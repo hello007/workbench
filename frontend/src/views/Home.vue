@@ -64,7 +64,6 @@
             <el-descriptions :column="2" border>
               <el-descriptions-item label="路径">{{ selectedNode.path }}</el-descriptions-item>
               <el-descriptions-item label="类型">{{ selectedNode.type === 'directory' ? '文件夹' : '文件' }}</el-descriptions-item>
-            </el-descriptions-item>
             </el-descriptions>
 
             <el-divider />
