@@ -96,3 +96,36 @@ func (a *App) GetDefaultDirectory() *model.Directory {
 	}
 	return dir
 }
+
+// GetFileTree 获取文件树
+func (a *App) GetFileTree(path string) []*model.FileTreeNode {
+	nodes, err := a.fileTreeSvc.GetChildren(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return []*model.FileTreeNode{}
+	}
+	return nodes
+}
+
+// GetFileTreeRecursive 获取完整树
+func (a *App) GetFileTreeRecursive(path string, maxDepth int) []*model.FileTreeNode {
+	nodes, err := a.fileTreeSvc.GetTree(path, maxDepth)
+	if err != nil {
+		println("Error:", err.Error())
+		return []*model.FileTreeNode{}
+	}
+	return nodes
+}
+
+// GetGitInfo 获取Git信息
+func (a *App) GetGitInfo(path string) *model.GitRepoInfo {
+	info, err := a.fileTreeSvc.GetGitInfo(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return &model.GitRepoInfo{
+			Path:   path,
+			IsRepo: false,
+		}
+	}
+	return info
+}
