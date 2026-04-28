@@ -7,7 +7,17 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "liuyang",
-    "email": "liuyang06@agree.com.cn"
-  }
+    "name": "Developer",
+    "email": "dev@example.com"
+  },
+  "info": {
+    "companyName": "Personal",
+    "productName": "Git Manager",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2025",
+    "comments": "Git仓库管理工具"
+  },
+  "wailsjsdir": "./frontend",
+  "version": "2",
+  "outputType": "desktop"
 }
