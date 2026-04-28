@@ -30,3 +30,5 @@ Thumbs.db
 # Data
 data/*.json
 !data/*.template
+
+node_modules
