@@ -35,3 +35,28 @@ func (d *Directory) Validate() error {
 	}
 	return nil
 }
+
+// FileTreeNode 文件树节点
+type FileTreeNode struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Path        string           `json:"path"`
+	Type        string           `json:"type"`
+	IsGitRepo   bool             `json:"isGitRepo"`
+	HasChildren bool             `json:"hasChildren"`
+	Children    []*FileTreeNode  `json:"children,omitempty"`
+	IsLeaf      bool             `json:"isLeaf"`
+}
+
+// NewFileTreeNode 创建文件树节点
+func NewFileTreeNode(name, path, fileType string) *FileTreeNode {
+	return &FileTreeNode{
+		ID:          path,
+		Name:        name,
+		Path:        path,
+		Type:        fileType,
+		IsGitRepo:   false,
+		HasChildren: fileType == "directory",
+		IsLeaf:      fileType == "file",
+	}
+}
