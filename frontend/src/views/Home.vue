@@ -40,7 +40,6 @@
           <el-tree
             v-if="selectedDirectoryId"
             ref="fileTreeRef"
-            :data="fileTreeData"
             :props="treeProps"
             lazy
             :load="loadTreeNode"
@@ -185,23 +184,48 @@ const loadDirectories = async () => {
 }
 
 const onDirectoryChange = async () => {
-  // 切换目录时重新加载文件树
-  if (selectedDirectoryId.value) {
-    await loadFileTree()
+  // 切换目录时清空文件树，触发重新加载
+  fileTreeData.value = []
+  // 强制树组件重新加载根节点
+  if (fileTreeRef.value) {
+    fileTreeRef.value.loadData()
   }
 }
 
-const loadFileTree = async () => {
-  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
-  if (!dir) return
-
-  const nodes = await GetFileTree(dir.path)
-  fileTreeData.value = nodes || []
-}
-
 const loadTreeNode = async (node, resolve) => {
-  const nodes = await GetFileTree(node.data.path)
-  resolve(nodes || [])
+  console.log('loadTreeNode called, node:', node)
+
+  let path
+  if (!node) {
+    // 根节点加载
+    const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
+    if (!dir) {
+      resolve([])
+      return
+    }
+    path = dir.path
+  } else {
+    // 子节点加载
+    path = node.data.path
+  }
+
+  try {
+    const nodes = await GetFileTree(path)
+    console.log('Got nodes for path', path, ':', nodes)
+
+    // 确保每个节点都有正确的 isLeaf 属性
+    const processedNodes = (nodes || []).map(n => ({
+      ...n,
+      isLeaf: n.type === 'file' || !n.hasChildren
+    }))
+
+    console.log('Processed nodes:', processedNodes)
+    resolve(processedNodes)
+  } catch (error) {
+    console.error('Error in loadTreeNode:', error)
+    ElMessage.error('加载节点失败: ' + error.message)
+    resolve([])
+  }
 }
 
 const onNodeClick = async (data) => {
@@ -293,7 +317,7 @@ const deleteFile = async () => {
   if (result) {
     ElMessage.success('删除成功')
     // 刷新文件树
-    await loadFileTree()
+    onDirectoryChange()
   } else {
     ElMessage.error('删除失败')
   }
@@ -317,9 +341,9 @@ const previewFile = async () => {
 // 生命周期
 onMounted(async () => {
   await loadDirectories()
-  if (selectedDirectoryId.value) {
-    await loadFileTree()
-  }
+  // 在懒加载模式下，文件树会自动加载，不需要手动调用 loadFileTree
+  console.log('Directories loaded:', directories.value)
+  console.log('Selected directory ID:', selectedDirectoryId.value)
 })
 </script>
 
