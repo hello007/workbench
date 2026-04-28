@@ -1,3 +1,32 @@
-build/bin
-node_modules
-frontend/dist
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+
+# Dependencies
+vendor/
+
+# Wails
+build/
+frontend/dist/
+frontend/wailsjs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+data/*.json
+!data/*.template
