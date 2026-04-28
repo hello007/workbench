@@ -129,3 +129,53 @@ func (a *App) GetGitInfo(path string) *model.GitRepoInfo {
 	}
 	return info
 }
+
+// CreateDirectory 创建文件夹
+func (a *App) CreateDirectory(parentPath, name string) bool {
+	err := a.fileOpSvc.CreateDirectory(parentPath, name)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
+// CreateFile 创建文件
+func (a *App) CreateFile(parentPath, name, content string) bool {
+	err := a.fileOpSvc.CreateFile(parentPath, name, content)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
+// RenameFile 重命名
+func (a *App) RenameFile(oldPath, newName string) bool {
+	err := a.fileOpSvc.Rename(oldPath, newName)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
+// DeleteFile 删除
+func (a *App) DeleteFile(path string) bool {
+	err := a.fileOpSvc.Delete(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
+// PreviewFile 预览文件
+func (a *App) PreviewFile(filePath string) *model.FilePreview {
+	const maxSize = 1024 * 1024 // 1MB
+	preview, err := a.fileOpSvc.PreviewFile(filePath, maxSize)
+	if err != nil {
+		preview.Error = err.Error()
+	}
+	return preview
+}
