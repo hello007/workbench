@@ -184,8 +184,8 @@ const loadDirectories = async () => {
 }
 
 const onDirectoryChange = async () => {
-  // 切换目录时清空文件树，触发重新加载
-  fileTreeData.value = []
+  console.log('Directory changed to:', selectedDirectoryId.value)
+
   // 强制树组件重新加载根节点
   if (fileTreeRef.value) {
     fileTreeRef.value.loadData()
@@ -194,19 +194,23 @@ const onDirectoryChange = async () => {
 
 const loadTreeNode = async (node, resolve) => {
   console.log('loadTreeNode called, node:', node)
+  console.log('node keys:', node ? Object.keys(node) : 'node is null')
 
   let path
-  if (!node) {
-    // 根节点加载
+  if (!node || Object.keys(node).length === 0) {
+    // 根节点加载 - 获取当前选中的目录路径
     const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
     if (!dir) {
+      console.log('No directory found for ID:', selectedDirectoryId.value)
       resolve([])
       return
     }
     path = dir.path
+    console.log('Loading root node for path:', path)
   } else {
     // 子节点加载
     path = node.data.path
+    console.log('Loading child nodes for path:', path)
   }
 
   try {
@@ -223,7 +227,7 @@ const loadTreeNode = async (node, resolve) => {
     resolve(processedNodes)
   } catch (error) {
     console.error('Error in loadTreeNode:', error)
-    ElMessage.error('加载节点失败: ' + error.message)
+    ElMessage.error('加载节点失败: ' + error.message || error)
     resolve([])
   }
 }
