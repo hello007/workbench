@@ -60,3 +60,65 @@ func NewFileTreeNode(name, path, fileType string) *FileTreeNode {
 		IsLeaf:      fileType == "file",
 	}
 }
+
+// GitCommit Git提交记录
+type GitCommit struct {
+	Hash    string    `json:"hash"`
+	Author  string    `json:"author"`
+	Date    time.Time `json:"date"`
+	Message string    `json:"message"`
+}
+
+// ShortHash 返回短哈希（前7位）
+func (c *GitCommit) ShortHash() string {
+	if len(c.Hash) > 7 {
+		return c.Hash[:7]
+	}
+	return c.Hash
+}
+
+// GitRepoInfo Git仓库信息
+type GitRepoInfo struct {
+	Path      string      `json:"path"`
+	Branch    string      `json:"branch"`
+	Remote    string      `json:"remote"`
+	RemoteURL string      `json:"remoteUrl"`
+	Commits   []GitCommit `json:"commits"`
+	IsRepo    bool        `json:"isRepo"`
+}
+
+// PageResult 分页结果
+type PageResult struct {
+	Records interface{} `json:"records"`
+	Total   int64       `json:"total"`
+	Current int         `json:"current"`
+	Size    int         `json:"size"`
+	Pages   int         `json:"pages"`
+}
+
+// NewPageResult 创建分页结果
+func NewPageResult(records interface{}, total int64, current, size int) *PageResult {
+	pages := int(total) / size
+	if int(total)%size != 0 {
+		pages++
+	}
+
+	return &PageResult{
+		Records: records,
+		Total:   total,
+		Current: current,
+		Size:    size,
+		Pages:   pages,
+	}
+}
+
+// FilePreview 文件预览
+type FilePreview struct {
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	Content  string `json:"content,omitempty"`
+	IsBinary bool   `json:"isBinary"`
+	TooLarge bool   `json:"tooLarge"`
+	Error    string `json:"error,omitempty"`
+}
