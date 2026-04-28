@@ -179,3 +179,45 @@ func (a *App) PreviewFile(filePath string) *model.FilePreview {
 	}
 	return preview
 }
+
+// GetGitLog 获取提交历史
+func (a *App) GetGitLog(dirPath string, page, pageSize int) *model.PageResult {
+	result, err := a.gitSvc.GetLog(dirPath, page, pageSize)
+	if err != nil {
+		println("Error:", err.Error())
+		return model.NewPageResult([]model.GitCommit{}, 0, page, pageSize)
+	}
+	return result
+}
+
+// CloneRepo 克隆仓库
+func (a *App) CloneRepo(url, targetPath string) string {
+	repoName := a.gitSvc.ExtractRepoName(url)
+	fullPath := filepath.Join(targetPath, repoName)
+
+	info, _ := a.gitSvc.GetInfo(fullPath)
+	if info.IsRepo {
+		return "错误: Git仓库已存在"
+	}
+
+	_, err := a.gitSvc.Clone(url, fullPath)
+	if err != nil {
+		return "错误: " + err.Error()
+	}
+
+	return "克隆成功"
+}
+
+// PullRepo 拉取更新
+func (a *App) PullRepo(dirPath string) string {
+	output, err := a.gitSvc.Pull(dirPath)
+	if err != nil {
+		return "错误: " + err.Error()
+	}
+	return output
+}
+
+// ExtractRepoName 提取仓库名
+func (a *App) ExtractRepoName(url string) string {
+	return a.gitSvc.ExtractRepoName(url)
+}
