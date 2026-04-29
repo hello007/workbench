@@ -194,10 +194,12 @@ const onDirectoryChange = async () => {
 
 const loadTreeNode = async (node, resolve) => {
   console.log('loadTreeNode called, node:', node)
-  console.log('node keys:', node ? Object.keys(node) : 'node is null')
+  console.log('node.level:', node?.level)
+  console.log('node.data:', node?.data)
 
   let path
-  if (!node || Object.keys(node).length === 0) {
+  // 判断是否为根节点（level === 0 或者 node.data 为空）
+  if (!node || node.level === 0 || !node.data) {
     // 根节点加载 - 获取当前选中的目录路径
     const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
     if (!dir) {
@@ -234,6 +236,12 @@ const loadTreeNode = async (node, resolve) => {
 
 const onNodeClick = async (data) => {
   selectedNode.value = data
+
+  // 清空文件预览（切换节点时）
+  filePreview.value = {
+    content: '',
+    error: ''
+  }
 
   // 如果是Git仓库，获取Git信息
   if (data.isGitRepo) {
