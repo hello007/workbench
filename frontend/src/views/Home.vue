@@ -136,6 +136,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { SuccessFilled } from '@element-plus/icons-vue'
+import { debug } from '../utils/debug'
 import {
   GetDirectories, AddDirectory,
   GetFileTree, GetGitInfo,
@@ -184,7 +185,7 @@ const loadDirectories = async () => {
 }
 
 const onDirectoryChange = async () => {
-  console.log('Directory changed to:', selectedDirectoryId.value)
+  debug.log('Directory changed to:', selectedDirectoryId.value)
 
   // 强制树组件重新加载根节点
   if (fileTreeRef.value) {
@@ -193,9 +194,9 @@ const onDirectoryChange = async () => {
 }
 
 const loadTreeNode = async (node, resolve) => {
-  console.log('loadTreeNode called, node:', node)
-  console.log('node.level:', node?.level)
-  console.log('node.data:', node?.data)
+  debug.log('loadTreeNode called, node:', node)
+  debug.log('node.level:', node?.level)
+  debug.log('node.data:', node?.data)
 
   let path
   // 判断是否为根节点（level === 0 或者 node.data 为空）
@@ -203,21 +204,21 @@ const loadTreeNode = async (node, resolve) => {
     // 根节点加载 - 获取当前选中的目录路径
     const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
     if (!dir) {
-      console.log('No directory found for ID:', selectedDirectoryId.value)
+      debug.log('No directory found for ID:', selectedDirectoryId.value)
       resolve([])
       return
     }
     path = dir.path
-    console.log('Loading root node for path:', path)
+    debug.log('Loading root node for path:', path)
   } else {
     // 子节点加载
     path = node.data.path
-    console.log('Loading child nodes for path:', path)
+    debug.log('Loading child nodes for path:', path)
   }
 
   try {
     const nodes = await GetFileTree(path)
-    console.log('Got nodes for path', path, ':', nodes)
+    debug.log('Got nodes for path', path, ':', nodes)
 
     // 确保每个节点都有正确的 isLeaf 属性
     const processedNodes = (nodes || []).map(n => ({
@@ -225,11 +226,11 @@ const loadTreeNode = async (node, resolve) => {
       isLeaf: n.type === 'file' || !n.hasChildren
     }))
 
-    console.log('Processed nodes:', processedNodes)
+    debug.log('Processed nodes:', processedNodes)
     resolve(processedNodes)
   } catch (error) {
     console.error('Error in loadTreeNode:', error)
-    ElMessage.error('加载节点失败: ' + error.message || error)
+    ElMessage.error('加载节点失败: ' + (error.message || error))
     resolve([])
   }
 }
@@ -354,8 +355,8 @@ const previewFile = async () => {
 onMounted(async () => {
   await loadDirectories()
   // 在懒加载模式下，文件树会自动加载，不需要手动调用 loadFileTree
-  console.log('Directories loaded:', directories.value)
-  console.log('Selected directory ID:', selectedDirectoryId.value)
+  debug.log('Directories loaded:', directories.value)
+  debug.log('Selected directory ID:', selectedDirectoryId.value)
 })
 </script>
 
