@@ -350,7 +350,6 @@ const renameDialogVisible = ref(false)
 const renameName = ref('')
 const renameLoading = ref(false)
 const renameInputRef = ref()
-const contextMenuTarget = ref(null)
 
 const cloneDialogVisible = ref(false)
 const cloneUrl = ref('')
@@ -468,8 +467,6 @@ const onLatestCommit = (commit) => {
 // ---- 右键菜单操作 ----
 
 const handleContextMenu = (command, data, node) => {
-  contextMenuTarget.value = { data, node }
-
   switch (command) {
     case 'createFile':
       showCreateFileDialogAt(data)
@@ -569,18 +566,22 @@ const handleDeleteAt = async (data) => {
     return
   }
 
-  const targetPath = data.path
-  const result = await DeleteFile(targetPath)
-  if (result) {
-    ElMessage.success('删除成功')
-    selectedNode.value = null
-    let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
-    if (!parentPath) {
-      parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+  try {
+    const targetPath = data.path
+    const result = await DeleteFile(targetPath)
+    if (result) {
+      ElMessage.success('删除成功')
+      selectedNode.value = null
+      let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
+      if (!parentPath) {
+        parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+      }
+      refreshNode(parentPath)
+    } else {
+      ElMessage.error('删除失败')
     }
-    refreshNode(parentPath)
-  } else {
-    ElMessage.error('删除失败')
+  } catch (error) {
+    ElMessage.error('删除失败: ' + (error.message || String(error)))
   }
 }
 
@@ -594,9 +595,13 @@ const copyToClipboard = async (text, label) => {
 }
 
 const handleOpenExplorer = async (path) => {
-  const result = await OpenInExplorer(path)
-  if (!result) {
-    ElMessage.error('打开资源管理器失败')
+  try {
+    const result = await OpenInExplorer(path)
+    if (!result) {
+      ElMessage.error('打开资源管理器失败')
+    }
+  } catch (error) {
+    ElMessage.error('打开资源管理器失败: ' + (error.message || String(error)))
   }
 }
 
@@ -736,30 +741,7 @@ const cloneRepo = async () => {
 
 const deleteFile = async () => {
   if (!selectedNode.value) return
-
-  try {
-    await ElMessageBox.confirm('确定要删除吗？', '警告', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
-
-  const targetPath = selectedNode.value.path
-  const result = await DeleteFile(targetPath)
-  if (result) {
-    ElMessage.success('删除成功')
-    selectedNode.value = null
-    let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
-    if (!parentPath) {
-      parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
-    }
-    refreshNode(parentPath)
-  } else {
-    ElMessage.error('删除失败')
-  }
+  await handleDeleteAt(selectedNode.value)
 }
 
 const previewFile = async () => {
@@ -808,6 +790,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   font-size: 14px;
+  cursor: default;
+  user-select: none;
 }
 .el-tree-node__children {
   transition: all 0.3s ease;
@@ -857,11 +841,6 @@ onMounted(async () => {
 }
 
 /* 右键菜单样式 */
-.custom-tree-node {
-  cursor: default;
-  user-select: none;
-}
-
 :deep(.el-dropdown-menu__item) {
   padding: 5px 16px;
 }
