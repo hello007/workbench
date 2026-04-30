@@ -82,7 +82,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
 import { GetGitRemoteURL } from '../../wailsjs/go/main/App'
@@ -96,34 +96,34 @@ const props = defineProps({
 const gitInfo = ref(null)
 const loading = ref(false)
 
-const loadGitInfo = async () => {
+const loadGitInfo = async (forceRefresh = false) => {
   loading.value = true
   try {
-    // 检查缓存
     const cacheKey = getCacheKey('git-info', props.repoPath)
-    const cached = gitCache.get(cacheKey)
 
-    if (cached) {
-      gitInfo.value = cached
-      loading.value = false
-      return
+    if (!forceRefresh) {
+      const cached = gitCache.get(cacheKey)
+      if (cached) {
+        gitInfo.value = cached
+        loading.value = false
+        return
+      }
+    } else {
+      gitCache.delete(cacheKey)
     }
 
-    // 请求新数据
     const info = await GetGitRemoteURL(props.repoPath)
     gitInfo.value = info
-
-    // 存入缓存
     gitCache.set(cacheKey, info)
   } catch (error) {
-    ElMessage.error('加载 Git 信息失败: ' + error)
+    ElMessage.error('加载 Git 信息失败: ' + (error.message || String(error)))
   } finally {
     loading.value = false
   }
 }
 
 const handleRefresh = () => {
-  loadGitInfo()
+  loadGitInfo(true)
 }
 
 const isHttpUrl = (url) => {
@@ -157,9 +157,14 @@ const formatTime = (timestamp) => {
   return date.toLocaleDateString('zh-CN')
 }
 
+watch(() => props.repoPath, () => {
+  gitInfo.value = null
+  loadGitInfo()
+})
+
 loadGitInfo()
 
-defineExpose({ loadGitInfo })
+defineExpose({ loadGitInfo, handleRefresh })
 </script>
 
 <style scoped>

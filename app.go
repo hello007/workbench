@@ -227,7 +227,10 @@ func (a *App) ExtractRepoName(url string) string {
 
 // GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息
 func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
-	// Open Git repository
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+
 	repo, err := git.PlainOpen(path)
 	if err != nil {
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
@@ -269,6 +272,16 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 
 // GetCommitHistory 获取 Git 仓库的提交历史
 func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Commit, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	repo, err := git.PlainOpen(path)
 	if err != nil {
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
@@ -292,7 +305,7 @@ func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Comm
 	}
 
 	// 收集指定数量的提交
-	var commits []model.Commit
+	commits := make([]model.Commit, 0, limit)
 	for i := 0; i < limit; i++ {
 		commitObj, err := commitIter.Next()
 		if err != nil {
@@ -354,11 +367,16 @@ func getCommitFiles(repo *git.Repository, commit *object.Commit) []string {
 	return files
 }
 
-// getTreeFiles 递归获取树中的所有文件路径
+// getTreeFiles 获取树中的文件路径（最多返回100个）
 func getTreeFiles(tree *object.Tree) []string {
-	var files []string
+	files := make([]string, 0, 100)
+	count := 0
 	tree.Files().ForEach(func(file *object.File) error {
+		if count >= 100 {
+			return fmt.Errorf("limit reached")
+		}
 		files = append(files, file.Name)
+		count++
 		return nil
 	})
 	return files

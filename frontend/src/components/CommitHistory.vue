@@ -45,7 +45,7 @@
                   {{ commit.shortSha }}
                 </el-text>
                 <el-tag size="small" type="info" style="margin-left: 10px;">
-                  {{ commit.files.length }} 个文件
+                  {{ commit.files?.length || 0 }} 个文件
                 </el-tag>
               </div>
               <el-button
@@ -135,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
@@ -148,9 +148,11 @@ const props = defineProps({
 })
 
 const PAGE_SIZE = 20
+const MAX_COMMITS = 500
 
 const commits = ref([])
 const expandedCommits = ref(new Set())
+const emit = defineEmits(['latest-commit'])
 const loading = ref(false)
 const loadingMore = ref(false)
 const searchKeyword = ref('')
@@ -171,23 +173,30 @@ const loadCommits = async (reset = true) => {
   if (reset) {
     loading.value = true
     commits.value = []
+    expandedCommits.value.clear()
   } else {
+    if (commits.value.length >= MAX_COMMITS) return
     loadingMore.value = true
   }
 
   try {
     const offset = reset ? 0 : commits.value.length
-    const newCommits = await GetCommitHistory(props.repoPath, PAGE_SIZE, offset)
+    const remaining = MAX_COMMITS - offset
+    const pageSize = Math.min(PAGE_SIZE, remaining)
+    const newCommits = await GetCommitHistory(props.repoPath, pageSize, offset)
 
     if (reset) {
-      commits.value = newCommits
+      commits.value = newCommits || []
+      if (newCommits && newCommits.length > 0) {
+        emit('latest-commit', newCommits[0])
+      }
     } else {
-      commits.value.push(...newCommits)
+      commits.value.push(...(newCommits || []))
     }
 
-    hasMore.value = newCommits.length === PAGE_SIZE
+    hasMore.value = newCommits && newCommits.length === pageSize && commits.value.length < MAX_COMMITS
   } catch (error) {
-    ElMessage.error('加载提交历史失败: ' + error)
+    ElMessage.error('加载提交历史失败: ' + (error.message || String(error)))
   } finally {
     loading.value = false
     loadingMore.value = false
@@ -238,6 +247,11 @@ const formatTime = (timestamp) => {
   const date = new Date(timestamp * 1000)
   return date.toLocaleDateString('zh-CN')
 }
+
+watch(() => props.repoPath, () => {
+  searchKeyword.value = ''
+  loadCommits(true)
+})
 
 onMounted(() => {
   loadCommits(true)

@@ -87,14 +87,17 @@
             <!-- Git 信息组件 -->
             <GitInfo
               v-if="selectedNode.isGitRepo"
+              ref="gitInfoRef"
               :repo-path="selectedNode.path"
               :latest-commit="latestCommit"
             />
 
             <CommitHistory
               v-if="selectedNode.isGitRepo"
+              ref="commitHistoryRef"
               :repo-path="selectedNode.path"
               style="margin-top: 20px;"
+              @latest-commit="onLatestCommit"
             />
 
             <div v-if="selectedNode.isGitRepo" style="margin-top: 20px;">
@@ -176,9 +179,9 @@ import GitInfo from '../components/GitInfo.vue'
 import CommitHistory from '../components/CommitHistory.vue'
 import {
   GetDirectories, AddDirectory,
-  GetFileTree, GetGitInfo,
+  GetFileTree,
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
-  PullRepo, GetCommitHistory
+  PullRepo
 } from '../../wailsjs/go/main/App'
 
 // 数据
@@ -202,6 +205,8 @@ const filePreview = ref({
 })
 
 const latestCommit = ref(null)
+const gitInfoRef = ref()
+const commitHistoryRef = ref()
 
 const treeProps = {
   label: 'name',
@@ -283,22 +288,13 @@ const onNodeClick = async (data) => {
     error: ''
   }
 
-  // 如果是Git仓库，获取Git信息
-  if (data.isGitRepo) {
-    const info = await GetGitInfo(data.path)
-    Object.assign(selectedNode.value, info)
-
-    try {
-      const history = await GetCommitHistory(data.path, 1, 0)
-      if (history.length > 0) {
-        latestCommit.value = history[0]
-      }
-    } catch (error) {
-      console.error('Failed to load latest commit:', error)
-    }
-  } else {
+  if (!data.isGitRepo) {
     latestCommit.value = null
   }
+}
+
+const onLatestCommit = (commit) => {
+  latestCommit.value = commit
 }
 
 const collapseAll = () => {
@@ -348,10 +344,16 @@ const pullRepo = async () => {
   if (!selectedNode.value) return
 
   gitLoading.value = true
-  const result = await PullRepo(selectedNode.value.path)
-  gitLoading.value = false
-
-  ElMessage.success(result || '拉取完成')
+  try {
+    const result = await PullRepo(selectedNode.value.path)
+    ElMessage.success(result || '拉取完成')
+    gitInfoRef.value?.handleRefresh()
+    commitHistoryRef.value?.handleRefresh()
+  } catch (error) {
+    ElMessage.error('拉取失败: ' + (error.message || String(error)))
+  } finally {
+    gitLoading.value = false
+  }
 }
 
 const showCreateDirectoryDialog = () => {
