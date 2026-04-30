@@ -85,7 +85,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
-import { GetGitRemoteURL } from '../../../wailsjs/go/main/App'
+import { GetGitRemoteURL } from '../../wailsjs/go/main/App'
 import { gitCache, getCacheKey } from '../utils/gitCache'
 
 const props = defineProps({

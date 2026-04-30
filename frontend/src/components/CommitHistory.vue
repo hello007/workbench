@@ -141,7 +141,7 @@ import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
   User, Search
 } from '@element-plus/icons-vue'
-import { GetCommitHistory } from '../../../wailsjs/go/main/App'
+import { GetCommitHistory } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
