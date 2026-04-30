@@ -32,6 +32,8 @@ export function GetGitLog(arg1:string,arg2:number,arg3:number):Promise<model.Pag
 
 export function GetGitRemoteURL(arg1:string):Promise<model.GitRemoteInfo>;
 
+export function OpenInExplorer(arg1:string):Promise<boolean>;
+
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
 
 export function PullRepo(arg1:string):Promise<string>;
