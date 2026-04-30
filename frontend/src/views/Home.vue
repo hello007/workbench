@@ -28,7 +28,7 @@
       </el-header>
 
       <!-- 主体内容 -->
-      <el-container>
+      <el-container class="main-content">
         <!-- 左侧文件树 -->
         <el-aside width="300px" class="file-tree-aside">
           <div class="tree-toolbar">
@@ -453,9 +453,15 @@ onMounted(async () => {
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+.main-content {
+  flex: 1;
+  min-height: 0;
+}
+
 .file-tree-aside {
   display: flex;
   flex-direction: column;
+  height: 100%;
   border-right: 1px solid #e6e6e6;
   background-color: #f5f7fa;
   overflow: hidden;
@@ -469,6 +475,7 @@ onMounted(async () => {
 
 .file-tree {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: transparent;
 }

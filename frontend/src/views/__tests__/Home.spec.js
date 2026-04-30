@@ -248,5 +248,10 @@ describe('Home.vue - Bug修复验证', () => {
       const tree = slotWrapper.find('.file-tree')
       expect(tree.exists()).toBe(true)
     })
+
+    it('内层 el-container 应该有 main-content 类以约束高度', () => {
+      const innerContainer = slotWrapper.findAll('div').filter(el => el.classes().includes('main-content'))
+      expect(innerContainer.length).toBe(1)
+    })
   })
 })
