@@ -48,8 +48,26 @@
           >
             <template #default="{ node, data }">
               <span class="custom-tree-node">
-                <span>{{ node.label }}</span>
-                <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;"><SuccessFilled /></el-icon>
+                <el-icon
+                  v-if="data.type === 'directory'"
+                  :color="node.expanded ? '#409EFF' : '#909399'"
+                  style="margin-right: 5px;"
+                >
+                  <component :is="node.expanded ? FolderOpened : Folder" />
+                </el-icon>
+                <el-icon v-else color="#606266" style="margin-right: 5px;">
+                  <Document />
+                </el-icon>
+                <span :style="{
+                  color: data.type === 'directory'
+                    ? (node.expanded ? '#409EFF' : '#909399')
+                    : '#606266'
+                }">
+                  {{ node.label }}
+                </span>
+                <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
+                  <SuccessFilled />
+                </el-icon>
               </span>
             </template>
           </el-tree>
@@ -135,7 +153,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SuccessFilled } from '@element-plus/icons-vue'
+import {
+  Folder,
+  FolderOpened,
+  Document,
+  SuccessFilled
+} from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import {
   GetDirectories, AddDirectory,
