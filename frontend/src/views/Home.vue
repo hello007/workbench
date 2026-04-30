@@ -33,7 +33,6 @@
         <el-aside width="300px" style="border-right: 1px solid #e6e6e6; background-color: #f5f7fa;">
           <div style="padding: 10px;">
             <el-button-group style="margin-bottom: 10px;">
-              <el-button size="small" @click="expandAll">全部展开</el-button>
               <el-button size="small" @click="collapseAll">全部收起</el-button>
             </el-button-group>
           </div>
@@ -274,14 +273,17 @@ const onNodeClick = async (data) => {
   }
 }
 
-const expandAll = () => {
-  // TODO: 实现全部展开
-  ElMessage.info('功能开发中')
-}
-
 const collapseAll = () => {
-  // TODO: 实现全部收起
-  ElMessage.info('功能开发中')
+  if (fileTreeRef.value) {
+    const allNodes = fileTreeRef.value.store.nodesMap
+    Object.keys(allNodes).forEach(key => {
+      const node = allNodes[key]
+      if (node.expanded) {
+        node.expanded = false
+      }
+    })
+    ElMessage.success('已全部收起')
+  }
 }
 
 const showAddDirectoryDialog = () => {
@@ -388,6 +390,18 @@ onMounted(async () => {
   font-family: 'Microsoft YaHei', Arial, sans-serif;
 }
 
+.el-tree-node__content {
+  transition: background-color 0.2s ease;
+  border-radius: 4px;
+  margin: 2px 0;
+}
+.el-tree-node__content:hover {
+  background-color: #F5F7FA !important;
+}
+.is-current > .el-tree-node__content {
+  background-color: #E6F7FF !important;
+  font-weight: 500;
+}
 .custom-tree-node {
   flex: 1;
   display: flex;
@@ -395,6 +409,15 @@ onMounted(async () => {
   justify-content: space-between;
   font-size: 14px;
   padding-right: 8px;
+}
+.el-tree-node__children {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+.el-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .el-header {
