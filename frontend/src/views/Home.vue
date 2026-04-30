@@ -82,30 +82,32 @@
               <el-descriptions-item label="类型">{{ selectedNode.type === 'directory' ? '文件夹' : '文件' }}</el-descriptions-item>
             </el-descriptions>
 
-            <el-divider />
-
-            <!-- Git 信息组件 -->
-            <GitInfo
-              v-if="selectedNode.isGitRepo"
-              ref="gitInfoRef"
-              :repo-path="selectedNode.path"
-              :latest-commit="latestCommit"
-            />
-
-            <CommitHistory
-              v-if="selectedNode.isGitRepo"
-              ref="commitHistoryRef"
-              :repo-path="selectedNode.path"
-              style="margin-top: 20px;"
-              @latest-commit="onLatestCommit"
-            />
-
-            <div v-if="selectedNode.isGitRepo" style="margin-top: 20px;">
-              <h3>Git信息</h3>
-              <el-button type="primary" @click="pullRepo" :loading="gitLoading" style="margin-bottom: 10px;">
+            <!-- Git 拉取更新按钮 -->
+            <div v-if="selectedNode.isGitRepo" style="margin-top: 10px;">
+              <el-button type="primary" @click="pullRepo" :loading="gitLoading">
                 拉取更新
               </el-button>
             </div>
+
+            <el-divider />
+
+            <!-- Git 信息签页 -->
+            <el-tabs v-if="selectedNode.isGitRepo" v-model="activeGitTab">
+              <el-tab-pane label="仓库信息" name="repo">
+                <GitInfo
+                  ref="gitInfoRef"
+                  :repo-path="selectedNode.path"
+                  :latest-commit="latestCommit"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="提交历史" name="commits" lazy>
+                <CommitHistory
+                  ref="commitHistoryRef"
+                  :repo-path="selectedNode.path"
+                  @latest-commit="onLatestCommit"
+                />
+              </el-tab-pane>
+            </el-tabs>
 
             <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 20px;">
               <h3>文件夹操作</h3>
@@ -205,6 +207,7 @@ const filePreview = ref({
 })
 
 const latestCommit = ref(null)
+const activeGitTab = ref('repo')
 const gitInfoRef = ref()
 const commitHistoryRef = ref()
 
