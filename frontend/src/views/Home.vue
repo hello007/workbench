@@ -190,6 +190,31 @@
         <el-button type="primary" @click="cloneRepo" :loading="cloneLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 新建文件夹/文件对话框 -->
+    <el-dialog
+      v-model="createDialogVisible"
+      :title="createType === 'directory' ? '新建文件夹' : '新建文件'"
+      width="420px"
+    >
+      <el-form label-width="80px">
+        <el-form-item label="父文件夹">
+          <el-input :model-value="selectedNode?.path" disabled />
+        </el-form-item>
+        <el-form-item :label="createType === 'directory' ? '文件夹名' : '文件名'">
+          <el-input
+            v-model="createName"
+            :placeholder="createType === 'directory' ? '例如: src' : '例如: main.go'"
+            :disabled="createLoading"
+            @keyup.enter="handleCreate"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false" :disabled="createLoading">取消</el-button>
+        <el-button type="primary" @click="handleCreate" :loading="createLoading">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -231,6 +256,11 @@ const filePreview = ref({
   content: '',
   error: ''
 })
+
+const createDialogVisible = ref(false)
+const createType = ref('directory')
+const createName = ref('')
+const createLoading = ref(false)
 
 const cloneDialogVisible = ref(false)
 const cloneUrl = ref('')
@@ -390,11 +420,44 @@ const pullRepo = async () => {
 }
 
 const showCreateDirectoryDialog = () => {
-  ElMessage.info('功能开发中')
+  createType.value = 'directory'
+  createName.value = ''
+  createDialogVisible.value = true
 }
 
 const showCreateFileDialog = () => {
-  ElMessage.info('功能开发中')
+  createType.value = 'file'
+  createName.value = ''
+  createDialogVisible.value = true
+}
+
+const handleCreate = async () => {
+  if (!createName.value.trim()) {
+    ElMessage.warning(createType.value === 'directory' ? '请输入文件夹名称' : '请输入文件名称')
+    return
+  }
+  if (!selectedNode.value) return
+
+  createLoading.value = true
+  try {
+    let result
+    if (createType.value === 'directory') {
+      result = await CreateDirectory(selectedNode.value.path, createName.value.trim())
+    } else {
+      result = await CreateFile(selectedNode.value.path, createName.value.trim(), '')
+    }
+    if (result) {
+      ElMessage.success(createType.value === 'directory' ? '文件夹创建成功' : '文件创建成功')
+      createDialogVisible.value = false
+      onDirectoryChange()
+    } else {
+      ElMessage.error('创建失败')
+    }
+  } catch (error) {
+    ElMessage.error('创建失败: ' + (error.message || String(error)))
+  } finally {
+    createLoading.value = false
+  }
 }
 
 const showRenameDialog = () => {
