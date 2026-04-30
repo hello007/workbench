@@ -381,3 +381,13 @@ func getTreeFiles(tree *object.Tree) []string {
 	})
 	return files
 }
+
+// OpenInExplorer 在资源管理器中打开
+func (a *App) OpenInExplorer(path string) bool {
+	err := a.fileOpSvc.OpenInExplorer(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}

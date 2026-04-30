@@ -2,6 +2,7 @@ package service
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"git-manager/model"
@@ -93,4 +94,17 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 
 	preview.Content = string(data)
 	return preview, nil
+}
+
+// OpenInExplorer 在资源管理器中打开
+func (s *FileOperationService) OpenInExplorer(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return exec.Command("explorer", path).Start()
+	}
+	return exec.Command("explorer", "/select,", path).Start()
 }
