@@ -40,34 +40,84 @@
             v-if="selectedDirectoryId"
             ref="fileTreeRef"
             :props="treeProps"
+            node-key="path"
             lazy
             :load="loadTreeNode"
             @node-click="onNodeClick"
             class="file-tree"
           >
             <template #default="{ node, data }">
-              <span class="custom-tree-node">
-                <el-icon
-                  v-if="data.type === 'directory'"
-                  :color="node.expanded ? '#409EFF' : '#909399'"
-                  style="margin-right: 5px;"
-                >
-                  <component :is="node.expanded ? FolderOpened : Folder" />
-                </el-icon>
-                <el-icon v-else color="#606266" style="margin-right: 5px;">
-                  <Document />
-                </el-icon>
-                <span :style="{
-                  color: data.type === 'directory'
-                    ? (node.expanded ? '#409EFF' : '#909399')
-                    : '#606266'
-                }">
-                  {{ node.label }}
+              <el-dropdown
+                trigger="contextmenu"
+                @command="handleContextMenu($event, data, node)"
+                @visible-change="(visible) => !visible || onNodeClick(data)"
+              >
+                <span class="custom-tree-node">
+                  <el-icon
+                    v-if="data.type === 'directory'"
+                    :color="node.expanded ? '#409EFF' : '#909399'"
+                    style="margin-right: 5px;"
+                  >
+                    <component :is="node.expanded ? FolderOpened : Folder" />
+                  </el-icon>
+                  <el-icon v-else color="#606266" style="margin-right: 5px;">
+                    <Document />
+                  </el-icon>
+                  <span :style="{
+                    color: data.type === 'directory'
+                      ? (node.expanded ? '#409EFF' : '#909399')
+                      : '#606266'
+                  }">
+                    {{ node.label }}
+                  </span>
+                  <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
+                    <SuccessFilled />
+                  </el-icon>
                 </span>
-                <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
-                  <SuccessFilled />
-                </el-icon>
-              </span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <!-- 文件夹专属菜单 -->
+                    <template v-if="data.type === 'directory'">
+                      <el-dropdown-item command="createFile">
+                        <el-icon><DocumentAdd /></el-icon>新建文件
+                      </el-dropdown-item>
+                      <el-dropdown-item command="createDir">
+                        <el-icon><FolderAdd /></el-icon>新建文件夹
+                      </el-dropdown-item>
+                      <el-dropdown-item divided command="rename">
+                        <el-icon><Edit /></el-icon>重命名
+                      </el-dropdown-item>
+                      <el-dropdown-item command="delete">
+                        <el-icon><Delete /></el-icon>删除
+                      </el-dropdown-item>
+                      <el-dropdown-item divided command="copyPath">
+                        <el-icon><CopyDocument /></el-icon>复制路径
+                      </el-dropdown-item>
+                      <el-dropdown-item command="openExplorer">
+                        <el-icon><Monitor /></el-icon>在资源管理器中打开
+                      </el-dropdown-item>
+                    </template>
+                    <!-- 文件专属菜单 -->
+                    <template v-else>
+                      <el-dropdown-item command="rename">
+                        <el-icon><Edit /></el-icon>重命名
+                      </el-dropdown-item>
+                      <el-dropdown-item command="delete">
+                        <el-icon><Delete /></el-icon>删除
+                      </el-dropdown-item>
+                      <el-dropdown-item divided command="copyPath">
+                        <el-icon><CopyDocument /></el-icon>复制路径
+                      </el-dropdown-item>
+                      <el-dropdown-item command="copyName">
+                        <el-icon><CopyDocument /></el-icon>复制文件名
+                      </el-dropdown-item>
+                      <el-dropdown-item command="openExplorer">
+                        <el-icon><Monitor /></el-icon>在资源管理器中打开
+                      </el-dropdown-item>
+                    </template>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-tree>
           <el-empty v-else description="请先选择工作目录" :image-size="100" />
@@ -215,6 +265,33 @@
         <el-button type="primary" @click="handleCreate" :loading="createLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 重命名对话框 -->
+    <el-dialog
+      v-model="renameDialogVisible"
+      title="重命名"
+      width="420px"
+    >
+      <el-form label-width="80px">
+        <el-form-item label="当前名称">
+          <el-input :model-value="selectedNode?.name" disabled />
+        </el-form-item>
+        <el-form-item label="新名称">
+          <el-input
+            ref="renameInputRef"
+            v-model="renameName"
+            placeholder="请输入新名称"
+            :disabled="renameLoading"
+            @keyup.enter="handleRename"
+            @keydown.esc="renameDialogVisible = false"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="renameDialogVisible = false" :disabled="renameLoading">取消</el-button>
+        <el-button type="primary" @click="handleRename" :loading="renameLoading">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -225,7 +302,13 @@ import {
   Folder,
   FolderOpened,
   Document,
-  SuccessFilled
+  SuccessFilled,
+  FolderAdd,
+  DocumentAdd,
+  Edit,
+  Delete,
+  CopyDocument,
+  Monitor
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import GitInfo from '../components/GitInfo.vue'
@@ -234,7 +317,8 @@ import {
   GetDirectories, AddDirectory,
   GetFileTree,
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
-  PullRepo, CloneRepo
+  PullRepo, CloneRepo,
+  OpenInExplorer
 } from '../../wailsjs/go/main/App'
 
 // 数据
@@ -261,6 +345,12 @@ const createDialogVisible = ref(false)
 const createType = ref('directory')
 const createName = ref('')
 const createLoading = ref(false)
+
+const renameDialogVisible = ref(false)
+const renameName = ref('')
+const renameLoading = ref(false)
+const renameInputRef = ref()
+const contextMenuTarget = ref(null)
 
 const cloneDialogVisible = ref(false)
 const cloneUrl = ref('')
@@ -298,6 +388,21 @@ const onDirectoryChange = async () => {
   if (fileTreeRef.value) {
     fileTreeRef.value.loadData()
   }
+}
+
+const refreshNode = (nodePath) => {
+  if (!fileTreeRef.value || !nodePath) return
+
+  const treeNode = fileTreeRef.value.store.nodesMap[nodePath]
+  if (treeNode) {
+    treeNode.loaded = false
+    treeNode.loading = false
+    treeNode.expand()
+  }
+}
+
+const refreshSelectedNode = () => {
+  refreshNode(selectedNode.value?.path)
 }
 
 const loadTreeNode = async (node, resolve) => {
@@ -358,6 +463,141 @@ const onNodeClick = async (data) => {
 
 const onLatestCommit = (commit) => {
   latestCommit.value = commit
+}
+
+// ---- 右键菜单操作 ----
+
+const handleContextMenu = (command, data, node) => {
+  contextMenuTarget.value = { data, node }
+
+  switch (command) {
+    case 'createFile':
+      showCreateFileDialogAt(data)
+      break
+    case 'createDir':
+      showCreateDirectoryDialogAt(data)
+      break
+    case 'rename':
+      showRenameDialogAt(data)
+      break
+    case 'delete':
+      handleDeleteAt(data)
+      break
+    case 'copyPath':
+      copyToClipboard(data.path, '路径')
+      break
+    case 'copyName':
+      copyToClipboard(data.name, '文件名')
+      break
+    case 'openExplorer':
+      handleOpenExplorer(data.path)
+      break
+  }
+}
+
+const showCreateFileDialogAt = (data) => {
+  selectedNode.value = data
+  createType.value = 'file'
+  createName.value = ''
+  createDialogVisible.value = true
+}
+
+const showCreateDirectoryDialogAt = (data) => {
+  selectedNode.value = data
+  createType.value = 'directory'
+  createName.value = ''
+  createDialogVisible.value = true
+}
+
+const showRenameDialogAt = (data) => {
+  selectedNode.value = data
+  renameName.value = data.name
+  renameDialogVisible.value = true
+  setTimeout(() => {
+    const input = renameInputRef.value?.input
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, 100)
+}
+
+const handleRename = async () => {
+  if (!renameName.value.trim()) {
+    ElMessage.warning('请输入名称')
+    return
+  }
+  if (!selectedNode.value) return
+
+  renameLoading.value = true
+  try {
+    const result = await RenameFile(selectedNode.value.path, renameName.value.trim())
+    if (result) {
+      ElMessage.success('重命名成功')
+      renameDialogVisible.value = false
+      const targetPath = selectedNode.value.path
+      let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
+      if (!parentPath) {
+        parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+      }
+      refreshNode(parentPath)
+      selectedNode.value = null
+    } else {
+      ElMessage.error('重命名失败')
+    }
+  } catch (error) {
+    ElMessage.error('重命名失败: ' + (error.message || String(error)))
+  } finally {
+    renameLoading.value = false
+  }
+}
+
+const handleDeleteAt = async (data) => {
+  selectedNode.value = data
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除 "${data.name}" 吗？此操作不可撤销。`,
+      '警告',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+  } catch {
+    return
+  }
+
+  const targetPath = data.path
+  const result = await DeleteFile(targetPath)
+  if (result) {
+    ElMessage.success('删除成功')
+    selectedNode.value = null
+    let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
+    if (!parentPath) {
+      parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+    }
+    refreshNode(parentPath)
+  } else {
+    ElMessage.error('删除失败')
+  }
+}
+
+const copyToClipboard = async (text, label) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制到剪贴板`)
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+const handleOpenExplorer = async (path) => {
+  const result = await OpenInExplorer(path)
+  if (!result) {
+    ElMessage.error('打开资源管理器失败')
+  }
 }
 
 const collapseAll = () => {
@@ -449,7 +689,7 @@ const handleCreate = async () => {
     if (result) {
       ElMessage.success(createType.value === 'directory' ? '文件夹创建成功' : '文件创建成功')
       createDialogVisible.value = false
-      onDirectoryChange()
+      refreshSelectedNode()
     } else {
       ElMessage.error('创建失败')
     }
@@ -461,7 +701,8 @@ const handleCreate = async () => {
 }
 
 const showRenameDialog = () => {
-  ElMessage.info('功能开发中')
+  if (!selectedNode.value) return
+  showRenameDialogAt(selectedNode.value)
 }
 
 const showCloneDialog = () => {
@@ -482,7 +723,7 @@ const cloneRepo = async () => {
     if (result.includes('成功')) {
       ElMessage.success(result)
       cloneDialogVisible.value = false
-      onDirectoryChange()
+      refreshSelectedNode()
     } else {
       ElMessage.error(result)
     }
@@ -506,11 +747,16 @@ const deleteFile = async () => {
     return
   }
 
-  const result = await DeleteFile(selectedNode.value.path)
+  const targetPath = selectedNode.value.path
+  const result = await DeleteFile(targetPath)
   if (result) {
     ElMessage.success('删除成功')
-    // 刷新文件树
-    onDirectoryChange()
+    selectedNode.value = null
+    let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
+    if (!parentPath) {
+      parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+    }
+    refreshNode(parentPath)
   } else {
     ElMessage.error('删除失败')
   }
@@ -608,5 +854,19 @@ onMounted(async () => {
 .el-main {
   background-color: #fff;
   overflow-y: auto;
+}
+
+/* 右键菜单样式 */
+.custom-tree-node {
+  cursor: default;
+  user-select: none;
+}
+
+:deep(.el-dropdown-menu__item) {
+  padding: 5px 16px;
+}
+
+:deep(.el-dropdown-menu__item .el-icon) {
+  margin-right: 6px;
 }
 </style>
