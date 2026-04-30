@@ -58,7 +58,10 @@ describe('Home.vue - Bug修复验证', () => {
           'el-empty': true,
           'el-descriptions': true,
           'el-descriptions-item': true,
-          'el-icon': true
+          'el-icon': true,
+          'el-dropdown': true,
+          'el-dropdown-menu': true,
+          'el-dropdown-item': true
         }
       }
     })
@@ -225,7 +228,10 @@ describe('Home.vue - Bug修复验证', () => {
             'el-descriptions-item': true,
             'el-icon': true,
             'GitInfo': true,
-            'CommitHistory': true
+            'CommitHistory': true,
+            'el-dropdown': true,
+            'el-dropdown-menu': true,
+            'el-dropdown-item': true
           }
         }
       })
