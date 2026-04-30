@@ -44,80 +44,32 @@
             lazy
             :load="loadTreeNode"
             @node-click="onNodeClick"
+            @node-contextmenu="onNodeContextMenu"
             class="file-tree"
           >
             <template #default="{ node, data }">
-              <el-dropdown
-                trigger="contextmenu"
-                @command="handleContextMenu($event, data, node)"
-                @visible-change="(visible) => !visible || onNodeClick(data)"
-              >
-                <span class="custom-tree-node">
-                  <el-icon
-                    v-if="data.type === 'directory'"
-                    :color="node.expanded ? '#409EFF' : '#909399'"
-                    style="margin-right: 5px;"
-                  >
-                    <component :is="node.expanded ? FolderOpened : Folder" />
-                  </el-icon>
-                  <el-icon v-else color="#606266" style="margin-right: 5px;">
-                    <Document />
-                  </el-icon>
-                  <span :style="{
-                    color: data.type === 'directory'
-                      ? (node.expanded ? '#409EFF' : '#909399')
-                      : '#606266'
-                  }">
-                    {{ node.label }}
-                  </span>
-                  <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
-                    <SuccessFilled />
-                  </el-icon>
+              <span class="custom-tree-node">
+                <el-icon
+                  v-if="data.type === 'directory'"
+                  :color="node.expanded ? '#409EFF' : '#909399'"
+                  style="margin-right: 5px;"
+                >
+                  <component :is="node.expanded ? FolderOpened : Folder" />
+                </el-icon>
+                <el-icon v-else color="#606266" style="margin-right: 5px;">
+                  <Document />
+                </el-icon>
+                <span :style="{
+                  color: data.type === 'directory'
+                    ? (node.expanded ? '#409EFF' : '#909399')
+                    : '#606266'
+                }">
+                  {{ node.label }}
                 </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <!-- 文件夹专属菜单 -->
-                    <template v-if="data.type === 'directory'">
-                      <el-dropdown-item command="createFile">
-                        <el-icon><DocumentAdd /></el-icon>新建文件
-                      </el-dropdown-item>
-                      <el-dropdown-item command="createDir">
-                        <el-icon><FolderAdd /></el-icon>新建文件夹
-                      </el-dropdown-item>
-                      <el-dropdown-item divided command="rename">
-                        <el-icon><Edit /></el-icon>重命名
-                      </el-dropdown-item>
-                      <el-dropdown-item command="delete">
-                        <el-icon><Delete /></el-icon>删除
-                      </el-dropdown-item>
-                      <el-dropdown-item divided command="copyPath">
-                        <el-icon><CopyDocument /></el-icon>复制路径
-                      </el-dropdown-item>
-                      <el-dropdown-item command="openExplorer">
-                        <el-icon><Monitor /></el-icon>在资源管理器中打开
-                      </el-dropdown-item>
-                    </template>
-                    <!-- 文件专属菜单 -->
-                    <template v-else>
-                      <el-dropdown-item command="rename">
-                        <el-icon><Edit /></el-icon>重命名
-                      </el-dropdown-item>
-                      <el-dropdown-item command="delete">
-                        <el-icon><Delete /></el-icon>删除
-                      </el-dropdown-item>
-                      <el-dropdown-item divided command="copyPath">
-                        <el-icon><CopyDocument /></el-icon>复制路径
-                      </el-dropdown-item>
-                      <el-dropdown-item command="copyName">
-                        <el-icon><CopyDocument /></el-icon>复制文件名
-                      </el-dropdown-item>
-                      <el-dropdown-item command="openExplorer">
-                        <el-icon><Monitor /></el-icon>在资源管理器中打开
-                      </el-dropdown-item>
-                    </template>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+                <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
+                  <SuccessFilled />
+                </el-icon>
+              </span>
             </template>
           </el-tree>
           <el-empty v-else description="请先选择工作目录" :image-size="100" />
@@ -292,11 +244,65 @@
         <el-button type="primary" @click="handleRename" :loading="renameLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 自定义右键菜单 -->
+    <div
+      v-if="contextMenu.visible"
+      class="context-menu-overlay"
+      @contextmenu.prevent="closeContextMenu"
+      @click="closeContextMenu"
+    />
+    <ul
+      v-if="contextMenu.visible"
+      class="context-menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+    >
+      <template v-if="contextMenu.data?.type === 'directory'">
+        <li class="context-menu-item" @click="onMenuCommand('createFile')">
+          <el-icon><DocumentAdd /></el-icon>新建文件
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('createDir')">
+          <el-icon><FolderAdd /></el-icon>新建文件夹
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('rename')">
+          <el-icon><Edit /></el-icon>重命名
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('delete')">
+          <el-icon><Delete /></el-icon>删除
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+          <el-icon><CopyDocument /></el-icon>复制路径
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
+          <el-icon><Monitor /></el-icon>在资源管理器中打开
+        </li>
+      </template>
+      <template v-else>
+        <li class="context-menu-item" @click="onMenuCommand('rename')">
+          <el-icon><Edit /></el-icon>重命名
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('delete')">
+          <el-icon><Delete /></el-icon>删除
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+          <el-icon><CopyDocument /></el-icon>复制路径
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copyName')">
+          <el-icon><CopyDocument /></el-icon>复制文件名
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
+          <el-icon><Monitor /></el-icon>在资源管理器中打开
+        </li>
+      </template>
+    </ul>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Folder,
@@ -464,9 +470,33 @@ const onLatestCommit = (commit) => {
   latestCommit.value = commit
 }
 
-// ---- 右键菜单操作 ----
+// ---- 右键菜单 ----
 
-const handleContextMenu = (command, data, node) => {
+const contextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  data: null
+})
+
+const onNodeContextMenu = (event, data) => {
+  event.preventDefault()
+  event.stopPropagation()
+  contextMenu.x = event.clientX
+  contextMenu.y = event.clientY
+  contextMenu.data = data
+  contextMenu.visible = true
+}
+
+const closeContextMenu = () => {
+  contextMenu.visible = false
+}
+
+const onMenuCommand = (command) => {
+  const data = contextMenu.data
+  closeContextMenu()
+  if (!data) return
+
   switch (command) {
     case 'createFile':
       showCreateFileDialogAt(data)
@@ -490,6 +520,14 @@ const handleContextMenu = (command, data, node) => {
       handleOpenExplorer(data.path)
       break
   }
+}
+
+const onGlobalClick = () => {
+  closeContextMenu()
+}
+
+const onGlobalContextMenu = () => {
+  closeContextMenu()
 }
 
 const showCreateFileDialogAt = (data) => {
@@ -762,9 +800,15 @@ const previewFile = async () => {
 // 生命周期
 onMounted(async () => {
   await loadDirectories()
-  // 在懒加载模式下，文件树会自动加载，不需要手动调用 loadFileTree
   debug.log('Directories loaded:', directories.value)
   debug.log('Selected directory ID:', selectedDirectoryId.value)
+  document.addEventListener('click', onGlobalClick)
+  document.addEventListener('contextmenu', onGlobalContextMenu)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('contextmenu', onGlobalContextMenu)
 })
 </script>
 
@@ -841,11 +885,50 @@ onMounted(async () => {
 }
 
 /* 右键菜单样式 */
-:deep(.el-dropdown-menu__item) {
-  padding: 5px 16px;
+.context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1999;
 }
 
-:deep(.el-dropdown-menu__item .el-icon) {
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  min-width: 160px;
+  margin: 0;
+  list-style: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 5px 16px;
+  font-size: 14px;
+  color: #606266;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background-color: #ecf5ff;
+  color: #409eff;
+}
+
+.context-menu-item .el-icon {
   margin-right: 6px;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background-color: #e4e7ed;
+  margin: 4px 0;
 }
 </style>

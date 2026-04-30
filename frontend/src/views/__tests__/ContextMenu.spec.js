@@ -1,9 +1,9 @@
 /**
  * 右键菜单功能测试
- * 覆盖：handleContextMenu 分发、重命名、删除、复制、资源管理器打开
+ * 覆盖：onNodeContextMenu、onMenuCommand 分发、重命名、删除、复制、资源管理器打开
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -80,9 +80,6 @@ const mountHome = () => mount(Home, {
       'el-descriptions': true,
       'el-descriptions-item': true,
       'el-icon': true,
-      'el-dropdown': true,
-      'el-dropdown-menu': true,
-      'el-dropdown-item': true,
       'GitInfo': true,
       'CommitHistory': true,
       'el-tabs': true,
@@ -91,7 +88,15 @@ const mountHome = () => mount(Home, {
   }
 })
 
-describe('右键菜单 - handleContextMenu 分发', () => {
+// 模拟 MouseEvent
+const createMouseEvent = (x = 100, y = 200) => ({
+  clientX: x,
+  clientY: y,
+  preventDefault: vi.fn(),
+  stopPropagation: vi.fn()
+})
+
+describe('右键菜单 - onNodeContextMenu 显示菜单', () => {
   let wrapper
 
   beforeEach(() => {
@@ -99,32 +104,86 @@ describe('右键菜单 - handleContextMenu 分发', () => {
     wrapper = mountHome()
   })
 
+  afterEach(() => {
+    wrapper.unmount()
+  })
+
+  it('右键节点应显示菜单并记录坐标和数据', () => {
+    const event = createMouseEvent(150, 250)
+    const data = { name: 'src', path: '/project/src', type: 'directory' }
+
+    wrapper.vm.onNodeContextMenu(event, data)
+
+    expect(wrapper.vm.contextMenu.visible).toBe(true)
+    expect(wrapper.vm.contextMenu.x).toBe(150)
+    expect(wrapper.vm.contextMenu.y).toBe(250)
+    expect(wrapper.vm.contextMenu.data).toEqual(data)
+  })
+
+  it('应阻止默认行为和冒泡', () => {
+    const event = createMouseEvent()
+    const data = { name: 'test.txt', path: '/test.txt', type: 'file' }
+
+    wrapper.vm.onNodeContextMenu(event, data)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(event.stopPropagation).toHaveBeenCalled()
+  })
+})
+
+describe('右键菜单 - closeContextMenu 关闭菜单', () => {
+  it('应隐藏菜单', () => {
+    const wrapper = mountHome()
+    wrapper.vm.contextMenu.visible = true
+    wrapper.vm.contextMenu.data = { name: 'test' }
+
+    wrapper.vm.closeContextMenu()
+
+    expect(wrapper.vm.contextMenu.visible).toBe(false)
+  })
+})
+
+describe('右键菜单 - onMenuCommand 分发', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    wrapper = mountHome()
+  })
+
+  afterEach(() => {
+    wrapper.unmount()
+  })
+
   it('createFile 命令应设置 selectedNode 并打开创建文件对话框', () => {
     const dirData = { name: 'src', path: '/project/src', type: 'directory' }
+    wrapper.vm.contextMenu.data = dirData
 
-    wrapper.vm.handleContextMenu('createFile', dirData, {})
+    wrapper.vm.onMenuCommand('createFile')
 
     expect(wrapper.vm.selectedNode).toEqual(dirData)
     expect(wrapper.vm.createType).toBe('file')
     expect(wrapper.vm.createName).toBe('')
     expect(wrapper.vm.createDialogVisible).toBe(true)
+    expect(wrapper.vm.contextMenu.visible).toBe(false)
   })
 
   it('createDir 命令应设置 selectedNode 并打开创建文件夹对话框', () => {
     const dirData = { name: 'src', path: '/project/src', type: 'directory' }
+    wrapper.vm.contextMenu.data = dirData
 
-    wrapper.vm.handleContextMenu('createDir', dirData, {})
+    wrapper.vm.onMenuCommand('createDir')
 
     expect(wrapper.vm.selectedNode).toEqual(dirData)
     expect(wrapper.vm.createType).toBe('directory')
-    expect(wrapper.vm.createName).toBe('')
     expect(wrapper.vm.createDialogVisible).toBe(true)
   })
 
   it('rename 命令应打开重命名对话框并预填名称', () => {
     const fileData = { name: 'old.txt', path: '/project/old.txt', type: 'file' }
+    wrapper.vm.contextMenu.data = fileData
 
-    wrapper.vm.handleContextMenu('rename', fileData, {})
+    wrapper.vm.onMenuCommand('rename')
 
     expect(wrapper.vm.selectedNode).toEqual(fileData)
     expect(wrapper.vm.renameName).toBe('old.txt')
@@ -133,8 +192,9 @@ describe('右键菜单 - handleContextMenu 分发', () => {
 
   it('delete 命令应触发删除确认', async () => {
     const fileData = { name: 'test.txt', path: '/project/test.txt', type: 'file' }
+    wrapper.vm.contextMenu.data = fileData
 
-    wrapper.vm.handleContextMenu('delete', fileData, {})
+    wrapper.vm.onMenuCommand('delete')
     await vi.waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalled())
 
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(
@@ -146,23 +206,34 @@ describe('右键菜单 - handleContextMenu 分发', () => {
 
   it('copyPath 命令应复制完整路径', async () => {
     const fileData = { name: 'test.txt', path: '/project/test.txt', type: 'file' }
+    wrapper.vm.contextMenu.data = fileData
 
-    wrapper.vm.handleContextMenu('copyPath', fileData, {})
+    wrapper.vm.onMenuCommand('copyPath')
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/project/test.txt'))
   })
 
   it('copyName 命令应仅复制文件名', async () => {
     const fileData = { name: 'test.txt', path: '/project/test.txt', type: 'file' }
+    wrapper.vm.contextMenu.data = fileData
 
-    wrapper.vm.handleContextMenu('copyName', fileData, {})
+    wrapper.vm.onMenuCommand('copyName')
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('test.txt'))
   })
 
   it('openExplorer 命令应调用 OpenInExplorer', async () => {
     const dirData = { name: 'project', path: '/project', type: 'directory' }
+    wrapper.vm.contextMenu.data = dirData
 
-    wrapper.vm.handleContextMenu('openExplorer', dirData, {})
+    wrapper.vm.onMenuCommand('openExplorer')
     await vi.waitFor(() => expect(OpenInExplorer).toHaveBeenCalledWith('/project'))
+  })
+
+  it('data 为 null 时不应执行任何操作', () => {
+    wrapper.vm.contextMenu.data = null
+
+    wrapper.vm.onMenuCommand('delete')
+
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled()
   })
 })
 
