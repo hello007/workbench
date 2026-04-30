@@ -9,6 +9,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"git-manager/model"
 	"git-manager/service"
+	"git-manager/util"
 )
 
 type App struct {
@@ -231,7 +232,12 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 		return nil, fmt.Errorf("路径不能为空")
 	}
 
-	repo, err := git.PlainOpen(path)
+	gitRoot, err := util.FindGitRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	}
+
+	repo, err := git.PlainOpen(gitRoot)
 	if err != nil {
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
@@ -282,7 +288,12 @@ func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Comm
 		offset = 0
 	}
 
-	repo, err := git.PlainOpen(path)
+	gitRoot, err := util.FindGitRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	}
+
+	repo, err := git.PlainOpen(gitRoot)
 	if err != nil {
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}

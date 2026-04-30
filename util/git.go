@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -100,6 +102,25 @@ func (g *GitCommand) Clone(url, targetPath string) (string, error) {
 	}
 
 	return stdout.String(), nil
+}
+
+// FindGitRoot 从给定路径向上查找 Git 仓库根目录
+func FindGitRoot(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	for {
+		gitDir := filepath.Join(abs, ".git")
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			return abs, nil
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return "", fmt.Errorf("not a git repository: %s", path)
+		}
+		abs = parent
+	}
 }
 
 // Pull 拉取更新
