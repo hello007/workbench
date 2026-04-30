@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,5 +59,71 @@ func TestGetGitRemoteURL_CurrentRepo(t *testing.T) {
 	// Verify the structure is valid (not nil)
 	if info.RemoteURL == "" && info.Branch == "" && !info.IsDetached {
 		t.Log("Repository has no origin remote (this is OK for the test)")
+	}
+}
+
+func TestGetCommitHistory_Limit(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "test-repo")
+	os.MkdirAll(repoPath, 0755)
+
+	// 初始化 Git 仓库并创建测试提交
+	exec.Command("git", "init", repoPath).Run()
+	exec.Command("git", "-C", repoPath, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", repoPath, "config", "user.email", "test@test.com").Run()
+
+	// 创建多个测试提交
+	for i := 1; i <= 5; i++ {
+		filename := filepath.Join(repoPath, fmt.Sprintf("file%d.txt", i))
+		os.WriteFile(filename, []byte(fmt.Sprintf("content %d", i)), 0644)
+		exec.Command("git", "-C", repoPath, "add", ".").Run()
+		exec.Command("git", "-C", repoPath, "commit", "-m", fmt.Sprintf("Commit %d", i)).Run()
+	}
+
+	app := NewApp()
+	commits, err := app.GetCommitHistory(repoPath, 3, 0)
+	if err != nil {
+		t.Fatalf("GetCommitHistory failed: %v", err)
+	}
+
+	if len(commits) != 3 {
+		t.Errorf("Expected 3 commits, got %d", len(commits))
+	}
+
+	// Git commit messages include trailing newline
+	if commits[0].Message != "Commit 5\n" {
+		t.Errorf("Expected 'Commit 5\\n', got %s", commits[0].Message)
+	}
+}
+
+func TestGetCommitHistory_Offset(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "test-repo")
+	os.MkdirAll(repoPath, 0755)
+
+	exec.Command("git", "init", repoPath).Run()
+	exec.Command("git", "-C", repoPath, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", repoPath, "config", "user.email", "test@test.com").Run()
+
+	for i := 1; i <= 5; i++ {
+		filename := filepath.Join(repoPath, fmt.Sprintf("file%d.txt", i))
+		os.WriteFile(filename, []byte(fmt.Sprintf("content %d", i)), 0644)
+		exec.Command("git", "-C", repoPath, "add", ".").Run()
+		exec.Command("git", "-C", repoPath, "commit", "-m", fmt.Sprintf("Commit %d", i)).Run()
+	}
+
+	app := NewApp()
+	commits, err := app.GetCommitHistory(repoPath, 2, 2)
+	if err != nil {
+		t.Fatalf("GetCommitHistory failed: %v", err)
+	}
+
+	if len(commits) != 2 {
+		t.Errorf("Expected 2 commits, got %d", len(commits))
+	}
+
+	// Git commit messages include trailing newline
+	if commits[0].Message != "Commit 3\n" {
+		t.Errorf("Expected 'Commit 3\\n', got %s", commits[0].Message)
 	}
 }

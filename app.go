@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"git-manager/model"
 	"git-manager/service"
 )
@@ -264,4 +265,101 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 		Branch:     branchName,
 		IsDetached: isDetached,
 	}, nil
+}
+
+// GetCommitHistory 获取 Git 仓库的提交历史
+func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Commit, error) {
+	repo, err := git.PlainOpen(path)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	}
+
+	// 获取提交日志迭代器
+	commitIter, err := repo.Log(&git.LogOptions{
+		Order: git.LogOrderCommitterTime,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("无法获取提交历史: %w", err)
+	}
+	defer commitIter.Close()
+
+	// 跳过 offset 个提交
+	for i := 0; i < offset; i++ {
+		_, err := commitIter.Next()
+		if err != nil {
+			break
+		}
+	}
+
+	// 收集指定数量的提交
+	var commits []model.Commit
+	for i := 0; i < limit; i++ {
+		commitObj, err := commitIter.Next()
+		if err != nil {
+			break
+		}
+
+		commit := model.Commit{
+			SHA:       commitObj.Hash.String(),
+			ShortSHA:  commitObj.Hash.String()[:8],
+			Message:   commitObj.Message,
+			Author:    commitObj.Author.Name,
+			Email:     commitObj.Author.Email,
+			Timestamp: commitObj.Author.When.Unix(),
+			DateTime:  commitObj.Author.When.Format("2006-01-02 15:04:05"),
+		}
+
+		files := getCommitFiles(repo, commitObj)
+		commit.Files = files
+
+		commits = append(commits, commit)
+	}
+
+	return commits, nil
+}
+
+// getCommitFiles 获取提交中变更的文件列表
+func getCommitFiles(repo *git.Repository, commit *object.Commit) []string {
+	var files []string
+
+	currentTree, err := commit.Tree()
+	if err != nil {
+		return files
+	}
+
+	parentCommit, err := commit.Parent(0)
+	if err != nil {
+		return getTreeFiles(currentTree)
+	}
+
+	parentTree, err := parentCommit.Tree()
+	if err != nil {
+		return files
+	}
+
+	patch, err := currentTree.Patch(parentTree)
+	if err != nil {
+		return files
+	}
+
+	for _, patchObj := range patch.FilePatches() {
+		from, to := patchObj.Files()
+		if from != nil {
+			files = append(files, from.Path())
+		} else if to != nil {
+			files = append(files, to.Path())
+		}
+	}
+
+	return files
+}
+
+// getTreeFiles 递归获取树中的所有文件路径
+func getTreeFiles(tree *object.Tree) []string {
+	var files []string
+	tree.Files().ForEach(func(file *object.File) error {
+		files = append(files, file.Name)
+		return nil
+	})
+	return files
 }
