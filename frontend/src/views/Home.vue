@@ -91,6 +91,12 @@
               :latest-commit="latestCommit"
             />
 
+            <CommitHistory
+              v-if="selectedNode.isGitRepo"
+              :repo-path="selectedNode.path"
+              style="margin-top: 20px;"
+            />
+
             <div v-if="selectedNode.isGitRepo" style="margin-top: 20px;">
               <h3>Git信息</h3>
               <el-button type="primary" @click="pullRepo" :loading="gitLoading" style="margin-bottom: 10px;">
@@ -167,6 +173,7 @@ import {
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import GitInfo from '../components/GitInfo.vue'
+import CommitHistory from '../components/CommitHistory.vue'
 import {
   GetDirectories, AddDirectory,
   GetFileTree, GetGitInfo,
