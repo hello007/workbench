@@ -84,6 +84,13 @@
 
             <el-divider />
 
+            <!-- Git 信息组件 -->
+            <GitInfo
+              v-if="selectedNode.isGitRepo"
+              :repo-path="selectedNode.path"
+              :latest-commit="latestCommit"
+            />
+
             <div v-if="selectedNode.isGitRepo" style="margin-top: 20px;">
               <h3>Git信息</h3>
               <el-button type="primary" @click="pullRepo" :loading="gitLoading" style="margin-bottom: 10px;">
@@ -159,11 +166,12 @@ import {
   SuccessFilled
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
+import GitInfo from '../components/GitInfo.vue'
 import {
   GetDirectories, AddDirectory,
   GetFileTree, GetGitInfo,
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
-  PullRepo
+  PullRepo, GetCommitHistory
 } from '../../wailsjs/go/main/App'
 
 // 数据
@@ -185,6 +193,8 @@ const filePreview = ref({
   content: '',
   error: ''
 })
+
+const latestCommit = ref(null)
 
 const treeProps = {
   label: 'name',
@@ -270,6 +280,17 @@ const onNodeClick = async (data) => {
   if (data.isGitRepo) {
     const info = await GetGitInfo(data.path)
     Object.assign(selectedNode.value, info)
+
+    try {
+      const history = await GetCommitHistory(data.path, 1, 0)
+      if (history.length > 0) {
+        latestCommit.value = history[0]
+      }
+    } catch (error) {
+      console.error('Failed to load latest commit:', error)
+    }
+  } else {
+    latestCommit.value = null
   }
 }
 
