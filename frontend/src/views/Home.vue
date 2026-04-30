@@ -319,6 +319,7 @@ import {
   GetFileTree,
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
   PullRepo, CloneRepo,
+  GetCommitHistory,
   OpenInExplorer
 } from '../../wailsjs/go/main/App'
 
@@ -458,6 +459,16 @@ const onNodeClick = async (data) => {
 
   if (!data.isGitRepo) {
     latestCommit.value = null
+  } else {
+    latestCommit.value = null
+    try {
+      const commits = await GetCommitHistory(data.path, 1, 0)
+      if (commits && commits.length > 0) {
+        latestCommit.value = commits[0]
+      }
+    } catch {
+      // 静默失败，用户仍可通过切换签页查看提交信息
+    }
   }
 }
 
