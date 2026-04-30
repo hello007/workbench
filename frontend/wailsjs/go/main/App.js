@@ -30,6 +30,10 @@ export function ExtractRepoName(arg1) {
   return window['go']['main']['App']['ExtractRepoName'](arg1);
 }
 
+export function GetCommitHistory(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetCommitHistory'](arg1, arg2, arg3);
+}
+
 export function GetDefaultDirectory() {
   return window['go']['main']['App']['GetDefaultDirectory']();
 }
@@ -52,6 +56,10 @@ export function GetGitInfo(arg1) {
 
 export function GetGitLog(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetGitLog'](arg1, arg2, arg3);
+}
+
+export function GetGitRemoteURL(arg1) {
+  return window['go']['main']['App']['GetGitRemoteURL'](arg1);
 }
 
 export function PreviewFile(arg1) {

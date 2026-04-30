@@ -16,6 +16,8 @@ export function DeleteFile(arg1:string):Promise<boolean>;
 
 export function ExtractRepoName(arg1:string):Promise<string>;
 
+export function GetCommitHistory(arg1:string,arg2:number,arg3:number):Promise<Array<model.Commit>>;
+
 export function GetDefaultDirectory():Promise<model.Directory>;
 
 export function GetDirectories():Promise<Array<model.Directory>>;
@@ -27,6 +29,8 @@ export function GetFileTreeRecursive(arg1:string,arg2:number):Promise<Array<mode
 export function GetGitInfo(arg1:string):Promise<model.GitRepoInfo>;
 
 export function GetGitLog(arg1:string,arg2:number,arg3:number):Promise<model.PageResult>;
+
+export function GetGitRemoteURL(arg1:string):Promise<model.GitRemoteInfo>;
 
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
 
