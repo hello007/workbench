@@ -114,6 +114,7 @@
               <el-button-group>
                 <el-button @click="showCreateDirectoryDialog">新建文件夹</el-button>
                 <el-button @click="showCreateFileDialog">新建文件</el-button>
+                <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
               </el-button-group>
             </div>
 
@@ -164,6 +165,31 @@
         <el-button type="primary" @click="addDirectory">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 克隆仓库对话框 -->
+    <el-dialog
+      v-model="cloneDialogVisible"
+      title="克隆仓库"
+      width="500px"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="目标文件夹">
+          <el-input :model-value="selectedNode?.path" disabled />
+        </el-form-item>
+        <el-form-item label="Git 地址">
+          <el-input
+            v-model="cloneUrl"
+            placeholder="例如: https://github.com/user/repo.git"
+            :disabled="cloneLoading"
+            @keyup.enter="cloneRepo"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="cloneDialogVisible = false" :disabled="cloneLoading">取消</el-button>
+        <el-button type="primary" @click="cloneRepo" :loading="cloneLoading">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -183,7 +209,7 @@ import {
   GetDirectories, AddDirectory,
   GetFileTree,
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
-  PullRepo
+  PullRepo, CloneRepo
 } from '../../wailsjs/go/main/App'
 
 // 数据
@@ -205,6 +231,10 @@ const filePreview = ref({
   content: '',
   error: ''
 })
+
+const cloneDialogVisible = ref(false)
+const cloneUrl = ref('')
+const cloneLoading = ref(false)
 
 const latestCommit = ref(null)
 const activeGitTab = ref('repo')
@@ -369,6 +399,35 @@ const showCreateFileDialog = () => {
 
 const showRenameDialog = () => {
   ElMessage.info('功能开发中')
+}
+
+const showCloneDialog = () => {
+  cloneUrl.value = ''
+  cloneDialogVisible.value = true
+}
+
+const cloneRepo = async () => {
+  if (!cloneUrl.value.trim()) {
+    ElMessage.warning('请输入 Git 仓库地址')
+    return
+  }
+  if (!selectedNode.value) return
+
+  cloneLoading.value = true
+  try {
+    const result = await CloneRepo(cloneUrl.value.trim(), selectedNode.value.path)
+    if (result.includes('成功')) {
+      ElMessage.success(result)
+      cloneDialogVisible.value = false
+      onDirectoryChange()
+    } else {
+      ElMessage.error(result)
+    }
+  } catch (error) {
+    ElMessage.error('克隆失败: ' + (error.message || String(error)))
+  } finally {
+    cloneLoading.value = false
+  }
 }
 
 const deleteFile = async () => {
