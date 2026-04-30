@@ -18,6 +18,9 @@ build/
 frontend/dist/
 frontend/wailsjs/
 
+# Release packages (contain binaries)
+release/
+
 # IDE
 .idea/
 .vscode/
