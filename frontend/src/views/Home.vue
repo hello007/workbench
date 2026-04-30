@@ -30,9 +30,9 @@
       <!-- 主体内容 -->
       <el-container>
         <!-- 左侧文件树 -->
-        <el-aside width="300px" style="border-right: 1px solid #e6e6e6; background-color: #f5f7fa;">
-          <div style="padding: 10px;">
-            <el-button-group style="margin-bottom: 10px;">
+        <el-aside width="300px" class="file-tree-aside">
+          <div class="tree-toolbar">
+            <el-button-group>
               <el-button size="small" @click="collapseAll">全部收起</el-button>
             </el-button-group>
           </div>
@@ -43,7 +43,7 @@
             lazy
             :load="loadTreeNode"
             @node-click="onNodeClick"
-            style="background: transparent;"
+            class="file-tree"
           >
             <template #default="{ node, data }">
               <span class="custom-tree-node">
@@ -436,9 +436,7 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   font-size: 14px;
-  padding-right: 8px;
 }
 .el-tree-node__children {
   transition: all 0.3s ease;
@@ -455,8 +453,24 @@ onMounted(async () => {
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.el-aside {
+.file-tree-aside {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e6e6e6;
+  background-color: #f5f7fa;
+  overflow: hidden;
+}
+
+.tree-toolbar {
+  flex-shrink: 0;
+  padding: 10px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.file-tree {
+  flex: 1;
   overflow-y: auto;
+  background: transparent;
 }
 
 .el-main {

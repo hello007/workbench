@@ -197,4 +197,56 @@ describe('Home.vue - Bug修复验证', () => {
       expect(debug.error).toBeDefined()
     })
   })
+
+  describe('左侧文件树滚动条', () => {
+    let slotWrapper
+
+    beforeEach(() => {
+      slotWrapper = mount(Home, {
+        global: {
+          stubs: {
+            'el-container': { template: '<div><slot /></div>' },
+            'el-header': { template: '<header><slot /></header>' },
+            'el-aside': { template: '<aside v-bind="$attrs"><slot /></aside>' },
+            'el-main': { template: '<main><slot /></main>' },
+            'el-tree': { template: '<div v-bind="$attrs"></div>' },
+            'el-dialog': true,
+            'el-form': true,
+            'el-form-item': true,
+            'el-input': true,
+            'el-switch': true,
+            'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+            'el-button-group': { template: '<div><slot /></div>' },
+            'el-divider': true,
+            'el-select': true,
+            'el-option': true,
+            'el-empty': true,
+            'el-descriptions': true,
+            'el-descriptions-item': true,
+            'el-icon': true,
+            'GitInfo': true,
+            'CommitHistory': true
+          }
+        }
+      })
+    })
+
+    it('el-aside 应该有 file-tree-aside 类以启用 flex 布局', () => {
+      const aside = slotWrapper.find('.file-tree-aside')
+      expect(aside.exists()).toBe(true)
+    })
+
+    it('el-aside 内部应该有 tree-toolbar 容器', () => {
+      const toolbar = slotWrapper.find('.tree-toolbar')
+      expect(toolbar.exists()).toBe(true)
+    })
+
+    it('el-tree 应该有 file-tree 类以启用滚动条', async () => {
+      await slotWrapper.vm.$nextTick()
+      slotWrapper.vm.selectedDirectoryId = 'test-id'
+      await slotWrapper.vm.$nextTick()
+      const tree = slotWrapper.find('.file-tree')
+      expect(tree.exists()).toBe(true)
+    })
+  })
 })
