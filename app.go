@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 
+	"github.com/go-git/go-git/v5"
 	"git-manager/model"
 	"git-manager/service"
 )
@@ -220,4 +222,46 @@ func (a *App) PullRepo(dirPath string) string {
 // ExtractRepoName 提取仓库名
 func (a *App) ExtractRepoName(url string) string {
 	return a.gitSvc.ExtractRepoName(url)
+}
+
+// GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息
+func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
+	// Open Git repository
+	repo, err := git.PlainOpen(path)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	}
+
+	// Get remote configuration
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		// No origin remote, return empty info
+		return &model.GitRemoteInfo{
+			RemoteURL:  "",
+			Branch:     "",
+			IsDetached: false,
+		}, nil
+	}
+
+	// Get remote URL
+	remoteURL := ""
+	if len(remote.Config().URLs) > 0 {
+		remoteURL = remote.Config().URLs[0]
+	}
+
+	// Get current HEAD reference
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", err)
+	}
+
+	// Check if detached HEAD
+	branchName := head.Name().Short()
+	isDetached := !head.Name().IsBranch()
+
+	return &model.GitRemoteInfo{
+		RemoteURL:  remoteURL,
+		Branch:     branchName,
+		IsDetached: isDetached,
+	}, nil
 }
