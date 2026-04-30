@@ -246,16 +246,11 @@
     </el-dialog>
 
     <!-- 自定义右键菜单 -->
-    <div
-      v-if="contextMenu.visible"
-      class="context-menu-overlay"
-      @contextmenu.prevent="closeContextMenu"
-      @click="closeContextMenu"
-    />
     <ul
       v-if="contextMenu.visible"
       class="context-menu"
       :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @click.stop
     >
       <template v-if="contextMenu.data?.type === 'directory'">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
@@ -885,15 +880,6 @@ onBeforeUnmount(() => {
 }
 
 /* 右键菜单样式 */
-.context-menu-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 1999;
-}
-
 .context-menu {
   position: fixed;
   z-index: 2000;
