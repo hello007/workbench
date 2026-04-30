@@ -86,6 +86,7 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
 import { GetGitRemoteURL } from '../../../wailsjs/go/main/App'
+import { gitCache, getCacheKey } from '../utils/gitCache'
 
 const props = defineProps({
   repoPath: { type: String, required: true },
@@ -98,8 +99,22 @@ const loading = ref(false)
 const loadGitInfo = async () => {
   loading.value = true
   try {
+    // 检查缓存
+    const cacheKey = getCacheKey('git-info', props.repoPath)
+    const cached = gitCache.get(cacheKey)
+
+    if (cached) {
+      gitInfo.value = cached
+      loading.value = false
+      return
+    }
+
+    // 请求新数据
     const info = await GetGitRemoteURL(props.repoPath)
     gitInfo.value = info
+
+    // 存入缓存
+    gitCache.set(cacheKey, info)
   } catch (error) {
     ElMessage.error('加载 Git 信息失败: ' + error)
   } finally {
