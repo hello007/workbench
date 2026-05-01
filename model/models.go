@@ -122,3 +122,17 @@ type FilePreview struct {
 	TooLarge bool   `json:"tooLarge"`
 	Error    string `json:"error,omitempty"`
 }
+
+// PullResult 单个仓库的拉取结果
+type PullResult struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+	Output  string `json:"output"`
+	Error   string `json:"error,omitempty"`
+}
+
+// PullSummary ScanAndPullRepos 的初始返回值
+type PullSummary struct {
+	Total int `json:"total"`
+}
