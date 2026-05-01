@@ -221,6 +221,22 @@ func (a *App) PullRepo(dirPath string) string {
 	return output
 }
 
+// ScanAndPullRepos 扫描并批量拉取 Git 仓库
+func (a *App) ScanAndPullRepos(dirPath string) (*model.PullSummary, error) {
+	repos := a.gitSvc.ScanGitRepos(dirPath)
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("未找到任何 Git 仓库")
+	}
+
+	summary := &model.PullSummary{Total: len(repos)}
+
+	go func() {
+		a.gitSvc.BatchPull(repos, 5, a.ctx)
+	}()
+
+	return summary, nil
+}
+
 // ExtractRepoName 提取仓库名
 func (a *App) ExtractRepoName(url string) string {
 	return a.gitSvc.ExtractRepoName(url)
