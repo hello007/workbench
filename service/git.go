@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"git-manager/model"
@@ -86,4 +87,42 @@ func (s *GitService) ExtractRepoName(url string) string {
 		return parts[len(parts)-1]
 	}
 	return "repo"
+}
+
+// ScanGitRepos 递归扫描目录下所有 Git 仓库
+// 如果 rootPath 本身是 git 仓库，直接返回 [rootPath]
+// 否则递归遍历子目录，收集所有 git 仓库路径
+func (s *GitService) ScanGitRepos(rootPath string) []string {
+	if s.gitCmd.IsGitRepository(rootPath) {
+		return []string{rootPath}
+	}
+
+	var repos []string
+	s.scanDir(rootPath, &repos)
+	return repos
+}
+
+func (s *GitService) scanDir(dir string, repos *[]string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		fullPath := filepath.Join(dir, entry.Name())
+		// 跳过 .git 目录本身
+		if entry.Name() == ".git" {
+			continue
+		}
+
+		if s.gitCmd.IsGitRepository(fullPath) {
+			*repos = append(*repos, fullPath)
+		} else {
+			s.scanDir(fullPath, repos)
+		}
+	}
 }
