@@ -40,6 +40,8 @@ export function PullRepo(arg1:string):Promise<string>;
 
 export function RenameFile(arg1:string,arg2:string):Promise<boolean>;
 
+export function ScanAndPullRepos(arg1:string):Promise<model.PullSummary>;
+
 export function SetDefaultDirectory(arg1:string):Promise<boolean>;
 
 export function UpdateDirectory(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<model.Directory>;

@@ -245,6 +245,54 @@
       </template>
     </el-dialog>
 
+    <!-- 更新仓库进度弹窗 -->
+    <el-dialog
+      v-model="pullDialogVisible"
+      :title="pullCompleted ? '更新完成' : '更新仓库'"
+      width="700px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!pullCompleted"
+      :show-close="pullCompleted"
+    >
+      <div style="margin-bottom: 16px;">
+        <el-progress
+          :percentage="pullProgress.total > 0 ? Math.round(pullProgress.current / pullProgress.total * 100) : 0"
+          :format="() => `${pullProgress.current} / ${pullProgress.total}`"
+          :status="pullCompleted ? (pullSummary.failed > 0 ? 'warning' : 'success') : undefined"
+        />
+        <div v-if="pullCompleted" style="margin-top: 8px; color: #909399; font-size: 13px;">
+          成功: {{ pullSummary.success }}，失败: {{ pullSummary.failed }}
+        </div>
+      </div>
+
+      <el-table :data="pullResults" style="width: 100%" max-height="400" size="small">
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-icon v-if="row.success" color="#67C23A"><SuccessFilled /></el-icon>
+            <el-icon v-else color="#F56C6C"><CircleCloseFilled /></el-icon>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="仓库名称" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="path" label="路径" min-width="250" show-overflow-tooltip />
+        <el-table-column label="结果" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.success" style="color: #67C23A;">{{ row.output || '已是最新' }}</span>
+            <span v-else style="color: #F56C6C;">{{ row.error }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="pullDialogVisible = false"
+          :disabled="!pullCompleted"
+        >
+          {{ pullCompleted ? '关闭' : '更新中...' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 自定义右键菜单 -->
     <ul
       v-if="contextMenu.visible"
@@ -272,6 +320,10 @@
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
           <el-icon><Monitor /></el-icon>在资源管理器中打开
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
+          <el-icon><Refresh /></el-icon>更新仓库
         </li>
       </template>
       <template v-else>
@@ -304,14 +356,17 @@ import {
   FolderOpened,
   Document,
   SuccessFilled,
+  CircleCloseFilled,
   FolderAdd,
   DocumentAdd,
   Edit,
   Delete,
   CopyDocument,
-  Monitor
+  Monitor,
+  Refresh
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from '../components/GitInfo.vue'
 import CommitHistory from '../components/CommitHistory.vue'
 import {
@@ -320,7 +375,8 @@ import {
   CreateDirectory, CreateFile, RenameFile, DeleteFile, PreviewFile,
   PullRepo, CloneRepo,
   GetCommitHistory,
-  OpenInExplorer
+  OpenInExplorer,
+  ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
 
 // 数据
@@ -356,6 +412,12 @@ const renameInputRef = ref()
 const cloneDialogVisible = ref(false)
 const cloneUrl = ref('')
 const cloneLoading = ref(false)
+
+const pullDialogVisible = ref(false)
+const pullProgress = reactive({ current: 0, total: 0 })
+const pullResults = ref([])
+const pullCompleted = ref(false)
+const pullSummary = reactive({ success: 0, failed: 0 })
 
 const latestCommit = ref(null)
 const activeGitTab = ref('repo')
@@ -525,6 +587,9 @@ const onMenuCommand = (command) => {
     case 'openExplorer':
       handleOpenExplorer(data.path)
       break
+    case 'pullRepos':
+      handleBatchPull(data)
+      break
   }
 }
 
@@ -647,6 +712,40 @@ const handleOpenExplorer = async (path) => {
   } catch (error) {
     ElMessage.error('打开资源管理器失败: ' + (error.message || String(error)))
   }
+}
+
+const handleBatchPull = async (data) => {
+  try {
+    const summary = await ScanAndPullRepos(data.path)
+
+    pullResults.value = []
+    pullProgress.current = 0
+    pullProgress.total = summary.total
+    pullCompleted.value = false
+    pullSummary.success = 0
+    pullSummary.failed = 0
+    pullDialogVisible.value = true
+  } catch (error) {
+    ElMessage.warning(error || '未找到任何 Git 仓库')
+  }
+}
+
+const cleanupPullEvents = () => {
+  EventsOff("pull-progress")
+  EventsOff("pull-complete")
+}
+
+const setupPullEvents = () => {
+  cleanupPullEvents()
+  EventsOn("pull-progress", (result) => {
+    pullResults.value = [...pullResults.value, result]
+    pullProgress.current++
+  })
+  EventsOn("pull-complete", (summary) => {
+    pullCompleted.value = true
+    pullSummary.success = summary.success || 0
+    pullSummary.failed = summary.failed || 0
+  })
 }
 
 const collapseAll = () => {
@@ -810,11 +909,13 @@ onMounted(async () => {
   debug.log('Selected directory ID:', selectedDirectoryId.value)
   document.addEventListener('click', onGlobalClick)
   document.addEventListener('contextmenu', onGlobalContextMenu)
+  setupPullEvents()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onGlobalClick)
   document.removeEventListener('contextmenu', onGlobalContextMenu)
+  cleanupPullEvents()
 })
 </script>
 
