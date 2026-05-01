@@ -25,6 +25,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenInExplorer: vi.fn().mockResolvedValue(true)
 }))
 
+// Mock Wails runtime
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => vi.fn()),
+  EventsOff: vi.fn()
+}))
+
 // Mock Element Plus
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -83,7 +89,10 @@ const mountHome = () => mount(Home, {
       'GitInfo': true,
       'CommitHistory': true,
       'el-tabs': true,
-      'el-tab-pane': true
+      'el-tab-pane': true,
+      'el-progress': true,
+      'el-table': true,
+      'el-table-column': true
     }
   }
 })

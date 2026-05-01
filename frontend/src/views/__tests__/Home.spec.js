@@ -10,6 +10,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import Home from '../Home.vue'
 
+// Mock Wails runtime
+vi.mock('../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => vi.fn()),
+  EventsOff: vi.fn()
+}))
+
 // Mock Element Plus组件
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -58,7 +64,10 @@ describe('Home.vue - Bug修复验证', () => {
           'el-empty': true,
           'el-descriptions': true,
           'el-descriptions-item': true,
-          'el-icon': true
+          'el-icon': true,
+          'el-progress': true,
+          'el-table': true,
+          'el-table-column': true
         }
       }
     })

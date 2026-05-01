@@ -730,12 +730,16 @@ const handleBatchPull = async (data) => {
   }
 }
 
+const isWailsRuntime = () => !!window.runtime
+
 const cleanupPullEvents = () => {
+  if (!isWailsRuntime()) return
   EventsOff("pull-progress")
   EventsOff("pull-complete")
 }
 
 const setupPullEvents = () => {
+  if (!isWailsRuntime()) return
   cleanupPullEvents()
   EventsOn("pull-progress", (result) => {
     pullResults.value = [...pullResults.value, result]
