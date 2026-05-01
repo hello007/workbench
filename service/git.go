@@ -1,13 +1,18 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"git-manager/model"
 	"git-manager/util"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GitService Git服务
@@ -125,4 +130,78 @@ func (s *GitService) scanDir(dir string, repos *[]string) {
 			s.scanDir(fullPath, repos)
 		}
 	}
+}
+
+// safeEmit 安全发射 Wails 事件，非 Wails 上下文时静默跳过
+func safeEmit(ctx context.Context, event string, data ...interface{}) {
+	if ctx == nil || ctx.Value("events") == nil {
+		return
+	}
+	runtime.EventsEmit(ctx, event, data...)
+}
+
+// BatchPull 并行拉取多个 Git 仓库
+func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Context) []model.PullResult {
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+
+	var (
+		wg           sync.WaitGroup
+		mu           sync.Mutex
+		results      []model.PullResult
+		sem          = make(chan struct{}, concurrency)
+		successCount int
+		failCount    int
+	)
+
+	for _, repo := range repos {
+		wg.Add(1)
+		go func(repoPath string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			name := filepath.Base(repoPath)
+			result := model.PullResult{
+				Path: repoPath,
+				Name: name,
+			}
+
+			if !s.gitCmd.IsGitRepository(repoPath) {
+				result.Success = false
+				result.Error = "不是 Git 仓库"
+			} else {
+				gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
+				output, err := gitCmd.Pull(repoPath)
+				if err != nil {
+					result.Success = false
+					result.Error = err.Error()
+				} else {
+					result.Success = true
+					result.Output = strings.TrimSpace(output)
+				}
+			}
+
+			mu.Lock()
+			results = append(results, result)
+			if result.Success {
+				successCount++
+			} else {
+				failCount++
+			}
+			mu.Unlock()
+
+			safeEmit(ctx, "pull-progress", result)
+		}(repo)
+	}
+
+	wg.Wait()
+
+	safeEmit(ctx, "pull-complete", map[string]int{
+		"success": successCount,
+		"failed":  failCount,
+	})
+
+	return results
 }

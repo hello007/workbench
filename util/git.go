@@ -23,6 +23,13 @@ func NewGitCommand() *GitCommand {
 	}
 }
 
+// NewGitCommandWithTimeout 创建指定超时时间的 Git 命令执行器
+func NewGitCommandWithTimeout(timeout time.Duration) *GitCommand {
+	return &GitCommand{
+		timeout: timeout,
+	}
+}
+
 // Execute 执行Git命令
 func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)

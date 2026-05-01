@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"git-manager/model"
 )
 
 func TestScanGitRepos_SingleRepo(t *testing.T) {
@@ -63,5 +66,55 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git %v in %s failed: %v", args, dir, err)
+	}
+}
+
+func TestBatchPull_SuccessAndFail(t *testing.T) {
+	dir := t.TempDir()
+
+	// 创建一个真实的 git 仓库（无远程，pull 会失败）
+	repoPath := filepath.Join(dir, "repo")
+	os.MkdirAll(repoPath, 0755)
+	runGit(t, repoPath, "init")
+	runGit(t, repoPath, "config", "user.email", "test@test.com")
+	runGit(t, repoPath, "config", "user.name", "test")
+
+	// 创建一个非 git 目录（会失败）
+	nonRepo := filepath.Join(dir, "not-a-repo")
+	os.MkdirAll(nonRepo, 0755)
+
+	svc := NewGitService()
+	results := svc.BatchPull([]string{repoPath, nonRepo}, 2, context.Background())
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// 按路径查找结果（goroutine 执行顺序不确定）
+	var repoResult, nonRepoResult *model.PullResult
+	for i := range results {
+		if results[i].Path == repoPath {
+			repoResult = &results[i]
+		}
+		if results[i].Path == nonRepo {
+			nonRepoResult = &results[i]
+		}
+	}
+
+	if repoResult == nil {
+		t.Fatal("expected result for repoPath")
+	}
+	if repoResult.Path != repoPath {
+		t.Errorf("expected path %s, got %s", repoPath, repoResult.Path)
+	}
+
+	if nonRepoResult == nil {
+		t.Fatal("expected result for nonRepo")
+	}
+	if nonRepoResult.Success {
+		t.Error("expected non-repo to fail")
+	}
+	if nonRepoResult.Error == "" {
+		t.Error("expected error message for non-repo")
 	}
 }
