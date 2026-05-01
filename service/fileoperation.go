@@ -104,7 +104,11 @@ func (s *FileOperationService) OpenInExplorer(path string) error {
 	}
 
 	if info.IsDir() {
-		return exec.Command("explorer", path).Start()
+		cmd := exec.Command("explorer", path)
+		util.HideCommandWindow(cmd)
+		return cmd.Start()
 	}
-	return exec.Command("explorer", "/select,", path).Start()
+	cmd := exec.Command("explorer", "/select,", path)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
 }

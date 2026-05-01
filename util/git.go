@@ -37,6 +37,7 @@ func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workDir
+	HideCommandWindow(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -54,6 +55,7 @@ func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
 func (g *GitCommand) IsGitRepository(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = dir
+	HideCommandWindow(cmd)
 	return cmd.Run() == nil
 }
 
@@ -98,6 +100,7 @@ func (g *GitCommand) Clone(url, targetPath string) (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", "clone", url, targetPath)
+	HideCommandWindow(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

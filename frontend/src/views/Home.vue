@@ -25,6 +25,13 @@
         >
           添加目录
         </el-button>
+        <span
+          v-if="selectedDirectoryPath"
+          class="current-directory-path"
+          :title="selectedDirectoryPath"
+        >
+          {{ selectedDirectoryPath }}
+        </span>
       </el-header>
 
       <!-- 主体内容 -->
@@ -349,7 +356,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Folder,
@@ -388,6 +395,11 @@ const fileTreeRef = ref()
 const gitLoading = ref(false)
 
 const addDirectoryDialogVisible = ref(false)
+
+const selectedDirectoryPath = computed(() => {
+  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
+  return dir ? dir.path : ''
+})
 const newDirectory = ref({
   name: '',
   path: '',
@@ -926,6 +938,18 @@ onBeforeUnmount(() => {
 <style scoped>
 .home {
   font-family: 'Microsoft YaHei', Arial, sans-serif;
+}
+.current-directory-path {
+  color: #e0e4ea;
+  font-size: 14px;
+  margin-left: 14px;
+  padding: 4px 10px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 500px;
 }
 
 .el-tree-node__content {
