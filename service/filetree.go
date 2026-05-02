@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"git-manager/model"
 	"git-manager/util"
@@ -11,7 +12,8 @@ import (
 
 // FileTreeService 文件树服务
 type FileTreeService struct {
-	gitCmd *util.GitCommand
+	gitCmd       *util.GitCommand
+	gitRepoCache sync.Map // path -> bool 缓存
 }
 
 // NewFileTreeService 创建服务
@@ -19,6 +21,17 @@ func NewFileTreeService() *FileTreeService {
 	return &FileTreeService{
 		gitCmd: util.NewGitCommand(),
 	}
+}
+
+// isGitRepoDir 使用 os.Stat 快速检查目录是否是 Git 仓库（带缓存）
+func (s *FileTreeService) isGitRepoDir(dir string) bool {
+	if v, ok := s.gitRepoCache.Load(dir); ok {
+		return v.(bool)
+	}
+	info, err := os.Stat(filepath.Join(dir, ".git"))
+	isRepo := err == nil && info.IsDir()
+	s.gitRepoCache.Store(dir, isRepo)
+	return isRepo
 }
 
 // GetChildren 获取子节点
@@ -48,7 +61,7 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 		node := model.NewFileTreeNode(name, fullPath, fileType)
 
 		if entry.IsDir() {
-			node.IsGitRepo = s.gitCmd.IsGitRepository(fullPath)
+			node.IsGitRepo = s.isGitRepoDir(fullPath)
 		}
 
 		nodes = append(nodes, node)
