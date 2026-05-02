@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec instructions *)",
+      "Bash(openspec status *)",
+      "Bash(go version *)",
+      "Bash(npm --version)",
+      "Bash(git --version)",
+      "Bash(wails version *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git diff *)",
+      "Bash(git diff)",
+      "Bash(git log --oneline -3)",
+      "Bash(git show *)",
+      "Bash(git status)",
+      "Bash(npm install *)",
+      "Bash(export PATH=\"/d/Program Files/Go/bin:/c/Users/liuyang/go/bin:$PATH\")",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(wails dev *)",
+      "Bash(wails build *)",
+      "Bash(npm test *)",
+      "Bash(openspec list *)",
+      "Bash(openspec new *)",
+      "Bash(go mod *)",
+      "Bash(go list *)",
+      "Bash(go get *)",
+      "Bash(go run *)",
+      "Bash(go tool *)",
+      "Bash(wails generate *)",
+      "Bash(node test-bindings.js)",
+      "Bash(npm list *)"
+    ]
+  }
+}
