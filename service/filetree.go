@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -66,6 +67,13 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 
 		nodes = append(nodes, node)
 	}
+
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Type != nodes[j].Type {
+			return nodes[i].Type == "directory"
+		}
+		return strings.ToLower(nodes[i].Name) < strings.ToLower(nodes[j].Name)
+	})
 
 	return nodes, nil
 }
