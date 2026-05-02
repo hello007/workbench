@@ -35,3 +35,5 @@ data/*.json
 !data/*.template
 
 node_modules
+# Worktree directory
+.worktrees/
