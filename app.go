@@ -418,3 +418,13 @@ func (a *App) OpenInExplorer(path string) bool {
 	}
 	return true
 }
+
+// OpenInVSCode 用 VSCode 打开
+func (a *App) OpenInVSCode(path string) bool {
+	err := a.fileOpSvc.OpenInVSCode(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}

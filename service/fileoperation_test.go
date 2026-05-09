@@ -174,3 +174,33 @@ func TestDelete_Directory(t *testing.T) {
 		t.Error("Directory still exists after delete")
 	}
 }
+
+func TestOpenInVSCode_Directory(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+
+	err := svc.OpenInVSCode(dir)
+	if err != nil {
+		t.Fatalf("OpenInVSCode(directory) failed: %v", err)
+	}
+}
+
+func TestOpenInVSCode_File(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "test.txt")
+	os.WriteFile(file, []byte("test"), 0644)
+
+	svc := NewFileOperationService()
+
+	err := svc.OpenInVSCode(file)
+	if err != nil {
+		t.Fatalf("OpenInVSCode(file) failed: %v", err)
+	}
+}
+
+func TestOpenInVSCode_InvalidCommand(t *testing.T) {
+	svc := NewFileOperationService()
+
+	err := svc.OpenInVSCode("")
+	_ = err
+}

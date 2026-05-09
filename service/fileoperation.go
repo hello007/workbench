@@ -112,3 +112,10 @@ func (s *FileOperationService) OpenInExplorer(path string) error {
 	util.HideCommandWindow(cmd)
 	return cmd.Start()
 }
+
+// OpenInVSCode 用 VSCode 打开文件或文件夹
+func (s *FileOperationService) OpenInVSCode(path string) error {
+	cmd := exec.Command("code", path)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
+}

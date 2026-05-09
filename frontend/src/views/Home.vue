@@ -328,6 +328,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
           <el-icon><Monitor /></el-icon>在资源管理器中打开
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
+          <el-icon><EditPen /></el-icon>用 VSCode 打开
+        </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
@@ -350,6 +353,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
           <el-icon><Monitor /></el-icon>在资源管理器中打开
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
+          <el-icon><EditPen /></el-icon>用 VSCode 打开
+        </li>
       </template>
     </ul>
   </div>
@@ -370,7 +376,8 @@ import {
   Delete,
   CopyDocument,
   Monitor,
-  Refresh
+  Refresh,
+  EditPen
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -383,6 +390,7 @@ import {
   PullRepo, CloneRepo,
   GetCommitHistory,
   OpenInExplorer,
+  OpenInVSCode,
   ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
 
@@ -599,6 +607,9 @@ const onMenuCommand = (command) => {
     case 'openExplorer':
       handleOpenExplorer(data.path)
       break
+    case 'openInVSCode':
+      handleOpenInVSCode(data.path)
+      break
     case 'pullRepos':
       handleBatchPull(data)
       break
@@ -723,6 +734,17 @@ const handleOpenExplorer = async (path) => {
     }
   } catch (error) {
     ElMessage.error('打开资源管理器失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenInVSCode = async (path) => {
+  try {
+    const result = await OpenInVSCode(path)
+    if (!result) {
+      ElMessage.error('打开 VSCode 失败，请确认已安装 VSCode 并将 code 命令加入 PATH')
+    }
+  } catch (error) {
+    ElMessage.error('打开 VSCode 失败: ' + (error.message || String(error)))
   }
 }
 

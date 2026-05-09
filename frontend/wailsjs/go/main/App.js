@@ -66,6 +66,10 @@ export function OpenInExplorer(arg1) {
   return window['go']['main']['App']['OpenInExplorer'](arg1);
 }
 
+export function OpenInVSCode(arg1) {
+  return window['go']['main']['App']['OpenInVSCode'](arg1);
+}
+
 export function PreviewFile(arg1) {
   return window['go']['main']['App']['PreviewFile'](arg1);
 }
