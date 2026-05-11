@@ -70,6 +70,10 @@ export function OpenInVSCode(arg1) {
   return window['go']['main']['App']['OpenInVSCode'](arg1);
 }
 
+export function OpenWithDefaultApp(arg1) {
+  return window['go']['main']['App']['OpenWithDefaultApp'](arg1);
+}
+
 export function PreviewFile(arg1) {
   return window['go']['main']['App']['PreviewFile'](arg1);
 }

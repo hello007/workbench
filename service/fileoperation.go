@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,6 +117,20 @@ func (s *FileOperationService) OpenInExplorer(path string) error {
 // OpenInVSCode 用 VSCode 打开文件或文件夹
 func (s *FileOperationService) OpenInVSCode(path string) error {
 	cmd := exec.Command("code", path)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
+}
+
+// OpenWithDefaultApp 用系统默认程序打开文件
+func (s *FileOperationService) OpenWithDefaultApp(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("不支持打开文件夹")
+	}
+	cmd := exec.Command("cmd", "/c", "start", "", path)
 	util.HideCommandWindow(cmd)
 	return cmd.Start()
 }

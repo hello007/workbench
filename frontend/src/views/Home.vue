@@ -130,6 +130,7 @@
             <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px;">
               <h3>文件操作</h3>
               <el-button-group>
+                <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
                 <el-button @click="previewFile">预览</el-button>
                 <el-button @click="showRenameDialog">重命名</el-button>
                 <el-button type="danger" @click="deleteFile">删除</el-button>
@@ -356,6 +357,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
           <el-icon><EditPen /></el-icon>用 VSCode 打开
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('openWithDefaultApp')">
+          <el-icon><Open /></el-icon>用默认程序打开
+        </li>
       </template>
     </ul>
   </div>
@@ -377,7 +381,8 @@ import {
   CopyDocument,
   Monitor,
   Refresh,
-  EditPen
+  EditPen,
+  Open
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -391,6 +396,7 @@ import {
   GetCommitHistory,
   OpenInExplorer,
   OpenInVSCode,
+  OpenWithDefaultApp,
   ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
 
@@ -610,6 +616,9 @@ const onMenuCommand = (command) => {
     case 'openInVSCode':
       handleOpenInVSCode(data.path)
       break
+    case 'openWithDefaultApp':
+      handleOpenWithDefaultApp()
+      break
     case 'pullRepos':
       handleBatchPull(data)
       break
@@ -745,6 +754,18 @@ const handleOpenInVSCode = async (path) => {
     }
   } catch (error) {
     ElMessage.error('打开 VSCode 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenWithDefaultApp = async () => {
+  if (!selectedNode.value || selectedNode.value.type !== 'file') return
+  try {
+    const result = await OpenWithDefaultApp(selectedNode.value.path)
+    if (!result) {
+      ElMessage.error('打开文件失败')
+    }
+  } catch (error) {
+    ElMessage.error('打开文件失败: ' + (error.message || String(error)))
   }
 }
 

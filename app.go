@@ -428,3 +428,13 @@ func (a *App) OpenInVSCode(path string) bool {
 	}
 	return true
 }
+
+// OpenWithDefaultApp 用系统默认程序打开文件
+func (a *App) OpenWithDefaultApp(path string) bool {
+	err := a.fileOpSvc.OpenWithDefaultApp(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}

@@ -36,6 +36,8 @@ export function OpenInExplorer(arg1:string):Promise<boolean>;
 
 export function OpenInVSCode(arg1:string):Promise<boolean>;
 
+export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
+
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
 
 export function PullRepo(arg1:string):Promise<string>;
