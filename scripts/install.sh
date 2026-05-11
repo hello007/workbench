@@ -36,4 +36,4 @@ fi
 cp "$SOURCE" "$TARGET"
 echo "安装完成: $TARGET"
 echo "版本信息:"
-"$TARGET" --version 2>/dev/null || true
+"$TARGET" --version 2>/dev/null | cat || true

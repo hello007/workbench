@@ -30,4 +30,4 @@ wails build -ldflags "$LDFLAGS"
 echo ""
 echo "构建完成: build/bin/git-manager.exe"
 echo "版本验证:"
-./build/bin/git-manager.exe --version
+./build/bin/git-manager.exe --version | cat

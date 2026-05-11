@@ -21,7 +21,7 @@ var assets embed.FS
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("git-manager v%s (build %s)\n", version, buildTime)
+		consolePrint(fmt.Sprintf("git-manager v%s (build %s)\n", version, buildTime))
 		os.Exit(0)
 	}
 
