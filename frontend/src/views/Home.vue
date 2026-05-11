@@ -45,6 +45,7 @@
           </div>
           <el-tree
             v-if="selectedDirectoryId"
+            :key="selectedDirectoryId"
             ref="fileTreeRef"
             :props="treeProps"
             node-key="path"
@@ -472,11 +473,7 @@ const loadDirectories = async () => {
 
 const onDirectoryChange = async () => {
   debug.log('Directory changed to:', selectedDirectoryId.value)
-
-  // 强制树组件重新加载根节点
-  if (fileTreeRef.value) {
-    fileTreeRef.value.loadData()
-  }
+  selectedNode.value = null
 }
 
 const refreshNode = (nodePath) => {
