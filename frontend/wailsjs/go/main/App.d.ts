@@ -36,6 +36,8 @@ export function OpenInExplorer(arg1:string):Promise<boolean>;
 
 export function OpenInVSCode(arg1:string):Promise<boolean>;
 
+export function OpenInWarp(arg1:string):Promise<boolean>;
+
 export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
 
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;

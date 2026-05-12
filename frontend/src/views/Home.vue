@@ -333,6 +333,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
           <el-icon><EditPen /></el-icon>用 VSCode 打开
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('openInWarp')">
+          <el-icon><Promotion /></el-icon>用 Warp 打开
+        </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
@@ -357,6 +360,9 @@
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
           <el-icon><EditPen /></el-icon>用 VSCode 打开
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('openInWarp')">
+          <el-icon><Promotion /></el-icon>用 Warp 打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openWithDefaultApp')">
           <el-icon><Open /></el-icon>用默认程序打开
@@ -383,7 +389,8 @@ import {
   Monitor,
   Refresh,
   EditPen,
-  Open
+  Open,
+  Promotion
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -397,6 +404,7 @@ import {
   GetCommitHistory,
   OpenInExplorer,
   OpenInVSCode,
+  OpenInWarp,
   OpenWithDefaultApp,
   ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
@@ -613,6 +621,9 @@ const onMenuCommand = (command) => {
     case 'openInVSCode':
       handleOpenInVSCode(data.path)
       break
+    case 'openInWarp':
+      handleOpenInWarp(data.path)
+      break
     case 'openWithDefaultApp':
       handleOpenWithDefaultApp()
       break
@@ -751,6 +762,17 @@ const handleOpenInVSCode = async (path) => {
     }
   } catch (error) {
     ElMessage.error('打开 VSCode 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenInWarp = async (path) => {
+  try {
+    const result = await OpenInWarp(path)
+    if (!result) {
+      ElMessage.error('打开 Warp 失败，请确认已安装 Warp 终端')
+    }
+  } catch (error) {
+    ElMessage.error('打开 Warp 失败: ' + (error.message || String(error)))
   }
 }
 

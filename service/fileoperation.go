@@ -121,6 +121,14 @@ func (s *FileOperationService) OpenInVSCode(path string) error {
 	return cmd.Start()
 }
 
+// OpenInWarp 用 Warp 终端打开
+func (s *FileOperationService) OpenInWarp(path string) error {
+	url := "file:///" + filepath.ToSlash(path)
+	cmd := exec.Command("warp", url)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
+}
+
 // OpenWithDefaultApp 用系统默认程序打开文件
 func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 	info, err := os.Stat(path)
