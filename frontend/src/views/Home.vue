@@ -602,7 +602,7 @@ const onMenuCommand = (command) => {
       handleDeleteAt(data)
       break
     case 'copyPath':
-      copyToClipboard(data.path, '路径')
+      copyToClipboard(data.path.replaceAll('\\', '/'), '路径')
       break
     case 'copyName':
       copyToClipboard(data.name, '文件名')
