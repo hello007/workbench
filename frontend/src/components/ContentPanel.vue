@@ -36,21 +36,35 @@
 
       <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 20px;">
         <h3>文件夹操作</h3>
-        <el-button-group>
-          <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
-          <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
-          <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
-        </el-button-group>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <el-button-group>
+            <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
+            <el-button @click="$emit('copy', selectedNode)">复制</el-button>
+            <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
+            <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
+            <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
+          </el-button-group>
+        </div>
       </div>
 
       <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px;">
         <h3>文件操作</h3>
-        <el-button-group>
-          <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
-          <el-button @click="previewFile">预览</el-button>
-          <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
-          <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
-        </el-button-group>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <el-button-group>
+            <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
+            <el-button @click="$emit('copy', selectedNode)">复制</el-button>
+            <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
+            <el-button @click="previewFile">预览</el-button>
+            <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
+            <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
+          </el-button-group>
+        </div>
 
         <div v-if="filePreview.content" style="margin-top: 20px;">
           <h4>文件内容</h4>
@@ -160,7 +174,8 @@ const props = defineProps({
   latestCommit: {
     type: Object,
     default: null
-  }
+  },
+  clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
 const emit = defineEmits([
@@ -169,7 +184,10 @@ const emit = defineEmits([
   'createDirectory',
   'createFile',
   'rename',
-  'delete'
+  'delete',
+  'copy',
+  'cut',
+  'paste'
 ])
 
 const gitLoading = ref(false)

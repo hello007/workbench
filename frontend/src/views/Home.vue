@@ -14,8 +14,12 @@
           ref="fileTreePanelRef"
           :directories="directories"
           :selected-dir-id="selectedDirectoryId"
+          :clipboard="clipboard"
           @select="onNodeSelect"
           @batch-pull="onBatchPull"
+          @copy="handleCopy"
+          @cut="handleCut"
+          @paste="handlePaste"
         />
       </el-aside>
       <el-main class="content-main">
@@ -23,12 +27,16 @@
           ref="contentPanelRef"
           :selected-node="selectedNode"
           :latest-commit="latestCommit"
+          :clipboard="clipboard"
           @latest-commit="commit => latestCommit = commit"
           @refresh-node="onRefreshNode"
           @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
           @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
           @rename="onRenameFromContent"
           @delete="onDeleteFromContent"
+          @copy="handleCopy"
+          @cut="handleCut"
+          @paste="handlePaste"
         />
       </el-main>
     </el-container>
@@ -36,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
@@ -45,7 +53,9 @@ import ContentPanel from '../components/ContentPanel.vue'
 import {
   GetDirectories,
   ScanAndPullRepos,
-  DeleteFile
+  DeleteFile,
+  CopyItem,
+  MoveItem
 } from '../../wailsjs/go/main/App'
 
 // ---- 核心状态 ----
@@ -53,6 +63,13 @@ const directories = ref([])
 const selectedDirectoryId = ref('')
 const selectedNode = ref(null)
 const latestCommit = ref(null)
+
+const clipboard = reactive({
+  mode: null,
+  sourcePath: '',
+  sourceName: '',
+  sourceType: ''
+})
 
 // ---- 子组件 ref ----
 const fileTreePanelRef = ref()
@@ -145,7 +162,77 @@ const onDeleteFromContent = async (node) => {
   }
 }
 
+// ---- 剪贴板操作 ----
+const clearClipboard = () => {
+  clipboard.mode = null
+  clipboard.sourcePath = ''
+  clipboard.sourceName = ''
+  clipboard.sourceType = ''
+}
+
+const handleCopy = (data) => {
+  clipboard.mode = 'copy'
+  clipboard.sourcePath = data.path
+  clipboard.sourceName = data.name
+  clipboard.sourceType = data.type
+  ElMessage.success(`${data.path.replaceAll('\\', '/')} 复制成功`)
+}
+
+const handleCut = (data) => {
+  clipboard.mode = 'cut'
+  clipboard.sourcePath = data.path
+  clipboard.sourceName = data.name
+  clipboard.sourceType = data.type
+  ElMessage.success(`${data.path.replaceAll('\\', '/')} 剪切成功`)
+}
+
+const resolveTargetDir = (data) => {
+  if (data.type === 'directory') {
+    return data.path
+  }
+  const lastSep = Math.max(data.path.lastIndexOf('\\'), data.path.lastIndexOf('/'))
+  return lastSep > 0 ? data.path.substring(0, lastSep) : ''
+}
+
+const handlePaste = async (targetData) => {
+  if (!clipboard.mode || !clipboard.sourcePath) return
+
+  const targetDir = resolveTargetDir(targetData)
+  if (!targetDir) return
+
+  try {
+    let result
+    if (clipboard.mode === 'copy') {
+      result = await CopyItem(clipboard.sourcePath, targetDir)
+    } else {
+      result = await MoveItem(clipboard.sourcePath, targetDir)
+    }
+
+    if (result && !result.startsWith('错误')) {
+      ElMessage.success(`粘贴成功：${result.replaceAll('\\', '/')}`)
+      fileTreePanelRef.value?.refreshNode(targetDir)
+
+      if (clipboard.mode === 'cut') {
+        const srcLastSep = Math.max(clipboard.sourcePath.lastIndexOf('\\'), clipboard.sourcePath.lastIndexOf('/'))
+        const srcParent = srcLastSep > 0 ? clipboard.sourcePath.substring(0, srcLastSep) : ''
+        if (srcParent && srcParent !== targetDir) {
+          fileTreePanelRef.value?.refreshNode(srcParent)
+        }
+        clearClipboard()
+      }
+    } else {
+      ElMessage.error(result || '粘贴失败')
+    }
+  } catch (error) {
+    ElMessage.error('粘贴失败: ' + (error.message || String(error)))
+  }
+}
+
 // ---- 生命周期 ----
+watch(() => selectedDirectoryId.value, () => {
+  clearClipboard()
+})
+
 onMounted(() => {
   loadDirectories()
 })

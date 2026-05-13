@@ -10,6 +10,10 @@ export function CloneRepo(arg1, arg2) {
   return window['go']['main']['App']['CloneRepo'](arg1, arg2);
 }
 
+export function CopyItem(arg1, arg2) {
+  return window['go']['main']['App']['CopyItem'](arg1, arg2);
+}
+
 export function CreateDirectory(arg1, arg2) {
   return window['go']['main']['App']['CreateDirectory'](arg1, arg2);
 }
@@ -60,6 +64,10 @@ export function GetGitLog(arg1, arg2, arg3) {
 
 export function GetGitRemoteURL(arg1) {
   return window['go']['main']['App']['GetGitRemoteURL'](arg1);
+}
+
+export function MoveItem(arg1, arg2) {
+  return window['go']['main']['App']['MoveItem'](arg1, arg2);
 }
 
 export function OpenInExplorer(arg1) {

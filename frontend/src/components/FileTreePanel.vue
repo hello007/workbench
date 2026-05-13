@@ -119,6 +119,16 @@
           <el-icon><Delete /></el-icon>删除
         </li>
         <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('cut')">
+          <el-icon><Scissor /></el-icon>剪切
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copy')">
+          <el-icon><CopyDocument /></el-icon>复制
+        </li>
+        <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
+          <el-icon><DocumentCopy /></el-icon>粘贴
+        </li>
+        <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('copyPath')">
           <el-icon><CopyDocument /></el-icon>复制路径
         </li>
@@ -145,6 +155,16 @@
         </li>
         <li class="context-menu-item" @click="onMenuCommand('delete')">
           <el-icon><Delete /></el-icon>删除
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('cut')">
+          <el-icon><Scissor /></el-icon>剪切
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copy')">
+          <el-icon><CopyDocument /></el-icon>复制
+        </li>
+        <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
+          <el-icon><DocumentCopy /></el-icon>粘贴
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('copyPath')">
@@ -187,7 +207,9 @@ import {
   Refresh,
   EditPen,
   Open,
-  Promotion
+  Promotion,
+  Scissor,
+  DocumentCopy
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -204,10 +226,11 @@ import {
 // ---- Props & Emits ----
 const props = defineProps({
   directories: { type: Array, default: () => [] },
-  selectedDirId: { type: String, default: '' }
+  selectedDirId: { type: String, default: '' },
+  clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste'])
 
 // ---- Refs ----
 const fileTreeRef = ref()
@@ -359,6 +382,15 @@ const onMenuCommand = (command) => {
       break
     case 'delete':
       handleDeleteAt(data)
+      break
+    case 'cut':
+      emit('cut', data)
+      break
+    case 'copy':
+      emit('copy', data)
+      break
+    case 'paste':
+      emit('paste', data)
       break
     case 'copyPath':
       copyToClipboard(data.path.replaceAll('\\', '/'), '路径')
@@ -671,5 +703,14 @@ onBeforeUnmount(() => {
   height: 1px;
   background-color: #e4e7ed;
   margin: 4px 0;
+}
+
+.context-menu-item.is-disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+.context-menu-item.is-disabled:hover {
+  background-color: transparent;
+  color: #c0c4cc;
 }
 </style>

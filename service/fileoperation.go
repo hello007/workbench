@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"git-manager/model"
 	"git-manager/util"
@@ -141,4 +142,73 @@ func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 	cmd := exec.Command("cmd", "/c", "start", "", path)
 	util.HideCommandWindow(cmd)
 	return cmd.Start()
+}
+
+// findAvailableName 查找可用路径，冲突时自动追加 (1), (2)...
+func findAvailableName(targetPath string) string {
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		return targetPath
+	}
+
+	ext := filepath.Ext(targetPath)
+	nameWithoutExt := strings.TrimSuffix(filepath.Base(targetPath), ext)
+	dir := filepath.Dir(targetPath)
+
+	for i := 1; i < 1000; i++ {
+		newName := fmt.Sprintf("%s(%d)%s", nameWithoutExt, i, ext)
+		newPath := filepath.Join(dir, newName)
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			return newPath
+		}
+	}
+
+	return targetPath
+}
+
+// CopyItem 复制文件或目录到目标文件夹，同名自动重命名
+func (s *FileOperationService) CopyItem(sourcePath, targetDir string) (string, error) {
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
+	targetPath := filepath.Join(targetDir, filepath.Base(sourcePath))
+	targetPath = findAvailableName(targetPath)
+
+	if info.IsDir() {
+		return targetPath, util.CopyDir(sourcePath, targetPath)
+	}
+	return targetPath, util.CopyFile(sourcePath, targetPath)
+}
+
+// MoveItem 移动文件或目录到目标文件夹，同名自动重命名
+func (s *FileOperationService) MoveItem(sourcePath, targetDir string) (string, error) {
+	sourceDir := filepath.Dir(sourcePath)
+	if sourceDir == targetDir {
+		return "", fmt.Errorf("源路径与目标路径相同")
+	}
+
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
+	targetPath := filepath.Join(targetDir, filepath.Base(sourcePath))
+	targetPath = findAvailableName(targetPath)
+
+	err = os.Rename(sourcePath, targetPath)
+	if err == nil {
+		return targetPath, nil
+	}
+
+	// 跨盘移动降级为复制+删除
+	if info.IsDir() {
+		err = util.CopyDir(sourcePath, targetPath)
+	} else {
+		err = util.CopyFile(sourcePath, targetPath)
+	}
+	if err != nil {
+		return "", err
+	}
+	return targetPath, os.RemoveAll(sourcePath)
 }

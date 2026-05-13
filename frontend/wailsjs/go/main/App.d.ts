@@ -6,6 +6,8 @@ export function AddDirectory(arg1:string,arg2:string,arg3:boolean):Promise<model
 
 export function CloneRepo(arg1:string,arg2:string):Promise<string>;
 
+export function CopyItem(arg1:string,arg2:string):Promise<string>;
+
 export function CreateDirectory(arg1:string,arg2:string):Promise<boolean>;
 
 export function CreateFile(arg1:string,arg2:string,arg3:string):Promise<boolean>;
@@ -31,6 +33,8 @@ export function GetGitInfo(arg1:string):Promise<model.GitRepoInfo>;
 export function GetGitLog(arg1:string,arg2:number,arg3:number):Promise<model.PageResult>;
 
 export function GetGitRemoteURL(arg1:string):Promise<model.GitRemoteInfo>;
+
+export function MoveItem(arg1:string,arg2:string):Promise<string>;
 
 export function OpenInExplorer(arg1:string):Promise<boolean>;
 

@@ -204,3 +204,200 @@ func TestOpenInVSCode_InvalidCommand(t *testing.T) {
 	err := svc.OpenInVSCode("")
 	_ = err
 }
+
+func TestFindAvailableName_NoConflict(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "test.txt")
+	result := findAvailableName(target)
+	if result != target {
+		t.Errorf("Expected %s, got %s", target, result)
+	}
+}
+
+func TestFindAvailableName_FileConflict(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "test.txt")
+	os.WriteFile(target, []byte("x"), 0644)
+
+	result := findAvailableName(target)
+	expected := filepath.Join(dir, "test(1).txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func TestFindAvailableName_MultipleConflicts(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "test.txt")
+	os.WriteFile(target, []byte("x"), 0644)
+	os.WriteFile(filepath.Join(dir, "test(1).txt"), []byte("x"), 0644)
+
+	result := findAvailableName(target)
+	expected := filepath.Join(dir, "test(2).txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func TestFindAvailableName_DirectoryConflict(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "folder")
+	os.MkdirAll(target, 0755)
+
+	result := findAvailableName(target)
+	expected := filepath.Join(dir, "folder(1)")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func TestCopyItem_File(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyItem(src, targetDir)
+	if err != nil {
+		t.Fatalf("CopyItem failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "test.txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, err := os.ReadFile(expected)
+	if err != nil {
+		t.Fatalf("Copied file not found: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("Expected 'hello', got '%s'", string(data))
+	}
+}
+
+func TestCopyItem_FileConflictAutoRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("original"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+	os.WriteFile(filepath.Join(targetDir, "test.txt"), []byte("existing"), 0644)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyItem(src, targetDir)
+	if err != nil {
+		t.Fatalf("CopyItem failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "test(1).txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, _ := os.ReadFile(expected)
+	if string(data) != "original" {
+		t.Errorf("Expected 'original', got '%s'", string(data))
+	}
+}
+
+func TestCopyItem_Directory(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(filepath.Join(srcDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "sub", "nested.txt"), []byte("nested"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyItem(srcDir, targetDir)
+	if err != nil {
+		t.Fatalf("CopyItem directory failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "srcdir")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(expected, "sub", "nested.txt"))
+	if string(data) != "nested" {
+		t.Errorf("Expected 'nested', got '%s'", string(data))
+	}
+}
+
+func TestCopyItem_SourceNotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+
+	_, err := svc.CopyItem(filepath.Join(dir, "nonexistent"), dir)
+	if err == nil {
+		t.Fatal("Expected error for nonexistent source")
+	}
+}
+
+func TestMoveItem_File(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	os.MkdirAll(srcDir, 0755)
+	src := filepath.Join(srcDir, "test.txt")
+	os.WriteFile(src, []byte("move me"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.MoveItem(src, targetDir)
+	if err != nil {
+		t.Fatalf("MoveItem failed: %v", err)
+	}
+
+	if _, err := os.Stat(src); err == nil {
+		t.Error("Source file still exists after move")
+	}
+
+	data, _ := os.ReadFile(result)
+	if string(data) != "move me" {
+		t.Errorf("Expected 'move me', got '%s'", string(data))
+	}
+}
+
+func TestMoveItem_SameDirectory(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("x"), 0644)
+
+	svc := NewFileOperationService()
+	_, err := svc.MoveItem(src, dir)
+	if err == nil {
+		t.Fatal("Expected error when source and target are same directory")
+	}
+}
+
+func TestMoveItem_FileConflictAutoRename(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	os.MkdirAll(srcDir, 0755)
+	os.WriteFile(filepath.Join(srcDir, "test.txt"), []byte("moving"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+	os.WriteFile(filepath.Join(targetDir, "test.txt"), []byte("existing"), 0644)
+
+	svc := NewFileOperationService()
+	result, err := svc.MoveItem(filepath.Join(srcDir, "test.txt"), targetDir)
+	if err != nil {
+		t.Fatalf("MoveItem failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "test(1).txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}

@@ -448,3 +448,21 @@ func (a *App) OpenWithDefaultApp(path string) bool {
 	}
 	return true
 }
+
+// CopyItem 复制文件或文件夹
+func (a *App) CopyItem(sourcePath, targetDir string) string {
+	result, err := a.fileOpSvc.CopyItem(sourcePath, targetDir)
+	if err != nil {
+		return "错误: " + err.Error()
+	}
+	return result
+}
+
+// MoveItem 移动文件或文件夹
+func (a *App) MoveItem(sourcePath, targetDir string) string {
+	result, err := a.fileOpSvc.MoveItem(sourcePath, targetDir)
+	if err != nil {
+		return "错误: " + err.Error()
+	}
+	return result
+}
