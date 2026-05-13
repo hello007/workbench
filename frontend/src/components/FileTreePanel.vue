@@ -2,12 +2,13 @@
   <div class="file-tree-aside">
     <div class="tree-toolbar">
       <el-button-group>
+        <el-button size="small" @click="refreshAll">刷新</el-button>
         <el-button size="small" @click="collapseAll">全部收起</el-button>
       </el-button-group>
     </div>
     <el-tree
       v-if="selectedDirId"
-      :key="selectedDirId"
+      :key="treeKey"
       ref="fileTreeRef"
       :props="treeProps"
       node-key="path"
@@ -131,6 +132,9 @@
           <el-icon><Promotion /></el-icon>用 Warp 打开
         </li>
         <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('refresh')">
+          <el-icon><Refresh /></el-icon>刷新
+        </li>
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
         </li>
@@ -207,6 +211,8 @@ const emit = defineEmits(['select', 'batchPull'])
 
 // ---- Refs ----
 const fileTreeRef = ref()
+const refreshCounter = ref(0)
+const treeKey = computed(() => `${props.selectedDirId}_${refreshCounter.value}`)
 
 const treeProps = {
   label: 'name',
@@ -293,6 +299,12 @@ const refreshNode = (nodePath) => {
   }
 }
 
+// ---- 全部刷新 ----
+const refreshAll = () => {
+  refreshCounter.value++
+  ElMessage.success('文件树已刷新')
+}
+
 // ---- 全部收起 ----
 const collapseAll = () => {
   if (fileTreeRef.value) {
@@ -365,6 +377,9 @@ const onMenuCommand = (command) => {
       break
     case 'openWithDefaultApp':
       handleOpenWithDefaultApp(data.path)
+      break
+    case 'refresh':
+      refreshNode(data.path)
       break
     case 'pullRepos':
       handleBatchPull(data)
