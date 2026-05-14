@@ -44,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
@@ -55,7 +55,10 @@ import {
   ScanAndPullRepos,
   DeleteFile,
   CopyItem,
-  MoveItem
+  MoveItem,
+  CopyToSystemClipboard,
+  CutToSystemClipboard,
+  ReadFromSystemClipboard
 } from '../../wailsjs/go/main/App'
 
 // ---- 核心状态 ----
@@ -162,6 +165,23 @@ const onDeleteFromContent = async (node) => {
   }
 }
 
+// ---- 键盘快捷键 ----
+const handleGlobalKeydown = (e) => {
+  if (!selectedNode.value) return
+  if (!(e.ctrlKey || e.metaKey)) return
+
+  if (e.key === 'c') {
+    e.preventDefault()
+    handleCopy(selectedNode.value)
+  } else if (e.key === 'x') {
+    e.preventDefault()
+    handleCut(selectedNode.value)
+  } else if (e.key === 'v') {
+    e.preventDefault()
+    handlePaste(selectedNode.value)
+  }
+}
+
 // ---- 剪贴板操作 ----
 const clearClipboard = () => {
   clipboard.mode = null
@@ -170,20 +190,22 @@ const clearClipboard = () => {
   clipboard.sourceType = ''
 }
 
-const handleCopy = (data) => {
+const handleCopy = async (data) => {
   clipboard.mode = 'copy'
   clipboard.sourcePath = data.path
   clipboard.sourceName = data.name
   clipboard.sourceType = data.type
   ElMessage.success(`${data.path.replaceAll('\\', '/')} 复制成功`)
+  CopyToSystemClipboard(data.path).catch(() => {})
 }
 
-const handleCut = (data) => {
+const handleCut = async (data) => {
   clipboard.mode = 'cut'
   clipboard.sourcePath = data.path
   clipboard.sourceName = data.name
   clipboard.sourceType = data.type
   ElMessage.success(`${data.path.replaceAll('\\', '/')} 剪切成功`)
+  CutToSystemClipboard(data.path).catch(() => {})
 }
 
 const resolveTargetDir = (data) => {
@@ -195,36 +217,70 @@ const resolveTargetDir = (data) => {
 }
 
 const handlePaste = async (targetData) => {
-  if (!clipboard.mode || !clipboard.sourcePath) return
-
   const targetDir = resolveTargetDir(targetData)
   if (!targetDir) return
 
   try {
-    let result
-    if (clipboard.mode === 'copy') {
-      result = await CopyItem(clipboard.sourcePath, targetDir)
-    } else {
-      result = await MoveItem(clipboard.sourcePath, targetDir)
+    const result = await ReadFromSystemClipboard()
+    if (!result) {
+      ElMessage.info('剪贴板中没有可粘贴的内容')
+      return
     }
 
-    if (result && !result.startsWith('错误')) {
-      ElMessage.success(`粘贴成功：${result.replaceAll('\\', '/')}`)
-      fileTreePanelRef.value?.refreshNode(targetDir)
+    const clipData = JSON.parse(result)
+    const paths = clipData.paths || []
+    const isCut = clipData.isCut || false
 
-      if (clipboard.mode === 'cut') {
-        const srcLastSep = Math.max(clipboard.sourcePath.lastIndexOf('\\'), clipboard.sourcePath.lastIndexOf('/'))
-        const srcParent = srcLastSep > 0 ? clipboard.sourcePath.substring(0, srcLastSep) : ''
-        if (srcParent && srcParent !== targetDir) {
-          fileTreePanelRef.value?.refreshNode(srcParent)
-        }
-        clearClipboard()
+    if (paths.length === 0) {
+      ElMessage.info('剪贴板中没有可粘贴的内容')
+      return
+    }
+
+    let successCount = 0
+    for (const srcPath of paths) {
+      let res
+      if (isCut) {
+        res = await MoveItem(srcPath, targetDir)
+      } else {
+        res = await CopyItem(srcPath, targetDir)
       }
+      if (res && !res.startsWith('错误')) {
+        successCount++
+      }
+    }
+
+    if (successCount > 0) {
+      ElMessage.success(`粘贴成功：${successCount} 个项目`)
+      fileTreePanelRef.value?.refreshNode(targetDir)
+      if (isCut) clearClipboard()
     } else {
-      ElMessage.error(result || '粘贴失败')
+      ElMessage.error('粘贴失败')
     }
   } catch (error) {
     ElMessage.error('粘贴失败: ' + (error.message || String(error)))
+  }
+}
+
+// 窗口获得焦点时，从系统剪贴板同步内部状态
+const handleWindowFocus = async () => {
+  try {
+    const result = await ReadFromSystemClipboard()
+    if (!result) {
+      clearClipboard()
+      return
+    }
+    const clipData = JSON.parse(result)
+    const paths = clipData.paths || []
+    if (paths.length === 0) {
+      clearClipboard()
+      return
+    }
+    clipboard.mode = clipData.isCut ? 'cut' : 'copy'
+    clipboard.sourcePath = paths[0]
+    clipboard.sourceName = paths[0].split(/[\\/]/).pop()
+    clipboard.sourceType = ''
+  } catch {
+    clearClipboard()
   }
 }
 
@@ -235,6 +291,13 @@ watch(() => selectedDirectoryId.value, () => {
 
 onMounted(() => {
   loadDirectories()
+  document.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('focus', handleWindowFocus)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('focus', handleWindowFocus)
 })
 </script>
 

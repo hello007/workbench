@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -465,4 +466,41 @@ func (a *App) MoveItem(sourcePath, targetDir string) string {
 		return "错误: " + err.Error()
 	}
 	return result
+}
+
+// CopyToSystemClipboard 写入系统剪贴板（复制模式）
+func (a *App) CopyToSystemClipboard(path string) string {
+	err := a.fileOpSvc.CopyToSystemClipboard([]string{path})
+	if err != nil {
+		println("Error:", err.Error())
+		return "错误: " + err.Error()
+	}
+	return ""
+}
+
+// CutToSystemClipboard 写入系统剪贴板（剪切模式）
+func (a *App) CutToSystemClipboard(path string) string {
+	err := a.fileOpSvc.CutToSystemClipboard([]string{path})
+	if err != nil {
+		println("Error:", err.Error())
+		return "错误: " + err.Error()
+	}
+	return ""
+}
+
+// ReadFromSystemClipboard 读取系统剪贴板文件列表
+func (a *App) ReadFromSystemClipboard() string {
+	paths, isCut, err := a.fileOpSvc.ReadFromSystemClipboard()
+	if err != nil {
+		println("Error:", err.Error())
+		return ""
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(map[string]interface{}{
+		"paths": paths,
+		"isCut": isCut,
+	})
+	return string(data)
 }
