@@ -47,7 +47,7 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 	for _, entry := range entries {
 		name := entry.Name()
 
-		if name == ".git" || strings.HasPrefix(name, ".") {
+		if name == ".git" {
 			continue
 		}
 

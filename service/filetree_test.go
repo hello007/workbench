@@ -58,11 +58,12 @@ func TestGetChildren_DirectoriesFirst(t *testing.T) {
 	}
 }
 
-func TestGetChildren_HiddenFilesSkipped(t *testing.T) {
+func TestGetChildren_OnlyGitSkipped(t *testing.T) {
 	dir := t.TempDir()
 
 	os.Mkdir(filepath.Join(dir, ".hidden"), 0755)
 	os.WriteFile(filepath.Join(dir, ".dotfile"), []byte{}, 0644)
+	os.Mkdir(filepath.Join(dir, ".git"), 0755)
 	os.Mkdir(filepath.Join(dir, "visible"), 0755)
 
 	svc := NewFileTreeService()
@@ -71,10 +72,19 @@ func TestGetChildren_HiddenFilesSkipped(t *testing.T) {
 		t.Fatalf("GetChildren failed: %v", err)
 	}
 
+	found := make(map[string]bool)
 	for _, n := range nodes {
-		if n.Name == ".hidden" || n.Name == ".dotfile" {
-			t.Errorf("hidden entry should be skipped: %s", n.Name)
-		}
+		found[n.Name] = true
+	}
+
+	if !found[".hidden"] {
+		t.Error(".hidden folder should be visible")
+	}
+	if !found[".dotfile"] {
+		t.Error(".dotfile should be visible")
+	}
+	if found[".git"] {
+		t.Error(".git should be skipped")
 	}
 }
 
