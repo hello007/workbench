@@ -36,10 +36,5 @@ data/*.json
 
 node_modules
 
-# BMAD framework
-.claude/skills/bmad-*
-_bmad/
-_bmad-output/
-
 # Worktree directory
 .worktrees/
