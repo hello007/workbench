@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestGetAppVersion(t *testing.T) {
+	app := NewApp()
+	v := app.GetAppVersion()
+	if v == "" {
+		t.Error("GetAppVersion should return non-empty string")
+	}
+	t.Logf("App version: %s", v)
+}
+
 func TestGetGitRemoteURL_ValidRepo(t *testing.T) {
 	// Create temporary test repository
 	tempDir := t.TempDir()

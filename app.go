@@ -42,6 +42,11 @@ func (a *App) shutdown(context.Context) {
 	println("Git Manager shutting down...")
 }
 
+// GetAppVersion 获取应用版本号
+func (a *App) GetAppVersion() string {
+	return version
+}
+
 // GetDirectories 获取所有工作目录
 func (a *App) GetDirectories() []*model.Directory {
 	directories, err := a.directorySvc.Load()

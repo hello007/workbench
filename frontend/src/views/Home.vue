@@ -5,6 +5,7 @@
         <DirectoryTree
           :directories="directories"
           :selected-id="selectedDirectoryId"
+          :version="appVersion"
           @select="onDirectorySelect"
           @change="loadDirectories"
         />
@@ -52,6 +53,7 @@ import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
 import {
   GetDirectories,
+  GetAppVersion,
   ScanAndPullRepos,
   DeleteFile,
   CopyItem,
@@ -66,6 +68,7 @@ const directories = ref([])
 const selectedDirectoryId = ref('')
 const selectedNode = ref(null)
 const latestCommit = ref(null)
+const appVersion = ref('')
 
 const clipboard = reactive({
   mode: null,
@@ -291,6 +294,7 @@ watch(() => selectedDirectoryId.value, () => {
 
 onMounted(() => {
   loadDirectories()
+  GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('focus', handleWindowFocus)
 })

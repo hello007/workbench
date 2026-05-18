@@ -47,7 +47,7 @@ development_status:
   1-1-three-column-layout-framework: done
   1-2-directory-add-remove: done
   1-3-default-directory-persistence: done
-  1-4-version-display-offline-support: backlog
+  1-4-version-display-offline-support: done
   epic-1-retrospective: optional
 
   # Epic 2: 文件树浏览

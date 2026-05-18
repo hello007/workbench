@@ -296,4 +296,17 @@ describe('DirectoryTree.vue', () => {
       expect(ElMessage.error).toHaveBeenCalledWith('设置失败: 网络错误')
     })
   })
+
+  describe('版本号显示', () => {
+    it('传入 version 时应该显示版本号', () => {
+      wrapper = createWrapper({ version: '1.0.0' })
+      expect(wrapper.find('.dir-version').exists()).toBe(true)
+      expect(wrapper.find('.dir-version').text()).toBe('v1.0.0')
+    })
+
+    it('未传入 version 时不显示版本号', () => {
+      wrapper = createWrapper({ version: '' })
+      expect(wrapper.find('.dir-version').exists()).toBe(false)
+    })
+  })
 })
