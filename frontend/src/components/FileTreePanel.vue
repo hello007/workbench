@@ -324,15 +324,16 @@ const copyToWholeDir = ref(true)
 const copyToLoading = ref(false)
 
 const copyToPreview = computed(() => {
-  const src = copyToSourcePath.value.trim()
-  const dst = copyToTargetPath.value.trim()
+  const src = copyToSourcePath.value.trim().replaceAll('\\', '/')
+  const dst = copyToTargetPath.value.trim().replaceAll('\\', '/')
   if (!src || !dst) return null
 
-  const srcName = src.split(/[\\/]/).pop() || ''
+  const srcName = src.split('/').pop() || ''
+  const normalizedDst = dst.replace(/\/+$/, '')
   if (copyToWholeDir.value) {
-    return { from: src, to: dst + '/' + srcName }
+    return { from: src, to: normalizedDst + '/' + srcName }
   }
-  return { from: src + '/*', to: dst + '/*' }
+  return { from: src + '/*', to: normalizedDst + '/*' }
 })
 
 // ---- 懒加载 ----
