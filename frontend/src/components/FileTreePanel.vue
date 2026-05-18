@@ -129,6 +129,12 @@
           </el-checkbox>
         </el-form-item>
       </el-form>
+      <div v-if="copyToPreview" class="copy-to-preview">
+        <div class="copy-to-preview-label">拷贝效果预览</div>
+        <div class="copy-to-preview-row">{{ copyToPreview.from }}</div>
+        <div class="copy-to-preview-arrow">↓</div>
+        <div class="copy-to-preview-row">{{ copyToPreview.to }}</div>
+      </div>
       <template #footer>
         <el-button @click="copyToDialogVisible = false" :disabled="copyToLoading">取消</el-button>
         <el-button type="primary" @click="handleCopyTo" :loading="copyToLoading">确定</el-button>
@@ -316,6 +322,18 @@ const copyToSourcePath = ref('')
 const copyToTargetPath = ref('')
 const copyToWholeDir = ref(true)
 const copyToLoading = ref(false)
+
+const copyToPreview = computed(() => {
+  const src = copyToSourcePath.value.trim()
+  const dst = copyToTargetPath.value.trim()
+  if (!src || !dst) return null
+
+  const srcName = src.split(/[\\/]/).pop() || ''
+  if (copyToWholeDir.value) {
+    return { from: src, to: dst + '/' + srcName }
+  }
+  return { from: src + '/*', to: dst + '/*' }
+})
 
 // ---- 懒加载 ----
 const loadTreeNode = async (node, resolve) => {
@@ -826,5 +844,32 @@ onBeforeUnmount(() => {
 .context-menu-item.is-disabled:hover {
   background-color: transparent;
   color: #c0c4cc;
+}
+
+.copy-to-preview {
+  margin: 0 0 16px;
+  padding: 12px;
+  background-color: #F5F7FA;
+  border: 1px solid #E4E7ED;
+  border-radius: 4px;
+}
+.copy-to-preview-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+.copy-to-preview-row {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  color: #303133;
+  word-break: break-all;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.copy-to-preview-arrow {
+  text-align: center;
+  color: #409EFF;
+  font-size: 16px;
+  margin: 4px 0;
 }
 </style>
