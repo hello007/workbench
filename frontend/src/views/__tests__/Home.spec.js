@@ -207,6 +207,106 @@ describe('Home.vue - Bug修复验证', () => {
     })
   })
 
+  describe('三栏布局验证（AC1）', () => {
+    let layoutWrapper
+
+    beforeEach(() => {
+      layoutWrapper = mount(Home, {
+        global: {
+          stubs: {
+            'el-container': { template: '<div class="el-container"><slot /></div>' },
+            'el-aside': { template: '<aside v-bind="$attrs"><slot /></aside>' },
+            'el-main': { template: '<main class="el-main"><slot /></main>' },
+            'el-header': true,
+            'el-tree': true,
+            'el-dialog': true,
+            'el-form': true,
+            'el-form-item': true,
+            'el-input': true,
+            'el-switch': true,
+            'el-button': true,
+            'el-button-group': true,
+            'el-divider': true,
+            'el-select': true,
+            'el-option': true,
+            'el-empty': true,
+            'el-descriptions': true,
+            'el-descriptions-item': true,
+            'el-icon': true,
+            'el-progress': true,
+            'el-table': true,
+            'el-table-column': true,
+            'DirectoryTree': { template: '<div class="stub-directory-tree" />' },
+            'FileTreePanel': { template: '<div class="stub-file-tree-panel" />' },
+            'ContentPanel': { template: '<div class="stub-content-panel" />' }
+          }
+        }
+      })
+    })
+
+    afterEach(() => {
+      if (layoutWrapper) {
+        layoutWrapper.unmount()
+        layoutWrapper = null
+      }
+    })
+
+    it('应该渲染三个面板组件', () => {
+      expect(layoutWrapper.find('.stub-directory-tree').exists()).toBe(true)
+      expect(layoutWrapper.find('.stub-file-tree-panel').exists()).toBe(true)
+      expect(layoutWrapper.find('.stub-content-panel').exists()).toBe(true)
+    })
+
+    it('第一栏应该有 directory-aside 类且 width 为 200px', () => {
+      const aside = layoutWrapper.find('.directory-aside')
+      expect(aside.exists()).toBe(true)
+      expect(aside.attributes('width')).toBe('200px')
+    })
+
+    it('第二栏应该有 file-tree-aside 类且 width 为 280px', () => {
+      const aside = layoutWrapper.find('.file-tree-aside')
+      expect(aside.exists()).toBe(true)
+      expect(aside.attributes('width')).toBe('280px')
+    })
+
+    it('第三栏应该有 content-main 类', () => {
+      const main = layoutWrapper.find('.content-main')
+      expect(main.exists()).toBe(true)
+    })
+
+    it('应该包含 el-container 作为布局容器', () => {
+      const container = layoutWrapper.find('.el-container')
+      expect(container.exists()).toBe(true)
+    })
+
+    it('三栏应按左-中-右顺序排列在容器内', () => {
+      const container = layoutWrapper.find('.el-container')
+      const children = container.findAll(':scope > aside, :scope > main')
+      const classes = children.map(el => {
+        if (el.classes().includes('directory-aside')) return 'directory'
+        if (el.classes().includes('file-tree-aside')) return 'file-tree'
+        if (el.classes().includes('content-main')) return 'content'
+        return 'unknown'
+      })
+      expect(classes).toEqual(['directory', 'file-tree', 'content'])
+    })
+
+    it('DirectoryTree 应嵌套在 directory-aside 内', () => {
+      const aside = layoutWrapper.find('.directory-aside')
+      expect(aside.find('.stub-directory-tree').exists()).toBe(true)
+    })
+
+    it('FileTreePanel 应嵌套在 file-tree-aside 内', () => {
+      const aside = layoutWrapper.find('.file-tree-aside')
+      expect(aside.find('.stub-file-tree-panel').exists()).toBe(true)
+    })
+
+    it('ContentPanel 应嵌套在 content-main 内', () => {
+      const main = layoutWrapper.find('.content-main')
+      expect(main.find('.stub-content-panel').exists()).toBe(true)
+    })
+  })
+
   describe('左侧文件树滚动条', () => {
     let slotWrapper
 
