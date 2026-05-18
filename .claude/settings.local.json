@@ -31,7 +31,8 @@
       "Bash(wails generate *)",
       "Bash(node test-bindings.js)",
       "Bash(npm list *)",
-      "Bash(openspec --version)"
+      "Bash(openspec --version)",
+      "Bash(python *)"
     ]
   }
 }

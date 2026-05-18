@@ -3,6 +3,7 @@
     <div class="tree-toolbar">
       <el-button-group>
         <el-button size="small" @click="refreshAll">刷新</el-button>
+        <el-button size="small" @click="expandAll" :loading="expanding">全部展开</el-button>
         <el-button size="small" @click="collapseAll">全部收起</el-button>
       </el-button-group>
     </div>
@@ -328,6 +329,36 @@ const refreshAll = () => {
   ElMessage.success('文件树已刷新')
 }
 
+// ---- 全部展开 ----
+const expanding = ref(false)
+
+const expandAll = async () => {
+  if (!fileTreeRef.value) return
+
+  expanding.value = true
+  try {
+    const expandNode = (node) => {
+      return new Promise(resolve => {
+        if (node.isLeaf) {
+          resolve()
+          return
+        }
+        node.expand(() => {
+          Promise.all(node.childNodes.map(child => expandNode(child))).then(resolve)
+        })
+      })
+    }
+
+    const root = fileTreeRef.value.store.root
+    await Promise.all(root.childNodes.map(child => expandNode(child)))
+    ElMessage.success('已全部展开')
+  } catch (error) {
+    ElMessage.error('展开失败: ' + (error.message || String(error)))
+  } finally {
+    expanding.value = false
+  }
+}
+
 // ---- 全部收起 ----
 const collapseAll = () => {
   if (fileTreeRef.value) {
@@ -596,6 +627,7 @@ const handleBatchPull = (data) => {
 // ---- 暴露方法 ----
 defineExpose({
   refreshNode,
+  expandAll,
   collapseAll,
   showRenameAt,
   showCreateAt
