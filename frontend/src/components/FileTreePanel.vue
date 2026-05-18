@@ -125,7 +125,7 @@
             v-model="copyToWholeDir"
             :disabled="copyToLoading"
           >
-            对原地址目录整体操作
+            包含文件夹本身
           </el-checkbox>
         </el-form-item>
       </el-form>
