@@ -559,6 +559,46 @@ func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
 
+func TestCopyTo_SourceIsParentOfTarget(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "parent")
+	os.MkdirAll(srcDir, 0755)
+	targetDir := filepath.Join(srcDir, "child")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, targetDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source is parent of target")
+	}
+}
+
+func TestCopyTo_SourceIsAncestorOfTarget(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "grandparent")
+	os.MkdirAll(filepath.Join(srcDir, "middle", "leaf"), 0755)
+	targetDir := filepath.Join(srcDir, "middle", "leaf")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, targetDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source is ancestor of target")
+	}
+}
+
+func TestCopyTo_SamePath(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "same")
+	os.MkdirAll(srcDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, srcDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source and target are the same")
+	}
+}
+
 func containsHelper(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

@@ -221,6 +221,16 @@ func (s *FileOperationService) CopyTo(sourcePath, targetPath string, copyWholeDi
 		return "", fmt.Errorf("原地址不存在: %s", sourcePath)
 	}
 
+	// 防止将父目录拷贝到子目录导致无限递归
+	cleanSource := filepath.Clean(sourcePath)
+	cleanTarget := filepath.Clean(targetPath)
+	if cleanSource == cleanTarget {
+		return "", fmt.Errorf("原地址与目标地址相同")
+	}
+	if strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanSource)+string(os.PathSeparator)) {
+		return "", fmt.Errorf("不能将父目录拷贝到其子目录中")
+	}
+
 	// 校验目标路径
 	targetInfo, err := os.Stat(targetPath)
 	if err == nil && !targetInfo.IsDir() {
