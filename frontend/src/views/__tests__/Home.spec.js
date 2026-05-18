@@ -363,4 +363,79 @@ describe('Home.vue - Bug修复验证', () => {
       expect(innerContainer.length).toBe(1)
     })
   })
+
+  describe('loadDirectories 默认选中逻辑', () => {
+    const dirStubs = {
+      'el-container': { template: '<div><slot /></div>' },
+      'el-header': true,
+      'el-aside': { template: '<aside v-bind="$attrs"><slot /></aside>' },
+      'el-main': { template: '<main><slot /></main>' },
+      'el-tree': true,
+      'el-dialog': true,
+      'el-form': true,
+      'el-form-item': true,
+      'el-input': true,
+      'el-switch': true,
+      'el-button': true,
+      'el-button-group': true,
+      'el-divider': true,
+      'el-select': true,
+      'el-option': true,
+      'el-empty': true,
+      'el-descriptions': true,
+      'el-descriptions-item': true,
+      'el-icon': true,
+      'el-progress': true,
+      'el-table': true,
+      'el-table-column': true
+    }
+
+    let GetDirectoriesMock
+
+    beforeEach(async () => {
+      const appModule = await vi.importMock('../../../wailsjs/go/main/App')
+      GetDirectoriesMock = appModule.GetDirectories
+    })
+
+    afterEach(() => {
+      GetDirectoriesMock.mockClear()
+    })
+
+    it('应该自动选中默认目录', async () => {
+      GetDirectoriesMock.mockResolvedValueOnce([
+        { id: 'dir-1', name: '项目A', path: '/a', isDefault: false },
+        { id: 'dir-2', name: '项目B', path: '/b', isDefault: true },
+        { id: 'dir-3', name: '项目C', path: '/c', isDefault: false }
+      ])
+
+      const w = mount(Home, { global: { stubs: dirStubs } })
+      await flushPromises()
+
+      expect(GetDirectoriesMock).toHaveBeenCalled()
+      expect(w.vm.selectedDirectoryId).toBe('dir-2')
+      w.unmount()
+    })
+
+    it('无默认目录时应该选中第一个', async () => {
+      GetDirectoriesMock.mockResolvedValueOnce([
+        { id: 'dir-1', name: '项目A', path: '/a', isDefault: false },
+        { id: 'dir-2', name: '项目B', path: '/b', isDefault: false }
+      ])
+
+      const w = mount(Home, { global: { stubs: dirStubs } })
+      await flushPromises()
+
+      expect(w.vm.selectedDirectoryId).toBe('dir-1')
+      w.unmount()
+    })
+
+    it('空列表不应报错', async () => {
+      const w = mount(Home, { global: { stubs: dirStubs } })
+      await flushPromises()
+
+      expect(w.vm.selectedDirectoryId).toBe('')
+      expect(w.vm.directories).toEqual([])
+      w.unmount()
+    })
+  })
 })

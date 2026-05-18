@@ -32,7 +32,11 @@
       "Bash(node test-bindings.js)",
       "Bash(npm list *)",
       "Bash(openspec --version)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(ls -d .worktrees)",
+      "Bash(ls -d worktrees)",
+      "Bash(git check-ignore *)",
+      "Bash(git worktree *)"
     ]
   }
 }

@@ -55,7 +55,10 @@ func (s *DirectoryService) Create(name, path string, isDefault bool) (*model.Dir
 		return nil, err
 	}
 
-	directories, _ := s.Load()
+	directories, err := s.Load()
+	if err != nil {
+		return nil, fmt.Errorf("加载配置失败: %w", err)
+	}
 	for _, dir := range directories {
 		if dir.Path == absPath {
 			return nil, fmt.Errorf("该目录已添加")
