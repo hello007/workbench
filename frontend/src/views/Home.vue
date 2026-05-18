@@ -173,6 +173,9 @@ const handleGlobalKeydown = (e) => {
   if (!selectedNode.value) return
   if (!(e.ctrlKey || e.metaKey)) return
 
+  const tag = e.target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
   if (e.key === 'c') {
     e.preventDefault()
     handleCopy(selectedNode.value)
