@@ -15,5 +15,6 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   RenameFile: vi.fn(() => Promise.resolve(true)),
   DeleteFile: vi.fn(() => Promise.resolve(true)),
   PreviewFile: vi.fn(() => Promise.resolve({ content: '', error: '' })),
-  PullRepo: vi.fn(() => Promise.resolve('Success'))
+  PullRepo: vi.fn(() => Promise.resolve('Success')),
+  CopyTo: vi.fn(() => Promise.resolve(''))
 }))

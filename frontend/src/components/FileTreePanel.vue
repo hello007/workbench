@@ -98,6 +98,43 @@
       </template>
     </el-dialog>
 
+    <!-- 拷贝到对话框 -->
+    <el-dialog
+      v-model="copyToDialogVisible"
+      title="拷贝到"
+      width="480px"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="原地址">
+          <el-input
+            v-model="copyToSourcePath"
+            placeholder="请输入原文件或文件夹路径"
+            :disabled="copyToLoading"
+          />
+        </el-form-item>
+        <el-form-item label="目标地址">
+          <el-input
+            v-model="copyToTargetPath"
+            placeholder="请输入目标文件夹路径"
+            :disabled="copyToLoading"
+            @keyup.enter="handleCopyTo"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox
+            v-model="copyToWholeDir"
+            :disabled="copyToLoading"
+          >
+            对原地址目录整体操作
+          </el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="copyToDialogVisible = false" :disabled="copyToLoading">取消</el-button>
+        <el-button type="primary" @click="handleCopyTo" :loading="copyToLoading">确定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 自定义右键菜单 -->
     <ul
       v-if="contextMenu.visible"
@@ -128,6 +165,9 @@
         </li>
         <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copyTo')">
+          <el-icon><FolderAdd /></el-icon>拷贝到...
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('copyPath')">
@@ -166,6 +206,9 @@
         </li>
         <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copyTo')">
+          <el-icon><FolderAdd /></el-icon>拷贝到...
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('copyPath')">
@@ -231,7 +274,7 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo'])
 
 // ---- Refs ----
 const fileTreeRef = ref()
@@ -266,6 +309,13 @@ const renameName = ref('')
 const renameLoading = ref(false)
 const renameInputRef = ref()
 const renameNode = ref(null)
+
+// ---- 拷贝到对话框状态 ----
+const copyToDialogVisible = ref(false)
+const copyToSourcePath = ref('')
+const copyToTargetPath = ref('')
+const copyToWholeDir = ref(true)
+const copyToLoading = ref(false)
 
 // ---- 懒加载 ----
 const loadTreeNode = async (node, resolve) => {
@@ -423,6 +473,9 @@ const onMenuCommand = (command) => {
     case 'paste':
       emit('paste', data)
       break
+    case 'copyTo':
+      showCopyToDialog(data)
+      break
     case 'copyPath':
       copyToClipboard(data.path.replaceAll('\\', '/'), '路径')
       break
@@ -564,6 +617,32 @@ const handleDeleteAt = async (data) => {
   }
 }
 
+// ---- 拷贝到对话框 ----
+const showCopyToDialog = (data) => {
+  copyToSourcePath.value = data.path.replaceAll('\\', '/')
+  copyToTargetPath.value = ''
+  copyToWholeDir.value = data.type === 'directory'
+  copyToLoading.value = false
+  copyToDialogVisible.value = true
+}
+
+const handleCopyTo = () => {
+  if (!copyToSourcePath.value.trim()) {
+    ElMessage.warning('请输入原地址')
+    return
+  }
+  if (!copyToTargetPath.value.trim()) {
+    ElMessage.warning('请输入目标地址')
+    return
+  }
+
+  emit('copyTo', {
+    sourcePath: copyToSourcePath.value,
+    targetPath: copyToTargetPath.value,
+    copyWholeDir: copyToWholeDir.value
+  })
+}
+
 // ---- 复制到剪贴板 ----
 const copyToClipboard = async (text, label) => {
   try {
@@ -630,7 +709,10 @@ defineExpose({
   expandAll,
   collapseAll,
   showRenameAt,
-  showCreateAt
+  showCreateAt,
+  showCopyToDialog,
+  setCopyToLoading: (val) => { copyToLoading.value = val },
+  closeCopyToDialog: () => { copyToDialogVisible.value = false }
 })
 
 // ---- 生命周期 ----

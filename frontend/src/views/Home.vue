@@ -20,6 +20,7 @@
           @copy="handleCopy"
           @cut="handleCut"
           @paste="handlePaste"
+          @copy-to="handleCopyTo"
         />
       </el-aside>
       <el-main class="content-main">
@@ -37,6 +38,7 @@
           @copy="handleCopy"
           @cut="handleCut"
           @paste="handlePaste"
+          @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
         />
       </el-main>
     </el-container>
@@ -56,6 +58,7 @@ import {
   DeleteFile,
   CopyItem,
   MoveItem,
+  CopyTo,
   CopyToSystemClipboard,
   CutToSystemClipboard,
   ReadFromSystemClipboard
@@ -258,6 +261,24 @@ const handlePaste = async (targetData) => {
     }
   } catch (error) {
     ElMessage.error('粘贴失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleCopyTo = async (data) => {
+  fileTreePanelRef.value?.setCopyToLoading(true)
+  try {
+    const result = await CopyTo(data.sourcePath, data.targetPath, data.copyWholeDir)
+    if (result && result.startsWith('错误')) {
+      ElMessage.error(result)
+    } else {
+      ElMessage.success('拷贝成功')
+      fileTreePanelRef.value?.closeCopyToDialog()
+      fileTreePanelRef.value?.refreshNode(data.targetPath)
+    }
+  } catch (error) {
+    ElMessage.error('拷贝失败: ' + (error.message || String(error)))
+  } finally {
+    fileTreePanelRef.value?.setCopyToLoading(false)
   }
 }
 

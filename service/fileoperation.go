@@ -212,3 +212,46 @@ func (s *FileOperationService) MoveItem(sourcePath, targetDir string) (string, e
 	}
 	return targetPath, os.RemoveAll(sourcePath)
 }
+
+// CopyTo 将源路径拷贝到目标路径，支持整体拷贝或仅拷贝目录内容
+func (s *FileOperationService) CopyTo(sourcePath, targetPath string, copyWholeDir bool) (string, error) {
+	// 校验源路径
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("原地址不存在: %s", sourcePath)
+	}
+
+	// 校验目标路径
+	targetInfo, err := os.Stat(targetPath)
+	if err == nil && !targetInfo.IsDir() {
+		return "", fmt.Errorf("目标地址不是文件夹: %s", targetPath)
+	}
+	if err != nil {
+		// 目标目录不存在，自动创建
+		if mkErr := os.MkdirAll(targetPath, 0755); mkErr != nil {
+			return "", mkErr
+		}
+	}
+
+	// 执行拷贝
+	if !sourceInfo.IsDir() || copyWholeDir {
+		return s.CopyItem(sourcePath, targetPath)
+	}
+
+	// copyWholeDir=false 且源是文件夹：逐项拷贝目录内容
+	entries, err := os.ReadDir(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
+	var lastResult string
+	for _, entry := range entries {
+		entryPath := filepath.Join(sourcePath, entry.Name())
+		result, err := s.CopyItem(entryPath, targetPath)
+		if err != nil {
+			return "", err
+		}
+		lastResult = result
+	}
+	return lastResult, nil
+}

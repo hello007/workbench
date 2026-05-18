@@ -468,6 +468,16 @@ func (a *App) MoveItem(sourcePath, targetDir string) string {
 	return result
 }
 
+// CopyTo 将文件或文件夹拷贝到指定目标目录
+func (a *App) CopyTo(sourcePath, targetPath string, copyWholeDir bool) string {
+	result, err := a.fileOpSvc.CopyTo(sourcePath, targetPath, copyWholeDir)
+	if err != nil {
+		println("Error:", err.Error())
+		return "错误: " + err.Error()
+	}
+	return result
+}
+
 // CopyToSystemClipboard 写入系统剪贴板（复制模式）
 func (a *App) CopyToSystemClipboard(path string) string {
 	err := a.fileOpSvc.CopyToSystemClipboard([]string{path})
