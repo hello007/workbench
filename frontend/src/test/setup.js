@@ -22,5 +22,6 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   ScanAndPullRepos: vi.fn(() => Promise.resolve({ total: 0 })),
   GetAppVersion: vi.fn(() => Promise.resolve('dev')),
   OpenInWarp: vi.fn(() => Promise.resolve(true)),
-  OpenWithDefaultApp: vi.fn(() => Promise.resolve(true))
+  OpenWithDefaultApp: vi.fn(() => Promise.resolve(true)),
+  CopyTo: vi.fn(() => Promise.resolve(''))
 }))

@@ -41,6 +41,7 @@
             <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
             <el-button @click="$emit('copy', selectedNode)">复制</el-button>
             <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+            <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
           </el-button-group>
           <el-button-group>
             <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
@@ -57,6 +58,7 @@
             <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
             <el-button @click="$emit('copy', selectedNode)">复制</el-button>
             <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+            <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
           </el-button-group>
           <el-button-group>
             <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
@@ -187,7 +189,8 @@ const emit = defineEmits([
   'delete',
   'copy',
   'cut',
-  'paste'
+  'paste',
+  'copyTo'
 ])
 
 const gitLoading = ref(false)

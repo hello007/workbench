@@ -401,3 +401,209 @@ func TestMoveItem_FileConflictAutoRename(t *testing.T) {
 		t.Errorf("Expected %s, got %s", expected, result)
 	}
 }
+
+func TestCopyTo_FileToExistingDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(src, targetDir, false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "test.txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, err := os.ReadFile(expected)
+	if err != nil {
+		t.Fatalf("Copied file not found: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("Expected 'hello', got '%s'", string(data))
+	}
+}
+
+func TestCopyTo_FileToNewDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "newdest")
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(src, targetDir, false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "test.txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, err := os.ReadFile(expected)
+	if err != nil {
+		t.Fatalf("Copied file not found: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("Expected 'hello', got '%s'", string(data))
+	}
+}
+
+func TestCopyTo_DirWholeDir(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(filepath.Join(srcDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "sub", "nested.txt"), []byte("nested"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(srcDir, targetDir, true)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "srcdir")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(expected, "sub", "nested.txt"))
+	if string(data) != "nested" {
+		t.Errorf("Expected 'nested', got '%s'", string(data))
+	}
+}
+
+func TestCopyTo_DirContentOnly(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(filepath.Join(srcDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+	os.WriteFile(filepath.Join(srcDir, "sub", "nested.txt"), []byte("nested"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, targetDir, false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	// 目标下不应有 srcdir 目录
+	srcdirInTarget := filepath.Join(targetDir, "srcdir")
+	if _, err := os.Stat(srcdirInTarget); err == nil {
+		t.Errorf("目标下不应存在 srcdir 目录，但找到了: %s", srcdirInTarget)
+	}
+
+	// 目标下应有 file.txt 和 sub 目录
+	data, err := os.ReadFile(filepath.Join(targetDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("file.txt not found in target: %v", err)
+	}
+	if string(data) != "content" {
+		t.Errorf("Expected 'content', got '%s'", string(data))
+	}
+
+	nestedData, _ := os.ReadFile(filepath.Join(targetDir, "sub", "nested.txt"))
+	if string(nestedData) != "nested" {
+		t.Errorf("Expected 'nested', got '%s'", string(nestedData))
+	}
+}
+
+func TestCopyTo_SourceNotExist(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+
+	_, err := svc.CopyTo(filepath.Join(dir, "nonexistent"), dir, false)
+	if err == nil {
+		t.Fatal("Expected error for nonexistent source")
+	}
+	expectedMsg := "原地址不存在:"
+	if err != nil && !contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestCopyTo_TargetIsFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetFile := filepath.Join(dir, "target.txt")
+	os.WriteFile(targetFile, []byte("existing"), 0644)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(src, targetFile, false)
+	if err == nil {
+		t.Fatal("Expected error when target is a file")
+	}
+	expectedMsg := "目标地址不是文件夹:"
+	if err != nil && !contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+// contains 检查字符串是否包含子串
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func TestCopyTo_SourceIsParentOfTarget(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "parent")
+	os.MkdirAll(srcDir, 0755)
+	targetDir := filepath.Join(srcDir, "child")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, targetDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source is parent of target")
+	}
+}
+
+func TestCopyTo_SourceIsAncestorOfTarget(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "grandparent")
+	os.MkdirAll(filepath.Join(srcDir, "middle", "leaf"), 0755)
+	targetDir := filepath.Join(srcDir, "middle", "leaf")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, targetDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source is ancestor of target")
+	}
+}
+
+func TestCopyTo_SamePath(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "same")
+	os.MkdirAll(srcDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(srcDir, srcDir, true)
+	if err == nil {
+		t.Fatal("Expected error when source and target are the same")
+	}
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
