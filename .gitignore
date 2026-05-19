@@ -17,6 +17,7 @@ vendor/
 build/
 frontend/dist/
 frontend/wailsjs/
+frontend/package.json.md5
 
 # Release packages (contain binaries)
 release/
