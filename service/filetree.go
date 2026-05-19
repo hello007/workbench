@@ -30,7 +30,8 @@ func (s *FileTreeService) isGitRepoDir(dir string) bool {
 		return v.(bool)
 	}
 	info, err := os.Stat(filepath.Join(dir, ".git"))
-	isRepo := err == nil && info.IsDir()
+	isRepo := err == nil
+	_ = info
 	s.gitRepoCache.Store(dir, isRepo)
 	return isRepo
 }

@@ -235,4 +235,314 @@ describe('FileTreePanel.vue', () => {
       wrapper = null
     })
   })
+
+  describe('isGitRepo 字段透传', () => {
+    it('isGitRepo=true 的目录节点应保留该字段', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce([
+        { name: 'my-repo', path: '/path/a/my-repo', type: 'directory', isGitRepo: true, hasChildren: true, isLeaf: false },
+        { name: 'plain-dir', path: '/path/a/plain-dir', type: 'directory', isGitRepo: false, hasChildren: true, isLeaf: false }
+      ])
+
+      wrapper = createWrapper()
+      const resolve = vi.fn()
+      await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+      await flushPromises()
+
+      const resolvedNodes = resolve.mock.calls[0][0]
+      const repoNode = resolvedNodes.find(n => n.name === 'my-repo')
+      const plainNode = resolvedNodes.find(n => n.name === 'plain-dir')
+      expect(repoNode.isGitRepo).toBe(true)
+      expect(plainNode.isGitRepo).toBe(false)
+    })
+
+    it('isGitRepo=true 的文件节点不应出现（文件不检测 Git）', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce([
+        { name: 'file.txt', path: '/test/file.txt', type: 'file', isGitRepo: false, hasChildren: false, isLeaf: true }
+      ])
+
+      wrapper = createWrapper()
+      const resolve = vi.fn()
+      await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+      await flushPromises()
+
+      const resolvedNodes = resolve.mock.calls[0][0]
+      const fileNode = resolvedNodes.find(n => n.name === 'file.txt')
+      expect(fileNode.isGitRepo).toBe(false)
+    })
+  })
+
+  describe('隐藏项数据透传', () => {
+    it('隐藏目录和隐藏文件应从后端正确透传到前端', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce([
+        { name: '.claude', path: '/path/a/.claude', type: 'directory', isGitRepo: false, hasChildren: true, isLeaf: false },
+        { name: '.env', path: '/path/a/.env', type: 'file', isGitRepo: false, hasChildren: false, isLeaf: true },
+        { name: '.gitignore', path: '/path/a/.gitignore', type: 'file', isGitRepo: false, hasChildren: false, isLeaf: true },
+        { name: 'src', path: '/path/a/src', type: 'directory', isGitRepo: false, hasChildren: true, isLeaf: false }
+      ])
+
+      wrapper = createWrapper()
+      const resolve = vi.fn()
+      await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+      await flushPromises()
+
+      const resolvedNodes = resolve.mock.calls[0][0]
+      expect(resolvedNodes.length).toBe(4)
+      const claudeNode = resolvedNodes.find(n => n.name === '.claude')
+      expect(claudeNode.type).toBe('directory')
+      expect(claudeNode.isLeaf).toBe(false)
+      const envNode = resolvedNodes.find(n => n.name === '.env')
+      expect(envNode.type).toBe('file')
+      expect(envNode.isLeaf).toBe(true)
+      const gitignoreNode = resolvedNodes.find(n => n.name === '.gitignore')
+      expect(gitignoreNode.type).toBe('file')
+      expect(gitignoreNode.isLeaf).toBe(true)
+    })
+  })
+
+  // ---- Story 2-4: 全部展开/收起与节点选中 ----
+
+  function createWrapperWithStore(storeMock = {}) {
+    const mergedStore = {
+      root: { childNodes: [] },
+      nodesMap: {},
+      ...storeMock
+    }
+    const stubs = {
+      ...defaultStubs,
+      'el-tree': {
+        template: '<div class="el-tree"></div>',
+        props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+        data() {
+          return { store: mergedStore }
+        }
+      }
+    }
+    return mount(FileTreePanel, {
+      props: {
+        directories: mockDirectories,
+        selectedDirId: 'dir-1',
+        clipboard: { mode: null }
+      },
+      global: { stubs }
+    })
+  }
+
+  describe('全部展开 expandAll', () => {
+    it('应递归展开非叶节点并显示成功提示', async () => {
+      const mockExpand = vi.fn((callback) => callback())
+      const childDir = {
+        isLeaf: false,
+        expanded: false,
+        childNodes: [{ isLeaf: true, childNodes: [] }],
+        expand: mockExpand
+      }
+      const childFile = { isLeaf: true, childNodes: [] }
+
+      wrapper = createWrapperWithStore({
+        root: { childNodes: [childDir, childFile] }
+      })
+
+      await wrapper.vm.expandAll()
+      await flushPromises()
+
+      expect(mockExpand).toHaveBeenCalledTimes(1)
+      expect(ElMessage.success).toHaveBeenCalledWith('已全部展开')
+    })
+
+    it('失败时应显示错误提示', async () => {
+      wrapper = createWrapper()
+      await wrapper.vm.expandAll()
+      await flushPromises()
+
+      expect(ElMessage.error).toHaveBeenCalled()
+    })
+  })
+
+  describe('全部收起 collapseAll', () => {
+    it('应收起所有展开节点并显示成功提示', () => {
+      const expandedNode = { expanded: true, childNodes: [] }
+      const collapsedNode = { expanded: false, childNodes: [] }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: {
+          '/path/a/src': expandedNode,
+          '/path/a/readme.md': collapsedNode
+        }
+      })
+
+      wrapper.vm.collapseAll()
+
+      expect(expandedNode.expanded).toBe(false)
+      expect(ElMessage.success).toHaveBeenCalledWith('已全部收起')
+    })
+  })
+
+  describe('节点选中 onNodeClick', () => {
+    it('点击节点应 emit select 事件携带节点数据', async () => {
+      wrapper = createWrapper()
+      const testData = { name: 'test.txt', path: '/test/test.txt', type: 'file' }
+
+      const tree = wrapper.findComponent('.el-tree')
+      const handler = tree.vm.$attrs.onNodeClick
+      handler(testData)
+      await flushPromises()
+
+      expect(wrapper.emitted('select')).toBeTruthy()
+      expect(wrapper.emitted('select')[0][0]).toEqual(testData)
+    })
+  })
+
+  // ---- Story 3-1: 创建文件和文件夹 ----
+
+  describe('showCreateAt 创建对话框', () => {
+    it('调用 showCreateAt(file) 应打开对话框并显示父路径', async () => {
+      wrapper = createWrapperWithStore()
+      const parentData = { name: 'src', path: '/path/a/src', type: 'directory' }
+
+      wrapper.vm.showCreateAt(parentData, 'file')
+      await flushPromises()
+
+      // 对话框打开后应能找到父路径输入框和确定按钮
+      const inputs = wrapper.findAll('input')
+      const parentInput = inputs.find(i => i.element.value === '/path/a/src')
+      expect(parentInput).toBeTruthy()
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      expect(confirmBtn).toBeTruthy()
+    })
+
+    it('调用 showCreateAt(directory) 也应打开对话框', async () => {
+      wrapper = createWrapperWithStore()
+      const parentData = { name: 'src', path: '/path/a/src', type: 'directory' }
+
+      wrapper.vm.showCreateAt(parentData, 'directory')
+      await flushPromises()
+
+      const inputs = wrapper.findAll('input')
+      const parentInput = inputs.find(i => i.element.value === '/path/a/src')
+      expect(parentInput).toBeTruthy()
+    })
+  })
+
+  describe('handleCreate 创建文件', () => {
+    it('创建文件夹成功应调用 CreateDirectory 并显示成功提示', async () => {
+      const { CreateDirectory } = await import('../../../wailsjs/go/main/App')
+      const mockExpand = vi.fn((callback) => callback())
+      const childDir = {
+        data: { path: '/path/a' },
+        isLeaf: false,
+        expanded: true,
+        childNodes: [],
+        expand: mockExpand,
+        loaded: true,
+        loading: false
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a': childDir },
+        root: { childNodes: [childDir] }
+      })
+
+      wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'directory')
+      await flushPromises()
+
+      // 找到名称输入框（value 为空的 input）并输入名称
+      const inputs = wrapper.findAll('input')
+      const nameInput = inputs.find(i => i.element.value === '')
+      await nameInput.setValue('new-folder')
+
+      // 点击确定按钮
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(CreateDirectory).toHaveBeenCalledWith('/path/a', 'new-folder')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件夹创建成功')
+    })
+
+    it('创建文件成功应调用 CreateFile 并显示成功提示', async () => {
+      const { CreateFile } = await import('../../../wailsjs/go/main/App')
+      const mockExpand = vi.fn((callback) => callback())
+      const childDir = {
+        data: { path: '/path/a' },
+        isLeaf: false,
+        expanded: true,
+        childNodes: [],
+        expand: mockExpand,
+        loaded: true,
+        loading: false
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a': childDir },
+        root: { childNodes: [childDir] }
+      })
+
+      wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'file')
+      await flushPromises()
+
+      const inputs = wrapper.findAll('input')
+      const nameInput = inputs.find(i => i.element.value === '')
+      await nameInput.setValue('new-file.go')
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(CreateFile).toHaveBeenCalledWith('/path/a', 'new-file.go', '')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件创建成功')
+    })
+
+    it('空名称应显示警告提示', async () => {
+      wrapper = createWrapperWithStore()
+      wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'file')
+      await flushPromises()
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入文件名称')
+    })
+
+    it('创建失败应显示错误提示', async () => {
+      const { CreateDirectory } = await import('../../../wailsjs/go/main/App')
+      CreateDirectory.mockResolvedValueOnce(false)
+
+      const childDir = {
+        data: { path: '/path/a' },
+        isLeaf: false,
+        expanded: true,
+        childNodes: [],
+        expand: vi.fn(),
+        loaded: true,
+        loading: false
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a': childDir },
+        root: { childNodes: [childDir] }
+      })
+
+      wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'directory')
+      await flushPromises()
+
+      const inputs = wrapper.findAll('input')
+      const nameInput = inputs.find(i => i.element.value === '')
+      await nameInput.setValue('existing-dir')
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.error).toHaveBeenCalledWith('创建失败')
+    })
+  })
 })

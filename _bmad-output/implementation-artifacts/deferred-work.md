@@ -36,3 +36,21 @@
 ## GetTree 递归性能
 
 - `node_modules`、`.cache`、`vendor` 等大型目录在递归展开时可能导致性能问题。建议增加排除规则或子节点数量上限。
+
+## Deferred from: code review of Stories 2-2, 2-3, 2-4, 3-1 (2026-05-21)
+
+- **[F1]** `_ = info` 代码异味 [service/filetree.go:34] — `os.Stat` 返回值被丢弃，仅用 `err == nil` 判断存在性。intentional for worktree support
+- **[F2]** 缺少负缓存（false 值）测试 [service/filetree_test.go] — CacheHit 只验证 true 缓存命中，未验证 false 缓存
+- **[F3]** gitRepoCache 无过期机制 [service/filetree.go:17] — sync.Map 永不过期（与 F27 from 2-1 重复，已记录）
+- **[F4]** handleRename/handleDeleteAt 根目录子项下 parentPath 提取失败 [FileTreePanel.vue:590-593]
+- **[F5]** handleRename 不阻止重命名为相同名称 [FileTreePanel.vue:577]
+- **[F6]** cloneRepo 用 `result.includes('成功')` 判断成功 [ContentPanel.vue:280] — 脆弱的字符串匹配
+- **[F7]** ContentPanel filePreview 切换节点不清除 [ContentPanel.vue:160-161] — 无 watch selectedNode
+- **[F8]** ContentPanel activeGitTab 切换节点不重置 [ContentPanel.vue:197]
+- **[F9]** FileTreePanel.vue 导入 EventsOn/EventsOff 但未使用 [FileTreePanel.vue:265] — 死代码
+- **[F10]** loadTreeNode 错误处理不一致 [FileTreePanel.vue:373] — `error.message || error` vs `String(error)`
+- **[F11]** 右键菜单无视口边界检查 [FileTreePanel.vue:148,449-450]
+- **[F12]** ContentPanel 无 isGitRepo 相关测试 [ContentPanel.spec.js]
+- **[F13]** handleCreate 不验证文件名特殊字符 [FileTreePanel.vue:534] — 路径遍历风险
+- **[F14]** HasChildren 对空目录默认 true [model/models.go:59] — 与 F24 from 2-1 重复
+- **[F15]** Story 2-3 AC4 隐藏项可操作性未显式测试 [FileTreePanel.spec.js]
