@@ -184,3 +184,38 @@ func (s *DirectoryService) GetDefault() (*model.Directory, error) {
 
 	return nil, fmt.Errorf("没有配置工作目录")
 }
+
+// Reorder 按给定 id 顺序重排目录
+func (s *DirectoryService) Reorder(ids []string) error {
+	directories, err := s.Load()
+	if err != nil {
+		return err
+	}
+
+	if len(ids) != len(directories) {
+		return fmt.Errorf("排序 id 数量(%d)与实际目录数(%d)不一致", len(ids), len(directories))
+	}
+
+	// 构建查找表
+	dirMap := make(map[string]*model.Directory, len(directories))
+	for _, dir := range directories {
+		dirMap[dir.ID] = dir
+	}
+
+	// 按新顺序排列，同时校验 id 有效且无重复
+	reordered := make([]*model.Directory, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return fmt.Errorf("排序 id 重复: %s", id)
+		}
+		seen[id] = true
+		dir, ok := dirMap[id]
+		if !ok {
+			return fmt.Errorf("工作目录不存在: %s", id)
+		}
+		reordered = append(reordered, dir)
+	}
+
+	return s.Save(reordered)
+}

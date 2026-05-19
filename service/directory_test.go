@@ -393,3 +393,81 @@ func TestPersistence_MultipleOperations(t *testing.T) {
 		t.Error("dir3 should exist after reload")
 	}
 }
+
+// --- Reorder 测试 ---
+
+func TestReorder_Success(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	dir3 := t.TempDir()
+	svc := createTestService(t)
+
+	created1, _ := svc.Create("目录1", dir1, false)
+	created2, _ := svc.Create("目录2", dir2, false)
+	created3, _ := svc.Create("目录3", dir3, false)
+
+	// 反序排列: 3, 1, 2
+	ids := []string{created3.ID, created1.ID, created2.ID}
+	err := svc.Reorder(ids)
+	if err != nil {
+		t.Fatalf("Reorder: got error %v", err)
+	}
+
+	dirs, _ := svc.Load()
+	if len(dirs) != 3 {
+		t.Fatalf("After reorder count: got %d, want 3", len(dirs))
+	}
+	if dirs[0].ID != created3.ID {
+		t.Errorf("Position 0: got %q, want %q", dirs[0].ID, created3.ID)
+	}
+	if dirs[1].ID != created1.ID {
+		t.Errorf("Position 1: got %q, want %q", dirs[1].ID, created1.ID)
+	}
+	if dirs[2].ID != created2.ID {
+		t.Errorf("Position 2: got %q, want %q", dirs[2].ID, created2.ID)
+	}
+}
+
+func TestReorder_CountMismatch(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	svc := createTestService(t)
+
+	svc.Create("目录1", dir1, false)
+	svc.Create("目录2", dir2, false)
+
+	// 只传1个id
+	err := svc.Reorder([]string{"single-id"})
+	if err == nil {
+		t.Fatal("Reorder count mismatch: expected error, got nil")
+	}
+}
+
+func TestReorder_DuplicateID(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	svc := createTestService(t)
+
+	created1, _ := svc.Create("目录1", dir1, false)
+	svc.Create("目录2", dir2, false)
+
+	// 重复id
+	err := svc.Reorder([]string{created1.ID, created1.ID})
+	if err == nil {
+		t.Fatal("Reorder duplicate id: expected error, got nil")
+	}
+}
+
+func TestReorder_UnknownID(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	svc := createTestService(t)
+
+	created1, _ := svc.Create("目录1", dir1, false)
+	svc.Create("目录2", dir2, false)
+
+	err := svc.Reorder([]string{created1.ID, "nonexistent-id"})
+	if err == nil {
+		t.Fatal("Reorder unknown id: expected error, got nil")
+	}
+}
