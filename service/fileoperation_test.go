@@ -599,6 +599,168 @@ func TestCopyTo_SamePath(t *testing.T) {
 	}
 }
 
+func TestPreviewFile_TextFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "test.txt")
+	content := "Hello, world!"
+	os.WriteFile(file, []byte(content), 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024) // 1MB
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if preview.Error != "" {
+		t.Errorf("Unexpected error: %s", preview.Error)
+	}
+	if preview.Content != content {
+		t.Errorf("Expected content '%s', got '%s'", content, preview.Content)
+	}
+	if preview.IsBinary {
+		t.Error("Expected non-binary file")
+	}
+	if preview.TooLarge {
+		t.Error("Expected file not to be too large")
+	}
+	if preview.Name != "test.txt" {
+		t.Errorf("Expected name 'test.txt', got '%s'", preview.Name)
+	}
+	if preview.Size != int64(len(content)) {
+		t.Errorf("Expected size %d, got %d", len(content), preview.Size)
+	}
+}
+
+func TestPreviewFile_TooLarge(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "large.bin")
+	// 1.1MB data
+	content := make([]byte, 1024*1024+100)
+	for i := range content {
+		content[i] = byte('a' + (i % 26))
+	}
+	os.WriteFile(file, content, 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024) // 1MB
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if preview.Error != "" {
+		t.Errorf("Unexpected error: %s", preview.Error)
+	}
+	if preview.Content != "" {
+		t.Errorf("Expected empty content for too large file, got %d bytes", len(preview.Content))
+	}
+	if preview.IsBinary {
+		t.Error("Expected non-binary file")
+	}
+	if !preview.TooLarge {
+		t.Error("Expected file to be too large")
+	}
+	if preview.Size != int64(len(content)) {
+		t.Errorf("Expected size %d, got %d", len(content), preview.Size)
+	}
+}
+
+func TestPreviewFile_Binary(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "binary.dat")
+	content := []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x00, 0x77, 0x6F, 0x72, 0x6C, 0x64} // Hello\x00world
+	os.WriteFile(file, content, 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024) // 1MB
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if preview.Error != "" {
+		t.Errorf("Unexpected error: %s", preview.Error)
+	}
+	if preview.Content != "" {
+		t.Errorf("Expected empty content for binary file, got %d bytes", len(preview.Content))
+	}
+	if !preview.IsBinary {
+		t.Error("Expected binary file")
+	}
+	if preview.TooLarge {
+		t.Error("Expected file not to be too large")
+	}
+	if preview.Size != int64(len(content)) {
+		t.Errorf("Expected size %d, got %d", len(content), preview.Size)
+	}
+}
+
+func TestPreviewFile_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "nonexistent.txt")
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err == nil {
+		t.Fatal("Expected error for nonexistent file")
+	}
+	if preview.Error == "" {
+		t.Error("Expected error to be set in preview")
+	}
+}
+
+func TestPreviewFile_PreviewableExtension(t *testing.T) {
+	testCases := []struct {
+		name        string
+		ext         string
+		content     []byte
+		expectError bool
+	}{
+		{"Go source file", ".go", []byte("package main\nfunc main() {}"), false},
+		{"JavaScript file", ".js", []byte("console.log('hello');"), false},
+		{"Vue file", ".vue", []byte("<template><div></div></template><script>export default {}</script>"), false},
+		{"Markdown file", ".md", []byte("# Header\nHello world"), false},
+		{"JSON file", ".json", []byte(`{"name": "test", "value": 42}`), false},
+		{"Text file", ".txt", []byte("Plain text file"), false},
+		{"HTML file", ".html", []byte("<html><body><p>test</p></body></html>"), false},
+		{"CSS file", ".css", []byte("body { font-size: 14px; }"), false},
+	}
+
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(dir, "test"+tc.ext)
+			os.WriteFile(file, tc.content, 0644)
+
+			preview, err := svc.PreviewFile(file, maxSize)
+
+			if tc.expectError {
+				if err == nil && preview.Error == "" {
+					t.Error("Expected error for non-previewable file")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("PreviewFile failed: %v", err)
+				}
+				if preview.Error != "" {
+					t.Errorf("Unexpected error: %s", preview.Error)
+				}
+				if !preview.IsBinary && !preview.TooLarge {
+					if preview.Content == "" {
+						t.Error("Expected content for previewable file")
+					}
+				}
+			}
+		})
+	}
+}
+
 func containsHelper(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
