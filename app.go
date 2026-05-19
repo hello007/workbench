@@ -107,6 +107,16 @@ func (a *App) GetDefaultDirectory() *model.Directory {
 	return dir
 }
 
+// ReorderDirectories 重排工作目录顺序
+func (a *App) ReorderDirectories(ids []string) bool {
+	err := a.directorySvc.Reorder(ids)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
 // GetFileTree 获取文件树
 func (a *App) GetFileTree(path string) []*model.FileTreeNode {
 	nodes, err := a.fileTreeSvc.GetChildren(path)
