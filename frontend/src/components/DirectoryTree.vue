@@ -8,27 +8,35 @@
 
     <!-- 目录列表 -->
     <div class="dir-list">
-      <div
-        v-for="dir in directories"
-        :key="dir.id"
-        class="dir-item"
-        :class="{ 'dir-item--active': dir.id === selectedId }"
-        @click="handleSelect(dir.id)"
-        @contextmenu.prevent="onContextMenu($event, dir)"
+      <draggable
+        :list="directories"
+        item-key="id"
+        :animation="200"
+        ghost-class="dir-item--ghost"
+        @end="onDragEnd"
       >
-        <div class="dir-info">
-          <div class="dir-row">
-            <el-icon class="dir-item-icon" color="#909399">
-              <Folder />
-            </el-icon>
-            <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
-            <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
-              <Star />
-            </el-icon>
+        <template #item="{ element: dir }">
+          <div
+            class="dir-item"
+            :class="{ 'dir-item--active': dir.id === selectedId }"
+            @click="handleSelect(dir.id)"
+            @contextmenu.prevent="onContextMenu($event, dir)"
+          >
+            <div class="dir-info">
+              <div class="dir-row">
+                <el-icon class="dir-item-icon" color="#909399">
+                  <Folder />
+                </el-icon>
+                <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
+                <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
+                  <Star />
+                </el-icon>
+              </div>
+              <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
+            </div>
           </div>
-          <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
-        </div>
-      </div>
+        </template>
+      </draggable>
       <el-empty
         v-if="!directories || directories.length === 0"
         description="暂无工作目录"
@@ -105,11 +113,13 @@
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Star, Plus, Edit, Delete } from '@element-plus/icons-vue'
+import draggable from 'vuedraggable'
 import {
   AddDirectory,
   UpdateDirectory,
   DeleteDirectory,
-  SetDefaultDirectory
+  SetDefaultDirectory,
+  ReorderDirectories
 } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -301,6 +311,21 @@ const handleDelete = async (dir) => {
   }
 }
 
+// --- 拖拽排序 ---
+const onDragEnd = async () => {
+  const ids = props.directories.map(d => d.id)
+  try {
+    const result = await ReorderDirectories(ids)
+    if (!result) {
+      ElMessage.error('排序保存失败')
+      emit('change')
+    }
+  } catch (error) {
+    ElMessage.error('排序保存失败')
+    emit('change')
+  }
+}
+
 // --- 生命周期 ---
 onMounted(() => {
   document.addEventListener('click', onGlobalClick)
@@ -447,5 +472,10 @@ onBeforeUnmount(() => {
   height: 1px;
   background-color: #e4e7ed;
   margin: 4px 0;
+}
+
+.dir-item--ghost {
+  opacity: 0.5;
+  background: #c8e6c9;
 }
 </style>
