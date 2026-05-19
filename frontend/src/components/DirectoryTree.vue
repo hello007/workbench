@@ -16,13 +16,18 @@
         @click="handleSelect(dir.id)"
         @contextmenu.prevent="onContextMenu($event, dir)"
       >
-        <el-icon class="dir-item-icon" color="#909399">
-          <Folder />
-        </el-icon>
-        <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
-        <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
-          <Star />
-        </el-icon>
+        <div class="dir-info">
+          <div class="dir-row">
+            <el-icon class="dir-item-icon" color="#909399">
+              <Folder />
+            </el-icon>
+            <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
+            <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
+              <Star />
+            </el-icon>
+          </div>
+          <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
+        </div>
       </div>
       <el-empty
         v-if="!directories || directories.length === 0"
@@ -337,8 +342,6 @@ onBeforeUnmount(() => {
 }
 
 .dir-item {
-  display: flex;
-  align-items: center;
   padding: 8px 12px;
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -373,6 +376,30 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   margin-left: 6px;
 }
+
+.dir-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.dir-row {
+  display: flex;
+  align-items: center;
+}
+
+.dir-path {
+  font-size: 11px;
+  color: #909399;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+  padding-left: 24px;
+}
+
 
 .dir-version {
   flex-shrink: 0;

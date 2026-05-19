@@ -119,6 +119,26 @@ describe('DirectoryTree.vue', () => {
       const stars = wrapper.findAll('.dir-item-star')
       expect(stars.length).toBe(1)
     })
+
+    it('应该显示目录路径', () => {
+      wrapper = createWrapper()
+      const paths = wrapper.findAll('.dir-path')
+      expect(paths[0].text()).toBe('/path/a')
+      expect(paths[1].text()).toBe('/path/b')
+    })
+
+    it('路径应该有 title 属性显示完整路径', () => {
+      wrapper = createWrapper()
+      const paths = wrapper.findAll('.dir-path')
+      expect(paths[0].attributes('title')).toBe('/path/a')
+      expect(paths[1].attributes('title')).toBe('/path/b')
+    })
+
+    it('路径样式应该为小字灰色', () => {
+      wrapper = createWrapper()
+      const paths = wrapper.findAll('.dir-path')
+      expect(paths.length).toBe(2)
+    })
   })
 
   describe('添加目录（AC1）', () => {

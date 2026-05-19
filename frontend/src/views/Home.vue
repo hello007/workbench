@@ -1,7 +1,7 @@
 <template>
   <div class="home">
-    <el-container style="height: 100vh;">
-      <el-aside width="200px" class="directory-aside">
+    <Splitpanes class="default-theme splitpanes-container">
+      <Pane :size="15" :min-size="10" :max-size="30">
         <DirectoryTree
           :directories="directories"
           :selected-id="selectedDirectoryId"
@@ -9,8 +9,8 @@
           @select="onDirectorySelect"
           @change="loadDirectories"
         />
-      </el-aside>
-      <el-aside width="280px" class="file-tree-aside">
+      </Pane>
+      <Pane :size="22" :min-size="15" :max-size="35">
         <FileTreePanel
           ref="fileTreePanelRef"
           :directories="directories"
@@ -23,8 +23,8 @@
           @paste="handlePaste"
           @copy-to="handleCopyTo"
         />
-      </el-aside>
-      <el-main class="content-main">
+      </Pane>
+      <Pane :size="63" :min-size="30">
         <ContentPanel
           ref="contentPanelRef"
           :selected-node="selectedNode"
@@ -41,8 +41,8 @@
           @paste="handlePaste"
           @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
         />
-      </el-main>
-    </el-container>
+      </Pane>
+    </Splitpanes>
   </div>
 </template>
 
@@ -53,14 +53,16 @@ import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
 import {
   GetDirectories,
   GetAppVersion,
   ScanAndPullRepos,
   DeleteFile,
   CopyItem,
-  MoveItem,
   CopyTo,
+  MoveItem,
   CopyToSystemClipboard,
   CutToSystemClipboard,
   ReadFromSystemClipboard
@@ -332,17 +334,23 @@ onBeforeUnmount(() => {
 <style scoped>
 .home {
   font-family: 'Microsoft YaHei', Arial, sans-serif;
+  height: 100vh;
 }
-.directory-aside {
-  border-right: 1px solid #e6e6e6;
-  overflow: hidden;
+.splitpanes-container {
+  height: 100%;
 }
-.file-tree-aside {
-  border-right: 1px solid #e6e6e6;
-  overflow: hidden;
+</style>
+
+<style>
+.splitpanes.default-theme .splitpanes__splitter {
+  background-color: #e6e6e6;
+  width: 1px !important;
+  min-width: 1px !important;
 }
-.content-main {
-  padding: 0;
-  overflow-y: auto;
+.splitpanes.default-theme .splitpanes__splitter:hover {
+  background-color: #c0c4cc;
+}
+.splitpanes.default-theme .splitpanes__pane {
+  background-color: #f5f7fa;
 }
 </style>
