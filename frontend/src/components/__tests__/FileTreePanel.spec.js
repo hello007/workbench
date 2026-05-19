@@ -545,4 +545,168 @@ describe('FileTreePanel.vue', () => {
       expect(ElMessage.error).toHaveBeenCalledWith('创建失败')
     })
   })
+
+  // ---- Story 3-2: 重命名和删除 ----
+
+  describe('showRenameAt 重命名对话框', () => {
+    it('调用 showRenameAt 应打开对话框并预填当前名称', async () => {
+      wrapper = createWrapperWithStore()
+      const nodeData = { name: 'old-name.txt', path: '/path/a/old-name.txt', type: 'file' }
+
+      wrapper.vm.showRenameAt(nodeData)
+      await flushPromises()
+
+      // 对话框打开后应能找到包含当前名称的输入框和确定按钮
+      const inputs = wrapper.findAll('input')
+      const nameInput = inputs.find(i => i.element.value === 'old-name.txt')
+      expect(nameInput).toBeTruthy()
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      expect(confirmBtn).toBeTruthy()
+    })
+  })
+
+  describe('handleRename 重命名', () => {
+    it('重命名成功应调用 RenameFile 并显示成功提示', async () => {
+      const { RenameFile } = await import('../../../wailsjs/go/main/App')
+      const mockExpand = vi.fn((callback) => callback())
+      const childNode = {
+        data: { path: '/path/a' },
+        isLeaf: false,
+        expanded: true,
+        childNodes: [],
+        expand: mockExpand,
+        loaded: true,
+        loading: false
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a': childNode },
+        root: { childNodes: [childNode] }
+      })
+
+      wrapper.vm.showRenameAt({ name: 'old.txt', path: '/path/a/old.txt', type: 'file' })
+      await flushPromises()
+
+      // 找到新名称输入框（对话框中有两个 value='old.txt' 的 input，第二个是 v-model 绑定的）
+      const inputs = wrapper.findAll('input')
+      const matchingInputs = inputs.filter(i => i.element.value === 'old.txt')
+      const nameInput = matchingInputs[matchingInputs.length - 1]
+      await nameInput.setValue('new.txt')
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(RenameFile).toHaveBeenCalledWith('/path/a/old.txt', 'new.txt')
+      expect(ElMessage.success).toHaveBeenCalledWith('重命名成功')
+      expect(mockExpand).toHaveBeenCalled()
+    })
+
+    it('空名称应显示警告提示', async () => {
+      wrapper = createWrapperWithStore()
+      wrapper.vm.showRenameAt({ name: 'file.txt', path: '/path/a/file.txt', type: 'file' })
+      await flushPromises()
+
+      // 清空新名称输入框（取最后一个匹配的 input，即 v-model 绑定的）
+      const inputs = wrapper.findAll('input')
+      const matchingInputs = inputs.filter(i => i.element.value === 'file.txt')
+      const nameInput = matchingInputs[matchingInputs.length - 1]
+      await nameInput.setValue('')
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入名称')
+    })
+
+    it('重命名失败应显示错误提示', async () => {
+      const { RenameFile } = await import('../../../wailsjs/go/main/App')
+      RenameFile.mockResolvedValueOnce(false)
+
+      wrapper = createWrapperWithStore()
+      wrapper.vm.showRenameAt({ name: 'old.txt', path: '/path/a/old.txt', type: 'file' })
+      await flushPromises()
+
+      const inputs = wrapper.findAll('input')
+      const matchingInputs = inputs.filter(i => i.element.value === 'old.txt')
+      const nameInput = matchingInputs[matchingInputs.length - 1]
+      await nameInput.setValue('new.txt')
+
+      const buttons = wrapper.findAll('button')
+      const confirmBtn = buttons.find(b => b.text() === '确定')
+      await confirmBtn.trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.error).toHaveBeenCalledWith('重命名失败')
+    })
+  })
+
+  describe('handleDeleteAt 删除', () => {
+    it('确认删除应调用 DeleteFile 并显示成功提示', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+
+      const mockExpand = vi.fn((callback) => callback())
+      const childNode = {
+        data: { path: '/path/a' },
+        isLeaf: false,
+        expanded: true,
+        childNodes: [],
+        expand: mockExpand,
+        loaded: true,
+        loading: false
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a': childNode },
+        root: { childNodes: [childNode] }
+      })
+
+      await wrapper.vm.handleDeleteAt({ name: 'to-delete.txt', path: '/path/a/to-delete.txt', type: 'file' })
+      await flushPromises()
+
+      expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+        expect.stringContaining('to-delete.txt'),
+        '警告',
+        expect.any(Object)
+      )
+      expect(DeleteFile).toHaveBeenCalledWith('/path/a/to-delete.txt')
+      expect(ElMessage.success).toHaveBeenCalledWith('删除成功')
+      expect(mockExpand).toHaveBeenCalled()
+    })
+
+    it('用户取消确认不应调用 DeleteFile', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+
+      wrapper = createWrapperWithStore()
+
+      await wrapper.vm.handleDeleteAt({ name: 'file.txt', path: '/path/a/file.txt', type: 'file' })
+      await flushPromises()
+
+      expect(ElMessageBox.confirm).toHaveBeenCalled()
+      expect(DeleteFile).not.toHaveBeenCalled()
+    })
+
+    it('删除失败应显示错误提示', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      DeleteFile.mockResolvedValueOnce(false)
+
+      wrapper = createWrapperWithStore()
+
+      await wrapper.vm.handleDeleteAt({ name: 'file.txt', path: '/path/a/file.txt', type: 'file' })
+      await flushPromises()
+
+      expect(DeleteFile).toHaveBeenCalledWith('/path/a/file.txt')
+      expect(ElMessage.error).toHaveBeenCalledWith('删除失败')
+    })
+  })
 })

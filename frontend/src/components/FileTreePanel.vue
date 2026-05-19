@@ -729,6 +729,7 @@ defineExpose({
   collapseAll,
   showRenameAt,
   showCreateAt,
+  handleDeleteAt,
   showCopyToDialog,
   setCopyToLoading: (val) => { copyToLoading.value = val },
   closeCopyToDialog: () => { copyToDialogVisible.value = false }
