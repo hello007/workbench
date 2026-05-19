@@ -36,6 +36,9 @@
       />
     </div>
 
+    <!-- 版本号 -->
+    <div v-if="version" class="dir-version">v{{ version }}</div>
+
     <!-- 右键菜单 -->
     <ul
       v-if="contextMenu.visible"
@@ -111,7 +114,8 @@ import {
 
 const props = defineProps({
   directories: { type: Array, default: () => [] },
-  selectedId: { type: String, default: '' }
+  selectedId: { type: String, default: '' },
+  version: { type: String, default: '' }
 })
 
 const emit = defineEmits(['select', 'change'])
@@ -394,6 +398,15 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   margin-top: 2px;
   padding-left: 24px;
+}
+
+.dir-version {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+  border-top: 1px solid #ebeef5;
 }
 
 /* 右键菜单样式 */
