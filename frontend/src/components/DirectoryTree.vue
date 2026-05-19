@@ -8,37 +8,36 @@
 
     <!-- 目录列表 -->
     <div class="dir-list">
-      <draggable
-        :list="directories"
-        item-key="id"
+      <VueDraggable
+        v-model="localDirectories"
         :animation="200"
         ghost-class="dir-item--ghost"
         @end="onDragEnd"
       >
-        <template #item="{ element: dir }">
-          <div
-            class="dir-item"
-            :class="{ 'dir-item--active': dir.id === selectedId }"
-            @click="handleSelect(dir.id)"
-            @contextmenu.prevent="onContextMenu($event, dir)"
-          >
-            <div class="dir-info">
-              <div class="dir-row">
-                <el-icon class="dir-item-icon" color="#909399">
-                  <Folder />
-                </el-icon>
-                <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
-                <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
-                  <Star />
-                </el-icon>
-              </div>
-              <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
+        <div
+          v-for="dir in localDirectories"
+          :key="dir.id"
+          class="dir-item"
+          :class="{ 'dir-item--active': dir.id === selectedId }"
+          @click="handleSelect(dir.id)"
+          @contextmenu.prevent="onContextMenu($event, dir)"
+        >
+          <div class="dir-info">
+            <div class="dir-row">
+              <el-icon class="dir-item-icon" color="#909399">
+                <Folder />
+              </el-icon>
+              <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
+              <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
+                <Star />
+              </el-icon>
             </div>
+            <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
           </div>
-        </template>
-      </draggable>
+        </div>
+      </VueDraggable>
       <el-empty
-        v-if="!directories || directories.length === 0"
+        v-if="localDirectories.length === 0"
         description="暂无工作目录"
         :image-size="80"
       />
@@ -110,10 +109,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Star, Plus, Edit, Delete } from '@element-plus/icons-vue'
-import draggable from 'vuedraggable'
+import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
   UpdateDirectory,
@@ -129,6 +128,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select', 'change'])
+
+// --- 本地目录列表（可变，用于拖拽） ---
+const localDirectories = ref([...props.directories])
+watch(() => props.directories, (val) => {
+  localDirectories.value = [...val]
+})
 
 // --- 选中 ---
 const handleSelect = (dirId) => {
@@ -313,7 +318,7 @@ const handleDelete = async (dir) => {
 
 // --- 拖拽排序 ---
 const onDragEnd = async () => {
-  const ids = props.directories.map(d => d.id)
+  const ids = localDirectories.value.map(d => d.id)
   try {
     const result = await ReorderDirectories(ids)
     if (!result) {
