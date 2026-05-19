@@ -5,7 +5,7 @@
  * 2. 节点切换时预览状态清理
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import Home from '../Home.vue'
@@ -207,6 +207,67 @@ describe('Home.vue - Bug修复验证', () => {
     })
   })
 
+  describe('splitpanes 三栏布局验证', () => {
+    let layoutWrapper
+
+    beforeEach(() => {
+      layoutWrapper = mount(Home, {
+        global: {
+          stubs: {
+            Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+            Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
+            DirectoryTree: { template: '<div class="stub-directory-tree" />' },
+            FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
+            ContentPanel: { template: '<div class="stub-content-panel" />' }
+          }
+        }
+      })
+    })
+
+    afterEach(() => {
+      if (layoutWrapper) {
+        layoutWrapper.unmount()
+        layoutWrapper = null
+      }
+    })
+
+    it('应该渲染 splitpanes 容器', () => {
+      expect(layoutWrapper.find('.splitpanes').exists()).toBe(true)
+    })
+
+    it('应该渲染三个 Pane', () => {
+      const panes = layoutWrapper.findAll('.pane')
+      expect(panes.length).toBe(3)
+    })
+
+    it('三个面板应按左-中-右顺序排列', () => {
+      const panes = layoutWrapper.findAll('.pane')
+      expect(panes[0].find('.stub-directory-tree').exists()).toBe(true)
+      expect(panes[1].find('.stub-file-tree-panel').exists()).toBe(true)
+      expect(panes[2].find('.stub-content-panel').exists()).toBe(true)
+    })
+
+    it('第一个 Pane 尺寸配置正确', () => {
+      const panes = layoutWrapper.findAll('.pane')
+      expect(panes[0].attributes('data-size')).toBe('15')
+      expect(panes[0].attributes('data-min-size')).toBe('10')
+      expect(panes[0].attributes('data-max-size')).toBe('30')
+    })
+
+    it('第二个 Pane 尺寸配置正确', () => {
+      const panes = layoutWrapper.findAll('.pane')
+      expect(panes[1].attributes('data-size')).toBe('22')
+      expect(panes[1].attributes('data-min-size')).toBe('15')
+      expect(panes[1].attributes('data-max-size')).toBe('35')
+    })
+
+    it('第三个 Pane 尺寸配置正确', () => {
+      const panes = layoutWrapper.findAll('.pane')
+      expect(panes[2].attributes('data-size')).toBe('63')
+      expect(panes[2].attributes('data-min-size')).toBe('30')
+    })
+  })
+
   describe('左侧文件树滚动条', () => {
     let slotWrapper
 
@@ -214,11 +275,11 @@ describe('Home.vue - Bug修复验证', () => {
       slotWrapper = mount(Home, {
         global: {
           stubs: {
-            'el-container': { template: '<div><slot /></div>' },
-            'el-header': { template: '<header><slot /></header>' },
-            'el-aside': { template: '<aside v-bind="$attrs"><slot /></aside>' },
-            'el-main': { template: '<main><slot /></main>' },
-            'el-tree': { template: '<div v-bind="$attrs"></div>' },
+            Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+            Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
+            DirectoryTree: { template: '<div class="stub-directory-tree" />' },
+            FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
+            ContentPanel: { template: '<div class="stub-content-panel" />' },
             'el-dialog': true,
             'el-form': true,
             'el-form-item': true,
@@ -233,34 +294,31 @@ describe('Home.vue - Bug修复验证', () => {
             'el-descriptions': true,
             'el-descriptions-item': true,
             'el-icon': true,
-            'GitInfo': true,
-            'CommitHistory': true
+            'el-tree': { template: '<div v-bind="$attrs"></div>' }
           }
         }
       })
     })
 
-    it('el-aside 应该有 file-tree-aside 类以启用 flex 布局', () => {
-      const aside = slotWrapper.find('.file-tree-aside')
-      expect(aside.exists()).toBe(true)
+    it('应该渲染 splitpanes 容器', () => {
+      const splitpanes = slotWrapper.find('.splitpanes')
+      expect(splitpanes.exists()).toBe(true)
     })
 
-    it('el-aside 内部应该有 tree-toolbar 容器', () => {
-      const toolbar = slotWrapper.find('.tree-toolbar')
-      expect(toolbar.exists()).toBe(true)
+    it('中间面板应该渲染 FileTreePanel', () => {
+      const panes = slotWrapper.findAll('.pane')
+      expect(panes.length).toBe(3)
+      expect(panes[1].find('.stub-file-tree-panel').exists()).toBe(true)
     })
 
-    it('el-tree 应该有 file-tree 类以启用滚动条', async () => {
-      await slotWrapper.vm.$nextTick()
-      slotWrapper.vm.selectedDirectoryId = 'test-id'
-      await slotWrapper.vm.$nextTick()
-      const tree = slotWrapper.find('.file-tree')
-      expect(tree.exists()).toBe(true)
+    it('右侧面板应该渲染 ContentPanel', () => {
+      const panes = slotWrapper.findAll('.pane')
+      expect(panes[2].find('.stub-content-panel').exists()).toBe(true)
     })
 
-    it('内层 el-container 应该有 main-content 类以约束高度', () => {
-      const innerContainer = slotWrapper.findAll('div').filter(el => el.classes().includes('main-content'))
-      expect(innerContainer.length).toBe(1)
+    it('应该渲染三个 Pane 面板', () => {
+      const panes = slotWrapper.findAll('.pane')
+      expect(panes.length).toBe(3)
     })
   })
 })
