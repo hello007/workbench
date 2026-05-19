@@ -223,21 +223,19 @@ describe('Home.vue - Bug修复验证', () => {
 
     it('第一个 Pane 尺寸配置正确', () => {
       const panes = layoutWrapper.findAll('.pane')
-      expect(panes[0].attributes('data-size')).toBe('15')
+      expect(panes[0].attributes('data-size')).toBe('20')
       expect(panes[0].attributes('data-min-size')).toBe('10')
-      expect(panes[0].attributes('data-max-size')).toBe('30')
     })
 
     it('第二个 Pane 尺寸配置正确', () => {
       const panes = layoutWrapper.findAll('.pane')
-      expect(panes[1].attributes('data-size')).toBe('22')
+      expect(panes[1].attributes('data-size')).toBe('30')
       expect(panes[1].attributes('data-min-size')).toBe('15')
-      expect(panes[1].attributes('data-max-size')).toBe('35')
     })
 
     it('第三个 Pane 尺寸配置正确', () => {
       const panes = layoutWrapper.findAll('.pane')
-      expect(panes[2].attributes('data-size')).toBe('63')
+      expect(panes[2].attributes('data-size')).toBe('50')
       expect(panes[2].attributes('data-min-size')).toBe('30')
     })
   })

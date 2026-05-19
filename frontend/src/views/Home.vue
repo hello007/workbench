@@ -1,7 +1,7 @@
 <template>
   <div class="home">
-    <Splitpanes class="default-theme splitpanes-container">
-      <Pane :size="15" :min-size="10" :max-size="30">
+    <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
+      <Pane :size="20" :min-size="10">
         <DirectoryTree
           :directories="directories"
           :selected-id="selectedDirectoryId"
@@ -10,7 +10,7 @@
           @change="loadDirectories"
         />
       </Pane>
-      <Pane :size="22" :min-size="15" :max-size="35">
+      <Pane :size="30" :min-size="15">
         <FileTreePanel
           ref="fileTreePanelRef"
           :directories="directories"
@@ -24,7 +24,7 @@
           @copy-to="handleCopyTo"
         />
       </Pane>
-      <Pane :size="63" :min-size="30">
+      <Pane :size="50" :min-size="30">
         <ContentPanel
           ref="contentPanelRef"
           :selected-node="selectedNode"
@@ -343,14 +343,19 @@ onBeforeUnmount(() => {
 
 <style>
 .splitpanes.default-theme .splitpanes__splitter {
-  background-color: #e6e6e6;
-  width: 1px !important;
-  min-width: 1px !important;
+  background-color: transparent;
+  border-left: 1px solid #e6e6e6;
 }
 .splitpanes.default-theme .splitpanes__splitter:hover {
-  background-color: #c0c4cc;
+  border-left-color: #c0c4cc;
+  background-color: rgba(192, 196, 204, 0.15);
+}
+.splitpanes.default-theme .splitpanes__splitter:before,
+.splitpanes.default-theme .splitpanes__splitter:after {
+  display: none;
 }
 .splitpanes.default-theme .splitpanes__pane {
   background-color: #f5f7fa;
+  transition: none !important;
 }
 </style>
