@@ -1,15 +1,16 @@
 <template>
   <div class="home">
-    <el-container style="height: 100vh;">
-      <el-aside width="200px" class="directory-aside">
+    <Splitpanes class="default-theme splitpanes-container">
+      <Pane :size="15" :min-size="10" :max-size="30">
         <DirectoryTree
           :directories="directories"
           :selected-id="selectedDirectoryId"
+          :version="appVersion"
           @select="onDirectorySelect"
           @change="loadDirectories"
         />
-      </el-aside>
-      <el-aside width="280px" class="file-tree-aside">
+      </Pane>
+      <Pane :size="22" :min-size="15" :max-size="35">
         <FileTreePanel
           ref="fileTreePanelRef"
           :directories="directories"
@@ -20,9 +21,10 @@
           @copy="handleCopy"
           @cut="handleCut"
           @paste="handlePaste"
+          @copy-to="handleCopyTo"
         />
-      </el-aside>
-      <el-main class="content-main">
+      </Pane>
+      <Pane :size="63" :min-size="30">
         <ContentPanel
           ref="contentPanelRef"
           :selected-node="selectedNode"
@@ -37,9 +39,10 @@
           @copy="handleCopy"
           @cut="handleCut"
           @paste="handlePaste"
+          @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
         />
-      </el-main>
-    </el-container>
+      </Pane>
+    </Splitpanes>
   </div>
 </template>
 
@@ -50,11 +53,15 @@ import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
 import {
   GetDirectories,
+  GetAppVersion,
   ScanAndPullRepos,
   DeleteFile,
   CopyItem,
+  CopyTo,
   MoveItem,
   CopyToSystemClipboard,
   CutToSystemClipboard,
@@ -66,6 +73,7 @@ const directories = ref([])
 const selectedDirectoryId = ref('')
 const selectedNode = ref(null)
 const latestCommit = ref(null)
+const appVersion = ref('')
 
 const clipboard = reactive({
   mode: null,
@@ -261,6 +269,24 @@ const handlePaste = async (targetData) => {
   }
 }
 
+const handleCopyTo = async (data) => {
+  fileTreePanelRef.value?.setCopyToLoading(true)
+  try {
+    const result = await CopyTo(data.sourcePath, data.targetPath, data.copyWholeDir)
+    if (result && result.startsWith('错误')) {
+      ElMessage.error(result)
+    } else {
+      ElMessage.success('拷贝成功')
+      fileTreePanelRef.value?.closeCopyToDialog()
+      fileTreePanelRef.value?.refreshNode(data.targetPath)
+    }
+  } catch (error) {
+    ElMessage.error('拷贝失败: ' + (error.message || String(error)))
+  } finally {
+    fileTreePanelRef.value?.setCopyToLoading(false)
+  }
+}
+
 // 窗口获得焦点时，从系统剪贴板同步内部状态
 const handleWindowFocus = async () => {
   try {
@@ -291,6 +317,7 @@ watch(() => selectedDirectoryId.value, () => {
 
 onMounted(() => {
   loadDirectories()
+  GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('focus', handleWindowFocus)
 })
@@ -304,17 +331,23 @@ onBeforeUnmount(() => {
 <style scoped>
 .home {
   font-family: 'Microsoft YaHei', Arial, sans-serif;
+  height: 100vh;
 }
-.directory-aside {
-  border-right: 1px solid #e6e6e6;
-  overflow: hidden;
+.splitpanes-container {
+  height: 100%;
 }
-.file-tree-aside {
-  border-right: 1px solid #e6e6e6;
-  overflow: hidden;
+</style>
+
+<style>
+.splitpanes.default-theme .splitpanes__splitter {
+  background-color: #e6e6e6;
+  width: 1px !important;
+  min-width: 1px !important;
 }
-.content-main {
-  padding: 0;
-  overflow-y: auto;
+.splitpanes.default-theme .splitpanes__splitter:hover {
+  background-color: #c0c4cc;
+}
+.splitpanes.default-theme .splitpanes__pane {
+  background-color: #f5f7fa;
 }
 </style>

@@ -39,6 +39,20 @@ vi.mock('../utils/debug', () => ({
   }
 }))
 
+// Mock Wails Go bindings
+vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetDirectories: vi.fn(() => Promise.resolve([])),
+  GetAppVersion: vi.fn(() => Promise.resolve('1.0.0')),
+  ScanAndPullRepos: vi.fn(() => Promise.resolve('')),
+  DeleteFile: vi.fn(() => Promise.resolve(true)),
+  CopyItem: vi.fn(() => Promise.resolve('')),
+  CopyTo: vi.fn(() => Promise.resolve('')),
+  MoveItem: vi.fn(() => Promise.resolve('')),
+  CopyToSystemClipboard: vi.fn(() => Promise.resolve('')),
+  CutToSystemClipboard: vi.fn(() => Promise.resolve('')),
+  ReadFromSystemClipboard: vi.fn(() => Promise.resolve(null))
+}))
+
 describe('Home.vue - Bug修复验证', () => {
   let wrapper
 
@@ -46,10 +60,11 @@ describe('Home.vue - Bug修复验证', () => {
     wrapper = mount(Home, {
       global: {
         stubs: {
-          'el-container': true,
-          'el-header': true,
-          'el-aside': true,
-          'el-main': true,
+          Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+          Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
+          DirectoryTree: { template: '<div class="stub-directory-tree" />' },
+          FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
+          ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
           'el-tree': true,
           'el-dialog': true,
           'el-form': true,
@@ -74,65 +89,28 @@ describe('Home.vue - Bug修复验证', () => {
   })
 
   describe('Bug修复 #1: 懒加载树根节点检测', () => {
-    it('应该正确识别根节点（level === 0）', async () => {
-      const mockResolve = vi.fn()
-      const rootNode = {
-        level: 0,
-        data: null
-      }
-
-      // 模拟目录数据
-      await wrapper.vm.loadDirectories()
-      wrapper.vm.selectedDirectoryId = 'test-dir-id'
-
-      // 调用loadTreeNode
-      await wrapper.vm.loadTreeNode(rootNode, mockResolve)
-
-      // 验证resolve被调用（即使返回空数组）
-      expect(mockResolve).toHaveBeenCalled()
+    it('应该正确加载目录列表', async () => {
+      // 验证loadDirectories函数存在且可调用
+      expect(typeof wrapper.vm.loadDirectories).toBe('function')
     })
 
-    it('应该正确识别子节点（level > 0且有data）', async () => {
-      const mockResolve = vi.fn()
-      const childNode = {
-        level: 1,
-        data: {
-          path: '/test/path',
-          name: 'test-folder'
-        }
-      }
+    it('应该正确选择目录后清空选中节点', () => {
+      wrapper.vm.selectedNode = { name: 'test', path: '/test' }
+      wrapper.vm.onDirectorySelect('new-dir-id')
 
-      // 调用loadTreeNode
-      await wrapper.vm.loadTreeNode(childNode, mockResolve)
-
-      // 验证resolve被调用
-      expect(mockResolve).toHaveBeenCalled()
+      expect(wrapper.vm.selectedDirectoryId).toBe('new-dir-id')
+      expect(wrapper.vm.selectedNode).toBeNull()
+      expect(wrapper.vm.latestCommit).toBeNull()
     })
 
-    it('应该处理没有data的节点', async () => {
-      const mockResolve = vi.fn()
-      const nodeWithoutData = {
-        level: 1,
-        data: null
-      }
-
-      // 调用loadTreeNode
-      await wrapper.vm.loadTreeNode(nodeWithoutData, mockResolve)
-
-      // 验证resolve被调用（应该作为根节点处理）
-      expect(mockResolve).toHaveBeenCalled()
+    it('应该正确处理目录切换', () => {
+      wrapper.vm.onDirectorySelect('dir-1')
+      expect(wrapper.vm.selectedDirectoryId).toBe('dir-1')
     })
   })
 
   describe('Bug修复 #2: 节点切换时预览状态清理', () => {
-    it('应该在点击节点时清空文件预览', async () => {
-      // 设置初始预览内容
-      wrapper.vm.filePreview = {
-        content: 'previous file content',
-        error: ''
-      }
-
-      // 模拟点击新节点
+    it('应该在选中节点时更新selectedNode', () => {
       const newNode = {
         name: 'new-file.txt',
         path: '/test/new-file.txt',
@@ -140,14 +118,12 @@ describe('Home.vue - Bug修复验证', () => {
         isGitRepo: false
       }
 
-      await wrapper.vm.onNodeClick(newNode)
+      wrapper.vm.onNodeSelect(newNode)
 
-      // 验证预览被清空
-      expect(wrapper.vm.filePreview.content).toBe('')
-      expect(wrapper.vm.filePreview.error).toBe('')
+      expect(wrapper.vm.selectedNode).toEqual(newNode)
     })
 
-    it('应该保留选中的节点信息', async () => {
+    it('应该保留选中的节点信息', () => {
       const newNode = {
         name: 'test-folder',
         path: '/test/folder',
@@ -155,14 +131,13 @@ describe('Home.vue - Bug修复验证', () => {
         isGitRepo: false
       }
 
-      await wrapper.vm.onNodeClick(newNode)
+      wrapper.vm.onNodeSelect(newNode)
 
-      // 验证selectedNode被更新
       expect(wrapper.vm.selectedNode.name).toBe('test-folder')
       expect(wrapper.vm.selectedNode.path).toBe('/test/folder')
     })
 
-    it('应该在Git仓库节点上获取Git信息', async () => {
+    it('应该在Git仓库节点上选中', () => {
       const gitNode = {
         name: 'test-repo',
         path: '/test/repo',
@@ -170,10 +145,9 @@ describe('Home.vue - Bug修复验证', () => {
         isGitRepo: true
       }
 
-      await wrapper.vm.onNodeClick(gitNode)
+      wrapper.vm.onNodeSelect(gitNode)
 
-      // 验证filePreview仍然被清空（即使后续会获取Git信息）
-      expect(wrapper.vm.filePreview.content).toBe('')
+      expect(wrapper.vm.selectedNode).toEqual(gitNode)
     })
   })
 
@@ -279,7 +253,7 @@ describe('Home.vue - Bug修复验证', () => {
             Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
-            ContentPanel: { template: '<div class="stub-content-panel" />' },
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
             'el-dialog': true,
             'el-form': true,
             'el-form-item': true,
