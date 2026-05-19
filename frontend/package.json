@@ -20,6 +20,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "element-plus": "^2.13.7",
+    "splitpanes": "^4.0.4",
     "vue": "^3.5.33",
     "vue-router": "^4.6.4"
   }
