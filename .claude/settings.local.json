@@ -36,7 +36,8 @@
       "Bash(ls -d .worktrees)",
       "Bash(ls -d worktrees)",
       "Bash(git check-ignore *)",
-      "Bash(git worktree *)"
+      "Bash(git worktree *)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

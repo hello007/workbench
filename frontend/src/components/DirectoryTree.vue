@@ -12,6 +12,7 @@
         v-model="localDirectories"
         :animation="200"
         ghost-class="dir-item--ghost"
+        :prevent-on-filter="false"
         @end="onDragEnd"
       >
         <div
@@ -19,8 +20,9 @@
           :key="dir.id"
           class="dir-item"
           :class="{ 'dir-item--active': dir.id === selectedId }"
+          @mousedown="handleSelect(dir.id)"
           @click="handleSelect(dir.id)"
-          @contextmenu.prevent="onContextMenu($event, dir)"
+          @contextmenu="onContextMenu($event, dir)"
         >
           <div class="dir-info">
             <div class="dir-row">
