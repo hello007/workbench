@@ -261,12 +261,18 @@ defineExpose({ loadCommits, handleRefresh })
 </script>
 
 <style scoped>
-.commit-history-card { height: 100%; }
+.commit-history-card {
+  height: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text-primary);
 }
 .header-actions {
   display: flex;
@@ -276,51 +282,91 @@ defineExpose({ loadCommits, handleRefresh })
   max-height: 600px;
   overflow-y: auto;
 }
-.commit-item { cursor: pointer; }
-.commit-card { margin-bottom: 10px; }
+.commit-item {
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+.commit-item:hover {
+  transform: translateX(4px);
+}
+.commit-card {
+  margin-bottom: var(--spacing-md);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+}
+.commit-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-light);
+}
 .commit-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--spacing-sm);
 }
 .commit-sha {
   display: flex;
   align-items: center;
 }
 .sha-text {
-  font-family: monospace;
+  font-family: Consolas, 'Courier New', monospace;
   font-size: 13px;
   cursor: pointer;
+  color: var(--primary-color);
+  font-weight: 500;
 }
-.sha-text:hover { text-decoration: underline; }
+.sha-text:hover {
+  text-decoration: underline;
+  color: var(--primary-dark);
+}
 .sha-full {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--spacing-sm);
 }
 .commit-message {
   display: block;
-  margin: 10px 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: #303133;
+  margin: var(--spacing-md) 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
 }
 .commit-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
-  color: #909399;
+  gap: var(--spacing-xs);
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
-.commit-detail { margin-top: 10px; }
-.files-section { margin-top: 15px; }
+.commit-detail {
+  margin-top: var(--spacing-md);
+  animation: fadeIn var(--transition-fast);
+}
+.files-section {
+  margin-top: var(--spacing-md);
+}
+.files-section .el-tag {
+  margin-right: var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
 .load-more {
-  margin-top: 20px;
+  margin-top: var(--spacing-lg);
   text-align: center;
 }
-.timeline-container::-webkit-scrollbar { width: 6px; }
+.timeline-container::-webkit-scrollbar {
+  width: 6px;
+}
 .timeline-container::-webkit-scrollbar-thumb {
-  background-color: #dcdfe6;
+  background-color: var(--text-tertiary);
   border-radius: 3px;
+  transition: background var(--transition-fast);
+}
+.timeline-container::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
 }
 </style>

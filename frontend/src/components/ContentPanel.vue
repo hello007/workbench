@@ -468,10 +468,188 @@ defineExpose({
 
 <style scoped>
 .content-panel {
-  background-color: #fff;
+  background-color: var(--bg-secondary);
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+/* 内容区域容器 */
+.content-panel > div:first-child {
+  padding: var(--spacing-lg);
+  animation: fadeIn var(--transition-normal);
+}
+
+/* 标题样式 */
+.content-panel h2 {
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: var(--spacing-md);
+  letter-spacing: 0.5px;
+}
+
+.content-panel h3 {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.content-panel h4 {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: var(--spacing-sm);
+}
+
+/* 按钮组样式 */
+.el-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+/* 操作按钮容器 */
+.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions) {
+  background: var(--bg-tertiary);
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-md);
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-normal);
+}
+
+.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--primary-light);
+}
+
+/* 文件预览区域 */
+.preview-textarea {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-normal);
+}
+
+.preview-textarea:hover {
+  border-color: var(--primary-light);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 标签页样式 */
+.el-tabs {
+  margin-top: var(--spacing-md);
+}
+
+.el-tabs__header {
+  margin-bottom: var(--spacing-md);
+}
+
+.el-tabs__nav-wrap {
+  border-bottom: 2px solid var(--border-color);
+}
+
+.el-tabs__item {
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-normal);
+}
+
+.el-tabs__item:hover {
+  color: var(--primary-color);
+}
+
+.el-tabs__item.is-active {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+/* 表格样式 */
+.el-table {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.el-table :deep(.el-table__cell) {
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.el-table :deep(.el-table__row:hover) {
+  background-color: var(--bg-tertiary);
+}
+
+/* 描述列表样式 */
+.el-descriptions {
+  margin-bottom: var(--spacing-md);
+}
+
+.el-descriptions__table {
+  width: 100%;
+}
+
+.el-descriptions__label {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.el-descriptions__content {
+  color: var(--text-secondary);
+}
+
+/* 进度条样式 */
+.el-progress {
+  margin-bottom: var(--spacing-md);
+}
+
+.el-progress__text {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+/* 对话框样式覆盖 */
+:deep(.el-dialog) {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+:deep(.el-dialog__header) {
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+:deep(.el-dialog__title) {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+:deep(.el-dialog__body) {
+  padding: var(--spacing-lg);
+  background: var(--bg-secondary);
+}
+
+:deep(.el-dialog__footer) {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+}
+
+/* 空状态样式 */
+:deep(.el-empty) {
+  margin-top: 50px;
+}
+
+:deep(.el-empty__description) {
+  color: var(--text-tertiary);
+  font-size: 14px;
 }
 </style>

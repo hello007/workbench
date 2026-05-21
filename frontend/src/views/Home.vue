@@ -358,20 +358,60 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-.splitpanes.default-theme .splitpanes__splitter {
-  background-color: transparent;
-  border-left: 1px solid #e6e6e6;
+/* 分隔线样式 - 强制覆盖默认样式 */
+.default-theme.splitpanes--vertical > .splitpanes__splitter,
+.splitpanes--vertical > .splitpanes__splitter {
+  background-color: #e8eaed !important;
+  border-left: none !important;
+  width: 1px !important;
+  margin-left: 0 !important;
+  transition: all var(--transition-normal);
+  position: relative !important;
+  box-shadow: none !important;
 }
-.splitpanes.default-theme .splitpanes__splitter:hover {
-  border-left-color: #c0c4cc;
-  background-color: rgba(192, 196, 204, 0.15);
+.default-theme.splitpanes--vertical > .splitpanes__splitter:hover,
+.splitpanes--vertical > .splitpanes__splitter:hover {
+  background-color: var(--primary-color) !important;
+  border-left: none !important;
+  cursor: col-resize !important;
+  width: 2px !important;
+  box-shadow: 0 0 5px rgba(64, 158, 255, 0.3) !important;
 }
-.splitpanes.default-theme .splitpanes__splitter:before,
-.splitpanes.default-theme .splitpanes__splitter:after {
-  display: none;
+/* 隐藏默认的分隔线装饰 - 最强优先级 */
+* .splitpanes__splitter:before,
+* .splitpanes__splitter:after,
+.splitpanes__splitter:before,
+.splitpanes__splitter:after,
+.default-theme.splitpanes--vertical > .splitpanes__splitter:before,
+.default-theme.splitpanes--vertical > .splitpanes__splitter:after,
+.splitpanes--vertical > .splitpanes__splitter:before,
+.splitpanes--vertical > .splitpanes__splitter:after,
+.default-theme.splitpanes .splitpanes--vertical > .splitpanes__splitter:before,
+.default-theme.splitpanes .splitpanes--vertical > .splitpanes__splitter:after,
+.splitpanes .splitpanes--vertical > .splitpanes__splitter:before,
+.splitpanes .splitpanes--vertical > .splitpanes__splitter:after,
+.default-theme.splitpanes .splitpanes__splitter:before,
+.default-theme.splitpanes .splitpanes__splitter:after {
+  display: none !important;
+  content: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background-color: transparent !important;
+  border: none !important;
 }
+/* 确保面板背景一致 */
 .splitpanes.default-theme .splitpanes__pane {
-  background-color: #f5f7fa;
-  transition: none !important;
+  background-color: var(--bg-primary);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* 移除可能干扰分隔线的面板阴影 */
+.splitpanes.default-theme .splitpanes__pane:nth-child(1) {
+  z-index: 1;
+}
+.splitpanes.default-theme .splitpanes__pane:nth-child(2) {
+  z-index: 0;
+}
+.splitpanes.default-theme .splitpanes__pane:nth-child(3) {
+  z-index: 0;
 }
 </style>

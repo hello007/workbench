@@ -394,7 +394,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #f5f7fa;
+  background-color: var(--bg-primary);
 }
 
 .dir-toolbar {
@@ -402,42 +402,62 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid #ebeef5;
+  padding: var(--spacing-md) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  box-shadow: var(--shadow-sm);
 }
 
 .dir-toolbar-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
 }
 
 .dir-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: var(--spacing-sm) 0;
 }
 
 .dir-item {
-  padding: 8px 12px;
+  padding: 8px 16px;
   cursor: pointer;
   border-left: 3px solid transparent;
-  transition: background-color 0.2s ease;
+  transition: all var(--transition-normal);
+  border-radius: var(--radius-md);
+  margin: 3px 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  font-size: 16px;
 }
 
 .dir-item:hover {
-  background-color: #ecf5ff;
+  background-color: var(--bg-tertiary);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-light);
 }
 
 .dir-item--active {
-  background-color: #e6f7ff;
-  border-left-color: #409eff;
+  background-color: rgba(64, 158, 255, 0.15);
+  border-left-color: var(--primary-color);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-color);
+}
+
+.dir-item--active:hover {
+  background-color: rgba(64, 158, 255, 0.2);
+  border-left-color: var(--primary-color);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary-color);
 }
 
 .dir-item-icon {
   flex-shrink: 0;
-  margin-right: 8px;
+  margin-right: var(--spacing-sm);
 }
 
 .dir-item-name {
@@ -446,13 +466,24 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
-  color: #303133;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .dir-item-star {
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: var(--spacing-xs);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 .dir-info {
@@ -468,67 +499,76 @@ onBeforeUnmount(() => {
 }
 
 .dir-path {
-  font-size: 11px;
-  color: #909399;
+  font-size: 13px;
+  color: var(--text-tertiary);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
+  margin-top: 4px;
   padding-left: 24px;
+  font-family: Consolas, 'Courier New', monospace;
 }
-
 
 .dir-version {
   flex-shrink: 0;
-  padding: 6px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
   font-size: 12px;
-  color: #909399;
+  color: var(--text-tertiary);
   text-align: center;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  font-weight: 500;
 }
 
 /* 右键菜单样式 */
 .context-menu {
   position: fixed;
   z-index: 2000;
-  background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  padding: 4px 0;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) 0;
+  box-shadow: var(--shadow-lg);
   min-width: 160px;
   margin: 0;
   list-style: none;
+  animation: fadeIn var(--transition-fast);
 }
 
 .context-menu-item {
   display: flex;
   align-items: center;
-  padding: 5px 16px;
+  padding: var(--spacing-sm) var(--spacing-md);
   font-size: 14px;
-  color: #606266;
+  color: var(--text-secondary);
   cursor: pointer;
   white-space: nowrap;
+  transition: all var(--transition-fast);
+  border-radius: var(--radius-sm);
+  margin: 0 var(--spacing-xs);
 }
 
 .context-menu-item:hover {
-  background-color: #ecf5ff;
-  color: #409eff;
+  background-color: rgba(64, 158, 255, 0.1);
+  color: var(--primary-color);
+  transform: translateX(4px);
 }
 
 .context-menu-item .el-icon {
-  margin-right: 6px;
+  margin-right: var(--spacing-xs);
 }
 
 .context-menu-divider {
   height: 1px;
-  background-color: #e4e7ed;
-  margin: 4px 0;
+  background-color: var(--border-color);
+  margin: var(--spacing-xs) 0;
 }
 
 .dir-item--ghost {
-  opacity: 0.5;
-  background: #c8e6c9;
+  opacity: 0.6;
+  background: rgba(103, 194, 58, 0.2);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--success-color);
 }
 </style>

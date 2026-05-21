@@ -168,36 +168,76 @@ defineExpose({ loadGitInfo, handleRefresh })
 </script>
 
 <style scoped>
-.git-info-card { margin-bottom: 20px; }
+.git-info-card {
+  margin-bottom: var(--spacing-lg);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+}
+.git-info-card:hover {
+  box-shadow: var(--shadow-md);
+}
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text-primary);
 }
 .url-with-copy {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 .url-text {
-  font-family: monospace;
+  font-family: Consolas, 'Courier New', monospace;
   font-size: 13px;
-  color: #606266;
+  color: var(--text-secondary);
 }
 .sha-with-copy {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 .sha-text {
-  font-family: monospace;
+  font-family: Consolas, 'Courier New', monospace;
   font-size: 13px;
-  color: #409EFF;
+  color: var(--primary-color);
   cursor: pointer;
+  font-weight: 500;
 }
 .commit-message {
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.6;
+}
+/* 优化标签样式 */
+:deep(.el-tag) {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  padding: 4px 8px;
+}
+/* 优化链接样式 */
+:deep(.el-link) {
+  color: var(--primary-color);
+  font-weight: 500;
+}
+:deep(.el-link:hover) {
+  color: var(--primary-dark);
+  text-decoration: underline;
+}
+/* 优化描述列表样式 */
+:deep(.el-descriptions__table) {
+  width: 100%;
+}
+:deep(.el-descriptions__label) {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+:deep(.el-descriptions__content) {
+  color: var(--text-secondary);
 }
 </style>
