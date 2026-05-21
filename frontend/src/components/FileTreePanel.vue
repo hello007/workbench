@@ -17,6 +17,8 @@
       :load="loadTreeNode"
       @node-click="onNodeClick"
       @node-contextmenu="onNodeContextMenu"
+      @node-expand="closeContextMenu"
+      @node-collapse="closeContextMenu"
       class="file-tree"
     >
       <template #default="{ node, data }">
@@ -280,7 +282,7 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu'])
 
 // ---- Refs ----
 const fileTreeRef = ref()
@@ -445,7 +447,10 @@ const collapseAll = () => {
 // ---- 右键菜单 ----
 const onNodeContextMenu = (event, data) => {
   event.preventDefault()
-  event.stopPropagation()
+  event.stopPropagation() // 恢复 stopPropagation()，防止事件冒泡
+
+  // 通知父组件关闭另一个组件的菜单
+  emit('contextmenu')
 
   // 计算菜单位置，确保完全可见
   const menuWidth = 160 // 菜单最小宽度
@@ -760,7 +765,8 @@ defineExpose({
   handleDeleteAt,
   showCopyToDialog,
   setCopyToLoading: (val) => { copyToLoading.value = val },
-  closeCopyToDialog: () => { copyToDialogVisible.value = false }
+  closeCopyToDialog: () => { copyToDialogVisible.value = false },
+  closeMenu: () => { contextMenu.visible = false }
 })
 
 // ---- 生命周期 ----

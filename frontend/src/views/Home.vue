@@ -3,11 +3,13 @@
     <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
       <Pane :size="20" :min-size="10">
         <DirectoryTree
+          ref="directoryTreeRef"
           :directories="directories"
           :selected-id="selectedDirectoryId"
           :version="appVersion"
           @select="onDirectorySelect"
           @change="loadDirectories"
+          @contextmenu="onDirectoryContextMenu"
         />
       </Pane>
       <Pane :size="30" :min-size="15">
@@ -22,6 +24,7 @@
           @cut="handleCut"
           @paste="handlePaste"
           @copy-to="handleCopyTo"
+          @contextmenu="onFileTreeContextMenu"
         />
       </Pane>
       <Pane :size="50" :min-size="30">
@@ -83,8 +86,20 @@ const clipboard = reactive({
 })
 
 // ---- 子组件 ref ----
+const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
 const contentPanelRef = ref()
+
+// ---- 右键菜单事件处理 ----
+// 当点击 DirectoryTree 右键菜单时，关闭 FileTreePanel 的菜单
+const onDirectoryContextMenu = () => {
+  fileTreePanelRef.value?.closeMenu()
+}
+
+// 当点击 FileTreePanel 右键菜单时，关闭 DirectoryTree 的菜单
+const onFileTreeContextMenu = () => {
+  directoryTreeRef.value?.closeMenu()
+}
 
 // ---- 加载目录列表 ----
 const loadDirectories = async () => {

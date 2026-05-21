@@ -129,7 +129,7 @@ const props = defineProps({
   version: { type: String, default: '' }
 })
 
-const emit = defineEmits(['select', 'change'])
+const emit = defineEmits(['select', 'change', 'contextmenu'])
 
 // --- 本地目录列表（可变，用于拖拽） ---
 const localDirectories = ref([...props.directories])
@@ -150,9 +150,21 @@ const contextMenu = reactive({
   targetDir: null
 })
 
+// 暴露关闭菜单的方法
+const closeMenu = () => {
+  contextMenu.visible = false
+}
+
+defineExpose({
+  closeMenu
+})
+
 const onContextMenu = (event, dir) => {
   event.preventDefault()
-  event.stopPropagation()
+  event.stopPropagation() // 恢复 stopPropagation()，防止事件冒泡
+
+  // 通知父组件关闭另一个组件的菜单
+  emit('contextmenu')
 
   // 计算菜单位置，确保完全可见
   const menuWidth = 160 // 菜单最小宽度
@@ -192,6 +204,10 @@ const closeContextMenu = () => {
 }
 
 const onGlobalClick = () => {
+  closeContextMenu()
+}
+
+const onGlobalContextMenu = () => {
   closeContextMenu()
 }
 
@@ -364,10 +380,12 @@ const onDragEnd = async () => {
 // --- 生命周期 ---
 onMounted(() => {
   document.addEventListener('click', onGlobalClick)
+  document.addEventListener('contextmenu', onGlobalContextMenu)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('contextmenu', onGlobalContextMenu)
 })
 </script>
 
