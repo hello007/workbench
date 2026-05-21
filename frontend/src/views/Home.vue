@@ -43,6 +43,7 @@
           @cut="handleCut"
           @paste="handlePaste"
           @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
+          @batch-pull="onBatchPull"
         />
       </Pane>
     </Splitpanes>

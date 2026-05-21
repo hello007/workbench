@@ -36,36 +36,83 @@
 
       <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 20px;">
         <h3>文件夹操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <el-button-group>
-            <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
-            <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-            <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
-            <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
-          </el-button-group>
-          <el-button-group>
-            <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
-            <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
-            <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
-          </el-button-group>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+          <!-- 基本操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">基本操作</span>
+            <el-button-group>
+              <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
+              <el-button @click="$emit('copy', selectedNode)">复制</el-button>
+              <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
+            </el-button-group>
+          </div>
+          <!-- 编辑操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">编辑操作</span>
+            <el-button-group>
+              <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
+              <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
+              <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
+              <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
+            </el-button-group>
+          </div>
+          <!-- 查看操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">查看操作</span>
+            <el-button-group>
+              <el-button @click="handleCopyPath">复制路径</el-button>
+              <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
+              <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
+              <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+            </el-button-group>
+          </div>
+          <!-- 高级操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">高级操作</span>
+            <el-button-group>
+              <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
+              <el-button @click="handleUpdateRepos">更新仓库</el-button>
+              <el-button @click="handleRefresh">刷新</el-button>
+            </el-button-group>
+          </div>
         </div>
       </div>
 
       <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
         <h3>文件操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <el-button-group>
-            <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
-            <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-            <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
-            <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
-          </el-button-group>
-          <el-button-group>
-            <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
-            <el-button @click="previewFile">预览</el-button>
-            <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
-            <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
-          </el-button-group>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+          <!-- 基本操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">基本操作</span>
+            <el-button-group>
+              <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
+              <el-button @click="$emit('copy', selectedNode)">复制</el-button>
+              <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
+            </el-button-group>
+          </div>
+          <!-- 编辑操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">编辑操作</span>
+            <el-button-group>
+              <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
+              <el-button @click="previewFile">预览</el-button>
+              <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
+              <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
+            </el-button-group>
+          </div>
+          <!-- 查看操作 -->
+          <div>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">查看操作</span>
+            <el-button-group>
+              <el-button @click="handleCopyPath">复制路径</el-button>
+              <el-button @click="handleCopyName">复制文件名</el-button>
+              <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
+              <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
+              <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+            </el-button-group>
+          </div>
         </div>
 
         <div v-if="filePreview.content" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
@@ -171,7 +218,8 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import {
-  PreviewFile, PullRepo, CloneRepo, OpenWithDefaultApp
+  PreviewFile, PullRepo, CloneRepo, OpenWithDefaultApp,
+  OpenInExplorer, OpenInVSCode, OpenInWarp
 } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -196,7 +244,8 @@ const emit = defineEmits([
   'copy',
   'cut',
   'paste',
-  'copyTo'
+  'copyTo',
+  'batchPull'
 ])
 
 const gitLoading = ref(false)
@@ -251,6 +300,70 @@ const handleOpenWithDefaultApp = async () => {
   } catch (error) {
     ElMessage.error('打开文件失败: ' + (error.message || String(error)))
   }
+}
+
+const handleOpenInExplorer = async () => {
+  if (!props.selectedNode) return
+  try {
+    const result = await OpenInExplorer(props.selectedNode.path)
+    if (!result) {
+      ElMessage.error('打开资源管理器失败')
+    }
+  } catch (error) {
+    ElMessage.error('打开资源管理器失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenInVSCode = async () => {
+  if (!props.selectedNode) return
+  try {
+    const result = await OpenInVSCode(props.selectedNode.path)
+    if (!result) {
+      ElMessage.error('打开 VSCode 失败，请确认已安装 VSCode 并将 code 命令加入 PATH')
+    }
+  } catch (error) {
+    ElMessage.error('打开 VSCode 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenInWarp = async () => {
+  if (!props.selectedNode) return
+  try {
+    const result = await OpenInWarp(props.selectedNode.path)
+    if (!result) {
+      ElMessage.error('打开 Warp 失败，请确认已安装 Warp 终端')
+    }
+  } catch (error) {
+    ElMessage.error('打开 Warp 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleCopyPath = async () => {
+  if (!props.selectedNode) return
+  try {
+    await navigator.clipboard.writeText(props.selectedNode.path.replaceAll('\\', '/'))
+    ElMessage.success('路径已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+const handleCopyName = async () => {
+  if (!props.selectedNode || props.selectedNode.type !== 'file') return
+  try {
+    await navigator.clipboard.writeText(props.selectedNode.name)
+    ElMessage.success('文件名已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+const handleRefresh = () => {
+  emit('refreshNode', props.selectedNode.path)
+}
+
+const handleUpdateRepos = () => {
+  emit('batchPull', props.selectedNode)
 }
 
 const previewFile = async () => {
