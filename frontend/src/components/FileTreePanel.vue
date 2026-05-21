@@ -446,8 +446,36 @@ const collapseAll = () => {
 const onNodeContextMenu = (event, data) => {
   event.preventDefault()
   event.stopPropagation()
-  contextMenu.x = event.clientX
-  contextMenu.y = event.clientY
+
+  // 计算菜单位置，确保完全可见
+  const menuWidth = 160 // 菜单最小宽度
+  const menuHeight = 400 // 菜单估计高度（文件菜单比目录菜单长）
+
+  let x = event.clientX
+  let y = event.clientY
+
+  // 检查右侧边界
+  if (x + menuWidth > window.innerWidth) {
+    x = window.innerWidth - menuWidth - 5
+  }
+
+  // 检查底部边界
+  if (y + menuHeight > window.innerHeight) {
+    y = window.innerHeight - menuHeight - 5
+  }
+
+  // 检查左侧边界
+  if (x < 5) {
+    x = 5
+  }
+
+  // 检查顶部边界
+  if (y < 5) {
+    y = 5
+  }
+
+  contextMenu.x = x
+  contextMenu.y = y
   contextMenu.data = data
   contextMenu.visible = true
 }
