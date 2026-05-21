@@ -51,7 +51,7 @@
         </div>
       </div>
 
-      <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px;">
+      <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
         <h3>文件操作</h3>
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <el-button-group>
@@ -68,14 +68,20 @@
           </el-button-group>
         </div>
 
-        <div v-if="filePreview.content" style="margin-top: 20px;">
-          <h4>文件内容</h4>
+        <div v-if="filePreview.content" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
+          <h4 style="margin-bottom: 10px;">文件内容</h4>
           <el-input
             v-model="filePreview.content"
             type="textarea"
-            :rows="10"
+            :rows="15"
             readonly
-            style="font-family: monospace;"
+            :style="{
+              fontFamily: 'monospace',
+              height: '100%',
+              minHeight: '200px',
+              resize: 'vertical'
+            }"
+            class="preview-textarea"
           />
         </div>
       </div>
@@ -158,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onBeforeUnmount } from 'vue'
+import { ref, reactive, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -262,6 +268,13 @@ const previewFile = async () => {
   }
 }
 
+// 监听选中节点变化，自动预览文件内容
+watch(() => props.selectedNode, async (newNode) => {
+  if (newNode && newNode.type === 'file') {
+    await previewFile()
+  }
+})
+
 const showCloneDialog = () => {
   cloneUrl.value = ''
   cloneDialogVisible.value = true
@@ -345,5 +358,7 @@ defineExpose({
   background-color: #fff;
   height: 100%;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 </style>

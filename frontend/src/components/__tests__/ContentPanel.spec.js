@@ -46,7 +46,7 @@ const contentPanelStubs = {
   'el-form-item': { template: '<div><slot /></div>', props: ['label'] },
   'el-input': {
     template: '<template v-if="type === \'textarea\'"><textarea :value="modelValue" :rows="rows" :readonly="readonly" /></template><template v-else><input :value="modelValue" :placeholder="placeholder" :disabled="disabled" :type="type" :readonly="readonly" /></template>',
-    props: ['modelValue', 'placeholder', 'disabled', 'type', 'rows', 'readonly']
+    props: ['modelValue', 'placeholder', 'disabled', 'type', 'rows', 'readonly', 'autosize']
   },
   'el-table': { template: '<table><slot /></table>', props: ['data', 'size'] },
   'el-table-column': { template: '<col />', props: ['prop', 'label', 'width', 'minWidth'] },
@@ -136,6 +136,9 @@ describe('ContentPanel.vue', () => {
         global: { stubs: contentPanelStubs }
       })
 
+      // 先检查初始状态
+      expect(wrapper.find('textarea').exists()).toBe(false)
+
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
       expect(previewBtn.exists()).toBe(true)
@@ -143,6 +146,20 @@ describe('ContentPanel.vue', () => {
       await flushPromises()
 
       expect(PreviewFile).toHaveBeenCalledWith('/test/file.txt')
+
+      // 检查组件实例的 filePreview 值
+      console.log('filePreview:', wrapper.vm.filePreview)
+
+      console.log('Wrapper HTML after preview:', wrapper.html())
+
+      // 尝试通过其他方式查找文本框
+      const textarea = wrapper.find('textarea')
+      console.log('Textarea found:', textarea.exists())
+
+      if (textarea.exists()) {
+        console.log('Textarea value:', textarea.element.value)
+      }
+
       expect(wrapper.find('textarea').exists()).toBe(true)
       expect(wrapper.find('textarea').element.value).toBe(testContent)
     })
