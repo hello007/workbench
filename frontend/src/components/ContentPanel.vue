@@ -140,6 +140,7 @@
       v-model="cloneDialogVisible"
       title="克隆仓库"
       width="500px"
+      append-to-body
     >
       <el-form label-width="100px">
         <el-form-item label="目标文件夹">
@@ -168,6 +169,7 @@
       :close-on-click-modal="false"
       :close-on-press-escape="!pullCompleted"
       :show-close="pullCompleted"
+      append-to-body
     >
       <div style="margin-bottom: 16px;">
         <el-progress

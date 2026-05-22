@@ -68,7 +68,7 @@
     </ul>
 
     <!-- 添加目录对话框 -->
-    <el-dialog v-model="addDialogVisible" title="添加工作目录" width="500px">
+    <el-dialog v-model="addDialogVisible" title="添加工作目录" width="500px" append-to-body>
       <el-form :model="addForm" label-width="100px">
         <el-form-item label="目录名称">
           <el-input v-model="addForm.name" placeholder="例如: 我的工作空间" />
@@ -87,7 +87,7 @@
     </el-dialog>
 
     <!-- 重命名目录对话框 -->
-    <el-dialog v-model="renameDialogVisible" title="重命名工作目录" width="420px">
+    <el-dialog v-model="renameDialogVisible" title="重命名工作目录" width="420px" append-to-body>
       <el-form label-width="80px">
         <el-form-item label="当前名称">
           <el-input :model-value="contextMenu.targetDir?.name" disabled />

@@ -53,6 +53,7 @@
       v-model="createDialogVisible"
       :title="createType === 'directory' ? '新建文件夹' : '新建文件'"
       width="420px"
+      append-to-body
     >
       <el-form label-width="80px">
         <el-form-item label="父文件夹">
@@ -78,6 +79,7 @@
       v-model="renameDialogVisible"
       title="重命名"
       width="420px"
+      append-to-body
     >
       <el-form label-width="80px">
         <el-form-item label="当前名称">
@@ -105,6 +107,7 @@
       v-model="copyToDialogVisible"
       title="拷贝到"
       width="480px"
+      append-to-body
     >
       <el-form label-width="100px">
         <el-form-item label="原地址">
