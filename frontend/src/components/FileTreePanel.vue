@@ -7,46 +7,48 @@
         <el-button size="small" @click="collapseAll">全部收起</el-button>
       </el-button-group>
     </div>
-    <el-tree
-      v-if="selectedDirId"
-      :key="treeKey"
-      ref="fileTreeRef"
-      :props="treeProps"
-      node-key="path"
-      lazy
-      :load="loadTreeNode"
-      @node-click="onNodeClick"
-      @node-contextmenu="onNodeContextMenu"
-      @node-expand="closeContextMenu"
-      @node-collapse="closeContextMenu"
-      class="file-tree"
-    >
-      <template #default="{ node, data }">
-        <span class="custom-tree-node">
-          <el-icon
-            v-if="data.type === 'directory'"
-            :color="node.expanded ? '#409EFF' : '#909399'"
-            style="margin-right: 5px;"
-          >
-            <component :is="node.expanded ? FolderOpened : Folder" />
-          </el-icon>
-          <el-icon v-else color="#606266" style="margin-right: 5px;">
-            <Document />
-          </el-icon>
-          <span :style="{
-            color: data.type === 'directory'
-              ? (node.expanded ? '#409EFF' : '#909399')
-              : '#606266'
-          }">
-            {{ node.label }}
+    <div class="tree-content" @contextmenu.prevent="onBlankAreaContextMenu">
+      <el-tree
+        v-if="selectedDirId"
+        :key="treeKey"
+        ref="fileTreeRef"
+        :props="treeProps"
+        node-key="path"
+        lazy
+        :load="loadTreeNode"
+        @node-click="onNodeClick"
+        @node-contextmenu="onNodeContextMenu"
+        @node-expand="closeContextMenu"
+        @node-collapse="closeContextMenu"
+        class="file-tree"
+      >
+        <template #default="{ node, data }">
+          <span class="custom-tree-node">
+            <el-icon
+              v-if="data.type === 'directory'"
+              :color="node.expanded ? '#409EFF' : '#909399'"
+              style="margin-right: 5px;"
+            >
+              <component :is="node.expanded ? FolderOpened : Folder" />
+            </el-icon>
+            <el-icon v-else color="#606266" style="margin-right: 5px;">
+              <Document />
+            </el-icon>
+            <span :style="{
+              color: data.type === 'directory'
+                ? (node.expanded ? '#409EFF' : '#909399')
+                : '#606266'
+            }">
+              {{ node.label }}
+            </span>
+            <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
+              <SuccessFilled />
+            </el-icon>
           </span>
-          <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
-            <SuccessFilled />
-          </el-icon>
-        </span>
-      </template>
-    </el-tree>
-    <el-empty v-else description="请先选择工作目录" :image-size="100" />
+        </template>
+      </el-tree>
+      <el-empty v-else description="请先选择工作目录" :image-size="100" />
+    </div>
 
     <!-- 新建文件夹/文件对话框 -->
     <el-dialog
@@ -153,7 +155,15 @@
       :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
       @click.stop
     >
-      <template v-if="contextMenu.data?.type === 'directory'">
+      <template v-if="contextMenu.isBlankArea">
+        <li class="context-menu-item" @click="onMenuCommand('createFile')">
+          <el-icon><DocumentAdd /></el-icon>新建文件
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('createDir')">
+          <el-icon><FolderAdd /></el-icon>新建文件夹
+        </li>
+      </template>
+      <template v-else-if="contextMenu.data?.type === 'directory'">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
           <el-icon><DocumentAdd /></el-icon>新建文件
         </li>
@@ -303,7 +313,8 @@ const contextMenu = reactive({
   visible: false,
   x: 0,
   y: 0,
-  data: null
+  data: null,
+  isBlankArea: false
 })
 
 // ---- 新建对话框状态 ----
@@ -462,6 +473,7 @@ const onNodeContextMenu = (event, data) => {
   contextMenu.x = x
   contextMenu.y = y
   contextMenu.data = data
+  contextMenu.isBlankArea = false
   contextMenu.visible = true
 
   // 等菜单渲染完成后测量实际高度并调整位置
@@ -507,10 +519,47 @@ const onNodeContextMenu = (event, data) => {
 
 const closeContextMenu = () => {
   contextMenu.visible = false
+  contextMenu.isBlankArea = false
 }
 
 const onGlobalClick = () => {
   closeContextMenu()
+}
+
+// ---- 空白区域右键菜单 ----
+const onBlankAreaContextMenu = (event) => {
+  event.stopPropagation()
+
+  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  if (!dir) return
+
+  emit('contextmenu')
+
+  let x = event.clientX
+  let y = event.clientY
+
+  contextMenu.x = x
+  contextMenu.y = y
+  contextMenu.data = { path: dir.path, name: dir.name, type: 'directory' }
+  contextMenu.isBlankArea = true
+  contextMenu.visible = true
+
+  nextTick(() => {
+    const menuElement = document.querySelector('.context-menu')
+    if (menuElement) {
+      const rect = menuElement.getBoundingClientRect()
+      let adjustedX = x
+      let adjustedY = y
+      if (adjustedX + rect.width > window.innerWidth) adjustedX = window.innerWidth - rect.width - 5
+      if (adjustedY + rect.height > window.innerHeight) adjustedY = window.innerHeight - rect.height - 5
+      if (adjustedX < 5) adjustedX = 5
+      if (adjustedY < 5) adjustedY = 5
+      if (adjustedX !== x || adjustedY !== y) {
+        contextMenu.x = adjustedX
+        contextMenu.y = adjustedY
+      }
+    }
+  })
 }
 
 const onGlobalContextMenu = () => {
@@ -818,10 +867,13 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
 }
 
-.file-tree {
+.tree-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+.file-tree {
   background: transparent;
 }
 
