@@ -199,6 +199,12 @@
 
       <template #footer>
         <el-button
+          v-if="!pullCompleted"
+          @click="pullRunningInBackground = true; pullDialogVisible = false"
+        >
+          后台运行
+        </el-button>
+        <el-button
           type="primary"
           @click="pullDialogVisible = false"
           :disabled="!pullCompleted"
@@ -207,6 +213,28 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 底部后台运行状态栏 -->
+    <transition name="slide-up">
+      <div v-if="pullRunningInBackground" class="pull-status-bar" @click="onStatusBarClick">
+        <div class="pull-status-left">
+          <span v-if="!pullCompleted" class="pull-status-pulse" />
+          <el-icon v-else :size="14" color="#67C23A"><SuccessFilled /></el-icon>
+          <span class="pull-status-text">
+            <template v-if="!pullCompleted">正在更新 {{ pullProgress.current }}/{{ pullProgress.total }}</template>
+            <template v-else>更新完成（{{ pullSummary.success }} 成功<template v-if="pullSummary.failed > 0">，{{ pullSummary.failed }} 失败</template>）</template>
+          </span>
+        </div>
+        <el-progress
+          v-if="!pullCompleted"
+          :percentage="pullProgress.total > 0 ? Math.round(pullProgress.current / pullProgress.total * 100) : 0"
+          :stroke-width="4"
+          :show-text="false"
+          class="pull-status-progress"
+        />
+        <span v-else class="pull-status-view">查看详情</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -267,6 +295,7 @@ const pullProgress = reactive({ current: 0, total: 0 })
 const pullResults = ref([])
 const pullCompleted = ref(false)
 const pullSummary = reactive({ success: 0, failed: 0 })
+const pullRunningInBackground = ref(false)
 
 const isWailsRuntime = () => !!window.runtime
 
@@ -424,7 +453,15 @@ const startBatchPull = (summary) => {
   pullCompleted.value = false
   pullSummary.success = 0
   pullSummary.failed = 0
+  pullRunningInBackground.value = false
   pullDialogVisible.value = true
+}
+
+const onStatusBarClick = () => {
+  if (pullCompleted.value) {
+    pullRunningInBackground.value = false
+    pullDialogVisible.value = true
+  }
 }
 
 const clearPreview = () => {
@@ -451,6 +488,10 @@ const setupPullEvents = () => {
     pullCompleted.value = true
     pullSummary.success = summary.success || 0
     pullSummary.failed = summary.failed || 0
+    if (pullRunningInBackground.value) {
+      pullRunningInBackground.value = false
+      pullDialogVisible.value = true
+    }
   })
 }
 
@@ -473,6 +514,7 @@ defineExpose({
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* 内容区域容器 */
@@ -651,5 +693,64 @@ defineExpose({
 :deep(.el-empty__description) {
   color: var(--text-tertiary);
   font-size: 14px;
+}
+
+/* 底部后台运行状态栏 */
+.pull-status-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%);
+  border-top: 1px solid #d4e8f7;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.pull-status-bar:hover {
+  background: linear-gradient(135deg, #e1f0ff 0%, #d6ecfa 100%);
+  box-shadow: 0 -2px 8px rgba(64, 158, 255, 0.1);
+}
+.pull-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pull-status-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+.pull-status-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pull-status-progress {
+  width: 100px;
+  flex-shrink: 0;
+}
+.pull-status-view {
+  font-size: 12px;
+  color: var(--primary-color);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
 }
 </style>
