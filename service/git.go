@@ -94,6 +94,22 @@ func (s *GitService) ExtractRepoName(url string) string {
 	return "repo"
 }
 
+// getLocalBranchNames 获取本地分支名列表
+func (s *GitService) getLocalBranchNames(dirPath string) []string {
+	output, err := s.gitCmd.Execute(dirPath, "branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
 // GetBranches 获取仓库的分支列表
 func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 	if !s.gitCmd.IsGitRepository(dirPath) {
@@ -121,8 +137,8 @@ func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "  "))
 		}
 
-		// 过滤 HEAD -> 引用
-		if strings.Contains(line, "HEAD ->") {
+		// 过滤 HEAD -> 引用和 detached HEAD
+		if strings.Contains(line, "HEAD ->") || strings.Contains(line, "(HEAD detached") {
 			continue
 		}
 
@@ -165,7 +181,19 @@ func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote 
 		if len(parts) == 2 {
 			localName = parts[1]
 		}
-		_, err := s.gitCmd.CheckoutRemote(dirPath, branchName, localName)
+		// 如果本地已有同名分支，直接切换；否则从远程创建
+		localExists := false
+		for _, b := range s.getLocalBranchNames(dirPath) {
+			if b == localName {
+				localExists = true
+				break
+			}
+		}
+		if localExists {
+			_, err = s.gitCmd.CheckoutLocal(dirPath, localName)
+		} else {
+			_, err = s.gitCmd.CheckoutRemote(dirPath, branchName, localName)
+		}
 		return err
 	}
 
