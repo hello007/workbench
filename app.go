@@ -545,3 +545,19 @@ func (a *App) DiscardChanges(path string, filePaths []string) error {
 	}
 	return a.gitSvc.DiscardChanges(path, filePaths)
 }
+
+// GetBranches 获取仓库分支列表
+func (a *App) GetBranches(path string) (*model.BranchList, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.GetBranches(path)
+}
+
+// CheckoutBranch 切换分支
+func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CheckoutBranch(path, branchName, isRemote)
+}

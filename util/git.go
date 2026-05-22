@@ -137,3 +137,27 @@ func FindGitRoot(path string) (string, error) {
 func (g *GitCommand) Pull(dir string) (string, error) {
 	return g.Execute(dir, "pull")
 }
+
+// GetBranchesAll 获取所有分支（本地+远程）
+func (g *GitCommand) GetBranchesAll(dir string) (string, error) {
+	return g.Execute(dir, "branch", "-a")
+}
+
+// HasLocalChanges 检查是否有未提交的变更
+func (g *GitCommand) HasLocalChanges(dir string) (bool, error) {
+	output, err := g.Execute(dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(output) != "", nil
+}
+
+// CheckoutLocal 切换到本地分支
+func (g *GitCommand) CheckoutLocal(dir, branch string) (string, error) {
+	return g.Execute(dir, "checkout", branch)
+}
+
+// CheckoutRemote 从远程分支创建本地分支并跟踪
+func (g *GitCommand) CheckoutRemote(dir, remoteBranch, localBranch string) (string, error) {
+	return g.Execute(dir, "checkout", "-b", localBranch, remoteBranch)
+}

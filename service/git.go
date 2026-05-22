@@ -94,6 +94,85 @@ func (s *GitService) ExtractRepoName(url string) string {
 	return "repo"
 }
 
+// GetBranches 获取仓库的分支列表
+func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
+	if !s.gitCmd.IsGitRepository(dirPath) {
+		return nil, fmt.Errorf("不是Git仓库")
+	}
+
+	output, err := s.gitCmd.GetBranchesAll(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("获取分支列表失败: %w", err)
+	}
+
+	var branches []model.BranchInfo
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		isCurrent := strings.HasPrefix(line, "* ")
+		if isCurrent {
+			line = strings.TrimSpace(line[2:])
+		} else {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "  "))
+		}
+
+		// 过滤 HEAD -> 引用
+		if strings.Contains(line, "HEAD ->") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "remotes/") {
+			name := strings.TrimPrefix(line, "remotes/")
+			branches = append(branches, model.BranchInfo{
+				Name:      name,
+				IsRemote:  true,
+				IsCurrent: isCurrent,
+			})
+		} else {
+			branches = append(branches, model.BranchInfo{
+				Name:      line,
+				IsRemote:  false,
+				IsCurrent: isCurrent,
+			})
+		}
+	}
+
+	return &model.BranchList{Branches: branches}, nil
+}
+
+// CheckoutBranch 切换分支
+func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote bool) error {
+	if !s.gitCmd.IsGitRepository(dirPath) {
+		return fmt.Errorf("不是Git仓库")
+	}
+
+	hasChanges, err := s.gitCmd.HasLocalChanges(dirPath)
+	if err != nil {
+		return fmt.Errorf("检查工作区状态失败: %w", err)
+	}
+	if hasChanges {
+		return fmt.Errorf("当前有未提交的变更，请先提交或暂存后再切换分支")
+	}
+
+	if isRemote {
+		parts := strings.SplitN(branchName, "/", 2)
+		localName := branchName
+		if len(parts) == 2 {
+			localName = parts[1]
+		}
+		_, err := s.gitCmd.CheckoutRemote(dirPath, branchName, localName)
+		return err
+	}
+
+	_, err = s.gitCmd.CheckoutLocal(dirPath, branchName)
+	return err
+}
+
 // ScanGitRepos 递归扫描目录下所有 Git 仓库
 // 如果 rootPath 本身是 git 仓库，直接返回 [rootPath]
 // 否则递归遍历子目录，收集所有 git 仓库路径

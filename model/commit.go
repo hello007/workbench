@@ -26,6 +26,18 @@ type FileChange struct {
 	Staged bool   `json:"staged"` // 是否已暂存
 }
 
+// BranchInfo 分支信息
+type BranchInfo struct {
+	Name      string `json:"name"`
+	IsRemote  bool   `json:"isRemote"`
+	IsCurrent bool   `json:"isCurrent"`
+}
+
+// BranchList 分支列表
+type BranchList struct {
+	Branches []BranchInfo `json:"branches"`
+}
+
 // StatusLabel 返回状态的可读标签
 func (f *FileChange) StatusLabel() string {
 	switch f.Status {
