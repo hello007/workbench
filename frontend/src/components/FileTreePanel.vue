@@ -862,8 +862,8 @@ onBeforeUnmount(() => {
   z-index: 2000;
   background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
   border: 1px solid #e9ecef;
-  border-radius: 10px;
-  padding: 8px 0;
+  border-radius: 8px;
+  padding: 4px 0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 4px 15px rgba(0, 0, 0, 0.1);
   min-width: 180px;
   margin: 0;
@@ -875,14 +875,14 @@ onBeforeUnmount(() => {
 .context-menu-item {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  font-size: 14px;
+  padding: 6px 14px;
+  font-size: 13px;
   color: #495057;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s ease;
-  border-radius: 6px;
-  margin: 0 8px;
+  border-radius: 4px;
+  margin: 0 4px;
   position: relative;
   overflow: hidden;
 }
@@ -910,14 +910,14 @@ onBeforeUnmount(() => {
 }
 
 .context-menu-item .el-icon {
-  margin-right: 8px;
-  font-size: 16px;
+  margin-right: 6px;
+  font-size: 14px;
 }
 
 .context-menu-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent 0%, #dee2e6 50%, transparent 100%);
-  margin: 6px 0;
+  margin: 3px 0;
 }
 
 .context-menu-item.is-disabled {
