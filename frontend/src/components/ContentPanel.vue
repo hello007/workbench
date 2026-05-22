@@ -1,6 +1,6 @@
 <template>
   <div class="content-panel">
-    <div v-if="selectedNode" style="padding: 20px;">
+    <div v-if="selectedNode" style="padding: 16px;">
       <h2>{{ selectedNode.name }}</h2>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="路径">{{ selectedNode.path }}</el-descriptions-item>
@@ -34,12 +34,12 @@
         </el-tab-pane>
       </el-tabs>
 
-      <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 20px;">
+      <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 12px;">
         <h3>文件夹操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 15px;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
           <!-- 基本操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">基本操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">基本操作</span>
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
@@ -49,7 +49,7 @@
           </div>
           <!-- 编辑操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">编辑操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">编辑操作</span>
             <el-button-group>
               <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
               <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
@@ -59,7 +59,7 @@
           </div>
           <!-- 查看操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">查看操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">查看操作</span>
             <el-button-group>
               <el-button @click="handleCopyPath">复制路径</el-button>
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
@@ -69,7 +69,7 @@
           </div>
           <!-- 高级操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">高级操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">高级操作</span>
             <el-button-group>
               <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
               <el-button @click="handleUpdateRepos">更新仓库</el-button>
@@ -79,12 +79,12 @@
         </div>
       </div>
 
-      <div v-else-if="selectedNode.type === 'file'" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
+      <div v-else-if="selectedNode.type === 'file'" style="margin-top: 12px; display: flex; flex-direction: column; flex: 1;">
         <h3>文件操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 15px;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
           <!-- 基本操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">基本操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">基本操作</span>
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
@@ -94,7 +94,7 @@
           </div>
           <!-- 编辑操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">编辑操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">编辑操作</span>
             <el-button-group>
               <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
               <el-button @click="previewFile">预览</el-button>
@@ -104,7 +104,7 @@
           </div>
           <!-- 查看操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 5px; display: block;">查看操作</span>
+            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">查看操作</span>
             <el-button-group>
               <el-button @click="handleCopyPath">复制路径</el-button>
               <el-button @click="handleCopyName">复制文件名</el-button>
@@ -115,8 +115,8 @@
           </div>
         </div>
 
-        <div v-if="filePreview.content" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1;">
-          <h4 style="margin-bottom: 10px;">文件内容</h4>
+        <div v-if="filePreview.content" style="margin-top: 12px; display: flex; flex-direction: column; flex: 1;">
+          <h4 style="margin-bottom: 6px;">文件内容</h4>
           <el-input
             v-model="filePreview.content"
             type="textarea"
@@ -484,18 +484,18 @@ defineExpose({
 /* 标题样式 */
 .content-panel h2 {
   color: var(--text-primary);
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  margin-bottom: var(--spacing-md);
+  margin-bottom: 10px;
   letter-spacing: 0.5px;
 }
 
 .content-panel h3 {
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin-bottom: var(--spacing-md);
-  padding-bottom: var(--spacing-sm);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
   border-bottom: 2px solid var(--border-color);
 }
 
@@ -516,9 +516,9 @@ defineExpose({
 /* 操作按钮容器 */
 .content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):not(.el-divider) {
   background: var(--bg-tertiary);
-  padding: var(--spacing-lg);
+  padding: 12px;
   border-radius: var(--radius-md);
-  margin-top: var(--spacing-md);
+  margin-top: 10px;
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
 }
@@ -543,7 +543,7 @@ defineExpose({
 
 /* 标签页样式 */
 .el-tabs {
-  margin-top: var(--spacing-md);
+  margin-top: 10px;
 }
 
 .el-tabs__header {
