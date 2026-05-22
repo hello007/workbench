@@ -132,7 +132,115 @@ func (s *GitService) scanDir(dir string, repos *[]string) {
 	}
 }
 
-// safeEmit 安全发射 Wails 事件，非 Wails 上下文时静默跳过
+// GetLocalChanges 获取本地变动文件列表
+func (s *GitService) GetLocalChanges(dirPath string) ([]model.FileChange, error) {
+	gitRoot, err := util.FindGitRoot(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	// 使用 -z 以 NUL 分隔输出，避免路径引号和八进制转义问题
+	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("获取本地变动失败: %w", err)
+	}
+
+	if output == "" {
+		return []model.FileChange{}, nil
+	}
+
+	segments := strings.Split(output, "\x00")
+	changes := make([]model.FileChange, 0, len(segments))
+
+	for i := 0; i < len(segments); i++ {
+		seg := segments[i]
+		if seg == "" || len(seg) < 4 || seg[2] != ' ' {
+			continue
+		}
+
+		staged := seg[0] != ' ' && seg[0] != '?'
+		statusRaw := seg[:2]
+		filePath := seg[3:]
+
+		// 重命名/复制时，下一个 segment 是目标路径
+		if (statusRaw[0] == 'R' || statusRaw[0] == 'C') && i+1 < len(segments) && segments[i+1] != "" {
+			filePath = segments[i+1]
+			i++
+		}
+
+		// 取工作区状态码
+		status := strings.TrimSpace(statusRaw)
+		if len(status) == 2 {
+			status = string(status[1])
+		}
+
+		changes = append(changes, model.FileChange{
+			Path:   filePath,
+			Status: status,
+			Staged: staged,
+		})
+	}
+
+	return changes, nil
+}
+
+// DiscardChanges 回滚本地变动
+func (s *GitService) DiscardChanges(dirPath string, filePaths []string) error {
+	gitRoot, err := util.FindGitRoot(dirPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	if len(filePaths) == 0 {
+		// 回滚全部：从 HEAD 恢复已跟踪文件，再清理未跟踪文件
+		if _, err := s.gitCmd.Execute(gitRoot, "checkout", "HEAD", "--", "."); err != nil {
+			return fmt.Errorf("回滚失败: %w", err)
+		}
+		if _, err := s.gitCmd.Execute(gitRoot, "clean", "-fd"); err != nil {
+			return fmt.Errorf("清理未跟踪文件失败: %w", err)
+		}
+		return nil
+	}
+
+	// 查询文件状态，区分已跟踪和未跟踪
+	changes, err := s.GetLocalChanges(dirPath)
+	if err != nil {
+		return fmt.Errorf("获取文件状态失败: %w", err)
+	}
+
+	untrackedSet := make(map[string]bool)
+	for _, c := range changes {
+		if c.Status == "?" {
+			untrackedSet[c.Path] = true
+		}
+	}
+
+	var tracked, untracked []string
+	for _, p := range filePaths {
+		if untrackedSet[p] {
+			untracked = append(untracked, p)
+		} else {
+			tracked = append(tracked, p)
+		}
+	}
+
+	if len(tracked) > 0 {
+		// 从 HEAD 恢复已跟踪文件（同时更新索引和工作区）
+		args := append([]string{"checkout", "HEAD", "--"}, tracked...)
+		if _, err := s.gitCmd.Execute(gitRoot, args...); err != nil {
+			return fmt.Errorf("回滚失败: %w", err)
+		}
+	}
+
+	if len(untracked) > 0 {
+		args := append([]string{"clean", "-fd", "--"}, untracked...)
+		if _, err := s.gitCmd.Execute(gitRoot, args...); err != nil {
+			return fmt.Errorf("清理未跟踪文件失败: %w", err)
+		}
+	}
+
+	return nil
+}
 func safeEmit(ctx context.Context, event string, data ...interface{}) {
 	if ctx == nil || ctx.Value("events") == nil {
 		return

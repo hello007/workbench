@@ -529,3 +529,19 @@ func (a *App) ReadFromSystemClipboard() string {
 	})
 	return string(data)
 }
+
+// GetLocalChanges 获取仓库本地变动文件列表
+func (a *App) GetLocalChanges(path string) ([]model.FileChange, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.GetLocalChanges(path)
+}
+
+// DiscardChanges 回滚本地变动，filePaths 为空则回滚全部
+func (a *App) DiscardChanges(path string, filePaths []string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.DiscardChanges(path, filePaths)
+}

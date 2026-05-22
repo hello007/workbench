@@ -18,3 +18,28 @@ type GitRemoteInfo struct {
 	Branch     string `json:"branch"`     // 当前分支名称
 	IsDetached bool   `json:"isDetached"` // 是否处于分离头指针状态
 }
+
+// FileChange 表示本地变动文件
+type FileChange struct {
+	Path   string `json:"path"`   // 文件相对路径
+	Status string `json:"status"` // 变更状态: M/A/D/R/?
+	Staged bool   `json:"staged"` // 是否已暂存
+}
+
+// StatusLabel 返回状态的可读标签
+func (f *FileChange) StatusLabel() string {
+	switch f.Status {
+	case "M":
+		return "已修改"
+	case "A":
+		return "已添加"
+	case "D":
+		return "已删除"
+	case "R":
+		return "已重命名"
+	case "?":
+		return "未跟踪"
+	default:
+		return f.Status
+	}
+}

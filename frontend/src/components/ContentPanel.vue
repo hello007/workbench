@@ -32,6 +32,12 @@
             @latest-commit="onLatestCommit"
           />
         </el-tab-pane>
+        <el-tab-pane label="本地变动" name="changes" lazy>
+          <LocalChanges
+            ref="localChangesRef"
+            :repo-path="selectedNode.path"
+          />
+        </el-tab-pane>
       </el-tabs>
 
       <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 12px;">
@@ -247,6 +253,7 @@ import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
+import LocalChanges from './LocalChanges.vue'
 import {
   PreviewFile, PullRepo, CloneRepo, OpenWithDefaultApp,
   OpenInExplorer, OpenInVSCode, OpenInWarp
