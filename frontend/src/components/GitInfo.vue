@@ -58,23 +58,23 @@
 
       <el-descriptions-item label="最新提交">
         <div class="sha-with-copy">
-          <el-text class="sha-text">{{ latestCommit?.shortSha || 'N/A' }}</el-text>
+          <el-text class="sha-text">{{ effectiveLatestCommit?.shortSha || 'N/A' }}</el-text>
           <el-button
             :icon="DocumentCopy"
             size="small"
             text
-            @click="copyToClipboard(latestCommit?.sha || '')"
+            @click="copyToClipboard(effectiveLatestCommit?.sha || '')"
           />
         </div>
       </el-descriptions-item>
 
       <el-descriptions-item label="提交时间">
-        {{ formatTime(latestCommit?.timestamp) }}
+        {{ formatTime(effectiveLatestCommit?.timestamp) }}
       </el-descriptions-item>
 
       <el-descriptions-item label="提交消息">
         <el-text class="commit-message" :line-clamp="3">
-          {{ latestCommit?.message || 'N/A' }}
+          {{ effectiveLatestCommit?.message || 'N/A' }}
         </el-text>
       </el-descriptions-item>
     </el-descriptions>
@@ -82,10 +82,10 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
-import { GetGitRemoteURL } from '../../wailsjs/go/main/App'
+import { GetGitRemoteURL, GetCommitHistory } from '../../wailsjs/go/main/App'
 import { gitCache, getCacheKey } from '../utils/gitCache'
 
 const props = defineProps({
@@ -95,6 +95,9 @@ const props = defineProps({
 
 const gitInfo = ref(null)
 const loading = ref(false)
+const localLatestCommit = ref(null)
+
+const effectiveLatestCommit = computed(() => props.latestCommit || localLatestCommit.value)
 
 const loadGitInfo = async (forceRefresh = false) => {
   loading.value = true
@@ -110,10 +113,17 @@ const loadGitInfo = async (forceRefresh = false) => {
       }
     } else {
       gitCache.delete(cacheKey)
+      localLatestCommit.value = null
     }
 
-    const info = await GetGitRemoteURL(props.repoPath)
+    const [info, commits] = await Promise.all([
+      GetGitRemoteURL(props.repoPath),
+      GetCommitHistory(props.repoPath, 1, 0).catch(() => [])
+    ])
     gitInfo.value = info
+    if (commits && commits.length > 0) {
+      localLatestCommit.value = commits[0]
+    }
     gitCache.set(cacheKey, info)
   } catch (error) {
     ElMessage.error('加载 Git 信息失败: ' + (error.message || String(error)))
