@@ -243,7 +243,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Folder,
@@ -452,37 +452,54 @@ const onNodeContextMenu = (event, data) => {
   // 通知父组件关闭另一个组件的菜单
   emit('contextmenu')
 
-  // 计算菜单位置，确保完全可见
-  const menuWidth = 160 // 菜单最小宽度
-  const menuHeight = 400 // 菜单估计高度（文件菜单比目录菜单长）
-
+  // 先设置菜单位置
   let x = event.clientX
   let y = event.clientY
-
-  // 检查右侧边界
-  if (x + menuWidth > window.innerWidth) {
-    x = window.innerWidth - menuWidth - 5
-  }
-
-  // 检查底部边界
-  if (y + menuHeight > window.innerHeight) {
-    y = window.innerHeight - menuHeight - 5
-  }
-
-  // 检查左侧边界
-  if (x < 5) {
-    x = 5
-  }
-
-  // 检查顶部边界
-  if (y < 5) {
-    y = 5
-  }
 
   contextMenu.x = x
   contextMenu.y = y
   contextMenu.data = data
   contextMenu.visible = true
+
+  // 等菜单渲染完成后测量实际高度并调整位置
+  nextTick(() => {
+    const menuElement = document.querySelector('.context-menu')
+    if (menuElement) {
+      const rect = menuElement.getBoundingClientRect()
+      const menuWidth = rect.width
+      const menuHeight = rect.height
+
+      // 重新检查并调整边界
+      let adjustedX = x
+      let adjustedY = y
+
+      // 检查右侧边界
+      if (adjustedX + menuWidth > window.innerWidth) {
+        adjustedX = window.innerWidth - menuWidth - 5
+      }
+
+      // 检查底部边界
+      if (adjustedY + menuHeight > window.innerHeight) {
+        adjustedY = window.innerHeight - menuHeight - 5
+      }
+
+      // 检查左侧边界
+      if (adjustedX < 5) {
+        adjustedX = 5
+      }
+
+      // 检查顶部边界
+      if (adjustedY < 5) {
+        adjustedY = 5
+      }
+
+      // 如果位置有变化，更新菜单位置
+      if (adjustedX !== x || adjustedY !== y) {
+        contextMenu.x = adjustedX
+        contextMenu.y = adjustedY
+      }
+    }
+  })
 }
 
 const closeContextMenu = () => {
@@ -844,54 +861,79 @@ onBeforeUnmount(() => {
 .context-menu {
   position: fixed;
   z-index: 2000;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-xs) 0;
-  box-shadow: var(--shadow-lg);
-  min-width: 160px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 8px 0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 4px 15px rgba(0, 0, 0, 0.1);
+  min-width: 180px;
   margin: 0;
   list-style: none;
-  animation: fadeIn var(--transition-fast);
+  animation: fadeIn 0.2s ease-out;
+  backdrop-filter: blur(10px);
 }
 
 .context-menu-item {
   display: flex;
   align-items: center;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 10px 16px;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: #495057;
   cursor: pointer;
   white-space: nowrap;
-  transition: all var(--transition-fast);
-  border-radius: var(--radius-sm);
-  margin: 0 var(--spacing-xs);
+  transition: all 0.2s ease;
+  border-radius: 6px;
+  margin: 0 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.context-menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 3px;
+  background: linear-gradient(180deg, #409eff 0%, #66b1ff 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
 .context-menu-item:hover {
-  background-color: rgba(64, 158, 255, 0.1);
-  color: var(--primary-color);
-  transform: translateX(4px);
+  background: linear-gradient(135deg, #ecf5ff 0%, #e6f2ff 100%);
+  color: #409eff;
+  transform: translateX(2px);
+}
+
+.context-menu-item:hover::before {
+  opacity: 1;
 }
 
 .context-menu-item .el-icon {
-  margin-right: var(--spacing-xs);
+  margin-right: 8px;
+  font-size: 16px;
 }
 
 .context-menu-divider {
   height: 1px;
-  background-color: var(--border-color);
-  margin: var(--spacing-xs) 0;
+  background: linear-gradient(90deg, transparent 0%, #dee2e6 50%, transparent 100%);
+  margin: 6px 0;
 }
 
 .context-menu-item.is-disabled {
-  color: var(--text-placeholder);
+  color: #adb5bd;
   cursor: not-allowed;
 }
+
 .context-menu-item.is-disabled:hover {
-  background-color: transparent;
-  color: var(--text-placeholder);
+  background: transparent;
+  color: #adb5bd;
   transform: none;
+}
+
+.context-menu-item.is-disabled:hover::before {
+  opacity: 0;
 }
 
 .copy-to-preview {
