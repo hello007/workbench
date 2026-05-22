@@ -250,9 +250,24 @@ const onMenuCommand = (command) => {
 const addDialogVisible = ref(false)
 const addLoading = ref(false)
 const addForm = ref({ name: '', path: '', isDefault: false })
+const addNameManuallySet = ref(false)
+
+watch(() => addForm.value.path, (newPath) => {
+  if (addNameManuallySet.value) return
+  const trimmed = newPath.replace(/[\\/]+$/, '')
+  const lastSep = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  addForm.value.name = lastSep >= 0 ? trimmed.substring(lastSep + 1) : trimmed
+})
+
+watch(() => addForm.value.name, (newVal, oldVal) => {
+  if (oldVal === '' && newVal !== '') {
+    addNameManuallySet.value = true
+  }
+})
 
 const showAddDialog = () => {
   addForm.value = { name: '', path: '', isDefault: false }
+  addNameManuallySet.value = false
   addDialogVisible.value = true
 }
 
