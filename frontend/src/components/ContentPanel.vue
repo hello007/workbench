@@ -514,7 +514,7 @@ defineExpose({
 }
 
 /* 操作按钮容器 */
-.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions) {
+.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):not(.el-divider) {
   background: var(--bg-tertiary);
   padding: var(--spacing-lg);
   border-radius: var(--radius-md);
@@ -523,7 +523,7 @@ defineExpose({
   transition: all var(--transition-normal);
 }
 
-.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):hover {
+.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):not(.el-divider):hover {
   box-shadow: var(--shadow-sm);
   border-color: var(--primary-light);
 }

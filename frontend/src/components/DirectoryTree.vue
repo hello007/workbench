@@ -443,32 +443,22 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: all var(--transition-normal);
-  border-radius: var(--radius-md);
-  margin: 3px 8px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-sm);
+  margin: 2px 8px;
   font-size: 13px;
 }
 
 .dir-item:hover {
   background-color: var(--bg-tertiary);
-  box-shadow: var(--shadow-md);
-  border-color: var(--primary-light);
 }
 
 .dir-item--active {
-  background-color: rgba(64, 158, 255, 0.15);
+  background-color: rgba(64, 158, 255, 0.1);
   border-left-color: var(--primary-color);
-  box-shadow: var(--shadow-md);
-  border-color: var(--primary-color);
 }
 
 .dir-item--active:hover {
-  background-color: rgba(64, 158, 255, 0.2);
-  border-left-color: var(--primary-color);
-  box-shadow: var(--shadow-lg);
-  border-color: var(--primary-color);
+  background-color: rgba(64, 158, 255, 0.15);
 }
 
 .dir-item-icon {
