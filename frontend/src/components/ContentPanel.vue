@@ -7,10 +7,13 @@
         <el-descriptions-item label="类型">{{ selectedNode.type === 'directory' ? '文件夹' : '文件' }}</el-descriptions-item>
       </el-descriptions>
 
-      <!-- Git 拉取更新按钮 -->
+      <!-- Git 操作按钮 -->
       <div v-if="selectedNode.isGitRepo" style="margin-top: 10px;">
         <el-button type="primary" @click="pullRepo" :loading="gitLoading">
           拉取更新
+        </el-button>
+        <el-button @click="showBranchDialog" :loading="branchLoading">
+          切换分支
         </el-button>
       </div>
 
@@ -141,6 +144,55 @@
     </div>
     <el-empty v-else description="请从左侧选择文件或文件夹" />
 
+    <!-- 切换分支对话框 -->
+    <el-dialog
+      v-model="branchDialogVisible"
+      title="切换分支"
+      width="480px"
+      append-to-body
+    >
+      <div style="margin-bottom: 12px; font-size: 13px; color: #909399;">
+        当前分支：<span style="color: #303133; font-weight: 600;">{{ currentBranchName }}</span>
+      </div>
+      <el-select
+        v-model="selectedBranch"
+        placeholder="搜索并选择分支"
+        filterable
+        style="width: 100%;"
+        :disabled="switchingBranch"
+      >
+        <el-option-group label="本地分支">
+          <el-option
+            v-for="b in localBranches"
+            :key="b.name"
+            :label="b.name"
+            :value="b.name"
+            :disabled="b.isCurrent"
+          />
+        </el-option-group>
+        <el-option-group v-if="remoteBranches.length > 0" label="远程分支">
+          <el-option
+            v-for="b in remoteBranches"
+            :key="b.name"
+            :label="b.name"
+            :value="b.name"
+            :disabled="b.isCurrent"
+          />
+        </el-option-group>
+      </el-select>
+      <template #footer>
+        <el-button @click="branchDialogVisible = false" :disabled="switchingBranch">取消</el-button>
+        <el-button
+          type="primary"
+          @click="doCheckout"
+          :loading="switchingBranch"
+          :disabled="!selectedBranch || selectedBranch === currentBranchName"
+        >
+          切换
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 克隆仓库对话框 -->
     <el-dialog
       v-model="cloneDialogVisible"
@@ -262,7 +314,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -271,7 +323,8 @@ import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
 import {
   PreviewFile, PullRepo, CloneRepo, OpenWithDefaultApp,
-  OpenInExplorer, OpenInVSCode, OpenInWarp
+  OpenInExplorer, OpenInVSCode, OpenInWarp,
+  GetBranches, CheckoutBranch
 } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -324,10 +377,58 @@ const pullRunningInBackground = ref(false)
 const singlePullVisible = ref(false)
 const singlePullResult = ref('')
 
+const branchDialogVisible = ref(false)
+const branchLoading = ref(false)
+const switchingBranch = ref(false)
+const branchList = ref([])
+const selectedBranch = ref('')
+const currentBranchName = ref('')
+const localBranches = computed(() => branchList.value.filter(b => !b.isRemote))
+const remoteBranches = computed(() => branchList.value.filter(b => b.isRemote))
+
 const isWailsRuntime = () => !!window.runtime
 
 const onLatestCommit = (commit) => {
   emit('latestCommit', commit)
+}
+
+const showBranchDialog = async () => {
+  if (!props.selectedNode) return
+
+  branchLoading.value = true
+  branchDialogVisible.value = true
+  selectedBranch.value = ''
+
+  try {
+    const result = await GetBranches(props.selectedNode.path)
+    branchList.value = result.branches || []
+    const current = branchList.value.find(b => b.isCurrent)
+    currentBranchName.value = current ? current.name : ''
+  } catch (error) {
+    ElMessage.error('获取分支列表失败: ' + (error.message || String(error)))
+  } finally {
+    branchLoading.value = false
+  }
+}
+
+const doCheckout = async () => {
+  if (!props.selectedNode || !selectedBranch.value) return
+
+  const branch = branchList.value.find(b => b.name === selectedBranch.value)
+  if (!branch) return
+
+  switchingBranch.value = true
+  try {
+    await CheckoutBranch(props.selectedNode.path, selectedBranch.value, branch.isRemote)
+    ElMessage.success('已切换到分支: ' + selectedBranch.value)
+    branchDialogVisible.value = false
+    gitInfoRef.value?.handleRefresh()
+    commitHistoryRef.value?.handleRefresh()
+  } catch (error) {
+    ElMessage.error('切换分支失败: ' + (error.message || String(error)))
+  } finally {
+    switchingBranch.value = false
+  }
 }
 
 const pullRepo = async () => {
