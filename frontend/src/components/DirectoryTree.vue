@@ -422,7 +422,6 @@ onBeforeUnmount(() => {
   padding: var(--spacing-md) var(--spacing-md);
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-  box-shadow: var(--shadow-sm);
 }
 
 .dir-toolbar-title {

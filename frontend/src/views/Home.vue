@@ -1,52 +1,60 @@
 <template>
   <div class="home">
-    <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
-      <Pane :size="20" :min-size="10">
-        <DirectoryTree
-          ref="directoryTreeRef"
-          :directories="directories"
-          :selected-id="selectedDirectoryId"
-          :version="appVersion"
-          @select="onDirectorySelect"
-          @change="loadDirectories"
-          @contextmenu="onDirectoryContextMenu"
-        />
-      </Pane>
-      <Pane :size="30" :min-size="15">
-        <FileTreePanel
-          ref="fileTreePanelRef"
-          :directories="directories"
-          :selected-dir-id="selectedDirectoryId"
-          :clipboard="clipboard"
-          @select="onNodeSelect"
-          @batch-pull="onBatchPull"
-          @copy="handleCopy"
-          @cut="handleCut"
-          @paste="handlePaste"
-          @copy-to="handleCopyTo"
-          @contextmenu="onFileTreeContextMenu"
-        />
-      </Pane>
-      <Pane :size="50" :min-size="30">
-        <ContentPanel
-          ref="contentPanelRef"
-          :selected-node="selectedNode"
-          :latest-commit="latestCommit"
-          :clipboard="clipboard"
-          @latest-commit="commit => latestCommit = commit"
-          @refresh-node="onRefreshNode"
-          @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
-          @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
-          @rename="onRenameFromContent"
-          @delete="onDeleteFromContent"
-          @copy="handleCopy"
-          @cut="handleCut"
-          @paste="handlePaste"
-          @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
-          @batch-pull="onBatchPull"
-        />
-      </Pane>
-    </Splitpanes>
+    <div class="splitpanes-wrapper">
+      <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
+        <Pane :size="20" :min-size="10">
+          <div class="pane-content">
+            <DirectoryTree
+              ref="directoryTreeRef"
+              :directories="directories"
+              :selected-id="selectedDirectoryId"
+              :version="appVersion"
+              @select="onDirectorySelect"
+              @change="loadDirectories"
+              @contextmenu="onDirectoryContextMenu"
+            />
+          </div>
+        </Pane>
+        <Pane :size="30" :min-size="15">
+          <div class="pane-content">
+            <FileTreePanel
+              ref="fileTreePanelRef"
+              :directories="directories"
+              :selected-dir-id="selectedDirectoryId"
+              :clipboard="clipboard"
+              @select="onNodeSelect"
+              @batch-pull="onBatchPull"
+              @copy="handleCopy"
+              @cut="handleCut"
+              @paste="handlePaste"
+              @copy-to="handleCopyTo"
+              @contextmenu="onFileTreeContextMenu"
+            />
+          </div>
+        </Pane>
+        <Pane :size="50" :min-size="30">
+          <div class="pane-content">
+            <ContentPanel
+              ref="contentPanelRef"
+              :selected-node="selectedNode"
+              :latest-commit="latestCommit"
+              :clipboard="clipboard"
+              @latest-commit="commit => latestCommit = commit"
+              @refresh-node="onRefreshNode"
+              @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
+              @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
+              @rename="onRenameFromContent"
+              @delete="onDeleteFromContent"
+              @copy="handleCopy"
+              @cut="handleCut"
+              @paste="handlePaste"
+              @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
+              @batch-pull="onBatchPull"
+            />
+          </div>
+        </Pane>
+      </Splitpanes>
+    </div>
   </div>
 </template>
 
@@ -351,9 +359,32 @@ onBeforeUnmount(() => {
 .home {
   font-family: 'Microsoft YaHei', Arial, sans-serif;
   height: 100vh;
+  width: 100%;
+  overflow: hidden !important;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.splitpanes-wrapper {
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  overflow: hidden !important;
+  position: relative;
 }
 .splitpanes-container {
   height: 100%;
+  width: 100%;
+  overflow: hidden !important;
+}
+.pane-content {
+  height: 100%;
+  width: 100%;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
 }
 </style>
 
