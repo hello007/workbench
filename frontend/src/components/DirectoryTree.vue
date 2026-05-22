@@ -449,7 +449,7 @@ onBeforeUnmount(() => {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .dir-item:hover {
@@ -483,7 +483,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
