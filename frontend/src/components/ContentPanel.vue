@@ -167,6 +167,21 @@
       </template>
     </el-dialog>
 
+    <!-- 单仓库拉取结果弹窗 -->
+    <el-dialog
+      v-model="singlePullVisible"
+      title="拉取结果"
+      width="600px"
+      append-to-body
+    >
+      <div
+        style="max-height: 400px; overflow-y: auto; padding: 12px; background: #f5f7fa; border-radius: 6px; font-family: Consolas, 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;"
+      >{{ singlePullResult }}</div>
+      <template #footer>
+        <el-button type="primary" @click="singlePullVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 更新仓库进度弹窗 -->
     <el-dialog
       v-model="pullDialogVisible"
@@ -306,6 +321,9 @@ const pullCompleted = ref(false)
 const pullSummary = reactive({ success: 0, failed: 0 })
 const pullRunningInBackground = ref(false)
 
+const singlePullVisible = ref(false)
+const singlePullResult = ref('')
+
 const isWailsRuntime = () => !!window.runtime
 
 const onLatestCommit = (commit) => {
@@ -318,7 +336,12 @@ const pullRepo = async () => {
   gitLoading.value = true
   try {
     const result = await PullRepo(props.selectedNode.path)
-    ElMessage.success(result || '拉取完成')
+    if (result && result.length > 200) {
+      singlePullResult.value = result
+      singlePullVisible.value = true
+    } else {
+      ElMessage.success(result || '拉取完成')
+    }
     gitInfoRef.value?.handleRefresh()
     commitHistoryRef.value?.handleRefresh()
   } catch (error) {
