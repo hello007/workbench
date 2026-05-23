@@ -106,13 +106,9 @@ func (s *FileOperationService) OpenInExplorer(path string) error {
 	}
 
 	if info.IsDir() {
-		cmd := exec.Command("cmd", "/c", "start", "", path)
-		util.HideCommandWindow(cmd)
-		return cmd.Start()
+		return exec.Command("explorer", path).Start()
 	}
-	cmd := exec.Command("cmd", "/c", "start", "", "/select,", path)
-	util.HideCommandWindow(cmd)
-	return cmd.Start()
+	return exec.Command("explorer", "/select,"+path).Start()
 }
 
 // OpenInVSCode 用 VSCode 打开文件或文件夹
