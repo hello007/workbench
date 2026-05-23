@@ -74,7 +74,7 @@
           <el-input v-model="addForm.name" placeholder="例如: 我的工作空间" />
         </el-form-item>
         <el-form-item label="目录路径">
-          <el-input v-model="addForm.path" placeholder="例如: C:\workspace" />
+          <el-input ref="addPathInputRef" v-model="addForm.path" placeholder="例如: C:\workspace" />
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="addForm.isDefault" />
@@ -251,6 +251,7 @@ const addDialogVisible = ref(false)
 const addLoading = ref(false)
 const addForm = ref({ name: '', path: '', isDefault: false })
 const addNameManuallySet = ref(false)
+const addPathInputRef = ref()
 
 watch(() => addForm.value.path, (newPath) => {
   if (addNameManuallySet.value) return
@@ -269,6 +270,12 @@ const showAddDialog = () => {
   addForm.value = { name: '', path: '', isDefault: false }
   addNameManuallySet.value = false
   addDialogVisible.value = true
+  nextTick(() => {
+    const input = addPathInputRef.value?.input
+    if (input) {
+      input.focus()
+    }
+  })
 }
 
 const handleAdd = async () => {
