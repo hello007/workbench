@@ -63,6 +63,7 @@
         </el-form-item>
         <el-form-item :label="createType === 'directory' ? '文件夹名' : '文件名'">
           <el-input
+            ref="createInputRef"
             v-model="createName"
             :placeholder="createType === 'directory' ? '例如: src' : '例如: main.go'"
             :disabled="createLoading"
@@ -121,6 +122,7 @@
         </el-form-item>
         <el-form-item label="目标地址">
           <el-input
+            ref="copyToTargetInputRef"
             v-model="copyToTargetPath"
             placeholder="请输入目标文件夹路径"
             :disabled="copyToLoading"
@@ -329,6 +331,7 @@ const createParentPath = computed(() => createParentData.value?.path || '')
 const renameDialogVisible = ref(false)
 const renameName = ref('')
 const renameLoading = ref(false)
+const createInputRef = ref()
 const renameInputRef = ref()
 const renameNode = ref(null)
 
@@ -338,6 +341,8 @@ const copyToSourcePath = ref('')
 const copyToTargetPath = ref('')
 const copyToWholeDir = ref(true)
 const copyToLoading = ref(false)
+
+const copyToTargetInputRef = ref()
 
 const copyToPreview = computed(() => {
   const src = copyToSourcePath.value.trim().replaceAll('\\', '/')
@@ -630,6 +635,12 @@ const showCreateAt = (data, type) => {
   createType.value = type
   createName.value = ''
   createDialogVisible.value = true
+  nextTick(() => {
+    const input = createInputRef.value?.input
+    if (input) {
+      input.focus()
+    }
+  })
 }
 
 const handleCreate = async () => {
@@ -745,6 +756,12 @@ const showCopyToDialog = (data) => {
   copyToWholeDir.value = data.type === 'directory'
   copyToLoading.value = false
   copyToDialogVisible.value = true
+  nextTick(() => {
+    const input = copyToTargetInputRef.value?.input
+    if (input) {
+      input.focus()
+    }
+  })
 }
 
 const handleCopyTo = () => {
