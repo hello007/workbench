@@ -62,6 +62,16 @@
         <el-icon><Star /></el-icon>设为默认
       </li>
       <li class="context-menu-divider" />
+      <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
+        <el-icon><Monitor /></el-icon>在资源管理器中打开
+      </li>
+      <li class="context-menu-item" @click="onMenuCommand('openVSCode')">
+        <el-icon><EditPen /></el-icon>用 VSCode 打开
+      </li>
+      <li class="context-menu-item" @click="onMenuCommand('openWarp')">
+        <el-icon><Promotion /></el-icon>用 Warp 打开
+      </li>
+      <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
       </li>
@@ -113,14 +123,17 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
   UpdateDirectory,
   DeleteDirectory,
   SetDefaultDirectory,
-  ReorderDirectories
+  ReorderDirectories,
+  OpenInExplorer,
+  OpenInVSCode,
+  OpenInWarp
 } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -239,6 +252,15 @@ const onMenuCommand = (command) => {
       break
     case 'setDefault':
       handleSetDefault(dir)
+      break
+    case 'openExplorer':
+      handleOpenExplorer(dir.path)
+      break
+    case 'openVSCode':
+      handleOpenVSCode(dir.path)
+      break
+    case 'openWarp':
+      handleOpenWarp(dir.path)
       break
     case 'delete':
       handleDelete(dir)
@@ -398,6 +420,40 @@ const handleDelete = async (dir) => {
     }
   } catch (error) {
     ElMessage.error('删除失败: ' + (error.message || String(error)))
+  }
+}
+
+// --- 打开操作 ---
+const handleOpenExplorer = async (path) => {
+  try {
+    const result = await OpenInExplorer(path)
+    if (!result) {
+      ElMessage.error('打开资源管理器失败')
+    }
+  } catch (error) {
+    ElMessage.error('打开资源管理器失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenVSCode = async (path) => {
+  try {
+    const result = await OpenInVSCode(path)
+    if (!result) {
+      ElMessage.error('打开 VSCode 失败，请确认已安装 VSCode 并将 code 命令加入 PATH')
+    }
+  } catch (error) {
+    ElMessage.error('打开 VSCode 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenWarp = async (path) => {
+  try {
+    const result = await OpenInWarp(path)
+    if (!result) {
+      ElMessage.error('打开 Warp 失败，请确认已安装 Warp 终端')
+    }
+  } catch (error) {
+    ElMessage.error('打开 Warp 失败: ' + (error.message || String(error)))
   }
 }
 
