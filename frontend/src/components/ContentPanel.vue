@@ -155,6 +155,7 @@
         当前分支：<span style="color: #303133; font-weight: 600;">{{ currentBranchName }}</span>
       </div>
       <el-select
+        ref="branchSelectRef"
         v-model="selectedBranch"
         placeholder="搜索并选择分支"
         filterable
@@ -206,6 +207,7 @@
         </el-form-item>
         <el-form-item label="Git 地址">
           <el-input
+            ref="cloneInputRef"
             v-model="cloneUrl"
             placeholder="例如: https://github.com/user/repo.git"
             :disabled="cloneLoading"
@@ -314,7 +316,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -366,6 +368,7 @@ const filePreview = ref({
 const cloneDialogVisible = ref(false)
 const cloneUrl = ref('')
 const cloneLoading = ref(false)
+const cloneInputRef = ref()
 
 const pullDialogVisible = ref(false)
 const pullProgress = reactive({ current: 0, total: 0 })
@@ -385,6 +388,7 @@ const selectedBranch = ref('')
 const currentBranchName = ref('')
 const localBranches = computed(() => branchList.value.filter(b => !b.isRemote))
 const remoteBranches = computed(() => branchList.value.filter(b => b.isRemote))
+const branchSelectRef = ref()
 
 const isWailsRuntime = () => !!window.runtime
 
@@ -404,6 +408,9 @@ const showBranchDialog = async () => {
     branchList.value = result.branches || []
     const current = branchList.value.find(b => b.isCurrent)
     currentBranchName.value = current ? current.name : ''
+    nextTick(() => {
+      branchSelectRef.value?.focus()
+    })
   } catch (error) {
     ElMessage.error('获取分支列表失败: ' + (error.message || String(error)))
   } finally {
@@ -553,6 +560,12 @@ watch(() => props.selectedNode, async (newNode) => {
 const showCloneDialog = () => {
   cloneUrl.value = ''
   cloneDialogVisible.value = true
+  nextTick(() => {
+    const input = cloneInputRef.value?.input
+    if (input) {
+      input.focus()
+    }
+  })
 }
 
 const cloneRepo = async () => {
