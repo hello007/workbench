@@ -635,12 +635,12 @@ const showCreateAt = (data, type) => {
   createType.value = type
   createName.value = ''
   createDialogVisible.value = true
-  nextTick(() => {
+  setTimeout(() => {
     const input = createInputRef.value?.input
     if (input) {
       input.focus()
     }
-  })
+  }, 100)
 }
 
 const handleCreate = async () => {
@@ -756,12 +756,12 @@ const showCopyToDialog = (data) => {
   copyToWholeDir.value = data.type === 'directory'
   copyToLoading.value = false
   copyToDialogVisible.value = true
-  nextTick(() => {
+  setTimeout(() => {
     const input = copyToTargetInputRef.value?.input
     if (input) {
       input.focus()
     }
-  })
+  }, 100)
 }
 
 const handleCopyTo = () => {

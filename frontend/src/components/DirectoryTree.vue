@@ -270,12 +270,12 @@ const showAddDialog = () => {
   addForm.value = { name: '', path: '', isDefault: false }
   addNameManuallySet.value = false
   addDialogVisible.value = true
-  nextTick(() => {
+  setTimeout(() => {
     const input = addPathInputRef.value?.input
     if (input) {
       input.focus()
     }
-  })
+  }, 100)
 }
 
 const handleAdd = async () => {

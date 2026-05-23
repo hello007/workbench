@@ -560,12 +560,12 @@ watch(() => props.selectedNode, async (newNode) => {
 const showCloneDialog = () => {
   cloneUrl.value = ''
   cloneDialogVisible.value = true
-  nextTick(() => {
+  setTimeout(() => {
     const input = cloneInputRef.value?.input
     if (input) {
       input.focus()
     }
-  })
+  }, 100)
 }
 
 const cloneRepo = async () => {
