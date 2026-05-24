@@ -199,6 +199,14 @@ const onDeleteFromContent = async (node) => {
 
 // ---- 键盘快捷键 ----
 const handleGlobalKeydown = (e) => {
+  if (e.key === 'F5') {
+    e.preventDefault()
+    if (selectedNode.value) {
+      fileTreePanelRef.value?.refreshNode(selectedNode.value.path)
+    }
+    return
+  }
+
   if (!selectedNode.value) return
   if (!(e.ctrlKey || e.metaKey)) return
 
