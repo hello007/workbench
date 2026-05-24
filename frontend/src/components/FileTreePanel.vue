@@ -15,6 +15,8 @@
         :props="treeProps"
         node-key="path"
         lazy
+        :expand-on-click-node="false"
+        highlight-current
         :load="loadTreeNode"
         @node-click="onNodeClick"
         @node-contextmenu="onNodeContextMenu"
@@ -300,6 +302,7 @@ const props = defineProps({
 const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu'])
 
 // ---- Refs ----
+const currentSelectedPath = ref('')
 const fileTreeRef = ref()
 const refreshCounter = ref(0)
 const treeKey = computed(() => `${props.selectedDirId}_${refreshCounter.value}`)
@@ -397,8 +400,25 @@ const loadTreeNode = async (node, resolve) => {
 }
 
 // ---- 节点点击 ----
-const onNodeClick = (data) => {
+const onNodeClick = (data, node) => {
+  const clickedPath = data.path.replace(/\\/g, '/')
+  const prevPath = currentSelectedPath.value.replace(/\\/g, '/')
+
+  currentSelectedPath.value = data.path
   emit('select', data)
+
+  if (data.isLeaf || data.type === 'file') return
+
+  const isAncestor = prevPath.length > clickedPath.length
+    && prevPath.startsWith(clickedPath + '/')
+
+  if (isAncestor) return
+
+  if (node.expanded) {
+    node.collapse()
+  } else {
+    node.expand()
+  }
 }
 
 // ---- 刷新节点 ----
