@@ -19,7 +19,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 
 ### 后端 (Go)
 
-- Go 1.24.0 | Wails v2.12.0 | go-git/v5 5.18.0
+- Go 1.26.2 | Wails v2.12.0 | go-git/v5 5.18.0
 - Wails 绑定：`app.go` 中的公开方法自动生成到 `frontend/wailsjs/go/main/App.js`
 - 前端资源通过 `//go:embed all:frontend/dist` 嵌入 Go 二进制
 - Git 操作：go-git 用于仓库信息读取/提交历史分析，exec.Cmd("git") 用于 clone/pull
@@ -134,7 +134,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 **Git 提交：**
 
 - 格式：`type: 中文描述`（feat/chore/fix/refactor/docs）
-- 单 master 分支直接开发，无 PR 流程
+- 功能开发在 `bmad` 分支进行，稳定后合并到 `master`
 - 每个功能完成后确认是否需要更新 README.md（CLAUDE.md 项目要求）
 
 **构建与测试：**
@@ -190,4 +190,4 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - 定期审查：移除已过时的规则，合并重复项
 - 保持精简：每条规则必须提供独特价值
 
-**最后更新：** 2026-05-14
+**最后更新：** 2026-05-24

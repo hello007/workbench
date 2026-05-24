@@ -6,7 +6,7 @@
 
 **项目名称：** Git Manager - Git仓库管理桌面应用
 **项目路径：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager\`
-**Git 仓库：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager\`（当前在 master 分支）
+**Git 仓库：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager\`
 **开始时间：** 2026-04-28
 **当前状态：** 生产就绪（已完成开发和测试，含批量更新仓库功能）
 
@@ -28,7 +28,7 @@
 ```text
 git-manager/
 ├── main.go              # 主入口
-├── app.go               # 应用结构体（20个绑定方法）
+├── app.go               # 应用结构体（前后端桥接）
 ├── model/               # 数据模型层
 ├── service/             # 业务逻辑层
 ├── util/                # 工具层
@@ -51,6 +51,7 @@ git-manager/
 |[开发规范.md](docs/开发规范.md)|代码风格、调试、错误处理、提交规范|
 |[常见问题.md](docs/常见问题.md)|常见问题|
 |[路线图.md](docs/路线图.md)|发展路线图|
+|[项目上下文.md](docs/project-context.md)|AI Agent 编码规则和模式|
 |[开发运维.md](git-manager/DEVELOPMENT.md)|开发运维详细文档|
 |[构建摘要.md](git-manager/BUILD_SUMMARY.md)|构建摘要|
 
@@ -68,5 +69,5 @@ git-manager/
 
 ---
 
-**最后更新：** 2026-05-01
-**文档版本：** v2.0
+**最后更新：** 2026-05-24
+**文档版本：** v2.1
