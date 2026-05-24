@@ -54,6 +54,7 @@
       class="context-menu"
       :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
       @click.stop
+      @mousedown.stop
     >
       <li class="context-menu-item" @click="onMenuCommand('rename')">
         <el-icon><Edit /></el-icon>重命名
@@ -474,12 +475,12 @@ const onDragEnd = async () => {
 
 // --- 生命周期 ---
 onMounted(() => {
-  document.addEventListener('click', onGlobalClick)
+  document.addEventListener('mousedown', onGlobalClick)
   document.addEventListener('contextmenu', onGlobalContextMenu)
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('mousedown', onGlobalClick)
   document.removeEventListener('contextmenu', onGlobalContextMenu)
 })
 </script>
