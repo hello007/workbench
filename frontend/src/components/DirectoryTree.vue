@@ -73,6 +73,10 @@
         <el-icon><Promotion /></el-icon>用 Warp 打开
       </li>
       <li class="context-menu-divider" />
+      <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
+        <el-icon><Refresh /></el-icon>更新仓库
+      </li>
+      <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
       </li>
@@ -124,7 +128,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion, Refresh } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -143,7 +147,7 @@ const props = defineProps({
   version: { type: String, default: '' }
 })
 
-const emit = defineEmits(['select', 'change', 'contextmenu'])
+const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull'])
 
 // --- 本地目录列表（可变，用于拖拽） ---
 const localDirectories = ref([...props.directories])
@@ -262,6 +266,9 @@ const onMenuCommand = (command) => {
       break
     case 'openWarp':
       handleOpenWarp(dir.path)
+      break
+    case 'pullRepos':
+      emit('batchPull', { path: dir.path })
       break
     case 'delete':
       handleDelete(dir)
