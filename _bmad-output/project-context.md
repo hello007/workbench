@@ -1,11 +1,11 @@
 ---
 project_name: 'git-manager'
 user_name: 'Liuyang'
-date: '2026-05-14'
+date: '2026-05-26'
 sections_completed:
   ['technology_stack', 'language_specific_rules', 'framework_specific_rules', 'testing_rules', 'code_quality_rules', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 87
+rule_count: 95
 optimized_for_llm: true
 ---
 
@@ -31,6 +31,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - Vue 3.5.33 (Composition API + `<script setup>`) | Element Plus 2.13.7
 - Vue Router 4.6.4 — 必须使用 Hash 模式 (`createWebHashHistory`)，Wails 不支持 Browser History
 - Vite 8.0.10 构建 | Vitest 4.1.5 + Vue Test Utils 2.4.9 测试
+- splitpanes 4.0.4（面板分割）| vue-draggable-plus 0.6.1（拖拽排序）
 - 所有 Wails 绑定调用都是异步的（返回 Promise）
 
 ---
@@ -48,6 +49,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - **并发控制**：`sync.WaitGroup` + `chan struct{}` 信号量；goroutine 内错误通过 `sync.Mutex` 保护收集；通过 `safeEmit` 推送事件（非 Wails 上下文静默跳过）
 - **JSON 序列化**：所有 model 结构体必须带 `json` 标签；配置读写统一走 `util.LoadJSON/SaveJSON`
 - **路径安全**：用户输入路径必须 `filepath.Clean` 处理；敏感操作前校验路径在合法范围内
+- **剪贴板操作**：`CopyToSystemClipboard/CutToSystemClipboard/ReadFromSystemClipboard` 走 Go 端系统调用；`CopyItem/MoveItem/CopyTo` 是文件操作，不是剪贴板操作
 - **测试规范**：表驱动测试优先（`[]struct{ name string; ... }`）；集成测试用 `t.TempDir()` 创建真实文件系统；断言用 `t.Errorf`，格式 `"funcName(input): got %v, want %v"`
 
 **JavaScript (Vue):**
@@ -62,6 +64,9 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - **右键菜单**：使用自定义 `<div>` + 绝对定位，不用 `el-dropdown`
 - **路径显示**：`path.replaceAll('\\', '/')` 统一为正斜杠；路径解析兼容 `\` 和 `/`
 - **键盘事件**：检查 `e.target` 是否为 input/textarea，避免在输入框中触发快捷键
+- **剪贴板操作**：禁止使用 `navigator.clipboard`，全部通过 Wails 绑定（CopyToSystemClipboard 等）走 Go 端系统调用
+- **面板分割**：使用 splitpanes 的 `<Splitpanes>` + `<Pane>` 组件，`horizontal` 属性控制方向，`size` 属性设置初始百分比
+- **拖拽排序**：使用 vue-draggable-plus 的 `VueDraggable` 组件，`v-model` 绑定数据，`group` 属性控制跨列表拖拽
 - **测试 Mock**：新增 Go 绑定方法后，必须在 `frontend/src/test/setup.js` 同步添加 mock
 
 ### 框架特定规则
@@ -72,12 +77,14 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - **事件系统**：Go 端 `runtime.EventsEmit(ctx, "event-name", data)` → 前端 `EventsOn("event-name", callback)`
 - **无 TypeScript**：前端纯 JS，`wailsjs/` 下的绑定文件是自动生成的 `.js`，不要手动编辑
 - **线程模型**：Go 绑定方法在单独 goroutine 执行，前端连续调用不会排队，必须在前端做防重复控制
+- **外部程序启动**：`OpenInExplorer/OpenInVSCode/OpenInWarp/OpenWithDefaultApp` 均走 `exec.Cmd`，必须设置 `HideCommandWindow(cmd)`
 
 **Element Plus:**
 
 - **ElTree 懒加载**：`lazy` + `:load="loadTreeNode"` 模式，`resolve(nodes)` 回调返回子节点；`node-key="path"` 用路径做唯一标识
 - **ElTree 刷新**：`node.data` 修改不触发视图更新，需 `treeNode.loaded = false; treeNode.expand()` 或改变组件 `key` 强制重建
 - **表单对话框**：`el-dialog` + `el-form` + `v-model` 控制显示，异步操作期间用 `loading` ref 防重复提交
+- **弹窗自动聚焦**：使用 `setTimeout(() => inputRef.value?.focus(), 100)` 替代 `nextTick`（nextTick 时 DOM 可能未完成渲染）
 
 **Vue 3 组件通信：**
 
@@ -98,7 +105,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 **前端测试：**
 
 - 框架：Vitest（`globals: true`）+ Vue Test Utils + jsdom 环境
-- `setup.js` 全局 mock 所有 Wails 绑定和运行时；**新增 Go 绑定方法必须同步更新此文件**
+- `setup.js` 全局 mock 所有 Wails 绑定和运行时；**新增 Go 绑定方法必须同步更新此文件**（缺失 mock 会导致测试直接报错而非跳过）
 - Element Plus 组件通过 mount options 的 `stubs` 替换，不做完整渲染
 - `ElMessage` 等 API 通过 `vi.mock('element-plus')` 在单测文件中 mock
 - 测试文件放在 `src/views/__tests__/` 或 `src/components/__tests__/` 下
@@ -127,6 +134,8 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - **不引入**：TypeScript、CSS 框架（Tailwind/UnoCSS）、ESLint/Prettier 配置文件
 - **数据契约**：前端解析 Wails 返回值前，必须参考 Go 端对应方法确认字段结构，不靠猜测
 - **右键菜单**：`position: fixed` + `z-index >= 2000` + DOM 留在组件内部（保证 scoped 样式生效）
+- **splitpanes 样式**：通过 `:style` 或 `class` 控制面板尺寸，不修改 splitpanes 源码
+- **vue-draggable-plus 样式**：拖拽手柄用 CSS `cursor: grab/grabbing`，拖拽占位符用 `.ghost` class
 - **匹配现有风格**：新增代码遵循相邻代码写法，不做"顺手改进"
 
 ### 开发工作流规则
@@ -134,7 +143,7 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 **Git 提交：**
 
 - 格式：`type: 中文描述`（feat/chore/fix/refactor/docs）
-- 单 master 分支直接开发，无 PR 流程
+- 功能开发在 `bmad` 分支进行，稳定后合并到 `master`
 - 每个功能完成后确认是否需要更新 README.md（CLAUDE.md 项目要求）
 
 **构建与测试：**
@@ -158,6 +167,8 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - **禁止**在同一功能中混用 go-git 和 exec.Cmd 两个 Git 引擎 — 状态可能不一致
 - **禁止**直接调用 `runtime.EventsEmit` — 必须通过 `safeEmit` 包装，防止非 Wails 上下文崩溃
 - **禁止**在 app.go 写超过 ~10 行的私有辅助函数 — 逻辑应搬到 service 层
+- **禁止**直接使用 `navigator.clipboard` — 必须通过 Wails 绑定走 Go 端系统调用
+- **禁止**使用 `nextTick` 实现弹窗自动聚焦 — 必须用 `setTimeout`（nextTick 时 DOM 未完成渲染）
 
 **前端禁止：**
 
@@ -190,4 +201,4 @@ _本文件包含 AI Agent 在本项目中编写代码时必须遵循的关键规
 - 定期审查：移除已过时的规则，合并重复项
 - 保持精简：每条规则必须提供独特价值
 
-**最后更新：** 2026-05-14
+**最后更新：** 2026-05-26

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-18
-last_updated: 2026-05-23
+last_updated: 2026-05-25
 project: git-manager
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   3-1-create-file-folder: done
   3-2-rename-delete: review
   3-3-file-preview: review
-  3-4-context-menu-system: backlog
+  3-4-context-menu-system: ready-for-dev
   3-5-copy-filename-path: backlog
   3-6-cut-copy-paste: backlog
   epic-3-retrospective: optional
