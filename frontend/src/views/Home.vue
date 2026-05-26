@@ -443,14 +443,4 @@ onBeforeUnmount(() => {
   background-color: var(--bg-primary);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-/* 移除可能干扰分隔线的面板阴影 */
-.splitpanes.default-theme .splitpanes__pane:nth-child(1) {
-  z-index: 1;
-}
-.splitpanes.default-theme .splitpanes__pane:nth-child(2) {
-  z-index: 0;
-}
-.splitpanes.default-theme .splitpanes__pane:nth-child(3) {
-  z-index: 0;
-}
 </style>
