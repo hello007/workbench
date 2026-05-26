@@ -12,6 +12,7 @@
               @select="onDirectorySelect"
               @change="loadDirectories"
               @contextmenu="onDirectoryContextMenu"
+              @batch-pull="onBatchPull"
             />
           </div>
         </Pane>
