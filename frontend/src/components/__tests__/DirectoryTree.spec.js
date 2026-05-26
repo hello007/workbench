@@ -55,7 +55,8 @@ const defaultStubs = {
   Star: { template: '<span>star</span>' },
   Plus: { template: '<span>plus</span>' },
   Edit: { template: '<span>edit</span>' },
-  Delete: { template: '<span>del</span>' }
+  Delete: { template: '<span>del</span>' },
+  Refresh: { template: '<span>refresh</span>' }
 }
 
 const mockDirectories = [
@@ -327,6 +328,35 @@ describe('DirectoryTree.vue', () => {
     it('未传入 version 时不显示版本号', () => {
       wrapper = createWrapper({ version: '' })
       expect(wrapper.find('.dir-version').exists()).toBe(false)
+    })
+  })
+
+  describe('更新仓库', () => {
+    it('点击"更新仓库"菜单项应该 emit batchPull 携带目录 path', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[1].trigger('contextmenu', { clientX: 10, clientY: 10 })
+
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const pullItem = menuItems.find(el => el.text().includes('更新仓库'))
+      expect(pullItem).toBeTruthy()
+
+      await pullItem.trigger('click')
+
+      expect(wrapper.emitted('batchPull')).toBeTruthy()
+      expect(wrapper.emitted('batchPull')[0][0]).toEqual({ path: '/path/b' })
+    })
+
+    it('点击"更新仓库"后菜单应该关闭', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const pullItem = menuItems.find(el => el.text().includes('更新仓库'))
+      await pullItem.trigger('click')
+
+      expect(wrapper.find('.context-menu').exists()).toBe(false)
     })
   })
 })
