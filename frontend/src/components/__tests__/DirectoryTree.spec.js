@@ -273,11 +273,12 @@ describe('DirectoryTree.vue', () => {
   })
 
   describe('事件监听清理', () => {
-    it('unmount 时应该移除 click 监听器', () => {
+    it('unmount 时应移除 mousedown 和 contextmenu 监听器', () => {
       const removeSpy = vi.spyOn(document, 'removeEventListener')
       wrapper = createWrapper()
       wrapper.unmount()
-      expect(removeSpy).toHaveBeenCalledWith('click', expect.any(Function))
+      expect(removeSpy).toHaveBeenCalledWith('mousedown', expect.any(Function))
+      expect(removeSpy).toHaveBeenCalledWith('contextmenu', expect.any(Function))
       removeSpy.mockRestore()
       wrapper = null
     })
