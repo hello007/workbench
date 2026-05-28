@@ -368,4 +368,54 @@ describe('Home.vue - Bug修复验证', () => {
       w.unmount()
     })
   })
+
+  describe('ActivityBar 和 ToolboxPanel 集成', () => {
+    const createWrapper = () => {
+      return mount(Home, {
+        global: {
+          stubs: {
+            Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+            Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
+            ActivityBar: { template: '<div class="stub-activity-bar" />', props: ['modelValue'] },
+            DirectoryTree: { template: '<div class="stub-directory-tree" />' },
+            ToolboxPanel: { template: '<div class="stub-toolbox-panel" />' },
+            FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+            'el-tree': true,
+            'el-dialog': true,
+            'el-form': true,
+            'el-form-item': true,
+            'el-input': true,
+            'el-switch': true,
+            'el-button': true,
+            'el-button-group': true,
+            'el-divider': true,
+            'el-select': true,
+            'el-option': true,
+            'el-empty': true,
+            'el-descriptions': true,
+            'el-descriptions-item': true,
+            'el-icon': true
+          }
+        }
+      })
+    }
+
+    it('应该渲染 ActivityBar 组件', () => {
+      const wrapper = createWrapper()
+      expect(wrapper.find('.stub-activity-bar').exists()).toBe(true)
+    })
+
+    it('默认 activePanel 应为 directory', () => {
+      const wrapper = createWrapper()
+      expect(wrapper.vm.activePanel).toBe('directory')
+    })
+
+    it('activePanel 为 toolbox 时不显示 DirectoryTree', async () => {
+      const wrapper = createWrapper()
+      wrapper.vm.activePanel = 'toolbox'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.stub-toolbox-panel').exists()).toBe(true)
+    })
+  })
 })

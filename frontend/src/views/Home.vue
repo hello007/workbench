@@ -1,21 +1,28 @@
 <template>
   <div class="home">
-    <div class="splitpanes-wrapper">
-      <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
-        <Pane :size="20" :min-size="10">
-          <div class="pane-content">
-            <DirectoryTree
-              ref="directoryTreeRef"
-              :directories="directories"
-              :selected-id="selectedDirectoryId"
-              :version="appVersion"
-              @select="onDirectorySelect"
-              @change="loadDirectories"
-              @contextmenu="onDirectoryContextMenu"
-              @batch-pull="onBatchPull"
-            />
-          </div>
-        </Pane>
+    <div class="home-layout">
+      <ActivityBar v-model="activePanel" />
+      <div class="splitpanes-wrapper">
+        <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
+          <Pane :size="20" :min-size="10">
+            <div class="pane-content" style="position:relative;">
+              <DirectoryTree
+                v-show="activePanel === 'directory'"
+                ref="directoryTreeRef"
+                :directories="directories"
+                :selected-id="selectedDirectoryId"
+                :version="appVersion"
+                @select="onDirectorySelect"
+                @change="loadDirectories"
+                @contextmenu="onDirectoryContextMenu"
+                @batch-pull="onBatchPull"
+              />
+              <ToolboxPanel
+                v-show="activePanel === 'toolbox'"
+                @close="activePanel = 'directory'"
+              />
+            </div>
+          </Pane>
         <Pane :size="30" :min-size="15">
           <div class="pane-content">
             <FileTreePanel
@@ -55,6 +62,7 @@
           </div>
         </Pane>
       </Splitpanes>
+      </div>
     </div>
   </div>
 </template>
@@ -66,6 +74,8 @@ import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
+import ActivityBar from '../components/ActivityBar.vue'
+import ToolboxPanel from '../components/ToolboxPanel.vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -87,6 +97,7 @@ const selectedDirectoryId = ref('')
 const selectedNode = ref(null)
 const latestCommit = ref(null)
 const appVersion = ref('')
+const activePanel = ref('directory')
 
 const clipboard = reactive({
   mode: null,
@@ -373,8 +384,12 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0;
   position: relative;
+}
+
+.home-layout {
   display: flex;
-  flex-direction: column;
+  height: 100%;
+  width: 100%;
 }
 .splitpanes-wrapper {
   flex: 1;
