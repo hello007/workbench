@@ -1046,8 +1046,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--text-primary);
   word-break: break-all;
-  overflow-x: auto;
-  white-space: nowrap;
 }
 .copy-to-preview-arrow {
   text-align: center;
