@@ -24,7 +24,7 @@
             </div>
           </Pane>
         <Pane :size="30" :min-size="15">
-          <div class="pane-content">
+          <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
             <FileTreePanel
               ref="fileTreePanelRef"
               :directories="directories"
@@ -41,7 +41,7 @@
           </div>
         </Pane>
         <Pane :size="50" :min-size="30">
-          <div class="pane-content">
+          <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
             <ContentPanel
               ref="contentPanelRef"
               :selected-node="selectedNode"
@@ -112,6 +112,12 @@ const fileTreePanelRef = ref()
 const contentPanelRef = ref()
 
 // ---- 右键菜单事件处理 ----
+const closeToolbox = () => {
+  if (activePanel.value === 'toolbox') {
+    activePanel.value = 'directory'
+  }
+}
+
 // 当点击 DirectoryTree 右键菜单时，关闭 FileTreePanel 的菜单
 const onDirectoryContextMenu = () => {
   fileTreePanelRef.value?.closeMenu()
