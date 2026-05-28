@@ -1,42 +1,33 @@
-# Binaries
-*.exe
-*.dll
-*.so
-*.dylib
 
-# Test binary
-*.test
-
-# Go workspace
-go.work
-
-# Dependencies
-vendor/
-
-# Wails
-build/
-frontend/dist/
-frontend/wailsjs/
-frontend/package.json.md5
-
-# Release packages (contain binaries)
-release/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Data
-data/*.json
 !data/*.template
-
-node_modules
-
+# Binaries
+# Data
+# Dependencies
+# Go workspace
+# IDE
+# OS
+# Release packages (contain binaries)
+# Test binary
+# Wails
 # Worktree directory
+*.dll
+*.dylib
+*.exe
+*.so
+*.swp
+*.test
+.DS_Store
+.idea/
+.superpowers/
+.vscode/
 .worktrees/
-.worktrees/
+build/
+data/*.json
+frontend/dist/
+frontend/package.json.md5
+frontend/wailsjs/
+go.work
+node_modules
+release/
+Thumbs.db
+vendor/
