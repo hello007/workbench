@@ -300,7 +300,7 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete'])
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -759,6 +759,7 @@ const handleDeleteAt = async (data) => {
     const result = await DeleteFile(targetPath)
     if (result) {
       ElMessage.success('删除成功')
+      emit('delete', data)
       let parentPath = targetPath.substring(0, targetPath.lastIndexOf('\\'))
       if (!parentPath) {
         parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))

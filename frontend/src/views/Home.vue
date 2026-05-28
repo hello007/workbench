@@ -37,6 +37,7 @@
               @paste="handlePaste"
               @copy-to="handleCopyTo"
               @contextmenu="onFileTreeContextMenu"
+              @delete="onDeleteFromFileTree"
             />
           </div>
         </Pane>
@@ -178,6 +179,17 @@ const onBatchPull = async (data) => {
 // ---- ContentPanel 重命名 ----
 const onRenameFromContent = (node) => {
   fileTreePanelRef.value?.showRenameAt(node)
+}
+
+// ---- FileTreePanel 删除 ----
+const onDeleteFromFileTree = (node) => {
+  if (!selectedNode.value) return
+  const deletedPath = node.path.replace(/\\/g, '/')
+  const selectedPath = selectedNode.value.path.replace(/\\/g, '/')
+  if (selectedPath === deletedPath || selectedPath.startsWith(deletedPath + '/')) {
+    selectedNode.value = null
+    contentPanelRef.value?.clearPreview()
+  }
 }
 
 // ---- ContentPanel 删除 ----
