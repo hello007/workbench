@@ -1,7 +1,7 @@
 <template>
   <div class="toolbox-panel">
     <div class="toolbox-header">
-      <span class="toolbox-title">工具箱</span>
+      <span class="toolbox-title"><el-icon :size="18" style="margin-right:4px;vertical-align:middle;"><SetUp /></el-icon>工具箱</span>
       <span class="toolbox-close" @click="$emit('close')">&#10005;</span>
     </div>
     <div class="toolbox-content">
@@ -66,7 +66,7 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument } from '@element-plus/icons-vue'
+import { CopyDocument, SetUp } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 
 defineEmits(['close'])
@@ -144,6 +144,7 @@ const tools = [
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: 100%;
   background-color: var(--bg-primary);
 }
 
