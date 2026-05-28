@@ -431,6 +431,8 @@ const refreshNode = (nodePath) => {
     treeNode.loaded = false
     treeNode.loading = false
     treeNode.expand()
+  } else {
+    refreshCounter.value++
   }
 }
 
