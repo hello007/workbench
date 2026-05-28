@@ -62,6 +62,6 @@ const panels = [
 .activity-bar-item.is-active {
   background: var(--primary-color);
   color: #ffffff;
-  box-shadow: 0 0 0 2px var(--primary-light);
+  box-shadow: 0 0 6px 1px var(--primary-light);
 }
 </style>
