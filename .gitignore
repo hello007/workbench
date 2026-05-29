@@ -31,3 +31,6 @@ node_modules
 release/
 Thumbs.db
 vendor/
+agent-harness/
+
+.claude/settings.local.json
