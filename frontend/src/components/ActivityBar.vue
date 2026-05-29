@@ -34,7 +34,7 @@ const panels = [
 .activity-bar {
   width: 44px;
   flex-shrink: 0;
-  background: #2c3e50;
+  background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -50,18 +50,20 @@ const panels = [
   justify-content: center;
   border-radius: 6px;
   cursor: pointer;
-  color: #8eaabe;
+  color: var(--sidebar-text);
   transition: all var(--transition-normal);
 }
 
 .activity-bar-item:hover {
-  background: #3a4f63;
-  color: #b0c4d8;
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text-hover);
+  transform: scale(1.08);
 }
 
 .activity-bar-item.is-active {
-  background: var(--primary-color);
-  color: #ffffff;
-  box-shadow: 0 0 6px 1px var(--primary-light);
+  background: var(--sidebar-active-bg);
+  color: var(--sidebar-active-text);
+  box-shadow: 0 0 8px 1px rgba(64, 158, 255, 0.35);
+  transform: scale(1.08);
 }
 </style>

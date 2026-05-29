@@ -1,9 +1,10 @@
 /* 全局样式重置和基础变量 */
 :root {
-  /* 主色调 - 蓝色系 */
+  /* 主色调 */
   --primary-color: #409eff;
   --primary-light: #66b1ff;
   --primary-dark: #337ecc;
+  --primary-bg: #ecf5ff;
 
   /* 辅助色 */
   --success-color: #67c23a;
@@ -16,6 +17,23 @@
   --bg-secondary: #ffffff;
   --bg-tertiary: #f0f2f5;
 
+  /* 侧边栏（深色） */
+  --sidebar-bg: #1e2a3a;
+  --sidebar-hover: #2b3d52;
+  --sidebar-text: #8eaabe;
+  --sidebar-text-hover: #b0c4d8;
+  --sidebar-active-bg: var(--primary-color);
+  --sidebar-active-text: #ffffff;
+
+  /* 右键菜单 */
+  --menu-bg: #ffffff;
+  --menu-bg-hover: #ecf5ff;
+  --menu-border: #e9ecef;
+  --menu-text: #495057;
+  --menu-text-hover: #409eff;
+  --menu-divider: #dee2e6;
+  --menu-shadow: 0 10px 30px rgba(30, 42, 58, 0.12), 0 4px 15px rgba(30, 42, 58, 0.08);
+
   /* 边框色 */
   --border-color: #ebeef5;
   --border-light: #dcdfe6;
@@ -26,11 +44,11 @@
   --text-tertiary: #909399;
   --text-placeholder: #c0c4cc;
 
-  /* 阴影 */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.15), 0 6px 10px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.2);
+  /* 阴影 — 主色调着色 */
+  --shadow-sm: 0 1px 3px rgba(30, 42, 58, 0.1), 0 1px 2px rgba(30, 42, 58, 0.06);
+  --shadow-md: 0 4px 6px rgba(30, 42, 58, 0.08), 0 2px 4px rgba(30, 42, 58, 0.04);
+  --shadow-lg: 0 10px 25px rgba(30, 42, 58, 0.1), 0 6px 10px rgba(30, 42, 58, 0.05);
+  --shadow-xl: 0 20px 40px rgba(30, 42, 58, 0.12);
 
   /* 间距 */
   --spacing-xs: 4px;
@@ -63,9 +81,8 @@ html, body {
   overflow: hidden !important;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
-    "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family: "Nunito", "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
   line-height: 1.6;
 }
 
@@ -94,7 +111,7 @@ html, body {
 }
 
 #app {
-  height: 100vh;
+  height: 100%;
 }
 
 /* 滚动条美化 */
@@ -161,4 +178,151 @@ html, body {
 .card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--primary-light);
+}
+
+/* 右键菜单 — 全局样式 */
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--radius-md);
+  padding: 4px 0;
+  box-shadow: var(--menu-shadow);
+  min-width: 180px;
+  margin: 0;
+  list-style: none;
+  animation: fadeIn 0.2s ease-out;
+  backdrop-filter: blur(10px);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--menu-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  margin: 0 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.context-menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 3px;
+  background: linear-gradient(180deg, var(--primary-color) 0%, var(--primary-light) 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--menu-bg-hover);
+  color: var(--menu-text-hover);
+  transform: translateX(2px);
+}
+
+.context-menu-item:hover::before {
+  opacity: 1;
+}
+
+.context-menu-item .el-icon {
+  margin-right: 6px;
+  font-size: 14px;
+}
+
+.context-menu-item.is-disabled {
+  color: var(--text-placeholder);
+  cursor: not-allowed;
+}
+
+.context-menu-item.is-disabled:hover {
+  background: transparent;
+  color: var(--text-placeholder);
+  transform: none;
+}
+
+.context-menu-item.is-disabled:hover::before {
+  opacity: 0;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--menu-divider) 50%, transparent 100%);
+  margin: 3px 0;
+}
+
+/* 拷贝预览 — 全局样式 */
+.copy-to-preview {
+  margin: 0 0 16px;
+  padding: var(--spacing-md);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.copy-to-preview-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.copy-to-preview-row {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.copy-to-preview-arrow {
+  text-align: center;
+  color: var(--primary-color);
+  font-size: 16px;
+  margin: 4px 0;
+}
+
+/* 交互增强 — 全局 */
+.el-button {
+  transition: all 0.2s ease;
+}
+
+.el-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.el-button--primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* focus 可见性 */
+.el-button:focus-visible,
+.el-input:focus-visible,
+.el-select:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+/* 目录项交互 */
+.dir-item:active:not(.dir-item--active) {
+  transform: scale(0.98);
+}
+
+/* 平滑滚动 */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 数字等宽 */
+.el-tag,
+.el-progress__text,
+.sha-text {
+  font-variant-numeric: tabular-nums;
 }

@@ -395,7 +395,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .home {
-  font-family: 'Microsoft YaHei', Arial, sans-serif;
   height: 100vh;
   width: 100%;
   overflow: hidden !important;
@@ -434,7 +433,7 @@ onBeforeUnmount(() => {
 /* 分隔线样式 - 强制覆盖默认样式 */
 .default-theme.splitpanes--vertical > .splitpanes__splitter,
 .splitpanes--vertical > .splitpanes__splitter {
-  background-color: #e8eaed !important;
+  background-color: var(--border-color) !important;
   border-left: none !important;
   width: 1px !important;
   margin-left: 0 !important;
@@ -448,7 +447,7 @@ onBeforeUnmount(() => {
   border-left: none !important;
   cursor: col-resize !important;
   width: 2px !important;
-  box-shadow: 0 0 5px rgba(64, 158, 255, 0.3) !important;
+  box-shadow: 0 0 6px rgba(64, 158, 255, 0.25) !important;
 }
 /* 隐藏默认的分隔线装饰 - 最强优先级 */
 * .splitpanes__splitter:before,

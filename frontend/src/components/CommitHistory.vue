@@ -9,7 +9,7 @@
             placeholder="搜索提交..."
             prefix-icon="Search"
             size="small"
-            style="width: 200px; margin-right: 10px;"
+            class="search-input"
             clearable
             @input="handleSearch"
           />
@@ -95,7 +95,7 @@
                     v-for="(file, index) in commit.files"
                     :key="index"
                     size="small"
-                    style="margin: 5px 5px 0 0;"
+                    class="file-tag"
                   >
                     {{ file }}
                   </el-tag>
@@ -368,5 +368,12 @@ defineExpose({ loadCommits, handleRefresh })
 }
 .timeline-container::-webkit-scrollbar-thumb:hover {
   background-color: var(--text-secondary);
+}
+.search-input {
+  width: 200px;
+  margin-right: 10px;
+}
+.file-tag {
+  margin: 5px 5px 0 0;
 }
 </style>

@@ -199,7 +199,12 @@ const tools = [
 .toolbox-item:hover {
   border-color: var(--primary-light);
   box-shadow: var(--shadow-sm);
-  background: #ecf5ff;
+  background: var(--primary-bg);
+  transform: translateX(2px);
+}
+
+.toolbox-item:active {
+  transform: scale(0.98);
 }
 
 .toolbox-item-header {
@@ -220,32 +225,4 @@ const tools = [
   margin-top: 3px;
 }
 
-.copy-to-preview {
-  margin: 0 0 16px;
-  padding: var(--spacing-md);
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-}
-
-.copy-to-preview-label {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-bottom: 8px;
-  font-weight: 500;
-}
-
-.copy-to-preview-row {
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.copy-to-preview-arrow {
-  text-align: center;
-  color: var(--primary-color);
-  font-size: 16px;
-  margin: 4px 0;
-}
 </style>

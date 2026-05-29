@@ -1,6 +1,6 @@
 <template>
   <div class="content-panel">
-    <div v-if="selectedNode" style="padding: 16px;">
+    <div v-if="selectedNode" class="content-inner">
       <h2>{{ selectedNode.name }}</h2>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="路径">{{ selectedNode.path }}</el-descriptions-item>
@@ -8,7 +8,7 @@
       </el-descriptions>
 
       <!-- Git 操作按钮 -->
-      <div v-if="selectedNode.isGitRepo" style="margin-top: 10px;">
+      <div v-if="selectedNode.isGitRepo" class="git-actions">
         <el-button type="primary" @click="pullRepo" :loading="gitLoading">
           拉取更新
         </el-button>
@@ -43,12 +43,11 @@
         </el-tab-pane>
       </el-tabs>
 
-      <div v-else-if="selectedNode.type === 'directory'" style="margin-top: 12px;">
+      <div v-else-if="selectedNode.type === 'directory'" class="node-actions">
         <h3>文件夹操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <!-- 基本操作 -->
+        <div class="action-groups">
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">基本操作</span>
+            <span class="action-label">基本操作</span>
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
@@ -56,9 +55,8 @@
               <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>
-          <!-- 编辑操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">编辑操作</span>
+            <span class="action-label">编辑操作</span>
             <el-button-group>
               <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
               <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
@@ -66,9 +64,8 @@
               <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
             </el-button-group>
           </div>
-          <!-- 查看操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">查看操作</span>
+            <span class="action-label">查看操作</span>
             <el-button-group>
               <el-button @click="handleCopyPath">复制路径</el-button>
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
@@ -76,9 +73,8 @@
               <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
             </el-button-group>
           </div>
-          <!-- 高级操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">高级操作</span>
+            <span class="action-label">高级操作</span>
             <el-button-group>
               <el-button type="success" @click="showCloneDialog">克隆仓库</el-button>
               <el-button @click="handleUpdateRepos">更新仓库</el-button>
@@ -88,12 +84,11 @@
         </div>
       </div>
 
-      <div v-else-if="selectedNode.type === 'file'" style="margin-top: 12px; display: flex; flex-direction: column; flex: 1;">
+      <div v-else-if="selectedNode.type === 'file'" class="node-actions node-actions--file">
         <h3>文件操作</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <!-- 基本操作 -->
+        <div class="action-groups">
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">基本操作</span>
+            <span class="action-label">基本操作</span>
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
@@ -101,9 +96,8 @@
               <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>
-          <!-- 编辑操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">编辑操作</span>
+            <span class="action-label">编辑操作</span>
             <el-button-group>
               <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
               <el-button @click="previewFile">预览</el-button>
@@ -111,9 +105,8 @@
               <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
             </el-button-group>
           </div>
-          <!-- 查看操作 -->
           <div>
-            <span style="font-size: 12px; color: #909399; margin-bottom: 3px; display: block;">查看操作</span>
+            <span class="action-label">查看操作</span>
             <el-button-group>
               <el-button @click="handleCopyPath">复制路径</el-button>
               <el-button @click="handleCopyName">复制文件名</el-button>
@@ -124,25 +117,29 @@
           </div>
         </div>
 
-        <div v-if="filePreview.content" style="margin-top: 12px; display: flex; flex-direction: column; flex: 1;">
-          <h4 style="margin-bottom: 6px;">文件内容</h4>
+        <div v-if="filePreview.content" class="file-preview">
+          <h4>文件内容</h4>
           <el-input
             v-model="filePreview.content"
             type="textarea"
             :rows="15"
             readonly
-            :style="{
-              fontFamily: 'monospace',
-              height: '100%',
-              minHeight: '200px',
-              resize: 'vertical'
-            }"
             class="preview-textarea"
           />
         </div>
       </div>
     </div>
-    <el-empty v-else description="请从左侧选择文件或文件夹" />
+    <div v-else class="empty-state">
+      <div class="empty-state-icon">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          <line x1="12" y1="11" x2="12" y2="17"/>
+          <line x1="9" y1="14" x2="15" y2="14"/>
+        </svg>
+      </div>
+      <p class="empty-state-title">请从左侧选择文件或文件夹</p>
+      <p class="empty-state-hint">在文件树中点击项目查看详情和操作</p>
+    </div>
 
     <!-- 切换分支对话框 -->
     <el-dialog
@@ -151,15 +148,15 @@
       width="480px"
       append-to-body
     >
-      <div style="margin-bottom: 12px; font-size: 13px; color: #909399;">
-        当前分支：<span style="color: #303133; font-weight: 600;">{{ currentBranchName }}</span>
+      <div class="branch-info">
+        当前分支：<span class="branch-name">{{ currentBranchName }}</span>
       </div>
       <el-select
         ref="branchSelectRef"
         v-model="selectedBranch"
         placeholder="搜索并选择分支"
         filterable
-        style="width: 100%;"
+        class="branch-select"
         :disabled="switchingBranch"
       >
         <el-option-group label="本地分支">
@@ -228,9 +225,7 @@
       width="600px"
       append-to-body
     >
-      <div
-        style="max-height: 400px; overflow-y: auto; padding: 12px; background: #f5f7fa; border-radius: 6px; font-family: Consolas, 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;"
-      >{{ singlePullResult }}</div>
+      <div class="pull-result-output">{{ singlePullResult }}</div>
       <template #footer>
         <el-button type="primary" @click="singlePullVisible = false">关闭</el-button>
       </template>
@@ -246,18 +241,18 @@
       :show-close="pullCompleted"
       append-to-body
     >
-      <div style="margin-bottom: 16px;">
+      <div class="pull-progress-section">
         <el-progress
           :percentage="pullProgress.total > 0 ? Math.round(pullProgress.current / pullProgress.total * 100) : 0"
           :format="() => `${pullProgress.current} / ${pullProgress.total}`"
           :status="pullCompleted ? (pullSummary.failed > 0 ? 'warning' : 'success') : undefined"
         />
-        <div v-if="pullCompleted" style="margin-top: 8px; color: #909399; font-size: 13px;">
+        <div v-if="pullCompleted" class="pull-summary">
           成功: {{ pullSummary.success }}，失败: {{ pullSummary.failed }}
         </div>
       </div>
 
-      <el-table :data="pullResults" style="width: 100%" max-height="400" size="small">
+      <el-table :data="pullResults" class="pull-table" max-height="400" size="small">
         <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-icon v-if="row.success" color="#67C23A"><SuccessFilled /></el-icon>
@@ -268,8 +263,7 @@
         <el-table-column prop="path" label="路径" min-width="250" show-overflow-tooltip />
         <el-table-column label="结果" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.success" style="color: #67C23A;">{{ row.output || '已是最新' }}</span>
-            <span v-else style="color: #F56C6C;">{{ row.error }}</span>
+            <span :class="row.success ? 'text-success' : 'text-danger'">{{ row.success ? (row.output || '已是最新') : row.error }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -550,7 +544,6 @@ const previewFile = async () => {
   }
 }
 
-// 监听选中节点变化，自动预览文件内容
 watch(() => props.selectedNode, async (newNode) => {
   if (newNode && newNode.type === 'file') {
     await previewFile()
@@ -663,13 +656,11 @@ defineExpose({
   position: relative;
 }
 
-/* 内容区域容器 */
-.content-panel > div:first-child {
+.content-inner {
   padding: var(--spacing-lg);
   animation: fadeIn var(--transition-normal);
 }
 
-/* 标题样式 */
 .content-panel h2 {
   color: var(--text-primary);
   font-size: 20px;
@@ -694,6 +685,48 @@ defineExpose({
   margin-bottom: var(--spacing-sm);
 }
 
+/* Git 操作区 */
+.git-actions {
+  margin-top: var(--spacing-sm);
+}
+
+/* 操作区域 */
+.node-actions {
+  margin-top: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-normal);
+}
+
+.node-actions:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--primary-light);
+}
+
+.node-actions--file {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.action-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.action-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 3px;
+  display: block;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
 /* 按钮组样式 */
 .el-button-group {
   display: flex;
@@ -701,27 +734,23 @@ defineExpose({
   gap: var(--spacing-sm);
 }
 
-/* 操作按钮容器 */
-.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):not(.el-divider) {
-  background: var(--bg-tertiary);
-  padding: 12px;
-  border-radius: var(--radius-md);
-  margin-top: 10px;
-  border: 1px solid var(--border-color);
-  transition: all var(--transition-normal);
-}
-
-.content-panel > div:first-child > div:not(.el-tabs):not(.el-descriptions):not(.el-divider):hover {
-  box-shadow: var(--shadow-sm);
-  border-color: var(--primary-light);
-}
-
 /* 文件预览区域 */
+.file-preview {
+  margin-top: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
 .preview-textarea {
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
+  font-family: Consolas, 'Courier New', monospace;
+  min-height: 200px;
+  height: 100%;
+  resize: vertical;
 }
 
 .preview-textarea:hover {
@@ -729,9 +758,60 @@ defineExpose({
   box-shadow: var(--shadow-sm);
 }
 
+/* 分支对话框 */
+.branch-info {
+  margin-bottom: var(--spacing-md);
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.branch-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.branch-select {
+  width: 100%;
+}
+
+/* 拉取结果 */
+.pull-result-output {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.pull-progress-section {
+  margin-bottom: var(--spacing-md);
+}
+
+.pull-summary {
+  margin-top: var(--spacing-sm);
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.pull-table {
+  width: 100%;
+}
+
+.text-success {
+  color: var(--success-color);
+}
+
+.text-danger {
+  color: var(--danger-color);
+}
+
 /* 标签页样式 */
 .el-tabs {
-  margin-top: 10px;
+  margin-top: var(--spacing-sm);
 }
 
 .el-tabs__header {
@@ -831,14 +911,38 @@ defineExpose({
   border-top: 1px solid var(--border-color);
 }
 
-/* 空状态样式 */
-:deep(.el-empty) {
-  margin-top: 50px;
+/* 自定义空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--spacing-xl);
+  animation: fadeIn var(--transition-normal);
 }
 
-:deep(.el-empty__description) {
+.empty-state-icon {
+  color: var(--border-light);
+  margin-bottom: var(--spacing-lg);
+  transition: color var(--transition-normal);
+}
+
+.empty-state:hover .empty-state-icon {
+  color: var(--primary-light);
+}
+
+.empty-state-title {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-xs) 0;
+  font-weight: 500;
+}
+
+.empty-state-hint {
+  font-size: 13px;
   color: var(--text-tertiary);
-  font-size: 14px;
+  margin: 0;
 }
 
 /* 底部后台运行状态栏 */
@@ -850,13 +954,13 @@ defineExpose({
   justify-content: space-between;
   gap: 12px;
   padding: 6px 16px;
-  background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%);
-  border-top: 1px solid #d4e8f7;
+  background: var(--primary-bg);
+  border-top: 1px solid var(--border-color);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 .pull-status-bar:hover {
-  background: linear-gradient(135deg, #e1f0ff 0%, #d6ecfa 100%);
+  background: linear-gradient(135deg, var(--primary-bg) 0%, #d6ecfa 100%);
   box-shadow: 0 -2px 8px rgba(64, 158, 255, 0.1);
 }
 .pull-status-left {
