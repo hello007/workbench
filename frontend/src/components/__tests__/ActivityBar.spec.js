@@ -18,10 +18,10 @@ describe('ActivityBar', () => {
     })
   }
 
-  it('应该渲染两个活动栏图标按钮', () => {
+  it('应该渲染三个活动栏图标按钮', () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    expect(items.length).toBe(2)
+    expect(items.length).toBe(3)
   })
 
   it('默认选中工作目录', () => {

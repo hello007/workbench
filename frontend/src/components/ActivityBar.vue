@@ -16,7 +16,7 @@
 </template>
 
 <script setup>
-import { Folder, SetUp } from '@element-plus/icons-vue'
+import { Folder, SetUp, Setting } from '@element-plus/icons-vue'
 
 defineProps({
   modelValue: { type: String, default: 'directory' }
@@ -26,7 +26,8 @@ defineEmits(['update:modelValue'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
-  { id: 'toolbox', icon: SetUp, label: '工具箱' }
+  { id: 'toolbox', icon: SetUp, label: '工具箱' },
+  { id: 'settings', icon: Setting, label: '设置' }
 ]
 </script>
 

@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"git-manager/service"
 )
 
 var (
@@ -27,6 +30,9 @@ func main() {
 
 	app := NewApp()
 
+	settingsSvc := service.NewSettingsService(filepath.Join("data", "settings.json"))
+	settings, _ := settingsSvc.Load()
+
 	err := wails.Run(&options.App{
 		Title:  "Git Manager",
 		Width:  1280,
@@ -38,6 +44,9 @@ func main() {
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{
 			app,
+		},
+		Windows: &windows.Options{
+			WebviewGpuIsDisabled: settings.GpuDisabled,
 		},
 	})
 

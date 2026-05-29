@@ -21,6 +21,10 @@
                 v-show="activePanel === 'toolbox'"
                 @close="activePanel = 'directory'"
               />
+              <SettingsPanel
+                v-show="activePanel === 'settings'"
+                @close="activePanel = 'directory'"
+              />
             </div>
           </Pane>
         <Pane :size="30" :min-size="15">
@@ -77,6 +81,7 @@ import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
 import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
+import SettingsPanel from '../components/SettingsPanel.vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -114,7 +119,7 @@ const contentPanelRef = ref()
 
 // ---- 右键菜单事件处理 ----
 const closeToolbox = () => {
-  if (activePanel.value === 'toolbox') {
+  if (activePanel.value === 'toolbox' || activePanel.value === 'settings') {
     activePanel.value = 'directory'
   }
 }

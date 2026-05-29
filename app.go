@@ -19,6 +19,7 @@ type App struct {
 	fileTreeSvc    *service.FileTreeService
 	fileOpSvc      *service.FileOperationService
 	gitSvc         *service.GitService
+	settingsSvc    *service.SettingsService
 }
 
 func NewApp() *App {
@@ -29,11 +30,13 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	dataDir := "data"
 	configPath := filepath.Join(dataDir, "directories.json")
+	settingsPath := filepath.Join(dataDir, "settings.json")
 
 	a.directorySvc = service.NewDirectoryService(configPath)
 	a.fileTreeSvc = service.NewFileTreeService()
 	a.fileOpSvc = service.NewFileOperationService()
 	a.gitSvc = service.NewGitService()
+	a.settingsSvc = service.NewSettingsService(settingsPath)
 
 	println("Git Manager started")
 }
@@ -560,4 +563,18 @@ func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) erro
 		return fmt.Errorf("路径不能为空")
 	}
 	return a.gitSvc.CheckoutBranch(path, branchName, isRemote)
+}
+
+// GetSettings 获取应用设置
+func (a *App) GetSettings() *model.AppSettings {
+	settings, err := a.settingsSvc.Load()
+	if err != nil {
+		return &model.AppSettings{}
+	}
+	return settings
+}
+
+// SaveSettings 保存应用设置
+func (a *App) SaveSettings(settings *model.AppSettings) error {
+	return a.settingsSvc.Save(settings)
 }
