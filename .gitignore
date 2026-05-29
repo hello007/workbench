@@ -28,6 +28,10 @@ frontend/package.json.md5
 frontend/wailsjs/
 go.work
 node_modules
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
 release/
 Thumbs.db
 vendor/
