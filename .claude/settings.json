@@ -16,5 +16,8 @@
       "Bash(node scripts/generate-icons.mjs)",
       "Bash(node -e ' *)"
     ]
+  },
+  "enabledPlugins": {
+    "cli-anything@cli-anything": true
   }
 }

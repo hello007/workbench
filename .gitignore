@@ -21,6 +21,7 @@
 .superpowers/
 .vscode/
 .worktrees/
+.claude/settings.local.json
 build/
 data/*.json
 frontend/dist/
