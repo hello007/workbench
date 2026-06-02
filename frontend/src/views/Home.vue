@@ -1,72 +1,88 @@
 <template>
   <div class="home">
     <div class="home-layout">
-      <ActivityBar v-model="activePanel" />
-      <div class="splitpanes-wrapper">
-        <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
-          <Pane :size="20" :min-size="10">
-            <div class="pane-content" style="position:relative;">
-              <DirectoryTree
-                v-show="activePanel === 'directory'"
-                ref="directoryTreeRef"
-                :directories="directories"
-                :selected-id="selectedDirectoryId"
-                :version="appVersion"
-                @select="onDirectorySelect"
-                @change="loadDirectories"
-                @contextmenu="onDirectoryContextMenu"
-                @batch-pull="onBatchPull"
-              />
-              <ToolboxPanel
-                v-show="activePanel === 'toolbox'"
-                @close="activePanel = 'directory'"
-              />
-              <SettingsPanel
-                v-show="activePanel === 'settings'"
-                @close="activePanel = 'directory'"
-              />
-            </div>
-          </Pane>
-        <Pane :size="30" :min-size="15">
-          <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
-            <FileTreePanel
-              ref="fileTreePanelRef"
-              :directories="directories"
-              :selected-dir-id="selectedDirectoryId"
-              :clipboard="clipboard"
-              @select="onNodeSelect"
-              @batch-pull="onBatchPull"
-              @copy="handleCopy"
-              @cut="handleCut"
-              @paste="handlePaste"
-              @copy-to="handleCopyTo"
-              @contextmenu="onFileTreeContextMenu"
-              @delete="onDeleteFromFileTree"
-            />
-          </div>
-        </Pane>
-        <Pane :size="50" :min-size="30">
-          <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
-            <ContentPanel
-              ref="contentPanelRef"
-              :selected-node="selectedNode"
-              :latest-commit="latestCommit"
-              :clipboard="clipboard"
-              @latest-commit="commit => latestCommit = commit"
-              @refresh-node="onRefreshNode"
-              @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
-              @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
-              @rename="onRenameFromContent"
-              @delete="onDeleteFromContent"
-              @copy="handleCopy"
-              @cut="handleCut"
-              @paste="handlePaste"
-              @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
-              @batch-pull="onBatchPull"
-            />
-          </div>
-        </Pane>
-      </Splitpanes>
+      <ActivityBar v-model="activePanel" :terminal-active="terminalVisible" @toggle-terminal="toggleTerminal" />
+      <div class="main-area">
+        <!-- 上半区：原有 Splitpanes 三栏 -->
+        <div class="main-panes">
+          <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
+            <Pane :size="20" :min-size="10">
+              <div class="pane-content" style="position:relative;">
+                <DirectoryTree
+                  v-show="activePanel === 'directory'"
+                  ref="directoryTreeRef"
+                  :directories="directories"
+                  :selected-id="selectedDirectoryId"
+                  :version="appVersion"
+                  @select="onDirectorySelect"
+                  @change="loadDirectories"
+                  @contextmenu="onDirectoryContextMenu"
+                  @batch-pull="onBatchPull"
+                />
+                <ToolboxPanel
+                  v-show="activePanel === 'toolbox'"
+                  @close="activePanel = 'directory'"
+                />
+                <SettingsPanel
+                  v-show="activePanel === 'settings'"
+                  @close="activePanel = 'directory'"
+                />
+              </div>
+            </Pane>
+            <Pane :size="30" :min-size="15">
+              <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+                <FileTreePanel
+                  ref="fileTreePanelRef"
+                  :directories="directories"
+                  :selected-dir-id="selectedDirectoryId"
+                  :clipboard="clipboard"
+                  @select="onNodeSelect"
+                  @batch-pull="onBatchPull"
+                  @copy="handleCopy"
+                  @cut="handleCut"
+                  @paste="handlePaste"
+                  @copy-to="handleCopyTo"
+                  @contextmenu="onFileTreeContextMenu"
+                  @delete="onDeleteFromFileTree"
+                />
+              </div>
+            </Pane>
+            <Pane :size="50" :min-size="30">
+              <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+                <ContentPanel
+                  ref="contentPanelRef"
+                  :selected-node="selectedNode"
+                  :latest-commit="latestCommit"
+                  :clipboard="clipboard"
+                  @latest-commit="commit => latestCommit = commit"
+                  @refresh-node="onRefreshNode"
+                  @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
+                  @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
+                  @rename="onRenameFromContent"
+                  @delete="onDeleteFromContent"
+                  @copy="handleCopy"
+                  @cut="handleCut"
+                  @paste="handlePaste"
+                  @copy-to="node => fileTreePanelRef.showCopyToDialog(node)"
+                  @batch-pull="onBatchPull"
+                />
+              </div>
+            </Pane>
+          </Splitpanes>
+        </div>
+        <!-- 拖拽分隔条 -->
+        <div
+          v-if="terminalVisible"
+          class="resize-bar"
+          @mousedown="onResizeBarMouseDown"
+        ></div>
+        <!-- 下半区：终端面板 -->
+        <TerminalPanel
+          :visible="terminalVisible"
+          :current-dir="terminalDir"
+          :style="{ height: terminalVisible ? terminalHeight + 'px' : '0px' }"
+          @toggle="toggleTerminal"
+        />
       </div>
     </div>
   </div>
@@ -82,6 +98,7 @@ import ContentPanel from '../components/ContentPanel.vue'
 import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
+import TerminalPanel from '../components/TerminalPanel.vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -111,6 +128,11 @@ const clipboard = reactive({
   sourceName: '',
   sourceType: ''
 })
+
+// ---- 终端状态 ----
+const terminalVisible = ref(false)
+const terminalHeight = ref(200)
+const terminalDir = ref('')
 
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
@@ -234,6 +256,13 @@ const onDeleteFromContent = async (node) => {
 
 // ---- 键盘快捷键 ----
 const handleGlobalKeydown = (e) => {
+  // Ctrl+` 切换终端
+  if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    toggleTerminal()
+    return
+  }
+
   if (e.key === 'F5') {
     e.preventDefault()
     if (selectedNode.value) {
@@ -258,6 +287,49 @@ const handleGlobalKeydown = (e) => {
     e.preventDefault()
     handlePaste(selectedNode.value)
   }
+}
+
+// ---- 终端 ----
+const toggleTerminal = () => {
+  terminalVisible.value = !terminalVisible.value
+}
+
+// 更新终端跟随目录
+watch(() => selectedNode.value, (node) => {
+  if (node && node.type === 'directory') {
+    terminalDir.value = node.path
+  } else if (node && node.type === 'file') {
+    const lastSep = Math.max(node.path.lastIndexOf('\\'), node.path.lastIndexOf('/'))
+    terminalDir.value = lastSep > 0 ? node.path.substring(0, lastSep) : node.path
+  }
+})
+
+watch(() => selectedDirectoryId.value, () => {
+  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
+  if (dir && !selectedNode.value) {
+    terminalDir.value = dir.path
+  }
+})
+
+// 拖拽分隔条
+const onResizeBarMouseDown = (e) => {
+  e.preventDefault()
+  const startY = e.clientY
+  const startHeight = terminalHeight.value
+
+  const onMouseMove = (moveEvent) => {
+    const delta = startY - moveEvent.clientY
+    const newHeight = Math.max(100, Math.min(startHeight + delta, window.innerHeight - 200))
+    terminalHeight.value = newHeight
+  }
+
+  const onMouseUp = () => {
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+  }
+
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
 }
 
 // ---- 剪贴板操作 ----
@@ -413,18 +485,34 @@ onBeforeUnmount(() => {
   height: 100%;
   width: 100%;
 }
-.splitpanes-wrapper {
+
+.main-area {
   flex: 1;
-  height: 100%;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.main-panes {
+  flex: 1;
+  min-height: 0;
   overflow: hidden !important;
   position: relative;
 }
-.splitpanes-container {
-  height: 100%;
-  width: 100%;
-  overflow: hidden !important;
+
+.resize-bar {
+  flex-shrink: 0;
+  height: 3px;
+  background: var(--border-color, #3c3c3c);
+  cursor: ns-resize;
+  transition: background 0.15s;
 }
+
+.resize-bar:hover {
+  background: var(--primary-color, #409eff);
+}
+
 .pane-content {
   height: 100%;
   width: 100%;
