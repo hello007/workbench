@@ -12,17 +12,29 @@
         <component :is="item.icon" />
       </el-icon>
     </div>
+    <!-- 终端图标（底部） -->
+    <div class="activity-bar-spacer"></div>
+    <div
+      class="activity-bar-item"
+      :class="{ 'is-active': terminalActive }"
+      @click="$emit('toggleTerminal')"
+    >
+      <el-icon :size="20">
+        <Monitor />
+      </el-icon>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { Folder, SetUp, Setting } from '@element-plus/icons-vue'
+import { Folder, SetUp, Setting, Monitor } from '@element-plus/icons-vue'
 
 defineProps({
-  modelValue: { type: String, default: 'directory' }
+  modelValue: { type: String, default: 'directory' },
+  terminalActive: { type: Boolean, default: false }
 })
 
-defineEmits(['update:modelValue'])
+defineEmits(['update:modelValue', 'toggleTerminal'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
@@ -41,6 +53,10 @@ const panels = [
   align-items: center;
   padding: 10px 0;
   gap: 4px;
+}
+
+.activity-bar-spacer {
+  flex: 1;
 }
 
 .activity-bar-item {
