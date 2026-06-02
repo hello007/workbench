@@ -24,6 +24,35 @@
           <span>GPU 设置已变更，需重启应用后生效</span>
         </div>
       </div>
+      <div class="settings-section">
+        <div class="settings-section-title">终端</div>
+        <div class="settings-item">
+          <div class="settings-item-info">
+            <div class="settings-item-label">默认 Shell</div>
+            <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
+          </div>
+          <el-select v-model="defaultShell" size="small" style="width: 140px;" @change="onSettingsChange">
+            <el-option label="PowerShell" value="powershell" />
+            <el-option label="CMD" value="cmd" />
+            <el-option label="Git Bash" value="gitbash" />
+            <el-option label="WSL" value="wsl" />
+          </el-select>
+        </div>
+        <div v-if="defaultShell === 'gitbash'" class="settings-item" style="margin-top:8px;">
+          <div class="settings-item-info">
+            <div class="settings-item-label">Git Bash 路径</div>
+            <div class="settings-item-desc">自定义 Git Bash 可执行文件路径</div>
+          </div>
+          <el-input v-model="gitBashPath" size="small" style="width: 240px;" @change="onSettingsChange" />
+        </div>
+        <div v-if="defaultShell === 'wsl'" class="settings-item" style="margin-top:8px;">
+          <div class="settings-item-info">
+            <div class="settings-item-label">WSL 发行版</div>
+            <div class="settings-item-desc">指定 WSL 发行版名称（留空使用默认）</div>
+          </div>
+          <el-input v-model="wslDistro" size="small" style="width: 240px;" @change="onSettingsChange" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -37,11 +66,17 @@ defineEmits(['close'])
 
 const gpuEnabled = ref(true)
 const needsRestart = ref(false)
+const defaultShell = ref('powershell')
+const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
+const wslDistro = ref('')
 
 onMounted(async () => {
   try {
     const settings = await GetSettings()
     gpuEnabled.value = !settings.gpuDisabled
+    defaultShell.value = settings.defaultShell || 'powershell'
+    gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
+    wslDistro.value = settings.wslDistro || ''
   } catch {
     gpuEnabled.value = true
   }
@@ -49,11 +84,29 @@ onMounted(async () => {
 
 const onGpuChange = async (val) => {
   try {
-    await SaveSettings({ gpuDisabled: !val })
+    await SaveSettings({
+      gpuDisabled: !val,
+      defaultShell: defaultShell.value,
+      gitBashPath: gitBashPath.value,
+      wslDistro: wslDistro.value
+    })
     needsRestart.value = true
   } catch {
     // 回滚
     gpuEnabled.value = !gpuEnabled.value
+  }
+}
+
+const onSettingsChange = async () => {
+  try {
+    await SaveSettings({
+      gpuDisabled: !gpuEnabled.value,
+      defaultShell: defaultShell.value,
+      gitBashPath: gitBashPath.value,
+      wslDistro: wslDistro.value
+    })
+  } catch {
+    // 回滚
   }
 }
 </script>
