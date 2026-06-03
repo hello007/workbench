@@ -282,6 +282,7 @@ import {
   DocumentCopy
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
+import { useTreeState } from '../composables/useTreeState'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -301,6 +302,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete'])
+
+const { saveState, restoreState } = useTreeState()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -865,6 +868,54 @@ const handleBatchPull = (data) => {
   emit('batchPull', data)
 }
 
+// ---- 树状态记忆 ----
+function getExpandedPaths() {
+  const tree = fileTreeRef.value
+  if (!tree) return []
+  const store = tree.store
+  const paths = []
+  function walk(node) {
+    if (node.expanded && node.data && node.data.path) {
+      paths.push(node.data.path)
+    }
+    if (node.childNodes) {
+      node.childNodes.forEach(walk)
+    }
+  }
+  walk(store.root)
+  return paths
+}
+
+function saveCurrentState(dirPath) {
+  const treeEl = document.querySelector('.tree-content')
+  saveState(dirPath, {
+    expandedPaths: getExpandedPaths(),
+    scrollTop: treeEl ? treeEl.scrollTop : 0,
+    selectedPath: null
+  })
+}
+
+async function restoreTreeState(dirPath) {
+  const state = restoreState(dirPath)
+  if (state.expandedPaths.length === 0) return
+
+  const tree = fileTreeRef.value
+  if (!tree) return
+
+  for (const path of state.expandedPaths) {
+    const node = tree.getNode(path)
+    if (node && !node.expanded) {
+      node.expand()
+      await new Promise(r => setTimeout(r, 50))
+    }
+  }
+
+  if (state.scrollTop > 0) {
+    const treeEl = document.querySelector('.tree-content')
+    if (treeEl) treeEl.scrollTop = state.scrollTop
+  }
+}
+
 // ---- 暴露方法 ----
 defineExpose({
   refreshNode,
@@ -876,7 +927,9 @@ defineExpose({
   showCopyToDialog,
   setCopyToLoading: (val) => { copyToLoading.value = val },
   closeCopyToDialog: () => { copyToDialogVisible.value = false },
-  closeMenu: () => { contextMenu.visible = false }
+  closeMenu: () => { contextMenu.visible = false },
+  saveCurrentState,
+  restoreTreeState
 })
 
 // ---- 生命周期 ----

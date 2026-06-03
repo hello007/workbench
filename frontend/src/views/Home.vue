@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
@@ -175,11 +175,28 @@ const loadDirectories = async () => {
 }
 
 // ---- 切换工作目录 ----
-const onDirectorySelect = (dirId) => {
+const onDirectorySelect = async (dirId) => {
+  // 保存当前工作目录的树状态
+  if (selectedDirectoryId.value) {
+    const currentDir = directories.value.find(d => d.id === selectedDirectoryId.value)
+    if (currentDir) {
+      fileTreePanelRef.value?.saveCurrentState(currentDir.path)
+    }
+  }
+
   selectedDirectoryId.value = dirId
   selectedNode.value = null
   latestCommit.value = null
   contentPanelRef.value?.clearPreview()
+
+  // 等待树重新渲染后恢复状态
+  await nextTick()
+  const newDir = directories.value.find(d => d.id === dirId)
+  if (newDir) {
+    setTimeout(() => {
+      fileTreePanelRef.value?.restoreTreeState(newDir.path)
+    }, 300)
+  }
 }
 
 // ---- 选中文件树节点 ----
