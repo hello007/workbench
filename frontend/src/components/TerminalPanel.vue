@@ -79,6 +79,7 @@ onMounted(async () => {
 })
 
 // 监听 visible 变化，首次打开时初始化终端
+// 使用 flush: 'post' 确保 DOM 更新后再执行，避免 v-if 导致 terminalContainer 为 null
 watch(() => props.visible, async (val) => {
   if (val && !hasInitialized.value && terminalContainer.value) {
     await nextTick()
@@ -91,7 +92,7 @@ watch(() => props.visible, async (val) => {
     await nextTick()
     resize()
   }
-})
+}, { flush: 'post' })
 
 // 监听目录变化，自动跟随
 watch(() => props.currentDir, (newDir) => {

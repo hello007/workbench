@@ -55,25 +55,17 @@ export function useTerminal() {
     const cols = terminal.cols
     const rows = terminal.rows
 
-    try {
-      const sid = await CreateTerminal(dir, currentShellType.value, cols, rows)
-      sessionID.value = sid
-      isActive.value = true
-      isExited.value = false
-    } catch (err) {
-      terminal.writeln(`\x1b[31m创建终端失败: ${err}\x1b[0m`)
-      return
-    }
+    // 输出缓冲区：CreateTerminal 返回前收到的输出暂存于此
+    // 解决 sessionID 尚未设置时事件回调无法匹配的问题
+    const outputBuffer = []
 
-    terminal.onData((data) => {
-      if (sessionID.value) {
-        WriteTerminalInput(sessionID.value, data).catch(() => {})
-      }
-    })
-
+    // 先注册事件监听器，再创建终端，避免 Shell 初始 prompt 输出丢失
     EventsOn('terminal-output', (sid, output) => {
-      if (sid === sessionID.value && term.value) {
+      if (sessionID.value && sid === sessionID.value && term.value) {
         term.value.write(output)
+      } else if (!sessionID.value && term.value) {
+        // sessionID 尚未赋值，暂存输出
+        outputBuffer.push({ sid, output })
       }
     })
 
@@ -84,6 +76,32 @@ export function useTerminal() {
         if (term.value) {
           term.value.writeln('\r\n\x1b[33m终端进程已退出。点击「重新启动」恢复。\x1b[0m')
         }
+      }
+    })
+
+    try {
+      const sid = await CreateTerminal(dir, currentShellType.value, cols, rows)
+      sessionID.value = sid
+      isActive.value = true
+      isExited.value = false
+
+      // 刷新缓冲区：将 CreateTerminal 返回前暂存的输出写入终端
+      for (const item of outputBuffer) {
+        if (item.sid === sid && term.value) {
+          term.value.write(item.output)
+        }
+      }
+      outputBuffer.length = 0
+    } catch (err) {
+      terminal.writeln(`\x1b[31m创建终端失败: ${err}\x1b[0m`)
+      EventsOff('terminal-output')
+      EventsOff('terminal-exit')
+      return
+    }
+
+    terminal.onData((data) => {
+      if (sessionID.value) {
+        WriteTerminalInput(sessionID.value, data).catch(() => {})
       }
     })
   }
