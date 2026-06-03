@@ -82,11 +82,19 @@
       </div>
     </div>
     <SettingsPanel v-model:visible="settingsVisible" />
+    <CommandPalette
+      v-model="commandPaletteVisible"
+      :current-dir="currentDirPath"
+      :work-dirs="directories"
+      @select-file="onPaletteSelectFile"
+      @select-favorite="onPaletteSelectFavorite"
+      @select-workdir="onPaletteSelectWorkDir"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
@@ -96,6 +104,8 @@ import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
+import CommandPalette from '../components/CommandPalette.vue'
+import { useRecentAccess } from '../composables/useRecentAccess'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -134,10 +144,20 @@ const terminalDir = ref('')
 // ---- 设置弹窗状态 ----
 const settingsVisible = ref(false)
 
+// ---- Command Palette 状态 ----
+const commandPaletteVisible = ref(false)
+const { record: recordAccess } = useRecentAccess()
+
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
 const contentPanelRef = ref()
+
+// ---- computed ----
+const currentDirPath = computed(() => {
+  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
+  return dir ? dir.path : ''
+})
 
 // ---- 右键菜单事件处理 ----
 const closeToolbox = () => {
@@ -203,6 +223,7 @@ const onDirectorySelect = async (dirId) => {
 const onNodeSelect = (data) => {
   selectedNode.value = data
   contentPanelRef.value?.clearPreview()
+  recordAccess({ path: data.path, type: data.type, workDir: currentDirPath.value })
 }
 
 // ---- 刷新文件树节点 ----
@@ -271,8 +292,38 @@ const onDeleteFromContent = async (node) => {
   }
 }
 
+// ---- Command Palette 事件处理 ----
+function onPaletteSelectFile(item) {
+  recordAccess({ path: item.path, type: item.type, workDir: currentDirPath.value })
+  fileTreePanelRef.value?.locateNode(item.path)
+}
+
+function onPaletteSelectFavorite(fav) {
+  recordAccess({ path: fav.path, type: 'dir', workDir: currentDirPath.value })
+  if (fav.path.startsWith(currentDirPath.value)) {
+    fileTreePanelRef.value?.locateNode(fav.path)
+  } else {
+    const targetDir = directories.value.find(d => fav.path.startsWith(d.path))
+    if (targetDir) {
+      onDirectorySelect(targetDir.id)
+      setTimeout(() => fileTreePanelRef.value?.locateNode(fav.path), 500)
+    }
+  }
+}
+
+function onPaletteSelectWorkDir(dir) {
+  onDirectorySelect(dir.id)
+}
+
 // ---- 键盘快捷键 ----
 const handleGlobalKeydown = (e) => {
+  // Ctrl+P 打开命令面板
+  if (e.ctrlKey && e.key === 'p') {
+    e.preventDefault()
+    commandPaletteVisible.value = true
+    return
+  }
+
   // Ctrl+` 切换终端
   if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
