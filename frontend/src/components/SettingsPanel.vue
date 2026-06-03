@@ -78,7 +78,7 @@
         <div v-show="activeTab === 'shortcuts'">
           <div class="settings-section-title">快捷键</div>
           <div class="settings-empty">
-            <el-icon :size="32" color="#555"><Keyboard /></el-icon>
+            <el-icon :size="32" color="#555"><Key /></el-icon>
             <p>暂无可配置快捷键</p>
           </div>
         </div>
@@ -89,7 +89,7 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import { WarningFilled, Keyboard } from '@element-plus/icons-vue'
+import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
