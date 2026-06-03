@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,7 +80,7 @@ func (s *TerminalService) ChangeDir(sessionID, dir string) error {
 	if !session.IsRunning() {
 		return fmt.Errorf("终端会话 %s 已停止", sessionID)
 	}
-	cdCmd := s.buildCdCommand(dir)
+	cdCmd := s.buildCdCommand(dir, session.ShellType)
 	_, err = ptyProc.Write([]byte(cdCmd))
 	if err != nil {
 		return err
@@ -141,10 +142,41 @@ func (s *TerminalService) resolveShellConfig(shellType, customPath string) *mode
 	return model.ResolveShellConfig(shellType, customPath)
 }
 
-// buildCdCommand 构建 cd 命令
-func (s *TerminalService) buildCdCommand(dir string) string {
+// buildCdCommand 根据 Shell 类型构建 cd 命令
+// CMD: cd /d "path"（/d 标志切换驱动器+目录）
+// PowerShell: cd "path"（自动处理驱动器切换）
+// Git Bash: cd "path"（反斜杠转正斜杠）
+// WSL: cd "/mnt/x/path"（Windows 路径转 WSL 挂载路径）
+func (s *TerminalService) buildCdCommand(dir string, shellType string) string {
 	normalizedDir := filepath.Clean(dir)
-	return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\n"
+
+	switch shellType {
+	case "cmd":
+		// CMD: /d 标志用于同时切换驱动器和目录
+		return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\n"
+	case "gitbash":
+		// Git Bash: 无 /d 标志，反斜杠转正斜杠
+		unixDir := strings.ReplaceAll(normalizedDir, `\`, `/`)
+		return fmt.Sprintf(`cd "%s"`, unixDir) + "\n"
+	case "wsl":
+		// WSL: D:\path → /mnt/d/path
+		wslDir := toWslPath(normalizedDir)
+		return fmt.Sprintf(`cd "%s"`, wslDir) + "\n"
+	default:
+		// PowerShell 及其他: 无需 /d 标志
+		return fmt.Sprintf(`cd "%s"`, normalizedDir) + "\n"
+	}
+}
+
+// toWslPath 将 Windows 路径转换为 WSL 挂载路径
+// D:\work → /mnt/d/work，C:\ → /mnt/c/
+func toWslPath(path string) string {
+	if len(path) >= 2 && path[1] == ':' {
+		drive := strings.ToLower(string(path[0]))
+		rest := strings.ReplaceAll(path[3:], `\`, `/`)
+		return fmt.Sprintf("/mnt/%s/%s", drive, rest)
+	}
+	return strings.ReplaceAll(path, `\`, `/`)
 }
 
 // startOutputPump 输出泵，持续读取 PTY 输出并向前端发送事件

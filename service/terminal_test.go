@@ -32,25 +32,151 @@ func TestResolveShellConfig_UnknownType(t *testing.T) {
 	}
 }
 
-func TestBuildCdCommand_Windows(t *testing.T) {
+// === buildCdCommand 各 Shell 类型测试 ===
+
+func TestBuildCdCommand_Cmd(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\workspace\test`)
+	cmd := svc.buildCdCommand(`D:\workspace\test`, "cmd")
 	expected := `cd /d "D:\workspace\test"` + "\n"
 	if cmd != expected {
-		t.Errorf("期望 cd 命令=%q, 实际=%q", expected, cmd)
+		t.Errorf("CMD: 期望=%q, 实际=%q", expected, cmd)
 	}
 }
 
-func TestBuildCdCommand_WithSpaces(t *testing.T) {
+func TestBuildCdCommand_Cmd_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\my project\test folder`)
+	cmd := svc.buildCdCommand(`D:\my project\test folder`, "cmd")
 	expected := `cd /d "D:\my project\test folder"` + "\n"
 	if cmd != expected {
-		t.Errorf("期望 cd 命令(含空格)=%q, 实际=%q", expected, cmd)
+		t.Errorf("CMD(含空格): 期望=%q, 实际=%q", expected, cmd)
 	}
 }
 
-// === 以下为新增测试 ===
+func TestBuildCdCommand_PowerShell(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\workspace\test`, "powershell")
+	expected := `cd "D:\workspace\test"` + "\n"
+	if cmd != expected {
+		t.Errorf("PowerShell: 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_PowerShell_WithSpaces(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "powershell")
+	expected := `cd "D:\工作\Doc\项目管理"` + "\n"
+	if cmd != expected {
+		t.Errorf("PowerShell(含空格/中文): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_GitBash(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\workspace\test`, "gitbash")
+	expected := `cd "D:/workspace/test"` + "\n"
+	if cmd != expected {
+		t.Errorf("Git Bash: 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_GitBash_WithSpaces(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理\10.岗职`, "gitbash")
+	expected := `cd "D:/工作/Doc/项目管理/10.岗职"` + "\n"
+	if cmd != expected {
+		t.Errorf("Git Bash(含中文/空格): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_Wsl(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\workspace\test`, "wsl")
+	expected := `cd "/mnt/d/workspace/test"` + "\n"
+	if cmd != expected {
+		t.Errorf("WSL: 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_Wsl_DriveRoot(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`C:\`, "wsl")
+	expected := `cd "/mnt/c/"` + "\n"
+	if cmd != expected {
+		t.Errorf("WSL(驱动器根): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_Wsl_WithSpaces(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "wsl")
+	expected := `cd "/mnt/d/工作/Doc/项目管理"` + "\n"
+	if cmd != expected {
+		t.Errorf("WSL(含中文): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_DefaultFallback(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`C:\Users`, "unknown_shell")
+	expected := `cd "C:\Users"` + "\n"
+	if cmd != expected {
+		t.Errorf("未知 Shell 应回退到 PowerShell 语法, 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_PathNormalization(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand("C:/Users/test", "cmd")
+	// filepath.Clean 在 Windows 上会将 / 转为 \
+	expected := `cd /d "C:\Users\test"` + "\n"
+	if cmd != expected {
+		t.Errorf("路径应被规范化, 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+func TestBuildCdCommand_EmptyPath(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand("", "cmd")
+	if cmd == "" {
+		t.Error("空路径不应产生空命令")
+	}
+}
+
+// === toWslPath 辅助函数测试 ===
+
+func TestToWslPath_DrivePath(t *testing.T) {
+	result := toWslPath(`D:\workspace\test`)
+	expected := "/mnt/d/workspace/test"
+	if result != expected {
+		t.Errorf("期望=%q, 实际=%q", expected, result)
+	}
+}
+
+func TestToWslPath_DriveRoot(t *testing.T) {
+	result := toWslPath(`C:\`)
+	expected := "/mnt/c/"
+	if result != expected {
+		t.Errorf("期望=%q, 实际=%q", expected, result)
+	}
+}
+
+func TestToWslPath_LowercaseDrive(t *testing.T) {
+	result := toWslPath(`D:\path`)
+	expected := "/mnt/d/path"
+	if result != expected {
+		t.Errorf("驱动器号应转小写, 期望=%q, 实际=%q", expected, result)
+	}
+}
+
+func TestToWslPath_NoDrive(t *testing.T) {
+	result := toWslPath(`relative\path`)
+	expected := "relative/path"
+	if result != expected {
+		t.Errorf("无驱动器号应只转斜杠, 期望=%q, 实际=%q", expected, result)
+	}
+}
+
+// === 以下为服务层原有测试 ===
 
 func TestNewTerminalService(t *testing.T) {
 	svc := NewTerminalService(nil)
@@ -113,33 +239,6 @@ func TestTerminalService_CreateTerminal_InvalidShellFallback(t *testing.T) {
 		t.Error("创建成功但 sessionID 为空")
 	}
 	svc.CloseTerminal(sessionID)
-}
-
-func TestBuildCdCommand_SimplePath(t *testing.T) {
-	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("C:\\Users")
-	expected := `cd /d "C:\Users"` + "\n"
-	if cmd != expected {
-		t.Errorf("期望 %q, 实际=%q", expected, cmd)
-	}
-}
-
-func TestBuildCdCommand_PathNormalization(t *testing.T) {
-	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("C:/Users/test")
-	// filepath.Clean 在 Windows 上会将 / 转为 \
-	expected := `cd /d "C:\Users\test"` + "\n"
-	if cmd != expected {
-		t.Errorf("路径应被规范化, 期望 %q, 实际=%q", expected, cmd)
-	}
-}
-
-func TestBuildCdCommand_EmptyPath(t *testing.T) {
-	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("")
-	if cmd == "" {
-		t.Error("空路径不应产生空命令")
-	}
 }
 
 func TestResolveShellConfig_AllTypes(t *testing.T) {
