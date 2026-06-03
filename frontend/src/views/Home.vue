@@ -1,7 +1,7 @@
 <template>
   <div class="home">
     <div class="home-layout">
-      <ActivityBar v-model="activePanel" :terminal-active="terminalVisible" @toggle-terminal="toggleTerminal" />
+      <ActivityBar v-model="activePanel" :terminal-active="terminalVisible" @toggle-terminal="toggleTerminal" @open-settings="settingsVisible = true" />
       <div class="main-area">
         <!-- 上半区：原有 Splitpanes 三栏 -->
         <div class="main-panes">
@@ -21,10 +21,6 @@
                 />
                 <ToolboxPanel
                   v-show="activePanel === 'toolbox'"
-                  @close="activePanel = 'directory'"
-                />
-                <SettingsPanel
-                  v-show="activePanel === 'settings'"
                   @close="activePanel = 'directory'"
                 />
               </div>
@@ -85,6 +81,7 @@
         />
       </div>
     </div>
+    <SettingsPanel v-model:visible="settingsVisible" />
   </div>
 </template>
 
@@ -134,6 +131,9 @@ const terminalVisible = ref(false)
 const terminalHeight = ref(200)
 const terminalDir = ref('')
 
+// ---- 设置弹窗状态 ----
+const settingsVisible = ref(false)
+
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
@@ -141,7 +141,7 @@ const contentPanelRef = ref()
 
 // ---- 右键菜单事件处理 ----
 const closeToolbox = () => {
-  if (activePanel.value === 'toolbox' || activePanel.value === 'settings') {
+  if (activePanel.value === 'toolbox') {
     activePanel.value = 'directory'
   }
 }
