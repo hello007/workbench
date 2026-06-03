@@ -136,3 +136,18 @@ type PullResult struct {
 type PullSummary struct {
 	Total int `json:"total"`
 }
+
+// Favorite 收藏夹条目
+type Favorite struct {
+	Path      string `json:"path"`
+	Alias     string `json:"alias,omitempty"`
+	Group     string `json:"group"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+// SearchResult 文件搜索结果
+type SearchResult struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
