@@ -37,7 +37,7 @@ func TestResolveShellConfig_UnknownType(t *testing.T) {
 func TestBuildCdCommand_Cmd(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\workspace\test`, "cmd")
-	expected := `cd /d "D:\workspace\test"` + "\n"
+	expected := `cd /d "D:\workspace\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("CMD: 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -46,7 +46,7 @@ func TestBuildCdCommand_Cmd(t *testing.T) {
 func TestBuildCdCommand_Cmd_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\my project\test folder`, "cmd")
-	expected := `cd /d "D:\my project\test folder"` + "\n"
+	expected := `cd /d "D:\my project\test folder"` + "\r"
 	if cmd != expected {
 		t.Errorf("CMD(含空格): 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -55,7 +55,7 @@ func TestBuildCdCommand_Cmd_WithSpaces(t *testing.T) {
 func TestBuildCdCommand_PowerShell(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\workspace\test`, "powershell")
-	expected := `cd "D:\workspace\test"` + "\n"
+	expected := `cd "D:\workspace\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("PowerShell: 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -64,7 +64,7 @@ func TestBuildCdCommand_PowerShell(t *testing.T) {
 func TestBuildCdCommand_PowerShell_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "powershell")
-	expected := `cd "D:\工作\Doc\项目管理"` + "\n"
+	expected := `cd "D:\工作\Doc\项目管理"` + "\r"
 	if cmd != expected {
 		t.Errorf("PowerShell(含空格/中文): 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -73,7 +73,7 @@ func TestBuildCdCommand_PowerShell_WithSpaces(t *testing.T) {
 func TestBuildCdCommand_GitBash(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\workspace\test`, "gitbash")
-	expected := `cd "D:/workspace/test"` + "\n"
+	expected := `cd "D:/workspace/test"` + "\r"
 	if cmd != expected {
 		t.Errorf("Git Bash: 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -82,7 +82,7 @@ func TestBuildCdCommand_GitBash(t *testing.T) {
 func TestBuildCdCommand_GitBash_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理\10.岗职`, "gitbash")
-	expected := `cd "D:/工作/Doc/项目管理/10.岗职"` + "\n"
+	expected := `cd "D:/工作/Doc/项目管理/10.岗职"` + "\r"
 	if cmd != expected {
 		t.Errorf("Git Bash(含中文/空格): 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -91,7 +91,7 @@ func TestBuildCdCommand_GitBash_WithSpaces(t *testing.T) {
 func TestBuildCdCommand_Wsl(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\workspace\test`, "wsl")
-	expected := `cd "/mnt/d/workspace/test"` + "\n"
+	expected := `cd "/mnt/d/workspace/test"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL: 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -100,7 +100,7 @@ func TestBuildCdCommand_Wsl(t *testing.T) {
 func TestBuildCdCommand_Wsl_DriveRoot(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`C:\`, "wsl")
-	expected := `cd "/mnt/c/"` + "\n"
+	expected := `cd "/mnt/c/"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL(驱动器根): 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -109,7 +109,7 @@ func TestBuildCdCommand_Wsl_DriveRoot(t *testing.T) {
 func TestBuildCdCommand_Wsl_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "wsl")
-	expected := `cd "/mnt/d/工作/Doc/项目管理"` + "\n"
+	expected := `cd "/mnt/d/工作/Doc/项目管理"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL(含中文): 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -118,7 +118,7 @@ func TestBuildCdCommand_Wsl_WithSpaces(t *testing.T) {
 func TestBuildCdCommand_DefaultFallback(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand(`C:\Users`, "unknown_shell")
-	expected := `cd "C:\Users"` + "\n"
+	expected := `cd "C:\Users"` + "\r"
 	if cmd != expected {
 		t.Errorf("未知 Shell 应回退到 PowerShell 语法, 期望=%q, 实际=%q", expected, cmd)
 	}
@@ -128,7 +128,7 @@ func TestBuildCdCommand_PathNormalization(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := svc.buildCdCommand("C:/Users/test", "cmd")
 	// filepath.Clean 在 Windows 上会将 / 转为 \
-	expected := `cd /d "C:\Users\test"` + "\n"
+	expected := `cd /d "C:\Users\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("路径应被规范化, 期望=%q, 实际=%q", expected, cmd)
 	}

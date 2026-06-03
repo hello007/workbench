@@ -153,18 +153,18 @@ func (s *TerminalService) buildCdCommand(dir string, shellType string) string {
 	switch shellType {
 	case "cmd":
 		// CMD: /d 标志用于同时切换驱动器和目录
-		return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\n"
+		return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\r"
 	case "gitbash":
 		// Git Bash: 无 /d 标志，反斜杠转正斜杠
 		unixDir := strings.ReplaceAll(normalizedDir, `\`, `/`)
-		return fmt.Sprintf(`cd "%s"`, unixDir) + "\n"
+		return fmt.Sprintf(`cd "%s"`, unixDir) + "\r"
 	case "wsl":
 		// WSL: D:\path → /mnt/d/path
 		wslDir := toWslPath(normalizedDir)
-		return fmt.Sprintf(`cd "%s"`, wslDir) + "\n"
+		return fmt.Sprintf(`cd "%s"`, wslDir) + "\r"
 	default:
 		// PowerShell 及其他: 无需 /d 标志
-		return fmt.Sprintf(`cd "%s"`, normalizedDir) + "\n"
+		return fmt.Sprintf(`cd "%s"`, normalizedDir) + "\r"
 	}
 }
 
