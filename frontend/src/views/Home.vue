@@ -40,6 +40,7 @@
                   @copy-to="handleCopyTo"
                   @contextmenu="onFileTreeContextMenu"
                   @delete="onDeleteFromFileTree"
+                  @add-work-dir="onAddWorkDir"
                 />
               </div>
             </Pane>
@@ -118,7 +119,8 @@ import {
   MoveItem,
   CopyToSystemClipboard,
   CutToSystemClipboard,
-  ReadFromSystemClipboard
+  ReadFromSystemClipboard,
+  AddDirectory
 } from '../../wailsjs/go/main/App'
 
 // ---- 核心状态 ----
@@ -238,6 +240,21 @@ const onBatchPull = async (data) => {
     contentPanelRef.value?.startBatchPull(summary)
   } catch (error) {
     ElMessage.warning(error || '未找到任何 Git 仓库')
+  }
+}
+
+// ---- 添加为工作目录 ----
+const onAddWorkDir = async (data) => {
+  try {
+    const dir = await AddDirectory(data.name, data.path, false)
+    if (dir) {
+      await loadDirectories()
+      ElMessage.success('已添加为工作目录')
+    } else {
+      ElMessage.error('添加工作目录失败')
+    }
+  } catch (error) {
+    ElMessage.error('添加工作目录失败: ' + (error.message || String(error)))
   }
 }
 

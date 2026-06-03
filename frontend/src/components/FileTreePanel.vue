@@ -215,6 +215,13 @@
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
         </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('addFavorite')">
+          <el-icon><Star /></el-icon>添加到收藏
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
+          <el-icon><FolderAdd /></el-icon>添加为工作目录
+        </li>
       </template>
       <template v-else>
         <li class="context-menu-item" @click="onMenuCommand('rename')">
@@ -255,6 +262,10 @@
         <li class="context-menu-item" @click="onMenuCommand('openWithDefaultApp')">
           <el-icon><Open /></el-icon>用默认程序打开
         </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('addFavorite')">
+          <el-icon><Star /></el-icon>添加到收藏
+        </li>
       </template>
     </ul>
   </div>
@@ -279,10 +290,12 @@ import {
   Open,
   Promotion,
   Scissor,
-  DocumentCopy
+  DocumentCopy,
+  Star
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { useTreeState } from '../composables/useTreeState'
+import { useFavorites } from '../composables/useFavorites'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -301,9 +314,10 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir'])
 
 const { saveState, restoreState } = useTreeState()
+const { addFavorite } = useFavorites()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -652,6 +666,12 @@ const onMenuCommand = (command) => {
     case 'pullRepos':
       handleBatchPull(data)
       break
+    case 'addFavorite':
+      handleAddFavorite(data)
+      break
+    case 'addAsWorkDir':
+      handleAddAsWorkDir(data)
+      break
   }
 }
 
@@ -866,6 +886,21 @@ const handleOpenWithDefaultApp = async (path) => {
 // ---- 批量拉取 ----
 const handleBatchPull = (data) => {
   emit('batchPull', data)
+}
+
+// ---- 添加到收藏 ----
+const handleAddFavorite = async (node) => {
+  const err = await addFavorite(node.path, '', '默认')
+  if (err) {
+    ElMessage.warning(err)
+  } else {
+    ElMessage.success('已添加到收藏')
+  }
+}
+
+// ---- 添加为工作目录 ----
+const handleAddAsWorkDir = (node) => {
+  emit('add-work-dir', { path: node.path, name: node.name })
 }
 
 // ---- 树状态记忆 ----
