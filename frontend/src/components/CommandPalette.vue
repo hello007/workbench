@@ -19,6 +19,7 @@
         @keydown.down.prevent="moveDown"
         @keydown.up.prevent="moveUp"
         @keydown.enter.prevent="selectCurrent"
+        @keydown.esc.prevent="onClose"
         @input="onInput"
       >
         <template #prefix>

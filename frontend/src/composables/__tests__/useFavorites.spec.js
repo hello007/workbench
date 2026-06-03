@@ -36,4 +36,31 @@ describe('useFavorites', () => {
     expect(results.length).toBe(1)
     expect(results[0].path).toBe('C:\\projects\\app')
   })
+
+  it('removes a favorite', async () => {
+    const { RemoveFavorite } = await import('../../../wailsjs/go/main/App')
+    const { removeFavorite } = useFavorites()
+    const result = await removeFavorite('C:\\projects\\app')
+    expect(RemoveFavorite).toHaveBeenCalledWith('C:\\projects\\app')
+    expect(result).toBe('')
+  })
+
+  it('updates group', async () => {
+    const { UpdateFavoriteGroup } = await import('../../../wailsjs/go/main/App')
+    const { updateGroup } = useFavorites()
+    const result = await updateGroup('C:\\projects\\app', '工作')
+    expect(UpdateFavoriteGroup).toHaveBeenCalledWith('C:\\projects\\app', '工作')
+    expect(result).toBe('')
+  })
+
+  it('searchFavorites returns all when query is empty', () => {
+    const { favorites, searchFavorites } = useFavorites()
+    favorites.value = [
+      { path: 'C:\\a', alias: '', group: '默认', createdAt: 1000 },
+      { path: 'C:\\b', alias: '', group: '默认', createdAt: 2000 }
+    ]
+
+    const results = searchFavorites('')
+    expect(results.length).toBe(2)
+  })
 })

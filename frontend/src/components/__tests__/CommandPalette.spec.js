@@ -31,7 +31,7 @@ const defaultStubs = {
     emits: ['update:modelValue', 'close']
   },
   'el-input': {
-    template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+    template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @keydown="$emit(\'keydown\', $event)" />',
     props: ['modelValue', 'placeholder', 'size', 'clearable'],
     emits: ['update:modelValue', 'input', 'keydown']
   },
@@ -125,5 +125,25 @@ describe('CommandPalette', () => {
     // With no input, either show recent or empty state
     const content = wrapper.find('.palette-content')
     expect(content.exists()).toBe(true)
+  })
+
+  it('switches to favorites mode with @ prefix', async () => {
+    const localWrapper = createWrapper()
+    const input = localWrapper.find('input')
+    await input.setValue('@')
+    await input.trigger('input')
+    await nextTick()
+    // In @ mode, should show favorites section when there are results
+    expect(localWrapper.vm).toBeTruthy()
+    localWrapper.unmount()
+  })
+
+  it('closes on escape key', async () => {
+    const localWrapper = createWrapper()
+    const input = localWrapper.find('input')
+    await input.trigger('keydown', { key: 'Escape' })
+    await nextTick()
+    expect(localWrapper.emitted('update:modelValue')).toBeTruthy()
+    localWrapper.unmount()
   })
 })

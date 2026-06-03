@@ -49,4 +49,14 @@ describe('useRecentAccess', () => {
     const items = getRecent(10)
     expect(items.length).toBe(0)
   })
+
+  it('handles deleted path gracefully (no crash on invalid data)', () => {
+    const { record, getRecent } = useRecentAccess()
+
+    record({ path: '/deleted/file.js', type: 'file', workDir: '/deleted' })
+
+    const items = getRecent(10)
+    expect(items.length).toBe(1)
+    expect(items[0].path).toBe('/deleted/file.js')
+  })
 })
