@@ -39,7 +39,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useTerminal } from '../composables/useTerminal'
-import { GetShellConfigs } from '../../wailsjs/go/main/App'
+import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -63,8 +63,9 @@ const terminalContainer = ref(null)
 const shellType = ref('powershell')
 const shellConfigs = ref([])
 const hasInitialized = ref(false)
+const settingsReady = ref(false)
 
-// 加载 Shell 配置
+// 加载 Shell 配置和默认 Shell 设置
 onMounted(async () => {
   try {
     shellConfigs.value = await GetShellConfigs()
@@ -76,23 +77,38 @@ onMounted(async () => {
       { type: 'wsl', displayName: 'WSL' }
     ]
   }
+  // 读取用户设置的默认 Shell 类型
+  try {
+    const settings = await GetSettings()
+    if (settings.defaultShell) {
+      shellType.value = settings.defaultShell
+    }
+  } catch {
+    // 读取失败则保持默认 powershell
+  }
+  settingsReady.value = true
 })
 
-// 监听 visible 变化，首次打开时初始化终端
+// 监听 visible 和 settingsReady 变化，首次打开时初始化终端
 // 使用 flush: 'post' 确保 DOM 更新后再执行，避免 v-if 导致 terminalContainer 为 null
-watch(() => props.visible, async (val) => {
-  if (val && !hasInitialized.value && terminalContainer.value) {
-    await nextTick()
-    const dir = props.currentDir || 'C:\\'
-    await initTerminal(terminalContainer.value, dir, shellType.value)
-    hasInitialized.value = true
-  }
-  // 展开时重新调整大小
-  if (val && isActive.value) {
-    await nextTick()
-    resize()
-  }
-}, { flush: 'post' })
+// 等待 settingsReady 确保默认 Shell 设置已加载
+watch(
+  [() => props.visible, settingsReady],
+  async ([val, ready]) => {
+    if (val && ready && !hasInitialized.value && terminalContainer.value) {
+      await nextTick()
+      const dir = props.currentDir || 'C:\\'
+      await initTerminal(terminalContainer.value, dir, shellType.value)
+      hasInitialized.value = true
+    }
+    // 展开时重新调整大小
+    if (val && isActive.value) {
+      await nextTick()
+      resize()
+    }
+  },
+  { flush: 'post' }
+)
 
 // 监听目录变化，自动跟随
 watch(() => props.currentDir, (newDir) => {
