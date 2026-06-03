@@ -21,6 +21,8 @@ type App struct {
 	gitSvc         *service.GitService
 	settingsSvc    *service.SettingsService
 	terminalSvc    *service.TerminalService
+	searchSvc      *service.SearchService
+	favoritesSvc   *service.FavoritesService
 }
 
 func NewApp() *App {
@@ -39,6 +41,10 @@ func (a *App) startup(ctx context.Context) {
 	a.gitSvc = service.NewGitService()
 	a.settingsSvc = service.NewSettingsService(settingsPath)
 	a.terminalSvc = service.NewTerminalService(ctx)
+
+	favoritesPath := filepath.Join(dataDir, "favorites.json")
+	a.searchSvc = service.NewSearchService()
+	a.favoritesSvc = service.NewFavoritesService(favoritesPath)
 
 	println("Git Manager started")
 }
@@ -622,4 +628,64 @@ func (a *App) CloseTerminal(sessionID string) error {
 // GetShellConfigs 获取可用的 Shell 配置列表
 func (a *App) GetShellConfigs() []model.ShellConfig {
 	return model.GetShellConfigs()
+}
+
+// ===== 搜索相关 =====
+
+// SearchFiles 搜索文件
+func (a *App) SearchFiles(rootDir, query string, maxResults int) []*model.SearchResult {
+	results, err := a.searchSvc.Search(rootDir, query, maxResults)
+	if err != nil {
+		println("SearchFiles error:", err.Error())
+		return []*model.SearchResult{}
+	}
+	return results
+}
+
+// ===== 收藏相关 =====
+
+// GetFavorites 获取所有收藏
+func (a *App) GetFavorites() []*model.Favorite {
+	favorites, err := a.favoritesSvc.Load()
+	if err != nil {
+		println("GetFavorites error:", err.Error())
+		return []*model.Favorite{}
+	}
+	return favorites
+}
+
+// AddFavorite 添加收藏
+func (a *App) AddFavorite(path, alias, group string) string {
+	err := a.favoritesSvc.Add(path, alias, group)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// RemoveFavorite 移除收藏
+func (a *App) RemoveFavorite(path string) string {
+	err := a.favoritesSvc.Remove(path)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// UpdateFavoriteAlias 更新收藏别名
+func (a *App) UpdateFavoriteAlias(path, alias string) string {
+	err := a.favoritesSvc.UpdateAlias(path, alias)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// UpdateFavoriteGroup 更新收藏分组
+func (a *App) UpdateFavoriteGroup(path, group string) string {
+	err := a.favoritesSvc.UpdateGroup(path, group)
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
