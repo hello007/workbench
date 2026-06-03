@@ -174,29 +174,29 @@ const onSettingsChange = async () => {
 .settings-nav {
   width: 200px;
   flex-shrink: 0;
-  background: #252526;
-  border-right: 1px solid #3c3c3c;
+  background: #ffffff;
+  border-right: 1px solid var(--border-color, #ebeef5);
   padding: 12px 0;
 }
 
 .settings-nav-item {
   padding: 10px 20px;
   font-size: 14px;
-  color: #888;
+  color: var(--text-secondary, #606266);
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: all 0.15s;
 }
 
 .settings-nav-item:hover {
-  background: #2d2d2d;
-  color: #ccc;
+  background: var(--bg-tertiary, #f0f2f5);
+  color: var(--text-primary, #303133);
 }
 
 .settings-nav-item.is-active {
-  color: #ccc;
-  background: #094771;
-  border-left-color: #409eff;
+  color: var(--primary-color, #409eff);
+  background: var(--primary-bg, #ecf5ff);
+  border-left-color: var(--primary-color, #409eff);
 }
 
 /* 右侧内容区 */
@@ -204,13 +204,13 @@ const onSettingsChange = async () => {
   flex: 1;
   padding: 20px 28px;
   overflow-y: auto;
-  background: #1e1e1e;
+  background: #ffffff;
 }
 
 .settings-section-title {
   font-size: 18px;
   font-weight: 600;
-  color: #d4d4d4;
+  color: var(--text-primary, #303133);
   margin-bottom: 20px;
 }
 
@@ -219,15 +219,15 @@ const onSettingsChange = async () => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background: #2d2d2d;
+  background: var(--bg-secondary, #ffffff);
   border-radius: 8px;
-  border: 1px solid #3c3c3c;
+  border: 1px solid var(--border-color, #ebeef5);
   margin-bottom: 12px;
   transition: border-color 0.15s;
 }
 
 .settings-item:hover {
-  border-color: #555;
+  border-color: var(--primary-light, #66b1ff);
 }
 
 .settings-item-info {
@@ -239,12 +239,12 @@ const onSettingsChange = async () => {
 .settings-item-label {
   font-size: 14px;
   font-weight: 500;
-  color: #d4d4d4;
+  color: var(--text-primary, #303133);
 }
 
 .settings-item-desc {
   font-size: 12px;
-  color: #888;
+  color: var(--text-secondary, #606266);
   margin-top: 4px;
 }
 
@@ -268,7 +268,7 @@ const onSettingsChange = async () => {
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: #555;
+  color: var(--text-tertiary, #909399);
 }
 
 .settings-empty p {
@@ -278,32 +278,32 @@ const onSettingsChange = async () => {
 </style>
 
 <style>
-/* 全局：el-dialog 暗色主题覆盖 */
+/* 全局：el-dialog 浅色主题覆盖 */
 .settings-dialog .el-dialog {
-  background: #1e1e1e;
-  border: 1px solid #3c3c3c;
+  background: #ffffff;
+  border: 1px solid var(--border-color, #ebeef5);
   border-radius: 8px;
 }
 
 .settings-dialog .el-dialog__header {
-  background: #252526;
-  border-bottom: 1px solid #3c3c3c;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border-color, #ebeef5);
   border-radius: 8px 8px 0 0;
   padding: 14px 20px;
 }
 
 .settings-dialog .el-dialog__title {
-  color: #d4d4d4;
+  color: var(--text-primary, #303133);
   font-size: 16px;
   font-weight: 600;
 }
 
 .settings-dialog .el-dialog__headerbtn .el-dialog__close {
-  color: #888;
+  color: var(--text-tertiary, #909399);
 }
 
 .settings-dialog .el-dialog__headerbtn:hover .el-dialog__close {
-  color: #d4d4d4;
+  color: var(--text-primary, #303133);
 }
 
 .settings-dialog .el-dialog__body {

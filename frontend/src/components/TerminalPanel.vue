@@ -177,8 +177,8 @@ onBeforeUnmount(async () => {
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  background-color: #1a1b26;
-  border-top: 1px solid rgba(64, 158, 255, 0.15);
+  background-color: #f5f7fa;
+  border-top: 1px solid var(--border-color, #ebeef5);
   height: 100%;
   position: relative;
 }
@@ -191,7 +191,7 @@ onBeforeUnmount(async () => {
   left: 10%;
   right: 10%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(64, 158, 255, 0.3), transparent);
+  background: linear-gradient(90deg, transparent, rgba(64, 158, 255, 0.2), transparent);
 }
 
 /* ── 工具栏 ── */
@@ -202,8 +202,8 @@ onBeforeUnmount(async () => {
   justify-content: space-between;
   height: 36px;
   padding: 0 12px;
-  background: linear-gradient(180deg, #1f2133 0%, #1a1b26 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+  border-bottom: 1px solid var(--border-color, #ebeef5);
 }
 
 .terminal-toolbar-left {
@@ -242,26 +242,25 @@ onBeforeUnmount(async () => {
 }
 
 .shell-select :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
+  background: #ffffff;
   box-shadow: none;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-light, #dcdfe6);
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .shell-select :deep(.el-input__wrapper:hover) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(64, 158, 255, 0.3);
+  border-color: var(--primary-color, #409eff);
 }
 
 .shell-select :deep(.el-input__inner) {
-  color: #a9b1d6;
+  color: var(--text-primary, #303133);
   font-size: 12px;
   font-weight: 500;
 }
 
 .shell-select :deep(.el-input__suffix) {
-  color: #565f89;
+  color: var(--text-tertiary, #909399);
 }
 
 /* 路径指示 */
@@ -270,9 +269,9 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: #ffffff;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color, #ebeef5);
   min-width: 0;
 }
 
@@ -284,7 +283,7 @@ onBeforeUnmount(async () => {
 .path-text {
   font-size: 12px;
   font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  color: #565f89;
+  color: var(--text-secondary, #606266);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -300,12 +299,12 @@ onBeforeUnmount(async () => {
 }
 
 .restart-btn {
-  color: #e0af68 !important;
+  color: var(--warning-color, #e6a23c) !important;
   font-size: 12px;
 }
 
 .restart-btn:hover {
-  color: #f5c862 !important;
+  color: #e6a23c !important;
 }
 
 .toolbar-actions {
@@ -320,15 +319,15 @@ onBeforeUnmount(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #565f89;
+  color: var(--text-tertiary, #909399);
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .toolbar-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #a9b1d6;
+  background: var(--bg-tertiary, #f0f2f5);
+  color: var(--text-primary, #303133);
 }
 
 .toolbar-btn:active {
@@ -350,7 +349,7 @@ onBeforeUnmount(async () => {
   flex: 1;
   min-height: 0;
   padding: 2px 0 0;
-  background: #1a1b26;
+  background: #ffffff;
 }
 
 .terminal-container :deep(.xterm) {
@@ -359,6 +358,7 @@ onBeforeUnmount(async () => {
 }
 
 .terminal-container :deep(.xterm-viewport) {
+  background-color: #ffffff !important;
   overflow-y: auto !important;
 }
 
@@ -372,26 +372,26 @@ onBeforeUnmount(async () => {
 }
 
 .terminal-container :deep(.xterm-viewport)::-webkit-scrollbar-thumb {
-  background: rgba(86, 95, 137, 0.3);
+  background: var(--border-light, #dcdfe6);
   border-radius: 3px;
 }
 
 .terminal-container :deep(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background: rgba(86, 95, 137, 0.5);
+  background: var(--text-tertiary, #909399);
 }
 </style>
 
 <style>
-/* Shell 下拉弹出框暗色主题 */
+/* Shell 下拉弹出框浅色主题 */
 .shell-select-popper {
-  background: #1f2133 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #ffffff !important;
+  border: 1px solid var(--border-color, #ebeef5) !important;
   border-radius: 8px !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
 }
 
 .shell-select-popper .el-select-dropdown__item {
-  color: #a9b1d6 !important;
+  color: var(--text-primary, #303133) !important;
   font-size: 13px;
   font-weight: 500;
   padding: 0 16px;
@@ -404,17 +404,17 @@ onBeforeUnmount(async () => {
 
 .shell-select-popper .el-select-dropdown__item:hover,
 .shell-select-popper .el-select-dropdown__item.hover {
-  background: rgba(64, 158, 255, 0.1) !important;
-  color: #7aa2f7 !important;
+  background: var(--primary-bg, #ecf5ff) !important;
+  color: var(--primary-color, #409eff) !important;
 }
 
 .shell-select-popper .el-select-dropdown__item.is-selected {
-  color: #409eff !important;
+  color: var(--primary-color, #409eff) !important;
   font-weight: 600;
 }
 
 .shell-select-popper .el-popper__arrow::before {
-  background: #1f2133 !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: #ffffff !important;
+  border-color: var(--border-color, #ebeef5) !important;
 }
 </style>

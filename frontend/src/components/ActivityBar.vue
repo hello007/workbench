@@ -55,12 +55,13 @@ const panels = [
 .activity-bar {
   width: 44px;
   flex-shrink: 0;
-  background: var(--sidebar-bg);
+  background: #ffffff;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 10px 0;
   gap: 4px;
+  border-right: 1px solid var(--border-color, #ebeef5);
 }
 
 .activity-bar-spacer {
@@ -75,18 +76,18 @@ const panels = [
   justify-content: center;
   border-radius: 6px;
   cursor: pointer;
-  color: var(--sidebar-text);
+  color: var(--text-secondary, #606266);
   transition: all var(--transition-normal);
 }
 
 .activity-bar-item:hover {
-  background: var(--sidebar-hover);
-  color: var(--sidebar-text-hover);
+  background: var(--bg-tertiary, #f0f2f5);
+  color: var(--text-primary, #303133);
   transform: scale(1.08);
 }
 
 .activity-bar-item.is-active {
-  background: var(--sidebar-active-bg);
+  background: var(--primary-color, #409eff);
   color: var(--sidebar-active-text);
   box-shadow: 0 0 8px 1px rgba(64, 158, 255, 0.35);
   transform: scale(1.08);
