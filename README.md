@@ -82,7 +82,7 @@ cd frontend && npm test
 │           ├── GitInfo.vue              # Git 仓库信息
 │           ├── CommitHistory.vue        # 提交历史
 │           ├── TerminalPanel.vue        # 终端面板（Shell 选择/目录显示/拖拽调高）
-│           └── SettingsPanel.vue        # 设置面板（含终端 Shell 配置）
+│           └── SettingsPanel.vue        # 设置弹窗（通用/终端/快捷键，左右双栏布局）
 ├── data/            # 运行时数据（不提交）
 ├── docs/            # 项目文档
 └── wails.json       # Wails 配置
