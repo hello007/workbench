@@ -18,10 +18,10 @@ describe('ActivityBar', () => {
     })
   }
 
-  it('应该渲染三个活动栏图标按钮', () => {
+  it('应该渲染四个活动栏图标按钮（工作目录、工具箱、设置、终端）', () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    expect(items.length).toBe(3)
+    expect(items.length).toBe(4)
   })
 
   it('默认选中工作目录', () => {
@@ -52,5 +52,13 @@ describe('ActivityBar', () => {
     await items[1].trigger('click')
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')[0]).toEqual(['toolbox'])
+  })
+
+  it('点击设置图标应触发 openSettings 事件', async () => {
+    const wrapper = createWrapper()
+    const items = wrapper.findAll('.activity-bar-item')
+    // settings 是第3个图标（index=2）
+    await items[2].trigger('click')
+    expect(wrapper.emitted('openSettings')).toBeTruthy()
   })
 })

@@ -12,6 +12,15 @@
         <component :is="item.icon" />
       </el-icon>
     </div>
+    <!-- 设置图标（不切换面板，直接开弹窗） -->
+    <div
+      class="activity-bar-item"
+      @click="$emit('openSettings')"
+    >
+      <el-icon :size="20">
+        <Setting />
+      </el-icon>
+    </div>
     <!-- 终端图标（底部） -->
     <div class="activity-bar-spacer"></div>
     <div
@@ -34,12 +43,11 @@ defineProps({
   terminalActive: { type: Boolean, default: false }
 })
 
-defineEmits(['update:modelValue', 'toggleTerminal'])
+defineEmits(['update:modelValue', 'toggleTerminal', 'openSettings'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
-  { id: 'toolbox', icon: SetUp, label: '工具箱' },
-  { id: 'settings', icon: Setting, label: '设置' }
+  { id: 'toolbox', icon: SetUp, label: '工具箱' }
 ]
 </script>
 
