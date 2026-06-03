@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="terminal-panel">
+  <div v-show="visible" class="terminal-panel">
     <!-- 工具栏 -->
     <div class="terminal-toolbar">
       <div class="terminal-toolbar-left">
@@ -89,19 +89,20 @@ onMounted(async () => {
   settingsReady.value = true
 })
 
-// 监听 visible 和 settingsReady 变化，首次打开时初始化终端
-// 使用 flush: 'post' 确保 DOM 更新后再执行，避免 v-if 导致 terminalContainer 为 null
-// 等待 settingsReady 确保默认 Shell 设置已加载
+// 监听 visible 和 settingsReady 变化，首次可见时初始化终端
+// 使用 v-show 保留 DOM，避免收起再展开时 xterm 丢失挂载点
+// 首次初始化需等待 visible=true（xterm 在 display:none 下无法正确 fit）
 watch(
   [() => props.visible, settingsReady],
   async ([val, ready]) => {
+    // 首次可见时初始化终端
     if (val && ready && !hasInitialized.value && terminalContainer.value) {
       await nextTick()
       const dir = props.currentDir || 'C:\\'
       await initTerminal(terminalContainer.value, dir, shellType.value)
       hasInitialized.value = true
     }
-    // 展开时重新调整大小
+    // 展开时重新调整大小（v-show 隐藏后尺寸变化，需重新 fit）
     if (val && isActive.value) {
       await nextTick()
       resize()
