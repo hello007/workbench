@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +81,41 @@ func TestSearchFiles_EmptyDir(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Errorf("Expected 0 results for empty dir, got %d", len(results))
+	}
+}
+
+func TestSearchFiles_SkipsGitDir(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".git", "objects"), 0755)
+	os.WriteFile(filepath.Join(root, ".git", "config"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("test"), 0644)
+
+	svc := NewSearchService()
+	results, err := svc.Search(root, "config", 20)
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	for _, r := range results {
+		if strings.Contains(r.Path, ".git") {
+			t.Errorf("Search results should not include .git contents, got: %s", r.Path)
+		}
+	}
+}
+
+func TestSearchFiles_SkipsNodeModules(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "node_modules", "lodash"), 0755)
+	os.WriteFile(filepath.Join(root, "node_modules", "lodash", "index.js"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(root, "src", "index.js"), []byte("test"), 0644)
+
+	svc := NewSearchService()
+	results, err := svc.Search(root, "index", 20)
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	for _, r := range results {
+		if strings.Contains(r.Path, "node_modules") {
+			t.Errorf("Search results should not include node_modules, got: %s", r.Path)
+		}
 	}
 }

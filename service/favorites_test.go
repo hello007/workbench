@@ -87,3 +87,50 @@ func TestFavorites_MaxLimit(t *testing.T) {
 		t.Fatal("Expected error when exceeding 100 limit")
 	}
 }
+
+func TestFavorites_UpdateGroup(t *testing.T) {
+	svc := createFavoritesTestService(t)
+
+	svc.Add("C:\\projects\\myapp", "", "默认")
+	err := svc.UpdateGroup("C:\\projects\\myapp", "工作")
+	if err != nil {
+		t.Fatalf("UpdateGroup: %v", err)
+	}
+
+	favs, _ := svc.Load()
+	if favs[0].Group != "工作" {
+		t.Errorf("Group not updated: %s", favs[0].Group)
+	}
+}
+
+func TestFavorites_UpdateGroup_NotExists(t *testing.T) {
+	svc := createFavoritesTestService(t)
+
+	err := svc.UpdateGroup("C:\\nonexistent", "工作")
+	if err == nil {
+		t.Fatal("Expected error for nonexistent path")
+	}
+}
+
+func TestFavorites_LoadEmpty(t *testing.T) {
+	svc := createFavoritesTestService(t)
+
+	favs, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load empty: %v", err)
+	}
+	if len(favs) != 0 {
+		t.Errorf("Expected 0 favorites from empty file, got %d", len(favs))
+	}
+}
+
+func TestFavorites_Remove_NotExists(t *testing.T) {
+	svc := createFavoritesTestService(t)
+
+	svc.Add("C:\\projects\\a", "", "默认")
+	err := svc.Remove("C:\\nonexistent")
+	// Should not error, just save without the nonexistent path
+	if err != nil {
+		t.Fatalf("Remove nonexistent should not error: %v", err)
+	}
+}
