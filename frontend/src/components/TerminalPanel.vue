@@ -3,32 +3,49 @@
     <!-- 工具栏 -->
     <div class="terminal-toolbar">
       <div class="terminal-toolbar-left">
-        <el-select
-          v-model="shellType"
-          size="small"
-          class="shell-select"
-          @change="onShellChange"
-        >
-          <el-option
-            v-for="config in shellConfigs"
-            :key="config.type"
-            :label="config.displayName"
-            :value="config.type"
-          />
-        </el-select>
-        <span class="terminal-dir" :title="currentDir">{{ currentDir }}</span>
+        <div class="shell-badge">
+          <span class="shell-dot"></span>
+          <el-select
+            v-model="shellType"
+            size="small"
+            class="shell-select"
+            popper-class="shell-select-popper"
+            @change="onShellChange"
+          >
+            <el-option
+              v-for="config in shellConfigs"
+              :key="config.type"
+              :label="config.displayName"
+              :value="config.type"
+            />
+          </el-select>
+        </div>
+        <div class="terminal-path">
+          <el-icon :size="12" class="path-icon"><Folder /></el-icon>
+          <span class="path-text" :title="currentDir">{{ currentDir }}</span>
+        </div>
       </div>
       <div class="terminal-toolbar-right">
-        <el-button
-          v-if="isExited"
-          size="small"
-          type="primary"
-          text
-          @click="onRestart"
-        >
-          重新启动
-        </el-button>
-        <span class="toolbar-btn" @click="$emit('toggle')">─</span>
+        <transition name="fade">
+          <el-button
+            v-if="isExited"
+            size="small"
+            type="primary"
+            text
+            class="restart-btn"
+            @click="onRestart"
+          >
+            <el-icon :size="14"><RefreshRight /></el-icon>
+            重新启动
+          </el-button>
+        </transition>
+        <div class="toolbar-actions">
+          <span class="toolbar-btn minimize-btn" @click="$emit('toggle')" title="收起终端">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <rect x="2" y="7" width="10" height="1.5" rx="0.75" fill="currentColor"/>
+            </svg>
+          </span>
+        </div>
       </div>
     </div>
     <!-- 终端区域 -->
@@ -38,6 +55,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { Folder, RefreshRight } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
@@ -155,92 +173,248 @@ onBeforeUnmount(async () => {
 </script>
 
 <style scoped>
+/* ── 面板容器 ── */
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  background-color: #1e1e1e;
-  border-top: 1px solid var(--border-color, #3c3c3c);
+  background-color: #1a1b26;
+  border-top: 1px solid rgba(64, 158, 255, 0.15);
   height: 100%;
+  position: relative;
 }
 
+/* 顶部光晕装饰线 */
+.terminal-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(64, 158, 255, 0.3), transparent);
+}
+
+/* ── 工具栏 ── */
 .terminal-toolbar {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 32px;
-  padding: 0 8px;
-  background: #252526;
-  border-bottom: 1px solid #3c3c3c;
+  height: 36px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #1f2133 0%, #1a1b26 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .terminal-toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
   flex: 1;
 }
 
+/* Shell 徽章 */
+.shell-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.shell-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #67c23a;
+  box-shadow: 0 0 6px rgba(103, 194, 58, 0.4);
+  animation: pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Shell 下拉框 */
 .shell-select {
-  width: 130px;
+  width: 120px;
 }
 
 .shell-select :deep(.el-input__wrapper) {
-  background: #3c3c3c;
+  background: rgba(255, 255, 255, 0.05);
   box-shadow: none;
-  border: 1px solid #4c4c4c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.shell-select :deep(.el-input__wrapper:hover) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(64, 158, 255, 0.3);
 }
 
 .shell-select :deep(.el-input__inner) {
-  color: #d4d4d4;
+  color: #a9b1d6;
   font-size: 12px;
+  font-weight: 500;
 }
 
-.terminal-dir {
-  font-size: 12px;
-  color: #888;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.shell-select :deep(.el-input__suffix) {
+  color: #565f89;
 }
 
-.terminal-toolbar-right {
+/* 路径指示 */
+.terminal-path {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.path-icon {
+  color: #409eff;
   flex-shrink: 0;
 }
 
+.path-text {
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  color: #565f89;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+/* 右侧操作区 */
+.terminal-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.restart-btn {
+  color: #e0af68 !important;
+  font-size: 12px;
+}
+
+.restart-btn:hover {
+  color: #f5c862 !important;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .toolbar-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888;
+  color: #565f89;
   cursor: pointer;
-  border-radius: 4px;
-  font-size: 14px;
-  transition: all 0.15s;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
 .toolbar-btn:hover {
-  background: #3c3c3c;
-  color: #d4d4d4;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a9b1d6;
 }
 
+.toolbar-btn:active {
+  transform: scale(0.92);
+}
+
+/* 淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ── 终端内容区 ── */
 .terminal-container {
   flex: 1;
   min-height: 0;
-  padding: 4px 8px;
+  padding: 2px 0 0;
+  background: #1a1b26;
 }
 
 .terminal-container :deep(.xterm) {
   height: 100%;
+  padding: 0 4px;
 }
 
 .terminal-container :deep(.xterm-viewport) {
   overflow-y: auto !important;
+}
+
+/* xterm 滚动条 */
+.terminal-container :deep(.xterm-viewport)::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-container :deep(.xterm-viewport)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-container :deep(.xterm-viewport)::-webkit-scrollbar-thumb {
+  background: rgba(86, 95, 137, 0.3);
+  border-radius: 3px;
+}
+
+.terminal-container :deep(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
+  background: rgba(86, 95, 137, 0.5);
+}
+</style>
+
+<style>
+/* Shell 下拉弹出框暗色主题 */
+.shell-select-popper {
+  background: #1f2133 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.shell-select-popper .el-select-dropdown__item {
+  color: #a9b1d6 !important;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 16px;
+  height: 34px;
+  line-height: 34px;
+  border-radius: 4px;
+  margin: 2px 4px;
+  width: calc(100% - 8px);
+}
+
+.shell-select-popper .el-select-dropdown__item:hover,
+.shell-select-popper .el-select-dropdown__item.hover {
+  background: rgba(64, 158, 255, 0.1) !important;
+  color: #7aa2f7 !important;
+}
+
+.shell-select-popper .el-select-dropdown__item.is-selected {
+  color: #409eff !important;
+  font-weight: 600;
+}
+
+.shell-select-popper .el-popper__arrow::before {
+  background: #1f2133 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
 }
 </style>

@@ -30,12 +30,31 @@ export function useTerminal() {
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: 'Consolas, "Courier New", monospace',
+      lineHeight: 1.2,
+      fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
       theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        selectionBackground: '#264f78'
+        background: '#1a1b26',
+        foreground: '#a9b1d6',
+        cursor: '#c0caf5',
+        cursorAccent: '#1a1b26',
+        selectionBackground: '#33467c',
+        selectionForeground: '#c0caf5',
+        black: '#15161e',
+        red: '#f7768e',
+        green: '#9ece6a',
+        yellow: '#e0af68',
+        blue: '#7aa2f7',
+        magenta: '#bb9af7',
+        cyan: '#7dcfff',
+        white: '#a9b1d6',
+        brightBlack: '#414868',
+        brightRed: '#f7768e',
+        brightGreen: '#9ece6a',
+        brightYellow: '#e0af68',
+        brightBlue: '#7aa2f7',
+        brightMagenta: '#bb9af7',
+        brightCyan: '#7dcfff',
+        brightWhite: '#c0caf5'
       },
       allowProposedApi: true
     })
