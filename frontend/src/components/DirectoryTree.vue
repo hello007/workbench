@@ -34,7 +34,7 @@
                 <Star />
               </el-icon>
             </div>
-            <div class="dir-path" :title="dir.path">{{ dir.path }}</div>
+            <div class="dir-path" :title="dir.path">{{ shortenPath(dir.path) }}</div>
           </div>
         </div>
       </VueDraggable>
@@ -140,6 +140,13 @@ import {
   OpenInVSCode,
   OpenInWarp
 } from '../../wailsjs/go/main/App'
+
+function shortenPath(path) {
+  if (!path || path.length <= 40) return path
+  const parts = path.replace(/\\/g, '/').split('/')
+  if (parts.length <= 3) return path
+  return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+}
 
 const props = defineProps({
   directories: { type: Array, default: () => [] },
