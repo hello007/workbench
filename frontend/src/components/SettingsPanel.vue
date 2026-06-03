@@ -1,76 +1,128 @@
 <template>
-  <div class="settings-panel">
-    <div class="settings-header">
-      <span class="settings-title"><el-icon :size="18" style="margin-right:4px;vertical-align:middle;"><Setting /></el-icon>设置</span>
-      <span class="settings-close" @click="$emit('close')">&#10005;</span>
-    </div>
-    <div class="settings-content">
-      <div class="settings-section">
-        <div class="settings-section-title">渲染</div>
-        <div class="settings-item">
-          <div class="settings-item-info">
-            <div class="settings-item-label">GPU 加速</div>
-            <div class="settings-item-desc">使用 GPU 渲染 WebView 界面，关闭后可降低 GPU 占用</div>
-          </div>
-          <el-switch
-            v-model="gpuEnabled"
-            active-text="开启"
-            inactive-text="关闭"
-            @change="onGpuChange"
-          />
-        </div>
-        <div v-if="needsRestart" class="settings-restart-hint">
-          <el-icon :size="14"><WarningFilled /></el-icon>
-          <span>GPU 设置已变更，需重启应用后生效</span>
+  <el-dialog
+    :model-value="visible"
+    @update:model-value="$emit('update:visible', $event)"
+    title="设置"
+    width="760px"
+    :close-on-click-modal="true"
+    :close-on-press-escape="true"
+    class="settings-dialog"
+    append-to-body
+  >
+    <div class="settings-body">
+      <!-- 左侧导航栏 -->
+      <div class="settings-nav">
+        <div
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="settings-nav-item"
+          :class="{ 'is-active': activeTab === tab.id }"
+          @click="activeTab = tab.id"
+        >
+          {{ tab.label }}
         </div>
       </div>
-      <div class="settings-section">
-        <div class="settings-section-title">终端</div>
-        <div class="settings-item">
-          <div class="settings-item-info">
-            <div class="settings-item-label">默认 Shell</div>
-            <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
+      <!-- 右侧内容区 -->
+      <div class="settings-content">
+        <!-- 通用页 -->
+        <div v-show="activeTab === 'general'">
+          <div class="settings-section-title">通用</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">GPU 加速</div>
+              <div class="settings-item-desc">使用 GPU 渲染 WebView 界面，关闭后可降低 GPU 占用</div>
+            </div>
+            <el-switch
+              v-model="gpuEnabled"
+              active-text="开启"
+              inactive-text="关闭"
+              @change="onGpuChange"
+            />
           </div>
-          <el-select v-model="defaultShell" size="small" style="width: 140px;" @change="onSettingsChange">
-            <el-option label="PowerShell" value="powershell" />
-            <el-option label="CMD" value="cmd" />
-            <el-option label="Git Bash" value="gitbash" />
-            <el-option label="WSL" value="wsl" />
-          </el-select>
+          <div v-if="needsRestart" class="settings-restart-hint">
+            <el-icon :size="14"><WarningFilled /></el-icon>
+            <span>GPU 设置已变更，需重启应用后生效</span>
+          </div>
         </div>
-        <div v-if="defaultShell === 'gitbash'" class="settings-item" style="margin-top:8px;">
-          <div class="settings-item-info">
-            <div class="settings-item-label">Git Bash 路径</div>
-            <div class="settings-item-desc">自定义 Git Bash 可执行文件路径</div>
+        <!-- 终端页 -->
+        <div v-show="activeTab === 'terminal'">
+          <div class="settings-section-title">终端</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">默认 Shell</div>
+              <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
+            </div>
+            <el-select v-model="defaultShell" size="small" style="width: 140px;" @change="onSettingsChange">
+              <el-option label="PowerShell" value="powershell" />
+              <el-option label="CMD" value="cmd" />
+              <el-option label="Git Bash" value="gitbash" />
+              <el-option label="WSL" value="wsl" />
+            </el-select>
           </div>
-          <el-input v-model="gitBashPath" size="small" style="width: 240px;" @change="onSettingsChange" />
+          <div v-if="defaultShell === 'gitbash'" class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">Git Bash 路径</div>
+              <div class="settings-item-desc">自定义 Git Bash 可执行文件路径</div>
+            </div>
+            <el-input v-model="gitBashPath" size="small" style="width: 240px;" @change="onSettingsChange" />
+          </div>
+          <div v-if="defaultShell === 'wsl'" class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">WSL 发行版</div>
+              <div class="settings-item-desc">指定 WSL 发行版名称（留空使用默认）</div>
+            </div>
+            <el-input v-model="wslDistro" size="small" style="width: 240px;" @change="onSettingsChange" />
+          </div>
         </div>
-        <div v-if="defaultShell === 'wsl'" class="settings-item" style="margin-top:8px;">
-          <div class="settings-item-info">
-            <div class="settings-item-label">WSL 发行版</div>
-            <div class="settings-item-desc">指定 WSL 发行版名称（留空使用默认）</div>
+        <!-- 快捷键页 -->
+        <div v-show="activeTab === 'shortcuts'">
+          <div class="settings-section-title">快捷键</div>
+          <div class="settings-empty">
+            <el-icon :size="32" color="#555"><Keyboard /></el-icon>
+            <p>暂无可配置快捷键</p>
           </div>
-          <el-input v-model="wslDistro" size="small" style="width: 240px;" @change="onSettingsChange" />
         </div>
       </div>
     </div>
-  </div>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { Setting, WarningFilled } from '@element-plus/icons-vue'
+import { ref, watch, onMounted } from 'vue'
+import { WarningFilled, Keyboard } from '@element-plus/icons-vue'
 import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
 
-defineEmits(['close'])
+const props = defineProps({
+  visible: { type: Boolean, default: false }
+})
 
+defineEmits(['update:visible'])
+
+const tabs = [
+  { id: 'general', label: '通用' },
+  { id: 'terminal', label: '终端' },
+  { id: 'shortcuts', label: '快捷键' }
+]
+
+const activeTab = ref('general')
 const gpuEnabled = ref(true)
 const needsRestart = ref(false)
 const defaultShell = ref('powershell')
 const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
 const wslDistro = ref('')
 
+// 弹窗打开时加载设置
+watch(() => props.visible, async (val) => {
+  if (val) {
+    await loadSettings()
+  }
+})
+
 onMounted(async () => {
+  await loadSettings()
+})
+
+async function loadSettings() {
   try {
     const settings = await GetSettings()
     gpuEnabled.value = !settings.gpuDisabled
@@ -80,7 +132,7 @@ onMounted(async () => {
   } catch {
     gpuEnabled.value = true
   }
-})
+}
 
 const onGpuChange = async (val) => {
   try {
@@ -92,7 +144,6 @@ const onGpuChange = async (val) => {
     })
     needsRestart.value = true
   } catch {
-    // 回滚
     gpuEnabled.value = !gpuEnabled.value
   }
 }
@@ -112,95 +163,89 @@ const onSettingsChange = async () => {
 </script>
 
 <style scoped>
-.settings-panel {
+/* 弹窗内容区背景 */
+.settings-body {
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background-color: var(--bg-primary);
+  height: 420px;
+  margin: -20px;  /* 抵消 el-dialog 默认 padding */
 }
 
-.settings-header {
+/* 左侧导航栏 */
+.settings-nav {
+  width: 200px;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-md) var(--spacing-md);
-  border-bottom: 1px solid var(--border-color);
-  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  background: #252526;
+  border-right: 1px solid #3c3c3c;
+  padding: 12px 0;
 }
 
-.settings-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.5px;
-}
-
-.settings-close {
-  font-size: 16px;
-  color: var(--text-tertiary);
+.settings-nav-item {
+  padding: 10px 20px;
+  font-size: 14px;
+  color: #888;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-normal);
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
 }
 
-.settings-close:hover {
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
+.settings-nav-item:hover {
+  background: #2d2d2d;
+  color: #ccc;
 }
 
+.settings-nav-item.is-active {
+  color: #ccc;
+  background: #094771;
+  border-left-color: #409eff;
+}
+
+/* 右侧内容区 */
 .settings-content {
   flex: 1;
-  min-height: 0;
+  padding: 20px 28px;
   overflow-y: auto;
-  padding: var(--spacing-sm);
-}
-
-.settings-section {
-  margin-bottom: 16px;
+  background: #1e1e1e;
 }
 
 .settings-section-title {
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 600;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 4px 8px 8px;
+  color: #d4d4d4;
+  margin-bottom: 20px;
 }
 
 .settings-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  transition: all var(--transition-normal);
+  padding: 14px 16px;
+  background: #2d2d2d;
+  border-radius: 8px;
+  border: 1px solid #3c3c3c;
+  margin-bottom: 12px;
+  transition: border-color 0.15s;
 }
 
 .settings-item:hover {
-  border-color: var(--primary-light);
+  border-color: #555;
 }
 
 .settings-item-info {
   flex: 1;
   min-width: 0;
+  margin-right: 16px;
 }
 
 .settings-item-label {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: #d4d4d4;
 }
 
 .settings-item-desc {
   font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
+  color: #888;
+  margin-top: 4px;
 }
 
 .settings-restart-hint {
@@ -211,8 +256,61 @@ const onSettingsChange = async () => {
   padding: 8px 12px;
   background: rgba(230, 162, 60, 0.1);
   border: 1px solid rgba(230, 162, 60, 0.3);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   color: #e6a23c;
   font-size: 12px;
+}
+
+/* 快捷键空状态 */
+.settings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #555;
+}
+
+.settings-empty p {
+  margin-top: 12px;
+  font-size: 14px;
+}
+</style>
+
+<style>
+/* 全局：el-dialog 暗色主题覆盖 */
+.settings-dialog .el-dialog {
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+}
+
+.settings-dialog .el-dialog__header {
+  background: #252526;
+  border-bottom: 1px solid #3c3c3c;
+  border-radius: 8px 8px 0 0;
+  padding: 14px 20px;
+}
+
+.settings-dialog .el-dialog__title {
+  color: #d4d4d4;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: #888;
+}
+
+.settings-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: #d4d4d4;
+}
+
+.settings-dialog .el-dialog__body {
+  padding: 20px;
+}
+
+.settings-dialog .el-overlay {
+  background-color: rgba(0, 0, 0, 0.5);
 }
 </style>
