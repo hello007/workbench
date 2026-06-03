@@ -132,6 +132,13 @@ export function useTerminal() {
     }
   }
 
+  // 聚焦终端
+  function focus() {
+    if (term.value) {
+      term.value.focus()
+    }
+  }
+
   // 销毁终端
   async function destroyTerminal() {
     EventsOff('terminal-output')
@@ -172,6 +179,7 @@ export function useTerminal() {
     initTerminal,
     changeDir,
     resize,
+    focus,
     destroyTerminal,
     restartTerminal
   }

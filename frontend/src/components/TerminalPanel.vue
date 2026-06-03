@@ -55,6 +55,7 @@ const {
   initTerminal,
   changeDir,
   resize,
+  focus,
   destroyTerminal,
   restartTerminal
 } = useTerminal()
@@ -101,11 +102,13 @@ watch(
       const dir = props.currentDir || 'C:\\'
       await initTerminal(terminalContainer.value, dir, shellType.value)
       hasInitialized.value = true
+      focus()
     }
-    // 展开时重新调整大小（v-show 隐藏后尺寸变化，需重新 fit）
+    // 展开时重新调整大小并聚焦（v-show 隐藏后尺寸变化，需重新 fit）
     if (val && isActive.value) {
       await nextTick()
       resize()
+      focus()
     }
   },
   { flush: 'post' }
