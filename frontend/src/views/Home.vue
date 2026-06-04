@@ -321,7 +321,7 @@ function onPaletteSelectFavorite(fav) {
     const targetDir = directories.value.find(d => fav.path.startsWith(d.path))
     if (targetDir) {
       onDirectorySelect(targetDir.id)
-      setTimeout(() => fileTreePanelRef.value?.locateNode(fav.path), 500)
+      nextTick(() => fileTreePanelRef.value?.locateNode(fav.path))
     }
   }
 }
