@@ -937,18 +937,40 @@ async function restoreTreeState(dirPath) {
   const tree = fileTreeRef.value
   if (!tree) return
 
-  for (const path of state.expandedPaths) {
+  const sortedPaths = [...state.expandedPaths].sort(
+    (a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length
+  )
+
+  for (const path of sortedPaths) {
     const node = tree.getNode(path)
-    if (node && !node.expanded) {
-      node.expand()
-      await new Promise(r => setTimeout(r, 50))
+    if (!node || node.expanded) continue
+
+    node.expand()
+    if (!node.loaded) {
+      await waitForNodeLoaded(node, 2000)
     }
   }
 
   if (state.scrollTop > 0) {
+    await nextTick()
     const treeEl = document.querySelector('.tree-content')
     if (treeEl) treeEl.scrollTop = state.scrollTop
   }
+}
+
+function waitForNodeLoaded(node, timeout = 2000) {
+  return new Promise(resolve => {
+    if (node.loaded) { resolve(); return }
+    const start = Date.now()
+    const check = () => {
+      if (node.loaded || Date.now() - start > timeout) {
+        resolve()
+      } else {
+        setTimeout(check, 30)
+      }
+    }
+    check()
+  })
 }
 
 // ---- 暴露方法 ----
