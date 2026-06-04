@@ -5,7 +5,7 @@ export function useFavorites() {
   const favorites = ref([])
 
   async function loadFavorites() {
-    favorites.value = await GetFavorites()
+    favorites.value = (await GetFavorites()) || []
   }
 
   async function addFavorite(path, alias, group) {
