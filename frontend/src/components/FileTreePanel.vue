@@ -349,13 +349,6 @@ const treeProps = {
   isLeaf: 'isLeaf'
 }
 
-const isFavorited = computed(() => {
-  const path = contextMenu.data?.path
-  const favList = favorites.value
-  if (!path) return false
-  return favList.some(f => f.path === path)
-})
-
 // ---- 右键菜单状态 ----
 const contextMenu = reactive({
   visible: false,
@@ -363,6 +356,13 @@ const contextMenu = reactive({
   y: 0,
   data: null,
   isBlankArea: false
+})
+
+const isFavorited = computed(() => {
+  const favList = favorites.value
+  const path = contextMenu.data?.path
+  if (!path) return false
+  return favList.some(f => f.path === path)
 })
 
 // ---- 新建对话框状态 ----
