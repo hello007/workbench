@@ -374,12 +374,11 @@ watch(visible, async (val) => {
 }
 
 .remove-fav-btn {
-  opacity: 0;
   cursor: pointer;
   color: #909399;
-  font-size: 14px;
+  font-size: 18px;
   margin-left: auto;
-  padding: 4px;
+  padding: 6px;
   border-radius: 4px;
   transition: all 0.2s;
 }
@@ -387,9 +386,5 @@ watch(visible, async (val) => {
 .remove-fav-btn:hover {
   color: #f56c6c;
   background: rgba(245, 108, 108, 0.1);
-}
-
-.result-item:hover .remove-fav-btn {
-  opacity: 1;
 }
 </style>
