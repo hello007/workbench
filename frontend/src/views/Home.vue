@@ -310,7 +310,15 @@ const onDeleteFromContent = async (node) => {
 // ---- Command Palette 事件处理 ----
 function onPaletteSelectFile(item) {
   recordAccess({ path: item.path, type: item.type, workDir: currentDirPath.value })
-  fileTreePanelRef.value?.locateNode(item.path)
+  if (item.path.startsWith(currentDirPath.value)) {
+    fileTreePanelRef.value?.locateNode(item.path)
+  } else {
+    const targetDir = directories.value.find(d => item.path.startsWith(d.path))
+    if (targetDir) {
+      onDirectorySelect(targetDir.id)
+      nextTick(() => fileTreePanelRef.value?.locateNode(item.path))
+    }
+  }
 }
 
 function onPaletteSelectFavorite(fav) {
