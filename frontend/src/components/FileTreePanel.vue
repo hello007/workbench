@@ -973,6 +973,47 @@ function waitForNodeLoaded(node, timeout = 2000) {
   })
 }
 
+async function locateNode(targetPath) {
+  const tree = fileTreeRef.value
+  if (!tree) return
+
+  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  if (!dir) return
+
+  const rootPath = dir.path.replace(/\\/g, '/')
+  const normalizedTarget = targetPath.replace(/\\/g, '/')
+
+  if (!normalizedTarget.startsWith(rootPath)) return
+
+  const relative = normalizedTarget.slice(rootPath.length).replace(/^\//, '')
+  if (!relative) return
+
+  const segments = relative.split('/')
+  let currentPath = rootPath
+
+  for (let i = 0; i < segments.length; i++) {
+    currentPath += '/' + segments[i]
+    const node = tree.getNode(currentPath) || tree.getNode(currentPath.replace(/\//g, '\\'))
+    if (!node) break
+
+    if (i < segments.length - 1 && !node.expanded) {
+      node.expand()
+      if (!node.loaded) {
+        await waitForNodeLoaded(node, 2000)
+      }
+    }
+  }
+
+  await nextTick()
+  const finalNode = tree.getNode(targetPath) || tree.getNode(normalizedTarget)
+  if (finalNode) {
+    tree.setCurrentKey(finalNode.data.path)
+    await nextTick()
+    const nodeEl = document.querySelector('.el-tree-node.is-current')
+    if (nodeEl) nodeEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+}
+
 // ---- 暴露方法 ----
 defineExpose({
   refreshNode,
@@ -986,7 +1027,8 @@ defineExpose({
   closeCopyToDialog: () => { copyToDialogVisible.value = false },
   closeMenu: () => { contextMenu.visible = false },
   saveCurrentState,
-  restoreTreeState
+  restoreTreeState,
+  locateNode
 })
 
 // ---- 生命周期 ----
