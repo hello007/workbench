@@ -215,9 +215,7 @@ const onDirectorySelect = async (dirId) => {
   await nextTick()
   const newDir = directories.value.find(d => d.id === dirId)
   if (newDir) {
-    setTimeout(() => {
-      fileTreePanelRef.value?.restoreTreeState(newDir.path)
-    }, 300)
+    fileTreePanelRef.value?.restoreTreeState(newDir.path)
   }
 }
 

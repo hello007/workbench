@@ -937,6 +937,8 @@ async function restoreTreeState(dirPath) {
   const tree = fileTreeRef.value
   if (!tree) return
 
+  await waitForNodeLoaded(tree.store.root, 3000)
+
   const sortedPaths = [...state.expandedPaths].sort(
     (a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length
   )
