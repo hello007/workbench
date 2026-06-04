@@ -1,9 +1,9 @@
 import { ref } from 'vue'
 import { GetFavorites, AddFavorite, RemoveFavorite, UpdateFavoriteAlias, UpdateFavoriteGroup } from '../../wailsjs/go/main/App'
 
-export function useFavorites() {
-  const favorites = ref([])
+const favorites = ref([])
 
+export function useFavorites() {
   async function loadFavorites() {
     favorites.value = (await GetFavorites()) || []
   }
