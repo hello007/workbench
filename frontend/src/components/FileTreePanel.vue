@@ -937,7 +937,7 @@ async function restoreTreeState(dirPath) {
   const tree = fileTreeRef.value
   if (!tree) return
 
-  await waitForNodeLoaded(tree.store.root, 3000)
+  await waitUntil(() => tree.store.root.childNodes.length > 0, 3000)
 
   const depthGroups = new Map()
   for (const path of state.expandedPaths) {
@@ -967,6 +967,21 @@ async function restoreTreeState(dirPath) {
     const treeEl = document.querySelector('.tree-content')
     if (treeEl) treeEl.scrollTop = state.scrollTop
   }
+}
+
+function waitUntil(condition, timeout = 2000) {
+  return new Promise(resolve => {
+    if (condition()) { resolve(); return }
+    const start = Date.now()
+    const check = () => {
+      if (condition() || Date.now() - start > timeout) {
+        resolve()
+      } else {
+        setTimeout(check, 16)
+      }
+    }
+    check()
+  })
 }
 
 function waitForNodeLoaded(node, timeout = 2000) {
