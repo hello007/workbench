@@ -272,7 +272,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Folder,
@@ -324,6 +324,17 @@ const currentSelectedPath = ref('')
 const fileTreeRef = ref()
 const refreshCounter = ref(0)
 const treeKey = computed(() => `${props.selectedDirId}_${refreshCounter.value}`)
+
+let treeReadyResolve = null
+let treeReadyPromise = new Promise(r => { treeReadyResolve = r })
+
+function resetTreeReady() {
+  treeReadyPromise = new Promise(r => { treeReadyResolve = r })
+}
+
+watch(treeKey, () => {
+  resetTreeReady()
+})
 
 const treeProps = {
   label: 'name',
@@ -410,6 +421,10 @@ const loadTreeNode = async (node, resolve) => {
 
     debug.log('Processed nodes:', processedNodes)
     resolve(processedNodes)
+
+    if (!node || node.level === 0 || !node.data) {
+      nextTick(() => treeReadyResolve?.())
+    }
   } catch (error) {
     console.error('Error in loadTreeNode:', error)
     ElMessage.error('加载节点失败: ' + (error.message || error))
@@ -1000,6 +1015,7 @@ function waitForNodeLoaded(node, timeout = 2000) {
 }
 
 async function locateNode(targetPath) {
+  await treeReadyPromise
   const tree = fileTreeRef.value
   if (!tree) return
 
@@ -1024,10 +1040,10 @@ async function locateNode(targetPath) {
     const node = tree.getNode(currentPath)
     if (!node) break
 
-    if (i < segments.length - 1 && !node.expanded) {
+    if (!node.expanded && !node.isLeaf) {
       node.expand()
       if (!node.loaded) {
-        await waitForNodeLoaded(node, 2000)
+        await waitForNodeLoaded(node, 3000)
       }
       await nextTick()
     }
