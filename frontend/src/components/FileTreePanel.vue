@@ -216,7 +216,10 @@
           <el-icon><Refresh /></el-icon>更新仓库
         </li>
         <li class="context-menu-divider" />
-        <li class="context-menu-item" @click="onMenuCommand('addFavorite')">
+        <li v-if="isFavorited" class="context-menu-item" @click="onMenuCommand('removeFavorite')">
+          <el-icon><StarFilled /></el-icon>取消收藏
+        </li>
+        <li v-else class="context-menu-item" @click="onMenuCommand('addFavorite')">
           <el-icon><Star /></el-icon>添加到收藏
         </li>
         <li class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
@@ -263,7 +266,10 @@
           <el-icon><Open /></el-icon>用默认程序打开
         </li>
         <li class="context-menu-divider" />
-        <li class="context-menu-item" @click="onMenuCommand('addFavorite')">
+        <li v-if="isFavorited" class="context-menu-item" @click="onMenuCommand('removeFavorite')">
+          <el-icon><StarFilled /></el-icon>取消收藏
+        </li>
+        <li v-else class="context-menu-item" @click="onMenuCommand('addFavorite')">
           <el-icon><Star /></el-icon>添加到收藏
         </li>
       </template>
@@ -291,7 +297,8 @@ import {
   Promotion,
   Scissor,
   DocumentCopy,
-  Star
+  Star,
+  StarFilled
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { useTreeState } from '../composables/useTreeState'
@@ -317,7 +324,7 @@ const props = defineProps({
 const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir'])
 
 const { saveState, restoreState } = useTreeState()
-const { addFavorite } = useFavorites()
+const { addFavorite, removeFavorite, favorites, loadFavorites } = useFavorites()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -341,6 +348,12 @@ const treeProps = {
   children: 'children',
   isLeaf: 'isLeaf'
 }
+
+const isFavorited = computed(() => {
+  const path = contextMenu.data?.path
+  if (!path) return false
+  return favorites.value.some(f => f.path === path)
+})
 
 // ---- 右键菜单状态 ----
 const contextMenu = reactive({
@@ -684,6 +697,9 @@ const onMenuCommand = (command) => {
     case 'addFavorite':
       handleAddFavorite(data)
       break
+    case 'removeFavorite':
+      handleRemoveFavorite(data)
+      break
     case 'addAsWorkDir':
       handleAddAsWorkDir(data)
       break
@@ -913,6 +929,16 @@ const handleAddFavorite = async (node) => {
   }
 }
 
+// ---- 取消收藏 ----
+const handleRemoveFavorite = async (node) => {
+  const err = await removeFavorite(node.path)
+  if (err) {
+    ElMessage.warning(err)
+  } else {
+    ElMessage.success('已取消收藏')
+  }
+}
+
 // ---- 添加为工作目录 ----
 const handleAddAsWorkDir = (node) => {
   emit('add-work-dir', { path: node.path, name: node.name })
@@ -1086,6 +1112,7 @@ defineExpose({
 onMounted(() => {
   document.addEventListener('mousedown', onGlobalClick)
   document.addEventListener('contextmenu', onGlobalContextMenu)
+  loadFavorites()
 })
 
 onBeforeUnmount(() => {
