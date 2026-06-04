@@ -69,6 +69,9 @@
             <div class="result-name">{{ item.alias || getFileName(item.path) }}</div>
             <div class="result-path">{{ item.path }}</div>
           </div>
+          <el-icon class="remove-fav-btn" @click.stop="handleRemoveFav(item)">
+            <Close />
+          </el-icon>
         </div>
       </div>
 
@@ -128,7 +131,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { Search, Document, Folder, Star, Loading } from '@element-plus/icons-vue'
+import { Search, Document, Folder, Star, Loading, Close } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { useFavorites } from '../composables/useFavorites'
@@ -144,7 +147,7 @@ const emit = defineEmits(['update:modelValue', 'select-file', 'select-favorite',
 const searchInputRef = ref(null)
 const { input, mode, query, selectedIndex, fileResults, searchLoading, searchFiles, resetSelection } = useCommandPalette()
 const { getRecent } = useRecentAccess()
-const { favorites, loadFavorites, searchFavorites } = useFavorites()
+const { favorites, loadFavorites, searchFavorites, removeFavorite } = useFavorites()
 
 const recentItems = ref([])
 const favoriteResults = ref([])
@@ -236,6 +239,11 @@ function selectFile(file) {
 function selectFavorite(fav) {
   emit('select-favorite', fav)
   onClose()
+}
+
+async function handleRemoveFav(item) {
+  await removeFavorite(item.path)
+  favoriteResults.value = favoriteResults.value.filter(f => f.path !== item.path)
 }
 
 function selectWorkDir(dir) {
@@ -363,5 +371,25 @@ watch(visible, async (val) => {
   padding: 20px;
   text-align: center;
   color: #909399;
+}
+
+.remove-fav-btn {
+  opacity: 0;
+  cursor: pointer;
+  color: #909399;
+  font-size: 14px;
+  margin-left: auto;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.remove-fav-btn:hover {
+  color: #f56c6c;
+  background: rgba(245, 108, 108, 0.1);
+}
+
+.result-item:hover .remove-fav-btn {
+  opacity: 1;
 }
 </style>
