@@ -980,20 +980,22 @@ async function locateNode(targetPath) {
   const dir = props.directories.find(d => d.id === props.selectedDirId)
   if (!dir) return
 
-  const rootPath = dir.path.replace(/\\/g, '/')
-  const normalizedTarget = targetPath.replace(/\\/g, '/')
+  const rootPath = dir.path
+  const sep = rootPath.includes('\\') ? '\\' : '/'
+  const normalizedTarget = sep === '\\' ? targetPath.replace(/\//g, '\\') : targetPath.replace(/\\/g, '/')
+  const normalizedRoot = sep === '\\' ? rootPath.replace(/\//g, '\\') : rootPath.replace(/\\/g, '/')
 
-  if (!normalizedTarget.startsWith(rootPath)) return
+  if (!normalizedTarget.startsWith(normalizedRoot)) return
 
-  const relative = normalizedTarget.slice(rootPath.length).replace(/^\//, '')
+  const relative = normalizedTarget.slice(normalizedRoot.length).replace(/^[\\/]/, '')
   if (!relative) return
 
-  const segments = relative.split('/')
-  let currentPath = rootPath
+  const segments = relative.split(/[\\/]/)
+  let currentPath = normalizedRoot
 
   for (let i = 0; i < segments.length; i++) {
-    currentPath += '/' + segments[i]
-    const node = tree.getNode(currentPath) || tree.getNode(currentPath.replace(/\//g, '\\'))
+    currentPath += sep + segments[i]
+    const node = tree.getNode(currentPath)
     if (!node) break
 
     if (i < segments.length - 1 && !node.expanded) {
@@ -1001,16 +1003,23 @@ async function locateNode(targetPath) {
       if (!node.loaded) {
         await waitForNodeLoaded(node, 2000)
       }
+      await nextTick()
     }
   }
 
   await nextTick()
-  const finalNode = tree.getNode(targetPath) || tree.getNode(normalizedTarget)
+  const finalNode = tree.getNode(normalizedTarget) || tree.getNode(targetPath)
   if (finalNode) {
     tree.setCurrentKey(finalNode.data.path)
-    await nextTick()
-    const nodeEl = document.querySelector('.el-tree-node.is-current')
-    if (nodeEl) nodeEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    await new Promise(r => setTimeout(r, 50))
+    const treeContainer = document.querySelector('.tree-content')
+    const nodeEl = treeContainer?.querySelector('.el-tree-node.is-current')
+    if (nodeEl && treeContainer) {
+      const containerRect = treeContainer.getBoundingClientRect()
+      const nodeRect = nodeEl.getBoundingClientRect()
+      const offset = nodeRect.top - containerRect.top - containerRect.height / 2
+      treeContainer.scrollBy({ top: offset, behavior: 'smooth' })
+    }
   }
 }
 
