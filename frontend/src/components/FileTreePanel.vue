@@ -939,18 +939,27 @@ async function restoreTreeState(dirPath) {
 
   await waitForNodeLoaded(tree.store.root, 3000)
 
-  const sortedPaths = [...state.expandedPaths].sort(
-    (a, b) => a.split(/[\\/]/).length - b.split(/[\\/]/).length
-  )
+  const depthGroups = new Map()
+  for (const path of state.expandedPaths) {
+    const depth = path.split(/[\\/]/).length
+    if (!depthGroups.has(depth)) depthGroups.set(depth, [])
+    depthGroups.get(depth).push(path)
+  }
 
-  for (const path of sortedPaths) {
-    const node = tree.getNode(path)
-    if (!node || node.expanded) continue
+  const sortedDepths = [...depthGroups.keys()].sort((a, b) => a - b)
 
-    node.expand()
-    if (!node.loaded) {
-      await waitForNodeLoaded(node, 2000)
+  for (const depth of sortedDepths) {
+    const paths = depthGroups.get(depth)
+    const pending = []
+
+    for (const path of paths) {
+      const node = tree.getNode(path)
+      if (!node || node.expanded) continue
+      node.expand()
+      if (!node.loaded) pending.push(waitForNodeLoaded(node, 2000))
     }
+
+    if (pending.length > 0) await Promise.all(pending)
   }
 
   if (state.scrollTop > 0) {
@@ -968,7 +977,7 @@ function waitForNodeLoaded(node, timeout = 2000) {
       if (node.loaded || Date.now() - start > timeout) {
         resolve()
       } else {
-        setTimeout(check, 30)
+        setTimeout(check, 16)
       }
     }
     check()
