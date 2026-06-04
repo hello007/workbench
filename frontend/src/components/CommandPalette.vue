@@ -375,17 +375,17 @@ watch(visible, async (val) => {
 
 .remove-fav-btn {
   cursor: pointer;
-  color: #909399;
+  color: #f56c6c;
   font-size: 18px;
   margin-left: auto;
   padding: 6px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(245, 108, 108, 0.08);
   transition: all 0.2s;
 }
 
 .remove-fav-btn:hover {
   color: #f56c6c;
-  background: rgba(245, 108, 108, 0.15);
+  background: rgba(245, 108, 108, 0.2);
 }
 </style>
