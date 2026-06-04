@@ -351,8 +351,9 @@ const treeProps = {
 
 const isFavorited = computed(() => {
   const path = contextMenu.data?.path
+  const favList = favorites.value
   if (!path) return false
-  return favorites.value.some(f => f.path === path)
+  return favList.some(f => f.path === path)
 })
 
 // ---- 右键菜单状态 ----
