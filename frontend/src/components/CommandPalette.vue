@@ -379,12 +379,13 @@ watch(visible, async (val) => {
   font-size: 18px;
   margin-left: auto;
   padding: 6px;
-  border-radius: 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.06);
   transition: all 0.2s;
 }
 
 .remove-fav-btn:hover {
   color: #f56c6c;
-  background: rgba(245, 108, 108, 0.1);
+  background: rgba(245, 108, 108, 0.15);
 }
 </style>
