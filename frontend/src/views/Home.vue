@@ -41,6 +41,7 @@
                   @contextmenu="onFileTreeContextMenu"
                   @delete="onDeleteFromFileTree"
                   @add-work-dir="onAddWorkDir"
+                  @open-content-search="onOpenContentSearch"
                 />
               </div>
             </Pane>
@@ -87,6 +88,7 @@
       v-model="commandPaletteVisible"
       :current-dir="currentDirPath"
       :work-dirs="directories"
+      :content-search-init="contentSearchInit"
       @select-file="onPaletteSelectFile"
       @select-favorite="onPaletteSelectFavorite"
       @select-workdir="onPaletteSelectWorkDir"
@@ -148,6 +150,7 @@ const settingsVisible = ref(false)
 
 // ---- Command Palette 状态 ----
 const commandPaletteVisible = ref(false)
+const contentSearchInit = ref('')
 const { record: recordAccess } = useRecentAccess()
 
 // ---- 子组件 ref ----
@@ -336,6 +339,11 @@ function onPaletteSelectFavorite(fav) {
 
 function onPaletteSelectWorkDir(dir) {
   onDirectorySelect(dir.id)
+}
+
+function onOpenContentSearch(subDir) {
+  contentSearchInit.value = subDir ? ':' + subDir.replace(/\\/g, '/') + '/ ' : ':'
+  commandPaletteVisible.value = true
 }
 
 // ---- 键盘快捷键 ----
