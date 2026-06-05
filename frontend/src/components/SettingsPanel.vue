@@ -74,6 +74,56 @@
             <el-input v-model="wslDistro" size="small" style="width: 240px;" @change="onSettingsChange" />
           </div>
         </div>
+        <!-- 搜索页 -->
+        <div v-show="activeTab === 'search'">
+          <div class="settings-section-title">搜索</div>
+          <div class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">排除目录</div>
+              <div class="settings-item-desc">搜索时跳过这些目录</div>
+            </div>
+            <div class="settings-tags">
+              <el-tag
+                v-for="dir in excludeDirs"
+                :key="dir"
+                closable
+                size="small"
+                @close="removeExcludeDir(dir)"
+              >{{ dir }}</el-tag>
+              <el-input
+                v-model="newExcludeDir"
+                size="small"
+                style="width: 120px;"
+                placeholder="添加目录"
+                @keyup.enter="addExcludeDir"
+              />
+              <el-button size="small" @click="addExcludeDir">添加</el-button>
+            </div>
+          </div>
+          <div class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">排除文件</div>
+              <div class="settings-item-desc">搜索时跳过这些扩展名的文件</div>
+            </div>
+            <div class="settings-tags">
+              <el-tag
+                v-for="file in excludeFiles"
+                :key="file"
+                closable
+                size="small"
+                @close="removeExcludeFile(file)"
+              >{{ file }}</el-tag>
+              <el-input
+                v-model="newExcludeFile"
+                size="small"
+                style="width: 120px;"
+                placeholder="如 .log"
+                @keyup.enter="addExcludeFile"
+              />
+              <el-button size="small" @click="addExcludeFile">添加</el-button>
+            </div>
+          </div>
+        </div>
         <!-- 快捷键页 -->
         <div v-show="activeTab === 'shortcuts'">
           <div class="settings-section-title">快捷键</div>
@@ -101,6 +151,7 @@ defineEmits(['update:visible'])
 const tabs = [
   { id: 'general', label: '通用' },
   { id: 'terminal', label: '终端' },
+  { id: 'search', label: '搜索' },
   { id: 'shortcuts', label: '快捷键' }
 ]
 
@@ -110,6 +161,10 @@ const needsRestart = ref(false)
 const defaultShell = ref('powershell')
 const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
 const wslDistro = ref('')
+const excludeDirs = ref([])
+const excludeFiles = ref([])
+const newExcludeDir = ref('')
+const newExcludeFile = ref('')
 
 // 弹窗打开时加载设置
 watch(() => props.visible, async (val) => {
@@ -129,9 +184,39 @@ async function loadSettings() {
     defaultShell.value = settings.defaultShell || 'powershell'
     gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
     wslDistro.value = settings.wslDistro || ''
+    excludeDirs.value = settings.searchExcludeDirs || []
+    excludeFiles.value = settings.searchExcludeFiles || []
   } catch {
     gpuEnabled.value = true
   }
+}
+
+const addExcludeDir = () => {
+  const val = newExcludeDir.value.trim()
+  if (val && !excludeDirs.value.includes(val)) {
+    excludeDirs.value.push(val)
+    onSettingsChange()
+  }
+  newExcludeDir.value = ''
+}
+
+const removeExcludeDir = (tag) => {
+  excludeDirs.value = excludeDirs.value.filter(d => d !== tag)
+  onSettingsChange()
+}
+
+const addExcludeFile = () => {
+  const val = newExcludeFile.value.trim()
+  if (val && !excludeFiles.value.includes(val)) {
+    excludeFiles.value.push(val)
+    onSettingsChange()
+  }
+  newExcludeFile.value = ''
+}
+
+const removeExcludeFile = (tag) => {
+  excludeFiles.value = excludeFiles.value.filter(f => f !== tag)
+  onSettingsChange()
 }
 
 const onGpuChange = async (val) => {
@@ -140,7 +225,9 @@ const onGpuChange = async (val) => {
       gpuDisabled: !val,
       defaultShell: defaultShell.value,
       gitBashPath: gitBashPath.value,
-      wslDistro: wslDistro.value
+      wslDistro: wslDistro.value,
+      searchExcludeDirs: excludeDirs.value,
+      searchExcludeFiles: excludeFiles.value
     })
     needsRestart.value = true
   } catch {
@@ -154,7 +241,9 @@ const onSettingsChange = async () => {
       gpuDisabled: !gpuEnabled.value,
       defaultShell: defaultShell.value,
       gitBashPath: gitBashPath.value,
-      wslDistro: wslDistro.value
+      wslDistro: wslDistro.value,
+      searchExcludeDirs: excludeDirs.value,
+      searchExcludeFiles: excludeFiles.value
     })
   } catch {
     // 回滚
@@ -274,6 +363,19 @@ const onSettingsChange = async () => {
 .settings-empty p {
   margin-top: 12px;
   font-size: 14px;
+}
+
+.settings-item--column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.settings-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
 }
 </style>
 
