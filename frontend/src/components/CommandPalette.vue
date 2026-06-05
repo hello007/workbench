@@ -13,7 +13,7 @@
       <el-input
         ref="searchInputRef"
         v-model="input"
-        placeholder="搜索文件、目录 (#切换工作目录 @收藏夹)"
+        placeholder="搜索文件、目录 (#工作目录 @收藏夹 :内容搜索)"
         size="large"
         clearable
         @keydown.down.prevent="moveDown"
@@ -117,13 +117,63 @@
         </div>
       </div>
 
+      <!-- 内容搜索 - 全局搜索提示 -->
+      <div v-if="(mode === 'content-global') && !contentSearching && contentGroups.length === 0 && !contentSearchExecuted && contentQuery.keyword" class="result-section">
+        <div class="content-search-confirm">
+          <el-icon><Search /></el-icon>
+          <span>将在 {{ workDirs.length }} 个工作目录中搜索 "<strong>{{ contentQuery.keyword }}</strong>"</span>
+          <span class="hint">按 Enter 确认搜索</span>
+        </div>
+      </div>
+
+      <!-- 内容搜索 - 单目录提示 -->
+      <div v-if="mode === 'content' && !contentSearching && contentGroups.length === 0 && !contentSearchExecuted && contentQuery.keyword" class="result-section">
+        <div class="content-search-hint">
+          <el-icon><Search /></el-icon>
+          <span>搜索 "{{ contentQuery.keyword }}"</span>
+          <span v-if="contentQuery.fileExt" class="hint-tag">{{ contentQuery.fileExt }}</span>
+          <span v-if="contentQuery.subDir" class="hint-tag">{{ contentQuery.subDir }}/</span>
+          <span class="hint">按 Enter 搜索</span>
+        </div>
+      </div>
+
+      <!-- 内容搜索结果 -->
+      <div v-if="contentGroups.length > 0" class="result-section">
+        <div v-for="group in contentGroups" :key="group.repoName" class="content-group">
+          <div class="section-title content-group-title">
+            <el-icon><Folder /></el-icon>
+            {{ group.repoName }}
+          </div>
+          <div
+            v-for="(item, idx) in group.items"
+            :key="group.repoName + '-' + idx"
+            class="result-item"
+            :class="{ 'result-item--active': getContentItemIndex(group, idx) === selectedIndex }"
+            @click="openContentResultInVSCode(item); onClose()"
+            @mouseenter="selectedIndex = getContentItemIndex(group, idx)"
+          >
+            <div class="result-info">
+              <div class="result-name content-file-line">{{ item.filePath }}:<span class="line-num">{{ item.lineNum }}</span></div>
+              <div class="result-line" v-html="highlightMatch(item.lineText, contentQuery.keyword)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 加载和空状态 -->
       <div v-if="searchLoading" class="result-loading">
         <el-icon class="is-loading"><Loading /></el-icon>
         搜索中...
       </div>
+      <div v-if="contentSearching" class="result-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        搜索中...
+      </div>
       <div v-if="mode === 'general' && query && !searchLoading && fileResults.length === 0 && favoriteResults.length === 0" class="result-empty">
         未找到匹配项
+      </div>
+      <div v-if="(mode === 'content' || mode === 'content-global') && !contentSearching && contentGroups.length === 0 && contentSearchExecuted && contentQuery.keyword" class="result-empty">
+        未找到匹配内容
       </div>
     </div>
   </el-dialog>
@@ -139,13 +189,19 @@ import { useFavorites } from '../composables/useFavorites'
 const props = defineProps({
   modelValue: Boolean,
   currentDir: String,
-  workDirs: Array
+  workDirs: Array,
+  contentSearchInit: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update:modelValue', 'select-file', 'select-favorite', 'select-workdir'])
 
 const searchInputRef = ref(null)
-const { input, mode, query, selectedIndex, fileResults, searchLoading, searchFiles, resetSelection } = useCommandPalette()
+const {
+  input, mode, query, selectedIndex,
+  fileResults, searchLoading,
+  contentQuery, contentGroups, contentSearching, contentSearchExecuted,
+  searchFiles, executeContentSearch, resetSelection
+} = useCommandPalette()
 const { getRecent } = useRecentAccess()
 const { favorites, loadFavorites, searchFavorites, removeFavorite } = useFavorites()
 
@@ -167,6 +223,11 @@ const filteredWorkDirs = computed(() => {
   )
 })
 
+// 获取内容搜索结果总数
+const contentTotalItems = computed(() => {
+  return contentGroups.value.reduce((sum, g) => sum + g.items.length, 0)
+})
+
 function getFavIndex(index) {
   if (showRecent.value) return recentItems.value.length + index
   return index
@@ -174,6 +235,48 @@ function getFavIndex(index) {
 
 function getFileIndex(index) {
   return getFavIndex(favoriteResults.value.length) + index
+}
+
+// 根据全局 index 获取内容搜索结果项
+function getContentItemByIndex(index) {
+  let offset = 0
+  for (const group of contentGroups.value) {
+    if (index < offset + group.items.length) {
+      return group.items[index - offset]
+    }
+    offset += group.items.length
+  }
+  return null
+}
+
+// 获取分组内项目的全局 index
+function getContentItemIndex(group, localIdx) {
+  let offset = 0
+  for (const g of contentGroups.value) {
+    if (g.repoPath === group.repoPath) {
+      return offset + localIdx
+    }
+    offset += g.items.length
+  }
+  return offset + localIdx
+}
+
+// 用 VSCode 打开内容搜索结果（跳转到行号）
+function openContentResultInVSCode(item) {
+  const fullPath = item.repoPath + '\\' + item.filePath.replace(/\//g, '\\')
+  window.open(`vscode://file/${fullPath}:${item.lineNum}`)
+}
+
+// 关键词高亮
+function highlightMatch(text, keyword) {
+  if (!keyword) return escapeHtml(text)
+  const escaped = escapeHtml(text)
+  const keywordEscaped = escapeHtml(keyword).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return escaped.replace(new RegExp(keywordEscaped, 'gi'), '<mark>$&</mark>')
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 let searchTimer = null
@@ -189,6 +292,11 @@ function onInput() {
     searchTimer = setTimeout(() => {
       searchFiles(props.currentDir)
     }, 300)
+  } else if (mode.value === 'content' || mode.value === 'content-global') {
+    // 内容搜索不在输入时触发，仅清空上次结果
+    favoriteResults.value = []
+    fileResults.value = []
+    contentSearchExecuted.value = false
   } else {
     favoriteResults.value = []
     fileResults.value = []
@@ -204,6 +312,23 @@ function moveUp() {
 }
 
 function selectCurrent() {
+  // 内容搜索模式：Enter 触发搜索或选择结果
+  if (mode.value === 'content' || mode.value === 'content-global') {
+    if (contentSearching.value) return
+    if (contentGroups.value.length > 0) {
+      const item = getContentItemByIndex(selectedIndex.value)
+      if (item) {
+        openContentResultInVSCode(item)
+        onClose()
+        return
+      }
+    }
+    if (contentQuery.value.keyword) {
+      executeContentSearch()
+    }
+    return
+  }
+
   if (showRecent.value && selectedIndex.value < recentItems.value.length) {
     selectItem(recentItems.value[selectedIndex.value])
   } else if (mode.value === 'workdir') {
@@ -279,6 +404,9 @@ watch(visible, async (val) => {
   if (val) {
     recentItems.value = getRecent(10)
     await loadFavorites()
+    if (props.contentSearchInit) {
+      input.value = props.contentSearchInit
+    }
     await nextTick()
     searchInputRef.value?.focus()
   }
@@ -387,5 +515,87 @@ watch(visible, async (val) => {
 .remove-fav-btn:hover {
   color: #f56c6c;
   background: rgba(245, 108, 108, 0.2);
+}
+
+/* 内容搜索确认提示 */
+.content-search-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  background: #fdf6ec;
+  color: #e6a23c;
+  font-size: 13px;
+}
+
+.content-search-confirm strong {
+  color: #303133;
+}
+
+.content-search-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.hint {
+  color: #c0c4cc;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.hint-tag {
+  background: #f0f2f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #606266;
+}
+
+/* 内容搜索分组 */
+.content-group {
+  margin-bottom: 4px;
+}
+
+.content-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #409eff !important;
+  font-weight: 500;
+}
+
+/* 匹配行内容 */
+.content-file-line {
+  font-size: 12px !important;
+  color: #606266 !important;
+}
+
+.line-num {
+  color: #409eff;
+  font-weight: 600;
+}
+
+.result-line {
+  font-size: 12px;
+  color: #303133;
+  font-family: 'Consolas', 'Monaco', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: #f5f7fa;
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin-top: 3px;
+}
+
+.result-line :deep(mark) {
+  background: #fde68a;
+  color: #92400e;
+  padding: 0 1px;
+  border-radius: 2px;
 }
 </style>
