@@ -215,6 +215,9 @@
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('contentSearch')">
+          <el-icon><Search /></el-icon>在此目录中搜索
+        </li>
         <li class="context-menu-divider" />
         <li v-if="isFavorited" class="context-menu-item" @click="onMenuCommand('removeFavorite')">
           <el-icon><StarFilled /></el-icon>取消收藏
@@ -298,7 +301,8 @@ import {
   Scissor,
   DocumentCopy,
   Star,
-  StarFilled
+  StarFilled,
+  Search
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { useTreeState } from '../composables/useTreeState'
@@ -321,7 +325,7 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search'])
 
 const { saveState, restoreState } = useTreeState()
 const { addFavorite, removeFavorite, favorites, loadFavorites } = useFavorites()
@@ -704,6 +708,16 @@ const onMenuCommand = (command) => {
     case 'addAsWorkDir':
       handleAddAsWorkDir(data)
       break
+    case 'contentSearch': {
+      const currentWorkDir = props.directories.find(d => d.id === props.selectedDirId)
+      if (currentWorkDir && data.path.startsWith(currentWorkDir.path)) {
+        const relPath = data.path.slice(currentWorkDir.path.length).replace(/^[\\\/]/, '')
+        emit('open-content-search', relPath)
+      } else {
+        emit('open-content-search', '')
+      }
+      break
+    }
   }
 }
 
