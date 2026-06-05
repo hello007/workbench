@@ -90,7 +90,7 @@ func (s *ContentSearchService) ContentSearch(
 			var err error
 
 			if s.rgAvailable {
-				items, err = s.searchWithRipgrep(ctx, searchDir, keyword, fileExt, excludeDirs, maxPerRepo)
+				items, err = s.searchWithRipgrep(ctx, searchDir, keyword, fileExt, excludeDirs, excludeFiles, maxPerRepo)
 			}
 			if !s.rgAvailable || err != nil {
 				items = s.searchWithGo(ctx, searchDir, keyword, fileExt, excludeDirs, excludeFiles, maxPerRepo)
@@ -126,7 +126,7 @@ func (s *ContentSearchService) ContentSearch(
 func (s *ContentSearchService) searchWithRipgrep(
 	ctx context.Context,
 	dir, keyword, fileExt string,
-	excludeDirs []string,
+	excludeDirs, excludeFiles []string,
 	maxResults int,
 ) ([]*model.ContentSearchResult, error) {
 	args := []string{
@@ -148,6 +148,11 @@ func (s *ContentSearchService) searchWithRipgrep(
 	// 排除目录
 	for _, d := range excludeDirs {
 		args = append(args, "--glob", "!"+d)
+	}
+
+	// 排除文件（按扩展名）
+	for _, f := range excludeFiles {
+		args = append(args, "--glob", "!*"+f)
 	}
 
 	args = append(args, dir)
