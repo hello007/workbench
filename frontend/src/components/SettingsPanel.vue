@@ -206,7 +206,7 @@ const excludeFiles = ref([])
 const newExcludeDir = ref('')
 const newExcludeFile = ref('')
 
-const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts } = useShortcuts()
+const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts, DEFAULTS } = useShortcuts()
 
 const shortcutsTabRef = ref(null)
 const recordingKey = ref(null)
