@@ -128,7 +128,29 @@
         <div v-show="activeTab === 'shortcuts'">
           <div class="settings-section-title">快捷键</div>
           <div class="shortcut-list">
-            <div class="shortcut-item" v-for="s in shortcuts" :key="s.action">
+            <!-- 可自定义快捷键 -->
+            <div
+              v-for="item in customizableShortcuts"
+              :key="item.key"
+              class="shortcut-item"
+              :class="{ 'shortcut-item--recording': recordingKey === item.key }"
+            >
+              <div class="shortcut-action">{{ item.action }}</div>
+              <div
+                class="shortcut-keys shortcut-keys--editable"
+                @click="startRecording(item.key)"
+              >
+                <template v-if="recordingKey === item.key">
+                  <kbd class="recording-hint">请按下新快捷键...</kbd>
+                </template>
+                <template v-else>
+                  <kbd v-for="key in item.keys" :key="key">{{ key }}</kbd>
+                </template>
+              </div>
+            </div>
+
+            <!-- 固定快捷键 -->
+            <div v-for="s in fixedShortcuts" :key="s.action" class="shortcut-item shortcut-item--fixed">
               <div class="shortcut-action">{{ s.action }}</div>
               <div class="shortcut-keys">
                 <kbd v-for="key in s.keys" :key="key">{{ key }}</kbd>
@@ -142,9 +164,11 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
+import { useShortcuts } from '../composables/useShortcuts'
 
 const props = defineProps({
   visible: { type: Boolean, default: false }
@@ -170,14 +194,61 @@ const excludeFiles = ref([])
 const newExcludeDir = ref('')
 const newExcludeFile = ref('')
 
-const shortcuts = [
-  { action: '打开命令面板', keys: ['Ctrl', 'P'] },
-  { action: '切换终端面板', keys: ['Ctrl', '`'] },
+const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts } = useShortcuts()
+
+const recordingKey = ref(null)
+const recordingText = ref('')
+
+const fixedShortcuts = [
   { action: '刷新当前节点', keys: ['F5'] },
   { action: '复制选中项', keys: ['Ctrl', 'C'] },
   { action: '剪切选中项', keys: ['Ctrl', 'X'] },
   { action: '粘贴', keys: ['Ctrl', 'V'] }
 ]
+
+const customizableShortcuts = computed(() => [
+  { action: '打开命令面板', key: 'commandPalette', keys: formatDisplay(shortcutCommandPalette.value), customizable: true },
+  { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(shortcutToggleTerminal.value), customizable: true }
+])
+
+function startRecording(key) {
+  recordingKey.value = key
+  recordingText.value = ''
+}
+
+function cancelRecording() {
+  recordingKey.value = null
+  recordingText.value = ''
+}
+
+function handleRecordingKeydown(e) {
+  if (!recordingKey.value) return false
+
+  if (e.key === 'Escape') {
+    cancelRecording()
+    return true
+  }
+
+  const shortcut = shortcutFromEvent(e)
+  if (!shortcut || !isValidShortcut(shortcut)) return true
+
+  const conflict = checkConflict(shortcut, recordingKey.value)
+  if (conflict) {
+    ElMessage.warning(`快捷键冲突：与"${conflict.key === 'commandPalette' ? '打开命令面板' : '切换终端面板'}"相同`)
+    return true
+  }
+
+  if (recordingKey.value === 'commandPalette') {
+    shortcutCommandPalette.value = shortcut
+  } else if (recordingKey.value === 'toggleTerminal') {
+    shortcutToggleTerminal.value = shortcut
+  }
+
+  recordingKey.value = null
+  recordingText.value = ''
+  saveShortcuts()
+  return true
+}
 
 // 弹窗打开时加载设置
 watch(() => props.visible, async (val) => {
@@ -199,6 +270,7 @@ async function loadSettings() {
     wslDistro.value = settings.wslDistro || ''
     excludeDirs.value = settings.searchExcludeDirs || []
     excludeFiles.value = settings.searchExcludeFiles || []
+    await loadShortcuts()
   } catch {
     gpuEnabled.value = true
   }
@@ -432,6 +504,40 @@ const onSettingsChange = async () => {
   border: 1px solid var(--border-color, #dcdfe6);
   border-radius: 4px;
   box-shadow: 0 1px 0 var(--border-color, #dcdfe6);
+}
+
+.shortcut-keys--editable {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.shortcut-keys--editable:hover {
+  background: #ecf5ff;
+}
+
+.shortcut-item--recording {
+  border-color: #409eff !important;
+  background: #fafcff;
+}
+
+.shortcut-item--fixed .shortcut-keys kbd {
+  opacity: 0.7;
+}
+
+.recording-hint {
+  color: #409eff;
+  font-style: italic;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 </style>
 
