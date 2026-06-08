@@ -109,6 +109,7 @@ import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
+import { useShortcuts } from '../composables/useShortcuts'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -152,6 +153,7 @@ const settingsVisible = ref(false)
 const commandPaletteVisible = ref(false)
 const contentSearchInit = ref('')
 const { record: recordAccess } = useRecentAccess()
+const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal } = useShortcuts()
 
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
@@ -348,15 +350,15 @@ function onOpenContentSearch(subDir) {
 
 // ---- 键盘快捷键 ----
 const handleGlobalKeydown = (e) => {
-  // Ctrl+P 打开命令面板
-  if (e.ctrlKey && e.key === 'p') {
+  // 打开命令面板（快捷键可自定义）
+  if (matchShortcut(e, shortcutCommandPalette.value)) {
     e.preventDefault()
     commandPaletteVisible.value = true
     return
   }
 
-  // Ctrl+` 切换终端
-  if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+  // 切换终端（快捷键可自定义）
+  if (matchShortcut(e, shortcutToggleTerminal.value)) {
     e.preventDefault()
     toggleTerminal()
     return
@@ -558,6 +560,7 @@ watch(() => selectedDirectoryId.value, () => {
 
 onMounted(() => {
   loadDirectories()
+  loadShortcuts()
   GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('focus', handleWindowFocus)
