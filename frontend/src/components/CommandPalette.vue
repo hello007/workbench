@@ -381,6 +381,8 @@ function onClose() {
   input.value = ''
   fileResults.value = []
   favoriteResults.value = []
+  contentGroups.value = []
+  contentSearchExecuted.value = false
   resetSelection()
 }
 
