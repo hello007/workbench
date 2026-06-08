@@ -7,6 +7,7 @@ import (
 )
 
 func TestOpenInExplorer_Directory(t *testing.T) {
+	t.Skip("会启动外部 GUI 进程（资源管理器/VSCode），默认跳过；如需手动验证请删除此行")
 	dir := t.TempDir()
 	svc := NewFileOperationService()
 
@@ -17,6 +18,7 @@ func TestOpenInExplorer_Directory(t *testing.T) {
 }
 
 func TestOpenInExplorer_File(t *testing.T) {
+	t.Skip("会启动外部 GUI 进程（资源管理器/VSCode），默认跳过；如需手动验证请删除此行")
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.txt")
 	os.WriteFile(file, []byte("test"), 0644)
@@ -176,6 +178,7 @@ func TestDelete_Directory(t *testing.T) {
 }
 
 func TestOpenInVSCode_Directory(t *testing.T) {
+	t.Skip("会启动外部 GUI 进程（资源管理器/VSCode），默认跳过；如需手动验证请删除此行")
 	dir := t.TempDir()
 	svc := NewFileOperationService()
 
@@ -186,6 +189,7 @@ func TestOpenInVSCode_Directory(t *testing.T) {
 }
 
 func TestOpenInVSCode_File(t *testing.T) {
+	t.Skip("会启动外部 GUI 进程（资源管理器/VSCode），默认跳过；如需手动验证请删除此行")
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.txt")
 	os.WriteFile(file, []byte("test"), 0644)
@@ -199,6 +203,7 @@ func TestOpenInVSCode_File(t *testing.T) {
 }
 
 func TestOpenInVSCode_InvalidCommand(t *testing.T) {
+	t.Skip("会启动外部 GUI 进程（资源管理器/VSCode），默认跳过；如需手动验证请删除此行")
 	svc := NewFileOperationService()
 
 	err := svc.OpenInVSCode("")
