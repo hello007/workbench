@@ -423,12 +423,29 @@ watch(visible, async (val) => {
 
 .command-palette-dialog :deep(.el-dialog__body) {
   padding: 0 0 15px 0;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 .palette-content {
   min-height: 60px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.palette-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.palette-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.palette-content::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+
+.palette-content::-webkit-scrollbar-thumb:hover {
+  background: #909399;
 }
 
 .result-section {
