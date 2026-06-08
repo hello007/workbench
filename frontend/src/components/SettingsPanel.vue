@@ -125,7 +125,7 @@
           </div>
         </div>
         <!-- 快捷键页 -->
-        <div v-show="activeTab === 'shortcuts'">
+        <div v-show="activeTab === 'shortcuts'" ref="shortcutsTabRef" tabindex="-1" @keydown="handleRecordingKeydown">
           <div class="settings-section-title">快捷键</div>
           <div class="shortcut-list">
             <!-- 可自定义快捷键 -->
@@ -164,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
@@ -196,6 +196,7 @@ const newExcludeFile = ref('')
 
 const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts } = useShortcuts()
 
+const shortcutsTabRef = ref(null)
 const recordingKey = ref(null)
 const recordingText = ref('')
 
@@ -214,6 +215,9 @@ const customizableShortcuts = computed(() => [
 function startRecording(key) {
   recordingKey.value = key
   recordingText.value = ''
+  nextTick(() => {
+    shortcutsTabRef.value?.focus()
+  })
 }
 
 function cancelRecording() {
@@ -222,7 +226,11 @@ function cancelRecording() {
 }
 
 function handleRecordingKeydown(e) {
-  if (!recordingKey.value) return false
+  if (!recordingKey.value) return
+
+  // 录制模式下拦截所有按键，阻止冒泡到 Home.vue 的全局处理器
+  e.preventDefault()
+  e.stopPropagation()
 
   if (e.key === 'Escape') {
     cancelRecording()
