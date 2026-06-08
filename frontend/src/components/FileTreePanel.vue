@@ -185,12 +185,15 @@
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
           <el-icon><Scissor /></el-icon>剪切
+          <span class="context-menu-shortcut">Ctrl+X</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('copy')">
           <el-icon><CopyDocument /></el-icon>复制
+          <span class="context-menu-shortcut">Ctrl+C</span>
         </li>
         <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
+          <span class="context-menu-shortcut">Ctrl+V</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('copyTo')">
           <el-icon><FolderAdd /></el-icon>拷贝到...
@@ -211,6 +214,7 @@
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('refresh')">
           <el-icon><Refresh /></el-icon>刷新
+          <span class="context-menu-shortcut">F5</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
           <el-icon><Refresh /></el-icon>更新仓库
@@ -239,12 +243,15 @@
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
           <el-icon><Scissor /></el-icon>剪切
+          <span class="context-menu-shortcut">Ctrl+X</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('copy')">
           <el-icon><CopyDocument /></el-icon>复制
+          <span class="context-menu-shortcut">Ctrl+C</span>
         </li>
         <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
+          <span class="context-menu-shortcut">Ctrl+V</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('copyTo')">
           <el-icon><FolderAdd /></el-icon>拷贝到...
@@ -1195,6 +1202,14 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+.context-menu-shortcut {
+  margin-left: auto;
+  padding-left: 24px;
+  font-size: 11px;
+  color: #adb2b8;
+  font-family: 'Consolas', 'Monaco', monospace;
+  white-space: nowrap;
 }
 
 </style>
