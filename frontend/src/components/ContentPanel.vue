@@ -123,9 +123,13 @@
             v-model="filePreview.content"
             type="textarea"
             :rows="15"
-            readonly
             class="preview-textarea"
           />
+          <div v-if="isContentModified" class="preview-actions">
+            <span class="modified-indicator">● 已修改</span>
+            <el-button size="small" @click="handleCancelEdit">取消</el-button>
+            <el-button size="small" type="primary" :loading="isSaving" @click="handleSave">保存</el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -311,14 +315,14 @@
 
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
 import {
-  PreviewFile, PullRepo, CloneRepo, OpenWithDefaultApp,
+  PreviewFile, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
   OpenInExplorer, OpenInVSCode, OpenInWarp,
   GetBranches, CheckoutBranch
 } from '../../wailsjs/go/main/App'
@@ -357,6 +361,12 @@ const commitHistoryRef = ref()
 const filePreview = ref({
   content: '',
   error: ''
+})
+const originalContent = ref('')
+const isSaving = ref(false)
+
+const isContentModified = computed(() => {
+  return filePreview.value.content !== originalContent.value
 })
 
 const cloneDialogVisible = ref(false)
@@ -542,9 +552,45 @@ const previewFile = async () => {
   } else if (preview.isBinary) {
     ElMessage.warning('二进制文件，无法预览')
   }
+
+  // 同步原始内容，用于编辑态变更检测
+  originalContent.value = preview.content || ''
 }
 
-watch(() => props.selectedNode, async (newNode) => {
+const handleSave = async () => {
+  if (!props.selectedNode || !isContentModified.value) return
+
+  isSaving.value = true
+  try {
+    await SaveFile(props.selectedNode.path, filePreview.value.content)
+    ElMessage.success('文件保存成功')
+    originalContent.value = filePreview.value.content
+    emit('refreshNode', props.selectedNode.path)
+  } catch (error) {
+    ElMessage.error('保存失败: ' + (error.message || String(error)))
+  } finally {
+    isSaving.value = false
+  }
+}
+
+const handleCancelEdit = () => {
+  filePreview.value.content = originalContent.value
+}
+
+watch(() => props.selectedNode, async (newNode, oldNode) => {
+  // 切换文件前检查是否有未保存修改
+  if (oldNode && oldNode.type === 'file' && isContentModified.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前文件已修改未保存，是否放弃修改？',
+        '未保存的修改',
+        { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
+      )
+    } catch {
+      // 用户选择"继续编辑"，阻止切换
+      return
+    }
+  }
   if (newNode && newNode.type === 'file') {
     await previewFile()
   }
@@ -608,6 +654,7 @@ const clearPreview = () => {
     content: '',
     error: ''
   }
+  originalContent.value = ''
 }
 
 const cleanupPullEvents = () => {
@@ -756,6 +803,23 @@ defineExpose({
 .preview-textarea:hover {
   border-color: var(--primary-light);
   box-shadow: var(--shadow-sm);
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.modified-indicator {
+  color: #e6a23c;
+  font-size: 12px;
+  margin-right: auto;
 }
 
 /* 分支对话框 */
