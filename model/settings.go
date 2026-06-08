@@ -7,5 +7,7 @@ type AppSettings struct {
 	GitBashPath        string   `json:"gitBashPath"`        // Git Bash 自定义路径
 	WslDistro          string   `json:"wslDistro"`          // WSL 发行版名称
 	SearchExcludeDirs  []string `json:"searchExcludeDirs"`  // 搜索排除目录
-	SearchExcludeFiles []string `json:"searchExcludeFiles"` // 搜索排除文件模式
+	SearchExcludeFiles     []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
+	ShortcutCommandPalette string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
+	ShortcutToggleTerminal string   `json:"shortcutToggleTerminal"` // 切换终端快捷键，默认 "Ctrl+`"
 }
