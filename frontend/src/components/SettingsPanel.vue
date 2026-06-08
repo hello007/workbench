@@ -126,7 +126,10 @@
         </div>
         <!-- 快捷键页 -->
         <div v-show="activeTab === 'shortcuts'" ref="shortcutsTabRef" tabindex="-1" @keydown="handleRecordingKeydown">
-          <div class="settings-section-title">快捷键</div>
+          <div class="settings-section-header">
+            <div class="settings-section-title">快捷键</div>
+            <el-button size="small" @click="resetAllShortcuts">重置所有</el-button>
+          </div>
           <div class="shortcut-list">
             <!-- 可自定义快捷键 -->
             <div
@@ -136,16 +139,25 @@
               :class="{ 'shortcut-item--recording': recordingKey === item.key }"
             >
               <div class="shortcut-action">{{ item.action }}</div>
-              <div
-                class="shortcut-keys shortcut-keys--editable"
-                @click="startRecording(item.key)"
-              >
-                <template v-if="recordingKey === item.key">
-                  <kbd class="recording-hint">请按下新快捷键...</kbd>
-                </template>
-                <template v-else>
-                  <kbd v-for="key in item.keys" :key="key">{{ key }}</kbd>
-                </template>
+              <div class="shortcut-actions">
+                <div
+                  class="shortcut-keys shortcut-keys--editable"
+                  @click="startRecording(item.key)"
+                >
+                  <template v-if="recordingKey === item.key">
+                    <kbd class="recording-hint">请按下新快捷键...</kbd>
+                  </template>
+                  <template v-else>
+                    <kbd v-for="key in item.keys" :key="key">{{ key }}</kbd>
+                  </template>
+                </div>
+                <el-button
+                  v-if="!isDefault(item.key)"
+                  size="small"
+                  text
+                  type="primary"
+                  @click="resetShortcut(item.key)"
+                >重置</el-button>
               </div>
             </div>
 
@@ -223,6 +235,24 @@ function startRecording(key) {
 function cancelRecording() {
   recordingKey.value = null
   recordingText.value = ''
+}
+
+function isDefault(key) {
+  if (key === 'commandPalette') return shortcutCommandPalette.value === DEFAULTS.commandPalette
+  if (key === 'toggleTerminal') return shortcutToggleTerminal.value === DEFAULTS.toggleTerminal
+  return true
+}
+
+function resetShortcut(key) {
+  if (key === 'commandPalette') shortcutCommandPalette.value = DEFAULTS.commandPalette
+  else if (key === 'toggleTerminal') shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
+  saveShortcuts()
+}
+
+function resetAllShortcuts() {
+  shortcutCommandPalette.value = DEFAULTS.commandPalette
+  shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
+  saveShortcuts()
 }
 
 function handleRecordingKeydown(e) {
@@ -476,6 +506,24 @@ const onSettingsChange = async () => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* 快捷键列表标题行 */
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-section-header .settings-section-title {
+  margin-bottom: 0;
+}
+
+.shortcut-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .shortcut-item {
