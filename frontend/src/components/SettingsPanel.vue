@@ -127,9 +127,13 @@
         <!-- 快捷键页 -->
         <div v-show="activeTab === 'shortcuts'">
           <div class="settings-section-title">快捷键</div>
-          <div class="settings-empty">
-            <el-icon :size="32" color="#555"><Key /></el-icon>
-            <p>暂无可配置快捷键</p>
+          <div class="shortcut-list">
+            <div class="shortcut-item" v-for="s in shortcuts" :key="s.action">
+              <div class="shortcut-action">{{ s.action }}</div>
+              <div class="shortcut-keys">
+                <kbd v-for="key in s.keys" :key="key">{{ key }}</kbd>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -165,6 +169,15 @@ const excludeDirs = ref([])
 const excludeFiles = ref([])
 const newExcludeDir = ref('')
 const newExcludeFile = ref('')
+
+const shortcuts = [
+  { action: '打开命令面板', keys: ['Ctrl', 'P'] },
+  { action: '切换终端面板', keys: ['Ctrl', '`'] },
+  { action: '刷新当前节点', keys: ['F5'] },
+  { action: '复制选中项', keys: ['Ctrl', 'C'] },
+  { action: '剪切选中项', keys: ['Ctrl', 'X'] },
+  { action: '粘贴', keys: ['Ctrl', 'V'] }
+]
 
 // 弹窗打开时加载设置
 watch(() => props.visible, async (val) => {
@@ -376,6 +389,49 @@ const onSettingsChange = async () => {
   flex-wrap: wrap;
   gap: 6px;
   width: 100%;
+}
+
+/* 快捷键列表 */
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #ebeef5);
+  transition: border-color 0.15s;
+}
+
+.shortcut-item:hover {
+  border-color: var(--primary-light, #66b1ff);
+}
+
+.shortcut-action {
+  font-size: 14px;
+  color: var(--text-primary, #303133);
+}
+
+.shortcut-keys {
+  display: flex;
+  gap: 4px;
+}
+
+.shortcut-keys kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary, #303133);
+  background: var(--bg-tertiary, #f0f2f5);
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: 4px;
+  box-shadow: 0 1px 0 var(--border-color, #dcdfe6);
 }
 </style>
 
