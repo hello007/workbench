@@ -217,6 +217,11 @@ func (a *App) PreviewFile(filePath string) *model.FilePreview {
 	return preview
 }
 
+// SaveFile 保存文件内容
+func (a *App) SaveFile(filePath string, content string) error {
+	return a.fileOpSvc.SaveFile(filePath, content)
+}
+
 // GetGitLog 获取提交历史
 func (a *App) GetGitLog(dirPath string, page, pageSize int) *model.PageResult {
 	result, err := a.gitSvc.GetLog(dirPath, page, pageSize)

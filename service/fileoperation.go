@@ -98,6 +98,47 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 	return preview, nil
 }
 
+// SaveFile 保存文件内容（原子写入：先写临时文件再 rename）
+func (s *FileOperationService) SaveFile(filePath string, content string) error {
+	// 校验路径存在且为普通文件
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("文件不存在: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("不能保存目录")
+	}
+
+	// 大小限制（与预览一致：1MB）
+	const maxSize = 1024 * 1024
+	if int64(len(content)) > maxSize {
+		return fmt.Errorf("内容超过1MB限制")
+	}
+
+	// 原子写入：先写临时文件再 rename
+	dir := filepath.Dir(filePath)
+	tmpFile, err := os.CreateTemp(dir, ".git-manager-save-*")
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	_, err = tmpFile.WriteString(content)
+	tmpFile.Close()
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("写入临时文件失败: %w", err)
+	}
+
+	err = os.Rename(tmpPath, filePath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("替换文件失败: %w", err)
+	}
+
+	return nil
+}
+
 // OpenInExplorer 在资源管理器中打开
 func (s *FileOperationService) OpenInExplorer(path string) error {
 	info, err := os.Stat(path)

@@ -774,3 +774,95 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+func TestSaveFile_OverwriteExisting(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "test.txt")
+	os.WriteFile(file, []byte("original"), 0644)
+
+	svc := NewFileOperationService()
+	err := svc.SaveFile(file, "updated content")
+	if err != nil {
+		t.Fatalf("SaveFile failed: %v", err)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("Failed to read saved file: %v", err)
+	}
+	if string(data) != "updated content" {
+		t.Errorf("Expected 'updated content', got '%s'", string(data))
+	}
+}
+
+func TestSaveFile_FileNotFound(t *testing.T) {
+	svc := NewFileOperationService()
+	err := svc.SaveFile(filepath.Join(t.TempDir(), "nonexistent.txt"), "content")
+	if err == nil {
+		t.Fatal("Expected error for nonexistent file")
+	}
+}
+
+func TestSaveFile_DirectoryPath(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	err := svc.SaveFile(dir, "content")
+	if err == nil {
+		t.Fatal("Expected error when saving to a directory")
+	}
+}
+
+func TestSaveFile_ContentTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "big.txt")
+	os.WriteFile(file, []byte("small"), 0644)
+
+	svc := NewFileOperationService()
+	largeContent := string(make([]byte, 1024*1024+1)) // > 1MB
+	err := svc.SaveFile(file, largeContent)
+	if err == nil {
+		t.Fatal("Expected error for content exceeding size limit")
+	}
+}
+
+func TestSaveFile_EmptyContent(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "empty.txt")
+	os.WriteFile(file, []byte("has content"), 0644)
+
+	svc := NewFileOperationService()
+	err := svc.SaveFile(file, "")
+	if err != nil {
+		t.Fatalf("SaveFile with empty content failed: %v", err)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("Failed to read saved file: %v", err)
+	}
+	if string(data) != "" {
+		t.Errorf("Expected empty content, got '%s'", string(data))
+	}
+}
+
+func TestSaveFile_NoTempFileLeak(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "clean.txt")
+	os.WriteFile(file, []byte("before"), 0644)
+
+	svc := NewFileOperationService()
+	err := svc.SaveFile(file, "after")
+	if err != nil {
+		t.Fatalf("SaveFile failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("Failed to read dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "clean.txt" {
+			t.Errorf("Unexpected file left behind: %s", e.Name())
+		}
+	}
+}
