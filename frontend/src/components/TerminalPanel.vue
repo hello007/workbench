@@ -162,6 +162,10 @@ onMounted(() => {
       resize()
     }
   })
+  // 观察 xterm 的直接父容器，检测拖拽调整高度等尺寸变化
+  if (terminalContainer.value) {
+    resizeObserver.observe(terminalContainer.value)
+  }
 })
 
 onBeforeUnmount(async () => {
