@@ -1,14 +1,14 @@
 #!/bin/bash
-# 安装 git-manager 到系统目录
+# 安装 WorkBench 到系统目录
 # 用法: ./scripts/install.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-SOURCE="$PROJECT_DIR/build/bin/git-manager.exe"
-TARGET_DIR="/d/Program Files/GitManager"
-TARGET="$TARGET_DIR/git-manager.exe"
+SOURCE="$PROJECT_DIR/build/bin/workbench.exe"
+TARGET_DIR="/d/Program Files/WorkBench"
+TARGET="$TARGET_DIR/workbench.exe"
 
 if [ ! -f "$SOURCE" ]; then
     echo "错误: 找不到构建产物 $SOURCE"
@@ -27,7 +27,7 @@ fi
 
 # 备份旧版本
 if [ -f "$TARGET" ]; then
-    BACKUP="$TARGET_DIR/git-manager.exe.bak"
+    BACKUP="$TARGET_DIR/workbench.exe.bak"
     echo "备份旧版本到: $BACKUP"
     mv -f "$TARGET" "$BACKUP"
 fi

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 构建并安装 git-manager
+# 构建并安装 WorkBench
 # 用法: ./scripts/buildAndInstall.sh [版本号]
 
 set -e
