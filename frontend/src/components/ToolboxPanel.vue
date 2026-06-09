@@ -34,6 +34,17 @@
             :disabled="copyToLoading"
           />
         </el-form-item>
+        <div class="swap-row">
+          <el-button
+            text
+            size="small"
+            :disabled="copyToLoading"
+            @click="swapCopyToPaths"
+          >
+            <el-icon class="swap-icon"><Sort /></el-icon>
+            互换
+          </el-button>
+        </div>
         <el-form-item label="目标地址">
           <el-input
             ref="copyToTargetInputRef"
@@ -66,7 +77,7 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, SetUp } from '@element-plus/icons-vue'
+import { CopyDocument, SetUp, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 
 defineEmits(['close'])
@@ -102,6 +113,13 @@ const copyToPreview = computed(() => {
   }
   return { from: src + '/*', to: normalizedDst + '/*' }
 })
+
+// 互换原地址与目标地址
+const swapCopyToPaths = () => {
+  const temp = copyToSourcePath.value
+  copyToSourcePath.value = copyToTargetPath.value
+  copyToTargetPath.value = temp
+}
 
 const handleCopyTo = async () => {
   if (!copyToSourcePath.value.trim()) {
@@ -225,4 +243,27 @@ const tools = [
   margin-top: 3px;
 }
 
+/* 互换按钮行 */
+.swap-row {
+  display: flex;
+  justify-content: center;
+  margin: -8px 0 0;
+}
+
+.swap-row .el-button {
+  color: var(--text-tertiary, #909399);
+  font-size: 12px;
+}
+
+.swap-row .el-button:hover {
+  color: var(--primary-color, #409eff);
+}
+
+.swap-row .el-button:hover .swap-icon {
+  transform: rotate(180deg);
+}
+
+.swap-icon {
+  transition: transform 0.3s ease;
+}
 </style>
