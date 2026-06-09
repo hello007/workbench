@@ -122,6 +122,17 @@
             :disabled="copyToLoading"
           />
         </el-form-item>
+        <div class="swap-row">
+          <el-button
+            text
+            size="small"
+            :disabled="copyToLoading"
+            @click="swapCopyToPaths"
+          >
+            <el-icon class="swap-icon"><Sort /></el-icon>
+            互换
+          </el-button>
+        </div>
         <el-form-item label="目标地址">
           <el-input
             ref="copyToTargetInputRef"
@@ -290,6 +301,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Sort } from '@element-plus/icons-vue'
 import {
   Folder,
   FolderOpened,
@@ -413,6 +425,13 @@ const copyToPreview = computed(() => {
   }
   return { from: src + '/*', to: normalizedDst + '/*' }
 })
+
+// 互换原地址与目标地址
+const swapCopyToPaths = () => {
+  const temp = copyToSourcePath.value
+  copyToSourcePath.value = copyToTargetPath.value
+  copyToTargetPath.value = temp
+}
 
 // ---- 懒加载 ----
 const loadTreeNode = async (node, resolve) => {
@@ -1210,6 +1229,30 @@ onBeforeUnmount(() => {
   color: #adb2b8;
   font-family: 'Consolas', 'Monaco', monospace;
   white-space: nowrap;
+}
+
+/* 互换按钮行 */
+.swap-row {
+  display: flex;
+  justify-content: center;
+  margin: -8px 0 0;
+}
+
+.swap-row .el-button {
+  color: var(--text-tertiary, #909399);
+  font-size: 12px;
+}
+
+.swap-row .el-button:hover {
+  color: var(--primary-color, #409eff);
+}
+
+.swap-row .el-button:hover .swap-icon {
+  transform: rotate(180deg);
+}
+
+.swap-icon {
+  transition: transform 0.3s ease;
 }
 
 </style>
