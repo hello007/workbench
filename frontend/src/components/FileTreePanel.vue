@@ -301,7 +301,6 @@
 <script setup>
 import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Sort } from '@element-plus/icons-vue'
 import {
   Folder,
   FolderOpened,
@@ -321,7 +320,8 @@ import {
   DocumentCopy,
   Star,
   StarFilled,
-  Search
+  Search,
+  Sort
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { useTreeState } from '../composables/useTreeState'
