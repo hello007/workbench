@@ -74,15 +74,22 @@ cd frontend && npm test
 │   └── src/
 │       ├── views/Home.vue              # 上下分区布局容器 + 状态中枢
 │       ├── composables/
-│       │   └── useTerminal.js           # 终端逻辑（xterm + PTY 通信）
+│       │   ├── useTerminal.js           # 终端逻辑（xterm + PTY 通信）
+│       │   ├── useCommandPalette.js     # 命令面板搜索/导航
+│       │   ├── useFavorites.js          # 收藏夹管理
+│       │   ├── useRecentAccess.js       # 最近访问历史
+│       │   ├── useTreeState.js          # 文件树状态持久化
+│       │   └── useShortcuts.js          # 快捷键解析与匹配
 │       └── components/
 │           ├── ActivityBar.vue           # 活动栏（目录/工具箱/终端切换）
 │           ├── DirectoryTree.vue        # 工作目录树面板
 │           ├── FileTreePanel.vue        # 文件树面板
-│           ├── ContentPanel.vue         # 操作面板
+│           ├── ContentPanel.vue         # 操作面板（含文件预览编辑）
+│           ├── CommandPalette.vue       # 命令面板（搜索/收藏/切换目录）
 │           ├── ToolboxPanel.vue         # 工具箱面板
 │           ├── GitInfo.vue              # Git 仓库信息
 │           ├── CommitHistory.vue        # 提交历史
+│           ├── LocalChanges.vue         # 本地变更列表
 │           ├── TerminalPanel.vue        # 终端面板（Shell 选择/目录显示/拖拽调高）
 │           └── SettingsPanel.vue        # 设置弹窗（通用/终端/快捷键，左右双栏布局）
 ├── data/            # 运行时数据（不提交）
