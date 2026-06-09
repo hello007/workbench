@@ -1,4 +1,4 @@
-# Git Manager - 构建摘要
+# WorkBench - 构建摘要
 
 **构建日期：** 2026-04-28
 **版本：** 1.0.0
@@ -6,7 +6,7 @@
 
 ## 构建产物
 
-**可执行文件：** `build/bin/git-manager.exe`
+**可执行文件：** `build/bin/workbench.exe`
 **文件大小：** 13 MB
 **平台：** Windows amd64
 
@@ -31,7 +31,7 @@
 
 ## 快速开始
 
-1. 双击 `build/bin/git-manager.exe` 启动应用
+1. 双击 `build/bin/workbench.exe` 启动应用
 2. 点击"添加目录"添加工作空间
 3. 浏览文件树，查看Git仓库信息
 4. 执行文件和Git操作
@@ -39,7 +39,7 @@
 ## 架构
 
 ```
-git-manager/
+workbench/
 ├── model/          # 数据模型层
 ├── service/        # 业务逻辑层
 ├── util/           # 工具层

@@ -190,7 +190,7 @@ import (
 	"sort"
 	"strings"
 
-	"git-manager/model"
+	"workbench/model"
 )
 
 type SearchService struct{}
@@ -410,8 +410,8 @@ import (
 	"fmt"
 	"time"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 type FavoritesService struct {

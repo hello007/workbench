@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // FavoritesService 收藏夹服务

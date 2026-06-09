@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"git-manager/model"
+	"workbench/model"
 )
 
 func TestScanGitRepos_SingleRepo(t *testing.T) {

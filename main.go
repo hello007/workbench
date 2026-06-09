@@ -11,7 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	"git-manager/service"
+	"workbench/service"
 )
 
 var (
@@ -24,7 +24,7 @@ var assets embed.FS
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		consolePrint(fmt.Sprintf("git-manager v%s (build %s)\n", version, buildTime))
+		consolePrint(fmt.Sprintf("WorkBench v%s (build %s)\n", version, buildTime))
 		os.Exit(0)
 	}
 
@@ -34,7 +34,7 @@ func main() {
 	settings, _ := settingsSvc.Load()
 
 	err := wails.Run(&options.App{
-		Title:  "Git Manager",
+		Title:  "WorkBench",
 		Width:  1280,
 		Height: 800,
 		AssetServer: &assetserver.Options{

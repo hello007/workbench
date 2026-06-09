@@ -1,18 +1,18 @@
-# git-manager --version 支持设计
+# workbench --version 支持设计
 
 **日期：** 2026-05-11
 **状态：** 已确认
 
 ## 需求
 
-1. 打包后的 `git-manager.exe` 支持 `--version` 命令输出
+1. 打包后的 `workbench.exe` 支持 `--version` 命令输出
 2. 每次打包时自动生成 version（默认为打包时间戳）
 3. `install.sh` 安装后可打印版本信息
 
 ## 输出格式
 
 ```
-git-manager v1.0.0 (build 20260511-101500)
+workbench v1.0.0 (build 20260511-101500)
 ```
 
 - 语义版本：从 `wails.json` 的 `productVersion` 读取
@@ -50,7 +50,7 @@ var (
 ```go
 func main() {
     if len(os.Args) > 1 && os.Args[1] == "--version" {
-        fmt.Printf("git-manager v%s (build %s)\n", version, buildTime)
+        fmt.Printf("workbench v%s (build %s)\n", version, buildTime)
         os.Exit(0)
     }
     // ... 原有 Wails 启动逻辑

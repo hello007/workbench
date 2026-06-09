@@ -37,7 +37,7 @@ type PullSummary struct {
 
 **Step 2: 验证编译通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功，无错误
 
 **Step 3: Commit**
@@ -132,7 +132,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 **Step 2: 运行测试验证失败**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestScanGitRepos -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestScanGitRepos -v`
 Expected: FAIL — `svc.ScanGitRepos` 方法不存在
 
 **Step 3: 在 `service/git.go` 中实现 ScanGitRepos**
@@ -190,14 +190,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 ```
 
 **Step 4: 运行测试验证通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestScanGitRepos -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestScanGitRepos -v`
 Expected: PASS — 全部 3 个测试通过
 
 **Step 5: Commit**
@@ -267,7 +267,7 @@ func TestBatchPull_SuccessAndFail(t *testing.T) {
 
 **Step 2: 运行测试验证失败**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestBatchPull -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestBatchPull -v`
 Expected: FAIL — `svc.BatchPull` 方法不存在
 
 **Step 3: 在 `service/git.go` 中实现 BatchPull**
@@ -284,8 +284,8 @@ import (
 	"sync"
 	"time"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // BatchPull 并行拉取多个 Git 仓库
@@ -369,8 +369,8 @@ import (
 	"sync"
 	"time"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -391,7 +391,7 @@ func NewGitCommandWithTimeout(timeout time.Duration) *GitCommand {
 
 **Step 5: 运行测试验证通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestBatchPull -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestBatchPull -v`
 Expected: PASS
 
 **Step 6: Commit**
@@ -432,7 +432,7 @@ func (a *App) ScanAndPullRepos(dirPath string) (*model.PullSummary, error) {
 
 **Step 2: 验证编译通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功
 
 **Step 3: Commit**
@@ -452,13 +452,13 @@ git commit -m "feat: add ScanAndPullRepos binding method with async batch pull"
 
 **Step 1: 运行 Wails 生成命令**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails generate module`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails generate module`
 
 Expected: 成功生成，`App.js` 中新增 `ScanAndPullRepos` 导出函数
 
 **Step 2: 验证绑定已生成**
 
-Run: `grep "ScanAndPullRepos" d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend/wailsjs/go/main/App.js`
+Run: `grep "ScanAndPullRepos" d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend/wailsjs/go/main/App.js`
 Expected: 找到 `export function ScanAndPullRepos(arg1) {`
 
 **Step 3: Commit**
@@ -547,7 +547,7 @@ const handleBatchPull = async (data) => {
 
 **Step 5: 验证编译通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm run build`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm run build`
 Expected: 编译成功
 
 **Step 6: Commit**
@@ -720,7 +720,7 @@ import {
 
 **Step 8: 验证编译通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm run build`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm run build`
 Expected: 编译成功
 
 **Step 9: Commit**
@@ -738,17 +738,17 @@ git commit -m "feat: implement batch pull progress dialog with real-time events"
 
 **Step 1: 运行后端全部测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./...`
 Expected: 全部 PASS
 
 **Step 2: 运行前端全部测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm test`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm test`
 Expected: 全部 PASS
 
 **Step 3: 启动开发模式进行手动测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`
 
 手动测试用例：
 
@@ -764,8 +764,8 @@ Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails 
 
 **Step 4: 构建生产版本验证**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails build -clean`
-Expected: 构建成功，输出 `build/bin/git-manager.exe`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails build -clean`
+Expected: 构建成功，输出 `build/bin/workbench.exe`
 
 **Step 5: 最终 Commit（如有修复）**
 

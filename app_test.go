@@ -49,7 +49,7 @@ func TestGetGitRemoteURL_InvalidPath(t *testing.T) {
 }
 
 func TestGetGitRemoteURL_CurrentRepo(t *testing.T) {
-	// Test with the current repository (git-manager)
+	// Test with the current repository (workbench)
 	app := NewApp()
 	info, err := app.GetGitRemoteURL(".")
 	if err != nil {

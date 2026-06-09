@@ -1,12 +1,12 @@
-# Git Manager 项目
+# WorkBench 项目
 
 > 所有文档一律使用中文描述，且每次功能完成后都需要确认是否需要更新 README.md
 
 ## 项目概述
 
-**项目名称：** Git Manager - Git仓库管理桌面应用
-**项目路径：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager\`
-**Git 仓库：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager\`
+**项目名称：** WorkBench - 开发者工作台
+**项目路径：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\workbench\`
+**Git 仓库：** `d:\workspace\workspace_ai\demo_OpenSpec\git_tools\workbench\`
 **开始时间：** 2026-04-28
 **当前状态：** 活跃开发中（v1.0.6+，持续迭代新功能）
 
@@ -26,7 +26,7 @@
 ## 项目结构
 
 ```text
-git-manager/
+workbench/
 ├── main.go              # 主入口
 ├── app.go               # 应用结构体（前后端桥接）
 ├── model/               # 数据模型层
@@ -52,8 +52,8 @@ git-manager/
 |[常见问题.md](docs/常见问题.md)|常见问题|
 |[路线图.md](docs/路线图.md)|发展路线图|
 |[项目上下文.md](docs/project-context.md)|AI Agent 编码规则和模式|
-|[开发运维.md](git-manager/DEVELOPMENT.md)|开发运维详细文档|
-|[构建摘要.md](git-manager/BUILD_SUMMARY.md)|构建摘要|
+|[开发运维.md](workbench/DEVELOPMENT.md)|开发运维详细文档|
+|[构建摘要.md](workbench/BUILD_SUMMARY.md)|构建摘要|
 
 ## 常用命令
 
@@ -65,7 +65,7 @@ git-manager/
 |前端测试|`cd frontend && npm test`|
 |安装依赖|`cd frontend && npm install`|
 |查看端口|`netstat -ano \| findstr ":34115"`|
-|停止进程|`taskkill /F /IM git-manager.exe`|
+|停止进程|`taskkill /F /IM workbench.exe`|
 
 ---
 

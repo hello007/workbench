@@ -220,7 +220,7 @@ func ReadClipboardFiles() (paths []string, isCut bool, err error) {
 
 **Step 2: 确认编译通过**
 
-Run: `cd git-manager && go build ./...`
+Run: `cd workbench && go build ./...`
 Expected: 无错误
 
 ---
@@ -236,7 +236,7 @@ Expected: 无错误
 ```go
 package service
 
-import "git-manager/util"
+import "workbench/util"
 
 // CopyToSystemClipboard 写入系统剪贴板（复制模式）
 func (s *FileOperationService) CopyToSystemClipboard(paths []string) error {
@@ -318,12 +318,12 @@ func (a *App) ReadFromSystemClipboard() string {
 
 **Step 4: 确认编译通过**
 
-Run: `cd git-manager && go build ./...`
+Run: `cd workbench && go build ./...`
 Expected: 无错误
 
 **Step 5: 运行全部测试**
 
-Run: `cd git-manager && go test ./... -count=1`
+Run: `cd workbench && go test ./... -count=1`
 Expected: 全部 PASS
 
 **Step 6: 提交后端变更**
@@ -582,14 +582,14 @@ git commit -m "feat: 前端集成系统剪贴板读写 + Ctrl+C/X/V 快捷键支
 
 **Step 1: 重新生成 Wails 前端绑定**
 
-Run: `cd git-manager && wails generate module`
+Run: `cd workbench && wails generate module`
 
 确认 `frontend/wailsjs/go/main/App.js` 中包含 `CopyToSystemClipboard`、`CutToSystemClipboard`、`ReadFromSystemClipboard`。
 确认 `frontend/wailsjs/go/main/App.d.ts` 中包含对应类型声明。
 
 **Step 2: 启动开发环境验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 
 验证清单：
 - [ ] 应用内复制文件 → 打开资源管理器 → Ctrl+V 粘贴，文件被复制

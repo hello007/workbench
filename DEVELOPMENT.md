@@ -1,4 +1,4 @@
-# Git Manager - 开发运维文档
+# WorkBench - 开发运维文档
 
 ## 环境要求
 
@@ -49,7 +49,7 @@ C:\Users\YourName\go\bin
 ### 首次设置
 ```bash
 # 1. 进入项目目录
-cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager
+cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\workbench
 
 # 2. 安装前端依赖
 cd frontend
@@ -65,7 +65,7 @@ dir /b /s | findstr /V "node_modules" | findstr /V ".git"
 ### 启动开发服务器
 ```bash
 # 进入项目目录
-cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager
+cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\workbench
 
 # 启动开发服务器（热重载）
 wails dev
@@ -102,7 +102,7 @@ go test ./model -run TestNewDirectory
 ### 调试后端代码
 ```bash
 # 使用 Delve 调试器
-dlv debug git-manager.exe
+dlv debug workbench.exe
 
 # 或在 VSCode 中设置断点调试
 # F5 启动调试
@@ -119,14 +119,14 @@ dlv debug git-manager.exe
 
 ### 构建生产版本
 ```bash
-cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\git-manager
+cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools\workbench
 
 # 构建完整应用
 wails build
 ```
 
 **构建产物：**
-- 位置：`build/bin/git-manager.exe`
+- 位置：`build/bin/workbench.exe`
 - 大小：约 13 MB
 - 包含：前端资源已嵌入，无需额外文件
 
@@ -154,7 +154,7 @@ wails dev
 ### 生产模式
 ```bash
 # 直接运行编译好的可执行文件
-build\bin\git-manager.exe
+build\bin\workbench.exe
 ```
 
 ### 发布应用
@@ -164,7 +164,7 @@ wails build
 
 # 发布给用户
 # 整个 build/bin/ 目录打包分发
-# 用户直接运行 git-manager.exe 即可
+# 用户直接运行 workbench.exe 即可
 ```
 
 ## 故障排除
@@ -175,8 +175,8 @@ wails build
 netstat -ano | findstr ":34115"
 
 # Windows: 查找进程并终止
-tasklist | findstr "git-manager"
-taskkill /F /IM git-manager.exe
+tasklist | findstr "workbench"
+taskkill /F /IM workbench.exe
 
 # 或使用其他端口
 wails dev -port 40000
@@ -275,23 +275,23 @@ wails build -clean
 ### 4. 验证构建
 ```bash
 # 测试运行
-build\bin\git-manager.exe
+build\bin\workbench.exe
 
 # 检查文件大小
-ls -lh build/bin/git-manager.exe
+ls -lh build/bin/workbench.exe
 ```
 
 ### 5. 打包分发
 ```bash
 # 创建发布包
 mkdir release
-copy build\bin\git-manager.exe release\
+copy build\bin\workbench.exe release\
 copy README.md release\
 # 添加其他必需文件
 
 # 压缩发布包
 cd release
-7z a -tzip git-manager-v1.0.0.zip *
+7z a -tzip workbench-v1.0.0.zip *
 ```
 
 ### 6. 创建 Git 标签（可选）
@@ -418,11 +418,11 @@ Windows 可能提示 SmartScreen 警告，首次运行需要：
 | 安装依赖 | `cd frontend && npm install` |
 | 清理重装 | `cd frontend && rm -rf node_modules && npm install` |
 | 查看端口占用 | `netstat -ano \| findstr ":34115"` |
-| 停止进程 | `taskkill /F /IM git-manager.exe` |
+| 停止进程 | `taskkill /F /IM workbench.exe` |
 
 ### 目录结构
 ```
-git-manager/
+workbench/
 ├── main.go              # 主入口
 ├── app.go               # 应用结构
 ├── model/               # 数据模型
@@ -435,7 +435,7 @@ git-manager/
 │   └── package.json
 ├── build/               # 构建输出
 │   └── bin/
-│       └── git-manager.exe
+│       └── workbench.exe
 └── wails.json          # Wails 配置
 ```
 

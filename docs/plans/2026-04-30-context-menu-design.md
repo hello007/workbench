@@ -2,7 +2,7 @@
 
 ## 概述
 
-为 Git Manager 左侧文件树的节点添加右键操作菜单，提供常用文件操作功能。采用 Element Plus `el-dropdown`（`trigger="contextmenu"`）实现，按节点类型区分菜单项。
+为 WorkBench 左侧文件树的节点添加右键操作菜单，提供常用文件操作功能。采用 Element Plus `el-dropdown`（`trigger="contextmenu"`）实现，按节点类型区分菜单项。
 
 ## 需求总结
 

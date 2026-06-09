@@ -1,6 +1,6 @@
-# Git仓库管理工具 - 渐进式开发计划
+# 开发者工作台 - 渐进式开发计划
 
-**项目名称**：Git Manager  
+**项目名称**：WorkBench  
 **技术栈**：Wails v2.5+ + Go 1.21+ + Vue3 + Element Plus  
 **平台**：Windows 10/11  
 **文档版本**：1.0  
@@ -56,7 +56,7 @@ git --version
 1. 在工作目录执行：
 ```bash
 cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools
-wails init -n git-manager -t vue3
+wails init -n workbench -t vue3
 ```
 
 2. 选择模板时确认使用 `vue3` 模板。
@@ -65,7 +65,7 @@ wails init -n git-manager -t vue3
 
 **生成的目录结构**：
 ```
-git-manager/
+workbench/
 ├── main.go                 # Go入口文件
 ├── app.go                  # 应用结构体
 ├── wails.json              # Wails配置文件
@@ -84,7 +84,7 @@ git-manager/
 
 **验证方法**：
 ```bash
-cd git-manager
+cd workbench
 dir  # Windows命令，查看目录结构
 ```
 
@@ -106,7 +106,7 @@ dir  # Windows命令，查看目录结构
 ```vue
 <template>
   <div id="app">
-    <!-- Git Manager -->
+    <!-- WorkBench -->
   </div>
 </template>
 
@@ -145,7 +145,7 @@ func main() {
     
     // 运行应用
     err := wails.Run(&options.App{
-        Title:  "Git Manager",
+        Title:  "WorkBench",
         Width:  1280,
         Height: 800,
         AssetServer: &assetserver.Options{
@@ -181,11 +181,11 @@ func NewApp() *App {
 }
 
 func (a *App) startup(context.Context) {
-    println("Git Manager starting up...")
+    println("WorkBench starting up...")
 }
 
 func (a *App) shutdown(context.Context) {
-    println("Git Manager shutting down...")
+    println("WorkBench shutting down...")
 }
 ```
 
@@ -197,8 +197,8 @@ wails dev
 **预期输出**：
 - Wails开发服务器启动
 - 自动打开浏览器（或应用窗口）
-- 控制台显示 "Git Manager starting up..."
-- 窗口显示空白页面（只有 "Git Manager" 文字）
+- 控制台显示 "WorkBench starting up..."
+- 窗口显示空白页面（只有 "WorkBench" 文字）
 
 **常见问题**：
 - **问题**：端口被占用
@@ -210,13 +210,13 @@ wails dev
 
 **目标**：配置应用的基本信息。
 
-**文件路径**：`git-manager/wails.json`
+**文件路径**：`workbench/wails.json`
 
 **完整配置**：
 ```json
 {
-  "name": "git-manager",
-  "outputfilename": "git-manager",
+  "name": "workbench",
+  "outputfilename": "workbench",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
@@ -227,10 +227,10 @@ wails dev
   },
   "info": {
     "companyName": "Personal",
-    "productName": "Git Manager",
+    "productName": "WorkBench",
     "productVersion": "1.0.0",
     "copyright": "Copyright ............ 2025",
-    "comments": "Git仓库管理工具"
+    "comments": "开发者工作台"
   },
   "wailsjsdir": "./frontend",
   "version": "2",
@@ -244,7 +244,7 @@ wails build -clean
 ```
 
 **预期输出**：
-- 在 `build/bin/` 目录生成 `git-manager.exe`
+- 在 `build/bin/` 目录生成 `workbench.exe`
 - 双击exe文件能启动应用（显示空白窗口）
 
 ---
@@ -257,7 +257,7 @@ wails build -clean
 
 1. 创建目录：
 ```bash
-cd git-manager
+cd workbench
 mkdir model
 mkdir service
 mkdir util
@@ -286,7 +286,7 @@ type nul > data\directories.json
 
 **目录结构**：
 ```
-git-manager/
+workbench/
 ├── main.go
 ├── app.go
 ├── model/              # 数据模型
@@ -318,7 +318,7 @@ dir /s /b
 
 **目标**：配置Git忽略文件。
 
-**文件路径**：`git-manager/.gitignore`
+**文件路径**：`workbench/.gitignore`
 
 **完整内容**：
 ```gitignore
@@ -373,13 +373,13 @@ git commit -m "Initial commit: Add .gitignore"
 
 **目标**：创建项目说明文档。
 
-**文件路径**：`git-manager/README.md`
+**文件路径**：`workbench/README.md`
 
 **完整内容**：
 ```markdown
-# Git Manager
+# WorkBench
 
-一个基于Wails的Git仓库管理工具，用于可视化管理和操作本地Git仓库。
+一个基于Wails的开发者工作台，用于可视化管理和操作本地Git仓库。
 
 ## 技术栈
 
@@ -451,7 +451,7 @@ MIT
 
 1. 进入前端目录：
 ```bash
-cd git-manager/frontend
+cd workbench/frontend
 ```
 
 2. 安装Element Plus：
@@ -475,7 +475,7 @@ element-plus@2.x.x
 
 **目标**：在Vue应用中引入Element Plus。
 
-**文件路径**：`git-manager/frontend/src/main.js`
+**文件路径**：`workbench/frontend/src/main.js`
 
 **完整代码**：
 ```javascript
@@ -496,7 +496,7 @@ app.mount('#app')
 
 **目标**：验证Element Plus组件可用。
 
-**文件路径**：`git-manager/frontend/src/App.vue`
+**文件路径**：`workbench/frontend/src/App.vue`
 
 **测试代码**：
 ```vue
@@ -526,7 +526,7 @@ const date = ref('')
 
 **验证方法**：
 ```bash
-cd git-manager
+cd workbench
 wails dev
 ```
 
@@ -540,7 +540,7 @@ wails dev
 
 **目标**：创建应用的主布局结构。
 
-**文件路径**：`git-manager/frontend/src/App.vue`
+**文件路径**：`workbench/frontend/src/App.vue`
 
 **完整代码**：
 ```vue
@@ -549,7 +549,7 @@ wails dev
     <el-container style="height: 100vh">
       <!-- 顶部工具栏 -->
       <el-header style="background-color: #545c64; display: flex; align-items: center;">
-        <span style="color: white; font-size: 18px;">Git仓库管理工具</span>
+        <span style="color: white; font-size: 18px;">开发者工作台</span>
         <el-divider direction="vertical" />
         <el-select 
           v-model="selectedDirectory" 
@@ -700,13 +700,13 @@ wails dev
 
 2. 将图标保存到：
 ```
-git-manager/build/icon.png
+workbench/build/icon.png
 ```
 
 3. Windows图标还需要.ico格式，可以使用在线转换工具：
    - 访问：https://convertico.com/
    - 上传PNG文件，转换为ICO
-   - 保存到：`git-manager/build/app.ico`
+   - 保存到：`workbench/build/app.ico`
 
 4. 更新 `wails.json`：
 ```json
@@ -737,7 +737,7 @@ wails build
 
 **目标**：创建directories.json的模板文件。
 
-**文件路径**：`git-manager/data/directories.json.template`
+**文件路径**：`workbench/data/directories.json.template`
 
 **完整内容**：
 ```json
@@ -1265,7 +1265,7 @@ func TestNewPageResult(t *testing.T) {
 
 **验证方法**：
 ```bash
-cd git-manager
+cd workbench
 go test ./model -v
 ```
 
@@ -1282,7 +1282,7 @@ go test ./model -v
 === RUN   TestNewPageResult
 --- PASS: TestNewPageResult (0.00s)
 PASS
-ok      git-manager/model    0.002s
+ok      workbench/model    0.002s
 ```
 
 ---
@@ -1705,8 +1705,8 @@ import (
     "os"
     "path/filepath"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // DirectoryService 工作目录服务
@@ -1947,8 +1947,8 @@ import (
     "path/filepath"
     "strings"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // FileTreeService 文件树服务
@@ -2083,7 +2083,7 @@ import (
     "os"
     "path/filepath"
     
-    "git-manager/model"
+    "workbench/model"
 )
 
 // FileOperationService 文件操作服务
@@ -2210,8 +2210,8 @@ import (
     "strings"
     "time"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // GitService Git服务
@@ -2381,7 +2381,7 @@ func (s *GitService) CheckCloneConflict(targetPath string) error {
 
 **验证方法**：
 ```bash
-cd git-manager
+cd workbench
 go build
 ```
 

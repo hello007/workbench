@@ -332,13 +332,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onGlobalClick))
 
 **Step 2: 验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 Expected: 编译通过，但 Home.vue 尚未引用此组件，不影响现有功能。
 
 **Step 3: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add frontend/src/components/DirectoryTree.vue
 git commit -m "feat: 新增 DirectoryTree 组件（工作目录树面板）"
 ```
@@ -887,13 +887,13 @@ defineExpose({ refreshNode, collapseAll })
 
 **Step 2: 验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 Expected: 编译通过，不影响现有功能。
 
 **Step 3: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add frontend/src/components/FileTreePanel.vue
 git commit -m "feat: 新增 FileTreePanel 组件（文件树面板）"
 ```
@@ -1196,13 +1196,13 @@ defineExpose({ startBatchPull, clearPreview: () => { filePreview.value = { conte
 
 **Step 2: 验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 Expected: 编译通过，不影响现有功能。
 
 **Step 3: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add frontend/src/components/ContentPanel.vue
 git commit -m "feat: 新增 ContentPanel 组件（操作面板）"
 ```
@@ -1415,13 +1415,13 @@ const onRenameFromContent = (node) => {
 
 **Step 3: 验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 Expected: 三列布局正确显示，工作目录可点击切换，文件树加载正常。
 
 **Step 4: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: 重构 Home.vue 为三列布局容器"
 ```
@@ -1432,7 +1432,7 @@ git commit -m "feat: 重构 Home.vue 为三列布局容器"
 
 **Step 1: 启动应用，逐项验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 
 按以下清单验证：
 
@@ -1456,7 +1456,7 @@ Run: `cd git-manager && wails dev`
 **Step 3: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add -A
 git commit -m "fix: 修复三列布局重构后的功能问题"
 ```
@@ -1484,13 +1484,13 @@ Read `frontend/src/App.vue`，确认路由配置正确。
 
 **Step 3: 运行后端测试**
 
-Run: `cd git-manager && go test ./...`
+Run: `cd workbench && go test ./...`
 Expected: 所有测试通过（后端未改动，应保持绿色）。
 
 **Step 4: Commit**
 
 ```bash
-cd git-manager
+cd workbench
 git add -A
 git commit -m "chore: 清理三列布局重构的残留代码"
 ```

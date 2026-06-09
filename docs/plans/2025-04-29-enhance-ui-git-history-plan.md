@@ -40,7 +40,7 @@
 ### 1.3 项目结构
 
 ```
-git-manager/
+workbench/
 ├── main.go                          # Wails 绑定方法
 ├── model/                           # 数据模型
 │   └── commit.go                    # Commit 和 GitRemoteInfo 结构体
@@ -130,7 +130,7 @@ go version  # 确保 >= 1.21
 
 **2. 添加 go-git 依赖**
 ```bash
-cd git-manager
+cd workbench
 go get github.com/go-git/go-git/v5
 go get github.com/go-git/go-git/v5/plumbing
 go get github.com/go-git/go-git/v5/plumbing/object
@@ -151,7 +151,7 @@ go mod verify
 定义 Commit 数据结构，支持前后端数据传输
 
 #### 文件路径
-`git-manager/model/commit.go`
+`workbench/model/commit.go`
 
 #### 完整代码
 
@@ -180,7 +180,7 @@ type GitRemoteInfo struct {
 
 #### 测试文件
 
-**文件路径：** `git-manager/model/commit_test.go`
+**文件路径：** `workbench/model/commit_test.go`
 
 ```go
 package model
@@ -209,7 +209,7 @@ func TestCommit_Structure(t *testing.T) {
 
 #### 3.3.1 GetGitRemoteURL 方法
 
-**文件路径：** `git-manager/main.go`
+**文件路径：** `workbench/main.go`
 
 ```go
 // GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息
@@ -247,7 +247,7 @@ func GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 
 #### 3.3.2 GetCommitHistory 方法
 
-**文件路径：** `git-manager/main.go`
+**文件路径：** `workbench/main.go`
 
 ```go
 // GetCommitHistory 获取 Git 仓库的提交历史
@@ -349,7 +349,7 @@ func getTreeFiles(tree *object.Tree) []string {
 
 ### 3.4 单元测试
 
-**文件路径：** `git-manager/main_test.go`
+**文件路径：** `workbench/main_test.go`
 
 ```go
 package main
@@ -394,7 +394,7 @@ func TestGetCommitHistory(t *testing.T) {
 
 **运行测试：**
 ```bash
-cd git-manager
+cd workbench
 go test ./...
 go test -cover ./...
 ```
@@ -404,7 +404,7 @@ go test -cover ./...
 ### 3.5 Wails 绑定生成
 
 ```bash
-cd git-manager
+cd workbench
 wails generate module
 ```
 
@@ -428,7 +428,7 @@ ls -la wailsjs/go/main/App.d.ts
 
 **测试命令：**
 ```bash
-cd git-manager
+cd workbench
 go test ./...
 wails dev
 ```
@@ -442,13 +442,13 @@ wails dev
 #### 4.1.1 安装 Element Plus Icons
 
 ```bash
-cd git-manager/frontend
+cd workbench/frontend
 npm install @element-plus/icons-vue
 ```
 
 #### 4.1.2 修改文件树模板
 
-**文件路径：** `git-manager/frontend/src/views/Home.vue`
+**文件路径：** `workbench/frontend/src/views/Home.vue`
 
 **导入图标：**
 ```javascript
@@ -490,7 +490,7 @@ import {
 
 #### 4.1.3 添加样式
 
-**文件路径：** `git-manager/frontend/src/views/Home.vue` - `<style scoped>`
+**文件路径：** `workbench/frontend/src/views/Home.vue` - `<style scoped>`
 
 ```css
 .el-tree-node__content {
@@ -529,7 +529,7 @@ import {
 
 #### 4.2.1 创建 GitInfo.vue
 
-**文件路径：** `git-manager/frontend/src/components/GitInfo.vue`
+**文件路径：** `workbench/frontend/src/components/GitInfo.vue`
 
 **完整组件代码：**
 ```vue
@@ -724,7 +724,7 @@ defineExpose({ loadGitInfo })
 
 #### 4.3.1 创建 CommitHistory.vue
 
-**文件路径：** `git-manager/frontend/src/components/CommitHistory.vue`
+**文件路径：** `workbench/frontend/src/components/CommitHistory.vue`
 
 **完整组件代码：**
 ```vue
@@ -1048,7 +1048,7 @@ defineExpose({ loadCommits, handleRefresh })
 
 ### 4.4 组件集成到 Home.vue
 
-**文件路径：** `git-manager/frontend/src/views/Home.vue`
+**文件路径：** `workbench/frontend/src/views/Home.vue`
 
 **导入组件：**
 ```javascript
@@ -1111,7 +1111,7 @@ const commits = ref([])
 
 **测试步骤：**
 ```bash
-cd git-manager
+cd workbench
 wails dev
 ```
 
@@ -1123,7 +1123,7 @@ wails dev
 
 #### 5.1.1 实现缓存机制
 
-**文件路径：** `git-manager/frontend/src/utils/gitCache.js`
+**文件路径：** `workbench/frontend/src/utils/gitCache.js`
 
 ```javascript
 class GitCache {
@@ -1214,7 +1214,7 @@ const onNodeClick = async (data) => {
 
 #### 5.3.1 全局错误处理
 
-**文件路径：** `git-manager/frontend/src/utils/errorHandler.js`
+**文件路径：** `workbench/frontend/src/utils/errorHandler.js`
 
 ```javascript
 import { ElMessage } from 'element-plus'
@@ -1272,7 +1272,7 @@ export const withErrorHandling = async (fn, context = '') => {
 
 #### 5.3.2 重试机制
 
-**文件路径：** `git-manager/frontend/src/utils/retry.js`
+**文件路径：** `workbench/frontend/src/utils/retry.js`
 
 ```javascript
 export const retryOperation = async (
@@ -1326,7 +1326,7 @@ export const withRetryAndErrorHandling = async (
 
 #### 6.1.1 功能测试清单
 
-创建 `git-manager/TEST_CHECKLIST.md`：
+创建 `workbench/TEST_CHECKLIST.md`：
 
 ```markdown
 # 功能测试清单
@@ -1377,7 +1377,7 @@ export const withRetryAndErrorHandling = async (
 
 #### 6.2.1 创建性能基准测试
 
-**文件路径：** `git-manager/backend_benchmark_test.go`
+**文件路径：** `workbench/backend_benchmark_test.go`
 
 ```go
 package main
@@ -1413,7 +1413,7 @@ func BenchmarkGetGitRemoteURL(b *testing.B) {
 
 **运行测试：**
 ```bash
-cd git-manager
+cd workbench
 go test -bench=. -benchmem
 ```
 
@@ -1428,7 +1428,7 @@ go test -bench=. -benchmem
 
 #### 6.3.1 创建跨平台测试脚本
 
-**文件路径：** `git-manager/scripts/test-cross-platform.sh`
+**文件路径：** `workbench/scripts/test-cross-platform.sh`
 
 ```bash
 #!/bin/bash
@@ -1470,7 +1470,7 @@ echo "跨平台测试完成！"
 #### 6.4.1 构建生产版本
 
 ```bash
-cd git-manager
+cd workbench
 
 # 清理之前的构建
 wails build -clean
@@ -1479,20 +1479,20 @@ wails build -clean
 wails build -platform windows/amd64
 
 # 构建 macOS 版本（如果需要）
-wails build -platform darwin/amd64 -output git-manager-macos
+wails build -platform darwin/amd64 -output workbench-macos
 
 # 构建 Linux 版本（如果需要）
-wails build -platform linux/amd64 -output git-manager-linux
+wails build -platform linux/amd64 -output workbench-linux
 ```
 
 #### 6.4.2 验证构建产物
 
 ```bash
 # 检查文件
-ls -lh build/bin/git-manager.exe
+ls -lh build/bin/workbench.exe
 
 # 测试运行
-./build/bin/git-manager.exe
+./build/bin/workbench.exe
 
 # 验证功能
 # - 添加工作目录
@@ -1505,18 +1505,18 @@ ls -lh build/bin/git-manager.exe
 
 ```bash
 # 创建发布目录
-mkdir -p release/git-manager-v1.0.0
+mkdir -p release/workbench-v1.0.0
 
 # 复制文件
-cp build/bin/git-manager.exe release/git-manager-v1.0.0/
+cp build/bin/workbench.exe release/workbench-v1.0.0/
 
 # 创建 README
-cat > release/git-manager-v1.0.0/README.md << 'EOF'
-# Git Manager v1.0.0
+cat > release/workbench-v1.0.0/README.md << 'EOF'
+# WorkBench v1.0.0
 
 ## 安装
 
-双击 git-manager.exe 启动应用
+双击 workbench.exe 启动应用
 
 ## 功能
 
@@ -1532,13 +1532,13 @@ EOF
 
 # 打包
 cd release
-zip -r git-manager-v1.0.0-windows.zip git-manager-v1.0.0/
+zip -r workbench-v1.0.0-windows.zip workbench-v1.0.0/
 ```
 
 #### 6.4.4 版本标签和发布
 
 ```bash
-cd git-manager
+cd workbench
 
 # 创建版本标签
 git tag -a v1.0.0 -m "Release version 1.0.0"
@@ -1548,9 +1548,9 @@ git push origin v1.0.0
 
 # 创建 GitHub Release
 gh release create v1.0.0 \
-  --title "Git Manager v1.0.0" \
+  --title "WorkBench v1.0.0" \
   --notes "首个稳定版本，包含完整的 Git 仓库管理功能" \
-  release/git-manager-v1.0.0-windows.zip
+  release/workbench-v1.0.0-windows.zip
 ```
 
 ---
@@ -1583,14 +1583,14 @@ gh release create v1.0.0 \
 
 ```bash
 # 运行所有测试
-cd git-manager
+cd workbench
 go test ./...
 
 # 构建生产版本
 wails build
 
 # 测试构建产物
-./build/bin/git-manager.exe
+./build/bin/workbench.exe
 ```
 
 **手动验证：**
@@ -1636,7 +1636,7 @@ wails build
 
 ```bash
 # Go 依赖
-cd git-manager
+cd workbench
 go get github.com/go-git/go-git/v5
 go mod tidy
 
@@ -1652,7 +1652,7 @@ wails generate module
 
 ```bash
 # 后端测试
-cd git-manager
+cd workbench
 go test ./...
 go test -bench=. -benchmem
 

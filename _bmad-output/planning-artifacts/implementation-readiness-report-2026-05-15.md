@@ -12,7 +12,7 @@ documents:
 # Implementation Readiness Assessment Report
 
 **Date:** 2026-05-15
-**Project:** git-manager
+**Project:** workbench
 
 ## Document Discovery
 

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use @superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 增强 Git Manager 应用的 UI 和功能，包括文件树样式美化、Git 信息展示和提交历史查看
+**Goal:** 增强 WorkBench 应用的 UI 和功能，包括文件树样式美化、Git 信息展示和提交历史查看
 
 **Architecture:** 线性分层执行 - 先完成后端 Go 方法（go-git），再开发前端 Vue 组件（Element Plus），最后集成和测试
 
@@ -22,7 +22,7 @@
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 go get github.com/go-git/go-git/v5@latest
 ```
 
@@ -71,7 +71,7 @@ git commit -m "feat: add go-git dependencies
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 mkdir -p model
 ```
 
@@ -575,7 +575,7 @@ git commit -m "feat: implement GetCommitHistory method
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 wails generate module
 ```
 
@@ -640,7 +640,7 @@ git commit -m "build: generate Wails bindings for new methods
 
 Run:
 ```bash
-cd git-manager/frontend
+cd workbench/frontend
 npm install @element-plus/icons-vue
 ```
 
@@ -871,7 +871,7 @@ git commit -m "frontend: enhance file tree styles and interactions
 
 Run:
 ```bash
-cd git-manager/frontend/src
+cd workbench/frontend/src
 mkdir -p components
 ```
 
@@ -1558,7 +1558,7 @@ git commit -m "frontend: add CommitHistory component
 
 Run:
 ```bash
-cd git-manager/frontend/src
+cd workbench/frontend/src
 mkdir -p utils
 ```
 
@@ -1700,7 +1700,7 @@ git commit -m "frontend: integrate cache into GitInfo component
 
 **Step 1: 创建测试清单**
 
-Create: `git-manager/TEST_CHECKLIST.md`
+Create: `workbench/TEST_CHECKLIST.md`
 ```markdown
 # 功能测试清单
 
@@ -1768,7 +1768,7 @@ git commit -m "test: add comprehensive test checklist
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 go test ./... -v
 ```
 
@@ -1811,7 +1811,7 @@ git commit -am "test: fix failing tests
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 wails dev
 ```
 
@@ -1823,7 +1823,7 @@ Expected: 应用启动，无错误
 
 **Step 3: 记录发现的问题**
 
-创建文件：`git-manager/ISSUES_FOUND.md`
+创建文件：`workbench/ISSUES_FOUND.md`
 ```markdown
 # 测试发现的问题
 
@@ -1859,13 +1859,13 @@ git commit -am "fix: resolve issues found during testing
 ### Task 4.4: 构建生产版本
 
 **Files:**
-- Build: `build/bin/git-manager.exe`
+- Build: `build/bin/workbench.exe`
 
 **Step 1: 清理之前的构建**
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 wails build -clean
 ```
 
@@ -1884,7 +1884,7 @@ Expected: 构建成功，生成 exe 文件
 
 Run:
 ```bash
-ls -lh build/bin/git-manager.exe
+ls -lh build/bin/workbench.exe
 ```
 
 Expected: 显示 exe 文件大小（15-20MB）
@@ -1893,7 +1893,7 @@ Expected: 显示 exe 文件大小（15-20MB）
 
 Run:
 ```bash
-./build/bin/git-manager.exe
+./build/bin/workbench.exe
 ```
 
 Expected: 应用正常启动，功能正常
@@ -1911,14 +1911,14 @@ git commit -am "build: update build configuration
 ### Task 4.5: 创建发布包
 
 **Files:**
-- Create: `release/git-manager-v1.0.0/`
+- Create: `release/workbench-v1.0.0/`
 
 **Step 1: 创建发布目录**
 
 Run:
 ```bash
-cd git-manager
-mkdir -p release/git-manager-v1.0.0
+cd workbench
+mkdir -p release/workbench-v1.0.0
 ```
 
 Expected: 目录创建成功
@@ -1927,16 +1927,16 @@ Expected: 目录创建成功
 
 Run:
 ```bash
-cp build/bin/git-manager.exe release/git-manager-v1.0.0/
+cp build/bin/workbench.exe release/workbench-v1.0.0/
 ```
 
 Expected: 文件复制成功
 
 **Step 3: 创建 README**
 
-Create: `release/git-manager-v1.0.0/README.md`
+Create: `release/workbench-v1.0.0/README.md`
 ```markdown
-# Git Manager v1.0.0
+# WorkBench v1.0.0
 
 ## 新增功能
 
@@ -1948,7 +1948,7 @@ Create: `release/git-manager-v1.0.0/README.md`
 
 ## 安装
 
-1. 双击 `git-manager.exe` 启动应用
+1. 双击 `workbench.exe` 启动应用
 2. 无需安装，直接运行
 
 ## 功能
@@ -1978,7 +1978,7 @@ Create: `release/git-manager-v1.0.0/README.md`
 Run:
 ```bash
 cd release
-zip -r git-manager-v1.0.0-windows.zip git-manager-v1.0.0/
+zip -r workbench-v1.0.0-windows.zip workbench-v1.0.0/
 ```
 
 Expected: 创建 zip 文件
@@ -2004,7 +2004,7 @@ git commit -m "release: prepare v1.0.0 release package
 
 Run:
 ```bash
-cd git-manager
+cd workbench
 git tag -a v1.0.0 -m "Release version 1.0.0
 
 Enhancements:
@@ -2031,9 +2031,9 @@ Expected: 标签推送成功
 Run:
 ```bash
 gh release create v1.0.0 \
-  --title "Git Manager v1.0.0 - UI Enhancement" \
-  --notes "See release/git-manager-v1.0.0/README.md for details" \
-  release/git-manager-v1.0.0-windows.zip
+  --title "WorkBench v1.0.0 - UI Enhancement" \
+  --notes "See release/workbench-v1.0.0/README.md for details" \
+  release/workbench-v1.0.0-windows.zip
 ```
 
 Expected: Release 创建成功
@@ -2120,7 +2120,7 @@ git commit -m "docs: add changelog for v1.0.0
 
 当所有上述任务完成后，实施即告完成。您应该拥有：
 
-1. ✅ 一个功能完整的 Git Manager 应用
+1. ✅ 一个功能完整的 WorkBench 应用
 2. ✅ 美化的 UI 和增强的 Git 功能
 3. ✅ 完整的测试覆盖
 4. ✅ 可发布的生产版本

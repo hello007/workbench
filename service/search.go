@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"git-manager/model"
+	"workbench/model"
 )
 
 type SearchService struct{}

@@ -220,7 +220,7 @@ func TestMoveItem_FileConflictAutoRename(t *testing.T) {
 
 **Step 2: 运行测试确认失败**
 
-Run: `cd git-manager && go test ./service/ -run "TestFindAvailableName|TestCopyItem|TestMoveItem" -v`
+Run: `cd workbench && go test ./service/ -run "TestFindAvailableName|TestCopyItem|TestMoveItem" -v`
 Expected: 编译失败（函数未定义）
 
 ---
@@ -323,8 +323,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 ```
 
@@ -407,12 +407,12 @@ func (s *FileOperationService) MoveItem(sourcePath, targetDir string) (string, e
 
 **Step 1: 运行测试**
 
-Run: `cd git-manager && go test ./service/ -run "TestFindAvailableName|TestCopyItem|TestMoveItem" -v`
+Run: `cd workbench && go test ./service/ -run "TestFindAvailableName|TestCopyItem|TestMoveItem" -v`
 Expected: 全部 PASS
 
 **Step 2: 运行完整后端测试套件**
 
-Run: `cd git-manager && go test ./... -v`
+Run: `cd workbench && go test ./... -v`
 Expected: 全部 PASS，无回归
 
 **Step 3: 在 app.go 末尾追加 Wails 绑定方法**
@@ -441,7 +441,7 @@ func (a *App) MoveItem(sourcePath, targetDir string) string {
 
 **Step 4: 确认编译通过**
 
-Run: `cd git-manager && go build ./...`
+Run: `cd workbench && go build ./...`
 Expected: 无错误
 
 **Step 5: 提交后端变更**
@@ -793,7 +793,7 @@ git commit -m "feat: 文件树右键菜单和操作面板新增剪切/复制/粘
 
 **Step 1: 重新生成 Wails 前端绑定**
 
-Run: `cd git-manager && wails generate module`
+Run: `cd workbench && wails generate module`
 （或者启动 `wails dev` 时会自动生成）
 
 确认 `frontend/wailsjs/go/main/App.js` 中包含 `CopyItem` 和 `MoveItem` 导出。
@@ -801,7 +801,7 @@ Run: `cd git-manager && wails generate module`
 
 **Step 2: 启动开发环境验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 
 验证清单：
 - [ ] 文件夹右键菜单显示 剪切/复制/粘贴 三项

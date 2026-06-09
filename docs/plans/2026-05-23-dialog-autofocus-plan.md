@@ -328,7 +328,7 @@ git commit -m "feat: 切换分支弹窗自动聚焦分支选择器"
 **Step 1: 启动开发服务器**
 
 ```bash
-cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev
+cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev
 ```
 
 **Step 2: 逐个验证所有 7 个弹窗**

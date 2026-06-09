@@ -13,8 +13,8 @@
 ### Task 1: 后端 — 新增 OpenInExplorer 方法
 
 **Files:**
-- Modify: `git-manager/service/fileoperation.go` (末尾追加方法)
-- Modify: `git-manager/app.go` (末尾追加绑定方法)
+- Modify: `workbench/service/fileoperation.go` (末尾追加方法)
+- Modify: `workbench/app.go` (末尾追加绑定方法)
 
 **Step 1: 在 service/fileoperation.go 末尾新增 OpenInExplorer 方法**
 
@@ -53,13 +53,13 @@ func (a *App) OpenInExplorer(path string) bool {
 
 **Step 3: 运行后端测试确认无破坏**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./...`
 Expected: PASS（无编译错误，现有测试全部通过）
 
 **Step 4: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add service/fileoperation.go app.go
 git commit -m "feat: add OpenInExplorer backend method"
 ```
@@ -69,7 +69,7 @@ git commit -m "feat: add OpenInExplorer backend method"
 ### Task 2: 前端 — 导入图标和 OpenInExplorer 绑定
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (script setup 部分)
+- Modify: `workbench/frontend/src/views/Home.vue` (script setup 部分)
 
 **Step 1: 在图标 import 中添加右键菜单需要的图标**
 
@@ -129,7 +129,7 @@ import {
 **Step 3: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: import context menu icons and OpenInExplorer binding"
 ```
@@ -139,7 +139,7 @@ git commit -m "feat: import context menu icons and OpenInExplorer binding"
 ### Task 3: 前端 — 将 el-tree 节点内容包裹在 el-dropdown 中
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (template 部分，第49-72行)
+- Modify: `workbench/frontend/src/views/Home.vue` (template 部分，第49-72行)
 
 **Step 1: 替换 el-tree 的 #default 插槽内容**
 
@@ -253,7 +253,7 @@ git commit -m "feat: import context menu icons and OpenInExplorer binding"
 **Step 2: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: add context menu dropdown to file tree nodes"
 ```
@@ -263,7 +263,7 @@ git commit -m "feat: add context menu dropdown to file tree nodes"
 ### Task 4: 前端 — 实现右键菜单操作的处理函数
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (script setup 部分)
+- Modify: `workbench/frontend/src/views/Home.vue` (script setup 部分)
 
 **Step 1: 添加重命名对话框相关的响应式变量**
 
@@ -420,7 +420,7 @@ const handleOpenExplorer = async (path) => {
 **Step 4: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: implement context menu action handlers"
 ```
@@ -430,7 +430,7 @@ git commit -m "feat: implement context menu action handlers"
 ### Task 5: 前端 — 添加重命名对话框模板
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (template 部分)
+- Modify: `workbench/frontend/src/views/Home.vue` (template 部分)
 
 **Step 1: 在现有对话框之后添加重命名对话框**
 
@@ -494,7 +494,7 @@ const showRenameDialogAt = (data) => {
 **Step 3: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: add rename dialog with auto-focus"
 ```
@@ -504,7 +504,7 @@ git commit -m "feat: add rename dialog with auto-focus"
 ### Task 6: 前端 — 移除右侧面板中已由右键菜单覆盖的重复操作按钮
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (template 部分)
+- Modify: `workbench/frontend/src/views/Home.vue` (template 部分)
 
 **Step 1: 保留右侧面板的重命名功能（之前是占位符），移除重复代码**
 
@@ -522,7 +522,7 @@ const showRenameDialog = () => {
 **Step 2: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "fix: wire up rename button in right panel to context menu handler"
 ```
@@ -532,7 +532,7 @@ git commit -m "fix: wire up rename button in right panel to context menu handler
 ### Task 7: 前端 — 添加右键菜单的样式微调
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/Home.vue` (style 部分)
+- Modify: `workbench/frontend/src/views/Home.vue` (style 部分)
 
 **Step 1: 在 `<style scoped>` 中添加右键菜单相关样式**
 
@@ -557,7 +557,7 @@ git commit -m "fix: wire up rename button in right panel to context menu handler
 **Step 2: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/Home.vue
 git commit -m "style: add context menu dropdown styles"
 ```
@@ -567,7 +567,7 @@ git commit -m "style: add context menu dropdown styles"
 ### Task 8: 前端测试 — 更新测试 stubs
 
 **Files:**
-- Modify: `git-manager/frontend/src/views/__tests__/Home.spec.js`
+- Modify: `workbench/frontend/src/views/__tests__/Home.spec.js`
 
 **Step 1: 在测试的 stubs 中添加新组件**
 
@@ -585,13 +585,13 @@ git commit -m "style: add context menu dropdown styles"
 
 **Step 2: 运行前端测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm test`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm test`
 Expected: 所有测试 PASS
 
 **Step 3: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add frontend/src/views/__tests__/Home.spec.js
 git commit -m "test: add el-dropdown stubs to Home.vue tests"
 ```
@@ -602,7 +602,7 @@ git commit -m "test: add el-dropdown stubs to Home.vue tests"
 
 **Step 1: 启动开发服务器**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`
 
 **Step 2: 验证功能清单**
 
@@ -621,7 +621,7 @@ Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails 
 **Step 3: 最终提交（如有修复）**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add -A
 git commit -m "feat: complete file tree context menu feature"
 ```

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // TerminalService 终端服务，管理终端会话的创建、输入、切换目录、调整大小和关闭

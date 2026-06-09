@@ -1,6 +1,6 @@
-# Git Manager
+# WorkBench
 
-Git 仓库管理桌面应用，基于 Wails + Vue 3 构建，提供工作目录管理、文件浏览、文件操作和 Git 集成功能。
+开发者工作台，基于 Wails + Vue 3 构建，提供工作目录管理、文件浏览、文件操作和 Git 集成功能。
 
 ## 技术栈
 

@@ -1,4 +1,4 @@
-# Git Manager 执行指南
+# WorkBench 执行指南
 
 ## 快速开始
 
@@ -11,7 +11,7 @@
 在新会话中输入：
 
 ```
-@superpowers:executing-plans docs/plans/2025-04-28-git-manager-implementation.md
+@superpowers:executing-plans docs/plans/2025-04-28-workbench-implementation.md
 ```
 
 ### 3. 执行技能将自动
@@ -75,8 +75,8 @@
 完成后将生成：
 
 ```
-git-manager/
-├── build/bin/git-manager.exe  (15-20MB 可执行文件)
+workbench/
+├── build/bin/workbench.exe  (15-20MB 可执行文件)
 ├── data/directories.json       (工作目录配置)
 ├── main.go                     (应用入口)
 ├── app.go                      (Wails 绑定)
@@ -130,7 +130,7 @@ git-manager/
 现在就可以开始执行了！在新会话中使用：
 
 ```
-@superpowers:executing-plans docs/plans/2025-04-28-git-manager-implementation.md
+@superpowers:executing-plans docs/plans/2025-04-28-workbench-implementation.md
 ```
 
 祝开发顺利！🚀

@@ -1,6 +1,6 @@
 ---
 date: '2026-05-18'
-project_name: 'git-manager'
+project_name: 'workbench'
 stepsCompleted:
   - 'step-01-document-discovery'
   - 'step-02-prd-analysis'
@@ -21,7 +21,7 @@ issues:
 # Implementation Readiness Assessment Report
 
 **Date:** 2026-05-18
-**Project:** git-manager
+**Project:** workbench
 
 ## Step 1: Document Discovery
 
@@ -378,7 +378,7 @@ Epic 1（应用框架+目录管理）
 
 本次评估在 6 个维度对项目规划文档进行了系统性审查，识别出 **0 个严重问题、0 个主要问题、3 个轻微关注点**。
 
-**核心结论：** git-manager 项目的 PRD、架构方案和 Epic/Stories 文档质量优秀，需求可追踪性完整，Epic 结构符合最佳实践，可以进入 Phase 4 实施阶段。建议在实施过程中关注上述 3 个轻微关注点，但不构成阻塞条件。
+**核心结论：** workbench 项目的 PRD、架构方案和 Epic/Stories 文档质量优秀，需求可追踪性完整，Epic 结构符合最佳实践，可以进入 Phase 4 实施阶段。建议在实施过程中关注上述 3 个轻微关注点，但不构成阻塞条件。
 
 ---
 

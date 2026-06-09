@@ -20,7 +20,7 @@ inputDocuments:
   - 'docs/测试策略.md'
   - 'docs/部署说明.md'
 workflowType: 'architecture'
-project_name: 'git-manager'
+project_name: 'workbench'
 user_name: 'Liuyang'
 date: '2026-05-15'
 lastStep: 8
@@ -122,7 +122,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 **代码组织：**
 
 ```
-git-manager/
+workbench/
 ├── app.go           # Wails 绑定调度层（公开方法 → service）
 ├── model/           # 数据结构 + 验证（带 json 标签）
 ├── service/         # 业务逻辑（不依赖 Wails）
@@ -401,7 +401,7 @@ output, err := cmd.CombinedOutput()
 ### Complete Project Directory Structure
 
 ```
-git-manager/
+workbench/
 ├── main.go                    # 应用入口（Wails 初始化）
 ├── app.go                     # 调度层（Wails 绑定方法 → service）
 ├── app_test.go                # app.go 测试

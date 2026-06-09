@@ -102,7 +102,7 @@ func TestReorder_UnknownID(t *testing.T) {
 
 **Step 2: 运行测试验证失败**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestReorder -v`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestReorder -v`
 Expected: FAIL — `svc.Reorder undefined`
 
 **Step 3: 实现 Reorder 方法**
@@ -148,7 +148,7 @@ func (s *DirectoryService) Reorder(ids []string) error {
 
 **Step 4: 运行测试验证通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestReorder -v`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestReorder -v`
 Expected: PASS
 
 **Step 5: 提交**
@@ -183,7 +183,7 @@ func (a *App) ReorderDirectories(ids []string) bool {
 
 **Step 2: 编译验证**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功（忽略 `pattern all:frontend/dist` 警告）
 
 **Step 3: 提交**
@@ -202,11 +202,11 @@ git commit -m "feat: App.ReorderDirectories 绑定方法"
 
 **Step 1: 安装**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm install vuedraggable@next`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm install vuedraggable@next`
 
 **Step 2: 验证安装**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm ls vuedraggable`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm ls vuedraggable`
 Expected: 显示版本号
 
 **Step 3: 提交**
@@ -330,10 +330,10 @@ git commit -m "feat: DirectoryTree 集成 vuedraggable 拖拽排序"
 
 **Step 1: 后端测试**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./model/ ./service/ -v`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./model/ ./service/ -v`
 Expected: 全部 PASS
 
 **Step 2: 前端编译检查**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm run build`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm run build`
 Expected: 构建成功

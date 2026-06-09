@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // FileOperationService 文件操作服务
@@ -117,7 +117,7 @@ func (s *FileOperationService) SaveFile(filePath string, content string) error {
 
 	// 原子写入：先写临时文件再 rename
 	dir := filepath.Dir(filePath)
-	tmpFile, err := os.CreateTemp(dir, ".git-manager-save-*")
+	tmpFile, err := os.CreateTemp(dir, ".workbench-save-*")
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}

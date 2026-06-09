@@ -1,8 +1,8 @@
-# Git仓库管理工具 - 实施计划
+# 开发者工作台 - 实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use @superpowers:executing-plans to implement this plan task-by-task.
 
-**目标:** 构建一个基于Wails的桌面Git仓库管理工具，支持工作目录管理、文件树浏览、文件操作和Git集成功能
+**目标:** 构建一个基于Wails的桌面开发者工作台，支持工作目录管理、文件树浏览、文件操作和Git集成功能
 
 **架构:** 使用Wails v2.5+框架，Go后端直接绑定方法到Vue3前端，通过进程内通信（无需HTTP API），前端资源嵌入到单一exe文件中
 
@@ -66,13 +66,13 @@ Expected: git version 2.x.x
 ### Task 1.1: 创建Wails项目
 
 **文件:** 
-- Create: `git-manager/` (新项目根目录)
+- Create: `workbench/` (新项目根目录)
 
 **Step 1: 在工作目录创建Wails项目**
 
 ```bash
 cd D:\workspace\workspace_ai\demo_OpenSpec\git_tools
-wails init -n git-manager -t vue3
+wails init -n workbench -t vue3
 ```
 
 Expected: 项目创建成功，显示生成文件列表
@@ -80,7 +80,7 @@ Expected: 项目创建成功，显示生成文件列表
 **Step 2: 进入项目目录**
 
 ```bash
-cd git-manager
+cd workbench
 dir
 ```
 
@@ -180,7 +180,7 @@ func main() {
     app := NewApp()
     
     err := wails.Run(&options.App{
-        Title:  "Git Manager",
+        Title:  "WorkBench",
         Width:  1280,
         Height: 800,
         AssetServer: &assetserver.Options{
@@ -220,11 +220,11 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
     a.ctx = ctx
-    println("Git Manager starting...")
+    println("WorkBench starting...")
 }
 
 func (a *App) shutdown(ctx context.Context) {
-    println("Git Manager shutting down...")
+    println("WorkBench shutting down...")
 }
 ```
 
@@ -235,7 +235,7 @@ func (a *App) shutdown(ctx context.Context) {
 ```vue
 <template>
   <div id="app">
-    <h1>Git Manager</h1>
+    <h1>WorkBench</h1>
   </div>
 </template>
 
@@ -255,7 +255,7 @@ func (a *App) shutdown(ctx context.Context) {
 wails dev
 ```
 
-Expected: 应用启动，显示"Git Manager"标题
+Expected: 应用启动，显示"WorkBench"标题
 
 **Step 5: 提交**
 
@@ -277,8 +277,8 @@ git commit -m "chore: clean up sample code"
 
 ```json
 {
-  "name": "git-manager",
-  "outputfilename": "git-manager",
+  "name": "workbench",
+  "outputfilename": "workbench",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
@@ -289,10 +289,10 @@ git commit -m "chore: clean up sample code"
   },
   "info": {
     "companyName": "Personal",
-    "productName": "Git Manager",
+    "productName": "WorkBench",
     "productVersion": "1.0.0",
     "copyright": "Copyright 2025",
-    "comments": "Git仓库管理工具"
+    "comments": "开发者工作台"
   },
   "wailsjsdir": "./frontend",
   "version": "2",
@@ -474,8 +474,8 @@ type nul > frontend\src\views\Home.vue
 ```vue
 <template>
   <div class="home">
-    <h1>Git Manager</h1>
-    <p>Git仓库管理工具</p>
+    <h1>WorkBench</h1>
+    <p>开发者工作台</p>
   </div>
 </template>
 
@@ -519,7 +519,7 @@ type nul > frontend\src\views\Home.vue
 wails dev
 ```
 
-Expected: 应用显示"Git Manager"标题和描述
+Expected: 应用显示"WorkBench"标题和描述
 
 **Step 6: 提交**
 
@@ -1152,8 +1152,8 @@ import (
     "os"
     "path/filepath"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // DirectoryService 工作目录服务
@@ -1363,8 +1363,8 @@ import (
     "path/filepath"
     "strings"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // FileTreeService 文件树服务
@@ -1495,8 +1495,8 @@ import (
     "os"
     "path/filepath"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // FileOperationService 文件操作服务
@@ -1616,8 +1616,8 @@ import (
     "strings"
     "time"
     
-    "git-manager/model"
-    "git-manager/util"
+    "workbench/model"
+    "workbench/util"
 )
 
 // GitService Git服务
@@ -1727,7 +1727,7 @@ import (
     "context"
     "path/filepath"
     
-    "git-manager/service"
+    "workbench/service"
 )
 
 type App struct {
@@ -1752,11 +1752,11 @@ func (a *App) startup(ctx context.Context) {
     a.fileOpSvc = service.NewFileOperationService()
     a.gitSvc = service.NewGitService()
     
-    println("Git Manager started")
+    println("WorkBench started")
 }
 
 func (a *App) shutdown(context.Context) {
-    println("Git Manager shutting down...")
+    println("WorkBench shutting down...")
 }
 ```
 
@@ -1846,8 +1846,8 @@ import (
     "context"
     "path/filepath"
     
-    "git-manager/model"
-    "git-manager/service"
+    "workbench/model"
+    "workbench/service"
 )
 ```
 
@@ -2071,7 +2071,7 @@ git commit -m "feat: add git operation bindings"
     <el-container style="height: 100vh;">
       <!-- 顶部工具栏 -->
       <el-header style="background-color: #545c64; display: flex; align-items: center; padding: 0 20px;">
-        <span style="color: white; font-size: 18px; font-weight: bold;">Git仓库管理工具</span>
+        <span style="color: white; font-size: 18px; font-weight: bold;">开发者工作台</span>
         <el-divider direction="vertical" style="margin: 0 20px; border-color: #8c919a;" />
         <el-select 
           v-model="selectedDirectoryId" 
@@ -2480,12 +2480,12 @@ cd ..
 wails build
 ```
 
-Expected: 在 `build/bin/` 目录生成 `git-manager.exe`
+Expected: 在 `build/bin/` 目录生成 `workbench.exe`
 
 **Step 3: 测试exe文件**
 
 ```bash
-build\bin\git-manager.exe
+build\bin\workbench.exe
 ```
 
 Expected: 应用独立运行，无需开发服务器
@@ -2514,7 +2514,7 @@ git commit -m "chore: successful production build"
 
 ## 实施完成
 
-恭喜！你已经完成了Git仓库管理工具的完整实现。应用现在可以：
+恭喜！你已经完成了开发者工作台的完整实现。应用现在可以：
 
 - ✅ 管理多个工作目录
 - ✅ 浏览文件树（懒加载、Git仓库标识）

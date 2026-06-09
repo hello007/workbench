@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // 默认排除配置

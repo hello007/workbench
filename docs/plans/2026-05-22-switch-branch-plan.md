@@ -33,7 +33,7 @@ type BranchList struct {
 
 **Step 2: 验证编译通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功，无错误
 
 **Step 3: 提交**
@@ -82,7 +82,7 @@ func (g *GitCommand) CheckoutRemote(dir, remoteBranch, localBranch string) (stri
 
 **Step 2: 验证编译通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功
 
 **Step 3: 提交**
@@ -188,7 +188,7 @@ func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote 
 
 **Step 2: 验证编译通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功
 
 **Step 3: 提交**
@@ -227,15 +227,15 @@ func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) erro
 
 **Step 2: 验证编译通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go build ./...`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go build ./...`
 Expected: 编译成功
 
 **Step 3: 运行 `wails dev` 生成前端绑定**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`（启动后等几秒，让 wails 自动生成 `frontend/wailsjs/go/main/App.js` 和 `App.d.ts`，然后停止）
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`（启动后等几秒，让 wails 自动生成 `frontend/wailsjs/go/main/App.js` 和 `App.d.ts`，然后停止）
 
 验证生成的文件中包含 `GetBranches` 和 `CheckoutBranch`：
-Run: `grep -c "GetBranches\|CheckoutBranch" D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend/wailsjs/go/main/App.js`
+Run: `grep -c "GetBranches\|CheckoutBranch" D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend/wailsjs/go/main/App.js`
 Expected: 至少 4（每个方法出现 export + wrapper 函数）
 
 **Step 4: 提交**
@@ -399,7 +399,7 @@ const doCheckout = async () => {
 
 **Step 3: 验证前端编译通过**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npx vue-tsc --noEmit 2>&1 || npm run build`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npx vue-tsc --noEmit 2>&1 || npm run build`
 Expected: 编译成功
 
 **Step 4: 提交**
@@ -415,7 +415,7 @@ git commit -m "feat: 新增切换分支按钮和弹窗"
 
 **Step 1: 启动开发服务器**
 
-Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`
+Run: `cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`
 
 **Step 2: 功能测试**
 

@@ -1,7 +1,7 @@
 package service
 
 import (
-	"git-manager/model"
+	"workbench/model"
 	"testing"
 )
 

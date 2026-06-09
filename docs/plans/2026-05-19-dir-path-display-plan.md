@@ -473,7 +473,7 @@ git log --oneline -5
 **Step 2: 合并到 bmad 分支**
 
 ```bash
-cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd D:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git merge feature/dir-path-display
 ```
 

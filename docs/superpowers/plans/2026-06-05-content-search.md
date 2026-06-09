@@ -136,7 +136,7 @@ import (
 	"strings"
 	"sync"
 
-	"git-manager/model"
+	"workbench/model"
 )
 
 // 默认排除配置

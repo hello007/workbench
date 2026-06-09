@@ -193,7 +193,7 @@
 
 ### 7.4 冲突处理
 
-- 如果同时打开多个 Git Manager 窗口，localStorage 更新采用"最后写入优胜"策略
+- 如果同时打开多个 WorkBench 窗口，localStorage 更新采用"最后写入优胜"策略
 - 树状态和收藏夹配置支持实时同步（监听 storage 事件）
 
 ### 7.5 快捷键冲突

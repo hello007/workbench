@@ -1,6 +1,6 @@
 package service
 
-import "git-manager/util"
+import "workbench/util"
 
 // CopyToSystemClipboard 写入系统剪贴板（复制模式）
 func (s *FileOperationService) CopyToSystemClipboard(paths []string) error {

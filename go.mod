@@ -1,4 +1,4 @@
-module git-manager
+module workbench
 
 go 1.24.0
 

@@ -1,8 +1,8 @@
 package service
 
 import (
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 type SettingsService struct {

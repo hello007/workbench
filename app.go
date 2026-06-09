@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"git-manager/model"
-	"git-manager/service"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/service"
+	"workbench/util"
 )
 
 type App struct {
@@ -49,14 +49,14 @@ func (a *App) startup(ctx context.Context) {
 	a.favoritesSvc = service.NewFavoritesService(favoritesPath)
 	a.contentSearchSvc = service.NewContentSearchService()
 
-	println("Git Manager started")
+	println("WorkBench started")
 }
 
 func (a *App) shutdown(context.Context) {
 	if a.terminalSvc != nil {
 		a.terminalSvc.CloseAll()
 	}
-	println("Git Manager shutting down...")
+	println("WorkBench shutting down...")
 }
 
 // GetAppVersion 获取应用版本号

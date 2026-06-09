@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"git-manager/model"
+	"workbench/model"
 )
 
 func TestGetChildren_DirectoriesFirst(t *testing.T) {

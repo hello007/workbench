@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // DirectoryService 工作目录服务

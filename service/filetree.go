@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"git-manager/model"
-	"git-manager/util"
+	"workbench/model"
+	"workbench/util"
 )
 
 // FileTreeService 文件树服务

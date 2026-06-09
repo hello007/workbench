@@ -12,11 +12,11 @@ inputDocuments:
   - 'docs/project-context.md'
 ---
 
-# git-manager - Epic Breakdown
+# workbench - Epic Breakdown
 
 ## Overview
 
-This document provides the complete epic and story breakdown for git-manager, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.
+This document provides the complete epic and story breakdown for workbench, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.
 
 ## Requirements Inventory
 

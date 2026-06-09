@@ -1,5 +1,5 @@
 ---
-project_name: 'git-manager'
+project_name: 'workbench'
 user_name: 'Liuyang'
 date: '2026-05-26'
 sections_completed:

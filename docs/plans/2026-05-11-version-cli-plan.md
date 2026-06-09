@@ -1,8 +1,8 @@
-# git-manager --version CLI 支持实施计划
+# workbench --version CLI 支持实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 让打包后的 git-manager.exe 支持 `--version` 输出版本信息，构建时通过 `-ldflags` 自动注入语义版本和构建时间戳。
+**Goal:** 让打包后的 workbench.exe 支持 `--version` 输出版本信息，构建时通过 `-ldflags` 自动注入语义版本和构建时间戳。
 
 **Architecture:** 在 `main.go` 中声明 `version`/`buildTime` 变量供链接器注入，`main()` 入口拦截 `--version` 参数后直接打印并退出。新建 `scripts/build.sh` 封装 `wails build` 命令，自动从 `wails.json` 读取版本号并注入时间戳。
 
@@ -34,25 +34,25 @@ var (
 
 ```go
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("git-manager v%s (build %s)\n", version, buildTime)
+		fmt.Printf("workbench v%s (build %s)\n", version, buildTime)
 		os.Exit(0)
 	}
 ```
 
 **Step 3: 运行测试确认不破坏现有功能**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./... -v -count=1`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./... -v -count=1`
 Expected: 所有现有测试 PASS
 
 **Step 4: 手动验证 --version（开发模式）**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go run . --version`
-Expected: 输出 `git-manager vdev (build unknown)`（未注入 ldflags 时使用默认值）
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go run . --version`
+Expected: 输出 `workbench vdev (build unknown)`（未注入 ldflags 时使用默认值）
 
 **Step 5: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add main.go
 git commit -m "feat: add --version CLI flag with ldflags injection support"
 ```
@@ -68,7 +68,7 @@ git commit -m "feat: add --version CLI flag with ldflags injection support"
 
 ```bash
 #!/bin/bash
-# git-manager 构建脚本
+# workbench 构建脚本
 # 用法: ./scripts/build.sh [版本号]
 # 示例: ./scripts/build.sh          # 从 wails.json 读取版本
 #       ./scripts/build.sh 2.0.0    # 手动指定版本
@@ -89,7 +89,7 @@ fi
 
 BUILD_TIME=$(date +"%Y%m%d-%H%M%S")
 
-echo "构建 git-manager"
+echo "构建 workbench"
 echo "  版本: $VERSION"
 echo "  时间: $BUILD_TIME"
 
@@ -98,24 +98,24 @@ LDFLAGS="-X main.version=$VERSION -X main.buildTime=$BUILD_TIME"
 wails build -ldflags "$LDFLAGS"
 
 echo ""
-echo "构建完成: build/bin/git-manager.exe"
+echo "构建完成: build/bin/workbench.exe"
 echo "版本验证:"
-./build/bin/git-manager.exe --version
+./build/bin/workbench.exe --version
 ```
 
 **Step 2: 添加执行权限**
 
-Run: `chmod +x d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/scripts/build.sh`
+Run: `chmod +x d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/scripts/build.sh`
 
 **Step 3: 验证脚本语法**
 
-Run: `bash -n d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/scripts/build.sh`
+Run: `bash -n d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/scripts/build.sh`
 Expected: 无输出（语法正确）
 
 **Step 4: 提交**
 
 ```bash
-cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager
+cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench
 git add scripts/build.sh
 git commit -m "feat: add build script with automatic version injection"
 ```
@@ -126,18 +126,18 @@ git commit -m "feat: add build script with automatic version injection"
 
 **Step 1: 使用构建脚本完整构建**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && ./scripts/build.sh`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && ./scripts/build.sh`
 Expected:
 - 输出 `版本: 1.0.0`、`时间: <当前时间>`
 - 构建成功
-- 最后输出 `git-manager v1.0.0 (build <时间戳>)`
+- 最后输出 `workbench v1.0.0 (build <时间戳>)`
 
 **Step 2: 手动指定版本构建**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && ./scripts/build.sh 2.0.0-test`
-Expected: 输出 `git-manager v2.0.0-test (build <时间戳>)`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && ./scripts/build.sh 2.0.0-test`
+Expected: 输出 `workbench v2.0.0-test (build <时间戳>)`
 
 **Step 3: 使用 install.sh 安装并验证**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && ./scripts/install.sh`
-Expected: 安装成功，末尾输出 `git-manager v1.0.0 (build <时间戳>)`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && ./scripts/install.sh`
+Expected: 安装成功，末尾输出 `workbench v1.0.0 (build <时间戳>)`

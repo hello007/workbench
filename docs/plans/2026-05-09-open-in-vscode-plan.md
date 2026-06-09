@@ -57,7 +57,7 @@ func TestOpenInVSCode_InvalidCommand(t *testing.T) {
 
 **Step 2: 运行测试确认失败**
 
-Run: `cd git-manager && go test ./service -run TestOpenInVSCode -v`
+Run: `cd workbench && go test ./service -run TestOpenInVSCode -v`
 Expected: 编译失败，`svc.OpenInVSCode undefined`
 
 **Step 3: 实现最小代码**
@@ -73,17 +73,17 @@ func (s *FileOperationService) OpenInVSCode(path string) error {
 }
 ```
 
-无需额外 import — `os/exec` 和 `git-manager/util` 已在文件顶部导入。
+无需额外 import — `os/exec` 和 `workbench/util` 已在文件顶部导入。
 
 **Step 4: 运行测试确认通过**
 
-Run: `cd git-manager && go test ./service -run TestOpenInVSCode -v`
+Run: `cd workbench && go test ./service -run TestOpenInVSCode -v`
 Expected: PASS
 
 **Step 5: 提交**
 
 ```bash
-cd git-manager
+cd workbench
 git add service/fileoperation.go service/fileoperation_test.go
 git commit -m "feat: add OpenInVSCode method in FileOperationService"
 ```
@@ -113,13 +113,13 @@ func (a *App) OpenInVSCode(path string) bool {
 
 **Step 2: 验证编译通过**
 
-Run: `cd git-manager && go build`
+Run: `cd workbench && go build`
 Expected: 编译成功，无错误
 
 **Step 3: 提交**
 
 ```bash
-cd git-manager
+cd workbench
 git add app.go
 git commit -m "feat: add OpenInVSCode binding method in App"
 ```
@@ -204,13 +204,13 @@ const handleOpenInVSCode = async (path) => {
 
 **Step 4: 验证前端编译通过**
 
-Run: `cd git-manager/frontend && npm run build`
+Run: `cd workbench/frontend && npm run build`
 Expected: 构建成功，无错误
 
 **Step 5: 提交**
 
 ```bash
-cd git-manager
+cd workbench
 git add frontend/src/views/Home.vue
 git commit -m "feat: add 'Open in VSCode' to file tree context menu"
 ```
@@ -221,12 +221,12 @@ git commit -m "feat: add 'Open in VSCode' to file tree context menu"
 
 **Step 1: 全量后端测试**
 
-Run: `cd git-manager && go test ./... -v`
+Run: `cd workbench && go test ./... -v`
 Expected: 所有测试 PASS
 
 **Step 2: Wails 开发模式验证**
 
-Run: `cd git-manager && wails dev`
+Run: `cd workbench && wails dev`
 
 手动验证步骤：
 1. 选择一个工作目录
@@ -238,5 +238,5 @@ Run: `cd git-manager && wails dev`
 
 **Step 3: 构建验证**
 
-Run: `cd git-manager && wails build`
-Expected: 构建成功，生成 `build/bin/git-manager.exe`
+Run: `cd workbench && wails build`
+Expected: 构建成功，生成 `build/bin/workbench.exe`

@@ -127,7 +127,7 @@ func TestSaveFile_NoTempFileLeak(t *testing.T) {
 
 - [ ] **Step 2: 运行测试，确认全部失败**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestSaveFile -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestSaveFile -v`
 Expected: 编译失败或 `undefined: NewFileOperationService.SaveFile`
 
 ---
@@ -162,7 +162,7 @@ func (s *FileOperationService) SaveFile(filePath string, content string) error {
 
 	// 原子写入：先写临时文件再 rename
 	dir := filepath.Dir(filePath)
-	tmpFile, err := os.CreateTemp(dir, ".git-manager-save-*")
+	tmpFile, err := os.CreateTemp(dir, ".workbench-save-*")
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}
@@ -198,12 +198,12 @@ func (a *App) SaveFile(filePath string, content string) error {
 
 - [ ] **Step 3: 运行后端测试，确认全部通过**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./service/ -run TestSaveFile -v`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./service/ -run TestSaveFile -v`
 Expected: PASS（6 个测试全部通过）
 
 - [ ] **Step 4: 运行全量后端测试，确认无回归**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./...`
 Expected: PASS（无失败测试）
 
 - [ ] **Step 5: 提交**
@@ -222,14 +222,14 @@ git commit -m "feat(file-preview): add SaveFile backend API with atomic write"
 
 - [ ] **Step 1: 重新生成 Wails 前端绑定**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`
 Expected: 启动后 Wails 会自动检测到新增的 `SaveFile` 方法并生成前端绑定
 
 > **注意**：等待前端编译完成后（看到 "Development server running" 即可），按 Ctrl+C 停止。绑定文件会自动保留在 `frontend/wailsjs/go/main/App.js` 和 `App.d.ts` 中。
 
 - [ ] **Step 2: 确认绑定已生成**
 
-Run: `grep -c "SaveFile" d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend/wailsjs/go/main/App.js`
+Run: `grep -c "SaveFile" d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend/wailsjs/go/main/App.js`
 Expected: 输出 `1` 或更多
 
 ---
@@ -550,17 +550,17 @@ git commit -m "docs: add file preview edit feature to README"
 
 - [ ] **Step 1: 运行全量后端测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && go test ./...`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && go test ./...`
 Expected: PASS
 
 - [ ] **Step 2: 运行前端测试**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/frontend && npm test`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench/frontend && npm test`
 Expected: PASS
 
 - [ ] **Step 3: 启动开发环境进行手动验证**
 
-Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager && wails dev`
+Run: `cd d:/workspace/workspace_ai/demo_OpenSpec/git_tools/workbench && wails dev`
 
 验证清单：
 1. 选中一个文本文件 → 自动预览内容
