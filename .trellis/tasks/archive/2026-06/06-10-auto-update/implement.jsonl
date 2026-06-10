@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "了解后端 model/service 分层规范，确保 update 相关代码放置正确"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "网络请求、下载、文件替换等操作的错误处理规范"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "更新流程中的日志记录规范"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "前后端数据流设计参考（Wails 绑定 + Events 推送进度）"}
+{"file": ".trellis/tasks/06-10-auto-update/prd.md", "reason": "完整需求文档，包含技术方案和实现步骤"}

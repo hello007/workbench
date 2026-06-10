@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量检查标准"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "错误处理审查依据"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "日志输出审查依据"}
+{"file": ".trellis/tasks/06-10-auto-update/prd.md", "reason": "验收标准和需求清单"}
