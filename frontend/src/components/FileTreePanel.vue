@@ -498,17 +498,48 @@ const onNodeClick = (data, node) => {
   }
 }
 
+// ---- 沿父路径向上回溯，找到第一个已展开的祖先节点 ----
+const findExpandedAncestor = (nodePath, store) => {
+  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  if (!dir) return null
+
+  const rootPath = dir.path
+  const sep = rootPath.includes('\\') ? '\\' : '/'
+  const normalizedRoot = sep === '\\' ? rootPath.replace(/\//g, '\\') : rootPath.replace(/\\/g, '/')
+  const normalizedTarget = sep === '\\' ? nodePath.replace(/\//g, '\\') : nodePath.replace(/\\/g, '/')
+
+  if (!normalizedTarget.startsWith(normalizedRoot)) return null
+
+  let segments = normalizedTarget.split(sep)
+  while (segments.length > 1) {
+    segments = segments.slice(0, -1)
+    const parentPath = segments.join(sep)
+    if (parentPath.length < normalizedRoot.length) return null
+    const parent = store.nodesMap[parentPath]
+    if (parent && parent.expanded === true) return parent
+    if (parentPath === normalizedRoot) return null
+  }
+  return null
+}
+
 // ---- 刷新节点 ----
 const refreshNode = (nodePath) => {
   if (!fileTreeRef.value || !nodePath) return
 
-  const treeNode = fileTreeRef.value.store.nodesMap[nodePath]
-  if (treeNode) {
-    treeNode.loaded = false
-    treeNode.loading = false
-    treeNode.expand()
-  } else {
-    refreshCounter.value++
+  const store = fileTreeRef.value.store
+  const direct = store.nodesMap[nodePath]
+  if (direct) {
+    direct.loaded = false
+    direct.loading = false
+    direct.expand()
+    return
+  }
+
+  const ancestor = findExpandedAncestor(nodePath, store)
+  if (ancestor) {
+    ancestor.loaded = false
+    ancestor.loading = false
+    ancestor.expand()
   }
 }
 

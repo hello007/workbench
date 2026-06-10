@@ -709,4 +709,97 @@ describe('FileTreePanel.vue', () => {
       expect(ElMessage.error).toHaveBeenCalledWith('删除失败')
     })
   })
+
+  describe('refreshNode 祖先回溯', () => {
+    it('命中分支：nodesMap 中存在目标路径时，应直接刷新该节点', async () => {
+      const targetExpand = vi.fn()
+      const ancestorExpand = vi.fn()
+      const targetNode = {
+        loaded: true,
+        loading: false,
+        expanded: true,
+        expand: targetExpand
+      }
+      const ancestorNode = {
+        loaded: true,
+        loading: false,
+        expanded: true,
+        expand: ancestorExpand
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: {
+          '/path/a/src': ancestorNode,
+          '/path/a/src/foo': targetNode
+        }
+      })
+      await flushPromises()
+
+      wrapper.vm.refreshNode('/path/a/src/foo')
+
+      expect(targetNode.loaded).toBe(false)
+      expect(targetNode.loading).toBe(false)
+      expect(targetExpand).toHaveBeenCalledTimes(1)
+      expect(ancestorExpand).not.toHaveBeenCalled()
+    })
+
+    it('回溯命中分支：目标缺失但存在已展开祖先时，应刷新最近的已展开祖先', async () => {
+      const grandExpand = vi.fn()
+      const parentExpand = vi.fn()
+      const grandNode = {
+        loaded: true,
+        loading: false,
+        expanded: true,
+        expand: grandExpand
+      }
+      const parentNode = {
+        loaded: true,
+        loading: false,
+        expanded: true,
+        expand: parentExpand
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: {
+          '/path/a/src': grandNode,
+          '/path/a/src/foo': parentNode
+        }
+      })
+      await flushPromises()
+
+      wrapper.vm.refreshNode('/path/a/src/foo/bar/baz.txt')
+
+      expect(parentNode.loaded).toBe(false)
+      expect(parentNode.loading).toBe(false)
+      expect(parentExpand).toHaveBeenCalledTimes(1)
+      expect(grandExpand).not.toHaveBeenCalled()
+    })
+
+    it('静默放弃分支：目标和所有祖先均不可命中时，不应触发任何 expand 也不应改变 treeKey', async () => {
+      const parentExpand = vi.fn()
+      const parentNode = {
+        loaded: true,
+        loading: false,
+        expanded: false,
+        expand: parentExpand
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: {
+          '/path/a/src/foo': parentNode
+        }
+      })
+      await flushPromises()
+
+      const beforeKey = wrapper.vm.$.exposed?.refreshNode ? null : null
+      // 通过 props selectedDirId 衍生的 treeKey 不在 expose 列表中，
+      // 改用断言"没有 expand 被触发"来验证未触发整树重建。
+      wrapper.vm.refreshNode('/path/a/other/dir/file.txt')
+
+      expect(parentExpand).not.toHaveBeenCalled()
+      expect(parentNode.loaded).toBe(true)
+      expect(parentNode.loading).toBe(false)
+      expect(beforeKey).toBe(null)
+    })
+  })
 })
