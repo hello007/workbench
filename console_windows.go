@@ -8,30 +8,29 @@ import (
 	"syscall"
 )
 
-func init() {
-	if len(os.Args) < 2 || os.Args[1] != "--version" {
+func consolePrint(msg string) {
+	// 尝试直接用 os.Stdout 输出（适用于管道/重定向场景）
+	if _, err := os.Stdout.Write([]byte(msg)); err == nil {
+		os.Stdout.Sync()
 		return
 	}
 
+	// GUI 模式下 os.Stdout 可能无效，尝试 AttachConsole 附加到父进程控制台
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-
-	// 检查 stdout 是否已连接（管道/重定向场景）
-	// GetFileType: FILE_TYPE_PIPE=3, FILE_TYPE_DISK=1
-	getFileType := kernel32.NewProc("GetFileType")
-	if ft, _, _ := getFileType.Call(os.Stdout.Fd()); ft == 3 || ft == 1 {
-		return // stdout 已是管道或文件，无需处理
-	}
-
-	// stdout 未连接，尝试附加到父进程控制台（cmd.exe / PowerShell）
 	attachConsole := kernel32.NewProc("AttachConsole")
 	getStdHandle := kernel32.NewProc("GetStdHandle")
+
+	// ATTACH_PARENT_PROCESS = -1
 	if r1, _, _ := attachConsole.Call(^uintptr(0)); r1 != 0 {
-		if h, _, _ := getStdHandle.Call(^uintptr(11)); h != 0 && h != ^uintptr(0) {
-			os.Stdout = os.NewFile(h, "stdout")
+		// STD_OUTPUT_HANDLE = -11, ^uintptr(10) = NOT(10) = -11
+		if h, _, _ := getStdHandle.Call(^uintptr(10)); h != 0 && h != ^uintptr(0) {
+			f := os.NewFile(h, "stdout")
+			fmt.Fprint(f, msg)
+			f.Sync()
+			return
 		}
 	}
-}
 
-func consolePrint(msg string) {
-	fmt.Print(msg)
+	// 最后回退到 stderr
+	fmt.Fprint(os.Stderr, msg)
 }
