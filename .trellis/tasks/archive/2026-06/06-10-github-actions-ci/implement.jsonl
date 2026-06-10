@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/06-10-github-actions-ci/prd.md", "reason": "PRD：需求、决策、技术方案、验收标准"}
+{"file": ".trellis/tasks/06-10-github-actions-ci/research/wails-github-actions.md", "reason": "研究：Wails v2 GitHub Actions 构建指南、依赖分析、workflow 模板"}

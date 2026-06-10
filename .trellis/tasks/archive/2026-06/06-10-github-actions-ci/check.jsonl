@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/06-10-github-actions-ci/prd.md", "reason": "PRD：验收标准、Definition of Done、Out of Scope"}
+{"file": ".trellis/tasks/06-10-github-actions-ci/research/wails-github-actions.md", "reason": "研究：Wails 构建依赖验证、workflow 配置参考"}
