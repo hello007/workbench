@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      # 1. 检出代码（获取完整历史，用于生成 Release Notes）
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 安装 Go 1.24
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      # 3. 安装 Node.js 20（带 npm cache 加速）
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # 4. 安装前端依赖
+      - name: 安装前端依赖
+        run: cd frontend && npm ci
+
+      # 5. 安装 Wails CLI（锁定 v2 大版本）
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2
+
+      # 6. 构建 Wails 应用（注入版本号和构建时间）
+      - name: 构建应用
+        run: |
+          $VER = "${{ github.ref_name }}".TrimStart('v')
+          $BT = Get-Date -Format "yyyyMMdd-HHmmss"
+          wails build -ldflags "-X main.version=$VER -X main.buildTime=$BT"
+
+      # 7. 验证构建产物
+      - name: 验证构建产物
+        run: |
+          if (Test-Path "build/bin/workbench.exe") {
+            Write-Host "构建成功: build/bin/workbench.exe"
+            ./build/bin/workbench.exe --version
+          } else {
+            Write-Error "构建失败: workbench.exe 未生成"
+            exit 1
+          }
+
+      # 8. 创建 GitHub Release 并上传 exe
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: build/bin/workbench.exe

@@ -52,6 +52,23 @@ wails build
 
 构建产物位于 `build/bin/` 目录。
 
+### 发版
+
+项目使用 GitHub Actions 自动打包发版。推送 `v*` 格式的 tag 即可触发：
+
+```bash
+# 创建并推送 tag（例如 v1.0.8）
+git tag v1.0.8
+git push origin v1.0.8
+```
+
+流水线会自动完成以下步骤：
+1. 在 Windows runner 上安装 Go 1.24 + Node.js 20 + Wails CLI
+2. 执行 `wails build`（自动注入版本号和构建时间）
+3. 创建 GitHub Release 并上传 `workbench.exe`
+
+> **注意**：当前代码主仓库在 Gitee，GitHub 作为镜像仓库专门用于 CI/CD。需确保 tag 同步推送到 GitHub remote。
+
 ### 测试
 
 ```bash
