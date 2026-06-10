@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/06-10-fix-filetree-copyto-collapse/prd.md", "reason": "Acceptance Criteria AC1–AC6 与 Out of Scope 是验收基线，check 阶段必须逐条核对。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "团队的代码质量与测试基线，单测必须覆盖三种回溯分支并通过 npm run test。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "review 时检查是否复用 locateNode 的分隔符归一化策略，避免在 findExpandedAncestor 里重复造轮子。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "review 时核对 refreshNode 语义变更是否破坏 create / rename / delete / 右键 refresh 等其他调用点的可见行为，以及 refreshAll 整树语义是否被误改。"}
