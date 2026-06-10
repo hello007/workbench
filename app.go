@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -25,6 +26,7 @@ type App struct {
 	searchSvc        *service.SearchService
 	favoritesSvc     *service.FavoritesService
 	contentSearchSvc *service.ContentSearchService
+	updateSvc        *service.UpdateService
 }
 
 func NewApp() *App {
@@ -48,6 +50,18 @@ func (a *App) startup(ctx context.Context) {
 	a.searchSvc = service.NewSearchService()
 	a.favoritesSvc = service.NewFavoritesService(favoritesPath)
 	a.contentSearchSvc = service.NewContentSearchService()
+
+	// 更新服务
+	a.updateSvc = service.NewUpdateService()
+	a.updateSvc.SetContext(ctx)
+
+	// 检查是否有待应用的更新（上次下载但未重启）
+	// 如果有待更新文件，会启动批处理脚本替换 exe 后启动新版本，
+	// 当前旧进程需要退出，避免同时运行两个实例
+	if hasPending, _ := a.updateSvc.CheckPendingUpdate(); hasPending {
+		println("发现待更新文件，正在应用更新并退出...")
+		os.Exit(0)
+	}
 
 	println("WorkBench started")
 }
@@ -759,4 +773,32 @@ func (a *App) UpdateFavoriteGroup(path, group string) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// ===== 更新相关 =====
+
+// CheckForUpdate 检查是否有新版本
+func (a *App) CheckForUpdate() (*model.UpdateInfo, error) {
+	return a.updateSvc.CheckForUpdate(version)
+}
+
+// DownloadUpdate 下载新版本
+func (a *App) DownloadUpdate(downloadURL string) error {
+	return a.updateSvc.DownloadUpdate(downloadURL)
+}
+
+// CancelDownload 取消下载
+func (a *App) CancelDownload() {
+	a.updateSvc.CancelDownload()
+}
+
+// ApplyUpdate 执行更新替换并退出应用
+func (a *App) ApplyUpdate() error {
+	err := a.updateSvc.ApplyUpdate()
+	if err != nil {
+		return err
+	}
+	// 退出当前应用
+	os.Exit(0)
+	return nil
 }

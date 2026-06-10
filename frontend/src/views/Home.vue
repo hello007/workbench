@@ -83,7 +83,8 @@
         />
       </div>
     </div>
-    <SettingsPanel v-model:visible="settingsVisible" />
+    <SettingsPanel v-model:visible="settingsVisible" @update-available="onUpdateAvailable" />
+    <UpdateDialog v-model:visible="updateDialogVisible" :update-info="updateInfo" />
     <CommandPalette
       v-model="commandPaletteVisible"
       :current-dir="currentDirPath"
@@ -108,6 +109,7 @@ import ToolboxPanel from '../components/ToolboxPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'
+import UpdateDialog from '../components/UpdateDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { useShortcuts } from '../composables/useShortcuts'
 import { Splitpanes, Pane } from 'splitpanes'
@@ -148,6 +150,8 @@ const terminalDir = ref('')
 
 // ---- 设置弹窗状态 ----
 const settingsVisible = ref(false)
+const updateDialogVisible = ref(false)
+const updateInfo = ref({})
 
 // ---- Command Palette 状态 ----
 const commandPaletteVisible = ref(false)
@@ -388,6 +392,12 @@ const handleGlobalKeydown = (e) => {
     e.preventDefault()
     handlePaste(selectedNode.value)
   }
+}
+
+// ---- 更新 ----
+function onUpdateAvailable(info) {
+  updateInfo.value = info
+  updateDialogVisible.value = true
 }
 
 // ---- 终端 ----

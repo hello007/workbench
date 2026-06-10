@@ -43,6 +43,20 @@
             <el-icon :size="14"><WarningFilled /></el-icon>
             <span>GPU 设置已变更，需重启应用后生效</span>
           </div>
+          <!-- 版本与更新 -->
+          <div class="settings-section-title" style="margin-top: 24px;">关于</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">当前版本</div>
+              <div class="settings-item-desc">v{{ appVersion }}</div>
+            </div>
+            <el-button
+              size="small"
+              type="primary"
+              :loading="checkingUpdate"
+              @click="handleCheckUpdate"
+            >检查更新</el-button>
+          </div>
         </div>
         <!-- 终端页 -->
         <div v-show="activeTab === 'terminal'">
@@ -179,14 +193,14 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
 import { useShortcuts } from '../composables/useShortcuts'
 
 const props = defineProps({
   visible: { type: Boolean, default: false }
 })
 
-defineEmits(['update:visible'])
+const emit = defineEmits(['update:visible', 'update-available'])
 
 const tabs = [
   { id: 'general', label: '通用' },
@@ -205,6 +219,8 @@ const excludeDirs = ref([])
 const excludeFiles = ref([])
 const newExcludeDir = ref('')
 const newExcludeFile = ref('')
+const appVersion = ref('')
+const checkingUpdate = ref(false)
 
 const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts, DEFAULTS } = useShortcuts()
 
@@ -311,6 +327,29 @@ async function loadSettings() {
     await loadShortcuts()
   } catch {
     gpuEnabled.value = true
+  }
+  // 加载版本号
+  try {
+    appVersion.value = await GetAppVersion()
+  } catch {
+    appVersion.value = 'dev'
+  }
+}
+
+async function handleCheckUpdate() {
+  checkingUpdate.value = true
+  try {
+    const info = await CheckForUpdate()
+    if (!info || !info.hasUpdate) {
+      ElMessage.success(`当前已是最新版本 v${info?.currentVer || appVersion.value}`)
+    } else {
+      // 有新版本，通知父组件弹出更新弹窗
+      emit('update-available', info)
+    }
+  } catch (e) {
+    ElMessage.error('检查更新失败: ' + (e.message || String(e)))
+  } finally {
+    checkingUpdate.value = false
   }
 }
 
