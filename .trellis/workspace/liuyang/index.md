@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
+- **Total Sessions**: 7
 - **Last Active**: 2026-06-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~208 | Active |
+| `journal-1.md` | ~241 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-06-23 | README 更新：补充 PDF 内嵌项目结构 | `f9df40a` | `master` |
 | 6 | 2026-06-23 | PDF 内嵌预览（pdfjs viewer + iframe，规避双实例） | `9d36bdb` | `master` |
 | 5 | 2026-06-23 | 文件类型预览功能（图片/文本/Office 内嵌 + PDF 降级） | `bead5c7` | `master` |
 | 4 | 2026-06-23 | 新增用 Obsidian 打开入口与文件预览渲染增强 | `095a6ab`, `bead5c7` | `master` |

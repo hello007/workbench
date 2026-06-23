@@ -206,3 +206,36 @@ refreshNode 在路径不在 nodesMap 时回退到 refreshCounter++ 触发 <el-tr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: README 更新：补充 PDF 内嵌项目结构
+
+**Date**: 2026-06-23
+**Task**: README 更新：补充 PDF 内嵌项目结构
+**Branch**: `master`
+
+### Summary
+
+README 项目结构补充 PDF 内嵌预览新增的 server/（preview.go AssetServer handler）与 frontend/public/pdfjs-viewer/（pdfjs viewer 静态资源），构建章节补产物体积说明（exe 约 33MB）。文件类型预览 PDF 条目复核准确。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f9df40a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
