@@ -55,6 +55,25 @@ wails build
 
 ### 发版
 
+#### 一键发版（推荐）
+
+使用 `scripts/release.sh` 一键完成「读取当前版本 → 递增 → 改写 `wails.json` → 提交 → 打 tag → 推送」，推送后由 CI 自动构建发布：
+
+```bash
+# 预览计划（不执行任何写操作）
+./scripts/release.sh --dry-run --bump patch --allow-dirty
+
+# 次版本递增并直接推送（如 1.0.9 -> 1.1.0）
+./scripts/release.sh --bump minor --yes
+
+# 手动指定版本号
+./scripts/release.sh --version 1.2.3 --yes
+```
+
+也可对 Claude 说「发版」，或使用 `/release` 触发智能推荐流程：skill 会按 `$LAST_TAG..HEAD` 范围内的提交类型（`major:` / `feat:` / `fix:` 等）推荐 `patch` / `minor` / `major` 级别，确认后自动调用脚本。
+
+#### GitHub Actions 自动打包发版（底层机制）
+
 项目使用 GitHub Actions 自动打包发版。推送 `v*` 格式的 tag 即可触发：
 
 ```bash
@@ -68,7 +87,7 @@ git push origin v1.0.8
 2. 执行 `wails build`（自动注入版本号和构建时间）
 3. 创建 GitHub Release 并上传 `workbench.exe`
 
-> **注意**：当前代码主仓库在 Gitee，GitHub 作为镜像仓库专门用于 CI/CD。需确保 tag 同步推送到 GitHub remote。
+> **CI 机制**：远程 `origin` 为 Gitee，是唯一主仓库；推送后 Gitee 会自动镜像到 GitHub，`release.yml` 据此自动构建发布，无需在本仓库配置 github remote，也无需手动同步 tag 到 GitHub。
 
 ### 测试
 

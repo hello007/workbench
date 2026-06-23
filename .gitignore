@@ -28,7 +28,8 @@ frontend/package.json.md5
 frontend/wailsjs/
 go.work
 node_modules
-release/
+# 仅忽略根目录的 release 构建产物，避免误伤 .claude/skills/release/ 等同名目录
+/release/
 Thumbs.db
 vendor/
 agent-harness/
