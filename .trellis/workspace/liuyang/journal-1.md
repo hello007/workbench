@@ -140,3 +140,36 @@ refreshNode 在路径不在 nodesMap 时回退到 refreshCounter++ 触发 <el-tr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 文件类型预览功能（图片/文本/Office 内嵌 + PDF 降级）
+
+**Date**: 2026-06-23
+**Task**: 文件类型预览功能（图片/文本/Office 内嵌 + PDF 降级）
+**Branch**: `master`
+
+### Summary
+
+调研 Flyfish Viewer（POC 实测依赖树过大、resolve 停滞不可行）后回退自研拼装。实现内嵌预览：图片(jpg/png/bmp/gif/webp)、文本(txt/json/sql/md/代码，CodeMirror6 只读高亮 + Markdown 渲染)、Office(docx→docx-preview、xlsx/xls/csv→SheetJS 多 sheet 表格)；文本类编辑双模式(只读+编辑保存)。降级「用默认程序打开」：PDF、pptx、旧 .doc/.ppt、不支持/超大/损坏。PDF 内嵌因 pdfjs+Vite ESM+WebView2 系统性双实例问题(私有字段 brand-check，4 种 worker 配置均失败，详见 research)暂降级。修复：图片读取失败降级、编辑态按钮布局、docx-preview/xlsx 改静态 import 解决 wails dev 动态 import .vite/deps fetch 失败。exe 约 17.6MB。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bead5c7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
