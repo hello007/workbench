@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/06-23-obsidian-open/research/obsidian-launch.md", "reason": "检查实现是否符合研究结论：URI 参数名 path、cmd /c start \"\" 标题位、注册表预检、路径编码、未安装提示"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否真正复用现有模式（OpenIn* 同构、HideCommandWindow、SaveSettings），有无重复代码或遗漏同步点"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 AppSettings.ObsidianPath 在 model→service→app→前端各层是否一致贯通，无字段遗漏或类型不匹配"}

@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/06-23-obsidian-open/research/obsidian-launch.md", "reason": "Obsidian 调用方式的核心依据：URI 协议格式、注册表预检、cmd /c start 用法、路径编码、exe 参数——后端 OpenInObsidian 实现直接照此"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务是复用现有 OpenIn*/AppSettings/SettingsPanel 模式，需遵循复用规范：先搜现有实现再写，避免重复造轮子"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "任务跨 model(AppSettings)/service(fileoperation)/app(桥接)/前端(SettingsPanel+三组件)多层，需对照跨层指南确保数据流一致"}

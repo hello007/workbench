@@ -72,6 +72,9 @@
       <li class="context-menu-item" @click="onMenuCommand('openWarp')">
         <el-icon><Promotion /></el-icon>用 Warp 打开
       </li>
+      <li class="context-menu-item" @click="onMenuCommand('openObsidian')">
+        <img :src="obsidianIcon" class="context-menu-img-icon" alt="Obsidian" />用 Obsidian 打开
+      </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
         <el-icon><Refresh /></el-icon>更新仓库
@@ -138,8 +141,10 @@ import {
   ReorderDirectories,
   OpenInExplorer,
   OpenInVSCode,
-  OpenInWarp
+  OpenInWarp,
+  OpenInObsidian
 } from '../../wailsjs/go/main/App'
+import obsidianIcon from '../assets/icons/obsidian.png'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -273,6 +278,9 @@ const onMenuCommand = (command) => {
       break
     case 'openWarp':
       handleOpenWarp(dir.path)
+      break
+    case 'openObsidian':
+      handleOpenObsidian(dir.path)
       break
     case 'pullRepos':
       emit('batchPull', { path: dir.path })
@@ -469,6 +477,17 @@ const handleOpenWarp = async (path) => {
     }
   } catch (error) {
     ElMessage.error('打开 Warp 失败: ' + (error.message || String(error)))
+  }
+}
+
+const handleOpenObsidian = async (path) => {
+  try {
+    const result = await OpenInObsidian(path)
+    if (!result) {
+      ElMessage.error('未检测到 Obsidian，请在【设置 → 通用 → 外部应用】中配置 Obsidian 程序路径，或安装 Obsidian 并至少运行一次')
+    }
+  } catch (error) {
+    ElMessage.error('打开 Obsidian 失败: ' + (error.message || String(error)))
   }
 }
 

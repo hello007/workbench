@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,6 +74,7 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 	}
 
 	preview.Size = info.Size()
+	preview.Kind = detectPreviewKind(filePath)
 
 	if preview.Size > maxSize {
 		preview.TooLarge = true
@@ -96,6 +99,56 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 
 	preview.Content = string(data)
 	return preview, nil
+}
+
+// ReadFileBytes 读取文件原始字节（base64），供前端构造 Blob 预览图片/PDF/Office
+func (s *FileOperationService) ReadFileBytes(filePath string, maxSize int64) (*model.FileBytes, error) {
+	result := &model.FileBytes{
+		Path: filePath,
+		Name: filepath.Base(filePath),
+		Kind: detectPreviewKind(filePath),
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	result.Size = info.Size()
+
+	if info.Size() > maxSize {
+		result.TooLarge = true
+		return result, nil
+	}
+
+	data, err := util.ReadFileSafe(filePath, maxSize)
+	if err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+
+	result.Base64 = base64.StdEncoding.EncodeToString(data)
+	return result, nil
+}
+
+// detectPreviewKind 根据扩展名识别预览类型，供前端选择渲染器
+func detectPreviewKind(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".svg", ".ico", ".tif", ".tiff", ".heic", ".heif", ".avif":
+		return model.KindImage
+	case ".pdf":
+		return model.KindPDF
+	case ".doc", ".docx", ".docm", ".dot", ".dotx",
+		".ppt", ".pptx", ".pptm", ".pps", ".ppsx",
+		".xls", ".xlsx", ".xlsm", ".xlsb", ".csv",
+		".odt", ".odp", ".ods", ".rtf":
+		return model.KindOffice
+	}
+	if util.IsPreviewable(filename) {
+		return model.KindText
+	}
+	return model.KindUnsupported
 }
 
 // SaveFile 保存文件内容（原子写入：先写临时文件再 rename）
@@ -177,6 +230,56 @@ func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 		return fmt.Errorf("不支持打开文件夹")
 	}
 	cmd := exec.Command("cmd", "/c", "start", "", path)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
+}
+
+// resolveObsidianVault 解析 Obsidian vault 目录：文件夹→自身，文件→父目录。
+// 纯函数，便于单测；路径不存在时返回错误。
+func resolveObsidianVault(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return path, nil
+	}
+	return filepath.Dir(path), nil
+}
+
+// encodeObsidianPath 将绝对路径编码为 obsidian:// URI 的 path 参数值。
+// 反斜杠→正斜杠 → QueryEscape → '+' 替换为 '%20'（与官方示例一致，中文/空格安全）。
+func encodeObsidianPath(p string) string {
+	escaped := url.QueryEscape(filepath.ToSlash(p))
+	return strings.ReplaceAll(escaped, "+", "%20")
+}
+
+// OpenInObsidian 用 Obsidian 打开指定路径对应的 vault。
+// vault 解析：文件夹→自身，文件→父目录。
+// 调用策略：obsidianPath 非空且文件存在 → 直接用该 exe 启动（优先）；
+// 否则走系统协议方案（注册表预检 + cmd /c start "" obsidian://open?path=...）。
+// 未检测到 Obsidian 时返回友好错误，由前端引导用户配置。
+func (s *FileOperationService) OpenInObsidian(path, obsidianPath string) error {
+	vaultPath, err := resolveObsidianVault(path)
+	if err != nil {
+		return fmt.Errorf("路径不存在或无法访问: %w", err)
+	}
+	uri := "obsidian://open?path=" + encodeObsidianPath(vaultPath)
+
+	// 策略一：用户配置了 Obsidian 可执行文件路径且存在，直接用该 exe 启动
+	if strings.TrimSpace(obsidianPath) != "" {
+		if _, statErr := os.Stat(obsidianPath); statErr == nil {
+			cmd := exec.Command(obsidianPath, uri)
+			util.HideCommandWindow(cmd)
+			return cmd.Start()
+		}
+	}
+
+	// 策略二：系统协议方案——预检 obsidian:// 是否注册，未注册则提示
+	if !isObsidianProtocolRegistered() {
+		return fmt.Errorf("未检测到 Obsidian，请在【设置 → 通用 → 外部应用】中配置 Obsidian 程序路径，或安装 Obsidian 并至少运行一次")
+	}
+	cmd := exec.Command("cmd", "/c", "start", "", uri)
 	util.HideCommandWindow(cmd)
 	return cmd.Start()
 }

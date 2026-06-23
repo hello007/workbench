@@ -71,6 +71,7 @@
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
               <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
               <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+              <el-button @click="handleOpenObsidian"><img :src="obsidianIcon" class="btn-img-icon" alt="Obsidian" />用 Obsidian 打开</el-button>
             </el-button-group>
           </div>
           <div>
@@ -113,22 +114,60 @@
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
               <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
               <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+              <el-button @click="handleOpenObsidian"><img :src="obsidianIcon" class="btn-img-icon" alt="Obsidian" />用 Obsidian 打开</el-button>
             </el-button-group>
           </div>
         </div>
 
-        <div v-if="filePreview.content" class="file-preview">
-          <h4>文件内容</h4>
-          <el-input
-            v-model="filePreview.content"
-            type="textarea"
-            :rows="15"
-            class="preview-textarea"
-          />
-          <div v-if="isContentModified" class="preview-actions">
-            <span class="modified-indicator">● 已修改</span>
-            <el-button size="small" @click="handleCancelEdit">取消</el-button>
-            <el-button size="small" type="primary" :loading="isSaving" @click="handleSave">保存</el-button>
+        <div v-if="filePreviewState !== 'empty'" class="file-preview">
+          <div class="file-preview-header">
+            <h4>{{ isEditing ? '编辑文件' : '文件预览' }}</h4>
+            <div class="file-preview-mode-actions">
+              <!-- 文本类提供编辑入口（双模式切换） -->
+              <template v-if="filePreview.kind === 'text'">
+                <template v-if="!isEditing">
+                  <el-button size="small" @click="enterEdit">编辑</el-button>
+                </template>
+                <template v-else>
+                  <el-button size="small" @click="handleCancelEdit">取消编辑</el-button>
+                </template>
+              </template>
+              <!-- 图片/PDF 不支持内嵌编辑时，提供外部打开 -->
+              <el-button size="small" @click="handleOpenWithDefaultApp">用默认程序打开</el-button>
+            </div>
+          </div>
+
+          <div class="file-preview-body">
+            <!-- 加载中 -->
+            <div v-if="filePreviewLoading" class="preview-loading-tip">加载中...</div>
+
+            <!-- 编辑态：保留原有 textarea + 保存链路 -->
+            <template v-else-if="isEditing">
+              <el-input
+                v-model="filePreview.content"
+                type="textarea"
+                :rows="15"
+                class="preview-textarea"
+              />
+              <div v-if="isContentModified" class="preview-actions">
+                <span class="modified-indicator">● 已修改</span>
+                <el-button size="small" @click="handleCancelEdit">取消</el-button>
+                <el-button size="small" type="primary" :loading="isSaving" @click="handleSave">保存</el-button>
+              </div>
+            </template>
+
+            <!-- 只读态：按 kind 分发到渲染器 -->
+            <FilePreviewRenderer
+              v-else
+              :kind="filePreview.kind"
+              :file-name="filePreview.name"
+              :content="filePreview.content"
+              :base64="filePreview.base64"
+              :error="filePreview.error"
+              :too-large="filePreview.tooLarge"
+              :is-binary="filePreview.isBinary"
+              @open-external="handleOpenWithDefaultApp"
+            />
           </div>
         </div>
       </div>
@@ -321,11 +360,13 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
+import FilePreviewRenderer from './FilePreviewRenderer.vue'
 import {
-  PreviewFile, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
-  OpenInExplorer, OpenInVSCode, OpenInWarp,
+  PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
+  OpenInExplorer, OpenInVSCode, OpenInWarp, OpenInObsidian,
   GetBranches, CheckoutBranch
 } from '../../wailsjs/go/main/App'
+import obsidianIcon from '../assets/icons/obsidian.png'
 
 const props = defineProps({
   selectedNode: {
@@ -359,11 +400,30 @@ const gitInfoRef = ref()
 const commitHistoryRef = ref()
 
 const filePreview = ref({
+  path: '',
+  name: '',
+  size: 0,
   content: '',
-  error: ''
+  base64: '',
+  isBinary: false,
+  tooLarge: false,
+  error: '',
+  kind: ''
 })
 const originalContent = ref('')
 const isSaving = ref(false)
+// 预览模式：默认只读渲染；文本类可切到编辑态
+const isEditing = ref(false)
+const filePreviewLoading = ref(false)
+
+// filePreview 是否已有内容/状态（用于 v-if 显示预览区）
+const filePreviewState = computed(() => {
+  const p = filePreview.value
+  if (p.error || p.tooLarge || p.isBinary) return 'fallback'
+  if (p.kind) return 'has-kind'
+  if (p.content) return 'has-content'
+  return 'empty'
+})
 
 const isContentModified = computed(() => {
   return filePreview.value.content !== originalContent.value
@@ -511,6 +571,18 @@ const handleOpenInWarp = async () => {
   }
 }
 
+const handleOpenObsidian = async () => {
+  if (!props.selectedNode) return
+  try {
+    const result = await OpenInObsidian(props.selectedNode.path)
+    if (!result) {
+      ElMessage.error('未检测到 Obsidian，请在【设置 → 通用 → 外部应用】中配置 Obsidian 程序路径，或安装 Obsidian 并至少运行一次')
+    }
+  } catch (error) {
+    ElMessage.error('打开 Obsidian 失败: ' + (error.message || String(error)))
+  }
+}
+
 const handleCopyPath = async () => {
   if (!props.selectedNode) return
   try {
@@ -542,19 +614,75 @@ const handleUpdateRepos = () => {
 const previewFile = async () => {
   if (!props.selectedNode) return
 
-  const preview = await PreviewFile(props.selectedNode.path)
-  filePreview.value = preview
+  filePreviewLoading.value = true
+  isEditing.value = false
+  try {
+    const preview = await PreviewFile(props.selectedNode.path)
 
-  if (preview.error) {
-    ElMessage.error('预览失败: ' + preview.error)
-  } else if (preview.tooLarge) {
-    ElMessage.warning('文件过大，无法预览')
-  } else if (preview.isBinary) {
-    ElMessage.warning('二进制文件，无法预览')
+    // 初始化预览对象（保留 content，清掉 base64）
+    filePreview.value = {
+      path: preview.path || props.selectedNode.path,
+      name: preview.name || props.selectedNode.name,
+      size: preview.size || 0,
+      content: preview.content || '',
+      base64: '',
+      isBinary: !!preview.isBinary,
+      tooLarge: !!preview.tooLarge,
+      error: preview.error || '',
+      kind: preview.kind || ''
+    }
+
+    if (preview.error) {
+      ElMessage.error('预览失败: ' + preview.error)
+    } else if (preview.tooLarge) {
+      ElMessage.warning('文件过大，无法预览')
+    } else if (preview.kind === 'unsupported') {
+      // 不支持的类型（含不可预览的二进制）：降级提示，用户可点「用默认程序打开」
+      ElMessage.warning('该文件类型暂不支持内嵌预览')
+    }
+
+    // 图片 / PDF：拉取原始字节（base64）供渲染器使用
+    if (!preview.error && !preview.tooLarge && (preview.kind === 'image' || preview.kind === 'pdf')) {
+      try {
+        const bytes = await ReadFileBytes(props.selectedNode.path)
+        if (bytes.error) {
+          filePreview.value.error = bytes.error
+          ElMessage.error('读取文件字节失败: ' + bytes.error)
+        } else if (bytes.tooLarge) {
+          filePreview.value.tooLarge = true
+          ElMessage.warning('文件过大，无法预览')
+        } else {
+          filePreview.value.base64 = bytes.base64 || ''
+        }
+      } catch (e) {
+        filePreview.value.error = (e?.message || String(e))
+        ElMessage.error('读取文件字节失败: ' + (e?.message || String(e)))
+      }
+    }
+
+    // 同步原始内容，用于编辑态变更检测
+    originalContent.value = preview.content || ''
+  } catch (error) {
+    filePreview.value = {
+      path: props.selectedNode.path,
+      name: props.selectedNode.name,
+      size: 0,
+      content: '',
+      base64: '',
+      isBinary: false,
+      tooLarge: false,
+      error: (error?.message || String(error)),
+      kind: ''
+    }
+    ElMessage.error('预览失败: ' + (error?.message || String(error)))
+  } finally {
+    filePreviewLoading.value = false
   }
+}
 
-  // 同步原始内容，用于编辑态变更检测
-  originalContent.value = preview.content || ''
+// 进入编辑模式（仅文本类）
+const enterEdit = () => {
+  isEditing.value = true
 }
 
 const handleSave = async () => {
@@ -566,6 +694,8 @@ const handleSave = async () => {
     ElMessage.success('文件保存成功')
     originalContent.value = filePreview.value.content
     emit('refreshNode', props.selectedNode.path)
+    // 保存后回到只读预览态
+    isEditing.value = false
   } catch (error) {
     ElMessage.error('保存失败: ' + (error.message || String(error)))
   } finally {
@@ -575,6 +705,8 @@ const handleSave = async () => {
 
 const handleCancelEdit = () => {
   filePreview.value.content = originalContent.value
+  // 取消编辑回到只读预览态
+  isEditing.value = false
 }
 
 watch(() => props.selectedNode, async (newNode, oldNode) => {
@@ -651,10 +783,19 @@ const onStatusBarClick = () => {
 
 const clearPreview = () => {
   filePreview.value = {
+    path: '',
+    name: '',
+    size: 0,
     content: '',
-    error: ''
+    base64: '',
+    isBinary: false,
+    tooLarge: false,
+    error: '',
+    kind: ''
   }
   originalContent.value = ''
+  isEditing.value = false
+  filePreviewLoading.value = false
 }
 
 const cleanupPullEvents = () => {
@@ -706,6 +847,10 @@ defineExpose({
 .content-inner {
   padding: var(--spacing-lg);
   animation: fadeIn var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .content-panel h2 {
@@ -756,6 +901,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
 }
 
 .action-groups {
@@ -787,6 +933,45 @@ defineExpose({
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
+}
+
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.file-preview-header h4 {
+  margin-bottom: 0;
+}
+
+.file-preview-mode-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-shrink: 0;
+}
+
+.file-preview-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.preview-loading-tip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  min-height: 200px;
 }
 
 .preview-textarea {
@@ -796,7 +981,7 @@ defineExpose({
   transition: all var(--transition-normal);
   font-family: Consolas, 'Courier New', monospace;
   min-height: 200px;
-  height: 100%;
+  flex: 1;
   resize: vertical;
 }
 

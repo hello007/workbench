@@ -10,4 +10,5 @@ type AppSettings struct {
 	SearchExcludeFiles     []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
 	ShortcutCommandPalette string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
 	ShortcutToggleTerminal string   `json:"shortcutToggleTerminal"` // 切换终端快捷键，默认 "Ctrl+`"
+	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
 }

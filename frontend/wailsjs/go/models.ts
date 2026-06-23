@@ -1,5 +1,5 @@
 export namespace model {
-
+	
 	export class AppSettings {
 	    gpuDisabled: boolean;
 	    defaultShell: string;
@@ -9,11 +9,12 @@ export namespace model {
 	    searchExcludeFiles: string[];
 	    shortcutCommandPalette: string;
 	    shortcutToggleTerminal: string;
-
+	    obsidianPath: string;
+	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.gpuDisabled = source["gpuDisabled"];
@@ -24,17 +25,18 @@ export namespace model {
 	        this.searchExcludeFiles = source["searchExcludeFiles"];
 	        this.shortcutCommandPalette = source["shortcutCommandPalette"];
 	        this.shortcutToggleTerminal = source["shortcutToggleTerminal"];
+	        this.obsidianPath = source["obsidianPath"];
 	    }
 	}
 	export class BranchInfo {
 	    name: string;
 	    isRemote: boolean;
 	    isCurrent: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BranchInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -44,16 +46,16 @@ export namespace model {
 	}
 	export class BranchList {
 	    branches: BranchInfo[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BranchList(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.branches = this.convertValues(source["branches"], BranchInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -81,11 +83,11 @@ export namespace model {
 	    timestamp: number;
 	    dateTime: string;
 	    files: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Commit(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sha = source["sha"];
@@ -104,11 +106,11 @@ export namespace model {
 	    filePath: string;
 	    lineNum: number;
 	    lineText: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ContentSearchResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.repoName = source["repoName"];
@@ -122,18 +124,18 @@ export namespace model {
 	    repoName: string;
 	    repoPath: string;
 	    items: ContentSearchResult[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ContentSearchGroup(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.repoName = source["repoName"];
 	        this.repoPath = source["repoPath"];
 	        this.items = this.convertValues(source["items"], ContentSearchResult);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -152,7 +154,7 @@ export namespace model {
 		    return a;
 		}
 	}
-
+	
 	export class Directory {
 	    id: string;
 	    name: string;
@@ -160,11 +162,11 @@ export namespace model {
 	    isDefault: boolean;
 	    // Go type: time
 	    createTime: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Directory(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -173,7 +175,7 @@ export namespace model {
 	        this.isDefault = source["isDefault"];
 	        this.createTime = this.convertValues(source["createTime"], null);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -192,38 +194,16 @@ export namespace model {
 		    return a;
 		}
 	}
-	export class DownloadProgress {
-	    totalBytes: number;
-	    downloaded: number;
-	    percent: number;
-	    speed: string;
-	    completed: boolean;
-	    error: string;
-
-	    static createFrom(source: any = {}) {
-	        return new DownloadProgress(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.totalBytes = source["totalBytes"];
-	        this.downloaded = source["downloaded"];
-	        this.percent = source["percent"];
-	        this.speed = source["speed"];
-	        this.completed = source["completed"];
-	        this.error = source["error"];
-	    }
-	}
 	export class Favorite {
 	    path: string;
 	    alias?: string;
 	    group: string;
 	    createdAt: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Favorite(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -232,15 +212,39 @@ export namespace model {
 	        this.createdAt = source["createdAt"];
 	    }
 	}
+	export class FileBytes {
+	    path: string;
+	    name: string;
+	    size: number;
+	    kind?: string;
+	    base64?: string;
+	    tooLarge: boolean;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileBytes(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.kind = source["kind"];
+	        this.base64 = source["base64"];
+	        this.tooLarge = source["tooLarge"];
+	        this.error = source["error"];
+	    }
+	}
 	export class FileChange {
 	    path: string;
 	    status: string;
 	    staged: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileChange(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -256,11 +260,12 @@ export namespace model {
 	    isBinary: boolean;
 	    tooLarge: boolean;
 	    error?: string;
-
+	    kind?: string;
+	
 	    static createFrom(source: any = {}) {
 	        return new FilePreview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -270,6 +275,7 @@ export namespace model {
 	        this.isBinary = source["isBinary"];
 	        this.tooLarge = source["tooLarge"];
 	        this.error = source["error"];
+	        this.kind = source["kind"];
 	    }
 	}
 	export class FileTreeNode {
@@ -281,11 +287,11 @@ export namespace model {
 	    hasChildren: boolean;
 	    children?: FileTreeNode[];
 	    isLeaf: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileTreeNode(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -297,7 +303,7 @@ export namespace model {
 	        this.children = this.convertValues(source["children"], FileTreeNode);
 	        this.isLeaf = source["isLeaf"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -322,11 +328,11 @@ export namespace model {
 	    // Go type: time
 	    date: any;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GitCommit(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hash = source["hash"];
@@ -334,7 +340,7 @@ export namespace model {
 	        this.date = this.convertValues(source["date"], null);
 	        this.message = source["message"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -357,11 +363,11 @@ export namespace model {
 	    remoteUrl: string;
 	    branch: string;
 	    isDetached: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GitRemoteInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.remoteUrl = source["remoteUrl"];
@@ -376,11 +382,11 @@ export namespace model {
 	    remoteUrl: string;
 	    commits: GitCommit[];
 	    isRepo: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GitRepoInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -390,7 +396,7 @@ export namespace model {
 	        this.commits = this.convertValues(source["commits"], GitCommit);
 	        this.isRepo = source["isRepo"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -415,11 +421,11 @@ export namespace model {
 	    current: number;
 	    size: number;
 	    pages: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PageResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.records = source["records"];
@@ -431,11 +437,11 @@ export namespace model {
 	}
 	export class PullSummary {
 	    total: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PullSummary(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.total = source["total"];
@@ -445,11 +451,11 @@ export namespace model {
 	    name: string;
 	    path: string;
 	    type: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SearchResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -462,11 +468,11 @@ export namespace model {
 	    executable: string;
 	    args?: string[];
 	    displayName: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ShellConfig(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.type = source["type"];
@@ -483,11 +489,11 @@ export namespace model {
 	    releaseNotes: string;
 	    publishedAt: string;
 	    fileSize: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hasUpdate = source["hasUpdate"];
@@ -501,3 +507,4 @@ export namespace model {
 	}
 
 }
+

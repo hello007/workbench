@@ -40,9 +40,9 @@ export function DeleteDirectory(arg1:string):Promise<boolean>;
 
 export function DeleteFile(arg1:string):Promise<boolean>;
 
-export function DownloadUpdate(arg1:string):Promise<void>;
-
 export function DiscardChanges(arg1:string,arg2:Array<string>):Promise<void>;
+
+export function DownloadUpdate(arg1:string):Promise<void>;
 
 export function ExtractRepoName(arg1:string):Promise<string>;
 
@@ -78,6 +78,8 @@ export function MoveItem(arg1:string,arg2:string):Promise<string>;
 
 export function OpenInExplorer(arg1:string):Promise<boolean>;
 
+export function OpenInObsidian(arg1:string):Promise<boolean>;
+
 export function OpenInVSCode(arg1:string):Promise<boolean>;
 
 export function OpenInWarp(arg1:string):Promise<boolean>;
@@ -87,6 +89,8 @@ export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
 
 export function PullRepo(arg1:string):Promise<string>;
+
+export function ReadFileBytes(arg1:string):Promise<model.FileBytes>;
 
 export function ReadFromSystemClipboard():Promise<string>;
 

@@ -231,6 +231,16 @@ func (a *App) PreviewFile(filePath string) *model.FilePreview {
 	return preview
 }
 
+// ReadFileBytes 读取文件原始字节（base64），供前端构造 Blob 预览图片/PDF/Office
+func (a *App) ReadFileBytes(filePath string) *model.FileBytes {
+	const maxSize = 50 * 1024 * 1024 // 50MB（图片/PDF/Office 放宽上限）
+	result, err := a.fileOpSvc.ReadFileBytes(filePath, maxSize)
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result
+}
+
 // SaveFile 保存文件内容
 func (a *App) SaveFile(filePath string, content string) error {
 	return a.fileOpSvc.SaveFile(filePath, content)
@@ -484,6 +494,21 @@ func (a *App) OpenInVSCode(path string) bool {
 // OpenInWarp 用 Warp 终端打开
 func (a *App) OpenInWarp(path string) bool {
 	err := a.fileOpSvc.OpenInWarp(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return false
+	}
+	return true
+}
+
+// OpenInObsidian 用 Obsidian 打开指定路径对应的 vault（文件夹→自身，文件→父目录）。
+// 若设置中配置了 Obsidian 程序路径则优先使用，否则走系统协议方案。
+func (a *App) OpenInObsidian(path string) bool {
+	var obsidianPath string
+	if settings, err := a.settingsSvc.Load(); err == nil {
+		obsidianPath = settings.ObsidianPath
+	}
+	err := a.fileOpSvc.OpenInObsidian(path, obsidianPath)
 	if err != nil {
 		println("Error:", err.Error())
 		return false

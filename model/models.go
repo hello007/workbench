@@ -121,6 +121,29 @@ type FilePreview struct {
 	IsBinary bool   `json:"isBinary"`
 	TooLarge bool   `json:"tooLarge"`
 	Error    string `json:"error,omitempty"`
+	// Kind 预览类型分流，供前端按类型选择渲染器：text/image/pdf/office/unsupported。
+	// 与 IsBinary 互补：图片/PDF/Office 虽是二进制，但可预览，需区别于"无法预览的二进制"。
+	Kind string `json:"kind,omitempty"`
+}
+
+// 预览类型常量
+const (
+	KindText        = "text"        // 文本类（txt/json/sql/md/代码等）
+	KindImage       = "image"       // 图片（jpg/png/bmp/gif/webp 等）
+	KindPDF         = "pdf"         // PDF
+	KindOffice      = "office"      // Office 文档（doc/docx/ppt/pptx/xls/xlsx 等）
+	KindUnsupported = "unsupported" // 不支持内嵌预览
+)
+
+// FileBytes 文件原始字节（base64），供前端构造 Blob 喂给预览组件（图片/PDF/Office）
+type FileBytes struct {
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	Kind     string `json:"kind,omitempty"`
+	Base64   string `json:"base64,omitempty"` // base64 编码的字节
+	TooLarge bool   `json:"tooLarge"`
+	Error    string `json:"error,omitempty"`
 }
 
 // PullResult 单个仓库的拉取结果

@@ -43,6 +43,15 @@
             <el-icon :size="14"><WarningFilled /></el-icon>
             <span>GPU 设置已变更，需重启应用后生效</span>
           </div>
+          <!-- 外部应用 -->
+          <div class="settings-section-title" style="margin-top: 24px;">外部应用</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">Obsidian 程序路径</div>
+              <div class="settings-item-desc">用 Obsidian 打开时优先使用该可执行文件；留空则尝试系统已注册的 Obsidian</div>
+            </div>
+            <el-input v-model="obsidianPath" size="small" style="width: 280px;" placeholder="如 C:\Users\me\AppData\Local\Obsidian\Obsidian.exe" @change="onSettingsChange" />
+          </div>
           <!-- 版本与更新 -->
           <div class="settings-section-title" style="margin-top: 24px;">关于</div>
           <div class="settings-item">
@@ -215,6 +224,7 @@ const needsRestart = ref(false)
 const defaultShell = ref('powershell')
 const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
 const wslDistro = ref('')
+const obsidianPath = ref('')
 const excludeDirs = ref([])
 const excludeFiles = ref([])
 const newExcludeDir = ref('')
@@ -322,6 +332,7 @@ async function loadSettings() {
     defaultShell.value = settings.defaultShell || 'powershell'
     gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
     wslDistro.value = settings.wslDistro || ''
+    obsidianPath.value = settings.obsidianPath || ''
     excludeDirs.value = settings.searchExcludeDirs || []
     excludeFiles.value = settings.searchExcludeFiles || []
     await loadShortcuts()
@@ -388,6 +399,7 @@ const onGpuChange = async (val) => {
       defaultShell: defaultShell.value,
       gitBashPath: gitBashPath.value,
       wslDistro: wslDistro.value,
+      obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
       searchExcludeFiles: excludeFiles.value
     })
@@ -404,6 +416,7 @@ const onSettingsChange = async () => {
       defaultShell: defaultShell.value,
       gitBashPath: gitBashPath.value,
       wslDistro: wslDistro.value,
+      obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
       searchExcludeFiles: excludeFiles.value
     })

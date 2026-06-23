@@ -1,20 +1,73 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(npx vitest *)",
-      "Read(//c/Users/liuyang/.claude/skills/subagent-driven-development/**)",
-      "Read(//c/Users/liuyang/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/pkg/runtime/**)",
-      "Bash(npm run *)",
-      "Bash(pip list *)",
-      "Bash(pip show *)",
-      "Bash(python -c \"from PIL import Image; print\\('Pillow available'\\)\")",
-      "Bash(node -e \"console.log\\(process.version\\)\")",
-      "Bash(npx --yes sharp-cli --version)",
-      "Bash(node -e \"try { require\\('sharp'\\); console.log\\('sharp available'\\); } catch\\(e\\) { console.log\\('sharp not available'\\); }\")",
-      "Bash(pip install *)",
-      "Bash(git check-ignore *)",
-      "Bash(node scripts/generate-icons.mjs)",
-      "Bash(node -e ' *)"
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-subagent-context.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-subagent-context.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-workflow-state.py",
+            "timeout": 15
+          }
+        ]
+      }
     ]
-  }
+  },
+  "enabledPlugins": {}
 }

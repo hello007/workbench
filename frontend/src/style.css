@@ -238,6 +238,24 @@ html, body {
   font-size: 14px;
 }
 
+/* 右键菜单内内置图标（如 Obsidian），与 el-icon 对齐 */
+.context-menu-img-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  vertical-align: middle;
+  object-fit: contain;
+}
+
+/* 按钮内内置图标（如 Obsidian） */
+.btn-img-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: middle;
+  object-fit: contain;
+}
+
 .context-menu-item.is-disabled {
   color: var(--text-placeholder);
   cursor: not-allowed;

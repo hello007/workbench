@@ -18,6 +18,8 @@ vi.mock('element-plus', async () => {
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   PreviewFile: vi.fn(() => Promise.resolve({ content: '', error: '' })),
+  ReadFileBytes: vi.fn(() => Promise.resolve({ base64: '', error: '' })),
+  SaveFile: vi.fn(() => Promise.resolve(undefined)),
   PullRepo: vi.fn(() => Promise.resolve('')),
   CloneRepo: vi.fn(() => Promise.resolve('克隆成功')),
   OpenWithDefaultApp: vi.fn(() => Promise.resolve(true))
@@ -115,7 +117,7 @@ describe('ContentPanel.vue', () => {
   })
 
   describe('文件预览', () => {
-    it('previewFile 成功应显示内容', async () => {
+    it('previewFile 成功应显示内容（文本类默认只读，进入编辑后显示 textarea）', async () => {
       const { PreviewFile } = await import('../../../wailsjs/go/main/App')
       const testContent = 'Hello, world!'
       PreviewFile.mockResolvedValueOnce({
@@ -125,7 +127,8 @@ describe('ContentPanel.vue', () => {
         content: testContent,
         isBinary: false,
         tooLarge: false,
-        error: ''
+        error: '',
+        kind: 'text'
       })
 
       wrapper = mount(ContentPanel, {
@@ -136,7 +139,7 @@ describe('ContentPanel.vue', () => {
         global: { stubs: contentPanelStubs }
       })
 
-      // 先检查初始状态
+      // 初始无预览区
       expect(wrapper.find('textarea').exists()).toBe(false)
 
       const buttons = wrapper.findAll('button')
@@ -147,21 +150,19 @@ describe('ContentPanel.vue', () => {
 
       expect(PreviewFile).toHaveBeenCalledWith('/test/file.txt')
 
-      // 检查组件实例的 filePreview 值
-      console.log('filePreview:', wrapper.vm.filePreview)
+      // 新契约：文本类默认只读渲染（无 textarea），预览区已显示
+      expect(wrapper.find('.file-preview').exists()).toBe(true)
+      expect(wrapper.find('textarea').exists()).toBe(false)
 
-      console.log('Wrapper HTML after preview:', wrapper.html())
+      // 点击「编辑」进入编辑态，出现 textarea 并携带内容
+      const editBtn = wrapper.findAll('button').find(btn => btn.text().includes('编辑'))
+      expect(editBtn.exists()).toBe(true)
+      await editBtn.trigger('click')
+      await flushPromises()
 
-      // 尝试通过其他方式查找文本框
       const textarea = wrapper.find('textarea')
-      console.log('Textarea found:', textarea.exists())
-
-      if (textarea.exists()) {
-        console.log('Textarea value:', textarea.element.value)
-      }
-
-      expect(wrapper.find('textarea').exists()).toBe(true)
-      expect(wrapper.find('textarea').element.value).toBe(testContent)
+      expect(textarea.exists()).toBe(true)
+      expect(textarea.element.value).toBe(testContent)
     })
 
     it('previewFile 大文件应显示警告', async () => {
@@ -193,21 +194,22 @@ describe('ContentPanel.vue', () => {
       expect(wrapper.find('textarea').exists()).toBe(false)
     })
 
-    it('previewFile 二进制文件应显示警告', async () => {
+    it('previewFile 不支持的二进制文件应降级提示（用默认程序打开）', async () => {
       const { PreviewFile } = await import('../../../wailsjs/go/main/App')
       PreviewFile.mockResolvedValueOnce({
-        path: '/test/image.png',
-        name: 'image.png',
+        path: '/test/data.bin',
+        name: 'data.bin',
         size: 1000,
         content: '',
         isBinary: true,
         tooLarge: false,
-        error: ''
+        error: '',
+        kind: 'unsupported'
       })
 
       wrapper = mount(ContentPanel, {
         props: {
-          selectedNode: { name: 'image.png', path: '/test/image.png', type: 'file' },
+          selectedNode: { name: 'data.bin', path: '/test/data.bin', type: 'file' },
           clipboard: { mode: null }
         },
         global: { stubs: contentPanelStubs }
@@ -218,8 +220,10 @@ describe('ContentPanel.vue', () => {
       await previewBtn.trigger('click')
       await flushPromises()
 
-      expect(ElMessage.warning).toHaveBeenCalledWith('二进制文件，无法预览')
+      // 不支持的二进制文件：无 textarea，降级分支提供「用默认程序打开」
       expect(wrapper.find('textarea').exists()).toBe(false)
+      expect(wrapper.text()).toContain('用默认程序打开')
+      expect(ElMessage.warning).toHaveBeenCalledWith('该文件类型暂不支持内嵌预览')
     })
 
     it('previewFile 错误应显示错误提示', async () => {
@@ -261,7 +265,8 @@ describe('ContentPanel.vue', () => {
         content: 'Hello, world!',
         isBinary: false,
         tooLarge: false,
-        error: ''
+        error: '',
+        kind: 'text'
       })
 
       wrapper = mount(ContentPanel, {
@@ -272,10 +277,14 @@ describe('ContentPanel.vue', () => {
         global: { stubs: contentPanelStubs }
       })
 
-      // 先调用 previewFile 显示内容
+      // 先调用 previewFile 显示内容（文本类默认只读，进入编辑后出现 textarea）
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
       await previewBtn.trigger('click')
+      await flushPromises()
+
+      const editBtn = wrapper.findAll('button').find(btn => btn.text().includes('编辑'))
+      await editBtn.trigger('click')
       await flushPromises()
       expect(wrapper.find('textarea').exists()).toBe(true)
 
