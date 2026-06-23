@@ -59,7 +59,7 @@ wails dev
 wails build
 ```
 
-构建产物位于 `build/bin/` 目录。
+构建产物位于 `build/bin/` 目录，`workbench.exe` 约 33MB（含 pdfjs viewer 静态资源）。
 
 ### 发版
 
@@ -115,7 +115,10 @@ cd frontend && npm test
 ├── model/           # 数据模型层
 ├── service/         # 业务逻辑层
 ├── util/            # 工具层
+├── server/          # PDF 预览 AssetServer handler（/preview-pdf 同源提供本地 PDF，支持 Range，路径安全校验）
 ├── frontend/        # Vue 3 前端
+│   ├── public/
+│   │   └── pdfjs-viewer/          # pdfjs 官方 viewer v4.8.69 静态资源（web/+build/+locale 中英），iframe 加载，go:embed 打包
 │   └── src/
 │       ├── views/Home.vue              # 上下分区布局容器 + 状态中枢
 │       ├── composables/
