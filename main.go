@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"workbench/server"
 	"workbench/service"
 )
 
@@ -38,7 +39,8 @@ func main() {
 		Width:  1280,
 		Height: 800,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: server.PreviewHandler(),
 		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,

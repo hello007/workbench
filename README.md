@@ -24,8 +24,9 @@
   - **图片**（jpg/jpeg/png/bmp/gif/webp）base64 内嵌显示，支持缩放
   - **文本**（txt/json/sql/md、各类代码）CodeMirror 6 只读高亮（行号、折叠、虚拟滚动）；Markdown 用 markdown-it 渲染（关闭原始 HTML 防 XSS）
   - **Office** — Word `.docx` 用 docx-preview 内嵌渲染；Excel `.xlsx/.xls/.csv` 用 SheetJS 解析为只读表格（多 Sheet 标签页）
+  - **PDF** — 内嵌预览（pdfjs 官方 viewer，工具栏支持翻页/缩放/搜索/缩略图）。通过 iframe 加载内嵌 viewer 静态资源、后端 `AssetServer` handler 以同源 URL 提供本地 PDF 字节（支持 HTTP Range，大 PDF 按需读取）；主页面不引入 pdfjs 库，靠 iframe 独立 browsing context 从架构上规避前端 pdfjs 双实例问题
   - **文本类「编辑」模式** — 文本类预览可一键切回就地编辑，保存复用既有 SaveFile 链路
-  - **降级为「用默认程序打开」** — PDF（pdfjs + WebView2 兼容性问题，暂不支持内嵌）、PowerPoint(`.pptx`)、旧版 Office(`.doc/.ppt`)、损坏/超大/不支持的类型，统一提供「用默认程序打开」按钮走系统默认程序
+  - **降级为「用默认程序打开」** — PowerPoint(`.pptx`)、旧版 Office(`.doc/.ppt`)、损坏/超大/不支持的类型，统一提供「用默认程序打开」按钮走系统默认程序
 - **用 Obsidian 打开** — 工作目录树/文件树右键菜单及操作面板「查看操作」均支持以 Obsidian 打开：文件夹以自身作为仓库（vault）、文件以父目录作为仓库；可在「设置 → 通用 → 外部应用」自定义 Obsidian 程序路径（配置后优先使用，否则走 `obsidian://` 协议 + 注册表预检 + `cmd /c start`，未检测到时引导用户配置或安装）
 - **Git 集成** — 查看提交历史、分支信息、仓库状态
 - **批量更新** — 一键批量 pull 所有仓库

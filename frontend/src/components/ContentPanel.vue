@@ -165,6 +165,7 @@
               :error="filePreview.error"
               :too-large="filePreview.tooLarge"
               :is-binary="filePreview.isBinary"
+              :pdf-path="filePreview.pdfPath"
               @open-external="handleOpenWithDefaultApp"
             />
           </div>
@@ -407,7 +408,8 @@ const filePreview = ref({
   isBinary: false,
   tooLarge: false,
   error: '',
-  kind: ''
+  kind: '',
+  pdfPath: ''
 })
 const originalContent = ref('')
 const isSaving = ref(false)
@@ -628,7 +630,10 @@ const previewFile = async () => {
       isBinary: !!preview.isBinary,
       tooLarge: !!preview.tooLarge,
       error: preview.error || '',
-      kind: preview.kind || ''
+      kind: preview.kind || '',
+      // PDF 走 iframe + 后端 /preview-pdf 同源 URL（POC-1），
+      // 不读取字节，直接把本地绝对路径传给渲染器拼装 URL。
+      pdfPath: preview.kind === 'pdf' ? (preview.path || props.selectedNode.path) : ''
     }
 
     if (preview.error) {
@@ -643,9 +648,8 @@ const previewFile = async () => {
     // 图片 / Office：拉取原始字节（base64）供渲染器使用。
     //   - 图片：渲染为 dataURL。
     //   - Office：docx 用 docx-preview、xlsx 用 SheetJS 在前端解析渲染。
-    // PDF 暂不支持内嵌预览（pdfjs + WebView2 系统性双实例问题，详见
-    // research/pdfjs-v6-pagesnumber-error.md），不再读取字节，统一走降级提示，
-    // 由用户手动点「用默认程序打开」按钮以系统默认阅读器查看。
+    // PDF：不读取字节，走 iframe + 后端 /preview-pdf 同源 URL（POC-1，WebView2 原生渲染），
+    //   主页面不 import pdfjs，靠 iframe 独立 browsing context 规避双实例。
     // 文本类用 content（PreviewFile 已返回），无需再取字节。
     const needsBytes = preview.kind === 'image' || preview.kind === 'office'
     if (!preview.error && !preview.tooLarge && needsBytes) {
@@ -679,7 +683,8 @@ const previewFile = async () => {
       isBinary: false,
       tooLarge: false,
       error: (error?.message || String(error)),
-      kind: ''
+      kind: '',
+      pdfPath: ''
     }
     ElMessage.error('预览失败: ' + (error?.message || String(error)))
   } finally {
@@ -798,7 +803,8 @@ const clearPreview = () => {
     isBinary: false,
     tooLarge: false,
     error: '',
-    kind: ''
+    kind: '',
+    pdfPath: ''
   }
   originalContent.value = ''
   isEditing.value = false

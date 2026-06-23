@@ -100,7 +100,25 @@
       </div>
     </div>
 
-    <!-- 不支持 / 超大 / 损坏 / PDF（PDF 暂不支持内嵌预览，由用户手动点「打开」走系统默认阅读器） -->
+    <!-- PDF：iframe 加载 pdfjs 官方完整 viewer（POC-2，方案 B）。
+         src=/pdfjs-viewer/web/viewer.html?file=<encoded /preview-pdf?path=...>，
+         viewer 内部按 ?file= 拉取 PDF 字节（仍走后端 AssetServer 同源 handler），
+         自带完整工具栏（翻页/缩放/搜索/缩略图/打印），保真度最高。
+         主页面不 import pdfjs，靠 iframe 独立 browsing context 从架构上规避双实例。 -->
+    <div v-else-if="kind === 'pdf'" class="preview-pdf-frame-wrap">
+      <iframe
+        v-if="pdfViewerSrc"
+        :src="pdfViewerSrc"
+        class="pdf-frame"
+        frameborder="0"
+      />
+      <div v-else class="preview-fallback">
+        <p class="fallback-tip">未提供 PDF 文件路径，无法预览。</p>
+        <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+      </div>
+    </div>
+
+    <!-- 不支持 / 超大 / 损坏 -->
     <div v-else class="preview-fallback">
       <p class="fallback-tip">{{ fallbackMessage }}</p>
       <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
@@ -173,7 +191,9 @@ const props = defineProps({
   // 错误/超大/二进制等附加状态
   error: { type: String, default: '' },
   tooLarge: { type: Boolean, default: false },
-  isBinary: { type: Boolean, default: false }
+  isBinary: { type: Boolean, default: false },
+  // PDF 本地绝对路径（kind=pdf 时由父组件传入，用于拼装 /preview-pdf 同源 URL）
+  pdfPath: { type: String, default: '' }
 })
 
 defineEmits(['openExternal'])
@@ -251,6 +271,24 @@ const imageDataUrl = computed(() => {
   const ext = getExt(props.fileName)
   const mime = imageMimeMap[ext] || 'image/octet-stream'
   return `data:${mime};base64,${props.base64}`
+})
+
+// ---------- PDF iframe URL（POC-2：pdfjs 官方完整 viewer） ----------
+// 通过 iframe 加载静态资源 /pdfjs-viewer/web/viewer.html，由 viewer 内部用
+// ?file= query 指定要打开的 PDF。PDF 本身仍由后端 AssetServer handler
+// （/preview-pdf?path=）以同源 URL 提供，dev 与 build 两态行为一致。
+//
+// 路径拼装（注意双重 encode）：
+//   1. pdfUrl = /preview-pdf?path=<encoded 本地路径>  —— 自身含 ?path= query
+//   2. 把 pdfUrl 作为 viewer 的 ?file= 参数，整体 encodeURIComponent，
+//      避免 pdfUrl 内的 ?/& 被 viewer 误解析为 viewer 自己的 query。
+//
+// 主页面不 import pdfjs：viewer 是 iframe 独立 browsing context，pdfjs 类
+// （含 PagesMapper）只在 iframe 内定义一份，从架构上规避前端 pdfjs 双实例。
+const pdfViewerSrc = computed(() => {
+  if (props.kind !== 'pdf' || !props.pdfPath) return ''
+  const pdfUrl = `/preview-pdf?path=${encodeURIComponent(props.pdfPath)}`
+  return `/pdfjs-viewer/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`
 })
 
 const imageScale = ref(1)
@@ -420,7 +458,6 @@ const renderXlsx = async () => {
 
 // ---------- 降级提示文案 ----------
 const fallbackMessage = computed(() => {
-  if (props.kind === 'pdf') return 'PDF 暂不支持内嵌预览，请点击「用默认程序打开」按钮用系统默认阅读器查看。'
   if (props.error) return '文件预览失败：' + props.error
   if (props.tooLarge) return '文件过大，暂不支持内嵌预览。'
   if (props.isBinary) return '二进制文件，无法内嵌预览。'
@@ -723,6 +760,23 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   font-size: 13px;
   text-align: center;
+}
+
+/* PDF iframe 容器 */
+.preview-pdf-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-tertiary);
 }
 
 /* 降级 */
