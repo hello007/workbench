@@ -239,3 +239,36 @@ README 项目结构补充 PDF 内嵌预览新增的 server/（preview.go AssetSe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 右侧操作面板布局优化
+
+**Date**: 2026-06-23
+**Task**: 右侧操作面板布局优化
+**Branch**: `master`
+
+### Summary
+
+优化右侧操作面板文件预览态布局，使预览区更适中：操作按钮组（基本/编辑/查看）从垂直堆叠改为横向紧凑流动（flex row + wrap），字体调小(12px)、一行排列（nowrap），查看操作 6 按钮一行排下；移除文件信息区「类型」字段（路径保留原 el-descriptions 样式），「复制路径/复制文件名」迁移到 descriptions 第二列（原类型位置），查看操作组相应移除；收紧「文件操作」标题与路径间距。UI 迭代多轮（紧凑化→间距→按钮一行→移除类型→恢复路径→按钮入第二列）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dfcab63` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
