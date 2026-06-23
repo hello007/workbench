@@ -19,6 +19,20 @@
 - 代价：需自行集成多渲染器、PPT 保真较弱、不支持旧格式 .doc/.ppt/.xls（降级外部打开）。
 - 后端 `ReadFileBytes`/`Kind` 基础已就绪（POC 产出，可复用）。
 
+## PDF 内嵌预览降级决策（2026-06-23）
+
+**背景**：阶段 1 MVP 原计划用 `pdfjs-dist` 渲染 PDF（翻页/缩放）。但实测 pdfjs + Vite ESM + WebView2 存在系统性「双实例」问题，4 种 worker 配置（v6 / v4 × `?url` / `workerPort`）全部失败。
+
+**根因**（已用 systematic-debugging 确认，详见 `research/pdfjs-v6-pagesnumber-error.md`）：即便 `workerPort` 设为真 Worker（console 已确认 `[pdf-preview] workerPort set: true Worker`），`WorkerTransport.getPage` 访问私有字段 `#pagePromises` 仍 brand-check 失败。Vite 把 `pdf.mjs`（主库）与 `pdf.worker.mjs`（worker）各打包一份，导致 `PDFDocumentProxy` 类被定义两份，主库的 `getPage()` 对 worker 创建的 proxy 做私有字段访问时失败。
+
+**决策**：**PDF 暂不支持内嵌预览，降级为「打开」按钮手动外部打开**。
+- 点击 PDF 文件不渲染、不自动打开；
+- 需要查看时由用户手动点击现有「用默认程序打开」按钮，触发系统默认阅读器。
+- 已移除 `pdfjs-dist` 依赖（`npm uninstall pdfjs-dist`），`FilePreviewRenderer.vue` 删除全部 PDF 渲染逻辑，`ContentPanel.vue` 中 `kind === 'pdf'` 不再调用 `ReadFileBytes`。
+- 简体中文注释已补充在 `FilePreviewRenderer.vue` 的 `fallbackMessage` 与 `ContentPanel.vue` 的 `previewFile`。
+
+**待后续出现确定性方案再评估**：例如后端转图片（缩略图/逐页栅格化）、或 pdfjs/WebView2 修复。
+
 ## POC 结论（Flyfish，2026-06-23）
 
 - `npm view` 确认包存在于 npmmirror（2.0.11）。
@@ -39,7 +53,7 @@
 | 类型 | 渲染方案 | 依赖 |
 |---|---|---|
 | 图片 jpg/png/bmp/webp/gif | 后端 base64 → `<img :src="dataUrl">`（Chromium 原生，含 bmp） | 无 |
-| PDF | pdf.js 渲染到 canvas（含翻页/缩放） | `pdfjs-dist` |
+| PDF | **暂不支持内嵌预览**（pdfjs + WebView2 双实例问题），降级「用默认程序打开」 | 已移除 `pdfjs-dist` |
 | Markdown | markdown-it 渲染（`html:false` 防 XSS） | `markdown-it` |
 | 代码高亮（含 md 代码块） | highlight.js 按需语言 | `highlight.js` |
 | 代码/txt/sql/json 只读 | CodeMirror 6 只读（行号/折叠/虚拟滚动） | `codemirror` + `@codemirror/{view,state,language,commands}` + `@codemirror/lang-*` |
@@ -63,7 +77,7 @@
 ## Acceptance Criteria
 
 * [ ] 点击 jpg/png/bmp，面板显示图片
-* [ ] 点击 pdf，面板可查看（翻页/缩放）
+* [ ] ~~点击 pdf，面板可查看（翻页/缩放）~~ **【降级/暂缓】**：pdfjs + WebView2 系统性双实例问题（详见上方「PDF 内嵌预览降级决策」与 `research/pdfjs-v6-pagesnumber-error.md`），暂不支持内嵌预览，点击 PDF 显示降级提示，由用户手动点「用默认程序打开」走系统默认阅读器。
 * [ ] 点击 docx/xlsx/pptx，面板显示内容（保真度按各库能力）
 * [ ] 点击 txt/json/sql/md，面板显示格式化/高亮/渲染内容
 * [ ] 文本类提供「编辑」入口，编辑后可保存（现有 SaveFile 链路不回退）
@@ -87,7 +101,8 @@
 ## Out of Scope（本任务不做）
 
 * 旧格式 .doc/.ppt/.xls 的内嵌预览（降级外部打开）
-* PDF/Office 的文本选择/搜索（pdf.js 自带搜索可用，Office 不强求）
+* **PDF 内嵌预览**：因 pdfjs + WebView2 系统性双实例问题（4 种 worker 配置均失败，详见 `research/pdfjs-v6-pagesnumber-error.md`）暂不支持，降级为「打开」按钮手动外部打开；待后续确定性方案（后端转图 / pdfjs 修复）再评估。
+* PDF/Office 的文本选择/搜索（Office 不强求）
 * 文档比对、水印、AI 切片等高级特性
 * Markdown 实时分屏预览
 
@@ -95,7 +110,7 @@
 
 * 关键文件：`ContentPanel.vue`（前端预览态）、`service/fileoperation.go`（`ReadFileBytes`/`PreviewFile` 已改）、`model/models.go`（`Kind`/`FileBytes` 已加）、`app.go`（`ReadFileBytes` 已绑定）、`util/file.go`（`ReadFileSafe`）
 * 技术栈：Go 1.26 + Wails v2.12 + Vue3 (Composition API) + Element Plus 2.13 + Vite 8
-* pdf.js worker：Vite 用 `?url` 导入 worker，配 `workerSrc`；CJK PDF 需 cMap
+* PDF：已放弃 pdfjs 内嵌方案（详见上方「PDF 内嵌预览降级决策」），降级「用默认程序打开」
 * CodeMirror 6：ESM + Vite 原生，无 worker，虚拟滚动支持大文件
 
 ## Research References
@@ -104,3 +119,9 @@
 * `research/office-doc-preview.md` — Office 前端库（避坑 unioffice/Handsontable）
 * `research/text-preview.md` — markdown-it + highlight.js + CodeMirror 6
 * `research/flyfish-file-viewer.md` — Flyfish 调研（POC 实测：依赖过大不可行，已放弃）
+
+## 打包体积记录（2026-06-23 收尾）
+
+* `wails build` 产物 `build/bin/workbench.exe` ≈ **17.6 MB**（18,475,008 字节），已移除 `pdfjs-dist`。
+* 前端 production chunk（`vite build`）：`Home-*.js` 约 1.67 MB（gzip 539 KB，含 docx-preview/xlsx/CodeMirror/highlight.js/markdown-it），`index-*.js` 约 0.96 MB（gzip 318 KB）。Vite 提示单 chunk 超 500 KB，属预期（桌面应用不强制拆包），后续若需可按路由/渲染器做动态 import 拆分。
+* 结论：相对仅文本预览时期体积增长可控，符合「依赖可控、体积可控」的自研拼装决策。

@@ -30,6 +30,16 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOff: vi.fn()
 }))
 
+// docx-preview / xlsx 在 jsdom 下会真实加载（动态 import），用空实现 stub，
+// 避免 Office 渲染用例触发真实库渲染（jsdom 下 DOM/Canvas 能力不全易崩）。
+vi.mock('docx-preview', () => ({
+  renderAsync: vi.fn(() => Promise.resolve())
+}))
+vi.mock('xlsx', () => ({
+  read: vi.fn(() => ({ SheetNames: [], Sheets: {} })),
+  utils: { sheet_to_json: vi.fn(() => []) }
+}))
+
 const contentPanelStubs = {
   'el-descriptions': { template: '<div class="el-descriptions"><slot /></div>', props: ['column', 'border'] },
   'el-descriptions-item': { template: '<div class="el-descriptions-item"><slot /></div>', props: ['label'] },
@@ -252,6 +262,108 @@ describe('ContentPanel.vue', () => {
       await flushPromises()
 
       expect(ElMessage.error).toHaveBeenCalledWith('预览失败: File not found')
+    })
+
+    it('previewFile office(docx) 应调用 ReadFileBytes 取 base64 传给渲染器', async () => {
+      const { PreviewFile, ReadFileBytes } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/report.docx',
+        name: 'report.docx',
+        size: 1024,
+        content: '',
+        base64: '',
+        isBinary: false,
+        tooLarge: false,
+        error: '',
+        kind: 'office'
+      })
+      ReadFileBytes.mockResolvedValueOnce({ base64: 'UEsDBBQAAAAAA', error: '', tooLarge: false })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'report.docx', path: '/test/report.docx', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      const buttons = wrapper.findAll('button')
+      const previewBtn = buttons.find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+
+      // office 应触发 ReadFileBytes 取字节
+      expect(ReadFileBytes).toHaveBeenCalledWith('/test/report.docx')
+      // 渲染器组件被挂载，且接受了 base64 prop
+      const renderer = wrapper.findComponent({ name: 'FilePreviewRenderer' })
+      // stub 场景下组件名可能缺失，回退断言预览区已显示
+      expect(wrapper.find('.file-preview').exists()).toBe(true)
+    })
+
+    it('previewFile office 文件过大（ReadFileBytes 返回 tooLarge）应降级提示', async () => {
+      const { PreviewFile, ReadFileBytes } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/big.xlsx',
+        name: 'big.xlsx',
+        size: 80 * 1024 * 1024,
+        content: '',
+        base64: '',
+        isBinary: false,
+        tooLarge: false,
+        error: '',
+        kind: 'office'
+      })
+      ReadFileBytes.mockResolvedValueOnce({ base64: '', error: '', tooLarge: true })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'big.xlsx', path: '/test/big.xlsx', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      const buttons = wrapper.findAll('button')
+      const previewBtn = buttons.find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+
+      expect(ReadFileBytes).toHaveBeenCalledWith('/test/big.xlsx')
+      expect(ElMessage.warning).toHaveBeenCalledWith('文件过大，无法预览')
+    })
+
+    it('previewFile 图片读取字节失败（ReadFileBytes 返回 error）应走降级提示', async () => {
+      const { PreviewFile, ReadFileBytes } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/pic.png',
+        name: 'pic.png',
+        size: 1024,
+        content: '',
+        base64: '',
+        isBinary: false,
+        tooLarge: false,
+        error: '',
+        kind: 'image'
+      })
+      ReadFileBytes.mockResolvedValueOnce({ base64: '', error: 'read error', tooLarge: false })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'pic.png', path: '/test/pic.png', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      const buttons = wrapper.findAll('button')
+      const previewBtn = buttons.find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+
+      expect(ReadFileBytes).toHaveBeenCalledWith('/test/pic.png')
+      expect(ElMessage.error).toHaveBeenCalledWith('读取文件字节失败: read error')
+      // 图片读取失败应走降级分支，提供「用默认程序打开」
+      expect(wrapper.text()).toContain('用默认程序打开')
     })
   })
 

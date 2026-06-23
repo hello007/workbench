@@ -146,13 +146,12 @@
               <el-input
                 v-model="filePreview.content"
                 type="textarea"
-                :rows="15"
                 class="preview-textarea"
               />
-              <div v-if="isContentModified" class="preview-actions">
-                <span class="modified-indicator">● 已修改</span>
+              <div class="preview-actions">
+                <span v-if="isContentModified" class="modified-indicator">● 已修改</span>
                 <el-button size="small" @click="handleCancelEdit">取消</el-button>
-                <el-button size="small" type="primary" :loading="isSaving" @click="handleSave">保存</el-button>
+                <el-button size="small" type="primary" :loading="isSaving" :disabled="!isContentModified" @click="handleSave">保存</el-button>
               </div>
             </template>
 
@@ -641,14 +640,22 @@ const previewFile = async () => {
       ElMessage.warning('该文件类型暂不支持内嵌预览')
     }
 
-    // 图片 / PDF：拉取原始字节（base64）供渲染器使用
-    if (!preview.error && !preview.tooLarge && (preview.kind === 'image' || preview.kind === 'pdf')) {
+    // 图片 / Office：拉取原始字节（base64）供渲染器使用。
+    //   - 图片：渲染为 dataURL。
+    //   - Office：docx 用 docx-preview、xlsx 用 SheetJS 在前端解析渲染。
+    // PDF 暂不支持内嵌预览（pdfjs + WebView2 系统性双实例问题，详见
+    // research/pdfjs-v6-pagesnumber-error.md），不再读取字节，统一走降级提示，
+    // 由用户手动点「用默认程序打开」按钮以系统默认阅读器查看。
+    // 文本类用 content（PreviewFile 已返回），无需再取字节。
+    const needsBytes = preview.kind === 'image' || preview.kind === 'office'
+    if (!preview.error && !preview.tooLarge && needsBytes) {
       try {
         const bytes = await ReadFileBytes(props.selectedNode.path)
         if (bytes.error) {
           filePreview.value.error = bytes.error
           ElMessage.error('读取文件字节失败: ' + bytes.error)
         } else if (bytes.tooLarge) {
+          // Office 文件过大（超过 ReadFileBytes 上限）→ 降级提示 + 打开按钮
           filePreview.value.tooLarge = true
           ElMessage.warning('文件过大，无法预览')
         } else {
@@ -980,9 +987,18 @@ defineExpose({
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
   font-family: Consolas, 'Courier New', monospace;
-  min-height: 200px;
   flex: 1;
+  min-height: 0;
+}
+
+.preview-textarea :deep(.el-textarea) {
+  height: 100%;
+}
+
+.preview-textarea :deep(.el-textarea__inner) {
+  height: 100% !important;
   resize: vertical;
+  font-family: Consolas, 'Courier New', monospace;
 }
 
 .preview-textarea:hover {
@@ -993,12 +1009,14 @@ defineExpose({
 .preview-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-sm);
   margin-top: var(--spacing-xs);
   padding: var(--spacing-xs) var(--spacing-sm);
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .modified-indicator {

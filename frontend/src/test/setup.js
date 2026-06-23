@@ -4,6 +4,26 @@
 
 import { vi } from 'vitest'
 
+// jsdom 缺失的浏览器 API 补丁：
+// - ResizeObserver：@codemirror/view 顶层模块引用，否则加载即抛 ReferenceError
+// - DOMMatrix：兜底防御（曾为 pdfjs-dist 准备，pdfjs 已移除但保留 stub 无副作用）
+// 仅在测试环境生效，不影响生产构建。
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = ResizeObserverStub
+}
+if (!globalThis.DOMMatrix) {
+  globalThis.DOMMatrix = class DOMMatrix {
+    constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0 }
+    multiply() { return this }
+    inverse() { return this }
+  }
+}
+
 // Mock Wails绑定
 vi.mock('../../wailsjs/go/main/App', () => ({
   GetDirectories: vi.fn(() => Promise.resolve([])),

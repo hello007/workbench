@@ -1,7 +1,7 @@
 <template>
   <div class="file-preview-renderer">
-    <!-- 图片预览：base64 → dataURL → <img> -->
-    <div v-if="kind === 'image'" class="preview-image-wrap">
+    <!-- 图片预览：base64 → dataURL → <img>（读取失败/过大时无 base64，走降级分支） -->
+    <div v-if="kind === 'image' && !error && !tooLarge" class="preview-image-wrap">
       <div class="image-toolbar">
         <el-button-group size="small">
           <el-button @click="zoomOut">缩小</el-button>
@@ -21,26 +21,6 @@
       </div>
     </div>
 
-    <!-- PDF 预览：pdf.js 渲染到 canvas -->
-    <div v-else-if="kind === 'pdf'" class="preview-pdf-wrap">
-      <div class="pdf-toolbar">
-        <el-button-group size="small">
-          <el-button :disabled="pdfPage <= 1" @click="prevPage">上一页</el-button>
-          <el-button :disabled="pdfPage >= pdfPageCount" @click="nextPage">下一页</el-button>
-        </el-button-group>
-        <span class="pdf-page-label">第 {{ pdfPage }} / {{ pdfPageCount }} 页</span>
-        <el-button-group size="small">
-          <el-button @click="pdfZoomOut">缩小</el-button>
-          <el-button @click="pdfResetZoom">100%</el-button>
-          <el-button @click="pdfZoomIn">放大</el-button>
-        </el-button-group>
-      </div>
-      <div class="pdf-canvas-scroll" ref="pdfScrollRef" v-loading="pdfLoading">
-        <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-        <div v-if="pdfError" class="pdf-error-tip">{{ pdfError }}</div>
-      </div>
-    </div>
-
     <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 -->
     <div v-else-if="isMarkdown" class="preview-markdown-wrap">
       <div class="markdown-body" v-html="renderedMarkdown"></div>
@@ -51,13 +31,76 @@
       <div ref="cmHostRef" class="cm-host"></div>
     </div>
 
-    <!-- Office：阶段 2 占位 -->
-    <div v-else-if="kind === 'office'" class="preview-fallback">
-      <p class="fallback-tip">Office 文档预览开发中，暂时请用默认程序打开。</p>
-      <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+    <!-- Office：按扩展名子类型分发（docx / xlsx 系内嵌渲染，pptx 与旧格式降级） -->
+    <div v-else-if="kind === 'office'" class="preview-office-wrap">
+      <!-- Word .docx：docx-preview 内嵌渲染（中保真） -->
+      <template v-if="officeSubType === 'docx'">
+        <div v-if="officeError" class="preview-fallback">
+          <p class="fallback-tip">{{ officeError }}</p>
+          <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+        </div>
+        <div
+          v-else
+          v-loading="officeLoading"
+          ref="docxContainerRef"
+          class="docx-container"
+          element-loading-text="正在加载 Word 文档..."
+        ></div>
+      </template>
+
+      <!-- Excel .xlsx/.xls/.csv：SheetJS 读 + el-table 渲染（只读，多 sheet 用 el-tabs） -->
+      <template v-else-if="officeSubType === 'xlsx'">
+        <div v-if="officeError" class="preview-fallback">
+          <p class="fallback-tip">{{ officeError }}</p>
+          <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+        </div>
+        <div v-else v-loading="officeLoading" class="xlsx-wrap" element-loading-text="正在加载 Excel 文档...">
+          <el-tabs v-if="xlsxSheets.length > 0" v-model="activeSheetName" class="xlsx-tabs">
+            <el-tab-pane
+              v-for="sheet in xlsxSheets"
+              :key="sheet.name"
+              :label="sheet.name"
+              :name="sheet.name"
+            >
+              <!-- 空 sheet 提示 -->
+              <div v-if="sheet.rows.length === 0" class="xlsx-empty-tip">该工作表为空。</div>
+              <el-table
+                v-else
+                :data="sheet.dataRows"
+                size="small"
+                border
+                height="100%"
+                class="xlsx-table"
+              >
+                <el-table-column
+                  v-for="(col, idx) in sheet.columns"
+                  :key="idx"
+                  :prop="col.prop"
+                  :label="col.label"
+                  min-width="100"
+                  show-overflow-tooltip
+                />
+              </el-table>
+            </el-tab-pane>
+          </el-tabs>
+          <div v-else class="xlsx-empty-tip">未解析到任何工作表数据。</div>
+        </div>
+      </template>
+
+      <!-- PowerPoint .pptx/.ppt：保真较低，降级提示 + 打开 -->
+      <div v-else-if="officeSubType === 'pptx'" class="preview-fallback">
+        <p class="fallback-tip">PowerPoint 内嵌预览保真较低，建议用默认程序打开查看完整效果。</p>
+        <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+      </div>
+
+      <!-- 旧版 Office 格式 .doc/.dot/.odt/.odp/.ods/.rtf 等：前端库不支持，降级 -->
+      <div v-else class="preview-fallback">
+        <p class="fallback-tip">旧版 Office 格式暂不支持内嵌预览，请用默认程序打开。</p>
+        <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+      </div>
     </div>
 
-    <!-- 不支持 / 超大 / 损坏 -->
+    <!-- 不支持 / 超大 / 损坏 / PDF（PDF 暂不支持内嵌预览，由用户手动点「打开」走系统默认阅读器） -->
     <div v-else class="preview-fallback">
       <p class="fallback-tip">{{ fallbackMessage }}</p>
       <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
@@ -68,6 +111,16 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
+// Office 渲染依赖采用静态 import：
+// 历史上曾用 await import('docx-preview') / await import('xlsx') 动态加载，
+// 但 wails dev 下 Vite 会把动态 import 重写为 /node_modules/.vite/deps/xlsx.js
+// 这类基于 location 解析的 optimizeDeps 预构建路径，而 Wails DevServer 对
+// .vite/deps 的代理不完整，导致 fetch 失败（dev 特有，production 无此问题）。
+// 改为静态 import 后 dev 与 production 行为一致，Office 才能在 dev 下验证。
+// docx-preview / xlsx 不依赖 DOMMatrix/Worker，jsdom 测试环境下安全
+// （测试已用 vi.mock stub 掉，见 ContentPanel.spec.js）。
+import { renderAsync } from 'docx-preview'
+import * as XLSX from 'xlsx'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
@@ -110,28 +163,12 @@ import { javascript as cmJs } from '@codemirror/lang-javascript'
 import { html as cmHtml } from '@codemirror/lang-html'
 import { css as cmCss } from '@codemirror/lang-css'
 
-// pdf.js v6：按需懒加载，避免顶层 import 在 jsdom 测试环境触发 DOMMatrix 未定义，
-// 同时让 pdfjs 主库拆分为独立 chunk，非 PDF 场景不进入首屏包。
-let pdfjsLibPromise = null
-const loadPdfjs = async () => {
-  if (!pdfjsLibPromise) {
-    pdfjsLibPromise = Promise.all([
-      import('pdfjs-dist'),
-      import('pdfjs-dist/build/pdf.worker.min.mjs?url')
-    ]).then(([lib, workerMod]) => {
-      lib.GlobalWorkerOptions.workerSrc = workerMod.default
-      return lib
-    })
-  }
-  return pdfjsLibPromise
-}
-
 const props = defineProps({
   kind: { type: String, default: '' },
   fileName: { type: String, default: '' },
   // 文本内容（kind=text / markdown 用）
   content: { type: String, default: '' },
-  // 图片/PDF 的 base64 原始字节（不含 data: 前缀）
+  // 图片的 base64 原始字节（不含 data: 前缀）
   base64: { type: String, default: '' },
   // 错误/超大/二进制等附加状态
   error: { type: String, default: '' },
@@ -222,91 +259,6 @@ const zoomIn = () => { imageScale.value = Math.min(5, imageScale.value + 0.2) }
 const zoomOut = () => { imageScale.value = Math.max(0.2, imageScale.value - 0.2) }
 const resetZoom = () => { imageScale.value = 1 }
 
-// ---------- PDF 预览 ----------
-const pdfCanvasRef = ref(null)
-const pdfScrollRef = ref(null)
-const pdfLoading = ref(false)
-const pdfError = ref('')
-const pdfDoc = ref(null)
-const pdfPage = ref(1)
-const pdfPageCount = ref(0)
-const pdfScale = ref(1.2)
-
-const base64ToUint8 = (b64) => {
-  const bin = atob(b64)
-  const len = bin.length
-  const bytes = new Uint8Array(len)
-  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes
-}
-
-const renderPdfPage = async () => {
-  if (!pdfDoc.value || !pdfCanvasRef.value) return
-  pdfLoading.value = true
-  pdfError.value = ''
-  try {
-    const page = await pdfDoc.value.getPage(pdfPage.value)
-    const viewport = page.getViewport({ scale: pdfScale.value })
-    const canvas = pdfCanvasRef.value
-    const context = canvas.getContext('2d')
-    // 高分屏适配
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.floor(viewport.width * ratio)
-    canvas.height = Math.floor(viewport.height * ratio)
-    canvas.style.width = `${Math.floor(viewport.width)}px`
-    canvas.style.height = `${Math.floor(viewport.height)}px`
-    context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    await page.render({ canvasContext: context, viewport }).promise
-  } catch (e) {
-    pdfError.value = 'PDF 页面渲染失败：' + (e?.message || String(e))
-  } finally {
-    pdfLoading.value = false
-  }
-}
-
-const loadPdf = async () => {
-  if (props.kind !== 'pdf' || !props.base64) return
-  pdfLoading.value = true
-  pdfError.value = ''
-  try {
-    // 切换到新 PDF 前，先销毁旧文档，避免内存泄漏
-    if (pdfDoc.value) {
-      try { pdfDoc.value.destroy() } catch {}
-      pdfDoc.value = null
-      pdfPageCount.value = 0
-    }
-    const lib = await loadPdfjs()
-    const data = base64ToUint8(props.base64)
-    // 注：CJK PDF 需要 cMap 资源。Wails 打包为 file:// + dist/assets，
-    // 动态 cMap 资源路径较难处理，阶段 1 MVP 暂不配置 cMapUrl（纯英文 PDF 不受影响）。
-    // 阶段 2/3 收尾时再按打包资源路径补 cMapUrl + standardFontDataUrl。
-    const task = lib.getDocument({ data })
-    pdfDoc.value = await task.promise
-    pdfPageCount.value = pdfDoc.value.numPages
-    pdfPage.value = 1
-    await nextTick()
-    await renderPdfPage()
-  } catch (e) {
-    pdfError.value = 'PDF 加载失败：' + (e?.message || String(e))
-  } finally {
-    pdfLoading.value = false
-  }
-}
-
-const prevPage = async () => {
-  if (pdfPage.value <= 1) return
-  pdfPage.value--
-  await renderPdfPage()
-}
-const nextPage = async () => {
-  if (pdfPage.value >= pdfPageCount.value) return
-  pdfPage.value++
-  await renderPdfPage()
-}
-const pdfZoomIn = async () => { pdfScale.value = Math.min(4, pdfScale.value + 0.3); await renderPdfPage() }
-const pdfZoomOut = async () => { pdfScale.value = Math.max(0.4, pdfScale.value - 0.3); await renderPdfPage() }
-const pdfResetZoom = async () => { pdfScale.value = 1.2; await renderPdfPage() }
-
 // ---------- CodeMirror 只读文本 ----------
 const cmHostRef = ref(null)
 let cmView = null
@@ -347,8 +299,128 @@ const setupCodeMirror = () => {
   })
 }
 
+// ---------- Office 子类型分发 ----------
+// docx：Word 新格式（docx-preview 可渲染）
+// xlsx：Excel 类（含 .xlsx/.xls/.csv，SheetJS 读 + el-table 渲染）
+// pptx：PowerPoint（保真低，降级外部打开）
+// legacy：旧版/其他 Office 格式（前端库不支持，降级外部打开）
+const XLS_EXTS = new Set(['xlsx', 'xls', 'xlsm', 'xlsb', 'csv'])
+const PPT_EXTS = new Set(['pptx', 'ppt', 'pptm', 'pps', 'ppsx'])
+const LEGACY_OFFICE_EXTS = new Set([
+  'doc', 'dot', 'dotx', 'docm',
+  'odt', 'odp', 'ods', 'rtf'
+])
+
+const officeSubType = computed(() => {
+  if (props.kind !== 'office') return ''
+  const ext = getExt(props.fileName)
+  if (ext === 'docx') return 'docx'
+  if (XLS_EXTS.has(ext)) return 'xlsx'
+  if (PPT_EXTS.has(ext)) return 'pptx'
+  // 剩余扩展名（含 LEGACY_OFFICE_EXTS 与其他未知 office 扩展）统一走旧格式降级
+  return 'legacy'
+})
+
+// ---------- base64 → ArrayBuffer 工具 ----------
+const base64ToUint8Array = (base64) => {
+  const binary = atob(base64)
+  const len = binary.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+// ---------- Word .docx 渲染（docx-preview，顶部静态 import） ----------
+const docxContainerRef = ref(null)
+const officeLoading = ref(false)
+const officeError = ref('')
+
+const renderDocx = async () => {
+  // 清空旧渲染产物
+  if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
+  if (!props.base64) {
+    officeError.value = 'Word 文档数据为空，无法预览。'
+    return
+  }
+  officeLoading.value = true
+  officeError.value = ''
+  try {
+    const data = base64ToUint8Array(props.base64)
+    await renderAsync(data, docxContainerRef.value, null, {
+      className: 'docx', // 渲染产物样式前缀
+      inWrapper: true,
+      ignoreWidth: false,
+      ignoreHeight: false,
+      breakPages: true,
+      experimental: true
+    })
+  } catch (e) {
+    officeError.value = 'Word 文档渲染失败：' + (e?.message || String(e)) + '，建议用默认程序打开。'
+  } finally {
+    officeLoading.value = false
+  }
+}
+
+// ---------- Excel 渲染（SheetJS xlsx，顶部静态 import） ----------
+const xlsxSheets = ref([]) // [{ name, rows, columns, dataRows }]
+const activeSheetName = ref('')
+
+const renderXlsx = async () => {
+  xlsxSheets.value = []
+  activeSheetName.value = ''
+  if (!props.base64) {
+    officeError.value = 'Excel 文档数据为空，无法预览。'
+    return
+  }
+  officeLoading.value = true
+  officeError.value = ''
+  try {
+    const data = base64ToUint8Array(props.base64)
+    const workbook = XLSX.read(data, { type: 'array' })
+    const sheets = []
+    workbook.SheetNames.forEach((sheetName) => {
+      const sheet = workbook.Sheets[sheetName]
+      // header:1 → 二维数组（按行），仅取单元格值，不保留样式
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: '' })
+      if (!rows || rows.length === 0) {
+        sheets.push({ name: sheetName, rows: [], columns: [], dataRows: [] })
+        return
+      }
+      // 首行作为表头，其余作为数据行
+      const headerRow = rows[0] || []
+      const colCount = headerRow.length
+      const columns = []
+      for (let i = 0; i < colCount; i++) {
+        columns.push({
+          prop: 'c' + i,
+          label: headerRow[i] === '' || headerRow[i] === null || headerRow[i] === undefined
+            ? '列' + (i + 1)
+            : String(headerRow[i])
+        })
+      }
+      // 将每行数据映射为 { c0: v0, c1: v1, ... }，便于 el-table 按 prop 取值
+      const dataRows = rows.slice(1).map((row) => {
+        const obj = {}
+        for (let i = 0; i < colCount; i++) {
+          const v = row[i]
+          obj['c' + i] = v === undefined || v === null ? '' : v
+        }
+        return obj
+      })
+      sheets.push({ name: sheetName, rows, columns, dataRows })
+    })
+    xlsxSheets.value = sheets
+    if (sheets.length > 0) activeSheetName.value = sheets[0].name
+  } catch (e) {
+    officeError.value = 'Excel 文档解析失败：' + (e?.message || String(e)) + '，建议用默认程序打开。'
+  } finally {
+    officeLoading.value = false
+  }
+}
+
 // ---------- 降级提示文案 ----------
 const fallbackMessage = computed(() => {
+  if (props.kind === 'pdf') return 'PDF 暂不支持内嵌预览，请点击「用默认程序打开」按钮用系统默认阅读器查看。'
   if (props.error) return '文件预览失败：' + props.error
   if (props.tooLarge) return '文件过大，暂不支持内嵌预览。'
   if (props.isBinary) return '二进制文件，无法内嵌预览。'
@@ -357,26 +429,42 @@ const fallbackMessage = computed(() => {
 })
 
 // ---------- 生命周期：随 props 变化重建对应渲染器 ----------
+const renderOfficeBySubType = async () => {
+  // 切换/重渲染前清空 office 内部状态与旧产物
+  officeError.value = ''
+  xlsxSheets.value = []
+  activeSheetName.value = ''
+  if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
+  if (officeSubType.value === 'docx') {
+    await nextTick()
+    await renderDocx()
+  } else if (officeSubType.value === 'xlsx') {
+    await nextTick()
+    await renderXlsx()
+  }
+  // pptx / legacy 无需渲染，模板走降级分支
+}
+
 watch(() => [props.kind, props.fileName, props.base64, props.content], async () => {
   // 销毁 CodeMirror（切到非 text 类型时）
   if (props.kind !== 'text' && cmView) {
     cmView.destroy()
     cmView = null
   }
-  // 销毁 PDF 文档
-  if (props.kind !== 'pdf' && pdfDoc.value) {
-    try { pdfDoc.value.destroy() } catch {}
-    pdfDoc.value = null
-    pdfPageCount.value = 0
+  // 切到非 office 时，清空 office 渲染产物与状态
+  if (props.kind !== 'office') {
+    officeError.value = ''
+    xlsxSheets.value = []
+    activeSheetName.value = ''
+    if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
   }
   if (props.kind === 'text') {
     await nextTick()
     setupCodeMirror()
-  } else if (props.kind === 'pdf') {
-    await nextTick()
-    await loadPdf()
   } else if (props.kind === 'image') {
     imageScale.value = 1
+  } else if (props.kind === 'office') {
+    await renderOfficeBySubType()
   }
 }, { immediate: false })
 
@@ -385,18 +473,15 @@ onMounted(async () => {
   if (props.kind === 'text') {
     await nextTick()
     setupCodeMirror()
-  } else if (props.kind === 'pdf') {
-    await nextTick()
-    await loadPdf()
+  } else if (props.kind === 'office') {
+    await renderOfficeBySubType()
   }
 })
 
 onBeforeUnmount(() => {
   if (cmView) { cmView.destroy(); cmView = null }
-  if (pdfDoc.value) {
-    try { pdfDoc.value.destroy() } catch {}
-    pdfDoc.value = null
-  }
+  // 卸载时清空 docx 渲染容器，避免 DOM 残留
+  if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
 })
 </script>
 
@@ -410,7 +495,6 @@ onBeforeUnmount(() => {
 
 /* 图片 */
 .preview-image-wrap,
-.preview-pdf-wrap,
 .preview-markdown-wrap,
 .preview-codemirror-wrap {
   display: flex;
@@ -419,8 +503,7 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.image-toolbar,
-.pdf-toolbar {
+.image-toolbar {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm, 8px);
@@ -432,8 +515,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.image-scale-label,
-.pdf-page-label {
+.image-scale-label {
   font-size: 12px;
   color: var(--text-secondary);
   margin: 0 auto;
@@ -458,31 +540,6 @@ onBeforeUnmount(() => {
   transform-origin: center center;
   transition: transform 0.15s ease;
   object-fit: contain;
-}
-
-/* PDF */
-.pdf-canvas-scroll {
-  flex: 1;
-  overflow: auto;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm, 4px);
-  display: flex;
-  justify-content: center;
-  padding: var(--spacing-sm, 8px);
-  min-height: 120px;
-  position: relative;
-}
-
-.pdf-canvas {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  background: #fff;
-}
-
-.pdf-error-tip {
-  color: var(--danger-color, #f56c6c);
-  font-size: 13px;
-  padding: var(--spacing-md, 12px);
 }
 
 /* Markdown */
@@ -593,6 +650,79 @@ onBeforeUnmount(() => {
 .cm-host :deep(.cm-gutters) {
   background: var(--bg-tertiary);
   border-right: 1px solid var(--border-color);
+}
+
+/* Office 容器 */
+.preview-office-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* docx-preview 渲染产物：白色纸张背景 + 可滚动 */
+.docx-container {
+  flex: 1;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--spacing-md, 16px);
+  min-height: 0;
+}
+
+.docx-container :deep(.docx-wrapper) {
+  background: #fff;
+  padding: 0;
+}
+
+.docx-container :deep(.docx-wrapper > section) {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  margin-bottom: 16px;
+}
+
+/* Excel 渲染容器 */
+.xlsx-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--spacing-xs, 4px);
+}
+
+.xlsx-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.xlsx-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.xlsx-tabs :deep(.el-tab-pane) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.xlsx-table {
+  flex: 1;
+  min-height: 0;
+}
+
+.xlsx-empty-tip {
+  padding: var(--spacing-md, 16px);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
 }
 
 /* 降级 */
