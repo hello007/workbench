@@ -2,9 +2,14 @@
   <div class="content-panel">
     <div v-if="selectedNode" class="content-inner">
       <h2>{{ selectedNode.name }}</h2>
+
+      <!-- 节点信息：第一列为完整路径，第二列（原类型字段位置）放置复制路径/复制文件名按钮 -->
       <el-descriptions :column="2" border>
         <el-descriptions-item label="路径">{{ selectedNode.path }}</el-descriptions-item>
-        <el-descriptions-item label="类型">{{ selectedNode.type === 'directory' ? '文件夹' : '文件' }}</el-descriptions-item>
+        <el-descriptions-item label="操作">
+          <el-button size="small" @click="handleCopyPath">复制路径</el-button>
+          <el-button v-if="selectedNode.type === 'file'" size="small" @click="handleCopyName">复制文件名</el-button>
+        </el-descriptions-item>
       </el-descriptions>
 
       <!-- Git 操作按钮 -->
@@ -67,7 +72,6 @@
           <div>
             <span class="action-label">查看操作</span>
             <el-button-group>
-              <el-button @click="handleCopyPath">复制路径</el-button>
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
               <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
               <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
@@ -109,8 +113,6 @@
           <div>
             <span class="action-label">查看操作</span>
             <el-button-group>
-              <el-button @click="handleCopyPath">复制路径</el-button>
-              <el-button @click="handleCopyName">复制文件名</el-button>
               <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
               <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
               <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
@@ -870,7 +872,7 @@ defineExpose({
   color: var(--text-primary);
   font-size: 20px;
   font-weight: 700;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   letter-spacing: 0.5px;
 }
 
@@ -878,10 +880,12 @@ defineExpose({
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--border-color);
 }
+
+/* 文件/文件夹操作区上方的 divider：紧贴上方路径信息，消除多余空白（由下方 .node-actions 统一处理） */
 
 .content-panel h4 {
   color: var(--text-primary);
@@ -897,7 +901,7 @@ defineExpose({
 
 /* 操作区域 */
 .node-actions {
-  margin-top: var(--spacing-sm);
+  margin-top: 0;
   background: var(--bg-tertiary);
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
@@ -917,27 +921,54 @@ defineExpose({
   min-height: 0;
 }
 
+/* 操作分组：横向流动布局，组作为单元横向排列，宽度不足换行 */
 .action-groups {
   display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm) var(--spacing-md);
+  align-items: flex-start;
+}
+
+/* 每个分组单元：label 在上、按钮组在下，整组作为一个不可分割单元 */
+.action-groups > div {
+  display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
+  gap: 2px;
 }
 
 .action-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-tertiary);
-  margin-bottom: 3px;
+  margin-bottom: 0;
   display: block;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   font-weight: 500;
+  line-height: 1.2;
 }
 
-/* 按钮组样式 */
+/* 按钮组样式：组内按钮强制一行（不换行），宽度不足时按需压缩 */
 .el-button-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-sm);
+  flex-wrap: nowrap;
+  gap: var(--spacing-xs);
+}
+
+/* 操作按钮紧凑化：字体调小、padding 收紧，保证查看操作 6 个按钮一行排下 */
+.node-actions :deep(.el-button) {
+  font-size: 12px;
+  padding: 6px 10px;
+  height: auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.node-actions :deep(.el-button .btn-img-icon) {
+  width: 14px;
+  height: 14px;
+  margin-right: 3px;
+  vertical-align: middle;
 }
 
 /* 文件预览区域 */
@@ -1128,7 +1159,12 @@ defineExpose({
 
 /* 描述列表样式 */
 .el-descriptions {
-  margin-bottom: var(--spacing-md);
+  margin-bottom: 4px;
+}
+
+/* 分隔线：覆盖 Element Plus 默认较大上下间距，使文件操作标题紧贴上方路径信息 */
+:deep(.el-divider--horizontal) {
+  margin: 6px 0;
 }
 
 .el-descriptions__table {
