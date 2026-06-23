@@ -173,3 +173,36 @@ refreshNode 在路径不在 nodesMap 时回退到 refreshCounter++ 触发 <el-tr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: PDF 内嵌预览（pdfjs viewer + iframe，规避双实例）
+
+**Date**: 2026-06-23
+**Task**: PDF 内嵌预览（pdfjs viewer + iframe，规避双实例）
+**Branch**: `master`
+
+### Summary
+
+调研 PDF 内嵌可实现方案（research/pdf-embed-options.md），排除后端转图（GPL/AGPL 金融排除），选定方案 B：pdfjs 官方完整 viewer 作为静态资源用 iframe 加载。iframe 是独立 browsing context，pdfjs 类只在 iframe 内一份，架构上根治前端 pdfjs 双实例（之前主页面 pdfjs 4 次失败的根因），主页面不 import pdfjs。POC-1 验证 Wails AssetServer 把本地 PDF 映射成同源 URL + iframe 加载基础可行；POC-2 引入 pdfjs viewer v4.8.69（viewer.html?file= 双重 encode），自带翻页/缩放/搜索/缩略图工具栏。后端 server/preview.go：/preview-pdf?path= handler，http.ServeFile 支持 Range，路径安全（.pdf 白名单+防穿越+普通文件校验）。locale 精简为中英（en-US/zh-CN/zh-TW）。替换之前的 PDF 外部打开降级。exe 约 33.17MB（含 viewer）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9d36bdb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
