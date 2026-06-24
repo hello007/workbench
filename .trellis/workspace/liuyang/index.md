@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-06-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~307 | Active |
+| `journal-1.md` | ~340 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-06-24 | 修复预览大小判定（tooLarge 误伤图片/Office） | `2cc7957` | `master` |
 | 9 | 2026-06-24 | 文件预览区浅蓝主题底美化 | `aa9b26b` | `master` |
 | 8 | 2026-06-23 | 右侧操作面板布局优化 | `dfcab63` | `master` |
 | 7 | 2026-06-23 | README 更新：补充 PDF 内嵌项目结构 | `f9df40a` | `master` |

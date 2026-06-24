@@ -305,3 +305,36 @@ README 项目结构补充 PDF 内嵌预览新增的 server/（preview.go AssetSe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: 修复预览大小判定（tooLarge 误伤图片/Office）
+
+**Date**: 2026-06-24
+**Task**: 修复预览大小判定（tooLarge 误伤图片/Office）
+**Branch**: `master`
+
+### Summary
+
+PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文；image/pdf/office/unsupported 不判 size、不读内容。去掉旧的 !IsPreviewable+0x00 binary 探测（detectPreviewKind 已按扩展名分类，前端按 kind 分发）。image/office 走 ReadFileBytes 50MB；pdf 走 iframe 无限制。修复：图片/Office >1MB 不显示、PDF 大文件误弹过大提示。单测更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2cc7957` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
