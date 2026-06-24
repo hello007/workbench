@@ -76,19 +76,20 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 	preview.Size = info.Size()
 	preview.Kind = detectPreviewKind(filePath)
 
-	if preview.Size > maxSize {
-		preview.TooLarge = true
+	// 按 kind 分流：只有 text 需要把全文读成 string（受 maxSize 限制）。
+	// image/pdf/office/unsupported 不在此读取内容、不判 tooLarge——
+	//   image/office 由前端走 ReadFileBytes（50MB 上限）取 base64；
+	//   pdf 走 iframe + AssetServer Range 流式（无大小限制）；
+	//   unsupported 由前端降级提示。
+	// maxSize（1MB）本意仅针对 text 读全内容，不能用于误伤其他类型。
+	if preview.Kind != model.KindText {
 		return preview, nil
 	}
 
-	if !util.IsPreviewable(filePath) {
-		data, _ := util.ReadFileSafe(filePath, 1024)
-		for _, b := range data {
-			if b == 0 {
-				preview.IsBinary = true
-				return preview, nil
-			}
-		}
+	// text：超过上限则标记过大，不再读全内容
+	if preview.Size > maxSize {
+		preview.TooLarge = true
+		return preview, nil
 	}
 
 	data, err := util.ReadFileSafe(filePath, maxSize)

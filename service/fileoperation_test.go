@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workbench/model"
 )
 
 func TestOpenInExplorer_Directory(t *testing.T) {
@@ -629,6 +631,9 @@ func TestPreviewFile_TextFile(t *testing.T) {
 	if preview.TooLarge {
 		t.Error("Expected file not to be too large")
 	}
+	if preview.Kind != model.KindText {
+		t.Errorf("Expected kind %s, got %s", model.KindText, preview.Kind)
+	}
 	if preview.Name != "test.txt" {
 		t.Errorf("Expected name 'test.txt', got '%s'", preview.Name)
 	}
@@ -637,10 +642,11 @@ func TestPreviewFile_TextFile(t *testing.T) {
 	}
 }
 
-func TestPreviewFile_TooLarge(t *testing.T) {
+// TestPreviewFile_TextTooLarge 文本类超过 maxSize（1MB）应标记 tooLarge、不读内容
+func TestPreviewFile_TextTooLarge(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "large.bin")
-	// 1.1MB data
+	file := filepath.Join(dir, "large.txt")
+	// 1.1MB 文本内容
 	content := make([]byte, 1024*1024+100)
 	for i := range content {
 		content[i] = byte('a' + (i % 26))
@@ -660,25 +666,76 @@ func TestPreviewFile_TooLarge(t *testing.T) {
 	if preview.Content != "" {
 		t.Errorf("Expected empty content for too large file, got %d bytes", len(preview.Content))
 	}
-	if preview.IsBinary {
-		t.Error("Expected non-binary file")
-	}
 	if !preview.TooLarge {
 		t.Error("Expected file to be too large")
+	}
+	if preview.Kind != model.KindText {
+		t.Errorf("Expected kind %s, got %s", model.KindText, preview.Kind)
 	}
 	if preview.Size != int64(len(content)) {
 		t.Errorf("Expected size %d, got %d", len(content), preview.Size)
 	}
 }
 
-func TestPreviewFile_Binary(t *testing.T) {
+// TestPreviewFile_NonTextNotTooLarge 非文本类型（image/pdf/office）不判 tooLarge、不读内容，
+// 仅按扩展名返回 kind，由前端按 kind 走各自路径处理（image/office→ReadFileBytes，pdf→iframe）。
+func TestPreviewFile_NonTextNotTooLarge(t *testing.T) {
+	// 故意构造 >1MB 的内容，验证不再被误标 tooLarge
+	content := make([]byte, 1024*1024+100)
+	for i := range content {
+		content[i] = byte('a' + (i % 26))
+	}
+
+	cases := []struct {
+		name string
+		ext  string
+		kind string
+	}{
+		{"image png", ".png", model.KindImage},
+		{"image jpg", ".jpg", model.KindImage},
+		{"pdf", ".pdf", model.KindPDF},
+		{"docx", ".docx", model.KindOffice},
+		{"xlsx", ".xlsx", model.KindOffice},
+	}
+
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024) // 1MB
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(dir, "test"+tc.ext)
+			os.WriteFile(file, content, 0644)
+
+			preview, err := svc.PreviewFile(file, maxSize)
+			if err != nil {
+				t.Fatalf("PreviewFile failed: %v", err)
+			}
+			if preview.Error != "" {
+				t.Errorf("Unexpected error: %s", preview.Error)
+			}
+			if preview.TooLarge {
+				t.Error("Non-text file should NOT be marked tooLarge (size limit only applies to text)")
+			}
+			if preview.Content != "" {
+				t.Errorf("Non-text file should have empty content, got %d bytes", len(preview.Content))
+			}
+			if preview.Kind != tc.kind {
+				t.Errorf("Expected kind %s, got %s", tc.kind, preview.Kind)
+			}
+		})
+	}
+}
+
+// TestPreviewFile_UnsupportedKind 不支持的扩展名返回 kind=unsupported
+func TestPreviewFile_UnsupportedKind(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "binary.dat")
-	content := []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x00, 0x77, 0x6F, 0x72, 0x6C, 0x64} // Hello\x00world
+	content := []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x00, 0x77, 0x6F, 0x72, 0x6C, 0x64}
 	os.WriteFile(file, content, 0644)
 
 	svc := NewFileOperationService()
-	maxSize := int64(1024 * 1024) // 1MB
+	maxSize := int64(1024 * 1024)
 	preview, err := svc.PreviewFile(file, maxSize)
 
 	if err != nil {
@@ -687,17 +744,14 @@ func TestPreviewFile_Binary(t *testing.T) {
 	if preview.Error != "" {
 		t.Errorf("Unexpected error: %s", preview.Error)
 	}
-	if preview.Content != "" {
-		t.Errorf("Expected empty content for binary file, got %d bytes", len(preview.Content))
-	}
-	if !preview.IsBinary {
-		t.Error("Expected binary file")
+	if preview.Kind != model.KindUnsupported {
+		t.Errorf("Expected kind %s, got %s", model.KindUnsupported, preview.Kind)
 	}
 	if preview.TooLarge {
-		t.Error("Expected file not to be too large")
+		t.Error("Unsupported file should NOT be tooLarge")
 	}
-	if preview.Size != int64(len(content)) {
-		t.Errorf("Expected size %d, got %d", len(content), preview.Size)
+	if preview.Content != "" {
+		t.Errorf("Unsupported file should have empty content, got %d bytes", len(preview.Content))
 	}
 }
 
