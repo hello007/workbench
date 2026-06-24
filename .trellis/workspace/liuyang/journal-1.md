@@ -272,3 +272,36 @@ README 项目结构补充 PDF 内嵌预览新增的 server/（preview.go AssetSe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 文件预览区浅蓝主题底美化
+
+**Date**: 2026-06-24
+**Task**: 文件预览区浅蓝主题底美化
+**Branch**: `master`
+
+### Summary
+
+预览区 .file-preview 改为浅蓝主题底(--primary-bg)+主题色边框+圆角阴影，header 底部分隔线+标题主题色加粗；渲染器内部(CodeMirror/图片/Markdown/Office/PDF)统一白底，形成浅蓝容器>白底内容区层次，一眼识别为文件预览。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa9b26b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-06-23
+- **Total Sessions**: 9
+- **Last Active**: 2026-06-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~274 | Active |
+| `journal-1.md` | ~307 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-06-24 | 文件预览区浅蓝主题底美化 | `aa9b26b` | `master` |
 | 8 | 2026-06-23 | 右侧操作面板布局优化 | `dfcab63` | `master` |
 | 7 | 2026-06-23 | README 更新：补充 PDF 内嵌项目结构 | `f9df40a` | `master` |
 | 6 | 2026-06-23 | PDF 内嵌预览（pdfjs viewer + iframe，规避双实例） | `9d36bdb` | `master` |
