@@ -561,7 +561,8 @@ onBeforeUnmount(() => {
 .image-scroll {
   flex: 1;
   overflow: auto;
-  background: var(--bg-tertiary);
+  /* 白底内容区，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
   display: flex;
@@ -587,7 +588,8 @@ onBeforeUnmount(() => {
 .markdown-body {
   flex: 1;
   overflow: auto;
-  background: var(--bg-tertiary);
+  /* 白底内容区，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
   padding: var(--spacing-md, 16px);
@@ -671,7 +673,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
-  background: var(--bg-tertiary);
+  /* 白底内容区，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
 }
 
 .cm-host :deep(.cm-editor) {
@@ -685,7 +688,7 @@ onBeforeUnmount(() => {
 }
 
 .cm-host :deep(.cm-gutters) {
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
 }
 
@@ -724,7 +727,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--bg-tertiary);
+  /* 白底内容区，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
   padding: var(--spacing-xs, 4px);
@@ -776,7 +780,8 @@ onBeforeUnmount(() => {
   width: 100%;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
-  background: var(--bg-tertiary);
+  /* 白底，避免加载前露出浅蓝容器 */
+  background: var(--bg-secondary);
 }
 
 /* 降级 */
@@ -787,7 +792,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: var(--spacing-md, 16px);
-  background: var(--bg-tertiary);
+  /* 白底内容区，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm, 4px);
   padding: var(--spacing-lg, 24px);

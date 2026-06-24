@@ -971,25 +971,36 @@ defineExpose({
   vertical-align: middle;
 }
 
-/* 文件预览区域 */
+/* 文件预览区域：浅蓝主题底卡片，与上方白底信息/按钮区一眼区分 */
 .file-preview {
-  margin-top: var(--spacing-sm);
+  margin-top: var(--spacing-md);
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* 浅蓝主题底 + 主题边框 + 圆角 + 阴影，形成「预览卡片」 */
+  background: var(--primary-bg);
+  border: 1px solid var(--primary-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
 .file-preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 紧贴容器内边距，底部细分隔与 body 区分 */
   margin-bottom: var(--spacing-sm);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
 .file-preview-header h4 {
   margin-bottom: 0;
+  color: var(--primary-dark);
+  font-weight: 600;
 }
 
 .file-preview-mode-actions {
@@ -998,6 +1009,7 @@ defineExpose({
   flex-shrink: 0;
 }
 
+/* body 透明，让浅蓝容器作为底，渲染器内部各自撑满 */
 .file-preview-body {
   display: flex;
   flex-direction: column;
@@ -1012,14 +1024,15 @@ defineExpose({
   flex: 1;
   color: var(--text-tertiary);
   font-size: 13px;
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   min-height: 200px;
 }
 
 .preview-textarea {
-  background: var(--bg-tertiary);
+  /* 编辑区白底，在浅蓝容器内形成「容器 > 内容」层次 */
+  background: var(--bg-secondary);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
@@ -1036,6 +1049,7 @@ defineExpose({
   height: 100% !important;
   resize: vertical;
   font-family: Consolas, 'Courier New', monospace;
+  background: var(--bg-secondary);
 }
 
 .preview-textarea:hover {
@@ -1050,7 +1064,8 @@ defineExpose({
   gap: var(--spacing-sm);
   margin-top: var(--spacing-xs);
   padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--bg-tertiary);
+  /* 操作条白底，与浅蓝容器层次分明 */
+  background: var(--bg-secondary);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   flex-shrink: 0;
