@@ -338,3 +338,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: 修复 WorkBench 启动后影响其他应用复制粘贴的剪贴板锁竞态
+
+**Date**: 2026-06-25
+**Task**: 修复 WorkBench 启动后影响其他应用复制粘贴的剪贴板锁竞态
+**Branch**: `master`
+
+### Summary
+
+诊断并修复 Win32 剪贴板独占锁抢占：Home.vue 的 window.focus 事件每次切窗都触发 ReadFromSystemClipboard → OpenClipboard(0)，与其他 Windows 应用产生数十毫秒锁竞态。方案 A：移除 focus 同步、粘贴按钮去 disabled 改延迟校验、OpenClipboard 加 3 次重试容错。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81abd8b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
