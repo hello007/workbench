@@ -540,29 +540,6 @@ const handleCopyTo = async (data) => {
   }
 }
 
-// 窗口获得焦点时，从系统剪贴板同步内部状态
-const handleWindowFocus = async () => {
-  try {
-    const result = await ReadFromSystemClipboard()
-    if (!result) {
-      clearClipboard()
-      return
-    }
-    const clipData = JSON.parse(result)
-    const paths = clipData.paths || []
-    if (paths.length === 0) {
-      clearClipboard()
-      return
-    }
-    clipboard.mode = clipData.isCut ? 'cut' : 'copy'
-    clipboard.sourcePath = paths[0]
-    clipboard.sourceName = paths[0].split(/[\\/]/).pop()
-    clipboard.sourceType = ''
-  } catch {
-    clearClipboard()
-  }
-}
-
 // ---- 生命周期 ----
 watch(() => selectedDirectoryId.value, () => {
   clearClipboard()
@@ -573,12 +550,10 @@ onMounted(() => {
   loadShortcuts()
   GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
-  window.addEventListener('focus', handleWindowFocus)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
-  window.removeEventListener('focus', handleWindowFocus)
 })
 </script>
 

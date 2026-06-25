@@ -56,7 +56,7 @@
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-              <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('paste', selectedNode)">粘贴</el-button>
               <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>
@@ -97,7 +97,7 @@
             <el-button-group>
               <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
               <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-              <el-button :disabled="!clipboard.mode" @click="$emit('paste', selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('paste', selectedNode)">粘贴</el-button>
               <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>

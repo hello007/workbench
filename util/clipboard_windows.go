@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 )
@@ -33,6 +34,21 @@ var (
 	procGlobalUnlock               = kernel32.NewProc("GlobalUnlock")
 	procGlobalSize                 = kernel32.NewProc("GlobalSize")
 )
+
+// openClipboardWithRetry 尝试以独占方式打开剪贴板，失败时短暂重试，最多 3 次。
+// 用于规避 Windows 剪贴板独占锁与其他应用的瞬时竞态。
+func openClipboardWithRetry() bool {
+	for i := 0; i < 3; i++ {
+		r, _, _ := procOpenClipboard.Call(0)
+		if r != 0 {
+			return true
+		}
+		if i < 2 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	return false
+}
 
 // WriteClipboardFiles 将文件路径写入系统剪贴板（CF_HDROP 格式）
 func WriteClipboardFiles(paths []string, isCut bool) error {
@@ -74,15 +90,14 @@ func WriteClipboardFiles(paths []string, isCut bool) error {
 
 	procGlobalUnlock.Call(hMem)
 
-	r, _, _ := procOpenClipboard.Call(0)
-	if r == 0 {
-		return errors.New("OpenClipboard failed")
+	if !openClipboardWithRetry() {
+		return errors.New("OpenClipboard failed after retries")
 	}
 	defer procCloseClipboard.Call()
 
 	procEmptyClipboard.Call()
 
-	r, _, _ = procSetClipboardData.Call(cfHDrop, hMem)
+	r, _, _ := procSetClipboardData.Call(cfHDrop, hMem)
 	if r == 0 {
 		return errors.New("SetClipboardData failed")
 	}
@@ -108,9 +123,8 @@ func WriteClipboardFiles(paths []string, isCut bool) error {
 
 // ReadClipboardFiles 读取系统剪贴板中的文件路径列表
 func ReadClipboardFiles() (paths []string, isCut bool, err error) {
-	r, _, _ := procOpenClipboard.Call(0)
-	if r == 0 {
-		return nil, false, errors.New("OpenClipboard failed")
+	if !openClipboardWithRetry() {
+		return nil, false, nil
 	}
 	defer procCloseClipboard.Call()
 

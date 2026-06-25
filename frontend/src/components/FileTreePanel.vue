@@ -202,7 +202,7 @@
           <el-icon><CopyDocument /></el-icon>复制
           <span class="context-menu-shortcut">Ctrl+C</span>
         </li>
-        <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
+        <li class="context-menu-item" @click="onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
           <span class="context-menu-shortcut">Ctrl+V</span>
         </li>
@@ -263,7 +263,7 @@
           <el-icon><CopyDocument /></el-icon>复制
           <span class="context-menu-shortcut">Ctrl+C</span>
         </li>
-        <li class="context-menu-item" :class="{ 'is-disabled': !clipboard.mode }" @click="clipboard.mode && onMenuCommand('paste')">
+        <li class="context-menu-item" @click="onMenuCommand('paste')">
           <el-icon><DocumentCopy /></el-icon>粘贴
           <span class="context-menu-shortcut">Ctrl+V</span>
         </li>
