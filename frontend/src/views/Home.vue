@@ -383,6 +383,9 @@ const handleGlobalKeydown = (e) => {
   if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
   if (e.key === 'c') {
+    // 预览区选中文本时，交还浏览器原生复制，避免被劫持为复制文件路径
+    const selection = window.getSelection()
+    if (selection && selection.toString()) return
     e.preventDefault()
     handleCopy(selectedNode.value)
   } else if (e.key === 'x') {

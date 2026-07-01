@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用现有自研右键菜单模式与复制函数模式，避免重复造轮子"}
+{"file": ".trellis/tasks/archive/2026-06/06-25-clipboard-fix/prd.md", "reason": "Ctrl+C 剪贴板劫持根因与系统剪贴板锁踩坑记录，实施须规避抢锁回归"}

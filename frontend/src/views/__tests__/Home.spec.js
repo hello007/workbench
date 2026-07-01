@@ -11,7 +11,7 @@ import { ElMessage } from 'element-plus'
 import Home from '../Home.vue'
 
 // Mock Wails runtime
-vi.mock('../../wailsjs/runtime/runtime', () => ({
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(() => vi.fn()),
   EventsOff: vi.fn()
 }))
@@ -50,7 +50,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   MoveItem: vi.fn(() => Promise.resolve('')),
   CopyToSystemClipboard: vi.fn(() => Promise.resolve('')),
   CutToSystemClipboard: vi.fn(() => Promise.resolve('')),
-  ReadFromSystemClipboard: vi.fn(() => Promise.resolve(null))
+  ReadFromSystemClipboard: vi.fn(() => Promise.resolve(null)),
+  GetFavorites: vi.fn(() => Promise.resolve([])),
+  AddFavorite: vi.fn(() => Promise.resolve(true)),
+  RemoveFavorite: vi.fn(() => Promise.resolve(true)),
+  UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
+  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true))
 }))
 
 describe('Home.vue - Bug修复验证', () => {
@@ -416,6 +421,83 @@ describe('Home.vue - Bug修复验证', () => {
       wrapper.vm.activePanel = 'toolbox'
       await wrapper.vm.$nextTick()
       expect(wrapper.find('.stub-toolbox-panel').exists()).toBe(true)
+    })
+  })
+
+  describe('Ctrl+C 复制拦截修复（预览选中文本放行）', () => {
+    const createWrapper = () => mount(Home, {
+      global: {
+        stubs: {
+          Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+          Pane: { template: '<div class="pane"><slot /></div>' },
+          ActivityBar: { template: '<div />', props: ['modelValue'] },
+          DirectoryTree: { template: '<div />' },
+          ToolboxPanel: { template: '<div />' },
+          FileTreePanel: { template: '<div />' },
+          ContentPanel: { template: '<div />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+          'el-tree': true,
+          'el-dialog': true,
+          'el-form': true,
+          'el-form-item': true,
+          'el-input': true,
+          'el-switch': true,
+          'el-button': true,
+          'el-button-group': true,
+          'el-divider': true,
+          'el-select': true,
+          'el-option': true,
+          'el-empty': true,
+          'el-descriptions': true,
+          'el-descriptions-item': true,
+          'el-icon': true
+        }
+      }
+    })
+
+    let w
+    let getSelectionSpy
+
+    beforeEach(async () => {
+      w = createWrapper()
+      await flushPromises()
+      w.vm.selectedNode = { name: 'a.txt', path: '/a/a.txt', type: 'file' }
+    })
+
+    afterEach(() => {
+      if (getSelectionSpy) {
+        getSelectionSpy.mockRestore()
+        getSelectionSpy = null
+      }
+      if (w) {
+        w.unmount()
+        w = null
+      }
+    })
+
+    const dispatchCtrlC = () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }))
+    }
+
+    it('预览区选中文本时 Ctrl+C 放行，不复制文件路径', async () => {
+      getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '选中的预览文本' })
+      const App = await vi.importMock('../../../wailsjs/go/main/App')
+      App.CopyToSystemClipboard.mockClear()
+
+      dispatchCtrlC()
+      await flushPromises()
+
+      expect(App.CopyToSystemClipboard).not.toHaveBeenCalled()
+    })
+
+    it('无选中文本时 Ctrl+C 仍复制文件路径（保持原行为）', async () => {
+      getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' })
+      const App = await vi.importMock('../../../wailsjs/go/main/App')
+      App.CopyToSystemClipboard.mockClear()
+
+      dispatchCtrlC()
+      await flushPromises()
+
+      expect(App.CopyToSystemClipboard).toHaveBeenCalledWith('/a/a.txt')
     })
   })
 })

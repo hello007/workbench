@@ -1,5 +1,5 @@
 <template>
-  <div class="file-preview-renderer">
+  <div class="file-preview-renderer" @contextmenu="onContextMenu">
     <!-- 图片预览：base64 → dataURL → <img>（读取失败/过大时无 base64，走降级分支） -->
     <div v-if="kind === 'image' && !error && !tooLarge" class="preview-image-wrap">
       <div class="image-toolbar">
@@ -23,7 +23,7 @@
 
     <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 -->
     <div v-else-if="isMarkdown" class="preview-markdown-wrap">
-      <div class="markdown-body" v-html="renderedMarkdown"></div>
+      <div class="markdown-body" ref="markdownBodyRef" v-html="renderedMarkdown"></div>
     </div>
 
     <!-- 代码 / txt / json / sql 只读：CodeMirror 6 -->
@@ -123,12 +123,33 @@
       <p class="fallback-tip">{{ fallbackMessage }}</p>
       <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
     </div>
+
+    <!-- 右键复制菜单（仅 text/markdown 预览） -->
+    <ul
+      v-if="contextMenu.visible"
+      class="context-menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @click.stop
+      @mousedown.stop
+    >
+      <li
+        class="context-menu-item"
+        :class="{ 'is-disabled': !contextMenu.canCopy }"
+        @click="onMenuCommand('copy')"
+      >
+        <el-icon><CopyDocument /></el-icon>复制
+      </li>
+      <li class="context-menu-item" @click="onMenuCommand('selectAll')">
+        <el-icon><Select /></el-icon>全选
+      </li>
+    </ul>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
+import { CopyDocument, Select } from '@element-plus/icons-vue'
 // Office 渲染依赖采用静态 import：
 // 历史上曾用 await import('docx-preview') / await import('xlsx') 动态加载，
 // 但 wails dev 下 Vite 会把动态 import 重写为 /node_modules/.vite/deps/xlsx.js
@@ -172,7 +193,7 @@ hljs.registerLanguage('python', python)
 // CodeMirror 6 按需引入
 import { EditorView, lineNumbers, highlightActiveLine, keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
-import { defaultKeymap, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, historyKeymap, selectAll } from '@codemirror/commands'
 import { syntaxHighlighting, defaultHighlightStyle, foldGutter, bracketMatching } from '@codemirror/language'
 import { json as cmJson } from '@codemirror/lang-json'
 import { sql as cmSql } from '@codemirror/lang-sql'
@@ -513,6 +534,134 @@ onMounted(async () => {
   } else if (props.kind === 'office') {
     await renderOfficeBySubType()
   }
+})
+
+// ---------- 右键复制菜单（仅 text/markdown 预览） ----------
+const markdownBodyRef = ref(null)
+const contextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  canCopy: false
+})
+
+// 最近一次预览区选区文本缓存。
+// 背景：浏览器/CodeMirror 在右键 mousedown 时会清除或收缩 DOM 选区，
+// 导致第二次右键（如先「全选」再右键「复制」）的 contextmenu 触发时
+// DOM 选区已空，canCopy 误判为 false。这里借助 selectionchange 在选区
+// 还存在时缓存文本，右键清除 DOM 选区后用缓存回退，保证复制可用。
+let lastSelectedText = ''
+
+// 读取预览区内的选区文本。
+// 仅当选区 anchorNode 落在 CodeMirror 宿主（cmHostRef）或 markdown
+// 容器（markdownBodyRef）内时返回其文本，否则返回空串，避免捕获预览
+// 区外的选区。sel / anchorNode 可能为 null，需做空值保护。
+const readSelectionInPreview = () => {
+  const sel = window.getSelection()
+  if (!sel) return ''
+  const node = sel.anchorNode
+  if (!node) return ''
+  const host = cmHostRef.value
+  const md = markdownBodyRef.value
+  if (host && (host === node || host.contains(node))) return sel.toString()
+  if (md && (md === node || md.contains(node))) return sel.toString()
+  return ''
+}
+
+// selectionchange 回调：仅在选区非空时更新缓存。
+// 右键清除选区也会触发 selectionchange（此时读到空），不覆盖缓存，
+// 从而保留「全选」时缓存的文本，供后续右键复制回退使用。
+const onSelectionChange = () => {
+  const t = readSelectionInPreview()
+  if (t) lastSelectedText = t
+}
+
+const onContextMenu = (event) => {
+  // 仅文本/代码（CodeMirror）与 markdown 预览启用右键复制菜单
+  if (props.kind !== 'text') return
+  event.preventDefault()
+  event.stopPropagation()
+
+  const x = event.clientX
+  const y = event.clientY
+  contextMenu.x = x
+  contextMenu.y = y
+  // 优先取当前 DOM 选区；右键清除了 DOM 选区时回退到缓存，保证「先全选再右键复制」可用
+  contextMenu.canCopy = !!(readSelectionInPreview() || lastSelectedText)
+  contextMenu.visible = true
+
+  // 菜单渲染后测量并做视口边界回退
+  nextTick(() => {
+    const menuEl = document.querySelector('.context-menu')
+    if (!menuEl) return
+    const rect = menuEl.getBoundingClientRect()
+    let ax = x
+    let ay = y
+    if (ax + rect.width > window.innerWidth) ax = window.innerWidth - rect.width - 5
+    if (ay + rect.height > window.innerHeight) ay = window.innerHeight - rect.height - 5
+    if (ax < 5) ax = 5
+    if (ay < 5) ay = 5
+    if (ax !== x || ay !== y) {
+      contextMenu.x = ax
+      contextMenu.y = ay
+    }
+  })
+}
+
+const closeContextMenu = () => {
+  contextMenu.visible = false
+}
+
+const copySelectedText = async () => {
+  // 优先取当前 DOM 选区；为空时回退到缓存（右键已清除 DOM 选区的场景）
+  // 写入剪贴板前去除前后空白，trim 后为空则跳过复制（不提示）
+  const text = (readSelectionInPreview() || lastSelectedText).trim()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+const selectAllText = () => {
+  if (cmView) {
+    // CodeMirror：selectAll 命令选中全文
+    selectAll(cmView)
+    cmView.focus()
+  } else if (markdownBodyRef.value) {
+    // markdown：Selection API 选中正文容器全部内容
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.selectAllChildren(markdownBodyRef.value)
+  }
+}
+
+const onMenuCommand = (command) => {
+  closeContextMenu()
+  if (command === 'copy') {
+    if (contextMenu.canCopy) copySelectedText()
+  } else if (command === 'selectAll') {
+    selectAllText()
+  }
+}
+
+const onGlobalClick = () => closeContextMenu()
+const onGlobalContextMenu = () => closeContextMenu()
+
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick)
+  // capture 阶段监听：其他组件右键（如文件树）即便 stopPropagation 也能关闭本菜单，实现互斥
+  document.addEventListener('contextmenu', onGlobalContextMenu, true)
+  // 监听选区变化，缓存预览区内最近一次非空选区文本，用于右键清除选区后的复制回退
+  document.addEventListener('selectionchange', onSelectionChange)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onGlobalClick)
+  document.removeEventListener('contextmenu', onGlobalContextMenu, true)
+  document.removeEventListener('selectionchange', onSelectionChange)
 })
 
 onBeforeUnmount(() => {
