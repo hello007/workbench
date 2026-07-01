@@ -371,3 +371,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 文件预览区支持复制选中文本（Ctrl+C + 右键复制/全选菜单）
+
+**Date**: 2026-07-01
+**Task**: 文件预览区支持复制选中文本（Ctrl+C + 右键复制/全选菜单）
+**Branch**: `master`
+
+### Summary
+
+修复 Home.vue 全局 Ctrl+C 拦截过宽（选中文本时放行浏览器原生复制，不再被劫持为复制文件路径）；FilePreviewRenderer 新增右键「复制/全选」菜单（仅 text/markdown，复制走 navigator.clipboard，全选用 CodeMirror selectAll / Selection API）；修复「全选后再次右键复制失效」（selectionchange 缓存预览区选区文本，右键清除 DOM 选区后用缓存回退）；复制前去除前后空格。新增 7 个测试用例，顺带修复 Home.spec.js 既有测试基础设施（runtime mock 路径、缺失 binding）。前端 136/136 通过，vite build 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e2d4736` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
