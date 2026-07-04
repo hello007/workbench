@@ -575,3 +575,39 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 文件树按文件类型显示图标
+
+**Date**: 2026-07-04
+**Task**: 文件树按文件类型显示图标
+**Branch**: `master`
+
+### Summary
+
+文件树文件节点按后缀显示对应类型图标，替换统一的 EP Document。纯前端硬编码默认映射（方案 A，无后端/无 UI/无自定义），映射表抽到独立 utils/fileIconMap.js 便于下期接 AppSettings 时合并。新建 frontend/src/utils/fileIconMap.js：import 类型图标 + DEFAULT_ICON_MAP（后缀→图标）+ getIconForFile(name)（取最后一个点后缀、toLowerCase、未命中返回 null）+ getExtension；FileTreePanel.vue 文件节点 el-icon Document 改为 template v-else 分支（getIconForFile 真值→img.tree-node-file-icon 14px，否则 fallback Document）。4d430e4 首版 13 类（xlsx/docx/txt/pdf/png/md/java/py/html/js/json/yaml/jpg）；aa76c88 加 ppt(ppt/pptx)+xmind；0751df3 扩展 9 类(typescript ts/tsx、go、css scss/sass/less、vue、xml svg、shell sh/bash/zsh/fish、db sqlite/sqlite3、zip 压缩包系列、properties 配置类 ini/conf/cfg/env/toml)；f98f7ee 加 exe(msi)+tmpl(tpl/template)+gitignore 后缀(.gitignore)+license 文件名匹配(LICENSE/LICENCE/COPYING/NOTICE，新增 FILENAME_ICON_MAP，getIconForFile 重构为先查文件名再查后缀)。npm test 136/136 全程通过、npm run build 通过；trellis-check 0 问题。自定义映射（AppSettings 持久化+合并+UI）留待下期。finish-work 前 markdown.png(modified pre-existing) 阻塞脏树，作为 chore commit 提交(6c9310a)。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d430e4` | (see git log) |
+| `aa76c88` | (see git log) |
+| `0751df3` | (see git log) |
+| `f98f7ee` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

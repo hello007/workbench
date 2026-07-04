@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~577 | Active |
+| `journal-1.md` | ~613 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-04 | 文件树按文件类型显示图标 | `4d430e4`, `aa76c88`, `0751df3`, `f98f7ee` | `master` |
 | 17 | 2026-07-04 | 用 assets 图标替换操作按钮与 git 仓库标记 | `bc1fde5` | `master` |
 | 16 | 2026-07-04 | 工作目录 git 标识缓存与异步刷新优化启动速度 | `088226d` | `master` |
 | 15 | 2026-07-04 | 左栏选中 git 工作目录右栏直显仓库详情 | `3aa7eb0`, `4497d03` | `master` |
