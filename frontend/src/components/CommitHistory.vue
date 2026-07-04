@@ -275,6 +275,8 @@ defineExpose({ loadCommits, handleRefresh })
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 缩小左侧缩进，与右侧 padding 拉开的间距接近平衡（不动 timeline-item 的 padding-left，避免破坏轴线结构） */
+  padding-left: 12px;
 }
 .card-header {
   display: flex;
@@ -293,6 +295,8 @@ defineExpose({ loadCommits, handleRefresh })
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden; /* 兜底：禁止 hover 等场景产生横向滚动条 */
+  /* 右侧留白，让卡片右边缘与 webkit 滚动条之间有清晰间距，避免视觉重叠 */
+  padding-right: var(--spacing-md);
 }
 .commit-item {
   cursor: pointer;
