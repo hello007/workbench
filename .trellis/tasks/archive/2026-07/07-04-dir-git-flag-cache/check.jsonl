@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 阶段核验 IsGitRepo 跨层一致、并发竞态规避（Save 前基于最新 Load 合并）、缓存与刷新行为正确"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 阶段核验复用 IsGitRepository/Load/Save，无重复封装"}
+{"file": "docs/开发规范.md", "reason": "check 阶段对照前后端代码风格与错误处理规范"}
+{"file": "docs/测试策略.md", "reason": "check 阶段核验后端单测（持久化/刷新/竞态/兼容）与前端 vitest 符合测试策略"}
