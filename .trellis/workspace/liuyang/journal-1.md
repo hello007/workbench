@@ -475,3 +475,37 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: 左栏选中 git 工作目录右栏直显仓库详情
+
+**Date**: 2026-07-04
+**Task**: 左栏选中 git 工作目录右栏直显仓库详情
+**Branch**: `master`
+
+### Summary
+
+让左侧工作目录树在选中一个本身是 git 仓库的工作目录时，右侧操作面板直接显示该仓库的 git 详情（仓库信息/提交历史/本地变动 + 拉取/切换分支），与文件树选中 git 仓库节点完全一致，并在左栏工作目录项标记 git 仓库。采用后端字段方案：model.Directory 加 IsGitRepo 字段(json:"isGitRepo")，app.go GetDirectories 用 util.NewGitCommand().IsGitRepository 遍历检测填充，AddDirectory/UpdateDirectory/GetDefaultDirectory 经 applyGitRepoFlag 一致填充（nil 安全），旧配置无该字段时 json 零值 false 天然兼容；前端 Home.onDirectorySelect 命中 newDir.isGitRepo 时构造 {id,path,name,type:'directory',isGitRepo:true} 的 selectedNode 复用 ContentPanel 现有 git 详情渲染，非 git 工作目录保持空状态，onNodeSelect 文件树选中仍优先覆盖；DirectoryTree 工作目录项 v-if=dir.isGitRepo 显示绿色 SuccessFilled 对勾（复用 FileTreePanel 标记样式 + title=Git 仓库)。后端 4 单测覆盖 git/非git/旧配置/nil 安全，前端 npm test 136/136 通过，trellis-check 5 条 AC 全过、跨层/回归/复用/边缘达标。文档同步更新 docs/功能说明.md(工作目录管理+Git 集成两节)与 README.md。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3aa7eb0` | (see git log) |
+| `4497d03` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
