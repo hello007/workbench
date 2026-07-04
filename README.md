@@ -29,7 +29,7 @@
   - **预览区复制选中文本** — 文本/代码/Markdown 预览态下，鼠标选中内容可直接 Ctrl+C 复制；也可右键弹出「复制 / 全选」菜单（复制项在无选中文本时禁用，全选用 CodeMirror 命令或 Selection API 实现）
   - **降级为「用默认程序打开」** — PowerPoint(`.pptx`)、旧版 Office(`.doc/.ppt`)、损坏/超大/不支持的类型，统一提供「用默认程序打开」按钮走系统默认程序
 - **用 Obsidian 打开** — 工作目录树/文件树右键菜单及操作面板「查看操作」均支持以 Obsidian 打开：文件夹以自身作为仓库（vault）、文件以父目录作为仓库；可在「设置 → 通用 → 外部应用」自定义 Obsidian 程序路径（配置后优先使用，否则走 `obsidian://` 协议 + 注册表预检 + `cmd /c start`，未检测到时引导用户配置或安装）
-- **Git 集成** — 查看提交历史、分支信息、仓库状态；支持变动文件 diff 比较、选择性提交（commit）、推送到远程（push）；选中 git 工作目录即可在右栏直接查看仓库详情，左栏工作目录列表标记 git 仓库
+- **Git 集成** — 查看提交历史、分支信息、仓库状态；双击变动文件弹窗双栏对照查看 diff、选择性提交（commit）、推送到远程（push）；选中 git 工作目录即可在右栏直接查看仓库详情，左栏工作目录列表标记 git 仓库
 - **批量更新** — 一键批量 pull 所有仓库
 - **工具箱** — 左侧活动栏提供工具箱入口，将"拷贝到"等全局工具集中管理，点击其他面板自动关闭
 - **内置终端** — 底部面板集成完整终端，支持 PowerShell / CMD / Git Bash / WSL 切换，工作目录自动跟随文件树，可拖拽调节高度，Ctrl+` 快速切换，首次打开即显示 Shell 提示符
@@ -139,6 +139,7 @@ cd frontend && npm test
 │           ├── GitInfo.vue              # Git 仓库信息
 │           ├── CommitHistory.vue        # 提交历史
 │           ├── LocalChanges.vue         # 本地变更列表
+│           ├── FileDiffDialog.vue       # 变动文件双栏 diff 弹窗
 │           ├── TerminalPanel.vue        # 终端面板（Shell 选择/目录显示/拖拽调高）
 │           ├── SettingsPanel.vue        # 设置弹窗（通用/终端/快捷键，左右双栏布局）
 │           └── UpdateDialog.vue         # 更新弹窗（版本信息/下载进度/确认重启）
