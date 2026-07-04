@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 时验证：5 个 favorites mock 返回值与 Home.spec.js 一致；全量 vitest run 不再报 GetFavorites unhandled rejection；FileTreePanel 测试用例全绿"}

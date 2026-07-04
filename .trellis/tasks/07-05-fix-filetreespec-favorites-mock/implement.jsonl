@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "补全 favorites mock 时，返回值须与 Home.spec.js:54-58 既有约定一致（GetFavorites→[]，其余→true），避免两处 spec 的 mock 语义漂移"}

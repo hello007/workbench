@@ -30,7 +30,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenInVSCode: vi.fn(() => Promise.resolve(true)),
   OpenInWarp: vi.fn(() => Promise.resolve(true)),
   OpenWithDefaultApp: vi.fn(() => Promise.resolve(true)),
-  ScanAndPullRepos: vi.fn(() => Promise.resolve({ total: 0 }))
+  ScanAndPullRepos: vi.fn(() => Promise.resolve({ total: 0 })),
+  GetFavorites: vi.fn(() => Promise.resolve([])),
+  AddFavorite: vi.fn(() => Promise.resolve(true)),
+  RemoveFavorite: vi.fn(() => Promise.resolve(true)),
+  UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
+  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true))
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
