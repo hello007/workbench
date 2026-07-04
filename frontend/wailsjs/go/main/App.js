@@ -202,6 +202,10 @@ export function ReadFromSystemClipboard() {
   return window['go']['main']['App']['ReadFromSystemClipboard']();
 }
 
+export function RefreshDirectoriesGitFlag() {
+  return window['go']['main']['App']['RefreshDirectoriesGitFlag']();
+}
+
 export function RemoveFavorite(arg1) {
   return window['go']['main']['App']['RemoveFavorite'](arg1);
 }
@@ -212,10 +216,6 @@ export function RenameFile(arg1, arg2) {
 
 export function ReorderDirectories(arg1) {
   return window['go']['main']['App']['ReorderDirectories'](arg1);
-}
-
-export function RefreshDirectoriesGitFlag() {
-  return window['go']['main']['App']['RefreshDirectoriesGitFlag']();
 }
 
 export function ResizeTerminal(arg1, arg2, arg3) {

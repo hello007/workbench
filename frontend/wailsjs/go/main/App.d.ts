@@ -102,13 +102,13 @@ export function ReadFileBytes(arg1:string):Promise<model.FileBytes>;
 
 export function ReadFromSystemClipboard():Promise<string>;
 
+export function RefreshDirectoriesGitFlag():Promise<Array<model.Directory>>;
+
 export function RemoveFavorite(arg1:string):Promise<string>;
 
 export function RenameFile(arg1:string,arg2:string):Promise<boolean>;
 
 export function ReorderDirectories(arg1:Array<string>):Promise<boolean>;
-
-export function RefreshDirectoriesGitFlag():Promise<Array<model.Directory>>;
 
 export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
