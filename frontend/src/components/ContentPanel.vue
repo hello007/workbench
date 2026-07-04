@@ -73,9 +73,9 @@
           <div>
             <span class="action-label">查看操作</span>
             <el-button-group>
-              <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
-              <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
-              <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+              <el-button @click="handleOpenInExplorer"><img :src="explorerIcon" class="btn-img-icon" alt="资源管理器" />打开资源管理器</el-button>
+              <el-button @click="handleOpenInVSCode"><img :src="vscodeIcon" class="btn-img-icon" alt="VSCode" />用 VSCode 打开</el-button>
+              <el-button @click="handleOpenInWarp"><img :src="warpIcon" class="btn-img-icon" alt="Warp" />用 Warp 打开</el-button>
               <el-button @click="handleOpenObsidian"><img :src="obsidianIcon" class="btn-img-icon" alt="Obsidian" />用 Obsidian 打开</el-button>
             </el-button-group>
           </div>
@@ -114,9 +114,9 @@
           <div>
             <span class="action-label">查看操作</span>
             <el-button-group>
-              <el-button @click="handleOpenInExplorer">打开资源管理器</el-button>
-              <el-button @click="handleOpenInVSCode">用 VSCode 打开</el-button>
-              <el-button @click="handleOpenInWarp">用 Warp 打开</el-button>
+              <el-button @click="handleOpenInExplorer"><img :src="explorerIcon" class="btn-img-icon" alt="资源管理器" />打开资源管理器</el-button>
+              <el-button @click="handleOpenInVSCode"><img :src="vscodeIcon" class="btn-img-icon" alt="VSCode" />用 VSCode 打开</el-button>
+              <el-button @click="handleOpenInWarp"><img :src="warpIcon" class="btn-img-icon" alt="Warp" />用 Warp 打开</el-button>
               <el-button @click="handleOpenObsidian"><img :src="obsidianIcon" class="btn-img-icon" alt="Obsidian" />用 Obsidian 打开</el-button>
             </el-button-group>
           </div>
@@ -370,6 +370,9 @@ import {
   GetBranches, CheckoutBranch
 } from '../../wailsjs/go/main/App'
 import obsidianIcon from '../assets/icons/obsidian.png'
+import explorerIcon from '../assets/icons/explorer.png'
+import vscodeIcon from '../assets/icons/vscode.ico'
+import warpIcon from '../assets/icons/warp.ico'
 
 const props = defineProps({
   selectedNode: {

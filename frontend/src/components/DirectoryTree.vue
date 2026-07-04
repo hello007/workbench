@@ -30,9 +30,13 @@
                 <Folder />
               </el-icon>
               <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
-              <el-icon v-if="dir.isGitRepo" class="dir-item-git" color="#67C23A" title="Git 仓库">
-                <SuccessFilled />
-              </el-icon>
+              <img
+                v-if="dir.isGitRepo"
+                :src="gitIcon"
+                class="dir-item-git-img"
+                alt="Git 仓库"
+                title="Git 仓库"
+              />
               <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
                 <Star />
               </el-icon>
@@ -67,13 +71,13 @@
       </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
-        <el-icon><Monitor /></el-icon>在资源管理器中打开
+        <img :src="explorerIcon" class="context-menu-img-icon" alt="资源管理器" />在资源管理器中打开
       </li>
       <li class="context-menu-item" @click="onMenuCommand('openVSCode')">
-        <el-icon><EditPen /></el-icon>用 VSCode 打开
+        <img :src="vscodeIcon" class="context-menu-img-icon" alt="VSCode" />用 VSCode 打开
       </li>
       <li class="context-menu-item" @click="onMenuCommand('openWarp')">
-        <el-icon><Promotion /></el-icon>用 Warp 打开
+        <img :src="warpIcon" class="context-menu-img-icon" alt="Warp" />用 Warp 打开
       </li>
       <li class="context-menu-item" @click="onMenuCommand('openObsidian')">
         <img :src="obsidianIcon" class="context-menu-img-icon" alt="Obsidian" />用 Obsidian 打开
@@ -134,7 +138,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion, Refresh, SuccessFilled } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -148,6 +152,10 @@ import {
   OpenInObsidian
 } from '../../wailsjs/go/main/App'
 import obsidianIcon from '../assets/icons/obsidian.png'
+import explorerIcon from '../assets/icons/explorer.png'
+import vscodeIcon from '../assets/icons/vscode.ico'
+import warpIcon from '../assets/icons/warp.ico'
+import gitIcon from '../assets/icons/git.png'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -601,6 +609,16 @@ onBeforeUnmount(() => {
 .dir-item-git {
   flex-shrink: 0;
   margin-left: 5px;
+}
+
+/* git 仓库标记 img（替代原 SuccessFilled 绿对勾，尺寸/对齐与原 el-icon 一致） */
+.dir-item-git-img {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  vertical-align: middle;
+  object-fit: contain;
 }
 
 @keyframes pulse {

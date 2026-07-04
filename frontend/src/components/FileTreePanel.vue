@@ -43,9 +43,13 @@
             }">
               {{ node.label }}
             </span>
-            <el-icon v-if="data.isGitRepo" color="#67C23A" style="margin-left: 5px;">
-              <SuccessFilled />
-            </el-icon>
+            <img
+              v-if="data.isGitRepo"
+              :src="gitIcon"
+              class="tree-node-git-img"
+              alt="Git 仓库"
+              title="Git 仓库"
+            />
           </span>
         </template>
       </el-tree>
@@ -214,13 +218,13 @@
           <el-icon><CopyDocument /></el-icon>复制路径
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
-          <el-icon><Monitor /></el-icon>在资源管理器中打开
+          <img :src="explorerIcon" class="context-menu-img-icon" alt="资源管理器" />在资源管理器中打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
-          <el-icon><EditPen /></el-icon>用 VSCode 打开
+          <img :src="vscodeIcon" class="context-menu-img-icon" alt="VSCode" />用 VSCode 打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInWarp')">
-          <el-icon><Promotion /></el-icon>用 Warp 打开
+          <img :src="warpIcon" class="context-menu-img-icon" alt="Warp" />用 Warp 打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInObsidian')">
           <img :src="obsidianIcon" class="context-menu-img-icon" alt="Obsidian" />用 Obsidian 打开
@@ -278,13 +282,13 @@
           <el-icon><CopyDocument /></el-icon>复制文件名
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
-          <el-icon><Monitor /></el-icon>在资源管理器中打开
+          <img :src="explorerIcon" class="context-menu-img-icon" alt="资源管理器" />在资源管理器中打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInVSCode')">
-          <el-icon><EditPen /></el-icon>用 VSCode 打开
+          <img :src="vscodeIcon" class="context-menu-img-icon" alt="VSCode" />用 VSCode 打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInWarp')">
-          <el-icon><Promotion /></el-icon>用 Warp 打开
+          <img :src="warpIcon" class="context-menu-img-icon" alt="Warp" />用 Warp 打开
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openInObsidian')">
           <img :src="obsidianIcon" class="context-menu-img-icon" alt="Obsidian" />用 Obsidian 打开
@@ -311,17 +315,13 @@ import {
   Folder,
   FolderOpened,
   Document,
-  SuccessFilled,
   FolderAdd,
   DocumentAdd,
   Edit,
   Delete,
   CopyDocument,
-  Monitor,
   Refresh,
-  EditPen,
   Open,
-  Promotion,
   Scissor,
   DocumentCopy,
   Star,
@@ -344,6 +344,10 @@ import {
   ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
 import obsidianIcon from '../assets/icons/obsidian.png'
+import explorerIcon from '../assets/icons/explorer.png'
+import vscodeIcon from '../assets/icons/vscode.ico'
+import warpIcon from '../assets/icons/warp.ico'
+import gitIcon from '../assets/icons/git.png'
 
 // ---- Props & Emits ----
 const props = defineProps({
@@ -1274,6 +1278,15 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 文件树节点 git 仓库标记 img（替代原 SuccessFilled，保留 margin-left:5px 对齐） */
+.tree-node-git-img {
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  vertical-align: middle;
+  object-fit: contain;
 }
 .context-menu-shortcut {
   margin-left: auto;
