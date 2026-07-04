@@ -292,13 +292,10 @@ defineExpose({ loadCommits, handleRefresh })
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden; /* 兜底：禁止 hover 等场景产生横向滚动条 */
 }
 .commit-item {
   cursor: pointer;
-  transition: all var(--transition-normal);
-}
-.commit-item:hover {
-  transform: translateX(4px);
 }
 .commit-card {
   margin-bottom: var(--spacing-md);
