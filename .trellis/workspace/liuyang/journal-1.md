@@ -437,3 +437,41 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 修复右边栏内容面板多处显示问题
+
+**Date**: 2026-07-04
+**Task**: 修复右边栏内容面板多处显示问题
+**Branch**: `master`
+
+### Summary
+
+修复右侧内容面板（ContentPanel）在仓库节点下三个 tab 的一系列显示问题，纯 CSS/样式调整、无功能逻辑改动。1) 高度链断层：el-tabs/tab-pane 未参与 flex 链，CommitHistory timeline 与 LocalChanges table 用固定 max-height(600/500) 撑高，叠加上方固定区触发 content-panel 整体 overflow:auto 滚动条；改为建立 content-panel→el-tabs→tab-pane→列表区的 flex:1+min-height:0+overflow 高度链，列表区内部滚动，整面板不滚，并顺带修复 content-panel 改 overflow:hidden 后文件夹节点操作按钮被裁剪的回归。2) CommitHistory hover：.commit-item:hover 的 translateX(4px) 使提交项向右漂移触发横向滚动条，去掉 translateX 并给 timeline-container 加 overflow-x:hidden 兜底。3) 提交历史卡片右边缘贴滚动条：timeline-container 加 padding-right:var(--spacing-md)，el-card__body 左 padding 减到 12px 平衡左右留白。4) GitInfo 远程地址 http 分支缺复制按钮：统一 url-with-copy 容器，http 用 el-link、git/ssh 用 span，共用复制按钮，:deep(.el-link.url-text) 仅设字体不覆盖主题色。5) GitInfo label 列偶发换行：:deep(.el-descriptions__label) 固定 width/min-width:80px + white-space:nowrap。6) GitInfo label 居中被 EP .el-descriptions__cell{text-align:left}(特异性0,0,3,0) 覆盖：加父选择器 .git-info-card 并针对 border 模式用 .is-bordered-label(特异性0,0,4,0) 稳定覆盖。npm test(136/136) 与 npm run build 全程通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `03f580d` | (see git log) |
+| `2e00152` | (see git log) |
+| `89daa13` | (see git log) |
+| `1d5bc4d` | (see git log) |
+| `9b66378` | (see git log) |
+| `539cc9c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
