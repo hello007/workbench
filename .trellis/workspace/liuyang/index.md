@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~544 | Active |
+| `journal-1.md` | ~577 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-07-04 | 用 assets 图标替换操作按钮与 git 仓库标记 | `bc1fde5` | `master` |
 | 16 | 2026-07-04 | 工作目录 git 标识缓存与异步刷新优化启动速度 | `088226d` | `master` |
 | 15 | 2026-07-04 | 左栏选中 git 工作目录右栏直显仓库详情 | `3aa7eb0`, `4497d03` | `master` |
 | 14 | 2026-07-04 | 修复右边栏内容面板多处显示问题 | `03f580d`, `2e00152`, `89daa13`, `1d5bc4d`, `9b66378`, `539cc9c` | `master` |

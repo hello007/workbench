@@ -542,3 +542,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 用 assets 图标替换操作按钮与 git 仓库标记
+
+**Date**: 2026-07-04
+**Task**: 用 assets 图标替换操作按钮与 git 仓库标记
+**Branch**: `master`
+
+### Summary
+
+用 frontend/src/assets/icons/ 下的图片按名字对应替换操作按钮/菜单图标 + git 仓库标记，纯前端模板/样式/import 清理，无功能逻辑改动。复用 obsidian 现有 <img class=btn-img-icon/context-menu-img-icon> 模式：1) explorer.png/vscode.ico/warp.ico 替换 5 处「打开资源管理器/用 VSCode 打开/用 Warp 打开」按钮与右键菜单图标（ContentPanel 文件夹+文件两查看操作按钮组、DirectoryTree 右键、FileTreePanel 目录+文件两右键，共 15 图标）；2) git.png 替换 DirectoryTree 工作目录项与 FileTreePanel 文件树节点的 SuccessFilled 绿对勾 git 仓库标记（2 处）；3) 清理无用 EP 图标 import（Monitor/EditPen/Promotion，DirectoryTree/FileTreePanel 的 SuccessFilled 仅 git 标记用也一并清理），ContentPanel 的 SuccessFilled 保留（拉取结果表格/状态栏仍用）；4) git 标记 img 用 scoped 样式（dir-item-git-img/tree-node-git-img，14px、margin-left:5px、vertical-align:middle、object-fit:contain）对齐原 SuccessFilled 视觉。.ico 由 Vite 当静态资源处理，构建产物 vscode/warp .ico 正常产出。npm test 136/136、npm run build 通过；trellis-check 17/17 替换到位、import 正确、无回归。另发现 pre-existing 冗余文件 vscode(1).ico（非本任务，建议后续清理）。finish-work 前 obsidian.png(modified) + 13 个新文件类型图标(untracked) 阻塞脏树，按用户确认作为 chore commit 提交（e27774e）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc1fde5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
