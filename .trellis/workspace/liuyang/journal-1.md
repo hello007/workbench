@@ -645,3 +645,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: 修复 FileTreePanel.spec.js 缺失 favorites mock 致全量测试 exit 1
+
+**Date**: 2026-07-05
+**Task**: 修复 FileTreePanel.spec.js 缺失 favorites mock 致全量测试 exit 1
+**Branch**: `master`
+
+### Summary
+
+FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorite/UpdateFavoriteAlias/UpdateFavoriteGroup 5 个方法，但 FileTreePanel.spec.js 的 App mock 未提供这些 export，导致全量 vitest run 报 31 个 unhandled rejection 并 exit 1。按 Home.spec.js 既定约定补全 5 个 mock（GetFavorites→[]，其余→true）。全量测试恢复 143/143 绿、exit 0。改动单文件 5 行。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6265f5b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
