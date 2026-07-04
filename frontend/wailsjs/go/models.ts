@@ -162,6 +162,7 @@ export namespace model {
 	    isDefault: boolean;
 	    // Go type: time
 	    createTime: any;
+	    isGitRepo: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Directory(source);
@@ -174,6 +175,7 @@ export namespace model {
 	        this.path = source["path"];
 	        this.isDefault = source["isDefault"];
 	        this.createTime = this.convertValues(source["createTime"], null);
+	        this.isGitRepo = source["isGitRepo"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

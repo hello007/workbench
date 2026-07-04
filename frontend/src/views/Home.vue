@@ -225,6 +225,18 @@ const onDirectorySelect = async (dirId) => {
   const newDir = directories.value.find(d => d.id === dirId)
   if (newDir) {
     fileTreePanelRef.value?.restoreTreeState(newDir.path)
+    // 命中 git 仓库工作目录：构造与文件树 git 仓库节点同构的 selectedNode，
+    // 复用 ContentPanel 现有的 git 详情渲染（仓库信息 / 提交历史 / 本地变动）。
+    if (newDir.isGitRepo) {
+      selectedNode.value = {
+        id: newDir.id,
+        path: newDir.path,
+        name: newDir.name,
+        type: 'directory',
+        isGitRepo: true
+      }
+    }
+    // 非 git 工作目录：selectedNode 保持上方已置空的 null（空状态），无需额外处理
   }
 }
 

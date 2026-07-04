@@ -85,7 +85,21 @@ func (a *App) GetDirectories() []*model.Directory {
 		println("Error:", err.Error())
 		return []*model.Directory{}
 	}
+	// 运行时检测每个工作目录是否本身为 git 仓库，供前端左栏标记与右栏 git 详情直显使用。
+	// IsGitRepository 在路径不存在或检测异常时返回 false，不报错。
+	gitCmd := util.NewGitCommand()
+	for _, d := range directories {
+		d.IsGitRepo = gitCmd.IsGitRepository(d.Path)
+	}
 	return directories
+}
+
+// applyGitRepoFlag 填充单个 Directory 的 IsGitRepo 运行时标记。
+func (a *App) applyGitRepoFlag(d *model.Directory) {
+	if d == nil {
+		return
+	}
+	d.IsGitRepo = util.NewGitCommand().IsGitRepository(d.Path)
 }
 
 // AddDirectory 添加工作目录
@@ -95,6 +109,7 @@ func (a *App) AddDirectory(name, path string, isDefault bool) *model.Directory {
 		println("Error:", err.Error())
 		return nil
 	}
+	a.applyGitRepoFlag(dir)
 	return dir
 }
 
@@ -105,6 +120,7 @@ func (a *App) UpdateDirectory(id, name, path string, isDefault bool) *model.Dire
 		println("Error:", err.Error())
 		return nil
 	}
+	a.applyGitRepoFlag(dir)
 	return dir
 }
 
@@ -135,6 +151,7 @@ func (a *App) GetDefaultDirectory() *model.Directory {
 		println("Error:", err.Error())
 		return nil
 	}
+	a.applyGitRepoFlag(dir)
 	return dir
 }
 

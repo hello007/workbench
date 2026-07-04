@@ -12,6 +12,9 @@ type Directory struct {
 	Path       string    `json:"path"`
 	IsDefault  bool      `json:"isDefault"`
 	CreateTime time.Time `json:"createTime"`
+	// IsGitRepo 表示该工作目录路径本身是否为 git 仓库根。
+	// 运行时检测填充，不参与业务持久化语义；旧配置文件无此字段时反序列化零值为 false，天然兼容。
+	IsGitRepo bool `json:"isGitRepo"`
 }
 
 // NewDirectory 创建新的工作目录

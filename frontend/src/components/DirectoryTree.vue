@@ -30,6 +30,9 @@
                 <Folder />
               </el-icon>
               <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
+              <el-icon v-if="dir.isGitRepo" class="dir-item-git" color="#67C23A" title="Git 仓库">
+                <SuccessFilled />
+              </el-icon>
               <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
                 <Star />
               </el-icon>
@@ -131,7 +134,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion, Refresh } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Monitor, EditPen, Promotion, Refresh, SuccessFilled } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -593,6 +596,11 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   margin-left: var(--spacing-xs);
   animation: pulse 1.5s infinite;
+}
+
+.dir-item-git {
+  flex-shrink: 0;
+  margin-left: 5px;
 }
 
 @keyframes pulse {
