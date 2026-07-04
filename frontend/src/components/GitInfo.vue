@@ -248,13 +248,16 @@ defineExpose({ loadGitInfo, handleRefresh })
 :deep(.el-descriptions__table) {
   width: 100%;
 }
-:deep(.el-descriptions__label) {
+.git-info-card :deep(.el-descriptions__label) {
   width: 80px;
   min-width: 80px;
   white-space: nowrap;
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-tertiary);
+  text-align: center;
+}
+.git-info-card :deep(.el-descriptions__cell.is-bordered-label) {
   text-align: center;
 }
 :deep(.el-descriptions__content) {
