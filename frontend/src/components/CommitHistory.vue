@@ -265,6 +265,16 @@ defineExpose({ loadCommits, handleRefresh })
   height: 100%;
   border-radius: var(--radius-md);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* el-card 内部 body 撑满剩余高度（header 固定） */
+.commit-history-card :deep(.el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .card-header {
   display: flex;
@@ -279,7 +289,8 @@ defineExpose({ loadCommits, handleRefresh })
   align-items: center;
 }
 .timeline-container {
-  max-height: 600px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 .commit-item {

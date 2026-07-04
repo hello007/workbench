@@ -21,7 +21,7 @@
         v-if="changes.length > 0"
         ref="tableRef"
         :data="changes"
-        max-height="500"
+        height="100%"
         size="small"
         @selection-change="onSelectionChange"
         @row-dblclick="openDiff"
@@ -336,6 +336,16 @@ defineExpose({ loadChanges })
   height: 100%;
   border-radius: var(--radius-md);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* el-card 内部 body 撑满剩余高度（header 固定） */
+.local-changes-card :deep(.el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .card-header {
   display: flex;
@@ -351,20 +361,29 @@ defineExpose({ loadChanges })
   gap: 8px;
 }
 .changes-container {
-  min-height: 100px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
-.file-path {
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  color: var(--text-secondary);
+/* 表格区：flex:1 撑满剩余高度并内部滚动（表头自动固定）；footer 固定在底部 */
+.changes-container :deep(.el-table) {
+  flex: 1;
+  min-height: 0;
 }
 .changes-footer {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color);
+}
+.file-path {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .commit-input {

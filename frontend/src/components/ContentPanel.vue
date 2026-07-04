@@ -25,7 +25,7 @@
       <el-divider />
 
       <!-- Git 信息签页 -->
-      <el-tabs v-if="selectedNode.isGitRepo" v-model="activeGitTab">
+      <el-tabs v-if="selectedNode.isGitRepo" v-model="activeGitTab" class="git-tabs">
         <el-tab-pane label="仓库信息" name="repo">
           <GitInfo
             ref="gitInfoRef"
@@ -862,7 +862,7 @@ defineExpose({
 .content-panel {
   background-color: var(--bg-secondary);
   height: 100%;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -908,7 +908,9 @@ defineExpose({
   margin-top: var(--spacing-sm);
 }
 
-/* 操作区域 */
+/* 操作区域：.content-panel 改 overflow:hidden 后，文件夹分支若窗口高度不足
+   会导致按钮被裁剪不可见，故让其成为弹性滚动区。文件分支自带 .node-actions--file
+   高度链（内部 .file-preview 自处理滚动），用 :not 掮除避免双重滚动容器。 */
 .node-actions {
   margin-top: 0;
   background: var(--bg-tertiary);
@@ -916,6 +918,11 @@ defineExpose({
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
+}
+.node-actions:not(.node-actions--file) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .node-actions:hover {
@@ -1140,6 +1147,26 @@ defineExpose({
 /* 标签页样式 */
 .el-tabs {
   margin-top: var(--spacing-sm);
+}
+
+/* 仓库节点选中时的 Git tabs：建立 flex 高度链，让 tab 内容填满剩余高度并内部滚动 */
+.git-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.git-tabs :deep(.el-tabs__header) {
+  flex-shrink: 0;
+  margin-bottom: var(--spacing-md);
+}
+.git-tabs :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+}
+.git-tabs :deep(.el-tab-pane) {
+  height: 100%;
+  overflow: hidden;
 }
 
 .el-tabs__header {

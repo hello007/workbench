@@ -60,11 +60,11 @@ export function GetDirectories():Promise<Array<model.Directory>>;
 
 export function GetFavorites():Promise<Array<model.Favorite>>;
 
+export function GetFileDiff(arg1:string,arg2:string):Promise<string>;
+
 export function GetFileTree(arg1:string):Promise<Array<model.FileTreeNode>>;
 
 export function GetFileTreeRecursive(arg1:string,arg2:number):Promise<Array<model.FileTreeNode>>;
-
-export function GetFileDiff(arg1:string,arg2:string):Promise<string>;
 
 export function GetGitInfo(arg1:string):Promise<model.GitRepoInfo>;
 
@@ -94,9 +94,9 @@ export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
 
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
 
-export function PushRepo(arg1:string,arg2:boolean):Promise<string>;
-
 export function PullRepo(arg1:string):Promise<string>;
+
+export function PushRepo(arg1:string,arg2:boolean):Promise<string>;
 
 export function ReadFileBytes(arg1:string):Promise<model.FileBytes>;
 

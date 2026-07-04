@@ -118,16 +118,16 @@ export function GetFavorites() {
   return window['go']['main']['App']['GetFavorites']();
 }
 
+export function GetFileDiff(arg1, arg2) {
+  return window['go']['main']['App']['GetFileDiff'](arg1, arg2);
+}
+
 export function GetFileTree(arg1) {
   return window['go']['main']['App']['GetFileTree'](arg1);
 }
 
 export function GetFileTreeRecursive(arg1, arg2) {
   return window['go']['main']['App']['GetFileTreeRecursive'](arg1, arg2);
-}
-
-export function GetFileDiff(arg1, arg2) {
-  return window['go']['main']['App']['GetFileDiff'](arg1, arg2);
 }
 
 export function GetGitInfo(arg1) {
@@ -186,12 +186,12 @@ export function PreviewFile(arg1) {
   return window['go']['main']['App']['PreviewFile'](arg1);
 }
 
-export function PushRepo(arg1, arg2) {
-  return window['go']['main']['App']['PushRepo'](arg1, arg2);
-}
-
 export function PullRepo(arg1) {
   return window['go']['main']['App']['PullRepo'](arg1);
+}
+
+export function PushRepo(arg1, arg2) {
+  return window['go']['main']['App']['PushRepo'](arg1, arg2);
 }
 
 export function ReadFileBytes(arg1) {
