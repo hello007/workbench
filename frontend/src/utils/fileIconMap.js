@@ -6,10 +6,19 @@ import pngIcon from '../assets/icons/png.png'
 import markdownIcon from '../assets/icons/markdown.png'
 import javaIcon from '../assets/icons/java.png'
 import pythonIcon from '../assets/icons/python.png'
+import goIcon from '../assets/icons/go.png'
 import htmlIcon from '../assets/icons/html.png'
 import javascriptIcon from '../assets/icons/javascript.png'
+import typescriptIcon from '../assets/icons/typescript.png'
+import cssIcon from '../assets/icons/css.png'
+import vueIcon from '../assets/icons/vue.png'
 import jsonIcon from '../assets/icons/json.png'
 import yamlIcon from '../assets/icons/yaml.png'
+import xmlIcon from '../assets/icons/xml.png'
+import shellIcon from '../assets/icons/shell.png'
+import dbIcon from '../assets/icons/db.png'
+import zipIcon from '../assets/icons/zip.png'
+import propertiesIcon from '../assets/icons/properties.png'
 import jpgIcon from '../assets/icons/jpg.png'
 import pptIcon from '../assets/icons/ppt.png'
 import xmindIcon from '../assets/icons/xmind.png'
@@ -33,14 +42,32 @@ const DEFAULT_ICON_MAP = {
   java: javaIcon,
   // python.png
   py: pythonIcon, pyw: pythonIcon,
+  // go.png
+  go: goIcon,
   // html.png
   html: htmlIcon, htm: htmlIcon,
   // javascript.png
   js: javascriptIcon, mjs: javascriptIcon, cjs: javascriptIcon, jsx: javascriptIcon,
+  // typescript.png
+  ts: typescriptIcon, tsx: typescriptIcon,
+  // css.png
+  css: cssIcon, scss: cssIcon, sass: cssIcon, less: cssIcon,
+  // vue.png
+  vue: vueIcon,
   // json.png
   json: jsonIcon,
   // yaml.png
   yaml: yamlIcon, yml: yamlIcon,
+  // xml.png
+  xml: xmlIcon, svg: xmlIcon,
+  // shell.png
+  sh: shellIcon, bash: shellIcon, zsh: shellIcon, fish: shellIcon,
+  // db.png
+  db: dbIcon, sqlite: dbIcon, sqlite3: dbIcon,
+  // zip.png（压缩包）
+  zip: zipIcon, rar: zipIcon, '7z': zipIcon, tar: zipIcon, gz: zipIcon, bz2: zipIcon, xz: zipIcon, tgz: zipIcon,
+  // properties.png（配置及 properties 类文件）
+  properties: propertiesIcon, ini: propertiesIcon, conf: propertiesIcon, cfg: propertiesIcon, env: propertiesIcon, toml: propertiesIcon,
   // jpg.png
   jpg: jpgIcon, jpeg: jpgIcon,
   // ppt.png
