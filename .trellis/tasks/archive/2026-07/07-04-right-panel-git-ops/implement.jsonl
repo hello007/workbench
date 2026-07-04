@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务大量复用 util.GitCommand.Execute / util.FindGitRoot / GetLocalChanges / el-table type=selection 等现有能力；遵循「先搜索再新建」，避免重复实现 diff 解析、变动列表等已有逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "新增能力横跨 Go(service/util) → app.go 暴露 → wails 绑定 → Vue 组件 四层；Commit/GetDiff/Push 的入参与返回需跨层一致，按指南校验数据契约与错误传递"}
+{"file": "docs/开发规范.md", "reason": "项目代码风格、错误处理、提交规范约定；后端新增 git 方法与前端重构 LocalChanges.vue 时遵循既有约定"}

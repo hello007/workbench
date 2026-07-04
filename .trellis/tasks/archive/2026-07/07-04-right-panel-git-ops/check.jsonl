@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 阶段核验是否充分复用现有 git 工具与表格多选机制，无重复造轮子"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 阶段核验 Go→wails→Vue 跨层数据流一致性：参数命名、返回结构、错误透传"}
+{"file": "docs/开发规范.md", "reason": "check 阶段对照代码风格、错误处理、提交规范核验改动"}
+{"file": "docs/测试策略.md", "reason": "check 阶段核验后端单测与前端 vitest 用例是否符合项目测试策略"}
