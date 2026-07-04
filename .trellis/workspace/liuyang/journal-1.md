@@ -509,3 +509,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 工作目录 git 标识缓存与异步刷新优化启动速度
+
+**Date**: 2026-07-04
+**Task**: 工作目录 git 标识缓存与异步刷新优化启动速度
+**Branch**: `master`
+
+### Summary
+
+修复上轮 workdir-git-detail 在 GetDirectories 同步检测所有工作目录 IsGitRepo 导致启动延迟的问题（每个目录一次 git rev-parse 子进程，N 个目录阻塞 UI）。改为缓存+持久化+异步刷新模式：1) service.DirectoryService.Create 在 Save 前用 util.NewGitCommand().IsGitRepository(absPath) 检测并持久化 IsGitRepo 到 directories.json，Update 每次重算（覆盖 path 变化）；2) app.go GetDirectories 去掉同步检测 for 循环，直接返回 Load 结果，启动零子进程、列表秒显；3) 新增 app.go RefreshDirectoriesGitFlag 同步 API：基于最新 Load 合并（只更新 IsGitRepo 字段，保留其他字段最新值，规避与并发 AddDirectory 的竞态覆盖）→ Save 回写 → 返回新列表；4) 移除冗余 applyGitRepoFlag；5) 前端 Home.vue onMounted 改为 loadDirectories().then(() => refreshGitFlags())，先用缓存渲染列表，再 await 刷新替换 directories.value（不重置 selectedDirectoryId/selectedNode，左栏标记按 dir.isGitRepo 自动刷新，失败静默 debug.log）；6) wailsjs 补 RefreshDirectoriesGitFlag 绑定，Home.spec.js 补 mock。后端 6 个单测覆盖 GetDirectories 不检测/Create/Update 持久化/Refresh 检测+回写/Refresh 基于最新 Load 合并保留其他字段(并发竞态)/旧配置兼容；前端 npm test 136/136；trellis-check 6 条 AC 全过、启动性能/持久化/竞态/跨层/回归/边缘达标。wailsjs 绑定后被 wails 工具链自动按字母序重排，单独 chore commit。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `088226d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
