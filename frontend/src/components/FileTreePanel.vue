@@ -33,9 +33,17 @@
             >
               <component :is="node.expanded ? FolderOpened : Folder" />
             </el-icon>
-            <el-icon v-else color="#606266" style="margin-right: 5px;">
-              <Document />
-            </el-icon>
+            <template v-else>
+              <img
+                v-if="getIconForFile(data.name)"
+                :src="getIconForFile(data.name)"
+                class="tree-node-file-icon"
+                :alt="data.name"
+              />
+              <el-icon v-else color="#606266" style="margin-right: 5px;">
+                <Document />
+              </el-icon>
+            </template>
             <span :style="{
               color: data.type === 'directory'
                 ? (node.expanded ? '#409EFF' : '#909399')
@@ -330,6 +338,7 @@ import {
   Sort
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
+import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavorites } from '../composables/useFavorites'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -1285,6 +1294,15 @@ onBeforeUnmount(() => {
   width: 14px;
   height: 14px;
   margin-left: 5px;
+  vertical-align: middle;
+  object-fit: contain;
+}
+
+/* 文件树节点文件类型图标（按后缀映射，与 Document/el-icon 视觉对齐） */
+.tree-node-file-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
   vertical-align: middle;
   object-fit: contain;
 }
