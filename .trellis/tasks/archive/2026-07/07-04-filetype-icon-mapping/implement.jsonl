@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "前端图标 import 复用既有 assets/icons 模式（同 obsidian/git 图标），映射表抽到 utils 便于下期接 AppSettings 替换，避免重复实现"}
+{"file": "docs/开发规范.md", "reason": "前端代码风格、命名与模块组织（utils 抽离）约定"}
