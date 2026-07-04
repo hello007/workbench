@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
-- **Last Active**: 2026-07-04
+- **Total Sessions**: 19
+- **Last Active**: 2026-07-05
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~613 | Active |
+| `journal-1.md` | ~647 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-07-05 | 修复 Git 仓库信息面板两个体验问题（偶发 N/A + 工作目录切换双刷新） | `ed19192`, `74df079` | `master` |
 | 18 | 2026-07-04 | 文件树按文件类型显示图标 | `4d430e4`, `aa76c88`, `0751df3`, `f98f7ee` | `master` |
 | 17 | 2026-07-04 | 用 assets 图标替换操作按钮与 git 仓库标记 | `bc1fde5` | `master` |
 | 16 | 2026-07-04 | 工作目录 git 标识缓存与异步刷新优化启动速度 | `088226d` | `master` |

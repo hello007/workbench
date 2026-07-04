@@ -611,3 +611,37 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: 修复 Git 仓库信息面板两个体验问题（偶发 N/A + 工作目录切换双刷新）
+
+**Date**: 2026-07-05
+**Task**: 修复 Git 仓库信息面板两个体验问题（偶发 N/A + 工作目录切换双刷新）
+**Branch**: `master`
+
+### Summary
+
+完成两个前端体验 bug 修复。07-04：GitInfo 缓存命中偶发丢失最新提交（N/A）——缓存升级为 {info,latestCommit}，Promise.allSettled 区分 info/commit 成败，commit 失败不落缓存避免污染，watch(repoPath) 与 onNodeSelect 清空 latestCommit/localLatestCommit 残留。07-05：工作目录切换 git 仓库内容面板双刷新——onDirectorySelect 重构，按 newDir.isGitRepo 直接设目标 selectedNode，消除 null 中间态导致的 content-inner 卸载再挂载。新增 GitInfo.spec.js（3 用例），Home.spec.js 增补跨仓库切换与 onDirectorySelect 用例，共 34 测试通过，build 成功。两个任务均已 archive。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed19192` | (see git log) |
+| `74df079` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
