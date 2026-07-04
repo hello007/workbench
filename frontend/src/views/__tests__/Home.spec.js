@@ -69,7 +69,7 @@ describe('Home.vue - Bug修复验证', () => {
           Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
           Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
           DirectoryTree: { template: '<div class="stub-directory-tree" />' },
-          FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
+          FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {} } },
           ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
           'el-tree': true,
           'el-dialog': true,
@@ -112,6 +112,70 @@ describe('Home.vue - Bug修复验证', () => {
     it('应该正确处理目录切换', () => {
       wrapper.vm.onDirectorySelect('dir-1')
       expect(wrapper.vm.selectedDirectoryId).toBe('dir-1')
+    })
+  })
+
+  describe('工作目录切换 git 仓库双刷新修复', () => {
+    it('切到 git 工作目录时 selectedNode 立即等于期望的 git 节点对象，无 null 中间态', async () => {
+      wrapper.vm.directories = [
+        { id: 'git-1', name: '仓库A', path: '/a/git-repo', isGitRepo: true, isDefault: false }
+      ]
+
+      await wrapper.vm.onDirectorySelect('git-1')
+      await flushPromises()
+
+      expect(wrapper.vm.selectedDirectoryId).toBe('git-1')
+      expect(wrapper.vm.selectedNode).toEqual({
+        id: 'git-1',
+        path: '/a/git-repo',
+        name: '仓库A',
+        type: 'directory',
+        isGitRepo: true
+      })
+      // latestCommit 应被清零
+      expect(wrapper.vm.latestCommit).toBeNull()
+    })
+
+    it('切到非 git 工作目录时 selectedNode 被置 null', async () => {
+      wrapper.vm.directories = [
+        { id: 'plain-1', name: '普通目录', path: '/b/plain', isGitRepo: false, isDefault: false }
+      ]
+
+      await wrapper.vm.onDirectorySelect('plain-1')
+      await flushPromises()
+
+      expect(wrapper.vm.selectedDirectoryId).toBe('plain-1')
+      expect(wrapper.vm.selectedNode).toBeNull()
+      expect(wrapper.vm.latestCommit).toBeNull()
+    })
+
+    it('gitA → gitB 切换时 selectedNode 由 A-git 直切 B-git（无 null 中间态）', async () => {
+      wrapper.vm.directories = [
+        { id: 'git-A', name: '仓库A', path: '/a/gitA', isGitRepo: true, isDefault: false },
+        { id: 'git-B', name: '仓库B', path: '/b/gitB', isGitRepo: true, isDefault: false }
+      ]
+      await wrapper.vm.onDirectorySelect('git-A')
+      await flushPromises()
+      expect(wrapper.vm.selectedNode.path).toBe('/a/gitA')
+
+      // 切到 B：观察中间态是否经过 null
+      const observed = []
+      const unwatch = wrapper.vm.$watch(() => wrapper.vm.selectedNode, (v) => observed.push(v), { deep: true, flush: 'sync' })
+
+      await wrapper.vm.onDirectorySelect('git-B')
+      await flushPromises()
+      unwatch()
+
+      // 最终落到 B-git
+      expect(wrapper.vm.selectedNode).toEqual({
+        id: 'git-B',
+        path: '/b/gitB',
+        name: '仓库B',
+        type: 'directory',
+        isGitRepo: true
+      })
+      // 关键：观察序列中不应出现 null（即 content-inner 不会卸载再挂载 = 无双刷新）
+      expect(observed.some(v => v === null)).toBe(false)
     })
   })
 

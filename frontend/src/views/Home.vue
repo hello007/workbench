@@ -225,7 +225,7 @@ const refreshGitFlags = async () => {
 
 // ---- 切换工作目录 ----
 const onDirectorySelect = async (dirId) => {
-  // 保存当前工作目录的树状态
+  // 1. 保存当前工作目录的树状态
   if (selectedDirectoryId.value) {
     const currentDir = directories.value.find(d => d.id === selectedDirectoryId.value)
     if (currentDir) {
@@ -233,28 +233,31 @@ const onDirectorySelect = async (dirId) => {
     }
   }
 
+  // 2. 先查目标目录（directories 列表已就绪，不依赖 nextTick）
+  const newDir = directories.value.find(d => d.id === dirId)
+
+  // 3. 直接切到目标 selectedNode，避免 null 中间态导致 content-inner 卸载再挂载（双刷新）
+  //    ContentPanel 模板 v-if="selectedNode" 在 null 时会卸载整个面板，
+  //    若先置 null 再设 git 节点，会触发"先卸载后挂载"两次刷新。
+  //    这里按 newDir.isGitRepo 一次性算出目标值，使 gitA→gitB 切换时面板始终挂载，
+  //    仅 GitInfo.repoPath 变化触发 watch 单次 loadGitInfo（与文件树切换一致）。
   selectedDirectoryId.value = dirId
-  selectedNode.value = null
   latestCommit.value = null
   contentPanelRef.value?.clearPreview()
-
-  // 等待树重新渲染后恢复状态
-  await nextTick()
-  const newDir = directories.value.find(d => d.id === dirId)
-  if (newDir) {
-    fileTreePanelRef.value?.restoreTreeState(newDir.path)
-    // 命中 git 仓库工作目录：构造与文件树 git 仓库节点同构的 selectedNode，
-    // 复用 ContentPanel 现有的 git 详情渲染（仓库信息 / 提交历史 / 本地变动）。
-    if (newDir.isGitRepo) {
-      selectedNode.value = {
+  selectedNode.value = newDir?.isGitRepo
+    ? {
         id: newDir.id,
         path: newDir.path,
         name: newDir.name,
         type: 'directory',
         isGitRepo: true
       }
-    }
-    // 非 git 工作目录：selectedNode 保持上方已置空的 null（空状态），无需额外处理
+    : null
+
+  // 4. 等文件树按新 selectedDirectoryId 重渲染后恢复树状态
+  await nextTick()
+  if (newDir) {
+    fileTreePanelRef.value?.restoreTreeState(newDir.path)
   }
 }
 

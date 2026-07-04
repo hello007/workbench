@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务核心是 Vue 渲染机制：v-if='selectedNode' 卸载/挂载整个 content-inner 导致双刷新。'UI Local Refresh vs Whole-Tree Rebuild' 章节讲组件状态/渲染语义（卸载副作用、key-bumping 反模式、缓存复用），直接指导 onDirectorySelect 重构——消除 null 中间态避免 content-inner 中途卸载"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "'Pre-Modification Rule: search first' —— 重构 onDirectorySelect 前 grep selectedNode 所有写入点（onDirectorySelect / onNodeSelect / selectDirectory / 其他），确保新逻辑与既有写入点语义一致，不遗漏清理或引入不一致"}

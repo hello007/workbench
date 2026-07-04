@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 时验证渲染与状态正确性：工作目录切换 git 仓库仅单次刷新（content-inner 不中途卸载）、gitA→gitB 不残留、切到非 git 目录正确清空、文件树切换行为不受影响（回归）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 时验证 selectedNode 写入点语义一致：onDirectorySelect 重构后与 onNodeSelect / selectDirectory 协同，无遗漏的清理点或状态残留"}
