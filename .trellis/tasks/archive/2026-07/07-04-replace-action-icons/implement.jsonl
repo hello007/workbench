@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 obsidian 现有 <img class=btn-img-icon/context-menu-img-icon> 模式与全局 .btn-img-icon 样式，避免重复造图标组件/样式"}
+{"file": "docs/开发规范.md", "reason": "前端代码风格、import 与清理无用 EP 图标 import 的约定"}

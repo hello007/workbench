@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 阶段核验图标替换复用既有 img 模式、无冗余图标样式、无用 EP import 已清理"}
+{"file": "docs/开发规范.md", "reason": "check 阶段对照前端代码风格核验"}
+{"file": "docs/测试策略.md", "reason": "check 阶段核验 npm test / npm run build 通过、无回归"}
