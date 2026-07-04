@@ -404,3 +404,36 @@ PreviewFile（service）按 kind 分流：仅 text 判 1MB tooLarge 并读全文
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: 右边栏操作面板支持 Git diff/提交/推送
+
+**Date**: 2026-07-04
+**Task**: 右边栏操作面板支持 Git diff/提交/推送
+**Branch**: `master`
+
+### Summary
+
+为右侧操作面板（ContentPanel）补全 Git 工作流闭环。后端 service/git.go + util/git.go 新增 Commit/Push/GetDiff/HasUpstream（复用 GitCommand.Execute 与 FindGitRoot，新增 ExecuteWithCodes 容忍 diff 退出码 1），app.go 暴露 CommitFiles/PushRepo/GetFileDiff/HasUpstream。前端 LocalChanges.vue 重构为 IDEA commit 窗口风格：单区变动清单 + 复选框勾选要提交的文件 + 双击文件弹窗双栏左右对照 diff（FileDiffDialog.vue，前端解析 unified diff）+ 底部 commit 输入框与提交/提交并推送/推送按钮，回滚下沉到「更多」菜单。采用 pathspec 选择性提交（git add + git commit -- 选中文件），不引入暂存区语义；推送无上游时提示 set-upstream；提交/推送后联动刷新本地变动+提交历史+仓库信息。go test 与 npm test(136/136) 全绿，trellis-check 9 条验收标准全部通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `26a5c52` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

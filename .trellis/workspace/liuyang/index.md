@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
-- **Last Active**: 2026-07-01
+- **Total Sessions**: 13
+- **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~406 | Active |
+| `journal-1.md` | ~439 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-07-04 | 右边栏操作面板支持 Git diff/提交/推送 | `26a5c52` | `master` |
 | 12 | 2026-07-01 | 文件预览区支持复制选中文本（Ctrl+C + 右键复制/全选菜单） | `e2d4736` | `master` |
 | 11 | 2026-06-25 | 修复 WorkBench 启动后影响其他应用复制粘贴的剪贴板锁竞态 | `81abd8b` | `master` |
 | 10 | 2026-06-24 | 修复预览大小判定（tooLarge 误伤图片/Office） | `2cc7957` | `master` |
