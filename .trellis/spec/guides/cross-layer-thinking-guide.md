@@ -237,3 +237,69 @@ Create detailed flow docs when:
 - Multiple teams are involved
 - Data format is complex
 - Feature has caused bugs before
+
+---
+
+## 组件状态切换：避免中间态卸载与缓存命中丢字段
+
+> 适用：Vue 组件选中状态切换、带内存缓存的组件加载。两个反模式均在本仓库真实出现过。
+
+### 反模式 1：切换状态经历 `null` 中间态 → `v-if` 卸载再挂载
+
+**症状**：切换选中项时内容面板先清空再加载（双刷新/闪烁），子组件销毁重建触发重复请求。
+
+**原因**：先 `selectedNode = null` 清空、`await nextTick()` 后再设目标值。模板 `<div v-if="selectedNode">` 在 `null` 时卸载整个子树，目标值设置时重新挂载——内部子组件（如 GitInfo）销毁重建，`loadGitInfo` 重新执行。
+
+**修正**：直接从旧值切到目标值，不经历 `null`。"切到非 git 目录需清空"由"目标值即 `null`"自然实现。
+
+```javascript
+// Wrong（双刷新）
+selectedNode.value = null
+await nextTick()
+if (newDir.isGitRepo) selectedNode.value = { ...gitNode }
+
+// Correct（单次刷新，与文件树切换一致）
+const newDir = directories.value.find(d => d.id === dirId)
+selectedNode.value = newDir?.isGitRepo ? { ...gitNode } : null
+await nextTick()
+fileTreePanelRef.value?.restoreTreeState(newDir.path)
+```
+
+**Checklist**：
+- [ ] 模板中 `v-if` 依赖被切换状态的节点——中间值（null/undefined）是否会触发整子树卸载？
+- [ ] "清空旧选中"能否由"目标值即空"自然实现，避免先 null 后设值？
+
+**Real-world**：`Home.vue onDirectorySelect` 切换 git 工作目录双刷新（任务 07-05）。
+
+### 反模式 2：缓存命中只恢复部分字段 → 派生渲染字段丢失
+
+**症状**：带缓存的组件命中缓存时，部分渲染字段显示 N/A，需手动刷新才恢复。
+
+**原因**：缓存只存部分状态（如 `info`），但渲染依赖与 `info` 同源加载的派生字段（如 `latestCommit`）。命中分支只恢复缓存字段就 `return`，派生字段丢失。常叠加"prop 数据源在 lazy tab 下常态为 null"——命中时两个数据源都为空。
+
+**修正**：缓存结构覆盖渲染所需的**全部**派生字段，命中时一并恢复。失败字段不落缓存（用 `Promise.allSettled` 区分成败），下次进入自动重试，避免污染缓存导致持续 N/A。
+
+```javascript
+// Wrong（命中丢 latestCommit → 显示 N/A）
+if (cached) { gitInfo.value = cached; return }   // cached 仅是 info
+gitCache.set(key, info)
+
+// Correct（缓存覆盖派生字段 + 失败不污染）
+if (cached) {
+  gitInfo.value = cached.info
+  localLatestCommit.value = cached.latestCommit   // 一并恢复
+  return
+}
+// 仅 commit 成功才落缓存；失败时本次不缓存，下次进入重拉两边
+if (commitsRes.status === 'fulfilled') {
+  gitCache.set(key, { info: infoRes.value, latestCommit })
+}
+```
+
+**Checklist**：
+- [ ] 命中分支是否恢复了组件渲染所需的全部字段（不只缓存的部分）？
+- [ ] 缓存写入是否覆盖所有从该次加载派生的渲染字段？
+- [ ] 某字段加载失败时，是否避免把 `null` 写入缓存（防止 TTL 内重试仍失败）？
+- [ ] 组件若同时依赖缓存 + 父组件 prop 两个数据源，切换时两者是否都清理残留？
+
+**Real-world**：`GitInfo.vue loadGitInfo` 缓存命中偶发丢失最新提交（任务 07-04）。

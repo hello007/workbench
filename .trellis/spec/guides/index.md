@@ -47,6 +47,14 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
 
+### When to Think About Component State Switching / In-Component Cache
+
+- [ ] Switching selected node / tab where the template uses `v-if` on the switched state
+- [ ] Component keeps an in-memory cache (e.g. `Map` with TTL) of loaded data
+- [ ] Cache-hit branch returns early after restoring only some fields
+
+→ Read the "组件状态切换" section in [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
+
 ---
 
 ## Pre-Modification Rule (CRITICAL)
