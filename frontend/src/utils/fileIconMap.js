@@ -11,6 +11,8 @@ import javascriptIcon from '../assets/icons/javascript.png'
 import jsonIcon from '../assets/icons/json.png'
 import yamlIcon from '../assets/icons/yaml.png'
 import jpgIcon from '../assets/icons/jpg.png'
+import pptIcon from '../assets/icons/ppt.png'
+import xmindIcon from '../assets/icons/xmind.png'
 
 // 默认"后缀→图标"映射：键为不含点的小写后缀，值为 import 的图标 URL
 // 下期接 AppSettings 时，将用户自定义映射与默认合并即可
@@ -40,7 +42,11 @@ const DEFAULT_ICON_MAP = {
   // yaml.png
   yaml: yamlIcon, yml: yamlIcon,
   // jpg.png
-  jpg: jpgIcon, jpeg: jpgIcon
+  jpg: jpgIcon, jpeg: jpgIcon,
+  // ppt.png
+  ppt: pptIcon, pptx: pptIcon,
+  // xmind.png
+  xmind: xmindIcon
 }
 
 // 取文件名最后一个 `.` 之后的部分作为后缀（如 a.tar.gz → gz），无 `.` 返回空串
