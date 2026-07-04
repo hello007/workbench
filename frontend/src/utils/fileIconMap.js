@@ -22,6 +22,10 @@ import propertiesIcon from '../assets/icons/properties.png'
 import jpgIcon from '../assets/icons/jpg.png'
 import pptIcon from '../assets/icons/ppt.png'
 import xmindIcon from '../assets/icons/xmind.png'
+import exeIcon from '../assets/icons/exe.png'
+import licenseIcon from '../assets/icons/license.png'
+import gitignoreIcon from '../assets/icons/gitignore.png'
+import tmplIcon from '../assets/icons/tmpl.png'
 
 // 默认"后缀→图标"映射：键为不含点的小写后缀，值为 import 的图标 URL
 // 下期接 AppSettings 时，将用户自定义映射与默认合并即可
@@ -73,7 +77,22 @@ const DEFAULT_ICON_MAP = {
   // ppt.png
   ppt: pptIcon, pptx: pptIcon,
   // xmind.png
-  xmind: xmindIcon
+  xmind: xmindIcon,
+  // exe.png（Windows 可执行/安装包）
+  exe: exeIcon, msi: exeIcon,
+  // tmpl.png（模板系列）
+  tmpl: tmplIcon, tpl: tmplIcon, template: tmplIcon,
+  // gitignore.png（.gitignore 文件，getExtension 取得 "gitignore" 后缀）
+  gitignore: gitignoreIcon
+}
+
+// 特殊文件名→图标映射（大小写不敏感）：匹配无后缀特殊文件如 LICENSE/COPYING
+// getIconForFile 先查文件名，再查后缀
+const FILENAME_ICON_MAP = {
+  license: licenseIcon,
+  licence: licenseIcon,
+  copying: licenseIcon,
+  notice: licenseIcon
 }
 
 // 取文件名最后一个 `.` 之后的部分作为后缀（如 a.tar.gz → gz），无 `.` 返回空串
@@ -86,9 +105,14 @@ function getExtension(name) {
 
 // 根据文件名返回对应类型图标 URL；无匹配返回 null（调用方 fallback EP Document）
 export function getIconForFile(name) {
+  if (!name) return null
+  // 1. 完整文件名匹配（大小写不敏感）—— 命中无后缀特殊文件如 LICENSE
+  const filenameKey = name.toLowerCase()
+  if (FILENAME_ICON_MAP[filenameKey]) return FILENAME_ICON_MAP[filenameKey]
+  // 2. 后缀匹配
   const ext = getExtension(name)
   if (!ext) return null
   return DEFAULT_ICON_MAP[ext] || null
 }
 
-export { DEFAULT_ICON_MAP }
+export { DEFAULT_ICON_MAP, FILENAME_ICON_MAP }
