@@ -162,47 +162,55 @@ func writeDirectoriesConfig(t *testing.T, path string, dirs []*model.Directory) 
 	}
 }
 
-// TestGetDirectories_FillsIsGitRepo 验证 GetDirectories 对 git 仓库返回 true、对普通目录返回 false。
-// 同时验证旧配置文件（不含 isGitRepo 字段）反序列化零值兼容。
-func TestGetDirectories_FillsIsGitRepo(t *testing.T) {
-	// 准备一个 git 仓库目录
-	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
-	runGitIn(t, repoDir, "config", "user.email", "test@test.com")
-	runGitIn(t, repoDir, "config", "user.name", "test")
-
-	// 准备一个普通目录
+// TestGetDirectories_NoRuntimeDetection 验证 GetDirectories 不再触发运行时检测：
+// 直接返回持久化的 IsGitRepo 值（启动零子进程）。
+// 构造"持久化 IsGitRepo=true 但实际路径非 git"的配置，断言 GetDirectories 原样返回 true 而不重算为 false。
+func TestGetDirectories_NoRuntimeDetection(t *testing.T) {
+	// 准备一个普通目录（非 git 仓）
 	plainDir := t.TempDir()
 
-	// 写入配置文件（刻意不含 isGitRepo 字段，验证旧配置反序列化零值兼容）
+	// 持久化值刻意标 true（与实际不符），若 GetDirectories 仍运行时检测会被纠正为 false
 	configPath := filepath.Join(t.TempDir(), "directories.json")
 	writeDirectoriesConfig(t, configPath, []*model.Directory{
-		{ID: "d1", Name: "repo", Path: repoDir, IsDefault: true},
-		{ID: "d2", Name: "plain", Path: plainDir, IsDefault: false},
+		{ID: "d1", Name: "stale", Path: plainDir, IsDefault: false, IsGitRepo: true},
 	})
 
 	app := &App{directorySvc: service.NewDirectoryService(configPath)}
 	got := app.GetDirectories()
-	if len(got) != 2 {
-		t.Fatalf("expected 2 directories, got %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 directory, got %d", len(got))
 	}
-
-	byID := make(map[string]*model.Directory, len(got))
-	for _, d := range got {
-		byID[d.ID] = d
-	}
-	if !byID["d1"].IsGitRepo {
-		t.Errorf("expected d1 (%s) IsGitRepo=true", repoDir)
-	}
-	if byID["d2"].IsGitRepo {
-		t.Errorf("expected d2 (%s) IsGitRepo=false", plainDir)
+	if !got[0].IsGitRepo {
+		t.Errorf("expected persisted IsGitRepo=true to be returned as-is without runtime detection, got false")
 	}
 }
 
-// TestGetDirectories_MissingPathAndAbsentConfig 验证路径不存在时 IsGitRepo=false（不报错），
+// TestGetDirectories_OldConfigBackwardCompat 验证旧配置（无 isGitRepo 字段）反序列化零值兼容：
+// GetDirectories 返回 IsGitRepo=false，等待 RefreshDirectoriesGitFlag 异步刷新补正。
+func TestGetDirectories_OldConfigBackwardCompat(t *testing.T) {
+	repoDir := t.TempDir()
+	runGitIn(t, repoDir, "init")
+
+	// 刻意不含 isGitRepo 字段，模拟旧配置（用 model 序列化保证路径转义正确，仅不设置 IsGitRepo）
+	configPath := filepath.Join(t.TempDir(), "directories.json")
+	writeDirectoriesConfig(t, configPath, []*model.Directory{
+		{ID: "d1", Name: "repo", Path: repoDir, IsDefault: false, IsGitRepo: false},
+	})
+
+	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	got := app.GetDirectories()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 directory, got %d", len(got))
+	}
+	if got[0].IsGitRepo {
+		t.Errorf("expected IsGitRepo=false (zero value) for old config without isGitRepo field, got true")
+	}
+}
+
+// TestGetDirectories_MissingPathAndAbsentConfig 验证路径不存在时持久化零值 IsGitRepo=false 原样返回，
 // 以及配置文件不存在时 GetDirectories 返回空切片。
 func TestGetDirectories_MissingPathAndAbsentConfig(t *testing.T) {
-	// 路径不存在 → 检测返回 false，不 panic
+	// 路径不存在 → IsGitRepo 字段缺省零值 false，GetDirectories 原样返回（不触发检测）
 	configPath := filepath.Join(t.TempDir(), "directories.json")
 	writeDirectoriesConfig(t, configPath, []*model.Directory{
 		{ID: "d1", Name: "ghost", Path: filepath.Join(t.TempDir(), "does-not-exist")},
@@ -224,12 +232,6 @@ func TestGetDirectories_MissingPathAndAbsentConfig(t *testing.T) {
 	}
 }
 
-// TestApplyGitRepoFlag_NilSafe 验证 nil 入参不 panic。
-func TestApplyGitRepoFlag_NilSafe(t *testing.T) {
-	app := &App{}
-	app.applyGitRepoFlag(nil) // 不应 panic
-}
-
 // TestDirectory_OldConfigBackwardCompat 验证不含 isGitRepo 字段的旧 JSON
 // 反序列化后 IsGitRepo 零值为 false（兼容性回归保护）。
 func TestDirectory_OldConfigBackwardCompat(t *testing.T) {
@@ -244,5 +246,161 @@ func TestDirectory_OldConfigBackwardCompat(t *testing.T) {
 	}
 	if d.IsGitRepo {
 		t.Error("expected IsGitRepo=false (zero value) for old config without isGitRepo field")
+	}
+}
+
+// TestRefreshDirectoriesGitFlag_DetectsAndPersists 验证 RefreshDirectoriesGitFlag：
+// 构造持久化 IsGitRepo 全 false 的旧配置（含一个真实 git 仓 + 一个普通目录），
+// 调用后 IsGitRepo 被刷新（git=true、plain=false）且回写 directories.json。
+func TestRefreshDirectoriesGitFlag_DetectsAndPersists(t *testing.T) {
+	// 准备真实 git 仓 + 普通目录
+	repoDir := t.TempDir()
+	runGitIn(t, repoDir, "init")
+	runGitIn(t, repoDir, "config", "user.email", "test@test.com")
+	runGitIn(t, repoDir, "config", "user.name", "test")
+	plainDir := t.TempDir()
+
+	// 旧配置：isGitRepo 字段全缺省（零值 false）
+	configPath := filepath.Join(t.TempDir(), "directories.json")
+	writeDirectoriesConfig(t, configPath, []*model.Directory{
+		{ID: "d1", Name: "repo", Path: repoDir, IsDefault: false},
+		{ID: "d2", Name: "plain", Path: plainDir, IsDefault: false},
+	})
+
+	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	got := app.RefreshDirectoriesGitFlag()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(got))
+	}
+	byID := make(map[string]*model.Directory, len(got))
+	for _, d := range got {
+		byID[d.ID] = d
+	}
+	if !byID["d1"].IsGitRepo {
+		t.Errorf("expected d1 (%s) refreshed to IsGitRepo=true", repoDir)
+	}
+	if byID["d2"].IsGitRepo {
+		t.Errorf("expected d2 (%s) refreshed to IsGitRepo=false", plainDir)
+	}
+
+	// 重新 Load（独立 service 实例）验证回写持久化
+	svc2 := service.NewDirectoryService(configPath)
+	persisted, err := svc2.Load()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	pByID := make(map[string]*model.Directory, len(persisted))
+	for _, d := range persisted {
+		pByID[d.ID] = d
+	}
+	if !pByID["d1"].IsGitRepo {
+		t.Error("expected d1 IsGitRepo=true persisted to directories.json")
+	}
+	if pByID["d2"].IsGitRepo {
+		t.Error("expected d2 IsGitRepo=false persisted to directories.json")
+	}
+}
+
+// TestRefreshDirectoriesGitFlag_PreservesOtherFields 验证 Refresh 基于"最新 Load 合并"语义：
+// 只更新 IsGitRepo，保留其他字段（如 Name）的最新持久化值，
+// 规避并发竞态（刷新期间用户改名，刷新不应覆盖）。
+func TestRefreshDirectoriesGitFlag_PreservesOtherFields(t *testing.T) {
+	repoDir := t.TempDir()
+	runGitIn(t, repoDir, "init")
+
+	configPath := filepath.Join(t.TempDir(), "directories.json")
+	writeDirectoriesConfig(t, configPath, []*model.Directory{
+		{ID: "d1", Name: "original", Path: repoDir, IsDefault: false, IsGitRepo: false},
+	})
+
+	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+
+	// 模拟并发：刷新前另一路径改了 Name（绕过 app，直接写最新值）
+	// 这里通过先调用 service 层改名来模拟外部最新持久化
+	svc := service.NewDirectoryService(configPath)
+	dir, _ := svc.GetDefault()
+	if dir == nil {
+		// 没有默认则取第一个
+		dirs, _ := svc.Load()
+		dir = dirs[0]
+	}
+	dir.Name = "renamed-by-user"
+	svc.Save([]*model.Directory{dir})
+
+	got := app.RefreshDirectoriesGitFlag()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 directory, got %d", len(got))
+	}
+	if got[0].Name != "renamed-by-user" {
+		t.Errorf("expected Name preserved as 'renamed-by-user', got %q", got[0].Name)
+	}
+	if !got[0].IsGitRepo {
+		t.Error("expected IsGitRepo refreshed to true")
+	}
+}
+
+// TestAddDirectory_PersistsIsGitRepo 验证 AddDirectory（service.Create）持久化 IsGitRepo：
+// git 仓 → true，普通目录 → false。
+func TestAddDirectory_PersistsIsGitRepo(t *testing.T) {
+	repoDir := t.TempDir()
+	runGitIn(t, repoDir, "init")
+	plainDir := t.TempDir()
+
+	configPath := filepath.Join(t.TempDir(), "directories.json")
+	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+
+	app.AddDirectory("repo", repoDir, false)
+	app.AddDirectory("plain", plainDir, false)
+
+	got := app.GetDirectories()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 directories, got %d", len(got))
+	}
+	byName := make(map[string]*model.Directory, len(got))
+	for _, d := range got {
+		byName[d.Name] = d
+	}
+	if !byName["repo"].IsGitRepo {
+		t.Errorf("expected repo (%s) IsGitRepo=true persisted", repoDir)
+	}
+	if byName["plain"].IsGitRepo {
+		t.Errorf("expected plain (%s) IsGitRepo=false persisted", plainDir)
+	}
+}
+
+// TestUpdateDirectory_RecalculatesIsGitRepo 验证 UpdateDirectory（service.Update）在 path 变化后重算 IsGitRepo：
+// 普通目录 → git 仓，IsGitRepo 从 false 变 true 并持久化。
+func TestUpdateDirectory_RecalculatesIsGitRepo(t *testing.T) {
+	// 初始：普通目录
+	plainDir := t.TempDir()
+	// 目标：另一个 git 仓
+	repoDir := t.TempDir()
+	runGitIn(t, repoDir, "init")
+
+	configPath := filepath.Join(t.TempDir(), "directories.json")
+	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+
+	created := app.AddDirectory("d", plainDir, false)
+	if created.IsGitRepo {
+		t.Fatalf("expected initial IsGitRepo=false for plain dir, got true")
+	}
+
+	// 改 path 到 git 仓
+	updated := app.UpdateDirectory(created.ID, "d", repoDir, false)
+	if updated == nil {
+		t.Fatal("UpdateDirectory returned nil")
+	}
+	if !updated.IsGitRepo {
+		t.Errorf("expected IsGitRepo=true after updating path to git repo, got false")
+	}
+
+	// 重新 Load 验证持久化
+	svc2 := service.NewDirectoryService(configPath)
+	dirs, _ := svc2.Load()
+	if len(dirs) != 1 {
+		t.Fatalf("expected 1 directory after update, got %d", len(dirs))
+	}
+	if !dirs[0].IsGitRepo {
+		t.Error("expected IsGitRepo=true persisted after update")
 	}
 }

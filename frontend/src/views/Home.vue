@@ -125,7 +125,8 @@ import {
   CopyToSystemClipboard,
   CutToSystemClipboard,
   ReadFromSystemClipboard,
-  AddDirectory
+  AddDirectory,
+  RefreshDirectoriesGitFlag
 } from '../../wailsjs/go/main/App'
 
 // ---- 核心状态 ----
@@ -202,6 +203,23 @@ const loadDirectories = async () => {
     }
   } catch (error) {
     debug.log('加载目录失败:', error)
+  }
+}
+
+// ---- 启动后异步刷新工作目录的 git 标识 ----
+// GetDirectories 启动时直接返回 directories.json 持久化的 IsGitRepo（秒回），
+// 这里再调一次后端刷新覆盖"目录后来才纳管为 git"等变化。
+// 仅替换 directories 列表（左栏 git 标记会因 dir.isGitRepo 更新自动刷新），
+// 不动 selectedDirectoryId / selectedNode，避免打断用户已选中的目录与右栏状态。
+const refreshGitFlags = async () => {
+  try {
+    const fresh = await RefreshDirectoriesGitFlag()
+    if (fresh && fresh.length) {
+      directories.value = fresh
+    }
+  } catch (error) {
+    // 刷新失败不影响主流程，缓存值仍可用
+    debug.log('刷新工作目录 git 标识失败:', error)
   }
 }
 
@@ -561,7 +579,8 @@ watch(() => selectedDirectoryId.value, () => {
 })
 
 onMounted(() => {
-  loadDirectories()
+  // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记。
+  loadDirectories().then(() => refreshGitFlags())
   loadShortcuts()
   GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)

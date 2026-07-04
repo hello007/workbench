@@ -108,6 +108,8 @@ export function RenameFile(arg1:string,arg2:string):Promise<boolean>;
 
 export function ReorderDirectories(arg1:Array<string>):Promise<boolean>;
 
+export function RefreshDirectoriesGitFlag():Promise<Array<model.Directory>>;
+
 export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;

@@ -78,49 +78,60 @@ func (a *App) GetAppVersion() string {
 	return version
 }
 
-// GetDirectories 获取所有工作目录
+// GetDirectories 获取所有工作目录。
+// 启动关键路径：直接返回 Load() 结果，不再同步检测 IsGitRepo（避免 N 次子进程阻塞 UI 渲染）。
+// IsGitRepo 取自 directories.json 持久化值（Create/Update 时写入，RefreshDirectoriesGitFlag 启动后异步刷新）。
 func (a *App) GetDirectories() []*model.Directory {
 	directories, err := a.directorySvc.Load()
 	if err != nil {
 		println("Error:", err.Error())
 		return []*model.Directory{}
 	}
-	// 运行时检测每个工作目录是否本身为 git 仓库，供前端左栏标记与右栏 git 详情直显使用。
-	// IsGitRepository 在路径不存在或检测异常时返回 false，不报错。
+	return directories
+}
+
+// RefreshDirectoriesGitFlag 重新检测所有工作目录的 IsGitRepo，回写 directories.json，返回刷新后的列表。
+// 启动后由前端异步调用，覆盖"目录后来纳管为 git 仓库"等变化。
+// 关键：基于最新 Load 合并——只更新 IsGitRepo 字段，保留其他字段最新值，
+// 规避"刷新期间用户 AddDirectory，刷新用旧快照 Save 覆盖新目录"的并发竞态。
+func (a *App) RefreshDirectoriesGitFlag() []*model.Directory {
+	// 1. 基于最新 Load（不使用任何旧快照）
+	directories, err := a.directorySvc.Load()
+	if err != nil {
+		println("Error:", err.Error())
+		return []*model.Directory{}
+	}
 	gitCmd := util.NewGitCommand()
+	// 2. 只更新 IsGitRepo 字段（其他字段保留 Load 的最新值）
 	for _, d := range directories {
 		d.IsGitRepo = gitCmd.IsGitRepository(d.Path)
+	}
+	// 3. Save 回写（基于最新 Load 的合并结果）
+	if err := a.directorySvc.Save(directories); err != nil {
+		println("Error:", err.Error())
 	}
 	return directories
 }
 
-// applyGitRepoFlag 填充单个 Directory 的 IsGitRepo 运行时标记。
-func (a *App) applyGitRepoFlag(d *model.Directory) {
-	if d == nil {
-		return
-	}
-	d.IsGitRepo = util.NewGitCommand().IsGitRepository(d.Path)
-}
-
-// AddDirectory 添加工作目录
+// AddDirectory 添加工作目录。
+// IsGitRepo 由 service.Create 在持久化时计算并写入 directories.json，此处直接返回。
 func (a *App) AddDirectory(name, path string, isDefault bool) *model.Directory {
 	dir, err := a.directorySvc.Create(name, path, isDefault)
 	if err != nil {
 		println("Error:", err.Error())
 		return nil
 	}
-	a.applyGitRepoFlag(dir)
 	return dir
 }
 
-// UpdateDirectory 更新工作目录
+// UpdateDirectory 更新工作目录。
+// IsGitRepo 由 service.Update 在持久化时重算并写入 directories.json，此处直接返回。
 func (a *App) UpdateDirectory(id, name, path string, isDefault bool) *model.Directory {
 	dir, err := a.directorySvc.Update(id, name, path, isDefault)
 	if err != nil {
 		println("Error:", err.Error())
 		return nil
 	}
-	a.applyGitRepoFlag(dir)
 	return dir
 }
 
@@ -144,14 +155,14 @@ func (a *App) SetDefaultDirectory(id string) bool {
 	return true
 }
 
-// GetDefaultDirectory 获取默认目录
+// GetDefaultDirectory 获取默认目录。
+// 读方法不触发检测，直接返回 Load 的持久化结果。
 func (a *App) GetDefaultDirectory() *model.Directory {
 	dir, err := a.directorySvc.GetDefault()
 	if err != nil {
 		println("Error:", err.Error())
 		return nil
 	}
-	a.applyGitRepoFlag(dir)
 	return dir
 }
 

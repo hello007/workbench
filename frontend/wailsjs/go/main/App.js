@@ -214,6 +214,10 @@ export function ReorderDirectories(arg1) {
   return window['go']['main']['App']['ReorderDirectories'](arg1);
 }
 
+export function RefreshDirectoriesGitFlag() {
+  return window['go']['main']['App']['RefreshDirectoriesGitFlag']();
+}
+
 export function ResizeTerminal(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeTerminal'](arg1, arg2, arg3);
 }

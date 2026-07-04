@@ -55,7 +55,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddFavorite: vi.fn(() => Promise.resolve(true)),
   RemoveFavorite: vi.fn(() => Promise.resolve(true)),
   UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
-  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true))
+  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true)),
+  RefreshDirectoriesGitFlag: vi.fn(() => Promise.resolve([]))
 }))
 
 describe('Home.vue - Bug修复验证', () => {
