@@ -51,6 +51,31 @@ func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// ExecuteWithCodes 执行 Git 命令，允许指定退出码视为正常（如 git diff --no-index 有差异时退出码 1）。
+// 若退出码在 acceptedExitCodes 中，返回 stdout 与 nil；否则按 Execute 语义返回错误。
+func (g *GitCommand) ExecuteWithCodes(workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = workDir
+	HideCommandWindow(cmd)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && acceptedExitCodes[exitErr.ExitCode()] {
+			return stdout.String(), nil
+		}
+		return "", fmt.Errorf("git %v failed: %s", args, stderr.String())
+	}
+
+	return stdout.String(), nil
+}
+
 // IsGitRepository 检查目录是否是Git仓库
 func (g *GitCommand) IsGitRepository(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")

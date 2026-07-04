@@ -38,6 +38,10 @@ export function CloseTerminal(arg1) {
   return window['go']['main']['App']['CloseTerminal'](arg1);
 }
 
+export function CommitFiles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CommitFiles'](arg1, arg2, arg3);
+}
+
 export function ContentSearch(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ContentSearch'](arg1, arg2, arg3, arg4);
 }
@@ -122,6 +126,10 @@ export function GetFileTreeRecursive(arg1, arg2) {
   return window['go']['main']['App']['GetFileTreeRecursive'](arg1, arg2);
 }
 
+export function GetFileDiff(arg1, arg2) {
+  return window['go']['main']['App']['GetFileDiff'](arg1, arg2);
+}
+
 export function GetGitInfo(arg1) {
   return window['go']['main']['App']['GetGitInfo'](arg1);
 }
@@ -144,6 +152,10 @@ export function GetSettings() {
 
 export function GetShellConfigs() {
   return window['go']['main']['App']['GetShellConfigs']();
+}
+
+export function HasUpstream(arg1) {
+  return window['go']['main']['App']['HasUpstream'](arg1);
 }
 
 export function MoveItem(arg1, arg2) {
@@ -172,6 +184,10 @@ export function OpenWithDefaultApp(arg1) {
 
 export function PreviewFile(arg1) {
   return window['go']['main']['App']['PreviewFile'](arg1);
+}
+
+export function PushRepo(arg1, arg2) {
+  return window['go']['main']['App']['PushRepo'](arg1, arg2);
 }
 
 export function PullRepo(arg1) {

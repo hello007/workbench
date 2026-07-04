@@ -44,6 +44,7 @@
           <LocalChanges
             ref="localChangesRef"
             :repo-path="selectedNode.path"
+            @committed="onLocalChangesCommitted"
           />
         </el-tab-pane>
       </el-tabs>
@@ -400,6 +401,7 @@ const gitLoading = ref(false)
 const activeGitTab = ref('repo')
 const gitInfoRef = ref()
 const commitHistoryRef = ref()
+const localChangesRef = ref()
 
 const filePreview = ref({
   path: '',
@@ -461,6 +463,13 @@ const isWailsRuntime = () => !!window.runtime
 
 const onLatestCommit = (commit) => {
   emit('latestCommit', commit)
+}
+
+// 本地变动提交/推送成功后联动刷新"提交历史"与"仓库信息"。
+// CommitHistory / GitInfo 均位于 lazy tab 内，未访问时 ref 为空，必须用可选链保护。
+const onLocalChangesCommitted = () => {
+  commitHistoryRef.value?.handleRefresh?.()
+  gitInfoRef.value?.handleRefresh?.()
 }
 
 const showBranchDialog = async () => {

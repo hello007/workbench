@@ -355,6 +355,136 @@ func safeEmit(ctx context.Context, event string, data ...interface{}) {
 	runtime.EventsEmit(ctx, event, data...)
 }
 
+// Commit 选择性提交：仅提交 files 列表中的文件（pathspec 语义）。
+// 先 git add -- <files> 把选中文件（含未跟踪）加入 index，
+// 再 git commit -m <message> -- <files>，pathspec 确保不影响 index 中其他文件。
+func (s *GitService) Commit(repoPath, message string, files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("未选择要提交的文件")
+	}
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("提交信息不能为空")
+	}
+
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	addArgs := append([]string{"add", "--"}, files...)
+	if _, err := s.gitCmd.Execute(gitRoot, addArgs...); err != nil {
+		return fmt.Errorf("暂存文件失败: %w", err)
+	}
+
+	commitArgs := append([]string{"commit", "-m", message, "--"}, files...)
+	if _, err := s.gitCmd.Execute(gitRoot, commitArgs...); err != nil {
+		return fmt.Errorf("提交失败: %w", err)
+	}
+
+	return nil
+}
+
+// Push 推送当前分支到远程。setUpstream=true 时使用 git push --set-upstream origin <branch>。
+// 返回 git stdout（trim 后）用于结果展示。
+func (s *GitService) Push(repoPath string, setUpstream bool) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	var args []string
+	if setUpstream {
+		branch, err := s.gitCmd.GetBranch(gitRoot)
+		if err != nil {
+			return "", fmt.Errorf("获取当前分支失败: %w", err)
+		}
+		branch = strings.TrimSpace(branch)
+		if branch == "" {
+			return "", fmt.Errorf("当前处于 detached HEAD，无法 set-upstream")
+		}
+		args = []string{"push", "--set-upstream", "origin", branch}
+	} else {
+		args = []string{"push"}
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, args...)
+	if err != nil {
+		return "", fmt.Errorf("推送失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// HasUpstream 判断当前分支是否配置了上游跟踪分支。
+// 通过 git rev-parse --abbrev-ref @{u} 判定：成功且输出非空即有上游，失败（无上游）返回 false。
+func (s *GitService) HasUpstream(repoPath string) (bool, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return false, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, "rev-parse", "--abbrev-ref", "@{u}")
+	if err != nil {
+		// 无上游时 git 返回非零退出码，stderr 包含 "No upstream" 类信息
+		return false, nil
+	}
+	return strings.TrimSpace(output) != "", nil
+}
+
+// GetDiff 获取单个文件的 unified diff 文本。
+// 已跟踪文件：git diff HEAD -- <file>（对比 HEAD 与工作区）。
+// 未跟踪文件：git diff --no-index /dev/null <file>（展示为新增全文）。
+// 无差异时返回空字符串。
+func (s *GitService) GetDiff(repoPath, file string) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	// 判断文件是否未跟踪
+	untracked, err := s.isUntracked(gitRoot, file)
+	if err != nil {
+		return "", err
+	}
+
+	if untracked {
+		// 未跟踪文件：用 --no-index 与空设备对比生成全量新增 diff
+		// git diff --no-index 在有差异时退出码为 1（git 标准行为），需容忍
+		devNull := os.DevNull
+		output, err := s.gitCmd.ExecuteWithCodes(gitRoot, map[int]bool{1: true}, "diff", "--no-index", devNull, file)
+		if err != nil {
+			return "", fmt.Errorf("获取差异失败: %w", err)
+		}
+		return strings.TrimSpace(output), nil
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, "diff", "HEAD", "--", file)
+	if err != nil {
+		return "", fmt.Errorf("获取差异失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// isUntracked 判断 file 是否为未跟踪文件（status 行首为 ??）。
+func (s *GitService) isUntracked(gitRoot, file string) (bool, error) {
+	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain", "-z", "--", file)
+	if err != nil {
+		return false, fmt.Errorf("获取文件状态失败: %w", err)
+	}
+	if output == "" {
+		// 无输出表示该路径无变动（已提交且工作区干净），不是未跟踪
+		return false, nil
+	}
+	// -z 分隔，第一段形如 "?? path" 或 "M  path" 等
+	seg := output
+	if idx := strings.Index(output, "\x00"); idx >= 0 {
+		seg = output[:idx]
+	}
+	if len(seg) >= 2 && seg[0] == '?' && seg[1] == '?' {
+		return true, nil
+	}
+	return false, nil
+}
+
 // BatchPull 并行拉取多个 Git 仓库
 func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Context) []model.PullResult {
 	if concurrency <= 0 {

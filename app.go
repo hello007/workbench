@@ -16,13 +16,13 @@ import (
 )
 
 type App struct {
-	ctx            context.Context
-	directorySvc   *service.DirectoryService
-	fileTreeSvc    *service.FileTreeService
-	fileOpSvc      *service.FileOperationService
-	gitSvc         *service.GitService
-	settingsSvc    *service.SettingsService
-	terminalSvc    *service.TerminalService
+	ctx              context.Context
+	directorySvc     *service.DirectoryService
+	fileTreeSvc      *service.FileTreeService
+	fileOpSvc        *service.FileOperationService
+	gitSvc           *service.GitService
+	settingsSvc      *service.SettingsService
+	terminalSvc      *service.TerminalService
 	searchSvc        *service.SearchService
 	favoritesSvc     *service.FavoritesService
 	contentSearchSvc *service.ContentSearchService
@@ -605,6 +605,42 @@ func (a *App) DiscardChanges(path string, filePaths []string) error {
 		return fmt.Errorf("路径不能为空")
 	}
 	return a.gitSvc.DiscardChanges(path, filePaths)
+}
+
+// CommitFiles 选择性提交（pathspec 语义）：仅提交 filePaths 中的文件，不影响 index 中其他已暂存文件。
+func (a *App) CommitFiles(path, message string, filePaths []string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.Commit(path, message, filePaths)
+}
+
+// PushRepo 推送当前分支到远程。setUpstream=true 时执行 git push --set-upstream origin <branch>。
+// 返回 git stdout 用于结果展示。
+func (a *App) PushRepo(path string, setUpstream bool) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.Push(path, setUpstream)
+}
+
+// GetFileDiff 获取单个文件的 unified diff 文本（已跟踪 vs HEAD，未跟踪显示为新增全文）。
+func (a *App) GetFileDiff(path, file string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	if file == "" {
+		return "", fmt.Errorf("文件路径不能为空")
+	}
+	return a.gitSvc.GetDiff(path, file)
+}
+
+// HasUpstream 判断当前分支是否配置了上游跟踪分支。
+func (a *App) HasUpstream(path string) (bool, error) {
+	if path == "" {
+		return false, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.HasUpstream(path)
 }
 
 // GetBranches 获取仓库分支列表

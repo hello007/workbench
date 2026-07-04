@@ -20,6 +20,8 @@ export function CloneRepo(arg1:string,arg2:string):Promise<string>;
 
 export function CloseTerminal(arg1:string):Promise<void>;
 
+export function CommitFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
+
 export function ContentSearch(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<Array<model.ContentSearchGroup>>;
 
 export function CopyItem(arg1:string,arg2:string):Promise<string>;
@@ -62,6 +64,8 @@ export function GetFileTree(arg1:string):Promise<Array<model.FileTreeNode>>;
 
 export function GetFileTreeRecursive(arg1:string,arg2:number):Promise<Array<model.FileTreeNode>>;
 
+export function GetFileDiff(arg1:string,arg2:string):Promise<string>;
+
 export function GetGitInfo(arg1:string):Promise<model.GitRepoInfo>;
 
 export function GetGitLog(arg1:string,arg2:number,arg3:number):Promise<model.PageResult>;
@@ -73,6 +77,8 @@ export function GetLocalChanges(arg1:string):Promise<Array<model.FileChange>>;
 export function GetSettings():Promise<model.AppSettings>;
 
 export function GetShellConfigs():Promise<Array<model.ShellConfig>>;
+
+export function HasUpstream(arg1:string):Promise<boolean>;
 
 export function MoveItem(arg1:string,arg2:string):Promise<string>;
 
@@ -87,6 +93,8 @@ export function OpenInWarp(arg1:string):Promise<boolean>;
 export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
 
 export function PreviewFile(arg1:string):Promise<model.FilePreview>;
+
+export function PushRepo(arg1:string,arg2:boolean):Promise<string>;
 
 export function PullRepo(arg1:string):Promise<string>;
 
