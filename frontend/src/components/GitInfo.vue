@@ -24,24 +24,24 @@
       v-loading="loading"
     >
       <el-descriptions-item label="远程地址">
-        <div v-if="gitInfo.remoteUrl">
+        <div v-if="gitInfo.remoteUrl" class="url-with-copy">
           <el-link
             v-if="isHttpUrl(gitInfo.remoteUrl)"
             :href="gitInfo.remoteUrl"
             target="_blank"
             type="primary"
+            class="url-text"
+            :underline="false"
           >
             {{ gitInfo.remoteUrl }}
           </el-link>
-          <div v-else class="url-with-copy">
-            <span class="url-text">{{ gitInfo.remoteUrl }}</span>
-            <el-button
-              :icon="DocumentCopy"
-              size="small"
-              text
-              @click="copyToClipboard(gitInfo.remoteUrl)"
-            />
-          </div>
+          <span v-else class="url-text">{{ gitInfo.remoteUrl }}</span>
+          <el-button
+            :icon="DocumentCopy"
+            size="small"
+            text
+            @click="copyToClipboard(gitInfo.remoteUrl)"
+          />
         </div>
         <el-text v-else type="info">未配置远程地址</el-text>
       </el-descriptions-item>
@@ -206,6 +206,12 @@ defineExpose({ loadGitInfo, handleRefresh })
   font-size: 13px;
   color: var(--text-secondary);
 }
+/* el-link 复用 .url-text：仅统一字体族与字号，不覆盖 el-link 主题色 */
+:deep(.el-link.url-text) {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  /* 颜色由 el-link 自身 type=primary 控制，保持主题色 */
+}
 .sha-with-copy {
   display: flex;
   align-items: center;
@@ -243,6 +249,9 @@ defineExpose({ loadGitInfo, handleRefresh })
   width: 100%;
 }
 :deep(.el-descriptions__label) {
+  width: 80px;
+  min-width: 80px;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-tertiary);
