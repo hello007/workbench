@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务核心是前端缓存/状态生命周期/刷新语义：'UI Local Refresh vs Whole-Tree Rebuild'（区分用户刷新 vs 联动刷新、避免 fall-through 语义混淆）与 'Mode-Detection Probe'（区分失败 vs 空、transient error 不应静默污染缓存）直接指导 GitInfo 缓存结构升级与 GetCommitHistory 失败处理实现"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "'Pre-Modification Rule: search first' —— 修改 latestCommit 生命周期与 gitCache value 结构前，必须 grep 全部读写点（Home.vue onNodeSelect/selectDirectory、GitInfo watch/loadGitInfo、ContentPanel 透传、CommitHistory emit），避免遗漏残留点或未同步的缓存读写"}

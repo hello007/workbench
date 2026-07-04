@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 时验证四种语义是否各自正确、不发生 fall-through 混淆：缓存命中 vs 未命中、用户手动刷新 vs onLocalChangesCommitted 联动刷新、GetCommitHistory 失败（不污染缓存可重试）vs 空仓库（显示 N/A）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 时验证已 grep 全仓库 latestCommit / gitCache 消费方，确认无遗漏的残留清理点，且 gitCache value 结构升级后所有 'git-info:' key 的读写均已同步"}

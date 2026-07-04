@@ -155,6 +155,25 @@ describe('Home.vue - Bug修复验证', () => {
 
       expect(wrapper.vm.selectedNode).toEqual(gitNode)
     })
+
+    it('切换文件树节点时应清零 latestCommit，避免上一个仓库的提交残留', () => {
+      // 模拟上一个仓库经"提交历史"tab emit 后 latestCommit 已有值
+      wrapper.vm.latestCommit = { sha: 'aaa', shortSha: 'aaa1111', message: '上一个仓库的提交' }
+      expect(wrapper.vm.latestCommit).not.toBeNull()
+
+      const newNode = {
+        name: 'repo-B',
+        path: '/test/repo-B',
+        type: 'directory',
+        isGitRepo: true
+      }
+
+      wrapper.vm.onNodeSelect(newNode)
+
+      expect(wrapper.vm.selectedNode).toEqual(newNode)
+      // 关键：切换节点后 latestCommit 被清零，GitInfo 不再显示上一个仓库的提交
+      expect(wrapper.vm.latestCommit).toBeNull()
+    })
   })
 
   describe('错误处理改进', () => {

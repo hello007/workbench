@@ -107,7 +107,10 @@ const loadGitInfo = async (forceRefresh = false) => {
     if (!forceRefresh) {
       const cached = gitCache.get(cacheKey)
       if (cached) {
-        gitInfo.value = cached
+        // 缓存命中：一并恢复 info 与 latestCommit，
+        // 避免命中分支直接 return 导致提交信息丢失（偶发 N/A）。
+        gitInfo.value = cached.info
+        localLatestCommit.value = cached.latestCommit || null
         loading.value = false
         return
       }
@@ -116,15 +119,28 @@ const loadGitInfo = async (forceRefresh = false) => {
       localLatestCommit.value = null
     }
 
-    const [info, commits] = await Promise.all([
+    // 用 allSettled 区分 info / commit 成败：
+    //  - info 失败：抛出走外层 catch 报错；
+    //  - commit 失败：本次不落缓存，下次进入自动重试，
+    //    避免 5 分钟内重进仍 N/A（防御性：失败不污染缓存）。
+    const [infoRes, commitsRes] = await Promise.allSettled([
       GetGitRemoteURL(props.repoPath),
-      GetCommitHistory(props.repoPath, 1, 0).catch(() => [])
+      GetCommitHistory(props.repoPath, 1, 0)
     ])
-    gitInfo.value = info
-    if (commits && commits.length > 0) {
-      localLatestCommit.value = commits[0]
+
+    if (infoRes.status !== 'fulfilled') {
+      throw infoRes.reason
     }
-    gitCache.set(cacheKey, info)
+    gitInfo.value = infoRes.value
+
+    const commits = commitsRes.status === 'fulfilled' ? commitsRes.value : null
+    const latestCommit = commits && commits.length > 0 ? commits[0] : null
+    localLatestCommit.value = latestCommit
+
+    // 仅当 commit 成功才落缓存；commit 失败时本次不缓存，下次进入重拉两边。
+    if (commitsRes.status === 'fulfilled') {
+      gitCache.set(cacheKey, { info: infoRes.value, latestCommit })
+    }
   } catch (error) {
     ElMessage.error('加载 Git 信息失败: ' + (error.message || String(error)))
   } finally {
@@ -169,6 +185,7 @@ const formatTime = (timestamp) => {
 
 watch(() => props.repoPath, () => {
   gitInfo.value = null
+  localLatestCommit.value = null
   loadGitInfo()
 })
 

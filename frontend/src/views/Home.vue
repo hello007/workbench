@@ -261,6 +261,9 @@ const onDirectorySelect = async (dirId) => {
 // ---- 选中文件树节点 ----
 const onNodeSelect = (data) => {
   selectedNode.value = data
+  // 切换文件树节点时清零 latestCommit，避免上一个仓库（经"提交历史"tab emit）
+  // 的提交残留到新选中仓库的 GitInfo 面板（与 GitInfo.watch(repoPath) 协同）。
+  latestCommit.value = null
   contentPanelRef.value?.clearPreview()
   recordAccess({ path: data.path, type: data.type, workDir: currentDirPath.value })
 }
