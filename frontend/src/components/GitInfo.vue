@@ -255,6 +255,7 @@ defineExpose({ loadGitInfo, handleRefresh })
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-tertiary);
+  text-align: center;
 }
 :deep(.el-descriptions__content) {
   color: var(--text-secondary);
