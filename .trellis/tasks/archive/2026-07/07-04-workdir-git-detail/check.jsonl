@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "check 阶段核验 IsGitRepo 字段跨层一致（Go json tag ↔ 前端 dir.isGitRepo）、检测失败不报错"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "check 阶段核验复用 IsGitRepository 与 ContentPanel 现有渲染、无重复检测/重复组件"}
+{"file": "docs/开发规范.md", "reason": "check 阶段对照前后端代码风格与错误处理规范"}
+{"file": "docs/测试策略.md", "reason": "check 阶段核验后端单测与前端 vitest 用例符合测试策略"}
