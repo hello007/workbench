@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "纯 CSS 高度链修复；复用项目既有 CSS 变量（var(--xxx)）与 flex 布局模式，不引入新样式约定或重复规则"}
+{"file": "docs/开发规范.md", "reason": "前端 CSS 与注释风格规范，调整需符合既有约定"}
