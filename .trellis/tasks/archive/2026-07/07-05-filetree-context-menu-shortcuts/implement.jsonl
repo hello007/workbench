@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务核心是复用既有 useShortcuts / AppSettings 快捷键体系（解析、匹配、录制、冲突检测），须按此指南优先搜索并扩展，而非新建重复逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "F2/Del 涉及 Home.vue 全局 keydown → 组件选中节点 → 后端 AppSettings 跨层；重命名/删除后刷新节点须遵循 UI Local Refresh 反模式，避免全树重建吞掉展开状态"}
+{"file": "docs/superpowers/specs/2026-06-08-custom-shortcuts-design.md", "reason": "现有自定义快捷键设计依据；新增 rename/delete 须与之统一：默认值表、设置面板录制交互、右键菜单提示样式 (.context-menu-shortcut)"}
+{"file": "docs/superpowers/plans/2026-06-08-custom-shortcuts.md", "reason": "提供 useShortcuts.js 完整实现模式（parseShortcut/matchShortcut/isValidShortcut/checkConflict/shortcutFromEvent），扩展时照此代码风格；含 SettingsPanel 录制 UI 与 FileTreePanel 菜单提示写法"}

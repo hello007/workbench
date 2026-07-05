@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查跨层契约：AppSettings 新增 ShortcutRename/ShortcutDelete 前后端字段一致、空值填默认、焦点判定边界（输入框/对话框/终端聚焦时跳过）无误触"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查是否复用 useShortcuts 现有 API（matchShortcut/checkConflict/saveShortcuts）而非重复实现；菜单提示样式复用 .context-menu-shortcut"}
+{"file": "docs/superpowers/specs/2026-06-08-custom-shortcuts-design.md", "reason": "对照既有设计：默认值、录制交互、冲突检测规则是否一致；校验放开单键后是否破坏既有 Ctrl+P / Ctrl+` 行为"}
