@@ -7,7 +7,7 @@
         <div class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
-              <div class="pane-content" style="position:relative;">
+              <div class="pane-content" style="position:relative;" @mousedown.capture="lastInteractedTree = 'directory'">
                 <DirectoryTree
                   v-show="activePanel === 'directory'"
                   ref="directoryTreeRef"
@@ -26,7 +26,7 @@
               </div>
             </Pane>
             <Pane :size="30" :min-size="15">
-              <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+              <div class="pane-content" @mousedown.capture="lastInteractedTree = 'file'" @mousedown="closeToolbox" @contextmenu="closeToolbox">
                 <FileTreePanel
                   ref="fileTreePanelRef"
                   :directories="directories"
@@ -136,6 +136,8 @@ const selectedNode = ref(null)
 const latestCommit = ref(null)
 const appVersion = ref('')
 const activePanel = ref('directory')
+// 最近交互的树面板，用于 F2/Del 快捷键分派（'directory' | 'file'）
+const lastInteractedTree = ref('directory')
 
 const clipboard = reactive({
   mode: null,
@@ -158,7 +160,7 @@ const updateInfo = ref({})
 const commandPaletteVisible = ref(false)
 const contentSearchInit = ref('')
 const { record: recordAccess } = useRecentAccess()
-const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal } = useShortcuts()
+const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete } = useShortcuts()
 
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
@@ -389,6 +391,30 @@ function onOpenContentSearch(subDir) {
 }
 
 // ---- 键盘快捷键 ----
+// ---- 快捷键焦点判定：避免在输入框/对话框/终端中误触树操作（尤其 Del 永久删除文件）----
+const isEditableTarget = (el) => {
+  if (!el) return false
+  const tag = el.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (el.isContentEditable) return true
+  return false
+}
+
+const isTerminalFocused = () => {
+  const el = document.activeElement
+  if (!el) return false
+  return !!el.closest('.terminal-panel, .xterm, .xterm-helper-textarea, .xterm-screen')
+}
+
+const isAnyOverlayOpen = () => {
+  // Element Plus 对话框/消息框/抽屉可见时存在这些类
+  const nodes = document.querySelectorAll('.el-dialog, .el-message-box, .el-drawer')
+  for (const n of nodes) {
+    if (n.offsetParent !== null) return true
+  }
+  return false
+}
+
 const handleGlobalKeydown = (e) => {
   // 打开命令面板（快捷键可自定义）
   if (matchShortcut(e, shortcutCommandPalette.value)) {
@@ -408,6 +434,22 @@ const handleGlobalKeydown = (e) => {
     e.preventDefault()
     if (selectedNode.value) {
       fileTreePanelRef.value?.refreshNode(selectedNode.value.path)
+    }
+    return
+  }
+
+  // 重命名 / 删除（快捷键可自定义，作用于最近交互的树面板）
+  if (matchShortcut(e, shortcutRename.value) || matchShortcut(e, shortcutDelete.value)) {
+    // 焦点判定：输入框/对话框/终端聚焦时不触发，避免误触（Del 文件树为永久删除）
+    if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
+    e.preventDefault()
+    const isRename = matchShortcut(e, shortcutRename.value)
+    if (lastInteractedTree.value === 'directory') {
+      if (isRename) directoryTreeRef.value?.triggerRenameCurrent()
+      else directoryTreeRef.value?.triggerDeleteCurrent()
+    } else {
+      if (isRename) fileTreePanelRef.value?.triggerRenameCurrent()
+      else fileTreePanelRef.value?.triggerDeleteCurrent()
     }
     return
   }

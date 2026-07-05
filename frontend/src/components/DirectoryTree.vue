@@ -65,9 +65,13 @@
     >
       <li class="context-menu-item" @click="onMenuCommand('rename')">
         <el-icon><Edit /></el-icon>重命名
+        <span class="context-menu-shortcut">{{ shortcutRename }}</span>
       </li>
       <li class="context-menu-item" @click="onMenuCommand('setDefault')">
         <el-icon><Star /></el-icon>设为默认
+      </li>
+      <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+        <el-icon><CopyDocument /></el-icon>复制路径
       </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
@@ -89,6 +93,7 @@
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
+        <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
       </li>
     </ul>
 
@@ -138,7 +143,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -156,6 +161,7 @@ import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
+import { useShortcuts } from '../composables/useShortcuts'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -171,6 +177,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull'])
+
+const { shortcutRename, shortcutDelete } = useShortcuts()
 
 // --- 本地目录列表（可变，用于拖拽） ---
 const localDirectories = ref([...props.directories])
@@ -196,8 +204,22 @@ const closeMenu = () => {
   contextMenu.visible = false
 }
 
+// 键盘快捷键入口：作用于当前选中的工作目录（F2 重命名 / Del 删除）
+// showRenameDialog / handleDelete 在下方定义，函数调用时才查找，无 TDZ 问题
+const triggerRenameCurrent = () => {
+  const dir = localDirectories.value.find(d => d.id === props.selectedId)
+  if (dir) showRenameDialog(dir)
+}
+
+const triggerDeleteCurrent = () => {
+  const dir = localDirectories.value.find(d => d.id === props.selectedId)
+  if (dir) handleDelete(dir)
+}
+
 defineExpose({
-  closeMenu
+  closeMenu,
+  triggerRenameCurrent,
+  triggerDeleteCurrent
 })
 
 const onContextMenu = (event, dir) => {
@@ -280,6 +302,9 @@ const onMenuCommand = (command) => {
       break
     case 'setDefault':
       handleSetDefault(dir)
+      break
+    case 'copyPath':
+      copyToClipboard(dir.path.replaceAll('\\', '/'), '路径')
       break
     case 'openExplorer':
       handleOpenExplorer(dir.path)
@@ -370,8 +395,10 @@ const renameDialogVisible = ref(false)
 const renameLoading = ref(false)
 const renameName = ref('')
 const renameInputRef = ref()
+const renameTargetDir = ref(null)
 
 const showRenameDialog = (dir) => {
+  renameTargetDir.value = dir
   renameName.value = dir.name
   renameDialogVisible.value = true
   nextTick(() => {
@@ -384,7 +411,7 @@ const showRenameDialog = (dir) => {
 }
 
 const handleRename = async () => {
-  const dir = contextMenu.targetDir
+  const dir = renameTargetDir.value
   if (!renameName.value.trim()) {
     ElMessage.warning('请输入新名称')
     return
@@ -454,6 +481,16 @@ const handleDelete = async (dir) => {
     }
   } catch (error) {
     ElMessage.error('删除失败: ' + (error.message || String(error)))
+  }
+}
+
+// --- 复制到剪贴板 ---
+const copyToClipboard = async (text, label) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制到剪贴板`)
+  } catch {
+    ElMessage.error('复制失败')
   }
 }
 

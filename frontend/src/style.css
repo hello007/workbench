@@ -277,6 +277,16 @@ html, body {
   margin: 3px 0;
 }
 
+/* 右键菜单项右侧快捷键提示 */
+.context-menu-shortcut {
+  margin-left: auto;
+  padding-left: 24px;
+  font-size: 11px;
+  color: #adb2b8;
+  font-family: 'Consolas', 'Monaco', monospace;
+  white-space: nowrap;
+}
+
 /* 拷贝预览 — 全局样式 */
 .copy-to-preview {
   margin: 0 0 16px;

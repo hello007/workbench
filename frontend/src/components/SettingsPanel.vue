@@ -232,7 +232,7 @@ const newExcludeFile = ref('')
 const appVersion = ref('')
 const checkingUpdate = ref(false)
 
-const { shortcutCommandPalette, shortcutToggleTerminal, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts, DEFAULTS } = useShortcuts()
+const { shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts, DEFAULTS } = useShortcuts()
 
 const shortcutsTabRef = ref(null)
 const recordingKey = ref(null)
@@ -245,9 +245,18 @@ const fixedShortcuts = [
   { action: '粘贴', keys: ['Ctrl', 'V'] }
 ]
 
+const shortcutLabels = {
+  commandPalette: '打开命令面板',
+  toggleTerminal: '切换终端面板',
+  rename: '重命名',
+  delete: '删除'
+}
+
 const customizableShortcuts = computed(() => [
   { action: '打开命令面板', key: 'commandPalette', keys: formatDisplay(shortcutCommandPalette.value), customizable: true },
-  { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(shortcutToggleTerminal.value), customizable: true }
+  { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(shortcutToggleTerminal.value), customizable: true },
+  { action: '重命名', key: 'rename', keys: formatDisplay(shortcutRename.value), customizable: true },
+  { action: '删除', key: 'delete', keys: formatDisplay(shortcutDelete.value), customizable: true }
 ])
 
 function startRecording(key) {
@@ -266,18 +275,24 @@ function cancelRecording() {
 function isDefault(key) {
   if (key === 'commandPalette') return shortcutCommandPalette.value === DEFAULTS.commandPalette
   if (key === 'toggleTerminal') return shortcutToggleTerminal.value === DEFAULTS.toggleTerminal
+  if (key === 'rename') return shortcutRename.value === DEFAULTS.rename
+  if (key === 'delete') return shortcutDelete.value === DEFAULTS.delete
   return true
 }
 
 function resetShortcut(key) {
   if (key === 'commandPalette') shortcutCommandPalette.value = DEFAULTS.commandPalette
   else if (key === 'toggleTerminal') shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
+  else if (key === 'rename') shortcutRename.value = DEFAULTS.rename
+  else if (key === 'delete') shortcutDelete.value = DEFAULTS.delete
   saveShortcuts()
 }
 
 function resetAllShortcuts() {
   shortcutCommandPalette.value = DEFAULTS.commandPalette
   shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
+  shortcutRename.value = DEFAULTS.rename
+  shortcutDelete.value = DEFAULTS.delete
   saveShortcuts()
 }
 
@@ -298,7 +313,14 @@ function handleRecordingKeydown(e) {
 
   const conflict = checkConflict(shortcut, recordingKey.value)
   if (conflict) {
-    ElMessage.warning(`快捷键冲突：与"${conflict.key === 'commandPalette' ? '打开命令面板' : '切换终端面板'}"相同`)
+    ElMessage.warning(`快捷键冲突：与"${shortcutLabels[conflict.key] || conflict.key}"相同`)
+    return true
+  }
+
+  // 固定快捷键（F5 / Ctrl+C/X/V）不可覆盖
+  const fixedValues = fixedShortcuts.map(s => s.keys.join('+'))
+  if (fixedValues.includes(shortcut)) {
+    ElMessage.warning(`快捷键冲突：与固定快捷键 "${shortcut}" 相同，不可覆盖`)
     return true
   }
 
@@ -306,6 +328,10 @@ function handleRecordingKeydown(e) {
     shortcutCommandPalette.value = shortcut
   } else if (recordingKey.value === 'toggleTerminal') {
     shortcutToggleTerminal.value = shortcut
+  } else if (recordingKey.value === 'rename') {
+    shortcutRename.value = shortcut
+  } else if (recordingKey.value === 'delete') {
+    shortcutDelete.value = shortcut
   }
 
   recordingKey.value = null

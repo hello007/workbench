@@ -201,9 +201,11 @@
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('rename')">
           <el-icon><Edit /></el-icon>重命名
+          <span class="context-menu-shortcut">{{ shortcutRename }}</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('delete')">
           <el-icon><Delete /></el-icon>删除
+          <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
@@ -262,9 +264,11 @@
       <template v-else>
         <li class="context-menu-item" @click="onMenuCommand('rename')">
           <el-icon><Edit /></el-icon>重命名
+          <span class="context-menu-shortcut">{{ shortcutRename }}</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('delete')">
           <el-icon><Delete /></el-icon>删除
+          <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
@@ -341,6 +345,7 @@ import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavorites } from '../composables/useFavorites'
+import { useShortcuts } from '../composables/useShortcuts'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -369,6 +374,7 @@ const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo
 
 const { saveState, restoreState } = useTreeState()
 const { addFavorite, removeFavorite, favorites, loadFavorites } = useFavorites()
+const { shortcutRename, shortcutDelete } = useShortcuts()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -1198,6 +1204,17 @@ async function locateNode(targetPath) {
   }
 }
 
+// ---- 键盘快捷键入口：作用于当前高亮节点 ----
+const triggerRenameCurrent = () => {
+  const node = fileTreeRef.value?.getCurrentNode()
+  if (node) showRenameAt(node)
+}
+
+const triggerDeleteCurrent = () => {
+  const node = fileTreeRef.value?.getCurrentNode()
+  if (node) handleDeleteAt(node)
+}
+
 // ---- 暴露方法 ----
 defineExpose({
   refreshNode,
@@ -1207,6 +1224,8 @@ defineExpose({
   showCreateAt,
   handleDeleteAt,
   showCopyToDialog,
+  triggerRenameCurrent,
+  triggerDeleteCurrent,
   setCopyToLoading: (val) => { copyToLoading.value = val },
   closeCopyToDialog: () => { copyToDialogVisible.value = false },
   closeMenu: () => { contextMenu.visible = false },
@@ -1305,14 +1324,6 @@ onBeforeUnmount(() => {
   margin-right: 5px;
   vertical-align: middle;
   object-fit: contain;
-}
-.context-menu-shortcut {
-  margin-left: auto;
-  padding-left: 24px;
-  font-size: 11px;
-  color: #adb2b8;
-  font-family: 'Consolas', 'Monaco', monospace;
-  white-space: nowrap;
 }
 
 /* 互换按钮行 */

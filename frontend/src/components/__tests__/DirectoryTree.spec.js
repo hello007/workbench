@@ -360,4 +360,40 @@ describe('DirectoryTree.vue', () => {
       expect(wrapper.find('.context-menu').exists()).toBe(false)
     })
   })
+
+  describe('复制路径', () => {
+    let writeTextSpy
+    beforeEach(() => {
+      writeTextSpy = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextSpy },
+        configurable: true,
+        writable: true
+      })
+    })
+
+    it('右键菜单应包含"复制路径"项', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const copyItem = menuItems.find(el => el.text().includes('复制路径'))
+      expect(copyItem).toBeTruthy()
+    })
+
+    it('点击"复制路径"应将路径（\\ 规范化为 /）写入剪贴板并提示', async () => {
+      wrapper = createWrapper({
+        directories: [{ id: 'd1', name: 'win', path: 'C:\\Users\\me', isDefault: false }],
+        selectedId: 'd1'
+      })
+      const items = wrapper.findAll('.dir-item')
+      await items[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const copyItem = menuItems.find(el => el.text().includes('复制路径'))
+      await copyItem.trigger('click')
+      await flushPromises()
+      expect(writeTextSpy).toHaveBeenCalledWith('C:/Users/me')
+      expect(ElMessage.success).toHaveBeenCalledWith('路径已复制到剪贴板')
+    })
+  })
 })
