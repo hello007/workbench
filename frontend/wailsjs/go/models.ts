@@ -9,6 +9,8 @@ export namespace model {
 	    searchExcludeFiles: string[];
 	    shortcutCommandPalette: string;
 	    shortcutToggleTerminal: string;
+	    shortcutRename: string;
+	    shortcutDelete: string;
 	    obsidianPath: string;
 	
 	    static createFrom(source: any = {}) {
@@ -25,6 +27,8 @@ export namespace model {
 	        this.searchExcludeFiles = source["searchExcludeFiles"];
 	        this.shortcutCommandPalette = source["shortcutCommandPalette"];
 	        this.shortcutToggleTerminal = source["shortcutToggleTerminal"];
+	        this.shortcutRename = source["shortcutRename"];
+	        this.shortcutDelete = source["shortcutDelete"];
 	        this.obsidianPath = source["obsidianPath"];
 	    }
 	}

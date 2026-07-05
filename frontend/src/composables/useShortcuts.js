@@ -3,11 +3,25 @@ import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
 
 const DEFAULTS = {
   commandPalette: 'Ctrl+P',
-  toggleTerminal: 'Ctrl+`'
+  toggleTerminal: 'Ctrl+`',
+  rename: 'F2',
+  delete: 'Delete'
 }
 
 const shortcutCommandPalette = ref(DEFAULTS.commandPalette)
 const shortcutToggleTerminal = ref(DEFAULTS.toggleTerminal)
+const shortcutRename = ref(DEFAULTS.rename)
+const shortcutDelete = ref(DEFAULTS.delete)
+
+/**
+ * 允许作为"单键快捷键"的功能键（无修饰键）。
+ * 字母/数字/符号单键不允许，避免与文本输入冲突。
+ */
+const ALLOWED_SINGLE_KEYS = new Set([
+  'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
+  'delete', 'insert', 'home', 'end', 'pageup', 'pagedown',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright'
+])
 
 /**
  * 将快捷键字符串解析为事件匹配对象
@@ -43,7 +57,7 @@ function matchShortcut(event, shortcutStr) {
 
 /**
  * 将快捷键字符串格式化为显示用数组
- * "Ctrl+P" → ["Ctrl", "P"]
+ * "Ctrl+P" → ["Ctrl", "P"]；"F2" → ["F2"]
  */
 function formatDisplay(str) {
   if (!str) return []
@@ -51,13 +65,15 @@ function formatDisplay(str) {
 }
 
 /**
- * 验证快捷键字符串是否有效（必须含修饰键 + 按键）
+ * 验证快捷键字符串是否有效：
+ * - 含 Ctrl/Alt/Shift 修饰键时，按键任意非空即可；
+ * - 无修饰键时，必须是白名单功能键单键（F1-F12、Delete 等）。
  */
 function isValidShortcut(str) {
   const parsed = parseShortcut(str)
   if (!parsed || !parsed.key) return false
-  if (!parsed.ctrlKey && !parsed.altKey && !parsed.shiftKey) return false
-  return true
+  if (parsed.ctrlKey || parsed.altKey || parsed.shiftKey) return true
+  return ALLOWED_SINGLE_KEYS.has(parsed.key)
 }
 
 /**
@@ -82,9 +98,13 @@ async function loadShortcuts() {
     const settings = await GetSettings()
     shortcutCommandPalette.value = settings.shortcutCommandPalette || DEFAULTS.commandPalette
     shortcutToggleTerminal.value = settings.shortcutToggleTerminal || DEFAULTS.toggleTerminal
+    shortcutRename.value = settings.shortcutRename || DEFAULTS.rename
+    shortcutDelete.value = settings.shortcutDelete || DEFAULTS.delete
   } catch {
     shortcutCommandPalette.value = DEFAULTS.commandPalette
     shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
+    shortcutRename.value = DEFAULTS.rename
+    shortcutDelete.value = DEFAULTS.delete
   }
 }
 
@@ -95,6 +115,8 @@ async function saveShortcuts() {
   const settings = await GetSettings()
   settings.shortcutCommandPalette = shortcutCommandPalette.value
   settings.shortcutToggleTerminal = shortcutToggleTerminal.value
+  settings.shortcutRename = shortcutRename.value
+  settings.shortcutDelete = shortcutDelete.value
   await SaveSettings(settings)
 }
 
@@ -104,7 +126,9 @@ async function saveShortcuts() {
 function checkConflict(shortcutStr, excludeKey) {
   const all = [
     { key: 'commandPalette', value: shortcutCommandPalette.value },
-    { key: 'toggleTerminal', value: shortcutToggleTerminal.value }
+    { key: 'toggleTerminal', value: shortcutToggleTerminal.value },
+    { key: 'rename', value: shortcutRename.value },
+    { key: 'delete', value: shortcutDelete.value }
   ]
   for (const item of all) {
     if (item.key === excludeKey) continue
@@ -117,6 +141,8 @@ export function useShortcuts() {
   return {
     shortcutCommandPalette,
     shortcutToggleTerminal,
+    shortcutRename,
+    shortcutDelete,
     parseShortcut,
     matchShortcut,
     formatDisplay,
