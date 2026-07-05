@@ -678,3 +678,38 @@ FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: 工作目录复制路径 + F2/Del 重命名删除快捷键
+
+**Date**: 2026-07-05
+**Task**: 工作目录复制路径 + F2/Del 重命名删除快捷键
+**Branch**: `master`
+
+### Summary
+
+为工作目录列表(DirectoryTree)右键新增'复制路径'；为工作目录列表与文件树(FileTreePanel)的重命名/删除操作增加默认 F2/Del 快捷键并支持设置面板自定义。扩展 useShortcuts 放开功能键单键白名单与 AppSettings 两个新字段；Home.vue 全局 keydown 增严格焦点判定（输入框/对话框/终端聚焦时不触发），避免 Del 误永久删除文件；SettingsPanel 拦截与固定快捷键(F5/Ctrl+C/X/V)冲突的录制。新增 useShortcuts.spec.js 19 例、DirectoryTree 复制路径 2 例，go test 与 vitest(164) 全绿。同步 README 与功能说明。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5aa49d9` | (see git log) |
+| `484a03d` | (see git log) |
+| `17211a3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
