@@ -23,7 +23,7 @@
 
     <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 -->
     <div v-else-if="isMarkdown" class="preview-markdown-wrap">
-      <div class="markdown-body" ref="markdownBodyRef" v-html="renderedMarkdown"></div>
+      <div class="markdown-body" ref="markdownBodyRef" v-html="renderedMarkdown" @click="onMarkdownClick"></div>
     </div>
 
     <!-- 代码 / txt / json / sql 只读：CodeMirror 6 -->
@@ -161,6 +161,7 @@ import { CopyDocument, Select } from '@element-plus/icons-vue'
 import { renderAsync } from 'docx-preview'
 import * as XLSX from 'xlsx'
 import MarkdownIt from 'markdown-it'
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -214,10 +215,13 @@ const props = defineProps({
   tooLarge: { type: Boolean, default: false },
   isBinary: { type: Boolean, default: false },
   // PDF 本地绝对路径（kind=pdf 时由父组件传入，用于拼装 /preview-pdf 同源 URL）
-  pdfPath: { type: String, default: '' }
+  pdfPath: { type: String, default: '' },
+  // 当前预览文件的本地绝对路径（kind=text/markdown 时由父组件传入，
+  // 用于把 markdown 内相对链接 ./other.md 解析为本地绝对路径）
+  filePath: { type: String, default: '' }
 })
 
-defineEmits(['openExternal'])
+const emit = defineEmits(['openExternal', 'openLink'])
 
 // ---------- 扩展名工具 ----------
 const getExt = (name = '') => {
@@ -536,8 +540,88 @@ onMounted(async () => {
   }
 })
 
-// ---------- 右键复制菜单（仅 text/markdown 预览） ----------
+// ---------- markdown 链接拦截 ----------
+// 不拦截 <a> 会触发顶层 window 原生导航：相对 ./other.md 解析到同源 URL 后，
+// Wails AssetServer embed.FS 未命中 → fallback 到 PreviewHandler → 返回
+// {"error":"缺少 path 参数"}，且 SPA 被该 JSON 文本整体替换、Vue 实例卸载，
+// 用户无法返回主界面（只能重启 exe）。这里在点击时拦截，分发到三种去向。
 const markdownBodyRef = ref(null)
+
+// 外部协议白名单（http(s)/file/mailto/tel/ftp/data）。Windows 盘符 D: 不匹配。
+const isExternalHref = (href) => /^(https?:|file:|mailto:|tel:|ftp:|data:)/i.test(href)
+
+// markdown-it 默认会对链接做 percent-encoding（中文等非 ASCII），还原为原始字符，
+// 避免 Windows 按 percent 编码字面名找不到中文文件名。decode 失败则回退原串。
+const safeDecodeURIComponent = (s) => {
+  try { return decodeURIComponent(s) } catch { return s }
+}
+
+// 把相对 href 解析为本地绝对路径，基准 = 当前预览文件所在目录。
+// 统一正斜杠后用栈规范化 . 与 ..（.. 越过根时自然弹栈，路径无效由 PreviewFile 报错）。
+const resolveAbsolutePath = (href) => {
+  const base = (props.filePath || '').replaceAll('\\', '/')
+  const slashIdx = base.lastIndexOf('/')
+  const dir = slashIdx >= 0 ? base.slice(0, slashIdx) : ''
+  const combined = (dir ? dir + '/' : '') + href.replaceAll('\\', '/')
+  const stack = []
+  for (const seg of combined.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') { stack.pop(); continue }
+    stack.push(seg)
+  }
+  return stack.join('/')
+}
+
+// 标题文本 → slug（小写、空白转连字符，保留中文与字母数字），用于 #锚点匹配。
+const slugifyHeading = (text) =>
+  text.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\w一-龥-]/g, '')
+
+// 在预览区内滚动到锚点对应标题。markdown-it 默认不给标题加 id，
+// 这里即时按 slug（或原文）匹配，命中则 scrollIntoView。
+const scrollToAnchor = (anchor) => {
+  if (!anchor || !markdownBodyRef.value) return false
+  const headings = markdownBodyRef.value.querySelectorAll('h1, h2, h3, h4, h5, h6')
+  for (const h of headings) {
+    const text = (h.textContent || '').trim()
+    if (slugifyHeading(text) === anchor || text.toLowerCase() === anchor) {
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return true
+    }
+  }
+  return false
+}
+
+const onMarkdownClick = (event) => {
+  // 仅 markdown 预览启用（代码/图片等无 v-html 链接）
+  if (props.kind !== 'text' || !isMarkdown.value) return
+  const a = event.target.closest('a')
+  if (!a) return
+  const href = (a.getAttribute('href') || '').trim()
+  if (!href) return
+  // 阻止顶层 window 原生导航（崩溃根因）
+  event.preventDefault()
+  event.stopPropagation()
+
+  if (isExternalHref(href)) {
+    // 外部链接 → 系统默认浏览器打开，不在窗内导航
+    BrowserOpenURL(href)
+    return
+  }
+  if (href.startsWith('#')) {
+    // 同文档锚点 → 预览区内滚动定位（中文锚点同样会被编码，先还原）
+    scrollToAnchor(safeDecodeURIComponent(href.slice(1)))
+    return
+  }
+  // 相对文件引用（./other.md 或 other.md，可能带 #锚点）：
+  // 取文件部分解析为绝对路径，通知父组件在应用内切换预览（锚点暂不跨文件滚动）
+  const hashIdx = href.indexOf('#')
+  const filePart = hashIdx >= 0 ? href.slice(0, hashIdx) : href
+  if (!filePart) return
+  // 还原 percent-encoding（中文文件名）后再解析路径
+  emit('openLink', resolveAbsolutePath(safeDecodeURIComponent(filePart)))
+}
+
+// ---------- 右键复制菜单（仅 text/markdown 预览） ----------
 const contextMenu = reactive({
   visible: false,
   x: 0,

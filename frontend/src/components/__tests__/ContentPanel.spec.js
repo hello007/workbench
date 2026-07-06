@@ -67,7 +67,8 @@ const contentPanelStubs = {
   GitInfo: { template: '<div class="git-info" />' },
   CommitHistory: { template: '<div class="commit-history" />' },
   SuccessFilled: { template: '<span />' },
-  CircleCloseFilled: { template: '<span />' }
+  CircleCloseFilled: { template: '<span />' },
+  ArrowLeft: { template: '<span class="arrow-left" />' }
 }
 
 describe('ContentPanel.vue', () => {
@@ -364,6 +365,111 @@ describe('ContentPanel.vue', () => {
       expect(ElMessage.error).toHaveBeenCalledWith('读取文件字节失败: read error')
       // 图片读取失败应走降级分支，提供「用默认程序打开」
       expect(wrapper.text()).toContain('用默认程序打开')
+    })
+
+    it('previewFile(overridePath) 按 overridePath 预览（markdown 相对链接切换，不改 selectedNode）', async () => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/docs/other.md', name: 'other.md', size: 7,
+        content: '# other', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'intro.md', path: '/docs/intro.md', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      // 通过 expose 的 previewFile 按 overridePath 切换预览（selectedNode 保持 intro.md）
+      await wrapper.vm.previewFile('/docs/other.md')
+      await flushPromises()
+
+      expect(PreviewFile).toHaveBeenCalledWith('/docs/other.md')
+    })
+
+    it('链接跳转后可后退回文件树选中节点（单步判断 selectedNode vs filePreview.path）', async () => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      // 1) A.md：点击「预览」按钮触发（模拟用户从文件树点击 file 节点由 Home.onNodeSelect 主驱动）
+      PreviewFile.mockResolvedValueOnce({
+        path: '/docs/a.md', name: 'a.md', size: 4,
+        content: '# a', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+      // 2) B.md：链接跳转
+      PreviewFile.mockResolvedValueOnce({
+        path: '/docs/b.md', name: 'b.md', size: 4,
+        content: '# b', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+      // 3) 后退回选中节点 A.md
+      PreviewFile.mockResolvedValueOnce({
+        path: '/docs/a.md', name: 'a.md', size: 4,
+        content: '# a', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'a.md', path: '/docs/a.md', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      // 预览 A：预览路径与选中节点一致 → 不可后退，按钮不渲染
+      const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+
+      expect(wrapper.vm.canGoBack).toBe(false)
+      expect(wrapper.find('.preview-back-btn').exists()).toBe(false)
+
+      // 模拟 markdown 链接跳转到 B（selectedNode 仍是 A）
+      await wrapper.vm.previewFile('/docs/b.md')
+      await flushPromises()
+
+      // 此时预览（B）≠ 选中节点（A）→ 可后退，按钮显示
+      expect(wrapper.vm.canGoBack).toBe(true)
+      expect(wrapper.find('.preview-back-btn').exists()).toBe(true)
+
+      // 后退：回到选中节点 A
+      await wrapper.vm.goBack()
+      await flushPromises()
+
+      // 最后一次 PreviewFile 应以选中节点 /docs/a.md 调用
+      const lastCall = PreviewFile.mock.calls[PreviewFile.mock.calls.length - 1]
+      expect(lastCall[0]).toBe('/docs/a.md')
+
+      // 退回后预览路径 === 选中节点路径 → 不可再后退，按钮消失
+      expect(wrapper.vm.canGoBack).toBe(false)
+      expect(wrapper.find('.preview-back-btn').exists()).toBe(false)
+    })
+
+    it('文件树点击 B 后选中节点与预览一致 → 后退按钮必不出现（关键回归）', async () => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValue({
+        path: '/docs/b.md', name: 'b.md', size: 4,
+        content: '# b', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'a.md', path: '/docs/a.md', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      // 模拟「文件树点击 B」：选中节点变更为 B
+      await wrapper.setProps({
+        selectedNode: { name: 'b.md', path: '/docs/b.md', type: 'file' }
+      })
+      // Home.onNodeSelect 主动调用 previewFile(B.path)
+      await wrapper.vm.previewFile('/docs/b.md')
+      await flushPromises()
+
+      // 此场景正是「正常文件树点击」：预览 === 选中节点 → 后退按钮必不出现
+      expect(wrapper.vm.canGoBack).toBe(false)
+      expect(wrapper.find('.preview-back-btn').exists()).toBe(false)
     })
   })
 

@@ -269,7 +269,20 @@ const onNodeSelect = (data) => {
   // 切换文件树节点时清零 latestCommit，避免上一个仓库（经"提交历史"tab emit）
   // 的提交残留到新选中仓库的 GitInfo 面板（与 GitInfo.watch(repoPath) 协同）。
   latestCommit.value = null
-  contentPanelRef.value?.clearPreview()
+  // 按节点类型主动驱动预览：
+  //   - file：直接 previewFile，使「同节点再点」（链接跳转后再点原节点）也能重新加载，
+  //     不再依赖 ContentPanel 内 watch(selectedNode) 的引用变化判定。
+  //   - 非文件：清空预览。
+  //   「未保存修改」检查已在 previewFile 内部统一处理。
+  //   显式传入 data.path / data.name：selectedNode 是父组件 ref，子组件 ContentPanel 的
+  //   props.selectedNode 更新是异步的（Vue 在 nextTick 才 patch 子组件 props），
+  //   若用无参 previewFile()，其内部 `targetPath = overridePath || props.selectedNode?.path`
+  //   读到的仍是【旧节点】路径 → 预览到上一个文件。传 data.path 直接绕开 props 更新时机。
+  if (data.type === 'file') {
+    contentPanelRef.value?.previewFile(data.path, data.name)
+  } else {
+    contentPanelRef.value?.clearPreview()
+  }
   recordAccess({ path: data.path, type: data.type, workDir: currentDirPath.value })
 }
 

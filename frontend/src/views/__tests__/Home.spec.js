@@ -70,7 +70,7 @@ describe('Home.vue - Bug修复验证', () => {
           Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
           DirectoryTree: { template: '<div class="stub-directory-tree" />' },
           FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {} } },
-          ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+          ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
           'el-tree': true,
           'el-dialog': true,
           'el-form': true,
@@ -281,7 +281,7 @@ describe('Home.vue - Bug修复验证', () => {
             Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
-            ContentPanel: { template: '<div class="stub-content-panel" />' }
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, previewFile: () => {} } }
           }
         }
       })
@@ -340,7 +340,7 @@ describe('Home.vue - Bug修复验证', () => {
             Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
-            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
             'el-dialog': true,
             'el-form': true,
             'el-form-item': true,
@@ -469,7 +469,7 @@ describe('Home.vue - Bug修复验证', () => {
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             ToolboxPanel: { template: '<div class="stub-toolbox-panel" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
-            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
             'el-tree': true,
             'el-dialog': true,
             'el-form': true,
@@ -518,7 +518,7 @@ describe('Home.vue - Bug修复验证', () => {
           DirectoryTree: { template: '<div />' },
           ToolboxPanel: { template: '<div />' },
           FileTreePanel: { template: '<div />' },
-          ContentPanel: { template: '<div />', methods: { clearPreview: () => {}, startBatchPull: () => {} } },
+          ContentPanel: { template: '<div />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
           'el-tree': true,
           'el-dialog': true,
           'el-form': true,
@@ -582,6 +582,80 @@ describe('Home.vue - Bug修复验证', () => {
       await flushPromises()
 
       expect(App.CopyToSystemClipboard).toHaveBeenCalledWith('/a/a.txt')
+    })
+  })
+
+  describe('onNodeSelect 显式传参修复（回归：链接跳转后再点空白预览到上一文件）', () => {
+    // 复现真实时序：父组件 selectedNode ref 更新后，子组件 ContentPanel 的
+    // props.selectedNode 在 nextTick 才 patch。若 onNodeSelect 用无参 previewFile()，
+    // 其内部 `targetPath = overridePath || props.selectedNode?.path` 读到的是【旧节点】路径。
+    // 修复：显式传入当前 data.path / data.name，绕开 props 更新时机。
+    const mountWithStub = (previewFileMock) => {
+      return mount(Home, {
+        global: {
+          stubs: {
+            Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+            Pane: { template: '<div class="pane"><slot /></div>' },
+            DirectoryTree: { template: '<div />' },
+            FileTreePanel: { template: '<div />' },
+            ContentPanel: {
+              template: '<div />',
+              methods: {
+                clearPreview: () => {},
+                startBatchPull: () => {},
+                previewFile: previewFileMock
+              }
+            }
+          }
+        }
+      })
+    }
+
+    it('点击 file 节点时显式传入该节点 path/name（不依赖 props 异步更新）', async () => {
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+
+      const node = { name: 'a.md', path: '/dir/a.md', type: 'file' }
+      w.vm.onNodeSelect(node)
+      await flushPromises()
+
+      expect(previewFileMock).toHaveBeenCalledTimes(1)
+      expect(previewFileMock).toHaveBeenLastCalledWith('/dir/a.md', 'a.md')
+      w.unmount()
+    })
+
+    it('连续切换不同 file 节点，最后一次 previewFile 调用参数为当前节点（非上一节点）', async () => {
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+
+      const nodeA = { name: 'a.md', path: '/dir/a.md', type: 'file' }
+      const nodeB = { name: 'b.md', path: '/dir/sub/b.md', type: 'file' }
+      w.vm.onNodeSelect(nodeA)
+      await flushPromises()
+      w.vm.onNodeSelect(nodeB)
+      await flushPromises()
+
+      expect(previewFileMock).toHaveBeenCalledTimes(2)
+      // 关键断言：最后一次调用参数是 nodeB（修复前会读到 nodeA 的路径）
+      expect(previewFileMock).toHaveBeenLastCalledWith('/dir/sub/b.md', 'b.md')
+      // 且不应出现「第二次仍用 nodeA 路径」的回归情形
+      expect(previewFileMock.mock.calls[1]).toEqual(['/dir/sub/b.md', 'b.md'])
+      w.unmount()
+    })
+
+    it('切到非 file 节点调用 clearPreview，不调用 previewFile', async () => {
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+
+      const dirNode = { name: 'sub', path: '/dir/sub', type: 'directory' }
+      w.vm.onNodeSelect(dirNode)
+      await flushPromises()
+
+      expect(previewFileMock).not.toHaveBeenCalled()
+      w.unmount()
     })
   })
 })

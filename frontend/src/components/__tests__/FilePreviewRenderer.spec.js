@@ -17,6 +17,11 @@ vi.mock('element-plus', async () => {
 
 // Office 依赖在 jsdom 下真实加载易崩，stub 掉
 vi.mock('docx-preview', () => ({ renderAsync: vi.fn(() => Promise.resolve()) }))
+
+// markdown 外部链接拦截后走 runtime.BrowserOpenURL，stub 掉避免 jsdom 无 window.runtime
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  BrowserOpenURL: vi.fn()
+}))
 vi.mock('xlsx', () => ({
   read: vi.fn(() => ({ SheetNames: [], Sheets: {} })),
   utils: { sheet_to_json: vi.fn(() => []) }
@@ -34,6 +39,91 @@ const mountRenderer = (props) => mount(FilePreviewRenderer, {
       'el-button': { template: '<button v-bind="$attrs"><slot /></button>' }
     }
   }
+})
+
+describe('FilePreviewRenderer.vue - markdown 链接点击分发', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  it('点击 ./ 相对链接 → emit openLink 带解析后的绝对路径', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'intro.md',
+      filePath: 'D:/repo/docs/intro.md',
+      content: '[other](./other.md)'
+    })
+    await flushPromises()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(wrapper.emitted('openLink')).toEqual([['D:/repo/docs/other.md']])
+  })
+
+  it('点击 ../ 链接 → 正确解析到上级目录', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'intro.md',
+      filePath: 'D:/repo/docs/intro.md',
+      content: '[readme](../README.md)'
+    })
+    await flushPromises()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(wrapper.emitted('openLink')).toEqual([['D:/repo/README.md']])
+  })
+
+  it('filePath 含 Windows 反斜杠时也按正斜杠规范化解析', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'intro.md',
+      filePath: 'D:\\repo\\docs\\intro.md',
+      content: '[other](sub/other.md)'
+    })
+    await flushPromises()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(wrapper.emitted('openLink')).toEqual([['D:/repo/docs/sub/other.md']])
+  })
+
+  it('点击 http(s) 外部链接 → 调用 BrowserOpenURL 且不 emit openLink', async () => {
+    const { BrowserOpenURL } = await import('../../../wailsjs/runtime/runtime')
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'intro.md',
+      filePath: 'D:/repo/docs/intro.md',
+      content: '[ext](https://example.com)'
+    })
+    await flushPromises()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(BrowserOpenURL).toHaveBeenCalledWith('https://example.com')
+    expect(wrapper.emitted('openLink')).toBeFalsy()
+  })
+
+  it('点击 #锚点 → 对应标题 scrollIntoView 定位', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'intro.md',
+      filePath: 'D:/repo/docs/intro.md',
+      content: '[go](#intro)\n\n# Intro'
+    })
+    await flushPromises()
+    const h1 = wrapper.find('.markdown-body h1').element
+    h1.scrollIntoView = vi.fn()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(h1.scrollIntoView).toHaveBeenCalled()
+  })
+
+  // markdown-it 默认 normalizeLink 会把链接里的中文等非 ASCII 做 percent-encoding，
+  // 中文文件名链接需先 decode 还原为原始字符，再解析路径，否则 Windows 按 percent
+  // 编码字面名找不到中文文件名。
+  it('中文文件名相对链接 → 还原 percent-encoding 后正确解析', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'README.md',
+      filePath: 'D:/repo/README.md',
+      content: '[功能说明](docs/功能说明.md)'
+    })
+    await flushPromises()
+    await wrapper.find('.markdown-body a').trigger('click')
+    expect(wrapper.emitted('openLink')).toEqual([['D:/repo/docs/功能说明.md']])
+  })
 })
 
 describe('FilePreviewRenderer.vue - 右键复制菜单', () => {

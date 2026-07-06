@@ -106,7 +106,7 @@
             <span class="action-label">编辑操作</span>
             <el-button-group>
               <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
-              <el-button @click="previewFile">预览</el-button>
+              <el-button @click="previewFile()">预览</el-button>
               <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
               <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
             </el-button-group>
@@ -124,7 +124,19 @@
 
         <div v-if="filePreviewState !== 'empty'" class="file-preview">
           <div class="file-preview-header">
-            <h4>{{ isEditing ? '编辑文件' : '文件预览' }}</h4>
+            <div class="file-preview-title">
+              <el-button
+                v-if="canGoBack"
+                class="preview-back-btn"
+                size="small"
+                link
+                title="后退到上一个文件"
+                @click="goBack"
+              >
+                <el-icon><ArrowLeft /></el-icon>
+              </el-button>
+              <h4>{{ isEditing ? '编辑文件' : '文件预览' }}</h4>
+            </div>
             <div class="file-preview-mode-actions">
               <!-- 文本类提供编辑入口（双模式切换） -->
               <template v-if="filePreview.kind === 'text'">
@@ -163,6 +175,7 @@
               v-else
               :kind="filePreview.kind"
               :file-name="filePreview.name"
+              :file-path="filePreview.path"
               :content="filePreview.content"
               :base64="filePreview.base64"
               :error="filePreview.error"
@@ -170,6 +183,7 @@
               :is-binary="filePreview.isBinary"
               :pdf-path="filePreview.pdfPath"
               @open-external="handleOpenWithDefaultApp"
+              @open-link="onPreviewLink"
             />
           </div>
         </div>
@@ -356,9 +370,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { SuccessFilled, CircleCloseFilled, ArrowLeft } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
@@ -423,6 +437,18 @@ const isSaving = ref(false)
 // 预览模式：默认只读渲染；文本类可切到编辑态
 const isEditing = ref(false)
 const filePreviewLoading = ref(false)
+
+// 「后退」= 回到文件树当前选中节点。
+//   设计意图（用户反馈）：仅当当前预览文件（通常通过 markdown 相对链接跳转得到）
+//   与文件树选中节点不一致时才显示后退按钮；点击后回到选中节点，按钮消失。
+//   因此这是一个单步判断，不需要多步历史栈。
+// 路径规范化：兼容 Windows 反斜杠与盘符大小写差异，统一为小写正斜杠比较。
+const normalizePath = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
+const canGoBack = computed(() => {
+  if (!props.selectedNode || props.selectedNode.type !== 'file') return false
+  if (!filePreview.value.path) return false
+  return normalizePath(filePreview.value.path) !== normalizePath(props.selectedNode.path)
+})
 
 // filePreview 是否已有内容/状态（用于 v-if 显示预览区）
 const filePreviewState = computed(() => {
@@ -626,18 +652,37 @@ const handleUpdateRepos = () => {
   emit('batchPull', props.selectedNode)
 }
 
-const previewFile = async () => {
-  if (!props.selectedNode) return
+const previewFile = async (overridePath, overrideName) => {
+  // 支持 markdown 相对链接在应用内打开：overridePath 非空时按指定路径预览，
+  // 不依赖 selectedNode（文件树选中态保持不变）。
+  const targetPath = overridePath || props.selectedNode?.path
+  if (!targetPath) return
+  const targetName = overrideName || props.selectedNode?.name || ''
+
+  // 「未保存修改」检查覆盖所有切换入口（文件树点击 / 链接跳转 / 回退），
+  // 必须在 isEditing 置 false 之前执行，否则会丢失「编辑中」的判定条件。
+  if (isEditing.value && isContentModified.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前文件已修改未保存，是否放弃修改？',
+        '未保存的修改',
+        { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
+      )
+    } catch {
+      // 用户选择"继续编辑"，阻止切换
+      return
+    }
+  }
 
   filePreviewLoading.value = true
   isEditing.value = false
   try {
-    const preview = await PreviewFile(props.selectedNode.path)
+    const preview = await PreviewFile(targetPath)
 
     // 初始化预览对象（保留 content，清掉 base64）
     filePreview.value = {
-      path: preview.path || props.selectedNode.path,
-      name: preview.name || props.selectedNode.name,
+      path: preview.path || targetPath,
+      name: preview.name || targetName,
       size: preview.size || 0,
       content: preview.content || '',
       base64: '',
@@ -647,7 +692,7 @@ const previewFile = async () => {
       kind: preview.kind || '',
       // PDF 走 iframe + 后端 /preview-pdf 同源 URL（POC-1），
       // 不读取字节，直接把本地绝对路径传给渲染器拼装 URL。
-      pdfPath: preview.kind === 'pdf' ? (preview.path || props.selectedNode.path) : ''
+      pdfPath: preview.kind === 'pdf' ? (preview.path || targetPath) : ''
     }
 
     if (preview.error) {
@@ -668,7 +713,7 @@ const previewFile = async () => {
     const needsBytes = preview.kind === 'image' || preview.kind === 'office'
     if (!preview.error && !preview.tooLarge && needsBytes) {
       try {
-        const bytes = await ReadFileBytes(props.selectedNode.path)
+        const bytes = await ReadFileBytes(targetPath)
         if (bytes.error) {
           filePreview.value.error = bytes.error
           ElMessage.error('读取文件字节失败: ' + bytes.error)
@@ -689,8 +734,8 @@ const previewFile = async () => {
     originalContent.value = preview.content || ''
   } catch (error) {
     filePreview.value = {
-      path: props.selectedNode.path,
-      name: props.selectedNode.name,
+      path: targetPath,
+      name: targetName,
       size: 0,
       content: '',
       base64: '',
@@ -704,6 +749,17 @@ const previewFile = async () => {
   } finally {
     filePreviewLoading.value = false
   }
+}
+
+// markdown 相对链接 → 应用内切换预览（不改 selectedNode，文件树选中态保持不变）
+const onPreviewLink = (absPath) => {
+  previewFile(absPath)
+}
+
+// 回到文件树当前选中节点：单步回退，按钮在选中节点与预览一致后自动消失。
+const goBack = () => {
+  if (!canGoBack.value || !props.selectedNode) return
+  previewFile(props.selectedNode.path, props.selectedNode.name)
 }
 
 // 进入编辑模式（仅文本类）
@@ -735,24 +791,12 @@ const handleCancelEdit = () => {
   isEditing.value = false
 }
 
-watch(() => props.selectedNode, async (newNode, oldNode) => {
-  // 切换文件前检查是否有未保存修改
-  if (oldNode && oldNode.type === 'file' && isContentModified.value) {
-    try {
-      await ElMessageBox.confirm(
-        '当前文件已修改未保存，是否放弃修改？',
-        '未保存的修改',
-        { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
-      )
-    } catch {
-      // 用户选择"继续编辑"，阻止切换
-      return
-    }
-  }
-  if (newNode && newNode.type === 'file') {
-    await previewFile()
-  }
-})
+// 注意：原 watch(selectedNode) 自动触发 previewFile 的逻辑已移除。
+//   原因：链接跳转后预览体（filePreview.path）与 selectedNode 脱钩，再次点击文件树
+//   同一节点时 selectedNode 引用不变 → watch 不触发 → 经 onNodeSelect.clearPreview() 后
+//   预览永久空白。改由 Home.onNodeSelect 按节点类型主动调用 previewFile / clearPreview，
+//   使「同节点再点」也能重新加载预览。
+// 「未保存修改」检查已统一收敛到 previewFile 入口，覆盖所有切换路径。
 
 const showCloneDialog = () => {
   cloneUrl.value = ''
@@ -857,7 +901,9 @@ onBeforeUnmount(() => {
 
 defineExpose({
   startBatchPull,
-  clearPreview
+  clearPreview,
+  previewFile,
+  goBack
 })
 </script>
 
@@ -1020,6 +1066,13 @@ defineExpose({
   margin-bottom: 0;
   color: var(--primary-dark);
   font-weight: 600;
+}
+
+/* 标题容器：后退按钮与 h4 横向排列 */
+.file-preview-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
 }
 
 .file-preview-mode-actions {
