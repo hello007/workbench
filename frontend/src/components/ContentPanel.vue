@@ -1,16 +1,32 @@
 <template>
   <div class="content-panel">
     <div v-if="selectedNode" class="content-inner">
-      <h2>{{ selectedNode.name }}</h2>
+      <!-- 紧凑 header：类型图标（可点击复制名称）+ 文件名 -->
+      <div class="panel-header">
+        <el-icon
+          class="panel-header-icon"
+          :title="selectedNode.type === 'directory' ? '复制文件夹名' : '复制文件名'"
+          @click="handleCopyName"
+        >
+          <Folder v-if="selectedNode.type === 'directory'" />
+          <Document v-else />
+        </el-icon>
+        <h2>{{ selectedNode.name }}</h2>
+      </div>
 
-      <!-- 节点信息：第一列为完整路径，第二列（原类型字段位置）放置复制路径/复制文件名按钮 -->
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="路径">{{ selectedNode.path }}</el-descriptions-item>
-        <el-descriptions-item label="操作">
-          <el-button size="small" @click="handleCopyPath">复制路径</el-button>
-          <el-button v-if="selectedNode.type === 'file'" size="small" @click="handleCopyName">复制文件名</el-button>
-        </el-descriptions-item>
-      </el-descriptions>
+      <!-- 路径行：弱化灰字 + 行尾内联复制按钮 -->
+      <div class="panel-path-row">
+        <span class="panel-path" :title="selectedNode.path">{{ selectedNode.path }}</span>
+        <div class="panel-path-actions">
+          <el-button
+            :icon="CopyDocument"
+            size="small"
+            text
+            title="复制路径"
+            @click="handleCopyPath"
+          />
+        </div>
+      </div>
 
       <!-- Git 操作按钮 -->
       <div v-if="selectedNode.isGitRepo" class="git-actions">
@@ -372,7 +388,7 @@
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SuccessFilled, CircleCloseFilled, ArrowLeft } from '@element-plus/icons-vue'
+import { SuccessFilled, CircleCloseFilled, ArrowLeft, Document, Folder, CopyDocument } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
@@ -635,10 +651,11 @@ const handleCopyPath = async () => {
 }
 
 const handleCopyName = async () => {
-  if (!props.selectedNode || props.selectedNode.type !== 'file') return
+  if (!props.selectedNode) return
+  const isDir = props.selectedNode.type === 'directory'
   try {
     await navigator.clipboard.writeText(props.selectedNode.name)
-    ElMessage.success('文件名已复制到剪贴板')
+    ElMessage.success((isDir ? '文件夹名' : '文件名') + '已复制到剪贴板')
   } catch {
     ElMessage.error('复制失败')
   }
@@ -928,16 +945,73 @@ defineExpose({
 
 .content-panel h2 {
   color: var(--text-primary);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  margin-bottom: 6px;
-  letter-spacing: 0.5px;
+  margin: 0;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 紧凑 header：类型图标 + 文件名 */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+.panel-header-icon {
+  font-size: 18px;
+  color: var(--primary-color);
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.panel-header-icon:hover {
+  color: var(--primary-dark);
+  background: var(--primary-bg);
+}
+.panel-header-icon:active {
+  transform: scale(0.92);
+}
+
+/* 路径行：弱化灰字 + 行尾内联复制按钮 */
+.panel-path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: 4px;
+  margin-bottom: var(--spacing-sm);
+}
+.panel-path {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: Consolas, 'Courier New', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.panel-path-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.panel-path-actions :deep(.el-button) {
+  font-size: 12px;
+  padding: 4px 6px;
 }
 
 .content-panel h3 {
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 600;
+  margin-top: 0;
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--border-color);
@@ -947,8 +1021,9 @@ defineExpose({
 
 .content-panel h4 {
   color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 0;
   margin-bottom: var(--spacing-sm);
 }
 
@@ -963,7 +1038,7 @@ defineExpose({
 .node-actions {
   margin-top: 0;
   background: var(--bg-tertiary);
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   transition: all var(--transition-normal);
@@ -1038,7 +1113,7 @@ defineExpose({
 
 /* 文件预览区域：浅蓝主题底卡片，与上方白底信息/按钮区一眼区分 */
 .file-preview {
-  margin-top: var(--spacing-md);
+  margin-top: var(--spacing-sm);
   display: flex;
   flex-direction: column;
   flex: 1;

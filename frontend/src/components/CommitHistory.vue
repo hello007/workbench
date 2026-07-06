@@ -25,86 +25,76 @@
     </template>
 
     <div v-loading="loading" class="timeline-container">
-      <el-timeline v-if="filteredCommits.length > 0">
-        <el-timeline-item
+      <div v-if="filteredCommits.length > 0" class="commit-list">
+        <div
           v-for="commit in filteredCommits"
           :key="commit.sha"
-          :timestamp="formatTime(commit.timestamp)"
-          placement="top"
+          class="commit-card"
+          :class="{ 'is-expanded': expandedCommits.has(commit.sha) }"
           @click="toggleCommitDetail(commit.sha)"
-          class="commit-item"
         >
-          <el-card class="commit-card" shadow="hover">
-            <div class="commit-header">
-              <div class="commit-sha">
-                <el-text
-                  type="primary"
-                  class="sha-text"
-                  @click.stop="copyToClipboard(commit.sha)"
+          <!-- 头部单行：短 SHA · 文件数 · 作者 · 相对时间 · 展开箭头 -->
+          <div class="commit-header">
+            <div class="commit-header-main">
+              <el-text
+                type="primary"
+                class="sha-text"
+                @click.stop="copyToClipboard(commit.sha)"
+              >
+                {{ commit.shortSha }}
+              </el-text>
+              <el-tag size="small" type="info" class="files-count-tag">
+                {{ commit.files?.length || 0 }} 文件
+              </el-tag>
+              <span class="commit-author">
+                <el-icon><User /></el-icon>{{ commit.author }}
+              </span>
+              <span class="commit-time">{{ formatTime(commit.timestamp) }}</span>
+            </div>
+            <el-icon class="commit-expand-icon">
+              <component :is="expandedCommits.has(commit.sha) ? ArrowUp : ArrowDown" />
+            </el-icon>
+          </div>
+
+          <div class="commit-message">{{ commit.message }}</div>
+
+          <el-collapse-transition>
+            <div v-show="expandedCommits.has(commit.sha)" class="commit-detail">
+              <el-descriptions :column="1" size="small" border>
+                <el-descriptions-item label="完整 SHA">
+                  <div class="sha-full">
+                    <el-text class="sha-text">{{ commit.sha }}</el-text>
+                    <el-button
+                      :icon="DocumentCopy"
+                      size="small"
+                      text
+                      @click.stop="copyToClipboard(commit.sha)"
+                    />
+                  </div>
+                </el-descriptions-item>
+                <el-descriptions-item label="作者邮箱">
+                  {{ commit.email }}
+                </el-descriptions-item>
+                <el-descriptions-item label="提交时间">
+                  {{ commit.dateTime }}
+                </el-descriptions-item>
+              </el-descriptions>
+
+              <div class="files-section">
+                <el-text size="small" strong>变更文件：</el-text>
+                <el-tag
+                  v-for="(file, index) in commit.files"
+                  :key="index"
+                  size="small"
+                  class="file-tag"
                 >
-                  {{ commit.shortSha }}
-                </el-text>
-                <el-tag size="small" type="info" style="margin-left: 10px;">
-                  {{ commit.files?.length || 0 }} 个文件
+                  {{ file }}
                 </el-tag>
               </div>
-              <el-button
-                :icon="expandedCommits.has(commit.sha) ? ArrowUp : ArrowDown"
-                size="small"
-                text
-                @click.stop="toggleCommitDetail(commit.sha)"
-              />
             </div>
-
-            <el-text class="commit-message">{{ commit.message }}</el-text>
-            <div class="commit-meta">
-              <el-icon><User /></el-icon>
-              <el-text size="small">{{ commit.author }}</el-text>
-              <el-divider direction="vertical" />
-              <el-text size="small" type="info">
-                {{ formatTime(commit.timestamp) }}
-              </el-text>
-            </div>
-
-            <el-collapse-transition>
-              <div v-show="expandedCommits.has(commit.sha)" class="commit-detail">
-                <el-divider />
-                <el-descriptions :column="1" size="small" border>
-                  <el-descriptions-item label="完整 SHA">
-                    <div class="sha-full">
-                      <el-text class="sha-text">{{ commit.sha }}</el-text>
-                      <el-button
-                        :icon="DocumentCopy"
-                        size="small"
-                        text
-                        @click.stop="copyToClipboard(commit.sha)"
-                      />
-                    </div>
-                  </el-descriptions-item>
-                  <el-descriptions-item label="作者邮箱">
-                    {{ commit.email }}
-                  </el-descriptions-item>
-                  <el-descriptions-item label="提交时间">
-                    {{ commit.dateTime }}
-                  </el-descriptions-item>
-                </el-descriptions>
-
-                <div class="files-section">
-                  <el-text size="small" strong>变更文件：</el-text>
-                  <el-tag
-                    v-for="(file, index) in commit.files"
-                    :key="index"
-                    size="small"
-                    class="file-tag"
-                  >
-                    {{ file }}
-                  </el-tag>
-                </div>
-              </div>
-            </el-collapse-transition>
-          </el-card>
-        </el-timeline-item>
-      </el-timeline>
+          </el-collapse-transition>
+        </div>
+      </div>
 
       <el-empty
         v-else-if="!loading && commits.length === 0"
@@ -275,8 +265,7 @@ defineExpose({ loadCommits, handleRefresh })
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* 缩小左侧缩进，与右侧 padding 拉开的间距接近平衡（不动 timeline-item 的 padding-left，避免破坏轴线结构） */
-  padding-left: 12px;
+  padding: var(--spacing-md);
 }
 .card-header {
   display: flex;
@@ -296,30 +285,47 @@ defineExpose({ loadCommits, handleRefresh })
   overflow-y: auto;
   overflow-x: hidden; /* 兜底：禁止 hover 等场景产生横向滚动条 */
   /* 右侧留白，让卡片右边缘与 webkit 滚动条之间有清晰间距，避免视觉重叠 */
-  padding-right: var(--spacing-md);
+  padding-right: var(--spacing-sm);
 }
-.commit-item {
-  cursor: pointer;
+
+/* 卡片列表：纵向排列，无时间轴占位 */
+.commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 .commit-card {
-  margin-bottom: var(--spacing-md);
+  cursor: pointer;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-light);
   border-radius: var(--radius-md);
+  background: var(--bg-secondary);
   box-shadow: var(--shadow-sm);
-  transition: all var(--transition-normal);
+  transition: all var(--transition-fast);
 }
 .commit-card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--primary-light);
+  border-left-color: var(--primary-color);
 }
+.commit-card.is-expanded {
+  border-left-color: var(--primary-color);
+}
+
+/* 头部单行：主信息 + 展开箭头 */
 .commit-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--spacing-sm);
+  gap: var(--spacing-sm);
 }
-.commit-sha {
+.commit-header-main {
   display: flex;
   align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  flex: 1;
 }
 .sha-text {
   font-family: Consolas, 'Courier New', monospace;
@@ -327,10 +333,40 @@ defineExpose({ loadCommits, handleRefresh })
   cursor: pointer;
   color: var(--primary-color);
   font-weight: 500;
+  flex-shrink: 0;
 }
 .sha-text:hover {
   text-decoration: underline;
   color: var(--primary-dark);
+}
+.files-count-tag {
+  flex-shrink: 0;
+}
+.commit-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+.commit-time {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.commit-expand-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+.commit-card:hover .commit-expand-icon {
+  color: var(--primary-color);
 }
 .sha-full {
   display: flex;
@@ -339,20 +375,16 @@ defineExpose({ loadCommits, handleRefresh })
 }
 .commit-message {
   display: block;
-  margin: var(--spacing-md) 0;
+  margin-top: 6px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--text-primary);
-}
-.commit-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  color: var(--text-tertiary);
-  font-size: 13px;
+  word-break: break-word;
 }
 .commit-detail {
-  margin-top: var(--spacing-md);
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
   animation: fadeIn var(--transition-fast);
 }
 .files-section {
