@@ -18,6 +18,14 @@ vi.mock('element-plus', async () => {
 // Office 依赖在 jsdom 下真实加载易崩，stub 掉
 vi.mock('docx-preview', () => ({ renderAsync: vi.fn(() => Promise.resolve()) }))
 
+// mermaid 在 jsdom 下无法真实渲染 SVG（依赖 DOM 测量/canvas），stub 掉
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    run: vi.fn(() => Promise.resolve())
+  }
+}))
+
 // markdown 外部链接拦截后走 runtime.BrowserOpenURL，stub 掉避免 jsdom 无 window.runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   BrowserOpenURL: vi.fn()
@@ -280,5 +288,107 @@ describe('FilePreviewRenderer.vue - 右键复制菜单', () => {
 
     expect(writeText).toHaveBeenCalledWith('hello world')
     expect(ElMessage.success).toHaveBeenCalled()
+  })
+})
+
+describe('FilePreviewRenderer.vue - mermaid 渲染', () => {
+  let wrapper
+
+  beforeEach(() => { vi.clearAllMocks() })
+  afterEach(() => { if (wrapper) { wrapper.unmount(); wrapper = null } })
+
+  it('mermaid 代码块渲染为 pre.mermaid（不走 highlight.js）', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'diagram.md',
+      content: '```mermaid\ngraph TD\nA-->B\n```'
+    })
+    await flushPromises()
+    const mermaidPre = wrapper.find('.markdown-body pre.mermaid')
+    expect(mermaidPre.exists()).toBe(true)
+    expect(mermaidPre.text()).toContain('graph TD')
+  })
+
+  it('调用 mermaid.run 渲染图形节点', async () => {
+    const mermaid = (await import('mermaid')).default
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'diagram.md',
+      content: '```mermaid\ngraph TD\nA-->B\n```'
+    })
+    await flushPromises()
+    expect(mermaid.run).toHaveBeenCalled()
+  })
+
+  it('普通代码块仍走 highlight.js（不产生 pre.mermaid）', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'code.md',
+      content: '```js\nconst a = 1\n```'
+    })
+    await flushPromises()
+    expect(wrapper.find('.markdown-body pre.mermaid').exists()).toBe(false)
+    expect(wrapper.find('.markdown-body pre.hljs').exists()).toBe(true)
+  })
+})
+
+describe('FilePreviewRenderer.vue - 标题目录 TOC', () => {
+  let wrapper
+
+  beforeEach(() => { vi.clearAllMocks() })
+  afterEach(() => { if (wrapper) { wrapper.unmount(); wrapper = null } })
+
+  it('默认（showToc=false）不显示 TOC', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '# 一级标题\n## 二级标题'
+    })
+    await flushPromises()
+    expect(wrapper.find('.preview-toc').exists()).toBe(false)
+  })
+
+  it('showToc=true 时提取标题并显示 TOC 侧边栏', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md', showToc: true,
+      content: '# 一级标题\n## 二级标题\n### 三级标题'
+    })
+    await flushPromises()
+    const toc = wrapper.find('.preview-toc')
+    expect(toc.exists()).toBe(true)
+    const items = wrapper.findAll('.toc-item')
+    expect(items.length).toBe(3)
+    expect(items[0].text()).toBe('一级标题')
+    expect(items[1].classes()).toContain('toc-level-2')
+  })
+
+  it('showToc=true 但无标题时显示空态提示', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'plain.md', showToc: true,
+      content: '正文段落，无标题。'
+    })
+    await flushPromises()
+    expect(wrapper.find('.preview-toc').exists()).toBe(true)
+    expect(wrapper.findAll('.toc-item').length).toBe(0)
+    expect(wrapper.find('.toc-empty').exists()).toBe(true)
+  })
+
+  it('点击 TOC 项调用标题 scrollIntoView', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md', showToc: true,
+      content: '# 标题A\n## 标题B'
+    })
+    await flushPromises()
+    const headings = wrapper.find('.markdown-body').element.querySelectorAll('h1,h2,h3,h4,h5,h6')
+    const spy = vi.fn()
+    headings.forEach(h => { h.scrollIntoView = spy })
+    await wrapper.findAll('.toc-item')[1].trigger('click')
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('点击 X 关闭图标 emit closeToc', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md', showToc: true,
+      content: '# 标题A'
+    })
+    await flushPromises()
+    await wrapper.find('.toc-close-icon').trigger('click')
+    expect(wrapper.emitted('closeToc')).toBeTruthy()
   })
 })

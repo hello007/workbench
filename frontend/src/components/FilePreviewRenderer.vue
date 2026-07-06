@@ -21,9 +21,32 @@
       </div>
     </div>
 
-    <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 -->
+    <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 + mermaid 图形 -->
     <div v-else-if="isMarkdown" class="preview-markdown-wrap">
       <div class="markdown-body" ref="markdownBodyRef" v-html="renderedMarkdown" @click="onMarkdownClick"></div>
+
+      <!-- 标题目录 TOC：默认隐藏，由父组件「目录」按钮控制显隐；右上角 X 关闭 -->
+      <div v-if="showToc" class="preview-toc">
+        <div class="toc-header">
+          <span class="toc-title">目录</span>
+          <el-icon class="toc-close-icon" title="关闭目录" @click="emit('closeToc')">
+            <Close />
+          </el-icon>
+        </div>
+        <ul v-if="toc.length > 0" class="toc-list">
+          <li
+            v-for="item in toc"
+            :key="item.index"
+            class="toc-item"
+            :class="'toc-level-' + item.level"
+            :title="item.text"
+            @click="scrollToHeadingByIndex(item.index)"
+          >
+            {{ item.text }}
+          </li>
+        </ul>
+        <div v-else class="toc-empty">无标题</div>
+      </div>
     </div>
 
     <!-- 代码 / txt / json / sql 只读：CodeMirror 6 -->
@@ -149,7 +172,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Select } from '@element-plus/icons-vue'
+import { CopyDocument, Select, Close } from '@element-plus/icons-vue'
 // Office 渲染依赖采用静态 import：
 // 历史上曾用 await import('docx-preview') / await import('xlsx') 动态加载，
 // 但 wails dev 下 Vite 会把动态 import 重写为 /node_modules/.vite/deps/xlsx.js
@@ -161,6 +184,7 @@ import { CopyDocument, Select } from '@element-plus/icons-vue'
 import { renderAsync } from 'docx-preview'
 import * as XLSX from 'xlsx'
 import MarkdownIt from 'markdown-it'
+import mermaid from 'mermaid'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
@@ -218,10 +242,12 @@ const props = defineProps({
   pdfPath: { type: String, default: '' },
   // 当前预览文件的本地绝对路径（kind=text/markdown 时由父组件传入，
   // 用于把 markdown 内相对链接 ./other.md 解析为本地绝对路径）
-  filePath: { type: String, default: '' }
+  filePath: { type: String, default: '' },
+  // markdown 目录（TOC）显隐：由父组件「目录」按钮控制，默认隐藏
+  showToc: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['openExternal', 'openLink'])
+const emit = defineEmits(['openExternal', 'openLink', 'closeToc'])
 
 // ---------- 扩展名工具 ----------
 const getExt = (name = '') => {
@@ -266,12 +292,21 @@ const isMarkdown = computed(() => {
   return ext === 'md' || ext === 'markdown'
 })
 
+// ---------- Mermaid 初始化 ----------
+// startOnLoad:false → 由我们在 DOM 更新后手动 run；securityLevel:'strict' 防注入。
+mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+
 // ---------- Markdown 渲染 ----------
 const md = new MarkdownIt({
   html: false, // 关闭原始 HTML，防 XSS
   linkify: true,
   breaks: false,
   highlight(code, lang) {
+    // mermaid 代码块不走 highlight.js：输出 <pre class="mermaid"> 保留原文，
+    // 供 mermaid.run 在 DOM 更新后解析渲染为 SVG 图形。
+    if (lang === 'mermaid') {
+      return `<pre class="mermaid">${md.utils.escapeHtml(code)}</pre>`
+    }
     const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext'
     try {
       return `<pre class="hljs"><code>${hljs.highlight(code, { language, ignoreIllegals: true }).value}</code></pre>`
@@ -289,6 +324,67 @@ const renderedMarkdown = computed(() => {
     return `<p>Markdown 渲染失败：${String(e)}</p>`
   }
 })
+
+// ---------- Mermaid 图形渲染 ----------
+// renderedMarkdown 更新（v-html 写入 DOM）后，对 .mermaid 节点调用 mermaid.run
+// 渲染为 SVG。单个图表失败时降级为「渲染失败」提示，不影响其余内容与图表。
+const renderMermaid = async () => {
+  if (!isMarkdown.value || !markdownBodyRef.value) return
+  const nodes = markdownBodyRef.value.querySelectorAll('pre.mermaid')
+  if (nodes.length === 0) return
+  try {
+    await mermaid.run({ nodes: Array.from(nodes), suppressErrors: true })
+  } catch (e) {
+    // 兜底：mermaid.run 整体异常时，逐个标记未渲染成功的图表
+    nodes.forEach((n) => {
+      if (n.getAttribute('data-processed') !== 'true') {
+        n.classList.add('mermaid-error')
+        n.setAttribute('title', 'Mermaid 渲染失败：' + (e?.message || String(e)))
+      }
+    })
+  }
+}
+
+// 内容变化 → 等 v-html 更新到 DOM 后再渲染 mermaid
+watch(renderedMarkdown, async () => {
+  await nextTick()
+  renderMermaid()
+})
+
+// ---------- 标题目录 TOC ----------
+// 用 markdown-it token 流提取 heading（层级 + 文本 + 文档内序号），
+// 序号用于点击时按 DOM 顺序定位对应标题，规避重复标题文本的歧义。
+const toc = computed(() => {
+  if (!isMarkdown.value) return []
+  let tokens
+  try {
+    tokens = md.parse(props.content || '', {})
+  } catch {
+    return []
+  }
+  const items = []
+  let index = 0
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t.type === 'heading_open') {
+      const level = Number(t.tag.slice(1)) || 1
+      const inline = tokens[i + 1]
+      const text = inline && inline.type === 'inline' ? (inline.content || '').trim() : ''
+      if (text) items.push({ level, text, index })
+      index++
+    }
+  }
+  return items
+})
+
+
+// 点击 TOC 项：按文档序号定位第 index 个标题，滚动到视图。
+const scrollToHeadingByIndex = (index) => {
+  if (!markdownBodyRef.value) return
+  const headings = markdownBodyRef.value.querySelectorAll('h1, h2, h3, h4, h5, h6')
+  const target = headings[index]
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 // ---------- 图片预览 ----------
 const imageDataUrl = computed(() => {
@@ -534,7 +630,12 @@ watch(() => [props.kind, props.fileName, props.base64, props.content], async () 
 onMounted(async () => {
   if (props.kind === 'text') {
     await nextTick()
-    setupCodeMirror()
+    if (isMarkdown.value) {
+      // markdown 走 v-html 分支，无 CodeMirror；首次挂载渲染 mermaid
+      renderMermaid()
+    } else {
+      setupCodeMirror()
+    }
   } else if (props.kind === 'office') {
     await renderOfficeBySubType()
   }
@@ -813,10 +914,86 @@ onBeforeUnmount(() => {
   object-fit: contain;
 }
 
-/* Markdown */
+/* Markdown：正文 + 右侧 TOC 横向布局 */
 .preview-markdown-wrap {
   overflow: hidden;
+  flex-direction: row;
+  gap: var(--spacing-sm, 8px);
 }
+
+/* TOC 侧边栏 */
+.preview-toc {
+  flex-shrink: 0;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+  transition: width var(--transition-fast, 0.15s ease);
+}
+.toc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  user-select: none;
+}
+.toc-close-icon {
+  font-size: 15px;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm, 4px);
+  transition: all var(--transition-fast, 0.15s ease);
+}
+.toc-close-icon:hover {
+  color: var(--danger-color, #f56c6c);
+  background: var(--bg-tertiary);
+}
+.toc-empty {
+  padding: 12px 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+.toc-item {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all var(--transition-fast, 0.15s ease);
+  border-left: 2px solid transparent;
+}
+.toc-item:hover {
+  color: var(--primary-color);
+  background: var(--primary-bg);
+  border-left-color: var(--primary-color);
+}
+.toc-level-1 { padding-left: 10px; font-weight: 600; }
+.toc-level-2 { padding-left: 20px; }
+.toc-level-3 { padding-left: 30px; }
+.toc-level-4 { padding-left: 40px; }
+.toc-level-5 { padding-left: 50px; }
+.toc-level-6 { padding-left: 60px; }
 
 .markdown-body {
   flex: 1;
@@ -868,6 +1045,30 @@ onBeforeUnmount(() => {
   background: transparent;
   padding: 0;
   color: inherit;
+}
+
+/* Mermaid 图形块：居中白底，与暗色代码块区分 */
+.markdown-body :deep(pre.mermaid) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: center;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.markdown-body :deep(pre.mermaid svg) {
+  max-width: 100%;
+  height: auto;
+}
+/* 渲染失败降级：显示红色边框与原始代码文本 */
+.markdown-body :deep(pre.mermaid.mermaid-error) {
+  background: #1e1e1e;
+  color: #f44747;
+  text-align: left;
+  border-color: var(--danger-color, #f56c6c);
+  font-family: Consolas, 'Courier New', monospace;
+  white-space: pre-wrap;
 }
 
 .markdown-body :deep(table) {

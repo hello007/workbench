@@ -165,6 +165,15 @@
               </template>
               <!-- 图片/PDF 不支持内嵌编辑时，提供外部打开 -->
               <el-button size="small" @click="handleOpenWithDefaultApp">用默认程序打开</el-button>
+              <!-- markdown 只读态：目录开关（默认隐藏，点击展示/收起） -->
+              <el-button
+                v-if="isMarkdownPreview && !isEditing"
+                size="small"
+                :type="showToc ? 'primary' : 'default'"
+                @click="showToc = !showToc"
+              >
+                目录
+              </el-button>
             </div>
           </div>
 
@@ -172,12 +181,13 @@
             <!-- 加载中 -->
             <div v-if="filePreviewLoading" class="preview-loading-tip">加载中...</div>
 
-            <!-- 编辑态：保留原有 textarea + 保存链路 -->
+            <!-- 编辑态：保留原有 textarea + 保存链路；Ctrl+S 保存 / Esc 取消 -->
             <template v-else-if="isEditing">
               <el-input
                 v-model="filePreview.content"
                 type="textarea"
                 class="preview-textarea"
+                @keydown="onEditKeydown"
               />
               <div class="preview-actions">
                 <span v-if="isContentModified" class="modified-indicator">● 已修改</span>
@@ -198,8 +208,10 @@
               :too-large="filePreview.tooLarge"
               :is-binary="filePreview.isBinary"
               :pdf-path="filePreview.pdfPath"
+              :show-toc="showToc"
               @open-external="handleOpenWithDefaultApp"
               @open-link="onPreviewLink"
+              @close-toc="showToc = false"
             />
           </div>
         </div>
@@ -453,6 +465,15 @@ const isSaving = ref(false)
 // 预览模式：默认只读渲染；文本类可切到编辑态
 const isEditing = ref(false)
 const filePreviewLoading = ref(false)
+// markdown 目录（TOC）显隐：默认隐藏，由「目录」按钮切换
+const showToc = ref(false)
+
+// 是否为 markdown 预览（决定「目录」按钮是否显示）
+const isMarkdownPreview = computed(() => {
+  if (filePreview.value.kind !== 'text') return false
+  const ext = (filePreview.value.name || '').split('.').pop().toLowerCase()
+  return ext === 'md' || ext === 'markdown'
+})
 
 // 「后退」= 回到文件树当前选中节点。
 //   设计意图（用户反馈）：仅当当前预览文件（通常通过 markdown 相对链接跳转得到）
@@ -693,6 +714,8 @@ const previewFile = async (overridePath, overrideName) => {
 
   filePreviewLoading.value = true
   isEditing.value = false
+  // 切换文件时收起目录，保持「默认隐藏」
+  showToc.value = false
   try {
     const preview = await PreviewFile(targetPath)
 
@@ -806,6 +829,35 @@ const handleCancelEdit = () => {
   filePreview.value.content = originalContent.value
   // 取消编辑回到只读预览态
   isEditing.value = false
+}
+
+// Esc 取消：有未保存修改时二次确认，无修改直接退出（标准安全行为）
+const cancelEditWithConfirm = async () => {
+  if (isContentModified.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前文件已修改未保存，是否放弃修改？',
+        '未保存的修改',
+        { confirmButtonText: '放弃', cancelButtonText: '继续编辑', type: 'warning' }
+      )
+    } catch {
+      // 用户选择"继续编辑"，保留编辑态
+      return
+    }
+  }
+  handleCancelEdit()
+}
+
+// 编辑态键盘快捷键：Ctrl/Cmd+S 保存、Esc 取消
+const onEditKeydown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+    // 阻止浏览器默认「另存为」；仅有未保存修改时保存
+    e.preventDefault()
+    if (isContentModified.value && !isSaving.value) handleSave()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelEditWithConfirm()
+  }
 }
 
 // 注意：原 watch(selectedNode) 自动触发 previewFile 的逻辑已移除。

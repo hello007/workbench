@@ -37,6 +37,7 @@
     "element-plus": "^2.13.7",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.2.0",
+    "mermaid": "^11.16.0",
     "splitpanes": "^4.0.4",
     "vue": "^3.5.33",
     "vue-draggable-plus": "^0.6.1",

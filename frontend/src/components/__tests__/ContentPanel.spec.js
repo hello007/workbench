@@ -12,6 +12,9 @@ vi.mock('element-plus', async () => {
       success: vi.fn(),
       warning: vi.fn(),
       info: vi.fn()
+    },
+    ElMessageBox: {
+      confirm: vi.fn(() => Promise.resolve())
     }
   }
 })
@@ -57,8 +60,9 @@ const contentPanelStubs = {
   'el-form': { template: '<form><slot /></form>' },
   'el-form-item': { template: '<div><slot /></div>', props: ['label'] },
   'el-input': {
-    template: '<template v-if="type === \'textarea\'"><textarea :value="modelValue" :rows="rows" :readonly="readonly" /></template><template v-else><input :value="modelValue" :placeholder="placeholder" :disabled="disabled" :type="type" :readonly="readonly" /></template>',
-    props: ['modelValue', 'placeholder', 'disabled', 'type', 'rows', 'readonly', 'autosize']
+    template: '<template v-if="type === \'textarea\'"><textarea :value="modelValue" :rows="rows" :readonly="readonly" @input="$emit(\'update:modelValue\', $event.target.value)" /></template><template v-else><input :value="modelValue" :placeholder="placeholder" :disabled="disabled" :type="type" :readonly="readonly" @input="$emit(\'update:modelValue\', $event.target.value)" /></template>',
+    props: ['modelValue', 'placeholder', 'disabled', 'type', 'rows', 'readonly', 'autosize'],
+    emits: ['update:modelValue']
   },
   'el-table': { template: '<table><slot /></table>', props: ['data', 'size'] },
   'el-table-column': { template: '<col />', props: ['prop', 'label', 'width', 'minWidth'] },
@@ -509,6 +513,140 @@ describe('ContentPanel.vue', () => {
       // 调用 clearPreview 清空
       await wrapper.vm.clearPreview()
       expect(wrapper.find('textarea').exists()).toBe(false)
+    })
+  })
+
+  describe('编辑态键盘快捷键', () => {
+    // 进入编辑态并返回 textarea 包装器
+    const enterEditMode = async (wrapper, content = 'Hello') => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/file.md', name: 'file.md', size: 5,
+        content, isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+      const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+      const editBtn = wrapper.findAll('button').find(btn => btn.text().includes('编辑'))
+      await editBtn.trigger('click')
+      await flushPromises()
+      return wrapper.find('textarea')
+    }
+
+    const mountPanel = () => mount(ContentPanel, {
+      props: {
+        selectedNode: { name: 'file.md', path: '/test/file.md', type: 'file' },
+        clipboard: { mode: null }
+      },
+      global: { stubs: contentPanelStubs }
+    })
+
+    it('Ctrl+S 有修改时触发保存', async () => {
+      const { SaveFile } = await import('../../../wailsjs/go/main/App')
+      wrapper = mountPanel()
+      const textarea = await enterEditMode(wrapper, 'Hello')
+
+      // 修改内容 → isContentModified 为真
+      await textarea.setValue('Hello changed')
+      await textarea.trigger('keydown', { key: 's', ctrlKey: true })
+      await flushPromises()
+
+      expect(SaveFile).toHaveBeenCalledWith('/test/file.md', 'Hello changed')
+    })
+
+    it('Ctrl+S 无修改时不触发保存', async () => {
+      const { SaveFile } = await import('../../../wailsjs/go/main/App')
+      wrapper = mountPanel()
+      const textarea = await enterEditMode(wrapper, 'Hello')
+
+      // 未修改，直接 Ctrl+S
+      await textarea.trigger('keydown', { key: 's', ctrlKey: true })
+      await flushPromises()
+
+      expect(SaveFile).not.toHaveBeenCalled()
+    })
+
+    it('Esc 无修改时直接退出编辑态', async () => {
+      wrapper = mountPanel()
+      const textarea = await enterEditMode(wrapper, 'Hello')
+
+      await textarea.trigger('keydown', { key: 'Escape' })
+      await flushPromises()
+
+      // 退出编辑态 → textarea 消失
+      expect(wrapper.find('textarea').exists()).toBe(false)
+    })
+
+    it('Esc 有修改时二次确认（确认后退出）', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      wrapper = mountPanel()
+      const textarea = await enterEditMode(wrapper, 'Hello')
+
+      await textarea.setValue('Hello changed')
+      await textarea.trigger('keydown', { key: 'Escape' })
+      await flushPromises()
+
+      expect(ElMessageBox.confirm).toHaveBeenCalled()
+      // mock 默认 resolve（放弃修改）→ 退出编辑态
+      expect(wrapper.find('textarea').exists()).toBe(false)
+    })
+  })
+
+  describe('markdown 目录按钮', () => {
+    // 预览一个 markdown 文件并返回 wrapper
+    const previewMarkdown = async (wrapper) => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/doc.md', name: 'doc.md', size: 20,
+        content: '# 标题A\n## 标题B', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+      const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+    }
+
+    const mountPanel = (type = 'file', name = 'doc.md', path = '/test/doc.md') => mount(ContentPanel, {
+      props: { selectedNode: { name, path, type }, clipboard: { mode: null } },
+      global: { stubs: contentPanelStubs }
+    })
+
+    it('markdown 预览显示「目录」按钮，非 markdown 不显示', async () => {
+      // markdown 文件
+      wrapper = mountPanel()
+      await previewMarkdown(wrapper)
+      expect(wrapper.findAll('button').find(b => b.text() === '目录')).toBeTruthy()
+      wrapper.unmount()
+
+      // 非 markdown 文本文件
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/a.txt', name: 'a.txt', size: 5,
+        content: 'hello', isBinary: false, tooLarge: false, error: '', kind: 'text'
+      })
+      wrapper = mountPanel('file', 'a.txt', '/test/a.txt')
+      const previewBtn = wrapper.findAll('button').find(b => b.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('button').find(b => b.text() === '目录')).toBeFalsy()
+    })
+
+    it('默认不显示 TOC，点击「目录」按钮后显示，X 关闭后隐藏', async () => {
+      wrapper = mountPanel()
+      await previewMarkdown(wrapper)
+
+      // 默认隐藏
+      expect(wrapper.find('.preview-toc').exists()).toBe(false)
+
+      // 点击目录按钮 → 显示
+      const tocBtn = wrapper.findAll('button').find(b => b.text() === '目录')
+      await tocBtn.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.preview-toc').exists()).toBe(true)
+
+      // 点击 X → 隐藏
+      await wrapper.find('.toc-close-icon').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.preview-toc').exists()).toBe(false)
     })
   })
 })
