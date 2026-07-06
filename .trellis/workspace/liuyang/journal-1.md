@@ -713,3 +713,36 @@ FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: 修复 md 预览相对链接点击崩溃与应用内导航
+
+**Date**: 2026-07-06
+**Task**: 修复 md 预览相对链接点击崩溃与应用内导航
+**Branch**: `master`
+
+### Summary
+
+修复 markdown 预览中点击相对链接触发顶层导航导致 SPA 崩溃的严重 bug（AssetServer fallback 返回错误 JSON 整体替换页面）。FilePreviewRenderer 拦截 <a> 点击，相对引用（含 ./ ../ 中文文件名 percent-encoding）解析为绝对路径在预览面板内切换，外部 http 链接走系统浏览器，同文档锚点滚动定位。后退按钮采用单步语义（预览脱离文件树选中节点时可返回，按需显隐）。Home.onNodeSelect 显式传 path 驱动预览，根治同节点再点空白与切换预览上一文件（props 异步更新时序）两个回归。新增前端单测 176 用例覆盖链接分发、路径解析、后退语义、props 时序。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b724d1e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
-- **Last Active**: 2026-07-05
+- **Total Sessions**: 22
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~715 | Active |
+| `journal-1.md` | ~748 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-07-06 | 修复 md 预览相对链接点击崩溃与应用内导航 | `b724d1e` | `master` |
 | 21 | 2026-07-05 | 工作目录复制路径 + F2/Del 重命名删除快捷键 | `5aa49d9`, `484a03d`, `17211a3` | `master` |
 | 20 | 2026-07-05 | 修复 FileTreePanel.spec.js 缺失 favorites mock 致全量测试 exit 1 | `6265f5b` | `master` |
 | 19 | 2026-07-05 | 修复 Git 仓库信息面板两个体验问题（偶发 N/A + 工作目录切换双刷新） | `ed19192`, `74df079` | `master` |
