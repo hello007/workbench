@@ -746,3 +746,36 @@ FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: markdown frontmatter 预览优化
+
+**Date**: 2026-07-07
+**Task**: markdown frontmatter 预览优化
+**Branch**: `master`
+
+### Summary
+
+优化文件预览 markdown 的 YAML frontmatter 展示：正则剥离 frontmatter + js-yaml 解析为结构化属性面板（数组 el-tag、标量原值、嵌套对象 JSON.stringify、多行字符串原样），解析失败降级为复用 hljs yaml 的代码块。新增 js-yaml 依赖，属性面板置于 markdownBodyRef 容器内复用既有右键复制/全选逻辑。补充 11 个 frontmatter 测试用例，201 测试全通过，vite build 成功。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e25e51a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

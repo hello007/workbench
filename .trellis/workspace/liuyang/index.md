@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-07-06
+- **Total Sessions**: 23
+- **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~748 | Active |
+| `journal-1.md` | ~781 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-07-07 | markdown frontmatter 预览优化 | `e25e51a` | `master` |
 | 22 | 2026-07-06 | 修复 md 预览相对链接点击崩溃与应用内导航 | `b724d1e` | `master` |
 | 21 | 2026-07-05 | 工作目录复制路径 + F2/Del 重命名删除快捷键 | `5aa49d9`, `484a03d`, `17211a3` | `master` |
 | 20 | 2026-07-05 | 修复 FileTreePanel.spec.js 缺失 favorites mock 致全量测试 exit 1 | `6265f5b` | `master` |
