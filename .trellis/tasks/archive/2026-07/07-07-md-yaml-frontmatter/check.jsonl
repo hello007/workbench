@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "审查是否复用既有 hljs/markdown-it/TOC，无重复逻辑"}
+{"file": ".trellis/tasks/07-07-md-yaml-frontmatter/research/frontmatter-display.md", "reason": "对照实现是否符合方案 B：解析失败降级、边界（BOM/空frontmatter/嵌套对象/多行字符串）"}
