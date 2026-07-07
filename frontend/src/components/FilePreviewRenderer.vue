@@ -23,7 +23,38 @@
 
     <!-- Markdown 渲染：markdown-it（html:false 防 XSS） + highlight.js 代码块 + mermaid 图形 -->
     <div v-else-if="isMarkdown" class="preview-markdown-wrap">
-      <div class="markdown-body" ref="markdownBodyRef" v-html="renderedMarkdown" @click="onMarkdownClick"></div>
+      <!-- markdownBodyRef 同时容纳 frontmatter 属性面板与正文，使右键复制选区
+           判断（readSelectionInPreview）与全选（selectAllChildren）无需改动即可覆盖面板 -->
+      <div class="markdown-body" ref="markdownBodyRef">
+        <!-- YAML frontmatter 属性面板（默认展开，置于正文上方；无 frontmatter 不渲染） -->
+        <div v-if="frontmatterRaw" class="frontmatter-panel">
+          <!-- 解析失败降级：复用已注册 hljs yaml 高亮 + 轻量提示，不影响正文 -->
+          <div v-if="frontmatterParseFailed" class="fm-fallback">
+            <p class="fm-fallback-tip">frontmatter 解析失败，以下为原文</p>
+            <pre class="hljs"><code v-html="highlightedFrontmatterRaw"></code></pre>
+          </div>
+          <!-- 解析成功：key-value 属性表格；数组值 → el-tag 徽章，标量/对象 → 文本 -->
+          <table v-else class="fm-table">
+            <tbody>
+              <tr v-for="entry in frontmatterEntries" :key="entry.key">
+                <td class="fm-key">{{ entry.key }}</td>
+                <td class="fm-value">
+                  <template v-if="entry.isArray">
+                    <el-tag
+                      v-for="(t, i) in entry.value"
+                      :key="i"
+                      size="small"
+                      class="fm-tag"
+                    >{{ formatFmValue(t) }}</el-tag>
+                  </template>
+                  <span v-else class="fm-scalar">{{ formatFmValue(entry.value) }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="markdown-content" v-html="renderedMarkdown" @click="onMarkdownClick"></div>
+      </div>
 
       <!-- 标题目录 TOC：默认隐藏，由父组件「目录」按钮控制显隐；右上角 X 关闭 -->
       <div v-if="showToc" class="preview-toc">
@@ -185,6 +216,8 @@ import { renderAsync } from 'docx-preview'
 import * as XLSX from 'xlsx'
 import MarkdownIt from 'markdown-it'
 import mermaid from 'mermaid'
+// YAML frontmatter 解析（v4+ 默认 safe schema），用于 markdown 预览属性面板
+import jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
@@ -316,10 +349,84 @@ const md = new MarkdownIt({
   }
 })
 
+// ---------- YAML frontmatter 提取与解析 ----------
+// markdown-it 默认不识别 frontmatter，文档开头的 ---\n...\n--- 块会被当作
+// 普通正文（--- 变 <hr>，key: value 变段落文本）。这里用正则剥离 frontmatter
+// 原文，正文再交 md.render / md.parse，frontmatter 则解析为结构化属性面板。
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/
+
+// strip 前导 BOM：仅用于 frontmatter 检测与正文剥离，避免 BOM 导致正则不匹配
+const stripBom = (s) => (s && s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s)
+
+// frontmatter 原文（捕获组 1，去除外层 --- 分隔符）；无则空串
+const frontmatterRaw = computed(() => {
+  if (!isMarkdown.value) return ''
+  const content = stripBom(props.content || '')
+  const m = content.match(FRONTMATTER_RE)
+  return m ? m[1] : ''
+})
+
+// 剥离 frontmatter 后的正文（供 md.render 与 md.parse 使用，保持 TOC 一致）
+const markdownBody = computed(() => {
+  if (!isMarkdown.value) return ''
+  const content = stripBom(props.content || '')
+  return content.replace(FRONTMATTER_RE, '')
+})
+
+// frontmatter 解析为对象（失败或非普通对象结构时返回 null）
+const frontmatterData = computed(() => {
+  const raw = frontmatterRaw.value
+  if (!raw) return null
+  try {
+    const data = jsyaml.load(raw)
+    // 仅认可普通对象；数组/标量等非对象结构降级为原文展示
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return null
+    return data
+  } catch {
+    return null
+  }
+})
+
+// 是否解析失败（有 frontmatter 原文但未解析为普通对象 → 降级为 YAML 代码块）
+const frontmatterParseFailed = computed(() => !!frontmatterRaw.value && frontmatterData.value === null)
+
+// 属性面板表格行：预计算 key / value / 是否数组，供模板遍历
+const frontmatterEntries = computed(() => {
+  const data = frontmatterData.value
+  if (!data) return []
+  return Object.keys(data).map((key) => {
+    const value = data[key]
+    return { key, value, isArray: Array.isArray(value) }
+  })
+})
+
+// 标量 / 嵌套对象 / 多行字符串的展示文本（数组元素也复用）
+// - null/undefined → 空串
+// - Date（js-yaml 把 YYYY-MM-DD 解析为 Date）→ 还原为 YYYY-MM-DD 原样
+// - 嵌套对象 → JSON.stringify
+// - 其余 → String(value)，不做类型转换
+const formatFmValue = (v) => {
+  if (v === null || v === undefined) return ''
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  if (typeof v === 'object' && !Array.isArray(v)) return JSON.stringify(v)
+  return String(v)
+}
+
+// 降级时复用已注册的 hljs yaml 高亮渲染 frontmatter 原文
+const highlightedFrontmatterRaw = computed(() => {
+  const raw = frontmatterRaw.value
+  if (!raw) return ''
+  try {
+    return hljs.highlight(raw, { language: 'yaml', ignoreIllegals: true }).value
+  } catch {
+    return md.utils.escapeHtml(raw)
+  }
+})
+
 const renderedMarkdown = computed(() => {
   if (!isMarkdown.value) return ''
   try {
-    return md.render(props.content || '')
+    return md.render(markdownBody.value)
   } catch (e) {
     return `<p>Markdown 渲染失败：${String(e)}</p>`
   }
@@ -358,7 +465,7 @@ const toc = computed(() => {
   if (!isMarkdown.value) return []
   let tokens
   try {
-    tokens = md.parse(props.content || '', {})
+    tokens = md.parse(markdownBody.value, {})
   } catch {
     return []
   }
@@ -1007,6 +1114,83 @@ onBeforeUnmount(() => {
   font-size: 14px;
   line-height: 1.7;
   min-height: 0;
+}
+
+/* YAML frontmatter 属性面板：置于正文上方，复用 .markdown-body 容器与 CSS 变量 */
+.frontmatter-panel {
+  margin-bottom: var(--spacing-md, 16px);
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.fm-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+
+.fm-table tr {
+  border-bottom: 1px solid var(--border-color);
+}
+.fm-table tr:last-child {
+  border-bottom: none;
+}
+
+.fm-key,
+.fm-value {
+  padding: 6px 8px;
+  vertical-align: top;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fm-key {
+  width: 120px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.fm-value {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* 数组值 el-tag 徽章间距 */
+.fm-tag {
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
+
+/* 标量值文本：保留换行（多行字符串原样展示） */
+.fm-scalar {
+  white-space: pre-wrap;
+}
+
+/* 解析失败降级：YAML 高亮代码块 + 轻量提示 */
+.fm-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs, 4px);
+}
+
+.fm-fallback-tip {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fm-fallback .hljs {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
 }
 
 .markdown-body :deep(h1),

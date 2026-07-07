@@ -44,7 +44,9 @@ const mountRenderer = (props) => mount(FilePreviewRenderer, {
   global: {
     stubs: {
       'el-icon': { template: '<i><slot /></i>' },
-      'el-button': { template: '<button v-bind="$attrs"><slot /></button>' }
+      'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+      // el-tag 真实渲染根元素为 span，stub 保留 class 以便断言数组值徽章
+      'el-tag': { template: '<span class="el-tag"><slot /></span>' }
     }
   }
 })
@@ -390,5 +392,164 @@ describe('FilePreviewRenderer.vue - 标题目录 TOC', () => {
     await flushPromises()
     await wrapper.find('.toc-close-icon').trigger('click')
     expect(wrapper.emitted('closeToc')).toBeTruthy()
+  })
+})
+
+describe('FilePreviewRenderer.vue - YAML frontmatter 属性面板', () => {
+  let wrapper
+
+  beforeEach(() => { vi.clearAllMocks() })
+  afterEach(() => { if (wrapper) { wrapper.unmount(); wrapper = null } })
+
+  it('含 frontmatter 的 md 显示属性面板，数组值显示为 el-tag', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\ntitle: 测试文档\ntags:\n  - vue\n  - wails\n---\n\n# 正文标题\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.frontmatter-panel').exists()).toBe(true)
+    expect(wrapper.find('.fm-table').exists()).toBe(true)
+    // key-value 表格行
+    const keys = wrapper.findAll('.fm-key')
+    expect(keys.length).toBe(2)
+    expect(keys[0].text()).toBe('title')
+    expect(keys[1].text()).toBe('tags')
+    // 标量值原样展示
+    expect(wrapper.find('.fm-scalar').text()).toBe('测试文档')
+    // 数组值渲染为 el-tag 徽章
+    const tags = wrapper.findAll('.fm-value .el-tag')
+    expect(tags.length).toBe(2)
+    expect(tags[0].text()).toBe('vue')
+    expect(tags[1].text()).toBe('wails')
+  })
+
+  it('frontmatter 中的 --- 不再被渲染为 <hr>，key: value 不再显示为段落文本', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\ntitle: 测试\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    const content = wrapper.find('.markdown-content')
+    // 正文区无 hr（frontmatter 的 --- 不再变 <hr>）
+    expect(content.find('hr').exists()).toBe(false)
+    // 正文区不含 frontmatter 的 key: value 文本（不再作为段落渲染）
+    expect(content.text()).not.toContain('title: 测试')
+    // 属性面板展示 key/value
+    expect(wrapper.find('.fm-key').text()).toBe('title')
+    expect(wrapper.find('.fm-scalar').text()).toBe('测试')
+  })
+
+  it('frontmatter 解析失败时降级为 YAML 高亮代码块，不影响正文', async () => {
+    // 未闭合引号 → js-yaml 抛异常 → 降级为原文高亮
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\ntitle: "unclosed quote\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.fm-fallback').exists()).toBe(true)
+    expect(wrapper.find('.fm-fallback-tip').text()).toContain('解析失败')
+    // 复用已注册 hljs yaml 高亮代码块
+    expect(wrapper.find('.fm-fallback pre.hljs').exists()).toBe(true)
+    expect(wrapper.find('.fm-fallback pre.hljs code').exists()).toBe(true)
+    // 正文仍正常渲染
+    expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
+  })
+
+  it('无 frontmatter 的 md 不显示属性面板（无回归）', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '# 标题\n\n正文段落\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.frontmatter-panel').exists()).toBe(false)
+    expect(wrapper.find('.markdown-content h1').text()).toBe('标题')
+    expect(wrapper.find('.markdown-content p').text()).toBe('正文段落')
+  })
+
+  it('TOC 标题提取不受 frontmatter 影响', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md', showToc: true,
+      content: '---\ntitle: 测试\n---\n\n# 一级\n## 二级\n'
+    })
+    await flushPromises()
+    const items = wrapper.findAll('.toc-item')
+    expect(items.length).toBe(2)
+    expect(items[0].text()).toBe('一级')
+    expect(items[1].text()).toBe('二级')
+  })
+
+  // ---------- 边界情况 ----------
+  it('BOM 开头的 md 仍能识别 frontmatter（strip BOM 后匹配正则）', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '﻿---\ntitle: BOM 文档\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.frontmatter-panel').exists()).toBe(true)
+    expect(wrapper.find('.fm-key').text()).toBe('title')
+    expect(wrapper.find('.fm-scalar').text()).toBe('BOM 文档')
+    // 正文不被 BOM 干扰
+    expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
+  })
+
+  it('空 frontmatter（---\\n---）不显示属性面板', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    // 空 frontmatter 不识别为属性面板
+    expect(wrapper.find('.frontmatter-panel').exists()).toBe(false)
+    // 正文标题仍正常渲染
+    expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
+  })
+
+  it('--- 无匹配结束符时不视为 frontmatter，正文不被误吞', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\nkey: value\n\n# 正文\n'
+    })
+    await flushPromises()
+    // 无结束 --- 不识别为 frontmatter
+    expect(wrapper.find('.frontmatter-panel').exists()).toBe(false)
+    // 正文标题仍渲染（不被误吞）
+    expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
+  })
+
+  it('嵌套对象值降级为 JSON 文本展示', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\nauthor:\n  name: liu\n  email: x@x\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.fm-key').text()).toBe('author')
+    // 嵌套对象 → JSON.stringify（MVP 不递归子表格）
+    expect(wrapper.find('.fm-scalar').text()).toBe(JSON.stringify({ name: 'liu', email: 'x@x' }))
+  })
+
+  it('多行字符串值原样展示（保留换行）', async () => {
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\ndescription: |\n  第一行\n  第二行\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    const scalar = wrapper.find('.fm-scalar')
+    expect(scalar.exists()).toBe(true)
+    // 多行字符串原样展示，换行由 .fm-scalar { white-space: pre-wrap } 保留
+    expect(scalar.text()).toContain('第一行')
+    expect(scalar.text()).toContain('第二行')
+  })
+
+  it('frontmatter 顶层为非对象结构（数组/标量/null）时降级为代码块', async () => {
+    // 顶层是数组 → js-yaml 返回数组 → 非普通对象 → 降级为原文高亮
+    wrapper = mountRenderer({
+      kind: 'text', fileName: 'doc.md',
+      content: '---\n[1,2,3]\n---\n\n# 正文\n'
+    })
+    await flushPromises()
+    expect(wrapper.find('.fm-fallback').exists()).toBe(true)
+    expect(wrapper.find('.fm-fallback pre.hljs').exists()).toBe(true)
+    // 正文仍正常渲染
+    expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
   })
 })

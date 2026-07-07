@@ -36,6 +36,7 @@
     "docx-preview": "^0.3.7",
     "element-plus": "^2.13.7",
     "highlight.js": "^11.11.1",
+    "js-yaml": "^4.3.0",
     "markdown-it": "^14.2.0",
     "mermaid": "^11.16.0",
     "splitpanes": "^4.0.4",
