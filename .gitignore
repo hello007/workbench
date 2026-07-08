@@ -18,6 +18,7 @@
 *.test
 .DS_Store
 .idea/
+.obsidian/
 .superpowers/
 .vscode/
 .worktrees/
