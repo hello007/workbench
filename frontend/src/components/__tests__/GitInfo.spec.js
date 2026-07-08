@@ -16,6 +16,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetCommitHistory: vi.fn()
 }))
 
+// GitInfo http(s) 仓库地址点击走 runtime.BrowserOpenURL，stub 掉避免 jsdom 无 window.runtime
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  BrowserOpenURL: vi.fn()
+}))
+
 vi.mock('@element-plus/icons-vue', () => ({
   Refresh: { template: '<i class="i-refresh" />' },
   DocumentCopy: { template: '<i class="i-copy" />' }
@@ -148,5 +153,36 @@ describe('GitInfo.vue', () => {
 
     expect(GetCommitHistory).toHaveBeenCalledWith(repoPath, 1, 0)
     expect(wrapper.find('.sha-text').text()).toBe('ccc33333')
+  })
+
+  it('点击 http(s) 仓库地址 -> 调用 BrowserOpenURL 由系统默认浏览器打开', async () => {
+    const { GetGitRemoteURL } = await import('../../../wailsjs/go/main/App')
+    const { BrowserOpenURL } = await import('../../../wailsjs/runtime/runtime')
+    const repoPath = '/repo/A'
+    const url = 'https://github.com/user/repo.git'
+
+    GetGitRemoteURL.mockResolvedValueOnce(remoteInfo({ remoteUrl: url }))
+
+    wrapper = mount(GitInfo, { props: { repoPath }, global: { stubs } })
+    await flushPromises()
+
+    await wrapper.find('.url-text').trigger('click')
+    expect(BrowserOpenURL).toHaveBeenCalledWith(url)
+  })
+
+  it('非 http 远程地址渲染为纯文本，点击不触发 BrowserOpenURL', async () => {
+    const { GetGitRemoteURL } = await import('../../../wailsjs/go/main/App')
+    const { BrowserOpenURL } = await import('../../../wailsjs/runtime/runtime')
+    const repoPath = '/repo/A'
+
+    GetGitRemoteURL.mockResolvedValueOnce(remoteInfo({ remoteUrl: 'git@github.com:user/repo.git' }))
+
+    wrapper = mount(GitInfo, { props: { repoPath }, global: { stubs } })
+    await flushPromises()
+
+    // ssh/git 协议渲染为 <span class="url-text">（非 el-link），无点击导航
+    expect(wrapper.find('.url-text').element.tagName).toBe('SPAN')
+    await wrapper.find('.url-text').trigger('click')
+    expect(BrowserOpenURL).not.toHaveBeenCalled()
   })
 })

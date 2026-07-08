@@ -27,11 +27,10 @@
         <div v-if="gitInfo.remoteUrl" class="url-with-copy">
           <el-link
             v-if="isHttpUrl(gitInfo.remoteUrl)"
-            :href="gitInfo.remoteUrl"
-            target="_blank"
             type="primary"
             class="url-text"
             :underline="false"
+            @click="openRemoteUrl(gitInfo.remoteUrl)"
           >
             {{ gitInfo.remoteUrl }}
           </el-link>
@@ -86,6 +85,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
 import { GetGitRemoteURL, GetCommitHistory } from '../../wailsjs/go/main/App'
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { gitCache, getCacheKey } from '../utils/gitCache'
 
 const props = defineProps({
@@ -154,6 +154,13 @@ const handleRefresh = () => {
 
 const isHttpUrl = (url) => {
   return url && (url.startsWith('http://') || url.startsWith('https://'))
+}
+
+// http(s) 远程地址点击交由系统默认浏览器打开（BrowserOpenURL），
+// 避免在 Wails 内置 webview 内导航/新开窗口（无法复用用户浏览器会话）。
+const openRemoteUrl = (url) => {
+  if (!url || !isHttpUrl(url)) return
+  BrowserOpenURL(url)
 }
 
 const getBranchTagType = (branch) => {
