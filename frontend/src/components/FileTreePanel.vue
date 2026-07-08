@@ -1024,9 +1024,9 @@ const handleOpenObsidian = async (path) => {
         // 用户点「自动注册并打开」-> 二次确认（预告信任提示 + 备份 + 运行中需关闭）
         try {
           await ElMessageBox.confirm(
-            '即将把该目录注册为 Obsidian vault 并打开。\n• 首次打开会弹出信任提示，请选择「Trust author and enable plugins」\n• Obsidian 配置已自动备份\n• 若 Obsidian 正在运行，需先关闭后重试',
+            '即将把该目录注册为 Obsidian vault 并打开。<br>• 首次打开会弹出信任提示，请选择「Trust author and enable plugins」<br>• Obsidian 配置已自动备份<br>• 若 Obsidian 正在运行，需先关闭后重试',
             '确认自动注册',
-            { confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' }
+            { confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: true }
           )
           const regStatus = await AutoRegisterAndOpen(path)
           if (regStatus === '') {
