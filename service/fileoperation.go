@@ -2,15 +2,27 @@ package service
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"workbench/model"
 	"workbench/util"
+)
+
+// 哨兵错误：供 app 层翻译为状态码字符串供前端分流。
+var (
+	// ErrObsidianNotInstalled 未检测到 Obsidian（未配置 exe 且 obsidian:// 协议未注册）。
+	ErrObsidianNotInstalled = errors.New("未检测到 Obsidian")
+	// ErrVaultNotRegistered 目标路径不属于任何已注册 Obsidian vault（将触发 Vault not found）。
+	ErrVaultNotRegistered = errors.New("目标路径未注册为 Obsidian vault")
+	// ErrObsidianRunning Obsidian 正在运行，自动注册需先关闭后重试（规避运行时回写覆盖）。
+	ErrObsidianRunning = errors.New("Obsidian 正在运行")
 )
 
 // FileOperationService 文件操作服务
@@ -255,11 +267,29 @@ func encodeObsidianPath(p string) string {
 	return strings.ReplaceAll(escaped, "+", "%20")
 }
 
+// launchObsidianURI 用指定 obsidian:// URI 启动 Obsidian。
+// useExe=true 用配置的 exe 启动（优先）；否则走 cmd /c start "" uri 协议方案（尊重默认协议处理器）。
+// 复用 HideCommandWindow 隐藏子控制台窗口，与 OpenIn* 系列同构。
+func launchObsidianURI(uri, obsidianPath string, useExe bool) error {
+	if useExe {
+		cmd := exec.Command(obsidianPath, uri)
+		util.HideCommandWindow(cmd)
+		return cmd.Start()
+	}
+	cmd := exec.Command("cmd", "/c", "start", "", uri)
+	util.HideCommandWindow(cmd)
+	return cmd.Start()
+}
+
 // OpenInObsidian 用 Obsidian 打开指定路径对应的 vault。
-// vault 解析：文件夹→自身，文件→父目录。
-// 调用策略：obsidianPath 非空且文件存在 → 直接用该 exe 启动（优先）；
-// 否则走系统协议方案（注册表预检 + cmd /c start "" obsidian://open?path=...）。
-// 未检测到 Obsidian 时返回友好错误，由前端引导用户配置。
+// vault 解析：文件夹->自身，文件->父目录。
+// 预检流程：resolveObsidianVault -> 协议/exe 检测 -> 归属判断 -> 发 URI。
+//   - 未检测到 Obsidian（未配置 exe 且协议未注册）-> ErrObsidianNotInstalled
+//   - obsidian.json 读取失败 -> 降级（直接发 URI，记日志，不阻塞，不比现状更差）
+//   - 路径不属于任何已注册 vault -> ErrVaultNotRegistered
+//   - 命中某 vault -> 正常发 URI
+//
+// 注意：用户配置了 exe 且存在时跳过协议预检，但归属判断仍要做（exe 启动同样会 Vault not found）。
 func (s *FileOperationService) OpenInObsidian(path, obsidianPath string) error {
 	vaultPath, err := resolveObsidianVault(path)
 	if err != nil {
@@ -267,22 +297,124 @@ func (s *FileOperationService) OpenInObsidian(path, obsidianPath string) error {
 	}
 	uri := "obsidian://open?path=" + encodeObsidianPath(vaultPath)
 
-	// 策略一：用户配置了 Obsidian 可执行文件路径且存在，直接用该 exe 启动
+	// 判断 Obsidian 是否可用 + 决定启动方式
+	useExe := false
 	if strings.TrimSpace(obsidianPath) != "" {
 		if _, statErr := os.Stat(obsidianPath); statErr == nil {
-			cmd := exec.Command(obsidianPath, uri)
-			util.HideCommandWindow(cmd)
-			return cmd.Start()
+			useExe = true
+		}
+	}
+	if !useExe && !isObsidianProtocolRegistered() {
+		return ErrObsidianNotInstalled
+	}
+
+	// 归属判断（无论 exe 还是协议，目标未注册 vault 都会触发 Vault not found，故统一做）
+	vaults, loadErr := loadObsidianVaults()
+	if loadErr != nil {
+		// 降级：读不到 obsidian.json，直接尽力打开，记日志不阻塞
+		println("警告: 读取 Obsidian vault 注册表失败，降级为直接打开:", loadErr.Error())
+		return launchObsidianURI(uri, obsidianPath, useExe)
+	}
+	if _, ok := findVaultForPath(vaults, vaultPath); !ok {
+		return ErrVaultNotRegistered
+	}
+	return launchObsidianURI(uri, obsidianPath, useExe)
+}
+
+// OpenObsidianVaultManager 打开 Obsidian 仓库管理器（obsidian://choose-vault），
+// 供用户手动将目录「打开文件夹作为仓库」添加为 vault。
+// 复用 exe 优先 / cmd /c start "" uri 模式；未检测到 Obsidian 时返回 ErrObsidianNotInstalled。
+func (s *FileOperationService) OpenObsidianVaultManager(obsidianPath string) error {
+	const uri = "obsidian://choose-vault"
+	useExe := false
+	if strings.TrimSpace(obsidianPath) != "" {
+		if _, statErr := os.Stat(obsidianPath); statErr == nil {
+			useExe = true
+		}
+	}
+	if !useExe && !isObsidianProtocolRegistered() {
+		return ErrObsidianNotInstalled
+	}
+	return launchObsidianURI(uri, obsidianPath, useExe)
+}
+
+// CopyObsidianVaultPath 将路径对应的 vault 路径文本复制到系统剪贴板（CF_UNICODETEXT）。
+// vault 解析：文件夹->自身，文件->父目录。供「打开仓库管理器」前复制路径，便于用户在 Obsidian 路径栏粘贴。
+func (s *FileOperationService) CopyObsidianVaultPath(path string) error {
+	vaultPath, err := resolveObsidianVault(path)
+	if err != nil {
+		return fmt.Errorf("路径不存在或无法访问: %w", err)
+	}
+	return util.WriteClipboardText(vaultPath)
+}
+
+// AutoRegisterAndOpen 自动将路径对应目录注册为 Obsidian vault 并打开。
+// 流程：resolveObsidianVault -> Obsidian 可用性检测 -> 进程检测 -> 读配置去重 -> 备份 -> 追加条目 -> 原子写 -> 发 URI。
+// 返回哨兵错误：
+//   - ErrObsidianNotInstalled: 未检测到 Obsidian（未配置 exe 且协议未注册）
+//   - ErrObsidianRunning: Obsidian 正在运行（需用户关闭后重试，规避运行时回写覆盖）
+//   - 其他: 读取/写入/打开失败
+//
+// 约束：不创建 .obsidian、不建 <vaultID>.json 窗口缓存、不改 open 字段、不 taskkill。
+// 复用现有 resolveObsidianVault/resolvePath/encodeObsidianPath/launchObsidianURI。
+func (s *FileOperationService) AutoRegisterAndOpen(path, obsidianPath string) error {
+	vaultPath, err := resolveObsidianVault(path)
+	if err != nil {
+		return fmt.Errorf("路径不存在或无法访问: %w", err)
+	}
+
+	// Obsidian 可用性 + 启动方式（与 OpenInObsidian 同构）
+	useExe := false
+	if strings.TrimSpace(obsidianPath) != "" {
+		if _, statErr := os.Stat(obsidianPath); statErr == nil {
+			useExe = true
+		}
+	}
+	if !useExe && !isObsidianProtocolRegistered() {
+		return ErrObsidianNotInstalled
+	}
+
+	// 进程检测：运行中不写入（Obsidian 运行时持有内存缓存，回写会覆盖手动修改）
+	if isObsidianRunning() {
+		return ErrObsidianRunning
+	}
+
+	// 读完整配置（保留未知顶层字段，回写不丢失 updateDisabled 等）
+	cfgPath := obsidianConfigPath()
+	cfg, err := loadFullConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("读取 Obsidian 配置失败: %w", err)
+	}
+
+	// 去重：按 resolvePath 已注册则直接发 URI 打开（幂等，不重复写入）
+	resolvedTarget := resolvePath(vaultPath)
+	for _, v := range cfg.Vaults {
+		if resolvePath(v.Path) == resolvedTarget {
+			uri := "obsidian://open?path=" + encodeObsidianPath(vaultPath)
+			return launchObsidianURI(uri, obsidianPath, useExe)
 		}
 	}
 
-	// 策略二：系统协议方案——预检 obsidian:// 是否注册，未注册则提示
-	if !isObsidianProtocolRegistered() {
-		return fmt.Errorf("未检测到 Obsidian，请在【设置 → 通用 → 外部应用】中配置 Obsidian 程序路径，或安装 Obsidian 并至少运行一次")
+	// 备份原配置（异常时可手动恢复）
+	if _, err := backupConfig(cfgPath); err != nil {
+		return fmt.Errorf("备份配置失败: %w", err)
 	}
-	cmd := exec.Command("cmd", "/c", "start", "", uri)
-	util.HideCommandWindow(cmd)
-	return cmd.Start()
+
+	// 追加新 vault 条目（不设 Open，不创建窗口缓存）
+	id := newVaultID(cfg.Vaults)
+	cfg.Vaults[id] = VaultEntry{
+		Path: vaultPath,
+		Ts:   time.Now().UnixMilli(),
+	}
+
+	// 原子写（同分区临时文件 + Rename，避免半写损坏）
+	if err := atomicWriteConfig(cfgPath, cfg); err != nil {
+		return fmt.Errorf("写入配置失败: %w", err)
+	}
+
+	// 发 URI 打开（Obsidian 未运行，启动时读取新 vault 列表）
+	uri := "obsidian://open?path=" + encodeObsidianPath(vaultPath)
+	return launchObsidianURI(uri, obsidianPath, useExe)
 }
 
 // findAvailableName 查找可用路径，冲突时自动追加 (1), (2)...

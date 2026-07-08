@@ -14,6 +14,10 @@ export function ApplyUpdate() {
   return window['go']['main']['App']['ApplyUpdate']();
 }
 
+export function AutoRegisterAndOpen(arg1) {
+  return window['go']['main']['App']['AutoRegisterAndOpen'](arg1);
+}
+
 export function CancelDownload() {
   return window['go']['main']['App']['CancelDownload']();
 }
@@ -48,6 +52,10 @@ export function ContentSearch(arg1, arg2, arg3, arg4) {
 
 export function CopyItem(arg1, arg2) {
   return window['go']['main']['App']['CopyItem'](arg1, arg2);
+}
+
+export function CopyObsidianVaultPath(arg1) {
+  return window['go']['main']['App']['CopyObsidianVaultPath'](arg1);
 }
 
 export function CopyTo(arg1, arg2, arg3) {
@@ -176,6 +184,10 @@ export function OpenInVSCode(arg1) {
 
 export function OpenInWarp(arg1) {
   return window['go']['main']['App']['OpenInWarp'](arg1);
+}
+
+export function OpenObsidianVaultManager() {
+  return window['go']['main']['App']['OpenObsidianVaultManager']();
 }
 
 export function OpenWithDefaultApp(arg1) {

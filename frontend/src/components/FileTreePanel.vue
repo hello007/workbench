@@ -355,6 +355,9 @@ import {
   OpenInWarp,
   OpenWithDefaultApp,
   OpenInObsidian,
+  OpenObsidianVaultManager,
+  CopyObsidianVaultPath,
+  AutoRegisterAndOpen,
   ScanAndPullRepos
 } from '../../wailsjs/go/main/App'
 import obsidianIcon from '../assets/icons/obsidian.png'
@@ -1007,9 +1010,49 @@ const handleOpenInWarp = async (path) => {
 
 const handleOpenObsidian = async (path) => {
   try {
-    const result = await OpenInObsidian(path)
-    if (!result) {
+    const status = await OpenInObsidian(path)
+    if (status === 'not-installed') {
       ElMessage.error('未检测到 Obsidian，请在【设置 → 通用 → 外部应用】中配置 Obsidian 程序路径，或安装 Obsidian 并至少运行一次')
+    } else if (status === 'not-registered') {
+      try {
+        await ElMessageBox.confirm('该目录未注册为 Obsidian vault。', '提示', {
+          confirmButtonText: '自动注册并打开',
+          cancelButtonText: '打开仓库管理器',
+          distinguishCancelAndClose: true,
+          type: 'info'
+        })
+        // 用户点「自动注册并打开」-> 二次确认（预告信任提示 + 备份 + 运行中需关闭）
+        try {
+          await ElMessageBox.confirm(
+            '即将把该目录注册为 Obsidian vault 并打开。\n• 首次打开会弹出信任提示，请选择「Trust author and enable plugins」\n• Obsidian 配置已自动备份\n• 若 Obsidian 正在运行，需先关闭后重试',
+            '确认自动注册',
+            { confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' }
+          )
+          const regStatus = await AutoRegisterAndOpen(path)
+          if (regStatus === '') {
+            ElMessage.success('已注册为 Obsidian vault 并打开，首次会弹信任提示请确认')
+          } else if (regStatus === 'running') {
+            ElMessage.warning('Obsidian 正在运行，请关闭所有 Obsidian 窗口后重试')
+          } else if (regStatus === 'not-installed') {
+            ElMessage.error('未检测到 Obsidian，请在【设置 -> 通用 -> 外部应用】中配置')
+          } else {
+            ElMessage.error('自动注册失败，请重试或手动添加')
+          }
+        } catch {
+          // 二次确认取消，不处理
+        }
+      } catch (action) {
+        if (action === 'cancel') {
+          // 「打开仓库管理器」：复制路径 + 提示 + 跳转 choose-vault
+          const copied = await CopyObsidianVaultPath(path)
+          if (copied) ElMessage.success('已复制目录路径到剪贴板')
+          else ElMessage.warning('复制路径失败')
+          const opened = await OpenObsidianVaultManager()
+          if (opened) ElMessage.info('已打开 Obsidian 仓库管理器，请将该目录添加为 vault')
+          else ElMessage.error('打开 Obsidian 仓库管理器失败')
+        }
+        // action === 'close' -> 关闭（X），不处理
+      }
     }
   } catch (error) {
     ElMessage.error('打开 Obsidian 失败: ' + (error.message || String(error)))

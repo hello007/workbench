@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-08-obsidian-vault-not-found/research/obsidian-vault-registry.md", "reason": "核对归属判断实现是否符合研究结论：完整路径段匹配、大小写不敏感、EvalSymlinks+Clean、最具体匹配；obsidian.json 防御性解析；choose-vault 跳转"}
+{"file": ".trellis/tasks/archive/2026-06/06-23-obsidian-open/research/obsidian-launch.md", "reason": "核对 URI 参数名 path、cmd /c start \"\" 标题位、注册表预检、路径编码、未安装提示未回归"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核对是否真正复用现有模式（OpenIn* 同构、HideCommandWindow、哨兵错误、App 状态码桥接），有无重复代码或遗漏同步点"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对状态码(not-installed/not-registered)在 service->app->前端各层一致贯通，前端三处 handler 引导流程一致"}
+{"file": ".trellis/tasks/07-08-obsidian-vault-not-found/research/obsidian-auto-register.md", "reason": "核对自动注册实现：进程检测、原子写、备份、去重、不建窗口缓存/不改open/不创建.obsidian、保留未知顶层字段"}

@@ -8,6 +8,8 @@ export function AddFavorite(arg1:string,arg2:string,arg3:string):Promise<string>
 
 export function ApplyUpdate():Promise<void>;
 
+export function AutoRegisterAndOpen(arg1:string):Promise<string>;
+
 export function CancelDownload():Promise<void>;
 
 export function ChangeTerminalDir(arg1:string,arg2:string):Promise<void>;
@@ -25,6 +27,8 @@ export function CommitFiles(arg1:string,arg2:string,arg3:Array<string>):Promise<
 export function ContentSearch(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<Array<model.ContentSearchGroup>>;
 
 export function CopyItem(arg1:string,arg2:string):Promise<string>;
+
+export function CopyObsidianVaultPath(arg1:string):Promise<boolean>;
 
 export function CopyTo(arg1:string,arg2:string,arg3:boolean):Promise<string>;
 
@@ -84,11 +88,13 @@ export function MoveItem(arg1:string,arg2:string):Promise<string>;
 
 export function OpenInExplorer(arg1:string):Promise<boolean>;
 
-export function OpenInObsidian(arg1:string):Promise<boolean>;
+export function OpenInObsidian(arg1:string):Promise<string>;
 
 export function OpenInVSCode(arg1:string):Promise<boolean>;
 
 export function OpenInWarp(arg1:string):Promise<boolean>;
+
+export function OpenObsidianVaultManager():Promise<boolean>;
 
 export function OpenWithDefaultApp(arg1:string):Promise<boolean>;
 

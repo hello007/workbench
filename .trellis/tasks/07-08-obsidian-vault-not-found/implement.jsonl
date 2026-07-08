@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-08-obsidian-vault-not-found/research/obsidian-vault-registry.md", "reason": "本任务核心依据：obsidian.json 结构、归属判断 Go 伪代码（完整路径段/大小写不敏感/EvalSymlinks/最具体匹配）、自动注册风险、choose-vault 语义--后端预检与归属判断直接照此实现"}
+{"file": ".trellis/tasks/archive/2026-06/06-23-obsidian-open/research/obsidian-launch.md", "reason": "OpenInObsidian 现有实现基础：URI 协议格式(path 参数)、注册表预检、cmd /c start \"\" 用法、路径编码、exe 参数--本任务在其上接入预检，须保持一致不回归"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "任务复用现有 OpenIn* 模式、哨兵错误、App 桥接、前端 handler 三处入口模式，需遵循复用规范：先搜现有实现再写，避免重复造轮子"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "任务跨 model/service(fileoperation)/app(桥接)/前端三组件多层，状态码与引导流程需跨层一致贯通"}
+{"file": ".trellis/tasks/07-08-obsidian-vault-not-found/research/obsidian-auto-register.md", "reason": "自动注册并打开可行性依据：信任提示不可绕过、tasklist进程检测、原子写+备份流程、vault ID生成、Go伪代码--AutoRegisterAndOpen直接照此"}

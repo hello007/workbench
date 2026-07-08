@@ -13,6 +13,7 @@ import (
 
 const (
 	cfHDrop        = 15
+	cfUnicodeText  = 13
 	gmemMoveable   = 0x0002
 	dropEffectMove = 2
 	dropFilesSize  = 20
@@ -192,4 +193,44 @@ func ReadClipboardFiles() (paths []string, isCut bool, err error) {
 	}
 
 	return paths, isCut, nil
+}
+
+// WriteClipboardText 将文本写入系统剪贴板（CF_UNICODETEXT 格式）。
+// UTF-16 编码文本 + 末尾 0 终止符；复用 WriteClipboardFiles 的 GlobalAlloc/GlobalLock/OpenClipboard 模式。
+// 供「打开 Obsidian 仓库管理器」前复制 vault 路径，便于用户在 Obsidian 路径栏粘贴。
+func WriteClipboardText(text string) error {
+	// UTF-16 编码，末尾补 0 终止符（占 2 字节）
+	encoded := utf16.Encode([]rune(text))
+	totalSize := uintptr(len(encoded)+1) * 2
+
+	hMem, _, _ := procGlobalAlloc.Call(gmemMoveable, totalSize)
+	if hMem == 0 {
+		return errors.New("GlobalAlloc failed")
+	}
+
+	ptr, _, _ := procGlobalLock.Call(hMem)
+	if ptr == 0 {
+		return errors.New("GlobalLock failed")
+	}
+
+	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), totalSize)
+	for i, c := range encoded {
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(c))
+	}
+	binary.LittleEndian.PutUint16(buf[len(encoded)*2:], 0) // 末尾 0 终止符
+
+	procGlobalUnlock.Call(hMem)
+
+	if !openClipboardWithRetry() {
+		return errors.New("OpenClipboard failed after retries")
+	}
+	defer procCloseClipboard.Call()
+
+	procEmptyClipboard.Call()
+
+	r, _, _ := procSetClipboardData.Call(cfUnicodeText, hMem)
+	if r == 0 {
+		return errors.New("SetClipboardData failed")
+	}
+	return nil
 }
