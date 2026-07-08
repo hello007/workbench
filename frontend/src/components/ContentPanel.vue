@@ -336,14 +336,21 @@
           :status="pullCompleted ? (pullSummary.failed > 0 ? 'warning' : 'success') : undefined"
         />
         <div v-if="pullCompleted" class="pull-summary">
-          成功: {{ pullSummary.success }}，失败: {{ pullSummary.failed }}
+          成功: {{ pullSummary.success }}，跳过: {{ pullSummary.skipped }}，失败: {{ pullSummary.failed }}
         </div>
       </div>
 
       <el-table :data="pullResults" class="pull-table" max-height="400" size="small">
         <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
-            <el-icon v-if="row.success" color="#67C23A"><SuccessFilled /></el-icon>
+            <img
+              v-if="row.skipped"
+              :src="gitGrayIcon"
+              class="pull-status-img"
+              alt="已跳过"
+              title="已跳过（未配置远程）"
+            />
+            <el-icon v-else-if="row.success" color="#67C23A"><SuccessFilled /></el-icon>
             <el-icon v-else color="#F56C6C"><CircleCloseFilled /></el-icon>
           </template>
         </el-table-column>
@@ -351,7 +358,7 @@
         <el-table-column prop="path" label="路径" min-width="250" show-overflow-tooltip />
         <el-table-column label="结果" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">
-            <span :class="row.success ? 'text-success' : 'text-danger'">{{ row.success ? (row.output || '已是最新') : row.error }}</span>
+            <span :class="row.skipped ? 'text-skipped' : (row.success ? 'text-success' : 'text-danger')">{{ row.skipped ? (row.output || '已跳过') : (row.success ? (row.output || '已是最新') : row.error) }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -416,6 +423,7 @@ import obsidianIcon from '../assets/icons/obsidian.png'
 import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
+import gitGrayIcon from '../assets/icons/git-gray.png'
 
 const props = defineProps({
   selectedNode: {
@@ -510,7 +518,7 @@ const pullDialogVisible = ref(false)
 const pullProgress = reactive({ current: 0, total: 0 })
 const pullResults = ref([])
 const pullCompleted = ref(false)
-const pullSummary = reactive({ success: 0, failed: 0 })
+const pullSummary = reactive({ success: 0, failed: 0, skipped: 0 })
 const pullRunningInBackground = ref(false)
 
 const singlePullVisible = ref(false)
@@ -951,6 +959,7 @@ const startBatchPull = (summary) => {
   pullCompleted.value = false
   pullSummary.success = 0
   pullSummary.failed = 0
+  pullSummary.skipped = 0
   pullRunningInBackground.value = false
   pullDialogVisible.value = true
 }
@@ -996,6 +1005,7 @@ const setupPullEvents = () => {
   EventsOn("pull-complete", (summary) => {
     pullCompleted.value = true
     pullSummary.success = summary.success || 0
+    pullSummary.skipped = summary.skipped || 0
     pullSummary.failed = summary.failed || 0
     if (pullRunningInBackground.value) {
       pullRunningInBackground.value = false
@@ -1363,6 +1373,16 @@ defineExpose({
 
 .text-success {
   color: var(--success-color);
+}
+
+.text-skipped {
+  color: #909399;
+}
+
+.pull-status-img {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
 }
 
 .text-danger {

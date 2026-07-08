@@ -106,6 +106,11 @@ func (a *App) RefreshDirectoriesGitFlag() []*model.Directory {
 	// 2. 只更新 IsGitRepo 字段（其他字段保留 Load 的最新值）
 	for _, d := range directories {
 		d.IsGitRepo = gitCmd.IsGitRepository(d.Path)
+		if d.IsGitRepo {
+			// 同步刷新 HasRemote，供前端灰色图标区分无远程仓库
+			_, _, err := gitCmd.GetRemote(d.Path)
+			d.HasRemote = err == nil
+		}
 	}
 	// 3. Save 回写（基于最新 Load 的合并结果）
 	if err := a.directorySvc.Save(directories); err != nil {
@@ -305,6 +310,12 @@ func (a *App) CloneRepo(url, targetPath string) string {
 
 // PullRepo 拉取更新
 func (a *App) PullRepo(dirPath string) string {
+	if !util.NewGitCommand().IsGitRepository(dirPath) {
+		return "错误: 不是Git仓库"
+	}
+	if !a.gitSvc.HasRemote(dirPath) {
+		return "该仓库未配置远程，无需拉取"
+	}
 	output, err := a.gitSvc.Pull(dirPath)
 	if err != nil {
 		return "错误: " + err.Error()

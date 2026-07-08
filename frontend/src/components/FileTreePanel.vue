@@ -53,10 +53,10 @@
             </span>
             <img
               v-if="data.isGitRepo"
-              :src="gitIcon"
+              :src="data.hasRemote ? gitIcon : gitGrayIcon"
               class="tree-node-git-img"
-              alt="Git 仓库"
-              title="Git 仓库"
+              :alt="data.hasRemote ? 'Git 仓库' : 'Git 仓库（无远程）'"
+              :title="data.hasRemote ? 'Git 仓库' : 'Git 仓库（未配置远程）'"
             />
           </span>
         </template>
@@ -365,6 +365,7 @@ import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
+import gitGrayIcon from '../assets/icons/git-gray.png'
 
 // ---- Props & Emits ----
 const props = defineProps({

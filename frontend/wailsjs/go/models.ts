@@ -167,6 +167,7 @@ export namespace model {
 	    // Go type: time
 	    createTime: any;
 	    isGitRepo: boolean;
+	    hasRemote: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Directory(source);
@@ -180,6 +181,7 @@ export namespace model {
 	        this.isDefault = source["isDefault"];
 	        this.createTime = this.convertValues(source["createTime"], null);
 	        this.isGitRepo = source["isGitRepo"];
+	        this.hasRemote = source["hasRemote"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -290,6 +292,7 @@ export namespace model {
 	    path: string;
 	    type: string;
 	    isGitRepo: boolean;
+	    hasRemote: boolean;
 	    hasChildren: boolean;
 	    children?: FileTreeNode[];
 	    isLeaf: boolean;
@@ -305,6 +308,7 @@ export namespace model {
 	        this.path = source["path"];
 	        this.type = source["type"];
 	        this.isGitRepo = source["isGitRepo"];
+	        this.hasRemote = source["hasRemote"];
 	        this.hasChildren = source["hasChildren"];
 	        this.children = this.convertValues(source["children"], FileTreeNode);
 	        this.isLeaf = source["isLeaf"];

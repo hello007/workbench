@@ -84,6 +84,13 @@ func (s *GitService) Pull(dirPath string) (string, error) {
 	return s.gitCmd.Pull(dirPath)
 }
 
+// HasRemote 检测仓库是否配置了远程仓库（git remote -v 是否非空）。
+// 用于一键更新跳过无远程的本地测试仓库，避免 pull 报错。
+func (s *GitService) HasRemote(dirPath string) bool {
+	_, _, err := s.gitCmd.GetRemote(dirPath)
+	return err == nil
+}
+
 // ExtractRepoName 提取仓库名
 func (s *GitService) ExtractRepoName(url string) string {
 	url = strings.TrimSuffix(url, ".git")
@@ -498,6 +505,7 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 		sem          = make(chan struct{}, concurrency)
 		successCount int
 		failCount    int
+		skippedCount int
 	)
 
 	for _, repo := range repos {
@@ -516,6 +524,10 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 			if !s.gitCmd.IsGitRepository(repoPath) {
 				result.Success = false
 				result.Error = "不是 Git 仓库"
+			} else if !s.HasRemote(repoPath) {
+				// 无远程配置的本地仓库无法 pull，跳过而非报错
+				result.Skipped = true
+				result.Output = "未配置远程仓库，已跳过"
 			} else {
 				gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
 				output, err := gitCmd.Pull(repoPath)
@@ -530,7 +542,9 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 
 			mu.Lock()
 			results = append(results, result)
-			if result.Success {
+			if result.Skipped {
+				skippedCount++
+			} else if result.Success {
 				successCount++
 			} else {
 				failCount++
@@ -545,6 +559,7 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 
 	safeEmit(ctx, "pull-complete", map[string]int{
 		"success": successCount,
+		"skipped": skippedCount,
 		"failed":  failCount,
 	})
 

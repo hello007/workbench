@@ -15,6 +15,9 @@ type Directory struct {
 	// IsGitRepo 表示该工作目录路径本身是否为 git 仓库根。
 	// 运行时检测填充，不参与业务持久化语义；旧配置文件无此字段时反序列化零值为 false，天然兼容。
 	IsGitRepo bool `json:"isGitRepo"`
+	// HasRemote 表示该 git 仓库是否配置了远程仓库（仅 IsGitRepo=true 时有意义）。
+	// 用于一键更新跳过无远程仓库及前端灰色图标区分；运行时检测填充，旧配置零值 false 兼容。
+	HasRemote bool `json:"hasRemote"`
 }
 
 // NewDirectory 创建新的工作目录
@@ -46,6 +49,9 @@ type FileTreeNode struct {
 	Path        string           `json:"path"`
 	Type        string           `json:"type"`
 	IsGitRepo   bool             `json:"isGitRepo"`
+	// HasRemote 表示该 git 仓库节点是否配置了远程仓库（仅 IsGitRepo=true 时有意义），
+	// 用于前端灰色图标区分无远程仓库。
+	HasRemote   bool             `json:"hasRemote"`
 	HasChildren bool             `json:"hasChildren"`
 	Children    []*FileTreeNode  `json:"children,omitempty"`
 	IsLeaf      bool             `json:"isLeaf"`
@@ -154,6 +160,9 @@ type PullResult struct {
 	Path    string `json:"path"`
 	Name    string `json:"name"`
 	Success bool   `json:"success"`
+	// Skipped 表示因无远程配置被跳过（未执行 pull），与 Success 互斥：
+	// 不计入成功也不计入失败，用于一键更新跳过无远程仓库。
+	Skipped bool   `json:"skipped"`
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
 }

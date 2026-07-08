@@ -32,10 +32,10 @@
               <span class="dir-item-name" :title="dir.name">{{ dir.name }}</span>
               <img
                 v-if="dir.isGitRepo"
-                :src="gitIcon"
+                :src="dir.hasRemote ? gitIcon : gitGrayIcon"
                 class="dir-item-git-img"
-                alt="Git 仓库"
-                title="Git 仓库"
+                :alt="dir.hasRemote ? 'Git 仓库' : 'Git 仓库（无远程）'"
+                :title="dir.hasRemote ? 'Git 仓库' : 'Git 仓库（未配置远程）'"
               />
               <el-icon v-if="dir.isDefault" class="dir-item-star" color="#e6a23c">
                 <Star />
@@ -164,6 +164,7 @@ import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
+import gitGrayIcon from '../assets/icons/git-gray.png'
 import { useShortcuts } from '../composables/useShortcuts'
 
 function shortenPath(path) {

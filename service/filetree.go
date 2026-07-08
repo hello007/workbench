@@ -13,8 +13,9 @@ import (
 
 // FileTreeService 文件树服务
 type FileTreeService struct {
-	gitCmd       *util.GitCommand
-	gitRepoCache sync.Map // path -> bool 缓存
+	gitCmd         *util.GitCommand
+	gitRepoCache   sync.Map // path -> bool 缓存（是否 git 仓库）
+	gitRemoteCache sync.Map // path -> bool 缓存（git 仓库是否配置远程）
 }
 
 // NewFileTreeService 创建服务
@@ -34,6 +35,18 @@ func (s *FileTreeService) isGitRepoDir(dir string) bool {
 	_ = info
 	s.gitRepoCache.Store(dir, isRepo)
 	return isRepo
+}
+
+// hasRemote 检测 git 仓库是否配置了远程仓库（带缓存，避免重复 git remote 子进程）。
+// 仅对 git 仓库调用；缓存命中直接返回，未命中执行 git remote -v 检测后缓存。
+func (s *FileTreeService) hasRemote(dir string) bool {
+	if v, ok := s.gitRemoteCache.Load(dir); ok {
+		return v.(bool)
+	}
+	_, _, err := s.gitCmd.GetRemote(dir)
+	has := err == nil
+	s.gitRemoteCache.Store(dir, has)
+	return has
 }
 
 // GetChildren 获取子节点
@@ -64,6 +77,9 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 
 		if entry.IsDir() {
 			node.IsGitRepo = s.isGitRepoDir(fullPath)
+			if node.IsGitRepo {
+				node.HasRemote = s.hasRemote(fullPath)
+			}
 		}
 
 		nodes = append(nodes, node)

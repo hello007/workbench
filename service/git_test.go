@@ -73,7 +73,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 func TestBatchPull_SuccessAndFail(t *testing.T) {
 	dir := t.TempDir()
 
-	// 创建一个真实的 git 仓库（无远程，pull 会失败）
+	// 创建一个真实的 git 仓库（无远程，会被跳过）
 	repoPath := filepath.Join(dir, "repo")
 	os.MkdirAll(repoPath, 0755)
 	runGit(t, repoPath, "init")
@@ -117,6 +117,41 @@ func TestBatchPull_SuccessAndFail(t *testing.T) {
 	}
 	if nonRepoResult.Error == "" {
 		t.Error("expected error message for non-repo")
+	}
+}
+
+func TestHasRemote(t *testing.T) {
+	// 无远程仓库
+	repo := initTempRepo(t)
+	svc := NewGitService()
+	if svc.HasRemote(repo) {
+		t.Error("expected HasRemote=false for repo without remote")
+	}
+
+	// 配置远程后应返回 true（不要求远程可达，仅检测配置存在）
+	runGit(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+	if !svc.HasRemote(repo) {
+		t.Error("expected HasRemote=true after adding remote")
+	}
+}
+
+func TestBatchPull_SkipsNoRemote(t *testing.T) {
+	repo := initTempRepo(t) // 无远程配置
+	svc := NewGitService()
+	results := svc.BatchPull([]string{repo}, 1, context.Background())
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+	if !r.Skipped {
+		t.Error("expected Skipped=true for repo without remote")
+	}
+	if r.Success {
+		t.Error("expected Success=false for skipped repo")
+	}
+	if r.Error != "" {
+		t.Errorf("expected no error for skipped repo, got: %s", r.Error)
 	}
 }
 

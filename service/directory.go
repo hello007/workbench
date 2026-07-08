@@ -68,7 +68,13 @@ func (s *DirectoryService) Create(name, path string, isDefault bool) (*model.Dir
 	newDir := model.NewDirectory(name, absPath, isDefault)
 	// 在持久化前计算并写入 IsGitRepo，避免启动时再同步检测子进程拖慢渲染。
 	// absPath 已经过 filepath.Abs 规范化；IsGitRepository 在路径不存在/检测异常时返回 false，不报错。
-	newDir.IsGitRepo = util.NewGitCommand().IsGitRepository(absPath)
+	gitCmd := util.NewGitCommand()
+	newDir.IsGitRepo = gitCmd.IsGitRepository(absPath)
+	if newDir.IsGitRepo {
+		// 同步检测远程配置，供前端灰色图标区分及一键更新跳过判定
+		_, _, err := gitCmd.GetRemote(absPath)
+		newDir.HasRemote = err == nil
+	}
 
 	if isDefault {
 		for _, dir := range directories {
@@ -110,7 +116,13 @@ func (s *DirectoryService) Update(id, name, path string, isDefault bool) (*model
 
 	// path 变化时 git 仓库状态可能改变；为简单稳妥起见，每次 Update 都重算并持久化 IsGitRepo，
 	// 覆盖"普通目录改成 git 仓库路径"或反之的变更。IsGitRepository 失败按 false 不报错。
-	target.IsGitRepo = util.NewGitCommand().IsGitRepository(target.Path)
+	gitCmd := util.NewGitCommand()
+	target.IsGitRepo = gitCmd.IsGitRepository(target.Path)
+	if target.IsGitRepo {
+		// 同步检测远程配置，供前端灰色图标区分及一键更新跳过判定
+		_, _, err := gitCmd.GetRemote(target.Path)
+		target.HasRemote = err == nil
+	}
 
 	target.Name = name
 
