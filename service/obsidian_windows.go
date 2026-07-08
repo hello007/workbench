@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
+	"workbench/util"
 )
 
 // obsidianConfigPath 返回 Obsidian vault 注册表路径：%APPDATA%\obsidian\obsidian.json。
@@ -55,7 +56,9 @@ func isObsidianProtocolRegistered() bool {
 // 保守阻塞（引导用户先关闭 Obsidian）虽有误杀但无数据丢失风险，更安全（见 research Caveat #8）。
 // 调用方在写入前据此判断是否引导用户先关闭 Obsidian（规避运行时回写覆盖）。
 func isObsidianRunning() bool {
-	out, err := exec.Command("tasklist", "/FO", "CSV", "/NH").Output()
+	cmd := exec.Command("tasklist", "/FO", "CSV", "/NH")
+	util.HideCommandWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		println("警告: tasklist 进程枚举失败，保守视为 Obsidian 运行中:", err.Error())
 		return true
