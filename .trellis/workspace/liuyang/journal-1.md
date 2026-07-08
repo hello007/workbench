@@ -779,3 +779,37 @@ FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: Obsidian 未注册 vault 报错处理：预检、引导与自动注册
+
+**Date**: 2026-07-08
+**Task**: Obsidian 未注册 vault 报错处理：预检、引导与自动注册
+**Branch**: `master`
+
+### Summary
+
+为「用 Obsidian 打开」增加打开前预检：读 obsidian.json 复刻「最具体包含 vault」归属判断，未注册时弹三按钮确认框--「自动注册并打开」（tasklist 进程检测+原子写+备份 obsidian.json 保留未知字段+发URI，二次确认预告首次信任提示，运行中引导手动关闭）或「打开仓库管理器」（复制路径到剪贴板+跳转 choose-vault）。引入哨兵错误 ErrObsidianNotInstalled/ErrVaultNotRegistered/ErrObsidianRunning + app 状态码翻译 + 前端分流；obsidian.json 读取失败降级到现状尽力打开。spec 记录外部工具多状态处理与修改外部应用配置文件原子写+备份+保留未知字段模式。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3308f1` | (see git log) |
+| `d44e9d0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
