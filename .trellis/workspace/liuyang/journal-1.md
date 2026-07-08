@@ -813,3 +813,36 @@ FileTreePanel.vue 经 useFavorites 调用 GetFavorites/AddFavorite/RemoveFavorit
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: 使用系统默认浏览器打开http链接
+
+**Date**: 2026-07-08
+**Task**: 使用系统默认浏览器打开http链接
+**Branch**: `master`
+
+### Summary
+
+GitInfo 仓库远程地址 http(s) 链接由内置 webview 改为系统默认浏览器打开（BrowserOpenURL）；新增 GitInfo 点击行为单测；docs/开发规范.md 沉淀外部链接打开规范。前端单测 203 passed，wails build 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37e3dff` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

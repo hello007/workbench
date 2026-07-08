@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~815 | Active |
+| `journal-1.md` | ~848 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-07-08 | 使用系统默认浏览器打开http链接 | `37e3dff` | `master` |
 | 24 | 2026-07-08 | Obsidian 未注册 vault 报错处理：预检、引导与自动注册 | `f3308f1`, `d44e9d0` | `master` |
 | 23 | 2026-07-07 | markdown frontmatter 预览优化 | `e25e51a` | `master` |
 | 22 | 2026-07-06 | 修复 md 预览相对链接点击崩溃与应用内导航 | `b724d1e` | `master` |
