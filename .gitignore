@@ -34,5 +34,6 @@ node_modules
 Thumbs.db
 vendor/
 agent-harness/
+bash.exe.stackdump
 
 .claude/settings.local.json
