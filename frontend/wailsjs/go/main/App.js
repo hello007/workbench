@@ -234,8 +234,8 @@ export function ResizeTerminal(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeTerminal'](arg1, arg2, arg3);
 }
 
-export function SaveFile(arg1, arg2) {
-  return window['go']['main']['App']['SaveFile'](arg1, arg2);
+export function SaveFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveFile'](arg1, arg2, arg3);
 }
 
 export function SaveSettings(arg1) {

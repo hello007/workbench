@@ -133,6 +133,9 @@ type FilePreview struct {
 	// Kind 预览类型分流，供前端按类型选择渲染器：text/image/pdf/office/unsupported。
 	// 与 IsBinary 互补：图片/PDF/Office 虽是二进制，但可预览，需区别于"无法预览的二进制"。
 	Kind string `json:"kind,omitempty"`
+	// Encoding 文本编码来源（utf-8/gbk），仅 text 类预览填充，供前端保存时按原编码回写。
+	// 空串等同于 utf-8；unsupported 降级为 text 时同样填充。
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // 预览类型常量

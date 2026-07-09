@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality Check 总览，核对实现是否满足后端规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查单测覆盖、禁止模式、代码质量"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查 PreviewFile/SaveFile 错误处理一致性"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查前后端 Encoding 字段与 SaveFile 签名联动一致性"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端开发规范入口，Pre-Development Checklist 与 Quality Check 总览"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "分层规范：DetectTextEncoding 放 util，PreviewFile/SaveFile 在 service，桥接在 app.go"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "PreviewFile/SaveFile 错误回传 model.FilePreview.Error 的处理约定"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "单测覆盖与禁止模式，编码检测各分支需补单测"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "DetectTextEncoding 统一复用于 text 与 unsupported，避免重复逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "后端 Encoding 字段 + SaveFile 签名变更需与前端 ContentPanel/FilePreviewRenderer 联动"}

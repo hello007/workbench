@@ -240,6 +240,32 @@ describe('ContentPanel.vue', () => {
       expect(wrapper.text()).toContain('用默认程序打开')
       expect(ElMessage.warning).toHaveBeenCalledWith('该文件类型暂不支持内嵌预览')
     })
+    it('previewFile unsupported 降级为文本应显示内容（无降级提示）', async () => {
+      const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+      // .log 不在文本白名单 -> detectPreviewKind 返回 unsupported，
+      // 但后端 DetectTextEncoding 判定为可显示文本后降级为 kind=text
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/note.log', name: 'note.log', size: 10,
+        content: 'log line', isBinary: false, tooLarge: false, error: '', kind: 'text',
+        encoding: 'utf-8'
+      })
+
+      wrapper = mount(ContentPanel, {
+        props: {
+          selectedNode: { name: 'note.log', path: '/test/note.log', type: 'file' },
+          clipboard: { mode: null }
+        },
+        global: { stubs: contentPanelStubs }
+      })
+
+      const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+
+      // 降级为 text 后：预览区已显示，无「暂不支持内嵌预览」警告
+      expect(wrapper.find('.file-preview').exists()).toBe(true)
+      expect(ElMessage.warning).not.toHaveBeenCalledWith('该文件类型暂不支持内嵌预览')
+    })
 
     it('previewFile 错误应显示错误提示', async () => {
       const { PreviewFile } = await import('../../../wailsjs/go/main/App')
@@ -551,7 +577,32 @@ describe('ContentPanel.vue', () => {
       await textarea.trigger('keydown', { key: 's', ctrlKey: true })
       await flushPromises()
 
-      expect(SaveFile).toHaveBeenCalledWith('/test/file.md', 'Hello changed')
+      // 默认 UTF-8（PreviewFile 未返回 encoding 时回退空串 = UTF-8）
+      expect(SaveFile).toHaveBeenCalledWith('/test/file.md', 'Hello changed', '')
+    })
+
+    it('Ctrl+S 保存 GBK 文件应回传 encoding=gbk', async () => {
+      const { PreviewFile, SaveFile } = await import('../../../wailsjs/go/main/App')
+      PreviewFile.mockResolvedValueOnce({
+        path: '/test/gbk.txt', name: 'gbk.txt', size: 11,
+        content: '中文GBK文本', isBinary: false, tooLarge: false, error: '', kind: 'text',
+        encoding: 'gbk'
+      })
+      wrapper = mountPanel()
+      const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+      await previewBtn.trigger('click')
+      await flushPromises()
+      const editBtn = wrapper.findAll('button').find(btn => btn.text().includes('编辑'))
+      await editBtn.trigger('click')
+      await flushPromises()
+
+      const textarea = wrapper.find('textarea')
+      await textarea.setValue('中文GBK文本改')
+      await textarea.trigger('keydown', { key: 's', ctrlKey: true })
+      await flushPromises()
+
+      // 保存应回传 encoding=gbk，后端按 GBK 编码写入（路径取自 selectedNode）
+      expect(SaveFile).toHaveBeenCalledWith('/test/file.md', '中文GBK文本改', 'gbk')
     })
 
     it('Ctrl+S 无修改时不触发保存', async () => {

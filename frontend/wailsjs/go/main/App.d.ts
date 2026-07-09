@@ -118,7 +118,7 @@ export function ReorderDirectories(arg1:Array<string>):Promise<boolean>;
 
 export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
-export function SaveFile(arg1:string,arg2:string):Promise<void>;
+export function SaveFile(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SaveSettings(arg1:model.AppSettings):Promise<void>;
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -835,7 +836,7 @@ func TestSaveFile_OverwriteExisting(t *testing.T) {
 	os.WriteFile(file, []byte("original"), 0644)
 
 	svc := NewFileOperationService()
-	err := svc.SaveFile(file, "updated content")
+	err := svc.SaveFile(file, "updated content", "")
 	if err != nil {
 		t.Fatalf("SaveFile failed: %v", err)
 	}
@@ -851,7 +852,7 @@ func TestSaveFile_OverwriteExisting(t *testing.T) {
 
 func TestSaveFile_FileNotFound(t *testing.T) {
 	svc := NewFileOperationService()
-	err := svc.SaveFile(filepath.Join(t.TempDir(), "nonexistent.txt"), "content")
+	err := svc.SaveFile(filepath.Join(t.TempDir(), "nonexistent.txt"), "content", "")
 	if err == nil {
 		t.Fatal("Expected error for nonexistent file")
 	}
@@ -860,7 +861,7 @@ func TestSaveFile_FileNotFound(t *testing.T) {
 func TestSaveFile_DirectoryPath(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewFileOperationService()
-	err := svc.SaveFile(dir, "content")
+	err := svc.SaveFile(dir, "content", "")
 	if err == nil {
 		t.Fatal("Expected error when saving to a directory")
 	}
@@ -873,7 +874,7 @@ func TestSaveFile_ContentTooLarge(t *testing.T) {
 
 	svc := NewFileOperationService()
 	largeContent := string(make([]byte, 1024*1024+1)) // > 1MB
-	err := svc.SaveFile(file, largeContent)
+	err := svc.SaveFile(file, largeContent, "")
 	if err == nil {
 		t.Fatal("Expected error for content exceeding size limit")
 	}
@@ -885,7 +886,7 @@ func TestSaveFile_EmptyContent(t *testing.T) {
 	os.WriteFile(file, []byte("has content"), 0644)
 
 	svc := NewFileOperationService()
-	err := svc.SaveFile(file, "")
+	err := svc.SaveFile(file, "", "")
 	if err != nil {
 		t.Fatalf("SaveFile with empty content failed: %v", err)
 	}
@@ -905,7 +906,7 @@ func TestSaveFile_NoTempFileLeak(t *testing.T) {
 	os.WriteFile(file, []byte("before"), 0644)
 
 	svc := NewFileOperationService()
-	err := svc.SaveFile(file, "after")
+	err := svc.SaveFile(file, "after", "")
 	if err != nil {
 		t.Fatalf("SaveFile failed: %v", err)
 	}
@@ -918,5 +919,173 @@ func TestSaveFile_NoTempFileLeak(t *testing.T) {
 		if e.Name() != "clean.txt" {
 			t.Errorf("Unexpected file left behind: %s", e.Name())
 		}
+	}
+}
+
+// TestSaveFile_UTF8Encoding 按 UTF-8 保存中文应写入 UTF-8 字节
+func TestSaveFile_UTF8Encoding(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "utf8.txt")
+	os.WriteFile(file, []byte("placeholder"), 0644)
+
+	svc := NewFileOperationService()
+	content := "中文UTF-8文本"
+	err := svc.SaveFile(file, content, "utf-8")
+	if err != nil {
+		t.Fatalf("SaveFile with UTF-8 failed: %v", err)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("Failed to read saved file: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("UTF-8 保存内容不匹配, 期望 '%s', 实际 '%s'", content, string(data))
+	}
+}
+
+// TestSaveFile_GBKEncoding 按 GBK 保存中文应写入 GBK 字节（非 UTF-8），读回验证编码未被改成 UTF-8
+func TestSaveFile_GBKEncoding(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "gbk.txt")
+	os.WriteFile(file, []byte("placeholder"), 0644)
+
+	svc := NewFileOperationService()
+	content := "中文GBK文本"
+	err := svc.SaveFile(file, content, "gbk")
+	if err != nil {
+		t.Fatalf("SaveFile with GBK failed: %v", err)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("Failed to read saved file: %v", err)
+	}
+	// "中文GBK文本" 的 GBK 编码字节
+	// 中=D6D0 文=CEC4 G=47 B=42 K=4B 文=CEC4 本=B1BE
+	expectedGBK := []byte{0xD6, 0xD0, 0xCE, 0xC4, 0x47, 0x42, 0x4B, 0xCE, 0xC4, 0xB1, 0xBE}
+	if !bytes.Equal(data, expectedGBK) {
+		t.Errorf("GBK 保存字节不匹配, 期望 %v, 实际 %v", expectedGBK, data)
+	}
+	// 关键回归：保存后文件不应是 UTF-8 编码（否则会改变原文件编码）
+	if string(data) == content {
+		t.Error("GBK 保存后文件不应是 UTF-8 编码（字节应与 UTF-8 不同）")
+	}
+}
+
+// TestPreviewFile_UnsupportedTextDowngrade unsupported 类型的小文本文件应降级为 text 显示
+func TestPreviewFile_UnsupportedTextDowngrade(t *testing.T) {
+	dir := t.TempDir()
+	// 无扩展名文件（detectPreviewKind 返回 unsupported）
+	file := filepath.Join(dir, "readme")
+	content := "this is a plain text file without extension"
+	os.WriteFile(file, []byte(content), 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if preview.Error != "" {
+		t.Errorf("Unexpected error: %s", preview.Error)
+	}
+	if preview.Kind != model.KindText {
+		t.Errorf("unsupported 文本应降级为 text, 实际 %s", preview.Kind)
+	}
+	if preview.Content != content {
+		t.Errorf("内容期望 '%s', 实际 '%s'", content, preview.Content)
+	}
+	if preview.Encoding != "utf-8" {
+		t.Errorf("编码期望 utf-8, 实际 %s", preview.Encoding)
+	}
+	if preview.IsBinary {
+		t.Error("UTF-8 文本不应判为二进制")
+	}
+	if preview.TooLarge {
+		t.Error("小文件不应判为过大")
+	}
+}
+
+// TestPreviewFile_GBKTextFile GBK 编码的文本文件应正确解码显示中文，encoding=gbk
+func TestPreviewFile_GBKTextFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "gbk.txt")
+	// "中文GBK文本" 的 GBK 编码字节
+	gbkData := []byte{0xD6, 0xD0, 0xCE, 0xC4, 0x47, 0x42, 0x4B, 0xCE, 0xC4, 0xB1, 0xBE}
+	os.WriteFile(file, gbkData, 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if preview.Error != "" {
+		t.Errorf("Unexpected error: %s", preview.Error)
+	}
+	if preview.Kind != model.KindText {
+		t.Errorf("GBK 文本应为 text, 实际 %s", preview.Kind)
+	}
+	if preview.Encoding != "gbk" {
+		t.Errorf("编码期望 gbk, 实际 %s", preview.Encoding)
+	}
+	if preview.Content != "中文GBK文本" {
+		t.Errorf("解码内容期望 '中文GBK文本', 实际 '%s'", preview.Content)
+	}
+	if preview.IsBinary {
+		t.Error("GBK 文本不应判为二进制")
+	}
+}
+
+// TestPreviewFile_BinaryUnsupportedIsBinary unsupported 二进制文件（含 NUL）应标记 IsBinary，不显示内容
+func TestPreviewFile_BinaryUnsupportedIsBinary(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "binary.dat")
+	content := []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x00, 0x77, 0x6F, 0x72, 0x6C, 0x64}
+	os.WriteFile(file, content, 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if !preview.IsBinary {
+		t.Error("含 NUL 字节应判为二进制（IsBinary=true）")
+	}
+	if preview.Content != "" {
+		t.Errorf("二进制文件内容应为空, 实际 %d bytes", len(preview.Content))
+	}
+	if preview.Kind != model.KindUnsupported {
+		t.Errorf("Kind 应保留 unsupported, 实际 %s", preview.Kind)
+	}
+}
+
+// TestPreviewFile_UnsupportedTooLarge unsupported 大文件应标记 tooLarge，不读内容
+func TestPreviewFile_UnsupportedTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "big.log")
+	content := make([]byte, 1024*1024+100)
+	for i := range content {
+		content[i] = byte('a' + (i % 26))
+	}
+	os.WriteFile(file, content, 0644)
+
+	svc := NewFileOperationService()
+	maxSize := int64(1024 * 1024)
+	preview, err := svc.PreviewFile(file, maxSize)
+
+	if err != nil {
+		t.Fatalf("PreviewFile failed: %v", err)
+	}
+	if !preview.TooLarge {
+		t.Error("超大 unsupported 文件应标记 tooLarge")
+	}
+	if preview.Content != "" {
+		t.Errorf("超大文件内容应为空, 实际 %d bytes", len(preview.Content))
 	}
 }

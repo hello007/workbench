@@ -82,6 +82,10 @@
 
     <!-- 代码 / txt / json / sql 只读：CodeMirror 6 -->
     <div v-else-if="kind === 'text'" class="preview-codemirror-wrap">
+      <!-- 编码标识：仅非 utf-8（如 gbk）时显示，提示用户保存将按此编码回写 -->
+      <div v-if="encoding && encoding !== 'utf-8'" class="encoding-badge">
+        编码: {{ encoding.toUpperCase() }}（保存将按此编码写入）
+      </div>
       <div ref="cmHostRef" class="cm-host"></div>
     </div>
 
@@ -277,7 +281,10 @@ const props = defineProps({
   // 用于把 markdown 内相对链接 ./other.md 解析为本地绝对路径）
   filePath: { type: String, default: '' },
   // markdown 目录（TOC）显隐：由父组件「目录」按钮控制，默认隐藏
-  showToc: { type: Boolean, default: false }
+  showToc: { type: Boolean, default: false },
+  // 文本编码来源（utf-8/gbk），用于在文本区提示用户当前文件编码，
+  // 保存时按此编码回写。仅非 utf-8（如 gbk）时显示标识，避免默认场景噪声。
+  encoding: { type: String, default: '' }
 })
 
 const emit = defineEmits(['openExternal', 'openLink', 'closeToc'])
@@ -1293,6 +1300,18 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm, 4px);
   /* 白底内容区，与浅蓝容器层次分明 */
   background: var(--bg-secondary);
+}
+
+/* 编码标识条：仅非 utf-8 文本显示，提示保存将按此编码回写 */
+.encoding-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  margin-bottom: var(--spacing-xs, 4px);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .cm-host :deep(.cm-editor) {

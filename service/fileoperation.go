@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"workbench/model"
 	"workbench/util"
 )
@@ -88,17 +90,18 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 	preview.Size = info.Size()
 	preview.Kind = detectPreviewKind(filePath)
 
-	// 按 kind 分流：只有 text 需要把全文读成 string（受 maxSize 限制）。
-	// image/pdf/office/unsupported 不在此读取内容、不判 tooLarge——
-	//   image/office 由前端走 ReadFileBytes（50MB 上限）取 base64；
-	//   pdf 走 iframe + AssetServer Range 流式（无大小限制）；
-	//   unsupported 由前端降级提示。
-	// maxSize（1MB）本意仅针对 text 读全内容，不能用于误伤其他类型。
-	if preview.Kind != model.KindText {
+	// 按 kind 分流：
+	//   image/pdf/office 不在此读取内容、不判 tooLarge——
+	//     image/office 由前端走 ReadFileBytes（50MB 上限）取 base64；
+	//     pdf 走 iframe + AssetServer Range 流式（无大小限制）。
+	//   text 与 unsupported 统一走编码检测（读字节 -> DetectTextEncoding），
+	//     解决 unsupported 直接放弃、text 的 GBK 文件乱码两类问题。
+	// maxSize（1MB）本意针对文本读全内容，不能用于误伤 image/pdf/office。
+	if preview.Kind != model.KindText && preview.Kind != model.KindUnsupported {
 		return preview, nil
 	}
 
-	// text：超过上限则标记过大，不再读全内容
+	// text/unsupported：超过上限则标记过大，不再读全内容
 	if preview.Size > maxSize {
 		preview.TooLarge = true
 		return preview, nil
@@ -110,7 +113,16 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 		return preview, err
 	}
 
-	preview.Content = string(data)
+	// 编码检测：ok=true -> 降级为 text 显示（Content=转码内容，Encoding=来源）；
+	// ok=false（含 NUL 或非 UTF-8 且 GBK 解码失败）-> IsBinary=true，Kind 保留原值，Content 空。
+	enc, content, ok := util.DetectTextEncoding(data)
+	if !ok {
+		preview.IsBinary = true
+		return preview, nil
+	}
+	preview.Encoding = enc
+	preview.Content = content
+	preview.Kind = model.KindText
 	return preview, nil
 }
 
@@ -164,8 +176,10 @@ func detectPreviewKind(filename string) string {
 	return model.KindUnsupported
 }
 
-// SaveFile 保存文件内容（原子写入：先写临时文件再 rename）
-func (s *FileOperationService) SaveFile(filePath string, content string) error {
+// SaveFile 保存文件内容（原子写入：先写临时文件再 rename）。
+// encoding 指定按原文件编码写入：encoding="gbk" -> GBK 编码后写入；
+// 其余（utf-8/空）-> 直接写入 UTF-8 字节。保留 1MB 限制与原子写。
+func (s *FileOperationService) SaveFile(filePath string, content string, encoding string) error {
 	// 校验路径存在且为普通文件
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -181,6 +195,18 @@ func (s *FileOperationService) SaveFile(filePath string, content string) error {
 		return fmt.Errorf("内容超过1MB限制")
 	}
 
+	// 按原文件编码转码为字节：GBK -> GBK 编码；其余（utf-8/空）-> 原样 UTF-8 字节
+	var data []byte
+	if encoding == "gbk" {
+		encoded, encErr := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(content))
+		if encErr != nil {
+			return fmt.Errorf("GBK 编码失败: %w", encErr)
+		}
+		data = encoded
+	} else {
+		data = []byte(content)
+	}
+
 	// 原子写入：先写临时文件再 rename
 	dir := filepath.Dir(filePath)
 	tmpFile, err := os.CreateTemp(dir, ".workbench-save-*")
@@ -189,7 +215,7 @@ func (s *FileOperationService) SaveFile(filePath string, content string) error {
 	}
 	tmpPath := tmpFile.Name()
 
-	_, err = tmpFile.WriteString(content)
+	_, err = tmpFile.Write(data)
 	tmpFile.Close()
 	if err != nil {
 		os.Remove(tmpPath)

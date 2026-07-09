@@ -22,14 +22,15 @@
 - **文件预览编辑** — 预览文本文件时支持就地编辑，修改后可保存或取消，切换文件时自动检查未保存修改
 - **文件类型预览** — 在操作面板内按文件类型直接预览，无需外部程序：
   - **图片**（jpg/jpeg/png/bmp/gif/webp）base64 内嵌显示，支持缩放
-  - **文本**（txt/json/sql/md、各类代码）CodeMirror 6 只读高亮（行号、折叠、虚拟滚动）；Markdown 用 markdown-it 渲染（关闭原始 HTML 防 XSS）
+  - **文本**（txt/json/sql/md、各类代码）CodeMirror 6 只读高亮（行号、折叠、虚拟滚动）；Markdown 用 markdown-it 渲染（关闭原始 HTML 防 XSS）；GBK 编码文件自动解码为 UTF-8 显示
   - **Office** — Word `.docx` 用 docx-preview 内嵌渲染；Excel `.xlsx/.xls/.csv` 用 SheetJS 解析为只读表格（多 Sheet 标签页）
   - **PDF** — 内嵌预览（pdfjs 官方 viewer，工具栏支持翻页/缩放/搜索/缩略图）。通过 iframe 加载内嵌 viewer 静态资源、后端 `AssetServer` handler 以同源 URL 提供本地 PDF 字节（支持 HTTP Range，大 PDF 按需读取）；主页面不引入 pdfjs 库，靠 iframe 独立 browsing context 从架构上规避前端 pdfjs 双实例问题
-  - **文本类「编辑」模式** — 文本类预览可一键切回就地编辑，保存复用既有 SaveFile 链路
+  - **文本类「编辑」模式** — 文本类预览可一键切回就地编辑，保存复用既有 SaveFile 链路，按原文件编码（UTF-8/GBK）写入不改变原编码
   - **预览区复制选中文本** — 文本/代码/Markdown 预览态下，鼠标选中内容可直接 Ctrl+C 复制；也可右键弹出「复制 / 全选」菜单（复制项在无选中文本时禁用，全选用 CodeMirror 命令或 Selection API 实现）
   - **Markdown 链接导航** — 预览态点击 Markdown 内链接：相对引用（`./other.md`、`../readme.md`）在预览面板内切换预览；外部 http 链接用系统默认浏览器打开；同文档锚点（`#标题`）滚动定位。拦截 `<a>` 原生顶层导航，避免误触后端 `AssetServer` fallback 返回 `{"error":"缺少 path 参数"}` 并导致界面崩溃
   - **Markdown frontmatter 属性面板** — 文档开头的 YAML frontmatter（`---\n...\n---`）不再被当作普通正文渲染（`---` 变 `<hr>`、`key: value` 变段落文本），而是解析为正文上方的结构化属性表格：数组值显示为标签徽章，标量值原样展示，嵌套对象以 JSON 文本呈现；解析失败时降级为带语法高亮的 YAML 原文代码块，不影响正文
   - **预览历史回退** — Markdown 相对链接跳转后，预览头部的「后退」按钮可回到上一个预览文件；点击文件树节点（含同节点再点）始终重新加载预览，避免「链接跳转后预览体与选中节点脱钩导致空白」
+  - **unsupported 按文本预览** — 无扩展名或未知扩展名的文件优先尝试按文本读取（UTF-8 优先 + GBK 兜底解码），可显示则降级为文本预览（可编辑保存）；含 NUL 字节或解码失败的二进制文件、超大文件（>1MB）走降级提示
   - **降级为「用默认程序打开」** — PowerPoint(`.pptx`)、旧版 Office(`.doc/.ppt`)、损坏/超大/不支持的类型，统一提供「用默认程序打开」按钮走系统默认程序
 - **用 Obsidian 打开** — 工作目录树/文件树右键菜单及操作面板「查看操作」均支持以 Obsidian 打开：文件夹以自身作为仓库（vault）、文件以父目录作为仓库；可在「设置 → 通用 → 外部应用」自定义 Obsidian 程序路径（配置后优先使用，否则走 `obsidian://` 协议 + 注册表预检 + `cmd /c start`，未检测到时引导用户配置或安装；打开前读取 Obsidian 仓库注册表（%APPDATA%\obsidian\obsidian.json）判断目录是否属于已注册 vault，未注册时弹确认框引导跳转 Obsidian 仓库管理器手动添加（避免 Obsidian 弹出 "Vault not found"），注册表读取失败则降级为现状尽力打开）
 - **Git 集成** — 查看提交历史、分支信息、仓库状态；双击变动文件弹窗双栏对照查看 diff、选择性提交（commit）、推送到远程（push）；选中 git 工作目录即可在右栏直接查看仓库详情，左栏工作目录列表标记 git 仓库

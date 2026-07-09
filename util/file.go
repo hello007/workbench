@@ -1,11 +1,15 @@
 package util
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // IsPreviewable 判断文件是否可预览
@@ -152,4 +156,58 @@ func CopyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// DetectTextEncoding 检测字节流的文本编码并尝试转码为 UTF-8。
+// 返回 (encoding, content, ok)：
+//   - 含 NUL 字节(0x00)（仅扫前 8KB，git heuristic）-> 二进制，ok=false
+//   - 合法 UTF-8 -> encoding="utf-8", content=原串, ok=true
+//   - 非合法 UTF-8 -> 尝试 GBK 解码：解码后 U+FFFD 替换字符占比 ≤5% -> encoding="gbk", content=解码结果, ok=true；否则 ok=false
+//   - 空数据 -> ok=true, encoding="utf-8", content=""（空文本可显示）
+//
+// 设计取舍：GBK 是双字节编码，某些二进制数据恰好构成合法 GBK 序列会被误判为文本，
+// 用 U+FFFD 占比阈值兜底（>5% 视为解码失败）。可接受少量误判，用户仍可"用默认程序打开"。
+func DetectTextEncoding(data []byte) (encoding, content string, ok bool) {
+	if len(data) == 0 {
+		return "utf-8", "", true
+	}
+
+	// NUL 字节检测：仅扫前 8KB（性能好，与 git heuristic 一致），命中即判为二进制
+	scanEnd := len(data)
+	if scanEnd > 8192 {
+		scanEnd = 8192
+	}
+	if bytes.IndexByte(data[:scanEnd], 0) != -1 {
+		return "", "", false
+	}
+
+	// 合法 UTF-8 -> 直接返回原串
+	if utf8.Valid(data) {
+		return "utf-8", string(data), true
+	}
+
+	// 非合法 UTF-8 -> 尝试 GBK 解码（失败插入 U+FFFD 替换字符，不返回 err）
+	decoded, err := simplifiedchinese.GBK.NewDecoder().Bytes(data)
+	if err != nil {
+		return "", "", false
+	}
+	// 解码后 U+FFFD 替换字符占比超阈值 -> 视为解码质量差（二进制/其他编码）
+	if replacementCharRatio(decoded) > 0.05 {
+		return "", "", false
+	}
+	return "gbk", string(decoded), true
+}
+
+// replacementCharRatio 计算 UTF-8 字节流中 U+FFFD 替换字符的 rune 占比。
+// 用于 GBK 解码后判断解码质量：占比高说明大量字节无法解码 -> 视为解码失败。
+func replacementCharRatio(b []byte) float64 {
+	if len(b) == 0 {
+		return 0
+	}
+	runeCount := utf8.RuneCount(b)
+	if runeCount == 0 {
+		return 0
+	}
+	replCount := bytes.Count(b, []byte("�"))
+	return float64(replCount) / float64(runeCount)
 }

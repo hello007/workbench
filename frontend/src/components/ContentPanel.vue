@@ -208,6 +208,7 @@
               :too-large="filePreview.tooLarge"
               :is-binary="filePreview.isBinary"
               :pdf-path="filePreview.pdfPath"
+              :encoding="filePreview.encoding"
               :show-toc="showToc"
               @open-external="handleOpenWithDefaultApp"
               @open-link="onPreviewLink"
@@ -467,7 +468,8 @@ const filePreview = ref({
   tooLarge: false,
   error: '',
   kind: '',
-  pdfPath: ''
+  pdfPath: '',
+  encoding: ''
 })
 const originalContent = ref('')
 const isSaving = ref(false)
@@ -782,7 +784,9 @@ const previewFile = async (overridePath, overrideName) => {
       kind: preview.kind || '',
       // PDF 走 iframe + 后端 /preview-pdf 同源 URL（POC-1），
       // 不读取字节，直接把本地绝对路径传给渲染器拼装 URL。
-      pdfPath: preview.kind === 'pdf' ? (preview.path || targetPath) : ''
+      pdfPath: preview.kind === 'pdf' ? (preview.path || targetPath) : '',
+      // 文本编码来源（utf-8/gbk），供保存时按原编码回写，不改变原文件编码
+      encoding: preview.encoding || ''
     }
 
     if (preview.error) {
@@ -833,7 +837,8 @@ const previewFile = async (overridePath, overrideName) => {
       tooLarge: false,
       error: (error?.message || String(error)),
       kind: '',
-      pdfPath: ''
+      pdfPath: '',
+      encoding: ''
     }
     ElMessage.error('预览失败: ' + (error?.message || String(error)))
   } finally {
@@ -862,7 +867,8 @@ const handleSave = async () => {
 
   isSaving.value = true
   try {
-    await SaveFile(props.selectedNode.path, filePreview.value.content)
+    // 按原文件编码回写（utf-8/gbk），不改变原文件编码
+    await SaveFile(props.selectedNode.path, filePreview.value.content, filePreview.value.encoding)
     ElMessage.success('文件保存成功')
     originalContent.value = filePreview.value.content
     emit('refreshNode', props.selectedNode.path)
@@ -982,7 +988,8 @@ const clearPreview = () => {
     tooLarge: false,
     error: '',
     kind: '',
-    pdfPath: ''
+    pdfPath: '',
+    encoding: ''
   }
   originalContent.value = ''
   isEditing.value = false

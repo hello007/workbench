@@ -275,9 +275,9 @@ func (a *App) ReadFileBytes(filePath string) *model.FileBytes {
 	return result
 }
 
-// SaveFile 保存文件内容
-func (a *App) SaveFile(filePath string, content string) error {
-	return a.fileOpSvc.SaveFile(filePath, content)
+// SaveFile 保存文件内容（按 encoding 指定编码写入：gbk 按 GBK，其余按 UTF-8）
+func (a *App) SaveFile(filePath string, content string, encoding string) error {
+	return a.fileOpSvc.SaveFile(filePath, content, encoding)
 }
 
 // GetGitLog 获取提交历史
