@@ -303,3 +303,20 @@ if (commitsRes.status === 'fulfilled') {
 - [ ] 组件若同时依赖缓存 + 父组件 prop 两个数据源，切换时两者是否都清理残留？
 
 **Real-world**：`GitInfo.vue loadGitInfo` 缓存命中偶发丢失最新提交（任务 07-04）。
+
+---
+
+## Wails 绑定同步检查
+
+改 Go 后端任何被 Wails 暴露给前端的契约时，`frontend/wailsjs/` 绑定不会自动重新生成（sub-agent / CI 无法运行 `wails dev`/`wails build`）。commit 前必查 `git status` 是否残留 `frontend/wailsjs/` 改动。
+
+### Checklist: 改动触及以下任一时
+
+- [ ] 改 `app.go` 的 `App` 导出方法签名 -> 同步 `frontend/wailsjs/go/main/App.js` + `App.d.ts`（参数数量一致）
+- [ ] 改 `model/` 下被前端使用的 struct 字段 -> 同步 `frontend/wailsjs/go/models.ts`（字段声明 + 构造函数赋值）
+- [ ] `git add` wailsjs 文件须用 `-f`（目录被 `.gitignore` 忽略但文件已跟踪）
+- [ ] commit 前 `git status` 确认 `frontend/wailsjs/` **无未提交残留**（sub-agent 实现报告可能遗漏 models.ts 等自动生成文件）
+
+详见 `.trellis/spec/backend/cross-layer-contracts.md`。
+
+**Real-world**：任务 07-09 给 `FilePreview` 加 `Encoding` 字段，sub-agent 改了 `models.ts` 但报告未提，trellis-check 未发现，commit 后 `git status` 仍残留 models.ts，才补提交（`f11fc53`）。根因：vitest 用 esbuild 转译不报 TS 类型错误，运行时靠 JS 动态取值，测试全过掩盖了类型绑定缺失。

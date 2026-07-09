@@ -42,6 +42,45 @@
 
 ---
 
+## Scenario: model struct 字段变更须同步 wailsjs/go/models.ts
+
+### 1. Scope / Trigger
+- Trigger: 修改 `model/` 下任何被 Wails 暴露给前端的导出 struct 字段（增删字段、改类型、改 json tag），如 `FilePreview`、`FileBytes`、`Directory`、`FileTreeNode` 等。
+- 原因: Wails 在 `wails dev`/`wails build` 时根据 Go struct 生成 `frontend/wailsjs/go/models.ts`（TS class 定义 + 构造函数赋值）。sub-agent / CI 无法运行 wails，必须手动同步，否则前端 TS 类型缺字段（JS 运行时仍能取到 JSON 字段，但类型不完整、IDE 无提示，且 vitest 用 esbuild 转译不报类型错误，极易漏）。
+
+### 2. Signatures（以 FilePreview 加 Encoding 字段为例）
+- Go: `model.FilePreview` 新增 `Encoding string` (`json:"encoding,omitempty"`)
+- TS (`frontend/wailsjs/go/models.ts`): `FilePreview` class 新增 `encoding?: string;` 字段声明 + 构造函数 `this.encoding = source["encoding"];`
+
+### 3. Contracts
+- Go struct 字段（含 json tag） <-> `models.ts` 对应 class 的字段声明 + 构造函数赋值，两处须一致
+- `omitempty` json tag -> TS 字段用 `?:` 可选
+- 字段名按 json tag（而非 Go 字段名）映射到 TS
+- `models.ts` 在 `.gitignore` 忽略目录 `frontend/wailsjs/` 下但已被跟踪；`git add` 该目录文件须用 `-f`
+
+### 4. Validation & Error Matrix
+- Go 加字段未同步 `models.ts` -> 前端 TS 类型缺字段，`preview.encoding` 类型检查警告（vitest esbuild 不报类型错误，测试仍过，易漏）
+- 只改 `models.ts` 字段声明未改构造函数 -> 运行时该字段为 undefined
+- sub-agent 报告遗漏 `models.ts` 改动 -> trellis-check 须专门查 `git status` 是否残留 `frontend/wailsjs/` 改动（任务 07-09 真实发生：sub-agent 改了 models.ts 但报告未提，trellis-check 未发现，commit 后才暴露）
+
+### 5. Good/Base/Bad Cases
+- Good: 改 Go struct -> 同步 `models.ts`（字段声明+构造函数）-> `git status` 确认无 wailsjs 残留 -> 跑 `npm test`
+- Base: 改 Go struct -> 同步 `models.ts` -> 跑 `npm test`
+- Bad: 改 Go struct 未同步 `models.ts` -> 前端类型缺字段（测试可能仍过，运行时靠 JS 动态取值，类型完整性丢失）
+
+### 6. Tests Required
+- 后端单测覆盖新字段读写
+- 前端若 TS 严格类型，补字段类型断言；vitest 下运行时断言字段值存在
+- commit 前 `git status` 确认 `frontend/wailsjs/` 无未提交残留
+
+### 7. Wrong vs Correct
+#### Wrong
+`model.FilePreview` 新增 `Encoding` 字段，仅改 Go 与 service，未同步 `frontend/wailsjs/go/models.ts`。前端 `preview.encoding` 在 JS 运行时能取到值（JSON 有），但 TS 类型缺失，IDE 无提示，且 `git status` 残留 models.ts 未提交。
+#### Correct
+同步修改 `frontend/wailsjs/go/models.ts` 的 `FilePreview` class：加 `encoding?: string;` 声明 + 构造函数 `this.encoding = source["encoding"];`，与 Go struct 的 json tag 一致。
+
+---
+
 ## Scenario: 文件预览/保存的编码契约（UTF-8 / GBK）
 
 ### 1. Scope / Trigger
