@@ -553,25 +553,49 @@ const findExpandedAncestor = (nodePath, store) => {
   return null
 }
 
-// ---- 刷新节点 ----
-const refreshNode = (nodePath) => {
+// ---- 刷新节点（保留子树展开状态）----
+// 局部刷新指定节点：触发 el-tree loadData 重建子节点，并在重建后恢复子树展开状态。
+// 解决两个问题：
+//   1. 工作目录根下操作不刷新 —— 根路径在 nodesMap 中不存在，此处改用 store.root 兜底；
+//   2. 拷贝/粘贴后目标收起 —— loadData 会 childNodes=[] 重建子节点，丢失子树展开，
+//      此处刷新前记录子树 expandedPaths，重建后逐层恢复。
+// 命中目标后 expand() 会展开目标并加载最新子节点（拷贝到未展开目标时随之展开，符合"看到结果"预期）。
+const refreshNode = async (nodePath) => {
   if (!fileTreeRef.value || !nodePath) return
 
   const store = fileTreeRef.value.store
-  const direct = store.nodesMap[nodePath]
-  if (direct) {
-    direct.loaded = false
-    direct.loading = false
-    direct.expand()
-    return
-  }
+  const dir = props.directories.find(d => d.id === props.selectedDirId)
 
-  const ancestor = findExpandedAncestor(nodePath, store)
-  if (ancestor) {
-    ancestor.loaded = false
-    ancestor.loading = false
-    ancestor.expand()
+  // 规范化路径分隔符（对齐工作目录根的分隔符，避免 \ / 混用导致 nodesMap 查询失败）
+  const sep = dir && dir.path.includes('\\') ? '\\' : '/'
+  const normalize = (p) => sep === '\\' ? (p || '').replace(/\//g, '\\') : (p || '').replace(/\\/g, '/')
+  const normalizedPath = normalize(nodePath)
+  const normalizedRoot = dir ? normalize(dir.path) : ''
+
+  // 定位目标节点：nodesMap 命中 -> 工作目录根(store.root) -> 已展开祖先兜底
+  let target = store.nodesMap[normalizedPath]
+  if (!target && normalizedRoot && normalizedPath === normalizedRoot) {
+    target = store.root
   }
+  if (!target) {
+    target = findExpandedAncestor(nodePath, store)
+  }
+  if (!target) return
+
+  // 刷新前记录子树展开状态（loadData 重建 childNodes 会丢失子树展开）
+  const expandedSubPaths = getExpandedPathsOf(target)
+
+  // 触发重新加载
+  target.loaded = false
+  target.loading = false
+  target.expand()
+
+  // 等待子节点重建完成（el-tree loadData 异步）
+  await waitForNodeLoaded(target, 3000)
+  await nextTick()
+
+  // 恢复子树展开状态
+  await restoreExpandedPaths(expandedSubPaths)
 }
 
 // ---- 全部刷新 ----
@@ -1117,6 +1141,48 @@ function getExpandedPaths() {
   }
   walk(store.root)
   return paths
+}
+
+// 收集指定节点子树的展开路径（用于刷新后恢复子树展开状态）
+function getExpandedPathsOf(node) {
+  const paths = []
+  function walk(n) {
+    if (!n) return
+    if (n.expanded && n.data && n.data.path) {
+      paths.push(n.data.path)
+    }
+    if (n.childNodes) {
+      n.childNodes.forEach(walk)
+    }
+  }
+  walk(node)
+  return paths
+}
+
+// 按记录的路径恢复展开状态（depth 分组逐层展开 + 等待懒加载）
+async function restoreExpandedPaths(paths) {
+  if (!paths || paths.length === 0) return
+  const tree = fileTreeRef.value
+  if (!tree || typeof tree.getNode !== 'function') return
+
+  const depthGroups = new Map()
+  for (const path of paths) {
+    const depth = path.split(/[\\/]/).length
+    if (!depthGroups.has(depth)) depthGroups.set(depth, [])
+    depthGroups.get(depth).push(path)
+  }
+
+  const sortedDepths = [...depthGroups.keys()].sort((a, b) => a - b)
+  for (const depth of sortedDepths) {
+    const pending = []
+    for (const path of depthGroups.get(depth)) {
+      const node = tree.getNode(path)
+      if (!node || node.expanded) continue
+      node.expand()
+      if (!node.loaded) pending.push(waitForNodeLoaded(node, 2000))
+    }
+    if (pending.length > 0) await Promise.all(pending)
+  }
 }
 
 function saveCurrentState(dirPath) {

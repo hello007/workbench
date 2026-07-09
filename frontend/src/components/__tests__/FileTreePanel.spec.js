@@ -337,7 +337,7 @@ describe('FileTreePanel.vue', () => {
 
   describe('全部展开 expandAll', () => {
     it('应递归展开非叶节点并显示成功提示', async () => {
-      const mockExpand = vi.fn((callback) => callback())
+      const mockExpand = vi.fn(function (callback) { this.loaded = true; if (typeof callback === 'function') callback() })
       const childDir = {
         isLeaf: false,
         expanded: false,
@@ -435,7 +435,7 @@ describe('FileTreePanel.vue', () => {
   describe('handleCreate 创建文件', () => {
     it('创建文件夹成功应调用 CreateDirectory 并显示成功提示', async () => {
       const { CreateDirectory } = await import('../../../wailsjs/go/main/App')
-      const mockExpand = vi.fn((callback) => callback())
+      const mockExpand = vi.fn(function (callback) { this.loaded = true; if (typeof callback === 'function') callback() })
       const childDir = {
         data: { path: '/path/a' },
         isLeaf: false,
@@ -471,7 +471,7 @@ describe('FileTreePanel.vue', () => {
 
     it('创建文件成功应调用 CreateFile 并显示成功提示', async () => {
       const { CreateFile } = await import('../../../wailsjs/go/main/App')
-      const mockExpand = vi.fn((callback) => callback())
+      const mockExpand = vi.fn(function (callback) { this.loaded = true; if (typeof callback === 'function') callback() })
       const childDir = {
         data: { path: '/path/a' },
         isLeaf: false,
@@ -574,7 +574,7 @@ describe('FileTreePanel.vue', () => {
   describe('handleRename 重命名', () => {
     it('重命名成功应调用 RenameFile 并显示成功提示', async () => {
       const { RenameFile } = await import('../../../wailsjs/go/main/App')
-      const mockExpand = vi.fn((callback) => callback())
+      const mockExpand = vi.fn(function (callback) { this.loaded = true; if (typeof callback === 'function') callback() })
       const childNode = {
         data: { path: '/path/a' },
         isLeaf: false,
@@ -656,7 +656,7 @@ describe('FileTreePanel.vue', () => {
       const { DeleteFile } = await import('../../../wailsjs/go/main/App')
       ElMessageBox.confirm.mockResolvedValueOnce('confirm')
 
-      const mockExpand = vi.fn((callback) => callback())
+      const mockExpand = vi.fn(function (callback) { this.loaded = true; if (typeof callback === 'function') callback() })
       const childNode = {
         data: { path: '/path/a' },
         isLeaf: false,
@@ -717,18 +717,24 @@ describe('FileTreePanel.vue', () => {
 
   describe('refreshNode 祖先回溯', () => {
     it('命中分支：nodesMap 中存在目标路径时，应直接刷新该节点', async () => {
-      const targetExpand = vi.fn()
-      const ancestorExpand = vi.fn()
+      const targetExpand = vi.fn(function () { this.loaded = true })
+      const ancestorExpand = vi.fn(function () { this.loaded = true })
       const targetNode = {
+        data: { path: '/path/a/src/foo' },
         loaded: true,
         loading: false,
         expanded: true,
+        isLeaf: false,
+        childNodes: [],
         expand: targetExpand
       }
       const ancestorNode = {
+        data: { path: '/path/a/src' },
         loaded: true,
         loading: false,
         expanded: true,
+        isLeaf: false,
+        childNodes: [targetNode],
         expand: ancestorExpand
       }
 
@@ -740,27 +746,31 @@ describe('FileTreePanel.vue', () => {
       })
       await flushPromises()
 
-      wrapper.vm.refreshNode('/path/a/src/foo')
+      await wrapper.vm.refreshNode('/path/a/src/foo')
 
-      expect(targetNode.loaded).toBe(false)
-      expect(targetNode.loading).toBe(false)
       expect(targetExpand).toHaveBeenCalledTimes(1)
       expect(ancestorExpand).not.toHaveBeenCalled()
     })
 
     it('回溯命中分支：目标缺失但存在已展开祖先时，应刷新最近的已展开祖先', async () => {
-      const grandExpand = vi.fn()
-      const parentExpand = vi.fn()
+      const grandExpand = vi.fn(function () { this.loaded = true })
+      const parentExpand = vi.fn(function () { this.loaded = true })
       const grandNode = {
+        data: { path: '/path/a/src' },
         loaded: true,
         loading: false,
         expanded: true,
+        isLeaf: false,
+        childNodes: [],
         expand: grandExpand
       }
       const parentNode = {
+        data: { path: '/path/a/src/foo' },
         loaded: true,
         loading: false,
         expanded: true,
+        isLeaf: false,
+        childNodes: [],
         expand: parentExpand
       }
 
@@ -772,20 +782,21 @@ describe('FileTreePanel.vue', () => {
       })
       await flushPromises()
 
-      wrapper.vm.refreshNode('/path/a/src/foo/bar/baz.txt')
+      await wrapper.vm.refreshNode('/path/a/src/foo/bar/baz.txt')
 
-      expect(parentNode.loaded).toBe(false)
-      expect(parentNode.loading).toBe(false)
       expect(parentExpand).toHaveBeenCalledTimes(1)
       expect(grandExpand).not.toHaveBeenCalled()
     })
 
-    it('静默放弃分支：目标和所有祖先均不可命中时，不应触发任何 expand 也不应改变 treeKey', async () => {
+    it('静默放弃分支：目标和所有祖先均不可命中时，不应触发任何 expand', async () => {
       const parentExpand = vi.fn()
       const parentNode = {
+        data: { path: '/path/a/src/foo' },
         loaded: true,
         loading: false,
         expanded: false,
+        isLeaf: false,
+        childNodes: [],
         expand: parentExpand
       }
 
@@ -796,15 +807,122 @@ describe('FileTreePanel.vue', () => {
       })
       await flushPromises()
 
-      const beforeKey = wrapper.vm.$.exposed?.refreshNode ? null : null
-      // 通过 props selectedDirId 衍生的 treeKey 不在 expose 列表中，
-      // 改用断言"没有 expand 被触发"来验证未触发整树重建。
-      wrapper.vm.refreshNode('/path/a/other/dir/file.txt')
+      await wrapper.vm.refreshNode('/path/a/other/dir/file.txt')
 
       expect(parentExpand).not.toHaveBeenCalled()
       expect(parentNode.loaded).toBe(true)
-      expect(parentNode.loading).toBe(false)
-      expect(beforeKey).toBe(null)
+    })
+
+    it('根节点分支：nodePath 为工作目录根时，应刷新 store.root', async () => {
+      const rootExpand = vi.fn(function () { this.loaded = true })
+      const root = {
+        loaded: true,
+        loading: false,
+        expanded: true,
+        isLeaf: false,
+        childNodes: [],
+        expand: rootExpand
+      }
+
+      wrapper = createWrapperWithStore({
+        root,
+        nodesMap: {}
+      })
+      await flushPromises()
+
+      await wrapper.vm.refreshNode('/path/a')
+
+      expect(rootExpand).toHaveBeenCalledTimes(1)
+    })
+
+    it('路径分隔符规范化：nodePath 用 / 而 nodesMap key 用 \\ 时仍能命中', async () => {
+      const targetExpand = vi.fn(function () { this.loaded = true })
+      const targetNode = {
+        data: { path: 'D:\\proj\\src' },
+        loaded: true,
+        loading: false,
+        expanded: true,
+        isLeaf: false,
+        childNodes: [],
+        expand: targetExpand
+      }
+      const winDirs = [{ id: 'dir-win', name: 'win', path: 'D:\\proj', isDefault: true }]
+      const winStore = {
+        root: { childNodes: [] },
+        nodesMap: { 'D:\\proj\\src': targetNode }
+      }
+      const stubs = {
+        ...defaultStubs,
+        'el-tree': {
+          template: '<div class="el-tree"></div>',
+          props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+          data() { return { store: winStore } }
+        }
+      }
+      wrapper = mount(FileTreePanel, {
+        props: { directories: winDirs, selectedDirId: 'dir-win', clipboard: { mode: null } },
+        global: { stubs }
+      })
+      await flushPromises()
+
+      // nodePath 用正斜杠，应规范化为反斜杠命中 nodesMap
+      await wrapper.vm.refreshNode('D:/proj/src')
+
+      expect(targetExpand).toHaveBeenCalledTimes(1)
+    })
+
+    it('子树展开保留：刷新已展开节点后应恢复其子节点的展开状态', async () => {
+      const subExpand = vi.fn(function () { this.loaded = true; this.expanded = true })
+      const subNode = {
+        data: { path: '/path/a/src/sub' },
+        loaded: true,
+        loading: false,
+        expanded: true,
+        isLeaf: false,
+        childNodes: [],
+        expand: subExpand
+      }
+      // target.expand 模拟 loadData 重建：子节点被重置为未展开的新节点
+      const targetExpand = vi.fn(function () {
+        this.loaded = true
+        subNode.expanded = false
+        this.childNodes = [subNode]
+      })
+      const targetNode = {
+        data: { path: '/path/a/src' },
+        loaded: true,
+        loading: false,
+        expanded: true,
+        isLeaf: false,
+        childNodes: [subNode],
+        expand: targetExpand
+      }
+      const subStore = {
+        root: { childNodes: [targetNode] },
+        nodesMap: { '/path/a/src': targetNode, '/path/a/src/sub': subNode }
+      }
+      const stubs = {
+        ...defaultStubs,
+        'el-tree': {
+          template: '<div class="el-tree"></div>',
+          props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+          data() { return { store: subStore } },
+          methods: {
+            getNode(path) { return subStore.nodesMap[path] }
+          }
+        }
+      }
+      wrapper = mount(FileTreePanel, {
+        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
+        global: { stubs }
+      })
+      await flushPromises()
+
+      await wrapper.vm.refreshNode('/path/a/src')
+
+      expect(targetExpand).toHaveBeenCalledTimes(1)
+      // 重建后 subNode 被重置为未展开，restoreExpandedPaths 应重新展开它
+      expect(subExpand).toHaveBeenCalledTimes(1)
     })
   })
 })
