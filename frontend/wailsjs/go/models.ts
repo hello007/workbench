@@ -269,6 +269,7 @@ export namespace model {
 	    tooLarge: boolean;
 	    error?: string;
 	    kind?: string;
+	    encoding?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new FilePreview(source);
@@ -284,6 +285,7 @@ export namespace model {
 	        this.tooLarge = source["tooLarge"];
 	        this.error = source["error"];
 	        this.kind = source["kind"];
+	        this.encoding = source["encoding"];
 	    }
 	}
 	export class FileTreeNode {
