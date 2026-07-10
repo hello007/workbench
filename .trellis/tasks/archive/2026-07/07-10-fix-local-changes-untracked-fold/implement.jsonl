@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "跨层契约护栏：本任务仅改 service/git.go 的 git status 取数参数（加 --untracked-files=all），不得改动 app.go 方法签名、model.FileChange struct 字段或文件编码逻辑，避免触发 Wails 绑定 / models.ts 失同步。根因、复现数据与方案见同目录 prd.md。"}

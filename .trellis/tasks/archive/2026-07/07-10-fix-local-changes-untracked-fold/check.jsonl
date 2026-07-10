@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "check 阶段核验改动未越界：未触及 app.go 方法签名、model.FileChange struct、frontend/wailsjs/go/models.ts、文件编码逻辑。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端质量/测试规范入口（项目待填充）；参照现有 service/git_test.go 的测试组织方式，补充 --untracked-files=all 解析测试（未跟踪目录展开、中文路径）。"}
