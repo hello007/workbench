@@ -846,3 +846,36 @@ GitInfo 仓库远程地址 http(s) 链接由内置 webview 改为系统默认浏
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: 修复本地变动未跟踪目录折叠显示不完整
+
+**Date**: 2026-07-10
+**Task**: 修复本地变动未跟踪目录折叠显示不完整
+**Branch**: `master`
+
+### Summary
+
+右栏本地变动面板对 Git 仓库显示不完整。根因：GetLocalChanges 用 git status --porcelain -z（默认 --untracked-files=normal）会把未跟踪目录折叠为单行 ?? dir/。改为追加 --untracked-files=all 展开目录内每个文件（复现仓库 all_in_ai 36→116，仍尊重 .gitignore）。顺带修复实测发现的既有 bug：git status -z 重命名格式为目标在前、源在后，原代码误用源路径覆盖目标路径导致重命名文件显示旧路径，修正后显示当前路径。补 3 个单测，trellis-check 全绿，文档无需更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f845d71` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
