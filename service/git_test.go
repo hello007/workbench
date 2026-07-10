@@ -390,3 +390,130 @@ func TestPush_NoUpstream(t *testing.T) {
 		t.Fatal("expected error when pushing without remote/upstream")
 	}
 }
+
+// TestGetLocalChanges_UntrackedDirExpanded 验证未跟踪目录被展开为内部每个文件单独成条
+// （对应 --untracked-files=all），而非默认 --untracked-files=normal 的单行 ?? dir/
+func TestGetLocalChanges_UntrackedDirExpanded(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// 建立初始提交（确立 HEAD，未跟踪目录内文件均为真正新增）
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// 在未跟踪目录下放多个文件
+	writeFile(t, filepath.Join(repo, "newdir", "f1.txt"), "one")
+	writeFile(t, filepath.Join(repo, "newdir", "f2.txt"), "two")
+	writeFile(t, filepath.Join(repo, "newdir", "sub", "f3.txt"), "three")
+
+	changes, err := svc.GetLocalChanges(repo)
+	if err != nil {
+		t.Fatalf("GetLocalChanges failed: %v", err)
+	}
+
+	want := map[string]bool{
+		"newdir/f1.txt":      false,
+		"newdir/f2.txt":      false,
+		"newdir/sub/f3.txt":  false,
+	}
+	for _, c := range changes {
+		// 未跟踪文件状态码为 ?
+		if _, ok := want[c.Path]; ok {
+			if c.Status != "?" {
+				t.Errorf("path %s: expected status '?', got %q", c.Path, c.Status)
+			}
+			if c.Staged {
+				t.Errorf("path %s: expected Staged=false for untracked", c.Path)
+			}
+			want[c.Path] = true
+		}
+	}
+	for path, found := range want {
+		if !found {
+			t.Errorf("expected untracked file %q in changes, not found (dir was collapsed?)", path)
+		}
+	}
+
+	// 目录本身不应作为独立条目出现（折叠形态 newdir/ 不应存在）
+	for _, c := range changes {
+		if c.Path == "newdir/" || c.Path == "newdir" {
+			t.Errorf("untracked dir should be expanded, got collapsed entry: %q", c.Path)
+		}
+	}
+}
+
+// TestGetLocalChanges_ChineseUntrackedPath 验证 -z 下中文路径原样保留且被 -uall 展开
+func TestGetLocalChanges_ChineseUntrackedPath(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(repo, "中文目录", "文件.txt"), "中文内容")
+
+	changes, err := svc.GetLocalChanges(repo)
+	if err != nil {
+		t.Fatalf("GetLocalChanges failed: %v", err)
+	}
+
+	found := false
+	for _, c := range changes {
+		if c.Path == filepath.ToSlash(filepath.Join("中文目录", "文件.txt")) {
+			found = true
+			if c.Status != "?" {
+				t.Errorf("expected status '?', got %q", c.Status)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("chinese untracked path not found in changes: %+v", changes)
+	}
+}
+
+// TestGetLocalChanges_RenameStillParses 验证 -uall 下重命名(R)两段式路径解析。
+//
+// git status -z 重命名条目格式为 "R  new.txt\x00old.txt\x00"（目标在前、源在后）：
+// 目标路径已在 seg[3:]，下一段为源路径，解析器仅跳过、不取作 Path。
+// 故 staged 记录的 Path 应为目标路径 new.txt，源路径 old.txt 不应出现。
+func TestGetLocalChanges_RenameStillParses(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// 初始提交一个文件
+	writeFile(t, filepath.Join(repo, "old.txt"), "content\n")
+	runGit(t, repo, "add", "old.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// git mv 制造重命名（已暂存，状态 R）
+	runGit(t, repo, "mv", "old.txt", "new.txt")
+
+	changes, err := svc.GetLocalChanges(repo)
+	if err != nil {
+		t.Fatalf("GetLocalChanges failed: %v", err)
+	}
+
+	// 重命名应只产出一条记录（两段式折叠为一条），且 Staged=true
+	renameCount := 0
+	hasNew := false
+	for _, c := range changes {
+		if c.Staged {
+			renameCount++
+			if c.Path == "new.txt" {
+				hasNew = true
+			}
+		}
+		// 源路径 old.txt 不应作为任何条目的 Path（既非独立条目，也非 rename 条目的 Path）
+		if c.Path == "old.txt" {
+			t.Errorf("source path old.txt should not appear as a change entry: %+v", c)
+		}
+	}
+	if renameCount != 1 {
+		t.Errorf("expected exactly 1 staged rename entry, got %d: %+v", renameCount, changes)
+	}
+	if !hasNew {
+		t.Errorf("staged rename entry should use target path new.txt, got changes: %+v", changes)
+	}
+}

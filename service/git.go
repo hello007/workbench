@@ -254,7 +254,10 @@ func (s *GitService) GetLocalChanges(dirPath string) ([]model.FileChange, error)
 	}
 
 	// 使用 -z 以 NUL 分隔输出，避免路径引号和八进制转义问题
-	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain", "-z")
+	// 追加 --untracked-files=all 展开未跟踪目录内的每个文件，
+	// 避免 git 默认 --untracked-files=normal 把未跟踪目录折叠为单行 ?? dir/
+	// 导致本地变动面板显示不完整。仍尊重 .gitignore，被忽略文件不会出现。
+	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, fmt.Errorf("获取本地变动失败: %w", err)
 	}
@@ -276,10 +279,10 @@ func (s *GitService) GetLocalChanges(dirPath string) ([]model.FileChange, error)
 		statusRaw := seg[:2]
 		filePath := seg[3:]
 
-		// 重命名/复制时，下一个 segment 是目标路径
+		// 重命名/复制：git -z 格式为 "XY <目标路径> NUL <源路径> NUL"，
+		// 目标路径已在 seg[3:]，下一段是源路径（仅跳过，不取作 filePath）。
 		if (statusRaw[0] == 'R' || statusRaw[0] == 'C') && i+1 < len(segments) && segments[i+1] != "" {
-			filePath = segments[i+1]
-			i++
+			i++ // 跳过源路径
 		}
 
 		// 取工作区状态码
