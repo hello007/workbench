@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-07-10
+- **Total Sessions**: 27
+- **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~881 | Active |
+| `journal-1.md` | ~914 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-07-13 | 文件节点刷新自动刷新其所在目录 | `bbd19e0` | `master` |
 | 26 | 2026-07-10 | 修复本地变动未跟踪目录折叠显示不完整 | `f845d71` | `master` |
 | 25 | 2026-07-08 | 使用系统默认浏览器打开http链接 | `37e3dff` | `master` |
 | 24 | 2026-07-08 | Obsidian 未注册 vault 报错处理：预检、引导与自动注册 | `f3308f1`, `d44e9d0` | `master` |

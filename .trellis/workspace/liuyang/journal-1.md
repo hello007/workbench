@@ -879,3 +879,36 @@ GitInfo 仓库远程地址 http(s) 链接由内置 webview 改为系统默认浏
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: 文件节点刷新自动刷新其所在目录
+
+**Date**: 2026-07-13
+**Task**: 文件节点刷新自动刷新其所在目录
+**Branch**: `master`
+
+### Summary
+
+FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 store.root），修复对叶子节点 expand() 无效导致刷新无反应；文件右键菜单新增「刷新 F5」项，F5 入口因逻辑内聚于 refreshNode 自动受益。新增 2 个单测，全量 210 测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbd19e0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
