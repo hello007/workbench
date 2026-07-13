@@ -308,6 +308,10 @@
         <li class="context-menu-item" @click="onMenuCommand('openWithDefaultApp')">
           <el-icon><Open /></el-icon>用默认程序打开
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('refresh')">
+          <el-icon><Refresh /></el-icon>刷新
+          <span class="context-menu-shortcut">F5</span>
+        </li>
         <li class="context-menu-divider" />
         <li v-if="isFavorited" class="context-menu-item" @click="onMenuCommand('removeFavorite')">
           <el-icon><StarFilled /></el-icon>取消收藏
@@ -581,6 +585,13 @@ const refreshNode = async (nodePath) => {
     target = findExpandedAncestor(nodePath, store)
   }
   if (!target) return
+
+  // 目标是文件时刷新其所在目录：文件作为叶子节点无子节点可重载，对其 expand() 无效，
+  // 故上溯到父节点（文件位于工作目录根下时父节点即 store.root）。
+  // 对未命中而走 findExpandedAncestor 的路径，target 已是目录，不会进入此分支。
+  if (target.data && target.data.type === 'file' && target.parent) {
+    target = target.parent
+  }
 
   // 刷新前记录子树展开状态（loadData 重建 childNodes 会丢失子树展开）
   const expandedSubPaths = getExpandedPathsOf(target)

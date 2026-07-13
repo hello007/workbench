@@ -925,4 +925,78 @@ describe('FileTreePanel.vue', () => {
       expect(subExpand).toHaveBeenCalledTimes(1)
     })
   })
+
+  describe('refreshNode 文件节点刷新所在目录', () => {
+    it('传入文件路径时，应刷新其父目录而非文件本身', async () => {
+      const dirExpand = vi.fn(function () { this.loaded = true })
+      const fileExpand = vi.fn(function () { this.loaded = true })
+      const dirNode = {
+        data: { path: '/path/a/src', type: 'directory' },
+        loaded: true, loading: false, expanded: true, isLeaf: false,
+        childNodes: [], expand: dirExpand
+      }
+      const fileNode = {
+        data: { path: '/path/a/src/foo.txt', type: 'file' },
+        loaded: true, loading: false, expanded: false, isLeaf: true,
+        childNodes: [], parent: dirNode, expand: fileExpand
+      }
+      dirNode.childNodes = [fileNode]
+      const store = {
+        root: { childNodes: [dirNode] },
+        nodesMap: { '/path/a/src': dirNode, '/path/a/src/foo.txt': fileNode }
+      }
+      const stubs = {
+        ...defaultStubs,
+        'el-tree': {
+          template: '<div class="el-tree"></div>',
+          props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+          data() { return { store } },
+          methods: { getNode(p) { return store.nodesMap[p] } }
+        }
+      }
+      wrapper = mount(FileTreePanel, {
+        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
+        global: { stubs }
+      })
+      await flushPromises()
+
+      await wrapper.vm.refreshNode('/path/a/src/foo.txt')
+
+      expect(dirExpand).toHaveBeenCalledTimes(1)
+      expect(fileExpand).not.toHaveBeenCalled()
+    })
+
+    it('文件位于工作目录根下时，应刷新 store.root', async () => {
+      const rootExpand = vi.fn(function () { this.loaded = true })
+      const root = {
+        loaded: true, loading: false, expanded: true, isLeaf: false,
+        childNodes: [], expand: rootExpand
+      }
+      const fileNode = {
+        data: { path: '/path/a/root.txt', type: 'file' },
+        loaded: true, loading: false, expanded: false, isLeaf: true,
+        childNodes: [], parent: root, expand: vi.fn(function () { this.loaded = true })
+      }
+      root.childNodes = [fileNode]
+      const store = { root, nodesMap: { '/path/a/root.txt': fileNode } }
+      const stubs = {
+        ...defaultStubs,
+        'el-tree': {
+          template: '<div class="el-tree"></div>',
+          props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+          data() { return { store } },
+          methods: { getNode(p) { return store.nodesMap[p] } }
+        }
+      }
+      wrapper = mount(FileTreePanel, {
+        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
+        global: { stubs }
+      })
+      await flushPromises()
+
+      await wrapper.vm.refreshNode('/path/a/root.txt')
+
+      expect(rootExpand).toHaveBeenCalledTimes(1)
+    })
+  })
 })
