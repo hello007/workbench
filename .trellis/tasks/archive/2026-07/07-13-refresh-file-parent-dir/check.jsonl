@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查时确认改动复用了 refreshNode、未在右键与 F5 两个调用点重复「文件→父目录」的路径计算逻辑，符合单一数据源"}

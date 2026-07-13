@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务方案A的核心是复用既有 refreshNode（在内部统一处理「文件→父目录」），而非在右键菜单与 F5 两处重复实现父路径计算；该指南约束实现时先搜索/复用、避免重复逻辑"}
