@@ -359,6 +359,15 @@ const { list, containerProps, wrapperProps, scrollTo } = useVirtualList(
   filteredRepos,
   { itemHeight: ITEM_HEIGHT, overscan: 10 }
 )
+// [方案B 兜底] 强制垂直滚动条常显，彻底消除"前面不显示、下面才显示"的抖动。
+// 根因：useVirtualList 内联注入 containerProps.style.overflowY='auto'（@vueuse/core index.mjs:7064），
+// Windows 经典滚动条占宽，滚动条出现/消失时 content-box 宽度跳变，useElementSize 默认 box:'content-box'
+// 监听该跳变 -> 触发 calculateRange 重算 -> 临界溢出抖动 -> 滚动条 thumb 时有时无。
+// 此处覆盖为 'scroll'：即使内容不溢出也保留禁用态 thumb，滚动条轨道+thumb 始终在，彻底消除"时有时无"。
+// containerProps.style 是 useVerticalVirtualList 内部普通对象 { overflowY:'auto' }，可写且引用稳定；
+// useVirtualList 内部逻辑不读取 overflowY（仅作为 inline style 返回），故仅改该字段不破坏
+// containerProps 的 ref/onScroll。配合 .repo-list 的 scrollbar-gutter:stable（方案A）双保险。
+containerProps.style.overflowY = 'scroll'
 
 // ---- 防抖自动保存（F16）----
 // useDebounceFn 在 @vueuse 12 未暴露 flush/cancel，改用 useTimeoutFn 手动管控：
@@ -416,10 +425,9 @@ async function onSelect(item) {
   await flushPendingSave()
   selectedPath.value = item.path
   syncEditState(item)
-  // 选中项滚回可视区（数据已就绪，nextTick 确保虚拟列表 slice 更新）
-  await nextTick()
-  const idx = filteredRepos.value.findIndex(r => r.path === item.path)
-  if (idx >= 0) scrollTo(idx)
+  // 不强制滚动：用户点击的项已在可视区，保持当前滚动位置，避免选中项被强制顶到顶部。
+  // 切 Tab 首选项（watch(activeTab) 的 scrollTo(0)）、刷新后选中项归位
+  // （loadList keepRepo 分支的 scrollTo(idx)）由各自场景单独处理。
 }
 
 // ---- 简述编辑 ----
@@ -670,10 +678,19 @@ onBeforeUnmount(() => {
 .repo-split-wrap :deep(.splitpanes) {
   width: 100%;
   height: 100%;
+  /* 补 min-height:0：.splitpanes 是 .repo-split-wrap(flex row) 的 flex item，
+     默认 min-height:auto 会被内部 pane content 撑高，使 height:100% 失效、
+     整条 flex 链被撑开（.repo-list 高度=内容高度不滚动，滚动条不显示）。
+     min-height:0 允许 .splitpanes 收缩到 height:100%，断点修复。 */
+  min-height: 0;
 }
 .repo-split-wrap :deep(.splitpanes__pane) {
   display: flex;
   min-height: 0;
+  /* min-width:0：Pane 是 splitpanes(flex row) 的 flex item，默认 min-width:auto
+     会被内部长路径等 min-content 撑开超出分配宽度，导致子元素 .repo-list 超出 Pane、
+     滚动条被 Pane overflow:hidden 裁剪（看不到滚动条的根因）。 */
+  min-width: 0;
 }
 
 /* 左栏：虚拟滚动容器必须定高 */
@@ -682,11 +699,30 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* min-width:0：作为 Pane(flex row) 的 flex item，默认 min-width:auto 会被
+     .repo-list 内部长路径 min-content 撑开超出 Pane，导致 .repo-list 超出 Pane、
+     滚动条被 Pane overflow:hidden 裁剪。与 :deep(.splitpanes__pane) 的 min-width:0
+     配合，切断横向撑开链。 */
+  min-width: 0;
   position: relative;
 }
 .repo-list {
-  height: 100%;
+  /* flex column 容器里 height:100% 受 flex item 默认 min-height:auto 影响，
+     会被虚拟列表 wrapperProps 的 totalHeight 撑开，导致容器高度等于全部内容高度、
+     内联 overflow-y:auto 不触发滚动条（bug2：滚动条只在滑到底部才出现）。
+     改用 flex:1 + min-height:0 让容器收缩到可视区高度，滚动条在内容超出时一直可见。
+     overflow-y 由 useVirtualList containerProps 的内联 style 提供（方案B 已在 setup 改为 'scroll'）。 */
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0;
   width: 100%;
+  /* [方案A] 滚动条轨道常驻：为滚动条预留固定空间，使 content-box 宽度始终 = W - 滚动条宽，
+     消除滚动条出现/消失导致的 content-box 宽度跳变（bug：width:100% 子元素宽度在顶部/底部不一致），
+     并切断 useElementSize 监听 content-box 宽度 -> calculateRange 重算 的反馈环
+     （bug：滚动条前面不显示、滑到下面才显示）。
+     仅 overflow 为 auto/scroll 时生效；containerProps.style.overflowY 已被方案B 改为 'scroll'，符合条件。
+     与方案B（overflow-y:scroll 强制 thumb 常显）叠加，轨道+thumb 始终在，content-box 宽度恒定。 */
+  scrollbar-gutter: stable;
 }
 .repo-list-hint {
   position: absolute;
