@@ -1,0 +1,70 @@
+{
+  "colors": {
+    "primary": "#4361ee",
+    "success": "#10b981",
+    "danger": "#ef4444",
+    "background": "#f8f9fa",
+    "containerBackground": "#f8f9fa",
+    "cardBackground": "#ffffff",
+    "metaBackground": "#e9ecef",
+    "border": "#dee2e6",
+    "labelText": "#212529",
+    "valueText": "#495057",
+    "descText": "#6c757d",
+    "white": "#ffffff",
+    "buttonHover": "#f8f9fa",
+    "secondaryHover": "#ced4da",
+    "shadowColor": "#000000"
+  },
+  "fontSizes": {
+    "meta": 13,
+    "title": 13,
+    "content": 12,
+    "question": 12,
+    "optionLabel": 11,
+    "optionDesc": 10,
+    "message": 12,
+    "button": 12,
+    "customLabel": 9,
+    "customInput": 10
+  },
+  "fontFamily": {
+    "text": "Microsoft YaHei, Segoe UI",
+    "mono": "Consolas"
+  },
+  "cornerRadius": {
+    "card": 8,
+    "meta": 6,
+    "button": 6,
+    "option": 6
+  },
+  "shadow": {
+    "blurRadius": 20,
+    "shadowDepth": 4,
+    "opacity": 0.12,
+    "direction": 315
+  },
+  "spacing": {
+    "metaPadding": "20,16",
+    "metaLineSpacing": 2,
+    "contentPadding": "20",
+    "titleMargin": "20,18,20,12",
+    "questionPadding": "20,12,20,12",
+    "buttonMargin": "0,0,16,0",
+    "optionMargin": "0,0,0,8",
+    "optionPadding": "12",
+    "sectionMargin": "0,0,0,12",
+    "customInputMargin": "20,12,20,8",
+    "customLabelMargin": "0,0,0,8",
+    "separatorMargin": "0,0,0,12"
+  },
+  "button": {
+    "minHeight": 36
+  },
+  "window": {
+    "minWidth": 600,
+    "maxWidth": 800,
+    "minHeight": 200,
+    "maxHeight": 700
+  }
+}

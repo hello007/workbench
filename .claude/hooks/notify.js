@@ -55,13 +55,17 @@ function loadStyles() {
       success: '#10b981',
       danger: '#ef4444',
       background: '#f8f9fa',
+      containerBackground: '#f8f9fa',
+      cardBackground: '#ffffff',
       metaBackground: '#e9ecef',
       border: '#dee2e6',
       labelText: '#212529',
       valueText: '#495057',
       descText: '#6c757d',
       white: '#ffffff',
-      buttonHover: '#f8f9fa'
+      buttonHover: '#f8f9fa',
+      secondaryHover: '#ced4da',
+      shadowColor: '#000000'
     },
     fontSizes: {
       meta: 13,
@@ -75,19 +79,38 @@ function loadStyles() {
       customLabel: 9,
       customInput: 10
     },
+    fontFamily: {
+      text: 'Microsoft YaHei, Segoe UI',
+      mono: 'Consolas'
+    },
+    cornerRadius: {
+      card: 8,
+      meta: 6,
+      button: 6,
+      option: 6
+    },
+    shadow: {
+      blurRadius: 20,
+      shadowDepth: 4,
+      opacity: 0.12,
+      direction: 315
+    },
     spacing: {
       metaPadding: '20,16',
       metaLineSpacing: 2,
       contentPadding: '20',
       titleMargin: '20,18,20,12',
       questionPadding: '20,12,20,12',
-      buttonMargin: '0,8,0,0',
+      buttonMargin: '0,0,16,0',
       optionMargin: '0,0,0,8',
       optionPadding: '12',
       sectionMargin: '0,0,0,12',
       customInputMargin: '20,12,20,8',
       customLabelMargin: '0,0,0,8',
       separatorMargin: '0,0,0,12'
+    },
+    button: {
+      minHeight: 36
     },
     window: {
       minWidth: 600,
@@ -103,7 +126,11 @@ function loadStyles() {
       return {
         colors: { ...defaults.colors, ...userStyles.colors },
         fontSizes: { ...defaults.fontSizes, ...userStyles.fontSizes },
+        fontFamily: { ...defaults.fontFamily, ...userStyles.fontFamily },
+        cornerRadius: { ...defaults.cornerRadius, ...userStyles.cornerRadius },
+        shadow: { ...defaults.shadow, ...userStyles.shadow },
         spacing: { ...defaults.spacing, ...userStyles.spacing },
+        button: { ...defaults.button, ...userStyles.button },
         window: { ...defaults.window, ...userStyles.window }
       };
     }
@@ -115,6 +142,9 @@ function loadStyles() {
 }
 
 const UI_STYLES = loadStyles();
+
+// 预览模式：node notify.js --preview 时注入模拟数据依次渲染三弹窗，供目视验收
+const PREVIEW_MODE = process.argv.includes('--preview');
 
 // ============================================
 // 工具函数
@@ -153,7 +183,7 @@ function encodeUtf8ToBase64(str) {
 
 // 生成样式辅助函数
 function getStyleHelpers() {
-  const { colors, fontSizes, spacing } = UI_STYLES;
+  const { colors, fontSizes, fontFamily, cornerRadius, shadow, spacing, button } = UI_STYLES;
 
   return {
     // 窗口基础样式
@@ -207,7 +237,66 @@ ${varName}.add_MouseLeave({
     // 颜色快速访问
     colors,
     fontSizes,
-    spacing
+    fontFamily,
+    cornerRadius,
+    shadow,
+    spacing,
+    // 卡片阴影效果（DropShadowEffect）
+    cardEffect: (varName) => `
+$${varName}Effect = New-Object System.Windows.Media.Effects.DropShadowEffect
+$${varName}Effect.Color = [System.Windows.Media.ColorConverter]::ConvertFromString('${colors.shadowColor}')
+$${varName}Effect.BlurRadius = ${shadow.blurRadius}
+$${varName}Effect.ShadowDepth = ${shadow.shadowDepth}
+$${varName}Effect.Opacity = ${shadow.opacity}
+$${varName}Effect.Direction = ${shadow.direction}
+$${varName}.Effect = $${varName}Effect`,
+    // 圆角按钮样式（注入 ControlTemplate 实现 CornerRadius，variant: primary/secondary/success/danger）
+    buttonStyle: (varName, variant) => {
+      const isSecondary = variant === 'secondary';
+      const bg = isSecondary ? colors.metaBackground
+        : (variant === 'primary' ? colors.primary
+          : variant === 'success' ? colors.success : colors.danger);
+      const fg = isSecondary ? colors.labelText : colors.white;
+      const borderBrush = colors.border;
+      const borderThickness = 0;
+      const hoverCode = isSecondary
+        ? `$${varName}.add_MouseEnter({ $this.Background = '${colors.secondaryHover}' })
+$${varName}.add_MouseLeave({ $this.Background = '${colors.metaBackground}' })`
+        : `$${varName}.add_MouseEnter({ $this.Opacity = 0.9 })
+$${varName}.add_MouseLeave({ $this.Opacity = 1.0 })`;
+      return `
+$${varName}.Background = '${bg}'
+$${varName}.Foreground = '${fg}'
+$${varName}.BorderBrush = '${borderBrush}'
+$${varName}.BorderThickness = '${borderThickness}'
+$${varName}.Padding = '12,8'
+$${varName}.MinHeight = ${button.minHeight}
+$${varName}.Margin = '${spacing.buttonMargin}'
+$${varName}.FontSize = ${fontSizes.button}
+$${varName}.FontWeight = 'Bold'
+$${varName}.Cursor = 'Hand'
+$${varName}.FontFamily = '${fontFamily.text}'
+$${varName}Tpl = [System.Windows.Markup.XamlReader]::Parse('<ControlTemplate TargetType="Button" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="${cornerRadius.button}" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></ControlTemplate>')
+$${varName}.Template = $${varName}Tpl
+${hoverCode}`;
+    },
+    // 字体设置（text 正文 / mono 等宽）
+    textFont: (varName, type) => `$${varName}.FontFamily = '${type === 'mono' ? fontFamily.mono : fontFamily.text}'`,
+    // 选项按钮样式（圆角 ControlTemplate + 左对齐 + 白底边框 + hover，用于 AskUserQuestion 单选项）
+    optionButtonStyle: (varName) => `
+$${varName}.Background = '${colors.white}'
+$${varName}.Foreground = '${colors.labelText}'
+$${varName}.BorderBrush = '${colors.border}'
+$${varName}.BorderThickness = '1'
+$${varName}.Padding = '8'
+$${varName}.Margin = '0,0,0,4'
+$${varName}.Cursor = 'Hand'
+$${varName}.HorizontalContentAlignment = 'Left'
+$${varName}.FontFamily = '${fontFamily.text}'
+$${varName}Tpl = [System.Windows.Markup.XamlReader]::Parse('<ControlTemplate TargetType="Button" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="${cornerRadius.option}" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/></Border></ControlTemplate>')
+$${varName}.Template = $${varName}Tpl
+$${varName}.add_MouseEnter({ $this.Background = '${colors.buttonHover}' })
+$${varName}.add_MouseLeave({ $this.Background = '${colors.white}' })`
   };
 }
 
@@ -220,7 +309,7 @@ function generateMetaInfoBar(sessionId, cwd, additionalFields = []) {
   const sessionLabel_b64 = encodeUtf8ToBase64('🔖 会话');
   const pathLabel_b64 = encodeUtf8ToBase64('📁 路径');
 
-  const { colors, fontSizes, spacing } = UI_STYLES;
+  const { colors, fontSizes, fontFamily, cornerRadius, spacing } = UI_STYLES;
 
   const additionalRows = additionalFields.map(field => {
     const label_b64 = encodeUtf8ToBase64(field.label);
@@ -231,10 +320,10 @@ $${field.id}Row.Orientation = 'Horizontal'
 $${field.id}Row.Margin = '0,0,0,${spacing.metaLineSpacing}'
 $${field.id}Lbl = New-Object System.Windows.Controls.TextBlock
 $${field.id}Lbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${label_b64}')) + ': '
-$${field.id}Lbl.FontSize = ${fontSizes.meta}; $${field.id}Lbl.FontWeight = 'Bold'; $${field.id}Lbl.Foreground = '${colors.labelText}'
+$${field.id}Lbl.FontSize = ${fontSizes.meta}; $${field.id}Lbl.FontWeight = 'Bold'; $${field.id}Lbl.Foreground = '${colors.labelText}'; $${field.id}Lbl.FontFamily = '${fontFamily.text}'
 $${field.id}Val = New-Object System.Windows.Controls.TextBlock
 $${field.id}Val.Text = '${value}'
-$${field.id}Val.FontSize = ${fontSizes.meta}; $${field.id}Val.Foreground = '${colors.valueText}'; $${field.id}Val.FontFamily = 'Consolas'
+$${field.id}Val.FontSize = ${fontSizes.meta}; $${field.id}Val.Foreground = '${colors.valueText}'; $${field.id}Val.FontFamily = '${fontFamily.mono}'
 ${field.wrap ? `$${field.id}Val.TextWrapping = 'Wrap'` : ''}
 $${field.id}Row.AddChild($${field.id}Lbl); $${field.id}Row.AddChild($${field.id}Val)
 $metaPanel.AddChild($${field.id}Row)
@@ -248,6 +337,7 @@ $metaBar.Background = '${colors.metaBackground}'
 $metaBar.Padding = '${spacing.metaPadding}'
 $metaBar.BorderBrush = '${colors.border}'
 $metaBar.BorderThickness = '0,1,0,1'
+$metaBar.CornerRadius = '${cornerRadius.meta}'
 [System.Windows.Controls.Grid]::SetRow($metaBar, 1)
 
 $metaPanel = New-Object System.Windows.Controls.StackPanel
@@ -257,10 +347,10 @@ $projectRow.Orientation = 'Horizontal'
 $projectRow.Margin = '0,0,0,${spacing.metaLineSpacing}'
 $projectLbl = New-Object System.Windows.Controls.TextBlock
 $projectLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${projectLabel_b64}')) + ': '
-$projectLbl.FontSize = ${fontSizes.meta}; $projectLbl.FontWeight = 'Bold'; $projectLbl.Foreground = '${colors.labelText}'
+$projectLbl.FontSize = ${fontSizes.meta}; $projectLbl.FontWeight = 'Bold'; $projectLbl.Foreground = '${colors.labelText}'; $projectLbl.FontFamily = '${fontFamily.text}'
 $projectVal = New-Object System.Windows.Controls.TextBlock
 $projectVal.Text = '${projectName.replace(/'/g, "''")}'
-$projectVal.FontSize = ${fontSizes.meta}; $projectVal.Foreground = '${colors.valueText}'; $projectVal.FontFamily = 'Consolas'
+$projectVal.FontSize = ${fontSizes.meta}; $projectVal.Foreground = '${colors.valueText}'; $projectVal.FontFamily = '${fontFamily.mono}'
 $projectRow.AddChild($projectLbl); $projectRow.AddChild($projectVal)
 $metaPanel.AddChild($projectRow)
 
@@ -269,10 +359,10 @@ $sessionRow.Orientation = 'Horizontal'
 $sessionRow.Margin = '0,0,0,${spacing.metaLineSpacing}'
 $sessionLbl = New-Object System.Windows.Controls.TextBlock
 $sessionLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${sessionLabel_b64}')) + ': '
-$sessionLbl.FontSize = ${fontSizes.meta}; $sessionLbl.FontWeight = 'Bold'; $sessionLbl.Foreground = '${colors.labelText}'
+$sessionLbl.FontSize = ${fontSizes.meta}; $sessionLbl.FontWeight = 'Bold'; $sessionLbl.Foreground = '${colors.labelText}'; $sessionLbl.FontFamily = '${fontFamily.text}'
 $sessionVal = New-Object System.Windows.Controls.TextBlock
 $sessionVal.Text = '${sessionShort}'
-$sessionVal.FontSize = ${fontSizes.meta}; $sessionVal.Foreground = '${colors.valueText}'; $sessionVal.FontFamily = 'Consolas'
+$sessionVal.FontSize = ${fontSizes.meta}; $sessionVal.Foreground = '${colors.valueText}'; $sessionVal.FontFamily = '${fontFamily.mono}'
 $sessionRow.AddChild($sessionLbl); $sessionRow.AddChild($sessionVal)
 $metaPanel.AddChild($sessionRow)
 
@@ -281,10 +371,10 @@ $pathRow.Orientation = 'Horizontal'
 $pathRow.Margin = '0,0,0,${spacing.metaLineSpacing}'
 $pathLbl = New-Object System.Windows.Controls.TextBlock
 $pathLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${pathLabel_b64}')) + ': '
-$pathLbl.FontSize = ${fontSizes.meta}; $pathLbl.FontWeight = 'Bold'; $pathLbl.Foreground = '${colors.labelText}'
+$pathLbl.FontSize = ${fontSizes.meta}; $pathLbl.FontWeight = 'Bold'; $pathLbl.Foreground = '${colors.labelText}'; $pathLbl.FontFamily = '${fontFamily.text}'
 $pathVal = New-Object System.Windows.Controls.TextBlock
 $pathVal.Text = '${cwd.replace(/\\/g, '\\\\').replace(/'/g, "''")}'
-$pathVal.FontSize = ${fontSizes.meta}; $pathVal.Foreground = '${colors.valueText}'; $pathVal.FontFamily = 'Consolas'
+$pathVal.FontSize = ${fontSizes.meta}; $pathVal.Foreground = '${colors.valueText}'; $pathVal.FontFamily = '${fontFamily.mono}'
 $pathVal.TextWrapping = 'Wrap'
 $pathRow.AddChild($pathLbl); $pathRow.AddChild($pathVal)
 $metaPanel.AddChild($pathRow)
@@ -399,6 +489,7 @@ function handlePermissionRequest(data) {
 
   playSound(SOUND_EXCLAMATION);
 
+  const S = getStyleHelpers();
   const toolInput = extractField(data, 'tool_input', {});
   const suggestions = data.permission_suggestions || [];
   const cwd = extractField(data, 'cwd', '');
@@ -435,7 +526,7 @@ $w.Width = 700
 $w.Height = 450
 $w.WindowStartupLocation = 'CenterScreen'
 $w.ResizeMode = 'NoResize'
-$w.Background = '#f8f9fa'
+$w.Background = '${S.colors.containerBackground}'
 $w.Topmost = $true
 
 $w.Add_Loaded({ $w.Activate(); $w.Focus() })
@@ -457,7 +548,7 @@ $titlePanel.Margin = '20,18,20,12'
 
 $titleText = New-Object System.Windows.Controls.TextBlock
 $titleText.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${needAuth_b64}'))
-$titleText.FontSize = 13; $titleText.FontWeight = 'Bold'; $titleText.Foreground = '#212529'
+$titleText.FontSize = ${S.fontSizes.title}; $titleText.FontWeight = 'Bold'; $titleText.Foreground = '${S.colors.labelText}'; $titleText.FontFamily = '${S.fontFamily.text}'
 $titlePanel.AddChild($titleText)
 $grid.AddChild($titlePanel)
 
@@ -465,7 +556,11 @@ ${generateMetaInfoBar(sessionId, cwd)}
 
 # Content
 $contentFrame = New-Object System.Windows.Controls.Border
-$contentFrame.Margin = '16,16,16,2'
+$contentFrame.Margin = '16,12,16,12'
+$contentFrame.Background = '${S.colors.cardBackground}'
+$contentFrame.CornerRadius = '${S.cornerRadius.card}'
+$contentFrame.Padding = '16'
+${S.cardEffect('contentFrame')}
 [System.Windows.Controls.Grid]::SetRow($contentFrame, 2)
 
 $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
@@ -473,33 +568,31 @@ $scrollViewer.VerticalScrollBarVisibility = 'Auto'
 $scrollViewer.HorizontalScrollBarVisibility = 'Disabled'
 
 $card = New-Object System.Windows.Controls.StackPanel
-$card.Background = '#ffffff'
 $card.Margin = '0'
-$card.Padding = '16'
 
 $toolLbl = New-Object System.Windows.Controls.TextBlock
 $toolLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${toolLabel_b64}'))
-$toolLbl.FontSize = 12; $toolLbl.FontWeight = 'Bold'; $toolLbl.Foreground = '#212529'
+$toolLbl.FontSize = ${S.fontSizes.content}; $toolLbl.FontWeight = 'Bold'; $toolLbl.Foreground = '${S.colors.labelText}'; $toolLbl.FontFamily = '${S.fontFamily.text}'
 $card.AddChild($toolLbl)
 
 $toolBlock = New-Object System.Windows.Controls.TextBlock
 $toolBlock.Text = "${toolName}"
-$toolBlock.FontSize = 12; $toolBlock.FontWeight = 'Bold'
-$toolBlock.Foreground = '#495057'; $toolBlock.Margin = '0,4,0,12'
-$toolBlock.FontFamily = 'Consolas'
+$toolBlock.FontSize = ${S.fontSizes.content}; $toolBlock.FontWeight = 'Bold'
+$toolBlock.Foreground = '${S.colors.valueText}'; $toolBlock.Margin = '0,4,0,12'
+$toolBlock.FontFamily = '${S.fontFamily.mono}'
 $card.AddChild($toolBlock)
 
 $detailsLbl = New-Object System.Windows.Controls.TextBlock
 $detailsLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${detailsLabel_b64}'))
-$detailsLbl.FontSize = 12; $detailsLbl.FontWeight = 'Bold'; $detailsLbl.Foreground = '#212529'
+$detailsLbl.FontSize = ${S.fontSizes.content}; $detailsLbl.FontWeight = 'Bold'; $detailsLbl.Foreground = '${S.colors.labelText}'; $detailsLbl.FontFamily = '${S.fontFamily.text}'
 $card.AddChild($detailsLbl)
 
 $detailsBlock = New-Object System.Windows.Controls.TextBlock
 $detailsBlock.Text = @'
 ${details}
 '@
-$detailsBlock.FontSize = 12; $detailsBlock.Foreground = '#495057'
-$detailsBlock.TextWrapping = 'Wrap'; $detailsBlock.FontFamily = 'Consolas'
+$detailsBlock.FontSize = ${S.fontSizes.content}; $detailsBlock.Foreground = '${S.colors.valueText}'
+$detailsBlock.TextWrapping = 'Wrap'; $detailsBlock.FontFamily = '${S.fontFamily.mono}'
 $detailsBlock.Margin = '0,4,0,0'
 $card.AddChild($detailsBlock)
 
@@ -516,27 +609,19 @@ $btnPanel.Margin = '16,12,16,16'
 
 $denyBtn = New-Object System.Windows.Controls.Button
 $denyBtn.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${denyBtn_b64}'))
-$denyBtn.Padding = '20,8'; $denyBtn.FontSize = 10; $denyBtn.FontWeight = 'Bold'
-$denyBtn.Background = '#ef4444'; $denyBtn.Foreground = '#ffffff'
-$denyBtn.BorderThickness = 0; $denyBtn.Cursor = 'Hand'
+${S.buttonStyle('denyBtn', 'danger')}
 $denyBtn.Add_Click({ $w.Tag = 'deny'; $w.DialogResult = $true; $w.Close() })
 $btnPanel.AddChild($denyBtn)
 
 $allowBtn = New-Object System.Windows.Controls.Button
 $allowBtn.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${allowBtn_b64}'))
-$allowBtn.Padding = '20,8'; $allowBtn.FontSize = 10; $allowBtn.Margin = '8,0,0,0'
-$allowBtn.FontWeight = 'Bold'
-$allowBtn.Background = '#4361ee'; $allowBtn.Foreground = '#ffffff'
-$allowBtn.BorderThickness = 0; $allowBtn.Cursor = 'Hand'
+${S.buttonStyle('allowBtn', 'primary')}
 $allowBtn.Add_Click({ $w.Tag = 'allow'; $w.DialogResult = $true; $w.Close() })
 $btnPanel.AddChild($allowBtn)
 
 $rememberBtn = New-Object System.Windows.Controls.Button
 $rememberBtn.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${rememberBtn_b64}'))
-$rememberBtn.Padding = '20,8'; $rememberBtn.FontSize = 10; $rememberBtn.Margin = '8,0,0,0'
-$rememberBtn.FontWeight = 'Bold'
-$rememberBtn.Background = '#10b981'; $rememberBtn.Foreground = '#ffffff'
-$rememberBtn.BorderThickness = 0; $rememberBtn.Cursor = 'Hand'
+${S.buttonStyle('rememberBtn', 'success')}
 $rememberBtn.Add_Click({ $w.Tag = 'remember'; $w.DialogResult = $true; $w.Close() })
 $btnPanel.AddChild($rememberBtn)
 
@@ -573,7 +658,7 @@ Write-Output $w.Tag
       output.hookSpecificOutput.decision.behavior = 'deny';
     }
 
-    console.log(JSON.stringify(output));
+    if (!PREVIEW_MODE) console.log(JSON.stringify(output));
   } catch (err) {
     logError(`[PermissionRequest] Error: ${err.message}\n`);
   }
@@ -590,6 +675,7 @@ function handlePreToolUse(data) {
     return;
   }
 
+  const S = getStyleHelpers();
   const toolInput = extractField(data, 'tool_input', {});
   const questions = toolInput.questions || [];
   const cwd = extractField(data, 'cwd', '');
@@ -623,11 +709,11 @@ function handlePreToolUse(data) {
 $btnContent${idx} = New-Object System.Windows.Controls.StackPanel
 $btnLabel${idx} = New-Object System.Windows.Controls.TextBlock
 $btnLabel${idx}.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${label_b64}'))
-$btnLabel${idx}.FontWeight = 'Bold'; $btnLabel${idx}.FontSize = 12; $btnLabel${idx}.Foreground = '#212529'
+$btnLabel${idx}.FontWeight = 'Bold'; $btnLabel${idx}.FontSize = ${S.fontSizes.optionLabel}; $btnLabel${idx}.Foreground = '${S.colors.labelText}'; $btnLabel${idx}.FontFamily = '${S.fontFamily.text}'
 $btnContent${idx}.AddChild($btnLabel${idx})
 $btnDesc${idx} = New-Object System.Windows.Controls.TextBlock
 $btnDesc${idx}.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${desc_b64}'))
-$btnDesc${idx}.FontSize = 12; $btnDesc${idx}.Foreground = '#6c757d'; $btnDesc${idx}.Margin = '0,3,0,0'; $btnDesc${idx}.TextWrapping = 'Wrap'
+$btnDesc${idx}.FontSize = ${S.fontSizes.optionDesc}; $btnDesc${idx}.Foreground = '${S.colors.descText}'; $btnDesc${idx}.Margin = '0,3,0,0'; $btnDesc${idx}.TextWrapping = 'Wrap'; $btnDesc${idx}.FontFamily = '${S.fontFamily.text}'
 $btnContent${idx}.AddChild($btnDesc${idx})
 `;
 
@@ -637,8 +723,8 @@ $btnContent${idx}.AddChild($btnDesc${idx})
 $btn${idx} = New-Object System.Windows.Controls.CheckBox
 $btn${idx}.Tag = '${labelEscaped}'
 $btn${idx}.Margin = '0,0,0,4'; $btn${idx}.Padding = '8'
-$btn${idx}.Background = '#ffffff'; $btn${idx}.BorderBrush = '#dee2e6'; $btn${idx}.BorderThickness = '1'
-$btn${idx}.Cursor = 'Hand'
+$btn${idx}.Background = '${S.colors.white}'; $btn${idx}.BorderBrush = '${S.colors.border}'; $btn${idx}.BorderThickness = '1'
+$btn${idx}.Cursor = 'Hand'; $btn${idx}.FontFamily = '${S.fontFamily.text}'; $btn${idx}.VerticalContentAlignment = 'Center'
 ${contentCode}
 $btn${idx}.Content = $btnContent${idx}
 $optionsPanel.AddChild($btn${idx})
@@ -649,14 +735,10 @@ $optionsPanel.AddChild($btn${idx})
       return `
 $btn${idx} = New-Object System.Windows.Controls.Button
 $btn${idx}.Tag = '${labelEscaped}'
-$btn${idx}.Margin = '0,0,0,4'; $btn${idx}.Padding = '8'
-$btn${idx}.Background = '#ffffff'; $btn${idx}.BorderBrush = '#dee2e6'; $btn${idx}.BorderThickness = '1'
-$btn${idx}.Cursor = 'Hand'; $btn${idx}.HorizontalContentAlignment = 'Left'
+${S.optionButtonStyle('btn' + idx)}
 ${contentCode}
 $btn${idx}.Content = $btnContent${idx}
 $btn${idx}.Add_Click({ $w.Tag = $this.Tag; $w.DialogResult = $true; $w.Close() })
-$btn${idx}.Add_MouseEnter({ $this.Background = '#f8f9fa' })
-$btn${idx}.Add_MouseLeave({ $this.Background = '#ffffff' })
 $optionsPanel.AddChild($btn${idx})
 `;
     })
@@ -685,7 +767,7 @@ $w.Width = 700
 $w.Height = 650
 $w.WindowStartupLocation = 'CenterScreen'
 $w.ResizeMode = 'NoResize'
-$w.Background = '#f8f9fa'
+$w.Background = '${S.colors.containerBackground}'
 $w.Tag = ''
 $w.Topmost = $true
 
@@ -711,9 +793,10 @@ $titlePanel.Margin = '20,18,20,12'
 
 $titleBlock = New-Object System.Windows.Controls.TextBlock
 $titleBlock.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${header_b64}'))
-$titleBlock.FontSize = 13
+$titleBlock.FontSize = ${S.fontSizes.title}
 $titleBlock.FontWeight = 'Bold'
-$titleBlock.Foreground = '#212529'
+$titleBlock.Foreground = '${S.colors.labelText}'
+$titleBlock.FontFamily = '${S.fontFamily.text}'
 $titlePanel.AddChild($titleBlock)
 $grid.AddChild($titlePanel)
 
@@ -726,9 +809,10 @@ $questionPanel.Padding = '20,12,20,12'
 
 $questionBlock = New-Object System.Windows.Controls.TextBlock
 $questionBlock.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${question_b64}'))
-$questionBlock.FontSize = 12
+$questionBlock.FontSize = ${S.fontSizes.question}
 $questionBlock.FontWeight = 'Bold'
-$questionBlock.Foreground = '#212529'
+$questionBlock.Foreground = '${S.colors.labelText}'
+$questionBlock.FontFamily = '${S.fontFamily.text}'
 $questionBlock.TextWrapping = 'Wrap'
 $questionPanel.Child = $questionBlock
 $grid.AddChild($questionPanel)
@@ -753,23 +837,25 @@ $customInputPanel.Margin = '20,12,20,8'
 
 $separator2 = New-Object System.Windows.Controls.Border
 $separator2.Height = 1
-$separator2.Background = '#dee2e6'
+$separator2.Background = '${S.colors.border}'
 $separator2.Margin = '0,0,0,12'
 $customInputPanel.AddChild($separator2)
 
 $customLabel = New-Object System.Windows.Controls.TextBlock
 $customLabel.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${customInputLabel_b64}'))
-$customLabel.FontSize = 12
+$customLabel.FontSize = ${S.fontSizes.customLabel}
 $customLabel.FontWeight = 'Bold'
-$customLabel.Foreground = '#212529'
+$customLabel.Foreground = '${S.colors.labelText}'
+$customLabel.FontFamily = '${S.fontFamily.text}'
 $customLabel.Margin = '0,0,0,8'
 $customInputPanel.AddChild($customLabel)
 
 $customInput = New-Object System.Windows.Controls.TextBox
 $customInput.Padding = '8'
-$customInput.FontSize = 12
-$customInput.Background = '#ffffff'
-$customInput.BorderBrush = '#dee2e6'
+$customInput.FontSize = ${S.fontSizes.customInput}
+$customInput.FontFamily = '${S.fontFamily.text}'
+$customInput.Background = '${S.colors.white}'
+$customInput.BorderBrush = '${S.colors.border}'
 $customInputPanel.AddChild($customInput)
 
 $grid.AddChild($customInputPanel)
@@ -783,21 +869,14 @@ $btnPanel.Margin = '20,12,20,16'
 
 $knowBtn = New-Object System.Windows.Controls.Button
 $knowBtn.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${knowBtn_b64}'))
-$knowBtn.Padding = '16,8'
-$knowBtn.FontSize = 10
-$knowBtn.FontWeight = 'Bold'
-$knowBtn.Background = '#6c757d'
-$knowBtn.Foreground = '#ffffff'
-$knowBtn.BorderThickness = 0
-$knowBtn.Cursor = 'Hand'
+${S.buttonStyle('knowBtn', 'secondary')}
 $knowBtn.Add_Click({ $w.Tag = ''; $w.DialogResult = $false; $w.Close() })
 $btnPanel.AddChild($knowBtn)
 
 ${multiSelect ? `
 $submitMulti = New-Object System.Windows.Controls.Button
 $submitMulti.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${submitMulti_b64}'))
-$submitMulti.Padding = '16,8'; $submitMulti.FontSize = 10; $submitMulti.FontWeight = 'Bold'; $submitMulti.Margin = '8,0,0,0'
-$submitMulti.Background = '#4361ee'; $submitMulti.Foreground = '#ffffff'; $submitMulti.BorderThickness = 0; $submitMulti.Cursor = 'Hand'
+${S.buttonStyle('submitMulti', 'primary')}
 $submitMulti.Add_Click({
   $selected = @()
   foreach ($child in $optionsPanel.Children) {
@@ -821,14 +900,7 @@ $btnPanel.AddChild($submitMulti)
 ${!multiSelect ? `
 $submitCustom = New-Object System.Windows.Controls.Button
 $submitCustom.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${submitCustom_b64}'))
-$submitCustom.Padding = '16,8'
-$submitCustom.FontSize = 10
-$submitCustom.FontWeight = 'Bold'
-$submitCustom.Margin = '8,0,0,0'
-$submitCustom.Background = '#10b981'
-$submitCustom.Foreground = '#ffffff'
-$submitCustom.BorderThickness = 0
-$submitCustom.Cursor = 'Hand'
+${S.buttonStyle('submitCustom', 'success')}
 $submitCustom.Add_Click({
   $text = $customInput.Text.Trim()
   if ($text -ne '') {
@@ -877,7 +949,7 @@ Write-Output $w.Tag
         }
       };
 
-      console.log(JSON.stringify(output));
+      if (!PREVIEW_MODE) console.log(JSON.stringify(output));
     } else {
       // "知道了（回到 CLI）"路径：不返回任何决策（exit 0 无 JSON），
       // 让 Claude Code 走默认权限流、显示原生 AskUserQuestion 面板，
@@ -899,6 +971,7 @@ function handleStop(data) {
   playSound(SOUND_ASTERISK);
   sendHttpNotification(data);
 
+  const S = getStyleHelpers();
   const cwd = extractField(data, 'cwd', '');
   const sessionId = extractField(data, 'session_id', '');
   const effortLevel = data.effort?.level || '';
@@ -938,7 +1011,7 @@ $w.Width = 600
 $w.Height = ${lastMessage ? 450 : 350}
 $w.WindowStartupLocation = 'CenterScreen'
 $w.ResizeMode = 'NoResize'
-$w.Background = '#f8f9fa'
+$w.Background = '${S.colors.containerBackground}'
 
 $grid = New-Object System.Windows.Controls.Grid
 $grid.Margin = '0'
@@ -957,9 +1030,10 @@ $titlePanel.Margin = '20,18,20,12'
 
 $titleText = New-Object System.Windows.Controls.TextBlock
 $titleText.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${heading_b64}'))
-$titleText.FontSize = 13
+$titleText.FontSize = ${S.fontSizes.title}
 $titleText.FontWeight = 'Bold'
-$titleText.Foreground = '#212529'
+$titleText.Foreground = '${S.colors.labelText}'
+$titleText.FontFamily = '${S.fontFamily.text}'
 $titleText.HorizontalAlignment = 'Center'
 $titlePanel.AddChild($titleText)
 $grid.AddChild($titlePanel)
@@ -969,7 +1043,11 @@ ${generateMetaInfoBar(sessionId, cwd, additionalFields)}
 # Content
 ${lastMessage ? `
 $contentFrame = New-Object System.Windows.Controls.Border
-$contentFrame.Margin = '16,16,16,2'
+$contentFrame.Margin = '16,12,16,12'
+$contentFrame.Background = '${S.colors.cardBackground}'
+$contentFrame.CornerRadius = '${S.cornerRadius.card}'
+$contentFrame.Padding = '16'
+${S.cardEffect('contentFrame')}
 [System.Windows.Controls.Grid]::SetRow($contentFrame, 2)
 
 $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
@@ -977,21 +1055,20 @@ $scrollViewer.VerticalScrollBarVisibility = 'Auto'
 $scrollViewer.HorizontalScrollBarVisibility = 'Disabled'
 
 $card = New-Object System.Windows.Controls.StackPanel
-$card.Background = '#ffffff'
-$card.Padding = '16'
 
 $msgLbl = New-Object System.Windows.Controls.TextBlock
 $msgLbl.Text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${msgLabel_b64}'))
-$msgLbl.FontSize = 12
+$msgLbl.FontSize = ${S.fontSizes.content}
 $msgLbl.FontWeight = 'Bold'
-$msgLbl.Foreground = '#212529'
+$msgLbl.Foreground = '${S.colors.labelText}'
+$msgLbl.FontFamily = '${S.fontFamily.text}'
 $card.AddChild($msgLbl)
 
 $msg = New-Object System.Windows.Controls.TextBlock
 $msg.Text = '${lastMessage.replace(/'/g, "''").substring(0, 500)}'
-$msg.FontFamily = 'Consolas'
-$msg.FontSize = 12
-$msg.Foreground = '#495057'
+$msg.FontFamily = '${S.fontFamily.mono}'
+$msg.FontSize = ${S.fontSizes.message}
+$msg.Foreground = '${S.colors.valueText}'
 $msg.Margin = '0,4,0,0'
 $msg.TextWrapping = 'Wrap'
 $card.AddChild($msg)
@@ -1011,12 +1088,7 @@ $btn = New-Object System.Windows.Controls.Button
 $btn.Content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${btnText_b64}'))
 $btn.Width = 120
 $btn.Height = 36
-$btn.Background = '#4361ee'
-$btn.Foreground = '#ffffff'
-$btn.FontWeight = 'Bold'
-$btn.FontSize = 10
-$btn.BorderThickness = '0'
-$btn.Cursor = 'Hand'
+${S.buttonStyle('btn', 'primary')}
 $btn.Add_Click({ $w.Close() })
 $btnPanel.AddChild($btn)
 
@@ -1059,32 +1131,105 @@ function handlePostToolUse(data) {
 }
 
 // ============================================
+// 预览模式：注入模拟数据依次渲染三弹窗，供目视验收
+// ============================================
+
+function runPreview() {
+  const baseData = {
+    session_id: 'a1b2c3d4-preview-test',
+    cwd: process.cwd()
+  };
+
+  console.log('[preview] 1/4 PermissionRequest 权限申请弹窗...');
+  handlePermissionRequest({
+    ...baseData,
+    hook_event_name: EVENT_PERMISSION_REQUEST,
+    tool_name: 'Bash',
+    tool_input: { command: 'rm -rf /tmp/preview-test', description: '预览模拟操作' },
+    permission_suggestions: []
+  });
+
+  console.log('[preview] 2/4 AskUserQuestion 单选弹窗...');
+  handlePreToolUse({
+    ...baseData,
+    hook_event_name: EVENT_PRE_TOOL_USE,
+    tool_name: TOOL_ASK_USER_QUESTION,
+    tool_input: {
+      questions: [{
+        header: '预览问题',
+        question: '这是一个预览问题，请选择一个选项查看单选弹窗效果：',
+        multiSelect: false,
+        options: [
+          { label: '选项一', description: '第一个选项的描述说明' },
+          { label: '选项二', description: '第二个选项的描述说明' },
+          { label: '选项三', description: '第三个选项的描述说明' }
+        ]
+      }]
+    }
+  });
+
+  console.log('[preview] 3/4 AskUserQuestion 多选弹窗...');
+  handlePreToolUse({
+    ...baseData,
+    hook_event_name: EVENT_PRE_TOOL_USE,
+    tool_name: TOOL_ASK_USER_QUESTION,
+    tool_input: {
+      questions: [{
+        header: '预览多选',
+        question: '这是一个多选预览问题，可勾选多个选项：',
+        multiSelect: true,
+        options: [
+          { label: '多选一', description: '第一个多选项' },
+          { label: '多选二', description: '第二个多选项' }
+        ]
+      }]
+    }
+  });
+
+  console.log('[preview] 4/4 Stop 任务完成弹窗...');
+  handleStop({
+    ...baseData,
+    hook_event_name: EVENT_STOP,
+    last_assistant_message: '这是预览的最后一条助手消息，用于展示 Stop 弹窗的消息卡片渲染效果。包含足够长的文本以测试换行与滚动行为。',
+    effort: { level: 'high' },
+    permission_mode: 'default',
+    background_tasks: [{ id: 't1' }, { id: 't2' }]
+  });
+
+  console.log('[preview] 全部弹窗展示完毕');
+}
+
+// ============================================
 // 主入口
 // ============================================
 
-let inputData = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => inputData += chunk);
-process.stdin.on('end', () => {
-  try {
-    if (!inputData) {
-      logError('[main] No input data received\n');
-      return;
-    }
+if (PREVIEW_MODE) {
+  runPreview();
+} else {
+  let inputData = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => inputData += chunk);
+  process.stdin.on('end', () => {
+    try {
+      if (!inputData) {
+        logError('[main] No input data received\n');
+        return;
+      }
 
-    const data = JSON.parse(inputData);
-    const event = data.hook_event_name || '';
+      const data = JSON.parse(inputData);
+      const event = data.hook_event_name || '';
 
-    if (event === EVENT_PERMISSION_REQUEST) {
-      handlePermissionRequest(data);
-    } else if (event === EVENT_STOP) {
-      handleStop(data);
-    } else if (event === EVENT_PRE_TOOL_USE) {
-      handlePreToolUse(data);
-    } else if (event === EVENT_POST_TOOL_USE) {
-      handlePostToolUse(data);
+      if (event === EVENT_PERMISSION_REQUEST) {
+        handlePermissionRequest(data);
+      } else if (event === EVENT_STOP) {
+        handleStop(data);
+      } else if (event === EVENT_PRE_TOOL_USE) {
+        handlePreToolUse(data);
+      } else if (event === EVENT_POST_TOOL_USE) {
+        handlePostToolUse(data);
+      }
+    } catch (err) {
+      logError(`[error] ${err.stack}\n`);
     }
-  } catch (err) {
-    logError(`[error] ${err.stack}\n`);
-  }
-});
+  });
+}
