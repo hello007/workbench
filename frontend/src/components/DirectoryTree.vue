@@ -87,6 +87,9 @@
         <img :src="obsidianIcon" class="context-menu-img-icon" alt="Obsidian" />用 Obsidian 打开
       </li>
       <li class="context-menu-divider" />
+      <li class="context-menu-item" @click="onMenuCommand('openRepoFilter')">
+        <el-icon><Filter /></el-icon>仓库筛选器
+      </li>
       <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
         <el-icon><Refresh /></el-icon>更新仓库
       </li>
@@ -143,7 +146,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -180,7 +183,7 @@ const props = defineProps({
   version: { type: String, default: '' }
 })
 
-const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull'])
+const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull', 'openRepoFilter'])
 
 const { shortcutRename, shortcutDelete } = useShortcuts()
 
@@ -321,6 +324,9 @@ const onMenuCommand = (command) => {
       break
     case 'openObsidian':
       handleOpenObsidian(dir.path)
+      break
+    case 'openRepoFilter':
+      emit('openRepoFilter', dir.id)
       break
     case 'pullRepos':
       emit('batchPull', { path: dir.path })

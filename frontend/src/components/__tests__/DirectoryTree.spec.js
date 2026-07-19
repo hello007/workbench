@@ -56,7 +56,9 @@ const defaultStubs = {
   Plus: { template: '<span>plus</span>' },
   Edit: { template: '<span>edit</span>' },
   Delete: { template: '<span>del</span>' },
-  Refresh: { template: '<span>refresh</span>' }
+  Refresh: { template: '<span>refresh</span>' },
+  CopyDocument: { template: '<span>copy</span>' },
+  Filter: { template: '<span>filter</span>' }
 }
 
 const mockDirectories = [
@@ -358,6 +360,29 @@ describe('DirectoryTree.vue', () => {
       await pullItem.trigger('click')
 
       expect(wrapper.find('.context-menu').exists()).toBe(false)
+    })
+  })
+
+  describe('仓库筛选器入口（优化1）', () => {
+    it('右键菜单应包含"仓库筛选器"项', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[1].trigger('contextmenu', { clientX: 10, clientY: 10 })
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const filterItem = menuItems.find(el => el.text().includes('仓库筛选器'))
+      expect(filterItem).toBeTruthy()
+    })
+
+    it('点击"仓库筛选器"应 emit openRepoFilter 携带目录 id', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[1].trigger('contextmenu', { clientX: 10, clientY: 10 })
+      const menuItems = wrapper.findAll('.context-menu-item')
+      const filterItem = menuItems.find(el => el.text().includes('仓库筛选器'))
+      await filterItem.trigger('click')
+      expect(wrapper.emitted('openRepoFilter')).toBeTruthy()
+      // 选中 items[1] = 项目B（dir-2），emit 携带其 id
+      expect(wrapper.emitted('openRepoFilter')[0][0]).toBe('dir-2')
     })
   })
 

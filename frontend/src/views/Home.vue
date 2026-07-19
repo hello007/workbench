@@ -18,6 +18,7 @@
                   @change="loadDirectories"
                   @contextmenu="onDirectoryContextMenu"
                   @batch-pull="onBatchPull"
+                  @open-repo-filter="openRepoFilter"
                 />
                 <ToolboxPanel
                   v-show="activePanel === 'toolbox'"
@@ -42,10 +43,10 @@
                   @delete="onDeleteFromFileTree"
                   @add-work-dir="onAddWorkDir"
                   @open-content-search="onOpenContentSearch"
-                  @open-repo-filter="repoFilterVisible = true"
+                  @open-repo-filter="openRepoFilter()"
                 >
                   <template #toolbar-extra>
-                    <el-button size="small" @click="repoFilterVisible = true">
+                    <el-button size="small" @click="openRepoFilter()">
                       仓库筛选
                     </el-button>
                   </template>
@@ -105,6 +106,7 @@
       v-model:visible="repoFilterVisible"
       :directories="directories"
       :current-dir-id="selectedDirectoryId"
+      :initial-dir-id="repoFilterInitialDirId"
       @locate="onRepoLocate"
     />
   </div>
@@ -176,6 +178,10 @@ const contentSearchInit = ref('')
 
 // ---- 仓库筛选器弹窗状态 ----
 const repoFilterVisible = ref(false)
+// 仓库筛选器打开时初始锁定的工作目录 id（由 DirectoryTree 右键"仓库筛选器"触发，
+// 优先于 currentDirId，使"在某个工作目录上右键"时弹窗直接定位到该目录而非当前选中目录）。
+// 每次打开后由 RepoFilterDialog 内 watch(visible) 消费，无需在此重置。
+const repoFilterInitialDirId = ref('')
 const { record: recordAccess } = useRecentAccess()
 const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete } = useShortcuts()
 
@@ -444,6 +450,19 @@ const onRepoLocate = async (repoPath) => {
 
   // 定位到目标节点（内部 await treeReadyPromise 兜底）
   await fileTreePanelRef.value?.locateNode(repoPath)
+}
+
+// ---- 仓库筛选器：统一打开入口 ----
+// 三个入口均走此函数：
+//   1) DirectoryTree 右键"仓库筛选器" -> 携带 dirId，锁定到右键所选项
+//   2) FileTreePanel 空白右键"仓库筛选器" -> 无 dirId，回退当前选中目录
+//   3) FileTreePanel 工具栏按钮 -> 无 dirId，回退当前选中目录
+// 关键：无 dirId 入口必须显式重置 initialDirId 为空，否则会残留上次右键锁定的目录，
+// 导致"工具栏按钮打开"仍定位到旧目录而非当前选中目录。
+// RepoFilterDialog 内 watch(visible) 按 initialDirId || currentDirId 优先级取值。
+function openRepoFilter(dirId = '') {
+  repoFilterInitialDirId.value = dirId || ''
+  repoFilterVisible.value = true
 }
 
 function onOpenContentSearch(subDir) {

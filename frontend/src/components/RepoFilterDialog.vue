@@ -157,7 +157,19 @@
                 </div>
 
                 <div class="detail-section">
-                  <div class="detail-label">README 摘要</div>
+                  <div class="detail-label">
+                    <span>README 摘要</span>
+                    <el-button
+                      text
+                      size="small"
+                      class="detail-readme-full-btn"
+                      :disabled="!selectedRepo.readmeSummary"
+                      :loading="readmeFullLoading"
+                      @click="onOpenReadmeFull"
+                    >
+                      <el-icon><Document /></el-icon>查看完整 README
+                    </el-button>
+                  </div>
                   <div class="detail-readme">
                     {{ selectedRepo.readmeSummary || '暂无 README' }}
                   </div>
@@ -222,26 +234,54 @@
         </Splitpanes>
       </div>
     </div>
+
+    <!-- 二级弹窗：完整 README 渲染（优化 4d）-->
+    <!-- 复用 FilePreviewRenderer：kind=text + fileName=README.md 触发 markdown 渲染分支，
+         享受代码高亮 / mermaid / TOC / frontmatter 能力，无需重复造轮子 -->
+    <el-dialog
+      v-model="readmeFullVisible"
+      :title="`README: ${selectedRepo?.name || ''}`"
+      width="800px"
+      :close-on-click-modal="true"
+      append-to-body
+      class="repo-readme-full-dialog"
+    >
+      <div class="readme-full-body">
+        <FilePreviewRenderer
+          v-if="readmeFullVisible"
+          kind="text"
+          file-name="README.md"
+          :content="readmeFullContent"
+        />
+      </div>
+    </el-dialog>
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Document } from '@element-plus/icons-vue'
 import { useVirtualList, useTimeoutFn } from '@vueuse/core'
 import { Splitpanes, Pane } from 'splitpanes'
 import {
   GetRepoFilterList,
   RefreshRepoFilterList,
   SaveRepoMeta,
-  CleanMissingRepoMeta
+  CleanMissingRepoMeta,
+  GetRepoReadme
 } from '../../wailsjs/go/main/App'
+// 复用 FilePreviewRenderer 渲染完整 README（享受 markdown-it 代码高亮 / mermaid / TOC / frontmatter）
+import FilePreviewRenderer from './FilePreviewRenderer.vue'
 
 // ---- Props & Emits ----
 const props = defineProps({
   visible: { type: Boolean, default: false },
   directories: { type: Array, default: () => [] },
-  currentDirId: { type: String, default: '' }
+  currentDirId: { type: String, default: '' },
+  // 由 DirectoryTree 右键"仓库筛选器"传入的初始工作目录 id，优先于 currentDirId。
+  // 用于"在某个工作目录上右键"时直接定位到该目录，而非当前选中目录。
+  initialDirId: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update:visible', 'locate'])
@@ -264,6 +304,11 @@ const selectedPath = ref('') // 选中态主键（数据驱动高亮）
 const editingSummary = ref('')
 const editingTags = ref([])
 const newTagInput = ref('')
+
+// 二级 README 完整内容弹窗（优化 4d）：点击"查看完整 README"加载并渲染
+const readmeFullVisible = ref(false)
+const readmeFullContent = ref('')
+const readmeFullLoading = ref(false)
 
 // ---- computed ----
 // Tab 分类计数：有标签为已编辑，无标签为未编辑
@@ -423,6 +468,28 @@ function onJumpClick() {
   emit('locate', repo.path)
 }
 
+// ---- 查看完整 README（二级弹窗，优化 4d）----
+// 调用 GetRepoReadme 拉取完整文本（不截断），复用 FilePreviewRenderer 以 markdown 渲染。
+// 无 README / 二进制 / 路径失效 -> 后端返回空串 -> 提示并阻止打开。
+async function onOpenReadmeFull() {
+  const repo = selectedRepo.value
+  if (!repo) return
+  readmeFullLoading.value = true
+  try {
+    const content = await GetRepoReadme(repo.path)
+    if (!content) {
+      ElMessage.warning('该仓库暂无 README')
+      return
+    }
+    readmeFullContent.value = content
+    readmeFullVisible.value = true
+  } catch (e) {
+    ElMessage.error('加载 README 失败: ' + (e.message || String(e)))
+  } finally {
+    readmeFullLoading.value = false
+  }
+}
+
 // ---- 加载列表 ----
 async function loadList(useRefresh = false) {
   // 重载前显式 flush 挂起的防抖保存：切换工作目录/刷新/清理失效均会重置选中态或重拉列表，
@@ -445,10 +512,13 @@ async function loadList(useRefresh = false) {
       await nextTick()
       const idx = filteredRepos.value.findIndex(r => r.path === keepRepo.path)
       if (idx >= 0) scrollTo(idx)
-    } else if (allRepos.value.length > 0) {
-      selectedPath.value = allRepos.value[0].path
-      syncEditState(allRepos.value[0])
+    } else if (filteredRepos.value.length > 0) {
+      // 旧选中不在列表 -> 选当前 Tab 首项（filteredRepos，而非 allRepos）
+      // 优化 2：避免首次进入"已编辑"Tab 时选中 allRepos[0]（可能是未编辑仓库）导致右栏误显示
+      selectedPath.value = filteredRepos.value[0].path
+      syncEditState(filteredRepos.value[0])
     } else {
+      // 当前 Tab 为空 -> 清空选中，右栏显示"请从左侧选择"
       selectedPath.value = ''
       syncEditState(null)
     }
@@ -493,8 +563,9 @@ watch(
   async (v) => {
     if (v) {
       // 打开：同步当前工作目录 + 重置筛选
+      // initialDirId（DirectoryTree 右键触发）优先于 currentDirId，实现"右键哪个目录筛哪个"
       suppressDirWatch = true
-      selectedDirId.value = props.currentDirId
+      selectedDirId.value = props.initialDirId || props.currentDirId
       await nextTick()
       suppressDirWatch = false
       searchKeyword.value = ''
@@ -518,6 +589,28 @@ watch(selectedDirId, async (newVal, oldVal) => {
   selectedPath.value = ''
   syncEditState(null)
   await loadList()
+})
+
+// ---- Tab 切换：右栏 detail 跟随新 Tab 首项（优化 3）----
+// 切换 Tab 必然导致旧选中项不在新 Tab（有标签=已编辑 / 无标签=未编辑 互斥），
+// 故选中项需切换为新 Tab 的首项，避免右栏残留旧 Tab 的仓库详情。
+watch(activeTab, async () => {
+  if (!props.visible) return
+  // 切换前 flush 旧选中项的防抖简述保存，避免丢失未提交编辑
+  await flushPendingSave()
+  await nextTick()
+  const inList = filteredRepos.value.some(r => r.path === selectedPath.value)
+  if (inList) return
+  if (filteredRepos.value.length > 0) {
+    selectedPath.value = filteredRepos.value[0].path
+    syncEditState(filteredRepos.value[0])
+    await nextTick()
+    scrollTo(0)
+  } else {
+    // 新 Tab 为空 -> 清空选中，右栏显示"请从左侧选择"
+    selectedPath.value = ''
+    syncEditState(null)
+  }
 })
 
 // 组件卸载兜底：flush 未保存编辑
@@ -686,10 +779,30 @@ onBeforeUnmount(() => {
   margin-bottom: 14px;
 }
 .detail-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-tertiary, #909399);
   margin-bottom: 6px;
+}
+.detail-readme-full-btn {
+  /* 文本按钮收紧 padding，与 label 同行右对齐 */
+  padding: 0 4px;
+  height: auto;
+  min-height: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--primary-color, #409eff);
+}
+/* 二级 README 弹窗 body：定高让 FilePreviewRenderer 内部 markdown-body 滚动 */
+.readme-full-body {
+  height: 60vh;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
 }
 .detail-readme {
   font-size: 13px;
@@ -730,6 +843,11 @@ onBeforeUnmount(() => {
 <style>
 /* 弹窗 body padding 收紧（非 scoped，覆盖 element-plus 默认） */
 .repo-filter-dialog .el-dialog__body {
+  padding: 12px 20px 16px;
+}
+
+/* 二级 README 弹窗：body 收紧 padding，让渲染区撑满 */
+.repo-readme-full-dialog .el-dialog__body {
   padding: 12px 20px 16px;
 }
 </style>

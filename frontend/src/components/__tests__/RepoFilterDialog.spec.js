@@ -51,12 +51,14 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetRepoFilterList: vi.fn(() => Promise.resolve(mockRepos.map(r => ({ ...r, tags: [...(r.tags || [])] })))),
   RefreshRepoFilterList: vi.fn(() => Promise.resolve(mockRepos.map(r => ({ ...r, tags: [...(r.tags || [])] })))),
   SaveRepoMeta: vi.fn(() => Promise.resolve()),
-  CleanMissingRepoMeta: vi.fn(() => Promise.resolve(1))
+  CleanMissingRepoMeta: vi.fn(() => Promise.resolve(1)),
+  GetRepoReadme: vi.fn(() => Promise.resolve('# 完整 README\n\n正文内容'))
 }))
 
 const defaultStubs = {
+  // v-bind="$attrs" 透传 class，使主弹窗 .repo-filter-dialog 与二级弹窗 .repo-readme-full-dialog 可区分
   'el-dialog': {
-    template: '<div v-if="modelValue" class="repo-filter-dialog"><slot /></div>',
+    template: '<div v-if="modelValue" v-bind="$attrs"><slot /></div>',
     props: ['modelValue', 'title', 'width', 'closeOnClickModal', 'appendTobody'],
     emits: ['update:modelValue']
   },
@@ -79,6 +81,7 @@ const defaultStubs = {
     props: ['loading', 'size', 'type', 'disabled'],
     emits: ['click']
   },
+  'el-icon': { template: '<i><slot /></i>' },
   'el-tabs': {
     template: '<div class="el-tabs"><slot /></div>',
     props: ['modelValue'],
@@ -95,7 +98,12 @@ const defaultStubs = {
   },
   'el-empty': { template: '<div class="el-empty" />', props: ['description', 'imageSize'] },
   Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
-  Pane: { template: '<div class="pane"><slot /></div>' }
+  Pane: { template: '<div class="pane"><slot /></div>' },
+  // stub 掉 FilePreviewRenderer，避免 mermaid / hljs 等副作用，仅断言收到 content
+  FilePreviewRenderer: {
+    template: '<div class="file-preview-renderer-stub" :data-content="content" />',
+    props: ['kind', 'fileName', 'content']
+  }
 }
 
 function createWrapper(props = {}) {
@@ -266,5 +274,65 @@ describe('RepoFilterDialog.vue', () => {
     await dirSelect.vm.$emit('update:modelValue', 'dir-2')
     await flushPromises()
     expect(GetRepoFilterList).toHaveBeenCalledWith('dir-2')
+  })
+
+  it('切换 Tab 时右栏 detail 跟随新 Tab 首项（优化3）', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    // 默认"已编辑"Tab，选中首项 repo-a
+    expect(wrapper.find('.detail-name').text()).toBe('repo-a')
+    // 切换到"未编辑"Tab
+    const tabs = wrapper.findComponent({ ref: 'repoTabsRef' })
+    await tabs.vm.$emit('update:modelValue', 'unedited')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    // 右栏 detail 应跟随到未编辑 Tab 首项 repo-b（而非残留 repo-a）
+    expect(wrapper.find('.detail-name').text()).toBe('repo-b')
+  })
+
+  it('首次进入"已编辑"Tab 为空时不显示未编辑仓库（优化2）', async () => {
+    const { GetRepoFilterList } = await import('../../../wailsjs/go/main/App')
+    // 仅返回无标签仓库：已编辑 Tab 为空，不应选中未编辑仓库
+    GetRepoFilterList.mockResolvedValueOnce([
+      { name: 'repo-x', path: '/work/repo-x', summary: '', tags: [], readmeSummary: 'X 摘要', missing: false, hasRemote: true, isGitRepo: true }
+    ])
+    wrapper = createWrapper()
+    await flushPromises()
+    // 默认 activeTab='edited'，已编辑 Tab 无匹配 -> 左栏无项
+    expect(wrapper.findAll('.repo-item').length).toBe(0)
+    // 右栏应显示"请从左侧选择"（el-empty），不显示未编辑仓库详情
+    expect(wrapper.find('.detail-name').exists()).toBe(false)
+    expect(wrapper.find('.el-empty').exists()).toBe(true)
+  })
+
+  it('点击"查看完整 README"调用 GetRepoReadme 并打开二级弹窗（优化4d）', async () => {
+    const { GetRepoReadme } = await import('../../../wailsjs/go/main/App')
+    wrapper = createWrapper()
+    await flushPromises()
+    // 默认选中 repo-a（有 readmeSummary），按钮可点击
+    const btn = wrapper.findAll('button').find(b => b.text().includes('查看完整 README'))
+    expect(btn).toBeTruthy()
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(GetRepoReadme).toHaveBeenCalledWith('/work/repo-a')
+    // 二级弹窗应可见，FilePreviewRenderer 收到完整 README 文本
+    expect(wrapper.find('.repo-readme-full-dialog').exists()).toBe(true)
+    const renderer = wrapper.find('.file-preview-renderer-stub')
+    expect(renderer.exists()).toBe(true)
+    expect(renderer.attributes('data-content')).toBe('# 完整 README\n\n正文内容')
+  })
+
+  it('README 摘要为空时"查看完整 README"按钮禁用（优化4d）', async () => {
+    const { GetRepoFilterList } = await import('../../../wailsjs/go/main/App')
+    // 选中项 readmeSummary 为空 -> 按钮禁用
+    GetRepoFilterList.mockResolvedValueOnce([
+      { name: 'repo-y', path: '/work/repo-y', summary: '', tags: ['标签'], readmeSummary: '', missing: false, hasRemote: true, isGitRepo: true }
+    ])
+    wrapper = createWrapper()
+    await flushPromises()
+    const btn = wrapper.findAll('button').find(b => b.text().includes('查看完整 README'))
+    expect(btn.attributes('disabled')).toBeDefined()
   })
 })
