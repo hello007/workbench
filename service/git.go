@@ -9,21 +9,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"workbench/model"
 	"workbench/util"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // GitService Git服务
 type GitService struct {
-	gitCmd *util.GitCommand
+	gitCmd    *util.GitCommand
+	scanCache *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
 }
 
-// NewGitService 创建服务
+// NewGitService 创建服务（不注入扫描缓存，兼容现有调用方与测试）。
 func NewGitService() *GitService {
 	return &GitService{
 		gitCmd: util.NewGitCommand(),
+	}
+}
+
+// NewGitServiceWithCache 创建服务并注入扫描缓存管理器，启用 .git 预筛 + mtime 缓存优化。
+// cachePath 为缓存文件路径（如 data/repo_scan_cache.json）。
+func NewGitServiceWithCache(cachePath string) *GitService {
+	return &GitService{
+		gitCmd:    util.NewGitCommand(),
+		scanCache: NewScanCacheManager(cachePath),
 	}
 }
 
@@ -208,12 +219,22 @@ func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote 
 	return err
 }
 
-// ScanGitRepos 递归扫描目录下所有 Git 仓库
-// 如果 rootPath 本身是 git 仓库，直接返回 [rootPath]
-// 否则递归遍历子目录，收集所有 git 仓库路径
+// ScanGitRepos 递归扫描目录下所有 Git 仓库。
+// 如果 rootPath 本身是 git 仓库，直接返回 [rootPath]；
+// 否则递归遍历子目录，收集所有 git 仓库路径。
+//
+// 优化（PRD F12）：用 .git 存在性预筛（util.IsGitRepositoryFast，os.Stat 不要求 IsDir，
+// 覆盖 worktree/submodule）替代逐目录 fork git rev-parse，降低 90%+ 子进程开销。
+// 若注入了 scanCache，叠加 mtime 缓存差量：二次扫描近乎瞬时（TTL 5min + 手动刷新兜底）。
+// 签名保持 []string 兼容现有调用方（ScanAndPullRepos 等）。
 func (s *GitService) ScanGitRepos(rootPath string) []string {
-	if s.gitCmd.IsGitRepository(rootPath) {
+	if util.IsGitRepositoryFast(rootPath) {
 		return []string{rootPath}
+	}
+
+	// 注入了缓存则走差量扫描路径
+	if s.scanCache != nil {
+		return s.scanGitReposCached(rootPath)
 	}
 
 	var repos []string
@@ -221,6 +242,7 @@ func (s *GitService) ScanGitRepos(rootPath string) []string {
 	return repos
 }
 
+// scanDir 递归扫描子目录，用 .git 预筛判定仓库（不 fork git 子进程）。
 func (s *GitService) scanDir(dir string, repos *[]string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -238,12 +260,134 @@ func (s *GitService) scanDir(dir string, repos *[]string) {
 			continue
 		}
 
-		if s.gitCmd.IsGitRepository(fullPath) {
+		if util.IsGitRepositoryFast(fullPath) {
 			*repos = append(*repos, fullPath)
 		} else {
 			s.scanDir(fullPath, repos)
 		}
 	}
+}
+
+// scanGitReposCached 带 mtime 缓存的递归扫描。
+// 策略（激进跳过子树 + TTL + 手动刷新兜底，参考 research/git-scan-optimization.md 方案 B）：
+//   - 缓存命中且目录 mtime 未变：沿用缓存结论（仓库则收录，非仓库则跳过整棵子树）
+//   - 缓存未命中或 mtime 变化：实际判定 + 递归子目录
+//
+// 并发安全：整次「扫描 + 落盘」在 scanCache.mu 互斥锁保护下串行执行，
+// 规避 Entries map 并发读写竞态（并发扫描同一 rootPath、或跨 rootPath 扫描与
+// 落盘序列化交错均可触发 map 并发读写 panic）。
+//
+// 已知风险：深层新增仓库（如 a/b/c 下 git init）若未更新 a/b 的 mtime，激进跳过会漏扫。
+// 由 TTL（5min 强制全扫）+ 手动刷新按钮（ClearScanCache，PRD F9）兜底，不丢数据。
+func (s *GitService) scanGitReposCached(rootPath string) []string {
+	s.scanCache.mu.Lock()
+	defer s.scanCache.mu.Unlock()
+
+	cache := s.scanCache.getCacheLocked(rootPath)
+	// TTL 过期则清空 entries 强制全扫
+	if cache.ttlExpired() {
+		cache.Entries = make(map[string]CacheEntry)
+	}
+
+	var repos []string
+	s.scanDirCached(rootPath, &repos, cache)
+
+	cache.ScannedAt = time.Now()
+	s.scanCache.saveLocked() // 持锁落盘，失败静默降级，不阻塞返回
+	return repos
+}
+
+// scanDirCached 单目录的缓存差量扫描。返回该目录子树下的所有仓库路径（含自身，若为仓库），
+// 同时追加到顶层 repos 累加器。
+//
+// 策略（激进跳过子树 + TTL + 手动刷新兜底，参考 research/git-scan-optimization.md 方案 B）：
+//   - 缓存命中且目录 mtime 未变：直接复用缓存的 SubtreeRepos，跳过整棵子树
+//   - 缓存未命中或 mtime 变化：实际判定 + 递归子目录，结果回写缓存
+//
+// 已知风险：深层新增仓库（如 a/b/c 下 git init）若未更新 a/b 的 mtime，激进跳过会漏扫。
+// 由 TTL（5min 强制全扫）+ 手动刷新按钮（ClearScanCache，PRD F9）兜底，不丢数据。
+func (s *GitService) scanDirCached(dir string, repos *[]string, cache *RepoScanCache) []string {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil
+	}
+	curMtime := info.ModTime()
+
+	// 缓存命中：mtime 未变 -> 复用缓存的子树仓库列表，跳过整棵子树
+	if entry, hit := cache.Entries[dir]; hit && entry.ModTime.Equal(curMtime) {
+		*repos = append(*repos, entry.SubtreeRepos...)
+		return entry.SubtreeRepos
+	}
+
+	// 缓存未命中或 mtime 变化：实际判定本目录是否仓库
+	isRepo := util.IsGitRepositoryFast(dir)
+	if isRepo {
+		subtree := []string{dir}
+		*repos = append(*repos, dir)
+		cache.Entries[dir] = CacheEntry{ModTime: curMtime, IsRepo: true, SubtreeRepos: subtree}
+		return subtree
+	}
+
+	// 非仓库：递归子目录，聚合子树仓库
+	var subtree []string
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == ".git" {
+				continue
+			}
+			childSubtree := s.scanDirCached(filepath.Join(dir, entry.Name()), repos, cache)
+			subtree = append(subtree, childSubtree...)
+		}
+	}
+	cache.Entries[dir] = CacheEntry{ModTime: curMtime, IsRepo: false, SubtreeRepos: subtree}
+	return subtree
+}
+
+// ClearScanCache 清除指定工作目录的扫描缓存，供手动刷新按钮（PRD F9）绕过缓存强制全扫。
+// 未注入缓存时为空操作。
+func (s *GitService) ClearScanCache(rootPath string) {
+	if s.scanCache == nil {
+		return
+	}
+	s.scanCache.clear(rootPath)
+}
+
+// HasRemotesBatch 批量检测多个仓库是否配置了远程仓库。
+// 用 go-git（读取 .git/config）实现，不 fork git 子进程，规避逐个 git remote -v 的子进程开销。
+// 并发执行（concurrency=8），用于仓库筛选器列表场景，保证 NF1（100 仓库 < 3s）。
+// 返回 map[路径]是否配置远程；判定失败（路径不存在/非仓库）记为 false。
+func (s *GitService) HasRemotesBatch(repoPaths []string) map[string]bool {
+	result := make(map[string]bool, len(repoPaths))
+	if len(repoPaths) == 0 {
+		return result
+	}
+
+	const concurrency = 8
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, p := range repoPaths {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			has := false
+			if repo, err := git.PlainOpen(path); err == nil {
+				if remotes, err := repo.Remotes(); err == nil {
+					has = len(remotes) > 0
+				}
+			}
+			mu.Lock()
+			result[path] = has
+			mu.Unlock()
+		}(p)
+	}
+	wg.Wait()
+	return result
 }
 
 // GetLocalChanges 获取本地变动文件列表

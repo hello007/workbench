@@ -84,6 +84,24 @@ func (g *GitCommand) IsGitRepository(dir string) bool {
 	return cmd.Run() == nil
 }
 
+// IsGitRepositoryFast 基于 .git 条目存在性快速判定目录是否为 Git 仓库。
+// 仅判 os.Stat 无错，不要求 .git 是目录，从而覆盖 worktree/submodule 的 .git 文件场景
+// （这两类的 .git 是文件，内容形如 "gitdir: /path/..."，若用 IsDir() 判定会漏判）。
+// 与现有 IsGitRepository（fork git rev-parse）相比，单次 os.Stat 约 0.1ms，快 200~1000 倍。
+//
+// 已知边界：bare repo（无 .git 条目）会漏判，桌面工作目录场景可忽略；
+// 损坏/残留 .git 会误判为仓库，后续真实 git 操作时会报错暴露，不产生静默数据错误。
+//
+// 注意：现有 FindGitRoot（本文件下方）使用 info.IsDir() 判定，对 worktree/submodule 漏判，
+// 属已存在的潜在 bug，本函数避免重蹈覆辙。
+func IsGitRepositoryFast(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
 // GetBranch 获取当前分支名
 func (g *GitCommand) GetBranch(dir string) (string, error) {
 	return g.Execute(dir, "branch", "--show-current")
