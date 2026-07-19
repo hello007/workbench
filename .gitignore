@@ -9,6 +9,8 @@
 # Release packages (contain binaries)
 # Test binary
 # Wails
+# Source maps
+*.mjs.map
 # Worktree directory
 *.dll
 *.dylib
