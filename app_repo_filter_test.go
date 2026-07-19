@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"workbench/model"
@@ -199,6 +200,47 @@ func TestGetRepoFilterList_UnknownDirId(t *testing.T) {
 	}
 }
 
+// TestGetRepoReadme_FullContent GetRepoReadme 返回仓库根目录下 README 完整文本（不截断）。
+func TestGetRepoReadme_FullContent(t *testing.T) {
+	app, _ := repoFilterTestApp(t)
+	workDir := t.TempDir()
+	repo := filepath.Join(workDir, "myrepo")
+	initRepoForTest(t, repo, false)
+	full := "# 项目名\n\n第一段描述。\n\n第二段描述。"
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte(full), 0644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+
+	got := app.GetRepoReadme(repo)
+	if got != full {
+		t.Errorf("GetRepoReadme: got %q, want %q", got, full)
+	}
+}
+
+// TestGetRepoReadme_NoReadme 无 README / 路径非目录 均返回空串。
+func TestGetRepoReadme_EmptyCases(t *testing.T) {
+	app, _ := repoFilterTestApp(t)
+	// 无 README 的仓库
+	workDir := t.TempDir()
+	repo := filepath.Join(workDir, "noreadme")
+	initRepoForTest(t, repo, false)
+	if got := app.GetRepoReadme(repo); got != "" {
+		t.Errorf("expected empty for repo without README, got %q", got)
+	}
+	// 路径不存在
+	if got := app.GetRepoReadme(filepath.Join(workDir, "nonexistent")); got != "" {
+		t.Errorf("expected empty for nonexistent path, got %q", got)
+	}
+	// 路径指向文件而非目录
+	filePath := filepath.Join(workDir, "afile.txt")
+	if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if got := app.GetRepoReadme(filePath); got != "" {
+		t.Errorf("expected empty for non-dir path, got %q", got)
+	}
+}
+
 // TestGetRepoFilterList_NoRepos 工作目录下无仓库时返回空列表。
 func TestGetRepoFilterList_NoRepos(t *testing.T) {
 	app, _ := repoFilterTestApp(t)
@@ -266,4 +308,151 @@ func indexOfSub(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// TestBuildRepoFilterList_WorkdirIsolation 验证切换工作目录后，其他工作目录的已编辑仓库
+// 不会以失效状态混入当前工作目录列表（repo_meta.json 按 path 全局存储，查询时按 rootPath 范围过滤）。
+func TestBuildRepoFilterList_WorkdirIsolation(t *testing.T) {
+	app, _ := repoFilterTestApp(t)
+
+	// 两个独立的工作目录
+	dirAPath := t.TempDir()
+	dirBPath := t.TempDir()
+	repoA := filepath.Join(dirAPath, "repo-a")
+	repoB := filepath.Join(dirBPath, "repo-b")
+	initRepoForTest(t, repoA, false)
+	initRepoForTest(t, repoB, false)
+
+	dirA := &model.Directory{ID: "dirA", Name: "dirA", Path: dirAPath}
+	dirB := &model.Directory{ID: "dirB", Name: "dirB", Path: dirBPath}
+
+	// 首次扫描 dirA 建立 repoA 元数据，并打标签使其成为"已编辑"仓库
+	app.buildRepoFilterList(dirA, false)
+	if err := app.SaveRepoMeta(repoA, "repoA 简述", []string{"tag-a"}); err != nil {
+		t.Fatalf("SaveRepoMeta repoA: %v", err)
+	}
+
+	// 扫描 dirB：repoA 不在 dirB 范围内，不应出现（更不能以 Missing 状态混入）
+	itemsB := app.buildRepoFilterList(dirB, false)
+	for _, it := range itemsB {
+		if it.Name == "repo-a" {
+			t.Errorf("repo-a 不应出现在 dirB 的列表中（工作目录隔离），但仍得到: %+v", it)
+		}
+	}
+	// repoB 应出现且非失效
+	foundB := false
+	for _, it := range itemsB {
+		if it.Name == "repo-b" {
+			foundB = true
+			if it.Missing {
+				t.Error("repo-b 不应标记为 Missing")
+			}
+		}
+	}
+	if !foundB {
+		t.Error("repo-b 应出现在 dirB 的列表中")
+	}
+
+	// 扫描 dirA：repoA 应出现、Missing=false（扫描到）且保留用户标签
+	itemsA := app.buildRepoFilterList(dirA, false)
+	foundA := false
+	for _, it := range itemsA {
+		if it.Name == "repo-a" {
+			foundA = true
+			if it.Missing {
+				t.Error("repo-a 不应标记为 Missing（扫描到）")
+			}
+			if len(it.Tags) != 1 || it.Tags[0] != "tag-a" {
+				t.Errorf("repo-a 标签: got %v, want [tag-a]", it.Tags)
+			}
+		}
+	}
+	if !foundA {
+		t.Error("repo-a 应出现在 dirA 的列表中")
+	}
+}
+
+// TestBuildRepoFilterList_MissingInSameWorkdir 验证当前工作目录范围内的失效记录
+// 仍被正确标记 Missing=true（保留失效清理入口，未被工作目录隔离逻辑误伤）。
+func TestBuildRepoFilterList_MissingInSameWorkdir(t *testing.T) {
+	app, _ := repoFilterTestApp(t)
+
+	dirAPath := t.TempDir()
+	repoA := filepath.Join(dirAPath, "repo-a")
+	repoGone := filepath.Join(dirAPath, "repo-gone")
+	initRepoForTest(t, repoA, false)
+	initRepoForTest(t, repoGone, false)
+
+	dirA := &model.Directory{ID: "dirA", Name: "dirA", Path: dirAPath}
+
+	// 首次扫描建立元数据
+	app.buildRepoFilterList(dirA, false)
+
+	// 删除 repoGone，使其成为同目录内真正失效的记录
+	if err := os.RemoveAll(repoGone); err != nil {
+		t.Fatalf("remove repoGone: %v", err)
+	}
+
+	// 强制刷新扫描：repoGone 在 dirA 范围内，应标记 Missing=true
+	items := app.buildRepoFilterList(dirA, true)
+	byName := make(map[string]*model.RepoFilterItem, len(items))
+	for _, it := range items {
+		byName[it.Name] = it
+	}
+	gone, ok := byName["repo-gone"]
+	if !ok {
+		t.Fatal("repo-gone 应以 Missing 状态出现在 dirA 列表中（保留失效清理入口）")
+	}
+	if !gone.Missing {
+		t.Error("repo-gone 应标记 Missing=true")
+	}
+	a, ok := byName["repo-a"]
+	if !ok {
+		t.Fatal("repo-a 应出现在 dirA 列表中")
+	}
+	if a.Missing {
+		t.Error("repo-a 不应标记为 Missing")
+	}
+}
+
+// TestIsPathUnder 直接固化 isPathUnder 的边界行为：相等、大小写、分隔符、兄弟路径不误判。
+// 这些边界虽在 Windows 文件系统不敏感场景下风险低，但路径主键规范化依赖其正确性，
+// 需独立测试防止未来回归（跨平台路径输入、外部传入未规范化路径等）。
+func TestIsPathUnder(t *testing.T) {
+	// 用绝对路径前缀构造，规避 filepath.Abs 依赖当前工作目录
+	base := filepath.Join(t.TempDir(), "parent")
+	child := filepath.Join(base, "child", "repo")
+
+	cases := []struct {
+		name   string
+		child  string
+		parent string
+		want   bool
+	}{
+		{"child 在 parent 下", child, base, true},
+		{"child == parent", base, base, true},
+		{"大小写差异（盘符/路径段）", upperPath(child), upperPath(base), true},
+		{"分隔符差异（\\ vs /）", toSlashPath(child), base, true},
+		{"兄弟路径不误判", filepath.Join(filepath.Dir(base), "parent-sibling", "repo"), base, false},
+		{"前缀同名兄弟不误判", filepath.Join(filepath.Dir(base), "parent-other"), base, false},
+		{"parent 末尾带分隔符不应误判", child, base + string(filepath.Separator), true},
+		{"空 parent 视为 cwd（child 不在 cwd 下时 false）", filepath.Join(t.TempDir(), "x"), "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isPathUnder(c.child, c.parent); got != c.want {
+				t.Errorf("isPathUnder(%q, %q) = %v, want %v", c.child, c.parent, got, c.want)
+			}
+		})
+	}
+}
+
+// upperPath 将路径中所有 ASCII 字母转大写，用于测试大小写不敏感判定。
+func upperPath(p string) string {
+	return strings.ToUpper(p)
+}
+
+// toSlashPath 将路径分隔符统一为 /，用于测试分隔符差异下的判定。
+func toSlashPath(p string) string {
+	return strings.ReplaceAll(p, "\\", "/")
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -399,6 +400,27 @@ func normalizeRepoPathForApp(path string) string {
 	return abs
 }
 
+// isPathUnder 判断 child 路径是否位于 parent 目录下（含相等）。
+// 规范化：filepath.Abs + ToSlash + ToLower，兼容 Windows 大小写与分隔符差异。
+// 用于将全局存储的 RepoMeta（按 path 主键）限定到当前工作目录范围内，
+// 避免其他工作目录的已编辑仓库以失效状态混入当前列表。
+func isPathUnder(child, parent string) bool {
+	c, err := filepath.Abs(child)
+	if err != nil {
+		c = child
+	}
+	p, err := filepath.Abs(parent)
+	if err != nil {
+		p = parent
+	}
+	cs := strings.ToLower(filepath.ToSlash(c))
+	ps := strings.ToLower(filepath.ToSlash(p))
+	if cs == ps {
+		return true
+	}
+	return strings.HasPrefix(cs, ps+"/")
+}
+
 // buildRepoFilterList 构建仓库筛选器列表的核心逻辑。
 // forceRescan=true 时清除扫描缓存并重新解析所有 README（手动刷新）；false 时走 mtime 缓存。
 //
@@ -507,6 +529,12 @@ func (a *App) buildRepoFilterList(dir *model.Directory, forceRescan bool) []*mod
 			if meta == nil || scannedSet[normalized] {
 				continue
 			}
+			// 仅处理当前工作目录范围内的失效记录，避免其他工作目录的已编辑仓库以失效状态出现。
+			// repo_meta.json 按 path 全局存储（path 全局唯一且仓库可能被嵌套工作目录包含），
+			// 故查询时按 rootPath 范围过滤，实现工作目录隔离。
+			if !isPathUnder(meta.Path, rootPath) {
+				continue
+			}
 			if !meta.Missing {
 				meta.Missing = true
 				dirty = true
@@ -572,6 +600,14 @@ func (a *App) CleanMissingRepoMeta() (int, error) {
 		return removed > 0, nil
 	})
 	return removed, err
+}
+
+// GetRepoReadme 返回指定仓库根目录下 README 的完整文本（不截断，供二级弹窗渲染）。
+// 复用 service.ReadFullReadme：路径校验（须存在且为目录）+ findReadme 定位
+// + ReadFileSafe 读取（上限 1MB）+ DetectTextEncoding 转 UTF-8。
+// 无 README / 二进制 / 编码不可识别 / 路径非目录 均返回空串（前端据此禁用"查看完整 README"）。
+func (a *App) GetRepoReadme(repoPath string) string {
+	return service.ReadFullReadme(repoPath)
 }
 
 // GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息
