@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 29
-- **Last Active**: 2026-07-19
+- **Total Sessions**: 30
+- **Last Active**: 2026-07-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~986 | Active |
+| `journal-1.md` | ~1019 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 30 | 2026-07-20 | 定制 Phase 3.3 沉淀目标到 docs/ 与 CLAUDE.md | `162f9a8` | `master` |
 | 29 | 2026-07-19 | 仓库筛选器：文件树 Git 仓库管理弹窗 | `889cc8c`, `9a95d82`, `6ca219c`, `3f00ba6`, `3254668`, `409fd31`, `13b8a68` | `master` |
 | 28 | 2026-07-19 | fix: 文件树点击已展开文件夹保持展开 | `cee33c3` | `master` |
 | 27 | 2026-07-13 | 文件节点刷新自动刷新其所在目录 | `bbd19e0` | `master` |

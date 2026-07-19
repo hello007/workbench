@@ -984,3 +984,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: 定制 Phase 3.3 沉淀目标到 docs/ 与 CLAUDE.md
+
+**Date**: 2026-07-20
+**Task**: 定制 Phase 3.3 沉淀目标到 docs/ 与 CLAUDE.md
+**Branch**: `master`
+
+### Summary
+
+把 finish-work 收尾流程的沉淀目标从 .trellis/spec/ 改为 docs/常见问题.md + docs/开发规范.md + CLAUDE.md（仅全局必读约定，需用户确认）；保留 Phase 3.3 时机（finish-work 前），不动 [required·once] 标记与 breadcrumb 契约；不改 trellis-update-spec SKILL.md（Phase 3.3 指令措辞足够强会覆盖 skill 默认，且规避模板覆盖风险）。只改 workflow.md 一处。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `162f9a8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
