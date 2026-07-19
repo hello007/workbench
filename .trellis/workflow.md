@@ -572,7 +572,12 @@ Load the `trellis-update-spec` skill and review whether this task produced new k
 - Pitfalls you hit
 - New technical decisions
 
-Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "nothing to update", walk through the judgment.
+**沉淀目标（本项目覆盖，非 `.trellis/spec/`）**：
+- 坑 / 问题 / 非显而易见的行为 -> `docs/常见问题.md`（Q&A 格式：症状 / 原因 / 解决方案 / 相关文件）
+- 规范 / 约定 / 正确做法 -> `docs/开发规范.md`（✅正确 / ❌错误 代码示例 + 原因）
+- 仅"每个 session 必读的全局约定"才进 `CLAUDE.md`，且**起草拟改片段后须用户确认再写入**
+
+**写入策略**：`docs/` 直接写入；`CLAUDE.md` 先列拟改片段、用户确认后再写。即使结论是"本次无内容可沉淀"，也要走一遍判断并说明。
 
 #### 3.4 Commit changes `[required · once]`
 
