@@ -55,6 +55,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./.claude/hooks/notify.js"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -64,6 +73,26 @@
             "type": "command",
             "command": "python .claude/hooks/inject-workflow-state.py",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./.claude/hooks/notify.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./.claude/hooks/notify.js"
           }
         ]
       }

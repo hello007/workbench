@@ -37,5 +37,6 @@ Thumbs.db
 vendor/
 agent-harness/
 bash.exe.stackdump
+notify_error.log
 
 .claude/settings.local.json

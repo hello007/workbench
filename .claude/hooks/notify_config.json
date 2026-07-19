@@ -1,0 +1,53 @@
+{
+  "log_enabled": true,
+  "sound_enabled": true,
+  "notify_url": "",
+  "ui_styles": {
+    "colors": {
+      "primary": "#4361ee",
+      "success": "#10b981",
+      "danger": "#ef4444",
+      "background": "#f8f9fa",
+      "metaBackground": "#e9ecef",
+      "border": "#dee2e6",
+      "labelText": "#212529",
+      "valueText": "#495057",
+      "descText": "#6c757d",
+      "white": "#ffffff",
+      "buttonHover": "#f8f9fa"
+    },
+    "fontSizes": {
+      "meta": 13,
+      "title": 13,
+      "content": 12,
+      "label": 12,
+      "description": 12,
+      "message": 12,
+      "button": 12
+    },
+    "spacing": {
+      "metaPadding": "20,16",
+      "metaLineSpacing": 2,
+      "titleMargin": "20,18,20,12",
+      "contentPadding": "16",
+      "buttonMargin": "0,8,0,0",
+      "optionMargin": "0,0,0,4",
+      "optionPadding": "8",
+      "labelDescSpacing": "0,3,0,0"
+    },
+    "window": {
+      "permission": {
+        "width": 700,
+        "height": 450
+      },
+      "askUser": {
+        "width": 600,
+        "height": 500
+      },
+      "stop": {
+        "width": 600,
+        "height": 450
+      }
+    }
+  }
+}
