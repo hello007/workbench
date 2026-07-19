@@ -6,6 +6,8 @@
         <el-button size="small" @click="expandAll" :loading="expanding">全部展开</el-button>
         <el-button size="small" @click="collapseAll">全部收起</el-button>
       </el-button-group>
+      <!-- 工具栏扩展位：仓库筛选器等外部按钮通过具名 slot 注入 -->
+      <slot name="toolbar-extra" />
     </div>
     <div class="tree-content" @contextmenu.prevent="onBlankAreaContextMenu">
       <el-tree
@@ -189,6 +191,10 @@
         </li>
         <li class="context-menu-item" @click="onMenuCommand('createDir')">
           <el-icon><FolderAdd /></el-icon>新建文件夹
+        </li>
+        <li class="context-menu-divider" />
+        <li class="context-menu-item" @click="onMenuCommand('openRepoFilter')">
+          <el-icon><Search /></el-icon>仓库筛选器
         </li>
       </template>
       <template v-else-if="contextMenu.data?.type === 'directory'">
@@ -378,7 +384,7 @@ const props = defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search', 'open-repo-filter'])
 
 const { saveState, restoreState } = useTreeState()
 const { addFavorite, removeFavorite, favorites, loadFavorites } = useFavorites()
@@ -785,6 +791,9 @@ const onMenuCommand = (command) => {
       break
     case 'createDir':
       showCreateAt(data, 'directory')
+      break
+    case 'openRepoFilter':
+      emit('open-repo-filter')
       break
     case 'rename':
       showRenameAt(data)

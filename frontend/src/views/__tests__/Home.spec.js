@@ -71,6 +71,7 @@ describe('Home.vue - Bug修复验证', () => {
           DirectoryTree: { template: '<div class="stub-directory-tree" />' },
           FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {} } },
           ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
+          RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' },
           'el-tree': true,
           'el-dialog': true,
           'el-form': true,
@@ -281,7 +282,8 @@ describe('Home.vue - Bug修复验证', () => {
             Pane: { template: '<div class="pane" :data-size="size" :data-min-size="minSize" :data-max-size="maxSize"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
-            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, previewFile: () => {} } }
+            ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, previewFile: () => {} } },
+            RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' }
           }
         }
       })
@@ -341,6 +343,7 @@ describe('Home.vue - Bug修复验证', () => {
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
             ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
+            RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' },
             'el-dialog': true,
             'el-form': true,
             'el-form-item': true,
@@ -656,6 +659,124 @@ describe('Home.vue - Bug修复验证', () => {
 
       expect(previewFileMock).not.toHaveBeenCalled()
       w.unmount()
+    })
+  })
+
+  describe('onRepoLocate 跨工作目录跳转衔接', () => {
+    // 复用 research/cross-workdir-locate.md 推荐时序：
+    //   规范化（\ -> / + toLowerCase）查找 targetDir -> 关弹窗 -> 跨目录则 await onDirectorySelect -> locateNode
+    const mountWithLocate = (locateNodeMock) => mount(Home, {
+      global: {
+        stubs: {
+          Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+          Pane: { template: '<div class="pane"><slot /></div>' },
+          DirectoryTree: { template: '<div />' },
+          FileTreePanel: {
+            template: '<div />',
+            methods: {
+              saveCurrentState: () => {},
+              restoreTreeState: () => {},
+              locateNode: locateNodeMock
+            }
+          },
+          ContentPanel: { template: '<div />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
+          RepoFilterDialog: { template: '<div />' },
+          'el-tree': true,
+          'el-dialog': true,
+          'el-form': true,
+          'el-form-item': true,
+          'el-input': true,
+          'el-switch': true,
+          'el-button': true,
+          'el-button-group': true,
+          'el-divider': true,
+          'el-select': true,
+          'el-option': true,
+          'el-empty': true,
+          'el-descriptions': true,
+          'el-descriptions-item': true,
+          'el-icon': true
+        }
+      }
+    })
+
+    let w
+    afterEach(() => {
+      if (w) { w.unmount(); w = null }
+    })
+
+    it('同工作目录：直接 locateNode，不切换工作目录', async () => {
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      w.vm.directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
+      ]
+      w.vm.selectedDirectoryId = 'dir-1'
+      await flushPromises()
+
+      await w.vm.onRepoLocate('D:/work/repo-a')
+      await flushPromises()
+
+      expect(locateNodeMock).toHaveBeenCalledWith('D:/work/repo-a')
+      // 同工作目录不应触发切换
+      expect(w.vm.selectedDirectoryId).toBe('dir-1')
+    })
+
+    it('跨工作目录：先切换工作目录再 locateNode', async () => {
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      w.vm.directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false },
+        { id: 'dir-2', name: '工作目录2', path: 'D:/other', isGitRepo: false, isDefault: false }
+      ]
+      w.vm.selectedDirectoryId = 'dir-1'
+      await flushPromises()
+
+      await w.vm.onRepoLocate('D:/other/repo-x')
+      await flushPromises()
+
+      // 应切换到 dir-2（跨工作目录先切换）
+      expect(w.vm.selectedDirectoryId).toBe('dir-2')
+      // 切换完成后调用 locateNode 定位目标
+      expect(locateNodeMock).toHaveBeenCalledWith('D:/other/repo-x')
+    })
+
+    it('未知路径：给出警告且不调用 locateNode', async () => {
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      w.vm.directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
+      ]
+      w.vm.selectedDirectoryId = 'dir-1'
+      await flushPromises()
+      ElMessage.warning.mockClear()
+
+      await w.vm.onRepoLocate('D:/unknown/repo')
+      await flushPromises()
+
+      expect(ElMessage.warning).toHaveBeenCalledWith('未找到该仓库所属的工作目录')
+      expect(locateNodeMock).not.toHaveBeenCalled()
+    })
+
+    it('大小写/分隔符差异：规范化后仍能命中目标工作目录并定位', async () => {
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      // 工作目录路径用反斜杠 + 大写盘符，仓库路径用正斜杠 + 小写盘符
+      w.vm.directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:\\work', isGitRepo: false, isDefault: false }
+      ]
+      w.vm.selectedDirectoryId = 'dir-1'
+      await flushPromises()
+
+      await w.vm.onRepoLocate('d:/work/repo-a')
+      await flushPromises()
+
+      // 规范化（\ -> / + toLowerCase）后应命中 dir-1 并定位（规避 locateNode 内 startsWith 大小写敏感的静默失败）
+      expect(locateNodeMock).toHaveBeenCalledWith('d:/work/repo-a')
     })
   })
 })

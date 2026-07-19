@@ -42,7 +42,14 @@
                   @delete="onDeleteFromFileTree"
                   @add-work-dir="onAddWorkDir"
                   @open-content-search="onOpenContentSearch"
-                />
+                  @open-repo-filter="repoFilterVisible = true"
+                >
+                  <template #toolbar-extra>
+                    <el-button size="small" @click="repoFilterVisible = true">
+                      仓库筛选
+                    </el-button>
+                  </template>
+                </FileTreePanel>
               </div>
             </Pane>
             <Pane :size="50" :min-size="30">
@@ -94,6 +101,12 @@
       @select-favorite="onPaletteSelectFavorite"
       @select-workdir="onPaletteSelectWorkDir"
     />
+    <RepoFilterDialog
+      v-model:visible="repoFilterVisible"
+      :directories="directories"
+      :current-dir-id="selectedDirectoryId"
+      @locate="onRepoLocate"
+    />
   </div>
 </template>
 
@@ -110,6 +123,7 @@ import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
+import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { useShortcuts } from '../composables/useShortcuts'
 import { Splitpanes, Pane } from 'splitpanes'
@@ -159,6 +173,9 @@ const updateInfo = ref({})
 // ---- Command Palette 状态 ----
 const commandPaletteVisible = ref(false)
 const contentSearchInit = ref('')
+
+// ---- 仓库筛选器弹窗状态 ----
+const repoFilterVisible = ref(false)
 const { record: recordAccess } = useRecentAccess()
 const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete } = useShortcuts()
 
@@ -396,6 +413,37 @@ function onPaletteSelectFavorite(fav) {
 
 function onPaletteSelectWorkDir(dir) {
   onDirectorySelect(dir.id)
+}
+
+// ---- 仓库筛选器：跳转定位（跨工作目录衔接）----
+// 时序严格参考 research/cross-workdir-locate.md：
+//   1. 规范化路径（\ -> / + toLowerCase）查找 targetDir，规避 locateNode 内 startsWith 未处理大小写的静默失败
+//   2. 尽早关闭弹窗，避免遮挡文件树
+//   3. 跨工作目录：await onDirectorySelect 触发 treeKey 变化 -> treeReadyPromise 重置 -> el-tree 重建，
+//      让 restoreTreeState（历史展开）先完成，再 locateNode，避免并发竞争同一节点 expand/loadData
+//   4. locateNode 内部 await treeReadyPromise 兜底等新树就绪，再沿父路径逐级展开 + setCurrentKey + scrollBy
+//   同工作目录：跳过步骤 3，treeKey 不变、treeReadyPromise 旧值已 resolve，locateNode 立即执行
+const onRepoLocate = async (repoPath) => {
+  if (!repoPath) return
+
+  const norm = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
+  const normTarget = norm(repoPath)
+  const targetDir = directories.value.find(d => normTarget.startsWith(norm(d.path)))
+  if (!targetDir) {
+    ElMessage.warning('未找到该仓库所属的工作目录')
+    return
+  }
+
+  // 关闭弹窗
+  repoFilterVisible.value = false
+
+  // 跨工作目录：先切换（触发文件树重建）
+  if (targetDir.id !== selectedDirectoryId.value) {
+    await onDirectorySelect(targetDir.id)
+  }
+
+  // 定位到目标节点（内部 await treeReadyPromise 兜底）
+  await fileTreePanelRef.value?.locateNode(repoPath)
 }
 
 function onOpenContentSearch(subDir) {
