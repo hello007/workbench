@@ -8,7 +8,7 @@
 
 ### 1. Scope / Trigger
 - Trigger: 修改 `app.go` 中 `App` 结构体的导出方法签名（增删参数、改类型）。
-- 原因: Wails 在 `wails dev` / `wails build` 时自动生成 `frontend/wailsjs/go/main/App.js` 与 `App.d.ts`，但 sub-agent / CI 环境无法运行 wails，绑定不会自动重新生成，必须手动同步。
+- 原因: Wails 在 `wails dev` / `wails build` 时自动生成 `frontend/wailsjs/go/main/App.js` 与 `App.d.ts`。`frontend/wailsjs/` 整目录已在 `.gitignore`（自 commit 28ca710）且不被 git 跟踪；sub-agent 环境可运行 `wails generate module` 重新生成绑定，若环境不可用（如 CI 无 wails）则需手动同步 `App.js` / `App.d.ts`。
 
 ### 2. Signatures（以 SaveFile 为例）
 - Go: `func (a *App) SaveFile(filePath, content, encoding string) error`
@@ -56,12 +56,12 @@
 - Go struct 字段（含 json tag） <-> `models.ts` 对应 class 的字段声明 + 构造函数赋值，两处须一致
 - `omitempty` json tag -> TS 字段用 `?:` 可选
 - 字段名按 json tag（而非 Go 字段名）映射到 TS
-- `models.ts` 在 `.gitignore` 忽略目录 `frontend/wailsjs/` 下但已被跟踪；`git add` 该目录文件须用 `-f`
+- `frontend/wailsjs/` 整目录在 `.gitignore` 中（自 commit 28ca710）且不被 git 跟踪，`models.ts` 由 `wails generate module` 自动生成，不提交、无需 `git add -f`
 
 ### 4. Validation & Error Matrix
 - Go 加字段未同步 `models.ts` -> 前端 TS 类型缺字段，`preview.encoding` 类型检查警告（vitest esbuild 不报类型错误，测试仍过，易漏）
 - 只改 `models.ts` 字段声明未改构造函数 -> 运行时该字段为 undefined
-- sub-agent 报告遗漏 `models.ts` 改动 -> trellis-check 须专门查 `git status` 是否残留 `frontend/wailsjs/` 改动（任务 07-09 真实发生：sub-agent 改了 models.ts 但报告未提，trellis-check 未发现，commit 后才暴露）
+- sub-agent 须运行 `wails generate module` 重新生成绑定 -> trellis-check 须确认绑定已生成且 Go 方法签名 / `App.js` / `App.d.ts` 三处一致，并核对 `RepoFilterItem` 等 struct 的 `models.ts` 字段与 Go json tag 对齐（`frontend/wailsjs/` 已 gitignore，`git status` 不会有残留）
 
 ### 5. Good/Base/Bad Cases
 - Good: 改 Go struct -> 同步 `models.ts`（字段声明+构造函数）-> `git status` 确认无 wailsjs 残留 -> 跑 `npm test`
