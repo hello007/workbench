@@ -912,3 +912,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: fix: 文件树点击已展开文件夹保持展开
+
+**Date**: 2026-07-19
+**Task**: fix: 文件树点击已展开文件夹保持展开
+**Branch**: `master`
+
+### Summary
+
+优化文件树交互：已展开未选中的文件夹点击后仅选中不收起，已选中时才收起
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cee33c3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
