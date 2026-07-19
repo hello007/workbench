@@ -515,6 +515,7 @@ const loadTreeNode = async (node, resolve) => {
 const onNodeClick = (data, node) => {
   const clickedPath = data.path.replace(/\\/g, '/')
   const prevPath = currentSelectedPath.value.replace(/\\/g, '/')
+  const wasSelected = prevPath === clickedPath // 点击前是否已选中
 
   currentSelectedPath.value = data.path
   emit('select', data)
@@ -526,8 +527,13 @@ const onNodeClick = (data, node) => {
 
   if (isAncestor) return
 
+  // 已展开未选中 → 仅选中，不收起
+  // 已展开已选中 → 收起
+  // 未展开 → 展开
   if (node.expanded) {
-    node.collapse()
+    if (wasSelected) {
+      node.collapse()
+    }
   } else {
     node.expand()
   }
