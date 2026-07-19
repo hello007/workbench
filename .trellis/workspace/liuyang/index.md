@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-07-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~947 | Active |
+| `journal-1.md` | ~986 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-07-19 | 仓库筛选器：文件树 Git 仓库管理弹窗 | `889cc8c`, `9a95d82`, `6ca219c`, `3f00ba6`, `3254668`, `409fd31`, `13b8a68` | `master` |
 | 28 | 2026-07-19 | fix: 文件树点击已展开文件夹保持展开 | `cee33c3` | `master` |
 | 27 | 2026-07-13 | 文件节点刷新自动刷新其所在目录 | `bbd19e0` | `master` |
 | 26 | 2026-07-10 | 修复本地变动未跟踪目录折叠显示不完整 | `f845d71` | `master` |

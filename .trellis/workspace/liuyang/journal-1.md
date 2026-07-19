@@ -945,3 +945,42 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: 仓库筛选器：文件树 Git 仓库管理弹窗
+
+**Date**: 2026-07-19
+**Task**: 仓库筛选器：文件树 Git 仓库管理弹窗
+**Branch**: `master`
+
+### Summary
+
+实现仓库筛选器弹窗（master-detail 两栏 + useVirtualList 虚拟滚动），支持工作目录切换、已编辑/未编辑 Tab 分类、标签 OR 筛选、README 智能续取摘要 + 二级弹窗渲染、跨工作目录跳转、失效仓库清理。后端 .git 预筛 + mtime 缓存扫描优化（100 仓库 <0.5s）+ go-git 并发检测远程。修复切换工作目录后旧仓库未隔离、左栏点击强制滚动、滚动条被父 Pane 裁剪等 bug。沉淀虚拟滚动滚动条陷阱到 docs/常见问题.md，Git 仓库检测规范到 docs/开发规范.md。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `889cc8c` | (see git log) |
+| `9a95d82` | (see git log) |
+| `6ca219c` | (see git log) |
+| `3f00ba6` | (see git log) |
+| `3254668` | (see git log) |
+| `409fd31` | (see git log) |
+| `13b8a68` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
