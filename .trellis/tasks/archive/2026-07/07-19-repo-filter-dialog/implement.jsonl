@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "新增 GetRepoFilterList/SaveRepoMeta/CleanMissingRepoMeta 等 Wails 绑定方法，须遵循绑定同步与前后端数据契约"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "后端 RepoMetaService 与扫描改造的错误处理规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go 代码质量标准与禁止模式"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务跨 Go 后端-Wails 绑定-Vue 前端三层，按跨层思维检查数据流与组件状态切换"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "实现前先搜索复用 ScanGitRepos/locateNode/PreviewFile，避免重复造轮子"}
+{"file": ".trellis/tasks/07-19-repo-filter-dialog/research/virtual-scroll-selection.md", "reason": "左栏 useVirtualList 实现骨架、等高约束、右栏 splitpanes 独立 Pane 不失焦"}
+{"file": ".trellis/tasks/07-19-repo-filter-dialog/research/git-scan-optimization.md", "reason": ".git 预筛(os.Stat 不要求 IsDir)+mtime 缓存方案与 IsGitRepositoryFast 代码骨架"}
+{"file": ".trellis/tasks/07-19-repo-filter-dialog/research/cross-workdir-locate.md", "reason": "跨工作目录跳转时序：关弹窗->onDirectorySelect->await treeReadyPromise->locateNode，及 toLowerCase 规范化"}
