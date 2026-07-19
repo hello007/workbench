@@ -1,0 +1,3 @@
+{"file": ".claude/skills/trellis-meta/references/customize-local/change-workflow.md", "reason": "检查 workflow.md 改动是否在允许的定制点内、未触碰 breadcrumb 契约"}
+{"file": "docs/常见问题.md", "reason": "沉淀目标格式基准，检查沉淀引导与其格式一致"}
+{"file": "docs/开发规范.md", "reason": "沉淀目标格式基准，检查沉淀引导与其格式一致"}

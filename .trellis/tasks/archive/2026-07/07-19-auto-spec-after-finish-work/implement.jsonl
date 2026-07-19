@@ -1,0 +1,4 @@
+{"file": ".claude/skills/trellis-meta/references/customize-local/change-workflow.md", "reason": "改 workflow.md 的官方定制指引，确认 walkthrough body 是允许的定制点、不触碰 breadcrumb 契约"}
+{"file": ".claude/skills/trellis-meta/references/customize-local/change-skills-or-commands.md", "reason": "改 trellis-update-spec SKILL.md 的官方指引，确认本地定制路径"}
+{"file": "docs/常见问题.md", "reason": "沉淀目标之一，参考其 Q&A 格式（症状/原因/解决方案/相关文件）"}
+{"file": "docs/开发规范.md", "reason": "沉淀目标之一，参考其 ✅❌ 示例 + 原因格式"}
