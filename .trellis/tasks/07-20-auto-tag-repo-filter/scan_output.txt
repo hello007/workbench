@@ -1,0 +1,312 @@
+=== AI框架\spring-ai ===
+PATH: D:\workspace\workspace_ai\github\AI框架\spring-ai
+EXISTS: True | CURTAGS: None
+README: # Spring AI [![build status](https://github.com/spring-projects/spring-ai/actions/workflows/continuous-integration.yml/badge.svg)](https://github.com/spring-projects/spring-ai/actions/workflows/continuous-integration.yml) [![build status](https://github.com/spring-projects/spring
+
+=== HarnessEngineering\harness-engineering ===
+PATH: D:\workspace\workspace_ai\github\HarnessEngineering\harness-engineering
+EXISTS: True | CURTAGS: ['harness']
+README: 中文 | [English](README.en.md)  ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Articles](https://img.shields.io/badge/articles-19-green) ![Translations](https://img.shields.io/badge/translations-12-orange)  # Harness Engineering 学习指南  > 一个从概念理解到独立实践的 Harness Engin
+
+=== MCP\Unla ===
+PATH: D:\workspace\workspace_ai\github\MCP\Unla
+EXISTS: True | CURTAGS: None
+GO: module github.com/amoylab/unla
+README: # Unla - MCP Gateway  > 🚀 Instantly transform your existing MCP Servers and APIs into [MCP](https://modelcontextprotocol.io/) endpoints — without changing a line of code.  [![English](https://img.shields.io/badge/English-Click-yellow)](./README.md) [![简体中文](https://img.shields.io
+
+=== MCP\codebase-memory-mcp ===
+PATH: D:\workspace\workspace_ai\github\MCP\codebase-memory-mcp
+EXISTS: True | CURTAGS: None
+README: # codebase-memory-mcp  [![GitHub Release](https://img.shields.io/github/v/release/DeusData/codebase-memory-mcp?style=flat&color=blue)](https://github.com/DeusData/codebase-memory-mcp/releases/latest) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![CI](htt
+
+=== MCP\mcp-gateway-java ===
+PATH: D:\workspace\workspace_ai\github\MCP\mcp-gateway-java
+EXISTS: True | CURTAGS: ['mcp', 'gateway']
+README: # MCP 网关（Java 版）  赞同科技 MCP 网关 Java 实现。对齐 SRS v1.0 / SDD v0.4 文档基线，提供面向银行解决方案的 MCP 协议接入与配置管理能力。  ## 项目简介  - **管理面（mcp-admin-server，端口 8080）**：17 个 REST 端点（认证 / 配置 / 用户 / 系统 / 审计），JWT 鉴权，配置写入三步原子事务（INSERT/UPDATE config + INSERT history + UPDATE revision），全量审计日志（AOP + 敏感字段 mask），Spr
+
+=== PPT\demo_ppt\.claude\skills\frontend-slides ===
+PATH: D:\workspace\workspace_ai\github\PPT\demo_ppt\.claude\skills\frontend-slides
+EXISTS: True | CURTAGS: ['PPT']
+README: # Frontend Slides  A coding-agent skill for creating stunning HTML presentations — from scratch or by converting PowerPoint files. It is packaged as a Claude Code plugin, and the core `SKILL.md` can also be read by other coding agents with filesystem and shell access.  ## What Th
+
+=== PPT\demo_ppt\.claude\skills\guizang-ppt-skill ===
+PATH: D:\workspace\workspace_ai\github\PPT\demo_ppt\.claude\skills\guizang-ppt-skill
+EXISTS: True | CURTAGS: ['PPT']
+README: # Guizang PPT Skill · 网页 PPT / 配图 / 封面  ![GitHub stars](https://img.shields.io/github/stars/op7418/guizang-ppt-skill?style=flat-square) ![License](https://img.shields.io/github/license/op7418/guizang-ppt-skill?style=flat-square) ![Skill](https://img.shields.io/badge/Skill-Agent-1
+
+=== PPT\frontend-slides ===
+PATH: D:\workspace\workspace_ai\github\PPT\frontend-slides
+EXISTS: True | CURTAGS: ['PPT']
+README: # Frontend Slides  A coding-agent skill for creating stunning HTML presentations — from scratch or by converting PowerPoint files. It is packaged as a Claude Code plugin, and the core `SKILL.md` can also be read by other coding agents with filesystem and shell access.  ## What Th
+
+=== PPT\guizang-ppt-skill ===
+PATH: D:\workspace\workspace_ai\github\PPT\guizang-ppt-skill
+EXISTS: True | CURTAGS: None
+README: # Guizang PPT Skill · 网页 PPT / 配图 / 封面  ![GitHub stars](https://img.shields.io/github/stars/op7418/guizang-ppt-skill?style=flat-square) ![License](https://img.shields.io/github/license/op7418/guizang-ppt-skill?style=flat-square) ![Skill](https://img.shields.io/badge/Skill-Agent-1
+
+=== PPT\html-anything ===
+PATH: D:\workspace\workspace_ai\github\PPT\html-anything
+EXISTS: True | CURTAGS: ['PPT']
+PKG: @html-anything/workspace | 
+README: # HTML Anything  <p align="center"><sub>From the team behind <a href="https://github.com/nexu-io/open-design"><b>Open Design</b></a> — <b>40k★ · 200+ contributors</b>, production-grade and iterating faster. html-anything is the focused agent-era HTML editor; if it clicks for you,
+
+=== PPT\ppt-master ===
+PATH: D:\workspace\workspace_ai\github\PPT\ppt-master
+EXISTS: True | CURTAGS: ['PPT']
+README: # PPT Master — AI generates natively editable PPTX from any document  [![Version](https://img.shields.io/github/v/release/hugohe3/ppt-master?label=version&color=blue)](https://github.com/hugohe3/ppt-master/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow
+
+=== SDD\BMAD-METHOD ===
+PATH: D:\workspace\workspace_ai\github\SDD\BMAD-METHOD
+EXISTS: True | CURTAGS: None
+PKG: bmad-method | Breakthrough Method of Agile AI-driven Development | kw=agile,ai,orchestrator,development,methodology,agents,bmad
+README: ![BMad Method](banner-bmad-method.png)  [![Version](https://img.shields.io/npm/v/bmad-method?color=blue&label=version)](https://www.npmjs.com/package/bmad-method) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Node.js Version](https://img.shiel
+
+=== SDD\OpenSpec ===
+PATH: D:\workspace\workspace_ai\github\SDD\OpenSpec
+EXISTS: True | CURTAGS: None
+PKG: @fission-ai/openspec | AI-native system for spec-driven development | kw=openspec,specs,cli,ai,development
+README: <p align="center">   <a href="https://github.com/Fission-AI/OpenSpec">     <picture>       <source srcset="assets/openspec_bg.png">       <img src="assets/openspec_bg.png" alt="OpenSpec logo">     </picture>   </a> </p>  <p align="center">   <a href="https://github.com/Fission-AI
+
+=== SDD\OpenSpec-Docs-zh ===
+PATH: D:\workspace\workspace_ai\github\SDD\OpenSpec-Docs-zh
+EXISTS: True | CURTAGS: None
+README: # OpenSpec-Docs-zh  > [OpenSpec](https://github.com/Fission-AI/OpenSpec) 官方文档的**中文翻译在线版本**。 > 提供完整的单页可交互文档，并对部分英文专有术语进行了本地化调整，以便中文读者更易理解和上手。  [![官方仓库](https://img.shields.io/badge/upstream-Fission--AI%2FOpenSpec-6366f1?style=flat-square&logo=github)](https://github.com/Fission-AI
+
+=== SDD\Trellis ===
+PATH: D:\workspace\workspace_ai\github\SDD\Trellis
+EXISTS: True | CURTAGS: None
+PKG:  | 
+README: <p align="center"> <picture> <source srcset="assets/trellis.png" media="(prefers-color-scheme: dark)"> <source srcset="assets/trellis.png" media="(prefers-color-scheme: light)"> <img src="assets/trellis.png" alt="Trellis Logo" width="500" style="image-rendering: -webkit-optimize-
+
+=== SDD\flow-kit ===
+PATH: D:\workspace\workspace_ai\github\SDD\flow-kit
+EXISTS: True | CURTAGS: None
+README: # flow-kit  一套攒起来的 AI 编程流程文档。我自己平时写项目用的那套方法抽成可复用的 markdown 包。  里面的思路不是凭空想的，主要是把最近折腾过的几个开源项目——bmad、spec-kit、OpenSpec、GSD、claude-task-master、superpowers、gstack、skills——里面我觉得有用的部分挑出来，再按自己的工作流重排一遍。各自的品牌和 CLI 依赖都剥掉了，只留 markdown。  装一次，后面不跟任何上游版本绑定。  ### 2026.5.13 合并提交：添加Artifact预检门 ###
+
+=== UI\awesome-design-md ===
+PATH: D:\workspace\workspace_ai\github\UI\awesome-design-md
+EXISTS: True | CURTAGS: None
+README: <a href="https://github.com/VoltAgent/voltagent">      <img width="1500"  alt="claude-skills" src="https://cdn.voltagent.dev/awesome-repo/logo.json.svg" /> </a>   <br/> <br/>  <div align="center">     <strong>Curated collection of DESIGN.md analysis by developer focused websites
+
+=== UI\taste-skill ===
+PATH: D:\workspace\workspace_ai\github\UI\taste-skill
+EXISTS: True | CURTAGS: None
+README: <p align="center">   <img src="assets/readme-banner.png" alt="Taste Skill - Anti-slop Agent Skills for premium frontends" width="100%" /> </p>  # Taste Skill  <p align="center">   <em>The Anti-Slop Frontend Framework for AI Agents</em> </p>  <p align="center">   <a href="https://
+
+=== agency-agents ===
+PATH: D:\workspace\workspace_ai\github\agency-agents
+EXISTS: True | CURTAGS: None
+README: # 🎭 The Agency: AI Specialists Ready to Transform Your Workflow  > **A complete AI agency at your fingertips** - From frontend wizards to Reddit community ninjas, from whimsy injectors to reality checkers. Each agent is a specialized expert with personality, processes, and proven
+
+=== agent\aiagentdemo ===
+PATH: D:\workspace\workspace_ai\github\agent\aiagentdemo
+EXISTS: True | CURTAGS: None
+README: # **快速开始**  本项目是一个基于Spring AI的AI Agent应用（**纯Demo，仅学习用途**），集成了 RAG 检索增强生成、Function Calling 工具调用、MCP 协议、SubAgent 子代理、Skill 技能系统等核心能力。本文将从六个核心模块出发，深入剖析其架构设计和实现细节。  ## **环境要求**  - Java 21+ - Maven 3.9+  ## **核心模块**  | **模块**                     | **说明**
+
+=== awesome\awesome-llm-apps ===
+PATH: D:\workspace\workspace_ai\github\awesome\awesome-llm-apps
+EXISTS: True | CURTAGS: None
+README: <p align="center">   <a href="http://www.theunwindai.com">     <img src="docs/banner/unwind_black.png" width="900px" alt="Unwind AI">   </a> </p>  <div align="center">  # Awesome LLM Apps  **100+ open-source AI agents, agent skills, and RAG apps. Hand-built, tested end-to-end, Ap
+
+=== awesome\chinese-independent-developer ===
+PATH: D:\workspace\workspace_ai\github\awesome\chinese-independent-developer
+EXISTS: True | CURTAGS: None
+README: ## 中国独立开发者项目列表 聚合所有中国独立开发者的项目  ### 子版面 - [程序员版面](./pages/README-Programmer-Edition.md)：使用需要命令行或写代码 - [游戏版面](./pages/README-Game.md)：都是游戏 - [2018 ~ 2020 年项目列表](./pages/README-2018-2020.md)：因 GitHub 渲染限制单独存档  备注：您当前查看的是主版面，收录的产品是打开即用，和子版面中的产品类型不同。  **1. 为什么有这个表** 作为开发者其实比较好奇其他人在做什么
+
+=== claude\ai-coding-guide ===
+PATH: D:\workspace\workspace_ai\github\claude\ai-coding-guide
+EXISTS: True | CURTAGS: None
+README: # AI 编程（Claude Code + Codex）指南  **简体中文** | [English](./README.en.md)  > 📘 **92 篇 · 约 52 万字** 精修中文教程，带你从装好到熟练 —— **Claude Code 53 篇 + Codex 39 篇**，把命令行变成你最快的那只手。  [![website](https://img.shields.io/badge/在线阅读-coding.stormzhang.ai-a6e3a1)](https://coding.stormzhang.ai) [![License:
+
+=== claude\claude-howto-zh-cn ===
+PATH: D:\workspace\workspace_ai\github\claude\claude-howto-zh-cn
+EXISTS: True | CURTAGS: None
+README: <picture>   <source media="(prefers-color-scheme: dark)" srcset="resources/logos/claude-howto-logo-dark.svg">   <img alt="Claude How To" src="resources/logos/claude-howto-logo.svg"> </picture>  [![Source Project](https://img.shields.io/badge/source-luongnv89%2Fclaude--howto-24292
+
+=== claude\claude-hud ===
+PATH: D:\workspace\workspace_ai\github\claude\claude-hud
+EXISTS: True | CURTAGS: None
+PKG: claude-hud | Real-time statusline HUD for Claude Code | kw=claude-code,statusline,hud
+README: # Claude HUD  A Claude Code plugin that shows what's happening — context usage, active tools, running agents, and todo progress. Always visible below your input.  [![License](https://img.shields.io/github/license/jarrodwatts/claude-hud?v=2)](LICENSE) [![Stars](https://img.shields
+
+=== douyin-downloader ===
+PATH: D:\workspace\workspace_ai\github\douyin-downloader
+EXISTS: True | CURTAGS: None
+README: # Douyin Downloader V2.0  <p align="center">   <img src="https://socialify.git.ci/jiji262/douyin-downloader/image?custom_description=Douyin+batch+download+tool%2C+remove+watermarks%2C+support+batch+download+of+videos%2C+gallery%2C+and+author+homepages.&description=1&font=Source+C
+
+=== enable_openclaw_feishu_lark ===
+PATH: D:\workspace\workspace_ai\github\enable_openclaw_feishu_lark
+EXISTS: True | CURTAGS: None
+PKG: enable-openclaw-feishu-lark | 本项目能够激活飞书的长连接功能 | kw=feishu,lark,websocket,long-connection,openclaw
+README: # Enable OpenClaw Feishu Lark  <p align="center">   <strong>🔗 飞书长连接客户端 - 快速接入飞书事件推送</strong> </p>  <p align="center">   <a href="#功能特点">功能特点</a> •   <a href="#快速开始">快速开始</a> •   <a href="#配置说明">配置说明</a> •   <a href="#事件处理">事件处理</a> •   <a href="#常见问题">常见问题</a> </p>  ---  ## 📖 项目介
+
+=== everything-claude-code ===
+PATH: D:\workspace\workspace_ai\github\everything-claude-code
+EXISTS: True | CURTAGS: None
+PKG: ecc-universal | Harness-native agent operating system for Codex, OpenCode, Cursor, Gemini, Claude Code, and terminal workflows - skills, hooks, rules, MCP conventions, and operator | kw=ai,agents,skills,hooks,mcp,rules,harness,agent-harness
+README: **Language:** English | [Português (Brasil)](docs/pt-BR/README.md) | [简体中文](README.zh-CN.md) | [繁體中文](docs/zh-TW/README.md) | [日本語](docs/ja-JP/README.md) | [한국어](docs/ko-KR/README.md) | [Türkçe](docs/tr/README.md) | [Русский](docs/ru/README.md) | [Tiếng Việt](docs/vi-VN/README.md
+
+=== flow-流程化\openflow ===
+PATH: D:\workspace\workspace_ai\github\flow-流程化\openflow
+EXISTS: True | CURTAGS: None
+PKG: @lininn/openflow | OpenSpec + Superpowers workflow orchestrator for Claude Code | kw=claude-code,openspec,superpowers,workflow,skill
+README: # @lininn/openflow  [中文文档](./README.zh-CN.md)  OpenSpec + Superpowers workflow orchestrator — bridging requirements specs and engineering execution, eliminating the format gap.  ## Installation  ```bash npm install -g @lininn/openflow ```  ## Usage  ### Initialize a project  ```b
+
+=== flow-流程化\superpowers-openspec-team-skills ===
+PATH: D:\workspace\workspace_ai\github\flow-流程化\superpowers-openspec-team-skills
+EXISTS: True | CURTAGS: None
+README: # Superpowers + OpenSpec Team Skills  ## Chinese Docs  Chinese readers can start here:  - [README.cn.md](README.cn.md) - [MEMORY.cn.md](MEMORY.cn.md) - [VERIFY.cn.md](VERIFY.cn.md) - [team-skills/INSTALL.cn.md](team-skills/INSTALL.cn.md) - [team-skills/README.cn.md](team-skills/R
+
+=== graph-知识图谱\Understand-Anything ===
+PATH: D:\workspace\workspace_ai\github\graph-知识图谱\Understand-Anything
+EXISTS: True | CURTAGS: None
+PKG: understand-anything | 
+README: <h1 align="center">Understand Anything</h1>  <p align="center">   <strong>Turn any codebase, knowledge base, or docs into an interactive knowledge graph you can explore, search, and ask questions about.</strong>   <br />   <em>Works with Claude Code, Codex, Cursor, Copilot, Gemin
+
+=== gstack ===
+PATH: D:\workspace\workspace_ai\github\gstack
+EXISTS: True | CURTAGS: None
+PKG: gstack | Garry's Stack — Claude Code skills + fast headless browser. One repo, one install, entire AI engineering workflow. | kw=browser,automation,playwright,headless,cli,claude,ai-agent,devtools
+README: # gstack  > "I don't think I've typed like a line of code probably since December, basically, which is an extremely large change." — [Andrej Karpathy](https://fortune.com/2026/03/21/andrej-karpathy-openai-cofounder-ai-agents-coding-state-of-psychosis-openclaw/), No Priors podcast
+
+=== hello007.github.io ===
+PATH: D:\workspace\workspace_ai\github\hello007.github.io
+EXISTS: True | CURTAGS: None
+README: # All In AI  > AI 转型实践指南与资源分享  本站点是关于团队 AI 转型的实践指南和宣贯材料，旨在帮助团队顺利实现 AI 方向的转型。  ## 📄 内容概览  ### 🎯 团队转型指南  #### [AI 转型启动会](./ai/AI转型启动会.html)  AI 转型项目的启动会议材料，用于团队宣贯和目标对齐。  **主要内容：**  - AI 转型的背景与意义 - 转型目标与预期成果 - 实施计划与时间节点 - 团队协作与分工  #### [团队向 AI 方向转型实操指南](./ai/团队向AI方向转型实操指南.html)  详细的
+
+=== loop工程\loopany-platform ===
+PATH: D:\workspace\workspace_ai\github\loop工程\loopany-platform
+EXISTS: True | CURTAGS: None
+PKG: loopany-platform | Loopany — multi-user scheduled-loop manager. Server schedules/stores/auths; execution is BYOA (claude-code on the user's own machine).
+README: <div align="center">  <img alt="Loopany" src="docs/assets/logo.svg" width="50">  # Loopany  **Scheduled agent loops. Keep the system under control.**  Describe a recurring task once. Loopany runs it on a schedule with **your own machine's coding agent**, and surfaces every result
+
+=== prompts\claude-code-system-prompts ===
+PATH: D:\workspace\workspace_ai\github\prompts\claude-code-system-prompts
+EXISTS: True | CURTAGS: None
+README: <div> <div align="right"> <a href="https://piebald.ai"><img width="200" top="20" align="right" src="https://github.com/Piebald-AI/.github/raw/main/Wordmark.svg"></a> </div>  <div align="left">  ### Check out Piebald We've released **Piebald**, the ultimate agentic AI developer ex
+
+=== skills ===
+PATH: D:\workspace\workspace_ai\github\skills
+EXISTS: True | CURTAGS: None
+README: > **Note:** This repository contains Anthropic's implementation of skills for Claude. For information about the Agent Skills standard, see [agentskills.io](http://agentskills.io).  [![skills.sh](https://skills.sh/b/anthropics/skills)](https://skills.sh/anthropics/skills)  # Skill
+
+=== stock\daily_stock_analysis ===
+PATH: D:\workspace\workspace_ai\github\stock\daily_stock_analysis
+EXISTS: True | CURTAGS: None
+README: <div align="center">  # 📈 股票智能分析系统  [![GitHub stars](https://img.shields.io/github/stars/ZhuLinsen/daily_stock_analysis?style=social)](https://github.com/ZhuLinsen/daily_stock_analysis/stargazers) [![CI](https://github.com/ZhuLinsen/daily_stock_analysis/actions/workflows/ci.yml/b
+
+=== stock\stock-analysis ===
+PATH: D:\workspace\workspace_ai\github\stock\stock-analysis
+EXISTS: True | CURTAGS: None
+README: # 📊 一句话搞定个股分析  > **说一句话，得一份专业研报。** 基本面 + 技术面 + 资金面，全自动 AI 驱动。 > > 用户只需说"分析 XXX" → 30+ 数据源采集 → Step 0-8 基本面 + 第 9 章技术面 → 交互式 HTML 报告  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.8+](https://img.shields.io/
+
+=== zread\zread-docs-cli ===
+PATH: D:\workspace\workspace_ai\github\zread\zread-docs-cli
+EXISTS: True | CURTAGS: None
+PKG: zread-docs-cli | A TypeScript CLI tool to browse and export zread.ai repository documentation | kw=zread,documentation,cli,github
+README: # zread-docs-cli  Browse and export [zread.ai](https://zread.ai) repository documentation from the command line.  **zread.ai** is a service that analyzes open-source repositories and generates structured documentation (wiki pages) from the codebase. This CLI tool lets you search
+
+=== 中文翻译仓库\agency-agents-zh ===
+PATH: D:\workspace\workspace_ai\github\中文翻译仓库\agency-agents-zh
+EXISTS: True | CURTAGS: None
+PKG: agency-agents-zh | 215 个即插即用的 AI 专家角色定义 — 从前端开发到区块链安全，从小红书运营到抖音策略 | kw=ai-agents,prompts,system-prompts,chinese,multi-agent,agency-agents,llm,claude
+README: # agency-agents 中文版（AI 智能体专家团队）  🌐 **简体中文** | [繁體中文](README.zh-TW.md) | [English (upstream)](https://github.com/msitarzewski/agency-agents)  > **215 个即插即用的 AI 专家角色** — 覆盖工程、设计、营销、产品、游戏、安全、金融等 18 个部门。不是通用提示词模板，每个智能体都有独立的人设、专业流程和可交付成果。支持 Claude Code / Cursor / Copilot 等 17 种 AI 编程工
+
+=== 中文翻译仓库\agency-orchestrator ===
+PATH: D:\workspace\workspace_ai\github\中文翻译仓库\agency-orchestrator
+EXISTS: True | CURTAGS: None
+PKG: agency-orchestrator | Multi-agent YAML workflow engine — 211 AI roles, auto DAG parallelism, zero code. One sentence → multiple AI roles collaborate → complete plan in minutes. 10  | kw=multi-agent,ai-agents,agent-orchestration,orchestrator,workflow,yaml-workflow,dag,llm
+README: # Agency Orchestrator  **中文** | [English](./README.en.md)  > **一句话，让多个 AI 角色自动协作，几分钟出完整方案。**  [![CI](https://github.com/jnMetaCode/agency-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/jnMetaCode/agency-orchestrator/actions) [![npm version](https://img.shiel
+
+=== 中文翻译仓库\ai-coding-guide ===
+PATH: D:\workspace\workspace_ai\github\中文翻译仓库\ai-coding-guide
+EXISTS: True | CURTAGS: None
+README: # AI 编程工具实战指南  **简体中文** | [English](./README.en.md)  > **10 款主流 AI 编程工具的中文最佳实践** — 不讲概念，只讲怎么用好。从提示词技巧到工作流设计，从单工具精通到多工具协作，帮你把 AI 编程效率拉满。  [![GitHub stars](https://img.shields.io/github/stars/jnMetaCode/ai-coding-guide?style=social)](https://github.com/jnMetaCode/ai-coding-guide) [
+
+=== 中文翻译仓库\library ===
+PATH: D:\workspace\workspace_ai\github\中文翻译仓库\library
+EXISTS: True | CURTAGS: None
+README: 
+
+=== 中文翻译仓库\superpowers-zh ===
+PATH: D:\workspace\workspace_ai\github\中文翻译仓库\superpowers-zh
+EXISTS: True | CURTAGS: None
+PKG: superpowers-zh | AI 编程超能力中文增强版 — superpowers（159k+ ⭐）完整汉化 + 4 个中国原创 skills，支持 Claude Code / Copilot CLI / Hermes Agent / Cursor / Claw Code / Windsurf / Kiro / Gemini CLI / Qoder 等 | kw=superpowers,claude-code,cursor,codex,gemini,kiro,deerflow,trae
+README: # superpowers-zh（AI 编程超能力 · 中文增强版）  🌐 **简体中文** | [English (upstream)](https://github.com/obra/superpowers)  > 🦸 **superpowers（159k+ ⭐）完整汉化 + 4 个中国原创 skills** — 让 Claude Code / Copilot CLI / Hermes Agent / Cursor / Windsurf / Kiro / Gemini CLI / Qoder 等 **18 款 AI 编程工具**真正会干活。从头脑风暴
+
+=== 工具类\省token\caveman ===
+PATH: D:\workspace\workspace_ai\github\工具类\省token\caveman
+EXISTS: True | CURTAGS: None
+PKG: caveman-installer | Caveman installer — detects your AI coding agents and installs caveman for each one.
+README: <p align="center">   <img src="docs/assets/caveman-logo-banner.png" alt="Caveman" width="720"> </p>  <p align="center">   <strong>why use many token when few do trick</strong> </p>  <p align="center">   Make your AI coding agent talk like a caveman.<br>   Same answers, <strong>65
+
+=== 工具类\省token\rtk ===
+PATH: D:\workspace\workspace_ai\github\工具类\省token\rtk
+EXISTS: True | CURTAGS: None
+README: <p align="center">   <img src="https://avatars.githubusercontent.com/u/258253854?v=4" alt="RTK - Rust Token Killer" width="500"> </p>  <p align="center">   <strong>High-performance CLI proxy that reduces LLM token consumption by 60-90%</strong> </p>  <p align="center">   <a href=
+
+=== 常用Skills\CLI-Anything ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\CLI-Anything
+EXISTS: True | CURTAGS: None
+README: <h1 align="center"><img src="assets/icon.png" alt="" width="64" style="vertical-align: middle;">&nbsp; CLI-Anything: Making ALL Software Agent-Native</h1>  <div align="center"> <a href="https://trendshift.io/repositories/22991" target="_blank"><img src="https://trendshift.io/api/
+
+=== 常用Skills\Enterprise-ai-scenario-map-skill ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\Enterprise-ai-scenario-map-skill
+EXISTS: True | CURTAGS: None
+README: # 🗺️ 企业AI场景地图生成器 | Enterprise AI Scenario Map Generator  **"老板，我们公司到底哪里能用AI？" —— 这个问题，现在有答案了。**  **"Boss, where exactly can we use AI?" — Now there's an answer.**  ---  每个企业都知道AI很重要，但90%的老板面对的现实是：  - 🤷 "AI到底能帮我做什么？" —— 听了100场演讲，还是一头雾水 - 💸 "我该先投哪个方向？" —— 怕投错钱，更怕错过窗口期 - 📊 "别人都在用AI了
+
+=== 常用Skills\andrej-karpathy-skills ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\andrej-karpathy-skills
+EXISTS: True | CURTAGS: None
+README: # Karpathy-Inspired Claude Code Guidelines  > Check out my new project [Multica](https://github.com/multica-ai/multica) — an open-source platform for running and managing coding agents with reusable skills. > > Follow me on X: [https://x.com/jiayuan_jy](https://x.com/jiayuan_jy)
+
+=== 常用Skills\awesome-design-md ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\awesome-design-md
+EXISTS: True | CURTAGS: None
+README: <a href="https://github.com/VoltAgent/voltagent">      <img width="1500"  alt="claude-skills" src="https://cdn.voltagent.dev/awesome-repo/logo.json.svg" /> </a>   <br/> <br/>  <div align="center">     <strong>Curated collection of DESIGN.md analysis by developer focused websites
+
+=== 常用Skills\claude-skills ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\claude-skills
+EXISTS: True | CURTAGS: None
+README: # Claude Code Skills & Plugins — Agent Skills for Every Coding Tool  **345 production-ready Claude Code skills, plugins, and agent skills for 13 AI coding tools.**  The most comprehensive open-source library of Claude Code skills and agent plugins — also works with OpenAI Codex,
+
+=== 常用Skills\drawio-skills ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\drawio-skills
+EXISTS: True | CURTAGS: None
+PKG: drawio-skills | A desktop-first Draw.io skill with YAML DSL, offline sidecars, and optional live browser editing.
+README: # Draw.io Skill for Claude, Gemini & Codex  [![Deploy Docs](https://github.com/bahayonghang/drawio-skills/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/bahayonghang/drawio-skills/actions/workflows/deploy-docs.yml) [![Deploy Docs (Push)](https://github.com/bahay
+
+=== 常用Skills\khazix-skills ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\khazix-skills
+EXISTS: True | CURTAGS: None
+README: <div align="center">  **中文** · [English](./README.en.md)  # 🧰 Khazix Skills  #### 我自己每天在用的一些 AI Skill，都开源在这里  [![License](https://img.shields.io/badge/License-MIT-3B82F6?style=for-the-badge)](./LICENSE) [![Skills](https://img.shields.io/badge/Skills-6-10B981?style=for-the-badge)]
+
+=== 常用Skills\legion-mind ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\legion-mind
+EXISTS: True | CURTAGS: None
+PKG: lgmind | Install, verify, rollback, and uninstall LegionMind assets for coding agents. | kw=lgmind,opencode,legionmind,agent,workflow,cli
+README: # LegionMind  LegionMind 不是另一个“让智能体多写一点代码”的工作流包。  它试图成为一套面向高级智能体使用者的**多智能体工程操作系统内核**：把任务记忆、设计门禁、评审协议、验证与汇报收敛成一套**可安装、可验证、可迭代**的智能体编排内核，让人类从执行者转向指挥、验收者和系统迭代者。  > 当前状态：`可运行内核 / v1 前硬化中`  ## 为什么需要 LegionMind  当我们开始使用 Multi-Agent Vibe Coding 体协作运行起来，最先碰到的问题通常是这些更底层的问题。  - 并行执行能放大 tok
+
+=== 常用Skills\ljg-skill-roundtable ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\ljg-skill-roundtable
+EXISTS: True | CURTAGS: None
+README: # ljg-roundtable  结构化圆桌讨论 — 一个 Claude Code Skill，以"求真"为目标，邀请代表不同思想的真实人物进行多轮辩证对话。  ## 功能  - 根据议题自动选择 3-5 位真实历史/当代人物，覆盖多元立场 - 主持人引导多轮辩证讨论，每轮聚焦最深的争议点 - 每轮生成 ASCII 思考框架图（矩阵/光谱/因果环路/层级树） - 讨论结束后生成完整知识网络和开放问题列表 - 全程输出为 org-mode 文件，保存到 `~/Documents/notes/`  ## 安装  ```bash /install lijig
+
+=== 常用Skills\planning-with-files ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\planning-with-files
+EXISTS: True | CURTAGS: None
+README: <div align="center"> <img src="media/v3-banner.png" alt="planning-with-files" width="100%"> </div>  # Planning with Files  > 📣 **New in [v3.0.0](https://github.com/OthmanAdi/planning-with-files/releases/tag/v3.0.0):** opt-in autonomous and gated modes for long-running agent runs,
+
+=== 常用Skills\skills ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\skills
+EXISTS: True | CURTAGS: None
+PKG: mattpocock-skills | Matt Pocock's agent skills for real engineering
+README: <p>   <a href="https://www.aihero.dev/s/skills-newsletter">     <picture>       <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1777382277/skills-repo-dark_2x.png">       <source media="(prefers-color-scheme: light)"
+
+=== 常用Skills\superpowers ===
+PATH: D:\workspace\workspace_ai\github\常用Skills\superpowers
+EXISTS: True | CURTAGS: None
+PKG: superpowers | Superpowers skills and runtime bootstrap for coding agents | kw=pi-package,skills,tdd,debugging,collaboration,workflow
+README: # Superpowers  Superpowers is a complete software development methodology for your coding agents, built on top of a set of composable skills and some initial instructions that make sure your agent uses them.   ## We're Hiring!  We're hiring someone to help out full time with Supe
+
+TOTAL: 58
