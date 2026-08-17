@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "App.CopyTo 签名变更涉及 Wails 前后端契约，需遵循跨层绑定约定"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "目录源忽略 targetName 返回提示串、非法路径校验需符合错误处理规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go 代码质量与测试要求"}
+{"file": ".trellis/tasks/08-14-copy-to-custom-filename/prd.md", "reason": "完整需求、验收标准与技术方案"}
