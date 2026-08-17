@@ -1017,3 +1017,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: 拷贝到支持自定义目标文件名与去只读
+
+**Date**: 2026-08-17
+**Task**: 拷贝到支持自定义目标文件名与去只读
+**Branch**: `master`
+
+### Summary
+
+「拷贝到」对话框（FileTreePanel 右键 + ToolboxPanel）增加目标文件名输入框：默认跟随源路径最后一段，可修改，预览实时反映，互换时重置默认名。后端 CopyTo 签名加第 4 参 targetName（空串兜底原行为），文件源与目录源（含文件夹本身）均生效，仅拷目录内容时忽略；冲突沿用自动加 (1)，非法名前后端双重校验。附带改进：util.CopyFile/CopyDir 拷完对目标置写位，只读源拷出目标可写且源属性不变（Windows 映射清除只读属性）。中途修正一处权限位笔误：&^0222 是清除写位，去只读应为 |0222。测试：后端新增 8 用例、前端新增透传用例，go test 与 Vitest 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f61ca5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
