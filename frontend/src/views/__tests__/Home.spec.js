@@ -69,7 +69,7 @@ describe('Home.vue - Bug修复验证', () => {
           Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
           Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
           DirectoryTree: { template: '<div class="stub-directory-tree" />' },
-          FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {} } },
+          FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {}, setCopyToLoading: () => {}, closeCopyToDialog: () => {}, refreshNode: () => {} } },
           ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
           RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' },
           'el-tree': true,
@@ -268,6 +268,22 @@ describe('Home.vue - Bug修复验证', () => {
       expect(debug).toBeDefined()
       expect(debug.log).toBeDefined()
       expect(debug.error).toBeDefined()
+    })
+  })
+
+  describe('handleCopyTo 自定义文件名透传（拷贝到支持重命名）', () => {
+    it('targetName 随 CopyTo 第 3 参透传，空串兜底', async () => {
+      const App = await vi.importMock('../../../wailsjs/go/main/App')
+      App.CopyTo.mockClear()
+
+      // 场景 1：带自定义名
+      await wrapper.vm.handleCopyTo({ sourcePath: '/a/src.txt', targetPath: '/b', targetName: 'renamed.txt', copyWholeDir: false })
+      expect(App.CopyTo).toHaveBeenCalledWith('/a/src.txt', '/b', 'renamed.txt', false)
+
+      App.CopyTo.mockClear()
+      // 场景 2：无自定义名（目录源）传空串，保持原行为
+      await wrapper.vm.handleCopyTo({ sourcePath: '/a/srcdir', targetPath: '/b', copyWholeDir: true })
+      expect(App.CopyTo).toHaveBeenCalledWith('/a/srcdir', '/b', '', true)
     })
   })
 

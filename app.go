@@ -907,9 +907,10 @@ func (a *App) MoveItem(sourcePath, targetDir string) string {
 	return result
 }
 
-// CopyTo 将文件或文件夹拷贝到指定目标目录
-func (a *App) CopyTo(sourcePath, targetPath string, copyWholeDir bool) string {
-	result, err := a.fileOpSvc.CopyTo(sourcePath, targetPath, copyWholeDir)
+// CopyTo 将文件或文件夹拷贝到指定目标目录。
+// targetName 为目标自定义名（仅文件源生效），空串表示与源同名。
+func (a *App) CopyTo(sourcePath, targetPath, targetName string, copyWholeDir bool) string {
+	result, err := a.fileOpSvc.CopyTo(sourcePath, targetPath, targetName, copyWholeDir)
 	if err != nil {
 		println("Error:", err.Error())
 		return "错误: " + err.Error()

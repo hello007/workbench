@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"workbench/model"
@@ -419,7 +420,7 @@ func TestCopyTo_FileToExistingDir(t *testing.T) {
 	os.MkdirAll(targetDir, 0755)
 
 	svc := NewFileOperationService()
-	result, err := svc.CopyTo(src, targetDir, false)
+	result, err := svc.CopyTo(src, targetDir, "", false)
 	if err != nil {
 		t.Fatalf("CopyTo failed: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestCopyTo_FileToNewDir(t *testing.T) {
 	targetDir := filepath.Join(dir, "newdest")
 
 	svc := NewFileOperationService()
-	result, err := svc.CopyTo(src, targetDir, false)
+	result, err := svc.CopyTo(src, targetDir, "", false)
 	if err != nil {
 		t.Fatalf("CopyTo failed: %v", err)
 	}
@@ -476,7 +477,7 @@ func TestCopyTo_DirWholeDir(t *testing.T) {
 	os.MkdirAll(targetDir, 0755)
 
 	svc := NewFileOperationService()
-	result, err := svc.CopyTo(srcDir, targetDir, true)
+	result, err := svc.CopyTo(srcDir, targetDir, "", true)
 	if err != nil {
 		t.Fatalf("CopyTo failed: %v", err)
 	}
@@ -503,7 +504,7 @@ func TestCopyTo_DirContentOnly(t *testing.T) {
 	os.MkdirAll(targetDir, 0755)
 
 	svc := NewFileOperationService()
-	_, err := svc.CopyTo(srcDir, targetDir, false)
+	_, err := svc.CopyTo(srcDir, targetDir, "", false)
 	if err != nil {
 		t.Fatalf("CopyTo failed: %v", err)
 	}
@@ -533,7 +534,7 @@ func TestCopyTo_SourceNotExist(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewFileOperationService()
 
-	_, err := svc.CopyTo(filepath.Join(dir, "nonexistent"), dir, false)
+	_, err := svc.CopyTo(filepath.Join(dir, "nonexistent"), dir, "", false)
 	if err == nil {
 		t.Fatal("Expected error for nonexistent source")
 	}
@@ -552,7 +553,7 @@ func TestCopyTo_TargetIsFile(t *testing.T) {
 	os.WriteFile(targetFile, []byte("existing"), 0644)
 
 	svc := NewFileOperationService()
-	_, err := svc.CopyTo(src, targetFile, false)
+	_, err := svc.CopyTo(src, targetFile, "", false)
 	if err == nil {
 		t.Fatal("Expected error when target is a file")
 	}
@@ -575,7 +576,7 @@ func TestCopyTo_SourceIsParentOfTarget(t *testing.T) {
 	os.MkdirAll(targetDir, 0755)
 
 	svc := NewFileOperationService()
-	_, err := svc.CopyTo(srcDir, targetDir, true)
+	_, err := svc.CopyTo(srcDir, targetDir, "", true)
 	if err == nil {
 		t.Fatal("Expected error when source is parent of target")
 	}
@@ -589,7 +590,7 @@ func TestCopyTo_SourceIsAncestorOfTarget(t *testing.T) {
 	os.MkdirAll(targetDir, 0755)
 
 	svc := NewFileOperationService()
-	_, err := svc.CopyTo(srcDir, targetDir, true)
+	_, err := svc.CopyTo(srcDir, targetDir, "", true)
 	if err == nil {
 		t.Fatal("Expected error when source is ancestor of target")
 	}
@@ -601,9 +602,172 @@ func TestCopyTo_SamePath(t *testing.T) {
 	os.MkdirAll(srcDir, 0755)
 
 	svc := NewFileOperationService()
-	_, err := svc.CopyTo(srcDir, srcDir, true)
+	_, err := svc.CopyTo(srcDir, srcDir, "", true)
 	if err == nil {
 		t.Fatal("Expected error when source and target are the same")
+	}
+}
+
+func TestCopyTo_CustomFileName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(src, targetDir, "renamed.txt", false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "renamed.txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+	if _, err := os.Stat(expected); err != nil {
+		t.Fatalf("Renamed file not found: %v", err)
+	}
+}
+
+func TestCopyTo_CustomNameConflictAutoRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+	// 目标已存在同名文件，自定义名应沿用自动重命名策略追加 (1)
+	os.WriteFile(filepath.Join(targetDir, "renamed.txt"), []byte("existing"), 0644)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(src, targetDir, "renamed.txt", false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	expected := filepath.Join(targetDir, "renamed(1).txt")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func TestCopyTo_CustomNameIllegal(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.txt")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	illegalNames := []string{"a/b.txt", `a\b.txt`, "..", "a:b.txt"}
+	for _, name := range illegalNames {
+		if _, err := svc.CopyTo(src, targetDir, name, false); err == nil {
+			t.Errorf("Expected error for illegal target name %q", name)
+		}
+	}
+}
+
+func TestCopyTo_DirSourceCustomName(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(srcDir, 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	// 目录源 + copyWholeDir=true + targetName 非空：目标目录以 targetName 命名落盘
+	result, err := svc.CopyTo(srcDir, targetDir, "renamed", true)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+	expected := filepath.Join(targetDir, "renamed")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+	if _, err := os.Stat(filepath.Join(expected, "file.txt")); err != nil {
+		t.Fatalf("Renamed dir content not found: %v", err)
+	}
+}
+
+func TestCopyTo_DirCustomNameConflictAutoRename(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(srcDir, 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+	// 目标已存在同名目录，自定义名应沿用自动重命名策略追加 (1)
+	os.MkdirAll(filepath.Join(targetDir, "renamed"), 0755)
+
+	svc := NewFileOperationService()
+	result, err := svc.CopyTo(srcDir, targetDir, "renamed", true)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+	expected := filepath.Join(targetDir, "renamed(1)")
+	if result != expected {
+		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func TestCopyTo_DirContentOnlyIgnoresCustomName(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "srcdir")
+	os.MkdirAll(srcDir, 0755)
+	os.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0644)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	// 目录源 + copyWholeDir=false（仅拷内容）+ targetName 非空：targetName 被忽略，
+	// 按原语义将目录内容拷入目标目录，无提示串
+	result, err := svc.CopyTo(srcDir, targetDir, "renamed", false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+	if strings.Contains(result, "自定义名称已忽略") {
+		t.Errorf("Unexpected ignore hint in result: %q", result)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "file.txt")); err != nil {
+		t.Fatalf("Content copied into target expected: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "renamed")); err == nil {
+		t.Error("Expected targetName to be ignored when copying dir content only")
+	}
+}
+
+func TestCopyTo_ReadOnlySourceClearsAttr(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "readonly.txt")
+	os.WriteFile(src, []byte("hello"), 0444)
+
+	targetDir := filepath.Join(dir, "dest")
+	os.MkdirAll(targetDir, 0755)
+
+	svc := NewFileOperationService()
+	_, err := svc.CopyTo(src, targetDir, "", false)
+	if err != nil {
+		t.Fatalf("CopyTo failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(targetDir, "readonly.txt"))
+	if err != nil {
+		t.Fatalf("Copied file not found: %v", err)
+	}
+	if info.Mode().Perm()&0222 == 0 {
+		t.Error("Expected copied file to be writable (read-only attribute removed)")
+	}
+	// 源文件只读属性保持不变
+	srcInfo, _ := os.Stat(src)
+	if srcInfo.Mode().Perm()&0222 != 0 {
+		t.Error("Expected source file to remain read-only")
 	}
 }
 

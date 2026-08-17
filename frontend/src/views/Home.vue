@@ -686,7 +686,7 @@ const handlePaste = async (targetData) => {
 const handleCopyTo = async (data) => {
   fileTreePanelRef.value?.setCopyToLoading(true)
   try {
-    const result = await CopyTo(data.sourcePath, data.targetPath, data.copyWholeDir)
+    const result = await CopyTo(data.sourcePath, data.targetPath, data.targetName || '', data.copyWholeDir)
     if (result && result.startsWith('错误')) {
       ElMessage.error(result)
     } else {

@@ -54,6 +54,15 @@
             @keyup.enter="handleCopyTo"
           />
         </el-form-item>
+        <el-form-item label="文件名">
+          <el-input
+            v-model="copyToTargetName"
+            placeholder="默认与源同名（仅文件生效），可修改"
+            :disabled="copyToLoading"
+            clearable
+            @keyup.enter="handleCopyTo"
+          />
+        </el-form-item>
         <el-form-item>
           <el-checkbox v-model="copyToWholeDir" :disabled="copyToLoading">
             包含文件夹本身
@@ -75,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CopyDocument, SetUp, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
@@ -93,6 +102,7 @@ const copyToTargetInputRef = ref()
 const showCopyToDialog = () => {
   copyToSourcePath.value = ''
   copyToTargetPath.value = ''
+  copyToTargetName.value = ''
   copyToWholeDir.value = true
   copyToLoading.value = false
   copyToDialogVisible.value = true
@@ -102,6 +112,25 @@ const showCopyToDialog = () => {
   })
 }
 
+// 自定义目标文件名：源路径手填无类型信息，输入框始终显示，默认取源路径最后一段；
+// 源实际是目录时由后端忽略并在返回串中提示
+const copyToTargetName = ref('')
+
+const defaultCopyToName = () => {
+  const src = copyToSourcePath.value.trim().replaceAll('\\', '/')
+  return src.split('/').pop() || ''
+}
+
+// 源路径变化时同步默认名：仅当用户未自行改名（当前值为空或等于旧默认名）时跟随，
+// 避免覆盖用户已输入的自定义名
+watch(copyToSourcePath, (newVal, oldVal) => {
+  const oldSrc = (oldVal || '').trim().replaceAll('\\', '/')
+  const oldDefault = oldSrc.split('/').pop() || ''
+  if (!copyToTargetName.value || copyToTargetName.value === oldDefault) {
+    copyToTargetName.value = defaultCopyToName()
+  }
+})
+
 const copyToPreview = computed(() => {
   const src = copyToSourcePath.value.trim().replaceAll('\\', '/')
   const dst = copyToTargetPath.value.trim().replaceAll('\\', '/')
@@ -109,17 +138,22 @@ const copyToPreview = computed(() => {
   const srcName = src.split('/').pop() || ''
   const normalizedDst = dst.replace(/\/+$/, '')
   if (copyToWholeDir.value) {
-    return { from: src, to: normalizedDst + '/' + srcName }
+    const finalName = copyToTargetName.value.trim() || srcName
+    return { from: src, to: normalizedDst + '/' + finalName }
   }
   return { from: src + '/*', to: normalizedDst + '/*' }
 })
 
-// 互换原地址与目标地址
+// 互换原地址与目标地址；文件名重置为新源路径的默认值（源已变，旧自定义名不再适用）
 const swapCopyToPaths = () => {
   const temp = copyToSourcePath.value
   copyToSourcePath.value = copyToTargetPath.value
   copyToTargetPath.value = temp
+  copyToTargetName.value = defaultCopyToName()
 }
+
+// 文件名非法字符校验（与 Windows 资源管理器一致 + 路径分隔符）
+const ILLEGAL_NAME_RE = /[\\/:*?"<>|]/
 
 const handleCopyTo = async () => {
   if (!copyToSourcePath.value.trim()) {
@@ -130,13 +164,19 @@ const handleCopyTo = async () => {
     ElMessage.warning('请输入目标地址')
     return
   }
+  const targetName = copyToTargetName.value.trim()
+  if (targetName && (ILLEGAL_NAME_RE.test(targetName) || targetName === '.' || targetName === '..')) {
+    ElMessage.warning('文件名含非法字符（\\ / : * ? " < > |）')
+    return
+  }
   copyToLoading.value = true
   try {
-    const result = await CopyTo(copyToSourcePath.value, copyToTargetPath.value, copyToWholeDir.value)
+    const result = await CopyTo(copyToSourcePath.value, copyToTargetPath.value, targetName, copyToWholeDir.value)
     if (result && result.startsWith('错误')) {
       ElMessage.error(result)
     } else {
-      ElMessage.success('拷贝成功')
+      // 源为目录且自定义名被忽略时，后端在结果串附提示，完整展示给用户
+      ElMessage.success(result ? `拷贝成功 ${result}` : '拷贝成功')
       copyToDialogVisible.value = false
     }
   } catch (error) {

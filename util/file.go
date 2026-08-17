@@ -102,7 +102,9 @@ func RemovePath(path string) error {
 	return os.RemoveAll(path)
 }
 
-// CopyFile 复制单个文件（保留权限）
+// CopyFile 复制单个文件（保留权限，但确保目标文件可写）。
+// 源文件只读时若原样保留权限位，目标文件将无法写入/删除，故拷贝完成后
+// 对目标 chmod 置上写权限位（0222，Windows 上映射为清除只读属性），其余权限位保持不变。
 func CopyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -121,11 +123,14 @@ func CopyFile(src, dst string) error {
 	}
 	defer dstFile.Close()
 
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	return os.Chmod(dst, info.Mode().Perm()|0222)
 }
 
-// CopyDir 递归复制目录
+// CopyDir 递归复制目录（目录与文件的目标只读属性一并确保可写，理由同 CopyFile）
 func CopyDir(src, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {
@@ -133,6 +138,11 @@ func CopyDir(src, dst string) error {
 	}
 
 	if err := os.MkdirAll(dst, info.Mode()); err != nil {
+		return err
+	}
+
+	// 目录本身的只读位在内容拷贝完成后统一清除，避免只读目录影响子项写入
+	if err := os.Chmod(dst, info.Mode().Perm()|0222); err != nil {
 		return err
 	}
 

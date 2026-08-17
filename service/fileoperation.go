@@ -513,11 +513,24 @@ func (s *FileOperationService) MoveItem(sourcePath, targetDir string) (string, e
 }
 
 // CopyTo 将源路径拷贝到目标路径，支持整体拷贝或仅拷贝目录内容
-func (s *FileOperationService) CopyTo(sourcePath, targetPath string, copyWholeDir bool) (string, error) {
+// CopyTo 将文件或文件夹拷贝到指定目标目录。
+// targetName 为目标自定义名（文件源、或目录源 + copyWholeDir=true 时生效）：空串 = 与源同名（原行为）；
+// 目录源且 copyWholeDir=false（仅拷贝内容）时无「目录名」概念，targetName 被忽略且不提示。
+func (s *FileOperationService) CopyTo(sourcePath, targetPath, targetName string, copyWholeDir bool) (string, error) {
 	// 校验源路径
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return "", fmt.Errorf("原地址不存在: %s", sourcePath)
+	}
+
+	// 校验自定义目标名：仅允许基础名，禁止路径分隔符等非法字符（防止逃逸目标目录）
+	if targetName != "" {
+		if targetName != filepath.Base(targetName) || targetName == "." || targetName == ".." {
+			return "", fmt.Errorf("目标文件名非法: %s", targetName)
+		}
+		if strings.ContainsAny(targetName, `\/:*?"<>|`) {
+			return "", fmt.Errorf("目标文件名含非法字符: %s", targetName)
+		}
 	}
 
 	// 防止将父目录拷贝到子目录导致无限递归
@@ -542,7 +555,35 @@ func (s *FileOperationService) CopyTo(sourcePath, targetPath string, copyWholeDi
 		}
 	}
 
-	// 执行拷贝
+	// 目录源 + 整体拷贝 + 自定义名：目标目录路径用 targetName 拼接，
+	// 与文件源自定义名同款逻辑（findAvailableName 冲突自动加 (1)）
+	if sourceInfo.IsDir() {
+		if copyWholeDir && targetName != "" {
+			finalPath := findAvailableName(filepath.Join(targetPath, targetName))
+			return finalPath, util.CopyDir(sourcePath, finalPath)
+		}
+		// 仅拷贝内容（copyWholeDir=false）时无「目录名」概念，targetName 忽略且不提示
+		return s.copyDirTo(sourcePath, targetPath, copyWholeDir)
+	}
+
+	// 文件源 + 自定义名：目标路径显式拼入 targetName，冲突时沿用自动重命名策略
+	if targetName != "" {
+		finalPath := findAvailableName(filepath.Join(targetPath, targetName))
+		return finalPath, util.CopyFile(sourcePath, finalPath)
+	}
+
+	// 文件源 + 默认名：与目录同走 CopyItem（拼源名 + 冲突自动重命名）
+	return s.copyDirTo(sourcePath, targetPath, copyWholeDir)
+}
+
+// copyDirTo 按原有 CopyTo 拷贝语义执行：文件 / copyWholeDir=true 走 CopyItem，
+// 否则逐项拷贝目录内容到 targetPath 下。
+func (s *FileOperationService) copyDirTo(sourcePath, targetPath string, copyWholeDir bool) (string, error) {
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
 	if !sourceInfo.IsDir() || copyWholeDir {
 		return s.CopyItem(sourcePath, targetPath)
 	}
