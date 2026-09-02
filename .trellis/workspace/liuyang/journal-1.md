@@ -1050,3 +1050,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: HTML 文件渲染预览（iframe sandbox + /preview-raw）
+
+**Date**: 2026-09-02
+**Task**: HTML 文件渲染预览（iframe sandbox + /preview-raw）
+**Branch**: `master`
+
+### Summary
+
+右侧操作面板 .html/.htm 预览默认进浏览器渲染视图：后端新增 /preview-raw 白名单路由供相对资源加载（ServeContent 规避 index.html 301），前端 iframe srcdoc + sandbox=allow-scripts（无 allow-same-origin，隔离主页面与 Wails 绑定），base 注入 + 外链 postMessage 走系统浏览器；工具栏源码/渲染切换（源码态保留编辑保存，保存后回渲染）+ 刷新按钮。测试：server 8 例 + 前端 20 例，go test 与 npm test 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `51a6b3b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
