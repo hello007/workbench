@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "Wails 绑定与文件预览/保存编码契约（kind 判定、content/encoding 链路），本任务 HTML 渲染分支复用 text kind 契约"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用优先：base 注入/外链拦截复用 markdown 预览既有 BrowserOpenURL 与 openLink 模式"}
+{"file": ".trellis/tasks/09-02-html-preview/prd.md", "reason": "本任务 PRD：需求、sandbox 安全设计、/preview-raw 路径式路由约束、验收标准"}

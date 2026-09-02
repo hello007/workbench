@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-02-html-preview/prd.md", "reason": "检查实现是否满足全部验收标准（sandbox 隧离、白名单、子树约束、双模式切换、外链浏览器打开）"}
+{"file": ".trellis/spec/backend/cross-layer-contracts.md", "reason": "核对预览契约未被破坏（kind=text 语义、编码回写、tooLarge 降级）"}
