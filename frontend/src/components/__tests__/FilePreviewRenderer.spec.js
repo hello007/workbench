@@ -553,3 +553,88 @@ describe('FilePreviewRenderer.vue - YAML frontmatter 属性面板', () => {
     expect(wrapper.find('.markdown-content h1').text()).toBe('正文')
   })
 })
+
+describe('FilePreviewRenderer.vue - HTML 渲染预览', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  const mountHtml = (htmlMode, props = {}) => mountRenderer({
+    kind: 'text', fileName: 'index.html',
+    filePath: 'D:/site/page/index.html',
+    content: '<html><head><title>demo</title></head><body><h1>hi</h1></body></html>',
+    htmlMode,
+    ...props
+  })
+
+  it('htmlMode=render：iframe 渲染分支生效，sandbox 仅 allow-scripts', async () => {
+    wrapper = mountHtml('render')
+    await flushPromises()
+    const frame = wrapper.find('.preview-html-wrap iframe.html-frame')
+    expect(frame.exists()).toBe(true)
+    // 无 allow-same-origin：opaque origin，脚本无法访问 parent / Wails 绑定
+    expect(frame.attributes('sandbox')).toBe('allow-scripts')
+  })
+
+  it('srcdoc 包含 <base> 指向 /preview-raw 与外链拦截脚本', async () => {
+    wrapper = mountHtml('render')
+    await flushPromises()
+    const srcdoc = wrapper.find('iframe.html-frame').attributes('srcdoc')
+    expect(srcdoc).toContain('<base href="/preview-raw/')
+    expect(srcdoc).toContain('workbench-open-external')
+    // 原文保留
+    expect(srcdoc).toContain('<h1>hi</h1>')
+  })
+
+  it('htmlMode=source：回落 CodeMirror 源码分支，无 iframe', async () => {
+    wrapper = mountHtml('source')
+    await flushPromises()
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(false)
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+    expect(wrapper.find('.cm-host').exists()).toBe(true)
+  })
+
+  it('mode 从 render 切到 source：动态创建 CodeMirror', async () => {
+    wrapper = mountHtml('render')
+    await flushPromises()
+    expect(wrapper.find('.cm-host').exists()).toBe(false)
+    await wrapper.setProps({ htmlMode: 'source' })
+    await flushPromises()
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+    expect(wrapper.find('.cm-host').exists()).toBe(true)
+  })
+
+  it('iframe message：合法外链事件 → BrowserOpenURL；非法 type 忽略', async () => {
+    const { BrowserOpenURL } = await import('../../../wailsjs/runtime/runtime')
+    wrapper = mountHtml('render')
+    await flushPromises()
+    // 合法：http(s) 外链
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'workbench-open-external', url: 'https://example.com/a' }
+    }))
+    expect(BrowserOpenURL).toHaveBeenCalledWith('https://example.com/a')
+    // 非法 type：忽略
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'other', url: 'https://example.com/b' }
+    }))
+    expect(BrowserOpenURL).toHaveBeenCalledTimes(1)
+    // 非法协议：忽略
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'workbench-open-external', url: 'file:///c:/x' }
+    }))
+    expect(BrowserOpenURL).toHaveBeenCalledTimes(1)
+  })
+
+  it('非 HTML 文本文件（.txt）不受 htmlMode 影响，走 CodeMirror', async () => {
+    wrapper = mountHtml('render', { fileName: 'note.txt' })
+    await flushPromises()
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(false)
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+  })
+})

@@ -25,6 +25,7 @@
   - **文本**（txt/json/sql/md、各类代码）CodeMirror 6 只读高亮（行号、折叠、虚拟滚动）；Markdown 用 markdown-it 渲染（关闭原始 HTML 防 XSS）；GBK 编码文件自动解码为 UTF-8 显示
   - **Office** — Word `.docx` 用 docx-preview 内嵌渲染；Excel `.xlsx/.xls/.csv` 用 SheetJS 解析为只读表格（多 Sheet 标签页）
   - **PDF** — 内嵌预览（pdfjs 官方 viewer，工具栏支持翻页/缩放/搜索/缩略图）。通过 iframe 加载内嵌 viewer 静态资源、后端 `AssetServer` handler 以同源 URL 提供本地 PDF 字节（支持 HTTP Range，大 PDF 按需读取）；主页面不引入 pdfjs 库，靠 iframe 独立 browsing context 从架构上规避前端 pdfjs 双实例问题
+  - **HTML 渲染**（`.html/.htm`）— 默认以浏览器渲染效果展示（iframe srcdoc + sandbox=`allow-scripts` 无 `allow-same-origin`，页面脚本可执行但处于 opaque origin，无法访问应用主页面与 Wails 绑定方法）；同目录相对资源（css/js/图片/字体）经后端 `/preview-raw` 白名单路由（扩展名白名单 + 绝对路径 + 普通文件校验）自动加载；渲染视图内相对链接面板内跳转、http(s) 外链用系统浏览器打开；工具栏「源码/渲染」切换（源码态可编辑保存，保存后回渲染视图）与「刷新」按钮；超过 1MB 走超大降级提示
   - **文本类「编辑」模式** — 文本类预览可一键切回就地编辑，保存复用既有 SaveFile 链路，按原文件编码（UTF-8/GBK）写入不改变原编码
   - **预览区复制选中文本** — 文本/代码/Markdown 预览态下，鼠标选中内容可直接 Ctrl+C 复制；也可右键弹出「复制 / 全选」菜单（复制项在无选中文本时禁用，全选用 CodeMirror 命令或 Selection API 实现）
   - **Markdown 链接导航** — 预览态点击 Markdown 内链接：相对引用（`./other.md`、`../readme.md`）在预览面板内切换预览；外部 http 链接用系统默认浏览器打开；同文档锚点（`#标题`）滚动定位。拦截 `<a>` 原生顶层导航，避免误触后端 `AssetServer` fallback 返回 `{"error":"缺少 path 参数"}` 并导致界面崩溃

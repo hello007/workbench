@@ -157,6 +157,22 @@
               <!-- 文本类提供编辑入口（双模式切换） -->
               <template v-if="filePreview.kind === 'text'">
                 <template v-if="!isEditing">
+                  <!-- HTML：渲染视图 ⇄ 源码视图切换（默认渲染） -->
+                  <el-button
+                    v-if="isHtmlPreview"
+                    size="small"
+                    @click="toggleHtmlView"
+                  >
+                    {{ htmlViewMode === 'render' ? '源码' : '渲染' }}
+                  </el-button>
+                  <!-- HTML 渲染视图：重载最新文件内容（外部编辑器修改后免重选） -->
+                  <el-button
+                    v-if="isHtmlPreview && htmlViewMode === 'render'"
+                    size="small"
+                    @click="refreshPreview"
+                  >
+                    刷新
+                  </el-button>
                   <el-button size="small" @click="enterEdit">编辑</el-button>
                 </template>
                 <template v-else>
@@ -210,6 +226,7 @@
               :pdf-path="filePreview.pdfPath"
               :encoding="filePreview.encoding"
               :show-toc="showToc"
+              :html-mode="htmlViewMode"
               @open-external="handleOpenWithDefaultApp"
               @open-link="onPreviewLink"
               @close-toc="showToc = false"
@@ -479,12 +496,34 @@ const filePreviewLoading = ref(false)
 // markdown 目录（TOC）显隐：默认隐藏，由「目录」按钮切换
 const showToc = ref(false)
 
+// HTML 预览视图模式：'render'（iframe 渲染，默认）/ 'source'（CodeMirror 源码）。
+// 切换文件时重置为 'render'（见 previewFile），编辑保存后也回渲染态。
+const htmlViewMode = ref('render')
+
 // 是否为 markdown 预览（决定「目录」按钮是否显示）
 const isMarkdownPreview = computed(() => {
   if (filePreview.value.kind !== 'text') return false
   const ext = (filePreview.value.name || '').split('.').pop().toLowerCase()
   return ext === 'md' || ext === 'markdown'
 })
+
+// 是否为 HTML 预览（决定「源码/渲染」切换与「刷新」按钮是否显示）
+const isHtmlPreview = computed(() => {
+  if (filePreview.value.kind !== 'text') return false
+  const ext = (filePreview.value.name || '').split('.').pop().toLowerCase()
+  return ext === 'html' || ext === 'htm'
+})
+
+// HTML 渲染视图 ⇄ 源码视图切换
+const toggleHtmlView = () => {
+  htmlViewMode.value = htmlViewMode.value === 'render' ? 'source' : 'render'
+}
+
+// HTML 渲染视图刷新：按当前预览路径重载文件（编辑态按钮不显示，无未保存丢失风险）
+const refreshPreview = () => {
+  if (!filePreview.value.path) return
+  previewFile(filePreview.value.path, filePreview.value.name)
+}
 
 // 「后退」= 回到文件树当前选中节点。
 //   设计意图（用户反馈）：仅当当前预览文件（通常通过 markdown 相对链接跳转得到）
@@ -768,6 +807,8 @@ const previewFile = async (overridePath, overrideName) => {
   isEditing.value = false
   // 切换文件时收起目录，保持「默认隐藏」
   showToc.value = false
+  // HTML 预览默认进渲染视图（新文件/链接跳转/刷新均重置）
+  htmlViewMode.value = 'render'
   try {
     const preview = await PreviewFile(targetPath)
 
@@ -857,8 +898,11 @@ const goBack = () => {
   previewFile(props.selectedNode.path, props.selectedNode.name)
 }
 
-// 进入编辑模式（仅文本类）
+// 进入编辑模式（仅文本类）；HTML 渲染视图下编辑需先切到源码视图（textarea 编辑链路在源码态）
 const enterEdit = () => {
+  if (isHtmlPreview.value && htmlViewMode.value === 'render') {
+    htmlViewMode.value = 'source'
+  }
   isEditing.value = true
 }
 
@@ -872,8 +916,9 @@ const handleSave = async () => {
     ElMessage.success('文件保存成功')
     originalContent.value = filePreview.value.content
     emit('refreshNode', props.selectedNode.path)
-    // 保存后回到只读预览态
+    // 保存后回到只读预览态；HTML 保存后回渲染视图查看最新效果
     isEditing.value = false
+    if (isHtmlPreview.value) htmlViewMode.value = 'render'
   } catch (error) {
     ElMessage.error('保存失败: ' + (error.message || String(error)))
   } finally {

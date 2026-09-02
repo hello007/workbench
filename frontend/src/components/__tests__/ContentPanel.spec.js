@@ -701,3 +701,112 @@ describe('ContentPanel.vue', () => {
     })
   })
 })
+
+describe('ContentPanel.vue - HTML 渲染预览', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  const mountAndPreview = async (previewResult) => {
+    const { PreviewFile } = await import('../../../wailsjs/go/main/App')
+    PreviewFile.mockResolvedValueOnce(previewResult)
+    wrapper = mount(ContentPanel, {
+      props: {
+        selectedNode: { name: 'index.html', path: '/test/index.html', type: 'file' },
+        clipboard: { mode: null }
+      },
+      global: { stubs: contentPanelStubs }
+    })
+    const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
+    await previewBtn.trigger('click')
+    await flushPromises()
+    return PreviewFile
+  }
+
+  const htmlPreviewResult = {
+    path: '/test/index.html',
+    name: 'index.html',
+    size: 48,
+    content: '<html><head><title>demo</title></head><body><h1>hi</h1></body></html>',
+    isBinary: false,
+    tooLarge: false,
+    error: '',
+    kind: 'text'
+  }
+
+  const findBtn = (text) => {
+    const btn = wrapper.findAll('button').find(b => b.text().trim() === text)
+    return btn || { exists: () => false }
+  }
+
+  it('HTML 预览默认进渲染视图：iframe 渲染 +「源码」「刷新」按钮', async () => {
+    await mountAndPreview(htmlPreviewResult)
+    // 渲染视图（真 FilePreviewRenderer，未 stub）
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(true)
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(false)
+    // 工具栏按钮
+    expect(findBtn('源码').exists()).toBe(true)
+    expect(findBtn('刷新').exists()).toBe(true)
+  })
+
+  it('「源码」按钮：切到 CodeMirror 源码视图，按钮变「渲染」、「刷新」隐藏', async () => {
+    await mountAndPreview(htmlPreviewResult)
+    await findBtn('源码').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(false)
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+    expect(findBtn('渲染').exists()).toBe(true)
+    expect(findBtn('刷新').exists()).toBe(false)
+    // 再切回渲染
+    await findBtn('渲染').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(true)
+  })
+
+  it('渲染态点「编辑」：自动切源码视图并进入编辑（textarea）', async () => {
+    await mountAndPreview(htmlPreviewResult)
+    await findBtn('编辑').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.find('iframe.html-frame').exists()).toBe(false)
+  })
+
+  it('源码态编辑保存后：回到渲染视图且内容为最新', async () => {
+    await mountAndPreview(htmlPreviewResult)
+    await findBtn('编辑').trigger('click')
+    await flushPromises()
+    await wrapper.find('textarea').setValue('<html><body><h1>new content</h1></body></html>')
+    await findBtn('保存').trigger('click')
+    await flushPromises()
+    // 保存成功 → 回渲染态，srcdoc 含新内容
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    const frame = wrapper.find('iframe.html-frame')
+    expect(frame.exists()).toBe(true)
+    expect(frame.attributes('srcdoc')).toContain('new content')
+  })
+
+  it('「刷新」按钮：按当前预览路径重新 PreviewFile', async () => {
+    const PreviewFile = await mountAndPreview(htmlPreviewResult)
+    expect(PreviewFile).toHaveBeenCalledTimes(1)
+    await findBtn('刷新').trigger('click')
+    await flushPromises()
+    expect(PreviewFile).toHaveBeenCalledTimes(2)
+    expect(PreviewFile).toHaveBeenLastCalledWith('/test/index.html')
+  })
+
+  it('非 HTML 文本（.txt）不显示「源码/刷新」按钮', async () => {
+    await mountAndPreview({ ...htmlPreviewResult, name: 'note.txt', path: '/test/note.txt' })
+    expect(findBtn('源码').exists()).toBe(false)
+    expect(findBtn('刷新').exists()).toBe(false)
+    expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+  })
+})

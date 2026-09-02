@@ -80,6 +80,19 @@
       </div>
     </div>
 
+    <!-- HTML 渲染预览：iframe srcdoc + sandbox（allow-scripts 无 allow-same-origin，
+         脚本可执行但处于 opaque origin，无法访问 parent / Wails 绑定）。
+         相对资源由注入的 <base> 指向 /preview-raw 解析；外链经注入脚本
+         postMessage 通知主页面走系统浏览器。源码态走下方 CodeMirror 分支。 -->
+    <div v-else-if="isHtmlRenderView" class="preview-html-wrap">
+      <iframe
+        :srcdoc="htmlSrcDoc"
+        class="html-frame"
+        sandbox="allow-scripts"
+        frameborder="0"
+      />
+    </div>
+
     <!-- 代码 / txt / json / sql 只读：CodeMirror 6 -->
     <div v-else-if="kind === 'text'" class="preview-codemirror-wrap">
       <!-- 编码标识：仅非 utf-8（如 gbk）时显示，提示用户保存将按此编码回写 -->
@@ -223,6 +236,7 @@ import mermaid from 'mermaid'
 // YAML frontmatter 解析（v4+ 默认 safe schema），用于 markdown 预览属性面板
 import jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
+import { buildHtmlPreviewDoc } from '../utils/htmlPreview'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -282,6 +296,9 @@ const props = defineProps({
   filePath: { type: String, default: '' },
   // markdown 目录（TOC）显隐：由父组件「目录」按钮控制，默认隐藏
   showToc: { type: Boolean, default: false },
+  // HTML 预览视图模式（kind=text 且扩展名 html/htm 时生效）：
+  // 'render' 渲染视图（iframe srcdoc）/ 'source' 源码视图（CodeMirror），由父组件控制
+  htmlMode: { type: String, default: 'render' },
   // 文本编码来源（utf-8/gbk），用于在文本区提示用户当前文件编码，
   // 保存时按此编码回写。仅非 utf-8（如 gbk）时显示标识，避免默认场景噪声。
   encoding: { type: String, default: '' }
@@ -331,6 +348,32 @@ const isMarkdown = computed(() => {
   const ext = getExt(props.fileName)
   return ext === 'md' || ext === 'markdown'
 })
+
+// ---------- HTML 渲染预览 ----------
+// HTML 文件（kind=text 且扩展名 html/htm）且视图模式为 render 时进 iframe 渲染分支；
+// source 模式回落到下方 CodeMirror 源码分支（v-else-if 链互斥）。
+const isHtmlFile = computed(() => {
+  if (props.kind !== 'text') return false
+  const ext = getExt(props.fileName)
+  return ext === 'html' || ext === 'htm'
+})
+
+const isHtmlRenderView = computed(() => isHtmlFile.value && props.htmlMode === 'render')
+
+// srcdoc = 原文 + <base>（相对资源解析到 /preview-raw）+ 外链拦截脚本
+const htmlSrcDoc = computed(() => {
+  if (!isHtmlRenderView.value) return ''
+  return buildHtmlPreviewDoc(props.content || '', props.filePath || '')
+})
+
+// 渲染 iframe 内注入脚本 postMessage 上来的外链 → 系统默认浏览器打开。
+// 校验 type 与 http(s) 协议，避免任意 message 直通 BrowserOpenURL。
+const onHtmlFrameMessage = (event) => {
+  const data = event.data
+  if (!data || data.type !== 'workbench-open-external') return
+  const url = typeof data.url === 'string' ? data.url : ''
+  if (/^https?:\/\//i.test(url)) BrowserOpenURL(url)
+}
 
 // ---------- Mermaid 初始化 ----------
 // startOnLoad:false → 由我们在 DOM 更新后手动 run；securityLevel:'strict' 防注入。
@@ -717,9 +760,9 @@ const renderOfficeBySubType = async () => {
   // pptx / legacy 无需渲染，模板走降级分支
 }
 
-watch(() => [props.kind, props.fileName, props.base64, props.content], async () => {
-  // 销毁 CodeMirror（切到非 text 类型时）
-  if (props.kind !== 'text' && cmView) {
+watch(() => [props.kind, props.fileName, props.base64, props.content, props.htmlMode], async () => {
+  // 销毁 CodeMirror（切到非 text 类型，或 HTML 切到渲染视图时）
+  if ((props.kind !== 'text' || isHtmlRenderView.value) && cmView) {
     cmView.destroy()
     cmView = null
   }
@@ -730,7 +773,9 @@ watch(() => [props.kind, props.fileName, props.base64, props.content], async () 
     activeSheetName.value = ''
     if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
   }
-  if (props.kind === 'text') {
+  if (props.kind === 'text' && !isHtmlRenderView.value) {
+    // 源码态（含 HTML source 模式、普通代码文件）用 CodeMirror；
+    // HTML render 模式走 iframe srcdoc 分支，无需 CodeMirror
     await nextTick()
     setupCodeMirror()
   } else if (props.kind === 'image') {
@@ -747,7 +792,8 @@ onMounted(async () => {
     if (isMarkdown.value) {
       // markdown 走 v-html 分支，无 CodeMirror；首次挂载渲染 mermaid
       renderMermaid()
-    } else {
+    } else if (!isHtmlRenderView.value) {
+      // HTML 渲染态走 iframe 分支，无 CodeMirror；源码态才初始化
       setupCodeMirror()
     }
   } else if (props.kind === 'office') {
@@ -955,12 +1001,15 @@ onMounted(() => {
   document.addEventListener('contextmenu', onGlobalContextMenu, true)
   // 监听选区变化，缓存预览区内最近一次非空选区文本，用于右键清除选区后的复制回退
   document.addEventListener('selectionchange', onSelectionChange)
+  // 监听 HTML 渲染 iframe 内注入脚本 postMessage 的外链打开请求
+  window.addEventListener('message', onHtmlFrameMessage)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onGlobalClick)
   document.removeEventListener('contextmenu', onGlobalContextMenu, true)
   document.removeEventListener('selectionchange', onSelectionChange)
+  window.removeEventListener('message', onHtmlFrameMessage)
 })
 
 onBeforeUnmount(() => {
@@ -1289,6 +1338,24 @@ onBeforeUnmount(() => {
 
 .markdown-body :deep(a:hover) {
   text-decoration: underline;
+}
+
+/* HTML 渲染 iframe */
+.preview-html-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.html-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  /* 白底，避免加载前露出浅蓝容器 */
+  background: var(--bg-secondary);
 }
 
 /* CodeMirror */
