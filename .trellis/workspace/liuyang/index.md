@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 32
-- **Last Active**: 2026-09-02
+- **Total Sessions**: 33
+- **Last Active**: 2026-09-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1085 | Active |
+| `journal-1.md` | ~1118 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 33 | 2026-09-07 | spec 沉淀迁出 .trellis/spec 至 docs/spec | `531dc81` | `master` |
 | 32 | 2026-09-02 | HTML 文件渲染预览（iframe sandbox + /preview-raw） | `51a6b3b` | `master` |
 | 31 | 2026-08-17 | 拷贝到支持自定义目标文件名与去只读 | `6f61ca5` | `master` |
 | 30 | 2026-07-20 | 定制 Phase 3.3 沉淀目标到 docs/ 与 CLAUDE.md | `162f9a8` | `master` |

@@ -1083,3 +1083,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: spec 沉淀迁出 .trellis/spec 至 docs/spec
+
+**Date**: 2026-09-07
+**Task**: spec 沉淀迁出 .trellis/spec 至 docs/spec
+**Branch**: `master`
+
+### Summary
+
+将 cross-layer-contracts.md 迁至 docs/spec/（git mv R100），删除空模板与 guides 共 9 文件移除 .trellis/spec/；CLAUDE.md 建立两级分流沉淀规则（详细文档进 docs/spec/，关键规则进 CLAUDE.md 关键规则表，禁写旧路径，覆盖 skill 默认指令）；workflow.md 正文引导改指新位置（未动步骤标记与 workflow-state 块，回归约束验证通过）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `531dc81` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
