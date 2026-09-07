@@ -40,6 +40,20 @@ workbench/
 └── BUILD_SUMMARY.md     # 构建摘要
 ```
 
+## 规范沉淀规则
+
+执行 trellis 工作流的 spec 沉淀（`trellis-update-spec`，workflow Phase 3.3）时，按以下两级分流写入：
+
+1. **详细契约 / 主题文档**（跨层契约、签名同步规则等需完整上下文的内容）写入 `docs/spec/<topic>.md`，**禁止写入 `.trellis/spec/`**。该目录已废弃移除；本规则覆盖 `trellis-update-spec` skill 内的默认路径指令——即使 skill 文本仍指向旧路径，以本节为准。
+2. **一两句级每次会话必知的关键规则**，直接追加到下方「关键规则」清单，并附指向 `docs/spec/` 详细文档的链接（如有）。
+
+### 关键规则
+
+|规则|详细文档|
+|---|---|
+|修改 `app.go` App 方法签名或 `model/` 导出 struct 字段时，须手动同步 `frontend/wailsjs/` 绑定（App.js / App.d.ts / models.ts 三处）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
+|定制 `.trellis/workflow.md` 时只改正文描述；若增删 `[required · once]` 标记或步骤，必须同步修改对应 `[workflow-state:*]` 标签块，否则 trellis 回归测试失败|[workflow.md Customizing 章节](.trellis/workflow.md)|
+
 ## 文档索引
 
 |文档|说明|
@@ -54,6 +68,7 @@ workbench/
 |[项目上下文.md](docs/project-context.md)|AI Agent 编码规则和模式|
 |[开发运维.md](workbench/DEVELOPMENT.md)|开发运维详细文档|
 |[构建摘要.md](workbench/BUILD_SUMMARY.md)|构建摘要|
+|[规范沉淀](docs/spec/README.md)|跨层契约等项目规范沉淀（原 .trellis/spec 迁移）|
 
 ## 常用命令
 
@@ -69,5 +84,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-06-09
-**文档版本：** v2.2
+**最后更新：** 2026-09-07
+**文档版本：** v2.3

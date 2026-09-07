@@ -26,16 +26,12 @@ Creates `.trellis/.developer` (gitignored) + `.trellis/workspace/<your-name>/`.
 
 ### Spec System
 
-`.trellis/spec/` holds coding guidelines organized by package and layer.
+Project spec documents live in `docs/spec/` (cross-layer contracts and other detailed conventions; the former `.trellis/spec/` directory was removed on 2026-09-07 and must not be recreated).
 
-- `.trellis/spec/<package>/<layer>/index.md` — entry point with **Pre-Development Checklist** + **Quality Check**. Actual guidelines live in the `.md` files it points to.
-- `.trellis/spec/guides/index.md` — cross-package thinking guides.
+- `docs/spec/README.md` — index of spec documents + two-tier routing rules.
+- `docs/spec/<topic>.md` — one detailed contract / topic document per file (e.g. `cross-layer-contracts.md` for Wails binding sync).
 
-```bash
-python ./.trellis/scripts/get_context.py --mode packages   # list packages / layers
-```
-
-**When to update spec**: new pattern/convention found · bug-fix prevention to codify · new technical decision.
+**When to update spec**: new pattern/convention found · bug-fix prevention to codify · new technical decision. Route per the CLAUDE.md「规范沉淀规则」two-tier rule: detailed contract docs go to `docs/spec/<topic>.md`; one-or-two-sentence must-know rules go to the CLAUDE.md「关键规则」list. Never write to `.trellis/spec/`.
 
 ### Task System
 
@@ -135,8 +131,9 @@ python ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed g
       matching phase's `[required · once]` walkthrough steps for sync
     - Run `trellis update` after editing to push the new bodies to
       downstream user projects (block-level managed replacement)
-    - Full runtime contract:
-      .trellis/spec/cli/backend/workflow-state-contract.md
+    - Full runtime contract: see the trellis upstream template file
+      `.trellis/spec/cli/backend/workflow-state-contract.md` (not installed
+      in this project; informational upstream reference only)
 -->
 
 ## Phase Index
@@ -379,7 +376,7 @@ Curate `implement.jsonl` and `check.jsonl` so the Phase 2 sub-agents get the rig
 **Format**: one JSON object per line — `{"file": "<path>", "reason": "<why>"}`. Paths are repo-root relative.
 
 **What to put in**:
-- **Spec files** — `.trellis/spec/<package>/<layer>/index.md` and any specific guideline files (`error-handling.md`, `conventions.md`, etc.) relevant to this task
+- **Spec files** — `docs/spec/<topic>.md` documents relevant to this task (e.g. `docs/spec/cross-layer-contracts.md` for Wails binding sync); the index lives in `docs/spec/README.md`
 - **Research files** — `{TASK_DIR}/research/*.md` that the sub-agent will need to consult
 
 **What NOT to put in**:
@@ -390,13 +387,7 @@ Curate `implement.jsonl` and `check.jsonl` so the Phase 2 sub-agents get the rig
 - `implement.jsonl` → specs + research the implement sub-agent needs to write code correctly
 - `check.jsonl` → specs for the check sub-agent (quality guidelines, check conventions, same research if needed)
 
-**How to discover relevant specs**:
-
-```bash
-python ./.trellis/scripts/get_context.py --mode packages
-```
-
-Lists every package + its spec layers with paths. Pick the entries that match this task's domain.
+**How to discover relevant specs**: check the document index in `docs/spec/README.md` and pick the `docs/spec/<topic>.md` entries that match this task's domain (specs no longer live under `.trellis/spec/` — that directory was removed).
 
 **How to append entries**:
 
@@ -572,10 +563,11 @@ Load the `trellis-update-spec` skill and review whether this task produced new k
 - Pitfalls you hit
 - New technical decisions
 
-**沉淀目标（本项目覆盖，非 `.trellis/spec/`）**：
+**沉淀目标（本项目覆盖；`.trellis/spec/` 已废弃移除，禁止写入）——按 CLAUDE.md「规范沉淀规则」两级分流**：
+- 详细契约 / 主题文档（跨层签名同步、接口约定等需完整上下文的内容）-> `docs/spec/<topic>.md`，并同步更新 `docs/spec/README.md` 索引
 - 坑 / 问题 / 非显而易见的行为 -> `docs/常见问题.md`（Q&A 格式：症状 / 原因 / 解决方案 / 相关文件）
 - 规范 / 约定 / 正确做法 -> `docs/开发规范.md`（✅正确 / ❌错误 代码示例 + 原因）
-- 仅"每个 session 必读的全局约定"才进 `CLAUDE.md`，且**起草拟改片段后须用户确认再写入**
+- 一两句级每个 session 必知的关键规则 -> `CLAUDE.md`「规范沉淀规则 → 关键规则」清单（附指向 `docs/spec/` 详细文档的链接），且**起草拟改片段后须用户确认再写入**
 
 **写入策略**：`docs/` 直接写入；`CLAUDE.md` 先列拟改片段、用户确认后再写。即使结论是"本次无内容可沉淀"，也要走一遍判断并说明。
 
@@ -691,5 +683,5 @@ Supported events: `after_create / after_start / after_finish / after_archive`. N
 
 For the workflow state machine's runtime contract, the locations of all status writers, pseudo-statuses (`no_task` / `stale_<source_type>`), the hook reachability matrix, and other deep details, see:
 
-- `.trellis/spec/cli/backend/workflow-state-contract.md` — runtime contract + writer table + test invariants
+- Trellis upstream template's `.trellis/spec/cli/backend/workflow-state-contract.md` (informational reference only; the file is not installed in this project) — runtime contract + writer table + test invariants
 - `.trellis/scripts/inject-workflow-state.py` — actual parser (reads workflow.md only, no embedded text)
