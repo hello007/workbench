@@ -1,0 +1,2 @@
+{"file": ".trellis/workflow.md", "reason": "验证无 .trellis/spec 残留引导且未动 [required · once] 标记与 [workflow-state:*] 块"}
+{"file": "CLAUDE.md", "reason": "验证含两级分流规则、禁写 .trellis/spec/ 声明、文档索引含 docs/spec/ 入口"}
