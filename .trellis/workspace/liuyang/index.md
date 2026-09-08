@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
+- **Total Sessions**: 37
 - **Last Active**: 2026-09-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1217 | Active |
+| `journal-1.md` | ~1250 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-09-09 | AI 第 3 批：运行历史归档 + 大输出流式文件 | `61455a9` | `master` |
 | 36 | 2026-09-09 | AI 配置表单化 + MCP stdio 支持（第 2 批） | `d6ef191` | `master` |
 | 35 | 2026-09-08 | AI 执行链路增强第 1 批：可观测性 + 并发上限 + 输出截断 | `644f5ea` | `master` |
 | 34 | 2026-09-08 | AI 功能菜单（Skill 聚合触发器）全量实现 | `a7648c8` | `master` |

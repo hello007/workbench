@@ -1215,3 +1215,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: AI 第 3 批：运行历史归档 + 大输出流式文件
+
+**Date**: 2026-09-09
+**Task**: AI 第 3 批：运行历史归档 + 大输出流式文件
+**Branch**: `master`
+
+### Summary
+
+合并实施 P1-2（运行历史归档）与 P0-4(3.3)（大输出流式文件），经 os.Rename 零拷贝衔接归档。后端 aiTaskRuntime.output 改 *os.File 流式写 data/ai_task_output/<id>.txt，GetAiTaskState 返回末尾 ~4KB 预览 + OutputSize/OutputFile/TableExtracted（后端预解析 markdown 表格方案 A），新增 GetAiTaskOutput 全量读。历史归档：AiTaskHistory 复用 AiTaskMetrics，输出文件 os.Rename 移入 data/ai_task_history/<id>.txt + 元 data/ai_task_history.json，保留策略 2000 条+90 天，定时清理 1 天兜底。前端 copyOutput/previewOutput 改调 GetAiTaskOutput，meetingTable 用 tableExtracted，废弃 fullOutput；新增 AiTaskHistoryPanel（筛选+列表+详情懒加载）。wailsjs 三处同步完成，前后端双绿（286 前端测试）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `61455a9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
