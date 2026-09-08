@@ -1149,3 +1149,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: AI 执行链路增强第 1 批：可观测性 + 并发上限 + 输出截断
+
+**Date**: 2026-09-08
+**Task**: AI 执行链路增强第 1 批：可观测性 + 并发上限 + 输出截断
+**Branch**: `master`
+
+### Summary
+
+基于头脑风暴识别的 3 个文档外缺口，展开 P0-2 可观测性 + P0-3 并发上限 + P0-4(3.1) 前端截断三项 design 并合并实施。parseStreamLine 解析 result 事件计量（token/耗时/成本），Tab 底栏展示；concurrencySem 信号量限并发（默认 3），超限排队 + queued/started 事件 + 排队态可见，超时起算后移到获取槽位后，排队取消用 queueCancel 唤醒 select，pumpOutput defer 释放信号量；onOutput 256KB 末尾窗口截断 + fullOutput 全量取数。跨层契约同步 wailsjs 三处。前后端双绿（后端 metrics/并发状态/清理测试，前端排队态/计量条/截断测试）。另产出 9 份 design 文档与 result 事件抓样归档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `644f5ea` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
