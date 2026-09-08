@@ -1248,3 +1248,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: AI skill 自动发现与一键导入（第 4 批）
+
+**Date**: 2026-09-09
+**Task**: AI skill 自动发现与一键导入（第 4 批）
+**Branch**: `master`
+
+### Summary
+
+实施 P1-1 skill 自动发现 + P0-1 表单联调。新增 SkillDescriptor model 与 SkillDiscoveryService，扫描用户级 ~/.claude/skills + 各工作目录 .claude/skills + 已安装插件 installPath/skills，解析 SKILL.md frontmatter（yaml.v3）去重，按来源拼接命令命名空间（用户级/项目级 /<name>、插件 /<plugin>:<name>），mtime fingerprint 缓存 + Refresh 强制重扫。app.go 加 GetDiscoveredSkills/RefreshDiscoveredSkills 绑定，wailsjs App.js/App.d.ts/models.ts 三处同步。AiFunctionConfigDialog 顶部加导入入口 + 模糊搜索 + 回填（command/cwd 覆盖，description/name 空时回填）。抓样纠正 design 4.1 插件 skill 路径假设：实际在用户级 installed_plugins.json 的 plugins 字段索引（{version,plugins}），非工作目录 .claude/plugins/。后端 7 项 + 前端 4 项单测，前后端全量双绿（290 测试）。真实环境 smoke 发现 64 个 skill，命名空间与 cwd 正确。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d32ef5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
