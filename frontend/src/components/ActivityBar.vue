@@ -36,7 +36,7 @@
 </template>
 
 <script setup>
-import { Folder, SetUp, Setting, Monitor } from '@element-plus/icons-vue'
+import { Folder, MagicStick, SetUp, Setting, Monitor } from '@element-plus/icons-vue'
 
 defineProps({
   modelValue: { type: String, default: 'directory' },
@@ -47,6 +47,7 @@ defineEmits(['update:modelValue', 'toggleTerminal', 'openSettings'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
+  { id: 'ai', icon: MagicStick, label: 'AI 功能' },
   { id: 'toolbox', icon: SetUp, label: '工具箱' }
 ]
 </script>

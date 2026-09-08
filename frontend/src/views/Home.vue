@@ -3,8 +3,9 @@
     <div class="home-layout">
       <ActivityBar v-model="activePanel" :terminal-active="terminalVisible" @toggle-terminal="toggleTerminal" @open-settings="settingsVisible = true" />
       <div class="main-area">
-        <!-- 上半区：原有 Splitpanes 三栏 -->
-        <div class="main-panes">
+        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页激活时整体隐藏，v-show 保状态：
+             运行中任务、已选文件、预览内容均保留，切回即恢复） -->
+        <div v-show="activePanel !== 'ai'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
               <div class="pane-content" style="position:relative;" @mousedown.capture="lastInteractedTree = 'directory'">
@@ -76,6 +77,11 @@
             </Pane>
           </Splitpanes>
         </div>
+        <!-- AI 功能页：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回不丢运行中任务/已开 Tab/已录参数。
+             与 .main-panes 同级，点击本面板不会冒泡进三栏 pane 的
+             closeToolbox handler（该 handler 仅绑定在 Splitpanes 内部 pane 上） -->
+        <AiFunctionPanel v-show="activePanel === 'ai'" />
         <!-- 拖拽分隔条 -->
         <div
           v-if="terminalVisible"
@@ -121,6 +127,7 @@ import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
 import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
+import AiFunctionPanel from '../components/AiFunctionPanel.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'

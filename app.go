@@ -30,6 +30,7 @@ type App struct {
 	contentSearchSvc *service.ContentSearchService
 	updateSvc        *service.UpdateService
 	repoMetaSvc      *service.RepoMetaService
+	aiFuncSvc        *service.AiFunctionService
 }
 
 func NewApp() *App {
@@ -58,6 +59,9 @@ func (a *App) startup(ctx context.Context) {
 	// 仓库筛选器元数据服务（简述/标签持久化，PRD F10）
 	a.repoMetaSvc = service.NewRepoMetaService(filepath.Join(dataDir, "repo_meta.json"))
 
+	// AI 功能服务（工具箱「AI 功能」页：skill 聚合触发，data/ai_functions.json）
+	a.aiFuncSvc = service.NewAiFunctionService(ctx, filepath.Join(dataDir, "ai_functions.json"))
+
 	// 更新服务
 	a.updateSvc = service.NewUpdateService()
 	a.updateSvc.SetContext(ctx)
@@ -76,6 +80,9 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	if a.terminalSvc != nil {
 		a.terminalSvc.CloseAll()
+	}
+	if a.aiFuncSvc != nil {
+		a.aiFuncSvc.CloseAll()
 	}
 	println("WorkBench shutting down...")
 }
@@ -1226,4 +1233,92 @@ func (a *App) ApplyUpdate() error {
 	// 退出当前应用
 	os.Exit(0)
 	return nil
+}
+
+// ===== AI 功能（skill 聚合触发）相关 =====
+
+// GetAiFunctions 获取 AI 功能项列表；配置文件不存在时自动写入并返回默认四项
+func (a *App) GetAiFunctions() ([]*model.AiFunction, error) {
+	return a.aiFuncSvc.LoadAiFunctions()
+}
+
+// SaveAiFunctions 保存 AI 功能项列表（配置管理界面增删改后调用）
+func (a *App) SaveAiFunctions(funcs []*model.AiFunction) error {
+	return a.aiFuncSvc.SaveAiFunctions(funcs)
+}
+
+// RunAiFunction 运行功能项主段：按参数规格组装 prompt 后起 claude 子进程。
+// params 为参数值（file/text 为单值 key，form 为字段 key->值），无参数传 nil。
+// 返回任务 id；输出经 Wails 事件 ai-task:output / ai-task:done 推送。
+func (a *App) RunAiFunction(functionID string, params map[string]string) (string, error) {
+	fn, err := a.aiFuncSvc.LoadAiFunctions()
+	if err != nil {
+		return "", err
+	}
+	var target *model.AiFunction
+	for _, f := range fn {
+		if f.ID == functionID {
+			target = f
+			break
+		}
+	}
+	if target == nil {
+		return "", fmt.Errorf("AI 功能 %s 不存在", functionID)
+	}
+	prompt, err := service.BuildStagePrompt(target.Command, target.Params, params)
+	if err != nil {
+		return "", err
+	}
+	return a.aiFuncSvc.RunStage(functionID, prompt, "")
+}
+
+// RunAiFollowUp 运行后续段（多段编排）：在原任务会话上 --resume 继续发送。
+// taskID 为主段任务 id，followUpID 为功能项中定义的后续段 id。
+func (a *App) RunAiFollowUp(taskID, followUpID string, params map[string]string) (string, error) {
+	state := a.aiFuncSvc.GetAiTaskState(taskID)
+	if state == nil {
+		return "", fmt.Errorf("任务 %s 不存在", taskID)
+	}
+	if state.SessionID == "" {
+		return "", fmt.Errorf("原任务无会话 id，无法续段（可能未产生任何输出即失败）")
+	}
+	fn, err := a.aiFuncSvc.LoadAiFunctions()
+	if err != nil {
+		return "", err
+	}
+	var target *model.AiFunction
+	for _, f := range fn {
+		if f.ID == state.FunctionID {
+			target = f
+			break
+		}
+	}
+	if target == nil {
+		return "", fmt.Errorf("功能项 %s 不存在", state.FunctionID)
+	}
+	var followUp *model.AiFollowUp
+	for i := range target.FollowUps {
+		if target.FollowUps[i].ID == followUpID {
+			followUp = &target.FollowUps[i]
+			break
+		}
+	}
+	if followUp == nil {
+		return "", fmt.Errorf("后续段 %s 不存在", followUpID)
+	}
+	prompt, err := service.BuildFollowUpPrompt(followUp, params)
+	if err != nil {
+		return "", err
+	}
+	return a.aiFuncSvc.RunStage(state.FunctionID, prompt, state.SessionID)
+}
+
+// CancelAiTask 取消运行中的任务（杀 claude 及其子进程树）
+func (a *App) CancelAiTask(taskID string) bool {
+	return a.aiFuncSvc.CancelAiTask(taskID)
+}
+
+// GetAiTaskState 查询任务状态（输出内容、会话 id、运行态）
+func (a *App) GetAiTaskState(taskID string) *model.AiTaskState {
+	return a.aiFuncSvc.GetAiTaskState(taskID)
 }

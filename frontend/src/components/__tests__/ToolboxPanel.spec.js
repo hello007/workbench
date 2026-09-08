@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ToolboxPanel from '../ToolboxPanel.vue'
 
+// ToolboxPanel 仅调用 CopyTo 绑定（AI 功能入口已迁至活动栏一级入口，与本组件无关）
+vi.mock('../../../wailsjs/go/main/App', () => ({
+  CopyTo: vi.fn()
+}))
+
 describe('ToolboxPanel', () => {
   const createWrapper = () => {
     return mount(ToolboxPanel, {
@@ -13,7 +18,8 @@ describe('ToolboxPanel', () => {
           'el-form-item': { template: '<div><slot /></div>' },
           'el-input': true,
           'el-checkbox': true,
-          'el-button': { template: '<button v-bind="$attrs"><slot /></button>' }
+          'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+          'el-empty': { template: '<div class="empty" />' }
         }
       }
     })
