@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查跨层同步：新增4个App方法 wailsjs App.js/App.d.ts 是否同步；AiTaskHistory/MeetingTable 及 AiTaskState/AiTaskRunResult 新字段 models.ts 是否同步（字段声明+构造函数赋值）；git status 确认 wailsjs 无残留"}
+{"file": "docs/plans/2026-09-08-ai-output-memory-design.md", "reason": "P0-4(3.3) 验收对照（第6节）：流式写文件不再全量驻留、GetAiTaskState 返回尾部预览+大小+文件路径、GetAiTaskOutput 全量读、TableExtracted 预解析表格视图不受截断影响、os.Rename 零拷贝衔接、三路径清理无孤儿"}
+{"file": "docs/plans/2026-09-08-ai-run-history-design.md", "reason": "P1-2 验收对照（第6节）：任务完成自动归档元数据+输出文件落盘、历史面板筛选生效、输出懒加载不阻塞列表、清理同步删输出文件无孤儿、重开应用历史完整恢复"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览验收对照：第5节第3批合并实施完成、第6节待确认点已定稿（表格预解析/清理三路径/保留策略/面板范围）、第1/2批衔接点未被重复改动"}

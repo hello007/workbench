@@ -1,0 +1,4 @@
+{"file": "docs/plans/2026-09-08-ai-output-memory-design.md", "reason": "P0-4(3.3) 主体设计：aiTaskRuntime.output 改 *os.File + outputSize、pumpOutput 写文件、GetAiTaskState 返回尾部预览+OutputSize+OutputFile、GetAiTaskOutput 全量读、TableExtracted 后端预解析（4.4 方案A）、输出文件清理三路径（4.5）、os.Rename 零拷贝衔接归档"}
+{"file": "docs/plans/2026-09-08-ai-run-history-design.md", "reason": "P1-2 主体设计：AiTaskHistory 结构复用 AiTaskMetrics、方案B 存储（元数据JSON+输出文件分存 4.1）、归档时机（pumpOutput 结束 emit done 前 4.3）、清理策略（2000条/90天 4.5）、历史面板基础筛选+列表+详情（4.4）"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览：第5节实施顺序（第3批 P1-2+P0-4(3.3) 合并理由）、第1/2批衔接点（metrics/queued/truncated/fullOutput/concurrencySem 勿重复改动）、第7.2节缺口2三层方案与零拷贝衔接"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "跨层契约：新增 App 方法（GetAiTaskOutput/GetAiTaskHistory/DeleteAiTaskHistory/ClearAiTaskHistory）须同步 App.js+App.d.ts；model 新增 AiTaskHistory/MeetingTable 与 AiTaskState/AiTaskRunResult 字段须同步 models.ts（字段声明+构造函数，omitempty→?:）"}

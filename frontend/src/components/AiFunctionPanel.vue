@@ -14,6 +14,7 @@
           并发 {{ concurrency.running }}/{{ concurrency.max }}
           <span v-if="concurrency.queued > 0" class="concurrency-queued">（排队 {{ concurrency.queued }}）</span>
         </span>
+        <el-button size="small" @click="historyVisible = true">历史</el-button>
         <el-button size="small" @click="configVisible = true">配置管理</el-button>
         <el-button size="small" @click="loadFunctions">刷新</el-button>
       </span>
@@ -171,6 +172,9 @@
       @update:visible="configVisible = $event"
       @saved="loadFunctions"
     />
+
+    <!-- 运行历史（P1-2：任务完成归档后查看历史记录，复用 metrics 展示样式） -->
+    <AiTaskHistoryPanel v-model:visible="historyVisible" />
   </div>
 </template>
 
@@ -185,6 +189,7 @@ import {
   RunAiFollowUp,
   CancelAiTask,
   GetAiConcurrencyStatus,
+  GetAiTaskOutput,
   RemoveAiTask,
   OpenInExplorer,
   OpenWithDefaultApp
@@ -192,6 +197,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import AiFunctionRunner from './AiFunctionRunner.vue'
 import AiFunctionConfigDialog from './AiFunctionConfigDialog.vue'
+import AiTaskHistoryPanel from './AiTaskHistoryPanel.vue'
 
 // 组件经 v-show 常驻挂载（Home 主区互斥展示），无 visible prop；
 // 功能列表挂载时加载一次，配置管理 saved 回调与标题栏「刷新」按钮负责后续重载
@@ -201,6 +207,7 @@ const tasks = ref([]) // { taskId, functionId, name, icon, prompt, output, runni
 const openFuncs = ref([])
 const activeTabId = ref('')
 const configVisible = ref(false)
+const historyVisible = ref(false)
 
 const iconComp = (name) => (name && Icons[name]) || Icons.MagicStick
 
@@ -247,8 +254,10 @@ const doRunMain = async (f, params) => {
       name: f.name,
       prompt: buildPromptPreview(f, params),
       output: '',
-      fullOutput: '',         // 完成动作取全量（onDone 写入 result.output，3.1 截断不影响）
-      truncated: false,       // 输出超 256KB 截断标记
+      outputSize: 0,          // 3.3：完整输出字节数（后端 done 写入），列表/详情展示用
+      outputFile: '',         // 3.3：输出文件相对路径（后端 done 写入）
+      tableExtracted: null,   // 3.3：后端预解析表格（done 写入），表格视图优先用此值
+      truncated: false,       // 输出超 256KB 截断标记（仅展示层）
       running: false,         // 后端先排队后执行，初始 queued=true
       queued: true,
       error: '',
@@ -337,10 +346,14 @@ const parseMarkdownTable = (text) => {
 
 // 任务是否走会议表格视图：followUps 含 cancel-meeting、输出含合法表格
 // 且表头含「会议号」三个条件同时满足；返回表格（含可见列）或 null。
+// 3.3：优先用后端预解析的 tableExtracted（避免末尾窗口截断后表格丢失）；
+// 预解析缺失时退化前端从展示文本解析（兜底，可能因截断丢表格）。
 const meetingTable = (t) => {
   if (!(t.followUps || []).some((fu) => fu.id === 'cancel-meeting')) return null
-  // 取全量输出解析表格，避免 3.1 末尾窗口截断后表格丢失（后端预解析留 3.3）
-  const tbl = parseMarkdownTable(t.fullOutput || t.output)
+  let tbl = t.tableExtracted
+  if (!tbl) {
+    tbl = parseMarkdownTable(t.output)
+  }
   if (!tbl || !tbl.headers.includes('会议号')) return null
   tbl.visibleHeaders = tbl.headers.filter((h) => !HIDDEN_COLS.includes(h))
   return tbl
@@ -406,7 +419,9 @@ const doRunFollowUp = async (task, followUp, params) => {
       name: `${task.name} · ${followUp.label}`,
       prompt: followUp.promptTemplate,
       output: '',
-      fullOutput: '',
+      outputSize: 0,
+      outputFile: '',
+      tableExtracted: null,
       truncated: false,
       running: false,
       queued: true,
@@ -426,7 +441,7 @@ const doRunFollowUp = async (task, followUp, params) => {
 
 // ===== 事件流 =====
 // P0-4(3.1) 末尾窗口截断：输出超 MAX_DISPLAY 只保留末尾窗口，顶部提示省略量。
-// 截断仅影响展示（t.output），完成动作取 t.fullOutput 全量不受影响。
+// 截断仅影响展示（t.output）；3.3 后 copy/preview/表格视图改调 GetAiTaskOutput 全量读取，不依赖展示文本。
 const MAX_DISPLAY = 256 * 1024
 
 const onOutput = (ev) => {
@@ -469,7 +484,10 @@ const onDone = (result) => {
   t.error = result.error || ''
   t.canceled = !!result.canceled
   t.metrics = result.metrics || null
-  t.fullOutput = result.output || ''
+  // 3.3：done 事件 payload 仅含末尾预览，全量输出在文件；记录大小/路径/预解析表格供完成动作与表格视图
+  t.outputSize = result.outputSize || 0
+  t.outputFile = result.outputFile || ''
+  t.tableExtracted = result.tableExtracted || null
   if (result.sessionId) t.sessionId = result.sessionId
   refreshConcurrency()
   if (!t.error && !t.canceled) {
@@ -497,9 +515,13 @@ const scrollOutput = () => {
 // ===== 完成动作 =====
 const handleCompletion = async (t, result) => {
   try {
-    if (t.completion === 'copy' && result.output) {
-      await navigator.clipboard.writeText(result.output)
-      ElMessage.success('输出已复制到剪贴板')
+    if (t.completion === 'copy') {
+      // 3.3：全量输出经 GetAiTaskOutput 读文件，不依赖已截断的展示文本
+      const full = await GetAiTaskOutput(t.taskId)
+      if (full) {
+        await navigator.clipboard.writeText(full)
+        ElMessage.success('输出已复制到剪贴板')
+      }
     } else if (t.completion === 'open_dir' && t.cwd) {
       await OpenInExplorer(t.cwd)
     } else if (t.completion === 'preview') {
@@ -513,11 +535,12 @@ const handleCompletion = async (t, result) => {
 
 const copyOutput = async (t) => {
   try {
-    // 取全量输出（t.fullOutput），不受 3.1 末尾窗口截断影响
-    await navigator.clipboard.writeText(t.fullOutput || t.output)
+    // 3.3：全量输出经 GetAiTaskOutput 读文件，不受 3.1 末尾窗口截断影响
+    const full = await GetAiTaskOutput(t.taskId)
+    await navigator.clipboard.writeText(full || '')
     ElMessage.success('已复制')
-  } catch {
-    ElMessage.error('复制失败')
+  } catch (e) {
+    ElMessage.error('复制失败: ' + (e?.message || String(e)))
   }
 }
 
@@ -525,12 +548,18 @@ const openDir = (t) => OpenInExplorer(t.cwd)
 
 const previewOutput = async (t) => {
   // 从输出中提取第一个 .html 文件路径（发言稿产物），系统默认程序打开即预览。
-  // 取全量输出（t.fullOutput），避免截断后路径丢失
-  const m = (t.fullOutput || t.output || '').match(/[A-Za-z]:\\[^\s"'<>|]+\.html/i)
-  if (m) {
-    await OpenWithDefaultApp(m[0])
-  } else {
-    ElMessage.info('输出中未找到 .html 产物路径，请手动打开目录')
+  // 3.3：全量输出经 GetAiTaskOutput 读文件，避免截断后路径丢失
+  try {
+    const full = await GetAiTaskOutput(t.taskId)
+    const m = (full || '').match(/[A-Za-z]:\\[^\s"'<>|]+\.html/i)
+    if (m) {
+      await OpenWithDefaultApp(m[0])
+    } else {
+      ElMessage.info('输出中未找到 .html 产物路径，请手动打开目录')
+      openDir(t)
+    }
+  } catch (e) {
+    ElMessage.error('读取输出失败: ' + (e?.message || String(e)))
     openDir(t)
   }
 }

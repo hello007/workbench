@@ -98,26 +98,35 @@ type AiConcurrencyStatus struct {
 }
 
 // AiTaskRunResult 单段执行的结果快照，经 Wails 事件 ai-task:done 推送。
+// 3.3 流式文件改造后 Output 仅含末尾预览（~4KB），全量输出已落输出文件，
+// 前端 copy/preview/表格视图经 GetAiTaskOutput 全量读取，不再从本结构取全量。
 type AiTaskRunResult struct {
-	TaskID    string           `json:"taskId"`
-	SessionID string           `json:"sessionId"` // claude 会话 id，供后续段 --resume
-	ExitCode  int              `json:"exitCode"`
-	Error     string           `json:"error"`
-	Output    string           `json:"output"` // 全量文本输出（copy 完成动作取此值）
-	Canceled  bool             `json:"canceled"`
-	Metrics   *AiTaskMetrics   `json:"metrics,omitempty"` // P0-2：result 事件计量，nil 表示无计量数据
+	TaskID         string         `json:"taskId"`
+	SessionID      string         `json:"sessionId"` // claude 会话 id，供后续段 --resume
+	ExitCode       int            `json:"exitCode"`
+	Error          string         `json:"error"`
+	Output         string         `json:"output"`                   // 末尾预览（~4KB），非全量
+	OutputSize     int64          `json:"outputSize"`               // 完整输出字节数
+	OutputFile     string         `json:"outputFile"`               // 输出文件相对路径（归档后指向 data/ai_task_history/<id>.txt）
+	TableExtracted *MeetingTable  `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
+	Canceled       bool           `json:"canceled"`
+	Metrics        *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：result 事件计量，nil 表示无计量数据
 }
 
 // AiTaskState 任务当前状态（前端恢复/展示用），GetAiTaskState 拉取。
+// 3.3 流式文件改造后 Output 仅含末尾预览（~4KB），不再全量拷贝 strings.Builder。
 type AiTaskState struct {
-	TaskID     string         `json:"taskId"`
-	FunctionID string         `json:"functionId"`
-	Running    bool          `json:"running"`
-	Queued     bool          `json:"queued"` // P0-3：排队中（等待并发槽位，未起进程）
-	SessionID  string        `json:"sessionId"`
-	Prompt     string        `json:"prompt"`
-	Output     string        `json:"output"`
-	Error      string        `json:"error"`
-	StartedAt  int64         `json:"startedAt"` // unix 毫秒
-	Metrics    *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：计量摘要，恢复展示用
+	TaskID         string         `json:"taskId"`
+	FunctionID     string         `json:"functionId"`
+	Running        bool           `json:"running"`
+	Queued         bool           `json:"queued"` // P0-3：排队中（等待并发槽位，未起进程）
+	SessionID      string         `json:"sessionId"`
+	Prompt         string         `json:"prompt"`
+	Output         string         `json:"output"`                   // 末尾预览（~4KB），非全量
+	OutputSize     int64          `json:"outputSize"`               // 完整输出字节数
+	OutputFile     string         `json:"outputFile"`               // 输出文件相对路径（供前端拉全量）
+	TableExtracted *MeetingTable  `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
+	Error          string         `json:"error"`
+	StartedAt      int64          `json:"startedAt"`         // unix 毫秒
+	Metrics        *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：计量摘要，恢复展示用
 }

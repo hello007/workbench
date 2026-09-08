@@ -299,7 +299,16 @@ describe('Home.vue - Bug修复验证', () => {
             DirectoryTree: { template: '<div class="stub-directory-tree" />' },
             FileTreePanel: { template: '<div class="stub-file-tree-panel" />' },
             ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, previewFile: () => {} } },
-            RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' }
+            RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' },
+            'el-dialog': true,
+            'el-drawer': true,
+            'el-table': true,
+            'el-table-column': true,
+            'el-tag': true,
+            'el-date-picker': true,
+            'el-select': true,
+            'el-option': true,
+            'el-button': true
           }
         }
       })
@@ -374,7 +383,12 @@ describe('Home.vue - Bug修复验证', () => {
             'el-descriptions': true,
             'el-descriptions-item': true,
             'el-icon': true,
-            'el-tree': { template: '<div v-bind="$attrs"></div>' }
+            'el-tree': { template: '<div v-bind="$attrs"></div>' },
+            'el-drawer': true,
+            'el-table': true,
+            'el-table-column': true,
+            'el-tag': true,
+            'el-date-picker': true
           }
         }
       })
@@ -624,7 +638,16 @@ describe('Home.vue - Bug修复验证', () => {
                 startBatchPull: () => {},
                 previewFile: previewFileMock
               }
-            }
+            },
+            'el-dialog': true,
+            'el-drawer': true,
+            'el-table': true,
+            'el-table-column': true,
+            'el-tag': true,
+            'el-date-picker': true,
+            'el-select': true,
+            'el-option': true,
+            'el-button': true
           }
         }
       })

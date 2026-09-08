@@ -1,11 +1,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"workbench/model"
 )
@@ -631,5 +635,295 @@ func TestBuildClaudeArgs_McpHttpStdioMixed(t *testing.T) {
 	}
 	if local.Headers != nil {
 		t.Errorf("stdio server 不应输出 headers: %+v", local.Headers)
+	}
+}
+
+// === 3.3 流式文件：表格预解析、尾部读取、全量读取、RemoveAiTask 删文件 ===
+
+// TestExtractTable_ValidMarkdown 验证从输出文本预解析 markdown 表格：
+// 取最后一个连续表格行块，跳过分隔行，首行为表头、其余为数据行，按表头名映射
+func TestExtractTable_ValidMarkdown(t *testing.T) {
+	text := "一些说明文字\n" +
+		"| 会议主题 | 会议号 | 开始时间 |\n" +
+		"| --- | --- | --- |\n" +
+		"| 评审会 | 123 | 09:00 |\n" +
+		"| 站会 | 456 | 09:30 |\n"
+	tbl := extractTable(text, int64(len(text)))
+	if tbl == nil {
+		t.Fatal("应解析出表格，返回 nil")
+	}
+	wantHeaders := []string{"会议主题", "会议号", "开始时间"}
+	if len(tbl.Headers) != 3 {
+		t.Fatalf("表头数量不符: %v", tbl.Headers)
+	}
+	for i, h := range wantHeaders {
+		if tbl.Headers[i] != h {
+			t.Errorf("表头[%d]: 期望=%s 实际=%s", i, h, tbl.Headers[i])
+		}
+	}
+	if len(tbl.Rows) != 2 {
+		t.Fatalf("数据行数量不符: %d（期望 2）", len(tbl.Rows))
+	}
+	if tbl.Rows[0]["会议号"] != "123" {
+		t.Errorf("首行会议号不符: %s", tbl.Rows[0]["会议号"])
+	}
+	if tbl.Rows[1]["会议主题"] != "站会" {
+		t.Errorf("次行会议主题不符: %s", tbl.Rows[1]["会议主题"])
+	}
+}
+
+// TestExtractTable_NoTable 无合法表格（行块不足）返回 nil
+func TestExtractTable_NoTable(t *testing.T) {
+	if extractTable("纯文本无表格", 100) != nil {
+		t.Error("无表格应返回 nil")
+	}
+	if extractTable("| 单行 |", 100) != nil {
+		t.Error("单行表格块（不足 2 行）应返回 nil")
+	}
+}
+
+// TestExtractTable_TakesLastBlock 多个表格块取最后一个
+func TestExtractTable_TakesLastBlock(t *testing.T) {
+	text := "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n| C | D |\n| --- | --- |\n| 3 | 4 |\n"
+	tbl := extractTable(text, int64(len(text)))
+	if tbl == nil {
+		t.Fatal("应解析出表格")
+	}
+	if tbl.Headers[0] != "C" {
+		t.Errorf("应取最后一个表格块，表头: %v", tbl.Headers)
+	}
+	if tbl.Rows[0]["C"] != "3" {
+		t.Errorf("最后一个表格数据行不符: %v", tbl.Rows[0])
+	}
+}
+
+// TestReadTail 验证从输出文件读末尾 N 字节：超过 maxBytes 截断取末尾，不足返回全文
+func TestReadTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+	content := strings.Repeat("x", 10000) + "TAIL"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("写测试文件失败: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("打开文件失败: %v", err)
+	}
+	defer f.Close()
+	size := int64(len(content))
+	// 末尾 4KB 预览：大文件截断取末尾，应以 TAIL 结尾
+	tail := readTail(f, size, 4096)
+	if !strings.HasSuffix(tail, "TAIL") {
+		t.Errorf("末尾预览应以 TAIL 结尾: %q", tail[len(tail)-20:])
+	}
+	if len(tail) > 4096 {
+		t.Errorf("末尾预览不应超 4KB: %d", len(tail))
+	}
+	// 小文件（短于 maxBytes）返回全文：用独立小文件验证，size 须为真实大小
+	shortPath := filepath.Join(dir, "short.txt")
+	if err := os.WriteFile(shortPath, []byte("TAIL"), 0o644); err != nil {
+		t.Fatalf("写小文件失败: %v", err)
+	}
+	sf, err := os.Open(shortPath)
+	if err != nil {
+		t.Fatalf("打开小文件失败: %v", err)
+	}
+	defer sf.Close()
+	short := readTail(sf, 4, 4096)
+	if short != "TAIL" {
+		t.Errorf("小文件应返回全文: %s", short)
+	}
+	// size=0 返回空
+	if readTail(f, 0, 4096) != "" {
+		t.Error("size=0 应返回空")
+	}
+}
+
+// TestGetAiTaskOutput 全量读取输出文件：任务在 map 读运行期文件，已清理读归档目录
+func TestGetAiTaskOutput(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+	// 运行期输出文件
+	outDir := svc.outputDir()
+	_ = os.MkdirAll(outDir, 0o755)
+	taskID := "aitask-test-1"
+	outPath := svc.outputFilePath(taskID)
+	want := "这是完整输出内容\n多行"
+	if err := os.WriteFile(outPath, []byte(want), 0o644); err != nil {
+		t.Fatalf("写输出文件失败: %v", err)
+	}
+	svc.tasks[taskID] = &aiTaskRuntime{
+		id:         taskID,
+		outputFile: nil,
+		outputPath: outPath,
+		outputSize: int64(len(want)),
+	}
+	got, err := svc.GetAiTaskOutput(taskID)
+	if err != nil {
+		t.Fatalf("读取输出失败: %v", err)
+	}
+	if got != want {
+		t.Errorf("输出内容不符: 期望=%q 实际=%q", want, got)
+	}
+	// 任务从 map 清理后：读归档目录（不存在则报错）
+	delete(svc.tasks, taskID)
+	_, err = svc.GetAiTaskOutput(taskID)
+	if err == nil {
+		// 归档目录无该文件应报错（除非恰好存在同名归档）
+		// 写一份归档文件再验证可读
+		histDir := filepath.Join(dir, aiTaskHistoryDirName)
+		_ = os.MkdirAll(histDir, 0o755)
+		_ = os.WriteFile(filepath.Join(histDir, taskID+".txt"), []byte("archived"), 0o644)
+		got2, err2 := svc.GetAiTaskOutput(taskID)
+		if err2 != nil {
+			t.Errorf("归档文件读取应成功: %v", err2)
+		}
+		if got2 != "archived" {
+			t.Errorf("归档内容不符: %s", got2)
+		}
+	}
+}
+
+// TestRemoveAiTask_DeletesOutputFile 验证 RemoveAiTask 同步删除运行期输出文件
+func TestRemoveAiTask_DeletesOutputFile(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+	outDir := svc.outputDir()
+	_ = os.MkdirAll(outDir, 0o755)
+	taskID := "aitask-cleanup"
+	outPath := svc.outputFilePath(taskID)
+	if err := os.WriteFile(outPath, []byte("temp output"), 0o644); err != nil {
+		t.Fatalf("写输出文件失败: %v", err)
+	}
+	svc.tasks[taskID] = &aiTaskRuntime{id: taskID, outputPath: outPath}
+	if !svc.RemoveAiTask(taskID) {
+		t.Fatal("已完成任务应可清理")
+	}
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Errorf("清理后输出文件应被删除: %v", err)
+	}
+}
+
+// TestGetAiTaskState_PreviewNotFull 验证 GetAiTaskState 返回末尾预览而非全量，
+// 且 OutputSize/OutputFile/TableExtracted 字段正确
+func TestGetAiTaskState_PreviewNotFull(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+	outDir := svc.outputDir()
+	_ = os.MkdirAll(outDir, 0o755)
+	taskID := "aitask-state"
+	outPath := svc.outputFilePath(taskID)
+	// 输出小于预览窗口（4KB）：preview 即全文，表格完整可预解析
+	content := "一些前置说明\n| 会议主题 | 会议号 |\n| --- | --- |\n| 评审 | 123 |\n"
+	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写输出文件失败: %v", err)
+	}
+	f, _ := os.Open(outPath)
+	defer f.Close()
+	svc.tasks[taskID] = &aiTaskRuntime{
+		id:         taskID,
+		functionID: "meeting-list",
+		prompt:     "/tencent-meeting-mcp",
+		outputFile: f,
+		outputPath: outPath,
+		outputSize: int64(len(content)),
+	}
+	st := svc.GetAiTaskState(taskID)
+	if st == nil {
+		t.Fatal("状态不应为 nil")
+	}
+	if st.OutputSize != int64(len(content)) {
+		t.Errorf("OutputSize 不符: %d（期望 %d）", st.OutputSize, int64(len(content)))
+	}
+	if st.OutputFile == "" {
+		t.Error("OutputFile 不应为空")
+	}
+	// 小文件预览即全文，应含表格
+	if !strings.Contains(st.Output, "| 评审 | 123 |") {
+		t.Errorf("预览应含表格行: %q", st.Output)
+	}
+	if len(st.Output) > aiTaskOutputPreviewSize {
+		t.Errorf("预览不应超 %d: %d", aiTaskOutputPreviewSize, len(st.Output))
+	}
+	// 表格预解析应成功（会议号在表头）
+	if st.TableExtracted == nil {
+		t.Fatal("TableExtracted 不应为 nil（输出含表格）")
+	}
+	if !containsHeader(st.TableExtracted.Headers, "会议号") {
+		t.Errorf("预解析表头应含会议号: %v", st.TableExtracted.Headers)
+	}
+}
+
+// TestGetAiTaskState_LargeOutputPreviewTruncated 大输出预览截断验证：
+// 输出远超 4KB 时预览不超过 4KB，且 OutputSize 准确
+func TestGetAiTaskState_LargeOutputPreviewTruncated(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+	outDir := svc.outputDir()
+	_ = os.MkdirAll(outDir, 0o755)
+	taskID := "aitask-large"
+	outPath := svc.outputFilePath(taskID)
+	content := strings.Repeat("x", 20000) // 20KB，远超 4KB 预览
+	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写输出文件失败: %v", err)
+	}
+	f, _ := os.Open(outPath)
+	defer f.Close()
+	svc.tasks[taskID] = &aiTaskRuntime{
+		id:         taskID,
+		outputFile: f,
+		outputPath: outPath,
+		outputSize: int64(len(content)),
+	}
+	st := svc.GetAiTaskState(taskID)
+	if st.OutputSize != int64(len(content)) {
+		t.Errorf("OutputSize 不符: %d", st.OutputSize)
+	}
+	if len(st.Output) > aiTaskOutputPreviewSize {
+		t.Errorf("大输出预览应不超过 %d: %d", aiTaskOutputPreviewSize, len(st.Output))
+	}
+	if len(st.Output) < aiTaskOutputPreviewSize-100 {
+		t.Errorf("大输出预览应接近 %d: %d", aiTaskOutputPreviewSize, len(st.Output))
+	}
+	// 无表格时 TableExtracted 为 nil
+	if st.TableExtracted != nil {
+		t.Error("无表格输出 TableExtracted 应为 nil")
+	}
+}
+
+// containsHeader 辅助：表头列表是否含指定列
+func containsHeader(headers []string, want string) bool {
+	for _, h := range headers {
+		if h == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestClassifyStatus 验证任务终态归类（success/failed/canceled/timeout）
+func TestClassifyStatus(t *testing.T) {
+	// canceled 优先
+	task := &aiTaskRuntime{canceled: true, cmd: &exec.Cmd{}}
+	if s := classifyStatus(task, fmt.Errorf("exit 1")); s != "canceled" {
+		t.Errorf("canceled 应优先: %s", s)
+	}
+	// 超时（ctx 真实触发 DeadlineExceeded，不 cancel 否则变 Canceled）
+	toCtx, toCancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer toCancel()
+	time.Sleep(10 * time.Millisecond) // 等超时触发
+	task2 := &aiTaskRuntime{cmd: &exec.Cmd{}, ctx: toCtx}
+	if s := classifyStatus(task2, fmt.Errorf("timeout")); s != "timeout" {
+		t.Errorf("超时应归类 timeout: %s", s)
+	}
+	// 非 0 退出（waitErr 非 nil）→ failed
+	task3 := &aiTaskRuntime{cmd: &exec.Cmd{}}
+	if s := classifyStatus(task3, fmt.Errorf("exit 1")); s != "failed" {
+		t.Errorf("非 0 退出应 failed: %s", s)
+	}
+	// 成功（无错误无 canceled）
+	task4 := &aiTaskRuntime{cmd: &exec.Cmd{}}
+	if s := classifyStatus(task4, nil); s != "success" {
+		t.Errorf("无错误应 success: %s", s)
 	}
 }

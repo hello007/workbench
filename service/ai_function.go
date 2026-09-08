@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,28 @@ const aiTaskDefaultTimeoutMinutes = 10
 // 先硬编码常量，后续随 schema v2 入配置文件可调。
 const aiTaskMaxConcurrent = 3
 
+// aiTaskOutputPreviewSize GetAiTaskState/AiTaskRunResult 返回的输出末尾预览大小（字节）。
+// 取 ~4KB：足够展示末尾进展，过 IPC 不构成大对象拷贝；全量经 GetAiTaskOutput 按需读。
+const aiTaskOutputPreviewSize = 4 * 1024
+
+// aiTaskOutputDirName 运行期输出文件目录名（相对 data 目录），归档时 os.Rename 移入 aiTaskHistoryDirName。
+const aiTaskOutputDirName = "ai_task_output"
+
+// aiTaskHistoryDirName 历史归档目录名（相对 data 目录），存归档后的输出文件。
+const aiTaskHistoryDirName = "ai_task_history"
+
+// aiTaskHistoryFileName 历史元数据 JSON 文件名（存 data 目录下）。
+const aiTaskHistoryFileName = "ai_task_history.json"
+
+// aiTaskHistoryMaxCount 历史保留条数上限（先到先清理最旧），与 aiTaskHistoryMaxDays 双上限。
+const aiTaskHistoryMaxCount = 2000
+
+// aiTaskHistoryMaxDays 历史保留天数上限（按 FinishedAt），与 aiTaskHistoryMaxCount 双上限。
+const aiTaskHistoryMaxDays = 90
+
+// aiTaskOutputCleanTTL 定时清理兜底：清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残）。
+const aiTaskOutputCleanTTL = 24 * time.Hour
+
 // AiFunctionService AI 功能服务：功能项配置持久化 + claude headless 子进程执行器。
 // 执行模型：每段一次 claude -p 调用（--output-format stream-json 流式回显），
 // 多段编排由前端驱动——段完成后拿 session_id，下一段 RunStage 传 resumeSessionID 续会话。
@@ -34,38 +57,69 @@ type AiFunctionService struct {
 	configPath     string
 	mu             sync.Mutex
 	tasks          map[string]*aiTaskRuntime
-	concurrencySem chan struct{} // 全局并发信号量，缓冲 = aiTaskMaxConcurrent
+	concurrencySem chan struct{}         // 全局并发信号量，缓冲 = aiTaskMaxConcurrent
+	historySvc     *AiTaskHistoryService // P1-2：历史归档服务（输出文件零拷贝接管 + 元数据持久化）
 }
 
 // aiTaskRuntime 一个运行中/已完成任务的内部状态
 type aiTaskRuntime struct {
-	id         string
-	functionID string
-	prompt     string
-	sessionID  string
-	cmd        *exec.Cmd
-	ctx        context.Context
-	cancel     context.CancelFunc
-	running    bool
-	canceled   bool
-	startedAt  time.Time
-	timeoutMin int
-	output     strings.Builder
-	errText    string
-	metrics    *model.AiTaskMetrics // result 事件计量（P0-2），nil 表示无计量
-	queued     bool                 // 排队中：等待并发槽位，未起进程（P0-3）
-	queuedAt   time.Time            // 入队时间（P0-3），供排队时长展示
-	queueCancel chan struct{}       // 排队取消信号（P0-3）：close 后唤醒 RunStage 的 select
+	id          string
+	functionID  string
+	prompt      string
+	sessionID   string
+	cmd         *exec.Cmd
+	ctx         context.Context
+	cancel      context.CancelFunc
+	running     bool
+	canceled    bool
+	startedAt   time.Time
+	finishedAt  time.Time
+	timeoutMin  int
+	outputFile  *os.File // 3.3：流式输出文件（data/ai_task_output/<id>.txt），替代 strings.Builder 全量驻留
+	outputPath  string   // 输出文件绝对路径，归档时 os.Rename 用
+	outputSize  int64    // 累计输出字节数（持锁更新，供展示/上限判断）
+	errText     string
+	metrics     *model.AiTaskMetrics // result 事件计量（P0-2），nil 表示无计量
+	queued      bool                 // 排队中：等待并发槽位，未起进程（P0-3）
+	queuedAt    time.Time            // 入队时间（P0-3），供排队时长展示
+	queueCancel chan struct{}        // 排队取消信号（P0-3）：close 后唤醒 RunStage 的 select
 }
 
 // NewAiFunctionService 创建 AI 功能服务
 func NewAiFunctionService(ctx context.Context, configPath string) *AiFunctionService {
+	dataDir := filepath.Dir(configPath)
 	return &AiFunctionService{
 		ctx:            ctx,
 		configPath:     configPath,
 		tasks:          make(map[string]*aiTaskRuntime),
 		concurrencySem: make(chan struct{}, aiTaskMaxConcurrent),
+		historySvc:     NewAiTaskHistoryService(dataDir),
 	}
+}
+
+// dataDir 推断 data 目录绝对路径：取 configPath（data/ai_functions.json）的父目录。
+// 供输出文件、历史归档定位 data/ai_task_output、data/ai_task_history 等子目录。
+func (s *AiFunctionService) dataDir() string {
+	return filepath.Dir(s.configPath)
+}
+
+// outputDir 运行期输出文件目录（data/ai_task_output/），调用方负责 MkdirAll。
+func (s *AiFunctionService) outputDir() string {
+	return filepath.Join(s.dataDir(), aiTaskOutputDirName)
+}
+
+// outputFilePath 单个任务的运行期输出文件绝对路径（data/ai_task_output/<id>.txt）。
+func (s *AiFunctionService) outputFilePath(taskID string) string {
+	return filepath.Join(s.outputDir(), taskID+".txt")
+}
+
+// ensureOutputDir 确保运行期输出目录存在，返回目录路径或错误。
+func (s *AiFunctionService) ensureOutputDir() (string, error) {
+	dir := s.outputDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("创建输出目录失败: %w", err)
+	}
+	return dir, nil
 }
 
 // ===== 配置持久化 =====
@@ -195,11 +249,25 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 		return "", fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
 	}
 
+	// 3.3：创建流式输出文件，替代 strings.Builder 全量驻留。
+	// 失败不阻断执行——输出文件不可用退化回无文件模式（outputSize 仍累加，GetAiTaskOutput 返空）。
+	if _, mkErr := s.ensureOutputDir(); mkErr != nil {
+		task.errText = mkErr.Error()
+	}
+	outPath := s.outputFilePath(taskID)
+	outFile, outErr := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+
 	task.cmd = cmd
 	task.ctx = ctx
 	task.cancel = cancel
 	task.running = true
 	task.timeoutMin = timeout
+	if outErr == nil {
+		task.outputFile = outFile
+		task.outputPath = outPath
+	} else {
+		task.errText = "创建输出文件失败: " + outErr.Error()
+	}
 
 	go s.pumpOutput(task, stdout)
 	return taskID, nil
@@ -238,7 +306,9 @@ func (s *AiFunctionService) CancelAiTask(taskID string) bool {
 	return true
 }
 
-// GetAiTaskState 查询任务状态（前端恢复面板用）
+// GetAiTaskState 查询任务状态（前端恢复面板用）。
+// 3.3 流式文件改造后 Output 仅含末尾预览（~4KB），全量经 GetAiTaskOutput 读文件；
+// OutputFile 为相对 data 目录的路径（供前端拉全量），TableExtracted 为预解析表格（避免前端从截断文本重解析丢失）。
 func (s *AiFunctionService) GetAiTaskState(taskID string) *model.AiTaskState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -246,18 +316,193 @@ func (s *AiFunctionService) GetAiTaskState(taskID string) *model.AiTaskState {
 	if !ok {
 		return nil
 	}
+	preview, outputSize, outputFile := s.outputSnapshot(task)
 	return &model.AiTaskState{
-		TaskID:     task.id,
-		FunctionID: task.functionID,
-		Running:    task.running,
-		Queued:     task.queued,
-		SessionID:  task.sessionID,
-		Prompt:     task.prompt,
-		Output:     task.output.String(),
-		Error:      task.errText,
-		StartedAt:  task.startedAt.UnixMilli(),
-		Metrics:    task.metrics,
+		TaskID:         task.id,
+		FunctionID:     task.functionID,
+		Running:        task.running,
+		Queued:         task.queued,
+		SessionID:      task.sessionID,
+		Prompt:         task.prompt,
+		Output:         preview,
+		OutputSize:     outputSize,
+		OutputFile:     outputFile,
+		TableExtracted: extractTable(preview, outputSize),
+		Error:          task.errText,
+		StartedAt:      task.startedAt.UnixMilli(),
+		Metrics:        task.metrics,
 	}
+}
+
+// outputSnapshot 取输出尾部预览 + 完整大小 + 文件相对路径（持锁调用安全，读文件无写竞态——pumpOutput 持锁写）。
+// 预览读末尾 aiTaskOutputPreviewSize 字节；outputFile 为相对 data 目录路径（前端不直接用绝对路径）。
+func (s *AiFunctionService) outputSnapshot(task *aiTaskRuntime) (preview string, size int64, relFile string) {
+	size = task.outputSize
+	relFile = s.relativeOutputFile(task)
+	if task.outputFile == nil {
+		// 无文件（创建失败或排队未起进程）：无法读尾部，预览返回空
+		return "", size, relFile
+	}
+	preview = readTail(task.outputFile, size, aiTaskOutputPreviewSize)
+	return preview, size, relFile
+}
+
+// relativeOutputFile 输出文件相对 data 目录路径（data/ai_task_output/<id>.txt → ai_task_output/<id>.txt）。
+// 归档后 task.outputPath 已指向 history 目录，返回 ai_task_history/<id>.txt。无文件返回空串。
+func (s *AiFunctionService) relativeOutputFile(task *aiTaskRuntime) string {
+	if task.outputPath == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(s.dataDir(), task.outputPath)
+	if err != nil {
+		return filepath.Base(task.outputPath)
+	}
+	return rel
+}
+
+// readTail 从输出文件读取末尾 maxBytes 字节为字符串。size 为已知文件大小（避免重复 Stat）。
+// 文件读取失败或为空返回空串。并发安全：调用方须持 s.mu（与 pumpOutput 写互斥）。
+func readTail(f *os.File, size int64, maxBytes int) string {
+	if size <= 0 || f == nil {
+		return ""
+	}
+	readSize := int64(maxBytes)
+	if size < readSize {
+		readSize = size
+	}
+	buf := make([]byte, readSize)
+	n, err := f.ReadAt(buf, size-readSize)
+	if err != nil && n == 0 {
+		return ""
+	}
+	return string(buf[:n])
+}
+
+// GetAiTaskOutput 全量读取任务输出文件（供前端 copy/preview/表格视图按需拉取）。
+// 运行中任务读当前累积内容（文件持续追加，读到调用时刻快照）；已完成任务读归档或运行期文件。
+// 文件不存在或无文件返回空串与错误，供前端判空降级。
+func (s *AiFunctionService) GetAiTaskOutput(taskID string) (string, error) {
+	s.mu.Lock()
+	task, ok := s.tasks[taskID]
+	if ok && task.outputPath != "" {
+		// 任务仍在 map：读其输出文件（运行中或已完成未清理）
+		path := task.outputPath
+		s.mu.Unlock()
+		return readOutputFile(path)
+	}
+	s.mu.Unlock()
+	// 任务已从 map 清理：尝试从归档目录读（历史详情查看输出走此路径）
+	histPath := filepath.Join(s.dataDir(), aiTaskHistoryDirName, taskID+".txt")
+	return readOutputFile(histPath)
+}
+
+// readOutputFile 全量读文件为字符串，文件不存在返回错误，空文件返回空串。
+func readOutputFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("读取输出文件失败: %w", err)
+	}
+	return string(data), nil
+}
+
+// archiveTask 任务完成后归档：输出文件 os.Rename 零拷贝移入历史目录，元数据追加落盘。
+// 在 pumpOutput 末尾、emit ai-task:done 之前调用，done 事件 payload 不含全量输出。
+// 归档失败不阻断 done 事件（前端仍能看运行期输出文件），仅日志记录。
+func (s *AiFunctionService) archiveTask(task *aiTaskRuntime, result model.AiTaskRunResult, status string) {
+	if s.historySvc == nil {
+		return
+	}
+	// 取功能名快照（功能项改名后历史仍展示归档时的名称）
+	name := task.functionID
+	if fn, err := s.loadFunction(task.functionID); err == nil && fn != nil {
+		name = fn.Name
+	}
+	entry := &model.AiTaskHistory{
+		ID:         task.id,
+		FunctionID: task.functionID,
+		Name:       name,
+		Prompt:     buildPromptPreview(task.prompt, 200),
+		StartedAt:  task.startedAt.UnixMilli(),
+		FinishedAt: task.finishedAt.UnixMilli(),
+		Status:     status,
+		ExitCode:   result.ExitCode,
+		Error:      result.Error,
+		SessionID:  task.sessionID,
+		Metrics:    task.metrics,
+		OutputSize: task.outputSize,
+	}
+	if _, err := s.historySvc.Archive(entry, task.outputPath); err != nil {
+		// 归档失败不影响 done 事件，输出文件留在运行期目录由定时清理兜底
+		task.errText = task.errText + "（归档失败: " + err.Error() + "）"
+	} else {
+		// 归档成功后更新 task.outputPath 指向历史目录，供 GetAiTaskOutput/RemoveAiTask 定位
+		s.mu.Lock()
+		task.outputPath = s.historySvc.historyFilePath(task.id)
+		s.mu.Unlock()
+		s.emit("ai-task:archived", map[string]any{"taskId": task.id})
+	}
+}
+
+// GetAiTaskHistory 查询历史列表（按筛选条件），委托 historySvc。
+func (s *AiFunctionService) GetAiTaskHistory(filter *model.AiTaskHistoryFilter) ([]*model.AiTaskHistory, error) {
+	if s.historySvc == nil {
+		return []*model.AiTaskHistory{}, nil
+	}
+	return s.historySvc.List(filter)
+}
+
+// GetAiTaskHistoryOutput 读取单条历史的归档输出文件全文（详情查看输出走此路径）。
+func (s *AiFunctionService) GetAiTaskHistoryOutput(id string) (string, error) {
+	if s.historySvc == nil {
+		return "", fmt.Errorf("历史服务未初始化")
+	}
+	return s.historySvc.GetOutput(id)
+}
+
+// DeleteAiTaskHistory 删除单条历史（元数据 + 输出文件）。
+func (s *AiFunctionService) DeleteAiTaskHistory(id string) bool {
+	if s.historySvc == nil {
+		return false
+	}
+	return s.historySvc.Delete(id)
+}
+
+// ClearAiTaskHistory 按条件批量清理历史，返回清理条数。
+func (s *AiFunctionService) ClearAiTaskHistory(criteria *model.AiTaskHistoryClearCriteria) (int, error) {
+	if s.historySvc == nil {
+		return 0, nil
+	}
+	return s.historySvc.Clear(criteria)
+}
+
+// StartHistoryCleanup 启动定时清理 goroutine：周期性清理未归档的运行期输出文件兜底防孤儿。
+// 归档接管（os.Rename）已移走文件不留残，此清理只处理异常残留。ctx 取消则停止。
+// 调用方为 app.go startup（应用启动时调一次）。
+func (s *AiFunctionService) StartHistoryCleanup() {
+	if s.ctx == nil {
+		return
+	}
+	go func() {
+		// 启动后先等 5 分钟再做首次清理，避免启动峰值叠加
+		timer := time.NewTimer(5 * time.Minute)
+		defer timer.Stop()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-timer.C:
+		}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		s.historySvc.CleanStaleOutputFiles(aiTaskOutputCleanTTL)
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.historySvc.CleanStaleOutputFiles(aiTaskOutputCleanTTL)
+			}
+		}
+	}()
 }
 
 // GetConcurrencyStatus 统计当前并发占用（运行中 + 排队中 + 上限），供前端标题栏展示「N/M」。
@@ -282,6 +527,7 @@ func (s *AiFunctionService) GetConcurrencyStatus() model.AiConcurrencyStatus {
 // RemoveAiTask 清理已完成/已取消任务的后端 runtime（前端 Tab 关闭时调用）。
 // 运行中或排队中的任务不允许清理（前端应禁止关闭运行中 Tab，排队任务先 CancelAiTask）。
 // 返回 false 表示任务不存在或仍在运行/排队中，不可清理。
+// 3.3：同时删除运行期输出文件（data/ai_task_output/<id>.txt）；归档接管后 outputPath 已移走，删原路径无副作用。
 func (s *AiFunctionService) RemoveAiTask(taskID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,7 +538,12 @@ func (s *AiFunctionService) RemoveAiTask(taskID string) bool {
 	if task.running || task.queued {
 		return false
 	}
+	outputPath := task.outputPath
 	delete(s.tasks, taskID)
+	// 锁外不可（defer 已持锁），文件删除在锁内执行：删除是独立文件操作，不与 pumpOutput 写竞态（任务已完成）
+	if outputPath != "" {
+		_ = os.Remove(outputPath)
+	}
 	return true
 }
 
@@ -306,6 +557,9 @@ func (s *AiFunctionService) CloseAll() {
 	s.mu.Unlock()
 	for _, t := range tasks {
 		killProcessTree(t.cmd)
+		if t.outputFile != nil {
+			_ = t.outputFile.Close()
+		}
 	}
 }
 
@@ -590,24 +844,140 @@ func parseStreamLine(line string) (text string, isResult bool, sessionID string,
 	return "", false, sessionID, nil
 }
 
+// extractTable 从输出文本预解析 markdown 表格，供表格视图直接渲染。
+// 解析规则与前端 parseMarkdownTable 一致：取最后一个连续 |...| 行块，
+// 跳过 --- 分隔行后首行为表头、其余为数据行，按表头名映射为 { 列名: 值 }。
+// preview 仅为末尾预览，大输出表格可能落在省略区导致预解析丢失——调用方按需
+// 经 GetAiTaskOutput 全量读后重解析兜底（前端 meetingTable 退化路径）。
+// 返回 nil 表示无合法表格（行块不足或无表头）。
+func extractTable(preview string, outputSize int64) *model.MeetingTable {
+	lines := strings.Split(preview, "\n")
+	isTableRow := func(l string) bool {
+		s := strings.TrimSpace(l)
+		return len(s) > 1 && strings.HasPrefix(s, "|") && strings.HasSuffix(s, "|")
+	}
+	splitCells := func(l string) []string {
+		s := strings.TrimSpace(l)
+		s = strings.TrimPrefix(s, "|")
+		s = strings.TrimSuffix(s, "|")
+		parts := strings.Split(s, "|")
+		for i, p := range parts {
+			parts[i] = strings.TrimSpace(p)
+		}
+		return parts
+	}
+	isSeparatorRow := func(cells []string) bool {
+		if len(cells) == 0 {
+			return false
+		}
+		for _, c := range cells {
+			// 形如 --- / :-- / --: / :--:，首尾可有冒号，中间至少两根横线
+			trimmed := strings.Trim(c, ":")
+			if len(trimmed) < 2 || !strings.HasPrefix(trimmed, "-") || strings.ContainsAny(trimmed, ":") {
+				return false
+			}
+		}
+		return true
+	}
+
+	// 收集所有连续表格行块，取最后一个
+	var blocks [][]string
+	var cur []string
+	for _, line := range lines {
+		if isTableRow(line) {
+			cur = append(cur, line)
+		} else if len(cur) > 0 {
+			blocks = append(blocks, cur)
+			cur = nil
+		}
+	}
+	if len(cur) > 0 {
+		blocks = append(blocks, cur)
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	block := blocks[len(blocks)-1]
+	if len(block) < 2 {
+		return nil
+	}
+	var parsedRows [][]string
+	for _, line := range block {
+		cells := splitCells(line)
+		if isSeparatorRow(cells) {
+			continue
+		}
+		parsedRows = append(parsedRows, cells)
+	}
+	if len(parsedRows) == 0 {
+		return nil
+	}
+	headers := parsedRows[0]
+	rows := make([]map[string]string, 0, len(parsedRows)-1)
+	for _, cells := range parsedRows[1:] {
+		obj := make(map[string]string, len(headers))
+		for i, h := range headers {
+			if i < len(cells) {
+				obj[h] = cells[i]
+			} else {
+				obj[h] = ""
+			}
+		}
+		rows = append(rows, obj)
+	}
+	return &model.MeetingTable{
+		Headers: headers,
+		Rows:    rows,
+	}
+}
+
+// classifyStatus 归类任务终态，供历史归档 Status 字段（success/failed/canceled/timeout）。
+// 优先级：canceled > 超时 > 非 0 退出 > 成功。waitErr 为 cmd.Wait 返回的错误。
+func classifyStatus(task *aiTaskRuntime, waitErr error) string {
+	if task.canceled {
+		return "canceled"
+	}
+	if task.ctx != nil && task.ctx.Err() == context.DeadlineExceeded {
+		return "timeout"
+	}
+	if waitErr != nil {
+		return "failed"
+	}
+	if state := task.cmd.ProcessState; state != nil && state.ExitCode() != 0 {
+		return "failed"
+	}
+	return "success"
+}
+
 // pumpOutput 逐行读取 stdout，解析 stream-json 并推送前端事件，等待进程退出。
 func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	// 信号量随进程退出释放（cmd.Wait 返回后函数返回，defer 执行）。
 	// pumpOutput 被调用时 task 已获取槽位（RunStage 排队取消分支不进 pumpOutput）。
 	defer func() { <-s.concurrencySem }()
+	// 输出文件随进程退出关闭：归档前 os.Rename 需文件句柄释放，且后续不再写。
+	defer func() {
+		if task.outputFile != nil {
+			_ = task.outputFile.Close()
+			task.outputFile = nil
+		}
+	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
 	for scanner.Scan() {
 		text, isResult, sessionID, metrics := parseStreamLine(scanner.Text())
 		// sessionID/output/metrics 写入须持锁：GetAiTaskState 在锁内读取同字段，
-		// 无锁并发写 strings.Builder 可能 panic；emit 放锁外避免拖长持锁时间
+		// 无锁并发写文件/计数可能数据错乱；emit 放锁外避免拖长持锁时间
 		s.mu.Lock()
 		if sessionID != "" {
 			task.sessionID = sessionID
 		}
 		if text != "" {
-			task.output.WriteString(text)
+			// 3.3：流式写文件替代 strings.Builder 全量驻留
+			if task.outputFile != nil {
+				_, _ = task.outputFile.WriteString(text)
+			}
+			task.outputSize += int64(len(text))
 		}
 		if isResult && metrics != nil {
 			task.metrics = metrics
@@ -629,11 +999,17 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 
 	s.mu.Lock()
 	task.running = false
+	task.finishedAt = time.Now()
+	// 3.3：result.Output 改末尾预览（不再全量 String 拷贝），全量在输出文件
+	preview, outputSize, outputFile := s.outputSnapshot(task)
 	result := model.AiTaskRunResult{
-		TaskID:    task.id,
-		SessionID: task.sessionID,
-		Output:    task.output.String(),
-		Metrics:   task.metrics,
+		TaskID:         task.id,
+		SessionID:      task.sessionID,
+		Output:         preview,
+		OutputSize:     outputSize,
+		OutputFile:     outputFile,
+		TableExtracted: extractTable(preview, outputSize),
+		Metrics:        task.metrics,
 	}
 	if task.canceled {
 		result.Canceled = true
@@ -648,7 +1024,13 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	if state := task.cmd.ProcessState; state != nil {
 		result.ExitCode = state.ExitCode()
 	}
+	// 归档状态判定（供历史归档 Status 字段）
+	status := classifyStatus(task, waitErr)
 	s.mu.Unlock()
+
+	// 3.3 + P1-2 衔接：归档输出文件 os.Rename 零拷贝移入历史目录，元数据落盘。
+	// 归档在 emit done 之前完成，done 事件 payload 不含全量输出（无大对象过 IPC）。
+	s.archiveTask(task, result, status)
 
 	s.emit("ai-task:done", result)
 }

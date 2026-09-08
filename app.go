@@ -61,6 +61,8 @@ func (a *App) startup(ctx context.Context) {
 
 	// AI 功能服务（工具箱「AI 功能」页：skill 聚合触发，data/ai_functions.json）
 	a.aiFuncSvc = service.NewAiFunctionService(ctx, filepath.Join(dataDir, "ai_functions.json"))
+	// 启动定时清理兜底：周期性清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残，此处只清异常残留）
+	a.aiFuncSvc.StartHistoryCleanup()
 
 	// 更新服务
 	a.updateSvc = service.NewUpdateService()
@@ -1332,4 +1334,35 @@ func (a *App) GetAiConcurrencyStatus() model.AiConcurrencyStatus {
 // 运行中或排队中的任务不可清理（前端应禁止关闭运行中 Tab）。
 func (a *App) RemoveAiTask(taskID string) bool {
 	return a.aiFuncSvc.RemoveAiTask(taskID)
+}
+
+// GetAiTaskOutput 全量读取任务输出文件（前端 copy/preview/表格视图按需拉取，不依赖已截断的展示文本）。
+// 任务仍在 map 读其输出文件；已清理则读归档目录的历史输出文件。
+func (a *App) GetAiTaskOutput(taskID string) (string, error) {
+	return a.aiFuncSvc.GetAiTaskOutput(taskID)
+}
+
+// GetAiTaskHistory 查询历史列表（按筛选条件，空 filter 返回全部，按完成时间降序）。
+func (a *App) GetAiTaskHistory(filter model.AiTaskHistoryFilter) []*model.AiTaskHistory {
+	list, _ := a.aiFuncSvc.GetAiTaskHistory(&filter)
+	if list == nil {
+		return []*model.AiTaskHistory{}
+	}
+	return list
+}
+
+// GetAiTaskHistoryOutput 读取单条历史的归档输出文件全文（历史详情查看输出走此路径，懒加载）。
+func (a *App) GetAiTaskHistoryOutput(id string) (string, error) {
+	return a.aiFuncSvc.GetAiTaskHistoryOutput(id)
+}
+
+// DeleteAiTaskHistory 删除单条历史（元数据 + 归档输出文件）。
+func (a *App) DeleteAiTaskHistory(id string) bool {
+	return a.aiFuncSvc.DeleteAiTaskHistory(id)
+}
+
+// ClearAiTaskHistory 按条件批量清理历史（OlderThanDays 按天数清理 / KeepRecent 保留最近 N 条），返回清理条数。
+func (a *App) ClearAiTaskHistory(criteria model.AiTaskHistoryClearCriteria) int {
+	n, _ := a.aiFuncSvc.ClearAiTaskHistory(&criteria)
+	return n
 }

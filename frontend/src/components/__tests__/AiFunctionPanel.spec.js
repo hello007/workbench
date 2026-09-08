@@ -18,6 +18,7 @@ const runAiFunctionMock = vi.fn(() => Promise.resolve('task-1'))
 const runAiFollowUpMock = vi.fn(() => Promise.resolve('task-2'))
 const openWithDefaultAppMock = vi.fn(() => Promise.resolve())
 const openInExplorerMock = vi.fn(() => Promise.resolve())
+const getAiTaskOutputMock = vi.fn(() => Promise.resolve('完整输出全文\n含多行'))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetAiFunctions: vi.fn(() =>
@@ -67,6 +68,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RunAiFollowUp: (...args) => runAiFollowUpMock(...args),
   CancelAiTask: vi.fn(),
   GetAiConcurrencyStatus: vi.fn(() => Promise.resolve({ running: 0, queued: 0, max: 3 })),
+  GetAiTaskOutput: (...args) => getAiTaskOutputMock(...args),
   RemoveAiTask: vi.fn(() => Promise.resolve(true)),
   OpenInExplorer: (...args) => openInExplorerMock(...args),
   OpenWithDefaultApp: (...args) => openWithDefaultAppMock(...args),
@@ -118,7 +120,8 @@ const stubs = {
     emits: ['run'],
     template: '<div class="ai-runner-stub" />'
   },
-  AiFunctionConfigDialog: true
+  AiFunctionConfigDialog: true,
+  AiTaskHistoryPanel: true
 }
 
 const createWrapper = () =>
@@ -410,5 +413,62 @@ describe('AiFunctionPanel', () => {
       '#腾讯会议：123-456\n' +
       '入会密码：无'
     )
+  })
+
+  // === 3.3 流式文件适配：copy/preview 改调 GetAiTaskOutput、meetingTable 用 tableExtracted ===
+
+  it('copyOutput 调 GetAiTaskOutput 全量读取（不依赖已截断的展示文本）', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 2, {}) // meeting-list
+    eventHandlers['ai-task:done']({ taskId: 'task-1', error: '', canceled: false })
+    await flushPromises()
+
+    // 直接调 copyOutput（meeting-list 无复制按钮，测方法行为）
+    await wrapper.vm.copyOutput(wrapper.vm.tasks[0])
+    await flushPromises()
+    // 应调 GetAiTaskOutput 取全量，而非取已截断的 t.output
+    expect(getAiTaskOutputMock).toHaveBeenCalledWith('task-1')
+    expect(writeText).toHaveBeenCalledWith('完整输出全文\n含多行')
+  })
+
+  it('previewOutput 调 GetAiTaskOutput 全量读取后提取 .html 路径', async () => {
+    getAiTaskOutputMock.mockResolvedValueOnce('产物路径 D:\\out\\slides.html 已生成')
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 2, {})
+    eventHandlers['ai-task:done']({ taskId: 'task-1', error: '', canceled: false })
+    await flushPromises()
+
+    await wrapper.vm.previewOutput(wrapper.vm.tasks[0])
+    await flushPromises()
+    expect(getAiTaskOutputMock).toHaveBeenCalledWith('task-1')
+    expect(openWithDefaultAppMock).toHaveBeenCalledWith('D:\\out\\slides.html')
+  })
+
+  it('meetingTable 优先用后端预解析 tableExtracted，不依赖展示文本', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 2, {}) // meeting-list（followUps 含 cancel-meeting）
+
+    // done 事件携带后端预解析表格（模拟 3.3 后端返回），output 为空也能渲染表格
+    eventHandlers['ai-task:done']({
+      taskId: 'task-1',
+      error: '',
+      canceled: false,
+      tableExtracted: {
+        headers: ['会议主题', '会议号', '开始时间', '结束时间', '时长', '入会链接', '入会密码', '状态'],
+        rows: [{ 会议主题: '评审会', 会议号: '123-456', 开始时间: '10:00', 结束时间: '11:00', 时长: '60分钟', 入会链接: 'url', 入会密码: '无', 状态: '未开始' }]
+      }
+    })
+    await flushPromises()
+
+    // tableExtracted 优先：output 为空仍渲染表格视图
+    expect(wrapper.vm.tasks[0].tableExtracted).toBeTruthy()
+    expect(wrapper.find('.task-table').exists()).toBe(true)
+    const labels = wrapper.findAll('.col-label').map((n) => n.text())
+    expect(labels).toEqual(expect.arrayContaining(['会议主题', '会议号', '操作']))
   })
 })
