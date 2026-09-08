@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查跨层同步：GetDiscoveredSkills/RefreshDiscoveredSkills 两个 App 方法 wailsjs App.js/App.d.ts 是否同步（参数数量一致）；SkillDescriptor struct 的 models.ts 是否同步（字段声明+构造函数赋值，omitempty→?:）；git status 确认 frontend/wailsjs 无残留"}
+{"file": "docs/plans/2026-09-08-ai-skill-discovery-design.md", "reason": "P1-1 验收对照（第6节）：导入列表含用户级+项目级+插件三类、command/cwd/description 回填正确、插件命名空间 /<plugin>:<name> 拼接、同名多来源区分、模糊搜索生效、mtime缓存二次打开瞬时+刷新强制重扫、frontmatter解析失败跳过不阻断"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览验收对照：第5节第4批合并实施完成、第6节P1-1待确认点已抓样定稿（插件目录结构/嵌套/解析失败）、第1/2/3批衔接点未被重复改动"}

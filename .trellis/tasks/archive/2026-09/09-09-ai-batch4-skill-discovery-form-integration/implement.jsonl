@@ -1,0 +1,4 @@
+{"file": "docs/plans/2026-09-08-ai-skill-discovery-design.md", "reason": "P1-1 主体设计：发现范围/来源分类 4.1、SkillDescriptor 4.2、发现服务 4.3、导入入口 4.4、缓存 4.5；第7节待确认点已抓样定论（插件路径纠正/一级子目录/解析失败跳过）"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览：第5节第4批实施顺序（P1-1 skill发现+P0-1联调）、第4节P1-1→P0-1依赖（导入后表单补全）、第1/2/3批衔接点勿重复改动（四块表单/AiFunction model/DirectoryService.Load/ScanCacheManager/AiTaskState/concurrencySem）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "跨层契约：新增 App 方法 GetDiscoveredSkills/RefreshDiscoveredSkills 须同步 App.js+App.d.ts；model 新增 SkillDescriptor 须同步 models.ts（字段声明+构造函数，omitempty→?:，字段名按 json tag）"}
+{"file": "docs/plans/2026-09-08-ai-config-form-design.md", "reason": "P0-1 表单设计：导入后用四块表单补全 params（none/file/text/form）/completion/followUps/env/mcp 的联调对照；基础字段区 command/cwd 必填校验与导入回填的衔接"}
