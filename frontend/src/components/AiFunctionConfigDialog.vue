@@ -66,15 +66,35 @@
           <el-form-item label="图标">
             <el-input v-model="editing.icon" placeholder="Element Plus 图标名，如 MagicStick" style="width: 220px" />
           </el-form-item>
-          <el-form-item label="参数/后续段">
-            <el-input
-              v-model="advancedJSON"
-              type="textarea"
-              :autosize="{ minRows: 6, maxRows: 16 }"
-              placeholder="params（参数输入）与 followUps（多段编排按钮）的 JSON 定义"
-            />
-            <div class="adv-error" v-if="advError">{{ advError }}</div>
-          </el-form-item>
+
+          <!-- 高级字段：四块折叠面板 + 末项原始 JSON 兜底视图 -->
+          <el-collapse v-model="activeNames" class="adv-collapse">
+            <el-collapse-item title="参数（params）" name="params">
+              <ParamsEditor ref="paramsEditorRef" v-model="editing.params" />
+            </el-collapse-item>
+            <el-collapse-item title="后续段（followUps）" name="followUps">
+              <FollowUpsEditor ref="followUpsEditorRef" v-model="editing.followUps" />
+            </el-collapse-item>
+            <el-collapse-item title="环境变量（env）" name="env">
+              <EnvEditor v-model="editing.env" />
+            </el-collapse-item>
+            <el-collapse-item title="MCP server（mcp）" name="mcp">
+              <McpEditor ref="mcpEditorRef" v-model="editing.mcp" />
+            </el-collapse-item>
+            <el-collapse-item title="原始 JSON（高级）" name="raw">
+              <el-input
+                v-model="rawJsonText"
+                type="textarea"
+                :autosize="{ minRows: 6, maxRows: 16 }"
+                :class="{ 'raw-error': rawJsonError }"
+                @change="onRawJsonChange"
+              />
+              <div class="raw-error-msg" v-if="rawJsonError">{{ rawJsonError }}</div>
+              <div class="raw-hint" v-else>
+                与上方表单双向同步：表单改 → JSON 自动更新；JSON 编辑后失焦解析回写表单，解析失败标红且表单保持原值。
+              </div>
+            </el-collapse-item>
+          </el-collapse>
         </el-form>
       </div>
       <div class="config-form config-empty" v-else>
@@ -101,6 +121,10 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetAiFunctions, SaveAiFunctions } from '../../wailsjs/go/main/App'
+import ParamsEditor from './ParamsEditor.vue'
+import FollowUpsEditor from './FollowUpsEditor.vue'
+import EnvEditor from './EnvEditor.vue'
+import McpEditor from './McpEditor.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false }
@@ -113,9 +137,17 @@ const editing = ref(null)
 const addDirsText = ref('')
 const saving = ref(false)
 
-// 高级字段（params/followUps/env/mcp）合并 JSON 编辑
-const advancedJSON = ref('{}')
-const advError = ref('')
+// 折叠面板：默认展开 params，其余收起
+const activeNames = ref(['params'])
+
+// 原始 JSON 兜底视图：与四块表单双向同步
+const rawJsonText = ref('{}')
+const rawJsonError = ref('')
+
+// 子组件 ref（收集字段级校验）
+const paramsEditorRef = ref()
+const followUpsEditorRef = ref()
+const mcpEditorRef = ref()
 
 const selected = computed(() => functions.value.find((f) => f.id === selectedId.value) || null)
 
@@ -145,20 +177,11 @@ const select = (id) => {
   selectedId.value = id
   const f = functions.value.find((x) => x.id === id)
   if (!f) return
-  // 深拷贝进编辑态
+  // 深拷贝进编辑态（子组件直接改 editing.value.xxx 属性，reactive 触发更新）
   editing.value = JSON.parse(JSON.stringify(f))
   addDirsText.value = (f.addDirs || []).join(', ')
-  advancedJSON.value = JSON.stringify(
-    {
-      params: f.params || null,
-      followUps: f.followUps || [],
-      env: f.env || null,
-      mcp: f.mcp || null
-    },
-    null,
-    2
-  )
-  advError.value = ''
+  activeNames.value = ['params']
+  syncRawFromForm()
 }
 
 const addNew = () => {
@@ -182,8 +205,8 @@ const addNew = () => {
   editing.value = item
   selectedId.value = ''
   addDirsText.value = ''
-  advancedJSON.value = JSON.stringify({ params: null, followUps: [], env: null, mcp: null }, null, 2)
-  advError.value = ''
+  activeNames.value = ['params']
+  syncRawFromForm()
 }
 
 const removeSelected = async () => {
@@ -200,6 +223,62 @@ const removeSelected = async () => {
   if (idx >= 0) functions.value.splice(idx, 1)
   editing.value = null
   selectedId.value = ''
+}
+
+// 表单 → 原始 JSON：四块字段任一变化即序列化；序列化结果与当前文本一致则不覆盖（避免 JSON 编辑时回写触发抖动）
+const syncRawFromForm = () => {
+  if (!editing.value) return
+  const next = JSON.stringify(
+    {
+      params: editing.value.params || null,
+      followUps: editing.value.followUps || [],
+      env: editing.value.env || null,
+      mcp: editing.value.mcp || null
+    },
+    null,
+    2
+  )
+  if (next !== rawJsonText.value) {
+    rawJsonText.value = next
+  }
+}
+
+// 四块字段 deep watch：子组件改属性/增删即触发同步原始 JSON
+watch(
+  [
+    () => editing.value?.params,
+    () => editing.value?.followUps,
+    () => editing.value?.env,
+    () => editing.value?.mcp
+  ],
+  syncRawFromForm,
+  { deep: true }
+)
+
+// 原始 JSON → 表单：失焦时解析，成功回写四块字段，失败标红且表单保持原值不回写
+const onRawJsonChange = () => {
+  try {
+    const parsed = JSON.parse(rawJsonText.value || '{}')
+    if (editing.value) {
+      editing.value.params = parsed.params ?? null
+      editing.value.followUps = parsed.followUps ?? []
+      editing.value.env = parsed.env ?? null
+      editing.value.mcp = parsed.mcp ?? null
+    }
+    rawJsonError.value = ''
+  } catch (e) {
+    rawJsonError.value = 'JSON 解析失败: ' + (e?.message || String(e)) + '（表单保持原值，修正后再同步）'
+  }
+}
+
+// 收集字段级校验错误：followUps / mcp 阻断保存；params 占位符不一致仅告警不阻断（ParamsEditor 内部已展示）
+const collectErrors = () => {
+  const errs = []
+  const fuErrs = followUpsEditorRef.value?.validationErrors || []
+  errs.push(...fuErrs)
+  const mcpErrs = mcpEditorRef.value?.validationErrors || []
+  errs.push(...mcpErrs)
+  return errs
 }
 
 const save = async () => {
@@ -219,22 +298,16 @@ const save = async () => {
     ElMessage.warning(`ID「${item.id}」重复`)
     return
   }
-  // 高级 JSON 校验
-  let adv
-  try {
-    adv = JSON.parse(advancedJSON.value || '{}')
-  } catch (e) {
-    advError.value = 'JSON 语法错误: ' + e.message
+  // 字段级校验：失败定位到具体字段（如 followUps[1].label 不能为空）
+  const errors = collectErrors()
+  if (errors.length) {
+    ElMessage.warning('配置校验失败：\n' + errors.join('\n'))
     return
   }
-  advError.value = ''
   item.id = item.id.trim()
   item.addDirs = addDirsText.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
-  item.params = adv.params || null
-  item.followUps = adv.followUps || []
-  item.env = adv.env || null
-  item.mcp = adv.mcp || null
-
+  // params/followUps/env/mcp 已被子组件直接改 editing.value，无需再赋值；followUps 兜底为 []
+  item.followUps = item.followUps || []
   await doSave()
 }
 
@@ -314,15 +387,41 @@ const doSave = async () => {
   justify-content: center;
   color: var(--text-secondary);
 }
-.adv-error {
-  color: var(--danger-color);
+/* 高级字段折叠面板：无外框，与上方 el-form 一体 */
+.adv-collapse {
+  border: none;
+  margin-top: 4px;
+}
+.adv-collapse :deep(.el-collapse-item__header) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+.adv-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+.adv-collapse :deep(.el-collapse-item__content) {
+  padding: 12px 0 4px;
+}
+/* 原始 JSON 兜底视图：等宽字体（代码语义），解析失败标红边框 */
+.adv-collapse :deep(.el-textarea__inner) {
+  font-family: Consolas, 'Cascadia Code', 'Courier New', monospace;
+  font-size: 12px;
+}
+.raw-error :deep(.el-textarea__inner) {
+  border-color: var(--danger-color, #f56c6c);
+}
+.raw-error-msg {
+  color: var(--danger-color, #f56c6c);
   font-size: 12px;
   margin-top: 4px;
 }
-/* JSON 编辑区等宽字体（JSON 为代码语义） */
-.config-form :deep(.el-textarea__inner) {
-  font-family: Consolas, 'Cascadia Code', 'Courier New', monospace;
+.raw-hint {
   font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  line-height: 1.5;
 }
 
 /* 动画可访问性：用户系统偏好减少动效时，禁用装饰过渡 */

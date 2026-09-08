@@ -1,0 +1,5 @@
+{"file": "docs/plans/2026-09-08-ai-config-form-design.md", "reason": "P0-1 主体设计：四子组件拆分、ParamsEditor 按 type 切换、form 模式占位符一致性校验、原始 JSON 兜底视图、字段级校验"}
+{"file": "docs/plans/2026-09-08-ai-mcp-stdio-design.md", "reason": "P2-1 设计：AiMcpServer 增 stdio 字段、buildClaudeArgs 序列化、http/stdio 校验规则、env 走 expandEnvRef"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "跨层契约：model 导出 struct 字段变更须同步 frontend/wailsjs/go/models.ts（字段声明+构造函数赋值），omitempty→TS 可选字段"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览：第 5 节实施顺序、第 1 批衔接点（metrics/queued/truncated 勿重复改动）、本批 P0-1+P2-1 合并理由"}
+{"file": ".trellis/tasks/09-08-ai-batch2-config-form-mcp-stdio/research/mcp-stdio-config-format.md", "reason": "stdio 字段结构三重佐证：command/args/env 全小写，不加 cwd，顶层 mcpServers 不变，http+stdio 可混用"}

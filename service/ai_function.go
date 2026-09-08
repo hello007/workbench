@@ -346,7 +346,20 @@ func buildClaudeArgs(fn *model.AiFunction, prompt, resumeSessionID string) []str
 	}
 
 	if fn.Mcp != nil && len(fn.Mcp.Servers) > 0 {
-		if raw, err := json.Marshal(fn.Mcp); err == nil {
+		// stdio server 的 env 走 expandEnvRef（与功能项 env 一致，token 等凭证不落配置），
+		// 拷贝 mcp 副本展开避免修改原配置对象
+		mcpCopy := &model.AiMcpConfig{Servers: make(map[string]model.AiMcpServer, len(fn.Mcp.Servers))}
+		for name, srv := range fn.Mcp.Servers {
+			if srv.Type == "stdio" && len(srv.Env) > 0 {
+				expanded := make(map[string]string, len(srv.Env))
+				for k, v := range srv.Env {
+					expanded[k] = expandEnvRef(v)
+				}
+				srv.Env = expanded
+			}
+			mcpCopy.Servers[name] = srv
+		}
+		if raw, err := json.Marshal(mcpCopy); err == nil {
 			args = append(args, "--mcp-config", string(raw))
 		}
 	}

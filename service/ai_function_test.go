@@ -513,3 +513,123 @@ func TestNewAiFunctionService_SemCapacity(t *testing.T) {
 		t.Errorf("信号量缓冲长度不符: %d（期望 %d）", cap(svc.concurrencySem), aiTaskMaxConcurrent)
 	}
 }
+
+// TestBuildClaudeArgs_McpStdio 验证 stdio 类型 MCP server 的序列化：
+// 字段结构（command/args/env，不含 url/headers/cwd）、env 走 expandEnvRef、原配置不被修改
+func TestBuildClaudeArgs_McpStdio(t *testing.T) {
+	os.Setenv("WB_TEST_MCP_TOK", "sec-xyz")
+	defer os.Unsetenv("WB_TEST_MCP_TOK")
+
+	fn := &model.AiFunction{
+		ID: "f1",
+		Mcp: &model.AiMcpConfig{
+			Servers: map[string]model.AiMcpServer{
+				"fs": {
+					Type:    "stdio",
+					Command: "npx",
+					Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", `D:\docs`},
+					Env:     map[string]string{"API_KEY": "$ENV:WB_TEST_MCP_TOK"},
+				},
+			},
+		},
+	}
+	args := buildClaudeArgs(fn, "p", "")
+	var mcpJSON string
+	for i, a := range args {
+		if a == "--mcp-config" && i+1 < len(args) {
+			mcpJSON = args[i+1]
+		}
+	}
+	if mcpJSON == "" {
+		t.Fatalf("缺少 --mcp-config: %v", args)
+	}
+	// stdio 字段输出
+	if !strings.Contains(mcpJSON, `"command":"npx"`) {
+		t.Errorf("stdio 未输出 command: %s", mcpJSON)
+	}
+	if !strings.Contains(mcpJSON, `"args":[`) {
+		t.Errorf("stdio 未输出 args: %s", mcpJSON)
+	}
+	// env 走 expandEnvRef：$ENV:WB_TEST_MCP_TOK 展开为 sec-xyz
+	if !strings.Contains(mcpJSON, "sec-xyz") {
+		t.Errorf("stdio env 未走 expandEnvRef 展开: %s", mcpJSON)
+	}
+	if strings.Contains(mcpJSON, "$ENV:WB_TEST_MCP_TOK") {
+		t.Errorf("stdio env 引用未展开，残留 $ENV:: %s", mcpJSON)
+	}
+	// http 字段 omitempty 不输出（stdio server 无 url/headers）
+	if strings.Contains(mcpJSON, `"url"`) {
+		t.Errorf("stdio server 不应输出 url 字段: %s", mcpJSON)
+	}
+	if strings.Contains(mcpJSON, `"headers"`) {
+		t.Errorf("stdio server 不应输出 headers 字段: %s", mcpJSON)
+	}
+	// 不含 cwd（官方不支持，见 research/mcp-stdio-config-format.md）
+	if strings.Contains(mcpJSON, `"cwd"`) {
+		t.Errorf("不应输出 cwd 字段（官方不支持）: %s", mcpJSON)
+	}
+	// 顶层 mcpServers 结构
+	if !strings.Contains(mcpJSON, `"mcpServers"`) {
+		t.Errorf("顶层应为 mcpServers: %s", mcpJSON)
+	}
+	// 原配置不被修改：fn.Mcp 中 env 仍为 $ENV: 引用（拷贝展开未污染原对象）
+	orig := fn.Mcp.Servers["fs"].Env["API_KEY"]
+	if orig != "$ENV:WB_TEST_MCP_TOK" {
+		t.Errorf("原配置 env 被修改: 期望=$ENV:WB_TEST_MCP_TOK 实际=%s", orig)
+	}
+}
+
+// TestBuildClaudeArgs_McpHttpStdioMixed 验证 http 与 stdio server 同块混用，
+// 各自按 type 输出对应字段，交叉字段 omitempty 不输出
+func TestBuildClaudeArgs_McpHttpStdioMixed(t *testing.T) {
+	fn := &model.AiFunction{
+		ID: "f1",
+		Mcp: &model.AiMcpConfig{
+			Servers: map[string]model.AiMcpServer{
+				"web":   {Type: "http", URL: "https://mcp.example.com/v1", Headers: map[string]string{"Authorization": "Bearer tok"}},
+				"local": {Type: "stdio", Command: "python", Args: []string{"-m", "mcp_server"}},
+			},
+		},
+	}
+	args := buildClaudeArgs(fn, "p", "")
+	var mcpJSON string
+	for i, a := range args {
+		if a == "--mcp-config" && i+1 < len(args) {
+			mcpJSON = args[i+1]
+		}
+	}
+	if mcpJSON == "" {
+		t.Fatalf("缺少 --mcp-config: %v", args)
+	}
+	// 解析为结构校验（交叉字段 omitempty：http 无 command/args/env，stdio 无 url/headers）
+	var parsed struct {
+		McpServers map[string]struct {
+			Type    string            `json:"type"`
+			URL     string            `json:"url,omitempty"`
+			Headers map[string]string `json:"headers,omitempty"`
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
+		t.Fatalf("mcp-config 非合法 JSON: %v", err)
+	}
+	if len(parsed.McpServers) != 2 {
+		t.Fatalf("server 数量不符: 期望=2 实际=%d", len(parsed.McpServers))
+	}
+	web := parsed.McpServers["web"]
+	if web.Type != "http" || web.URL != "https://mcp.example.com/v1" || web.Command != "" {
+		t.Errorf("http server 字段不符: %+v", web)
+	}
+	if _, ok := web.Headers["Authorization"]; !ok {
+		t.Errorf("http headers 丢失: %+v", web.Headers)
+	}
+	local := parsed.McpServers["local"]
+	if local.Type != "stdio" || local.Command != "python" || len(local.Args) != 2 || local.URL != "" {
+		t.Errorf("stdio server 字段不符: %+v", local)
+	}
+	if local.Headers != nil {
+		t.Errorf("stdio server 不应输出 headers: %+v", local.Headers)
+	}
+}

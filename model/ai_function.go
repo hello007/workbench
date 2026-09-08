@@ -24,11 +24,17 @@ type AiMcpConfig struct {
 	Servers map[string]AiMcpServer `json:"mcpServers"`
 }
 
-// AiMcpServer 单个 MCP server 定义（当前仅支持 http 类型）。
+// AiMcpServer 单个 MCP server 定义，支持 http 与 stdio 两种类型。
+// 序列化进 --mcp-config 的 mcpServers map 项，按 type 输出对应字段（交叉字段 omitempty 不输出）。
 type AiMcpServer struct {
-	Type    string            `json:"type"`    // 固定 "http"
-	URL     string            `json:"url"`     // server 地址
-	Headers map[string]string `json:"headers"` // 附加请求头（如 Authorization: Bearer xxx）
+	Type string `json:"type"` // http / stdio
+	// http 类型字段
+	URL     string            `json:"url,omitempty"`     // server 地址（http 必填）
+	Headers map[string]string `json:"headers,omitempty"` // 附加请求头（如 Authorization: Bearer xxx）
+	// stdio 类型字段（本地命令行 MCP，如 npx/python 启动的 server）
+	Command string            `json:"command,omitempty"` // 启动命令（stdio 必填，如 npx/-y/@modelcontextprotocol/server-filesystem）
+	Args    []string          `json:"args,omitempty"`    // 命令参数
+	Env     map[string]string `json:"env,omitempty"`     // 子进程环境变量（经 expandEnvRef 展开，与功能项 env 一致）
 }
 
 // AiParamSpec 运行前参数输入规格。

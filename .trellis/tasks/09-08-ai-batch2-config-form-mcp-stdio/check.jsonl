@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查跨层同步：AiMcpServer 加字段后 models.ts 是否同步（字段声明+构造函数），git status 确认 wailsjs 无残留"}
+{"file": "docs/plans/2026-09-08-ai-config-form-design.md", "reason": "P0-1 验收标准：四块表单录入、字段级校验、占位符一致性告警、JSON 双向同步、seed 回填"}
+{"file": "docs/plans/2026-09-08-ai-mcp-stdio-design.md", "reason": "P2-1 验收：stdio 可配置、--mcp-config 序列化结构正确、http 须 url/stdio 须 command、交叉字段忽略"}
+{"file": ".trellis/tasks/09-08-ai-batch2-config-form-mcp-stdio/research/mcp-stdio-config-format.md", "reason": "对照 stdio 序列化 JSON 结构：字段名/类型/是否含 cwd，验证 buildClaudeArgs 输出符合官方规范"}
