@@ -1182,3 +1182,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: AI 配置表单化 + MCP stdio 支持（第 2 批）
+
+**Date**: 2026-09-09
+**Task**: AI 配置表单化 + MCP stdio 支持（第 2 批）
+**Branch**: `master`
+
+### Summary
+
+将 AiFunctionConfigDialog 的 params/followUps/env/mcp 四块裸 JSON textarea 改为结构化表单（ParamsEditor/FollowUpsEditor/EnvEditor/McpEditor 四子组件 + el-collapse 折叠面板 + 原始 JSON 兜底双向同步），扩展 AiMcpServer 支持 stdio 类型（command/args/env，不加 cwd，env 走 expandEnvRef）。research 三重佐证确认 stdio 字段结构。前后端双绿：go test 全 ok，前端 17 文件 277 测试全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6ef191` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
