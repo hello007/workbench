@@ -79,9 +79,20 @@ const seedData = [
 ]
 
 const saveAiFunctionsMock = vi.fn(() => Promise.resolve())
+
+// 已发现 skill 列表（user/project/plugin 三类，覆盖命名空间拼接与 cwd 差异）
+const discoveredSkills = [
+  { name: 'drawio', description: '画图工具', command: '/drawio', cwd: '', source: 'user', sourceDir: '/h/skills/drawio', plugin: '' },
+  { name: 'release', description: '发版流程', command: '/release', cwd: 'D:\\work', source: 'project', sourceDir: 'D:\\work\\.claude\\skills\\release', plugin: '' },
+  { name: 'agree-slides', description: '生成幻灯片', command: '/ab-office:agree-slides', cwd: 'D:\\work', source: 'plugin', sourceDir: '/p/skills/agree-slides', plugin: 'ab-office' }
+]
+const refreshDiscoveredMock = vi.fn(() => Promise.resolve(discoveredSkills))
+
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetAiFunctions: vi.fn(() => Promise.resolve(seedData)),
-  SaveAiFunctions: (...args) => saveAiFunctionsMock(...args)
+  SaveAiFunctions: (...args) => saveAiFunctionsMock(...args),
+  GetDiscoveredSkills: vi.fn(() => Promise.resolve(discoveredSkills)),
+  RefreshDiscoveredSkills: () => refreshDiscoveredMock()
 }))
 
 // stub 外壳/折叠组件（避免 teleport 与 transition 在 jsdom 下的问题）；
@@ -95,7 +106,15 @@ const stubs = {
   'el-collapse-item': {
     template: '<div class="collapse-item" :data-name="name"><slot /></div>',
     props: ['title', 'name']
-  }
+  },
+  // el-table stub：渲染 data 行文本（name/description/command/cwd），支持行点击/双击事件
+  'el-table': {
+    template: `<div class="el-table"><div v-for="(row,i) in data" :key="i" class="el-table__row" @click="$emit('current-change',row)" @dblclick="$emit('row-dblclick',row)">{{ row.name }} {{ row.description }} {{ row.command }} {{ row.cwd }}</div></div>`,
+    props: ['data'],
+    emits: ['current-change', 'row-dblclick']
+  },
+  'el-table-column': { template: '<div class="col"><slot /></div>', props: ['prop', 'label', 'width'] },
+  'el-tag': { template: '<span class="el-tag"><slot /></span>', props: ['type', 'size'] }
 }
 
 const createWrapper = async () => {
@@ -279,5 +298,65 @@ describe('AiFunctionConfigDialog', () => {
     expect(saveAiFunctionsMock).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('saved')).toBeTruthy()
     expect(wrapper.emitted('update:visible')).toBeTruthy()
+  })
+
+  // ---- 导入 skill 流程（第 4 批 P1-1）----
+  const openImportDialog = async (wrapper) => {
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('从已发现 skill 导入'))
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  it('导入 skill：点按钮拉取列表，对话框显示三类 skill', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    await openImportDialog(wrapper)
+    expect(wrapper.text()).toContain('drawio')
+    expect(wrapper.text()).toContain('agree-slides')
+    expect(wrapper.text()).toContain('/ab-office:agree-slides')
+  })
+
+  it('导入 skill：模糊搜索按名称/描述过滤', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    await openImportDialog(wrapper)
+    const searchInput = wrapper.findAll('input').find((i) => i.element.placeholder?.includes('模糊搜索'))
+    await searchInput.setValue('幻灯')
+    await flushPromises()
+    expect(wrapper.text()).toContain('agree-slides')
+    expect(wrapper.text()).not.toContain('drawio')
+  })
+
+  it('导入 skill：刷新按钮调用 RefreshDiscoveredSkills', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    await openImportDialog(wrapper)
+    refreshDiscoveredMock.mockClear()
+    const refreshBtn = wrapper.findAll('button').find((b) => b.text().includes('刷新'))
+    await refreshBtn.trigger('click')
+    await flushPromises()
+    expect(refreshDiscoveredMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('导入 skill：选中行导入回填 command/cwd，已有 name 不覆盖', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report') // name=生成周报，command=/ab-weekly-report
+    await openImportDialog(wrapper)
+    const rows = wrapper.findAll('.el-table__row')
+    const targetRow = rows.find((r) => r.text().includes('agree-slides'))
+    await targetRow.trigger('click') // current-change 选中
+    await flushPromises()
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text() === '导入')
+    await confirmBtn.trigger('click')
+    await flushPromises()
+    // command 覆盖为插件命名空间命令
+    const cmdInput = wrapper.findAll('input').find((i) => i.element.value.includes('/ab-office:agree-slides'))
+    expect(cmdInput).toBeTruthy()
+    // cwd 覆盖为 D:\work
+    const cwdInput = wrapper.findAll('input').find((i) => i.element.value.includes('D:\\work'))
+    expect(cwdInput).toBeTruthy()
+    // name 保持"生成周报"（非空不覆盖）
+    const nameInput = wrapper.findAll('input').find((i) => i.element.value === '生成周报')
+    expect(nameInput).toBeTruthy()
   })
 })

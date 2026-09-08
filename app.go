@@ -18,19 +18,20 @@ import (
 )
 
 type App struct {
-	ctx              context.Context
-	directorySvc     *service.DirectoryService
-	fileTreeSvc      *service.FileTreeService
-	fileOpSvc        *service.FileOperationService
-	gitSvc           *service.GitService
-	settingsSvc      *service.SettingsService
-	terminalSvc      *service.TerminalService
-	searchSvc        *service.SearchService
-	favoritesSvc     *service.FavoritesService
-	contentSearchSvc *service.ContentSearchService
-	updateSvc        *service.UpdateService
-	repoMetaSvc      *service.RepoMetaService
-	aiFuncSvc        *service.AiFunctionService
+	ctx               context.Context
+	directorySvc      *service.DirectoryService
+	fileTreeSvc       *service.FileTreeService
+	fileOpSvc         *service.FileOperationService
+	gitSvc            *service.GitService
+	settingsSvc       *service.SettingsService
+	terminalSvc       *service.TerminalService
+	searchSvc         *service.SearchService
+	favoritesSvc      *service.FavoritesService
+	contentSearchSvc  *service.ContentSearchService
+	updateSvc         *service.UpdateService
+	repoMetaSvc       *service.RepoMetaService
+	aiFuncSvc         *service.AiFunctionService
+	skillDiscoverySvc *service.SkillDiscoveryService
 }
 
 func NewApp() *App {
@@ -63,6 +64,9 @@ func (a *App) startup(ctx context.Context) {
 	a.aiFuncSvc = service.NewAiFunctionService(ctx, filepath.Join(dataDir, "ai_functions.json"))
 	// 启动定时清理兜底：周期性清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残，此处只清异常残留）
 	a.aiFuncSvc.StartHistoryCleanup()
+
+	// skill 自动发现服务（配置对话框「导入 skill」入口，扫描用户级/工作目录/插件 skills）
+	a.skillDiscoverySvc = service.NewSkillDiscoveryService(a.directorySvc)
 
 	// 更新服务
 	a.updateSvc = service.NewUpdateService()
@@ -1247,6 +1251,24 @@ func (a *App) GetAiFunctions() ([]*model.AiFunction, error) {
 // SaveAiFunctions 保存 AI 功能项列表（配置管理界面增删改后调用）
 func (a *App) SaveAiFunctions(funcs []*model.AiFunction) error {
 	return a.aiFuncSvc.SaveAiFunctions(funcs)
+}
+
+// GetDiscoveredSkills 获取已发现的 skill 列表（带 mtime 缓存）。
+// 扫描用户级 ~/.claude/skills + 各工作目录 .claude/skills + 已安装插件 skills，
+// 解析 SKILL.md frontmatter 去重后返回，供配置对话框「导入 skill」入口回填 command/cwd/description/name。
+func (a *App) GetDiscoveredSkills() []*model.SkillDescriptor {
+	if a.skillDiscoverySvc == nil {
+		return []*model.SkillDescriptor{}
+	}
+	return a.skillDiscoverySvc.GetCached()
+}
+
+// RefreshDiscoveredSkills 强制重扫已发现 skill 列表（清除缓存），供导入对话框「刷新」按钮调用。
+func (a *App) RefreshDiscoveredSkills() []*model.SkillDescriptor {
+	if a.skillDiscoverySvc == nil {
+		return []*model.SkillDescriptor{}
+	}
+	return a.skillDiscoverySvc.Refresh()
 }
 
 // RunAiFunction 运行功能项主段：按参数规格组装 prompt 后起 claude 子进程。

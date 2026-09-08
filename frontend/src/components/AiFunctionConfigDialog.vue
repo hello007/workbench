@@ -27,6 +27,10 @@
       <!-- 右：编辑表单 -->
       <div class="config-form" v-if="editing">
         <el-form label-width="92px" size="small">
+          <el-form-item label-width="0" class="import-row">
+            <el-button type="primary" plain size="small" @click="openImport">从已发现 skill 导入</el-button>
+            <span class="import-hint">导入后用下方表单补全参数/完成动作等字段</span>
+          </el-form-item>
           <el-form-item label="ID" required>
             <el-input v-model="editing.id" placeholder="唯一标识，如 my-skill" />
           </el-form-item>
@@ -114,13 +118,61 @@
       <el-button @click="$emit('update:visible', false)">关闭</el-button>
       <el-button type="primary" :loading="saving" @click="save">保存全部</el-button>
     </template>
+
+    <!-- 导入 skill 对话框：列出用户级/项目级/插件 skill，模糊搜索，选中回填 -->
+    <el-dialog
+      v-model="importVisible"
+      title="从已发现 skill 导入"
+      width="880px"
+      append-to-body
+      destroy-on-close
+      class="ai-import-dialog"
+    >
+      <div class="import-toolbar">
+        <el-input
+          v-model="importKeyword"
+          placeholder="按名称/描述模糊搜索"
+          clearable
+          size="small"
+          style="width: 280px"
+        />
+        <el-button size="small" :loading="importLoading" @click="refreshImport">刷新</el-button>
+        <span class="import-count">共 {{ filteredSkills.length }} 项</span>
+      </div>
+      <el-table
+        :data="filteredSkills"
+        v-loading="importLoading"
+        height="400"
+        size="small"
+        highlight-current-row
+        empty-text="未发现 skill（用户级 ~/.claude/skills、各工作目录 .claude/skills、已安装插件）"
+        @current-change="onImportSelect"
+        @row-dblclick="confirmImport"
+      >
+        <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip />
+        <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
+        <el-table-column label="来源" width="80">
+          <template #default="{ row }">
+            <el-tag size="small" :type="sourceTagType(row.source)">{{ sourceLabel(row.source) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="command" label="命令" width="180" show-overflow-tooltip />
+        <el-table-column label="目录" width="200" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.cwd || '（任意/待补）' }}</template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!importSelected" @click="confirmImport">导入</el-button>
+      </template>
+    </el-dialog>
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetAiFunctions, SaveAiFunctions } from '../../wailsjs/go/main/App'
+import { GetAiFunctions, SaveAiFunctions, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
 import ParamsEditor from './ParamsEditor.vue'
 import FollowUpsEditor from './FollowUpsEditor.vue'
 import EnvEditor from './EnvEditor.vue'
@@ -148,6 +200,74 @@ const rawJsonError = ref('')
 const paramsEditorRef = ref()
 const followUpsEditorRef = ref()
 const mcpEditorRef = ref()
+
+// 导入 skill 对话框状态
+const importVisible = ref(false)
+const importLoading = ref(false)
+const importKeyword = ref('')
+const importSkills = ref([])
+const importSelected = ref(null)
+
+// 模糊搜索：按名称/描述过滤（不区分大小写）
+const filteredSkills = computed(() => {
+  const kw = importKeyword.value.trim().toLowerCase()
+  if (!kw) return importSkills.value
+  return importSkills.value.filter(
+    (s) =>
+      (s.name || '').toLowerCase().includes(kw) ||
+      (s.description || '').toLowerCase().includes(kw)
+  )
+})
+
+// 打开导入对话框并拉取已发现 skill 列表（GetDiscoveredSkills 带 mtime 缓存，二次打开瞬时）
+const openImport = async () => {
+  importVisible.value = true
+  importKeyword.value = ''
+  importSelected.value = null
+  importSkills.value = []
+  importLoading.value = true
+  try {
+    importSkills.value = (await GetDiscoveredSkills()) || []
+  } catch (e) {
+    ElMessage.error('加载 skill 列表失败: ' + (e?.message || String(e)))
+  } finally {
+    importLoading.value = false
+  }
+}
+
+// 强制重扫（清除缓存），供导入对话框「刷新」按钮调用
+const refreshImport = async () => {
+  importLoading.value = true
+  try {
+    importSkills.value = (await RefreshDiscoveredSkills()) || []
+    importSelected.value = null
+  } catch (e) {
+    ElMessage.error('刷新失败: ' + (e?.message || String(e)))
+  } finally {
+    importLoading.value = false
+  }
+}
+
+// el-table 选中行变更
+const onImportSelect = (row) => {
+  importSelected.value = row || null
+}
+
+// 确认导入：command/cwd 覆盖（导入核心目的是修正命名空间与目录），
+// description/name 仅在当前为空时回填（保留用户已编辑的名称与描述）
+const confirmImport = () => {
+  const s = importSelected.value
+  if (!s || !editing.value) return
+  editing.value.command = s.command
+  editing.value.cwd = s.cwd || ''
+  if (!editing.value.description) editing.value.description = s.description || ''
+  if (!editing.value.name) editing.value.name = s.name
+  importVisible.value = false
+  ElMessage.success(`已导入 ${s.command}`)
+}
+
+const sourceLabel = (src) => ({ user: '用户级', project: '项目级', plugin: '插件' }[src] || src)
+const sourceTagType = (src) => ({ user: 'info', project: 'success', plugin: 'warning' }[src] || '')
 
 const selected = computed(() => functions.value.find((f) => f.id === selectedId.value) || null)
 
@@ -386,6 +506,28 @@ const doSave = async () => {
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
+}
+/* 导入 skill 入口与对话框样式 */
+.import-row {
+  margin-bottom: 8px;
+}
+.import-row .el-button {
+  margin-right: 8px;
+}
+.import-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.import-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.import-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-left: auto;
 }
 /* 高级字段折叠面板：无外框，与上方 el-form 一体 */
 .adv-collapse {
