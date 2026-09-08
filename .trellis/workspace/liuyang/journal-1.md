@@ -1116,3 +1116,36 @@ FileTreePanel.refreshNode 命中文件节点时上溯到父目录（根下即 st
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: AI 功能菜单（Skill 聚合触发器）全量实现
+
+**Date**: 2026-09-08
+**Task**: AI 功能菜单（Skill 聚合触发器）全量实现
+**Branch**: `master`
+
+### Summary
+
+brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go 执行器 claude -p + stream-json 流式回显/取消杀树/超时，多段编排 --resume 承载人工确认（周报确认落盘、会议行内取消），功能项配置化（空数组自愈回种），首批四功能（周报/发言稿多选/会议预约默认下一正点+小时步进/会议表格行内详情复制与取消），会议走 skill 自带 tm.py 直调（token 随项目 settings 零落配置），任务 Tab 空闲复用，任务驾驶舱视觉美化。历经七轮修复（prompt 组装 bug、v-model 契约错位三处、Tab 溢出与横移等）。终验 264 前端测试 + Go 全量绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a7648c8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
