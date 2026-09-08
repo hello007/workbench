@@ -1,0 +1,17 @@
+#
+# https://help.github.com/articles/dealing-with-line-endings/
+#
+# These are explicitly windows files and should use crlf
+# 所有文本文件统一LF
+* text=auto eol=lf
+# Windows 批处理脚本必须 CRLF（置于通配行之后才不被覆盖）
+*.bat           text eol=crlf
+
+# 二进制文件不转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
