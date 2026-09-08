@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本任务改 app.go 绑定（GetAiConcurrencyStatus/RemoveAiTask）与 model/ai_function.go 导出 struct 字段（AiTaskMetrics/AiConcurrencyStatus/AiTaskState.Queued），须遵循跨层契约同步 frontend/wailsjs/ 三处（App.js/App.d.ts/models.ts）"}
+{"file": "docs/plans/2026-09-08-ai-task-observability-design.md", "reason": "P0-2 设计依据：第 4.1 节 result 事件字段抓样表（total_cost_usd 等）、第 4.2 节 AiTaskMetrics 结构、第 4.4 节前端展示项"}
+{"file": "docs/plans/2026-09-08-ai-concurrency-control-design.md", "reason": "P0-3 设计依据：第 4.2 节排队/执行两段拆分、第 4.3 节槽位释放、第 4.4 节排队取消两态、第 7 节决策结论"}
+{"file": "docs/plans/2026-09-08-ai-output-memory-design.md", "reason": "P0-4(3.1) 设计依据：第 4.1 节前端末尾窗口截断方案、t.fullOutput 临时方案、truncated 标记"}
+{"file": "docs/plans/samples/result-event-sample.json", "reason": "result 事件完整抓样，parseStreamLine 四元组改造的字段映射依据"}

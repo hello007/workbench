@@ -119,7 +119,7 @@ func TestRenderPrompt_MissingParamKept(t *testing.T) {
 
 func TestParseStreamLine_AssistantText(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"role":"assistant","content":[{"type":"text","text":"会议号 123"}]}}`
-	text, isResult, sid := parseStreamLine(line)
+	text, isResult, sid, metrics := parseStreamLine(line)
 	if text != "会议号 123" {
 		t.Errorf("文本增量不符: %q", text)
 	}
@@ -129,32 +129,72 @@ func TestParseStreamLine_AssistantText(t *testing.T) {
 	if sid != "s1" {
 		t.Errorf("session_id 不符: %q", sid)
 	}
+	if metrics != nil {
+		t.Errorf("assistant 事件不应有计量: %+v", metrics)
+	}
 }
 
 func TestParseStreamLine_ResultEvent(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s2","result":"done"}`
-	_, isResult, sid := parseStreamLine(line)
+	_, isResult, sid, metrics := parseStreamLine(line)
 	if !isResult {
 		t.Errorf("result 事件应标记终态")
 	}
 	if sid != "s2" {
 		t.Errorf("session_id 不符: %q", sid)
 	}
+	// result 事件无计量字段时 metrics 为 nil（全零判定）
+	if metrics != nil {
+		t.Errorf("无计量字段的 result 事件 metrics 应为 nil: %+v", metrics)
+	}
+}
+
+// TestParseStreamLine_ResultWithMetrics result 事件携带计量字段时解析为 AiTaskMetrics
+func TestParseStreamLine_ResultWithMetrics(t *testing.T) {
+	line := `{"type":"result","subtype":"success","session_id":"s3","duration_ms":8268,"num_turns":1,"total_cost_usd":0.14502,"usage":{"input_tokens":28919,"output_tokens":17,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
+	_, isResult, _, metrics := parseStreamLine(line)
+	if !isResult {
+		t.Errorf("result 事件应标记终态")
+	}
+	if metrics == nil {
+		t.Fatalf("带计量字段的 result 事件 metrics 不应为 nil")
+	}
+	if metrics.DurationMs != 8268 {
+		t.Errorf("durationMs 不符: %d", metrics.DurationMs)
+	}
+	if metrics.NumTurns != 1 {
+		t.Errorf("numTurns 不符: %d", metrics.NumTurns)
+	}
+	if metrics.CostUSD != 0.14502 {
+		t.Errorf("costUsd 不符: %f", metrics.CostUSD)
+	}
+	if metrics.Usage == nil {
+		t.Fatalf("usage 不应为 nil")
+	}
+	if metrics.Usage.InputTokens != 28919 {
+		t.Errorf("inputTokens 不符: %d", metrics.Usage.InputTokens)
+	}
+	if metrics.Usage.OutputTokens != 17 {
+		t.Errorf("outputTokens 不符: %d", metrics.Usage.OutputTokens)
+	}
 }
 
 func TestParseStreamLine_NonJSONPassthrough(t *testing.T) {
-	text, isResult, _ := parseStreamLine("some diagnostic text")
+	text, isResult, _, metrics := parseStreamLine("some diagnostic text")
 	if text != "some diagnostic text\n" {
 		t.Errorf("非 JSON 行应原样透传加换行: %q", text)
 	}
 	if isResult {
 		t.Errorf("非 JSON 行不应是终态")
 	}
+	if metrics != nil {
+		t.Errorf("非 JSON 行不应有计量: %+v", metrics)
+	}
 }
 
 func TestParseStreamLine_ToolUseIgnored(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"content":[{"type":"tool_use","name":"get_meeting"}]}}`
-	text, _, _ := parseStreamLine(line)
+	text, _, _, _ := parseStreamLine(line)
 	if text != "" {
 		t.Errorf("tool_use 片段不应产出文本: %q", text)
 	}
@@ -413,5 +453,63 @@ func TestBuildFollowUpPrompt_EmptyError(t *testing.T) {
 	_, err = BuildFollowUpPrompt(&model.AiFollowUp{ID: "fu5", PromptTemplate: "取消 {{meeting}}"}, map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "无有效参数") {
 		t.Errorf("模板占位符无值也应报「无有效参数」: err=%v", err)
+	}
+}
+
+// TestGetConcurrencyStatus 验证并发占用统计：running/queued/max 计数正确
+func TestGetConcurrencyStatus(t *testing.T) {
+	svc := NewAiFunctionService(nil, "")
+	// 手动注入三种状态的 task
+	svc.tasks["t1"] = &aiTaskRuntime{running: true, queued: false}
+	svc.tasks["t2"] = &aiTaskRuntime{running: true, queued: false}
+	svc.tasks["t3"] = &aiTaskRuntime{running: false, queued: true}
+	svc.tasks["t4"] = &aiTaskRuntime{running: false, queued: false} // 已完成，不计 running/queued
+
+	st := svc.GetConcurrencyStatus()
+	if st.Running != 2 {
+		t.Errorf("running 计数不符: %d（期望 2）", st.Running)
+	}
+	if st.Queued != 1 {
+		t.Errorf("queued 计数不符: %d（期望 1）", st.Queued)
+	}
+	if st.Max != aiTaskMaxConcurrent {
+		t.Errorf("max 不符: %d（期望 %d）", st.Max, aiTaskMaxConcurrent)
+	}
+}
+
+// TestRemoveAiTask 验证清理规则：运行中/排队中不可清理，已完成可清理
+func TestRemoveAiTask(t *testing.T) {
+	svc := NewAiFunctionService(nil, "")
+	svc.tasks["running"] = &aiTaskRuntime{running: true, queued: false}
+	svc.tasks["queued"] = &aiTaskRuntime{running: false, queued: true}
+	svc.tasks["done"] = &aiTaskRuntime{running: false, queued: false}
+
+	// 运行中不可清理
+	if svc.RemoveAiTask("running") {
+		t.Error("运行中任务应不可清理")
+	}
+	// 排队中不可清理
+	if svc.RemoveAiTask("queued") {
+		t.Error("排队中任务应不可清理")
+	}
+	// 已完成可清理
+	if !svc.RemoveAiTask("done") {
+		t.Error("已完成任务应可清理")
+	}
+	if _, ok := svc.tasks["done"]; ok {
+		t.Error("清理后 tasks map 不应再含该任务")
+	}
+	// 不存在的任务返回 false
+	if svc.RemoveAiTask("nonexistent") {
+		t.Error("不存在的任务应返回 false")
+	}
+}
+
+// TestParseStreamLine_ResultWithMetrics 字段映射已在上方测试；
+// 此处确保 max 常量与构造函数一致（信号量缓冲长度）
+func TestNewAiFunctionService_SemCapacity(t *testing.T) {
+	svc := NewAiFunctionService(nil, "")
+	if cap(svc.concurrencySem) != aiTaskMaxConcurrent {
+		t.Errorf("信号量缓冲长度不符: %d（期望 %d）", cap(svc.concurrencySem), aiTaskMaxConcurrent)
 	}
 }

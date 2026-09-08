@@ -1322,3 +1322,14 @@ func (a *App) CancelAiTask(taskID string) bool {
 func (a *App) GetAiTaskState(taskID string) *model.AiTaskState {
 	return a.aiFuncSvc.GetAiTaskState(taskID)
 }
+
+// GetAiConcurrencyStatus 查询全局并发占用（运行中/排队中/上限），供前端标题栏展示「N/M」
+func (a *App) GetAiConcurrencyStatus() model.AiConcurrencyStatus {
+	return a.aiFuncSvc.GetConcurrencyStatus()
+}
+
+// RemoveAiTask 清理已完成/已取消任务的后端 runtime（前端 Tab 关闭时调用）。
+// 运行中或排队中的任务不可清理（前端应禁止关闭运行中 Tab）。
+func (a *App) RemoveAiTask(taskID string) bool {
+	return a.aiFuncSvc.RemoveAiTask(taskID)
+}

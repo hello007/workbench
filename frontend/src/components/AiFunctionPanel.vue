@@ -10,6 +10,10 @@
         <span class="panel-subtitle"><span class="subtitle-sign">&gt;</span>Claude Skills 聚合触发</span>
       </div>
       <span class="panel-actions">
+        <span v-if="concurrency.running > 0 || concurrency.queued > 0" class="concurrency-badge">
+          并发 {{ concurrency.running }}/{{ concurrency.max }}
+          <span v-if="concurrency.queued > 0" class="concurrency-queued">（排队 {{ concurrency.queued }}）</span>
+        </span>
         <el-button size="small" @click="configVisible = true">配置管理</el-button>
         <el-button size="small" @click="loadFunctions">刷新</el-button>
       </span>
@@ -64,7 +68,7 @@
                 <span class="task-prompt" :title="t.prompt">{{ t.prompt }}</span>
                 <div class="task-actions">
                   <el-button
-                    v-if="t.running"
+                    v-if="t.running || t.queued"
                     size="small"
                     type="danger"
                     plain
@@ -94,6 +98,11 @@
                     预览产物
                   </el-button>
                 </div>
+              </div>
+              <!-- 底栏：完成态展示计量摘要（耗时/token/成本），失败态展示 exitCode 与错误信息 -->
+              <div v-if="!t.running && !t.queued && (metricsText(t) || t.error)" class="task-footer">
+                <span v-if="metricsText(t)" class="metrics-text">{{ metricsText(t) }}</span>
+                <span v-if="t.error" class="error-text">✗ {{ t.canceled ? '已取消' : '失败' }} · {{ t.error }}</span>
               </div>
               <!-- 后续段按钮（多段编排）；会议表格视图时由行内取消按钮替代 -->
               <div
@@ -175,6 +184,8 @@ import {
   RunAiFunction,
   RunAiFollowUp,
   CancelAiTask,
+  GetAiConcurrencyStatus,
+  RemoveAiTask,
   OpenInExplorer,
   OpenWithDefaultApp
 } from '../../wailsjs/go/main/App'
@@ -236,10 +247,14 @@ const doRunMain = async (f, params) => {
       name: f.name,
       prompt: buildPromptPreview(f, params),
       output: '',
-      running: true,
+      fullOutput: '',         // 完成动作取全量（onDone 写入 result.output，3.1 截断不影响）
+      truncated: false,       // 输出超 256KB 截断标记
+      running: false,         // 后端先排队后执行，初始 queued=true
+      queued: true,
       error: '',
       canceled: false,
       sessionId: '',
+      metrics: null,          // P0-2 计量，onDone 写入
       followUps: f.followUps || [],
       completion: f.completion || 'none',
       cwd: f.cwd
@@ -247,7 +262,7 @@ const doRunMain = async (f, params) => {
     let reuseIdx = -1
     for (let i = tasks.value.length - 1; i >= 0; i--) {
       const t = tasks.value[i]
-      if (t.functionId === f.id && !t.running) {
+      if (t.functionId === f.id && !t.running && !t.queued) {
         reuseIdx = i
         break
       }
@@ -258,6 +273,7 @@ const doRunMain = async (f, params) => {
       tasks.value.push(task)
     }
     activeTabId.value = taskId
+    refreshConcurrency()
   } catch (e) {
     ElMessage.error('启动失败: ' + (e?.message || String(e)))
   }
@@ -323,7 +339,8 @@ const parseMarkdownTable = (text) => {
 // 且表头含「会议号」三个条件同时满足；返回表格（含可见列）或 null。
 const meetingTable = (t) => {
   if (!(t.followUps || []).some((fu) => fu.id === 'cancel-meeting')) return null
-  const tbl = parseMarkdownTable(t.output)
+  // 取全量输出解析表格，避免 3.1 末尾窗口截断后表格丢失（后端预解析留 3.3）
+  const tbl = parseMarkdownTable(t.fullOutput || t.output)
   if (!tbl || !tbl.headers.includes('会议号')) return null
   tbl.visibleHeaders = tbl.headers.filter((h) => !HIDDEN_COLS.includes(h))
   return tbl
@@ -389,36 +406,84 @@ const doRunFollowUp = async (task, followUp, params) => {
       name: `${task.name} · ${followUp.label}`,
       prompt: followUp.promptTemplate,
       output: '',
-      running: true,
+      fullOutput: '',
+      truncated: false,
+      running: false,
+      queued: true,
       error: '',
       canceled: false,
+      metrics: null,
       followUps: fn?.followUps || [],
       completion: 'none',
       cwd: task.cwd
     })
     activeTabId.value = taskId
+    refreshConcurrency()
   } catch (e) {
     ElMessage.error('启动后续段失败: ' + (e?.message || String(e)))
   }
 }
 
 // ===== 事件流 =====
+// P0-4(3.1) 末尾窗口截断：输出超 MAX_DISPLAY 只保留末尾窗口，顶部提示省略量。
+// 截断仅影响展示（t.output），完成动作取 t.fullOutput 全量不受影响。
+const MAX_DISPLAY = 256 * 1024
+
 const onOutput = (ev) => {
   const t = tasks.value.find((x) => x.taskId === ev.taskId)
   if (!t) return
   t.output += ev.text || ''
+  if (t.output.length > MAX_DISPLAY) {
+    const omittedKB = Math.floor((t.output.length - MAX_DISPLAY) / 1024)
+    t.output =
+      '…（已省略前 ' + omittedKB + ' KB，完整内容可复制或查看历史）\n' +
+      t.output.slice(-MAX_DISPLAY)
+    t.truncated = true
+  }
   scrollOutput()
+}
+
+// onQueued 后端注册排队态（RunStage 先入 map 再 select 等槽位）
+const onQueued = (ev) => {
+  const t = tasks.value.find((x) => x.taskId === ev.taskId)
+  if (!t) return
+  t.queued = true
+  t.running = false
+  refreshConcurrency()
+}
+
+// onStarted 后端获取槽位转执行态（超时从此起算）
+const onStarted = (ev) => {
+  const t = tasks.value.find((x) => x.taskId === ev.taskId)
+  if (!t) return
+  t.queued = false
+  t.running = true
+  refreshConcurrency()
 }
 
 const onDone = (result) => {
   const t = tasks.value.find((x) => x.taskId === result.taskId)
   if (!t) return
   t.running = false
+  t.queued = false
   t.error = result.error || ''
   t.canceled = !!result.canceled
+  t.metrics = result.metrics || null
+  t.fullOutput = result.output || ''
   if (result.sessionId) t.sessionId = result.sessionId
+  refreshConcurrency()
   if (!t.error && !t.canceled) {
     handleCompletion(t, result)
+  }
+}
+
+// 并发占用展示（标题栏「N/M」），任务起止时刷新
+const concurrency = ref({ running: 0, queued: 0, max: 3 })
+const refreshConcurrency = async () => {
+  try {
+    concurrency.value = await GetAiConcurrencyStatus()
+  } catch {
+    // 查询失败不影响主流程
   }
 }
 
@@ -448,7 +513,8 @@ const handleCompletion = async (t, result) => {
 
 const copyOutput = async (t) => {
   try {
-    await navigator.clipboard.writeText(t.output)
+    // 取全量输出（t.fullOutput），不受 3.1 末尾窗口截断影响
+    await navigator.clipboard.writeText(t.fullOutput || t.output)
     ElMessage.success('已复制')
   } catch {
     ElMessage.error('复制失败')
@@ -458,8 +524,9 @@ const copyOutput = async (t) => {
 const openDir = (t) => OpenInExplorer(t.cwd)
 
 const previewOutput = async (t) => {
-  // 从输出中提取第一个 .html 文件路径（发言稿产物），系统默认程序打开即预览
-  const m = (t.output || '').match(/[A-Za-z]:\\[^\s"'<>|]+\.html/i)
+  // 从输出中提取第一个 .html 文件路径（发言稿产物），系统默认程序打开即预览。
+  // 取全量输出（t.fullOutput），避免截断后路径丢失
+  const m = (t.fullOutput || t.output || '').match(/[A-Za-z]:\\[^\s"'<>|]+\.html/i)
   if (m) {
     await OpenWithDefaultApp(m[0])
   } else {
@@ -471,9 +538,12 @@ const previewOutput = async (t) => {
 // ===== 任务管理 =====
 const cancelTask = async (t) => {
   await CancelAiTask(t.taskId)
+  // 排队取消立即生效，运行中取消等 done 事件；两种都刷新并发展示
+  t.queued = false
+  refreshConcurrency()
 }
 
-// 关闭 Tab：功能 Tab（func: 前缀）直接关闭；任务 Tab 运行中拦截
+// 关闭 Tab：功能 Tab（func: 前缀）直接关闭；任务 Tab 运行中/排队中拦截
 const closeTab = (name) => {
   if (name.startsWith('func:')) {
     const id = name.slice('func:'.length)
@@ -486,11 +556,15 @@ const closeTab = (name) => {
 
 const closeTask = (taskId) => {
   const t = tasks.value.find((x) => x.taskId === taskId)
-  if (t?.running) {
-    ElMessage.warning('任务运行中，请先取消再关闭')
+  if (t?.running || t?.queued) {
+    ElMessage.warning('任务运行中或排队中，请先取消再关闭')
     return
   }
   tasks.value = tasks.value.filter((x) => x.taskId !== taskId)
+  // 清理后端 runtime（已完成/已取消才允许走到此处）
+  RemoveAiTask(taskId).catch(() => {
+    // 清理失败不阻断前端 Tab 关闭
+  })
   if (activeTabId.value === taskId) {
     switchToFirstTab()
   }
@@ -503,19 +577,47 @@ const switchToFirstTab = () => {
     (openFuncs.value[0] ? funcTabName(openFuncs.value[0].id) : '')
 }
 
-const tabLabel = (t) => (t.running ? `${t.name} ⏳` : t.error ? `${t.name} ✕` : t.name)
+const tabLabel = (t) =>
+  t.queued ? `${t.name} ⌛` : t.running ? `${t.name} ⏳` : t.error ? `${t.name} ✕` : t.name
 const statusText = (t) =>
-  t.running ? '运行中' : t.canceled ? '已取消' : t.error ? '失败' : '已完成'
+  t.queued ? '排队中' : t.running ? '运行中' : t.canceled ? '已取消' : t.error ? '失败' : '已完成'
 const statusTagType = (t) =>
-  t.running ? 'primary' : t.canceled ? 'info' : t.error ? 'danger' : 'success'
+  t.queued ? 'info' : t.running ? 'primary' : t.canceled ? 'info' : t.error ? 'danger' : 'success'
+
+// 计量摘要（P0-2）：耗时 / token 入出 / 缓存读（非零）/ 成本 / 轮次（>1），无 metrics 返回空
+const metricsText = (t) => {
+  const m = t.metrics
+  if (!m) return ''
+  const parts = []
+  if (m.durationMs > 0) parts.push(fmtDuration(m.durationMs))
+  const u = m.usage
+  if (u) {
+    parts.push(`入 ${fmtK(u.inputTokens)} / 出 ${fmtK(u.outputTokens)}`)
+    if (u.cacheReadInputTokens > 0) parts.push(`缓存读 ${fmtK(u.cacheReadInputTokens)}`)
+  }
+  if (m.costUsd > 0) parts.push(`$${m.costUsd.toFixed(3)}`)
+  if (m.numTurns > 1) parts.push(`${m.numTurns} 轮`)
+  return parts.join(' · ')
+}
+const fmtDuration = (ms) => {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+const fmtK = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 // ===== 生命周期 =====
 onMounted(() => {
   loadFunctions()
+  refreshConcurrency()
+  EventsOn('ai-task:queued', onQueued)
+  EventsOn('ai-task:started', onStarted)
   EventsOn('ai-task:output', onOutput)
   EventsOn('ai-task:done', onDone)
 })
 onBeforeUnmount(() => {
+  EventsOff('ai-task:queued')
+  EventsOff('ai-task:started')
   EventsOff('ai-task:output')
   EventsOff('ai-task:done')
 })
@@ -578,10 +680,20 @@ onBeforeUnmount(() => {
 /* 按钮组与标题间加分隔感：左缘细线 + 间距（hover 反馈由 el-button 自带，保持克制） */
 .panel-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding-left: 16px;
   margin-left: 12px;
   border-left: 1px solid var(--border-color);
+}
+/* 并发占用徽标：标题栏展示「N/M（排队 K）」，仅运行中或排队中有值时显示 */
+.concurrency-badge {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  white-space: nowrap;
+}
+.concurrency-queued {
+  color: var(--el-color-info, #909399);
 }
 .ai-layout {
   display: flex;
@@ -744,6 +856,22 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+}
+/* 底栏计量/失败信息：完成态展示耗时/token/成本，失败态展示 exitCode 与错误分类 */
+.task-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.metrics-text {
+  color: var(--text-secondary, #909399);
+}
+.error-text {
+  color: var(--el-color-danger, #f56c6c);
 }
 /* 运行中状态标签呼吸脉搏：主色 20% 透明度 box-shadow 扩散，仅运行中态 */
 .status-running {

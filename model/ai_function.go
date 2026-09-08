@@ -66,24 +66,52 @@ type AiFollowUp struct {
 	Input          *AiParamSpec `json:"input"`          // 点击前需要的输入，nil 表示直接发送
 }
 
-// AiTaskRunResult 单段执行的结果快照，经 Wails 事件 ai-task:done 推送。
-type AiTaskRunResult struct {
-	TaskID    string `json:"taskId"`
-	SessionID string `json:"sessionId"` // claude 会话 id，供后续段 --resume
-	ExitCode  int    `json:"exitCode"`
-	Error     string `json:"error"`
-	Output    string `json:"output"` // 全量文本输出（copy 完成动作取此值）
-	Canceled  bool   `json:"canceled"`
+// AiTaskUsage 单次执行的 token 用量（来自 result 事件 usage 字段）。
+// 源字段映射：input_tokens / output_tokens / cache_creation_input_tokens / cache_read_input_tokens。
+type AiTaskUsage struct {
+	InputTokens              int `json:"inputTokens"`
+	OutputTokens             int `json:"outputTokens"`
+	CacheCreationInputTokens int `json:"cacheCreationInputTokens"`
+	CacheReadInputTokens     int `json:"cacheReadInputTokens"`
 }
 
-// AiTaskState 任务当前状态（前端恢复/展示用），GetAiTask 拉取。
+// AiTaskMetrics 任务计量摘要（来自 result 事件 + 进程退出状态）。
+// 源字段映射：duration_ms / total_cost_usd（顶层，非 cost_usd）/ num_turns。
+type AiTaskMetrics struct {
+	Usage      *AiTaskUsage `json:"usage,omitempty"`
+	DurationMs int64        `json:"durationMs"`
+	CostUSD    float64      `json:"costUsd"`
+	NumTurns   int          `json:"numTurns"`
+}
+
+// AiConcurrencyStatus 全局并发占用情况，供前端标题栏展示「N/M」。
+type AiConcurrencyStatus struct {
+	Running int `json:"running"` // 运行中数量（已获取信号量槽位且进程未退出）
+	Queued  int `json:"queued"`  // 排队中数量（等待槽位）
+	Max     int `json:"max"`     // 并发上限（信号量缓冲长度）
+}
+
+// AiTaskRunResult 单段执行的结果快照，经 Wails 事件 ai-task:done 推送。
+type AiTaskRunResult struct {
+	TaskID    string           `json:"taskId"`
+	SessionID string           `json:"sessionId"` // claude 会话 id，供后续段 --resume
+	ExitCode  int              `json:"exitCode"`
+	Error     string           `json:"error"`
+	Output    string           `json:"output"` // 全量文本输出（copy 完成动作取此值）
+	Canceled  bool             `json:"canceled"`
+	Metrics   *AiTaskMetrics   `json:"metrics,omitempty"` // P0-2：result 事件计量，nil 表示无计量数据
+}
+
+// AiTaskState 任务当前状态（前端恢复/展示用），GetAiTaskState 拉取。
 type AiTaskState struct {
-	TaskID     string `json:"taskId"`
-	FunctionID string `json:"functionId"`
-	Running    bool   `json:"running"`
-	SessionID  string `json:"sessionId"`
-	Prompt     string `json:"prompt"`
-	Output     string `json:"output"`
-	Error      string `json:"error"`
-	StartedAt  int64  `json:"startedAt"` // unix 毫秒
+	TaskID     string         `json:"taskId"`
+	FunctionID string         `json:"functionId"`
+	Running    bool          `json:"running"`
+	Queued     bool          `json:"queued"` // P0-3：排队中（等待并发槽位，未起进程）
+	SessionID  string        `json:"sessionId"`
+	Prompt     string        `json:"prompt"`
+	Output     string        `json:"output"`
+	Error      string        `json:"error"`
+	StartedAt  int64         `json:"startedAt"` // unix 毫秒
+	Metrics    *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：计量摘要，恢复展示用
 }

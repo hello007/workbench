@@ -19,14 +19,22 @@ import (
 // 默认超时（分钟），功能项 TimeoutMinutes 为 0 时使用
 const aiTaskDefaultTimeoutMinutes = 10
 
+// aiTaskMaxConcurrent 全局并发上限：同时运行的 claude -p 子进程数。
+// 单进程常驻 ~150-300MB，3 并发约 ~1GB，兼顾本地资源与 API 限流。
+// 先硬编码常量，后续随 schema v2 入配置文件可调。
+const aiTaskMaxConcurrent = 3
+
 // AiFunctionService AI 功能服务：功能项配置持久化 + claude headless 子进程执行器。
 // 执行模型：每段一次 claude -p 调用（--output-format stream-json 流式回显），
 // 多段编排由前端驱动——段完成后拿 session_id，下一段 RunStage 传 resumeSessionID 续会话。
+// 并发控制：concurrencySem 限制同时运行的子进程数，超限任务排队等待（queued=true），
+// 获取槽位后才创建执行 ctx（超时起算后移，排队等待不侵蚀执行预算）。
 type AiFunctionService struct {
-	ctx        context.Context
-	configPath string
-	mu         sync.Mutex
-	tasks      map[string]*aiTaskRuntime
+	ctx            context.Context
+	configPath     string
+	mu             sync.Mutex
+	tasks          map[string]*aiTaskRuntime
+	concurrencySem chan struct{} // 全局并发信号量，缓冲 = aiTaskMaxConcurrent
 }
 
 // aiTaskRuntime 一个运行中/已完成任务的内部状态
@@ -44,14 +52,19 @@ type aiTaskRuntime struct {
 	timeoutMin int
 	output     strings.Builder
 	errText    string
+	metrics    *model.AiTaskMetrics // result 事件计量（P0-2），nil 表示无计量
+	queued     bool                 // 排队中：等待并发槽位，未起进程（P0-3）
+	queuedAt   time.Time            // 入队时间（P0-3），供排队时长展示
+	queueCancel chan struct{}       // 排队取消信号（P0-3）：close 后唤醒 RunStage 的 select
 }
 
 // NewAiFunctionService 创建 AI 功能服务
 func NewAiFunctionService(ctx context.Context, configPath string) *AiFunctionService {
 	return &AiFunctionService{
-		ctx:        ctx,
-		configPath: configPath,
-		tasks:      make(map[string]*aiTaskRuntime),
+		ctx:            ctx,
+		configPath:     configPath,
+		tasks:          make(map[string]*aiTaskRuntime),
+		concurrencySem: make(chan struct{}, aiTaskMaxConcurrent),
 	}
 }
 
@@ -86,6 +99,11 @@ func (s *AiFunctionService) SaveAiFunctions(funcs []*model.AiFunction) error {
 // RunStage 执行一段：组装 claude 命令、起子进程、异步流式推送输出。
 // resumeSessionID 非空时以 --resume 续会话（多段编排的后续段）。
 // 返回任务 id（用于事件流对号与取消），进程启动失败同步报错。
+//
+// 并发控制：先注册排队态 task（queued=true）入 map 并 emit ai-task:queued，
+// select 等待 concurrencySem 槽位（响应 s.ctx 关闭与排队取消）；
+// 获取槽位后才 WithTimeout 创建执行 ctx——超时起算后移，排队等待不侵蚀执行预算。
+// 排队期间用户取消：从 map 删除并 emit done（canceled），不启动进程。
 func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string) (string, error) {
 	fn, err := s.loadFunction(functionID)
 	if err != nil {
@@ -95,11 +113,60 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 		return "", fmt.Errorf("prompt 不能为空")
 	}
 
+	taskID := fmt.Sprintf("aitask-%d", time.Now().UnixNano())
+	task := &aiTaskRuntime{
+		id:          taskID,
+		functionID:  functionID,
+		prompt:      prompt,
+		queued:      true,
+		queuedAt:    time.Now(),
+		queueCancel: make(chan struct{}),
+	}
+	s.mu.Lock()
+	s.tasks[taskID] = task
+	s.mu.Unlock()
+	s.emit("ai-task:queued", map[string]any{"taskId": taskID})
+
+	// 排队等待槽位；三路唤醒：
+	//   - concurrencySem 槽位可用 → 转执行
+	//   - queueCancel close → 排队取消（CancelAiTask 触发），不启动进程
+	//   - s.ctx.Done → app 关闭
+	select {
+	case s.concurrencySem <- struct{}{}:
+		// 获取到槽位，继续
+	case <-task.queueCancel:
+		// 排队取消：select 未成功写入 sem，无需归还槽位；清理 map
+		s.mu.Lock()
+		delete(s.tasks, taskID)
+		s.mu.Unlock()
+		return "", fmt.Errorf("任务已取消（排队中）")
+	case <-s.ctx.Done():
+		// app 关闭：select 未成功写入 sem，无需归还槽位；清理 map
+		s.mu.Lock()
+		delete(s.tasks, taskID)
+		s.mu.Unlock()
+		return "", fmt.Errorf("应用关闭，任务未启动")
+	}
+
+	// 排队期间被取消：不启动进程，清理 map 与槽位
+	s.mu.Lock()
+	if task.canceled {
+		delete(s.tasks, taskID)
+		s.mu.Unlock()
+		<-s.concurrencySem // 归还槽位
+		return "", fmt.Errorf("任务已取消（排队中）")
+	}
+	task.queued = false
+	task.startedAt = time.Now()
+	s.mu.Unlock()
+	s.emit("ai-task:started", map[string]any{"taskId": taskID})
+
+	// 获取槽位后才创建执行 ctx（超时起算后移）
 	timeout := fn.TimeoutMinutes
 	if timeout <= 0 {
 		timeout = aiTaskDefaultTimeoutMinutes
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Minute)
+	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(timeout)*time.Minute)
 
 	args := buildClaudeArgs(fn, prompt, resumeSessionID)
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -109,36 +176,40 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		s.mu.Lock()
+		task.running = false
+		task.errText = "创建输出管道失败"
+		s.mu.Unlock()
+		<-s.concurrencySem // 归还槽位
 		return "", fmt.Errorf("创建输出管道失败: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout // claude 的诊断信息合并进同一流
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		s.mu.Lock()
+		task.running = false
+		task.errText = "启动 claude 失败"
+		s.mu.Unlock()
+		<-s.concurrencySem // 归还槽位
 		return "", fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
 	}
 
-	taskID := fmt.Sprintf("aitask-%d", time.Now().UnixNano())
-	task := &aiTaskRuntime{
-		id:         taskID,
-		functionID: functionID,
-		prompt:     prompt,
-		cmd:        cmd,
-		ctx:        ctx,
-		cancel:     cancel,
-		running:    true,
-		startedAt:  time.Now(),
-		timeoutMin: timeout,
-	}
-	s.mu.Lock()
-	s.tasks[taskID] = task
-	s.mu.Unlock()
+	task.cmd = cmd
+	task.ctx = ctx
+	task.cancel = cancel
+	task.running = true
+	task.timeoutMin = timeout
 
 	go s.pumpOutput(task, stdout)
 	return taskID, nil
 }
 
-// CancelAiTask 取消任务：杀整个子进程树（claude 可能再 spawn python MCP 子进程）。
+// CancelAiTask 取消任务，区分两态：
+//   - 排队中（queued=true，无进程）：从 map 删除，emit ai-task:done（canceled），
+//     让出排队位（RunStage 的 select 醒来后走 canceled 分支自行清理，此处先 emit done 通知前端）
+//   - 运行中（有进程）：标记 canceled 并杀整个子进程树（claude 可能再 spawn python MCP 子进程），
+//     pumpOutput 末尾检测 canceled 构造 done 事件
 func (s *AiFunctionService) CancelAiTask(taskID string) bool {
 	s.mu.Lock()
 	task, ok := s.tasks[taskID]
@@ -147,8 +218,22 @@ func (s *AiFunctionService) CancelAiTask(taskID string) bool {
 		return false
 	}
 	task.canceled = true
+	queued := task.queued
 	s.mu.Unlock()
 
+	if queued {
+		// 排队中：无进程可杀。close queueCancel 唤醒 RunStage 的 select，
+		// 由 select 的 queueCancel 分支 delete map（避免与 select 竞态重复删）。
+		// 竞态保护：若 select 恰好命中 sem 分支（获取槽位），它会在持锁后检测
+		// task.canceled 走归还槽位分支——此处 close 也能让后续不再阻塞。
+		close(task.queueCancel)
+		s.emit("ai-task:done", model.AiTaskRunResult{
+			TaskID:   taskID,
+			Canceled: true,
+			Error:    "已取消（排队中）",
+		})
+		return true
+	}
 	killProcessTree(task.cmd)
 	return true
 }
@@ -165,12 +250,50 @@ func (s *AiFunctionService) GetAiTaskState(taskID string) *model.AiTaskState {
 		TaskID:     task.id,
 		FunctionID: task.functionID,
 		Running:    task.running,
+		Queued:     task.queued,
 		SessionID:  task.sessionID,
 		Prompt:     task.prompt,
 		Output:     task.output.String(),
 		Error:      task.errText,
 		StartedAt:  task.startedAt.UnixMilli(),
+		Metrics:    task.metrics,
 	}
+}
+
+// GetConcurrencyStatus 统计当前并发占用（运行中 + 排队中 + 上限），供前端标题栏展示「N/M」。
+func (s *AiFunctionService) GetConcurrencyStatus() model.AiConcurrencyStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var running, queued int
+	for _, t := range s.tasks {
+		if t.queued {
+			queued++
+		} else if t.running {
+			running++
+		}
+	}
+	return model.AiConcurrencyStatus{
+		Running: running,
+		Queued:  queued,
+		Max:     cap(s.concurrencySem),
+	}
+}
+
+// RemoveAiTask 清理已完成/已取消任务的后端 runtime（前端 Tab 关闭时调用）。
+// 运行中或排队中的任务不允许清理（前端应禁止关闭运行中 Tab，排队任务先 CancelAiTask）。
+// 返回 false 表示任务不存在或仍在运行/排队中，不可清理。
+func (s *AiFunctionService) RemoveAiTask(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return false
+	}
+	if task.running || task.queued {
+		return false
+	}
+	delete(s.tasks, taskID)
+	return true
 }
 
 // CloseAll 应用退出时清理全部运行中任务
@@ -374,13 +497,27 @@ func BuildFollowUpPrompt(followUp *model.AiFollowUp, params map[string]string) (
 
 // ===== stream-json 解析与输出泵 =====
 
-// streamEvent claude --output-format stream-json 的单行事件（只取关心的字段）
+// streamEvent claude --output-format stream-json 的单行事件（只取关心的字段）。
+// result 事件携带的计量字段（usage/duration_ms/total_cost_usd/num_turns）随事件一起解析。
 type streamEvent struct {
-	Type      string            `json:"type"`
-	Subtype   string            `json:"subtype"`
-	SessionID string            `json:"session_id"`
-	Result    string            `json:"result"`
-	Message   *assistantMessage `json:"message"`
+	Type         string            `json:"type"`
+	Subtype      string            `json:"subtype"`
+	SessionID    string            `json:"session_id"`
+	Result       string            `json:"result"`
+	Message      *assistantMessage `json:"message"`
+	IsError      bool              `json:"is_error"`
+	DurationMs   int64             `json:"duration_ms"`
+	NumTurns     int               `json:"num_turns"`
+	TotalCostUSD float64           `json:"total_cost_usd"`
+	Usage        *streamUsage      `json:"usage"`
+}
+
+// streamUsage result 事件 usage 字段的 token 用量（仅取关心的四项）
+type streamUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 type assistantMessage struct {
@@ -393,16 +530,17 @@ type messageContentPart struct {
 	Text string `json:"text"`
 }
 
-// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件)。
+// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件, 会话 id, 计量摘要)。
 // 非 JSON 行（如 stderr 串入的诊断文本）原样作为文本增量返回，不丢输出。
-func parseStreamLine(line string) (text string, isResult bool, sessionID string) {
+// metrics 仅在 result 事件且含计量字段时非 nil（旧版或字段缺失时为 nil，前端判空跳过）。
+func parseStreamLine(line string) (text string, isResult bool, sessionID string, metrics *model.AiTaskMetrics) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
-		return "", false, ""
+		return "", false, "", nil
 	}
 	var ev streamEvent
 	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
-		return line + "\n", false, ""
+		return line + "\n", false, "", nil
 	}
 	if ev.SessionID != "" {
 		sessionID = ev.SessionID
@@ -414,22 +552,42 @@ func parseStreamLine(line string) (text string, isResult bool, sessionID string)
 				sb.WriteString(part.Text)
 			}
 		}
-		return sb.String(), false, sessionID
+		return sb.String(), false, sessionID, nil
 	}
 	if ev.Type == "result" {
-		return "", true, sessionID
+		// result 事件携带计量：duration_ms/num_turns/total_cost_usd 与 usage。
+		// 任一计量字段非零或 usage 非 nil 即构造 metrics；全零（异常 result）返回 nil
+		if ev.DurationMs != 0 || ev.NumTurns != 0 || ev.TotalCostUSD != 0 || ev.Usage != nil {
+			metrics = &model.AiTaskMetrics{
+				DurationMs: ev.DurationMs,
+				NumTurns:   ev.NumTurns,
+				CostUSD:    ev.TotalCostUSD,
+			}
+			if ev.Usage != nil {
+				metrics.Usage = &model.AiTaskUsage{
+					InputTokens:              ev.Usage.InputTokens,
+					OutputTokens:             ev.Usage.OutputTokens,
+					CacheCreationInputTokens: ev.Usage.CacheCreationInputTokens,
+					CacheReadInputTokens:     ev.Usage.CacheReadInputTokens,
+				}
+			}
+		}
+		return "", true, sessionID, metrics
 	}
-	return "", false, sessionID
+	return "", false, sessionID, nil
 }
 
 // pumpOutput 逐行读取 stdout，解析 stream-json 并推送前端事件，等待进程退出。
 func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
+	// 信号量随进程退出释放（cmd.Wait 返回后函数返回，defer 执行）。
+	// pumpOutput 被调用时 task 已获取槽位（RunStage 排队取消分支不进 pumpOutput）。
+	defer func() { <-s.concurrencySem }()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
 	for scanner.Scan() {
-		text, isResult, sessionID := parseStreamLine(scanner.Text())
-		// sessionID/output 写入须持锁：GetAiTaskState 在锁内读取同字段，
+		text, isResult, sessionID, metrics := parseStreamLine(scanner.Text())
+		// sessionID/output/metrics 写入须持锁：GetAiTaskState 在锁内读取同字段，
 		// 无锁并发写 strings.Builder 可能 panic；emit 放锁外避免拖长持锁时间
 		s.mu.Lock()
 		if sessionID != "" {
@@ -437,6 +595,9 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 		}
 		if text != "" {
 			task.output.WriteString(text)
+		}
+		if isResult && metrics != nil {
+			task.metrics = metrics
 		}
 		s.mu.Unlock()
 		if text != "" {
@@ -459,6 +620,7 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 		TaskID:    task.id,
 		SessionID: task.sessionID,
 		Output:    task.output.String(),
+		Metrics:   task.metrics,
 	}
 	if task.canceled {
 		result.Canceled = true

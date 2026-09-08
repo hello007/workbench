@@ -66,6 +66,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RunAiFunction: (...args) => runAiFunctionMock(...args),
   RunAiFollowUp: (...args) => runAiFollowUpMock(...args),
   CancelAiTask: vi.fn(),
+  GetAiConcurrencyStatus: vi.fn(() => Promise.resolve({ running: 0, queued: 0, max: 3 })),
+  RemoveAiTask: vi.fn(() => Promise.resolve(true)),
   OpenInExplorer: (...args) => openInExplorerMock(...args),
   OpenWithDefaultApp: (...args) => openWithDefaultAppMock(...args),
   GetFileTree: vi.fn(() => Promise.resolve([]))
@@ -205,7 +207,8 @@ describe('AiFunctionPanel', () => {
     expect(wrapper.vm.tasks[0]).toMatchObject({
       taskId: 'task-2',
       functionId: 'speech-doc',
-      running: true,
+      queued: true,
+      running: false,
       output: '',
       error: '',
       canceled: false
@@ -213,7 +216,7 @@ describe('AiFunctionPanel', () => {
     // 旧输出/会话等历史一并清空
     expect(wrapper.vm.tasks[0].sessionId).toBe('')
     expect(wrapper.vm.activeTabId).toBe('task-2')
-    // 第三次运行：同功能 Tab 全部运行中，不拦截，新增 Tab
+    // 第三次运行：同功能 Tab 仍在排队中（queued=true），不可复用，新增 Tab
     await runFromCard(wrapper, 1, { file: 'D:\\doc\\c.md' })
     expect(wrapper.vm.tasks.length).toBe(2)
     expect(wrapper.vm.activeTabId).toBe('task-3')
@@ -268,6 +271,70 @@ describe('AiFunctionPanel', () => {
     await flushPromises()
     expect(wrapper.find('.tag').text()).toBe('失败')
     expect(openInExplorerMock).not.toHaveBeenCalled()
+  })
+
+  it('排队态：ai-task:queued 后 Tab 显示排队中，ai-task:started 转运行中', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 0, {})
+    // doRunMain 初始即 queued（后端先排队后执行）
+    expect(wrapper.vm.tasks[0].queued).toBe(true)
+    expect(wrapper.vm.tasks[0].running).toBe(false)
+    expect(wrapper.find('.tag').text()).toBe('排队中')
+
+    // started 事件转运行中
+    eventHandlers['ai-task:started']({ taskId: 'task-1' })
+    await flushPromises()
+    expect(wrapper.vm.tasks[0].queued).toBe(false)
+    expect(wrapper.vm.tasks[0].running).toBe(true)
+    expect(wrapper.find('.tag').text()).toBe('运行中')
+  })
+
+  it('done 带 metrics 时底栏展示耗时/token/成本摘要', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 0, {})
+
+    eventHandlers['ai-task:done']({
+      taskId: 'task-1',
+      error: '',
+      canceled: false,
+      metrics: {
+        durationMs: 8268,
+        numTurns: 1,
+        costUsd: 0.14502,
+        usage: { inputTokens: 28919, outputTokens: 17, cacheReadInputTokens: 0 }
+      }
+    })
+    await flushPromises()
+    const footer = wrapper.find('.task-footer')
+    expect(footer.exists()).toBe(true)
+    const metricsText = footer.find('.metrics-text').text()
+    expect(metricsText).toContain('8s')         // 耗时
+    expect(metricsText).toContain('28.9k')      // 入 token（k 进制）
+    expect(metricsText).toContain('0.145')      // 成本三位小数
+    // cacheReadInputTokens=0 不展示缓存读，numTurns=1 不展示轮次
+    expect(metricsText).not.toContain('缓存读')
+    expect(metricsText).not.toContain('轮')
+  })
+
+  it('输出超 256KB 时前端截断保留末尾窗口并标记 truncated', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await runFromCard(wrapper, 0, {})
+
+    // 模拟 started 转运行中（截断在 onOutput 累加时触发）
+    eventHandlers['ai-task:started']({ taskId: 'task-1' })
+    await flushPromises()
+
+    // 灌入超 256KB 输出（300KB），触发截断
+    const big = 'x'.repeat(300 * 1024)
+    eventHandlers['ai-task:output']({ taskId: 'task-1', text: big })
+    await flushPromises()
+    expect(wrapper.vm.tasks[0].truncated).toBe(true)
+    // 截断后 output 仅保留末尾 256KB + 顶部提示
+    expect(wrapper.vm.tasks[0].output.length).toBeLessThan(300 * 1024)
+    expect(wrapper.vm.tasks[0].output).toContain('已省略前')
   })
 
   it('会议列表输出 markdown 表格时渲染表格视图（隐藏列不渲染），行内取消走确认后续段', async () => {
