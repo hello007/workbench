@@ -1414,3 +1414,42 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 43: 前端引入 Pinia 状态管理（6 批迁移 + 收尾）
+
+**Date**: 2026-09-10
+**Task**: 前端引入 Pinia 状态管理（6 批迁移 + 收尾）
+**Branch**: `master`
+
+### Summary
+
+引入 Pinia 统一前端状态管理，6 批风险递增迁移：PR1 骨架（pinia+@pinia/testing+store/5空壳+acceptHMRUpdate，顺手修 wails v2 runtime 无 SaveFileDialog/OpenFileDialog 导出的预存 bug——后端 app.go 加桥接方法+wails generate module 同步绑定）；PR2 favorites；PR3 settings（纯函数命名导出+action）；PR4 ui（12 state+2 action，6 子组件删 UI prop 直读 store）；PR5 directory（核心数据流，4 子组件删数据 prop，DirectoryTree localDirectories 保留拖拽副本，onRepoLocate cross-workdir 时序保留）；PR6 workspace（selectedNode/latestCommit/clipboard/lastInteractedTree，ContentPanel 30+ props.selectedNode 替换，latestCommit emit 链改直写 store，clipboard prop 删零消费）。设计原则：store管数据ref管命令（refreshNode/previewFile/locateNode 走 template ref+defineExpose）。收尾补 5 store action/getter 单测（21文件336用例）+ spec 目录对齐（git mv useFavorites/useShortcuts 至 store/__tests__）+ README/docs 文档更新。全程 wailsjs 绑定零变更（对话框桥接修复除外），npm test+build 双绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb057ff` | (see git log) |
+| `2151b1f` | (see git log) |
+| `71e274f` | (see git log) |
+| `b55e551` | (see git log) |
+| `7310273` | (see git log) |
+| `615385b` | (see git log) |
+| `22e545f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
