@@ -597,6 +597,30 @@ func (s *AiFunctionService) ClearAiTaskHistory(criteria *model.AiTaskHistoryClea
 	return s.historySvc.Clear(criteria)
 }
 
+// GetAiTaskHistoryStats 历史聚合统计（汇总 + 按功能排行），委托 historySvc。
+func (s *AiFunctionService) GetAiTaskHistoryStats(filter *model.AiTaskHistoryFilter) (*model.AiTaskHistoryStats, error) {
+	if s.historySvc == nil {
+		return &model.AiTaskHistoryStats{}, nil
+	}
+	return s.historySvc.Stats(filter)
+}
+
+// ExportAiTaskHistoryCSV 历史明细导出 CSV 文本，委托 historySvc。
+func (s *AiFunctionService) ExportAiTaskHistoryCSV(filter *model.AiTaskHistoryFilter) (string, error) {
+	if s.historySvc == nil {
+		return "", fmt.Errorf("历史服务未初始化")
+	}
+	return s.historySvc.ExportCSV(filter)
+}
+
+// ExportAiTaskHistoryMarkdown 历史报告导出 Markdown 文本，委托 historySvc。
+func (s *AiFunctionService) ExportAiTaskHistoryMarkdown(filter *model.AiTaskHistoryFilter) (string, error) {
+	if s.historySvc == nil {
+		return "", fmt.Errorf("历史服务未初始化")
+	}
+	return s.historySvc.ExportMarkdown(filter)
+}
+
 // StartHistoryCleanup 启动定时清理 goroutine：周期性清理未归档的运行期输出文件兜底防孤儿。
 // 归档接管（os.Rename）已移走文件不留残，此清理只处理异常残留。ctx 取消则停止。
 // 调用方为 app.go startup（应用启动时调一次）。

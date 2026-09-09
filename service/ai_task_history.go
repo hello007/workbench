@@ -186,6 +186,180 @@ func (h *AiTaskHistoryService) List(filter *model.AiTaskHistoryFilter) ([]*model
 	return result, nil
 }
 
+// Stats 按筛选范围聚合统计：总数/成功数/总成本/token 四分项/总耗时 + 按功能项聚合排行。
+// metrics 为 nil 的记录（异常 result）计入 count 但跳过计量累加。
+// 量级 2000 条上限（enforceRetention），内存聚合无性能压力。
+func (h *AiTaskHistoryService) Stats(filter *model.AiTaskHistoryFilter) (*model.AiTaskHistoryStats, error) {
+	list, err := h.List(filter)
+	if err != nil {
+		return nil, err
+	}
+	stats := &model.AiTaskHistoryStats{ByFunction: []model.FunctionStat{}}
+	// FunctionID -> 聚合下标；Name 快照取最新（列表降序，首次遇到即最新）
+	fnIndex := map[string]int{}
+	for _, e := range list {
+		stats.TotalCount++
+		if e.Status == "success" {
+			stats.SuccessCount++
+		}
+		idx, ok := fnIndex[e.FunctionID]
+		if !ok {
+			stats.ByFunction = append(stats.ByFunction, model.FunctionStat{
+				FunctionID:   e.FunctionID,
+				FunctionName: e.Name,
+			})
+			idx = len(stats.ByFunction) - 1
+			fnIndex[e.FunctionID] = idx
+		}
+		stats.ByFunction[idx].Count++
+		if e.Metrics == nil {
+			continue
+		}
+		stats.TotalCostUSD += e.Metrics.CostUSD
+		stats.TotalDurationMs += e.Metrics.DurationMs
+		stats.ByFunction[idx].TotalCostUSD += e.Metrics.CostUSD
+		if e.Metrics.Usage != nil {
+			stats.TotalInputTokens += e.Metrics.Usage.InputTokens
+			stats.TotalOutputTokens += e.Metrics.Usage.OutputTokens
+			stats.TotalCacheReadTokens += e.Metrics.Usage.CacheReadInputTokens
+			stats.TotalCacheCreationTokens += e.Metrics.Usage.CacheCreationInputTokens
+			stats.ByFunction[idx].TotalTokens += e.Metrics.Usage.InputTokens + e.Metrics.Usage.OutputTokens
+		}
+	}
+	// 按运行次数降序排行
+	sort.SliceStable(stats.ByFunction, func(i, j int) bool {
+		return stats.ByFunction[i].Count > stats.ByFunction[j].Count
+	})
+	return stats, nil
+}
+
+// csvEscape 标准字段转义：含逗号/引号/换行的字段用双引号包裹，内部引号翻倍
+func csvEscape(s string) string {
+	if strings.ContainsAny(s, ",\"\r\n") {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+	return s
+}
+
+// ExportCSV 按筛选范围导出明细 CSV 文本（UTF-8 BOM 开头，Excel 打开中文不乱码）。
+// 列：时间/功能/状态/耗时ms/成本USD/入token/出token/输出大小。
+func (h *AiTaskHistoryService) ExportCSV(filter *model.AiTaskHistoryFilter) (string, error) {
+	list, err := h.List(filter)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("\ufeff") // UTF-8 BOM (Excel zh-CN compatible)
+	b.WriteString("时间,功能,状态,耗时ms,成本USD,入token,出token,输出大小\n")
+	for _, e := range list {
+		var durationMs int64
+		var costUSD float64
+		var inTok, outTok int
+		if e.Metrics != nil {
+			durationMs = e.Metrics.DurationMs
+			costUSD = e.Metrics.CostUSD
+			if e.Metrics.Usage != nil {
+				inTok = e.Metrics.Usage.InputTokens
+				outTok = e.Metrics.Usage.OutputTokens
+			}
+		}
+		fmt.Fprintf(&b, "%s,%s,%s,%d,%.6f,%d,%d,%d\n",
+			csvEscape(formatHistoryTime(e.FinishedAt)),
+			csvEscape(e.Name),
+			csvEscape(e.Status),
+			durationMs, costUSD, inTok, outTok, e.OutputSize)
+	}
+	return b.String(), nil
+}
+
+// formatHistoryTime unix 毫秒转本地时间字符串（导出报告的时间列）
+func formatHistoryTime(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).Format("2006-01-02 15:04:05")
+}
+
+// mdEscape Markdown 表格单元格转义：竖线会破坏列结构，替换为全角
+func mdEscape(s string) string {
+	return strings.ReplaceAll(s, "|", "｜")
+}
+
+// ExportMarkdown 按筛选范围导出报告 Markdown 文本：标题（含筛选时间范围）+ 统计摘要表 + 功能排行表 + 明细表。
+func (h *AiTaskHistoryService) ExportMarkdown(filter *model.AiTaskHistoryFilter) (string, error) {
+	stats, err := h.Stats(filter)
+	if err != nil {
+		return "", err
+	}
+	list, err := h.List(filter)
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	b.WriteString("# AI 任务历史报告\n\n")
+	if filter != nil && (filter.From > 0 || filter.To > 0) {
+		fromStr, toStr := "不限", "不限"
+		if filter.From > 0 {
+			fromStr = formatHistoryTime(filter.From)
+		}
+		if filter.To > 0 {
+			toStr = formatHistoryTime(filter.To)
+		}
+		fmt.Fprintf(&b, "**筛选时间范围**：%s 至 %s\n\n", fromStr, toStr)
+	}
+
+	// 统计摘要表
+	b.WriteString("## 统计摘要\n\n")
+	b.WriteString("| 指标 | 数值 |\n| --- | --- |\n")
+	fmt.Fprintf(&b, "| 运行次数 | %d（成功 %d） |\n", stats.TotalCount, stats.SuccessCount)
+	fmt.Fprintf(&b, "| 总成本 | $%.6f |\n", stats.TotalCostUSD)
+	fmt.Fprintf(&b, "| 总 token | %d（入 %d / 出 %d / 缓存读 %d / 缓存写 %d） |\n",
+		stats.TotalInputTokens+stats.TotalOutputTokens+stats.TotalCacheReadTokens+stats.TotalCacheCreationTokens,
+		stats.TotalInputTokens, stats.TotalOutputTokens, stats.TotalCacheReadTokens, stats.TotalCacheCreationTokens)
+	fmt.Fprintf(&b, "| 总耗时 | %s |\n\n", formatDurationFull(stats.TotalDurationMs))
+
+	// 功能排行表
+	b.WriteString("## 功能排行\n\n")
+	b.WriteString("| 功能 | 运行次数 | 总成本 | 入+出 token |\n| --- | --- | --- | --- |\n")
+	for _, fn := range stats.ByFunction {
+		fmt.Fprintf(&b, "| %s | %d | $%.6f | %d |\n",
+			mdEscape(fn.FunctionName), fn.Count, fn.TotalCostUSD, fn.TotalTokens)
+	}
+	b.WriteString("\n")
+
+	// 明细表
+	b.WriteString("## 明细\n\n")
+	b.WriteString("| 时间 | 功能 | 状态 | 耗时 | 成本 |\n| --- | --- | --- | --- | --- |\n")
+	for _, e := range list {
+		durationStr, costStr := "—", "—"
+		if e.Metrics != nil {
+			durationStr = formatDurationFull(e.Metrics.DurationMs)
+			costStr = fmt.Sprintf("$%.6f", e.Metrics.CostUSD)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+			mdEscape(formatHistoryTime(e.FinishedAt)), mdEscape(e.Name), mdEscape(e.Status), durationStr, costStr)
+	}
+	return b.String(), nil
+}
+
+// formatDurationFull 毫秒时长转「Xh Ym Zs」全格式（导出报告用，避免省略高位）
+func formatDurationFull(ms int64) string {
+	if ms <= 0 {
+		return "0s"
+	}
+	s := ms / 1000
+	h, m, sec := s/3600, s%3600/60, s%60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, sec)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, sec)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+}
+
 // GetOutput 读取单条历史的归档输出文件全文（详情查看输出走此路径）。
 // 文件不存在返回错误，供前端判空降级。
 func (h *AiTaskHistoryService) GetOutput(id string) (string, error) {

@@ -51,7 +51,43 @@
       </el-select>
       <el-button size="small" @click="loadList">查询</el-button>
       <el-button size="small" type="warning" plain @click="clearOld">清理 30 天前</el-button>
+      <el-button size="small" plain @click="exportCsv">导出 CSV</el-button>
+      <el-button size="small" plain @click="exportMarkdown">导出 Markdown</el-button>
       <span class="filter-count">共 {{ list.length }} 条</span>
+    </div>
+
+    <!-- 统计卡片区：随筛选查询一并刷新 -->
+    <div class="history-stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.totalCount }} <span class="stat-sub">成功 {{ stats.successCount }}</span></div>
+        <div class="stat-label">运行次数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${{ stats.totalCostUsd.toFixed(3) }}</div>
+        <div class="stat-label">总成本</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" title="入 {{ stats.totalInputTokens }} / 出 {{ stats.totalOutputTokens }} / 缓存读 {{ stats.totalCacheReadTokens }} / 缓存写 {{ stats.totalCacheCreationTokens }}">
+          {{ totalTokens() }}
+        </div>
+        <div class="stat-label">总 token</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ fmtDuration(stats.totalDurationMs) }}</div>
+        <div class="stat-label">总耗时</div>
+      </div>
+      <!-- 功能排行：全部展示 -->
+      <div v-if="stats.byFunction && stats.byFunction.length" class="stat-card fn-rank">
+        <el-table :data="stats.byFunction" size="small" border max-height="120">
+          <el-table-column prop="functionName" label="功能排行" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.functionName }}</template>
+          </el-table-column>
+          <el-table-column prop="count" label="次数" width="60" />
+          <el-table-column label="成本" width="80">
+            <template #default="{ row }">${{ row.totalCostUsd.toFixed(3) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
     </div>
 
     <!-- 历史列表 -->
@@ -117,11 +153,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GetAiFunctions,
   GetAiTaskHistory,
+  GetAiTaskHistoryStats,
   GetAiTaskHistoryOutput,
+  ExportAiTaskHistoryCSV,
+  ExportAiTaskHistoryMarkdown,
   DeleteAiTaskHistory,
-  ClearAiTaskHistory
+  ClearAiTaskHistory,
+  SaveFile
 } from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { EventsOn, EventsOff, SaveFileDialog } from '../../wailsjs/runtime/runtime'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['update:visible'])
@@ -130,6 +170,18 @@ const functions = ref([])
 const list = ref([])
 const filter = ref({ functionId: '', status: '', from: 0, to: 0 })
 const dateRange = ref(null)
+// 统计随筛选查询一并拉取（loadList 时并行）
+const stats = ref({
+  totalCount: 0,
+  successCount: 0,
+  totalCostUsd: 0,
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  totalCacheReadTokens: 0,
+  totalCacheCreationTokens: 0,
+  totalDurationMs: 0,
+  byFunction: []
+})
 
 // 详情抽屉状态
 const detailVisible = ref(false)
@@ -147,11 +199,55 @@ const loadFunctions = async () => {
 
 const loadList = async () => {
   try {
-    list.value = (await GetAiTaskHistory(filter.value)) || []
+    // 列表与统计并行拉取，保证统计与列表同筛选范围
+    const [hist, stat] = await Promise.all([
+      GetAiTaskHistory(filter.value),
+      GetAiTaskHistoryStats(filter.value)
+    ])
+    list.value = hist || []
+    stats.value = stat || stats.value
   } catch (e) {
     ElMessage.error('加载历史失败: ' + (e?.message || String(e)))
   }
 }
+
+// 总 token = 四分项相加（不合并口径，tooltip 展示分项）
+const totalTokens = () =>
+  (stats.value.totalInputTokens || 0) +
+  (stats.value.totalOutputTokens || 0) +
+  (stats.value.totalCacheReadTokens || 0) +
+  (stats.value.totalCacheCreationTokens || 0)
+
+// 导出通用流程：后端生成文本 -> SaveFileDialog 选路径 -> SaveFile 落盘
+const exportReport = async (fetchText, defaultFilename, filters, label) => {
+  let text
+  try {
+    text = await fetchText(filter.value)
+  } catch (e) {
+    ElMessage.error('生成' + label + '失败: ' + (e?.message || String(e)))
+    return
+  }
+  let path
+  try {
+    path = await SaveFileDialog({ DefaultFilename: defaultFilename, Filters: filters })
+  } catch {
+    // runtime 不可用时静默（保存对话框被取消不算错误）
+    return
+  }
+  if (!path) return // 用户取消
+  try {
+    await SaveFile(path, text, 'utf-8')
+    ElMessage.success(label + '已保存: ' + path)
+  } catch (e) {
+    ElMessage.error('保存' + label + '失败: ' + (e?.message || String(e)))
+  }
+}
+
+const exportCsv = () =>
+  exportReport(ExportAiTaskHistoryCSV, 'ai-task-history.csv', [{ DisplayName: 'CSV 文件', Pattern: '*.csv' }], 'CSV')
+
+const exportMarkdown = () =>
+  exportReport(ExportAiTaskHistoryMarkdown, 'ai-task-history-report.md', [{ DisplayName: 'Markdown 文件', Pattern: '*.md' }], 'Markdown 报告')
 
 // 打开时加载功能列表与历史（destroy-on-close 下每次打开重新加载，含最新归档）
 const onOpen = () => {
@@ -301,6 +397,40 @@ onBeforeUnmount(() => {
   margin-left: auto;
   font-size: 12px;
   color: var(--text-tertiary, #909399);
+}
+/* 统计卡片区：4 个数字卡 + 功能排行，随筛选刷新 */
+.history-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.stat-card {
+  min-width: 110px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-tertiary, #f5f7fa);
+}
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.stat-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-tertiary, #909399);
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--text-tertiary, #909399);
+}
+.fn-rank {
+  flex: 1;
+  min-width: 300px;
+  padding: 4px;
 }
 .detail-loading {
   padding: 24px;

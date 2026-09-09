@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -280,5 +281,174 @@ func TestBuildPromptPreview(t *testing.T) {
 	got := buildPromptPreview(long, 10)
 	if len([]rune(got)) > 11 {
 		t.Errorf("长 prompt 应截断到约 10 字: %d", len([]rune(got)))
+	}
+}
+
+// makeEntryWithMetrics 构造带计量的历史元数据（Stats/Export 测试用）
+func makeEntryWithMetrics(id, functionID, name string, finishedAt time.Time, status string, usage *model.AiTaskUsage, costUSD float64, durationMs int64) *model.AiTaskHistory {
+	e := makeEntry(id, finishedAt, status, 100)
+	e.FunctionID = functionID
+	e.Name = name
+	if usage != nil || costUSD > 0 || durationMs > 0 {
+		e.Metrics = &model.AiTaskMetrics{Usage: usage, CostUSD: costUSD, DurationMs: durationMs}
+	}
+	return e
+}
+
+// TestStats_Aggregation 多记录多功能项聚合：总数/成功数/token 四分项/成本/耗时 + 按次数降序
+func TestStats_Aggregation(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	entries := []*model.AiTaskHistory{
+		// 周报：2 次（1 成功 1 失败），带计量
+		makeEntryWithMetrics("s1", "fn-report", "生成周报", base.Add(-3*time.Hour), "success",
+			&model.AiTaskUsage{InputTokens: 1000, OutputTokens: 500, CacheReadInputTokens: 200, CacheCreationInputTokens: 100}, 0.012, 60000),
+		makeEntryWithMetrics("s2", "fn-report", "生成周报", base.Add(-2*time.Hour), "failed",
+			&model.AiTaskUsage{InputTokens: 200, OutputTokens: 100, CacheReadInputTokens: 0, CacheCreationInputTokens: 50}, 0.003, 10000),
+		// 会议预约：1 次成功
+		makeEntryWithMetrics("s3", "fn-meeting", "预约腾讯会议", base.Add(-1*time.Hour), "success",
+			&model.AiTaskUsage{InputTokens: 300, OutputTokens: 80, CacheReadInputTokens: 20, CacheCreationInputTokens: 10}, 0.005, 30000),
+	}
+	for _, e := range entries {
+		_, _ = svc.Archive(e, "")
+	}
+
+	stats, err := svc.Stats(nil)
+	if err != nil {
+		t.Fatalf("Stats 失败: %v", err)
+	}
+	if stats.TotalCount != 3 || stats.SuccessCount != 2 {
+		t.Errorf("计数不符: total=%d success=%d（期望 3/2）", stats.TotalCount, stats.SuccessCount)
+	}
+	if stats.TotalInputTokens != 1500 || stats.TotalOutputTokens != 680 {
+		t.Errorf("入/出 token 不符: %d/%d（期望 1500/680）", stats.TotalInputTokens, stats.TotalOutputTokens)
+	}
+	if stats.TotalCacheReadTokens != 220 || stats.TotalCacheCreationTokens != 160 {
+		t.Errorf("缓存 token 不符: read=%d creation=%d（期望 220/160）", stats.TotalCacheReadTokens, stats.TotalCacheCreationTokens)
+	}
+	if stats.TotalCostUSD < 0.0199 || stats.TotalCostUSD > 0.0201 {
+		t.Errorf("总成本不符: %f（期望约 0.020）", stats.TotalCostUSD)
+	}
+	if stats.TotalDurationMs != 100000 {
+		t.Errorf("总耗时不符: %d（期望 100000）", stats.TotalDurationMs)
+	}
+	// 功能排行按次数降序：fn-report(2) 在前
+	if len(stats.ByFunction) != 2 {
+		t.Fatalf("功能聚合数不符: %d（期望 2）", len(stats.ByFunction))
+	}
+	if stats.ByFunction[0].FunctionID != "fn-report" || stats.ByFunction[0].Count != 2 {
+		t.Errorf("排行首位不符: %+v", stats.ByFunction[0])
+	}
+	if stats.ByFunction[0].TotalTokens != 1800 {
+		t.Errorf("fn-report 入+出 token 不符: %d（期望 1800）", stats.ByFunction[0].TotalTokens)
+	}
+}
+
+// TestStats_NilMetrics metrics 为 nil 的记录计入 count 但不累加计量
+func TestStats_NilMetrics(t *testing.T) {
+	svc := newHistorySvc(t)
+	now := time.Now()
+	_, _ = svc.Archive(makeEntry("m1", now, "failed", 0), "") // metrics 为 nil
+	_, _ = svc.Archive(makeEntryWithMetrics("m2", "fn-a", "功能A", now.Add(-time.Hour), "success",
+		&model.AiTaskUsage{InputTokens: 10, OutputTokens: 5}, 0.001, 1000), "")
+
+	stats, _ := svc.Stats(nil)
+	if stats.TotalCount != 2 {
+		t.Errorf("nil metrics 应计入 TotalCount: %d（期望 2）", stats.TotalCount)
+	}
+	if stats.TotalInputTokens != 10 || stats.TotalCostUSD > 0.0011 || stats.TotalDurationMs != 1000 {
+		t.Errorf("nil metrics 不应累加计量: %+v", stats)
+	}
+}
+
+// TestStats_Filter Stats 尊重筛选条件（功能/状态/时间范围）
+func TestStats_Filter(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	_, _ = svc.Archive(makeEntryWithMetrics("f1", "fn-a", "功能A", base.Add(-2*time.Hour), "success",
+		&model.AiTaskUsage{InputTokens: 100, OutputTokens: 50}, 0.01, 5000), "")
+	_, _ = svc.Archive(makeEntryWithMetrics("f2", "fn-b", "功能B", base, "failed",
+		&model.AiTaskUsage{InputTokens: 200, OutputTokens: 0}, 0.02, 0), "")
+
+	// 功能筛选
+	fnStats, _ := svc.Stats(&model.AiTaskHistoryFilter{FunctionID: "fn-a"})
+	if fnStats.TotalCount != 1 || fnStats.TotalInputTokens != 100 {
+		t.Errorf("功能筛选聚合不符: %+v", fnStats)
+	}
+	// 状态筛选
+	stStats, _ := svc.Stats(&model.AiTaskHistoryFilter{Status: "success"})
+	if stStats.TotalCount != 1 || stStats.SuccessCount != 1 {
+		t.Errorf("状态筛选聚合不符: %+v", stStats)
+	}
+	// 时间范围：仅 f2（base 时刻）
+	timeStats, _ := svc.Stats(&model.AiTaskHistoryFilter{From: base.Add(-time.Hour).UnixMilli()})
+	if timeStats.TotalCount != 1 {
+		t.Errorf("时间筛选聚合不符: %+v", timeStats)
+	}
+}
+
+// TestExportCSV BOM 头、表头、字段转义（含逗号的功能名）
+func TestExportCSV(t *testing.T) {
+	svc := newHistorySvc(t)
+	now := time.Now()
+	_, _ = svc.Archive(makeEntryWithMetrics("c1", "fn-x", "导出,测试", now, "success",
+		&model.AiTaskUsage{InputTokens: 10, OutputTokens: 5}, 0.01, 2000), "")
+
+	csv, err := svc.ExportCSV(nil)
+	if err != nil {
+		t.Fatalf("ExportCSV 失败: %v", err)
+	}
+	// UTF-8 BOM 开头（U+FEFF）
+	if !strings.HasPrefix(csv, string(rune(0xFEFF))) {
+		t.Error("CSV 应以 UTF-8 BOM 开头")
+	}
+	// 表头
+	if !strings.Contains(csv, "时间,功能,状态,耗时ms,成本USD,入token,出token,输出大小") {
+		t.Errorf("CSV 表头不符: %s", csv)
+	}
+	// 含逗号的功能名被引号包裹
+	if !strings.Contains(csv, `"导出,测试"`) {
+		t.Errorf("含逗号功能名应转义: %s", csv)
+	}
+	// 数据列
+	if !strings.Contains(csv, ",success,2000,") {
+		t.Errorf("耗时/状态列不符: %s", csv)
+	}
+}
+
+// TestExportMarkdown 含统计摘要表与功能排行表关键行
+func TestExportMarkdown(t *testing.T) {
+	svc := newHistorySvc(t)
+	now := time.Now()
+	_, _ = svc.Archive(makeEntryWithMetrics("d1", "fn-md", "周报生成", now, "success",
+		&model.AiTaskUsage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10, CacheCreationInputTokens: 5}, 0.02, 30000), "")
+	_, _ = svc.Archive(makeEntry("d2", now.Add(-time.Minute), "failed", 0), "")
+
+	md, err := svc.ExportMarkdown(nil)
+	if err != nil {
+		t.Fatalf("ExportMarkdown 失败: %v", err)
+	}
+	// 标题与三个表
+	for _, want := range []string{"# AI 任务历史报告", "## 统计摘要", "## 功能排行", "## 明细", "周报生成"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Markdown 缺少关键内容 %q:\n%s", want, md)
+		}
+	}
+	// 摘要含次数与成功数
+	if !strings.Contains(md, "| 运行次数 | 2（成功 1） |") {
+		t.Errorf("摘要运行次数不符:\n%s", md)
+	}
+}
+
+// TestCsvEscape CSV 字段转义：逗号/引号包裹、内部引号翻倍
+func TestCsvEscape(t *testing.T) {
+	if got := csvEscape("普通"); got != "普通" {
+		t.Errorf("普通字段不应转义: %s", got)
+	}
+	if got := csvEscape("a,b"); got != `"a,b"` {
+		t.Errorf("含逗号应引号包裹: %s", got)
+	}
+	if got := csvEscape(`说"好"`); got != `"说""好"""` {
+		t.Errorf("含引号应翻倍: %s", got)
 	}
 }

@@ -1388,3 +1388,24 @@ func (a *App) ClearAiTaskHistory(criteria model.AiTaskHistoryClearCriteria) int 
 	n, _ := a.aiFuncSvc.ClearAiTaskHistory(&criteria)
 	return n
 }
+
+// GetAiTaskHistoryStats 历史聚合统计（按筛选范围汇总次数/成本/token 四分项/耗时 + 功能排行）。
+// historySvc 未初始化时返回零值统计，前端空态展示。
+func (a *App) GetAiTaskHistoryStats(filter model.AiTaskHistoryFilter) *model.AiTaskHistoryStats {
+	stats, err := a.aiFuncSvc.GetAiTaskHistoryStats(&filter)
+	if err != nil || stats == nil {
+		return &model.AiTaskHistoryStats{ByFunction: []model.FunctionStat{}}
+	}
+	return stats
+}
+
+// ExportAiTaskHistoryCSV 导出当前筛选范围的历史明细 CSV 文本（UTF-8 BOM 开头）。
+// 落盘由前端经 SaveFileDialog 选路径后调 SaveFile 完成，后端不直接写文件。
+func (a *App) ExportAiTaskHistoryCSV(filter model.AiTaskHistoryFilter) (string, error) {
+	return a.aiFuncSvc.ExportAiTaskHistoryCSV(&filter)
+}
+
+// ExportAiTaskHistoryMarkdown 导出当前筛选范围的历史报告 Markdown 文本（统计摘要 + 功能排行 + 明细）。
+func (a *App) ExportAiTaskHistoryMarkdown(filter model.AiTaskHistoryFilter) (string, error) {
+	return a.aiFuncSvc.ExportAiTaskHistoryMarkdown(&filter)
+}

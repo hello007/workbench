@@ -37,6 +37,30 @@ type AiTaskHistoryFilter struct {
 	To         int64  `json:"to,omitempty"`         // 结束时间（unix 毫秒），0 表示不限
 }
 
+// AiTaskHistoryStats 历史聚合统计（按筛选范围汇总，后端算好返回，前端只渲染）。
+// metrics 为 nil 的记录（异常 result）计入 TotalCount 但不参与 token/成本/耗时累加。
+type AiTaskHistoryStats struct {
+	TotalCount   int     `json:"totalCount"`   // 记录总数
+	SuccessCount int     `json:"successCount"` // 成功数
+	TotalCostUSD float64 `json:"totalCostUsd"` // 总成本
+	// token 四分项独立累加（Anthropic 计费口径：cache_creation 与 cache_read 均为实际消耗）
+	TotalInputTokens         int            `json:"totalInputTokens"`
+	TotalOutputTokens        int            `json:"totalOutputTokens"`
+	TotalCacheReadTokens     int            `json:"totalCacheReadTokens"`
+	TotalCacheCreationTokens int            `json:"totalCacheCreationTokens"`
+	TotalDurationMs          int64          `json:"totalDurationMs"` // 总耗时（仅成功任务有计量）
+	ByFunction               []FunctionStat `json:"byFunction"`      // 按功能项聚合（按运行次数降序）
+}
+
+// FunctionStat 单个功能项的统计。
+type FunctionStat struct {
+	FunctionID   string  `json:"functionId"`
+	FunctionName string  `json:"functionName"` // 取最近一条的 name 快照（功能改名取最新）
+	Count        int     `json:"count"`
+	TotalCostUSD float64 `json:"totalCostUsd"`
+	TotalTokens  int     `json:"totalTokens"` // 入+出
+}
+
 // AiTaskHistoryClearCriteria 批量清理条件，满足任一条件的记录被清理。
 // OlderThan 与 KeepRecent 互斥：OlderThan 按天数清理（清理 N 天前），
 // KeepRecent 保留最近 N 条、清理其余。

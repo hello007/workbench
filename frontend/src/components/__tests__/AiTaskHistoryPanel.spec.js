@@ -4,7 +4,8 @@ import AiTaskHistoryPanel from '../AiTaskHistoryPanel.vue'
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(),
-  EventsOff: vi.fn()
+  EventsOff: vi.fn(),
+  SaveFileDialog: (...args) => SaveFileDialogMock(...args)
 }))
 
 vi.mock('element-plus', async () => {
@@ -49,10 +50,30 @@ const mockHistory = [
   }
 ]
 
+const SaveFileDialogMock = vi.fn(() => Promise.resolve('D:/tmp/ai-task-history.csv'))
 const getAiTaskHistoryMock = vi.fn(() => Promise.resolve(mockHistory))
+const getAiTaskHistoryStatsMock = vi.fn(() =>
+  Promise.resolve({
+    totalCount: 2,
+    successCount: 1,
+    totalCostUsd: 0.012,
+    totalInputTokens: 1000,
+    totalOutputTokens: 500,
+    totalCacheReadTokens: 200,
+    totalCacheCreationTokens: 100,
+    totalDurationMs: 60000,
+    byFunction: [
+      { functionId: 'weekly-report', functionName: '生成周报', count: 1, totalCostUsd: 0.012, totalTokens: 1500 },
+      { functionId: 'meeting-book', functionName: '预约腾讯会议', count: 1, totalCostUsd: 0, totalTokens: 0 }
+    ]
+  })
+)
 const getAiTaskHistoryOutputMock = vi.fn(() => Promise.resolve('归档输出全文\n第二行'))
 const deleteAiTaskHistoryMock = vi.fn(() => Promise.resolve(true))
 const clearAiTaskHistoryMock = vi.fn(() => Promise.resolve(1))
+const exportCsvMock = vi.fn(() => Promise.resolve('﻿时间,功能\n2026-01-01,周报'))
+const exportMarkdownMock = vi.fn(() => Promise.resolve('# AI 任务历史报告'))
+const saveFileMock = vi.fn(() => Promise.resolve())
 const getAiFunctionsMock = vi.fn(() =>
   Promise.resolve([
     { id: 'weekly-report', name: '生成周报' },
@@ -63,7 +84,11 @@ const getAiFunctionsMock = vi.fn(() =>
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetAiFunctions: (...args) => getAiFunctionsMock(...args),
   GetAiTaskHistory: (...args) => getAiTaskHistoryMock(...args),
+  GetAiTaskHistoryStats: (...args) => getAiTaskHistoryStatsMock(...args),
   GetAiTaskHistoryOutput: (...args) => getAiTaskHistoryOutputMock(...args),
+  ExportAiTaskHistoryCSV: (...args) => exportCsvMock(...args),
+  ExportAiTaskHistoryMarkdown: (...args) => exportMarkdownMock(...args),
+  SaveFile: (...args) => saveFileMock(...args),
   DeleteAiTaskHistory: (...args) => deleteAiTaskHistoryMock(...args),
   ClearAiTaskHistory: (...args) => clearAiTaskHistoryMock(...args)
 }))
@@ -118,6 +143,24 @@ describe('AiTaskHistoryPanel', () => {
     getAiTaskHistoryOutputMock.mockResolvedValue('归档输出全文\n第二行')
     deleteAiTaskHistoryMock.mockResolvedValue(true)
     clearAiTaskHistoryMock.mockResolvedValue(1)
+    getAiTaskHistoryStatsMock.mockResolvedValue({
+      totalCount: 2,
+      successCount: 1,
+      totalCostUsd: 0.012,
+      totalInputTokens: 1000,
+      totalOutputTokens: 500,
+      totalCacheReadTokens: 200,
+      totalCacheCreationTokens: 100,
+      totalDurationMs: 60000,
+      byFunction: [
+        { functionId: 'weekly-report', functionName: '生成周报', count: 1, totalCostUsd: 0.012, totalTokens: 1500 },
+        { functionId: 'meeting-book', functionName: '预约腾讯会议', count: 1, totalCostUsd: 0, totalTokens: 0 }
+      ]
+    })
+    exportCsvMock.mockResolvedValue('﻿时间,功能\n2026-01-01,周报')
+    exportMarkdownMock.mockResolvedValue('# AI 任务历史报告')
+    saveFileMock.mockResolvedValue()
+    SaveFileDialogMock.mockResolvedValue('D:/tmp/ai-task-history.csv')
   })
 
   it('打开时加载功能列表与历史，按列表渲染', async () => {
@@ -190,5 +233,44 @@ describe('AiTaskHistoryPanel', () => {
     expect(text).toContain('2.0 KB')
     // 成本 0.012 → $0.012
     expect(text).toContain('$0.012')
+  })
+
+  it('统计区随查询渲染：数字卡与功能排行', async () => {
+    const wrapper = createWrapper(true)
+    await flushPromises()
+    expect(getAiTaskHistoryStatsMock).toHaveBeenCalled()
+    const text = wrapper.find('.history-stats').text()
+    // 运行次数与成功数
+    expect(text).toContain('成功 1')
+    // 总成本 0.012 → $0.012
+    expect(text).toContain('$0.012')
+    // 总 token = 1000+500+200+100 = 1800
+    expect(wrapper.vm.totalTokens()).toBe(1800)
+    // 功能排行含功能名
+    expect(text).toContain('生成周报')
+  })
+
+  it('导出 CSV：调 ExportAiTaskHistoryCSV 后经 SaveFileDialog 选路径调 SaveFile 落盘', async () => {
+    const wrapper = createWrapper(true)
+    await flushPromises()
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出 CSV'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(exportCsvMock).toHaveBeenCalled()
+    expect(SaveFileDialogMock).toHaveBeenCalled()
+    // 落盘调用：路径 + 文本 + 编码
+    expect(saveFileMock).toHaveBeenCalledWith('D:/tmp/ai-task-history.csv', expect.stringContaining('时间'), 'utf-8')
+  })
+
+  it('导出 Markdown：调 ExportAiTaskHistoryMarkdown 落盘', async () => {
+    const wrapper = createWrapper(true)
+    await flushPromises()
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出 Markdown'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(exportMarkdownMock).toHaveBeenCalled()
+    expect(saveFileMock).toHaveBeenCalledWith('D:/tmp/ai-task-history.csv', '# AI 任务历史报告', 'utf-8')
   })
 })
