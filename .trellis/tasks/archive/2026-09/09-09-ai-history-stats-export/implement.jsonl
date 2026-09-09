@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本任务新增 3 个 App 方法并同步 wailsjs 绑定（App.js/App.d.ts/models.ts 三处），须遵守跨层契约同步规则"}
+{"file": "docs/plans/2026-09-09-ai-history-stats-export.md", "reason": "设计来源文档：聚合模型、导出方法、改动范围与已确认的 4 项决策（总 token 保留 4 分项、SaveFileDialog、导出当前筛选范围、趋势不做）"}

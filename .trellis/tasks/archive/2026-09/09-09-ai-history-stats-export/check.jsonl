@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 app.go 新增方法签名与 wailsjs 三处绑定（App.js/App.d.ts/models.ts）是否一致同步"}
+{"file": "docs/plans/2026-09-09-ai-history-stats-export.md", "reason": "对照设计文档验收：聚合口径（metrics nil 跳过计量仍计 count）、导出列、4 分项 token Total 含 CacheCreation"}
