@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ElementPlus from 'element-plus'
 import AiFunctionConfigDialog from '../AiFunctionConfigDialog.vue'
 
@@ -79,6 +79,25 @@ const seedData = [
 ]
 
 const saveAiFunctionsMock = vi.fn(() => Promise.resolve())
+const exportAiFunctionsMock = vi.fn(() =>
+  Promise.resolve(JSON.stringify({ schemaVersion: 2, functions: seedData }, null, 2))
+)
+// 导入预览：weekly-report 与本机 id 重复 → conflict；fresh-skill 本机无 → new；bad-item 缺 cwd → invalid
+const importPreviewMock = vi.fn(() =>
+  Promise.resolve({
+    new: [{ id: 'fresh-skill', name: '全新功能', command: '/fresh', cwd: 'D:\\proj' }],
+    conflict: [{ id: 'weekly-report', name: '生成周报（导入）', command: '/ab-weekly-report', cwd: 'D:\\proj' }],
+    invalid: ['bad-item']
+  })
+)
+const saveFileMock = vi.fn(() => Promise.resolve())
+// 选中的导入文件路径
+const openFileDialogMock = vi.fn(() => Promise.resolve('D:/tmp/ai_functions.json'))
+const saveFileDialogMock = vi.fn(() => Promise.resolve('D:/tmp/exported.json'))
+// 导入文件 base64 内容（解码后为 v2 JSON 文本，内容本身不影响——ImportAiFunctions 已 mock）
+const readFileBytesMock = vi.fn(() =>
+  Promise.resolve({ base64: btoa('{"schemaVersion":2,"functions":[]}'), error: '', tooLarge: false })
+)
 
 // 已发现 skill 列表（user/project/plugin 三类，覆盖命名空间拼接与 cwd 差异）
 const discoveredSkills = [
@@ -91,8 +110,17 @@ const refreshDiscoveredMock = vi.fn(() => Promise.resolve(discoveredSkills))
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetAiFunctions: vi.fn(() => Promise.resolve(seedData)),
   SaveAiFunctions: (...args) => saveAiFunctionsMock(...args),
+  ExportAiFunctions: () => exportAiFunctionsMock(),
+  ImportAiFunctions: (...args) => importPreviewMock(...args),
+  SaveFile: (...args) => saveFileMock(...args),
+  ReadFileBytes: (...args) => readFileBytesMock(...args),
   GetDiscoveredSkills: vi.fn(() => Promise.resolve(discoveredSkills)),
   RefreshDiscoveredSkills: () => refreshDiscoveredMock()
+}))
+
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  OpenFileDialog: (...args) => openFileDialogMock(...args),
+  SaveFileDialog: (...args) => saveFileDialogMock(...args)
 }))
 
 // stub 外壳/折叠组件（避免 teleport 与 transition 在 jsdom 下的问题）；
@@ -152,6 +180,8 @@ beforeEach(() => {
   vi.spyOn(ElMessage, 'warning').mockImplementation(() => {})
   vi.spyOn(ElMessage, 'success').mockImplementation(() => {})
   vi.spyOn(ElMessage, 'error').mockImplementation(() => {})
+  // ElMessageBox.confirm 默认放行（用户点「继续导出」）；个别用例 mockRejectedValue 测取消
+  vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('')
 })
 
 describe('AiFunctionConfigDialog', () => {
@@ -358,5 +388,119 @@ describe('AiFunctionConfigDialog', () => {
     // name 保持"生成周报"（非空不覆盖）
     const nameInput = wrapper.findAll('input').find((i) => i.element.value === '生成周报')
     expect(nameInput).toBeTruthy()
+  })
+
+  // ---- 导出配置 ----
+  const clickExport = async (wrapper) => {
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出配置'))
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  it('导出配置：弹共享范围确认后调 ExportAiFunctions → SaveFileDialog → SaveFile 落盘', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    await clickExport(wrapper)
+    expect(exportAiFunctionsMock).toHaveBeenCalledTimes(1)
+    expect(saveFileDialogMock).toHaveBeenCalledTimes(1)
+    expect(saveFileMock).toHaveBeenCalledTimes(1)
+    // SaveFile 收到 schema v2 JSON 文本
+    const [path, content] = saveFileMock.mock.calls[0]
+    expect(path).toBe('D:/tmp/exported.json')
+    expect(content).toContain('"schemaVersion": 2')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('导出配置：共享范围确认取消时不导出', async () => {
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+    const wrapper = await createWrapper()
+    await clickExport(wrapper)
+    expect(exportAiFunctionsMock).not.toHaveBeenCalled()
+    expect(saveFileMock).not.toHaveBeenCalled()
+  })
+
+  it('导出配置：SaveFileDialog 用户取消（返回空）不调 SaveFile', async () => {
+    saveFileDialogMock.mockResolvedValueOnce('')
+    const wrapper = await createWrapper()
+    await clickExport(wrapper)
+    expect(exportAiFunctionsMock).toHaveBeenCalled()
+    expect(saveFileMock).not.toHaveBeenCalled()
+  })
+
+  // ---- 导入配置预览 ----
+  const clickImportConfig = async (wrapper) => {
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导入配置'))
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  it('导入配置：选文件 → 读文本 → ImportAiFunctions 生成预览展示三类', async () => {
+    const wrapper = await createWrapper()
+    await clickImportConfig(wrapper)
+    expect(openFileDialogMock).toHaveBeenCalledTimes(1)
+    expect(readFileBytesMock).toHaveBeenCalledWith('D:/tmp/ai_functions.json')
+    expect(importPreviewMock).toHaveBeenCalledTimes(1)
+    // 预览对话框展示三类
+    expect(wrapper.text()).toContain('将新增')
+    expect(wrapper.text()).toContain('fresh-skill')
+    expect(wrapper.text()).toContain('冲突')
+    expect(wrapper.text()).toContain('weekly-report')
+    expect(wrapper.text()).toContain('非法项')
+    expect(wrapper.text()).toContain('bad-item')
+  })
+
+  it('导入配置：OpenFileDialog 取消（返回空）不解析', async () => {
+    openFileDialogMock.mockResolvedValueOnce('')
+    const wrapper = await createWrapper()
+    await clickImportConfig(wrapper)
+    expect(readFileBytesMock).not.toHaveBeenCalled()
+    expect(importPreviewMock).not.toHaveBeenCalled()
+  })
+
+  it('导入配置：冲突项默认「跳过」，确认导入追加 New 不覆盖冲突项', async () => {
+    const wrapper = await createWrapper()
+    await clickImportConfig(wrapper)
+    // 冲突项 weekly-report 默认 skip
+    const applyBtn = wrapper.findAll('button').find((b) => b.text().includes('确认导入'))
+    await applyBtn.trigger('click')
+    await flushPromises()
+    expect(saveAiFunctionsMock).toHaveBeenCalledTimes(1)
+    const merged = saveAiFunctionsMock.mock.calls[0][0]
+    // 本机原有 4 项保留 + New 追加 1 项 = 5 项
+    expect(merged.length).toBe(5)
+    // weekly-report 保持本机原值（未被导入版覆盖，name 仍为"生成周报"而非"生成周报（导入）"）
+    const wr = merged.find((f) => f.id === 'weekly-report')
+    expect(wr.name).toBe('生成周报')
+    // fresh-skill 已追加
+    expect(merged.find((f) => f.id === 'fresh-skill')).toBeTruthy()
+    // invalid 的 bad-item 不导入
+    expect(merged.find((f) => f.id === 'bad-item')).toBeFalsy()
+  })
+
+  it('导入配置：冲突项标记「覆盖」后替换本机同名项', async () => {
+    const wrapper = await createWrapper()
+    await clickImportConfig(wrapper)
+    // el-radio stub 不渲染，直接操作组件内部 conflictDecisions
+    // 找组件实例设 weekly-report 为 overwrite
+    const vm = wrapper.vm
+    vm.conflictDecisions['weekly-report'] = 'overwrite'
+    await flushPromises()
+    const applyBtn = wrapper.findAll('button').find((b) => b.text().includes('确认导入'))
+    await applyBtn.trigger('click')
+    await flushPromises()
+    const merged = saveAiFunctionsMock.mock.calls[0][0]
+    // weekly-report 被导入版覆盖（name 变为"生成周报（导入）"）
+    const wr = merged.find((f) => f.id === 'weekly-report')
+    expect(wr.name).toBe('生成周报（导入）')
+    // 仍 5 项（4 本机 + 1 New，覆盖不增数）
+    expect(merged.length).toBe(5)
+  })
+
+  it('导入配置：ImportAiFunctions 报错时不落盘', async () => {
+    importPreviewMock.mockRejectedValueOnce(new Error('解析失败: 非合法 JSON'))
+    const wrapper = await createWrapper()
+    await clickImportConfig(wrapper)
+    expect(ElMessage.error).toHaveBeenCalled()
+    expect(saveAiFunctionsMock).not.toHaveBeenCalled()
   })
 })

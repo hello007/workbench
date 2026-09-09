@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 App.js/App.d.ts/models.ts 三处绑定是否与 app.go 新方法、model.ImportPreview 字段一致"}
+{"file": "docs/plans/2026-09-09-ai-config-import-export.md", "reason": "校验导出格式 schema v2、导入 v1 迁移、冲突分类、非法项标记、合并非替换语义是否符合设计"}

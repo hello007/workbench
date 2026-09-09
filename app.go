@@ -1253,6 +1253,20 @@ func (a *App) SaveAiFunctions(funcs []*model.AiFunction) error {
 	return a.aiFuncSvc.SaveAiFunctions(funcs)
 }
 
+// ExportAiFunctions 导出当前全部功能项为 schema v2 JSON 文本。
+// 前端拿到文本后用 Wails runtime.SaveFileDialog 选路径落盘；后端不耦合用户目录。
+// env 的 $ENV: 引用与 MCP headers 原样导出，前端导出前提示用户确认共享范围。
+func (a *App) ExportAiFunctions() (string, error) {
+	return a.aiFuncSvc.ExportAiFunctions()
+}
+
+// ImportAiFunctions 解析外部 JSON 配置并生成导入预览，不落盘。
+// 复用 migrateFunctions 迁移补全 + validateFunctions 校验，与本机已加载项按 id 比对
+// 生成 New/Conflict/Invalid 三类。前端展示预览、用户决策冲突策略后调 SaveAiFunctions 合并落盘。
+func (a *App) ImportAiFunctions(jsonText string) (*model.ImportPreview, error) {
+	return a.aiFuncSvc.ImportAiFunctions(jsonText)
+}
+
 // GetDiscoveredSkills 获取已发现的 skill 列表（带 mtime 缓存）。
 // 扫描用户级 ~/.claude/skills + 各工作目录 .claude/skills + 已安装插件 skills，
 // 解析 SKILL.md frontmatter 去重后返回，供配置对话框「导入 skill」入口回填 command/cwd/description/name。

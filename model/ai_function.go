@@ -33,6 +33,16 @@ type AiFunctionsConfig struct {
 	Functions     []*AiFunction `json:"functions"`
 }
 
+// ImportPreview 导入预览：解析+迁移+比对后的分类结果，供前端展示后确认，不直接落盘。
+// ImportAiFunctions 对外部 JSON 走 migrateFunctions 迁移补全 + validateFunctions 校验后，
+// 与本机已加载功能项按 id 比对生成三类：New（本机不存在，将新增）、Conflict（id 已存在，
+// 待用户决策覆盖/跳过）、Invalid（校验失败的 id，不导入）。
+type ImportPreview struct {
+	New      []*AiFunction `json:"new"`      // 本机不存在的，将新增
+	Conflict []*AiFunction `json:"conflict"` // id 已存在，待用户决策覆盖本机/跳过
+	Invalid  []string      `json:"invalid"`  // 校验失败的 id（不会导入）
+}
+
 // AiMcpConfig MCP server 注入配置，整体序列化为 --mcp-config 的内联 JSON。
 type AiMcpConfig struct {
 	Servers map[string]AiMcpServer `json:"mcpServers"`

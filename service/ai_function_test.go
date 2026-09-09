@@ -303,6 +303,178 @@ func TestSaveAiFunctions_Roundtrip(t *testing.T) {
 	}
 }
 
+// === ExportAiFunctions / ImportAiFunctions 测试 ===
+
+// TestExportAiFunctions_SchemaV2Format 验证导出文本为 schema v2 结构且含当前全部功能项。
+func TestExportAiFunctions_SchemaV2Format(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+
+	in := []*model.AiFunction{
+		{ID: "exp-1", Name: "导出项一", Command: "/a", Cwd: `D:\a`},
+		{ID: "exp-2", Name: "导出项二", Command: "/b", Cwd: `D:\b`},
+	}
+	if err := svc.SaveAiFunctions(in); err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+
+	text, err := svc.ExportAiFunctions()
+	if err != nil {
+		t.Fatalf("导出失败: %v", err)
+	}
+	var cfg model.AiFunctionsConfig
+	if err := json.Unmarshal([]byte(text), &cfg); err != nil {
+		t.Fatalf("导出文本非合法 JSON: %v", err)
+	}
+	if cfg.SchemaVersion != model.CurrentSchemaVersion {
+		t.Errorf("schemaVersion 不符: 期望=%d 实际=%d", model.CurrentSchemaVersion, cfg.SchemaVersion)
+	}
+	if len(cfg.Functions) != 2 {
+		t.Fatalf("导出功能项数量: 期望=2 实际=%d", len(cfg.Functions))
+	}
+	ids := map[string]bool{}
+	for _, f := range cfg.Functions {
+		ids[f.ID] = true
+	}
+	for _, want := range []string{"exp-1", "exp-2"} {
+		if !ids[want] {
+			t.Errorf("导出缺少功能项 %s", want)
+		}
+	}
+}
+
+// TestImportAiFunctions_V1ArrayMigration 验证导入 v1 顶层裸数组走迁移补全并归入 New。
+func TestImportAiFunctions_V1ArrayMigration(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+
+	// 本机先存一项
+	if err := svc.SaveAiFunctions([]*model.AiFunction{
+		{ID: "local-1", Name: "本机项", Command: "/l", Cwd: `D:\l`},
+	}); err != nil {
+		t.Fatalf("保存本机配置失败: %v", err)
+	}
+
+	// v1 顶层裸数组（无 schemaVersion），导入应迁移补全
+	v1 := `[{"id":"imp-1","name":"导入项","command":"/i","cwd":"D:\\i"}]`
+	preview, err := svc.ImportAiFunctions(v1)
+	if err != nil {
+		t.Fatalf("导入解析失败: %v", err)
+	}
+	if len(preview.New) != 1 || preview.New[0].ID != "imp-1" {
+		t.Errorf("New 分类不符: %+v", preview.New)
+	}
+	if len(preview.Conflict) != 0 {
+		t.Errorf("不应有冲突项: %+v", preview.Conflict)
+	}
+	if len(preview.Invalid) != 0 {
+		t.Errorf("不应有非法项: %+v", preview.Invalid)
+	}
+}
+
+// TestImportAiFunctions_ConflictAndNew 验证 id 比对：本机已有 → Conflict，本机无 → New。
+func TestImportAiFunctions_ConflictAndNew(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+
+	if err := svc.SaveAiFunctions([]*model.AiFunction{
+		{ID: "dup", Name: "本机重复项", Command: "/l", Cwd: `D:\l`},
+	}); err != nil {
+		t.Fatalf("保存本机配置失败: %v", err)
+	}
+
+	// v2 结构，含一项与本机 id 重复、一项全新
+	v2 := `{"schemaVersion":2,"functions":[
+		{"id":"dup","name":"导入重复项","command":"/d","cwd":"D:\\d"},
+		{"id":"fresh","name":"导入新项","command":"/f","cwd":"D:\\f"}
+	]}`
+	preview, err := svc.ImportAiFunctions(v2)
+	if err != nil {
+		t.Fatalf("导入解析失败: %v", err)
+	}
+	if len(preview.New) != 1 || preview.New[0].ID != "fresh" {
+		t.Errorf("New 分类不符: %+v", preview.New)
+	}
+	if len(preview.Conflict) != 1 || preview.Conflict[0].ID != "dup" {
+		t.Errorf("Conflict 分类不符: %+v", preview.Conflict)
+	}
+	if len(preview.Invalid) != 0 {
+		t.Errorf("不应有非法项: %+v", preview.Invalid)
+	}
+}
+
+// TestImportAiFunctions_InvalidMarked 验证缺必填字段的项归入 Invalid 不导入。
+func TestImportAiFunctions_InvalidMarked(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+
+	// empty-cwd 项 Cwd 为空 → validateFunctions 判非法；valid-1 正常
+	v2 := `{"schemaVersion":2,"functions":[
+		{"id":"valid-1","name":"合法项","command":"/v","cwd":"D:\\v"},
+		{"id":"empty-cwd","name":"缺工作目录","command":"/e","cwd":""}
+	]}`
+	preview, err := svc.ImportAiFunctions(v2)
+	if err != nil {
+		t.Fatalf("导入解析失败: %v", err)
+	}
+	if len(preview.New) != 1 || preview.New[0].ID != "valid-1" {
+		t.Errorf("New 分类不符: %+v", preview.New)
+	}
+	if len(preview.Invalid) != 1 || preview.Invalid[0] != "empty-cwd" {
+		t.Errorf("Invalid 分类不符: %+v", preview.Invalid)
+	}
+}
+
+// TestImportAiFunctions_InvalidJSON 验证非合法 JSON 走 migrateFunctions 错误返回，不落盘。
+func TestImportAiFunctions_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
+
+	preview, err := svc.ImportAiFunctions(`{not json`)
+	if err == nil {
+		t.Fatalf("非合法 JSON 应返回错误，preview=%+v", preview)
+	}
+	if preview != nil {
+		t.Errorf("错误时 preview 应为 nil: %+v", preview)
+	}
+}
+
+// TestImportAiFunctions_DoesNotPersist 验证 ImportAiFunctions 不改变本机配置内容：
+// 导入后本机功能项集合不变（ImportAiFunctions 自身不写，仅返回预览）。
+func TestImportAiFunctions_DoesNotPersist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai_functions.json")
+	svc := NewAiFunctionService(nil, path)
+
+	if err := svc.SaveAiFunctions([]*model.AiFunction{
+		{ID: "local-1", Name: "本机项", Command: "/l", Cwd: `D:\l`},
+	}); err != nil {
+		t.Fatalf("保存本机配置失败: %v", err)
+	}
+	before, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载本机配置失败: %v", err)
+	}
+
+	if _, err := svc.ImportAiFunctions(`{"schemaVersion":2,"functions":[
+		{"id":"imp-1","name":"导入项","command":"/i","cwd":"D:\\i"}]}`); err != nil {
+		t.Fatalf("导入解析失败: %v", err)
+	}
+
+	after, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载本机配置失败: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("ImportAiFunctions 不应改变本机功能项数量: 期望=%d 实际=%d", len(before), len(after))
+	}
+	for _, fn := range after {
+		if fn.ID != "local-1" {
+			t.Errorf("ImportAiFunctions 不应落盘导入项，发现多余 id=%s", fn.ID)
+		}
+	}
+}
+
 // === BuildStagePrompt 测试 ===
 
 func TestBuildStagePrompt_NilSpec(t *testing.T) {

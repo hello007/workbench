@@ -190,6 +190,61 @@ func (s *AiFunctionService) saveConfig(funcs []*model.AiFunction) error {
 	})
 }
 
+// ExportAiFunctions 导出当前全部功能项为 schema v2 JSON 文本。
+// 返回 {schemaVersion, functions} 序列化结果，与落盘格式一致，供前端用 Wails SaveFileDialog 选路径写文件；
+// 后端不耦合用户目录。env 的 $ENV: 引用与 MCP headers 原样导出，前端导出前提示用户确认共享范围。
+func (s *AiFunctionService) ExportAiFunctions() (string, error) {
+	funcs, err := s.LoadAiFunctions()
+	if err != nil {
+		return "", fmt.Errorf("读取当前 AI 功能配置失败: %w", err)
+	}
+	data, err := json.MarshalIndent(model.AiFunctionsConfig{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Functions:     funcs,
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("序列化导出配置失败: %w", err)
+	}
+	return string(data), nil
+}
+
+// ImportAiFunctions 解析外部 JSON 配置并生成导入预览，不落盘。
+// 复用 migrateFunctions 迁移补全（v1 数组/v2 对象均支持）+ validateFunctions 校验非法项，
+// 与本机已加载功能项按 id 比对：本机无 → New，本机有 → Conflict，校验失败 → Invalid。
+// 前端展示预览、用户决策冲突策略后，调既有 SaveAiFunctions 合并落盘。
+// 非合法 JSON 或顶层结构非法走 migrateFunctions 错误返回，前端提示不落盘。
+func (s *AiFunctionService) ImportAiFunctions(jsonText string) (*model.ImportPreview, error) {
+	funcs, _, err := s.migrateFunctions([]byte(jsonText))
+	if err != nil {
+		return nil, fmt.Errorf("解析导入配置失败: %w", err)
+	}
+	valid, invalidIDs := validateFunctions(funcs)
+
+	current, err := s.LoadAiFunctions()
+	if err != nil {
+		return nil, fmt.Errorf("读取本机 AI 功能配置失败: %w", err)
+	}
+	currentIDs := make(map[string]struct{}, len(current))
+	for _, fn := range current {
+		if fn != nil {
+			currentIDs[fn.ID] = struct{}{}
+		}
+	}
+
+	preview := &model.ImportPreview{Invalid: invalidIDs}
+	for _, fn := range valid {
+		if fn == nil {
+			continue
+		}
+		if _, exists := currentIDs[fn.ID]; exists {
+			preview.Conflict = append(preview.Conflict, fn)
+		} else {
+			preview.New = append(preview.New, fn)
+		}
+	}
+	return preview, nil
+}
+
 // migrateFunctions 解析配置原始字节并迁移到当前版本，返回 (功能项, 是否需落盘, 错误)。
 // v1 顶层裸数组 → 包一层并补全字段；v2+ 对象 → 补全缺失字段。版本演进在此追加分支。
 func (s *AiFunctionService) migrateFunctions(raw []byte) (funcs []*model.AiFunction, migrated bool, err error) {

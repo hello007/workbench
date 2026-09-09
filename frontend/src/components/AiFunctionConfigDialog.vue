@@ -22,6 +22,10 @@
           <div class="config-item-id">{{ f.id }}</div>
         </div>
         <el-button class="add-btn" size="small" @click="addNew">+ 新增功能</el-button>
+        <div class="config-io-btns">
+          <el-button size="small" @click="exportConfig">导出配置</el-button>
+          <el-button size="small" @click="importConfig">导入配置</el-button>
+        </div>
       </div>
 
       <!-- 右：编辑表单 -->
@@ -173,13 +177,56 @@
         <el-button type="primary" :disabled="!importSelected" @click="confirmImport">导入</el-button>
       </template>
     </el-dialog>
+
+    <!-- 导入配置预览对话框：展示解析迁移后的 新增/冲突/非法 三类，冲突项逐项决策覆盖/跳过 -->
+    <el-dialog
+      v-model="previewVisible"
+      title="导入配置预览"
+      width="720px"
+      append-to-body
+      destroy-on-close
+      class="ai-import-preview-dialog"
+    >
+      <div v-loading="previewLoading">
+        <div class="preview-section" v-if="importPreview?.new?.length">
+          <div class="preview-section-title">将新增（{{ importPreview.new.length }}）</div>
+          <div class="preview-item" v-for="f in importPreview.new" :key="'n-' + f.id">
+            <span class="preview-item-name">{{ f.name }}</span>
+            <span class="preview-item-id">{{ f.id }}</span>
+          </div>
+        </div>
+        <div class="preview-section" v-if="importPreview?.conflict?.length">
+          <div class="preview-section-title">冲突（{{ importPreview.conflict.length }}）—— id 已存在，逐项决策</div>
+          <div class="preview-item preview-conflict" v-for="f in importPreview.conflict" :key="'c-' + f.id">
+            <span class="preview-item-name">{{ f.name }}</span>
+            <span class="preview-item-id">{{ f.id }}</span>
+            <el-radio-group v-model="conflictDecisions[f.id]" size="small">
+              <el-radio value="overwrite">覆盖本机</el-radio>
+              <el-radio value="skip">跳过</el-radio>
+            </el-radio-group>
+          </div>
+        </div>
+        <div class="preview-section" v-if="importPreview?.invalid?.length">
+          <div class="preview-section-title preview-invalid-title">非法项（{{ importPreview.invalid.length }}）—— 不会导入</div>
+          <div class="preview-item-id" v-for="id in importPreview.invalid" :key="'i-' + id">{{ id }}</div>
+        </div>
+        <div class="preview-empty" v-if="!previewLoading && !hasPreviewItems">
+          无可导入项（配置为空或全部非法）
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="previewVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!hasPreviewItems" :loading="importApplying" @click="applyImport">确认导入</el-button>
+      </template>
+    </el-dialog>
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetAiFunctions, SaveAiFunctions, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
+import { GetAiFunctions, SaveAiFunctions, ExportAiFunctions, ImportAiFunctions, SaveFile, ReadFileBytes, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
+import { OpenFileDialog, SaveFileDialog } from '../../wailsjs/runtime/runtime'
 import ParamsEditor from './ParamsEditor.vue'
 import FollowUpsEditor from './FollowUpsEditor.vue'
 import EnvEditor from './EnvEditor.vue'
@@ -276,6 +323,156 @@ const confirmImport = () => {
 
 const sourceLabel = (src) => ({ user: '用户级', project: '项目级', plugin: '插件' }[src] || src)
 const sourceTagType = (src) => ({ user: 'info', project: 'success', plugin: 'warning' }[src] || '')
+
+// === 导出 / 导入整份配置 ===
+// 导入预览对话框状态
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const importApplying = ref(false)
+const importPreview = ref(null) // { new, conflict, invalid }
+const conflictDecisions = ref({}) // conflict.id -> 'overwrite' | 'skip'
+
+// 预览是否有可导入项（new 或 conflict 任一非空）
+const hasPreviewItems = computed(() => {
+  const p = importPreview.value
+  if (!p) return false
+  return (p.new?.length || 0) > 0 || (p.conflict?.length || 0) > 0
+})
+
+// 导出配置：原样导出 schema v2 JSON，导出前提示 env/MCP 共享范围
+const exportConfig = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '配置可能含 env（$ENV: 引用）与 MCP headers 等配置，原样导出。请确认共享范围后再保存。',
+      '导出配置',
+      { type: 'warning', confirmButtonText: '继续导出', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // 用户取消
+  }
+  let text
+  try {
+    text = await ExportAiFunctions()
+  } catch (e) {
+    ElMessage.error('导出失败: ' + (e?.message || String(e)))
+    return
+  }
+  let path
+  try {
+    path = await SaveFileDialog({
+      DefaultFilename: 'ai_functions.json',
+      Filters: [{ DisplayName: 'JSON 文件', Pattern: '*.json' }]
+    })
+  } catch {
+    return // runtime 不可用或对话框异常，静默
+  }
+  if (!path) return // 用户取消
+  try {
+    await SaveFile(path, text, 'utf-8')
+    ElMessage.success('配置已导出: ' + path)
+  } catch (e) {
+    ElMessage.error('写入导出文件失败: ' + (e?.message || String(e)))
+  }
+}
+
+// 导入配置：选 JSON 文件 → 读文本 → 后端解析迁移生成预览（不落盘）→ 展示预览对话框
+const importConfig = async () => {
+  let path
+  try {
+    path = await OpenFileDialog({
+      Title: '选择 AI 功能配置文件',
+      Filters: [{ DisplayName: 'JSON 文件', Pattern: '*.json' }]
+    })
+  } catch {
+    return
+  }
+  if (!path) return // 用户取消（OpenFileDialog 取消返回空）
+  // OpenFileDialog 可能返回数组或单字符串，统一取首个
+  const filePath = Array.isArray(path) ? path[0] : path
+  if (!filePath) return
+
+  previewLoading.value = true
+  previewVisible.value = true
+  importPreview.value = null
+  conflictDecisions.value = {}
+  try {
+    const bytes = await ReadFileBytes(filePath)
+    if (bytes?.error) {
+      ElMessage.error('读取文件失败: ' + bytes.error)
+      previewVisible.value = false
+      return
+    }
+    if (bytes?.tooLarge) {
+      ElMessage.error('文件过大（超 50MB），无法导入')
+      previewVisible.value = false
+      return
+    }
+    // base64 → 文本
+    const text = bytes?.base64 ? atob(bytes.base64) : ''
+    const preview = await ImportAiFunctions(text)
+    importPreview.value = preview
+    // 冲突项默认「跳过」（保守，避免误覆盖本机自定义）
+    const decisions = {}
+    for (const f of preview.conflict || []) {
+      decisions[f.id] = 'skip'
+    }
+    conflictDecisions.value = decisions
+  } catch (e) {
+    ElMessage.error('导入解析失败: ' + (e?.message || String(e)))
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+// 确认导入：New 全部追加 + Conflict 标记覆盖的替换 + 跳过的忽略 + Invalid 不导入，合并后落盘
+const applyImport = async () => {
+  const p = importPreview.value
+  if (!p) return
+  // 以本机当前列表为基底（保留本机已有，合并语义而非替换）
+  const merged = functions.value.map((f) => ({ ...f }))
+  const byId = new Map(merged.map((f, i) => [f.id, i]))
+
+  // New 追加（本机不存在的）
+  for (const f of p.new || []) {
+    if (!byId.has(f.id)) {
+      merged.push({ ...f })
+      byId.set(f.id, merged.length - 1)
+    }
+  }
+  // Conflict 标记覆盖的替换本机同名项
+  for (const f of p.conflict || []) {
+    if (conflictDecisions.value[f.id] === 'overwrite') {
+      const idx = byId.get(f.id)
+      if (idx !== undefined) {
+        merged[idx] = { ...f }
+      } else {
+        merged.push({ ...f })
+        byId.set(f.id, merged.length - 1)
+      }
+    }
+    // 'skip' 忽略
+  }
+
+  importApplying.value = true
+  try {
+    await SaveAiFunctions(merged)
+    functions.value = merged
+    ElMessage.success(`导入完成：新增 ${p.new?.length || 0} 项，冲突覆盖 ${countOverwrite()} 项`)
+    previewVisible.value = false
+    emit('saved')
+  } catch (e) {
+    ElMessage.error('导入落盘失败: ' + (e?.message || String(e)))
+  } finally {
+    importApplying.value = false
+  }
+}
+
+const countOverwrite = () => {
+  const p = importPreview.value
+  if (!p) return 0
+  return (p.conflict || []).filter((f) => conflictDecisions.value[f.id] === 'overwrite').length
+}
 
 const selected = computed(() => functions.value.find((f) => f.id === selectedId.value) || null)
 
@@ -509,6 +706,50 @@ const doSave = async () => {
 .add-btn {
   width: 100%;
   margin-top: 4px;
+}
+.config-io-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.config-io-btns .el-button {
+  flex: 1;
+}
+/* 导入配置预览对话框 */
+.preview-section {
+  margin-bottom: 16px;
+}
+.preview-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.preview-invalid-title {
+  color: var(--danger-color, #f56c6c);
+}
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.preview-conflict {
+  flex-wrap: wrap;
+}
+.preview-item-name {
+  font-weight: 500;
+}
+.preview-item-id {
+  font-family: Consolas, 'Cascadia Code', 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.preview-empty {
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: 24px 0;
 }
 .config-form {
   flex: 1;
