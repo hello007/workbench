@@ -97,7 +97,7 @@ const mockDirectories = [
 ]
 
 // directories / selectedDirId 已迁 directory store：经 store 设置初始值驱动（不再传 prop）。
-// clipboard prop 属 workspace 域（批次6），保留透传。
+// clipboard prop 已删（workspace 域批次6 迁 store，FileTreePanel 零消费）。
 function setupDirectoryStore(directories = mockDirectories, selectedDirId = 'dir-1') {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -108,10 +108,9 @@ function setupDirectoryStore(directories = mockDirectories, selectedDirId = 'dir
 }
 
 function createWrapper(props = {}) {
-  const { directories = mockDirectories, selectedDirId = 'dir-1', clipboard = { mode: null } } = props
+  const { directories = mockDirectories, selectedDirId = 'dir-1' } = props
   const pinia = setupDirectoryStore(directories, selectedDirId)
   return mount(FileTreePanel, {
-    props: { clipboard },
     global: { plugins: [pinia], stubs: defaultStubs }
   })
 }
@@ -337,7 +336,6 @@ describe('FileTreePanel.vue', () => {
     }
     const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
     return mount(FileTreePanel, {
-      props: { clipboard: { mode: null } },
       global: { plugins: [pinia], stubs }
     })
   }
@@ -868,7 +866,6 @@ describe('FileTreePanel.vue', () => {
       }
       const pinia = setupDirectoryStore(winDirs, 'dir-win')
       wrapper = mount(FileTreePanel, {
-        props: { clipboard: { mode: null } },
         global: { plugins: [pinia], stubs }
       })
       await flushPromises()
@@ -922,7 +919,6 @@ describe('FileTreePanel.vue', () => {
       }
       const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { clipboard: { mode: null } },
         global: { plugins: [pinia], stubs }
       })
       await flushPromises()
@@ -965,7 +961,6 @@ describe('FileTreePanel.vue', () => {
       }
       const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { clipboard: { mode: null } },
         global: { plugins: [pinia], stubs }
       })
       await flushPromises()
@@ -1000,7 +995,6 @@ describe('FileTreePanel.vue', () => {
       }
       const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { clipboard: { mode: null } },
         global: { plugins: [pinia], stubs }
       })
       await flushPromises()

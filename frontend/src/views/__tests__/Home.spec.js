@@ -7,10 +7,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
-import { useUiStore, useDirectoryStore } from '../../store'
+import { useUiStore, useDirectoryStore, useWorkspaceStore } from '../../store'
 
 // Mock Wails runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -106,12 +107,12 @@ describe('Home.vue - Bug修复验证', () => {
     })
 
     it('应该正确选择目录后清空选中节点', () => {
-      wrapper.vm.selectedNode = { name: 'test', path: '/test' }
+      useWorkspaceStore().selectedNode = { name: 'test', path: '/test' }
       wrapper.vm.onDirectorySelect('new-dir-id')
 
       expect(useDirectoryStore().selectedDirectoryId).toBe('new-dir-id')
-      expect(wrapper.vm.selectedNode).toBeNull()
-      expect(wrapper.vm.latestCommit).toBeNull()
+      expect(useWorkspaceStore().selectedNode).toBeNull()
+      expect(useWorkspaceStore().latestCommit).toBeNull()
     })
 
     it('应该正确处理目录切换', () => {
@@ -130,7 +131,7 @@ describe('Home.vue - Bug修复验证', () => {
       await flushPromises()
 
       expect(useDirectoryStore().selectedDirectoryId).toBe('git-1')
-      expect(wrapper.vm.selectedNode).toEqual({
+      expect(useWorkspaceStore().selectedNode).toEqual({
         id: 'git-1',
         path: '/a/git-repo',
         name: '仓库A',
@@ -138,7 +139,7 @@ describe('Home.vue - Bug修复验证', () => {
         isGitRepo: true
       })
       // latestCommit 应被清零
-      expect(wrapper.vm.latestCommit).toBeNull()
+      expect(useWorkspaceStore().latestCommit).toBeNull()
     })
 
     it('切到非 git 工作目录时 selectedNode 被置 null', async () => {
@@ -150,8 +151,8 @@ describe('Home.vue - Bug修复验证', () => {
       await flushPromises()
 
       expect(useDirectoryStore().selectedDirectoryId).toBe('plain-1')
-      expect(wrapper.vm.selectedNode).toBeNull()
-      expect(wrapper.vm.latestCommit).toBeNull()
+      expect(useWorkspaceStore().selectedNode).toBeNull()
+      expect(useWorkspaceStore().latestCommit).toBeNull()
     })
 
     it('gitA → gitB 切换时 selectedNode 由 A-git 直切 B-git（无 null 中间态）', async () => {
@@ -161,18 +162,18 @@ describe('Home.vue - Bug修复验证', () => {
       ]
       await wrapper.vm.onDirectorySelect('git-A')
       await flushPromises()
-      expect(wrapper.vm.selectedNode.path).toBe('/a/gitA')
+      expect(useWorkspaceStore().selectedNode.path).toBe('/a/gitA')
 
       // 切到 B：观察中间态是否经过 null
       const observed = []
-      const unwatch = wrapper.vm.$watch(() => wrapper.vm.selectedNode, (v) => observed.push(v), { deep: true, flush: 'sync' })
+      const unwatch = watch(() => useWorkspaceStore().selectedNode, (v) => observed.push(v), { deep: true, flush: 'sync' })
 
       await wrapper.vm.onDirectorySelect('git-B')
       await flushPromises()
       unwatch()
 
       // 最终落到 B-git
-      expect(wrapper.vm.selectedNode).toEqual({
+      expect(useWorkspaceStore().selectedNode).toEqual({
         id: 'git-B',
         path: '/b/gitB',
         name: '仓库B',
@@ -195,7 +196,7 @@ describe('Home.vue - Bug修复验证', () => {
 
       wrapper.vm.onNodeSelect(newNode)
 
-      expect(wrapper.vm.selectedNode).toEqual(newNode)
+      expect(useWorkspaceStore().selectedNode).toEqual(newNode)
     })
 
     it('应该保留选中的节点信息', () => {
@@ -208,8 +209,8 @@ describe('Home.vue - Bug修复验证', () => {
 
       wrapper.vm.onNodeSelect(newNode)
 
-      expect(wrapper.vm.selectedNode.name).toBe('test-folder')
-      expect(wrapper.vm.selectedNode.path).toBe('/test/folder')
+      expect(useWorkspaceStore().selectedNode.name).toBe('test-folder')
+      expect(useWorkspaceStore().selectedNode.path).toBe('/test/folder')
     })
 
     it('应该在Git仓库节点上选中', () => {
@@ -222,13 +223,13 @@ describe('Home.vue - Bug修复验证', () => {
 
       wrapper.vm.onNodeSelect(gitNode)
 
-      expect(wrapper.vm.selectedNode).toEqual(gitNode)
+      expect(useWorkspaceStore().selectedNode).toEqual(gitNode)
     })
 
     it('切换文件树节点时应清零 latestCommit，避免上一个仓库的提交残留', () => {
       // 模拟上一个仓库经"提交历史"tab emit 后 latestCommit 已有值
-      wrapper.vm.latestCommit = { sha: 'aaa', shortSha: 'aaa1111', message: '上一个仓库的提交' }
-      expect(wrapper.vm.latestCommit).not.toBeNull()
+      useWorkspaceStore().latestCommit = { sha: 'aaa', shortSha: 'aaa1111', message: '上一个仓库的提交' }
+      expect(useWorkspaceStore().latestCommit).not.toBeNull()
 
       const newNode = {
         name: 'repo-B',
@@ -239,9 +240,9 @@ describe('Home.vue - Bug修复验证', () => {
 
       wrapper.vm.onNodeSelect(newNode)
 
-      expect(wrapper.vm.selectedNode).toEqual(newNode)
+      expect(useWorkspaceStore().selectedNode).toEqual(newNode)
       // 关键：切换节点后 latestCommit 被清零，GitInfo 不再显示上一个仓库的提交
-      expect(wrapper.vm.latestCommit).toBeNull()
+      expect(useWorkspaceStore().latestCommit).toBeNull()
     })
   })
 
@@ -581,7 +582,7 @@ describe('Home.vue - Bug修复验证', () => {
     beforeEach(async () => {
       w = createWrapper()
       await flushPromises()
-      w.vm.selectedNode = { name: 'a.txt', path: '/a/a.txt', type: 'file' }
+      useWorkspaceStore().selectedNode = { name: 'a.txt', path: '/a/a.txt', type: 'file' }
     })
 
     afterEach(() => {

@@ -8,7 +8,7 @@
         <div v-show="uiStore.activePanel !== 'ai'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
-              <div class="pane-content" style="position:relative;" @mousedown.capture="lastInteractedTree = 'directory'">
+              <div class="pane-content" style="position:relative;" @mousedown.capture="workspaceStore.lastInteractedTree = 'directory'">
                 <DirectoryTree
                   v-show="uiStore.activePanel === 'directory'"
                   ref="directoryTreeRef"
@@ -25,10 +25,9 @@
               </div>
             </Pane>
             <Pane :size="30" :min-size="15">
-              <div class="pane-content" @mousedown.capture="lastInteractedTree = 'file'" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+              <div class="pane-content" @mousedown.capture="workspaceStore.lastInteractedTree = 'file'" @mousedown="closeToolbox" @contextmenu="closeToolbox">
                 <FileTreePanel
                   ref="fileTreePanelRef"
-                  :clipboard="clipboard"
                   @select="onNodeSelect"
                   @batch-pull="onBatchPull"
                   @copy="handleCopy"
@@ -53,10 +52,6 @@
               <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
                 <ContentPanel
                   ref="contentPanelRef"
-                  :selected-node="selectedNode"
-                  :latest-commit="latestCommit"
-                  :clipboard="clipboard"
-                  @latest-commit="commit => latestCommit = commit"
                   @refresh-node="onRefreshNode"
                   @create-directory="node => fileTreePanelRef.showCreateAt(node, 'directory')"
                   @create-file="node => fileTreePanelRef.showCreateAt(node, 'file')"
@@ -104,7 +99,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DirectoryTree from '../components/DirectoryTree.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
@@ -118,7 +113,7 @@ import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useSettingsStore, useUiStore, useDirectoryStore, matchShortcut } from '../store'
+import { useSettingsStore, useUiStore, useDirectoryStore, useWorkspaceStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -134,19 +129,9 @@ import {
   AddDirectory
 } from '../../wailsjs/go/main/App'
 
-// ---- 核心状态（workspace 域留 Home，批次6 迁 store；directory 域已迁 directoryStore）----
+// ---- 核心状态（workspace 域已迁 workspaceStore；directory 域已迁 directoryStore）----
 const directoryStore = useDirectoryStore()
-const selectedNode = ref(null)
-const latestCommit = ref(null)
-// 最近交互的树面板，用于 F2/Del 快捷键分派（'directory' | 'file'）
-const lastInteractedTree = ref('directory')
-
-const clipboard = reactive({
-  mode: null,
-  sourcePath: '',
-  sourceName: '',
-  sourceType: ''
-})
+const workspaceStore = useWorkspaceStore()
 
 const { record: recordAccess } = useRecentAccess()
 const settingsStore = useSettingsStore()
@@ -189,14 +174,14 @@ const onDirectorySelect = async (dirId) => {
   const newDir = directoryStore.directories.find(d => d.id === dirId)
 
   // 3. 直接切到目标 selectedNode，避免 null 中间态导致 content-inner 卸载再挂载（双刷新）
-  //    ContentPanel 模板 v-if="selectedNode" 在 null 时会卸载整个面板，
+  //    ContentPanel 模板 v-if="workspaceStore.selectedNode" 在 null 时会卸载整个面板，
   //    若先置 null 再设 git 节点，会触发"先卸载后挂载"两次刷新。
   //    这里按 newDir.isGitRepo 一次性算出目标值，使 gitA→gitB 切换时面板始终挂载，
   //    仅 GitInfo.repoPath 变化触发 watch 单次 loadGitInfo（与文件树切换一致）。
   directoryStore.selectedDirectoryId = dirId
-  latestCommit.value = null
+  workspaceStore.latestCommit = null
   contentPanelRef.value?.clearPreview()
-  selectedNode.value = newDir?.isGitRepo
+  workspaceStore.selectedNode = newDir?.isGitRepo
     ? {
         id: newDir.id,
         path: newDir.path,
@@ -215,19 +200,19 @@ const onDirectorySelect = async (dirId) => {
 
 // ---- 选中文件树节点 ----
 const onNodeSelect = (data) => {
-  selectedNode.value = data
+  workspaceStore.selectedNode = data
   // 切换文件树节点时清零 latestCommit，避免上一个仓库（经"提交历史"tab emit）
   // 的提交残留到新选中仓库的 GitInfo 面板（与 GitInfo.watch(repoPath) 协同）。
-  latestCommit.value = null
+  workspaceStore.latestCommit = null
   // 按节点类型主动驱动预览：
   //   - file：直接 previewFile，使「同节点再点」（链接跳转后再点原节点）也能重新加载，
   //     不再依赖 ContentPanel 内 watch(selectedNode) 的引用变化判定。
   //   - 非文件：清空预览。
   //   「未保存修改」检查已在 previewFile 内部统一处理。
-  //   显式传入 data.path / data.name：selectedNode 是父组件 ref，子组件 ContentPanel 的
-  //   props.selectedNode 更新是异步的（Vue 在 nextTick 才 patch 子组件 props），
-  //   若用无参 previewFile()，其内部 `targetPath = overridePath || props.selectedNode?.path`
-  //   读到的仍是【旧节点】路径 → 预览到上一个文件。传 data.path 直接绕开 props 更新时机。
+  //   显式传入 data.path / data.name：selectedNode 在 workspace store，子组件 ContentPanel 直读
+  //   store 的响应式更新时机与原 props 一致（Vue 在 nextTick 才 patch），
+  //   若用无参 previewFile()，其内部 `targetPath = overridePath || workspaceStore.selectedNode?.path`
+  //   读到的仍是【旧节点】路径 → 预览到上一个文件。传 data.path 直接绕开更新时机。
   if (data.type === 'file') {
     contentPanelRef.value?.previewFile(data.path, data.name)
   } else {
@@ -273,11 +258,11 @@ const onRenameFromContent = (node) => {
 
 // ---- FileTreePanel 删除 ----
 const onDeleteFromFileTree = (node) => {
-  if (!selectedNode.value) return
+  if (!workspaceStore.selectedNode) return
   const deletedPath = node.path.replace(/\\/g, '/')
-  const selectedPath = selectedNode.value.path.replace(/\\/g, '/')
+  const selectedPath = workspaceStore.selectedNode.path.replace(/\\/g, '/')
   if (selectedPath === deletedPath || selectedPath.startsWith(deletedPath + '/')) {
-    selectedNode.value = null
+    workspaceStore.selectedNode = null
     contentPanelRef.value?.clearPreview()
   }
 }
@@ -308,7 +293,7 @@ const onDeleteFromContent = async (node) => {
       if (parentPath) {
         fileTreePanelRef.value?.refreshNode(parentPath)
       }
-      selectedNode.value = null
+      workspaceStore.selectedNode = null
     } else {
       ElMessage.error('删除失败')
     }
@@ -435,8 +420,8 @@ const handleGlobalKeydown = (e) => {
 
   if (e.key === 'F5') {
     e.preventDefault()
-    if (selectedNode.value) {
-      fileTreePanelRef.value?.refreshNode(selectedNode.value.path)
+    if (workspaceStore.selectedNode) {
+      fileTreePanelRef.value?.refreshNode(workspaceStore.selectedNode.path)
     }
     return
   }
@@ -447,7 +432,7 @@ const handleGlobalKeydown = (e) => {
     if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
     e.preventDefault()
     const isRename = matchShortcut(e, settingsStore.shortcutRename)
-    if (lastInteractedTree.value === 'directory') {
+    if (workspaceStore.lastInteractedTree === 'directory') {
       if (isRename) directoryTreeRef.value?.triggerRenameCurrent()
       else directoryTreeRef.value?.triggerDeleteCurrent()
     } else {
@@ -457,7 +442,7 @@ const handleGlobalKeydown = (e) => {
     return
   }
 
-  if (!selectedNode.value) return
+  if (!workspaceStore.selectedNode) return
   if (!(e.ctrlKey || e.metaKey)) return
 
   const tag = e.target.tagName
@@ -468,13 +453,13 @@ const handleGlobalKeydown = (e) => {
     const selection = window.getSelection()
     if (selection && selection.toString()) return
     e.preventDefault()
-    handleCopy(selectedNode.value)
+    handleCopy(workspaceStore.selectedNode)
   } else if (e.key === 'x') {
     e.preventDefault()
-    handleCut(selectedNode.value)
+    handleCut(workspaceStore.selectedNode)
   } else if (e.key === 'v') {
     e.preventDefault()
-    handlePaste(selectedNode.value)
+    handlePaste(workspaceStore.selectedNode)
   }
 }
 
@@ -485,7 +470,7 @@ function onUpdateAvailable(info) {
 }
 
 // 更新终端跟随目录
-watch(() => selectedNode.value, (node) => {
+watch(() => workspaceStore.selectedNode, (node) => {
   if (node && node.type === 'directory') {
     uiStore.terminalDir = node.path
   } else if (node && node.type === 'file') {
@@ -496,7 +481,7 @@ watch(() => selectedNode.value, (node) => {
 
 watch(() => directoryStore.selectedDirectoryId, () => {
   const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
-  if (dir && !selectedNode.value) {
+  if (dir && !workspaceStore.selectedNode) {
     uiStore.terminalDir = dir.path
   }
 })
@@ -523,27 +508,20 @@ const onResizeBarMouseDown = (e) => {
 }
 
 // ---- 剪贴板操作 ----
-const clearClipboard = () => {
-  clipboard.mode = null
-  clipboard.sourcePath = ''
-  clipboard.sourceName = ''
-  clipboard.sourceType = ''
-}
-
 const handleCopy = async (data) => {
-  clipboard.mode = 'copy'
-  clipboard.sourcePath = data.path
-  clipboard.sourceName = data.name
-  clipboard.sourceType = data.type
+  workspaceStore.clipboard.mode = 'copy'
+  workspaceStore.clipboard.sourcePath = data.path
+  workspaceStore.clipboard.sourceName = data.name
+  workspaceStore.clipboard.sourceType = data.type
   ElMessage.success(`${data.path.replaceAll('\\', '/')} 复制成功`)
   CopyToSystemClipboard(data.path).catch(() => {})
 }
 
 const handleCut = async (data) => {
-  clipboard.mode = 'cut'
-  clipboard.sourcePath = data.path
-  clipboard.sourceName = data.name
-  clipboard.sourceType = data.type
+  workspaceStore.clipboard.mode = 'cut'
+  workspaceStore.clipboard.sourcePath = data.path
+  workspaceStore.clipboard.sourceName = data.name
+  workspaceStore.clipboard.sourceType = data.type
   ElMessage.success(`${data.path.replaceAll('\\', '/')} 剪切成功`)
   CutToSystemClipboard(data.path).catch(() => {})
 }
@@ -592,7 +570,7 @@ const handlePaste = async (targetData) => {
     if (successCount > 0) {
       ElMessage.success(`粘贴成功：${successCount} 个项目`)
       fileTreePanelRef.value?.refreshNode(targetDir)
-      if (isCut) clearClipboard()
+      if (isCut) workspaceStore.clearClipboard()
     } else {
       ElMessage.error('粘贴失败')
     }
@@ -622,7 +600,7 @@ const handleCopyTo = async (data) => {
 
 // ---- 生命周期 ----
 watch(() => directoryStore.selectedDirectoryId, () => {
-  clearClipboard()
+  workspaceStore.clearClipboard()
 })
 
 onMounted(() => {

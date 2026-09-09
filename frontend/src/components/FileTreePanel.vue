@@ -386,12 +386,8 @@ import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
 
 // ---- Props & Emits ----
-// clipboard prop 属 workspace 域（批次6 迁 store），此处保留声明。
+// clipboard prop 已删（workspace 域批次6 迁 store，本组件零消费）。
 // directories / selectedDirId 已迁 directory store，子组件直读。
-defineProps({
-  clipboard: { type: Object, default: () => ({ mode: null }) }
-})
-
 const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search', 'open-repo-filter'])
 
 const { saveState, restoreState } = useTreeState()

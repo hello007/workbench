@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
+import { createPinia, setActivePinia } from 'pinia'
 import ContentPanel from '../ContentPanel.vue'
+import { useWorkspaceStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -75,11 +77,21 @@ const contentPanelStubs = {
   ArrowLeft: { template: '<span class="arrow-left" />' }
 }
 
+// selectedNode/latestCommit 已迁 workspace store：mount 前经 store 设初始值驱动（不再传 prop）。
+function mountPanel(selectedNode = null) {
+  const workspaceStore = useWorkspaceStore()
+  workspaceStore.selectedNode = selectedNode
+  return mount(ContentPanel, {
+    global: { stubs: contentPanelStubs }
+  })
+}
+
 describe('ContentPanel.vue', () => {
   let wrapper
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
   })
 
   afterEach(() => {
@@ -91,13 +103,7 @@ describe('ContentPanel.vue', () => {
 
   describe('节点信息展示', () => {
     it('选中文件节点应显示名称、路径和类型', () => {
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'test.txt', path: '/path/to/test.txt', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'test.txt', path: '/path/to/test.txt', type: 'file' })
 
       expect(wrapper.find('h2').text()).toBe('test.txt')
       expect(wrapper.text()).toContain('/path/to/test.txt')
@@ -105,13 +111,7 @@ describe('ContentPanel.vue', () => {
     })
 
     it('选中文件夹节点应显示类型为"文件夹"', () => {
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'src', path: '/path/to/src', type: 'directory' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'src', path: '/path/to/src', type: 'directory' })
 
       expect(wrapper.find('h2').text()).toBe('src')
       expect(wrapper.text()).toContain('/path/to/src')
@@ -119,13 +119,7 @@ describe('ContentPanel.vue', () => {
     })
 
     it('未选中节点时不应显示 h2 标题', () => {
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: null,
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel(null)
 
       expect(wrapper.find('h2').exists()).toBe(false)
     })
@@ -146,13 +140,7 @@ describe('ContentPanel.vue', () => {
         kind: 'text'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'file.txt', path: '/test/file.txt', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'file.txt', path: '/test/file.txt', type: 'file' })
 
       // 初始无预览区
       expect(wrapper.find('textarea').exists()).toBe(false)
@@ -192,13 +180,7 @@ describe('ContentPanel.vue', () => {
         error: ''
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'large.pdf', path: '/test/large.pdf', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'large.pdf', path: '/test/large.pdf', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -222,13 +204,7 @@ describe('ContentPanel.vue', () => {
         kind: 'unsupported'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'data.bin', path: '/test/data.bin', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'data.bin', path: '/test/data.bin', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -250,13 +226,7 @@ describe('ContentPanel.vue', () => {
         encoding: 'utf-8'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'note.log', path: '/test/note.log', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'note.log', path: '/test/note.log', type: 'file' })
 
       const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
       await previewBtn.trigger('click')
@@ -279,13 +249,7 @@ describe('ContentPanel.vue', () => {
         error: 'File not found'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'nonexistent.txt', path: '/test/nonexistent.txt', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'nonexistent.txt', path: '/test/nonexistent.txt', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -310,13 +274,7 @@ describe('ContentPanel.vue', () => {
       })
       ReadFileBytes.mockResolvedValueOnce({ base64: 'UEsDBBQAAAAAA', error: '', tooLarge: false })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'report.docx', path: '/test/report.docx', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'report.docx', path: '/test/report.docx', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -346,13 +304,7 @@ describe('ContentPanel.vue', () => {
       })
       ReadFileBytes.mockResolvedValueOnce({ base64: '', error: '', tooLarge: true })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'big.xlsx', path: '/test/big.xlsx', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'big.xlsx', path: '/test/big.xlsx', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -378,13 +330,7 @@ describe('ContentPanel.vue', () => {
       })
       ReadFileBytes.mockResolvedValueOnce({ base64: '', error: 'read error', tooLarge: false })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'pic.png', path: '/test/pic.png', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'pic.png', path: '/test/pic.png', type: 'file' })
 
       const buttons = wrapper.findAll('button')
       const previewBtn = buttons.find(btn => btn.text().includes('预览'))
@@ -404,13 +350,7 @@ describe('ContentPanel.vue', () => {
         content: '# other', isBinary: false, tooLarge: false, error: '', kind: 'text'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'intro.md', path: '/docs/intro.md', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'intro.md', path: '/docs/intro.md', type: 'file' })
 
       // 通过 expose 的 previewFile 按 overridePath 切换预览（selectedNode 保持 intro.md）
       await wrapper.vm.previewFile('/docs/other.md')
@@ -437,13 +377,7 @@ describe('ContentPanel.vue', () => {
         content: '# a', isBinary: false, tooLarge: false, error: '', kind: 'text'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'a.md', path: '/docs/a.md', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'a.md', path: '/docs/a.md', type: 'file' })
 
       // 预览 A：预览路径与选中节点一致 → 不可后退，按钮不渲染
       const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
@@ -481,18 +415,11 @@ describe('ContentPanel.vue', () => {
         content: '# b', isBinary: false, tooLarge: false, error: '', kind: 'text'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'a.md', path: '/docs/a.md', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'a.md', path: '/docs/a.md', type: 'file' })
 
-      // 模拟「文件树点击 B」：选中节点变更为 B
-      await wrapper.setProps({
-        selectedNode: { name: 'b.md', path: '/docs/b.md', type: 'file' }
-      })
+      // 模拟「文件树点击 B」：选中节点变更为 B（经 workspace store 驱动响应式更新）
+      useWorkspaceStore().selectedNode = { name: 'b.md', path: '/docs/b.md', type: 'file' }
+      await wrapper.vm.$nextTick()
       // Home.onNodeSelect 主动调用 previewFile(B.path)
       await wrapper.vm.previewFile('/docs/b.md')
       await flushPromises()
@@ -517,13 +444,7 @@ describe('ContentPanel.vue', () => {
         kind: 'text'
       })
 
-      wrapper = mount(ContentPanel, {
-        props: {
-          selectedNode: { name: 'file.txt', path: '/test/file.txt', type: 'file' },
-          clipboard: { mode: null }
-        },
-        global: { stubs: contentPanelStubs }
-      })
+      wrapper = mountPanel({ name: 'file.txt', path: '/test/file.txt', type: 'file' })
 
       // 先调用 previewFile 显示内容（文本类默认只读，进入编辑后出现 textarea）
       const buttons = wrapper.findAll('button')
@@ -559,13 +480,13 @@ describe('ContentPanel.vue', () => {
       return wrapper.find('textarea')
     }
 
-    const mountPanel = () => mount(ContentPanel, {
-      props: {
-        selectedNode: { name: 'file.md', path: '/test/file.md', type: 'file' },
-        clipboard: { mode: null }
-      },
-      global: { stubs: contentPanelStubs }
-    })
+    const mountPanel = () => {
+      const workspaceStore = useWorkspaceStore()
+      workspaceStore.selectedNode = { name: 'file.md', path: '/test/file.md', type: 'file' }
+      return mount(ContentPanel, {
+        global: { stubs: contentPanelStubs }
+      })
+    }
 
     it('Ctrl+S 有修改时触发保存', async () => {
       const { SaveFile } = await import('../../../wailsjs/go/main/App')
@@ -656,10 +577,13 @@ describe('ContentPanel.vue', () => {
       await flushPromises()
     }
 
-    const mountPanel = (type = 'file', name = 'doc.md', path = '/test/doc.md') => mount(ContentPanel, {
-      props: { selectedNode: { name, path, type }, clipboard: { mode: null } },
-      global: { stubs: contentPanelStubs }
-    })
+    const mountPanel = (type = 'file', name = 'doc.md', path = '/test/doc.md') => {
+      const workspaceStore = useWorkspaceStore()
+      workspaceStore.selectedNode = { name, path, type }
+      return mount(ContentPanel, {
+        global: { stubs: contentPanelStubs }
+      })
+    }
 
     it('markdown 预览显示「目录」按钮，非 markdown 不显示', async () => {
       // markdown 文件
@@ -707,6 +631,7 @@ describe('ContentPanel.vue - HTML 渲染预览', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
   })
 
   afterEach(() => {
@@ -719,13 +644,7 @@ describe('ContentPanel.vue - HTML 渲染预览', () => {
   const mountAndPreview = async (previewResult) => {
     const { PreviewFile } = await import('../../../wailsjs/go/main/App')
     PreviewFile.mockResolvedValueOnce(previewResult)
-    wrapper = mount(ContentPanel, {
-      props: {
-        selectedNode: { name: 'index.html', path: '/test/index.html', type: 'file' },
-        clipboard: { mode: null }
-      },
-      global: { stubs: contentPanelStubs }
-    })
+    wrapper = mountPanel({ name: 'index.html', path: '/test/index.html', type: 'file' })
     const previewBtn = wrapper.findAll('button').find(btn => btn.text().includes('预览'))
     await previewBtn.trigger('click')
     await flushPromises()

@@ -1,22 +1,22 @@
 <template>
   <div class="content-panel">
-    <div v-if="selectedNode" class="content-inner">
+    <div v-if="workspaceStore.selectedNode" class="content-inner">
       <!-- 紧凑 header：类型图标（可点击复制名称）+ 文件名 -->
       <div class="panel-header">
         <el-icon
           class="panel-header-icon"
-          :title="selectedNode.type === 'directory' ? '复制文件夹名' : '复制文件名'"
+          :title="workspaceStore.selectedNode.type === 'directory' ? '复制文件夹名' : '复制文件名'"
           @click="handleCopyName"
         >
-          <Folder v-if="selectedNode.type === 'directory'" />
+          <Folder v-if="workspaceStore.selectedNode.type === 'directory'" />
           <Document v-else />
         </el-icon>
-        <h2>{{ selectedNode.name }}</h2>
+        <h2>{{ workspaceStore.selectedNode.name }}</h2>
       </div>
 
       <!-- 路径行：弱化灰字 + 行尾内联复制按钮 -->
       <div class="panel-path-row">
-        <span class="panel-path" :title="selectedNode.path">{{ selectedNode.path }}</span>
+        <span class="panel-path" :title="workspaceStore.selectedNode.path">{{ workspaceStore.selectedNode.path }}</span>
         <div class="panel-path-actions">
           <el-button
             :icon="CopyDocument"
@@ -29,7 +29,7 @@
       </div>
 
       <!-- Git 操作按钮 -->
-      <div v-if="selectedNode.isGitRepo" class="git-actions">
+      <div v-if="workspaceStore.selectedNode.isGitRepo" class="git-actions">
         <el-button type="primary" @click="pullRepo" :loading="gitLoading">
           拉取更新
         </el-button>
@@ -41,49 +41,49 @@
       <el-divider />
 
       <!-- Git 信息签页 -->
-      <el-tabs v-if="selectedNode.isGitRepo" v-model="activeGitTab" class="git-tabs">
+      <el-tabs v-if="workspaceStore.selectedNode.isGitRepo" v-model="activeGitTab" class="git-tabs">
         <el-tab-pane label="仓库信息" name="repo">
           <GitInfo
             ref="gitInfoRef"
-            :repo-path="selectedNode.path"
-            :latest-commit="latestCommit"
+            :repo-path="workspaceStore.selectedNode.path"
+            :latest-commit="workspaceStore.latestCommit"
           />
         </el-tab-pane>
         <el-tab-pane label="提交历史" name="commits" lazy>
           <CommitHistory
             ref="commitHistoryRef"
-            :repo-path="selectedNode.path"
+            :repo-path="workspaceStore.selectedNode.path"
             @latest-commit="onLatestCommit"
           />
         </el-tab-pane>
         <el-tab-pane label="本地变动" name="changes" lazy>
           <LocalChanges
             ref="localChangesRef"
-            :repo-path="selectedNode.path"
+            :repo-path="workspaceStore.selectedNode.path"
             @committed="onLocalChangesCommitted"
           />
         </el-tab-pane>
       </el-tabs>
 
-      <div v-else-if="selectedNode.type === 'directory'" class="node-actions">
+      <div v-else-if="workspaceStore.selectedNode.type === 'directory'" class="node-actions">
         <h3>文件夹操作</h3>
         <div class="action-groups">
           <div>
             <span class="action-label">基本操作</span>
             <el-button-group>
-              <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
-              <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-              <el-button @click="$emit('paste', selectedNode)">粘贴</el-button>
-              <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
+              <el-button @click="$emit('cut', workspaceStore.selectedNode)">剪切</el-button>
+              <el-button @click="$emit('copy', workspaceStore.selectedNode)">复制</el-button>
+              <el-button @click="$emit('paste', workspaceStore.selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('copyTo', workspaceStore.selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>
           <div>
             <span class="action-label">编辑操作</span>
             <el-button-group>
-              <el-button @click="$emit('createDirectory', selectedNode)">新建文件夹</el-button>
-              <el-button @click="$emit('createFile', selectedNode)">新建文件</el-button>
-              <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
-              <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
+              <el-button @click="$emit('createDirectory', workspaceStore.selectedNode)">新建文件夹</el-button>
+              <el-button @click="$emit('createFile', workspaceStore.selectedNode)">新建文件</el-button>
+              <el-button @click="$emit('rename', workspaceStore.selectedNode)">重命名</el-button>
+              <el-button type="danger" @click="$emit('delete', workspaceStore.selectedNode)">删除</el-button>
             </el-button-group>
           </div>
           <div>
@@ -106,16 +106,16 @@
         </div>
       </div>
 
-      <div v-else-if="selectedNode.type === 'file'" class="node-actions node-actions--file">
+      <div v-else-if="workspaceStore.selectedNode.type === 'file'" class="node-actions node-actions--file">
         <h3>文件操作</h3>
         <div class="action-groups">
           <div>
             <span class="action-label">基本操作</span>
             <el-button-group>
-              <el-button @click="$emit('cut', selectedNode)">剪切</el-button>
-              <el-button @click="$emit('copy', selectedNode)">复制</el-button>
-              <el-button @click="$emit('paste', selectedNode)">粘贴</el-button>
-              <el-button @click="$emit('copyTo', selectedNode)">拷贝到</el-button>
+              <el-button @click="$emit('cut', workspaceStore.selectedNode)">剪切</el-button>
+              <el-button @click="$emit('copy', workspaceStore.selectedNode)">复制</el-button>
+              <el-button @click="$emit('paste', workspaceStore.selectedNode)">粘贴</el-button>
+              <el-button @click="$emit('copyTo', workspaceStore.selectedNode)">拷贝到</el-button>
             </el-button-group>
           </div>
           <div>
@@ -123,8 +123,8 @@
             <el-button-group>
               <el-button type="primary" @click="handleOpenWithDefaultApp">打开</el-button>
               <el-button @click="previewFile()">预览</el-button>
-              <el-button @click="$emit('rename', selectedNode)">重命名</el-button>
-              <el-button type="danger" @click="$emit('delete', selectedNode)">删除</el-button>
+              <el-button @click="$emit('rename', workspaceStore.selectedNode)">重命名</el-button>
+              <el-button type="danger" @click="$emit('delete', workspaceStore.selectedNode)">删除</el-button>
             </el-button-group>
           </div>
           <div>
@@ -306,7 +306,7 @@
     >
       <el-form label-width="100px">
         <el-form-item label="目标文件夹">
-          <el-input :model-value="selectedNode?.path" disabled />
+          <el-input :model-value="workspaceStore.selectedNode?.path" disabled />
         </el-form-item>
         <el-form-item label="Git 地址">
           <el-input
@@ -442,21 +442,15 @@ import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitGrayIcon from '../assets/icons/git-gray.png'
+import { useWorkspaceStore } from '../store'
 
-const props = defineProps({
-  selectedNode: {
-    type: Object,
-    default: null
-  },
-  latestCommit: {
-    type: Object,
-    default: null
-  },
-  clipboard: { type: Object, default: () => ({ mode: null }) }
-})
+// workspace 域共享态（selectedNode/latestCommit）已迁 store，本组件直读直写：
+//   - selectedNode：原 props.selectedNode，30+ 处消费改为 workspaceStore.selectedNode
+//   - latestCommit：CommitHistory emit latest-commit 时直写 workspaceStore.latestCommit（不再经 Home emit 中转）
+//   - clipboard prop 已删（本组件零消费，仅 Home 内部 handleCopy/Cut/Paste 用）
+const workspaceStore = useWorkspaceStore()
 
 const emit = defineEmits([
-  'latestCommit',
   'refreshNode',
   'createDirectory',
   'createFile',
@@ -532,9 +526,9 @@ const refreshPreview = () => {
 // 路径规范化：兼容 Windows 反斜杠与盘符大小写差异，统一为小写正斜杠比较。
 const normalizePath = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
 const canGoBack = computed(() => {
-  if (!props.selectedNode || props.selectedNode.type !== 'file') return false
+  if (!workspaceStore.selectedNode || workspaceStore.selectedNode.type !== 'file') return false
   if (!filePreview.value.path) return false
-  return normalizePath(filePreview.value.path) !== normalizePath(props.selectedNode.path)
+  return normalizePath(filePreview.value.path) !== normalizePath(workspaceStore.selectedNode.path)
 })
 
 // filePreview 是否已有内容/状态（用于 v-if 显示预览区）
@@ -578,7 +572,7 @@ const branchSelectRef = ref()
 const isWailsRuntime = () => !!window.runtime
 
 const onLatestCommit = (commit) => {
-  emit('latestCommit', commit)
+  workspaceStore.latestCommit = commit
 }
 
 // 本地变动提交/推送成功后联动刷新"提交历史"与"仓库信息"。
@@ -589,14 +583,14 @@ const onLocalChangesCommitted = () => {
 }
 
 const showBranchDialog = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
 
   branchLoading.value = true
   branchDialogVisible.value = true
   selectedBranch.value = ''
 
   try {
-    const result = await GetBranches(props.selectedNode.path)
+    const result = await GetBranches(workspaceStore.selectedNode.path)
     branchList.value = result.branches || []
     const current = branchList.value.find(b => b.isCurrent)
     currentBranchName.value = current ? current.name : ''
@@ -611,14 +605,14 @@ const showBranchDialog = async () => {
 }
 
 const doCheckout = async () => {
-  if (!props.selectedNode || !selectedBranch.value) return
+  if (!workspaceStore.selectedNode || !selectedBranch.value) return
 
   const branch = branchList.value.find(b => b.name === selectedBranch.value)
   if (!branch) return
 
   switchingBranch.value = true
   try {
-    await CheckoutBranch(props.selectedNode.path, selectedBranch.value, branch.isRemote)
+    await CheckoutBranch(workspaceStore.selectedNode.path, selectedBranch.value, branch.isRemote)
     ElMessage.success('已切换到分支: ' + selectedBranch.value)
     branchDialogVisible.value = false
     gitInfoRef.value?.handleRefresh()
@@ -631,11 +625,11 @@ const doCheckout = async () => {
 }
 
 const pullRepo = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
 
   gitLoading.value = true
   try {
-    const result = await PullRepo(props.selectedNode.path)
+    const result = await PullRepo(workspaceStore.selectedNode.path)
     if (result && result.length > 200) {
       singlePullResult.value = result
       singlePullVisible.value = true
@@ -652,9 +646,9 @@ const pullRepo = async () => {
 }
 
 const handleOpenWithDefaultApp = async () => {
-  if (!props.selectedNode || props.selectedNode.type !== 'file') return
+  if (!workspaceStore.selectedNode || workspaceStore.selectedNode.type !== 'file') return
   try {
-    const result = await OpenWithDefaultApp(props.selectedNode.path)
+    const result = await OpenWithDefaultApp(workspaceStore.selectedNode.path)
     if (!result) {
       ElMessage.error('打开文件失败')
     }
@@ -664,9 +658,9 @@ const handleOpenWithDefaultApp = async () => {
 }
 
 const handleOpenInExplorer = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
   try {
-    const result = await OpenInExplorer(props.selectedNode.path)
+    const result = await OpenInExplorer(workspaceStore.selectedNode.path)
     if (!result) {
       ElMessage.error('打开资源管理器失败')
     }
@@ -676,9 +670,9 @@ const handleOpenInExplorer = async () => {
 }
 
 const handleOpenInVSCode = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
   try {
-    const result = await OpenInVSCode(props.selectedNode.path)
+    const result = await OpenInVSCode(workspaceStore.selectedNode.path)
     if (!result) {
       ElMessage.error('打开 VSCode 失败，请确认已安装 VSCode 并将 code 命令加入 PATH')
     }
@@ -688,9 +682,9 @@ const handleOpenInVSCode = async () => {
 }
 
 const handleOpenInWarp = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
   try {
-    const result = await OpenInWarp(props.selectedNode.path)
+    const result = await OpenInWarp(workspaceStore.selectedNode.path)
     if (!result) {
       ElMessage.error('打开 Warp 失败，请确认已安装 Warp 终端')
     }
@@ -700,8 +694,8 @@ const handleOpenInWarp = async () => {
 }
 
 const handleOpenObsidian = async () => {
-  if (!props.selectedNode) return
-  const path = props.selectedNode.path
+  if (!workspaceStore.selectedNode) return
+  const path = workspaceStore.selectedNode.path
   try {
     const status = await OpenInObsidian(path)
     if (status === 'not-installed') {
@@ -753,9 +747,9 @@ const handleOpenObsidian = async () => {
 }
 
 const handleCopyPath = async () => {
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
   try {
-    await navigator.clipboard.writeText(props.selectedNode.path.replaceAll('\\', '/'))
+    await navigator.clipboard.writeText(workspaceStore.selectedNode.path.replaceAll('\\', '/'))
     ElMessage.success('路径已复制到剪贴板')
   } catch {
     ElMessage.error('复制失败')
@@ -763,10 +757,10 @@ const handleCopyPath = async () => {
 }
 
 const handleCopyName = async () => {
-  if (!props.selectedNode) return
-  const isDir = props.selectedNode.type === 'directory'
+  if (!workspaceStore.selectedNode) return
+  const isDir = workspaceStore.selectedNode.type === 'directory'
   try {
-    await navigator.clipboard.writeText(props.selectedNode.name)
+    await navigator.clipboard.writeText(workspaceStore.selectedNode.name)
     ElMessage.success((isDir ? '文件夹名' : '文件名') + '已复制到剪贴板')
   } catch {
     ElMessage.error('复制失败')
@@ -774,19 +768,19 @@ const handleCopyName = async () => {
 }
 
 const handleRefresh = () => {
-  emit('refreshNode', props.selectedNode.path)
+  emit('refreshNode', workspaceStore.selectedNode.path)
 }
 
 const handleUpdateRepos = () => {
-  emit('batchPull', props.selectedNode)
+  emit('batchPull', workspaceStore.selectedNode)
 }
 
 const previewFile = async (overridePath, overrideName) => {
   // 支持 markdown 相对链接在应用内打开：overridePath 非空时按指定路径预览，
   // 不依赖 selectedNode（文件树选中态保持不变）。
-  const targetPath = overridePath || props.selectedNode?.path
+  const targetPath = overridePath || workspaceStore.selectedNode?.path
   if (!targetPath) return
-  const targetName = overrideName || props.selectedNode?.name || ''
+  const targetName = overrideName || workspaceStore.selectedNode?.name || ''
 
   // 「未保存修改」检查覆盖所有切换入口（文件树点击 / 链接跳转 / 回退），
   // 必须在 isEditing 置 false 之前执行，否则会丢失「编辑中」的判定条件。
@@ -894,8 +888,8 @@ const onPreviewLink = (absPath) => {
 
 // 回到文件树当前选中节点：单步回退，按钮在选中节点与预览一致后自动消失。
 const goBack = () => {
-  if (!canGoBack.value || !props.selectedNode) return
-  previewFile(props.selectedNode.path, props.selectedNode.name)
+  if (!canGoBack.value || !workspaceStore.selectedNode) return
+  previewFile(workspaceStore.selectedNode.path, workspaceStore.selectedNode.name)
 }
 
 // 进入编辑模式（仅文本类）；HTML 渲染视图下编辑需先切到源码视图（textarea 编辑链路在源码态）
@@ -907,15 +901,15 @@ const enterEdit = () => {
 }
 
 const handleSave = async () => {
-  if (!props.selectedNode || !isContentModified.value) return
+  if (!workspaceStore.selectedNode || !isContentModified.value) return
 
   isSaving.value = true
   try {
     // 按原文件编码回写（utf-8/gbk），不改变原文件编码
-    await SaveFile(props.selectedNode.path, filePreview.value.content, filePreview.value.encoding)
+    await SaveFile(workspaceStore.selectedNode.path, filePreview.value.content, filePreview.value.encoding)
     ElMessage.success('文件保存成功')
     originalContent.value = filePreview.value.content
-    emit('refreshNode', props.selectedNode.path)
+    emit('refreshNode', workspaceStore.selectedNode.path)
     // 保存后回到只读预览态；HTML 保存后回渲染视图查看最新效果
     isEditing.value = false
     if (isHtmlPreview.value) htmlViewMode.value = 'render'
@@ -984,15 +978,15 @@ const cloneRepo = async () => {
     ElMessage.warning('请输入 Git 仓库地址')
     return
   }
-  if (!props.selectedNode) return
+  if (!workspaceStore.selectedNode) return
 
   cloneLoading.value = true
   try {
-    const result = await CloneRepo(cloneUrl.value.trim(), props.selectedNode.path)
+    const result = await CloneRepo(cloneUrl.value.trim(), workspaceStore.selectedNode.path)
     if (result.includes('成功')) {
       ElMessage.success(result)
       cloneDialogVisible.value = false
-      emit('refreshNode', props.selectedNode.path)
+      emit('refreshNode', workspaceStore.selectedNode.path)
     } else {
       ElMessage.error(result)
     }
