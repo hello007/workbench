@@ -1381,3 +1381,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: AI 功能配置导入导出
+
+**Date**: 2026-09-09
+**Task**: AI 功能配置导入导出
+**Branch**: `master`
+
+### Summary
+
+配置管理对话框加导出/导入整份配置。导出当前全部功能项为 schema v2 JSON（原样含 env/MCP，导出前弹共享范围提示），前端 SaveFileDialog 选路径落盘。导入复用第 5 批 migrateFunctions 迁移补全 + validateFunctions 校验，与本机已加载项按 id 比对生成 New/Conflict/Invalid 三类预览不落盘；冲突项默认跳过可逐项改覆盖，确认后合并调 SaveAiFunctions 落盘。非合法 JSON 走 migrate 错误返回不落盘。新增 model.ImportPreview、service ExportAiFunctions/ImportAiFunctions、app.go 两 App 方法（wails generate module 同步绑定）。后端 6 测试 + 前端 7 测试全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ca03fb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
