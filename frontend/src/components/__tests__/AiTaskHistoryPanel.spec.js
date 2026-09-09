@@ -4,8 +4,7 @@ import AiTaskHistoryPanel from '../AiTaskHistoryPanel.vue'
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(),
-  EventsOff: vi.fn(),
-  SaveFileDialog: (...args) => SaveFileDialogMock(...args)
+  EventsOff: vi.fn()
 }))
 
 vi.mock('element-plus', async () => {
@@ -89,6 +88,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ExportAiTaskHistoryCSV: (...args) => exportCsvMock(...args),
   ExportAiTaskHistoryMarkdown: (...args) => exportMarkdownMock(...args),
   SaveFile: (...args) => saveFileMock(...args),
+  SaveFileDialog: (...args) => SaveFileDialogMock(...args),
   DeleteAiTaskHistory: (...args) => deleteAiTaskHistoryMock(...args),
   ClearAiTaskHistory: (...args) => clearAiTaskHistoryMock(...args)
 }))

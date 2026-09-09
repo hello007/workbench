@@ -1,0 +1,1 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Pinia 迁移删 prop 时须确认不触碰 frontend/wailsjs/ 绑定(App.js/App.d.ts/models.ts)；本文件定义前后端契约边界，迁移批次5/6涉及子组件改写时参照，避免误改绑定"}

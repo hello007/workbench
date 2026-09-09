@@ -159,9 +159,10 @@ import {
   ExportAiTaskHistoryMarkdown,
   DeleteAiTaskHistory,
   ClearAiTaskHistory,
-  SaveFile
+  SaveFile,
+  SaveFileDialog
 } from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff, SaveFileDialog } from '../../wailsjs/runtime/runtime'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['update:visible'])
@@ -229,7 +230,7 @@ const exportReport = async (fetchText, defaultFilename, filters, label) => {
   }
   let path
   try {
-    path = await SaveFileDialog({ DefaultFilename: defaultFilename, Filters: filters })
+    path = await SaveFileDialog(defaultFilename, filters)
   } catch {
     // runtime 不可用时静默（保存对话框被取消不算错误）
     return

@@ -225,8 +225,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetAiFunctions, SaveAiFunctions, ExportAiFunctions, ImportAiFunctions, SaveFile, ReadFileBytes, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
-import { OpenFileDialog, SaveFileDialog } from '../../wailsjs/runtime/runtime'
+import { GetAiFunctions, SaveAiFunctions, ExportAiFunctions, ImportAiFunctions, SaveFile, SaveFileDialog, OpenFileDialog, ReadFileBytes, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
 import ParamsEditor from './ParamsEditor.vue'
 import FollowUpsEditor from './FollowUpsEditor.vue'
 import EnvEditor from './EnvEditor.vue'
@@ -359,10 +358,7 @@ const exportConfig = async () => {
   }
   let path
   try {
-    path = await SaveFileDialog({
-      DefaultFilename: 'ai_functions.json',
-      Filters: [{ DisplayName: 'JSON 文件', Pattern: '*.json' }]
-    })
+    path = await SaveFileDialog('ai_functions.json', [{ DisplayName: 'JSON 文件', Pattern: '*.json' }])
   } catch {
     return // runtime 不可用或对话框异常，静默
   }
@@ -379,10 +375,7 @@ const exportConfig = async () => {
 const importConfig = async () => {
   let path
   try {
-    path = await OpenFileDialog({
-      Title: '选择 AI 功能配置文件',
-      Filters: [{ DisplayName: 'JSON 文件', Pattern: '*.json' }]
-    })
+    path = await OpenFileDialog('选择 AI 功能配置文件', [{ DisplayName: 'JSON 文件', Pattern: '*.json' }])
   } catch {
     return
   }

@@ -119,3 +119,49 @@
 GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；或保存时统一按 UTF-8 写入（改变原文件编码，破坏 GBK 文件）。
 #### Correct
 用 `DetectTextEncoding` 检测编码并转码为 UTF-8 给前端显示；保存时按 `Encoding` 字段转回原编码写入，原文件编码不变。
+
+---
+
+## Scenario: Wails v2 文件对话框须后端桥接（前端 runtime 无导出）
+
+### 1. Scope / Trigger
+- Trigger: 前端组件需弹出原生文件对话框（保存/打开/目录选择），从 `wailsjs/runtime/runtime` import `SaveFileDialog` / `OpenFileDialog` 等符号。
+- 原因: Wails v2 前端 runtime（`frontend/wailsjs/runtime/runtime.js`）**不导出** `SaveFileDialog` / `OpenFileDialog` / `DirectoryDialog` 等文件对话框 API（仅导出 `EventsOn` / `EventsOff` / `BrowserOpenURL` / `WindowReload` 等事件与窗口类）。前端 import 这些符号时 `npm run build` 必挂 `MISSING_EXPORT`，但 `npm test`（vitest 因 mock 规避）可能仍过，易漏。原生对话框必须在后端 Go 调 `github.com/wailsapp/wails/v2/pkg/runtime.SaveFileDialog(ctx, opts)` 等，前端无直接 API。
+
+### 2. Signatures
+- Go 桥接方法（`app.go`，ctx 取 startup 注入的 `a.ctx`）：
+  - `func (a *App) SaveFileDialog(defaultFilename string, filters []runtime.FileFilter) (string, error)` — 包装 `runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{DefaultFilename: defaultFilename, Filters: filters})`
+  - `func (a *App) OpenFileDialog(title string, filters []runtime.FileFilter) (string, error)` — 包装 `runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: title, Filters: filters})`
+- JS binding（`App.js`）：`export function SaveFileDialog(arg1, arg2) { return window['go']['main']['App']['SaveFileDialog'](arg1, arg2) }`
+- TS（`App.d.ts`）：`SaveFileDialog(arg1: string, arg2: Array<frontend.FileFilter>): Promise<string>`
+- `runtime.FileFilter` 结构 `{ DisplayName string; Pattern string }`，wails 生成到 `models.ts` 的 `frontend` namespace（`class FileFilter { DisplayName: string; Pattern: string }`），**非** `model` namespace。
+- 前端调用：`const path = await SaveFileDialog(defaultFilename, [{ DisplayName: 'CSV 文件', Pattern: '*.csv' }])`（位置参数，非对象参数）
+
+### 3. Contracts
+- 前端对话框调用须经后端桥接方法，不得直接从 `wailsjs/runtime/runtime` import 文件对话框符号
+- ctx 来源：`a.ctx`（`startup(ctx context.Context)` 注入，`app.go:42` 赋值 `a.ctx = ctx`），桥接方法传 `a.ctx` 给 wails runtime
+- 后端不耦合用户目录：桥接方法只返回路径，不读写文件；落盘仍由前端调 `SaveFile(path, content, encoding)` 完成
+- `wails generate module` 重生成 `App.js` / `App.d.ts` / `models.ts` 三处；`frontend/wailsjs/` 整目录 gitignore，不提交
+
+### 4. Validation & Error Matrix
+- 前端 import `SaveFileDialog` from `wailsjs/runtime/runtime` → `npm run build` 报 `MISSING_EXPORT: "SaveFileDialog" is not exported by "wailsjs/runtime/runtime.js"`，构建失败
+- 同类 `OpenFileDialog` 同根因，须一并修（一组件多用则一并迁移）
+- 桥接方法签名改后未 `wails generate module` → `App.js` / `App.d.ts` 缺新方法，前端调用 `window['go']['main']['App']['SaveFileDialog']` 运行时 undefined
+- `runtime.FileFilter` 字段名大小写：Go `DisplayName` / `Pattern`（首字母大写），wails 生成 TS 同名首字母大写，前端传参须用 `DisplayName` / `Pattern` 而非 `displayName` / `pattern`
+- 用户取消对话框 → 返回空串，前端 `if (!path) return` 处理（不算错误）
+
+### 5. Good/Base/Bad Cases
+- Good: 后端加桥接方法 → `wails generate module` 同步绑定 → 前端 import 从 `wailsjs/go/main/App` 取 → 调用点改位置参数 → spec mock 迁至 App mock 块 → `npm run build` + `npm test` 双绿
+- Base: 后端加桥接方法 → 手动同步 `App.js` / `App.d.ts`（无 wails CLI 时）→ 前端调用点改 → `npm test` 过
+- Bad: 前端从 `wailsjs/runtime/runtime` import 文件对话框符号 → `npm run build` 挂 MISSING_EXPORT
+
+### 6. Tests Required
+- 前端 spec 断言桥接方法被调用且参数正确（如 `AiTaskHistoryPanel.spec.js` 断言 `SaveFileDialog` 收到 `(defaultFilename, filters)` 两参）
+- spec mock 须从 `wailsjs/go/main/App` mock（非 `wailsjs/runtime/runtime`），mock 变量定义后复用
+- `npm run build` 须通过（vitest 不走 rolldown 全量打包，可能漏 MISSING_EXPORT，故 build 为必要验收）
+
+### 7. Wrong vs Correct
+#### Wrong
+`AiTaskHistoryPanel.vue` import `{ EventsOn, EventsOff, SaveFileDialog } from 'wailsjs/runtime/runtime'`，调用 `SaveFileDialog({ DefaultFilename: defaultFilename, Filters: filters })`。`runtime.js` 无 `SaveFileDialog` 导出，`npm run build` 报 MISSING_EXPORT。`AiFunctionConfigDialog.vue` 同根因 import `OpenFileDialog` + `SaveFileDialog` 同样挂。
+#### Correct
+`app.go` 加 `SaveFileDialog(defaultFilename, filters)` / `OpenFileDialog(title, filters)` 桥接方法（ctx 取 `a.ctx`），`wails generate module` 生成绑定。前端 import 改从 `wailsjs/go/main/App` 取，调用改位置参数 `SaveFileDialog(defaultFilename, filters)`，spec mock 迁至 App mock 块。`npm run build` + `npm test` 双绿。

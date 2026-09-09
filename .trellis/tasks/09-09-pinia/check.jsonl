@@ -1,0 +1,1 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验收阶段核查 Wails 绑定零变更的判定依据；对照本文件确认 store 迁移未污染 wailsjs 绑定层"}

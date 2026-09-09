@@ -113,14 +113,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ExportAiFunctions: () => exportAiFunctionsMock(),
   ImportAiFunctions: (...args) => importPreviewMock(...args),
   SaveFile: (...args) => saveFileMock(...args),
+  SaveFileDialog: (...args) => saveFileDialogMock(...args),
+  OpenFileDialog: (...args) => openFileDialogMock(...args),
   ReadFileBytes: (...args) => readFileBytesMock(...args),
   GetDiscoveredSkills: vi.fn(() => Promise.resolve(discoveredSkills)),
   RefreshDiscoveredSkills: () => refreshDiscoveredMock()
-}))
-
-vi.mock('../../../wailsjs/runtime/runtime', () => ({
-  OpenFileDialog: (...args) => openFileDialogMock(...args),
-  SaveFileDialog: (...args) => saveFileDialogMock(...args)
 }))
 
 // stub 外壳/折叠组件（避免 teleport 与 transition 在 jsdom 下的问题）；
