@@ -10,6 +10,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
+import { useUiStore } from '../../store'
 
 // Mock Wails runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -533,12 +534,12 @@ describe('Home.vue - Bug修复验证', () => {
 
     it('默认 activePanel 应为 directory', () => {
       const wrapper = createWrapper()
-      expect(wrapper.vm.activePanel).toBe('directory')
+      expect(useUiStore().activePanel).toBe('directory')
     })
 
     it('activePanel 为 toolbox 时不显示 DirectoryTree', async () => {
       const wrapper = createWrapper()
-      wrapper.vm.activePanel = 'toolbox'
+      useUiStore().activePanel = 'toolbox'
       await wrapper.vm.$nextTick()
       expect(wrapper.find('.stub-toolbox-panel').exists()).toBe(true)
     })

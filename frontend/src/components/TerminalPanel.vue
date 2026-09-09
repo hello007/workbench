@@ -1,5 +1,5 @@
 <template>
-  <div v-show="visible" class="terminal-panel">
+  <div v-show="uiStore.terminalVisible" class="terminal-panel">
     <!-- 工具栏 -->
     <div class="terminal-toolbar">
       <div class="terminal-toolbar-left">
@@ -22,7 +22,7 @@
         </div>
         <div class="terminal-path">
           <el-icon :size="12" class="path-icon"><Folder /></el-icon>
-          <span class="path-text" :title="currentDir">{{ currentDir }}</span>
+          <span class="path-text" :title="uiStore.terminalDir">{{ uiStore.terminalDir }}</span>
         </div>
       </div>
       <div class="terminal-toolbar-right">
@@ -57,12 +57,10 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Folder, RefreshRight } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
+import { useUiStore } from '../store'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
-const props = defineProps({
-  visible: { type: Boolean, default: false },
-  currentDir: { type: String, default: '' }
-})
+const uiStore = useUiStore()
 
 defineEmits(['toggle'])
 
@@ -112,12 +110,12 @@ onMounted(async () => {
 // 使用 v-show 保留 DOM，避免收起再展开时 xterm 丢失挂载点
 // 首次初始化需等待 visible=true（xterm 在 display:none 下无法正确 fit）
 watch(
-  [() => props.visible, settingsReady],
+  [() => uiStore.terminalVisible, settingsReady],
   async ([val, ready]) => {
     // 首次可见时初始化终端
     if (val && ready && !hasInitialized.value && terminalContainer.value) {
       await nextTick()
-      const dir = props.currentDir || 'C:\\'
+      const dir = uiStore.terminalDir || 'C:\\'
       await initTerminal(terminalContainer.value, dir, shellType.value)
       hasInitialized.value = true
       focus()
@@ -133,7 +131,7 @@ watch(
 )
 
 // 监听目录变化，自动跟随
-watch(() => props.currentDir, (newDir) => {
+watch(() => uiStore.terminalDir, (newDir) => {
   if (newDir && isActive.value) {
     changeDir(newDir)
   }
@@ -142,14 +140,14 @@ watch(() => props.currentDir, (newDir) => {
 // Shell 类型切换
 async function onShellChange(newType) {
   if (!terminalContainer.value) return
-  const dir = terminalDir.value || props.currentDir || 'C:\\'
+  const dir = terminalDir.value || uiStore.terminalDir || 'C:\\'
   await restartTerminal(terminalContainer.value, dir, newType)
 }
 
 // 重新启动
 async function onRestart() {
   if (!terminalContainer.value) return
-  const dir = terminalDir.value || props.currentDir || 'C:\\'
+  const dir = terminalDir.value || uiStore.terminalDir || 'C:\\'
   await restartTerminal(terminalContainer.value, dir, shellType.value)
 }
 
@@ -158,7 +156,7 @@ let resizeObserver = null
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(() => {
-    if (props.visible && isActive.value) {
+    if (uiStore.terminalVisible && isActive.value) {
       resize()
     }
   })

@@ -1,7 +1,6 @@
 <template>
   <el-dialog
-    :model-value="visible"
-    @update:model-value="emit('update:visible', $event)"
+    v-model="uiStore.repoFilterVisible"
     title="仓库筛选器"
     width="900px"
     :close-on-click-modal="false"
@@ -273,18 +272,19 @@ import {
 } from '../../wailsjs/go/main/App'
 // 复用 FilePreviewRenderer 渲染完整 README（享受 markdown-it 代码高亮 / mermaid / TOC / frontmatter）
 import FilePreviewRenderer from './FilePreviewRenderer.vue'
+import { useUiStore } from '../store'
 
 // ---- Props & Emits ----
+// visible / initialDirId 已迁 ui store（uiStore.repoFilterVisible / repoFilterInitialDirId）。
+// directories / currentDirId 为数据 prop，批次5 随 directory store 一并处理，此处保留。
 const props = defineProps({
-  visible: { type: Boolean, default: false },
   directories: { type: Array, default: () => [] },
-  currentDirId: { type: String, default: '' },
-  // 由 DirectoryTree 右键"仓库筛选器"传入的初始工作目录 id，优先于 currentDirId。
-  // 用于"在某个工作目录上右键"时直接定位到该目录，而非当前选中目录。
-  initialDirId: { type: String, default: '' }
+  currentDirId: { type: String, default: '' }
 })
 
-const emit = defineEmits(['update:visible', 'locate'])
+const emit = defineEmits(['locate'])
+
+const uiStore = useUiStore()
 
 // ---- 常量 ----
 // 等高项高度：必须与 .repo-item 的 height 严格一致，否则虚拟滚动定位偏移
@@ -567,13 +567,13 @@ async function onCleanMissing() {
 // ---- 弹窗打开 / 关闭 ----
 let suppressDirWatch = false
 watch(
-  () => props.visible,
+  () => uiStore.repoFilterVisible,
   async (v) => {
     if (v) {
       // 打开：同步当前工作目录 + 重置筛选
-      // initialDirId（DirectoryTree 右键触发）优先于 currentDirId，实现"右键哪个目录筛哪个"
+      // repoFilterInitialDirId（uiStore，DirectoryTree 右键触发）优先于 currentDirId，实现"右键哪个目录筛哪个"
       suppressDirWatch = true
-      selectedDirId.value = props.initialDirId || props.currentDirId
+      selectedDirId.value = uiStore.repoFilterInitialDirId || props.currentDirId
       await nextTick()
       suppressDirWatch = false
       searchKeyword.value = ''
@@ -591,7 +591,7 @@ watch(
 // ---- 工作目录切换：重新加载列表 ----
 watch(selectedDirId, async (newVal, oldVal) => {
   if (suppressDirWatch) return
-  if (!props.visible) return
+  if (!uiStore.repoFilterVisible) return
   if (newVal === oldVal) return
   // 切换工作目录清空选中，避免跨目录残留
   selectedPath.value = ''
@@ -603,7 +603,7 @@ watch(selectedDirId, async (newVal, oldVal) => {
 // 切换 Tab 必然导致旧选中项不在新 Tab（有标签=已编辑 / 无标签=未编辑 互斥），
 // 故选中项需切换为新 Tab 的首项，避免右栏残留旧 Tab 的仓库详情。
 watch(activeTab, async () => {
-  if (!props.visible) return
+  if (!uiStore.repoFilterVisible) return
   // 切换前 flush 旧选中项的防抖简述保存，避免丢失未提交编辑
   await flushPendingSave()
   await nextTick()

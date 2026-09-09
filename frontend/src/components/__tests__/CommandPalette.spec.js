@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import CommandPalette from '../CommandPalette.vue'
+import { useUiStore } from '../../store'
 
 // Mock wailsjs bindings used by composables (composables use ../../wailsjs relative to themselves)
 vi.mock('../../wailsjs/go/main/App', () => ({
@@ -47,7 +48,6 @@ const defaultStubs = {
 }
 
 const defaultProps = {
-  modelValue: true,
   currentDir: 'C:\\projects\\test',
   workDirs: [
     { id: '1', name: 'Project A', path: 'C:\\projects\\a' },
@@ -55,10 +55,18 @@ const defaultProps = {
   ]
 }
 
-function createWrapper(props = {}) {
+// modelValue / contentSearchInit 已迁 ui store：visible 经 uiStore.commandPaletteVisible 驱动，
+// contentSearchInit 经 uiStore.contentSearchInit（默认空串，本组用例不依赖）。
+// currentDir / workDirs 为数据 prop，保留。
+function createWrapper(options = {}) {
+  const { visible = true, ...props } = options
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const uiStore = useUiStore()
+  uiStore.commandPaletteVisible = visible
   return mount(CommandPalette, {
     props: { ...defaultProps, ...props },
-    global: { plugins: [createPinia()], stubs: defaultStubs }
+    global: { plugins: [pinia], stubs: defaultStubs }
   })
 }
 
@@ -82,7 +90,7 @@ describe('CommandPalette', () => {
   })
 
   it('does not render when hidden', () => {
-    wrapper = createWrapper({ modelValue: false })
+    wrapper = createWrapper({ visible: false })
     expect(wrapper.find('.command-palette-dialog').exists()).toBe(false)
   })
 
@@ -144,7 +152,8 @@ describe('CommandPalette', () => {
     const input = localWrapper.find('input')
     await input.trigger('keydown', { key: 'Escape' })
     await nextTick()
-    expect(localWrapper.emitted('update:modelValue')).toBeTruthy()
+    // onClose 直写 uiStore.commandPaletteVisible=false（不再 emit update:modelValue）
+    expect(useUiStore().commandPaletteVisible).toBe(false)
     localWrapper.unmount()
   })
 })

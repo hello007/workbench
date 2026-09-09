@@ -5,8 +5,8 @@
       v-for="item in panels"
       :key="item.id"
       class="activity-bar-item"
-      :class="{ 'is-active': modelValue === item.id }"
-      @click="$emit('update:modelValue', item.id)"
+      :class="{ 'is-active': uiStore.activePanel === item.id }"
+      @click="uiStore.activePanel = item.id"
     >
       <el-icon :size="20">
         <component :is="item.icon" />
@@ -25,7 +25,7 @@
     <div class="activity-bar-spacer"></div>
     <div
       class="activity-bar-item"
-      :class="{ 'is-active': terminalActive }"
+      :class="{ 'is-active': uiStore.terminalVisible }"
       @click="$emit('toggleTerminal')"
     >
       <el-icon :size="20">
@@ -37,13 +37,11 @@
 
 <script setup>
 import { Folder, MagicStick, SetUp, Setting, Monitor } from '@element-plus/icons-vue'
+import { useUiStore } from '../store'
 
-defineProps({
-  modelValue: { type: String, default: 'directory' },
-  terminalActive: { type: Boolean, default: false }
-})
+const uiStore = useUiStore()
 
-defineEmits(['update:modelValue', 'toggleTerminal', 'openSettings'])
+defineEmits(['toggleTerminal', 'openSettings'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },

@@ -184,16 +184,14 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Search, Document, Folder, Star, Loading, Close } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useFavoritesStore } from '../store'
+import { useFavoritesStore, useUiStore } from '../store'
 
 const props = defineProps({
-  modelValue: Boolean,
   currentDir: String,
-  workDirs: Array,
-  contentSearchInit: { type: String, default: '' }
+  workDirs: Array
 })
 
-const emit = defineEmits(['update:modelValue', 'select-file', 'select-favorite', 'select-workdir'])
+const emit = defineEmits(['select-file', 'select-favorite', 'select-workdir'])
 
 const searchInputRef = ref(null)
 const {
@@ -204,13 +202,14 @@ const {
 } = useCommandPalette()
 const { getRecent } = useRecentAccess()
 const favoritesStore = useFavoritesStore()
+const uiStore = useUiStore()
 
 const recentItems = ref([])
 const favoriteResults = ref([])
 
 const visible = computed({
-  get: () => props.modelValue,
-  set: (val) => emit('update:modelValue', val)
+  get: () => uiStore.commandPaletteVisible,
+  set: (val) => { uiStore.commandPaletteVisible = val }
 })
 
 const showRecent = computed(() => mode.value === 'general' && !query.value && recentItems.value.length > 0)
@@ -406,8 +405,8 @@ watch(visible, async (val) => {
   if (val) {
     recentItems.value = getRecent(10)
     await favoritesStore.loadFavorites()
-    if (props.contentSearchInit) {
-      input.value = props.contentSearchInit
+    if (uiStore.contentSearchInit) {
+      input.value = uiStore.contentSearchInit
     }
     await nextTick()
     searchInputRef.value?.focus()

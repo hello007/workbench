@@ -1,7 +1,6 @@
 <template>
   <el-dialog
-    :model-value="visible"
-    @update:model-value="$emit('update:visible', $event)"
+    v-model="uiStore.settingsVisible"
     title="设置"
     width="760px"
     :close-on-click-modal="true"
@@ -203,13 +202,11 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
-import { useSettingsStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS } from '../store'
 
-const props = defineProps({
-  visible: { type: Boolean, default: false }
-})
+const emit = defineEmits(['update-available'])
 
-const emit = defineEmits(['update:visible', 'update-available'])
+const uiStore = useUiStore()
 
 const tabs = [
   { id: 'general', label: '通用' },
@@ -341,7 +338,7 @@ function handleRecordingKeydown(e) {
 }
 
 // 弹窗打开时加载设置
-watch(() => props.visible, async (val) => {
+watch(() => uiStore.settingsVisible, async (val) => {
   if (val) {
     await loadSettings()
   }

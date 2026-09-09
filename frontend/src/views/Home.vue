@@ -1,29 +1,29 @@
 <template>
   <div class="home">
     <div class="home-layout">
-      <ActivityBar v-model="activePanel" :terminal-active="terminalVisible" @toggle-terminal="toggleTerminal" @open-settings="settingsVisible = true" />
+      <ActivityBar @toggle-terminal="uiStore.toggleTerminal" @open-settings="uiStore.settingsVisible = true" />
       <div class="main-area">
         <!-- 上半区：原有 Splitpanes 三栏（AI 功能页激活时整体隐藏，v-show 保状态：
              运行中任务、已选文件、预览内容均保留，切回即恢复） -->
-        <div v-show="activePanel !== 'ai'" class="main-panes">
+        <div v-show="uiStore.activePanel !== 'ai'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
               <div class="pane-content" style="position:relative;" @mousedown.capture="lastInteractedTree = 'directory'">
                 <DirectoryTree
-                  v-show="activePanel === 'directory'"
+                  v-show="uiStore.activePanel === 'directory'"
                   ref="directoryTreeRef"
                   :directories="directories"
                   :selected-id="selectedDirectoryId"
-                  :version="appVersion"
+                  :version="uiStore.appVersion"
                   @select="onDirectorySelect"
                   @change="loadDirectories"
                   @contextmenu="onDirectoryContextMenu"
                   @batch-pull="onBatchPull"
-                  @open-repo-filter="openRepoFilter"
+                  @open-repo-filter="uiStore.openRepoFilter"
                 />
                 <ToolboxPanel
-                  v-show="activePanel === 'toolbox'"
-                  @close="activePanel = 'directory'"
+                  v-show="uiStore.activePanel === 'toolbox'"
+                  @close="uiStore.activePanel = 'directory'"
                 />
               </div>
             </Pane>
@@ -44,10 +44,10 @@
                   @delete="onDeleteFromFileTree"
                   @add-work-dir="onAddWorkDir"
                   @open-content-search="onOpenContentSearch"
-                  @open-repo-filter="openRepoFilter()"
+                  @open-repo-filter="uiStore.openRepoFilter()"
                 >
                   <template #toolbar-extra>
-                    <el-button size="small" @click="openRepoFilter()">
+                    <el-button size="small" @click="uiStore.openRepoFilter()">
                       仓库筛选
                     </el-button>
                   </template>
@@ -81,38 +81,32 @@
              v-show 常驻挂载：切走再切回不丢运行中任务/已开 Tab/已录参数。
              与 .main-panes 同级，点击本面板不会冒泡进三栏 pane 的
              closeToolbox handler（该 handler 仅绑定在 Splitpanes 内部 pane 上） -->
-        <AiFunctionPanel v-show="activePanel === 'ai'" />
+        <AiFunctionPanel v-show="uiStore.activePanel === 'ai'" />
         <!-- 拖拽分隔条 -->
         <div
-          v-if="terminalVisible"
+          v-if="uiStore.terminalVisible"
           class="resize-bar"
           @mousedown="onResizeBarMouseDown"
         ></div>
         <!-- 下半区：终端面板 -->
         <TerminalPanel
-          :visible="terminalVisible"
-          :current-dir="terminalDir"
-          :style="{ height: terminalVisible ? terminalHeight + 'px' : '0px' }"
-          @toggle="toggleTerminal"
+          :style="{ height: uiStore.terminalVisible ? uiStore.terminalHeight + 'px' : '0px' }"
+          @toggle="uiStore.toggleTerminal"
         />
       </div>
     </div>
-    <SettingsPanel v-model:visible="settingsVisible" @update-available="onUpdateAvailable" />
-    <UpdateDialog v-model:visible="updateDialogVisible" :update-info="updateInfo" />
+    <SettingsPanel @update-available="onUpdateAvailable" />
+    <UpdateDialog />
     <CommandPalette
-      v-model="commandPaletteVisible"
       :current-dir="currentDirPath"
       :work-dirs="directories"
-      :content-search-init="contentSearchInit"
       @select-file="onPaletteSelectFile"
       @select-favorite="onPaletteSelectFavorite"
       @select-workdir="onPaletteSelectWorkDir"
     />
     <RepoFilterDialog
-      v-model:visible="repoFilterVisible"
       :directories="directories"
       :current-dir-id="selectedDirectoryId"
-      :initial-dir-id="repoFilterInitialDirId"
       @locate="onRepoLocate"
     />
   </div>
@@ -134,7 +128,7 @@ import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useSettingsStore, matchShortcut } from '../store'
+import { useSettingsStore, useUiStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -152,13 +146,11 @@ import {
   RefreshDirectoriesGitFlag
 } from '../../wailsjs/go/main/App'
 
-// ---- 核心状态 ----
+// ---- 核心状态（directory/workspace 域，批次5/6 迁 store）----
 const directories = ref([])
 const selectedDirectoryId = ref('')
 const selectedNode = ref(null)
 const latestCommit = ref(null)
-const appVersion = ref('')
-const activePanel = ref('directory')
 // 最近交互的树面板，用于 F2/Del 快捷键分派（'directory' | 'file'）
 const lastInteractedTree = ref('directory')
 
@@ -169,28 +161,10 @@ const clipboard = reactive({
   sourceType: ''
 })
 
-// ---- 终端状态 ----
-const terminalVisible = ref(false)
-const terminalHeight = ref(200)
-const terminalDir = ref('')
-
-// ---- 设置弹窗状态 ----
-const settingsVisible = ref(false)
-const updateDialogVisible = ref(false)
-const updateInfo = ref({})
-
-// ---- Command Palette 状态 ----
-const commandPaletteVisible = ref(false)
-const contentSearchInit = ref('')
-
-// ---- 仓库筛选器弹窗状态 ----
-const repoFilterVisible = ref(false)
-// 仓库筛选器打开时初始锁定的工作目录 id（由 DirectoryTree 右键"仓库筛选器"触发，
-// 优先于 currentDirId，使"在某个工作目录上右键"时弹窗直接定位到该目录而非当前选中目录）。
-// 每次打开后由 RepoFilterDialog 内 watch(visible) 消费，无需在此重置。
-const repoFilterInitialDirId = ref('')
 const { record: recordAccess } = useRecentAccess()
 const settingsStore = useSettingsStore()
+// UI 临时态（activePanel/终端3/弹窗 visible×6/appVersion）已迁 ui store
+const uiStore = useUiStore()
 
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
@@ -205,8 +179,8 @@ const currentDirPath = computed(() => {
 
 // ---- 右键菜单事件处理 ----
 const closeToolbox = () => {
-  if (activePanel.value === 'toolbox') {
-    activePanel.value = 'directory'
+  if (uiStore.activePanel === 'toolbox') {
+    uiStore.activePanel = 'directory'
   }
 }
 
@@ -448,7 +422,7 @@ const onRepoLocate = async (repoPath) => {
   }
 
   // 关闭弹窗
-  repoFilterVisible.value = false
+  uiStore.repoFilterVisible = false
 
   // 跨工作目录：先切换（触发文件树重建）
   if (targetDir.id !== selectedDirectoryId.value) {
@@ -460,21 +434,17 @@ const onRepoLocate = async (repoPath) => {
 }
 
 // ---- 仓库筛选器：统一打开入口 ----
-// 三个入口均走此函数：
+// 三个入口均走 uiStore.openRepoFilter action（封装 initialDirId + visible 赋值）：
 //   1) DirectoryTree 右键"仓库筛选器" -> 携带 dirId，锁定到右键所选项
 //   2) FileTreePanel 空白右键"仓库筛选器" -> 无 dirId，回退当前选中目录
 //   3) FileTreePanel 工具栏按钮 -> 无 dirId，回退当前选中目录
 // 关键：无 dirId 入口必须显式重置 initialDirId 为空，否则会残留上次右键锁定的目录，
 // 导致"工具栏按钮打开"仍定位到旧目录而非当前选中目录。
-// RepoFilterDialog 内 watch(visible) 按 initialDirId || currentDirId 优先级取值。
-function openRepoFilter(dirId = '') {
-  repoFilterInitialDirId.value = dirId || ''
-  repoFilterVisible.value = true
-}
+// RepoFilterDialog 内 watch(repoFilterVisible) 按 initialDirId || currentDirId 优先级取值。
 
 function onOpenContentSearch(subDir) {
-  contentSearchInit.value = subDir ? ':' + subDir.replace(/\\/g, '/') + '/ ' : ':'
-  commandPaletteVisible.value = true
+  uiStore.contentSearchInit = subDir ? ':' + subDir.replace(/\\/g, '/') + '/ ' : ':'
+  uiStore.commandPaletteVisible = true
 }
 
 // ---- 键盘快捷键 ----
@@ -506,14 +476,14 @@ const handleGlobalKeydown = (e) => {
   // 打开命令面板（快捷键可自定义）
   if (matchShortcut(e, settingsStore.shortcutCommandPalette)) {
     e.preventDefault()
-    commandPaletteVisible.value = true
+    uiStore.commandPaletteVisible = true
     return
   }
 
   // 切换终端（快捷键可自定义）
   if (matchShortcut(e, settingsStore.shortcutToggleTerminal)) {
     e.preventDefault()
-    toggleTerminal()
+    uiStore.toggleTerminal()
     return
   }
 
@@ -564,29 +534,24 @@ const handleGlobalKeydown = (e) => {
 
 // ---- 更新 ----
 function onUpdateAvailable(info) {
-  updateInfo.value = info
-  updateDialogVisible.value = true
-}
-
-// ---- 终端 ----
-const toggleTerminal = () => {
-  terminalVisible.value = !terminalVisible.value
+  uiStore.updateInfo = info
+  uiStore.updateDialogVisible = true
 }
 
 // 更新终端跟随目录
 watch(() => selectedNode.value, (node) => {
   if (node && node.type === 'directory') {
-    terminalDir.value = node.path
+    uiStore.terminalDir = node.path
   } else if (node && node.type === 'file') {
     const lastSep = Math.max(node.path.lastIndexOf('\\'), node.path.lastIndexOf('/'))
-    terminalDir.value = lastSep > 0 ? node.path.substring(0, lastSep) : node.path
+    uiStore.terminalDir = lastSep > 0 ? node.path.substring(0, lastSep) : node.path
   }
 })
 
 watch(() => selectedDirectoryId.value, () => {
   const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
   if (dir && !selectedNode.value) {
-    terminalDir.value = dir.path
+    uiStore.terminalDir = dir.path
   }
 })
 
@@ -594,12 +559,12 @@ watch(() => selectedDirectoryId.value, () => {
 const onResizeBarMouseDown = (e) => {
   e.preventDefault()
   const startY = e.clientY
-  const startHeight = terminalHeight.value
+  const startHeight = uiStore.terminalHeight
 
   const onMouseMove = (moveEvent) => {
     const delta = startY - moveEvent.clientY
     const newHeight = Math.max(100, Math.min(startHeight + delta, window.innerHeight - 200))
-    terminalHeight.value = newHeight
+    uiStore.terminalHeight = newHeight
   }
 
   const onMouseUp = () => {
@@ -718,7 +683,7 @@ onMounted(() => {
   // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记。
   loadDirectories().then(() => refreshGitFlags())
   settingsStore.loadShortcuts()
-  GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
+  GetAppVersion().then(v => { uiStore.appVersion = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
 })
 

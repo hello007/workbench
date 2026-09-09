@@ -1,7 +1,6 @@
 <template>
   <el-dialog
-    :model-value="visible"
-    @update:model-value="$emit('update:visible', $event)"
+    v-model="uiStore.updateDialogVisible"
     title="发现新版本"
     width="480px"
     :close-on-click-modal="false"
@@ -13,17 +12,17 @@
     <div v-if="!downloading && !downloaded" class="update-info">
       <div class="update-version">
         <span class="version-label">新版本</span>
-        <span class="version-number">v{{ updateInfo.latestVer }}</span>
+        <span class="version-number">v{{ uiStore.updateInfo.latestVer }}</span>
       </div>
       <div class="update-current">
-        当前版本：v{{ updateInfo.currentVer }}
+        当前版本：v{{ uiStore.updateInfo.currentVer }}
       </div>
-      <div v-if="updateInfo.releaseNotes" class="update-notes">
+      <div v-if="uiStore.updateInfo.releaseNotes" class="update-notes">
         <div class="update-notes-title">更新内容</div>
-        <div class="update-notes-body">{{ updateInfo.releaseNotes }}</div>
+        <div class="update-notes-body">{{ uiStore.updateInfo.releaseNotes }}</div>
       </div>
       <div class="update-meta">
-        <span v-if="updateInfo.fileSize">文件大小：{{ formatSize(updateInfo.fileSize) }}</span>
+        <span v-if="uiStore.updateInfo.fileSize">文件大小：{{ formatSize(uiStore.updateInfo.fileSize) }}</span>
       </div>
     </div>
 
@@ -77,19 +76,15 @@ import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { DownloadUpdate, CancelDownload, ApplyUpdate } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { useUiStore } from '../store'
 
-const props = defineProps({
-  visible: { type: Boolean, default: false },
-  updateInfo: { type: Object, default: () => ({}) }
-})
-
-const emit = defineEmits(['update:visible'])
+const uiStore = useUiStore()
 
 const downloading = ref(false)
 const downloaded = ref(false)
 
 // 弹窗打开时重置状态
-watch(() => props.visible, (val) => {
+watch(() => uiStore.updateDialogVisible, (val) => {
   if (val) {
     downloading.value = false
     downloaded.value = false
@@ -120,7 +115,7 @@ onBeforeUnmount(() => {
 })
 
 async function handleStartDownload() {
-  if (!props.updateInfo.downloadUrl) {
+  if (!uiStore.updateInfo.downloadUrl) {
     ElMessage.error('下载地址无效')
     return
   }
@@ -129,7 +124,7 @@ async function handleStartDownload() {
   progress.value = { totalBytes: 0, downloaded: 0, percent: 0, speed: '', completed: false }
 
   try {
-    await DownloadUpdate(props.updateInfo.downloadUrl)
+    await DownloadUpdate(uiStore.updateInfo.downloadUrl)
   } catch (e) {
     downloading.value = false
     ElMessage.error('下载失败: ' + (e.message || String(e)))
@@ -155,7 +150,7 @@ function handleRestartLater() {
 }
 
 function handleClose() {
-  emit('update:visible', false)
+  uiStore.updateDialogVisible = false
   // 重置状态
   if (!downloading.value) {
     downloaded.value = false
