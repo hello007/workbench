@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本任务新增 GetFunctionUsageCounts App 方法并同步 wailsjs 绑定（App.js/App.d.ts），须遵守跨层契约同步规则"}
+{"file": "docs/plans/2026-09-09-ai-usage-frequency-sort.md", "reason": "设计来源文档：排序优先级 pinned > 频次 > 原序、后端聚合方案、异步 late-join、改动范围清单"}

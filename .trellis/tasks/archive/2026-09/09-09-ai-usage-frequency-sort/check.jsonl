@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 app.go 新增方法签名与 wailsjs 绑定（App.js/App.d.ts）是否一致同步"}
+{"file": "docs/plans/2026-09-09-ai-usage-frequency-sort.md", "reason": "对照设计文档验收：canceled 不计入、pinned 优先、频次降序稳定排序、localStorage 持久化、异步加载不阻塞"}
