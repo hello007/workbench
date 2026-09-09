@@ -1314,3 +1314,37 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: AI 任务历史统计与导出报告
+
+**Date**: 2026-09-09
+**Task**: AI 任务历史统计与导出报告
+**Branch**: `master`
+
+### Summary
+
+在历史归档数据上新增聚合统计与导出：AiTaskHistoryStats/FunctionStat 模型（4 分项 token Total 含 plan 漏列的 CacheCreation）、service 层 Stats/ExportCSV(BOM+RFC4180)/ExportMarkdown、app.go 3 个 App 方法与 wailsjs 三处绑定（含手动补 runtime SaveFileDialog 绑定）、前端统计卡片+功能排行+双导出按钮（SaveFileDialog 落盘）。后端 6 测试+前端 3 测试全绿。沉淀 2 条 FAQ：SaveFileDialog 绑定缺失、Go 源码 BOM 字面量编译报错。4 项决策：趋势不做/4 分项 token/前端 SaveFileDialog/导出当前筛选范围。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `267429f` | (see git log) |
+| `bcf7e8e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
