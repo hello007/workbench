@@ -184,7 +184,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Search, Document, Folder, Star, Loading, Close } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useFavorites } from '../composables/useFavorites'
+import { useFavoritesStore } from '../store'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -203,7 +203,7 @@ const {
   searchFiles, executeContentSearch, resetSelection
 } = useCommandPalette()
 const { getRecent } = useRecentAccess()
-const { favorites, loadFavorites, searchFavorites, removeFavorite } = useFavorites()
+const favoritesStore = useFavoritesStore()
 
 const recentItems = ref([])
 const favoriteResults = ref([])
@@ -286,9 +286,9 @@ function onInput() {
   clearTimeout(searchTimer)
 
   if (mode.value === 'favorites') {
-    favoriteResults.value = searchFavorites(query.value)
+    favoriteResults.value = favoritesStore.searchFavorites(query.value)
   } else if (mode.value === 'general' && query.value) {
-    favoriteResults.value = searchFavorites(query.value).slice(0, 5)
+    favoriteResults.value = favoritesStore.searchFavorites(query.value).slice(0, 5)
     searchTimer = setTimeout(() => {
       searchFiles(props.currentDir)
     }, 300)
@@ -367,7 +367,7 @@ function selectFavorite(fav) {
 }
 
 async function handleRemoveFav(item) {
-  await removeFavorite(item.path)
+  await favoritesStore.removeFavorite(item.path)
   favoriteResults.value = favoriteResults.value.filter(f => f.path !== item.path)
 }
 
@@ -405,7 +405,7 @@ function formatTime(timestamp) {
 watch(visible, async (val) => {
   if (val) {
     recentItems.value = getRecent(10)
-    await loadFavorites()
+    await favoritesStore.loadFavorites()
     if (props.contentSearchInit) {
       input.value = props.contentSearchInit
     }

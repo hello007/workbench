@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
+import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
 
 // Mock Wails runtime
@@ -63,6 +64,8 @@ describe('Home.vue - Bug修复验证', () => {
   let wrapper
 
   beforeEach(() => {
+    // Home.vue 渲染真实 CommandPalette（未 stub），其 setup 调用 useFavoritesStore() 需活跃 pinia
+    setActivePinia(createPinia())
     wrapper = mount(Home, {
       global: {
         stubs: {

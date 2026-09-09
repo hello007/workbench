@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia } from 'pinia'
 import CommandPalette from '../CommandPalette.vue'
 
 // Mock wailsjs bindings used by composables (composables use ../../wailsjs relative to themselves)
@@ -57,7 +58,7 @@ const defaultProps = {
 function createWrapper(props = {}) {
   return mount(CommandPalette, {
     props: { ...defaultProps, ...props },
-    global: { stubs: defaultStubs }
+    global: { plugins: [createPinia()], stubs: defaultStubs }
   })
 }
 

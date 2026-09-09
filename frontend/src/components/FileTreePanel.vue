@@ -363,7 +363,7 @@ import {
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
-import { useFavorites } from '../composables/useFavorites'
+import { useFavoritesStore } from '../store'
 import { useShortcuts } from '../composables/useShortcuts'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
@@ -396,7 +396,7 @@ const props = defineProps({
 const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search', 'open-repo-filter'])
 
 const { saveState, restoreState } = useTreeState()
-const { addFavorite, removeFavorite, favorites, loadFavorites } = useFavorites()
+const favoritesStore = useFavoritesStore()
 const { shortcutRename, shortcutDelete } = useShortcuts()
 
 // ---- Refs ----
@@ -432,7 +432,7 @@ const contextMenu = reactive({
 })
 
 const isFavorited = computed(() => {
-  const favList = favorites.value
+  const favList = favoritesStore.favorites
   const path = contextMenu.data?.path
   if (!path) return false
   return favList.some(f => f.path === path)
@@ -1173,7 +1173,7 @@ const handleBatchPull = (data) => {
 
 // ---- 添加到收藏 ----
 const handleAddFavorite = async (node) => {
-  const err = await addFavorite(node.path, '', '默认')
+  const err = await favoritesStore.addFavorite(node.path, '', '默认')
   if (err) {
     ElMessage.warning(err)
   } else {
@@ -1183,7 +1183,7 @@ const handleAddFavorite = async (node) => {
 
 // ---- 取消收藏 ----
 const handleRemoveFavorite = async (node) => {
-  const err = await removeFavorite(node.path)
+  const err = await favoritesStore.removeFavorite(node.path)
   if (err) {
     ElMessage.warning(err)
   } else {
@@ -1419,7 +1419,7 @@ defineExpose({
 onMounted(() => {
   document.addEventListener('mousedown', onGlobalClick)
   document.addEventListener('contextmenu', onGlobalContextMenu)
-  loadFavorites()
+  favoritesStore.loadFavorites()
 })
 
 onBeforeUnmount(() => {

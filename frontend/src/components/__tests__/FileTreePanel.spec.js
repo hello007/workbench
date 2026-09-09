@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
+import { createPinia } from 'pinia'
 import FileTreePanel from '../FileTreePanel.vue'
 
 vi.mock('element-plus', async () => {
@@ -102,7 +103,7 @@ function createWrapper(props = {}) {
       clipboard: { mode: null },
       ...props
     },
-    global: { stubs: defaultStubs }
+    global: { plugins: [createPinia()], stubs: defaultStubs }
   })
 }
 
@@ -331,7 +332,7 @@ describe('FileTreePanel.vue', () => {
         selectedDirId: 'dir-1',
         clipboard: { mode: null }
       },
-      global: { stubs }
+      global: { plugins: [createPinia()], stubs }
     })
   }
 
@@ -861,7 +862,7 @@ describe('FileTreePanel.vue', () => {
       }
       wrapper = mount(FileTreePanel, {
         props: { directories: winDirs, selectedDirId: 'dir-win', clipboard: { mode: null } },
-        global: { stubs }
+        global: { plugins: [createPinia()], stubs }
       })
       await flushPromises()
 
@@ -914,7 +915,7 @@ describe('FileTreePanel.vue', () => {
       }
       wrapper = mount(FileTreePanel, {
         props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { stubs }
+        global: { plugins: [createPinia()], stubs }
       })
       await flushPromises()
 
@@ -956,7 +957,7 @@ describe('FileTreePanel.vue', () => {
       }
       wrapper = mount(FileTreePanel, {
         props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { stubs }
+        global: { plugins: [createPinia()], stubs }
       })
       await flushPromises()
 
@@ -990,7 +991,7 @@ describe('FileTreePanel.vue', () => {
       }
       wrapper = mount(FileTreePanel, {
         props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { stubs }
+        global: { plugins: [createPinia()], stubs }
       })
       await flushPromises()
 
