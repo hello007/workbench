@@ -13,7 +13,8 @@ import {
   formatDisplay,
   shortcutFromEvent,
   DEFAULTS
-} from '../../store'
+} from '..'
+import { GetSettings, SaveSettings } from '../../../wailsjs/go/main/App'
 
 describe('settings store - 默认值', () => {
   it('DEFAULTS 应包含 rename=F2 与 delete=Delete', () => {
@@ -120,5 +121,66 @@ describe('settings store - checkConflict（含 rename/delete）', () => {
     const c = store.checkConflict('Ctrl+P', 'rename')
     expect(c).toBeTruthy()
     expect(c.key).toBe('commandPalette')
+  })
+})
+
+describe('settings store - loadShortcuts/saveShortcuts', () => {
+  beforeEach(() => {
+    // 每个 it 独立 pinia 实例（store 重置为 DEFAULTS）+ 清理 mock 历史 + 重置默认实现
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    SaveSettings.mockResolvedValue(true)
+  })
+
+  it('loadShortcuts 后端值覆盖默认，未提供字段填默认', async () => {
+    GetSettings.mockResolvedValue({ shortcutRename: 'F5', shortcutCommandPalette: 'Ctrl+Shift+P' })
+    const store = useSettingsStore()
+    await store.loadShortcuts()
+    expect(store.shortcutRename).toBe('F5')
+    expect(store.shortcutCommandPalette).toBe('Ctrl+Shift+P')
+    // 未提供的字段回填默认（toggleTerminal/delete）
+    expect(store.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
+    expect(store.shortcutDelete).toBe(DEFAULTS.delete)
+  })
+
+  it('loadShortcuts 空对象全填默认', async () => {
+    GetSettings.mockResolvedValue({})
+    const store = useSettingsStore()
+    await store.loadShortcuts()
+    expect(store.shortcutCommandPalette).toBe(DEFAULTS.commandPalette)
+    expect(store.shortcutRename).toBe(DEFAULTS.rename)
+    expect(store.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
+    expect(store.shortcutDelete).toBe(DEFAULTS.delete)
+  })
+
+  it('loadShortcuts 失败回退默认（覆盖用户改过的非默认值）', async () => {
+    GetSettings.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    // 先改非默认，验证 catch 分支确实重置
+    store.shortcutRename = 'F5'
+    expect(store.shortcutRename).toBe('F5')
+    await store.loadShortcuts()
+    expect(store.shortcutRename).toBe(DEFAULTS.rename)
+    expect(store.shortcutCommandPalette).toBe(DEFAULTS.commandPalette)
+  })
+
+  it('saveShortcuts 将 4 个 shortcut 字段写入 settings 对象并保留其他字段', async () => {
+    const existing = { shortcutCommandPalette: 'Ctrl+P', otherField: 'keep' }
+    GetSettings.mockResolvedValue(existing)
+    const store = useSettingsStore()
+    store.shortcutRename = 'F5'
+    await store.saveShortcuts()
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    const saved = SaveSettings.mock.calls[0][0]
+    // 改后值写入
+    expect(saved.shortcutRename).toBe('F5')
+    // store 当前值写入（commandPalette 默认 'Ctrl+P'）
+    expect(saved.shortcutCommandPalette).toBe('Ctrl+P')
+    // 默认值写入
+    expect(saved.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
+    expect(saved.shortcutDelete).toBe(DEFAULTS.delete)
+    // 非快捷键字段保留
+    expect(saved.otherField).toBe('keep')
   })
 })

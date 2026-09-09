@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useFavoritesStore } from '../../store'
+import { useFavoritesStore } from '..'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetFavorites: vi.fn(() => Promise.resolve([

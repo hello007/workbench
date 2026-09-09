@@ -10,6 +10,7 @@
 | 桌面框架 | Wails | v2.12.0 |
 | 前端 | Vue 3 (Composition API) | 3.5.33 |
 | UI 组件 | Element Plus | 2.13.7 |
+| 状态管理 | Pinia | 4.0.3 |
 | 路由 | Vue Router | 4.6.4 |
 | 构建工具 | Vite | 8.0.10 |
 
@@ -128,14 +129,19 @@ cd frontend && npm test
 │   ├── public/
 │   │   └── pdfjs-viewer/          # pdfjs 官方 viewer v4.8.69 静态资源（web/+build/+locale 中英），iframe 加载，go:embed 打包
 │   └── src/
-│       ├── views/Home.vue              # 上下分区布局容器 + 状态中枢
-│       ├── composables/
-│       │   ├── useTerminal.js           # 终端逻辑（xterm + PTY 通信）
-│       │   ├── useCommandPalette.js     # 命令面板搜索/导航
-│       │   ├── useFavorites.js          # 收藏夹管理
-│       │   ├── useRecentAccess.js       # 最近访问历史
-│       │   ├── useTreeState.js          # 文件树状态持久化
-│       │   └── useShortcuts.js          # 快捷键解析与匹配
+│       ├── views/Home.vue              # 上下分区布局容器 + 跨域编排（域 action 调度 + ref 链）
+│       ├── store/                      # Pinia 状态管理（setup store，按域拆分）
+│       │   ├── index.js                # createPinia + 导出 5 store
+│       │   ├── favorites.js            # 收藏夹（favorites ref + 增删改查搜索）
+│       │   ├── settings.js             # 快捷键配置 + 纯函数（matchShortcut/isValidShortcut 等）
+│       │   ├── ui.js                   # UI 临时态（activePanel/终端/弹窗 visible/appVersion）
+│       │   ├── directory.js            # 工作目录（directories/selectedDirectoryId/currentDirPath）
+│       │   └── workspace.js            # 工作区共享态（selectedNode/latestCommit/clipboard）
+│       ├── composables/                # 组件内实例态 + localStorage 工具（useFavorites/useShortcuts 已迁 store）
+│       │   ├── useTerminal.js           # 终端逻辑（xterm + PTY 通信，每实例独立）
+│       │   ├── useCommandPalette.js     # 命令面板搜索/导航（每实例独立）
+│       │   ├── useRecentAccess.js       # 最近访问历史（localStorage 工具）
+│       │   └── useTreeState.js          # 文件树状态持久化（localStorage 工具）
 │       └── components/
 │           ├── ActivityBar.vue           # 活动栏（目录/AI 功能/工具箱/终端切换）
 │           ├── DirectoryTree.vue        # 工作目录树面板
