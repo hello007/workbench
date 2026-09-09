@@ -1348,3 +1348,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: AI 功能项使用频次智能排序
+
+**Date**: 2026-09-09
+**Task**: AI 功能项使用频次智能排序
+**Branch**: `master`
+
+### Summary
+
+实施 docs/plans/2026-09-09-ai-usage-frequency-sort.md：后端 UsageCounts 聚合（canceled 不计入）+ GetFunctionUsageCounts App 方法 + wailsjs 绑定同步；前端 AiFunctionPanel 频次排序开关（localStorage 持久化）、pinned>频次>原序排序、异步 late-join、频次角标仅开关开启显示；测试 Go 2 例前端 4 例全绿；确认 4 项待确认点（canceled 不计入/角标仅频次模式/localStorage/先全量无窗口）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b782ca` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

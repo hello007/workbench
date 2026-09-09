@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
+- **Total Sessions**: 41
 - **Last Active**: 2026-09-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1350 | Active |
+| `journal-1.md` | ~1383 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-09-09 | AI 功能项使用频次智能排序 | `1b782ca` | `master` |
 | 40 | 2026-09-09 | AI 任务历史统计与导出报告 | `267429f`, `bcf7e8e` | `master` |
 | 39 | 2026-09-09 | AI 功能项搜索/分组/置顶 + 配置 schema 版本与迁移（第 5 批） | `10e97ac` | `master` |
 | 38 | 2026-09-09 | AI skill 自动发现与一键导入（第 4 批） | `3d32ef5` | `master` |
