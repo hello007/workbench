@@ -22,15 +22,23 @@
     <div class="ai-layout">
       <!-- 左：功能卡片列表（管理按钮已上移标题栏，侧栏纯列表） -->
       <div class="ai-sidebar">
-        <!-- 搜索 + tag chips 筛选：功能项增长后保持高频功能快速触达 -->
+        <!-- 搜索 + 频次排序开关 + tag chips 筛选：功能项增长后保持高频功能快速触达 -->
         <div class="ai-filter">
-          <el-input
-            v-model="keyword"
-            placeholder="搜索名称/描述/标签"
-            clearable
-            size="small"
-            :prefix-icon="Search"
-          />
+          <div class="ai-filter-row">
+            <el-input
+              v-model="keyword"
+              placeholder="搜索名称/描述/标签"
+              clearable
+              size="small"
+              :prefix-icon="Search"
+            />
+            <el-tooltip content="按使用频次排序（置顶仍优先，取消的任务不计入）" placement="top">
+              <span class="ai-sort-switch">
+                <el-switch v-model="sortByFrequency" size="small" />
+                <span class="ai-sort-label">频次</span>
+              </span>
+            </el-tooltip>
+          </div>
           <div v-if="allTags.length" class="ai-tag-chips">
             <el-tag
               v-for="tag in allTags"
@@ -56,6 +64,8 @@
             <div class="ai-card-head">
               <el-icon :size="18" class="ai-card-icon"><component :is="iconComp(f.icon)" /></el-icon>
               <span class="ai-card-name">{{ f.name }}</span>
+              <!-- 运行次数角标：仅频次排序模式显示（排序依据可见，关闭时不添视觉噪音） -->
+              <span v-if="sortByFrequency && usageCounts[f.id]" class="ai-card-count">{{ usageCounts[f.id] }} 次</span>
               <el-icon v-if="f.pinned" :size="14" class="ai-card-pin"><Star /></el-icon>
             </div>
             <div class="ai-card-desc">{{ f.description }}</div>
@@ -204,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as Icons from '@element-plus/icons-vue'
 import { MagicStick, Search, Star } from '@element-plus/icons-vue'
@@ -214,6 +224,7 @@ import {
   RunAiFollowUp,
   CancelAiTask,
   GetAiConcurrencyStatus,
+  GetFunctionUsageCounts,
   GetAiTaskOutput,
   RemoveAiTask,
   OpenInExplorer,
@@ -248,13 +259,33 @@ const allTags = computed(() => {
   return [...set]
 })
 
+// ===== 频次排序 =====
+// sortByFrequency 排序模式开关，localStorage 持久化（记住上次选择，轻量不入配置文件）；
+// usageCounts 为 functionId → 运行次数（后端聚合，canceled 不计入）。
+const SORT_FREQ_KEY = 'ai-function-sort-by-frequency'
+const sortByFrequency = ref(localStorage.getItem(SORT_FREQ_KEY) === '1')
+watch(sortByFrequency, (v) => {
+  localStorage.setItem(SORT_FREQ_KEY, v ? '1' : '0')
+})
+const usageCounts = ref({})
+
+// loadUsageCounts 异步拉取频次聚合：列表先渲染不阻塞，数据到达 late-join 触发重排
+const loadUsageCounts = async () => {
+  try {
+    usageCounts.value = (await GetFunctionUsageCounts()) || {}
+  } catch {
+    // 频次拉取失败不影响列表展示，仅退化为原序
+  }
+}
+
 const toggleTag = (tag) => {
   const idx = selectedTags.value.indexOf(tag)
   if (idx >= 0) selectedTags.value.splice(idx, 1)
   else selectedTags.value.push(tag)
 }
 
-// filteredFunctions：搜索 + tag 筛选后，pinned 优先排序（同组保持配置文件顺序，稳定排序）
+// filteredFunctions：搜索 + tag 筛选后排序，优先级 pinned > 频次（开启时降序）> 配置文件顺序
+// （Array.prototype.sort ES2019+ 稳定，同序保持原数组即配置文件顺序）
 const filteredFunctions = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   const tags = selectedTags.value
@@ -269,6 +300,11 @@ const filteredFunctions = computed(() => {
     })
     .sort((a, b) => {
       if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+      if (sortByFrequency.value) {
+        const fa = usageCounts.value[a.id] || 0
+        const fb = usageCounts.value[b.id] || 0
+        if (fa !== fb) return fb - fa
+      }
       return 0
     })
 })
@@ -276,6 +312,8 @@ const filteredFunctions = computed(() => {
 const loadFunctions = async () => {
   try {
     functions.value = (await GetAiFunctions()) || []
+    // 功能列表刷新后频次同步重拉（新增运行记录影响排序），不阻塞列表渲染
+    loadUsageCounts()
   } catch (e) {
     ElMessage.error('加载 AI 功能失败: ' + (e?.message || String(e)))
   }
@@ -808,6 +846,36 @@ onBeforeUnmount(() => {
 .ai-filter {
   flex-shrink: 0;
   margin-bottom: 8px;
+}
+/* 搜索框 + 频次排序开关同行 */
+.ai-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-filter-row .el-input {
+  flex: 1;
+}
+.ai-sort-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.ai-sort-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+/* 频次角标：仅频次模式显示，弱化样式避免抢焦点 */
+.ai-card-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.06));
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+  flex-shrink: 0;
 }
 .ai-tag-chips {
   display: flex;

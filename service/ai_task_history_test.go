@@ -387,6 +387,58 @@ func TestStats_Filter(t *testing.T) {
 	}
 }
 
+// TestUsageCounts 频次聚合：success/failed/timeout 计入，canceled 不计入，
+// FunctionID 为空的记录跳过；同功能多条累加
+func TestUsageCounts(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	_, _ = svc.Archive(makeEntry("u1", base.Add(-3*time.Hour), "success", 0), "")
+	_, _ = svc.Archive(makeEntry("u2", base.Add(-2*time.Hour), "success", 0), "")
+	_, _ = svc.Archive(makeEntry("u3", base.Add(-time.Hour), "failed", 0), "")
+	_, _ = svc.Archive(makeEntry("u4", base.Add(-time.Hour), "timeout", 0), "")
+	// canceled 不计入
+	_, _ = svc.Archive(makeEntry("u5", base.Add(-time.Hour), "canceled", 0), "")
+	// FunctionID 为空跳过
+	empty := makeEntry("u6", base, "success", 0)
+	empty.FunctionID = ""
+	_, _ = svc.Archive(empty, "")
+
+	counts, err := svc.UsageCounts()
+	if err != nil {
+		t.Fatalf("UsageCounts 失败: %v", err)
+	}
+	// 逐项断言：每功能各 1 次（success/failed/timeout 各计入），canceled 与空 FunctionID 不产生键
+	for _, id := range []string{"fn-u1", "fn-u2", "fn-u3", "fn-u4"} {
+		if counts[id] != 1 {
+			t.Errorf("%s 应计 1 次, got %d", id, counts[id])
+		}
+	}
+	if _, ok := counts["fn-u5"]; ok {
+		t.Errorf("canceled 不应计入频次: %v", counts)
+	}
+	if len(counts) != 4 {
+		t.Errorf("应恰好 4 个功能项计数, got %d: %v", len(counts), counts)
+	}
+}
+
+// TestUsageCounts_MultiSameFunction 同功能多条记录累加
+func TestUsageCounts_MultiSameFunction(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	for i := 0; i < 3; i++ {
+		e := makeEntry("m1", base.Add(-time.Duration(i)*time.Minute), "success", 0)
+		e.FunctionID = "fn-same"
+		_, _ = svc.Archive(e, "")
+	}
+	counts, err := svc.UsageCounts()
+	if err != nil {
+		t.Fatalf("UsageCounts 失败: %v", err)
+	}
+	if counts["fn-same"] != 3 {
+		t.Errorf("同功能应累加为 3 次, got %d", counts["fn-same"])
+	}
+}
+
 // TestExportCSV BOM 头、表头、字段转义（含逗号的功能名）
 func TestExportCSV(t *testing.T) {
 	svc := newHistorySvc(t)

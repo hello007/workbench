@@ -186,6 +186,26 @@ func (h *AiTaskHistoryService) List(filter *model.AiTaskHistoryFilter) ([]*model
 	return result, nil
 }
 
+// UsageCounts 聚合各功能项运行次数（functionId → 次数），供前端「按频次排序」。
+// canceled 不计入（用户取消表示未有效使用）；FunctionID 为空的记录跳过。
+// 全量聚合不做时间窗口，量级 2000 条上限（enforceRetention）无性能压力。
+func (h *AiTaskHistoryService) UsageCounts() (map[string]int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	list, err := h.loadAll()
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int)
+	for _, e := range list {
+		if e.FunctionID == "" || e.Status == "canceled" {
+			continue
+		}
+		counts[e.FunctionID]++
+	}
+	return counts, nil
+}
+
 // Stats 按筛选范围聚合统计：总数/成功数/总成本/token 四分项/总耗时 + 按功能项聚合排行。
 // metrics 为 nil 的记录（异常 result）计入 count 但跳过计量累加。
 // 量级 2000 条上限（enforceRetention），内存聚合无性能压力。

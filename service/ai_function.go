@@ -605,6 +605,14 @@ func (s *AiFunctionService) GetAiTaskHistoryStats(filter *model.AiTaskHistoryFil
 	return s.historySvc.Stats(filter)
 }
 
+// GetFunctionUsageCounts 各功能项运行次数聚合（功能列表按频次排序用），委托 historySvc。
+func (s *AiFunctionService) GetFunctionUsageCounts() (map[string]int, error) {
+	if s.historySvc == nil {
+		return map[string]int{}, nil
+	}
+	return s.historySvc.UsageCounts()
+}
+
 // ExportAiTaskHistoryCSV 历史明细导出 CSV 文本，委托 historySvc。
 func (s *AiFunctionService) ExportAiTaskHistoryCSV(filter *model.AiTaskHistoryFilter) (string, error) {
 	if s.historySvc == nil {

@@ -1399,6 +1399,17 @@ func (a *App) GetAiTaskHistoryStats(filter model.AiTaskHistoryFilter) *model.AiT
 	return stats
 }
 
+// GetFunctionUsageCounts 各功能项运行次数聚合（functionId → 次数，canceled 不计入）。
+// 供「AI 功能」列表按频次排序，避免全量历史元数据过 IPC。
+func (a *App) GetFunctionUsageCounts() map[string]int {
+	counts, err := a.aiFuncSvc.GetFunctionUsageCounts()
+	if err != nil {
+		println("Error:", err.Error())
+		return map[string]int{}
+	}
+	return counts
+}
+
 // ExportAiTaskHistoryCSV 导出当前筛选范围的历史明细 CSV 文本（UTF-8 BOM 开头）。
 // 落盘由前端经 SaveFileDialog 选路径后调 SaveFile 完成，后端不直接写文件。
 func (a *App) ExportAiTaskHistoryCSV(filter model.AiTaskHistoryFilter) (string, error) {

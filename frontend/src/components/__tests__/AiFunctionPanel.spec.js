@@ -72,6 +72,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RunAiFollowUp: (...args) => runAiFollowUpMock(...args),
   CancelAiTask: vi.fn(),
   GetAiConcurrencyStatus: vi.fn(() => Promise.resolve({ running: 0, queued: 0, max: 3 })),
+  GetFunctionUsageCounts: vi.fn(() =>
+    Promise.resolve({ 'weekly-report': 5, 'speech-doc': 12, 'meeting-list': 1 })
+  ),
   GetAiTaskOutput: (...args) => getAiTaskOutputMock(...args),
   RemoveAiTask: vi.fn(() => Promise.resolve(true)),
   OpenInExplorer: (...args) => openInExplorerMock(...args),
@@ -90,6 +93,7 @@ const stubs = {
   'el-tag': { template: '<span class="tag"><slot /></span>', props: ['size', 'type', 'effect'] },
   'el-input': { template: '<input class="el-input" />', props: ['modelValue', 'placeholder', 'clearable', 'size', 'prefixIcon'] },
   'el-switch': { template: '<span class="el-switch" />', props: ['modelValue'] },
+  'el-tooltip': { template: '<span class="el-tooltip"><slot /></span>', props: ['content', 'placement'] },
   // 声明 emits 后 click 监听器不进 $attrs，避免透传 onClick 与 $emit('click') 双触发
   'el-button': {
     emits: ['click'],
@@ -147,6 +151,7 @@ const runFromCard = async (wrapper, idx, params = {}) => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]
 })
 
@@ -517,5 +522,69 @@ describe('AiFunctionPanel', () => {
     fns.find((f) => f.id === 'meeting-list').pinned = true
     await flushPromises()
     expect(wrapper.vm.filteredFunctions[0].id).toBe('meeting-list')
+  })
+
+  it('频次模式：pinned 仍最前，未 pinned 按运行次数降序（次数相同保持配置文件顺序）', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.sortByFrequency = true
+    await flushPromises()
+    // 频次 mock：weekly-report 5 / speech-doc 12 / meeting-list 1；pinned weekly-report 仍第一
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual([
+      'weekly-report',
+      'speech-doc',
+      'meeting-list'
+    ])
+    // 取消 pinned 后纯频次降序：speech-doc(12) > weekly-report(5) > meeting-list(1)
+    wrapper.vm.functions.find((f) => f.id === 'weekly-report').pinned = false
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual([
+      'speech-doc',
+      'weekly-report',
+      'meeting-list'
+    ])
+  })
+
+  it('关闭频次模式恢复第 5 批行为（pinned 优先 + 配置文件顺序）', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.sortByFrequency = true
+    await flushPromises()
+    wrapper.vm.sortByFrequency = false
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual([
+      'weekly-report',
+      'speech-doc',
+      'meeting-list'
+    ])
+  })
+
+  it('频次角标仅频次模式显示，无计数的功能项不显示角标', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.find('.ai-card-count').exists()).toBe(false)
+    wrapper.vm.sortByFrequency = true
+    await flushPromises()
+    const counts = wrapper.findAll('.ai-card-count').map((n) => n.text())
+    expect(counts).toEqual(['5 次', '12 次', '1 次'])
+    // 关闭后角标消失
+    wrapper.vm.sortByFrequency = false
+    await flushPromises()
+    expect(wrapper.find('.ai-card-count').exists()).toBe(false)
+  })
+
+  it('排序模式持久化：开关写入 localStorage，初始化读取恢复', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.vm.sortByFrequency).toBe(false)
+    wrapper.vm.sortByFrequency = true
+    await flushPromises()
+    expect(localStorage.getItem('ai-function-sort-by-frequency')).toBe('1')
+    wrapper.unmount()
+    // 重新挂载：从 localStorage 恢复开启态
+    const wrapper2 = createWrapper()
+    await flushPromises()
+    expect(wrapper2.vm.sortByFrequency).toBe(true)
+    wrapper2.unmount()
   })
 })
