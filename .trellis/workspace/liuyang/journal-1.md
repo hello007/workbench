@@ -1281,3 +1281,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: AI 功能项搜索/分组/置顶 + 配置 schema 版本与迁移（第 5 批）
+
+**Date**: 2026-09-09
+**Task**: AI 功能项搜索/分组/置顶 + 配置 schema 版本与迁移（第 5 批）
+**Branch**: `master`
+
+### Summary
+
+合并实施 P2-2 与 P2-3，AI 功能菜单总览实施顺序最后一批。schema v2：ai_functions.json 升级为 {schemaVersion, functions}，加载期迁移 v1 裸数组自动补全 tags/pinned 等字段，字段级校验失败备份 .bak.<ts> 后回种 seed；搜索/分组/置顶：列表加搜索框（name/description/tags 模糊匹配）+ tag chips 筛选 + pinned 优先排序，配置对话框加 tags/pinned 编辑。LoadAiFunctions/SaveAiFunctions 签名保持稳定，wailsjs 仅同步 models.ts 加 tags/pinned。前后端双绿（后端含 v1 迁移/部分剔除/全非法回种/顶层非法 4 个新测试，前端含搜索/tag 筛选/pinned 置顶 3 个新测试）。3 个前置待确认点按 design 推荐定稿：tag chips 筛选、手写校验、仅校验失败备份单份。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10e97ac` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
