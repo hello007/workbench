@@ -267,17 +267,20 @@ func TestLoadAiFunctions_EmptyArrayReseed(t *testing.T) {
 		t.Fatalf("空数组自愈后数量: 期望=4 实际=%d", len(funcs))
 	}
 
-	// 文件应被重写为四项（直接读文件验证，二次 Load 无法区分回种与重写）
+	// 文件应被重写为 schema v2 结构的默认四项（直接读文件验证，二次 Load 无法区分回种与重写）
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读回配置文件失败: %v", err)
 	}
-	var persisted []*model.AiFunction
+	var persisted model.AiFunctionsConfig
 	if err := json.Unmarshal(raw, &persisted); err != nil {
 		t.Fatalf("配置文件不是合法 JSON: %v", err)
 	}
-	if len(persisted) != 4 {
-		t.Errorf("配置文件未被重写为默认四项: 期望=4 实际=%d", len(persisted))
+	if persisted.SchemaVersion != model.CurrentSchemaVersion {
+		t.Errorf("schemaVersion 不符: 期望=%d 实际=%d", model.CurrentSchemaVersion, persisted.SchemaVersion)
+	}
+	if len(persisted.Functions) != 4 {
+		t.Errorf("配置文件未被重写为默认四项: 期望=4 实际=%d", len(persisted.Functions))
 	}
 }
 
@@ -925,5 +928,103 @@ func TestClassifyStatus(t *testing.T) {
 	task4 := &aiTaskRuntime{cmd: &exec.Cmd{}}
 	if s := classifyStatus(task4, nil); s != "success" {
 		t.Errorf("无错误应 success: %s", s)
+	}
+}
+
+// TestLoadAiFunctions_V1ArrayMigrate 验证 v1 裸数组加载迁移：
+// 旧格式（无 schemaVersion 的数组）加载后补全缺失字段、落盘 v2 结构，tags/pinned 零值合法。
+func TestLoadAiFunctions_V1ArrayMigrate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai_functions.json")
+	v1 := `[{"id":"a","name":"A","command":"/a","cwd":"D:\\a"},{"id":"b","name":"B","command":"/b","cwd":"D:\\b","permissionMode":"default","timeoutMinutes":5,"completion":"copy"}]`
+	if err := os.WriteFile(path, []byte(v1), 0o644); err != nil {
+		t.Fatalf("预写 v1 配置失败: %v", err)
+	}
+	svc := NewAiFunctionService(nil, path)
+	funcs, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if len(funcs) != 2 {
+		t.Fatalf("迁移后数量不符: 期望=2 实际=%d", len(funcs))
+	}
+	if funcs[0].PermissionMode != "bypassPermissions" || funcs[0].TimeoutMinutes != aiTaskDefaultTimeoutMinutes || funcs[0].Completion != "none" {
+		t.Errorf("a 项字段补全不符: mode=%s timeout=%d completion=%s", funcs[0].PermissionMode, funcs[0].TimeoutMinutes, funcs[0].Completion)
+	}
+	if funcs[1].PermissionMode != "default" || funcs[1].TimeoutMinutes != 5 || funcs[1].Completion != "copy" {
+		t.Errorf("b 项已有字段被覆盖: mode=%s timeout=%d completion=%s", funcs[1].PermissionMode, funcs[1].TimeoutMinutes, funcs[1].Completion)
+	}
+	raw, _ := os.ReadFile(path)
+	var persisted model.AiFunctionsConfig
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatalf("落盘文件非 v2 结构: %v", err)
+	}
+	if persisted.SchemaVersion != model.CurrentSchemaVersion || len(persisted.Functions) != 2 {
+		t.Errorf("落盘 v2 结构不符: version=%d count=%d", persisted.SchemaVersion, len(persisted.Functions))
+	}
+}
+
+// TestLoadAiFunctions_PartialInvalidTrimmed 验证部分功能项非法：备份 + 剔除非法项保留合法项。
+func TestLoadAiFunctions_PartialInvalidTrimmed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai_functions.json")
+	cfg := `{"schemaVersion":2,"functions":[{"id":"a","name":"A","command":"/a","cwd":"D:\\a"},{"id":"b","name":"B","cwd":"D:\\b"},{"id":"c","name":"C","command":"/c"}]}`
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("预写配置失败: %v", err)
+	}
+	svc := NewAiFunctionService(nil, path)
+	funcs, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if len(funcs) != 1 || funcs[0].ID != "a" {
+		t.Errorf("应剔除 b/c 保留 a: %+v", funcs)
+	}
+	matches, _ := filepath.Glob(path + ".bak.*")
+	if len(matches) != 1 {
+		t.Errorf("应生成 1 个备份文件: %v", matches)
+	}
+}
+
+// TestLoadAiFunctions_AllInvalidReseed 验证全部非法时备份后回种 seed。
+func TestLoadAiFunctions_AllInvalidReseed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai_functions.json")
+	cfg := `{"schemaVersion":2,"functions":[{"id":"a","name":"A","cwd":"D:\\a"}]}`
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("预写配置失败: %v", err)
+	}
+	svc := NewAiFunctionService(nil, path)
+	funcs, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if len(funcs) != 4 {
+		t.Errorf("全部非法应回种 4 项 seed: %d", len(funcs))
+	}
+	matches, _ := filepath.Glob(path + ".bak.*")
+	if len(matches) != 1 {
+		t.Errorf("应生成 1 个备份文件: %v", matches)
+	}
+}
+
+// TestLoadAiFunctions_GarbledTopLevelReseed 验证顶层结构非法（非数组非对象）备份回种。
+func TestLoadAiFunctions_GarbledTopLevelReseed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ai_functions.json")
+	if err := os.WriteFile(path, []byte("not a json at all"), 0o644); err != nil {
+		t.Fatalf("预写非法内容失败: %v", err)
+	}
+	svc := NewAiFunctionService(nil, path)
+	funcs, err := svc.LoadAiFunctions()
+	if err != nil {
+		t.Fatalf("加载失败: %v", err)
+	}
+	if len(funcs) != 4 {
+		t.Errorf("非法内容应回种 4 项 seed: %d", len(funcs))
+	}
+	matches, _ := filepath.Glob(path + ".bak.*")
+	if len(matches) != 1 {
+		t.Errorf("应生成 1 个备份文件: %v", matches)
 	}
 }

@@ -17,6 +17,20 @@ type AiFunction struct {
 	Completion     string            `json:"completion"`     // 完成动作：none/open_dir/preview/copy
 	Params         *AiParamSpec      `json:"params"`         // 运行前参数输入，nil 表示无参数直跑
 	FollowUps      []AiFollowUp      `json:"followUps"`      // 后续段（多段编排），运行完成后面板显示对应按钮，点击即 --resume 续会话
+	Tags           []string          `json:"tags,omitempty"`   // 业务域标签，如 ["周报","ABX5"]，供列表分组筛选与搜索匹配
+	Pinned         bool              `json:"pinned,omitempty"` // 置顶，列表排序时始终排在最前
+}
+
+// CurrentSchemaVersion ai_functions.json 当前 schema 版本。
+// 字段演进（增非兼容字段）时 +1，并在 service.migrateFunctions 新增对应迁移分支。
+// v1：顶层裸数组 []*AiFunction（无 schemaVersion）；v2：{schemaVersion, functions} + Tags/Pinned 字段。
+const CurrentSchemaVersion = 2
+
+// AiFunctionsConfig ai_functions.json 顶层结构（schema v2+）。
+// 加载时旧 v1 数组自动包一层并迁移补全新字段；保存时统一写本结构。
+type AiFunctionsConfig struct {
+	SchemaVersion int           `json:"schemaVersion"`
+	Functions     []*AiFunction `json:"functions"`
 }
 
 // AiMcpConfig MCP server 注入配置，整体序列化为 --mcp-config 的内联 JSON。

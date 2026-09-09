@@ -32,7 +32,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
         cwd: 'D:\\proj',
         params: null,
         followUps: [{ id: 'confirm', label: '确认落盘', promptTemplate: '落盘' }],
-        completion: 'open_dir'
+        completion: 'open_dir',
+        tags: ['周报'],
+        pinned: true
       },
       {
         id: 'speech-doc',
@@ -43,7 +45,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
         cwd: 'D:\\ppt',
         params: { type: 'file', label: '源文档', textFieldKey: 'file' },
         followUps: [],
-        completion: 'preview'
+        completion: 'preview',
+        tags: ['文档']
       },
       {
         id: 'meeting-list',
@@ -60,7 +63,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
             promptTemplate: '/tencent-meeting-mcp 取消会议 {{meeting}}'
           }
         ],
-        completion: 'none'
+        completion: 'none',
+        tags: ['会议']
       }
     ])
   ),
@@ -83,7 +87,9 @@ const stubs = {
   'el-empty': { template: '<div class="empty" />' },
   'el-tabs': { template: '<div class="tabs"><slot /></div>', props: ['modelValue'] },
   'el-tab-pane': { template: '<div class="tab-pane"><slot /></div>', props: ['label', 'name'] },
-  'el-tag': { template: '<span class="tag"><slot /></span>', props: ['size', 'type'] },
+  'el-tag': { template: '<span class="tag"><slot /></span>', props: ['size', 'type', 'effect'] },
+  'el-input': { template: '<input class="el-input" />', props: ['modelValue', 'placeholder', 'clearable', 'size', 'prefixIcon'] },
+  'el-switch': { template: '<span class="el-switch" />', props: ['modelValue'] },
   // 声明 emits 后 click 监听器不进 $attrs，避免透传 onClick 与 $emit('click') 双触发
   'el-button': {
     emits: ['click'],
@@ -257,7 +263,7 @@ describe('AiFunctionPanel', () => {
       output: '第一段输出'
     })
     await flushPromises()
-    expect(wrapper.find('.tag').text()).toBe('已完成')
+    expect(wrapper.find('.task-toolbar .tag').text()).toBe('已完成')
     expect(openInExplorerMock).toHaveBeenCalledWith('D:\\proj')
   })
 
@@ -272,7 +278,7 @@ describe('AiFunctionPanel', () => {
       canceled: false
     })
     await flushPromises()
-    expect(wrapper.find('.tag').text()).toBe('失败')
+    expect(wrapper.find('.task-toolbar .tag').text()).toBe('失败')
     expect(openInExplorerMock).not.toHaveBeenCalled()
   })
 
@@ -283,14 +289,14 @@ describe('AiFunctionPanel', () => {
     // doRunMain 初始即 queued（后端先排队后执行）
     expect(wrapper.vm.tasks[0].queued).toBe(true)
     expect(wrapper.vm.tasks[0].running).toBe(false)
-    expect(wrapper.find('.tag').text()).toBe('排队中')
+    expect(wrapper.find('.task-toolbar .tag').text()).toBe('排队中')
 
     // started 事件转运行中
     eventHandlers['ai-task:started']({ taskId: 'task-1' })
     await flushPromises()
     expect(wrapper.vm.tasks[0].queued).toBe(false)
     expect(wrapper.vm.tasks[0].running).toBe(true)
-    expect(wrapper.find('.tag').text()).toBe('运行中')
+    expect(wrapper.find('.task-toolbar .tag').text()).toBe('运行中')
   })
 
   it('done 带 metrics 时底栏展示耗时/token/成本摘要', async () => {
@@ -470,5 +476,46 @@ describe('AiFunctionPanel', () => {
     expect(wrapper.find('.task-table').exists()).toBe(true)
     const labels = wrapper.findAll('.col-label').map((n) => n.text())
     expect(labels).toEqual(expect.arrayContaining(['会议主题', '会议号', '操作']))
+  })
+
+  it('搜索框按名称/描述/标签模糊匹配过滤列表', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.keyword = '周报'
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual(['weekly-report'])
+    wrapper.vm.keyword = '会议'
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual(['meeting-list'])
+    wrapper.vm.keyword = ''
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions.length).toBe(3)
+  })
+
+  it('tag chips 点击筛选含该标签的功能项，再次点击取消', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.vm.allTags).toEqual(expect.arrayContaining(['周报', '文档', '会议']))
+    wrapper.vm.toggleTag('会议')
+    await flushPromises()
+    expect(wrapper.vm.selectedTags).toEqual(['会议'])
+    expect(wrapper.vm.filteredFunctions.map((f) => f.id)).toEqual(['meeting-list'])
+    wrapper.vm.toggleTag('会议')
+    await flushPromises()
+    expect(wrapper.vm.selectedTags).toEqual([])
+    expect(wrapper.vm.filteredFunctions.length).toBe(3)
+  })
+
+  it('pinned 功能项始终排在列表最前并标记 pinned class', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions[0].id).toBe('weekly-report')
+    expect(wrapper.findAll('.ai-card')[0].classes()).toContain('ai-card-pinned')
+    // 取消 weekly-report 置顶、给 meeting-list 置顶，meeting-list 应排到第一
+    const fns = wrapper.vm.functions
+    fns.find((f) => f.id === 'weekly-report').pinned = false
+    fns.find((f) => f.id === 'meeting-list').pinned = true
+    await flushPromises()
+    expect(wrapper.vm.filteredFunctions[0].id).toBe('meeting-list')
   })
 })

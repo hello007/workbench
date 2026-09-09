@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -124,28 +125,149 @@ func (s *AiFunctionService) ensureOutputDir() (string, error) {
 
 // ===== 配置持久化 =====
 
-// LoadAiFunctions 加载功能项配置；文件不存在或加载结果为空数组时，
-// 写入并返回默认四项（首批功能）。空数组自愈：配置界面保存过空数组会导致菜单空白。
+// LoadAiFunctions 加载功能项配置（schema v2+，加载期自动迁移旧版本）。
+// 文件不存在 → 写默认 seed；v1 裸数组 → 包一层并补全字段；
+// 字段校验失败 → 备份原文件后回种 seed 或保留合法项，不整体不可用。
+// 对外仍返回 []*AiFunction，签名不变（前端 GetAiFunctions 与 wailsjs 无需改动）。
 func (s *AiFunctionService) LoadAiFunctions() ([]*model.AiFunction, error) {
-	var funcs []*model.AiFunction
-	if util.FileExists(s.configPath) {
-		if err := util.LoadJSON(s.configPath, &funcs); err != nil {
-			return nil, fmt.Errorf("加载 AI 功能配置失败: %w", err)
-		}
-	}
-	if len(funcs) == 0 {
+	if !util.FileExists(s.configPath) {
 		defaults := defaultAiFunctions()
-		if err := util.SaveJSON(s.configPath, defaults); err != nil {
+		if err := s.saveConfig(defaults); err != nil {
 			return nil, fmt.Errorf("写入默认 AI 功能配置失败: %w", err)
 		}
 		return defaults, nil
 	}
+	raw, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 AI 功能配置失败: %w", err)
+	}
+	funcs, migrated, err := s.migrateFunctions(raw)
+	if err != nil {
+		s.backupConfig(raw) // 顶层结构非法：备份后回种 seed
+		defaults := defaultAiFunctions()
+		if saveErr := s.saveConfig(defaults); saveErr != nil {
+			return nil, fmt.Errorf("配置损坏回种失败（备份已生成）: %w", saveErr)
+		}
+		return defaults, nil
+	}
+	valid, invalidIDs := validateFunctions(funcs)
+	if len(invalidIDs) > 0 {
+		s.backupConfig(raw)
+		if len(valid) == 0 {
+			defaults := defaultAiFunctions()
+			if saveErr := s.saveConfig(defaults); saveErr != nil {
+				return nil, fmt.Errorf("配置全部非法回种失败（备份已生成）: %w", saveErr)
+			}
+			return defaults, nil
+		}
+		funcs = valid
+	}
+	if len(funcs) == 0 { // 空配置（如 v1 空数组 []）自愈回种
+		defaults := defaultAiFunctions()
+		if err := s.saveConfig(defaults); err != nil {
+			return nil, fmt.Errorf("写入默认 AI 功能配置失败: %w", err)
+		}
+		return defaults, nil
+	}
+	if migrated || len(invalidIDs) > 0 { // 迁移/剔除后落盘新结构，下次加载直读 v2
+		if err := s.saveConfig(funcs); err != nil {
+			return nil, fmt.Errorf("迁移后配置落盘失败: %w", err)
+		}
+	}
 	return funcs, nil
 }
 
-// SaveAiFunctions 保存功能项配置
+// SaveAiFunctions 保存功能项配置（schema v2 结构）。签名不变，前端与 wailsjs 无需改动。
 func (s *AiFunctionService) SaveAiFunctions(funcs []*model.AiFunction) error {
-	return util.SaveJSON(s.configPath, funcs)
+	return s.saveConfig(funcs)
+}
+
+// saveConfig 以 schema v2 结构 {schemaVersion, functions} 落盘。
+func (s *AiFunctionService) saveConfig(funcs []*model.AiFunction) error {
+	return util.SaveJSON(s.configPath, model.AiFunctionsConfig{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Functions:     funcs,
+	})
+}
+
+// migrateFunctions 解析配置原始字节并迁移到当前版本，返回 (功能项, 是否需落盘, 错误)。
+// v1 顶层裸数组 → 包一层并补全字段；v2+ 对象 → 补全缺失字段。版本演进在此追加分支。
+func (s *AiFunctionService) migrateFunctions(raw []byte) (funcs []*model.AiFunction, migrated bool, err error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, true, nil // 空内容走自愈回种
+	}
+	switch trimmed[0] {
+	case '[':
+		if err := json.Unmarshal(raw, &funcs); err != nil {
+			return nil, false, fmt.Errorf("解析 v1 配置数组失败: %w", err)
+		}
+		migrated = true
+		for _, fn := range funcs {
+			migrateFunction(fn)
+		}
+	case '{':
+		var cfg model.AiFunctionsConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return nil, false, fmt.Errorf("解析配置对象失败: %w", err)
+		}
+		funcs = cfg.Functions
+		for _, fn := range funcs {
+			if migrateFunction(fn) {
+				migrated = true
+			}
+		}
+	default:
+		return nil, false, fmt.Errorf("配置顶层既非数组也非对象")
+	}
+	return funcs, migrated, nil
+}
+
+// migrateFunction 补全单个功能项缺失字段到当前版本，返回是否发生补全。
+// Tags/Pinned 为 omitempty 零值即合法（nil/false），运行时按空处理，无需显式赋值。
+func migrateFunction(fn *model.AiFunction) bool {
+	if fn == nil {
+		return false
+	}
+	changed := false
+	if fn.PermissionMode == "" {
+		fn.PermissionMode = "bypassPermissions"
+		changed = true
+	}
+	if fn.TimeoutMinutes <= 0 {
+		fn.TimeoutMinutes = aiTaskDefaultTimeoutMinutes
+		changed = true
+	}
+	if fn.Completion == "" {
+		fn.Completion = "none"
+		changed = true
+	}
+	return changed
+}
+
+// validateFunctions 字段级校验：id/name/command/cwd 必填。返回 (合法项, 非法项 id 列表)。
+func validateFunctions(funcs []*model.AiFunction) (valid []*model.AiFunction, invalidIDs []string) {
+	for _, fn := range funcs {
+		if fn == nil {
+			invalidIDs = append(invalidIDs, "(nil 项)")
+			continue
+		}
+		if strings.TrimSpace(fn.ID) == "" || strings.TrimSpace(fn.Name) == "" ||
+			strings.TrimSpace(fn.Command) == "" || strings.TrimSpace(fn.Cwd) == "" {
+			invalidIDs = append(invalidIDs, fn.ID)
+			continue
+		}
+		valid = append(valid, fn)
+	}
+	return valid, invalidIDs
+}
+
+// backupConfig 将原配置备份为 ai_functions.json.bak.<timestamp>（校验失败留底，best effort）。
+func (s *AiFunctionService) backupConfig(raw []byte) {
+	bakPath := s.configPath + ".bak." + time.Now().Format("20060102-150405")
+	if err := os.WriteFile(bakPath, raw, 0o644); err != nil {
+		fmt.Printf("配置备份失败（不阻断回种）: %v\n", err)
+	}
 }
 
 // ===== 任务执行 =====
@@ -1082,6 +1204,7 @@ func defaultAiFunctions() []*model.AiFunction {
 				StartDir:   `D:\工作\Typora`,
 				Extensions: []string{".md", ".docx", ".txt"},
 			},
+			Tags: []string{"文档"},
 		},
 		{
 			ID:             "weekly-report",
@@ -1100,6 +1223,8 @@ func defaultAiFunctions() []*model.AiFunction {
 					PromptTemplate: "亮点已确认，请按 skill 流程落盘周报终稿",
 				},
 			},
+			Tags:   []string{"周报"},
+			Pinned: true,
 		},
 		{
 			ID:             "meeting-book",
@@ -1121,6 +1246,7 @@ func defaultAiFunctions() []*model.AiFunction {
 					{Key: "duration", Label: "时长（小时）", Type: "number", Required: true, Placeholder: "如：1（可输 1.5）"},
 				},
 			},
+			Tags: []string{"会议"},
 		},
 		{
 			ID:             "meeting-list",
@@ -1150,6 +1276,7 @@ func defaultAiFunctions() []*model.AiFunction {
 					},
 				},
 			},
+			Tags: []string{"会议"},
 		},
 	}
 }

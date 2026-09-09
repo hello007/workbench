@@ -22,16 +22,41 @@
     <div class="ai-layout">
       <!-- 左：功能卡片列表（管理按钮已上移标题栏，侧栏纯列表） -->
       <div class="ai-sidebar">
+        <!-- 搜索 + tag chips 筛选：功能项增长后保持高频功能快速触达 -->
+        <div class="ai-filter">
+          <el-input
+            v-model="keyword"
+            placeholder="搜索名称/描述/标签"
+            clearable
+            size="small"
+            :prefix-icon="Search"
+          />
+          <div v-if="allTags.length" class="ai-tag-chips">
+            <el-tag
+              v-for="tag in allTags"
+              :key="tag"
+              size="small"
+              :type="selectedTags.includes(tag) ? 'primary' : 'info'"
+              :effect="selectedTags.includes(tag) ? 'dark' : 'plain'"
+              class="ai-tag-chip"
+              @click="toggleTag(tag)"
+            >
+              {{ tag }}
+            </el-tag>
+          </div>
+        </div>
         <div class="ai-cards">
           <div
-            v-for="f in functions"
+            v-for="f in filteredFunctions"
             :key="f.id"
             class="ai-card"
+            :class="{ 'ai-card-pinned': f.pinned }"
             @click="openFunctionTab(f)"
           >
             <div class="ai-card-head">
               <el-icon :size="18" class="ai-card-icon"><component :is="iconComp(f.icon)" /></el-icon>
               <span class="ai-card-name">{{ f.name }}</span>
+              <el-icon v-if="f.pinned" :size="14" class="ai-card-pin"><Star /></el-icon>
             </div>
             <div class="ai-card-desc">{{ f.description }}</div>
           </div>
@@ -179,10 +204,10 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as Icons from '@element-plus/icons-vue'
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, Search, Star } from '@element-plus/icons-vue'
 import {
   GetAiFunctions,
   RunAiFunction,
@@ -210,6 +235,43 @@ const configVisible = ref(false)
 const historyVisible = ref(false)
 
 const iconComp = (name) => (name && Icons[name]) || Icons.MagicStick
+
+// 搜索与分组筛选：keyword 模糊匹配 name/description/tags；selectedTags 多选筛选（含全部选中 tag）
+const keyword = ref('')
+const selectedTags = ref([])
+
+const allTags = computed(() => {
+  const set = new Set()
+  for (const f of functions.value) {
+    for (const t of f.tags || []) set.add(t)
+  }
+  return [...set]
+})
+
+const toggleTag = (tag) => {
+  const idx = selectedTags.value.indexOf(tag)
+  if (idx >= 0) selectedTags.value.splice(idx, 1)
+  else selectedTags.value.push(tag)
+}
+
+// filteredFunctions：搜索 + tag 筛选后，pinned 优先排序（同组保持配置文件顺序，稳定排序）
+const filteredFunctions = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  const tags = selectedTags.value
+  return functions.value
+    .filter((f) => {
+      if (kw) {
+        const hay = [f.name, f.description, ...(f.tags || [])].join(' ').toLowerCase()
+        if (!hay.includes(kw)) return false
+      }
+      if (tags.length && !tags.every((t) => (f.tags || []).includes(t))) return false
+      return true
+    })
+    .sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+      return 0
+    })
+})
 
 const loadFunctions = async () => {
   try {
@@ -741,6 +803,31 @@ onBeforeUnmount(() => {
   min-height: 0;
   padding-right: 12px;
   border-right: 1px solid var(--border-color);
+}
+/* 搜索 + tag chips 筛选区：固定在侧栏顶部，不随卡片滚动 */
+.ai-filter {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+.ai-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ai-tag-chip {
+  cursor: pointer;
+}
+/* pinned 卡片：左侧指示条常显主色 + 名称加粗，区别普通卡片 */
+.ai-card-pinned::before {
+  opacity: 1;
+}
+.ai-card-pinned .ai-card-name {
+  font-weight: 700;
+}
+.ai-card-pin {
+  margin-left: auto;
+  color: var(--warning-color, #e6a23c);
 }
 .ai-cards {
   flex: 1;

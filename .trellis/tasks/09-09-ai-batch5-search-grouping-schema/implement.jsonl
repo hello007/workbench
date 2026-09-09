@@ -1,0 +1,4 @@
+{"file": "docs/plans/2026-09-08-ai-config-schema-design.md", "reason": "P2-3 主体设计：配置结构升级 {schemaVersion, functions} 4.1、迁移函数 migrateFunctions 4.2（判数组v1/对象v2+、版本路由、字段补全）、校验失败兜底 4.3（备份+回种seed）、版本常量 CurrentSchemaVersion=2 4.4；第6节待确认点已决策手写校验+仅校验失败备份单份"}
+{"file": "docs/plans/2026-09-08-ai-function-search-design.md", "reason": "P2-2 主体设计：model 扩展 Tags/Pinned 4.1、列表排序与筛选 4.2（pinned优先+搜索name/description/tags）、分组渲染 4.3（tag chips 筛选方案已定）、配置对话框编辑 tags/pinned 4.4；seed四功能预置tags作为分组示例"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览：第5节第5批P2-2+P2-3合并理由、第4节P2-2→P2-3依赖（tags/pinned字段升级走schema v2迁移）、第1-4批衔接点勿重复改动（四块表单/AiFunction既有字段/LoadAiFunctions签名/DirectoryService/AiTaskState/concurrencySem）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "跨层契约：AiFunction加Tags/Pinned字段须同步models.ts（字段声明+构造函数赋值，omitempty→?:，字段名按json tag）；LoadAiFunctions/SaveAiFunctions签名保持稳定则App.js/App.d.ts无需改动；frontend/wailsjs已gitignore，git status无残留即同步完成"}

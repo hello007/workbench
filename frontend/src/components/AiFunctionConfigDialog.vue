@@ -70,6 +70,13 @@
           <el-form-item label="图标">
             <el-input v-model="editing.icon" placeholder="Element Plus 图标名，如 MagicStick" style="width: 220px" />
           </el-form-item>
+          <el-form-item label="标签">
+            <el-input v-model="tagsText" placeholder="业务域标签，逗号分隔（如 周报,会议,文档）" />
+          </el-form-item>
+          <el-form-item label="置顶">
+            <el-switch v-model="editing.pinned" />
+            <span class="form-hint">置顶功能始终排在列表最前</span>
+          </el-form-item>
 
           <!-- 高级字段：四块折叠面板 + 末项原始 JSON 兜底视图 -->
           <el-collapse v-model="activeNames" class="adv-collapse">
@@ -187,6 +194,7 @@ const functions = ref([])
 const selectedId = ref('')
 const editing = ref(null)
 const addDirsText = ref('')
+const tagsText = ref('')
 const saving = ref(false)
 
 // 折叠面板：默认展开 params，其余收起
@@ -300,6 +308,7 @@ const select = (id) => {
   // 深拷贝进编辑态（子组件直接改 editing.value.xxx 属性，reactive 触发更新）
   editing.value = JSON.parse(JSON.stringify(f))
   addDirsText.value = (f.addDirs || []).join(', ')
+  tagsText.value = (f.tags || []).join(', ')
   activeNames.value = ['params']
   syncRawFromForm()
 }
@@ -313,6 +322,8 @@ const addNew = () => {
     command: '',
     cwd: '',
     addDirs: [],
+    tags: [],
+    pinned: false,
     env: null,
     mcp: null,
     permissionMode: 'bypassPermissions',
@@ -325,6 +336,7 @@ const addNew = () => {
   editing.value = item
   selectedId.value = ''
   addDirsText.value = ''
+  tagsText.value = ''
   activeNames.value = ['params']
   syncRawFromForm()
 }
@@ -426,6 +438,7 @@ const save = async () => {
   }
   item.id = item.id.trim()
   item.addDirs = addDirsText.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  item.tags = tagsText.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
   // params/followUps/env/mcp 已被子组件直接改 editing.value，无需再赋值；followUps 兜底为 []
   item.followUps = item.followUps || []
   await doSave()
@@ -517,6 +530,11 @@ const doSave = async () => {
 .import-hint {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-left: 8px;
 }
 .import-toolbar {
   display: flex;

@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查跨层同步：AiFunction Tags/Pinned 的 models.ts 是否同步（字段声明+构造函数赋值，omitempty→?:）；LoadAiFunctions/SaveAiFunctions 签名是否保持稳定（() ([]*AiFunction, error) 与 (funcs []*AiFunction) error），签名不变则 App.js/App.d.ts 不动；git status 确认 frontend/wailsjs 无残留"}
+{"file": "docs/plans/2026-09-08-ai-config-schema-design.md", "reason": "P2-3 验收对照：ai_functions.json 升级为 {schemaVersion, functions} 结构、旧v1数组加载自动迁移补全tags/pinned不丢合法配置、非法配置备份 ai_functions.json.bak.<timestamp> 后回种seed不整体崩、字段补全默认值（permissionMode→bypassPermissions/timeoutMinutes→10）"}
+{"file": "docs/plans/2026-09-08-ai-function-search-design.md", "reason": "P2-2 验收对照：搜索框按name/description/tags模糊匹配、tag chips筛选切换生效（方案A已定）、pinned功能项始终排最前、配置对话框可编辑tags多标签+pinned开关保存后生效、seed四功能预置tags"}
+{"file": "docs/plans/2026-09-08-ai-optimization-overview.md", "reason": "总览验收对照：第5批P2-2+P2-3合并实施完成、第6节待确认点已决策定稿（tag chips/手写校验/单份备份）、第1-4批衔接点未被重复改动"}
