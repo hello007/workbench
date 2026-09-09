@@ -1,22 +1,21 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(() => Promise.resolve({})),
   SaveSettings: vi.fn(() => Promise.resolve(true))
 }))
 
-import { useShortcuts } from '../useShortcuts'
-
-const {
+import {
+  useSettingsStore,
   isValidShortcut,
   matchShortcut,
   formatDisplay,
   shortcutFromEvent,
-  checkConflict,
   DEFAULTS
-} = useShortcuts()
+} from '../../store'
 
-describe('useShortcuts - 默认值', () => {
+describe('settings store - 默认值', () => {
   it('DEFAULTS 应包含 rename=F2 与 delete=Delete', () => {
     expect(DEFAULTS.rename).toBe('F2')
     expect(DEFAULTS.delete).toBe('Delete')
@@ -25,7 +24,7 @@ describe('useShortcuts - 默认值', () => {
   })
 })
 
-describe('useShortcuts - isValidShortcut（单键白名单）', () => {
+describe('settings store - isValidShortcut（单键白名单）', () => {
   it('功能键单键合法', () => {
     expect(isValidShortcut('F2')).toBe(true)
     expect(isValidShortcut('Delete')).toBe(true)
@@ -48,7 +47,7 @@ describe('useShortcuts - isValidShortcut（单键白名单）', () => {
   })
 })
 
-describe('useShortcuts - matchShortcut（单键匹配，大小写归一）', () => {
+describe('settings store - matchShortcut（单键匹配，大小写归一）', () => {
   const ev = (key, mods = {}) => ({
     key,
     ctrlKey: !!mods.ctrl,
@@ -72,7 +71,7 @@ describe('useShortcuts - matchShortcut（单键匹配，大小写归一）', () 
   })
 })
 
-describe('useShortcuts - shortcutFromEvent', () => {
+describe('settings store - shortcutFromEvent', () => {
   const base = { ctrlKey: false, altKey: false, shiftKey: false }
   it('F2 事件 → "F2"', () => {
     expect(shortcutFromEvent({ key: 'F2', ...base })).toBe('F2')
@@ -85,7 +84,7 @@ describe('useShortcuts - shortcutFromEvent', () => {
   })
 })
 
-describe('useShortcuts - formatDisplay', () => {
+describe('settings store - formatDisplay', () => {
   it('组合键拆分数组', () => {
     expect(formatDisplay('Ctrl+P')).toEqual(['Ctrl', 'P'])
   })
@@ -94,22 +93,31 @@ describe('useShortcuts - formatDisplay', () => {
   })
 })
 
-describe('useShortcuts - checkConflict（含 rename/delete）', () => {
+describe('settings store - checkConflict（含 rename/delete）', () => {
+  beforeEach(() => {
+    // 每个 it 独立 pinia 实例，store 默认值为 DEFAULTS
+    setActivePinia(createPinia())
+  })
+
   it('与 rename 默认值 F2 冲突', () => {
-    const c = checkConflict('F2', 'delete')
+    const store = useSettingsStore()
+    const c = store.checkConflict('F2', 'delete')
     expect(c).toBeTruthy()
     expect(c.key).toBe('rename')
   })
   it('与 delete 默认值 Delete 冲突', () => {
-    const c = checkConflict('Delete', 'rename')
+    const store = useSettingsStore()
+    const c = store.checkConflict('Delete', 'rename')
     expect(c).toBeTruthy()
     expect(c.key).toBe('delete')
   })
   it('excludeKey 排除自身', () => {
-    expect(checkConflict('F2', 'rename')).toBeNull()
+    const store = useSettingsStore()
+    expect(store.checkConflict('F2', 'rename')).toBeNull()
   })
   it('与命令面板默认值 Ctrl+P 冲突', () => {
-    const c = checkConflict('Ctrl+P', 'rename')
+    const store = useSettingsStore()
+    const c = store.checkConflict('Ctrl+P', 'rename')
     expect(c).toBeTruthy()
     expect(c.key).toBe('commandPalette')
   })

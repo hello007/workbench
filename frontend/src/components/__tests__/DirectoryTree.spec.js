@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import DirectoryTree from '../DirectoryTree.vue'
 
@@ -73,7 +74,7 @@ function createWrapper(props = {}) {
       selectedId: 'dir-1',
       ...props
     },
-    global: { stubs: defaultStubs }
+    global: { plugins: [createPinia()], stubs: defaultStubs }
   })
 }
 

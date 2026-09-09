@@ -134,7 +134,7 @@ import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useShortcuts } from '../composables/useShortcuts'
+import { useSettingsStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -190,7 +190,7 @@ const repoFilterVisible = ref(false)
 // 每次打开后由 RepoFilterDialog 内 watch(visible) 消费，无需在此重置。
 const repoFilterInitialDirId = ref('')
 const { record: recordAccess } = useRecentAccess()
-const { matchShortcut, loadShortcuts, shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete } = useShortcuts()
+const settingsStore = useSettingsStore()
 
 // ---- 子组件 ref ----
 const directoryTreeRef = ref()
@@ -504,14 +504,14 @@ const isAnyOverlayOpen = () => {
 
 const handleGlobalKeydown = (e) => {
   // 打开命令面板（快捷键可自定义）
-  if (matchShortcut(e, shortcutCommandPalette.value)) {
+  if (matchShortcut(e, settingsStore.shortcutCommandPalette)) {
     e.preventDefault()
     commandPaletteVisible.value = true
     return
   }
 
   // 切换终端（快捷键可自定义）
-  if (matchShortcut(e, shortcutToggleTerminal.value)) {
+  if (matchShortcut(e, settingsStore.shortcutToggleTerminal)) {
     e.preventDefault()
     toggleTerminal()
     return
@@ -526,11 +526,11 @@ const handleGlobalKeydown = (e) => {
   }
 
   // 重命名 / 删除（快捷键可自定义，作用于最近交互的树面板）
-  if (matchShortcut(e, shortcutRename.value) || matchShortcut(e, shortcutDelete.value)) {
+  if (matchShortcut(e, settingsStore.shortcutRename) || matchShortcut(e, settingsStore.shortcutDelete)) {
     // 焦点判定：输入框/对话框/终端聚焦时不触发，避免误触（Del 文件树为永久删除）
     if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
     e.preventDefault()
-    const isRename = matchShortcut(e, shortcutRename.value)
+    const isRename = matchShortcut(e, settingsStore.shortcutRename)
     if (lastInteractedTree.value === 'directory') {
       if (isRename) directoryTreeRef.value?.triggerRenameCurrent()
       else directoryTreeRef.value?.triggerDeleteCurrent()
@@ -717,7 +717,7 @@ watch(() => selectedDirectoryId.value, () => {
 onMounted(() => {
   // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记。
   loadDirectories().then(() => refreshGitFlags())
-  loadShortcuts()
+  settingsStore.loadShortcuts()
   GetAppVersion().then(v => { appVersion.value = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
 })

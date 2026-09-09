@@ -203,7 +203,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
-import { useShortcuts } from '../composables/useShortcuts'
+import { useSettingsStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS } from '../store'
 
 const props = defineProps({
   visible: { type: Boolean, default: false }
@@ -232,7 +232,7 @@ const newExcludeFile = ref('')
 const appVersion = ref('')
 const checkingUpdate = ref(false)
 
-const { shortcutCommandPalette, shortcutToggleTerminal, shortcutRename, shortcutDelete, formatDisplay, isValidShortcut, shortcutFromEvent, checkConflict, loadShortcuts, saveShortcuts, DEFAULTS } = useShortcuts()
+const settingsStore = useSettingsStore()
 
 const shortcutsTabRef = ref(null)
 const recordingKey = ref(null)
@@ -253,10 +253,10 @@ const shortcutLabels = {
 }
 
 const customizableShortcuts = computed(() => [
-  { action: '打开命令面板', key: 'commandPalette', keys: formatDisplay(shortcutCommandPalette.value), customizable: true },
-  { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(shortcutToggleTerminal.value), customizable: true },
-  { action: '重命名', key: 'rename', keys: formatDisplay(shortcutRename.value), customizable: true },
-  { action: '删除', key: 'delete', keys: formatDisplay(shortcutDelete.value), customizable: true }
+  { action: '打开命令面板', key: 'commandPalette', keys: formatDisplay(settingsStore.shortcutCommandPalette), customizable: true },
+  { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(settingsStore.shortcutToggleTerminal), customizable: true },
+  { action: '重命名', key: 'rename', keys: formatDisplay(settingsStore.shortcutRename), customizable: true },
+  { action: '删除', key: 'delete', keys: formatDisplay(settingsStore.shortcutDelete), customizable: true }
 ])
 
 function startRecording(key) {
@@ -273,27 +273,27 @@ function cancelRecording() {
 }
 
 function isDefault(key) {
-  if (key === 'commandPalette') return shortcutCommandPalette.value === DEFAULTS.commandPalette
-  if (key === 'toggleTerminal') return shortcutToggleTerminal.value === DEFAULTS.toggleTerminal
-  if (key === 'rename') return shortcutRename.value === DEFAULTS.rename
-  if (key === 'delete') return shortcutDelete.value === DEFAULTS.delete
+  if (key === 'commandPalette') return settingsStore.shortcutCommandPalette === DEFAULTS.commandPalette
+  if (key === 'toggleTerminal') return settingsStore.shortcutToggleTerminal === DEFAULTS.toggleTerminal
+  if (key === 'rename') return settingsStore.shortcutRename === DEFAULTS.rename
+  if (key === 'delete') return settingsStore.shortcutDelete === DEFAULTS.delete
   return true
 }
 
 function resetShortcut(key) {
-  if (key === 'commandPalette') shortcutCommandPalette.value = DEFAULTS.commandPalette
-  else if (key === 'toggleTerminal') shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
-  else if (key === 'rename') shortcutRename.value = DEFAULTS.rename
-  else if (key === 'delete') shortcutDelete.value = DEFAULTS.delete
-  saveShortcuts()
+  if (key === 'commandPalette') settingsStore.shortcutCommandPalette = DEFAULTS.commandPalette
+  else if (key === 'toggleTerminal') settingsStore.shortcutToggleTerminal = DEFAULTS.toggleTerminal
+  else if (key === 'rename') settingsStore.shortcutRename = DEFAULTS.rename
+  else if (key === 'delete') settingsStore.shortcutDelete = DEFAULTS.delete
+  settingsStore.saveShortcuts()
 }
 
 function resetAllShortcuts() {
-  shortcutCommandPalette.value = DEFAULTS.commandPalette
-  shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
-  shortcutRename.value = DEFAULTS.rename
-  shortcutDelete.value = DEFAULTS.delete
-  saveShortcuts()
+  settingsStore.shortcutCommandPalette = DEFAULTS.commandPalette
+  settingsStore.shortcutToggleTerminal = DEFAULTS.toggleTerminal
+  settingsStore.shortcutRename = DEFAULTS.rename
+  settingsStore.shortcutDelete = DEFAULTS.delete
+  settingsStore.saveShortcuts()
 }
 
 function handleRecordingKeydown(e) {
@@ -311,7 +311,7 @@ function handleRecordingKeydown(e) {
   const shortcut = shortcutFromEvent(e)
   if (!shortcut || !isValidShortcut(shortcut)) return true
 
-  const conflict = checkConflict(shortcut, recordingKey.value)
+  const conflict = settingsStore.checkConflict(shortcut, recordingKey.value)
   if (conflict) {
     ElMessage.warning(`快捷键冲突：与"${shortcutLabels[conflict.key] || conflict.key}"相同`)
     return true
@@ -325,18 +325,18 @@ function handleRecordingKeydown(e) {
   }
 
   if (recordingKey.value === 'commandPalette') {
-    shortcutCommandPalette.value = shortcut
+    settingsStore.shortcutCommandPalette = shortcut
   } else if (recordingKey.value === 'toggleTerminal') {
-    shortcutToggleTerminal.value = shortcut
+    settingsStore.shortcutToggleTerminal = shortcut
   } else if (recordingKey.value === 'rename') {
-    shortcutRename.value = shortcut
+    settingsStore.shortcutRename = shortcut
   } else if (recordingKey.value === 'delete') {
-    shortcutDelete.value = shortcut
+    settingsStore.shortcutDelete = shortcut
   }
 
   recordingKey.value = null
   recordingText.value = ''
-  saveShortcuts()
+  settingsStore.saveShortcuts()
   return true
 }
 
@@ -361,7 +361,7 @@ async function loadSettings() {
     obsidianPath.value = settings.obsidianPath || ''
     excludeDirs.value = settings.searchExcludeDirs || []
     excludeFiles.value = settings.searchExcludeFiles || []
-    await loadShortcuts()
+    await settingsStore.loadShortcuts()
   } catch {
     gpuEnabled.value = true
   }

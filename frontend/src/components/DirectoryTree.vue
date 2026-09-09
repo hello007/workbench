@@ -65,7 +65,7 @@
     >
       <li class="context-menu-item" @click="onMenuCommand('rename')">
         <el-icon><Edit /></el-icon>重命名
-        <span class="context-menu-shortcut">{{ shortcutRename }}</span>
+        <span class="context-menu-shortcut">{{ settingsStore.shortcutRename }}</span>
       </li>
       <li class="context-menu-item" @click="onMenuCommand('setDefault')">
         <el-icon><Star /></el-icon>设为默认
@@ -96,7 +96,7 @@
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
-        <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
+        <span class="context-menu-shortcut">{{ settingsStore.shortcutDelete }}</span>
       </li>
     </ul>
 
@@ -168,7 +168,7 @@ import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useShortcuts } from '../composables/useShortcuts'
+import { useSettingsStore } from '../store'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -185,7 +185,7 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull', 'openRepoFilter'])
 
-const { shortcutRename, shortcutDelete } = useShortcuts()
+const settingsStore = useSettingsStore()
 
 // --- 本地目录列表（可变，用于拖拽） ---
 const localDirectories = ref([...props.directories])

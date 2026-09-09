@@ -216,11 +216,11 @@
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('rename')">
           <el-icon><Edit /></el-icon>重命名
-          <span class="context-menu-shortcut">{{ shortcutRename }}</span>
+          <span class="context-menu-shortcut">{{ settingsStore.shortcutRename }}</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('delete')">
           <el-icon><Delete /></el-icon>删除
-          <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
+          <span class="context-menu-shortcut">{{ settingsStore.shortcutDelete }}</span>
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
@@ -279,11 +279,11 @@
       <template v-else>
         <li class="context-menu-item" @click="onMenuCommand('rename')">
           <el-icon><Edit /></el-icon>重命名
-          <span class="context-menu-shortcut">{{ shortcutRename }}</span>
+          <span class="context-menu-shortcut">{{ settingsStore.shortcutRename }}</span>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('delete')">
           <el-icon><Delete /></el-icon>删除
-          <span class="context-menu-shortcut">{{ shortcutDelete }}</span>
+          <span class="context-menu-shortcut">{{ settingsStore.shortcutDelete }}</span>
         </li>
         <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('cut')">
@@ -363,8 +363,7 @@ import {
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
-import { useFavoritesStore } from '../store'
-import { useShortcuts } from '../composables/useShortcuts'
+import { useFavoritesStore, useSettingsStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -397,7 +396,7 @@ const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo
 
 const { saveState, restoreState } = useTreeState()
 const favoritesStore = useFavoritesStore()
-const { shortcutRename, shortcutDelete } = useShortcuts()
+const settingsStore = useSettingsStore()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
