@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import FileTreePanel from '../FileTreePanel.vue'
+import { useDirectoryStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -95,15 +96,23 @@ const mockDirectories = [
   { id: 'dir-2', name: '项目B', path: '/path/b', isDefault: false }
 ]
 
+// directories / selectedDirId 已迁 directory store：经 store 设置初始值驱动（不再传 prop）。
+// clipboard prop 属 workspace 域（批次6），保留透传。
+function setupDirectoryStore(directories = mockDirectories, selectedDirId = 'dir-1') {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const directoryStore = useDirectoryStore()
+  directoryStore.directories = directories
+  directoryStore.selectedDirectoryId = selectedDirId
+  return pinia
+}
+
 function createWrapper(props = {}) {
+  const { directories = mockDirectories, selectedDirId = 'dir-1', clipboard = { mode: null } } = props
+  const pinia = setupDirectoryStore(directories, selectedDirId)
   return mount(FileTreePanel, {
-    props: {
-      directories: mockDirectories,
-      selectedDirId: 'dir-1',
-      clipboard: { mode: null },
-      ...props
-    },
-    global: { plugins: [createPinia()], stubs: defaultStubs }
+    props: { clipboard },
+    global: { plugins: [pinia], stubs: defaultStubs }
   })
 }
 
@@ -326,13 +335,10 @@ describe('FileTreePanel.vue', () => {
         }
       }
     }
+    const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
     return mount(FileTreePanel, {
-      props: {
-        directories: mockDirectories,
-        selectedDirId: 'dir-1',
-        clipboard: { mode: null }
-      },
-      global: { plugins: [createPinia()], stubs }
+      props: { clipboard: { mode: null } },
+      global: { plugins: [pinia], stubs }
     })
   }
 
@@ -860,9 +866,10 @@ describe('FileTreePanel.vue', () => {
           data() { return { store: winStore } }
         }
       }
+      const pinia = setupDirectoryStore(winDirs, 'dir-win')
       wrapper = mount(FileTreePanel, {
-        props: { directories: winDirs, selectedDirId: 'dir-win', clipboard: { mode: null } },
-        global: { plugins: [createPinia()], stubs }
+        props: { clipboard: { mode: null } },
+        global: { plugins: [pinia], stubs }
       })
       await flushPromises()
 
@@ -913,9 +920,10 @@ describe('FileTreePanel.vue', () => {
           }
         }
       }
+      const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { plugins: [createPinia()], stubs }
+        props: { clipboard: { mode: null } },
+        global: { plugins: [pinia], stubs }
       })
       await flushPromises()
 
@@ -955,9 +963,10 @@ describe('FileTreePanel.vue', () => {
           methods: { getNode(p) { return store.nodesMap[p] } }
         }
       }
+      const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { plugins: [createPinia()], stubs }
+        props: { clipboard: { mode: null } },
+        global: { plugins: [pinia], stubs }
       })
       await flushPromises()
 
@@ -989,9 +998,10 @@ describe('FileTreePanel.vue', () => {
           methods: { getNode(p) { return store.nodesMap[p] } }
         }
       }
+      const pinia = setupDirectoryStore(mockDirectories, 'dir-1')
       wrapper = mount(FileTreePanel, {
-        props: { directories: mockDirectories, selectedDirId: 'dir-1', clipboard: { mode: null } },
-        global: { plugins: [createPinia()], stubs }
+        props: { clipboard: { mode: null } },
+        global: { plugins: [pinia], stubs }
       })
       await flushPromises()
 

@@ -11,7 +11,7 @@
     </div>
     <div class="tree-content" @contextmenu.prevent="onBlankAreaContextMenu">
       <el-tree
-        v-if="selectedDirId"
+        v-if="directoryStore.selectedDirectoryId"
         :key="treeKey"
         ref="fileTreeRef"
         :props="treeProps"
@@ -363,7 +363,7 @@ import {
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
-import { useFavoritesStore, useSettingsStore } from '../store'
+import { useFavoritesStore, useSettingsStore, useDirectoryStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -386,9 +386,9 @@ import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
 
 // ---- Props & Emits ----
-const props = defineProps({
-  directories: { type: Array, default: () => [] },
-  selectedDirId: { type: String, default: '' },
+// clipboard prop 属 workspace 域（批次6 迁 store），此处保留声明。
+// directories / selectedDirId 已迁 directory store，子组件直读。
+defineProps({
   clipboard: { type: Object, default: () => ({ mode: null }) }
 })
 
@@ -397,12 +397,13 @@ const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo
 const { saveState, restoreState } = useTreeState()
 const favoritesStore = useFavoritesStore()
 const settingsStore = useSettingsStore()
+const directoryStore = useDirectoryStore()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
 const fileTreeRef = ref()
 const refreshCounter = ref(0)
-const treeKey = computed(() => `${props.selectedDirId}_${refreshCounter.value}`)
+const treeKey = computed(() => `${directoryStore.selectedDirectoryId}_${refreshCounter.value}`)
 
 let treeReadyResolve = null
 let treeReadyPromise = new Promise(r => { treeReadyResolve = r })
@@ -512,9 +513,9 @@ const loadTreeNode = async (node, resolve) => {
 
   let path
   if (!node || node.level === 0 || !node.data) {
-    const dir = props.directories.find(d => d.id === props.selectedDirId)
+    const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
     if (!dir) {
-      debug.log('No directory found for ID:', props.selectedDirId)
+      debug.log('No directory found for ID:', directoryStore.selectedDirectoryId)
       resolve([])
       return
     }
@@ -577,7 +578,7 @@ const onNodeClick = (data, node) => {
 
 // ---- 沿父路径向上回溯，找到第一个已展开的祖先节点 ----
 const findExpandedAncestor = (nodePath, store) => {
-  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
   if (!dir) return null
 
   const rootPath = dir.path
@@ -610,7 +611,7 @@ const refreshNode = async (nodePath) => {
   if (!fileTreeRef.value || !nodePath) return
 
   const store = fileTreeRef.value.store
-  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
 
   // 规范化路径分隔符（对齐工作目录根的分隔符，避免 \ / 混用导致 nodesMap 查询失败）
   const sep = dir && dir.path.includes('\\') ? '\\' : '/'
@@ -773,7 +774,7 @@ const onGlobalClick = () => {
 const onBlankAreaContextMenu = (event) => {
   event.stopPropagation()
 
-  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
   if (!dir) return
 
   emit('contextmenu')
@@ -880,7 +881,7 @@ const onMenuCommand = (command) => {
       handleAddAsWorkDir(data)
       break
     case 'contentSearch': {
-      const currentWorkDir = props.directories.find(d => d.id === props.selectedDirId)
+      const currentWorkDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
       if (currentWorkDir && data.path.startsWith(currentWorkDir.path)) {
         const relPath = data.path.slice(currentWorkDir.path.length).replace(/^[\\\/]/, '')
         emit('open-content-search', relPath)
@@ -1338,7 +1339,7 @@ async function locateNode(targetPath) {
   const tree = fileTreeRef.value
   if (!tree) return
 
-  const dir = props.directories.find(d => d.id === props.selectedDirId)
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
   if (!dir) return
 
   const rootPath = dir.path

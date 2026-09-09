@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import CommandPalette from '../CommandPalette.vue'
-import { useUiStore } from '../../store'
+import { useUiStore, useDirectoryStore } from '../../store'
 
 // Mock wailsjs bindings used by composables (composables use ../../wailsjs relative to themselves)
 vi.mock('../../wailsjs/go/main/App', () => ({
@@ -47,25 +47,24 @@ const defaultStubs = {
   Loading: { template: '<span>loading</span>' }
 }
 
-const defaultProps = {
-  currentDir: 'C:\\projects\\test',
-  workDirs: [
-    { id: '1', name: 'Project A', path: 'C:\\projects\\a' },
-    { id: '2', name: 'Project B', path: 'C:\\projects\\b' }
-  ]
-}
+const defaultWorkDirs = [
+  { id: '1', name: 'Project A', path: 'C:\\projects\\a' },
+  { id: '2', name: 'Project B', path: 'C:\\projects\\b' }
+]
 
 // modelValue / contentSearchInit 已迁 ui store：visible 经 uiStore.commandPaletteVisible 驱动，
 // contentSearchInit 经 uiStore.contentSearchInit（默认空串，本组用例不依赖）。
-// currentDir / workDirs 为数据 prop，保留。
+// currentDir / workDirs 已迁 directory store：经 directoryStore.directories / selectedDirectoryId 驱动。
 function createWrapper(options = {}) {
-  const { visible = true, ...props } = options
+  const { visible = true, workDirs = defaultWorkDirs } = options
   const pinia = createPinia()
   setActivePinia(pinia)
   const uiStore = useUiStore()
   uiStore.commandPaletteVisible = visible
+  const directoryStore = useDirectoryStore()
+  directoryStore.directories = workDirs
+  directoryStore.selectedDirectoryId = workDirs[0]?.id || ''
   return mount(CommandPalette, {
-    props: { ...defaultProps, ...props },
     global: { plugins: [pinia], stubs: defaultStubs }
   })
 }

@@ -12,11 +12,8 @@
                 <DirectoryTree
                   v-show="uiStore.activePanel === 'directory'"
                   ref="directoryTreeRef"
-                  :directories="directories"
-                  :selected-id="selectedDirectoryId"
-                  :version="uiStore.appVersion"
                   @select="onDirectorySelect"
-                  @change="loadDirectories"
+                  @change="directoryStore.loadDirectories"
                   @contextmenu="onDirectoryContextMenu"
                   @batch-pull="onBatchPull"
                   @open-repo-filter="uiStore.openRepoFilter"
@@ -31,8 +28,6 @@
               <div class="pane-content" @mousedown.capture="lastInteractedTree = 'file'" @mousedown="closeToolbox" @contextmenu="closeToolbox">
                 <FileTreePanel
                   ref="fileTreePanelRef"
-                  :directories="directories"
-                  :selected-dir-id="selectedDirectoryId"
                   :clipboard="clipboard"
                   @select="onNodeSelect"
                   @batch-pull="onBatchPull"
@@ -98,24 +93,19 @@
     <SettingsPanel @update-available="onUpdateAvailable" />
     <UpdateDialog />
     <CommandPalette
-      :current-dir="currentDirPath"
-      :work-dirs="directories"
       @select-file="onPaletteSelectFile"
       @select-favorite="onPaletteSelectFavorite"
       @select-workdir="onPaletteSelectWorkDir"
     />
     <RepoFilterDialog
-      :directories="directories"
-      :current-dir-id="selectedDirectoryId"
       @locate="onRepoLocate"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { debug } from '../utils/debug'
 import DirectoryTree from '../components/DirectoryTree.vue'
 import FileTreePanel from '../components/FileTreePanel.vue'
 import ContentPanel from '../components/ContentPanel.vue'
@@ -128,11 +118,10 @@ import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useSettingsStore, useUiStore, matchShortcut } from '../store'
+import { useSettingsStore, useUiStore, useDirectoryStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
-  GetDirectories,
   GetAppVersion,
   ScanAndPullRepos,
   DeleteFile,
@@ -142,13 +131,11 @@ import {
   CopyToSystemClipboard,
   CutToSystemClipboard,
   ReadFromSystemClipboard,
-  AddDirectory,
-  RefreshDirectoriesGitFlag
+  AddDirectory
 } from '../../wailsjs/go/main/App'
 
-// ---- 核心状态（directory/workspace 域，批次5/6 迁 store）----
-const directories = ref([])
-const selectedDirectoryId = ref('')
+// ---- 核心状态（workspace 域留 Home，批次6 迁 store；directory 域已迁 directoryStore）----
+const directoryStore = useDirectoryStore()
 const selectedNode = ref(null)
 const latestCommit = ref(null)
 // 最近交互的树面板，用于 F2/Del 快捷键分派（'directory' | 'file'）
@@ -171,12 +158,6 @@ const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
 const contentPanelRef = ref()
 
-// ---- computed ----
-const currentDirPath = computed(() => {
-  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
-  return dir ? dir.path : ''
-})
-
 // ---- 右键菜单事件处理 ----
 const closeToolbox = () => {
   if (uiStore.activePanel === 'toolbox') {
@@ -194,60 +175,25 @@ const onFileTreeContextMenu = () => {
   directoryTreeRef.value?.closeMenu()
 }
 
-// ---- 加载目录列表 ----
-const loadDirectories = async () => {
-  try {
-    const dirs = await GetDirectories()
-    directories.value = dirs || []
-
-    // 自动选择默认目录
-    const defaultDir = dirs.find(d => d.isDefault)
-    if (defaultDir) {
-      selectedDirectoryId.value = defaultDir.id
-    } else if (dirs.length > 0) {
-      selectedDirectoryId.value = dirs[0].id
-    }
-  } catch (error) {
-    debug.log('加载目录失败:', error)
-  }
-}
-
-// ---- 启动后异步刷新工作目录的 git 标识 ----
-// GetDirectories 启动时直接返回 directories.json 持久化的 IsGitRepo（秒回），
-// 这里再调一次后端刷新覆盖"目录后来才纳管为 git"等变化。
-// 仅替换 directories 列表（左栏 git 标记会因 dir.isGitRepo 更新自动刷新），
-// 不动 selectedDirectoryId / selectedNode，避免打断用户已选中的目录与右栏状态。
-const refreshGitFlags = async () => {
-  try {
-    const fresh = await RefreshDirectoriesGitFlag()
-    if (fresh && fresh.length) {
-      directories.value = fresh
-    }
-  } catch (error) {
-    // 刷新失败不影响主流程，缓存值仍可用
-    debug.log('刷新工作目录 git 标识失败:', error)
-  }
-}
-
 // ---- 切换工作目录 ----
 const onDirectorySelect = async (dirId) => {
   // 1. 保存当前工作目录的树状态
-  if (selectedDirectoryId.value) {
-    const currentDir = directories.value.find(d => d.id === selectedDirectoryId.value)
+  if (directoryStore.selectedDirectoryId) {
+    const currentDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
     if (currentDir) {
       fileTreePanelRef.value?.saveCurrentState(currentDir.path)
     }
   }
 
   // 2. 先查目标目录（directories 列表已就绪，不依赖 nextTick）
-  const newDir = directories.value.find(d => d.id === dirId)
+  const newDir = directoryStore.directories.find(d => d.id === dirId)
 
   // 3. 直接切到目标 selectedNode，避免 null 中间态导致 content-inner 卸载再挂载（双刷新）
   //    ContentPanel 模板 v-if="selectedNode" 在 null 时会卸载整个面板，
   //    若先置 null 再设 git 节点，会触发"先卸载后挂载"两次刷新。
   //    这里按 newDir.isGitRepo 一次性算出目标值，使 gitA→gitB 切换时面板始终挂载，
   //    仅 GitInfo.repoPath 变化触发 watch 单次 loadGitInfo（与文件树切换一致）。
-  selectedDirectoryId.value = dirId
+  directoryStore.selectedDirectoryId = dirId
   latestCommit.value = null
   contentPanelRef.value?.clearPreview()
   selectedNode.value = newDir?.isGitRepo
@@ -287,7 +233,7 @@ const onNodeSelect = (data) => {
   } else {
     contentPanelRef.value?.clearPreview()
   }
-  recordAccess({ path: data.path, type: data.type, workDir: currentDirPath.value })
+  recordAccess({ path: data.path, type: data.type, workDir: directoryStore.currentDirPath })
 }
 
 // ---- 刷新文件树节点 ----
@@ -310,7 +256,7 @@ const onAddWorkDir = async (data) => {
   try {
     const dir = await AddDirectory(data.name, data.path, false)
     if (dir) {
-      await loadDirectories()
+      await directoryStore.loadDirectories()
       ElMessage.success('已添加为工作目录')
     } else {
       ElMessage.error('添加工作目录失败')
@@ -373,11 +319,11 @@ const onDeleteFromContent = async (node) => {
 
 // ---- Command Palette 事件处理 ----
 function onPaletteSelectFile(item) {
-  recordAccess({ path: item.path, type: item.type, workDir: currentDirPath.value })
-  if (item.path.startsWith(currentDirPath.value)) {
+  recordAccess({ path: item.path, type: item.type, workDir: directoryStore.currentDirPath })
+  if (item.path.startsWith(directoryStore.currentDirPath)) {
     fileTreePanelRef.value?.locateNode(item.path)
   } else {
-    const targetDir = directories.value.find(d => item.path.startsWith(d.path))
+    const targetDir = directoryStore.directories.find(d => item.path.startsWith(d.path))
     if (targetDir) {
       onDirectorySelect(targetDir.id)
       nextTick(() => fileTreePanelRef.value?.locateNode(item.path))
@@ -386,11 +332,11 @@ function onPaletteSelectFile(item) {
 }
 
 function onPaletteSelectFavorite(fav) {
-  recordAccess({ path: fav.path, type: 'dir', workDir: currentDirPath.value })
-  if (fav.path.startsWith(currentDirPath.value)) {
+  recordAccess({ path: fav.path, type: 'dir', workDir: directoryStore.currentDirPath })
+  if (fav.path.startsWith(directoryStore.currentDirPath)) {
     fileTreePanelRef.value?.locateNode(fav.path)
   } else {
-    const targetDir = directories.value.find(d => fav.path.startsWith(d.path))
+    const targetDir = directoryStore.directories.find(d => fav.path.startsWith(d.path))
     if (targetDir) {
       onDirectorySelect(targetDir.id)
       nextTick(() => fileTreePanelRef.value?.locateNode(fav.path))
@@ -415,7 +361,7 @@ const onRepoLocate = async (repoPath) => {
 
   const norm = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
   const normTarget = norm(repoPath)
-  const targetDir = directories.value.find(d => normTarget.startsWith(norm(d.path)))
+  const targetDir = directoryStore.directories.find(d => normTarget.startsWith(norm(d.path)))
   if (!targetDir) {
     ElMessage.warning('未找到该仓库所属的工作目录')
     return
@@ -425,7 +371,7 @@ const onRepoLocate = async (repoPath) => {
   uiStore.repoFilterVisible = false
 
   // 跨工作目录：先切换（触发文件树重建）
-  if (targetDir.id !== selectedDirectoryId.value) {
+  if (targetDir.id !== directoryStore.selectedDirectoryId) {
     await onDirectorySelect(targetDir.id)
   }
 
@@ -548,8 +494,8 @@ watch(() => selectedNode.value, (node) => {
   }
 })
 
-watch(() => selectedDirectoryId.value, () => {
-  const dir = directories.value.find(d => d.id === selectedDirectoryId.value)
+watch(() => directoryStore.selectedDirectoryId, () => {
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
   if (dir && !selectedNode.value) {
     uiStore.terminalDir = dir.path
   }
@@ -675,13 +621,13 @@ const handleCopyTo = async (data) => {
 }
 
 // ---- 生命周期 ----
-watch(() => selectedDirectoryId.value, () => {
+watch(() => directoryStore.selectedDirectoryId, () => {
   clearClipboard()
 })
 
 onMounted(() => {
   // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记。
-  loadDirectories().then(() => refreshGitFlags())
+  directoryStore.loadDirectories().then(() => directoryStore.refreshGitFlags())
   settingsStore.loadShortcuts()
   GetAppVersion().then(v => { uiStore.appVersion = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)

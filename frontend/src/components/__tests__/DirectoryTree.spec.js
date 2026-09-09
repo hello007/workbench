@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import DirectoryTree from '../DirectoryTree.vue'
+import { useDirectoryStore, useUiStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -67,14 +68,18 @@ const mockDirectories = [
   { id: 'dir-2', name: '项目B', path: '/path/b', isDefault: false }
 ]
 
-function createWrapper(props = {}) {
+// directories / selectedId / version 已迁 directory/ui store：经 store 设置初始值驱动（不再传 prop）。
+function createWrapper(options = {}) {
+  const { directories = mockDirectories, selectedId = 'dir-1', version = '' } = options
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const directoryStore = useDirectoryStore()
+  directoryStore.directories = directories
+  directoryStore.selectedDirectoryId = selectedId
+  const uiStore = useUiStore()
+  uiStore.appVersion = version
   return mount(DirectoryTree, {
-    props: {
-      directories: mockDirectories,
-      selectedId: 'dir-1',
-      ...props
-    },
-    global: { plugins: [createPinia()], stubs: defaultStubs }
+    global: { plugins: [pinia], stubs: defaultStubs }
   })
 }
 

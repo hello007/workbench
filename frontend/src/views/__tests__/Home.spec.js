@@ -10,7 +10,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
-import { useUiStore } from '../../store'
+import { useUiStore, useDirectoryStore } from '../../store'
 
 // Mock Wails runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -102,34 +102,34 @@ describe('Home.vue - Bug修复验证', () => {
   describe('Bug修复 #1: 懒加载树根节点检测', () => {
     it('应该正确加载目录列表', async () => {
       // 验证loadDirectories函数存在且可调用
-      expect(typeof wrapper.vm.loadDirectories).toBe('function')
+      expect(typeof useDirectoryStore().loadDirectories).toBe('function')
     })
 
     it('应该正确选择目录后清空选中节点', () => {
       wrapper.vm.selectedNode = { name: 'test', path: '/test' }
       wrapper.vm.onDirectorySelect('new-dir-id')
 
-      expect(wrapper.vm.selectedDirectoryId).toBe('new-dir-id')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('new-dir-id')
       expect(wrapper.vm.selectedNode).toBeNull()
       expect(wrapper.vm.latestCommit).toBeNull()
     })
 
     it('应该正确处理目录切换', () => {
       wrapper.vm.onDirectorySelect('dir-1')
-      expect(wrapper.vm.selectedDirectoryId).toBe('dir-1')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('dir-1')
     })
   })
 
   describe('工作目录切换 git 仓库双刷新修复', () => {
     it('切到 git 工作目录时 selectedNode 立即等于期望的 git 节点对象，无 null 中间态', async () => {
-      wrapper.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'git-1', name: '仓库A', path: '/a/git-repo', isGitRepo: true, isDefault: false }
       ]
 
       await wrapper.vm.onDirectorySelect('git-1')
       await flushPromises()
 
-      expect(wrapper.vm.selectedDirectoryId).toBe('git-1')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('git-1')
       expect(wrapper.vm.selectedNode).toEqual({
         id: 'git-1',
         path: '/a/git-repo',
@@ -142,20 +142,20 @@ describe('Home.vue - Bug修复验证', () => {
     })
 
     it('切到非 git 工作目录时 selectedNode 被置 null', async () => {
-      wrapper.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'plain-1', name: '普通目录', path: '/b/plain', isGitRepo: false, isDefault: false }
       ]
 
       await wrapper.vm.onDirectorySelect('plain-1')
       await flushPromises()
 
-      expect(wrapper.vm.selectedDirectoryId).toBe('plain-1')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('plain-1')
       expect(wrapper.vm.selectedNode).toBeNull()
       expect(wrapper.vm.latestCommit).toBeNull()
     })
 
     it('gitA → gitB 切换时 selectedNode 由 A-git 直切 B-git（无 null 中间态）', async () => {
-      wrapper.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'git-A', name: '仓库A', path: '/a/gitA', isGitRepo: true, isDefault: false },
         { id: 'git-B', name: '仓库B', path: '/b/gitB', isGitRepo: true, isDefault: false }
       ]
@@ -468,7 +468,7 @@ describe('Home.vue - Bug修复验证', () => {
       await flushPromises()
 
       expect(GetDirectoriesMock).toHaveBeenCalled()
-      expect(w.vm.selectedDirectoryId).toBe('dir-2')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('dir-2')
       w.unmount()
     })
 
@@ -481,7 +481,7 @@ describe('Home.vue - Bug修复验证', () => {
       const w = mount(Home, { global: { stubs: dirStubs } })
       await flushPromises()
 
-      expect(w.vm.selectedDirectoryId).toBe('dir-1')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('dir-1')
       w.unmount()
     })
 
@@ -489,8 +489,8 @@ describe('Home.vue - Bug修复验证', () => {
       const w = mount(Home, { global: { stubs: dirStubs } })
       await flushPromises()
 
-      expect(w.vm.selectedDirectoryId).toBe('')
-      expect(w.vm.directories).toEqual([])
+      expect(useDirectoryStore().selectedDirectoryId).toBe('')
+      expect(useDirectoryStore().directories).toEqual([])
       w.unmount()
     })
   })
@@ -752,10 +752,10 @@ describe('Home.vue - Bug修复验证', () => {
       const locateNodeMock = vi.fn().mockResolvedValue(undefined)
       w = mountWithLocate(locateNodeMock)
       await flushPromises()
-      w.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
       ]
-      w.vm.selectedDirectoryId = 'dir-1'
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
       await flushPromises()
 
       await w.vm.onRepoLocate('D:/work/repo-a')
@@ -763,25 +763,25 @@ describe('Home.vue - Bug修复验证', () => {
 
       expect(locateNodeMock).toHaveBeenCalledWith('D:/work/repo-a')
       // 同工作目录不应触发切换
-      expect(w.vm.selectedDirectoryId).toBe('dir-1')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('dir-1')
     })
 
     it('跨工作目录：先切换工作目录再 locateNode', async () => {
       const locateNodeMock = vi.fn().mockResolvedValue(undefined)
       w = mountWithLocate(locateNodeMock)
       await flushPromises()
-      w.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false },
         { id: 'dir-2', name: '工作目录2', path: 'D:/other', isGitRepo: false, isDefault: false }
       ]
-      w.vm.selectedDirectoryId = 'dir-1'
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
       await flushPromises()
 
       await w.vm.onRepoLocate('D:/other/repo-x')
       await flushPromises()
 
       // 应切换到 dir-2（跨工作目录先切换）
-      expect(w.vm.selectedDirectoryId).toBe('dir-2')
+      expect(useDirectoryStore().selectedDirectoryId).toBe('dir-2')
       // 切换完成后调用 locateNode 定位目标
       expect(locateNodeMock).toHaveBeenCalledWith('D:/other/repo-x')
     })
@@ -790,10 +790,10 @@ describe('Home.vue - Bug修复验证', () => {
       const locateNodeMock = vi.fn().mockResolvedValue(undefined)
       w = mountWithLocate(locateNodeMock)
       await flushPromises()
-      w.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
       ]
-      w.vm.selectedDirectoryId = 'dir-1'
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
       await flushPromises()
       ElMessage.warning.mockClear()
 
@@ -809,10 +809,10 @@ describe('Home.vue - Bug修复验证', () => {
       w = mountWithLocate(locateNodeMock)
       await flushPromises()
       // 工作目录路径用反斜杠 + 大写盘符，仓库路径用正斜杠 + 小写盘符
-      w.vm.directories = [
+      useDirectoryStore().directories = [
         { id: 'dir-1', name: '工作目录1', path: 'D:\\work', isGitRepo: false, isDefault: false }
       ]
-      w.vm.selectedDirectoryId = 'dir-1'
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
       await flushPromises()
 
       await w.vm.onRepoLocate('d:/work/repo-a')

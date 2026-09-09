@@ -19,7 +19,7 @@
           v-for="dir in localDirectories"
           :key="dir.id"
           class="dir-item"
-          :class="{ 'dir-item--active': dir.id === selectedId }"
+          :class="{ 'dir-item--active': dir.id === directoryStore.selectedDirectoryId }"
           @mousedown="handleSelect(dir.id)"
           @click="handleSelect(dir.id)"
           @contextmenu="onContextMenu($event, dir)"
@@ -53,7 +53,7 @@
     </div>
 
     <!-- 版本号 -->
-    <div v-if="version" class="dir-version">v{{ version }}</div>
+    <div v-if="uiStore.appVersion" class="dir-version">v{{ uiStore.appVersion }}</div>
 
     <!-- 右键菜单 -->
     <ul
@@ -168,7 +168,7 @@ import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useSettingsStore } from '../store'
+import { useSettingsStore, useDirectoryStore, useUiStore } from '../store'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -177,19 +177,17 @@ function shortenPath(path) {
   return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
-const props = defineProps({
-  directories: { type: Array, default: () => [] },
-  selectedId: { type: String, default: '' },
-  version: { type: String, default: '' }
-})
-
 const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull', 'openRepoFilter'])
 
 const settingsStore = useSettingsStore()
+const directoryStore = useDirectoryStore()
+const uiStore = useUiStore()
 
 // --- 本地目录列表（可变，用于拖拽） ---
-const localDirectories = ref([...props.directories])
-watch(() => props.directories, (val) => {
+// localDirectories 为 VueDraggable v-model 的可变副本（拖拽时原地重排 + onDragEnd 取序持久化），
+// 数据源为 directoryStore.directories：初始化拷贝一份，store 变化时同步覆盖。
+const localDirectories = ref([...directoryStore.directories])
+watch(() => directoryStore.directories, (val) => {
   localDirectories.value = [...val]
 })
 
@@ -214,12 +212,12 @@ const closeMenu = () => {
 // 键盘快捷键入口：作用于当前选中的工作目录（F2 重命名 / Del 删除）
 // showRenameDialog / handleDelete 在下方定义，函数调用时才查找，无 TDZ 问题
 const triggerRenameCurrent = () => {
-  const dir = localDirectories.value.find(d => d.id === props.selectedId)
+  const dir = localDirectories.value.find(d => d.id === directoryStore.selectedDirectoryId)
   if (dir) showRenameDialog(dir)
 }
 
 const triggerDeleteCurrent = () => {
-  const dir = localDirectories.value.find(d => d.id === props.selectedId)
+  const dir = localDirectories.value.find(d => d.id === directoryStore.selectedDirectoryId)
   if (dir) handleDelete(dir)
 }
 

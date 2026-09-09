@@ -18,7 +18,7 @@
           ref="dirSelectRef"
         >
           <el-option
-            v-for="d in directories"
+            v-for="d in directoryStore.directories"
             :key="d.id"
             :label="d.name"
             :value="d.id"
@@ -272,19 +272,15 @@ import {
 } from '../../wailsjs/go/main/App'
 // 复用 FilePreviewRenderer 渲染完整 README（享受 markdown-it 代码高亮 / mermaid / TOC / frontmatter）
 import FilePreviewRenderer from './FilePreviewRenderer.vue'
-import { useUiStore } from '../store'
+import { useUiStore, useDirectoryStore } from '../store'
 
 // ---- Props & Emits ----
 // visible / initialDirId 已迁 ui store（uiStore.repoFilterVisible / repoFilterInitialDirId）。
-// directories / currentDirId 为数据 prop，批次5 随 directory store 一并处理，此处保留。
-const props = defineProps({
-  directories: { type: Array, default: () => [] },
-  currentDirId: { type: String, default: '' }
-})
-
+// directories / currentDirId 已迁 directory store，子组件直读。
 const emit = defineEmits(['locate'])
 
 const uiStore = useUiStore()
+const directoryStore = useDirectoryStore()
 
 // ---- 常量 ----
 // 等高项高度：必须与 .repo-item 的 height 严格一致，否则虚拟滚动定位偏移
@@ -571,9 +567,9 @@ watch(
   async (v) => {
     if (v) {
       // 打开：同步当前工作目录 + 重置筛选
-      // repoFilterInitialDirId（uiStore，DirectoryTree 右键触发）优先于 currentDirId，实现"右键哪个目录筛哪个"
+      // repoFilterInitialDirId（uiStore，DirectoryTree 右键触发）优先于当前选中目录，实现"右键哪个目录筛哪个"
       suppressDirWatch = true
-      selectedDirId.value = uiStore.repoFilterInitialDirId || props.currentDirId
+      selectedDirId.value = uiStore.repoFilterInitialDirId || directoryStore.selectedDirectoryId
       await nextTick()
       suppressDirWatch = false
       searchKeyword.value = ''

@@ -4,7 +4,7 @@ import { computed, unref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import RepoFilterDialog from '../RepoFilterDialog.vue'
-import { useUiStore } from '../../store'
+import { useUiStore, useDirectoryStore } from '../../store'
 
 // jsdom 无布局，useVirtualList 计算 containerHeight=0 -> list 为空，测试无法断言 .repo-item。
 // 改为返回全部项，绕过虚拟化裁剪（仅测试分类/筛选/跳转逻辑，不测虚拟滚动本身）。
@@ -109,16 +109,18 @@ const defaultStubs = {
 }
 
 // visible / initialDirId 已迁 ui store：经 uiStore.repoFilterVisible / repoFilterInitialDirId 驱动。
-// directories / currentDirId 为数据 prop，保留（批次5 随 directory store 处理）。
+// directories / currentDirId 已迁 directory store：经 directoryStore.directories / selectedDirectoryId 驱动。
 function createWrapper(options = {}) {
-  const { visible = true, initialDirId = '', ...props } = options
+  const { visible = true, initialDirId = '', directories = mockDirs, currentDirId = 'dir-1' } = options
   const pinia = createPinia()
   setActivePinia(pinia)
   const uiStore = useUiStore()
   uiStore.repoFilterVisible = visible
   uiStore.repoFilterInitialDirId = initialDirId
+  const directoryStore = useDirectoryStore()
+  directoryStore.directories = directories
+  directoryStore.selectedDirectoryId = currentDirId
   return mount(RepoFilterDialog, {
-    props: { directories: mockDirs, currentDirId: 'dir-1', ...props },
     global: { plugins: [pinia], stubs: defaultStubs }
   })
 }

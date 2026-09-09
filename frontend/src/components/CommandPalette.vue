@@ -121,7 +121,7 @@
       <div v-if="(mode === 'content-global') && !contentSearching && contentGroups.length === 0 && !contentSearchExecuted && contentQuery.keyword" class="result-section">
         <div class="content-search-confirm">
           <el-icon><Search /></el-icon>
-          <span>将在 {{ workDirs.length }} 个工作目录中搜索 "<strong>{{ contentQuery.keyword }}</strong>"</span>
+          <span>将在 {{ directoryStore.directories.length }} 个工作目录中搜索 "<strong>{{ contentQuery.keyword }}</strong>"</span>
           <span class="hint">按 Enter 确认搜索</span>
         </div>
       </div>
@@ -184,12 +184,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Search, Document, Folder, Star, Loading, Close } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
-import { useFavoritesStore, useUiStore } from '../store'
-
-const props = defineProps({
-  currentDir: String,
-  workDirs: Array
-})
+import { useFavoritesStore, useUiStore, useDirectoryStore } from '../store'
 
 const emit = defineEmits(['select-file', 'select-favorite', 'select-workdir'])
 
@@ -203,6 +198,7 @@ const {
 const { getRecent } = useRecentAccess()
 const favoritesStore = useFavoritesStore()
 const uiStore = useUiStore()
+const directoryStore = useDirectoryStore()
 
 const recentItems = ref([])
 const favoriteResults = ref([])
@@ -215,9 +211,9 @@ const visible = computed({
 const showRecent = computed(() => mode.value === 'general' && !query.value && recentItems.value.length > 0)
 
 const filteredWorkDirs = computed(() => {
-  if (!query.value) return props.workDirs || []
+  if (!query.value) return directoryStore.directories || []
   const q = query.value.toLowerCase()
-  return (props.workDirs || []).filter(d =>
+  return (directoryStore.directories || []).filter(d =>
     d.name.toLowerCase().includes(q) || d.path.toLowerCase().includes(q)
   )
 })
@@ -289,7 +285,7 @@ function onInput() {
   } else if (mode.value === 'general' && query.value) {
     favoriteResults.value = favoritesStore.searchFavorites(query.value).slice(0, 5)
     searchTimer = setTimeout(() => {
-      searchFiles(props.currentDir)
+      searchFiles(directoryStore.currentDirPath)
     }, 300)
   } else if (mode.value === 'content' || mode.value === 'content-global') {
     // 内容搜索不在输入时触发，仅清空上次结果
