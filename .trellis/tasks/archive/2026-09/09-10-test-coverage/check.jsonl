@@ -1,0 +1,2 @@
+{"file": "docs/测试策略.md", "reason": "验收阶段核对新用例符合现有测试模式与 Mock 约定"}
+{"file": ".trellis/tasks/09-10-test-coverage/prd.md", "reason": "验收 checklist：后端 service/model/server≥80% + util≥40% + 前端 thresholds≥70% 硬失败 + CI 门禁脚本就绪"}

@@ -1,0 +1,2 @@
+{"file": "docs/测试策略.md", "reason": "后端 *_test.go 模式 + 前端 __tests__/*.spec.js 模式 + 现有 Mock 约定，补测须遵循"}
+{"file": ".trellis/tasks/09-10-test-coverage/prd.md", "reason": "分层覆盖率口径（重点包≥80%/util≥40%/主包无门禁）+ 前端硬失败阈值 + 补测优先级 + CI 门禁方案"}
