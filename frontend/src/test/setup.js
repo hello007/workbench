@@ -7,6 +7,7 @@ import { vi } from 'vitest'
 // jsdom 缺失的浏览器 API 补丁：
 // - ResizeObserver：@codemirror/view 顶层模块引用，否则加载即抛 ReferenceError
 // - DOMMatrix：兜底防御（曾为 pdfjs-dist 准备，pdfjs 已移除但保留 stub 无副作用）
+// - matchMedia：xterm 初始化时调用（终端面板真实渲染时触发），jsdom 无实现需 stub
 // 仅在测试环境生效，不影响生产构建。
 class ResizeObserverStub {
   observe() {}
@@ -22,6 +23,16 @@ if (!globalThis.DOMMatrix) {
     multiply() { return this }
     inverse() { return this }
   }
+}
+if (!globalThis.matchMedia) {
+  globalThis.matchMedia = () => ({
+    matches: false,
+    media: '',
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {}
+  })
 }
 
 // Mock Wails绑定

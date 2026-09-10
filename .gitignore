@@ -40,3 +40,6 @@ bash.exe.stackdump
 notify_error.log
 
 .claude/settings.local.json
+# Coverage report artifacts
+frontend/coverage/
+coverage.out

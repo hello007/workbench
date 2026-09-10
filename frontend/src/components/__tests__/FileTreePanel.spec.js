@@ -58,7 +58,9 @@ const defaultStubs = {
   },
   'el-tree': {
     template: '<div class="el-tree"></div>',
-    props: ['props', 'lazy', 'load', 'nodeKey', 'data']
+    props: ['props', 'lazy', 'load', 'nodeKey', 'data'],
+    // 提供 store mock：refreshNode 命中 nodesMap/root 兜底时 target=null 提前返回，不抛 nodesMap
+    data: () => ({ store: { nodesMap: {}, root: null } })
   },
   'el-empty': { template: '<div class="el-empty" />', props: ['description', 'imageSize'] },
   'el-icon': { template: '<i><slot /></i>' },
@@ -1002,6 +1004,450 @@ describe('FileTreePanel.vue', () => {
       await wrapper.vm.refreshNode('/path/a/root.txt')
 
       expect(rootExpand).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
+// ===== 补充：菜单分发与外部工具 handler 分支 =====
+describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
+  let wrapper
+
+  const nodeData = { id: 'n1', name: 'a.go', path: 'D:\\proj\\a.go', type: 'file' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    wrapper = createWrapper()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  // 设置右键菜单数据后触发 onMenuCommand
+  const setMenuDataAndCommand = (command, data = nodeData) => {
+    wrapper.vm.$.setupState.contextMenu.data = data
+    wrapper.vm.onMenuCommand(command)
+  }
+
+  describe('onMenuCommand 分发', () => {
+    it('createFile / createDir 打开创建对话框', () => {
+      setMenuDataAndCommand('createFile')
+      expect(wrapper.vm.$.setupState.createDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.createType).toBe('file')
+      setMenuDataAndCommand('createDir')
+      expect(wrapper.vm.$.setupState.createType).toBe('directory')
+    })
+
+    it('rename 打开重命名对话框', () => {
+      setMenuDataAndCommand('rename')
+      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.renameName).toBe('a.go')
+    })
+
+    it('copyTo 打开拷贝到对话框（文件模式）', () => {
+      setMenuDataAndCommand('copyTo')
+      expect(wrapper.vm.$.setupState.copyToDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.copyToFileMode).toBe(true)
+      expect(wrapper.vm.$.setupState.copyToWholeDir).toBe(false)
+    })
+
+    it('copyTo 目录模式设置 wholeDir=true', () => {
+      setMenuDataAndCommand('copyTo', { ...nodeData, type: 'directory' })
+      expect(wrapper.vm.$.setupState.copyToWholeDir).toBe(true)
+      expect(wrapper.vm.$.setupState.copyToFileMode).toBe(false)
+    })
+
+    it('cut/copy/paste emit 对应事件', () => {
+      setMenuDataAndCommand('cut')
+      expect(wrapper.emitted('cut')).toBeTruthy()
+      setMenuDataAndCommand('copy')
+      expect(wrapper.emitted('copy')).toBeTruthy()
+      setMenuDataAndCommand('paste')
+      expect(wrapper.emitted('paste')).toBeTruthy()
+    })
+
+    it('openRepoFilter emit open-repo-filter', () => {
+      setMenuDataAndCommand('openRepoFilter')
+      expect(wrapper.emitted('open-repo-filter')).toBeTruthy()
+    })
+
+    it('pullRepos emit batchPull', () => {
+      setMenuDataAndCommand('pullRepos')
+      expect(wrapper.emitted('batchPull')).toBeTruthy()
+    })
+
+    it('refresh 命令关闭菜单', () => {
+      wrapper.vm.$.setupState.contextMenu.visible = true
+      setMenuDataAndCommand('refresh')
+      // onMenuCommand 先 closeContextMenu
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+    })
+
+    it('contentSearch：路径在当前工作目录内 emit 相对子目录', () => {
+      // nodeData.path = D:\proj\a.go，currentDir path = /path/a（mockDirectories）
+      // 不同前缀 → emit 空串
+      setMenuDataAndCommand('contentSearch')
+      const emits = wrapper.emitted('open-content-search')
+      expect(emits).toBeTruthy()
+    })
+
+    it('copyPath / copyName 调 navigator.clipboard', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      setMenuDataAndCommand('copyPath')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('D:/proj/a.go')
+      setMenuDataAndCommand('copyName')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('a.go')
+      vi.unstubAllGlobals()
+    })
+
+    it('openExplorer / openInVSCode / openWithDefaultApp 调后端绑定', async () => {
+      const { OpenInExplorer, OpenInVSCode, OpenWithDefaultApp } = await import('../../../wailsjs/go/main/App')
+      setMenuDataAndCommand('openExplorer')
+      await flushPromises()
+      expect(OpenInExplorer).toHaveBeenCalledWith('D:\\proj\\a.go')
+      setMenuDataAndCommand('openInVSCode')
+      await flushPromises()
+      expect(OpenInVSCode).toHaveBeenCalledWith('D:\\proj\\a.go')
+      setMenuDataAndCommand('openWithDefaultApp')
+      await flushPromises()
+      expect(OpenWithDefaultApp).toHaveBeenCalledWith('D:\\proj\\a.go')
+    })
+
+    it('addFavorite / removeFavorite 调收藏 store', async () => {
+      const { AddFavorite, RemoveFavorite } = await import('../../../wailsjs/go/main/App')
+      setMenuDataAndCommand('addFavorite')
+      await flushPromises()
+      expect(AddFavorite).toHaveBeenCalled()
+      setMenuDataAndCommand('removeFavorite')
+      await flushPromises()
+      expect(RemoveFavorite).toHaveBeenCalled()
+    })
+
+    it('无 contextMenu.data 时直接返回', () => {
+      wrapper.vm.$.setupState.contextMenu.data = null
+      wrapper.vm.onMenuCommand('rename')
+      // 不抛错即通过
+      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(false)
+    })
+  })
+
+  describe('handleCreate', () => {
+    it('空名时 warning', () => {
+      wrapper.vm.$.setupState.createType = 'directory'
+      wrapper.vm.$.setupState.createParentData = { path: 'D:\\dir' }
+      wrapper.vm.$.setupState.createName = ''
+      wrapper.vm.handleCreate()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入文件夹名称')
+    })
+
+    it('目录创建成功', async () => {
+      const { CreateDirectory } = await import('../../../wailsjs/go/main/App')
+      wrapper.vm.$.setupState.createType = 'directory'
+      wrapper.vm.$.setupState.createParentData = { path: 'D:\\dir' }
+      wrapper.vm.$.setupState.createName = 'newdir'
+      await wrapper.vm.handleCreate()
+      await flushPromises()
+      expect(CreateDirectory).toHaveBeenCalledWith('D:\\dir', 'newdir')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件夹创建成功')
+    })
+
+    it('文件创建成功', async () => {
+      const { CreateFile } = await import('../../../wailsjs/go/main/App')
+      wrapper.vm.$.setupState.createType = 'file'
+      wrapper.vm.$.setupState.createParentData = { path: 'D:\\dir' }
+      wrapper.vm.$.setupState.createName = 'new.txt'
+      await wrapper.vm.handleCreate()
+      await flushPromises()
+      expect(CreateFile).toHaveBeenCalledWith('D:\\dir', 'new.txt', '')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件创建成功')
+    })
+
+    it('创建返回 false 时 error', async () => {
+      const { CreateFile } = await import('../../../wailsjs/go/main/App')
+      CreateFile.mockResolvedValueOnce(false)
+      wrapper.vm.$.setupState.createType = 'file'
+      wrapper.vm.$.setupState.createParentData = { path: 'D:\\dir' }
+      wrapper.vm.$.setupState.createName = 'x.txt'
+      await wrapper.vm.handleCreate()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('创建失败')
+    })
+
+    it('创建抛异常时 error', async () => {
+      const { CreateFile } = await import('../../../wailsjs/go/main/App')
+      CreateFile.mockRejectedValueOnce(new Error('boom'))
+      wrapper.vm.$.setupState.createType = 'file'
+      wrapper.vm.$.setupState.createParentData = { path: 'D:\\dir' }
+      wrapper.vm.$.setupState.createName = 'x.txt'
+      await wrapper.vm.handleCreate()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+    })
+  })
+
+  describe('handleRename', () => {
+    it('空名时 warning', () => {
+      wrapper.vm.$.setupState.renameNode = { path: 'D:\\a.go', name: 'a.go' }
+      wrapper.vm.$.setupState.renameName = ''
+      wrapper.vm.handleRename()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入名称')
+    })
+
+    it('成功时 refreshNode 父目录（\\ 分隔）', async () => {
+      const { RenameFile } = await import('../../../wailsjs/go/main/App')
+      wrapper.vm.$.setupState.renameNode = { path: 'D:\\dir\\a.go', name: 'a.go' }
+      wrapper.vm.$.setupState.renameName = 'b.go'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(RenameFile).toHaveBeenCalledWith('D:\\dir\\a.go', 'b.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('重命名成功')
+    })
+
+    it('成功时 refreshNode 父目录（/ 分隔）', async () => {
+      const { RenameFile } = await import('../../../wailsjs/go/main/App')
+      wrapper.vm.$.setupState.renameNode = { path: 'dir/a.go', name: 'a.go' }
+      wrapper.vm.$.setupState.renameName = 'b.go'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(RenameFile).toHaveBeenCalledWith('dir/a.go', 'b.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('重命名成功')
+    })
+
+    it('返回 false 时 error', async () => {
+      const { RenameFile } = await import('../../../wailsjs/go/main/App')
+      RenameFile.mockResolvedValueOnce(false)
+      wrapper.vm.$.setupState.renameNode = { path: 'D:\\a.go', name: 'a.go' }
+      wrapper.vm.$.setupState.renameName = 'b.go'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('重命名失败')
+    })
+  })
+
+  describe('handleCopyTo 校验', () => {
+    it('原地址为空时 warning', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = ''
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:\\dst'
+      wrapper.vm.handleCopyTo()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入原地址')
+    })
+
+    it('目标地址为空时 warning', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:\\src'
+      wrapper.vm.$.setupState.copyToTargetPath = ''
+      wrapper.vm.handleCopyTo()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入目标地址')
+    })
+
+    it('文件名含非法字符时 warning', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:\\src'
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:\\dst'
+      wrapper.vm.$.setupState.copyToTargetName = 'a:b'
+      wrapper.vm.handleCopyTo()
+      expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('非法字符'))
+    })
+
+    it('校验通过时 emit copyTo', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:/src'
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:/dst'
+      wrapper.vm.$.setupState.copyToTargetName = 'newname'
+      wrapper.vm.$.setupState.copyToWholeDir = true
+      wrapper.vm.handleCopyTo()
+      expect(wrapper.emitted('copyTo')).toBeTruthy()
+      const payload = wrapper.emitted('copyTo')[0][0]
+      expect(payload.targetName).toBe('newname')
+      expect(payload.copyWholeDir).toBe(true)
+    })
+  })
+
+  describe('外部工具 handler', () => {
+    it('handleOpenExplorer 失败时 error', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      OpenInExplorer.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenExplorer('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('打开资源管理器失败')
+    })
+
+    it('handleOpenExplorer 抛异常时 error', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      OpenInExplorer.mockRejectedValueOnce(new Error('x'))
+      await wrapper.vm.$.setupState.handleOpenExplorer('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('x'))
+    })
+
+    it('handleOpenInVSCode 失败时 error', async () => {
+      const { OpenInVSCode } = await import('../../../wailsjs/go/main/App')
+      OpenInVSCode.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenInVSCode('D:\\a.go')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('VSCode'))
+    })
+
+    it('handleOpenWithDefaultApp 失败时 error', async () => {
+      const { OpenWithDefaultApp } = await import('../../../wailsjs/go/main/App')
+      OpenWithDefaultApp.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenWithDefaultApp('D:\\a.go')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('打开文件失败')
+    })
+  })
+
+  describe('copyToClipboard', () => {
+    it('成功时 success 提示', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      await wrapper.vm.$.setupState.copyToClipboard('text', '路径')
+      expect(ElMessage.success).toHaveBeenCalledWith('路径已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('失败时 error 提示', async () => {
+      const writeText = vi.fn(() => Promise.reject(new Error('denied')))
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      await wrapper.vm.$.setupState.copyToClipboard('text', '路径')
+      expect(ElMessage.error).toHaveBeenCalledWith('复制失败')
+      vi.unstubAllGlobals()
+    })
+  })
+
+  describe('节点点击与右键菜单', () => {
+    it('onNodeClick：叶子/文件节点 emit select 后直接返回', () => {
+      const data = { path: 'D:\\a.go', type: 'file', isLeaf: true }
+      wrapper.vm.$.setupState.onNodeClick(data, { expanded: false })
+      expect(wrapper.emitted('select')).toBeTruthy()
+    })
+
+    it('onNodeClick：已展开已选中目录收起', () => {
+      wrapper.vm.$.setupState.currentSelectedPath = 'D:\\dir'
+      const data = { path: 'D:\\dir', type: 'directory' }
+      const node = { expanded: true, collapse: vi.fn(), expand: vi.fn() }
+      wrapper.vm.$.setupState.onNodeClick(data, node)
+      expect(node.collapse).toHaveBeenCalled()
+    })
+
+    it('onNodeClick：未展开目录展开', () => {
+      const data = { path: 'D:\\dir', type: 'directory' }
+      const node = { expanded: false, collapse: vi.fn(), expand: vi.fn() }
+      wrapper.vm.$.setupState.onNodeClick(data, node)
+      expect(node.expand).toHaveBeenCalled()
+    })
+
+    it('onNodeContextMenu：设置菜单位置 + emit contextmenu', () => {
+      const event = { preventDefault: () => {}, stopPropagation: () => {}, clientX: 100, clientY: 200 }
+      wrapper.vm.$.setupState.onNodeContextMenu(event, { path: 'D:\\a.go', name: 'a.go' })
+      expect(wrapper.emitted('contextmenu')).toBeTruthy()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(true)
+      expect(wrapper.vm.$.setupState.contextMenu.isBlankArea).toBe(false)
+      expect(wrapper.vm.$.setupState.contextMenu.data.path).toBe('D:\\a.go')
+    })
+
+    it('closeContextMenu 关闭菜单', () => {
+      wrapper.vm.$.setupState.contextMenu.visible = true
+      wrapper.vm.$.setupState.contextMenu.isBlankArea = true
+      wrapper.vm.$.setupState.closeContextMenu()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+      expect(wrapper.vm.$.setupState.contextMenu.isBlankArea).toBe(false)
+    })
+
+    it('onGlobalClick 关闭菜单', () => {
+      wrapper.vm.$.setupState.contextMenu.visible = true
+      wrapper.vm.$.setupState.onGlobalClick()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+    })
+
+    it('onGlobalContextMenu 关闭菜单', () => {
+      wrapper.vm.$.setupState.contextMenu.visible = true
+      wrapper.vm.$.setupState.onGlobalContextMenu()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+    })
+
+    it('onBlankAreaContextMenu：设菜单数据为当前工作目录', () => {
+      const event = { stopPropagation: () => {}, clientX: 50, clientY: 50 }
+      wrapper.vm.$.setupState.onBlankAreaContextMenu(event)
+      expect(wrapper.emitted('contextmenu')).toBeTruthy()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(true)
+      expect(wrapper.vm.$.setupState.contextMenu.isBlankArea).toBe(true)
+      // mockDirectories[0].path = /path/a
+      expect(wrapper.vm.$.setupState.contextMenu.data.type).toBe('directory')
+    })
+  })
+
+  describe('refreshAll / 拷贝到纯函数', () => {
+    it('refreshAll 自增 counter + success 提示', () => {
+      const before = wrapper.vm.$.setupState.refreshCounter
+      wrapper.vm.$.setupState.refreshAll()
+      expect(wrapper.vm.$.setupState.refreshCounter).toBe(before + 1)
+      expect(ElMessage.success).toHaveBeenCalledWith('文件树已刷新')
+    })
+
+    it('defaultCopyToName：路径末段', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:\\src\\dir'
+      expect(wrapper.vm.$.setupState.defaultCopyToName()).toBe('dir')
+    })
+
+    it('copyToPreview：整目录模式 from → dst/name', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:/src'
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:/dst'
+      wrapper.vm.$.setupState.copyToWholeDir = true
+      wrapper.vm.$.setupState.copyToTargetName = 'newname'
+      const p = wrapper.vm.$.setupState.copyToPreview
+      expect(p.from).toBe('D:/src')
+      expect(p.to).toBe('D:/dst/newname')
+    })
+
+    it('copyToPreview：非整目录模式 from/* → dst/*', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:/src'
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:/dst'
+      wrapper.vm.$.setupState.copyToWholeDir = false
+      const p = wrapper.vm.$.setupState.copyToPreview
+      expect(p.from).toBe('D:/src/*')
+      expect(p.to).toBe('D:/dst/*')
+    })
+
+    it('copyToPreview：source/target 为空时返回 null', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = ''
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:/dst'
+      expect(wrapper.vm.$.setupState.copyToPreview).toBeNull()
+    })
+
+    it('swapCopyToPaths 交换原地址与目标地址', () => {
+      wrapper.vm.$.setupState.copyToSourcePath = 'D:/a'
+      wrapper.vm.$.setupState.copyToTargetPath = 'D:/b'
+      wrapper.vm.$.setupState.swapCopyToPaths()
+      expect(wrapper.vm.$.setupState.copyToSourcePath).toBe('D:/b')
+      expect(wrapper.vm.$.setupState.copyToTargetPath).toBe('D:/a')
+    })
+  })
+
+  describe('收藏 handler', () => {
+    it('handleAddFavorite 成功时 success', async () => {
+      const { AddFavorite } = await import('../../../wailsjs/go/main/App')
+      AddFavorite.mockResolvedValueOnce('')
+      await wrapper.vm.$.setupState.handleAddFavorite({ path: 'D:\\a.go' })
+      await flushPromises()
+      expect(AddFavorite).toHaveBeenCalled()
+      expect(ElMessage.success).toHaveBeenCalledWith('已添加到收藏')
+    })
+
+    it('handleAddFavorite 返回错误时 warning', async () => {
+      const { AddFavorite } = await import('../../../wailsjs/go/main/App')
+      AddFavorite.mockResolvedValueOnce('已存在')
+      await wrapper.vm.$.setupState.handleAddFavorite({ path: 'D:\\a.go' })
+      await flushPromises()
+      expect(ElMessage.warning).toHaveBeenCalledWith('已存在')
+    })
+
+    it('handleRemoveFavorite 成功时 success', async () => {
+      const { RemoveFavorite } = await import('../../../wailsjs/go/main/App')
+      RemoveFavorite.mockResolvedValueOnce('')
+      await wrapper.vm.$.setupState.handleRemoveFavorite({ path: 'D:\\a.go' })
+      await flushPromises()
+      expect(ElMessage.success).toHaveBeenCalledWith('已取消收藏')
     })
   })
 })

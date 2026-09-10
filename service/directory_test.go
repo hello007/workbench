@@ -471,3 +471,100 @@ func TestReorder_UnknownID(t *testing.T) {
 		t.Fatal("Reorder unknown id: expected error, got nil")
 	}
 }
+
+// --- Update 测试 ---
+
+// TestUpdate_RenameName 仅改名、路径不变时成功且 IsGitRepo 重算。
+func TestUpdate_RenameName(t *testing.T) {
+	dir := t.TempDir()
+	svc := createTestService(t)
+	created, _ := svc.Create("旧名", dir, false)
+
+	updated, err := svc.Update(created.ID, "新名", dir, false)
+	if err != nil {
+		t.Fatalf("Update rename: %v", err)
+	}
+	if updated.Name != "新名" {
+		t.Errorf("Update name: got %q, want 新名", updated.Name)
+	}
+	if updated.Path != dir {
+		t.Errorf("Update path 不应变: got %q, want %q", updated.Path, dir)
+	}
+}
+
+// TestUpdate_ChangePath 路径变更到新存在目录时更新成功。
+func TestUpdate_ChangePath(t *testing.T) {
+	oldDir := t.TempDir()
+	newDir := t.TempDir()
+	svc := createTestService(t)
+	created, _ := svc.Create("目录", oldDir, false)
+
+	updated, err := svc.Update(created.ID, "目录", newDir, false)
+	if err != nil {
+		t.Fatalf("Update change path: %v", err)
+	}
+	if updated.Path != newDir {
+		t.Errorf("Update path: got %q, want %q", updated.Path, newDir)
+	}
+}
+
+// TestUpdate_NotExists id 不存在返回错误。
+func TestUpdate_NotExists(t *testing.T) {
+	dir := t.TempDir()
+	svc := createTestService(t)
+	_, err := svc.Update("nonexistent-id", "名", dir, false)
+	if err == nil {
+		t.Fatal("Update nonexistent: expected error, got nil")
+	}
+}
+
+// TestUpdate_PathNotExists 路径变更且新路径不存在时返回错误。
+func TestUpdate_PathNotExists(t *testing.T) {
+	oldDir := t.TempDir()
+	svc := createTestService(t)
+	created, _ := svc.Create("目录", oldDir, false)
+
+	_, err := svc.Update(created.ID, "目录", "/nonexistent/path/xyz", false)
+	if err == nil {
+		t.Fatal("Update 不存在路径应返回错误")
+	}
+}
+
+// TestUpdate_SetDefault 设为默认时清除其他目录的默认标记。
+func TestUpdate_SetDefault(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	svc := createTestService(t)
+	created1, _ := svc.Create("目录1", dir1, true)
+	created2, _ := svc.Create("目录2", dir2, false)
+
+	// 将目录2设为默认（此前目录1是默认）
+	if _, err := svc.Update(created2.ID, "目录2", dir2, true); err != nil {
+		t.Fatalf("Update set default: %v", err)
+	}
+
+	dirs, _ := svc.Load()
+	for _, d := range dirs {
+		if d.ID == created1.ID && d.IsDefault {
+			t.Error("目录1应不再为默认")
+		}
+		if d.ID == created2.ID && !d.IsDefault {
+			t.Error("目录2应为默认")
+		}
+	}
+}
+
+// TestUpdate_KeepDefaultWhenAlreadyDefault 已是默认时 isDefault=true 不报错且保持。
+func TestUpdate_KeepDefaultWhenAlreadyDefault(t *testing.T) {
+	dir := t.TempDir()
+	svc := createTestService(t)
+	created, _ := svc.Create("目录", dir, true)
+
+	updated, err := svc.Update(created.ID, "改名", dir, true)
+	if err != nil {
+		t.Fatalf("Update keep default: %v", err)
+	}
+	if !updated.IsDefault {
+		t.Error("应保持默认")
+	}
+}

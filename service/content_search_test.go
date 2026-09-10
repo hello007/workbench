@@ -2,9 +2,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -172,6 +174,53 @@ func TestIsExcludedFile(t *testing.T) {
 	}
 	if isExcludedFile("App.java", defaultExcludeFiles) {
 		t.Error("App.java should not be excluded")
+	}
+}
+
+// TestSearchFileContent_LargeFile 超 10MB 文件跳过不搜索。
+func TestSearchFileContent_LargeFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "big.txt")
+	big := bytes.Repeat([]byte("a"), 10*1024*1024+1)
+	if err := os.WriteFile(p, big, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := searchFileContent(p, "a", int64(len(big)))
+	if len(got) != 0 {
+		t.Errorf("大文件应跳过, got %d results", len(got))
+	}
+}
+
+// TestSearchFileContent_LongLineTruncated 超长匹配行截断为 300 字符 + "..."。
+func TestSearchFileContent_LongLineTruncated(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	longLine := strings.Repeat("a", 400) + "keyword"
+	if err := os.WriteFile(p, []byte(longLine), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := searchFileContent(p, "keyword", int64(len(longLine)))
+	if len(got) != 1 {
+		t.Fatalf("应 1 条结果, got %d", len(got))
+	}
+	if !strings.HasSuffix(got[0].LineText, "...") {
+		t.Errorf("长行应截断以 ... 结尾, got len=%d", len(got[0].LineText))
+	}
+}
+
+// TestSearchFileContent_NoMatch 无匹配返回空切片。
+func TestSearchFileContent_NoMatch(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	os.WriteFile(p, []byte("hello world\n"), 0o644)
+	got := searchFileContent(p, "nonexistent", 12)
+	if len(got) != 0 {
+		t.Errorf("无匹配应返回空, got %d", len(got))
+	}
+}
+
+// TestSearchFileContent_NotExists 文件不存在返回空（ReadFile 失败）。
+func TestSearchFileContent_NotExists(t *testing.T) {
+	got := searchFileContent(filepath.Join(t.TempDir(), "missing.txt"), "x", 100)
+	if len(got) != 0 {
+		t.Errorf("不存在文件应返回空, got %d", len(got))
 	}
 }
 

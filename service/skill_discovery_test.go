@@ -246,3 +246,22 @@ func TestSkillDiscovery_CacheAndRefresh(t *testing.T) {
 		t.Fatalf("Refresh 结果异常: %+v", third)
 	}
 }
+
+// TestModTimeStr_NotExists 不存在路径返回 "0"。
+func TestModTimeStr_NotExists(t *testing.T) {
+	if got := modTimeStr(filepath.Join(t.TempDir(), "missing")); got != "0" {
+		t.Errorf("不存在路径应返回 0, got %s", got)
+	}
+}
+
+// TestModTimeStr_Exists 存在路径返回非零 mtime 格式串。
+func TestModTimeStr_Exists(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := modTimeStr(p)
+	if got == "0" || len(got) == 0 {
+		t.Errorf("存在路径应返回时间戳, got %s", got)
+	}
+}

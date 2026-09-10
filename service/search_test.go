@@ -119,3 +119,56 @@ func TestSearchFiles_SkipsNodeModules(t *testing.T) {
 		}
 	}
 }
+
+// TestMatchScore_Branches 覆盖 matchScore 全部分支：空模式/完全匹配/前缀/包含/其余。
+func TestMatchScore_Branches(t *testing.T) {
+	cases := []struct {
+		text, pattern string
+		want          int
+	}{
+		{"anything", "", 0},          // 空模式
+		{"button", "button", 100},    // 完全匹配
+		{"button.vue", "button", 80}, // 前缀
+		{"mybutton", "button", 60},   // 包含
+		{"xyz", "button", 40},        // 其余
+	}
+	for _, c := range cases {
+		if got := matchScore(c.text, c.pattern); got != c.want {
+			t.Errorf("matchScore(%q, %q): got %d, want %d", c.text, c.pattern, got, c.want)
+		}
+	}
+}
+
+// TestFuzzyMatch_EmptyPattern 空模式恒匹配。
+func TestFuzzyMatch_EmptyPattern(t *testing.T) {
+	if !fuzzyMatch("anything", "") {
+		t.Error("空模式应匹配")
+	}
+}
+
+// TestFuzzyMatch_NoMatch 字符不构成子序列返回 false。
+func TestFuzzyMatch_NoMatch(t *testing.T) {
+	if fuzzyMatch("abc", "xyz") {
+		t.Error("无子序列应不匹配")
+	}
+}
+
+// TestSearchFiles_SortByScore 结果按分数降序（完全匹配在前）。
+func TestSearchFiles_SortByScore(t *testing.T) {
+	root := t.TempDir()
+	// app 完全匹配(100)、application 前缀(80)、myapp 包含(60)
+	for _, f := range []string{"app", "application", "myapp"} {
+		os.WriteFile(filepath.Join(root, f), []byte("x"), 0o644)
+	}
+	svc := NewSearchService()
+	results, err := svc.Search(root, "app", 20)
+	if err != nil {
+		t.Fatalf("Search error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("结果数: got %d, want 3", len(results))
+	}
+	if results[0].Name != "app" {
+		t.Errorf("首位应为完全匹配 app, got %s", results[0].Name)
+	}
+}

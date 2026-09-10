@@ -445,3 +445,55 @@ func TestGetChildren_DotGitFile(t *testing.T) {
 		t.Error("src should be visible")
 	}
 }
+
+// TestGetGitInfo_NonRepo 非仓库目录返回 IsRepo=false 且不报错。
+func TestGetGitInfo_NonRepo(t *testing.T) {
+	svc := NewFileTreeService()
+	info, err := svc.GetGitInfo(t.TempDir())
+	if err != nil {
+		t.Fatalf("GetGitInfo non-repo: %v", err)
+	}
+	if info.IsRepo {
+		t.Error("非仓库 IsRepo 应为 false")
+	}
+}
+
+// TestGetGitInfo_RealRepo 真实仓库 IsRepo=true。
+func TestGetGitInfo_RealRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+
+	svc := NewFileTreeService()
+	info, err := svc.GetGitInfo(dir)
+	if err != nil {
+		t.Fatalf("GetGitInfo real repo: %v", err)
+	}
+	if !info.IsRepo {
+		t.Error("真实仓库 IsRepo 应为 true")
+	}
+}
+
+// TestGetTree_NestedDepth maxDepth 限制递归层数。
+func TestGetTree_NestedDepth(t *testing.T) {
+	root := t.TempDir()
+	// a/b/c 三层
+	mustMkdir(t, filepath.Join(root, "a"))
+	mustMkdir(t, filepath.Join(root, "a", "b"))
+	mustMkdir(t, filepath.Join(root, "a", "b", "c"))
+
+	svc := NewFileTreeService()
+	// maxDepth=2：仅展开第 0、1 层（a 节点存在，b 不展开）
+	nodes, err := svc.GetTree(root, 2)
+	if err != nil {
+		t.Fatalf("GetTree: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "a" {
+		t.Fatalf("顶层应只有 a: %v", nodes)
+	}
+	// maxDepth=2 时 a 的子节点 b 应被展开（depth 0->1），但 b 的子节点 c 不展开
+	if len(nodes[0].Children) == 0 {
+		t.Error("a 应有子节点 b")
+	}
+}

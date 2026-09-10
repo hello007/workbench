@@ -61,6 +61,287 @@ func TestScanGitRepos_NoRepos(t *testing.T) {
 	}
 }
 
+// TestExtractRepoName 覆盖 .git 后缀剥离与路径末段提取。
+func TestExtractRepoName(t *testing.T) {
+	svc := NewGitService()
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/user/repo.git", "repo"},
+		{"https://github.com/user/repo", "repo"},
+		{"git@github.com:user/repo.git", "repo"},
+		{"ssh://git@gitlab.com/group/sub/project.git", "project"},
+		{"repo", "repo"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := svc.ExtractRepoName(c.url); got != c.want {
+			t.Errorf("ExtractRepoName(%q): got %q, want %q", c.url, got, c.want)
+		}
+	}
+}
+
+// TestHasRemote_NonRepo 非仓库目录无远程返回 false。
+func TestHasRemote_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if svc.HasRemote(t.TempDir()) {
+		t.Error("非仓库目录应无远程")
+	}
+}
+
+// TestGetInfo_NonRepo 非仓库目录返回 IsRepo=false 且不报错。
+func TestGetInfo_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	info, err := svc.GetInfo(t.TempDir())
+	if err != nil {
+		t.Fatalf("GetInfo non-repo: %v", err)
+	}
+	if info.IsRepo {
+		t.Error("非仓库目录 IsRepo 应为 false")
+	}
+}
+
+// TestPull_NonRepo 非仓库目录 pull 返回错误。
+func TestPull_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if _, err := svc.Pull(t.TempDir()); err == nil {
+		t.Error("非仓库 pull 应返回错误")
+	}
+}
+
+// TestGetLog_NonRepo 非仓库目录返回错误。
+func TestGetLog_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if _, err := svc.GetLog(t.TempDir(), 1, 10); err == nil {
+		t.Error("非仓库 getlog 应返回错误")
+	}
+}
+
+// TestGetLog_Repo_Empty 真实仓库但无提交时返回空分页结果。
+func TestGetLog_Repo_Empty(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+
+	svc := NewGitService()
+	res, err := svc.GetLog(dir, 1, 10)
+	if err != nil {
+		t.Fatalf("GetLog repo: %v", err)
+	}
+	if res.Total != 0 {
+		t.Errorf("空仓库 Total 期望 0, got %d", res.Total)
+	}
+}
+
+// TestClone_TargetExists 目标路径已存在时返回错误（不真克隆）。
+func TestClone_TargetExists(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "exists")
+	os.MkdirAll(target, 0o755)
+
+	svc := NewGitService()
+	_, err := svc.Clone("https://example.com/x.git", target)
+	if err == nil {
+		t.Error("目标已存在应返回错误")
+	}
+}
+
+// TestGetBranches_NonRepo 非仓库目录返回错误。
+func TestGetBranches_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if _, err := svc.GetBranches(t.TempDir()); err == nil {
+		t.Error("非仓库 getbranches 应返回错误")
+	}
+}
+
+// TestCheckoutBranch_NonRepo 非仓库目录返回错误。
+func TestCheckoutBranch_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.CheckoutBranch(t.TempDir(), "main", false); err == nil {
+		t.Error("非仓库 checkout 应返回错误")
+	}
+}
+
+// TestDiscardChanges_NonRepo 非 git 目录无法定位仓库根，返回错误。
+func TestDiscardChanges_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.DiscardChanges(t.TempDir(), nil); err == nil {
+		t.Error("非仓库 discard 应返回错误")
+	}
+}
+
+// TestGetInfo_RealRepo 真实仓库（无远程）IsRepo=true 且不报错。
+func TestGetInfo_RealRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+
+	svc := NewGitService()
+	info, err := svc.GetInfo(dir)
+	if err != nil {
+		t.Fatalf("GetInfo real repo: %v", err)
+	}
+	if !info.IsRepo {
+		t.Error("真实仓库 IsRepo 应为 true")
+	}
+}
+
+// TestDiscardChanges_RealRepo_All 真实仓库回滚全部改动（已跟踪文件恢复 + 未跟踪清理）。
+func TestDiscardChanges_RealRepo_All(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("原"), 0o644)
+	runGit(t, dir, "add", "f.txt")
+	runGit(t, dir, "commit", "-m", "init")
+
+	// 修改已跟踪文件 + 新增未跟踪文件
+	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("改"), 0o644)
+	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("新"), 0o644)
+
+	svc := NewGitService()
+	if err := svc.DiscardChanges(dir, nil); err != nil {
+		t.Fatalf("DiscardChanges all: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "f.txt"))
+	if string(data) != "原" {
+		t.Errorf("已跟踪文件应恢复原内容, got %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); !os.IsNotExist(err) {
+		t.Error("未跟踪文件应被清理")
+	}
+}
+
+// TestCommit_NoFiles 未选文件返回错误。
+func TestCommit_NoFiles(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.Commit(t.TempDir(), "msg", nil); err == nil {
+		t.Error("未选文件应返回错误")
+	}
+}
+
+// TestCommit_EmptyMessage 提交信息为空返回错误。
+func TestCommit_EmptyMessage(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.Commit(t.TempDir(), "  ", []string{"f.txt"}); err == nil {
+		t.Error("空提交信息应返回错误")
+	}
+}
+
+// TestCommit_RealRepo 真实仓库选择性提交文件。
+func TestCommit_RealRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644)
+
+	svc := NewGitService()
+	if err := svc.Commit(dir, "首次提交", []string{"f.txt"}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	// 提交后工作区应无改动
+	has, _ := svc.gitCmd.HasLocalChanges(dir)
+	if has {
+		t.Error("提交后工作区应干净")
+	}
+}
+
+// TestGetLocalChanges_RealRepo 真实仓库文件状态解析。
+func TestGetLocalChanges_RealRepo(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+
+	svc := NewGitService()
+	changes, err := svc.GetLocalChanges(dir)
+	if err != nil {
+		t.Fatalf("GetLocalChanges: %v", err)
+	}
+	if len(changes) == 0 {
+		t.Error("应检测到改动文件")
+	}
+}
+
+// TestGetDiff_NonRepo 非仓库目录返回错误（不 panic）。
+func TestGetDiff_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	_, err := svc.GetDiff(t.TempDir(), "f.txt")
+	if err == nil {
+		t.Error("非仓库 GetDiff 应返回错误")
+	}
+}
+
+// TestPush_NonRepo 非仓库目录 push 返回错误。
+func TestPush_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if _, err := svc.Push(t.TempDir(), false); err == nil {
+		t.Error("非仓库 push 应返回错误")
+	}
+}
+
+// TestPush_RealRepo_NoRemote 真实仓库无远程时 push 失败。
+func TestPush_RealRepo_NoRemote(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+	svc := NewGitService()
+	if _, err := svc.Push(dir, false); err == nil {
+		t.Error("无远程仓库 push 应失败")
+	}
+}
+
+// TestHasUpstream_NonRepo 非仓库目录返回错误。
+func TestHasUpstream_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if _, err := svc.HasUpstream(t.TempDir()); err == nil {
+		t.Error("非仓库 HasUpstream 应返回错误")
+	}
+}
+
+// TestHasUpstream_RealRepo_NoUpstream 真实仓库无上游返回 false。
+func TestHasUpstream_RealRepo_NoUpstream(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "t@t.com")
+	runGit(t, dir, "config", "user.name", "t")
+	svc := NewGitService()
+	has, err := svc.HasUpstream(dir)
+	if err != nil {
+		t.Fatalf("HasUpstream: %v", err)
+	}
+	if has {
+		t.Error("无远程仓库应无上游")
+	}
+}
+
+// TestSafeEmit_NoPanic nil ctx 或无 events 的 ctx 不 panic、不调用 EventsEmit。
+func TestSafeEmit_NoPanic(t *testing.T) {
+	safeEmit(nil, "event", "data")
+	safeEmit(context.Background(), "event", "data")
+}
+
+// TestSafeEmit_NonGitDir_ScanGitReposCached 未注入缓存的 ScanGitRepos 走纯 .git 预筛路径。
+func TestScanGitRepos_CachedWithCache(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "r1")
+	os.MkdirAll(repo, 0o755)
+	runGit(t, repo, "init")
+
+	svc := NewGitServiceWithCache(filepath.Join(t.TempDir(), "scan_cache.json"))
+	repos := svc.ScanGitRepos(root)
+	if len(repos) != 1 {
+		t.Errorf("缓存路径扫描应找到 1 个仓库, got %d", len(repos))
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

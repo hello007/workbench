@@ -53,6 +53,276 @@ func TestOpenInExplorer_EmptyPath(t *testing.T) {
 	}
 }
 
+// TestReadFileBytes_Success 图片文件读取返回 base64 与 Kind=image。
+func TestReadFileBytes_Success(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "pic.png")
+	want := []byte{0x89, 0x50, 0x4E, 0x47}
+	os.WriteFile(p, want, 0o644)
+
+	svc := NewFileOperationService()
+	got, err := svc.ReadFileBytes(p, 1024)
+	if err != nil {
+		t.Fatalf("ReadFileBytes: %v", err)
+	}
+	if got.Kind != model.KindImage {
+		t.Errorf("Kind: got %q, want image", got.Kind)
+	}
+	if got.Size != int64(len(want)) {
+		t.Errorf("Size: got %d, want %d", got.Size, len(want))
+	}
+	if got.Base64 == "" {
+		t.Error("Base64 不应为空")
+	}
+	if got.TooLarge {
+		t.Error("未超限不应标记 TooLarge")
+	}
+}
+
+// TestReadFileBytes_TooLarge 超限返回 TooLarge=true 且不读内容。
+func TestReadFileBytes_TooLarge(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "big.png")
+	os.WriteFile(p, []byte("1234567890"), 0o644)
+
+	svc := NewFileOperationService()
+	got, err := svc.ReadFileBytes(p, 5)
+	if err != nil {
+		t.Fatalf("ReadFileBytes too large: %v", err)
+	}
+	if !got.TooLarge {
+		t.Error("超限应标记 TooLarge")
+	}
+	if got.Base64 != "" {
+		t.Errorf("超限不应返回 base64, got %q", got.Base64)
+	}
+}
+
+// TestReadFileBytes_NotExists 文件不存在返回 Error。
+func TestReadFileBytes_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	got, err := svc.ReadFileBytes(filepath.Join(t.TempDir(), "missing.png"), 1024)
+	if err == nil {
+		t.Error("不存在文件应返回错误")
+	}
+	if got.Error == "" {
+		t.Error("result.Error 不应为空")
+	}
+}
+
+// TestReadFileBytes_TextKind 文本类文件 Kind=text。
+func TestReadFileBytes_TextKind(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "note.md")
+	os.WriteFile(p, []byte("# 标题"), 0o644)
+
+	svc := NewFileOperationService()
+	got, err := svc.ReadFileBytes(p, 1024)
+	if err != nil {
+		t.Fatalf("ReadFileBytes text: %v", err)
+	}
+	if got.Kind != model.KindText {
+		t.Errorf("Kind: got %q, want text", got.Kind)
+	}
+}
+
+// TestMoveItem_Success 文件移动到目标目录后源消失、目标存在。
+func TestMoveItem_Success(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "f.txt")
+	os.WriteFile(src, []byte("内容"), 0o644)
+
+	svc := NewFileOperationService()
+	moved, err := svc.MoveItem(src, dstDir)
+	if err != nil {
+		t.Fatalf("MoveItem: %v", err)
+	}
+	if !filepath.IsAbs(moved) && moved == "" {
+		t.Error("应返回目标路径")
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("源文件应被移走")
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "f.txt")); err != nil {
+		t.Error("目标文件应存在")
+	}
+}
+
+// TestMoveItem_SameDir 源与目标相同目录返回错误。
+func TestMoveItem_SameDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "f.txt")
+	os.WriteFile(src, []byte("x"), 0o644)
+
+	svc := NewFileOperationService()
+	_, err := svc.MoveItem(src, dir)
+	if err == nil {
+		t.Error("源与目标相同应返回错误")
+	}
+}
+
+// TestMoveItem_SourceNotExists 源不存在返回错误。
+func TestMoveItem_SourceNotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	_, err := svc.MoveItem(filepath.Join(t.TempDir(), "missing.txt"), t.TempDir())
+	if err == nil {
+		t.Error("源不存在应返回错误")
+	}
+}
+
+// TestMoveItem_NameCollision 目标同名时自动重命名（追加 (1)）。
+func TestMoveItem_NameCollision(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	// 目标已有同名文件
+	os.WriteFile(filepath.Join(dstDir, "f.txt"), []byte("旧"), 0o644)
+	src := filepath.Join(srcDir, "f.txt")
+	os.WriteFile(src, []byte("新"), 0o644)
+
+	svc := NewFileOperationService()
+	moved, err := svc.MoveItem(src, dstDir)
+	if err != nil {
+		t.Fatalf("MoveItem collision: %v", err)
+	}
+	if filepath.Base(moved) == "f.txt" {
+		t.Error("同名应自动重命名, 不应覆盖")
+	}
+}
+
+// TestSaveFile_UTF8 默认编码写入 UTF-8 内容。
+func TestSaveFile_UTF8(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.txt")
+	os.WriteFile(p, []byte("旧"), 0o644)
+
+	svc := NewFileOperationService()
+	if err := svc.SaveFile(p, "新内容", ""); err != nil {
+		t.Fatalf("SaveFile utf-8: %v", err)
+	}
+	data, _ := os.ReadFile(p)
+	if string(data) != "新内容" {
+		t.Errorf("内容不符: %q", data)
+	}
+}
+
+// TestSaveFile_GBK encoding=gbk 时按 GBK 编码写入。
+func TestSaveFile_GBK(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.txt")
+	os.WriteFile(p, []byte("x"), 0o644)
+
+	svc := NewFileOperationService()
+	if err := svc.SaveFile(p, "中文", "gbk"); err != nil {
+		t.Fatalf("SaveFile gbk: %v", err)
+	}
+	data, _ := os.ReadFile(p)
+	// "中文" 的 GBK 编码：中=D6D0 文=CEC4
+	want := []byte{0xD6, 0xD0, 0xCE, 0xC4}
+	if !bytes.Equal(data, want) {
+		t.Errorf("GBK 编码不符: got %v, want %v", data, want)
+	}
+}
+
+// TestSaveFile_Directory 路径是目录时返回错误。
+func TestSaveFile_Directory(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	if err := svc.SaveFile(dir, "x", ""); err == nil {
+		t.Error("目录应返回错误")
+	}
+}
+
+// TestSaveFile_TooLarge 内容超 1MB 限制返回错误。
+func TestSaveFile_TooLarge(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.txt")
+	os.WriteFile(p, []byte("x"), 0o644)
+
+	svc := NewFileOperationService()
+	big := strings.Repeat("x", 1024*1024+1)
+	if err := svc.SaveFile(p, big, ""); err == nil {
+		t.Error("超 1MB 应返回错误")
+	}
+}
+
+// TestSaveFile_NotExists 文件不存在返回错误。
+func TestSaveFile_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	if err := svc.SaveFile(filepath.Join(t.TempDir(), "missing.txt"), "x", ""); err == nil {
+		t.Error("不存在文件应返回错误")
+	}
+}
+
+// TestOpenWithDefaultApp_NotExists 路径不存在返回错误（不启动外部进程）。
+func TestOpenWithDefaultApp_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	if err := svc.OpenWithDefaultApp(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
+		t.Error("不存在文件应返回错误")
+	}
+}
+
+// TestOpenWithDefaultApp_Directory 目录返回错误（不启动外部进程）。
+func TestOpenWithDefaultApp_Directory(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	if err := svc.OpenWithDefaultApp(dir); err == nil {
+		t.Error("目录应返回错误")
+	}
+}
+
+// TestPreviewFile_NotExists 预览不存在文件返回错误信息。
+func TestPreviewFile_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	got, err := svc.PreviewFile(filepath.Join(t.TempDir(), "missing.txt"), 1024)
+	if err == nil {
+		t.Error("不存在文件应返回错误")
+	}
+	if got == nil {
+		t.Error("应返回非 nil preview")
+	}
+}
+
+// TestPreviewFile_Directory 预览目录返回错误。
+func TestPreviewFile_Directory(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewFileOperationService()
+	got, err := svc.PreviewFile(dir, 1024)
+	if err == nil {
+		t.Error("目录应返回错误")
+	}
+	if got == nil || got.Error == "" {
+		t.Error("应返回含错误信息的 preview")
+	}
+}
+
+// TestOpenInObsidian_NotExistsPath 路径不存在返回错误（不启动外部进程）。
+func TestOpenInObsidian_NotExistsPath(t *testing.T) {
+	svc := NewFileOperationService()
+	err := svc.OpenInObsidian(filepath.Join(t.TempDir(), "missing"), "")
+	if err == nil {
+		t.Error("不存在路径应返回错误")
+	}
+}
+
+// TestCopyObsidianVaultPath_NotExists 路径不存在返回错误。
+func TestCopyObsidianVaultPath_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	err := svc.CopyObsidianVaultPath(filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Error("不存在路径应返回错误")
+	}
+}
+
+// TestAutoRegisterAndOpen_NotExists 路径不存在返回错误。
+func TestAutoRegisterAndOpen_NotExists(t *testing.T) {
+	svc := NewFileOperationService()
+	err := svc.AutoRegisterAndOpen(filepath.Join(t.TempDir(), "missing"), "")
+	if err == nil {
+		t.Error("不存在路径应返回错误")
+	}
+}
+
 func TestCreateDirectory_New(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewFileOperationService()

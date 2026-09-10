@@ -25,7 +25,10 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddDirectory: vi.fn(() => Promise.resolve({ id: 'dir-1', name: '测试', path: '/test', isDefault: false })),
   UpdateDirectory: vi.fn(() => Promise.resolve({ id: 'dir-1', name: '测试', path: '/test', isDefault: false })),
   DeleteDirectory: vi.fn(() => Promise.resolve(true)),
-  SetDefaultDirectory: vi.fn(() => Promise.resolve(true))
+  SetDefaultDirectory: vi.fn(() => Promise.resolve(true)),
+  OpenInExplorer: vi.fn(() => Promise.resolve(true)),
+  OpenInVSCode: vi.fn(() => Promise.resolve(true)),
+  OpenInWarp: vi.fn(() => Promise.resolve(true))
 }))
 
 vi.mock('../../../utils/debug', () => ({
@@ -425,6 +428,191 @@ describe('DirectoryTree.vue', () => {
       await flushPromises()
       expect(writeTextSpy).toHaveBeenCalledWith('C:/Users/me')
       expect(ElMessage.success).toHaveBeenCalledWith('路径已复制到剪贴板')
+    })
+  })
+})
+
+// ===== 补充：菜单分发与 handler 分支 =====
+describe('DirectoryTree.vue - 菜单分发与 handler 补充', () => {
+  let wrapper
+  const targetDir = { id: 'dir-1', name: '项目A', path: 'D:\\proj\\A', isDefault: true }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    wrapper = createWrapper()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  const setMenuAndCommand = (command, dir = targetDir) => {
+    wrapper.vm.$.setupState.contextMenu.targetDir = dir
+    wrapper.vm.$.setupState.contextMenu.visible = true
+    wrapper.vm.onMenuCommand(command)
+  }
+
+  describe('onMenuCommand 分发', () => {
+    it('rename 打开重命名对话框', () => {
+      setMenuAndCommand('rename')
+      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.renameName).toBe('项目A')
+    })
+
+    it('setDefault 调 SetDefaultDirectory', async () => {
+      const { SetDefaultDirectory } = await import('../../../wailsjs/go/main/App')
+      setMenuAndCommand('setDefault')
+      await flushPromises()
+      expect(SetDefaultDirectory).toHaveBeenCalledWith('dir-1')
+    })
+
+    it('copyPath 调 navigator.clipboard', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      setMenuAndCommand('copyPath')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('D:/proj/A')
+      vi.unstubAllGlobals()
+    })
+
+    it('openExplorer / openVSCode / openWarp 调后端绑定', async () => {
+      const { OpenInExplorer, OpenInVSCode, OpenInWarp } = await import('../../../wailsjs/go/main/App')
+      setMenuAndCommand('openExplorer')
+      await flushPromises()
+      expect(OpenInExplorer).toHaveBeenCalledWith('D:\\proj\\A')
+      setMenuAndCommand('openVSCode')
+      await flushPromises()
+      expect(OpenInVSCode).toHaveBeenCalledWith('D:\\proj\\A')
+      setMenuAndCommand('openWarp')
+      await flushPromises()
+      expect(OpenInWarp).toHaveBeenCalledWith('D:\\proj\\A')
+    })
+
+    it('openRepoFilter emit openRepoFilter 带 dirId', () => {
+      setMenuAndCommand('openRepoFilter')
+      expect(wrapper.emitted('openRepoFilter')).toBeTruthy()
+      expect(wrapper.emitted('openRepoFilter')[0]).toEqual(['dir-1'])
+    })
+
+    it('pullRepos emit batchPull', () => {
+      setMenuAndCommand('pullRepos')
+      expect(wrapper.emitted('batchPull')).toBeTruthy()
+    })
+
+    it('delete 调 handleDelete', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce(true)
+      setMenuAndCommand('delete')
+      await flushPromises()
+      const { DeleteDirectory } = await import('../../../wailsjs/go/main/App')
+      expect(DeleteDirectory).toHaveBeenCalled()
+    })
+
+    it('无 targetDir 时直接返回', () => {
+      wrapper.vm.$.setupState.contextMenu.targetDir = null
+      wrapper.vm.onMenuCommand('rename')
+      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(false)
+    })
+  })
+
+  describe('handleRename', () => {
+    it('空名时 warning', () => {
+      wrapper.vm.$.setupState.renameTargetDir = targetDir
+      wrapper.vm.$.setupState.renameName = ''
+      wrapper.vm.handleRename()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入新名称')
+    })
+
+    it('成功时 emit change', async () => {
+      const { UpdateDirectory } = await import('../../../wailsjs/go/main/App')
+      wrapper.vm.$.setupState.renameTargetDir = targetDir
+      wrapper.vm.$.setupState.renameName = '新名'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(UpdateDirectory).toHaveBeenCalledWith('dir-1', '新名', 'D:\\proj\\A', true)
+      expect(ElMessage.success).toHaveBeenCalledWith('重命名成功')
+      expect(wrapper.emitted('change')).toBeTruthy()
+    })
+
+    it('返回 null 时 error', async () => {
+      const { UpdateDirectory } = await import('../../../wailsjs/go/main/App')
+      UpdateDirectory.mockResolvedValueOnce(null)
+      wrapper.vm.$.setupState.renameTargetDir = targetDir
+      wrapper.vm.$.setupState.renameName = '新名'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('重命名失败')
+    })
+
+    it('抛异常时 error', async () => {
+      const { UpdateDirectory } = await import('../../../wailsjs/go/main/App')
+      UpdateDirectory.mockRejectedValueOnce(new Error('dup'))
+      wrapper.vm.$.setupState.renameTargetDir = targetDir
+      wrapper.vm.$.setupState.renameName = '新名'
+      await wrapper.vm.handleRename()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('dup'))
+    })
+  })
+
+  describe('外部工具 handler', () => {
+    it('handleOpenExplorer 失败时 error', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      OpenInExplorer.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenExplorer('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('打开资源管理器失败')
+    })
+
+    it('handleOpenExplorer 抛异常时 error', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      OpenInExplorer.mockRejectedValueOnce(new Error('x'))
+      await wrapper.vm.$.setupState.handleOpenExplorer('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('x'))
+    })
+
+    it('handleOpenVSCode 失败时 error', async () => {
+      const { OpenInVSCode } = await import('../../../wailsjs/go/main/App')
+      OpenInVSCode.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenVSCode('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('VSCode'))
+    })
+
+    it('handleOpenWarp 失败时 error', async () => {
+      const { OpenInWarp } = await import('../../../wailsjs/go/main/App')
+      OpenInWarp.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenWarp('D:\\dir')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('Warp'))
+    })
+  })
+
+  describe('其他 handler', () => {
+    it('handleSelect emit select', () => {
+      wrapper.vm.handleSelect('dir-2')
+      expect(wrapper.emitted('select')).toBeTruthy()
+      expect(wrapper.emitted('select')[0]).toEqual(['dir-2'])
+    })
+
+    it('shortenPath 截断长路径', () => {
+      const { shortenPath } = wrapper.vm.$.setupState
+      expect(shortenPath('D:\\very\\long\\path\\to\\dir')).toBeTruthy()
+    })
+
+    it('triggerRenameCurrent 对选中目录打开重命名', () => {
+      wrapper.vm.$.setupState.contextMenu.targetDir = targetDir
+      wrapper.vm.triggerRenameCurrent()
+      // selectedDirectoryId = dir-1，targetDir.id = dir-1 → 打开重命名
+      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(true)
+    })
+
+    it('closeMenu 关闭菜单', () => {
+      wrapper.vm.$.setupState.contextMenu.visible = true
+      wrapper.vm.$.setupState.contextMenu.targetDir = targetDir
+      wrapper.vm.$.setupState.closeMenu()
+      expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
     })
   })
 })

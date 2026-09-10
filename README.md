@@ -116,6 +116,18 @@ go test ./...
 cd frontend && npm test
 ```
 
+### 测试覆盖率门禁
+
+```bash
+# 后端覆盖率门禁（分层阈值：model/server ≥80%，service ≥76%，util ≥40% 排除 pty_windows.go）
+bash scripts/coverage-check.sh
+
+# 前端覆盖率（vitest v8 provider + thresholds，低于阈值 exit 非 0）
+cd frontend && npm run test:coverage
+```
+
+详见 [测试策略](docs/测试策略.md)。
+
 ## 项目结构
 
 ```text

@@ -27,7 +27,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SaveFile: vi.fn(() => Promise.resolve(undefined)),
   PullRepo: vi.fn(() => Promise.resolve('')),
   CloneRepo: vi.fn(() => Promise.resolve('克隆成功')),
-  OpenWithDefaultApp: vi.fn(() => Promise.resolve(true))
+  OpenWithDefaultApp: vi.fn(() => Promise.resolve(true)),
+  OpenInExplorer: vi.fn(() => Promise.resolve(true)),
+  OpenInVSCode: vi.fn(() => Promise.resolve(true)),
+  OpenInWarp: vi.fn(() => Promise.resolve(true)),
+  GetBranches: vi.fn(() => Promise.resolve({ branches: [{ name: 'main', isCurrent: true, isRemote: false }] })),
+  CheckoutBranch: vi.fn(() => Promise.resolve(true))
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -727,5 +732,321 @@ describe('ContentPanel.vue - HTML 渲染预览', () => {
     expect(findBtn('源码').exists()).toBe(false)
     expect(findBtn('刷新').exists()).toBe(false)
     expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+  })
+})
+
+// ===== 补充：外部工具 / 分支 / 拉取 / 克隆 / 编辑 handler 分支 =====
+describe('ContentPanel.vue - handler 分支补充', () => {
+  let wrapper
+  const fileNode = { id: 'n1', name: 'a.go', path: 'D:\\proj\\a.go', type: 'file' }
+  const dirNode = { id: 'n2', name: 'proj', path: 'D:\\proj', type: 'directory' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  const mountWith = (node = null) => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = node
+    wrapper = mount(ContentPanel, { global: { stubs: contentPanelStubs } })
+    return wrapper
+  }
+
+  describe('外部工具 handler', () => {
+    it('handleOpenInExplorer 调后端', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      await wrapper.vm.$.setupState.handleOpenInExplorer()
+      await flushPromises()
+      expect(OpenInExplorer).toHaveBeenCalledWith('D:\\proj\\a.go')
+    })
+
+    it('handleOpenInExplorer 失败时 error', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      OpenInExplorer.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenInExplorer()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('打开资源管理器失败')
+    })
+
+    it('handleOpenInExplorer 无选中节点时直接返回', async () => {
+      const { OpenInExplorer } = await import('../../../wailsjs/go/main/App')
+      mountWith(null)
+      await wrapper.vm.$.setupState.handleOpenInExplorer()
+      expect(OpenInExplorer).not.toHaveBeenCalled()
+    })
+
+    it('handleOpenInVSCode 失败时 error', async () => {
+      const { OpenInVSCode } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      OpenInVSCode.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenInVSCode()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('VSCode'))
+    })
+
+    it('handleOpenInWarp 失败时 error', async () => {
+      const { OpenInWarp } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      OpenInWarp.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenInWarp()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('Warp'))
+    })
+
+    it('handleOpenWithDefaultApp 非 file 类型时不触发', async () => {
+      const { OpenWithDefaultApp } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.handleOpenWithDefaultApp()
+      expect(OpenWithDefaultApp).not.toHaveBeenCalled()
+    })
+
+    it('handleOpenWithDefaultApp 失败时 error', async () => {
+      const { OpenWithDefaultApp } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      OpenWithDefaultApp.mockResolvedValueOnce(false)
+      await wrapper.vm.$.setupState.handleOpenWithDefaultApp()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('打开文件失败')
+    })
+  })
+
+  describe('复制路径/文件名', () => {
+    it('handleCopyPath 成功', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      await wrapper.vm.$.setupState.handleCopyPath()
+      expect(writeText).toHaveBeenCalledWith('D:/proj/a.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('路径已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyPath 失败时 error', async () => {
+      const writeText = vi.fn(() => Promise.reject(new Error('x')))
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      await wrapper.vm.$.setupState.handleCopyPath()
+      expect(ElMessage.error).toHaveBeenCalledWith('复制失败')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyName 目录时提示文件夹名', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.handleCopyName()
+      expect(ElMessage.success).toHaveBeenCalledWith('文件夹名已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+  })
+
+  describe('刷新/更新 emit', () => {
+    it('handleRefresh emit refreshNode', () => {
+      mountWith(fileNode)
+      wrapper.vm.$.setupState.handleRefresh()
+      expect(wrapper.emitted('refreshNode')).toBeTruthy()
+    })
+
+    it('handleUpdateRepos emit batchPull', () => {
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.handleUpdateRepos()
+      expect(wrapper.emitted('batchPull')).toBeTruthy()
+    })
+  })
+
+  describe('分支对话框', () => {
+    it('showBranchDialog 加载分支列表', async () => {
+      const { GetBranches } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      expect(GetBranches).toHaveBeenCalledWith('D:\\proj')
+      expect(wrapper.vm.$.setupState.branchDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.currentBranchName).toBe('main')
+    })
+
+    it('showBranchDialog 失败时 error', async () => {
+      const { GetBranches } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      GetBranches.mockRejectedValueOnce(new Error('boom'))
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+    })
+
+    it('doCheckout 成功切换', async () => {
+      const { CheckoutBranch } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      wrapper.vm.$.setupState.selectedBranch = 'main'
+      await wrapper.vm.$.setupState.doCheckout()
+      await flushPromises()
+      expect(CheckoutBranch).toHaveBeenCalledWith('D:\\proj', 'main', false)
+      expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('main'))
+    })
+
+    it('doCheckout 无选中分支时直接返回', async () => {
+      const { CheckoutBranch } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.doCheckout()
+      expect(CheckoutBranch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('拉取', () => {
+    it('pullRepo 成功短结果 success', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      PullRepo.mockResolvedValueOnce('已是最新的')
+      await wrapper.vm.$.setupState.pullRepo()
+      await flushPromises()
+      expect(ElMessage.success).toHaveBeenCalledWith('已是最新的')
+    })
+
+    it('pullRepo 超长结果弹详情', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      PullRepo.mockResolvedValueOnce('x'.repeat(300))
+      await wrapper.vm.$.setupState.pullRepo()
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.singlePullVisible).toBe(true)
+    })
+
+    it('pullRepo 失败时 error', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      PullRepo.mockRejectedValueOnce(new Error('net'))
+      await wrapper.vm.$.setupState.pullRepo()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('net'))
+    })
+
+    it('pullRepo 无选中节点时直接返回', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(null)
+      await wrapper.vm.$.setupState.pullRepo()
+      expect(PullRepo).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('克隆', () => {
+    it('cloneRepo 空地址时 warning', async () => {
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.cloneRepo()
+      expect(ElMessage.warning).toHaveBeenCalledWith('请输入 Git 仓库地址')
+    })
+
+    it('cloneRepo 成功时 success + emit refreshNode', async () => {
+      const { CloneRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.cloneUrl = 'https://example.com/repo.git'
+      await wrapper.vm.$.setupState.cloneRepo()
+      await flushPromises()
+      expect(CloneRepo).toHaveBeenCalled()
+      expect(ElMessage.success).toHaveBeenCalled()
+      expect(wrapper.emitted('refreshNode')).toBeTruthy()
+    })
+
+    it('cloneRepo 结果不含成功时 error', async () => {
+      const { CloneRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.cloneUrl = 'https://x'
+      CloneRepo.mockResolvedValueOnce('认证失败')
+      await wrapper.vm.$.setupState.cloneRepo()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('认证失败')
+    })
+
+    it('cloneRepo 抛异常时 error', async () => {
+      const { CloneRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.cloneUrl = 'https://x'
+      CloneRepo.mockRejectedValueOnce(new Error('boom'))
+      await wrapper.vm.$.setupState.cloneRepo()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+    })
+  })
+
+  describe('批量拉取/状态栏', () => {
+    it('startBatchPull 初始化进度状态', () => {
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.startBatchPull({ total: 5 })
+      expect(wrapper.vm.$.setupState.pullDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.pullProgress.total).toBe(5)
+      expect(wrapper.vm.$.setupState.pullCompleted).toBe(false)
+    })
+
+    it('onStatusBarClick 完成后打开对话框', () => {
+      mountWith(dirNode)
+      wrapper.vm.$.setupState.pullCompleted = true
+      wrapper.vm.$.setupState.pullRunningInBackground = true
+      wrapper.vm.$.setupState.onStatusBarClick()
+      expect(wrapper.vm.$.setupState.pullDialogVisible).toBe(true)
+      expect(wrapper.vm.$.setupState.pullRunningInBackground).toBe(false)
+    })
+  })
+
+  describe('编辑/纯函数', () => {
+    it('normalizePath 规范化反斜杠 + 小写', () => {
+      mountWith(null)
+      expect(wrapper.vm.$.setupState.normalizePath('D:\\Proj\\A')).toBe('d:/proj/a')
+    })
+
+    it('isWailsRuntime 判断 window.runtime', () => {
+      mountWith(null)
+      expect(wrapper.vm.$.setupState.isWailsRuntime()).toBe(false)
+    })
+
+    it('enterEdit HTML 渲染态切源码', () => {
+      // isHtmlPreview 依赖 filePreview.kind/name，直接置 filePreview
+      mountWith(fileNode)
+      wrapper.vm.$.setupState.filePreview = { kind: 'text', name: 'a.html', content: '', encoding: 'utf-8', path: 'D:\\a.html' }
+      expect(wrapper.vm.$.setupState.isHtmlPreview).toBe(true)
+      expect(wrapper.vm.$.setupState.htmlViewMode).toBe('render')
+      wrapper.vm.$.setupState.enterEdit()
+      expect(wrapper.vm.$.setupState.htmlViewMode).toBe('source')
+      expect(wrapper.vm.$.setupState.isEditing).toBe(true)
+    })
+
+    it('handleCancelEdit 恢复原内容并退出编辑', () => {
+      mountWith(fileNode)
+      wrapper.vm.$.setupState.originalContent = 'orig'
+      wrapper.vm.$.setupState.filePreview = { content: 'modified' }
+      wrapper.vm.$.setupState.isEditing = true
+      wrapper.vm.$.setupState.handleCancelEdit()
+      expect(wrapper.vm.$.setupState.filePreview.content).toBe('orig')
+      expect(wrapper.vm.$.setupState.isEditing).toBe(false)
+    })
+
+    it('onEditKeydown Ctrl+S 触发保存（有修改时）', async () => {
+      const { SaveFile } = await import('../../../wailsjs/go/main/App')
+      mountWith(fileNode)
+      wrapper.vm.$.setupState.originalContent = 'orig'
+      wrapper.vm.$.setupState.filePreview = { content: 'changed', encoding: 'utf-8' }
+      const e = { ctrlKey: true, metaKey: false, key: 's', preventDefault: vi.fn() }
+      await wrapper.vm.$.setupState.onEditKeydown(e)
+      await flushPromises()
+      expect(SaveFile).toHaveBeenCalled()
+    })
+
+    it('onEditKeydown Esc 取消编辑（无修改直接退出）', async () => {
+      mountWith(fileNode)
+      wrapper.vm.$.setupState.originalContent = 'same'
+      wrapper.vm.$.setupState.filePreview = { content: 'same' }
+      wrapper.vm.$.setupState.isEditing = true
+      const e = { ctrlKey: false, metaKey: false, key: 'Escape', preventDefault: vi.fn() }
+      await wrapper.vm.$.setupState.onEditKeydown(e)
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.isEditing).toBe(false)
+    })
   })
 })

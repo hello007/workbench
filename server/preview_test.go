@@ -164,3 +164,71 @@ func TestPreviewRaw_ChinesePath(t *testing.T) {
 		t.Errorf("chinese path: expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestEscapeJSON_AllBranches 覆盖 escapeJSON 的所有转义分支与默认分支。
+func TestEscapeJSON_AllBranches(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{`a"b`, `a\"b`},
+		{`a\b`, `a\\b`},
+		{"a\nb", `a\nb`},
+		{"a\rb", `a\rb`},
+		{"a\tb", `a\tb`},
+		{"普通中文", "普通中文"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := escapeJSON(c.in); got != c.want {
+			t.Errorf("escapeJSON(%q): got %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestPreviewHandler_MissingPath /preview-pdf 缺 path 参数返回 400。
+func TestPreviewHandler_MissingPath(t *testing.T) {
+	handler := PreviewHandler()
+	req := httptest.NewRequest(http.MethodGet, "/preview-pdf", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing path: expected 400, got %d", rec.Code)
+	}
+}
+
+// TestPreviewHandler_DirectoryRejected /preview-pdf 指向目录返回 400。
+func TestPreviewHandler_DirectoryRejected(t *testing.T) {
+	// 构造一个目录路径但其扩展名恰好为 .pdf（命名特殊的目录）
+	pdfDir := filepath.ToSlash(filepath.Join(t.TempDir(), "fake.pdf"))
+	os.MkdirAll(pdfDir, 0o755)
+	handler := PreviewHandler()
+	req := httptest.NewRequest(http.MethodGet, "/preview-pdf?path="+pdfDir, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("directory via preview-pdf: expected 400, got %d", rec.Code)
+	}
+}
+
+// TestPreviewHandler_NotFound /preview-pdf 文件不存在返回 404。
+func TestPreviewHandler_NotFound(t *testing.T) {
+	missing := filepath.ToSlash(filepath.Join(t.TempDir(), "missing.pdf"))
+	handler := PreviewHandler()
+	req := httptest.NewRequest(http.MethodGet, "/preview-pdf?path="+missing, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing pdf: expected 404, got %d", rec.Code)
+	}
+}
+
+// TestPreviewHandler_MethodRejected /preview-pdf 非 GET/HEAD 返回 405。
+func TestPreviewHandler_MethodRejected(t *testing.T) {
+	handler := PreviewHandler()
+	req := httptest.NewRequest(http.MethodPost, "/preview-pdf?path=x.pdf", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST preview-pdf: expected 405, got %d", rec.Code)
+	}
+}

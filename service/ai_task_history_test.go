@@ -504,3 +504,27 @@ func TestCsvEscape(t *testing.T) {
 		t.Errorf("含引号应翻倍: %s", got)
 	}
 }
+
+// TestFormatHistoryTime 零/负值返回空串，正值返回格式化时间。
+func TestFormatHistoryTime(t *testing.T) {
+	if got := formatHistoryTime(0); got != "" {
+		t.Errorf("0 应返回空串, got %s", got)
+	}
+	if got := formatHistoryTime(-100); got != "" {
+		t.Errorf("负值应返回空串, got %s", got)
+	}
+	got := formatHistoryTime(1700000000000)
+	if got == "" || len(got) < 10 {
+		t.Errorf("有效时间应返回格式化串, got %s", got)
+	}
+}
+
+// TestMdEscape 竖线转义为全角，无竖线不变。
+func TestMdEscape(t *testing.T) {
+	if got := mdEscape("a|b|c"); got != "a｜b｜c" {
+		t.Errorf("竖线应转义为全角, got %s", got)
+	}
+	if got := mdEscape("普通文本"); got != "普通文本" {
+		t.Errorf("无竖线不应改变, got %s", got)
+	}
+}

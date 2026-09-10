@@ -46,3 +46,26 @@ func TestGitRemoteInfo_Structure(t *testing.T) {
 		t.Error("Expected not detached")
 	}
 }
+
+// TestFileChange_StatusLabel 覆盖各变更状态到中文标签的映射及默认分支。
+func TestFileChange_StatusLabel(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"M", "已修改"},
+		{"A", "已添加"},
+		{"D", "已删除"},
+		{"R", "已重命名"},
+		{"?", "未跟踪"},
+		{"X", "X"}, // 未知状态回退原值
+		{"", ""},
+	}
+	for _, c := range cases {
+		fc := &FileChange{Status: c.status}
+		got := fc.StatusLabel()
+		if got != c.want {
+			t.Errorf("status %q: got %q, want %q", c.status, got, c.want)
+		}
+	}
+}

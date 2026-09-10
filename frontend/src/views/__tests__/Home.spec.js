@@ -29,6 +29,9 @@ vi.mock('element-plus', async () => {
       success: vi.fn(),
       warning: vi.fn(),
       info: vi.fn()
+    },
+    ElMessageBox: {
+      confirm: vi.fn(() => Promise.resolve(true))
     }
   }
 })
@@ -59,7 +62,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RemoveFavorite: vi.fn(() => Promise.resolve(true)),
   UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
   UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true)),
-  RefreshDirectoriesGitFlag: vi.fn(() => Promise.resolve([]))
+  RefreshDirectoriesGitFlag: vi.fn(() => Promise.resolve([])),
+  AddDirectory: vi.fn(() => Promise.resolve({ id: '1' })),
+  GetSettings: vi.fn(() => Promise.resolve({}))
 }))
 
 describe('Home.vue - Bug修复验证', () => {
@@ -68,6 +73,8 @@ describe('Home.vue - Bug修复验证', () => {
   beforeEach(() => {
     // Home.vue 渲染真实 CommandPalette（未 stub），其 setup 调用 useFavoritesStore() 需活跃 pinia
     setActivePinia(createPinia())
+    // 清空 localStorage 避免 useRecentAccess 跨文件残留脏记录（undefined path 触发 getFileName 报错）
+    localStorage.clear()
     wrapper = mount(Home, {
       global: {
         stubs: {
@@ -822,5 +829,379 @@ describe('Home.vue - Bug修复验证', () => {
       // 规范化（\ -> / + toLowerCase）后应命中 dir-1 并定位（规避 locateNode 内 startsWith 大小写敏感的静默失败）
       expect(locateNodeMock).toHaveBeenCalledWith('d:/work/repo-a')
     })
+  })
+})
+
+// ===== 补充：未覆盖 handler 分支 =====
+describe('Home.vue - handler 分支补充', () => {
+  let wrapper
+  // 子组件方法 spy 收集器
+  let fileTreeSpies, dirTreeSpies, contentSpies
+
+  const mountHome = () => {
+    fileTreeSpies = {
+      saveCurrentState: vi.fn(), restoreTreeState: vi.fn(), locateNode: vi.fn().mockResolvedValue(),
+      refreshNode: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn(),
+      showRenameAt: vi.fn(), showCreateAt: vi.fn(), showCopyToDialog: vi.fn(),
+      closeCopyToDialog: vi.fn(), setCopyToLoading: vi.fn(), closeMenu: vi.fn()
+    }
+    dirTreeSpies = { closeMenu: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn() }
+    contentSpies = { clearPreview: vi.fn(), startBatchPull: vi.fn(), previewFile: vi.fn() }
+    return mount(Home, {
+      global: {
+        stubs: {
+          Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
+          Pane: { template: '<div class="pane"><slot /></div>' },
+          DirectoryTree: { template: '<div />', methods: dirTreeSpies },
+          FileTreePanel: { template: '<div />', methods: fileTreeSpies },
+          ContentPanel: { template: '<div />', methods: contentSpies },
+          RepoFilterDialog: { template: '<div />' },
+          'el-tree': true, 'el-dialog': true, 'el-form': true, 'el-form-item': true,
+          'el-input': true, 'el-switch': true, 'el-button': true, 'el-button-group': true,
+          'el-divider': true, 'el-select': true, 'el-option': true, 'el-empty': true,
+          'el-descriptions': true, 'el-descriptions-item': true, 'el-icon': true
+        }
+      }
+    })
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    localStorage.clear()
+    wrapper = mountHome()
+    await flushPromises()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  // matchShortcut 严格比对 ctrlKey/altKey/shiftKey，事件须显式给 false
+  const keyEvent = (over = {}) => ({
+    ctrlKey: false, altKey: false, shiftKey: false, metaKey: false,
+    target: document.body, preventDefault: () => {}, ...over
+  })
+
+  // ---- resolveTargetDir / closeToolbox / onRefreshNode ----
+  it('resolveTargetDir：directory 直接返回 path，file 取父目录', () => {
+    expect(wrapper.vm.resolveTargetDir({ type: 'directory', path: 'D:\\dir' })).toBe('D:\\dir')
+    expect(wrapper.vm.resolveTargetDir({ type: 'file', path: 'D:\\dir\\a.go' })).toBe('D:\\dir')
+    expect(wrapper.vm.resolveTargetDir({ type: 'file', path: 'a.go' })).toBe('')
+  })
+
+  it('closeToolbox：toolbox 激活时切回 directory', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'toolbox'
+    wrapper.vm.closeToolbox()
+    expect(ui.activePanel).toBe('directory')
+    // 非 toolbox 时不变
+    ui.activePanel = 'directory'
+    wrapper.vm.closeToolbox()
+    expect(ui.activePanel).toBe('directory')
+  })
+
+  it('onRefreshNode 透传给 fileTreePanel.refreshNode', () => {
+    wrapper.vm.onRefreshNode('/some/path')
+    expect(fileTreeSpies.refreshNode).toHaveBeenCalledWith('/some/path')
+  })
+
+  // ---- handleCopy / handleCut ----
+  it('handleCopy 写入剪贴板态 + 系统剪贴板', async () => {
+    const { CopyToSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    const ws = useWorkspaceStore()
+    await wrapper.vm.handleCopy({ path: 'D:\\a.go', name: 'a.go', type: 'file' })
+    expect(ws.clipboard.mode).toBe('copy')
+    expect(ws.clipboard.sourcePath).toBe('D:\\a.go')
+    expect(CopyToSystemClipboard).toHaveBeenCalledWith('D:\\a.go')
+  })
+
+  it('handleCut 写入剪贴板态为 cut', async () => {
+    const { CutToSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    const ws = useWorkspaceStore()
+    await wrapper.vm.handleCut({ path: 'D:\\b.go', name: 'b.go', type: 'file' })
+    expect(ws.clipboard.mode).toBe('cut')
+    expect(CutToSystemClipboard).toHaveBeenCalledWith('D:\\b.go')
+  })
+
+  // ---- handlePaste 分支 ----
+  it('handlePaste：目标目录为空时直接返回', async () => {
+    const { ReadFromSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    await wrapper.vm.handlePaste({ type: 'file', path: 'a.go' })
+    expect(ReadFromSystemClipboard).not.toHaveBeenCalled()
+  })
+
+  it('handlePaste：剪贴板为空时 info 提示', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { ReadFromSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockResolvedValueOnce(null)
+    await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
+    expect(ElMessage.info).toHaveBeenCalledWith('剪贴板中没有可粘贴的内容')
+  })
+
+  it('handlePaste：复制模式成功时 success + refreshNode', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { ReadFromSystemClipboard, CopyItem } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockResolvedValueOnce(JSON.stringify({ paths: ['D:\\a.go'], isCut: false }))
+    CopyItem.mockResolvedValueOnce('ok')
+    await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
+    await flushPromises()
+    expect(CopyItem).toHaveBeenCalledWith('D:\\a.go', 'D:\\dst')
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('1'))
+    expect(fileTreeSpies.refreshNode).toHaveBeenCalledWith('D:\\dst')
+  })
+
+  it('handlePaste：剪切模式成功时调 MoveItem + clearClipboard', async () => {
+    const { ReadFromSystemClipboard, MoveItem } = await import('../../../wailsjs/go/main/App')
+    const ws = useWorkspaceStore()
+    ws.clipboard.mode = 'cut'
+    ReadFromSystemClipboard.mockResolvedValueOnce(JSON.stringify({ paths: ['D:\\a.go'], isCut: true }))
+    MoveItem.mockResolvedValueOnce('ok')
+    await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
+    await flushPromises()
+    expect(MoveItem).toHaveBeenCalledWith('D:\\a.go', 'D:\\dst')
+    // clearClipboard 重置剪贴板态
+    expect(ws.clipboard.mode).toBeFalsy()
+  })
+
+  it('handlePaste：全部失败时 error 提示', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { ReadFromSystemClipboard, CopyItem } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockResolvedValueOnce(JSON.stringify({ paths: ['D:\\a.go'], isCut: false }))
+    CopyItem.mockResolvedValueOnce('错误：源不存在')
+    await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('粘贴失败')
+  })
+
+  it('handlePaste：抛异常时 error 提示', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { ReadFromSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockRejectedValueOnce(new Error('boom'))
+    await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+  })
+
+  // ---- onBatchPull / onAddWorkDir ----
+  it('onBatchPull 成功时调 startBatchPull', async () => {
+    const { ScanAndPullRepos } = await import('../../../wailsjs/go/main/App')
+    ScanAndPullRepos.mockResolvedValueOnce({ total: 3 })
+    await wrapper.vm.onBatchPull({ path: 'D:\\root' })
+    await flushPromises()
+    expect(ScanAndPullRepos).toHaveBeenCalledWith('D:\\root')
+    expect(contentSpies.startBatchPull).toHaveBeenCalledWith({ total: 3 })
+  })
+
+  it('onBatchPull 失败时 warning 提示', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { ScanAndPullRepos } = await import('../../../wailsjs/go/main/App')
+    ScanAndPullRepos.mockRejectedValueOnce('some error msg')
+    await wrapper.vm.onBatchPull({ path: 'D:\\root' })
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('some error msg')
+  })
+
+  it('onAddWorkDir 成功时 reload + success', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { AddDirectory } = await import('../../../wailsjs/go/main/App')
+    AddDirectory.mockResolvedValueOnce({ id: '1' })
+    await wrapper.vm.onAddWorkDir({ name: '新目录', path: 'D:\\new' })
+    await flushPromises()
+    expect(AddDirectory).toHaveBeenCalledWith('新目录', 'D:\\new', false)
+    expect(ElMessage.success).toHaveBeenCalledWith('已添加为工作目录')
+  })
+
+  it('onAddWorkDir 返回 null 时 error', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { AddDirectory } = await import('../../../wailsjs/go/main/App')
+    AddDirectory.mockResolvedValueOnce(null)
+    await wrapper.vm.onAddWorkDir({ name: 'x', path: 'D:\\x' })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('添加工作目录失败')
+  })
+
+  it('onAddWorkDir 抛异常时 error', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { AddDirectory } = await import('../../../wailsjs/go/main/App')
+    AddDirectory.mockRejectedValueOnce(new Error('dup'))
+    await wrapper.vm.onAddWorkDir({ name: 'x', path: 'D:\\x' })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('dup'))
+  })
+
+  // ---- onDeleteFromFileTree / onDeleteFromContent ----
+  it('onDeleteFromFileTree：选中节点在删除子树内时清空预览', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { path: 'D:\\dir\\sub\\a.go' }
+    wrapper.vm.onDeleteFromFileTree({ path: 'D:\\dir\\sub' })
+    expect(ws.selectedNode).toBeNull()
+    expect(contentSpies.clearPreview).toHaveBeenCalled()
+  })
+
+  it('onDeleteFromFileTree：选中节点不在删除子树内时保留', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { path: 'D:\\other\\b.go' }
+    wrapper.vm.onDeleteFromFileTree({ path: 'D:\\dir\\sub' })
+    expect(ws.selectedNode).toBeTruthy()
+  })
+
+  it('onDeleteFromFileTree：无选中节点时直接返回', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = null
+    wrapper.vm.onDeleteFromFileTree({ path: 'D:\\dir' })
+    expect(contentSpies.clearPreview).not.toHaveBeenCalled()
+  })
+
+  it('onDeleteFromContent：用户取消时不删除', async () => {
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+    await wrapper.vm.onDeleteFromContent({ name: 'a.go', path: 'D:\\a.go' })
+    await flushPromises()
+    const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+    expect(DeleteFile).not.toHaveBeenCalled()
+    expect(ElMessage.success).not.toHaveBeenCalled()
+  })
+
+  it('onDeleteFromContent：确认后删除成功 + 刷新父节点', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+    ElMessageBox.confirm.mockResolvedValueOnce(true)
+    DeleteFile.mockResolvedValueOnce(true)
+    await wrapper.vm.onDeleteFromContent({ name: 'a.go', path: 'D:\\dir\\a.go' })
+    await flushPromises()
+    expect(DeleteFile).toHaveBeenCalledWith('D:\\dir\\a.go')
+    expect(fileTreeSpies.refreshNode).toHaveBeenCalledWith('D:\\dir')
+  })
+
+  it('onDeleteFromContent：DeleteFile 返回 false 时 error', async () => {
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    const { DeleteFile } = await import('../../../wailsjs/go/main/App')
+    ElMessageBox.confirm.mockResolvedValueOnce(true)
+    DeleteFile.mockResolvedValueOnce(false)
+    await wrapper.vm.onDeleteFromContent({ name: 'a.go', path: 'a.go' })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('删除失败')
+  })
+
+  // ---- onPaletteSelectFile / onPaletteSelectFavorite ----
+  it('onPaletteSelectFile：路径在当前目录内直接 locateNode', async () => {
+    const dirStore = useDirectoryStore()
+    dirStore.directories = [{ id: 'd1', name: 'w', path: 'D:\\work', isGitRepo: false }]
+    dirStore.selectedDirectoryId = 'd1'
+    await wrapper.vm.onPaletteSelectFile({ path: 'D:\\work\\a.go', type: 'file' })
+    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('D:\\work\\a.go')
+  })
+
+  it('onPaletteSelectFile：路径在其他目录时切目录后 locateNode', async () => {
+    const dirStore = useDirectoryStore()
+    dirStore.directories = [
+      { id: 'd1', name: 'w1', path: 'D:\\work1', isGitRepo: false },
+      { id: 'd2', name: 'w2', path: 'D:\\work2', isGitRepo: false }
+    ]
+    dirStore.selectedDirectoryId = 'd1'
+    await wrapper.vm.onPaletteSelectFile({ path: 'D:\\work2\\b.go', type: 'file' })
+    await flushPromises()
+    expect(dirStore.selectedDirectoryId).toBe('d2')
+    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('D:\\work2\\b.go')
+  })
+
+  // ---- onUpdateAvailable / onOpenContentSearch ----
+  it('onUpdateAvailable 写入 updateInfo + 打开弹窗', () => {
+    const ui = useUiStore()
+    wrapper.vm.onUpdateAvailable({ latestVer: '1.2.0' })
+    expect(ui.updateInfo.latestVer).toBe('1.2.0')
+    expect(ui.updateDialogVisible).toBe(true)
+  })
+
+  it('onOpenContentSearch 带 subDir 时设置 :subDir/ 初始串', () => {
+    const ui = useUiStore()
+    wrapper.vm.onOpenContentSearch('sub\\dir')
+    expect(ui.contentSearchInit).toBe(':sub/dir/ ')
+    expect(ui.commandPaletteVisible).toBe(true)
+  })
+
+  it('onOpenContentSearch 无 subDir 时设置 : 初始串', () => {
+    const ui = useUiStore()
+    wrapper.vm.onOpenContentSearch('')
+    expect(ui.contentSearchInit).toBe(':')
+  })
+
+  // ---- handleGlobalKeydown 分支 ----
+  it('快捷键打开命令面板', () => {
+    const ui = useUiStore()
+    ui.commandPaletteVisible = false
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'p', ctrlKey: true }))
+    expect(ui.commandPaletteVisible).toBe(true)
+  })
+
+  it('快捷键切换终端', () => {
+    const ui = useUiStore()
+    const before = ui.terminalVisible
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '`', ctrlKey: true }))
+    expect(ui.terminalVisible).toBe(!before)
+  })
+
+  it('F5 刷新选中节点', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { path: 'D:\\dir' }
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'F5' }))
+    expect(fileTreeSpies.refreshNode).toHaveBeenCalledWith('D:\\dir')
+  })
+
+  it('F5 无选中节点时不刷新', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = null
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'F5' }))
+    expect(fileTreeSpies.refreshNode).not.toHaveBeenCalled()
+  })
+
+  it('重命名快捷键作用于最近交互的目录树', () => {
+    const ws = useWorkspaceStore()
+    ws.lastInteractedTree = 'directory'
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'F2' }))
+    expect(dirTreeSpies.triggerRenameCurrent).toHaveBeenCalled()
+  })
+
+  it('删除快捷键作用于最近交互的文件树', () => {
+    const ws = useWorkspaceStore()
+    ws.lastInteractedTree = 'file'
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'Delete' }))
+    expect(fileTreeSpies.triggerDeleteCurrent).toHaveBeenCalled()
+  })
+
+  it('输入框聚焦时不触发重命名/删除', () => {
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'F2', target: input }))
+    expect(dirTreeSpies.triggerRenameCurrent).not.toHaveBeenCalled()
+    document.body.removeChild(input)
+  })
+
+  it('Ctrl+C 预览区选中文本时放行原生复制', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { path: 'D:\\a.go' }
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => 'selected text' })
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'c', ctrlKey: true }))
+    expect(ws.clipboard.sourcePath).toBe('')
+    getSelectionSpy.mockRestore()
+  })
+
+  it('Ctrl+C 无选中文本时触发 handleCopy', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { path: 'D:\\a.go' }
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' })
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'c', ctrlKey: true }))
+    expect(ws.clipboard.sourcePath).toBe('D:\\a.go')
+    getSelectionSpy.mockRestore()
+  })
+
+  it('无选中节点时 Ctrl+C 直接返回', () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = null
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' })
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: 'c', ctrlKey: true }))
+    expect(ws.clipboard.sourcePath).toBe('')
+    getSelectionSpy.mockRestore()
   })
 })
