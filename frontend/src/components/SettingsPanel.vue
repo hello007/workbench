@@ -28,6 +28,17 @@
           <div class="settings-section-title">通用</div>
           <div class="settings-item">
             <div class="settings-item-info">
+              <div class="settings-item-label">主题</div>
+              <div class="settings-item-desc">跟随系统主题，或手动切换浅色 / 暗色</div>
+            </div>
+            <el-radio-group v-model="settingsStore.themeMode" @change="onThemeChange">
+              <el-radio value="system">跟随系统</el-radio>
+              <el-radio value="light">浅色</el-radio>
+              <el-radio value="dark">暗色</el-radio>
+            </el-radio-group>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
               <div class="settings-item-label">GPU 加速</div>
               <div class="settings-item-desc">使用 GPU 渲染 WebView 界面，关闭后可降低 GPU 占用</div>
             </div>
@@ -424,7 +435,8 @@ const onGpuChange = async (val) => {
       wslDistro: wslDistro.value,
       obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
-      searchExcludeFiles: excludeFiles.value
+      searchExcludeFiles: excludeFiles.value,
+      themeMode: settingsStore.themeMode
     })
     needsRestart.value = true
   } catch {
@@ -441,10 +453,21 @@ const onSettingsChange = async () => {
       wslDistro: wslDistro.value,
       obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
-      searchExcludeFiles: excludeFiles.value
+      searchExcludeFiles: excludeFiles.value,
+      themeMode: settingsStore.themeMode
     })
   } catch {
     // 回滚
+  }
+}
+
+// 主题切换：走 store 合并写（GetSettings → 覆盖 themeMode → SaveSettings），
+// 保留其他字段；切换即生效（App.vue watch resolvedTheme 已应用 dark class）
+const onThemeChange = async () => {
+  try {
+    await settingsStore.saveTheme()
+  } catch {
+    // 保存失败不回滚 UI 状态：内存态主题已切换并即时生效，下次启动回退
   }
 }
 </script>
@@ -461,7 +484,7 @@ const onSettingsChange = async () => {
 .settings-nav {
   width: 200px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--bg-secondary);
   border-right: 1px solid var(--border-color, #ebeef5);
   padding: 12px 0;
 }
@@ -491,7 +514,7 @@ const onSettingsChange = async () => {
   flex: 1;
   padding: 20px 28px;
   overflow-y: auto;
-  background: #ffffff;
+  background: var(--bg-secondary);
 }
 
 .settings-section-title {
@@ -544,7 +567,7 @@ const onSettingsChange = async () => {
   background: rgba(230, 162, 60, 0.1);
   border: 1px solid rgba(230, 162, 60, 0.3);
   border-radius: 8px;
-  color: #e6a23c;
+  color: var(--warning-color, #e6a23c);
   font-size: 12px;
 }
 
@@ -645,12 +668,12 @@ const onSettingsChange = async () => {
 }
 
 .shortcut-keys--editable:hover {
-  background: #ecf5ff;
+  background: var(--primary-bg);
 }
 
 .shortcut-item--recording {
-  border-color: #409eff !important;
-  background: #fafcff;
+  border-color: var(--primary-color) !important;
+  background: var(--primary-bg);
 }
 
 .shortcut-item--fixed .shortcut-keys kbd {
@@ -658,7 +681,7 @@ const onSettingsChange = async () => {
 }
 
 .recording-hint {
-  color: #409eff;
+  color: var(--primary-color);
   font-style: italic;
   background: transparent !important;
   border: none !important;
@@ -673,15 +696,15 @@ const onSettingsChange = async () => {
 </style>
 
 <style>
-/* 全局：el-dialog 浅色主题覆盖 */
+/* 全局：el-dialog 主题适配（浅色/暗色经 CSS 变量随 resolvedTheme 切换） */
 .settings-dialog .el-dialog {
-  background: #ffffff;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color, #ebeef5);
   border-radius: 8px;
 }
 
 .settings-dialog .el-dialog__header {
-  background: #ffffff;
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color, #ebeef5);
   border-radius: 8px 8px 0 0;
   padding: 14px 20px;

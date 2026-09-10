@@ -184,3 +184,113 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     expect(saved.otherField).toBe('keep')
   })
 })
+
+describe('settings store - 主题 (themeMode/resolvedTheme/loadTheme/saveTheme)', () => {
+  let matchMediaSpy
+
+  beforeEach(() => {
+    // 每个 it 独立 pinia 实例（store 重置为默认 themeMode='system'）+ 清理 mock
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    SaveSettings.mockResolvedValue(true)
+  })
+
+  afterEach(() => {
+    if (matchMediaSpy) {
+      matchMediaSpy.mockRestore()
+      matchMediaSpy = null
+    }
+  })
+
+  it('resolvedTheme：light/dark 模式直接映射', () => {
+    const store = useSettingsStore()
+    store.themeMode = 'light'
+    expect(store.resolvedTheme).toBe('light')
+    store.themeMode = 'dark'
+    expect(store.resolvedTheme).toBe('dark')
+  })
+
+  it('resolvedTheme：system 模式默认跟随系统浅色（matchMedia matches:false）', () => {
+    // test/setup.js 全局 matchMedia stub 返回 matches:false
+    const store = useSettingsStore()
+    store.themeMode = 'system'
+    expect(store.resolvedTheme).toBe('light')
+  })
+
+  it('resolvedTheme：system 模式 + 系统偏好暗色 → dark', () => {
+    matchMediaSpy = vi.spyOn(window, 'matchMedia').mockReturnValue({
+      matches: true,
+      media: '',
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })
+    const store = useSettingsStore()
+    store.themeMode = 'system'
+    expect(store.resolvedTheme).toBe('dark')
+  })
+
+  it('matchMedia change 监听器：system 模式下系统切换暗色 → resolvedTheme 变 dark', () => {
+    let changeCb = null
+    matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((q) => ({
+      matches: false,
+      media: q,
+      addEventListener: (ev, cb) => { changeCb = cb },
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    }))
+    const store = useSettingsStore()
+    store.themeMode = 'system'
+    expect(store.resolvedTheme).toBe('light')
+    expect(changeCb).not.toBeNull()
+    // 模拟系统主题变化为暗色
+    changeCb({ matches: true })
+    expect(store.resolvedTheme).toBe('dark')
+  })
+
+  it('loadTheme：后端 themeMode=dark → themeMode=dark', async () => {
+    GetSettings.mockResolvedValue({ themeMode: 'dark' })
+    const store = useSettingsStore()
+    await store.loadTheme()
+    expect(store.themeMode).toBe('dark')
+    expect(store.resolvedTheme).toBe('dark')
+  })
+
+  it('loadTheme：themeMode 缺失 → 默认 system', async () => {
+    GetSettings.mockResolvedValue({})
+    const store = useSettingsStore()
+    store.themeMode = 'dark'
+    await store.loadTheme()
+    expect(store.themeMode).toBe('system')
+  })
+
+  it('loadTheme：非法值（pink）→ 默认 system', async () => {
+    GetSettings.mockResolvedValue({ themeMode: 'pink' })
+    const store = useSettingsStore()
+    await store.loadTheme()
+    expect(store.themeMode).toBe('system')
+  })
+
+  it('loadTheme：GetSettings 失败 → 默认 system', async () => {
+    GetSettings.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    store.themeMode = 'dark'
+    await store.loadTheme()
+    expect(store.themeMode).toBe('system')
+  })
+
+  it('saveTheme：合并写（GetSettings → 覆盖 themeMode → SaveSettings），保留其他字段', async () => {
+    GetSettings.mockResolvedValue({ otherField: 'keep', themeMode: 'light' })
+    const store = useSettingsStore()
+    store.themeMode = 'dark'
+    await store.saveTheme()
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    const saved = SaveSettings.mock.calls[0][0]
+    expect(saved.themeMode).toBe('dark')
+    // 非主题字段保留
+    expect(saved.otherField).toBe('keep')
+  })
+})

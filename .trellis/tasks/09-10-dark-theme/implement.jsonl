@@ -1,1 +1,1 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "themeMode 持久化走现有 GetSettings/SaveSettings 通用 JSON 不触发跨层同步;若实现中发现需新增后端 settings 方法或改 model struct 字段,须同步 frontend/wailsjs/ 绑定 App.js/App.d.ts/models.ts 三处"}

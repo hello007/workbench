@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
+import { createPinia, setActivePinia } from 'pinia'
 import FilePreviewRenderer from '../FilePreviewRenderer.vue'
 
 vi.mock('element-plus', async () => {
@@ -39,17 +40,22 @@ vi.mock('xlsx', () => ({
 class ResizeObserverMock { observe() {} unobserve() {} disconnect() {} }
 global.ResizeObserver = global.ResizeObserver || ResizeObserverMock
 
-const mountRenderer = (props) => mount(FilePreviewRenderer, {
-  props,
-  global: {
-    stubs: {
-      'el-icon': { template: '<i><slot /></i>' },
-      'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
-      // el-tag 真实渲染根元素为 span，stub 保留 class 以便断言数组值徽章
-      'el-tag': { template: '<span class="el-tag"><slot /></span>' }
+const mountRenderer = (props) => {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  return mount(FilePreviewRenderer, {
+    props,
+    global: {
+      plugins: [pinia],
+      stubs: {
+        'el-icon': { template: '<i><slot /></i>' },
+        'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+        // el-tag 真实渲染根元素为 span，stub 保留 class 以便断言数组值徽章
+        'el-tag': { template: '<span class="el-tag"><slot /></span>' }
+      }
     }
-  }
-})
+  })
+}
 
 describe('FilePreviewRenderer.vue - markdown 链接点击分发', () => {
   let wrapper

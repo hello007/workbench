@@ -181,10 +181,10 @@ defineExpose({ placeholderWarnings })
 .warn-box {
   margin: 4px 0 8px 92px;
   padding: 6px 10px;
-  background: #fdf6ec;
+  background: rgba(230, 162, 60, 0.12);
   border-radius: var(--radius-sm);
   font-size: 12px;
-  color: #e6a23c;
+  color: var(--warning-color, #e6a23c);
 }
 .warn-item {
   line-height: 1.6;

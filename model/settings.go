@@ -13,4 +13,5 @@ type AppSettings struct {
 	ShortcutRename         string   `json:"shortcutRename"`         // 重命名快捷键，默认 "F2"
 	ShortcutDelete         string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
 	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
+	ThemeMode              string   `json:"themeMode"`              // 主题模式：system(跟随系统)/light/dark，空值按 system 处理
 }

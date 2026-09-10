@@ -25,6 +25,10 @@
   --sidebar-active-bg: var(--primary-color);
   --sidebar-active-text: #ffffff;
 
+  /* 终端背景：与 useTerminal.js LIGHT_TERMINAL_THEME.background 一致，
+     xterm 容器/视口背景须与此值同步，避免暗色主题下亮色残留 */
+  --terminal-bg: #ffffff;
+
   /* 右键菜单 */
   --menu-bg: #ffffff;
   --menu-bg-hover: #ecf5ff;
@@ -67,6 +71,67 @@
   --transition-fast: 0.15s ease;
   --transition-normal: 0.3s ease;
   --transition-slow: 0.5s ease;
+}
+
+/*
+ * 暗色主题变量覆盖
+ * 触发：<html> 元素加 .dark class（App.vue watch resolvedTheme 切换）
+ * 选择器 html.dark 与 Element Plus dark/css-vars.css 一致；特异性 (0,1,1) 高于
+ * 亮色 :root (0,1,0)，确保暗色覆盖生效。非颜色变量（间距/圆角/动画）不重复声明。
+ */
+html.dark {
+  /* 主色调（保持品牌色一致，仅调整背景着色透明度适配深底） */
+  --primary-color: #409eff;
+  --primary-light: #66b1ff;
+  --primary-dark: #337ecc;
+  --primary-bg: rgba(64, 158, 255, 0.15);
+
+  /* 辅助色（保持一致） */
+  --success-color: #67c23a;
+  --warning-color: #e6a23c;
+  --danger-color: #f56c6c;
+  --info-color: #909399;
+
+  /* 背景色（三档深色层次） */
+  --bg-primary: #1d1e1f;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d2d;
+
+  /* 侧边栏（暗色下更深统一，保持与背景层次） */
+  --sidebar-bg: #0f1620;
+  --sidebar-hover: #1a2433;
+  --sidebar-text: #8eaabe;
+  --sidebar-text-hover: #b0c4d8;
+  --sidebar-active-bg: var(--primary-color);
+  --sidebar-active-text: #ffffff;
+
+  /* 终端背景：与 useTerminal.js DARK_TERMINAL_THEME.background 一致 */
+  --terminal-bg: #1d1e1f;
+
+  /* 右键菜单 */
+  --menu-bg: #252526;
+  --menu-bg-hover: rgba(64, 158, 255, 0.15);
+  --menu-border: #3a3a3a;
+  --menu-text: #d4d4d4;
+  --menu-text-hover: var(--primary-light);
+  --menu-divider: #3a3a3a;
+  --menu-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 4px 15px rgba(0, 0, 0, 0.35);
+
+  /* 边框色 */
+  --border-color: #3c3c3c;
+  --border-light: #4a4a4a;
+
+  /* 文字色（四档） */
+  --text-primary: #e4e4e4;
+  --text-secondary: #a8a8a8;
+  --text-tertiary: #7a7a7a;
+  --text-placeholder: #5a5a5a;
+
+  /* 阴影 — 暗色下加深 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.4), 0 6px 10px rgba(0, 0, 0, 0.25);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.5);
 }
 
 *, *::before, *::after {

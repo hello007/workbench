@@ -237,6 +237,7 @@ import mermaid from 'mermaid'
 import jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { buildHtmlPreviewDoc } from '../utils/htmlPreview'
+import { useSettingsStore } from '../store'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -305,6 +306,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['openExternal', 'openLink', 'closeToc'])
+
+// 主题 store：mermaid 主题随 resolvedTheme 切换（dark/light），避免暗色下亮色残留
+const settingsStore = useSettingsStore()
 
 // ---------- 扩展名工具 ----------
 const getExt = (name = '') => {
@@ -485,12 +489,25 @@ const renderedMarkdown = computed(() => {
 // ---------- Mermaid 图形渲染 ----------
 // renderedMarkdown 更新（v-html 写入 DOM）后，对 .mermaid 节点调用 mermaid.run
 // 渲染为 SVG。单个图表失败时降级为「渲染失败」提示，不影响其余内容与图表。
+// 主题随 resolvedTheme 切换：dark 模式用 mermaid dark 主题，避免暗色下亮色残留。
 const renderMermaid = async () => {
   if (!isMarkdown.value || !markdownBodyRef.value) return
-  const nodes = markdownBodyRef.value.querySelectorAll('pre.mermaid')
+  // 按当前生效主题配置 mermaid（initialize 可重复调用，重新配置主题）
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: settingsStore.resolvedTheme === 'dark' ? 'dark' : 'default'
+  })
+  const nodes = Array.from(markdownBodyRef.value.querySelectorAll('pre.mermaid'))
   if (nodes.length === 0) return
+  // 保存原始代码文本：mermaid.run 会用 SVG 覆盖节点内容，主题切换重渲染时需还原
+  nodes.forEach((n) => {
+    if (!n.hasAttribute('data-mermaid-code')) {
+      n.setAttribute('data-mermaid-code', n.textContent || '')
+    }
+  })
   try {
-    await mermaid.run({ nodes: Array.from(nodes), suppressErrors: true })
+    await mermaid.run({ nodes, suppressErrors: true })
   } catch (e) {
     // 兜底：mermaid.run 整体异常时，逐个标记未渲染成功的图表
     nodes.forEach((n) => {
@@ -502,10 +519,29 @@ const renderMermaid = async () => {
   }
 }
 
+// 主题切换：还原 .mermaid 节点原始代码 + 清除已渲染标记，重新按新主题渲染
+const rerenderMermaidForTheme = async () => {
+  if (!isMarkdown.value || !markdownBodyRef.value) return
+  const nodes = Array.from(markdownBodyRef.value.querySelectorAll('pre.mermaid'))
+  if (nodes.length === 0) return
+  nodes.forEach((n) => {
+    const code = n.getAttribute('data-mermaid-code')
+    if (code !== null) n.textContent = code
+    n.removeAttribute('data-processed')
+  })
+  await renderMermaid()
+}
+
 // 内容变化 → 等 v-html 更新到 DOM 后再渲染 mermaid
 watch(renderedMarkdown, async () => {
   await nextTick()
   renderMermaid()
+})
+
+// 主题变化 → 等 DOM 稳定后按新主题重渲染 mermaid
+watch(() => settingsStore.resolvedTheme, async () => {
+  await nextTick()
+  await rerenderMermaidForTheme()
 })
 
 // ---------- 标题目录 TOC ----------

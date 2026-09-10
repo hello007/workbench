@@ -435,12 +435,12 @@ watch(visible, async (val) => {
 }
 
 .palette-content::-webkit-scrollbar-thumb {
-  background: #c0c4cc;
+  background: var(--text-placeholder, #c0c4cc);
   border-radius: 3px;
 }
 
 .palette-content::-webkit-scrollbar-thumb:hover {
-  background: #909399;
+  background: var(--text-tertiary, #909399);
 }
 
 .result-section {
@@ -449,7 +449,7 @@ watch(visible, async (val) => {
 
 .section-title {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-tertiary, #909399);
   padding: 8px 20px 5px;
   font-weight: 500;
 }
@@ -464,7 +464,7 @@ watch(visible, async (val) => {
 
 .result-item:hover,
 .result-item--active {
-  background: #f5f7fa;
+  background: var(--bg-tertiary, #f5f7fa);
 }
 
 .result-icon {
@@ -480,13 +480,13 @@ watch(visible, async (val) => {
 
 .result-name {
   font-size: 14px;
-  color: #303133;
+  color: var(--text-primary, #303133);
   margin-bottom: 2px;
 }
 
 .result-path {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-tertiary, #909399);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -494,7 +494,7 @@ watch(visible, async (val) => {
 
 .result-time {
   font-size: 12px;
-  color: #c0c4cc;
+  color: var(--text-placeholder, #c0c4cc);
   margin-left: 10px;
   flex-shrink: 0;
 }
@@ -502,7 +502,7 @@ watch(visible, async (val) => {
 .result-loading {
   padding: 20px;
   text-align: center;
-  color: #909399;
+  color: var(--text-tertiary, #909399);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -512,12 +512,12 @@ watch(visible, async (val) => {
 .result-empty {
   padding: 20px;
   text-align: center;
-  color: #909399;
+  color: var(--text-tertiary, #909399);
 }
 
 .remove-fav-btn {
   cursor: pointer;
-  color: #f56c6c;
+  color: var(--danger-color, #f56c6c);
   font-size: 18px;
   margin-left: auto;
   padding: 6px;
@@ -527,7 +527,7 @@ watch(visible, async (val) => {
 }
 
 .remove-fav-btn:hover {
-  color: #f56c6c;
+  color: var(--danger-color, #f56c6c);
   background: rgba(245, 108, 108, 0.2);
 }
 
@@ -537,13 +537,13 @@ watch(visible, async (val) => {
   align-items: center;
   gap: 8px;
   padding: 14px 20px;
-  background: #fdf6ec;
-  color: #e6a23c;
+  background: rgba(230, 162, 60, 0.12);
+  color: var(--warning-color, #e6a23c);
   font-size: 13px;
 }
 
 .content-search-confirm strong {
-  color: #303133;
+  color: var(--text-primary, #303133);
 }
 
 .content-search-hint {
@@ -551,22 +551,22 @@ watch(visible, async (val) => {
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  color: #909399;
+  color: var(--text-tertiary, #909399);
   font-size: 13px;
 }
 
 .hint {
-  color: #c0c4cc;
+  color: var(--text-placeholder, #c0c4cc);
   font-size: 12px;
   margin-left: auto;
 }
 
 .hint-tag {
-  background: #f0f2f5;
+  background: var(--bg-tertiary, #f0f2f5);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
-  color: #606266;
+  color: var(--text-secondary, #606266);
 }
 
 /* 内容搜索分组 */
@@ -578,29 +578,29 @@ watch(visible, async (val) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #409eff !important;
+  color: var(--primary-color, #409eff) !important;
   font-weight: 500;
 }
 
 /* 匹配行内容 */
 .content-file-line {
   font-size: 12px !important;
-  color: #606266 !important;
+  color: var(--text-secondary, #606266) !important;
 }
 
 .line-num {
-  color: #409eff;
+  color: var(--primary-color, #409eff);
   font-weight: 600;
 }
 
 .result-line {
   font-size: 12px;
-  color: #303133;
+  color: var(--text-primary, #303133);
   font-family: 'Consolas', 'Monaco', monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  background: #f5f7fa;
+  background: var(--bg-tertiary, #f5f7fa);
   padding: 3px 6px;
   border-radius: 3px;
   margin-top: 3px;

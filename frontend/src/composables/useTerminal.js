@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -11,6 +11,71 @@ import {
   CloseTerminal
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { useSettingsStore } from '../store'
+
+/**
+ * 终端浅色主题：白底深字，光标主色
+ */
+export const LIGHT_TERMINAL_THEME = {
+  background: '#ffffff',
+  foreground: '#303133',
+  cursor: '#409eff',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#409eff20',
+  selectionForeground: '#303133',
+  black: '#303133',
+  red: '#f56c6c',
+  green: '#67c23a',
+  yellow: '#e6a23c',
+  blue: '#409eff',
+  magenta: '#e066c1',
+  cyan: '#00d4aa',
+  white: '#909399',
+  brightBlack: '#606266',
+  brightRed: '#f56c6c',
+  brightGreen: '#67c23a',
+  brightYellow: '#e6a23c',
+  brightBlue: '#409eff',
+  brightMagenta: '#e066c1',
+  brightCyan: '#00d4aa',
+  brightWhite: '#303133'
+}
+
+/**
+ * 终端暗色主题：深底浅字，光标主色，与 style.css 暗色背景层次一致
+ */
+export const DARK_TERMINAL_THEME = {
+  background: '#1d1e1f',
+  foreground: '#e4e4e4',
+  cursor: '#409eff',
+  cursorAccent: '#1d1e1f',
+  selectionBackground: '#409eff40',
+  selectionForeground: '#e4e4e4',
+  black: '#1d1e1f',
+  red: '#f56c6c',
+  green: '#67c23a',
+  yellow: '#e6a23c',
+  blue: '#409eff',
+  magenta: '#e066c1',
+  cyan: '#00d4aa',
+  white: '#e4e4e4',
+  brightBlack: '#7a7a7a',
+  brightRed: '#f56c6c',
+  brightGreen: '#67c23a',
+  brightYellow: '#e6a23c',
+  brightBlue: '#66b1ff',
+  brightMagenta: '#e066c1',
+  brightCyan: '#00d4aa',
+  brightWhite: '#ffffff'
+}
+
+/**
+ * 按实际生效主题选取 xterm 主题对象
+ * @param {string} resolved - 'dark' | 'light'
+ */
+export function getTerminalTheme(resolved) {
+  return resolved === 'dark' ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
+}
 
 export function useTerminal() {
   const term = ref(null)
@@ -20,6 +85,9 @@ export function useTerminal() {
   const currentDir = ref('')
   const currentShellType = ref('powershell')
   const isExited = ref(false)
+
+  // 主题 store：读取实际生效主题 resolvedTheme，初始化与切换 xterm 主题
+  const settingsStore = useSettingsStore()
 
   // 初始化终端
   async function initTerminal(container, dir, shellType) {
@@ -32,30 +100,7 @@ export function useTerminal() {
       fontSize: 14,
       lineHeight: 1.2,
       fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
-      theme: {
-        background: '#ffffff',
-        foreground: '#303133',
-        cursor: '#409eff',
-        cursorAccent: '#ffffff',
-        selectionBackground: '#409eff20',
-        selectionForeground: '#303133',
-        black: '#303133',
-        red: '#f56c6c',
-        green: '#67c23a',
-        yellow: '#e6a23c',
-        blue: '#409eff',
-        magenta: '#e066c1',
-        cyan: '#00d4aa',
-        white: '#909399',
-        brightBlack: '#606266',
-        brightRed: '#f56c6c',
-        brightGreen: '#67c23a',
-        brightYellow: '#e6a23c',
-        brightBlue: '#409eff',
-        brightMagenta: '#e066c1',
-        brightCyan: '#00d4aa',
-        brightWhite: '#303133'
-      },
+      theme: getTerminalTheme(settingsStore.resolvedTheme),
       allowProposedApi: true
     })
 
@@ -187,6 +232,14 @@ export function useTerminal() {
     await destroyTerminal()
     await initTerminal(container, dir, shellType)
   }
+
+  // 主题切换：终端已初始化时实时切换 xterm 主题（背景/文字/光标色）
+  // 未初始化（term.value 为 null）时跳过，下次 initTerminal 按当时主题初始化
+  watch(() => settingsStore.resolvedTheme, (resolved) => {
+    if (term.value) {
+      term.value.options.theme = getTerminalTheme(resolved)
+    }
+  })
 
   return {
     term,

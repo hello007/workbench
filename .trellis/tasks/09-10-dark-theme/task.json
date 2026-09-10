@@ -3,7 +3,7 @@
   "name": "dark-theme",
   "title": "暗色主题支持",
   "description": "基于 Element Plus 暗色主题能力实现:系统主题自动跟随、手动切换亮/暗、主题配置持久化到 settings.json。覆盖工作目录树/文件树/导航中心/终端/AI功能面板全场景。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

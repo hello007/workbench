@@ -179,7 +179,7 @@ onBeforeUnmount(async () => {
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  background-color: #f5f7fa;
+  background-color: var(--bg-primary);
   border-top: 1px solid var(--border-color, #ebeef5);
   height: 100%;
   position: relative;
@@ -204,7 +204,7 @@ onBeforeUnmount(async () => {
   justify-content: space-between;
   height: 36px;
   padding: 0 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
   border-bottom: 1px solid var(--border-color, #ebeef5);
 }
 
@@ -228,7 +228,7 @@ onBeforeUnmount(async () => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #67c23a;
+  background: var(--success-color, #67c23a);
   box-shadow: 0 0 6px rgba(103, 194, 58, 0.4);
   animation: pulse 2.5s ease-in-out infinite;
 }
@@ -244,7 +244,7 @@ onBeforeUnmount(async () => {
 }
 
 .shell-select :deep(.el-input__wrapper) {
-  background: #ffffff;
+  background: var(--bg-secondary);
   box-shadow: none;
   border: 1px solid var(--border-light, #dcdfe6);
   border-radius: 6px;
@@ -271,14 +271,14 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  background: #ffffff;
+  background: var(--bg-secondary);
   border-radius: 4px;
   border: 1px solid var(--border-color, #ebeef5);
   min-width: 0;
 }
 
 .path-icon {
-  color: #409eff;
+  color: var(--primary-color, #409eff);
   flex-shrink: 0;
 }
 
@@ -306,7 +306,7 @@ onBeforeUnmount(async () => {
 }
 
 .restart-btn:hover {
-  color: #e6a23c !important;
+  color: var(--warning-color, #e6a23c) !important;
 }
 
 .toolbar-actions {
@@ -351,7 +351,8 @@ onBeforeUnmount(async () => {
   flex: 1;
   min-height: 0;
   padding: 2px 0 0;
-  background: #ffffff;
+  /* 与 xterm 主题背景一致（亮色 #ffffff / 暗色 #1d1e1f），避免暗色下亮色残留 */
+  background: var(--terminal-bg);
 }
 
 .terminal-container :deep(.xterm) {
@@ -360,7 +361,7 @@ onBeforeUnmount(async () => {
 }
 
 .terminal-container :deep(.xterm-viewport) {
-  background-color: #ffffff !important;
+  background-color: var(--terminal-bg) !important;
   overflow-y: auto !important;
 }
 
@@ -384,9 +385,9 @@ onBeforeUnmount(async () => {
 </style>
 
 <style>
-/* Shell 下拉弹出框浅色主题 */
+/* Shell 下拉弹出框主题适配（浅色/暗色经 CSS 变量随 resolvedTheme 切换） */
 .shell-select-popper {
-  background: #ffffff !important;
+  background: var(--bg-secondary) !important;
   border: 1px solid var(--border-color, #ebeef5) !important;
   border-radius: 8px !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
@@ -416,7 +417,7 @@ onBeforeUnmount(async () => {
 }
 
 .shell-select-popper .el-popper__arrow::before {
-  background: #ffffff !important;
+  background: var(--bg-secondary) !important;
   border-color: var(--border-color, #ebeef5) !important;
 }
 </style>

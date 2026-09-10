@@ -71,6 +71,34 @@ const stubs = {
     template: '<span class="el-tag"><slot /><span class="tag-close" @click.stop="$emit(\'close\')" /></span>',
     props: ['closable', 'size'],
     emits: ['close']
+  },
+  // el-radio-group + el-radio stub：用 provide/inject 传递选中态，
+  // 原生 radio change 时由 group 向父组件 emit update:modelValue + change
+  'el-radio-group': {
+    template: '<div class="el-radio-group" :data-model="modelValue"><slot /></div>',
+    props: ['modelValue'],
+    emits: ['update:modelValue', 'change'],
+    provide() {
+      return { elRadioGroup: this }
+    }
+  },
+  'el-radio': {
+    template: '<label class="el-radio"><input type="radio" :value="value" :checked="isChecked" @change="onChange" /><span><slot /></span></label>',
+    props: ['value'],
+    inject: { elRadioGroup: { default: null } },
+    computed: {
+      isChecked() {
+        return this.elRadioGroup && this.elRadioGroup.modelValue === this.value
+      }
+    },
+    methods: {
+      onChange() {
+        if (this.elRadioGroup) {
+          this.elRadioGroup.$emit('update:modelValue', this.value)
+          this.elRadioGroup.$emit('change', this.value)
+        }
+      }
+    }
   }
 }
 
@@ -311,6 +339,36 @@ describe('SettingsPanel.vue', () => {
     const obsInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('Obsidian'))
     await obsInput.setValue('C:\\Obsidian.exe')
     await obsInput.trigger('change')
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalled()
+  })
+
+  it('通用 tab 渲染主题单选（跟随系统/浅色/暗色）', async () => {
+    wrapper = await createWrapper()
+    expect(wrapper.text()).toContain('主题')
+    expect(wrapper.text()).toContain('跟随系统')
+    expect(wrapper.text()).toContain('浅色')
+    expect(wrapper.text()).toContain('暗色')
+  })
+
+  it('主题单选绑定 settingsStore.themeMode（store 变化反映到选中态）', async () => {
+    wrapper = await createWrapper()
+    // createWrapper 内 setActivePinia 重置 pinia，须在其后取 store，确保与组件同实例
+    const settingsStore = useSettingsStore()
+    settingsStore.themeMode = 'dark'
+    await nextTick()
+    const group = wrapper.find('.el-radio-group')
+    expect(group.exists()).toBe(true)
+    // group stub 经 data-model 暴露当前 modelValue（v-model 绑定 store.themeMode）
+    expect(group.attributes('data-model')).toBe('dark')
+  })
+
+  it('切换主题为 dark 触发 saveTheme（SaveSettings 被调用）', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const darkRadio = wrapper.find('input[type="radio"][value="dark"]')
+    await darkRadio.setValue(true)
     await flushPromises()
     expect(SaveSettings).toHaveBeenCalled()
   })

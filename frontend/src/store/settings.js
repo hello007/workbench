@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
 
@@ -97,12 +97,94 @@ function shortcutFromEvent(event) {
  * loadShortcuts / saveShortcuts / checkConflict 作为 action 访问 store 内 ref；
  * parseShortcut / matchShortcut / formatDisplay / isValidShortcut / shortcutFromEvent / DEFAULTS
  * 为无状态纯函数与常量，作模块级命名导出，供 spec 与消费方直接 import。
+ *
+ * 主题态（themeMode / resolvedTheme）同样收敛于此 store：
+ * themeMode 三态 system/light/dark，system 模式经 matchMedia 解析为实际生效主题 resolvedTheme。
+ * loadTheme/saveTheme 走现有 GetSettings/SaveSettings（settings.json 通用字段 themeMode）。
  */
+// 主题模式合法值集合；非法或缺失值统一回退 system
+const THEME_MODES = new Set(['system', 'light', 'dark'])
+
+/**
+ * 读取系统是否偏好暗色主题。
+ * SSR / 无 matchMedia 环境（jsdom 未注入时）回退 false。
+ */
+function getSystemPrefersDark() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 注册系统主题变化监听器，返回注销函数。
+ * 优先 addEventListener（标准），回退 addListener（旧 Safari）。
+ * 无 matchMedia 环境返回空函数。
+ */
+function watchSystemTheme(onChange) {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
+  let mql
+  try {
+    mql = window.matchMedia('(prefers-color-scheme: dark)')
+  } catch {
+    return () => {}
+  }
+  const handler = (e) => onChange(e.matches)
+  if (typeof mql.addEventListener === 'function') {
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }
+  if (typeof mql.addListener === 'function') {
+    mql.addListener(handler)
+    return () => mql.removeListener(handler)
+  }
+  return () => {}
+}
+
 export const useSettingsStore = defineStore('settings', () => {
   const shortcutCommandPalette = ref(DEFAULTS.commandPalette)
   const shortcutToggleTerminal = ref(DEFAULTS.toggleTerminal)
   const shortcutRename = ref(DEFAULTS.rename)
   const shortcutDelete = ref(DEFAULTS.delete)
+
+  // 主题模式：system(跟随系统) / light / dark，默认 system
+  const themeMode = ref('system')
+  // 系统当前是否偏好暗色（system 模式下决定 resolvedTheme）
+  const systemPrefersDark = ref(getSystemPrefersDark())
+  // 监听系统主题变化（store 单例生命周期内常驻；system 模式实时跟随）
+  watchSystemTheme((isDark) => {
+    systemPrefersDark.value = isDark
+  })
+
+  // 实际生效主题：light/dark。system 模式按系统偏好解析，light/dark 直接取值
+  const resolvedTheme = computed(() => {
+    if (themeMode.value === 'light') return 'light'
+    if (themeMode.value === 'dark') return 'dark'
+    return systemPrefersDark.value ? 'dark' : 'light'
+  })
+
+  /**
+   * 从后端加载主题配置；缺失或非法值回退 system
+   */
+  async function loadTheme() {
+    try {
+      const settings = await GetSettings()
+      themeMode.value = THEME_MODES.has(settings.themeMode) ? settings.themeMode : 'system'
+    } catch {
+      themeMode.value = 'system'
+    }
+  }
+
+  /**
+   * 保存主题配置到后端（合并写：先读现有 settings 再覆盖 themeMode，避免覆盖其他字段）
+   */
+  async function saveTheme() {
+    const settings = await GetSettings()
+    settings.themeMode = themeMode.value
+    await SaveSettings(settings)
+  }
 
   /**
    * 从后端加载快捷键配置，空值填默认
@@ -156,9 +238,14 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcutToggleTerminal,
     shortcutRename,
     shortcutDelete,
+    themeMode,
+    systemPrefersDark,
+    resolvedTheme,
     loadShortcuts,
     saveShortcuts,
-    checkConflict
+    checkConflict,
+    loadTheme,
+    saveTheme
   }
 })
 

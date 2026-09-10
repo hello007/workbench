@@ -1422,7 +1422,7 @@ defineExpose({
 }
 
 .text-skipped {
-  color: #909399;
+  color: var(--text-tertiary, #909399);
 }
 
 .pull-status-img {

@@ -19,6 +19,9 @@ func TestAppSettings_DefaultValues(t *testing.T) {
 	if s.WslDistro != "" {
 		t.Error("WslDistro 默认应为空")
 	}
+	if s.ThemeMode != "" {
+		t.Error("ThemeMode 默认应为空（空值视为 system）")
+	}
 }
 
 func TestAppSettings_JSONSerialization(t *testing.T) {
@@ -63,5 +66,25 @@ func TestAppSettings_JSONDeserialization_Partial(t *testing.T) {
 	}
 	if s.DefaultShell != "" {
 		t.Error("缺失字段应为零值")
+	}
+	if s.ThemeMode != "" {
+		t.Error("ThemeMode 缺失时应为零值")
+	}
+}
+
+func TestAppSettings_ThemeModeRoundTrip(t *testing.T) {
+	// themeMode 字段需完整往返：序列化 → 反序列化保留原值
+	// 该字段是前端主题持久化落盘的唯一存储位，丢失即重启后主题回退
+	s := &AppSettings{ThemeMode: "dark"}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+	var decoded AppSettings
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+	if decoded.ThemeMode != "dark" {
+		t.Errorf("ThemeMode 往返丢失: 期望 dark, 实际=%s", decoded.ThemeMode)
 	}
 }

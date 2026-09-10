@@ -54,7 +54,7 @@ const panels = [
 .activity-bar {
   width: 44px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   align-items: center;

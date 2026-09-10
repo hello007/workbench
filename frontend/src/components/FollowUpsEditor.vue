@@ -138,10 +138,10 @@ defineExpose({ validationErrors })
 .warn-box {
   margin-top: 8px;
   padding: 6px 10px;
-  background: #fef0f0;
+  background: rgba(245, 108, 108, 0.12);
   border-radius: var(--radius-sm);
   font-size: 12px;
-  color: #f56c6c;
+  color: var(--danger-color, #f56c6c);
 }
 .warn-item {
   line-height: 1.6;

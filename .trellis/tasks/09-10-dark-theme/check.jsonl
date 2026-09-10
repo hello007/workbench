@@ -1,1 +1,1 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端测试覆盖率 ≥70% 硬失败(exclude wailsjs);主题切换逻辑(store resolvedTheme + class toggle + matchMedia 监听)须测试覆盖"}
