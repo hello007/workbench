@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验收阶段核对 App 方法签名未变 + frontend/wailsjs/ 绑定 diff 为空"}
+{"file": ".trellis/tasks/09-10-app-go/prd.md", "reason": "验收 checklist：go build + go test + wails build 三重验证 + 方法总数核对 = 98"}

@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "拆分 app.go 须保持 App 方法签名不变；签名变更须同步 frontend/wailsjs/ 绑定三处，本任务约束为零绑定变更"}
+{"file": ".trellis/tasks/09-10-app-go/prd.md", "reason": "拆分映射表 + 14 文件归属 + 三重验证验收标准 + 私有方法跟随主调用域规则"}
