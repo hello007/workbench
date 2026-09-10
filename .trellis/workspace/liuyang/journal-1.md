@@ -1453,3 +1453,37 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 44: app.go 按域拆分 + 测试覆盖率分层门禁
+
+**Date**: 2026-09-10
+**Task**: app.go 按域拆分 + 测试覆盖率分层门禁
+**Branch**: `master`
+
+### Summary
+
+任务2 app.go 按域拆分：1457 行单文件拆为 14 域文件（app.go 留 core + 13 新建），99 个 App 方法纯机械移动零签名变更零绑定变更，三重验证（go build+test+wails build）全绿。任务3 测试覆盖率门禁：后端分层（model/server ≥80% 达 100%/91%、service ≥76% 基线 76.1% 系统调用核心难测、util ≥40% 排除 pty_windows.go、主包不设门禁）+ 前端 ≥70% 硬失败（lines 81.67%/branches 70.26%/functions 73.75%/statements 78.84%，exclude wailsjs）+ CI 脚本 scripts/coverage-check.sh + vitest thresholds。补后端 6 测试文件约 80 Test 函数、前端 11 新 spec + 6 扩展共 36 spec 715 用例。spec 沉淀 docs/spec/test-coverage-gate.md + CLAUDE.md 关键规则。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0980f1` | (see git log) |
+| `26a462b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

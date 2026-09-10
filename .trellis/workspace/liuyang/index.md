@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 43
+- **Total Sessions**: 44
 - **Last Active**: 2026-09-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1455 | Active |
+| `journal-1.md` | ~1489 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 44 | 2026-09-10 | app.go 按域拆分 + 测试覆盖率分层门禁 | `f0980f1`, `26a462b` | `master` |
 | 43 | 2026-09-10 | 前端引入 Pinia 状态管理（6 批迁移 + 收尾） | `bb057ff`, `2151b1f`, `71e274f`, `b55e551`, `7310273`, `615385b`, `22e545f` | `master` |
 | 42 | 2026-09-09 | AI 功能配置导入导出 | `1ca03fb` | `master` |
 | 41 | 2026-09-09 | AI 功能项使用频次智能排序 | `1b782ca` | `master` |
