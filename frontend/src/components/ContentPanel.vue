@@ -63,6 +63,12 @@
             @committed="onLocalChangesCommitted"
           />
         </el-tab-pane>
+        <el-tab-pane label="标签" name="tags" lazy>
+          <GitTags :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
+        <el-tab-pane label="远程仓库" name="remotes" lazy>
+          <GitRemotes :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
       </el-tabs>
 
       <div v-else-if="workspaceStore.selectedNode.type === 'directory'" class="node-actions">
@@ -430,6 +436,8 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
+import GitTags from './GitTags.vue'
+import GitRemotes from './GitRemotes.vue'
 import FilePreviewRenderer from './FilePreviewRenderer.vue'
 import {
   PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,

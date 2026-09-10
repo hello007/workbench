@@ -77,6 +77,8 @@ const contentPanelStubs = {
   'el-icon': { template: '<i><slot /></i>' },
   GitInfo: { template: '<div class="git-info" />' },
   CommitHistory: { template: '<div class="commit-history" />' },
+  GitTags: { template: '<div class="git-tags" />' },
+  GitRemotes: { template: '<div class="git-remotes" />' },
   SuccessFilled: { template: '<span />' },
   CircleCloseFilled: { template: '<span />' },
   ArrowLeft: { template: '<span class="arrow-left" />' }

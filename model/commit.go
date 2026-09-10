@@ -38,6 +38,23 @@ type BranchList struct {
 	Branches []BranchInfo `json:"branches"`
 }
 
+// GitTag 表示一个 Git 标签
+type GitTag struct {
+	Name     string `json:"name"`     // 标签名
+	Type     string `json:"type"`     // 类型: lightweight|annotated
+	Sha      string `json:"sha"`     // 指向的提交 SHA
+	ShortSha string `json:"shortSha"` // 前 8 位 SHA，用于显示
+	Message  string `json:"message"`  // 注释消息（轻量标签为空）
+	Tagger   string `json:"tagger"`   // 标注者（轻量标签为空）
+	Date     string `json:"date"`     // 标注时间（轻量标签为空）
+}
+
+// GitRemote 表示一个 Git 远程仓库
+type GitRemote struct {
+	Name string `json:"name"` // 远程仓库名
+	URL  string `json:"url"`  // 远程仓库地址（取首个 URL）
+}
+
 // StatusLabel 返回状态的可读标签
 func (f *FileChange) StatusLabel() string {
 	switch f.Status {

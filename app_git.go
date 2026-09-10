@@ -323,3 +323,79 @@ func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) erro
 	}
 	return a.gitSvc.CheckoutBranch(path, branchName, isRemote)
 }
+
+// ===== 标签管理域 =====
+
+// GetTags 获取仓库标签列表
+func (a *App) GetTags(path string) ([]model.GitTag, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ListTags(path)
+}
+
+// CreateTag 创建标签（message 为空创建轻量标签，非空创建注释标签），仅钉 HEAD
+func (a *App) CreateTag(path, name, message string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CreateTag(path, name, message)
+}
+
+// DeleteTag 删除本地标签
+func (a *App) DeleteTag(path, name string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.DeleteTag(path, name)
+}
+
+// PushTag 推送单个标签到远程 origin，返回 git stdout
+func (a *App) PushTag(path, name string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.PushTag(path, name)
+}
+
+// ===== 远程仓库管理域 =====
+
+// GetRemotes 获取远程仓库列表（名称 + URL）
+func (a *App) GetRemotes(path string) ([]model.GitRemote, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ListRemotes(path)
+}
+
+// AddRemote 新增远程仓库
+func (a *App) AddRemote(path, name, url string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AddRemote(path, name, url)
+}
+
+// RemoveRemote 删除远程仓库
+func (a *App) RemoveRemote(path, name string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.RemoveRemote(path, name)
+}
+
+// FetchRepo 拉取远程更新（remote 为空时对所有远程执行，prune 控制是否清理远端已删分支）
+func (a *App) FetchRepo(path, remote string, prune bool) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.Fetch(path, remote, prune)
+}
+
+// SetBranchUpstream 为指定分支设置上游跟踪分支
+func (a *App) SetBranchUpstream(path, branch, remote string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.SetBranchUpstream(path, branch, remote)
+}

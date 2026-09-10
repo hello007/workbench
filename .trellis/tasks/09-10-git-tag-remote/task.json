@@ -3,7 +3,7 @@
   "name": "git-tag-remote",
   "title": "Git 标签与远程仓库管理",
   "description": "补全 Git 高级操作闭环:标签管理(列出/创建轻量+注释标签/删除/推送)与远程仓库管理(增删 remote/查看 remote 信息/fetch/设跟踪分支)。复用现有 Git 集成面板交互范式,前后端契约同步 wailsjs 绑定。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

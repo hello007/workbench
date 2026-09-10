@@ -712,3 +712,228 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 
 	return results
 }
+
+// ===== 标签管理 =====
+
+// ListTags 列出仓库所有标签。
+// 用 git for-each-ref 以 Tab 分隔输出 name/objecttype/objectname/*objectname/taggername/taggerdate/contents:subject。
+// objecttype=="tag" 为注释标签（sha 取 *objectname 即指向的提交，含 tagger/message），
+// 否则为轻量标签（sha 取 objectname 即提交本身，无 tagger/message）。
+func (s *GitService) ListTags(repoPath string) ([]model.GitTag, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	// taggerdate 取 :relative（相对时间）；:format-relative 非合法 git 语法。
+	const format = "%(refname:short)%09%(objecttype)%09%(objectname)%09%(*objectname)%09%(taggername)%09%(taggerdate:relative)%09%(contents:subject)"
+	output, err := s.gitCmd.Execute(gitRoot, "for-each-ref", "--format="+format, "refs/tags")
+	if err != nil {
+		return nil, fmt.Errorf("获取标签列表失败: %w", err)
+	}
+
+	var tags []model.GitTag
+	for _, line := range strings.Split(output, "\n") {
+		// 仅去行尾 \r（Windows CRLF），不去 TrimSpace 以保留尾部的空字段 Tab 分隔
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		get := func(i int) string {
+			if i < len(parts) {
+				return parts[i]
+			}
+			return ""
+		}
+
+		tag := model.GitTag{Name: get(0)}
+		if get(1) == "tag" {
+			// 注释标签：sha 取 *objectname（指向的提交）
+			tag.Type = "annotated"
+			tag.Sha = get(3)
+			tag.Tagger = get(4)
+			tag.Date = get(5)
+			tag.Message = get(6)
+		} else {
+			// 轻量标签：sha 取 objectname（提交本身），无 tagger/message
+			tag.Type = "lightweight"
+			tag.Sha = get(2)
+		}
+		if len(tag.Sha) > 8 {
+			tag.ShortSha = tag.Sha[:8]
+		} else {
+			tag.ShortSha = tag.Sha
+		}
+		tags = append(tags, tag)
+	}
+	return tags, nil
+}
+
+// CreateTag 创建标签。message 为空创建轻量标签，非空创建注释标签（-a -m），仅钉 HEAD。
+func (s *GitService) CreateTag(repoPath, name, message string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("标签名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	var args []string
+	if strings.TrimSpace(message) == "" {
+		args = []string{"tag", name}
+	} else {
+		args = []string{"tag", "-a", "-m", message, name}
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, args...); err != nil {
+		return fmt.Errorf("创建标签失败: %w", err)
+	}
+	return nil
+}
+
+// DeleteTag 删除本地标签（git tag -d）。
+func (s *GitService) DeleteTag(repoPath, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("标签名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	if _, err := s.gitCmd.Execute(gitRoot, "tag", "-d", name); err != nil {
+		return fmt.Errorf("删除标签失败: %w", err)
+	}
+	return nil
+}
+
+// PushTag 推送单个标签到远程 origin，返回 trim 后的 stdout。
+func (s *GitService) PushTag(repoPath, name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("标签名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, "push", "origin", name)
+	if err != nil {
+		return "", fmt.Errorf("推送标签失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// ===== 远程仓库管理 =====
+
+// ListRemotes 列出远程仓库（名称 + URL），每个 remote 取首个 URL（去重，保持顺序）。
+func (s *GitService) ListRemotes(repoPath string) ([]model.GitRemote, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, "remote", "-v")
+	if err != nil {
+		return nil, fmt.Errorf("获取远程列表失败: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var remotes []model.GitRemote
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// git remote -v 每行格式: "<name>\t<url> (fetch|push)"
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		name := parts[0]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		remotes = append(remotes, model.GitRemote{Name: name, URL: parts[1]})
+	}
+	return remotes, nil
+}
+
+// AddRemote 新增远程仓库（git remote add）。
+func (s *GitService) AddRemote(repoPath, name, url string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("远程仓库名不能为空")
+	}
+	if strings.TrimSpace(url) == "" {
+		return fmt.Errorf("远程仓库地址不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	if _, err := s.gitCmd.Execute(gitRoot, "remote", "add", name, url); err != nil {
+		return fmt.Errorf("添加远程仓库失败: %w", err)
+	}
+	return nil
+}
+
+// RemoveRemote 删除远程仓库（git remote remove）。
+func (s *GitService) RemoveRemote(repoPath, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("远程仓库名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	if _, err := s.gitCmd.Execute(gitRoot, "remote", "remove", name); err != nil {
+		return fmt.Errorf("删除远程仓库失败: %w", err)
+	}
+	return nil
+}
+
+// Fetch 拉取远程更新。remote 为空时对所有远程执行；prune 控制是否清理远端已删分支。返回 trim 后的 stdout。
+func (s *GitService) Fetch(repoPath, remote string, prune bool) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	args := []string{"fetch"}
+	if prune {
+		args = append(args, "--prune")
+	}
+	if strings.TrimSpace(remote) != "" {
+		args = append(args, remote)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, args...)
+	if err != nil {
+		return "", fmt.Errorf("fetch 失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// SetBranchUpstream 为指定分支设置上游跟踪分支（git branch --set-upstream-to=<remote>/<branch> <branch>）。
+func (s *GitService) SetBranchUpstream(repoPath, branch, remote string) error {
+	if strings.TrimSpace(branch) == "" {
+		return fmt.Errorf("分支名不能为空")
+	}
+	if strings.TrimSpace(remote) == "" {
+		return fmt.Errorf("远程仓库名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	upstream := remote + "/" + branch
+	if _, err := s.gitCmd.Execute(gitRoot, "branch", "--set-upstream-to="+upstream, branch); err != nil {
+		return fmt.Errorf("设置上游分支失败: %w", err)
+	}
+	return nil
+}
