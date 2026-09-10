@@ -1,13 +1,13 @@
 # Cross-Layer Contracts
 
-> Executable contracts spanning Go backend (`app.go` bridge) ↔ Wails JS bindings (`frontend/wailsjs/`) ↔ Vue frontend. 本文件记录跨层签名与契约，供未来修改 App 方法签名或文件预览/保存逻辑时参照。
+> Executable contracts spanning Go backend (`app.go` + `app_*.go` 按域拆分文件 bridge) ↔ Wails JS bindings (`frontend/wailsjs/`) ↔ Vue frontend. 本文件记录跨层签名与契约，供未来修改 App 方法签名或文件预览/保存逻辑时参照。
 
 ---
 
 ## Scenario: App 方法签名变更须手动同步 Wails 绑定
 
 ### 1. Scope / Trigger
-- Trigger: 修改 `app.go` 中 `App` 结构体的导出方法签名（增删参数、改类型）。
+- Trigger: 修改 `app.go` 或 `app_*.go`（按域拆分文件）中 `App` 结构体的导出方法签名（增删参数、改类型）。App struct 与 startup/shutdown 留 `app.go`，方法按域分散 `app_*.go`。
 - 原因: Wails 在 `wails dev` / `wails build` 时自动生成 `frontend/wailsjs/go/main/App.js` 与 `App.d.ts`。`frontend/wailsjs/` 整目录已在 `.gitignore`（自 commit 28ca710）且不被 git 跟踪；sub-agent 环境可运行 `wails generate module` 重新生成绑定，若环境不可用（如 CI 无 wails）则需手动同步 `App.js` / `App.d.ts`。
 
 ### 2. Signatures（以 SaveFile 为例）
@@ -129,7 +129,7 @@ GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；�
 - 原因: Wails v2 前端 runtime（`frontend/wailsjs/runtime/runtime.js`）**不导出** `SaveFileDialog` / `OpenFileDialog` / `DirectoryDialog` 等文件对话框 API（仅导出 `EventsOn` / `EventsOff` / `BrowserOpenURL` / `WindowReload` 等事件与窗口类）。前端 import 这些符号时 `npm run build` 必挂 `MISSING_EXPORT`，但 `npm test`（vitest 因 mock 规避）可能仍过，易漏。原生对话框必须在后端 Go 调 `github.com/wailsapp/wails/v2/pkg/runtime.SaveFileDialog(ctx, opts)` 等，前端无直接 API。
 
 ### 2. Signatures
-- Go 桥接方法（`app.go`，ctx 取 startup 注入的 `a.ctx`）：
+- Go 桥接方法（`app.go` / `app_*.go` 按域拆分文件，ctx 取 startup 注入的 `a.ctx`）：
   - `func (a *App) SaveFileDialog(defaultFilename string, filters []runtime.FileFilter) (string, error)` — 包装 `runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{DefaultFilename: defaultFilename, Filters: filters})`
   - `func (a *App) OpenFileDialog(title string, filters []runtime.FileFilter) (string, error)` — 包装 `runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: title, Filters: filters})`
 - JS binding（`App.js`）：`export function SaveFileDialog(arg1, arg2) { return window['go']['main']['App']['SaveFileDialog'](arg1, arg2) }`
@@ -164,4 +164,4 @@ GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；�
 #### Wrong
 `AiTaskHistoryPanel.vue` import `{ EventsOn, EventsOff, SaveFileDialog } from 'wailsjs/runtime/runtime'`，调用 `SaveFileDialog({ DefaultFilename: defaultFilename, Filters: filters })`。`runtime.js` 无 `SaveFileDialog` 导出，`npm run build` 报 MISSING_EXPORT。`AiFunctionConfigDialog.vue` 同根因 import `OpenFileDialog` + `SaveFileDialog` 同样挂。
 #### Correct
-`app.go` 加 `SaveFileDialog(defaultFilename, filters)` / `OpenFileDialog(title, filters)` 桥接方法（ctx 取 `a.ctx`），`wails generate module` 生成绑定。前端 import 改从 `wailsjs/go/main/App` 取，调用改位置参数 `SaveFileDialog(defaultFilename, filters)`，spec mock 迁至 App mock 块。`npm run build` + `npm test` 双绿。
+`app_preview.go` 加 `SaveFileDialog(defaultFilename, filters)` / `OpenFileDialog(title, filters)` 桥接方法（ctx 取 `a.ctx`），`wails generate module` 生成绑定。前端 import 改从 `wailsjs/go/main/App` 取，调用改位置参数 `SaveFileDialog(defaultFilename, filters)`，spec mock 迁至 App mock 块。`npm run build` + `npm test` 双绿。
