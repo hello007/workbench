@@ -58,6 +58,14 @@ const contentPanelStubs = {
   'el-tab-pane': { template: '<div><slot /></div>', props: ['label', 'name', 'lazy'] },
   'el-button': { template: '<button v-bind="$attrs"><slot /></button>', props: ['loading', 'type', 'disabled', 'size'] },
   'el-button-group': { template: '<div><slot /></div>' },
+  'el-switch': {
+    template: '<input type="checkbox" class="el-switch" :checked="modelValue" @change="onChange" />',
+    props: ['modelValue', 'activeText', 'inlinePrompt'],
+    emits: ['update:modelValue'],
+    methods: {
+      onChange(e) { this.$emit('update:modelValue', e.target.checked) }
+    }
+  },
   'el-empty': { template: '<div />', props: ['description', 'imageSize'] },
   'el-dialog': {
     template: '<div v-if="modelValue"><slot /><slot name="footer" /></div>',
@@ -79,6 +87,7 @@ const contentPanelStubs = {
   CommitHistory: { template: '<div class="commit-history" />' },
   GitTags: { template: '<div class="git-tags" />' },
   GitRemotes: { template: '<div class="git-remotes" />' },
+  GitMerge: { template: '<div class="git-merge" />' },
   SuccessFilled: { template: '<span />' },
   CircleCloseFilled: { template: '<span />' },
   ArrowLeft: { template: '<span class="arrow-left" />' }
@@ -936,6 +945,28 @@ describe('ContentPanel.vue - handler 分支补充', () => {
       mountWith(null)
       await wrapper.vm.$.setupState.pullRepo()
       expect(PullRepo).not.toHaveBeenCalled()
+    })
+
+    it('pullRepo 默认传 useRebase=false（兼容现有 pull 行为）', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      PullRepo.mockResolvedValueOnce('ok')
+      await wrapper.vm.$.setupState.pullRepo()
+      await flushPromises()
+      expect(PullRepo).toHaveBeenCalledWith(expect.any(String), false)
+    })
+
+    it('pullRepo 切换变基模式后传 useRebase=true', async () => {
+      const { PullRepo } = await import('../../../wailsjs/go/main/App')
+      // el-switch 仅在 isGitRepo 节点的 git-actions 区渲染，用 git 仓库节点挂载
+      const gitNode = { id: 'n2', name: 'proj', path: 'D:\\proj', type: 'directory', isGitRepo: true }
+      mountWith(gitNode)
+      await wrapper.find('.el-switch').setValue(true)
+      await flushPromises()
+      PullRepo.mockResolvedValueOnce('ok')
+      await wrapper.vm.$.setupState.pullRepo()
+      await flushPromises()
+      expect(PullRepo).toHaveBeenCalledWith(expect.any(String), true)
     })
   })
 

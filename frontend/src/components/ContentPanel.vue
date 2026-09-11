@@ -33,6 +33,12 @@
         <el-button type="primary" @click="pullRepo" :loading="gitLoading">
           拉取更新
         </el-button>
+        <el-switch
+          v-model="pullUseRebase"
+          active-text="变基模式"
+          inline-prompt
+          style="margin-left: var(--spacing-sm)"
+        />
         <el-button @click="showBranchDialog" :loading="branchLoading">
           切换分支
         </el-button>
@@ -71,6 +77,9 @@
         </el-tab-pane>
         <el-tab-pane label="远程仓库" name="remotes" lazy>
           <GitRemotes :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
+        <el-tab-pane label="合并/变基" name="merge" lazy>
+          <GitMerge :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
       </el-tabs>
 
@@ -442,6 +451,7 @@ import LocalChanges from './LocalChanges.vue'
 import GitBranches from './GitBranches.vue'
 import GitTags from './GitTags.vue'
 import GitRemotes from './GitRemotes.vue'
+import GitMerge from './GitMerge.vue'
 import FilePreviewRenderer from './FilePreviewRenderer.vue'
 import {
   PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
@@ -476,6 +486,8 @@ const emit = defineEmits([
 ])
 
 const gitLoading = ref(false)
+// 拉取是否走变基模式（git pull --rebase），默认 false 保持普通 pull 行为
+const pullUseRebase = ref(false)
 const activeGitTab = ref('repo')
 const gitInfoRef = ref()
 const commitHistoryRef = ref()
@@ -641,7 +653,7 @@ const pullRepo = async () => {
 
   gitLoading.value = true
   try {
-    const result = await PullRepo(workspaceStore.selectedNode.path)
+    const result = await PullRepo(workspaceStore.selectedNode.path, pullUseRebase.value)
     if (result && result.length > 200) {
       singlePullResult.value = result
       singlePullVisible.value = true

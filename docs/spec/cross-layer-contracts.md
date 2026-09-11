@@ -165,3 +165,44 @@ GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；�
 `AiTaskHistoryPanel.vue` import `{ EventsOn, EventsOff, SaveFileDialog } from 'wailsjs/runtime/runtime'`，调用 `SaveFileDialog({ DefaultFilename: defaultFilename, Filters: filters })`。`runtime.js` 无 `SaveFileDialog` 导出，`npm run build` 报 MISSING_EXPORT。`AiFunctionConfigDialog.vue` 同根因 import `OpenFileDialog` + `SaveFileDialog` 同样挂。
 #### Correct
 `app_preview.go` 加 `SaveFileDialog(defaultFilename, filters)` / `OpenFileDialog(title, filters)` 桥接方法（ctx 取 `a.ctx`），`wails generate module` 生成绑定。前端 import 改从 `wailsjs/go/main/App` 取，调用改位置参数 `SaveFileDialog(defaultFilename, filters)`，spec mock 迁至 App mock 块。`npm run build` + `npm test` 双绿。
+
+---
+
+## Scenario: 具名 string 类型作 Wails 绑定参数须手动补 models.ts type 别名
+
+### 1. Scope / Trigger
+- Trigger: `model/` 下用 `type X string`（具名 string 类型，非普通 string、非 struct）作为 Wails 暴露方法的**参数类型**或**返回值类型**，如 `MergeMode`、`ConflictType`。
+- 原因: `wails generate module` 对具名 string 类型的处理在不同位置不一致——struct 字段处解析为普通 `string`，函数参数/返回值处保留 `model.X` 引用写进 `App.d.ts`，但 `models.ts` **不**为该类型生成 `export type X = string` 别名。结果 `App.d.ts` 引用了 `models.ts` 不存在的类型，`npm run build` 报 `MISSING_EXPORT`。vitest 走 esbuild 转译不报类型错误，`npm test` 仍过，**极易漏**。
+
+### 2. Signatures（以 MergeMode 为例）
+- Go: `type MergeMode string` + `func (a *App) Merge(path, branch string, mode model.MergeMode) (string, error)`
+- TS (`App.d.ts`): `Merge(arg1:string,arg2:string,arg3:model.MergeMode):Promise<string>` — 引用 `model.MergeMode`
+- TS (`models.ts`): wails **不生成** `export type MergeMode = string`，须手动补
+
+### 3. Contracts
+- 具名 string 类型作方法参数/返回值 → `App.d.ts` 保留 `model.X` 引用 → `models.ts` 须有对应 `export type X = string` 别名
+- struct 字段位的具名 string 类型（如 `ConflictState.Type ConflictType`）wails 解析为普通 `string`，`models.ts` 的 class 字段直接是 `type: string`，不产生引用、不需补别名
+- 故只有"类型出现在函数签名"才触发本规则；仅出现在 struct 字段不触发
+- `frontend/wailsjs/` 整目录 gitignore（自 commit 28ca710），`models.ts` 由 `wails generate module` 生成，手动补的别名不提交、不 `git add -f`
+
+### 4. Validation & Error Matrix
+- 具名 string 类型作参数，未补 `models.ts` 别名 → `npm run build` 报 `MISSING_EXPORT: "MergeMode" is not exported by ".../models.ts"`，构建失败
+- 同一类型同时用于 struct 字段与函数参数 → struct 字段侧已是 `string`（无引用），仅函数参数侧需补别名（补一处即覆盖）
+- 仅跑 `npm test` 不跑 `npm run build` → vitest esbuild 不报类型错误，测试过但 build 挂，**漏检**
+- sub-agent 运行 `wails generate module` 后未核对 `models.ts` 是否生成别名 → 生成器本身不补，仍缺，须手动补
+
+### 5. Good/Base/Bad Cases
+- Good: Go 定义具名 string 类型作参数 → `wails generate module` → 核对 `models.ts` 无 `export type X` → 手动补 `export type X = string` → `npm run build` + `npm test` 双绿
+- Base: 手动同步 `App.d.ts`（无 wails CLI）→ 同步手动补 `models.ts` 别名 → `npm run build` 验证
+- Bad: 只跑 `npm test` 通过即提交 → CI/`wails build` 报 MISSING_EXPORT
+
+### 6. Tests Required
+- `npm run build` 必跑（rolldown 全量打包验证 import 路径，vitest 不走此路径会漏 MISSING_EXPORT）
+- 后端单测覆盖具名 string 类型常量取值（如 `MergeModeFF`/`MergeModeNoFF`/`MergeModeSquash` 分支）
+- 前端单测断言方法被以正确参数调用（如 `Merge` 收到 `(path, branch, mode)`）
+
+### 7. Wrong vs Correct
+#### Wrong
+`model/commit.go` 定义 `type MergeMode string`，`app_git.go` 方法 `Merge(path, branch string, mode model.MergeMode)`，`wails generate module` 后 `App.d.ts` 引用 `model.MergeMode` 但 `models.ts` 无该导出。仅跑 `npm test`（vitest esbuild 不报类型错误）即提交，`wails build` / `npm run build` 报 `MISSING_EXPORT: "MergeMode"`。
+#### Correct
+`wails generate module` 后核对 `models.ts`，手动补 `export type MergeMode = string`（与 wails 将 struct 字段位的具名 string 解析为 `string` 的行为一致），`npm run build` + `npm test` 双绿。
