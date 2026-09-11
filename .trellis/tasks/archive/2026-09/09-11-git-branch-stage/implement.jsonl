@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 5 个 App 桥接方法(CreateBranch/DeleteBranch/RenameBranch/StageFiles/UnstageFiles)须同步 wailsjs App.js/App.d.ts/models.ts 三处,本 spec 为同步规则权威"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 新方法须达 ≥76% 基线,前端 ≥70% 硬失败,测试编写门槛"}
