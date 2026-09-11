@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-09-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1556 | Active |
+| `journal-1.md` | ~1589 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-09-11 | 修复 filetree cache mtime 测试 flaky | `76c2d00` | `master` |
 | 46 | 2026-09-11 | Git 分支增删改与单文件暂存 | `4ebe69e`, `30bcd31` | `master` |
 | 45 | 2026-09-11 | Git 标签与远程仓库管理 | `533dfe3` | `master` |
 | 44 | 2026-09-10 | app.go 按域拆分 + 测试覆盖率分层门禁 | `f0980f1`, `26a462b` | `master` |

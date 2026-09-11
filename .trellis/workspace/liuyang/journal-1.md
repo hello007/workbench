@@ -1554,3 +1554,36 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 47: 修复 filetree cache mtime 测试 flaky
+
+**Date**: 2026-09-11
+**Task**: 修复 filetree cache mtime 测试 flaky
+**Branch**: `master`
+
+### Summary
+
+TestGetChildren_CacheInvalidatedOnMtimeChange 在 NTFS 上 flaky：连续 mustWriteFile 落同 mtime tick 时目录 mtime 不变导致缓存命中返回旧节点数。采用方案 C 改写为注入陈旧缓存（modTime 明确落后于当前）直接驱动 get 的 modTime.Equal 失效分支，不依赖文件系统 tick 时序。沉淀 docs/spec/test-stability.md 规范。验证：5 次连续 PASS + 全量绿 + service 覆盖率 77.7%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76c2d00` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
