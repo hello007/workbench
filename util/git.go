@@ -204,3 +204,116 @@ func (g *GitCommand) CheckoutLocal(dir, branch string) (string, error) {
 func (g *GitCommand) CheckoutRemote(dir, remoteBranch, localBranch string) (string, error) {
 	return g.Execute(dir, "checkout", "-b", localBranch, remoteBranch)
 }
+
+// ===== 合并 / 变基 / 拣选 =====
+//
+// 以下操作均可能因冲突以 exit 1 正常结束，统一走 ExecuteWithCodes 接受退出码 1。
+// 调用方据返回的 stdout/stderr 与 IsXxxInProgress 判定是否进入冲突态。
+// workDir 须为仓库根目录（由 service 层 FindGitRoot 保证），冲突态检测依赖 .git 目录。
+
+// conflictExitCodes 冲突类操作可接受的退出码集合：exit 1 表示存在冲突，视为正常返回。
+var conflictExitCodes = map[int]bool{1: true}
+
+// Merge 合并指定分支到当前分支。mode 取 ff/no-ff/squash：
+// ff 走 git 默认行为（可快进时快进），no-ff 强制合并提交，squash 压缩为单个暂存变更。
+// mode 以 string 传入而非 model.MergeMode，避免 util 层反向依赖 model，保持底层纯净。
+func (g *GitCommand) Merge(workDir, branch, mode string) (string, error) {
+	args := []string{"merge"}
+	switch mode {
+	case "no-ff":
+		args = append(args, "--no-ff")
+	case "squash":
+		args = append(args, "--squash")
+	default:
+		// ff：git 默认即可快进时快进，不附加 flag
+	}
+	args = append(args, branch)
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, args...)
+}
+
+// Rebase 将当前分支变基到指定分支之上（git rebase <branch>）。
+func (g *GitCommand) Rebase(workDir, branch string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", branch)
+}
+
+// CherryPick 将指定提交拣选到当前分支（git cherry-pick <sha>）。
+func (g *GitCommand) CherryPick(workDir, sha string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "cherry-pick", sha)
+}
+
+// PullRebase 拉取远程更新并以变基方式重放本地提交（git pull --rebase）。
+func (g *GitCommand) PullRebase(workDir string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "pull", "--rebase")
+}
+
+// MergeAbort 中止进行中的合并，回滚到合并前状态（git merge --abort）。
+func (g *GitCommand) MergeAbort(workDir string) (string, error) {
+	return g.Execute(workDir, "merge", "--abort")
+}
+
+// MergeContinue 合并冲突解决后提交合并。走 git commit --no-edit 复用预生成的 MERGE_MSG，
+// 避免弹出编辑器。仍可能因遗留冲突以 exit 1 失败，走 ExecuteWithCodes 接受。
+func (g *GitCommand) MergeContinue(workDir string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "commit", "--no-edit")
+}
+
+// RebaseAbort 中止进行中的变基，回滚到变基前分支位置（git rebase --abort）。
+func (g *GitCommand) RebaseAbort(workDir string) (string, error) {
+	return g.Execute(workDir, "rebase", "--abort")
+}
+
+// RebaseContinue 解决冲突后继续变基。可能再次冲突，走 ExecuteWithCodes 接受 exit 1。
+func (g *GitCommand) RebaseContinue(workDir string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", "--continue")
+}
+
+// RebaseSkip 跳过当前冲突提交继续变基（git rebase --skip）。
+func (g *GitCommand) RebaseSkip(workDir string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", "--skip")
+}
+
+// CherryPickAbort 中止进行中的拣选（git cherry-pick --abort）。
+func (g *GitCommand) CherryPickAbort(workDir string) (string, error) {
+	return g.Execute(workDir, "cherry-pick", "--abort")
+}
+
+// CherryPickContinue 解决冲突后继续拣选。可能再次冲突，走 ExecuteWithCodes 接受 exit 1。
+func (g *GitCommand) CherryPickContinue(workDir string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, "cherry-pick", "--continue")
+}
+
+// ListConflictFiles 列出未解决冲突文件（git diff --name-only --diff-filter=U）。
+// 返回相对仓库根的文件路径列表，无冲突时返回空切片。
+func (g *GitCommand) ListConflictFiles(workDir string) ([]string, error) {
+	output, err := g.Execute(workDir, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return []string{}, nil
+	}
+	return strings.Split(output, "\n"), nil
+}
+
+// IsMergeInProgress 检测是否处于合并冲突态：.git/MERGE_HEAD 存在即合并进行中。
+func (g *GitCommand) IsMergeInProgress(workDir string) bool {
+	return fileExists(filepath.Join(workDir, ".git", "MERGE_HEAD"))
+}
+
+// IsRebaseInProgress 检测是否处于变基态：.git/rebase-merge/ 或 .git/rebase-apply/ 存在。
+func (g *GitCommand) IsRebaseInProgress(workDir string) bool {
+	return fileExists(filepath.Join(workDir, ".git", "rebase-merge")) ||
+		fileExists(filepath.Join(workDir, ".git", "rebase-apply"))
+}
+
+// IsCherryPickInProgress 检测是否处于拣选冲突态：.git/CHERRY_PICK_HEAD 存在即拣选进行中。
+func (g *GitCommand) IsCherryPickInProgress(workDir string) bool {
+	return fileExists(filepath.Join(workDir, ".git", "CHERRY_PICK_HEAD"))
+}
+
+// fileExists 判定路径存在性（文件或目录均可），供冲突态检测复用。
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}

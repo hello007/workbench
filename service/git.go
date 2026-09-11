@@ -63,20 +63,6 @@ func (s *GitService) GetInfo(dirPath string) (*model.GitRepoInfo, error) {
 	return info, nil
 }
 
-// GetLog 获取提交历史（需要补充util/git.go的方法）
-func (s *GitService) GetLog(dirPath string, page, pageSize int) (*model.PageResult, error) {
-	if !s.gitCmd.IsGitRepository(dirPath) {
-		return nil, fmt.Errorf("不是Git仓库")
-	}
-
-	// 简化实现，这里假设使用固定逻辑
-	commits := []model.GitCommit{}
-
-	// 这里需要调用Git命令获取日志
-	// 暂时返回空结果
-	return model.NewPageResult(commits, 0, page, pageSize), nil
-}
-
 // Clone 克隆仓库
 func (s *GitService) Clone(url, targetPath string) (string, error) {
 	if _, err := os.Stat(targetPath); err == nil {
@@ -86,12 +72,15 @@ func (s *GitService) Clone(url, targetPath string) (string, error) {
 	return s.gitCmd.Clone(url, targetPath)
 }
 
-// Pull 拉取更新
-func (s *GitService) Pull(dirPath string) (string, error) {
+// Pull 拉取更新。useRebase=true 走 git pull --rebase（变基模式，冲突走统一冲突解决入口），
+// useRebase=false 走普通 pull，与历史行为完全一致。
+func (s *GitService) Pull(dirPath string, useRebase bool) (string, error) {
 	if !s.gitCmd.IsGitRepository(dirPath) {
 		return "", fmt.Errorf("不是Git仓库")
 	}
-
+	if useRebase {
+		return s.gitCmd.PullRebase(dirPath)
+	}
 	return s.gitCmd.Pull(dirPath)
 }
 
@@ -1028,4 +1017,205 @@ func (s *GitService) UnstageFiles(repoPath string, files []string) error {
 		return fmt.Errorf("取消暂存文件失败: %w", err)
 	}
 	return nil
+}
+
+// ===== 合并 / 变基 / 拣选 / 冲突解决 =====
+//
+// 设计要点：
+//   - merge/rebase/cherry-pick 共用 precheckMutation 前置校验（仓库存在 + 非 detached HEAD + 工作区干净）
+//   - 冲突类操作 git 以 exit 1 正常返回，util 层 ExecuteWithCodes 已接受，service 层不把冲突当错误
+//   - continue/abort/skip 通过 requireInProgress 守卫，避免无进行中操作时调 --continue 产生 git 报错
+//   - Pull 增 useRebase 参数为破坏性签名变更，须同步 app 层与前端 wailsjs 绑定（见 cross-layer-contracts.md）
+
+// precheckMutation 校验变更类操作前置条件：仓库存在 + 非 detached HEAD + 工作区干净。
+// 返回 git 根目录供后续操作使用。detached HEAD 判定依据 branch --show-current 返回空串。
+func (s *GitService) precheckMutation(repoPath string) (string, error) {
+	if !s.gitCmd.IsGitRepository(repoPath) {
+		return "", fmt.Errorf("不是Git仓库")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	branch, err := s.gitCmd.GetBranch(gitRoot)
+	if err != nil {
+		return "", fmt.Errorf("获取当前分支失败: %w", err)
+	}
+	if strings.TrimSpace(branch) == "" {
+		return "", fmt.Errorf("当前处于分离头指针状态，禁止合并/变基/拣选")
+	}
+	hasChanges, err := s.gitCmd.HasLocalChanges(gitRoot)
+	if err != nil {
+		return "", fmt.Errorf("检查工作区状态失败: %w", err)
+	}
+	if hasChanges {
+		return "", fmt.Errorf("工作区不干净，请先提交或暂存变更")
+	}
+	return gitRoot, nil
+}
+
+// Merge 合并 branch 到当前分支，mode 取 ff/no-ff/squash。前置校验通过后委托 util。
+func (s *GitService) Merge(repoPath, branch string, mode model.MergeMode) (string, error) {
+	if strings.TrimSpace(branch) == "" {
+		return "", fmt.Errorf("目标分支不能为空")
+	}
+	gitRoot, err := s.precheckMutation(repoPath)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.Merge(gitRoot, branch, string(mode))
+}
+
+// Rebase 将当前分支变基到 branch 之上。前置校验通过后委托 util。
+func (s *GitService) Rebase(repoPath, branch string) (string, error) {
+	if strings.TrimSpace(branch) == "" {
+		return "", fmt.Errorf("目标分支不能为空")
+	}
+	gitRoot, err := s.precheckMutation(repoPath)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.Rebase(gitRoot, branch)
+}
+
+// CherryPick 将 sha 拣选到当前分支。前置校验通过后委托 util。
+func (s *GitService) CherryPick(repoPath, sha string) (string, error) {
+	if strings.TrimSpace(sha) == "" {
+		return "", fmt.Errorf("提交 SHA 不能为空")
+	}
+	gitRoot, err := s.precheckMutation(repoPath)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.CherryPick(gitRoot, sha)
+}
+
+// GetConflictState 返回当前冲突态快照。按 merge > rebase > cherry-pick 优先级判定类型，
+// 并列出未解决冲突文件。无冲突态时 Type=none、Files 为空切片。
+func (s *GitService) GetConflictState(repoPath string) (*model.ConflictState, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	state := &model.ConflictState{Type: model.ConflictTypeNone, Files: []string{}}
+	switch {
+	case s.gitCmd.IsMergeInProgress(gitRoot):
+		state.Type = model.ConflictTypeMerge
+	case s.gitCmd.IsRebaseInProgress(gitRoot):
+		state.Type = model.ConflictTypeRebase
+	case s.gitCmd.IsCherryPickInProgress(gitRoot):
+		state.Type = model.ConflictTypeCherryPick
+	default:
+		return state, nil
+	}
+	files, err := s.gitCmd.ListConflictFiles(gitRoot)
+	if err != nil {
+		return nil, fmt.Errorf("获取冲突文件列表失败: %w", err)
+	}
+	state.Files = files
+	return state, nil
+}
+
+// ResolveConflict 标记单个冲突文件已解决（git add -- <file>）。file 空报错。
+func (s *GitService) ResolveConflict(repoPath, file string) error {
+	if strings.TrimSpace(file) == "" {
+		return fmt.Errorf("文件路径不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "add", "--", file); err != nil {
+		return fmt.Errorf("标记已解决失败: %w", err)
+	}
+	return nil
+}
+
+// requireInProgress 守卫 continue/abort/skip：要求指定操作进行中，否则报错。返回 git 根。
+func (s *GitService) requireInProgress(repoPath string, op model.ConflictType) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	var inProgress bool
+	switch op {
+	case model.ConflictTypeMerge:
+		inProgress = s.gitCmd.IsMergeInProgress(gitRoot)
+	case model.ConflictTypeRebase:
+		inProgress = s.gitCmd.IsRebaseInProgress(gitRoot)
+	case model.ConflictTypeCherryPick:
+		inProgress = s.gitCmd.IsCherryPickInProgress(gitRoot)
+	default:
+		return "", fmt.Errorf("不支持的操作类型: %s", op)
+	}
+	if !inProgress {
+		return "", fmt.Errorf("无进行中的%s操作", op)
+	}
+	return gitRoot, nil
+}
+
+// ContinueMerge 合并冲突解决后提交合并（git commit --no-edit，复用 MERGE_MSG）。
+func (s *GitService) ContinueMerge(repoPath string) (string, error) {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeMerge)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.MergeContinue(gitRoot)
+}
+
+// ContinueRebase 变基冲突解决后继续。可能再次冲突。
+func (s *GitService) ContinueRebase(repoPath string) (string, error) {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.RebaseContinue(gitRoot)
+}
+
+// ContinueCherryPick 拣选冲突解决后继续。可能再次冲突。
+func (s *GitService) ContinueCherryPick(repoPath string) (string, error) {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeCherryPick)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.CherryPickContinue(gitRoot)
+}
+
+// AbortMerge 中止合并，回滚到合并前状态。
+func (s *GitService) AbortMerge(repoPath string) error {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeMerge)
+	if err != nil {
+		return err
+	}
+	_, err = s.gitCmd.MergeAbort(gitRoot)
+	return err
+}
+
+// AbortRebase 中止变基，回滚到变基前分支位置。
+func (s *GitService) AbortRebase(repoPath string) error {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
+	if err != nil {
+		return err
+	}
+	_, err = s.gitCmd.RebaseAbort(gitRoot)
+	return err
+}
+
+// AbortCherryPick 中止拣选，回滚到拣选前状态。
+func (s *GitService) AbortCherryPick(repoPath string) error {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeCherryPick)
+	if err != nil {
+		return err
+	}
+	_, err = s.gitCmd.CherryPickAbort(gitRoot)
+	return err
+}
+
+// SkipRebase 跳过当前冲突提交继续变基（仅 rebase 有 --skip 语义，merge/cherry-pick 无）。
+func (s *GitService) SkipRebase(repoPath string) (string, error) {
+	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
+	if err != nil {
+		return "", err
+	}
+	return s.gitCmd.RebaseSkip(gitRoot)
 }

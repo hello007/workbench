@@ -25,16 +25,6 @@ func (a *App) GetGitInfo(path string) *model.GitRepoInfo {
 	return info
 }
 
-// GetGitLog 获取提交历史
-func (a *App) GetGitLog(dirPath string, page, pageSize int) *model.PageResult {
-	result, err := a.gitSvc.GetLog(dirPath, page, pageSize)
-	if err != nil {
-		println("Error:", err.Error())
-		return model.NewPageResult([]model.GitCommit{}, 0, page, pageSize)
-	}
-	return result
-}
-
 // CloneRepo 克隆仓库
 func (a *App) CloneRepo(url, targetPath string) string {
 	repoName := a.gitSvc.ExtractRepoName(url)
@@ -53,15 +43,15 @@ func (a *App) CloneRepo(url, targetPath string) string {
 	return "克隆成功"
 }
 
-// PullRepo 拉取更新
-func (a *App) PullRepo(dirPath string) string {
+// PullRepo 拉取更新。useRebase=true 走 git pull --rebase（变基模式），false 走普通 pull。
+func (a *App) PullRepo(dirPath string, useRebase bool) string {
 	if !util.NewGitCommand().IsGitRepository(dirPath) {
 		return "错误: 不是Git仓库"
 	}
 	if !a.gitSvc.HasRemote(dirPath) {
 		return "该仓库未配置远程，无需拉取"
 	}
-	output, err := a.gitSvc.Pull(dirPath)
+	output, err := a.gitSvc.Pull(dirPath, useRebase)
 	if err != nil {
 		return "错误: " + err.Error()
 	}
@@ -442,4 +432,102 @@ func (a *App) SetBranchUpstream(path, branch, remote string) error {
 		return fmt.Errorf("路径不能为空")
 	}
 	return a.gitSvc.SetBranchUpstream(path, branch, remote)
+}
+
+// ===== 合并 / 变基 / 拣选 / 冲突解决域 =====
+
+// Merge 合并 branch 到当前分支，mode 取 ff/no-ff/squash。返回 git stdout。
+func (a *App) Merge(path, branch string, mode model.MergeMode) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.Merge(path, branch, mode)
+}
+
+// Rebase 将当前分支变基到 branch 之上。
+func (a *App) Rebase(path, branch string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.Rebase(path, branch)
+}
+
+// CherryPick 将 sha 拣选到当前分支。
+func (a *App) CherryPick(path, sha string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CherryPick(path, sha)
+}
+
+// GetConflictState 返回当前冲突态快照（操作类型 + 冲突文件列表）。
+func (a *App) GetConflictState(path string) (*model.ConflictState, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.GetConflictState(path)
+}
+
+// ResolveConflict 标记单个冲突文件已解决（git add）。
+func (a *App) ResolveConflict(path, file string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ResolveConflict(path, file)
+}
+
+// ContinueMerge 合并冲突解决后提交合并。
+func (a *App) ContinueMerge(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ContinueMerge(path)
+}
+
+// ContinueRebase 变基冲突解决后继续。
+func (a *App) ContinueRebase(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ContinueRebase(path)
+}
+
+// ContinueCherryPick 拣选冲突解决后继续。
+func (a *App) ContinueCherryPick(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ContinueCherryPick(path)
+}
+
+// AbortMerge 中止合并。
+func (a *App) AbortMerge(path string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AbortMerge(path)
+}
+
+// AbortRebase 中止变基。
+func (a *App) AbortRebase(path string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AbortRebase(path)
+}
+
+// AbortCherryPick 中止拣选。
+func (a *App) AbortCherryPick(path string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AbortCherryPick(path)
+}
+
+// SkipRebase 跳过当前冲突提交继续变基。
+func (a *App) SkipRebase(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.SkipRebase(path)
 }

@@ -105,33 +105,8 @@ func TestGetInfo_NonRepo(t *testing.T) {
 // TestPull_NonRepo 非仓库目录 pull 返回错误。
 func TestPull_NonRepo(t *testing.T) {
 	svc := NewGitService()
-	if _, err := svc.Pull(t.TempDir()); err == nil {
+	if _, err := svc.Pull(t.TempDir(), false); err == nil {
 		t.Error("非仓库 pull 应返回错误")
-	}
-}
-
-// TestGetLog_NonRepo 非仓库目录返回错误。
-func TestGetLog_NonRepo(t *testing.T) {
-	svc := NewGitService()
-	if _, err := svc.GetLog(t.TempDir(), 1, 10); err == nil {
-		t.Error("非仓库 getlog 应返回错误")
-	}
-}
-
-// TestGetLog_Repo_Empty 真实仓库但无提交时返回空分页结果。
-func TestGetLog_Repo_Empty(t *testing.T) {
-	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
-
-	svc := NewGitService()
-	res, err := svc.GetLog(dir, 1, 10)
-	if err != nil {
-		t.Fatalf("GetLog repo: %v", err)
-	}
-	if res.Total != 0 {
-		t.Errorf("空仓库 Total 期望 0, got %d", res.Total)
 	}
 }
 
@@ -694,9 +669,9 @@ func TestGetLocalChanges_UntrackedDirExpanded(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"newdir/f1.txt":      false,
-		"newdir/f2.txt":      false,
-		"newdir/sub/f3.txt":  false,
+		"newdir/f1.txt":     false,
+		"newdir/f2.txt":     false,
+		"newdir/sub/f3.txt": false,
 	}
 	for _, c := range changes {
 		// 未跟踪文件状态码为 ?

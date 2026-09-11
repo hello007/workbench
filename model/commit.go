@@ -42,7 +42,7 @@ type BranchList struct {
 type GitTag struct {
 	Name     string `json:"name"`     // 标签名
 	Type     string `json:"type"`     // 类型: lightweight|annotated
-	Sha      string `json:"sha"`     // 指向的提交 SHA
+	Sha      string `json:"sha"`      // 指向的提交 SHA
 	ShortSha string `json:"shortSha"` // 前 8 位 SHA，用于显示
 	Message  string `json:"message"`  // 注释消息（轻量标签为空）
 	Tagger   string `json:"tagger"`   // 标注者（轻量标签为空）
@@ -71,4 +71,33 @@ func (f *FileChange) StatusLabel() string {
 	default:
 		return f.Status
 	}
+}
+
+// MergeMode 合并策略，对应 git merge 的 --ff/--no-ff/--squash 选项。
+type MergeMode string
+
+const (
+	// MergeModeFF 快进合并：当前分支为目标分支祖先时直接前移指针，不产生合并提交。
+	MergeModeFF MergeMode = "ff"
+	// MergeModeNoFF 强制产生合并提交：即使可快进也创建合并节点，保留分支拓扑。
+	MergeModeNoFF MergeMode = "no-ff"
+	// MergeModeSquash 压缩合并：将目标分支多个提交压缩为单个暂存变更，不产生合并节点。
+	MergeModeSquash MergeMode = "squash"
+)
+
+// ConflictType 冲突来源操作类型，标识当前进行中的 merge/rebase/cherry-pick。
+type ConflictType string
+
+const (
+	ConflictTypeNone       ConflictType = "none"        // 无进行中的冲突态
+	ConflictTypeMerge      ConflictType = "merge"       // git merge 产生的冲突
+	ConflictTypeRebase     ConflictType = "rebase"      // git rebase 产生的冲突
+	ConflictTypeCherryPick ConflictType = "cherry-pick" // git cherry-pick 产生的冲突
+)
+
+// ConflictState 冲突态快照：当前进行中的操作类型 + 未解决冲突文件列表。
+// 前端据此渲染冲突解决面板，Type=none 时隐藏面板。
+type ConflictState struct {
+	Type  ConflictType `json:"type"`  // 冲突来源操作
+	Files []string     `json:"files"` // 冲突文件相对仓库根路径
 }

@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Pull 签名增 useRebase 参数属破坏性变更，新增 Merge/Rebase/CherryPick 绑定——须按此契约同步 wailsjs App.js/App.d.ts/models.ts 三处"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端单测门禁基线：service ≥76%、util ≥40%；前端 ≥70% 硬失败。PR1/PR2 实现时须对齐分层门禁"}
