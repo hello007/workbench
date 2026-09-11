@@ -20,9 +20,10 @@
       <el-table
         v-if="changes.length > 0"
         ref="tableRef"
-        :data="changes"
+        :data="sortedChanges"
         height="100%"
         size="small"
+        :row-class-name="rowClassName"
         @selection-change="onSelectionChange"
         @row-dblclick="openDiff"
       >
@@ -35,6 +36,17 @@
         <el-table-column prop="path" label="文件路径（双击查看差异）" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="file-path">{{ row.path }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="暂存" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.staged ? 'success' : 'info'" size="small">{{ row.staged ? '已暂存' : '未暂存' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" align="center">
+          <template #default="{ row }">
+            <el-button v-if="!row.staged" size="small" text @click="stageSingle(row)">+暂存</el-button>
+            <el-button v-else size="small" text type="warning" @click="unstageSingle(row)">-取消暂存</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -91,6 +103,12 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item command="stageSelected" :disabled="selectedChanges.length === 0">
+                    暂存选中 ({{ selectedChanges.length }})
+                  </el-dropdown-item>
+                  <el-dropdown-item command="unstageSelected" :disabled="selectedChanges.length === 0">
+                    取消暂存选中 ({{ selectedChanges.length }})
+                  </el-dropdown-item>
                   <el-dropdown-item command="discardSelected" :disabled="selectedChanges.length === 0">
                     回滚选中 ({{ selectedChanges.length }})
                   </el-dropdown-item>
@@ -117,7 +135,9 @@ import {
   DiscardChanges,
   CommitFiles,
   PushRepo,
-  HasUpstream
+  HasUpstream,
+  StageFiles,
+  UnstageFiles
 } from '../../wailsjs/go/main/App'
 import FileDiffDialog from './FileDiffDialog.vue'
 
@@ -144,6 +164,19 @@ const diffFile = ref('')
 const canCommit = computed(() => {
   return selectedChanges.value.length > 0 && commitMessage.value.trim().length > 0
 })
+
+// 单表分组：按 staged 排序，未暂存组在上、已暂存组在下（稳定排序保留组内原序）。
+// Staged 字段驱动分组，不拆双栏表，保持单 el-table。
+const sortedChanges = computed(() => {
+  return [...changes.value].sort((a, b) => {
+    const sa = a.staged ? 1 : 0
+    const sb = b.staged ? 1 : 0
+    return sa - sb
+  })
+})
+
+// 行级 class：区分已暂存/未暂存组，提供视觉分组提示。
+const rowClassName = ({ row }) => (row.staged ? 'row-staged' : 'row-unstaged')
 
 const loadChanges = async () => {
   loading.value = true
@@ -292,8 +325,63 @@ const discardAll = async () => {
   }
 }
 
+// 暂存单文件：行级 + 按钮，调 StageFiles 后刷新面板。
+const stageSingle = async (row) => {
+  if (!row || !row.path) return
+  try {
+    await StageFiles(props.repoPath, [row.path])
+    await loadChanges()
+  } catch (error) {
+    ElMessage.error('暂存失败: ' + (error.message || String(error)))
+  }
+}
+
+// 取消暂存单文件：行级 - 按钮，调 UnstageFiles（git restore --staged）后刷新面板。
+const unstageSingle = async (row) => {
+  if (!row || !row.path) return
+  try {
+    await UnstageFiles(props.repoPath, [row.path])
+    await loadChanges()
+  } catch (error) {
+    ElMessage.error('取消暂存失败: ' + (error.message || String(error)))
+  }
+}
+
+// 批量暂存选中：仅暂存未暂存的选中项（git add 对已暂存项幂等，过滤避免冗余）。
+const stageSelected = async () => {
+  const paths = selectedChanges.value.filter(c => !c.staged).map(c => c.path)
+  if (paths.length === 0) {
+    ElMessage.warning('选中文件均已暂存')
+    return
+  }
+  try {
+    await StageFiles(props.repoPath, paths)
+    await loadChanges()
+  } catch (error) {
+    ElMessage.error('暂存失败: ' + (error.message || String(error)))
+  }
+}
+
+// 批量取消暂存选中：仅对已暂存的选中项执行 git restore --staged，
+// 避免对未跟踪/未暂存文件调用导致 git 报错。
+const unstageSelected = async () => {
+  const paths = selectedChanges.value.filter(c => c.staged).map(c => c.path)
+  if (paths.length === 0) {
+    ElMessage.warning('选中文件均未暂存')
+    return
+  }
+  try {
+    await UnstageFiles(props.repoPath, paths)
+    await loadChanges()
+  } catch (error) {
+    ElMessage.error('取消暂存失败: ' + (error.message || String(error)))
+  }
+}
+
 const onMoreCommand = (command) => {
-  if (command === 'discardSelected') discardSelected()
+  if (command === 'stageSelected') stageSelected()
+  else if (command === 'unstageSelected') unstageSelected()
+  else if (command === 'discardSelected') discardSelected()
   else if (command === 'discardAll') discardAll()
 }
 
@@ -328,7 +416,7 @@ onMounted(() => {
   loadChanges()
 })
 
-defineExpose({ loadChanges })
+defineExpose({ loadChanges, stageSingle, unstageSingle })
 </script>
 
 <style scoped>
@@ -370,6 +458,13 @@ defineExpose({ loadChanges })
 .changes-container :deep(.el-table) {
   flex: 1;
   min-height: 0;
+}
+/* 单表分组视觉区分：已暂存行浅绿底，未暂存行默认底（Staged 字段驱动 row-class-name） */
+.changes-container :deep(.row-staged) {
+  background-color: var(--success-bg, #f0f9eb);
+}
+.changes-container :deep(.row-unstaged) {
+  background-color: var(--bg-secondary);
 }
 .changes-footer {
   flex-shrink: 0;

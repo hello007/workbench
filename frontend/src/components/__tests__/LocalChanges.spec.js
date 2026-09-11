@@ -17,7 +17,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   DiscardChanges: vi.fn(),
   CommitFiles: vi.fn(),
   PushRepo: vi.fn(),
-  HasUpstream: vi.fn()
+  HasUpstream: vi.fn(),
+  StageFiles: vi.fn(),
+  UnstageFiles: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -72,6 +74,20 @@ const changes = [
   { path: 'src/a.go', status: 'M' },
   { path: 'src/b.go', status: 'A' },
   { path: 'src/c.go', status: '?' }
+]
+
+// 含 staged 字段的混合数据：未暂存(a,c) + 已暂存(b,d)
+const mixedChanges = [
+  { path: 'src/a.go', status: 'M', staged: false },
+  { path: 'src/b.go', status: 'A', staged: true },
+  { path: 'src/c.go', status: '?', staged: false },
+  { path: 'src/d.go', status: 'M', staged: true }
+]
+
+// 全部已暂存：用于 stageSelected 无可暂存项的警告分支
+const stagedChanges = [
+  { path: 'src/a.go', status: 'M', staged: true },
+  { path: 'src/b.go', status: 'A', staged: true }
 ]
 
 function mockBindings(over = {}) {
@@ -341,5 +357,116 @@ describe('LocalChanges.vue', () => {
   it('defineExpose 暴露 loadChanges', async () => {
     wrapper = await createWrapper()
     expect(typeof wrapper.vm.loadChanges).toBe('function')
+  })
+
+  // ===== 暂存 / 取消暂存交互 =====
+
+  it('sortedChanges：未暂存组在上、已暂存组在下（Staged 字段驱动）', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    wrapper = await createWrapper()
+    const sorted = wrapper.vm.$.setupState.sortedChanges
+    expect(sorted.map(c => c.path)).toEqual(['src/a.go', 'src/c.go', 'src/b.go', 'src/d.go'])
+  })
+
+  it('rowClassName：按 staged 返回 row-staged / row-unstaged', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    wrapper = await createWrapper()
+    const { rowClassName } = wrapper.vm.$.setupState
+    expect(rowClassName({ row: { staged: true } })).toBe('row-staged')
+    expect(rowClassName({ row: { staged: false } })).toBe('row-unstaged')
+  })
+
+  it('stageSingle：行级暂存调用 StageFiles(path, [row.path]) 并刷新', async () => {
+    const { StageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    StageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    GetLocalChanges.mockClear()
+    await wrapper.vm.stageSingle({ path: 'src/a.go', staged: false })
+    await flushPromises()
+    expect(StageFiles).toHaveBeenCalledWith('/repo/A', ['src/a.go'])
+    expect(GetLocalChanges).toHaveBeenCalled()
+  })
+
+  it('unstageSingle：行级取消暂存调用 UnstageFiles(path, [row.path]) 并刷新', async () => {
+    const { UnstageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    UnstageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    GetLocalChanges.mockClear()
+    await wrapper.vm.unstageSingle({ path: 'src/b.go', staged: true })
+    await flushPromises()
+    expect(UnstageFiles).toHaveBeenCalledWith('/repo/A', ['src/b.go'])
+    expect(GetLocalChanges).toHaveBeenCalled()
+  })
+
+  it('stageSingle 失败时弹错误提示', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { StageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    StageFiles.mockRejectedValue(new Error('stage fail'))
+    wrapper = await createWrapper()
+    await wrapper.vm.stageSingle({ path: 'src/a.go', staged: false })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('stage fail'))
+  })
+
+  it('stageSelected：批量暂存仅传未暂存的选中路径', async () => {
+    const { StageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    StageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    // el-table stub 挂载即 emit selection-change → selectedChanges = 全部 4 行（按 sorted 顺序）
+    const dropdown = wrapper.findComponent(ElDropdownC)
+    dropdown.vm.$emit('command', 'stageSelected')
+    await flushPromises()
+    expect(StageFiles).toHaveBeenCalledWith('/repo/A', ['src/a.go', 'src/c.go'])
+  })
+
+  it('unstageSelected：批量取消暂存仅传已暂存的选中路径', async () => {
+    const { UnstageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    UnstageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    const dropdown = wrapper.findComponent(ElDropdownC)
+    dropdown.vm.$emit('command', 'unstageSelected')
+    await flushPromises()
+    expect(UnstageFiles).toHaveBeenCalledWith('/repo/A', ['src/b.go', 'src/d.go'])
+  })
+
+  it('stageSelected：选中均已暂存时弹警告且不调用 StageFiles', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { StageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(stagedChanges)
+    StageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    const dropdown = wrapper.findComponent(ElDropdownC)
+    dropdown.vm.$emit('command', 'stageSelected')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('均已暂存'))
+    expect(StageFiles).not.toHaveBeenCalled()
+  })
+
+  it('unstageSelected：选中均未暂存时弹警告且不调用 UnstageFiles', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { UnstageFiles, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(changes) // changes 无 staged 字段 → 均视为未暂存
+    UnstageFiles.mockResolvedValue(undefined)
+    wrapper = await createWrapper()
+    const dropdown = wrapper.findComponent(ElDropdownC)
+    dropdown.vm.$emit('command', 'unstageSelected')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('均未暂存'))
+    expect(UnstageFiles).not.toHaveBeenCalled()
+  })
+
+  it('更多下拉渲染 stageSelected / unstageSelected 命令项', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(changes)
+    wrapper = await createWrapper()
+    expect(wrapper.find('[data-cmd="stageSelected"]').exists()).toBe(true)
+    expect(wrapper.find('[data-cmd="unstageSelected"]').exists()).toBe(true)
   })
 })

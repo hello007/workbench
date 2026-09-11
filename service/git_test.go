@@ -798,3 +798,200 @@ func TestGetLocalChanges_RenameStillParses(t *testing.T) {
 		t.Errorf("staged rename entry should use target path new.txt, got changes: %+v", changes)
 	}
 }
+
+// TestCreateBranch_EmptyName 空分支名返回错误。
+func TestCreateBranch_EmptyName(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.CreateBranch(t.TempDir(), "  "); err == nil {
+		t.Error("空分支名应返回错误")
+	}
+}
+
+// TestCreateBranch_NonRepo 非 git 目录无法定位仓库根，返回错误。
+func TestCreateBranch_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.CreateBranch(t.TempDir(), "feature"); err == nil {
+		t.Error("非仓库 createbranch 应返回错误")
+	}
+}
+
+// TestCreateBranch_RealRepo 真实仓库从 HEAD 创建分支，列表应包含新分支。
+func TestCreateBranch_RealRepo(t *testing.T) {
+	repo := initTempRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	svc := NewGitService()
+	if err := svc.CreateBranch(repo, "feature"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	branches, err := svc.GetBranches(repo)
+	if err != nil {
+		t.Fatalf("GetBranches: %v", err)
+	}
+	found := false
+	for _, b := range branches.Branches {
+		if b.Name == "feature" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("创建的 feature 分支应在分支列表中")
+	}
+}
+
+// TestDeleteBranch_EmptyName 空分支名返回错误。
+func TestDeleteBranch_EmptyName(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.DeleteBranch(t.TempDir(), "", false); err == nil {
+		t.Error("空分支名应返回错误")
+	}
+}
+
+// TestDeleteBranch_ForceDeletesUnmerged 验证 force=true 走 -D 强删路径：
+// 未合并分支用 -d（force=false）删除失败，用 -D（force=true）删除成功。
+func TestDeleteBranch_ForceDeletesUnmerged(t *testing.T) {
+	repo := initTempRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// 创建并切换到 feature 分支，新增未合并提交后切回原分支
+	runGit(t, repo, "checkout", "-b", "feature")
+	writeFile(t, filepath.Join(repo, "b.txt"), "feature-only")
+	runGit(t, repo, "add", "b.txt")
+	runGit(t, repo, "commit", "-m", "feature commit")
+	runGit(t, repo, "checkout", "-")
+
+	svc := NewGitService()
+	// force=false 走 -d：未合并应失败
+	if err := svc.DeleteBranch(repo, "feature", false); err == nil {
+		t.Fatal("未合并分支用 -d 删除应失败")
+	}
+	// force=true 走 -D：应强删成功
+	if err := svc.DeleteBranch(repo, "feature", true); err != nil {
+		t.Fatalf("force=true 强删应成功: %v", err)
+	}
+}
+
+// TestRenameBranch_EmptyName 原分支名或新分支名空均返回错误。
+func TestRenameBranch_EmptyName(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.RenameBranch(t.TempDir(), "", "new"); err == nil {
+		t.Error("空原分支名应返回错误")
+	}
+	if err := svc.RenameBranch(t.TempDir(), "old", ""); err == nil {
+		t.Error("空新分支名应返回错误")
+	}
+}
+
+// TestRenameBranch_RealRepo 真实仓库重命名分支，旧名消失、新名出现。
+func TestRenameBranch_RealRepo(t *testing.T) {
+	repo := initTempRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+	runGit(t, repo, "branch", "old-name")
+
+	svc := NewGitService()
+	if err := svc.RenameBranch(repo, "old-name", "new-name"); err != nil {
+		t.Fatalf("RenameBranch: %v", err)
+	}
+	branches, err := svc.GetBranches(repo)
+	if err != nil {
+		t.Fatalf("GetBranches: %v", err)
+	}
+	hasOld, hasNew := false, false
+	for _, b := range branches.Branches {
+		if b.Name == "old-name" {
+			hasOld = true
+		}
+		if b.Name == "new-name" {
+			hasNew = true
+		}
+	}
+	if hasOld {
+		t.Error("旧分支名应不存在")
+	}
+	if !hasNew {
+		t.Error("新分支名应存在")
+	}
+}
+
+// TestStageFiles_EmptyFiles 空文件列表返回错误。
+func TestStageFiles_EmptyFiles(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.StageFiles(t.TempDir(), nil); err == nil {
+		t.Error("空文件列表应返回错误")
+	}
+}
+
+// TestStageFiles_RealRepo 真实仓库暂存已修改文件，Staged 应转为 true。
+func TestStageFiles_RealRepo(t *testing.T) {
+	repo := initTempRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+	writeFile(t, filepath.Join(repo, "a.txt"), "modified")
+
+	svc := NewGitService()
+	if err := svc.StageFiles(repo, []string{"a.txt"}); err != nil {
+		t.Fatalf("StageFiles: %v", err)
+	}
+	changes, err := svc.GetLocalChanges(repo)
+	if err != nil {
+		t.Fatalf("GetLocalChanges: %v", err)
+	}
+	found := false
+	for _, c := range changes {
+		if c.Path == "a.txt" {
+			found = true
+			if !c.Staged {
+				t.Error("暂存后 a.txt 应 Staged=true")
+			}
+		}
+	}
+	if !found {
+		t.Error("a.txt 应在变动列表中")
+	}
+}
+
+// TestUnstageFiles_EmptyFiles 空文件列表返回错误。
+func TestUnstageFiles_EmptyFiles(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.UnstageFiles(t.TempDir(), nil); err == nil {
+		t.Error("空文件列表应返回错误")
+	}
+}
+
+// TestUnstageFiles_RealRepo 真实仓库取消暂存已暂存文件，Staged 应转为 false 且仍在变动列表。
+func TestUnstageFiles_RealRepo(t *testing.T) {
+	repo := initTempRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "init")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+	writeFile(t, filepath.Join(repo, "a.txt"), "modified")
+	runGit(t, repo, "add", "a.txt")
+
+	svc := NewGitService()
+	if err := svc.UnstageFiles(repo, []string{"a.txt"}); err != nil {
+		t.Fatalf("UnstageFiles: %v", err)
+	}
+	changes, err := svc.GetLocalChanges(repo)
+	if err != nil {
+		t.Fatalf("GetLocalChanges: %v", err)
+	}
+	found := false
+	for _, c := range changes {
+		if c.Path == "a.txt" {
+			found = true
+			if c.Staged {
+				t.Error("取消暂存后 a.txt 应 Staged=false")
+			}
+		}
+	}
+	if !found {
+		t.Error("a.txt 应仍在变动列表中（仅取消暂存，未丢弃改动）")
+	}
+}

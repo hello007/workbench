@@ -63,6 +63,9 @@
             @committed="onLocalChangesCommitted"
           />
         </el-tab-pane>
+        <el-tab-pane label="分支" name="branches" lazy>
+          <GitBranches :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
         <el-tab-pane label="标签" name="tags" lazy>
           <GitTags :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
@@ -436,6 +439,7 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
+import GitBranches from './GitBranches.vue'
 import GitTags from './GitTags.vue'
 import GitRemotes from './GitRemotes.vue'
 import FilePreviewRenderer from './FilePreviewRenderer.vue'

@@ -937,3 +937,95 @@ func (s *GitService) SetBranchUpstream(repoPath, branch, remote string) error {
 	}
 	return nil
 }
+
+// ===== 分支管理（增删改） =====
+
+// CreateBranch 从当前 HEAD 创建新分支（git branch <name>）。name 空报错，重名透传 git 报错。
+func (s *GitService) CreateBranch(repoPath, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("分支名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "branch", name); err != nil {
+		return fmt.Errorf("创建分支失败: %w", err)
+	}
+	return nil
+}
+
+// DeleteBranch 删除本地分支。force=false 走 git branch -d（安全删除，未合并会失败），
+// force=true 走 git branch -D（强制删除）。name 空报错。
+func (s *GitService) DeleteBranch(repoPath, name string, force bool) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("分支名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "branch", flag, name); err != nil {
+		return fmt.Errorf("删除分支失败: %w", err)
+	}
+	return nil
+}
+
+// RenameBranch 重命名本地分支（git branch -m <oldName> <newName>），仅本地不触远程。
+// oldName/newName 空报错；当前分支重命名由前端显式传入当前分支名实现。
+func (s *GitService) RenameBranch(repoPath, oldName, newName string) error {
+	if strings.TrimSpace(oldName) == "" {
+		return fmt.Errorf("原分支名不能为空")
+	}
+	if strings.TrimSpace(newName) == "" {
+		return fmt.Errorf("新分支名不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "branch", "-m", oldName, newName); err != nil {
+		return fmt.Errorf("重命名分支失败: %w", err)
+	}
+	return nil
+}
+
+// ===== 暂存区管理 =====
+
+// StageFiles 暂存文件（git add -- <files>），files 空报错。
+// 与 Commit 内部暂存逻辑一致，但单独暴露供工作区整理使用。
+func (s *GitService) StageFiles(repoPath string, files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("未选择要暂存的文件")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	args := append([]string{"add", "--"}, files...)
+	if _, err := s.gitCmd.Execute(gitRoot, args...); err != nil {
+		return fmt.Errorf("暂存文件失败: %w", err)
+	}
+	return nil
+}
+
+// UnstageFiles 取消暂存文件（git restore --staged -- <files>），统一命令通配已跟踪/未跟踪（git 2.25+）。
+// files 空报错。
+func (s *GitService) UnstageFiles(repoPath string, files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("未选择要取消暂存的文件")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	args := append([]string{"restore", "--staged", "--"}, files...)
+	if _, err := s.gitCmd.Execute(gitRoot, args...); err != nil {
+		return fmt.Errorf("取消暂存文件失败: %w", err)
+	}
+	return nil
+}

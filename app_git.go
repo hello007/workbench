@@ -324,6 +324,50 @@ func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) erro
 	return a.gitSvc.CheckoutBranch(path, branchName, isRemote)
 }
 
+// ===== 分支管理域（增删改） =====
+
+// CreateBranch 从当前 HEAD 创建新分支
+func (a *App) CreateBranch(path, name string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CreateBranch(path, name)
+}
+
+// DeleteBranch 删除本地分支，force=true 走强删（-D）
+func (a *App) DeleteBranch(path, name string, force bool) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.DeleteBranch(path, name, force)
+}
+
+// RenameBranch 重命名本地分支（仅本地，不触远程）
+func (a *App) RenameBranch(path, oldName, newName string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.RenameBranch(path, oldName, newName)
+}
+
+// ===== 暂存区管理域 =====
+
+// StageFiles 暂存文件（git add -- <files>）
+func (a *App) StageFiles(path string, files []string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.StageFiles(path, files)
+}
+
+// UnstageFiles 取消暂存文件（git restore --staged -- <files>）
+func (a *App) UnstageFiles(path string, files []string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.UnstageFiles(path, files)
+}
+
 // ===== 标签管理域 =====
 
 // GetTags 获取仓库标签列表
