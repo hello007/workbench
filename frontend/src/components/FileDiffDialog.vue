@@ -12,14 +12,46 @@
       <div v-if="error" class="diff-empty">{{ error }}</div>
 
       <!-- 空差异 / 二进制 -->
-      <div v-else-if="!loading && left.length === 0 && right.length === 0" class="diff-empty">
+      <div v-else-if="!loading && left.length === 0 && right.length === 0 && fileGroups.length === 0" class="diff-empty">
         {{ binaryHint ? binaryHint : '无差异' }}
       </div>
 
-      <!-- 双栏 diff -->
+      <!-- range 模式：多文件分组双栏 -->
+      <div v-else-if="mode === 'range' && fileGroups.length > 0" class="range-groups">
+        <div v-for="(group, gi) in fileGroups" :key="'g' + gi" class="range-file-group">
+          <div class="range-file-header">{{ group.file }}</div>
+          <div v-if="group.binary" class="diff-empty range-binary">该文件为二进制文件，不支持文本 diff 展示</div>
+          <div v-else class="diff-table">
+            <div class="diff-col diff-col-left">
+              <div class="diff-col-header">{{ leftHeader }}</div>
+              <div class="diff-col-body">
+                <div
+                  v-for="(line, idx) in group.left"
+                  :key="'gl' + gi + idx"
+                  class="diff-line"
+                  :class="lineClass(line)"
+                ><span class="diff-line-no">{{ line.no || '' }}</span><span class="diff-line-text">{{ line.text }}</span></div>
+              </div>
+            </div>
+            <div class="diff-col diff-col-right">
+              <div class="diff-col-header">{{ rightHeader }}</div>
+              <div class="diff-col-body">
+                <div
+                  v-for="(line, idx) in group.right"
+                  :key="'gr' + gi + idx"
+                  class="diff-line"
+                  :class="lineClass(line)"
+                ><span class="diff-line-no">{{ line.no || '' }}</span><span class="diff-line-text">{{ line.text }}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 单文件双栏 diff -->
       <div v-else class="diff-table">
         <div class="diff-col diff-col-left">
-          <div class="diff-col-header">旧版本（HEAD / 工作区前）</div>
+          <div class="diff-col-header">{{ leftHeader }}</div>
           <div class="diff-col-body">
             <div
               v-for="(line, idx) in left"
@@ -30,7 +62,7 @@
           </div>
         </div>
         <div class="diff-col diff-col-right">
-          <div class="diff-col-header">新版本（工作区）</div>
+          <div class="diff-col-header">{{ rightHeader }}</div>
           <div class="diff-col-body">
             <div
               v-for="(line, idx) in right"
@@ -52,12 +84,20 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { GetFileDiff } from '../../wailsjs/go/main/App'
+import { GetFileDiff, GetCommitFileDiff, GetRangeDiff } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   repoPath: { type: String, required: true },
-  file: { type: String, default: '' }
+  file: { type: String, default: '' },
+  // diff 来源模式：
+  //   'workspace'（默认）：工作区单文件，调 GetFileDiff(repoPath, file)
+  //   'commit'：指定提交中单文件，调 GetCommitFileDiff(repoPath, sha, file)
+  //   'range'：两个提交区间全文件，调 GetRangeDiff(repoPath, baseSha, headSha)
+  mode: { type: String, default: 'workspace' },
+  sha: { type: String, default: '' },
+  baseSha: { type: String, default: '' },
+  headSha: { type: String, default: '' }
 })
 
 defineEmits(['update:modelValue'])
@@ -67,10 +107,31 @@ const error = ref('')
 const binaryHint = ref('')
 const left = ref([])
 const right = ref([])
+// range 模式：按 diff --git 头拆分的多文件分组，每项 { file, left, right }
+const fileGroups = ref([])
 
 const dialogTitle = computed(() => {
+  if (props.mode === 'range') {
+    return `区间差异 (${props.baseSha.slice(0, 8)} → ${props.headSha.slice(0, 8)})`
+  }
   const name = props.file ? props.file.split(/[\\/]/).pop() : ''
   return name ? `文件差异 - ${name}` : '文件差异'
+})
+
+// 双栏标题按 diff 来源模式区分：
+//   workspace：旧=HEAD/工作区前，新=工作区
+//   commit：旧=父提交，新=该提交（root commit 时旧=空树，呈现全增）
+//   range：旧=base 提交，新=head 提交
+const leftHeader = computed(() => {
+  if (props.mode === 'commit') return '父提交版本'
+  if (props.mode === 'range') return `base (${props.baseSha.slice(0, 8)})`
+  return '旧版本（HEAD / 工作区前）'
+})
+
+const rightHeader = computed(() => {
+  if (props.mode === 'commit') return `该提交 (${props.sha.slice(0, 8)})`
+  if (props.mode === 'range') return `head (${props.headSha.slice(0, 8)})`
+  return '新版本（工作区）'
 })
 
 const lineClass = (line) => {
@@ -117,6 +178,12 @@ const parseDiff = (text) => {
       // "\ No newline at end of file" 提示，挂到对应侧最后一行（这里直接忽略，避免对齐复杂度）
       continue
     }
+    // 跳过 diff 文件头行：diff --git / index / +++ / ---，避免污染双栏
+    // （+++ 与 --- 首字符为 + / -，若不排除会被误当 add / del 行）
+    if (raw.startsWith('diff --git') || raw.startsWith('index ') ||
+        raw.startsWith('+++') || raw.startsWith('---')) {
+      continue
+    }
     if (tag === ' ') {
       leftLines.push({ kind: 'context', no: String(leftNo++), text: content })
       rightLines.push({ kind: 'context', no: String(rightNo++), text: content })
@@ -134,23 +201,77 @@ const parseDiff = (text) => {
   return { leftLines, rightLines }
 }
 
+/**
+ * 解析 range diff（多文件 unified diff）为按文件分组的双栏结构。
+ * git diff <base> <head> 输出形如：
+ *   diff --git a/path b/path
+ *   index ...
+ *   --- a/path
+ *   +++ b/path
+ *   @@ -l,l +r,r @@
+ *   ...
+ * 按 `diff --git` 头拆段，每段取 b/ 路径为文件名，段内行喂 parseDiff。
+ * 二进制段（含 "Binary files ... differ"）单独标记，不进双栏。
+ */
+const parseRangeDiff = (text) => {
+  const groups = []
+  if (!text) return groups
+
+  // 按 "diff --git" 拆段，首段可能为空（文本以 diff --git 开头时）
+  const segments = text.split(/^diff --git /m)
+  for (const seg of segments) {
+    if (!seg.trim()) continue
+    // seg 形如 "a/path b/path\nindex ...\n--- a/path\n+++ b/path\n@@ ..."
+    const headerMatch = seg.match(/^a\/\S+ b\/(.+?)(?:\r?\n)/)
+    const file = headerMatch ? headerMatch[1] : '(未知文件)'
+    const segText = 'diff --git ' + seg
+    if (/^Binary files /m.test(segText)) {
+      groups.push({ file, binary: true, left: [], right: [] })
+      continue
+    }
+    const { leftLines, rightLines } = parseDiff(segText)
+    if (leftLines.length === 0 && rightLines.length === 0) continue
+    groups.push({ file, binary: false, left: leftLines, right: rightLines })
+  }
+  return groups
+}
+
 const loadDiff = async () => {
-  if (!props.repoPath || !props.file) return
+  if (!props.repoPath) return
   loading.value = true
   error.value = ''
   binaryHint.value = ''
   left.value = []
   right.value = []
+  fileGroups.value = []
   try {
-    const text = await GetFileDiff(props.repoPath, props.file)
+    let text
+    if (props.mode === 'commit') {
+      if (!props.sha || !props.file) return
+      text = await GetCommitFileDiff(props.repoPath, props.sha, props.file)
+    } else if (props.mode === 'range') {
+      if (!props.baseSha || !props.headSha) return
+      text = await GetRangeDiff(props.repoPath, props.baseSha, props.headSha)
+    } else {
+      // workspace：工作区单文件
+      if (!props.file) return
+      text = await GetFileDiff(props.repoPath, props.file)
+    }
     if (!text || !text.trim()) {
       // 无 diff 文本：可能是二进制或无差异
       binaryHint.value = '无差异，或该文件类型不支持文本 diff 展示（二进制 / 图片）'
       return
     }
-    // git diff 对二进制文件会输出 "Binary files ... differ"
-    if (/^Binary files /m.test(text)) {
+    // 单文件二进制兜底（range 模式按段各自判二进制，不走此分支）
+    if (props.mode !== 'range' && /^Binary files /m.test(text)) {
       binaryHint.value = '该文件为二进制文件，不支持文本 diff 展示'
+      return
+    }
+    if (props.mode === 'range') {
+      fileGroups.value = parseRangeDiff(text)
+      if (fileGroups.value.length === 0) {
+        binaryHint.value = '无差异'
+      }
       return
     }
     const { leftLines, rightLines } = parseDiff(text)
@@ -165,7 +286,7 @@ const loadDiff = async () => {
 }
 
 watch(
-  () => [props.modelValue, props.file],
+  () => [props.modelValue, props.file, props.sha, props.baseSha, props.headSha, props.mode],
   ([visible]) => {
     if (visible) loadDiff()
   }
@@ -184,6 +305,31 @@ watch(
   text-align: center;
   color: var(--text-tertiary);
   font-size: 14px;
+}
+
+/* range 模式：多文件分组 */
+.range-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 16px);
+}
+.range-file-group {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+.range-file-header {
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  word-break: break-all;
+}
+.range-binary {
+  padding: 16px;
 }
 
 .diff-table {

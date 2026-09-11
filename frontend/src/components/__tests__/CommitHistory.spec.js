@@ -12,7 +12,9 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  GetCommitHistory: vi.fn()
+  GetCommitHistory: vi.fn(),
+  GetCommitFileDiff: vi.fn(),
+  GetRangeDiff: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -32,7 +34,7 @@ const stubs = {
     emits: ['update:modelValue', 'input']
   },
   'el-button': {
-    template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /><i v-if="$slots.icon"><slot name="icon" /></i></button>',
+    template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /><i v-if="$slots.icon"><slot name="icon" /></i></button>',
     props: ['icon', 'loading', 'size', 'type', 'circle', 'plain', 'disabled'],
     // 声明 emits 让父级 onClick 不进 $attrs，避免与模板 @click 双触发
     emits: ['click']
@@ -40,11 +42,25 @@ const stubs = {
   'el-icon': { template: '<i><slot /></i>' },
   // el-text 用 v-bind="$attrs" 让 class="sha-text" 落到 span 上，便于 .sha-text 选择器命中
   'el-text': { template: '<span v-bind="$attrs"><slot /></span>', props: ['type', 'size', 'strong'] },
-  'el-tag': { template: '<span class="el-tag"><slot /></span>', props: ['type', 'size'] },
+  'el-tag': {
+    template: '<span class="el-tag"><slot /></span>',
+    props: ['type', 'size']
+  },
+  'el-checkbox': {
+    template: '<input type="checkbox" class="el-checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
+    props: ['modelValue', 'disabled'],
+    emits: ['update:modelValue', 'change']
+  },
   'el-empty': { template: '<div class="el-empty" />', props: ['description'] },
   'el-descriptions': { template: '<div class="el-descriptions"><slot /></div>', props: ['column', 'size', 'border'] },
   'el-descriptions-item': { template: '<div class="el-desc-item"><slot /></div>', props: ['label'] },
-  'el-collapse-transition': { template: '<div class="el-collapse"><slot /></div>' }
+  'el-collapse-transition': { template: '<div class="el-collapse"><slot /></div>' },
+  // FileDiffDialog stub：捕获 props 即可，不渲染内部 diff 逻辑
+  FileDiffDialog: {
+    name: 'FileDiffDialog',
+    template: '<div class="file-diff-stub" />',
+    props: ['modelValue', 'repoPath', 'file', 'sha', 'baseSha', 'headSha', 'mode']
+  }
 }
 const directives = { loading: () => {} }
 
@@ -203,10 +219,11 @@ describe('CommitHistory.vue', () => {
     // 展开一条
     await wrapper.find('.commit-card').trigger('click')
     expect(wrapper.find('.commit-card').classes()).toContain('is-expanded')
-    // 点刷新
+    // 点刷新（header-actions 末尾的 Refresh 按钮，前面有 compare-btn）
     GetCommitHistory.mockClear()
     GetCommitHistory.mockResolvedValue([commit()])
-    await wrapper.find('.el-card .header-actions button').trigger('click')
+    const refreshBtn = wrapper.findAll('.el-card .header-actions button').pop()
+    await refreshBtn.trigger('click')
     await flushPromises()
     expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0)
     // 展开态被清空
@@ -263,5 +280,84 @@ describe('CommitHistory.vue', () => {
     wrapper = createWrapper()
     await flushPromises()
     expect(wrapper.find('.commit-time').text()).toContain('分钟前')
+  })
+
+  it('展开 commit 点击变更文件 tag 弹出 commit 文件 diff 弹窗，传 sha 与 file', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    const c = commit({ files: ['src/a.go', 'src/b.go'] })
+    GetCommitHistory.mockResolvedValue([c])
+    wrapper = createWrapper()
+    await flushPromises()
+    // 展开详情面板
+    await wrapper.find('.commit-card').trigger('click')
+    // 点击第一个变更文件 tag
+    const tags = wrapper.findAll('.files-section .el-tag')
+    expect(tags.length).toBe(2)
+    await tags[0].trigger('click')
+    await nextTick()
+    // FileDiffDialog stub 收到 mode=commit + sha + file
+    const stub = wrapper.findComponent({ name: 'FileDiffDialog' })
+    expect(stub.props('modelValue')).toBe(true)
+    expect(stub.props('mode')).toBe('commit')
+    expect(stub.props('sha')).toBe(c.sha)
+    expect(stub.props('file')).toBe('src/a.go')
+  })
+
+  it('勾选两个提交后对比按钮启用，点击弹 range diff 传 base/head', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    const c1 = commit({ sha: '1111111111111111111111111111111111111111' })
+    const c2 = commit({ sha: '2222222222222222222222222222222222222222' })
+    GetCommitHistory.mockResolvedValue([c1, c2])
+    wrapper = createWrapper()
+    await flushPromises()
+
+    const cards = wrapper.findAll('.commit-card')
+    expect(cards.length).toBe(2)
+    // 未选满：按钮 disabled
+    const disabledBtn = wrapper.find('.compare-btn[disabled]')
+    expect(disabledBtn.exists()).toBe(true)
+
+    // 勾选两条
+    const checkboxes = wrapper.findAll('.el-checkbox')
+    expect(checkboxes.length).toBe(2)
+    await checkboxes[0].setValue(true)
+    await checkboxes[1].setValue(true)
+    await nextTick()
+    // 选满 2：按钮变启用（无 disabled 属性）
+    expect(wrapper.find('.compare-btn[disabled]').exists()).toBe(false)
+
+    // 点对比按钮
+    await wrapper.find('.compare-btn').trigger('click')
+    await nextTick()
+    // 找到 range 模式的 FileDiffDialog stub（两个 stub，取 mode=range）
+    const stubs = wrapper.findAllComponents({ name: 'FileDiffDialog' })
+    const rangeStub = stubs.find(s => s.props('mode') === 'range')
+    expect(rangeStub).toBeTruthy()
+    expect(rangeStub.props('modelValue')).toBe(true)
+    expect(rangeStub.props('baseSha')).toBe(c1.sha)
+    expect(rangeStub.props('headSha')).toBe(c2.sha)
+  })
+
+  it('勾选第三个提交时弹出最早的，保持限选 2 个', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    const c1 = commit({ sha: '1111111111111111111111111111111111111111' })
+    const c2 = commit({ sha: '2222222222222222222222222222222222222222' })
+    const c3 = commit({ sha: '3333333333333333333333333333333333333333' })
+    GetCommitHistory.mockResolvedValue([c1, c2, c3])
+    wrapper = createWrapper()
+    await flushPromises()
+
+    const checkboxes = wrapper.findAll('.el-checkbox')
+    await checkboxes[0].setValue(true) // c1
+    await checkboxes[1].setValue(true) // c2
+    await nextTick()
+    expect(wrapper.vm.selectedShas).toEqual([c1.sha, c2.sha])
+
+    // 勾第三个 → 弹出 c1，保留 c2、c3
+    await checkboxes[2].setValue(true) // c3
+    await nextTick()
+    expect(wrapper.vm.selectedShas).toEqual([c2.sha, c3.sha])
+    // c1 复选框应取消勾选
+    expect(checkboxes[0].element.checked).toBe(false)
   })
 })

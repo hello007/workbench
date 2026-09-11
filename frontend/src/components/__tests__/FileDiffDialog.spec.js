@@ -12,7 +12,9 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  GetFileDiff: vi.fn()
+  GetFileDiff: vi.fn(),
+  GetCommitFileDiff: vi.fn(),
+  GetRangeDiff: vi.fn()
 }))
 
 // v-loading 指令 stub（jsdom 无 element-plus 指令注册）
@@ -153,5 +155,66 @@ describe('FileDiffDialog.vue', () => {
     const { GetFileDiff } = await import('../../../wailsjs/go/main/App')
     wrapper = await createWrapper({ repoPath: '', file: '' })
     expect(GetFileDiff).not.toHaveBeenCalled()
+  })
+
+  it('commit 模式调 GetCommitFileDiff 并以 sha/file 传参', async () => {
+    const { GetCommitFileDiff } = await import('../../../wailsjs/go/main/App')
+    const diff = ['@@ -1,1 +1,2 @@', ' ctx', '+new'].join('\n')
+    GetCommitFileDiff.mockResolvedValue(diff)
+    wrapper = await createWrapper({ mode: 'commit', sha: 'abcdef12', file: 'src/a.go' })
+    expect(GetCommitFileDiff).toHaveBeenCalledWith('/repo/A', 'abcdef12', 'src/a.go')
+    // 双栏渲染正常
+    expect(wrapper.find('.diff-col-left').exists()).toBe(true)
+    expect(wrapper.find('.diff-col-right').findAll('.diff-line-add').length).toBe(1)
+  })
+
+  it('range 模式调 GetRangeDiff 并以 base/head 传参', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    const diff = ['@@ -1,1 +1,2 @@', ' ctx', '+new'].join('\n')
+    GetRangeDiff.mockResolvedValue(diff)
+    wrapper = await createWrapper({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+    expect(GetRangeDiff).toHaveBeenCalledWith('/repo/A', 'base1234', 'head5678')
+  })
+
+  it('range 模式多文件按 diff --git 头拆分分组', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    // 两文件 diff：a.go 有新增行，b.go 二进制
+    const diff = [
+      'diff --git a/src/a.go b/src/a.go',
+      'index 111..222 100644',
+      '--- a/src/a.go',
+      '+++ b/src/a.go',
+      '@@ -1,1 +1,2 @@',
+      ' ctx',
+      '+new',
+      'diff --git a/bin.dat b/bin.dat',
+      'Binary files a/bin.dat and b/bin.dat differ'
+    ].join('\n')
+    GetRangeDiff.mockResolvedValue(diff)
+    wrapper = await createWrapper({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+    // 两个文件分组
+    const groups = wrapper.findAll('.range-file-group')
+    expect(groups.length).toBe(2)
+    // 第一组：a.go，有双栏
+    expect(groups[0].find('.range-file-header').text()).toBe('src/a.go')
+    expect(groups[0].find('.diff-col-left').exists()).toBe(true)
+    expect(groups[0].findAll('.diff-line-add').length).toBe(1)
+    // 第二组：bin.dat，二进制提示，无双栏
+    expect(groups[1].find('.range-file-header').text()).toBe('bin.dat')
+    expect(groups[1].find('.range-binary').exists()).toBe(true)
+    expect(groups[1].find('.diff-col-left').exists()).toBe(false)
+  })
+
+  it('range 模式无差异返回空分组时展示无差异提示', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    GetRangeDiff.mockResolvedValue('  ')
+    wrapper = await createWrapper({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+    expect(wrapper.find('.diff-empty').text()).toContain('无差异')
+  })
+
+  it('commit 模式 sha 或 file 缺失时不发起加载', async () => {
+    const { GetCommitFileDiff } = await import('../../../wailsjs/go/main/App')
+    wrapper = await createWrapper({ mode: 'commit', sha: '', file: 'src/a.go' })
+    expect(GetCommitFileDiff).not.toHaveBeenCalled()
   })
 })

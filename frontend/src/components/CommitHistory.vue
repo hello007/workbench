@@ -14,6 +14,24 @@
             @input="handleSearch"
           />
           <el-button
+            v-if="selectedShas.length === 2"
+            type="primary"
+            size="small"
+            class="compare-btn"
+            @click="openRangeDiff"
+          >
+            对比选中 (2)
+          </el-button>
+          <el-button
+            v-else
+            size="small"
+            class="compare-btn"
+            disabled
+            :title="selectedShas.length < 2 ? '选择两个提交进行对比' : ''"
+          >
+            对比选中 ({{ selectedShas.length }}/2)
+          </el-button>
+          <el-button
             :icon="Refresh"
             circle
             size="small"
@@ -33,9 +51,15 @@
           :class="{ 'is-expanded': expandedCommits.has(commit.sha) }"
           @click="toggleCommitDetail(commit.sha)"
         >
-          <!-- 头部单行：短 SHA · 文件数 · 作者 · 相对时间 · 展开箭头 -->
+          <!-- 头部单行：勾选 · 短 SHA · 文件数 · 作者 · 相对时间 · 展开箭头 -->
           <div class="commit-header">
             <div class="commit-header-main">
+              <el-checkbox
+                :model-value="selectedShas.includes(commit.sha)"
+                class="commit-checkbox"
+                @update:model-value="toggleSelectSha(commit.sha, $event)"
+                @click.stop
+              />
               <el-text
                 type="primary"
                 class="sha-text"
@@ -87,6 +111,7 @@
                   :key="index"
                   size="small"
                   class="file-tag"
+                  @click.stop="openCommitFileDiff(commit.sha, file)"
                 >
                   {{ file }}
                 </el-tag>
@@ -121,6 +146,24 @@
         </el-button>
       </div>
     </div>
+
+    <!-- 单提交单文件 diff 弹窗 -->
+    <FileDiffDialog
+      v-model="commitDiffVisible"
+      :repo-path="repoPath"
+      :file="commitDiffFile"
+      :sha="commitDiffSha"
+      mode="commit"
+    />
+
+    <!-- 两提交区间 diff 弹窗 -->
+    <FileDiffDialog
+      v-model="rangeDiffVisible"
+      :repo-path="repoPath"
+      :base-sha="rangeBaseSHA"
+      :head-sha="rangeHeadSHA"
+      mode="range"
+    />
   </el-card>
 </template>
 
@@ -132,6 +175,7 @@ import {
   User, Search
 } from '@element-plus/icons-vue'
 import { GetCommitHistory } from '../../wailsjs/go/main/App'
+import FileDiffDialog from './FileDiffDialog.vue'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -147,6 +191,17 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const searchKeyword = ref('')
 const hasMore = ref(false)
+
+// 单提交单文件 diff 弹窗状态
+const commitDiffVisible = ref(false)
+const commitDiffSha = ref('')
+const commitDiffFile = ref('')
+
+// range diff 勾选与弹窗状态
+const selectedShas = ref([])
+const rangeDiffVisible = ref(false)
+const rangeBaseSHA = ref('')
+const rangeHeadSHA = ref('')
 
 const filteredCommits = computed(() => {
   if (!searchKeyword.value) return commits.value
@@ -199,6 +254,7 @@ const loadMore = () => {
 
 const handleRefresh = () => {
   expandedCommits.value.clear()
+  selectedShas.value = []
   loadCommits(true)
 }
 
@@ -212,6 +268,36 @@ const toggleCommitDetail = (sha) => {
   } else {
     expandedCommits.value.add(sha)
   }
+}
+
+// 打开指定提交中某文件相对父提交的 diff 弹窗
+const openCommitFileDiff = (sha, file) => {
+  commitDiffSha.value = sha
+  commitDiffFile.value = file
+  commitDiffVisible.value = true
+}
+
+// 勾选提交参与区间对比，限选 2 个：第三个替换最早选中的（FIFO）
+const toggleSelectSha = (sha, checked) => {
+  if (checked) {
+    if (!selectedShas.value.includes(sha)) {
+      if (selectedShas.value.length >= 2) {
+        // 满额时弹出最早的，保持选择顺序为勾选先后
+        selectedShas.value.shift()
+      }
+      selectedShas.value.push(sha)
+    }
+  } else {
+    selectedShas.value = selectedShas.value.filter(s => s !== sha)
+  }
+}
+
+// 打开两提交区间 diff 弹窗，base 为先选、head 为后选
+const openRangeDiff = () => {
+  if (selectedShas.value.length !== 2) return
+  rangeBaseSHA.value = selectedShas.value[0]
+  rangeHeadSHA.value = selectedShas.value[1]
+  rangeDiffVisible.value = true
 }
 
 const copyToClipboard = async (text) => {
@@ -240,6 +326,7 @@ const formatTime = (timestamp) => {
 
 watch(() => props.repoPath, () => {
   searchKeyword.value = ''
+  selectedShas.value = []
   loadCommits(true)
 })
 
@@ -326,6 +413,14 @@ defineExpose({ loadCommits, handleRefresh })
   gap: var(--spacing-sm);
   min-width: 0;
   flex: 1;
+}
+.commit-checkbox {
+  flex-shrink: 0;
+  /* el-checkbox 默认 margin-right 偏大，收紧贴合列表行 */
+  margin-right: 0;
+}
+.compare-btn {
+  margin-right: 10px;
 }
 .sha-text {
   font-family: Consolas, 'Courier New', monospace;
