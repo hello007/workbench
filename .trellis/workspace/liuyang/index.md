@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 45
+- **Total Sessions**: 46
 - **Last Active**: 2026-09-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1522 | Active |
+| `journal-1.md` | ~1556 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 46 | 2026-09-11 | Git 分支增删改与单文件暂存 | `4ebe69e`, `30bcd31` | `master` |
 | 45 | 2026-09-11 | Git 标签与远程仓库管理 | `533dfe3` | `master` |
 | 44 | 2026-09-10 | app.go 按域拆分 + 测试覆盖率分层门禁 | `f0980f1`, `26a462b` | `master` |
 | 43 | 2026-09-10 | 前端引入 Pinia 状态管理（6 批迁移 + 收尾） | `bb057ff`, `2151b1f`, `71e274f`, `b55e551`, `7310273`, `615385b`, `22e545f` | `master` |

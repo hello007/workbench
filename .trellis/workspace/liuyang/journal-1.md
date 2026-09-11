@@ -1520,3 +1520,37 @@ brainstorm 定案后实施 AI 功能：活动栏一级入口占满主区，Go �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 46: Git 分支增删改与单文件暂存
+
+**Date**: 2026-09-11
+**Task**: Git 分支增删改与单文件暂存
+**Branch**: `master`
+
+### Summary
+
+后端新增 CreateBranch/DeleteBranch/RenameBranch + StageFiles/UnstageFiles 5 方法(git branch -m/-d/-D + git add/restore --staged),wailsjs 三处同步,11 单测,service 77.7%。前端新建 GitBranches.vue 面板(对齐 GitTags/GitRemotes),LocalChanges.vue 单表分组(未暂存上/已暂存下)+ 行级 +/- + 更多下拉批量,提交链路不改,43 前端用例。9 项 PRD 决策全落实。check 报告 filetree_cache mtime flaky 测试目标外,单独立项修复。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ebe69e` | (see git log) |
+| `30bcd31` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
