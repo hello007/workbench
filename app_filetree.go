@@ -26,6 +26,23 @@ func (a *App) GetFileTreeRecursive(path string, maxDepth int) []*model.FileTreeN
 	return nodes
 }
 
+// RefreshFileTree 清除指定路径的文件树缓存并返回最新子节点。
+// 供前端 refreshNode（右键刷新/F5/文件操作后）绕过缓存强刷单点目录。
+func (a *App) RefreshFileTree(path string) []*model.FileTreeNode {
+	nodes, err := a.fileTreeSvc.RefreshChildren(path)
+	if err != nil {
+		println("Error:", err.Error())
+		return []*model.FileTreeNode{}
+	}
+	return nodes
+}
+
+// ClearAllFileTreeCache 清除全部文件树缓存。
+// 供前端 refreshAll（工具栏"刷新"按钮，el-tree 整体重建）前置调用，确保逐节点重拉拿到最新数据。
+func (a *App) ClearAllFileTreeCache() {
+	a.fileTreeSvc.ClearAllCache()
+}
+
 // CreateDirectory 创建文件夹
 func (a *App) CreateDirectory(parentPath, name string) bool {
 	err := a.fileOpSvc.CreateDirectory(parentPath, name)

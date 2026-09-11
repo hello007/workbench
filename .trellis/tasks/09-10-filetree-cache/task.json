@@ -3,7 +3,7 @@
   "name": "filetree-cache",
   "title": "文件树缓存机制",
   "description": "在现有虚拟滚动基础上引入缓存:内存缓存已加载节点、持久化缓存到本地文件、智能失效策略(监听 git 事件/文件变更触发失效)、缓存大小限制。目标提升大型仓库二次加载体感。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

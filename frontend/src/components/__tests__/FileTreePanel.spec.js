@@ -23,6 +23,8 @@ vi.mock('element-plus', async () => {
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetFileTree: vi.fn(() => Promise.resolve([])),
+  RefreshFileTree: vi.fn(() => Promise.resolve([])),
+  ClearAllFileTreeCache: vi.fn(() => Promise.resolve()),
   GetGitInfo: vi.fn(() => Promise.resolve({})),
   CreateDirectory: vi.fn(() => Promise.resolve(true)),
   CreateFile: vi.fn(() => Promise.resolve(true)),
@@ -759,6 +761,30 @@ describe('FileTreePanel.vue', () => {
       expect(ancestorExpand).not.toHaveBeenCalled()
     })
 
+    it('refreshNode 应先调 RefreshFileTree 清后端缓存再触发 expand', async () => {
+      const { RefreshFileTree } = await import('../../../wailsjs/go/main/App')
+      const targetExpand = vi.fn(function () { this.loaded = true })
+      const targetNode = {
+        data: { path: '/path/a/src/foo' },
+        loaded: true,
+        loading: false,
+        expanded: true,
+        isLeaf: false,
+        childNodes: [],
+        expand: targetExpand
+      }
+
+      wrapper = createWrapperWithStore({
+        nodesMap: { '/path/a/src/foo': targetNode }
+      })
+      await flushPromises()
+
+      await wrapper.vm.refreshNode('/path/a/src/foo')
+
+      expect(RefreshFileTree).toHaveBeenCalledWith('/path/a/src/foo')
+      expect(targetExpand).toHaveBeenCalledTimes(1)
+    })
+
     it('回溯命中分支：目标缺失但存在已展开祖先时，应刷新最近的已展开祖先', async () => {
       const grandExpand = vi.fn(function () { this.loaded = true })
       const parentExpand = vi.fn(function () { this.loaded = true })
@@ -1378,9 +1404,11 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
   })
 
   describe('refreshAll / 拷贝到纯函数', () => {
-    it('refreshAll 自增 counter + success 提示', () => {
+    it('refreshAll 先清全部缓存再自增 counter + success 提示', async () => {
+      const { ClearAllFileTreeCache } = await import('../../../wailsjs/go/main/App')
       const before = wrapper.vm.$.setupState.refreshCounter
-      wrapper.vm.$.setupState.refreshAll()
+      await wrapper.vm.$.setupState.refreshAll()
+      expect(ClearAllFileTreeCache).toHaveBeenCalled()
       expect(wrapper.vm.$.setupState.refreshCounter).toBe(before + 1)
       expect(ElMessage.success).toHaveBeenCalledWith('文件树已刷新')
     })

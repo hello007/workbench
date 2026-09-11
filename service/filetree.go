@@ -16,12 +16,14 @@ type FileTreeService struct {
 	gitCmd         *util.GitCommand
 	gitRepoCache   sync.Map // path -> bool 缓存（是否 git 仓库）
 	gitRemoteCache sync.Map // path -> bool 缓存（git 仓库是否配置远程）
+	treeCache      *FileTreeCache // 单层目录节点缓存（纯内存，mtime + TTL + 手动刷新）
 }
 
 // NewFileTreeService 创建服务
 func NewFileTreeService() *FileTreeService {
 	return &FileTreeService{
-		gitCmd: util.NewGitCommand(),
+		gitCmd:    util.NewGitCommand(),
+		treeCache: NewFileTreeCache(),
 	}
 }
 
@@ -50,7 +52,28 @@ func (s *FileTreeService) hasRemote(dir string) bool {
 }
 
 // GetChildren 获取子节点
+//
+// 缓存策略（复用 RepoScanCache 的 mtime + TTL + 手动刷新范式）：
+//   - 规范化 path（filepath.Abs）作为缓存键
+//   - os.Stat 取目录 mtime；Stat 失败（目录不存在等）跳过缓存直接实扫
+//   - 缓存命中且 mtime 未变且未 TTL 过期 -> 返回缓存节点深拷贝，无 os.ReadDir / git remote 开销
+//   - 未命中或失效 -> 实扫 + 排序 + git 信息 -> 回写缓存 -> 返回
+//
+// GetTree 递归内部调本方法，自动受益于缓存，无需 path|depth 复合键。
 func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, error) {
+	abs, err := filepath.Abs(dirPath)
+	if err != nil {
+		abs = dirPath
+	}
+
+	// 取目录 mtime 用于缓存键判定；Stat 失败（目录不存在等）跳过缓存直接实扫
+	info, statErr := os.Stat(dirPath)
+	if statErr == nil {
+		if nodes, ok := s.treeCache.get(abs, info.ModTime()); ok {
+			return nodes, nil
+		}
+	}
+
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, err
@@ -92,7 +115,28 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 		return strings.ToLower(nodes[i].Name) < strings.ToLower(nodes[j].Name)
 	})
 
+	// 回写缓存：仅当成功取到 mtime 时（Stat 失败说明目录不可访问，不缓存）
+	if statErr == nil {
+		s.treeCache.set(abs, info.ModTime(), nodes)
+	}
+
 	return nodes, nil
+}
+
+// RefreshChildren 清除指定路径的缓存并立即重扫返回最新数据。
+// 供手动刷新（右键/F5/文件操作后）绕过缓存，确保前端拿到最新数据。
+func (s *FileTreeService) RefreshChildren(dirPath string) ([]*model.FileTreeNode, error) {
+	abs, err := filepath.Abs(dirPath)
+	if err != nil {
+		abs = dirPath
+	}
+	s.treeCache.clearPath(abs)
+	return s.GetChildren(dirPath)
+}
+
+// ClearAllCache 清除全部文件树缓存，供工具栏"刷新"按钮（el-tree 整体重建）前置调用。
+func (s *FileTreeService) ClearAllCache() {
+	s.treeCache.clearAll()
 }
 
 // GetTree 递归获取完整树

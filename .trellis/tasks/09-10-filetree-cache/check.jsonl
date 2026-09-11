@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证新增 App 方法的 wailsjs 三处绑定已同步"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证 service 层覆盖率 ≥76% 基线达标"}

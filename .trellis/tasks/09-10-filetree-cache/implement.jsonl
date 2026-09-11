@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 RefreshFileTree/ClearAllFileTreeCache App 方法须同步 wailsjs 三处绑定(App.js/App.d.ts/models.ts)"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层新增 filetree_cache.go 须满足 service ≥76% 覆盖率基线"}

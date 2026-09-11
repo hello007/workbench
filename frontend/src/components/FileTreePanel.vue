@@ -367,6 +367,8 @@ import { useFavoritesStore, useSettingsStore, useDirectoryStore } from '../store
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
+  RefreshFileTree,
+  ClearAllFileTreeCache,
   CreateDirectory, CreateFile, RenameFile, DeleteFile,
   OpenInExplorer,
   OpenInVSCode,
@@ -632,6 +634,19 @@ const refreshNode = async (nodePath) => {
     target = target.parent
   }
 
+  // 清除后端该路径缓存：避免缓存未失效时 el-tree 重载拿到陈旧数据。
+  // RefreshFileTree 清缓存并立即重扫回写，后续 target.expand 触发 loadTreeNode -> GetFileTree 命中最新缓存。
+  // 返回值不直接使用（UI 更新仍走 el-tree loadData 机制以保留子树展开状态恢复逻辑）。
+  // target 为 store.root 时 data.path 可能为空，回退到 normalizedPath（此时即工作目录根路径）。
+  const refreshPath = (target.data && target.data.path) ? target.data.path : normalizedPath
+  if (refreshPath) {
+    try {
+      await RefreshFileTree(refreshPath)
+    } catch (error) {
+      console.error('Error clearing file tree cache:', error)
+    }
+  }
+
   // 刷新前记录子树展开状态（loadData 重建 childNodes 会丢失子树展开）
   const expandedSubPaths = getExpandedPathsOf(target)
 
@@ -649,7 +664,14 @@ const refreshNode = async (nodePath) => {
 }
 
 // ---- 全部刷新 ----
-const refreshAll = () => {
+// 前置清除全部后端树缓存，再触发 el-tree 整体重建（treeKey 变更 -> 逐节点重拉 GetFileTree）。
+// 不清缓存则二次重建命中陈旧缓存，拿不到最新数据。
+const refreshAll = async () => {
+  try {
+    await ClearAllFileTreeCache()
+  } catch (error) {
+    console.error('Error clearing file tree cache:', error)
+  }
   refreshCounter.value++
   ElMessage.success('文件树已刷新')
 }
