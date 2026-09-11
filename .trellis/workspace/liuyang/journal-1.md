@@ -1622,3 +1622,37 @@ TestGetChildren_CacheInvalidatedOnMtimeChange 在 NTFS 上 flaky：连续 mustWr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 49: 提交历史增强: commit 文件 diff 与区间 diff
+
+**Date**: 2026-09-12
+**Task**: 提交历史增强: commit 文件 diff 与区间 diff
+**Branch**: `master`
+
+### Summary
+
+补齐提交历史模块 diff 能力。后端 GetCommitFileDiff(单 commit 单文件, root commit 对比空树全增) + GetRangeDiff(两 commit 区间), git CLI 路线, 8 单测, service 77.7%。前端 FileDiffDialog 泛化 workspace/commit/range 三模式, CommitHistory 文件 tag 弹窗 + 列表 checkbox 限选 2 区间对比, range 按 diff --git 头拆分多文件分组双栏。顺带修 parseDiff 误判 +++/--- 文件头为 add/del 行。前端 812 测试过, 覆盖率 80%。路线图勾选 commit 间 diff, README 补描述。搜索/过滤移出范围待独立任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b5bfd1b` | (see git log) |
+| `5a9f47e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
