@@ -236,26 +236,54 @@ func TestGetChildren_CachePopulatedAndHit(t *testing.T) {
 	}
 }
 
-// TestGetChildren_CacheInvalidatedOnMtimeChange 目录新增文件后 mtime 变化，
-// 缓存应失效重扫，返回包含新文件的数据。
+// TestGetChildren_CacheInvalidatedOnMtimeChange 注入记录旧 mtime 的陈旧缓存，
+// 验证 GetChildren 比对当前目录 mtime 不等时走失效重扫分支。
+//
+// 规避 NTFS mtime 时序 flaky：原写法依赖 mustWriteFile 触发目录 mtime 变化来失效
+// 缓存，但 NTFS 目录 mtime 分辨率约 1 秒，连续写文件可能落在同一 tick 导致目录
+// mtime 未变、缓存命中返回旧节点数而间歇性 FAIL（跨秒重跑又 PASS）。改为注入一个
+// modTime 明确早于当前 mtime 的陈旧缓存，直接驱动 get 的 modTime.Equal 判定走
+// 失效分支，不依赖文件系统 tick 时序，确定性 PASS。
 func TestGetChildren_CacheInvalidatedOnMtimeChange(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "a.txt"), []byte("a"))
 	svc := NewFileTreeService()
 
-	nodes1, _ := svc.GetChildren(dir)
+	// 首次扫描回写真实缓存（modTime = 目录当前 mtime），确认基线 1 节点
+	nodes1, err := svc.GetChildren(dir)
+	if err != nil {
+		t.Fatalf("first GetChildren: %v", err)
+	}
 	if len(nodes1) != 1 {
 		t.Fatalf("first call: %d nodes", len(nodes1))
 	}
 
-	// 新增文件 -> 目录 mtime 变化 -> 缓存失效
+	// 新增文件（目录内容已变；不依赖其是否更新目录 mtime）
 	mustWriteFile(t, filepath.Join(dir, "b.txt"), []byte("b"))
+
+	abs, _ := filepath.Abs(dir)
+	info, _ := os.Stat(dir)
+	curMtime := info.ModTime()
+
+	// 注入陈旧缓存：modTime 设为明显早于当前 mtime 的旧值，节点名与实际不符，
+	// 模拟“缓存记录 mtime 落后于目录当前 mtime”的失效场景。
+	staleMtime := curMtime.Add(-time.Hour)
+	staleNodes := []*model.FileTreeNode{model.NewFileTreeNode("stale.txt", filepath.Join(dir, "stale.txt"), "file")}
+	svc.treeCache.set(abs, staleMtime, staleNodes)
+
+	// get 判 staleMtime != curMtime -> 缓存失效 -> miss 重扫返回真实 2 节点
 	nodes2, err := svc.GetChildren(dir)
 	if err != nil {
 		t.Fatalf("second GetChildren: %v", err)
 	}
 	if len(nodes2) != 2 {
-		t.Errorf("mtime 变化应重扫: got %d nodes, want 2", len(nodes2))
+		t.Errorf("mtime 变化应使缓存失效重扫: got %d nodes, want 2", len(nodes2))
+	}
+	// 确认返回真实数据而非陈旧缓存
+	for _, n := range nodes2 {
+		if n.Name == "stale.txt" {
+			t.Error("缓存未失效，返回了陈旧缓存的 stale.txt")
+		}
 	}
 }
 
