@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "check 阶段核验 wailsjs 绑定三处（App.js/App.d.ts/models.ts）与新 App 方法签名一致，具名 string 类型别名齐全"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "check 阶段核验后端 service ≥76%/util ≥40%、前端 ≥70% 门禁达标"}
+{"file": "docs/spec/test-stability.md", "reason": "check 阶段核验新增单测符合稳定性规范（mock gitCmd、无真实仓库依赖、无时序抖动）"}

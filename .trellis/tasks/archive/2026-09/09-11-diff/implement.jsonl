@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法 GetCommitFileDiff/GetRangeDiff 需同步 wailsjs 绑定三处（App.js/App.d.ts/models.ts），本 spec 规定签名同步规则与具名 string 类型陷阱"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76%/util ≥40%、前端 ≥70% 分层门禁阈值，新增 git service 方法和前端组件必须配套测试达标"}
+{"file": "docs/spec/test-stability.md", "reason": "git CLI 类 service 测试的稳定性规范（mock gitCmd/避免真实仓库依赖），GetCommitFileDiff/GetRangeDiff 单测需遵循"}
