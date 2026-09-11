@@ -607,6 +607,74 @@ func (s *GitService) GetDiff(repoPath, file string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// emptyTreeSHA 为 Git 通用空树对象哈希，用作 root commit（无 parent）的对比基准，
+// 使首条提交的文件改动呈现为全增 diff。该哈希为 Git 内置常量，非仓库相关，跨仓库稳定。
+const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// hasParent 判断给定 SHA 是否存在父提交。
+// `git rev-parse <sha>^` 在 root commit 上以非零退出码失败并输出错误到 stderr，
+// 据此区分 root commit（无 parent）与普通提交。
+func (s *GitService) hasParent(gitRoot, sha string) bool {
+	_, err := s.gitCmd.Execute(gitRoot, "rev-parse", sha+"^")
+	return err == nil
+}
+
+// GetCommitFileDiff 获取指定提交中单个文件相对其父提交的 unified diff 文本。
+//   - 普通提交：`git diff <sha>^ <sha> -- <file>`
+//   - root commit（无 parent）：对比空树，`git diff <emptyTree> <sha> -- <file>`，
+//     文件改动呈现为全增
+//   - 返回 unified diff 文本，空串表示无差异或二进制文件（前端按 Binary files 兜底提示）
+//
+// file 为空时返回全 commit diff（不限定 pathspec），供需要整提交概览的调用方使用。
+func (s *GitService) GetCommitFileDiff(repoPath, sha, file string) (string, error) {
+	if sha == "" {
+		return "", fmt.Errorf("提交 SHA 不能为空")
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	args := []string{"diff"}
+	if s.hasParent(gitRoot, sha) {
+		args = append(args, sha+"^", sha)
+	} else {
+		// root commit：对比空树，使文件改动呈现为全增
+		args = append(args, emptyTreeSHA, sha)
+	}
+	if file != "" {
+		args = append(args, "--", file)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, args...)
+	if err != nil {
+		return "", fmt.Errorf("获取提交差异失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// GetRangeDiff 获取两个提交之间的 unified diff 文本（全文件，不限定 pathspec）。
+// `git diff <baseSHA> <headSHA>`，base 到 head 的变更方向。
+// 返回多文件 unified diff，前端按 `diff --git a/ b/` 头拆分文件分组展示。
+func (s *GitService) GetRangeDiff(repoPath, baseSHA, headSHA string) (string, error) {
+	if baseSHA == "" || headSHA == "" {
+		return "", fmt.Errorf("提交 SHA 不能为空")
+	}
+	if baseSHA == headSHA {
+		return "", nil
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	output, err := s.gitCmd.Execute(gitRoot, "diff", baseSHA, headSHA)
+	if err != nil {
+		return "", fmt.Errorf("获取区间差异失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
 // isUntracked 判断 file 是否为未跟踪文件（status 行首为 ??）。
 func (s *GitService) isUntracked(gitRoot, file string) (bool, error) {
 	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain", "-z", "--", file)

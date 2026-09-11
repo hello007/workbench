@@ -623,6 +623,190 @@ func TestGetDiff_UntrackedFile(t *testing.T) {
 	}
 }
 
+// headSHA 取仓库 HEAD 的完整 SHA，供 commit diff 测试定位提交用。
+func headSHA(t *testing.T, dir string) string {
+	t.Helper()
+	output, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s failed: %v", dir, err)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func TestGetCommitFileDiff_NormalCommit(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// 首次提交（root）
+	writeFile(t, filepath.Join(repo, "a.txt"), "line1\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// 第二次提交：修改 a.txt
+	writeFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "add line2")
+
+	sha := headSHA(t, repo)
+	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
+	if err != nil {
+		t.Fatalf("GetCommitFileDiff failed: %v", err)
+	}
+	if diff == "" {
+		t.Fatal("expected non-empty diff for commit file change")
+	}
+	if !strings.Contains(diff, "+line2") {
+		t.Errorf("expected diff to contain +line2, got:\n%s", diff)
+	}
+}
+
+func TestGetCommitFileDiff_RootCommit(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// 仅一条 root commit
+	writeFile(t, filepath.Join(repo, "a.txt"), "first\ncontent\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "root")
+
+	sha := headSHA(t, repo)
+	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
+	if err != nil {
+		t.Fatalf("GetCommitFileDiff on root commit failed: %v", err)
+	}
+	if diff == "" {
+		t.Fatal("root commit diff should be non-empty (all-added)")
+	}
+	// root commit 无 parent，文件应呈现为全增
+	if !strings.Contains(diff, "+first") || !strings.Contains(diff, "+content") {
+		t.Errorf("root commit diff should show all lines as added, got:\n%s", diff)
+	}
+	// 不应出现删除行（无 parent 无旧版本）
+	if strings.Contains(diff, "-first") {
+		t.Errorf("root commit diff should not contain deleted lines, got:\n%s", diff)
+	}
+}
+
+func TestGetCommitFileDiff_BinaryFile(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// 首次提交一个文本文件建立非 root 环境
+	writeFile(t, filepath.Join(repo, "a.txt"), "init\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// 二进制文件（含 NUL 字节）
+	binPath := filepath.Join(repo, "bin.dat")
+	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0xFF}, 0644); err != nil {
+		t.Fatalf("write binary file failed: %v", err)
+	}
+	runGit(t, repo, "add", "bin.dat")
+	runGit(t, repo, "commit", "-m", "add binary")
+
+	sha := headSHA(t, repo)
+	diff, err := svc.GetCommitFileDiff(repo, sha, "bin.dat")
+	if err != nil {
+		t.Fatalf("GetCommitFileDiff on binary file failed: %v", err)
+	}
+	// git diff 对二进制文件输出 "Binary files ... differ"
+	if !strings.Contains(diff, "Binary files") {
+		t.Errorf("expected binary file hint in diff, got:\n%s", diff)
+	}
+}
+
+func TestGetCommitFileDiff_NoChangeReturnsEmpty(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "line1\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// 第二次提交改的是 b.txt，对 a.txt 取 diff 应为空
+	writeFile(t, filepath.Join(repo, "b.txt"), "new\n")
+	runGit(t, repo, "add", "b.txt")
+	runGit(t, repo, "commit", "-m", "add b")
+
+	sha := headSHA(t, repo)
+	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
+	if err != nil {
+		t.Fatalf("GetCommitFileDiff failed: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("expected empty diff for unchanged file, got:\n%s", diff)
+	}
+}
+
+func TestGetCommitFileDiff_EmptySHAReturnsError(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+	_, err := svc.GetCommitFileDiff(repo, "", "a.txt")
+	if err == nil {
+		t.Error("empty SHA should return error")
+	}
+}
+
+func TestGetRangeDiff_TwoCommits(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	// commit1: a.txt 初始
+	writeFile(t, filepath.Join(repo, "a.txt"), "v1\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "c1")
+	sha1 := headSHA(t, repo)
+
+	// commit2: 改 a.txt + 加 b.txt
+	writeFile(t, filepath.Join(repo, "a.txt"), "v1\nv2\n")
+	writeFile(t, filepath.Join(repo, "b.txt"), "new\n")
+	runGit(t, repo, "add", "a.txt", "b.txt")
+	runGit(t, repo, "commit", "-m", "c2")
+	sha2 := headSHA(t, repo)
+
+	diff, err := svc.GetRangeDiff(repo, sha1, sha2)
+	if err != nil {
+		t.Fatalf("GetRangeDiff failed: %v", err)
+	}
+	if diff == "" {
+		t.Fatal("expected non-empty range diff")
+	}
+	// range diff 应覆盖两个文件的变更
+	if !strings.Contains(diff, "+v2") {
+		t.Errorf("range diff should contain a.txt change +v2, got:\n%s", diff)
+	}
+	if !strings.Contains(diff, "+new") {
+		t.Errorf("range diff should contain b.txt add +new, got:\n%s", diff)
+	}
+}
+
+func TestGetRangeDiff_SameSHAEmpty(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "v1\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "c1")
+	sha := headSHA(t, repo)
+
+	diff, err := svc.GetRangeDiff(repo, sha, sha)
+	if err != nil {
+		t.Fatalf("GetRangeDiff same SHA failed: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("same SHA range diff should be empty, got:\n%s", diff)
+	}
+}
+
+func TestGetRangeDiff_EmptySHAReturnsError(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+	_, err := svc.GetRangeDiff(repo, "", "abc")
+	if err == nil {
+		t.Error("empty base SHA should return error")
+	}
+}
+
 func TestHasUpstream_NoRemote(t *testing.T) {
 	repo := initTempRepo(t)
 	svc := NewGitService()

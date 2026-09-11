@@ -290,6 +290,29 @@ func (a *App) GetFileDiff(path, file string) (string, error) {
 	return a.gitSvc.GetDiff(path, file)
 }
 
+// GetCommitFileDiff 获取指定提交中单个文件相对其父提交的 unified diff 文本。
+// root commit（无 parent）对比空树呈现为全增。file 为空时返回整提交 diff。
+func (a *App) GetCommitFileDiff(path, sha, file string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	if sha == "" {
+		return "", fmt.Errorf("提交 SHA 不能为空")
+	}
+	return a.gitSvc.GetCommitFileDiff(path, sha, file)
+}
+
+// GetRangeDiff 获取两个提交之间的 unified diff 文本（全文件，base 到 head 方向）。
+func (a *App) GetRangeDiff(path, baseSHA, headSHA string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	if baseSHA == "" || headSHA == "" {
+		return "", fmt.Errorf("提交 SHA 不能为空")
+	}
+	return a.gitSvc.GetRangeDiff(path, baseSHA, headSHA)
+}
+
 // HasUpstream 判断当前分支是否配置了上游跟踪分支。
 func (a *App) HasUpstream(path string) (bool, error) {
 	if path == "" {
