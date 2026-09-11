@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +68,14 @@ func TestFileTreeCache_TTLExpiry(t *testing.T) {
 	// TTL 过期 -> 未命中
 	if _, ok := cache.get("/p", mtime); ok {
 		t.Error("TTL 过期应未命中")
+	}
+
+	// #1: TTL 过期不仅判 miss，还应驱逐条目（delete），避免内存与历史访问目录数成正比无界增长
+	cache.mu.Lock()
+	_, stillExists := cache.entries["/p"]
+	cache.mu.Unlock()
+	if stillExists {
+		t.Error("TTL 过期后条目应从 map 驱逐，不应常驻至 refreshAll 全清")
 	}
 }
 
@@ -272,9 +281,9 @@ func TestGetChildren_ReturnsIndependentCopy(t *testing.T) {
 	}
 }
 
-// TestRefreshChildren_BypassesStaleCache 注入陈旧缓存（mtime 匹配会命中），
-// RefreshChildren 应清除该路径缓存并返回真实数据。
-func TestRefreshChildren_BypassesStaleCache(t *testing.T) {
+// TestInvalidateCache_BypassesStaleCache 注入陈旧缓存（mtime 匹配会命中），
+// InvalidateCache 应清除该路径缓存，后续 GetChildren miss 并实扫返回真实数据。
+func TestInvalidateCache_BypassesStaleCache(t *testing.T) {
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "real.txt"), []byte("real"))
 	svc := NewFileTreeService()
@@ -292,13 +301,78 @@ func TestRefreshChildren_BypassesStaleCache(t *testing.T) {
 		t.Fatalf("前置验证失败，应命中陈旧缓存: %+v", cached)
 	}
 
-	// RefreshChildren 应清陈旧缓存并返回真实数据
-	fresh, err := svc.RefreshChildren(dir)
+	// InvalidateCache 纯清缓存（不返回数据），后续 GetChildren 应 miss 并实扫
+	svc.InvalidateCache(dir)
+	fresh, err := svc.GetChildren(dir)
 	if err != nil {
-		t.Fatalf("RefreshChildren: %v", err)
+		t.Fatalf("GetChildren after invalidate: %v", err)
 	}
 	if len(fresh) != 1 || fresh[0].Name != "real.txt" {
-		t.Errorf("RefreshChildren 应返回真实数据: %+v", fresh)
+		t.Errorf("InvalidateCache 后应返回真实数据: %+v", fresh)
+	}
+}
+
+// TestDeepCopyNode_CoversAllFields 用反射遍历 model.FileTreeNode 全字段，比对 deepCopyNode
+// 输出与原节点的字段值。保障机制：未来 FileTreeNode 新增字段未在 deepCopyNode 拷贝时，拷贝值为
+// 该字段零值，原值为非零值，反射逐字段断言失败——为手写字段拷贝提供编译期之外的同步保障。
+//
+// 构造原则：所有字段均设非零值（bool=true / string=非空 / slice=非 nil），含 Children 递归一层。
+// 前置断言强制 original 全字段非零：未来新增字段未在此构造设非零值即失败，迫使维护者同步补构造，
+// 从而使漏拷贝能被下方 DeepEqual 捕获。reflect.DeepEqual 对 slice 字段递归比对值（非地址）。
+func TestDeepCopyNode_CoversAllFields(t *testing.T) {
+	original := &model.FileTreeNode{
+		ID:          "id-1",
+		Name:        "node-name",
+		Path:        "/p/node",
+		Type:        "directory",
+		IsGitRepo:   true,
+		HasRemote:   true,
+		HasChildren: true,
+		IsLeaf:      true,
+		Children: []*model.FileTreeNode{
+			{
+				ID:          "child-id",
+				Name:        "child-name",
+				Path:        "/p/node/child",
+				Type:        "file",
+				IsGitRepo:   true,
+				HasRemote:   true,
+				HasChildren: true,
+				IsLeaf:      true,
+				// 非 nil 空 slice，检测 nil 与空 slice 的拷贝一致性
+				Children: []*model.FileTreeNode{},
+			},
+		},
+	}
+
+	cp := deepCopyNode(original)
+	if cp == nil {
+		t.Fatal("deepCopyNode 返回 nil")
+	}
+
+	want := reflect.ValueOf(original).Elem()
+	got := reflect.ValueOf(cp).Elem()
+	typ := want.Type()
+
+	// 前置断言：original 每个字段必须非零值。零值字段拷贝后仍为零值，DeepEqual 无法区分漏拷贝；
+	// 此断言强制未来新增字段时测试构造同步设非零值，从而使漏拷贝能被下方 DeepEqual 捕获。
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		w := want.Field(i)
+		if reflect.DeepEqual(w.Interface(), reflect.Zero(w.Type()).Interface()) {
+			t.Errorf("构造缺陷：字段 %s 为零值，无法检测 deepCopyNode 是否拷贝；请设非零值", field.Name)
+		}
+	}
+
+	// reflect 逐字段比对原节点与拷贝节点的值，漏拷贝字段零值 != 原非零值即失败
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		w := want.Field(i)
+		g := got.Field(i)
+		if !reflect.DeepEqual(w.Interface(), g.Interface()) {
+			t.Errorf("字段 %s 未同步拷贝: 原=%v, 拷贝=%v（deepCopyNode 漏拷贝该字段，请同步更新）",
+				field.Name, w.Interface(), g.Interface())
+		}
 	}
 }
 

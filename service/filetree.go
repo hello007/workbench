@@ -123,15 +123,16 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 	return nodes, nil
 }
 
-// RefreshChildren 清除指定路径的缓存并立即重扫返回最新数据。
-// 供手动刷新（右键/F5/文件操作后）绕过缓存，确保前端拿到最新数据。
-func (s *FileTreeService) RefreshChildren(dirPath string) ([]*model.FileTreeNode, error) {
+// InvalidateCache 清除指定路径的缓存（纯失效，不重扫不返回数据）。
+// 供手动刷新（右键/F5/文件操作后）绕过缓存，后续 GetChildren miss 后实扫回写最新数据。
+// 数据流等价于原 RefreshChildren，但消除无用序列化：前端 refreshNode 调本方法清缓存后，
+// 经 el-tree expand 触发 loadTreeNode -> GetFileTree 命中实扫结果，无需经 App 方法返回节点列表。
+func (s *FileTreeService) InvalidateCache(dirPath string) {
 	abs, err := filepath.Abs(dirPath)
 	if err != nil {
 		abs = dirPath
 	}
 	s.treeCache.clearPath(abs)
-	return s.GetChildren(dirPath)
 }
 
 // ClearAllCache 清除全部文件树缓存，供工具栏"刷新"按钮（el-tree 整体重建）前置调用。

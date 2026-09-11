@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证 InvalidateFileTreeCache wailsjs 三处绑定同步"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证 service 覆盖率 ≥76%"}

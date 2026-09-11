@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "#7 RefreshFileTree→InvalidateFileTreeCache 改签名(去返回值)须同步 wailsjs App.js/App.d.ts"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层覆盖率须维持 ≥76% 基线"}

@@ -64,8 +64,9 @@ func (c *FileTreeCache) get(path string, curMtime time.Time) ([]*model.FileTreeN
 	if !entry.modTime.Equal(curMtime) {
 		return nil, false
 	}
-	// TTL 过期 -> 兜底深层文件变更漏扫
+	// TTL 过期 -> 兜底深层文件变更漏扫；驱逐过期条目，避免内存与历史访问目录数成正比无界增长
 	if time.Since(entry.cachedAt) > fileTreeCacheTTL {
+		delete(c.entries, path)
 		return nil, false
 	}
 	return deepCopyNodes(entry.nodes), true
@@ -83,7 +84,7 @@ func (c *FileTreeCache) set(path string, modTime time.Time, nodes []*model.FileT
 	}
 }
 
-// clearPath 清除指定路径的缓存，供 RefreshFileTree 单点强刷（右键/F5/文件操作后）。
+// clearPath 清除指定路径的缓存，供 InvalidateFileTreeCache 单点强刷（右键/F5/文件操作后）。
 func (c *FileTreeCache) clearPath(path string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -112,6 +113,8 @@ func deepCopyNode(n *model.FileTreeNode) *model.FileTreeNode {
 		HasChildren: n.HasChildren,
 		IsLeaf:      n.IsLeaf,
 	}
+	// 当前 GetChildren 仅构建单层节点（NewFileTreeNode 不设 Children，set 回写时 Children 恒 nil），
+	// 递归分支不执行；保留递归为防御未来多层缓存扩展，非当前执行路径。
 	if n.Children != nil {
 		cp.Children = make([]*model.FileTreeNode, len(n.Children))
 		for i, child := range n.Children {

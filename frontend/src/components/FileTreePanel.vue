@@ -367,7 +367,7 @@ import { useFavoritesStore, useSettingsStore, useDirectoryStore } from '../store
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
-  RefreshFileTree,
+  InvalidateFileTreeCache,
   ClearAllFileTreeCache,
   CreateDirectory, CreateFile, RenameFile, DeleteFile,
   OpenInExplorer,
@@ -635,13 +635,13 @@ const refreshNode = async (nodePath) => {
   }
 
   // 清除后端该路径缓存：避免缓存未失效时 el-tree 重载拿到陈旧数据。
-  // RefreshFileTree 清缓存并立即重扫回写，后续 target.expand 触发 loadTreeNode -> GetFileTree 命中最新缓存。
-  // 返回值不直接使用（UI 更新仍走 el-tree loadData 机制以保留子树展开状态恢复逻辑）。
+  // InvalidateFileTreeCache 纯清缓存（不返回数据），后续 target.expand 触发 loadTreeNode -> GetFileTree
+  // 命中 miss 后实扫回写最新数据。UI 更新走 el-tree loadData 机制以保留子树展开状态恢复逻辑。
   // target 为 store.root 时 data.path 可能为空，回退到 normalizedPath（此时即工作目录根路径）。
   const refreshPath = (target.data && target.data.path) ? target.data.path : normalizedPath
   if (refreshPath) {
     try {
-      await RefreshFileTree(refreshPath)
+      await InvalidateFileTreeCache(refreshPath)
     } catch (error) {
       console.error('Error clearing file tree cache:', error)
     }

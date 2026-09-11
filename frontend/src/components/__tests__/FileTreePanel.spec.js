@@ -23,7 +23,7 @@ vi.mock('element-plus', async () => {
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetFileTree: vi.fn(() => Promise.resolve([])),
-  RefreshFileTree: vi.fn(() => Promise.resolve([])),
+  InvalidateFileTreeCache: vi.fn(() => Promise.resolve()),
   ClearAllFileTreeCache: vi.fn(() => Promise.resolve()),
   GetGitInfo: vi.fn(() => Promise.resolve({})),
   CreateDirectory: vi.fn(() => Promise.resolve(true)),
@@ -761,8 +761,8 @@ describe('FileTreePanel.vue', () => {
       expect(ancestorExpand).not.toHaveBeenCalled()
     })
 
-    it('refreshNode 应先调 RefreshFileTree 清后端缓存再触发 expand', async () => {
-      const { RefreshFileTree } = await import('../../../wailsjs/go/main/App')
+    it('refreshNode 应先调 InvalidateFileTreeCache 清后端缓存再触发 expand', async () => {
+      const { InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
       const targetExpand = vi.fn(function () { this.loaded = true })
       const targetNode = {
         data: { path: '/path/a/src/foo' },
@@ -781,7 +781,7 @@ describe('FileTreePanel.vue', () => {
 
       await wrapper.vm.refreshNode('/path/a/src/foo')
 
-      expect(RefreshFileTree).toHaveBeenCalledWith('/path/a/src/foo')
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a/src/foo')
       expect(targetExpand).toHaveBeenCalledTimes(1)
     })
 
