@@ -1587,3 +1587,38 @@ TestGetChildren_CacheInvalidatedOnMtimeChange 在 NTFS 上 flaky：连续 mustWr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 48: Git 合并变基与冲突解决（merge/rebase/cherry-pick + 冲突态）
+
+**Date**: 2026-09-11
+**Task**: Git 合并变基与冲突解决（merge/rebase/cherry-pick + 冲突态）
+**Branch**: `master`
+
+### Summary
+
+为 WorkBench 补全 Git 合并/变基/拣选与冲突解决闭环。PR1 后端三层：model 新增 MergeMode/ConflictType/ConflictState；util/git.go 薄封装 Merge/Rebase/CherryPick/PullRebase + abort/continue/skip + ListConflictFiles + IsXxxInProgress 检测，冲突类走 ExecuteWithCodes 接受 exit 1；service 业务方法 + precheckMutation(工作区干净+非 detached HEAD) + requireInProgress 守卫 + Pull(useRebase) 签名变更默认 false；app_git.go 12 个 Wails 绑定。清理废弃 GetGitLog/GetLog 死代码。PR2 前端：GitMerge.vue(操作区+冲突态面板) + ContentPanel Pull rebase 开关 + wailsjs 三处同步(发现并修复 wails generate 对具名 string 类型不生成 models.ts type 别名的缺口，手动补 MergeMode/ConflictType 别名)。PR3 文档：功能说明/路线图/README 更新。覆盖率 service 77.7%/util 48.6% 达门禁，前端 79.86%≥70% 硬门禁，804 测试全过。沉淀 cross-layer-contracts.md 新增具名 string 类型 Scenario。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e06eb4b` | (see git log) |
+| `eaf212c` | (see git log) |
+| `fa6675d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
+- **Total Sessions**: 48
 - **Last Active**: 2026-09-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1589 | Active |
+| `journal-1.md` | ~1624 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-09-11 | Git 合并变基与冲突解决（merge/rebase/cherry-pick + 冲突态） | `e06eb4b`, `eaf212c`, `fa6675d` | `master` |
 | 47 | 2026-09-11 | 修复 filetree cache mtime 测试 flaky | `76c2d00` | `master` |
 | 46 | 2026-09-11 | Git 分支增删改与单文件暂存 | `4ebe69e`, `30bcd31` | `master` |
 | 45 | 2026-09-11 | Git 标签与远程仓库管理 | `533dfe3` | `master` |
