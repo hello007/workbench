@@ -130,7 +130,7 @@ import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import {
-  GetSubmodules, InitSubmodules, UpdateSubmodules,
+  GetSubmodules, UpdateSubmodules,
   AddSubmodule, RemoveSubmodule, CheckoutSubmoduleBranch
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
@@ -235,11 +235,14 @@ const submitUpdate = async () => {
   }
 }
 
-// 全量初始化：git submodule update --init，抢锁由后端 service 处理
+// 全量初始化：git submodule update --init --recursive，一步完成注册 + 检出未初始化子模块。
+// 不走仅注册的 InitSubmodules（git submodule init）：仅注册不检出，submodule status 前导码仍为
+// '-'（未初始化），用户点「初始化」后状态标签不变，体验上等同无反应。
+// mode=checkout 钉 index SHA 不漂移，recursive 下探嵌套。抢锁由后端 service 处理。
 const initAll = async () => {
   initializing.value = true
   try {
-    const out = await InitSubmodules(props.repoPath)
+    const out = await UpdateSubmodules(props.repoPath, 'checkout', true, true, '')
     ElMessage.success('子模块初始化成功' + (out ? `\n${out}` : ''))
     await loadSubmodules()
   } catch (error) {

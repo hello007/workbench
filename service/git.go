@@ -1753,6 +1753,18 @@ func (s *GitService) UpdateSubmodules(repoPath string, mode model.SubmoduleUpdat
 	}
 	defer release()
 
+	// mode 白名单校验：SubmoduleUpdateMode 为具名 string 类型，编译期不约束取值，
+	// 非法值（前端传错或调用方拼错）会在 util.SubmoduleUpdate 的 switch default 静默走 checkout，
+	// 与用户意图不符且无报错。此处显式拒绝，给出可定位的错误。空串兜底为 checkout。
+	switch mode {
+	case model.SubmoduleUpdateCheckout, model.SubmoduleUpdateMerge,
+		model.SubmoduleUpdateRebase, model.SubmoduleUpdateRemote:
+	case "":
+		mode = model.SubmoduleUpdateCheckout
+	default:
+		return "", fmt.Errorf("不支持的子模块更新模式: %q（有效值 checkout/merge/rebase/remote）", string(mode))
+	}
+
 	gitRoot, err := util.FindGitRoot(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
@@ -1821,6 +1833,16 @@ func (s *GitService) RemoveSubmodule(repoPath, path string) error {
 		return fmt.Errorf("submodule 路径不能为空")
 	}
 
+	// path 穿越防御：path 最终拼入 os.RemoveAll(.git/modules/<path>)，虽步骤 1/2 的 git
+	// submodule deinit / git rm 会拒绝仓库外路径，仍在此显式拦截绝对路径与 .. 上溯，
+	// 作为深度防御给出更清晰错误，避免依赖 git 子命令副作用保安全。
+	cleanPath := filepath.Clean(path)
+	if filepath.IsAbs(path) ||
+		filepath.ToSlash(cleanPath) == ".." ||
+		strings.HasPrefix(filepath.ToSlash(cleanPath), "../") {
+		return fmt.Errorf("非法 submodule 路径（禁止绝对路径或 .. 上溯）: %s", path)
+	}
+
 	gitRoot, err := s.precheckMutation(repoPath)
 	if err != nil {
 		return err
@@ -1834,7 +1856,12 @@ func (s *GitService) RemoveSubmodule(repoPath, path string) error {
 	if _, err := s.gitCmd.Execute(gitRoot, "rm", "-f", path); err != nil {
 		return fmt.Errorf("移除 submodule gitlink 失败: %w", err)
 	}
-	// 步骤 3：手动清 .git/modules/<path>（git 不自动清，path 即 name 是 git 默认）
+	// 步骤 3：手动清 .git/modules/<path>（git 不自动清此目录）。
+	// path 即 .git/modules 下的目录名——git submodule add 默认段名=name=path，故默认场景命中。
+	// 已知边界：若 submodule 以 `git submodule add --name <name>` 添加（.gitmodules 段名 ≠ path），
+	// git 目录存于 .git/modules/<name> 而非 .git/modules/<path>，本步删除落空（RemoveAll 对不存在
+	// 路径返回 nil 不报错），残留 .git/modules/<name>。WorkBench 的 AddSubmodule 不带 --name，
+	// 故本工具添加的 submodule 不触发此边界；外部以自定义 name 添加的 submodule 删除后需手动清理。
 	modulesDir := filepath.Join(gitRoot, ".git", "modules", path)
 	if err := os.RemoveAll(modulesDir); err != nil {
 		return fmt.Errorf("清理 .git/modules 残留失败: %w", err)

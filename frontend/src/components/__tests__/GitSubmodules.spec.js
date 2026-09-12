@@ -171,10 +171,10 @@ describe('GitSubmodules.vue', () => {
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
   })
 
-  it('初始化按钮调用 InitSubmodules 并刷新列表', async () => {
-    const { GetSubmodules, InitSubmodules } = await import('../../../wailsjs/go/main/App')
+  it('初始化按钮调用 UpdateSubmodules(--init --recursive) 并刷新列表', async () => {
+    const { GetSubmodules, UpdateSubmodules } = await import('../../../wailsjs/go/main/App')
     GetSubmodules.mockResolvedValue([sub({ path: 'libs/a' })])
-    InitSubmodules.mockResolvedValue('')
+    UpdateSubmodules.mockResolvedValue('')
 
     wrapper = createWrapper()
     await flushPromises()
@@ -183,7 +183,9 @@ describe('GitSubmodules.vue', () => {
     await findBtn(wrapper, '初始化', true).trigger('click')
     await flushPromises()
 
-    expect(InitSubmodules).toHaveBeenCalledWith('/repo/A')
+    // 走 update --init --recursive（checkout + recursive + init + 全量空 path），
+    // 非 InitSubmodules（仅注册不检出，status 仍 - 前导码，体验无反应）
+    expect(UpdateSubmodules).toHaveBeenCalledWith('/repo/A', 'checkout', true, true, '')
     expect(GetSubmodules).toHaveBeenCalled()
   })
 

@@ -382,14 +382,15 @@ func (g *GitCommand) SubmoduleUpdateInit(workDir string, recursive bool, path st
 	return g.Execute(workDir, args...)
 }
 
-// SubmoduleAdd 执行 `git submodule add [-b branch] <url> <path>`，新增 submodule。
+// SubmoduleAdd 执行 `git submodule add [-b branch] -- <url> <path>`，新增 submodule。
 // 生成 .gitmodules + 写 .git/config + .git/modules/<name> + 工作区检出。
+// `--` 分隔 positional 参数，防止 url/path 以 `-` 起头被 git 误解析为 flag（参数注入深度防御）。
 func (g *GitCommand) SubmoduleAdd(workDir, url, path, branch string) (string, error) {
 	args := []string{"submodule", "add"}
 	if branch != "" {
 		args = append(args, "-b", branch)
 	}
-	args = append(args, url, path)
+	args = append(args, "--", url, path)
 	return g.Execute(workDir, args...)
 }
 

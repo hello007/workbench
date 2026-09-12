@@ -348,6 +348,35 @@ func TestUpdateSubmodules_NonRepo(t *testing.T) {
 	}
 }
 
+// TestUpdateSubmodules_InvalidMode 非法 mode（非 checkout/merge/rebase/remote）应被白名单拦截，
+// 而非静默走 util.SubmoduleUpdate 的 default（checkout）分支——避免前端传错或调用方拼错时无报错。
+func TestUpdateSubmodules_InvalidMode(t *testing.T) {
+	repo := initTempRepo(t)
+	svc := NewGitService()
+	_, err := svc.UpdateSubmodules(repo, model.SubmoduleUpdateMode("garbage"), false, false, "")
+	if err == nil {
+		t.Fatal("非法 mode 应返回错误")
+	}
+	if !strings.Contains(err.Error(), "不支持的子模块更新模式") {
+		t.Errorf("错误信息应含模式校验提示, got %v", err)
+	}
+}
+
+// TestUpdateSubmodules_EmptyModeDefaultsCheckout 空 mode 兜底为 checkout，不报错（init=false 路径）。
+func TestUpdateSubmodules_EmptyModeDefaultsCheckout(t *testing.T) {
+	parent, _ := setupSuperprojectWithSubmodule(t)
+	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	svc := NewGitService()
+	// 空 mode + init=true 走 update --init（mode 不参与），应成功检出
+	_, err := svc.UpdateSubmodules(parent, model.SubmoduleUpdateMode(""), false, true, "libs/child")
+	if err != nil {
+		t.Fatalf("空 mode 应兜底 checkout 不报错: %v", err)
+	}
+	if !pathExists(filepath.Join(parent, "libs", "child", "child.txt")) {
+		t.Error("空 mode + init 后应检出 child.txt")
+	}
+}
+
 // gitOutput 在仓库执行 git 命令返回 stdout（失败终止测试）。
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -493,6 +522,29 @@ func TestRemoveSubmodule_NonRepo(t *testing.T) {
 	svc := NewGitService()
 	if err := svc.RemoveSubmodule(t.TempDir(), "libs/x"); err == nil {
 		t.Error("非仓库 RemoveSubmodule 应返回错误")
+	}
+}
+
+// TestRemoveSubmodule_PathTraversal path 含 .. 上溯或为绝对路径时，须在步骤 1 之前被深度防御拦截，
+// 避免依赖后续 git submodule deinit / git rm 的副作用保安全（os.RemoveAll(.git/modules/<path>) 穿越风险）。
+func TestRemoveSubmodule_PathTraversal(t *testing.T) {
+	parent := initTempRepo(t)
+	writeFile(t, filepath.Join(parent, "p.txt"), "p")
+	runGit(t, parent, "add", "p.txt")
+	runGit(t, parent, "commit", "-m", "p")
+	svc := NewGitService()
+
+	for _, bad := range []string{"../..", "../../etc", "/etc/passwd"} {
+		if err := svc.RemoveSubmodule(parent, bad); err == nil {
+			t.Errorf("路径 %q 应被穿越防御拦截", bad)
+		}
+	}
+	// 正常相对路径不应被误拦（校验守卫不过度严格）
+	// 不实际执行删除（无该 submodule），仅校验不被守卫拦截：正常路径会通过守卫进入 precheckMutation
+	// 因工作区干净 + 在分支上，precheckMutation 通过，随后 deinit 报错（无此 submodule）——错误信息不含「非法」
+	err := svc.RemoveSubmodule(parent, "libs/notexist")
+	if err != nil && strings.Contains(err.Error(), "非法 submodule 路径") {
+		t.Errorf("正常相对路径 libs/notexist 不应被穿越守卫误拦: %v", err)
 	}
 }
 
