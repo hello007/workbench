@@ -140,6 +140,7 @@ import {
   UnstageFiles
 } from '../../wailsjs/go/main/App'
 import FileDiffDialog from './FileDiffDialog.vue'
+import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -227,7 +228,7 @@ const doCommit = async (withPush) => {
       await doPush()
     }
   } catch (error) {
-    ElMessage.error('提交失败: ' + (error?.message || String(error)))
+    handleGitError('提交失败: ', error)
   } finally {
     committing.value = false
   }
@@ -275,7 +276,7 @@ const doPush = async () => {
     await loadChanges()
     emit('committed')
   } catch (error) {
-    ElMessage.error('推送失败: ' + (error?.message || String(error)))
+    handleGitError('推送失败: ', error)
   } finally {
     pushing.value = false
   }
@@ -301,7 +302,7 @@ const discardSelected = async () => {
     ElMessage.success('回滚成功')
     loadChanges()
   } catch (error) {
-    ElMessage.error('回滚失败: ' + (error.message || String(error)))
+    handleGitError('回滚失败: ', error)
   }
 }
 
@@ -321,7 +322,7 @@ const discardAll = async () => {
     ElMessage.success('全部回滚成功')
     loadChanges()
   } catch (error) {
-    ElMessage.error('回滚失败: ' + (error.message || String(error)))
+    handleGitError('回滚失败: ', error)
   }
 }
 
@@ -332,7 +333,7 @@ const stageSingle = async (row) => {
     await StageFiles(props.repoPath, [row.path])
     await loadChanges()
   } catch (error) {
-    ElMessage.error('暂存失败: ' + (error.message || String(error)))
+    handleGitError('暂存失败: ', error)
   }
 }
 
@@ -343,7 +344,7 @@ const unstageSingle = async (row) => {
     await UnstageFiles(props.repoPath, [row.path])
     await loadChanges()
   } catch (error) {
-    ElMessage.error('取消暂存失败: ' + (error.message || String(error)))
+    handleGitError('取消暂存失败: ', error)
   }
 }
 
@@ -358,7 +359,7 @@ const stageSelected = async () => {
     await StageFiles(props.repoPath, paths)
     await loadChanges()
   } catch (error) {
-    ElMessage.error('暂存失败: ' + (error.message || String(error)))
+    handleGitError('暂存失败: ', error)
   }
 }
 
@@ -374,7 +375,7 @@ const unstageSelected = async () => {
     await UnstageFiles(props.repoPath, paths)
     await loadChanges()
   } catch (error) {
-    ElMessage.error('取消暂存失败: ' + (error.message || String(error)))
+    handleGitError('取消暂存失败: ', error)
   }
 }
 

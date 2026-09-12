@@ -459,6 +459,7 @@ import {
   CopyObsidianVaultPath, AutoRegisterAndOpen,
   GetBranches, CheckoutBranch
 } from '../../wailsjs/go/main/App'
+import { handleGitError } from '../utils/gitError'
 import obsidianIcon from '../assets/icons/obsidian.png'
 import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
@@ -642,7 +643,7 @@ const doCheckout = async () => {
     gitInfoRef.value?.handleRefresh()
     commitHistoryRef.value?.handleRefresh()
   } catch (error) {
-    ElMessage.error('切换分支失败: ' + (error.message || String(error)))
+    handleGitError('切换分支失败: ', error)
   } finally {
     switchingBranch.value = false
   }
@@ -663,7 +664,7 @@ const pullRepo = async () => {
     gitInfoRef.value?.handleRefresh()
     commitHistoryRef.value?.handleRefresh()
   } catch (error) {
-    ElMessage.error('拉取失败: ' + (error.message || String(error)))
+    handleGitError('拉取失败: ', error)
   } finally {
     gitLoading.value = false
   }
@@ -1015,7 +1016,7 @@ const cloneRepo = async () => {
       ElMessage.error(result)
     }
   } catch (error) {
-    ElMessage.error('克隆失败: ' + (error.message || String(error)))
+    handleGitError('克隆失败: ', error)
   } finally {
     cloneLoading.value = false
   }

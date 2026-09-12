@@ -101,6 +101,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import {
   GetBranches, CreateBranch, DeleteBranch, RenameBranch
 } from '../../wailsjs/go/main/App'
+import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -160,7 +161,7 @@ const submitCreate = async () => {
     createVisible.value = false
     await loadBranches()
   } catch (error) {
-    ElMessage.error('创建分支失败: ' + (error.message || String(error)))
+    handleGitError('创建分支失败: ', error)
   } finally {
     creating.value = false
   }
@@ -190,7 +191,7 @@ const submitRename = async () => {
     renameVisible.value = false
     await loadBranches()
   } catch (error) {
-    ElMessage.error('重命名分支失败: ' + (error.message || String(error)))
+    handleGitError('重命名分支失败: ', error)
   } finally {
     renaming.value = false
     renamingName.value = ''
@@ -221,7 +222,7 @@ const deleteBranch = async (branch) => {
       await loadBranches()
     }
   } catch (err) {
-    ElMessage.error('删除分支失败: ' + (err.message || String(err)))
+    handleGitError('删除分支失败: ', err)
   } finally {
     deletingName.value = ''
   }

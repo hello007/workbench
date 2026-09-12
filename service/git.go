@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,10 +17,28 @@ import (
 	"workbench/util"
 )
 
+// ErrOperationInProgress 表示目标仓库已有变更类 Git 操作正在进行，本次请求被拒绝。
+// 前端据此错误码统一弹 warning 提示用户稍后重试，而非当作普通失败。
+var ErrOperationInProgress = fmt.Errorf("该仓库有 Git 操作进行中，请稍后重试")
+
+// IsOperationInProgressError 判断错误是否为操作进行中拒绝。兼容 errors.Is 与字符串匹配两条路径。
+func IsOperationInProgressError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrOperationInProgress) {
+		return true
+	}
+	return strings.Contains(err.Error(), ErrOperationInProgress.Error())
+}
+
 // GitService Git服务
 type GitService struct {
 	gitCmd    *util.GitCommand
 	scanCache *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
+
+	opMu     sync.Mutex              // 保护 opLocks map 的并发读写
+	opLocks  map[string]*sync.Mutex  // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
 }
 
 // NewGitService 创建服务（不注入扫描缓存，兼容现有调用方与测试）。
@@ -36,6 +55,36 @@ func NewGitServiceWithCache(cachePath string) *GitService {
 		gitCmd:    util.NewGitCommand(),
 		scanCache: NewScanCacheManager(cachePath),
 	}
+}
+
+// tryLockRepo 尝试获取目标仓库的变更操作互斥锁。
+// 锁粒度按仓库绝对路径为键（A1 纯仓库锁）：同一仓库的变更操作串行化，不同仓库互不阻塞。
+// 采用 TryLock 语义（方案 A 互斥拒绝）：锁已被占用立即返回 ErrOperationInProgress，不等待、不排队。
+// 成功返回 release 闭包，调用方须 defer 调用以释放锁，保证 panic 路径下也无泄漏。
+// repoPath 经 filepath.Abs 规范化为绝对路径作为键，避免相对路径与绝对路径双键绕过互斥。
+func (s *GitService) tryLockRepo(repoPath string) (release func(), err error) {
+	abs, aerr := filepath.Abs(repoPath)
+	if aerr != nil {
+		// Abs 失败极少见（路径非法），退回用原路径作键，不阻断主流程
+		abs = repoPath
+	}
+
+	s.opMu.Lock()
+	mu, ok := s.opLocks[abs]
+	if !ok {
+		mu = &sync.Mutex{}
+		if s.opLocks == nil {
+			s.opLocks = make(map[string]*sync.Mutex)
+		}
+		s.opLocks[abs] = mu
+	}
+	s.opMu.Unlock()
+
+	if !mu.TryLock() {
+		return nil, fmt.Errorf("%w: %s", ErrOperationInProgress, abs)
+	}
+
+	return mu.Unlock, nil
 }
 
 // GetInfo 获取仓库信息
@@ -65,6 +114,12 @@ func (s *GitService) GetInfo(dirPath string) (*model.GitRepoInfo, error) {
 
 // Clone 克隆仓库
 func (s *GitService) Clone(url, targetPath string) (string, error) {
+	release, err := s.tryLockRepo(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if _, err := os.Stat(targetPath); err == nil {
 		return "", fmt.Errorf("目标路径已存在")
 	}
@@ -75,6 +130,12 @@ func (s *GitService) Clone(url, targetPath string) (string, error) {
 // Pull 拉取更新。useRebase=true 走 git pull --rebase（变基模式，冲突走统一冲突解决入口），
 // useRebase=false 走普通 pull，与历史行为完全一致。
 func (s *GitService) Pull(dirPath string, useRebase bool) (string, error) {
+	release, err := s.tryLockRepo(dirPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if !s.gitCmd.IsGitRepository(dirPath) {
 		return "", fmt.Errorf("不是Git仓库")
 	}
@@ -170,6 +231,12 @@ func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 
 // CheckoutBranch 切换分支
 func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote bool) error {
+	release, err := s.tryLockRepo(dirPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if !s.gitCmd.IsGitRepository(dirPath) {
 		return fmt.Errorf("不是Git仓库")
 	}
@@ -436,6 +503,12 @@ func (s *GitService) GetLocalChanges(dirPath string) ([]model.FileChange, error)
 
 // DiscardChanges 回滚本地变动
 func (s *GitService) DiscardChanges(dirPath string, filePaths []string) error {
+	release, err := s.tryLockRepo(dirPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	gitRoot, err := util.FindGitRoot(dirPath)
 	if err != nil {
 		return fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
@@ -502,6 +575,12 @@ func safeEmit(ctx context.Context, event string, data ...interface{}) {
 // 先 git add -- <files> 把选中文件（含未跟踪）加入 index，
 // 再 git commit -m <message> -- <files>，pathspec 确保不影响 index 中其他文件。
 func (s *GitService) Commit(repoPath, message string, files []string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if len(files) == 0 {
 		return fmt.Errorf("未选择要提交的文件")
 	}
@@ -530,6 +609,12 @@ func (s *GitService) Commit(repoPath, message string, files []string) error {
 // Push 推送当前分支到远程。setUpstream=true 时使用 git push --set-upstream origin <branch>。
 // 返回 git stdout（trim 后）用于结果展示。
 func (s *GitService) Push(repoPath string, setUpstream bool) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := util.FindGitRoot(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
@@ -733,14 +818,22 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 				result.Skipped = true
 				result.Output = "未配置远程仓库，已跳过"
 			} else {
-				gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
-				output, err := gitCmd.Pull(repoPath)
-				if err != nil {
+				// 抢仓级锁，防止与用户手动单仓 PullRepo 并发冲突；抢失败记为失败而非跳过
+				release, lockErr := s.tryLockRepo(repoPath)
+				if lockErr != nil {
 					result.Success = false
-					result.Error = err.Error()
+					result.Error = lockErr.Error()
 				} else {
-					result.Success = true
-					result.Output = strings.TrimSpace(output)
+					defer release()
+					gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
+					output, err := gitCmd.Pull(repoPath)
+					if err != nil {
+						result.Success = false
+						result.Error = err.Error()
+					} else {
+						result.Success = true
+						result.Output = strings.TrimSpace(output)
+					}
 				}
 			}
 
@@ -829,6 +922,12 @@ func (s *GitService) ListTags(repoPath string) ([]model.GitTag, error) {
 
 // CreateTag 创建标签。message 为空创建轻量标签，非空创建注释标签（-a -m），仅钉 HEAD。
 func (s *GitService) CreateTag(repoPath, name, message string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("标签名不能为空")
 	}
@@ -851,6 +950,12 @@ func (s *GitService) CreateTag(repoPath, name, message string) error {
 
 // DeleteTag 删除本地标签（git tag -d）。
 func (s *GitService) DeleteTag(repoPath, name string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("标签名不能为空")
 	}
@@ -867,6 +972,12 @@ func (s *GitService) DeleteTag(repoPath, name string) error {
 
 // PushTag 推送单个标签到远程 origin，返回 trim 后的 stdout。
 func (s *GitService) PushTag(repoPath, name string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("标签名不能为空")
 	}
@@ -920,6 +1031,12 @@ func (s *GitService) ListRemotes(repoPath string) ([]model.GitRemote, error) {
 
 // AddRemote 新增远程仓库（git remote add）。
 func (s *GitService) AddRemote(repoPath, name, url string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("远程仓库名不能为空")
 	}
@@ -939,6 +1056,12 @@ func (s *GitService) AddRemote(repoPath, name, url string) error {
 
 // RemoveRemote 删除远程仓库（git remote remove）。
 func (s *GitService) RemoveRemote(repoPath, name string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("远程仓库名不能为空")
 	}
@@ -955,6 +1078,12 @@ func (s *GitService) RemoveRemote(repoPath, name string) error {
 
 // Fetch 拉取远程更新。remote 为空时对所有远程执行；prune 控制是否清理远端已删分支。返回 trim 后的 stdout。
 func (s *GitService) Fetch(repoPath, remote string, prune bool) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := util.FindGitRoot(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
@@ -977,6 +1106,12 @@ func (s *GitService) Fetch(repoPath, remote string, prune bool) (string, error) 
 
 // SetBranchUpstream 为指定分支设置上游跟踪分支（git branch --set-upstream-to=<remote>/<branch> <branch>）。
 func (s *GitService) SetBranchUpstream(repoPath, branch, remote string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(branch) == "" {
 		return fmt.Errorf("分支名不能为空")
 	}
@@ -999,6 +1134,12 @@ func (s *GitService) SetBranchUpstream(repoPath, branch, remote string) error {
 
 // CreateBranch 从当前 HEAD 创建新分支（git branch <name>）。name 空报错，重名透传 git 报错。
 func (s *GitService) CreateBranch(repoPath, name string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("分支名不能为空")
 	}
@@ -1015,6 +1156,12 @@ func (s *GitService) CreateBranch(repoPath, name string) error {
 // DeleteBranch 删除本地分支。force=false 走 git branch -d（安全删除，未合并会失败），
 // force=true 走 git branch -D（强制删除）。name 空报错。
 func (s *GitService) DeleteBranch(repoPath, name string, force bool) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("分支名不能为空")
 	}
@@ -1035,6 +1182,12 @@ func (s *GitService) DeleteBranch(repoPath, name string, force bool) error {
 // RenameBranch 重命名本地分支（git branch -m <oldName> <newName>），仅本地不触远程。
 // oldName/newName 空报错；当前分支重命名由前端显式传入当前分支名实现。
 func (s *GitService) RenameBranch(repoPath, oldName, newName string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(oldName) == "" {
 		return fmt.Errorf("原分支名不能为空")
 	}
@@ -1056,6 +1209,12 @@ func (s *GitService) RenameBranch(repoPath, oldName, newName string) error {
 // StageFiles 暂存文件（git add -- <files>），files 空报错。
 // 与 Commit 内部暂存逻辑一致，但单独暴露供工作区整理使用。
 func (s *GitService) StageFiles(repoPath string, files []string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if len(files) == 0 {
 		return fmt.Errorf("未选择要暂存的文件")
 	}
@@ -1073,6 +1232,12 @@ func (s *GitService) StageFiles(repoPath string, files []string) error {
 // UnstageFiles 取消暂存文件（git restore --staged -- <files>），统一命令通配已跟踪/未跟踪（git 2.25+）。
 // files 空报错。
 func (s *GitService) UnstageFiles(repoPath string, files []string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if len(files) == 0 {
 		return fmt.Errorf("未选择要取消暂存的文件")
 	}
@@ -1124,6 +1289,12 @@ func (s *GitService) precheckMutation(repoPath string) (string, error) {
 
 // Merge 合并 branch 到当前分支，mode 取 ff/no-ff/squash。前置校验通过后委托 util。
 func (s *GitService) Merge(repoPath, branch string, mode model.MergeMode) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if strings.TrimSpace(branch) == "" {
 		return "", fmt.Errorf("目标分支不能为空")
 	}
@@ -1136,6 +1307,12 @@ func (s *GitService) Merge(repoPath, branch string, mode model.MergeMode) (strin
 
 // Rebase 将当前分支变基到 branch 之上。前置校验通过后委托 util。
 func (s *GitService) Rebase(repoPath, branch string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if strings.TrimSpace(branch) == "" {
 		return "", fmt.Errorf("目标分支不能为空")
 	}
@@ -1148,6 +1325,12 @@ func (s *GitService) Rebase(repoPath, branch string) (string, error) {
 
 // CherryPick 将 sha 拣选到当前分支。前置校验通过后委托 util。
 func (s *GitService) CherryPick(repoPath, sha string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	if strings.TrimSpace(sha) == "" {
 		return "", fmt.Errorf("提交 SHA 不能为空")
 	}
@@ -1186,6 +1369,12 @@ func (s *GitService) GetConflictState(repoPath string) (*model.ConflictState, er
 
 // ResolveConflict 标记单个冲突文件已解决（git add -- <file>）。file 空报错。
 func (s *GitService) ResolveConflict(repoPath, file string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if strings.TrimSpace(file) == "" {
 		return fmt.Errorf("文件路径不能为空")
 	}
@@ -1224,6 +1413,12 @@ func (s *GitService) requireInProgress(repoPath string, op model.ConflictType) (
 
 // ContinueMerge 合并冲突解决后提交合并（git commit --no-edit，复用 MERGE_MSG）。
 func (s *GitService) ContinueMerge(repoPath string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeMerge)
 	if err != nil {
 		return "", err
@@ -1233,6 +1428,12 @@ func (s *GitService) ContinueMerge(repoPath string) (string, error) {
 
 // ContinueRebase 变基冲突解决后继续。可能再次冲突。
 func (s *GitService) ContinueRebase(repoPath string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
 	if err != nil {
 		return "", err
@@ -1242,6 +1443,12 @@ func (s *GitService) ContinueRebase(repoPath string) (string, error) {
 
 // ContinueCherryPick 拣选冲突解决后继续。可能再次冲突。
 func (s *GitService) ContinueCherryPick(repoPath string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeCherryPick)
 	if err != nil {
 		return "", err
@@ -1251,6 +1458,12 @@ func (s *GitService) ContinueCherryPick(repoPath string) (string, error) {
 
 // AbortMerge 中止合并，回滚到合并前状态。
 func (s *GitService) AbortMerge(repoPath string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeMerge)
 	if err != nil {
 		return err
@@ -1261,6 +1474,12 @@ func (s *GitService) AbortMerge(repoPath string) error {
 
 // AbortRebase 中止变基，回滚到变基前分支位置。
 func (s *GitService) AbortRebase(repoPath string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
 	if err != nil {
 		return err
@@ -1271,6 +1490,12 @@ func (s *GitService) AbortRebase(repoPath string) error {
 
 // AbortCherryPick 中止拣选，回滚到拣选前状态。
 func (s *GitService) AbortCherryPick(repoPath string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeCherryPick)
 	if err != nil {
 		return err
@@ -1281,6 +1506,12 @@ func (s *GitService) AbortCherryPick(repoPath string) error {
 
 // SkipRebase 跳过当前冲突提交继续变基（仅 rebase 有 --skip 语义，merge/cherry-pick 无）。
 func (s *GitService) SkipRebase(repoPath string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	gitRoot, err := s.requireInProgress(repoPath, model.ConflictTypeRebase)
 	if err != nil {
 		return "", err

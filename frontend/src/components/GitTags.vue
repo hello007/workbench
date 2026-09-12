@@ -93,6 +93,7 @@ import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { GetTags, CreateTag, DeleteTag, PushTag } from '../../wailsjs/go/main/App'
+import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -136,7 +137,7 @@ const submitCreate = async () => {
     createVisible.value = false
     await loadTags()
   } catch (error) {
-    ElMessage.error('创建标签失败: ' + (error.message || String(error)))
+    handleGitError('创建标签失败: ', error)
   } finally {
     creating.value = false
   }
@@ -158,7 +159,7 @@ const deleteTag = async (tag) => {
     ElMessage.success('标签已删除')
     await loadTags()
   } catch (error) {
-    ElMessage.error('删除标签失败: ' + (error.message || String(error)))
+    handleGitError('删除标签失败: ', error)
   } finally {
     deletingName.value = ''
   }
@@ -170,7 +171,7 @@ const pushTag = async (tag) => {
     const out = await PushTag(props.repoPath, tag.name)
     ElMessage.success('标签推送成功' + (out ? `\n${out}` : ''))
   } catch (error) {
-    ElMessage.error('推送标签失败: ' + (error.message || String(error)))
+    handleGitError('推送标签失败: ', error)
   } finally {
     pushingName.value = ''
   }

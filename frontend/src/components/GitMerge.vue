@@ -95,6 +95,7 @@ import {
   AbortMerge, AbortRebase, AbortCherryPick, SkipRebase,
   OpenInVSCode
 } from '../../wailsjs/go/main/App'
+import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -183,8 +184,8 @@ const execute = async () => {
     }
   } catch (error) {
     // 冲突时后端可能以 exit 1 返回，ExecuteWithCodes 已吸收为正常返回；
-    // 此处捕获的是真错误（前置校验失败、命令异常等）
-    ElMessage.error('操作失败: ' + (error.message || String(error)))
+    // 此处捕获的是真错误（前置校验失败、命令异常、并发拒绝等）
+    handleGitError('操作失败: ', error)
     await refreshConflictState()
   } finally {
     executing.value = false
@@ -208,7 +209,7 @@ const resolveFile = async (file) => {
     await ResolveConflict(props.repoPath, file)
     await refreshConflictState()
   } catch (error) {
-    ElMessage.error('标记已解决失败: ' + (error.message || String(error)))
+    handleGitError('标记已解决失败: ', error)
   } finally {
     resolvingFile.value = ''
   }
@@ -233,7 +234,7 @@ const continueOp = async () => {
       ElMessage.success('冲突已解决，操作完成' + (output ? `\n${output}` : ''))
     }
   } catch (error) {
-    ElMessage.error('继续操作失败: ' + (error.message || String(error)))
+    handleGitError('继续操作失败: ', error)
     await refreshConflictState()
   } finally {
     continuing.value = false
@@ -254,7 +255,7 @@ const abortOp = async () => {
     ElMessage.success('已中止操作')
     await refreshConflictState()
   } catch (error) {
-    ElMessage.error('中止操作失败: ' + (error.message || String(error)))
+    handleGitError('中止操作失败: ', error)
     await refreshConflictState()
   } finally {
     aborting.value = false
@@ -272,7 +273,7 @@ const skipOp = async () => {
       ElMessage.success('已跳过当前提交，变基完成' + (output ? `\n${output}` : ''))
     }
   } catch (error) {
-    ElMessage.error('跳过失败: ' + (error.message || String(error)))
+    handleGitError('跳过失败: ', error)
     await refreshConflictState()
   } finally {
     skipping.value = false

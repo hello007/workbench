@@ -116,6 +116,7 @@ import {
   GetRemotes, AddRemote, RemoveRemote, FetchRepo, SetBranchUpstream,
   GetGitRemoteURL
 } from '../../wailsjs/go/main/App'
+import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -186,7 +187,7 @@ const submitAdd = async () => {
     addVisible.value = false
     await loadRemotes()
   } catch (error) {
-    ElMessage.error('添加远程失败: ' + (error.message || String(error)))
+    handleGitError('添加远程失败: ', error)
   } finally {
     adding.value = false
   }
@@ -211,7 +212,7 @@ const removeRemote = async (remote) => {
     }
     await loadRemotes()
   } catch (error) {
-    ElMessage.error('删除远程失败: ' + (error.message || String(error)))
+    handleGitError('删除远程失败: ', error)
   } finally {
     removingName.value = ''
   }
@@ -223,7 +224,7 @@ const fetchRemote = async (remote) => {
     const out = await FetchRepo(props.repoPath, remote.name, pruneOnFetch.value)
     ElMessage.success('拉取成功' + (out ? `\n${out}` : ''))
   } catch (error) {
-    ElMessage.error('拉取失败: ' + (error.message || String(error)))
+    handleGitError('拉取失败: ', error)
   } finally {
     fetchingName.value = ''
   }
@@ -235,7 +236,7 @@ const fetchAll = async () => {
     const out = await FetchRepo(props.repoPath, '', pruneOnFetch.value)
     ElMessage.success('拉取全部成功' + (out ? `\n${out}` : ''))
   } catch (error) {
-    ElMessage.error('拉取全部失败: ' + (error.message || String(error)))
+    handleGitError('拉取全部失败: ', error)
   } finally {
     fetchingAll.value = false
   }
@@ -248,7 +249,7 @@ const setUpstream = async () => {
     await SetBranchUpstream(props.repoPath, currentBranch.value, upstreamRemote.value)
     ElMessage.success(`已为分支「${currentBranch.value}」设置上游：${upstreamRemote.value}/${currentBranch.value}`)
   } catch (error) {
-    ElMessage.error('设置上游分支失败: ' + (error.message || String(error)))
+    handleGitError('设置上游分支失败: ', error)
   } finally {
     settingUpstream.value = false
   }
