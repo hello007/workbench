@@ -1800,3 +1800,44 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 54: 后端依赖注入(Wire)与service治理
+
+**Date**: 2026-09-12
+**Task**: wire-service
+**Branch**: `master`
+
+### Summary
+
+落地路线图技术债「后端架构优化 → 依赖注入」。调研 [research/di-approach.md] 结论：本项目 14 service 仅 1 条跨依赖边（SkillDiscovery→Directory），生命周期重（os.Exit/goroutine/CloseAll），Wire 图求解价值闲置且引入双生成器复杂度，fx 运行时反射对桌面二进制风险高。采方案 A 手写 NewAppServices 聚合 + App 内嵌 *AppServices 字段提升。关键修正：AppServices 须在 package main（跨包内嵌未导出字段不提升，放 service 包则 133 委托方法全 diff 或编译失败）。NewApp() 返回 &App{AppServices:&AppServices{}} nil 防护。构造与生命周期分离（4 处副作用留 startup/shutdown）。同步改 10 处测试 App 字面量。go test -race 全绿、service 78.6%、wails generate module 后 App.js/App.d.ts 零 diff、wails build 通过。
+
+### Main Changes
+
+- `app_services.go`（新）：AppServices struct 14 字段 + NewAppServices(ctx,dataDir) 集中装配
+- `app.go`：App 内嵌 *AppServices 移 14 字段，startup 瘦身改调 NewAppServices，NewApp nil 防护
+- `app_test.go` 8 处 + `app_repo_filter_test.go` 1 处 + helper：App 字面量改 AppServices 注入
+- `docs/spec/app-services-assembly.md`（新）：装配范式契约文档
+- `CLAUDE.md` / `docs/spec/README.md` / `docs/路线图.md`：关键规则 + 索引 + 技术债勾选
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25cf67f` | refactor(app): AppServices 集中装配 + App 内嵌字段提升 |
+
+### Testing
+
+- [OK] `go test ./... -race` 全绿
+- [OK] service 覆盖率 78.6% ≥76% 基线
+- [OK] `wails generate module` 后 App.js/App.d.ts diff 零变更
+- [OK] `wails build` 18.166s 通过无 MISSING_EXPORT
+- [OK] `go vet` main 包无警告
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推进第二个任务：全局错误处理 + 日志系统（在本任务稳定 service 边界上铺设）
