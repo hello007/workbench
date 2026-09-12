@@ -1767,3 +1767,36 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 
 - 待用户确认后 commit（未自行提交）
 - 未来可选升级：方案 B 排队 / 方案 C context 取消+进度（锁结构已预留扩展点）
+
+
+## Session 52: Git 并发操作控制
+
+**Date**: 2026-09-12
+**Task**: Git 并发操作控制
+**Branch**: `master`
+
+### Summary
+
+方案 A 互斥拒绝：service/git.go GitService 加 opMu+opLocks，tryLockRepo 按 sync.Mutex TryLock 串行化同仓变更操作，跨仓并行，只读不抢锁；30 个变更方法接入锁，BatchPull worker 抢仓级锁。前端 utils/gitError.js handleGitError 统一拦截 ErrOperationInProgress→ElMessage.warning。trellis-check 子 agent 审核通过并修复 1 个 BatchPull 假覆盖测试。go test -race 全绿、npm test 824 用例、build 无 MISSING_EXPORT、service 77.8%/前端全维度≥70% 门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b4e5426` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
