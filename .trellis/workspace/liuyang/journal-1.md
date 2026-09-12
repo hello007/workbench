@@ -1689,3 +1689,36 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 51: 提交历史缓存与增量更新
+
+**Date**: 2026-09-12
+**Task**: 提交历史缓存与增量更新
+**Branch**: `master`
+
+### Summary
+
+落地路线图「Git 操作优化 → 提交历史缓存」三项（本地缓存/增量更新/过期策略）。新增 service/commit_history_cache.go 纯内存缓存（复用 filetree_cache 范式：Mutex + TTL 5min + 深拷贝 + 单仓上限 5000），按仓库根 + HEAD ref 复合键隔离分支。app_git.go GetCommitHistory 四路径编排：HEAD SHA 相同命中内存过滤分页 / HEAD 前移增量 prepend / rebase 链断回退全量 / 超限走原 go-git 路径。过滤与分页下沉缓存内内存执行，翻页与防抖过滤不再触 go-git Log 与 getCommitFiles 重算。新增 InvalidateCommitHistoryCache/ClearAllCommitHistoryCache 桥接，前端 handleRefresh 前置清缓存。三绿 + service 78% / 前端全≥70% + race 无竞态 + wails 绑定重生成。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5645e04` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
