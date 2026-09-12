@@ -1656,3 +1656,36 @@ TestGetChildren_CacheInvalidatedOnMtimeChange 在 NTFS 上 flaky：连续 mustWr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 50: 提交历史服务端搜索与作者日期文件过滤
+
+**Date**: 2026-09-12
+**Task**: 提交历史服务端搜索与作者日期文件过滤
+**Branch**: `master`
+
+### Summary
+
+GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下推 Since/Until/PathFilter，Author/Keyword 迭代内手动匹配（v5.18.0 无 Author 字段）。前端 CommitHistory.vue 头部过滤条件行 + 防抖服务端触发，移除客户端 filteredCommits 与 MAX_COMMITS 上限。关键发现：go-git v5.18.0 LogOptions 无 Author 字段，Since/Until 按 Committer.When 过滤。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ddf3a3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
