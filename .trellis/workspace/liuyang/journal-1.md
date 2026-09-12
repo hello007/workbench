@@ -1722,3 +1722,48 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 52: Git 并发操作控制
+
+**Date**: 2026-09-12
+**Task**: git-concurrency-control
+**Branch**: `master`
+
+### Summary
+
+落地路线图「Git 操作优化 → 并发操作控制」。方案 A 互斥拒绝：service/git.go GitService 新增 `opMu sync.Mutex` + `opLocks map[string]*sync.Mutex`，按仓库绝对路径为键懒创建锁；`tryLockRepo(repoPath)(release, err)` 用 `sync.Mutex.TryLock`，失败返 `ErrOperationInProgress`（"该仓库有 Git 操作进行中，请稍后重试"），成功返 release 闭包 defer 释放。锁粒度 A1 纯仓库锁（git index lock 本身全仓互斥），跨仓并行，只读不抢锁。30 个变更方法（Commit/Push/Pull/Clone/Checkout/分支增删改/Stage/Unstage/Discard/Merge/Rebase/CherryPick/ResolveConflict/Continue×3/Abort×3/SkipRebase/Tag 三/Remote 三/Fetch/SetBranchUpstream）方法体最前接入 tryLockRepo defer release；BatchPull 内部 worker 抢仓级锁防与手动单仓 PullRepo 冲突，失败记 result.Error。前端新增 `src/utils/gitError.js`（`isGitOperationInProgress` + `handleGitError`：操作进行中→ElMessage.warning 原文案，否则 ElMessage.error 拼前缀），LocalChanges/GitMerge/GitTags/GitRemotes/GitBranches/ContentPanel 六组件变更 catch 改调 helper。三绿 + service 77.7% + 前端全维度≥70%（gitError.js 100%）+ race 无竞态 + build 无 MISSING_EXPORT。
+
+### Main Changes
+
+- `service/git.go`：GitService 加 `opMu`/`opLocks` 字段；新增 `ErrOperationInProgress`、`IsOperationInProgressError`、`tryLockRepo`；30 变更方法接入锁；BatchPull worker 抢锁
+- `service/git_concurrency_test.go`（新）：锁基础设施 6 用例 + 接入验证 5 用例（同仓互斥/释放后恢复/只读不阻塞/BatchPull 不死锁）
+- `frontend/src/utils/gitError.js`（新）：统一错误拦截 helper
+- `frontend/src/utils/__tests__/gitError.spec.js`（新）：helper 单测
+- 6 组件变更 catch 改调 handleGitError：LocalChanges/GitMerge/GitTags/GitRemotes/GitBranches/ContentPanel
+- `docs/路线图.md`：勾选并发操作控制
+- `docs/功能说明.md`、`README.md`：补并发控制说明
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (pending) | feat(git): 变更类操作按仓库路径并发互斥拒绝 |
+
+### Testing
+
+- [OK] `go test ./... -race` 全绿
+- [OK] `npm test` 824 用例全绿
+- [OK] `npm run build` 无 MISSING_EXPORT
+- [OK] service 覆盖率 77.7% ≥ 76% 基线
+- [OK] 前端覆盖率 Statements 80.17% / Branches 71.92% / Functions 75.95% / Lines 82.96% 全≥70%
+- [OK] race detector 无竞态
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 待用户确认后 commit（未自行提交）
+- 未来可选升级：方案 B 排队 / 方案 C context 取消+进度（锁结构已预留扩展点）
