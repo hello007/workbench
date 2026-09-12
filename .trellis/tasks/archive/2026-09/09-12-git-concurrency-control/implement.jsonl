@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "若新增 model 导出 struct（如 ErrOperationInProgress error 类型或 OngoingOp model）或改 App 方法签名，须同步 frontend/wailsjs/ 绑定三处"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层 ≥76% 覆盖率门禁，锁基础设施与变更方法接入需配套单测达基线"}
+{"file": ".trellis/tasks/09-12-git-concurrency-control/prd.md", "reason": "锁设计 tryLockRepo/release/ErrOperationInProgress、变更/只读方法清单、Acceptance Criteria 全在 PRD"}
