@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验桥接方法三处同步：Go 签名 / App.js / App.d.ts 一致；frontend/wailsjs/ gitignore 无残留；npm run build 验 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验 service 包覆盖率 ≥76% 未回归，新增 commit_history_cache.go 及其 _test.go 达标；前端 ≥70% 未回归"}
+{"file": "docs/spec/test-stability.md", "reason": "校验 TTL / 增量 / SHA 链断测试采用方案 C 注入陈旧缓存，确定性 PASS 无 flaky；go test -race 无竞态"}

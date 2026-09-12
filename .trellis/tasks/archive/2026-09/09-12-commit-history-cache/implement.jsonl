@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 InvalidateCommitHistoryCache / ClearAllCommitHistoryCache 桥接方法须同步 App.js + App.d.ts；无新 model struct 故 models.ts 无新增——核对场景 1 与场景 2"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增 service/commit_history_cache.go 纳入 service 包 ≥76% 门禁；app_*.go 薄包装不设门禁——实现时按分层阈值补测"}
+{"file": "docs/spec/test-stability.md", "reason": "TTL 5min 失效测试与 mtime/timestamp 时序相关，按方案 C 注入陈旧缓存（cachedAt 明确早于当前）驱动失效分支，不依赖真实时间 sleep，规避 flaky"}
