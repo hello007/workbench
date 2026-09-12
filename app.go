@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 )
 
@@ -23,8 +24,9 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// 集中装配全部 service（纯构造，副作用见下方）
-	a.AppServices = NewAppServices(ctx, "data")
+	// 集中装配全部 service（纯构造，副作用见下方）。version=="dev" 为 wails dev 模式，
+	// logger 额外输出 stdout；生产构建 ldflags 注入真实版本号走纯文件日志。
+	a.AppServices = NewAppServices(ctx, "data", version == "dev")
 
 	// 启动定时清理兜底：周期性清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残，此处只清异常残留）
 	a.aiFuncSvc.StartHistoryCleanup()
@@ -36,11 +38,11 @@ func (a *App) startup(ctx context.Context) {
 	// 如果有待更新文件，会启动批处理脚本替换 exe 后启动新版本，
 	// 当前旧进程需要退出，避免同时运行两个实例
 	if hasPending, _ := a.updateSvc.CheckPendingUpdate(); hasPending {
-		println("发现待更新文件，正在应用更新并退出...")
+		slog.Info("pending update detected, applying and exiting")
 		os.Exit(0)
 	}
 
-	println("WorkBench started")
+	slog.Info("workbench started")
 }
 
 func (a *App) shutdown(context.Context) {
@@ -50,7 +52,7 @@ func (a *App) shutdown(context.Context) {
 	if a.aiFuncSvc != nil {
 		a.aiFuncSvc.CloseAll()
 	}
-	println("WorkBench shutting down...")
+	slog.Info("workbench shutting down")
 }
 
 // GetAppVersion 获取应用版本号

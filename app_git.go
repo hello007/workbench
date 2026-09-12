@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 func (a *App) GetGitInfo(path string) *model.GitRepoInfo {
 	info, err := a.fileTreeSvc.GetGitInfo(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("get git info failed", "path", path, "err", err)
 		return &model.GitRepoInfo{
 			Path:   path,
 			IsRepo: false,

@@ -338,7 +338,7 @@ func (s *FileOperationService) OpenInObsidian(path, obsidianPath string) error {
 	vaults, loadErr := loadObsidianVaults()
 	if loadErr != nil {
 		// 降级：读不到 obsidian.json，直接尽力打开，记日志不阻塞
-		println("警告: 读取 Obsidian vault 注册表失败，降级为直接打开:", loadErr.Error())
+		Logger().Warn("read obsidian vault registry failed, fallback to direct open", "err", loadErr)
 		return launchObsidianURI(uri, obsidianPath, useExe)
 	}
 	if _, ok := findVaultForPath(vaults, vaultPath); !ok {

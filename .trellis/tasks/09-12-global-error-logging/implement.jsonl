@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-12-global-error-logging/prd.md", "reason": "任务 PRD：slog+lumberjack 日志方案、AppError+ErrorFormatter 错误方案、59 处 println 替换清单、git/obsidian 两域迁移、前端 error.js helper、规范修订项"}
+{"file": ".trellis/tasks/09-12-global-error-logging/research/logging-approach.md", "reason": "日志库选型（slog 胜出）+ 错误处理方案 + Wails v2.12 ErrorFormatter 源码核实（CallbackMessage.Err any + ErrorFormatter func(error) any 原生支持结构化 error 传递）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定契约：ErrorFormatter 注册属 options 非方法签名变更，须核查 App.js/App.d.ts/models.ts 零 diff"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% + 前端 ≥70% 门禁，logger 注入不改构造签名保基线"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "AppServices 装配范式：logger 在 NewAppServices 顶部注入，SetLogger setter 模式"}

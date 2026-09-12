@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 )
 
 // ===== 剪贴板域 =====
@@ -29,7 +30,7 @@ func (a *App) MoveItem(sourcePath, targetDir string) string {
 func (a *App) CopyTo(sourcePath, targetPath, targetName string, copyWholeDir bool) string {
 	result, err := a.fileOpSvc.CopyTo(sourcePath, targetPath, targetName, copyWholeDir)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("copy to failed", "sourcePath", sourcePath, "targetPath", targetPath, "err", err)
 		return "错误: " + err.Error()
 	}
 	return result
@@ -39,7 +40,7 @@ func (a *App) CopyTo(sourcePath, targetPath, targetName string, copyWholeDir boo
 func (a *App) CopyToSystemClipboard(path string) string {
 	err := a.fileOpSvc.CopyToSystemClipboard([]string{path})
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("copy to system clipboard failed", "path", path, "err", err)
 		return "错误: " + err.Error()
 	}
 	return ""
@@ -49,7 +50,7 @@ func (a *App) CopyToSystemClipboard(path string) string {
 func (a *App) CutToSystemClipboard(path string) string {
 	err := a.fileOpSvc.CutToSystemClipboard([]string{path})
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("cut to system clipboard failed", "path", path, "err", err)
 		return "错误: " + err.Error()
 	}
 	return ""
@@ -59,7 +60,7 @@ func (a *App) CutToSystemClipboard(path string) string {
 func (a *App) ReadFromSystemClipboard() string {
 	paths, isCut, err := a.fileOpSvc.ReadFromSystemClipboard()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("read from system clipboard failed", "err", err)
 		return ""
 	}
 	if len(paths) == 0 {

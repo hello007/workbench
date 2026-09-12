@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+
 	"workbench/model"
 	"workbench/util"
 )
@@ -13,7 +15,7 @@ import (
 func (a *App) GetDirectories() []*model.Directory {
 	directories, err := a.directorySvc.Load()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("load directories failed", "err", err)
 		return []*model.Directory{}
 	}
 	return directories
@@ -27,7 +29,7 @@ func (a *App) RefreshDirectoriesGitFlag() []*model.Directory {
 	// 1. 基于最新 Load（不使用任何旧快照）
 	directories, err := a.directorySvc.Load()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("load directories for git flag refresh failed", "err", err)
 		return []*model.Directory{}
 	}
 	gitCmd := util.NewGitCommand()
@@ -42,7 +44,7 @@ func (a *App) RefreshDirectoriesGitFlag() []*model.Directory {
 	}
 	// 3. Save 回写（基于最新 Load 的合并结果）
 	if err := a.directorySvc.Save(directories); err != nil {
-		println("Error:", err.Error())
+		slog.Error("save directories after git flag refresh failed", "err", err)
 	}
 	return directories
 }
@@ -52,7 +54,7 @@ func (a *App) RefreshDirectoriesGitFlag() []*model.Directory {
 func (a *App) AddDirectory(name, path string, isDefault bool) *model.Directory {
 	dir, err := a.directorySvc.Create(name, path, isDefault)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("add directory failed", "name", name, "path", path, "err", err)
 		return nil
 	}
 	return dir
@@ -63,7 +65,7 @@ func (a *App) AddDirectory(name, path string, isDefault bool) *model.Directory {
 func (a *App) UpdateDirectory(id, name, path string, isDefault bool) *model.Directory {
 	dir, err := a.directorySvc.Update(id, name, path, isDefault)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("update directory failed", "id", id, "err", err)
 		return nil
 	}
 	return dir
@@ -73,7 +75,7 @@ func (a *App) UpdateDirectory(id, name, path string, isDefault bool) *model.Dire
 func (a *App) DeleteDirectory(id string) bool {
 	err := a.directorySvc.Delete(id)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("delete directory failed", "id", id, "err", err)
 		return false
 	}
 	return true
@@ -83,7 +85,7 @@ func (a *App) DeleteDirectory(id string) bool {
 func (a *App) SetDefaultDirectory(id string) bool {
 	err := a.directorySvc.SetDefault(id)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("set default directory failed", "id", id, "err", err)
 		return false
 	}
 	return true
@@ -94,7 +96,7 @@ func (a *App) SetDefaultDirectory(id string) bool {
 func (a *App) GetDefaultDirectory() *model.Directory {
 	dir, err := a.directorySvc.GetDefault()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("get default directory failed", "err", err)
 		return nil
 	}
 	return dir
@@ -104,7 +106,7 @@ func (a *App) GetDefaultDirectory() *model.Directory {
 func (a *App) ReorderDirectories(ids []string) bool {
 	err := a.directorySvc.Reorder(ids)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("reorder directories failed", "err", err)
 		return false
 	}
 	return true

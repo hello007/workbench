@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 
 	"workbench/service"
 )
@@ -12,7 +13,7 @@ import (
 func (a *App) OpenInExplorer(path string) bool {
 	err := a.fileOpSvc.OpenInExplorer(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("open in explorer failed", "path", path, "err", err)
 		return false
 	}
 	return true
@@ -22,7 +23,7 @@ func (a *App) OpenInExplorer(path string) bool {
 func (a *App) OpenInVSCode(path string) bool {
 	err := a.fileOpSvc.OpenInVSCode(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("open in vscode failed", "path", path, "err", err)
 		return false
 	}
 	return true
@@ -32,7 +33,7 @@ func (a *App) OpenInVSCode(path string) bool {
 func (a *App) OpenInWarp(path string) bool {
 	err := a.fileOpSvc.OpenInWarp(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("open in warp failed", "path", path, "err", err)
 		return false
 	}
 	return true
@@ -57,7 +58,7 @@ func (a *App) OpenInObsidian(path string) string {
 	if errors.Is(err, service.ErrObsidianNotInstalled) {
 		return "not-installed"
 	}
-	println("Error:", err.Error())
+	slog.Error("open in obsidian failed", "path", path, "err", err)
 	return "not-installed"
 }
 
@@ -70,7 +71,7 @@ func (a *App) OpenObsidianVaultManager() bool {
 	}
 	err := a.fileOpSvc.OpenObsidianVaultManager(obsidianPath)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("open obsidian vault manager failed", "err", err)
 		return false
 	}
 	return true
@@ -82,7 +83,7 @@ func (a *App) OpenObsidianVaultManager() bool {
 func (a *App) CopyObsidianVaultPath(path string) bool {
 	err := a.fileOpSvc.CopyObsidianVaultPath(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("copy obsidian vault path failed", "path", path, "err", err)
 		return false
 	}
 	return true
@@ -106,7 +107,7 @@ func (a *App) AutoRegisterAndOpen(path string) string {
 	if errors.Is(err, service.ErrObsidianNotInstalled) {
 		return "not-installed"
 	}
-	println("Error:", err.Error())
+	slog.Error("auto register and open obsidian failed", "path", path, "err", err)
 	return "failed"
 }
 
@@ -114,7 +115,7 @@ func (a *App) AutoRegisterAndOpen(path string) string {
 func (a *App) OpenWithDefaultApp(path string) bool {
 	err := a.fileOpSvc.OpenWithDefaultApp(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("open with default app failed", "path", path, "err", err)
 		return false
 	}
 	return true

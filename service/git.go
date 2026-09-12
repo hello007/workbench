@@ -19,17 +19,21 @@ import (
 
 // ErrOperationInProgress 表示目标仓库已有变更类 Git 操作正在进行，本次请求被拒绝。
 // 前端据此错误码统一弹 warning 提示用户稍后重试，而非当作普通失败。
-var ErrOperationInProgress = fmt.Errorf("该仓库有 Git 操作进行中，请稍后重试")
+// 类型为 *model.AppError，经 Wails ErrorFormatter 结构化传前端 {code, message}，
+// 前端按 code=E_GIT_IN_PROGRESS 分流；后端内部 errors.As 仍可识别。
+var ErrOperationInProgress = model.NewAppError(model.ErrCodeGitInProgress, "该仓库有 Git 操作进行中，请稍后重试")
 
-// IsOperationInProgressError 判断错误是否为操作进行中拒绝。兼容 errors.Is 与字符串匹配两条路径。
+// IsOperationInProgressError 判断错误是否为操作进行中拒绝。
+// 优先 errors.As 识别 *AppError 的 Code；兜底字符串匹配兼容未迁移路径。
 func IsOperationInProgressError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrOperationInProgress) {
-		return true
+	var appErr *model.AppError
+	if errors.As(err, &appErr) {
+		return appErr.Code == model.ErrCodeGitInProgress
 	}
-	return strings.Contains(err.Error(), ErrOperationInProgress.Error())
+	return strings.Contains(err.Error(), ErrOperationInProgress.Message)
 }
 
 // GitService Git服务
@@ -81,7 +85,7 @@ func (s *GitService) tryLockRepo(repoPath string) (release func(), err error) {
 	s.opMu.Unlock()
 
 	if !mu.TryLock() {
-		return nil, fmt.Errorf("%w: %s", ErrOperationInProgress, abs)
+		return nil, model.WrapAppError(model.ErrCodeGitInProgress, "该仓库有 Git 操作进行中，请稍后重试", ErrOperationInProgress)
 	}
 
 	return mu.Unlock, nil

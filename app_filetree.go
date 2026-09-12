@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+
 	"workbench/model"
 )
 
@@ -10,7 +12,7 @@ import (
 func (a *App) GetFileTree(path string) []*model.FileTreeNode {
 	nodes, err := a.fileTreeSvc.GetChildren(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("get file tree failed", "path", path, "err", err)
 		return []*model.FileTreeNode{}
 	}
 	return nodes
@@ -20,7 +22,7 @@ func (a *App) GetFileTree(path string) []*model.FileTreeNode {
 func (a *App) GetFileTreeRecursive(path string, maxDepth int) []*model.FileTreeNode {
 	nodes, err := a.fileTreeSvc.GetTree(path, maxDepth)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("get file tree recursive failed", "path", path, "maxDepth", maxDepth, "err", err)
 		return []*model.FileTreeNode{}
 	}
 	return nodes
@@ -42,7 +44,7 @@ func (a *App) ClearAllFileTreeCache() {
 func (a *App) CreateDirectory(parentPath, name string) bool {
 	err := a.fileOpSvc.CreateDirectory(parentPath, name)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("create directory failed", "parentPath", parentPath, "name", name, "err", err)
 		return false
 	}
 	return true
@@ -52,7 +54,7 @@ func (a *App) CreateDirectory(parentPath, name string) bool {
 func (a *App) CreateFile(parentPath, name, content string) bool {
 	err := a.fileOpSvc.CreateFile(parentPath, name, content)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("create file failed", "parentPath", parentPath, "name", name, "err", err)
 		return false
 	}
 	return true
@@ -62,7 +64,7 @@ func (a *App) CreateFile(parentPath, name, content string) bool {
 func (a *App) RenameFile(oldPath, newName string) bool {
 	err := a.fileOpSvc.Rename(oldPath, newName)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("rename file failed", "oldPath", oldPath, "newName", newName, "err", err)
 		return false
 	}
 	return true
@@ -72,7 +74,7 @@ func (a *App) RenameFile(oldPath, newName string) bool {
 func (a *App) DeleteFile(path string) bool {
 	err := a.fileOpSvc.Delete(path)
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("delete file failed", "path", path, "err", err)
 		return false
 	}
 	return true

@@ -4,7 +4,10 @@ import (
 	"context"
 	"path/filepath"
 
+	"log/slog"
+
 	"workbench/service"
+	"workbench/util"
 )
 
 // AppServices 集中持有 App 的全部 service 与缓存实例。
@@ -43,8 +46,21 @@ type AppServices struct {
 //   - updateSvc.CheckPendingUpdate()：命中待更新则 os.Exit(0)
 //
 // 跨依赖：skillDiscoverySvc 依赖 directorySvc，构造顺序须 directorySvc 先。
-func NewAppServices(ctx context.Context, dataDir string) *AppServices {
+//
+// isDev 控制 logger 是否额外输出 stdout（wails dev 时 true，生产构建 false）。
+func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppServices {
 	s := &AppServices{}
+
+	// 优先初始化全局日志器并注入 service 包，后续 service 构造与运行期日志均可落盘。
+	// 落盘 data/logs/app.log，按 5MB 轮转保留 5 份；dev 模式额外 stdout。
+	logDir := filepath.Join(dataDir, "logs")
+	if absLogDir, err := util.InitLogger(logDir, isDev); err != nil {
+		// 日志初始化失败不阻断启动，回退 slog 默认 stderr，启动后仍可运行
+		slog.Error("init logger failed", "dir", logDir, "err", err)
+	} else {
+		service.SetLogger(slog.Default())
+		slog.Info("logger initialized", "logDir", absLogDir, "dev", isDev)
+	}
 
 	// 工作目录配置（data/directories.json）
 	configPath := filepath.Join(dataDir, "directories.json")

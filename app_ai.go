@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 
 	"workbench/model"
 	"workbench/service"
@@ -184,7 +185,7 @@ func (a *App) GetAiTaskHistoryStats(filter model.AiTaskHistoryFilter) *model.AiT
 func (a *App) GetFunctionUsageCounts() map[string]int {
 	counts, err := a.aiFuncSvc.GetFunctionUsageCounts()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("get ai function usage counts failed", "err", err)
 		return map[string]int{}
 	}
 	return counts

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"workbench/model"
@@ -13,7 +14,7 @@ import (
 func (a *App) SearchFiles(rootDir, query string, maxResults int) []*model.SearchResult {
 	results, err := a.searchSvc.Search(rootDir, query, maxResults)
 	if err != nil {
-		println("SearchFiles error:", err.Error())
+		slog.Error("search files failed", "rootDir", rootDir, "query", query, "err", err)
 		return []*model.SearchResult{}
 	}
 	return results

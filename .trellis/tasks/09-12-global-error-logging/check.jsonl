@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-12-global-error-logging/prd.md", "reason": "验收标准：59 处 println 替换、AppError+ErrorFormatter 注册、git/obsidian 两域迁移、前端 error.js 全组件、绑定零 diff、覆盖率门禁"}
+{"file": ".trellis/tasks/09-12-global-error-logging/research/logging-approach.md", "reason": "核查 ErrorFormatter 源码核实结论、slog+lumberjack 方案、迁移范围边界"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 Wails 绑定零 diff 契约（ErrorFormatter options 非签名变更）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service ≥76% + 前端 ≥70% 门禁不降"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "核查 logger 注入是否符合 AppServices 装配范式"}

@@ -156,7 +156,7 @@ func TestTryLockRepo_ConcurrentTryLockRace(t *testing.T) {
 }
 
 // TestIsOperationInProgressError 覆盖错误识别三条路径：
-// nil、直接 wrap（errors.Is）、字符串包含。
+// nil、AppError 本体（errors.As 提 Code）、字符串包含（未迁移路径兜底）。
 func TestIsOperationInProgressError(t *testing.T) {
 	if IsOperationInProgressError(nil) {
 		t.Error("nil 不应识别为进行中错误")

@@ -23,6 +23,7 @@
 |[test-coverage-gate.md](test-coverage-gate.md)|测试覆盖率分层门禁：后端 model/server ≥80% + service ≥76% 基线 + util ≥40% 排除 pty_windows.go + 主包不设门禁；前端 ≥70% 硬失败 exclude wailsjs；CI 脚本 scripts/coverage-check.sh 契约|
 |[test-stability.md](test-stability.md)|测试稳定性规范（Flaky 规避）：依赖文件系统 mtime 时序判失效的测试在 NTFS 上 flaky，改注入陈旧缓存（modTime 明确落后）驱动失效分支，不用 time.Sleep|
 |[app-services-assembly.md](app-services-assembly.md)|AppServices 装配范式：`NewAppServices` 集中装配 + App 内嵌 `*AppServices` 字段提升保 133 委托方法与 Wails 绑定零 diff；AppServices 须在 package main；构造与生命周期副作用分离；新增 service 改动点 2 处|
+|[logging-and-errors.md](logging-and-errors.md)|日志与错误处理规范：后端 slog + lumberjack 落盘 `data/logs/app.log`（禁 println）；AppError + Wails ErrorFormatter 结构化 error 跨层传递（源码核实 `CallbackMessage.Err any`）；前端 handleError 按 code 分流；新增错误码同步三处|
 
 ## 新增文档约定
 

@@ -60,7 +60,7 @@ func isObsidianRunning() bool {
 	util.HideCommandWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		println("警告: tasklist 进程枚举失败，保守视为 Obsidian 运行中:", err.Error())
+		Logger().Warn("tasklist enumerate failed, assume obsidian running", "err", err)
 		return true
 	}
 	return strings.Contains(strings.ToLower(string(out)), "obsidian.exe")

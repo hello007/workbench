@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+
 	"workbench/model"
 )
 
@@ -10,7 +12,7 @@ import (
 func (a *App) GetFavorites() []*model.Favorite {
 	favorites, err := a.favoritesSvc.Load()
 	if err != nil {
-		println("GetFavorites error:", err.Error())
+		slog.Error("get favorites failed", "err", err)
 		return []*model.Favorite{}
 	}
 	return favorites

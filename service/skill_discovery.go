@@ -115,7 +115,7 @@ func (s *SkillDiscoveryService) discover() []*model.SkillDescriptor {
 					scanSkillsDir(filepath.Join(installPath, "skills"), "plugin", pi.cwd, seen, &result, pi.plugin)
 				}
 			} else {
-				println("skill discovery: parse installed_plugins.json failed:", err.Error())
+				Logger().Warn("skill discovery: parse installed_plugins.json failed", "err", err)
 			}
 		}
 	}
@@ -174,7 +174,7 @@ func scanSkillsDir(skillsDir, source, cwd string, seen map[string]*model.SkillDe
 		}
 		name, desc, ok := parseSkillFrontmatter(skillMd)
 		if !ok {
-			println("skill discovery: skip, frontmatter parse failed:", skillMd)
+			Logger().Warn("skill discovery: skip, frontmatter parse failed", "skillMd", skillMd)
 			continue
 		}
 		sourceDir := filepath.Join(skillsDir, e.Name())

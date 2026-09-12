@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -40,7 +41,7 @@ func (a *App) RefreshRepoFilterList(dirId string) []*model.RepoFilterItem {
 func (a *App) findDirectoryById(id string) *model.Directory {
 	directories, err := a.directorySvc.Load()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("find directory by id: load directories failed", "id", id, "err", err)
 		return nil
 	}
 	for _, d := range directories {
@@ -117,7 +118,7 @@ func (a *App) buildRepoFilterList(dir *model.Directory, forceRescan bool) []*mod
 	//    故该快照的 readmeNeeded 判定（依赖 LastScanAt/meta 是否存在）在后续 Mutate 重新加载时仍成立。
 	metaSnapshot, err := a.repoMetaSvc.Load()
 	if err != nil {
-		println("Error:", err.Error())
+		slog.Error("load repo meta snapshot failed", "err", err)
 		metaSnapshot = make(map[string]*model.RepoMeta)
 	}
 	readmeNeeded := make(map[string]bool, len(repoPaths))
@@ -215,7 +216,7 @@ func (a *App) buildRepoFilterList(dir *model.Directory, forceRescan bool) []*mod
 		return dirty, nil
 	})
 	if mutateErr != nil {
-		println("Error:", mutateErr.Error())
+		slog.Error("mutate repo meta failed", "err", mutateErr)
 	}
 
 	return items
