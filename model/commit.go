@@ -12,6 +12,15 @@ type Commit struct {
 	Files     []string `json:"files"`     // 变更的文件路径列表
 }
 
+// CommitFilter 提交历史服务端过滤条件，各字段组合语义为 AND，空字段表示该维度不参与过滤。
+type CommitFilter struct {
+	Author   string `json:"author,omitempty"`   // 作者 Name+Email 子串匹配（大小写不敏感）
+	Keyword  string `json:"keyword,omitempty"`  // 提交消息子串匹配（大小写不敏感）
+	Since    string `json:"since,omitempty"`    // 起始日期 YYYY-MM-DD（含当天 00:00:00）
+	Until    string `json:"until,omitempty"`    // 截止日期 YYYY-MM-DD（含当天 23:59:59）
+	FilePath string `json:"filePath,omitempty"` // 文件路径子串匹配（目录级，大小写不敏感）
+}
+
 // GitRemoteInfo 表示 Git 远程仓库信息
 type GitRemoteInfo struct {
 	RemoteURL  string `json:"remoteUrl"`  // 远程仓库地址

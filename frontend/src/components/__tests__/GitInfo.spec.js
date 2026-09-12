@@ -79,7 +79,7 @@ describe('GitInfo.vue', () => {
     await flushPromises()
 
     expect(GetGitRemoteURL).toHaveBeenCalledTimes(1)
-    expect(GetCommitHistory).toHaveBeenCalledWith(repoPath, 1, 0)
+    expect(GetCommitHistory).toHaveBeenCalledWith(repoPath, 1, 0, {})
     expect(wrapper.find('.sha-text').text()).toBe('abcdef12')
     expect(wrapper.text()).toContain('fix: 修复某个问题')
     wrapper.unmount()
@@ -151,7 +151,7 @@ describe('GitInfo.vue', () => {
     wrapper = mount(GitInfo, { props: { repoPath }, global: { stubs } })
     await flushPromises()
 
-    expect(GetCommitHistory).toHaveBeenCalledWith(repoPath, 1, 0)
+    expect(GetCommitHistory).toHaveBeenCalledWith(repoPath, 1, 0, {})
     expect(wrapper.find('.sha-text').text()).toBe('ccc33333')
   })
 

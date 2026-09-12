@@ -11,7 +11,7 @@
             size="small"
             class="search-input"
             clearable
-            @input="handleSearch"
+            @update:model-value="handleSearch"
           />
           <el-button
             v-if="selectedShas.length === 2"
@@ -42,10 +42,40 @@
       </div>
     </template>
 
+    <div class="filter-bar">
+      <el-input
+        v-model="filter.author"
+        placeholder="作者"
+        size="small"
+        class="filter-input"
+        clearable
+        @update:model-value="applyFilter"
+      />
+      <el-date-picker
+        v-model="filter.dateRange"
+        type="daterange"
+        size="small"
+        range-separator="至"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        class="filter-date"
+        @change="applyFilter"
+      />
+      <el-input
+        v-model="filter.filePath"
+        placeholder="文件路径"
+        size="small"
+        class="filter-input"
+        clearable
+        @update:model-value="applyFilter"
+      />
+    </div>
+
     <div v-loading="loading" class="timeline-container">
-      <div v-if="filteredCommits.length > 0" class="commit-list">
+      <div v-if="commits.length > 0" class="commit-list">
         <div
-          v-for="commit in filteredCommits"
+          v-for="commit in commits"
           :key="commit.sha"
           class="commit-card"
           :class="{ 'is-expanded': expandedCommits.has(commit.sha) }"
@@ -123,12 +153,7 @@
 
       <el-empty
         v-else-if="!loading && commits.length === 0"
-        description="暂无提交记录"
-      />
-
-      <el-empty
-        v-else-if="!loading && filteredCommits.length === 0"
-        description="未找到匹配的提交"
+        :description="hasActiveFilter ? '未找到匹配的提交' : '暂无提交记录'"
       />
 
       <div
@@ -168,7 +193,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
@@ -182,7 +207,6 @@ const props = defineProps({
 })
 
 const PAGE_SIZE = 20
-const MAX_COMMITS = 500
 
 const commits = ref([])
 const expandedCommits = ref(new Set())
@@ -191,6 +215,10 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const searchKeyword = ref('')
 const hasMore = ref(false)
+
+// 服务端过滤条件：author/keyword/filePath 子串匹配，dateRange 转换为 since/until 日期串
+const filter = ref({ author: '', dateRange: null, filePath: '' })
+let filterTimer = null
 
 // 单提交单文件 diff 弹窗状态
 const commitDiffVisible = ref(false)
@@ -203,15 +231,39 @@ const rangeDiffVisible = ref(false)
 const rangeBaseSHA = ref('')
 const rangeHeadSHA = ref('')
 
-const filteredCommits = computed(() => {
-  if (!searchKeyword.value) return commits.value
+// buildFilter 将前端过滤状态组装为后端 CommitFilter 对象，空值不参与过滤
+const buildFilter = () => {
+  const f = {
+    author: filter.value.author || '',
+    keyword: searchKeyword.value || '',
+    filePath: filter.value.filePath || ''
+  }
+  if (filter.value.dateRange && filter.value.dateRange.length === 2) {
+    f.since = filter.value.dateRange[0]
+    f.until = filter.value.dateRange[1]
+  }
+  return f
+}
 
-  const keyword = searchKeyword.value.toLowerCase()
-  return commits.value.filter(commit =>
-    commit.message.toLowerCase().includes(keyword) ||
-    commit.author.toLowerCase().includes(keyword) ||
-    commit.sha.toLowerCase().includes(keyword)
-  )
+// hasActiveFilter 是否存在任意过滤条件，用于区分空列表来源：有过滤则「未找到匹配的提交」，无则「暂无提交记录」
+const hasActiveFilter = computed(() => {
+  const f = buildFilter()
+  return Boolean(f.author || f.keyword || f.filePath || f.since || f.until)
+})
+
+// applyFilter 防抖触发服务端过滤重载（300ms 内连续输入合并为一次请求）
+const applyFilter = () => {
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => {
+    selectedShas.value = []
+    expandedCommits.value.clear()
+    loadCommits(true)
+  }, 300)
+}
+
+// 组件卸载时清未触发的防抖定时器，避免卸载后回调仍触发 loadCommits 写已销毁响应式状态
+onUnmounted(() => {
+  clearTimeout(filterTimer)
 })
 
 const loadCommits = async (reset = true) => {
@@ -220,15 +272,13 @@ const loadCommits = async (reset = true) => {
     commits.value = []
     expandedCommits.value.clear()
   } else {
-    if (commits.value.length >= MAX_COMMITS) return
     loadingMore.value = true
   }
 
   try {
     const offset = reset ? 0 : commits.value.length
-    const remaining = MAX_COMMITS - offset
-    const pageSize = Math.min(PAGE_SIZE, remaining)
-    const newCommits = await GetCommitHistory(props.repoPath, pageSize, offset)
+    const pageSize = PAGE_SIZE
+    const newCommits = await GetCommitHistory(props.repoPath, pageSize, offset, buildFilter())
 
     if (reset) {
       commits.value = newCommits || []
@@ -239,7 +289,7 @@ const loadCommits = async (reset = true) => {
       commits.value.push(...(newCommits || []))
     }
 
-    hasMore.value = newCommits && newCommits.length === pageSize && commits.value.length < MAX_COMMITS
+    hasMore.value = newCommits && newCommits.length === pageSize
   } catch (error) {
     ElMessage.error('加载提交历史失败: ' + (error.message || String(error)))
   } finally {
@@ -259,7 +309,7 @@ const handleRefresh = () => {
 }
 
 const handleSearch = () => {
-  // 搜索由 computed 属性自动处理
+  applyFilter()
 }
 
 const toggleCommitDetail = (sha) => {
@@ -326,6 +376,7 @@ const formatTime = (timestamp) => {
 
 watch(() => props.repoPath, () => {
   searchKeyword.value = ''
+  filter.value = { author: '', dateRange: null, filePath: '' }
   selectedShas.value = []
   loadCommits(true)
 })
@@ -365,6 +416,20 @@ defineExpose({ loadCommits, handleRefresh })
 .header-actions {
   display: flex;
   align-items: center;
+}
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+.filter-input {
+  width: 140px;
+}
+.filter-date {
+  width: 240px !important;
 }
 .timeline-container {
   flex: 1;

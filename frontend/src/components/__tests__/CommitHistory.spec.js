@@ -51,7 +51,13 @@ const stubs = {
     props: ['modelValue', 'disabled'],
     emits: ['update:modelValue', 'change']
   },
-  'el-empty': { template: '<div class="el-empty" />', props: ['description'] },
+  'el-empty': { template: '<div class="el-empty" :data-description="description" />', props: ['description'] },
+  'el-date-picker': {
+    name: 'ElDatePicker',
+    template: '<input class="el-date-picker" />',
+    props: ['modelValue', 'type', 'size', 'rangeSeparator', 'startPlaceholder', 'endPlaceholder', 'valueFormat'],
+    emits: ['update:modelValue', 'change']
+  },
   'el-descriptions': { template: '<div class="el-descriptions"><slot /></div>', props: ['column', 'size', 'border'] },
   'el-descriptions-item': { template: '<div class="el-desc-item"><slot /></div>', props: ['label'] },
   'el-collapse-transition': { template: '<div class="el-collapse"><slot /></div>' },
@@ -103,14 +109,14 @@ describe('CommitHistory.vue', () => {
     GetCommitHistory.mockResolvedValue([c])
     wrapper = createWrapper()
     await flushPromises()
-    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0)
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
     expect(wrapper.findAll('.commit-card').length).toBe(1)
     expect(wrapper.text()).toContain('张三')
     expect(wrapper.emitted('latest-commit')).toBeTruthy()
     expect(wrapper.emitted('latest-commit')[0]).toEqual([c])
   })
 
-  it('搜索按 message/author/sha 过滤', async () => {
+  it('搜索关键词触发服务端过滤重载（keyword 传入 filter）', async () => {
     const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
     GetCommitHistory.mockResolvedValue([
       commit({ sha: 'aaa111', shortSha: 'aaa111', message: 'fix: 登录', author: '张三' }),
@@ -120,16 +126,16 @@ describe('CommitHistory.vue', () => {
     await flushPromises()
     expect(wrapper.findAll('.commit-card').length).toBe(2)
 
-    // 按 message 关键字过滤
+    // 输入关键词 → applyFilter 防抖 300ms 后服务端重载（仅返回匹配提交）
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValue([commit({ message: 'fix: 登录', author: '张三' })])
     await wrapper.find('input').setValue('登录')
-    await nextTick()
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '登录', filePath: '' })
     expect(wrapper.findAll('.commit-card').length).toBe(1)
     expect(wrapper.findAll('.commit-card')[0].text()).toContain('张三')
-
-    // 清空搜索恢复全部
-    await wrapper.find('input').setValue('')
-    await nextTick()
-    expect(wrapper.findAll('.commit-card').length).toBe(2)
   })
 
   it('点击提交卡片展开/收起详情', async () => {
@@ -209,6 +215,24 @@ describe('CommitHistory.vue', () => {
     await flushPromises()
     const empties = wrapper.findAll('.el-empty')
     expect(empties.length).toBeGreaterThan(0)
+    expect(empties[0].attributes('data-description')).toBe('暂无提交记录')
+  })
+
+  it('过滤后无匹配展示未找到匹配的提交', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    wrapper = createWrapper()
+    await flushPromises()
+    // 设作者过滤后服务端返回空
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValue([])
+    const inputs = wrapper.findAll('input')
+    await inputs[1].setValue('不存在的人')
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+    const empties = wrapper.findAll('.el-empty')
+    expect(empties.length).toBeGreaterThan(0)
+    expect(empties[0].attributes('data-description')).toBe('未找到匹配的提交')
   })
 
   it('刷新按钮清空展开态并重新加载', async () => {
@@ -225,21 +249,22 @@ describe('CommitHistory.vue', () => {
     const refreshBtn = wrapper.findAll('.el-card .header-actions button').pop()
     await refreshBtn.trigger('click')
     await flushPromises()
-    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0)
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
     // 展开态被清空
     expect(wrapper.find('.commit-card').classes()).not.toContain('is-expanded')
   })
 
-  it('切换 repoPath 重新加载并清空搜索关键字', async () => {
+  it('切换 repoPath 重新加载并清空搜索关键字与过滤条件', async () => {
     const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
     GetCommitHistory.mockResolvedValue([commit()])
     wrapper = createWrapper()
     await flushPromises()
     await wrapper.find('input').setValue('关键字')
+    await new Promise(r => setTimeout(r, 350))
     GetCommitHistory.mockClear()
     await wrapper.setProps({ repoPath: '/repo/B' })
     await flushPromises()
-    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/B', 20, 0)
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/B', 20, 0, { author: '', keyword: '', filePath: '' })
     expect(wrapper.find('input').element.value).toBe('')
   })
 
@@ -257,7 +282,7 @@ describe('CommitHistory.vue', () => {
     GetCommitHistory.mockResolvedValueOnce(nextPage)
     await wrapper.find('.load-more button').trigger('click')
     await flushPromises()
-    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 20)
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 20, { author: '', keyword: '', filePath: '' })
     // 累计 25 条
     expect(wrapper.findAll('.commit-card').length).toBe(25)
     // 第二页不足 20 → 不再展示加载更多
@@ -271,6 +296,75 @@ describe('CommitHistory.vue', () => {
     await flushPromises()
     expect(typeof wrapper.vm.loadCommits).toBe('function')
     expect(typeof wrapper.vm.handleRefresh).toBe('function')
+  })
+
+  it('作者过滤触发服务端重载（author 传入 filter）', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    wrapper = createWrapper()
+    await flushPromises()
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValue([commit({ author: '张三' })])
+    // filter-bar 作者 input（inputs[0] 为搜索框，[1] 为作者）
+    const inputs = wrapper.findAll('input')
+    await inputs[1].setValue('张三')
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '张三', keyword: '', filePath: '' })
+  })
+
+  it('文件路径过滤触发服务端重载（filePath 传入 filter）', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    wrapper = createWrapper()
+    await flushPromises()
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValue([commit({ files: ['src/a.go'] })])
+    // inputs: [0]搜索框 [1]作者 [2]date-picker [3]文件路径
+    const inputs = wrapper.findAll('input')
+    await inputs[3].setValue('src')
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: 'src' })
+  })
+
+  it('日期区间过滤触发服务端重载（since/until 传入 filter）', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    wrapper = createWrapper()
+    await flushPromises()
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValue([])
+    const dp = wrapper.findComponent({ name: 'ElDatePicker' })
+    // 先 emit update:modelValue 让 v-model 更新 dateRange，再 emit change 触发 applyFilter
+    dp.vm.$emit('update:modelValue', ['2026-01-01', '2026-01-31'])
+    await nextTick()
+    dp.vm.$emit('change')
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '', since: '2026-01-01', until: '2026-01-31' })
+  })
+
+  it('过滤后加载更多带当前 filter 参数', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    const firstPage = Array.from({ length: 20 }, (_, i) => commit({ sha: String(i).padStart(40, '0') }))
+    GetCommitHistory.mockResolvedValueOnce(firstPage)
+    wrapper = createWrapper()
+    await flushPromises()
+    // 设作者过滤后重载首页
+    GetCommitHistory.mockClear()
+    GetCommitHistory.mockResolvedValueOnce(firstPage)
+    const inputs = wrapper.findAll('input')
+    await inputs[1].setValue('张三')
+    await new Promise(r => setTimeout(r, 350))
+    await flushPromises()
+    // 加载更多：带 author=张三 filter
+    GetCommitHistory.mockClear()
+    const nextPage = Array.from({ length: 5 }, (_, i) => commit({ sha: String(i + 20).padStart(40, '0') }))
+    GetCommitHistory.mockResolvedValueOnce(nextPage)
+    await wrapper.find('.load-more button').trigger('click')
+    await flushPromises()
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 20, { author: '张三', keyword: '', filePath: '' })
   })
 
   it('formatTime 对近期时间输出相对文案', async () => {

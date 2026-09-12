@@ -94,7 +94,7 @@ func TestGetCommitHistory_Limit(t *testing.T) {
 	}
 
 	app := NewApp()
-	commits, err := app.GetCommitHistory(repoPath, 3, 0)
+	commits, err := app.GetCommitHistory(repoPath, 3, 0, model.CommitFilter{})
 	if err != nil {
 		t.Fatalf("GetCommitHistory failed: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestGetCommitHistory_Offset(t *testing.T) {
 	}
 
 	app := NewApp()
-	commits, err := app.GetCommitHistory(repoPath, 2, 2)
+	commits, err := app.GetCommitHistory(repoPath, 2, 2, model.CommitFilter{})
 	if err != nil {
 		t.Fatalf("GetCommitHistory failed: %v", err)
 	}
@@ -138,6 +138,223 @@ func TestGetCommitHistory_Offset(t *testing.T) {
 	// Git commit messages include trailing newline
 	if commits[0].Message != "Commit 3\n" {
 		t.Errorf("Expected 'Commit 3\\n', got %s", commits[0].Message)
+	}
+}
+
+// commitSpec 测试提交规格：消息/作者/邮箱/文件路径/提交日期（committer date）。
+type commitSpec struct {
+	message string
+	author  string
+	email   string
+	file    string
+	date    string // YYYY-MM-DD HH:MM:SS，同时设 GIT_COMMITTER_DATE 与 GIT_AUTHOR_DATE
+}
+
+// makeCommits 在 repoPath 初始化仓库并按 specs 顺序提交。每提交可指定独立作者与提交日期，
+// 用于过滤测试构造多作者/多文件/多日期数据。
+func makeCommits(t *testing.T, repoPath string, specs []commitSpec) {
+	t.Helper()
+	exec.Command("git", "init", repoPath).Run()
+	exec.Command("git", "-C", repoPath, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", repoPath, "config", "user.email", "test@test.com").Run()
+	for _, s := range specs {
+		fp := filepath.Join(repoPath, s.file)
+		os.MkdirAll(filepath.Dir(fp), 0755)
+		os.WriteFile(fp, []byte(s.message), 0644)
+		exec.Command("git", "-C", repoPath, "add", ".").Run()
+		cmd := exec.Command("git", "-C", repoPath, "commit", "-m", s.message)
+		env := os.Environ()
+		if s.author != "" {
+			env = append(env,
+				"GIT_AUTHOR_NAME="+s.author, "GIT_AUTHOR_EMAIL="+s.email,
+				"GIT_COMMITTER_NAME="+s.author, "GIT_COMMITTER_EMAIL="+s.email)
+		}
+		if s.date != "" {
+			env = append(env, "GIT_COMMITTER_DATE="+s.date, "GIT_AUTHOR_DATE="+s.date)
+		}
+		cmd.Env = env
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("makeCommits commit %q: %v", s.message, err)
+		}
+	}
+}
+
+// TestGetCommitHistory_KeywordFilter 关键词过滤提交消息子串（大小写不敏感）。
+func TestGetCommitHistory_KeywordFilter(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "feat: add login", author: "Alice", email: "a@x.com", file: "a.go"},
+		{message: "fix: 修复登录", author: "Bob", email: "b@x.com", file: "b.go"},
+		{message: "docs: readme", author: "Alice", email: "a@x.com", file: "c.go"},
+	})
+	app := NewApp()
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{Keyword: "登录"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected 1 commit matching 登录, got %d", len(commits))
+	}
+	if commits[0].Message != "fix: 修复登录\n" {
+		t.Errorf("unexpected message: %q", commits[0].Message)
+	}
+}
+
+// TestGetCommitHistory_AuthorFilter 作者过滤按 Name+Email 子串匹配。
+func TestGetCommitHistory_AuthorFilter(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "c1", author: "Alice", email: "alice@x.com", file: "a.go"},
+		{message: "c2", author: "Bob", email: "bob@x.com", file: "b.go"},
+		{message: "c3", author: "Alice", email: "alice@x.com", file: "c.go"},
+	})
+	app := NewApp()
+	// "alice" 同时命中 Name(Alice) 与 Email(alice@x.com)
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{Author: "alice"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 Alice commits, got %d", len(commits))
+	}
+	for _, c := range commits {
+		if c.Author != "Alice" {
+			t.Errorf("expected Alice, got %s", c.Author)
+		}
+	}
+}
+
+// TestGetCommitHistory_FilePathFilter 文件路径过滤子串匹配（目录级）。
+func TestGetCommitHistory_FilePathFilter(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "c1", file: "src/a.go"},
+		{message: "c2", file: "docs/b.md"},
+		{message: "c3", file: "src/c.go"},
+	})
+	app := NewApp()
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{FilePath: "src"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 src commits, got %d", len(commits))
+	}
+}
+
+// TestGetCommitHistory_CombinedFilter 多条件 AND 组合。
+func TestGetCommitHistory_CombinedFilter(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "feat: login", author: "Alice", email: "a@x.com", file: "src/a.go"},
+		{message: "feat: login", author: "Bob", email: "b@x.com", file: "src/b.go"},
+		{message: "feat: login", author: "Alice", email: "a@x.com", file: "docs/c.md"},
+	})
+	app := NewApp()
+	// author=Alice + keyword=login + filePath=src → 仅第一条
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{
+		Author: "Alice", Keyword: "login", FilePath: "src",
+	})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected 1 combined match, got %d", len(commits))
+	}
+	if commits[0].Author != "Alice" {
+		t.Errorf("expected Alice, got %s", commits[0].Author)
+	}
+}
+
+// TestGetCommitHistory_NoFilter_BackwardCompat filter 全空时与原分页行为一致。
+func TestGetCommitHistory_NoFilter_BackwardCompat(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "c1", file: "a.go"},
+		{message: "c2", file: "b.go"},
+		{message: "c3", file: "c.go"},
+	})
+	app := NewApp()
+	commits, err := app.GetCommitHistory(repoPath, 2, 0, model.CommitFilter{})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 (limit), got %d", len(commits))
+	}
+	if commits[0].Message != "c3\n" {
+		t.Errorf("expected latest c3, got %q", commits[0].Message)
+	}
+}
+
+// TestGetCommitHistory_FilteredOffset 过滤后 offset 翻页仅遍历过滤结果集。
+func TestGetCommitHistory_FilteredOffset(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "feat: a", file: "a.go"},
+		{message: "fix: b", file: "b.go"},
+		{message: "feat: c", file: "c.go"},
+		{message: "fix: d", file: "d.go"},
+	})
+	app := NewApp()
+	// keyword=feat 匹配 a、c，按时间倒序为 c、a；limit=1 offset=1 → 第二条 = a
+	commits, err := app.GetCommitHistory(repoPath, 1, 1, model.CommitFilter{Keyword: "feat"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected 1, got %d", len(commits))
+	}
+	if commits[0].Message != "feat: a\n" {
+		t.Errorf("expected feat: a, got %q", commits[0].Message)
+	}
+}
+
+// TestGetCommitHistory_DateRange 日期区间过滤（go-git Since/Until 按 Committer.When）。
+func TestGetCommitHistory_DateRange(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		{message: "old", file: "a.go", date: "2026-01-01 10:00:00"},
+		{message: "mid", file: "b.go", date: "2026-06-01 10:00:00"},
+		{message: "new", file: "c.go", date: "2026-12-01 10:00:00"},
+	})
+	app := NewApp()
+	// Since=2026-03-01 Until=2026-09-30 → 仅 mid
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{
+		Since: "2026-03-01", Until: "2026-09-30",
+	})
+	if err != nil {
+		t.Fatalf("GetCommitHistory: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected 1 mid commit, got %d", len(commits))
+	}
+	if commits[0].Message != "mid\n" {
+		t.Errorf("expected mid, got %q", commits[0].Message)
+	}
+}
+
+// TestParseDateStart_End 日期解析边界：起始 00:00:00、截止 23:59:59、空串与非法格式报错。
+func TestParseDateStart_End(t *testing.T) {
+	start, err := parseDateStart("2026-09-12")
+	if err != nil {
+		t.Fatalf("parseDateStart: %v", err)
+	}
+	if start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 {
+		t.Errorf("start should be 00:00:00, got %v", start)
+	}
+	end, err := parseDateEnd("2026-09-12")
+	if err != nil {
+		t.Fatalf("parseDateEnd: %v", err)
+	}
+	if end.Hour() != 23 || end.Minute() != 59 || end.Second() != 59 {
+		t.Errorf("end should be 23:59:59, got %v", end)
+	}
+	if _, err := parseDateStart(""); err == nil {
+		t.Error("empty string should error")
+	}
+	if _, err := parseDateStart("bad"); err == nil {
+		t.Error("bad format should error")
 	}
 }
 

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -129,8 +131,12 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 	}, nil
 }
 
-// GetCommitHistory 获取 Git 仓库的提交历史
-func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Commit, error) {
+// GetCommitHistory 获取 Git 仓库的提交历史，支持服务端过滤与分页。
+// filter 各字段组合语义为 AND：Since/Until/FilePath 下推 go-git LogOptions 原生过滤，
+// Author/Keyword 因 go-git v5.18.0 LogOptions 无 Author 字段，在迭代内手动子串匹配（大小写不敏感）。
+// offset 为过滤后偏移：先跳过不匹配提交，再跳过 offset 个匹配提交，最后收集 limit 个。
+// filter 全空时与原分页行为完全一致（跳过 offset + 收集 limit）。
+func (a *App) GetCommitHistory(path string, limit, offset int, filter model.CommitFilter) ([]model.Commit, error) {
 	if path == "" {
 		return nil, fmt.Errorf("路径不能为空")
 	}
@@ -151,29 +157,52 @@ func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Comm
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
 
-	// 获取提交日志迭代器
-	commitIter, err := repo.Log(&git.LogOptions{
-		Order: git.LogOrderCommitterTime,
-	})
+	// 构造日志迭代选项：Since/Until/FilePath 原生下推，Author/Keyword 迭代内手动匹配
+	logOpts := &git.LogOptions{Order: git.LogOrderCommitterTime}
+	if t, err := parseDateStart(filter.Since); err == nil {
+		logOpts.Since = &t
+	}
+	if t, err := parseDateEnd(filter.Until); err == nil {
+		logOpts.Until = &t
+	}
+	if filter.FilePath != "" {
+		fp := strings.ToLower(filter.FilePath)
+		logOpts.PathFilter = func(p string) bool {
+			return strings.Contains(strings.ToLower(p), fp)
+		}
+	}
+	authorQ := strings.ToLower(filter.Author)
+	keywordQ := strings.ToLower(filter.Keyword)
+
+	commitIter, err := repo.Log(logOpts)
 	if err != nil {
 		return nil, fmt.Errorf("无法获取提交历史: %w", err)
 	}
 	defer commitIter.Close()
 
-	// 跳过 offset 个提交
-	for i := 0; i < offset; i++ {
-		_, err := commitIter.Next()
-		if err != nil {
-			break
-		}
-	}
-
-	// 收集指定数量的提交
+	// 过滤后分页：跳过不匹配提交 → 跳过 offset 个匹配提交 → 收集 limit 个
 	commits := make([]model.Commit, 0, limit)
-	for i := 0; i < limit; i++ {
+	skipped := 0
+	for len(commits) < limit {
 		commitObj, err := commitIter.Next()
 		if err != nil {
 			break
+		}
+
+		// Author/Keyword 手动过滤（Since/Until/FilePath 已由迭代器过滤）
+		if authorQ != "" {
+			hay := strings.ToLower(commitObj.Author.Name + " " + commitObj.Author.Email)
+			if !strings.Contains(hay, authorQ) {
+				continue
+			}
+		}
+		if keywordQ != "" && !strings.Contains(strings.ToLower(commitObj.Message), keywordQ) {
+			continue
+		}
+
+		if skipped < offset {
+			skipped++
+			continue
 		}
 
 		commit := model.Commit{
@@ -185,14 +214,25 @@ func (a *App) GetCommitHistory(path string, limit int, offset int) ([]model.Comm
 			Timestamp: commitObj.Author.When.Unix(),
 			DateTime:  commitObj.Author.When.Format("2006-01-02 15:04:05"),
 		}
-
-		files := getCommitFiles(repo, commitObj)
-		commit.Files = files
-
+		commit.Files = getCommitFiles(repo, commitObj)
 		commits = append(commits, commit)
 	}
 
 	return commits, nil
+}
+
+// parseDateStart 解析 YYYY-MM-DD 为当天 00:00:00 本地时刻，空串或格式错返回错误。
+func parseDateStart(s string) (time.Time, error) {
+	return time.ParseInLocation("2006-01-02", strings.TrimSpace(s), time.Local)
+}
+
+// parseDateEnd 解析 YYYY-MM-DD 为当天 23:59:59 本地时刻，空串或格式错返回错误。
+func parseDateEnd(s string) (time.Time, error) {
+	t, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(s), time.Local)
+	if err != nil {
+		return t, err
+	}
+	return t.Add(24*time.Hour - time.Second), nil
 }
 
 // getCommitFiles 获取提交中变更的文件列表

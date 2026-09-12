@@ -125,7 +125,7 @@ const loadGitInfo = async (forceRefresh = false) => {
     //    避免 5 分钟内重进仍 N/A（防御性：失败不污染缓存）。
     const [infoRes, commitsRes] = await Promise.allSettled([
       GetGitRemoteURL(props.repoPath),
-      GetCommitHistory(props.repoPath, 1, 0)
+      GetCommitHistory(props.repoPath, 1, 0, {})
     ])
 
     if (infoRes.status !== 'fulfilled') {
