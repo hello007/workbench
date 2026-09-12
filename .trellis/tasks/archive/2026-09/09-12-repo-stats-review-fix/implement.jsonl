@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名变更须同步 wailsjs 三处"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% / 前端 ≥70% 门禁"}
