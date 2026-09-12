@@ -11,20 +11,21 @@ import (
 // ===== 核心域：App 结构体与生命周期 =====
 
 type App struct {
-	ctx               context.Context
-	directorySvc      *service.DirectoryService
-	fileTreeSvc       *service.FileTreeService
-	fileOpSvc         *service.FileOperationService
-	gitSvc            *service.GitService
-	settingsSvc       *service.SettingsService
-	terminalSvc       *service.TerminalService
-	searchSvc         *service.SearchService
-	favoritesSvc      *service.FavoritesService
-	contentSearchSvc  *service.ContentSearchService
-	updateSvc         *service.UpdateService
-	repoMetaSvc       *service.RepoMetaService
-	aiFuncSvc         *service.AiFunctionService
-	skillDiscoverySvc *service.SkillDiscoveryService
+	ctx                context.Context
+	directorySvc       *service.DirectoryService
+	fileTreeSvc        *service.FileTreeService
+	fileOpSvc          *service.FileOperationService
+	gitSvc             *service.GitService
+	commitHistoryCache *service.CommitHistoryCache // 提交历史全量快照缓存（纯内存，HEAD SHA 增量 + TTL + 手动刷新）
+	settingsSvc        *service.SettingsService
+	terminalSvc        *service.TerminalService
+	searchSvc          *service.SearchService
+	favoritesSvc       *service.FavoritesService
+	contentSearchSvc   *service.ContentSearchService
+	updateSvc          *service.UpdateService
+	repoMetaSvc        *service.RepoMetaService
+	aiFuncSvc          *service.AiFunctionService
+	skillDiscoverySvc  *service.SkillDiscoveryService
 }
 
 func NewApp() *App {
@@ -42,6 +43,8 @@ func (a *App) startup(ctx context.Context) {
 	a.fileOpSvc = service.NewFileOperationService()
 	// 注入扫描缓存（.git 预筛 + mtime 缓存优化，PRD F12），让 ScanGitRepos 与一键更新同步受益
 	a.gitSvc = service.NewGitServiceWithCache(filepath.Join(dataDir, "repo_scan_cache.json"))
+	// 注入提交历史缓存（纯内存，复用 filetree_cache 范式：HEAD SHA 增量 + TTL + 手动刷新）
+	a.commitHistoryCache = service.NewCommitHistoryCache()
 	a.settingsSvc = service.NewSettingsService(settingsPath)
 	a.terminalSvc = service.NewTerminalService(ctx)
 

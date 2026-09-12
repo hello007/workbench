@@ -199,7 +199,7 @@ import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
   User, Search
 } from '@element-plus/icons-vue'
-import { GetCommitHistory } from '../../wailsjs/go/main/App'
+import { GetCommitHistory, InvalidateCommitHistoryCache } from '../../wailsjs/go/main/App'
 import FileDiffDialog from './FileDiffDialog.vue'
 
 const props = defineProps({
@@ -302,9 +302,11 @@ const loadMore = () => {
   loadCommits(false)
 }
 
-const handleRefresh = () => {
+const handleRefresh = async () => {
   expandedCommits.value.clear()
   selectedShas.value = []
+  // 前置清提交历史缓存，确保下次 loadCommits 全量重扫（绕过缓存命中与增量 prepend）
+  await InvalidateCommitHistoryCache(props.repoPath)
   loadCommits(true)
 }
 

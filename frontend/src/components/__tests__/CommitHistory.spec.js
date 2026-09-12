@@ -14,7 +14,8 @@ vi.mock('element-plus', async () => {
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetCommitHistory: vi.fn(),
   GetCommitFileDiff: vi.fn(),
-  GetRangeDiff: vi.fn()
+  GetRangeDiff: vi.fn(),
+  InvalidateCommitHistoryCache: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -235,8 +236,9 @@ describe('CommitHistory.vue', () => {
     expect(empties[0].attributes('data-description')).toBe('未找到匹配的提交')
   })
 
-  it('刷新按钮清空展开态并重新加载', async () => {
-    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+  it('刷新按钮清空展开态、清缓存并重新加载', async () => {
+    const { GetCommitHistory, InvalidateCommitHistoryCache } = await import('../../../wailsjs/go/main/App')
+    InvalidateCommitHistoryCache.mockResolvedValue()
     GetCommitHistory.mockResolvedValue([commit()])
     wrapper = createWrapper()
     await flushPromises()
@@ -245,10 +247,13 @@ describe('CommitHistory.vue', () => {
     expect(wrapper.find('.commit-card').classes()).toContain('is-expanded')
     // 点刷新（header-actions 末尾的 Refresh 按钮，前面有 compare-btn）
     GetCommitHistory.mockClear()
+    InvalidateCommitHistoryCache.mockClear()
     GetCommitHistory.mockResolvedValue([commit()])
     const refreshBtn = wrapper.findAll('.el-card .header-actions button').pop()
     await refreshBtn.trigger('click')
     await flushPromises()
+    // 前置清缓存（绕过命中与增量，确保全量重扫）
+    expect(InvalidateCommitHistoryCache).toHaveBeenCalledWith('/repo/A')
     expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
     // 展开态被清空
     expect(wrapper.find('.commit-card').classes()).not.toContain('is-expanded')

@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"workbench/model"
+	"workbench/service"
 	"workbench/util"
 )
 
@@ -131,11 +133,18 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 	}, nil
 }
 
-// GetCommitHistory 获取 Git 仓库的提交历史，支持服务端过滤与分页。
-// filter 各字段组合语义为 AND：Since/Until/FilePath 下推 go-git LogOptions 原生过滤，
-// Author/Keyword 因 go-git v5.18.0 LogOptions 无 Author 字段，在迭代内手动子串匹配（大小写不敏感）。
+// GetCommitHistory 获取 Git 仓库的提交历史，支持服务端过滤与分页，带纯内存缓存。
+//
+// 缓存策略（复用 filetree_cache 范式，纯内存不落盘）：
+//   - 命中：缓存键存在且 headSHA == 当前 HEAD 且 TTL 内 -> 返缓存全量深拷贝，内存过滤分页
+//   - 增量：缓存键存在但 headSHA 不同（commit/pull 后 HEAD 前移）-> 从新 HEAD 迭代收集新提交
+//     直到与缓存已有 SHA 交集，prepend 后回写；超阈值无交集视为链断回退全量
+//   - 全量：miss 或链断 -> go-git Log 全量扫（带上限），回写缓存
+//   - 超限：全量扫超 commitHistoryMaxEntries -> 不缓存，走原 go-git 过滤分页路径（向后兼容）
+//
+// 过滤与分页在缓存全量上内存执行（Author/Keyword/Since/Until/FilePath 全内存），翻页与
+// 防抖过滤不再触 go-git Log 迭代与 getCommitFiles 重算。filter 全空时行为与原一致。
 // offset 为过滤后偏移：先跳过不匹配提交，再跳过 offset 个匹配提交，最后收集 limit 个。
-// filter 全空时与原分页行为完全一致（跳过 offset + 收集 limit）。
 func (a *App) GetCommitHistory(path string, limit, offset int, filter model.CommitFilter) ([]model.Commit, error) {
 	if path == "" {
 		return nil, fmt.Errorf("路径不能为空")
@@ -157,7 +166,209 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
 
-	// 构造日志迭代选项：Since/Until/FilePath 原生下推，Author/Keyword 迭代内手动匹配
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", err)
+	}
+	currentSHA := head.Hash().String()
+	key := commitHistoryCacheKey(gitRoot, head)
+
+	// cache 未注入（如测试 App{} 未经 startup）走原 go-git 路径，向后兼容
+	if a.commitHistoryCache == nil {
+		return fetchCommitHistoryFromGit(repo, limit, offset, filter)
+	}
+
+	// 解析全量快照：命中/增量/全量；nil 表示超限不缓存
+	all := a.resolveCommitHistory(repo, key, currentSHA)
+	if all == nil {
+		// 超上限仓库走原 go-git 过滤分页路径，不缓存
+		return fetchCommitHistoryFromGit(repo, limit, offset, filter)
+	}
+
+	return filterCommits(all, filter, limit, offset), nil
+}
+
+// commitHistoryIncrementalThreshold 增量 prepend 时从新 HEAD 迭代收集新提交的上限。
+// 达此阈值仍无与缓存已有 SHA 交集，视为 SHA 链断裂（rebase/amend 改写历史），
+// 回退全量重扫。500 平衡：过小误判全量、过大遍历成本。
+const commitHistoryIncrementalThreshold = 500
+
+// resolveCommitHistory 解析全量提交快照。命中返缓存深拷贝；HEAD 前移走增量 prepend；
+// miss 或 SHA 链断走全量扫；全量扫超上限返 nil（调用方走 uncached 路径）。
+// 非命中的成功结果回写缓存。
+func (a *App) resolveCommitHistory(repo *git.Repository, key, currentSHA string) []model.Commit {
+	cached, cachedHeadSHA, found := a.commitHistoryCache.Get(key)
+
+	// 命中：HEAD SHA 相同 + TTL 内（get 已判 TTL）
+	if found && cachedHeadSHA == currentSHA {
+		return cached
+	}
+
+	// 增量：有条目但 HEAD 前移
+	if found {
+		merged := a.incrementalCommits(repo, cached)
+		if merged != nil {
+			a.commitHistoryCache.Set(key, currentSHA, merged)
+			return merged
+		}
+		// nil: SHA 链断裂，回退全量
+	}
+
+	// 全量扫
+	all := fullScanCommits(repo)
+	if all == nil {
+		return nil // 超上限不缓存
+	}
+	a.commitHistoryCache.Set(key, currentSHA, all)
+	return all
+}
+
+// incrementalCommits 从新 HEAD 迭代收集新提交，直到与缓存已有 SHA 交集，prepend 到缓存前。
+// 迭代超 commitHistoryIncrementalThreshold 仍无交集，或到根无交集，返 nil（SHA 链断裂，
+// 调用方回退全量重扫）。
+func (a *App) incrementalCommits(repo *git.Repository, cached []model.Commit) []model.Commit {
+	cachedSet := make(map[string]bool, len(cached))
+	for _, c := range cached {
+		cachedSet[c.SHA] = true
+	}
+
+	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
+	if err != nil {
+		return nil
+	}
+	defer iter.Close()
+
+	newCommits := make([]model.Commit, 0, 16)
+	for len(newCommits) < commitHistoryIncrementalThreshold {
+		commitObj, err := iter.Next()
+		if err != nil {
+			// 到根仍无交集，SHA 链断裂
+			return nil
+		}
+		if cachedSet[commitObj.Hash.String()] {
+			break // 交集，停止收集
+		}
+		newCommits = append(newCommits, toModelCommit(repo, commitObj))
+	}
+
+	// 达阈值无交集，SHA 链断裂
+	if len(newCommits) >= commitHistoryIncrementalThreshold {
+		return nil
+	}
+
+	// prepend：新提交在前，缓存全量在后（committer time 倒序与 go-git LogOrder 一致）
+	return append(newCommits, cached...)
+}
+
+// fullScanCommits 全量扫描提交历史（go-git Log 迭代，含 getCommitFiles 变更文件列表）。
+// 收集上限 commitHistoryMaxEntries+1 以判定超限：达上限+1 返 nil（不缓存，调用方走
+// uncached 路径）。
+func fullScanCommits(repo *git.Repository) []model.Commit {
+	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
+	if err != nil {
+		return nil
+	}
+	defer iter.Close()
+
+	all := make([]model.Commit, 0, 128)
+	for len(all) <= service.CommitHistoryMaxEntries {
+		commitObj, err := iter.Next()
+		if err != nil {
+			break // 历史结束
+		}
+		all = append(all, toModelCommit(repo, commitObj))
+	}
+	if len(all) > service.CommitHistoryMaxEntries {
+		return nil // 超限不缓存
+	}
+	return all
+}
+
+// toModelCommit 将 go-git Commit 转为 model.Commit，含 getCommitFiles 变更文件列表。
+// 提取公共转换逻辑供全量扫与增量 prepend 复用。
+func toModelCommit(repo *git.Repository, commitObj *object.Commit) model.Commit {
+	sha := commitObj.Hash.String()
+	return model.Commit{
+		SHA:       sha,
+		ShortSHA:  sha[:8],
+		Message:   commitObj.Message,
+		Author:    commitObj.Author.Name,
+		Email:     commitObj.Author.Email,
+		Timestamp: commitObj.Author.When.Unix(),
+		DateTime:  commitObj.Author.When.Format("2006-01-02 15:04:05"),
+		Files:     getCommitFiles(repo, commitObj),
+	}
+}
+
+// filterCommits 在全量提交快照上内存执行过滤与分页。各维度组合语义 AND，空字段不参与过滤：
+//   - Author：Author + Email 子串匹配（大小写不敏感）
+//   - Keyword：Message 子串匹配（大小写不敏感）
+//   - Since/Until：Timestamp 区间含端点（解析 YYYY-MM-DD 为本地时刻起止）
+//   - FilePath：Files 任一含子串（目录级，大小写不敏感）
+//
+// 过滤后跳过 offset 个匹配提交，收集 limit 个。offset 为过滤后偏移。
+func filterCommits(all []model.Commit, filter model.CommitFilter, limit, offset int) []model.Commit {
+	authorQ := strings.ToLower(filter.Author)
+	keywordQ := strings.ToLower(filter.Keyword)
+	filePathQ := strings.ToLower(filter.FilePath)
+
+	var sinceTs, untilTs int64
+	if t, err := parseDateStart(filter.Since); err == nil {
+		sinceTs = t.Unix()
+	}
+	if t, err := parseDateEnd(filter.Until); err == nil {
+		untilTs = t.Unix()
+	}
+
+	result := make([]model.Commit, 0, limit)
+	skipped := 0
+	for _, c := range all {
+		if authorQ != "" {
+			hay := strings.ToLower(c.Author + " " + c.Email)
+			if !strings.Contains(hay, authorQ) {
+				continue
+			}
+		}
+		if keywordQ != "" && !strings.Contains(strings.ToLower(c.Message), keywordQ) {
+			continue
+		}
+		if sinceTs != 0 && c.Timestamp < sinceTs {
+			continue
+		}
+		if untilTs != 0 && c.Timestamp > untilTs {
+			continue
+		}
+		if filePathQ != "" && !commitMatchesFilePath(c.Files, filePathQ) {
+			continue
+		}
+
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		result = append(result, c)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+// commitMatchesFilePath 判断提交变更文件列表是否含指定子串（目录级，如输 src 匹配
+// 所有 src/ 下变更）。大小写不敏感。
+func commitMatchesFilePath(files []string, filePathQ string) bool {
+	for _, f := range files {
+		if strings.Contains(strings.ToLower(f), filePathQ) {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchCommitHistoryFromGit 走原 go-git 过滤分页路径（不缓存），供超上限仓库向后兼容。
+// Since/Until/FilePath 下推 LogOptions 原生过滤，Author/Keyword 迭代内手动匹配，
+// 过滤后偏移分页。与缓存路径行为一致：filter 全空时返回 limit 条提交。
+func fetchCommitHistoryFromGit(repo *git.Repository, limit, offset int, filter model.CommitFilter) ([]model.Commit, error) {
 	logOpts := &git.LogOptions{Order: git.LogOrderCommitterTime}
 	if t, err := parseDateStart(filter.Since); err == nil {
 		logOpts.Since = &t
@@ -180,7 +391,6 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 	}
 	defer commitIter.Close()
 
-	// 过滤后分页：跳过不匹配提交 → 跳过 offset 个匹配提交 → 收集 limit 个
 	commits := make([]model.Commit, 0, limit)
 	skipped := 0
 	for len(commits) < limit {
@@ -188,8 +398,6 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 		if err != nil {
 			break
 		}
-
-		// Author/Keyword 手动过滤（Since/Until/FilePath 已由迭代器过滤）
 		if authorQ != "" {
 			hay := strings.ToLower(commitObj.Author.Name + " " + commitObj.Author.Email)
 			if !strings.Contains(hay, authorQ) {
@@ -199,26 +407,40 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 		if keywordQ != "" && !strings.Contains(strings.ToLower(commitObj.Message), keywordQ) {
 			continue
 		}
-
 		if skipped < offset {
 			skipped++
 			continue
 		}
-
-		commit := model.Commit{
-			SHA:       commitObj.Hash.String(),
-			ShortSHA:  commitObj.Hash.String()[:8],
-			Message:   commitObj.Message,
-			Author:    commitObj.Author.Name,
-			Email:     commitObj.Author.Email,
-			Timestamp: commitObj.Author.When.Unix(),
-			DateTime:  commitObj.Author.When.Format("2006-01-02 15:04:05"),
-		}
-		commit.Files = getCommitFiles(repo, commitObj)
-		commits = append(commits, commit)
+		commits = append(commits, toModelCommit(repo, commitObj))
 	}
-
 	return commits, nil
+}
+
+// commitHistoryCacheKey 构造缓存键。分支用 ref 全名（refs/heads/master），HEAD 前移时
+// 同 ref 靠 headSHA 增量判定；detached HEAD 用 SHA 隔离不同提交，避免跳转串历史。
+func commitHistoryCacheKey(gitRoot string, head *plumbing.Reference) string {
+	if head.Name().IsBranch() {
+		return gitRoot + "|" + head.Name().String()
+	}
+	return gitRoot + "|HEAD|" + head.Hash().String()
+}
+
+// InvalidateCommitHistoryCache 清除指定仓库的提交历史缓存。供前端 handleRefresh 前置调用，
+// 绕过缓存命中与增量 prepend，确保下次 GetCommitHistory 全量重扫。
+func (a *App) InvalidateCommitHistoryCache(path string) {
+	if path == "" {
+		return
+	}
+	gitRoot, err := util.FindGitRoot(path)
+	if err != nil {
+		return
+	}
+	a.commitHistoryCache.ClearByGitRoot(gitRoot)
+}
+
+// ClearAllCommitHistoryCache 清除全部仓库的提交历史缓存。预留全量刷新入口。
+func (a *App) ClearAllCommitHistoryCache() {
+	a.commitHistoryCache.ClearAll()
 }
 
 // parseDateStart 解析 YYYY-MM-DD 为当天 00:00:00 本地时刻，空串或格式错返回错误。
