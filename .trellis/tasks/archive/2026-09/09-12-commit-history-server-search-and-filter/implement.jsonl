@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "扩 GetCommitHistory 签名 + 新增 model.CommitFilter struct 触发跨层同步：App.js/App.d.ts/models.ts 三处同步规则、具名 string 类型别名规则、wails generate module 流程、npm run build 必跑验证 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76% + 前端 ≥70% 覆盖率分层门禁，本任务新增 GetCommitHistory 过滤逻辑属 service 层须达基线，前端 CommitHistory.vue 服务端过滤改造须维持前端门禁"}
