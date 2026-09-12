@@ -36,7 +36,7 @@
 </template>
 
 <script setup>
-import { Folder, MagicStick, SetUp, Setting, Monitor } from '@element-plus/icons-vue'
+import { Folder, MagicStick, SetUp, Setting, Monitor, TrendCharts } from '@element-plus/icons-vue'
 import { useUiStore } from '../store'
 
 const uiStore = useUiStore()
@@ -46,6 +46,7 @@ defineEmits(['toggleTerminal', 'openSettings'])
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
   { id: 'ai', icon: MagicStick, label: 'AI 功能' },
+  { id: 'stats', icon: TrendCharts, label: '仓库统计' },
   { id: 'toolbox', icon: SetUp, label: '工具箱' }
 ]
 </script>

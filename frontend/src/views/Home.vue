@@ -3,9 +3,11 @@
     <div class="home-layout">
       <ActivityBar @toggle-terminal="uiStore.toggleTerminal" @open-settings="uiStore.settingsVisible = true" />
       <div class="main-area">
-        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页激活时整体隐藏，v-show 保状态：
-             运行中任务、已选文件、预览内容均保留，切回即恢复） -->
-        <div v-show="uiStore.activePanel !== 'ai'" class="main-panes">
+        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页 / 仓库统计页激活时整体隐藏，v-show 保状态：
+             运行中任务、已选文件、预览内容均保留，切回即恢复）。
+             白名单排除：directory/toolbox 之外的占满面板（ai/stats）激活时三栏隐藏，
+             与 AiFunctionPanel/StatsView 的互斥占满对称。 -->
+        <div v-show="uiStore.activePanel === 'directory' || uiStore.activePanel === 'toolbox'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
               <div class="pane-content" style="position:relative;" @mousedown.capture="workspaceStore.lastInteractedTree = 'directory'">
@@ -72,6 +74,10 @@
              与 .main-panes 同级，点击本面板不会冒泡进三栏 pane 的
              closeToolbox handler（该 handler 仅绑定在 Splitpanes 内部 pane 上） -->
         <AiFunctionPanel v-show="uiStore.activePanel === 'ai'" />
+        <!-- 仓库统计页：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回不丢已加载统计与档位选择。
+             从 workspaceStore.selectedNode 取仓库路径，后端 FindGitRoot 定位 git 根。 -->
+        <StatsView v-show="uiStore.activePanel === 'stats'" />
         <!-- 拖拽分隔条 -->
         <div
           v-if="uiStore.terminalVisible"
@@ -107,6 +113,7 @@ import ContentPanel from '../components/ContentPanel.vue'
 import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
 import AiFunctionPanel from '../components/AiFunctionPanel.vue'
+import StatsView from './StatsView.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'
