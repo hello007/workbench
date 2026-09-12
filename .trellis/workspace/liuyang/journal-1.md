@@ -1841,3 +1841,50 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - 推进第二个任务：全局错误处理 + 日志系统（在本任务稳定 service 边界上铺设）
+
+
+## Session 55: 全局错误处理与日志系统
+
+**Date**: 2026-09-13
+**Task**: global-error-logging
+**Branch**: `master`
+
+### Summary
+
+落地路线图技术债「后端架构优化 → 错误处理+日志」。调研 [research/logging-approach.md] 选 slog（标准库）+ lumberjack 胜出（zerolog/zap 桌面单用户性能优势无意义）。关键发现：核实 Wails v2.12 源码 `internal/frontend/dispatcher/calls.go:74` CallbackMessage.Err 类型 any + `pkg/options/options.go:69` ErrorFormatter func(error) any 原生支持结构化 error 传递，非研究初判的"仅 .Error() 字符串"。据此错误方案升级为 AppError + ErrorFormatter（非 Error() 编码 code 字符串），133 委托方法签名零改，Wails 绑定零 diff。util/logger.go InitLogger（slog JSONHandler + lumberjack 5MB/5份/压缩，dev 加 stdout）+ service/logger.go package-level SetLogger 注入（不改 14 service 构造签名保 76% 基线）。44 处散落 println 替换 slog 带结构化字段。model/app_error.go AppError{Code,Message,Err} + 错误码常量表，main.go 注册 ErrorFormatter 转 {code,message} 传前端。git 域 ErrOperationInProgress 转 *AppError（errors.As 提 Code + 文案兜底）；obsidian 域保留现状（string 状态码非 error 路径）。前端 error.js 通用 handleError 按 code 分流，gitError.js 重导出兼容 7 组件零改动。go test -race 全绿 service 78.6%、npm test 878 全过、wails generate 后绑定零 diff、wails build 通过。
+
+### Main Changes
+
+- `util/logger.go`（新）：InitLogger slog+lumberjack 轮转落盘 data/logs/app.log
+- `service/logger.go`（新）：package-level logger + SetLogger + Logger() 兜底
+- `app_services.go`：NewAppServices 顶部注入 logger（加 isDev 参数）
+- 44 处 println 替换 slog（app_*.go 11 文件 + service 3 文件）
+- `model/app_error.go`（新）：AppError 类型 + 错误码常量表 + 5 单测
+- `main.go`：注册 Wails ErrorFormatter（formatAppError）+ 4 单测
+- `service/git.go`：ErrOperationInProgress 转 *AppError，IsOperationInProgressError 用 errors.As
+- `frontend/src/utils/error.js`（新）：handleError 按 code 分流 + 17 单测；gitError.js 重导出兼容
+- `docs/spec/logging-and-errors.md`（新）+ CLAUDE.md 关键规则 + 开发规范修订（禁 println）+ 路线图勾选
+- `.gitignore` 补 data/logs/
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `35654f9` | feat(log): slog 结构化日志 + AppError 统一错误处理 |
+
+### Testing
+
+- [OK] `go test ./... -race` 全绿
+- [OK] service 覆盖率 78.6% ≥76% 基线
+- [OK] `npm test` 878 用例全过
+- [OK] `wails generate module` 后 App.js/App.d.ts 零 diff
+- [OK] `wails build` 16.32s 通过无 MISSING_EXPORT
+- [OK] `go vet` main/model/service 包无新增警告
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推进第三个任务：E2E 测试（Playwright 关键流程）
