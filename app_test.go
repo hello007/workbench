@@ -392,7 +392,7 @@ func TestGetDirectories_NoRuntimeDetection(t *testing.T) {
 		{ID: "d1", Name: "stale", Path: plainDir, IsDefault: false, IsGitRepo: true},
 	})
 
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 	got := app.GetDirectories()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 directory, got %d", len(got))
@@ -414,7 +414,7 @@ func TestGetDirectories_OldConfigBackwardCompat(t *testing.T) {
 		{ID: "d1", Name: "repo", Path: repoDir, IsDefault: false, IsGitRepo: false},
 	})
 
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 	got := app.GetDirectories()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 directory, got %d", len(got))
@@ -433,7 +433,7 @@ func TestGetDirectories_MissingPathAndAbsentConfig(t *testing.T) {
 		{ID: "d1", Name: "ghost", Path: filepath.Join(t.TempDir(), "does-not-exist")},
 	})
 
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 	got := app.GetDirectories()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 directory, got %d", len(got))
@@ -443,7 +443,7 @@ func TestGetDirectories_MissingPathAndAbsentConfig(t *testing.T) {
 	}
 
 	// 配置文件不存在 → Load 返回空，GetDirectories 返回空切片
-	app2 := &App{directorySvc: service.NewDirectoryService(filepath.Join(t.TempDir(), "absent.json"))}
+	app2 := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(filepath.Join(t.TempDir(), "absent.json"))}}
 	if got := app2.GetDirectories(); len(got) != 0 {
 		t.Errorf("expected empty slice when config absent, got %d", len(got))
 	}
@@ -484,7 +484,7 @@ func TestRefreshDirectoriesGitFlag_DetectsAndPersists(t *testing.T) {
 		{ID: "d2", Name: "plain", Path: plainDir, IsDefault: false},
 	})
 
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 	got := app.RefreshDirectoriesGitFlag()
 	if len(got) != 2 {
 		t.Fatalf("expected 2 directories, got %d", len(got))
@@ -530,7 +530,7 @@ func TestRefreshDirectoriesGitFlag_PreservesOtherFields(t *testing.T) {
 		{ID: "d1", Name: "original", Path: repoDir, IsDefault: false, IsGitRepo: false},
 	})
 
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 
 	// 模拟并发：刷新前另一路径改了 Name（绕过 app，直接写最新值）
 	// 这里通过先调用 service 层改名来模拟外部最新持久化
@@ -564,7 +564,7 @@ func TestAddDirectory_PersistsIsGitRepo(t *testing.T) {
 	plainDir := t.TempDir()
 
 	configPath := filepath.Join(t.TempDir(), "directories.json")
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 
 	app.AddDirectory("repo", repoDir, false)
 	app.AddDirectory("plain", plainDir, false)
@@ -595,7 +595,7 @@ func TestUpdateDirectory_RecalculatesIsGitRepo(t *testing.T) {
 	runGitIn(t, repoDir, "init")
 
 	configPath := filepath.Join(t.TempDir(), "directories.json")
-	app := &App{directorySvc: service.NewDirectoryService(configPath)}
+	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}
 
 	created := app.AddDirectory("d", plainDir, false)
 	if created.IsGitRepo {

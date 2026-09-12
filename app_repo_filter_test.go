@@ -15,9 +15,11 @@ func repoFilterTestApp(t *testing.T) (*App, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	app := &App{
-		directorySvc: service.NewDirectoryService(filepath.Join(tmp, "directories.json")),
-		gitSvc:       service.NewGitServiceWithCache(filepath.Join(tmp, "repo_scan_cache.json")),
-		repoMetaSvc:  service.NewRepoMetaService(filepath.Join(tmp, "repo_meta.json")),
+		AppServices: &AppServices{
+			directorySvc: service.NewDirectoryService(filepath.Join(tmp, "directories.json")),
+			gitSvc:       service.NewGitServiceWithCache(filepath.Join(tmp, "repo_scan_cache.json")),
+			repoMetaSvc:  service.NewRepoMetaService(filepath.Join(tmp, "repo_meta.json")),
+		},
 	}
 	return app, tmp
 }

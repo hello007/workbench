@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-12-wire-service/prd.md", "reason": "任务 PRD：AppServices struct 字段定义、NewAppServices 装配逻辑、App 内嵌方案、NewApp nil 防护、4 处生命周期副作用保留、测试改动清单"}
+{"file": ".trellis/tasks/09-12-wire-service/research/di-approach.md", "reason": "DI 方案调研：方案 A 决策依据、Go 字段提升内嵌零 diff 原理、包归属（package main 非 service 包）关键修正、测试构造成本分析"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定契约：App 导出方法签名不可变，重构须保 App.js/App.d.ts/models.ts 三文件零 diff"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "测试覆盖率门禁：service ≥76% 基线，重构不可降；前端 ≥70% 硬失败（本任务不动前端）"}

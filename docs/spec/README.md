@@ -22,6 +22,7 @@
 |[cross-layer-contracts.md](cross-layer-contracts.md)|Wails 绑定同步契约：App 方法签名变更须手动同步 `frontend/wailsjs/` 三处（App.js / App.d.ts / models.ts）；文件预览/保存的编码契约（UTF-8 / GBK）|
 |[test-coverage-gate.md](test-coverage-gate.md)|测试覆盖率分层门禁：后端 model/server ≥80% + service ≥76% 基线 + util ≥40% 排除 pty_windows.go + 主包不设门禁；前端 ≥70% 硬失败 exclude wailsjs；CI 脚本 scripts/coverage-check.sh 契约|
 |[test-stability.md](test-stability.md)|测试稳定性规范（Flaky 规避）：依赖文件系统 mtime 时序判失效的测试在 NTFS 上 flaky，改注入陈旧缓存（modTime 明确落后）驱动失效分支，不用 time.Sleep|
+|[app-services-assembly.md](app-services-assembly.md)|AppServices 装配范式：`NewAppServices` 集中装配 + App 内嵌 `*AppServices` 字段提升保 133 委托方法与 Wails 绑定零 diff；AppServices 须在 package main；构造与生命周期副作用分离；新增 service 改动点 2 处|
 
 ## 新增文档约定
 
@@ -33,4 +34,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-09-11
+**最后更新：** 2026-09-12

@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-12-wire-service/prd.md", "reason": "验收标准清单：133 委托方法零 diff、NewApp nil 防护、4 处生命周期副作用保留、测试全绿、Wails 绑定零 diff、service ≥76%"}
+{"file": ".trellis/tasks/09-12-wire-service/research/di-approach.md", "reason": "方案 A 决策与包归属修正：核查 AppServices 是否在 package main、字段提升是否零 diff"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 Wails 绑定三文件零 diff 契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service 覆盖率不降基线、测试全绿门禁"}
