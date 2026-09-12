@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App.GetRepoStats 绑定须同步 frontend/wailsjs App.js/App.d.ts/models.ts 三处"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% / 前端 ≥70% 门禁契约"}
+{"file": ".trellis/tasks/09-12-repo-stats/research/chart-lib-selection.md", "reason": "ECharts 按需引入方案 + vue-echarts 集成要点"}
+{"file": ".trellis/tasks/09-12-repo-stats/research/heatmap-implementation.md", "reason": "calendar heatmap 配置 + visualMap 5档色阶 + dayjs 日期序列"}
