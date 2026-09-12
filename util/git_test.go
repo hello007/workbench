@@ -145,3 +145,42 @@ func TestGetBranchesAll_RealRepo(t *testing.T) {
 		t.Errorf("GetBranchesAll 不应报错: %v", err)
 	}
 }
+
+// TestFindGitRoot_GitFile worktree/submodule 的 .git 是文件（内容形如 "gitdir: /path/..."），
+// FindGitRoot 应识别该目录为仓库根，而非因 IsDir 漏判向上走到父目录。
+func TestFindGitRoot_GitFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /some/path/.git/modules/x"), 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+	root, err := FindGitRoot(dir)
+	if err != nil {
+		t.Fatalf("FindGitRoot gitfile: %v", err)
+	}
+	abs, _ := filepath.Abs(dir)
+	if root != abs {
+		t.Errorf("gitfile 目录应识别为根, got %s want %s", root, abs)
+	}
+}
+
+// TestFindGitRoot_GitFileInSubdir submodule 工作目录在父仓库之下，.git 为文件时，
+// FindGitRoot 应停在该目录而非继续向上走到 superproject 根（修复后行为）。
+func TestFindGitRoot_GitFileInSubdir(t *testing.T) {
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "libs", "child")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	// submodule 工作目录的 .git 是文件
+	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: ../../.git/modules/libs/child"), 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+	root, err := FindGitRoot(sub)
+	if err != nil {
+		t.Fatalf("FindGitRoot sub gitfile: %v", err)
+	}
+	abs, _ := filepath.Abs(sub)
+	if root != abs {
+		t.Errorf("submodule 目录应停在自身根, got %s want %s", root, abs)
+	}
+}

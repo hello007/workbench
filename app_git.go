@@ -877,3 +877,55 @@ func (a *App) SkipRebase(path string) (string, error) {
 	}
 	return a.gitSvc.SkipRebase(path)
 }
+
+// ===== 子模块管理域 =====
+
+// GetSubmodules 获取子模块列表（双命令融合：submodule status + porcelain=2 dirty 标记）
+func (a *App) GetSubmodules(path string) ([]model.GitSubmodule, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ListSubmodules(path)
+}
+
+// InitSubmodules 初始化子模块（注册到本地 .git/config，不克隆不检出）
+func (a *App) InitSubmodules(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.InitSubmodules(path)
+}
+
+// UpdateSubmodules 更新子模块。mode 取 checkout/merge/rebase/remote，
+// recursive 下探嵌套，init 走 update --init 含首次检出，subPath 非空时仅更新单个子模块。
+func (a *App) UpdateSubmodules(path string, mode model.SubmoduleUpdateMode, recursive, init bool, subPath string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.UpdateSubmodules(path, mode, recursive, init, subPath)
+}
+
+// AddSubmodule 新增子模块。url 为子模块仓库地址，subPath 为子模块在父仓库中的相对路径，
+// branch 为跟踪分支（空表示不指定 -b，由 git 默认 remote HEAD 决定）。
+func (a *App) AddSubmodule(path, url, subPath, branch string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AddSubmodule(path, url, subPath, branch)
+}
+
+// RemoveSubmodule 删除子模块（三步清理：deinit + git rm + .git/modules 残留）
+func (a *App) RemoveSubmodule(path, subPath string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.RemoveSubmodule(path, subPath)
+}
+
+// CheckoutSubmoduleBranch 切换 detached 子模块到跟踪分支，subPath 为子模块相对路径。
+func (a *App) CheckoutSubmoduleBranch(path, subPath, branch string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CheckoutSubmoduleBranch(path, subPath, branch)
+}

@@ -157,15 +157,16 @@ func (g *GitCommand) Clone(url, targetPath string) (string, error) {
 	return stdout.String(), nil
 }
 
-// FindGitRoot 从给定路径向上查找 Git 仓库根目录
+// FindGitRoot 从给定路径向上查找 Git 仓库根目录。
+// 判定复用 IsGitRepositoryFast（仅判 .git 条目存在，不要求 IsDir），覆盖 submodule / worktree
+// 的 .git 文件场景（这两类的 .git 是文件，内容形如 "gitdir: /path/..."，IsDir 判定会漏判）。
 func FindGitRoot(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
 	for {
-		gitDir := filepath.Join(abs, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if IsGitRepositoryFast(abs) {
 			return abs, nil
 		}
 		parent := filepath.Dir(abs)
@@ -316,4 +317,95 @@ func (g *GitCommand) IsCherryPickInProgress(workDir string) bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ===== Submodule =====
+//
+// 以下封装 git submodule 子命令。workDir 须为 superproject 根目录（由 service 层
+// FindGitRoot 保证），submodule 命令在 superproject 根执行才能正确读写 .gitmodules
+// 与 .git/modules/<name>。
+
+// SubmoduleStatus 执行 `git submodule status`，返回原始多行输出。
+// 每行格式: "<前导码><40位SHA> <path> (<describe>)" 或 "<前导码><SHA> <path>"（未初始化无 describe）。
+// 前导码: 空格=一致, -=未初始化, +=SHA 不一致, U=合并冲突。
+// 注意：本命令不检测 submodule 工作区 dirty，dirty 须另取 StatusPorcelain2。
+func (g *GitCommand) SubmoduleStatus(workDir string) (string, error) {
+	return g.Execute(workDir, "submodule", "status")
+}
+
+// StatusPorcelain2 执行 `git status --porcelain=2`，用于检测 submodule 工作区 dirty。
+// submodule 行含 "S" 标志位与 Y 字段，service 层解析后与 submodule status 按 path 关联补 dirty。
+func (g *GitCommand) StatusPorcelain2(workDir string) (string, error) {
+	return g.Execute(workDir, "status", "--porcelain=2")
+}
+
+// SubmoduleInit 执行 `git submodule init`，将 .gitmodules 条目复制到本地 .git/config。
+func (g *GitCommand) SubmoduleInit(workDir string) (string, error) {
+	return g.Execute(workDir, "submodule", "init")
+}
+
+// SubmoduleUpdate 执行 `git submodule update`，mode 取 checkout/merge/rebase/remote：
+// checkout 为默认（git 原生，检出 index SHA），merge/rebase/remote 对应同名 flag。
+// recursive=true 附加 --recursive 下探嵌套 submodule。path 非空时限定单 submodule。
+// mode 以 string 传入而非 model.SubmoduleUpdateMode，避免 util 层反向依赖 model，保持底层纯净。
+func (g *GitCommand) SubmoduleUpdate(workDir, mode string, recursive bool, path string) (string, error) {
+	args := []string{"submodule", "update"}
+	switch mode {
+	case "merge":
+		args = append(args, "--merge")
+	case "rebase":
+		args = append(args, "--rebase")
+	case "remote":
+		args = append(args, "--remote")
+	default:
+		// checkout：git 默认行为，不附加 flag
+	}
+	if recursive {
+		args = append(args, "--recursive")
+	}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+	return g.Execute(workDir, args...)
+}
+
+// SubmoduleUpdateInit 等价 `git submodule update --init [--recursive]`，一步完成注册 + 检出。
+// clone 后首次检出 / 切到含新 submodule 的分支时首选。path 非空时限定单 submodule。
+func (g *GitCommand) SubmoduleUpdateInit(workDir string, recursive bool, path string) (string, error) {
+	args := []string{"submodule", "update", "--init"}
+	if recursive {
+		args = append(args, "--recursive")
+	}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+	return g.Execute(workDir, args...)
+}
+
+// SubmoduleAdd 执行 `git submodule add [-b branch] <url> <path>`，新增 submodule。
+// 生成 .gitmodules + 写 .git/config + .git/modules/<name> + 工作区检出。
+func (g *GitCommand) SubmoduleAdd(workDir, url, path, branch string) (string, error) {
+	args := []string{"submodule", "add"}
+	if branch != "" {
+		args = append(args, "-b", branch)
+	}
+	args = append(args, url, path)
+	return g.Execute(workDir, args...)
+}
+
+// SubmoduleDeinit 执行 `git submodule deinit -f <path>`，清空工作区 + 移除 .git/config 段。
+// 不清 .gitmodules、不清 .git/modules/<name>、不清 superproject index gitlink，须调用方后续处理。
+func (g *GitCommand) SubmoduleDeinit(workDir, path string) (string, error) {
+	return g.Execute(workDir, "submodule", "deinit", "-f", path)
+}
+
+// BranchShowCurrent 执行 `git -C <dir> branch --show-current`，返回当前分支名。
+// 返回空串表示处于 detached HEAD 状态，供 submodule detached 检测使用。
+func (g *GitCommand) BranchShowCurrent(dir string) (string, error) {
+	return g.Execute(dir, "branch", "--show-current")
+}
+
+// Checkout 执行 `git -C <dir> checkout <branch>`，切换分支。供 submodule 切换跟踪分支使用。
+func (g *GitCommand) Checkout(dir, branch string) (string, error) {
+	return g.Execute(dir, "checkout", branch)
 }

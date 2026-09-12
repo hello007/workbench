@@ -1,0 +1,4 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁硬失败校验：service ≥76% + 前端 ≥70%，check 阶段须核达标"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 wailsjs App.js/App.d.ts/models.ts 三处同步 + type X string 具名类型别名手补"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性规范，submodule 测试涉及临时仓库与命令输出，须遵循"}
+{"file": ".trellis/tasks/09-12-submodule/research/submodule-ops-and-status.md", "reason": "校验状态解析双命令融合 + 删除三步清理 + detached 检测实现是否符合研究结论"}

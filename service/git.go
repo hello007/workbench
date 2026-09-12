@@ -1518,3 +1518,357 @@ func (s *GitService) SkipRebase(repoPath string) (string, error) {
 	}
 	return s.gitCmd.RebaseSkip(gitRoot)
 }
+
+// ===== Submodule 管理 =====
+//
+// 设计要点：
+//   - submodule 操作的 repoPath 恒为 superproject 根（用户在 WorkBench 添加的顶层仓库）
+//   - 列表走双命令融合：git submodule status（前导码/SHA/path/describe/init 态）+ git status --porcelain=2（dirty）
+//   - 只读查询不抢 tryLockRepo（与 ListTags/ListRemotes 一致）；变更类抢锁，add/remove 加 precheckMutation
+//   - util 层封装 git 子命令，mode 以 string 传入避免 util 反向依赖 model
+
+// ListSubmodules 列出 superproject 下所有 submodule，双命令融合产出 GitSubmodule。
+// `git submodule status` 提供前导码/SHA/path/describe/init 态/SHA 不一致/冲突；
+// `git status --porcelain=2` 提供 submodule 工作区 dirty 标记（submodule status 不检测 dirty）。
+// 仅读查询，不抢仓级锁。
+func (s *GitService) ListSubmodules(repoPath string) ([]model.GitSubmodule, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	statusOut, err := s.gitCmd.SubmoduleStatus(gitRoot)
+	if err != nil {
+		return nil, fmt.Errorf("获取 submodule 状态失败: %w", err)
+	}
+
+	// 解析 git submodule status 每行：前导码 + 40位SHA + path + 可选 (describe)
+	submods := make(map[string]*model.GitSubmodule)
+	var order []string
+	for _, line := range strings.Split(statusOut, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 42 { // 至少 1 前导 + 40 SHA + 1 空格 + 1 path
+			continue
+		}
+		prefix := line[0]
+		sha := line[1:41]
+		rest := strings.TrimLeft(line[41:], " ")
+		// describe 在末尾括号 (...)，未初始化时无此段
+		var describe, path string
+		if idx := strings.LastIndex(rest, " ("); idx >= 0 && strings.HasSuffix(rest, ")") {
+			path = strings.TrimSpace(rest[:idx])
+			describe = rest[idx+2 : len(rest)-1]
+		} else {
+			path = strings.TrimSpace(rest)
+		}
+		if path == "" {
+			continue
+		}
+		sm := &model.GitSubmodule{
+			Path:     path,
+			Sha:      sha,
+			ShortSha: shortSHA(sha),
+			Describe: describe,
+		}
+		switch prefix {
+		case '-':
+			sm.Initialized = false
+		case '+':
+			sm.Initialized = true
+			sm.ShaMismatch = true
+		case 'U':
+			sm.Initialized = true
+			sm.Conflict = true
+		default: // 空格
+			sm.Initialized = true
+		}
+		submods[path] = sm
+		order = append(order, path)
+	}
+
+	// 融合 .gitmodules 的 branch/url 配置
+	s.fillSubmoduleConfig(gitRoot, submods)
+
+	// 融合 git status --porcelain=2 的 dirty 标记
+	// 注意：git submodule status 不检测 submodule 工作区 dirty，须 porcelain=2 融合。
+	// porcelain=2 ordinary 行: "1 <XY> <subFlags> <mH> <mI> <mW> <hH> <hI> <path>"
+	// submodule 行 subFlags 以 "S" 开头，后跟 4 位标志（git 2.41 实测）：
+	//   位1（S 后第1位）: C=committed change（submodule HEAD≠index）/ 空格
+	//   位2（S 后第2位）: M=submodule 内已跟踪文件被修改 / .
+	//   位3（S 后第3位）: U=submodule 内有未跟踪文件 / .
+	//   位4: 其他
+	// dirty（工作区有改动）= 位2 'M' 或 位3 'U'。ShaMismatch 已由 submodule status 前导码 + 判定，不重复。
+	// 不用 XY 的 Y 字段判 dirty：Y 在「新提交干净」与「dirty」两种场景均为 M，无法区分（实测
+	// 新提交=SC.. / dirty=S.CMU 或 SC.U，差异在 subFlags 位2/位3）。
+	porcelainOut, err := s.gitCmd.StatusPorcelain2(gitRoot)
+	if err == nil {
+		for _, line := range strings.Split(porcelainOut, "\n") {
+			line = strings.TrimRight(line, "\r")
+			if line == "" || line[0] != '1' {
+				continue // 仅普通变更行（"1 ..."），忽略 "?" 未跟踪与 "2" 重命名
+			}
+			fields := strings.Fields(line)
+			// 前 8 字段无空格；第 9 字段起为 path（含空格时整段引号包裹，strings.Fields 按空格拆开，
+			// 故取 fields[8:] 拼回复原）。不足 9 字段说明非 ordinary 变更行，跳过。
+			if len(fields) < 9 {
+				continue
+			}
+			subFlags := fields[2]
+			// 仅处理 submodule 行（subFlags 以 S 开头且至少 4 字符含位2/位3）
+			if len(subFlags) < 4 || subFlags[0] != 'S' {
+				continue
+			}
+			path := strings.Join(fields[8:], " ")
+			path = strings.Trim(path, "\"")
+			sm, ok := submods[path]
+			if !ok {
+				continue
+			}
+			// subFlags 位2（已跟踪文件修改）或 位3（未跟踪文件）非 '.' 表示 submodule 工作区 dirty
+			if subFlags[2] != '.' || subFlags[3] != '.' {
+				sm.Dirty = true
+			}
+		}
+	}
+
+	// 融合 detached 检测：对每个已初始化 submodule 查 branch --show-current 是否为空
+	for _, p := range order {
+		sm := submods[p]
+		if !sm.Initialized {
+			continue
+		}
+		subDir := filepath.Join(gitRoot, sm.Path)
+		if branch, err := s.gitCmd.BranchShowCurrent(subDir); err == nil && strings.TrimSpace(branch) == "" {
+			sm.Detached = true
+		}
+	}
+
+	result := make([]model.GitSubmodule, 0, len(order))
+	for _, p := range order {
+		result = append(result, *submods[p])
+	}
+	return result, nil
+}
+
+// fillSubmoduleConfig 从 .gitmodules 读取 branch/url 配置填充到 GitSubmodule。
+// .gitmodules 为 ini 格式，[submodule "name"] 段下 path/url/branch 键。
+// 解析失败不阻断（返回的 GitSubmodule 仅缺 branch/url，不影响状态展示）。
+func (s *GitService) fillSubmoduleConfig(gitRoot string, submods map[string]*model.GitSubmodule) {
+	gitmodulesPath := filepath.Join(gitRoot, ".gitmodules")
+	data, err := os.ReadFile(gitmodulesPath)
+	if err != nil {
+		return // 无 .gitmodules（无 submodule 或未提交），跳过
+	}
+
+	// 简易 ini 解析：按段 [submodule "x"] 收集键值，段内 path/url/branch 映射
+	type section struct {
+		path, url, branch string
+	}
+	sections := make(map[string]*section)
+	var curName string
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(strings.TrimRight(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			// 段头: [submodule "name"] -> 取 name
+			inner := line[1 : len(line)-1]
+			parts := strings.SplitN(inner, " ", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "submodule" {
+				curName = strings.Trim(strings.TrimSpace(parts[1]), "\"")
+				if _, ok := sections[curName]; !ok {
+					sections[curName] = &section{}
+				}
+			} else {
+				curName = ""
+			}
+			continue
+		}
+		if curName == "" {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		sec := sections[curName]
+		switch key {
+		case "path":
+			sec.path = val
+		case "url":
+			sec.url = val
+		case "branch":
+			sec.branch = val
+		}
+	}
+
+	// .gitmodules 段名可能与 path 不同（name 是逻辑名，path 是路径），按 path 匹配
+	for _, sec := range sections {
+		if sm, ok := submods[sec.path]; ok {
+			sm.Url = sec.url
+			sm.Branch = sec.branch
+		}
+	}
+}
+
+// shortSHA 返回 SHA 前 8 位，不足 8 位返回原值。
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// InitSubmodules 初始化 submodule（git submodule init）。
+// 仅注册到本地 .git/config，不克隆不检出，一般直接走 UpdateSubmodules(--init)。抢锁。
+func (s *GitService) InitSubmodules(repoPath string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	output, err := s.gitCmd.SubmoduleInit(gitRoot)
+	if err != nil {
+		return "", fmt.Errorf("初始化 submodule 失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// UpdateSubmodules 更新 submodule。mode 取 checkout/merge/rebase/remote，recursive 下探嵌套。
+// path 非空时仅更新单个 submodule，为空时更新全部。init=true 走 update --init（含首次检出）。
+// 抢锁（变更类操作），但不走 precheckMutation——submodule 更新不要求 superproject 工作区干净，
+// 仅要求非 detached HEAD（superproject 本身须在分支上）。
+func (s *GitService) UpdateSubmodules(repoPath string, mode model.SubmoduleUpdateMode, recursive, init bool, path string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	var output string
+	if init {
+		output, err = s.gitCmd.SubmoduleUpdateInit(gitRoot, recursive, path)
+	} else {
+		output, err = s.gitCmd.SubmoduleUpdate(gitRoot, string(mode), recursive, path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("更新 submodule 失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// AddSubmodule 新增 submodule（git submodule add [-b branch] <url> <path>）。
+// 一次完成：生成 .gitmodules（版本化）+ 写 .git/config（本地注册）+ .git/modules/<name>（git 目录存储）+ 工作区检出。
+// 抢锁 + precheckMutation（要求 superproject 工作区干净 + 非 detached HEAD）。
+// url/path 空校验。返回 trim 后的 stdout。
+// 注意：git 2.41+ 默认禁 file 协议（CVE-2022-39253），file:// 或本地路径作 url 时
+// 须用户环境配置 protocol.file.allow=always，否则 git 报错原样透传（WorkBench 不处理）。
+func (s *GitService) AddSubmodule(repoPath, url, path, branch string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	if strings.TrimSpace(url) == "" {
+		return "", fmt.Errorf("submodule 仓库地址不能为空")
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("submodule 路径不能为空")
+	}
+
+	gitRoot, err := s.precheckMutation(repoPath)
+	if err != nil {
+		return "", err
+	}
+
+	output, err := s.gitCmd.SubmoduleAdd(gitRoot, url, path, branch)
+	if err != nil {
+		return "", fmt.Errorf("添加 submodule 失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// RemoveSubmodule 删除 submodule，三步清理确保无残留：
+//  1. git submodule deinit -f <path>：清空工作区 + 移除 .git/config 段
+//  2. git rm -f <path>：移除 superproject index gitlink + .gitmodules 条目 + 工作区目录
+//  3. os.RemoveAll(.git/modules/<path>)：手动清除 .git/modules 残留
+//     （git 不自动清此目录，遗漏致同名 submodule 重加时复用旧 git 目录、历史错乱）
+//
+// 抢锁 + precheckMutation（要求工作区干净 + 非 detached HEAD）。path 空校验。
+// path 同时作 .git/modules 下的段名（git 默认段名等于 path）。
+func (s *GitService) RemoveSubmodule(repoPath, path string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("submodule 路径不能为空")
+	}
+
+	gitRoot, err := s.precheckMutation(repoPath)
+	if err != nil {
+		return err
+	}
+
+	// 步骤 1：deinit 清工作区 + .git/config 段（不清 .gitmodules、不清 .git/modules）
+	if _, err := s.gitCmd.SubmoduleDeinit(gitRoot, path); err != nil {
+		return fmt.Errorf("注销 submodule 失败: %w", err)
+	}
+	// 步骤 2：git rm 清 superproject index gitlink + .gitmodules 条目 + 工作区目录
+	if _, err := s.gitCmd.Execute(gitRoot, "rm", "-f", path); err != nil {
+		return fmt.Errorf("移除 submodule gitlink 失败: %w", err)
+	}
+	// 步骤 3：手动清 .git/modules/<path>（git 不自动清，path 即 name 是 git 默认）
+	modulesDir := filepath.Join(gitRoot, ".git", "modules", path)
+	if err := os.RemoveAll(modulesDir); err != nil {
+		return fmt.Errorf("清理 .git/modules 残留失败: %w", err)
+	}
+	return nil
+}
+
+// CheckoutSubmoduleBranch 将 detached 的 submodule 切换到跟踪分支，避免用户在分离头指针上开发丢提交。
+// subPath 为 submodule 在 superproject 中的相对路径，branch 为目标分支名（通常读 .gitmodules 的 branch 配置）。
+// 抢锁（变更类操作），但不走 precheckMutation——此操作作用于 submodule 自身工作区，
+// 不要求 superproject 工作区干净。subPath/branch 空校验。
+func (s *GitService) CheckoutSubmoduleBranch(repoPath, subPath, branch string) (string, error) {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	if strings.TrimSpace(subPath) == "" {
+		return "", fmt.Errorf("submodule 路径不能为空")
+	}
+	if strings.TrimSpace(branch) == "" {
+		return "", fmt.Errorf("分支名不能为空")
+	}
+
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+
+	subDir := filepath.Join(gitRoot, subPath)
+	output, err := s.gitCmd.Checkout(subDir, branch)
+	if err != nil {
+		return "", fmt.Errorf("切换 submodule 分支失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}

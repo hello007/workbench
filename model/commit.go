@@ -110,3 +110,35 @@ type ConflictState struct {
 	Type  ConflictType `json:"type"`  // 冲突来源操作
 	Files []string     `json:"files"` // 冲突文件相对仓库根路径
 }
+
+// GitSubmodule 表示 superproject 下的一个 Git submodule。
+// 数据由 `git submodule status`（前导码/SHA/path/describe/init 态）与
+// `git status --porcelain=2`（dirty 标记）双命令融合产出，按 path 关联。
+type GitSubmodule struct {
+	Path        string `json:"path"`        // submodule 在 superproject 中的相对路径
+	Sha         string `json:"sha"`         // 当前 checkout 的提交 SHA（40 位）
+	ShortSha    string `json:"shortSha"`    // 前 8 位 SHA，用于显示
+	Describe    string `json:"describe"`    // git describe 结果，未初始化或无 tag 时为空
+	Branch      string `json:"branch"`      // .gitmodules 中配置的跟踪分支，未配置时为空
+	Url         string `json:"url"`         // .gitmodules 中配置的仓库地址
+	Initialized bool   `json:"initialized"` // 是否已初始化（前导码 - 表示未初始化）
+	ShaMismatch bool   `json:"shaMismatch"` // checkout SHA 与 index 记录不一致（前导码 +）
+	Dirty       bool   `json:"dirty"`       // submodule 工作区有未提交改动（来自 porcelain=2）
+	Conflict    bool   `json:"conflict"`    // superproject 合并冲突（前导码 U）
+	Detached    bool   `json:"detached"`    // submodule HEAD 处于分离头指针状态
+}
+
+// SubmoduleUpdateMode submodule 更新策略，对应 git submodule update 的 --merge/--rebase/--remote 选项。
+// checkout 为默认（git 原生行为，检出 index 记录 SHA，结果 detached）。
+type SubmoduleUpdateMode string
+
+const (
+	// SubmoduleUpdateCheckout 默认检出：按 superproject index 记录的 SHA 检出，结果为 detached HEAD。
+	SubmoduleUpdateCheckout SubmoduleUpdateMode = "checkout"
+	// SubmoduleUpdateMerge 合并更新：把远程 tip 合并进 submodule 当前分支，保持在分支上。
+	SubmoduleUpdateMerge SubmoduleUpdateMode = "merge"
+	// SubmoduleUpdateRebase 变基更新：把 submodule 当前分支变基到远程 tip。
+	SubmoduleUpdateRebase SubmoduleUpdateMode = "rebase"
+	// SubmoduleUpdateRemote 远程升级：忽略 index SHA，拉 .gitmodules 的 branch 远程最新（后须 superproject commit 指针）。
+	SubmoduleUpdateRemote SubmoduleUpdateMode = "remote"
+)

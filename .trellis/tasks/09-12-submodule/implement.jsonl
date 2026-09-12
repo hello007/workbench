@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-12-submodule/research/submodule-ops-and-status.md", "reason": "submodule 命令实测输出格式 + 双命令融合解析规则 + 删除三步清理 + detached 陷阱，后端 service 解析与操作实现直接依赖"}
+{"file": ".trellis/tasks/09-12-submodule/research/findgitroot-fix-and-gogit-submodule.md", "reason": "FindGitRoot 修复方案（复用 IsGitRepositoryFast）+ caller 影响分析 + go-git 能力边界结论，PR1 前置依赖"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法 + GitSubmodule/SubmoduleUpdateMode model 须同步 wailsjs App.js/App.d.ts/models.ts 三处；type X string 具名类型须手补 models.ts 别名，否则 npm run build 报 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76% + 前端 ≥70% 硬失败门禁，测试编写须达标"}

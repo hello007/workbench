@@ -81,6 +81,9 @@
         <el-tab-pane label="合并/变基" name="merge" lazy>
           <GitMerge :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
+        <el-tab-pane label="子模块" name="submodules" lazy>
+          <GitSubmodules :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
       </el-tabs>
 
       <div v-else-if="workspaceStore.selectedNode.type === 'directory'" class="node-actions">
@@ -452,6 +455,7 @@ import GitBranches from './GitBranches.vue'
 import GitTags from './GitTags.vue'
 import GitRemotes from './GitRemotes.vue'
 import GitMerge from './GitMerge.vue'
+import GitSubmodules from './GitSubmodules.vue'
 import FilePreviewRenderer from './FilePreviewRenderer.vue'
 import {
   PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,

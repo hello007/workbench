@@ -88,6 +88,7 @@ const contentPanelStubs = {
   GitTags: { template: '<div class="git-tags" />' },
   GitRemotes: { template: '<div class="git-remotes" />' },
   GitMerge: { template: '<div class="git-merge" />' },
+  GitSubmodules: { template: '<div class="git-submodules" />' },
   SuccessFilled: { template: '<span />' },
   CircleCloseFilled: { template: '<span />' },
   ArrowLeft: { template: '<span class="arrow-left" />' }
