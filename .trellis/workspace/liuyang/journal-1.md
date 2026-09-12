@@ -1766,3 +1766,37 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 53: Submodule 完整闭环管理
+
+**Date**: 2026-09-12
+**Task**: Submodule 完整闭环管理
+**Branch**: `master`
+
+### Summary
+
+落地路线图 Git 高级操作 Submodule 支持最后一块拼图。6 操作闭环（查看/状态/初始化/更新/添加/删除）+ detached 检测切换。ListSubmodules 双命令融合（git submodule status + git status --porcelain=2）按 path 关联，dirty 判定用 subFlags 位2/位3 而非 XY Y 字段严格区分 dirty 工作区与新提交干净。FindGitRoot 修复（复用 IsGitRepositoryFast 修 submodule/worktree .git 文件漏判，~24 caller 受益）。RemoveSubmodule 三步清理（deinit + git rm + .git/modules 手动删）。审核修 4 项：initAll UX bug（改走 update --init）、mode 白名单校验、path 穿越防御、SubmoduleAdd -- 分隔。service 78.6% / 前端 ≥70% 四指标。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33c63ef` | (see git log) |
+| `5be5880` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
