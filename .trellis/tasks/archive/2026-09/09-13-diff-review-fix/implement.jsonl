@@ -1,0 +1,4 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误语义收紧：读设置失败改普通 error 的分流依据；前端 handleError 分流"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "确认本次无 App 签名变更（仅内部校验），wailsjs 绑定零 diff"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "修复后覆盖率门禁零回归"}
+{"file": ".trellis/tasks/09-13-diff-review-fix/prd.md", "reason": "12 项修复清单与验收标准"}
