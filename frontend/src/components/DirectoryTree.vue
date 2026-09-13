@@ -3,7 +3,11 @@
     <!-- 工具栏 -->
     <div class="dir-toolbar">
       <span class="dir-toolbar-title">工作目录</span>
-      <el-button :icon="Plus" circle size="small" @click="showAddDialog" />
+      <div class="dir-toolbar-actions">
+        <el-button :icon="Download" circle size="small" title="导出仓库列表配置" @click="handleExportConfig" />
+        <el-button :icon="Upload" circle size="small" title="导入仓库列表配置" @click="importDialogVisible = true" />
+        <el-button :icon="Plus" circle size="small" title="添加工作目录" @click="showAddDialog" />
+      </div>
     </div>
 
     <!-- 目录列表 -->
@@ -140,13 +144,19 @@
         <el-button type="primary" @click="handleRename" :loading="renameLoading">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 仓库列表配置导入对话框：选文件 → 预览/决策 → 执行 → 结果汇总 -->
+    <RepoConfigImportDialog
+      v-model:visible="importDialogVisible"
+      @imported="onConfigImported"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -160,15 +170,20 @@ import {
   OpenInObsidian,
   OpenObsidianVaultManager,
   CopyObsidianVaultPath,
-  AutoRegisterAndOpen
+  AutoRegisterAndOpen,
+  ExportRepoConfig,
+  SaveFileDialog,
+  SaveFile
 } from '../../wailsjs/go/main/App'
+import RepoConfigImportDialog from './RepoConfigImportDialog.vue'
+import { handleError } from '../utils/error'
 import obsidianIcon from '../assets/icons/obsidian.png'
 import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useSettingsStore, useDirectoryStore, useUiStore } from '../store'
+import { useSettingsStore, useDirectoryStore, useUiStore, useFavoritesStore } from '../store'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -182,6 +197,40 @@ const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull', 'openR
 const settingsStore = useSettingsStore()
 const directoryStore = useDirectoryStore()
 const uiStore = useUiStore()
+const favoritesStore = useFavoritesStore()
+
+// --- 仓库列表配置导入导出 ---
+const importDialogVisible = ref(false)
+
+// 导出配置：后端组装 manifest JSON → SaveFileDialog 选路径 → SaveFile 落盘
+const handleExportConfig = async () => {
+  let text
+  try {
+    text = await ExportRepoConfig()
+  } catch (e) {
+    handleError('导出失败: ', e)
+    return
+  }
+  let path
+  try {
+    path = await SaveFileDialog('repo_config.json', [{ DisplayName: 'JSON 文件', Pattern: '*.json' }])
+  } catch {
+    return // runtime 不可用或对话框异常，静默
+  }
+  if (!path) return // 用户取消
+  try {
+    await SaveFile(path, text, 'utf-8')
+    ElMessage.success('仓库列表配置已导出: ' + path)
+  } catch (e) {
+    handleError('写入导出文件失败: ', e)
+  }
+}
+
+// 导入完成：刷新工作目录与收藏夹列表
+const onConfigImported = () => {
+  directoryStore.loadDirectories().then(() => directoryStore.refreshGitFlags())
+  favoritesStore.loadFavorites()
+}
 
 // --- 本地目录列表（可变，用于拖拽） ---
 // localDirectories 为 VueDraggable v-model 的可变副本（拖拽时原地重排 + onDragEnd 取序持久化），
@@ -637,6 +686,16 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.5px;
+}
+
+.dir-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dir-toolbar-actions .el-button + .el-button {
+  margin-left: 0;
 }
 
 .dir-list {

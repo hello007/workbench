@@ -7,7 +7,9 @@ import { ElMessage } from 'element-plus'
 export const ErrorCode = Object.freeze({
   GitInProgress: 'E_GIT_IN_PROGRESS', // 变更类 Git 操作进行中，本次拒绝（warning）
   DiffToolNotConfigured: 'E_DIFF_TOOL_NOT_CONFIGURED', // 外部 diff 工具未配置或配置无效，引导用户去设置（warning）
-  DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED' // 外部 diff 工具启动失败（error）
+  DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED', // 外部 diff 工具启动失败（error）
+  RepoConfigInvalidJson: 'E_REPO_CONFIG_INVALID_JSON', // 仓库列表配置导入：文件不是合法 JSON 或顶层结构缺失（error）
+  RepoConfigUnsupportedVersion: 'E_REPO_CONFIG_UNSUPPORTED_VERSION' // 仓库列表配置导入：manifestVersion 缺失或高于当前支持（error）
 })
 
 // 预期拒绝类错误码（用户可重试），弹 warning 而非 error。

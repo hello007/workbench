@@ -226,6 +226,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetAiFunctions, SaveAiFunctions, ExportAiFunctions, ImportAiFunctions, SaveFile, SaveFileDialog, OpenFileDialog, ReadFileBytes, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
+import { decodeBase64Utf8 } from '../utils/base64'
 import ParamsEditor from './ParamsEditor.vue'
 import FollowUpsEditor from './FollowUpsEditor.vue'
 import EnvEditor from './EnvEditor.vue'
@@ -400,8 +401,8 @@ const importConfig = async () => {
       previewVisible.value = false
       return
     }
-    // base64 → 文本
-    const text = bytes?.base64 ? atob(bytes.base64) : ''
+    // base64 → 文本（按 UTF-8 解码，含中文的配置文件不乱码）
+    const text = bytes?.base64 ? decodeBase64Utf8(bytes.base64) : ''
     const preview = await ImportAiFunctions(text)
     importPreview.value = preview
     // 冲突项默认「跳过」（保守，避免误覆盖本机自定义）

@@ -168,6 +168,37 @@ GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；�
 
 ---
 
+## Scenario: ReadFileBytes 的 base64 须按 UTF-8 解码（禁裸 atob）
+
+### 1. Scope / Trigger
+- Trigger: 前端消费 `ReadFileBytes` 返回的 `base64` 字段还原文本内容（导入配置文件、预览文本等）。
+- 原因: 后端返回文件**原始字节**的 base64；`atob` 按 Latin-1 逐字节还原成字符串，中文等多字节 UTF-8 序列直接当字符串用会双重编码乱码（如「导入新目录」→「å¯¼å¥…」）。
+
+### 2. Signatures
+- Go: `func (a *App) ReadFileBytes(filePath string) *model.FileBytes`（`base64` 字段 = 文件原始字节的 base64）
+- JS（正确解码）: `frontend/src/utils/base64.js` 的 `decodeBase64Utf8(base64)` — `Uint8Array.from(atob(b64), c => c.charCodeAt(0))` 还原字节 → `TextDecoder('utf-8')` 解码
+
+### 3. Contracts
+- 前端拿 `base64` 还原**文本**时一律用 `decodeBase64Utf8`，禁止裸 `atob(b64)` 后直接当文本传递
+- 还原**二进制**（图片/PDF Blob）不受此约束：`Uint8Array.from(atob(b64), c=>c.charCodeAt(0))` 直接构 Blob 即可（无文本语义）
+
+### 4. Validation & Error Matrix
+- 中文 JSON 导入文件裸 `atob` → 后端解析拿到乱码字段（名称/路径全坏），无报错纯数据损坏，**难排查**
+- 纯 ASCII 内容裸 `atob` 恰好正确（单字节等价），单测用 ASCII 数据测不出该 bug，**必须用中文数据测**
+
+### 5. Tests Required
+- 前端 spec：`ReadFileBytes` mock 返回含中文内容的 `btoa(UTF-8 字节)`，断言解码后与原文一致
+- E2E：`Buffer.from(中文文本).toString('base64')` 注入 + 断言后端收到的文本参数与原文一致
+
+### 6. Wrong vs Correct
+#### Wrong
+`const text = atob(bytes.base64)` → 中文配置文件导入后名称/路径乱码。
+#### Correct
+`const text = decodeBase64Utf8(bytes.base64)`（`frontend/src/utils/base64.js`），字节序列还原后按 UTF-8 解码。
+（来源：2026-09-13 仓库列表配置导入导出任务，E2E 中文 manifest 断言暴露，AI 功能配置导入同款隐患一并修复。）
+
+---
+
 ## Scenario: 具名 string 类型作 Wails 绑定参数须手动补 models.ts type 别名
 
 ### 1. Scope / Trigger

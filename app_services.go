@@ -35,6 +35,7 @@ type AppServices struct {
 	repoMetaSvc        *service.RepoMetaService
 	aiFuncSvc          *service.AiFunctionService
 	skillDiscoverySvc  *service.SkillDiscoveryService
+	repoConfigSvc      *service.RepoConfigService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -98,6 +99,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 更新服务（检查更新与自动更新，ctx 由 startup 调 SetContext 注入）
 	s.updateSvc = service.NewUpdateService()
+
+	// 仓库列表配置导入导出服务（聚合工作目录 + 收藏夹两个数据源，跨依赖须在其后构造）
+	s.repoConfigSvc = service.NewRepoConfigService(s.directorySvc, s.favoritesSvc)
 
 	return s
 }

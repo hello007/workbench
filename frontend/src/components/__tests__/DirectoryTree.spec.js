@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import DirectoryTree from '../DirectoryTree.vue'
 import { useDirectoryStore, useUiStore } from '../../store'
+import { ExportRepoConfig, SaveFileDialog, SaveFile } from '../../../wailsjs/go/main/App'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -26,9 +27,20 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UpdateDirectory: vi.fn(() => Promise.resolve({ id: 'dir-1', name: '测试', path: '/test', isDefault: false })),
   DeleteDirectory: vi.fn(() => Promise.resolve(true)),
   SetDefaultDirectory: vi.fn(() => Promise.resolve(true)),
+  ReorderDirectories: vi.fn(() => Promise.resolve(true)),
   OpenInExplorer: vi.fn(() => Promise.resolve(true)),
   OpenInVSCode: vi.fn(() => Promise.resolve(true)),
-  OpenInWarp: vi.fn(() => Promise.resolve(true))
+  OpenInWarp: vi.fn(() => Promise.resolve(true)),
+  OpenInObsidian: vi.fn(() => Promise.resolve('')),
+  OpenObsidianVaultManager: vi.fn(() => Promise.resolve(true)),
+  CopyObsidianVaultPath: vi.fn(() => Promise.resolve('')),
+  AutoRegisterAndOpen: vi.fn(() => Promise.resolve(0)),
+  GetDirectories: vi.fn(() => Promise.resolve([])),
+  GetFavorites: vi.fn(() => Promise.resolve([])),
+  // 仓库列表配置导出链路（manifest 文本 → 选路径 → 落盘）
+  ExportRepoConfig: vi.fn(() => Promise.resolve('{"manifestVersion":1,"directories":[],"favorites":[]}')),
+  SaveFileDialog: vi.fn(() => Promise.resolve('D:/out/repo_config.json')),
+  SaveFile: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('../../../utils/debug', () => ({
@@ -156,14 +168,14 @@ describe('DirectoryTree.vue', () => {
   describe('添加目录（AC1）', () => {
     it('点击添加按钮应该显示对话框', async () => {
       wrapper = createWrapper()
-      const btn = wrapper.find('.dir-toolbar button')
+      const btn = wrapper.find('button[title="添加工作目录"]')
       await btn.trigger('click')
       expect(wrapper.find('.el-dialog').exists()).toBe(true)
     })
 
     it('空名称应该提示警告', async () => {
       wrapper = createWrapper()
-      await wrapper.find('.dir-toolbar button').trigger('click')
+      await wrapper.find('button[title="添加工作目录"]').trigger('click')
 
       const { AddDirectory } = await import('../../../wailsjs/go/main/App')
       // 直接调用 handleAdd
@@ -176,7 +188,7 @@ describe('DirectoryTree.vue', () => {
 
     it('空路径应该提示警告', async () => {
       wrapper = createWrapper()
-      await wrapper.find('.dir-toolbar button').trigger('click')
+      await wrapper.find('button[title="添加工作目录"]').trigger('click')
 
       const { AddDirectory } = await import('../../../wailsjs/go/main/App')
       wrapper.vm.addForm = { name: '测试', path: '', isDefault: false }
@@ -613,6 +625,43 @@ describe('DirectoryTree.vue - 菜单分发与 handler 补充', () => {
       wrapper.vm.$.setupState.contextMenu.targetDir = targetDir
       wrapper.vm.$.setupState.closeMenu()
       expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+    })
+  })
+
+  describe('仓库列表配置导出', () => {
+    it('导出链路：后端取文本 → SaveFileDialog 选路径 → SaveFile 按 UTF-8 落盘', async () => {
+      wrapper = createWrapper()
+      const exportBtn = wrapper.find('button[title="导出仓库列表配置"]')
+      expect(exportBtn.exists()).toBe(true)
+      await exportBtn.trigger('click')
+      await flushPromises()
+
+      expect(ExportRepoConfig).toHaveBeenCalledTimes(1)
+      expect(SaveFileDialog).toHaveBeenCalledWith('repo_config.json', [
+        { DisplayName: 'JSON 文件', Pattern: '*.json' }
+      ])
+      expect(SaveFile).toHaveBeenCalledWith(
+        'D:/out/repo_config.json',
+        '{"manifestVersion":1,"directories":[],"favorites":[]}',
+        'utf-8'
+      )
+      expect(ElMessage.success).toHaveBeenCalled()
+    })
+
+    it('用户取消保存对话框：不落盘', async () => {
+      SaveFileDialog.mockResolvedValueOnce('')
+      wrapper = createWrapper()
+      await wrapper.find('button[title="导出仓库列表配置"]').trigger('click')
+      await flushPromises()
+
+      expect(ExportRepoConfig).toHaveBeenCalledTimes(1)
+      expect(SaveFile).not.toHaveBeenCalled()
+    })
+
+    it('导出按钮与导入按钮均在工具栏渲染', () => {
+      wrapper = createWrapper()
+      expect(wrapper.find('button[title="导出仓库列表配置"]').exists()).toBe(true)
+      expect(wrapper.find('button[title="导入仓库列表配置"]').exists()).toBe(true)
     })
   })
 })

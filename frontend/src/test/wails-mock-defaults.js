@@ -33,7 +33,23 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   AddFavorite: '',
   RemoveFavorite: '',
   UpdateFavoriteAlias: '',
-  UpdateFavoriteGroup: ''
+  UpdateFavoriteGroup: '',
+
+  // ---- 仓库列表配置导入导出（形状对齐 model.RepoConfigImportPreview / Result）----
+  // SaveFileDialog / OpenFileDialog 默认空串 = 用户取消，安全 no-op
+  SaveFileDialog: '',
+  OpenFileDialog: '',
+  SaveFile: true,
+  ReadFileBytes: { base64: '', error: '', tooLarge: false },
+  ExportRepoConfig: '{"manifestVersion":1,"exportedAt":"2026-09-13T00:00:00Z","directories":[],"favorites":[]}',
+  PreviewRepoConfigImport: {
+    newDirectories: [],
+    conflictDirectories: [],
+    newFavorites: [],
+    conflictFavorites: [],
+    invalid: []
+  },
+  ApplyRepoConfigImport: { added: 0, overwritten: 0, skipped: 0, failed: 0, failedReasons: [] }
 }
 
 /**

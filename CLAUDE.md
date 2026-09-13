@@ -58,6 +58,7 @@ workbench/
 |新增 service 须在 `app_services.go` 的 `AppServices` struct 加字段 + `NewAppServices` 加构造行（2 处）；`AppServices` 必须在 package main（跨包内嵌未导出字段不提升）；App 内嵌 `*AppServices` 字段提升保 133 委托方法与 Wails 绑定零 diff；构造纯 new，生命周期副作用留 startup/shutdown|[app-services-assembly.md](docs/spec/app-services-assembly.md)|
 |后端日志用 `log/slog`（禁 `println`，无级别无落盘 GUI 不可见）；service 包内调 `Logger()`（SetLogger 注入），App 层调 `slog.X`；需前端分流的错误用 `model.AppError{Code,Message}` 经 `main.go` ErrorFormatter 转 `{code,message}` 传前端，前端 `handleError` 按 code 分流；新增错误码同步 `model/app_error.go` 常量表 + `frontend/src/utils/error.js` ErrorCode/WARNING_CODES|[logging-and-errors.md](docs/spec/logging-and-errors.md)|
 |E2E 用例从 `frontend/e2e/fixtures.js` import `{test,expect}`（自动注入 Wails mock，禁直接 import `@playwright/test`）；mock 返回值改 `src/test/wails-mock-defaults.js` 单一数据源（vitest/E2E 共用）；禁 `waitForTimeout`，靠 expect 自动重试；后端集成测试文件头 `//go:build integration`（默认 go test 不编译，CI 显式跑 `-tags=integration`）；`frontend/wailsjs/` 不入库，CI 须先 `wails generate module` 再 build|[e2e-testing.md](docs/spec/e2e-testing.md)|
+|前端还原 `ReadFileBytes` 返回的 base64 为文本时用 `utils/base64.js` 的 `decodeBase64Utf8`，禁裸 `atob`（Latin-1 逐字节还原，中文双重编码乱码；ASCII 内容恰好正确故单测须用中文数据）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 
 ## 文档索引
 
