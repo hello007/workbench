@@ -1954,3 +1954,36 @@ GetCommitHistory 扩签名加 model.CommitFilter，go-git LogOptions 原生下�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 56: E2E 扩展：文件树/子模块/AI 功能触发
+
+**Date**: 2026-09-13
+**Task**: E2E 扩展：文件树/子模块/AI 功能触发
+**Branch**: `master`
+
+### Summary
+
+E2E 扩展三流程：wails-init.js 新增 __events__ 描述符（EventsOn 回调登记 + setTimeout 按序派发）模拟 AI 任务异步事件流；file-tree/submodule/ai-function 三 spec 共 13 用例；集成测试新增真实 submodule fixture（git ≥2.38 file transport 限制经 GIT_CONFIG_* 环境变量放行——submodule clone 子进程不读父仓库局部 config，RemoveSubmodule 前置干净工作区需先提交）。验证：E2E 32 三连全绿、vitest 878 零回归、覆盖率门禁全过、集成与 vet 全绿。文档同步四处。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3141115` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
