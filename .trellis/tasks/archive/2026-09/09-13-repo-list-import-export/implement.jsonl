@@ -1,0 +1,6 @@
+{"file": "docs/spec/app-services-assembly.md", "reason": "新建 RepoConfigService 须按此规范在 AppServices struct + NewAppServices 注册，保持 package main 与零委托 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增错误码 E_REPO_CONFIG_INVALID_JSON / E_REPO_CONFIG_UNSUPPORTED_VERSION 须按此规范双侧同步（model/app_error.go + frontend error.js）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 新增委托方法后 wailsjs 三处手动同步规则；SaveFileDialog/OpenFileDialog 桥接先例"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 与后端分层覆盖率门禁阈值，验收零回归依据"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E fixtures import {test,expect}、wails-mock-defaults 单一数据源、禁 waitForTimeout"}
+{"file": ".trellis/tasks/09-13-repo-list-import-export/prd.md", "reason": "需求、冲突决策语义、manifest v1 结构、验收清单"}

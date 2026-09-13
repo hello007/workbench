@@ -1,0 +1,6 @@
+{"file": "docs/spec/app-services-assembly.md", "reason": "检查 RepoConfigService 装配是否符合 AppServices 2 处注册与纯构造约定"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查新错误码双侧同步完整（后端常量表 + 前端 ErrorCode/WARNING_CODES）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处同步（App.js/App.d.ts/models.ts）与具名类型别名导出"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁阈值与测试分层是否达标"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 用法合规（fixtures mock、无 waitForTimeout）"}
+{"file": ".trellis/tasks/09-13-repo-list-import-export/prd.md", "reason": "验收清单逐项核对"}
