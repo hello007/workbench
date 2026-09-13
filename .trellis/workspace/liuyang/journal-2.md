@@ -40,3 +40,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 58: 外部 diff 工具审核修复
+
+**Date**: 2026-09-13
+**Task**: 外部 diff 工具审核修复
+**Branch**: `master`
+
+### Summary
+
+双路代码审核发现 1 bug + 10 risk + 1 nit 全部修复：SHA 入参正则校验（防 git 选项注入任意写文件）、git show 仅缺失语义降级（防超时/损坏伪装成新增假 diff）、os.Stat 仅 ErrNotExist 降级、读设置失败改普通 error、临时目录 os.MkdirTemp 原子唯一、util 测试根注入；前端通用保存改合并写消除「加载失败后通用保存清空 diff 配置」残留路径、预设切换加确认防误覆盖、保存失败补提示、range 模式 header 按钮禁用、loadDiff 序号守卫防过期响应覆盖、diffToolConfigured 补 args 校验。测试：前端 903 全绿（+7）、E2E 36、后端全绿、门禁零回归。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4454bbc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
