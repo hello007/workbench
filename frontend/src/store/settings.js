@@ -106,6 +106,18 @@ function shortcutFromEvent(event) {
 const THEME_MODES = new Set(['system', 'light', 'dark'])
 
 /**
+ * 外部 diff 工具预设模板：选中预设即填充默认路径与参数模板，二者仍可手动修改。
+ * path 为常用默认安装路径（vscode 依赖 PATH 中的 code 命令，与 OpenInVSCode 一致）；
+ * args 须包含 {left} {right} 占位符，由后端渲染为实际文件路径。
+ */
+export const DIFF_TOOL_PRESETS = {
+  beyondcompare: { label: 'Beyond Compare', path: 'C:\\Program Files\\Beyond Compare 5\\BComp.exe', args: '{left} {right}' },
+  winmerge: { label: 'WinMerge', path: 'C:\\Program Files\\WinMerge\\WinMergeU.exe', args: '{left} {right}' },
+  vscode: { label: 'VSCode diff', path: 'code', args: '--diff --wait {left} {right}' },
+  custom: { label: '自定义', path: '', args: '{left} {right}' }
+}
+
+/**
  * 读取系统是否偏好暗色主题。
  * SSR / 无 matchMedia 环境（jsdom 未注入时）回退 false。
  */
@@ -151,6 +163,14 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // 主题模式：system(跟随系统) / light / dark，默认 system
   const themeMode = ref('system')
+
+  // 外部 diff 工具配置：预设名 / 可执行文件路径 / 参数模板（{left} {right} 占位符）。
+  // 收敛于此 store 供 SettingsPanel（配置）与 FileDiffDialog（按钮态判断）共享。
+  const diffToolName = ref('beyondcompare')
+  const diffToolPath = ref('')
+  const diffToolArgs = ref('')
+  // 是否已配置：路径非空即可用（参数模板缺失由后端结构化报错兜底）
+  const diffToolConfigured = computed(() => diffToolPath.value.trim() !== '')
   // 系统当前是否偏好暗色（system 模式下决定 resolvedTheme）
   const systemPrefersDark = ref(getSystemPrefersDark())
   // 监听系统主题变化（store 单例生命周期内常驻；system 模式实时跟随）
@@ -183,6 +203,33 @@ export const useSettingsStore = defineStore('settings', () => {
   async function saveTheme() {
     const settings = await GetSettings()
     settings.themeMode = themeMode.value
+    await SaveSettings(settings)
+  }
+
+  /**
+   * 从后端加载外部 diff 工具配置，空值回退默认预设名
+   */
+  async function loadDiffTool() {
+    try {
+      const settings = await GetSettings()
+      diffToolName.value = settings.diffToolName || 'beyondcompare'
+      diffToolPath.value = settings.diffToolPath || ''
+      diffToolArgs.value = settings.diffToolArgs || ''
+    } catch {
+      diffToolName.value = 'beyondcompare'
+      diffToolPath.value = ''
+      diffToolArgs.value = ''
+    }
+  }
+
+  /**
+   * 保存外部 diff 工具配置到后端（合并写，避免覆盖其他字段）
+   */
+  async function saveDiffTool() {
+    const settings = await GetSettings()
+    settings.diffToolName = diffToolName.value
+    settings.diffToolPath = diffToolPath.value
+    settings.diffToolArgs = diffToolArgs.value
     await SaveSettings(settings)
   }
 
@@ -241,11 +288,17 @@ export const useSettingsStore = defineStore('settings', () => {
     themeMode,
     systemPrefersDark,
     resolvedTheme,
+    diffToolName,
+    diffToolPath,
+    diffToolArgs,
+    diffToolConfigured,
     loadShortcuts,
     saveShortcuts,
     checkConflict,
     loadTheme,
-    saveTheme
+    saveTheme,
+    loadDiffTool,
+    saveDiffTool
   }
 })
 

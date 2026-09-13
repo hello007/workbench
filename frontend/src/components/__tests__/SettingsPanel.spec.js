@@ -315,7 +315,7 @@ describe('SettingsPanel.vue', () => {
     SaveSettings.mockResolvedValue(true)
     wrapper = await createWrapper()
     await wrapper.findAll('.settings-nav-item')[1].trigger('click')
-    const select = wrapper.find('select')
+    const select = wrapper.find('.default-shell-select')
     await select.setValue('gitbash')
     await nextTick()
     expect(wrapper.text()).toContain('Git Bash 路径')
@@ -326,7 +326,7 @@ describe('SettingsPanel.vue', () => {
     SaveSettings.mockResolvedValue(true)
     wrapper = await createWrapper()
     await wrapper.findAll('.settings-nav-item')[1].trigger('click')
-    await wrapper.find('select').setValue('wsl')
+    await wrapper.find('.default-shell-select').setValue('wsl')
     await nextTick()
     expect(wrapper.text()).toContain('WSL 发行版')
   })
@@ -341,6 +341,22 @@ describe('SettingsPanel.vue', () => {
     await obsInput.trigger('change')
     await flushPromises()
     expect(SaveSettings).toHaveBeenCalled()
+  })
+
+  it('修改其他设置项（obsidian 路径）不清空 diff 工具配置', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper({ diffToolPath: 'C:\\tools\\diff.exe' })
+    const store = useSettingsStore()
+    expect(store.diffToolPath).toContain('tools')
+    const obsInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('Obsidian'))
+    await obsInput.setValue('C:\\Obsidian.exe')
+    await obsInput.trigger('change')
+    await flushPromises()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    // 全量覆盖写保留 store 中已配置的 diff 工具字段
+    expect(saved.diffToolPath).toBe(store.diffToolPath)
+    expect(saved.obsidianPath).toBe('C:\\Obsidian.exe')
   })
 
   it('通用 tab 渲染主题单选（跟随系统/浅色/暗色）', async () => {
@@ -467,5 +483,78 @@ describe('SettingsPanel.vue', () => {
     await wrapper.findAll('button').find(b => b.text().includes('重置所有')).trigger('click')
     expect(settingsStore.shortcutCommandPalette).toBe(DEFAULTS.commandPalette)
     expect(settingsStore.shortcutRename).toBe(DEFAULTS.rename)
+  })
+})
+// ---- 外部 diff 工具配置 ----
+
+describe('SettingsPanel.vue - 外部 diff 工具配置区', () => {
+  let wrapper
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('通用 tab 渲染外部 diff 工具配置区（预设/路径/参数模板）', async () => {
+    wrapper = await createWrapper()
+    expect(wrapper.text()).toContain('外部 diff 工具')
+    expect(wrapper.find('.diff-tool-preset-select').exists()).toBe(true)
+    const inputs = wrapper.findAll('input').map(i => i.attributes('placeholder'))
+    expect(inputs.some(p => p?.includes('WinMergeU.exe'))).toBe(true)
+    expect(inputs).toContain('{left} {right}')
+  })
+
+  it('loadSettings 时经 store 加载已保存的 diff 工具配置', async () => {
+    wrapper = await createWrapper({ diffToolName: 'winmerge', diffToolPath: 'C:\\tools\\WinMergeU.exe', diffToolArgs: '{left} {right}' })
+    const store = useSettingsStore()
+    expect(store.diffToolName).toBe('winmerge')
+    expect(store.diffToolPath).toBe('C:\\tools\\WinMergeU.exe')
+  })
+
+  it('路径 change 触发 SaveSettings 且写入三个 diffTool 字段', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const pathInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('WinMergeU.exe'))
+    await pathInput.setValue('C:\\my\\diff.exe')
+    await pathInput.trigger('change')
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalled()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    expect(saved.diffToolPath).toBe('C:\\my\\diff.exe')
+    expect(typeof saved.diffToolName).toBe('string')
+    expect(typeof saved.diffToolArgs).toBe('string')
+  })
+
+  it('切换预设自动填充默认路径与参数模板并保存', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const store = useSettingsStore()
+    const presetSelect = wrapper.find('.diff-tool-preset-select')
+    await presetSelect.setValue('vscode')
+    await presetSelect.trigger('change')
+    await flushPromises()
+    expect(store.diffToolName).toBe('vscode')
+    expect(store.diffToolPath).toBe('code')
+    expect(store.diffToolArgs).toBe('--diff --wait {left} {right}')
+    expect(SaveSettings).toHaveBeenCalled()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    expect(saved.diffToolName).toBe('vscode')
+  })
+
+  it('参数模板 change 触发 SaveSettings', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const argsInput = wrapper.findAll('input').find(i => i.attributes('placeholder') === '{left} {right}')
+    await argsInput.setValue('{left} {right} --norestore')
+    await argsInput.trigger('change')
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalled()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    expect(saved.diffToolArgs).toBe('{left} {right} --norestore')
   })
 })

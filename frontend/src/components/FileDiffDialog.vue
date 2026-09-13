@@ -2,11 +2,25 @@
   <el-dialog
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
-    :title="dialogTitle"
     width="80%"
     append-to-body
     destroy-on-close
   >
+    <template #header>
+      <div class="diff-dialog-header">
+        <span class="diff-dialog-title">{{ dialogTitle }}</span>
+        <el-tooltip :content="externalDiffTooltip" placement="top">
+          <span>
+            <el-button
+              size="small"
+              :disabled="!externalDiffAvailable"
+              :loading="openingExternal"
+              @click="openExternalDiff()"
+            >用外部工具打开</el-button>
+          </span>
+        </el-tooltip>
+      </div>
+    </template>
     <div v-loading="loading" class="diff-body">
       <!-- 错误 -->
       <div v-if="error" class="diff-empty">{{ error }}</div>
@@ -19,7 +33,19 @@
       <!-- range 模式：多文件分组双栏 -->
       <div v-else-if="mode === 'range' && fileGroups.length > 0" class="range-groups">
         <div v-for="(group, gi) in fileGroups" :key="'g' + gi" class="range-file-group">
-          <div class="range-file-header">{{ group.file }}</div>
+          <div class="range-file-header">
+            <span class="range-file-name">{{ group.file }}</span>
+            <el-tooltip :content="externalDiffTooltip" placement="top">
+              <span>
+                <el-button
+                  size="small"
+                  text
+                  :disabled="!settingsStore.diffToolConfigured || group.binary"
+                  @click="openExternalDiff(group.file)"
+                >用外部工具打开</el-button>
+              </span>
+            </el-tooltip>
+          </div>
           <div v-if="group.binary" class="diff-empty range-binary">该文件为二进制文件，不支持文本 diff 展示</div>
           <div v-else class="diff-table">
             <div class="diff-col diff-col-left">
@@ -84,7 +110,9 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { GetFileDiff, GetCommitFileDiff, GetRangeDiff } from '../../wailsjs/go/main/App'
+import { GetFileDiff, GetCommitFileDiff, GetRangeDiff, OpenInExternalDiff } from '../../wailsjs/go/main/App'
+import { useSettingsStore } from '../store'
+import { handleError } from '../utils/error'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -109,6 +137,43 @@ const left = ref([])
 const right = ref([])
 // range 模式：按 diff --git 头拆分的多文件分组，每项 { file, left, right }
 const fileGroups = ref([])
+
+const settingsStore = useSettingsStore()
+
+// 外部 diff 打开中状态（按钮 loading，防重复点击）
+const openingExternal = ref(false)
+
+// 单文件模式当前 diff 是否为二进制（二进制文件外部工具无法按文本对比，禁用按钮；
+// 「无差异」空文本不禁用——留按钮可点，由后端正常处理）
+const isBinaryFile = ref(false)
+
+// 按钮可用性：工具已配置且当前文件非二进制（range 段级二进制由组内按钮单独判断）
+const externalDiffAvailable = computed(() => settingsStore.diffToolConfigured && !isBinaryFile.value)
+
+// tooltip：未配置引导去设置；已配置说明按钮用途
+const externalDiffTooltip = computed(() => {
+  if (!settingsStore.diffToolConfigured) return '未配置外部 diff 工具，请在设置中配置'
+  return '用外部 diff 工具打开左右版本文件'
+})
+
+/**
+ * 用外部 diff 工具打开当前 diff 的左右版本。
+ * range 模式传入文件组路径逐文件打开；单文件模式用 props.file。
+ * 未配置时按钮已置灰不会触发；后端启动失败经 AppError 结构化返回，
+ * handleError 按 code 分流（NotConfigured=warning 引导设置，其余=error）。
+ */
+const openExternalDiff = async (fileOverride) => {
+  const file = fileOverride || props.file
+  if (!file || openingExternal.value) return
+  openingExternal.value = true
+  try {
+    await OpenInExternalDiff(props.repoPath, props.mode, file, props.sha, props.baseSha, props.headSha)
+  } catch (e) {
+    handleError('打开外部 diff 失败: ', e)
+  } finally {
+    openingExternal.value = false
+  }
+}
 
 const dialogTitle = computed(() => {
   if (props.mode === 'range') {
@@ -241,6 +306,7 @@ const loadDiff = async () => {
   loading.value = true
   error.value = ''
   binaryHint.value = ''
+  isBinaryFile.value = false
   left.value = []
   right.value = []
   fileGroups.value = []
@@ -264,6 +330,7 @@ const loadDiff = async () => {
     }
     // 单文件二进制兜底（range 模式按段各自判二进制，不走此分支）
     if (props.mode !== 'range' && /^Binary files /m.test(text)) {
+      isBinaryFile.value = true
       binaryHint.value = '该文件为二进制文件，不支持文本 diff 展示'
       return
     }
@@ -294,6 +361,33 @@ watch(
 </script>
 
 <style scoped>
+.diff-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 24px;
+}
+
+.diff-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.range-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.range-file-name {
+  flex: 1;
+  min-width: 0;
+}
+
 .diff-body {
   min-height: 240px;
   max-height: 65vh;
@@ -326,6 +420,9 @@ watch(
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-color);
+  word-break: break-all;
+}
+.range-file-header .range-file-name {
   word-break: break-all;
 }
 .range-binary {

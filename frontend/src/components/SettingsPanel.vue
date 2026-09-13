@@ -62,6 +62,31 @@
             </div>
             <el-input v-model="obsidianPath" size="small" style="width: 280px;" placeholder="如 C:\Users\me\AppData\Local\Obsidian\Obsidian.exe" @change="onSettingsChange" />
           </div>
+          <!-- 外部 diff 工具 -->
+          <div class="settings-section-title" style="margin-top: 24px;">外部 diff 工具</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">预设</div>
+              <div class="settings-item-desc">选择常用 diff 工具自动填充路径与参数，均可手动修改</div>
+            </div>
+            <el-select v-model="settingsStore.diffToolName" class="diff-tool-preset-select" size="small" style="width: 180px;" @change="onDiffToolPresetChange">
+              <el-option v-for="(preset, key) in diffToolPresets" :key="key" :label="preset.label" :value="key" />
+            </el-select>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">可执行文件路径</div>
+              <div class="settings-item-desc">留空表示未配置，diff 弹窗的「用外部工具打开」按钮将置灰</div>
+            </div>
+            <el-input v-model="settingsStore.diffToolPath" size="small" style="width: 280px;" placeholder="如 C:\Program Files\WinMerge\WinMergeU.exe" @change="onDiffToolChange" />
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">参数模板</div>
+              <div class="settings-item-desc">须包含 {left} 与 {right} 占位符，分别替换为旧版本 / 新版本文件路径</div>
+            </div>
+            <el-input v-model="settingsStore.diffToolArgs" size="small" style="width: 280px;" placeholder="{left} {right}" @change="onDiffToolChange" />
+          </div>
           <!-- 版本与更新 -->
           <div class="settings-section-title" style="margin-top: 24px;">关于</div>
           <div class="settings-item">
@@ -85,7 +110,7 @@
               <div class="settings-item-label">默认 Shell</div>
               <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
             </div>
-            <el-select v-model="defaultShell" size="small" style="width: 140px;" @change="onSettingsChange">
+            <el-select v-model="defaultShell" class="default-shell-select" size="small" style="width: 140px;" @change="onSettingsChange">
               <el-option label="PowerShell" value="powershell" />
               <el-option label="CMD" value="cmd" />
               <el-option label="Git Bash" value="gitbash" />
@@ -213,7 +238,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -241,6 +266,23 @@ const appVersion = ref('')
 const checkingUpdate = ref(false)
 
 const settingsStore = useSettingsStore()
+
+// 外部 diff 工具预设表（模板渲染，供 el-select 遍历）
+const diffToolPresets = DIFF_TOOL_PRESETS
+
+// 切换预设：填充该预设的默认路径与参数模板并保存（仍可手动修改）
+const onDiffToolPresetChange = async (key) => {
+  const preset = DIFF_TOOL_PRESETS[key]
+  if (!preset) return
+  settingsStore.diffToolPath = preset.path
+  settingsStore.diffToolArgs = preset.args
+  await settingsStore.saveDiffTool()
+}
+
+// 路径 / 参数模板手动修改后保存
+const onDiffToolChange = async () => {
+  await settingsStore.saveDiffTool()
+}
 
 const shortcutsTabRef = ref(null)
 const recordingKey = ref(null)
@@ -370,6 +412,7 @@ async function loadSettings() {
     excludeDirs.value = settings.searchExcludeDirs || []
     excludeFiles.value = settings.searchExcludeFiles || []
     await settingsStore.loadShortcuts()
+    await settingsStore.loadDiffTool()
   } catch {
     gpuEnabled.value = true
   }
@@ -436,7 +479,10 @@ const onGpuChange = async (val) => {
       obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
       searchExcludeFiles: excludeFiles.value,
-      themeMode: settingsStore.themeMode
+      themeMode: settingsStore.themeMode,
+      diffToolName: settingsStore.diffToolName,
+      diffToolPath: settingsStore.diffToolPath,
+      diffToolArgs: settingsStore.diffToolArgs
     })
     needsRestart.value = true
   } catch {
@@ -454,7 +500,10 @@ const onSettingsChange = async () => {
       obsidianPath: obsidianPath.value,
       searchExcludeDirs: excludeDirs.value,
       searchExcludeFiles: excludeFiles.value,
-      themeMode: settingsStore.themeMode
+      themeMode: settingsStore.themeMode,
+      diffToolName: settingsStore.diffToolName,
+      diffToolPath: settingsStore.diffToolPath,
+      diffToolArgs: settingsStore.diffToolArgs
     })
   } catch {
     // 回滚

@@ -12,7 +12,8 @@ import {
   matchShortcut,
   formatDisplay,
   shortcutFromEvent,
-  DEFAULTS
+  DEFAULTS,
+  DIFF_TOOL_PRESETS
 } from '..'
 import { GetSettings, SaveSettings } from '../../../wailsjs/go/main/App'
 
@@ -292,5 +293,83 @@ describe('settings store - 主题 (themeMode/resolvedTheme/loadTheme/saveTheme)'
     expect(saved.themeMode).toBe('dark')
     // 非主题字段保留
     expect(saved.otherField).toBe('keep')
+  })
+})
+
+describe('settings store - 外部 diff 工具 (diffTool/loadDiffTool/saveDiffTool)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    SaveSettings.mockResolvedValue(true)
+  })
+
+  it('默认值：预设 beyondcompare、路径与参数为空、未配置', () => {
+    const store = useSettingsStore()
+    expect(store.diffToolName).toBe('beyondcompare')
+    expect(store.diffToolPath).toBe('')
+    expect(store.diffToolArgs).toBe('')
+    expect(store.diffToolConfigured).toBe(false)
+  })
+
+  it('loadDiffTool 后端值覆盖，空值回退默认', async () => {
+    GetSettings.mockResolvedValue({ diffToolName: 'winmerge', diffToolPath: 'C:\\tools\\WinMergeU.exe', diffToolArgs: '{left} {right}' })
+    const store = useSettingsStore()
+    await store.loadDiffTool()
+    expect(store.diffToolName).toBe('winmerge')
+    expect(store.diffToolPath).toBe('C:\\tools\\WinMergeU.exe')
+    expect(store.diffToolArgs).toBe('{left} {right}')
+    expect(store.diffToolConfigured).toBe(true)
+
+    GetSettings.mockResolvedValue({})
+    await store.loadDiffTool()
+    expect(store.diffToolName).toBe('beyondcompare')
+    expect(store.diffToolPath).toBe('')
+    expect(store.diffToolConfigured).toBe(false)
+  })
+
+  it('loadDiffTool 失败回退默认', async () => {
+    GetSettings.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    store.diffToolName = 'vscode'
+    await store.loadDiffTool()
+    expect(store.diffToolName).toBe('beyondcompare')
+    expect(store.diffToolPath).toBe('')
+  })
+
+  it('saveDiffTool 合并写：写入三个字段并保留其他字段', async () => {
+    GetSettings.mockResolvedValue({ otherField: 'keep' })
+    const store = useSettingsStore()
+    store.diffToolName = 'vscode'
+    store.diffToolPath = 'code'
+    store.diffToolArgs = '--diff --wait {left} {right}'
+    await store.saveDiffTool()
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    const saved = SaveSettings.mock.calls[0][0]
+    expect(saved.diffToolName).toBe('vscode')
+    expect(saved.diffToolPath).toBe('code')
+    expect(saved.diffToolArgs).toBe('--diff --wait {left} {right}')
+    expect(saved.otherField).toBe('keep')
+  })
+
+  it('diffToolConfigured：路径仅空白视为未配置', () => {
+    const store = useSettingsStore()
+    store.diffToolPath = '   '
+    expect(store.diffToolConfigured).toBe(false)
+    store.diffToolPath = ' code '
+    expect(store.diffToolConfigured).toBe(true)
+  })
+
+  it('DIFF_TOOL_PRESETS：四个预设均含 label/path/args，args 含占位符', () => {
+    const keys = Object.keys(DIFF_TOOL_PRESETS)
+    expect(keys).toEqual(expect.arrayContaining(['beyondcompare', 'winmerge', 'vscode', 'custom']))
+    for (const key of keys) {
+      const preset = DIFF_TOOL_PRESETS[key]
+      expect(preset.label).toBeTruthy()
+      expect(typeof preset.path).toBe('string')
+      expect(preset.args).toContain('{left}')
+      expect(preset.args).toContain('{right}')
+    }
+    expect(DIFF_TOOL_PRESETS.vscode.args).toBe('--diff --wait {left} {right}')
   })
 })

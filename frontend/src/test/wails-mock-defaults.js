@@ -27,6 +27,7 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   GetAppVersion: 'dev',
   OpenInWarp: true,
   OpenWithDefaultApp: true,
+  OpenInExternalDiff: true,
   CopyTo: '',
   GetFavorites: [],
   AddFavorite: '',

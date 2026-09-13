@@ -5,11 +5,13 @@ import { ElMessage } from 'element-plus'
 // 前端按 code 分流提示级别（warning=预期拒绝，error=真失败）。
 // 详见 docs/spec/logging-and-errors.md。
 export const ErrorCode = Object.freeze({
-  GitInProgress: 'E_GIT_IN_PROGRESS' // 变更类 Git 操作进行中，本次拒绝（warning）
+  GitInProgress: 'E_GIT_IN_PROGRESS', // 变更类 Git 操作进行中，本次拒绝（warning）
+  DiffToolNotConfigured: 'E_DIFF_TOOL_NOT_CONFIGURED', // 外部 diff 工具未配置或配置无效，引导用户去设置（warning）
+  DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED' // 外部 diff 工具启动失败（error）
 })
 
 // 预期拒绝类错误码（用户可重试），弹 warning 而非 error。
-const WARNING_CODES = new Set([ErrorCode.GitInProgress])
+const WARNING_CODES = new Set([ErrorCode.GitInProgress, ErrorCode.DiffToolNotConfigured])
 
 /**
  * 从错误对象提取 code 与 message。
