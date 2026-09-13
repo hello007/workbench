@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处绑定是否同步、models.ts 是否缺 AppSettings 新字段"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查新错误码是否双侧同步、错误是否经 AppError 结构化返回"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁零回归"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 是否遵守 mock 规范（不触外部进程）"}
+{"file": ".trellis/tasks/09-13-diff/prd.md", "reason": "对照验收标准逐项核验"}

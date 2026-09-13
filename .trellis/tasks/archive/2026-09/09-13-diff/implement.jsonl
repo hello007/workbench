@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 新方法 OpenInExternalDiff + AppSettings 新字段须手动同步 wailsjs 三处绑定（App.js/App.d.ts/models.ts），AppSettings 具名类型缺失会导致 npm run build MISSING_EXPORT"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新方法挂现有 service（不新增 service）：确认 AppServices struct 组装模式与 App 内嵌字段提升约束"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新错误码 ErrCodeDiffToolNotConfigured/ErrCodeDiffToolLaunchFailed 须双侧同步 model/app_error.go 常量表 + frontend/src/utils/error.js；后端日志用 slog"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 从 fixtures.js import {test,expect} 自动注入 Wails mock；mock 默认值改 wails-mock-defaults.js；禁 waitForTimeout"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁阈值：后端 service ≥76% + util ≥40% + 前端 ≥70%，新增代码不得拉低"}
+{"file": ".trellis/tasks/09-13-diff/prd.md", "reason": "任务需求、ADR 决策与验收标准"}
