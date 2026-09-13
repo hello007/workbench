@@ -73,3 +73,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 59: 仓库列表配置导入导出
+
+**Date**: 2026-09-13
+**Task**: 仓库列表配置导入导出
+**Branch**: `master`
+
+### Summary
+
+WorkBench 新增仓库列表配置（工作目录+收藏夹）JSON 导出导入：manifest v1 结构、RepoConfigService 聚合两数据源（Export/PreviewImport/ApplyImport）、冲突三决策（跳过/覆盖/另存为新项）预览-汇总链路、E_REPO_CONFIG_* 错误码双侧同步、DirectoryTree 工具栏入口、新错误码与 base64 UTF-8 解码契约沉淀 spec；后端 18 单测 + 前端覆盖率门禁 + E2E 6 用例全绿，trellis-check 修 saveAsNew 路径规范化与收藏分组兜底
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `11ab5b6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
