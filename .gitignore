@@ -45,3 +45,7 @@ data/logs/
 # Coverage report artifacts
 frontend/coverage/
 coverage.out
+
+# Playwright E2E artifacts
+frontend/test-results/
+frontend/playwright-report/

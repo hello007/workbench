@@ -1,0 +1,85 @@
+# CI：push(master) / pull_request 触发，Linux runner 跑后端测试 + 前端构建/单测 + Playwright E2E。
+# 与 release.yml（tag v* 触发、windows-latest 发版）互不冲突：tag push 不匹配 branches 过滤器。
+# 前置事实：frontend/wailsjs/ 在 .gitignore 中不入库，CI 干净环境须先 wails generate module
+# 重新生成绑定，否则 vite build 缺 wailsjs/go/main/App 模块必失败（已本地验证可复现生成）。
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 安装 Go 1.24（对齐 release.yml；setup-go 默认缓存 go module/build）
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      # 3. 安装 Node.js 20（带 npm cache 加速，对齐 release.yml）
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # 4. 生成 Wails 绑定（frontend/wailsjs/ 被 gitignore，须重新生成；ubuntu 自带 git，
+      #    wails generate module 仅解析 Go 代码生成 JS/TS 绑定，无需 WebView2 等桌面依赖）
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2
+
+      - name: 生成 Wails 绑定
+        run: wails generate module
+
+      # 5. 后端单元测试（快的放前面，失败即停）
+      - name: 后端单元测试
+        run: go test ./...
+
+      # 6. 后端集成测试（临时 git 仓库 fixture，git_flows_integration_test.go，
+      #    构建标签 integration 隔离，不依赖网络）
+      - name: 后端集成测试
+        run: go test -tags=integration ./...
+
+      # 7. 前端依赖安装
+      - name: 安装前端依赖
+        run: cd frontend && npm ci
+
+      # 8. 前端构建（验证绑定生成完整 + MISSING_EXPORT 类打包错误）
+      - name: 前端构建
+        run: cd frontend && npm run build
+
+      # 9. 安装 Playwright Chromium（--with-deps 同步装系统依赖，runner 有免密 sudo）
+      - name: 安装 Playwright 浏览器
+        run: cd frontend && npx playwright install --with-deps chromium
+
+      # 10. E2E 测试（webServer 自动 vite build + vite preview，CI 环境自动 retries=2）
+      - name: E2E 测试
+        run: cd frontend && npm run e2e
+
+      # 11. 前端单元测试
+      - name: 前端单元测试
+        run: cd frontend && npm test -- --run
+
+      # 12. 失败时上传 E2E 报告与 trace（短保留期）
+      - name: 上传 E2E 报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
