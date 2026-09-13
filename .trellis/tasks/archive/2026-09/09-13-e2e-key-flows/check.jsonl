@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-13-e2e-key-flows/research/e2e-approach.md", "reason": "校验实现是否符合方案 C 决策（前端 mock E2E + 后端 Go 集成测试 + GitHub Actions CI）"}
+{"file": "docs/spec/test-stability.md", "reason": "校验 E2E 用例符合稳定性规范：无 flaky 风险、隔离与超时设置正确"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验现有覆盖率门禁与测试命令未被破坏"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 mock 数据与真实 Go 服务契约一致，无签名漂移"}

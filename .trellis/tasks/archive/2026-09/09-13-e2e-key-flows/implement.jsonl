@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-13-e2e-key-flows/research/e2e-approach.md", "reason": "方案 C 决策依据：Playwright+vite preview+mock 后端、Go 集成测试、CI 结论，实现须遵循"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性规范，E2E 须非 flaky，遵循重试/超时/隔离约束"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁规则，新增 E2E 不得破坏现有 go test / npm test 门禁与阈值"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "前后端契约规则，mock Wails 行为须与真实 Go 服务签名对齐"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "AppServices 装配规则，后端集成测试构造 service 链时须遵循"}
