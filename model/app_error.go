@@ -50,4 +50,8 @@ func WrapAppError(code, message string, err error) *AppError {
 const (
 	// Git 域
 	ErrCodeGitInProgress = "E_GIT_IN_PROGRESS" // 变更类操作进行中，本次拒绝（warning）
+
+	// 外部 diff 工具域
+	ErrCodeDiffToolNotConfigured = "E_DIFF_TOOL_NOT_CONFIGURED" // 未配置或配置无效（缺路径/参数模板占位符），引导用户去设置（warning）
+	ErrCodeDiffToolLaunchFailed  = "E_DIFF_TOOL_LAUNCH_FAILED"  // 可执行文件不存在或启动失败（error）
 )

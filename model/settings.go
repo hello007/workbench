@@ -14,4 +14,7 @@ type AppSettings struct {
 	ShortcutDelete         string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
 	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
 	ThemeMode              string   `json:"themeMode"`              // 主题模式：system(跟随系统)/light/dark，空值按 system 处理
+	DiffToolName           string   `json:"diffToolName"`           // 外部 diff 工具预设名：beyondcompare/winmerge/vscode/custom
+	DiffToolPath           string   `json:"diffToolPath"`           // 外部 diff 工具可执行文件路径，留空表示未配置
+	DiffToolArgs           string   `json:"diffToolArgs"`           // 外部 diff 工具参数模板，支持 {left} {right} 占位符
 }

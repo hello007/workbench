@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
+
+	"workbench/util"
 )
 
 // ===== 核心域：App 结构体与生命周期 =====
@@ -27,6 +29,9 @@ func (a *App) startup(ctx context.Context) {
 	// 集中装配全部 service（纯构造，副作用见下方）。version=="dev" 为 wails dev 模式，
 	// logger 额外输出 stdout；生产构建 ldflags 注入真实版本号走纯文件日志。
 	a.AppServices = NewAppServices(ctx, "data", version == "dev")
+
+	// 清理上次会话外部 diff 工具残留临时文件（运行中不删，避免工具仍持有文件）
+	util.CleanupDiffTempDir()
 
 	// 启动定时清理兜底：周期性清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残，此处只清异常残留）
 	a.aiFuncSvc.StartHistoryCleanup()
