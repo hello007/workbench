@@ -113,7 +113,150 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   Rebase: 'Rebase completed',
   ContinueMerge: 'Merge completed',
   AbortMerge: '',
-  ResolveConflict: true
+  ResolveConflict: true,
+
+  // ---- 文件树操作（新建/重命名/删除）E2E 默认值 ----
+  // GetFileTree 形状对齐 model.FileTreeNode（id/name/path/type/isGitRepo/hasRemote/
+  // hasChildren/children/isLeaf）；el-tree 懒加载：根节点与展开子节点各调一次 GetFileTree(path)。
+  // 注入两个工作目录子节点（src 目录 + README.md 文件），目录展开断言与右键菜单操作都以此为基础。
+  GetFileTree: [
+    {
+      id: 'D:/e2e-demo/demo-repo/src',
+      name: 'src',
+      path: 'D:/e2e-demo/demo-repo/src',
+      type: 'dir',
+      isGitRepo: false,
+      hasRemote: false,
+      hasChildren: true,
+      isLeaf: false,
+      children: []
+    },
+    {
+      id: 'D:/e2e-demo/demo-repo/README.md',
+      name: 'README.md',
+      path: 'D:/e2e-demo/demo-repo/README.md',
+      type: 'file',
+      isGitRepo: false,
+      hasRemote: false,
+      hasChildren: false,
+      isLeaf: true
+    }
+  ],
+
+  // ---- 子模块管理 E2E 默认值 ----
+  // 形状对齐 model.GitSubmodule（path/sha/shortSha/describe/branch/url/initialized/
+  // shaMismatch/dirty/conflict/detached）。三条数据覆盖状态标签四色映射：
+  // 干净（success）/已修改（warning）/未初始化（info）。
+  GetSubmodules: [
+    {
+      path: 'libs/logger',
+      sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0',
+      shortSha: 'a1b2c3d4',
+      describe: '',
+      branch: 'main',
+      url: 'https://github.com/demo/logger.git',
+      initialized: true,
+      shaMismatch: false,
+      dirty: false,
+      conflict: false,
+      detached: false
+    },
+    {
+      path: 'libs/sdk',
+      sha: '0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e',
+      shortSha: '0f9e8d7c',
+      describe: '',
+      branch: '',
+      url: 'https://github.com/demo/sdk.git',
+      initialized: true,
+      shaMismatch: false,
+      dirty: true,
+      conflict: false,
+      detached: false
+    },
+    {
+      path: 'libs/vendored',
+      sha: '11223344556677889900aabbccddeeff00112233',
+      shortSha: '11223344',
+      describe: '',
+      branch: '',
+      url: 'https://github.com/demo/vendored.git',
+      initialized: false,
+      shaMismatch: false,
+      dirty: false,
+      conflict: false,
+      detached: false
+    }
+  ],
+  UpdateSubmodules: 'Submodule update completed',
+  AddSubmodule: 'Submodule added',
+  RemoveSubmodule: null,
+  CheckoutSubmoduleBranch: 'Switched to branch main',
+
+  // ---- AI 功能触发 E2E 默认值 ----
+  // GetAiFunctions 形状对齐 model.AiFunction；单功能无参数（params=null）直跑，
+  // completion=none 避免完成动作触达 GetAiTaskOutput/OpenInExplorer 等次级方法。
+  GetAiFunctions: [
+    {
+      id: 'ai-fmt-review',
+      name: '代码评审',
+      description: '对当前变更做一次代码评审并输出建议',
+      icon: 'MagicStick',
+      command: '/e2e:review',
+      cwd: '',
+      addDirs: [],
+      env: {},
+      mcp: null,
+      permissionMode: 'bypassPermissions',
+      timeoutMinutes: 10,
+      completion: 'none',
+      params: null,
+      followUps: [],
+      tags: [],
+      pinned: false
+    }
+  ],
+  // RunAiFunction 返回 taskID 并派发成功事件流（queued→started→output→done），
+  // 形状对齐 service/ai_function.go emit 数据与 model.AiTaskRunResult。
+  RunAiFunction: {
+    __value__: 'task-e2e-1',
+    __events__: [
+      { event: 'ai-task:queued', payload: { taskId: 'task-e2e-1' } },
+      { event: 'ai-task:started', payload: { taskId: 'task-e2e-1' } },
+      {
+        event: 'ai-task:output',
+        payload: { taskId: 'task-e2e-1', text: '评审开始：检查 2 个文件\n发现 1 个问题\n' }
+      },
+      {
+        event: 'ai-task:done',
+        payload: {
+          taskId: 'task-e2e-1',
+          sessionId: 'session-e2e-1',
+          exitCode: 0,
+          error: '',
+          output: '评审开始：检查 2 个文件\n发现 1 个问题\n',
+          outputSize: 42,
+          outputFile: 'ai_task_history/task-e2e-1.txt',
+          canceled: false
+        }
+      }
+    ]
+  },
+  CancelAiTask: true,
+  // GetAiTaskState 形状对齐 model.AiTaskState（前端恢复面板用，E2E 内运行链不轮询）
+  GetAiTaskState: {
+    taskId: 'task-e2e-1',
+    functionId: 'ai-fmt-review',
+    running: false,
+    queued: false,
+    sessionId: 'session-e2e-1',
+    prompt: '',
+    output: '',
+    outputSize: 0,
+    outputFile: '',
+    error: '',
+    startedAt: 1757400000000
+  }
 }
 
 /** E2E 实际注入 window.go.main.App 的合并表（基础表 + E2E 补充表，后者优先） */

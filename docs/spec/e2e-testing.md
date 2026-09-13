@@ -1,20 +1,20 @@
 # E2E 测试规范（方案 C 混合架构）
 
 > 本文档规定 WorkBench E2E 测试的分层架构、mock 约束、调用断言模式、构建标签隔离与 CI 绑定生成要求。
-> 最后更新：2026-09-13 · 来源任务：09-13-e2e-key-flows
+> 最后更新：2026-09-13 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock
 
 ## 1. 适用范围
 
 - 前端 Playwright E2E（`frontend/e2e/`，vite preview web 版 + mock Wails 后端）
-- 后端 Go 集成测试（`git_flows_integration_test.go`，构建标签 `integration`）
+- 后端 Go 集成测试（`git_flows_integration_test.go` / `git_submodule_integration_test.go`，构建标签 `integration`）
 - CI 中 E2E 与集成测试的运行（`.github/workflows/ci.yml`）
 
 ## 2. 架构分层（方案 C）
 
 | 层 | 载体 | 覆盖范围 | 明确不覆盖 |
 |---|---|---|---|
-| 前端 E2E | Playwright 驱动 `vite preview` web 版，`window.go` / `window.runtime` 全 mock | UI 编排、跨组件流程、路由、用户操作链、bound method 调用参数 | 真实 Go 后端、Wails 桌面桥接（WebView2 / 原生对话框） |
-| 后端集成测试 | `go test -tags=integration`，`t.TempDir()` 真实 git 仓库 fixture | service 链业务逻辑（提交/推送/分支/合并/变基/冲突） | Wails 绑定层、前端 UI |
+| 前端 E2E | Playwright 驱动 `vite preview` web 版，`window.go` / `window.runtime` 全 mock | UI 编排、跨组件流程、路由、用户操作链、bound method 调用参数、AI 任务事件流状态机 | 真实 Go 后端、Wails 桌面桥接（WebView2 / 原生对话框） |
+| 后端集成测试 | `go test -tags=integration`，`t.TempDir()` 真实 git 仓库 fixture | service 链业务逻辑（提交/推送/分支/合并/变基/冲突/submodule 全链） | Wails 绑定层、前端 UI |
 | 现有单测 | go test + Vitest | 组件/函数级行为 | 跨组件编排与全链路 |
 
 前后端交界契约靠 `docs/spec/cross-layer-contracts.md` 纪律对齐（mock 返回值形状须对齐 `App.d.ts` / `models.ts` 真实签名），非自动验证——这是方案 C 的已知缝隙。
@@ -47,7 +47,8 @@
 
 - 默认所有用例从 `./fixtures` import `{ test, expect }`（非 `@playwright/test`），自动注入 mock
 - 用例 / describe 级动态行为经 `test.use({ wailsOverrides: { 方法名: 值 | 描述符 } })` 覆盖默认表
-- value 描述符：纯值恒 resolve；`{__error__, __code__?}` reject（带 `__code__` 时对齐 Wails ErrorFormatter 的 `{code, message}` AppError 形态）；`{__sequence__: [...]}` 按序返回、耗尽后 hold last
+- value 描述符：纯值恒 resolve；`{__error__, __code__?}` reject（带 `__code__` 时对齐 Wails ErrorFormatter 的 `{code, message}` AppError 形态）；`{__sequence__: [...]}` 按序返回、耗尽后 hold last；`{__value__, __events__: [{event, payload, delayMs?}]}` resolve `__value__`（缺省 null）并按序经 `setTimeout` 派发 Wails 事件（`delayMs` 缺省 0；每次调用完整派发，无状态消费）
+- `__events__` 派发机制：`wails-init.js` 的 `runtime.EventsOn/EventsOnMultiple/EventsOnce` 将回调登记到页面全局 `window.__wailsEventHandlers`（按事件名分组），描述符派发时逐一调用；`EventsOff` 移除该事件全部回调。用于模拟 AI 任务（`ai-task:queued/started/output/done`）等异步事件流——真实链路由后端 `runtime.EventsEmit` 推送，E2E 侧无需真实子进程
 - 每测试独享新页面，覆盖互不影响（无跨用例状态泄漏）
 
 ## 7. 构建标签隔离（后端集成测试）
@@ -59,6 +60,10 @@
   - 显式 `symbolic-ref HEAD refs/heads/master`（规避 `init.defaultBranch` 差异）
   - 局部配置 `user.name/email`、`core.autocrlf=false`、`commit.gpgsign=false`（规避环境差异）
   - git 不在 PATH 时 skip 不 fail（CI 保证有 git）
+- submodule fixture 约定（`git_submodule_integration_test.go`）：
+  - 真实 `git submodule add <本地路径>` 产生标准 `.git/modules/<path>` clone 结构，无 fake 数据（单测侧 fake 与真实布局的差异在集成层天然规避）
+  - `t.Setenv(GIT_CONFIG_COUNT/KEY_0/VALUE_0)` 注入 `protocol.file.allow=always`——git ≥2.38.1 默认禁 file transport，且 submodule clone 子进程不读父仓库局部 config（安全设计），仅环境变量可覆盖 fixture 命令与被测 App 链两类子进程
+  - `RemoveSubmodule` 前置校验工作区干净，Add 后须 `itCommitAll` 提交再删
 
 ## 8. CI 绑定生成要求（wailsjs 不入库）
 

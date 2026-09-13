@@ -3,7 +3,7 @@
   "name": "e2e-submodule-ai-mock",
   "title": "E2E 测试扩展：submodule、文件树操作、AI 功能 mock",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

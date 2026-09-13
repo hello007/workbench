@@ -113,8 +113,14 @@ git push origin v1.0.8
 # 后端测试
 go test ./...
 
+# 后端集成测试（真实 git 仓库 fixture，含 submodule 全链）
+go test -tags=integration ./...
+
 # 前端测试
 cd frontend && npm test
+
+# E2E 测试（Playwright + mock Wails 后端，首次需先 npm run e2e:install）
+cd frontend && npm run e2e
 ```
 
 ### 测试覆盖率门禁

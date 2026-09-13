@@ -20,10 +20,17 @@
  * - { __error__: string, __code__?: string }：reject。带 __code__ 时 reject 结构化
  *   {code, message}（对齐 Wails ErrorFormatter 的 AppError 形态），否则 reject Error
  * - { __sequence__: [v1, v2, ...] }：按序返回，序列耗尽后恒返回最后一个值
+ * - { __value__: v, __events__: [{ event, payload, delayMs? }] }：resolve __value__
+ *   （缺省 null），并按序派发 Wails 事件（模拟 AI 任务 queued/started/output/done
+ *   等异步事件流）。每次调用都完整派发（无状态消费），delayMs 缺省 0。
  *
  * 调用记录：每次 bound method 调用都会 push 到 window.__wailsCalls
  * （{method, args}），用例经 fixtures.js 的 getWailsCalls 断言「UI 操作触发了
  * 正确的 Wails 调用与参数」。
+ *
+ * 事件注册：window.runtime.EventsOn/EventsOnMultiple 将回调登记到
+ * window.__wailsEventHandlers（按事件名分组），__events__ 派发时逐一调用，
+ * EventsOff 移除该事件全部回调——语义对齐 Wails runtime。
  */
 
 /**
@@ -58,6 +65,17 @@ export function injectWailsMocks(returnValues) {
           const next = seq.length > 1 ? seq.shift() : (seq[0] === undefined ? null : seq[0])
           return Promise.resolve(next)
         }
+        if (Array.isArray(value.__events__)) {
+          // 模拟异步事件流：resolve __value__ 后按序经 setTimeout 派发（保持异步时序，
+          // delayMs 支持用例编排「运行中→完成」等中间态断言窗口）
+          value.__events__.forEach((ev) => {
+            setTimeout(() => {
+              const handlers = (window.__wailsEventHandlers || {})[ev.event] || []
+              handlers.forEach((handler) => handler(ev.payload))
+            }, ev.delayMs || 0)
+          })
+          return Promise.resolve(value.__value__ !== undefined ? value.__value__ : null)
+        }
       }
       return Promise.resolve(value)
     }
@@ -82,13 +100,30 @@ export function injectWailsMocks(returnValues) {
   window.go = { main: { App: appProxy } }
 
   // window.runtime stub：覆盖前端实际消费的 runtime API（EventsOn/EventsOff/
-  // BrowserOpenURL 等，见 wailsjs/runtime/runtime.js 转发表）
+  // BrowserOpenURL 等，见 wailsjs/runtime/runtime.js 转发表）。
+  // EventsOn/EventsOnMultiple/EventsOnce 将回调登记到 window.__wailsEventHandlers
+  // （按事件名分组），供 __events__ 描述符派发；EventsOff 移除该事件全部回调。
+  window.__wailsEventHandlers = Object.create(null)
+  const registerHandler = (name, callback, once) => {
+    const handlers = (window.__wailsEventHandlers[name] = window.__wailsEventHandlers[name] || [])
+    handlers.push(once ? (...args) => {
+      const idx = handlers.indexOf(wrapped)
+      if (idx >= 0) handlers.splice(idx, 1)
+      callback(...args)
+    } : callback)
+    // once 包装后的函数名占位：闭包内自引用，splice 时按引用定位
+    const wrapped = handlers[handlers.length - 1]
+  }
   window.runtime = {
-    EventsOn: () => {},
-    EventsOnMultiple: () => {},
-    EventsOnce: () => {},
-    EventsOff: () => {},
-    EventsOffAll: () => {},
+    EventsOn: (name, callback) => registerHandler(name, callback, false),
+    EventsOnMultiple: (name, callback) => registerHandler(name, callback, false),
+    EventsOnce: (name, callback) => registerHandler(name, callback, true),
+    EventsOff: (name) => {
+      delete window.__wailsEventHandlers[name]
+    },
+    EventsOffAll: () => {
+      window.__wailsEventHandlers = Object.create(null)
+    },
     EventsEmit: () => {},
     BrowserOpenURL: () => {},
     WindowReload: () => {},
