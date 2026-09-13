@@ -1,0 +1,6 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 全部约定：mock 单一数据源、addInitScript 自包含、__wailsCalls 断言、wailsOverrides 描述符、非 flaky 约定"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "mock 返回值形状契约依据：对齐 App.d.ts / models.ts 真实签名"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁阈值：验收须确认 878 单测与门禁零回归"}
+{"file": "docs/spec/test-stability.md", "reason": "非 flaky 约定：文件系统时序类断言规避模式"}
+{"file": "docs/测试策略.md", "reason": "文档同步落点：新增用例纳入测试策略说明"}
+{"file": "frontend/e2e/README.md", "reason": "E2E 用例编写日常参考：运行方式与用例约定，新用例须同步"}
