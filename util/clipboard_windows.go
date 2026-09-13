@@ -73,6 +73,8 @@ func WriteClipboardFiles(paths []string, isCut bool) error {
 		return errors.New("GlobalLock failed")
 	}
 
+	// GlobalLock 返回 Windows 堆内存指针（非 Go 堆），锁定期间地址稳定，GC 不移动，转换安全；
+	// go vet unsafeptr 对 syscall 返回值无豁免（golang/go#44836）属误报，经 go vet -unsafeptr=false 规避
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), totalSize)
 	binary.LittleEndian.PutUint32(buf[0:4], dropFilesSize)
 	binary.LittleEndian.PutUint32(buf[16:20], 1) // fWide=1
@@ -111,6 +113,8 @@ func WriteClipboardFiles(paths []string, isCut bool) error {
 		if hEffect != 0 {
 			effectPtr, _, _ := procGlobalLock.Call(hEffect)
 			if effectPtr != 0 {
+				// GlobalLock 返回 Windows 堆内存指针（非 Go 堆），锁定期间地址稳定，GC 不移动，转换安全；
+				// go vet unsafeptr 对 syscall 返回值无豁免（golang/go#44836）属误报，经 go vet -unsafeptr=false 规避
 				effectBuf := unsafe.Slice((*byte)(unsafe.Pointer(effectPtr)), 4)
 				binary.LittleEndian.PutUint32(effectBuf, dropEffectMove)
 				procGlobalUnlock.Call(hEffect)
@@ -150,6 +154,8 @@ func ReadClipboardFiles() (paths []string, isCut bool, err error) {
 	}
 	defer procGlobalUnlock.Call(hData)
 
+	// GlobalLock 返回 Windows 堆内存指针（非 Go 堆），锁定期间地址稳定，GC 不移动，转换安全；
+	// go vet unsafeptr 对 syscall 返回值无豁免（golang/go#44836）属误报，经 go vet -unsafeptr=false 规避
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
 
 	pFiles := binary.LittleEndian.Uint32(buf[0:4])
@@ -183,6 +189,8 @@ func ReadClipboardFiles() (paths []string, isCut bool, err error) {
 	if hEffect != 0 {
 		effectPtr, _, _ := procGlobalLock.Call(hEffect)
 		if effectPtr != 0 {
+			// GlobalLock 返回 Windows 堆内存指针（非 Go 堆），锁定期间地址稳定，GC 不移动，转换安全；
+			// go vet unsafeptr 对 syscall 返回值无豁免（golang/go#44836）属误报，经 go vet -unsafeptr=false 规避
 			effectBuf := unsafe.Slice((*byte)(unsafe.Pointer(effectPtr)), 4)
 			effect := binary.LittleEndian.Uint32(effectBuf)
 			procGlobalUnlock.Call(hEffect)
@@ -213,6 +221,8 @@ func WriteClipboardText(text string) error {
 		return errors.New("GlobalLock failed")
 	}
 
+	// GlobalLock 返回 Windows 堆内存指针（非 Go 堆），锁定期间地址稳定，GC 不移动，转换安全；
+	// go vet unsafeptr 对 syscall 返回值无豁免（golang/go#44836）属误报，经 go vet -unsafeptr=false 规避
 	buf := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), totalSize)
 	for i, c := range encoded {
 		binary.LittleEndian.PutUint16(buf[i*2:], uint16(c))
