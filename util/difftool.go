@@ -5,18 +5,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // 外部 diff 工具集成辅助：参数模板渲染与左右版本临时文件管理。
 //
-// 临时文件策略：每次打开外部 diff 创建唯一子目录（UnixNano 时间戳），
+// 临时文件策略：每次打开外部 diff 经 os.MkdirTemp 创建原子唯一的子目录，
 // 目录内分 left/right 两侧写入，文件保留原文件名以便外部工具按扩展名
 // 做语法高亮。启动后不主动删除（工具可能立即 detach 或长时间持有文件），
 // 由应用启动时统一清理上会话残留（CleanupDiffTempDir）。
 
+// diffTempRootOverride 测试注入用根目录覆盖；非空时 DiffTempRoot 返回它，
+// 避免单测读写真实共享临时目录（误删运行中应用的在用文件）。
+var diffTempRootOverride string
+
 // DiffTempRoot 返回外部 diff 临时文件根目录（系统临时目录下 workbench-diff）。
 func DiffTempRoot() string {
+	if diffTempRootOverride != "" {
+		return diffTempRootOverride
+	}
 	return filepath.Join(os.TempDir(), "workbench-diff")
 }
 
@@ -28,10 +34,10 @@ func CleanupDiffTempDir() {
 }
 
 // CreateDiffTempDir 创建一次外部 diff 会话的临时目录，返回目录路径。
-// 目录名用 UnixNano 时间戳保证同会话内多次打开互不覆盖。
+// os.MkdirTemp 保证并发/连续调用原子唯一，避免时间戳粒度撞名互覆。
 func CreateDiffTempDir() (string, error) {
-	dir := filepath.Join(DiffTempRoot(), fmt.Sprintf("%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	dir, err := os.MkdirTemp(DiffTempRoot(), "")
+	if err != nil {
 		return "", fmt.Errorf("创建外部 diff 临时目录失败: %w", err)
 	}
 	return dir, nil

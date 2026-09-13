@@ -231,6 +231,30 @@ func TestResolveExternalDiffSides_MissingSHA(t *testing.T) {
 	}
 }
 
+// TestResolveExternalDiffSides_InvalidSHA SHA 拼入 git show 参数前必须过形态校验：
+// 以 - 开头的值会被 git 解析为命令行选项（如 --output= 任意写文件），属安全校验。
+func TestResolveExternalDiffSides_InvalidSHA(t *testing.T) {
+	repo, v1, _ := newDiffTestRepo(t)
+	svc := NewGitService()
+
+	cases := []model.ExternalDiffRequest{
+		{Mode: "commit", File: "main.go", SHA: "--output=C:/evil.txt"},
+		{Mode: "commit", File: "main.go", SHA: "rm -rf; echo"},
+		{Mode: "range", File: "main.go", BaseSHA: "--exec=boom", HeadSHA: v1},
+		{Mode: "range", File: "main.go", BaseSHA: v1, HeadSHA: "HEAD; touch /tmp/x"},
+	}
+	for _, req := range cases {
+		if _, _, _, err := svc.resolveExternalDiffSides(repo, req); err == nil {
+			t.Errorf("非法 SHA %q 应被拒绝", req.SHA+req.BaseSHA+req.HeadSHA)
+		}
+	}
+
+	// 合法 SHA（大小写混合十六进制）应正常通过校验进入 git 取内容
+	if _, _, _, err := svc.resolveExternalDiffSides(repo, model.ExternalDiffRequest{Mode: "commit", File: "main.go", SHA: strings.ToUpper(v1)}); err != nil {
+		t.Errorf("大写合法 SHA 不应被拒绝: %v", err)
+	}
+}
+
 func TestOpenInExternalDiff_LaunchFailed(t *testing.T) {
 	repo, _, _ := newDiffTestRepo(t)
 	svc := NewGitService()

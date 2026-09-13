@@ -13,7 +13,7 @@
           <span>
             <el-button
               size="small"
-              :disabled="!externalDiffAvailable"
+              :disabled="!externalDiffAvailable || mode === 'range'"
               :loading="openingExternal"
               @click="openExternalDiff()"
             >用外部工具打开</el-button>
@@ -150,9 +150,10 @@ const isBinaryFile = ref(false)
 // 按钮可用性：工具已配置且当前文件非二进制（range 段级二进制由组内按钮单独判断）
 const externalDiffAvailable = computed(() => settingsStore.diffToolConfigured && !isBinaryFile.value)
 
-// tooltip：未配置引导去设置；已配置说明按钮用途
+// tooltip：未配置引导去设置；range 模式引导用文件组行内按钮；已配置说明按钮用途
 const externalDiffTooltip = computed(() => {
   if (!settingsStore.diffToolConfigured) return '未配置外部 diff 工具，请在设置中配置'
+  if (props.mode === 'range') return '区间差异请使用各文件行内的「用外部工具打开」按钮'
   return '用外部 diff 工具打开左右版本文件'
 })
 
@@ -301,8 +302,13 @@ const parseRangeDiff = (text) => {
   return groups
 }
 
+// 加载序号：快速切换文件时旧请求后到会覆盖新状态（含 isBinaryFile/left/right），
+// 过期响应整体丢弃
+let loadSeq = 0
+
 const loadDiff = async () => {
   if (!props.repoPath) return
+  const seq = ++loadSeq
   loading.value = true
   error.value = ''
   binaryHint.value = ''
@@ -323,6 +329,7 @@ const loadDiff = async () => {
       if (!props.file) return
       text = await GetFileDiff(props.repoPath, props.file)
     }
+    if (seq !== loadSeq) return
     if (!text || !text.trim()) {
       // 无 diff 文本：可能是二进制或无差异
       binaryHint.value = '无差异，或该文件类型不支持文本 diff 展示（二进制 / 图片）'
@@ -345,10 +352,13 @@ const loadDiff = async () => {
     left.value = leftLines
     right.value = rightLines
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = '加载差异失败: ' + (e?.message || String(e))
     ElMessage.error(error.value)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+    }
   }
 }
 

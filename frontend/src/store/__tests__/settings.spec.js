@@ -355,8 +355,20 @@ describe('settings store - 外部 diff 工具 (diffTool/loadDiffTool/saveDiffToo
   it('diffToolConfigured：路径仅空白视为未配置', () => {
     const store = useSettingsStore()
     store.diffToolPath = '   '
+    store.diffToolArgs = '{left} {right}'
     expect(store.diffToolConfigured).toBe(false)
     store.diffToolPath = ' code '
+    expect(store.diffToolConfigured).toBe(true)
+  })
+
+  it('diffToolConfigured：args 缺占位符视为未配置（与后端校验对称）', () => {
+    const store = useSettingsStore()
+    store.diffToolPath = 'code'
+    store.diffToolArgs = '--diff'
+    expect(store.diffToolConfigured).toBe(false)
+    store.diffToolArgs = '{left}'
+    expect(store.diffToolConfigured).toBe(false)
+    store.diffToolArgs = '{left} {right}'
     expect(store.diffToolConfigured).toBe(true)
   })
 

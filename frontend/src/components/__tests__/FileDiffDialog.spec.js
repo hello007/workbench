@@ -322,4 +322,48 @@ describe('FileDiffDialog.vue', () => {
     await flushPromises()
     expect(OpenInExternalDiff).toHaveBeenCalledWith('/repo/A', 'range', 'src/a.go', '', 'base1234', 'head5678')
   })
+
+  it('range 模式 header 按钮禁用（无单文件语义，走文件组行内按钮）', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    GetRangeDiff.mockResolvedValue('@@ -1,1 +1,2 @@\n ctx\n+new')
+    wrapper = await createWrapperConfigured({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+    const headerBtn = wrapper.find('.diff-dialog-header button')
+    expect(headerBtn.attributes('disabled')).not.toBeUndefined()
+    // tooltip 提示走文件组按钮
+    const tooltip = wrapper.find('.diff-dialog-header .el-tooltip')
+    expect(tooltip.attributes('content')).toContain('各文件行内')
+  })
+
+  it('快速切换文件时过期二进制响应不覆盖新状态（loadSeq 守卫）', async () => {
+    const { GetFileDiff } = await import('../../../wailsjs/go/main/App')
+    // 第一次请求挂起（二进制场景），第二次立即返回正常 diff
+    let resolveFirst
+    GetFileDiff.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+    GetFileDiff.mockImplementationOnce(() => Promise.resolve('@@ -1,1 +1,1 @@\n ctx'))
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useSettingsStore()
+    store.diffToolPath = 'C:\\tools\\diff.exe'
+    store.diffToolArgs = '{left} {right}'
+    wrapper = mount(FileDiffDialog, {
+      props: { modelValue: false, repoPath: '/repo/A', file: 'a.bin' },
+      global: { plugins: [pinia], stubs, directives }
+    })
+    // 打开弹窗触发第一次加载（a.bin，挂起）
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    // 切换到正常文件：第二次请求立即完成
+    await wrapper.setProps({ file: 'a.txt' })
+    await flushPromises()
+    // 新文件按钮应可用
+    const btn = wrapper.findAll('button').find(b => b.text() === '用外部工具打开')
+    expect(btn.attributes('disabled')).toBeUndefined()
+
+    // 旧请求此时才返回二进制内容：不应覆盖新状态
+    resolveFirst('Binary files a/x b/x differ')
+    await flushPromises()
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
 })

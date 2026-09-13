@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"workbench/model"
@@ -124,11 +125,12 @@ func (a *App) OpenWithDefaultApp(path string) bool {
 
 // OpenInExternalDiff 用设置中的外部 diff 工具打开文件的两个版本对比。
 // mode: workspace（工作区单文件）/ commit（提交中单文件，sha）/ range（两提交间单文件，baseSha/headSha）。
-// 未配置或配置无效、启动失败经 AppError 结构化返回，前端按 code 分流提示。
+// 未配置或配置无效、启动失败经 AppError 结构化返回，前端按 code 分流提示；
+// 读设置 IO 失败走普通 error（磁盘故障不应被提示为「未配置，请去设置」）。
 func (a *App) OpenInExternalDiff(path, mode, file, sha, baseSha, headSha string) error {
 	settings, err := a.settingsSvc.Load()
 	if err != nil {
-		return model.WrapAppError(model.ErrCodeDiffToolNotConfigured, "读取设置失败", err)
+		return fmt.Errorf("读取设置失败: %w", err)
 	}
 	return a.gitSvc.OpenInExternalDiff(path, settings.DiffToolPath, settings.DiffToolArgs, model.ExternalDiffRequest{
 		Mode:    mode,

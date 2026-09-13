@@ -3,13 +3,14 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsPanel from '../SettingsPanel.vue'
-import { useUiStore, useSettingsStore, DEFAULTS } from '../../store'
+import { useUiStore, useSettingsStore, DEFAULTS, DIFF_TOOL_PRESETS } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
   return {
     ...actual,
-    ElMessage: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
+    ElMessage: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
+    ElMessageBox: { confirm: vi.fn() }
   }
 })
 
@@ -490,6 +491,10 @@ describe('SettingsPanel.vue', () => {
 describe('SettingsPanel.vue - 外部 diff 工具配置区', () => {
   let wrapper
 
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount()
@@ -543,6 +548,74 @@ describe('SettingsPanel.vue - 外部 diff 工具配置区', () => {
     expect(SaveSettings).toHaveBeenCalled()
     const saved = SaveSettings.mock.calls.at(-1)[0]
     expect(saved.diffToolName).toBe('vscode')
+  })
+
+  it('已有自定义配置时切换预设需确认，取消则回退选中且不保存', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper({ diffToolName: 'custom', diffToolPath: 'C:\my\diff.exe', diffToolArgs: '{left} {right} --extra' })
+    const store = useSettingsStore()
+    const presetSelect = wrapper.find('.diff-tool-preset-select')
+    await presetSelect.setValue('winmerge')
+    await presetSelect.trigger('change')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    // 取消：选中回退旧预设，path/args 不被覆盖，未触发保存
+    expect(store.diffToolName).toBe('custom')
+    expect(store.diffToolPath).toBe('C:\my\diff.exe')
+    expect(SaveSettings).not.toHaveBeenCalled()
+  })
+
+  it('已有自定义配置时切换预设确认通过则覆盖并保存', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    ElMessageBox.confirm.mockResolvedValue()
+    wrapper = await createWrapper({ diffToolName: 'custom', diffToolPath: 'C:\my\diff.exe', diffToolArgs: '{left} {right} --extra' })
+    const store = useSettingsStore()
+    const presetSelect = wrapper.find('.diff-tool-preset-select')
+    await presetSelect.setValue('winmerge')
+    await presetSelect.trigger('change')
+    await flushPromises()
+    expect(store.diffToolName).toBe('winmerge')
+    expect(store.diffToolPath).toBe(DIFF_TOOL_PRESETS.winmerge.path)
+    expect(SaveSettings).toHaveBeenCalled()
+  })
+
+  it('预设切换保存失败时提示错误', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockRejectedValue(new Error('disk full'))
+    wrapper = await createWrapper()
+    const presetSelect = wrapper.find('.diff-tool-preset-select')
+    await presetSelect.setValue('vscode')
+    await presetSelect.trigger('change')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('保存外部 diff 工具配置失败'))
+  })
+
+  it('通用设置合并写：以磁盘为基底，diffTool/themeMode 不经通用保存覆盖', async () => {
+    const { GetSettings, SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper({
+      diffToolName: 'custom',
+      diffToolPath: 'C:\disk\diff.exe',
+      diffToolArgs: '{left} {right}',
+      themeMode: 'dark'
+    })
+    const obsInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('Obsidian'))
+    await obsInput.setValue('C:\Obsidian.exe')
+    await obsInput.trigger('change')
+    await flushPromises()
+    const calls = SaveSettings.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    const saved = calls.at(-1)[0]
+    // 磁盘 diffTool/themeMode 值原样透传（不被 store 内存值覆盖）
+    expect(saved.diffToolPath).toBe('C:\disk\diff.exe')
+    expect(saved.themeMode).toBe('dark')
+    expect(saved.obsidianPath).toBe('C:\Obsidian.exe')
   })
 
   it('参数模板 change 触发 SaveSettings', async () => {

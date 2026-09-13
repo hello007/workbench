@@ -1,10 +1,13 @@
 package service
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"workbench/model"
@@ -17,10 +20,51 @@ import (
 // 内容、落临时文件、渲染参数模板并启动工具进程。错误经 AppError 结构化
 // 返回，前端按 code 分流（见 docs/spec/logging-and-errors.md）。
 
+// validSHA 校验提交 SHA 形态（7-64 位十六进制）。commit/range 模式的 SHA
+// 会拼接进 `git show <rev>:<path>` 的参数，若不校验，以 `-` 开头的值会被
+// git 解析为命令行选项（如 --output= 任意写文件）；该方法经 Wails 暴露给
+// 前端，入参必须视为不可信输入。
+var validSHA = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
+
+// validateDiffSHA 校验 SHA 非空且形态合法，非法返回错误。
+func validateDiffSHA(sha, field string) error {
+	if sha == "" {
+		return fmt.Errorf("%s 不能为空", field)
+	}
+	if !validSHA.MatchString(sha) {
+		return fmt.Errorf("%s 不是合法的提交 SHA", field)
+	}
+	return nil
+}
+
+// isRevPathMissing 判断 git show 错误是否为「该版本中不存在此路径/版本」的缺失语义。
+// 仅缺失语义才允许降级为空内容；超时/锁冲突/对象损坏/无效 SHA 等真实错误必须
+// 上抛，否则会把历史版本伪装成「新增文件」假 diff。
+// 文案覆盖（git 原生输出）：
+//   - "path 'x' does not exist in '<rev>'"（版本树中无此路径）
+//   - "path 'x' exists on disk, but not in '<rev>'"（工作区有而版本中无，untracked/新增）
+//   - "invalid object name 'HEAD'"（unborn branch，仓库尚无任何提交；仅 HEAD: 前缀时降级，
+//     用户传入的不存在 SHA 同样报 invalid object name，须上抛防伪造全增 diff）
+func isRevPathMissing(err error, revPath string) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "does not exist in") || strings.Contains(msg, "exists on disk, but not in") {
+		return true
+	}
+	if strings.Contains(msg, "invalid object name 'HEAD'") && strings.HasPrefix(revPath, "HEAD:") {
+		return true
+	}
+	return false
+}
+
 // OpenInExternalDiff 用外部 diff 工具打开文件的两个版本对比。
 //   - workspace：左侧 HEAD 版本（未跟踪/无 HEAD 版本时为空文件），右侧工作区原文件
 //     （原文件已删除时降级为空文件临时路径）
-//   - commit：左侧父提交版本（root commit 对比空树，即空文件），右侧提交版本
+//   - commit：左侧父提交版本（root commit 对比空树，即空文件），右侧提交版本。
+//     说明：hasParent 经 `git rev-parse <sha>^` 判定，本地对象库场景其失败
+//     几乎只有「无父提交」一种语义，瞬时失败概率可忽略（见 service/git.go）
 //   - range：左侧 BaseSHA 版本，右侧 HeadSHA 版本
 //
 // exePath / argsTemplate 来自应用设置；未配置或模板缺占位符返回
@@ -94,25 +138,37 @@ func (s *GitService) OpenInExternalDiff(repoPath, exePath, argsTemplate string, 
 func (s *GitService) resolveExternalDiffSides(gitRoot string, req model.ExternalDiffRequest) (leftContent, rightPath string, needTempRight bool, err error) {
 	switch req.Mode {
 	case "workspace":
-		// 左侧 HEAD 版本；未跟踪文件无 HEAD 版本，git show 失败按空内容处理
+		// 左侧 HEAD 版本；未跟踪文件无 HEAD 版本（缺失语义报错），降级空内容
 		left, err := s.gitShow(gitRoot, "HEAD:"+req.File)
-		if err != nil {
+		if !isRevPathMissing(err, "HEAD:"+req.File) {
+			if err != nil {
+				return "", "", false, fmt.Errorf("获取 HEAD 版本内容失败: %w", err)
+			}
+		} else {
 			left = ""
 		}
 		abs := filepath.Join(gitRoot, filepath.FromSlash(req.File))
 		if _, statErr := os.Stat(abs); statErr != nil {
-			// 工作区文件已删除（deleted 状态）：右侧降级为空内容临时文件
+			// 仅「路径不存在」（工作区文件已删除，deleted 状态）降级为空内容临时文件；
+			// 权限/超长等其他 Stat 失败必须上抛，避免伪造删除 diff
+			if !errors.Is(statErr, fs.ErrNotExist) {
+				return "", "", false, fmt.Errorf("访问工作区文件失败: %w", statErr)
+			}
 			return left, "", true, nil
 		}
 		return left, abs, false, nil
 	case "commit":
-		if req.SHA == "" {
-			return "", "", false, fmt.Errorf("提交 SHA 不能为空")
+		if err := validateDiffSHA(req.SHA, "提交 SHA"); err != nil {
+			return "", "", false, err
 		}
 		left := ""
 		if s.hasParent(gitRoot, req.SHA) {
 			left, err = s.gitShow(gitRoot, req.SHA+"^:"+req.File)
-			if err != nil {
+			if !isRevPathMissing(err, req.SHA+"^:"+req.File) {
+				if err != nil {
+					return "", "", false, fmt.Errorf("获取父提交版本内容失败: %w", err)
+				}
+			} else {
 				// 父提交中不存在该文件（本提交新增）：左侧为空内容
 				left = ""
 			}
@@ -123,11 +179,18 @@ func (s *GitService) resolveExternalDiffSides(gitRoot string, req model.External
 		}
 		return left, right, true, nil
 	case "range":
-		if req.BaseSHA == "" || req.HeadSHA == "" {
-			return "", "", false, fmt.Errorf("提交 SHA 不能为空")
+		if err := validateDiffSHA(req.BaseSHA, "基准提交 SHA"); err != nil {
+			return "", "", false, err
+		}
+		if err := validateDiffSHA(req.HeadSHA, "目标提交 SHA"); err != nil {
+			return "", "", false, err
 		}
 		left, err := s.gitShow(gitRoot, req.BaseSHA+":"+req.File)
-		if err != nil {
+		if !isRevPathMissing(err, req.BaseSHA+":"+req.File) {
+			if err != nil {
+				return "", "", false, fmt.Errorf("获取基准版本内容失败: %w", err)
+			}
+		} else {
 			// 基准提交中不存在该文件（区间内新增）：左侧为空内容
 			left = ""
 		}

@@ -39,7 +39,7 @@ test.describe('外部 diff 工具集成', () => {
       await expect(settingsDialog.locator('input[placeholder="{left} {right}"]')).toBeVisible()
     })
 
-    test('修改路径后 blur：SaveSettings 携带三个 diffTool 字段', async ({ page }) => {
+    test('修改路径后 blur：经合并写 SaveSettings 持久化三个 diffTool 字段', async ({ page }) => {
       await page.setViewportSize({ width: 1920, height: 1080 })
       await page.goto('/')
       await page.locator('.activity-bar-item').nth(-2).click()
@@ -51,9 +51,10 @@ test.describe('外部 diff 工具集成', () => {
       const calls = await getWailsCalls(page, 'SaveSettings')
       expect(calls.length).toBeGreaterThan(0)
       const saved = calls.at(-1).args[0]
+      // diff 配置走 store 合并写：GetSettings 磁盘值 + 覆盖三个 diffTool 字段
+      // （args 无 UI 预填默认值，mock 磁盘为空时如实保存空串）
       expect(saved.diffToolPath).toBe('C:\\tools\\WinMergeU.exe')
-      // 全量覆盖写须携带其余两个字段，避免清空既有配置
-      expect(typeof saved.diffToolName).toBe('string')
+      expect(saved.diffToolName).toBe('beyondcompare')
       expect(typeof saved.diffToolArgs).toBe('string')
     })
   })

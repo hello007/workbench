@@ -169,8 +169,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const diffToolName = ref('beyondcompare')
   const diffToolPath = ref('')
   const diffToolArgs = ref('')
-  // 是否已配置：路径非空即可用（参数模板缺失由后端结构化报错兜底）
-  const diffToolConfigured = computed(() => diffToolPath.value.trim() !== '')
+  // 是否已配置：与后端校验对称——路径非空且参数模板含 {left}{right} 占位符，
+  // 避免按钮可用但点击即报「参数模板须包含占位符」
+  const diffToolConfigured = computed(() =>
+    diffToolPath.value.trim() !== '' &&
+    diffToolArgs.value.includes('{left}') &&
+    diffToolArgs.value.includes('{right}')
+  )
   // 系统当前是否偏好暗色（system 模式下决定 resolvedTheme）
   const systemPrefersDark = ref(getSystemPrefersDark())
   // 监听系统主题变化（store 单例生命周期内常驻；system 模式实时跟随）

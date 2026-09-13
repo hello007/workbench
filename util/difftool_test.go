@@ -7,6 +7,17 @@ import (
 	"testing"
 )
 
+// useTempDiffRoot 将 diff 临时根指向本用例专属目录，测试结束恢复，
+// 避免读写真实共享 %TEMP%\workbench-diff（误删运行中应用的在用文件）。
+func useTempDiffRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	prev := diffTempRootOverride
+	diffTempRootOverride = dir
+	t.Cleanup(func() { diffTempRootOverride = prev })
+	return dir
+}
+
 func TestRenderDiffArgsTemplate_Basic(t *testing.T) {
 	args, err := RenderDiffArgsTemplate("{left} {right}", `C:\tmp\a.go`, `C:\tmp\b.go`)
 	if err != nil {
@@ -60,12 +71,13 @@ func TestRenderDiffArgsTemplate_MissingPlaceholder(t *testing.T) {
 }
 
 func TestDiffTempDir_WriteAndRead(t *testing.T) {
+	root := useTempDiffRoot(t)
 	dir, err := CreateDiffTempDir()
 	if err != nil {
 		t.Fatalf("CreateDiffTempDir: %v", err)
 	}
-	if !strings.Contains(dir, "workbench-diff") {
-		t.Errorf("临时目录应位于 workbench-diff 下, got %q", dir)
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("临时目录应位于注入根下, got %q", dir)
 	}
 
 	leftPath, err := WriteDiffTempFile(dir, "left", "main.go", "left content")
@@ -94,6 +106,21 @@ func TestDiffTempDir_WriteAndRead(t *testing.T) {
 	}
 }
 
+func TestCreateDiffTempDir_Unique(t *testing.T) {
+	useTempDiffRoot(t)
+	dirA, err := CreateDiffTempDir()
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	dirB, err := CreateDiffTempDir()
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if dirA == dirB {
+		t.Errorf("连续创建应得到不同目录, got %q", dirA)
+	}
+}
+
 func TestWriteDiffTempFile_InvalidInput(t *testing.T) {
 	if _, err := WriteDiffTempFile("", "left", "a.go", "x"); err == nil {
 		t.Error("空临时目录应返回错误")
@@ -104,11 +131,12 @@ func TestWriteDiffTempFile_InvalidInput(t *testing.T) {
 }
 
 func TestCleanupDiffTempDir(t *testing.T) {
+	root := useTempDiffRoot(t)
 	if _, err := CreateDiffTempDir(); err != nil {
 		t.Fatalf("CreateDiffTempDir: %v", err)
 	}
 	CleanupDiffTempDir()
-	if _, err := os.Stat(DiffTempRoot()); !os.IsNotExist(err) {
-		t.Errorf("清理后根目录应不存在, err=%v", err)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("清理后注入根应不存在, err=%v", err)
 	}
 }

@@ -69,7 +69,7 @@
               <div class="settings-item-label">预设</div>
               <div class="settings-item-desc">选择常用 diff 工具自动填充路径与参数，均可手动修改</div>
             </div>
-            <el-select v-model="settingsStore.diffToolName" class="diff-tool-preset-select" size="small" style="width: 180px;" @change="onDiffToolPresetChange">
+            <el-select :model-value="settingsStore.diffToolName" class="diff-tool-preset-select" size="small" style="width: 180px;" @change="onDiffToolPresetChange">
               <el-option v-for="(preset, key) in diffToolPresets" :key="key" :label="preset.label" :value="key" />
             </el-select>
           </div>
@@ -236,7 +236,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS } from '../store'
 
@@ -270,18 +270,46 @@ const settingsStore = useSettingsStore()
 // 外部 diff 工具预设表（模板渲染，供 el-select 遍历）
 const diffToolPresets = DIFF_TOOL_PRESETS
 
-// 切换预设：填充该预设的默认路径与参数模板并保存（仍可手动修改）
+// 切换预设：填充该预设的默认路径与参数模板并保存（仍可手动修改）。
+// 模板用 :model-value 手动赋值（change 时 v-model 已写入新值，取消时无法回退）；
+// 已有非当前预设默认值的自定义配置时先确认，防误点覆盖/清空已存配置。
 const onDiffToolPresetChange = async (key) => {
   const preset = DIFF_TOOL_PRESETS[key]
   if (!preset) return
+  const prevName = settingsStore.diffToolName
+  const hasCustomized =
+    settingsStore.diffToolPath.trim() !== '' &&
+    (settingsStore.diffToolPath !== preset.path || settingsStore.diffToolArgs !== preset.args)
+  if (hasCustomized) {
+    try {
+      await ElMessageBox.confirm(
+        '切换预设将覆盖当前已配置的路径与参数模板，是否继续？',
+        '切换外部 diff 工具',
+        { type: 'warning', confirmButtonText: '覆盖', cancelButtonText: '取消' }
+      )
+    } catch {
+      // 取消：回退下拉选中值
+      settingsStore.diffToolName = prevName
+      return
+    }
+  }
+  settingsStore.diffToolName = key
   settingsStore.diffToolPath = preset.path
   settingsStore.diffToolArgs = preset.args
-  await settingsStore.saveDiffTool()
+  try {
+    await settingsStore.saveDiffTool()
+  } catch (e) {
+    ElMessage.error('保存外部 diff 工具配置失败: ' + (e?.message || String(e)))
+  }
 }
 
 // 路径 / 参数模板手动修改后保存
 const onDiffToolChange = async () => {
-  await settingsStore.saveDiffTool()
+  try {
+    await settingsStore.saveDiffTool()
+  } catch (e) {
+    ElMessage.error('保存外部 diff 工具配置失败: ' + (e?.message || String(e)))
+  }
 }
 
 const shortcutsTabRef = ref(null)
@@ -469,21 +497,24 @@ const removeExcludeFile = (tag) => {
   onSettingsChange()
 }
 
+// 通用设置保存（合并写）：以磁盘现有设置为基底，仅覆盖本面板管理的通用字段。
+// themeMode / diffTool 三字段不经此处写回（各走 saveTheme / saveDiffTool 合并写）——
+// 否则 loadSettings 启动失败时 store 留默认值，任一次通用保存都会把磁盘配置静默清空。
+async function saveGeneralSettings(gpuDisabled) {
+  const settings = await GetSettings()
+  settings.gpuDisabled = gpuDisabled
+  settings.defaultShell = defaultShell.value
+  settings.gitBashPath = gitBashPath.value
+  settings.wslDistro = wslDistro.value
+  settings.obsidianPath = obsidianPath.value
+  settings.searchExcludeDirs = excludeDirs.value
+  settings.searchExcludeFiles = excludeFiles.value
+  await SaveSettings(settings)
+}
+
 const onGpuChange = async (val) => {
   try {
-    await SaveSettings({
-      gpuDisabled: !val,
-      defaultShell: defaultShell.value,
-      gitBashPath: gitBashPath.value,
-      wslDistro: wslDistro.value,
-      obsidianPath: obsidianPath.value,
-      searchExcludeDirs: excludeDirs.value,
-      searchExcludeFiles: excludeFiles.value,
-      themeMode: settingsStore.themeMode,
-      diffToolName: settingsStore.diffToolName,
-      diffToolPath: settingsStore.diffToolPath,
-      diffToolArgs: settingsStore.diffToolArgs
-    })
+    await saveGeneralSettings(!val)
     needsRestart.value = true
   } catch {
     gpuEnabled.value = !gpuEnabled.value
@@ -492,19 +523,7 @@ const onGpuChange = async (val) => {
 
 const onSettingsChange = async () => {
   try {
-    await SaveSettings({
-      gpuDisabled: !gpuEnabled.value,
-      defaultShell: defaultShell.value,
-      gitBashPath: gitBashPath.value,
-      wslDistro: wslDistro.value,
-      obsidianPath: obsidianPath.value,
-      searchExcludeDirs: excludeDirs.value,
-      searchExcludeFiles: excludeFiles.value,
-      themeMode: settingsStore.themeMode,
-      diffToolName: settingsStore.diffToolName,
-      diffToolPath: settingsStore.diffToolPath,
-      diffToolArgs: settingsStore.diffToolArgs
-    })
+    await saveGeneralSettings(!gpuEnabled.value)
   } catch {
     // 回滚
   }
