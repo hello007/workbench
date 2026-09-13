@@ -1,0 +1,2 @@
+{"file": "docs/开发规范.md", "reason": "vet 命令更新落点：记录 go vet -unsafeptr=false 固化命令与原因"}
+{"file": "docs/spec/e2e-testing.md", "reason": "确认 go test 默认 vet 子集与 CI 无 vet 步骤的事实依据（第 10 节 CI 表）"}
