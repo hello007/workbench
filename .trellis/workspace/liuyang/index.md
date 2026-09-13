@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 56
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 57
 - **Last Active**: 2026-09-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1989 | Active |
+| `journal-2.md` | ~42 | Active |
+| `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 57 | 2026-09-13 | 外部 diff 工具集成 | `539069f`, `87f6db9`, `e046ef4` | `master` |
 | 56 | 2026-09-13 | E2E 扩展：文件树/子模块/AI 功能触发 | `3141115` | `master` |
 | 55 | 2026-09-13 | 修复 clipboard_windows.go go vet unsafe.Pointer 告警 | `d7d5b51` | `master` |
 | 54 | 2026-09-13 | E2E 测试体系落地（Playwright 三流程 + Go 集成测试 + CI） | `b891eff` | `master` |
