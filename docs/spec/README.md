@@ -25,6 +25,7 @@
 |[app-services-assembly.md](app-services-assembly.md)|AppServices 装配范式：`NewAppServices` 集中装配 + App 内嵌 `*AppServices` 字段提升保 133 委托方法与 Wails 绑定零 diff；AppServices 须在 package main；构造与生命周期副作用分离；新增 service 改动点 2 处|
 |[logging-and-errors.md](logging-and-errors.md)|日志与错误处理规范：后端 slog + lumberjack 落盘 `data/logs/app.log`（禁 println）；AppError + Wails ErrorFormatter 结构化 error 跨层传递（源码核实 `CallbackMessage.Err any`）；前端 handleError 按 code 分流；新增错误码同步三处|
 |[e2e-testing.md](e2e-testing.md)|E2E 测试规范（方案 C 混合架构）：前端 Playwright E2E（vite preview web 版 + mock Wails 后端，fixtures 注入）+ 后端 Go 集成测试（`//go:build integration` 标签隔离）；mock 单一数据源 `src/test/wails-mock-defaults.js`；`wailsjs/` 不入库，CI 须先 `wails generate module` 再 build|
+|[perf-baseline.md](perf-baseline.md)|性能基线（v1.4 PR1）：Go benchmark（FileTree/ScanGitRepos/NewAppServices ns/op+B/op+allocs）+ 前端 bundle 体积（chunk 分布）+ MemStats 快照 + GUI 冷启动占位；PR4 优化前后对比的唯一数据依据；benchmark 不纳入覆盖率门禁|
 
 ## 新增文档约定
 
@@ -36,4 +37,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-09-13
+**最后更新：** 2026-09-14

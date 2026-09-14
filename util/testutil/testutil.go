@@ -4,7 +4,13 @@
 // writeFile / setupFFRepo / setupConflictRepo 等辅助合并为单一导出版本，与前端
 // src/test/wails-mock-defaults.js 单一数据源模式对齐。
 //
-// 仅 _test.go 调用，不进生产二进制。所有函数均调 t.Helper()，失败定位指向调用点。
+// 仅 _test.go 与 benchmark 调用，不进生产二进制（全部导入方均为 _test.go）。
+// 所有函数均调 t.Helper()，失败定位指向调用点。
+//
+// 参数类型用 testing.TB（接口）而非 *testing.T：*testing.T（普通测试）与 *testing.B
+// （benchmark）均实现该接口，使 benchmark 可直接复用本组 fixture 构造函数，避免在
+// perf_bench_test.go 重复造 git init/config 与批量写文件的轮子。原有 *testing.T
+// 调用点零改动（自动满足 testing.TB）。
 package testutil
 
 import (
@@ -14,12 +20,12 @@ import (
 	"testing"
 )
 
-// RunGit 在 dir 目录执行 git 命令，失败即终止测试。
+// RunGit 在 dir 目录执行 git 命令，失败即终止测试或 benchmark。
 //
 // 输出经 CombinedOutput 捕获并附在失败消息中，便于定位 git 报错根因。
 // 收敛 service.runGit / util.runGitSimple / main.runGitIn 三处同义实现：
 // 三者语义一致（指定目录执行 git，失败终止），仅失败消息详略不同，统一为含 stderr 版本。
-func RunGit(t *testing.T, dir string, args ...string) {
+func RunGit(t testing.TB, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -34,7 +40,7 @@ func RunGit(t *testing.T, dir string, args ...string) {
 // MkdirAll 为 service.writeFile 原有行为；对原不建父目录的 svcMergeWriteFile /
 // writeDiffFile / gitMergeTestWriteFile 调用方为无副作用超集（父目录已存在时 MkdirAll 为 no-op）。
 // 收敛上述四处同义实现。
-func WriteFile(t *testing.T, path, content string) {
+func WriteFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
@@ -48,7 +54,7 @@ func WriteFile(t *testing.T, path, content string) {
 //
 // 收敛 service.initTempRepo 与各包内联的 git init + config user.email/user.name 模式。
 // 不设置初始分支（沿用 git 默认）；如需显式 master 分支请配合 SetupMasterBranch。
-func InitTempRepo(t *testing.T) string {
+func InitTempRepo(t testing.TB) string {
 	t.Helper()
 	dir := t.TempDir()
 	RunGit(t, dir, "init")
@@ -61,7 +67,7 @@ func InitTempRepo(t *testing.T) string {
 //
 // 收敛 service.svcSetupMasterBranch 与 util.setupMasterBranch 两处同义实现。
 // 须在首次提交前调用（修改未出生的 HEAD symbolic ref）。
-func SetupMasterBranch(t *testing.T, dir string) {
+func SetupMasterBranch(t testing.TB, dir string) {
 	t.Helper()
 	RunGit(t, dir, "symbolic-ref", "HEAD", "refs/heads/master")
 }
@@ -70,7 +76,7 @@ func SetupMasterBranch(t *testing.T, dir string) {
 //
 // merge feature 进 master 为 fast-forward，无冲突。返回仓库根目录。
 // 收敛 service.svcSetupFFRepo 与 util.setupFFRepo 两处同义 fixture。
-func SetupFFRepo(t *testing.T) string {
+func SetupFFRepo(t testing.TB) string {
 	t.Helper()
 	dir := InitTempRepo(t)
 	SetupMasterBranch(t, dir)
@@ -89,7 +95,7 @@ func SetupFFRepo(t *testing.T) string {
 // merge feature 进 master 必然产生冲突。返回仓库根目录。
 //
 // 收敛 service.svcSetupConflictRepo 与 util.setupConflictRepo 两处同义 fixture。
-func SetupConflictRepo(t *testing.T) string {
+func SetupConflictRepo(t testing.TB) string {
 	t.Helper()
 	dir := InitTempRepo(t)
 	SetupMasterBranch(t, dir)
