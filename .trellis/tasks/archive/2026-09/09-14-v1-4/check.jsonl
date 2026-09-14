@@ -1,0 +1,8 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁零回归：model/server≥80% service≥76% util≥40%（排 pty_windows.go）前端≥70%（exclude wailsjs）硬失败；改阈值须同步本文档 + docs/测试策略.md"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E/集成测试规范：fixtures.js import {test,expect} 禁直接 import @playwright/test；mock 改 wails-mock-defaults.js 单一数据源；禁 waitForTimeout；integration 构建标签；wailsjs 不入库 CI 须先 generate"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查跨层契约：app.go 方法签名或 model 导出 struct 字段变更须同步 frontend/wailsjs App.js/App.d.ts/models.ts 三处；具名 string 类型须手补 export type 别名防 MISSING_EXPORT"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "检查 AppServices 装配：新增 service 须 AppServices struct 加字段 + NewAppServices 加构造行 2 处；AppServices 须 package main；构造纯 new 副作用留 startup/shutdown"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查错误处理：service 包调 Logger() App 层调 slog.X；前端分流错误用 AppError{Code,Message}；新增错误码同步 model/app_error.go 常量表 + frontend error.js ErrorCode/WARNING_CODES"}
+{"file": "docs/spec/test-stability.md", "reason": "检查测试稳定性：抽 testutil 后无 flaky 回归；已知 flaky 点（文件树缓存 mtime）处置规范"}
+{"file": "docs/spec/README.md", "reason": "检查 spec 沉淀分流：详细契约入 docs/spec/<topic>.md 禁入 .trellis/spec；关键规则追加 CLAUDE.md 清单附链接"}
+{"file": "CLAUDE.md", "reason": "检查项目根指令合规：README.md 同步确认；文档命名规范；Mermaid 规范；Edit 工具大段中文改 Write 规避"}

@@ -1,0 +1,8 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "PR1 测试重构 + 依赖升级后须复核分层覆盖率门禁数值，model/server≥80% service≥76% util≥40% 前端≥70% 基线，改阈值须同步本文档"}
+{"file": "docs/spec/e2e-testing.md", "reason": "PR1 安全扫描入 CI + 依赖升级后 E2E 回归保障；wailsjs 不入库须先 wails generate module 再 build、fixtures.js import 规范、禁 waitForTimeout"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "PR1 测试重构涉及 model/app.go 绑定同步规则；PR2 session.json 新增持久化跨层契约（App 方法签名/model 字段变更须同步 frontend/wailsjs 三处）"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "PR1 测试重构可能触及 AppServices 装配；新增 service 须 AppServices 加字段 + NewAppServices 加构造行 2 处，App 内嵌 *AppServices 字段提升保委托方法零 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "PR2 崩溃恢复快照损坏须降级冷启动不阻塞，错误用 AppError{Code,Message} 经 ErrorFormatter 跨层分流；slog 落盘规范"}
+{"file": "docs/spec/test-stability.md", "reason": "PR1 测试重构抽 testutil 须遵守测试稳定性规范，避免 flaky；文件树缓存 mtime 差量等已知 flaky 点"}
+{"file": "docs/spec/README.md", "reason": "PR3 文档 + 全程 spec 沉淀两级分流规则：详细契约入 docs/spec/<topic>.md，关键规则追加 CLAUDE.md 关键规则清单并附链接"}
+{"file": "CLAUDE.md", "reason": "项目根指令：功能完成后确认是否更新 README.md；规范沉淀规则；文档命名 [类型]-[项目/模块]-[主题]-[版本].md；Mermaid v11.x 编写规范"}
