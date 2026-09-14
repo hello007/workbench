@@ -232,7 +232,9 @@ import { CopyDocument, Select, Close } from '@element-plus/icons-vue'
 import { renderAsync } from 'docx-preview'
 import * as XLSX from 'xlsx'
 import MarkdownIt from 'markdown-it'
-import mermaid from 'mermaid'
+// mermaid 改为懒加载（见下方 ensureMermaid）：仅在 markdown 含 mermaid 代码块时动态 import，
+// 使 mermaid 及其依赖（cytoscape 425KB / katex 253KB / 各 mermaid 子图）移出 Home chunk，
+// 首屏不再加载图表库。dev 模式经 vite optimizeDeps.include 预构建（见 vite.config.js）。
 // YAML frontmatter 解析（v4+ 默认 safe schema），用于 markdown 预览属性面板
 import jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
@@ -379,9 +381,23 @@ const onHtmlFrameMessage = (event) => {
   if (/^https?:\/\//i.test(url)) BrowserOpenURL(url)
 }
 
-// ---------- Mermaid 初始化 ----------
+// ---------- Mermaid 懒加载 ----------
+// mermaid（含 cytoscape / katex / 各子图）体积大，仅在 markdown 含 mermaid 代码块时按需加载，
+// 避免进入 Home 路由即加载图表库。模块级缓存 mermaid 实例，首次加载后复用。
 // startOnLoad:false → 由我们在 DOM 更新后手动 run；securityLevel:'strict' 防注入。
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+let mermaidModule = null
+const ensureMermaid = async () => {
+  if (!mermaidModule) {
+    mermaidModule = (await import('mermaid')).default
+  }
+  // 按当前生效主题配置 mermaid（initialize 可重复调用，重新配置主题）
+  mermaidModule.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: settingsStore.resolvedTheme === 'dark' ? 'dark' : 'default'
+  })
+  return mermaidModule
+}
 
 // ---------- Markdown 渲染 ----------
 const md = new MarkdownIt({
@@ -492,14 +508,11 @@ const renderedMarkdown = computed(() => {
 // 主题随 resolvedTheme 切换：dark 模式用 mermaid dark 主题，避免暗色下亮色残留。
 const renderMermaid = async () => {
   if (!isMarkdown.value || !markdownBodyRef.value) return
-  // 按当前生效主题配置 mermaid（initialize 可重复调用，重新配置主题）
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    theme: settingsStore.resolvedTheme === 'dark' ? 'dark' : 'default'
-  })
   const nodes = Array.from(markdownBodyRef.value.querySelectorAll('pre.mermaid'))
+  // 无 mermaid 代码块时不加载 mermaid，零成本（不触发动态 import），普通 markdown 不受影响
   if (nodes.length === 0) return
+  // 有 mermaid 块才懒加载 mermaid（含 cytoscape/katex）并按当前主题初始化
+  const mermaid = await ensureMermaid()
   // 保存原始代码文本：mermaid.run 会用 SVG 覆盖节点内容，主题切换重渲染时需还原
   nodes.forEach((n) => {
     if (!n.hasAttribute('data-mermaid-code')) {
