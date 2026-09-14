@@ -106,3 +106,42 @@ WorkBench 新增仓库列表配置（工作目录+收藏夹）JSON 导出导入�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 60: v1.4 平台加固 epic：技术债/稳定性/文档/性能四域落地
+
+**Date**: 2026-09-14
+**Task**: v1.4 平台加固 epic：技术债/稳定性/文档/性能四域落地
+**Branch**: `master`
+
+### Summary
+
+v1.4 平台加固 epic 单任务分 4 PR 推进。PR1 技术债：归档历史 plans/superpowers 74 文件 + 抽 util/testutil 跨包测试辅助收敛 service/util/main 三包（6 导出函数，覆盖率 service 78.9%/util 50.7% 零回归）+ 建性能基线（4 维度真实数据 benchmark）+ 依赖升级 minor/patch（Go 1.26.6/Wails v2.16，govulncheck 13→0）+ 安全扫描入 CI（govulncheck + npm audit --audit-level=high，security job continue-on-error）。PR2 稳定性：崩溃恢复 UI 状态快照 data/session.json（SessionState/TerminalSnapshot，Terminal 指针避 omitempty，Load 损坏降级冷启动，debounce 2s + beforeunload 保存，前端 useSessionState composable 恢复 activePanel/终端/工作目录）。PR3 文档：新建快速入门/架构设计/API参考（139 方法 24 域）/贡献指南 + 路线图同步 + 校正委托方法计数 133→138/AppServices 字段 14→16。PR4 性能：mermaid 懒加载减首屏 eager 1.8MB/gzip 550KB（treeCache 8.6× 保持），xlsx/highlight.js/codemirror 懒加载 UX 风险跳过。全程 spec 沉淀 perf-baseline/security-scan/session 契约 + CLAUDE.md 关键规则 4 条。测试：后端全绿 + 前端 932 用例 + 44 E2E + 覆盖率门禁零回归。协作/云集成/国际化三块路线图标 ⏸️ 暂缓 v1.4+。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fd78538` | (see git log) |
+| `c3603d3` | (see git log) |
+| `ed8dd6b` | (see git log) |
+| `41c4b1a` | (see git log) |
+| `32639b6` | (see git log) |
+| `955383e` | (see git log) |
+| `277ab88` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
