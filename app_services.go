@@ -12,12 +12,12 @@ import (
 
 // AppServices 集中持有 App 的全部 service 与缓存实例。
 //
-// 设计：App 内嵌 *AppServices，借助 Go 字段提升使 133 个委托方法
+// 设计：App 内嵌 *AppServices，借助 Go 字段提升使 138 个委托方法
 // (a.directorySvc 等) 直接可达，装配集中化同时零委托方法 diff。
 //
 // 包归属：须定义在 package main。Go 跨包内嵌时未导出字段不提升——
 // 若放 service 包且字段小写，main 包内 a.directorySvc 编译失败；
-// 字段大写则 133 委托方法全改。放 main 包字段保持小写，提升同包可见。
+// 字段大写则 138 委托方法全改。放 main 包字段保持小写，提升同包可见。
 //
 // 字段顺序与原 App struct 一致，便于对照与排查。
 type AppServices struct {

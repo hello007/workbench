@@ -11,7 +11,7 @@ import (
 // ===== 核心域：App 结构体与生命周期 =====
 
 // App 内嵌 *AppServices，借助 Go 字段提升直接持有全部 service 字段
-// (a.directorySvc 等)，使 133 个委托方法零 diff。装配见 NewAppServices。
+// (a.directorySvc 等)，使 138 个委托方法零 diff。装配见 NewAppServices。
 type App struct {
 	ctx context.Context
 	*AppServices
