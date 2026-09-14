@@ -696,6 +696,22 @@ func (s *GitService) GetDiff(repoPath, file string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// GetStagedDiff 获取单个文件暂存区相对 HEAD 的 unified diff 文本。
+// 走 git diff --cached -- <file>：仅已暂存（git add 过）的变更，未暂存的工作区改动不纳入。
+// 用于 AI 提交信息生成：仅基于暂存区内容生成 commit message，避免误判未暂存改动。
+// 文件未暂存（index 与 HEAD 一致）时返回空字符串。新增文件须先 git add 进 index 才有 diff。
+func (s *GitService) GetStagedDiff(repoPath, file string) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	output, err := s.gitCmd.Execute(gitRoot, "diff", "--cached", "--", file)
+	if err != nil {
+		return "", fmt.Errorf("获取暂存差异失败: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
 // emptyTreeSHA 为 Git 通用空树对象哈希，用作 root commit（无 parent）的对比基准，
 // 使首条提交的文件改动呈现为全增 diff。该哈希为 Git 内置常量，非仓库相关，跨仓库稳定。
 const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"

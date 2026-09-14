@@ -64,26 +64,27 @@ type AiFunctionService struct {
 
 // aiTaskRuntime 一个运行中/已完成任务的内部状态
 type aiTaskRuntime struct {
-	id          string
-	functionID  string
-	prompt      string
-	sessionID   string
-	cmd         *exec.Cmd
-	ctx         context.Context
-	cancel      context.CancelFunc
-	running     bool
-	canceled    bool
-	startedAt   time.Time
-	finishedAt  time.Time
-	timeoutMin  int
-	outputFile  *os.File // 3.3：流式输出文件（data/ai_task_output/<id>.txt），替代 strings.Builder 全量驻留
-	outputPath  string   // 输出文件绝对路径，归档时 os.Rename 用
-	outputSize  int64    // 累计输出字节数（持锁更新，供展示/上限判断）
-	errText     string
-	metrics     *model.AiTaskMetrics // result 事件计量（P0-2），nil 表示无计量
-	queued      bool                 // 排队中：等待并发槽位，未起进程（P0-3）
-	queuedAt    time.Time            // 入队时间（P0-3），供排队时长展示
-	queueCancel chan struct{}        // 排队取消信号（P0-3）：close 后唤醒 RunStage 的 select
+	id               string
+	functionID       string
+	prompt           string
+	sessionID        string
+	cmd              *exec.Cmd
+	ctx              context.Context
+	cancel           context.CancelFunc
+	running          bool
+	canceled         bool
+	startedAt        time.Time
+	finishedAt       time.Time
+	timeoutMin       int
+	outputFile       *os.File // 3.3：流式输出文件（data/ai_task_output/<id>.txt），替代 strings.Builder 全量驻留
+	outputPath       string   // 输出文件绝对路径，归档时 os.Rename 用
+	outputSize       int64    // 累计输出字节数（持锁更新，供展示/上限判断）
+	errText          string
+	metrics          *model.AiTaskMetrics // result 事件计量（P0-2），nil 表示无计量
+	structuredOutput json.RawMessage      // 方案 C：result 事件 structured_output 字段缓存，透传 AiTaskRunResult/AiTaskState
+	queued           bool                 // 排队中：等待并发槽位，未起进程（P0-3）
+	queuedAt         time.Time            // 入队时间（P0-3），供排队时长展示
+	queueCancel      chan struct{}        // 排队取消信号（P0-3）：close 后唤醒 RunStage 的 select
 }
 
 // NewAiFunctionService 创建 AI 功能服务
@@ -307,8 +308,17 @@ func validateFunctions(funcs []*model.AiFunction) (valid []*model.AiFunction, in
 			invalidIDs = append(invalidIDs, "(nil 项)")
 			continue
 		}
-		if strings.TrimSpace(fn.ID) == "" || strings.TrimSpace(fn.Name) == "" ||
-			strings.TrimSpace(fn.Command) == "" || strings.TrimSpace(fn.Cwd) == "" {
+		if strings.TrimSpace(fn.ID) == "" || strings.TrimSpace(fn.Name) == "" {
+			invalidIDs = append(invalidIDs, fn.ID)
+			continue
+		}
+		// Command 与 PromptTemplate 至少一非空：
+		//   - 斜杠命令 skill：Command 非空（如 /ab-weekly-report）
+		//   - 纯 prompt skill：Command 可空，经 Params.PromptTemplate 驱动（如 AI 提交信息生成/代码审查）
+		// Cwd 可空：纯 prompt skill 不依赖项目级 skill 发现，cmd.Dir 空继承父进程目录
+		hasCommand := strings.TrimSpace(fn.Command) != ""
+		hasTemplate := fn.Params != nil && strings.TrimSpace(fn.Params.PromptTemplate) != ""
+		if !hasCommand && !hasTemplate {
 			invalidIDs = append(invalidIDs, fn.ID)
 			continue
 		}
@@ -495,19 +505,20 @@ func (s *AiFunctionService) GetAiTaskState(taskID string) *model.AiTaskState {
 	}
 	preview, outputSize, outputFile := s.outputSnapshot(task)
 	return &model.AiTaskState{
-		TaskID:         task.id,
-		FunctionID:     task.functionID,
-		Running:        task.running,
-		Queued:         task.queued,
-		SessionID:      task.sessionID,
-		Prompt:         task.prompt,
-		Output:         preview,
-		OutputSize:     outputSize,
-		OutputFile:     outputFile,
-		TableExtracted: extractTable(preview, outputSize),
-		Error:          task.errText,
-		StartedAt:      task.startedAt.UnixMilli(),
-		Metrics:        task.metrics,
+		TaskID:           task.id,
+		FunctionID:       task.functionID,
+		Running:          task.running,
+		Queued:           task.queued,
+		SessionID:        task.sessionID,
+		Prompt:           task.prompt,
+		Output:           preview,
+		OutputSize:       outputSize,
+		OutputFile:       outputFile,
+		TableExtracted:   extractTable(preview, outputSize),
+		Error:            task.errText,
+		StartedAt:        task.startedAt.UnixMilli(),
+		Metrics:          task.metrics,
+		StructuredOutput: task.structuredOutput,
 	}
 }
 
@@ -796,6 +807,13 @@ func buildClaudeArgs(fn *model.AiFunction, prompt, resumeSessionID string) []str
 	}
 	args = append(args, "--output-format", "stream-json", "--verbose")
 
+	// 方案 C：OutputSchema 非空时追加 --json-schema，claude 在 result 事件回 structured_output
+	// 字段严格符合 schema（tool use 机制，与自由文本 result 解耦，自由文本带 markdown 包裹不影响）。
+	// 空则不加，兼容现有 skill 零回归。
+	if len(fn.OutputSchema) > 0 {
+		args = append(args, "--json-schema", string(fn.OutputSchema))
+	}
+
 	mode := fn.PermissionMode
 	if mode == "" {
 		mode = "bypassPermissions" // 菜单场景无交互终端，默认放行权限（功能项可覆盖）
@@ -976,16 +994,17 @@ func BuildFollowUpPrompt(followUp *model.AiFollowUp, params map[string]string) (
 // streamEvent claude --output-format stream-json 的单行事件（只取关心的字段）。
 // result 事件携带的计量字段（usage/duration_ms/total_cost_usd/num_turns）随事件一起解析。
 type streamEvent struct {
-	Type         string            `json:"type"`
-	Subtype      string            `json:"subtype"`
-	SessionID    string            `json:"session_id"`
-	Result       string            `json:"result"`
-	Message      *assistantMessage `json:"message"`
-	IsError      bool              `json:"is_error"`
-	DurationMs   int64             `json:"duration_ms"`
-	NumTurns     int               `json:"num_turns"`
-	TotalCostUSD float64           `json:"total_cost_usd"`
-	Usage        *streamUsage      `json:"usage"`
+	Type             string            `json:"type"`
+	Subtype          string            `json:"subtype"`
+	SessionID        string            `json:"session_id"`
+	Result           string            `json:"result"`
+	Message          *assistantMessage `json:"message"`
+	IsError          bool              `json:"is_error"`
+	DurationMs       int64             `json:"duration_ms"`
+	NumTurns         int               `json:"num_turns"`
+	TotalCostUSD     float64           `json:"total_cost_usd"`
+	Usage            *streamUsage      `json:"usage"`
+	StructuredOutput json.RawMessage   `json:"structured_output"` // 方案 C：--json-schema 强制结构化输出，仅 result 事件出现，与自由文本 result 解耦
 }
 
 // streamUsage result 事件 usage 字段的 token 用量（仅取关心的四项）
@@ -1006,17 +1025,18 @@ type messageContentPart struct {
 	Text string `json:"text"`
 }
 
-// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件, 会话 id, 计量摘要)。
+// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件, 会话 id, 计量摘要, 结构化输出)。
 // 非 JSON 行（如 stderr 串入的诊断文本）原样作为文本增量返回，不丢输出。
 // metrics 仅在 result 事件且含计量字段时非 nil（旧版或字段缺失时为 nil，前端判空跳过）。
-func parseStreamLine(line string) (text string, isResult bool, sessionID string, metrics *model.AiTaskMetrics) {
+// structuredOutput 仅在 result 事件且配了 --json-schema 时非空（claude 在 result 事件回 structured_output 字段）。
+func parseStreamLine(line string) (text string, isResult bool, sessionID string, metrics *model.AiTaskMetrics, structuredOutput json.RawMessage) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
-		return "", false, "", nil
+		return "", false, "", nil, nil
 	}
 	var ev streamEvent
 	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
-		return line + "\n", false, "", nil
+		return line + "\n", false, "", nil, nil
 	}
 	if ev.SessionID != "" {
 		sessionID = ev.SessionID
@@ -1028,7 +1048,7 @@ func parseStreamLine(line string) (text string, isResult bool, sessionID string,
 				sb.WriteString(part.Text)
 			}
 		}
-		return sb.String(), false, sessionID, nil
+		return sb.String(), false, sessionID, nil, nil
 	}
 	if ev.Type == "result" {
 		// result 事件携带计量：duration_ms/num_turns/total_cost_usd 与 usage。
@@ -1048,9 +1068,9 @@ func parseStreamLine(line string) (text string, isResult bool, sessionID string,
 				}
 			}
 		}
-		return "", true, sessionID, metrics
+		return "", true, sessionID, metrics, ev.StructuredOutput
 	}
-	return "", false, sessionID, nil
+	return "", false, sessionID, nil, nil
 }
 
 // extractTable 从输出文本预解析 markdown 表格，供表格视图直接渲染。
@@ -1174,7 +1194,7 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
 	for scanner.Scan() {
-		text, isResult, sessionID, metrics := parseStreamLine(scanner.Text())
+		text, isResult, sessionID, metrics, structuredOutput := parseStreamLine(scanner.Text())
 		// sessionID/output/metrics 写入须持锁：GetAiTaskState 在锁内读取同字段，
 		// 无锁并发写文件/计数可能数据错乱；emit 放锁外避免拖长持锁时间
 		s.mu.Lock()
@@ -1190,6 +1210,10 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 		}
 		if isResult && metrics != nil {
 			task.metrics = metrics
+		}
+		// 方案 C：result 事件 structured_output 缓存，pumpOutput 末尾透传 AiTaskRunResult
+		if isResult && len(structuredOutput) > 0 {
+			task.structuredOutput = structuredOutput
 		}
 		s.mu.Unlock()
 		if text != "" {
@@ -1212,13 +1236,14 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	// 3.3：result.Output 改末尾预览（不再全量 String 拷贝），全量在输出文件
 	preview, outputSize, outputFile := s.outputSnapshot(task)
 	result := model.AiTaskRunResult{
-		TaskID:         task.id,
-		SessionID:      task.sessionID,
-		Output:         preview,
-		OutputSize:     outputSize,
-		OutputFile:     outputFile,
-		TableExtracted: extractTable(preview, outputSize),
-		Metrics:        task.metrics,
+		TaskID:           task.id,
+		SessionID:        task.sessionID,
+		Output:           preview,
+		OutputSize:       outputSize,
+		OutputFile:       outputFile,
+		TableExtracted:   extractTable(preview, outputSize),
+		Metrics:          task.metrics,
+		StructuredOutput: task.structuredOutput,
 	}
 	if task.canceled {
 		result.Canceled = true
@@ -1364,6 +1389,125 @@ func defaultAiFunctions() []*model.AiFunction {
 				},
 			},
 			Tags: []string{"会议"},
+		},
+		{
+			ID:             "commit-message",
+			Name:           "AI 生成提交信息",
+			Description:    "基于暂存区 diff 生成 2-3 个 Conventional Commits 规范的提交信息候选，点击填入提交框",
+			Icon:           "EditPen",
+			Command:        "",
+			PermissionMode: "bypassPermissions",
+			TimeoutMinutes: 5,
+			Completion:     "none",
+			Params: &model.AiParamSpec{
+				Type:  "form",
+				Label: "提交信息生成",
+				PromptTemplate: `你是提交信息生成助手。基于以下 git 暂存区 diff 生成 2-3 个 Conventional Commits 规范的提交信息候选。
+
+## 规范
+- 格式：type(可选scope): description
+- type 取值：feat(新功能) / fix(缺陷修复) / docs(文档) / refactor(重构) / perf(性能) / test(测试) / chore(构建/杂务) / build(构建系统) / ci(CI 配置) / style(格式)
+- description：祈使句、一行、简短、不加句号、描述「做了什么」非「怎么做」
+- scope 从 diff 涉及模块推断（如 service/auth.go → auth），无明确 scope 省略
+- 多文件多类型变更取主导类型
+
+## 历史 commit 风格参考（few-shot，模仿其 type/scope/描述风格）
+{{history}}
+
+## 暂存区 diff
+{{diff}}
+
+## 输出要求
+生成 2-3 个候选，type 准确、description 简洁、候选间有差异（不同 type / scope / 详略）。
+仅基于 diff 实际内容生成，不编造未在 diff 中体现的变更。`,
+			},
+			OutputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "description": "Conventional Commits 类型: feat/fix/docs/refactor/perf/test/chore/build/ci/style"},
+          "scope": {"type": "string", "description": "影响范围，无明确 scope 时省略"},
+          "description": {"type": "string", "description": "简短描述，祈使句，一行，不加句号"},
+          "body": {"type": "string", "description": "详细说明 what/why，可空"}
+        },
+        "required": ["type", "description"]
+      },
+      "minItems": 2,
+      "maxItems": 3
+    }
+  },
+  "required": ["candidates"]
+}`),
+			Tags: []string{"提交"},
+		},
+		{
+			ID:             "code-review",
+			Name:           "AI 代码审查",
+			Description:    "基于未提交变更或指定 commit diff 进行结构化代码审查，输出按级别分组的问题清单",
+			Icon:           "View",
+			Command:        "",
+			PermissionMode: "bypassPermissions",
+			TimeoutMinutes: 10,
+			Completion:     "none",
+			Params: &model.AiParamSpec{
+				Type:  "form",
+				Label: "代码审查",
+				PromptTemplate: `你是代码审查助手。基于以下 git diff 进行结构化审查，输出问题清单。
+
+## 审查维度
+- bug 风险：逻辑错误、空指针/nil 解引用、边界条件、并发竞态、资源泄漏
+- 编码规范：命名、分层架构、注释完整性、错误处理、日志规范
+- 安全漏洞：注入风险、敏感信息泄露、权限校验缺失、不安全反序列化
+- 性能问题：N+1 查询、不必要的拷贝、阻塞同步操作、大对象未释放
+- 改进建议：可读性、复用、逻辑简化
+
+## 级别（severity）
+- critical：必须修复（bug 导致错误行为 / 安全漏洞）
+- warning：建议修复（规范违反 / 性能问题）
+- info：可选改进（可读性 / 简化建议）
+- 约束：style 与 improvement 类别不得标 critical
+
+## 项目规范上下文
+{{rules}}
+
+## 待审查 diff
+{{diff}}
+
+## 输出要求
+- 只基于 diff 实际内容审查，不编造 diff 中不存在的代码或问题
+- 每个问题引用具体 file + line（line 为 diff 中的行号）
+- confidence 取 0-1 反映把握程度，低于 0.5 的不报或标 info
+- 无问题时 issues 返回空数组，summary 说明已审查无问题
+- suggestion 给出具体修复建议，可操作`,
+			},
+			OutputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {"type": "string", "description": "文件路径"},
+          "line": {"type": "integer", "description": "diff 中行号"},
+          "severity": {"type": "string", "enum": ["critical", "warning", "info"]},
+          "category": {"type": "string", "enum": ["bug", "style", "security", "performance", "improvement"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "description": {"type": "string", "description": "问题描述"},
+          "suggestion": {"type": "string", "description": "修复建议"}
+        },
+        "required": ["file", "severity", "category", "description"]
+      }
+    },
+    "summary": {"type": "string", "description": "整体审查结论"}
+  },
+  "required": ["issues"]
+}`),
+			Tags: []string{"审查"},
 		},
 	}
 }

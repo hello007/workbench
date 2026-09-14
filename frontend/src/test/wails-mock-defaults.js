@@ -260,7 +260,8 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
           output: '评审开始：检查 2 个文件\n发现 1 个问题\n',
           outputSize: 42,
           outputFile: 'ai_task_history/task-e2e-1.txt',
-          canceled: false
+          canceled: false,
+          structuredOutput: null
         }
       }
     ]

@@ -637,6 +637,16 @@ func (a *App) GetRangeDiff(path, baseSHA, headSHA string) (string, error) {
 	return a.gitSvc.GetRangeDiff(path, baseSHA, headSHA)
 }
 
+// GetStagedDiffText 聚合暂存区所有文件 diff 为单段文本（含截断保护），供 AI 提交信息生成注入 prompt。
+// 链路：GetLocalChanges 筛 Staged + 逐文件 GetStagedDiff（git diff --cached），超阈值截断 + 提示剩余。
+// 暂存区为空返回 AppError{E_GIT_NO_STAGED_CHANGES}，前端按 code 禁用「AI 生成」按钮 + 提示。
+func (a *App) GetStagedDiffText(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AggregateStagedDiff(path)
+}
+
 // HasUpstream 判断当前分支是否配置了上游跟踪分支。
 func (a *App) HasUpstream(path string) (bool, error) {
 	if path == "" {

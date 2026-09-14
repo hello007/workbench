@@ -369,20 +369,22 @@ func TestImportAiFunctions_EmptyJSON(t *testing.T) {
 	}
 }
 
-// TestValidateFunctions 覆盖 nil 项、关键字段空、有效项各分支。
+// TestValidateFunctions 覆盖 nil 项、关键字段空、纯 prompt 模式、有效项各分支。
 func TestValidateFunctions(t *testing.T) {
 	funcs := []*model.AiFunction{
 		nil,
 		{ID: "", Name: "x", Command: "/c", Cwd: "/d"},   // ID 空
 		{ID: "f1", Name: "", Command: "/c", Cwd: "/d"},  // Name 空
-		{ID: "f2", Name: "n", Command: "/c", Cwd: "/d"}, // 有效
+		{ID: "f2", Name: "n", Command: "/c", Cwd: "/d"}, // 有效（斜杠命令模式）
+		{ID: "f3", Name: "n", Command: "", Cwd: "", Params: &model.AiParamSpec{Type: "form", PromptTemplate: "{{diff}}"}}, // 有效（纯 prompt 模式：Command 空但 PromptTemplate 非空，Cwd 空继承父进程）
+		{ID: "f4", Name: "n", Command: "", Cwd: "/d"},   // 非法：Command 空 + 无 PromptTemplate
 	}
 	valid, invalidIDs := validateFunctions(funcs)
-	if len(valid) != 1 || valid[0].ID != "f2" {
-		t.Errorf("valid 应只含 f2, got %v", valid)
+	if len(valid) != 2 {
+		t.Errorf("valid 应含 f2/f3 两项, got %v", valid)
 	}
-	if len(invalidIDs) != 3 {
-		t.Errorf("invalidIDs 数: got %d, want 3", len(invalidIDs))
+	if len(invalidIDs) != 4 {
+		t.Errorf("invalidIDs 数: got %d, want 4（nil/ID空/Name空/f4）", len(invalidIDs))
 	}
 }
 

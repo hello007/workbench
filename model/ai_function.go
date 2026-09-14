@@ -1,24 +1,27 @@
 package model
 
+import "encoding/json"
+
 // AiFunction AI 功能项：工具箱「AI 功能」页中一个可一键触发的 Claude skill 调用配置。
 // 配置存 data/ai_functions.json，新增 skill 只加配置不改代码。
 type AiFunction struct {
-	ID             string            `json:"id"`             // 唯一标识（主键）
-	Name           string            `json:"name"`           // 显示名称
-	Description    string            `json:"description"`    // 显示描述
-	Icon           string            `json:"icon"`           // Element Plus 图标名（如 "MagicStick"）
-	Command        string            `json:"command"`        // 斜杠命令（含插件命名空间，如 "/ab-office:agree-slides"）
-	Cwd            string            `json:"cwd"`            // 子进程工作目录（skill 所在项目根，项目级 skill 发现依赖此值）
-	AddDirs        []string          `json:"addDirs"`        // 额外授权目录（逐个映射为 --add-dir）
-	Env            map[string]string `json:"env"`            // 注入子进程的环境变量（经 --settings {"env":{...}}，MCP token 等）
-	Mcp            *AiMcpConfig      `json:"mcp"`            // MCP server 注入（经 --mcp-config 内联 JSON），nil 表示不注入
-	PermissionMode string            `json:"permissionMode"` // claude --permission-mode，默认 bypassPermissions（菜单场景无交互）
-	TimeoutMinutes int               `json:"timeoutMinutes"` // 超时分钟数，0 表示用默认值 10
-	Completion     string            `json:"completion"`     // 完成动作：none/open_dir/preview/copy
-	Params         *AiParamSpec      `json:"params"`         // 运行前参数输入，nil 表示无参数直跑
-	FollowUps      []AiFollowUp      `json:"followUps"`      // 后续段（多段编排），运行完成后面板显示对应按钮，点击即 --resume 续会话
-	Tags           []string          `json:"tags,omitempty"`   // 业务域标签，如 ["周报","ABX5"]，供列表分组筛选与搜索匹配
-	Pinned         bool              `json:"pinned,omitempty"` // 置顶，列表排序时始终排在最前
+	ID             string            `json:"id"`                     // 唯一标识（主键）
+	Name           string            `json:"name"`                   // 显示名称
+	Description    string            `json:"description"`            // 显示描述
+	Icon           string            `json:"icon"`                   // Element Plus 图标名（如 "MagicStick"）
+	Command        string            `json:"command"`                // 斜杠命令（含插件命名空间，如 "/ab-office:agree-slides"）
+	Cwd            string            `json:"cwd"`                    // 子进程工作目录（skill 所在项目根，项目级 skill 发现依赖此值）
+	AddDirs        []string          `json:"addDirs"`                // 额外授权目录（逐个映射为 --add-dir）
+	Env            map[string]string `json:"env"`                    // 注入子进程的环境变量（经 --settings {"env":{...}}，MCP token 等）
+	Mcp            *AiMcpConfig      `json:"mcp"`                    // MCP server 注入（经 --mcp-config 内联 JSON），nil 表示不注入
+	PermissionMode string            `json:"permissionMode"`         // claude --permission-mode，默认 bypassPermissions（菜单场景无交互）
+	TimeoutMinutes int               `json:"timeoutMinutes"`         // 超时分钟数，0 表示用默认值 10
+	Completion     string            `json:"completion"`             // 完成动作：none/open_dir/preview/copy
+	Params         *AiParamSpec      `json:"params"`                 // 运行前参数输入，nil 表示无参数直跑
+	FollowUps      []AiFollowUp      `json:"followUps"`              // 后续段（多段编排），运行完成后面板显示对应按钮，点击即 --resume 续会话
+	Tags           []string          `json:"tags,omitempty"`         // 业务域标签，如 ["周报","ABX5"]，供列表分组筛选与搜索匹配
+	Pinned         bool              `json:"pinned,omitempty"`       // 置顶，列表排序时始终排在最前
+	OutputSchema   json.RawMessage   `json:"outputSchema,omitempty"` // 结构化输出 JSON schema，非空时 buildClaudeArgs 追加 --json-schema，claude 在 result 事件回 structured_output 字段严格符合 schema
 }
 
 // CurrentSchemaVersion ai_functions.json 当前 schema 版本。
@@ -125,32 +128,34 @@ type AiConcurrencyStatus struct {
 // 3.3 流式文件改造后 Output 仅含末尾预览（~4KB），全量输出已落输出文件，
 // 前端 copy/preview/表格视图经 GetAiTaskOutput 全量读取，不再从本结构取全量。
 type AiTaskRunResult struct {
-	TaskID         string         `json:"taskId"`
-	SessionID      string         `json:"sessionId"` // claude 会话 id，供后续段 --resume
-	ExitCode       int            `json:"exitCode"`
-	Error          string         `json:"error"`
-	Output         string         `json:"output"`                   // 末尾预览（~4KB），非全量
-	OutputSize     int64          `json:"outputSize"`               // 完整输出字节数
-	OutputFile     string         `json:"outputFile"`               // 输出文件相对路径（归档后指向 data/ai_task_history/<id>.txt）
-	TableExtracted *MeetingTable  `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
-	Canceled       bool           `json:"canceled"`
-	Metrics        *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：result 事件计量，nil 表示无计量数据
+	TaskID           string          `json:"taskId"`
+	SessionID        string          `json:"sessionId"` // claude 会话 id，供后续段 --resume
+	ExitCode         int             `json:"exitCode"`
+	Error            string          `json:"error"`
+	Output           string          `json:"output"`                   // 末尾预览（~4KB），非全量
+	OutputSize       int64           `json:"outputSize"`               // 完整输出字节数
+	OutputFile       string          `json:"outputFile"`               // 输出文件相对路径（归档后指向 data/ai_task_history/<id>.txt）
+	TableExtracted   *MeetingTable   `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
+	Canceled         bool            `json:"canceled"`
+	Metrics          *AiTaskMetrics  `json:"metrics,omitempty"`          // P0-2：result 事件计量，nil 表示无计量数据
+	StructuredOutput json.RawMessage `json:"structuredOutput,omitempty"` // 方案 C：--json-schema 强制结构化输出，result 事件 structured_output 字段原样透传前端，nil 表示未配 OutputSchema 或 result 无该字段
 }
 
 // AiTaskState 任务当前状态（前端恢复/展示用），GetAiTaskState 拉取。
 // 3.3 流式文件改造后 Output 仅含末尾预览（~4KB），不再全量拷贝 strings.Builder。
 type AiTaskState struct {
-	TaskID         string         `json:"taskId"`
-	FunctionID     string         `json:"functionId"`
-	Running        bool           `json:"running"`
-	Queued         bool           `json:"queued"` // P0-3：排队中（等待并发槽位，未起进程）
-	SessionID      string         `json:"sessionId"`
-	Prompt         string         `json:"prompt"`
-	Output         string         `json:"output"`                   // 末尾预览（~4KB），非全量
-	OutputSize     int64          `json:"outputSize"`               // 完整输出字节数
-	OutputFile     string         `json:"outputFile"`               // 输出文件相对路径（供前端拉全量）
-	TableExtracted *MeetingTable  `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
-	Error          string         `json:"error"`
-	StartedAt      int64          `json:"startedAt"`         // unix 毫秒
-	Metrics        *AiTaskMetrics `json:"metrics,omitempty"` // P0-2：计量摘要，恢复展示用
+	TaskID           string          `json:"taskId"`
+	FunctionID       string          `json:"functionId"`
+	Running          bool            `json:"running"`
+	Queued           bool            `json:"queued"` // P0-3：排队中（等待并发槽位，未起进程）
+	SessionID        string          `json:"sessionId"`
+	Prompt           string          `json:"prompt"`
+	Output           string          `json:"output"`                   // 末尾预览（~4KB），非全量
+	OutputSize       int64           `json:"outputSize"`               // 完整输出字节数
+	OutputFile       string          `json:"outputFile"`               // 输出文件相对路径（供前端拉全量）
+	TableExtracted   *MeetingTable   `json:"tableExtracted,omitempty"` // 预解析 markdown 表格，nil 表示无表格
+	Error            string          `json:"error"`
+	StartedAt        int64           `json:"startedAt"`                  // unix 毫秒
+	Metrics          *AiTaskMetrics  `json:"metrics,omitempty"`          // P0-2：计量摘要，恢复展示用
+	StructuredOutput json.RawMessage `json:"structuredOutput,omitempty"` // 方案 C：结构化输出透传，与 AiTaskRunResult.StructuredOutput 同源
 }

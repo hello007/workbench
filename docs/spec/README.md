@@ -27,6 +27,7 @@
 |[e2e-testing.md](e2e-testing.md)|E2E 测试规范（方案 C 混合架构）：前端 Playwright E2E（vite preview web 版 + mock Wails 后端，fixtures 注入）+ 后端 Go 集成测试（`//go:build integration` 标签隔离）；mock 单一数据源 `src/test/wails-mock-defaults.js`；`wailsjs/` 不入库，CI 须先 `wails generate module` 再 build|
 |[perf-baseline.md](perf-baseline.md)|性能基线（v1.4 PR1）：Go benchmark（FileTree/ScanGitRepos/NewAppServices ns/op+B/op+allocs）+ 前端 bundle 体积（chunk 分布）+ MemStats 快照 + GUI 冷启动占位；PR4 优化前后对比的唯一数据依据；benchmark 不纳入覆盖率门禁|
 |[security-scan.md](security-scan.md)|安全扫描（v1.4 PR1）：govulncheck（Go 调用链分析）+ npm audit（官方 registry 绕过 npmmirror）；CI security job `continue-on-error` 不阻塞 PR；已知漏洞清单（xlsx 无补丁接受风险、go-git/go-billy/x/net/标准库已修复）；go.mod `toolchain` directive 与标准库漏洞修复|
+|[ai-structured-output.md](ai-structured-output.md)|AI 结构化输出契约（v1.5 AI epic PR1）：claude CLI `--json-schema` tool use 强制结构化，与自由文本 result 解耦；`AiFunction.OutputSchema` → `buildClaudeArgs` → `parseStreamLine` 提取 structured_output → `AiTaskRunResult/AiTaskState.StructuredOutput` 透传前端只渲染不解析；纯 prompt skill 模式（Command 空 + PromptTemplate 驱动，validateFunctions 放宽）|
 
 ## 新增文档约定
 
@@ -38,4 +39,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-09-14
+**最后更新：** 2026-09-15

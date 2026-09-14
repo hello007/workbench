@@ -49,13 +49,14 @@ func WrapAppError(code, message string, err error) *AppError {
 // 新增错误码须同步本表 + docs/spec/logging-and-errors.md + 前端 error.js codeMap。
 const (
 	// Git 域
-	ErrCodeGitInProgress = "E_GIT_IN_PROGRESS" // 变更类操作进行中，本次拒绝（warning）
+	ErrCodeGitInProgress      = "E_GIT_IN_PROGRESS"       // 变更类操作进行中，本次拒绝（warning）
+	ErrCodeGitNoStagedChanges = "E_GIT_NO_STAGED_CHANGES" // 无暂存文件，AI 提交信息生成按钮禁用（warning）
 
 	// 外部 diff 工具域
 	ErrCodeDiffToolNotConfigured = "E_DIFF_TOOL_NOT_CONFIGURED" // 未配置或配置无效（缺路径/参数模板占位符），引导用户去设置（warning）
 	ErrCodeDiffToolLaunchFailed  = "E_DIFF_TOOL_LAUNCH_FAILED"  // 可执行文件不存在或启动失败（error）
 
 	// 仓库列表配置导入导出域
-	ErrCodeRepoConfigInvalidJSON       = "E_REPO_CONFIG_INVALID_JSON"        // 导入文件不是合法 JSON 或顶层结构缺失（error）
+	ErrCodeRepoConfigInvalidJSON        = "E_REPO_CONFIG_INVALID_JSON"        // 导入文件不是合法 JSON 或顶层结构缺失（error）
 	ErrCodeRepoConfigUnsupportedVersion = "E_REPO_CONFIG_UNSUPPORTED_VERSION" // manifestVersion 缺失或高于当前支持，须用兼容版本应用重新导出（error）
 )

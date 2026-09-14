@@ -123,7 +123,7 @@ func TestRenderPrompt_MissingParamKept(t *testing.T) {
 
 func TestParseStreamLine_AssistantText(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"role":"assistant","content":[{"type":"text","text":"会议号 123"}]}}`
-	text, isResult, sid, metrics := parseStreamLine(line)
+	text, isResult, sid, metrics, _ := parseStreamLine(line)
 	if text != "会议号 123" {
 		t.Errorf("文本增量不符: %q", text)
 	}
@@ -140,7 +140,7 @@ func TestParseStreamLine_AssistantText(t *testing.T) {
 
 func TestParseStreamLine_ResultEvent(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s2","result":"done"}`
-	_, isResult, sid, metrics := parseStreamLine(line)
+	_, isResult, sid, metrics, _ := parseStreamLine(line)
 	if !isResult {
 		t.Errorf("result 事件应标记终态")
 	}
@@ -156,7 +156,7 @@ func TestParseStreamLine_ResultEvent(t *testing.T) {
 // TestParseStreamLine_ResultWithMetrics result 事件携带计量字段时解析为 AiTaskMetrics
 func TestParseStreamLine_ResultWithMetrics(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s3","duration_ms":8268,"num_turns":1,"total_cost_usd":0.14502,"usage":{"input_tokens":28919,"output_tokens":17,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
-	_, isResult, _, metrics := parseStreamLine(line)
+	_, isResult, _, metrics, _ := parseStreamLine(line)
 	if !isResult {
 		t.Errorf("result 事件应标记终态")
 	}
@@ -184,7 +184,7 @@ func TestParseStreamLine_ResultWithMetrics(t *testing.T) {
 }
 
 func TestParseStreamLine_NonJSONPassthrough(t *testing.T) {
-	text, isResult, _, metrics := parseStreamLine("some diagnostic text")
+	text, isResult, _, metrics, _ := parseStreamLine("some diagnostic text")
 	if text != "some diagnostic text\n" {
 		t.Errorf("非 JSON 行应原样透传加换行: %q", text)
 	}
@@ -198,7 +198,7 @@ func TestParseStreamLine_NonJSONPassthrough(t *testing.T) {
 
 func TestParseStreamLine_ToolUseIgnored(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"content":[{"type":"tool_use","name":"get_meeting"}]}}`
-	text, _, _, _ := parseStreamLine(line)
+	text, _, _, _, _ := parseStreamLine(line)
 	if text != "" {
 		t.Errorf("tool_use 片段不应产出文本: %q", text)
 	}
@@ -231,8 +231,8 @@ func TestLoadAiFunctions_DefaultSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 4 {
-		t.Fatalf("默认功能项数量: 期望=4 实际=%d", len(funcs))
+	if len(funcs) != 6 {
+		t.Fatalf("默认功能项数量: 期望=6 实际=%d", len(funcs))
 	}
 	ids := map[string]bool{}
 	for _, f := range funcs {
@@ -245,7 +245,7 @@ func TestLoadAiFunctions_DefaultSeed(t *testing.T) {
 	}
 	// 二次加载应读文件而非重新 seed
 	funcs2, _ := svc.LoadAiFunctions()
-	if len(funcs2) != 4 {
+	if len(funcs2) != 6 {
 		t.Errorf("二次加载数量不符: %d", len(funcs2))
 	}
 }
@@ -254,7 +254,7 @@ func TestLoadAiFunctions_EmptyArrayReseed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ai_functions.json")
 
-	// 预写空数组（配置界面保存过空数组的现场），Load 应自愈回种默认四项
+	// 预写空数组（配置界面保存过空数组的现场），Load 应自愈回种默认六项
 	if err := os.WriteFile(path, []byte("[]"), 0o644); err != nil {
 		t.Fatalf("预写空数组失败: %v", err)
 	}
@@ -263,11 +263,11 @@ func TestLoadAiFunctions_EmptyArrayReseed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 4 {
-		t.Fatalf("空数组自愈后数量: 期望=4 实际=%d", len(funcs))
+	if len(funcs) != 6 {
+		t.Fatalf("空数组自愈后数量: 期望=6 实际=%d", len(funcs))
 	}
 
-	// 文件应被重写为 schema v2 结构的默认四项（直接读文件验证，二次 Load 无法区分回种与重写）
+	// 文件应被重写为 schema v2 结构的默认六项（直接读文件验证，二次 Load 无法区分回种与重写）
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读回配置文件失败: %v", err)
@@ -279,8 +279,8 @@ func TestLoadAiFunctions_EmptyArrayReseed(t *testing.T) {
 	if persisted.SchemaVersion != model.CurrentSchemaVersion {
 		t.Errorf("schemaVersion 不符: 期望=%d 实际=%d", model.CurrentSchemaVersion, persisted.SchemaVersion)
 	}
-	if len(persisted.Functions) != 4 {
-		t.Errorf("配置文件未被重写为默认四项: 期望=4 实际=%d", len(persisted.Functions))
+	if len(persisted.Functions) != 6 {
+		t.Errorf("配置文件未被重写为默认六项: 期望=6 实际=%d", len(persisted.Functions))
 	}
 }
 
@@ -408,10 +408,10 @@ func TestImportAiFunctions_InvalidMarked(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewAiFunctionService(nil, filepath.Join(dir, "ai_functions.json"))
 
-	// empty-cwd 项 Cwd 为空 → validateFunctions 判非法；valid-1 正常
+	// empty-cmd 项 Command 空 + 无 PromptTemplate → validateFunctions 判非法（纯 prompt 模式须有模板）；valid-1 正常
 	v2 := `{"schemaVersion":2,"functions":[
 		{"id":"valid-1","name":"合法项","command":"/v","cwd":"D:\\v"},
-		{"id":"empty-cwd","name":"缺工作目录","command":"/e","cwd":""}
+		{"id":"empty-cmd","name":"缺命令与模板","command":"","cwd":"D:\\e"}
 	]}`
 	preview, err := svc.ImportAiFunctions(v2)
 	if err != nil {
@@ -420,7 +420,7 @@ func TestImportAiFunctions_InvalidMarked(t *testing.T) {
 	if len(preview.New) != 1 || preview.New[0].ID != "valid-1" {
 		t.Errorf("New 分类不符: %+v", preview.New)
 	}
-	if len(preview.Invalid) != 1 || preview.Invalid[0] != "empty-cwd" {
+	if len(preview.Invalid) != 1 || preview.Invalid[0] != "empty-cmd" {
 		t.Errorf("Invalid 分类不符: %+v", preview.Invalid)
 	}
 }
@@ -1140,7 +1140,7 @@ func TestLoadAiFunctions_V1ArrayMigrate(t *testing.T) {
 func TestLoadAiFunctions_PartialInvalidTrimmed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ai_functions.json")
-	cfg := `{"schemaVersion":2,"functions":[{"id":"a","name":"A","command":"/a","cwd":"D:\\a"},{"id":"b","name":"B","cwd":"D:\\b"},{"id":"c","name":"C","command":"/c"}]}`
+	cfg := `{"schemaVersion":2,"functions":[{"id":"a","name":"A","command":"/a","cwd":"D:\\a"},{"id":"b","name":"B","command":"","cwd":"D:\\b"},{"id":"c","name":"C","command":"","cwd":"D:\\c"}]}`
 	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("预写配置失败: %v", err)
 	}
@@ -1171,8 +1171,8 @@ func TestLoadAiFunctions_AllInvalidReseed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 4 {
-		t.Errorf("全部非法应回种 4 项 seed: %d", len(funcs))
+	if len(funcs) != 6 {
+		t.Errorf("全部非法应回种 6 项 seed: %d", len(funcs))
 	}
 	matches, _ := filepath.Glob(path + ".bak.*")
 	if len(matches) != 1 {
@@ -1192,8 +1192,8 @@ func TestLoadAiFunctions_GarbledTopLevelReseed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 4 {
-		t.Errorf("非法内容应回种 4 项 seed: %d", len(funcs))
+	if len(funcs) != 6 {
+		t.Errorf("非法内容应回种 6 项 seed: %d", len(funcs))
 	}
 	matches, _ := filepath.Glob(path + ".bak.*")
 	if len(matches) != 1 {
