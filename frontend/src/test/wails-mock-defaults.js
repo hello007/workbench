@@ -49,7 +49,13 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
     conflictFavorites: [],
     invalid: []
   },
-  ApplyRepoConfigImport: { added: 0, overwritten: 0, skipped: 0, failed: 0, failedReasons: [] }
+  ApplyRepoConfigImport: { added: 0, overwritten: 0, skipped: 0, failed: 0, failedReasons: [] },
+
+  // ---- 会话快照（崩溃恢复 UI 状态，data/session.json）----
+  // GetSessionState 默认 null = 无快照（首次启动 / 崩溃后冷启动），用例按需 override 注入快照验恢复
+  GetSessionState: null,
+  // SaveSessionState 默认 true = mock no-op（debounce / beforeunload 调用，失败静默不阻塞 UI）
+  SaveSessionState: true
 }
 
 /**

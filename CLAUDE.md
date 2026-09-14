@@ -61,6 +61,7 @@ workbench/
 |前端还原 `ReadFileBytes` 返回的 base64 为文本时用 `utils/base64.js` 的 `decodeBase64Utf8`，禁裸 `atob`（Latin-1 逐字节还原，中文双重编码乱码；ASCII 内容恰好正确故单测须用中文数据）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |后端跨包共用测试辅助入 `util/testutil`（`RunGit`/`WriteFile`/`InitTempRepo`/`SetupMasterBranch`/`SetupFFRepo`/`SetupConflictRepo`），与前端 `wails-mock-defaults.js` 单一数据源模式对齐；包内专用辅助留 `*_test_helper.go` 不导出；禁各 `_test.go` 重复定义 git 命令执行/临时仓库构造辅助；集成测试 `it*` helper 语义更严（autocrlf/gpgsign）不并入 testutil；辅助函数参数用 `testing.TB`（`*testing.T`/`*testing.B` 共同接口）使 benchmark 可复用 fixture 构造|[perf-baseline.md](docs/spec/perf-baseline.md)|
 |依赖安全扫描：Go 用 `govulncheck ./...`（调用链分析，非全依赖树），npm 用 `npm audit --registry=https://registry.npmjs.org --audit-level=high`（本地 npmmirror 不支持安全端点须绕过）；CI security job `continue-on-error` 不阻塞 PR；Go 标准库漏洞只能升 `go.mod` `toolchain` directive 修复（非 `go get`），依赖升级后须重跑 govulncheck 确认清零|[security-scan.md](docs/spec/security-scan.md)|
+|崩溃恢复 UI 状态快照独立持久化 `data/session.json`（`SessionState`：selectedDirectoryId/activePanel/terminal）；`Terminal` 字段须用指针避 `omitempty` 空快照失效（nil→前端判冷启动）；类型名 `TerminalSnapshot` 避让 `model/terminal.go` 运行时会话；Load 损坏降级空快照不阻塞启动（复用 SettingsService 模式 + slog.Warn）；字段变更须同步 `frontend/wailsjs/` 绑定三处|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 
 ## 文档索引
 

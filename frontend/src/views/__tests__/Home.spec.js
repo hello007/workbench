@@ -64,7 +64,10 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true)),
   RefreshDirectoriesGitFlag: vi.fn(() => Promise.resolve([])),
   AddDirectory: vi.fn(() => Promise.resolve({ id: '1' })),
-  GetSettings: vi.fn(() => Promise.resolve({}))
+  GetSettings: vi.fn(() => Promise.resolve({})),
+  // 会话快照（崩溃恢复）：默认无快照（冷启动），SaveSessionState mock no-op
+  GetSessionState: vi.fn(() => Promise.resolve(null)),
+  SaveSessionState: vi.fn(() => Promise.resolve(true))
 }))
 
 describe('Home.vue - Bug修复验证', () => {

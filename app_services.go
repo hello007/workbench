@@ -36,6 +36,9 @@ type AppServices struct {
 	aiFuncSvc          *service.AiFunctionService
 	skillDiscoverySvc  *service.SkillDiscoveryService
 	repoConfigSvc      *service.RepoConfigService
+	// 会话快照服务（崩溃恢复 UI 状态，data/session.json）。复用 SettingsService 持久化模式，
+	// Load 损坏降级冷启动不阻塞；前端 debounce 写 + shutdown 最终写。见 docs/spec/cross-layer-contracts.md。
+	sessionSvc *service.SessionService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -102,6 +105,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 仓库列表配置导入导出服务（聚合工作目录 + 收藏夹两个数据源，跨依赖须在其后构造）
 	s.repoConfigSvc = service.NewRepoConfigService(s.directorySvc, s.favoritesSvc)
+
+	// 会话快照服务（崩溃恢复 UI 状态，独立 data/session.json 不与 settings.json 耦合）
+	s.sessionSvc = service.NewSessionService(filepath.Join(dataDir, "session.json"))
 
 	return s
 }

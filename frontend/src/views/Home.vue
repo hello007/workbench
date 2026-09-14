@@ -120,6 +120,7 @@ import CommandPalette from '../components/CommandPalette.vue'
 import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
+import { restoreSession, applySessionState, startSessionAutoSave } from '../composables/useSessionState'
 import { useSettingsStore, useUiStore, useDirectoryStore, useWorkspaceStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -610,9 +611,36 @@ watch(() => directoryStore.selectedDirectoryId, () => {
   workspaceStore.clearClipboard()
 })
 
+// 会话快照自动保存句柄（debounce + beforeunload），onBeforeUnmount 时 dispose 释放监听
+let sessionAutoSave = null
+
 onMounted(() => {
-  // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记。
-  directoryStore.loadDirectories().then(() => directoryStore.refreshGitFlags())
+  // 启动会话快照自动保存（debounce 写 + beforeunload 最终写），恢复完成后才启用避免恢复写回触发保存
+  sessionAutoSave = startSessionAutoSave()
+
+  // 启动流程：先用缓存渲染列表（秒回），再异步刷新 git 标记 + 恢复上次会话 UI 状态。
+  directoryStore.loadDirectories().then(async () => {
+    directoryStore.refreshGitFlags()
+    // 恢复上次会话 UI 状态（崩溃/异常退出后启动时恢复；首次启动或无快照时走默认冷启动）
+    const snapshot = await restoreSession()
+    if (snapshot) {
+      let restored = applySessionState(snapshot)
+      // 恢复当前工作目录：仅当该目录仍存在于列表中时，复用 onDirectorySelect 切换
+      // （顺带触发文件树重载 + useTreeState 的 localStorage 展开状态还原，不纳入 session.json 重复持久化）
+      if (snapshot.selectedDirectoryId) {
+        const exists = directoryStore.directories.some(d => d.id === snapshot.selectedDirectoryId)
+        if (exists && snapshot.selectedDirectoryId !== directoryStore.selectedDirectoryId) {
+          await onDirectorySelect(snapshot.selectedDirectoryId)
+          restored = true
+        }
+      }
+      if (restored) {
+        ElMessage.success({ message: '已恢复上次会话', duration: 1500 })
+      }
+    }
+    // 恢复阶段完成，启用自动保存
+    sessionAutoSave.markRestored()
+  })
   settingsStore.loadShortcuts()
   GetAppVersion().then(v => { uiStore.appVersion = v }).catch(() => {})
   document.addEventListener('keydown', handleGlobalKeydown)
@@ -620,6 +648,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
+  if (sessionAutoSave) {
+    sessionAutoSave.dispose()
+    sessionAutoSave = null
+  }
 })
 </script>
 
