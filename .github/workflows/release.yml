@@ -19,11 +19,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 2. 安装 Go 1.24
+      # 2. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.6）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       # 3. 安装 Node.js 20（带 npm cache 加速）
       - name: 安装 Node.js

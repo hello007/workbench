@@ -22,11 +22,11 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 2. 安装 Go 1.24（对齐 release.yml；setup-go 默认缓存 go module/build）
+      # 2. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.6；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       # 3. 安装 Node.js 20（带 npm cache 加速，对齐 release.yml）
       - name: 安装 Node.js
@@ -83,3 +83,43 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # 安全扫描 job：与 test job 并行，govulncheck + npm audit 采集漏洞。
+  # continue-on-error：发现 high 漏洞时标记 job 失败但不阻塞 PR 合并（信息性扫描）。
+  # 已知无补丁漏洞（如 xlsx）见 docs/spec/security-scan.md「已知接受风险」章节。
+  security:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # Go 漏洞扫描：govulncheck 基于代码实际调用链分析已知漏洞（非全依赖树扫描），
+      # 只报代码可达的漏洞，噪声低。go.mod toolchain go1.26.6 确保标准库漏洞已修复。
+      - name: 安装 govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Go 漏洞扫描
+        run: govulncheck ./...
+
+      # 前端依赖安装（npm audit 需读取 package-lock.json 依赖树）
+      - name: 安装前端依赖
+        run: cd frontend && npm ci
+
+      # npm 漏洞扫描：本地 npmmirror registry 不支持安全端点，须显式指定官方 registry。
+      # --audit-level=high：仅 high 以上漏洞才使步骤失败，避免 low/moderate 噪声阻塞。
+      - name: 前端漏洞扫描
+        run: cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=high

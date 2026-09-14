@@ -6,8 +6,8 @@
 
 | 层级 | 技术 | 版本 |
 | ---- | ---- | ---- |
-| 后端 | Go | 1.26.2 |
-| 桌面框架 | Wails | v2.12.0 |
+| 后端 | Go | 1.26.6 |
+| 桌面框架 | Wails | v2.16.0 |
 | 前端 | Vue 3 (Composition API) | 3.5.33 |
 | UI 组件 | Element Plus | 2.13.7 |
 | 状态管理 | Pinia | 4.0.3 |
@@ -101,7 +101,7 @@ git push origin v1.0.8
 ```
 
 流水线会自动完成以下步骤：
-1. 在 Windows runner 上安装 Go 1.24 + Node.js 20 + Wails CLI
+1. 在 Windows runner 上安装 Go 1.26 + Node.js 20 + Wails CLI
 2. 执行 `wails build`（自动注入版本号和构建时间）
 3. 创建 GitHub Release 并上传 `workbench.exe`
 
