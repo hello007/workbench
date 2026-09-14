@@ -1,10 +1,11 @@
 package util
 
 import (
-	"os/exec"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workbench/util/testutil"
 )
 
 // TestIsGitRepositoryFast_StandardRepo 标准仓库（.git 为目录）应被识别。
@@ -56,18 +57,8 @@ func TestIsGitRepositoryFast_NonexistentPath(t *testing.T) {
 // TestIsGitRepositoryFast_RealGitRepo 用真实 git init 创建的仓库应被识别（端到端验证）。
 func TestIsGitRepositoryFast_RealGitRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	if !IsGitRepositoryFast(dir) {
 		t.Error("expected real git init repo to be detected")
-	}
-}
-
-// runGitSimple 在指定目录执行 git 命令，失败即终止测试。
-func runGitSimple(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("git %v in %s failed: %v", args, dir, err)
 	}
 }

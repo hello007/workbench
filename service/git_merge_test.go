@@ -1,68 +1,13 @@
 package service
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
-
-// svcMergeWriteFile 写入测试文件，失败即终止。
-func svcMergeWriteFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-// svcSetupMasterBranch 显式以 master 作为初始分支，避免 git 新版默认 main 歧义。
-func svcSetupMasterBranch(t *testing.T, dir string) {
-	t.Helper()
-	runGit(t, dir, "symbolic-ref", "HEAD", "refs/heads/master")
-}
-
-// svcSetupFFRepo 构造可快进合并仓库：master 基线提交，feature 领先一个提交，切回 master。
-func svcSetupFFRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	runGit(t, dir, "init")
-	svcSetupMasterBranch(t, dir)
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "base\n")
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "base")
-	runGit(t, dir, "checkout", "-b", "feature")
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "feature\n")
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "feature")
-	runGit(t, dir, "checkout", "master")
-	return dir
-}
-
-// svcSetupConflictRepo 构造冲突仓库：master 与 feature 各改 a.txt 同一行 line2 并提交。
-func svcSetupConflictRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	runGit(t, dir, "init")
-	svcSetupMasterBranch(t, dir)
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "line1\nline2\nline3\n")
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "base")
-	runGit(t, dir, "checkout", "-b", "feature")
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "line1\nfeature-line2\nline3\n")
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "feature change line2")
-	runGit(t, dir, "checkout", "master")
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "line1\nmaster-line2\nline3\n")
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "master change line2")
-	return dir
-}
 
 // TestMerge_NonRepo 非仓库目录 merge 返回错误。
 func TestMerge_NonRepo(t *testing.T) {
@@ -74,7 +19,7 @@ func TestMerge_NonRepo(t *testing.T) {
 
 // TestMerge_EmptyBranch 目标分支空时拒绝，且优先于工作区校验。
 func TestMerge_EmptyBranch(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Merge(dir, "  ", model.MergeModeFF); err == nil {
 		t.Error("空分支名应返回错误")
@@ -83,8 +28,8 @@ func TestMerge_EmptyBranch(t *testing.T) {
 
 // TestMerge_DirtyWorkspace 工作区有未提交变更时拒绝 merge。
 func TestMerge_DirtyWorkspace(t *testing.T) {
-	dir := svcSetupFFRepo(t)
-	svcMergeWriteFile(t, filepath.Join(dir, "dirty.txt"), "dirty\n")
+	dir := testutil.SetupFFRepo(t)
+	testutil.WriteFile(t, filepath.Join(dir, "dirty.txt"), "dirty\n")
 	svc := NewGitService()
 	_, err := svc.Merge(dir, "feature", model.MergeModeFF)
 	if err == nil {
@@ -97,8 +42,8 @@ func TestMerge_DirtyWorkspace(t *testing.T) {
 
 // TestMerge_DetachedHead 分离头指针状态下禁止 merge。
 func TestMerge_DetachedHead(t *testing.T) {
-	dir := svcSetupFFRepo(t)
-	runGit(t, dir, "checkout", "--detach")
+	dir := testutil.SetupFFRepo(t)
+	testutil.RunGit(t, dir, "checkout", "--detach")
 	svc := NewGitService()
 	_, err := svc.Merge(dir, "feature", model.MergeModeFF)
 	if err == nil {
@@ -111,7 +56,7 @@ func TestMerge_DetachedHead(t *testing.T) {
 
 // TestMerge_Success_FF 可快进场景 merge ff 成功，无冲突态。
 func TestMerge_Success_FF(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Merge(dir, "feature", model.MergeModeFF); err != nil {
 		t.Fatalf("Merge ff: %v", err)
@@ -127,7 +72,7 @@ func TestMerge_Success_FF(t *testing.T) {
 
 // TestMerge_Conflict_EntersState 冲突 merge 进入冲突态，类型为 merge 且含冲突文件。
 func TestMerge_Conflict_EntersState(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Merge(dir, "feature", model.MergeModeFF); err != nil {
 		t.Fatalf("冲突应被接受为正常返回: %v", err)
@@ -152,7 +97,7 @@ func TestMerge_Conflict_EntersState(t *testing.T) {
 
 // TestGetConflictState_None 干净仓库冲突态为 none、文件列表空。
 func TestGetConflictState_None(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	state, err := svc.GetConflictState(dir)
 	if err != nil {
@@ -168,10 +113,10 @@ func TestGetConflictState_None(t *testing.T) {
 
 // TestResolveConflict 标记冲突文件已解决后，冲突列表清空。
 func TestResolveConflict(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	svc.Merge(dir, "feature", model.MergeModeFF)
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "line1\nresolved\nline3\n")
+	testutil.WriteFile(t, filepath.Join(dir, "a.txt"), "line1\nresolved\nline3\n")
 	if err := svc.ResolveConflict(dir, "a.txt"); err != nil {
 		t.Fatalf("ResolveConflict: %v", err)
 	}
@@ -183,7 +128,7 @@ func TestResolveConflict(t *testing.T) {
 
 // TestResolveConflict_EmptyFile 文件路径空报错。
 func TestResolveConflict_EmptyFile(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if err := svc.ResolveConflict(dir, ""); err == nil {
 		t.Error("空文件路径应报错")
@@ -192,7 +137,7 @@ func TestResolveConflict_EmptyFile(t *testing.T) {
 
 // TestContinueMerge_NotInProgress 无进行中合并时 continue 报错。
 func TestContinueMerge_NotInProgress(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.ContinueMerge(dir); err == nil {
 		t.Error("无进行中合并应报错")
@@ -201,10 +146,10 @@ func TestContinueMerge_NotInProgress(t *testing.T) {
 
 // TestContinueMerge 冲突解决后 continue 完成合并，退出冲突态。
 func TestContinueMerge(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	svc.Merge(dir, "feature", model.MergeModeFF)
-	svcMergeWriteFile(t, filepath.Join(dir, "a.txt"), "line1\nresolved\nline3\n")
+	testutil.WriteFile(t, filepath.Join(dir, "a.txt"), "line1\nresolved\nline3\n")
 	svc.ResolveConflict(dir, "a.txt")
 	if _, err := svc.ContinueMerge(dir); err != nil {
 		t.Fatalf("ContinueMerge: %v", err)
@@ -217,7 +162,7 @@ func TestContinueMerge(t *testing.T) {
 
 // TestAbortMerge 冲突后 abort 清理冲突态。
 func TestAbortMerge(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	svc.Merge(dir, "feature", model.MergeModeFF)
 	if err := svc.AbortMerge(dir); err != nil {
@@ -231,7 +176,7 @@ func TestAbortMerge(t *testing.T) {
 
 // TestAbortMerge_NotInProgress 无进行中合并时 abort 报错。
 func TestAbortMerge_NotInProgress(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if err := svc.AbortMerge(dir); err == nil {
 		t.Error("无进行中合并 abort 应报错")
@@ -240,7 +185,7 @@ func TestAbortMerge_NotInProgress(t *testing.T) {
 
 // TestRebase_EmptyBranch 目标分支空时拒绝。
 func TestRebase_EmptyBranch(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Rebase(dir, ""); err == nil {
 		t.Error("空分支名应返回错误")
@@ -249,8 +194,8 @@ func TestRebase_EmptyBranch(t *testing.T) {
 
 // TestRebase_DirtyWorkspace 工作区脏拒绝 rebase（验证 precheck 共用）。
 func TestRebase_DirtyWorkspace(t *testing.T) {
-	dir := svcSetupFFRepo(t)
-	svcMergeWriteFile(t, filepath.Join(dir, "dirty.txt"), "dirty\n")
+	dir := testutil.SetupFFRepo(t)
+	testutil.WriteFile(t, filepath.Join(dir, "dirty.txt"), "dirty\n")
 	svc := NewGitService()
 	_, err := svc.Rebase(dir, "feature")
 	if err == nil {
@@ -263,7 +208,7 @@ func TestRebase_DirtyWorkspace(t *testing.T) {
 
 // TestRebase_Conflict_EntersState rebase 冲突进入 rebase 态。
 func TestRebase_Conflict_EntersState(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Rebase(dir, "feature"); err != nil {
 		t.Fatalf("rebase 冲突应被接受: %v", err)
@@ -276,7 +221,7 @@ func TestRebase_Conflict_EntersState(t *testing.T) {
 
 // TestAbortRebase 变基冲突后 abort 清理。
 func TestAbortRebase(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	svc.Rebase(dir, "feature")
 	if err := svc.AbortRebase(dir); err != nil {
@@ -290,7 +235,7 @@ func TestAbortRebase(t *testing.T) {
 
 // TestSkipRebase_NotRebase 无变基进行时 skip 报错。
 func TestSkipRebase_NotRebase(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.SkipRebase(dir); err == nil {
 		t.Error("无进行中变基 skip 应报错")
@@ -299,7 +244,7 @@ func TestSkipRebase_NotRebase(t *testing.T) {
 
 // TestCherryPick_EmptySHA SHA 空拒绝。
 func TestCherryPick_EmptySHA(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	if _, err := svc.CherryPick(dir, "  "); err == nil {
 		t.Error("空 SHA 应返回错误")
@@ -308,7 +253,7 @@ func TestCherryPick_EmptySHA(t *testing.T) {
 
 // TestCherryPick_Success 无冲突拣选成功。
 func TestCherryPick_Success(t *testing.T) {
-	dir := svcSetupFFRepo(t)
+	dir := testutil.SetupFFRepo(t)
 	svc := NewGitService()
 	shaOut, err := svc.gitCmd.Execute(dir, "rev-parse", "feature")
 	if err != nil {
@@ -326,7 +271,7 @@ func TestCherryPick_Success(t *testing.T) {
 
 // TestCherryPick_Conflict_EntersState 冲突拣选进入 cherry-pick 态。
 func TestCherryPick_Conflict_EntersState(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	shaOut, _ := svc.gitCmd.Execute(dir, "rev-parse", "feature")
 	sha := strings.TrimSpace(shaOut)
@@ -341,7 +286,7 @@ func TestCherryPick_Conflict_EntersState(t *testing.T) {
 
 // TestAbortCherryPick 拣选冲突后 abort 清理。
 func TestAbortCherryPick(t *testing.T) {
-	dir := svcSetupConflictRepo(t)
+	dir := testutil.SetupConflictRepo(t)
 	svc := NewGitService()
 	shaOut, _ := svc.gitCmd.Execute(dir, "rev-parse", "feature")
 	sha := strings.TrimSpace(shaOut)

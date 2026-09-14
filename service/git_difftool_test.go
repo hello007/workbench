@@ -9,6 +9,7 @@ import (
 
 	"workbench/model"
 	"workbench/util"
+	"workbench/util/testutil"
 )
 
 // newDiffTestRepo 创建含两次提交的测试仓库：
@@ -19,29 +20,22 @@ import (
 func newDiffTestRepo(t *testing.T) (string, string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "test@test.com")
-	runGit(t, dir, "config", "user.name", "test")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, dir, "config", "user.name", "test")
 
-	writeDiffFile(t, filepath.Join(dir, "main.go"), "v1")
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-m", "v1")
+	testutil.WriteFile(t, filepath.Join(dir, "main.go"), "v1")
+	testutil.RunGit(t, dir, "add", ".")
+	testutil.RunGit(t, dir, "commit", "-m", "v1")
 	v1 := gitRevParse(t, dir, "HEAD")
 
-	writeDiffFile(t, filepath.Join(dir, "main.go"), "v2")
-	writeDiffFile(t, filepath.Join(dir, "added.txt"), "new")
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-m", "v2")
+	testutil.WriteFile(t, filepath.Join(dir, "main.go"), "v2")
+	testutil.WriteFile(t, filepath.Join(dir, "added.txt"), "new")
+	testutil.RunGit(t, dir, "add", ".")
+	testutil.RunGit(t, dir, "commit", "-m", "v2")
 	v2 := gitRevParse(t, dir, "HEAD")
 
 	return dir, v1, v2
-}
-
-func writeDiffFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
 }
 
 func gitRevParse(t *testing.T, dir, rev string) string {
@@ -93,7 +87,7 @@ func TestOpenInExternalDiff_EmptyFile(t *testing.T) {
 
 func TestResolveExternalDiffSides_Workspace(t *testing.T) {
 	repo, _, _ := newDiffTestRepo(t)
-	writeDiffFile(t, filepath.Join(repo, "main.go"), "v2-working")
+	testutil.WriteFile(t, filepath.Join(repo, "main.go"), "v2-working")
 
 	svc := NewGitService()
 	left, rightPath, needTempRight, err := svc.resolveExternalDiffSides(repo, model.ExternalDiffRequest{Mode: "workspace", File: "main.go"})
@@ -113,7 +107,7 @@ func TestResolveExternalDiffSides_Workspace(t *testing.T) {
 
 func TestResolveExternalDiffSides_WorkspaceUntracked(t *testing.T) {
 	repo, _, _ := newDiffTestRepo(t)
-	writeDiffFile(t, filepath.Join(repo, "new.txt"), "brand new")
+	testutil.WriteFile(t, filepath.Join(repo, "new.txt"), "brand new")
 
 	svc := NewGitService()
 	left, _, needTempRight, err := svc.resolveExternalDiffSides(repo, model.ExternalDiffRequest{Mode: "workspace", File: "new.txt"})

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
 
 // initBareRemote 创建一个 bare git 仓库作为远程，返回其绝对路径（已转正斜杠）。
@@ -14,7 +15,7 @@ import (
 func initBareRemote(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	runGit(t, dir, "init", "--bare")
+	testutil.RunGit(t, dir, "init", "--bare")
 	return dir
 }
 
@@ -60,7 +61,7 @@ func TestListTags_NonRepo(t *testing.T) {
 
 // TestListTags_EmptyRepo 仓库无标签返回空切片。
 func TestListTags_EmptyRepo(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	tags, err := svc.ListTags(repo)
 	if err != nil {
@@ -73,16 +74,16 @@ func TestListTags_EmptyRepo(t *testing.T) {
 
 // TestListTags_LightweightAndAnnotated 轻量+注释标签的类型/sha/message/tagger 解析。
 func TestListTags_LightweightAndAnnotated(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 轻量标签：直接 ref 指向提交
-	runGit(t, repo, "tag", "v1.0")
+	testutil.RunGit(t, repo, "tag", "v1.0")
 	// 注释标签：tag 对象含 tagger/message
-	runGit(t, repo, "tag", "-a", "-m", "release 1.0", "v1.1")
+	testutil.RunGit(t, repo, "tag", "-a", "-m", "release 1.0", "v1.1")
 
 	tags, err := svc.ListTags(repo)
 	if err != nil {
@@ -139,11 +140,11 @@ func TestListTags_LightweightAndAnnotated(t *testing.T) {
 
 // TestCreateTag_Lightweight message 为空创建轻量标签。
 func TestCreateTag_Lightweight(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	if err := svc.CreateTag(repo, "v1.0", ""); err != nil {
 		t.Fatalf("CreateTag lightweight: %v", err)
@@ -160,11 +161,11 @@ func TestCreateTag_Lightweight(t *testing.T) {
 
 // TestCreateTag_Annotated message 非空创建注释标签。
 func TestCreateTag_Annotated(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	if err := svc.CreateTag(repo, "v1.1", "release note"); err != nil {
 		t.Fatalf("CreateTag annotated: %v", err)
@@ -184,7 +185,7 @@ func TestCreateTag_Annotated(t *testing.T) {
 
 // TestCreateTag_EmptyName 标签名为空返回错误。
 func TestCreateTag_EmptyName(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.CreateTag(repo, "  ", ""); err == nil {
 		t.Error("空标签名应返回错误")
@@ -193,11 +194,11 @@ func TestCreateTag_EmptyName(t *testing.T) {
 
 // TestCreateTag_Duplicate 重名标签返回错误。
 func TestCreateTag_Duplicate(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	if err := svc.CreateTag(repo, "v1.0", ""); err != nil {
 		t.Fatalf("first CreateTag: %v", err)
@@ -211,12 +212,12 @@ func TestCreateTag_Duplicate(t *testing.T) {
 
 // TestDeleteTag_Success 删除后列表不含该标签。
 func TestDeleteTag_Success(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
-	runGit(t, repo, "tag", "v1.0")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.RunGit(t, repo, "tag", "v1.0")
 
 	if err := svc.DeleteTag(repo, "v1.0"); err != nil {
 		t.Fatalf("DeleteTag: %v", err)
@@ -229,7 +230,7 @@ func TestDeleteTag_Success(t *testing.T) {
 
 // TestDeleteTag_NotExists 删除不存在的标签返回错误。
 func TestDeleteTag_NotExists(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.DeleteTag(repo, "nonexistent"); err == nil {
 		t.Error("删除不存在的标签应返回错误")
@@ -240,12 +241,12 @@ func TestDeleteTag_NotExists(t *testing.T) {
 
 // TestPushTag_NoRemote 无远程配置时推送返回错误。
 func TestPushTag_NoRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
-	runGit(t, repo, "tag", "v1.0")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.RunGit(t, repo, "tag", "v1.0")
 
 	if _, err := svc.PushTag(repo, "v1.0"); err == nil {
 		t.Error("无远程时推送标签应返回错误")
@@ -254,13 +255,13 @@ func TestPushTag_NoRemote(t *testing.T) {
 
 // TestPushTag_BareRemote 推送标签到本地 bare 远程成功，远程含该标签。
 func TestPushTag_BareRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 	remote := initBareRemote(t)
-	runGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
+	testutil.RunGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
 
 	if err := svc.CreateTag(repo, "v1.0", ""); err != nil {
 		t.Fatalf("CreateTag: %v", err)
@@ -291,7 +292,7 @@ func TestListRemotes_NonRepo(t *testing.T) {
 
 // TestListRemotes_NoRemote 仓库无远程返回空切片。
 func TestListRemotes_NoRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	remotes, err := svc.ListRemotes(repo)
 	if err != nil {
@@ -304,10 +305,10 @@ func TestListRemotes_NoRemote(t *testing.T) {
 
 // TestListRemotes_WithRemotes 多 remote 去重（fetch+push 行）+ 取首个 URL。
 func TestListRemotes_WithRemotes(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	runGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
-	runGit(t, repo, "remote", "add", "upstream", "https://example.com/upstream.git")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
+	testutil.RunGit(t, repo, "remote", "add", "upstream", "https://example.com/upstream.git")
 
 	remotes, err := svc.ListRemotes(repo)
 	if err != nil {
@@ -337,7 +338,7 @@ func TestListRemotes_WithRemotes(t *testing.T) {
 
 // TestAddRemote_Success 新增后列表含该远程。
 func TestAddRemote_Success(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.AddRemote(repo, "origin", "https://example.com/origin.git"); err != nil {
 		t.Fatalf("AddRemote: %v", err)
@@ -350,9 +351,9 @@ func TestAddRemote_Success(t *testing.T) {
 
 // TestAddRemote_Duplicate 重名远程返回错误。
 func TestAddRemote_Duplicate(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	runGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
 	if err := svc.AddRemote(repo, "origin", "https://example.com/another.git"); err == nil {
 		t.Error("重名远程应返回错误")
 	}
@@ -360,7 +361,7 @@ func TestAddRemote_Duplicate(t *testing.T) {
 
 // TestAddRemote_EmptyArgs 名称或地址为空返回错误。
 func TestAddRemote_EmptyArgs(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.AddRemote(repo, "  ", "https://example.com/x.git"); err == nil {
 		t.Error("空名称应返回错误")
@@ -374,9 +375,9 @@ func TestAddRemote_EmptyArgs(t *testing.T) {
 
 // TestRemoveRemote_Success 删除后列表不含该远程。
 func TestRemoveRemote_Success(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	runGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
 	if err := svc.RemoveRemote(repo, "origin"); err != nil {
 		t.Fatalf("RemoveRemote: %v", err)
 	}
@@ -388,7 +389,7 @@ func TestRemoveRemote_Success(t *testing.T) {
 
 // TestRemoveRemote_NotExists 删除不存在的远程返回错误。
 func TestRemoveRemote_NotExists(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.RemoveRemote(repo, "nonexistent"); err == nil {
 		t.Error("删除不存在的远程应返回错误")
@@ -399,7 +400,7 @@ func TestRemoveRemote_NotExists(t *testing.T) {
 
 // TestFetch_InvalidRemote 指定不存在的 remote 名时 fetch 返回错误。
 func TestFetch_InvalidRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if _, err := svc.Fetch(repo, "nonexistent", false); err == nil {
 		t.Error("不存在的 remote 应返回错误")
@@ -408,10 +409,10 @@ func TestFetch_InvalidRemote(t *testing.T) {
 
 // TestFetch_BareRemote 对本地 bare 远程 fetch 成功（无网络依赖）。
 func TestFetch_BareRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	remote := initBareRemote(t)
-	runGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
+	testutil.RunGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
 
 	if _, err := svc.Fetch(repo, "origin", false); err != nil {
 		t.Fatalf("Fetch from bare remote: %v", err)
@@ -422,7 +423,7 @@ func TestFetch_BareRemote(t *testing.T) {
 
 // TestSetBranchUpstream_NoRemote 无远程配置时设上游返回错误。
 func TestSetBranchUpstream_NoRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.SetBranchUpstream(repo, "main", "origin"); err == nil {
 		t.Error("无远程时设上游应返回错误")
@@ -431,7 +432,7 @@ func TestSetBranchUpstream_NoRemote(t *testing.T) {
 
 // TestSetBranchUpstream_EmptyArgs 分支或远程为空返回错误。
 func TestSetBranchUpstream_EmptyArgs(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if err := svc.SetBranchUpstream(repo, "  ", "origin"); err == nil {
 		t.Error("空分支应返回错误")
@@ -443,13 +444,13 @@ func TestSetBranchUpstream_EmptyArgs(t *testing.T) {
 
 // TestSetBranchUpstream_Success 推送分支后设上游，HasUpstream 返回 true。
 func TestSetBranchUpstream_Success(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 	remote := initBareRemote(t)
-	runGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
+	testutil.RunGit(t, repo, "remote", "add", "origin", filepath.ToSlash(remote))
 
 	// 动态获取当前分支名（兼容 master/main 默认值差异）
 	branch, err := svc.gitCmd.GetBranch(repo)
@@ -462,7 +463,7 @@ func TestSetBranchUpstream_Success(t *testing.T) {
 	}
 
 	// 推送分支以创建 remote-tracking ref（不带 --set-upstream，故无上游配置）
-	runGit(t, repo, "push", "origin", branch)
+	testutil.RunGit(t, repo, "push", "origin", branch)
 
 	has, _ := svc.HasUpstream(repo)
 	if has {

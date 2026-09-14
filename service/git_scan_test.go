@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workbench/util/testutil"
 )
 
 // TestScanGitRepos_GitFileAsWorktree worktree/submodule 的 .git 是文件（非目录），
@@ -38,7 +40,7 @@ func TestScanGitRepos_WithCache(t *testing.T) {
 	root := t.TempDir()
 	repoA := filepath.Join(root, "repo-a")
 	os.MkdirAll(repoA, 0755)
-	runGit(t, repoA, "init")
+	testutil.RunGit(t, repoA, "init")
 
 	cachePath := filepath.Join(t.TempDir(), "scan_cache.json")
 	svc := NewGitServiceWithCache(cachePath)
@@ -71,7 +73,7 @@ func TestScanGitRepos_CachePersists(t *testing.T) {
 	root := t.TempDir()
 	repoA := filepath.Join(root, "repo-a")
 	os.MkdirAll(repoA, 0755)
-	runGit(t, repoA, "init")
+	testutil.RunGit(t, repoA, "init")
 
 	cachePath := filepath.Join(t.TempDir(), "scan_cache.json")
 	svc1 := NewGitServiceWithCache(cachePath)
@@ -90,7 +92,7 @@ func TestScanGitRepos_CacheDetectsNewRepo(t *testing.T) {
 	root := t.TempDir()
 	repoA := filepath.Join(root, "repo-a")
 	os.MkdirAll(repoA, 0755)
-	runGit(t, repoA, "init")
+	testutil.RunGit(t, repoA, "init")
 
 	cachePath := filepath.Join(t.TempDir(), "scan_cache.json")
 	svc := NewGitServiceWithCache(cachePath)
@@ -102,7 +104,7 @@ func TestScanGitRepos_CacheDetectsNewRepo(t *testing.T) {
 	// 新增第二个仓库（root 的直接子项，root mtime 变化）
 	repoB := filepath.Join(root, "repo-b")
 	os.MkdirAll(repoB, 0755)
-	runGit(t, repoB, "init")
+	testutil.RunGit(t, repoB, "init")
 
 	repos := svc.ScanGitRepos(root)
 	if len(repos) != 2 {
@@ -112,10 +114,10 @@ func TestScanGitRepos_CacheDetectsNewRepo(t *testing.T) {
 
 // TestHasRemotesBatch 批量远程检测：有远程/无远程/非仓库 三种情况。
 func TestHasRemotesBatch(t *testing.T) {
-	repoWithRemote := initTempRepo(t)
-	runGit(t, repoWithRemote, "remote", "add", "origin", "https://example.com/repo.git")
+	repoWithRemote := testutil.InitTempRepo(t)
+	testutil.RunGit(t, repoWithRemote, "remote", "add", "origin", "https://example.com/repo.git")
 
-	repoNoRemote := initTempRepo(t)
+	repoNoRemote := testutil.InitTempRepo(t)
 
 	nonRepo := t.TempDir()
 

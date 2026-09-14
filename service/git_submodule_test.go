@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
 
 // setupSuperprojectWithSubmodule 构造一个 superproject 含一个真实 submodule，
@@ -24,25 +25,25 @@ import (
 // 返回 parent 与 child 的绝对路径。
 func setupSuperprojectWithSubmodule(t *testing.T) (parent, child string) {
 	t.Helper()
-	parent = initTempRepo(t)
-	child = initTempRepo(t)
+	parent = testutil.InitTempRepo(t)
+	child = testutil.InitTempRepo(t)
 
 	// child 首次提交
-	writeFile(t, filepath.Join(child, "child.txt"), "child init")
-	runGit(t, child, "add", "child.txt")
-	runGit(t, child, "commit", "-m", "child init")
+	testutil.WriteFile(t, filepath.Join(child, "child.txt"), "child init")
+	testutil.RunGit(t, child, "add", "child.txt")
+	testutil.RunGit(t, child, "commit", "-m", "child init")
 
 	// parent 首次提交
-	writeFile(t, filepath.Join(parent, "parent.txt"), "parent init")
-	runGit(t, parent, "add", "parent.txt")
-	runGit(t, parent, "commit", "-m", "parent init")
+	testutil.WriteFile(t, filepath.Join(parent, "parent.txt"), "parent init")
+	testutil.RunGit(t, parent, "add", "parent.txt")
+	testutil.RunGit(t, parent, "commit", "-m", "parent init")
 
 	// git 2.41+ 默认禁 file 协议（CVE-2022-39253）。仓库本地 config protocol.file.allow
 	// 不被 submodule add 内部的 clone 子进程继承，须用 -c 内联传主进程再下传子进程。
 	// 用 child 绝对路径作 url，避免相对路径在 clone 子进程 cwd 下解析错位（parent 与 child
 	// 分属不同 t.TempDir 随机子目录，../child 无法上溯命中）。
 	runGitInlineConfig(t, parent, "protocol.file.allow=always", "submodule", "add", child, "libs/child")
-	runGit(t, parent, "commit", "-m", "add child submodule")
+	testutil.RunGit(t, parent, "commit", "-m", "add child submodule")
 
 	// 确保 submodule 在 superproject 真正检出（已初始化）
 	runGitInlineConfig(t, parent, "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
@@ -85,10 +86,10 @@ func TestListSubmodules_NonRepo(t *testing.T) {
 
 // TestListSubmodules_NoSubmodules 仓库无 submodule 返回空切片。
 func TestListSubmodules_NoSubmodules(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	svc := NewGitService()
 	subs, err := svc.ListSubmodules(repo)
@@ -167,7 +168,7 @@ func TestListSubmodules_Dirty(t *testing.T) {
 	svc := NewGitService()
 
 	// 在 submodule 工作区制造未提交改动
-	writeFile(t, filepath.Join(parent, "libs/child", "dirty.txt"), "dirty change")
+	testutil.WriteFile(t, filepath.Join(parent, "libs/child", "dirty.txt"), "dirty change")
 
 	subs, err := svc.ListSubmodules(parent)
 	if err != nil {
@@ -189,11 +190,11 @@ func TestListSubmodules_NewCommitNotDirty(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
 	// 在 submodule 工作目录内提交新 commit（HEAD 前移，工作区干净）
 	subDir := filepath.Join(parent, "libs/child")
-	runGit(t, subDir, "config", "user.email", "test@test.com")
-	runGit(t, subDir, "config", "user.name", "test")
-	writeFile(t, filepath.Join(subDir, "c2.txt"), "c2")
-	runGit(t, subDir, "add", "c2.txt")
-	runGit(t, subDir, "commit", "-m", "c2 in submodule")
+	testutil.RunGit(t, subDir, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, subDir, "config", "user.name", "test")
+	testutil.WriteFile(t, filepath.Join(subDir, "c2.txt"), "c2")
+	testutil.RunGit(t, subDir, "add", "c2.txt")
+	testutil.RunGit(t, subDir, "commit", "-m", "c2 in submodule")
 
 	svc := NewGitService()
 	subs, err := svc.ListSubmodules(parent)
@@ -216,7 +217,7 @@ func TestListSubmodules_NewCommitNotDirty(t *testing.T) {
 func TestListSubmodules_NotInitialized(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
 	// deinit 注销，使 submodule 进入未初始化态（前导码 -）。deinit 不走 file 协议，普通 runGit 即可。
-	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	testutil.RunGit(t, parent, "submodule", "deinit", "-f", "libs/child")
 
 	svc := NewGitService()
 	subs, err := svc.ListSubmodules(parent)
@@ -256,19 +257,19 @@ func TestListSubmodules_ConfigFromGitmodules(t *testing.T) {
 
 // TestListSubmodules_BranchConfig 带 -b branch 添加 submodule 时 Branch 应从 .gitmodules 读取。
 func TestListSubmodules_BranchConfig(t *testing.T) {
-	parent := initTempRepo(t)
-	child := initTempRepo(t)
-	writeFile(t, filepath.Join(child, "c.txt"), "c")
-	runGit(t, child, "add", "c.txt")
-	runGit(t, child, "commit", "-m", "c")
+	parent := testutil.InitTempRepo(t)
+	child := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(child, "c.txt"), "c")
+	testutil.RunGit(t, child, "add", "c.txt")
+	testutil.RunGit(t, child, "commit", "-m", "c")
 	// child 创建 master 分支并推送（submodule -b 需远程有该分支）
-	runGit(t, child, "branch", "main")
+	testutil.RunGit(t, child, "branch", "main")
 
-	writeFile(t, filepath.Join(parent, "p.txt"), "p")
-	runGit(t, parent, "add", "p.txt")
-	runGit(t, parent, "commit", "-m", "p")
+	testutil.WriteFile(t, filepath.Join(parent, "p.txt"), "p")
+	testutil.RunGit(t, parent, "add", "p.txt")
+	testutil.RunGit(t, parent, "commit", "-m", "p")
 	runGitInlineConfig(t, parent, "protocol.file.allow=always", "submodule", "add", "-b", "main", child, "libs/child")
-	runGit(t, parent, "commit", "-m", "add child with branch")
+	testutil.RunGit(t, parent, "commit", "-m", "add child with branch")
 	runGitInlineConfig(t, parent, "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
 
 	svc := NewGitService()
@@ -291,7 +292,7 @@ func TestListSubmodules_BranchConfig(t *testing.T) {
 func TestInitSubmodules(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
 	// 先 deinit 使其未注册
-	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	testutil.RunGit(t, parent, "submodule", "deinit", "-f", "libs/child")
 
 	svc := NewGitService()
 	if _, err := svc.InitSubmodules(parent); err != nil {
@@ -310,7 +311,7 @@ func TestInitSubmodules(t *testing.T) {
 func TestUpdateSubmodules_Init(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
 	// deinit 使其未检出
-	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	testutil.RunGit(t, parent, "submodule", "deinit", "-f", "libs/child")
 
 	svc := NewGitService()
 	// update --init 重新检出
@@ -327,7 +328,7 @@ func TestUpdateSubmodules_Init(t *testing.T) {
 // TestUpdateSubmodules_SinglePath 传 path 仅更新单个 submodule。
 func TestUpdateSubmodules_SinglePath(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
-	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	testutil.RunGit(t, parent, "submodule", "deinit", "-f", "libs/child")
 
 	svc := NewGitService()
 	_, err := svc.UpdateSubmodules(parent, model.SubmoduleUpdateCheckout, false, true, "libs/child")
@@ -351,7 +352,7 @@ func TestUpdateSubmodules_NonRepo(t *testing.T) {
 // TestUpdateSubmodules_InvalidMode 非法 mode（非 checkout/merge/rebase/remote）应被白名单拦截，
 // 而非静默走 util.SubmoduleUpdate 的 default（checkout）分支——避免前端传错或调用方拼错时无报错。
 func TestUpdateSubmodules_InvalidMode(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	_, err := svc.UpdateSubmodules(repo, model.SubmoduleUpdateMode("garbage"), false, false, "")
 	if err == nil {
@@ -365,7 +366,7 @@ func TestUpdateSubmodules_InvalidMode(t *testing.T) {
 // TestUpdateSubmodules_EmptyModeDefaultsCheckout 空 mode 兜底为 checkout，不报错（init=false 路径）。
 func TestUpdateSubmodules_EmptyModeDefaultsCheckout(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
-	runGit(t, parent, "submodule", "deinit", "-f", "libs/child")
+	testutil.RunGit(t, parent, "submodule", "deinit", "-f", "libs/child")
 	svc := NewGitService()
 	// 空 mode + init=true 走 update --init（mode 不参与），应成功检出
 	_, err := svc.UpdateSubmodules(parent, model.SubmoduleUpdateMode(""), false, true, "libs/child")
@@ -413,16 +414,16 @@ func allowFileProtocol(t *testing.T) {
 
 // TestAddSubmodule 在无 submodule 的仓库新增一个，校验 .gitmodules 生成 + ListSubmodules 能列出。
 func TestAddSubmodule(t *testing.T) {
-	parent := initTempRepo(t)
-	child := initTempRepo(t)
+	parent := testutil.InitTempRepo(t)
+	child := testutil.InitTempRepo(t)
 	// child 首次提交（submodule add 须有可克隆的提交）
-	writeFile(t, filepath.Join(child, "child.txt"), "child init")
-	runGit(t, child, "add", "child.txt")
-	runGit(t, child, "commit", "-m", "child init")
+	testutil.WriteFile(t, filepath.Join(child, "child.txt"), "child init")
+	testutil.RunGit(t, child, "add", "child.txt")
+	testutil.RunGit(t, child, "commit", "-m", "child init")
 	// parent 首次提交（precheckMutation 要求工作区干净 + 非 detached）
-	writeFile(t, filepath.Join(parent, "parent.txt"), "parent init")
-	runGit(t, parent, "add", "parent.txt")
-	runGit(t, parent, "commit", "-m", "parent init")
+	testutil.WriteFile(t, filepath.Join(parent, "parent.txt"), "parent init")
+	testutil.RunGit(t, parent, "add", "parent.txt")
+	testutil.RunGit(t, parent, "commit", "-m", "parent init")
 
 	// file 协议许可（git 2.41+ 默认禁，submodule add 内部 clone 子进程须继承）
 	allowFileProtocol(t)
@@ -445,16 +446,16 @@ func TestAddSubmodule(t *testing.T) {
 
 // TestAddSubmodule_DirtyWorkspace 工作区有未提交改动时 AddSubmodule 应报错（precheckMutation 拦截）。
 func TestAddSubmodule_DirtyWorkspace(t *testing.T) {
-	parent := initTempRepo(t)
-	child := initTempRepo(t)
-	writeFile(t, filepath.Join(child, "child.txt"), "child init")
-	runGit(t, child, "add", "child.txt")
-	runGit(t, child, "commit", "-m", "child init")
+	parent := testutil.InitTempRepo(t)
+	child := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(child, "child.txt"), "child init")
+	testutil.RunGit(t, child, "add", "child.txt")
+	testutil.RunGit(t, child, "commit", "-m", "child init")
 	// parent 先提交一次使仓库在分支上，再制造未提交改动
-	writeFile(t, filepath.Join(parent, "parent.txt"), "parent init")
-	runGit(t, parent, "add", "parent.txt")
-	runGit(t, parent, "commit", "-m", "parent init")
-	writeFile(t, filepath.Join(parent, "dirty.txt"), "uncommitted") // 未提交改动
+	testutil.WriteFile(t, filepath.Join(parent, "parent.txt"), "parent init")
+	testutil.RunGit(t, parent, "add", "parent.txt")
+	testutil.RunGit(t, parent, "commit", "-m", "parent init")
+	testutil.WriteFile(t, filepath.Join(parent, "dirty.txt"), "uncommitted") // 未提交改动
 
 	allowFileProtocol(t)
 
@@ -528,10 +529,10 @@ func TestRemoveSubmodule_NonRepo(t *testing.T) {
 // TestRemoveSubmodule_PathTraversal path 含 .. 上溯或为绝对路径时，须在步骤 1 之前被深度防御拦截，
 // 避免依赖后续 git submodule deinit / git rm 的副作用保安全（os.RemoveAll(.git/modules/<path>) 穿越风险）。
 func TestRemoveSubmodule_PathTraversal(t *testing.T) {
-	parent := initTempRepo(t)
-	writeFile(t, filepath.Join(parent, "p.txt"), "p")
-	runGit(t, parent, "add", "p.txt")
-	runGit(t, parent, "commit", "-m", "p")
+	parent := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(parent, "p.txt"), "p")
+	testutil.RunGit(t, parent, "add", "p.txt")
+	testutil.RunGit(t, parent, "commit", "-m", "p")
 	svc := NewGitService()
 
 	for _, bad := range []string{"../..", "../../etc", "/etc/passwd"} {
@@ -555,7 +556,7 @@ func TestCheckoutSubmoduleBranch(t *testing.T) {
 	parent, _ := setupSuperprojectWithSubmodule(t)
 	// submodule 经 update --init 检出为 detached HEAD，在其 git 目录创建一个分支供切换
 	subDir := filepath.Join(parent, "libs", "child")
-	runGit(t, subDir, "branch", "feature-x")
+	testutil.RunGit(t, subDir, "branch", "feature-x")
 
 	svc := NewGitService()
 	if _, err := svc.CheckoutSubmoduleBranch(parent, "libs/child", "feature-x"); err != nil {

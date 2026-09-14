@@ -8,6 +8,7 @@ import (
 
 	"workbench/model"
 	"workbench/service"
+	"workbench/util/testutil"
 )
 
 // repoFilterTestApp 构建一个用于仓库筛选器测试的 App，注入临时配置的各 service。
@@ -30,11 +31,11 @@ func initRepoForTest(t *testing.T, path string, withRemote bool) {
 	if err := os.MkdirAll(path, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}
-	runGitIn(t, path, "init")
-	runGitIn(t, path, "config", "user.email", "test@test.com")
-	runGitIn(t, path, "config", "user.name", "test")
+	testutil.RunGit(t, path, "init")
+	testutil.RunGit(t, path, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, path, "config", "user.name", "test")
 	if withRemote {
-		runGitIn(t, path, "remote", "add", "origin", "https://example.com/repo.git")
+		testutil.RunGit(t, path, "remote", "add", "origin", "https://example.com/repo.git")
 	}
 }
 

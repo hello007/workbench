@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"workbench/util/testutil"
 )
 
 // TestNewGitCommand_DefaultTimeout 默认超时 30s。
@@ -26,7 +28,7 @@ func TestNewGitCommandWithTimeout(t *testing.T) {
 // TestIsGitRepository_RealRepo 真实 git init 仓库返回 true。
 func TestIsGitRepository_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	g := NewGitCommand()
 	if !g.IsGitRepository(dir) {
 		t.Error("真实仓库应识别为 true")
@@ -44,7 +46,7 @@ func TestIsGitRepository_NonRepo(t *testing.T) {
 // TestFindGitRoot_RealRepo 仓库根目录向上查找返回自身。
 func TestFindGitRoot_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	root, err := FindGitRoot(dir)
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
@@ -58,7 +60,7 @@ func TestFindGitRoot_RealRepo(t *testing.T) {
 // TestFindGitRoot_Subdir 子目录向上查找定位到仓库根。
 func TestFindGitRoot_Subdir(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	sub := filepath.Join(dir, "a", "b")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -84,7 +86,7 @@ func TestFindGitRoot_NonRepo(t *testing.T) {
 // TestHasLocalChanges_NoChanges 无改动返回 false。
 func TestHasLocalChanges_NoChanges(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	g := NewGitCommand()
 	has, err := g.HasLocalChanges(dir)
 	if err != nil {
@@ -98,7 +100,7 @@ func TestHasLocalChanges_NoChanges(t *testing.T) {
 // TestHasLocalChanges_WithChanges 有未跟踪文件返回 true。
 func TestHasLocalChanges_WithChanges(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -114,10 +116,7 @@ func TestHasLocalChanges_WithChanges(t *testing.T) {
 
 // TestGetBranch_RealRepo 真实仓库获取分支不报错。
 func TestGetBranch_RealRepo(t *testing.T) {
-	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
-	runGitSimple(t, dir, "config", "user.email", "t@t.com")
-	runGitSimple(t, dir, "config", "user.name", "t")
+	dir := testutil.InitTempRepo(t)
 	g := NewGitCommand()
 	_, err := g.GetBranch(dir)
 	if err != nil {
@@ -138,7 +137,7 @@ func TestExecute_InvalidArgs(t *testing.T) {
 // TestGetBranchesAll_RealRepo 真实仓库获取分支列表不报错。
 func TestGetBranchesAll_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGitSimple(t, dir, "init")
+	testutil.RunGit(t, dir, "init")
 	g := NewGitCommand()
 	_, err := g.GetBranchesAll(dir)
 	if err != nil {

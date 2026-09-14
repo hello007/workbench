@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"workbench/util/testutil"
 )
 
 // TestTryLockRepo_SameRepoMutualExclusion 同一仓库第二次 TryLock 应失败返回 ErrOperationInProgress，
@@ -182,12 +184,12 @@ func (e errString) Error() string { return string(e) }
 func setupTinyRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	mustWriteFile(t, filepath.Join(dir, "a.txt"), []byte("a"))
-	runGit(t, dir, "add", "a.txt")
-	runGit(t, dir, "commit", "-m", "init")
+	testutil.RunGit(t, dir, "add", "a.txt")
+	testutil.RunGit(t, dir, "commit", "-m", "init")
 	return dir
 }
 
@@ -272,7 +274,7 @@ func TestReadonlyMethod_NotBlockedByLock(t *testing.T) {
 func TestBatchPull_RejectsLockedRepo(t *testing.T) {
 	svc := NewGitService()
 	dir := setupTinyRepo(t)
-	runGit(t, dir, "remote", "add", "origin", "https://example.com/repo.git")
+	testutil.RunGit(t, dir, "remote", "add", "origin", "https://example.com/repo.git")
 
 	// 外部占住该仓锁，模拟用户正对该仓做单仓操作
 	release, err := svc.tryLockRepo(dir)

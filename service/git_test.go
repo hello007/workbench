@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
 
 func TestScanGitRepos_SingleRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "test@test.com")
-	runGit(t, dir, "config", "user.name", "test")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, dir, "config", "user.name", "test")
 
 	svc := NewGitService()
 	repos := svc.ScanGitRepos(dir)
@@ -37,9 +38,9 @@ func TestScanGitRepos_NestedRepos(t *testing.T) {
 
 	for _, repo := range []string{repoA, repoB, repoC} {
 		os.MkdirAll(repo, 0755)
-		runGit(t, repo, "init")
-		runGit(t, repo, "config", "user.email", "test@test.com")
-		runGit(t, repo, "config", "user.name", "test")
+		testutil.RunGit(t, repo, "init")
+		testutil.RunGit(t, repo, "config", "user.email", "test@test.com")
+		testutil.RunGit(t, repo, "config", "user.name", "test")
 	}
 
 	svc := NewGitService()
@@ -150,9 +151,9 @@ func TestDiscardChanges_NonRepo(t *testing.T) {
 // TestGetInfo_RealRepo 真实仓库（无远程）IsRepo=true 且不报错。
 func TestGetInfo_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 
 	svc := NewGitService()
 	info, err := svc.GetInfo(dir)
@@ -167,12 +168,12 @@ func TestGetInfo_RealRepo(t *testing.T) {
 // TestDiscardChanges_RealRepo_All 真实仓库回滚全部改动（已跟踪文件恢复 + 未跟踪清理）。
 func TestDiscardChanges_RealRepo_All(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("原"), 0o644)
-	runGit(t, dir, "add", "f.txt")
-	runGit(t, dir, "commit", "-m", "init")
+	testutil.RunGit(t, dir, "add", "f.txt")
+	testutil.RunGit(t, dir, "commit", "-m", "init")
 
 	// 修改已跟踪文件 + 新增未跟踪文件
 	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("改"), 0o644)
@@ -210,9 +211,9 @@ func TestCommit_EmptyMessage(t *testing.T) {
 // TestCommit_RealRepo 真实仓库选择性提交文件。
 func TestCommit_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644)
 
 	svc := NewGitService()
@@ -229,9 +230,9 @@ func TestCommit_RealRepo(t *testing.T) {
 // TestGetLocalChanges_RealRepo 真实仓库文件状态解析。
 func TestGetLocalChanges_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 
 	svc := NewGitService()
@@ -264,9 +265,9 @@ func TestPush_NonRepo(t *testing.T) {
 // TestPush_RealRepo_NoRemote 真实仓库无远程时 push 失败。
 func TestPush_RealRepo_NoRemote(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	svc := NewGitService()
 	if _, err := svc.Push(dir, false); err == nil {
 		t.Error("无远程仓库 push 应失败")
@@ -284,9 +285,9 @@ func TestHasUpstream_NonRepo(t *testing.T) {
 // TestHasUpstream_RealRepo_NoUpstream 真实仓库无上游返回 false。
 func TestHasUpstream_RealRepo_NoUpstream(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 	svc := NewGitService()
 	has, err := svc.HasUpstream(dir)
 	if err != nil {
@@ -308,21 +309,12 @@ func TestScanGitRepos_CachedWithCache(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "r1")
 	os.MkdirAll(repo, 0o755)
-	runGit(t, repo, "init")
+	testutil.RunGit(t, repo, "init")
 
 	svc := NewGitServiceWithCache(filepath.Join(t.TempDir(), "scan_cache.json"))
 	repos := svc.ScanGitRepos(root)
 	if len(repos) != 1 {
 		t.Errorf("缓存路径扫描应找到 1 个仓库, got %d", len(repos))
-	}
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("git %v in %s failed: %v", args, dir, err)
 	}
 }
 
@@ -332,9 +324,9 @@ func TestBatchPull_SuccessAndFail(t *testing.T) {
 	// 创建一个真实的 git 仓库（无远程，会被跳过）
 	repoPath := filepath.Join(dir, "repo")
 	os.MkdirAll(repoPath, 0755)
-	runGit(t, repoPath, "init")
-	runGit(t, repoPath, "config", "user.email", "test@test.com")
-	runGit(t, repoPath, "config", "user.name", "test")
+	testutil.RunGit(t, repoPath, "init")
+	testutil.RunGit(t, repoPath, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, repoPath, "config", "user.name", "test")
 
 	// 创建一个非 git 目录（会失败）
 	nonRepo := filepath.Join(dir, "not-a-repo")
@@ -378,21 +370,21 @@ func TestBatchPull_SuccessAndFail(t *testing.T) {
 
 func TestHasRemote(t *testing.T) {
 	// 无远程仓库
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	if svc.HasRemote(repo) {
 		t.Error("expected HasRemote=false for repo without remote")
 	}
 
 	// 配置远程后应返回 true（不要求远程可达，仅检测配置存在）
-	runGit(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
 	if !svc.HasRemote(repo) {
 		t.Error("expected HasRemote=true after adding remote")
 	}
 }
 
 func TestBatchPull_SkipsNoRemote(t *testing.T) {
-	repo := initTempRepo(t) // 无远程配置
+	repo := testutil.InitTempRepo(t) // 无远程配置
 	svc := NewGitService()
 	results := svc.BatchPull([]string{repo}, 1, context.Background())
 
@@ -411,29 +403,8 @@ func TestBatchPull_SkipsNoRemote(t *testing.T) {
 	}
 }
 
-// initTempRepo 初始化一个临时 git 仓库并配置身份，返回仓库根目录。
-func initTempRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "test@test.com")
-	runGit(t, dir, "config", "user.name", "test")
-	return dir
-}
-
-// writeFile 写入文件内容（自动创建父目录）。
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		t.Fatalf("mkdir failed: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write file failed: %v", err)
-	}
-}
-
 func TestCommit_EmptyFilesReturnsError(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	err := svc.Commit(repo, "msg", nil)
 	if err == nil {
@@ -445,7 +416,7 @@ func TestCommit_EmptyFilesReturnsError(t *testing.T) {
 }
 
 func TestCommit_EmptyMessageReturnsError(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	err := svc.Commit(repo, "  ", []string{"a.txt"})
 	if err == nil {
@@ -457,16 +428,16 @@ func TestCommit_EmptyMessageReturnsError(t *testing.T) {
 }
 
 func TestCommit_TrackedFile(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 初始提交建立 HEAD
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 修改 a.txt 并提交
-	writeFile(t, filepath.Join(repo, "a.txt"), "modified")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "modified")
 	if err := svc.Commit(repo, "change a", []string{"a.txt"}); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
@@ -481,16 +452,16 @@ func TestCommit_TrackedFile(t *testing.T) {
 }
 
 func TestCommit_UntrackedFile(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 先建一个初始提交，避免首次提交特殊语义
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 新增未跟踪文件 b.txt
-	writeFile(t, filepath.Join(repo, "b.txt"), "new file")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "new file")
 	if err := svc.Commit(repo, "add b", []string{"b.txt"}); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
@@ -516,18 +487,18 @@ func TestCommit_UntrackedFile(t *testing.T) {
 }
 
 func TestCommit_Pathspec_OnlySelectedFiles(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 建立初始提交
-	writeFile(t, filepath.Join(repo, "a.txt"), "init a")
-	writeFile(t, filepath.Join(repo, "b.txt"), "init b")
-	runGit(t, repo, "add", "a.txt", "b.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init a")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "init b")
+	testutil.RunGit(t, repo, "add", "a.txt", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 同时修改 a.txt 和 b.txt，但只提交 a.txt
-	writeFile(t, filepath.Join(repo, "a.txt"), "changed a")
-	writeFile(t, filepath.Join(repo, "b.txt"), "changed b")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "changed a")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "changed b")
 	if err := svc.Commit(repo, "only a", []string{"a.txt"}); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
@@ -555,16 +526,16 @@ func TestCommit_Pathspec_OnlySelectedFiles(t *testing.T) {
 }
 
 func TestCommit_ChinesePath(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 初始提交
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 子目录下的中文路径文件
-	writeFile(t, filepath.Join(repo, "中文目录", "文件.txt"), "中文内容")
+	testutil.WriteFile(t, filepath.Join(repo, "中文目录", "文件.txt"), "中文内容")
 	if err := svc.Commit(repo, "中文提交", []string{filepath.ToSlash(filepath.Join("中文目录", "文件.txt"))}); err != nil {
 		t.Fatalf("Commit failed: %v", err)
 	}
@@ -579,14 +550,14 @@ func TestCommit_ChinesePath(t *testing.T) {
 }
 
 func TestGetDiff_TrackedFile(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
-	writeFile(t, filepath.Join(repo, "a.txt"), "line1\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "line1\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
-	writeFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
 
 	diff, err := svc.GetDiff(repo, "a.txt")
 	if err != nil {
@@ -601,16 +572,16 @@ func TestGetDiff_TrackedFile(t *testing.T) {
 }
 
 func TestGetDiff_UntrackedFile(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 初始提交（确保工作区有 HEAD）
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 未跟踪文件
-	writeFile(t, filepath.Join(repo, "b.txt"), "new\ncontent\n")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "new\ncontent\n")
 	diff, err := svc.GetDiff(repo, "b.txt")
 	if err != nil {
 		t.Fatalf("GetDiff failed: %v", err)
@@ -634,18 +605,18 @@ func headSHA(t *testing.T, dir string) string {
 }
 
 func TestGetCommitFileDiff_NormalCommit(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 首次提交（root）
-	writeFile(t, filepath.Join(repo, "a.txt"), "line1\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "line1\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 第二次提交：修改 a.txt
-	writeFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "add line2")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "add line2")
 
 	sha := headSHA(t, repo)
 	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
@@ -661,13 +632,13 @@ func TestGetCommitFileDiff_NormalCommit(t *testing.T) {
 }
 
 func TestGetCommitFileDiff_RootCommit(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 仅一条 root commit
-	writeFile(t, filepath.Join(repo, "a.txt"), "first\ncontent\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "root")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "first\ncontent\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "root")
 
 	sha := headSHA(t, repo)
 	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
@@ -688,21 +659,21 @@ func TestGetCommitFileDiff_RootCommit(t *testing.T) {
 }
 
 func TestGetCommitFileDiff_BinaryFile(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 首次提交一个文本文件建立非 root 环境
-	writeFile(t, filepath.Join(repo, "a.txt"), "init\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 二进制文件（含 NUL 字节）
 	binPath := filepath.Join(repo, "bin.dat")
 	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0xFF}, 0644); err != nil {
 		t.Fatalf("write binary file failed: %v", err)
 	}
-	runGit(t, repo, "add", "bin.dat")
-	runGit(t, repo, "commit", "-m", "add binary")
+	testutil.RunGit(t, repo, "add", "bin.dat")
+	testutil.RunGit(t, repo, "commit", "-m", "add binary")
 
 	sha := headSHA(t, repo)
 	diff, err := svc.GetCommitFileDiff(repo, sha, "bin.dat")
@@ -716,17 +687,17 @@ func TestGetCommitFileDiff_BinaryFile(t *testing.T) {
 }
 
 func TestGetCommitFileDiff_NoChangeReturnsEmpty(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
-	writeFile(t, filepath.Join(repo, "a.txt"), "line1\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "line1\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 第二次提交改的是 b.txt，对 a.txt 取 diff 应为空
-	writeFile(t, filepath.Join(repo, "b.txt"), "new\n")
-	runGit(t, repo, "add", "b.txt")
-	runGit(t, repo, "commit", "-m", "add b")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "new\n")
+	testutil.RunGit(t, repo, "add", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "add b")
 
 	sha := headSHA(t, repo)
 	diff, err := svc.GetCommitFileDiff(repo, sha, "a.txt")
@@ -739,7 +710,7 @@ func TestGetCommitFileDiff_NoChangeReturnsEmpty(t *testing.T) {
 }
 
 func TestGetCommitFileDiff_EmptySHAReturnsError(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	_, err := svc.GetCommitFileDiff(repo, "", "a.txt")
 	if err == nil {
@@ -748,20 +719,20 @@ func TestGetCommitFileDiff_EmptySHAReturnsError(t *testing.T) {
 }
 
 func TestGetRangeDiff_TwoCommits(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// commit1: a.txt 初始
-	writeFile(t, filepath.Join(repo, "a.txt"), "v1\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "c1")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "v1\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "c1")
 	sha1 := headSHA(t, repo)
 
 	// commit2: 改 a.txt + 加 b.txt
-	writeFile(t, filepath.Join(repo, "a.txt"), "v1\nv2\n")
-	writeFile(t, filepath.Join(repo, "b.txt"), "new\n")
-	runGit(t, repo, "add", "a.txt", "b.txt")
-	runGit(t, repo, "commit", "-m", "c2")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "v1\nv2\n")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "new\n")
+	testutil.RunGit(t, repo, "add", "a.txt", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "c2")
 	sha2 := headSHA(t, repo)
 
 	diff, err := svc.GetRangeDiff(repo, sha1, sha2)
@@ -781,12 +752,12 @@ func TestGetRangeDiff_TwoCommits(t *testing.T) {
 }
 
 func TestGetRangeDiff_SameSHAEmpty(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
-	writeFile(t, filepath.Join(repo, "a.txt"), "v1\n")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "c1")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "v1\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "c1")
 	sha := headSHA(t, repo)
 
 	diff, err := svc.GetRangeDiff(repo, sha, sha)
@@ -799,7 +770,7 @@ func TestGetRangeDiff_SameSHAEmpty(t *testing.T) {
 }
 
 func TestGetRangeDiff_EmptySHAReturnsError(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 	_, err := svc.GetRangeDiff(repo, "", "abc")
 	if err == nil {
@@ -808,7 +779,7 @@ func TestGetRangeDiff_EmptySHAReturnsError(t *testing.T) {
 }
 
 func TestHasUpstream_NoRemote(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	has, err := svc.HasUpstream(repo)
@@ -821,7 +792,7 @@ func TestHasUpstream_NoRemote(t *testing.T) {
 }
 
 func TestPush_NoUpstream(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 无远程配置的仓库直接 push 应返回错误（可接受）
@@ -834,18 +805,18 @@ func TestPush_NoUpstream(t *testing.T) {
 // TestGetLocalChanges_UntrackedDirExpanded 验证未跟踪目录被展开为内部每个文件单独成条
 // （对应 --untracked-files=all），而非默认 --untracked-files=normal 的单行 ?? dir/
 func TestGetLocalChanges_UntrackedDirExpanded(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 建立初始提交（确立 HEAD，未跟踪目录内文件均为真正新增）
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 在未跟踪目录下放多个文件
-	writeFile(t, filepath.Join(repo, "newdir", "f1.txt"), "one")
-	writeFile(t, filepath.Join(repo, "newdir", "f2.txt"), "two")
-	writeFile(t, filepath.Join(repo, "newdir", "sub", "f3.txt"), "three")
+	testutil.WriteFile(t, filepath.Join(repo, "newdir", "f1.txt"), "one")
+	testutil.WriteFile(t, filepath.Join(repo, "newdir", "f2.txt"), "two")
+	testutil.WriteFile(t, filepath.Join(repo, "newdir", "sub", "f3.txt"), "three")
 
 	changes, err := svc.GetLocalChanges(repo)
 	if err != nil {
@@ -885,14 +856,14 @@ func TestGetLocalChanges_UntrackedDirExpanded(t *testing.T) {
 
 // TestGetLocalChanges_ChineseUntrackedPath 验证 -z 下中文路径原样保留且被 -uall 展开
 func TestGetLocalChanges_ChineseUntrackedPath(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
-	writeFile(t, filepath.Join(repo, "中文目录", "文件.txt"), "中文内容")
+	testutil.WriteFile(t, filepath.Join(repo, "中文目录", "文件.txt"), "中文内容")
 
 	changes, err := svc.GetLocalChanges(repo)
 	if err != nil {
@@ -919,16 +890,16 @@ func TestGetLocalChanges_ChineseUntrackedPath(t *testing.T) {
 // 目标路径已在 seg[3:]，下一段为源路径，解析器仅跳过、不取作 Path。
 // 故 staged 记录的 Path 应为目标路径 new.txt，源路径 old.txt 不应出现。
 func TestGetLocalChanges_RenameStillParses(t *testing.T) {
-	repo := initTempRepo(t)
+	repo := testutil.InitTempRepo(t)
 	svc := NewGitService()
 
 	// 初始提交一个文件
-	writeFile(t, filepath.Join(repo, "old.txt"), "content\n")
-	runGit(t, repo, "add", "old.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "old.txt"), "content\n")
+	testutil.RunGit(t, repo, "add", "old.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// git mv 制造重命名（已暂存，状态 R）
-	runGit(t, repo, "mv", "old.txt", "new.txt")
+	testutil.RunGit(t, repo, "mv", "old.txt", "new.txt")
 
 	changes, err := svc.GetLocalChanges(repo)
 	if err != nil {
@@ -976,10 +947,10 @@ func TestCreateBranch_NonRepo(t *testing.T) {
 
 // TestCreateBranch_RealRepo 真实仓库从 HEAD 创建分支，列表应包含新分支。
 func TestCreateBranch_RealRepo(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	svc := NewGitService()
 	if err := svc.CreateBranch(repo, "feature"); err != nil {
@@ -1011,17 +982,17 @@ func TestDeleteBranch_EmptyName(t *testing.T) {
 // TestDeleteBranch_ForceDeletesUnmerged 验证 force=true 走 -D 强删路径：
 // 未合并分支用 -d（force=false）删除失败，用 -D（force=true）删除成功。
 func TestDeleteBranch_ForceDeletesUnmerged(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
 
 	// 创建并切换到 feature 分支，新增未合并提交后切回原分支
-	runGit(t, repo, "checkout", "-b", "feature")
-	writeFile(t, filepath.Join(repo, "b.txt"), "feature-only")
-	runGit(t, repo, "add", "b.txt")
-	runGit(t, repo, "commit", "-m", "feature commit")
-	runGit(t, repo, "checkout", "-")
+	testutil.RunGit(t, repo, "checkout", "-b", "feature")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "feature-only")
+	testutil.RunGit(t, repo, "add", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "feature commit")
+	testutil.RunGit(t, repo, "checkout", "-")
 
 	svc := NewGitService()
 	// force=false 走 -d：未合并应失败
@@ -1047,11 +1018,11 @@ func TestRenameBranch_EmptyName(t *testing.T) {
 
 // TestRenameBranch_RealRepo 真实仓库重命名分支，旧名消失、新名出现。
 func TestRenameBranch_RealRepo(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
-	runGit(t, repo, "branch", "old-name")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.RunGit(t, repo, "branch", "old-name")
 
 	svc := NewGitService()
 	if err := svc.RenameBranch(repo, "old-name", "new-name"); err != nil {
@@ -1088,11 +1059,11 @@ func TestStageFiles_EmptyFiles(t *testing.T) {
 
 // TestStageFiles_RealRepo 真实仓库暂存已修改文件，Staged 应转为 true。
 func TestStageFiles_RealRepo(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
-	writeFile(t, filepath.Join(repo, "a.txt"), "modified")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "modified")
 
 	svc := NewGitService()
 	if err := svc.StageFiles(repo, []string{"a.txt"}); err != nil {
@@ -1126,12 +1097,12 @@ func TestUnstageFiles_EmptyFiles(t *testing.T) {
 
 // TestUnstageFiles_RealRepo 真实仓库取消暂存已暂存文件，Staged 应转为 false 且仍在变动列表。
 func TestUnstageFiles_RealRepo(t *testing.T) {
-	repo := initTempRepo(t)
-	writeFile(t, filepath.Join(repo, "a.txt"), "init")
-	runGit(t, repo, "add", "a.txt")
-	runGit(t, repo, "commit", "-m", "init")
-	writeFile(t, filepath.Join(repo, "a.txt"), "modified")
-	runGit(t, repo, "add", "a.txt")
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "modified")
+	testutil.RunGit(t, repo, "add", "a.txt")
 
 	svc := NewGitService()
 	if err := svc.UnstageFiles(repo, []string{"a.txt"}); err != nil {

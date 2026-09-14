@@ -26,6 +26,7 @@ import (
 
 	"workbench/model"
 	"workbench/service"
+	"workbench/util/testutil"
 )
 
 // itRequireGit 前置检查：git 不在 PATH 时跳过（CI 保证有 git，本地异常环境降级为 skip 不 fail）。
@@ -44,12 +45,12 @@ func itInitRepo(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	runGitIn(t, dir, "init")
-	runGitIn(t, dir, "symbolic-ref", "HEAD", "refs/heads/master")
-	runGitIn(t, dir, "config", "user.name", "integration")
-	runGitIn(t, dir, "config", "user.email", "integration@test.local")
-	runGitIn(t, dir, "config", "core.autocrlf", "false")
-	runGitIn(t, dir, "config", "commit.gpgsign", "false")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "symbolic-ref", "HEAD", "refs/heads/master")
+	testutil.RunGit(t, dir, "config", "user.name", "integration")
+	testutil.RunGit(t, dir, "config", "user.email", "integration@test.local")
+	testutil.RunGit(t, dir, "config", "core.autocrlf", "false")
+	testutil.RunGit(t, dir, "config", "commit.gpgsign", "false")
 	return dir
 }
 
@@ -60,7 +61,7 @@ func itBareRemote(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir bare: %v", err)
 	}
-	runGitIn(t, dir, "init", "--bare")
+	testutil.RunGit(t, dir, "init", "--bare")
 	return dir
 }
 
@@ -79,8 +80,8 @@ func itWriteFile(t *testing.T, repoPath, rel, content string) {
 // itCommitAll 暂存全部变更并提交（fixture 造数用，被测行为走 App 链）。
 func itCommitAll(t *testing.T, repoPath, message string) {
 	t.Helper()
-	runGitIn(t, repoPath, "add", "-A")
-	runGitIn(t, repoPath, "commit", "-m", message)
+	testutil.RunGit(t, repoPath, "add", "-A")
+	testutil.RunGit(t, repoPath, "commit", "-m", message)
 }
 
 // itGitOut 执行 git 命令并返回 trim 后输出（rev-parse 等需要读取结果的校验用）。
@@ -149,10 +150,10 @@ func itSetupForkRepo(t *testing.T) string {
 	repo := itInitRepo(t)
 	itWriteFile(t, repo, "a.txt", "base\n")
 	itCommitAll(t, repo, "base")
-	runGitIn(t, repo, "checkout", "-b", "feature")
+	testutil.RunGit(t, repo, "checkout", "-b", "feature")
 	itWriteFile(t, repo, "a.txt", "feature\n")
 	itCommitAll(t, repo, "feature change")
-	runGitIn(t, repo, "checkout", "master")
+	testutil.RunGit(t, repo, "checkout", "master")
 	return repo
 }
 
@@ -162,10 +163,10 @@ func itSetupConflictRepo(t *testing.T) string {
 	repo := itInitRepo(t)
 	itWriteFile(t, repo, "a.txt", "line1\nline2\nline3\n")
 	itCommitAll(t, repo, "base")
-	runGitIn(t, repo, "checkout", "-b", "feature")
+	testutil.RunGit(t, repo, "checkout", "-b", "feature")
 	itWriteFile(t, repo, "a.txt", "line1\nfeature-line2\nline3\n")
 	itCommitAll(t, repo, "feature change line2")
-	runGitIn(t, repo, "checkout", "master")
+	testutil.RunGit(t, repo, "checkout", "master")
 	itWriteFile(t, repo, "a.txt", "line1\nmaster-line2\nline3\n")
 	itCommitAll(t, repo, "master change line2")
 	return repo
@@ -461,13 +462,13 @@ func TestIntegration_RebaseFlow(t *testing.T) {
 	repo := itInitRepo(t)
 	itWriteFile(t, repo, "a.txt", "base\n")
 	itCommitAll(t, repo, "base")
-	runGitIn(t, repo, "checkout", "-b", "feature")
+	testutil.RunGit(t, repo, "checkout", "-b", "feature")
 	itWriteFile(t, repo, "b.txt", "feature only\n")
 	itCommitAll(t, repo, "feature commit")
-	runGitIn(t, repo, "checkout", "master")
+	testutil.RunGit(t, repo, "checkout", "master")
 	itWriteFile(t, repo, "c.txt", "master only\n")
 	itCommitAll(t, repo, "master commit")
-	runGitIn(t, repo, "checkout", "feature")
+	testutil.RunGit(t, repo, "checkout", "feature")
 	app := itNewApp()
 
 	if _, err := app.Rebase(repo, "master"); err != nil {

@@ -10,6 +10,7 @@ import (
 	"workbench/model"
 	"workbench/service"
 	"workbench/util"
+	"workbench/util/testutil"
 )
 
 func TestGetAppVersion(t *testing.T) {
@@ -358,16 +359,6 @@ func TestParseDateStart_End(t *testing.T) {
 	}
 }
 
-// runGitIn 在指定目录执行 git 命令，失败即终止测试。
-func runGitIn(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v in %s failed: %v\n%s", args, dir, err, out)
-	}
-}
-
 // writeDirectoriesConfig 写入临时目录配置文件（directories.json），返回其路径。
 func writeDirectoriesConfig(t *testing.T, path string, dirs []*model.Directory) {
 	t.Helper()
@@ -406,7 +397,7 @@ func TestGetDirectories_NoRuntimeDetection(t *testing.T) {
 // GetDirectories 返回 IsGitRepo=false，等待 RefreshDirectoriesGitFlag 异步刷新补正。
 func TestGetDirectories_OldConfigBackwardCompat(t *testing.T) {
 	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
+	testutil.RunGit(t, repoDir, "init")
 
 	// 刻意不含 isGitRepo 字段，模拟旧配置（用 model 序列化保证路径转义正确，仅不设置 IsGitRepo）
 	configPath := filepath.Join(t.TempDir(), "directories.json")
@@ -472,9 +463,9 @@ func TestDirectory_OldConfigBackwardCompat(t *testing.T) {
 func TestRefreshDirectoriesGitFlag_DetectsAndPersists(t *testing.T) {
 	// 准备真实 git 仓 + 普通目录
 	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
-	runGitIn(t, repoDir, "config", "user.email", "test@test.com")
-	runGitIn(t, repoDir, "config", "user.name", "test")
+	testutil.RunGit(t, repoDir, "init")
+	testutil.RunGit(t, repoDir, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, repoDir, "config", "user.name", "test")
 	plainDir := t.TempDir()
 
 	// 旧配置：isGitRepo 字段全缺省（零值 false）
@@ -523,7 +514,7 @@ func TestRefreshDirectoriesGitFlag_DetectsAndPersists(t *testing.T) {
 // 规避并发竞态（刷新期间用户改名，刷新不应覆盖）。
 func TestRefreshDirectoriesGitFlag_PreservesOtherFields(t *testing.T) {
 	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
+	testutil.RunGit(t, repoDir, "init")
 
 	configPath := filepath.Join(t.TempDir(), "directories.json")
 	writeDirectoriesConfig(t, configPath, []*model.Directory{
@@ -560,7 +551,7 @@ func TestRefreshDirectoriesGitFlag_PreservesOtherFields(t *testing.T) {
 // git 仓 → true，普通目录 → false。
 func TestAddDirectory_PersistsIsGitRepo(t *testing.T) {
 	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
+	testutil.RunGit(t, repoDir, "init")
 	plainDir := t.TempDir()
 
 	configPath := filepath.Join(t.TempDir(), "directories.json")
@@ -592,7 +583,7 @@ func TestUpdateDirectory_RecalculatesIsGitRepo(t *testing.T) {
 	plainDir := t.TempDir()
 	// 目标：另一个 git 仓
 	repoDir := t.TempDir()
-	runGitIn(t, repoDir, "init")
+	testutil.RunGit(t, repoDir, "init")
 
 	configPath := filepath.Join(t.TempDir(), "directories.json")
 	app := &App{AppServices: &AppServices{directorySvc: service.NewDirectoryService(configPath)}}

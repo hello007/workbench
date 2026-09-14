@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"workbench/util/testutil"
 )
 
 // TestScanGitRepos_ConcurrentSameRoot 并发扫描同一 rootPath 不应触发 map 读写竞态。
@@ -17,7 +19,7 @@ func TestScanGitRepos_ConcurrentSameRoot(t *testing.T) {
 		if err := os.MkdirAll(repo, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", repo, err)
 		}
-		runGit(t, repo, "init")
+		testutil.RunGit(t, repo, "init")
 	}
 
 	cachePath := filepath.Join(t.TempDir(), "scan_cache.json")
@@ -51,7 +53,7 @@ func TestScanGitRepos_ConcurrentDifferentRoots(t *testing.T) {
 		if err := os.MkdirAll(repo, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", repo, err)
 		}
-		runGit(t, repo, "init")
+		testutil.RunGit(t, repo, "init")
 		roots[i] = root
 	}
 
@@ -77,7 +79,7 @@ func TestScanGitRepos_ConcurrentClearAndScan(t *testing.T) {
 	if err := os.MkdirAll(repo, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", repo, err)
 	}
-	runGit(t, repo, "init")
+	testutil.RunGit(t, repo, "init")
 
 	cachePath := filepath.Join(t.TempDir(), "scan_cache.json")
 	svc := NewGitServiceWithCache(cachePath)

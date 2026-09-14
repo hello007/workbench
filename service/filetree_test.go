@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
 
 func TestGetChildren_DirectoriesFirst(t *testing.T) {
@@ -461,9 +462,9 @@ func TestGetGitInfo_NonRepo(t *testing.T) {
 // TestGetGitInfo_RealRepo 真实仓库 IsRepo=true。
 func TestGetGitInfo_RealRepo(t *testing.T) {
 	dir := t.TempDir()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "t@t.com")
-	runGit(t, dir, "config", "user.name", "t")
+	testutil.RunGit(t, dir, "init")
+	testutil.RunGit(t, dir, "config", "user.email", "t@t.com")
+	testutil.RunGit(t, dir, "config", "user.name", "t")
 
 	svc := NewFileTreeService()
 	info, err := svc.GetGitInfo(dir)
