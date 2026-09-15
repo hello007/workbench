@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证 AiFunction.OutputSchema + AiTaskRunResult.StructuredOutput 新字段 wailsjs 三处同步零 diff；具名 string 别名补 export type"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "验证新 service（若有）AppServices 加字段 + NewAppServices 加构造行 2 处；AppServices 在 package main；委托方法计数"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证覆盖率门禁零回归：service ≥76% model/server ≥80% 前端 ≥70%（exclude wailsjs）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "验证新增错误码同步 model/app_error.go 常量表 + frontend error.js；AppError{Code,Message} 跨层分流"}
+{"file": "docs/spec/e2e-testing.md", "reason": "验证 E2E 用例从 fixtures.js import {test,expect} 注入 Wails mock；mock 单一数据源 wails-mock-defaults.js；禁 waitForTimeout 靠 expect 自动重试"}
+{"file": "docs/spec/test-stability.md", "reason": "验证测试稳定性规范（避免 flaky、并发/时序处理）"}
