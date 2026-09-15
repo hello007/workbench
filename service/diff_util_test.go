@@ -214,6 +214,140 @@ func TestAggregateStagedDiff_TruncatesManyFiles(t *testing.T) {
 	}
 }
 
+// === AggregateUncommittedDiff 测试 ===
+
+func TestAggregateUncommittedDiff_EmptyChangesReturnsAppError(t *testing.T) {
+	// 干净仓库（无任何本地变更）返回 AppError{E_GIT_NO_STAGED_CHANGES}
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "base\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "base")
+
+	svc := NewGitService()
+	_, err := svc.AggregateUncommittedDiff(repo)
+	if err == nil {
+		t.Fatal("无本地变更应返回错误")
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("应返回 AppError，got %T: %v", err, err)
+	}
+	if appErr.Code != model.ErrCodeGitNoStagedChanges {
+		t.Errorf("code 应为 E_GIT_NO_STAGED_CHANGES，got %s", appErr.Code)
+	}
+	if !strings.Contains(appErr.Message, "无本地变更") {
+		t.Errorf("未提交聚合空变更 message 应含「无本地变更」，got %q", appErr.Message)
+	}
+}
+
+func TestAggregateUncommittedDiff_IncludesUnstaged(t *testing.T) {
+	// 未暂存工作区改动应纳入聚合（与 AggregateStagedDiff 的关键差异）
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "base\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "base")
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "workdir-only\n") // 未 add
+
+	svc := NewGitService()
+	// AggregateStagedDiff 无暂存文件 → AppError（对照基线）
+	_, stagedErr := svc.AggregateStagedDiff(repo)
+	if stagedErr == nil {
+		t.Fatal("无暂存文件 AggregateStagedDiff 应报错（对照基线）")
+	}
+	// AggregateUncommittedDiff 纳入未暂存改动 → 返回 diff 文本
+	text, err := svc.AggregateUncommittedDiff(repo)
+	if err != nil {
+		t.Fatalf("AggregateUncommittedDiff 失败: %v", err)
+	}
+	if !strings.Contains(text, "=== a.txt ===") {
+		t.Errorf("聚合文本应含文件头 === a.txt ===，got %q", text)
+	}
+	if !strings.Contains(text, "workdir-only") {
+		t.Errorf("聚合文本应含未暂存工作区改动，got %q", text)
+	}
+}
+
+func TestAggregateUncommittedDiff_IncludesStagedAndUnstaged(t *testing.T) {
+	// 暂存 + 未暂存混合均纳入聚合
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "base-a\n")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "base-b\n")
+	testutil.RunGit(t, repo, "add", "a.txt", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "base")
+	// a.txt 暂存，b.txt 仅工作区改动
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "staged-a\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "unstaged-b\n")
+
+	svc := NewGitService()
+	text, err := svc.AggregateUncommittedDiff(repo)
+	if err != nil {
+		t.Fatalf("AggregateUncommittedDiff 失败: %v", err)
+	}
+	if !strings.Contains(text, "=== a.txt ===") || !strings.Contains(text, "=== b.txt ===") {
+		t.Errorf("聚合文本应含两文件头，got %q", text)
+	}
+	if !strings.Contains(text, "staged-a") {
+		t.Errorf("聚合文本应含暂存文件改动，got %q", text)
+	}
+	if !strings.Contains(text, "unstaged-b") {
+		t.Errorf("聚合文本应含未暂存文件改动，got %q", text)
+	}
+}
+
+func TestAggregateUncommittedDiff_TruncatesManyFiles(t *testing.T) {
+	// 未暂存文件数超 maxDiffFiles（20），应截断并拼提示
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "init.txt"), "init\n")
+	testutil.RunGit(t, repo, "add", "init.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+
+	// 工作区改动 25 个文件超 maxDiffFiles=20（均不 add，走未暂存聚合）
+	for i := 0; i < 25; i++ {
+		name := "f" + string(rune('a'+i)) + ".txt"
+		testutil.WriteFile(t, filepath.Join(repo, name), "content-"+name+"\n")
+	}
+
+	svc := NewGitService()
+	text, err := svc.AggregateUncommittedDiff(repo)
+	if err != nil {
+		t.Fatalf("AggregateUncommittedDiff 失败: %v", err)
+	}
+	if !strings.Contains(text, "[已截断") {
+		t.Errorf("超文件数阈值应拼截断提示，got %q", text)
+	}
+	if !strings.Contains(text, "剩余") {
+		t.Errorf("截断提示应含剩余信息，got %q", text)
+	}
+}
+
+func TestAggregateUncommittedDiff_IncludesUntrackedFile(t *testing.T) {
+	// 未跟踪文件应纳入聚合（GetDiff --no-index 展示为新增全文）
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "init.txt"), "init\n")
+	testutil.RunGit(t, repo, "add", "init.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	// 新建未跟踪文件
+	testutil.WriteFile(t, filepath.Join(repo, "new.txt"), "new-content\n")
+
+	svc := NewGitService()
+	text, err := svc.AggregateUncommittedDiff(repo)
+	if err != nil {
+		t.Fatalf("AggregateUncommittedDiff 失败: %v", err)
+	}
+	if !strings.Contains(text, "=== new.txt ===") {
+		t.Errorf("聚合文本应含未跟踪文件头，got %q", text)
+	}
+	if !strings.Contains(text, "new-content") {
+		t.Errorf("聚合文本应含未跟踪文件内容，got %q", text)
+	}
+}
+
 // === GetRecentCommitSubjects 测试 ===
 
 func TestGetRecentCommitSubjects_DefaultLimit(t *testing.T) {

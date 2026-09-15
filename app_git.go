@@ -647,6 +647,17 @@ func (a *App) GetStagedDiffText(path string) (string, error) {
 	return a.gitSvc.AggregateStagedDiff(path)
 }
 
+// GetUncommittedDiffText 聚合未提交全量变更（staged + unstaged）diff 为单段文本（含截断保护），
+// 供 AI 代码审查注入 prompt。链路：GetLocalChanges 不筛 Staged + 逐文件 GetDiff（git diff HEAD），
+// 超阈值截断 + 提示剩余。无任何本地变更返回 AppError{E_GIT_NO_STAGED_CHANGES}（复用 PR1 错误码，
+// 语义「无本地变更可审查」），前端按 code 走 handleGitError warning 提示。
+func (a *App) GetUncommittedDiffText(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.AggregateUncommittedDiff(path)
+}
+
 // GetRecentCommitSubjects 取最近 limit 条 commit subject（过滤归档噪声），供 AI 提交信息生成 few-shot。
 // limit<=0 默认 3。空仓库返回空切片不报错（few-shot 可选增强，不阻塞主流程）。
 func (a *App) GetRecentCommitSubjects(path string, limit int) ([]string, error) {

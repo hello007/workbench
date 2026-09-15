@@ -61,7 +61,11 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // GetStagedDiffText 默认示例 diff（LocalChanges 用户点「AI 生成」才调，挂载不触发）
   // GetRecentCommitSubjects 默认 3 条 few-shot 示例（形状对齐 []string）
   GetStagedDiffText: '=== src/app.js ===\n+const x = 1\n',
-  GetRecentCommitSubjects: ['feat: 新增某功能', 'fix: 修复某缺陷', 'docs: 更新文档']
+  GetRecentCommitSubjects: ['feat: 新增某功能', 'fix: 修复某缺陷', 'docs: 更新文档'],
+
+  // ---- AI 代码审查（PR3）----
+  // GetUncommittedDiffText 默认示例 diff（LocalChanges 用户点「AI 审查」才调，挂载不触发）
+  GetUncommittedDiffText: '=== src/app.js ===\n+const x = 1\n'
 }
 
 /**
@@ -272,7 +276,18 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
               { type: 'feat', scope: 'auth', description: '新增登录校验' },
               { type: 'fix', scope: '', description: '修复空指针异常' },
               { type: 'refactor', scope: '', description: '抽取公共校验逻辑' }
-            ]
+            ],
+            // code-review skill OutputSchema 的 issues 数组示例（PR3）：
+            // 含多级别（critical/warning/info）多类别（bug/security/performance/style）问题，
+            // 供前端 CodeReviewResult 单一数据源。与 candidates 共存：commit-message E2E 读 .candidates，
+            // code-review E2E 读 .issues，互不干扰。
+            issues: [
+              { file: 'src/auth.go', line: 42, severity: 'critical', category: 'bug', confidence: 0.9, description: '空指针解引用：user 为 nil 时访问 user.Name', suggestion: '访问前判空 if user != nil' },
+              { file: 'src/auth.go', line: 88, severity: 'warning', category: 'security', confidence: 0.8, description: '密码明文打印到日志', suggestion: '日志脱敏或移除该日志' },
+              { file: 'src/util.go', line: 12, severity: 'warning', category: 'performance', confidence: 0.6, description: '循环内重复查询数据库', suggestion: '预加载后内存匹配' },
+              { file: 'src/util.go', line: 30, severity: 'info', category: 'style', confidence: 0.5, description: '变量名 s 含义不清', suggestion: '改为 sessionToken' }
+            ],
+            summary: '审查 2 个文件，发现 4 个问题（1 严重 / 2 警告 / 1 提示）'
           }
         }
       }

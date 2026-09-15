@@ -146,6 +146,17 @@
                   {{ file }}
                 </el-tag>
               </div>
+
+              <div class="review-action">
+                <el-button
+                  size="small"
+                  type="primary"
+                  plain
+                  :icon="View"
+                  :loading="aiReviewing && reviewCommitSha === commit.sha"
+                  @click.stop="reviewCommit(commit)"
+                >审查此 commit</el-button>
+              </div>
             </div>
           </el-collapse-transition>
         </div>
@@ -189,6 +200,15 @@
       :head-sha="rangeHeadSHA"
       mode="range"
     />
+
+    <!-- AI 代码审查结果弹窗（问题清单按级别分组，点击文件定位 commit diff） -->
+    <CodeReviewResult
+      v-model="reviewResultVisible"
+      :issues="reviewIssues"
+      :summary="reviewSummary"
+      :loading="aiReviewing"
+      @locate-file="onReviewLocateFile"
+    />
   </el-card>
 </template>
 
@@ -197,10 +217,15 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
-  User, Search
+  User, Search, View
 } from '@element-plus/icons-vue'
-import { GetCommitHistory, InvalidateCommitHistoryCache } from '../../wailsjs/go/main/App'
+import { GetCommitHistory, InvalidateCommitHistoryCache, GetCommitFileDiff, RunAiFunction } from '../../wailsjs/go/main/App'
+// 仅引 EventsOn：用其返回的「注销本监听器」闭包在 onUnmounted 调用，精准移除本组件监听器。
+// 禁用 EventsOff('ai-task:done')——会清同名全部监听器，误删 AiFunctionPanel / LocalChanges 的 onDone。
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
+import CodeReviewResult from './CodeReviewResult.vue'
+import { handleGitError } from '../utils/error'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -231,6 +256,17 @@ const rangeDiffVisible = ref(false)
 const rangeBaseSHA = ref('')
 const rangeHeadSHA = ref('')
 
+// AI 代码审查状态（审指定 commit 全量 diff）
+// 复用 ai-task:done 监听器（onAiTaskDone 按 currentReviewTaskId 路由到问题清单）
+const aiReviewing = ref(false)
+const reviewIssues = ref([])
+const reviewSummary = ref('')
+const reviewResultVisible = ref(false)
+let currentReviewTaskId = null
+let reviewCommitSha = '' // 审查中的 commit sha，问题点击定位文件时复用打开 commit diff
+// EventsOn 返回的注销闭包：onUnmounted 调用，精准移除本组件的 ai-task:done 监听器
+let offAiTaskDone = null
+
 // buildFilter 将前端过滤状态组装为后端 CommitFilter 对象，空值不参与过滤
 const buildFilter = () => {
   const f = {
@@ -260,11 +296,6 @@ const applyFilter = () => {
     loadCommits(true)
   }, 300)
 }
-
-// 组件卸载时清未触发的防抖定时器，避免卸载后回调仍触发 loadCommits 写已销毁响应式状态
-onUnmounted(() => {
-  clearTimeout(filterTimer)
-})
 
 const loadCommits = async (reset = true) => {
   if (reset) {
@@ -329,6 +360,55 @@ const openCommitFileDiff = (sha, file) => {
   commitDiffVisible.value = true
 }
 
+// AI 代码审查：取整 commit 全量 diff（file 传空）→ RunAiFunction('code-review')
+// done 事件经 onAiTaskDone（currentReviewTaskId 路由）取 structuredOutput.issues 渲染问题清单。
+const reviewCommit = async (commit) => {
+  if (!commit || !commit.sha || aiReviewing.value) return
+  aiReviewing.value = true
+  reviewIssues.value = []
+  reviewSummary.value = ''
+  reviewCommitSha = commit.sha
+  reviewResultVisible.value = true
+  try {
+    // file 传空串 → GetCommitFileDiff 返回全 commit diff（不限定 pathspec）
+    const diffText = await GetCommitFileDiff(props.repoPath, commit.sha, '')
+    currentReviewTaskId = await RunAiFunction('code-review', { diff: diffText })
+  } catch (error) {
+    aiReviewing.value = false
+    reviewResultVisible.value = false
+    currentReviewTaskId = null
+    reviewCommitSha = ''
+    handleGitError('AI 审查失败: ', error)
+  }
+}
+
+// done 事件处理：taskId 匹配后取 structuredOutput.issues 渲染问题清单。
+// 全局常驻监听（onMounted 注册），多组件共存各自 taskId 过滤互不干扰。
+const onAiTaskDone = (result) => {
+  if (!currentReviewTaskId || result.taskId !== currentReviewTaskId) return
+  aiReviewing.value = false
+  currentReviewTaskId = null
+  if (result.error || result.canceled) {
+    reviewResultVisible.value = false
+    reviewCommitSha = ''
+    ElMessage.error('AI 审查失败: ' + (result.error || '已取消'))
+    return
+  }
+  const structured = result.structuredOutput
+  reviewIssues.value = (structured && Array.isArray(structured.issues)) ? structured.issues : []
+  reviewSummary.value = (structured && structured.summary) || ''
+  // structuredOutput.issues 为空 → CodeReviewResult el-empty 降级提示
+}
+
+// 代码审查问题点击文件定位：复用 commit 模式 FileDiffDialog 打开该 commit 的文件 diff
+// （行号定位暂不支持，仅打开文件）
+const onReviewLocateFile = (file) => {
+  if (!file || !reviewCommitSha) return
+  commitDiffSha.value = reviewCommitSha
+  commitDiffFile.value = file
+  commitDiffVisible.value = true
+}
+
 // 勾选提交参与区间对比，限选 2 个：第三个替换最早选中的（FIFO）
 const toggleSelectSha = (sha, checked) => {
   if (checked) {
@@ -385,6 +465,17 @@ watch(() => props.repoPath, () => {
 
 onMounted(() => {
   loadCommits(true)
+  offAiTaskDone = EventsOn('ai-task:done', onAiTaskDone)
+})
+
+onUnmounted(() => {
+  clearTimeout(filterTimer)
+  // 调 EventsOn 返回的注销闭包，仅移除本组件监听器（Wails EventsOff 按 eventName 清同名全部监听器，
+  // 会误伤 AiFunctionPanel / LocalChanges 的 onDone）
+  if (offAiTaskDone) {
+    offAiTaskDone()
+    offAiTaskDone = null
+  }
 })
 
 defineExpose({ loadCommits, handleRefresh })
@@ -559,6 +650,9 @@ defineExpose({ loadCommits, handleRefresh })
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
+}
+.review-action {
+  margin-top: var(--spacing-md);
 }
 .load-more {
   margin-top: var(--spacing-lg);

@@ -43,18 +43,49 @@ func TruncateDiff(text string, maxLines int) (result string, truncated bool, dro
 // 用于 AI 提交信息生成：diff 经 RunAiFunction params 注入 BuildStagePrompt 的
 // {{diff}} 占位符。截断保护避免大 diff 超 claude 上下文窗口。
 func (s *GitService) AggregateStagedDiff(repoPath string) (string, error) {
+	return s.aggregateDiff(repoPath, true)
+}
+
+// AggregateUncommittedDiff 聚合未提交全量变更（staged + unstaged）diff 为单段文本，含截断保护。
+//
+// 与 AggregateStagedDiff 同构但含未暂存：不筛 Staged，逐文件 GetDiff（git diff HEAD，
+// 已跟踪文件对比 HEAD 与工作区含暂存+未暂存；未跟踪文件 --no-index 展示新增全文）。
+// 按 maxDiffFiles/maxDiffLines/maxDiffBytes 三阈值截断，截断时文末拼提示
+// 「[已截断：剩余 N 文件 M 行未纳入]」供模型感知上下文不完整。
+//
+// 无任何本地变更返回 AppError{E_GIT_NO_STAGED_CHANGES}（复用 PR1 错误码，前端按 code
+// 走 handleGitError warning 提示「无本地变更可审查」）。文本格式与 AggregateStagedDiff
+// 一致：每文件 diff 前拼「=== <path> ===」头。
+//
+// 用于 AI 代码审查（审未提交变更）：diff 经 RunAiFunction('code-review', { diff }) 注入
+// form PromptTemplate 的 {{diff}} 占位符。截断保护避免大 diff 超 claude 上下文窗口。
+func (s *GitService) AggregateUncommittedDiff(repoPath string) (string, error) {
+	return s.aggregateDiff(repoPath, false)
+}
+
+// aggregateDiff 是 AggregateStagedDiff / AggregateUncommittedDiff 的共用实现。
+//
+// stagedOnly=true 走暂存区聚合（筛 Staged + GetStagedDiff），用于提交信息生成；
+// stagedOnly=false 走未提交全量聚合（不筛 Staged + GetDiff），用于代码审查。
+// 两者共享截断阈值与文件头格式，仅数据源与筛选不同。空变更返回 AppError。
+func (s *GitService) aggregateDiff(repoPath string, stagedOnly bool) (string, error) {
 	changes, err := s.GetLocalChanges(repoPath)
 	if err != nil {
 		return "", err
 	}
-	stagedFiles := make([]string, 0, len(changes))
+	files := make([]string, 0, len(changes))
 	for _, c := range changes {
-		if c.Staged {
-			stagedFiles = append(stagedFiles, c.Path)
+		if stagedOnly && !c.Staged {
+			continue
 		}
+		files = append(files, c.Path)
 	}
-	if len(stagedFiles) == 0 {
-		return "", model.NewAppError(model.ErrCodeGitNoStagedChanges, "无暂存文件，请先 git add 要提交的变更")
+	if len(files) == 0 {
+		msg := "无暂存文件，请先 git add 要提交的变更"
+		if !stagedOnly {
+			msg = "无本地变更可审查"
+		}
+		return "", model.NewAppError(model.ErrCodeGitNoStagedChanges, msg)
 	}
 
 	var sb strings.Builder
@@ -65,7 +96,7 @@ func (s *GitService) AggregateStagedDiff(repoPath string) (string, error) {
 	droppedLines := 0
 	truncated := false
 
-	for _, file := range stagedFiles {
+	for _, file := range files {
 		if truncated {
 			// 前序文件已触发截断，后续文件全部丢弃计数
 			droppedFiles++
@@ -77,12 +108,17 @@ func (s *GitService) AggregateStagedDiff(repoPath string) (string, error) {
 			truncated = true
 			continue
 		}
-		diff, err := s.GetStagedDiff(repoPath, file)
+		var diff string
+		if stagedOnly {
+			diff, err = s.GetStagedDiff(repoPath, file)
+		} else {
+			diff, err = s.GetDiff(repoPath, file)
+		}
 		if err != nil {
 			return "", err
 		}
 		if diff == "" {
-			continue // 文件 staged 但无 diff（如 add 后内容改回 HEAD 一致），跳过不计数
+			continue // 文件无 diff（如改动改回 HEAD 一致），跳过不计数
 		}
 		fileBlock := fmt.Sprintf("=== %s ===\n%s\n", file, diff)
 		blockLines := strings.Count(fileBlock, "\n")

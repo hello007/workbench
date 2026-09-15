@@ -25,6 +25,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UnstageFiles: vi.fn(),
   GetStagedDiffText: vi.fn(),
   GetRecentCommitSubjects: vi.fn(),
+  GetUncommittedDiffText: vi.fn(),
   RunAiFunction: vi.fn()
 }))
 
@@ -45,7 +46,8 @@ vi.mock('@element-plus/icons-vue', () => ({
   Refresh: { template: '<i class="i-refresh" />' },
   ArrowDown: { template: '<i class="i-down" />' },
   MagicStick: { template: '<i class="i-magic" />' },
-  Loading: { template: '<i class="i-loading" />' }
+  Loading: { template: '<i class="i-loading" />' },
+  View: { template: '<i class="i-view" />' }
 }))
 
 // el-table stub：渲染行 + 挂载即 emit selection-change（模拟全选）+ 双击行 emit row-dblclick
@@ -92,7 +94,13 @@ const stubs = {
     template: '<div class="el-dialog" v-if="modelValue"><slot /><slot name="footer" /></div>',
     props: ['modelValue', 'title', 'width']
   },
-  FileDiffDialog: { template: '<div class="file-diff-dialog-stub" />', props: ['modelValue', 'repoPath', 'file'] }
+  FileDiffDialog: { name: 'FileDiffDialog', template: '<div class="file-diff-dialog-stub" :data-file="file" />', props: ['modelValue', 'repoPath', 'file'] },
+  CodeReviewResult: {
+    name: 'CodeReviewResult',
+    template: '<div class="code-review-stub" v-if="modelValue" :data-loading="loading"><span v-for="(i, idx) in issues" :key="idx" class="stub-issue" @click="$emit(\'locate-file\', i.file)">{{ i.file }}</span></div>',
+    props: ['modelValue', 'issues', 'summary', 'loading'],
+    emits: ['update:modelValue', 'locate-file']
+  }
 }
 const directives = { loading: () => {} }
 
@@ -612,5 +620,148 @@ describe('LocalChanges.vue', () => {
     expect(EventsOff).not.toHaveBeenCalled()
     // 标记已卸载，避免 afterEach 重复 unmount
     wrapper = null
+  })
+
+  // ===== AI 代码审查 =====
+
+  it('AI 审查按钮：无本地变动时 footer 不渲染（按钮随 action-bar 隐藏）', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue([])
+    wrapper = await createWrapper()
+    // changes-footer 在 changes.length===0 时不渲染，AI 审查按钮随之不出现
+    expect(wrapper.find('.changes-footer').exists()).toBe(false)
+    const btn = wrapper.findAll('button').find(b => b.text().includes('AI 审查'))
+    expect(btn).toBeUndefined()
+  })
+
+  it('AI 审查按钮：有本地变动时可用', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    wrapper = await createWrapper()
+    const btn = wrapper.findAll('button').find(b => b.text().includes('AI 审查'))
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('点击 AI 审查：调 GetUncommittedDiffText + RunAiFunction 注入 diff', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('=== src/a.go ===\n+const x = 1\n')
+    RunAiFunction.mockResolvedValue('task-review-1')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    expect(GetUncommittedDiffText).toHaveBeenCalledWith('/repo/A')
+    expect(RunAiFunction).toHaveBeenCalledWith('code-review', { diff: '=== src/a.go ===\n+const x = 1\n' })
+  })
+
+  it('done 事件 structuredOutput.issues 渲染问题清单到 CodeReviewResult', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-2')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    expect(doneHandler).toBeTruthy()
+    doneHandler({
+      taskId: 'task-review-2',
+      structuredOutput: {
+        issues: [
+          { file: 'src/a.go', line: 1, severity: 'critical', category: 'bug', description: '空指针', suggestion: '判空' },
+          { file: 'src/b.go', line: 2, severity: 'warning', category: 'style', description: '命名', suggestion: '改名' }
+        ],
+        summary: '2 个问题'
+      },
+      error: '',
+      canceled: false
+    })
+    await flushPromises()
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('modelValue')).toBe(true)
+    expect(stub.props('issues').length).toBe(2)
+    expect(stub.props('summary')).toBe('2 个问题')
+    // loading 关闭
+    expect(stub.props('loading')).toBe(false)
+  })
+
+  it('done 事件 code-review 与 commit-message taskId 共存不串扰', async () => {
+    // 同时发起 commit-message 与 code-review，done 事件按 taskId 路由互不干扰
+    const { GetLocalChanges, GetStagedDiffText, GetRecentCommitSubjects, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockResolvedValue('staged-diff')
+    GetRecentCommitSubjects.mockResolvedValue([])
+    GetUncommittedDiffText.mockResolvedValue('uncommitted-diff')
+    // commit-message 返回 task-cm，code-review 返回 task-cr
+    RunAiFunction.mockImplementation((id) => Promise.resolve(id === 'commit-message' ? 'task-cm' : 'task-cr'))
+    wrapper = await createWrapper()
+    // 先点 AI 生成（commit-message）
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    // 再点 AI 审查（code-review）
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    // done commit-message → 候选弹窗渲染候选
+    doneHandler({ taskId: 'task-cm', structuredOutput: { candidates: [{ type: 'fix', scope: '', description: '修' }] }, error: '', canceled: false })
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-item').length).toBe(1)
+    // done code-review → 问题清单渲染
+    doneHandler({ taskId: 'task-cr', structuredOutput: { issues: [{ file: 'a.go', severity: 'info', category: 'style', description: 'x' }] }, error: '', canceled: false })
+    await flushPromises()
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('issues').length).toBe(1)
+  })
+
+  it('AI 审查失败（无变更 AppError）时 handleGitError 走 warning 并关闭弹窗', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { GetLocalChanges, GetUncommittedDiffText } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockRejectedValue({ code: 'E_GIT_NO_STAGED_CHANGES', message: '无本地变更可审查' })
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    // E_GIT_NO_STAGED_CHANGES 在 WARNING_CODES → handleGitError 走 warning
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('无本地变更'))
+    // CodeReviewResult 弹窗关闭
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('modelValue')).toBe(false)
+  })
+
+  it('done 事件 error 时弹错误并关闭审查弹窗', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-err')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    doneHandler({ taskId: 'task-review-err', error: '超时', canceled: false, structuredOutput: null })
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('超时'))
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('modelValue')).toBe(false)
+  })
+
+  it('CodeReviewResult locate-file 打开工作区 FileDiffDialog', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-loc')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    doneHandler({ taskId: 'task-review-loc', structuredOutput: { issues: [{ file: 'src/a.go', severity: 'info', category: 'style', description: 'x' }] }, error: '', canceled: false })
+    await flushPromises()
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    await stub.vm.$emit('locate-file', 'src/a.go')
+    await flushPromises()
+    // 工作区 FileDiffDialog 打开，file 定位到 src/a.go
+    const diffStub = wrapper.findComponent({ name: 'FileDiffDialog' })
+    expect(diffStub.exists()).toBe(true)
+    expect(diffStub.props('file')).toBe('src/a.go')
   })
 })

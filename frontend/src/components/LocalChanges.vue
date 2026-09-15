@@ -111,6 +111,21 @@
             >
               推送
             </el-button>
+            <el-tooltip
+              :content="changes.length > 0 ? '基于未提交全量变更（暂存+未暂存）做结构化代码审查' : '无本地变更可审查'"
+              placement="top"
+            >
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :icon="View"
+                :loading="aiReviewing"
+                :disabled="changes.length === 0 || aiReviewing"
+                @click="reviewCode"
+                class="ai-review-btn"
+              >AI 审查</el-button>
+            </el-tooltip>
           </div>
 
           <div class="action-right">
@@ -172,13 +187,22 @@
         <el-button size="small" @click="candidateDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- AI 代码审查结果弹窗（问题清单按级别分组，点击文件定位 diff） -->
+    <CodeReviewResult
+      v-model="reviewResultVisible"
+      :issues="reviewIssues"
+      :summary="reviewSummary"
+      :loading="aiReviewing"
+      @locate-file="onReviewLocateFile"
+    />
   </el-card>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, ArrowDown, MagicStick, Loading } from '@element-plus/icons-vue'
+import { Refresh, ArrowDown, MagicStick, Loading, View } from '@element-plus/icons-vue'
 import {
   GetLocalChanges,
   DiscardChanges,
@@ -189,6 +213,7 @@ import {
   UnstageFiles,
   GetStagedDiffText,
   GetRecentCommitSubjects,
+  GetUncommittedDiffText,
   RunAiFunction
 } from '../../wailsjs/go/main/App'
 // 仅引 EventsOn：用其返回的「注销本监听器」闭包（offAiTaskDone）在 onBeforeUnmount 调用，
@@ -196,6 +221,7 @@ import {
 // 会误删 AiFunctionPanel（v-show 常驻）的 onDone，导致本组件卸载后 AI 功能面板 done 事件失效。
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
+import CodeReviewResult from './CodeReviewResult.vue'
 import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
@@ -225,6 +251,14 @@ const candidateDialogVisible = ref(false)
 let currentAiTaskId = null
 // EventsOn 返回的注销闭包：onBeforeUnmount 调用，精准移除本组件的 ai-task:done 监听器（不波及 AiFunctionPanel）
 let offAiTaskDone = null
+
+// AI 代码审查状态（审未提交变更）
+// 复用 ai-task:done 监听器（onAiTaskDone 内按 currentReviewTaskId 路由到问题清单，与 commit-message 共存）
+const aiReviewing = ref(false)
+const reviewIssues = ref([])
+const reviewSummary = ref('')
+const reviewResultVisible = ref(false)
+let currentReviewTaskId = null
 
 // 有无暂存文件：changes 列表筛 staged 非空（驱动 AI 生成按钮启用态）
 const hasStagedChanges = computed(() => changes.value.some(c => c.staged))
@@ -265,6 +299,13 @@ const onSelectionChange = (selection) => {
 const openDiff = (row) => {
   if (!row || !row.path) return
   diffFile.value = row.path
+  diffVisible.value = true
+}
+
+// 代码审查问题点击文件定位：复用工作区 FileDiffDialog 打开该文件 diff（行号定位暂不支持，仅打开文件）
+const onReviewLocateFile = (file) => {
+  if (!file) return
+  diffFile.value = file
   diffVisible.value = true
 }
 
@@ -372,23 +413,60 @@ const generateCommitMessage = async () => {
   }
 }
 
-// done 事件处理：taskId 匹配后取 structuredOutput.candidates 渲染候选列表。
+// AI 代码审查：取未提交全量聚合 diff → RunAiFunction('code-review')
+// done 事件经 onAiTaskDone（currentReviewTaskId 路由）取 structuredOutput.issues 渲染问题清单。
+// 无本地变更返回 AppError{E_GIT_NO_STAGED_CHANGES}，handleGitError 按 code warning 提示 + 关闭弹窗。
+const reviewCode = async () => {
+  if (changes.value.length === 0 || aiReviewing.value) return
+  aiReviewing.value = true
+  reviewIssues.value = []
+  reviewSummary.value = ''
+  reviewResultVisible.value = true
+  try {
+    const diffText = await GetUncommittedDiffText(props.repoPath)
+    currentReviewTaskId = await RunAiFunction('code-review', { diff: diffText })
+  } catch (error) {
+    aiReviewing.value = false
+    reviewResultVisible.value = false
+    currentReviewTaskId = null
+    handleGitError('AI 审查失败: ', error)
+  }
+}
+
+// done 事件处理：按 taskId 路由到 commit-message（候选）/ code-review（问题清单）。
 // 全局常驻监听（onMounted 注册），多组件共存各自 taskId 过滤互不干扰。
 const onAiTaskDone = (result) => {
-  if (!currentAiTaskId || result.taskId !== currentAiTaskId) return
-  aiGenerating.value = false
-  currentAiTaskId = null
-  if (result.error || result.canceled) {
-    candidateDialogVisible.value = false
-    ElMessage.error('AI 生成失败: ' + (result.error || '已取消'))
+  // commit-message 路由：取 structuredOutput.candidates 渲染候选列表
+  if (currentAiTaskId && result.taskId === currentAiTaskId) {
+    aiGenerating.value = false
+    currentAiTaskId = null
+    if (result.error || result.canceled) {
+      candidateDialogVisible.value = false
+      ElMessage.error('AI 生成失败: ' + (result.error || '已取消'))
+      return
+    }
+    const structured = result.structuredOutput
+    if (structured && Array.isArray(structured.candidates) && structured.candidates.length > 0) {
+      candidates.value = structured.candidates
+    } else {
+      // structuredOutput 为空（解析失败或未配 OutputSchema）→ 降级空列表，el-empty 提示手输
+      candidates.value = []
+    }
     return
   }
-  const structured = result.structuredOutput
-  if (structured && Array.isArray(structured.candidates) && structured.candidates.length > 0) {
-    candidates.value = structured.candidates
-  } else {
-    // structuredOutput 为空（解析失败或未配 OutputSchema）→ 降级空列表，el-empty 提示手输
-    candidates.value = []
+  // code-review 路由：取 structuredOutput.issues 渲染问题清单
+  if (currentReviewTaskId && result.taskId === currentReviewTaskId) {
+    aiReviewing.value = false
+    currentReviewTaskId = null
+    if (result.error || result.canceled) {
+      reviewResultVisible.value = false
+      ElMessage.error('AI 审查失败: ' + (result.error || '已取消'))
+      return
+    }
+    const structured = result.structuredOutput
+    reviewIssues.value = (structured && Array.isArray(structured.issues)) ? structured.issues : []
+    reviewSummary.value = (structured && structured.summary) || ''
+    // structuredOutput.issues 为空 → CodeReviewResult el-empty 降级提示「AI 未发现问题或输出格式异常」
   }
 }
 
@@ -631,6 +709,10 @@ defineExpose({ loadChanges, stageSingle, unstageSingle })
 }
 
 .ai-gen-btn {
+  flex-shrink: 0;
+}
+
+.ai-review-btn {
   flex-shrink: 0;
 }
 
