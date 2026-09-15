@@ -48,7 +48,8 @@ vi.mock('@element-plus/icons-vue', () => ({
   ArrowDown: { template: '<i class="i-down" />' },
   MagicStick: { template: '<i class="i-magic" />' },
   Loading: { template: '<i class="i-loading" />' },
-  View: { template: '<i class="i-view" />' }
+  View: { template: '<i class="i-view" />' },
+  CopyDocument: { template: '<i class="i-copy" />' }
 }))
 
 // el-table stub：渲染行 + 挂载即 emit selection-change（模拟全选）+ 双击行 emit row-dblclick
@@ -311,7 +312,7 @@ describe('LocalChanges.vue', () => {
     expect(PushRepo).toHaveBeenCalledWith('/repo/A', false)
   })
 
-  it('推送超长输出截断展示', async () => {
+  it('推送超长输出弹 Dialog 完整展示不截断', async () => {
     const { ElMessage } = await import('element-plus')
     const { PushRepo, HasUpstream, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
     GetLocalChanges.mockResolvedValue(changes)
@@ -321,7 +322,25 @@ describe('LocalChanges.vue', () => {
     wrapper = await createWrapper()
     await wrapper.findAll('button').find(b => b.text() === '推送').trigger('click')
     await flushPromises()
-    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('...'))
+    // 不再截断 toast，改弹 PushResultDialog 完整展示
+    expect(ElMessage.success).not.toHaveBeenCalledWith(expect.stringContaining('...'))
+    const dialog = wrapper.findAll('.el-dialog').find(d => d.text().includes(long))
+    expect(dialog.exists()).toBe(true)
+  })
+
+  it('推送短输出走 toast 不弹结果 Dialog', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { PushRepo, HasUpstream, GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(changes)
+    HasUpstream.mockResolvedValue(true)
+    PushRepo.mockResolvedValue('To github.com/demo/demo-repo.git\n   main -> main')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text() === '推送').trigger('click')
+    await flushPromises()
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('main -> main'))
+    // 短输出不弹结果 Dialog：无 pre.push-result-output 含该输出
+    const resultPre = wrapper.find('.push-result-output')
+    expect(resultPre.exists()).toBe(false)
   })
 
   it('推送失败时弹错误提示', async () => {

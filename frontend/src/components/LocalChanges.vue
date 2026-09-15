@@ -196,6 +196,9 @@
       :loading="aiReviewing"
       @locate-file="onReviewLocateFile"
     />
+
+    <!-- 推送结果弹窗：超长 output 完整展示 + 复制 -->
+    <PushResultDialog v-model="pushResultVisible" :output="pushResultOutput" />
   </el-card>
 </template>
 
@@ -223,6 +226,7 @@ import {
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
 import CodeReviewResult from './CodeReviewResult.vue'
+import PushResultDialog from './PushResultDialog.vue'
 import { handleGitError } from '../utils/gitError'
 
 const props = defineProps({
@@ -244,6 +248,10 @@ const pushing = ref(false)
 // diff 弹窗状态
 const diffVisible = ref(false)
 const diffFile = ref('')
+
+// 推送结果弹窗状态：output > 200 字符时弹 Dialog 完整展示，对齐 Pull 结果范式
+const pushResultVisible = ref(false)
+const pushResultOutput = ref('')
 
 // AI 生成提交信息状态
 const aiGenerating = ref(false)
@@ -377,8 +385,9 @@ const doPush = async () => {
     const output = await PushRepo(props.repoPath, setUpstream)
     const text = (output || '').trim()
     if (text.length > 200) {
-      // 超长输出截断展示
-      ElMessage.success(text.slice(0, 200) + '...')
+      // 超长输出弹 Dialog 完整展示（对齐 Pull 结果范式），不截断
+      pushResultOutput.value = text
+      pushResultVisible.value = true
     } else {
       ElMessage.success(text || '推送完成')
     }

@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 测试约束——wails-mock-defaults.js 单一数据源 + 禁 waitForTimeout 靠 expect 重试，新增 PushResultDialog 测试须遵守"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬失败门禁，新增组件须配单测不拉低覆盖率"}
+{"file": "frontend/src/components/ContentPanel.vue", "reason": "Pull 结果范式对照审查——Push 面板阈值逻辑/样式/交互须与 Pull 一致，审查偏离点（独立组件+复制按钮）是否合理"}
