@@ -16,7 +16,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetCommitFileDiff: vi.fn(),
   GetRangeDiff: vi.fn(),
   InvalidateCommitHistoryCache: vi.fn(),
-  RunAiFunction: vi.fn()
+  RunAiFunction: vi.fn(),
+  CancelAiTask: vi.fn()
 }))
 
 // ai-task:done 事件总线：EventsOn 记录 handler 供测试手动触发（vi.hoisted 避免工厂函数 TDZ）
@@ -513,6 +514,35 @@ describe('CommitHistory.vue', () => {
     // file 传空串 → 全 commit diff
     expect(GetCommitFileDiff).toHaveBeenCalledWith('/repo/A', c.sha, '')
     expect(RunAiFunction).toHaveBeenCalledWith('code-review', { diff: '=== src/a.go ===\n+const x = 1\n' })
+  })
+
+  it('切仓库时取消在途 AI 审查任务并重置态（防旧仓库结果串入新仓库 + loading 卡死）', async () => {
+    const { GetCommitHistory, GetCommitFileDiff, RunAiFunction, CancelAiTask } = await import('../../../wailsjs/go/main/App')
+    const c = commit()
+    GetCommitHistory.mockResolvedValue([c])
+    GetCommitFileDiff.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-cr-stale')
+    CancelAiTask.mockResolvedValue(true)
+    wrapper = createWrapper()
+    await flushPromises()
+    await wrapper.find('.commit-card').trigger('click')
+    await wrapper.findAll('button').find(b => b.text().includes('审查此 commit')).trigger('click')
+    await flushPromises()
+    expect(CancelAiTask).not.toHaveBeenCalled()
+    // 审查弹窗已开（审查中）：CodeReviewResult 常驻挂载，断 modelValue=true
+    expect(wrapper.findComponent({ name: 'CodeReviewResult' }).props('modelValue')).toBe(true)
+    // 切仓库：触发 resetAiState
+    await wrapper.setProps({ repoPath: '/repo/B' })
+    await flushPromises()
+    // 在途审查任务被取消
+    expect(CancelAiTask).toHaveBeenCalledWith('task-cr-stale')
+    // 审查弹窗关闭：modelValue=false
+    expect(wrapper.findComponent({ name: 'CodeReviewResult' }).props('modelValue')).toBe(false)
+    // 旧 taskId 的 done 事件不再匹配本组件 → 不渲染问题清单（防旧仓库结果串入新仓库）
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    doneHandler({ taskId: 'task-cr-stale', structuredOutput: { issues: [{ file: 'x', severity: 'info', category: 'style', description: 'y' }] }, error: '', canceled: false })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'CodeReviewResult' }).props('modelValue')).toBe(false)
   })
 
   it('done 事件 structuredOutput.issues 渲染问题清单到 CodeReviewResult', async () => {

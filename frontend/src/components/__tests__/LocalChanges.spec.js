@@ -26,7 +26,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetStagedDiffText: vi.fn(),
   GetRecentCommitSubjects: vi.fn(),
   GetUncommittedDiffText: vi.fn(),
-  RunAiFunction: vi.fn()
+  RunAiFunction: vi.fn(),
+  CancelAiTask: vi.fn()
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -387,6 +388,50 @@ describe('LocalChanges.vue', () => {
     await wrapper.setProps({ repoPath: '/repo/B' })
     await flushPromises()
     expect(GetLocalChanges).toHaveBeenCalledWith('/repo/B')
+  })
+
+  it('切仓库时取消在途 AI 任务并重置态（防旧仓库候选串入新仓库 + loading 卡死）', async () => {
+    const { GetLocalChanges, GetStagedDiffText, GetRecentCommitSubjects, RunAiFunction, CancelAiTask } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockResolvedValue('diff')
+    GetRecentCommitSubjects.mockResolvedValue([])
+    RunAiFunction.mockResolvedValue('task-ai-stale')
+    CancelAiTask.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    expect(CancelAiTask).not.toHaveBeenCalled()
+    // 候选弹窗已开（生成中）
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+    // 切仓库：触发 resetAiState
+    await wrapper.setProps({ repoPath: '/repo/B' })
+    await flushPromises()
+    // 在途任务被取消（释放并发槽位与 claude 子进程）
+    expect(CancelAiTask).toHaveBeenCalledWith('task-ai-stale')
+    // 候选弹窗关闭、loading 复位
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+    // 旧 taskId 的 done 事件不再匹配本组件 → 不渲染候选（防旧仓库结果串入新仓库）
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    doneHandler({ taskId: 'task-ai-stale', structuredOutput: { candidates: [{ type: 'feat', description: 'x' }] }, error: '', canceled: false })
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-item').length).toBe(0)
+  })
+
+  it('卸载时取消在途 AI 审查任务并注销监听器', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction, CancelAiTask } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-unmount')
+    CancelAiTask.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    expect(CancelAiTask).not.toHaveBeenCalled()
+    wrapper.unmount()
+    await flushPromises()
+    // 卸载时在途审查任务被取消
+    expect(CancelAiTask).toHaveBeenCalledWith('task-review-unmount')
+    wrapper = null
   })
 
   it('defineExpose 暴露 loadChanges', async () => {

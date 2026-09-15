@@ -219,7 +219,7 @@ import {
   Refresh, DocumentCopy, ArrowUp, ArrowDown,
   User, Search, View
 } from '@element-plus/icons-vue'
-import { GetCommitHistory, InvalidateCommitHistoryCache, GetCommitFileDiff, RunAiFunction } from '../../wailsjs/go/main/App'
+import { GetCommitHistory, InvalidateCommitHistoryCache, GetCommitFileDiff, RunAiFunction, CancelAiTask } from '../../wailsjs/go/main/App'
 // 仅引 EventsOn：用其返回的「注销本监听器」闭包在 onUnmounted 调用，精准移除本组件监听器。
 // 禁用 EventsOff('ai-task:done')——会清同名全部监听器，误删 AiFunctionPanel / LocalChanges 的 onDone。
 import { EventsOn } from '../../wailsjs/runtime/runtime'
@@ -360,6 +360,22 @@ const openCommitFileDiff = (sha, file) => {
   commitDiffVisible.value = true
 }
 
+// 切换仓库或卸载时重置 AI 审查态：在途任务的 done 事件不再匹配本组件 taskId（路由失配被忽略），
+// 防止旧仓库的审查结果渲染进新仓库对话框，并避免 loading 态卡死按钮。
+// 在途任务经 CancelAiTask 取消以释放并发槽位与 claude 子进程（结果不再有 UI 消费，留历史归档）。
+const resetAiState = () => {
+  if (currentReviewTaskId) {
+    // Promise.resolve 兜底非 Promise 返回（Wails 绑定实际恒返 Promise，防御测试 mock 裸 vi.fn() 返 undefined）
+    Promise.resolve(CancelAiTask(currentReviewTaskId)).catch(() => {})
+    currentReviewTaskId = null
+  }
+  aiReviewing.value = false
+  reviewResultVisible.value = false
+  reviewIssues.value = []
+  reviewSummary.value = ''
+  reviewCommitSha = ''
+}
+
 // AI 代码审查：取整 commit 全量 diff（file 传空）→ RunAiFunction('code-review')
 // done 事件经 onAiTaskDone（currentReviewTaskId 路由）取 structuredOutput.issues 渲染问题清单。
 const reviewCommit = async (commit) => {
@@ -457,6 +473,8 @@ const formatTime = (timestamp) => {
 }
 
 watch(() => props.repoPath, () => {
+  // 切仓库前重置 AI 审查态：在途任务取消，done 事件不再匹配本组件 taskId，避免旧仓库审查结果串入新仓库
+  resetAiState()
   searchKeyword.value = ''
   filter.value = { author: '', dateRange: null, filePath: '' }
   selectedShas.value = []
@@ -470,6 +488,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearTimeout(filterTimer)
+  // 卸载前取消在途 AI 审查任务（无 UI 消费结果）并重置态
+  resetAiState()
   // 调 EventsOn 返回的注销闭包，仅移除本组件监听器（Wails EventsOff 按 eventName 清同名全部监听器，
   // 会误伤 AiFunctionPanel / LocalChanges 的 onDone）
   if (offAiTaskDone) {

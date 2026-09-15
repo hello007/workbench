@@ -230,7 +230,10 @@ import {
   OpenInExplorer,
   OpenWithDefaultApp
 } from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+// 仅引 EventsOn：用其返回的「注销本监听器」闭包在 onBeforeUnmount 调用，精准移除本组件监听器。
+// 禁用 EventsOff('ai-task:done')——Wails v2 EventsOff 按 eventName 删同名全部监听器，
+// 会误删 LocalChanges / CommitHistory 的 onDone（三组件共监听 ai-task:done，各自 taskId 过滤互不干扰）。
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import AiFunctionRunner from './AiFunctionRunner.vue'
 import AiFunctionConfigDialog from './AiFunctionConfigDialog.vue'
 import AiTaskHistoryPanel from './AiTaskHistoryPanel.vue'
@@ -736,19 +739,30 @@ const fmtDuration = (ms) => {
 const fmtK = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 // ===== 生命周期 =====
+// EventsOn 返回的注销闭包：onBeforeUnmount 逐个调用，仅移除本组件监听器。
+// ai-task:done 为三组件（AiFunctionPanel/LocalChanges/CommitHistory）共监听事件，
+// 禁用 EventsOff 按 eventName 清同名全部监听器，避免误删他组件 onDone。
+const offQueued = ref(null)
+const offStarted = ref(null)
+const offOutput = ref(null)
+const offDone = ref(null)
 onMounted(() => {
   loadFunctions()
   refreshConcurrency()
-  EventsOn('ai-task:queued', onQueued)
-  EventsOn('ai-task:started', onStarted)
-  EventsOn('ai-task:output', onOutput)
-  EventsOn('ai-task:done', onDone)
+  offQueued.value = EventsOn('ai-task:queued', onQueued)
+  offStarted.value = EventsOn('ai-task:started', onStarted)
+  offOutput.value = EventsOn('ai-task:output', onOutput)
+  offDone.value = EventsOn('ai-task:done', onDone)
 })
 onBeforeUnmount(() => {
-  EventsOff('ai-task:queued')
-  EventsOff('ai-task:started')
-  EventsOff('ai-task:output')
-  EventsOff('ai-task:done')
+  offQueued.value && offQueued.value()
+  offStarted.value && offStarted.value()
+  offOutput.value && offOutput.value()
+  offDone.value && offDone.value()
+  offQueued.value = null
+  offStarted.value = null
+  offOutput.value = null
+  offDone.value = null
 })
 </script>
 

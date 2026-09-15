@@ -214,7 +214,8 @@ import {
   GetStagedDiffText,
   GetRecentCommitSubjects,
   GetUncommittedDiffText,
-  RunAiFunction
+  RunAiFunction,
+  CancelAiTask
 } from '../../wailsjs/go/main/App'
 // 仅引 EventsOn：用其返回的「注销本监听器」闭包（offAiTaskDone）在 onBeforeUnmount 调用，
 // 精准移除本组件监听器。禁用 EventsOff('ai-task:done')——Wails v2 EventsOff 按 eventName 删全部监听器，
@@ -391,6 +392,28 @@ const doPush = async () => {
 }
 
 const pushOnly = () => doPush()
+
+// 切换仓库或卸载时重置 AI 任务态：在途任务的 done 事件不再匹配本组件 taskId（路由失配被忽略），
+// 防止旧仓库的候选/审查结果渲染进新仓库对话框，并避免 loading 态卡死按钮。
+// 在途任务经 CancelAiTask 取消以释放并发槽位与 claude 子进程（结果不再有 UI 消费，留历史归档）。
+const resetAiState = () => {
+  if (currentAiTaskId) {
+    // Promise.resolve 兜底非 Promise 返回（Wails 绑定实际恒返 Promise，防御测试 mock 裸 vi.fn() 返 undefined）
+    Promise.resolve(CancelAiTask(currentAiTaskId)).catch(() => {})
+    currentAiTaskId = null
+  }
+  if (currentReviewTaskId) {
+    Promise.resolve(CancelAiTask(currentReviewTaskId)).catch(() => {})
+    currentReviewTaskId = null
+  }
+  aiGenerating.value = false
+  aiReviewing.value = false
+  candidateDialogVisible.value = false
+  reviewResultVisible.value = false
+  candidates.value = []
+  reviewIssues.value = []
+  reviewSummary.value = ''
+}
 
 // AI 生成提交信息：取暂存区聚合 diff + 历史 few-shot → RunAiFunction('commit-message')
 // done 事件经 onAiTaskDone 取 result.structuredOutput.candidates 渲染候选列表。
@@ -609,6 +632,8 @@ const getStatusLabel = (status) => {
 }
 
 watch(() => props.repoPath, () => {
+  // 切仓库前重置 AI 任务态：在途任务取消，done 事件不再匹配本组件 taskId，避免旧仓库候选/审查结果串入新仓库
+  resetAiState()
   changes.value = []
   commitMessage.value = ''
   loadChanges()
@@ -620,6 +645,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // 卸载前取消在途 AI 任务（无 UI 消费结果）并重置态，再注销监听器
+  resetAiState()
   // 调 EventsOn 返回的注销闭包，仅移除本组件监听器（Wails EventsOff 会清同名全部监听器，误伤 AiFunctionPanel）
   if (offAiTaskDone) {
     offAiTaskDone()
