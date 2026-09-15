@@ -647,6 +647,15 @@ func (a *App) GetStagedDiffText(path string) (string, error) {
 	return a.gitSvc.AggregateStagedDiff(path)
 }
 
+// GetRecentCommitSubjects 取最近 limit 条 commit subject（过滤归档噪声），供 AI 提交信息生成 few-shot。
+// limit<=0 默认 3。空仓库返回空切片不报错（few-shot 可选增强，不阻塞主流程）。
+func (a *App) GetRecentCommitSubjects(path string, limit int) ([]string, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.GetRecentCommitSubjects(path, limit)
+}
+
 // HasUpstream 判断当前分支是否配置了上游跟踪分支。
 func (a *App) HasUpstream(path string) (bool, error) {
 	if path == "" {

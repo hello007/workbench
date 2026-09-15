@@ -12,6 +12,9 @@ vi.mock('element-plus', async () => {
   }
 })
 
+// ai-task:done 事件总线：EventsOn 记录 handler 供测试手动触发（vi.hoisted 避免工厂函数 TDZ）
+const aiEventBus = vi.hoisted(() => ({ handlers: {} }))
+
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetLocalChanges: vi.fn(),
   DiscardChanges: vi.fn(),
@@ -19,12 +22,30 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   PushRepo: vi.fn(),
   HasUpstream: vi.fn(),
   StageFiles: vi.fn(),
-  UnstageFiles: vi.fn()
+  UnstageFiles: vi.fn(),
+  GetStagedDiffText: vi.fn(),
+  GetRecentCommitSubjects: vi.fn(),
+  RunAiFunction: vi.fn()
+}))
+
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  // 对齐 Wails v2：EventsOn 返回「注销本监听器」闭包，onBeforeUnmount 调它精准移除（不清同名全部）
+  EventsOn: vi.fn((event, handler) => {
+    aiEventBus.handlers[event] = handler
+    return () => {
+      if (aiEventBus.handlers[event] === handler) delete aiEventBus.handlers[event]
+    }
+  }),
+  EventsOff: vi.fn((event) => {
+    delete aiEventBus.handlers[event]
+  })
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
   Refresh: { template: '<i class="i-refresh" />' },
-  ArrowDown: { template: '<i class="i-down" />' }
+  ArrowDown: { template: '<i class="i-down" />' },
+  MagicStick: { template: '<i class="i-magic" />' },
+  Loading: { template: '<i class="i-loading" />' }
 }))
 
 // el-table stub：渲染行 + 挂载即 emit selection-change（模拟全选）+ 双击行 emit row-dblclick
@@ -66,6 +87,11 @@ const stubs = {
   'el-dropdown': ElDropdownC,
   'el-dropdown-menu': { template: '<div class="el-dropdown-menu"><slot /></div>' },
   'el-dropdown-item': { template: '<div class="el-dropdown-item" :data-cmd="command"><slot /></div>', props: ['command', 'disabled'] },
+  'el-tooltip': { template: '<span class="el-tooltip"><slot /></span>', props: ['content', 'placement'] },
+  'el-dialog': {
+    template: '<div class="el-dialog" v-if="modelValue"><slot /><slot name="footer" /></div>',
+    props: ['modelValue', 'title', 'width']
+  },
   FileDiffDialog: { template: '<div class="file-diff-dialog-stub" />', props: ['modelValue', 'repoPath', 'file'] }
 }
 const directives = { loading: () => {} }
@@ -122,6 +148,7 @@ describe('LocalChanges.vue', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.keys(aiEventBus.handlers).forEach(k => delete aiEventBus.handlers[k])
   })
 
   afterEach(() => {
@@ -468,5 +495,122 @@ describe('LocalChanges.vue', () => {
     wrapper = await createWrapper()
     expect(wrapper.find('[data-cmd="stageSelected"]').exists()).toBe(true)
     expect(wrapper.find('[data-cmd="unstageSelected"]').exists()).toBe(true)
+  })
+
+  // ===== AI 生成提交信息 =====
+
+  it('AI 生成按钮：无暂存文件时禁用', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    // changes 无 staged 字段 → 均视为未暂存 → 按钮禁用
+    GetLocalChanges.mockResolvedValue(changes)
+    wrapper = await createWrapper()
+    const aiBtn = wrapper.findAll('button').find(b => b.text().includes('AI 生成'))
+    expect(aiBtn).toBeTruthy()
+    expect(aiBtn.attributes('disabled')).toBeDefined()
+  })
+
+  it('AI 生成按钮：有暂存文件时可用', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges) // 含 staged: true
+    wrapper = await createWrapper()
+    const aiBtn = wrapper.findAll('button').find(b => b.text().includes('AI 生成'))
+    expect(aiBtn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('点击 AI 生成：调 GetStagedDiffText + GetRecentCommitSubjects + RunAiFunction 注入 diff/history', async () => {
+    const { GetLocalChanges, GetStagedDiffText, GetRecentCommitSubjects, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockResolvedValue('=== src/b.go ===\n+const x = 1\n')
+    GetRecentCommitSubjects.mockResolvedValue(['feat: a', 'fix: b'])
+    RunAiFunction.mockResolvedValue('task-ai-1')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    expect(GetStagedDiffText).toHaveBeenCalledWith('/repo/A')
+    expect(GetRecentCommitSubjects).toHaveBeenCalledWith('/repo/A', 3)
+    expect(RunAiFunction).toHaveBeenCalledWith('commit-message', {
+      diff: '=== src/b.go ===\n+const x = 1\n',
+      history: 'feat: a\nfix: b'
+    })
+  })
+
+  it('done 事件 structuredOutput.candidates 渲染候选 + 点击填入提交框', async () => {
+    const { GetLocalChanges, GetStagedDiffText, GetRecentCommitSubjects, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockResolvedValue('diff')
+    GetRecentCommitSubjects.mockResolvedValue([])
+    RunAiFunction.mockResolvedValue('task-ai-2')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    // 手动触发 done 事件（taskId 匹配 currentAiTaskId）
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    expect(doneHandler).toBeTruthy()
+    doneHandler({
+      taskId: 'task-ai-2',
+      structuredOutput: {
+        candidates: [
+          { type: 'feat', scope: 'auth', description: '新增登录' },
+          { type: 'fix', scope: '', description: '修复空指针' }
+        ]
+      },
+      error: '',
+      canceled: false
+    })
+    await flushPromises()
+    const items = wrapper.findAll('.candidate-item')
+    expect(items.length).toBe(2)
+    // 点击第一个候选填入提交框：feat(auth): 新增登录
+    await items[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('feat(auth): 新增登录')
+  })
+
+  it('done 事件 structuredOutput 为空时降级提示手输', async () => {
+    const { GetLocalChanges, GetStagedDiffText, GetRecentCommitSubjects, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockResolvedValue('diff')
+    GetRecentCommitSubjects.mockResolvedValue([])
+    RunAiFunction.mockResolvedValue('task-ai-3')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    const doneHandler = aiEventBus.handlers['ai-task:done']
+    doneHandler({ taskId: 'task-ai-3', structuredOutput: null, error: '', canceled: false })
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-item').length).toBe(0)
+    expect(wrapper.find('.el-empty').exists()).toBe(true)
+  })
+
+  it('AI 生成失败（空暂存 AppError）时 handleGitError 走 warning 并关闭弹窗', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { GetLocalChanges, GetStagedDiffText } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetStagedDiffText.mockRejectedValue({ code: 'E_GIT_NO_STAGED_CHANGES', message: '无暂存文件，请先 git add 要提交的变更' })
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 生成')).trigger('click')
+    await flushPromises()
+    // E_GIT_NO_STAGED_CHANGES 在 WARNING_CODES → handleGitError 走 warning
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('无暂存文件'))
+    // 弹窗关闭
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+  })
+
+  it('卸载时用 EventsOn 返回闭包注销本组件监听器（禁 EventsOff 清同名全部，避误伤 AiFunctionPanel）', async () => {
+    const { GetLocalChanges } = await import('../../../wailsjs/go/main/App')
+    const { EventsOn, EventsOff } = await import('../../../wailsjs/runtime/runtime')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    wrapper = await createWrapper()
+    // 挂载后已注册 ai-task:done 监听器
+    expect(EventsOn).toHaveBeenCalledWith('ai-task:done', expect.any(Function))
+    expect(aiEventBus.handlers['ai-task:done']).toBeTruthy()
+    EventsOff.mockClear()
+    wrapper.unmount()
+    // 卸载后本组件监听器被精准移除
+    expect(aiEventBus.handlers['ai-task:done']).toBeUndefined()
+    // 关键断言：未调 EventsOff（Wails EventsOff 按 eventName 清同名全部监听器，会误删 AiFunctionPanel 的 onDone）
+    expect(EventsOff).not.toHaveBeenCalled()
+    // 标记已卸载，避免 afterEach 重复 unmount
+    wrapper = null
   })
 })

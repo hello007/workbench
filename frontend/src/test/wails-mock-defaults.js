@@ -55,7 +55,13 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // GetSessionState 默认 null = 无快照（首次启动 / 崩溃后冷启动），用例按需 override 注入快照验恢复
   GetSessionState: null,
   // SaveSessionState 默认 true = mock no-op（debounce / beforeunload 调用，失败静默不阻塞 UI）
-  SaveSessionState: true
+  SaveSessionState: true,
+
+  // ---- AI 提交信息生成（PR2）----
+  // GetStagedDiffText 默认示例 diff（LocalChanges 用户点「AI 生成」才调，挂载不触发）
+  // GetRecentCommitSubjects 默认 3 条 few-shot 示例（形状对齐 []string）
+  GetStagedDiffText: '=== src/app.js ===\n+const x = 1\n',
+  GetRecentCommitSubjects: ['feat: 新增某功能', 'fix: 修复某缺陷', 'docs: 更新文档']
 }
 
 /**
@@ -261,7 +267,13 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
           outputSize: 42,
           outputFile: 'ai_task_history/task-e2e-1.txt',
           canceled: false,
-          structuredOutput: null
+          structuredOutput: {
+            candidates: [
+              { type: 'feat', scope: 'auth', description: '新增登录校验' },
+              { type: 'fix', scope: '', description: '修复空指针异常' },
+              { type: 'refactor', scope: '', description: '抽取公共校验逻辑' }
+            ]
+          }
         }
       }
     ]

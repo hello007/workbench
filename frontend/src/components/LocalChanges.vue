@@ -54,15 +54,32 @@
       <el-empty v-else-if="!loading" description="没有本地变动" :image-size="60" />
 
       <div v-if="changes.length > 0" class="changes-footer">
-        <!-- commit message 输入区 -->
-        <el-input
-          v-model="commitMessage"
-          type="textarea"
-          :rows="2"
-          placeholder="请输入提交信息（必填）"
-          class="commit-input"
-          resize="vertical"
-        />
+        <!-- commit message 输入区 + AI 生成按钮 -->
+        <div class="commit-input-row">
+          <el-input
+            v-model="commitMessage"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入提交信息（必填）"
+            class="commit-input"
+            resize="vertical"
+          />
+          <el-tooltip
+            :content="hasStagedChanges ? '基于暂存区 diff 生成 Conventional Commits 提交信息候选' : '无暂存文件，请先 git add 要提交的变更'"
+            placement="top"
+          >
+            <el-button
+              :icon="MagicStick"
+              size="small"
+              type="primary"
+              plain
+              :loading="aiGenerating"
+              :disabled="!hasStagedChanges || aiGenerating"
+              @click="generateCommitMessage"
+              class="ai-gen-btn"
+            >AI 生成</el-button>
+          </el-tooltip>
+        </div>
 
         <!-- 操作按钮组 -->
         <div class="action-bar">
@@ -123,13 +140,45 @@
 
     <!-- 双栏 diff 弹窗 -->
     <FileDiffDialog v-model="diffVisible" :repo-path="repoPath" :file="diffFile" />
+
+    <!-- AI 提交信息候选弹窗 -->
+    <el-dialog
+      v-model="candidateDialogVisible"
+      title="AI 提交信息候选"
+      width="520px"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <div v-if="aiGenerating" class="candidate-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>生成中...</span>
+      </div>
+      <div v-else-if="candidates.length > 0">
+        <div
+          v-for="(c, idx) in candidates"
+          :key="idx"
+          class="candidate-item"
+          @click="selectCandidate(c)"
+        >
+          <div class="candidate-head">
+            <el-tag size="small" :type="getCandidateTagType(c.type)">{{ c.type }}</el-tag>
+            <span v-if="c.scope" class="candidate-scope">({{ c.scope }})</span>
+          </div>
+          <div class="candidate-desc">{{ c.description }}</div>
+        </div>
+      </div>
+      <el-empty v-else description="AI 输出格式异常，请手输提交信息" :image-size="60" />
+      <template #footer>
+        <el-button size="small" @click="candidateDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, ArrowDown } from '@element-plus/icons-vue'
+import { Refresh, ArrowDown, MagicStick, Loading } from '@element-plus/icons-vue'
 import {
   GetLocalChanges,
   DiscardChanges,
@@ -137,8 +186,15 @@ import {
   PushRepo,
   HasUpstream,
   StageFiles,
-  UnstageFiles
+  UnstageFiles,
+  GetStagedDiffText,
+  GetRecentCommitSubjects,
+  RunAiFunction
 } from '../../wailsjs/go/main/App'
+// 仅引 EventsOn：用其返回的「注销本监听器」闭包（offAiTaskDone）在 onBeforeUnmount 调用，
+// 精准移除本组件监听器。禁用 EventsOff('ai-task:done')——Wails v2 EventsOff 按 eventName 删全部监听器，
+// 会误删 AiFunctionPanel（v-show 常驻）的 onDone，导致本组件卸载后 AI 功能面板 done 事件失效。
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
 import { handleGitError } from '../utils/gitError'
 
@@ -161,6 +217,17 @@ const pushing = ref(false)
 // diff 弹窗状态
 const diffVisible = ref(false)
 const diffFile = ref('')
+
+// AI 生成提交信息状态
+const aiGenerating = ref(false)
+const candidates = ref([])
+const candidateDialogVisible = ref(false)
+let currentAiTaskId = null
+// EventsOn 返回的注销闭包：onBeforeUnmount 调用，精准移除本组件的 ai-task:done 监听器（不波及 AiFunctionPanel）
+let offAiTaskDone = null
+
+// 有无暂存文件：changes 列表筛 staged 非空（驱动 AI 生成按钮启用态）
+const hasStagedChanges = computed(() => changes.value.some(c => c.staged))
 
 const canCommit = computed(() => {
   return selectedChanges.value.length > 0 && commitMessage.value.trim().length > 0
@@ -283,6 +350,62 @@ const doPush = async () => {
 }
 
 const pushOnly = () => doPush()
+
+// AI 生成提交信息：取暂存区聚合 diff + 历史 few-shot → RunAiFunction('commit-message')
+// done 事件经 onAiTaskDone 取 result.structuredOutput.candidates 渲染候选列表。
+// 空暂存返回 AppError{E_GIT_NO_STAGED_CHANGES}，handleGitError 按 code warning 提示。
+const generateCommitMessage = async () => {
+  if (!hasStagedChanges.value || aiGenerating.value) return
+  aiGenerating.value = true
+  candidates.value = []
+  candidateDialogVisible.value = true
+  try {
+    const diffText = await GetStagedDiffText(props.repoPath)
+    const subjects = await GetRecentCommitSubjects(props.repoPath, 3)
+    const history = (subjects || []).join('\n')
+    currentAiTaskId = await RunAiFunction('commit-message', { diff: diffText, history })
+  } catch (error) {
+    aiGenerating.value = false
+    candidateDialogVisible.value = false
+    currentAiTaskId = null
+    handleGitError('AI 生成失败: ', error)
+  }
+}
+
+// done 事件处理：taskId 匹配后取 structuredOutput.candidates 渲染候选列表。
+// 全局常驻监听（onMounted 注册），多组件共存各自 taskId 过滤互不干扰。
+const onAiTaskDone = (result) => {
+  if (!currentAiTaskId || result.taskId !== currentAiTaskId) return
+  aiGenerating.value = false
+  currentAiTaskId = null
+  if (result.error || result.canceled) {
+    candidateDialogVisible.value = false
+    ElMessage.error('AI 生成失败: ' + (result.error || '已取消'))
+    return
+  }
+  const structured = result.structuredOutput
+  if (structured && Array.isArray(structured.candidates) && structured.candidates.length > 0) {
+    candidates.value = structured.candidates
+  } else {
+    // structuredOutput 为空（解析失败或未配 OutputSchema）→ 降级空列表，el-empty 提示手输
+    candidates.value = []
+  }
+}
+
+// 候选点击填入提交框：拼 type(scope): description，关闭弹窗，用户可编辑后走现有 CommitFiles。
+const selectCandidate = (c) => {
+  const scope = c.scope ? '(' + c.scope + ')' : ''
+  commitMessage.value = `${c.type}${scope}: ${c.description}`
+  candidateDialogVisible.value = false
+}
+
+// 候选 type 标签颜色：feat/fix/perf 主色区分，其余 primary
+const getCandidateTagType = (type) => {
+  if (type === 'feat') return 'success'
+  if (type === 'fix') return 'danger'
+  if (type === 'perf') return 'warning'
+  return 'primary'
+}
 
 const discardSelected = async () => {
   if (selectedChanges.value.length === 0) return
@@ -415,6 +538,15 @@ watch(() => props.repoPath, () => {
 
 onMounted(() => {
   loadChanges()
+  offAiTaskDone = EventsOn('ai-task:done', onAiTaskDone)
+})
+
+onBeforeUnmount(() => {
+  // 调 EventsOn 返回的注销闭包，仅移除本组件监听器（Wails EventsOff 会清同名全部监听器，误伤 AiFunctionPanel）
+  if (offAiTaskDone) {
+    offAiTaskDone()
+    offAiTaskDone = null
+  }
 })
 
 defineExpose({ loadChanges, stageSingle, unstageSingle })
@@ -482,13 +614,64 @@ defineExpose({ loadChanges, stageSingle, unstageSingle })
   color: var(--text-secondary);
 }
 
+.commit-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
 .commit-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 .commit-input :deep(.el-textarea__inner) {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 13px;
+}
+
+.ai-gen-btn {
+  flex-shrink: 0;
+}
+
+.candidate-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  color: var(--text-secondary);
+}
+
+.candidate-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.candidate-item:hover {
+  border-color: var(--el-color-primary);
+  background-color: var(--el-color-primary-light-9, #ecf5ff);
+}
+
+.candidate-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.candidate-scope {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.candidate-desc {
+  font-size: 14px;
+  color: var(--text-primary);
+  word-break: break-all;
 }
 
 .action-bar {

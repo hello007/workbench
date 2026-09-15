@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,8 +42,8 @@ type GitService struct {
 	gitCmd    *util.GitCommand
 	scanCache *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
 
-	opMu     sync.Mutex              // 保护 opLocks map 的并发读写
-	opLocks  map[string]*sync.Mutex  // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
+	opMu    sync.Mutex             // 保护 opLocks map 的并发读写
+	opLocks map[string]*sync.Mutex // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
 }
 
 // NewGitService 创建服务（不注入扫描缓存，兼容现有调用方与测试）。
@@ -710,6 +711,59 @@ func (s *GitService) GetStagedDiff(repoPath, file string) (string, error) {
 		return "", fmt.Errorf("获取暂存差异失败: %w", err)
 	}
 	return strings.TrimSpace(output), nil
+}
+
+// GetRecentCommitSubjects 取最近 limit 条 commit subject（git log --format=%s -n），
+// 过滤归档噪声（chore: record journal / chore(task): archive 这类无技术信息提交），
+// 不足 limit 时从更多候选补齐（最多扫最近 50 条），仍不足则返回实际可用数量。
+// limit<=0 默认 3。空仓库（无任何提交）返回空切片不报错。
+//
+// 用于 AI 提交信息生成 few-shot：注入 BuildStagePrompt 的 {{history}} 占位符，
+// 模仿历史 commit 的 type/scope/描述风格。过滤归档噪声避免 few-shot 被无信息提交污染。
+// few-shot 为可选增强，git log 失败时降级返回空切片不阻塞主流程。
+func (s *GitService) GetRecentCommitSubjects(repoPath string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	// 取 limit 的若干倍候选以过滤噪声后补齐，上限 50 避免全量扫描历史
+	fetchN := limit * 5
+	if fetchN > 50 {
+		fetchN = 50
+	}
+	output, err := s.gitCmd.Execute(gitRoot, "log", "--format=%s", "-n", strconv.Itoa(fetchN))
+	if err != nil {
+		// 空仓库（无任何提交）git log 非零退出；few-shot 为可选增强，降级返回空切片
+		return []string{}, nil
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return []string{}, nil
+	}
+	all := strings.Split(output, "\n")
+	result := make([]string, 0, limit)
+	for _, subject := range all {
+		subject = strings.TrimSpace(subject)
+		if isArchiveNoiseSubject(subject) {
+			continue
+		}
+		result = append(result, subject)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result, nil
+}
+
+// isArchiveNoiseSubject 判定 commit subject 是否为归档噪声（few-shot 应过滤）。
+// "chore: record journal" 精确匹配（日志归档，subject 固定无后缀）；
+// "chore(task): archive" 前缀匹配（任务归档，后接任务名如 09-14-v1-4）。
+// 这类提交无技术信息，注入 few-shot 会污染提交信息生成风格。
+func isArchiveNoiseSubject(subject string) bool {
+	return subject == "chore: record journal" || strings.HasPrefix(subject, "chore(task): archive")
 }
 
 // emptyTreeSHA 为 Git 通用空树对象哈希，用作 root commit（无 parent）的对比基准，

@@ -213,3 +213,98 @@ func TestAggregateStagedDiff_TruncatesManyFiles(t *testing.T) {
 		t.Errorf("截断提示应含剩余信息，got %q", text)
 	}
 }
+
+// === GetRecentCommitSubjects 测试 ===
+
+func TestGetRecentCommitSubjects_DefaultLimit(t *testing.T) {
+	// limit<=0 默认取 3，按最近优先返回（git log 倒序，最新在前）
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	msgs := []string{"feat: a", "fix: b", "docs: c", "refactor: d", "test: e"}
+	for i, msg := range msgs {
+		name := string(rune('a'+i)) + ".txt"
+		testutil.WriteFile(t, filepath.Join(repo, name), "v\n")
+		testutil.RunGit(t, repo, "add", name)
+		testutil.RunGit(t, repo, "commit", "-m", msg)
+	}
+	svc := NewGitService()
+	subjects, err := svc.GetRecentCommitSubjects(repo, 0)
+	if err != nil {
+		t.Fatalf("GetRecentCommitSubjects 失败: %v", err)
+	}
+	if len(subjects) != 3 {
+		t.Errorf("默认 limit=3 应返回 3 条，got %d: %v", len(subjects), subjects)
+	}
+	// 倒序最新在前：test: e, refactor: d, docs: c
+	if subjects[0] != "test: e" || subjects[2] != "docs: c" {
+		t.Errorf("应按最近优先返回，got %v", subjects)
+	}
+}
+
+func TestGetRecentCommitSubjects_FiltersArchiveNoise(t *testing.T) {
+	// 归档噪声（chore: record journal / chore(task): archive xxx）应被过滤
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	msgs := []string{
+		"feat: init",
+		"chore: record journal",
+		"fix: bug",
+		"chore(task): archive 09-14-v1-4",
+		"docs: readme",
+	}
+	for i, msg := range msgs {
+		name := string(rune('a'+i)) + ".txt"
+		testutil.WriteFile(t, filepath.Join(repo, name), "v\n")
+		testutil.RunGit(t, repo, "add", name)
+		testutil.RunGit(t, repo, "commit", "-m", msg)
+	}
+	svc := NewGitService()
+	// limit=3，取最近 5 条候选过滤 2 条噪声后返回 3 条真实
+	subjects, err := svc.GetRecentCommitSubjects(repo, 3)
+	if err != nil {
+		t.Fatalf("GetRecentCommitSubjects 失败: %v", err)
+	}
+	for _, s := range subjects {
+		if isArchiveNoiseSubject(s) {
+			t.Errorf("归档噪声未被过滤: %q", s)
+		}
+	}
+	// 倒序：docs: readme, [archive 过滤], fix: bug, [record journal 过滤], feat: init
+	if len(subjects) != 3 {
+		t.Errorf("过滤噪声后应返回 3 条，got %d: %v", len(subjects), subjects)
+	}
+	if subjects[0] != "docs: readme" || subjects[1] != "fix: bug" || subjects[2] != "feat: init" {
+		t.Errorf("过滤后顺序不符，got %v", subjects)
+	}
+}
+
+func TestGetRecentCommitSubjects_EmptyRepo(t *testing.T) {
+	// 空仓库（无任何提交）git log 非零退出，降级返回空切片不报错
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	svc := NewGitService()
+	subjects, err := svc.GetRecentCommitSubjects(repo, 3)
+	if err != nil {
+		t.Fatalf("空仓库不应报错，got %v", err)
+	}
+	if len(subjects) != 0 {
+		t.Errorf("空仓库应返回空切片，got %v", subjects)
+	}
+}
+
+func TestGetRecentCommitSubjects_LimitExceedsHistory(t *testing.T) {
+	// limit 超过实际历史数，返回实际可用数量不报错
+	repo := testutil.InitTempRepo(t)
+	testutil.SetupMasterBranch(t, repo)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "feat: only")
+	svc := NewGitService()
+	subjects, err := svc.GetRecentCommitSubjects(repo, 10)
+	if err != nil {
+		t.Fatalf("GetRecentCommitSubjects 失败: %v", err)
+	}
+	if len(subjects) != 1 || subjects[0] != "feat: only" {
+		t.Errorf("limit 超历史应返回实际 1 条，got %v", subjects)
+	}
+}
