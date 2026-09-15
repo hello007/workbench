@@ -38,6 +38,87 @@ wails-mock-defaults.js: done payload structuredOutput (测试单一数据源)
 3. **wailsjs**：`AiFunction.outputSchema` / `AiTaskState.structuredOutput` 字段已同步（models.ts）；若新增 struct 字段须同步 `frontend/wailsjs/{App.js,App.d.ts,models.ts}` 三处（见 [cross-layer-contracts.md](cross-layer-contracts.md)）
 4. **前端消费**：`AiFunctionPanel.vue` 的 `onDone` 读 `result.structuredOutput` 渲染结构化面板（按功能定制：候选列表 / 问题清单 / 表格）；**PR1 只搭链路不消费，消费在 PR2/PR3**
 5. **测试**：`wails-mock-defaults.js` 的 done payload 加 `structuredOutput` 字段（单一数据源，vitest/E2E 共用）
+6. **seed skill 合并白名单**：新增 skill 须在 `mergeMissingSeedSkills`（service/ai_function.go）的白名单数组加入其 ID，否则 PR1 前已建 `data/ai_functions.json` 的老用户配置不含该 skill，`RunAiFunction` 报「AI 功能 <id> 不存在」。详见下方「seed skill 合并白名单」节。
+
+## seed skill 合并白名单
+
+### 背景
+
+`defaultAiFunctions()` 内置 skill 配置（speech-doc / weekly-report / meeting-book / meeting-list / commit-message / code-review）。`LoadAiFunctions` 对已存在配置走 `migrateFunctions`（补字段）+ `validateFunctions`（校验），但**不按 ID 合并新 seed skill**。PR1 前已建 `data/ai_functions.json`（仅含 4 项原 skill）的用户升级后，`commit-message` / `code-review` 缺失，`RunAiFunction` 报「AI 功能 commit-message 不存在」。
+
+### 契约
+
+- 新增 seed skill **必须**加入 `mergeMissingSeedSkills` 的白名单数组，否则老用户配置不合并
+- 白名单仅含 epic 交付物：`["commit-message", "code-review"]`
+- **旧 seed skill（speech-doc / weekly-report / meeting-book / meeting-list）不进白名单** —— 用户可能故意删除，不加回尊重用户删除决策
+- 用户已存在同 ID 项（含自定义 Name/Params）**不覆盖**，尊重用户自定义
+- seed 按 ID 索引 `map[string]*model.AiFunction` O(1) 查表，非线性扫 `defaultAiFunctions`
+- 合并后 `changed=true`，`LoadAiFunctions` 落盘条件 `migrated || len(invalidIDs) > 0 || seedMerged` 触发落盘，下次加载直读
+
+### 签名
+
+```go
+// mergeMissingSeedSkills 按 ID 合并白名单内缺失的 seed skill。
+// 白名单 = epic 交付物（commit-message/code-review）。
+// 用户已存同 ID 项不覆盖；旧 seed skill 不进白名单尊重删除决策。
+// 返回合并后的 funcs 与是否发生合并。
+func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, bool)
+```
+
+### 验证矩阵
+
+| 条件 | 行为 | changed |
+|---|---|---|
+| 老配置（4 项原 skill，缺 epic skill） | 追加 commit-message/code-review | true |
+| 全量配置（6 项） | 不变 | false |
+| 用户删了 meeting-book（5 项含 epic skill） | meeting-book 不加回 | false |
+| 用户自定义 commit-message（ID 同字段改） | 不覆盖 | false |
+| 部分缺项（有 commit-message 缺 code-review） | 仅补 code-review | true |
+
+### Wrong vs Correct
+
+#### Wrong
+```go
+// 全量同步 defaultAiFunctions —— 用户故意删过的 skill 被加回
+func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, bool) {
+    defaults := defaultAiFunctions()
+    // 遍历 defaults 全追加缺失项，无视用户删除决策
+}
+```
+
+#### Correct
+```go
+// 白名单仅 epic 交付物，尊重用户删除/自定义
+var seedMergeWhitelist = []string{"commit-message", "code-review"}
+
+func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, bool) {
+    existing := make(map[string]bool, len(funcs))
+    for _, fn := range funcs {
+        if fn != nil && fn.ID != "" {
+            existing[fn.ID] = true
+        }
+    }
+    seedByID := make(map[string]*model.AiFunction)
+    for _, fn := range defaultAiFunctions() {
+        seedByID[fn.ID] = fn
+    }
+    changed := false
+    for _, id := range seedMergeWhitelist {
+        if !existing[id] {
+            if seed, ok := seedByID[id]; ok {
+                funcs = append(funcs, seed)
+                changed = true
+            }
+        }
+    }
+    return funcs, changed
+}
+```
+
+### 测试
+
+- `service/ai_function_seed_merge_test.go`：6 单测覆盖验证矩阵全 5 行 + 端到端集成（老 4 项配置经 `LoadAiFunctions` → 6 项 + 落盘 + 二次加载稳定）
+- 断言点：合并后 funcs 含白名单 skill、用户自定义项原字段未变、meeting-book 未加回、`changed` 返回值正确
 
 ## 约束
 
@@ -54,6 +135,7 @@ wails-mock-defaults.js: done payload structuredOutput (测试单一数据源)
 | model/ai_function.go | `AiTaskRunResult.StructuredOutput` / `AiTaskState.StructuredOutput` | struct 字段 |
 | service/ai_function.go | `buildClaudeArgs`（追加 `--json-schema`） | ~797 |
 | service/ai_function.go | `streamEvent.StructuredOutput` / `parseStreamLine` 第 5 返回值 | ~989/1023 |
+| service/ai_function.go | `mergeMissingSeedSkills`（seed skill 合并白名单） | ~304 |
 | service/ai_function.go | `aiTaskRuntime.structuredOutput` / `pumpOutput` 缓存 / `GetAiTaskState` 透传 | ~84/1191/497 |
 | frontend/wailsjs/go/models.ts | `AiFunction.outputSchema` / `AiTaskState.structuredOutput` | 字段同步 |
 | frontend/src/test/wails-mock-defaults.js | done payload `structuredOutput` | ~263 |
