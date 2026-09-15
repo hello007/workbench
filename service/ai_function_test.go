@@ -298,8 +298,21 @@ func TestSaveAiFunctions_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(out) != 1 || out[0].ID != "x1" || out[0].Completion != "copy" {
-		t.Errorf("roundtrip 数据不符: %+v", out)
+	// LoadAiFunctions 合并 epic 新增 skill：x1 + commit-message + code-review = 3 项
+	if len(out) != 3 {
+		t.Fatalf("roundtrip 后数量: 期望=3（x1 + 2 epic seed）实际=%d", len(out))
+	}
+	var x1 *model.AiFunction
+	for _, fn := range out {
+		if fn.ID == "x1" {
+			x1 = fn
+		}
+	}
+	if x1 == nil {
+		t.Fatal("x1 项丢失")
+	}
+	if x1.Name != "自定义" || x1.Completion != "copy" {
+		t.Errorf("x1 字段不符: Name=%s Completion=%s", x1.Name, x1.Completion)
 	}
 }
 
@@ -329,8 +342,9 @@ func TestExportAiFunctions_SchemaV2Format(t *testing.T) {
 	if cfg.SchemaVersion != model.CurrentSchemaVersion {
 		t.Errorf("schemaVersion 不符: 期望=%d 实际=%d", model.CurrentSchemaVersion, cfg.SchemaVersion)
 	}
-	if len(cfg.Functions) != 2 {
-		t.Fatalf("导出功能项数量: 期望=2 实际=%d", len(cfg.Functions))
+	// ExportAiFunctions 经 LoadAiFunctions 合并 epic seed：exp-1/exp-2 + commit-message/code-review = 4 项
+	if len(cfg.Functions) != 4 {
+		t.Fatalf("导出功能项数量: 期望=4（exp-1/exp-2 + 2 epic seed 合并）实际=%d", len(cfg.Functions))
 	}
 	ids := map[string]bool{}
 	for _, f := range cfg.Functions {
@@ -468,9 +482,11 @@ func TestImportAiFunctions_DoesNotPersist(t *testing.T) {
 	if len(after) != len(before) {
 		t.Fatalf("ImportAiFunctions 不应改变本机功能项数量: 期望=%d 实际=%d", len(before), len(after))
 	}
+	// ImportAiFunctions 不落盘：导入项 imp-1 不应出现在本机配置
+	// （before/after 均经 LoadAiFunctions 合并 epic seed，含 local-1 + commit-message + code-review）
 	for _, fn := range after {
-		if fn.ID != "local-1" {
-			t.Errorf("ImportAiFunctions 不应落盘导入项，发现多余 id=%s", fn.ID)
+		if fn.ID == "imp-1" {
+			t.Errorf("ImportAiFunctions 不应落盘导入项 imp-1")
 		}
 	}
 }
@@ -1117,9 +1133,10 @@ func TestLoadAiFunctions_V1ArrayMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 2 {
-		t.Fatalf("迁移后数量不符: 期望=2 实际=%d", len(funcs))
+	if len(funcs) != 4 {
+		t.Fatalf("迁移+合并后数量不符: 期望=4（a/b + 2 epic seed）实际=%d", len(funcs))
 	}
+	// a/b 字段补全验证（merge 追加 seed 到末尾，a/b 仍是前两项）
 	if funcs[0].PermissionMode != "bypassPermissions" || funcs[0].TimeoutMinutes != aiTaskDefaultTimeoutMinutes || funcs[0].Completion != "none" {
 		t.Errorf("a 项字段补全不符: mode=%s timeout=%d completion=%s", funcs[0].PermissionMode, funcs[0].TimeoutMinutes, funcs[0].Completion)
 	}
@@ -1131,7 +1148,7 @@ func TestLoadAiFunctions_V1ArrayMigrate(t *testing.T) {
 	if err := json.Unmarshal(raw, &persisted); err != nil {
 		t.Fatalf("落盘文件非 v2 结构: %v", err)
 	}
-	if persisted.SchemaVersion != model.CurrentSchemaVersion || len(persisted.Functions) != 2 {
+	if persisted.SchemaVersion != model.CurrentSchemaVersion || len(persisted.Functions) != 4 {
 		t.Errorf("落盘 v2 结构不符: version=%d count=%d", persisted.SchemaVersion, len(persisted.Functions))
 	}
 }
@@ -1149,8 +1166,12 @@ func TestLoadAiFunctions_PartialInvalidTrimmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载失败: %v", err)
 	}
-	if len(funcs) != 1 || funcs[0].ID != "a" {
-		t.Errorf("应剔除 b/c 保留 a: %+v", funcs)
+	// 剔除 b/c 保留 a，并合并 epic seed：a + commit-message + code-review = 3 项
+	if len(funcs) != 3 {
+		t.Fatalf("剔除非法+合并 seed 后数量: 期望=3（a + 2 epic seed）实际=%d", len(funcs))
+	}
+	if funcs[0].ID != "a" {
+		t.Errorf("应保留 a 为首项: %+v", funcs[0])
 	}
 	matches, _ := filepath.Glob(path + ".bak.*")
 	if len(matches) != 1 {

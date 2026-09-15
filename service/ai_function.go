@@ -170,7 +170,10 @@ func (s *AiFunctionService) LoadAiFunctions() ([]*model.AiFunction, error) {
 		}
 		return defaults, nil
 	}
-	if migrated || len(invalidIDs) > 0 { // 迁移/剔除后落盘新结构，下次加载直读 v2
+	// 合并 epic 新增内置 skill（commit-message/code-review）：老用户配置缺这两项时补齐，
+	// 不回种用户删过的旧 skill、不覆盖用户自定义同 id 项。seedMerged 触发落盘下次直读。
+	funcs, seedMerged := mergeMissingSeedSkills(funcs)
+	if migrated || len(invalidIDs) > 0 || seedMerged { // 迁移/剔除/seed 合并后落盘新结构，下次加载直读 v2
 		if err := s.saveConfig(funcs); err != nil {
 			return nil, fmt.Errorf("迁移后配置落盘失败: %w", err)
 		}
@@ -299,6 +302,47 @@ func migrateFunction(fn *model.AiFunction) bool {
 		changed = true
 	}
 	return changed
+}
+
+// mergeMissingSeedSkills 合并 epic 新增的内置 skill 到已加载配置：
+// 仅补白名单中的 epic 交付物（commit-message/code-review），funcs 缺同 ID 项时从
+// defaultAiFunctions 取对应 seed 追加；用户已存同 ID 项（含自定义）不覆盖，尊重用户配置。
+// 不回种用户可能故意删除的旧 skill（speech-doc/weekly-report/meeting-book/meeting-list），
+// 避免撤销用户删减决策。返回 (合并后 funcs, 是否发生追加)。
+//
+// 背景：PR1 在 defaultAiFunctions 新增 commit-message/code-review，但已存在 data/ai_functions.json
+// 的老用户加载时走读文件路径（非回种），缺这两项会导致前端报功能不存在。LoadAiFunctions 在
+// 迁移/校验后调用本 helper 补齐，并经 seedMerged 触发落盘，下次加载直读合并后结构。
+func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, bool) {
+	// 白名单：epic 交付的新增内置 skill，缺失即补。旧 skill 不进白名单（尊重用户删除决策）。
+	whitelist := []string{"commit-message", "code-review"}
+	existing := make(map[string]bool, len(funcs))
+	for _, fn := range funcs {
+		if fn != nil && fn.ID != "" {
+			existing[fn.ID] = true
+		}
+	}
+	// seed 按 id 索引，避免每个白名单项线性扫 defaultAiFunctions
+	defaults := defaultAiFunctions()
+	seedByID := make(map[string]*model.AiFunction, len(defaults))
+	for _, fn := range defaults {
+		if fn != nil {
+			seedByID[fn.ID] = fn
+		}
+	}
+	changed := false
+	for _, id := range whitelist {
+		if existing[id] {
+			continue // 用户已有同 id 项（含自定义），不覆盖
+		}
+		seed, ok := seedByID[id]
+		if !ok {
+			continue // 白名单 id 在 seed 中不存在（防御，不应发生）
+		}
+		funcs = append(funcs, seed)
+		changed = true
+	}
+	return funcs, changed
 }
 
 // validateFunctions 字段级校验：id/name/command/cwd 必填。返回 (合法项, 非法项 id 列表)。
