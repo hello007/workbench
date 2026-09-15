@@ -237,3 +237,48 @@ GBK 文件用 `string(data)` 直接转（utf8 无效，前端显示乱码）；�
 `model/commit.go` 定义 `type MergeMode string`，`app_git.go` 方法 `Merge(path, branch string, mode model.MergeMode)`，`wails generate module` 后 `App.d.ts` 引用 `model.MergeMode` 但 `models.ts` 无该导出。仅跑 `npm test`（vitest esbuild 不报类型错误）即提交，`wails build` / `npm run build` 报 `MISSING_EXPORT: "MergeMode"`。
 #### Correct
 `wails generate module` 后核对 `models.ts`，手动补 `export type MergeMode = string`（与 wails 将 struct 字段位的具名 string 解析为 `string` 的行为一致），`npm run build` + `npm test` 双绿。
+
+## Scenario: Wails 事件监听多组件共听须闭包精准注销（禁 EventsOff 全局移除）
+
+### 1. Scope / Trigger
+- Trigger: 多个 Vue 组件共监听同一 Wails runtime 事件（如 `ai-task:done` 被 AiFunctionPanel + LocalChanges + CommitHistory 三组件共听），任一组件卸载时须注销本组件监听器
+
+### 2. Signatures
+- `EventsOn(eventName, callback)` 返回注销闭包（`wailsjs/runtime/runtime.js`）
+- `EventsOff(eventName)` 清该事件**全部**同名监听器（Wails v2 语义，非单移除）
+
+### 3. Contracts
+- 多组件共监听同事件时，组件卸载须调 `EventsOn` 返回的闭包精准移除**本组件**监听器
+- 禁 `EventsOff('eventName')` 全局移除——会误删他组件同事件监听器
+- `onMounted` 注册保存闭包 + `onBeforeUnmount`/`onUnmounted` 调闭包注销
+- 组件 repoPath 切换/卸载时在途 AI 任务须经 `CancelAiTask` 取消 + 重置任务态（taskId/loading/弹窗 visible/结果），防旧仓库 done 事件结果串入新仓库 + loading 卡死
+
+### 4. Validation & Error Matrix
+- 组件卸载调 `EventsOff('ai-task:done')` → 误删他组件 onDone → 他组件 done 事件无响应
+- repoPath 切换未重置 `currentAiTaskId` → 旧仓库在途任务 done 事件按 taskId 匹配渲染进新仓库
+- 卸载未取消在途任务 → claude 子进程 + concurrencySem 槽位泄漏
+- `CancelAiTask(...).catch(...)` 须 `Promise.resolve(...)` 兜底（测试 mock 裸 `vi.fn()` 返 undefined）
+
+### 5. Good/Base/Bad Cases
+- Good: `const off = EventsOn('ai-task:done', onDone); onUnmounted(() => off())` + `watch(repoPath, resetAiState)` + `resetAiState` 内 `CancelAiTask` 在途任务
+- Bad: `onUnmounted(() => EventsOff('ai-task:done'))` 清全部同名监听器
+- Bad: repoPath 切换仅刷数据不重置 AI 任务态
+
+### 6. Tests Required
+- 前端单测断言卸载时 `EventsOff` **未**被调用（防全局移除回退）
+- 卸载/切仓库后旧 taskId done 事件被忽略（断言无渲染残留 + 弹窗 modelValue 复位）
+- 切仓库时 `CancelAiTask` 被调用（断言在途任务取消）
+
+### 7. Wrong vs Correct
+#### Wrong
+```js
+onMounted(() => EventsOn('ai-task:done', onDone))
+onBeforeUnmount(() => EventsOff('ai-task:done')) // 清全部同名监听器，误删他组件
+```
+#### Correct
+```js
+let offDone
+onMounted(() => { offDone = EventsOn('ai-task:done', onDone) })
+onBeforeUnmount(() => { offDone && offDone() }) // 仅移除本组件监听器
+watch(repoPath, () => resetAiState()) // 切仓库重置任务态 + 取消在途任务
+```

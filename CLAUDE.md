@@ -65,6 +65,7 @@ workbench/
 |AI 结构化输出走 `--json-schema`（claude CLI tool use 强制，与自由文本 `result` 解耦，自由文本带 markdown 包裹不影响）：`AiFunction.OutputSchema`（`json.RawMessage`，可选 nil 不加 flag 兼容现有 skill）→ `buildClaudeArgs` 追加 `--json-schema` → `parseStreamLine` 提取 result 事件 `structured_output` → `AiTaskRunResult/AiTaskState.StructuredOutput` 透传前端只渲染不解析；新增结构化 AI skill 零新增 service 代码（链路现成）；须配 `--verbose`（`--print`+`stream-json` 硬性要求，`buildClaudeArgs` 已加）|[ai-structured-output.md](docs/spec/ai-structured-output.md)|
 |AI 功能项支持纯 prompt 模式（`Command` 空 + `Params.PromptTemplate` 驱动，`Cwd` 空继承父进程目录），`validateFunctions` 校验放宽为 Command 与 PromptTemplate 至少一非空；斜杠命令 skill（Command 非空）与纯 prompt skill（如 AI 提交信息生成/代码审查）两类并存；纯 prompt skill 经 `BuildStagePrompt` form 模板 `{{key}}` 占位注入 diff/历史等参数|[ai-structured-output.md](docs/spec/ai-structured-output.md)|
 |新增内置 seed skill 须加入 `mergeMissingSeedSkills`（service/ai_function.go）白名单（现仅 `commit-message`/`code-review`），否则 PR1 前已建 `data/ai_functions.json` 老用户配置不含该 skill、`RunAiFunction` 报「功能不存在」；旧 seed skill 不进白名单尊重用户删除决策，用户自定义同 ID 项不覆盖|[ai-structured-output.md](docs/spec/ai-structured-output.md)|
+|Wails 事件多组件共监听同事件（如 `ai-task:done` 被 AiFunctionPanel/LocalChanges/CommitHistory 共听）须用 `EventsOn` 返回闭包精准注销本组件监听器，禁 `EventsOff('eventName')` 全局移除（清全部同名监听器误删他组件）；组件 repoPath 切换/卸载须重置 AI 任务态 + `CancelAiTask` 在途任务防旧仓库结果串入 + loading 卡死|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 
 ## 文档索引
 
