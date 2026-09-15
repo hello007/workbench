@@ -126,6 +126,14 @@ func TestDefaultAiFunctions_IncludesCodeReview(t *testing.T) {
 	if !strings.Contains(cr.Params.PromptTemplate, "{{diff}}") {
 		t.Error("code-review PromptTemplate 应含 {{diff}} 占位符")
 	}
+	// 回归 guard：{{rules}} 无注入机制（renderPrompt 无 rules 键，字面量泄漏到 prompt），
+	// 方案 A 内嵌规则到模板。断言 {{rules}} 已移除 + 内嵌规则关键词存在，防回退。
+	if strings.Contains(cr.Params.PromptTemplate, "{{rules}}") {
+		t.Error("code-review PromptTemplate 不应含 {{rules}} 占位符（无注入机制，字面量泄漏到 prompt）")
+	}
+	if !strings.Contains(cr.Params.PromptTemplate, "分层架构") || !strings.Contains(cr.Params.PromptTemplate, "AppError") {
+		t.Error("code-review PromptTemplate 应内嵌项目规范规则（分层架构 / AppError 等关键词）")
+	}
 	// OutputSchema 应含 issues 数组 + severity/category enum 约束
 	schemaStr := string(cr.OutputSchema)
 	if !strings.Contains(schemaStr, "issues") {

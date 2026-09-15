@@ -1515,8 +1515,15 @@ func defaultAiFunctions() []*model.AiFunction {
 - info：可选改进（可读性 / 简化建议）
 - 约束：style 与 improvement 类别不得标 critical
 
-## 项目规范上下文
-{{rules}}
+## 项目规范上下文（WorkBench 项目规范，审查依据）
+- 分层架构：service（业务逻辑）/ model（数据结构）/ util（工具）/ app（前后端桥接）严格分层，禁 service 直接操作 wailsjs 或 app 层写业务逻辑
+- 跨层契约：新增 App 方法签名或 model 导出 struct 字段变更须同步 frontend/wailsjs/{App.js, App.d.ts, models.ts} 三处，漏同步致前端 MISSING_EXPORT 或运行时 undefined
+- 错误处理：跨层错误用 AppError{Code,Message}（model/app_error.go 定义错误码常量），禁裸 error 直接抛前端；前端按 code 分流（WARNING_CODES 命中起 warning 不阻塞，其他报错）
+- 日志：后端用 log/slog（service 包调 Logger() 注入，App 层调 slog.X），禁 println（无级别无落盘 GUI 不可见）
+- service 装配：新增 service 须 AppServices struct 加字段 + NewAppServices 加构造行（2 处），App 内嵌 *AppServices 字段提升保委托方法与 Wails 绑定零 diff
+- 测试：覆盖率门禁 service ≥76% / model/server ≥80% / util ≥40%（排除 pty_windows.go）/ 前端 ≥70%（exclude wailsjs）；新增逻辑须配单测
+- 并发：AI 任务组 concurrencySem 控并发，RunStage 排队/取消/槽位归还三路唤醒，禁裸 goroutine 不控并发
+- diff 截断：大 diff 须经 TruncateDiff 截断保护（200KB/20 文件/50K 行三阈值），超长 diff 截断 + 提示剩余
 
 ## 待审查 diff
 {{diff}}
