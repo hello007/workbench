@@ -259,6 +259,8 @@ defineExpose({ loadBranches })
 }
 .branches-container {
   min-height: 60px;
+  max-height: 360px;
+  overflow-y: auto;
 }
 .branch-list {
   display: flex;

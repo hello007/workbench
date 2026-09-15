@@ -37,7 +37,7 @@
           v-model="pullUseRebase"
           active-text="变基模式"
           inline-prompt
-          style="margin-left: var(--spacing-sm)"
+          class="rebase-switch"
         />
         <el-button @click="showBranchDialog" :loading="branchLoading">
           切换分支
@@ -1209,6 +1209,15 @@ defineExpose({
 /* Git 操作区 */
 .git-actions {
   margin-top: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+/* 变基模式开关固定宽度：inline-prompt 开态显「变基模式」文字、关态为空，
+   开关宽度随之变化并挤压右侧「切换分支」按钮位置跳动。固定 core 宽度消除跳动。 */
+.rebase-switch :deep(.el-switch__core) {
+  width: 96px !important;
 }
 
 /* 操作区域：.content-panel 改 overflow:hidden 后，文件夹分支若窗口高度不足

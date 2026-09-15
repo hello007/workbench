@@ -1,0 +1,2 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "校验前端单测符合 mock 单一数据源 / 无 waitForTimeout / expect 自动重试规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验前端覆盖率 ≥70% 门禁未破，wailsjs 仍 exclude"}

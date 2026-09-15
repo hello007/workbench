@@ -97,6 +97,9 @@
       <li class="context-menu-item" @click="onMenuCommand('pullRepos')">
         <el-icon><Refresh /></el-icon>更新仓库
       </li>
+      <li v-if="contextMenu.targetDir?.isGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
+        <el-icon><TrendCharts /></el-icon>跳转仓库统计
+      </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
@@ -156,7 +159,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -183,7 +186,7 @@ import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useSettingsStore, useDirectoryStore, useUiStore, useFavoritesStore } from '../store'
+import { useSettingsStore, useDirectoryStore, useUiStore, useFavoritesStore, useWorkspaceStore } from '../store'
 
 function shortenPath(path) {
   if (!path || path.length <= 40) return path
@@ -198,6 +201,7 @@ const settingsStore = useSettingsStore()
 const directoryStore = useDirectoryStore()
 const uiStore = useUiStore()
 const favoritesStore = useFavoritesStore()
+const workspaceStore = useWorkspaceStore()
 
 // --- 仓库列表配置导入导出 ---
 const importDialogVisible = ref(false)
@@ -378,10 +382,20 @@ const onMenuCommand = (command) => {
     case 'pullRepos':
       emit('batchPull', { path: dir.path })
       break
+    case 'jumpStats':
+      handleJumpStats(dir)
+      break
     case 'delete':
       handleDelete(dir)
       break
   }
+}
+
+// 跳转仓库统计：设当前选中节点为该工作目录并切到统计面板，
+// StatsView 读 selectedNode.path 加载统计（顺序先设节点后切面板，触发 watch 链）。
+const handleJumpStats = (dir) => {
+  workspaceStore.selectedNode = { path: dir.path, name: dir.name, type: 'directory', isGitRepo: true }
+  uiStore.activePanel = 'stats'
 }
 
 // --- 添加目录 ---

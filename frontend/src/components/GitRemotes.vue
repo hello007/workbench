@@ -288,6 +288,8 @@ defineExpose({ loadAll })
 }
 .remotes-container {
   min-height: 60px;
+  max-height: 360px;
+  overflow-y: auto;
 }
 .remote-list {
   display: flex;
@@ -301,6 +303,9 @@ defineExpose({ loadAll })
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
 }
 .remote-row:hover {
   box-shadow: var(--shadow-md);
@@ -311,6 +316,8 @@ defineExpose({ loadAll })
   align-items: center;
   gap: var(--spacing-sm);
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 .remote-name {
   font-family: Consolas, 'Courier New', monospace;
@@ -325,10 +332,9 @@ defineExpose({ loadAll })
   word-break: break-all;
 }
 .remote-actions {
-  margin-top: 6px;
   display: flex;
   gap: var(--spacing-xs);
-  justify-content: flex-end;
+  flex-shrink: 0;
 }
 .fetch-all-bar {
   margin-top: var(--spacing-md);

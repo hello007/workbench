@@ -205,6 +205,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openRepoFilter')">
           <el-icon><Search /></el-icon>仓库筛选器
         </li>
+        <li v-if="blankAreaIsGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
+          <el-icon><TrendCharts /></el-icon>跳转仓库统计
+        </li>
       </template>
       <template v-else-if="contextMenu.data?.type === 'directory'">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
@@ -274,6 +277,9 @@
         </li>
         <li class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
           <el-icon><FolderAdd /></el-icon>添加为工作目录
+        </li>
+        <li v-if="contextMenu.data?.isGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
+          <el-icon><TrendCharts /></el-icon>跳转仓库统计
         </li>
       </template>
       <template v-else>
@@ -358,12 +364,13 @@ import {
   Star,
   StarFilled,
   Search,
-  Sort
+  Sort,
+  TrendCharts
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
-import { useFavoritesStore, useSettingsStore, useDirectoryStore } from '../store'
+import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -396,6 +403,8 @@ const { saveState, restoreState } = useTreeState()
 const favoritesStore = useFavoritesStore()
 const settingsStore = useSettingsStore()
 const directoryStore = useDirectoryStore()
+const workspaceStore = useWorkspaceStore()
+const uiStore = useUiStore()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -434,6 +443,12 @@ const isFavorited = computed(() => {
   const path = contextMenu.data?.path
   if (!path) return false
   return favList.some(f => f.path === path)
+})
+
+// 空白区右键时判断当前工作目录是否 git 仓库（空白区 data 无 isGitRepo 字段，回查工作目录）
+const blankAreaIsGitRepo = computed(() => {
+  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
+  return dir?.isGitRepo || false
 })
 
 // ---- 新建对话框状态 ----
@@ -908,7 +923,17 @@ const onMenuCommand = (command) => {
       }
       break
     }
+    case 'jumpStats':
+      handleJumpStats(data)
+      break
   }
+}
+
+// 跳转仓库统计：设选中节点为右键目录并切统计面板，
+// StatsView 读 selectedNode.path 加载统计（先设节点后切面板触发 watch 链）。
+const handleJumpStats = (data) => {
+  workspaceStore.selectedNode = { path: data.path, name: data.name, type: data.type, isGitRepo: true }
+  uiStore.activePanel = 'stats'
 }
 
 // ---- 新建文件/文件夹 ----

@@ -240,6 +240,8 @@ defineExpose({ loadTags })
 }
 .tags-container {
   min-height: 60px;
+  max-height: 360px;
+  overflow-y: auto;
 }
 .tag-list {
   display: flex;

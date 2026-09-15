@@ -1,0 +1,2 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "前端组件改动需更新 vitest 单测，遵守 mock 数据源 wails-mock-defaults.js / 禁 waitForTimeout / expect 自动重试等规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率门禁 ≥70%（exclude wailsjs），GitTags/GitRemotes/StatsView/DirectoryTree/FileTreePanel 单测须维持覆盖"}

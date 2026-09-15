@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import DirectoryTree from '../DirectoryTree.vue'
-import { useDirectoryStore, useUiStore } from '../../store'
+import { useDirectoryStore, useUiStore, useWorkspaceStore } from '../../store'
 import { ExportRepoConfig, SaveFileDialog, SaveFile } from '../../../wailsjs/go/main/App'
 
 vi.mock('element-plus', async () => {
@@ -509,6 +509,17 @@ describe('DirectoryTree.vue - 菜单分发与 handler 补充', () => {
     it('pullRepos emit batchPull', () => {
       setMenuAndCommand('pullRepos')
       expect(wrapper.emitted('batchPull')).toBeTruthy()
+    })
+
+    it('jumpStats 设选中节点为 git 仓库并切到统计面板', () => {
+      const workspaceStore = useWorkspaceStore()
+      const uiStore = useUiStore()
+      const gitDir = { ...targetDir, isGitRepo: true }
+      setMenuAndCommand('jumpStats', gitDir)
+      expect(workspaceStore.selectedNode?.path).toBe('D:\\proj\\A')
+      expect(workspaceStore.selectedNode?.name).toBe('项目A')
+      expect(workspaceStore.selectedNode?.isGitRepo).toBe(true)
+      expect(uiStore.activePanel).toBe('stats')
     })
 
     it('delete 调 handleDelete', async () => {

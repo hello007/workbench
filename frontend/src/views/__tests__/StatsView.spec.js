@@ -3,7 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  GetRepoStats: vi.fn()
+  GetRepoStats: vi.fn(),
+  GetGitRemoteURL: vi.fn()
 }))
 
 vi.mock('element-plus', async () => {
@@ -19,7 +20,7 @@ vi.mock('@element-plus/icons-vue', () => ({
 }))
 
 import StatsView from '../StatsView.vue'
-import { GetRepoStats } from '../../../wailsjs/go/main/App'
+import { GetRepoStats, GetGitRemoteURL } from '../../../wailsjs/go/main/App'
 import { useWorkspaceStore, useUiStore } from '../../store'
 
 const mockStats = {
@@ -64,6 +65,7 @@ const stubs = {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  GetGitRemoteURL.mockResolvedValue({ remoteUrl: 'https://example.com/repo.git', branch: 'main', isDetached: false })
 })
 
 describe('StatsView', () => {
@@ -73,6 +75,7 @@ describe('StatsView', () => {
     const wrapper = mount(StatsView, { global: { stubs } })
     await flushPromises()
     expect(GetRepoStats).not.toHaveBeenCalled()
+    expect(GetGitRemoteURL).not.toHaveBeenCalled()
   })
 
   it('统计页可见 + 无选中节点时应显示空提示且不调 GetRepoStats', async () => {
@@ -95,6 +98,24 @@ describe('StatsView', () => {
     expect(wrapper.find('.rs-chart-stub').attributes('data-stats')).toBe('set')
     expect(wrapper.text()).toContain('最近 30 天')
     expect(wrapper.text()).toContain('13')
+  })
+
+  it('统计页可见时展示当前仓库信息（名/路径/分支/远程地址）', async () => {
+    GetRepoStats.mockResolvedValue({ ...mockStats })
+    GetGitRemoteURL.mockResolvedValue({ remoteUrl: 'https://example.com/repo.git', branch: 'dev', isDetached: false })
+    useUiStore().activePanel = 'stats'
+    useWorkspaceStore().selectedNode = { path: '/fake/repo', name: 'my-repo', type: 'directory' }
+
+    const wrapper = mount(StatsView, { global: { stubs } })
+    await flushPromises()
+
+    const info = wrapper.find('.stats-repo-info')
+    expect(info.exists()).toBe(true)
+    expect(info.text()).toContain('my-repo')
+    expect(info.text()).toContain('/fake/repo')
+    expect(info.text()).toContain('dev')
+    expect(info.text()).toContain('https://example.com/repo.git')
+    expect(GetGitRemoteURL).toHaveBeenCalledWith('/fake/repo')
   })
 
   it('sampled=true 时应显示采样提示', async () => {

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import FileTreePanel from '../FileTreePanel.vue'
-import { useDirectoryStore } from '../../store'
+import { useDirectoryStore, useWorkspaceStore, useUiStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -1100,6 +1100,17 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
     it('pullRepos emit batchPull', () => {
       setMenuDataAndCommand('pullRepos')
       expect(wrapper.emitted('batchPull')).toBeTruthy()
+    })
+
+    it('jumpStats 设选中节点为 git 目录并切统计面板', () => {
+      const workspaceStore = useWorkspaceStore()
+      const uiStore = useUiStore()
+      const gitDirData = { name: 'repo', path: 'D:\\proj\\repo', type: 'directory', isGitRepo: true }
+      setMenuDataAndCommand('jumpStats', gitDirData)
+      expect(workspaceStore.selectedNode?.path).toBe('D:\\proj\\repo')
+      expect(workspaceStore.selectedNode?.name).toBe('repo')
+      expect(workspaceStore.selectedNode?.isGitRepo).toBe(true)
+      expect(uiStore.activePanel).toBe('stats')
     })
 
     it('refresh 命令关闭菜单', () => {
