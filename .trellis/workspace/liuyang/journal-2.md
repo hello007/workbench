@@ -145,3 +145,44 @@ v1.4 平台加固 epic 单任务分 4 PR 推进。PR1 技术债：归档历史 p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 61: AI 开发辅助 epic 交付（提交信息生成 + 代码审查）
+
+**Date**: 2026-09-15
+**Task**: AI 开发辅助 epic 交付（提交信息生成 + 代码审查）
+**Branch**: `master`
+
+### Summary
+
+v1.5 AI 开发辅助 epic 全量交付，复用 v1.3 AI 执行链路分 3 PR 推进。PR1 结构化输出链路（claude --json-schema tool use 强制，AiFunction.OutputSchema→structured_output 透传，与自由文本 result 解耦）+ staged-diff 变体 + TruncateDiff/AggregateStagedDiff 三阈值截断 + commit-message/code-review seed skill 模板。PR2 AI 提交信息生成（GetRecentCommitSubjects few-shot 过滤归档噪声 + 暂存 diff→Conventional Commits 候选 + 候选弹窗点击填入）。PR3 AI 代码审查（AggregateUncommittedDiff + GetUncommittedDiffText + LocalChanges/CommitHistory 两入口 + CodeReviewResult 问题清单面板 severity 分级分组）。缝隙修复 mergeMissingSeedSkills 按 ID 合并白名单（老用户配置自动补全 epic 新增 skill）。task#7 code-review rules 方案 A 内嵌移除 {{rules}} 占位符。整体审查修复 4 跨 PR bug（AI 任务态泄漏/EventsOff 全局误删监听/CancelAiTask mock 契约）+ 补边界用例。spec 沉淀两契约（seed skill 合并白名单 + Wails 事件多组件共听闭包注销）。覆盖率全程零回归 service 79% / model 100% / 前端 lines 83.93%，965 测试全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `92f8b51` | (see git log) |
+| `b245c11` | (see git log) |
+| `5b94426` | (see git log) |
+| `6545bd0` | (see git log) |
+| `92f26c5` | (see git log) |
+| `0362171` | (see git log) |
+| `07344ed` | (see git log) |
+| `9eb19f4` | (see git log) |
+| `11c4279` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
