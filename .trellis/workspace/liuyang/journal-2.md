@@ -219,3 +219,36 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 ### Next Steps
 
 - None - task complete
+
+
+## Session 63: 仓库信息面板样式修复与仓库统计跳转
+
+**Date**: 2026-09-15
+**Task**: 仓库信息面板样式修复与仓库统计跳转
+**Branch**: `master`
+
+### Summary
+
+修复右栏 Git 面板三个样式 bug（标签/分支/远程卡片容器加滚动防裁剪；GitRemotes 行改 flex 横向使地址与拉取/删除按钮同行对齐；变基模式 el-switch 固定宽度消跳动 + git-actions 改 flex gap 增大间距）。仓库统计页顶部新增仓库信息条（名/路径/分支/远程地址，复用 git-info 缓存，含 repoInfoSeq 并发丢序防护）。工作目录与文件树右键新增「跳转仓库统计」（仅 git 仓库节点，空白区回查工作目录 isGitRepo）。975 单测全过覆盖率达标，trellis-check 审查自修 1 处并发丢序。docs 同步更新功能说明与 README。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f378d4c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
