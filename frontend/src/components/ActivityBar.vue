@@ -1,37 +1,47 @@
 <!-- frontend/src/components/ActivityBar.vue -->
 <template>
   <div class="activity-bar">
-    <div
+    <el-tooltip
       v-for="item in panels"
       :key="item.id"
-      class="activity-bar-item"
-      :class="{ 'is-active': uiStore.activePanel === item.id }"
-      @click="uiStore.activePanel = item.id"
+      :content="item.label"
+      placement="right"
+      :show-after="300"
     >
-      <el-icon :size="20">
-        <component :is="item.icon" />
-      </el-icon>
-    </div>
+      <div
+        class="activity-bar-item"
+        :class="{ 'is-active': uiStore.activePanel === item.id }"
+        @click="uiStore.activePanel = item.id"
+      >
+        <el-icon :size="20">
+          <component :is="item.icon" />
+        </el-icon>
+      </div>
+    </el-tooltip>
     <!-- 设置图标（不切换面板，直接开弹窗） -->
-    <div
-      class="activity-bar-item"
-      @click="$emit('openSettings')"
-    >
-      <el-icon :size="20">
-        <Setting />
-      </el-icon>
-    </div>
+    <el-tooltip content="设置" placement="right" :show-after="300">
+      <div
+        class="activity-bar-item"
+        @click="$emit('openSettings')"
+      >
+        <el-icon :size="20">
+          <Setting />
+        </el-icon>
+      </div>
+    </el-tooltip>
     <!-- 终端图标（底部） -->
     <div class="activity-bar-spacer"></div>
-    <div
-      class="activity-bar-item"
-      :class="{ 'is-active': uiStore.terminalVisible }"
-      @click="$emit('toggleTerminal')"
-    >
-      <el-icon :size="20">
-        <Monitor />
-      </el-icon>
-    </div>
+    <el-tooltip content="终端" placement="right" :show-after="300">
+      <div
+        class="activity-bar-item"
+        :class="{ 'is-active': uiStore.terminalVisible }"
+        @click="$emit('toggleTerminal')"
+      >
+        <el-icon :size="20">
+          <Monitor />
+        </el-icon>
+      </div>
+    </el-tooltip>
   </div>
 </template>
 
@@ -45,10 +55,10 @@ defineEmits(['toggleTerminal', 'openSettings'])
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
-  { id: 'dashboard', icon: DataBoard, label: '状态看板' },
   { id: 'ai', icon: MagicStick, label: 'AI 功能' },
-  { id: 'stats', icon: TrendCharts, label: '仓库统计' },
-  { id: 'toolbox', icon: SetUp, label: '工具箱' }
+  { id: 'toolbox', icon: SetUp, label: '工具箱' },
+  { id: 'dashboard', icon: DataBoard, label: '状态看板' },
+  { id: 'stats', icon: TrendCharts, label: '仓库统计' }
 ]
 </script>
 
