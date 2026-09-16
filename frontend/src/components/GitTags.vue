@@ -28,17 +28,19 @@
       <div v-if="tags.length > 0" class="tag-list">
         <div v-for="tag in tags" :key="tag.name" class="tag-row">
           <div class="tag-main">
-            <el-text class="tag-name" :title="tag.name">{{ tag.name }}</el-text>
-            <el-tag size="small" :type="tag.type === 'annotated' ? 'warning' : 'info'">
-              {{ tag.type === 'annotated' ? '注释' : '轻量' }}
-            </el-tag>
-            <el-text class="tag-sha" :title="tag.sha" @click="copyText(tag.sha)">
-              {{ tag.shortSha }}
-            </el-text>
-            <span v-if="tag.tagger" class="tag-tagger">{{ tag.tagger }}</span>
-            <span v-if="tag.date" class="tag-date">{{ tag.date }}</span>
+            <div class="tag-meta">
+              <el-text class="tag-name" :title="tag.name">{{ tag.name }}</el-text>
+              <el-tag size="small" :type="tag.type === 'annotated' ? 'warning' : 'info'">
+                {{ tag.type === 'annotated' ? '注释' : '轻量' }}
+              </el-tag>
+              <el-text class="tag-sha" :title="tag.sha" @click="copyText(tag.sha)">
+                {{ tag.shortSha }}
+              </el-text>
+              <span v-if="tag.tagger" class="tag-tagger">{{ tag.tagger }}</span>
+              <span v-if="tag.date" class="tag-date">{{ tag.date }}</span>
+            </div>
+            <div class="tag-message" v-if="tag.message">{{ tag.message }}</div>
           </div>
-          <div class="tag-message" v-if="tag.message">{{ tag.message }}</div>
           <div class="tag-actions">
             <el-button
               size="small"
@@ -255,12 +257,22 @@ defineExpose({ loadTags })
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   transition: all var(--transition-fast);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
 }
 .tag-row:hover {
   box-shadow: var(--shadow-md);
   border-left-color: var(--primary-color);
 }
 .tag-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  flex: 1;
+  min-width: 0;
+}
+.tag-meta {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
@@ -287,16 +299,15 @@ defineExpose({ loadTags })
   color: var(--text-tertiary);
 }
 .tag-message {
-  margin-top: 6px;
   font-size: 13px;
   color: var(--text-primary);
   word-break: break-word;
   white-space: pre-wrap;
 }
 .tag-actions {
-  margin-top: 6px;
   display: flex;
+  align-items: center;
   gap: var(--spacing-xs);
-  justify-content: flex-end;
+  flex-shrink: 0;
 }
 </style>

@@ -274,6 +274,9 @@ defineExpose({ loadBranches })
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
 }
 .branch-row:hover {
   box-shadow: var(--shadow-md);
@@ -283,6 +286,8 @@ defineExpose({ loadBranches })
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
 }
 .branch-name {
@@ -292,9 +297,9 @@ defineExpose({ loadBranches })
   color: var(--primary-color);
 }
 .branch-actions {
-  margin-top: 6px;
   display: flex;
+  align-items: center;
   gap: var(--spacing-xs);
-  justify-content: flex-end;
+  flex-shrink: 0;
 }
 </style>
