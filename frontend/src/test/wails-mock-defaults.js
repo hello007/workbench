@@ -88,6 +88,17 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   CheckForUpdate: null,
   GetRepoStats: null,
 
+  // ---- 全局状态看板 ----
+  // 形状对齐 model.RepoStatus（见 frontend/wailsjs/go/models.ts）。
+  // 单测/E2E 兜底返回空，具体用例在测试内局部 vi.mock 覆盖。
+  GetDashboardPinned: [],
+  AddDashboardPin: true,
+  RemoveDashboardPin: true,
+  IsDashboardPinned: false,
+  GetDashboardStatuses: [],
+  RefreshDashboardStatuses: [],
+
+
   // ---- Git 三流程（提交/推送、分支管理、合并/变基）E2E 默认值 ----
   // 形状对齐 model.BranchList / FileChange / Commit / GitRemoteInfo / ConflictState
   // （见 frontend/wailsjs/go/models.ts）。这些方法仅在 ContentPanel 选中 git 仓库节点

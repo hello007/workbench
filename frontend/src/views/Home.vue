@@ -78,6 +78,10 @@
              v-show 常驻挂载：切走再切回不丢已加载统计与档位选择。
              从 workspaceStore.selectedNode 取仓库路径，后端 FindGitRoot 定位 git 根。 -->
         <StatsView v-show="uiStore.activePanel === 'stats'" />
+        <!-- 全局状态看板：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回不丢已加载状态。pin 仓库列表持久化后端。
+             @locate 复用 onRepoLocate 跳转范式（切工作目录 + 展开文件树定位）。 -->
+        <DashboardView v-show="uiStore.activePanel === 'dashboard'" @locate="onRepoLocate" />
         <!-- 拖拽分隔条 -->
         <div
           v-if="uiStore.terminalVisible"
@@ -114,6 +118,7 @@ import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
 import AiFunctionPanel from '../components/AiFunctionPanel.vue'
 import StatsView from './StatsView.vue'
+import DashboardView from './DashboardView.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'

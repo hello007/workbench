@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "model 新增 RepoStatus/PinnedRepos 导出 struct 字段须同步 frontend/wailsjs/ 三处(App.js/App.d.ts/models.ts);具名 string 类型须手动补 type 别名;session.json 指针字段避 omitempty 范式参考"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 DashboardService 须在 app_services.go 的 AppServices struct 加字段 + NewAppServices 加构造行(2 处);AppServices 必须在 package main;App 内嵌 *AppServices 字段提升保委托方法与 Wails 绑定零 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "service 包内调 Logger()(SetLogger 注入);Load 损坏降级空 + slog.Warn 范式(dashboard_pinned.json 复用);需前端分流的错误用 model.AppError{Code,Message} 经 ErrorFormatter 转 {code,message} 传前端"}
+{"file": "docs/spec/perf-baseline.md", "reason": "批量并发算状态复用 HasRemotesBatch/BatchPull 的 sem+wg 范式;跨包测试辅助入 util/testutil(RunGit/InitTempRepo/SetupMasterBranch 等),禁 _test.go 重复定义 git 执行/临时仓库辅助"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁:model/server ≥80% + service ≥76% + util ≥40% + 前端 ≥70% 硬失败(exclude wailsjs);集成测试文件头 //go:build integration"}
+{"file": "docs/spec/e2e-testing.md", "reason": "前端单测/E2E 用 wails-mock-defaults.js 单一数据源;E2E 从 fixtures.js import {test,expect} 自动注入 Wails mock;禁 waitForTimeout 靠 expect 自动重试"}
+{"file": "CLAUDE.md", "reason": "项目关键规则总索引:修改 app.go 签名/model 字段同步 wailsjs;新增 service 加 app_services.go 两处;日志用 slog;写产物 JSON 前关闭 workbench.exe 避免被覆盖丢数据"}

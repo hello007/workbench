@@ -39,6 +39,9 @@ type AppServices struct {
 	// 会话快照服务（崩溃恢复 UI 状态，data/session.json）。复用 SettingsService 持久化模式，
 	// Load 损坏降级冷启动不阻塞；前端 debounce 写 + shutdown 最终写。见 docs/spec/cross-layer-contracts.md。
 	sessionSvc *service.SessionService
+	// 全局状态看板服务（pin 仓库列表 + 跨仓状态快照，data/dashboard_pinned.json）。
+	// 复用 RepoMetaService 持久化范式；状态计算只读不走仓级锁，批量并发复用 HasRemotesBatch 范式。
+	dashboardSvc *service.DashboardService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -108,6 +111,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 会话快照服务（崩溃恢复 UI 状态，独立 data/session.json 不与 settings.json 耦合）
 	s.sessionSvc = service.NewSessionService(filepath.Join(dataDir, "session.json"))
+
+	// 全局状态看板服务（pin 仓库列表 + 跨仓状态快照，独立 data/dashboard_pinned.json）
+	s.dashboardSvc = service.NewDashboardService(filepath.Join(dataDir, "dashboard_pinned.json"))
 
 	return s
 }

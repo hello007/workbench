@@ -100,6 +100,9 @@
       <li v-if="contextMenu.targetDir?.isGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
         <el-icon><TrendCharts /></el-icon>跳转仓库统计
       </li>
+      <li v-if="contextMenu.targetDir?.isGitRepo" class="context-menu-item" @click="onMenuCommand('toggleDashboardPin')">
+        <el-icon><DataBoard /></el-icon>{{ contextMenu.targetPinned ? '取消关注状态看板' : '加入状态看板' }}
+      </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
@@ -159,7 +162,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts, DataBoard } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -176,7 +179,10 @@ import {
   AutoRegisterAndOpen,
   ExportRepoConfig,
   SaveFileDialog,
-  SaveFile
+  SaveFile,
+  IsDashboardPinned,
+  AddDashboardPin,
+  RemoveDashboardPin
 } from '../../wailsjs/go/main/App'
 import RepoConfigImportDialog from './RepoConfigImportDialog.vue'
 import { handleError } from '../utils/error'
@@ -254,7 +260,8 @@ const contextMenu = reactive({
   visible: false,
   x: 0,
   y: 0,
-  targetDir: null
+  targetDir: null,
+  targetPinned: false
 })
 
 // 暴露关闭菜单的方法
@@ -294,7 +301,18 @@ const onContextMenu = (event, dir) => {
   contextMenu.x = x
   contextMenu.y = y
   contextMenu.targetDir = dir
+  contextMenu.targetPinned = false
   contextMenu.visible = true
+
+  // git 仓库才查 pin 状态（用于右键「加入/取消关注状态看板」文案切换）
+  if (dir.isGitRepo) {
+    IsDashboardPinned(dir.path).then(pinned => {
+      // 菜单可能已关闭或切换目标，仅当目标仍是当前 dir 时生效
+      if (contextMenu.targetDir === dir) {
+        contextMenu.targetPinned = pinned
+      }
+    }).catch(() => { /* 查询失败默认未 pin，不阻塞菜单 */ })
+  }
 
   // 等菜单渲染完成后测量实际高度并调整位置
   nextTick(() => {
@@ -385,6 +403,9 @@ const onMenuCommand = (command) => {
     case 'jumpStats':
       handleJumpStats(dir)
       break
+    case 'toggleDashboardPin':
+      handleToggleDashboardPin(dir)
+      break
     case 'delete':
       handleDelete(dir)
       break
@@ -396,6 +417,22 @@ const onMenuCommand = (command) => {
 const handleJumpStats = (dir) => {
   workspaceStore.selectedNode = { path: dir.path, name: dir.name, type: 'directory', isGitRepo: true }
   uiStore.activePanel = 'stats'
+}
+
+// 加入/取消关注状态看板：基于右键时查询的 targetPinned 状态切换。
+// pin 列表后端持久化（data/dashboard_pinned.json，路径规范化去重），看板开页或刷新时拉取最新状态。
+const handleToggleDashboardPin = async (dir) => {
+  try {
+    if (contextMenu.targetPinned) {
+      await RemoveDashboardPin(dir.path)
+      ElMessage.success('已取消关注状态看板')
+    } else {
+      await AddDashboardPin(dir.path)
+      ElMessage.success('已加入状态看板')
+    }
+  } catch (e) {
+    handleError('状态看板操作失败：', e)
+  }
 }
 
 // --- 添加目录 ---

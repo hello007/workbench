@@ -39,7 +39,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddFavorite: vi.fn(() => Promise.resolve(true)),
   RemoveFavorite: vi.fn(() => Promise.resolve(true)),
   UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
-  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true))
+  UpdateFavoriteGroup: vi.fn(() => Promise.resolve(true)),
+  // 状态看板 pin：值对齐 src/test/wails-mock-defaults.js 单一数据源
+  IsDashboardPinned: vi.fn(() => Promise.resolve(false)),
+  AddDashboardPin: vi.fn(() => Promise.resolve(true)),
+  RemoveDashboardPin: vi.fn(() => Promise.resolve(true))
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -1487,6 +1491,67 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       await wrapper.vm.$.setupState.handleRemoveFavorite({ path: 'D:\\a.go' })
       await flushPromises()
       expect(ElMessage.success).toHaveBeenCalledWith('已取消收藏')
+    })
+  })
+
+  describe('toggleDashboardPin 状态看板关注', () => {
+    const fakeEvent = { preventDefault: () => {}, stopPropagation: () => {}, clientX: 100, clientY: 200 }
+
+    it('git 仓库节点右键触发 IsDashboardPinned 查询（参数为 data.path）', async () => {
+      const { IsDashboardPinned } = await import('../../../wailsjs/go/main/App')
+      const gitRepoData = { id: 'repo-1', name: 'my-repo', path: 'D:\\proj\\my-repo', type: 'directory', isGitRepo: true }
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, gitRepoData)
+      await flushPromises()
+      expect(IsDashboardPinned).toHaveBeenCalledWith('D:\\proj\\my-repo')
+    })
+
+    it('targetPinned=true 时点「取消关注状态看板」调 RemoveDashboardPin（不调 AddDashboardPin）', async () => {
+      const { IsDashboardPinned, RemoveDashboardPin, AddDashboardPin } = await import('../../../wailsjs/go/main/App')
+      IsDashboardPinned.mockResolvedValueOnce(true)
+      const gitRepoData = { id: 'repo-1', name: 'my-repo', path: 'D:\\proj\\my-repo', type: 'directory', isGitRepo: true }
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, gitRepoData)
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.contextMenu.targetPinned).toBe(true)
+      wrapper.vm.onMenuCommand('toggleDashboardPin')
+      await flushPromises()
+      expect(RemoveDashboardPin).toHaveBeenCalledWith('D:\\proj\\my-repo')
+      expect(AddDashboardPin).not.toHaveBeenCalled()
+      expect(ElMessage.success).toHaveBeenCalledWith('已取消关注状态看板')
+    })
+
+    it('targetPinned=false 时点「加入状态看板」调 AddDashboardPin（不调 RemoveDashboardPin）', async () => {
+      const { IsDashboardPinned, AddDashboardPin, RemoveDashboardPin } = await import('../../../wailsjs/go/main/App')
+      // factory 默认 IsDashboardPinned 返回 false，无需 override
+      const gitRepoData = { id: 'repo-2', name: 'another-repo', path: 'D:\\proj\\another-repo', type: 'directory', isGitRepo: true }
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, gitRepoData)
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.contextMenu.targetPinned).toBe(false)
+      wrapper.vm.onMenuCommand('toggleDashboardPin')
+      await flushPromises()
+      expect(AddDashboardPin).toHaveBeenCalledWith('D:\\proj\\another-repo')
+      expect(RemoveDashboardPin).not.toHaveBeenCalled()
+      expect(ElMessage.success).toHaveBeenCalledWith('已加入状态看板')
+    })
+
+    it('path 切换守卫：A 的 IsDashboardPinned 延迟返回时不更新 B 的 targetPinned', async () => {
+      const { IsDashboardPinned } = await import('../../../wailsjs/go/main/App')
+      let resolveA
+      IsDashboardPinned.mockImplementationOnce(() => new Promise(r => { resolveA = r }))
+      const repoA = { id: 'a', name: 'repo-a', path: 'D:\\proj\\repo-a', type: 'directory', isGitRepo: true }
+      const repoB = { id: 'b', name: 'repo-b', path: 'D:\\proj\\repo-b', type: 'directory', isGitRepo: true }
+      // 右键 A：发起 IsDashboardPinned(A)，尚未 resolve
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, repoA)
+      // 右键 B：contextMenu.data 切到 B，B 的查询走默认 false 立即 resolve
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, repoB)
+      await flushPromises()
+      // B 的 targetPinned 为 false（默认），A 的延迟返回尚未 resolve
+      expect(wrapper.vm.$.setupState.contextMenu.targetPinned).toBe(false)
+      // A 的查询 resolve 为 true，但因 contextMenu.data.path 已是 B，守卫拦截不更新
+      resolveA(true)
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.contextMenu.targetPinned).toBe(false)
+      expect(IsDashboardPinned).toHaveBeenCalledWith('D:\\proj\\repo-a')
+      expect(IsDashboardPinned).toHaveBeenCalledWith('D:\\proj\\repo-b')
     })
   })
 })

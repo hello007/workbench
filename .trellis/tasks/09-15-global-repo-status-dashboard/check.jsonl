@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "审查 model 新增字段是否同步 frontend/wailsjs/ 三处绑定;指针字段避 omitempty;具名 string 类型补 type 别名"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "审查 DashboardService 是否在 app_services.go AppServices struct 加字段 + NewAppServices 加构造行(2 处);App 内嵌字段提升委托方法零 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "审查 service 用 Logger() 非 println;dashboard_pinned.json Load 损坏降级空 + slog.Warn;AppError 跨层分流"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "审查覆盖率达标:model/server ≥80% / service ≥76% / util ≥40% / 前端 ≥70%;集成测试 //go:build integration 文件头"}
+{"file": "docs/spec/perf-baseline.md", "reason": "审查批量并发用 sem+wg 范式;测试辅助入 util/testutil 不重复定义;参数用 testing.TB"}
+{"file": "docs/spec/e2e-testing.md", "reason": "审查前端单测 mock 单一数据源;E2E 从 fixtures.js import;禁 waitForTimeout"}
+{"file": "CLAUDE.md", "reason": "项目关键规则总索引,审查所有跨层契约/日志/service 装配规则遵循"}

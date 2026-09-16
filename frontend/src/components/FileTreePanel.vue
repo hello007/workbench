@@ -208,6 +208,9 @@
         <li v-if="blankAreaIsGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
           <el-icon><TrendCharts /></el-icon>跳转仓库统计
         </li>
+        <li v-if="blankAreaIsGitRepo" class="context-menu-item" @click="onMenuCommand('toggleDashboardPin')">
+          <el-icon><DataBoard /></el-icon>{{ contextMenu.targetPinned ? '取消关注状态看板' : '加入状态看板' }}
+        </li>
       </template>
       <template v-else-if="contextMenu.data?.type === 'directory'">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
@@ -280,6 +283,9 @@
         </li>
         <li v-if="contextMenu.data?.isGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
           <el-icon><TrendCharts /></el-icon>跳转仓库统计
+        </li>
+        <li v-if="contextMenu.data?.isGitRepo" class="context-menu-item" @click="onMenuCommand('toggleDashboardPin')">
+          <el-icon><DataBoard /></el-icon>{{ contextMenu.targetPinned ? '取消关注状态看板' : '加入状态看板' }}
         </li>
       </template>
       <template v-else>
@@ -365,7 +371,8 @@ import {
   StarFilled,
   Search,
   Sort,
-  TrendCharts
+  TrendCharts,
+  DataBoard
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
@@ -385,8 +392,12 @@ import {
   OpenObsidianVaultManager,
   CopyObsidianVaultPath,
   AutoRegisterAndOpen,
-  ScanAndPullRepos
+  ScanAndPullRepos,
+  IsDashboardPinned,
+  AddDashboardPin,
+  RemoveDashboardPin
 } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
 import obsidianIcon from '../assets/icons/obsidian.png'
 import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
@@ -430,12 +441,17 @@ const treeProps = {
 }
 
 // ---- 右键菜单状态 ----
+// targetPinned：右键打开菜单时异步查询 IsDashboardPinned 缓存的 pin 状态，
+// 用于「加入/取消关注状态看板」菜单项文案切换。关闭菜单时不重置（onMenuCommand
+// 先 closeContextMenu 再调 handleToggleDashboardPin，后者仍需读 targetPinned），
+// 每次打开菜单时重置为 false 再按查询结果更新。
 const contextMenu = reactive({
   visible: false,
   x: 0,
   y: 0,
   data: null,
-  isBlankArea: false
+  isBlankArea: false,
+  targetPinned: false
 })
 
 const isFavorited = computed(() => {
@@ -751,7 +767,20 @@ const onNodeContextMenu = (event, data) => {
   contextMenu.y = y
   contextMenu.data = data
   contextMenu.isBlankArea = false
+  contextMenu.targetPinned = false
   contextMenu.visible = true
+
+  // git 仓库才查 pin 状态（用于右键「加入/取消关注状态看板」文案切换）
+  // 守卫用 path 而非对象引用：空白区 data 每次新建对象 === 失效，节点/空白区统一用 path 更一致
+  if (data.isGitRepo) {
+    const targetPath = data.path
+    IsDashboardPinned(targetPath).then(pinned => {
+      // 菜单可能已关闭或切换目标，仅当目标仍是当前 data 时生效
+      if (contextMenu.data?.path === targetPath) {
+        contextMenu.targetPinned = pinned
+      }
+    }).catch(() => { /* 查询失败默认未 pin，不阻塞菜单 */ })
+  }
 
   // 等菜单渲染完成后测量实际高度并调整位置
   nextTick(() => {
@@ -819,7 +848,20 @@ const onBlankAreaContextMenu = (event) => {
   contextMenu.y = y
   contextMenu.data = { path: dir.path, name: dir.name, type: 'directory' }
   contextMenu.isBlankArea = true
+  contextMenu.targetPinned = false
   contextMenu.visible = true
+
+  // 当前工作目录为 git 仓库才查 pin 状态（用于右键「加入/取消关注状态看板」文案切换）
+  // 守卫用 path 而非对象引用：空白区 data 每次新建对象 === 失效
+  if (blankAreaIsGitRepo.value) {
+    const targetPath = dir.path
+    IsDashboardPinned(targetPath).then(pinned => {
+      // 菜单可能已关闭或切换目标，仅当目标仍是当前 data 时生效
+      if (contextMenu.data?.path === targetPath) {
+        contextMenu.targetPinned = pinned
+      }
+    }).catch(() => { /* 查询失败默认未 pin，不阻塞菜单 */ })
+  }
 
   nextTick(() => {
     const menuElement = document.querySelector('.context-menu')
@@ -926,6 +968,9 @@ const onMenuCommand = (command) => {
     case 'jumpStats':
       handleJumpStats(data)
       break
+    case 'toggleDashboardPin':
+      handleToggleDashboardPin(data)
+      break
   }
 }
 
@@ -934,6 +979,22 @@ const onMenuCommand = (command) => {
 const handleJumpStats = (data) => {
   workspaceStore.selectedNode = { path: data.path, name: data.name, type: data.type, isGitRepo: true }
   uiStore.activePanel = 'stats'
+}
+
+// 加入/取消关注状态看板：基于右键时查询的 targetPinned 状态切换。
+// pin 列表后端持久化（data/dashboard_pinned.json，路径规范化去重），看板开页或刷新时拉取最新状态。
+const handleToggleDashboardPin = async (data) => {
+  try {
+    if (contextMenu.targetPinned) {
+      await RemoveDashboardPin(data.path)
+      ElMessage.success('已取消关注状态看板')
+    } else {
+      await AddDashboardPin(data.path)
+      ElMessage.success('已加入状态看板')
+    }
+  } catch (e) {
+    handleError('状态看板操作失败：', e)
+  }
 }
 
 // ---- 新建文件/文件夹 ----
