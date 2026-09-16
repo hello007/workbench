@@ -252,3 +252,36 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 ### Next Steps
 
 - None - task complete
+
+
+## Session 64: 全局仓库状态看板
+
+**Date**: 2026-09-16
+**Task**: 全局仓库状态看板
+**Branch**: `master`
+
+### Summary
+
+个人开发者多仓维护痛点:手动 pin 关注的核心仓库,一眼看清 dirty/ahead/behind/上游状态。7 项决策 brainstorm 收敛(范围=手动 pin C / 字段=4 态 A / 网络=纯本地不 fetch A / 刷新=开页算+手动 A / 入口=ActivityBar 一级 A / 动作=只读+跳转 A / pin 来源=选仓器+右键双入口 C)。后端 DashboardService(pin Mutate+ComputeRepoStatus rev-list ahead/behind+并发 8)+model RepoStatus/PinnedRepos+6 App 委托+9 单测+6 集成测试。前端 DashboardView 表格+空状态+添加 pin 弹窗+ActivityBar 第 5 图标+DirectoryTree/FileTreePanel 右键动态文案双入口。trellis-check 两轮通过自修 2 处日志违规(service 引 slog→Logger()、FileTreePanel 裸 ElMessage→handleError)。验证:go build/vet 干净,集成测试 6/6,前端 vitest 987/987,service 覆盖率 78.2%≥76%。文档 README/功能说明/路线图同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34cd775` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
