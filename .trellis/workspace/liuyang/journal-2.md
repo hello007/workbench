@@ -325,3 +325,36 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 
 - 待用户手动验证看板跳转 + orphaned 标记
 - pre-existing difftool 测试失败另行排查(非本任务范围)
+
+
+## Session 65: 修复状态看板跳转仓库无反应+嵌套工作目录选错+孤立条目标记
+
+**Date**: 2026-09-16
+**Task**: 修复状态看板跳转仓库无反应+嵌套工作目录选错+孤立条目标记
+**Branch**: `master`
+
+### Summary
+
+状态看板点跳转无反应。根因 onRepoLocate 不切 activePanel，看板与三栏 .main-panes v-show 互斥（仅 directory/toolbox 显示三栏），文件树 display:none 致 locateNode 对隐藏树不可见。修复：(1) onRepoLocate 看板入口切 activePanel=directory（仅 dashboard 入口，toolbox 入口保持避免回归）；(2) findOwningDirectory 最长前缀匹配替代 find(startsWith)，嵌套工作目录取最具体；(3) DashboardView enrichedStatuses computed 派生 orphaned 标记，pin 路径不再属于任何工作目录时标「工作目录已移除」，missing 优先。提取 utils/pathMatch.js（normalizePath/belongsToDir/findOwningDirectory，含盘根/尾分隔符边界处理）供 onRepoLocate 与 DashboardView 共用。sub-agent 审查修复 2 处（belongsToDir 盘根 false negative、onRepoLocate toolbox 入口回归）+ 补 6 测试。验证：前端 vitest 1010/1010、覆盖率门禁 exit=0（Statements 81%/Branches 74.56%/Functions 76.55%/Lines 83.58%）、npm run build 过。spec sync 不需要（纯前端无跨层契约变更）。pre-existing difftool 测试失败另行排查。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a779a2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

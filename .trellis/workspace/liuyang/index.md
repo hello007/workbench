@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 64
+- **Total Sessions**: 65
 - **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~287 | Active |
+| `journal-2.md` | ~360 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 65 | 2026-09-16 | 修复状态看板跳转仓库无反应+嵌套工作目录选错+孤立条目标记 | `1a779a2` | `master` |
 | 64 | 2026-09-16 | 全局仓库状态看板 | `34cd775` | `master` |
 | 63 | 2026-09-15 | 仓库信息面板样式修复与仓库统计跳转 | `f378d4c` | `master` |
 | 62 | 2026-09-15 | 推送结果面板补闭环 | `8bc618b` | `master` |
