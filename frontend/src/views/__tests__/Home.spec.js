@@ -832,6 +832,45 @@ describe('Home.vue - Bug修复验证', () => {
       // 规范化（\ -> / + toLowerCase）后应命中 dir-1 并定位（规避 locateNode 内 startsWith 大小写敏感的静默失败）
       expect(locateNodeMock).toHaveBeenCalledWith('d:/work/repo-a')
     })
+
+    it('看板入口：从 dashboard 切到 directory 确保三栏文件树可见', async () => {
+      // 看板与三栏 .main-panes v-show 互斥，看板跳转不切面板则文件树 display:none、locateNode 不可见
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      useDirectoryStore().directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
+      ]
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
+      useUiStore().activePanel = 'dashboard'
+      await flushPromises()
+
+      await w.vm.onRepoLocate('D:/work/repo-a')
+      await flushPromises()
+
+      // 主修复点：切回 directory 让文件树可见，再 locateNode
+      expect(useUiStore().activePanel).toBe('directory')
+      expect(locateNodeMock).toHaveBeenCalledWith('D:/work/repo-a')
+    })
+
+    it('仓库筛选器入口（toolbox）：保持当前面板不强制切 directory', async () => {
+      // toolbox 下 FileTreePanel 仍可见，跳转不应退出工具箱（仅看板入口切 directory）
+      const locateNodeMock = vi.fn().mockResolvedValue(undefined)
+      w = mountWithLocate(locateNodeMock)
+      await flushPromises()
+      useDirectoryStore().directories = [
+        { id: 'dir-1', name: '工作目录1', path: 'D:/work', isGitRepo: false, isDefault: false }
+      ]
+      useDirectoryStore().selectedDirectoryId = 'dir-1'
+      useUiStore().activePanel = 'toolbox'
+      await flushPromises()
+
+      await w.vm.onRepoLocate('D:/work/repo-a')
+      await flushPromises()
+
+      expect(useUiStore().activePanel).toBe('toolbox')
+      expect(locateNodeMock).toHaveBeenCalledWith('D:/work/repo-a')
+    })
   })
 })
 

@@ -19,11 +19,12 @@
       </el-empty>
 
       <!-- 状态表格 -->
-      <el-table v-else :data="statuses" class="status-table" :row-class-name="rowClass" @row-click="onRowClick">
+      <el-table v-else :data="enrichedStatuses" class="status-table" :row-class-name="rowClass" @row-click="onRowClick">
         <el-table-column label="仓库" min-width="160">
           <template #default="{ row }">
             <span class="repo-name" :class="{ 'repo-missing': row.missing }">{{ row.name }}</span>
             <span class="repo-path" :title="row.path">{{ row.path }}</span>
+            <el-tag v-if="row.orphaned" size="small" type="info">工作目录已移除</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="分支" width="120">
@@ -124,6 +125,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { useDirectoryStore } from '../store'
 import { handleError } from '../utils/error'
+import { belongsToDir } from '../utils/pathMatch'
 
 const emit = defineEmits(['locate'])
 
@@ -134,6 +136,18 @@ const statuses = ref([])
 
 // 状态计算异常的仓库（非致命 Error 字段非空）
 const errorRepos = computed(() => statuses.value.filter(r => r.error))
+
+// 派生 orphaned 标记：pin 仓库路径不再属于任何已注册工作目录（工作目录被移除或路径被改）。
+// 前端纯计算，不入后端 RepoStatus（避免同步 wailsjs 绑定三处）。
+// computed 自动响应 statuses 与 directoryStore.directories 两个 ref：工作目录增删后标记自动更新，
+// 覆盖启动竞态（loadStatuses 早于 directories 就绪，directories 后到 computed 重算）。
+// 展示优先级 missing > orphaned：路径已失效时按 missing 灰显，不重复标 orphaned。
+const enrichedStatuses = computed(() =>
+  statuses.value.map(r => ({
+    ...r,
+    orphaned: r.missing ? false : !directoryStore.directories.some(d => belongsToDir(r.path, d.path))
+  }))
+)
 
 // 行样式：失效仓库灰显
 function rowClass({ row }) {

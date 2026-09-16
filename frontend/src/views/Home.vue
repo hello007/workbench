@@ -126,6 +126,7 @@ import UpdateDialog from '../components/UpdateDialog.vue'
 import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { restoreSession, applySessionState, startSessionAutoSave } from '../composables/useSessionState'
+import { findOwningDirectory } from '../utils/pathMatch'
 import { useSettingsStore, useUiStore, useDirectoryStore, useWorkspaceStore, matchShortcut } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -346,7 +347,7 @@ function onPaletteSelectWorkDir(dir) {
   onDirectorySelect(dir.id)
 }
 
-// ---- 仓库筛选器：跳转定位（跨工作目录衔接）----
+// ---- 仓库筛选器 / 状态看板：跳转定位（跨工作目录衔接）----
 // 时序严格参考 research/cross-workdir-locate.md：
 //   1. 规范化路径（\ -> / + toLowerCase）查找 targetDir，规避 locateNode 内 startsWith 未处理大小写的静默失败
 //   2. 尽早关闭弹窗，避免遮挡文件树
@@ -354,19 +355,28 @@ function onPaletteSelectWorkDir(dir) {
 //      让 restoreTreeState（历史展开）先完成，再 locateNode，避免并发竞争同一节点 expand/loadData
 //   4. locateNode 内部 await treeReadyPromise 兜底等新树就绪，再沿父路径逐级展开 + setCurrentKey + scrollBy
 //   同工作目录：跳过步骤 3，treeKey 不变、treeReadyPromise 旧值已 resolve，locateNode 立即执行
+// 状态看板入口（activePanel==='dashboard'）须切到 directory：看板与三栏 .main-panes v-show 互斥
+// （仅 directory/toolbox 显示三栏），看板下不切则文件树 display:none、locateNode 对隐藏树不可见 = 无反应。
+// 仓库筛选器入口（activePanel 为 directory/toolbox）三栏本就可见（toolbox 下 FileTreePanel 仍展示），
+// 保持当前面板不强制切 directory，避免 toolbox 下跳转误退出工具箱——严格满足「仓库筛选器跳转不受回归影响」。
+// 工作目录查找用 findOwningDirectory 最长前缀匹配，嵌套工作目录（D:\projects 与 D:\projects\sub 并存）
+// 取最具体者，避免选中外层导致 locateNode 在错误树里定位。
 const onRepoLocate = async (repoPath) => {
   if (!repoPath) return
 
-  const norm = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
-  const normTarget = norm(repoPath)
-  const targetDir = directoryStore.directories.find(d => normTarget.startsWith(norm(d.path)))
+  const targetDir = findOwningDirectory(repoPath, directoryStore.directories)
   if (!targetDir) {
     ElMessage.warning('未找到该仓库所属的工作目录')
     return
   }
 
-  // 关闭弹窗
+  // 关闭弹窗（仓库筛选器场景；看板场景无弹窗，赋值幂等）
   uiStore.repoFilterVisible = false
+
+  // 仅看板入口切面板：directory 下赋值幂等，toolbox 下保持工具箱不退出
+  if (uiStore.activePanel === 'dashboard') {
+    uiStore.activePanel = 'directory'
+  }
 
   // 跨工作目录：先切换（触发文件树重建）
   if (targetDir.id !== directoryStore.selectedDirectoryId) {

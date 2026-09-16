@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/archive/2026-07/07-19-repo-filter-dialog/research/cross-workdir-locate.md", "reason": "onRepoLocate 时序契约：treeKey/treeReadyPromise 兜底、await onDirectorySelect 串行 restoreTreeState、路径规范化 toLowerCase 规避 Windows 大小写静默失败。实现切面板+最长前缀匹配必读"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率门禁 ≥70% 硬失败。新增 DashboardView computed/工具函数若可单测须补 spec，避免 thresholds 红线"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "前端派生字段不入后端 RepoStatus 的约束依据；确认不改 wailsjs 绑定三处合规"}

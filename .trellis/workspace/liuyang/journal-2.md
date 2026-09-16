@@ -285,3 +285,43 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 ### Next Steps
 
 - None - task complete
+
+
+## Session 65: 修复状态看板跳转仓库无反应
+
+**Date**: 2026-09-16
+**Task**: fix-dashboard-repo-adjust-no-response
+**Branch**: `master`
+
+### Summary
+
+状态看板点行/「跳转」无反应。根因:onRepoLocate(Home.vue)切目录+locateNode 但从不切 activePanel,看板与三栏 .main-panes v-show 互斥(仅 directory/toolbox 显示三栏),点跳转后仍留看板 → 文件树 display:none → locateNode 对隐藏树 setCurrentKey/scrollBy 不可见 = 视觉无反应。仓库筛选器同函数不卡,因弹窗关闭后三栏本就可见。附带修两个相关痛点:嵌套工作目录(D:\projects 与 D:\projects\sub 并存)find(startsWith) 选错外层;工作目录移除后 pin 条目无标记。3 处纯前端改动,零后端/零 wailsjs 绑定。
+
+### Main Changes
+
+- frontend/src/utils/pathMatch.js(新):normalizePath(\→/ + toLowerCase)、belongsToDir(前缀匹配 + 分隔符边界排除 projects vs projects-other)、findOwningDirectory(最长前缀匹配取最具体工作目录)。Windows 大小写不敏感 + 嵌套歧义收敛。
+- frontend/src/utils/__tests__/pathMatch.spec.js(新):17 单测,覆盖大小写/分隔符混合/同前缀串排除/嵌套最长前缀/空值兜底。
+- frontend/src/views/Home.vue onRepoLocate:import findOwningDirectory 替代内联 find(startsWith);进入即设 uiStore.activePanel='directory'(关弹窗后、切目录前),修主 bug;注释补充看板入口 v-show 互斥原因 + 仓库筛选器入口幂等说明。
+- frontend/src/views/DashboardView.vue:import belongsToDir;computed 派生 enrichedStatuses 给每条加 orphaned 前端字段(missing 优先,非 missing 且不属于任何工作目录 = true);模板表格 :data=enrichedStatuses + 仓库列 el-tag type=info「工作目录已移除」。computed 自动响应 statuses + directoryStore.directories 双 ref,工作目录增删后标记自动更新,无需 watch。
+
+### Commits
+
+| Hash | Message |
+|------|---------|
+| (未提交) | 待用户确认后提交 |
+
+### Testing
+
+- [OK] 前端 vitest 1004/1004(含新增 17 pathMatch 单测)
+- [OK] 前端覆盖率门禁 exit=0(Statements 81% / Branches 74.54% / Functions 76.55% / Lines 83.58%,均 ≥70%;pathMatch.js 100%)
+- [OK] 后端 model/server/util/testutil 包通过
+- [pre-existing] service 包 TestOpenInExternalDiff_LaunchFailed/LaunchSuccess 稳定失败(GetFileAttributesEx workbench-diff: 系统找不到文件),Windows 临时目录环境问题,与本任务前端改动零关联,重跑一致失败
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 待用户手动验证看板跳转 + orphaned 标记
+- pre-existing difftool 测试失败另行排查(非本任务范围)

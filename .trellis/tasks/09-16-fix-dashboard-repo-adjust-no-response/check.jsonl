@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/archive/2026-07/07-19-repo-filter-dialog/research/cross-workdir-locate.md", "reason": "校验 onRepoLocate 改动未破坏既有跨目录时序：await onDirectorySelect 串行、locateNode 内 treeReadyPromise 兜底仍生效"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验前端覆盖率不回退 ≥70% 门禁；新增工具函数单测覆盖判定"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验未违规引入后端 RepoStatus 字段同步 wailsjs 三处的约束"}

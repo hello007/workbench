@@ -174,4 +174,31 @@ describe('DashboardView.vue', () => {
     expect(ElMessage.warning).toHaveBeenCalled()
     expect(wailsMock.AddDashboardPin).not.toHaveBeenCalled()
   })
+
+  it('orphaned 标记：路径不属于任何已注册工作目录时派生 orphaned=true', async () => {
+    // 工作目录 /work；repo-x 路径 /other/repo-x 不属于任何已注册工作目录 → orphaned
+    const statuses = [
+      { path: '/other/repo-x', name: 'repo-x', branch: 'master', dirty: false, ahead: 0, behind: 0, hasUpstream: false, detached: false, isRepo: true, missing: false },
+      { path: '/work/repo-a', name: 'repo-a', branch: 'master', dirty: false, ahead: 0, behind: 0, hasUpstream: false, detached: false, isRepo: true, missing: false }
+    ]
+    wailsMock.GetDashboardStatuses.mockReturnValue(Promise.resolve(statuses))
+    const wrapper = createWrapper()
+    await flushPromises()
+    const enriched = wrapper.vm.$.setupState.enrichedStatuses
+    expect(enriched[0].orphaned).toBe(true)   // /other/repo-x 不属于 /work
+    expect(enriched[1].orphaned).toBe(false)  // /work/repo-a 属于 /work
+  })
+
+  it('missing 优先于 orphaned：失效仓库即使路径不属于工作目录也不标 orphaned', async () => {
+    // repo-m missing=true 且路径 /other/repo-m 不属于 /work，但 missing 优先 → orphaned=false
+    const statuses = [
+      { path: '/other/repo-m', name: 'repo-m', branch: '', dirty: false, ahead: 0, behind: 0, hasUpstream: false, detached: false, isRepo: true, missing: true }
+    ]
+    wailsMock.GetDashboardStatuses.mockReturnValue(Promise.resolve(statuses))
+    const wrapper = createWrapper()
+    await flushPromises()
+    const enriched = wrapper.vm.$.setupState.enrichedStatuses
+    expect(enriched[0].missing).toBe(true)
+    expect(enriched[0].orphaned).toBe(false)
+  })
 })
