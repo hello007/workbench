@@ -29,6 +29,7 @@
 |[security-scan.md](security-scan.md)|安全扫描（v1.4 PR1）：govulncheck（Go 调用链分析）+ npm audit（官方 registry 绕过 npmmirror）；CI security job `continue-on-error` 不阻塞 PR；已知漏洞清单（xlsx 无补丁接受风险、go-git/go-billy/x/net/标准库已修复）；go.mod `toolchain` directive 与标准库漏洞修复|
 |[ai-structured-output.md](ai-structured-output.md)|AI 结构化输出契约（v1.5 AI epic PR1）：claude CLI `--json-schema` tool use 强制结构化，与自由文本 result 解耦；`AiFunction.OutputSchema` → `buildClaudeArgs` → `parseStreamLine` 提取 structured_output → `AiTaskRunResult/AiTaskState.StructuredOutput` 透传前端只渲染不解析；纯 prompt skill 模式（Command 空 + PromptTemplate 驱动，validateFunctions 放宽）|
 |[design-tokens.md](design-tokens.md)|设计令牌体系（v1.6 视觉现代化）：双主题变量分层（:root 亮/html.dark 暗，非颜色变量不重复声明）；主色改须同步 Element Plus `--el-color-primary` 派生（light-3~9 实色阶，暗色 light-9 用 rgba 透明度）否则组件割裂；冷暖灰统一蓝灰 Slate 色相禁混；阴影禁纯黑须带背景色相；`--terminal-bg` 须与 `useTerminal.js` LIGHT/DARK_TERMINAL_THEME.background 严格一致（改背景色不动终端）；Geist 四字重梯度 + font-display:swap + fallback 链|
+|[frontend-visual-conventions.md](frontend-visual-conventions.md)|前端页面风格开发规范（v1.6 视觉现代化，与 design-tokens 互补）：配色按语义选色（primary/success/warning/danger/info）+ 蓝灰三档中性色阶（bg/text/border）；VSCode 式三列布局（ActivityBar 48px + FileTreePanel + ContentPanel）+ 面板 nav+content 二分；组件视觉模式（nav active 左侧指示条 `left:0` 防 overflow 裁剪禁负 left、卡片 hover `--shadow-sm`→`--shadow-md` 层级、section-title 字重梯度 h1-h3 600/`-0.01em` + h4-h6 500、kbd Geist 字体族、行内 style 禁用迁语义类）；四档间距/圆角内紧外松就近归并；弹窗 `min(像素,视口比例)` 响应式尺寸分档（设置 960×620、命令面板 720×480、小弹窗 420-600）；本文指南层引用变量名不重述取值|
 
 ## 新增文档约定
 
@@ -40,4 +41,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-09-16
+**最后更新：** 2026-09-17

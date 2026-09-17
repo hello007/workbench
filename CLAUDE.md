@@ -67,6 +67,7 @@ workbench/
 |新增内置 seed skill 须加入 `mergeMissingSeedSkills`（service/ai_function.go）白名单（现仅 `commit-message`/`code-review`），否则 PR1 前已建 `data/ai_functions.json` 老用户配置不含该 skill、`RunAiFunction` 报「功能不存在」；旧 seed skill 不进白名单尊重用户删除决策，用户自定义同 ID 项不覆盖|[ai-structured-output.md](docs/spec/ai-structured-output.md)|
 |Wails 事件多组件共监听同事件（如 `ai-task:done` 被 AiFunctionPanel/LocalChanges/CommitHistory 共听）须用 `EventsOn` 返回闭包精准注销本组件监听器，禁 `EventsOff('eventName')` 全局移除（清全部同名监听器误删他组件）；组件 repoPath 切换/卸载须重置 AI 任务态 + `CancelAiTask` 在途任务防旧仓库结果串入 + loading 卡死|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |前端设计令牌：改 `--primary-color` 须同步 Element Plus `--el-color-primary` 派生（light-3~9 实色阶，暗色 light-9 用 rgba 透明度）否则 el-button/el-tag 割裂；冷暖灰统一蓝灰 Slate 色相禁混；暗色阴影禁纯黑须带背景色相 `rgba(2,6,23,…)`；`--terminal-bg` 须与 `useTerminal.js` LIGHT/DARK_TERMINAL_THEME.background 严格一致（改 `--bg-primary` 不动终端背景）；Geist 四字重 + font-display:swap + fallback 链|[design-tokens.md](docs/spec/design-tokens.md)|
+|前端新增页面/组件视觉风格须守 frontend-visual-conventions（与 design-tokens 互补，本文指南层/契约层）：配色按语义选色（primary/success/warning/danger/info）+ 蓝灰三档中性色阶；VSCode 式三列布局（ActivityBar 48px + FileTreePanel + ContentPanel）+ 面板 nav+content 二分；nav active 左侧指示条 `left:0` 防 overflow 裁剪（禁负 left）+ 卡片 hover `--shadow-sm`→`--shadow-md` 层级 + section-title 字重梯度（h1-h3 用 600 + `letter-spacing:-0.01em`、h4-h6 用 500）+ kbd `'Geist','Consolas','Monaco',monospace` 字体族 + 行内 style 禁用全迁语义类；四档间距/圆角内紧外松就近归并（容器 `--radius-lg` 较软、内元素 `--radius-md` 较紧）；弹窗 `min(像素,视口比例)` 响应式尺寸分档（设置 960×620、命令面板 720×480、内容多大弹窗 900+、小弹窗 420-600）+ `top` 用 vh 响应式|[frontend-visual-conventions.md](docs/spec/frontend-visual-conventions.md)|
 
 ## 文档索引
 
@@ -105,5 +106,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-09-16
-**文档版本：** v2.7
+**最后更新：** 2026-09-17
+**文档版本：** v2.8
