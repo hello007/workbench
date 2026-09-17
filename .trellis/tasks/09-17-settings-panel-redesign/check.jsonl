@@ -1,0 +1,4 @@
+{"file": "docs/spec/design-tokens.md", "reason": "验收无硬编码 fallback 残留、阴影着色、Geist 字体、el-overlay 蓝灰着色等契约逐项核对"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证前端覆盖率 ≥70% 门禁未破，SettingsPanel.spec.js + 全量 npm test 须绿"}
+{"file": "docs/spec/e2e-testing.md", "reason": "wailsjs 不入库；视觉改动不得引入对 wailsjs 绑定的耦合"}
+{"file": ".trellis/tasks/09-17-settings-panel-redesign/prd.md", "reason": "对照 Acceptance Criteria 逐项验收：10 项改动/行内 style 全迁/深浅双主题/功能不回归"}

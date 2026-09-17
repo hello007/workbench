@@ -1,0 +1,4 @@
+{"file": "docs/spec/design-tokens.md", "reason": "纯变量驱动契约（禁 var(--x,#硬编码) 双值）、阴影着色、Geist 字体前缀、Element Plus --el-* 同步、el-overlay 蓝灰着色 — 实现期硬约束"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬失败门禁（exclude wailsjs）；改 SettingsPanel.vue 须不破现有 vitest 用例"}
+{"file": ".claude/skills/redesign-skill/SKILL.md", "reason": "审计清单 + Fix Priority 顺序（配色→hover/active→布局→组件→字号）+ Code Quality 行内 style 迁移要求为实现期执行依据"}
+{"file": ".trellis/tasks/09-17-settings-panel-redesign/prd.md", "reason": "MVP 范围/10 项改动清单/行内 style 全迁决策/Out of Scope 边界"}

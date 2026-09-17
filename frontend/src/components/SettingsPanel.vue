@@ -54,22 +54,22 @@
             <span>GPU 设置已变更，需重启应用后生效</span>
           </div>
           <!-- 外部应用 -->
-          <div class="settings-section-title" style="margin-top: 24px;">外部应用</div>
+          <div class="settings-section-title settings-section-title--spaced">外部应用</div>
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">Obsidian 程序路径</div>
               <div class="settings-item-desc">用 Obsidian 打开时优先使用该可执行文件；留空则尝试系统已注册的 Obsidian</div>
             </div>
-            <el-input v-model="obsidianPath" size="small" style="width: 280px;" placeholder="如 C:\Users\me\AppData\Local\Obsidian\Obsidian.exe" @change="onSettingsChange" />
+            <el-input v-model="obsidianPath" size="small" class="input-w-xl" placeholder="如 C:\Users\me\AppData\Local\Obsidian\Obsidian.exe" @change="onSettingsChange" />
           </div>
           <!-- 外部 diff 工具 -->
-          <div class="settings-section-title" style="margin-top: 24px;">外部 diff 工具</div>
+          <div class="settings-section-title settings-section-title--spaced">外部 diff 工具</div>
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">预设</div>
               <div class="settings-item-desc">选择常用 diff 工具自动填充路径与参数，均可手动修改</div>
             </div>
-            <el-select :model-value="settingsStore.diffToolName" class="diff-tool-preset-select" size="small" style="width: 180px;" @change="onDiffToolPresetChange">
+            <el-select :model-value="settingsStore.diffToolName" class="diff-tool-preset-select input-w-md" size="small" @change="onDiffToolPresetChange">
               <el-option v-for="(preset, key) in diffToolPresets" :key="key" :label="preset.label" :value="key" />
             </el-select>
           </div>
@@ -78,17 +78,17 @@
               <div class="settings-item-label">可执行文件路径</div>
               <div class="settings-item-desc">留空表示未配置，diff 弹窗的「用外部工具打开」按钮将置灰</div>
             </div>
-            <el-input v-model="settingsStore.diffToolPath" size="small" style="width: 280px;" placeholder="如 C:\Program Files\WinMerge\WinMergeU.exe" @change="onDiffToolChange" />
+            <el-input v-model="settingsStore.diffToolPath" size="small" class="input-w-xl" placeholder="如 C:\Program Files\WinMerge\WinMergeU.exe" @change="onDiffToolChange" />
           </div>
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">参数模板</div>
               <div class="settings-item-desc">须包含 {left} 与 {right} 占位符，分别替换为旧版本 / 新版本文件路径</div>
             </div>
-            <el-input v-model="settingsStore.diffToolArgs" size="small" style="width: 280px;" placeholder="{left} {right}" @change="onDiffToolChange" />
+            <el-input v-model="settingsStore.diffToolArgs" size="small" class="input-w-xl" placeholder="{left} {right}" @change="onDiffToolChange" />
           </div>
           <!-- 版本与更新 -->
-          <div class="settings-section-title" style="margin-top: 24px;">关于</div>
+          <div class="settings-section-title settings-section-title--spaced">关于</div>
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">当前版本</div>
@@ -110,7 +110,7 @@
               <div class="settings-item-label">默认 Shell</div>
               <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
             </div>
-            <el-select v-model="defaultShell" class="default-shell-select" size="small" style="width: 140px;" @change="onSettingsChange">
+            <el-select v-model="defaultShell" class="default-shell-select input-w-md" size="small" @change="onSettingsChange">
               <el-option label="PowerShell" value="powershell" />
               <el-option label="CMD" value="cmd" />
               <el-option label="Git Bash" value="gitbash" />
@@ -122,14 +122,14 @@
               <div class="settings-item-label">Git Bash 路径</div>
               <div class="settings-item-desc">自定义 Git Bash 可执行文件路径</div>
             </div>
-            <el-input v-model="gitBashPath" size="small" style="width: 240px;" @change="onSettingsChange" />
+            <el-input v-model="gitBashPath" size="small" class="input-w-lg" @change="onSettingsChange" />
           </div>
           <div v-if="defaultShell === 'wsl'" class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">WSL 发行版</div>
               <div class="settings-item-desc">指定 WSL 发行版名称（留空使用默认）</div>
             </div>
-            <el-input v-model="wslDistro" size="small" style="width: 240px;" @change="onSettingsChange" />
+            <el-input v-model="wslDistro" size="small" class="input-w-lg" @change="onSettingsChange" />
           </div>
         </div>
         <!-- 搜索页 -->
@@ -151,7 +151,7 @@
               <el-input
                 v-model="newExcludeDir"
                 size="small"
-                style="width: 120px;"
+                class="input-w-sm"
                 placeholder="添加目录"
                 @keyup.enter="addExcludeDir"
               />
@@ -174,7 +174,7 @@
               <el-input
                 v-model="newExcludeFile"
                 size="small"
-                style="width: 120px;"
+                class="input-w-sm"
                 placeholder="如 .log"
                 @keyup.enter="addExcludeFile"
               />
@@ -541,11 +541,13 @@ const onThemeChange = async () => {
 </script>
 
 <style scoped>
-/* 弹窗内容区背景 */
+/* 弹窗内容区背景
+ * margin 负值与 el-dialog__body padding（同为 --spacing-lg）配对抵消，
+ * 使 settings-body 填满 dialog body padding-box（边缘到边缘） */
 .settings-body {
   display: flex;
   height: 420px;
-  margin: -20px;  /* 抵消 el-dialog 默认 padding */
+  margin: calc(-1 * var(--spacing-lg));
 }
 
 /* 左侧导航栏 */
@@ -553,89 +555,122 @@ const onThemeChange = async () => {
   width: 200px;
   flex-shrink: 0;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color, #ebeef5);
-  padding: 12px 0;
+  border-right: 1px solid var(--border-color);
+  padding: var(--spacing-sm) 0;
 }
 
+/* nav-item：position:relative 供 ::before 指示条定位；
+ * 指示条 left:0 贴 item 左缘——.settings-body 虽 margin 负值但无 overflow:hidden，
+ * 不会裁剪溢出（参照 ActivityBar 同款约束，禁用负 left） */
 .settings-nav-item {
-  padding: 10px 20px;
+  position: relative;
+  padding: var(--spacing-sm) var(--spacing-lg);
   font-size: 14px;
-  color: var(--text-secondary, #606266);
+  color: var(--text-secondary);
   cursor: pointer;
-  border-left: 2px solid transparent;
-  transition: all 0.15s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-tertiary, #f0f2f5);
-  color: var(--text-primary, #303133);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
+/* active：左侧指示条 + 主色填充；
+ * hover 不再额外反馈（避免与 active 状态重复，参照 ActivityBar 去冗余） */
 .settings-nav-item.is-active {
-  color: var(--primary-color, #409eff);
-  background: var(--primary-bg, #ecf5ff);
-  border-left-color: var(--primary-color, #409eff);
+  color: var(--primary-color);
+  background: var(--primary-bg);
+}
+
+.settings-nav-item.is-active:hover {
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.settings-nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--primary-light);
 }
 
 /* 右侧内容区 */
 .settings-content {
   flex: 1;
-  padding: 20px 28px;
+  padding: var(--spacing-lg);
   overflow-y: auto;
   background: var(--bg-secondary);
 }
 
+/* section-title：对齐全局 h3 字重梯度（600 + 负字距） */
 .settings-section-title {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary, #303133);
-  margin-bottom: 20px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-lg);
 }
 
+/* 段落间距：替代原行内 style="margin-top:24px"（24px = --spacing-lg，视觉等价） */
+.settings-section-title--spaced {
+  margin-top: var(--spacing-lg);
+}
+
+/* settings-item 卡片：默认 --shadow-sm，hover 升 --shadow-md（参照 DashboardView .card 模式） */
 .settings-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
-  background: var(--bg-secondary, #ffffff);
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #ebeef5);
-  margin-bottom: 12px;
-  transition: border-color 0.15s;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  margin-bottom: var(--spacing-md);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .settings-item:hover {
-  border-color: var(--primary-light, #66b1ff);
+  border-color: var(--primary-light);
+  box-shadow: var(--shadow-md);
 }
 
 .settings-item-info {
   flex: 1;
   min-width: 0;
-  margin-right: 16px;
+  margin-right: var(--spacing-md);
 }
 
 .settings-item-label {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary, #303133);
+  color: var(--text-primary);
 }
 
 .settings-item-desc {
   font-size: 12px;
-  color: var(--text-secondary, #606266);
-  margin-top: 4px;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
 }
 
+/* restart-hint：用 --warning-color + color-mix 透明度叠加
+ * （替代原 rgba(230,162,60,…) 硬编码，纯变量驱动，随主题切换） */
 .settings-restart-hint {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: rgba(230, 162, 60, 0.1);
-  border: 1px solid rgba(230, 162, 60, 0.3);
-  border-radius: 8px;
-  color: var(--warning-color, #e6a23c);
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: color-mix(in srgb, var(--warning-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--warning-color);
   font-size: 12px;
 }
 
@@ -645,33 +680,40 @@ const onThemeChange = async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
-  color: var(--text-tertiary, #909399);
+  padding: 60px var(--spacing-lg);
+  color: var(--text-tertiary);
 }
 
 .settings-empty p {
-  margin-top: 12px;
+  margin-top: var(--spacing-sm);
   font-size: 14px;
 }
 
 .settings-item--column {
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--spacing-sm);
 }
 
 .settings-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--spacing-sm);
   width: 100%;
 }
+
+/* input/select 宽度语义类（替代行内 style="width:..."）
+ * 归并位：sm=120 / md=140(140 与 180 归并) / lg=240 / xl=280，保持视觉等义 */
+.input-w-sm { width: 120px; }
+.input-w-md { width: 140px; }
+.input-w-lg { width: 240px; }
+.input-w-xl { width: 280px; }
 
 /* 快捷键列表 */
 .shortcut-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--spacing-xs);
 }
 
 /* 快捷键列表标题行 */
@@ -679,7 +721,7 @@ const onThemeChange = async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: var(--spacing-md);
 }
 
 .settings-section-header .settings-section-title {
@@ -689,50 +731,51 @@ const onThemeChange = async () => {
 .shortcut-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 
 .shortcut-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #ebeef5);
-  transition: border-color 0.15s;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  transition: border-color var(--transition-fast);
 }
 
 .shortcut-item:hover {
-  border-color: var(--primary-light, #66b1ff);
+  border-color: var(--primary-light);
 }
 
 .shortcut-action {
   font-size: 14px;
-  color: var(--text-primary, #303133);
+  color: var(--text-primary);
 }
 
 .shortcut-keys {
   display: flex;
-  gap: 4px;
+  gap: var(--spacing-xs);
 }
 
+/* kbd 键帽：Geist 字体前缀 + 变量驱动阴影（禁硬编码色值） */
 .shortcut-keys kbd {
   display: inline-block;
-  padding: 3px 8px;
+  padding: 3px var(--spacing-sm);
   font-size: 12px;
-  font-family: 'Consolas', 'Monaco', monospace;
-  color: var(--text-primary, #303133);
-  background: var(--bg-tertiary, #f0f2f5);
-  border: 1px solid var(--border-color, #dcdfe6);
-  border-radius: 4px;
-  box-shadow: 0 1px 0 var(--border-color, #dcdfe6);
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 0 var(--border-color);
 }
 
 .shortcut-keys--editable {
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background 0.15s;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
 }
 
 .shortcut-keys--editable:hover {
@@ -764,39 +807,46 @@ const onThemeChange = async () => {
 </style>
 
 <style>
-/* 全局：el-dialog 主题适配（浅色/暗色经 CSS 变量随 resolvedTheme 切换） */
+/* 全局：el-dialog 主题适配（浅色/暗色经 CSS 变量随 resolvedTheme 切换）
+ * 圆角 --radius-lg（容器外圈较软，内卡片 --radius-md，外松内紧层级） */
 .settings-dialog .el-dialog {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color, #ebeef5);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
 }
 
 .settings-dialog .el-dialog__header {
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color, #ebeef5);
-  border-radius: 8px 8px 0 0;
-  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: var(--spacing-md) var(--spacing-lg);
 }
 
 .settings-dialog .el-dialog__title {
-  color: var(--text-primary, #303133);
+  color: var(--text-primary);
   font-size: 16px;
   font-weight: 600;
 }
 
 .settings-dialog .el-dialog__headerbtn .el-dialog__close {
-  color: var(--text-tertiary, #909399);
+  color: var(--text-tertiary);
 }
 
 .settings-dialog .el-dialog__headerbtn:hover .el-dialog__close {
-  color: var(--text-primary, #303133);
+  color: var(--text-primary);
 }
 
 .settings-dialog .el-dialog__body {
-  padding: 20px;
+  padding: var(--spacing-lg);
 }
 
-.settings-dialog .el-overlay {
-  background-color: rgba(0, 0, 0, 0.5);
+/* el-overlay 蓝灰着色（禁纯黑）——:has() 仅作用于含 settings-dialog 的遮罩，
+ * 不影响其他弹窗；亮色 Slate-900 着色，暗色更深一档 Slate-950 着色 */
+.el-overlay:has(.settings-dialog) {
+  background-color: rgba(15, 23, 42, 0.5);
+}
+
+html.dark .el-overlay:has(.settings-dialog) {
+  background-color: rgba(2, 6, 23, 0.6);
 }
 </style>
