@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 66
+- **Total Sessions**: 67
 - **Last Active**: 2026-09-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~393 | Active |
+| `journal-2.md` | ~426 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 67 | 2026-09-17 | 设置弹窗视觉精修对齐 design-tokens | `2d17512` | `master` |
 | 66 | 2026-09-17 | WorkBench 前端视觉现代化重做 | `24597d1` | `master` |
 | 65 | 2026-09-16 | 修复状态看板跳转仓库无反应+嵌套工作目录选错+孤立条目标记 | `1a779a2` | `master` |
 | 64 | 2026-09-16 | 全局仓库状态看板 | `34cd775` | `master` |

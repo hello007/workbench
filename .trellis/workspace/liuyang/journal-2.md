@@ -391,3 +391,36 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 ### Next Steps
 
 - None - task complete
+
+
+## Session 67: 设置弹窗视觉精修对齐 design-tokens
+
+**Date**: 2026-09-17
+**Task**: 设置弹窗视觉精修对齐 design-tokens
+**Branch**: `master`
+
+### Summary
+
+SettingsPanel.vue 单文件组件级视觉精修，对齐上一任务沉淀的 design-tokens 契约 + ActivityBar/DashboardView 模式。删全部 var(--x,#硬编码) fallback 双值纯变量驱动；el-dialog 圆角/padding 用 --radius-lg/--spacing-*；settings-item 卡片 hover 加 --shadow 层级；section-title 对齐 h3 字重梯度；kbd 字体族加 Geist 前缀；restart-hint 用 --warning-color + color-mix 透明度叠加；el-overlay 纯黑遮罩→蓝灰着色；nav active 加左侧指示条（left:0 防 overflow 裁剪参照 ActivityBar 上一任务 high 教训）；12 处行内 style 全迁到 class（.input-w-* + --spaced）。顺手修复 el-overlay 旧选择器死代码 bug（.settings-dialog .el-overlay 后代选择器永不匹配→改 :has() 首次使遮罩着色生效，这是上一任务未察觉的既有 bug）。script 业务逻辑零改动，wailsjs 未触。sub-agent 审查通过无 critical/high，4 条 info/low 全非阻断（el-overlay 行为变化/recording-hint 暗色对比度既有模式/.settings-empty 死 CSS/Key 死 import 均范围外）。1010 测试全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2d17512` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
