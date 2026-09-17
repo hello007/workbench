@@ -1,0 +1,4 @@
+{"file": "docs/spec/design-tokens.md", "reason": "验收尺寸改动未破坏变量驱动/双主题分层契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证前端覆盖率 ≥70% 门禁未破，SettingsPanel/CommandPalette 测试 + 全量 npm test 须绿"}
+{"file": "docs/spec/e2e-testing.md", "reason": "wailsjs 不入库；尺寸改动不得引入对 wailsjs 绑定的耦合"}
+{"file": ".trellis/tasks/09-17-settings-dialog-sizing/prd.md", "reason": "对照 Acceptance Criteria 逐项验收：两弹窗 width/height 响应式/全屏少滚动显路径/小窗不溢出/top=15vh 保留/功能不回归"}

@@ -4,7 +4,7 @@
     :show-close="false"
     :close-on-click-modal="true"
     :close-on-press-escape="true"
-    width="600px"
+    width="min(720px, 70vw)"
     top="15vh"
     class="command-palette-dialog"
     @close="onClose"
@@ -422,7 +422,7 @@ watch(visible, async (val) => {
 
 .palette-content {
   min-height: 60px;
-  max-height: 400px;
+  max-height: min(480px, 60vh);
   overflow-y: auto;
 }
 

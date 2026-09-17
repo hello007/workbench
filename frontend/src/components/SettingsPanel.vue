@@ -2,7 +2,7 @@
   <el-dialog
     v-model="uiStore.settingsVisible"
     title="设置"
-    width="760px"
+    width="min(960px, 86vw)"
     :close-on-click-modal="true"
     :close-on-press-escape="true"
     class="settings-dialog"
@@ -546,7 +546,7 @@ const onThemeChange = async () => {
  * 使 settings-body 填满 dialog body padding-box（边缘到边缘） */
 .settings-body {
   display: flex;
-  height: 420px;
+  height: min(620px, 78vh);
   margin: calc(-1 * var(--spacing-lg));
 }
 

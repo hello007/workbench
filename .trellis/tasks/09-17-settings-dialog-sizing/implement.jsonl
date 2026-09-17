@@ -1,0 +1,3 @@
+{"file": "docs/spec/design-tokens.md", "reason": "守契约：尺寸改不涉色值，但 min() 响应式属设计令牌体系扩展范畴，须确认不破坏既有变量驱动/双主题分层规则"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬失败门禁（exclude wailsjs）；改 SettingsPanel/CommandPalette 须不破现有 vitest 用例"}
+{"file": ".trellis/tasks/09-17-settings-dialog-sizing/prd.md", "reason": "MVP 范围（SettingsPanel+CommandPalette 两文件）/min() 响应式数值/单 PR 拆分/Out of Scope 边界"}
