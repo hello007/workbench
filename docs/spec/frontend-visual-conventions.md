@@ -171,7 +171,7 @@ kbd {
 
 |类型|变量档位|应用规则|
 |---|---|---|
-|间距|`--spacing-xs/sm/md/lg/xl`|就近归并：任意像素值归到最近档位，禁用 `5px`/`10px`/`12px` 等非档位值|
+|间距|`--spacing-xs/sm/md/lg/xl`|就近归并：布局间距（容器级/组件间 margin/padding/gap）任意像素值归到最近档位，禁用 `5px`/`10px`/`12px` 等非档位值；键帽/徽章类微元素自身内边距有特例，见「间距就近归并」适用边界|
 |圆角|`--radius-sm/md/lg/xl`|内紧外松：容器外圈 `--radius-lg`（较软）→ 内卡片 `--radius-md`（较紧）→ 内元素 `--radius-sm`|
 
 #### 内紧外松层级
@@ -184,11 +184,13 @@ kbd {
 
 #### 间距就近归并
 
-实际像素值归并到最近档位，**禁用非档位值**：
+**适用边界**：四档归并约束的是**布局间距**——容器级与组件间的 margin/padding/gap。键帽（`kbd`）、徽章、tag 等最小视觉元素的**自身内边距**允许字面像素特例（如 SettingsPanel `kbd` 的 `padding: 2px 6px`）：这类元素尺寸跟随内容、且档位 4/8 跳档过宽——设置弹窗紧凑化实测 8px 水平 padding 配 12px 字号键帽明显空旷，收紧至 6px 无对应档位。
+
+布局间距实际像素值归并到最近档位，**禁用非档位值**：
 
 |场景|档位|示例|
 |---|---|---|
-|紧凑内边距（键帽、tag）|`--spacing-xs`（4）|`kbd` padding|
+|紧凑内边距（tag 等）|`--spacing-xs`（4）|tag 内边距|
 |组件内间距、gap|`--spacing-sm`（8）|`.result-section` margin、`header-actions` gap|
 |卡片 padding、列表项|`--spacing-md`（16）|`.settings-item` padding、`.dashboard-view` padding|
 |弹窗 body padding、段落间距|`--spacing-lg`（24）|`.el-dialog__body` padding、`.section-title--spaced`|

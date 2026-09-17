@@ -546,7 +546,7 @@ const onThemeChange = async () => {
  * 使 settings-body 填满 dialog body padding-box（边缘到边缘） */
 .settings-body {
   display: flex;
-  height: min(620px, 78vh);
+  height: min(560px, 78vh);
   margin: calc(-1 * var(--spacing-lg));
 }
 
@@ -608,30 +608,32 @@ const onThemeChange = async () => {
   background: var(--bg-secondary);
 }
 
-/* section-title：对齐全局 h3 字重梯度（600 + 负字距） */
+/* section-title：对齐全局 h3 字重梯度（600 + 负字距）；
+ * margin-bottom 取 sm（布局紧凑化：标题与内容贴紧，段间留白由卡片自身 padding 补足） */
 .settings-section-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
 }
 
-/* 段落间距：替代原行内 style="margin-top:24px"（24px = --spacing-lg，视觉等价） */
+/* 段落间距：紧凑化后取 md（段落分组间仍保留一档呼吸感，标题内聚用 sm） */
 .settings-section-title--spaced {
-  margin-top: var(--spacing-lg);
+  margin-top: var(--spacing-md);
 }
 
-/* settings-item 卡片：默认 --shadow-sm，hover 升 --shadow-md（参照 DashboardView .card 模式） */
+/* settings-item 卡片：默认 --shadow-sm，hover 升 --shadow-md（参照 DashboardView .card 模式）；
+ * padding 上下收至 sm、左右保持 md（紧凑化：卡片内敛），卡片间距收至 sm */
 .settings-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -721,7 +723,7 @@ const onThemeChange = async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
 }
 
 .settings-section-header .settings-section-title {
@@ -758,10 +760,11 @@ const onThemeChange = async () => {
   gap: var(--spacing-xs);
 }
 
-/* kbd 键帽：Geist 字体前缀 + 变量驱动阴影（禁硬编码色值） */
+/* kbd 键帽：Geist 字体前缀 + 变量驱动阴影（禁硬编码色值）；
+ * padding 收紧（2px 6px）贴合 12px 字号，消除键帽与文字间的空旷感 */
 .shortcut-keys kbd {
   display: inline-block;
-  padding: 3px var(--spacing-sm);
+  padding: 2px 6px;
   font-size: 12px;
   font-family: 'Geist', 'Consolas', 'Monaco', monospace;
   color: var(--text-primary);
