@@ -40,6 +40,7 @@ bash.exe.stackdump
 notify_error.log
 # 结构化日志落盘目录（slog + lumberjack，见 docs/spec/logging-and-errors.md）
 data/logs/
+data/ai_task*
 
 .claude/settings.local.json
 # Coverage report artifacts
