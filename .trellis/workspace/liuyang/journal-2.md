@@ -490,3 +490,36 @@ SettingsPanel + CommandPalette 两弹窗尺寸改 min() 响应式。设置弹窗
 ### Next Steps
 
 - None - task complete
+
+
+## Session 70: 设置弹窗垂直布局紧凑化
+
+**Date**: 2026-09-17
+**Task**: 设置弹窗垂直布局紧凑化
+**Branch**: `master`
+
+### Summary
+
+SettingsPanel 垂直间距紧凑化：弹窗高度 620→560px、段落标题 18→16px、标题下间距 24→8px、卡片 padding 上下收至 8px、卡片间距 16→8px、kbd 键帽 padding 3px 8px→2px 6px。间距全守四档 token。沉淀 frontend-visual-conventions 间距四档适用边界：键帽/徽章类微元素自身内边距允许字面像素特例，修正 kbd padding 示例与代码不符。前端测试 1010 全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed10d09` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
