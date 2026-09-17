@@ -358,3 +358,36 @@ PushRepo 长输出（>200 字符）弹独立 PushResultDialog 完整展示，替
 ### Next Steps
 
 - None - task complete
+
+
+## Session 66: WorkBench 前端视觉现代化重做
+
+**Date**: 2026-09-17
+**Task**: WorkBench 前端视觉现代化重做
+**Branch**: `master`
+
+### Summary
+
+基于 redesign-skill 审计做全局视觉升级，不换栈（Wails+Vue3+Element Plus）。主色 #409eff→靛蓝系 #2563eb/#3b82f6（VS Code/GitHub 同色系）；冷暖灰统一蓝灰 Slate 色相；暗色阴影纯黑→蓝灰着色；字体 Nunito→Geist 4 字重（顺带修旧 600/700 woff2 缺失坑）；Element Plus --el-color-primary 派生同步；app.css Wails 样板清理；ActivityBar hover/active 去重+左侧指示条；DashboardView header/表格/异常提示卡片化。新增 docs/spec/design-tokens.md 设计令牌契约。sub-agent 代码审查 1 high（指示条 left:-12px 被 .home overflow:hidden 裁剪不可见→改 left:0）+3 low（nunito 孤儿字体删除+补 Geist OFL 协议；暗色阴影字面值偏离已文档化；app.css 空壳保留）已处理。1010 测试全绿，终端 --terminal-bg 同步契约未破，wailsjs 零触。起因：用户给的 ai-website-cloner-template 是 Next.js+React 克隆工具模板非 UI 风格库，栈不兼容无法直接拉风格，改走 redesign-skill 原生重做。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `24597d1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
