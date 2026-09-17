@@ -80,7 +80,7 @@
 
 - 表格行 hover 用 `--primary-bg` 轻量高亮（禁主色实色填充，避免压字降低对比度）
 - 异常提示**禁裸用默认 `el-alert` 平铺**，须以 `.error-list` 卡片层包裹 `el-alert`：`border-left: 3px solid var(--warning-color)` + `--radius-md` + `--shadow-sm`（el-alert 仍在内，由外层卡片重着色提供质感，参照 `DashboardView` `.error-list`）
-- 失效行整体 `opacity: 0.5` + `text-decoration: line-through`
+- 失效行整体 `opacity: 0.5` + 仓库名 `text-decoration: line-through`（line-through 仅作用于 `.repo-name.repo-missing`，非整行）
 
 ### 3. 组件视觉模式
 
@@ -109,11 +109,11 @@
 }
 ```
 
-**`left: 0` 是硬约束**：父容器（如 `.home`）常设 `overflow: hidden`，负 `left` 会导致指示条溢出被裁剪。参照 ActivityBar `.activity-bar-item.is-active::before` 与 SettingsPanel `.settings-nav-item.is-active::before`。
+**`left: 0` 是硬约束**：父容器（如 `.home`）常设 `overflow: hidden`，负 `left` 会导致指示条溢出被裁剪。参照 ActivityBar `.activity-bar-item.is-active::before`（现状圆角硬编码 `2px`，待归一 `--radius-sm`）与 SettingsPanel `.settings-nav-item.is-active::before`。
 
 #### 卡片 hover 阴影层级
 
-卡片默认 `--shadow-sm`，hover 升 `--shadow-md` + `border-color` 切 `--primary-light`，过渡用 `--transition-fast`：
+卡片默认 `--shadow-sm`，hover 升 `--shadow-md` + `border-color` 切 `--primary-light`，过渡用 `--transition-fast`（规范值；现状 style.css `.card` 为 `--transition-normal`，待归一）：
 
 ```css
 .card {
@@ -127,7 +127,7 @@
 }
 ```
 
-参照全局 `.card`、SettingsPanel `.settings-item`、`.shortcut-item`。
+参照全局 `.card`（过渡现状 `--transition-normal`，待归一 fast）、SettingsPanel `.settings-item`、`.shortcut-item`。
 
 #### section-title 字重梯度
 
@@ -200,10 +200,10 @@ kbd {
 
 弹窗宽高用 `min(像素上限, 视口比例)` 双约束：大屏卡上限保聚焦、小窗缩不溢出：
 
-```css
-width="min(960px, 86vw)"      /* 宽：像素上限 + 视口比例 */
-height: min(620px, 78vh);     /* 高：同上 */
-top="15vh"                    /* 距顶：vh 响应式（CommandPalette 显式设置；SettingsPanel 沿用 EP 默认 15vh） */
+```vue
+width="min(960px, 86vw)"      <!-- 宽：像素上限 + 视口比例 -->
+height: min(620px, 78vh);     <!-- 高：同上 -->
+top="15vh"                    <!-- 距顶：vh 响应式（CommandPalette 显式设置；SettingsPanel 沿用 EP 默认 15vh） -->
 ```
 
 #### 尺寸分档
@@ -214,8 +214,8 @@ top="15vh"                    /* 距顶：vh 响应式（CommandPalette 显式�
 |---|---|---|---|
 |设置弹窗（多 tab + nav）|`min(960px, 86vw)`|`min(620px, 78vh)`|SettingsPanel|
 |命令面板（搜索 + 列表）|`min(720px, 70vw)`|内容区 `min(480px, 60vh)`|CommandPalette|
-|内容多的大弹窗|`min(Npx, 85vw)` N≥900|按内容自适应|RepoFilterDialog 900 / AiTaskHistoryPanel 920|
-|中小弹窗（添加/选择）|`min(Npx, 80vw)` N=600-700|自适应|DashboardView 添加仓库 640px|
+|内容多的大弹窗|`min(Npx, 85vw)` N≥900|按内容自适应|RepoFilterDialog/AiTaskHistoryPanel（目标值 900/920；现状固定 px，待迁移 min() 模式）|
+|中小弹窗（添加/选择）|`min(Npx, 80vw)` N=600-700|自适应|DashboardView 添加仓库（目标值 640；现状固定 px，待迁移 min() 模式）|
 |小弹窗（确认/表单）|420-600px 固定或 `min`|自适应|DirectoryTree 添加 500 / GitBranches 420|
 
 - `top` 用 vh 响应式（如 `15vh`），禁固定 px（小屏顶距过大、大屏过小）
@@ -244,14 +244,14 @@ top="15vh"                    /* 距顶：vh 响应式（CommandPalette 显式�
 
 ### 正确：弹窗 min() 响应式
 
-```css
-width="min(960px, 86vw)"           /* 大屏 960px 保聚焦，小屏 86vw 不溢出 */
+```vue
+width="min(960px, 86vw)"           <!-- 大屏 960px 保聚焦，小屏 86vw 不溢出 -->
 ```
 
 ### 错误：弹窗固定像素
 
-```css
-width="960px"                      /* 1024×768 小屏溢出，2560 屏偏小不响应 */
+```vue
+width="960px"                      <!-- 1024×768 小屏溢出，2560 屏偏小不响应 -->
 ```
 
 ### 正确：卡片 hover 阴影层级
@@ -280,19 +280,19 @@ width="960px"                      /* 1024×768 小屏溢出，2560 屏偏小不
 ### 错误：用默认 el-alert 平铺
 
 ```html
-<el-alert type="warning" />   /* 无左边框强调、无圆角阴影，与卡片体系割裂 */
+<el-alert type="warning" />   <!-- 无左边框强调、无圆角阴影，与卡片体系割裂 -->
 ```
 
 ### 正确：宽度用语义类
 
 ```html
-<el-input class="input-w-xl" />   /* 归并档，可复用 */
+<el-input class="input-w-xl" />   <!-- 归并档，可复用 -->
 ```
 
 ### 错误：行内 style 写宽度
 
 ```html
-<el-input style="width:280px" />   /* 非语义、难复用、守 redesign-skill 禁令 */
+<el-input style="width:280px" />   <!-- 非语义、难复用、守 redesign-skill 禁令 -->
 ```
 
 ### 正确：语义色派生用 color-mix + 变量
@@ -321,4 +321,4 @@ width="960px"                      /* 1024×768 小屏溢出，2560 屏偏小不
 
 ## 沉淀来源
 
-2026-09-17 WorkBench 前端视觉现代化重做（任务 `.trellis/tasks/09-16-workbench` 系列三任务）：ActivityBar/DashboardView/SettingsPanel/CommandPalette 视觉模式已确立并稳定，新增页面无统一参照易风格漂移，故将「怎么用变量搭风格」沉淀为指南层规范，与 design-tokens.md 契约层形成双子。
+2026-09-17 WorkBench 前端视觉现代化重做（任务 `.trellis/tasks/archive/2026-09/09-16-workbench` 系列三任务）：ActivityBar/DashboardView/SettingsPanel/CommandPalette 视觉模式已确立并稳定，新增页面无统一参照易风格漂移，故将「怎么用变量搭风格」沉淀为指南层规范，与 design-tokens.md 契约层形成双子。
