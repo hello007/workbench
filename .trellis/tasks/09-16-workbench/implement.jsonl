@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "终端 --terminal-bg 须与 useTerminal.js LIGHT/DARK_TERMINAL_THEME.background 同步；改全局背景色时此契约为硬约束，避免终端容器暗色残留"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬失败门禁（exclude wailsjs）；改 DashboardView/ActivityBar 须不破现有 vitest 用例"}
+{"file": ".claude/skills/redesign-skill/SKILL.md", "reason": "审计清单 + Fix Priority 顺序（字体→配色→hover/active→布局→组件→状态→收尾）为实现期执行依据"}
+{"file": ".trellis/tasks/09-16-workbench/prd.md", "reason": "MVP 范围/主色靛蓝系/Geist 字体/3 PR 拆分/Out of Scope 边界"}

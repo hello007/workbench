@@ -267,32 +267,42 @@ defineExpose({ loadStatuses })
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 12px 16px;
+  padding: var(--spacing-md) var(--spacing-lg);
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .dashboard-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
 .dashboard-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm);
 }
 
 .fresh-tip {
-  color: var(--el-text-color-secondary);
+  color: var(--text-tertiary);
   cursor: help;
+  transition: color var(--transition-fast);
+}
+
+.fresh-tip:hover {
+  color: var(--text-secondary);
 }
 
 .dashboard-body {
@@ -300,8 +310,13 @@ defineExpose({ loadStatuses })
   overflow: auto;
 }
 
-.status-table {
-  width: 100%;
+/* 表格行 hover 蓝灰高亮 */
+.status-table :deep(.el-table__row) {
+  transition: background var(--transition-fast);
+}
+
+.status-table :deep(.el-table__row:hover > td) {
+  background: var(--primary-bg) !important;
 }
 
 .status-table :deep(.row-missing) {
@@ -311,6 +326,7 @@ defineExpose({ loadStatuses })
 .repo-name {
   display: block;
   font-weight: 500;
+  color: var(--text-primary);
 }
 
 .repo-name.repo-missing {
@@ -320,38 +336,53 @@ defineExpose({ loadStatuses })
 .repo-path {
   display: block;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-top: 2px;
 }
 
 .dim {
-  color: var(--el-text-color-placeholder);
+  color: var(--text-placeholder);
 }
 
+/* 异常提示卡片化 — 替代默认 el-alert 平铺 */
 .error-list {
-  margin-top: 12px;
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--warning-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .error-item {
   font-size: 13px;
   line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.error-item strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .add-dialog {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--spacing-sm);
 }
 
 .add-list {
   min-height: 200px;
   max-height: 360px;
   overflow: auto;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
 }
 
 .add-item {
@@ -360,11 +391,12 @@ defineExpose({ loadStatuses })
 
 .add-name {
   font-weight: 500;
-  margin-right: 8px;
+  margin-right: var(--spacing-sm);
+  color: var(--text-primary);
 }
 
 .add-path {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--text-tertiary);
 }
 </style>

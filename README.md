@@ -10,6 +10,7 @@
 | 桌面框架 | Wails | v2.16.0 |
 | 前端 | Vue 3 (Composition API) | 3.5.33 |
 | UI 组件 | Element Plus | 2.13.7 |
+| 字体 | Geist（Vercel，SIL OFL） | 4 字重（400/500/600/700） |
 | 状态管理 | Pinia | 4.0.3 |
 | 路由 | Vue Router | 4.6.4 |
 | 构建工具 | Vite | 8.0.10 |

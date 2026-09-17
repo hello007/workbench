@@ -1,0 +1,4 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证前端覆盖率 ≥70% 硬失败门禁未破，改组件后 npm test 须绿"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用 Wails mock、wailsjs 不入库；视觉改动不得引入对 wailsjs 绑定的耦合"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证 --terminal-bg 与 useTerminal.js 终端主题 background 仍一致，深浅切换无残留"}
+{"file": ".trellis/tasks/09-16-workbench/prd.md", "reason": "对照 Acceptance Criteria 逐项验收：主色靛蓝/阴影着色/Element Plus 同步/Geist 四字重/app.css 清理/两组件精修/功能不回归"}

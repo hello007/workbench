@@ -1,27 +1,30 @@
-/* 全局样式重置和基础变量 */
+/* 全局样式重置和基础变量
+ * 设计系统：靛蓝系主色（VS Code/GitHub 同色系）+ 蓝灰统一色相 + Geist 字体
+ * 主题：:root 亮色 / html.dark 暗色覆盖（特异性 (0,1,1) > (0,1,0)）
+ */
 :root {
-  /* 主色调 */
-  --primary-color: #409eff;
-  --primary-light: #66b1ff;
-  --primary-dark: #337ecc;
-  --primary-bg: #ecf5ff;
+  /* 主色调 — 靛蓝系（降饱和，开发者工具心智模型） */
+  --primary-color: #2563eb;
+  --primary-light: #3b82f6;
+  --primary-dark: #1d4ed8;
+  --primary-bg: #eff6ff;
 
-  /* 辅助色 */
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
-  --danger-color: #f56c6c;
-  --info-color: #909399;
+  /* 辅助色（同步降饱和，与靛蓝同色温） */
+  --success-color: #16a34a;
+  --warning-color: #d97706;
+  --danger-color: #dc2626;
+  --info-color: #64748b;
 
-  /* 背景色 */
-  --bg-primary: #f5f7fa;
+  /* 背景色 — 蓝灰中性层次（统一冷色相，禁混暖灰） */
+  --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f0f2f5;
+  --bg-tertiary: #f1f5f9;
 
-  /* 侧边栏（深色） */
-  --sidebar-bg: #1e2a3a;
-  --sidebar-hover: #2b3d52;
-  --sidebar-text: #8eaabe;
-  --sidebar-text-hover: #b0c4d8;
+  /* 侧边栏（深蓝灰，与主背景同色相） */
+  --sidebar-bg: #0f172a;
+  --sidebar-hover: #1e293b;
+  --sidebar-text: #94a3b8;
+  --sidebar-text-hover: #cbd5e1;
   --sidebar-active-bg: var(--primary-color);
   --sidebar-active-text: #ffffff;
 
@@ -31,28 +34,28 @@
 
   /* 右键菜单 */
   --menu-bg: #ffffff;
-  --menu-bg-hover: #ecf5ff;
-  --menu-border: #e9ecef;
-  --menu-text: #495057;
-  --menu-text-hover: #409eff;
-  --menu-divider: #dee2e6;
-  --menu-shadow: 0 10px 30px rgba(30, 42, 58, 0.12), 0 4px 15px rgba(30, 42, 58, 0.08);
+  --menu-bg-hover: #eff6ff;
+  --menu-border: #e2e8f0;
+  --menu-text: #334155;
+  --menu-text-hover: var(--primary-color);
+  --menu-divider: #cbd5e1;
+  --menu-shadow: 0 10px 30px rgba(15, 23, 42, 0.12), 0 4px 15px rgba(15, 23, 42, 0.08);
 
-  /* 边框色 */
-  --border-color: #ebeef5;
-  --border-light: #dcdfe6;
+  /* 边框色 — 蓝灰系 */
+  --border-color: #e2e8f0;
+  --border-light: #cbd5e1;
 
-  /* 文字色 */
-  --text-primary: #303133;
-  --text-secondary: #606266;
-  --text-tertiary: #909399;
-  --text-placeholder: #c0c4cc;
+  /* 文字色 — 蓝灰四档 */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-placeholder: #94a3b8;
 
-  /* 阴影 — 主色调着色 */
-  --shadow-sm: 0 1px 3px rgba(30, 42, 58, 0.1), 0 1px 2px rgba(30, 42, 58, 0.06);
-  --shadow-md: 0 4px 6px rgba(30, 42, 58, 0.08), 0 2px 4px rgba(30, 42, 58, 0.04);
-  --shadow-lg: 0 10px 25px rgba(30, 42, 58, 0.1), 0 6px 10px rgba(30, 42, 58, 0.05);
-  --shadow-xl: 0 20px 40px rgba(30, 42, 58, 0.12);
+  /* 阴影 — 蓝灰着色（禁纯黑低透明，须带背景色相） */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 6px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 25px rgba(15, 23, 42, 0.1), 0 6px 10px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 20px 40px rgba(15, 23, 42, 0.12);
 
   /* 间距 */
   --spacing-xs: 4px;
@@ -61,7 +64,7 @@
   --spacing-lg: 24px;
   --spacing-xl: 32px;
 
-  /* 圆角 */
+  /* 圆角 — 内紧外松 */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -71,6 +74,15 @@
   --transition-fast: 0.15s ease;
   --transition-normal: 0.3s ease;
   --transition-slow: 0.5s ease;
+
+  /* Element Plus 主色同步覆盖 — 否则 el-button/el-tag 仍默认蓝割裂 */
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #4f80ed;
+  --el-color-primary-light-5: #7ba3f2;
+  --el-color-primary-light-7: #a8c5f7;
+  --el-color-primary-light-8: #bcd2f9;
+  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary-dark-2: #1d4ed8;
 }
 
 /*
@@ -81,57 +93,66 @@
  */
 html.dark {
   /* 主色调（保持品牌色一致，仅调整背景着色透明度适配深底） */
-  --primary-color: #409eff;
-  --primary-light: #66b1ff;
-  --primary-dark: #337ecc;
-  --primary-bg: rgba(64, 158, 255, 0.15);
+  --primary-color: #3b82f6;
+  --primary-light: #60a5fa;
+  --primary-dark: #2563eb;
+  --primary-bg: rgba(59, 130, 246, 0.15);
 
-  /* 辅助色（保持一致） */
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
-  --danger-color: #f56c6c;
-  --info-color: #909399;
+  /* 辅助色（暗色下提亮一档保证对比度） */
+  --success-color: #22c55e;
+  --warning-color: #f59e0b;
+  --danger-color: #ef4444;
+  --info-color: #94a3b8;
 
-  /* 背景色（三档深色层次） */
-  --bg-primary: #1d1e1f;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d2d;
+  /* 背景色（蓝灰深色三档层次） */
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
 
   /* 侧边栏（暗色下更深统一，保持与背景层次） */
-  --sidebar-bg: #0f1620;
-  --sidebar-hover: #1a2433;
-  --sidebar-text: #8eaabe;
-  --sidebar-text-hover: #b0c4d8;
+  --sidebar-bg: #020617;
+  --sidebar-hover: #1e293b;
+  --sidebar-text: #94a3b8;
+  --sidebar-text-hover: #cbd5e1;
   --sidebar-active-bg: var(--primary-color);
   --sidebar-active-text: #ffffff;
 
-  /* 终端背景：与 useTerminal.js DARK_TERMINAL_THEME.background 一致 */
+  /* 终端背景：与 useTerminal.js DARK_TERMINAL_THEME.background 一致，不随主背景改 */
   --terminal-bg: #1d1e1f;
 
   /* 右键菜单 */
-  --menu-bg: #252526;
-  --menu-bg-hover: rgba(64, 158, 255, 0.15);
-  --menu-border: #3a3a3a;
-  --menu-text: #d4d4d4;
+  --menu-bg: #1e293b;
+  --menu-bg-hover: rgba(59, 130, 246, 0.15);
+  --menu-border: #334155;
+  --menu-text: #e2e8f0;
   --menu-text-hover: var(--primary-light);
-  --menu-divider: #3a3a3a;
-  --menu-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 4px 15px rgba(0, 0, 0, 0.35);
+  --menu-divider: #334155;
+  --menu-shadow: 0 10px 30px rgba(2, 6, 23, 0.5), 0 4px 15px rgba(2, 6, 23, 0.35);
 
   /* 边框色 */
-  --border-color: #3c3c3c;
-  --border-light: #4a4a4a;
+  --border-color: #334155;
+  --border-light: #475569;
 
   /* 文字色（四档） */
-  --text-primary: #e4e4e4;
-  --text-secondary: #a8a8a8;
-  --text-tertiary: #7a7a7a;
-  --text-placeholder: #5a5a5a;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-placeholder: #64748b;
 
-  /* 阴影 — 暗色下加深 */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.4), 0 6px 10px rgba(0, 0, 0, 0.25);
-  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.5);
+  /* 阴影 — 蓝灰着色（禁纯黑，带背景色相） */
+  --shadow-sm: 0 1px 3px rgba(2, 6, 23, 0.4), 0 1px 2px rgba(2, 6, 23, 0.25);
+  --shadow-md: 0 4px 6px rgba(2, 6, 23, 0.35), 0 2px 4px rgba(2, 6, 23, 0.2);
+  --shadow-lg: 0 10px 25px rgba(2, 6, 23, 0.4), 0 6px 10px rgba(2, 6, 23, 0.25);
+  --shadow-xl: 0 20px 40px rgba(2, 6, 23, 0.5);
+
+  /* Element Plus 暗色主色同步 */
+  --el-color-primary: #3b82f6;
+  --el-color-primary-light-3: #5b94f8;
+  --el-color-primary-light-5: #7ba3f2;
+  --el-color-primary-light-7: #4f80ed;
+  --el-color-primary-light-8: #3b82f6;
+  --el-color-primary-light-9: rgba(59, 130, 246, 0.15);
+  --el-color-primary-dark-2: #2563eb;
 }
 
 *, *::before, *::after {
@@ -146,40 +167,57 @@ html, body {
   overflow: hidden !important;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: "Nunito", "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+  font-family: "Geist", "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
     "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
   line-height: 1.6;
+  /* 字体渲染优化 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
+/* Geist 字体 — 4 字重梯度（400/500/600/700），替换原 Nunito */
 @font-face {
-  font-family: "Nunito";
+  font-family: "Geist";
   font-style: normal;
   font-weight: 400;
+  font-display: swap;
   src: local(""),
-    url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
+    url("assets/fonts/geist-regular.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Nunito";
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local(""),
+    url("assets/fonts/geist-medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
   font-style: normal;
   font-weight: 600;
+  font-display: swap;
   src: local(""),
-    url("assets/fonts/nunito-v16-latin-600.woff2") format("woff2");
+    url("assets/fonts/geist-semibold.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Nunito";
+  font-family: "Geist";
   font-style: normal;
   font-weight: 700;
+  font-display: swap;
   src: local(""),
-    url("assets/fonts/nunito-v16-latin-700.woff2") format("woff2");
+    url("assets/fonts/geist-bold.woff2") format("woff2");
 }
 
 #app {
   height: 100%;
 }
 
-/* 滚动条美化 */
+/* 滚动条美化 — 蓝灰系 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -347,8 +385,8 @@ html, body {
   margin-left: auto;
   padding-left: 24px;
   font-size: 11px;
-  color: #adb2b8;
-  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--text-tertiary);
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
   white-space: nowrap;
 }
 
@@ -369,7 +407,7 @@ html, body {
 }
 
 .copy-to-preview-row {
-  font-family: Consolas, 'Courier New', monospace;
+  font-family: 'Geist', Consolas, 'Courier New', monospace;
   font-size: 13px;
   color: var(--text-primary);
   word-break: break-all;
@@ -413,9 +451,27 @@ html {
   scroll-behavior: smooth;
 }
 
-/* 数字等宽 */
+/* 数字等宽 — 数据密集界面 */
 .el-tag,
 .el-progress__text,
 .sha-text {
   font-variant-numeric: tabular-nums;
+}
+
+/* 标题字重梯度 — 补 Medium/SemiBold 层级 */
+h1, h2, h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h4, h5, h6 {
+  font-weight: 500;
+}
+
+/* 小标签/uppercase 文本 — 正向字距 */
+.label-caps {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 500;
 }
