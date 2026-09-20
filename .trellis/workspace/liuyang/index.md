@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 73
+- **Total Sessions**: 74
 - **Last Active**: 2026-09-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~626 | Active |
+| `journal-2.md` | ~659 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 74 | 2026-09-20 | 标签列表版本语义倒序排列 | `01577b6` | `master` |
 | 73 | 2026-09-20 | 提交历史加载提速：采集层 CLI 化 42.7×（12.84s→0.30s） | `f942a57`, `9852770` | `master` |
 | 72 | 2026-09-20 | 提交行 origin badge warning 橙实底醒目标识 | `2b0bf1a` | `master` |
 | 71 | 2026-09-20 | 提交历史分支同步面板：本地/远程位置差异 + push/pull/fetch | `9ce90ef`, `4df91f7` | `master` |

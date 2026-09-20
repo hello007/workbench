@@ -624,3 +624,36 @@ SettingsPanel 垂直间距紧凑化：弹窗高度 620→560px、段落标题 18
 ### Next Steps
 
 - None - task complete
+
+
+## Session 74: 标签列表版本语义倒序排列
+
+**Date**: 2026-09-20
+**Task**: 标签列表版本语义倒序排列
+**Branch**: `master`
+
+### Summary
+
+ListTags 的 for-each-ref 加 --sort=-version:refname：新版本在上（v1.10 > v1.2 版本段数值比较，非字典序错排），非版本名标签退回字典序。备选 creatordate（创建序≠版本序）被否。前端/wailsjs 零改动。新增版本序锚定 + 混合类型 + 非版本名测试，复核 0 问题（1 gofmt 已修）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01577b6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
