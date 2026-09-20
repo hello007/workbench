@@ -743,7 +743,7 @@ describe('CommitHistory.vue', () => {
     expect(badge.attributes('data-type')).toBe('danger')
   })
 
-  it('BranchSyncBar emit synced 后清缓存并重载提交列表', async () => {
+  it('BranchSyncBar emit synced(source=push) 后清缓存并重载提交列表', async () => {
     const { GetCommitHistory, GetBranchSyncInfo, InvalidateCommitHistoryCache } = await import('../../../wailsjs/go/main/App')
     GetCommitHistory.mockResolvedValue([commit()])
     GetBranchSyncInfo.mockResolvedValue(syncInfoBase({ ahead: 1 }))
@@ -753,14 +753,55 @@ describe('CommitHistory.vue', () => {
     GetCommitHistory.mockClear()
     InvalidateCommitHistoryCache.mockClear()
     GetCommitHistory.mockResolvedValue([commit()])
-    // 模拟摘要条 push 成功：emit synced（对齐 BranchSyncBar doPush 成功路径）
+    // 模拟摘要条 push 成功：emit synced 携带来源（对齐 BranchSyncBar doPush 成功路径）
     const bar = wrapper.findComponent({ name: 'BranchSyncBar' })
     expect(bar.exists()).toBe(true)
-    bar.vm.$emit('synced')
+    bar.vm.$emit('synced', 'push')
     await flushPromises()
     // 前置清缓存（绕过命中与增量，确保全量重扫）后重载
     expect(InvalidateCommitHistoryCache).toHaveBeenCalledWith('/repo/A')
     expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
+  })
+
+  it('BranchSyncBar emit synced(source=pull) 同样清缓存重载', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo, InvalidateCommitHistoryCache } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({ behind: 1 }))
+    InvalidateCommitHistoryCache.mockResolvedValue()
+    wrapper = createWrapper()
+    await flushPromises()
+    GetCommitHistory.mockClear()
+    InvalidateCommitHistoryCache.mockClear()
+    GetCommitHistory.mockResolvedValue([commit()])
+    const bar = wrapper.findComponent({ name: 'BranchSyncBar' })
+    bar.vm.$emit('synced', 'pull')
+    await flushPromises()
+    expect(InvalidateCommitHistoryCache).toHaveBeenCalledWith('/repo/A')
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
+  })
+
+  it('BranchSyncBar emit synced(source=fetch) 不清缓存不重载，保留展开与勾选态', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo, InvalidateCommitHistoryCache } = await import('../../../wailsjs/go/main/App')
+    const c = commit()
+    GetCommitHistory.mockResolvedValue([c])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase())
+    InvalidateCommitHistoryCache.mockResolvedValue()
+    wrapper = createWrapper()
+    await flushPromises()
+    // 用户展开一条并勾选参与对比
+    await wrapper.find('.commit-card').trigger('click')
+    await wrapper.find('.el-checkbox').setValue(true)
+    GetCommitHistory.mockClear()
+    InvalidateCommitHistoryCache.mockClear()
+    const bar = wrapper.findComponent({ name: 'BranchSyncBar' })
+    bar.vm.$emit('synced', 'fetch')
+    await flushPromises()
+    // fetch 不改本地 HEAD 与提交历史：不清缓存、不重载列表
+    expect(InvalidateCommitHistoryCache).not.toHaveBeenCalled()
+    expect(GetCommitHistory).not.toHaveBeenCalled()
+    // 用户展开与勾选对比态保留（不被打断）
+    expect(wrapper.find('.commit-card').classes()).toContain('is-expanded')
+    expect(wrapper.vm.selectedShas).toEqual([c.sha])
   })
 
   it('切仓库清空 refs 映射：旧仓库 badge 不串入新仓库提交行', async () => {

@@ -294,8 +294,12 @@ const onSyncInfo = (info) => {
   branchSync.value = info
 }
 
-// push/pull/fetch 操作成功：前置清提交历史缓存（HEAD 可能变化，绕过命中与增量确保全量重扫）后重载
-const onBranchSynced = async () => {
+// 分支同步操作完成，按来源分流：
+// push/pull 改变本地 HEAD 与提交链——清空展开/勾选态，前置清提交历史缓存（绕过命中与增量）后全量重载；
+// fetch 仅更新远程引用快照，不改本地 HEAD 与提交历史——不清缓存不重载，保留用户展开与勾选对比态，
+// 摘要与 refs badge 由 BranchSyncBar 内部 fetch 成功后自刷新（update:info）驱动更新。
+const onBranchSynced = async (source) => {
+  if (source === 'fetch') return
   expandedCommits.value.clear()
   selectedShas.value = []
   await InvalidateCommitHistoryCache(props.repoPath)

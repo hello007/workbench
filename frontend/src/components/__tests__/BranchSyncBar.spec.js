@@ -142,7 +142,7 @@ describe('BranchSyncBar.vue', () => {
     await flushPromises()
     expect(HasUpstream).toHaveBeenCalledWith('/repo/A')
     expect(PushRepo).toHaveBeenCalledWith('/repo/A', false)
-    expect(wrapper.emitted('synced')).toBeTruthy()
+    expect(wrapper.emitted('synced')).toEqual([['push']])
   })
 
   it('无上游时确认后走 PushRepo(path, true) set-upstream', async () => {
@@ -158,7 +158,7 @@ describe('BranchSyncBar.vue', () => {
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalled()
     expect(PushRepo).toHaveBeenCalledWith('/repo/A', true)
-    expect(wrapper.emitted('synced')).toBeTruthy()
+    expect(wrapper.emitted('synced')).toEqual([['push']])
   })
 
   it('无上游用户取消确认时不推送', async () => {
@@ -194,7 +194,7 @@ describe('BranchSyncBar.vue', () => {
     await wrapper.find('.dropdown-main-btn').trigger('click')
     await flushPromises()
     expect(PullRepo).toHaveBeenCalledWith('/repo/A', true)
-    expect(wrapper.emitted('synced')).toBeTruthy()
+    expect(wrapper.emitted('synced')).toEqual([['pull']])
   })
 
   it('下拉项 command=merge 走 PullRepo(path, false)', async () => {
@@ -209,18 +209,26 @@ describe('BranchSyncBar.vue', () => {
     comp.vm.$emit('command', 'merge')
     await flushPromises()
     expect(PullRepo).toHaveBeenCalledWith('/repo/A', false)
+    expect(wrapper.emitted('synced')).toEqual([['pull']])
   })
 
-  it('fetch 按钮调 FetchRepo(path, origin, false)，成功后 emit synced', async () => {
+  it('fetch 按钮调 FetchRepo(path, origin, false)，成功后 emit synced(source=fetch) 并重算摘要', async () => {
     const { GetBranchSyncInfo, FetchRepo } = await import('../../../wailsjs/go/main/App')
     GetBranchSyncInfo.mockResolvedValue(syncInfo())
     FetchRepo.mockResolvedValue('Fetching origin')
     wrapper = createWrapper()
     await flushPromises()
+    GetBranchSyncInfo.mockClear()
+    // fetch 后远程引用更新：第二次摘要返回新 refs（验证 refresh 自刷新链路驱动父组件 badge）
+    GetBranchSyncInfo.mockResolvedValue(syncInfo({ behind: 1, refs: [syncInfo().refs[0]] }))
     await wrapper.find('.fetch-btn').trigger('click')
     await flushPromises()
     expect(FetchRepo).toHaveBeenCalledWith('/repo/A', 'origin', false)
-    expect(wrapper.emitted('synced')).toBeTruthy()
+    expect(wrapper.emitted('synced')).toEqual([['fetch']])
+    // fetch 成功后内部自刷新摘要：update:info 携带新数据再次上抛（refs badge 更新链路）
+    expect(GetBranchSyncInfo).toHaveBeenCalledWith('/repo/A')
+    const updates = wrapper.emitted('update:info')
+    expect(updates[updates.length - 1][0].behind).toBe(1)
   })
 
   it('fetch 失败仅提示不阻塞（不抛错、摘要条保留）', async () => {
@@ -272,6 +280,51 @@ describe('BranchSyncBar.vue', () => {
     await wrapper.setProps({ repoPath: '/repo/B' })
     await flushPromises()
     expect(GetBranchSyncInfo).toHaveBeenCalledWith('/repo/B')
+    expect(wrapper.find('.branch-name').text()).toBe('dev')
+  })
+
+  it('切仓库后旧仓库在途响应晚返回被丢弃（不写状态不 emit，防旧 refs 污染新仓库）', async () => {
+    const { GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    // A 的摘要请求挂起（可控 resolve），B 的摘要请求立即返回
+    let resolveA
+    const pendingA = new Promise((resolve) => { resolveA = resolve })
+    GetBranchSyncInfo.mockImplementation((path) => {
+      if (path === '/repo/A') return pendingA
+      return Promise.resolve(syncInfo({ branch: 'dev' }))
+    })
+    wrapper = createWrapper() // repoPath=/repo/A，挂载即发起 A 摘要请求（挂起中）
+    await flushPromises()
+    // 切到 B：watch 清旧摘要并立即拉取 B（已 resolve）
+    await wrapper.setProps({ repoPath: '/repo/B' })
+    await flushPromises()
+    expect(wrapper.find('.branch-name').text()).toBe('dev')
+    // A 的在途响应此刻才晚到
+    resolveA(syncInfo({ branch: 'stale-A', refs: [{ sha: 'f'.repeat(40), kind: 'local', name: 'stale-branch' }] }))
+    await flushPromises()
+    // 状态仍为 B 数据：A 的过期响应被丢弃，不覆盖状态、不再 emit 旧数据
+    expect(wrapper.find('.branch-name').text()).toBe('dev')
+    const updates = wrapper.emitted('update:info')
+    expect(updates[updates.length - 1][0].branch).toBe('dev')
+    expect(wrapper.text()).not.toContain('stale-branch')
+  })
+
+  it('切仓库后旧仓库摘要请求失败晚返回被丢弃（不清掉新仓库已渲染的摘要）', async () => {
+    const { GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    let rejectA
+    const failingA = new Promise((_, reject) => { rejectA = reject })
+    GetBranchSyncInfo.mockImplementation((path) => {
+      if (path === '/repo/A') return failingA
+      return Promise.resolve(syncInfo({ branch: 'dev' }))
+    })
+    wrapper = createWrapper()
+    await flushPromises()
+    await wrapper.setProps({ repoPath: '/repo/B' })
+    await flushPromises()
+    expect(wrapper.find('.branch-name').text()).toBe('dev')
+    // A 的失败响应此刻才晚到：不得把 B 已渲染的摘要降级清空
+    rejectA(new Error('stale failure'))
+    await flushPromises()
+    expect(wrapper.find('.branch-sync-bar').exists()).toBe(true)
     expect(wrapper.find('.branch-name').text()).toBe('dev')
   })
 })

@@ -98,6 +98,9 @@ func TestGetBranchSyncInfo_Behind(t *testing.T) {
 	// 另一 clone 推新 commit（模拟他人在远端推进）
 	cloneDir := filepath.Join(t.TempDir(), "other-clone")
 	testutil.RunGit(t, t.TempDir(), "clone", remote, cloneDir)
+	// clone 仓库不带本测试会话的 git 身份，须显式补 config，否则 CI 干净容器 commit 因缺 user.email 失败
+	testutil.RunGit(t, cloneDir, "config", "user.name", "other")
+	testutil.RunGit(t, cloneDir, "config", "user.email", "other@test.local")
 	itWriteFile(t, cloneDir, "c.txt", "remote new\n")
 	itCommitAll(t, cloneDir, "remote only commit")
 	testutil.RunGit(t, cloneDir, "push", "origin", "master")
