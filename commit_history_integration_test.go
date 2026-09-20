@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
+
 	"workbench/model"
 	"workbench/service"
 	"workbench/util"
@@ -105,7 +107,17 @@ func TestCommitHistoryOverflow_CacheNotWritten(t *testing.T) {
 	if _, err := app.GetCommitHistory(repoPath, 5, 0, model.CommitFilter{}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if _, _, found := app.commitHistoryCache.Get(gitRoot + "|refs/heads/master"); found {
+	// 期望键经 commitHistoryCacheKey 构造（head 取 repo.Head()），不硬编码键格式，
+	// 键格式后续变更时本测试不会产生假阳性
+	repo, err := git.PlainOpen(gitRoot)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	if _, _, found := app.commitHistoryCache.Get(commitHistoryCacheKey(gitRoot, head)); found {
 		t.Error("超限仓库不应写缓存")
 	}
 }

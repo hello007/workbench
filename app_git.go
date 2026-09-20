@@ -182,11 +182,11 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 		return fetchCommitHistoryFromGit(gitRoot, limit, offset, filter)
 	}
 
-	// 解析全量快照：命中/增量/全量；overflow=true 表示超限（>5000），commits==nil&&!overflow 表示扫描失败
-	all, overflow := a.resolveCommitHistory(gitRoot, key, currentSHA)
-	if all == nil && !overflow {
-		// git log 失败（库损坏等），向上报错而非静默返空
-		return nil, fmt.Errorf("无法获取提交历史")
+	// 解析全量快照：命中/增量/全量；overflow=true 表示超限（>5000）
+	all, overflow, scanErr := a.resolveCommitHistory(gitRoot, key, currentSHA)
+	if scanErr != nil {
+		// git log 失败（库损坏等），向上 %w 包裹底层错误（含 stderr 摘要）而非静默返空
+		return nil, fmt.Errorf("无法获取提交历史: %w", scanErr)
 	}
 	if overflow {
 		// 超上限仓库走 CLI 流式过滤分页路径，不缓存
@@ -203,7 +203,7 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 //   - 命中/增量/全量缓存路径：统计基于全量快照，Sampled=false
 //   - 超限仓库（>5000 commit，overflow=true）：直接复用 fullScanCommits 已扫的前 5000 条
 //     采样统计（不二次扫 fetchCommitHistoryFromGit），Sampled=true（前端提示采样）
-//   - git log 失败（库损坏等，commits==nil && !overflow）：向上报错，不静默返空统计
+//   - git log 失败（库损坏等）：底层错误落 slog.Warn 后向上 %w 包裹报错，不静默返空统计
 //   - cache 未注入（测试 App{} 未经 startup）：走全量扫，超限同上采样复用
 //
 // rangeKey 控制时间窗口与 Trend 粒度（7d/30d/90d/1y/all），热力图始终按日展示最近一年。
@@ -233,14 +233,15 @@ func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 	// 取全量快照：cache 注入走缓存三态解析，未注入走全量扫；两路径统一返 (commits, overflow)
 	var all []model.Commit
 	var overflow bool
+	var scanErr error
 	if a.commitHistoryCache == nil {
-		all, overflow = fullScanCommits(gitRoot)
+		all, overflow, scanErr = fullScanCommits(gitRoot)
 	} else {
-		all, overflow = a.resolveCommitHistory(gitRoot, key, currentSHA)
+		all, overflow, scanErr = a.resolveCommitHistory(gitRoot, key, currentSHA)
 	}
-	if all == nil && !overflow {
-		// git log 失败（库损坏等），向上报错而非静默返空统计误导前端
-		return model.RepoStats{}, fmt.Errorf("无法获取提交历史")
+	if scanErr != nil {
+		// git log 失败（库损坏等），向上 %w 包裹底层错误而非静默返空统计误导前端
+		return model.RepoStats{}, fmt.Errorf("无法获取提交历史: %w", scanErr)
 	}
 
 	stats := service.AggregateRepoStats(all, rangeKey, time.Now())
@@ -254,15 +255,15 @@ func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 const commitHistoryIncrementalThreshold = 500
 
 // resolveCommitHistory 解析全量提交快照。命中返缓存深拷贝；HEAD 前移走增量 prepend；
-// miss 或 SHA 链断走全量扫。返 (commits, overflow)：overflow=true 表示超限（>5000），
-// commits 为已扫前 5000 条供采样统计复用；commits==nil && !overflow 表示 git log 失败。
-// 非超限的成功结果回写缓存（超限不缓存）。
-func (a *App) resolveCommitHistory(gitRoot, key, currentSHA string) ([]model.Commit, bool) {
+// miss 或 SHA 链断走全量扫。返 (commits, overflow, err)：overflow=true 表示超限（>5000），
+// commits 为已扫前 5000 条供采样统计复用；err != nil 表示 git log 失败（已落 slog.Warn），
+// 调用方向上 %w 包裹报错。非超限的成功结果回写缓存（超限不缓存）。
+func (a *App) resolveCommitHistory(gitRoot, key, currentSHA string) ([]model.Commit, bool, error) {
 	cached, cachedHeadSHA, found := a.commitHistoryCache.Get(key)
 
 	// 命中：HEAD SHA 相同 + TTL 内（get 已判 TTL）
 	if found && cachedHeadSHA == currentSHA {
-		return cached, false
+		return cached, false, nil
 	}
 
 	// 增量：有条目但 HEAD 前移
@@ -270,20 +271,20 @@ func (a *App) resolveCommitHistory(gitRoot, key, currentSHA string) ([]model.Com
 		merged := a.incrementalCommits(gitRoot, cached)
 		if merged != nil {
 			a.commitHistoryCache.Set(key, currentSHA, merged)
-			return merged, false
+			return merged, false, nil
 		}
-		// nil: SHA 链断裂，回退全量
+		// nil: SHA 链断裂（或流式失败已落日志），回退全量
 	}
 
 	// 全量扫：超限时返前 5000 条 + overflow=true（不缓存，供采样复用）
-	all, overflow := fullScanCommits(gitRoot)
-	if all == nil && !overflow {
-		return nil, false // git log 失败，调用方报错
+	all, overflow, err := fullScanCommits(gitRoot)
+	if err != nil {
+		return nil, false, err
 	}
 	if !overflow {
 		a.commitHistoryCache.Set(key, currentSHA, all)
 	}
-	return all, overflow
+	return all, overflow, nil
 }
 
 // incrementalCommits 从新 HEAD 流式收集新提交，直到与缓存已有 SHA 交集即提前终止
@@ -306,6 +307,9 @@ func (a *App) incrementalCommits(gitRoot string, cached []model.Commit) []model.
 		return len(newCommits) < commitHistoryIncrementalThreshold
 	})
 	if err != nil {
+		// 流式失败（git 启动失败/非零退出，err 含 stderr 摘要）落日志后按链断处理，
+		// 回退全量扫（全量再失败会由 fullScanCommits 落日志并向上报错）。
+		slog.Warn("incremental commit scan failed, fallback to full scan", "gitRoot", gitRoot, "err", err)
 		return nil
 	}
 
@@ -321,13 +325,17 @@ func (a *App) incrementalCommits(gitRoot string, cached []model.Commit) []model.
 // fullScanCommits 全量扫描提交历史（CLI git log 批量，含 --name-only 变更文件列表）。
 // 取上限 commitHistoryMaxEntries+1 条以判定超限：达上限+1 时截断为前 MaxEntries 条 +
 // overflow=true（调用方按需走 uncached 路径或采样统计，复用已扫结果避免二次扫）。
-// git log 失败（库损坏等）返 (nil, false)，与超限 (前5000, true) 区分，调用方可报错不误判超限。
-func fullScanCommits(gitRoot string) ([]model.Commit, bool) {
+// git log 失败（库损坏等）返 (nil, false, err)：底层错误（util.GitCommand 错误已含
+// args 与 stderr 摘要）先落 slog.Warn 再向上透传，调用方 %w 包裹报错，不误判超限、
+// 不静默吞错。
+func fullScanCommits(gitRoot string) ([]model.Commit, bool, error) {
 	commits, err := loadCommitLogBatch(gitRoot, service.CommitHistoryMaxEntries+1)
 	if err != nil {
-		return nil, false
+		slog.Warn("full scan commit history failed", "gitRoot", gitRoot, "err", err)
+		return nil, false, err
 	}
-	return truncateOverflow(commits)
+	commits, overflow := truncateOverflow(commits)
+	return commits, overflow, nil
 }
 
 // filterCommits 在全量提交快照上内存执行过滤与分页。各维度组合语义 AND，空字段不参与过滤：

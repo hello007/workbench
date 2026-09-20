@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"workbench/model"
 	"workbench/service"
@@ -144,15 +145,18 @@ func TestGetCommitHistory_Offset(t *testing.T) {
 
 // commitSpec 测试提交规格：消息/作者/邮箱/文件路径/提交日期（committer date）。
 type commitSpec struct {
-	message string
-	author  string
-	email   string
-	file    string
-	date    string // YYYY-MM-DD HH:MM:SS，同时设 GIT_COMMITTER_DATE 与 GIT_AUTHOR_DATE
+	message       string
+	author        string
+	email         string
+	file          string
+	date          string // YYYY-MM-DD HH:MM:SS，同时设 GIT_COMMITTER_DATE 与 GIT_AUTHOR_DATE
+	authorDate    string // 独立 author 日期，与 committerDate 分离构造 author≠committer 提交
+	committerDate string // 独立 committer 日期，与 authorDate 分离构造 author≠committer 提交
 }
 
 // makeCommits 在 repoPath 初始化仓库并按 specs 顺序提交。每提交可指定独立作者与提交日期，
-// 用于过滤测试构造多作者/多文件/多日期数据。
+// 用于过滤测试构造多作者/多文件/多日期数据；authorDate/committerDate 分离设置时
+// 可构造 author 时间与 committer 时间不同的提交（锚定 Since/Until 按 author 时间过滤）。
 func makeCommits(t *testing.T, repoPath string, specs []commitSpec) {
 	t.Helper()
 	exec.Command("git", "init", repoPath).Run()
@@ -172,6 +176,12 @@ func makeCommits(t *testing.T, repoPath string, specs []commitSpec) {
 		}
 		if s.date != "" {
 			env = append(env, "GIT_COMMITTER_DATE="+s.date, "GIT_AUTHOR_DATE="+s.date)
+		}
+		if s.authorDate != "" {
+			env = append(env, "GIT_AUTHOR_DATE="+s.authorDate)
+		}
+		if s.committerDate != "" {
+			env = append(env, "GIT_COMMITTER_DATE="+s.committerDate)
 		}
 		cmd.Env = env
 		if err := cmd.Run(); err != nil {
@@ -333,6 +343,56 @@ func TestGetCommitHistory_DateRange(t *testing.T) {
 	if commits[0].Message != "mid\n" {
 		t.Errorf("expected mid, got %q", commits[0].Message)
 	}
+}
+
+// TestGetCommitHistory_DateFilterAuthorTimeBasis 锚定 Since/Until 日期过滤统一按
+// author 时间（%at = Author.When.Unix()）命中：原 go-git uncached 路径按 committer
+// 时间过滤，换 CLI 采集层后与缓存路径统一为 author 时间（见 docs/spec/perf-baseline.md
+// 第 12 节决策记录）。fixture 经 GIT_AUTHOR_DATE / GIT_COMMITTER_DATE 环境变量分离构造
+// author≠committer 的提交，若按 committer 时间过滤则两条命中结果恰好反转。
+func TestGetCommitHistory_DateFilterAuthorTimeBasis(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{
+		// authored 1 月、committed 3 月：author 视角在 Since 之外
+		{message: "author-jan", file: "a.go",
+			authorDate: "2026-01-10 10:00:00", committerDate: "2026-03-20 10:00:00"},
+		// authored 3 月、committed 1 月：author 视角在 Since 之内
+		{message: "author-mar", file: "b.go",
+			authorDate: "2026-03-15 10:00:00", committerDate: "2026-01-05 10:00:00"},
+	})
+	app := newAppWithCommitCache()
+
+	// Since=2026-02-01：author 时间基准应仅命中 author-mar（committer 基准会误中 author-jan）
+	commits, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{Since: "2026-02-01"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory Since: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Message != "author-mar\n" {
+		t.Fatalf("Since 应按 author 时间命中 author-mar: got %+v", firstMsgOf(commits))
+	}
+
+	// Until=2026-02-28：author 时间基准应仅命中 author-jan（committer 基准会误中 author-mar）
+	commits2, err := app.GetCommitHistory(repoPath, 20, 0, model.CommitFilter{Until: "2026-02-28"})
+	if err != nil {
+		t.Fatalf("GetCommitHistory Until: %v", err)
+	}
+	if len(commits2) != 1 || commits2[0].Message != "author-jan\n" {
+		t.Fatalf("Until 应按 author 时间命中 author-jan: got %+v", firstMsgOf(commits2))
+	}
+
+	// Timestamp 取 %at（author unix 秒）：author-mar 应为 2026-03-15 10:00:00 本地时刻
+	want := time.Date(2026, 3, 15, 10, 0, 0, 0, time.Local).Unix()
+	if commits[0].Timestamp != want {
+		t.Errorf("Timestamp 应为 author 时间 unix 秒: got %d want %d", commits[0].Timestamp, want)
+	}
+}
+
+// firstMsgOf 取提交切片首条消息描述（空返占位），日期过滤断言辅助。
+func firstMsgOf(commits []model.Commit) string {
+	if len(commits) == 0 {
+		return "(empty)"
+	}
+	return commits[0].Message
 }
 
 // TestParseDateStart_End 日期解析边界：起始 00:00:00、截止 23:59:59、空串与非法格式报错。

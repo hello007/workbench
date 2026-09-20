@@ -31,10 +31,24 @@ func mkChunk(sha, parents, author, email, ts, ai, message string, files []string
 	return sha + "\x01" + parents + "\x01" + author + "\x01" + email + "\x01" + ts + "\x01" + ai + "\x01" + message + "\x01\n" + filePart
 }
 
+// shaHex 生成确定性 40 位小写 hex 字符串（模拟 git %H/%P 真实输出格式；种子仅用于
+// 区分不同 SHA，无密码学意义）。空种子按 "seed" 处理。
+func shaHex(seed string) string {
+	if seed == "" {
+		seed = "seed"
+	}
+	const digits = "0123456789abcdef"
+	out := make([]byte, 40)
+	for i := range out {
+		out[i] = digits[(seed[i%len(seed)]+byte(i))%16]
+	}
+	return string(out)
+}
+
 // TestParseCommitLogChunk_Basic 常规记录：字段解析、Message 保留尾部换行、DateTime
 // 取 %ai 首 19 字节、文件列表解析。
 func TestParseCommitLogChunk_Basic(t *testing.T) {
-	chunk := mkChunk("abc12345def", "parent1 parent2", "Alice", "a@x.com",
+	chunk := mkChunk(shaHex("basic"), shaHex("p1")+" "+shaHex("p2"), "Alice", "a@x.com",
 		"1700000000", "2023-11-14 22:13:20 +0800", "feat: add login\n\nbody line\n",
 		[]string{"src/a.go", "docs/b.md"})
 	c, err := parseCommitLogChunk(chunk)
@@ -44,10 +58,10 @@ func TestParseCommitLogChunk_Basic(t *testing.T) {
 	if c == nil {
 		t.Fatal("chunk 不应为空")
 	}
-	if c.SHA != "abc12345def" {
+	if c.SHA != shaHex("basic") {
 		t.Errorf("SHA: got %q", c.SHA)
 	}
-	if c.ShortSHA != "abc12345" {
+	if c.ShortSHA != shaHex("basic")[:8] {
 		t.Errorf("ShortSHA 应取前 8 位: got %q", c.ShortSHA)
 	}
 	if c.Message != "feat: add login\n\nbody line\n" {
@@ -68,10 +82,10 @@ func TestParseCommitLogChunk_Basic(t *testing.T) {
 }
 
 // TestParseCommitLogChunk_MessageWithSpecialBytes 消息含换行/中文/0x01：0x01 出现在
-// 消息内时以记录内最后一个 0x01 为消息终止符，解析仍正确。
+// 消息内时以「最后一个后随 \n\n 的 0x01」为消息终止符（反向定位），解析仍正确。
 func TestParseCommitLogChunk_MessageWithSpecialBytes(t *testing.T) {
 	rawMessage := "fix: 修复登录\n\n含分隔符 \x01 的正文行\n第二行\n"
-	chunk := mkChunk("sha1", "p1", "张三", "z@x.com",
+	chunk := mkChunk(shaHex("m1"), shaHex("p1"), "张三", "z@x.com",
 		"1700000001", "2023-11-14 22:13:21 +0800", rawMessage, []string{"b.go"})
 	c, err := parseCommitLogChunk(chunk)
 	if err != nil {
@@ -92,7 +106,7 @@ func TestParseCommitLogChunk_RootCommitFileCap(t *testing.T) {
 	for i := range files {
 		files[i] = fmt.Sprintf("file%d.txt", i)
 	}
-	c, err := parseCommitLogChunk(mkChunk("rootsha", "", "t", "t@t.com",
+	c, err := parseCommitLogChunk(mkChunk(shaHex("root"), "", "t", "t@t.com",
 		"1700000000", "2023-11-14 22:13:20 +0800", "root\n", files))
 	if err != nil {
 		t.Fatalf("root: %v", err)
@@ -101,7 +115,7 @@ func TestParseCommitLogChunk_RootCommitFileCap(t *testing.T) {
 		t.Errorf("root 提交文件应截断至 %d: got %d", rootCommitFileLimit, len(c.Files))
 	}
 
-	c2, err := parseCommitLogChunk(mkChunk("sha", "p", "t", "t@t.com",
+	c2, err := parseCommitLogChunk(mkChunk(shaHex("nr"), shaHex("p"), "t", "t@t.com",
 		"1700000000", "2023-11-14 22:13:20 +0800", "non-root\n", files))
 	if err != nil {
 		t.Fatalf("non-root: %v", err)
@@ -111,8 +125,8 @@ func TestParseCommitLogChunk_RootCommitFileCap(t *testing.T) {
 	}
 }
 
-// TestParseCommitLogChunk_EmptyAndMalformed 空块返 nil 不报错；字段不足 / 时间戳非法 /
-// 消息终止符缺失报 error。
+// TestParseCommitLogChunk_EmptyAndMalformed 空块返 nil 不报错；字段不足 / SHA 或
+// parents 非 40 位 hex / 时间戳非法 / 作者日期非法 / 消息终止符缺失报 error。
 func TestParseCommitLogChunk_EmptyAndMalformed(t *testing.T) {
 	if c, err := parseCommitLogChunk(""); err != nil || c != nil {
 		t.Errorf("空块应返 (nil, nil): got (%v, %v)", c, err)
@@ -123,19 +137,37 @@ func TestParseCommitLogChunk_EmptyAndMalformed(t *testing.T) {
 	if _, err := parseCommitLogChunk("sha\x01p\x01author"); err == nil {
 		t.Error("头部字段不足应报错")
 	}
-	if _, err := parseCommitLogChunk(mkChunk("sha", "p", "a", "e", "notanumber",
+	// SHA 非 40 位 hex（头部强校验快速失败，防字段错位静默解析）
+	if _, err := parseCommitLogChunk(mkChunk("shortsha", shaHex("p"), "a", "e",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\n", nil)); err == nil {
+		t.Error("SHA 非 40 位 hex 应报错")
+	}
+	// parents 非 40 位 hex
+	if _, err := parseCommitLogChunk(mkChunk(shaHex("pl"), "badparent", "a", "e",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\n", nil)); err == nil {
+		t.Error("parents 非 40 位 hex 应报错")
+	}
+	// 时间戳非法（SHA/parents 合法，定位到 ts 校验分支）
+	if _, err := parseCommitLogChunk(mkChunk(shaHex("ts"), shaHex("p"), "a", "e", "notanumber",
 		"2023-11-14 22:13:20 +0800", "m\n", nil)); err == nil {
 		t.Error("时间戳非法应报错")
 	}
-	if _, err := parseCommitLogChunk("sha\x01p\x01a\x01e\x01" + "1700000000" + "\x01" + "ai"); err == nil {
-		t.Error("消息终止符（最后一个 0x01）缺失应报错")
+	// 作者日期非法
+	if _, err := parseCommitLogChunk(mkChunk(shaHex("ai"), shaHex("p"), "a", "e", "1700000000",
+		"bad-date", "m\n", nil)); err == nil {
+		t.Error("作者日期非法应报错")
+	}
+	// 消息终止符缺失（头部合法，既无 "\x01\n\n" 锚点也不以 "\x01\n" 结尾）
+	noTerm := shaHex("nt") + "\x01" + shaHex("p") + "\x01a\x01e\x01170000000\x012023-11-14 22:13:20 +0800\x01m\n\x01"
+	if _, err := parseCommitLogChunk(noTerm); err == nil {
+		t.Error("消息终止符缺失应报错")
 	}
 }
 
 // TestParseCommitLogOutput_MultiRecords 完整输出（首 0x00 + 多记录）解析。
 func TestParseCommitLogOutput_MultiRecords(t *testing.T) {
-	out := "\x00" + mkChunk("sha2", "sha3", "a", "e@x.com", "200", "1970-01-01 00:03:20 +0000", "second\n", []string{"2.txt"}) +
-		"\x00" + mkChunk("sha3", "", "a", "e@x.com", "100", "1970-01-01 00:01:40 +0000", "root\n", []string{"1.txt"}) + "\n"
+	out := "\x00" + mkChunk(shaHex("s2"), shaHex("s3"), "a", "e@x.com", "200", "1970-01-01 00:03:20 +0000", "second\n", []string{"2.txt"}) +
+		"\x00" + mkChunk(shaHex("s3"), "", "a", "e@x.com", "100", "1970-01-01 00:01:40 +0000", "root\n", []string{"1.txt"}) + "\n"
 	commits, err := parseCommitLogOutput(out)
 	if err != nil {
 		t.Fatalf("parseCommitLogOutput: %v", err)
@@ -143,7 +175,7 @@ func TestParseCommitLogOutput_MultiRecords(t *testing.T) {
 	if len(commits) != 2 {
 		t.Fatalf("应解析 2 条: got %d", len(commits))
 	}
-	if commits[0].SHA != "sha2" || commits[1].SHA != "sha3" {
+	if commits[0].SHA != shaHex("s2") || commits[1].SHA != shaHex("s3") {
 		t.Errorf("顺序应保持: got %s, %s", commits[0].SHA, commits[1].SHA)
 	}
 	if commits[1].Files[0] != "1.txt" {
@@ -282,7 +314,10 @@ func TestFullScanCommits_CommitterTimeOrder(t *testing.T) {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
 
-	all, overflow := fullScanCommits(gitRoot)
+	all, overflow, scanErr := fullScanCommits(gitRoot)
+	if scanErr != nil {
+		t.Fatalf("fullScanCommits: %v", scanErr)
+	}
 	if overflow {
 		t.Fatal("3 条提交不应超限")
 	}
@@ -332,7 +367,10 @@ func TestGetCommitHistory_MergeCommitFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	all, overflow := fullScanCommits(gitRoot)
+	all, overflow, scanErr := fullScanCommits(gitRoot)
+	if scanErr != nil {
+		t.Fatalf("fullScanCommits: %v", scanErr)
+	}
 	if overflow {
 		t.Fatal("不应超限")
 	}
@@ -352,11 +390,14 @@ func TestGetCommitHistory_MergeCommitFiles(t *testing.T) {
 }
 
 // TestFullScanCommits_NonGitRootReturnsNilFalse git log 失败（非仓库目录）返
-// (nil, false)，调用方据此报错而不误判超限。
+// (nil, false, err)，底层错误落日志并透传，调用方据此 %w 包裹报错而不误判超限。
 func TestFullScanCommits_NonGitRootReturnsNilFalse(t *testing.T) {
-	commits, overflow := fullScanCommits(t.TempDir())
+	commits, overflow, err := fullScanCommits(t.TempDir())
 	if commits != nil || overflow {
 		t.Errorf("非仓库应返 (nil, false): got (%v, %v)", commits, overflow)
+	}
+	if err == nil {
+		t.Error("非仓库应透传底层错误供调用方包裹")
 	}
 }
 
@@ -383,5 +424,70 @@ func TestStreamCommitLog_StopEarly(t *testing.T) {
 	}
 	if seen != 2 {
 		t.Errorf("应在第 2 条提前终止: got %d", seen)
+	}
+}
+
+// TestParseCommitLogChunk_AuthorEmailWithFieldSeparator 作者名/邮箱含 0x01（分隔符
+// 错位）：头部强校验（SHA/parents 40 位 hex、ts 纯数字、ai 固定格式）快速失败报错，
+// 不得静默解析出错位的错误数据。
+func TestParseCommitLogChunk_AuthorEmailWithFieldSeparator(t *testing.T) {
+	if c, err := parseCommitLogChunk(mkChunk(shaHex("an"), shaHex("p"), "bad\x01name", "e@x.com",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\n", []string{"f.go"})); err == nil || c != nil {
+		t.Errorf("作者名含 0x01 应报错不静默解析: got (%v, %v)", c, err)
+	}
+	if c, err := parseCommitLogChunk(mkChunk(shaHex("ae"), shaHex("p"), "author", "e\x01@x.com",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\n", []string{"f.go"})); err == nil || c != nil {
+		t.Errorf("邮箱含 0x01 应报错不静默解析: got (%v, %v)", c, err)
+	}
+}
+
+// TestParseCommitLogChunk_FileNameWithFieldSeparator 文件名含 0x01（core.quotePath=false
+// 原样输出）：终止符从记录尾部按 "\x01\n\n" 固定结构反向定位，文件名内 0x01 不干扰，
+// 消息与文件列表均正确解析，无静默吞并。
+func TestParseCommitLogChunk_FileNameWithFieldSeparator(t *testing.T) {
+	chunk := mkChunk(shaHex("fn"), shaHex("p"), "a", "e@x.com",
+		"1700000000", "2023-11-14 22:13:20 +0800", "feat: files\n", []string{"bad\x01name.txt", "b.go"})
+	c, err := parseCommitLogChunk(chunk)
+	if err != nil {
+		t.Fatalf("parseCommitLogChunk: %v", err)
+	}
+	if c.Message != "feat: files\n" {
+		t.Errorf("Message 不应被文件名内 0x01 吞并文件列表: got %q", c.Message)
+	}
+	if len(c.Files) != 2 || c.Files[0] != "bad\x01name.txt" || c.Files[1] != "b.go" {
+		t.Errorf("含 0x01 文件名应原样解析: got %v", c.Files)
+	}
+}
+
+// TestParseCommitLogChunk_TerminatorAnchorPriority 消息区含 "\x01\n\n" 与空提交兜底
+// 锚点的优先级：两锚点同时命中取更靠后者——无文件（空）提交的消息内可含 "\x01\n\n"，
+// 须以记录尾部真实终止符为准；消息以 0x01 结尾且有文件时反向锚点不受干扰。
+func TestParseCommitLogChunk_TerminatorAnchorPriority(t *testing.T) {
+	// 空提交 + 消息含 "\x01\n\n"：应以尾部 "\x01\n" 兜底锚点为准，消息完整、无文件
+	chunk := mkChunk(shaHex("ec"), shaHex("p"), "a", "e@x.com",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\x01\n\nrest\n", nil)
+	c, err := parseCommitLogChunk(chunk)
+	if err != nil {
+		t.Fatalf("empty commit parse: %v", err)
+	}
+	if c.Message != "m\x01\n\nrest\n" {
+		t.Errorf("空提交消息应完整保留: got %q", c.Message)
+	}
+	if c.Files != nil {
+		t.Errorf("空提交不应解析出文件列表: got %v", c.Files)
+	}
+
+	// 消息以 0x01 结尾且有文件："\x01\n\n" 反向锚点落在格式终止符，解析正确
+	chunk2 := mkChunk(shaHex("me"), shaHex("p"), "a", "e@x.com",
+		"1700000000", "2023-11-14 22:13:20 +0800", "m\x01\n", []string{"f.go"})
+	c2, err := parseCommitLogChunk(chunk2)
+	if err != nil {
+		t.Fatalf("message-ends-with-0x01 parse: %v", err)
+	}
+	if c2.Message != "m\x01\n" {
+		t.Errorf("以 0x01 结尾的消息应原样保留: got %q", c2.Message)
+	}
+	if len(c2.Files) != 1 || c2.Files[0] != "f.go" {
+		t.Errorf("文件列表不受消息内 0x01 干扰: got %v", c2.Files)
 	}
 }

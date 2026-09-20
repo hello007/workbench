@@ -15,11 +15,15 @@ package main
 //	记录分隔 = 0x00；字段分隔 = 0x01。每记录：
 //	  \0<SHA>\x01<parents>\x01<author>\x01<email>\x01<authorUnixTs>\x01<authorDateISO>\x01<rawMessage>\x01\n\n<files>\n
 //
-//	- 0x00 作记录分隔安全：git 原生拒绝消息含 NUL 字节（"a NUL byte in commit log
-//	  message not allowed"），文件路径不含控制字符。
+//	- 0x00 作记录/字段间分隔安全：git 原生拒绝消息含 NUL 字节（"a NUL byte in
+//	  commit log message not allowed"），文件系统路径同样不能含 NUL。
 //	- 消息用 %B（raw message，含 subject+body+尾部换行）非 %s+%b 拼接，与 go-git
-//	  Commit.Message 字节级一致（既有测试断言 Message 带尾部 "\n"）。消息内 0x01 由
-//	  「取记录内最后一个 0x01 为消息终止符」策略消化。
+//	  Commit.Message 字节级一致（既有测试断言 Message 带尾部 "\n"）。消息内出现 0x01
+//	  时由 parseCommitLogChunk 的终止符反向定位消化（见其函数注释）。
+//	- 已知边界（均不产生静默错数据的现实路径）：作者名/邮箱含 0x01 时分隔符错位，
+//	  头部强校验快速失败报错（不静默）；文件名以 0x01 结尾（Windows 文件名禁控制
+//	  字符不可构造，Linux 极端手工构造）会与「\x01\n 结尾」空提交兜底锚点冲突，
+//	  可能误判为无文件提交。
 //	- %at = author unix 秒（与 go-git Author.When.Unix() 一致）；%ai 首 19 字节即
 //	  作者时区墙钟 "2006-01-02 15:04:05"，与 go-git Author.When.Format(...) 一致
 //	  （非本地时区，避免转换漂移）。
@@ -104,9 +108,17 @@ func parseCommitLogOutput(out string) ([]model.Commit, error) {
 // parseCommitLogChunk 解析单条 git log 记录块（不含前导 0x00，流式路径可能含两端
 // 0x00，统一 Trim 消化）。首记录前空块返 (nil, nil)。
 //
-// 解析策略：头部 5 个 0x01 分隔字段（SHA/parents/author/email/ts/ai）后为消息区，
-// 消息区终止于记录内最后一个 0x01（格式串尾部 %x01），其后为文件列表——消息内出现
-// 0x01 时仍正确（文件列表不含 0x01）。
+// 解析策略（任一字段含 0x01/0x0a 时要么正确解析要么报错，不静默产出错数据）：
+//  1. 头部强校验：前 6 个 0x01 分隔出 SHA/parents/author/email/ts/authorDateISO 后，
+//     校验 SHA 与 parents 为 40 位 hex、ts 为纯数字、authorDateISO 为固定格式。
+//     作者名/邮箱含 0x01 会使分隔符错位，错位后的字段几乎必然不满足上述格式，
+//     快速失败报错（此前策略仅对最后 0x01 取 LastIndex，错位时可静默解析错数据）。
+//  2. 消息终止符与文件列表从记录尾部反向定位：有文件提交的终止符后随 "\n\n"
+//     （格式换行 + --name-only 段前空行，实测 git 输出固定结构），取最后一个
+//     "\x01\n\n" 为终止锚点，其后即文件行——消息与文件名内的 0x01 均不干扰；
+//     无文件提交（空提交，--name-only 无输出）终止符后仅一个 "\n"，以「记录以
+//     "\x01\n" 结尾」为兜底锚点。两锚点同时命中取更靠后者（无文件提交的消息内
+//     可含 "\x01\n\n"，须以记录尾部真实终止符为准）。
 func parseCommitLogChunk(chunk string) (*model.Commit, error) {
 	chunk = strings.Trim(chunk, "\x00")
 	if chunk == "" {
@@ -130,17 +142,37 @@ func parseCommitLogChunk(chunk string) (*model.Commit, error) {
 		return nil, fmt.Errorf("git log 记录头部字段不完整: %q", truncateForLog(chunk))
 	}
 	header := strings.SplitN(chunk[:headerEnd], "\x01", 6)
+	if !isHexSHA(header[0]) {
+		return nil, fmt.Errorf("git log 记录 SHA 非法（字段可能错位）: %q", truncateForLog(header[0]))
+	}
+	if !isHexSHAList(header[1]) {
+		return nil, fmt.Errorf("git log 记录 parents 非法（字段可能错位）: %q", truncateForLog(header[1]))
+	}
 	ts, err := strconv.ParseInt(header[4], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("git log 提交时间戳解析失败: %q", header[4])
 	}
+	if !isAuthorDateISO(header[5]) {
+		return nil, fmt.Errorf("git log 记录作者日期非法（字段可能错位）: %q", truncateForLog(header[5]))
+	}
 
-	last := strings.LastIndexByte(chunk, '\x01')
-	if last <= headerEnd {
+	// 消息终止符反向定位（两种锚点取更靠后者，-1 表示未命中）
+	termFiles := strings.LastIndex(chunk, "\x01\n\n")
+	termEmpty := -1
+	if strings.HasSuffix(chunk, "\x01\n") {
+		termEmpty = len(chunk) - 2
+	}
+	var message string
+	var files []string
+	switch {
+	case termFiles >= 0 && termFiles > termEmpty:
+		message = chunk[headerEnd+1 : termFiles]
+		files = parseCommitLogFiles(chunk[termFiles+len("\x01\n\n"):])
+	case termEmpty >= 0 && termEmpty > termFiles:
+		message = chunk[headerEnd+1 : termEmpty]
+	default:
 		return nil, fmt.Errorf("git log 记录消息终止符缺失: %q", truncateForLog(chunk))
 	}
-	message := chunk[headerEnd+1 : last]
-	files := parseCommitLogFiles(chunk[last+1:])
 	// root 提交（无 parent）CLI 列全树文件，对齐 getTreeFiles 的 100 上限
 	if header[1] == "" && len(files) > rootCommitFileLimit {
 		files = files[:rootCommitFileLimit]
@@ -156,6 +188,63 @@ func parseCommitLogChunk(chunk string) (*model.Commit, error) {
 		DateTime:  authorDateWallClock(header[5]),
 		Files:     files,
 	}, nil
+}
+
+// isHexSHA 判定 40 位小写 hex SHA-1（git %H/%P 输出格式；SHA-256 仓库不在支持范围，
+// 与 go-git plumbing 的 SHA-1 用法一致）。
+func isHexSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// isHexSHAList 判定 %P 输出：空串（root 提交无 parent）或 40 位 hex SHA 以单个空格
+// 分隔（merge 多父）。
+func isHexSHAList(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, p := range strings.Split(s, " ") {
+		if !isHexSHA(p) {
+			return false
+		}
+	}
+	return true
+}
+
+// isAuthorDateISO 判定 %ai 输出固定格式 "2006-01-02 15:04:05 +0800"（25 字节，
+// 时区为 +/-HHMM）。
+func isAuthorDateISO(s string) bool {
+	if len(s) != 25 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var ok bool
+		switch i {
+		case 4, 7: // 年-月 间的连字符
+			ok = c == '-'
+		case 10, 19: // 日期与时间、时间与时区 间的空格
+			ok = c == ' '
+		case 13, 16: // 时:分:秒 间的冒号
+			ok = c == ':'
+		case 20: // 时区符号
+			ok = c == '+' || c == '-'
+		default: // 其余位置均为数字
+			ok = c >= '0' && c <= '9'
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // parseCommitLogFiles 解析记录尾部的文件列表段（"\n\n<file>\n..."）。空列表返 nil，

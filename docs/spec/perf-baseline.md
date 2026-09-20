@@ -286,8 +286,9 @@ Windows 上读放大 1-2 个数量级。优化将采集层换为 CLI `git log` �
   与流式路径共用 `commitFilterPredicate` 单一实现防漂移。
 - **字段语义对齐 go-git**（字节级）：
   - Message 取 `%B`（raw message 含 subject+body+尾部换行，与 `commitObj.Message` 一致；
-    消息内 `\x01` 以「记录内最后一个 \x01 为终止符」策略消化；git 原生拒绝消息含 NUL，
-    `\x00` 记录分隔安全）；
+    消息内 `\x01` 由 `parseCommitLogChunk` 终止符反向定位消化（「最后一个后随 `\n\n`
+    的 `\x01`」+ 空提交尾部 `\x01\n` 兜底锚点，头部 40 位 hex SHA/parents/ts/ai 强校验
+    快速失败）；git 原生拒绝消息含 NUL，`\x00` 记录分隔安全）；
   - Timestamp 取 `%at`（对齐 `Author.When.Unix()`）；DateTime 取 `%ai` 首 19 字节
     （对齐 `Author.When.Format("2006-01-02 15:04:05")` 作者时区墙钟，非本地时区）；
   - merge 提交 `--diff-merges=first-parent`（对齐 `Parent(0)` diff，须 git ≥2.31）；
@@ -304,3 +305,17 @@ Windows 上读放大 1-2 个数量级。优化将采集层换为 CLI `git log` �
 
 前端与 `frontend/wailsjs/` 零改动（GetCommitHistory / GetRepoStats / Invalidate 签名不变，
 绑定零 diff）。
+
+### 12.4 语义决策与已知上限记录（09-20 check 审核修复）
+
+- **Since/Until 统一按 author 时间**：CLI 采集层的 Timestamp 取 `%at`（author unix 秒），
+  Since/Until 内存过滤统一按 author 时间命中——与缓存路径既有语义一致。原 go-git uncached
+  路径按 committer 时间过滤，换层后两路径统一为 author 时间（方向正确，非漂移）。
+  决策记录：author≠committer 提交（`GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` 环境变量分离
+  构造）单测锚定日期过滤按 author 时间命中（`TestGetCommitHistory_DateFilterAuthorTimeBasis`）。
+- **流式采集 30s 超时已知上限**：overflow 流式路径（`streamCommitLog`）沿用
+  `commitLogTimeout = 30s`（与 `util.GitCommand` 缺省超时对齐）。数十万提交量级的超限仓库
+  + 无匹配过滤条件时，流式须读完全部历史才能确认无匹配，可能触发 30s 超时报错。属已知
+  上限，维持现状（超出桌面仓库常见量级；凑够 limit 的常规翻页不受影响）。
+- **采集失败可观测**：全量扫/增量流式的 git 失败（启动失败、非零退出，错误含 args 与
+  stderr 摘要）落 `slog.Warn` 并向上 `%w` 包裹（「无法获取提交历史: ...」），不再静默吞错。
