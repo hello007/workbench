@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查 badge 是否守语义色与视觉约定、无游离色值"}
+{"file": "docs/spec/test-stability.md", "reason": "检查测试改动是否守稳定性规范"}

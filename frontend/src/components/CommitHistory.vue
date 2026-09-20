@@ -106,12 +106,13 @@
               <el-tag size="small" type="info" class="files-count-tag">
                 {{ commit.files?.length || 0 }} 文件
               </el-tag>
-              <!-- refs badge：当前分支(primary)/上游(info)/分离 HEAD(danger)，同行共标 -->
+              <!-- refs badge：当前分支(primary)/远程头(warning 橙实底醒目定位)/分离 HEAD(danger)，同行共标 -->
               <el-tag
                 v-for="refItem in refsForCommit(commit.sha)"
                 :key="refItem.kind + ':' + refItem.name"
                 size="small"
                 :type="refTagType(refItem.kind)"
+                :effect="refTagEffect(refItem.kind)"
                 class="ref-badge"
               >{{ refItem.name }}</el-tag>
               <span class="commit-author">
@@ -282,12 +283,15 @@ const refsForCommit = (sha) => {
   return info.refs.filter(r => r.sha === sha)
 }
 
-// badge 语义色：当前分支=primary（默认）、上游=info、分离 HEAD=danger（对齐 frontend-visual-conventions）
+// badge 语义色：当前分支=primary（默认）、远程头=warning 橙、分离 HEAD=danger（对齐 frontend-visual-conventions）
 const refTagType = (kind) => {
-  if (kind === 'remote') return 'info'
+  if (kind === 'remote') return 'warning'
   if (kind === 'head') return 'danger'
   return ''
 }
+
+// badge 效果：远程头用 effect=dark 实底强化醒目度（扫一眼定位远程头所在提交），local/head 维持 light 默认
+const refTagEffect = (kind) => (kind === 'remote' ? 'dark' : 'light')
 
 // 摘要刷新（挂载/切仓库/子组件拉取成功），更新 refs 映射
 const onSyncInfo = (info) => {

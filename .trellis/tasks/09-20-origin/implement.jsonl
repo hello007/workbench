@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "badge 语义色选色与视觉约定（warning=注意类语义、实底效果用法）"}
+{"file": "docs/spec/test-stability.md", "reason": "改 badge 断言时组件测试须守稳定性规范"}

@@ -65,8 +65,8 @@ const stubs = {
   // el-text 用 v-bind="$attrs" 让 class="sha-text" 落到 span 上，便于 .sha-text 选择器命中
   'el-text': { template: '<span v-bind="$attrs"><slot /></span>', props: ['type', 'size', 'strong'] },
   'el-tag': {
-    template: '<span class="el-tag" :data-type="type"><slot /></span>',
-    props: ['type', 'size']
+    template: '<span class="el-tag" :data-type="type" :data-effect="effect"><slot /></span>',
+    props: ['type', 'size', 'effect']
   },
   'el-checkbox': {
     template: '<input type="checkbox" class="el-checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
@@ -690,8 +690,10 @@ describe('CommitHistory.vue', () => {
     expect(headBadges.length).toBe(2)
     expect(headBadges[0].text()).toBe('main')
     expect(headBadges[0].attributes('data-type')).toBe('') // local=primary 默认
+    expect(headBadges[0].attributes('data-effect')).toBe('light') // local 维持 light plain
     expect(headBadges[1].text()).toBe('origin/main')
-    expect(headBadges[1].attributes('data-type')).toBe('info')
+    expect(headBadges[1].attributes('data-type')).toBe('warning') // remote=warning 橙
+    expect(headBadges[1].attributes('data-effect')).toBe('dark') // 实底醒目，与 local plain 并列可辨
     // 非远程头 commit 无 badge
     expect(cards[1].findAll('.ref-badge').length).toBe(0)
   })
@@ -722,7 +724,8 @@ describe('CommitHistory.vue', () => {
     const remoteBadges = cards[1].findAll('.ref-badge')
     expect(remoteBadges.length).toBe(1)
     expect(remoteBadges[0].text()).toBe('origin/main')
-    expect(remoteBadges[0].attributes('data-type')).toBe('info')
+    expect(remoteBadges[0].attributes('data-type')).toBe('warning') // remote=warning 橙
+    expect(remoteBadges[0].attributes('data-effect')).toBe('dark')
   })
 
   it('detached HEAD 摘要渲染 head badge（danger 语义色）', async () => {
@@ -741,6 +744,7 @@ describe('CommitHistory.vue', () => {
     expect(badge.exists()).toBe(true)
     expect(badge.text()).toBe('HEAD')
     expect(badge.attributes('data-type')).toBe('danger')
+    expect(badge.attributes('data-effect')).toBe('light') // head 维持 light plain
   })
 
   it('BranchSyncBar emit synced(source=push) 后清缓存并重载提交列表', async () => {
