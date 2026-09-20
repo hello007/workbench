@@ -523,3 +523,37 @@ SettingsPanel 垂直间距紧凑化：弹窗高度 620→560px、段落标题 18
 ### Next Steps
 
 - None - task complete
+
+
+## Session 71: 提交历史分支同步面板：本地/远程位置差异 + push/pull/fetch
+
+**Date**: 2026-09-20
+**Task**: 提交历史分支同步面板：本地/远程位置差异 + push/pull/fetch
+**Branch**: `master`
+
+### Summary
+
+脑暴收敛 PRD 后实现提交历史同步面板：后端新增 GetBranchSyncInfo 绑定（ComputeAheadBehind 抽共享函数零行为变化 + go-git refs 遍历三类标记），前端 BranchSyncBar 摘要条（↑ahead/↓behind + push 引导 set-upstream + pull split 下拉默认 rebase + fetch 按钮时效提示）与提交行 refs badge（远程头停在哪条一眼可见、同步共标）。测试：9 单测 + 6 集成（bare 远程 + CLI 基准）+ 前端 24 用例，覆盖率 service 78.5%/前端 81%。独立审核发现 3 中风险（集成测试 git 身份依赖、乱序响应污染、fetch 过度清空）全修复 + 5 回归测试。spec 沉淀：e2e-testing.md 新增绑定 mock 两表契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ce90ef` | (see git log) |
+| `4df91f7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
