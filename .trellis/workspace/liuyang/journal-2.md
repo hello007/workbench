@@ -557,3 +557,36 @@ SettingsPanel 垂直间距紧凑化：弹窗高度 620→560px、段落标题 18
 ### Next Steps
 
 - None - task complete
+
+
+## Session 72: 提交行 origin badge warning 橙实底醒目标识
+
+**Date**: 2026-09-20
+**Task**: 提交行 origin badge warning 橙实底醒目标识
+**Branch**: `master`
+
+### Summary
+
+提交历史行内 remote badge 由 info plain 改 warning + dark 实底，一眼定位远程头所在提交；本地/HEAD 维持 plain，共标并列可辨。纯前端视觉小改（CommitHistory.vue refTagType/refTagEffect + 测试断言 type/effect 双维度），检查 0 问题，前端 1034 用例全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b0bf1a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
