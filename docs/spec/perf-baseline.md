@@ -1,16 +1,16 @@
 # 性能基线（v1.4 PR1）
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
-> 严格遵循「先测后优」：本基线只测量不改生产代码，PR4 每项优化须有 before/after 量化支撑。
-> 最后更新：2026-09-14 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4
+> 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
+> 最后更新：2026-09-20 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf
 
 ## 1. 适用范围
 
-- Go 后端核心路径 benchmark 基线：文件树构建、仓库扫描、App service 装配
+- Go 后端核心路径 benchmark 基线：文件树构建、仓库扫描、App service 装配、提交历史冷扫
 - 前端 bundle 体积基线：dist 总量、各 chunk 体积、代码分割候选
 - Go 运行时内存占用快照：HeapAlloc / HeapSys / NumGC
 - GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（手动测量，留占位）
-- PR4 性能优化前后对比的唯一数据依据
+- 性能优化前后对比的唯一数据依据
 
 ## 2. 测量环境
 
@@ -54,6 +54,19 @@
 - NewAppServices 装配 5.80 ms / 137 KB / 1958 allocs。单次 startup 成本可接受（用户感知阈值 ~100 ms，5.8 ms 占比小）。
 - 5.8 ms 中 logger 初始化（InitLogger 建 lumberjack + JSONHandler + 落盘首条日志）占可观比例，PR4 若优化启动可考察 logger 懒初始化。
 - benchmark artifact：每次构造重新 InitLogger 覆盖全局 logger，lumberjack 句柄累积（生产仅 startup 一次无此问题）；用 500x 固定迭代控制句柄量，ns/op 稳定。
+
+### 3.3 主包（提交历史冷扫）
+
+采集命令：`go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./`
+
+| Benchmark | 采集层 | 迭代数 | ns/op | B/op | allocs/op | 说明 |
+|---|---|---:|---:|---:|---:|---|
+| `BenchmarkGetCommitHistory_ColdScan` | go-git（before） | 1 | 12,839,285,200 (~12.84 s) | 53,995,504 (~51.5 MB) | 947,603 | 300 提交冷扫，go-git 逐条树 diff（每提交 Patch ≥2 次对象库读），优化前实现 |
+| `BenchmarkGetCommitHistory_ColdScan` | CLI git log（after） | 9 | 300,395,267 (~0.30 s) | 479,859 (~469 KB) | 2,451 | 同一基准，CLI 批量采集（2026-09-20 换层后，见第 12 节） |
+
+**关键结论**：
+- 300 提交冷扫从 12.84 s 降至 0.30 s（**~42.7× 提速**），根因（go-git 逐条树 diff 对象库读放大）证实，详见第 12 节。
+- fixture 300 提交（testutil 构造，StopTimer/StartTimer 排除构造耗时），每迭代 `ClearByGitRoot` 强制缓存 miss 走全量扫，取单页 limit=20。
 
 ## 4. 维度 2：前端 bundle 体积
 
@@ -140,6 +153,7 @@
 |---|---|---|
 | 1a service benchmark | `go test -bench=. -benchmem -benchtime=2s ./service/` | `service/perf_bench_test.go` |
 | 1b 主包 benchmark | `go test -bench=BenchmarkNewAppServices -benchmem -benchtime=500x -run=^$ ./` | `perf_bench_test.go` |
+| 1c 提交历史冷扫 benchmark | `go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./` | `commit_history_bench_test.go` |
 | 3 MemStats | `go test -run TestPerfMemStats -v ./` | `perf_bench_test.go` |
 | 2 前端 bundle | `cd frontend && npm run build` 后 `du -sh dist dist/assets` | `frontend/dist/` |
 
@@ -227,3 +241,66 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - [test-stability.md](test-stability.md) — benchmark 稳定性约定（fixture 构造排除耗时、禁 sleep、缓存命中依赖 mtime 未变）
 - [app-services-assembly.md](app-services-assembly.md) — NewAppServices 装配契约（纯构造、benchmark 测的就是它）
 - [cross-layer-contracts.md](cross-layer-contracts.md) — wailsjs 绑定契约（mermaid 懒加载不涉签名变更，绑定零 diff）
+
+## 12. 提交历史采集层优化（09-20 任务）
+
+### 12.1 before/after 对比
+
+根因：采集层经 go-git 逐提交做树 diff（`getCommitFiles` 的 `Patch`，每条 ≥2 次对象库读），
+Windows 上读放大 1-2 个数量级。优化将采集层换为 CLI `git log` 批量/流式子进程（workbench
+既有依赖，Push/Pull/Fetch 已用，零新增）。
+
+采集命令：`go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./`
+（300 提交 fixture，每迭代 `ClearByGitRoot` 强制冷扫，GetCommitHistory 取单页 limit=20，
+同机同环境先后两次采集）
+
+| 指标 | before（go-git 逐条树 diff） | after（CLI git log 批量） | 变化 |
+|---|---:|---:|---:|
+| ns/op | 12,839,285,200 (~12.84 s) | 300,395,267 (~0.30 s) | **−12.54 s（~42.7× 提速）** |
+| B/op | 53,995,504 (~51.5 MB) | 479,859 (~469 KB) | **~112× 降分配量** |
+| allocs/op | 947,603 | 2,451 | **~386× 降分配次数** |
+| 迭代数（2s 预算） | 1 | 9 | — |
+
+**关键结论**：
+- **根因证实**：go-git 逐条树 diff ~42 ms/条（300 条 12.84 s，2s 预算仅容 1 次操作）；
+  CLI 单子进程批量采集 0.30 s。满足验收「提升 ≥5×」且达 1-2 数量级预期。
+- **after 的 0.30 s 构成**：约 2/3 为 Windows git 进程创建开销（沙盒对照：裸 `git log`
+  300 提交 5 次共 1.008 s ≈ 200 ms/次，user 0.015s / sys 0.200s，系统调用占绝对大头），
+  已是单进程采集的下限量级。冷扫仅首启 / TTL 过期 / 手动刷新触发，日常翻页与过滤走内存
+  缓存命中路径，不触采集。
+- **overflow 流式**：>5000 提交仓库全量扫换 `-n 5001` 探测超限；翻页路径 CLI 流式读
+  stdout（\x00 分隔逐记录解析），凑够 limit 关闭管道提前终止不读全量，增量 prepend 命中
+  缓存 SHA 交集即停。翻页/过滤/不缓存语义由 git fast-import 构造的 5001 提交集成测试锚定
+  （单子进程秒级构造，规避逐条 commit 分钟级 fixture 成本）。
+
+### 12.2 改动与语义零漂移锚点
+
+- **采集层**（`commit_history_cli.go` 新增 + `app_git.go` 换实现）：`fullScanCommits` /
+  `incrementalCommits` / `fetchCommitHistoryFromGit` 签名由 `*git.Repository` 改
+  `gitRoot string`（git.PlainOpen/Head 保留供缓存键与空仓判定）；`getCommitFiles` /
+  `getTreeFiles` 按 PRD 保留（历史主路径不再逐条调用）。
+- **缓存层零改动**：CommitHistoryCache key/TTL/SHA 链增量判定/失效入口（ClearPath /
+  ClearByGitRoot / ClearAll）/ cap 5000 与 overflow 不缓存策略全保留。
+- **过滤零下推**：Author/Keyword/Since/Until/FilePath 内存过滤，不下推 CLI flags
+  （pathspec 子串与 `--author` 正则语义均与内存子串匹配不等价）；缓存路径 `filterCommits`
+  与流式路径共用 `commitFilterPredicate` 单一实现防漂移。
+- **字段语义对齐 go-git**（字节级）：
+  - Message 取 `%B`（raw message 含 subject+body+尾部换行，与 `commitObj.Message` 一致；
+    消息内 `\x01` 以「记录内最后一个 \x01 为终止符」策略消化；git 原生拒绝消息含 NUL，
+    `\x00` 记录分隔安全）；
+  - Timestamp 取 `%at`（对齐 `Author.When.Unix()`）；DateTime 取 `%ai` 首 19 字节
+    （对齐 `Author.When.Format("2006-01-02 15:04:05")` 作者时区墙钟，非本地时区）；
+  - merge 提交 `--diff-merges=first-parent`（对齐 `Parent(0)` diff，须 git ≥2.31）；
+  - root 提交（parents 空）文件列表截断 100（对齐 `getTreeFiles` 上限）；
+  - `-c core.quotePath=false` 输出原始非 ASCII 路径（缺省转义会破坏 FilePath 子串过滤）；
+  - 排序：git log 缺省按 committer date 弹出，线性链退化为链序，与 go-git
+    LogOrderCommitterTime 语义一致（时间乱序 fixture 测试锚定）。
+- **行为锚定**：既有 GetCommitHistory 全部过滤组合 / 缓存命中 / 增量 prepend / SHA 链断 /
+  日期区间测试未改一字全绿（语义零漂移硬验证）；新增解析单测（换行 / 中文 / `\x01` 消息、
+  root 截断、畸形输入报错）与行为测试（Message 字节级、committer 序、merge、非本地时区
+  DateTime、流式提前终止）。
+
+### 12.3 前端与绑定
+
+前端与 `frontend/wailsjs/` 零改动（GetCommitHistory / GetRepoStats / Invalidate 签名不变，
+绑定零 diff）。

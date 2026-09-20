@@ -29,6 +29,11 @@ echo "--- 维度 1b: 主包 benchmark（NewAppServices）---"
 go test -bench=BenchmarkNewAppServices -benchmem -benchtime=500x ./
 echo
 
+echo "--- 维度 1c: 主包 benchmark（提交历史冷扫）---"
+# fixture 构造 300 提交仓库（每次 benchmark 调用重建，构造耗时段 StopTimer 排除）
+go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./
+echo
+
 echo "--- 维度 3: Go 运行时内存 MemStats 快照 ---"
 go test -run TestPerfMemStats -v ./
 echo

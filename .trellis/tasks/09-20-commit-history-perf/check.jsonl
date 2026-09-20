@@ -1,0 +1,3 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "检查 before/after 量化是否落地、benchmark 是否守规范、禁止无量化盲目优化"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service 覆盖率门禁与测试跟随"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新测试/benchmark 稳定性合规"}

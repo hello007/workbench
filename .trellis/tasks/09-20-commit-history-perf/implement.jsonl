@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "先测后优硬约束：before/after 量化要求、benchmark 规范（testutil fixture、StopTimer）、结果须回写本文档新增提交历史维度"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 覆盖率门禁；新增 CLI 采集层代码须带测试"}
+{"file": "docs/spec/test-stability.md", "reason": "benchmark 稳定性约定（禁 sleep、fixture 排除计时）与测试稳定性规范"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "绑定签名不变承诺的契约背景（前端零改动验证依据）"}
