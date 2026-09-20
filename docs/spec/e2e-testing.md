@@ -26,6 +26,7 @@
   - `WAILS_MOCK_E2E_EXTRA_RETURN_VALUES` 为 E2E 专属补充表（仅影响 UI 断言的方法给具体返回值）
   - `WAILS_MOCK_E2E_RETURN_VALUES` 为 E2E 实际注入的合并表（基础表 + 补充表，后者优先）
 - **禁止**在用例内硬编码与默认表重复的返回值；需要新方法返回值时先改 `wails-mock-defaults.js`
+- **新增 Wails 绑定时两张表都要评估**：基础表缺项时 vitest 侧（setup.js 兜底路径）方法为 undefined 而非 resolve null（与 E2E 的 Proxy 兜底行为不同），组件内调用即 TypeError；至少登记基础表（可返回 null/空值，由组件 v-if 降级），UI 断言需要具体值时再加 E2E 补充表
 - 表外方法经 Proxy 兜底 resolve null（链路不断裂），但影响 UI 断言的方法必须登记具体返回值
 - mock 返回值形状对齐 `frontend/wailsjs/go/main/App.d.ts` / `models.ts` 真实签名（参数个数、字段名）
 

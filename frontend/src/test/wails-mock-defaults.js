@@ -65,7 +65,11 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
 
   // ---- AI 代码审查（PR3）----
   // GetUncommittedDiffText 默认示例 diff（LocalChanges 用户点「AI 审查」才调，挂载不触发）
-  GetUncommittedDiffText: '=== src/app.js ===\n+const x = 1\n'
+  GetUncommittedDiffText: '=== src/app.js ===\n+const x = 1\n',
+
+  // ---- 分支同步摘要（提交历史 BranchSyncBar 挂载即调）----
+  // 默认 null = 摘要条隐藏（BranchSyncBar 对空值有 v-if 防护）；E2E extra 表另有完整对象版本
+  GetBranchSyncInfo: null
 }
 
 /**
@@ -138,6 +142,21 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
       files: ['README.md']
     }
   ],
+  // ---- 分支同步摘要（提交历史摘要条 BranchSyncBar）----
+  // 形状对齐 model.BranchSyncInfo（refs: [{sha, kind, name}]，kind 取 head/local/remote）。
+  // 默认同步态（ahead/behind=0，local 与 remote 共标 HEAD 同 commit），用例按需 override。
+  GetBranchSyncInfo: {
+    branch: 'main',
+    ahead: 0,
+    behind: 0,
+    hasUpstream: true,
+    detached: false,
+    headSha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0',
+    refs: [
+      { sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0', kind: 'local', name: 'main' },
+      { sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0', kind: 'remote', name: 'origin/main' }
+    ]
+  },
   GetGitRemoteURL: {
     remoteUrl: 'https://github.com/demo/demo-repo.git',
     branch: 'main',

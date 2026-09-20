@@ -47,6 +47,48 @@ type BranchList struct {
 	Branches []BranchInfo `json:"branches"`
 }
 
+// BranchSyncInfo 当前分支与上游跟踪分支的同步状态摘要 + 关键 refs 位置映射，
+// 供提交历史视图渲染「本地 vs 远程」同步摘要条与提交行 refs badge。
+type BranchSyncInfo struct {
+	// Branch 当前分支名；detached HEAD 时为短 SHA。
+	Branch string `json:"branch"`
+	// Ahead 本地领先上游的提交数（未推送）。
+	Ahead int `json:"ahead"`
+	// Behind 本地落后上游的提交数（未拉取，基于上次 fetch 的本地远程引用快照）。
+	Behind int `json:"behind"`
+	// HasUpstream 当前分支是否配置跟踪上游；false 时 Ahead/Behind 无意义置 0。
+	HasUpstream bool `json:"hasUpstream"`
+	// Detached HEAD 是否处于分离头指针状态。
+	Detached bool `json:"detached"`
+	// HeadSha 当前 HEAD 指向的完整 SHA。
+	HeadSha string `json:"headSha"`
+	// Refs 关键引用位置映射（HEAD/当前分支/上游），提交行按 sha 匹配渲染 badge。
+	Refs []CommitRef `json:"refs"`
+}
+
+// CommitRef 分支同步摘要的引用位置条目：某个引用当前指向的 commit。
+// Kind 用普通 string 字段 + 常量表达（不用具名 string 类型，规避 wails 不为
+// 具名 string 生成 models.ts 别名导致 npm run build MISSING_EXPORT，
+// 见 docs/spec/cross-layer-contracts.md）。
+type CommitRef struct {
+	// Sha 引用指向的完整 SHA。
+	Sha string `json:"sha"`
+	// Kind 引用类别，取值见 CommitRefKind 系列常量。
+	Kind string `json:"kind"`
+	// Name 引用展示名：HEAD / 分支名（如 master）/ 上游名（如 origin/master）。
+	Name string `json:"name"`
+}
+
+// CommitRef Kind 取值常量。
+const (
+	// CommitRefKindHead 分离头指针状态下的 HEAD 位置标记。
+	CommitRefKindHead = "head"
+	// CommitRefKindLocal 当前本地分支位置标记。
+	CommitRefKindLocal = "local"
+	// CommitRefKindRemote 当前分支上游远程分支位置标记（如 origin/master）。
+	CommitRefKindRemote = "remote"
+)
+
 // GitTag 表示一个 Git 标签
 type GitTag struct {
 	Name     string `json:"name"`     // 标签名

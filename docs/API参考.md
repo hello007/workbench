@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **139** 个导出方法，分布在 15 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 16 个 service/cache。按 24 个业务域分组：
+共 **140** 个导出方法，分布在 15 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 16 个 service/cache。按 24 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -190,6 +190,7 @@
 | 方法 | 签名 | 语义 | 返回值 |
 |---|---|---|---|
 | `GetBranches` | `(path) => Promise<BranchList>` | 获取本地/远程分支列表 | BranchList |
+| `GetBranchSyncInfo` | `(path) => Promise<BranchSyncInfo>` | 当前分支与上游同步摘要（branch/ahead/behind/hasUpstream/detached/headSha）+ refs 位置映射（refs: `[{sha, kind, name}]`，kind 取 head/local/remote），供提交历史摘要条与提交行 badge；refs 不缓存每次现算 | BranchSyncInfo |
 | `CheckoutBranch` | `(path, branchName, isRemote) => Promise<void>` | 切换分支（可选远程分支） | — |
 | `CreateBranch` | `(path, name) => Promise<void>` | 创建分支 | — |
 | `DeleteBranch` | `(path, name, force) => Promise<void>` | 删除分支（可选强制） | — |

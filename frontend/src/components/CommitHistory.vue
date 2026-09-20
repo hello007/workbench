@@ -40,6 +40,12 @@
           />
         </div>
       </div>
+      <!-- 本地 vs 远程同步摘要条：分支名 + ahead/behind 计数 + push/pull/fetch 操作 -->
+      <BranchSyncBar
+        :repo-path="repoPath"
+        @update:info="onSyncInfo"
+        @synced="onBranchSynced"
+      />
     </template>
 
     <div class="filter-bar">
@@ -100,6 +106,14 @@
               <el-tag size="small" type="info" class="files-count-tag">
                 {{ commit.files?.length || 0 }} 文件
               </el-tag>
+              <!-- refs badge：当前分支(primary)/上游(info)/分离 HEAD(danger)，同行共标 -->
+              <el-tag
+                v-for="refItem in refsForCommit(commit.sha)"
+                :key="refItem.kind + ':' + refItem.name"
+                size="small"
+                :type="refTagType(refItem.kind)"
+                class="ref-badge"
+              >{{ refItem.name }}</el-tag>
               <span class="commit-author">
                 <el-icon><User /></el-icon>{{ commit.author }}
               </span>
@@ -225,6 +239,7 @@ import { GetCommitHistory, InvalidateCommitHistoryCache, GetCommitFileDiff, RunA
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
 import CodeReviewResult from './CodeReviewResult.vue'
+import BranchSyncBar from './BranchSyncBar.vue'
 import { handleGitError } from '../utils/error'
 
 const props = defineProps({
@@ -255,6 +270,37 @@ const selectedShas = ref([])
 const rangeDiffVisible = ref(false)
 const rangeBaseSHA = ref('')
 const rangeHeadSHA = ref('')
+
+// 分支同步摘要（由 BranchSyncBar 拉取后经 update:info 上抛），供提交行按 sha 匹配 refs badge
+const branchSync = ref(null)
+
+// refsForCommit 返回指向指定 commit 的 refs 条目（当前分支/上游/分离 HEAD），
+// 顺序依后端 refs 返回序（local 先于 remote），同行共标稳定
+const refsForCommit = (sha) => {
+  const info = branchSync.value
+  if (!info || !Array.isArray(info.refs)) return []
+  return info.refs.filter(r => r.sha === sha)
+}
+
+// badge 语义色：当前分支=primary（默认）、上游=info、分离 HEAD=danger（对齐 frontend-visual-conventions）
+const refTagType = (kind) => {
+  if (kind === 'remote') return 'info'
+  if (kind === 'head') return 'danger'
+  return ''
+}
+
+// 摘要刷新（挂载/切仓库/子组件拉取成功），更新 refs 映射
+const onSyncInfo = (info) => {
+  branchSync.value = info
+}
+
+// push/pull/fetch 操作成功：前置清提交历史缓存（HEAD 可能变化，绕过命中与增量确保全量重扫）后重载
+const onBranchSynced = async () => {
+  expandedCommits.value.clear()
+  selectedShas.value = []
+  await InvalidateCommitHistoryCache(props.repoPath)
+  loadCommits(true)
+}
 
 // AI 代码审查状态（审指定 commit 全量 diff）
 // 复用 ai-task:done 监听器（onAiTaskDone 按 currentReviewTaskId 路由到问题清单）
@@ -478,6 +524,8 @@ watch(() => props.repoPath, () => {
   searchKeyword.value = ''
   filter.value = { author: '', dateRange: null, filePath: '' }
   selectedShas.value = []
+  // 清旧仓库 refs 映射：子组件重拉摘要成功前/失败时，防旧仓库 badge 数据串入新仓库提交行
+  branchSync.value = null
   loadCommits(true)
 })
 
@@ -614,6 +662,12 @@ defineExpose({ loadCommits, handleRefresh })
 }
 .files-count-tag {
   flex-shrink: 0;
+}
+.ref-badge {
+  flex-shrink: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .commit-author {
   display: inline-flex;

@@ -15,6 +15,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetCommitHistory: vi.fn(),
   GetCommitFileDiff: vi.fn(),
   GetRangeDiff: vi.fn(),
+  GetBranchSyncInfo: vi.fn(),
   InvalidateCommitHistoryCache: vi.fn(),
   RunAiFunction: vi.fn(),
   CancelAiTask: vi.fn()
@@ -64,7 +65,7 @@ const stubs = {
   // el-text 用 v-bind="$attrs" 让 class="sha-text" 落到 span 上，便于 .sha-text 选择器命中
   'el-text': { template: '<span v-bind="$attrs"><slot /></span>', props: ['type', 'size', 'strong'] },
   'el-tag': {
-    template: '<span class="el-tag"><slot /></span>',
+    template: '<span class="el-tag" :data-type="type"><slot /></span>',
     props: ['type', 'size']
   },
   'el-checkbox': {
@@ -94,6 +95,20 @@ const stubs = {
     template: '<div class="code-review-stub" v-if="modelValue" :data-loading="loading"><span v-for="(i, idx) in issues" :key="idx" class="stub-issue" @click="$emit(\'locate-file\', i.file)">{{ i.file }}</span></div>',
     props: ['modelValue', 'issues', 'summary', 'loading'],
     emits: ['update:modelValue', 'locate-file']
+  },
+  // BranchSyncBar 内部依赖的 element 组件 stub（BranchSyncBar 本身真实渲染以测 badge 联动）
+  'el-tooltip': { template: '<span class="el-tooltip"><slot /></span>', props: ['content', 'placement'] },
+  'el-dropdown': {
+    template: '<div class="el-dropdown"><button class="dropdown-main-btn" :disabled="disabled" @click="$emit(\'click\', $event)"><slot /></button><slot name="dropdown" /></div>',
+    props: ['splitButton', 'type', 'size', 'disabled'],
+    emits: ['click', 'command']
+  },
+  'el-dropdown-menu': { template: '<div class="el-dropdown-menu"><slot /></div>' },
+  'el-dropdown-item': { template: '<div class="el-dropdown-item"><slot /></div>', props: ['command'] },
+  PushResultDialog: {
+    name: 'PushResultDialog',
+    template: '<div class="push-result-stub" />',
+    props: ['modelValue', 'output']
   }
 }
 const directives = { loading: () => {} }
@@ -636,5 +651,133 @@ describe('CommitHistory.vue', () => {
     // 未调 EventsOff（会清同名全部监听器，误伤 AiFunctionPanel / LocalChanges）
     expect(EventsOff).not.toHaveBeenCalled()
     wrapper = null
+  })
+
+  // ===== 分支同步摘要条（BranchSyncBar）联动与 refs badge =====
+
+  // 摘要数据基线（形状对齐 model.BranchSyncInfo），refs 按 sha 匹配提交行
+  const syncInfoBase = (over = {}) => ({
+    branch: 'main',
+    ahead: 0,
+    behind: 0,
+    hasUpstream: true,
+    detached: false,
+    headSha: '1111111111111111111111111111111111111111',
+    refs: [],
+    ...over
+  })
+
+  it('摘要条按 sha 匹配渲染 refs badge：local 与 remote 同行共标', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    const sha1 = '1111111111111111111111111111111111111111'
+    const sha2 = '2222222222222222222222222222222222222222'
+    GetCommitHistory.mockResolvedValue([
+      commit({ sha: sha1, shortSha: '11111111' }),
+      commit({ sha: sha2, shortSha: '22222222' })
+    ])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({
+      headSha: sha1,
+      refs: [
+        { sha: sha1, kind: 'local', name: 'main' },
+        { sha: sha1, kind: 'remote', name: 'origin/main' }
+      ]
+    }))
+    wrapper = createWrapper()
+    await flushPromises()
+    const cards = wrapper.findAll('.commit-card')
+    // HEAD commit 同行共标 local + remote 两个 badge（远程头与本地头重合可见）
+    const headBadges = cards[0].findAll('.ref-badge')
+    expect(headBadges.length).toBe(2)
+    expect(headBadges[0].text()).toBe('main')
+    expect(headBadges[0].attributes('data-type')).toBe('') // local=primary 默认
+    expect(headBadges[1].text()).toBe('origin/main')
+    expect(headBadges[1].attributes('data-type')).toBe('info')
+    // 非远程头 commit 无 badge
+    expect(cards[1].findAll('.ref-badge').length).toBe(0)
+  })
+
+  it('ahead 时 remote badge 停在已推送 commit（远程头位置可见）', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    const sha1 = '1111111111111111111111111111111111111111'
+    const sha2 = '2222222222222222222222222222222222222222'
+    GetCommitHistory.mockResolvedValue([
+      commit({ sha: sha1, shortSha: '11111111' }),
+      commit({ sha: sha2, shortSha: '22222222' })
+    ])
+    // 本地 HEAD=sha1，远程停在 sha2（本地领先）
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({
+      ahead: 1,
+      headSha: sha1,
+      refs: [
+        { sha: sha1, kind: 'local', name: 'main' },
+        { sha: sha2, kind: 'remote', name: 'origin/main' }
+      ]
+    }))
+    wrapper = createWrapper()
+    await flushPromises()
+    const cards = wrapper.findAll('.commit-card')
+    expect(cards[0].findAll('.ref-badge').length).toBe(1)
+    expect(cards[0].find('.ref-badge').text()).toBe('main')
+    // remote badge 单独落在旧 commit 上
+    const remoteBadges = cards[1].findAll('.ref-badge')
+    expect(remoteBadges.length).toBe(1)
+    expect(remoteBadges[0].text()).toBe('origin/main')
+    expect(remoteBadges[0].attributes('data-type')).toBe('info')
+  })
+
+  it('detached HEAD 摘要渲染 head badge（danger 语义色）', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    const sha1 = '1111111111111111111111111111111111111111'
+    GetCommitHistory.mockResolvedValue([commit({ sha: sha1, shortSha: '11111111' })])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({
+      detached: true,
+      branch: '11111111',
+      hasUpstream: false,
+      refs: [{ sha: sha1, kind: 'head', name: 'HEAD' }]
+    }))
+    wrapper = createWrapper()
+    await flushPromises()
+    const badge = wrapper.find('.commit-card .ref-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('HEAD')
+    expect(badge.attributes('data-type')).toBe('danger')
+  })
+
+  it('BranchSyncBar emit synced 后清缓存并重载提交列表', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo, InvalidateCommitHistoryCache } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({ ahead: 1 }))
+    InvalidateCommitHistoryCache.mockResolvedValue()
+    wrapper = createWrapper()
+    await flushPromises()
+    GetCommitHistory.mockClear()
+    InvalidateCommitHistoryCache.mockClear()
+    GetCommitHistory.mockResolvedValue([commit()])
+    // 模拟摘要条 push 成功：emit synced（对齐 BranchSyncBar doPush 成功路径）
+    const bar = wrapper.findComponent({ name: 'BranchSyncBar' })
+    expect(bar.exists()).toBe(true)
+    bar.vm.$emit('synced')
+    await flushPromises()
+    // 前置清缓存（绕过命中与增量，确保全量重扫）后重载
+    expect(InvalidateCommitHistoryCache).toHaveBeenCalledWith('/repo/A')
+    expect(GetCommitHistory).toHaveBeenCalledWith('/repo/A', 20, 0, { author: '', keyword: '', filePath: '' })
+  })
+
+  it('切仓库清空 refs 映射：旧仓库 badge 不串入新仓库提交行', async () => {
+    const { GetCommitHistory, GetBranchSyncInfo } = await import('../../../wailsjs/go/main/App')
+    const shaOld = '1111111111111111111111111111111111111111'
+    GetCommitHistory.mockResolvedValue([commit({ sha: shaOld, shortSha: '11111111' })])
+    GetBranchSyncInfo.mockResolvedValue(syncInfoBase({
+      headSha: shaOld,
+      refs: [{ sha: shaOld, kind: 'local', name: 'old-repo-branch' }]
+    }))
+    wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.findAll('.ref-badge').length).toBe(1)
+    // 切仓库且新仓库摘要拉取失败（摘要条静默降级不 emit）：旧仓库 refs 不得残留
+    GetBranchSyncInfo.mockRejectedValue(new Error('not a repo'))
+    await wrapper.setProps({ repoPath: '/repo/B' })
+    await flushPromises()
+    expect(wrapper.findAll('.ref-badge').length).toBe(0)
   })
 })

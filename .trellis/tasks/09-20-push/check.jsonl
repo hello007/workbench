@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 model.BranchSyncInfo/绑定是否同步 wailsjs 三处、具名类型别名是否手补、监听器注销是否用 EventsOn 闭包范式"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service/前端覆盖率是否达门禁基线（service ≥76%、前端 ≥70%）且测试跟随新代码"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查摘要条/badge 视觉实现是否符合语义色、间距四档、布局约定"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增前端测试是否守稳定性规范（无 waitForTimeout、mock 数据源对齐 wails-mock-defaults）"}

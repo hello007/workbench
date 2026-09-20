@@ -683,6 +683,16 @@ func (a *App) GetBranches(path string) (*model.BranchList, error) {
 	return a.gitSvc.GetBranches(path)
 }
 
+// GetBranchSyncInfo 获取当前分支与上游的同步状态摘要 + 关键 refs 位置映射。
+// 一次 IPC 聚合返回摘要与 refs，供提交历史同步摘要条（BranchSyncBar）与提交行 refs badge
+// 渲染；refs 随 push/fetch 变化，不入 CommitHistoryCache，每次现算。
+func (a *App) GetBranchSyncInfo(path string) (*model.BranchSyncInfo, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return service.ComputeBranchSyncInfo(path)
+}
+
 // CheckoutBranch 切换分支
 func (a *App) CheckoutBranch(path string, branchName string, isRemote bool) error {
 	if path == "" {

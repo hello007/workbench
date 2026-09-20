@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 GetBranchSyncInfo 绑定与 model.BranchSyncInfo struct 须手动同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；具名类型不生成别名须手补；EventsOn 返回闭包精准注销范式（CommitHistory 多组件共听场景）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "摘要条 BranchSyncBar 与提交行 refs badge 的新增视觉须守语义色选色、四档间距/圆角、卡片 header 布局约定"}
+{"file": "docs/spec/design-tokens.md", "reason": "badge 本地分支/远程分支分色须用现有语义 token（primary/info 等）+ 蓝灰色阶，禁新增游离色值"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增后端 ahead/behind 抽取共享函数与 refs 遍历代码影响 service ≥76% 基线门禁；前端 CommitHistory 改动影响 ≥70% 硬门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "CommitHistory 组件测试新增摘要条交互用例时须守测试稳定性规范（自动重试、禁 waitForTimeout 等既有约定）"}

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"workbench/model"
 	"workbench/util"
 )
@@ -208,13 +210,13 @@ func (s *DashboardService) ComputeRepoStatus(repoPath string) model.RepoStatus {
 		}
 		// detached 无上游可比，ahead/behind 置 0
 	} else {
-		// 上游检测：git rev-parse --abbrev-ref @{u}，无上游时 git 非零退出
-		if _, err := s.gitCmd.Execute(gitRoot, "rev-parse", "--abbrev-ref", "@{u}"); err == nil {
+		// 上游检测 + ahead/behind 共享计算（与 ComputeBranchSyncInfo 复用，防两处漂移）
+		ahead, behind, hasUpstream, abErr := ComputeAheadBehind(gitRoot)
+		if hasUpstream {
 			status.HasUpstream = true
-			ahead, behind, err := s.computeAheadBehind(gitRoot)
-			if err != nil {
+			if abErr != nil {
 				// 远程引用可能不存在（未 fetch），降级 0/0 + 警告，不阻塞
-				status.Error = fmt.Sprintf("计算 ahead/behind 失败: %v", err)
+				status.Error = fmt.Sprintf("计算 ahead/behind 失败: %v", abErr)
 			} else {
 				status.Ahead = ahead
 				status.Behind = behind
@@ -236,25 +238,145 @@ func (s *DashboardService) ComputeRepoStatus(repoPath string) model.RepoStatus {
 	return status
 }
 
-// computeAheadBehind 用 git rev-list --left-right --count @{u}...HEAD 计算 ahead/behind。
-// 左值=behind（远程领先本地），右值=ahead（本地领先远程）。
-// 基于本地已有远程引用（上次 fetch/clone 快照），不主动 fetch。
-func (s *DashboardService) computeAheadBehind(gitRoot string) (ahead, behind int, err error) {
+// ComputeAheadBehind 计算当前分支相对上游跟踪分支的 ahead/behind（含上游探测）。
+// 导出共享：ComputeRepoStatus 与 ComputeBranchSyncInfo 复用同一计算，防两处漂移。
+// 语义：git rev-list --left-right --count @{u}...HEAD，基于本地已有远程引用
+// （上次 fetch/clone 快照），不主动 fetch。
+// 返回约定：
+//   - hasUpstream=false：分支无跟踪上游，ahead/behind 置 0，err=nil（降级非错误）
+//   - hasUpstream=true 且 err!=nil：有上游但 rev-list 失败（远程引用未 fetch 等），
+//     ahead/behind 置 0，由调用方决定降级方式
+func ComputeAheadBehind(gitRoot string) (ahead, behind int, hasUpstream bool, err error) {
+	gitCmd := util.NewGitCommand()
+	// 上游检测：git rev-parse --abbrev-ref @{u}，无上游时 git 非零退出
+	if _, err := gitCmd.Execute(gitRoot, "rev-parse", "--abbrev-ref", "@{u}"); err != nil {
+		return 0, 0, false, nil
+	}
 	// @{u}...HEAD 三点表示法：左右各自独有的提交数
 	// 输出格式："behind\tahead"（左=上游独有=behind，右=HEAD独有=ahead）
-	output, err := s.gitCmd.Execute(gitRoot, "rev-list", "--left-right", "--count", "@{u}...HEAD")
+	output, err := gitCmd.Execute(gitRoot, "rev-list", "--left-right", "--count", "@{u}...HEAD")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, true, err
 	}
 	output = strings.TrimSpace(output)
 	parts := strings.Split(output, "\t")
 	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("rev-list 输出格式异常: %q", output)
+		return 0, 0, true, fmt.Errorf("rev-list 输出格式异常: %q", output)
 	}
 	behind, berr := strconv.Atoi(strings.TrimSpace(parts[0]))
 	ahead, aerr := strconv.Atoi(strings.TrimSpace(parts[1]))
 	if berr != nil || aerr != nil {
-		return 0, 0, fmt.Errorf("rev-list 数值解析失败: %q", output)
+		return 0, 0, true, fmt.Errorf("rev-list 数值解析失败: %q", output)
 	}
-	return ahead, behind, nil
+	return ahead, behind, true, nil
+}
+
+// ComputeBranchSyncInfo 计算单仓库当前分支与上游的同步状态摘要 + refs 位置映射（纯查询）。
+// 供 App.GetBranchSyncInfo 薄委托暴露：一次调用聚合摘要与 refs，避免前端多次 IPC。
+// refs 不入 CommitHistoryCache（随 push/fetch 变化），每次调用现算（refs 数量极小，成本可忽略）。
+//
+// ahead/behind 语义与 ComputeRepoStatus 一致（共享 ComputeAheadBehind）。边界降级：
+//   - 空仓库（unborn branch）：返回分支名 + 零值计数 + 空 refs，不报错
+//   - detached HEAD：Detached=true，Branch=短 SHA，refs 仅含 HEAD 条目
+//   - 无上游：HasUpstream=false，Ahead/Behind 置 0，refs 无 remote 条目
+func ComputeBranchSyncInfo(repoPath string) (*model.BranchSyncInfo, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	gitCmd := util.NewGitCommand()
+
+	info := &model.BranchSyncInfo{Refs: []model.CommitRef{}}
+
+	// 当前分支：git branch --show-current，detached HEAD 时返回空（与 ComputeRepoStatus 同语义）
+	branch, err := gitCmd.Execute(gitRoot, "branch", "--show-current")
+	if err != nil {
+		return nil, fmt.Errorf("获取分支失败: %w", err)
+	}
+	branch = strings.TrimSpace(branch)
+
+	repo, err := git.PlainOpen(gitRoot)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	}
+
+	head, headErr := repo.Head()
+	if headErr != nil {
+		if branch != "" {
+			// unborn branch（空仓库有分支名但无 commit）：降级分支名 + 零值，不报错
+			info.Branch = branch
+			return info, nil
+		}
+		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", headErr)
+	}
+	info.HeadSha = head.Hash().String()
+
+	// detached HEAD：branch --show-current 返回空串；Branch 展示短 SHA（对齐 ComputeRepoStatus），
+	// refs 仅含 HEAD 条目（detached 时 @{u} 无法解析上游，无 local/remote 条目）
+	if branch == "" {
+		info.Detached = true
+		info.Branch = info.HeadSha[:8]
+		info.Refs = append(info.Refs, model.CommitRef{
+			Sha:  info.HeadSha,
+			Kind: model.CommitRefKindHead,
+			Name: "HEAD",
+		})
+		return info, nil
+	}
+	info.Branch = branch
+
+	// ahead/behind + 上游检测（与 ComputeRepoStatus 共享同一计算）
+	ahead, behind, hasUpstream, abErr := ComputeAheadBehind(gitRoot)
+	info.HasUpstream = hasUpstream
+	if abErr != nil {
+		// 有上游但 rev-list 失败（远程引用不存在未 fetch），降级 0/0 + 警告日志，不阻塞
+		Logger().Warn("计算 ahead/behind 失败，降级 0/0", "path", repoPath, "err", abErr)
+	} else {
+		info.Ahead = ahead
+		info.Behind = behind
+	}
+
+	// 实际上游名：git rev-parse --abbrev-ref @{u}（MVP 上游即 origin/<branch>，以实际解析为准）
+	upstreamName := ""
+	if hasUpstream {
+		if out, uerr := gitCmd.Execute(gitRoot, "rev-parse", "--abbrev-ref", "@{u}"); uerr == nil {
+			upstreamName = strings.TrimSpace(out)
+		}
+	}
+
+	// refs 遍历：过滤当前本地分支与上游远程引用两类条目。非 detached 时 HEAD 与当前分支
+	// 同 commit，位置由 local 条目承载（detached 的 HEAD 条目已在上方单独构造）
+	localRefName := plumbing.ReferenceName("refs/heads/" + branch)
+	remoteRefName := plumbing.ReferenceName("refs/remotes/" + upstreamName)
+	iter, err := repo.References()
+	if err != nil {
+		return nil, fmt.Errorf("遍历仓库引用失败: %w", err)
+	}
+	defer iter.Close()
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Type() != plumbing.HashReference {
+			return nil
+		}
+		switch ref.Name() {
+		case localRefName:
+			info.Refs = append(info.Refs, model.CommitRef{
+				Sha:  ref.Hash().String(),
+				Kind: model.CommitRefKindLocal,
+				Name: branch,
+			})
+		case remoteRefName:
+			// upstreamName 为空时 remoteRefName 不可能匹配任何引用，此分支仅在有效上游时命中
+			info.Refs = append(info.Refs, model.CommitRef{
+				Sha:  ref.Hash().String(),
+				Kind: model.CommitRefKindRemote,
+				Name: upstreamName,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("遍历仓库引用失败: %w", err)
+	}
+
+	return info, nil
 }
