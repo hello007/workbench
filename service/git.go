@@ -939,8 +939,10 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 
 // ===== 标签管理 =====
 
-// ListTags 列出仓库所有标签。
-// 用 git for-each-ref 以 Tab 分隔输出 name/objecttype/objectname/*objectname/taggername/taggerdate/contents:subject。
+// ListTags 列出仓库所有标签，按版本语义倒序排列（新版本在上，v1.10 排在 v1.2 之上）。
+// 排序由 git for-each-ref --sort=-version:refname 决定：版本段按数值比较，
+// 非版本名标签（如 release-2024）退回字典序参与排列。
+// 用 Tab 分隔输出 name/objecttype/objectname/*objectname/taggername/taggerdate/contents:subject。
 // objecttype=="tag" 为注释标签（sha 取 *objectname 即指向的提交，含 tagger/message），
 // 否则为轻量标签（sha 取 objectname 即提交本身，无 tagger/message）。
 func (s *GitService) ListTags(repoPath string) ([]model.GitTag, error) {
@@ -951,7 +953,7 @@ func (s *GitService) ListTags(repoPath string) ([]model.GitTag, error) {
 
 	// taggerdate 取 :relative（相对时间）；:format-relative 非合法 git 语法。
 	const format = "%(refname:short)%09%(objecttype)%09%(objectname)%09%(*objectname)%09%(taggername)%09%(taggerdate:relative)%09%(contents:subject)"
-	output, err := s.gitCmd.Execute(gitRoot, "for-each-ref", "--format="+format, "refs/tags")
+	output, err := s.gitCmd.Execute(gitRoot, "for-each-ref", "--sort=-version:refname", "--format="+format, "refs/tags")
 	if err != nil {
 		return nil, fmt.Errorf("获取标签列表失败: %w", err)
 	}

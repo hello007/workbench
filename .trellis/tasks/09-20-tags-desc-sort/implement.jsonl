@@ -1,0 +1,2 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 覆盖率门禁；ListTags 排序改动须带测试"}
+{"file": "docs/spec/test-stability.md", "reason": "新增测试守稳定性规范（真实 git fixture、禁 sleep）"}

@@ -136,6 +136,77 @@ func TestListTags_LightweightAndAnnotated(t *testing.T) {
 	}
 }
 
+// tagNames 提取标签名列表，用于失败信息展示完整顺序。
+func tagNames(tags []model.GitTag) []string {
+	names := make([]string, len(tags))
+	for i := range tags {
+		names[i] = tags[i].Name
+	}
+	return names
+}
+
+// indexOfTag 返回标签在列表中的下标（未找到返回 -1）。
+func indexOfTag(tags []model.GitTag, name string) int {
+	for i := range tags {
+		if tags[i].Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestListTags_VersionSortDescending 版本语义倒序（--sort=-version:refname）：
+// v1.10 排在 v1.9 与 v1.2 之上（字典序倒序会错排为 v1.9 > v1.2 > v1.10）；
+// 轻量/注释标签混合下排序一致；非版本名标签（release-2024）退回字典序正常列出。
+func TestListTags_VersionSortDescending(t *testing.T) {
+	repo := testutil.InitTempRepo(t)
+	svc := NewGitService()
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+
+	// 创建顺序刻意与预期顺序错开，排序完全由 git --sort 决定；轻量/注释交错验证类型不影响顺序
+	testutil.RunGit(t, repo, "tag", "v1.2")                                     // 轻量
+	testutil.RunGit(t, repo, "tag", "-a", "-m", "release 2024", "release-2024") // 注释（非版本名）
+	testutil.RunGit(t, repo, "tag", "v1.10")                                    // 轻量
+	testutil.RunGit(t, repo, "tag", "-a", "-m", "release 1.9", "v1.9")          // 注释
+
+	tags, err := svc.ListTags(repo)
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	if len(tags) != 4 {
+		t.Fatalf("expected 4 tags, got %d: %+v", len(tags), tags)
+	}
+
+	// 版本语义倒序锚定：idx(v1.10) < idx(v1.9) < idx(v1.2)。
+	// 断言索引关系而非绝对位置，使非版本名标签的位置差异不影响版本组内锚定。
+	older := map[string]string{"v1.10": "v1.9", "v1.9": "v1.2"}
+	for newer, olderName := range older {
+		ni, oi := indexOfTag(tags, newer), indexOfTag(tags, olderName)
+		if ni < 0 || oi < 0 {
+			t.Fatalf("tag missing: %s@%d %s@%d; order: %v", newer, ni, olderName, oi, tagNames(tags))
+		}
+		if ni > oi {
+			t.Errorf("版本语义倒序 %s 应排在 %s 之上; order: %v", newer, olderName, tagNames(tags))
+		}
+	}
+
+	// v1.10 > v1.2 为核心锚定：字典序会把 "v1.10" 排在 "v1.2" 之后，版本序必须反转
+	if indexOfTag(tags, "v1.10") > indexOfTag(tags, "v1.2") {
+		t.Errorf("v1.10 应按版本序排在 v1.2 之上（字典序错排场景）; order: %v", tagNames(tags))
+	}
+
+	// 非版本名标签退回字典序，仍应正常列出且类型解析正确
+	rel := findTag(tags, "release-2024")
+	if rel == nil {
+		t.Fatalf("非版本名标签 release-2024 应正常列出; order: %v", tagNames(tags))
+	}
+	if rel.Type != "annotated" || rel.Message != "release 2024" {
+		t.Errorf("release-2024 expected annotated/'release 2024', got %s/%q", rel.Type, rel.Message)
+	}
+}
+
 // ===== CreateTag =====
 
 // TestCreateTag_Lightweight message 为空创建轻量标签。
