@@ -590,3 +590,37 @@ SettingsPanel 垂直间距紧凑化：弹窗高度 620→560px、段落标题 18
 ### Next Steps
 
 - None - task complete
+
+
+## Session 73: 提交历史加载提速：采集层 CLI 化 42.7×（12.84s→0.30s）
+
+**Date**: 2026-09-20
+**Task**: 提交历史加载提速：采集层 CLI 化 42.7×（12.84s→0.30s）
+**Branch**: `master`
+
+### Summary
+
+确诊提交历史加载慢根因：go-git 逐条树 diff（每条 ≥2 树对象读 × 5000 上限），冷扫 12.84s。采集层换 CLI git log 批量/流式（%x00/%x01 分隔 + %B 字节级对齐 + --name-only 批量文件 + first-parent merge + quotePath=false），过滤/缓存/前端零行为变化，既有测试未改一字全过。before/after 量化落 perf-baseline.md（--diff-merges 需 git ≥2.31 已记录）。独立审核 4 中 1 提示全处置：解析头部强校验防静默错（作者/文件名含 \x01）、失败 slog.Warn 透传、Since/Until 时间基统一 author 锚定、缓存键去硬编码、30s 超时上限记录。主包 + 集成（fast-import 5001 提交）+ 前端全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f942a57` | (see git log) |
+| `9852770` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
