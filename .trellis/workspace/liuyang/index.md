@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 74
-- **Last Active**: 2026-09-20
+- **Total Sessions**: 75
+- **Last Active**: 2026-09-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~659 | Active |
+| `journal-2.md` | ~700 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 75 | 2026-09-22 | 浏览器访问模式：全功能暴露到浏览器（PR1-PR6 完整交付） | `10c4801`, `067f370`, `50d3757`, `3b7ea48`, `094a0c4`, `ccd4207`, `405f7ed`, `7b87b7c`, `2cfd0e6` | `master` |
 | 74 | 2026-09-20 | 标签列表版本语义倒序排列 | `01577b6` | `master` |
 | 73 | 2026-09-20 | 提交历史加载提速：采集层 CLI 化 42.7×（12.84s→0.30s） | `f942a57`, `9852770` | `master` |
 | 72 | 2026-09-20 | 提交行 origin badge warning 橙实底醒目标识 | `2b0bf1a` | `master` |

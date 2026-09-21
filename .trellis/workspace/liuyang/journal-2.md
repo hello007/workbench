@@ -657,3 +657,44 @@ ListTags 的 for-each-ref 加 --sort=-version:refname：新版本在上（v1.10 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 75: 浏览器访问模式：全功能暴露到浏览器（PR1-PR6 完整交付）
+
+**Date**: 2026-09-22
+**Task**: 浏览器访问模式：全功能暴露到浏览器（PR1-PR6 完整交付）
+**Branch**: `master`
+
+### Summary
+
+WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设置可关）+ --serve 无头模式。PR1 EventSink 收敛（5 处直调 runtime.EventsEmit 改造，修 nil-ctx fatal）+ token 中间件；PR2 /api/rpc reflect 翻译 153 绑定方法 + 对话框守卫（防 serve 模式杀进程）+ 32MB body 上限；PR3 WebSocket 事件 hub（升级前认证、gorilla/websocket 零新增依赖）；PR4 前端 transport polyfill（RPC Proxy + 事件 shim + 断线重连 + token 门，业务组件零改动）；PR5 桌面同开 HTTP（webServeManager + multicastSink + token 热轮换）+ 设置页网络访问分区；PR6 文档六件套同步。安全默认：token 必开恒定时间比较、默认 127.0.0.1、0600 落盘、非回环双保险确认。顺带修复 CreateDiffTempDir 缺 MkdirAll 产品缺陷。spec 沉淀 docs/spec/browser-channel.md。二期（交互式 agent 会话等）归档 docs/浏览器模式-二期扩展.md。覆盖门禁全绿：server 93%/service 79.2%/model 89.4%/前端 84%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `10c4801` | (see git log) |
+| `067f370` | (see git log) |
+| `50d3757` | (see git log) |
+| `3b7ea48` | (see git log) |
+| `094a0c4` | (see git log) |
+| `ccd4207` | (see git log) |
+| `405f7ed` | (see git log) |
+| `7b87b7c` | (see git log) |
+| `2cfd0e6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
