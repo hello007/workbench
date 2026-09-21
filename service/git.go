@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"workbench/model"
 	"workbench/util"
@@ -569,11 +568,11 @@ func (s *GitService) DiscardChanges(dirPath string, filePaths []string) error {
 
 	return nil
 }
+
+// safeEmit 推送批量拉取进度事件（经 EventSink 出口）。
+// ctx 为 nil 或非 Wails 上下文（无 events 键）时静默跳过，防护集中在 EventSink。
 func safeEmit(ctx context.Context, event string, data ...interface{}) {
-	if ctx == nil || ctx.Value("events") == nil {
-		return
-	}
-	runtime.EventsEmit(ctx, event, data...)
+	emitEvent(NewWailsEventSink(ctx), event, data...)
 }
 
 // Commit 选择性提交：仅提交 files 列表中的文件（pathspec 语义）。

@@ -36,6 +36,11 @@ func CleanupDiffTempDir() {
 // CreateDiffTempDir 创建一次外部 diff 会话的临时目录，返回目录路径。
 // os.MkdirTemp 保证并发/连续调用原子唯一，避免时间戳粒度撞名互覆。
 func CreateDiffTempDir() (string, error) {
+	// os.MkdirTemp 不创建父目录：根目录被启动期清理（CleanupDiffTempDir 删除
+	// 整个根）或外部删除后，须先重建，否则 Mkdir 因父目录缺失报「找不到文件」
+	if err := os.MkdirAll(DiffTempRoot(), 0o755); err != nil {
+		return "", fmt.Errorf("创建外部 diff 临时根目录失败: %w", err)
+	}
 	dir, err := os.MkdirTemp(DiffTempRoot(), "")
 	if err != nil {
 		return "", fmt.Errorf("创建外部 diff 临时目录失败: %w", err)

@@ -121,6 +121,24 @@ func TestCreateDiffTempDir_Unique(t *testing.T) {
 	}
 }
 
+// TestCreateDiffTempDir_MissingRootRecreated 根目录被清理（启动期 CleanupDiffTempDir
+// 删除整个根）后创建应自动重建父目录，而非报「找不到文件」。
+func TestCreateDiffTempDir_MissingRootRecreated(t *testing.T) {
+	root := useTempDiffRoot(t)
+	CleanupDiffTempDir() // 确保根目录不存在
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("前置条件失败: 根目录应不存在, err=%v", err)
+	}
+
+	dir, err := CreateDiffTempDir()
+	if err != nil {
+		t.Fatalf("根目录缺失时 CreateDiffTempDir 应自动重建: %v", err)
+	}
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("临时目录应位于重建的根下, got %q", dir)
+	}
+}
+
 func TestWriteDiffTempFile_InvalidInput(t *testing.T) {
 	if _, err := WriteDiffTempFile("", "left", "a.go", "x"); err == nil {
 		t.Error("空临时目录应返回错误")

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"workbench/model"
 	"workbench/util"
 )
 
@@ -131,14 +132,20 @@ func TestNewUpdateService_Construct(t *testing.T) {
 	}
 }
 
-// TestUpdateService_SetContext SetContext 后 ctx 生效。
+// TestUpdateService_SetContext SetContext 后事件出口已注入，且 emit 安全（nil/非 Wails ctx 不 fatal）。
 func TestUpdateService_SetContext(t *testing.T) {
 	svc := NewUpdateService()
-	ctx := context.Background()
-	svc.SetContext(ctx)
-	if svc.ctx != ctx {
-		t.Error("SetContext 未生效")
+	if svc.sink != nil {
+		t.Error("构造后 sink 应为 nil（未注入上下文前不推送事件）")
 	}
+	svc.SetContext(nil)
+	if svc.sink == nil {
+		t.Error("SetContext 未注入事件出口")
+	}
+	// nil ctx 与非 Wails 上下文（无 events 键）下 Emit 均须静默跳过，不得触发 wails runtime fatal
+	svc.sink.Emit("update:download-progress", model.DownloadProgress{})
+	svc.SetContext(context.Background())
+	svc.sink.Emit("update:download-progress", model.DownloadProgress{})
 }
 
 // TestHideWindow 返回隐藏窗口的 SysProcAttr。

@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"workbench/model"
 	"workbench/util"
 )
@@ -55,6 +54,7 @@ const aiTaskOutputCleanTTL = 24 * time.Hour
 // 获取槽位后才创建执行 ctx（超时起算后移，排队等待不侵蚀执行预算）。
 type AiFunctionService struct {
 	ctx            context.Context
+	sink           EventSink // 事件出口（ai-task:* 事件推送），构造注入；ctx 另用于任务生命周期
 	configPath     string
 	mu             sync.Mutex
 	tasks          map[string]*aiTaskRuntime
@@ -92,6 +92,7 @@ func NewAiFunctionService(ctx context.Context, configPath string) *AiFunctionSer
 	dataDir := filepath.Dir(configPath)
 	return &AiFunctionService{
 		ctx:            ctx,
+		sink:           NewWailsEventSink(ctx),
 		configPath:     configPath,
 		tasks:          make(map[string]*aiTaskRuntime),
 		concurrencySem: make(chan struct{}, aiTaskMaxConcurrent),
@@ -1313,12 +1314,9 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	s.emit("ai-task:done", result)
 }
 
-// emit 推送 Wails 事件（测试环境 ctx 为 nil 时静默跳过）
+// emit 推送事件（经 EventSink 出口；ctx 为 nil 或非 Wails 上下文时静默跳过）
 func (s *AiFunctionService) emit(name string, data ...any) {
-	if s.ctx == nil {
-		return
-	}
-	runtime.EventsEmit(s.ctx, name, data...)
+	emitEvent(s.sink, name, data...)
 }
 
 // pipeReader 抽象 stdout 管道（测试替换用）

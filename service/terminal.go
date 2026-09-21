@@ -8,22 +8,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"workbench/model"
 	"workbench/util"
 )
 
 // TerminalService 终端服务，管理终端会话的创建、输入、切换目录、调整大小和关闭
 type TerminalService struct {
-	ctx      context.Context
+	sink     EventSink // 事件出口（terminal-output/terminal-exit 推送），构造注入
 	sessions map[string]*model.TerminalSession
 	mu       sync.Mutex
 }
 
-// NewTerminalService 创建终端服务实例
+// NewTerminalService 创建终端服务实例。
+// ctx 为 Wails 上下文，用于构造事件出口；传 nil（单测等无 Wails 上下文场景）
+// 时事件推送静默跳过（防护集中在 EventSink，修复原直调 EventsEmit 的 fatal 隐患）。
 func NewTerminalService(ctx context.Context) *TerminalService {
 	return &TerminalService{
-		ctx:      ctx,
+		sink:     NewWailsEventSink(ctx),
 		sessions: make(map[string]*model.TerminalSession),
 	}
 }
@@ -179,7 +180,7 @@ func toWslPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
 }
 
-// startOutputPump 输出泵，持续读取 PTY 输出并向前端发送事件
+// startOutputPump 输出泵，持续读取 PTY 输出并经事件出口推送给前端
 func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyProcess) {
 	buf := make([]byte, 4096)
 	for {
@@ -190,12 +191,12 @@ func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyPro
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				runtime.EventsEmit(s.ctx, "terminal-exit", sessionID)
+				emitEvent(s.sink, "terminal-exit", sessionID)
 			}
 			return
 		}
-		if n > 0 && s.ctx != nil {
-			runtime.EventsEmit(s.ctx, "terminal-output", sessionID, string(buf[:n]))
+		if n > 0 {
+			emitEvent(s.sink, "terminal-output", sessionID, string(buf[:n]))
 		}
 	}
 }
@@ -210,7 +211,7 @@ func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProces
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				runtime.EventsEmit(s.ctx, "terminal-exit", sessionID)
+				emitEvent(s.sink, "terminal-exit", sessionID)
 			}
 			return
 		}

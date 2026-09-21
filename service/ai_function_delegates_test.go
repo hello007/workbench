@@ -11,7 +11,8 @@ import (
 )
 
 // newAiSvcForTest 构造指向临时 data 目录的 AiFunctionService。
-// ctx 传 nil：测试环境无 Wails 上下文，emit 检查 ctx==nil 后直接返回，避免触发 runtime.EventsEmit fatal。
+// ctx 传 nil：测试环境无 Wails 上下文，事件出口（EventSink）对 nil ctx/非 Wails 上下文
+// 静默跳过，避免触发 runtime.EventsEmit fatal。
 func newAiSvcForTest(t *testing.T) *AiFunctionService {
 	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "ai_functions.json")

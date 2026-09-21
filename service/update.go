@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"workbench/model"
 )
 
@@ -30,7 +29,7 @@ const (
 
 // UpdateService 更新服务
 type UpdateService struct {
-	ctx        context.Context
+	sink       EventSink // 事件出口（update:download-progress 推送），SetContext 注入
 	httpClient *http.Client
 	cancelDL   context.CancelFunc // 用于取消下载
 	mu         sync.Mutex         // 保护 cancelDL 字段
@@ -43,9 +42,10 @@ func NewUpdateService() *UpdateService {
 	}
 }
 
-// SetContext 设置 Wails 上下文（用于 EventsEmit）
+// SetContext 设置 Wails 上下文并注入事件出口（用于推送下载进度事件）。
+// ctx 为 nil（单测等无 Wails 上下文场景）时事件推送静默跳过（防护集中在 EventSink）。
 func (s *UpdateService) SetContext(ctx context.Context) {
-	s.ctx = ctx
+	s.sink = NewWailsEventSink(ctx)
 }
 
 // CheckForUpdate 检查是否有新版本
@@ -172,27 +172,25 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 			}
 			downloaded += int64(written)
 
-			// 推送进度
-			if s.ctx != nil {
-				percent := float64(0)
-				if total > 0 {
-					percent = float64(downloaded) / float64(total) * 100
-				}
-
-				elapsed := time.Since(startTime).Seconds()
-				var speed string
-				if elapsed > 0 {
-					bytesPerSec := float64(downloaded) / elapsed
-					speed = formatSpeed(bytesPerSec)
-				}
-
-				runtime.EventsEmit(s.ctx, "update:download-progress", model.DownloadProgress{
-					TotalBytes: total,
-					Downloaded: downloaded,
-					Percent:    percent,
-					Speed:      speed,
-				})
+			// 推送进度（经事件出口，sink 未注入或非 Wails 上下文时静默跳过）
+			percent := float64(0)
+			if total > 0 {
+				percent = float64(downloaded) / float64(total) * 100
 			}
+
+			elapsed := time.Since(startTime).Seconds()
+			var speed string
+			if elapsed > 0 {
+				bytesPerSec := float64(downloaded) / elapsed
+				speed = formatSpeed(bytesPerSec)
+			}
+
+			emitEvent(s.sink, "update:download-progress", model.DownloadProgress{
+				TotalBytes: total,
+				Downloaded: downloaded,
+				Percent:    percent,
+				Speed:      speed,
+			})
 		}
 
 		if err == io.EOF {
@@ -209,14 +207,12 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 	}
 
 	// 推送完成事件
-	if s.ctx != nil {
-		runtime.EventsEmit(s.ctx, "update:download-progress", model.DownloadProgress{
-			TotalBytes: total,
-			Downloaded: downloaded,
-			Percent:    100,
-			Completed:  true,
-		})
-	}
+	emitEvent(s.sink, "update:download-progress", model.DownloadProgress{
+		TotalBytes: total,
+		Downloaded: downloaded,
+		Percent:    100,
+		Completed:  true,
+	})
 
 	return nil
 }
