@@ -168,6 +168,29 @@ func TestWebHandler_NilAssets(t *testing.T) {
 	}
 }
 
+// TestWebHandler_SetTokenRotation 令牌热轮换：轮换后旧令牌立即 401、新令牌 200
+// （桌面设置页「重新生成令牌」运行期生效语义，经 RotateToken → SetToken 到达）。
+func TestWebHandler_SetTokenRotation(t *testing.T) {
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+
+	// 轮换前旧令牌可用
+	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer old-token"}); rec.Code != http.StatusOK {
+		t.Fatalf("轮换前旧令牌应 200, got %d", rec.Code)
+	}
+
+	h.SetToken("new-token")
+
+	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer old-token"}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("轮换后旧令牌应 401, got %d", rec.Code)
+	}
+	if rec := get(t, h, "/?token=old-token", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("轮换后旧令牌查询参数通道应 401, got %d", rec.Code)
+	}
+	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer new-token"}); rec.Code != http.StatusOK {
+		t.Errorf("轮换后新令牌应 200, got %d", rec.Code)
+	}
+}
+
 // TestExtractToken 令牌提取优先级与边界。
 func TestExtractToken(t *testing.T) {
 	newReq := func(path string, header map[string]string) *http.Request {

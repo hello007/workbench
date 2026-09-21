@@ -89,3 +89,107 @@ func TestSettingsSave_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip 不一致: %+v", got)
 	}
 }
+
+// TestSettingsLoad_WebServeDefaults 配置文件不存在时 webServe 段补默认值：
+// 默认开启（桌面同开 HTTP）+ 回环默认地址。
+func TestSettingsLoad_WebServeDefaults(t *testing.T) {
+	svc := newSettingsSvc(t)
+	got, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.WebServe == nil {
+		t.Fatal("webServe 段缺失时应补默认值而非 nil")
+	}
+	if !got.WebServe.Enabled {
+		t.Error("webServe 段缺失（老配置升级）应默认开启")
+	}
+	if got.WebServe.BindAddress != model.DefaultWebServeBindAddress {
+		t.Errorf("BindAddress 应为默认回环地址, got %q", got.WebServe.BindAddress)
+	}
+}
+
+// TestSettingsLoad_WebServeExplicitDisabled 显式关闭（enabled:false）被尊重，
+// 不被默认值覆盖；地址为空仅补默认地址。
+func TestSettingsLoad_WebServeExplicitDisabled(t *testing.T) {
+	svc := newSettingsSvc(t)
+	if err := svc.Save(&model.AppSettings{
+		WebServe: &model.WebServeSettings{Enabled: false},
+	}); err != nil {
+		t.Fatalf("Save 前置: %v", err)
+	}
+
+	got, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.WebServe == nil {
+		t.Fatal("webServe 段不应为 nil")
+	}
+	if got.WebServe.Enabled {
+		t.Error("用户显式关闭应被尊重，不得回退为开启")
+	}
+	if got.WebServe.BindAddress != model.DefaultWebServeBindAddress {
+		t.Errorf("地址为空应补默认回环地址, got %q", got.WebServe.BindAddress)
+	}
+}
+
+// TestSettingsLoad_WebServeMissingSegmentOldConfig 老配置文件（无 webServe 段）
+// 升级加载后补默认开启段；其余字段不受影响。
+func TestSettingsLoad_WebServeMissingSegmentOldConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	// 手写不含 webServe 段的旧版本配置
+	if err := os.WriteFile(p, []byte(`{"defaultShell":"cmd","themeMode":"dark"}`), 0o644); err != nil {
+		t.Fatalf("准备旧配置: %v", err)
+	}
+
+	got, err := NewSettingsService(p).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.DefaultShell != "cmd" || got.ThemeMode != "dark" {
+		t.Errorf("既有字段应原样保留: %+v", got)
+	}
+	if got.WebServe == nil || !got.WebServe.Enabled {
+		t.Error("无 webServe 段的老配置应默认开启浏览器访问")
+	}
+}
+
+// TestSettingsLoad_InvalidJSON_WebServeDefaults 配置损坏降级时 webServe 段同样
+// 补默认值（不阻塞启动，桌面同开语义保持）。
+func TestSettingsLoad_InvalidJSON_WebServeDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(p, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("准备损坏配置: %v", err)
+	}
+
+	got, err := NewSettingsService(p).Load()
+	if err != nil {
+		t.Fatalf("损坏 JSON 应吞错, got %v", err)
+	}
+	if got.WebServe == nil || !got.WebServe.Enabled ||
+		got.WebServe.BindAddress != model.DefaultWebServeBindAddress {
+		t.Errorf("损坏降级应补 webServe 默认值, got %+v", got.WebServe)
+	}
+}
+
+// TestSettingsSave_RoundTrip_WebServe webServe 段持久化 round-trip：
+// 显式关闭 + 自定义地址写盘后重读一致。
+func TestSettingsSave_RoundTrip_WebServe(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	svc1 := NewSettingsService(p)
+	if err := svc1.Save(&model.AppSettings{
+		WebServe: &model.WebServeSettings{Enabled: false, BindAddress: "192.168.1.5:36115"},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := NewSettingsService(p).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.WebServe == nil || got.WebServe.Enabled ||
+		got.WebServe.BindAddress != "192.168.1.5:36115" {
+		t.Errorf("webServe 段 round-trip 不一致: %+v", got.WebServe)
+	}
+}

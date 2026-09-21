@@ -117,3 +117,39 @@ func TestLoadOrCreateToken_ReadErrorSurfaced(t *testing.T) {
 		t.Error("读取目录路径应返回错误而非静默重建")
 	}
 }
+
+// TestSaveToken_RoundTrip SaveToken 持久化后 LoadOrCreateToken 读回一致（含
+// 尾部换行写入形态），父目录不存在时自动创建。
+func TestSaveToken_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data", "nested", DefaultTokenFile)
+
+	if err := SaveToken(path, "rotated-token"); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	got, err := LoadOrCreateToken(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateToken: %v", err)
+	}
+	if got != "rotated-token" {
+		t.Errorf("读回令牌不符: got %q", got)
+	}
+}
+
+// TestSaveToken_OverwriteExisting SaveToken 覆写已有文件（轮换语义：旧令牌被替换）。
+func TestSaveToken_OverwriteExisting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DefaultTokenFile)
+	if err := SaveToken(path, "old-token"); err != nil {
+		t.Fatalf("SaveToken 旧令牌: %v", err)
+	}
+	if err := SaveToken(path, "new-token"); err != nil {
+		t.Fatalf("SaveToken 新令牌: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读回令牌文件: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "new-token" {
+		t.Errorf("旧令牌应被覆写, got %q", got)
+	}
+}

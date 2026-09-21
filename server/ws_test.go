@@ -264,6 +264,48 @@ func TestWSHub_ConcurrentEmitAndDisconnectRace(t *testing.T) {
 	waitClientCount(t, hub, 0)
 }
 
+// TestWSHub_SetTokenRotation 令牌热轮换：轮换后旧令牌两通道均 401、新令牌均
+// 升级成功；轮换前建立的在途连接不在数据面校验令牌，保持有效并继续收到广播
+// （RegenerateWebToken 的热生效语义：不断监听、不断在途连接）。
+func TestWSHub_SetTokenRotation(t *testing.T) {
+	hub, srv := newTestWSHub(t, "old-token")
+
+	// 轮换前建立在途连接（旧令牌时期）
+	existing := mustDialWS(t, srv, "?token=old-token")
+	waitClientCount(t, hub, 1)
+
+	hub.SetToken("new-token")
+
+	// 旧令牌两通道均拒绝
+	if conn, resp := dialWS(t, srv, "?token=old-token", nil); conn != nil {
+		t.Fatal("轮换后旧令牌查询参数通道应拒绝")
+	} else if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("轮换后旧令牌查询参数通道应 401, got %v", resp)
+	}
+	if conn, resp := dialWS(t, srv, "", []string{"old-token"}); conn != nil {
+		t.Fatal("轮换后旧令牌子协议通道应拒绝")
+	} else if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("轮换后旧令牌子协议通道应 401, got %v", resp)
+	}
+
+	// 新令牌两通道均可升级
+	mustDialWS(t, srv, "?token=new-token")
+	waitClientCount(t, hub, 2)
+	connNewSub, _ := dialWS(t, srv, "", []string{"new-token"})
+	if connNewSub == nil {
+		t.Fatal("轮换后新令牌子协议通道应升级成功")
+	}
+	t.Cleanup(func() { _ = connNewSub.Close() })
+	waitClientCount(t, hub, 3)
+
+	// 在途连接（旧令牌时期建立）保持有效并收到广播
+	hub.Emit("after-rotate", "x")
+	frame := readFrame(t, existing)
+	if frame.Event != "after-rotate" {
+		t.Errorf("在途连接应继续收到广播, got %q", frame.Event)
+	}
+}
+
 // TestWSHub_SlowConsumerDropped 写超时/背压防护：客户端不读帧，发送队列
 // 与 TCP 缓冲塞满后写超时触发断连，慢消费者被踢出（不拖垮广播方与其余客户端）。
 func TestWSHub_SlowConsumerDropped(t *testing.T) {
