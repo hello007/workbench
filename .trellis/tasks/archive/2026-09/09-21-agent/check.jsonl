@@ -1,0 +1,5 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增 server/gateway 代码覆盖率达标（≥80% 门禁）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对前端绑定/事件契约同步：wailsjs 三处、models.ts 别名、EventsOn 注销"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对 E2E 规范：fixtures import、mock 单一数据源、禁 waitForTimeout"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对网关错误链路：slog 级别、AppError 分流、错误码常量表同步"}
+{"file": ".trellis/tasks/09-21-agent/research/wails-browser-bridge.md", "reason": "核对实现与既定主路径一致（--serve/ RPC 翻译/WS hub/polyfill），nil-ctx 隐患已修"}

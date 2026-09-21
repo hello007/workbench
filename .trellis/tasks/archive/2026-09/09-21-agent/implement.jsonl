@@ -1,0 +1,8 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "前端 polyfill transport 层须与 wailsjs 绑定/事件契约对齐；EventsOn 精准注销、绑定三处同步规则"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 gateway/server 服务须按 AppServices 装配规范（struct 字段 + 构造行，package main）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "网关层错误须走 slog + model.AppError{Code,Message} 分流，新错误码同步常量表"}
+{"file": "docs/spec/e2e-testing.md", "reason": "wailsjs 不入库、wails-mock-defaults 单一数据源、E2E fixtures 约束影响 transport 探测与测试"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增 server 包代码受 ≥80% 覆盖率门禁约束"}
+{"file": "docs/spec/security-scan.md", "reason": "引入 WS 库（melody/gorilla）等新依赖后须重跑 govulncheck"}
+{"file": ".trellis/tasks/09-21-agent/research/wails-browser-bridge.md", "reason": "主路径技术方案：--serve 分支、/api/rpc 翻译、WS hub、polyfill 要点清单"}
+{"file": ".trellis/tasks/09-21-agent/research/web-exposure-patterns.md", "reason": "认证与暴露模式依据：token 必开、默认回环、WS 握手验签"}
