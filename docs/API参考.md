@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **140** 个导出方法，分布在 15 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 16 个 service/cache。按 24 个业务域分组：
+共 **153** 个导出方法，分布在 17 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 17 个 service/cache。按 26 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -20,24 +20,26 @@
 | 文件操作与剪贴板 | 6 | `app_clipboard.go` |
 | 搜索 | 2 | `app_search.go` |
 | Git 仓库信息 | 6 | `app_git.go` |
-| 提交历史与统计 | 4 | `app_git.go` |
+| 提交历史与统计 | 5 | `app_git.go` |
 | 本地变更与提交 | 7 | `app_git.go` |
-| Diff | 3 | `app_git.go` |
-| 分支 | 6 | `app_git.go` |
+| Diff | 5 | `app_git.go` |
+| 分支 | 7 | `app_git.go` |
 | 标签 | 4 | `app_git.go` |
 | 远程 | 4 | `app_git.go` |
 | 合并/变基/挑拣 | 12 | `app_git.go` |
 | Submodule | 6 | `app_git.go` |
 | 仓库元数据 | 5 | `app_repometa.go` |
 | 仓库配置导入导出 | 3 | `app_repo_config.go` |
+| 状态看板 | 6 | `app_dashboard.go` |
 | AI 功能 | 21 | `app_ai.go` |
 | 会话快照 | 2 | `app_session.go` |
 | 终端 | 6 | `app_terminal.go` |
 | 外部集成 | 9 | `app_external.go` |
 | 设置 | 2 | `app_settings.go` |
+| 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
 
-> 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 5 节）。
+> 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
 ---
 
@@ -156,6 +158,7 @@
 | `GetRepoStats` | `(path, rangeKey) => Promise<RepoStats>` | 获取仓库统计（趋势/贡献者/热力图） | RepoStats |
 | `InvalidateCommitHistoryCache` | `(path) => Promise<void>` | 失效指定仓库提交历史缓存 | — |
 | `ClearAllCommitHistoryCache` | `() => Promise<void>` | 清空全部提交历史缓存 | — |
+| `GetRecentCommitSubjects` | `(path, limit) => Promise<string[]>` | 取最近 limit 条 commit subject（过滤归档噪声，limit<=0 默认 3），供 AI 提交信息生成 few-shot | commit subject 数组 |
 
 ---
 
@@ -182,6 +185,8 @@
 | `GetFileDiff` | `(path, file) => Promise<string>` | 工作区文件 diff | diff 文本 |
 | `GetCommitFileDiff` | `(path, sha, file) => Promise<string>` | 指定提交中某文件的 diff | diff 文本 |
 | `GetRangeDiff` | `(path, baseSHA, headSHA) => Promise<string>` | 两提交区间 diff | diff 文本 |
+| `GetStagedDiffText` | `(path) => Promise<string>` | 聚合暂存区全部文件 diff 为单段文本（含截断保护），供 AI 提交信息生成；暂存区为空返回 `E_GIT_NO_STAGED_CHANGES` | diff 文本 |
+| `GetUncommittedDiffText` | `(path) => Promise<string>` | 聚合未提交变更 diff 为单段文本（含截断保护），供 AI 代码审查；无任何本地变更返回 `E_GIT_NO_STAGED_CHANGES` | diff 文本 |
 
 ---
 
@@ -283,7 +288,22 @@
 
 ---
 
-## 20. AI 功能
+## 20. 状态看板
+
+全局状态看板（活动栏一级入口）：手动 pin 关注的核心仓库跨仓状态总览，pin 列表持久化到 `data/dashboard_pinned.json`。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `GetDashboardPinned` | `() => Promise<string[]>` | 获取 pin 仓库路径列表 | 路径数组 |
+| `AddDashboardPin` | `(path) => Promise<void>` | 加入看板（路径规范化去重） | — |
+| `RemoveDashboardPin` | `(path) => Promise<void>` | 从看板移除 | — |
+| `IsDashboardPinned` | `(path) => Promise<boolean>` | 查询仓库是否已 pin | 是否已 pin |
+| `GetDashboardStatuses` | `() => Promise<RepoStatus[]>` | 计算 pin 仓库状态（分支/工作区/ahead/behind/上游） | RepoStatus 数组 |
+| `RefreshDashboardStatuses` | `() => Promise<RepoStatus[]>` | 强制刷新 pin 仓库状态 | RepoStatus 数组 |
+
+---
+
+## 21. AI 功能
 
 skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事件流经 Wails `runtime.EventsEmit` 推送（`ai-task:queued/started/output/done`）。持久化到 `data/ai_functions.json`。
 
@@ -313,7 +333,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ---
 
-## 21. 会话快照
+## 22. 会话快照
 
 崩溃恢复 UI 状态快照，持久化到 `data/session.json`（v1.4 PR2）。
 
@@ -324,7 +344,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ---
 
-## 22. 终端
+## 23. 终端
 
 pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃恢复仅恢复工作目录。
 
@@ -339,7 +359,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 23. 外部集成
+## 24. 外部集成
 
 `OpenInExternalDiff` 启动外部 diff 工具（配置见设置面板，未配置返回 `E_DIFF_TOOL_NOT_CONFIGURED`）。
 
@@ -357,7 +377,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 24. 设置
+## 25. 设置
 
 持久化到 `data/settings.json`。
 
@@ -368,7 +388,20 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 25. 更新
+## 26. 网络访问
+
+浏览器访问通道（桌面同开 HTTP / `--serve` 无头模式共用），配置段持久化到 `data/settings.json` 的 `webServe`，令牌持久化到 `data/web_token`（0600）。设置页「网络访问」分区消费这组方法。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `GetWebServeConfig` | `() => Promise<WebServeConfig>` | 获取浏览器访问通道配置与运行状态（含候选访问地址） | WebServeConfig |
+| `SetWebServeConfig` | `(enabled, bindAddress) => Promise<void>` | 保存配置并应用（关闭停机 / 改址平滑重启 / 改绑非回环须前端先风险确认） | — |
+| `GetWebServeToken` | `() => Promise<string>` | 读取当前访问令牌（设置页遮蔽展示） | 令牌字符串 |
+| `RegenerateWebToken` | `() => Promise<string>` | 重新生成令牌并热轮换（旧令牌立即失效，不断监听与在途连接） | 新令牌字符串 |
+
+---
+
+## 27. 更新
 
 检查更新与自动更新，pending 机制（批处理脚本替换 exe 后重启）。
 
@@ -381,11 +414,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 26. 数据模型
+## 28. 数据模型
 
-全部提取自 `frontend/wailsjs/go/models.ts`（`model` namespace，54 个 class；`frontend` namespace 含 `FileFilter`）。字段名按 Go json tag 映射，`omitempty` 对应 TS `?:` 可选。以下列出关键 struct，完整定义见 `models.ts`。
+全部提取自 `frontend/wailsjs/go/models.ts`（`model` namespace；`frontend` namespace 含 `FileFilter`）。字段名按 Go json tag 映射，`omitempty` 对应 TS `?:` 可选。以下列出关键 struct，完整定义见 `models.ts`。
 
-### 26.1 目录与文件
+### 28.1 目录与文件
 
 **Directory** — 工作目录
 
@@ -440,7 +473,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `status` | string | 变更状态：M/A/D/R/? |
 | `staged` | boolean | 是否已暂存 |
 
-### 26.2 Git
+### 28.2 Git
 
 **GitRepoInfo** — 仓库概览
 
@@ -482,7 +515,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **RepoStats** — 仓库统计（`trend`: TimeBucket[]，`contributors`: Contributor[]，`heatmap`: DayCount[]，`totalCommits` / `dateRange` / `granularity` / `sampled`）
 
-### 26.3 会话快照
+### 28.3 会话快照
 
 **SessionState** — 崩溃恢复 UI 状态快照
 
@@ -496,13 +529,29 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **TerminalSnapshot**（`visible` / `height` / `workDir`）
 
-### 26.4 设置与更新
+### 28.4 设置与更新
 
-**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs`）
+**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）
+
+**WebServeSettings** — 浏览器访问通道配置（`AppSettings.webServe` 段；指针形态区分「段缺失」与「显式关闭」，加载时经 `EnsureWebServeDefaults` 补默认值）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `enabled` | boolean | 桌面模式是否同开 HTTP 服务（默认 true） |
+| `bindAddress` | string | HTTP 监听地址 host:port（默认 `127.0.0.1:36115`） |
+
+**WebServeConfig** — 浏览器访问通道配置与运行状态（`GetWebServeConfig` 返回，持久化配置之上附带派生信息）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `enabled` | boolean | 是否启用（持久化配置） |
+| `bindAddress` | string | 监听地址 host:port（持久化配置） |
+| `running` | boolean | HTTP 服务当前是否运行中 |
+| `accessUrls` | string[] | 候选访问地址（含回环与本机局域网 IPv4，同网段设备可达） |
 
 **UpdateInfo** — 更新信息（`hasUpdate` / `currentVer` / `latestVer` / `downloadUrl` / `releaseNotes` / `publishedAt` / `fileSize`）
 
-### 26.5 AI
+### 28.5 AI
 
 **AiFunction** — AI 功能配置（`id` / `name` / `description` / `icon` / `command` / `cwd` / `addDirs` / `env` / `mcp` / `permissionMode` / `timeoutMinutes` / `completion` / `params` / `followUps` / `tags` / `pinned`）
 
@@ -520,11 +569,13 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ImportPreview** — AI 功能导入预览（`new` / `conflict`: AiFunction[]，`invalid`: string[]）
 
-### 26.6 其他
+### 28.6 其他
 
 **Favorite**（`path` / `alias` / `group` / `createdAt`）
 
 **RepoFilterItem**（`name` / `path` / `summary` / `tags` / `readmeSummary` / `missing` / `hasRemote` / `isGitRepo`）
+
+**RepoStatus** — 状态看板仓库状态（`path` / `name` / `branch` / `dirty` / `ahead` / `behind` / `hasUpstream` / `detached` / `isRepo` / `missing` / `error`）
 
 **RepoConfigImportPreview**（`newDirectories` / `conflictDirectories`: RepoConfigDirectoryPreview[]，`newFavorites` / `conflictFavorites`: RepoConfigFavoritePreview[]，`invalid`: RepoConfigInvalidItem[]）
 
@@ -542,7 +593,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **SkillDescriptor**（`name` / `description` / `command` / `cwd` / `source` / `sourceDir` / `plugin`）
 
-### 26.7 具名 string 类型
+### 28.7 具名 string 类型
 
 `model/commit.go` 定义的两个具名 string 类型，作方法参数时 `App.d.ts` 保留 `model.X` 引用：
 
@@ -555,9 +606,9 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 27. 深度查询入口
+## 29. 深度查询入口
 
-本清单为静态快照。需要查询方法调用链、service 实现、字段影响面等动态结构信息时，使用项目内置的 CodeGraph 索引（`.codegraph/`，SQLite 知识图谱，307 文件 / 6151 节点 / 11282 边）：
+本清单为静态快照。需要查询方法调用链、service 实现、字段影响面等动态结构信息时，使用项目内置的 CodeGraph 索引（`.codegraph/`，SQLite 知识图谱，全仓库符号/调用边/文件索引，规模以 `codegraph status` 实时查询为准）：
 
 | 查询意图 | 工具 |
 |---|---|
@@ -571,4 +622,4 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-**最后更新：** 2026-09-14
+**最后更新：** 2026-09-22
