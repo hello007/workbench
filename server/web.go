@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,10 +34,14 @@ type WebOptions struct {
 // healthPath 健康检查路径，无敏感信息，豁免 token 认证（供探活/手工连通性验证）。
 const healthPath = "/healthz"
 
-// webHandler serve 模式 HTTP handler：token 认证 + 静态资产 + SPA fallback。
-type webHandler struct {
+// WebHandler serve 模式 HTTP handler：token 认证 + 静态资产 + SPA fallback。
+// 导出类型以支持 SetToken 令牌热轮换（桌面设置页「重新生成令牌」运行期生效）。
+type WebHandler struct {
 	files fs.FS
+	mu    sync.RWMutex // 保护 token，认证读与轮换写互斥
 	token string
+	// mux 实际路由表（各端点挂载），ServeHTTP 委托转发
+	mux http.Handler
 }
 
 // NewWebHandler 构建浏览器访问模式 HTTP handler。
@@ -49,12 +54,13 @@ type webHandler struct {
 //     AssetServer.Handler 挂载且无 token：本地信任模型，文件路径由用户在 UI 中
 //     选择，且 iframe 加载无法携带 Authorization 头，套 token 会让 PDF/HTML 预览
 //     在浏览器模式不可用）。serve 模式下该信任模型的网络面防护依赖默认回环
-//     绑定，改绑非回环地址须 --listen 显式指定（见 main.go defaultServeAddr 注释）；
+//     绑定，改绑非回环地址须 --listen 显式指定或设置页确认（见 model/settings.go
+//     DefaultWebServeBindAddress 注释）；
 //   - 其余路径经 token 认证中间件（Authorization: Bearer / X-Auth-Token 头 /
 //     ?token= 查询参数，便于首次手工验证）后进入静态资产服务；
 //     未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由可达）。
-func NewWebHandler(opts WebOptions) http.Handler {
-	h := &webHandler{files: opts.Assets, token: opts.Token}
+func NewWebHandler(opts WebOptions) *WebHandler {
+	h := &WebHandler{files: opts.Assets, token: opts.Token}
 	mux := http.NewServeMux()
 	mux.HandleFunc(healthPath, h.serveHealth)
 	if opts.RPCTarget != nil {
@@ -67,17 +73,31 @@ func NewWebHandler(opts WebOptions) http.Handler {
 	mux.Handle("/preview-pdf", preview)
 	mux.Handle(previewRawPrefix, preview)
 	mux.Handle("/", h.requireToken(http.HandlerFunc(h.serveStatic)))
-	return mux
+	h.mux = mux
+	return h
+}
+
+// ServeHTTP 委托内部路由表处理请求（实现 http.Handler）。
+func (h *WebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
+}
+
+// SetToken 热轮换访问令牌：立即生效于后续全部认证判断（旧令牌随即失效）。
+// 已建立的 WebSocket 连接不在数据面校验令牌，保持有效至断开重连。
+func (h *WebHandler) SetToken(token string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.token = token
 }
 
 // serveHealth 健康检查端点（免认证）。
-func (h *webHandler) serveHealth(w http.ResponseWriter, _ *http.Request) {
+func (h *WebHandler) serveHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 // requireToken token 认证中间件：未授权返回 401 JSON（安全失败关闭）。
-func (h *webHandler) requireToken(next http.Handler) http.Handler {
+func (h *WebHandler) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !h.authorized(r) {
 			// 只记路径不记完整 URL：?token= 查询参数形式的令牌不得进日志
@@ -91,15 +111,18 @@ func (h *webHandler) requireToken(next http.Handler) http.Handler {
 
 // authorized 校验请求携带的令牌。恒定时间比较防时序侧信道；
 // 服务端令牌为空（未配置）时一律拒绝。
-func (h *webHandler) authorized(r *http.Request) bool {
-	if h.token == "" {
+func (h *WebHandler) authorized(r *http.Request) bool {
+	h.mu.RLock()
+	token := h.token
+	h.mu.RUnlock()
+	if token == "" {
 		return false
 	}
 	provided := extractToken(r)
 	if provided == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(h.token)) == 1
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
 }
 
 // extractToken 从请求提取令牌，优先级：Authorization: Bearer > X-Auth-Token 头
@@ -117,7 +140,7 @@ func extractToken(r *http.Request) string {
 }
 
 // serveStatic 静态资产服务，未命中文件（含目录与 SPA 前端路由）fallback 到 index.html。
-func (h *webHandler) serveStatic(w http.ResponseWriter, r *http.Request) {
+func (h *WebHandler) serveStatic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writePreviewError(w, http.StatusMethodNotAllowed, "仅支持 GET/HEAD 请求")
 		return
@@ -142,7 +165,7 @@ func (h *webHandler) serveStatic(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveIndex 返回 SPA 入口 index.html；资产源缺失该文件时返回 404。
-func (h *webHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
+func (h *WebHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	f, err := h.files.Open("index.html")
 	if err != nil {
 		writePreviewError(w, http.StatusNotFound, "index.html 不存在")

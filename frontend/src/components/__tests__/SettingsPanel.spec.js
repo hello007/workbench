@@ -18,7 +18,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(),
   SaveSettings: vi.fn(),
   GetAppVersion: vi.fn(),
-  CheckForUpdate: vi.fn()
+  CheckForUpdate: vi.fn(),
+  GetWebServeConfig: vi.fn(),
+  SetWebServeConfig: vi.fn(),
+  GetWebServeToken: vi.fn(),
+  RegenerateWebToken: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -115,15 +119,27 @@ const baseSettings = (over = {}) => ({
   shortcutToggleTerminal: DEFAULTS.toggleTerminal,
   shortcutRename: DEFAULTS.rename,
   shortcutDelete: DEFAULTS.delete,
+  webServe: { enabled: true, bindAddress: '127.0.0.1:36115' },
+  ...over
+})
+
+// 网络访问分区 mock 默认返回值（形状对齐 model.WebServeConfig / 令牌 string）
+const baseWebServeConfig = (over = {}) => ({
+  enabled: true,
+  bindAddress: '127.0.0.1:36115',
+  running: true,
+  accessUrls: ['http://127.0.0.1:36115', 'http://192.168.1.5:36115'],
   ...over
 })
 
 async function createWrapper(settingsOver = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  const { GetSettings, GetAppVersion } = await import('../../../wailsjs/go/main/App')
+  const { GetSettings, GetAppVersion, GetWebServeConfig, GetWebServeToken } = await import('../../../wailsjs/go/main/App')
   GetSettings.mockResolvedValue(baseSettings(settingsOver))
   GetAppVersion.mockResolvedValue('1.0.0')
+  GetWebServeConfig.mockResolvedValue(baseWebServeConfig())
+  GetWebServeToken.mockResolvedValue('a'.repeat(64))
   const uiStore = useUiStore()
   uiStore.settingsVisible = true
   const wrapper = mount(SettingsPanel, { global: { stubs, plugins: [pinia] } })
@@ -145,9 +161,9 @@ describe('SettingsPanel.vue', () => {
     }
   })
 
-  it('挂载时加载设置 + 版本号，渲染 4 个导航 tab', async () => {
+  it('挂载时加载设置 + 版本号，渲染 5 个导航 tab', async () => {
     wrapper = await createWrapper()
-    expect(wrapper.findAll('.settings-nav-item').length).toBe(4)
+    expect(wrapper.findAll('.settings-nav-item').length).toBe(5)
     expect(wrapper.text()).toContain('v1.0.0')
   })
 
@@ -629,5 +645,168 @@ describe('SettingsPanel.vue - 外部 diff 工具配置区', () => {
     expect(SaveSettings).toHaveBeenCalled()
     const saved = SaveSettings.mock.calls.at(-1)[0]
     expect(saved.diffToolArgs).toBe('{left} {right} --norestore')
+  })
+})
+
+// ---- 网络访问分区（浏览器访问通道） ----
+
+describe('SettingsPanel.vue - 网络访问分区', () => {
+  let wrapper
+
+  // 切到网络访问 tab（第 5 个导航项）
+  async function openNetworkTab() {
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+  }
+
+  // 网络分区开关（class 锚点定位，与通用页 GPU 开关区分）
+  function webSwitch() {
+    return wrapper.find('input.webserve-switch')
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('渲染浏览器访问分区（开关/绑定地址/运行状态/令牌/访问地址）', async () => {
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    expect(wrapper.text()).toContain('浏览器访问')
+    expect(wrapper.text()).toContain('绑定地址')
+    expect(wrapper.text()).toContain('运行状态')
+    expect(wrapper.text()).toContain('访问令牌')
+    expect(wrapper.text()).toContain('访问地址')
+    expect(wrapper.text()).toContain('127.0.0.1:36115')
+    // 运行中状态 tag
+    expect(wrapper.text()).toContain('运行中')
+  })
+
+  it('挂载时加载配置与令牌，令牌默认遮蔽展示', async () => {
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    // 64 位令牌遮蔽为 24 个圆点
+    expect(wrapper.text()).toContain('•'.repeat(24))
+    expect(wrapper.text()).not.toContain('aaaa')
+  })
+
+  it('显示切换后令牌明文展示', async () => {
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '显示').trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('a'.repeat(64))
+    // 按钮文案切换为「隐藏」
+    expect(wrapper.findAll('button').some(b => b.text() === '隐藏')).toBe(true)
+  })
+
+  it('复制令牌成功提示', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { ElMessage } = await import('element-plus')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '复制').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('a'.repeat(64))
+    expect(ElMessage.success).toHaveBeenCalledWith('访问令牌已复制')
+  })
+
+  it('回环地址下切换开关直接保存（无风险确认）', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const sw = webSwitch()
+    sw.element.checked = false
+    await sw.trigger('change')
+    await flushPromises()
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(false, '127.0.0.1:36115')
+  })
+
+  it('非回环地址保存时风险确认取消则不保存并回滚地址', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    // 修改绑定地址为非回环（setValue 触发 change → onBindAddressChange）
+    const bindInput = wrapper.find('.webserve-bind-input')
+    await bindInput.setValue('0.0.0.0:36115')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(SetWebServeConfig).not.toHaveBeenCalled()
+    // 回滚：loadWebServeConfig 刷新后地址回到 mock 已保存值
+    expect(bindInput.element.value).toBe('127.0.0.1:36115')
+  })
+
+  it('非回环地址保存时风险确认通过则保存新地址', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    ElMessageBox.confirm.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const bindInput = wrapper.find('.webserve-bind-input')
+    await bindInput.setValue('192.168.1.5:36115')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '192.168.1.5:36115')
+  })
+
+  it('绑定地址非法格式报错且不保存', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const bindInput = wrapper.find('.webserve-bind-input')
+    await bindInput.setValue('no-port-address')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('格式无效'))
+    expect(SetWebServeConfig).not.toHaveBeenCalled()
+    // 回滚为已保存地址
+    expect(bindInput.element.value).toBe('127.0.0.1:36115')
+  })
+
+  it('重新生成令牌需二次确认并回填新令牌', async () => {
+    const { RegenerateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    const { ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    RegenerateWebToken.mockResolvedValue('f'.repeat(64))
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('重新输入新令牌'),
+      '重新生成访问令牌',
+      expect.objectContaining({ type: 'warning' })
+    )
+    expect(RegenerateWebToken).toHaveBeenCalled()
+    // 轮换后自动明文展示新令牌
+    expect(wrapper.text()).toContain('f'.repeat(64))
+    expect(ElMessage.success).toHaveBeenCalledWith('访问令牌已重新生成')
+  })
+
+  it('重新生成令牌取消则不调用', async () => {
+    const { RegenerateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(RegenerateWebToken).not.toHaveBeenCalled()
   })
 })

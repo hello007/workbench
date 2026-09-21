@@ -69,7 +69,17 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
 
   // ---- 分支同步摘要（提交历史 BranchSyncBar 挂载即调）----
   // 默认 null = 摘要条隐藏（BranchSyncBar 对空值有 v-if 防护）；E2E extra 表另有完整对象版本
-  GetBranchSyncInfo: null
+  GetBranchSyncInfo: null,
+
+  // ---- 浏览器访问通道（设置页「网络访问」分区，PR5）----
+  // GetWebServeConfig 形状对齐 model.WebServeConfig；默认关闭 + 未运行，
+  // 对 UI 主断言无影响（组件按 cfg?.enabled 防御性读取）
+  GetWebServeConfig: { enabled: false, bindAddress: '127.0.0.1:36115', running: false, accessUrls: ['http://127.0.0.1:36115'] },
+  // GetWebServeToken 默认空串 = 未生成（token 展示区遮蔽为占位符）
+  GetWebServeToken: '',
+  SetWebServeConfig: true,
+  // RegenerateWebToken 返回新令牌（64 位 hex 形态缩写，仅断言被调用与回填展示）
+  RegenerateWebToken: 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8'
 }
 
 /**

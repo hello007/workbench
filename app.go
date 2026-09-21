@@ -16,6 +16,12 @@ import (
 type App struct {
 	ctx context.Context
 	*AppServices
+	// webServe 浏览器访问通道管理器（桌面同开 HTTP / --serve 无头共用）。
+	// startup / runServe 创建；零值构造（测试）时为 nil，方法内 nil 防护处理。
+	webServe *webServeManager
+	// webServeListenOverride 命令行 --listen 显式覆盖值（空串 = 未指定，走
+	// settings.json webServe.bindAddress；命令行覆盖配置文件）。main() 注入。
+	webServeListenOverride string
 }
 
 // NewApp 构造空 App。AppServices 初始化为空 struct（非 nil），
@@ -48,10 +54,19 @@ func (a *App) startup(ctx context.Context) {
 		os.Exit(0)
 	}
 
+	// 浏览器访问通道：按设置启动桌面同开 HTTP 服务（默认开启，端口占用等失败
+	// 仅告警降级，桌面功能不受影响）。放在待更新检查之后：命中更新即退出，无需起服务。
+	a.startWebServe()
+
 	slog.Info("workbench started")
 }
 
 func (a *App) shutdown(context.Context) {
+	if a.webServe != nil {
+		if err := a.webServe.Stop(); err != nil {
+			slog.Warn("web serve shutdown failed", "err", err)
+		}
+	}
 	if a.terminalSvc != nil {
 		a.terminalSvc.CloseAll()
 	}

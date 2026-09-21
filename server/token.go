@@ -44,11 +44,20 @@ func LoadOrCreateToken(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("创建令牌目录失败: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("持久化令牌失败: %w", err)
+	if err := SaveToken(path, token); err != nil {
+		return "", err
 	}
 	return token, nil
+}
+
+// SaveToken 持久化访问令牌（0600，父目录自动创建）。
+// 供「重新生成令牌」轮换写回，与 LoadOrCreateToken 的写入语义一致。
+func SaveToken(path, token string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("创建令牌目录失败: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return fmt.Errorf("持久化令牌失败: %w", err)
+	}
+	return nil
 }

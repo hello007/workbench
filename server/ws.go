@@ -130,6 +130,19 @@ func (h *WSHub) ClientCount() int {
 	return len(h.clients)
 }
 
+// SetToken 热轮换访问令牌：更新握手校验基准与升级子协议回显列表。
+//
+// 语义：已建立的连接不在数据面校验令牌，轮换后保持有效至断开重连（重连须用
+// 新令牌）。upgrader 结构体在锁下复制快照后再用于 Upgrade（Upgrade 为阻塞
+// 操作不持锁），与本方法写 Subprotocols 互斥，消除并发读写竞态；SetToken
+// 每次替换全新 slice（不改旧 slice 元素），快照持有的旧 slice 恒定不可变。
+func (h *WSHub) SetToken(token string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.token = token
+	h.upgrader.Subprotocols = []string{token}
+}
+
 // ServeHTTP 处理 GET /ws 升级请求。
 //
 // 认证必须在升级前完成：失败以 HTTP 401 拒绝（若先升级再踢，客户端已进入
@@ -146,7 +159,11 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writePreviewError(w, http.StatusUnauthorized, "未授权访问：请携带访问令牌")
 		return
 	}
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	// 锁下取 upgrader 快照（见 SetToken 注释），Upgrade 在锁外执行
+	h.mu.RLock()
+	upgrader := h.upgrader
+	h.mu.RUnlock()
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// Upgrade 失败（非 WebSocket 握手/Origin 校验拒绝等）时已自行写出
 		// HTTP 错误响应，此处仅记日志
@@ -162,15 +179,18 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // authorized 校验升级请求令牌：两种通道任一命中即通过；恒定时间比较防
 // 时序侧信道；服务端令牌未配置时一律拒绝（fail closed）。
 func (h *WSHub) authorized(r *http.Request) bool {
-	if h.token == "" {
+	h.mu.RLock()
+	token := h.token
+	h.mu.RUnlock()
+	if token == "" {
 		return false
 	}
 	if t := r.URL.Query().Get("token"); t != "" &&
-		subtle.ConstantTimeCompare([]byte(t), []byte(h.token)) == 1 {
+		subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
 		return true
 	}
 	for _, p := range websocket.Subprotocols(r) {
-		if subtle.ConstantTimeCompare([]byte(p), []byte(h.token)) == 1 {
+		if subtle.ConstantTimeCompare([]byte(p), []byte(token)) == 1 {
 			return true
 		}
 	}

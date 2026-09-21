@@ -10,8 +10,11 @@ import (
 func (a *App) GetSettings() *model.AppSettings {
 	settings, err := a.settingsSvc.Load()
 	if err != nil {
-		return &model.AppSettings{}
+		settings = &model.AppSettings{}
 	}
+	// webServe 段默认值兜底（Load 正常路径已补，此处覆盖 settingsSvc 异常分支），
+	// 保证前端拿到的配置段始终完整
+	settings.EnsureWebServeDefaults()
 	return settings
 }
 

@@ -228,6 +228,65 @@
             </div>
           </div>
         </div>
+        <!-- 网络访问页（浏览器访问通道：桌面同开 HTTP，浏览器打开同一套界面） -->
+        <div v-show="activeTab === 'network'">
+          <div class="settings-section-title">网络访问</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">浏览器访问</div>
+              <div class="settings-item-desc">启动 HTTP 服务，浏览器打开与本机一致的界面（默认开启）</div>
+            </div>
+            <el-switch
+              v-model="webEnabled"
+              class="webserve-switch"
+              active-text="开启"
+              inactive-text="关闭"
+              @change="onWebServeToggle"
+            />
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">绑定地址</div>
+              <div class="settings-item-desc">host:port；默认仅本机可达，改绑 0.0.0.0 会向局域网暴露本机能力</div>
+            </div>
+            <el-input
+              v-model="webBindAddress"
+              size="small"
+              class="input-w-lg webserve-bind-input"
+              placeholder="127.0.0.1:36115"
+              @change="onBindAddressChange"
+            />
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">运行状态</div>
+              <div class="settings-item-desc">{{ webRunning ? 'HTTP 服务运行中，浏览器可访问' : '服务未运行' }}</div>
+            </div>
+            <el-tag :type="webRunning ? 'success' : 'info'" size="small">{{ webRunning ? '运行中' : '已停止' }}</el-tag>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">访问令牌</div>
+              <div class="settings-item-desc">浏览器首次访问须输入该令牌，请勿外泄</div>
+            </div>
+            <div class="webserve-token-actions">
+              <span class="webserve-token-text" :title="tokenVisible ? webToken : ''">{{ tokenMask }}</span>
+              <el-button size="small" text type="primary" @click="tokenVisible = !tokenVisible">{{ tokenVisible ? '隐藏' : '显示' }}</el-button>
+              <el-button size="small" text type="primary" @click="copyToken">复制</el-button>
+              <el-button size="small" text type="danger" @click="regenerateToken">重新生成</el-button>
+            </div>
+          </div>
+          <div class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">访问地址</div>
+              <div class="settings-item-desc">服务运行时，浏览器打开以下地址；局域网地址仅同网段设备可达</div>
+            </div>
+            <div class="webserve-urls">
+              <code v-for="url in webAccessUrls" :key="url" class="webserve-url">{{ url }}</code>
+              <div v-if="!webAccessUrls.length" class="webserve-url-empty">暂无可用地址</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </el-dialog>
@@ -237,7 +296,8 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS } from '../store'
 
 const emit = defineEmits(['update-available'])
@@ -248,7 +308,8 @@ const tabs = [
   { id: 'general', label: '通用' },
   { id: 'terminal', label: '终端' },
   { id: 'search', label: '搜索' },
-  { id: 'shortcuts', label: '快捷键' }
+  { id: 'shortcuts', label: '快捷键' },
+  { id: 'network', label: '网络访问' }
 ]
 
 const activeTab = ref('general')
@@ -309,6 +370,153 @@ const onDiffToolChange = async () => {
     await settingsStore.saveDiffTool()
   } catch (e) {
     ElMessage.error('保存外部 diff 工具配置失败: ' + (e?.message || String(e)))
+  }
+}
+
+// ===== 浏览器访问通道（网络访问分区）=====
+const webEnabled = ref(false)
+const webBindAddress = ref('127.0.0.1:36115')
+const webRunning = ref(false)
+const webAccessUrls = ref([])
+const webToken = ref('')
+const tokenVisible = ref(false)
+
+// 令牌展示：隐藏态以圆点遮蔽（等长截断，长 hex 不撑破布局）；无令牌给占位
+const tokenMask = computed(() => {
+  if (!webToken.value) return '（未生成）'
+  return tokenVisible.value ? webToken.value : '•'.repeat(Math.min(webToken.value.length, 24))
+})
+
+/**
+ * 判断绑定地址 host 部分是否为回环（仅本机可达）。
+ * 与后端 isLoopbackBind 判定对齐：127.0.0.1 / localhost / ::1 三种形态。
+ */
+function isLoopbackAddress(addr) {
+  const idx = addr.lastIndexOf(':')
+  if (idx <= 0) return false
+  const host = addr.slice(0, idx).replace(/^\[|\]$/g, '').toLowerCase()
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+}
+
+/**
+ * 校验绑定地址为 host:port 形态且端口合法。
+ */
+function isValidBindAddress(addr) {
+  const idx = addr.lastIndexOf(':')
+  if (idx <= 0 || idx === addr.length - 1) return false
+  const port = Number(addr.slice(idx + 1))
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+}
+
+/**
+ * 非回环绑定的风险确认弹窗：说明全盘文件/终端/agent 暴露风险与建议隧道。
+ * 取消（reject）时由调用方回滚表单状态。
+ */
+function confirmNonLoopbackRisk() {
+  return ElMessageBox.confirm(
+    '绑定到非回环地址后，本机全部文件、终端与 AI agent 能力将暴露给局域网内设备，且服务未内置 TLS。远程访问建议使用 Tailscale / frp 等加密隧道。是否继续？',
+    '暴露风险确认',
+    { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' }
+  )
+}
+
+/**
+ * 加载浏览器访问通道配置与令牌（弹窗打开 / 变更刷新时调用）。
+ * 失败静默保持当前表单值：网络分区为增强信息，不阻塞其他设置页。
+ */
+async function loadWebServeConfig() {
+  try {
+    const cfg = await GetWebServeConfig()
+    webEnabled.value = !!cfg?.enabled
+    webBindAddress.value = cfg?.bindAddress || '127.0.0.1:36115'
+    webRunning.value = !!cfg?.running
+    webAccessUrls.value = cfg?.accessUrls || []
+  } catch {
+    // 保持默认值
+  }
+  try {
+    webToken.value = await GetWebServeToken()
+  } catch {
+    webToken.value = ''
+  }
+}
+
+/**
+ * 启用开关变更：非回环地址先风险确认，保存后刷新运行状态；
+ * 取消确认 / 保存失败均统一从后端刷新真实状态回滚表单。
+ */
+const onWebServeToggle = async (val) => {
+  try {
+    if (val && !isLoopbackAddress(webBindAddress.value)) {
+      await confirmNonLoopbackRisk()
+    }
+    await SetWebServeConfig(val, webBindAddress.value)
+    ElMessage.success(val ? '浏览器访问已开启' : '浏览器访问已关闭')
+  } catch (e) {
+    if (e && (e.code || e.message)) {
+      handleError('保存浏览器访问设置失败: ', e)
+    }
+  }
+  await loadWebServeConfig()
+}
+
+/**
+ * 绑定地址变更：格式校验 → 非回环风险确认 → 保存并使运行时生效（改址平滑重启）；
+ * 格式非法 / 取消 / 失败均从后端刷新回滚为已保存地址。
+ */
+const onBindAddressChange = async () => {
+  const addr = webBindAddress.value.trim()
+  if (!isValidBindAddress(addr)) {
+    ElMessage.error('绑定地址格式无效，须为 host:port（如 127.0.0.1:36115）')
+    await loadWebServeConfig()
+    return
+  }
+  try {
+    if (webEnabled.value && !isLoopbackAddress(addr)) {
+      await confirmNonLoopbackRisk()
+    }
+    await SetWebServeConfig(webEnabled.value, addr)
+    ElMessage.success('绑定地址已保存，服务已按新地址生效')
+  } catch (e) {
+    if (e && (e.code || e.message)) {
+      handleError('保存浏览器访问设置失败: ', e)
+    }
+  }
+  await loadWebServeConfig()
+}
+
+/**
+ * 复制令牌到剪贴板。
+ */
+async function copyToken() {
+  if (!webToken.value) return
+  try {
+    await navigator.clipboard.writeText(webToken.value)
+    ElMessage.success('访问令牌已复制')
+  } catch (e) {
+    ElMessage.error('复制失败: ' + (e?.message || String(e)))
+  }
+}
+
+/**
+ * 重新生成令牌：二次确认（已连接浏览器需重输）→ 轮换 → 回填展示新令牌。
+ */
+const regenerateToken = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '重新生成后，当前令牌立即失效：已连接的浏览器在下次连接时须重新输入新令牌。是否继续？',
+      '重新生成访问令牌',
+      { type: 'warning', confirmButtonText: '重新生成', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    webToken.value = await RegenerateWebToken()
+    tokenVisible.value = true
+    ElMessage.success('访问令牌已重新生成')
+  } catch (e) {
+    handleError('重新生成访问令牌失败: ', e)
   }
 }
 
@@ -444,6 +652,8 @@ async function loadSettings() {
   } catch {
     gpuEnabled.value = true
   }
+  // 浏览器访问通道配置（独立加载，失败静默不阻塞其他设置页）
+  await loadWebServeConfig()
   // 加载版本号
   try {
     appVersion.value = await GetAppVersion()
@@ -710,6 +920,58 @@ const onThemeChange = async () => {
 .input-w-md { width: 140px; }
 .input-w-lg { width: 240px; }
 .input-w-xl { width: 280px; }
+
+/* ===== 网络访问分区 ===== */
+
+/* 令牌操作区：遮蔽文本 + 显示/复制/重新生成横向排布 */
+.webserve-token-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+/* 令牌文本：等宽字体键帽风（对齐 kbd 字体族约定），超长截断防撑破布局 */
+.webserve-token-text {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* 访问地址列表：纵向排布的等宽地址项 */
+.webserve-urls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.webserve-url {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webserve-url-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
 
 /* 快捷键列表 */
 .shortcut-list {
