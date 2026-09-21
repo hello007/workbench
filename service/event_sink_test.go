@@ -113,9 +113,24 @@ func TestAiFunctionService_Emit_ThroughSink(t *testing.T) {
 	}
 }
 
-// TestSafeEmit_NilCtx_StillSafe safeEmit 收敛后守卫语义保持（nil ctx 不 fatal）。
-func TestSafeEmit_NilCtx_StillSafe(t *testing.T) {
-	safeEmit(nil, "pull-progress", model.PullResult{})
+// TestGitService_Emit_ThroughSink GitService 批量拉取事件经出口透传；
+// sink 未注入（零值构造）时静默不 panic——替代原 safeEmit 收敛前的守卫测试。
+func TestGitService_Emit_ThroughSink(t *testing.T) {
+	zero := &GitService{}                                     // sink=nil
+	emitEvent(zero.sink, "pull-progress", model.PullResult{}) // 不应 panic
+
+	svc := NewGitService()
+	fake := &fakeEventSink{}
+	svc.sink = fake
+
+	emitEvent(svc.sink, "pull-complete", map[string]int{"success": 1})
+
+	if len(fake.calls) != 1 {
+		t.Fatalf("应记录 1 次调用, got %d", len(fake.calls))
+	}
+	if fake.calls[0].name != "pull-complete" {
+		t.Errorf("事件名不符: got %q", fake.calls[0].name)
+	}
 }
 
 // TestDownloadUpdate_EmitsProgressViaSink 下载完成后经 sink 推送完成事件

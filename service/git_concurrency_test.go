@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -283,7 +282,7 @@ func TestBatchPull_RejectsLockedRepo(t *testing.T) {
 	}
 	defer release()
 
-	results := svc.BatchPull([]string{dir}, 1, context.Background())
+	results := svc.BatchPull([]string{dir}, 1)
 	if len(results) != 1 {
 		t.Fatalf("应返回 1 个结果，实际 %d", len(results))
 	}
@@ -307,7 +306,7 @@ func TestBatchPull_NoDeadlockOnConcurrentWorkers(t *testing.T) {
 	// 建两个无远程临时仓（BatchPull 会跳过，但会经过抢锁前 IsGitRepository 判定路径）
 	dirs := []string{setupTinyRepo(t), setupTinyRepo(t), setupTinyRepo(t)}
 
-	results := svc.BatchPull(dirs, 3, context.Background())
+	results := svc.BatchPull(dirs, 3)
 	if len(results) != len(dirs) {
 		t.Fatalf("应返回 %d 结果，实际 %d", len(dirs), len(results))
 	}

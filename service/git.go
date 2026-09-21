@@ -40,16 +40,26 @@ func IsOperationInProgressError(err error) bool {
 type GitService struct {
 	gitCmd    *util.GitCommand
 	scanCache *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
+	sink      EventSink         // 事件出口（pull-progress/pull-complete 推送），SetContext 注入
 
 	opMu    sync.Mutex             // 保护 opLocks map 的并发读写
 	opLocks map[string]*sync.Mutex // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
 }
 
 // NewGitService 创建服务（不注入扫描缓存，兼容现有调用方与测试）。
+// 事件出口经 SetContext 后置注入（调用方众多，保持无参签名不变）；
+// 未注入时事件推送静默跳过（防护集中在 EventSink）。
 func NewGitService() *GitService {
 	return &GitService{
 		gitCmd: util.NewGitCommand(),
 	}
+}
+
+// SetContext 设置 Wails 上下文并注入事件出口（用于推送批量拉取进度事件）。
+// 对齐 UpdateService.SetContext 的 setter 注入模式；ctx 为 nil（单测等无
+// Wails 上下文场景）时事件推送静默跳过（防护集中在 EventSink）。
+func (s *GitService) SetContext(ctx context.Context) {
+	s.sink = NewWailsEventSink(ctx)
 }
 
 // NewGitServiceWithCache 创建服务并注入扫描缓存管理器，启用 .git 预筛 + mtime 缓存优化。
@@ -569,12 +579,6 @@ func (s *GitService) DiscardChanges(dirPath string, filePaths []string) error {
 	return nil
 }
 
-// safeEmit 推送批量拉取进度事件（经 EventSink 出口）。
-// ctx 为 nil 或非 Wails 上下文（无 events 键）时静默跳过，防护集中在 EventSink。
-func safeEmit(ctx context.Context, event string, data ...interface{}) {
-	emitEvent(NewWailsEventSink(ctx), event, data...)
-}
-
 // Commit 选择性提交：仅提交 files 列表中的文件（pathspec 语义）。
 // 先 git add -- <files> 把选中文件（含未跟踪）加入 index，
 // 再 git commit -m <message> -- <files>，pathspec 确保不影响 index 中其他文件。
@@ -854,8 +858,10 @@ func (s *GitService) isUntracked(gitRoot, file string) (bool, error) {
 	return false, nil
 }
 
-// BatchPull 并行拉取多个 Git 仓库
-func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Context) []model.PullResult {
+// BatchPull 并行拉取多个 Git 仓库，进度事件经构造注入的 sink 推送
+// （pull-progress 每仓一条、pull-complete 汇总一条；sink 未注入或非 Wails
+// 上下文时静默跳过，防护集中在 EventSink）。
+func (s *GitService) BatchPull(repos []string, concurrency int) []model.PullResult {
 	if concurrency <= 0 {
 		concurrency = 5
 	}
@@ -921,13 +927,13 @@ func (s *GitService) BatchPull(repos []string, concurrency int, ctx context.Cont
 			}
 			mu.Unlock()
 
-			safeEmit(ctx, "pull-progress", result)
+			emitEvent(s.sink, "pull-progress", result)
 		}(repo)
 	}
 
 	wg.Wait()
 
-	safeEmit(ctx, "pull-complete", map[string]int{
+	emitEvent(s.sink, "pull-complete", map[string]int{
 		"success": successCount,
 		"skipped": skippedCount,
 		"failed":  failCount,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -20,7 +21,6 @@ import (
 	"workbench/model"
 	"workbench/server"
 	"workbench/service"
-	"workbench/util"
 )
 
 var (
@@ -105,18 +105,23 @@ func main() {
 
 // runServe 启动无头 HTTP 服务模式并阻塞运行。
 //
-// 与桌面模式差异：跳过 wails.Run（不创建窗口、不装配 AppServices），
-// 自建 net/http 服务对外提供前端静态资产（复用桌面模式同一份 embed 资产）
-// 与健康检查；浏览器 RPC/WS 通道属后续 PR。日志初始化与桌面模式对齐
-// （data/logs/app.log，dev 模式额外 stdout）。
+// 与桌面模式差异：跳过 wails.Run（不创建窗口），自建 net/http 服务对外提供
+// 前端静态资产（复用桌面模式同一份 embed 资产）、/api/rpc 通用 RPC 翻译层
+// （149 个绑定方法）、/preview-pdf 与 /preview-raw 文件预览及健康检查。
+// 装配集中走 NewAppServices（logger 初始化与全部 service 纯构造，与桌面
+// startup 同构）；serve 模式无 Wails 上下文，传 context.Background()——事件
+// 出口在非 Wails 上下文下静默跳过（防护集中在 EventSink），WS hub 事件桥接
+// 属后续 PR；startup 生命周期副作用（StartHistoryCleanup / CheckPendingUpdate
+// 等）暂不执行，待 WS/事件桥接 PR 一并对齐。
 func runServe(listen string) error {
-	logDir := filepath.Join("data", "logs")
-	if _, err := util.InitLogger(logDir, version == "dev"); err != nil {
-		// 日志初始化失败不阻断启动，回退 slog 默认 stderr
-		slog.Error("init logger failed", "dir", logDir, "err", err)
-	} else {
-		service.SetLogger(slog.Default())
-	}
+	app := NewApp()
+	// serve 模式无 Wails startup，ctx 兜底为 Background。注意：wails runtime 对
+	// 缺 frontend 键的 ctx（含 Background）直接 log.Fatalf 退出进程，不能靠 ctx
+	// 形态规避——对话框等 runtime 依赖方法须经 wailsRuntimeUnavailable 守卫前置
+	// 拒绝（app.go）；service 层事件发射由 EventSink 的 events 键守卫静默跳过
+	// （service/event_sink.go）。
+	app.ctx = context.Background()
+	app.AppServices = NewAppServices(context.Background(), "data", version == "dev")
 
 	distFS, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
@@ -129,7 +134,11 @@ func runServe(listen string) error {
 		return fmt.Errorf("准备访问令牌失败: %w", err)
 	}
 
-	handler := server.NewWebHandler(server.WebOptions{Assets: distFS, Token: token})
+	handler := server.NewWebHandler(server.WebOptions{
+		Assets:    distFS,
+		Token:     token,
+		RPCTarget: app,
+	})
 	srv := &http.Server{
 		Addr:              listen,
 		Handler:           handler,

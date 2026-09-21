@@ -73,7 +73,7 @@ func (a *App) ScanAndPullRepos(dirPath string) (*model.PullSummary, error) {
 	summary := &model.PullSummary{Total: len(repos)}
 
 	go func() {
-		a.gitSvc.BatchPull(repos, 5, a.ctx)
+		a.gitSvc.BatchPull(repos, 5)
 	}()
 
 	return summary, nil

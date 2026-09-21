@@ -298,10 +298,13 @@ func TestHasUpstream_RealRepo_NoUpstream(t *testing.T) {
 	}
 }
 
-// TestSafeEmit_NoPanic nil ctx 或无 events 的 ctx 不 panic、不调用 EventsEmit。
-func TestSafeEmit_NoPanic(t *testing.T) {
-	safeEmit(nil, "event", "data")
-	safeEmit(context.Background(), "event", "data")
+// TestGitService_SetContext_SinkSafe SetContext 注入的事件出口在 nil ctx 或
+// 非 Wails 上下文下静默跳过不 panic——保持原 safeEmit 收敛前的守卫语义。
+func TestGitService_SetContext_SinkSafe(t *testing.T) {
+	svc := NewGitService()
+	svc.SetContext(nil)
+	svc.SetContext(context.Background())
+	emitEvent(svc.sink, "pull-progress", model.PullResult{})
 }
 
 // TestSafeEmit_NonGitDir_ScanGitReposCached 未注入缓存的 ScanGitRepos 走纯 .git 预筛路径。
@@ -333,7 +336,7 @@ func TestBatchPull_SuccessAndFail(t *testing.T) {
 	os.MkdirAll(nonRepo, 0755)
 
 	svc := NewGitService()
-	results := svc.BatchPull([]string{repoPath, nonRepo}, 2, context.Background())
+	results := svc.BatchPull([]string{repoPath, nonRepo}, 2)
 
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -386,7 +389,7 @@ func TestHasRemote(t *testing.T) {
 func TestBatchPull_SkipsNoRemote(t *testing.T) {
 	repo := testutil.InitTempRepo(t) // 无远程配置
 	svc := NewGitService()
-	results := svc.BatchPull([]string{repo}, 1, context.Background())
+	results := svc.BatchPull([]string{repo}, 1)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -400,6 +403,39 @@ func TestBatchPull_SkipsNoRemote(t *testing.T) {
 	}
 	if r.Error != "" {
 		t.Errorf("expected no error for skipped repo, got: %s", r.Error)
+	}
+}
+
+// TestBatchPull_EmitsProgressViaSink 批量拉取事件经注入的 sink 推送：
+// 每仓 1 条 pull-progress（跳过路径也有）+ 汇总 1 条 pull-complete，
+// 不推送其他事件——safeEmit 收敛为 sink 字段注入后行为不变。
+func TestBatchPull_EmitsProgressViaSink(t *testing.T) {
+	repo := testutil.InitTempRepo(t) // 无远程配置，走跳过路径
+	svc := NewGitService()
+	fake := &fakeEventSink{}
+	svc.sink = fake
+
+	results := svc.BatchPull([]string{repo}, 1)
+	if len(results) != 1 {
+		t.Fatalf("应返回 1 个结果, got %d", len(results))
+	}
+
+	var progress, complete int
+	for _, c := range fake.calls {
+		switch c.name {
+		case "pull-progress":
+			progress++
+		case "pull-complete":
+			complete++
+		default:
+			t.Errorf("不应推送其他事件: %q", c.name)
+		}
+	}
+	if progress != 1 {
+		t.Errorf("应推送 1 条 pull-progress, got %d", progress)
+	}
+	if complete != 1 {
+		t.Errorf("应推送 1 条 pull-complete, got %d", complete)
 	}
 }
 

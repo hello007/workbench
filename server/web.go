@@ -19,6 +19,10 @@ type WebOptions struct {
 	// Token 访问令牌（LoadOrCreateToken 生成/读取）。空串视为未配置，
 	// 此时除 /healthz 外全部请求拒绝（fail closed）。
 	Token string
+	// RPCTarget /api/rpc 通用翻译层的调用目标（App 实例，any + reflect 路由，
+	// 避免 server 包反向依赖 main 包）。非 nil 时挂载 /api/rpc（经 token 认证）；
+	// nil 时 /api/rpc 不挂载（请求落入静态路径分支被 405 拒绝）。
+	RPCTarget any
 }
 
 // healthPath 健康检查路径，无敏感信息，豁免 token 认证（供探活/手工连通性验证）。
@@ -34,6 +38,12 @@ type webHandler struct {
 //
 // 路由分层：
 //   - /healthz 免认证健康检查（仅返回固定 JSON 状态，不暴露版本/路径等信息）；
+//   - /api/rpc 通用 RPC 翻译层（RPCTarget 非 nil 时挂载），经 token 认证中间件；
+//   - /preview-pdf、/preview-raw/ 文件预览路由，认证语义与桌面模式一致（桌面经
+//     AssetServer.Handler 挂载且无 token：本地信任模型，文件路径由用户在 UI 中
+//     选择，且 iframe 加载无法携带 Authorization 头，套 token 会让 PDF/HTML 预览
+//     在浏览器模式不可用）。serve 模式下该信任模型的网络面防护依赖默认回环
+//     绑定，改绑非回环地址须 --listen 显式指定（见 main.go defaultServeAddr 注释）；
 //   - 其余路径经 token 认证中间件（Authorization: Bearer / X-Auth-Token 头 /
 //     ?token= 查询参数，便于首次手工验证）后进入静态资产服务；
 //     未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由可达）。
@@ -41,6 +51,12 @@ func NewWebHandler(opts WebOptions) http.Handler {
 	h := &webHandler{files: opts.Assets, token: opts.Token}
 	mux := http.NewServeMux()
 	mux.HandleFunc(healthPath, h.serveHealth)
+	if opts.RPCTarget != nil {
+		mux.Handle(rpcPath, h.requireToken(NewRPCHandler(opts.RPCTarget)))
+	}
+	preview := PreviewHandler()
+	mux.Handle("/preview-pdf", preview)
+	mux.Handle(previewRawPrefix, preview)
 	mux.Handle("/", h.requireToken(http.HandlerFunc(h.serveStatic)))
 	return mux
 }

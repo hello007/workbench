@@ -35,7 +35,12 @@ func (a *App) SaveFile(filePath string, content string, encoding string) error {
 // SaveFileDialog 弹出原生保存文件对话框，返回用户选择的路径（取消返回空串）。
 // 前端导出 CSV/Markdown/JSON 时由前端调此方法选路径，再调 SaveFile 落盘，
 // 后端不耦合用户目录。ctx 取自 startup 注入的 a.ctx，filters 为文件类型筛选列表。
+// serve 无头模式下经 wailsRuntimeUnavailable 守卫前置拒绝（wails runtime 对无
+// frontend 键的 ctx 会 log.Fatalf 退出进程，不可达此处的 runtime 调用）。
 func (a *App) SaveFileDialog(defaultFilename string, filters []runtime.FileFilter) (string, error) {
+	if err := a.wailsRuntimeUnavailable(); err != nil {
+		return "", err
+	}
 	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		DefaultFilename: defaultFilename,
 		Filters:         filters,
@@ -45,7 +50,11 @@ func (a *App) SaveFileDialog(defaultFilename string, filters []runtime.FileFilte
 // OpenFileDialog 弹出原生打开文件对话框，返回用户选择的路径（取消返回空串）。
 // 前端导入配置文件时由前端调此方法选路径，再读文件内容交后端解析。
 // ctx 取自 startup 注入的 a.ctx，title 为对话框标题，filters 为文件类型筛选列表。
+// serve 无头模式下经 wailsRuntimeUnavailable 守卫前置拒绝（同 SaveFileDialog）。
 func (a *App) OpenFileDialog(title string, filters []runtime.FileFilter) (string, error) {
+	if err := a.wailsRuntimeUnavailable(); err != nil {
+		return "", err
+	}
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:   title,
 		Filters: filters,

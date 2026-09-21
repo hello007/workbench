@@ -78,6 +78,8 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 注入扫描缓存（.git 预筛 + mtime 缓存优化，PRD F12），让 ScanGitRepos 与一键更新同步受益
 	s.gitSvc = service.NewGitServiceWithCache(filepath.Join(dataDir, "repo_scan_cache.json"))
+	// 注入事件出口（批量拉取 pull-progress/pull-complete 推送；对齐 updateSvc 的 setter 注入模式）
+	s.gitSvc.SetContext(ctx)
 	// 注入提交历史缓存（纯内存，复用 filetree_cache 范式：HEAD SHA 增量 + TTL + 手动刷新）
 	s.commitHistoryCache = service.NewCommitHistoryCache()
 
