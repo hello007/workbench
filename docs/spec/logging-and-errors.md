@@ -92,6 +92,14 @@ type AppError struct {
 | `ErrCodeDiffToolLaunchFailed` | `E_DIFF_TOOL_LAUNCH_FAILED` | 外部 diff 工具 | error |
 | `ErrCodeRepoConfigInvalidJSON` | `E_REPO_CONFIG_INVALID_JSON` | 仓库列表配置导入导出 | error（导入文件非法 JSON/顶层结构缺失） |
 | `ErrCodeRepoConfigUnsupportedVersion` | `E_REPO_CONFIG_UNSUPPORTED_VERSION` | 仓库列表配置导入导出 | error（manifestVersion 缺失或高于支持） |
+| `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
+| `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |
+| `ErrCodeRPCMethodUnsupported` | `E_RPC_METHOD_UNSUPPORTED` | RPC 协议层（serve 浏览器模式） | error（签名形态不受支持，如变参） |
+| `ErrCodeRPCArgCountMismatch` | `E_RPC_ARG_COUNT_MISMATCH` | RPC 协议层（serve 浏览器模式） | error（参数个数不匹配） |
+| `ErrCodeRPCArgTypeMismatch` | `E_RPC_ARG_TYPE_MISMATCH` | RPC 协议层（serve 浏览器模式） | error（参数类型不匹配） |
+| `ErrCodeRPCInternal` | `E_RPC_INTERNAL` | RPC 协议层（serve 浏览器模式） | error（非 AppError 通用内部错误） |
+
+RPC 协议层错误码不构成 AppError（传输协议错误而非业务域错误），取值唯一来源为 `model/app_error.go` RPC 协议段常量表；`server/rpc.go` 以别名引用，前端 `src/transport/rpc.js` 在浏览器模式下按 code 透传给 `handleError` 分流（401 不透传，由 transport 层 token 输入门消化后重试）。
 
 **新增错误码须同步**：本表 + `frontend/src/utils/error.js` `ErrorCode` + `WARNING_CODES` + 前端 `codeMap`（如有）。
 

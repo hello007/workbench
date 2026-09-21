@@ -10,7 +10,16 @@ export const ErrorCode = Object.freeze({
   DiffToolNotConfigured: 'E_DIFF_TOOL_NOT_CONFIGURED', // 外部 diff 工具未配置或配置无效，引导用户去设置（warning）
   DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED', // 外部 diff 工具启动失败（error）
   RepoConfigInvalidJson: 'E_REPO_CONFIG_INVALID_JSON', // 仓库列表配置导入：文件不是合法 JSON 或顶层结构缺失（error）
-  RepoConfigUnsupportedVersion: 'E_REPO_CONFIG_UNSUPPORTED_VERSION' // 仓库列表配置导入：manifestVersion 缺失或高于当前支持（error）
+  RepoConfigUnsupportedVersion: 'E_REPO_CONFIG_UNSUPPORTED_VERSION', // 仓库列表配置导入：manifestVersion 缺失或高于当前支持（error）
+  // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
+  // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
+  // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。
+  RpcBadRequest: 'E_RPC_BAD_REQUEST', // 请求体非法（非 JSON、缺 method）或方法不允许（error）
+  RpcMethodNotFound: 'E_RPC_METHOD_NOT_FOUND', // 请求的方法不存在或未导出（error）
+  RpcMethodUnsupported: 'E_RPC_METHOD_UNSUPPORTED', // 方法签名形态不受支持，如变参方法（error）
+  RpcArgCountMismatch: 'E_RPC_ARG_COUNT_MISMATCH', // 参数个数与方法签名不符（error）
+  RpcArgTypeMismatch: 'E_RPC_ARG_TYPE_MISMATCH', // 参数值无法转换为签名要求的类型（error）
+  RpcInternal: 'E_RPC_INTERNAL' // 非 AppError 的通用内部错误/网络失败（error）
 })
 
 // 预期拒绝类错误码（用户可重试），弹 warning 而非 error。

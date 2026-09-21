@@ -13,23 +13,24 @@ import (
 
 // RPC 协议层错误码（传输协议错误，非业务域错误）。
 //
-// 响应形态与 model.AppError 经 Wails ErrorFormatter 传给前端的 {code, message}
-// 对象一致，前端按 code 分流；浏览器 transport shim 属后续 PR，当前尚无前端
-// 消费方，故暂不进 model/app_error.go 业务常量表，待前端 shim 落地时随
-// handleError 分流映射一并同步（见 docs/spec/logging-and-errors.md）。
+// 取值唯一来源为 model/app_error.go 的 RPC 协议段常量表，此处保留原常量名作
+// 别名引用，包内既有调用点与测试零改动。响应形态与 model.AppError 经 Wails
+// ErrorFormatter 传给前端的 {code, message} 对象一致；前端 transport shim
+// （frontend/src/transport）已落地，错误码同步至 utils/error.js ErrorCode 表，
+// 原注释「待前端 shim 落地时迁移」的计划已兑现（见 docs/spec/logging-and-errors.md）。
 const (
 	// ErrCodeRPCBadRequest 请求体非法（非 JSON、缺 method 字段）或方法不允许
-	ErrCodeRPCBadRequest = "E_RPC_BAD_REQUEST"
+	ErrCodeRPCBadRequest = model.ErrCodeRPCBadRequest
 	// ErrCodeRPCMethodNotFound 请求的方法不存在或未导出
-	ErrCodeRPCMethodNotFound = "E_RPC_METHOD_NOT_FOUND"
+	ErrCodeRPCMethodNotFound = model.ErrCodeRPCMethodNotFound
 	// ErrCodeRPCMethodUnsupported 方法签名形态不受支持（如变参方法）
-	ErrCodeRPCMethodUnsupported = "E_RPC_METHOD_UNSUPPORTED"
+	ErrCodeRPCMethodUnsupported = model.ErrCodeRPCMethodUnsupported
 	// ErrCodeRPCArgCountMismatch 参数个数与方法签名不符
-	ErrCodeRPCArgCountMismatch = "E_RPC_ARG_COUNT_MISMATCH"
+	ErrCodeRPCArgCountMismatch = model.ErrCodeRPCArgCountMismatch
 	// ErrCodeRPCArgTypeMismatch 参数值无法转换为签名要求的类型
-	ErrCodeRPCArgTypeMismatch = "E_RPC_ARG_TYPE_MISMATCH"
+	ErrCodeRPCArgTypeMismatch = model.ErrCodeRPCArgTypeMismatch
 	// ErrCodeRPCInternal 非 AppError 的通用内部错误（业务方法返回的普通 error）
-	ErrCodeRPCInternal = "E_RPC_INTERNAL"
+	ErrCodeRPCInternal = model.ErrCodeRPCInternal
 )
 
 // rpcPath 通用 RPC 翻译层端点路径。

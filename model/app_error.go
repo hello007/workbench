@@ -59,4 +59,16 @@ const (
 	// 仓库列表配置导入导出域
 	ErrCodeRepoConfigInvalidJSON        = "E_REPO_CONFIG_INVALID_JSON"        // 导入文件不是合法 JSON 或顶层结构缺失（error）
 	ErrCodeRepoConfigUnsupportedVersion = "E_REPO_CONFIG_UNSUPPORTED_VERSION" // manifestVersion 缺失或高于当前支持，须用兼容版本应用重新导出（error）
+
+	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
+	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
+	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值
+	// 同步（2026-09-22 浏览器 transport shim 落地时迁移，兑现 rpc.go 原注释
+	// 「待前端 shim 落地时同步常量表」的迁移计划）。
+	ErrCodeRPCBadRequest        = "E_RPC_BAD_REQUEST"        // 请求体非法（非 JSON、缺 method）或方法不允许（error）
+	ErrCodeRPCMethodNotFound    = "E_RPC_METHOD_NOT_FOUND"   // 请求的方法不存在或未导出（error）
+	ErrCodeRPCMethodUnsupported = "E_RPC_METHOD_UNSUPPORTED" // 方法签名形态不受支持，如变参方法（error）
+	ErrCodeRPCArgCountMismatch  = "E_RPC_ARG_COUNT_MISMATCH" // 参数个数与方法签名不符（error）
+	ErrCodeRPCArgTypeMismatch   = "E_RPC_ARG_TYPE_MISMATCH"  // 参数值无法转换为签名要求的类型（error）
+	ErrCodeRPCInternal          = "E_RPC_INTERNAL"           // 非 AppError 的通用内部错误（error）
 )
