@@ -23,6 +23,11 @@ type WebOptions struct {
 	// 避免 server 包反向依赖 main 包）。非 nil 时挂载 /api/rpc（经 token 认证）；
 	// nil 时 /api/rpc 不挂载（请求落入静态路径分支被 405 拒绝）。
 	RPCTarget any
+	// WSHub WebSocket 事件广播 hub（serve 模式事件出口）。非 nil 时挂载 /ws
+	// 端点——认证在 hub 内升级前完成（支持 ?token= 与 Sec-WebSocket-Protocol
+	// 子协议两种浏览器通道，见 ws.go），不套 requireToken（其 header/查询参数
+	// 提取不覆盖子协议通道）；nil 时 /ws 不挂载（落入静态路径分支被 405 拒绝）。
+	WSHub *WSHub
 }
 
 // healthPath 健康检查路径，无敏感信息，豁免 token 认证（供探活/手工连通性验证）。
@@ -39,6 +44,7 @@ type webHandler struct {
 // 路由分层：
 //   - /healthz 免认证健康检查（仅返回固定 JSON 状态，不暴露版本/路径等信息）；
 //   - /api/rpc 通用 RPC 翻译层（RPCTarget 非 nil 时挂载），经 token 认证中间件；
+//   - /ws WebSocket 事件广播端点（WSHub 非 nil 时挂载），认证在 hub 内升级前完成；
 //   - /preview-pdf、/preview-raw/ 文件预览路由，认证语义与桌面模式一致（桌面经
 //     AssetServer.Handler 挂载且无 token：本地信任模型，文件路径由用户在 UI 中
 //     选择，且 iframe 加载无法携带 Authorization 头，套 token 会让 PDF/HTML 预览
@@ -53,6 +59,9 @@ func NewWebHandler(opts WebOptions) http.Handler {
 	mux.HandleFunc(healthPath, h.serveHealth)
 	if opts.RPCTarget != nil {
 		mux.Handle(rpcPath, h.requireToken(NewRPCHandler(opts.RPCTarget)))
+	}
+	if opts.WSHub != nil {
+		mux.Handle(wsPath, opts.WSHub)
 	}
 	preview := PreviewHandler()
 	mux.Handle("/preview-pdf", preview)

@@ -53,12 +53,13 @@ const aiTaskOutputCleanTTL = 24 * time.Hour
 // 并发控制：concurrencySem 限制同时运行的子进程数，超限任务排队等待（queued=true），
 // 获取槽位后才创建执行 ctx（超时起算后移，排队等待不侵蚀执行预算）。
 type AiFunctionService struct {
-	ctx            context.Context
-	sink           EventSink // 事件出口（ai-task:* 事件推送），构造注入；ctx 另用于任务生命周期
-	configPath     string
-	mu             sync.Mutex
-	tasks          map[string]*aiTaskRuntime
-	concurrencySem chan struct{}         // 全局并发信号量，缓冲 = aiTaskMaxConcurrent
+	ctx        context.Context
+	sinkHolder // 事件出口持有器（ai-task:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换；ctx 另用于任务生命周期
+	configPath string
+	mu         sync.Mutex
+	tasks      map[string]*aiTaskRuntime
+	// 全局并发信号量，缓冲 = aiTaskMaxConcurrent
+	concurrencySem chan struct{}
 	historySvc     *AiTaskHistoryService // P1-2：历史归档服务（输出文件零拷贝接管 + 元数据持久化）
 }
 
@@ -90,14 +91,15 @@ type aiTaskRuntime struct {
 // NewAiFunctionService 创建 AI 功能服务
 func NewAiFunctionService(ctx context.Context, configPath string) *AiFunctionService {
 	dataDir := filepath.Dir(configPath)
-	return &AiFunctionService{
+	s := &AiFunctionService{
 		ctx:            ctx,
-		sink:           NewWailsEventSink(ctx),
 		configPath:     configPath,
 		tasks:          make(map[string]*aiTaskRuntime),
 		concurrencySem: make(chan struct{}, aiTaskMaxConcurrent),
 		historySvc:     NewAiTaskHistoryService(dataDir),
 	}
+	s.SetEventSink(NewWailsEventSink(ctx))
+	return s
 }
 
 // dataDir 推断 data 目录绝对路径：取 configPath（data/ai_functions.json）的父目录。
@@ -1316,7 +1318,7 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 
 // emit 推送事件（经 EventSink 出口；ctx 为 nil 或非 Wails 上下文时静默跳过）
 func (s *AiFunctionService) emit(name string, data ...any) {
-	emitEvent(s.sink, name, data...)
+	emitEvent(s.eventSink(), name, data...)
 }
 
 // pipeReader 抽象 stdout 管道（测试替换用）

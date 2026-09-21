@@ -38,9 +38,9 @@ func IsOperationInProgressError(err error) bool {
 
 // GitService Git服务
 type GitService struct {
-	gitCmd    *util.GitCommand
-	scanCache *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
-	sink      EventSink         // 事件出口（pull-progress/pull-complete 推送），SetContext 注入
+	gitCmd     *util.GitCommand
+	scanCache  *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
+	sinkHolder                   // 事件出口持有器（pull-progress/pull-complete 推送），SetContext 注入 + serve 模式经 SetEventSink 切换
 
 	opMu    sync.Mutex             // 保护 opLocks map 的并发读写
 	opLocks map[string]*sync.Mutex // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
@@ -59,7 +59,7 @@ func NewGitService() *GitService {
 // 对齐 UpdateService.SetContext 的 setter 注入模式；ctx 为 nil（单测等无
 // Wails 上下文场景）时事件推送静默跳过（防护集中在 EventSink）。
 func (s *GitService) SetContext(ctx context.Context) {
-	s.sink = NewWailsEventSink(ctx)
+	s.SetEventSink(NewWailsEventSink(ctx))
 }
 
 // NewGitServiceWithCache 创建服务并注入扫描缓存管理器，启用 .git 预筛 + mtime 缓存优化。
@@ -927,13 +927,13 @@ func (s *GitService) BatchPull(repos []string, concurrency int) []model.PullResu
 			}
 			mu.Unlock()
 
-			emitEvent(s.sink, "pull-progress", result)
+			emitEvent(s.eventSink(), "pull-progress", result)
 		}(repo)
 	}
 
 	wg.Wait()
 
-	emitEvent(s.sink, "pull-complete", map[string]int{
+	emitEvent(s.eventSink(), "pull-complete", map[string]int{
 		"success": successCount,
 		"skipped": skippedCount,
 		"failed":  failCount,

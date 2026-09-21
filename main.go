@@ -107,19 +107,19 @@ func main() {
 //
 // 与桌面模式差异：跳过 wails.Run（不创建窗口），自建 net/http 服务对外提供
 // 前端静态资产（复用桌面模式同一份 embed 资产）、/api/rpc 通用 RPC 翻译层
-// （149 个绑定方法）、/preview-pdf 与 /preview-raw 文件预览及健康检查。
-// 装配集中走 NewAppServices（logger 初始化与全部 service 纯构造，与桌面
-// startup 同构）；serve 模式无 Wails 上下文，传 context.Background()——事件
-// 出口在非 Wails 上下文下静默跳过（防护集中在 EventSink），WS hub 事件桥接
-// 属后续 PR；startup 生命周期副作用（StartHistoryCleanup / CheckPendingUpdate
-// 等）暂不执行，待 WS/事件桥接 PR 一并对齐。
+// （149 个绑定方法）、/ws WebSocket 事件广播、/preview-pdf 与 /preview-raw
+// 文件预览及健康检查。装配集中走 NewAppServices（logger 初始化与全部 service
+// 纯构造，与桌面 startup 同构）；serve 模式无 Wails 上下文，传
+// context.Background()，事件出口统一切换为 WS hub 广播给浏览器（四个持 sink
+// 服务：terminal/update/ai_function/git；未连接任何客户端时 Emit 为空投递）。
+// startup 生命周期副作用（StartHistoryCleanup / CheckPendingUpdate 等）暂不
+// 执行，属无头模式后续完善项。
 func runServe(listen string) error {
 	app := NewApp()
 	// serve 模式无 Wails startup，ctx 兜底为 Background。注意：wails runtime 对
 	// 缺 frontend 键的 ctx（含 Background）直接 log.Fatalf 退出进程，不能靠 ctx
 	// 形态规避——对话框等 runtime 依赖方法须经 wailsRuntimeUnavailable 守卫前置
-	// 拒绝（app.go）；service 层事件发射由 EventSink 的 events 键守卫静默跳过
-	// （service/event_sink.go）。
+	// 拒绝（app.go）；service 层事件出口经下方 SetEventSink 切换为 WS hub。
 	app.ctx = context.Background()
 	app.AppServices = NewAppServices(context.Background(), "data", version == "dev")
 
@@ -134,10 +134,20 @@ func runServe(listen string) error {
 		return fmt.Errorf("准备访问令牌失败: %w", err)
 	}
 
+	// 事件出口切换为 WebSocket hub：terminal 输出泵/下载进度/AI 任务/git 批量
+	// 拉取的事件经 hub 广播给浏览器（SetEventSink 并发安全，输出泵 goroutine
+	// 读侧由 sinkHolder 读写锁保护）。桌面模式不执行切换，仍走 wails sink。
+	hub := server.NewWSHub(token)
+	app.terminalSvc.SetEventSink(hub)
+	app.updateSvc.SetEventSink(hub)
+	app.aiFuncSvc.SetEventSink(hub)
+	app.gitSvc.SetEventSink(hub)
+
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets:    distFS,
 		Token:     token,
 		RPCTarget: app,
+		WSHub:     hub,
 	})
 	srv := &http.Server{
 		Addr:              listen,

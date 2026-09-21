@@ -29,7 +29,7 @@ const (
 
 // UpdateService 更新服务
 type UpdateService struct {
-	sink       EventSink // 事件出口（update:download-progress 推送），SetContext 注入
+	sinkHolder // 事件出口持有器（update:download-progress 推送），SetContext 注入 + serve 模式经 SetEventSink 切换
 	httpClient *http.Client
 	cancelDL   context.CancelFunc // 用于取消下载
 	mu         sync.Mutex         // 保护 cancelDL 字段
@@ -45,7 +45,7 @@ func NewUpdateService() *UpdateService {
 // SetContext 设置 Wails 上下文并注入事件出口（用于推送下载进度事件）。
 // ctx 为 nil（单测等无 Wails 上下文场景）时事件推送静默跳过（防护集中在 EventSink）。
 func (s *UpdateService) SetContext(ctx context.Context) {
-	s.sink = NewWailsEventSink(ctx)
+	s.SetEventSink(NewWailsEventSink(ctx))
 }
 
 // CheckForUpdate 检查是否有新版本
@@ -185,7 +185,7 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 				speed = formatSpeed(bytesPerSec)
 			}
 
-			emitEvent(s.sink, "update:download-progress", model.DownloadProgress{
+			emitEvent(s.eventSink(), "update:download-progress", model.DownloadProgress{
 				TotalBytes: total,
 				Downloaded: downloaded,
 				Percent:    percent,
@@ -207,7 +207,7 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 	}
 
 	// 推送完成事件
-	emitEvent(s.sink, "update:download-progress", model.DownloadProgress{
+	emitEvent(s.eventSink(), "update:download-progress", model.DownloadProgress{
 		TotalBytes: total,
 		Downloaded: downloaded,
 		Percent:    100,

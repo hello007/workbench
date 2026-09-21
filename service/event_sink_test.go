@@ -4,13 +4,16 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"workbench/model"
 )
 
 // fakeEventSink 记录 Emit 调用的假事件出口，用于断言事件名与载荷透传。
+// Emit 加锁：SetEventSink 切换竞态测试中多个 goroutine 并发写同一实例。
 type fakeEventSink struct {
+	mu    sync.Mutex
 	calls []fakeEmitCall
 }
 
@@ -20,6 +23,8 @@ type fakeEmitCall struct {
 }
 
 func (f *fakeEventSink) Emit(name string, data ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, fakeEmitCall{name: name, data: data})
 }
 
@@ -67,20 +72,20 @@ func TestWailsEventSink_TypedNilReceiver_NoPanic(t *testing.T) {
 // TestTerminalService_ConstructorInjectsSink 构造时注入事件出口，nil ctx 不报错。
 func TestTerminalService_ConstructorInjectsSink(t *testing.T) {
 	svc := NewTerminalService(nil)
-	if svc.sink == nil {
+	if svc.eventSink() == nil {
 		t.Fatal("NewTerminalService 应注入事件出口")
 	}
 	// nil ctx 下 Emit 静默跳过，不得 panic/fatal
-	svc.sink.Emit("terminal-exit", "session-1")
+	svc.eventSink().Emit("terminal-exit", "session-1")
 }
 
 // TestTerminalService_Emit_ThroughSink 换注入 fake sink 后事件经出口透传。
 func TestTerminalService_Emit_ThroughSink(t *testing.T) {
 	svc := NewTerminalService(nil)
 	fake := &fakeEventSink{}
-	svc.sink = fake
+	svc.SetEventSink(fake)
 
-	emitEvent(svc.sink, "terminal-output", "session-1", "output-text")
+	emitEvent(svc.eventSink(), "terminal-output", "session-1", "output-text")
 
 	if len(fake.calls) != 1 {
 		t.Fatalf("应记录 1 次调用, got %d", len(fake.calls))
@@ -101,7 +106,7 @@ func TestAiFunctionService_Emit_ThroughSink(t *testing.T) {
 
 	svc := NewAiFunctionService(nil, "unused.json")
 	fake := &fakeEventSink{}
-	svc.sink = fake
+	svc.SetEventSink(fake)
 
 	svc.emit("ai-task:queued", 1, "two")
 
@@ -116,14 +121,14 @@ func TestAiFunctionService_Emit_ThroughSink(t *testing.T) {
 // TestGitService_Emit_ThroughSink GitService 批量拉取事件经出口透传；
 // sink 未注入（零值构造）时静默不 panic——替代原 safeEmit 收敛前的守卫测试。
 func TestGitService_Emit_ThroughSink(t *testing.T) {
-	zero := &GitService{}                                     // sink=nil
-	emitEvent(zero.sink, "pull-progress", model.PullResult{}) // 不应 panic
+	zero := &GitService{}                                            // sink 未注入
+	emitEvent(zero.eventSink(), "pull-progress", model.PullResult{}) // 不应 panic
 
 	svc := NewGitService()
 	fake := &fakeEventSink{}
-	svc.sink = fake
+	svc.SetEventSink(fake)
 
-	emitEvent(svc.sink, "pull-complete", map[string]int{"success": 1})
+	emitEvent(svc.eventSink(), "pull-complete", map[string]int{"success": 1})
 
 	if len(fake.calls) != 1 {
 		t.Fatalf("应记录 1 次调用, got %d", len(fake.calls))
@@ -146,7 +151,7 @@ func TestDownloadUpdate_EmitsProgressViaSink(t *testing.T) {
 
 	svc := NewUpdateService()
 	fake := &fakeEventSink{}
-	svc.sink = fake
+	svc.SetEventSink(fake)
 
 	if err := svc.DownloadUpdate(srv.URL); err != nil {
 		t.Fatalf("DownloadUpdate: %v", err)

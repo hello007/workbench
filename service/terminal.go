@@ -14,19 +14,20 @@ import (
 
 // TerminalService 终端服务，管理终端会话的创建、输入、切换目录、调整大小和关闭
 type TerminalService struct {
-	sink     EventSink // 事件出口（terminal-output/terminal-exit 推送），构造注入
-	sessions map[string]*model.TerminalSession
-	mu       sync.Mutex
+	sinkHolder // 事件出口持有器（terminal-output/terminal-exit 推送），构造注入 + serve 模式经 SetEventSink 切换
+	sessions   map[string]*model.TerminalSession
+	mu         sync.Mutex
 }
 
 // NewTerminalService 创建终端服务实例。
 // ctx 为 Wails 上下文，用于构造事件出口；传 nil（单测等无 Wails 上下文场景）
 // 时事件推送静默跳过（防护集中在 EventSink，修复原直调 EventsEmit 的 fatal 隐患）。
 func NewTerminalService(ctx context.Context) *TerminalService {
-	return &TerminalService{
-		sink:     NewWailsEventSink(ctx),
+	s := &TerminalService{
 		sessions: make(map[string]*model.TerminalSession),
 	}
+	s.SetEventSink(NewWailsEventSink(ctx))
+	return s
 }
 
 // CreateTerminal 创建终端会话
@@ -191,12 +192,12 @@ func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyPro
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				emitEvent(s.sink, "terminal-exit", sessionID)
+				emitEvent(s.eventSink(), "terminal-exit", sessionID)
 			}
 			return
 		}
 		if n > 0 {
-			emitEvent(s.sink, "terminal-output", sessionID, string(buf[:n]))
+			emitEvent(s.eventSink(), "terminal-output", sessionID, string(buf[:n]))
 		}
 	}
 }
@@ -211,7 +212,7 @@ func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProces
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				emitEvent(s.sink, "terminal-exit", sessionID)
+				emitEvent(s.eventSink(), "terminal-exit", sessionID)
 			}
 			return
 		}

@@ -304,7 +304,7 @@ func TestGitService_SetContext_SinkSafe(t *testing.T) {
 	svc := NewGitService()
 	svc.SetContext(nil)
 	svc.SetContext(context.Background())
-	emitEvent(svc.sink, "pull-progress", model.PullResult{})
+	emitEvent(svc.eventSink(), "pull-progress", model.PullResult{})
 }
 
 // TestSafeEmit_NonGitDir_ScanGitReposCached 未注入缓存的 ScanGitRepos 走纯 .git 预筛路径。
@@ -413,7 +413,7 @@ func TestBatchPull_EmitsProgressViaSink(t *testing.T) {
 	repo := testutil.InitTempRepo(t) // 无远程配置，走跳过路径
 	svc := NewGitService()
 	fake := &fakeEventSink{}
-	svc.sink = fake
+	svc.SetEventSink(fake)
 
 	results := svc.BatchPull([]string{repo}, 1)
 	if len(results) != 1 {
