@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 绑定三处同步、models.ts 类型别名、事件监听闭包注销"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "核查 ChatService 注册两处与构造模式（纯 new，副作用留 startup/shutdown）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查日志级别与错误码三处同步（model 常量表/error.js/文档）"}
+{"file": "docs/spec/browser-channel.md", "reason": "核查事件发送走 EventSink、serve 模式守卫"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查新面板视觉与现有面板一致性"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查覆盖率达标与测试分层"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查测试写法（fixtures.js import、禁 waitForTimeout、mock 单一数据源）"}

@@ -1,0 +1,9 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法须同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；具名 string 类型手动补 models.ts 别名；EventsOn 返回闭包精准注销监听"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 ChatService 须在 AppServices struct 加字段+NewAppServices 加构造行（2 处，package main）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "service 层 slog 日志（Logger 注入）；需前端分流的错误用 model.AppError 错误码，新增错误码同步常量表+error.js"}
+{"file": "docs/spec/browser-channel.md", "reason": "service 层发前端事件必须走 EventSink（emitEvent），禁直调 runtime.EventsEmit"}
+{"file": "docs/spec/ai-structured-output.md", "reason": "现有 claude CLI 链路（buildClaudeArgs/stream-json 解析/任务队列/seed skill 合并）与纯 prompt 模式先例，ChatService 复用该链路"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "新面板视觉规范：VSCode 式三列布局、语义配色、nav 指示条、弹窗响应式尺寸分档、间距圆角"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌：新增组件配色/阴影/字体须走现有 CSS 变量，禁硬编码"}
+{"file": "docs/spec/e2e-testing.md", "reason": "前端测试用 fixtures.js 的 {test,expect}（Wails mock 注入）；mock 默认值改 wails-mock-defaults.js 单一数据源"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：前端 ≥70% 硬失败；后端 service ≥76%；新增代码须带测试"}
