@@ -95,9 +95,9 @@
 |---|---|
 | 触发 | push(master) + pull_request；与 release.yml（tag v*）不冲突 |
 | Runner | ubuntu-latest（git 预装，集成测试可跑；Playwright headless 原生支持） |
-| 步骤顺序 | checkout → Go 1.24 → Node 20 → wails CLI + `wails generate module` → go test → go test integration → npm ci → npm run build → playwright install → e2e → npm test（快的在前，失败即停） |
+| 步骤顺序 | checkout → dist 占位（满足 `//go:embed`）→ Go 1.26 → Node 20 → GTK/WebKit apt 依赖 → wails CLI + `wails generate module` → go build（production 标签）+ go vet → go test → go test integration → npm ci → npm run build → playwright install → e2e → npm test（快的在前，失败即停） |
 | 失败产物 | `playwright-report/` + `test-results/` 上传 artifact（`if: failure()`，保留 7 天） |
-| 版本对齐 | Go 1.24 / Node 20 / npm cache 与 release.yml 一致 |
+| 版本对齐 | Go 1.26 / Node 20 / npm cache 与 release.yml 一致 |
 
 ## 11. 相关文档
 
