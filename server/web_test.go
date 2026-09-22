@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -227,34 +228,290 @@ func TestWebHandler_PreviewSecFetchSiteMatrix(t *testing.T) {
 	}
 }
 
-// TestExtractToken 令牌提取优先级与边界。
-func TestExtractToken(t *testing.T) {
-	newReq := func(path string, header map[string]string) *http.Request {
+// TestWebHandler_CookieAuthMatrix 会话 cookie 认证矩阵：有效 cookie 免凭据
+// 访问静态资产 200；错误 cookie 作为唯一凭据 401；错 cookie + 对 query 经
+// query 通道重验证 200 并重种新会话（任一通道命中即通过，与 ws.go 多通道
+// 语义一致；短路提取会让轮换后旧 cookie 遮蔽 ?token= 新令牌，堵死恢复路径）。
+func TestWebHandler_CookieAuthMatrix(t *testing.T) {
+	h := newTestHandler()
+
+	newReq := func(path string, cookie string) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if cookie != "" {
+			req.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
+		}
+		return req
+	}
+
+	// 有效 cookie：免 header/query 200
+	req := newReq("/assets/app.js", testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("有效 cookie 应 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "console.log('app')" {
+		t.Errorf("cookie 认证后静态内容不符: %q", body)
+	}
+
+	// 错误 cookie（唯一凭据）：401
+	req = newReq("/", "wrong-cookie")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("错误 cookie 应 401, got %d", rec.Code)
+	}
+
+	// 错 cookie + 对 query：query 通道重验证 200，并重种正确会话 cookie
+	req = newReq("/?token="+testToken, "wrong-cookie")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("错 cookie + 对 query 应经 query 重验证 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != testToken {
+		t.Errorf("query 重验证应重种正确会话 cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_RotationRecoveryViaQueryToken 令牌轮换后同浏览器恢复路径
+// 回归：浏览器携带旧 cookie（随同源请求自动发送）访问 /?token=<新令牌>，
+// 旧 cookie 不得遮蔽 query 新令牌——重验证须 200 并把会话 cookie 原地换新，
+// 否则轮换后用户在旧 cookie 过期前（30 天）无法经 URL 重新进入。
+func TestWebHandler_RotationRecoveryViaQueryToken(t *testing.T) {
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+	h.SetToken("new-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/?token=new-token", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("轮换后 ?token= 新令牌重验证应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != "new-token" {
+		t.Errorf("轮换恢复应重种新令牌会话 cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_IndexHtmlRedirectSetsCookie 首访 /index.html 场景：路径命中
+// index.html 后由 http.FileServer 规范化 301 到 ./（query 原样保留）。301 必须
+// 发生在 requireToken 之后的静态服务层——认证与 issueSessionCookie 先于重定向
+// 执行，301 响应携带会话 Set-Cookie，Location 保留 ?token=，跟随重定向的请求
+// 双重可达，首访链路不断裂。
+func TestWebHandler_IndexHtmlRedirectSetsCookie(t *testing.T) {
+	rec := get(t, newTestHandler(), "/index.html?token="+testToken, nil)
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("/index.html 应 301 规范化到 /, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "./?token="+testToken {
+		t.Errorf("301 Location 应保留 query token, got %q", loc)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != testToken {
+		t.Errorf("301 响应应携带会话 Set-Cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_QueryTokenSetsCookie 首访 ?token= 认证成功后种会话 cookie：
+// 属性断言 wb_token 值 / Path=/ / Max-Age=2592000 / HttpOnly / SameSite=Strict，
+// HTTP 明文链路无 Secure。
+func TestWebHandler_QueryTokenSetsCookie(t *testing.T) {
+	rec := get(t, newTestHandler(), "/?token="+testToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("首访 query 认证应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("应种恰好一条 cookie, got %d", len(cookies))
+	}
+	c := cookies[0]
+	if c.Name != cookieName || c.Value != testToken {
+		t.Errorf("cookie 名值不符: %s=%q", c.Name, c.Value)
+	}
+	if c.Path != "/" {
+		t.Errorf("cookie Path 应为 /, got %q", c.Path)
+	}
+	if c.MaxAge != int(cookieMaxAge.Seconds()) {
+		t.Errorf("cookie Max-Age 应为 %d, got %d", int(cookieMaxAge.Seconds()), c.MaxAge)
+	}
+	if !c.HttpOnly {
+		t.Error("cookie 应 HttpOnly")
+	}
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("cookie 应 SameSite=Strict, got %v", c.SameSite)
+	}
+	if c.Secure {
+		t.Error("HTTP 明文链路不应有 Secure")
+	}
+}
+
+// TestWebHandler_HeaderTokenSetsCookie header 通道认证成功同样种会话 cookie
+//（curl / 脚本验证后的浏览器共用场景与子集代理链路兜底）。
+func TestWebHandler_HeaderTokenSetsCookie(t *testing.T) {
+	rec := get(t, newTestHandler(), "/", map[string]string{"Authorization": "Bearer " + testToken})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Bearer 认证应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != cookieName || cookies[0].Value != testToken {
+		t.Fatalf("header 认证成功应种 wb_token cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_CookieHitNoReset cookie 命中的请求不重复 Set-Cookie（避免
+// 每个静态资产请求都带冗余 Set-Cookie 头）。
+func TestWebHandler_CookieHitNoReset(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: testToken})
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cookie 命中应 200, got %d", rec.Code)
+	}
+	if cookies := rec.Result().Cookies(); len(cookies) != 0 {
+		t.Errorf("cookie 命中不应重复 Set-Cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_CookieStaleResetWithHeaderAuth cookie 与当前令牌不一致时，
+// header 认证成功即重种新会话 cookie（令牌轮换后旧 cookie 原地换新）。
+func TestWebHandler_CookieStaleResetWithHeaderAuth(t *testing.T) {
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+	h.SetToken("new-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
+	req.Header.Set("Authorization", "Bearer new-token")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("header 认证应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != "new-token" {
+		t.Errorf("旧 cookie 不一致应重种新令牌 cookie, got %v", cookies)
+	}
+}
+
+// TestWebHandler_CookieSecureOnTLS HTTPS 链路（r.TLS 非 nil）种 cookie 追加
+// Secure 属性。
+func TestWebHandler_CookieSecureOnTLS(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?token="+testToken, nil)
+	req.TLS = &tls.ConnectionState{}
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("首访认证应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].Secure {
+		t.Errorf("TLS 链路 cookie 应带 Secure, got %v", cookies)
+	}
+}
+
+// TestWebHandler_CookieSessionCascade 首访资产级联全链路（serve 浏览器模式
+// 核心场景）：GET /?token= 认证并 Set-Cookie → 浏览器后续静态资产请求仅凭
+// cookie 200 → 完全无凭据的资产请求仍 401（fail closed 不因会话机制放宽）。
+func TestWebHandler_CookieSessionCascade(t *testing.T) {
+	h := newTestHandler()
+
+	// 1. 首访首页：?token= 认证成功 + Set-Cookie
+	rec := get(t, h, "/?token="+testToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("首访应 200, got %d", rec.Code)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("首访应种会话 cookie, got %v", cookies)
+	}
+
+	// 2. 模拟浏览器级联请求：仅凭 cookie 访问静态资产（无 query/header）
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	req.AddCookie(cookies[0])
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("cookie 会话资产请求应 200, got %d", rec.Code)
+	}
+
+	// 3. 无任何凭据的资产请求：401
+	if rec := get(t, h, "/assets/app.js", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("无凭据资产请求应 401, got %d", rec.Code)
+	}
+}
+
+// TestWebHandler_TokenRotationInvalidatesCookie 令牌轮换后旧 cookie 失效 401，
+// 新令牌 query 认证种新会话。
+func TestWebHandler_TokenRotationInvalidatesCookie(t *testing.T) {
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("轮换前旧 cookie 应 200, got %d", rec.Code)
+	}
+
+	h.SetToken("new-token")
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("轮换后旧 cookie 应 401, got %d", rec.Code)
+	}
+}
+
+// TestCredentialTokens 凭据候选收集：优先级排列且多通道并存（authorized 对
+// 候选逐一独立比对，任一命中即通过，不做短路提取）。
+func TestCredentialTokens(t *testing.T) {
+	newReq := func(path string, header map[string]string, cookie *http.Cookie) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		for k, v := range header {
 			req.Header.Set(k, v)
 		}
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
 		return req
+	}
+	wbCookie := func(v string) *http.Cookie {
+		return &http.Cookie{Name: cookieName, Value: v}
 	}
 
 	cases := []struct {
 		name string
 		req  *http.Request
-		want string
+		want []string
 	}{
-		{"Bearer 头", newReq("/", map[string]string{"Authorization": "Bearer t1"}), "t1"},
-		{"Bearer 头优先于 X-Auth-Token", newReq("/", map[string]string{"Authorization": "Bearer t1", "X-Auth-Token": "t2"}), "t1"},
-		{"非 Bearer 的 Authorization 忽略", newReq("/", map[string]string{"Authorization": "Basic abc"}), ""},
-		{"Bearer 空值回退 X-Auth-Token", newReq("/", map[string]string{"Authorization": "Bearer ", "X-Auth-Token": "t2"}), "t2"},
-		{"仅 X-Auth-Token", newReq("/", map[string]string{"X-Auth-Token": "t2"}), "t2"},
-		{"查询参数兜底", newReq("/?token=t3", nil), "t3"},
-		{"头优先于查询参数", newReq("/?token=t3", map[string]string{"X-Auth-Token": "t2"}), "t2"},
-		{"全空", newReq("/", nil), ""},
+		{"Bearer 头", newReq("/", map[string]string{"Authorization": "Bearer t1"}, nil), []string{"t1"}},
+		{"Bearer 头优先于 X-Auth-Token", newReq("/", map[string]string{"Authorization": "Bearer t1", "X-Auth-Token": "t2"}, nil), []string{"t1", "t2"}},
+		{"非 Bearer 的 Authorization 忽略", newReq("/", map[string]string{"Authorization": "Basic abc"}, nil), nil},
+		{"Bearer 空值候选与 X-Auth-Token 并存", newReq("/", map[string]string{"Authorization": "Bearer ", "X-Auth-Token": "t2"}, nil), []string{"t2"}},
+		{"仅 X-Auth-Token", newReq("/", map[string]string{"X-Auth-Token": "t2"}, nil), []string{"t2"}},
+		{"cookie 通道", newReq("/", nil, wbCookie("c1")), []string{"c1"}},
+		{"cookie 与查询参数并存", newReq("/?token=t3", nil, wbCookie("c1")), []string{"c1", "t3"}},
+		{"头与 cookie 并存", newReq("/", map[string]string{"X-Auth-Token": "t2"}, wbCookie("c1")), []string{"t2", "c1"}},
+		{"cookie 空值候选与查询参数并存", newReq("/?token=t3", nil, wbCookie("")), []string{"t3"}},
+		{"同名异键 cookie 不误取", newReq("/", nil, &http.Cookie{Name: "other", Value: "x"}), nil},
+		{"查询参数兜底", newReq("/?token=t3", nil, nil), []string{"t3"}},
+		{"全空", newReq("/", nil, nil), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := extractToken(tc.req); got != tc.want {
-				t.Errorf("extractToken = %q, want %q", got, tc.want)
+			got := credentialTokens(tc.req)
+			if len(got) != len(tc.want) {
+				t.Fatalf("credentialTokens = %#v, want %#v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("credentialTokens = %#v, want %#v", got, tc.want)
+				}
 			}
 		})
 	}

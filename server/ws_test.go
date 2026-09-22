@@ -165,6 +165,45 @@ func TestWSHub_AuthorizedSubprotocol(t *testing.T) {
 	}
 }
 
+// TestWSHub_CookieAuthChannel cookie 会话通道：浏览器裸连 WebSocket（无
+// protocols 参数）时首访 HTTP 请求种下的 wb_token cookie 随同源握手自动携带。
+// 有效 cookie 升级成功收帧；错误 cookie 升级前 401 拒绝。
+func TestWSHub_CookieAuthChannel(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	// 有效 cookie：裸连（无子协议、无查询参数）升级成功并收到广播
+	header := http.Header{}
+	header.Set("Cookie", cookieName+"=right-token")
+	url := "ws://" + srv.Listener.Addr().String() + wsPath
+	conn, _, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial(url, header)
+	if err != nil {
+		t.Fatalf("cookie 通道升级应成功: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	waitClientCount(t, hub, 1)
+
+	hub.Emit("push", "via-cookie")
+	frame := readFrame(t, conn)
+	if frame.Event != "push" || frame.Data[0] != "via-cookie" {
+		t.Errorf("事件帧不符: got %#v", frame)
+	}
+
+	// 错误 cookie：升级前 401 拒绝
+	badHeader := http.Header{}
+	badHeader.Set("Cookie", cookieName+"=wrong-token")
+	badConn, resp, _ := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial(url, badHeader)
+	if badConn != nil {
+		t.Fatal("错误 cookie 升级应失败")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("错误 cookie 应 HTTP 401 拒绝升级, got %d", status)
+	}
+}
+
 // TestWSHub_FrameFormat 帧格式为 {"event":"<事件名>","data":<变参数组>}，
 // 与 Wails EventsOn 回调 ...data 形态对齐（shim 以 callback(...frame.data) 还原）。
 func TestWSHub_FrameFormat(t *testing.T) {

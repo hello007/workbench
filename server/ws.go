@@ -163,11 +163,13 @@ func (h *WSHub) SetToken(token string) {
 //
 // 认证必须在升级前完成：失败以 HTTP 401 拒绝（若先升级再踢，客户端已进入
 // WebSocket 上下文，拿不到明确 HTTP 状态码，错误语义劣化）。浏览器 WebSocket
-// API 无法携带自定义 Authorization 头，支持两种令牌通道：
-//   - ?token= 查询参数（非浏览器客户端与手工验证便利；风险与 PR1 HTTP 通道
-//     的查询参数形态一致——可能进访问日志，恒定时间比较后即弃，不落日志）；
+// API 无法携带自定义 Authorization 头，支持三种令牌通道：
 //   - Sec-WebSocket-Protocol 子协议（浏览器 shim 主通道）：new WebSocket(url,
-//     [token]) 以子协议名携带，升级响应回显（upgrader.Subprotocols）。
+//     [token]) 以子协议名携带，升级响应回显（upgrader.Subprotocols）；
+//   - wb_token cookie（浏览器会话通道）：首访 HTTP 请求种下的会话 cookie 随
+//     同源 WS 握手自动携带，支撑前端无 localStorage 令牌时的裸连形态；
+//   - ?token= 查询参数（非浏览器客户端与手工验证便利；风险与 PR1 HTTP 通道
+//     的查询参数形态一致——可能进访问日志，恒定时间比较后即弃，不落日志）。
 func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.authorized(r) {
 		// 只记来源不记完整 URL：?token= 查询参数形式的令牌不得进日志
@@ -192,8 +194,10 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.readPump(c)
 }
 
-// authorized 校验升级请求令牌：两种通道任一命中即通过；恒定时间比较防
-// 时序侧信道；服务端令牌未配置时一律拒绝（fail closed）。
+// authorized 校验升级请求令牌：三种通道任一命中即通过——Sec-WebSocket-Protocol
+// 子协议（浏览器 shim 主通道，显式凭据）> wb_token cookie（浏览器会话，裸连
+// WebSocket 无 protocols 参数时依赖）> ?token= 查询参数（手工验证便利）；
+// 恒定时间比较防时序侧信道；服务端令牌未配置时一律拒绝（fail closed）。
 func (h *WSHub) authorized(r *http.Request) bool {
 	h.mu.RLock()
 	token := h.token
@@ -201,14 +205,18 @@ func (h *WSHub) authorized(r *http.Request) bool {
 	if token == "" {
 		return false
 	}
-	if t := r.URL.Query().Get("token"); t != "" &&
-		subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
-		return true
-	}
 	for _, p := range websocket.Subprotocols(r) {
 		if subtle.ConstantTimeCompare([]byte(p), []byte(token)) == 1 {
 			return true
 		}
+	}
+	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" &&
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(token)) == 1 {
+		return true
+	}
+	if t := r.URL.Query().Get("token"); t != "" &&
+		subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
+		return true
 	}
 	return false
 }

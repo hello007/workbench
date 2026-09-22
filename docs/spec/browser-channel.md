@@ -46,7 +46,8 @@ POST /api/rpc            （须经 token 中间件）
 ### 2.3 WebSocket 事件 hub（server/ws.go）
 
 ```text
-GET /ws?token=<t>  或  Sec-WebSocket-Protocol: <t>     （升级前 401 拒绝，勿升级后踢）
+GET /ws  —— Sec-WebSocket-Protocol: <t>  /  wb_token cookie  /  ?token=<t>
+                                                               （升级前 401 拒绝，勿升级后踢）
 帧: {"event":"<事件名>","data":[...]}    零载荷 data 为 [] 非 null
 func (h *WSHub) Close()   // 停机关闭：写锁遍历 clients 逐个 conn.Close，send 由 readPump unregister 收尾
 ```
@@ -71,7 +72,7 @@ done chan error                                       // 每次 Start 重建、S
 | 契约 | 内容 |
 |---|---|
 | 错误形态三端一致 | main.go `formatAppError` `{code,message}` ↔ rpc.go `error:{code,message}` ↔ transport/rpc.js reject `{code,message}`；`E_RPC_*` 六码取值唯一源 `model/app_error.go`，前端 `utils/error.js` ErrorCode 同步（新增码三处同步，同 logging-and-errors.md） |
-| token 三通道 | HTTP：`Authorization: Bearer` > `X-Auth-Token` > `?token=`（仅首访手工验证，勿写进文档推荐）；WS：`?token=` 或子协议。恒定时间比较（`subtle.ConstantTimeCompare`），fail-closed。落盘 `data/web_token` 0600，已 gitignore |
+| token 四通道 | HTTP 凭据优先级：`Authorization: Bearer` > `X-Auth-Token` > `wb_token` cookie > `?token=`（仅首访手工验证，勿写进文档推荐）；WS：子协议 > `wb_token` cookie > `?token=`。HTTP 与 WS 均**任一通道命中即通过**（候选有序但不短路——短路提取会让轮换后浏览器自动携带的旧 cookie 遮蔽 `?token=` 里的新令牌，同浏览器重验证恢复路径永远 401；单令牌基准下任一通道命中即须持有当前令牌，通道间无降级面，回归 `TestWebHandler_RotationRecoveryViaQueryToken`）。cookie 会话贯通（`issueSessionCookie`）：header/query 认证成功且 cookie 缺失或不一致时 `Set-Cookie: wb_token=<t>; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict`（`r.TLS != nil` 加 Secure），cookie 命中不重复 Set-Cookie——首访 `/?token=<t>` 后静态资产级联请求经 cookie 透明通过（查询参数只随单请求发送，无会话时全部 401，应用永远起不来——2026-09-22 用户实测缺陷）；令牌轮换后旧 cookie 失效须重新验证。恒定时间比较（`subtle.ConstantTimeCompare`），fail-closed。落盘 `data/web_token` 0600，已 gitignore |
 | token 热轮换 | `RegenerateWebToken`/`WebHandler.SetToken`/`WSHub.SetToken`：HTTP 与新 WS 握手立即生效；在途 WS 连接数据面不再校验 token，保持至断开重连（UI 文案已交代） |
 | token 轮换原子性 | `RegenerateWebToken` 生成→`SaveToken` 落盘→`RotateToken` 全程持 `App.webTokenMu` 互斥：并发轮换（浏览器多标签页同时触发）不加锁会交错出磁盘与 handler/hub 内存基准不一致；互斥后「落盘+热轮换」原子完成，最后一个持锁完成的调用决定三处一致的最终态（并发回归：`TestApp_RegenerateWebToken_ConcurrentConsistency`） |
 | Wait 代际语义 | `--serve` 主流程阻塞于 `Wait`；done channel 引用即代际标识，收到退出错误后核对代际——代际已更替（浏览器经 `SetWebServeConfig` 触发的重启/停机）则继续等当前代际（停机态经 `cond.Wait` 等下一次 Start），进程存活；仅代际未变的真实 Serve 故障退出才返回错误终止进程。旧实现读到旧 done 的 `ErrServerClosed` 即返回 → `runServe` 返回 → 进程意外退出（🔴 已修复，`TestWebServeManager_WaitGenerationSurvivesRestart`） |
@@ -87,7 +88,9 @@ done chan error                                       // 每次 Start 重建、S
 | 条件 | 行为 |
 |---|---|
 | 无/错 token 访问 RPC、静态页（除 /healthz） | 401 JSON |
-| WS 握手无/错 token | HTTP 401 拒绝升级 |
+| 带有效 `wb_token` cookie 访问 RPC/静态资产/WS | 200/升级成功（会话贯通）；cookie 命中不重复 Set-Cookie |
+| 错 cookie / 令牌轮换后旧 cookie | 401 JSON（header/query 重验证后重种新会话） |
+| WS 握手无/错 token（三通道均未命中） | HTTP 401 拒绝升级 |
 | serve 模式预览请求 `Sec-Fetch-Site` 非 same-origin（含缺失） | 403 JSON（`requireSameOrigin`；桌面模式不经此路径） |
 | serve 模式调窗口对话框方法（Save/OpenFileDialog 等） | `wailsRuntimeUnavailable` 守卫返回可读错误（不守卫则 wails `log.Fatalf` 杀整个服务进程——真实事故，PR2 修复） |
 | RPC 未知方法 / 未导出方法 / 变参方法 | `E_RPC_METHOD_NOT_FOUND` / 拒绝 |
@@ -107,10 +110,12 @@ done chan error                                       // 每次 Start 重建、S
 
 * 事件出口：sink nil-ctx/非 Wails ctx 安全、fake sink 透传断言、SetEventSink 切换 -race（并发 Emit+切换）、emitCurrent 持锁投递顺序（`TestSinkHolder_EmitCurrentUnderLockNoStaleDelivery`：新出口首事件不得早于旧出口在途 Emit 结束）
 * RPC：成功/未知方法/参数矩阵/AppError 透传/未认证 401/32MB 上限
-* WS：认证矩阵（两 token 通道）、帧格式 `data:[]`、断连清理无 goroutine 泄漏、慢消费者踢出、SetToken 热轮换双通道、`Close` 断开全部在途客户端 + 幂等（`TestWSHub_CloseDisconnectsAllClients`）+ manager Stop 集成（`TestWebServeManager_StopClosesWSClients`）
+* cookie 会话：认证矩阵（有效 cookie 200/错 cookie 唯一凭据 401/错 cookie + 对 query 重验证重种）、首访 Set-Cookie 属性（HttpOnly/SameSite=Strict/Max-Age/Path、TLS 加 Secure）、cookie 命中不重复 Set-Cookie、旧 cookie 轮换后 401、header 认证重种、轮换后同浏览器 `?token=` 重验证恢复（`TestWebHandler_RotationRecoveryViaQueryToken`）、首访资产级联（`TestWebHandler_CookieSessionCascade`）与真实 embed 资产全链路（`serve_cookie_smoke_test.go`：?token= 拿 Set-Cookie → 带 cookie 资产 200 → 无凭据 401 → cookie RPC 200）
+* WS：认证矩阵（三 token 通道）、帧格式 `data:[]`、断连清理无 goroutine 泄漏、慢消费者踢出、SetToken 热轮换、cookie 通道裸连升级（`TestWSHub_CookieAuthChannel`）、`Close` 断开全部在途客户端 + 幂等（`TestWSHub_CloseDisconnectsAllClients`）+ manager Stop 集成（`TestWebServeManager_StopClosesWSClients`）
 * webServe：manager 幂等/改址重启/端口占用三态、RegenerateWebToken 真实 HTTP 链路旧 401 新 200、并发轮换三处一致（磁盘==handler==hub）、Wait 代际（重启/停机/重开不返回 + 绕过管理器关 listener 真实退出返回错误）
 * 预览同源：`Sec-Fetch-Site` 矩阵（same-origin 过关入业务校验 / cross-site、none、缺失 403）
 * serve 端到端：`serve_rpc_smoke_test.go`（真实 *App + httptest：401/Bearer/query/WS 广播/对话框守卫不杀进程）
+* 前端事件桥：无本地令牌裸连（`new WebSocket(url)` 不传 protocols、不弹门）、裸连失败转 token 门后转子协议、裸连成功后断线静默重连、有令牌走子协议零回归（events.spec.js）
 
 ## 7. Wrong vs Correct
 
@@ -139,3 +144,4 @@ s.emitCurrent("task-progress", progress)
 
 **创建：** 2026-09-22（任务 `.trellis/tasks/09-21-agent`）
 **更新：** 2026-09-22（任务 `.trellis/tasks/09-22-browser-audit-fixes`：补 Wait 代际、停机立即断开语义、token 轮换原子性、WSHub.Close、预览同源收敛、emitCurrent 持锁投递契约）
+**更新：** 2026-09-22（任务 `.trellis/tasks/09-22-first-visit-asset-401`：token 三通道扩为四通道——新增 wb_token cookie 会话贯通（首访 `?token=` 自动种 30 天 HttpOnly/SameSite=Strict 会话，静态资产级联/RPC/WS 裸连透明通过），前端无本地令牌时 WS 裸连）

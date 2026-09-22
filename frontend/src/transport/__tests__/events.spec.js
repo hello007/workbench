@@ -324,16 +324,55 @@ describe('事件桥（window.runtime shim）', () => {
     expect(FakeWebSocket.instances).toHaveLength(2)
   })
 
-  it('无令牌时注册不建连，先经 token 门取得令牌再连接', async () => {
+  it('无本地令牌时裸连（服务端经 cookie 认证）：不弹门、不传子协议', () => {
     window.localStorage.removeItem('workbench.web.token')
-    mockGateResolves(TOK_NEW)
     const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
     bridge.EventsOn('e', () => {})
-    expect(FakeWebSocket.instances).toHaveLength(0)
+    // 首访 HTTP 请求已种 wb_token 会话 cookie，WS 裸连由服务端经 cookie 认证，
+    // 无需本地令牌、不经 token 门
+    expect(requestToken).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    const socket = lastSocket()
+    expect(socket.url).toBe('ws://test/ws')
+    // new WebSocket(url) 第二参不传：protocols 为 undefined（非子协议通道）
+    expect(socket.protocols).toBeUndefined()
+  })
+
+  it('裸连失败（从未 open）转 token 门，门提交令牌后转子协议通道', async () => {
+    vi.useFakeTimers()
+    window.localStorage.removeItem('workbench.web.token')
+    mockGateResolves(TOK2)
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    expect(lastSocket().protocols).toBeUndefined()
+    // 裸连握手失败（cookie 未种/失效 → 服务端 401 拒绝）：转 token 门
+    lastSocket().close()
     expect(requestToken).toHaveBeenCalledTimes(1)
     await flushMicrotasks()
-    expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(lastSocket().protocols).toEqual([TOK_NEW])
+    // 门提交令牌后以子协议通道重建连接
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(lastSocket().protocols).toEqual([TOK2])
+    vi.advanceTimersByTime(60000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it('裸连成功后断线走静默重连（仍为裸连形态），不经 token 门', () => {
+    vi.useFakeTimers()
+    window.localStorage.removeItem('workbench.web.token')
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const cb = vi.fn()
+    bridge.EventsOn('e', cb)
+    const s1 = lastSocket()
+    s1.open()
+    s1.close()
+    // 曾成功连接：断线走 1s 退避静默重连，不弹门
+    expect(requestToken).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(lastSocket().protocols).toBeUndefined()
+    lastSocket().open()
+    lastSocket().receive({ event: 'e', data: ['after'] })
+    expect(cb).toHaveBeenCalledWith('after')
   })
 
   it('令牌非 64 位 hex 形态时不建 WS，直接进 token 门重输（防子协议 SyntaxError）', async () => {

@@ -12,18 +12,23 @@
  *     浏览器下等价为新标签页打开。
  *
  * 连接管理：
- *   - 令牌经 Sec-WebSocket-Protocol 子协议携带（new WebSocket(url, [token])），
- *     与 server/ws.go 约定一致（服务端以 upgrader.Subprotocols 回显选中子协议）；
+ *   - 本地存有合法令牌（64 位 hex）时经 Sec-WebSocket-Protocol 子协议携带
+ *     （new WebSocket(url, [token])），与 server/ws.go 约定一致（服务端以
+ *     upgrader.Subprotocols 回显选中子协议）；本地无令牌时裸连
+ *     （new WebSocket(url)，不带 protocols），服务端经首访 HTTP 请求种下的
+ *     wb_token cookie 认证（见 server/web.go issueSessionCookie），支持
+ *     localStorage 清空后刷新页面的场景；
  *   - 注册表常驻：断线自动重连（指数退避，1s 起步、2 倍递增、30s 封顶），
  *     服务端向全部客户端广播，重连成功后事件自然恢复分发，无需重发订阅；
- *   - 首次连接（页面生命周期内从未 open 成功）失败视为令牌缺失/失效，
- *     弹 token 输入门重试；已成功连接过的断线走静默退避重连（横幅提示，
- *     见 connBanner.js），连续失败达 3 次后终止静默循环，弹 token 门重新
- *     认证并横幅提示服务不可达；门被取消则停止重连，之后任意 EventsOn
- *     注册或 RPC 401 弹门可再次拉起认证；若服务端轮换令牌，RPC 401 门
- *     会更新令牌，下一次重连即用新值；
- *   - 建连前校验令牌为 64 位 hex（服务端签发形态），非法令牌直接进 token
- *     门重输，避免非法字符作为 WebSocket 子协议同步抛 SyntaxError；
+ *   - 首次连接（页面生命周期内从未 open 成功）失败视为令牌缺失/失效
+ *     （含裸连 cookie 认证 401），弹 token 输入门重试；已成功连接过的断线走
+ *     静默退避重连（横幅提示，见 connBanner.js），连续失败达 3 次后终止静默
+ *     循环，弹 token 门重新认证并横幅提示服务不可达；门被取消则停止重连，
+ *     之后任意 EventsOn 注册或 RPC 401 弹门可再次拉起认证；若服务端轮换令牌，
+ *     RPC 401 门会更新令牌，下一次重连即用新值；
+ *   - 本地令牌非空但非 64 位 hex 形态时直接进 token 门重输，避免非法字符作为
+ *     WebSocket 子协议同步抛 SyntaxError（裸连不带子协议无此风险，故仅拦截
+ *     子协议通道）；
  *   - 无监听者时不重连，下次 EventsOn 注册时唤醒。
  */
 
@@ -37,8 +42,9 @@ const RECONNECT_MAX_DELAY_MS = 30000
 // 连续重连失败次数上限：达到后终止静默退避循环，转 token 门重新认证。
 const RECONNECT_FAIL_LIMIT = 3
 // 服务端签发的访问令牌为 32 字节 hex（64 字符，见 server/token.go GenerateToken）。
-// 建连前校验：无令牌或形态非法时不发起 WebSocket——非法字符作为子协议传入
-// 会使 new WebSocket 同步抛 SyntaxError 未捕获，杀死重连链。
+// 用于拦截「非空但形态非法」的令牌：非法字符作为子协议传入会使 new WebSocket
+// 同步抛 SyntaxError 未捕获，杀死重连链。空令牌不走此拦截——无令牌时裸连，
+// 服务端经 wb_token cookie 认证（见 server/web.go issueSessionCookie）。
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/i
 
 /**
@@ -68,17 +74,22 @@ export function createEventBridge({ wsUrl }) {
   }
 
   /**
-   * 发起一次 WS 连接。无令牌时先经 token 门取得再连。
+   * 发起一次 WS 连接。本地有合法令牌走子协议通道；无令牌走裸连（服务端经
+   * wb_token cookie 认证）；令牌非空但形态非法（非 64 位 hex）先经 token 门
+   * 取得合法值再连。
    */
   function connect() {
     if (socket || pendingGate) return
     const token = getToken()
-    if (!TOKEN_PATTERN.test(token)) {
-      // 无令牌或令牌非服务端签发的 64 位 hex 形态：经 token 门取得/重输
+    if (token && !TOKEN_PATTERN.test(token)) {
+      // 令牌非服务端签发的 64 位 hex 形态：经 token 门取得/重输
+      //（仅拦截子协议通道：非法字符作子协议会使 new WebSocket 同步抛
+      // SyntaxError；裸连不带子协议，无令牌时直接裸连经 cookie 认证）
       waitGateThenConnect()
       return
     }
-    socket = new WebSocket(wsUrl, [token])
+    // 有令牌：子协议携带；无令牌：裸连（第二参不传，服务端经 cookie 认证）
+    socket = token ? new WebSocket(wsUrl, [token]) : new WebSocket(wsUrl)
     socket.onopen = () => {
       everOpened = true
       reconnectAttempts = 0
@@ -99,8 +110,9 @@ export function createEventBridge({ wsUrl }) {
       socket = null
       notifyDisconnected()
       emitState(false)
-      if (!everOpened && getToken()) {
-        // 首次握手未成功即断开：典型为令牌缺失/失效，经门重试
+      if (!everOpened) {
+        // 首次握手未成功即断开：典型为令牌缺失/失效（含裸连 cookie 认证
+        // 401——cookie 未种或服务端令牌已轮换），经门重试
         waitGateThenConnect()
         return
       }

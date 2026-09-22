@@ -25,14 +25,25 @@ type WebOptions struct {
 	// nil 时 /api/rpc 不挂载（请求落入静态路径分支被 405 拒绝）。
 	RPCTarget any
 	// WSHub WebSocket 事件广播 hub（serve 模式事件出口）。非 nil 时挂载 /ws
-	// 端点——认证在 hub 内升级前完成（支持 ?token= 与 Sec-WebSocket-Protocol
-	// 子协议两种浏览器通道，见 ws.go），不套 requireToken（其 header/查询参数
-	// 提取不覆盖子协议通道）；nil 时 /ws 不挂载（落入静态路径分支被 405 拒绝）。
+	// 端点——认证在 hub 内升级前完成（支持 Sec-WebSocket-Protocol 子协议 /
+	// wb_token cookie / ?token= 三种通道，见 ws.go），不套 requireToken（其
+	// header/查询参数提取不覆盖子协议通道）；nil 时 /ws 不挂载（落入静态路径
+	// 分支被 405 拒绝）。
 	WSHub *WSHub
 }
 
 // healthPath 健康检查路径，无敏感信息，豁免 token 认证（供探活/手工连通性验证）。
 const healthPath = "/healthz"
+
+// cookieName 浏览器会话 cookie 名：首访经 ?token= 查询参数或 header 通道认证
+// 成功后种下，浏览器后续的静态资产、/api/rpc、/ws 请求自动携带，免去再次输
+// 令牌。查询参数只随单个请求发送，静态资产级联请求无凭据会全部 401（首访
+// 资产级联缺陷的修复点），cookie 是贯通浏览器会话的凭据载体。
+const cookieName = "wb_token"
+
+// cookieMaxAge 会话 cookie 有效期（30 天）。与服务端令牌无续期联动：令牌热
+// 轮换后旧 cookie 值认证不过即失效，浏览器重新经 ?token= 验证种新会话。
+const cookieMaxAge = 30 * 24 * time.Hour
 
 // WebHandler serve 模式 HTTP handler：token 认证 + 静态资产 + SPA fallback。
 // 导出类型以支持 SetToken 令牌热轮换（桌面设置页「重新生成令牌」运行期生效）。
@@ -57,8 +68,10 @@ type WebHandler struct {
 //     绑定，改绑非回环地址须 --listen 显式指定或设置页确认（见 model/settings.go
 //     DefaultWebServeBindAddress 注释）；
 //   - 其余路径经 token 认证中间件（Authorization: Bearer / X-Auth-Token 头 /
-//     ?token= 查询参数，便于首次手工验证）后进入静态资产服务；
-//     未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由可达）。
+//     wb_token cookie / ?token= 查询参数，便于首次手工验证；认证成功且会话
+//     cookie 缺失或不一致时种下 cookie，见 issueSessionCookie）后进入静态资产
+//     服务；未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由
+//     可达）。
 func NewWebHandler(opts WebOptions) *WebHandler {
 	h := &WebHandler{files: opts.Assets, token: opts.Token}
 	mux := http.NewServeMux()
@@ -122,47 +135,98 @@ func requireSameOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// requireToken token 认证中间件：未授权返回 401 JSON（安全失败关闭）。
+// requireToken token 认证中间件：未授权返回 401 JSON（安全失败关闭）；授权
+// 成功后经 issueSessionCookie 贯通浏览器会话。
 func (h *WebHandler) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !h.authorized(r) {
+		token, ok := h.authorized(r)
+		if !ok {
 			// 只记路径不记完整 URL：?token= 查询参数形式的令牌不得进日志
 			slog.Warn("unauthorized request", "path", r.URL.Path, "remote", r.RemoteAddr)
 			writePreviewError(w, http.StatusUnauthorized, "未授权访问：请携带访问令牌")
 			return
 		}
+		h.issueSessionCookie(w, r, token)
 		next.ServeHTTP(w, r)
 	})
 }
 
-// authorized 校验请求携带的令牌。恒定时间比较防时序侧信道；
-// 服务端令牌为空（未配置）时一律拒绝。
-func (h *WebHandler) authorized(r *http.Request) bool {
+// authorized 校验请求携带的令牌：credentialTokens 的候选逐一独立比对，任一
+// 命中即通过（与 ws.go authorized 的多通道语义一致）。候选有序但不短路——
+// 服务端单令牌基准下，任一通道命中即须持有当前令牌，通道间无降级面；反之若
+// 高优先级通道存在即短路提取，令牌轮换后浏览器携带的旧 cookie 会遮蔽
+// ?token= 里的新令牌，「重新经 ?token= 验证种新会话」的轮换恢复路径永远
+// 401。恒定时间比较防时序侧信道；服务端令牌为空（未配置）时一律拒绝。
+//
+// 返回值 token 为命中时的服务端令牌快照（与比对同一次读锁内取得）：调用方
+// issueSessionCookie 原子使用该快照，避免轮换插入验证与种 cookie 之间时，
+// 持旧令牌的请求收到 Set-Cookie 新令牌（轮换驱逐语义被旁路）。
+func (h *WebHandler) authorized(r *http.Request) (string, bool) {
 	h.mu.RLock()
 	token := h.token
 	h.mu.RUnlock()
 	if token == "" {
-		return false
+		return "", false
 	}
-	provided := extractToken(r)
-	if provided == "" {
-		return false
+	for _, provided := range credentialTokens(r) {
+		if provided != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
+			return token, true
+		}
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	return "", false
 }
 
-// extractToken 从请求提取令牌，优先级：Authorization: Bearer > X-Auth-Token 头
-// > ?token= 查询参数（便于首次手工验证）。
-func extractToken(r *http.Request) string {
+// credentialTokens 按优先级收集请求携带的全部凭据候选（可同时多个，空候选
+// 不收）：Authorization: Bearer > X-Auth-Token 头 > wb_token cookie（浏览器
+// 会话）> ?token= 查询参数（便于首次手工验证）。
+func credentialTokens(r *http.Request) []string {
+	var candidates []string
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 		if t := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")); t != "" {
-			return t
+			candidates = append(candidates, t)
 		}
 	}
 	if t := r.Header.Get("X-Auth-Token"); t != "" {
-		return t
+		candidates = append(candidates, t)
 	}
-	return r.URL.Query().Get("token")
+	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
+		candidates = append(candidates, c.Value)
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		candidates = append(candidates, t)
+	}
+	return candidates
+}
+
+// issueSessionCookie 浏览器会话贯通：凭据经 header/query 通道（而非 cookie）
+// 认证成功且会话 cookie 缺失或与当前令牌不一致时，种下 wb_token cookie，
+// 使浏览器后续静态资产、/api/rpc、/ws 请求自动携带凭据。cookie 已一致的
+// 请求不重复 Set-Cookie。token 为 authorized 返回的验证时令牌快照（非实时
+// 重读，见 authorized 注释）。令牌值经 HttpOnly 阻断脚本读取，SameSite=Strict
+// 收敛跨站携带面；HTTPS 链路（r.TLS 非 nil）追加 Secure。
+func (h *WebHandler) issueSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	if token == "" || h.hasValidCookie(r, token) {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(cookieMaxAge.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
+	})
+}
+
+// hasValidCookie 判断请求携带的会话 cookie 是否与服务端当前令牌一致
+// （恒定时间比较，与其它通道同防时序侧信道）。一致则不再重复 Set-Cookie。
+func (h *WebHandler) hasValidCookie(r *http.Request, token string) bool {
+	c, err := r.Cookie(cookieName)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(token)) == 1
 }
 
 // serveStatic 静态资产服务，未命中文件（含目录与 SPA 前端路由）fallback 到 index.html。
