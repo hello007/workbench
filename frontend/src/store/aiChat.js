@@ -134,12 +134,17 @@ export const useAiChatStore = defineStore('aiChat', () => {
       resetChatSessionSelection()
       return
     }
+    let sessions
     try {
-      chatSessions.value = (await ListChatSessions(dirId)) || []
+      sessions = (await ListChatSessions(dirId)) || []
     } catch (error) {
       debug.log('加载 AI 对话会话列表失败:', error)
-      chatSessions.value = []
+      sessions = []
     }
+    // await 期间目录可能已被切换（快速连点 A→B）：丢弃迟到响应，
+    // 防旧目录的会话列表覆盖新目录视图并误选旧目录会话
+    if (selectedChatDirectoryId.value !== dirId) return
+    chatSessions.value = sessions
     // 选中失效（切目录/被删）或尚无选中时默认取最近更新会话
     const stillExists = chatSessions.value.some(s => s.id === selectedChatSessionId.value)
     if (!stillExists) {
@@ -171,9 +176,12 @@ export const useAiChatStore = defineStore('aiChat', () => {
     }
     try {
       const sess = await GetChatSession(id)
+      // await 期间选中可能已切走（快速连切）：丢弃迟到响应，防旧会话消息覆盖新选中会话
+      if (selectedChatSessionId.value !== id) return
       selectedChatSession.value = sess
       chatMessages.value = (sess && sess.messages) || []
     } catch (error) {
+      if (selectedChatSessionId.value !== id) return
       debug.log('加载 AI 对话会话失败:', error)
       selectedChatSession.value = null
       chatMessages.value = []
@@ -217,7 +225,8 @@ export const useAiChatStore = defineStore('aiChat', () => {
 
   // ===== 任务域（PR3）=====
   // 在途对话任务态：{ taskId, chatSessionId, status: 'queued'|'running', reply, prompt }。
-  // null = 无在途任务。RunChat 成功即置 queued（不等 queued 事件，防事件丢失）。
+  // null = 无在途任务。RunChat resolve 即置 running（后端返回时进程已启动，
+  // queued/started 事件此时早已发过；先到的事件因本地任务尚未建立按 taskId 对不上被忽略）。
   const chatTask = ref(null)
 
   /** 是否有在途（排队/运行中）对话任务。 */
@@ -230,7 +239,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
 
   /**
    * 发送一轮对话：RunChat 自由 prompt（权限模式/模型取当前配置）。
-   * 成功后乐观置任务 queued + 追加本地 user 气泡；首条消息自动生成会话标题。
+   * 成功后任务置 running + 追加本地 user 气泡；首条消息自动生成会话标题。
    * @param {string} prompt 用户输入
    * @returns {Promise<string>} 任务 id
    */
@@ -240,11 +249,12 @@ export const useAiChatStore = defineStore('aiChat', () => {
     const isFirstTurn = !chatMessages.value.some(m => m.role === 'user')
     const settings = chatSettings.value
     const taskId = await RunChat(sessionId, prompt, settings.permissionMode, settings.modelName)
-    // 乐观态：任务置 queued（事件到达时按 taskId 对号刷新）+ user 气泡就地追加
+    // 乐观态：resolve 即进程已启动，任务直接置 running（queued 态仅由 queued 事件
+    // 兜底，且不回退已运行任务）+ user 气泡就地追加
     chatTask.value = {
       taskId,
       chatSessionId: sessionId,
-      status: 'queued',
+      status: 'running',
       reply: '',
       prompt
     }
@@ -252,10 +262,11 @@ export const useAiChatStore = defineStore('aiChat', () => {
       ...chatMessages.value,
       { role: 'user', content: prompt, timestamp: Date.now(), taskId }
     ]
-    // 首条消息自动生成会话标题（默认标题未被用户改过时），失败不阻断对话
+    // 首条消息自动生成会话标题（默认标题未被用户改过时），失败不阻断对话。
+    // Array.from 按 Unicode 码点截断，避免 UTF-16 码元截半 emoji 产生非法半代理
     if (isFirstTurn && selectedChatSession.value &&
         selectedChatSession.value.title === CHAT_DEFAULT_SESSION_TITLE) {
-      const title = prompt.replace(/\s+/g, ' ').trim().slice(0, 20)
+      const title = Array.from(prompt.replace(/\s+/g, ' ').trim()).slice(0, 20).join('')
       if (title) {
         renameChatSession(sessionId, title).catch((error) => {
           debug.log('会话标题自动生成失败:', error)
@@ -307,14 +318,15 @@ export const useAiChatStore = defineStore('aiChat', () => {
 
   // ----- chat-task:* 事件 handler（组件 EventsOn 绑定，按 taskId 对号）-----
 
-  /** chat-task:queued：排队确认（RunChat 已乐观置 queued，仅对号刷新幂等）。 */
+  /** chat-task:queued：排队兜底确认。仅补排队态，不把已运行的任务回退为排队。 */
   function onChatTaskQueued(ev) {
     const task = chatTask.value
     if (!task || task.taskId !== ev?.taskId) return
+    if (task.status === 'running') return
     task.status = 'queued'
   }
 
-  /** chat-task:started：后端取得并发槽位转执行态。 */
+  /** chat-task:started：后端取得并发槽位转执行态（幂等）。 */
   function onChatTaskStarted(ev) {
     const task = chatTask.value
     if (!task || task.taskId !== ev?.taskId) return

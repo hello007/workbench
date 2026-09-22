@@ -23,7 +23,7 @@ import {
   SaveChatSettings
 } from '../../../wailsjs/go/main/App'
 // 断言监听器注销行为需引用 mock 本体
-import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
+import { EventsOn, EventsOff, BrowserOpenURL } from '../../../wailsjs/runtime/runtime'
 
 // Wails 事件 handler 注册表（EventsOn mock 捕获 + 返回注销闭包，对齐真实 runtime 行为）
 const eventHandlers = {}
@@ -35,7 +35,8 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
     offClosures.push(off)
     return off
   }),
-  EventsOff: vi.fn()
+  EventsOff: vi.fn(),
+  BrowserOpenURL: vi.fn()
 }))
 
 vi.mock('element-plus', async () => {
@@ -131,11 +132,26 @@ const defaultStubs = {
     emits: ['update:modelValue']
   },
   'el-empty': { template: '<div class="el-empty">{{ description }}</div>', props: ['description', 'imageSize'] },
-  'el-dropdown': { template: '<div class="el-dropdown"><slot /><slot name="dropdown" /></div>', emits: ['command'] },
+  // el-dropdown stub：经 provide 向后代 el-dropdown-item 下发命令派发函数，
+  // 使下拉项可 DOM 点击触发 @command（对齐真实 EP 组件的 item 点击行为）
+  'el-dropdown': {
+    template: '<div class="el-dropdown"><slot /><slot name="dropdown" /></div>',
+    emits: ['command'],
+    provide() {
+      return { __dropdownCommand: (cmd) => this.$emit('command', cmd) }
+    }
+  },
   'el-dropdown-menu': { template: '<div class="el-dropdown-menu"><slot /></div>' },
   'el-dropdown-item': {
-    template: '<div class="el-dropdown-item" :class="{ \'is-disabled\': disabled }"><slot /></div>',
-    props: ['command', 'disabled', 'divided']
+    template: '<div class="el-dropdown-item" :class="{ \'is-disabled\': disabled }" @click="onClick"><slot /></div>',
+    props: ['command', 'disabled', 'divided'],
+    inject: { __dropdownCommand: { default: null } },
+    methods: {
+      onClick() {
+        if (this.disabled) return
+        if (this.__dropdownCommand) this.__dropdownCommand(this.command)
+      }
+    }
   },
   'el-select': {
     template: '<select :value="modelValue" @change="onChange"><slot /></select>',
@@ -278,6 +294,20 @@ describe('AiChatPanel.vue', () => {
       expect(RemoveChatDirectory).not.toHaveBeenCalled()
     })
 
+    it('移除目录确认文案如实说明历史会话不可达', async () => {
+      ElMessageBox.confirm.mockResolvedValueOnce()
+      wrapper = createWrapper()
+      await flushPromises()
+
+      await wrapper.find('.chat-dir-remove').trigger('click')
+
+      expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+        expect.stringContaining('历史会话'),
+        '移除目录',
+        expect.objectContaining({ type: 'warning' })
+      )
+    })
+
     it('移除失败走 handleError 报错提示', async () => {
       ElMessageBox.confirm.mockResolvedValueOnce()
       RemoveChatDirectory.mockRejectedValueOnce({ message: '目录项不存在' })
@@ -298,22 +328,44 @@ describe('AiChatPanel.vue', () => {
       expect(ReorderChatDirectories).toHaveBeenCalledWith(['chatdir-1', 'chatdir-2'])
     })
 
-    it('重命名：对话框预填当前名，提交后调 UpdateChatDirectory 并关闭', async () => {
+    it('排序保存失败回滚本地顺序并报错', async () => {
+      ReorderChatDirectories.mockRejectedValueOnce({ message: '磁盘已满' })
       wrapper = createWrapper()
       await flushPromises()
 
-      wrapper.vm.$.setupState.showRenameDialog({ id: 'chatdir-1', path: 'D:\\a', displayName: '项目管理' })
+      const state = wrapper.vm.$.setupState
+      // 模拟拖拽后的本地新序（chatdir-2 拖到最前）
+      state.localDirs = [
+        { id: 'chatdir-2', path: 'C:\\work\\server', displayName: 'server', sortOrder: 1, createdAt: 2000 },
+        { id: 'chatdir-1', path: 'D:\\workspace\\very-long-projects\\demo-projects\\alpha', displayName: '项目管理', sortOrder: 0, createdAt: 1000 }
+      ]
+      await state.onDragEnd()
       await flushPromises()
-      expect(wrapper.vm.$.setupState.renameName).toBe('项目管理')
-      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(true)
 
-      wrapper.vm.$.setupState.renameName = '新名'
-      await wrapper.vm.$.setupState.handleRename()
+      // 持久化失败：本地顺序回滚为 store 真实顺序，不停留在未保存的拖拽结果
+      expect(state.localDirs.map(d => d.id)).toEqual(['chatdir-1', 'chatdir-2'])
+      expect(ElMessage.error).toHaveBeenCalledWith('排序保存失败: 磁盘已满')
+    })
+
+    it('重命名：DOM 路径点击编辑图标，对话框预填当前名，提交后调 UpdateChatDirectory 并关闭', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+
+      await wrapper.findAll('.chat-dir-edit')[0].trigger('click')
+      const dialog = wrapper.find('.el-dialog')
+      expect(dialog.exists()).toBe(true)
+      // 显示名输入框预填当前名（第 2 个 input，第 1 个为禁用的当前路径）
+      const inputs = dialog.findAll('input')
+      expect(inputs[1].element.value).toBe('项目管理')
+      await inputs[1].setValue('新名')
+
+      const okBtn = dialog.findAll('button').find(b => b.text() === '确定')
+      await okBtn.trigger('click')
       await flushPromises()
 
       expect(UpdateChatDirectory).toHaveBeenCalledWith('chatdir-1', '新名')
       expect(ElMessage.success).toHaveBeenCalledWith('重命名成功')
-      expect(wrapper.vm.$.setupState.renameDialogVisible).toBe(false)
+      expect(wrapper.find('.el-dialog').exists()).toBe(false)
     })
 
     it('重命名：空名 warning 不调后端', async () => {
@@ -330,7 +382,7 @@ describe('AiChatPanel.vue', () => {
   })
 
   describe('添加目录对话框', () => {
-    it('点击「添加目录」打开对话框，成功添加后关闭并刷新列表', async () => {
+    it('点击「添加目录」打开对话框，填表提交成功后关闭并刷新列表（DOM 路径）', async () => {
       wrapper = createWrapper()
       await flushPromises()
       expect(wrapper.find('.el-dialog').exists()).toBe(false)
@@ -338,14 +390,16 @@ describe('AiChatPanel.vue', () => {
       await wrapper.find('.panel-actions button').trigger('click')
       expect(wrapper.find('.el-dialog').exists()).toBe(true)
 
-      wrapper.vm.$.setupState.addForm.path = 'D:\\new\\dir'
-      wrapper.vm.$.setupState.addForm.displayName = '项目管理'
-      await wrapper.vm.$.setupState.handleAdd()
+      const inputs = wrapper.findAll('.el-dialog input')
+      await inputs[0].setValue('D:\\new\\dir')
+      await inputs[1].setValue('项目管理')
+      const okBtn = wrapper.findAll('.el-dialog button').find(b => b.text() === '确定')
+      await okBtn.trigger('click')
       await flushPromises()
 
       expect(AddChatDirectory).toHaveBeenCalledWith('D:\\new\\dir', '项目管理')
       expect(ElMessage.success).toHaveBeenCalledWith('已添加「dir」')
-      expect(wrapper.vm.$.setupState.addDialogVisible).toBe(false)
+      expect(wrapper.find('.el-dialog').exists()).toBe(false)
     })
 
     it('路径为空时 warning 提示且不调后端', async () => {
@@ -425,14 +479,17 @@ describe('AiChatPanel.vue', () => {
       expect(wrapper.find('.chat-messages-empty').text()).toContain('新建会话')
     })
 
-    it('切换会话加载对应消息', async () => {
+    it('会话下拉 DOM 点击切换会话并加载对应消息', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
       GetChatSession.mockClear()
 
-      await wrapper.vm.$.setupState.handleSelectSession('chatsession-old')
+      const item = wrapper.findAll('.session-menu .el-dropdown-item')
+        .find(w => w.text().includes('旧会话'))
+      await item.trigger('click')
       await flushPromises()
+
       expect(GetChatSession).toHaveBeenCalledWith('chatsession-old')
       expect(useAiChatStore().selectedChatSessionId).toBe('chatsession-old')
     })
@@ -511,6 +568,8 @@ describe('AiChatPanel.vue', () => {
 
       expect(RunChat).toHaveBeenCalledWith('chatsession-new', '帮我看看这个项目', 'default', '')
       expect(wrapper.vm.$.setupState.inputText).toBe('')
+      // RunChat resolve 即运行态：状态行显示生成中而非排队等待（F2 回归）
+      expect(wrapper.find('.chat-input-status').text()).toContain('回复生成中')
       // 基准 1 条 user + 乐观 1 条
       expect(wrapper.findAll('.chat-msg-row.user').length).toBe(2)
       // 流式 assistant 气泡出现
@@ -531,12 +590,31 @@ describe('AiChatPanel.vue', () => {
       expect(RunChat).not.toHaveBeenCalled()
     })
 
-    it('空文本发送 warning 且不调后端', async () => {
+    it('中文 IME 组合输入的 Enter（isComposing）不发送', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      await wrapper.vm.$.setupState.handleSend()
+      const ta = wrapper.find("textarea.chat-input")
+      await ta.setValue('nihao')
+      // 构造 isComposing=true 的 keydown 模拟 IME 选词确认（普通 Event 实例可直赋属性）
+      const evt = new Event('keydown', { bubbles: true, cancelable: true })
+      evt.key = 'Enter'
+      evt.isComposing = true
+      ta.element.dispatchEvent(evt)
+      await flushPromises()
+
+      expect(RunChat).not.toHaveBeenCalled()
+      // 输入保留，未被当作消息发送清空
+      expect(ta.element.value).toBe('nihao')
+    })
+
+    it('空文本点击发送按钮 warning 且不调后端', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      await wrapper.find('.chat-send-btn').trigger('click')
       expect(ElMessage.warning).toHaveBeenCalledWith('请输入对话内容')
       expect(RunChat).not.toHaveBeenCalled()
     })
@@ -573,6 +651,28 @@ describe('AiChatPanel.vue', () => {
 
       expect(CreateChatSession).toHaveBeenCalled()
       expect(RunChat).toHaveBeenCalledWith('chatsession-created', '第一句', 'default', '')
+    })
+
+    it('首发建会话挂起期间重复发送被忽略（防双击双会话双发）', async () => {
+      ListChatSessions.mockResolvedValueOnce([])
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      // 建会话请求挂起：模拟后端延迟
+      let resolveCreate
+      CreateChatSession.mockImplementationOnce(
+        () => new Promise((r) => { resolveCreate = r })
+      )
+      wrapper.vm.$.setupState.inputText = '第一句'
+      const first = wrapper.vm.$.setupState.handleSend()
+      const second = wrapper.vm.$.setupState.handleSend() // 挂起期间重入
+      resolveCreate({ id: 'chatsession-created', directoryId: 'chatdir-1', title: '新会话', cwd: 'D:\\p', createdAt: 3, updatedAt: 300 })
+      await Promise.all([first, second])
+      await flushPromises()
+
+      expect(CreateChatSession).toHaveBeenCalledTimes(1)
+      expect(RunChat).toHaveBeenCalledTimes(1)
     })
 
     it('发送失败走 handleError 且输入保留', async () => {
@@ -629,6 +729,69 @@ describe('AiChatPanel.vue', () => {
       expect(wrapper.findAll('.chat-msg-row').length).toBe(2)
       // 发送按钮恢复
       expect(wrapper.find('.chat-send-btn').exists()).toBe(true)
+    })
+
+    it('markdown 链接点击被拦截：外链经 BrowserOpenURL 打开且不触发 webview 导航', async () => {
+      GetChatSession.mockResolvedValueOnce({
+        id: 'chatsession-new', directoryId: 'chatdir-1', title: '最近会话', cwd: 'D:\\p',
+        createdAt: 1, updatedAt: 100,
+        messages: [
+          { role: 'assistant', content: '看 [文档](https://example.com/doc) 与 [相对](./notes.md)', timestamp: 2 }
+        ]
+      })
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      // 拦截处理器在执行后会 stopPropagation，故在同容器（.chat-msg-md）上
+      // 后置注册监听（同元素监听按注册序执行，晚于 Vue 处理器）读取 defaultPrevented
+      let clickDefaultPrevented = null
+      wrapper.find('.chat-msg-md').element.addEventListener('click', (e) => {
+        clickDefaultPrevented = e.defaultPrevented
+      })
+
+      const links = wrapper.findAll('.chat-msg-md a')
+      expect(links.length).toBe(2)
+
+      // 外部链接：阻止默认导航 + 交系统浏览器打开
+      await links[0].trigger('click')
+      expect(BrowserOpenURL).toHaveBeenCalledWith('https://example.com/doc')
+      expect(clickDefaultPrevented).toBe(true)
+
+      // 相对链接：仅阻止导航（对话场景无应用内跳转语义），不交系统浏览器
+      await links[1].trigger('click')
+      expect(BrowserOpenURL).toHaveBeenCalledTimes(1)
+      expect(clickDefaultPrevented).toBe(true)
+    })
+
+    it('用户上翻离开底部时暂停自动跟随，滚回底部附近恢复', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const el = wrapper.find('.chat-messages').element
+      // jsdom 无布局：注入滚动度量（视口 400，内容 1000）
+      Object.defineProperty(el, 'scrollHeight', { value: 1000, configurable: true })
+      Object.defineProperty(el, 'clientHeight', { value: 400, configurable: true })
+
+      // 用户上翻至距底 500px（> 40 阈值）→ 暂停跟随
+      el.scrollTop = 100
+      await wrapper.find('.chat-messages').trigger('scroll')
+
+      wrapper.vm.$.setupState.inputText = 'hi'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+      // 新消息到达但用户已上翻：不强制拽回底部
+      expect(el.scrollTop).toBe(100)
+
+      // 滚回底部附近（距底 10px ≤ 阈值）→ 恢复跟随
+      el.scrollTop = 590
+      await wrapper.find('.chat-messages').trigger('scroll')
+
+      eventHandlers['chat-task:output']({ taskId: 'chattask-1', text: '增量' })
+      await flushPromises()
+      await flushPromises()
+      expect(el.scrollTop).toBe(1000)
     })
 
     it('done 失败提示与取消提示', async () => {
@@ -708,6 +871,81 @@ describe('AiChatPanel.vue', () => {
       expect(useAiChatStore().selectedChatSessionId).toBe('chatsession-new')
     })
 
+    it('取消任务失败时中止切换（不带着在途任务切走）', async () => {
+      ElMessageBox.confirm.mockResolvedValueOnce()
+      CancelChatTask.mockRejectedValueOnce({ message: '进程句柄失效' })
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = 'hi'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+
+      await wrapper.findAll('.chat-dir-item')[1].trigger('click')
+      await flushPromises()
+
+      expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
+      expect(ElMessage.error).toHaveBeenCalledWith('取消任务失败: 进程句柄失效')
+      // 取消失败：不切换，留在当前目录
+      expect(useAiChatStore().selectedChatDirectoryId).toBe('chatdir-1')
+    })
+
+    it('删除在途会话：先确认取消任务再删除（防孤儿消息复活）', async () => {
+      ElMessageBox.confirm.mockResolvedValue()
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = 'hi'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+
+      await wrapper.vm.$.setupState.handleDeleteSession()
+      await flushPromises()
+
+      // 两次确认：先「取消任务并删除」再「删除会话」
+      expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)
+      expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
+      expect(DeleteChatSession).toHaveBeenCalledWith('chatsession-new')
+    })
+
+    it('删除在途会话：取消确认被拒时不删除不取消', async () => {
+      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = 'hi'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+
+      await wrapper.vm.$.setupState.handleDeleteSession()
+      await flushPromises()
+
+      expect(CancelChatTask).not.toHaveBeenCalled()
+      expect(DeleteChatSession).not.toHaveBeenCalled()
+    })
+
+    it('数据加载完成前卸载也能注销全部监听器（先注册后加载）', async () => {
+      let resolveLoad
+      ListChatDirectories.mockImplementationOnce(() => new Promise((r) => { resolveLoad = r }))
+      wrapper = createWrapper()
+      // 不 flushPromises：onMounted 内数据加载仍挂起时立即卸载
+      wrapper.unmount()
+      wrapper = null
+      resolveLoad([
+        { id: 'chatdir-1', path: 'D:\\p', displayName: '项目管理', sortOrder: 0, createdAt: 1000 }
+      ])
+      await flushPromises()
+
+      const chatOffs = offClosures.slice(0, 4)
+      expect(chatOffs.length).toBe(4)
+      chatOffs.forEach((off) => expect(off).toHaveBeenCalled())
+      ;['chat-task:queued', 'chat-task:started', 'chat-task:output', 'chat-task:done']
+        .forEach((e) => expect(eventHandlers[e]).toBeUndefined())
+    })
+
     it('卸载时经 EventsOn 返回闭包精准注销监听器（禁 EventsOff）', async () => {
       wrapper = createWrapper()
       await flushPromises()
@@ -760,19 +998,25 @@ describe('AiChatPanel.vue', () => {
       expect(wrapper.vm.$.setupState.tplDialogVisible).toBe(true)
     })
 
-    it('新增目录模板：handleSaveTemplate 调 AddChatTemplate 并重置表单', async () => {
+    it('新增目录模板：模板下拉 -> 管理弹窗 DOM 路径调 AddChatTemplate 并重置表单', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      const state = wrapper.vm.$.setupState
-      state.tplForm = { id: '', scope: 'directory', name: '新模板', content: '内容A' }
-      await state.handleSaveTemplate()
+      // 模板下拉点击「管理模板」打开弹窗
+      await wrapper.find('.tpl-manage-item').trigger('click')
+      expect(wrapper.find('.tpl-manage-body').exists()).toBe(true)
+
+      const form = wrapper.find('.tpl-form')
+      await form.find('input').setValue('新模板')
+      await form.find('textarea').setValue('内容A')
+      const addBtn = wrapper.findAll('.el-dialog button').find(b => b.text() === '新增')
+      await addBtn.trigger('click')
       await flushPromises()
 
       expect(AddChatTemplate).toHaveBeenCalledWith('directory', 'chatdir-1', '新模板', '内容A')
       expect(ElMessage.success).toHaveBeenCalledWith('模板已新增')
-      expect(state.tplForm.id).toBe('')
+      expect(wrapper.vm.$.setupState.tplForm.id).toBe('')
     })
 
     it('编辑模板：调 UpdateChatTemplate', async () => {

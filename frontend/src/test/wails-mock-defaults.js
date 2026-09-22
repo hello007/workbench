@@ -379,12 +379,15 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   // ---- AI 对话工作台（PR3 对话闭环）E2E 默认值 ----
   // RunChat 返回任务 id 并派发 chat-task:* 事件流（queued→started→output→done），
   // 形状对齐 service/chat_service.go emit 数据与 model.ChatTaskRunResult。
-  // 事件流经 __events__ 派发机制模拟，真实链路由后端 runtime 推送。
+  // queued/started 经 __preEvents__ 在 resolve 前派发（真实时序：先 emit 再返回），
+  // output/done 经 __events__ 在 resolve 后派发，真实链路由后端 runtime 推送。
   RunChat: {
     __value__: 'chattask-e2e-1',
-    __events__: [
+    __preEvents__: [
       { event: 'chat-task:queued', payload: { taskId: 'chattask-e2e-1' } },
-      { event: 'chat-task:started', payload: { taskId: 'chattask-e2e-1', chatSessionId: 'chatsession-e2e-1' } },
+      { event: 'chat-task:started', payload: { taskId: 'chattask-e2e-1', chatSessionId: 'chatsession-e2e-1' } }
+    ],
+    __events__: [
       {
         event: 'chat-task:output',
         payload: { taskId: 'chattask-e2e-1', chatSessionId: 'chatsession-e2e-1', text: '这是 AI 的回复：**加粗要点**。\n' }

@@ -143,8 +143,8 @@
             </el-select>
           </div>
 
-          <!-- 消息历史区：气泡列表 + markdown 渲染 + 流式增量 -->
-          <div ref="messagesEl" class="chat-messages">
+          <!-- 消息历史区：气泡列表 + markdown 渲染 + 流式增量（scroll 驱动跟底状态） -->
+          <div ref="messagesEl" class="chat-messages" @scroll="onMessagesScroll">
             <div v-if="!displayMessages.length" class="chat-messages-empty">
               <el-empty
                 v-if="!aiChatStore.chatSessions.length"
@@ -160,11 +160,12 @@
               :class="msg.role"
             >
               <div class="chat-msg-bubble" :class="{ 'is-streaming': msg.streaming }">
-                <!-- assistant：markdown 渲染（html:false 防 XSS） -->
+                <!-- assistant：markdown 渲染（html:false 防 XSS；点击拦截防 webview 导航） -->
                 <div
                   v-if="msg.role === 'assistant'"
                   class="chat-msg-md"
                   v-html="renderChatMarkdown(msg.content)"
+                  @click="onChatMarkdownClick"
                 ></div>
                 <div v-else class="chat-msg-text">{{ msg.content }}</div>
               </div>
@@ -351,7 +352,7 @@ import { useAiChatStore, useUiStore } from '../store'
 import { handleError } from '../utils/error'
 import { shortenPath } from '../utils/pathFormat'
 import { renderChatMarkdown } from '../utils/chatMarkdown'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
 const aiChatStore = useAiChatStore()
 const uiStore = useUiStore()
@@ -386,24 +387,27 @@ watch(() => aiChatStore.chatDirectories, (val) => {
   localDirs.value = [...val]
 })
 
-// 拖拽结束：按新序持久化（失败提示并等待 store 重载回弹真实顺序）
+// 拖拽结束：按新序持久化（失败回滚本地顺序并提示，防 UI 停留在未保存的拖拽结果）
 const onDragEnd = async () => {
   const ids = localDirs.value.map(d => d.id)
   try {
     await aiChatStore.reorderChatDirectories(ids)
   } catch (error) {
+    localDirs.value = [...aiChatStore.chatDirectories]
     handleError('排序保存失败: ', error)
   }
 }
 
-// --- 在途任务时切换目录/会话的统一确认（继续将取消当前任务） ---
-const confirmDiscardInFlight = async () => {
+// --- 在途任务时切换目录/会话/新建/删除的统一确认（继续则取消当前任务） ---
+// actionLabel 描述后续动作（切换/新建/删除），确认取消任务后继续；取消失败则中止，
+// 防承诺「取消任务并继续」时带着仍在运行的任务继续。
+const confirmDiscardInFlight = async (actionLabel) => {
   if (!aiChatStore.chatInFlight) return true
   try {
     await ElMessageBox.confirm(
-      '当前有对话进行中，切换将取消该任务。确定切换吗？',
-      '切换确认',
-      { confirmButtonText: '取消任务并切换', cancelButtonText: '留在当前', type: 'warning' }
+      `当前有对话进行中，${actionLabel}将取消该任务。确定${actionLabel}吗？`,
+      `${actionLabel}确认`,
+      { confirmButtonText: `取消任务并${actionLabel}`, cancelButtonText: '留在当前', type: 'warning' }
     )
   } catch {
     return false
@@ -412,6 +416,7 @@ const confirmDiscardInFlight = async () => {
     await aiChatStore.cancelChatTask()
   } catch (error) {
     handleError('取消任务失败: ', error)
+    return false
   }
   return true
 }
@@ -419,7 +424,7 @@ const confirmDiscardInFlight = async () => {
 // --- 侧栏目录点击（在途任务先确认） ---
 const handleSelectDirectory = async (dir) => {
   if (dir.id === aiChatStore.selectedChatDirectoryId) return
-  if (!(await confirmDiscardInFlight())) return
+  if (!(await confirmDiscardInFlight('切换'))) return
   aiChatStore.selectChatDirectory(dir.id)
 }
 
@@ -434,7 +439,7 @@ watch(() => aiChatStore.selectedChatDirectoryId, async (id) => {
 const handleRemove = async (dir) => {
   try {
     await ElMessageBox.confirm(
-      `确定移除常用目录 "${dir.displayName}" 吗？该目录下的会话与消息记录不受影响。`,
+      `确定移除常用目录 "${dir.displayName}" 吗？移除后该目录下的历史会话将无法再从面板访问（重新添加同路径会生成新目录项，不会恢复它们）。`,
       '移除目录',
       {
         confirmButtonText: '移除',
@@ -563,12 +568,12 @@ const onSessionCommand = async (cmd) => {
 
 const handleSelectSession = async (id) => {
   if (!id || id === aiChatStore.selectedChatSessionId) return
-  if (!(await confirmDiscardInFlight())) return
+  if (!(await confirmDiscardInFlight('切换'))) return
   await aiChatStore.selectChatSession(id)
 }
 
 const handleNewSession = async () => {
-  if (!(await confirmDiscardInFlight())) return
+  if (!(await confirmDiscardInFlight('新建'))) return
   try {
     await aiChatStore.createChatSession()
   } catch (error) {
@@ -579,6 +584,10 @@ const handleNewSession = async () => {
 const handleDeleteSession = async () => {
   const id = aiChatStore.selectedChatSessionId
   if (!id) return
+  // 在途任务属于该会话时先确认并取消：防删除后进程继续跑、完成后复活孤儿消息文件
+  if (aiChatStore.chatTask && aiChatStore.chatTask.chatSessionId === id) {
+    if (!(await confirmDiscardInFlight('删除'))) return
+  }
   const title = aiChatStore.selectedChatSession?.title || '该会话'
   try {
     await ElMessageBox.confirm(
@@ -611,29 +620,73 @@ const displayMessages = computed(() => {
 })
 
 const messagesEl = ref(null)
-const scrollToBottom = () => {
+
+// markdown 气泡链接点击拦截（模式照抄 FilePreviewRenderer.onMarkdownClick）：
+// 不拦截 <a> 点击会触发 webview 顶层导航、整个应用被目标页替换；
+// 外部链接交系统默认浏览器打开，相对链接/锚点在对话场景无意义仅阻止导航
+const isExternalHref = (href) => /^(https?:|file:|mailto:|tel:|ftp:|data:)/i.test(href)
+
+const onChatMarkdownClick = (event) => {
+  const a = event.target.closest('a')
+  if (!a) return
+  const href = (a.getAttribute('href') || '').trim()
+  if (!href) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (isExternalHref(href)) {
+    BrowserOpenURL(href)
+  }
+}
+
+// 自动跟随底部：距底 ≤40px 视为「在底部」，新内容才自动滚动；
+// 用户上翻阅读历史时暂停跟随，滚回底部附近自动恢复
+const FOLLOW_BOTTOM_THRESHOLD = 40
+let followBottom = true
+
+const isNearBottom = () => {
+  const el = messagesEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_BOTTOM_THRESHOLD
+}
+
+const onMessagesScroll = () => {
+  followBottom = isNearBottom()
+}
+
+const scrollToBottom = (force = false) => {
+  if (!force && !followBottom) return
   nextTick(() => {
     const el = messagesEl.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) {
+      el.scrollTop = el.scrollHeight
+      followBottom = true
+    }
   })
 }
-// 消息条数变化 / 流式内容增长 / 会话切换时滚到底部
-watch(() => [aiChatStore.chatMessages.length, aiChatStore.chatTask?.reply], scrollToBottom)
-watch(() => aiChatStore.selectedChatSessionId, scrollToBottom)
+// 消息条数变化 / 流式内容增长时近底部才跟随；会话切换强制滚到底部
+watch(() => [aiChatStore.chatMessages.length, aiChatStore.chatTask?.reply], () => scrollToBottom())
+watch(() => aiChatStore.selectedChatSessionId, () => scrollToBottom(true))
 
 // ===== 输入与发送 =====
 
 const inputText = ref('')
 const inputRef = ref()
 
-// Enter 发送 / Shift+Enter 换行（textarea 内组合键交给默认行为）
+// Enter 发送 / Shift+Enter 换行（textarea 内组合键交给默认行为）。
+// 中文 IME 选词确认的 Enter（isComposing / keyCode 229）不发送，防把拼音串直发
 const onInputEnter = (e) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (e.shiftKey) return
   e.preventDefault()
   handleSend()
 }
 
+// 发送重入保护：从触发到 RunChat resolve 之间（含无会话首发先建会话的 await）
+// 屏蔽重复触发，防双击双会话双发
+let sending = false
+
 const handleSend = async () => {
+  if (sending) return
   const prompt = inputText.value.trim()
   if (!prompt) {
     ElMessage.warning('请输入对话内容')
@@ -641,20 +694,25 @@ const handleSend = async () => {
   }
   // 进行中禁发（按钮已切换为停止，此处双保护；后端另有 E_CHAT_IN_PROGRESS 拒绝）
   if (aiChatStore.chatInFlight) return
-  if (!aiChatStore.selectedChatSessionId) {
-    // 无会话时先建一个再发（空目录直接输入的顺滑路径）
-    try {
-      await aiChatStore.createChatSession()
-    } catch (error) {
-      handleError('新建会话失败: ', error)
-      return
-    }
-  }
+  sending = true
   try {
-    await aiChatStore.runChat(prompt)
-    inputText.value = ''
-  } catch (error) {
-    handleError('发送失败: ', error)
+    if (!aiChatStore.selectedChatSessionId) {
+      // 无会话时先建一个再发（空目录直接输入的顺滑路径）
+      try {
+        await aiChatStore.createChatSession()
+      } catch (error) {
+        handleError('新建会话失败: ', error)
+        return
+      }
+    }
+    try {
+      await aiChatStore.runChat(prompt)
+      inputText.value = ''
+    } catch (error) {
+      handleError('发送失败: ', error)
+    }
+  } finally {
+    sending = false
   }
 }
 
@@ -782,17 +840,22 @@ const onTaskDone = async (result) => {
   }
 }
 
-onMounted(async () => {
-  await aiChatStore.loadChatDirectories()
-  aiChatStore.loadChatSettings()
-  if (aiChatStore.selectedChatDirectoryId) {
-    await aiChatStore.loadChatSessions()
-    aiChatStore.loadChatTemplates()
-  }
+onMounted(() => {
+  // 先同步注册事件监听再异步加载数据：保证卸载路径必能拿到全部 off 闭包
+  // （若先 await 加载，await 期间卸载则 off 闭包未赋值、监听器泄漏）
   offQueued = EventsOn('chat-task:queued', aiChatStore.onChatTaskQueued)
   offStarted = EventsOn('chat-task:started', aiChatStore.onChatTaskStarted)
   offOutput = EventsOn('chat-task:output', aiChatStore.onChatTaskOutput)
   offDone = EventsOn('chat-task:done', onTaskDone)
+
+  ;(async () => {
+    await aiChatStore.loadChatDirectories()
+    aiChatStore.loadChatSettings()
+    if (aiChatStore.selectedChatDirectoryId) {
+      await aiChatStore.loadChatSessions()
+      aiChatStore.loadChatTemplates()
+    }
+  })()
 })
 
 onBeforeUnmount(() => {

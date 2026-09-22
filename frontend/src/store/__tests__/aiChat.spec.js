@@ -213,6 +213,21 @@ describe('aiChat store', () => {
     expect(store.chatSessions).toEqual([])
   })
 
+  it('loadChatSessions await 期间目录已切换时丢弃迟到响应', async () => {
+    const store = await setupWithDirectory()
+    const baseline = store.chatSessions.map(s => s.id)
+    let resolveLate
+    ListChatSessions.mockImplementationOnce(() => new Promise((r) => { resolveLate = r }))
+    const pending = store.loadChatSessions()
+    // await 期间快速切到另一目录，随后旧目录的空列表响应迟到
+    store.selectChatDirectory('chatdir-2')
+    resolveLate([])
+    await pending
+    // 迟到响应被丢弃：不覆盖新目录视图、不误选旧目录会话
+    expect(store.chatSessions.map(s => s.id)).toEqual(baseline)
+    expect(store.selectedChatSessionId).toBe('chatsession-new')
+  })
+
   it('selectChatSession 切换会话并加载对应消息', async () => {
     const store = await setupWithDirectory()
     GetChatSession.mockClear()
@@ -228,6 +243,24 @@ describe('aiChat store', () => {
     await store.selectChatSession('chatsession-missing')
     expect(store.selectedChatSessionId).toBe('chatsession-missing')
     expect(store.chatMessages).toEqual([])
+  })
+
+  it('selectChatSession 迟到响应不覆盖新选中会话的消息', async () => {
+    const store = await setupWithDirectory()
+    let resolveLate
+    GetChatSession.mockImplementationOnce(
+      (id) => new Promise((r) => {
+        resolveLate = () => r({ id, title: '旧会话', messages: [{ role: 'user', content: '迟到旧消息', timestamp: 1 }] })
+      })
+    )
+    const late = store.selectChatSession('chatsession-old')
+    // 快速连切：新选中会话先完成加载
+    await store.selectChatSession('chatsession-new')
+    resolveLate()
+    await late
+    // 迟到的旧会话响应被丢弃：消息保持新选中会话内容
+    expect(store.selectedChatSessionId).toBe('chatsession-new')
+    expect(store.chatMessages[0].content).toBe('第一问')
   })
 
   it('createChatSession 以当前目录建会话并选中', async () => {
@@ -274,7 +307,7 @@ describe('aiChat store', () => {
 
   // ===== 任务域（PR3）=====
 
-  it('runChat 以当前配置发送并乐观置任务态与 user 气泡', async () => {
+  it('runChat 以当前配置发送并乐观置 running 任务态与 user 气泡', async () => {
     const store = await setupWithDirectory()
     await store.saveChatSettings('acceptEdits', 'opus')
 
@@ -284,7 +317,8 @@ describe('aiChat store', () => {
     expect(store.chatInFlight).toBe(true)
     expect(store.chatTask.taskId).toBe('chattask-1')
     expect(store.chatTask.chatSessionId).toBe('chatsession-new')
-    expect(store.chatTask.status).toBe('queued')
+    // RunChat resolve 即进程已启动，任务直接为 running（非排队态）
+    expect(store.chatTask.status).toBe('running')
     // 乐观 user 气泡追加（GetChatSession 基准 2 条 + 1 条乐观）
     expect(store.chatMessages.length).toBe(3)
     expect(store.chatMessages[2].role).toBe('user')
@@ -304,6 +338,19 @@ describe('aiChat store', () => {
       'chatsession-new',
       '这是一个超过二十个字的需求请帮我生成会话'
     )
+  })
+
+  it('runChat 会话标题按 Unicode 码点截断（emoji 不截半产生非法半代理）', async () => {
+    GetChatSession.mockResolvedValueOnce({
+      id: 'chatsession-new', directoryId: 'chatdir-1', title: '新会话', cwd: 'C:\\p',
+      createdAt: 1, updatedAt: 100, messages: []
+    })
+    const store = await setupWithDirectory()
+    await store.runChat('😀'.repeat(25))
+    await flushPromises()
+    const calledTitle = UpdateChatSessionTitle.mock.calls[0][1]
+    expect(Array.from(calledTitle).length).toBe(20)
+    expect(calledTitle).toBe('😀'.repeat(20))
   })
 
   it('runChat 非首条消息或标题已改时不自动生成标题', async () => {
@@ -326,14 +373,36 @@ describe('aiChat store', () => {
     await expect(store.runChat('hi')).rejects.toThrow('未选择会话')
   })
 
-  it('onChatTaskStarted / onChatTaskOutput 按 taskId 对号更新', async () => {
+  it('queued/started/output 先于 RunChat resolve 到达时被安全忽略，resolve 后为 running', async () => {
+    const store = await setupWithDirectory()
+    let resolveRun
+    RunChat.mockImplementationOnce(() => new Promise((r) => { resolveRun = r }))
+    const pending = store.runChat('hi')
+    // 真实时序：后端先 emit 事件再返回 bound call，此时本地任务尚未建立
+    store.onChatTaskQueued({ taskId: 'chattask-1' })
+    store.onChatTaskStarted({ taskId: 'chattask-1', chatSessionId: 'chatsession-new' })
+    store.onChatTaskOutput({ taskId: 'chattask-1', text: '早到增量' })
+    expect(store.chatTask).toBeNull()
+    resolveRun('chattask-1')
+    await pending
+    // resolve 即 running，早到的增量不被误记
+    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTask.reply).toBe('')
+  })
+
+  it('onChatTaskStarted / onChatTaskOutput 按 taskId 对号更新，queued 不回退运行态', async () => {
     const store = await setupWithDirectory()
     await store.runChat('hi')
-
-    // 不匹配的 taskId 忽略
+    // resolve 即 running；不匹配 taskId 的 started 不改状态
+    expect(store.chatTask.status).toBe('running')
     store.onChatTaskStarted({ taskId: 'other' })
-    expect(store.chatTask.status).toBe('queued')
+    expect(store.chatTask.status).toBe('running')
 
+    // 已 running 时同任务 queued 事件不回退为排队态（F2 回归）
+    store.onChatTaskQueued({ taskId: 'chattask-1' })
+    expect(store.chatTask.status).toBe('running')
+
+    // started 幂等
     store.onChatTaskStarted({ taskId: 'chattask-1' })
     expect(store.chatTask.status).toBe('running')
 
@@ -368,21 +437,24 @@ describe('aiChat store', () => {
     expect(store.chatInFlight).toBe(true)
   })
 
-  it('cancelChatTask 排队态立即清任务态，运行中等 done', async () => {
+  it('cancelChatTask 运行中等 done 收尾，排队态兜底立即清任务态', async () => {
     const store = await setupWithDirectory()
+    // RunChat resolve 即 running：取消后任务态保留，等 done 事件收尾
     await store.runChat('hi')
     await store.cancelChatTask()
     expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
-    expect(store.chatInFlight).toBe(false)
-
-    // 运行中：取消后任务态保留（done 事件收尾）
-    await store.runChat('hi2')
-    store.onChatTaskStarted({ taskId: 'chattask-1' })
-    await store.cancelChatTask()
     expect(store.chatInFlight).toBe(true)
 
     // done 到达后清理
     await store.handleChatTaskDone({ taskId: 'chattask-1', canceled: true })
+    expect(store.chatInFlight).toBe(false)
+
+    // 排队态（兜底路径）：取消立即清任务态
+    store.chatTask = {
+      taskId: 'chattask-2', chatSessionId: 'chatsession-new', status: 'queued', reply: '', prompt: 'p'
+    }
+    await store.cancelChatTask()
+    expect(CancelChatTask).toHaveBeenCalledWith('chattask-2')
     expect(store.chatInFlight).toBe(false)
   })
 

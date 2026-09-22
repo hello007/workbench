@@ -20,9 +20,12 @@
  * - { __error__: string, __code__?: string }：reject。带 __code__ 时 reject 结构化
  *   {code, message}（对齐 Wails ErrorFormatter 的 AppError 形态），否则 reject Error
  * - { __sequence__: [v1, v2, ...] }：按序返回，序列耗尽后恒返回最后一个值
- * - { __value__: v, __events__: [{ event, payload, delayMs? }] }：resolve __value__
- *   （缺省 null），并按序派发 Wails 事件（模拟 AI 任务 queued/started/output/done
+ * - { __value__: v, __events__: [{ event, payload, delayMs? }], __preEvents__?: [...] }：
+ *   resolve __value__（缺省 null）并派发 Wails 事件（模拟 AI 任务 queued/started/output/done
  *   等异步事件流）。每次调用都完整派发（无状态消费），delayMs 缺省 0。
+ *   __preEvents__（可选）在 resolve 前同步派发，对齐真实后端「先 emit 再返回 bound call」
+ *   的时序（如 chat-task:queued/started 先于 RunChat resolve 到达）；__events__ 在
+ *   resolve 后按序经 setTimeout 派发（保持异步时序，可编排「运行中→完成」断言窗口）。
  *
  * 调用记录：每次 bound method 调用都会 push 到 window.__wailsCalls
  * （{method, args}），用例经 fixtures.js 的 getWailsCalls 断言「UI 操作触发了
@@ -66,7 +69,14 @@ export function injectWailsMocks(returnValues) {
           return Promise.resolve(next)
         }
         if (Array.isArray(value.__events__)) {
-          // 模拟异步事件流：resolve __value__ 后按序经 setTimeout 派发（保持异步时序，
+          // __preEvents__：resolve 前同步派发，对齐真实后端「先 emit 再返回」时序
+          // （前端事件 handler 在页面加载即注册，此时回调同步执行）
+          const preEvents = Array.isArray(value.__preEvents__) ? value.__preEvents__ : []
+          const handlersNow = window.__wailsEventHandlers || {}
+          preEvents.forEach((ev) => {
+            ;(handlersNow[ev.event] || []).forEach((handler) => handler(ev.payload))
+          })
+          // __events__：resolve 后按序经 setTimeout 派发（保持异步时序，
           // delayMs 支持用例编排「运行中→完成」等中间态断言窗口）
           value.__events__.forEach((ev) => {
             setTimeout(() => {
