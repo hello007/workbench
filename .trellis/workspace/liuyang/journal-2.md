@@ -765,3 +765,36 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 78: 网络访问快捷切换与带 token 链接复制
+
+**Date**: 2026-09-22
+**Task**: 网络访问快捷切换与带 token 链接复制
+**Branch**: `master`
+
+### Summary
+
+设置页网络访问分区易用性增强：绑定地址分段控件（本地 127.0.0.1／公网 0.0.0.0）一键切换，公网复用风险确认取消回弹，自定义手输保留双向联动，saveBindAddress 统一保存链路；访问地址每行复制带 token 完整链接（http://<addr>/?token=<t>），粘贴即用，0.0.0.0 加载过滤+复制拦截双保险永不生成，复制提示含令牌安全提醒。勘察确认后端 webAccessUrls 已排除 0.0.0.0，纯前端零绑定变更。新增 12 用例全绿（1122），覆盖率四指标达标。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bcfc531..fe4e55c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
