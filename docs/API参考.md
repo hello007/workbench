@@ -336,7 +336,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ## 22. AI 对话
 
-AI 对话工作台（活动栏「AI 对话」面板）：多会话持续式对话。会话/消息/目录/模板/配置独立持久化到 `data/ai_chat/`。对话任务异步事件流经 EventSink 推送（`chat-task:queued/started/output/done`，payload 形状对齐 `model.ChatTaskRunResult`）；`RunChat` 自动在会话已有 claude session id 时追加 `--resume` 续上下文。
+AI 对话工作台（活动栏「AI 对话」面板）：多会话持续式对话。会话/消息/目录/模板/配置独立持久化到 `data/ai_chat/`。对话任务异步事件流经 EventSink 推送（`chat-task:*`，各事件 payload 形状不同）：`queued` 载荷 `{taskId}`；`started` 载荷 `{taskId, chatSessionId}`；`output` 载荷 `{taskId, chatSessionId, text}`（流式文本增量）；仅 `done` 载荷为 `model.ChatTaskRunResult` 全量结果（全文回复/claude 会话 id/退出码/错误/取消标记）。`RunChat` 自动在会话已有 claude session id 时追加 `--resume` 续上下文。
 
 ### 会话 CRUD
 

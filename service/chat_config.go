@@ -64,10 +64,10 @@ func (s *ChatService) loadTemplatesIndex() (*chatTemplateIndex, error) {
 	return &chatTemplateIndex{SchemaVersion: chatTemplateSchemaVersion}, nil
 }
 
-// saveTemplatesIndex 落盘模板索引。
+// saveTemplatesIndex 落盘模板索引（原子写，防崩溃截断）。
 func (s *ChatService) saveTemplatesIndex(idx *chatTemplateIndex) error {
 	idx.SchemaVersion = chatTemplateSchemaVersion
-	if err := util.SaveJSON(s.templatesPath(), idx); err != nil {
+	if err := saveChatJSON(s.templatesPath(), idx); err != nil {
 		return fmt.Errorf("保存模板失败: %w", err)
 	}
 	return nil
@@ -225,6 +225,9 @@ func (s *ChatService) RemoveChatTemplate(id string) error {
 // （permissionMode=default、modelName 空 = claude 默认模型），不报错——
 // 配置缺失/损坏均不影响对话功能可用。
 func (s *ChatService) GetChatSettings() *model.ChatSettings {
+	// 与 ChatService 其余读写一致持 s.mu：并发读写同文件时防撕裂读静默回退默认
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	defaults := &model.ChatSettings{
 		PermissionMode: model.ChatPermissionModeDefault,
 		ModelName:      "",
@@ -275,7 +278,9 @@ func (s *ChatService) SaveChatSettings(permissionMode, modelName string) error {
 		PermissionMode: permissionMode,
 		ModelName:      strings.TrimSpace(modelName),
 	}
-	if err := util.SaveJSON(s.settingsPath(), settings); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := saveChatJSON(s.settingsPath(), settings); err != nil {
 		return fmt.Errorf("保存对话设置失败: %w", err)
 	}
 	return nil

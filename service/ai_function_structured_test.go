@@ -14,7 +14,7 @@ import (
 // 实测 claude --json-schema 在 result 事件回 structured_output，与自由文本 result 解耦。
 func TestParseStreamLine_StructuredOutput(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s4","result":"done","structured_output":{"candidates":[{"type":"feat","description":"add login"}]}}`
-	_, isResult, _, _, structuredOutput := parseStreamLine(line)
+	_, isResult, _, _, structuredOutput, _ := parseStreamLine(line)
 	if !isResult {
 		t.Error("result 事件应标记终态")
 	}
@@ -34,7 +34,7 @@ func TestParseStreamLine_StructuredOutput(t *testing.T) {
 // TestParseStreamLine_NoStructuredOutput result 事件无 structured_output 字段时返回 nil（未配 --json-schema）。
 func TestParseStreamLine_NoStructuredOutput(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s5","result":"done"}`
-	_, isResult, _, _, structuredOutput := parseStreamLine(line)
+	_, isResult, _, _, structuredOutput, _ := parseStreamLine(line)
 	if !isResult {
 		t.Error("result 事件应标记终态")
 	}

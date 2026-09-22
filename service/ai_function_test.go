@@ -123,7 +123,7 @@ func TestRenderPrompt_MissingParamKept(t *testing.T) {
 
 func TestParseStreamLine_AssistantText(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"role":"assistant","content":[{"type":"text","text":"会议号 123"}]}}`
-	text, isResult, sid, metrics, _ := parseStreamLine(line)
+	text, isResult, sid, metrics, _, _ := parseStreamLine(line)
 	if text != "会议号 123" {
 		t.Errorf("文本增量不符: %q", text)
 	}
@@ -140,7 +140,7 @@ func TestParseStreamLine_AssistantText(t *testing.T) {
 
 func TestParseStreamLine_ResultEvent(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s2","result":"done"}`
-	_, isResult, sid, metrics, _ := parseStreamLine(line)
+	_, isResult, sid, metrics, _, _ := parseStreamLine(line)
 	if !isResult {
 		t.Errorf("result 事件应标记终态")
 	}
@@ -156,7 +156,7 @@ func TestParseStreamLine_ResultEvent(t *testing.T) {
 // TestParseStreamLine_ResultWithMetrics result 事件携带计量字段时解析为 AiTaskMetrics
 func TestParseStreamLine_ResultWithMetrics(t *testing.T) {
 	line := `{"type":"result","subtype":"success","session_id":"s3","duration_ms":8268,"num_turns":1,"total_cost_usd":0.14502,"usage":{"input_tokens":28919,"output_tokens":17,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
-	_, isResult, _, metrics, _ := parseStreamLine(line)
+	_, isResult, _, metrics, _, _ := parseStreamLine(line)
 	if !isResult {
 		t.Errorf("result 事件应标记终态")
 	}
@@ -183,8 +183,34 @@ func TestParseStreamLine_ResultWithMetrics(t *testing.T) {
 	}
 }
 
+// TestParseStreamLine_ResultError result 事件错误文本提取（对话任务透传用）：
+// is_error=true 取 result 字段错误文本；非 success subtype 且无 result 文本时用
+// subtype 兜底描述；成功事件恒空串（AI 功能调用方忽略该值，行为零变化）。
+func TestParseStreamLine_ResultError(t *testing.T) {
+	line := `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom: quota exceeded","session_id":"s9"}`
+	_, isResult, _, _, _, errText := parseStreamLine(line)
+	if !isResult {
+		t.Error("result 事件应标记终态")
+	}
+	if errText != "boom: quota exceeded" {
+		t.Errorf("is_error result 应透传 result 字段错误文本, got %q", errText)
+	}
+
+	lineNoResult := `{"type":"result","subtype":"error_max_turns","is_error":true,"session_id":"s9"}`
+	_, _, _, _, _, errTextNoResult := parseStreamLine(lineNoResult)
+	if !strings.Contains(errTextNoResult, "error_max_turns") {
+		t.Errorf("无 result 文本时应用 subtype 兜底, got %q", errTextNoResult)
+	}
+
+	lineSuccess := `{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s9"}`
+	_, _, _, _, _, errTextSuccess := parseStreamLine(lineSuccess)
+	if errTextSuccess != "" {
+		t.Errorf("成功事件错误文本应为空串, got %q", errTextSuccess)
+	}
+}
+
 func TestParseStreamLine_NonJSONPassthrough(t *testing.T) {
-	text, isResult, _, metrics, _ := parseStreamLine("some diagnostic text")
+	text, isResult, _, metrics, _, _ := parseStreamLine("some diagnostic text")
 	if text != "some diagnostic text\n" {
 		t.Errorf("非 JSON 行应原样透传加换行: %q", text)
 	}
@@ -198,7 +224,7 @@ func TestParseStreamLine_NonJSONPassthrough(t *testing.T) {
 
 func TestParseStreamLine_ToolUseIgnored(t *testing.T) {
 	line := `{"type":"assistant","session_id":"s1","message":{"content":[{"type":"tool_use","name":"get_meeting"}]}}`
-	text, _, _, _, _ := parseStreamLine(line)
+	text, _, _, _, _, _ := parseStreamLine(line)
 	if text != "" {
 		t.Errorf("tool_use 片段不应产出文本: %q", text)
 	}

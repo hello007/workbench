@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"workbench/model"
@@ -31,6 +32,50 @@ const chatMaxConcurrent = 3
 // chatIndexSchemaVersion sessions.json 当前 schema 版本。
 // 字段演进时 +1，并在加载处追加迁移分支。
 const chatIndexSchemaVersion = 1
+
+// chatTaskIDSeq 任务 id 原子递增序号：UnixNano 在同一 tick 内可能重复（并发
+// RunChat 或循环内连续创建），同 tick 覆盖 s.tasks 同键任务；追加单调序号保证唯一。
+var chatTaskIDSeq atomic.Int64
+
+// newChatTaskID 生成对话任务 id（chattask-<unixnano>-<seq>，前端视为不透明字符串）。
+func newChatTaskID() string {
+	return fmt.Sprintf("chattask-%d-%d", time.Now().UnixNano(), chatTaskIDSeq.Add(1))
+}
+
+// saveChatJSON 原子写 JSON 文件：先写同目录 temp 文件，成功后把现有旧文件复制为
+// <目标>.bak（保留上一好版本，rename 后新文件若损坏仍有回退），再 os.Rename
+// temp 原子替换目标。进程崩溃不再把目标截断为半截内容（util.SaveJSON 的
+// os.WriteFile 是截断写，崩溃即丢会话历史/索引且 .bak 备份的也是已截断内容）。
+// 仅 ChatService 域使用；util.SaveJSON 有其他 service 在用，保持原样不动。
+func saveChatJSON(filePath string, v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(filePath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// 成功 rename 后目标名已不存在，此删除为 no-op；失败路径清理 temp 残留
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// 覆写前备份上一好版本（当前文件不存在时跳过）
+	if old, rerr := os.ReadFile(filePath); rerr == nil {
+		_ = os.WriteFile(filePath+".bak", old, 0o644)
+	}
+	return os.Rename(tmpName, filePath)
+}
 
 // ===== 子进程抽象（测试注入 fake，不真调 claude CLI）=====
 
@@ -59,9 +104,16 @@ type execChatProcess struct {
 }
 
 // newExecChatProcess 生产进程工厂：构造 exec.Cmd 并隐藏 Windows 控制台窗口。
+// cmd.Cancel 定制 ctx 超时/取消时的终止方式：CommandContext 默认只 Kill 根进程，
+// claude spawn 的 MCP 等子进程会成孤儿；走 killProcessTree 整树终止（与手动
+// 取消路径一致）。Cancel 在进程仍存活时被调用，整树杀真正生效。
 func newExecChatProcess(ctx context.Context, name string, args []string, dir string) chatProcess {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	cmd.Cancel = func() error {
+		killProcessTree(cmd)
+		return nil
+	}
 	util.HideCommandWindow(cmd)
 	return &execChatProcess{cmd: cmd}
 }
@@ -214,10 +266,10 @@ func (s *ChatService) loadIndex() (*chatSessionIndex, error) {
 	return &chatSessionIndex{SchemaVersion: chatIndexSchemaVersion}, nil
 }
 
-// saveIndex 落盘会话索引。
+// saveIndex 落盘会话索引（原子写，防崩溃截断）。
 func (s *ChatService) saveIndex(idx *chatSessionIndex) error {
 	idx.SchemaVersion = chatIndexSchemaVersion
-	if err := util.SaveJSON(s.indexPath(), idx); err != nil {
+	if err := saveChatJSON(s.indexPath(), idx); err != nil {
 		return fmt.Errorf("保存会话索引失败: %w", err)
 	}
 	return nil
@@ -404,18 +456,25 @@ func (s *ChatService) loadDirectoriesIndex() (*chatDirectoryIndex, error) {
 	return &chatDirectoryIndex{SchemaVersion: chatDirectorySchemaVersion}, nil
 }
 
-// saveDirectoriesIndex 落盘目录项索引。
+// saveDirectoriesIndex 落盘目录项索引（原子写，防崩溃截断）。
 func (s *ChatService) saveDirectoriesIndex(idx *chatDirectoryIndex) error {
 	idx.SchemaVersion = chatDirectorySchemaVersion
-	if err := util.SaveJSON(s.directoriesPath(), idx); err != nil {
+	if err := saveChatJSON(s.directoriesPath(), idx); err != nil {
 		return fmt.Errorf("保存目录列表失败: %w", err)
 	}
 	return nil
 }
 
+// chatDirectoryKey 目录去重键：小写 + 正斜杠归一。Windows 路径大小写不敏感，
+// 前端 containsPath 已按小写比较，后端去重键同样归一，避免同路径不同大小写
+// 产生重复目录项。
+func chatDirectoryKey(path string) string {
+	return strings.ToLower(filepath.ToSlash(path))
+}
+
 // AddChatDirectory 添加常用目录项。displayName 为空时取路径末段目录名。
-// 路径须为已存在的目录（claude 子进程以此为 cwd）；重复添加（规范化路径相同）
-// 返回既有项（幂等，前端提前查重给提示，此处兜底不产生重复项）。
+// 路径须为已存在的目录（claude 子进程以此为 cwd）；重复添加（去重键相同，
+// 大小写不敏感）返回既有项（幂等，前端提前查重给提示，此处兜底不产生重复项）。
 func (s *ChatService) AddChatDirectory(path, displayName string) (*model.ChatDirectory, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -440,8 +499,9 @@ func (s *ChatService) AddChatDirectory(path, displayName string) (*model.ChatDir
 	if err != nil {
 		return nil, err
 	}
+	dedupeKey := chatDirectoryKey(absPath)
 	for _, dir := range idx.Directories {
-		if dir != nil && dir.Path == absPath {
+		if dir != nil && chatDirectoryKey(dir.Path) == dedupeKey {
 			return dir, nil
 		}
 	}
@@ -607,7 +667,7 @@ func (s *ChatService) appendMessages(sessionID string, msgs ...model.ChatMessage
 		return err
 	}
 	existing = append(existing, msgs...)
-	if err := util.SaveJSON(s.messagesFilePath(sessionID), existing); err != nil {
+	if err := saveChatJSON(s.messagesFilePath(sessionID), existing); err != nil {
 		return fmt.Errorf("写入会话消息失败: %w", err)
 	}
 	return nil
@@ -657,7 +717,7 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	// 同会话串行保护：已存在该会话的进行中/排队任务则拒绝。
 	// 检查与注册同一临界区完成，防两个并发 RunChat 同时通过检查（检查-注册
 	// 分离的窗口内双双入队，同会话两轮并行破坏 --resume 上下文与消息文件）。
-	taskID := fmt.Sprintf("chattask-%d", time.Now().UnixNano())
+	taskID := newChatTaskID()
 	task := &chatTaskRuntime{
 		id:            taskID,
 		chatSessionID: chatSessionID,
@@ -703,7 +763,12 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		<-s.concurrencySem
 		return "", fmt.Errorf("任务已取消（排队中）")
 	}
+	// queued=false 与 running=true 同临界区翻转：注册态（queued=true）到执行态
+	// （running=true）之间不得出现双 false 窗口，否则同会话串行保护检查
+	// （running || queued）被绕过，两轮 claude 并行同会话破坏 --resume 上下文。
+	// 后续启动失败路径负责复位并摘除任务。
 	task.queued = false
+	task.running = true
 	task.startedAt = time.Now()
 	s.mu.Unlock()
 	s.emitCurrent("chat-task:started", map[string]any{"taskId": taskID, "chatSessionId": chatSessionID})
@@ -718,9 +783,11 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	stdout, err := proc.StdoutPipe()
 	if err != nil {
 		cancel()
+		// 启动失败：复位标志并摘除任务（失败任务不残留 s.tasks，防内存无界
+		// 增长与串行保护永久拒绝该会话）；错误经返回值同步报给前端
 		s.mu.Lock()
 		task.running = false
-		task.errText = "创建输出管道失败"
+		delete(s.tasks, taskID)
 		s.mu.Unlock()
 		<-s.concurrencySem
 		return "", fmt.Errorf("创建输出管道失败: %w", err)
@@ -729,7 +796,7 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		cancel()
 		s.mu.Lock()
 		task.running = false
-		task.errText = "启动 claude 失败"
+		delete(s.tasks, taskID)
 		s.mu.Unlock()
 		<-s.concurrencySem
 		return "", fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
@@ -753,7 +820,13 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	task.cancel = cancel
 	task.running = true
 	task.timeoutMin = timeout
+	lateCanceled := task.canceled
 	s.mu.Unlock()
+	if lateCanceled {
+		// 取消发生在启动窗口（queued 翻转后、proc 赋值前）：取消时无进程可杀，
+		// 此刻进程已起，补杀防「已取消但进程继续跑完」
+		proc.Kill()
+	}
 
 	go s.pumpChatOutput(task, proc, stdout)
 	return taskID, nil
@@ -763,6 +836,9 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 //   - 排队中（无进程）：close queueCancel 唤醒 RunChat 的 select 自行清理，
 //     并先 emit done（canceled）通知前端
 //   - 运行中：标记 canceled 并杀进程树，pumpChatOutput 末尾构造 done 事件
+//
+// 幂等：重复取消直接返回 true，不重复 close queueCancel（double-close panic）、
+// 不重复 emit done。
 func (s *ChatService) CancelChatTask(taskID string) bool {
 	s.mu.Lock()
 	task, ok := s.tasks[taskID]
@@ -770,8 +846,14 @@ func (s *ChatService) CancelChatTask(taskID string) bool {
 		s.mu.Unlock()
 		return false
 	}
+	if task.canceled {
+		// 已取消过（排队 close 或运行杀进程均已触发），幂等返回
+		s.mu.Unlock()
+		return true
+	}
 	task.canceled = true
 	queued := task.queued
+	proc := task.proc
 	s.mu.Unlock()
 
 	if queued {
@@ -784,7 +866,11 @@ func (s *ChatService) CancelChatTask(taskID string) bool {
 		})
 		return true
 	}
-	task.proc.Kill()
+	// queued=false → running=true 的启动窗口内 proc 尚未赋值（nil），
+	// 跳过杀进程；若进程随后启动成功，RunChat 的 lateCanceled 检查补杀
+	if proc != nil {
+		proc.Kill()
+	}
 	return true
 }
 
@@ -838,8 +924,14 @@ func (s *ChatService) pumpChatOutput(task *chatTaskRuntime, proc chatProcess, st
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
+	// claudeErr result 事件的 claude 侧错误文本（is_error/非 success subtype），
+	// pump 局部变量：仅本 goroutine 读写，Wait 后统一消费
+	claudeErr := ""
 	for scanner.Scan() {
-		text, isResult, sessionID, _, _ := parseStreamLine(scanner.Text())
+		text, isResult, sessionID, _, _, resultErr := parseStreamLine(scanner.Text())
+		if resultErr != "" {
+			claudeErr = resultErr
+		}
 		// 状态写入须持锁：GetChatTaskState 在锁内读同字段；emit 放锁外
 		s.mu.Lock()
 		if sessionID != "" {
@@ -861,12 +953,17 @@ func (s *ChatService) pumpChatOutput(task *chatTaskRuntime, proc chatProcess, st
 			continue
 		}
 	}
+	// Scan 退出后必须查 Err()：非 EOF（读管道错误/单行超 4MB 上限）意味着
+	// 回复被截断，静默终止会让用户拿到不完整回复且 done 无任何错误提示
+	scanErr := scanner.Err()
 
 	waitErr := proc.Wait()
 
 	s.mu.Lock()
 	task.running = false
 	task.finishedAt = time.Now()
+	// 超时判定须在读 ctx.Err() 之后调 cancel（cancel 会把 Err 覆写为 Canceled）
+	timedOut := task.ctx != nil && task.ctx.Err() == context.DeadlineExceeded
 	reply := task.reply.String()
 	result := model.ChatTaskRunResult{
 		TaskID:          task.id,
@@ -874,20 +971,42 @@ func (s *ChatService) pumpChatOutput(task *chatTaskRuntime, proc chatProcess, st
 		ClaudeSessionID: task.claudeSessionID,
 		Reply:           reply,
 	}
-	if task.canceled {
+	switch {
+	case task.canceled:
 		result.Canceled = true
 		result.Error = "已取消"
-	} else if waitErr != nil {
-		if task.ctx != nil && task.ctx.Err() == context.DeadlineExceeded {
-			result.Error = fmt.Sprintf("执行超时（上限 %d 分钟）", task.timeoutMin)
+	case timedOut:
+		result.Error = fmt.Sprintf("执行超时（上限 %d 分钟）", task.timeoutMin)
+	case claudeErr != "":
+		// claude 侧报告失败：错误文本优先于裸退出码（"exit status 1" 不可读）
+		if waitErr != nil {
+			result.Error = waitErr.Error() + ": " + claudeErr
 		} else {
+			result.Error = claudeErr
+		}
+	case waitErr != nil || scanErr != nil:
+		// 进程退出错误与输出流读取错误并存时合并展示
+		if waitErr != nil {
 			result.Error = waitErr.Error()
+		}
+		if scanErr != nil {
+			if result.Error != "" {
+				result.Error += "; "
+			}
+			result.Error += "输出流读取中断: " + scanErr.Error()
 		}
 	}
 	if code := proc.ExitCode(); code >= 0 {
 		result.ExitCode = code
 	}
+	cancelFn := task.cancel
 	s.mu.Unlock()
+
+	// 释放执行 ctx（超时定时器）：正常完成/手动取消路径不再等 10 分钟定时器
+	// 自然到期才释放；超时路径 ctx 已自取消，重复调用幂等无害
+	if cancelFn != nil {
+		cancelFn()
+	}
 
 	// 落盘本轮结果（锁外：appendMessages/updateSessionMeta 内部各自加锁）。
 	// assistant 回复非空才入档（失败轮无回复不留空消息；取消轮保留部分回复）。
@@ -921,4 +1040,11 @@ func (s *ChatService) pumpChatOutput(task *chatTaskRuntime, proc chatProcess, st
 	}
 
 	s.emitCurrent("chat-task:done", result)
+
+	// 终态任务摘除：done 事件已发出，任务表仅保留在途任务（防已完成任务
+	// 从不删除导致内存无界增长）。前端 restoreChatTaskState 对「查无此任务」
+	// 已按终态处理（清空任务态防卡死），摘除不破坏事件丢失恢复链路。
+	s.mu.Lock()
+	delete(s.tasks, task.id)
+	s.mu.Unlock()
 }
