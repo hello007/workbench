@@ -58,6 +58,14 @@ describe('useSessionState - buildSessionState', () => {
     })
   })
 
+  it('整窗全屏态写入快照（fullscreen: true）', () => {
+    const uiStore = useUiStore()
+    uiStore.terminalVisible = true
+    uiStore.terminalFullscreen = true
+    const snapshot = buildSessionState()
+    expect(snapshot.terminal.fullscreen).toBe(true)
+  })
+
   it('镜像项缺字段时归一为空串（防 undefined 入快照）', () => {
     const uiStore = useUiStore()
     uiStore.terminalTabsSnapshot = [{ workDir: 'D:/repo' }, null]
@@ -141,6 +149,24 @@ describe('useSessionState - applySessionState', () => {
     applySessionState({ terminal: { visible: true, height: 200, workDir: 'D:/legacy' } })
     expect(uiStore.terminalTabsSnapshot).toEqual([])
     expect(uiStore.terminalDir).toBe('')
+  })
+
+  it('恢复整窗全屏态（visible=true 且 fullscreen=true）', () => {
+    const uiStore = useUiStore()
+    const touched = applySessionState({
+      terminal: { visible: true, height: 200, fullscreen: true, tabs: [{ workDir: 'D:/a' }] }
+    })
+    expect(touched).toBe(true)
+    expect(uiStore.terminalFullscreen).toBe(true)
+  })
+
+  it('fullscreen=true 但 visible=false 时不恢复（防御非法组合）', () => {
+    const uiStore = useUiStore()
+    applySessionState({
+      terminal: { visible: false, height: 200, fullscreen: true, tabs: [{ workDir: 'D:/a' }] }
+    })
+    // tabs 等字段仍恢复，仅断言 fullscreen 未被置位
+    expect(uiStore.terminalFullscreen).toBe(false)
   })
 
   it('非法 activePanel 被忽略（保持默认 directory）', () => {
@@ -317,6 +343,21 @@ describe('useSessionState - startSessionAutoSave', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(App.SaveSessionState).toHaveBeenCalledTimes(1)
     expect(App.SaveSessionState.mock.calls[0][0].terminal.activeIndex).toBe(1)
+
+    handle.dispose()
+  })
+
+  it('整窗全屏态变化触发保存，快照含 fullscreen', async () => {
+    const App = await vi.importMock('../../../wailsjs/go/main/App')
+    App.SaveSessionState.mockClear()
+    const uiStore = useUiStore()
+    const handle = startSessionAutoSave()
+    handle.markRestored()
+
+    uiStore.terminalFullscreen = true
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(App.SaveSessionState).toHaveBeenCalledTimes(1)
+    expect(App.SaveSessionState.mock.calls[0][0].terminal.fullscreen).toBe(true)
 
     handle.dispose()
   })

@@ -19,6 +19,12 @@ export const useUiStore = defineStore('ui', () => {
   const terminalHeight = ref(200)
   const terminalDir = ref('')
 
+  // 终端整窗全屏态（PR4/D5）：true 时 TerminalPanel 根元素 fixed 覆盖整窗
+  // （含 ActivityBar/FileTree）。与 terminalVisible 独立维度，但全屏必然可见
+  // （切换入口在终端面板工具栏）；快照链路经 useSessionState 双向流转，
+  // 恢复侧仅接受 visible=true 时的 fullscreen=true（防御非法组合）。
+  const terminalFullscreen = ref(false)
+
   // 终端 tab 快照镜像（崩溃恢复用）：TerminalPanel 持有的 tab 列表（workDir/shellType）
   // 与活动下标的只读投影，供 useSessionState 构建/恢复 data/session.json 的终端快照。
   // 仅承载可恢复配置，不含 isExited 等运行时状态；tab 状态真源仍在 TerminalPanel 的
@@ -42,9 +48,26 @@ export const useUiStore = defineStore('ui', () => {
 
   /**
    * 切换终端可见性
+   * 收起时同步还原全屏态（维护「fullscreen ⇒ visible」不变式）：全屏态下快捷键
+   * toggleTerminal 若只切 visible，会留下 fullscreen=true/visible=false 非法组合
+   * （fixed 层被 v-show 隐藏但快照仍记全屏，再展开时意外直达全屏态）。
    */
   function toggleTerminal() {
+    if (terminalVisible.value) {
+      terminalFullscreen.value = false
+    }
     terminalVisible.value = !terminalVisible.value
+  }
+
+  /**
+   * 切换终端整窗全屏态（工具栏最大化/还原按钮共用入口）
+   * 全屏必然可见：面板隐藏时进入全屏先展开面板（防御非法组合）。
+   */
+  function toggleTerminalFullscreen() {
+    if (!terminalVisible.value) {
+      terminalVisible.value = true
+    }
+    terminalFullscreen.value = !terminalFullscreen.value
   }
 
   /**
@@ -63,6 +86,7 @@ export const useUiStore = defineStore('ui', () => {
     terminalVisible,
     terminalHeight,
     terminalDir,
+    terminalFullscreen,
     terminalTabsSnapshot,
     terminalActiveIndex,
     settingsVisible,
@@ -74,6 +98,7 @@ export const useUiStore = defineStore('ui', () => {
     repoFilterInitialDirId,
     appVersion,
     toggleTerminal,
+    toggleTerminalFullscreen,
     openRepoFilter
   }
 })

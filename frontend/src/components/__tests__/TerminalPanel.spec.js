@@ -40,7 +40,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
 
 vi.mock('@element-plus/icons-vue', () => ({
   Folder: { template: '<i class="i-folder" />' },
-  RefreshRight: { template: '<i class="i-refresh" />' }
+  RefreshRight: { template: '<i class="i-refresh" />' },
+  FullScreen: { template: '<i class="i-fullscreen" />' },
+  ScaleToOriginal: { template: '<i class="i-scale-to-original" />' }
 }))
 
 const stubs = {
@@ -514,6 +516,185 @@ describe('TerminalPanel.vue', () => {
         { workDir: 'D:\\a', shellType: 'powershell' }
       ])
       expect(uiStore.terminalActiveIndex).toBe(0)
+    })
+  })
+
+  describe('整窗全屏（PR4/D5）', () => {
+    /** 打开面板并进入全屏态 */
+    async function openPanelAndFullscreen(wrapper, dir = 'D:\\proj') {
+      const uiStore = await openPanel(wrapper, dir)
+      uiStore.terminalFullscreen = true
+      await nextTick()
+      await flushPromises()
+      return uiStore
+    }
+
+    it('点击全屏按钮切换 uiStore.terminalFullscreen 与根元素 is-fullscreen class', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanel(wrapper, 'D:\\proj')
+      expect(wrapper.find('.terminal-panel').classes()).not.toContain('is-fullscreen')
+
+      await wrapper.find('.fullscreen-btn').trigger('click')
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(true)
+      expect(wrapper.find('.terminal-panel').classes()).toContain('is-fullscreen')
+
+      await wrapper.find('.fullscreen-btn').trigger('click')
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(false)
+      expect(wrapper.find('.terminal-panel').classes()).not.toContain('is-fullscreen')
+    })
+
+    it('全屏按钮 title 随状态切换（最大化/还原）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      expect(wrapper.find('.fullscreen-btn').attributes('title')).toBe('终端整窗全屏')
+
+      const uiStore = useUiStore()
+      uiStore.terminalFullscreen = true
+      await nextTick()
+      expect(wrapper.find('.fullscreen-btn').attributes('title')).toBe('还原终端面板')
+    })
+
+    it('全屏态收起按钮隐藏（防 fullscreen=true/visible=false 非法组合）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      expect(wrapper.find('.minimize-btn').exists()).toBe(true)
+
+      const uiStore = useUiStore()
+      uiStore.terminalFullscreen = true
+      await nextTick()
+      expect(wrapper.find('.minimize-btn').exists()).toBe(false)
+    })
+
+    it('ESC 键退出全屏', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelAndFullscreen(wrapper)
+      expect(uiStore.terminalFullscreen).toBe(true)
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(false)
+      expect(wrapper.find('.terminal-panel').classes()).not.toContain('is-fullscreen')
+    })
+
+    it('非 ESC 键不退出全屏', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelAndFullscreen(wrapper)
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(true)
+    })
+
+    it('ESC keydown 监听随全屏态挂载/卸载（精准注销，非全屏期不占用全局监听）', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanel(wrapper, 'D:\\proj')
+      const addSpy = vi.spyOn(window, 'addEventListener')
+      const removeSpy = vi.spyOn(window, 'removeEventListener')
+
+      uiStore.terminalFullscreen = true
+      await nextTick()
+      expect(addSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
+
+      uiStore.terminalFullscreen = false
+      await nextTick()
+      expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
+
+      addSpy.mockRestore()
+      removeSpy.mockRestore()
+    })
+
+    it('进入与退出全屏时活动 tab refit（resize 调用）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      terminalMock.resize.mockClear()
+      const uiStore = useUiStore()
+
+      uiStore.terminalFullscreen = true
+      await flushPromises()
+      expect(terminalMock.resize).toHaveBeenCalledTimes(1)
+
+      uiStore.terminalFullscreen = false
+      await flushPromises()
+      expect(terminalMock.resize).toHaveBeenCalledTimes(2)
+    })
+
+    it('快照恢复 fullscreen=true：根元素全屏 class + 全屏态下首次可见 init 正常', async () => {
+      wrapper = await createWrapper()
+      const uiStore = useUiStore()
+      uiStore.terminalFullscreen = true
+      uiStore.terminalTabsSnapshot = [{ workDir: 'D:\\fs', shellType: 'powershell' }]
+      uiStore.terminalVisible = true
+      await nextTick()
+      await flushPromises()
+
+      expect(wrapper.find('.terminal-panel').classes()).toContain('is-fullscreen')
+      expect(terminalMock.initTerminal).toHaveBeenCalledTimes(1)
+      expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\fs',
+        'powershell'
+      )
+    })
+
+    it('挂载时已是全屏态：ESC 监听经 immediate 挂载可用', async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const { GetShellConfigs, GetSettings } = await import('../../../wailsjs/go/main/App')
+      GetShellConfigs.mockResolvedValue([{ type: 'powershell', displayName: 'PowerShell' }])
+      GetSettings.mockResolvedValue({ defaultShell: 'powershell' })
+      const uiStore = useUiStore()
+      uiStore.terminalVisible = true
+      uiStore.terminalFullscreen = true
+      wrapper = mount(TerminalPanel, { global: { stubs, plugins: [pinia] } })
+      await flushPromises()
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(false)
+    })
+
+    it('Element Plus 弹层内按 ESC 只关弹窗，不同时退出全屏', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelAndFullscreen(wrapper)
+
+      // 构造 .el-overlay 弹层结构（焦点元素在其子树内），事件冒泡到 window
+      const overlay = document.createElement('div')
+      overlay.className = 'el-overlay'
+      const inner = document.createElement('input')
+      overlay.appendChild(inner)
+      document.body.appendChild(overlay)
+      inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(true)
+
+      overlay.remove()
+    })
+
+    it('已被消费的 ESC（defaultPrevented，如命令面板 @keydown.esc.prevent）不退出全屏', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelAndFullscreen(wrapper)
+
+      const ev = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+      ev.preventDefault()
+      window.dispatchEvent(ev)
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(true)
+    })
+
+    it('xterm 辅助 textarea 内未消费的 ESC（IME 组合中断）不退出全屏', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelAndFullscreen(wrapper)
+
+      const textarea = document.createElement('textarea')
+      textarea.className = 'xterm-helper-textarea'
+      document.body.appendChild(textarea)
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await nextTick()
+      expect(uiStore.terminalFullscreen).toBe(true)
+
+      textarea.remove()
     })
   })
 })

@@ -82,15 +82,15 @@
              v-show 常驻挂载：切走再切回不丢已加载状态。pin 仓库列表持久化后端。
              @locate 复用 onRepoLocate 跳转范式（切工作目录 + 展开文件树定位）。 -->
         <DashboardView v-show="uiStore.activePanel === 'dashboard'" @locate="onRepoLocate" />
-        <!-- 拖拽分隔条 -->
+        <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
-          v-if="uiStore.terminalVisible"
+          v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
           class="resize-bar"
           @mousedown="onResizeBarMouseDown"
         ></div>
-        <!-- 下半区：终端面板 -->
+        <!-- 下半区：终端面板（全屏态不输出 inline height，避免压住 .is-fullscreen 的 inset 拉伸） -->
         <TerminalPanel
-          :style="{ height: uiStore.terminalVisible ? uiStore.terminalHeight + 'px' : '0px' }"
+          :style="uiStore.terminalVisible && !uiStore.terminalFullscreen ? { height: uiStore.terminalHeight + 'px' } : {}"
           @toggle="uiStore.toggleTerminal"
         />
       </div>

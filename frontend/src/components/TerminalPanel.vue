@@ -1,5 +1,5 @@
 <template>
-  <div v-show="uiStore.terminalVisible" class="terminal-panel">
+  <div v-show="uiStore.terminalVisible" class="terminal-panel" :class="{ 'is-fullscreen': uiStore.terminalFullscreen }">
     <!-- 工具栏：tab 序列融入单行 36px 工具栏；单 tab 时退化为徽章模式（D1 零视觉噪音） -->
     <div class="terminal-toolbar">
       <div class="terminal-toolbar-left">
@@ -62,7 +62,21 @@
           </el-button>
         </transition>
         <div class="toolbar-actions">
-          <span class="toolbar-btn minimize-btn" @click="$emit('toggle')" title="收起终端">
+          <!-- 整窗全屏切换（D5）：停靠态显示最大化入口，全屏态切换为还原图标；ESC 亦可退出 -->
+          <span
+            class="toolbar-btn fullscreen-btn"
+            :title="uiStore.terminalFullscreen ? '还原终端面板' : '终端整窗全屏'"
+            @click="uiStore.toggleTerminalFullscreen()"
+          >
+            <el-icon :size="14">
+              <ScaleToOriginal v-if="uiStore.terminalFullscreen" />
+              <FullScreen v-else />
+            </el-icon>
+          </span>
+          <!-- 收起按钮全屏态隐藏：全屏态下「收起」应先还原停靠形态再收起，直接收起会产生
+               fullscreen=true/terminalVisible=false 非法组合（fixed 层被 v-show 隐藏但快照仍记全屏）；
+               操作流为「还原 → 再收起」两步，保持状态机简单 -->
+          <span v-if="!uiStore.terminalFullscreen" class="toolbar-btn minimize-btn" @click="$emit('toggle')" title="收起终端">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <rect x="2" y="7" width="10" height="1.5" rx="0.75" fill="currentColor"/>
             </svg>
@@ -85,7 +99,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Folder, RefreshRight } from '@element-plus/icons-vue'
+import { Folder, RefreshRight, FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
 import { useUiStore } from '../store'
@@ -340,6 +354,44 @@ async function onRestart() {
   await inst.restartTerminal(container, tab.dir, tab.shellType)
 }
 
+// ── 整窗全屏（D5）──
+// ESC 退出全屏：keydown 监听随全屏态挂载/卸载（精准注销，非全屏期不占用全局监听）。
+// 弹窗/命令面板内按 ESC 只关弹窗，不同时退出全屏：
+//   a) defaultPrevented：自定义组件已在自身 handler 消费（如 CommandPalette 输入框 @keydown.esc.prevent）；
+//   b) 按键目标位于 Element Plus 弹层（.el-overlay，含 el-dialog/ElMessageBox）：EP 关 ESC 仅
+//      handleClose 不 stopPropagation（use-dialog/useEscapeKeydown 实测），冒泡到 window 时
+//      焦点元素仍在弹层子树内，closest 命中即跳过；
+//   c) 目标为 xterm 辅助 textarea：正常按键（含 vim 的 ESC）已被 xterm cancel(e,true) 阻断冒泡，
+//      能冒泡至此的仅 IME 组合中断等 xterm 未消费场景，用户意图是终端内操作而非退全屏。
+function onFullscreenKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (e.defaultPrevented) return
+  const target = e.target
+  if (typeof target?.closest === 'function' && target.closest('.el-overlay, .xterm-helper-textarea')) return
+  uiStore.terminalFullscreen = false
+}
+
+// 全屏态切换：挂载/卸载 ESC 监听 + 活动 tab refit 兜底。
+// immediate：防御挂载时已是全屏态（如测试/未来挂载时序变化）时 ESC 监听缺失；
+// 产品运行时 store 初始 false，该分支为幂等无害兜底。
+// 布局从流内切 fixed 时终端区域实际尺寸变化，正常由 ResizeObserver 驱动 refit；
+// 此处主动 ensureActiveTabReady 兜底校准（动画/RO 回调时序不稳时保证最终尺寸正确，
+// 已 init 走 resize + focus，未 init 走首次 init，快照恢复全屏态亦经此路径就绪）
+watch(
+  () => uiStore.terminalFullscreen,
+  (fs) => {
+    if (fs) {
+      window.addEventListener('keydown', onFullscreenKeydown)
+    } else {
+      window.removeEventListener('keydown', onFullscreenKeydown)
+    }
+    if (uiStore.terminalVisible) {
+      ensureActiveTabReady()
+    }
+  },
+  { immediate: true }
+)
+
 // 窗口 resize 监听：观察终端区域，尺寸变化时 refit 活动 tab 实例
 let resizeObserver = null
 
@@ -358,11 +410,13 @@ onMounted(() => {
   }
 })
 
-// 卸载：销毁全部 tab 实例（循环 destroyTerminal），停掉全部同步 watcher
+// 卸载：销毁全部 tab 实例（循环 destroyTerminal），停掉全部同步 watcher；
+// 防御性移除 ESC 监听（全屏态卸载时不泄漏全局 keydown）
 onBeforeUnmount(async () => {
   if (resizeObserver) {
     resizeObserver.disconnect()
   }
+  window.removeEventListener('keydown', onFullscreenKeydown)
   stopExitedWatchers.forEach(stop => stop())
   stopExitedWatchers.clear()
   const destroyAll = Array.from(instances.values()).map(inst => inst.destroyTerminal())
@@ -392,6 +446,30 @@ onBeforeUnmount(async () => {
   right: 10%;
   height: 1px;
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary-color) 20%, transparent), transparent);
+}
+
+/* ── 整窗全屏态（D5）：同一元素仅 CSS 切换 fixed 覆盖整窗（含 ActivityBar/FileTree/上半区），
+    禁搬 DOM/重挂载（xterm 会话无损）；停靠态 inline height 由 Home.vue 全屏时不输出，
+    此处 inset:0 拉伸宽高才生效。
+    z-index 1500 依据：Element Plus 弹窗体系（el-dialog/el-popover/el-message）由 popup
+    manager 自 2001 起全局递增分配，项目右键菜单 .context-menu 为 2000（style.css）——
+    全屏层须低于全部弹窗类，保证全屏态打开设置/命令面板/右键菜单正常置顶；
+    浏览器通道注入 UI（src/transport/dom.js 3000/4000）更高且仅 serve 模式出现，
+    不参与桌面层级竞争。 */
+.terminal-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  /* 轻量淡入动画（0.15s）：全屏切换本质是流内布局 → fixed 定位切换，position 不可插值，
+     尺寸为跳变而非过渡，尺寸 transition 无效果且会在跳变帧反复触发 ResizeObserver →
+     fit + ResizeTerminal IPC 抖动；opacity 动画不触碰布局尺寸，零 RO 触发，规避 fit 风暴。
+     实际 refit 由 RO 感知容器尺寸变化驱动 + fullscreen watch 的 ensureActiveTabReady 兜底。 */
+  animation: fullscreen-fade-in 0.15s ease;
+}
+
+@keyframes fullscreen-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ── 工具栏 ── */

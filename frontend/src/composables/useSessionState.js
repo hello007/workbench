@@ -48,7 +48,7 @@ export function buildSessionState() {
         shellType: (t && t.shellType) || ''
       })),
       activeIndex: uiStore.terminalActiveIndex || 0,
-      fullscreen: false // PR4 整窗全屏：接入 uiStore.terminalFullscreen 后替换
+      fullscreen: !!uiStore.terminalFullscreen
     }
   }
 }
@@ -83,6 +83,12 @@ export function applySessionState(state) {
     }
     if (state.terminal.height > 0) {
       uiStore.terminalHeight = state.terminal.height
+      touched = true
+    }
+    // 恢复整窗全屏态：仅在 visible=true 时接受（保存链路保证全屏必然可见，
+    // 防御 fullscreen=true/visible=false 非法组合——面板隐藏时全屏层无从呈现）
+    if (state.terminal.visible && state.terminal.fullscreen) {
+      uiStore.terminalFullscreen = true
       touched = true
     }
 
@@ -170,7 +176,7 @@ export function startSessionAutoSave() {
     }, SAVE_DEBOUNCE_MS)
   }
 
-  // 监听可恢复状态变化（selectedDirectoryId / activePanel / 终端面板三态 + tab 快照镜像）
+  // 监听可恢复状态变化（selectedDirectoryId / activePanel / 终端面板三态 + 全屏态 + tab 快照镜像）
   // terminalTabsSnapshot 引用变化即触发（TerminalPanel 每 tab 增删/切换时同步新数组）
   const stopWatch = watch(
     () => [
@@ -179,6 +185,7 @@ export function startSessionAutoSave() {
       uiStore.terminalVisible,
       uiStore.terminalHeight,
       uiStore.terminalDir,
+      uiStore.terminalFullscreen,
       uiStore.terminalTabsSnapshot,
       uiStore.terminalActiveIndex
     ],

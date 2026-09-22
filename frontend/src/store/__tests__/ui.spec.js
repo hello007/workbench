@@ -27,6 +27,11 @@ describe('ui store', () => {
       expect(store.terminalActiveIndex).toBe(0)
     })
 
+    it('终端整窗全屏默认 false', () => {
+      const store = useUiStore()
+      expect(store.terminalFullscreen).toBe(false)
+    })
+
     it('全部弹窗 visible 默认 false', () => {
       const store = useUiStore()
       expect(store.settingsVisible).toBe(false)
@@ -52,6 +57,46 @@ describe('ui store', () => {
       expect(store.terminalVisible).toBe(true)
       store.toggleTerminal()
       expect(store.terminalVisible).toBe(false)
+    })
+
+    it('全屏态收起时同步还原全屏态（维护 fullscreen ⇒ visible 不变式）', () => {
+      const store = useUiStore()
+      store.toggleTerminal()
+      store.toggleTerminalFullscreen()
+      expect(store.terminalVisible).toBe(true)
+      expect(store.terminalFullscreen).toBe(true)
+      // 快捷键 toggleTerminal 在全屏态下收起：若只切 visible 会留下
+      // fullscreen=true/visible=false 非法组合（快照仍记全屏）
+      store.toggleTerminal()
+      expect(store.terminalVisible).toBe(false)
+      expect(store.terminalFullscreen).toBe(false)
+    })
+
+    it('非全屏态收起行为不变（fullscreen 保持 false）', () => {
+      const store = useUiStore()
+      store.toggleTerminal()
+      store.toggleTerminal()
+      expect(store.terminalVisible).toBe(false)
+      expect(store.terminalFullscreen).toBe(false)
+    })
+  })
+
+  describe('toggleTerminalFullscreen', () => {
+    it('连续切换 false → true → false', () => {
+      const store = useUiStore()
+      expect(store.terminalFullscreen).toBe(false)
+      store.toggleTerminalFullscreen()
+      expect(store.terminalFullscreen).toBe(true)
+      store.toggleTerminalFullscreen()
+      expect(store.terminalFullscreen).toBe(false)
+    })
+
+    it('面板隐藏时进入全屏先展开面板（防御 fullscreen ⇒ visible 非法组合）', () => {
+      const store = useUiStore()
+      expect(store.terminalVisible).toBe(false)
+      store.toggleTerminalFullscreen()
+      expect(store.terminalVisible).toBe(true)
+      expect(store.terminalFullscreen).toBe(true)
     })
   })
 
