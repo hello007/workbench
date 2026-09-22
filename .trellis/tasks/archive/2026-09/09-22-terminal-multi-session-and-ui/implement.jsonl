@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "多终端改 model/SessionState 快照字段与 ui store，须守 wailsjs 三处同步、EventsOn 闭包精准注销等跨层契约"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "tab 栏/工具栏/全屏覆盖层为新增视觉组件，须守三列布局、间距圆角四档、nav 指示条等约定"}
+{"file": "docs/spec/design-tokens.md", "reason": "终端全屏与 tab 栏配色须用设计令牌；--terminal-bg 与 xterm 主题 background 严格一致契约不可破坏"}
+{"file": "docs/spec/e2e-testing.md", "reason": "新增多终端 E2E 用例须从 fixtures.js import test/expect，mock 默认值入 wails-mock-defaults.js 单一数据源"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "会话上限提示/退出态提示涉及前端错误分流时须走 model.AppError + ErrorCode 约定"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "改 service/model/前端须知各层覆盖率门禁基线，避免实现期返工"}
+{"file": ".trellis/tasks/09-22-terminal-multi-session-and-ui/research/terminal-multi-session-ux.md", "reason": "多终端 UX 研究结论：tab 主形态、目录创建时决定、xterm 隐藏容器 fit 静默失败须激活 refit、dispose 泄漏教训"}

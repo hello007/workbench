@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处是否同步、事件监听是否闭包精准注销、快照旧版降级兼容"}
+{"file": "docs/spec/design-tokens.md", "reason": "检查 --terminal-bg 契约、明暗主题派生色阶、暗色阴影规范未被破坏"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查 tab 栏/全屏层视觉是否符合间距圆角四档、语义配色、行内 style 迁移语义类"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 是否用 fixtures.js、mock 是否走 wails-mock-defaults.js、禁 waitForTimeout"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查各层覆盖率门禁（model/server ≥80%、service ≥76%、前端 ≥70%）达标"}
+{"file": ".trellis/tasks/09-22-terminal-multi-session-and-ui/research/terminal-multi-session-ux.md", "reason": "对照研究结论核查实现：激活 refit、实例 dispose、tab 信息层级是否落实"}
