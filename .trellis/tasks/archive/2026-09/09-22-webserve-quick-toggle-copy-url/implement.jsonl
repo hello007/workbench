@@ -1,0 +1,4 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "分段控件/提示风格守页面视觉规范"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌（语义色/间距/圆角）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "若需补后端字段须走 wailsjs 三处同步规则"}
+{"file": "docs/spec/e2e-testing.md", "reason": "wails-mock-defaults.js 单一数据源登记（如需）"}

@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "视觉规范复核"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "绑定面零变更复核（若动了则三处同步核验）"}
