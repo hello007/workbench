@@ -905,3 +905,41 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 82: Linux 平台支持改造（PR0-PR4 全量落地）
+
+**Date**: 2026-09-23
+**Task**: Linux 平台支持改造（PR0-PR4 全量落地）
+**Branch**: `master`
+
+### Summary
+
+WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含 hideWindow 平台抽离与剪贴板编译缺口修复）；PR1 平台差异代码（shell 配置 GOOS 分支、buildCdCommand POSIX 分支、文件打开 xdg-open 双文件抽象、xclip/wl-copy 剪贴板真实现、Obsidian xdg-mime/pgrep 真实现，Linux 6 测试失败清零）；PR2 自更新 .sh POSIX 脚本（sh -n 语法实证）+ 前端 shell 三层兜底链；PR3 CI ubuntu 门禁（webkit2_41 标签、dist 占位修复 go:embed 冲突）；PR4 release 双 job（ubuntu-22.04 基线 tar.gz）+ 自更新资产平台化与安全解包 + 文档。沉淀 docs/spec/linux-platform.md。Windows 全量回归零破坏，WSL 实机全绿。CI/release 变更待推送后首跑终验。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5ed0a3` | (see git log) |
+| `736d914` | (see git log) |
+| `b5097dc` | (see git log) |
+| `8906825` | (see git log) |
+| `47c6a13` | (see git log) |
+| `de948bf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 81
-- **Last Active**: 2026-09-22
+- **Total Sessions**: 82
+- **Last Active**: 2026-09-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~907 | Active |
+| `journal-2.md` | ~945 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 82 | 2026-09-23 | Linux 平台支持改造（PR0-PR4 全量落地） | `e5ed0a3`, `736d914`, `b5097dc`, `8906825`, `47c6a13`, `de948bf` | `master` |
 | 81 | 2026-09-22 | AI 对话三路审核与 31 项缺陷修复 | `1fb3c89`, `76c07c6` | `master` |
 | 80 | 2026-09-22 | AI 对话工作台（AIChatBox）全栈落地 | `6734e2d`, `2f5660b`, `ec214ad` | `master` |
 | 79 | 2026-09-22 | 终端多 tab 会话、整窗全屏与外观设置 | `76756ed`, `88b3d88`, `88a2cb4`, `79dbebf`, `60698bc`, `4b6e99f` | `master` |
