@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **153** 个导出方法，分布在 17 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 17 个 service/cache。按 26 个业务域分组：
+共 **172** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -32,6 +32,7 @@
 | 仓库配置导入导出 | 3 | `app_repo_config.go` |
 | 状态看板 | 6 | `app_dashboard.go` |
 | AI 功能 | 21 | `app_ai.go` |
+| AI 对话 | 19 | `app_chat.go` |
 | 会话快照 | 2 | `app_session.go` |
 | 终端 | 6 | `app_terminal.go` |
 | 外部集成 | 9 | `app_external.go` |
@@ -333,7 +334,57 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ---
 
-## 22. 会话快照
+## 22. AI 对话
+
+AI 对话工作台（活动栏「AI 对话」面板）：多会话持续式对话。会话/消息/目录/模板/配置独立持久化到 `data/ai_chat/`。对话任务异步事件流经 EventSink 推送（`chat-task:queued/started/output/done`，payload 形状对齐 `model.ChatTaskRunResult`）；`RunChat` 自动在会话已有 claude session id 时追加 `--resume` 续上下文。
+
+### 会话 CRUD
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `CreateChatSession` | `(directoryID, title, cwd) => Promise<ChatSession>` | 创建会话（title 空 = 默认「新会话」，cwd 为 claude 子进程工作目录） | 新建 ChatSession |
+| `ListChatSessions` | `(directoryID) => Promise<ChatSession[]>` | 列出目录的会话（按最近活跃降序，不含消息；directoryID 空 = 全部目录） | ChatSession 数组 |
+| `GetChatSession` | `(sessionID) => Promise<ChatSession>` | 读取会话完整内容（元数据 + 消息按时间升序；不存在返回 `E_CHAT_SESSION_NOT_FOUND`） | ChatSession |
+| `DeleteChatSession` | `(sessionID) => Promise<void>` | 删除会话（索引项 + 消息文件） | — |
+| `UpdateChatSessionTitle` | `(sessionID, title) => Promise<void>` | 修改会话标题（并刷新活跃时间，列表排序前移） | — |
+
+### 目录 CRUD
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `AddChatDirectory` | `(path, displayName) => Promise<ChatDirectory>` | 添加侧栏常用目录项（displayName 空 = 取目录名；重复路径幂等返回既有项） | ChatDirectory |
+| `ListChatDirectories` | `() => Promise<ChatDirectory[]>` | 列出侧栏常用目录项（按 SortOrder 升序） | ChatDirectory 数组 |
+| `UpdateChatDirectory` | `(id, displayName) => Promise<void>` | 修改目录项显示名 | — |
+| `RemoveChatDirectory` | `(id) => Promise<void>` | 移除目录项（不影响已产生的会话与消息数据） | — |
+| `ReorderChatDirectories` | `(ids) => Promise<void>` | 按 ids 顺序持久化目录项排序（侧栏拖拽重排） | — |
+
+### 对话执行与任务状态
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `RunChat` | `(chatSessionID, prompt, permissionMode, modelName) => Promise<string>` | 执行一轮对话（permissionMode 仅非 default 时传 claude，modelName 空 = claude 默认），返回任务 id；prompt 为空拒绝（`E_CHAT_EMPTY_PROMPT`），同会话已有进行中/排队任务拒绝（`E_CHAT_IN_PROGRESS`） | taskID |
+| `GetChatTaskState` | `(taskID) => Promise<ChatTaskState>` | 查询对话任务状态（回复累积文本/claude 会话 id/运行态，切页恢复用；不存在返回 null） | ChatTaskState |
+| `CancelChatTask` | `(taskID) => Promise<boolean>` | 取消运行中/排队中的对话任务（杀 claude 及其子进程树） | 是否成功 |
+
+### 模板 CRUD
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `AddChatTemplate` | `(scope, directoryID, name, content) => Promise<ChatTemplate>` | 新增模板（scope 取 `global`/`directory`：global 忽略 directoryID，directory 时必填归属目录项） | ChatTemplate |
+| `ListChatTemplates` | `(directoryID) => Promise<ChatTemplate[]>` | 「该目录的目录模板 + 全局模板」合并列表（directoryID 空 = 仅全局） | ChatTemplate 数组 |
+| `UpdateChatTemplate` | `(id, name, content) => Promise<void>` | 修改模板名与内容（归属域不支持修改，删旧建新） | — |
+| `RemoveChatTemplate` | `(id) => Promise<void>` | 删除模板 | — |
+
+### 执行配置
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `GetChatSettings` | `() => Promise<ChatSettings>` | 读对话执行配置（文件缺失/损坏回默认值，不报错） | ChatSettings |
+| `SaveChatSettings` | `(permissionMode, modelName) => Promise<void>` | 持久化对话执行配置（permissionMode 须在可选集内） | — |
+
+---
+
+## 23. 会话快照
 
 崩溃恢复 UI 状态快照，持久化到 `data/session.json`（v1.4 PR2）。
 
@@ -344,7 +395,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ---
 
-## 23. 终端
+## 24. 终端
 
 pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃恢复按快照循环重建全部 tab（每 tab 一次 `CreateTerminal`）。
 
@@ -359,7 +410,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 24. 外部集成
+## 25. 外部集成
 
 `OpenInExternalDiff` 启动外部 diff 工具（配置见设置面板，未配置返回 `E_DIFF_TOOL_NOT_CONFIGURED`）。
 
@@ -377,7 +428,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 25. 设置
+## 26. 设置
 
 持久化到 `data/settings.json`。
 
@@ -388,7 +439,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 26. 网络访问
+## 27. 网络访问
 
 浏览器访问通道（桌面同开 HTTP / `--serve` 无头模式共用），配置段持久化到 `data/settings.json` 的 `webServe`，令牌持久化到 `data/web_token`（0600）。设置页「网络访问」分区消费这组方法。
 
@@ -401,7 +452,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 27. 更新
+## 28. 更新
 
 检查更新与自动更新，pending 机制（批处理脚本替换 exe 后重启）。
 
@@ -414,11 +465,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 28. 数据模型
+## 29. 数据模型
 
 全部提取自 `frontend/wailsjs/go/models.ts`（`model` namespace；`frontend` namespace 含 `FileFilter`）。字段名按 Go json tag 映射，`omitempty` 对应 TS `?:` 可选。以下列出关键 struct，完整定义见 `models.ts`。
 
-### 28.1 目录与文件
+### 29.1 目录与文件
 
 **Directory** — 工作目录
 
@@ -473,7 +524,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `status` | string | 变更状态：M/A/D/R/? |
 | `staged` | boolean | 是否已暂存 |
 
-### 28.2 Git
+### 29.2 Git
 
 **GitRepoInfo** — 仓库概览
 
@@ -515,7 +566,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **RepoStats** — 仓库统计（`trend`: TimeBucket[]，`contributors`: Contributor[]，`heatmap`: DayCount[]，`totalCommits` / `dateRange` / `granularity` / `sampled`）
 
-### 28.3 会话快照
+### 29.3 会话快照
 
 **SessionState** — 崩溃恢复 UI 状态快照
 
@@ -529,7 +580,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **TerminalSnapshot**（`visible` / `height` / `workDir`（旧版单终端兼容读取源，新快照不写入）/ `tabs`（v2 多终端 tab 列表 `TerminalTabSnapshot[]`：`workDir` / `shellType`）/ `activeIndex` / `fullscreen`）
 
-### 28.4 设置与更新
+### 29.4 设置与更新
 
 **AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
 
@@ -551,7 +602,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **UpdateInfo** — 更新信息（`hasUpdate` / `currentVer` / `latestVer` / `downloadUrl` / `releaseNotes` / `publishedAt` / `fileSize`）
 
-### 28.5 AI
+### 29.5 AI
 
 **AiFunction** — AI 功能配置（`id` / `name` / `description` / `icon` / `command` / `cwd` / `addDirs` / `env` / `mcp` / `permissionMode` / `timeoutMinutes` / `completion` / `params` / `followUps` / `tags` / `pinned`）
 
@@ -569,7 +620,56 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ImportPreview** — AI 功能导入预览（`new` / `conflict`: AiFunction[]，`invalid`: string[]）
 
-### 28.6 其他
+### 29.6 AI 对话
+
+**ChatSession** — 对话会话（元数据入 `data/ai_chat/sessions.json` 索引；消息逐会话存 `data/ai_chat/messages/<sessionId>.json`，`GetChatSession` 加载时填充）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | 会话 ID（`chatsession-<unixnano>`） |
+| `directoryId` | string | 所属侧栏目录项 ID |
+| `title` | string | 会话标题（默认「新会话」，用户可改） |
+| `cwd` | string | claude 子进程工作目录 |
+| `claudeSessionId` | string? | claude CLI 会话 id，空 = 尚未产生（首轮对话），下一轮 `--resume` 用 |
+| `createdAt` / `updatedAt` | number | 创建 / 最近活跃时间（unix 毫秒，列表按 updatedAt 降序） |
+| `messages` | ChatMessage[]? | 会话消息（索引文件不落此字段） |
+
+**ChatMessage** — 单条消息
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `role` | string | `user` / `assistant` |
+| `content` | string | 消息文本（markdown） |
+| `timestamp` | number | unix 毫秒 |
+| `taskId` | string? | 产生本条消息的对话任务 id（历史消息无任务关联时为空） |
+
+**ChatDirectory** — 侧栏常用目录项（持久化 `data/ai_chat/directories.json`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | 目录项 ID（`chatdir-<unixnano>`） |
+| `path` | string | 目录绝对路径（规范化，claude 子进程 cwd） |
+| `displayName` | string | 侧栏显示名（空 = 取目录名） |
+| `sortOrder` | number | 侧栏排序（拖拽重排后按列表序重写） |
+| `createdAt` | number | 创建时间 unix 毫秒 |
+
+**ChatTemplate** — 输入框纯文本模板片段（持久化 `data/ai_chat/templates.json`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | 模板 ID（`chattpl-<unixnano>`） |
+| `scope` | string | `global`（跨目录共享）/ `directory`（归属侧栏目录项） |
+| `directoryId` | string? | scope=directory 时的归属目录项 id，global 恒空 |
+| `name` / `content` | string | 模板名（下拉展示）/ 模板正文（纯文本） |
+| `createdAt` / `updatedAt` | number | 创建 / 修改时间 unix 毫秒 |
+
+**ChatSettings** — 执行配置（持久化 `data/ai_chat/settings.json`；`permissionMode` 取 `default`/`acceptEdits`/`plan`/`bypassPermissions`，`modelName` 空 = claude 默认模型）
+
+**ChatTaskState** — 对话任务当前状态（`GetChatTaskState` 拉取，切页恢复/轮询兜底；`taskId` / `chatSessionId` / `running` / `queued` / `claudeSessionId` / `reply`（本轮回复累积文本）/ `error` / `startedAt`）
+
+**ChatTaskRunResult** — 单轮对话执行结果（`chat-task:done` 事件 payload；`taskId` / `chatSessionId` / `claudeSessionId` / `reply`（assistant 回复全文）/ `exitCode` / `error` / `canceled`）
+
+### 29.7 其他
 
 **Favorite**（`path` / `alias` / `group` / `createdAt`）
 
@@ -593,7 +693,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **SkillDescriptor**（`name` / `description` / `command` / `cwd` / `source` / `sourceDir` / `plugin`）
 
-### 28.7 具名 string 类型
+### 29.8 具名 string 类型
 
 `model/commit.go` 定义的两个具名 string 类型，作方法参数时 `App.d.ts` 保留 `model.X` 引用：
 
@@ -606,7 +706,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 29. 深度查询入口
+## 30. 深度查询入口
 
 本清单为静态快照。需要查询方法调用链、service 实现、字段影响面等动态结构信息时，使用项目内置的 CodeGraph 索引（`.codegraph/`，SQLite 知识图谱，全仓库符号/调用边/文件索引，规模以 `codegraph status` 实时查询为准）：
 
