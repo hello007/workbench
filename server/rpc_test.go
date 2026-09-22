@@ -278,13 +278,15 @@ func TestWebHandler_RPCNotMounted(t *testing.T) {
 	}
 }
 
-// TestWebHandler_PreviewRoutesMountedNoAuth 预览路由已挂载且与桌面一致不做 token 认证
-// （桌面经 AssetServer.Handler 无鉴权挂载）：路由命中以「未带令牌仍进入 preview
-// 业务校验（400 缺参数）」而非 401/SPA fallback 为准。
+// TestWebHandler_PreviewRoutesMountedNoAuth 预览路由已挂载且不做 token 认证，
+// 但须携带同源标记（Sec-Fetch-Site: same-origin，前端页面内嵌框架的加载形态；
+// 同源校验矩阵详见 TestWebHandler_PreviewSecFetchSiteMatrix）：路由命中以「同源
+// 请求未带令牌仍进入 preview 业务校验（400 缺参数）」而非 401/403/SPA fallback 为准。
 func TestWebHandler_PreviewRoutesMountedNoAuth(t *testing.T) {
 	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken, RPCTarget: rpcTestTarget{}})
+	sameOrigin := map[string]string{"Sec-Fetch-Site": "same-origin"}
 
-	rec := get(t, h, "/preview-pdf", nil)
+	rec := get(t, h, "/preview-pdf", sameOrigin)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("/preview-pdf 应命中 preview 路由返回 400（缺 path 参数）, got %d: %q", rec.Code, rec.Body.String())
 	}
@@ -292,19 +294,19 @@ func TestWebHandler_PreviewRoutesMountedNoAuth(t *testing.T) {
 		t.Errorf("/preview-pdf 响应不符: %q", body)
 	}
 
-	rec = get(t, h, "/preview-raw/", nil)
+	rec = get(t, h, "/preview-raw/", sameOrigin)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("/preview-raw/ 应命中 preview 路由返回 400（缺资源路径）, got %d", rec.Code)
 	}
 }
 
 // TestWebHandler_PreviewPDFSmoke preview 挂载 smoke：以临时 PDF 走通
-// /preview-pdf 完整链路（path 参数校验 + ServeFile 返回内容）。
+// /preview-pdf 完整链路（同源关 + path 参数校验 + ServeFile 返回内容）。
 func TestWebHandler_PreviewPDFSmoke(t *testing.T) {
 	pdfPath := newPreviewTestFile(t, "doc.pdf", "%PDF-smoke")
 	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken})
 
-	rec := get(t, h, "/preview-pdf?path="+pdfPath, nil)
+	rec := get(t, h, "/preview-pdf?path="+pdfPath, map[string]string{"Sec-Fetch-Site": "same-origin"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("合法 PDF 预览应 200, got %d: %q", rec.Code, rec.Body.String())
 	}

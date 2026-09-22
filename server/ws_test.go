@@ -306,6 +306,37 @@ func TestWSHub_SetTokenRotation(t *testing.T) {
 	}
 }
 
+// TestWSHub_CloseDisconnectsAllClients hub 停机关闭：Close 后全部在途客户端
+// 读侧感知连接关闭、readPump 走 unregister 收尾清空 clients；Close 幂等（二次
+// 调用不 panic），Close 后 Emit 不 panic（对应 webServeManager.stopLocked 的
+// 停机关闭路径，防僵尸客户端与 pump goroutine 泄漏）。
+func TestWSHub_CloseDisconnectsAllClients(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conns := []*websocket.Conn{
+		mustDialWS(t, srv, "?token=right-token"),
+		mustDialWS(t, srv, "?token=right-token"),
+	}
+	waitClientCount(t, hub, 2)
+
+	hub.Close()
+
+	// 各客户端读侧感知服务端关闭（连接被断，读到错误而非事件帧）
+	for i, conn := range conns {
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, _, err := conn.ReadMessage(); err == nil {
+			t.Errorf("客户端 %d 在 hub Close 后应读到连接关闭错误", i)
+		}
+	}
+	// readPump 感知断连后 unregister，clients 清空（goroutine 收尾完成）
+	waitClientCount(t, hub, 0)
+
+	// 幂等：二次 Close 不 panic（clients 已空，遍历为空操作）
+	hub.Close()
+
+	// Close 后广播不 panic：残留投递目标已注销，空投递安全
+	hub.Emit("after-close", "x")
+}
+
 // TestWSHub_SlowConsumerDropped 写超时/背压防护：客户端不读帧，发送队列
 // 与 TCP 缓冲塞满后写超时触发断连，慢消费者被踢出（不拖垮广播方与其余客户端）。
 func TestWSHub_SlowConsumerDropped(t *testing.T) {

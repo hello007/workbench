@@ -191,6 +191,42 @@ func TestWebHandler_SetTokenRotation(t *testing.T) {
 	}
 }
 
+// TestWebHandler_PreviewSecFetchSiteMatrix serve 模式预览路由同源校验矩阵：
+// 仅 Sec-Fetch-Site: same-origin（前端页面内嵌框架加载形态）放行；cross-site
+// （恶意网站跨站嵌入）、none（地址栏直接导航）、缺失（curl/脚本探测）一律 403。
+// 放行判定以「过了同源关到达 PreviewHandler」为证：/preview-pdf 缺 path 参数
+// 返回 400（同源关后的业务校验），与 403（同源关拒绝）状态码可区分。
+func TestWebHandler_PreviewSecFetchSiteMatrix(t *testing.T) {
+	cases := []struct {
+		name string
+		site string
+		want int
+	}{
+		{"同源放行", "same-origin", http.StatusBadRequest},
+		{"跨站拒绝", "cross-site", http.StatusForbidden},
+		{"直接导航拒绝", "none", http.StatusForbidden},
+		{"缺失头拒绝", "", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			header := map[string]string{}
+			if tc.site != "" {
+				header["Sec-Fetch-Site"] = tc.site
+			}
+			rec := get(t, newTestHandler(), "/preview-pdf", header)
+			if rec.Code != tc.want {
+				t.Fatalf("Sec-Fetch-Site=%q 应返回 %d, got %d", tc.site, tc.want, rec.Code)
+			}
+		})
+	}
+
+	// /preview-raw/ 路由同样受同源关约束
+	rec := get(t, newTestHandler(), "/preview-raw/C:/x/style.css", map[string]string{"Sec-Fetch-Site": "cross-site"})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("/preview-raw 跨站请求应 403, got %d", rec.Code)
+	}
+}
+
 // TestExtractToken 令牌提取优先级与边界。
 func TestExtractToken(t *testing.T) {
 	newReq := func(path string, header map[string]string) *http.Request {

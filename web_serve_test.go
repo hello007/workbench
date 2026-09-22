@@ -11,8 +11,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 
 	"workbench/model"
+	"workbench/server"
 	"workbench/service"
 )
 
@@ -480,3 +484,240 @@ func TestMulticastSink(t *testing.T) {
 type sinkFunc func(name string, data ...any)
 
 func (f sinkFunc) Emit(name string, data ...any) { f(name, data...) }
+
+// assertWaitBlocked 断言 Wait goroutine 在窗口期内未返回（--serve 主进程
+// 存活语义：重启/停机不得使 Wait 返回）。
+func assertWaitBlocked(t *testing.T, errCh <-chan error, window time.Duration) {
+	t.Helper()
+	select {
+	case err := <-errCh:
+		t.Fatalf("Wait 不应在此场景返回（进程须存活）, got err=%v", err)
+	case <-time.After(window):
+	}
+}
+
+// TestWebServeManager_WaitGenerationSurvivesRestart 代际 Wait（B1 回归）：
+// --serve 主流程阻塞于 Wait，浏览器经 SetWebServeConfig 触发的重启/停机/
+// 重新开启均不得使 Wait 返回（旧实现读到旧代际 done 的 ErrServerClosed 即
+// 返回 → runServe 返回 → 进程意外退出）；仅代际未变的真实 Serve 故障退出
+// 才返回错误交调用方终止进程。
+func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
+	app := newWebServeTestApp(t)
+	m := app.webServe
+
+	// 用具体端口构造地址变化：127.0.0.1:0 字符串相同会命中 Start 幂等 no-op，
+	// 触发不了真实重启路径
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+		t.Fatalf("Start A: %v", err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- m.Wait() }()
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+
+	// 改绑定地址重启：旧代际 Serve 退出被代际核对消化，Wait 继续等新代际
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+		t.Fatalf("Start B（重启）: %v", err)
+	}
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+
+	// 关开关停机：done 置 nil，Wait 阻塞等下一次 Start（进程存活）
+	if err := m.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+
+	// 重新开启：Wait 被唤醒继续监视新代际
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+		t.Fatalf("Start C（重新开启）: %v", err)
+	}
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+
+	// 真实故障退出：绕过管理器直接关 listener，Serve 因 Accept 错误退出且
+	// 代际未变 → Wait 返回该错误（--serve 以非零状态终止，runServe 上抛）
+	m.mu.Lock()
+	ln := m.ln
+	m.mu.Unlock()
+	if ln == nil {
+		t.Fatal("运行中 listener 不应为 nil")
+	}
+	_ = ln.Close()
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Error("真实 Serve 故障退出应返回非 nil 错误")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listener 关闭后 Wait 应退出")
+	}
+}
+
+// TestWebServeManager_StopClosesWSClients 停机关闭在途 WS 客户端（B2 集成
+// 回归）：http.Server.Close 不跟踪 hijacked 连接，stopLocked 须经 hub.Close
+// 显式断开——Stop 后客户端读侧感知连接关闭（无僵尸客户端、pump goroutine 经
+// readPump unregister 收尾）。
+func TestWebServeManager_StopClosesWSClients(t *testing.T) {
+	app := newWebServeTestApp(t)
+	m := app.webServe
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	token, err := server.LoadOrCreateToken(serveTokenFile)
+	if err != nil {
+		t.Fatalf("读访问令牌: %v", err)
+	}
+	conn, _, err := (&websocket.Dialer{
+		Subprotocols:     []string{token},
+		HandshakeTimeout: 5 * time.Second,
+	}).Dial("ws://"+m.listenAddr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("WS 升级失败: %v", err)
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for m.hub.ClientCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待 WS 客户端注册超时")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := m.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Error("Stop 后在途 WS 客户端应读到连接关闭错误（无僵尸客户端）")
+	}
+}
+
+// TestApp_SetWebServeConfig_ServeWaitSurvives --serve 端到端（B1 回归）：
+// 浏览器经 /api/rpc 同款入口 SetWebServeConfig 改址重启与关开关后，Wait 不
+// 返回（进程存活），且新地址服务可用（旧地址拒绝连接）。
+func TestApp_SetWebServeConfig_ServeWaitSurvives(t *testing.T) {
+	app := newWebServeTestApp(t)
+
+	// 具体端口构造地址变化（127.0.0.1:0 同串会命中 Start 幂等 no-op）
+	if err := app.SetWebServeConfig(true, fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+		t.Fatalf("开启: %v", err)
+	}
+	urlA := "http://" + app.webServe.listenAddr() + "/healthz"
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- app.webServe.Wait() }()
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+
+	// 改绑定地址：平滑重启，Wait 不返回，新地址可达、旧地址关闭
+	if err := app.SetWebServeConfig(true, fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+		t.Fatalf("改址重启: %v", err)
+	}
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+	urlB := "http://" + app.webServe.listenAddr() + "/healthz"
+	if urlA == urlB {
+		t.Fatal("改址后监听地址应变化")
+	}
+	if code := httpGetWithToken(t, urlB, ""); code != http.StatusOK {
+		t.Errorf("重启后新地址健康检查应 200（免认证）, got %d", code)
+	}
+	if _, err := http.Get(urlA); err == nil {
+		t.Error("重启后旧地址不应再接受连接")
+	}
+
+	// 关开关：停机后 Wait 仍不返回（进程存活等待重新开启）
+	if err := app.SetWebServeConfig(false, "127.0.0.1:0"); err != nil {
+		t.Fatalf("关闭: %v", err)
+	}
+	assertWaitBlocked(t, errCh, 200*time.Millisecond)
+}
+
+// TestApp_RegenerateWebToken_ConcurrentConsistency 并发轮换一致性（B3 回归）：
+// 多 goroutine 并发 RegenerateWebToken（生成→落盘→热轮换全程互斥）后，磁盘
+// 令牌与 handler 校验基准、hub 升级基准三处一致：最终令牌对 RPC 200、WS 子
+// 协议升级成功，其余并发产生的令牌对 RPC 一律 401。
+func TestApp_RegenerateWebToken_ConcurrentConsistency(t *testing.T) {
+	app := newWebServeTestApp(t)
+	if err := app.webServe.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	const n = 8
+	tokens := make(chan string, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tok, err := app.RegenerateWebToken()
+			if err != nil {
+				t.Errorf("RegenerateWebToken: %v", err)
+				return
+			}
+			tokens <- tok
+		}()
+	}
+	wg.Wait()
+	close(tokens)
+
+	seen := make(map[string]struct{}, n)
+	for tok := range tokens {
+		if len(tok) != 64 {
+			t.Errorf("令牌应为 64 位 hex, got %q", tok)
+		}
+		seen[tok] = struct{}{}
+	}
+	if len(seen) != n {
+		t.Fatalf("并发轮换应产生 %d 个互异令牌, got %d", n, len(seen))
+	}
+
+	// 磁盘最终值（互斥串行下为最后一个持锁完成的调用所写）
+	persisted, err := os.ReadFile(serveTokenFile)
+	if err != nil {
+		t.Fatalf("读令牌文件: %v", err)
+	}
+	disk := strings.TrimSpace(string(persisted))
+	if _, ok := seen[disk]; !ok {
+		t.Fatalf("磁盘令牌 %q 应是本轮并发产生的令牌之一", disk)
+	}
+
+	// handler 校验基准 == 磁盘：最终令牌 200，其余令牌 401
+	rpcURL := "http://" + app.webServe.listenAddr() + "/api/rpc"
+	postRPC := func(token string) int {
+		req, err := http.NewRequest(http.MethodPost, rpcURL,
+			strings.NewReader(`{"method":"GetAppVersion","args":[]}`))
+		if err != nil {
+			t.Fatalf("构造 RPC 请求失败: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("RPC 请求失败: %v", err)
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+	if code := postRPC(disk); code != http.StatusOK {
+		t.Errorf("磁盘令牌（最终生效）应通过 RPC 认证 200, got %d", code)
+	}
+	for tok := range seen {
+		if tok == disk {
+			continue
+		}
+		if code := postRPC(tok); code != http.StatusUnauthorized {
+			t.Errorf("被后续轮换覆盖的令牌应 401, got %d", code)
+		}
+	}
+
+	// hub 升级基准 == 磁盘：最终令牌经 WS 子协议通道升级成功
+	wsConn, wsResp, err := (&websocket.Dialer{
+		Subprotocols:     []string{disk},
+		HandshakeTimeout: 5 * time.Second,
+	}).Dial("ws://"+app.webServe.listenAddr()+"/ws", nil)
+	if err != nil {
+		if wsResp != nil {
+			_ = wsResp.Body.Close()
+		}
+		t.Fatalf("磁盘令牌应通过 WS 子协议升级, err=%v status=%v", err, wsResp)
+	}
+	_ = wsConn.Close()
+}

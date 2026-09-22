@@ -88,7 +88,8 @@ func TestSetEventSink_ConcurrentSwitchAndEmit(t *testing.T) {
 		}
 	}()
 
-	// 读取方：输出泵 goroutine 语义，持续经 eventSink() 取当前出口发射
+	// 读取方：输出泵 goroutine 语义，经 emitCurrent 持读锁发射（与生产调用
+	// 路径一致：取值与投递在同一 RLock 域内）
 	var emitWG sync.WaitGroup
 	for g := 0; g < 3; g++ {
 		emitWG.Add(1)
@@ -99,7 +100,7 @@ func TestSetEventSink_ConcurrentSwitchAndEmit(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					emitEvent(svc.eventSink(), "terminal-output", "session-1", "data")
+					svc.emitCurrent("terminal-output", "session-1", "data")
 				}
 			}
 		}()
@@ -109,6 +110,89 @@ func TestSetEventSink_ConcurrentSwitchAndEmit(t *testing.T) {
 	close(stop)
 	switchWG.Wait()
 	emitWG.Wait()
+}
+
+// probeSink 可观测 Emit 生命周期的假出口：每条事件 Emit 期间标记 inEmit，
+// 供断言「投递期间出口不可被切换」（emitCurrent 持读锁投递语义）。
+type probeSink struct {
+	mu       sync.Mutex
+	names    []string
+	emitting bool
+}
+
+func (p *probeSink) Emit(name string, data ...any) {
+	p.mu.Lock()
+	p.emitting = true
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		p.emitting = false
+		p.mu.Unlock()
+	}()
+	if name == "slow" {
+		// 拉长本条事件的投递时长，制造与 SetEventSink 的交错窗口
+		time.Sleep(50 * time.Millisecond)
+	}
+	p.mu.Lock()
+	p.names = append(p.names, name)
+	p.mu.Unlock()
+}
+
+// TestSinkHolder_EmitCurrentUnderLockNoStaleDelivery emitCurrent 持读锁投递：
+// 旧出口某条事件的 Emit 尚未返回时，SetEventSink 切换被锁阻塞、新出口不生效，
+// 因此新出口首条事件的投递必然晚于旧出口在途 Emit 结束——消除旧实现（取值与
+// 投递分两步、中间释放锁）切换窗口内事件迟到旧出口、新出口先于旧出口收到
+// 事件的顺序缺口。
+func TestSinkHolder_EmitCurrentUnderLockNoStaleDelivery(t *testing.T) {
+	h := &sinkHolder{}
+	slow := &probeSink{}
+	fast := &probeSink{}
+	h.SetEventSink(slow)
+
+	emitDone := make(chan struct{})
+	go func() {
+		defer close(emitDone)
+		h.emitCurrent("slow", "payload") // 投递期间 slow.Emit 睡眠 50ms
+	}()
+
+	// 等待 slow 真正进入 Emit（inEmit=true）后再切换，保证交错窗口成立
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		slow.mu.Lock()
+		emitting := slow.emitting
+		slow.mu.Unlock()
+		if emitting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("等待 slow 进入 Emit 超时")
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// 切换方：阻塞至 slow 的 Emit 返回（读锁释放）后才生效并完成新投递
+	h.SetEventSink(fast)
+	h.emitCurrent("fast-first", "payload")
+
+	// fast 收到事件时 slow 的在途 Emit 必须已结束（顺序缺口消除的断言点）
+	slow.mu.Lock()
+	emitting := slow.emitting
+	slowNames := append([]string(nil), slow.names...)
+	slow.mu.Unlock()
+	if emitting {
+		t.Error("切换后新出口投递时旧出口的在途 Emit 不应仍在进行（持锁投递被违反）")
+	}
+	if len(slowNames) != 1 || slowNames[0] != "slow" {
+		t.Errorf("旧出口应恰好收到切换前的 1 条事件: %v", slowNames)
+	}
+	fast.mu.Lock()
+	fastNames := append([]string(nil), fast.names...)
+	fast.mu.Unlock()
+	if len(fastNames) != 1 || fastNames[0] != "fast-first" {
+		t.Errorf("新出口应恰好收到切换后的 1 条事件: %v", fastNames)
+	}
+
+	<-emitDone
 }
 
 // TestBatchPull_EmitsViaSwitchedSink serve 模式端到端（service 层）：构造期
