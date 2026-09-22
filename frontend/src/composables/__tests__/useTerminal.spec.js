@@ -8,7 +8,7 @@ import { flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 // 用 vi.hoisted 声明捕获变量，确保 vi.mock 工厂可安全引用（hoistable）
-const captures = vi.hoisted(() => ({ lastTerminal: null, lastTerminalConfig: null }))
+const captures = vi.hoisted(() => ({ lastTerminal: null, lastTerminalConfig: null, offFns: [] }))
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn(function (config) {
@@ -42,7 +42,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   CloseTerminal: vi.fn(() => Promise.resolve())
 }))
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
-  EventsOn: vi.fn(),
+  // 与真实 Wails runtime 一致：EventsOn 返回本监听器的注销闭包
+  EventsOn: vi.fn(() => {
+    const off = vi.fn()
+    captures.offFns.push(off)
+    return off
+  }),
   EventsOff: vi.fn()
 }))
 
@@ -113,5 +118,73 @@ describe('useTerminal - 主题切换', () => {
     await nextTick()
     // watch 回调内 term.value 为 null 时跳过，不抛错
     expect(t.term.value).toBeNull()
+  })
+})
+
+describe('useTerminal - 多实例事件治理', () => {
+  let settingsStore
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    captures.lastTerminal = null
+    captures.lastTerminalConfig = null
+    captures.offFns = []
+    settingsStore = useSettingsStore()
+  })
+
+  it('destroyTerminal 调用 EventsOn 返回的闭包精准注销，不再调用全局 EventsOff', async () => {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    // terminal-output + terminal-exit 两个监听器各有一个注销闭包
+    expect(captures.offFns.length).toBe(2)
+    captures.offFns.forEach((off) => expect(off).not.toHaveBeenCalled())
+
+    await t.destroyTerminal()
+    captures.offFns.forEach((off) => expect(off).toHaveBeenCalledTimes(1))
+  })
+
+  it('CreateTerminal 失败时同样精准注销监听器', async () => {
+    const { CreateTerminal } = await import('../../../wailsjs/go/main/App')
+    CreateTerminal.mockRejectedValueOnce(new Error('pty fail'))
+    const { EventsOff } = await import('../../../wailsjs/runtime/runtime')
+
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    captures.offFns.forEach((off) => expect(off).toHaveBeenCalledTimes(1))
+    // 全局 EventsOff 不得被调用（会误删其他实例监听器）
+    expect(EventsOff).not.toHaveBeenCalled()
+  })
+
+  it('initTerminal 传递 fontSize/scrollback options 至 xterm 配置', async () => {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell', { fontSize: 16, scrollback: 5000 })
+    await flushPromises()
+    expect(captures.lastTerminalConfig.fontSize).toBe(16)
+    expect(captures.lastTerminalConfig.scrollback).toBe(5000)
+  })
+
+  it('未传 options 时使用默认外观（fontSize 14 / scrollback 1000）', async () => {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    expect(captures.lastTerminalConfig.fontSize).toBe(14)
+    expect(captures.lastTerminalConfig.scrollback).toBe(1000)
+  })
+
+  it('两个实例并存：各自注册独立监听器，销毁其一不影响另一实例', async () => {
+    const t1 = useTerminal()
+    const t2 = useTerminal()
+    await t1.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await t2.initTerminal(document.createElement('div'), 'D:\\', 'powershell')
+    await flushPromises()
+    expect(captures.offFns.length).toBe(4)
+
+    await t1.destroyTerminal()
+    // 仅 t1 的两个闭包被调用，t2 的保持未调用
+    const calledCount = captures.offFns.filter((off) => off.mock.calls.length > 0).length
+    expect(calledCount).toBe(2)
   })
 })

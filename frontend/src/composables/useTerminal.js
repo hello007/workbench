@@ -10,7 +10,7 @@ import {
   ResizeTerminal,
   CloseTerminal
 } from '../../wailsjs/go/main/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { useSettingsStore } from '../store'
 
 /**
@@ -77,6 +77,18 @@ export function getTerminalTheme(resolved) {
   return resolved === 'dark' ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
 }
 
+// 终端默认外观（字号/回滚行数）；PR 外观设置接入后由设置页覆盖
+export const TERMINAL_DEFAULTS = {
+  fontSize: 14,
+  scrollback: 1000
+}
+
+/**
+ * 单终端会话 composable：一次实例对应一个 shell 进程（一个 tab）。
+ * 多终端 = 多次调用 useTerminal() 各自持有独立 sessionID/事件监听。
+ * 事件监听用 EventsOn 返回的闭包精准注销，禁全局 EventsOff
+ * （会误删其他实例的同名监听器，见 docs/spec/cross-layer-contracts.md）。
+ */
 export function useTerminal() {
   const term = ref(null)
   const fitAddon = ref(null)
@@ -86,18 +98,23 @@ export function useTerminal() {
   const currentShellType = ref('powershell')
   const isExited = ref(false)
 
+  // 本实例的事件注销闭包（EventsOn 返回值），destroyTerminal 时精准摘除
+  let offOutput = null
+  let offExit = null
+
   // 主题 store：读取实际生效主题 resolvedTheme，初始化与切换 xterm 主题
   const settingsStore = useSettingsStore()
 
-  // 初始化终端
-  async function initTerminal(container, dir, shellType) {
+  // 初始化终端；options.fontSize/scrollback 覆盖默认外观（外观设置接入点）
+  async function initTerminal(container, dir, shellType, options = {}) {
     if (isActive.value && sessionID.value) {
       return
     }
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: options.fontSize || TERMINAL_DEFAULTS.fontSize,
+      scrollback: options.scrollback || TERMINAL_DEFAULTS.scrollback,
       lineHeight: 1.2,
       fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
       theme: getTerminalTheme(settingsStore.resolvedTheme),
@@ -120,11 +137,13 @@ export function useTerminal() {
     const rows = terminal.rows
 
     // 输出缓冲区：CreateTerminal 返回前收到的输出暂存于此
-    // 解决 sessionID 尚未设置时事件回调无法匹配的问题
+    // 解决 sessionID 尚未设置时事件回调无法匹配的问题；
+    // 多实例并存时各自缓冲、按 sid 过滤刷新，互不干扰
     const outputBuffer = []
 
-    // 先注册事件监听器，再创建终端，避免 Shell 初始 prompt 输出丢失
-    EventsOn('terminal-output', (sid, output) => {
+    // 先注册事件监听器，再创建终端，避免 Shell 初始 prompt 输出丢失；
+    // EventsOn 返回注销闭包，仅摘除本实例监听器
+    offOutput = EventsOn('terminal-output', (sid, output) => {
       if (sessionID.value && sid === sessionID.value && term.value) {
         term.value.write(output)
       } else if (!sessionID.value && term.value) {
@@ -133,7 +152,7 @@ export function useTerminal() {
       }
     })
 
-    EventsOn('terminal-exit', (sid) => {
+    offExit = EventsOn('terminal-exit', (sid) => {
       if (sid === sessionID.value) {
         isActive.value = false
         isExited.value = true
@@ -158,8 +177,7 @@ export function useTerminal() {
       outputBuffer.length = 0
     } catch (err) {
       terminal.writeln(`\x1b[31m创建终端失败: ${err}\x1b[0m`)
-      EventsOff('terminal-output')
-      EventsOff('terminal-exit')
+      unregisterEvents()
       return
     }
 
@@ -168,6 +186,18 @@ export function useTerminal() {
         WriteTerminalInput(sessionID.value, data).catch(() => {})
       }
     })
+  }
+
+  // 精准注销本实例的事件监听器（闭包模式，禁 EventsOff 全局移除）
+  function unregisterEvents() {
+    if (offOutput) {
+      offOutput()
+      offOutput = null
+    }
+    if (offExit) {
+      offExit()
+      offExit = null
+    }
   }
 
   // 切换工作目录
@@ -205,8 +235,7 @@ export function useTerminal() {
 
   // 销毁终端
   async function destroyTerminal() {
-    EventsOff('terminal-output')
-    EventsOff('terminal-exit')
+    unregisterEvents()
 
     if (sessionID.value) {
       try {
