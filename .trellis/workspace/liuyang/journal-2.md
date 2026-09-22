@@ -698,3 +698,37 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 76: 浏览器通道审核缺陷修复（三维度审核 1🔴+8🟡 全修）
+
+**Date**: 2026-09-22
+**Task**: 浏览器通道审核缺陷修复（三维度审核 1🔴+8🟡 全修）
+**Branch**: `master`
+
+### Summary
+
+三维度代码审核（安全/并发与生命周期/跨层契约与前端）发现 1🔴+8🟡 全部修复。🔴：--serve 模式浏览器改绑定地址触发 Wait 误判 ErrServerClosed 进程退出——Wait 代际化（done 即代际+cond 等重开）。后端：WSHub.Close 治僵尸连接与 goroutine 泄漏；停机改 srv.Close 立即断开消自等 3s；RegenerateWebToken 全程互斥保并发三处一致；预览路由 requireSameOrigin 封堵跨站文件探测（缺失也 403，桌面经 AssetServer 直挂零变化）；sinkHolder.emitCurrent 持读锁投递消切换窗口顺序缺口。前端：重新生成 token 后 setToken 防自锁；连败 3 次转 token 门；token hex 预校验防 SyntaxError；不可达横幅+门取消出口。18 个新回归测试，-race 全绿，覆盖率 server 93.2%/service 79.2%/前端 84.3%。并行接缝（RPC/WS 不经同源中间件、门取消与 401 交互、锁序）经 check 代理逐一核验。spec browser-channel.md 回补六契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `676e9d9` | (see git log) |
+| `45b4bc8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
