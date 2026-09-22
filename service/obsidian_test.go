@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -45,17 +46,17 @@ func TestResolveObsidianVault_NotFound(t *testing.T) {
 	}
 }
 
-// TestEncodeObsidianPath 空格/中文/反斜杠编码
+// TestEncodeObsidianPath 空格/中文编码（POSIX 路径语义，跨平台断言）；
+// Windows 反斜杠路径语义用例见 TestEncodeObsidianPath_WindowsPaths。
 func TestEncodeObsidianPath(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 		want string // 关键断言片段
 	}{
-		{"反斜杠转正斜杠后编码", `C:\Users\test`, "C%3A%2FUsers%2Ftest"},
-		{"空格编码为%20", `C:\my notes`, "my%20notes"},
-		{"中文安全编码", `C:\Users\张三\笔记`, "%E5%BC%A0%E4%B8%89"},
-		{"不含加号", `C:\a b\c`, ""},
+		{"空格编码为%20", `/home/my notes`, "my%20notes"},
+		{"中文安全编码", `/home/张三/笔记`, "%E5%BC%A0%E4%B8%89"},
+		{"不含加号", `/home/a b/c`, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -63,15 +64,27 @@ func TestEncodeObsidianPath(t *testing.T) {
 			if c.want != "" && !strings.Contains(got, c.want) {
 				t.Errorf("encodeObsidianPath(%q) = %q, 应包含 %q", c.in, got, c.want)
 			}
-			// 编码结果不应出现原始空格或反斜杠
-			if strings.ContainsAny(got, " \\") {
-				t.Errorf("编码结果 %q 不应含空格或反斜杠", got)
+			// 编码结果不应出现原始空格
+			if strings.Contains(got, " ") {
+				t.Errorf("编码结果 %q 不应含空格", got)
 			}
 			// 空格应编码为 %20 而非 +
 			if strings.Contains(got, "+") {
 				t.Errorf("空格应编码为 %%20 而非 +: %q", got)
 			}
 		})
+	}
+}
+
+// TestEncodeObsidianPath_WindowsPaths Windows 路径语义：反斜杠转正斜杠后编码
+// （依赖 filepath.ToSlash 的 Windows 分隔符语义，非 Windows 平台跳过）。
+func TestEncodeObsidianPath_WindowsPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows 路径分隔符语义（\\ 不参与 Linux 归一），非 Windows 平台跳过")
+	}
+	got := encodeObsidianPath(`C:\Users\test`)
+	if want := "C%3A%2FUsers%2Ftest"; !strings.Contains(got, want) {
+		t.Errorf("encodeObsidianPath(%q) = %q, 应包含 %q", `C:\Users\test`, got, want)
 	}
 }
 
@@ -84,7 +97,8 @@ func TestOpenInObsidian_NotFoundPath(t *testing.T) {
 	}
 }
 
-// TestIsAncestorOrEqual 完整路径段匹配、大小写不敏感、归一化。
+// TestIsAncestorOrEqual 完整路径段匹配、大小写归一、归一化
+// （POSIX 路径语义，跨平台断言）；Windows 盘符路径语义用例见 TestIsAncestorOrEqual_WindowsPaths。
 func TestIsAncestorOrEqual(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -92,9 +106,34 @@ func TestIsAncestorOrEqual(t *testing.T) {
 		child  string
 		want   bool
 	}{
-		{"相等", `C:\Vault`, `C:\Vault`, true},
+		{"相等", `/Vault`, `/Vault`, true},
+		{"祖先是 vault 根", `/Vault`, `/Vault/note.md`, true},
+		{"非完整段不匹配", `/Vault`, `/VaultChild/note.md`, false},
+		{"大小写归一", `/vault`, `/VAULT/note.md`, true},
+		{"末尾分隔符归一", `/Vault/`, `/Vault`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isAncestorOrEqual(c.parent, c.child); got != c.want {
+				t.Errorf("isAncestorOrEqual(%q, %q) = %v, 期望 %v", c.parent, c.child, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsAncestorOrEqual_WindowsPaths Windows 路径语义：盘符大小写归一、
+// 不同盘符不匹配、正斜杠输入（依赖 Windows 分隔符语义，非 Windows 平台跳过）。
+func TestIsAncestorOrEqual_WindowsPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows 路径分隔符语义（\\ 不参与 Linux 归一），非 Windows 平台跳过")
+	}
+	cases := []struct {
+		name   string
+		parent string
+		child  string
+		want   bool
+	}{
 		{"祖先是 vault 根", `C:\Vault`, `C:\Vault\note.md`, true},
-		{"非完整段不匹配", `C:\Vault`, `C:\VaultChild\note.md`, false},
 		{"大小写不敏感", `c:\vault`, `C:\VAULT\note.md`, true},
 		{"正斜杠输入", `C:/Vault`, `C:/Vault/note.md`, true},
 		{"不同盘符不匹配", `C:\Vault`, `D:\Vault\note.md`, false},

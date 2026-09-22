@@ -1,6 +1,7 @@
 package model
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -34,6 +35,7 @@ func TestTerminalSession_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+// TestGetShellConfigs_Count 各平台 Shell 配置均为 4 项（Windows 与 Linux 列表等宽）。
 func TestGetShellConfigs_Count(t *testing.T) {
 	configs := GetShellConfigs()
 	if len(configs) != 4 {
@@ -41,90 +43,78 @@ func TestGetShellConfigs_Count(t *testing.T) {
 	}
 }
 
-func TestGetShellConfigs_Fields(t *testing.T) {
+// TestGetShellConfigs_PlatformTypes 各平台 Shell 类型集合与默认顺序（首项为默认 Shell）。
+func TestGetShellConfigs_PlatformTypes(t *testing.T) {
 	configs := GetShellConfigs()
-	expected := map[string]ShellConfig{
-		"powershell": {Type: "powershell", Executable: "powershell.exe", DisplayName: "PowerShell"},
-		"cmd":        {Type: "cmd", Executable: "cmd.exe", DisplayName: "CMD"},
-		"gitbash":    {Type: "gitbash", Executable: `C:\Program Files\Git\bin\bash.exe`, DisplayName: "Git Bash"},
-		"wsl":        {Type: "wsl", Executable: "wsl.exe", DisplayName: "WSL"},
+	var wantOrder []string
+	switch runtime.GOOS {
+	case "windows":
+		wantOrder = []string{"powershell", "cmd", "gitbash", "wsl"}
+	case "linux":
+		wantOrder = []string{"bash", "zsh", "fish", "sh"}
+	default:
+		t.Skipf("平台 %s 无既定 Shell 列表断言", runtime.GOOS)
 	}
-	for _, c := range configs {
-		exp, ok := expected[c.Type]
-		if !ok {
-			t.Errorf("未预期的 Shell 类型: %s", c.Type)
-			continue
-		}
-		if c.Executable != exp.Executable {
-			t.Errorf("%s: 期望 Executable=%s, 实际=%s", c.Type, exp.Executable, c.Executable)
-		}
-		if c.DisplayName != exp.DisplayName {
-			t.Errorf("%s: 期望 DisplayName=%s, 实际=%s", c.Type, exp.DisplayName, c.DisplayName)
+	if len(configs) != len(wantOrder) {
+		t.Fatalf("期望 %d 项配置, 实际=%d", len(wantOrder), len(configs))
+	}
+	for i, want := range wantOrder {
+		if configs[i].Type != want {
+			t.Errorf("第 %d 项应为 %s, 实际=%s", i+1, want, configs[i].Type)
 		}
 	}
 }
 
-func TestGetShellConfigs_GitBashHasArgs(t *testing.T) {
+// TestGetShellConfigs_EntriesUnique 跨平台通用不变式：Type 唯一且 Executable 非空。
+func TestGetShellConfigs_EntriesUnique(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, c := range GetShellConfigs() {
+		if c.Type == "" {
+			t.Error("Shell 类型不应为空")
+		}
+		if seen[c.Type] {
+			t.Errorf("Shell 类型重复: %s", c.Type)
+		}
+		seen[c.Type] = true
+		if c.Executable == "" {
+			t.Errorf("%s: Executable 不应为空", c.Type)
+		}
+	}
+}
+
+// TestResolveShellConfig_KnownType 解析当前平台列表中真实存在的类型：
+// 返回同类型配置，customPath 为空时用列表默认路径。
+func TestResolveShellConfig_KnownType(t *testing.T) {
 	configs := GetShellConfigs()
-	for _, c := range configs {
-		if c.Type == "gitbash" {
-			if len(c.Args) == 0 {
-				t.Error("Git Bash 配置应包含 Args")
-			}
-			return
-		}
-	}
-	t.Error("未找到 gitbash 配置")
-}
+	first := configs[0]
 
-func TestResolveShellConfig_PowerShell(t *testing.T) {
-	config := ResolveShellConfig("powershell", "")
-	if config.Type != "powershell" {
-		t.Errorf("期望 powershell, 实际=%s", config.Type)
+	config := ResolveShellConfig(first.Type, "")
+	if config.Type != first.Type {
+		t.Errorf("期望 Type=%s, 实际=%s", first.Type, config.Type)
 	}
-	if config.Executable != "powershell.exe" {
-		t.Errorf("期望 powershell.exe, 实际=%s", config.Executable)
+	if config.Executable != first.Executable {
+		t.Errorf("空自定义路径应用列表默认路径, 期望=%s, 实际=%s", first.Executable, config.Executable)
 	}
 }
 
-func TestResolveShellConfig_CMD(t *testing.T) {
-	config := ResolveShellConfig("cmd", "")
-	if config.Type != "cmd" {
-		t.Errorf("期望 cmd, 实际=%s", config.Type)
-	}
-}
-
-func TestResolveShellConfig_GitBash(t *testing.T) {
-	config := ResolveShellConfig("gitbash", "")
-	if config.Type != "gitbash" {
-		t.Errorf("期望 gitbash, 实际=%s", config.Type)
-	}
-}
-
-func TestResolveShellConfig_WSL(t *testing.T) {
-	config := ResolveShellConfig("wsl", "")
-	if config.Type != "wsl" {
-		t.Errorf("期望 wsl, 实际=%s", config.Type)
-	}
-}
-
+// TestResolveShellConfig_CustomPathOverride 解析当前平台列表中的类型并覆盖自定义路径。
 func TestResolveShellConfig_CustomPathOverride(t *testing.T) {
-	config := ResolveShellConfig("gitbash", "D:\\custom\\bash.exe")
-	if config.Executable != "D:\\custom\\bash.exe" {
-		t.Errorf("自定义路径应覆盖默认路径, 实际=%s", config.Executable)
+	first := GetShellConfigs()[0]
+	const custom = "/custom/path/override"
+	config := ResolveShellConfig(first.Type, custom)
+	if config.Executable != custom {
+		t.Errorf("自定义路径应覆盖默认路径, 期望=%s, 实际=%s", custom, config.Executable)
 	}
 }
 
-func TestResolveShellConfig_EmptyCustomPath(t *testing.T) {
-	config := ResolveShellConfig("gitbash", "")
-	if config.Executable != `C:\Program Files\Git\bin\bash.exe` {
-		t.Errorf("空自定义路径应使用默认路径, 实际=%s", config.Executable)
+// TestResolveShellConfig_UnknownTypeFallsBackToDefault 未知类型回退到平台默认 Shell。
+func TestResolveShellConfig_UnknownTypeFallsBackToDefault(t *testing.T) {
+	config := ResolveShellConfig("no_such_shell_type", "")
+	wantType := "bash"
+	if runtime.GOOS == "windows" {
+		wantType = "powershell"
 	}
-}
-
-func TestResolveShellConfig_UnknownType(t *testing.T) {
-	config := ResolveShellConfig("unknown_shell", "")
-	if config.Type != "powershell" {
-		t.Errorf("未知类型应回退到 powershell, 实际=%s", config.Type)
+	if config.Type != wantType {
+		t.Errorf("未知类型应回退到平台默认 %s, 实际=%s", wantType, config.Type)
 	}
 }

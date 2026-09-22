@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -144,13 +145,38 @@ func (s *TerminalService) resolveShellConfig(shellType, customPath string) *mode
 	return model.ResolveShellConfig(shellType, customPath)
 }
 
+// isUnixShellType 判断 Shell 类型是否为 POSIX shell（bash/zsh/fish/sh，
+// 与 model.GetShellConfigs 非 Windows 分支对齐）。cd 命令须按 POSIX 单引号语法输出。
+// 非 Windows 平台上的未知类型兜底按 POSIX 处理，避免向 Unix shell 输出 Windows 语法（cd /d）。
+func isUnixShellType(shellType string) bool {
+	switch shellType {
+	case "bash", "zsh", "fish", "sh":
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	switch shellType {
+	case "powershell", "cmd", "gitbash", "wsl":
+		return false
+	}
+	return true
+}
+
 // buildCdCommand 根据 Shell 类型构建 cd 命令
+// POSIX shell（bash/zsh/fish/sh）: cd -- '<path>'（单引号包裹，路径内单引号转义）
 // CMD: cd /d "path"（/d 标志切换驱动器+目录）
 // PowerShell: cd "path"（自动处理驱动器切换）
 // Git Bash: cd "path"（反斜杠转正斜杠）
 // WSL: cd "/mnt/x/path"（Windows 路径转 WSL 挂载路径）
 func (s *TerminalService) buildCdCommand(dir string, shellType string) string {
 	normalizedDir := filepath.Clean(dir)
+
+	if isUnixShellType(shellType) {
+		// ToSlash 归一为 POSIX 分隔符：Linux 上无操作；
+		// Windows 上误配 bash 类型时 Clean 产生的反斜杠转回正斜杠（Git Bash 兼容）
+		return buildPosixCdCommand(filepath.ToSlash(normalizedDir))
+	}
 
 	switch shellType {
 	case "cmd":
@@ -179,6 +205,15 @@ func toWslPath(path string) string {
 		return fmt.Sprintf("/mnt/%s/%s", drive, rest)
 	}
 	return strings.ReplaceAll(path, `\`, `/`)
+}
+
+// buildPosixCdCommand 构建 POSIX shell 的 cd 命令：cd -- '<path>'。
+// `--` 防止以 - 开头的路径被解析为选项；单引号包裹路径，路径内单引号按 POSIX
+// 规则转义为 '\''（结束引号、转义引号、重开引号）。
+// 末尾保留 \r（回车），与 Windows 分支语义一致：PTY 中回车触发命令执行。
+func buildPosixCdCommand(dir string) string {
+	escaped := strings.ReplaceAll(dir, "'", `'\''`)
+	return "cd -- '" + escaped + "'\r"
 }
 
 // startOutputPump 输出泵，持续读取 PTY 输出并经事件出口推送给前端

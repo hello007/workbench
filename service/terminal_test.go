@@ -1,34 +1,24 @@
 package service
 
 import (
-	"workbench/model"
+	"runtime"
+	"strings"
 	"testing"
+
+	"workbench/model"
 )
 
-func TestResolveShellConfig_Default(t *testing.T) {
+// TestResolveShellConfig_KnownType 解析当前平台默认 Shell（列表首项），
+// Windows 断言见 terminal_windows_test.go（powershell/gitbash 专属用例）。
+func TestResolveShellConfig_KnownType(t *testing.T) {
 	svc := NewTerminalService(nil)
-	config := svc.resolveShellConfig("powershell", "")
-	if config.Type != "powershell" {
-		t.Errorf("期望 shellType=powershell, 实际=%s", config.Type)
+	first := model.GetShellConfigs()[0]
+	config := svc.resolveShellConfig(first.Type, "")
+	if config.Type != first.Type {
+		t.Errorf("期望 shellType=%s, 实际=%s", first.Type, config.Type)
 	}
-	if config.Executable != "powershell.exe" {
-		t.Errorf("期望 executable=powershell.exe, 实际=%s", config.Executable)
-	}
-}
-
-func TestResolveShellConfig_CustomPath(t *testing.T) {
-	svc := NewTerminalService(nil)
-	config := svc.resolveShellConfig("gitbash", "D:\\custom\\bash.exe")
-	if config.Executable != "D:\\custom\\bash.exe" {
-		t.Errorf("期望自定义路径, 实际=%s", config.Executable)
-	}
-}
-
-func TestResolveShellConfig_UnknownType(t *testing.T) {
-	svc := NewTerminalService(nil)
-	config := svc.resolveShellConfig("unknown", "")
-	if config.Type != "powershell" {
-		t.Errorf("未知类型应回退到 powershell, 实际=%s", config.Type)
+	if config.Executable != first.Executable {
+		t.Errorf("期望 executable=%s, 实际=%s", first.Executable, config.Executable)
 	}
 }
 
@@ -117,20 +107,48 @@ func TestBuildCdCommand_Wsl_WithSpaces(t *testing.T) {
 
 func TestBuildCdCommand_DefaultFallback(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`C:\Users`, "unknown_shell")
-	expected := `cd "C:\Users"` + "\r"
+	if runtime.GOOS == "windows" {
+		// Windows 上未知 Shell 回退 PowerShell 语法
+		cmd := svc.buildCdCommand(`C:\Users`, "unknown_shell")
+		expected := `cd "C:\Users"` + "\r"
+		if cmd != expected {
+			t.Errorf("未知 Shell 应回退到 PowerShell 语法, 期望=%q, 实际=%q", expected, cmd)
+		}
+		return
+	}
+	// 非 Windows 平台未知 Shell 兜底按 POSIX 语法输出，避免向 Unix shell 发出 Windows 语法
+	cmd := svc.buildCdCommand("/tmp/work", "unknown_shell")
+	expected := "cd -- '/tmp/work'" + "\r"
 	if cmd != expected {
-		t.Errorf("未知 Shell 应回退到 PowerShell 语法, 期望=%q, 实际=%q", expected, cmd)
+		t.Errorf("非 Windows 平台未知 Shell 应回退到 POSIX 语法, 期望=%q, 实际=%q", expected, cmd)
 	}
 }
 
-func TestBuildCdCommand_PathNormalization(t *testing.T) {
+// TestBuildCdCommand_PosixBash POSIX shell（bash）输出 cd -- '<path>' 语法（跨平台纯函数断言）。
+func TestBuildCdCommand_PosixBash(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("C:/Users/test", "cmd")
-	// filepath.Clean 在 Windows 上会将 / 转为 \
-	expected := `cd /d "C:\Users\test"` + "\r"
+	cmd := svc.buildCdCommand("/tmp/work dir", "bash")
+	expected := "cd -- '/tmp/work dir'" + "\r"
 	if cmd != expected {
-		t.Errorf("路径应被规范化, 期望=%q, 实际=%q", expected, cmd)
+		t.Errorf("POSIX(bash): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+// TestBuildCdCommand_PosixQuoteEscape 路径内单引号按 POSIX 规则转义为 '\''。
+func TestBuildCdCommand_PosixQuoteEscape(t *testing.T) {
+	svc := NewTerminalService(nil)
+	cmd := svc.buildCdCommand(`/tmp/it's`, "zsh")
+	expected := "cd -- '/tmp/it'\\''s'" + "\r"
+	if cmd != expected {
+		t.Errorf("POSIX(单引号转义): 期望=%q, 实际=%q", expected, cmd)
+	}
+}
+
+// TestBuildPosixCdCommand_TrailingCR POSIX 与 Windows 分支一致保留 \r 结尾（PTY 回车执行语义）。
+func TestBuildPosixCdCommand_TrailingCR(t *testing.T) {
+	cmd := buildPosixCdCommand("/tmp/work")
+	if !strings.HasSuffix(cmd, "\r") {
+		t.Errorf("POSIX cd 命令应以 \\r 结尾, 实际=%q", cmd)
 	}
 }
 
@@ -243,17 +261,17 @@ func TestTerminalService_CreateTerminal_InvalidShellFallback(t *testing.T) {
 
 func TestResolveShellConfig_AllTypes(t *testing.T) {
 	svc := NewTerminalService(nil)
-	types := []string{"powershell", "cmd", "gitbash", "wsl"}
-	for _, shellType := range types {
-		config := svc.resolveShellConfig(shellType, "")
-		if config.Type != shellType {
-			t.Errorf("类型 %s: 期望 Type=%s, 实际=%s", shellType, shellType, config.Type)
+	// 遍历当前平台 Shell 列表：每个类型都应解析回自身且字段完整
+	for _, shell := range model.GetShellConfigs() {
+		config := svc.resolveShellConfig(shell.Type, "")
+		if config.Type != shell.Type {
+			t.Errorf("类型 %s: 期望 Type=%s, 实际=%s", shell.Type, shell.Type, config.Type)
 		}
 		if config.Executable == "" {
-			t.Errorf("类型 %s: Executable 不应为空", shellType)
+			t.Errorf("类型 %s: Executable 不应为空", shell.Type)
 		}
 		if config.DisplayName == "" {
-			t.Errorf("类型 %s: DisplayName 不应为空", shellType)
+			t.Errorf("类型 %s: DisplayName 不应为空", shell.Type)
 		}
 	}
 }

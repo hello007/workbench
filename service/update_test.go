@@ -148,20 +148,6 @@ func TestUpdateService_SetContext(t *testing.T) {
 	svc.eventSink().Emit("update:download-progress", model.DownloadProgress{})
 }
 
-// TestHideWindow 返回隐藏窗口的 SysProcAttr。
-func TestHideWindow(t *testing.T) {
-	attr := hideWindow()
-	if attr == nil {
-		t.Fatal("hideWindow 应返回非 nil")
-	}
-	if !attr.HideWindow {
-		t.Error("HideWindow 应为 true")
-	}
-	if attr.CreationFlags != 0x08000000 {
-		t.Errorf("CreationFlags 期望 0x08000000, got %#x", attr.CreationFlags)
-	}
-}
-
 // mockTransport 拦截 HTTP 请求返回固定响应，用于 CheckForUpdate 单测（绕过真实 GitHub API）。
 type mockTransport struct {
 	body       string

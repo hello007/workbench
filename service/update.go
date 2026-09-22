@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"workbench/model"
@@ -368,14 +367,6 @@ func (s *UpdateService) writePendingUpdate() error {
 	}
 	content, _ := json.Marshal(data)
 	return os.WriteFile(pendingFile, content, 0644)
-}
-
-// hideWindow 返回 SysProcAttr 用于隐藏批处理脚本窗口
-func hideWindow() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
 }
 
 // CompareVersions 比较两个语义化版本号

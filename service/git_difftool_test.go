@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -271,8 +272,12 @@ func TestOpenInExternalDiff_LaunchSuccess(t *testing.T) {
 	repo, _, _ := newDiffTestRepo(t)
 	svc := NewGitService()
 
-	// 用 cmd /c echo 作为假 diff 工具：立即退出、无副作用，验证启动链路与参数渲染
-	err := svc.OpenInExternalDiff(repo, "cmd", "/c echo {left} vs {right}",
+	// 用平台回显命令作为假 diff 工具：立即退出、无副作用，验证启动链路与参数渲染
+	exePath, argsTemplate := "cmd", "/c echo {left} vs {right}"
+	if runtime.GOOS != "windows" {
+		exePath, argsTemplate = "/bin/echo", "{left} vs {right}"
+	}
+	err := svc.OpenInExternalDiff(repo, exePath, argsTemplate,
 		model.ExternalDiffRequest{Mode: "workspace", File: "main.go"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)

@@ -87,6 +87,15 @@ func (s *FileOperationService) PreviewFile(filePath string, maxSize int64) (*mod
 		return preview, err
 	}
 
+	// 目录前置拒绝：跨平台统一显式拒绝。原实现依赖「读目录失败」的系统错误兜底，
+	// 文案平台间不一致（Linux: is a directory / Windows: 权限拒绝），且目录条目极多
+	// 导致 stat size 超过 maxSize 时会误标 TooLarge 静默返回，用户看不到错误。
+	if info.IsDir() {
+		err := errors.New("不能预览目录")
+		preview.Error = err.Error()
+		return preview, err
+	}
+
 	preview.Size = info.Size()
 	preview.Kind = detectPreviewKind(filePath)
 
@@ -231,17 +240,14 @@ func (s *FileOperationService) SaveFile(filePath string, content string, encodin
 	return nil
 }
 
-// OpenInExplorer 在资源管理器中打开
+// OpenInExplorer 在系统文件管理器中打开
+// （Windows: 资源管理器，文件场景定位选中；Linux: xdg-open，文件场景降级打开父目录）
 func (s *FileOperationService) OpenInExplorer(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-
-	if info.IsDir() {
-		return exec.Command("explorer", path).Start()
-	}
-	return exec.Command("explorer", "/select,"+path).Start()
+	return openInFileManager(path, info.IsDir())
 }
 
 // OpenInVSCode 用 VSCode 打开文件或文件夹
@@ -260,6 +266,7 @@ func (s *FileOperationService) OpenInWarp(path string) error {
 }
 
 // OpenWithDefaultApp 用系统默认程序打开文件
+// （Windows: cmd /c start；Linux: xdg-open）
 func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -268,9 +275,7 @@ func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("不支持打开文件夹")
 	}
-	cmd := exec.Command("cmd", "/c", "start", "", path)
-	util.HideCommandWindow(cmd)
-	return cmd.Start()
+	return openWithSystemHandler(path)
 }
 
 // resolveObsidianVault 解析 Obsidian vault 目录：文件夹→自身，文件→父目录。
@@ -294,7 +299,8 @@ func encodeObsidianPath(p string) string {
 }
 
 // launchObsidianURI 用指定 obsidian:// URI 启动 Obsidian。
-// useExe=true 用配置的 exe 启动（优先）；否则走 cmd /c start "" uri 协议方案（尊重默认协议处理器）。
+// useExe=true 用配置的 exe 启动（优先）；否则走系统默认协议处理器
+// （Windows: cmd /c start "" uri；Linux: xdg-open uri）。
 // 复用 HideCommandWindow 隐藏子控制台窗口，与 OpenIn* 系列同构。
 func launchObsidianURI(uri, obsidianPath string, useExe bool) error {
 	if useExe {
@@ -302,9 +308,7 @@ func launchObsidianURI(uri, obsidianPath string, useExe bool) error {
 		util.HideCommandWindow(cmd)
 		return cmd.Start()
 	}
-	cmd := exec.Command("cmd", "/c", "start", "", uri)
-	util.HideCommandWindow(cmd)
-	return cmd.Start()
+	return openWithSystemHandler(uri)
 }
 
 // OpenInObsidian 用 Obsidian 打开指定路径对应的 vault。

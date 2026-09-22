@@ -3,6 +3,7 @@ package model
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 )
 
@@ -39,17 +40,35 @@ type ShellConfig struct {
 	DisplayName string   `json:"displayName"`
 }
 
-// GetShellConfigs 获取所有可用的 Shell 配置
+// GetShellConfigs 获取当前平台可用的 Shell 配置
 func GetShellConfigs() []ShellConfig {
+	if runtime.GOOS == "windows" {
+		return []ShellConfig{
+			{Type: "powershell", Executable: "powershell.exe", DisplayName: "PowerShell"},
+			{Type: "cmd", Executable: "cmd.exe", DisplayName: "CMD"},
+			{Type: "gitbash", Executable: `C:\Program Files\Git\bin\bash.exe`, Args: []string{"-i"}, DisplayName: "Git Bash"},
+			{Type: "wsl", Executable: "wsl.exe", DisplayName: "WSL"},
+		}
+	}
+	// Linux/Unix: 常见登录 shell，默认 bash；路径取各发行版通用安装位置
 	return []ShellConfig{
-		{Type: "powershell", Executable: "powershell.exe", DisplayName: "PowerShell"},
-		{Type: "cmd", Executable: "cmd.exe", DisplayName: "CMD"},
-		{Type: "gitbash", Executable: `C:\Program Files\Git\bin\bash.exe`, Args: []string{"-i"}, DisplayName: "Git Bash"},
-		{Type: "wsl", Executable: "wsl.exe", DisplayName: "WSL"},
+		{Type: "bash", Executable: "/bin/bash", DisplayName: "Bash"},
+		{Type: "zsh", Executable: "/bin/zsh", DisplayName: "Zsh"},
+		{Type: "fish", Executable: "/usr/bin/fish", DisplayName: "Fish"},
+		{Type: "sh", Executable: "/bin/sh", DisplayName: "Sh"},
 	}
 }
 
-// ResolveShellConfig 根据类型解析 Shell 配置，支持自定义路径覆盖
+// defaultShellConfig 返回当前平台的默认 Shell 配置（Windows: PowerShell；Linux: Bash）
+func defaultShellConfig() *ShellConfig {
+	if runtime.GOOS == "windows" {
+		return &ShellConfig{Type: "powershell", Executable: "powershell.exe", DisplayName: "PowerShell"}
+	}
+	return &ShellConfig{Type: "bash", Executable: "/bin/bash", DisplayName: "Bash"}
+}
+
+// ResolveShellConfig 根据类型解析 Shell 配置，支持自定义路径覆盖；
+// 类型不在当前平台列表中时回退到平台默认 Shell
 func ResolveShellConfig(shellType, customPath string) *ShellConfig {
 	configs := GetShellConfigs()
 	for _, c := range configs {
@@ -61,6 +80,5 @@ func ResolveShellConfig(shellType, customPath string) *ShellConfig {
 			return &config
 		}
 	}
-	// 默认返回 PowerShell
-	return &ShellConfig{Type: "powershell", Executable: "powershell.exe", DisplayName: "PowerShell"}
+	return defaultShellConfig()
 }

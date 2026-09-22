@@ -1141,8 +1141,31 @@ func TestChatService_SettingsConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestChatDirectoryKey B13：去重键小写 + 正斜杠归一（跨平台纯函数断言）。
+// TestChatDirectoryKey B13：去重键小写 + 分隔符归一（跨平台纯函数断言）。
+// 仅覆盖 POSIX 路径语义（Linux 上 \ 为合法文件名字符，不参与归一）；
+// Windows 路径语义用例见 TestChatDirectoryKey_WindowsPaths。
 func TestChatDirectoryKey(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b string
+		same bool
+	}{
+		{"POSIX 大小写归一", "/tmp/work/x", "/TMP/WORK/X", true},
+		{"不同路径", "/tmp/work/a", "/tmp/work/b", false},
+	}
+	for _, tc := range cases {
+		if got := chatDirectoryKey(tc.a) == chatDirectoryKey(tc.b); got != tc.same {
+			t.Errorf("%s: chatDirectoryKey(%q)==chatDirectoryKey(%q) = %v, want %v", tc.name, tc.a, tc.b, got, tc.same)
+		}
+	}
+}
+
+// TestChatDirectoryKey_WindowsPaths Windows 路径语义：盘符大小写归一、
+// 反斜杠与正斜杠等价（依赖 Windows 分隔符语义，非 Windows 平台跳过）。
+func TestChatDirectoryKey_WindowsPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows 路径分隔符语义（\\ 不参与 Linux 归一），非 Windows 平台跳过")
+	}
 	cases := []struct {
 		name string
 		a, b string
@@ -1150,7 +1173,6 @@ func TestChatDirectoryKey(t *testing.T) {
 	}{
 		{"同路径不同盘符大小写", `C:\Proj\A`, "c:/proj/a", true},
 		{"不同路径", `C:\Proj\A`, `C:\Proj\B`, false},
-		{"POSIX 大小写归一", "/tmp/work/x", "/TMP/WORK/X", true},
 		{"反斜杠与正斜杠等价", `C:\a\b`, "C:/a/b", true},
 	}
 	for _, tc := range cases {
