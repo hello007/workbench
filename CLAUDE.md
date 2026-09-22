@@ -71,6 +71,7 @@ workbench/
 |service 层发前端事件必须走 EventSink（`emitEvent(s.eventSink(), ...)`），禁直调 `runtime.EventsEmit`（非 Wails ctx 触发 log.Fatalf 杀整个进程，serve 浏览器通道也收不到）；serve 模式禁调窗口对话框类方法（`wailsRuntimeUnavailable` 守卫返回错误）；/api/rpc、WS 帧、token 三通道与热轮换、`E_RPC_*` 错误码三处同步规则见详细文档|[browser-channel.md](docs/spec/browser-channel.md)|
 |终端多 tab：xterm 实例禁重挂载/搬 DOM（v-show 保 DOM + 激活 refit，隐藏容器 fit 静默失败）；tab 列表 watch 须 getter 投影（数组 splice 不触发多源引用比较，仅「关闭非活动 tab」路径能暴露）；快照 v2 归一化消费旧 `workDir` 后必须置空防复写；全屏层 z-index 1500（<右键菜单 2000 ≤ EP 弹窗 2001+）且守 `fullscreen ⇒ visible` 不变式，ESC 处理须过滤 `defaultPrevented` 与 `.el-overlay/.xterm-helper-textarea`，全屏动画仅 opacity（尺寸 transition 引发 fit 风暴）；外观字号/字体热更后须 refit+ResizeTerminal、scrollback 仅新建生效、`el-input-number` 必带 `:value-on-clear` 防清空写 null 脏值|[terminal-multi-session.md](docs/spec/terminal-multi-session.md)|
 |新增带事件的 service 须同步 `web_serve.go` `applySink` 补 `SetEventSink` 行（现五服务：terminal/update/aiFunc/git/chat），漏加则浏览器通道静默收不到该服务全部事件（桌面端正常、极易漏测）；AI 对话 ChatService 契约：chat-task:* 事件流与 ai-task:* 隔离、data/ai_chat/ 存储布局（索引与消息分离+损坏降级）、--resume 链路 session_id 回写、同会话串行保护（E_CHAT_IN_PROGRESS）、processFactory 注入点（多 CLI 扩展位）、assistant 回复在 done 事件前落盘|[ai-chat-service.md](docs/spec/ai-chat-service.md)|
+|Linux 支持：Wails 桌面构建须 `-tags webkit2_41`（Ubuntu 24.04 已移除 webkit2gtk-4.0 包）；无标签时桌面前端 CGO 不进依赖图（internal/app 桩实现），后端子包 build/test 无需 GTK 依赖；平台抽象选型——编译期字段独有走 `_windows/_other` 双文件、短行为分叉走运行时 GOOS 分支、纯逻辑抽无 tag 文件双侧同测；自更新 Linux 资产名 `workbench-linux-amd64.tar.gz` 与 release.yml 打包名严格一致；`build/` 在 gitignore，需分发文件须白名单放行（`!build/README-linux.md` 先例，漏放发版必挂）；测试平台断言拆 `_windows_test.go`/`_linux_test.go`，禁两平台共享一份平台耦合断言；前端 shell/目录兜底禁 'powershell'、'C:\\' 字面量，统一走 settings store `FALLBACK_SHELL` 与 `fallbackTerminalDir()`|[linux-platform.md](docs/spec/linux-platform.md)|
 
 ## 文档索引
 
@@ -109,5 +110,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-09-22
-**文档版本：** v2.9
+**最后更新：** 2026-09-23
+**文档版本：** v2.10
