@@ -195,7 +195,7 @@ func (m *webServeManager) listenAddr() string {
 	return m.ln.Addr().String()
 }
 
-// applySink 将四个持事件出口的服务（terminal/update/ai_function/git）统一切换：
+// applySink 将五个持事件出口的服务（terminal/update/ai_function/git/chat）统一切换：
 // sink 非 nil → 复合出口（Wails + hub 广播）；nil → 恢复纯 Wails 出口。
 // SetEventSink 并发安全（sinkHolder 读写锁），输出泵等 goroutine 读侧已受保护。
 func (m *webServeManager) applySink(hub *server.WSHub) {
@@ -212,6 +212,7 @@ func (m *webServeManager) applySink(hub *server.WSHub) {
 	m.app.updateSvc.SetEventSink(sink)
 	m.app.aiFuncSvc.SetEventSink(sink)
 	m.app.gitSvc.SetEventSink(sink)
+	m.app.chatSvc.SetEventSink(sink)
 }
 
 // multicastSink 复合事件出口：同一条事件依次投递给多个 sink。

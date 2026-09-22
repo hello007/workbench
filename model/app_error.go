@@ -60,6 +60,11 @@ const (
 	ErrCodeRepoConfigInvalidJSON        = "E_REPO_CONFIG_INVALID_JSON"        // 导入文件不是合法 JSON 或顶层结构缺失（error）
 	ErrCodeRepoConfigUnsupportedVersion = "E_REPO_CONFIG_UNSUPPORTED_VERSION" // manifestVersion 缺失或高于当前支持，须用兼容版本应用重新导出（error）
 
+	// AI 对话域（AI 对话工作台多轮会话）
+	ErrCodeChatSessionNotFound = "E_CHAT_SESSION_NOT_FOUND" // 会话不存在或已删除（error）
+	ErrCodeChatInProgress      = "E_CHAT_IN_PROGRESS"       // 该会话已有对话进行中，本轮拒绝（warning）
+	ErrCodeChatEmptyPrompt     = "E_CHAT_EMPTY_PROMPT"      // 对话内容为空（warning）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

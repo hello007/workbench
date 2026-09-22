@@ -42,6 +42,10 @@ type AppServices struct {
 	// 全局状态看板服务（pin 仓库列表 + 跨仓状态快照，data/dashboard_pinned.json）。
 	// 复用 RepoMetaService 持久化范式；状态计算只读不走仓级锁，批量并发复用 HasRemotesBatch 范式。
 	dashboardSvc *service.DashboardService
+	// AI 对话服务（AI 对话工作台「AI 对话」页：多会话持续式对话，data/ai_chat/）。
+	// 事件推送复用 sinkHolder 范式（chat-task:* 独立前缀），子进程执行经
+	// processFactory 抽象（测试注入 fake 不真调 claude CLI）。
+	chatSvc *service.ChatService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -116,6 +120,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 全局状态看板服务（pin 仓库列表 + 跨仓状态快照，独立 data/dashboard_pinned.json）
 	s.dashboardSvc = service.NewDashboardService(filepath.Join(dataDir, "dashboard_pinned.json"))
+
+	// AI 对话服务（AI 对话工作台「AI 对话」页：会话索引 + 每会话消息文件，
+	// 独立 data/ai_chat/ 目录不与其他 service 数据交叉）
+	s.chatSvc = service.NewChatService(ctx, filepath.Join(dataDir, "ai_chat"))
 
 	return s
 }

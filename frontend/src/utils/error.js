@@ -11,6 +11,10 @@ export const ErrorCode = Object.freeze({
   DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED', // 外部 diff 工具启动失败（error）
   RepoConfigInvalidJson: 'E_REPO_CONFIG_INVALID_JSON', // 仓库列表配置导入：文件不是合法 JSON 或顶层结构缺失（error）
   RepoConfigUnsupportedVersion: 'E_REPO_CONFIG_UNSUPPORTED_VERSION', // 仓库列表配置导入：manifestVersion 缺失或高于当前支持（error）
+  // AI 对话域错误码（AI 对话工作台多轮会话），取值与 model/app_error.go Chat 域段一致。
+  ChatSessionNotFound: 'E_CHAT_SESSION_NOT_FOUND', // 会话不存在或已删除（error）
+  ChatInProgress: 'E_CHAT_IN_PROGRESS', // 该会话已有对话进行中，本轮拒绝（warning）
+  ChatEmptyPrompt: 'E_CHAT_EMPTY_PROMPT', // 对话内容为空（warning）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。
@@ -23,7 +27,13 @@ export const ErrorCode = Object.freeze({
 })
 
 // 预期拒绝类错误码（用户可重试），弹 warning 而非 error。
-const WARNING_CODES = new Set([ErrorCode.GitInProgress, ErrorCode.GitNoStagedChanges, ErrorCode.DiffToolNotConfigured])
+const WARNING_CODES = new Set([
+  ErrorCode.GitInProgress,
+  ErrorCode.GitNoStagedChanges,
+  ErrorCode.DiffToolNotConfigured,
+  ErrorCode.ChatInProgress,
+  ErrorCode.ChatEmptyPrompt
+])
 
 /**
  * 从错误对象提取 code 与 message。

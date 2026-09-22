@@ -78,6 +78,9 @@ func (a *App) shutdown(context.Context) {
 	if a.aiFuncSvc != nil {
 		a.aiFuncSvc.CloseAll()
 	}
+	if a.chatSvc != nil {
+		a.chatSvc.CloseAll()
+	}
 	slog.Info("workbench shutting down")
 }
 

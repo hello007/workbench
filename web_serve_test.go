@@ -30,7 +30,7 @@ func withTempTokenFile(t *testing.T) {
 }
 
 // newWebServeTestApp 构造浏览器访问域测试用 App：完整 AppServices 装配（applySink
-// 需 terminal/update/aiFunc/git 四服务非 nil）+ 令牌文件隔离 + 管理器就绪。
+// 需 terminal/update/aiFunc/git/chat 五服务非 nil）+ 令牌文件隔离 + 管理器就绪。
 // 不用 t.TempDir：NewAppServices 内 util.InitLogger 的 lumberjack 句柄持有
 // app.log，Windows 上 RemoveAll 清理失败（对齐 serve_rpc_smoke_test.go）。
 func newWebServeTestApp(t *testing.T) *App {
