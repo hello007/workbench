@@ -28,6 +28,8 @@ watch(() => settingsStore.resolvedTheme, (theme) => {
 onMounted(() => {
   // 启动时从 settings.json 加载主题配置（system 模式实时跟随系统偏好）
   settingsStore.loadTheme()
+  // 启动时解析默认 Shell（用户设置 → 平台默认 → powershell 兜底），终端创建链路消费
+  settingsStore.loadDefaultShell()
 })
 </script>
 

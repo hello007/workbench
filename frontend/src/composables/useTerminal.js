@@ -11,7 +11,7 @@ import {
   CloseTerminal
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import { useSettingsStore } from '../store'
+import { useSettingsStore, FALLBACK_SHELL } from '../store'
 
 /**
  * 终端浅色主题：白底深字，光标主色
@@ -107,7 +107,8 @@ export function useTerminal() {
   const sessionID = ref('')
   const isActive = ref(false)
   const currentDir = ref('')
-  const currentShellType = ref('powershell')
+  // 当前会话 shell 类型：初始空串（尚未创建会话），initTerminal 时按 tab 指定值解析
+  const currentShellType = ref('')
   const isExited = ref(false)
 
   // 本实例的事件注销闭包（EventsOn 返回值），destroyTerminal 时精准摘除
@@ -144,7 +145,10 @@ export function useTerminal() {
     term.value = terminal
     fitAddon.value = fit
     currentDir.value = dir
-    currentShellType.value = shellType || 'powershell'
+    // 空值兜底链：设置页默认 Shell（用户设置或平台默认，App 启动时已预加载）
+    // → FALLBACK_SHELL（后端链路均不可用时的最终回退，Windows 感知不变）。
+    // 正常路径 TerminalPanel 建 tab 时已传入非空 shellType，此处仅防御直接调用
+    currentShellType.value = shellType || settingsStore.defaultShell || FALLBACK_SHELL
 
     const cols = terminal.cols
     const rows = terminal.rows

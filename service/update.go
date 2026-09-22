@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,6 +280,57 @@ func buildApplyBat(newExe, currentExe, pendingFile, updateDir string) string {
 	return b.String()
 }
 
+// buildUpdateSh 生成 Linux 更新 shell 脚本内容（buildUpdateBat 的 POSIX 等价实现）：
+// kill -0 轮询等待旧进程退出（最多 10 秒，超时 kill -9 强杀）、mv 替换二进制、
+// 清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。
+// 与 .bat 的差异：LF 换行（CR 会导致 shebang 解析失败）、路径双引号包裹防空格。
+// 脚本自身位于 updateDir 内，rm -rf 时已连带删除，末行自删兜底脚本被移出临时目录的场景
+// （与 .bat 的 rd /S /Q + del %~f0 行为一致）。
+func buildUpdateSh(pid int, newExe, currentExe, pendingFile, updateDir string) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("echo 正在更新 WorkBench...\n\n")
+	b.WriteString("PID=" + strconv.Itoa(pid) + "\n")
+	b.WriteString("WAIT=0\n")
+	b.WriteString("# 等待当前进程退出（最多 10 秒，超时强杀）\n")
+	b.WriteString("while kill -0 \"$PID\" 2>/dev/null; do\n")
+	b.WriteString("    if [ \"$WAIT\" -ge 10 ]; then\n")
+	b.WriteString("        kill -9 \"$PID\" 2>/dev/null\n")
+	b.WriteString("        break\n")
+	b.WriteString("    fi\n")
+	b.WriteString("    WAIT=$((WAIT + 1))\n")
+	b.WriteString("    sleep 1\n")
+	b.WriteString("done\n\n")
+	b.WriteString("# 替换二进制\n")
+	b.WriteString("mv -f \"" + newExe + "\" \"" + currentExe + "\"\n\n")
+	b.WriteString("# 清理更新标记和临时目录\n")
+	b.WriteString("rm -f \"" + pendingFile + "\"\n")
+	b.WriteString("rm -rf \"" + updateDir + "\"\n\n")
+	b.WriteString("# 启动新版本（nohup 后台运行，脱离本脚本会话）\n")
+	b.WriteString("nohup \"" + currentExe + "\" >/dev/null 2>&1 &\n\n")
+	b.WriteString("# 删除脚本自身\n")
+	b.WriteString("rm -f -- \"$0\"\n")
+	return b.String()
+}
+
+// buildApplySh 生成 Linux 启动时应用更新的 shell 脚本内容（buildApplyBat 的 POSIX 等价实现）：
+// mv 替换二进制、清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。LF 换行。
+func buildApplySh(newExe, currentExe, pendingFile, updateDir string) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("echo 正在应用更新...\n\n")
+	b.WriteString("# 替换二进制\n")
+	b.WriteString("mv -f \"" + newExe + "\" \"" + currentExe + "\"\n\n")
+	b.WriteString("# 清理更新标记和临时目录\n")
+	b.WriteString("rm -f \"" + pendingFile + "\"\n")
+	b.WriteString("rm -rf \"" + updateDir + "\"\n\n")
+	b.WriteString("# 启动新版本（nohup 后台运行，脱离本脚本会话）\n")
+	b.WriteString("nohup \"" + currentExe + "\" >/dev/null 2>&1 &\n\n")
+	b.WriteString("# 删除脚本自身\n")
+	b.WriteString("rm -f -- \"$0\"\n")
+	return b.String()
+}
+
 // ApplyUpdate 执行更新替换并重启应用
 func (s *UpdateService) ApplyUpdate() error {
 	updateDir := filepath.Join(os.TempDir(), UpdateTempDir)
@@ -296,15 +348,30 @@ func (s *UpdateService) ApplyUpdate() error {
 	}
 
 	pendingFile := filepath.Join(updateDir, PendingUpdateFile)
-	batContent := buildUpdateBat(os.Getpid(), newExe, currentExe, pendingFile, updateDir)
 
-	batPath := filepath.Join(updateDir, "update.bat")
-	if err := os.WriteFile(batPath, []byte(batContent), 0755); err != nil {
+	// 按平台生成更新脚本：Windows 生成 .bat（CRLF），Linux 生成 .sh（LF）
+	scriptName, scriptContent := "update.bat", buildUpdateBat(os.Getpid(), newExe, currentExe, pendingFile, updateDir)
+	if runtime.GOOS != "windows" {
+		scriptName, scriptContent = "update.sh", buildUpdateSh(os.Getpid(), newExe, currentExe, pendingFile, updateDir)
+	}
+	scriptPath := filepath.Join(updateDir, scriptName)
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return fmt.Errorf("创建更新脚本失败: %w", err)
 	}
+	// Linux 下落盘受 umask 影响可能丢失执行位，显式 chmod 0755 保证可执行
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(scriptPath, 0755); err != nil {
+			return fmt.Errorf("设置更新脚本执行权限失败: %w", err)
+		}
+	}
 
-	// 执行批处理脚本（独立进程，不需要等待）
-	cmd := exec.Command("cmd", "/C", batPath)
+	// 执行更新脚本（独立进程，不需要等待）：Windows 经 cmd /C 运行 .bat，Linux 经 sh 运行 .sh
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", scriptPath)
+	} else {
+		cmd = exec.Command("sh", scriptPath)
+	}
 	cmd.SysProcAttr = hideWindow()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动更新脚本失败: %w", err)
@@ -338,14 +405,29 @@ func (s *UpdateService) CheckPendingUpdate() (bool, error) {
 		return false, fmt.Errorf("获取当前程序路径失败: %w", err)
 	}
 
-	batContent := buildApplyBat(newExe, currentExe, pendingFile, updateDir)
-
-	batPath := filepath.Join(updateDir, "apply-update.bat")
-	if err := os.WriteFile(batPath, []byte(batContent), 0755); err != nil {
+	// 按平台生成应用更新脚本：Windows 生成 .bat（CRLF），Linux 生成 .sh（LF）
+	scriptName, scriptContent := "apply-update.bat", buildApplyBat(newExe, currentExe, pendingFile, updateDir)
+	if runtime.GOOS != "windows" {
+		scriptName, scriptContent = "apply-update.sh", buildApplySh(newExe, currentExe, pendingFile, updateDir)
+	}
+	scriptPath := filepath.Join(updateDir, scriptName)
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		return false, fmt.Errorf("创建更新脚本失败: %w", err)
 	}
+	// Linux 下落盘受 umask 影响可能丢失执行位，显式 chmod 0755 保证可执行
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(scriptPath, 0755); err != nil {
+			return false, fmt.Errorf("设置更新脚本执行权限失败: %w", err)
+		}
+	}
 
-	cmd := exec.Command("cmd", "/C", batPath)
+	// 执行更新脚本（独立进程）：Windows 经 cmd /C 运行 .bat，Linux 经 sh 运行 .sh
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", scriptPath)
+	} else {
+		cmd = exec.Command("sh", scriptPath)
+	}
 	cmd.SysProcAttr = hideWindow()
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("启动更新脚本失败: %w", err)

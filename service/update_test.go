@@ -121,6 +121,53 @@ func TestBuildApplyBat_ContainsKeyParts(t *testing.T) {
 	}
 }
 
+// TestBuildUpdateSh_ContainsKeyParts 生成的 shell 脚本含 kill -0 等待轮询、超时强杀、
+// 二进制替换、清理、nohup 启动、脚本自删各关键片段，且为 LF 换行（CR 会导致 shebang 解析失败）。
+func TestBuildUpdateSh_ContainsKeyParts(t *testing.T) {
+	sh := buildUpdateSh(1234, "/tmp/upd/workbench", "/opt/workbench/workbench", "/tmp/upd/pending.json", "/tmp/upd")
+	wants := []string{
+		"#!/bin/sh",
+		"PID=1234",
+		`while kill -0 "$PID" 2>/dev/null; do`,
+		`kill -9 "$PID" 2>/dev/null`,
+		"sleep 1",
+		`mv -f "/tmp/upd/workbench" "/opt/workbench/workbench"`,
+		`rm -f "/tmp/upd/pending.json"`,
+		`rm -rf "/tmp/upd"`,
+		`nohup "/opt/workbench/workbench" >/dev/null 2>&1 &`,
+		`rm -f -- "$0"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(sh, w) {
+			t.Errorf("buildUpdateSh 缺少 %q\n输出:\n%s", w, sh)
+		}
+	}
+	if strings.Contains(sh, "\r") {
+		t.Error("shell 脚本应为 LF 换行，不应包含 CR")
+	}
+}
+
+// TestBuildApplySh_ContainsKeyParts 生成的应用脚本含替换、清理、启动、自删片段，且为 LF 换行。
+func TestBuildApplySh_ContainsKeyParts(t *testing.T) {
+	sh := buildApplySh("/tmp/upd/workbench", "/opt/workbench/workbench", "/tmp/upd/pending.json", "/tmp/upd")
+	wants := []string{
+		"#!/bin/sh",
+		`mv -f "/tmp/upd/workbench" "/opt/workbench/workbench"`,
+		`rm -f "/tmp/upd/pending.json"`,
+		`rm -rf "/tmp/upd"`,
+		`nohup "/opt/workbench/workbench" >/dev/null 2>&1 &`,
+		`rm -f -- "$0"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(sh, w) {
+			t.Errorf("buildApplySh 缺少 %q\n输出:\n%s", w, sh)
+		}
+	}
+	if strings.Contains(sh, "\r") {
+		t.Error("shell 脚本应为 LF 换行，不应包含 CR")
+	}
+}
+
 // TestNewUpdateService_Construct 构造后 httpClient 已初始化。
 func TestNewUpdateService_Construct(t *testing.T) {
 	svc := NewUpdateService()

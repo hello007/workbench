@@ -131,6 +131,14 @@ describe('TerminalPanel.vue', () => {
     expect(wrapper.vm.$.setupState.defaultShell).toBe('gitbash')
   })
 
+  it('未设置 defaultShell 时取 GetShellConfigs 首项作平台默认（Linux=bash）', async () => {
+    wrapper = await createWrapper(
+      [{ type: 'bash', displayName: 'Bash' }, { type: 'zsh', displayName: 'Zsh' }],
+      {}
+    )
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
+  })
+
   it('GetSettings 失败时保持默认 powershell', async () => {
     wrapper = await createWrapper(null, 'fail')
     expect(wrapper.vm.$.setupState.defaultShell).toBe('powershell')

@@ -19,6 +19,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SaveSettings: vi.fn(),
   GetAppVersion: vi.fn(),
   CheckForUpdate: vi.fn(),
+  GetShellConfigs: vi.fn(),
   GetWebServeConfig: vi.fn(),
   SetWebServeConfig: vi.fn(),
   GetWebServeToken: vi.fn(),
@@ -176,12 +177,26 @@ const baseWebServeConfig = (over = {}) => ({
   ...over
 })
 
-async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a'.repeat(64)) {
+async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a'.repeat(64), shellConfigsOver = null) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  const { GetSettings, GetAppVersion, GetWebServeConfig, GetWebServeToken } = await import('../../../wailsjs/go/main/App')
+  const { GetSettings, GetAppVersion, GetShellConfigs, GetWebServeConfig, GetWebServeToken } = await import('../../../wailsjs/go/main/App')
   GetSettings.mockResolvedValue(baseSettings(settingsOver))
   GetAppVersion.mockResolvedValue('1.0.0')
+  // Shell 列表默认返回与原硬编码一致的 Windows 4 种（数据源已改后端拉取，兜底列表不变）；
+  // 传 'fail' 模拟后端拉取失败
+  if (shellConfigsOver === 'fail') {
+    GetShellConfigs.mockRejectedValue(new Error('shell configs fail'))
+  } else {
+    GetShellConfigs.mockResolvedValue(shellConfigsOver === null
+      ? [
+          { type: 'powershell', displayName: 'PowerShell' },
+          { type: 'cmd', displayName: 'CMD' },
+          { type: 'gitbash', displayName: 'Git Bash' },
+          { type: 'wsl', displayName: 'WSL' }
+        ]
+      : shellConfigsOver)
+  }
   GetWebServeConfig.mockResolvedValue(baseWebServeConfig(webServeOver))
   GetWebServeToken.mockResolvedValue(webToken)
   const uiStore = useUiStore()
@@ -217,6 +232,27 @@ describe('SettingsPanel.vue', () => {
     await terminalTab.trigger('click')
     expect(terminalTab.classes()).toContain('is-active')
     expect(wrapper.text()).toContain('默认 Shell')
+  })
+
+  it('Shell 下拉数据源来自后端 GetShellConfigs，未设置 defaultShell 时取首项作平台默认', async () => {
+    wrapper = await createWrapper({ defaultShell: '' }, {}, 'a'.repeat(64), [
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' }
+    ])
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    expect(wrapper.vm.$.setupState.shellConfigs.map(c => c.type)).toEqual(['bash', 'zsh'])
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
+    expect(wrapper.text()).toContain('Bash')
+    expect(wrapper.text()).toContain('Zsh')
+  })
+
+  it('GetShellConfigs 拉取失败时保留 Windows 兜底列表，defaultShell 回退 powershell', async () => {
+    wrapper = await createWrapper({ defaultShell: '' }, {}, 'a'.repeat(64), 'fail')
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    expect(wrapper.vm.$.setupState.shellConfigs.map(c => c.type)).toEqual([
+      'powershell', 'cmd', 'gitbash', 'wsl'
+    ])
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('powershell')
   })
 
   it('切换到搜索 tab', async () => {

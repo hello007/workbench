@@ -111,10 +111,7 @@
               <div class="settings-item-desc">终端面板使用的 Shell 类型</div>
             </div>
             <el-select v-model="defaultShell" class="default-shell-select input-w-md" size="small" @change="onSettingsChange">
-              <el-option label="PowerShell" value="powershell" />
-              <el-option label="CMD" value="cmd" />
-              <el-option label="Git Bash" value="gitbash" />
-              <el-option label="WSL" value="wsl" />
+              <el-option v-for="cfg in shellConfigs" :key="cfg.type" :label="cfg.displayName" :value="cfg.type" />
             </el-select>
           </div>
           <div v-if="defaultShell === 'gitbash'" class="settings-item">
@@ -350,10 +347,10 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -370,7 +367,16 @@ const tabs = [
 const activeTab = ref('general')
 const gpuEnabled = ref(true)
 const needsRestart = ref(false)
-const defaultShell = ref('powershell')
+const defaultShell = ref(FALLBACK_SHELL)
+// Shell 下拉数据源：初始为 Windows 常见 Shell 兜底列表，loadSettings 时经后端
+// GetShellConfigs 覆盖（按平台返回：Windows=powershell/cmd/gitbash/wsl、Linux=bash/zsh/fish/sh）；
+// 后端拉取失败保留兜底列表（Git Bash 路径 / WSL 发行版分支依赖列表含对应 type，Windows 专属）
+const shellConfigs = ref([
+  { type: 'powershell', displayName: 'PowerShell' },
+  { type: 'cmd', displayName: 'CMD' },
+  { type: 'gitbash', displayName: 'Git Bash' },
+  { type: 'wsl', displayName: 'WSL' }
+])
 const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
 const wslDistro = ref('')
 const obsidianPath = ref('')
@@ -780,10 +786,22 @@ onMounted(async () => {
 })
 
 async function loadSettings() {
+  // Shell 下拉数据源从后端拉取（须先于 defaultShell 解析，未设置时取列表首项作平台默认）；
+  // 拉取失败保留初始兜底列表，不阻塞后续设置加载
+  try {
+    const configs = await GetShellConfigs()
+    if (Array.isArray(configs) && configs.length > 0) {
+      shellConfigs.value = configs
+    }
+  } catch {
+    // 保留兜底列表
+  }
   try {
     const settings = await GetSettings()
     gpuEnabled.value = !settings.gpuDisabled
-    defaultShell.value = settings.defaultShell || 'powershell'
+    // 用户未设置过默认 Shell 时取平台默认（列表首项：Windows=powershell、Linux=bash），
+    // 最终兜底复用 store 的 FALLBACK_SHELL 单一常量，防各处字面量漂移
+    defaultShell.value = settings.defaultShell || shellConfigs.value[0]?.type || FALLBACK_SHELL
     gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
     wslDistro.value = settings.wslDistro || ''
     obsidianPath.value = settings.obsidianPath || ''

@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { GetSettings, SaveSettings } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetShellConfigs } from '../../wailsjs/go/main/App'
 
 /**
  * 默认快捷键配置
@@ -140,6 +140,12 @@ export const TERMINAL_FONT_OPTIONS = [
 ]
 
 /**
+ * 默认 Shell 最终兜底值：用户设置与平台 Shell 列表均不可用时回退 powershell
+ * （Windows 现状不变；Linux 正常链路下 GetShellConfigs 必返回 bash 首项，不会触达）
+ */
+export const FALLBACK_SHELL = 'powershell'
+
+/**
  * 读取系统是否偏好暗色主题。
  * SSR / 无 matchMedia 环境（jsdom 未注入时）回退 false。
  */
@@ -212,6 +218,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const terminalFontFamily = ref(TERMINAL_APPEARANCE_DEFAULTS.fontFamily)
   const terminalScrollback = ref(TERMINAL_APPEARANCE_DEFAULTS.scrollback)
 
+  // 默认 Shell 类型：settings.json defaultShell（用户设置）优先；未设置时取平台默认
+  // （GetShellConfigs 首项：Windows=powershell、Linux=bash）；后端均不可用回退 FALLBACK_SHELL。
+  // App 启动时经 loadDefaultShell 预加载，useTerminal 以此兜底空 shellType 参数，
+  // 避免 useTerminal 内散落 'powershell' 硬编码（Linux 下会误开 PowerShell）
+  const defaultShell = ref('')
+
   // 字号 clamp：非正数/非法值回退默认，界内取整后收敛到 [10, 24]
   function clampTerminalFontSize(v) {
     const n = Number(v)
@@ -262,6 +274,34 @@ export const useSettingsStore = defineStore('settings', () => {
     terminalFontSize.value = next
     saveTerminalAppearance().catch(() => {})
     return true
+  }
+
+  /**
+   * 加载默认 Shell 类型（App 启动时调用）：
+   * 1. settings.json defaultShell（用户显式设置）优先
+   * 2. 未设置时取 GetShellConfigs 首项（后端按平台返回：Windows=powershell、Linux=bash）
+   * 3. 后端均不可用（RPC 桥异常等）回退 FALLBACK_SHELL，保持 Windows 感知零变化
+   */
+  async function loadDefaultShell() {
+    try {
+      const settings = await GetSettings()
+      if (settings && settings.defaultShell) {
+        defaultShell.value = settings.defaultShell
+        return
+      }
+    } catch {
+      // 用户设置读取失败，继续取平台默认
+    }
+    try {
+      const configs = await GetShellConfigs()
+      if (Array.isArray(configs) && configs.length > 0) {
+        defaultShell.value = configs[0].type
+        return
+      }
+    } catch {
+      // 平台 Shell 列表不可用，回退最终兜底
+    }
+    defaultShell.value = FALLBACK_SHELL
   }
 
   // 实际生效主题：light/dark。system 模式按系统偏好解析，light/dark 直接取值
@@ -381,6 +421,7 @@ export const useSettingsStore = defineStore('settings', () => {
     terminalFontSize,
     terminalFontFamily,
     terminalScrollback,
+    defaultShell,
     loadShortcuts,
     saveShortcuts,
     checkConflict,
@@ -390,6 +431,7 @@ export const useSettingsStore = defineStore('settings', () => {
     saveDiffTool,
     loadTerminalAppearance,
     saveTerminalAppearance,
+    loadDefaultShell,
     stepTerminalFontSize
   }
 })

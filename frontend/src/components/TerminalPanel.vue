@@ -118,7 +118,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Folder, RefreshRight, FullScreen, ScaleToOriginal, WarningFilled } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
-import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX } from '../store'
+import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL } from '../store'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
 const uiStore = useUiStore()
@@ -132,7 +132,7 @@ const { tabs, activeId, atLimit, createTab, activateTab, closeTab, markExited, m
 
 const terminalArea = ref(null)
 const tabStrip = ref(null)
-const defaultShell = ref('powershell')
+const defaultShell = ref(FALLBACK_SHELL)
 const shellConfigs = ref([])
 const settingsReady = ref(false)
 
@@ -156,14 +156,17 @@ onMounted(async () => {
       { type: 'wsl', displayName: 'WSL' }
     ]
   }
-  // 读取用户设置的默认 Shell 类型（新建 tab 使用）
+  // 读取用户设置的默认 Shell 类型（新建 tab 使用）；未设置时取平台默认
+  // （列表首项：Windows=powershell、Linux=bash），读取失败保持当前默认
   try {
     const settings = await GetSettings()
     if (settings.defaultShell) {
       defaultShell.value = settings.defaultShell
+    } else if (shellConfigs.value.length > 0) {
+      defaultShell.value = shellConfigs.value[0].type
     }
   } catch {
-    // 读取失败则保持默认 powershell
+    // 读取失败则保持初始 FALLBACK_SHELL（powershell，Windows 现状；Linux 正常链路下不可达）
   }
   settingsReady.value = true
 })
