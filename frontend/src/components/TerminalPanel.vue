@@ -186,19 +186,69 @@ function createInstanceForTab(tab) {
   return inst
 }
 
-// 面板首次可见时创建第一个 tab（沿用原「首次可见才 init」节奏，单终端体验与改造前一致）
+// ── 崩溃恢复快照钩子（保存侧）──
+// tab 列表变化时把可恢复配置（workDir/shellType + 活动下标）同步到 uiStore 快照镜像，
+// useSessionState 从镜像构建 data/session.json 的终端快照；isExited 等运行时状态不入镜像。
+// source 用 getter 返回投影数组（新建引用）强制深度感知 push/splice——多源 ref 直接监听
+// 依赖引用比较，数组内部变异（如关闭非活动 tab 时 activeId 不变）不会触发回调
+watch(
+  () => [tabs.value.map(t => ({ id: t.id, dir: t.dir, shellType: t.shellType })), activeId.value],
+  () => {
+    uiStore.terminalTabsSnapshot = tabs.value.map(t => ({
+      workDir: t.dir || '',
+      shellType: t.shellType || ''
+    }))
+    const idx = tabs.value.findIndex(t => t.id === activeId.value)
+    uiStore.terminalActiveIndex = idx >= 0 ? idx : 0
+  }
+)
+
+// ── 崩溃恢复快照钩子（恢复侧）──
+// 消费 uiStore 快照镜像（useSessionState 恢复流程写入）循环新建 tab 并还原活动下标。
+// 先清镜像防再次展开面板时重复恢复；超上限由 createTab 返回 null 自然截断。
+// 返回恢复数量（0 = 无可恢复快照，调用方走默认单 tab）。
+function restoreTabsFromSnapshot() {
+  const snapshotTabs = uiStore.terminalTabsSnapshot || []
+  const restoreIndex = uiStore.terminalActiveIndex
+  uiStore.terminalTabsSnapshot = []
+  uiStore.terminalActiveIndex = 0
+  if (snapshotTabs.length === 0) return 0
+  const created = []
+  for (const item of snapshotTabs) {
+    const shellType = item.shellType || defaultShell.value
+    const tab = createTab({
+      dir: item.workDir,
+      shellType,
+      title: shellDisplayName(shellType)
+    })
+    if (!tab) break // 达上限（MAX_TERMINAL_TABS）截断
+    createInstanceForTab(tab)
+    created.push(tab)
+  }
+  if (created.length > 0) {
+    const idx = Math.min(Math.max(restoreIndex, 0), created.length - 1)
+    activateTab(created[idx].id)
+  }
+  return created.length
+}
+
+// 面板首次可见时按快照镜像恢复多 tab；无可恢复快照则创建第一个 tab
+// （沿用原「首次可见才 init」节奏，非活动 tab 保留惰性 init：首次激活时再建会话）
 watch(
   [() => uiStore.terminalVisible, settingsReady],
   async ([val, ready]) => {
     if (val && ready) {
       if (tabs.value.length === 0) {
-        const tab = createTab({
-          dir: uiStore.terminalDir || 'C:\\',
-          shellType: defaultShell.value,
-          title: shellDisplayName(defaultShell.value)
-        })
-        if (tab) {
-          createInstanceForTab(tab)
+        const restored = restoreTabsFromSnapshot()
+        if (restored === 0) {
+          const tab = createTab({
+            dir: uiStore.terminalDir || 'C:\\',
+            shellType: defaultShell.value,
+            title: shellDisplayName(defaultShell.value)
+          })
+          if (tab) {
+            createInstanceForTab(tab)
+          }
         }
       }
       await ensureActiveTabReady()

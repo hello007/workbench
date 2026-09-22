@@ -24,6 +24,11 @@ func NewSessionService(path string) *SessionService {
 
 // Load 读取会话快照。文件不存在或损坏时降级返回空 SessionState（nil error），
 // 不阻塞启动。损坏场景额外 slog.Warn 记录路径与根因，便于排查为何走了冷启动。
+//
+// 读取后对终端快照做归一化（NormalizedTabs）：旧版 v1 单终端快照（workDir 单值）
+// 降级为单元素 Tabs，前端只消费统一的多 tab 形态；归一化结果写回 state，
+// 下次 Save 即以 v2 形态落盘。归一化消费遗留 WorkDir 后将其清除，
+// 保证 Load→Save 落盘为纯 v2 形态（WorkDir 仅作旧数据兼容读取源，不随后续 Save 复写）。
 func (s *SessionService) Load() (*model.SessionState, error) {
 	state := &model.SessionState{}
 	if !util.FileExists(s.path) {
@@ -33,6 +38,10 @@ func (s *SessionService) Load() (*model.SessionState, error) {
 		Logger().Warn("session snapshot corrupt, falling back to cold start",
 			"path", s.path, "err", err)
 		return &model.SessionState{}, nil
+	}
+	if state.Terminal != nil {
+		state.Terminal.Tabs = state.Terminal.NormalizedTabs()
+		state.Terminal.WorkDir = ""
 	}
 	return state, nil
 }

@@ -19,6 +19,13 @@ export const useUiStore = defineStore('ui', () => {
   const terminalHeight = ref(200)
   const terminalDir = ref('')
 
+  // 终端 tab 快照镜像（崩溃恢复用）：TerminalPanel 持有的 tab 列表（workDir/shellType）
+  // 与活动下标的只读投影，供 useSessionState 构建/恢复 data/session.json 的终端快照。
+  // 仅承载可恢复配置，不含 isExited 等运行时状态；tab 状态真源仍在 TerminalPanel 的
+  // useTerminalTabs，本镜像由其同步写入，恢复时由 useSessionState 写回、TerminalPanel 消费。
+  const terminalTabsSnapshot = ref([])
+  const terminalActiveIndex = ref(0)
+
   // 弹窗 visible×6：设置 / 更新提示 / 命令面板 / 仓库筛选 + 内容搜索初始串 + 仓库筛选初始目录 id
   const settingsVisible = ref(false)
   const updateDialogVisible = ref(false)
@@ -56,6 +63,8 @@ export const useUiStore = defineStore('ui', () => {
     terminalVisible,
     terminalHeight,
     terminalDir,
+    terminalTabsSnapshot,
+    terminalActiveIndex,
     settingsVisible,
     updateDialogVisible,
     updateInfo,

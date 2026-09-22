@@ -21,6 +21,12 @@ describe('ui store', () => {
       expect(store.terminalDir).toBe('')
     })
 
+    it('终端 tab 快照镜像默认空列表、活动下标 0', () => {
+      const store = useUiStore()
+      expect(store.terminalTabsSnapshot).toEqual([])
+      expect(store.terminalActiveIndex).toBe(0)
+    })
+
     it('全部弹窗 visible 默认 false', () => {
       const store = useUiStore()
       expect(store.settingsVisible).toBe(false)

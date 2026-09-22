@@ -376,4 +376,144 @@ describe('TerminalPanel.vue', () => {
     await flushPromises()
     expect(terminalMock.destroyTerminal).toHaveBeenCalledTimes(2)
   })
+
+  describe('崩溃恢复快照钩子（session.json 多 tab 升级）', () => {
+    /** 打开面板前注入恢复镜像（模拟 useSessionState 恢复流程写入） */
+    async function openPanelWithSnapshot(wrapper, tabs, activeIndex = 0) {
+      const uiStore = useUiStore()
+      uiStore.terminalTabsSnapshot = tabs
+      uiStore.terminalActiveIndex = activeIndex
+      uiStore.terminalVisible = true
+      await nextTick()
+      await flushPromises()
+      return uiStore
+    }
+
+    it('按快照循环新建全部 tab，仅活动 tab 初始化（惰性 init）', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelWithSnapshot(wrapper, [
+        { workDir: 'D:\\a', shellType: 'powershell' },
+        { workDir: 'D:\\b', shellType: 'cmd' }
+      ])
+
+      expect(wrapper.findAll('.terminal-tab')).toHaveLength(2)
+      expect(capturedInstances).toHaveLength(2)
+      // 活动下标 0：仅第 1 个 tab 建 xterm 会话，第 2 个留待首次激活
+      expect(terminalMock.initTerminal).toHaveBeenCalledTimes(1)
+      expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\a',
+        'powershell'
+      )
+      // 活动下标还原 + 镜像消费后被保存钩子回写为当前 tab 投影（原快照不再残留）
+      expect(uiStore.terminalActiveIndex).toBe(0)
+      expect(uiStore.terminalTabsSnapshot).toEqual([
+        { workDir: 'D:\\a', shellType: 'powershell' },
+        { workDir: 'D:\\b', shellType: 'cmd' }
+      ])
+    })
+
+    it('活动下标指向第 2 个 tab 时还原激活并初始化该 tab', async () => {
+      wrapper = await createWrapper()
+      await openPanelWithSnapshot(
+        wrapper,
+        [
+          { workDir: 'D:\\a', shellType: 'powershell' },
+          { workDir: 'D:\\b', shellType: 'cmd' }
+        ],
+        1
+      )
+
+      expect(wrapper.findAll('.terminal-tab')[1].classes()).toContain('is-active')
+      expect(terminalMock.initTerminal).toHaveBeenCalledTimes(1)
+      expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\b',
+        'cmd'
+      )
+    })
+
+    it('快照超上限 8 个时截断（createTab 达上限返回 null 后停止）', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanelWithSnapshot(
+        wrapper,
+        Array.from({ length: 9 }, (_, i) => ({
+          workDir: `D:\\dir-${i}`,
+          shellType: 'powershell'
+        })),
+        3
+      )
+
+      const tabEls = wrapper.findAll('.terminal-tab')
+      expect(tabEls).toHaveLength(8)
+      expect(capturedInstances).toHaveLength(8)
+      // 截断后原活动下标 3 仍在界内，clamp 不偏移：第 4 个 tab 激活
+      expect(tabEls[3].classes()).toContain('is-active')
+      expect(uiStore.terminalActiveIndex).toBe(3)
+    })
+
+    it('旧版快照降级单 tab：shellType 为空时回退设置页默认 shell', async () => {
+      wrapper = await createWrapper()
+      await openPanelWithSnapshot(wrapper, [{ workDir: 'D:\\legacy', shellType: '' }])
+
+      // 单 tab 走徽章模式（D1 隐藏 tab 栏），tab 状态断言组件内 tabs
+      expect(wrapper.vm.$.setupState.tabs).toHaveLength(1)
+      expect(wrapper.find('.tab-strip').exists()).toBe(false)
+      expect(wrapper.find('.shell-name').text()).toBe('PowerShell')
+      expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\legacy',
+        'powershell' // GetSettings mock 默认 defaultShell
+      )
+    })
+
+    it('镜像为空时走默认单 tab（冷启动 / 无可恢复快照）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\fresh')
+
+      expect(wrapper.vm.$.setupState.tabs).toHaveLength(1)
+      expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\fresh',
+        'powershell'
+      )
+    })
+
+    it('保存钩子：tab 新建/切换同步镜像（workDir/shellType/活动下标）', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanel(wrapper, 'D:\\first')
+      expect(uiStore.terminalTabsSnapshot).toEqual([
+        { workDir: 'D:\\first', shellType: 'powershell' }
+      ])
+      expect(uiStore.terminalActiveIndex).toBe(0)
+
+      uiStore.terminalDir = 'D:\\second'
+      await addTab(wrapper)
+      expect(uiStore.terminalTabsSnapshot).toEqual([
+        { workDir: 'D:\\first', shellType: 'powershell' },
+        { workDir: 'D:\\second', shellType: 'powershell' }
+      ])
+      expect(uiStore.terminalActiveIndex).toBe(1)
+
+      // 切回第 1 个 tab：活动下标回流镜像
+      await wrapper.findAll('.terminal-tab')[0].trigger('click')
+      await flushPromises()
+      expect(uiStore.terminalActiveIndex).toBe(0)
+    })
+
+    it('保存钩子：关闭 tab 后镜像同步收缩', async () => {
+      wrapper = await createWrapper()
+      const uiStore = await openPanel(wrapper, 'D:\\a')
+      await addTab(wrapper)
+      expect(uiStore.terminalTabsSnapshot).toHaveLength(2)
+
+      await wrapper.findAll('.terminal-tab')[0].find('.tab-close').trigger('click')
+      await flushPromises()
+
+      expect(uiStore.terminalTabsSnapshot).toEqual([
+        { workDir: 'D:\\a', shellType: 'powershell' }
+      ])
+      expect(uiStore.terminalActiveIndex).toBe(0)
+    })
+  })
 })

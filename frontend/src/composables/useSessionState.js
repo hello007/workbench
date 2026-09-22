@@ -10,7 +10,8 @@
  * 设计依据：
  *   - 文件树展开状态由 useTreeState 持久化到 localStorage（按工作目录隔离），恢复 selectedDirectoryId
  *     后由 Home.vue 调 onDirectorySelect 触发 localStorage 还原，不纳入本快照避免重复。
- *   - 终端不真实复用进程，仅恢复可见性/高度/工作目录，由 TerminalPanel 用 WorkDir 新建会话。
+ *   - 终端不真实复用进程，恢复 tab 列表（workDir/shellType）+ 活动下标，由 TerminalPanel
+ *     按快照逐 tab 重新 CreateTerminal（超上限截断），不复活旧进程。
  *   - 启动恢复须在 directories 加载后由 Home.vue 编排（恢复 selectedDirectoryId 须校验目录仍存在）。
  *
  * 详见 docs/spec/cross-layer-contracts.md 与 .trellis/tasks/09-14-v1-4/prd.md PR2。
@@ -27,6 +28,10 @@ const SAVE_DEBOUNCE_MS = 2000
 
 /**
  * 从 Pinia store 构建会话快照对象（字段对齐后端 model.SessionState）。
+ * 终端部分为多 tab 结构（对齐后端 model.TerminalSnapshot v2）：
+ *   - tabs/activeIndex 来源于 TerminalPanel 同步到 uiStore 的 tab 快照镜像
+ *   - fullscreen 为整窗全屏态（PR4 接入 uiStore 后替换常量 false）
+ * 后端 Load 已将旧版 v1 单终端快照归一化为 tabs 形态，本函数只产出 v2 结构。
  * @returns {Object} SessionState 快照（始终含 terminal 子对象，由后端 Save 补 version/savedAt）
  */
 export function buildSessionState() {
@@ -38,7 +43,12 @@ export function buildSessionState() {
     terminal: {
       visible: !!uiStore.terminalVisible,
       height: uiStore.terminalHeight || 0,
-      workDir: uiStore.terminalDir || ''
+      tabs: (uiStore.terminalTabsSnapshot || []).map(t => ({
+        workDir: (t && t.workDir) || '',
+        shellType: (t && t.shellType) || ''
+      })),
+      activeIndex: uiStore.terminalActiveIndex || 0,
+      fullscreen: false // PR4 整窗全屏：接入 uiStore.terminalFullscreen 后替换
     }
   }
 }
@@ -47,6 +57,10 @@ export function buildSessionState() {
  * 将快照写回 Pinia store（仅恢复 activePanel 与终端面板状态）。
  * selectedDirectoryId 的恢复须由 Home.vue 在 directories 加载后校验存在性并调 onDirectorySelect
  * （需 fileTreePanelRef 触发文件树重载 + localStorage 展开状态还原），不在本函数处理。
+ *
+ * 终端 tab 恢复：把归一化后的 tab 列表写入 uiStore 快照镜像（terminalTabsSnapshot/
+ * terminalActiveIndex），TerminalPanel 面板首次可见时消费镜像循环新建 tab（超上限截断、
+ * 越界活动下标 clamp）。旧版 v1 快照由后端 Load 归一化为 tabs 形态，此处无需兼容单值 workDir。
  * @param {Object|null} state 后端快照
  * @returns {boolean} 是否恢复了任意 UI 状态（用于决定是否提示「已恢复上次会话」）
  */
@@ -71,8 +85,21 @@ export function applySessionState(state) {
       uiStore.terminalHeight = state.terminal.height
       touched = true
     }
-    if (state.terminal.workDir) {
-      uiStore.terminalDir = state.terminal.workDir
+
+    // 恢复终端 tab 列表：过滤无效项（缺工作目录的 tab 无法新建会话），越界活动下标 clamp
+    const rawTabs = Array.isArray(state.terminal.tabs) ? state.terminal.tabs : []
+    const tabs = rawTabs
+      .filter(t => t && t.workDir)
+      .map(t => ({ workDir: t.workDir, shellType: t.shellType || '' }))
+    if (tabs.length > 0) {
+      const index = Number.isInteger(state.terminal.activeIndex)
+        ? state.terminal.activeIndex
+        : 0
+      const clamped = Math.min(Math.max(index, 0), tabs.length - 1)
+      uiStore.terminalTabsSnapshot = tabs
+      uiStore.terminalActiveIndex = clamped
+      // 活动 tab 的目录回填跟随目录：恢复后新建 tab 继承上次活动会话目录而非回退默认值
+      uiStore.terminalDir = tabs[clamped].workDir
       touched = true
     }
   }
@@ -143,14 +170,17 @@ export function startSessionAutoSave() {
     }, SAVE_DEBOUNCE_MS)
   }
 
-  // 监听可恢复状态变化（selectedDirectoryId / activePanel / 终端三态）
+  // 监听可恢复状态变化（selectedDirectoryId / activePanel / 终端面板三态 + tab 快照镜像）
+  // terminalTabsSnapshot 引用变化即触发（TerminalPanel 每 tab 增删/切换时同步新数组）
   const stopWatch = watch(
     () => [
       directoryStore.selectedDirectoryId,
       uiStore.activePanel,
       uiStore.terminalVisible,
       uiStore.terminalHeight,
-      uiStore.terminalDir
+      uiStore.terminalDir,
+      uiStore.terminalTabsSnapshot,
+      uiStore.terminalActiveIndex
     ],
     triggerSave
   )
