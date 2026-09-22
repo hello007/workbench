@@ -785,7 +785,7 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 
 | Hash | Message |
 |------|---------|
-| `bcfc531..fe4e55c` | (see git log) |
+| `bcfc531` | (see git log) |
 
 ### Testing
 
