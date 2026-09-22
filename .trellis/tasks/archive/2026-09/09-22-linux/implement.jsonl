@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/09-22-linux/prd.md", "reason": "任务 PRD：四个决策、需求清单、PR0-PR4 实施计划、验收标准，实现全程对照"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Shell 配置平台化改 model/terminal.go 导出结构，前端默认 shell 读取链路涉及跨层契约与 wailsjs 绑定同步规则"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增平台分支（xdg-open 失败、xclip/wl-copy 探测）需 slog 日志与 AppError 错误码规范"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端 Linux shell（bash/zsh/fish）接入多 tab 终端链路，须守 PTY 不重挂载、refit 等既有约束"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增平台分支代码须配测试，覆盖率门禁分层（service ≥76% 等）照旧生效"}
+{"file": "docs/spec/test-stability.md", "reason": "Linux CI 下测试路径断言修复须守测试稳定性规范（临时目录、平台无关断言）"}
+{"file": "docs/spec/browser-channel.md", "reason": "浏览器访问模式是 PR0 验证主通道；serve 模式禁窗口对话框（wailsRuntimeUnavailable 守卫）与文件打开新平台分支相关"}

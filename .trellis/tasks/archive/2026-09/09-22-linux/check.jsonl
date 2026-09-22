@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-22-linux/prd.md", "reason": "对照验收标准逐条核查：Linux 编译、终端、文件打开、剪贴板、Obsidian、自更新、CI、tar.gz、文档"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查新增平台分支代码覆盖率达标（service ≥76%、util ≥40%），平台 build tag 文件的门禁排除规则"}
+{"file": "docs/spec/test-stability.md", "reason": "核查 Linux 测试修复未引入平台耦合，Windows 侧回归零变化"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 model/ 或 App 方法签名变更是否同步 frontend/wailsjs 三处绑定"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查新平台分支错误码是否同步 model/app_error.go 与 frontend/src/utils/error.js 两处常量表"}
