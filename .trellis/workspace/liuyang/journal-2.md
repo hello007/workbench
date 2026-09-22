@@ -871,3 +871,37 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 81: AI 对话三路审核与 31 项缺陷修复
+
+**Date**: 2026-09-22
+**Task**: AI 对话三路审核与 31 项缺陷修复
+**Branch**: `master`
+
+### Summary
+
+3 个 cavecrew-reviewer 并行审核（后端/前端/跨层）发现 5🔴5🟠21🟡：后端 2 个 panic 路径（proc nil、double-close）与串行绕过窗口、非原子持久化；前端 IME 误发、乐观态时序、webview 链接导航。2 个 trellis-implement 并行修复全部 31 项（文件集零交集），trellis-check 逐项读码核实。service 覆盖率 76.1%→80.0%，前端 83.05%→83.25%，E2E 46 passed。经验沉淀：接口抽象丢 nil 守卫（ai_function killProcessTree 有防护，chat 抽 chatProcess 时丢失）；E2E mock 时序与生产相反会恰好掩盖时序类缺陷。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1fb3c89` | (see git log) |
+| `76c07c6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
