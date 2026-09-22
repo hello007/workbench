@@ -798,3 +798,41 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 79: 终端多 tab 会话、整窗全屏与外观设置
+
+**Date**: 2026-09-22
+**Task**: 终端多 tab 会话、整窗全屏与外观设置
+**Branch**: `master`
+
+### Summary
+
+终端页面优化 epic（5 PR）：PR1 useTerminal 事件闭包精准注销+外观参数化；PR2 多 tab 会话（useTerminalTabs 状态/实例分离、上限 8、目录新建继承不跟随、单 tab 隐藏 tab 栏）；PR3 快照 v2 多 tab 升级（旧版降级、归一化幂等、Fullscreen 字段先行）；PR4 整窗全屏（fixed 层 z-index 1500、ESC 冒泡过滤、fullscreen⇒visible 不变式、快照还原）；PR5 外观设置（字号/字体/scrollback 设置页+工具栏 A-/A+、xterm 热更 refit、退出态提示条）+ 文档。5 轮 trellis-check 共修复 12 问题（重启态不复位、watch 多源引用比较陷阱、el-input-number 清空写脏值等）。前端 1216 用例绿、后端 6 包绿、service 79.2% 过门禁。沉淀 docs/spec/terminal-multi-session.md + CLAUDE.md 关键规则行。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76756ed` | (see git log) |
+| `88b3d88` | (see git log) |
+| `88a2cb4` | (see git log) |
+| `79dbebf` | (see git log) |
+| `60698bc` | (see git log) |
+| `4b6e99f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
