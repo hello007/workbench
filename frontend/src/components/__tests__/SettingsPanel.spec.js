@@ -104,6 +104,26 @@ const stubs = {
         }
       }
     }
+  },
+  // el-radio-button stub：与 el-radio 同构（provide/inject 桥接 group 选中态），
+  // 供网络访问分区「绑定地址快捷切换」分段控件测试
+  'el-radio-button': {
+    template: '<label class="el-radio-button"><input type="radio" :value="value" :checked="isChecked" @change="onChange" /><span><slot /></span></label>',
+    props: ['value'],
+    inject: { elRadioGroup: { default: null } },
+    computed: {
+      isChecked() {
+        return this.elRadioGroup && this.elRadioGroup.modelValue === this.value
+      }
+    },
+    methods: {
+      onChange() {
+        if (this.elRadioGroup) {
+          this.elRadioGroup.$emit('update:modelValue', this.value)
+          this.elRadioGroup.$emit('change', this.value)
+        }
+      }
+    }
   }
 }
 
@@ -132,14 +152,14 @@ const baseWebServeConfig = (over = {}) => ({
   ...over
 })
 
-async function createWrapper(settingsOver = {}) {
+async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a'.repeat(64)) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const { GetSettings, GetAppVersion, GetWebServeConfig, GetWebServeToken } = await import('../../../wailsjs/go/main/App')
   GetSettings.mockResolvedValue(baseSettings(settingsOver))
   GetAppVersion.mockResolvedValue('1.0.0')
-  GetWebServeConfig.mockResolvedValue(baseWebServeConfig())
-  GetWebServeToken.mockResolvedValue('a'.repeat(64))
+  GetWebServeConfig.mockResolvedValue(baseWebServeConfig(webServeOver))
+  GetWebServeToken.mockResolvedValue(webToken)
   const uiStore = useUiStore()
   uiStore.settingsVisible = true
   const wrapper = mount(SettingsPanel, { global: { stubs, plugins: [pinia] } })
@@ -825,5 +845,150 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalled()
     expect(RegenerateWebToken).not.toHaveBeenCalled()
+  })
+
+  // ---- 绑定地址快捷分段切换 ----
+
+  // 分段控件（class 锚点定位）；stub 经 data-model 属性暴露当前选中态
+  function bindModeGroup() {
+    return wrapper.find('.webserve-bind-mode')
+  }
+
+  it('渲染绑定地址分段控件，回环地址时本地选中', async () => {
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    expect(bindModeGroup().exists()).toBe(true)
+    expect(bindModeGroup().attributes('data-model')).toBe('local')
+    expect(wrapper.text()).toContain('本地 127.0.0.1')
+    expect(wrapper.text()).toContain('公网 0.0.0.0')
+  })
+
+  it('绑定为 0.0.0.0 时分段选中公网', async () => {
+    wrapper = await createWrapper({}, { bindAddress: '0.0.0.0:36115' })
+    await openNetworkTab()
+    expect(bindModeGroup().attributes('data-model')).toBe('public')
+  })
+
+  it('手输自定义地址（后端已保存）时分段无选中', async () => {
+    wrapper = await createWrapper({}, { bindAddress: '192.168.1.5:36115' })
+    await openNetworkTab()
+    expect(bindModeGroup().attributes('data-model')).toBe('')
+  })
+
+  it('分段切公网：风险确认通过后保存 0.0.0.0 并回填地址与分段态', async () => {
+    const { SetWebServeConfig, GetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    ElMessageBox.confirm.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    // 保存后 loadWebServeConfig 重取配置，mock 返回新地址模拟后端已持久化
+    GetWebServeConfig.mockResolvedValue(baseWebServeConfig({ bindAddress: '0.0.0.0:36115' }))
+    await bindModeGroup().find('input[type="radio"][value="public"]').setValue(true)
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '0.0.0.0:36115')
+    expect(wrapper.find('.webserve-bind-input').element.value).toBe('0.0.0.0:36115')
+    expect(bindModeGroup().attributes('data-model')).toBe('public')
+  })
+
+  it('分段切公网取消确认：不保存，地址与分段态回弹本地', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await bindModeGroup().find('input[type="radio"][value="public"]').setValue(true)
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(SetWebServeConfig).not.toHaveBeenCalled()
+    expect(wrapper.find('.webserve-bind-input').element.value).toBe('127.0.0.1:36115')
+    expect(bindModeGroup().attributes('data-model')).toBe('local')
+  })
+
+  it('分段切本地：直接保存无风险确认', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper({}, { bindAddress: '0.0.0.0:36115' })
+    await openNetworkTab()
+    await bindModeGroup().find('input[type="radio"][value="local"]').setValue(true)
+    await flushPromises()
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '127.0.0.1:36115')
+  })
+
+  it('分段切换沿用当前绑定地址端口', async () => {
+    const { SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    SetWebServeConfig.mockResolvedValue()
+    ElMessageBox.confirm.mockResolvedValue()
+    wrapper = await createWrapper({}, { bindAddress: '127.0.0.1:36999' })
+    await openNetworkTab()
+    await bindModeGroup().find('input[type="radio"][value="public"]').setValue(true)
+    await flushPromises()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '0.0.0.0:36999')
+  })
+
+  it('手输自定义地址保存后分段置空（自定义态）', async () => {
+    const { SetWebServeConfig, GetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    // 保存后 loadWebServeConfig 重取配置，mock 返回自定义地址模拟后端已持久化
+    GetWebServeConfig.mockResolvedValue(baseWebServeConfig({ bindAddress: '192.168.1.5:36115' }))
+    const bindInput = wrapper.find('.webserve-bind-input')
+    await bindInput.setValue('192.168.1.5:36115')
+    await flushPromises()
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '192.168.1.5:36115')
+    expect(bindModeGroup().attributes('data-model')).toBe('')
+  })
+
+  // ---- 复制带 token 链接 ----
+
+  // 地址行复制按钮定位（首个地址行为回环 127.0.0.1）
+  function firstUrlCopyBtn() {
+    return wrapper.findAll('.webserve-url-row button').find(b => b.text() === '复制链接')
+  }
+
+  it('每个候选地址行可复制带 token 完整链接并附安全提示', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { ElMessage } = await import('element-plus')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const rows = wrapper.findAll('.webserve-url-row')
+    expect(rows.length).toBe(2)
+    await firstUrlCopyBtn().trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(`http://127.0.0.1:36115/?token=${'a'.repeat(64)}`)
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('请勿外发'))
+  })
+
+  it('0.0.0.0 候选地址被过滤：不渲染也不产生复制入口', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    wrapper = await createWrapper({}, { accessUrls: ['http://0.0.0.0:36115', 'http://127.0.0.1:36115', 'http://192.168.1.5:36115'] })
+    await openNetworkTab()
+    // 仅回环 + 局域网两行，0.0.0.0 被防御性过滤
+    expect(wrapper.findAll('.webserve-url-row').length).toBe(2)
+    expect(wrapper.text()).not.toContain('0.0.0.0:36115')
+    await firstUrlCopyBtn().trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(`http://127.0.0.1:36115/?token=${'a'.repeat(64)}`)
+  })
+
+  it('令牌未生成时复制链接给出警示且不写入剪贴板', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { ElMessage } = await import('element-plus')
+    // 挂载前即令牌为空（loadWebServeConfig 挂载时取令牌，挂载后覆盖不生效）
+    wrapper = await createWrapper({}, {}, '')
+    await openNetworkTab()
+    await firstUrlCopyBtn().trigger('click')
+    await flushPromises()
+    expect(writeText).not.toHaveBeenCalled()
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('未生成'))
   })
 })

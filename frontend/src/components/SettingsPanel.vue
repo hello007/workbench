@@ -244,18 +244,24 @@
               @change="onWebServeToggle"
             />
           </div>
-          <div class="settings-item">
+          <div class="settings-item settings-item--column">
             <div class="settings-item-info">
               <div class="settings-item-label">绑定地址</div>
-              <div class="settings-item-desc">host:port；默认仅本机可达，改绑 0.0.0.0 会向局域网暴露本机能力</div>
+              <div class="settings-item-desc">快捷切换或手输 host:port；默认仅本机可达，改绑 0.0.0.0 会向局域网暴露本机能力</div>
             </div>
-            <el-input
-              v-model="webBindAddress"
-              size="small"
-              class="input-w-lg webserve-bind-input"
-              placeholder="127.0.0.1:36115"
-              @change="onBindAddressChange"
-            />
+            <div class="webserve-bind-row">
+              <el-radio-group :model-value="webBindMode" size="small" class="webserve-bind-mode" @change="onBindModeChange">
+                <el-radio-button value="local">本地 127.0.0.1</el-radio-button>
+                <el-radio-button value="public">公网 0.0.0.0</el-radio-button>
+              </el-radio-group>
+              <el-input
+                v-model="webBindAddress"
+                size="small"
+                class="input-w-lg webserve-bind-input"
+                placeholder="127.0.0.1:36115"
+                @change="onBindAddressChange"
+              />
+            </div>
           </div>
           <div class="settings-item">
             <div class="settings-item-info">
@@ -279,10 +285,13 @@
           <div class="settings-item settings-item--column">
             <div class="settings-item-info">
               <div class="settings-item-label">访问地址</div>
-              <div class="settings-item-desc">服务运行时，浏览器打开以下地址；局域网地址仅同网段设备可达</div>
+              <div class="settings-item-desc">服务运行时，浏览器打开以下地址；局域网地址仅同网段设备可达。复制链接内含令牌即凭据，请勿外发</div>
             </div>
             <div class="webserve-urls">
-              <code v-for="url in webAccessUrls" :key="url" class="webserve-url">{{ url }}</code>
+              <div v-for="url in webAccessUrls" :key="url" class="webserve-url-row">
+                <code class="webserve-url">{{ url }}</code>
+                <el-button size="small" text type="primary" @click="copyAccessLink(url)">复制链接</el-button>
+              </div>
               <div v-if="!webAccessUrls.length" class="webserve-url-empty">暂无可用地址</div>
             </div>
           </div>
@@ -400,13 +409,34 @@ function isLoopbackAddress(addr) {
 }
 
 /**
+ * 提取绑定地址的端口（校验 1-65535 合法性），非法返回空串。
+ */
+function portOf(addr) {
+  const idx = addr.lastIndexOf(':')
+  if (idx <= 0 || idx === addr.length - 1) return ''
+  const port = addr.slice(idx + 1)
+  const n = Number(port)
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? port : ''
+}
+
+/**
  * 校验绑定地址为 host:port 形态且端口合法。
  */
 function isValidBindAddress(addr) {
+  return portOf(addr) !== ''
+}
+
+/**
+ * 由绑定地址推导分段选中态：127.0.0.1 / localhost → local，
+ * 0.0.0.0 → public，其他（手输自定义地址）→ ''（分段无选中）。
+ */
+function bindModeOf(addr) {
   const idx = addr.lastIndexOf(':')
-  if (idx <= 0 || idx === addr.length - 1) return false
-  const port = Number(addr.slice(idx + 1))
-  return Number.isInteger(port) && port >= 1 && port <= 65535
+  if (idx <= 0) return ''
+  const host = addr.slice(0, idx).replace(/^\[|\]$/g, '').toLowerCase()
+  if (host === '127.0.0.1' || host === 'localhost') return 'local'
+  if (host === '0.0.0.0') return 'public'
+  return ''
 }
 
 /**
@@ -431,7 +461,9 @@ async function loadWebServeConfig() {
     webEnabled.value = !!cfg?.enabled
     webBindAddress.value = cfg?.bindAddress || '127.0.0.1:36115'
     webRunning.value = !!cfg?.running
-    webAccessUrls.value = cfg?.accessUrls || []
+    // 防御性过滤 0.0.0.0：监听地址语义浏览器不可直连（后端 webAccessUrls 已排除，
+    // 前端兜底——复制链接区不渲染、不产生 0.0.0.0 链接）
+    webAccessUrls.value = (cfg?.accessUrls || []).filter(u => !u.includes('//0.0.0.0:'))
   } catch {
     // 保持默认值
   }
@@ -462,16 +494,18 @@ const onWebServeToggle = async (val) => {
 }
 
 /**
- * 绑定地址变更：格式校验 → 非回环风险确认 → 保存并使运行时生效（改址平滑重启）；
- * 格式非法 / 取消 / 失败均从后端刷新回滚为已保存地址。
+ * 分段选中态由当前绑定地址推导：手输自定义地址 / 后端回滚刷新均自动联动，
+ * 无需单独维护状态。
  */
-const onBindAddressChange = async () => {
-  const addr = webBindAddress.value.trim()
-  if (!isValidBindAddress(addr)) {
-    ElMessage.error('绑定地址格式无效，须为 host:port（如 127.0.0.1:36115）')
-    await loadWebServeConfig()
-    return
-  }
+const webBindMode = computed(() => bindModeOf(webBindAddress.value))
+
+/**
+ * 保存绑定地址并使运行时生效（改址平滑重启）：开启状态下非回环地址先走风险
+ * 确认（本地/公网分段与手输三个入口共用，按目标地址自然分流）；取消确认 /
+ * 保存失败均静默（取消 reject 与无 code 错误不走 handleError）并从后端刷新
+ * 回滚为已保存地址。
+ */
+async function saveBindAddress(addr) {
   try {
     if (webEnabled.value && !isLoopbackAddress(addr)) {
       await confirmNonLoopbackRisk()
@@ -487,6 +521,34 @@ const onBindAddressChange = async () => {
 }
 
 /**
+ * 分段切换：本地直接保存（无需确认）；公网（非回环）经 saveBindAddress 内置
+ * 风险确认，取消则不保存。模板用 :model-value 手动赋值（不经 v-model 写入
+ * 选中态），确认取消时选中态由地址推导自然回弹，无需手动恢复（参照
+ * onDiffToolPresetChange 同款理由）。端口沿用当前绑定地址端口。
+ */
+async function onBindModeChange(mode) {
+  if (mode !== 'local' && mode !== 'public') return
+  const port = portOf(webBindAddress.value) || '36115'
+  const addr = (mode === 'local' ? '127.0.0.1' : '0.0.0.0') + ':' + port
+  if (addr === webBindAddress.value.trim()) return
+  await saveBindAddress(addr)
+}
+
+/**
+ * 绑定地址变更：格式校验 → 保存并使运行时生效（非回环风险确认由
+ * saveBindAddress 内置）；格式非法 / 取消 / 失败均从后端刷新回滚为已保存地址。
+ */
+const onBindAddressChange = async () => {
+  const addr = webBindAddress.value.trim()
+  if (!isValidBindAddress(addr)) {
+    ElMessage.error('绑定地址格式无效，须为 host:port（如 127.0.0.1:36115）')
+    await loadWebServeConfig()
+    return
+  }
+  await saveBindAddress(addr)
+}
+
+/**
  * 复制令牌到剪贴板。
  */
 async function copyToken() {
@@ -494,6 +556,25 @@ async function copyToken() {
   try {
     await navigator.clipboard.writeText(webToken.value)
     ElMessage.success('访问令牌已复制')
+  } catch (e) {
+    ElMessage.error('复制失败: ' + (e?.message || String(e)))
+  }
+}
+
+/**
+ * 复制带 token 的完整访问链接：http://<addr>:<port>/?token=<令牌>，粘贴浏览器即用。
+ * 0.0.0.0 双保险拦截（列表加载时已过滤一次，此处防直接传入）；令牌未生成时
+ * 警示不复制；成功提示附带安全提示（链接即凭据，勿外发）。
+ */
+async function copyAccessLink(url) {
+  if (!url || url.includes('//0.0.0.0:')) return
+  if (!webToken.value) {
+    ElMessage.warning('访问令牌未生成，无法复制链接')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(`${url}/?token=${webToken.value}`)
+    ElMessage.success('链接已复制；链接内含访问令牌即凭据，请勿外发')
   } catch (e) {
     ElMessage.error('复制失败: ' + (e?.message || String(e)))
   }
@@ -927,6 +1008,15 @@ const onThemeChange = async () => {
 
 /* ===== 网络访问分区 ===== */
 
+/* 分段切换 + 自定义地址输入横排（窄窗换行防挤压） */
+.webserve-bind-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  width: 100%;
+}
+
 /* 令牌操作区：遮蔽文本 + 显示/复制/重新生成横向排布 */
 .webserve-token-actions {
   display: flex;
@@ -949,11 +1039,18 @@ const onThemeChange = async () => {
   border-radius: var(--radius-sm);
 }
 
-/* 访问地址列表：纵向排布的等宽地址项 */
+/* 访问地址列表：纵向排布的地址行（地址 code + 复制链接按钮横排） */
 .webserve-urls {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.webserve-url-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
   width: 100%;
 }
 
