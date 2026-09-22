@@ -24,7 +24,10 @@
 .superpowers/
 .vscode/
 .worktrees/
-build/
+# build/ 构建产物整体忽略；README-linux.md 为手写的 Linux 发行包说明源文件
+# （release.yml 打包 tar.gz 时随二进制分发），白名单放行提交
+build/*
+!build/README-linux.md
 data/*.json
 frontend/dist/
 frontend/package.json.md5

@@ -25,6 +25,13 @@ const (
 	UpdateTempDir = "workbench-update"
 	// PendingUpdateFile 待更新标记文件
 	PendingUpdateFile = "pending-update.json"
+	// updateAssetWindows Windows 平台更新资产名（与 .github/workflows/release.yml 上传产物名严格一致）
+	updateAssetWindows = "workbench.exe"
+	// updateAssetLinux Linux 平台更新资产名（tar.gz 压缩包，与 release.yml 打包产物名严格一致；
+	// 不带版本号——版本由 Release tag 携带，固定资产名保证旧版本客户端按名匹配不失配，amd64 后缀预留 arm64 扩展）
+	updateAssetLinux = "workbench-linux-amd64.tar.gz"
+	// updateBinaryLinux Linux tar.gz 包内二进制名（扁平布局顶层成员，解包后落 updateDir）
+	updateBinaryLinux = "workbench"
 )
 
 // UpdateService 更新服务
@@ -33,6 +40,24 @@ type UpdateService struct {
 	httpClient *http.Client
 	cancelDL   context.CancelFunc // 用于取消下载
 	mu         sync.Mutex         // 保护 cancelDL 字段
+}
+
+// updateAssetName 返回当前平台的更新资产名（CheckForUpdate 按平台匹配 GitHub Release 资产）
+func updateAssetName() string {
+	if runtime.GOOS == "windows" {
+		return updateAssetWindows
+	}
+	return updateAssetLinux
+}
+
+// updateBinaryPath 返回更新目录内新版本二进制的路径：
+// Windows 资产即二进制本体（workbench.exe 直接落地）；Linux 资产为 tar.gz，
+// 下载后由 extractUpdateTarGz 解包出 workbench 二进制
+func updateBinaryPath(updateDir string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(updateDir, updateAssetWindows)
+	}
+	return filepath.Join(updateDir, updateBinaryLinux)
 }
 
 // NewUpdateService 创建更新服务
@@ -92,9 +117,9 @@ func (s *UpdateService) CheckForUpdate(currentVersion string) (*model.UpdateInfo
 		PublishedAt:  release.PublishedAt,
 	}
 
-	// 查找 workbench.exe 资产
+	// 按平台查找更新资产（Windows: workbench.exe；Linux: workbench-linux-amd64.tar.gz）
 	for _, asset := range release.Assets {
-		if asset.Name == "workbench.exe" {
+		if asset.Name == updateAssetName() {
 			info.DownloadURL = asset.BrowserDownloadURL
 			info.FileSize = asset.Size
 			break
@@ -120,7 +145,8 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 		return fmt.Errorf("创建临时目录失败: %w", err)
 	}
 
-	targetFile := filepath.Join(updateDir, "workbench.exe")
+	// 下载目标按平台资产名落地（Windows: workbench.exe；Linux: workbench-linux-amd64.tar.gz）
+	targetFile := filepath.Join(updateDir, updateAssetName())
 
 	// 创建可取消的请求上下文
 	dlCtx, cancel := context.WithCancel(context.Background())
@@ -198,6 +224,15 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("下载中断: %w", err)
+		}
+	}
+
+	// Linux 资产为 tar.gz 压缩包：下载完成后解包出二进制到 updateDir，后续 ApplyUpdate /
+	// CheckPendingUpdate 经 updateBinaryPath 取解包产物走替换流程（Windows 资产即二进制
+	// 本体，下载路径即最终路径，无需解包）
+	if runtime.GOOS != "windows" {
+		if _, err := extractUpdateTarGz(targetFile, updateDir); err != nil {
+			return fmt.Errorf("解压更新包失败: %w", err)
 		}
 	}
 
@@ -334,7 +369,7 @@ func buildApplySh(newExe, currentExe, pendingFile, updateDir string) string {
 // ApplyUpdate 执行更新替换并重启应用
 func (s *UpdateService) ApplyUpdate() error {
 	updateDir := filepath.Join(os.TempDir(), UpdateTempDir)
-	newExe := filepath.Join(updateDir, "workbench.exe")
+	newExe := updateBinaryPath(updateDir)
 
 	// 检查新版本文件是否存在
 	if _, err := os.Stat(newExe); os.IsNotExist(err) {
@@ -392,9 +427,9 @@ func (s *UpdateService) CheckPendingUpdate() (bool, error) {
 		return false, nil // 没有待更新
 	}
 
-	newExe := filepath.Join(updateDir, "workbench.exe")
+	newExe := updateBinaryPath(updateDir)
 	if _, err := os.Stat(newExe); os.IsNotExist(err) {
-		// 标记文件在但 exe 不存在，清理后返回
+		// 标记文件在但新版本二进制不存在，清理后返回
 		os.RemoveAll(updateDir)
 		return false, nil
 	}

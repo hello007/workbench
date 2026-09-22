@@ -44,7 +44,7 @@
 - **工具箱** — 左侧活动栏提供工具箱入口，将"拷贝到"等全局工具集中管理，点击其他面板自动关闭
 - **AI 功能（Skill 聚合）** — 活动栏一级入口（与工作目录/工具箱互切，占满主区），点击功能卡片打开功能 Tab（详情+参数录入+运行），一键触发 Claude Code skills：后端起 `claude -p` headless 子进程（stream-json 流式回显），功能项配置化（`data/ai_functions.json`，界面增删改，新增 skill 不改代码）；首批四功能：生成周报（草稿→面板确认→落盘终稿）、文档转 HTML 发言稿（多选源文件→预览产物）、预约腾讯会议（表单→会议号入剪贴板）、查看/取消腾讯会议（表格展示→行内详情复制/确认取消）；多段编排经 `--resume` 续会话保留上下文，任务可取消（杀进程树）、可超时，同功能重跑复用空闲 Tab；功能列表支持置顶（pinned 优先）与按使用频次智能排序（历史归档聚合运行次数，取消不计入，开关状态持久化）；AI 开发辅助：提交面板「AI 生成」基于暂存区 diff + 历史 few-shot 生成 Conventional Commits 候选信息、提交面板「AI 审查」与提交历史「审查此 commit」基于未提交/指定 commit diff 输出结构化问题清单（severity/category 分级分组 + 文件定位 + 跳转 diff），结构化输出经 claude `--json-schema` 强制，seed skill 按 ID 合并白名单自动补全老用户配置
 - **AI 对话（多会话持续式对话）** — 活动栏一级入口（与 AI 功能/工具箱等面板互切，占满主区），以常用目录为入口的多轮 AI 对话：侧栏常用目录管理（工作目录/文件树右键「添加到 AI 对话」、自定义显示名、拖拽排序、移除），每目录多会话（新建/下拉切换/删除，首条消息自动生成标题，claude `--resume <sessionId>` 续上下文），回复流式增量输出并 markdown 渲染，可中途停止（杀进程树）；纯文本模板（本目录/全局两组 + 管理弹窗增删改，点击整段填入输入框可再修改）；执行配置持久化记忆（权限模式 default/acceptEdits/plan/bypassPermissions 四档 + 模型选择）；后端 ChatService 独立持久化 `data/ai_chat/`（会话/消息/目录/模板/配置），provider 接口预留多 CLI 接入
-- **内置终端** — 底部面板 VSCode 式多 tab 终端：最多 8 个会话并存、独立输入输出互不干扰（新建 tab 继承文件树当前目录，tab 可关闭、中键关闭、溢出横向滚动，单 tab 时隐藏 tab 栏保持零噪音），支持 PowerShell / CMD / Git Bash / WSL，会话退出后 tab 标记并面板内提示一键重启；整窗全屏覆盖层（按钮 + ESC 退出，重启还原）；外观可配置（设置页字号 10-24 / 字体 / 回滚行数 1000-10000，工具栏 A-/A+ 快捷调节并实时热更），可拖拽调节高度，Ctrl+` 快速切换
+- **内置终端** — 底部面板 VSCode 式多 tab 终端：最多 8 个会话并存、独立输入输出互不干扰（新建 tab 继承文件树当前目录，tab 可关闭、中键关闭、溢出横向滚动，单 tab 时隐藏 tab 栏保持零噪音），Windows 支持 PowerShell / CMD / Git Bash / WSL，Linux 支持 Bash / Zsh / Fish / Sh，会话退出后 tab 标记并面板内提示一键重启；整窗全屏覆盖层（按钮 + ESC 退出，重启还原）；外观可配置（设置页字号 10-24 / 字体 / 回滚行数 1000-10000，工具栏 A-/A+ 快捷调节并实时热更），可拖拽调节高度，Ctrl+` 快速切换
 - **自定义快捷键** — 支持自定义「打开命令面板（默认 Ctrl+P）」「切换终端（默认 Ctrl+`）」「重命名（默认 F2）」「删除（默认 Delete）」快捷键，点击录制新快捷键（支持组合键与 F1-F12/Delete 等功能键单键），右键菜单显示快捷键提示，F2/Del 作用于当前选中节点（输入框/对话框/终端聚焦时不触发），可单个或批量重置
 - **浏览器访问** — 同一二进制将完整界面暴露为浏览器可访问页面：桌面模式默认同开 HTTP 服务（设置「网络访问」可关），`--serve` 无头模式纯服务常驻；token 认证（首启自动生成，设置页查看/复制/重新生成），默认绑定 `127.0.0.1:36115`，文件/Git/终端/AI 任务全功能与桌面一致，适合本机其他浏览器与远程设备（远程建议 Tailscale/frp 等加密隧道）；详见 [功能说明](docs/功能说明.md)
 - **检查更新** — 设置面板显示当前版本号，一键检查 GitHub Releases 新版本，下载进度实时显示，支持取消下载；更新完成后提示重启，用户可选择立即重启或下次启动时自动替换
@@ -52,6 +52,13 @@
 ## 快速开始
 
 ### 环境要求
+
+| 平台 | 运行要求 | 说明 |
+| ---- | ---- | ---- |
+| Windows | Windows 10+ | WebView2 运行时系统自带，零额外依赖 |
+| Linux | Ubuntu 22.04+ / Debian 12+ | 桌面模式需 GTK3 与 webkit2gtk-4.1；浏览器访问模式（`--serve`）无额外系统依赖 |
+
+开发环境通用要求：
 
 - Go 1.26+
 - Node.js 18+
@@ -73,7 +80,16 @@ wails dev
 wails build
 ```
 
-构建产物位于 `build/bin/` 目录，`workbench.exe` 约 33MB（含 pdfjs viewer 静态资源）。
+构建产物位于 `build/bin/` 目录，Windows 生成 `workbench.exe`（约 33MB，含 pdfjs viewer 静态资源）。
+
+Linux 构建需先安装桌面编译依赖（Ubuntu 22.04+/Debian 12+）：
+
+```bash
+sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+wails build -tags webkit2_41
+```
+
+产物为 `build/bin/workbench`；`-tags webkit2_41` 将 WebKit 依赖从默认 webkit2gtk-4.0 切换到 4.1（Ubuntu 22.04+/Debian 12+ 仓库仅提供 4.1）。详见 [部署说明](docs/部署说明.md)。
 
 ### 发版
 
@@ -105,9 +121,9 @@ git push origin v1.0.8
 ```
 
 流水线会自动完成以下步骤：
-1. 在 Windows runner 上安装 Go 1.26 + Node.js 20 + Wails CLI
-2. 执行 `wails build`（自动注入版本号和构建时间）
-3. 创建 GitHub Release 并上传 `workbench.exe`
+1. 在 Windows 与 Ubuntu 22.04 runner 上并行安装 Go 1.26 + Node.js 20 + Wails CLI（Linux 侧另装 GTK/WebKit 开发依赖）
+2. 执行 `wails build`（自动注入版本号和构建时间；Linux 侧叠加 `webkit2_41` 标签）
+3. 创建 GitHub Release 并上传 `workbench.exe`（Windows）与 `workbench-linux-amd64.tar.gz`（Linux，扁平布局：`workbench` 二进制 + `README-linux.md` 依赖说明，解压即用）
 
 > **CI 机制**：远程 `origin` 为 Gitee，是唯一主仓库；推送后 Gitee 会自动镜像到 GitHub，`release.yml` 据此自动构建发布，无需在本仓库配置 github remote，也无需手动同步 tag 到 GitHub。
 

@@ -98,6 +98,16 @@ async function addTab(wrapper) {
   await flushPromises()
 }
 
+/** 临时改写 navigator.userAgent（jsdom 默认 UA 无平台语义，用例内模拟目标平台） */
+function overrideUserAgent(ua, fn) {
+  Object.defineProperty(window.navigator, 'userAgent', { value: ua, configurable: true })
+  try {
+    fn()
+  } finally {
+    delete window.navigator.userAgent
+  }
+}
+
 describe('TerminalPanel.vue', () => {
   let wrapper
 
@@ -340,6 +350,48 @@ describe('TerminalPanel.vue', () => {
     expect(dirBasename('C:\\')).toBe('C:')
     expect(dirBasename('/')).toBe('/')
     expect(dirBasename('')).toBe('')
+  })
+
+  it('终端兜底目录平台化：UA 含 Windows 兜底 C:\\，非 Windows 兜底 /', async () => {
+    wrapper = await createWrapper()
+    const fallbackTerminalDir = wrapper.vm.$.setupState.fallbackTerminalDir
+    // 默认 jsdom UA（win32/linux）不含 "Windows" → 非 Windows 分支
+    expect(fallbackTerminalDir()).toBe('/')
+    // 模拟 Windows WebView2 UA
+    overrideUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', () => {
+      expect(fallbackTerminalDir()).toBe('C:\\')
+    })
+  })
+
+  it('文件树目录为空时新建首个 tab 走平台兜底目录（jsdom UA → /）', async () => {
+    wrapper = await createWrapper()
+    const uiStore = useUiStore()
+    uiStore.terminalDir = ''
+    uiStore.terminalVisible = true
+    await nextTick()
+    await flushPromises()
+
+    expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+      expect.any(Object),
+      '/',
+      'powershell'
+    )
+  })
+
+  it('空目录快照恢复时 tab 目录走平台兜底（jsdom UA → /）', async () => {
+    wrapper = await createWrapper()
+    const uiStore = useUiStore()
+    uiStore.terminalTabsSnapshot = [{ workDir: '', shellType: 'powershell' }]
+    uiStore.terminalVisible = true
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.vm.$.setupState.tabs).toHaveLength(1)
+    expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+      expect.any(Object),
+      '/',
+      'powershell'
+    )
   })
 
   it('tab 溢出时滚轮驱动横向滚动（滚动条隐藏后的鼠标滚动方式）', async () => {

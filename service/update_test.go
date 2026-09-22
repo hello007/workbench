@@ -1,12 +1,17 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -219,9 +224,77 @@ func newUpdateSvcWithMock(status int, body string) *UpdateService {
 	return svc
 }
 
+// TestUpdateAssetName_MatchesPlatform 资产名按 GOOS 返回（与 release.yml 产物名严格一致）
+func TestUpdateAssetName_MatchesPlatform(t *testing.T) {
+	want := updateAssetWindows
+	if runtime.GOOS != "windows" {
+		want = updateAssetLinux
+	}
+	if updateAssetName() != want {
+		t.Errorf("updateAssetName() = %q, want %q", updateAssetName(), want)
+	}
+}
+
+// TestUpdateBinaryPath_MatchesPlatform 更新目录内二进制路径按平台返回：
+// Windows 资产即二进制本体；Linux 为解包产物 workbench
+func TestUpdateBinaryPath_MatchesPlatform(t *testing.T) {
+	got := updateBinaryPath("/tmp/upd")
+	want := filepath.Join("/tmp/upd", updateAssetWindows)
+	if runtime.GOOS != "windows" {
+		want = filepath.Join("/tmp/upd", updateBinaryLinux)
+	}
+	if got != want {
+		t.Errorf("updateBinaryPath() = %q, want %q", got, want)
+	}
+}
+
+// buildTestTarGz 构造测试用最小 tar.gz（扁平布局多成员），返回字节流。
+// 仅 Linux 下载分支消费（模拟 release.yml 打包产物结构），Windows 分支载荷为 exe 字节；
+// 无条件编译隔离以简化引用（跨平台编译均可达，行为由运行时 GOOS 分支决定）。
+func buildTestTarGz(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+	for name, content := range files {
+		if err := tw.WriteHeader(&tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     name,
+			Mode:     0o755,
+			Size:     int64(len(content)),
+		}); err != nil {
+			t.Fatalf("写 tar 头 %s: %v", name, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			t.Fatalf("写 tar 内容 %s: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("关闭 tar: %v", err)
+	}
+	if err := gzw.Close(); err != nil {
+		t.Fatalf("关闭 gzip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// updateTestPayload 按当前平台资产形态构造测试下载载荷：
+// Windows 为 exe 字节直接落地；Linux 为最小 tar.gz（覆盖下载后解包链路）。
+func updateTestPayload(t *testing.T) []byte {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return []byte("fake exe content")
+	}
+	return buildTestTarGz(t, map[string][]byte{
+		updateBinaryLinux: []byte("fake linux binary"),
+		"README-linux.md": []byte("readme"),
+	})
+}
+
 // TestCheckForUpdate_Success 有效响应返回 UpdateInfo，版本比较正确。
+// 资产名按当前平台构造（Windows/Linux CI 均须命中各自资产）。
 func TestCheckForUpdate_Success(t *testing.T) {
-	body := `{"tag_name":"v1.0.5","body":"release notes","published_at":"2026-01-01","assets":[{"name":"workbench.exe","browser_download_url":"http://example.com/wb.exe","size":12345}]}`
+	body := fmt.Sprintf(`{"tag_name":"v1.0.5","body":"release notes","published_at":"2026-01-01","assets":[{"name":%q,"browser_download_url":"http://example.com/asset","size":12345}]}`, updateAssetName())
 	svc := newUpdateSvcWithMock(200, body)
 	info, err := svc.CheckForUpdate("1.0.0")
 	if err != nil {
@@ -233,7 +306,7 @@ func TestCheckForUpdate_Success(t *testing.T) {
 	if info.LatestVer != "1.0.5" {
 		t.Errorf("LatestVer: got %s, want 1.0.5", info.LatestVer)
 	}
-	if info.DownloadURL != "http://example.com/wb.exe" {
+	if info.DownloadURL != "http://example.com/asset" {
 		t.Errorf("DownloadURL: got %s", info.DownloadURL)
 	}
 	if info.FileSize != 12345 {
@@ -280,7 +353,7 @@ func TestCheckForUpdate_HttpError(t *testing.T) {
 
 // TestCheckForUpdate_NoUpdate 当前版本已最新时 HasUpdate=false。
 func TestCheckForUpdate_NoUpdate(t *testing.T) {
-	body := `{"tag_name":"v1.0.0","assets":[{"name":"workbench.exe","browser_download_url":"http://x","size":1}]}`
+	body := fmt.Sprintf(`{"tag_name":"v1.0.0","assets":[{"name":%q,"browser_download_url":"http://x","size":1}]}`, updateAssetName())
 	svc := newUpdateSvcWithMock(200, body)
 	info, err := svc.CheckForUpdate("1.0.0")
 	if err != nil {
@@ -297,13 +370,17 @@ func cleanupUpdateDir(t *testing.T) {
 	_ = os.RemoveAll(filepath.Join(os.TempDir(), UpdateTempDir))
 }
 
-// TestDownloadUpdate_Success 下载成功写入 workbench.exe 与 pending 标记。
+// TestDownloadUpdate_Success 下载成功写入平台资产并生成 pending 标记。
+// Windows 资产为 exe 字节直接落地；Linux 资产为 tar.gz，断言解包出的二进制内容
+// （解包细节由 update_extract_linux_test.go 覆盖）。
 func TestDownloadUpdate_Success(t *testing.T) {
 	cleanupUpdateDir(t)
 	defer cleanupUpdateDir(t)
 
+	payload := updateTestPayload(t)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("fake exe content"))
+		w.Write(payload)
 	}))
 	defer srv.Close()
 
@@ -311,16 +388,28 @@ func TestDownloadUpdate_Success(t *testing.T) {
 	if err := svc.DownloadUpdate(srv.URL); err != nil {
 		t.Fatalf("DownloadUpdate: %v", err)
 	}
-	target := filepath.Join(os.TempDir(), UpdateTempDir, "workbench.exe")
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("读下载文件: %v", err)
+
+	updateDir := filepath.Join(os.TempDir(), UpdateTempDir)
+	if runtime.GOOS == "windows" {
+		data, err := os.ReadFile(filepath.Join(updateDir, updateAssetWindows))
+		if err != nil {
+			t.Fatalf("读下载文件: %v", err)
+		}
+		if string(data) != "fake exe content" {
+			t.Errorf("下载内容不符: %q", data)
+		}
+	} else {
+		data, err := os.ReadFile(filepath.Join(updateDir, updateBinaryLinux))
+		if err != nil {
+			t.Fatalf("读解包二进制: %v", err)
+		}
+		if string(data) != "fake linux binary" {
+			t.Errorf("解包内容不符: %q", data)
+		}
 	}
-	if string(data) != "fake exe content" {
-		t.Errorf("下载内容不符: %q", data)
-	}
+
 	// pending 标记应已生成
-	pending := filepath.Join(os.TempDir(), UpdateTempDir, PendingUpdateFile)
+	pending := filepath.Join(updateDir, PendingUpdateFile)
 	if !util.FileExists(pending) {
 		t.Error("pending 标记应已生成")
 	}

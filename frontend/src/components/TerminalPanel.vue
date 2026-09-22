@@ -176,6 +176,14 @@ function shellDisplayName(type) {
   return cfg ? cfg.displayName : type
 }
 
+// 终端兜底目录（平台感知）：仅文件树当前目录为空（未选目录 / 空目录快照恢复）时触发。
+// Windows 维持 'C:\\'（盘符根，历史行为不变）；非 Windows 兜底 '/'（POSIX 根目录，
+// 目录恒有效且可预测——空串会让 PTY 继承 workbench 进程 cwd，serve 模式下不可预测）。
+// 平台检测经 userAgent：Windows WebView2 含 "Windows NT"，Linux WebKitGTK 含 "Linux"。
+function fallbackTerminalDir() {
+  return /Windows/.test(navigator.userAgent) ? 'C:\\' : '/'
+}
+
 // 目录尾段名（tab 副标签）：'D:\\work\\demo' → 'demo'，兼容正反斜杠；
 // 根目录（'C:\\'）尾段为空时回退盘符形式 'C:'，避免副标签空白
 function dirBasename(dir) {
@@ -251,7 +259,7 @@ function restoreTabsFromSnapshot() {
   for (const item of snapshotTabs) {
     const shellType = item.shellType || defaultShell.value
     const tab = createTab({
-      dir: item.workDir,
+      dir: item.workDir || fallbackTerminalDir(),
       shellType,
       title: shellDisplayName(shellType)
     })
@@ -276,7 +284,7 @@ watch(
         const restored = restoreTabsFromSnapshot()
         if (restored === 0) {
           const tab = createTab({
-            dir: uiStore.terminalDir || 'C:\\',
+            dir: uiStore.terminalDir || fallbackTerminalDir(),
             shellType: defaultShell.value,
             title: shellDisplayName(defaultShell.value)
           })
@@ -303,7 +311,7 @@ async function initTab(tab) {
     initedTabs.delete(tab.id)
     return
   }
-  await inst.initTerminal(container, tab.dir || 'C:\\', tab.shellType)
+  await inst.initTerminal(container, tab.dir || fallbackTerminalDir(), tab.shellType)
   inst.focus()
 }
 
@@ -324,11 +332,11 @@ async function ensureActiveTabReady() {
   }
 }
 
-// 新建 tab：目录继承文件树当前目录（D2 继承语义），Shell 类型取设置页默认值
+// 新建 tab：目录继承文件树当前目录（D2 继承语义，空时走平台兜底），Shell 类型取设置页默认值
 async function onAddTab() {
   if (atLimit.value) return
   const tab = createTab({
-    dir: uiStore.terminalDir || 'C:\\',
+    dir: uiStore.terminalDir || fallbackTerminalDir(),
     shellType: defaultShell.value,
     title: shellDisplayName(defaultShell.value)
   })

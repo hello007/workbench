@@ -145,7 +145,7 @@ func TestDownloadUpdate_EmitsProgressViaSink(t *testing.T) {
 	defer cleanupUpdateDir(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("fake exe content"))
+		_, _ = w.Write(updateTestPayload(t)) // 载荷按平台资产形态构造（Linux 为 tar.gz，须可解包）
 	}))
 	defer srv.Close()
 
