@@ -77,10 +77,22 @@ export function getTerminalTheme(resolved) {
   return resolved === 'dark' ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
 }
 
-// 终端默认外观（字号/回滚行数）；PR 外观设置接入后由设置页覆盖
+// 终端兜底默认外观（字号/回滚行数）。正常路径由设置页持久化值
+// （settings store terminalFontSize/terminalFontFamily/terminalScrollback）覆盖；
+// store 异常时仍保证 xterm 拿到合法配置
 export const TERMINAL_DEFAULTS = {
   fontSize: 14,
   scrollback: 1000
+}
+
+/**
+ * 构建终端 fontFamily：设置页选值（或默认 Cascadia Code 栈）为主字体，
+ * 补齐等宽 fallback 链，保证缺字形字符仍可渲染
+ * @param {string} fontFamily - 设置页保存的字体族名；空串 = 默认 Cascadia Code 栈
+ */
+export function buildTerminalFontFamily(fontFamily) {
+  const primary = fontFamily ? `"${fontFamily}"` : '"Cascadia Code", "Fira Code"'
+  return `${primary}, Consolas, "Courier New", monospace`
 }
 
 /**
@@ -105,7 +117,8 @@ export function useTerminal() {
   // 主题 store：读取实际生效主题 resolvedTheme，初始化与切换 xterm 主题
   const settingsStore = useSettingsStore()
 
-  // 初始化终端；options.fontSize/scrollback 覆盖默认外观（外观设置接入点）
+  // 初始化终端；options.fontSize/fontFamily/scrollback 显式传值时覆盖设置页外观
+  // （外观设置接入点，测试与特殊场景用），缺省从 settings store 读取持久化三字段
   async function initTerminal(container, dir, shellType, options = {}) {
     if (isActive.value && sessionID.value) {
       return
@@ -113,10 +126,10 @@ export function useTerminal() {
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: options.fontSize || TERMINAL_DEFAULTS.fontSize,
-      scrollback: options.scrollback || TERMINAL_DEFAULTS.scrollback,
+      fontSize: options.fontSize ?? settingsStore.terminalFontSize,
+      scrollback: options.scrollback ?? settingsStore.terminalScrollback,
       lineHeight: 1.2,
-      fontFamily: '"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace',
+      fontFamily: options.fontFamily ?? buildTerminalFontFamily(settingsStore.terminalFontFamily),
       theme: getTerminalTheme(settingsStore.resolvedTheme),
       allowProposedApi: true
     })
@@ -156,9 +169,8 @@ export function useTerminal() {
       if (sid === sessionID.value) {
         isActive.value = false
         isExited.value = true
-        if (term.value) {
-          term.value.writeln('\r\n\x1b[33m终端进程已退出。点击「重新启动」恢复。\x1b[0m')
-        }
+        // 退出提示由 TerminalPanel 面板内叠加提示条呈现（warning 语义色 + 重启入口），
+        // 不再向终端缓冲写裸色转义文案
       }
     })
 
@@ -269,6 +281,20 @@ export function useTerminal() {
       term.value.options.theme = getTerminalTheme(resolved)
     }
   })
+
+  // 终端外观热更：设置页控件 / 工具栏 A-/A+ 修改字号或字体后，已开终端实时生效。
+  // xterm 支持 options 热更；字号/字体变化改变 cols/rows 计算，须 refit 并通知后端
+  // PTY 同步尺寸（复用 resize() 的 fit + ResizeTerminal 链路）。
+  // scrollback 不热更（新建终端生效），未初始化时跳过（下次 initTerminal 按当时配置）
+  watch(
+    [() => settingsStore.terminalFontSize, () => settingsStore.terminalFontFamily],
+    () => {
+      if (!term.value) return
+      term.value.options.fontSize = settingsStore.terminalFontSize
+      term.value.options.fontFamily = buildTerminalFontFamily(settingsStore.terminalFontFamily)
+      resize()
+    }
+  )
 
   return {
     term,

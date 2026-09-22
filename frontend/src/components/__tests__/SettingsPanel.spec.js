@@ -66,6 +66,27 @@ const stubs = {
     }
   },
   'el-option': { template: '<option :value="value">{{ label }}</option>', props: ['label', 'value'] },
+  // el-input-number stub：number input 形态，change 时转数值后双向 emit（对齐真实组件 change 载荷）；
+  // 清空输入框时 emit valueOnClear（对齐真实组件 value-on-clear 语义，防 store 进 null/undefined）
+  'el-input-number': {
+    template: '<input type="number" class="el-input-number" :value="modelValue" @change="onChange" />',
+    props: ['modelValue', 'min', 'max', 'step', 'stepStrictly', 'size', 'valueOnClear'],
+    emits: ['update:modelValue', 'change'],
+    methods: {
+      onChange(e) {
+        const raw = e.target.value
+        if (raw === '') {
+          const cleared = this.valueOnClear === undefined ? null : this.valueOnClear
+          this.$emit('update:modelValue', cleared)
+          this.$emit('change', cleared)
+          return
+        }
+        const v = Number(raw)
+        this.$emit('update:modelValue', v)
+        this.$emit('change', v)
+      }
+    }
+  },
   'el-button': {
     template: '<button v-bind="$attrs" :disabled="loading" @click="$emit(\'click\')"><slot /></button>',
     props: ['type', 'size', 'loading', 'disabled', 'text'],
@@ -132,6 +153,9 @@ const baseSettings = (over = {}) => ({
   defaultShell: 'powershell',
   gitBashPath: 'C:\\Program Files\\Git\\bin\\bash.exe',
   wslDistro: '',
+  terminalFontSize: 14,
+  terminalFontFamily: '',
+  terminalScrollback: 1000,
   obsidianPath: '',
   searchExcludeDirs: ['node_modules'],
   searchExcludeFiles: ['.log'],
@@ -366,6 +390,75 @@ describe('SettingsPanel.vue', () => {
     await wrapper.find('.default-shell-select').setValue('wsl')
     await nextTick()
     expect(wrapper.text()).toContain('WSL 发行版')
+  })
+
+  it('终端 tab：渲染终端外观三项（字号/字体/回滚行数）', async () => {
+    wrapper = await createWrapper()
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    expect(wrapper.text()).toContain('终端外观')
+    expect(wrapper.text()).toContain('字号')
+    expect(wrapper.text()).toContain('字体')
+    expect(wrapper.text()).toContain('回滚行数')
+    expect(wrapper.find('.terminal-font-size-input').exists()).toBe(true)
+    expect(wrapper.find('.terminal-font-select').exists()).toBe(true)
+    expect(wrapper.find('.terminal-scrollback-input').exists()).toBe(true)
+  })
+
+  it('loadSettings 时经 store 加载已保存的终端外观三字段', async () => {
+    wrapper = await createWrapper({ terminalFontSize: 18, terminalFontFamily: 'Consolas', terminalScrollback: 5000 })
+    const store = useSettingsStore()
+    expect(store.terminalFontSize).toBe(18)
+    expect(store.terminalFontFamily).toBe('Consolas')
+    expect(store.terminalScrollback).toBe(5000)
+    // 数字输入框反映 store 值（设置页与工具栏 A-/A+ 双向同步的数据源）
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    expect(wrapper.find('.terminal-font-size-input').element.value).toBe('18')
+  })
+
+  it('字号变更触发 SaveSettings 且写入三字段', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const store = useSettingsStore()
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    const fontSizeInput = wrapper.find('.terminal-font-size-input')
+    await fontSizeInput.setValue('20')
+    await fontSizeInput.trigger('change')
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalled()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    expect(saved.terminalFontSize).toBe(20)
+    expect(saved.terminalFontFamily).toBe(store.terminalFontFamily)
+    expect(saved.terminalScrollback).toBe(store.terminalScrollback)
+  })
+
+  it('清空字号/回滚输入框时经 value-on-clear 回写默认值（store 不进 null/undefined）', async () => {
+    wrapper = await createWrapper()
+    const store = useSettingsStore()
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+
+    const fontSizeInput = wrapper.find('.terminal-font-size-input')
+    await fontSizeInput.setValue('')
+    await fontSizeInput.trigger('change')
+    expect(store.terminalFontSize).toBe(14)
+
+    const scrollbackInput = wrapper.find('.terminal-scrollback-input')
+    await scrollbackInput.setValue('')
+    await scrollbackInput.trigger('change')
+    expect(store.terminalScrollback).toBe(1000)
+  })
+
+  it('终端外观保存失败时 error 提示', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SaveSettings.mockRejectedValue(new Error('disk full'))
+    wrapper = await createWrapper()
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    const fontSizeInput = wrapper.find('.terminal-font-size-input')
+    await fontSizeInput.setValue('16')
+    await fontSizeInput.trigger('change')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('保存终端外观设置失败'))
   })
 
   it('obsidian 路径变更触发 SaveSettings', async () => {

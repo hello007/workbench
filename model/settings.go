@@ -20,12 +20,26 @@ type WebServeConfig struct {
 	AccessUrls  []string `json:"accessUrls"`  // 候选访问地址（含回环与本机局域网 IPv4，同网段设备可达）
 }
 
+// 终端外观默认值与取值边界（设置页控件与工具栏 A-/A+ 快捷调节共用同一边界；
+// 前端 settings store 的 TERMINAL_APPEARANCE_DEFAULTS 等常量与此对齐）
+const (
+	DefaultTerminalFontSize   = 14
+	MinTerminalFontSize       = 10
+	MaxTerminalFontSize       = 24
+	DefaultTerminalScrollback = 1000
+	MinTerminalScrollback     = 1000
+	MaxTerminalScrollback     = 10000
+)
+
 // AppSettings 应用设置
 type AppSettings struct {
 	GpuDisabled        bool     `json:"gpuDisabled"`
 	DefaultShell       string   `json:"defaultShell"`       // 默认 Shell 类型：powershell/cmd/gitbash/wsl
 	GitBashPath        string   `json:"gitBashPath"`        // Git Bash 自定义路径
 	WslDistro          string   `json:"wslDistro"`          // WSL 发行版名称
+	TerminalFontSize   int      `json:"terminalFontSize"`   // 终端字号（pt），默认 14，范围 10-24
+	TerminalFontFamily string   `json:"terminalFontFamily"` // 终端字体族，空值走默认 Cascadia Code 字体栈
+	TerminalScrollback int      `json:"terminalScrollback"` // 终端回滚行数，默认 1000，范围 1000-10000
 	SearchExcludeDirs  []string `json:"searchExcludeDirs"`  // 搜索排除目录
 	SearchExcludeFiles     []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
 	ShortcutCommandPalette string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
@@ -57,4 +71,30 @@ func (s *AppSettings) EnsureWebServeDefaults() {
 	if s.WebServe.BindAddress == "" {
 		s.WebServe.BindAddress = DefaultWebServeBindAddress
 	}
+}
+
+// EnsureTerminalDefaults 补全终端外观默认值并收敛越界值：
+//   - 字号/回滚行数零值（老配置升级、字段缺失、损坏降级）→ 补默认（14 / 1000）；
+//   - 手改配置文件越界值 → clamp 收敛到合法区间（字号 10-24、回滚 1000-10000），
+//     防 xterm 拿到异常配置（字号过小不可读、过大破坏布局，scrollback 超限放大内存）；
+//   - TerminalFontFamily 空串即默认 Cascadia Code 字体栈，不强制填充。
+//
+// 在 SettingsService.Load 返回前统一调用，保证前端 GetSettings 拿到的三字段始终可用。
+func (s *AppSettings) EnsureTerminalDefaults() {
+	s.TerminalFontSize = clampTerminalInt(s.TerminalFontSize, MinTerminalFontSize, MaxTerminalFontSize, DefaultTerminalFontSize)
+	s.TerminalScrollback = clampTerminalInt(s.TerminalScrollback, MinTerminalScrollback, MaxTerminalScrollback, DefaultTerminalScrollback)
+}
+
+// clampTerminalInt 零值回退默认，越界收敛到 [min, max]。
+func clampTerminalInt(v, min, max, def int) int {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }

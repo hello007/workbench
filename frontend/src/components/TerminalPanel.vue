@@ -48,19 +48,23 @@
         </span>
       </div>
       <div class="terminal-toolbar-right">
-        <transition name="fade">
-          <el-button
-            v-if="activeTab && activeTab.isExited"
-            size="small"
-            type="primary"
-            text
-            class="restart-btn"
-            @click="onRestart"
-          >
-            <el-icon :size="14"><RefreshRight /></el-icon>
-            重新启动
-          </el-button>
-        </transition>
+        <!-- 字号快捷调节（R5）：A-/A+ 步进 ±1，与设置页共享 store 字段双向同步；
+             达边界禁用（store clamp 保证不越界，按钮态仅反馈） -->
+        <div class="font-size-controls">
+          <span
+            class="toolbar-btn font-step-btn"
+            :class="{ 'is-disabled': settingsStore.terminalFontSize <= TERMINAL_FONT_SIZE_MIN }"
+            :title="settingsStore.terminalFontSize <= TERMINAL_FONT_SIZE_MIN ? '已达最小字号' : '减小字号'"
+            @click="onFontSizeStep(-1)"
+          >A−</span>
+          <span class="font-size-value" title="当前终端字号（设置页可改字体与回滚行数）">{{ settingsStore.terminalFontSize }}</span>
+          <span
+            class="toolbar-btn font-step-btn"
+            :class="{ 'is-disabled': settingsStore.terminalFontSize >= TERMINAL_FONT_SIZE_MAX }"
+            :title="settingsStore.terminalFontSize >= TERMINAL_FONT_SIZE_MAX ? '已达最大字号' : '增大字号'"
+            @click="onFontSizeStep(1)"
+          >A+</span>
+        </div>
         <div class="toolbar-actions">
           <!-- 整窗全屏切换（D5）：停靠态显示最大化入口，全屏态切换为还原图标；ESC 亦可退出 -->
           <span
@@ -93,19 +97,32 @@
         :ref="el => setTabContainer(tab.id, el)"
         class="terminal-container"
       ></div>
+      <!-- 退出态提示条（R6）：活动 tab 会话退出时叠加于终端区底部（warning 语义色卡片，
+           替代原向终端缓冲写裸黄字）；重启入口随条内按钮，恢复运行后整条消失 -->
+      <transition name="fade">
+        <div v-if="activeTab && activeTab.isExited" class="terminal-exit-overlay">
+          <el-icon :size="14" class="exit-icon"><WarningFilled /></el-icon>
+          <span class="exit-text">终端会话已退出</span>
+          <el-button size="small" type="warning" plain class="exit-restart-btn" @click="onRestart">
+            <el-icon :size="12"><RefreshRight /></el-icon>
+            重新启动
+          </el-button>
+        </div>
+      </transition>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Folder, RefreshRight, FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
+import { Folder, RefreshRight, FullScreen, ScaleToOriginal, WarningFilled } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
-import { useUiStore } from '../store'
+import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX } from '../store'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
 const uiStore = useUiStore()
+const settingsStore = useSettingsStore()
 
 defineEmits(['toggle'])
 
@@ -354,6 +371,12 @@ async function onRestart() {
   await inst.restartTerminal(container, tab.dir, tab.shellType)
 }
 
+// 字号快捷步进（A-/A+）：与设置页共享 store 字段（双向同步）；
+// 越界（边界外步进）由 store clamp 拦截（返回 false 不变不存），此处无需重复判断
+function onFontSizeStep(delta) {
+  settingsStore.stepTerminalFontSize(delta)
+}
+
 // ── 整窗全屏（D5）──
 // ESC 退出全屏：keydown 监听随全屏态挂载/卸载（精准注销，非全屏期不占用全局监听）。
 // 弹窗/命令面板内按 ESC 只关弹窗，不同时退出全屏：
@@ -479,7 +502,7 @@ onBeforeUnmount(async () => {
   align-items: center;
   justify-content: space-between;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 var(--spacing-md, 16px);
   background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
   border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
@@ -487,7 +510,7 @@ onBeforeUnmount(async () => {
 .terminal-toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-sm, 8px);
   min-width: 0;
   flex: 1;
 }
@@ -513,9 +536,9 @@ onBeforeUnmount(async () => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--spacing-xs, 4px);
   height: 26px;
-  padding: 0 4px 0 10px;
+  padding: 0 var(--spacing-xs, 4px) 0 var(--spacing-sm, 8px);
   border-radius: var(--radius-sm, 4px);
   color: var(--text-secondary, #64748b);
   cursor: pointer;
@@ -607,8 +630,8 @@ onBeforeUnmount(async () => {
 .shell-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 4px;
+  gap: var(--spacing-sm, 8px);
+  padding: 0 var(--spacing-xs, 4px);
 }
 
 .shell-dot {
@@ -643,8 +666,8 @@ onBeforeUnmount(async () => {
 .terminal-path {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
+  gap: var(--spacing-xs, 4px);
+  padding: 2px var(--spacing-sm, 8px);
   background: var(--bg-secondary);
   border-radius: var(--radius-sm, 4px);
   border: 1px solid var(--border-color, #e2e8f0);
@@ -670,17 +693,32 @@ onBeforeUnmount(async () => {
 .terminal-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--spacing-xs, 4px);
   flex-shrink: 0;
 }
 
-.restart-btn {
-  color: var(--warning-color, #d97706) !important;
-  font-size: 12px;
+/* 字号快捷调节（A− / 当前值 / A+）：等宽字体键帽风，值展示提供同步反馈 */
+.font-size-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs, 4px);
 }
 
-.restart-btn:hover {
-  color: var(--warning-color, #d97706) !important;
+.font-size-value {
+  min-width: 18px;
+  text-align: center;
+  font-size: 11px;
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary, #64748b);
+}
+
+.font-step-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
 }
 
 .toolbar-actions {
@@ -698,7 +736,7 @@ onBeforeUnmount(async () => {
   color: var(--text-tertiary, #64748b);
   cursor: pointer;
   border-radius: var(--radius-sm, 4px);
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
 }
 
 .toolbar-btn:hover {
@@ -710,13 +748,18 @@ onBeforeUnmount(async () => {
   transform: scale(0.92);
 }
 
-/* 新建 tab 按钮达上限态：禁用视觉 + 提示（title），点击 handler 内拦截 */
-.add-tab-btn.is-disabled {
+/* 禁用态（达上限新建 / 达边界字号）：去 hover 反馈 + 禁点击光标，点击 handler 内拦截 */
+.toolbar-btn.is-disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.add-tab-btn.is-disabled:active {
+.toolbar-btn.is-disabled:hover {
+  background: transparent;
+  color: var(--text-tertiary, #64748b);
+}
+
+.toolbar-btn.is-disabled:active {
   transform: none;
 }
 
@@ -737,6 +780,40 @@ onBeforeUnmount(async () => {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+/* 退出态提示条（R6）：面板内叠加于终端区底部居中（不挡顶部 prompt 输出），
+ * warning 语义色 + 变量派生（禁硬编码 rgba，随主题切换）；
+ * 底色以 bg-secondary 为主混入 warning 保证终端文字背景上仍可读 */
+.terminal-exit-overlay {
+  position: absolute;
+  bottom: var(--spacing-md, 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+  background: color-mix(in srgb, var(--warning-color, #d97706) 15%, var(--bg-secondary, #1e293b));
+  border: 1px solid color-mix(in srgb, var(--warning-color, #d97706) 35%, transparent);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-md, 0 4px 6px rgba(15, 23, 42, 0.08));
+  color: var(--warning-color, #d97706);
+  font-size: 12px;
+  z-index: 10;
+}
+
+.exit-icon {
+  flex-shrink: 0;
+}
+
+.exit-text {
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+}
+
+.exit-restart-btn {
+  flex-shrink: 0;
 }
 
 .terminal-container {

@@ -35,14 +35,16 @@ vi.mock('../../composables/useTerminal', async () => {
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetShellConfigs: vi.fn(),
-  GetSettings: vi.fn()
+  GetSettings: vi.fn(),
+  SaveSettings: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
   Folder: { template: '<i class="i-folder" />' },
   RefreshRight: { template: '<i class="i-refresh" />' },
   FullScreen: { template: '<i class="i-fullscreen" />' },
-  ScaleToOriginal: { template: '<i class="i-scale-to-original" />' }
+  ScaleToOriginal: { template: '<i class="i-scale-to-original" />' },
+  WarningFilled: { template: '<i class="i-warning" />' }
 }))
 
 const stubs = {
@@ -57,7 +59,7 @@ const stubs = {
 async function createWrapper(shellConfigsOver = null, settingsOver = null) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  const { GetShellConfigs, GetSettings } = await import('../../../wailsjs/go/main/App')
+  const { GetShellConfigs, GetSettings, SaveSettings } = await import('../../../wailsjs/go/main/App')
   if (shellConfigsOver === null) {
     GetShellConfigs.mockResolvedValue([{ type: 'powershell', displayName: 'PowerShell' }, { type: 'cmd', displayName: 'CMD' }])
   } else if (shellConfigsOver === 'fail') {
@@ -72,6 +74,7 @@ async function createWrapper(shellConfigsOver = null, settingsOver = null) {
   } else {
     GetSettings.mockResolvedValue(settingsOver)
   }
+  SaveSettings.mockResolvedValue(true)
   const uiStore = useUiStore()
   uiStore.terminalVisible = false
   const wrapper = mount(TerminalPanel, { global: { stubs, plugins: [pinia] } })
@@ -695,6 +698,103 @@ describe('TerminalPanel.vue', () => {
       expect(uiStore.terminalFullscreen).toBe(true)
 
       textarea.remove()
+    })
+  })
+
+  describe('终端外观设置（PR5/R5）与退出态提示条（R6）', () => {
+    it('工具栏渲染 A-/A+ 字号控件与当前字号值', async () => {
+      wrapper = await createWrapper()
+      expect(wrapper.find('.font-size-controls').exists()).toBe(true)
+      expect(wrapper.find('.font-size-value').text()).toBe('14')
+      expect(wrapper.find('.font-step-btn').exists()).toBe(true)
+    })
+
+    it('点击 A+ 增大字号并持久化（与设置页共享 store 字段）', async () => {
+      const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+      const { useSettingsStore } = await import('../../store')
+      wrapper = await createWrapper()
+      const settingsStore = useSettingsStore()
+      const plusBtn = wrapper.findAll('.font-step-btn')[1]
+      await plusBtn.trigger('click')
+      expect(settingsStore.terminalFontSize).toBe(15)
+      await flushPromises()
+      expect(SaveSettings).toHaveBeenCalled()
+    })
+
+    it('点击 A- 减小字号', async () => {
+      const { useSettingsStore } = await import('../../store')
+      wrapper = await createWrapper()
+      const settingsStore = useSettingsStore()
+      settingsStore.terminalFontSize = 16
+      await nextTick()
+      const minusBtn = wrapper.findAll('.font-step-btn')[0]
+      await minusBtn.trigger('click')
+      expect(settingsStore.terminalFontSize).toBe(15)
+    })
+
+    it('字号达下限 10 时 A- 禁用，达上限 24 时 A+ 禁用（不越界）', async () => {
+      const { useSettingsStore } = await import('../../store')
+      wrapper = await createWrapper()
+      const settingsStore = useSettingsStore()
+
+      settingsStore.terminalFontSize = 10
+      await nextTick()
+      const stepBtns = wrapper.findAll('.font-step-btn')
+      expect(stepBtns[0].classes()).toContain('is-disabled')
+      expect(stepBtns[1].classes()).not.toContain('is-disabled')
+
+      settingsStore.terminalFontSize = 24
+      await nextTick()
+      expect(wrapper.findAll('.font-step-btn')[0].classes()).not.toContain('is-disabled')
+      expect(wrapper.findAll('.font-step-btn')[1].classes()).toContain('is-disabled')
+    })
+
+    it('活动 tab 退出时终端区显示叠加提示条（替代裸黄字）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      expect(wrapper.find('.terminal-exit-overlay').exists()).toBe(false)
+
+      capturedInstances[0].isExited.value = true
+      await nextTick()
+      const overlay = wrapper.find('.terminal-exit-overlay')
+      expect(overlay.exists()).toBe(true)
+      expect(overlay.text()).toContain('终端会话已退出')
+      expect(overlay.find('.exit-restart-btn').exists()).toBe(true)
+    })
+
+    it('点击提示条重新启动按钮针对活动 tab 重建会话', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      capturedInstances[0].isExited.value = true
+      await nextTick()
+      await wrapper.find('.exit-restart-btn').trigger('click')
+      await flushPromises()
+      expect(terminalMock.restartTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\proj',
+        'powershell'
+      )
+    })
+
+    it('会话恢复运行后提示条消失', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      capturedInstances[0].isExited.value = true
+      await nextTick()
+      expect(wrapper.find('.terminal-exit-overlay').exists()).toBe(true)
+
+      capturedInstances[0].isExited.value = false
+      await nextTick()
+      expect(wrapper.find('.terminal-exit-overlay').exists()).toBe(false)
+    })
+
+    it('非活动 tab 退出不显示提示条（仅 tab 黄点标记）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\a')
+      await addTab(wrapper)
+      capturedInstances[0].isExited.value = true // tab-1 非活动（活动为 tab-2）
+      await nextTick()
+      expect(wrapper.find('.terminal-exit-overlay').exists()).toBe(false)
     })
   })
 })

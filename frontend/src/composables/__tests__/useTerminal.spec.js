@@ -8,7 +8,7 @@ import { flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 // 用 vi.hoisted 声明捕获变量，确保 vi.mock 工厂可安全引用（hoistable）
-const captures = vi.hoisted(() => ({ lastTerminal: null, lastTerminalConfig: null, offFns: [] }))
+const captures = vi.hoisted(() => ({ lastTerminal: null, lastTerminalConfig: null, lastFit: null, offFns: [] }))
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn(function (config) {
@@ -16,7 +16,8 @@ vi.mock('@xterm/xterm', () => ({
     captures.lastTerminal = {
       cols: 80,
       rows: 24,
-      options: { theme: config.theme },
+      // options 承载初始化配置（xterm options 可运行时热更，测试模拟同款语义）
+      options: { theme: config.theme, fontSize: config.fontSize, fontFamily: config.fontFamily },
       loadAddon: vi.fn(),
       open: vi.fn(),
       onData: vi.fn(),
@@ -29,7 +30,10 @@ vi.mock('@xterm/xterm', () => ({
   })
 }))
 vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: vi.fn(function () { return { fit: vi.fn() } })
+  FitAddon: vi.fn(function () {
+    captures.lastFit = { fit: vi.fn() }
+    return captures.lastFit
+  })
 }))
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: vi.fn(function () { return {} })
@@ -62,6 +66,7 @@ describe('useTerminal - 主题切换', () => {
     vi.clearAllMocks()
     captures.lastTerminal = null
     captures.lastTerminalConfig = null
+    captures.lastFit = null
     settingsStore = useSettingsStore()
   })
 
@@ -129,6 +134,7 @@ describe('useTerminal - 多实例事件治理', () => {
     vi.clearAllMocks()
     captures.lastTerminal = null
     captures.lastTerminalConfig = null
+    captures.lastFit = null
     captures.offFns = []
     settingsStore = useSettingsStore()
   })
@@ -186,5 +192,78 @@ describe('useTerminal - 多实例事件治理', () => {
     // 仅 t1 的两个闭包被调用，t2 的保持未调用
     const calledCount = captures.offFns.filter((off) => off.mock.calls.length > 0).length
     expect(calledCount).toBe(2)
+  })
+})
+
+describe('useTerminal - 外观设置热更（PR5/R5）', () => {
+  let settingsStore
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    captures.lastTerminal = null
+    captures.lastTerminalConfig = null
+    captures.lastFit = null
+    settingsStore = useSettingsStore()
+  })
+
+  it('initTerminal 未传 options 时从 settings store 读取外观三字段', async () => {
+    settingsStore.terminalFontSize = 18
+    settingsStore.terminalFontFamily = 'Consolas'
+    settingsStore.terminalScrollback = 5000
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    expect(captures.lastTerminalConfig.fontSize).toBe(18)
+    expect(captures.lastTerminalConfig.fontFamily).toBe('"Consolas", Consolas, "Courier New", monospace')
+    expect(captures.lastTerminalConfig.scrollback).toBe(5000)
+  })
+
+  it('initTerminal 未配置字体时使用默认 Cascadia Code 栈', async () => {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    expect(captures.lastTerminalConfig.fontFamily).toBe('"Cascadia Code", "Fira Code", Consolas, "Courier New", monospace')
+  })
+
+  it('options 显式传值优先于 store 外观配置', async () => {
+    settingsStore.terminalFontSize = 18
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell', { fontSize: 12 })
+    await flushPromises()
+    expect(captures.lastTerminalConfig.fontSize).toBe(12)
+  })
+
+  it('字号变化热更 term.options.fontSize 并 refit（fit + ResizeTerminal 链路）', async () => {
+    const { ResizeTerminal } = await import('../../../wailsjs/go/main/App')
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    expect(captures.lastTerminal.options.fontSize).toBe(14)
+    captures.lastFit.fit.mockClear()
+    ResizeTerminal.mockClear()
+
+    settingsStore.terminalFontSize = 20
+    await nextTick()
+    expect(captures.lastTerminal.options.fontSize).toBe(20)
+    // 字号变化改变 cols/rows 计算：refit + 通知后端 PTY 同步尺寸
+    expect(captures.lastFit.fit).toHaveBeenCalled()
+    expect(ResizeTerminal).toHaveBeenCalled()
+  })
+
+  it('字体变化热更 term.options.fontFamily', async () => {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    settingsStore.terminalFontFamily = 'Courier New'
+    await nextTick()
+    expect(captures.lastTerminal.options.fontFamily).toBe('"Courier New", Consolas, "Courier New", monospace')
+  })
+
+  it('终端未初始化时外观变化不报错（term.value 为 null）', async () => {
+    const t = useTerminal()
+    settingsStore.terminalFontSize = 20
+    await nextTick()
+    expect(t.term.value).toBeNull()
   })
 })

@@ -193,3 +193,54 @@ func TestSettingsSave_RoundTrip_WebServe(t *testing.T) {
 		t.Errorf("webServe 段 round-trip 不一致: %+v", got.WebServe)
 	}
 }
+
+// TestSettingsLoad_TerminalDefaults 老配置（无终端外观字段）升级加载后
+// 字号/回滚行数补默认值，字体保留空串语义（默认 Cascadia Code 栈）。
+func TestSettingsLoad_TerminalDefaults(t *testing.T) {
+	svc := newSettingsSvc(t)
+	got, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.TerminalFontSize != model.DefaultTerminalFontSize {
+		t.Errorf("TerminalFontSize 缺省应补 %d, got %d", model.DefaultTerminalFontSize, got.TerminalFontSize)
+	}
+	if got.TerminalScrollback != model.DefaultTerminalScrollback {
+		t.Errorf("TerminalScrollback 缺省应补 %d, got %d", model.DefaultTerminalScrollback, got.TerminalScrollback)
+	}
+	if got.TerminalFontFamily != "" {
+		t.Errorf("TerminalFontFamily 缺省应保留空串, got %q", got.TerminalFontFamily)
+	}
+}
+
+// TestSettingsLoad_TerminalClamp 手改配置文件写入越界值时 clamp 收敛到
+// 合法区间（字号 10-24、回滚 1000-10000），界内用户取值原样保留。
+func TestSettingsLoad_TerminalClamp(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(p, []byte(`{"terminalFontSize":99,"terminalScrollback":1}`), 0o644); err != nil {
+		t.Fatalf("准备越界配置: %v", err)
+	}
+
+	got, err := NewSettingsService(p).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.TerminalFontSize != model.MaxTerminalFontSize {
+		t.Errorf("字号越界应收敛到上限 %d, got %d", model.MaxTerminalFontSize, got.TerminalFontSize)
+	}
+	if got.TerminalScrollback != model.MinTerminalScrollback {
+		t.Errorf("回滚越界应收敛到下限 %d, got %d", model.MinTerminalScrollback, got.TerminalScrollback)
+	}
+
+	// 界内取值原样保留
+	if err := os.WriteFile(p, []byte(`{"terminalFontSize":18,"terminalScrollback":5000}`), 0o644); err != nil {
+		t.Fatalf("准备界内配置: %v", err)
+	}
+	got, err = NewSettingsService(p).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.TerminalFontSize != 18 || got.TerminalScrollback != 5000 {
+		t.Errorf("界内取值应原样保留, got fontSize=%d scrollback=%d", got.TerminalFontSize, got.TerminalScrollback)
+	}
+}

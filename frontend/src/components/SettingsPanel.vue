@@ -131,6 +131,51 @@
             </div>
             <el-input v-model="wslDistro" size="small" class="input-w-lg" @change="onSettingsChange" />
           </div>
+          <!-- 终端外观（R5/D4）：字号/字体/回滚行数，字号改动对已开终端实时生效 -->
+          <div class="settings-section-title settings-section-title--spaced">终端外观</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">字号</div>
+              <div class="settings-item-desc">终端文字大小（10-24），改动对已打开终端实时生效；工具栏 A-/A+ 可快捷调节</div>
+            </div>
+            <el-input-number
+              v-model="settingsStore.terminalFontSize"
+              class="terminal-font-size-input"
+              :min="TERMINAL_FONT_SIZE_MIN"
+              :max="TERMINAL_FONT_SIZE_MAX"
+              :step="1"
+              :value-on-clear="TERMINAL_APPEARANCE_DEFAULTS.fontSize"
+              step-strictly
+              size="small"
+              @change="onTerminalAppearanceChange"
+            />
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">字体</div>
+              <div class="settings-item-desc">终端等宽字体，默认 Cascadia Code 栈</div>
+            </div>
+            <el-select v-model="settingsStore.terminalFontFamily" class="terminal-font-select input-w-md" size="small" @change="onTerminalAppearanceChange">
+              <el-option v-for="opt in terminalFontOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">回滚行数</div>
+              <div class="settings-item-desc">可回看的历史输出行数（1000-10000），新建终端生效</div>
+            </div>
+            <el-input-number
+              v-model="settingsStore.terminalScrollback"
+              class="terminal-scrollback-input"
+              :min="TERMINAL_SCROLLBACK_MIN"
+              :max="TERMINAL_SCROLLBACK_MAX"
+              :step="1000"
+              :value-on-clear="TERMINAL_APPEARANCE_DEFAULTS.scrollback"
+              step-strictly
+              size="small"
+              @change="onTerminalAppearanceChange"
+            />
+          </div>
         </div>
         <!-- 搜索页 -->
         <div v-show="activeTab === 'search'">
@@ -308,7 +353,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -340,6 +385,9 @@ const settingsStore = useSettingsStore()
 
 // 外部 diff 工具预设表（模板渲染，供 el-select 遍历）
 const diffToolPresets = DIFF_TOOL_PRESETS
+
+// 终端字体下拉选项（value 空串 = 默认 Cascadia Code 栈）
+const terminalFontOptions = TERMINAL_FONT_OPTIONS
 
 // 切换预设：填充该预设的默认路径与参数模板并保存（仍可手动修改）。
 // 模板用 :model-value 手动赋值（change 时 v-model 已写入新值，取消时无法回退）；
@@ -380,6 +428,15 @@ const onDiffToolChange = async () => {
     await settingsStore.saveDiffTool()
   } catch (e) {
     ElMessage.error('保存外部 diff 工具配置失败: ' + (e?.message || String(e)))
+  }
+}
+
+// 终端外观三项（字号/字体/回滚行数）变更后保存（store 合并写）
+const onTerminalAppearanceChange = async () => {
+  try {
+    await settingsStore.saveTerminalAppearance()
+  } catch (e) {
+    ElMessage.error('保存终端外观设置失败: ' + (e?.message || String(e)))
   }
 }
 
@@ -734,6 +791,7 @@ async function loadSettings() {
     excludeFiles.value = settings.searchExcludeFiles || []
     await settingsStore.loadShortcuts()
     await settingsStore.loadDiffTool()
+    await settingsStore.loadTerminalAppearance()
   } catch {
     gpuEnabled.value = true
   }

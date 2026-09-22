@@ -346,7 +346,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ## 23. 终端
 
-pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃恢复仅恢复工作目录。
+pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃恢复按快照循环重建全部 tab（每 tab 一次 `CreateTerminal`）。
 
 | 方法 | 签名 | 语义 | 返回值 |
 |---|---|---|---|
@@ -527,11 +527,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `version` | string? | 快照格式版本 |
 | `savedAt` | number? | 保存时间戳 |
 
-**TerminalSnapshot**（`visible` / `height` / `workDir`）
+**TerminalSnapshot**（`visible` / `height` / `workDir`（旧版单终端兼容读取源，新快照不写入）/ `tabs`（v2 多终端 tab 列表 `TerminalTabSnapshot[]`：`workDir` / `shellType`）/ `activeIndex` / `fullscreen`）
 
 ### 28.4 设置与更新
 
-**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）
+**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
 
 **WebServeSettings** — 浏览器访问通道配置（`AppSettings.webServe` 段；指针形态区分「段缺失」与「显式关闭」，加载时经 `EnsureWebServeDefaults` 补默认值）
 

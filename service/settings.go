@@ -24,6 +24,9 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 	// webServe 段默认值补全（段缺失/地址为空 → 默认开启 + 回环地址），
 	// 保证桌面 startup 与 --serve 地址解析拿到的配置始终完整可用
 	settings.EnsureWebServeDefaults()
+	// 终端外观三字段默认值补全与越界收敛（零值 → 默认，越界 clamp），
+	// 保证前端 GetSettings 拿到的字号/字体/回滚配置始终可用
+	settings.EnsureTerminalDefaults()
 	return settings, nil
 }
 

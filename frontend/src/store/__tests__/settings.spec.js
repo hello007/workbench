@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { flushPromises } from '@vue/test-utils'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(() => Promise.resolve({})),
@@ -13,7 +14,13 @@ import {
   formatDisplay,
   shortcutFromEvent,
   DEFAULTS,
-  DIFF_TOOL_PRESETS
+  DIFF_TOOL_PRESETS,
+  TERMINAL_APPEARANCE_DEFAULTS,
+  TERMINAL_FONT_SIZE_MIN,
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_SCROLLBACK_MIN,
+  TERMINAL_SCROLLBACK_MAX,
+  TERMINAL_FONT_OPTIONS
 } from '..'
 import { GetSettings, SaveSettings } from '../../../wailsjs/go/main/App'
 
@@ -383,5 +390,113 @@ describe('settings store - 外部 diff 工具 (diffTool/loadDiffTool/saveDiffToo
       expect(preset.args).toContain('{right}')
     }
     expect(DIFF_TOOL_PRESETS.vscode.args).toBe('--diff --wait {left} {right}')
+  })
+})
+
+describe('settings store - 终端外观 (terminalFontSize/fontFamily/scrollback)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    SaveSettings.mockResolvedValue(true)
+  })
+
+  it('默认值：字号 14 / 字体空串（Cascadia Code 栈）/ 回滚 1000，与后端常量对齐', () => {
+    const store = useSettingsStore()
+    expect(store.terminalFontSize).toBe(TERMINAL_APPEARANCE_DEFAULTS.fontSize)
+    expect(store.terminalFontSize).toBe(14)
+    expect(store.terminalFontFamily).toBe('')
+    expect(store.terminalScrollback).toBe(TERMINAL_APPEARANCE_DEFAULTS.scrollback)
+    expect(store.terminalScrollback).toBe(1000)
+    expect(TERMINAL_FONT_SIZE_MIN).toBe(10)
+    expect(TERMINAL_FONT_SIZE_MAX).toBe(24)
+    expect(TERMINAL_SCROLLBACK_MIN).toBe(1000)
+    expect(TERMINAL_SCROLLBACK_MAX).toBe(10000)
+  })
+
+  it('TERMINAL_FONT_OPTIONS 含默认 Cascadia Code 栈（空串 value）与 Consolas/Courier New', () => {
+    expect(TERMINAL_FONT_OPTIONS.map(o => o.value)).toEqual(['', 'Consolas', 'Courier New'])
+    for (const opt of TERMINAL_FONT_OPTIONS) {
+      expect(opt.label).toBeTruthy()
+    }
+  })
+
+  it('loadTerminalAppearance 后端值覆盖默认，零值/缺失回退默认', async () => {
+    GetSettings.mockResolvedValue({ terminalFontSize: 18, terminalFontFamily: 'Consolas', terminalScrollback: 5000 })
+    const store = useSettingsStore()
+    await store.loadTerminalAppearance()
+    expect(store.terminalFontSize).toBe(18)
+    expect(store.terminalFontFamily).toBe('Consolas')
+    expect(store.terminalScrollback).toBe(5000)
+
+    // 后端零值（老配置兜底缺失场景）回退默认
+    GetSettings.mockResolvedValue({ terminalFontSize: 0, terminalFontFamily: '', terminalScrollback: 0 })
+    await store.loadTerminalAppearance()
+    expect(store.terminalFontSize).toBe(14)
+    expect(store.terminalFontFamily).toBe('')
+    expect(store.terminalScrollback).toBe(1000)
+  })
+
+  it('loadTerminalAppearance 越界值 clamp 到 [10,24] / [1000,10000]', async () => {
+    GetSettings.mockResolvedValue({ terminalFontSize: 99, terminalScrollback: 50 })
+    const store = useSettingsStore()
+    await store.loadTerminalAppearance()
+    expect(store.terminalFontSize).toBe(TERMINAL_FONT_SIZE_MAX)
+    expect(store.terminalScrollback).toBe(TERMINAL_SCROLLBACK_MIN)
+
+    GetSettings.mockResolvedValue({ terminalFontSize: 5, terminalScrollback: 99999 })
+    await store.loadTerminalAppearance()
+    expect(store.terminalFontSize).toBe(TERMINAL_FONT_SIZE_MIN)
+    expect(store.terminalScrollback).toBe(TERMINAL_SCROLLBACK_MAX)
+  })
+
+  it('loadTerminalAppearance 失败保持当前值不抛错', async () => {
+    GetSettings.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    store.terminalFontSize = 20
+    await store.loadTerminalAppearance()
+    expect(store.terminalFontSize).toBe(20)
+  })
+
+  it('saveTerminalAppearance 合并写三字段并保留其他字段', async () => {
+    GetSettings.mockResolvedValue({ otherField: 'keep' })
+    const store = useSettingsStore()
+    store.terminalFontSize = 20
+    store.terminalFontFamily = 'Courier New'
+    store.terminalScrollback = 8000
+    await store.saveTerminalAppearance()
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    const saved = SaveSettings.mock.calls[0][0]
+    expect(saved.terminalFontSize).toBe(20)
+    expect(saved.terminalFontFamily).toBe('Courier New')
+    expect(saved.terminalScrollback).toBe(8000)
+    expect(saved.otherField).toBe('keep')
+  })
+
+  it('stepTerminalFontSize 步进 ±1 并持久化', async () => {
+    GetSettings.mockResolvedValue({})
+    const store = useSettingsStore()
+    expect(store.stepTerminalFontSize(1)).toBe(true)
+    expect(store.terminalFontSize).toBe(15)
+    expect(store.stepTerminalFontSize(-1)).toBe(true)
+    expect(store.terminalFontSize).toBe(14)
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalled()
+  })
+
+  it('stepTerminalFontSize 边界不越界：10 减 / 24 加返回 false 且不变不存', async () => {
+    GetSettings.mockResolvedValue({})
+    const store = useSettingsStore()
+    store.terminalFontSize = TERMINAL_FONT_SIZE_MIN
+    expect(store.stepTerminalFontSize(-1)).toBe(false)
+    expect(store.terminalFontSize).toBe(TERMINAL_FONT_SIZE_MIN)
+
+    store.terminalFontSize = TERMINAL_FONT_SIZE_MAX
+    expect(store.stepTerminalFontSize(1)).toBe(false)
+    expect(store.terminalFontSize).toBe(TERMINAL_FONT_SIZE_MAX)
+
+    // 边界内仍可步进
+    expect(store.stepTerminalFontSize(-1)).toBe(true)
+    expect(store.terminalFontSize).toBe(TERMINAL_FONT_SIZE_MAX - 1)
   })
 })

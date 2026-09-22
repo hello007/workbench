@@ -118,6 +118,28 @@ export const DIFF_TOOL_PRESETS = {
 }
 
 /**
+ * 终端外观默认值与取值边界（与后端 model.AppSettings 常量对齐）：
+ * 字号 10-24（默认 14）、回滚行数 1000-10000（默认 1000）。
+ * fontFamily 空串 = 默认 Cascadia Code 字体栈（useTerminal buildTerminalFontFamily 消费）。
+ */
+export const TERMINAL_APPEARANCE_DEFAULTS = {
+  fontSize: 14,
+  fontFamily: '',
+  scrollback: 1000
+}
+export const TERMINAL_FONT_SIZE_MIN = 10
+export const TERMINAL_FONT_SIZE_MAX = 24
+export const TERMINAL_SCROLLBACK_MIN = 1000
+export const TERMINAL_SCROLLBACK_MAX = 10000
+
+/** 终端字体下拉选项（value 空串 = 默认 Cascadia Code 栈，含 Fira Code/Consolas fallback 链） */
+export const TERMINAL_FONT_OPTIONS = [
+  { label: '默认（Cascadia Code）', value: '' },
+  { label: 'Consolas', value: 'Consolas' },
+  { label: 'Courier New', value: 'Courier New' }
+]
+
+/**
  * 读取系统是否偏好暗色主题。
  * SSR / 无 matchMedia 环境（jsdom 未注入时）回退 false。
  */
@@ -182,6 +204,65 @@ export const useSettingsStore = defineStore('settings', () => {
   watchSystemTheme((isDark) => {
     systemPrefersDark.value = isDark
   })
+
+  // 终端外观三字段：字号 / 字体族 / 回滚行数。
+  // SettingsPanel（设置页控件）与 TerminalPanel（A-/A+ 快捷调节）共享同一 store 字段实现双向同步；
+  // useTerminal 消费三字段初始化 xterm，字号/字体变化经 watch 热更已开终端
+  const terminalFontSize = ref(TERMINAL_APPEARANCE_DEFAULTS.fontSize)
+  const terminalFontFamily = ref(TERMINAL_APPEARANCE_DEFAULTS.fontFamily)
+  const terminalScrollback = ref(TERMINAL_APPEARANCE_DEFAULTS.scrollback)
+
+  // 字号 clamp：非正数/非法值回退默认，界内取整后收敛到 [10, 24]
+  function clampTerminalFontSize(v) {
+    const n = Number(v)
+    if (!Number.isFinite(n) || n <= 0) return TERMINAL_APPEARANCE_DEFAULTS.fontSize
+    return Math.min(Math.max(Math.round(n), TERMINAL_FONT_SIZE_MIN), TERMINAL_FONT_SIZE_MAX)
+  }
+
+  // 回滚行数 clamp：非正数/非法值回退默认，界内取整后收敛到 [1000, 10000]
+  function clampTerminalScrollback(v) {
+    const n = Number(v)
+    if (!Number.isFinite(n) || n <= 0) return TERMINAL_APPEARANCE_DEFAULTS.scrollback
+    return Math.min(Math.max(Math.round(n), TERMINAL_SCROLLBACK_MIN), TERMINAL_SCROLLBACK_MAX)
+  }
+
+  /**
+   * 从后端加载终端外观三字段（后端 Load 已补默认值，此处仍 clamp 兜底
+   * 手改配置文件越界值与 GetSettings 异常返回的 0 值）
+   */
+  async function loadTerminalAppearance() {
+    try {
+      const settings = await GetSettings()
+      terminalFontSize.value = clampTerminalFontSize(settings.terminalFontSize)
+      terminalFontFamily.value = settings.terminalFontFamily || ''
+      terminalScrollback.value = clampTerminalScrollback(settings.terminalScrollback)
+    } catch {
+      // 读取失败保持当前值（默认或上次加载值），不阻塞设置页
+    }
+  }
+
+  /**
+   * 保存终端外观三字段到后端（合并写，避免覆盖其他字段）
+   */
+  async function saveTerminalAppearance() {
+    const settings = await GetSettings()
+    settings.terminalFontSize = terminalFontSize.value
+    settings.terminalFontFamily = terminalFontFamily.value
+    settings.terminalScrollback = terminalScrollback.value
+    await SaveSettings(settings)
+  }
+
+  /**
+   * A-/A+ 字号步进：clamp 后写 store 并异步持久化。
+   * 越界（10/24 边界外步进）不变不存，返回 false 供调用方禁用按钮。
+   */
+  function stepTerminalFontSize(delta) {
+    const next = clampTerminalFontSize(terminalFontSize.value + delta)
+    if (next === terminalFontSize.value) return false
+    terminalFontSize.value = next
+    saveTerminalAppearance().catch(() => {})
+    return true
+  }
 
   // 实际生效主题：light/dark。system 模式按系统偏好解析，light/dark 直接取值
   const resolvedTheme = computed(() => {
@@ -297,13 +378,19 @@ export const useSettingsStore = defineStore('settings', () => {
     diffToolPath,
     diffToolArgs,
     diffToolConfigured,
+    terminalFontSize,
+    terminalFontFamily,
+    terminalScrollback,
     loadShortcuts,
     saveShortcuts,
     checkConflict,
     loadTheme,
     saveTheme,
     loadDiffTool,
-    saveDiffTool
+    saveDiffTool,
+    loadTerminalAppearance,
+    saveTerminalAppearance,
+    stepTerminalFontSize
   }
 })
 
