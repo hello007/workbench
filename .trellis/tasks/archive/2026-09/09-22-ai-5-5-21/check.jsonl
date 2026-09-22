@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-22-ai-5-5-21/audit-findings.md", "reason": "逐项核对 31 项处置状态与修复质量"}
+{"file": "docs/spec/ai-chat-service.md", "reason": "核查修复未破坏契约（事件名/存储布局/串行语义）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查覆盖率门禁与回归测试有效性"}

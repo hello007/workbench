@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-22-ai-5-5-21/audit-findings.md", "reason": "31 项缺陷清单（位置/级别/问题/修复方向），为准需求源"}
+{"file": "docs/spec/ai-chat-service.md", "reason": "ChatService 契约：事件流/存储布局/串行保护语义修复时不可破坏"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "事件监听闭包注销、绑定同步规则；前端事件纪律修复项参照"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "is_error 透传与错误上报遵循 slog + AppError 模式"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "修复须带回归测试，覆盖率门禁 service ≥76% 前端 ≥70%"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E mock 时序修复项：fixtures.js import、禁 waitForTimeout、mock 单一数据源"}
