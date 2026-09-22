@@ -4,7 +4,8 @@ import { flushPromises } from '@vue/test-utils'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(() => Promise.resolve({})),
-  SaveSettings: vi.fn(() => Promise.resolve(true))
+  SaveSettings: vi.fn(() => Promise.resolve(true)),
+  GetShellConfigs: vi.fn(() => Promise.resolve([]))
 }))
 
 import {
@@ -20,9 +21,10 @@ import {
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_SCROLLBACK_MIN,
   TERMINAL_SCROLLBACK_MAX,
-  TERMINAL_FONT_OPTIONS
+  TERMINAL_FONT_OPTIONS,
+  FALLBACK_SHELL
 } from '..'
-import { GetSettings, SaveSettings } from '../../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetShellConfigs } from '../../../wailsjs/go/main/App'
 
 describe('settings store - 默认值', () => {
   it('DEFAULTS 应包含 rename=F2 与 delete=Delete', () => {
@@ -30,6 +32,51 @@ describe('settings store - 默认值', () => {
     expect(DEFAULTS.delete).toBe('Delete')
     expect(DEFAULTS.commandPalette).toBe('Ctrl+P')
     expect(DEFAULTS.toggleTerminal).toBe('Ctrl+`')
+  })
+})
+
+describe('settings store - loadDefaultShell', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    GetShellConfigs.mockResolvedValue([])
+  })
+
+  it('用户已设置 defaultShell 时优先取用户设置', async () => {
+    GetSettings.mockResolvedValue({ defaultShell: 'zsh' })
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe('zsh')
+    expect(GetShellConfigs).not.toHaveBeenCalled()
+  })
+
+  it('用户未设置时取 GetShellConfigs 首项（平台默认：Windows=powershell、Linux=bash）', async () => {
+    GetSettings.mockResolvedValue({})
+    GetShellConfigs.mockResolvedValue([
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' }
+    ])
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe('bash')
+  })
+
+  it('后端均不可用时回退 FALLBACK_SHELL（powershell，Windows 感知不变）', async () => {
+    GetSettings.mockRejectedValue(new Error('fail'))
+    GetShellConfigs.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe(FALLBACK_SHELL)
+    expect(FALLBACK_SHELL).toBe('powershell')
+  })
+
+  it('GetShellConfigs 返回空列表时同样回退 FALLBACK_SHELL', async () => {
+    GetSettings.mockResolvedValue({})
+    GetShellConfigs.mockResolvedValue([])
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe(FALLBACK_SHELL)
   })
 })
 
