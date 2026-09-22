@@ -3,10 +3,10 @@
     <div class="home-layout">
       <ActivityBar @toggle-terminal="uiStore.toggleTerminal" @open-settings="uiStore.settingsVisible = true" />
       <div class="main-area">
-        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页 / 仓库统计页激活时整体隐藏，v-show 保状态：
-             运行中任务、已选文件、预览内容均保留，切回即恢复）。
-             白名单排除：directory/toolbox 之外的占满面板（ai/stats）激活时三栏隐藏，
-             与 AiFunctionPanel/StatsView 的互斥占满对称。 -->
+        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页 / AI 对话页 / 看板 / 仓库统计页激活时整体隐藏，
+             v-show 保状态：运行中任务、已选文件、预览内容均保留，切回即恢复）。
+             白名单排除：directory/toolbox 之外的占满面板（ai/ai-chat/dashboard/stats）
+             激活时三栏隐藏，与 AiFunctionPanel/AiChatPanel 等的互斥占满对称。 -->
         <div v-show="uiStore.activePanel === 'directory' || uiStore.activePanel === 'toolbox'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
@@ -82,6 +82,9 @@
              v-show 常驻挂载：切走再切回不丢已加载状态。pin 仓库列表持久化后端。
              @locate 复用 onRepoLocate 跳转范式（切工作目录 + 展开文件树定位）。 -->
         <DashboardView v-show="uiStore.activePanel === 'dashboard'" @locate="onRepoLocate" />
+        <!-- AI 对话工作台：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回不丢选中目录与在途任务态（对齐 AiFunctionPanel）。 -->
+        <AiChatPanel v-show="uiStore.activePanel === 'ai-chat'" />
         <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
           v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
@@ -117,6 +120,7 @@ import ContentPanel from '../components/ContentPanel.vue'
 import ActivityBar from '../components/ActivityBar.vue'
 import ToolboxPanel from '../components/ToolboxPanel.vue'
 import AiFunctionPanel from '../components/AiFunctionPanel.vue'
+import AiChatPanel from '../components/AiChatPanel.vue'
 import StatsView from './StatsView.vue'
 import DashboardView from './DashboardView.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'

@@ -1,0 +1,1330 @@
+<template>
+  <div class="ai-chat-panel">
+    <!-- 顶部标题栏：风格对齐 AiFunctionPanel 的 panel-header（渐变背景 + 主色标题图标） -->
+    <div class="panel-header">
+      <div class="panel-heading">
+        <span class="panel-title">
+          <el-icon :size="18" class="panel-title-icon"><ChatDotRound /></el-icon>
+          AI 对话
+        </span>
+        <span class="panel-subtitle"><span class="subtitle-sign">&gt;</span>常用目录 · 多会话持续对话</span>
+      </div>
+      <span class="panel-actions">
+        <el-button size="small" @click="showAddDialog">
+          <el-icon class="panel-btn-icon"><Plus /></el-icon>添加目录
+        </el-button>
+      </span>
+    </div>
+
+    <div class="chat-layout">
+      <!-- 左：常用目录栏（拖拽排序 + 点击选中 + hover 移除） -->
+      <div class="chat-dirs">
+        <div class="chat-dirs-caption">
+          <span>常用目录</span>
+          <span v-if="aiChatStore.chatDirectories.length" class="chat-dirs-count">{{ aiChatStore.chatDirectories.length }}</span>
+        </div>
+        <div class="chat-dirs-list">
+          <VueDraggable
+            v-model="localDirs"
+            :animation="200"
+            ghost-class="chat-dir-item--ghost"
+            :prevent-on-filter="false"
+            @end="onDragEnd"
+          >
+            <div
+              v-for="dir in localDirs"
+              :key="dir.id"
+              class="chat-dir-item"
+              :class="{ 'is-active': dir.id === aiChatStore.selectedChatDirectoryId }"
+              @click="handleSelectDirectory(dir)"
+            >
+              <div class="chat-dir-row">
+                <el-icon class="chat-dir-icon"><Folder /></el-icon>
+                <span class="chat-dir-name" :title="dir.displayName">{{ dir.displayName }}</span>
+                <el-icon class="chat-dir-edit" title="重命名" @click.stop="showRenameDialog(dir)"><Edit /></el-icon>
+                <el-icon class="chat-dir-remove" title="移除" @click.stop="handleRemove(dir)"><Delete /></el-icon>
+              </div>
+              <div class="chat-dir-path" :title="dir.path">{{ shortenPath(dir.path) }}</div>
+            </div>
+          </VueDraggable>
+          <el-empty
+            v-if="!aiChatStore.chatDirectories.length"
+            class="chat-dirs-empty"
+            description="暂无常用目录"
+            :image-size="60"
+          />
+        </div>
+        <div v-if="!aiChatStore.chatDirectories.length" class="chat-dirs-hint">
+          可右键工作目录或文件树目录「添加到 AI 对话」
+        </div>
+      </div>
+
+      <!-- 右：对话区（上下分栏：会话工具条 + 消息历史 + 输入区） -->
+      <div class="chat-main">
+        <!-- 未选目录：占位引导 -->
+        <el-empty
+          v-if="!aiChatStore.selectedChatDirectory"
+          class="chat-main-empty"
+          description="从左侧选择目录开始对话"
+        />
+        <template v-else>
+          <!-- 会话工具条：会话下拉（类 /resume）+ 新建 + 权限模式 + 模型 -->
+          <div class="chat-toolbar">
+            <el-dropdown trigger="click" @command="onSessionCommand">
+              <el-button size="small" class="session-btn" :title="currentSessionTitle">
+                <el-icon class="session-btn-icon"><ChatLineRound /></el-icon>
+                <span class="session-btn-label">{{ currentSessionTitle }}</span>
+                <el-icon class="session-btn-arrow"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu class="session-menu">
+                  <el-dropdown-item v-if="!aiChatStore.chatSessions.length" disabled>
+                    暂无会话
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="s in aiChatStore.chatSessions"
+                    :key="s.id"
+                    :command="s.id"
+                    :class="{ 'is-current': s.id === aiChatStore.selectedChatSessionId }"
+                  >
+                    <span class="session-menu-title">{{ s.title }}</span>
+                    <span class="session-menu-time">{{ formatSessionTime(s.updatedAt) }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="aiChatStore.selectedChatSessionId"
+                    divided
+                    command="__delete_session__"
+                    class="session-menu-delete"
+                  >
+                    删除当前会话
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button size="small" @click="handleNewSession">
+              <el-icon class="panel-btn-icon"><Plus /></el-icon>新建会话
+            </el-button>
+
+            <span class="chat-toolbar-spacer"></span>
+
+            <!-- 权限模式：中文标签下拉，说明见 tooltip；bypassPermissions 选中时警告提示 -->
+            <el-tooltip :content="permissionModeTip" placement="top">
+              <el-select
+                v-model="aiChatStore.chatSettings.permissionMode"
+                size="small"
+                class="chat-config-select"
+                @change="onPermissionModeChange"
+              >
+                <el-option
+                  v-for="m in PERMISSION_MODES"
+                  :key="m.value"
+                  :value="m.value"
+                  :label="m.label"
+                />
+              </el-select>
+            </el-tooltip>
+            <!-- 模型：常用选项 + allow-create 自定义输入；空值 = claude 默认模型 -->
+            <el-select
+              v-model="aiChatStore.chatSettings.modelName"
+              size="small"
+              class="chat-config-select chat-config-model"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="默认模型"
+              @change="persistChatSettings"
+            >
+              <el-option
+                v-for="m in MODEL_OPTIONS"
+                :key="m.value"
+                :value="m.value"
+                :label="m.label"
+              />
+            </el-select>
+          </div>
+
+          <!-- 消息历史区：气泡列表 + markdown 渲染 + 流式增量 -->
+          <div ref="messagesEl" class="chat-messages">
+            <div v-if="!displayMessages.length" class="chat-messages-empty">
+              <el-empty
+                v-if="!aiChatStore.chatSessions.length"
+                description="该目录暂无会话，点击「新建会话」开始"
+                :image-size="60"
+              />
+              <el-empty v-else description="输入需求开始对话" :image-size="60" />
+            </div>
+            <div
+              v-for="(msg, i) in displayMessages"
+              :key="`${msg.taskId || 'msg'}-${i}`"
+              class="chat-msg-row"
+              :class="msg.role"
+            >
+              <div class="chat-msg-bubble" :class="{ 'is-streaming': msg.streaming }">
+                <!-- assistant：markdown 渲染（html:false 防 XSS） -->
+                <div
+                  v-if="msg.role === 'assistant'"
+                  class="chat-msg-md"
+                  v-html="renderChatMarkdown(msg.content)"
+                ></div>
+                <div v-else class="chat-msg-text">{{ msg.content }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 输入区：模板下拉 + textarea（Enter 发送 / Shift+Enter 换行）+ 发送/停止 -->
+          <div class="chat-input-area">
+            <div class="chat-input-row">
+              <el-dropdown trigger="click" @command="applyTemplate">
+                <el-button size="small" text bg class="tpl-btn" title="插入模板">
+                  <el-icon><Document /></el-icon>模板
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu class="tpl-menu">
+                    <el-dropdown-item v-if="!aiChatStore.chatTemplates.length" disabled>
+                      暂无模板
+                    </el-dropdown-item>
+                    <template v-if="aiChatStore.chatTemplateGroups.directory.length">
+                      <el-dropdown-item disabled class="tpl-group-title">本目录模板</el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="t in aiChatStore.chatTemplateGroups.directory"
+                        :key="t.id"
+                        :command="t.id"
+                        :title="t.content"
+                      >
+                        {{ t.name }}
+                      </el-dropdown-item>
+                    </template>
+                    <template v-if="aiChatStore.chatTemplateGroups.global.length">
+                      <el-dropdown-item divided disabled class="tpl-group-title">全局模板</el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="t in aiChatStore.chatTemplateGroups.global"
+                        :key="t.id"
+                        :command="t.id"
+                        :title="t.content"
+                      >
+                        {{ t.name }}
+                      </el-dropdown-item>
+                    </template>
+                    <el-dropdown-item divided command="__manage_templates__" class="tpl-manage-item">
+                      <el-icon><Setting /></el-icon>管理模板
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-input
+                ref="inputRef"
+                v-model="inputText"
+                type="textarea"
+                class="chat-input"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                placeholder="输入需求，Enter 发送 / Shift+Enter 换行"
+                @keydown.enter="onInputEnter"
+              />
+              <div class="chat-input-actions">
+                <el-button
+                  v-if="!aiChatStore.chatInFlight"
+                  type="primary"
+                  class="chat-send-btn"
+                  @click="handleSend"
+                >
+                  <el-icon><Position /></el-icon>发送
+                </el-button>
+                <el-button v-else type="danger" plain class="chat-stop-btn" @click="handleStop">
+                  <el-icon><VideoPause /></el-icon>停止
+                </el-button>
+              </div>
+            </div>
+            <div v-if="aiChatStore.chatInFlight" class="chat-input-status">
+              <span class="chat-input-status-dot"></span>
+              {{ aiChatStore.chatTask?.status === 'queued' ? '排队等待中…' : '回复生成中…' }}
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 添加目录对话框：路径手输（对齐工作目录添加模式，后端校验存在性）+ 显示名留空取目录名 -->
+    <el-dialog v-model="addDialogVisible" title="添加 AI 对话目录" width="480px" append-to-body>
+      <el-form label-width="80px">
+        <el-form-item label="目录路径">
+          <el-input ref="addPathInputRef" v-model="addForm.path" placeholder="例如: D:\workspace\demo" />
+        </el-form-item>
+        <el-form-item label="显示名">
+          <el-input v-model="addForm.displayName" placeholder="留空则取目录名，例如: 项目管理" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addLoading" @click="handleAdd">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 重命名对话框：改显示名（仅侧栏展示，不影响路径与会话） -->
+    <el-dialog v-model="renameDialogVisible" title="重命名目录" width="420px" append-to-body>
+      <el-form label-width="80px">
+        <el-form-item label="当前路径">
+          <el-input :model-value="renameTarget ? shortenPath(renameTarget.path) : ''" disabled />
+        </el-form-item>
+        <el-form-item label="显示名">
+          <el-input
+            ref="renameInputRef"
+            v-model="renameName"
+            placeholder="请输入显示名"
+            :disabled="renameLoading"
+            @keyup.enter="handleRename"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="renameDialogVisible = false" :disabled="renameLoading">取消</el-button>
+        <el-button type="primary" :loading="renameLoading" @click="handleRename">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 模板管理弹窗：列表 + 增删改表单（name/content/scope），小弹窗分档 min(560px, 80vw) -->
+    <el-dialog v-model="tplDialogVisible" title="管理对话模板" width="min(560px, 80vw)" append-to-body>
+      <div class="tpl-manage-body">
+        <div class="tpl-list">
+          <div class="tpl-item tpl-item-new" @click="resetTplForm">
+            <el-icon><Plus /></el-icon>
+            <span>新增模板</span>
+          </div>
+          <div
+            v-for="t in aiChatStore.chatTemplates"
+            :key="t.id"
+            class="tpl-item"
+            :class="{ 'is-active': tplForm.id === t.id }"
+            @click="editTpl(t)"
+          >
+            <span class="tpl-item-name" :title="t.content">{{ t.name }}</span>
+            <el-tag size="small" :type="t.scope === 'directory' ? 'primary' : 'info'">
+              {{ t.scope === 'directory' ? '本目录' : '全局' }}
+            </el-tag>
+            <el-icon class="tpl-item-remove" title="删除" @click.stop="handleRemoveTemplate(t)"><Delete /></el-icon>
+          </div>
+          <el-empty
+            v-if="!aiChatStore.chatTemplates.length"
+            class="tpl-list-empty"
+            description="暂无模板"
+            :image-size="48"
+          />
+        </div>
+        <el-form class="tpl-form" label-width="52px">
+          <el-form-item label="名称">
+            <el-input v-model="tplForm.name" placeholder="模板名称" />
+          </el-form-item>
+          <el-form-item label="归属">
+            <el-radio-group v-model="tplForm.scope" :disabled="!!tplForm.id">
+              <el-radio value="directory">本目录</el-radio>
+              <el-radio value="global">全局</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="内容">
+            <el-input
+              v-model="tplForm.content"
+              type="textarea"
+              :rows="5"
+              placeholder="模板正文（纯文本，点击模板整段填入输入框可再修改）"
+            />
+          </el-form-item>
+          <div class="tpl-form-actions">
+            <el-button @click="resetTplForm">重置</el-button>
+            <el-button type="primary" :loading="tplSaving" @click="handleSaveTemplate">
+              {{ tplForm.id ? '保存修改' : '新增' }}
+            </el-button>
+          </div>
+        </el-form>
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  ChatDotRound, Plus, Folder, Delete, Edit,
+  ArrowDown, ChatLineRound, Document, Setting, Position, VideoPause
+} from '@element-plus/icons-vue'
+import { VueDraggable } from 'vue-draggable-plus'
+import { useAiChatStore, useUiStore } from '../store'
+import { handleError } from '../utils/error'
+import { shortenPath } from '../utils/pathFormat'
+import { renderChatMarkdown } from '../utils/chatMarkdown'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
+
+const aiChatStore = useAiChatStore()
+const uiStore = useUiStore()
+
+// ===== 常量选项 =====
+
+// 权限模式可选集（值与 model.ChatPermissionMode* 常量对齐）
+const PERMISSION_MODES = [
+  { value: 'default', label: '默认权限', tip: 'claude 默认权限行为，敏感操作需逐次确认' },
+  { value: 'acceptEdits', label: '自动接受编辑', tip: '自动接受文件编辑，其余操作仍需确认' },
+  { value: 'plan', label: '规划模式', tip: '仅分析与规划方案，不执行修改' },
+  { value: 'bypassPermissions', label: '跳过确认', tip: '跳过全部权限确认，AI 可直接修改代码与执行命令（高危）' }
+]
+const permissionModeTip = computed(() => {
+  const cur = PERMISSION_MODES.find(m => m.value === aiChatStore.chatSettings.permissionMode)
+  return cur ? cur.tip : PERMISSION_MODES[0].tip
+})
+
+// 模型下拉常用项（MVP 仅 claude 系；allow-create 支持自定义输入，空值 = claude 默认模型）
+const MODEL_OPTIONS = [
+  { value: '', label: '默认模型' },
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'opus', label: 'Opus' },
+  { value: 'haiku', label: 'Haiku' }
+]
+
+// --- 本地目录列表（可变，用于拖拽） ---
+// localDirs 为 VueDraggable v-model 的可变副本（参照 DirectoryTree 模式）：
+// 拖拽原地重排 + onDragEnd 取序持久化；store 重载后同步覆盖。
+const localDirs = ref([...aiChatStore.chatDirectories])
+watch(() => aiChatStore.chatDirectories, (val) => {
+  localDirs.value = [...val]
+})
+
+// 拖拽结束：按新序持久化（失败提示并等待 store 重载回弹真实顺序）
+const onDragEnd = async () => {
+  const ids = localDirs.value.map(d => d.id)
+  try {
+    await aiChatStore.reorderChatDirectories(ids)
+  } catch (error) {
+    handleError('排序保存失败: ', error)
+  }
+}
+
+// --- 在途任务时切换目录/会话的统一确认（继续将取消当前任务） ---
+const confirmDiscardInFlight = async () => {
+  if (!aiChatStore.chatInFlight) return true
+  try {
+    await ElMessageBox.confirm(
+      '当前有对话进行中，切换将取消该任务。确定切换吗？',
+      '切换确认',
+      { confirmButtonText: '取消任务并切换', cancelButtonText: '留在当前', type: 'warning' }
+    )
+  } catch {
+    return false
+  }
+  try {
+    await aiChatStore.cancelChatTask()
+  } catch (error) {
+    handleError('取消任务失败: ', error)
+  }
+  return true
+}
+
+// --- 侧栏目录点击（在途任务先确认） ---
+const handleSelectDirectory = async (dir) => {
+  if (dir.id === aiChatStore.selectedChatDirectoryId) return
+  if (!(await confirmDiscardInFlight())) return
+  aiChatStore.selectChatDirectory(dir.id)
+}
+
+// 目录切换后：加载该目录会话列表（默认选中最近更新）+ 该目录模板
+watch(() => aiChatStore.selectedChatDirectoryId, async (id) => {
+  if (!id) return
+  await aiChatStore.loadChatSessions()
+  aiChatStore.loadChatTemplates()
+})
+
+// --- 移除目录项（hover 出按钮 + 确认框） ---
+const handleRemove = async (dir) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定移除常用目录 "${dir.displayName}" 吗？该目录下的会话与消息记录不受影响。`,
+      '移除目录',
+      {
+        confirmButtonText: '移除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  try {
+    await aiChatStore.removeChatDirectory(dir.id)
+    ElMessage.success('已移除')
+  } catch (error) {
+    handleError('移除失败: ', error)
+  }
+}
+
+// --- 添加目录对话框 ---
+const addDialogVisible = ref(false)
+const addLoading = ref(false)
+const addForm = ref({ path: '', displayName: '' })
+const addPathInputRef = ref()
+
+const showAddDialog = () => {
+  addForm.value = { path: '', displayName: '' }
+  addDialogVisible.value = true
+  nextTick(() => {
+    const input = addPathInputRef.value?.input
+    if (input) {
+      input.focus()
+    }
+  })
+}
+
+const handleAdd = async () => {
+  const path = addForm.value.path.trim()
+  if (!path) {
+    ElMessage.warning('请输入目录路径')
+    return
+  }
+  // 前置查重（规范化路径）：后端幂等兜底，此处给可读提示
+  if (aiChatStore.containsPath(path)) {
+    ElMessage.info('该目录已在常用目录列表中')
+    addDialogVisible.value = false
+    return
+  }
+  addLoading.value = true
+  try {
+    const item = await aiChatStore.addChatDirectory(path, addForm.value.displayName.trim())
+    ElMessage.success(item ? `已添加「${item.displayName}」` : '已添加')
+    addDialogVisible.value = false
+  } catch (error) {
+    handleError('添加失败: ', error)
+  } finally {
+    addLoading.value = false
+  }
+}
+
+// --- 重命名显示名（hover 出入口 + 对话框） ---
+const renameDialogVisible = ref(false)
+const renameLoading = ref(false)
+const renameName = ref('')
+const renameTarget = ref(null)
+const renameInputRef = ref()
+
+const showRenameDialog = (dir) => {
+  renameTarget.value = dir
+  renameName.value = dir.displayName
+  renameDialogVisible.value = true
+  nextTick(() => {
+    const input = renameInputRef.value?.input
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  })
+}
+
+const handleRename = async () => {
+  const dir = renameTarget.value
+  if (!renameName.value.trim()) {
+    ElMessage.warning('请输入显示名')
+    return
+  }
+  if (!dir) return
+
+  renameLoading.value = true
+  try {
+    await aiChatStore.updateChatDirectory(dir.id, renameName.value.trim())
+    ElMessage.success('重命名成功')
+    renameDialogVisible.value = false
+  } catch (error) {
+    handleError('重命名失败: ', error)
+  } finally {
+    renameLoading.value = false
+  }
+}
+
+// ===== 会话管理（类 /resume）=====
+
+const currentSessionTitle = computed(() =>
+  aiChatStore.selectedChatSession?.title || '选择会话'
+)
+
+// 会话下拉时间：当天 HH:mm，否则 M-D HH:mm（手写格式化，不引额外依赖）
+const formatSessionTime = (ts) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return hm
+  return `${d.getMonth() + 1}-${d.getDate()} ${hm}`
+}
+
+// 会话下拉命令分派：会话 id = 切换；__delete_session__ = 删除当前会话
+const onSessionCommand = async (cmd) => {
+  if (cmd === '__delete_session__') {
+    await handleDeleteSession()
+    return
+  }
+  await handleSelectSession(cmd)
+}
+
+const handleSelectSession = async (id) => {
+  if (!id || id === aiChatStore.selectedChatSessionId) return
+  if (!(await confirmDiscardInFlight())) return
+  await aiChatStore.selectChatSession(id)
+}
+
+const handleNewSession = async () => {
+  if (!(await confirmDiscardInFlight())) return
+  try {
+    await aiChatStore.createChatSession()
+  } catch (error) {
+    handleError('新建会话失败: ', error)
+  }
+}
+
+const handleDeleteSession = async () => {
+  const id = aiChatStore.selectedChatSessionId
+  if (!id) return
+  const title = aiChatStore.selectedChatSession?.title || '该会话'
+  try {
+    await ElMessageBox.confirm(
+      `确定删除会话「${title}」吗？会话消息记录将一并删除，不可恢复。`,
+      '删除会话',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await aiChatStore.deleteChatSession(id)
+    ElMessage.success('会话已删除')
+  } catch (error) {
+    handleError('删除会话失败: ', error)
+  }
+}
+
+// ===== 消息渲染与流式 =====
+
+// 展示消息 = 持久化消息 + 在途任务的流式 assistant 气泡（仅当前会话视图追加）
+const displayMessages = computed(() => {
+  const base = aiChatStore.chatMessages
+  if (!aiChatStore.chatTaskInCurrentSession) return base
+  const task = aiChatStore.chatTask
+  return [
+    ...base,
+    { role: 'assistant', content: task.reply, streaming: true, taskId: task.taskId }
+  ]
+})
+
+const messagesEl = ref(null)
+const scrollToBottom = () => {
+  nextTick(() => {
+    const el = messagesEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+// 消息条数变化 / 流式内容增长 / 会话切换时滚到底部
+watch(() => [aiChatStore.chatMessages.length, aiChatStore.chatTask?.reply], scrollToBottom)
+watch(() => aiChatStore.selectedChatSessionId, scrollToBottom)
+
+// ===== 输入与发送 =====
+
+const inputText = ref('')
+const inputRef = ref()
+
+// Enter 发送 / Shift+Enter 换行（textarea 内组合键交给默认行为）
+const onInputEnter = (e) => {
+  if (e.shiftKey) return
+  e.preventDefault()
+  handleSend()
+}
+
+const handleSend = async () => {
+  const prompt = inputText.value.trim()
+  if (!prompt) {
+    ElMessage.warning('请输入对话内容')
+    return
+  }
+  // 进行中禁发（按钮已切换为停止，此处双保护；后端另有 E_CHAT_IN_PROGRESS 拒绝）
+  if (aiChatStore.chatInFlight) return
+  if (!aiChatStore.selectedChatSessionId) {
+    // 无会话时先建一个再发（空目录直接输入的顺滑路径）
+    try {
+      await aiChatStore.createChatSession()
+    } catch (error) {
+      handleError('新建会话失败: ', error)
+      return
+    }
+  }
+  try {
+    await aiChatStore.runChat(prompt)
+    inputText.value = ''
+  } catch (error) {
+    handleError('发送失败: ', error)
+  }
+}
+
+const handleStop = async () => {
+  try {
+    await aiChatStore.cancelChatTask()
+  } catch (error) {
+    handleError('取消失败: ', error)
+  }
+}
+
+// ===== 模板 =====
+
+const applyTemplate = (cmd) => {
+  if (cmd === '__manage_templates__') {
+    tplDialogVisible.value = true
+    return
+  }
+  const tpl = aiChatStore.chatTemplates.find(t => t.id === cmd)
+  if (!tpl) return
+  // 整段替换填入（用户可再修改），光标回输入框
+  inputText.value = tpl.content
+  nextTick(() => {
+    inputRef.value?.focus?.()
+  })
+}
+
+// 模板管理弹窗状态：tplForm.id 非空 = 编辑既有项（归属域锁定），空 = 新增
+const tplDialogVisible = ref(false)
+const tplSaving = ref(false)
+const tplForm = ref({ id: '', scope: 'directory', name: '', content: '' })
+
+const editTpl = (t) => {
+  tplForm.value = { id: t.id, scope: t.scope, name: t.name, content: t.content }
+}
+
+const resetTplForm = () => {
+  tplForm.value = { id: '', scope: 'directory', name: '', content: '' }
+}
+
+const handleSaveTemplate = async () => {
+  const form = tplForm.value
+  const name = form.name.trim()
+  const content = form.content.trim()
+  if (!name) {
+    ElMessage.warning('请输入模板名称')
+    return
+  }
+  if (!content) {
+    ElMessage.warning('请输入模板内容')
+    return
+  }
+  tplSaving.value = true
+  try {
+    if (form.id) {
+      await aiChatStore.updateChatTemplate(form.id, name, content)
+      ElMessage.success('模板已更新')
+    } else {
+      await aiChatStore.addChatTemplate(form.scope, aiChatStore.selectedChatDirectoryId, name, content)
+      ElMessage.success('模板已新增')
+    }
+    resetTplForm()
+  } catch (error) {
+    handleError('保存模板失败: ', error)
+  } finally {
+    tplSaving.value = false
+  }
+}
+
+const handleRemoveTemplate = async (t) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除模板「${t.name}」吗？`,
+      '删除模板',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await aiChatStore.removeChatTemplate(t.id)
+    if (tplForm.value.id === t.id) {
+      resetTplForm()
+    }
+    ElMessage.success('模板已删除')
+  } catch (error) {
+    handleError('删除模板失败: ', error)
+  }
+}
+
+// ===== 权限模式 / 模型配置 =====
+
+const persistChatSettings = async () => {
+  try {
+    await aiChatStore.saveChatSettings(
+      aiChatStore.chatSettings.permissionMode,
+      aiChatStore.chatSettings.modelName
+    )
+  } catch (error) {
+    handleError('保存对话设置失败: ', error)
+  }
+}
+
+const onPermissionModeChange = async () => {
+  if (aiChatStore.chatSettings.permissionMode === 'bypassPermissions') {
+    ElMessage.warning('已选择「跳过确认」：AI 可直接修改代码与执行命令，请注意风险')
+  }
+  await persistChatSettings()
+}
+
+// ===== chat-task:* 事件监听（闭包精准注销，禁 EventsOff 全局移除） =====
+
+let offQueued = null
+let offStarted = null
+let offOutput = null
+let offDone = null
+
+const onTaskDone = async (result) => {
+  const handled = await aiChatStore.handleChatTaskDone(result)
+  if (!handled) return
+  if (result?.canceled) {
+    ElMessage.info('对话已取消')
+  } else if (result?.error) {
+    ElMessage.error('对话失败: ' + result.error)
+  }
+}
+
+onMounted(async () => {
+  await aiChatStore.loadChatDirectories()
+  aiChatStore.loadChatSettings()
+  if (aiChatStore.selectedChatDirectoryId) {
+    await aiChatStore.loadChatSessions()
+    aiChatStore.loadChatTemplates()
+  }
+  offQueued = EventsOn('chat-task:queued', aiChatStore.onChatTaskQueued)
+  offStarted = EventsOn('chat-task:started', aiChatStore.onChatTaskStarted)
+  offOutput = EventsOn('chat-task:output', aiChatStore.onChatTaskOutput)
+  offDone = EventsOn('chat-task:done', onTaskDone)
+})
+
+onBeforeUnmount(() => {
+  offQueued && offQueued()
+  offStarted && offStarted()
+  offOutput && offOutput()
+  offDone && offDone()
+  offQueued = null
+  offStarted = null
+  offOutput = null
+  offDone = null
+})
+
+// 面板切走再切回时恢复在途任务状态（事件丢失兜底，防 loading 卡死）
+watch(() => uiStore.activePanel, (panel) => {
+  if (panel === 'ai-chat') {
+    aiChatStore.restoreChatTaskState()
+  }
+})
+</script>
+
+<style scoped>
+.panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+}
+.panel-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.panel-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subtitle-sign {
+  font-family: Consolas, 'Cascadia Code', 'Courier New', monospace;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-right: 4px;
+}
+.panel-title-icon {
+  color: var(--primary-color);
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding-left: var(--spacing-md);
+  margin-left: 12px;
+  border-left: 1px solid var(--border-color);
+}
+.panel-btn-icon {
+  margin-right: 4px;
+}
+
+.chat-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 左：常用目录栏 */
+.chat-dirs {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+.chat-dirs-caption {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.chat-dirs-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.chat-dirs-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-xs) 0;
+}
+.chat-dirs-empty {
+  margin-top: var(--spacing-xl);
+}
+.chat-dirs-hint {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-placeholder);
+}
+
+/* 目录项：nav active 左侧指示条（left:0 贴项左缘，防父级 overflow 裁剪） */
+.chat-dir-item {
+  position: relative;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.chat-dir-item:hover {
+  background: var(--bg-tertiary);
+}
+.chat-dir-item.is-active {
+  background: var(--primary-bg);
+}
+.chat-dir-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--primary-light);
+}
+.chat-dir-item--ghost {
+  opacity: 0.6;
+  background: color-mix(in srgb, var(--success-color) 12%, transparent);
+  border: 1px dashed var(--success-color);
+  border-radius: var(--radius-sm);
+}
+.chat-dir-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+.chat-dir-icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+.chat-dir-item.is-active .chat-dir-icon {
+  color: var(--primary-color);
+}
+.chat-dir-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+/* 重命名/移除按钮：hover 出现（占用右侧尾部，不挤压名称省略） */
+.chat-dir-edit,
+.chat-dir-remove {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: color var(--transition-fast), opacity var(--transition-fast);
+}
+.chat-dir-item:hover .chat-dir-edit,
+.chat-dir-item:hover .chat-dir-remove {
+  opacity: 1;
+}
+.chat-dir-edit:hover {
+  color: var(--primary-color);
+}
+.chat-dir-remove:hover {
+  color: var(--danger-color);
+}
+.chat-dir-path {
+  margin-top: 2px;
+  padding-left: 22px;
+  font-size: 12px;
+  font-family: Consolas, 'Courier New', monospace;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 右：对话区（白底卡片浮于面板底色，上下分栏） */
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+}
+.chat-main-empty {
+  margin: auto;
+}
+
+/* 会话工具条 */
+.chat-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+}
+.session-btn {
+  max-width: 240px;
+}
+.session-btn-icon {
+  margin-right: 4px;
+  color: var(--primary-color);
+}
+.session-btn-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-btn-arrow {
+  margin-left: 4px;
+  color: var(--text-tertiary);
+}
+.chat-toolbar-spacer {
+  flex: 1;
+}
+.chat-config-select {
+  width: 128px;
+}
+.chat-config-model {
+  width: 140px;
+}
+
+/* 会话下拉项：标题 + 更新时间两列 */
+.session-menu .session-menu-title {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+}
+.session-menu .session-menu-time {
+  margin-left: 12px;
+  font-size: 11px;
+  color: var(--text-placeholder);
+}
+.session-menu .is-current .session-menu-title {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+.session-menu-delete {
+  color: var(--danger-color);
+}
+
+/* 消息历史区：纵向滚动 */
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-md) var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+.chat-messages-empty {
+  margin: auto;
+}
+
+/* 消息气泡：user 右对齐主色淡底 / assistant 左对齐弱层底 */
+.chat-msg-row {
+  display: flex;
+}
+.chat-msg-row.user {
+  justify-content: flex-end;
+}
+.chat-msg-row.assistant {
+  justify-content: flex-start;
+}
+.chat-msg-bubble {
+  max-width: 82%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.chat-msg-row.user .chat-msg-bubble {
+  background: var(--primary-bg);
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--primary-color) 18%, transparent);
+}
+.chat-msg-row.assistant .chat-msg-bubble {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+/* 流式生成中：气泡尾部闪烁光标（仅装饰，reduced-motion 下禁用） */
+.chat-msg-bubble.is-streaming .chat-msg-md > *:last-child::after {
+  content: '▍';
+  color: var(--primary-color);
+  animation: chatCursor 1s steps(2) infinite;
+}
+@keyframes chatCursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* assistant markdown 排版：标题/列表/代码块/表格/引用 */
+.chat-msg-md :deep(h1),
+.chat-msg-md :deep(h2),
+.chat-msg-md :deep(h3),
+.chat-msg-md :deep(h4) {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0.6em 0 0.3em;
+  line-height: 1.4;
+}
+.chat-msg-md :deep(h1) { font-size: 1.25em; }
+.chat-msg-md :deep(h2) { font-size: 1.15em; }
+.chat-msg-md :deep(h3) { font-size: 1.05em; }
+.chat-msg-md :deep(p) {
+  margin: 0.35em 0;
+}
+.chat-msg-md :deep(ul),
+.chat-msg-md :deep(ol) {
+  margin: 0.35em 0;
+  padding-left: 1.4em;
+}
+.chat-msg-md :deep(li) {
+  margin: 0.15em 0;
+}
+.chat-msg-md :deep(code) {
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+.chat-msg-md :deep(pre.hljs) {
+  margin: 0.5em 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+.chat-msg-md :deep(pre.hljs code) {
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.chat-msg-md :deep(blockquote) {
+  margin: 0.5em 0;
+  padding: 0.1em 0.8em;
+  border-left: 3px solid var(--primary-light);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+}
+.chat-msg-md :deep(table) {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-msg-md :deep(th),
+.chat-msg-md :deep(td) {
+  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+}
+.chat-msg-md :deep(th) {
+  background: var(--bg-primary);
+  font-weight: 600;
+}
+.chat-msg-md :deep(a) {
+  color: var(--primary-color);
+}
+.chat-msg-md :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 0.6em 0;
+}
+
+/* 输入区 */
+.chat-input-area {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+.chat-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+}
+.tpl-btn {
+  flex-shrink: 0;
+}
+.chat-input {
+  flex: 1;
+  min-width: 0;
+}
+.chat-input-actions {
+  flex-shrink: 0;
+}
+/* 进行中状态行：呼吸圆点 + 文案 */
+.chat-input-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--spacing-xs);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.chat-input-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: chatPulse 1.4s ease-in-out infinite;
+}
+@keyframes chatPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* 模板管理弹窗：列表 + 表单左右二分 */
+.tpl-manage-body {
+  display: flex;
+  gap: var(--spacing-md);
+  min-height: 300px;
+}
+.tpl-list {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  overflow-y: auto;
+  max-height: min(360px, 46vh);
+}
+.tpl-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.tpl-item:hover {
+  background: var(--bg-tertiary);
+}
+.tpl-item.is-active {
+  background: var(--primary-bg);
+}
+.tpl-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.tpl-item-remove {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+.tpl-item-remove:hover {
+  color: var(--danger-color);
+}
+.tpl-item-new {
+  color: var(--primary-color);
+  font-size: 13px;
+  border: 1px dashed var(--border-color);
+}
+.tpl-item-new:hover {
+  border-color: var(--primary-light);
+}
+.tpl-list-empty {
+  margin-top: var(--spacing-lg);
+}
+.tpl-form {
+  flex: 1;
+  min-width: 0;
+}
+.tpl-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+/* 动画可访问性：用户系统偏好减少动效时禁用装饰动画 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-msg-bubble.is-streaming .chat-msg-md > *:last-child::after,
+  .chat-input-status-dot {
+    animation: none !important;
+  }
+}
+</style>

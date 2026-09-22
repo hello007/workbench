@@ -43,7 +43,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   // 状态看板 pin：值对齐 src/test/wails-mock-defaults.js 单一数据源
   IsDashboardPinned: vi.fn(() => Promise.resolve(false)),
   AddDashboardPin: vi.fn(() => Promise.resolve(true)),
-  RemoveDashboardPin: vi.fn(() => Promise.resolve(true))
+  RemoveDashboardPin: vi.fn(() => Promise.resolve(true)),
+  // AI 对话目录域（aiChat store 经右键「添加到 AI 对话」触达）
+  ListChatDirectories: vi.fn(() => Promise.resolve([])),
+  AddChatDirectory: vi.fn(() => Promise.resolve({ id: 'chatdir-1', path: '/path/a/sub', displayName: 'sub', sortOrder: 0, createdAt: 1000 })),
+  UpdateChatDirectory: vi.fn(() => Promise.resolve()),
+  RemoveChatDirectory: vi.fn(() => Promise.resolve()),
+  ReorderChatDirectories: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -1165,6 +1171,27 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       setMenuDataAndCommand('removeFavorite')
       await flushPromises()
       expect(RemoveFavorite).toHaveBeenCalled()
+    })
+
+    it('addToAiChat 调 AddChatDirectory（displayName 空由后端取目录名）', async () => {
+      const { AddChatDirectory } = await import('../../../wailsjs/go/main/App')
+      const dirData = { name: 'sub', path: 'D:\\proj\\sub', type: 'directory' }
+      setMenuDataAndCommand('addToAiChat', dirData)
+      await flushPromises()
+      expect(AddChatDirectory).toHaveBeenCalledWith('D:\\proj\\sub', '')
+      expect(ElMessage.success).toHaveBeenCalledWith('已添加到 AI 对话「sub」')
+    })
+
+    it('addToAiChat 重复路径 info 提示不重复添加', async () => {
+      const { AddChatDirectory } = await import('../../../wailsjs/go/main/App')
+      const { useAiChatStore } = await import('../../store')
+      const aiChatStore = useAiChatStore()
+      aiChatStore.chatDirectories = [{ id: 'chatdir-x', path: 'd:/proj/sub', displayName: 'sub', sortOrder: 0, createdAt: 0 }]
+      const dirData = { name: 'sub', path: 'D:\\proj\\sub', type: 'directory' }
+      setMenuDataAndCommand('addToAiChat', dirData)
+      await flushPromises()
+      expect(ElMessage.info).toHaveBeenCalledWith('该目录已在 AI 对话列表中')
+      expect(AddChatDirectory).not.toHaveBeenCalled()
     })
 
     it('无 contextMenu.data 时直接返回', () => {

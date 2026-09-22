@@ -79,7 +79,34 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   GetWebServeToken: '',
   SetWebServeConfig: true,
   // RegenerateWebToken 返回新令牌（64 位 hex 形态缩写，仅断言被调用与回填展示）
-  RegenerateWebToken: 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8'
+  RegenerateWebToken: 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8',
+
+  // ---- AI 对话工作台（PR1 ChatService 会话链路 + PR2 目录项 CRUD + PR3 对话闭环）----
+  // 会话方法：选中目录后调 ListChatSessions，选中会话后调 GetChatSession；
+  // 返回空 = 空态降级；其余方法仅在用户操作时调用，null/true 为安全 no-op
+  // （形状对齐 model.ChatSession / ChatTaskState / ChatDirectory / ChatTemplate
+  // / ChatSettings，见 frontend/wailsjs/go/models.ts）。
+  CreateChatSession: null,
+  ListChatSessions: [],
+  GetChatSession: null,
+  DeleteChatSession: true,
+  UpdateChatSessionTitle: true,
+  RunChat: null,
+  CancelChatTask: false,
+  GetChatTaskState: null,
+  // PR3 模板与执行配置：GetChatSettings 给默认值（default + 空 model），
+  // 组件挂载即调，空对象会破坏权限模式下拉的取值绑定
+  AddChatTemplate: null,
+  ListChatTemplates: [],
+  UpdateChatTemplate: true,
+  RemoveChatTemplate: true,
+  GetChatSettings: { permissionMode: 'default', modelName: '' },
+  SaveChatSettings: true,
+  AddChatDirectory: null,
+  ListChatDirectories: [],
+  UpdateChatDirectory: true,
+  RemoveChatDirectory: true,
+  ReorderChatDirectories: true
 }
 
 /**
@@ -347,7 +374,53 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
     outputFile: '',
     error: '',
     startedAt: 1757400000000
-  }
+  },
+
+  // ---- AI 对话工作台（PR3 对话闭环）E2E 默认值 ----
+  // RunChat 返回任务 id 并派发 chat-task:* 事件流（queued→started→output→done），
+  // 形状对齐 service/chat_service.go emit 数据与 model.ChatTaskRunResult。
+  // 事件流经 __events__ 派发机制模拟，真实链路由后端 runtime 推送。
+  RunChat: {
+    __value__: 'chattask-e2e-1',
+    __events__: [
+      { event: 'chat-task:queued', payload: { taskId: 'chattask-e2e-1' } },
+      { event: 'chat-task:started', payload: { taskId: 'chattask-e2e-1', chatSessionId: 'chatsession-e2e-1' } },
+      {
+        event: 'chat-task:output',
+        payload: { taskId: 'chattask-e2e-1', chatSessionId: 'chatsession-e2e-1', text: '这是 AI 的回复：**加粗要点**。\n' }
+      },
+      {
+        event: 'chat-task:done',
+        payload: {
+          taskId: 'chattask-e2e-1',
+          chatSessionId: 'chatsession-e2e-1',
+          claudeSessionId: 'claude-e2e-1',
+          reply: '这是 AI 的回复：**加粗要点**。\n',
+          exitCode: 0,
+          error: '',
+          canceled: false
+        }
+      }
+    ]
+  },
+  // ListChatSessions 形状对齐 model.ChatSession（不含消息）；空 directoryId 过滤语义下
+  // E2E 注入单条会话供会话下拉断言
+  ListChatSessions: [
+    {
+      id: 'chatsession-e2e-1',
+      directoryId: 'chatdir-1',
+      title: '新会话',
+      cwd: 'D:/e2e-demo/demo-repo',
+      claudeSessionId: '',
+      createdAt: 1757400000000,
+      updatedAt: 1757400000000
+    }
+  ],
+  // GetChatSession 含完整消息数组（气泡渲染断言数据源）
+  GetChatSession: null,
+  GetChatTaskState: null,
+  ListChatTemplates: [],
+  GetChatSettings: { permissionMode: 'default', modelName: '' }
 }
 
 /** E2E 实际注入 window.go.main.App 的合并表（基础表 + E2E 补充表，后者优先） */

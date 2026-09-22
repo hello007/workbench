@@ -281,6 +281,9 @@
         <li class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
           <el-icon><FolderAdd /></el-icon>添加为工作目录
         </li>
+        <li class="context-menu-item" @click="onMenuCommand('addToAiChat')">
+          <el-icon><ChatDotRound /></el-icon>添加到 AI 对话
+        </li>
         <li v-if="contextMenu.data?.isGitRepo" class="context-menu-item" @click="onMenuCommand('jumpStats')">
           <el-icon><TrendCharts /></el-icon>跳转仓库统计
         </li>
@@ -372,12 +375,13 @@ import {
   Search,
   Sort,
   TrendCharts,
-  DataBoard
+  DataBoard,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { useTreeState } from '../composables/useTreeState'
-import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore } from '../store'
+import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore, useAiChatStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   GetFileTree,
@@ -416,6 +420,7 @@ const settingsStore = useSettingsStore()
 const directoryStore = useDirectoryStore()
 const workspaceStore = useWorkspaceStore()
 const uiStore = useUiStore()
+const aiChatStore = useAiChatStore()
 
 // ---- Refs ----
 const currentSelectedPath = ref('')
@@ -955,6 +960,9 @@ const onMenuCommand = (command) => {
     case 'addAsWorkDir':
       handleAddAsWorkDir(data)
       break
+    case 'addToAiChat':
+      handleAddToAiChat(data)
+      break
     case 'contentSearch': {
       const currentWorkDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
       if (currentWorkDir && data.path.startsWith(currentWorkDir.path)) {
@@ -1298,6 +1306,23 @@ const handleRemoveFavorite = async (node) => {
 // ---- 添加为工作目录 ----
 const handleAddAsWorkDir = (node) => {
   emit('add-work-dir', { path: node.path, name: node.name })
+}
+
+// ---- 添加到 AI 对话 ----
+// 仅目录节点菜单含此项：把该子目录加入 AI 对话侧栏常用目录。
+// 已存在时 info 提示不重复添加（后端同路径幂等兜底）；成功仅提示不强制
+// 切换面板（对齐「添加到收藏」交互：不中断当前工作流）。
+const handleAddToAiChat = async (node) => {
+  if (aiChatStore.containsPath(node.path)) {
+    ElMessage.info('该目录已在 AI 对话列表中')
+    return
+  }
+  try {
+    const item = await aiChatStore.addChatDirectory(node.path, '')
+    ElMessage.success(item ? `已添加到 AI 对话「${item.displayName}」` : '已添加到 AI 对话')
+  } catch (error) {
+    handleError('添加失败: ', error)
+  }
 }
 
 // ---- 树状态记忆 ----

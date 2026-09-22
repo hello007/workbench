@@ -103,6 +103,9 @@
       <li v-if="contextMenu.targetDir?.isGitRepo" class="context-menu-item" @click="onMenuCommand('toggleDashboardPin')">
         <el-icon><DataBoard /></el-icon>{{ contextMenu.targetPinned ? '取消关注状态看板' : '加入状态看板' }}
       </li>
+      <li class="context-menu-item" @click="onMenuCommand('addToAiChat')">
+        <el-icon><ChatDotRound /></el-icon>添加到 AI 对话
+      </li>
       <li class="context-menu-divider" />
       <li class="context-menu-item" @click="onMenuCommand('delete')">
         <el-icon><Delete /></el-icon>删除
@@ -162,7 +165,7 @@
 <script setup>
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts, DataBoard } from '@element-plus/icons-vue'
+import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import {
   AddDirectory,
@@ -192,14 +195,8 @@ import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitIcon from '../assets/icons/git.png'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useSettingsStore, useDirectoryStore, useUiStore, useFavoritesStore, useWorkspaceStore } from '../store'
-
-function shortenPath(path) {
-  if (!path || path.length <= 40) return path
-  const parts = path.replace(/\\/g, '/').split('/')
-  if (parts.length <= 3) return path
-  return `.../${parts[parts.length - 2]}/${parts[parts.length - 1]}`
-}
+import { useSettingsStore, useDirectoryStore, useUiStore, useFavoritesStore, useWorkspaceStore, useAiChatStore } from '../store'
+import { shortenPath } from '../utils/pathFormat'
 
 const emit = defineEmits(['select', 'change', 'contextmenu', 'batchPull', 'openRepoFilter'])
 
@@ -208,6 +205,7 @@ const directoryStore = useDirectoryStore()
 const uiStore = useUiStore()
 const favoritesStore = useFavoritesStore()
 const workspaceStore = useWorkspaceStore()
+const aiChatStore = useAiChatStore()
 
 // --- 仓库列表配置导入导出 ---
 const importDialogVisible = ref(false)
@@ -406,9 +404,28 @@ const onMenuCommand = (command) => {
     case 'toggleDashboardPin':
       handleToggleDashboardPin(dir)
       break
+    case 'addToAiChat':
+      handleAddToAiChat(dir.path)
+      break
     case 'delete':
       handleDelete(dir)
       break
+  }
+}
+
+// 添加到 AI 对话：整个工作目录加入 AI 对话侧栏常用目录。
+// 已存在时 info 提示不重复添加（后端同路径幂等兜底）；成功仅提示不强制
+// 切换面板（对齐「添加到收藏」交互：不中断当前工作流）。
+const handleAddToAiChat = async (path) => {
+  if (aiChatStore.containsPath(path)) {
+    ElMessage.info('该目录已在 AI 对话列表中')
+    return
+  }
+  try {
+    const item = await aiChatStore.addChatDirectory(path, '')
+    ElMessage.success(item ? `已添加到 AI 对话「${item.displayName}」` : '已添加到 AI 对话')
+  } catch (error) {
+    handleError('添加失败: ', error)
   }
 }
 

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import DirectoryTree from '../DirectoryTree.vue'
-import { useDirectoryStore, useUiStore, useWorkspaceStore } from '../../store'
+import { useDirectoryStore, useUiStore, useWorkspaceStore, useAiChatStore } from '../../store'
 import { ExportRepoConfig, SaveFileDialog, SaveFile } from '../../../wailsjs/go/main/App'
 
 vi.mock('element-plus', async () => {
@@ -28,6 +28,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   DeleteDirectory: vi.fn(() => Promise.resolve(true)),
   SetDefaultDirectory: vi.fn(() => Promise.resolve(true)),
   ReorderDirectories: vi.fn(() => Promise.resolve(true)),
+  // AI 对话目录域（aiChat store 经 DirectoryTree 右键「添加到 AI 对话」触达）
+  ListChatDirectories: vi.fn(() => Promise.resolve([])),
+  AddChatDirectory: vi.fn(() => Promise.resolve({ id: 'chatdir-1', path: 'D:\\proj\\A', displayName: 'A', sortOrder: 0, createdAt: 1000 })),
+  UpdateChatDirectory: vi.fn(() => Promise.resolve()),
+  RemoveChatDirectory: vi.fn(() => Promise.resolve()),
+  ReorderChatDirectories: vi.fn(() => Promise.resolve()),
   OpenInExplorer: vi.fn(() => Promise.resolve(true)),
   OpenInVSCode: vi.fn(() => Promise.resolve(true)),
   OpenInWarp: vi.fn(() => Promise.resolve(true)),
@@ -529,6 +535,32 @@ describe('DirectoryTree.vue - 菜单分发与 handler 补充', () => {
       await flushPromises()
       const { DeleteDirectory } = await import('../../../wailsjs/go/main/App')
       expect(DeleteDirectory).toHaveBeenCalled()
+    })
+
+    it('addToAiChat 调 AddChatDirectory（displayName 空由后端取目录名）', async () => {
+      const { AddChatDirectory } = await import('../../../wailsjs/go/main/App')
+      setMenuAndCommand('addToAiChat')
+      await flushPromises()
+      expect(AddChatDirectory).toHaveBeenCalledWith('D:\\proj\\A', '')
+      expect(ElMessage.success).toHaveBeenCalledWith('已添加到 AI 对话「A」')
+    })
+
+    it('addToAiChat 重复路径 info 提示不重复添加', async () => {
+      const { AddChatDirectory } = await import('../../../wailsjs/go/main/App')
+      const aiChatStore = useAiChatStore()
+      aiChatStore.chatDirectories = [{ id: 'chatdir-x', path: 'd:/proj/a', displayName: 'A', sortOrder: 0, createdAt: 0 }]
+      setMenuAndCommand('addToAiChat')
+      await flushPromises()
+      expect(ElMessage.info).toHaveBeenCalledWith('该目录已在 AI 对话列表中')
+      expect(AddChatDirectory).not.toHaveBeenCalled()
+    })
+
+    it('addToAiChat 后端报错走 handleError', async () => {
+      const { AddChatDirectory } = await import('../../../wailsjs/go/main/App')
+      AddChatDirectory.mockRejectedValueOnce({ message: '目录不存在: x' })
+      setMenuAndCommand('addToAiChat')
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith('添加失败: 目录不存在: x')
     })
 
     it('无 targetDir 时直接返回', () => {

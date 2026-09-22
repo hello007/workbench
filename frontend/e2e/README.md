@@ -41,7 +41,7 @@ Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`�
 | `e2e/fixtures.js` | 扩展 `test`：每个用例自动 `addInitScript` 注入 Wails mock，用例统一从这里 import；导出 `getWailsCalls(page, method?)` 读取页面内 `window.__wailsCalls` 调用记录 |
 | `e2e/wails-init.js` | 浏览器页面上下文执行的注入函数（`window.go.main.App` + `window.runtime` stub + `__wailsCalls` 调用记录 + `{__error__}` / `{__sequence__}` / `{__value__, __events__}` 返回值描述符） |
 | `e2e/git-fixtures.js` | Git 三流程共享上下文：mock 工作目录常量（`GIT_FLOW_OVERRIDES`）、公共前置 `openGitRepoPage`、对话框定位 `visibleDialog` |
-| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发） |
+| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发 / ai-chat AI 对话工作台） |
 | `../src/test/wails-mock-defaults.js` | mock 默认返回值表单一数据源（vitest setup.js 与 E2E 共用基础表，E2E 另有专属补充表） |
 
 ## mock 机制说明

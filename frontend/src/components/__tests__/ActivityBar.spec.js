@@ -8,7 +8,8 @@ describe('ActivityBar', () => {
   // activePanel / terminalActive 已迁 ui store：mount 前在 uiStore 上设初值，
   // 组件内直读 uiStore.activePanel / uiStore.terminalVisible；
   // 点击面板项直写 store（不再 emit update:modelValue），设置/终端仍 emit 由 Home 处理。
-  // 图标顺序：directory(0) / ai(1) / toolbox(2) / dashboard(3) / stats(4) / 设置(5) / 终端(6)
+  // 图标顺序：directory(0) / ai(1) / ai-chat(2) / toolbox(3) / dashboard(4) / stats(5)
+  //           / 设置(6) / 终端(7)
   const createWrapper = (activePanel = 'directory') => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -25,10 +26,10 @@ describe('ActivityBar', () => {
     })
   }
 
-  it('应该渲染七个活动栏图标按钮（工作目录、状态看板、AI 功能、仓库统计、工具箱、设置、终端）', () => {
+  it('应该渲染八个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、状态看板、仓库统计、设置、终端）', () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    expect(items.length).toBe(7)
+    expect(items.length).toBe(8)
   })
 
   it('默认选中工作目录', () => {
@@ -43,8 +44,8 @@ describe('ActivityBar', () => {
     const wrapper = createWrapper('dashboard')
     const items = wrapper.findAll('.activity-bar-item')
     expect(items[0].classes()).not.toContain('is-active')
-    // dashboard 是第4个图标（index=3）
-    expect(items[3].classes()).toContain('is-active')
+    // dashboard 是第5个图标（index=4）
+    expect(items[4].classes()).toContain('is-active')
     expect(items[1].classes()).not.toContain('is-active')
   })
 
@@ -57,12 +58,22 @@ describe('ActivityBar', () => {
     expect(items[1].classes()).toContain('is-active')
   })
 
+  it('选中 AI 对话时高亮对应图标', () => {
+    const wrapper = createWrapper('ai-chat')
+    const items = wrapper.findAll('.activity-bar-item')
+    expect(items[0].classes()).not.toContain('is-active')
+    expect(items[1].classes()).not.toContain('is-active')
+    expect(items[3].classes()).not.toContain('is-active')
+    // ai-chat 是第3个图标（index=2）
+    expect(items[2].classes()).toContain('is-active')
+  })
+
   it('选中仓库统计时高亮对应图标', () => {
     const wrapper = createWrapper('stats')
     const items = wrapper.findAll('.activity-bar-item')
     expect(items[1].classes()).not.toContain('is-active')
-    // stats 是第5个图标（index=4）
-    expect(items[4].classes()).toContain('is-active')
+    // stats 是第6个图标（index=5）
+    expect(items[5].classes()).toContain('is-active')
     expect(items[2].classes()).not.toContain('is-active')
   })
 
@@ -71,10 +82,10 @@ describe('ActivityBar', () => {
     const items = wrapper.findAll('.activity-bar-item')
     expect(items[0].classes()).not.toContain('is-active')
     expect(items[1].classes()).not.toContain('is-active')
-    expect(items[3].classes()).not.toContain('is-active')
     expect(items[4].classes()).not.toContain('is-active')
-    // toolbox 是第3个图标（index=2）
-    expect(items[2].classes()).toContain('is-active')
+    expect(items[5].classes()).not.toContain('is-active')
+    // toolbox 是第4个图标（index=3）
+    expect(items[3].classes()).toContain('is-active')
   })
 
   it('点击工作目录图标应将 activePanel 置为 directory', async () => {
@@ -87,8 +98,8 @@ describe('ActivityBar', () => {
   it('点击状态看板图标应将 activePanel 置为 dashboard', async () => {
     const wrapper = createWrapper('directory')
     const items = wrapper.findAll('.activity-bar-item')
-    // dashboard 是第4个图标（index=3）
-    await items[3].trigger('click')
+    // dashboard 是第5个图标（index=4）
+    await items[4].trigger('click')
     expect(useUiStore().activePanel).toBe('dashboard')
   })
 
@@ -100,27 +111,35 @@ describe('ActivityBar', () => {
     expect(useUiStore().activePanel).toBe('ai')
   })
 
+  it('点击 AI 对话图标应将 activePanel 置为 ai-chat', async () => {
+    const wrapper = createWrapper('directory')
+    const items = wrapper.findAll('.activity-bar-item')
+    // ai-chat 是第3个图标（index=2）
+    await items[2].trigger('click')
+    expect(useUiStore().activePanel).toBe('ai-chat')
+  })
+
   it('点击仓库统计图标应将 activePanel 置为 stats', async () => {
     const wrapper = createWrapper('directory')
     const items = wrapper.findAll('.activity-bar-item')
-    // stats 是第5个图标（index=4）
-    await items[4].trigger('click')
+    // stats 是第6个图标（index=5）
+    await items[5].trigger('click')
     expect(useUiStore().activePanel).toBe('stats')
   })
 
   it('点击工具箱图标应将 activePanel 置为 toolbox', async () => {
     const wrapper = createWrapper('directory')
     const items = wrapper.findAll('.activity-bar-item')
-    // toolbox 是第3个图标（index=2）
-    await items[2].trigger('click')
+    // toolbox 是第4个图标（index=3）
+    await items[3].trigger('click')
     expect(useUiStore().activePanel).toBe('toolbox')
   })
 
   it('点击设置图标应触发 openSettings 事件', async () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    // settings 是第6个图标（index=5）
-    await items[5].trigger('click')
+    // settings 是第7个图标（index=6）
+    await items[6].trigger('click')
     expect(wrapper.emitted('openSettings')).toBeTruthy()
   })
 })
