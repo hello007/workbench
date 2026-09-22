@@ -1318,7 +1318,7 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 
 // emit 推送事件（经 EventSink 出口；ctx 为 nil 或非 Wails 上下文时静默跳过）
 func (s *AiFunctionService) emit(name string, data ...any) {
-	emitEvent(s.eventSink(), name, data...)
+	s.emitCurrent(name, data...)
 }
 
 // pipeReader 抽象 stdout 管道（测试替换用）

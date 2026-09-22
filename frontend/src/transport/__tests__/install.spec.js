@@ -7,7 +7,8 @@ vi.mock('../tokenGate', () => ({
 }))
 vi.mock('../connBanner', () => ({
   notifyConnected: vi.fn(),
-  notifyDisconnected: vi.fn()
+  notifyDisconnected: vi.fn(),
+  notifyUnreachable: vi.fn()
 }))
 
 /** 可编程 WebSocket 桩：仅记录构造参数 */
@@ -25,9 +26,9 @@ describe('transport 探测与装配', () => {
     FakeWebSocket.instances = []
     delete window.go
     delete window.runtime
-    // 预置令牌：注册监听即建连，不经 token 门（门已被 mock 挂起）
+    // 预置合法形态令牌（64 位 hex）：注册监听即建连，不经 token 门（门已被 mock 挂起）
     window.localStorage.clear()
-    window.localStorage.setItem('workbench.web.token', 'tok-1')
+    window.localStorage.setItem('workbench.web.token', 'a'.repeat(64))
     vi.stubGlobal('WebSocket', FakeWebSocket)
   })
 

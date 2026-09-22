@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createEventBridge } from '../events'
 import { requestToken } from '../tokenGate'
-import { notifyConnected, notifyDisconnected } from '../connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable } from '../connBanner'
 
 // 隔离 token 门与横幅的真实实现（DOM/持久化副作用），仅验证事件桥对它们的调用契约
 vi.mock('../tokenGate', () => ({
@@ -9,8 +9,22 @@ vi.mock('../tokenGate', () => ({
 }))
 vi.mock('../connBanner', () => ({
   notifyConnected: vi.fn(),
-  notifyDisconnected: vi.fn()
+  notifyDisconnected: vi.fn(),
+  notifyUnreachable: vi.fn()
 }))
+
+// 服务端签发令牌为 32 字节 hex（64 字符），建连前按该形态校验（见 events.js TOKEN_PATTERN）
+const TOK = 'a'.repeat(64)
+const TOK2 = 'b'.repeat(64)
+const TOK_NEW = 'c'.repeat(64)
+
+/** 门提交指定令牌：模拟 tokenGate 已持久化新令牌后 resolve */
+function mockGateResolves(token) {
+  requestToken.mockImplementation(() => {
+    window.localStorage.setItem('workbench.web.token', token)
+    return Promise.resolve(token)
+  })
+}
 
 /** 可编程 WebSocket 桩：记录实例，允许测试手工驱动 open/close/收帧 */
 class FakeWebSocket {
@@ -67,7 +81,7 @@ describe('事件桥（window.runtime shim）', () => {
     requestToken.mockReturnValue(new Promise(() => {}))
     vi.stubGlobal('WebSocket', FakeWebSocket)
     window.localStorage.clear()
-    window.localStorage.setItem('workbench.web.token', 'tok-1')
+    window.localStorage.setItem('workbench.web.token', TOK)
   })
 
   afterEach(() => {
@@ -82,7 +96,7 @@ describe('事件桥（window.runtime shim）', () => {
     const socket = lastSocket()
     expect(socket.url).toBe('ws://test/ws')
     // 与 server/ws.go 约定一致：令牌经 Sec-WebSocket-Protocol 子协议携带
-    expect(socket.protocols).toEqual(['tok-1'])
+    expect(socket.protocols).toEqual([TOK])
     // 已在连接中时重复注册不重复建连
     bridge.EventsOn('terminal-exit', () => {})
     expect(FakeWebSocket.instances).toHaveLength(1)
@@ -264,36 +278,39 @@ describe('事件桥（window.runtime shim）', () => {
     expect(() => off()).not.toThrow()
   })
 
-  it('重连退避指数递增并封顶 30s', () => {
+  it('重连退避指数递增：1s/2s 起步，达到失败阈值前按退避节奏重连', () => {
     vi.useFakeTimers()
     const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
     bridge.EventsOn('e', () => {})
-    // 首连成功后断开，退避序列 1s/2s/4s/8s/16s，其后封顶 30s
     lastSocket().open()
+    // 第 1 轮断开 → 1s 后重连
     lastSocket().close()
-    for (const delay of [1000, 2000, 4000, 8000, 16000]) {
-      vi.advanceTimersByTime(delay)
-      expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2)
-      lastSocket().close()
-    }
-    const count = FakeWebSocket.instances.length
-    // 下一轮退避封顶 30s：29999ms 内无新连接，30s 整触发
-    vi.advanceTimersByTime(29999)
-    expect(FakeWebSocket.instances).toHaveLength(count)
+    vi.advanceTimersByTime(999)
+    expect(FakeWebSocket.instances).toHaveLength(1)
     vi.advanceTimersByTime(1)
-    expect(FakeWebSocket.instances).toHaveLength(count + 1)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    lastSocket().close()
+    // 第 2 轮断开 → 2s 后重连
+    vi.advanceTimersByTime(1999)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    lastSocket().close()
+    // 第 3 轮断开 → 4s 后重连（连续失败第 3 次，之后转门，见阈值用例）
+    vi.advanceTimersByTime(3999)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    vi.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    lastSocket().close()
   })
 
   it('首次连接失败（从未 open）触发 token 门重试而非静默重连', async () => {
     vi.useFakeTimers()
     // 门提交：模拟 tokenGate 已持久化新令牌后 resolve
-    requestToken.mockImplementation(() => {
-      window.localStorage.setItem('workbench.web.token', 'tok-2')
-      return Promise.resolve('tok-2')
-    })
+    mockGateResolves(TOK2)
     const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
     bridge.EventsOn('e', () => {})
-    // 首连持 tok-1 直接建连，不经门
+    // 首连持合法令牌直接建连，不经门
     expect(requestToken).not.toHaveBeenCalled()
     // 握手失败即断开：令牌失效场景，弹门而非退避
     lastSocket().close()
@@ -302,24 +319,93 @@ describe('事件桥（window.runtime shim）', () => {
     requestToken.mockReturnValue(new Promise(() => {}))
     await flushMicrotasks()
     expect(FakeWebSocket.instances).toHaveLength(2)
-    expect(lastSocket().protocols).toEqual(['tok-2'])
+    expect(lastSocket().protocols).toEqual([TOK2])
     vi.advanceTimersByTime(60000)
     expect(FakeWebSocket.instances).toHaveLength(2)
   })
 
   it('无令牌时注册不建连，先经 token 门取得令牌再连接', async () => {
     window.localStorage.removeItem('workbench.web.token')
-    requestToken.mockImplementation(() => {
-      window.localStorage.setItem('workbench.web.token', 'tok-new')
-      return Promise.resolve('tok-new')
-    })
+    mockGateResolves(TOK_NEW)
     const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
     bridge.EventsOn('e', () => {})
     expect(FakeWebSocket.instances).toHaveLength(0)
     expect(requestToken).toHaveBeenCalledTimes(1)
     await flushMicrotasks()
     expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(lastSocket().protocols).toEqual(['tok-new'])
+    expect(lastSocket().protocols).toEqual([TOK_NEW])
+  })
+
+  it('令牌非 64 位 hex 形态时不建 WS，直接进 token 门重输（防子协议 SyntaxError）', async () => {
+    mockGateResolves(TOK)
+    window.localStorage.setItem('workbench.web.token', 'bad-token!')
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    // 非法令牌拦截在 new WebSocket 之前：不建连、直接弹门
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(requestToken).toHaveBeenCalledTimes(1)
+    await flushMicrotasks()
+    // 门取得合法令牌后正常建连，子协议携带新令牌
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(lastSocket().protocols).toEqual([TOK])
+  })
+
+  it('曾连接后连续 3 次重连失败：终止静默循环转 token 门并提示服务不可达', async () => {
+    vi.useFakeTimers()
+    // 门实现须在弹门前就绪（beforeEach 的挂起实现被覆盖为提交新令牌即 resolve）
+    mockGateResolves(TOK2)
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    lastSocket().open()
+    // 断开后 1s/2s/4s 退避重连，每次连上即断（重连失败）
+    lastSocket().close()
+    vi.advanceTimersByTime(1000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    lastSocket().close()
+    vi.advanceTimersByTime(2000)
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    lastSocket().close()
+    vi.advanceTimersByTime(4000)
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    lastSocket().close()
+    // 连续失败达阈值（3 次）：不再调度退避，弹门重新认证 + 不可达横幅
+    expect(requestToken).toHaveBeenCalledTimes(1)
+    expect(notifyUnreachable).toHaveBeenCalled()
+    // 门未决期间不再静默重连
+    vi.advanceTimersByTime(60000)
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    // 门提交新令牌后失败计数清零并重建连接
+    await flushMicrotasks()
+    expect(FakeWebSocket.instances).toHaveLength(5)
+    expect(lastSocket().protocols).toEqual([TOK2])
+  })
+
+  it('token 门被取消后停止重连并保留不可达横幅，不再静默循环', async () => {
+    vi.useFakeTimers()
+    // 用户取消令牌输入：门 reject（实现须在弹门前就绪）
+    requestToken.mockReturnValue(Promise.reject({ code: 'E_RPC_INTERNAL', message: '已取消访问令牌输入' }))
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    lastSocket().open()
+    // 连续 3 次重连失败达阈值，弹门
+    lastSocket().close()
+    vi.advanceTimersByTime(1000)
+    lastSocket().close()
+    vi.advanceTimersByTime(2000)
+    lastSocket().close()
+    vi.advanceTimersByTime(4000)
+    lastSocket().close()
+    expect(requestToken).toHaveBeenCalledTimes(1)
+    await flushMicrotasks()
+    // 取消路径同样给出不可达横幅
+    expect(notifyUnreachable).toHaveBeenCalled()
+    // 取消后不再重连，之后重新注册监听可再次拉起建连
+    vi.advanceTimersByTime(60000)
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    mockGateResolves(TOK_NEW)
+    bridge.EventsOn('e2', () => {})
+    await flushMicrotasks()
+    expect(FakeWebSocket.instances).toHaveLength(5)
   })
 
   it('注册表清空后断开不再重连，重新注册时唤醒建连', () => {

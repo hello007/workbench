@@ -298,6 +298,7 @@ import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
+import { setToken } from '../transport/token'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS } from '../store'
 
 const emit = defineEmits(['update-available'])
@@ -513,6 +514,9 @@ const regenerateToken = async () => {
   }
   try {
     webToken.value = await RegenerateWebToken()
+    // 浏览器（serve）模式下同步更新本页令牌，避免旧令牌轮换后本页后续请求
+    // 401 自锁；桌面模式该写入仅落 localStorage，不参与 Wails 通道，无条件调用无副作用
+    setToken(webToken.value)
     tokenVisible.value = true
     ElMessage.success('访问令牌已重新生成')
   } catch (e) {

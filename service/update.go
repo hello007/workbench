@@ -185,7 +185,7 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 				speed = formatSpeed(bytesPerSec)
 			}
 
-			emitEvent(s.eventSink(), "update:download-progress", model.DownloadProgress{
+			s.emitCurrent("update:download-progress", model.DownloadProgress{
 				TotalBytes: total,
 				Downloaded: downloaded,
 				Percent:    percent,
@@ -207,7 +207,7 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 	}
 
 	// 推送完成事件
-	emitEvent(s.eventSink(), "update:download-progress", model.DownloadProgress{
+	s.emitCurrent("update:download-progress", model.DownloadProgress{
 		TotalBytes: total,
 		Downloaded: downloaded,
 		Percent:    100,

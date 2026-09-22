@@ -130,6 +130,22 @@ func (h *WSHub) ClientCount() int {
 	return len(h.clients)
 }
 
+// Close 关闭 hub 当前全部在途客户端连接（服务停机路径调用，杜绝 Shutdown 不
+// 关 hijacked 连接导致的僵尸客户端与 readPump/writePump goroutine 泄漏）。
+//
+// 只关底层 conn，不直接 close(c.send)：conn 关闭使 readPump 的 ReadMessage
+// 返回错误，走既有 unregister（写锁下 delete + close(send)，仅当客户端仍在册）
+// 收尾，天然防双重 close 与向已 close channel 发送；Close 后再 Emit 亦安全
+// （clients 随各连接 unregister 逐步清空，残留连接的 send 投递失败由 Emit 的
+// 溢出分支 conn.Close 兜底，net.Conn.Close 幂等）。
+func (h *WSHub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		_ = c.conn.Close()
+	}
+}
+
 // SetToken 热轮换访问令牌：更新握手校验基准与升级子协议回显列表。
 //
 // 语义：已建立的连接不在数据面校验令牌，轮换后保持有效至断开重连（重连须用

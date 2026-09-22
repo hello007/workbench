@@ -18,18 +18,28 @@
  *     服务端向全部客户端广播，重连成功后事件自然恢复分发，无需重发订阅；
  *   - 首次连接（页面生命周期内从未 open 成功）失败视为令牌缺失/失效，
  *     弹 token 输入门重试；已成功连接过的断线走静默退避重连（横幅提示，
- *     见 connBanner.js），若服务端轮换令牌，RPC 401 门会更新令牌，
- *     下一次重连即用新值；
+ *     见 connBanner.js），连续失败达 3 次后终止静默循环，弹 token 门重新
+ *     认证并横幅提示服务不可达；门被取消则停止重连，之后任意 EventsOn
+ *     注册或 RPC 401 弹门可再次拉起认证；若服务端轮换令牌，RPC 401 门
+ *     会更新令牌，下一次重连即用新值；
+ *   - 建连前校验令牌为 64 位 hex（服务端签发形态），非法令牌直接进 token
+ *     门重输，避免非法字符作为 WebSocket 子协议同步抛 SyntaxError；
  *   - 无监听者时不重连，下次 EventsOn 注册时唤醒。
  */
 
 import { getToken } from './token'
 import { requestToken } from './tokenGate'
-import { notifyConnected, notifyDisconnected } from './connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable } from './connBanner'
 
 // 重连退避参数：基础 1s，指数递增，封顶 30s。
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
+// 连续重连失败次数上限：达到后终止静默退避循环，转 token 门重新认证。
+const RECONNECT_FAIL_LIMIT = 3
+// 服务端签发的访问令牌为 32 字节 hex（64 字符，见 server/token.go GenerateToken）。
+// 建连前校验：无令牌或形态非法时不发起 WebSocket——非法字符作为子协议传入
+// 会使 new WebSocket 同步抛 SyntaxError 未捕获，杀死重连链。
+const TOKEN_PATTERN = /^[0-9a-f]{64}$/i
 
 /**
  * 创建事件桥实例。index.js 以默认参数创建单例挂到 window.runtime；
@@ -63,7 +73,8 @@ export function createEventBridge({ wsUrl }) {
   function connect() {
     if (socket || pendingGate) return
     const token = getToken()
-    if (!token) {
+    if (!TOKEN_PATTERN.test(token)) {
+      // 无令牌或令牌非服务端签发的 64 位 hex 形态：经 token 门取得/重输
       waitGateThenConnect()
       return
     }
@@ -93,23 +104,36 @@ export function createEventBridge({ wsUrl }) {
         waitGateThenConnect()
         return
       }
+      if (reconnectAttempts >= RECONNECT_FAIL_LIMIT) {
+        // 连续重连失败达阈值：终止静默退避循环，转 token 门重新认证，
+        // 并经横幅给出「服务不可达」解释（终结无提示的无限重连）
+        reconnectAttempts = 0
+        notifyUnreachable()
+        waitGateThenConnect()
+        return
+      }
       scheduleReconnect()
     }
   }
 
   /**
-   * 弹 token 门（模块级去重），取得令牌后重建连接。
+   * 弹 token 门（模块级去重），取得令牌后重建连接；用户取消时停止重连。
    */
   function waitGateThenConnect() {
     if (pendingGate) return
     pendingGate = true
     requestToken().then(() => {
       pendingGate = false
+      // 门取得新令牌后失败计数清零，重新获得完整退避重连机会
+      reconnectAttempts = 0
       connect()
     }).catch(() => {
-      // 防御：requestToken 当前实现不 reject，若未来引入取消/失败路径，
-      // 须解除 pendingGate 挂起态，避免门异常后全部建连通道被永久阻塞
+      // 用户取消令牌输入：解除挂起态、停掉未决退避定时器并保留不可达横幅，
+      // 终结静默重连循环；之后任一组件 EventsOn 注册或 RPC 401 弹门可再次拉起认证
       pendingGate = false
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+      notifyUnreachable()
     })
   }
 

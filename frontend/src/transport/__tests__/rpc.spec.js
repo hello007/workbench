@@ -95,6 +95,23 @@ describe('RPC 通道', () => {
     expect(document.querySelector('.wb-token-gate-backdrop')).toBeNull()
   })
 
+  it('HTTP 401 后取消令牌输入：取消错误经通道透传 reject，浮层关闭', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: '未授权访问：请携带访问令牌' }, 401))
+    const promise = createRpcProxy().ReadFileBytes('D:/a.txt')
+    await vi.waitFor(() => {
+      expect(document.querySelector('.wb-token-gate-backdrop')).toBeTruthy()
+    })
+    // ESC 取消输入门（焦点在输入框内经冒泡触发）：reject {code, message} 交由
+    // 业务组件 handleError 分流，下一次任意 RPC 401 可再次触发门（不永久锁死认证入口）
+    const input = document.querySelector('.wb-token-gate-input')
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await expect(promise).rejects.toEqual({
+      code: 'E_RPC_INTERNAL',
+      message: '已取消访问令牌输入'
+    })
+    expect(document.querySelector('.wb-token-gate-backdrop')).toBeNull()
+  })
+
   it('协议层 HTTP 拒绝（405）reject writeRPCError 结构中的 code/message', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(
       { ok: false, error: { code: 'E_RPC_BAD_REQUEST', message: '仅支持 POST 请求' } },

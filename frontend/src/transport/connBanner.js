@@ -1,7 +1,8 @@
 /**
  * 连接状态横幅（浏览器模式下 WS 断连/恢复的最小 UI 提示）。
  *
- * 由 events.js 在 WS onopen/onclose 时调用 notifyConnected/notifyDisconnected。
+ * 由 events.js 在 WS onopen/onclose 时调用 notifyConnected/notifyDisconnected，
+ * 连续重连失败达阈值或用户取消重连时调用 notifyUnreachable。
  * 仅在「曾成功连接过」后才提示断连：首访令牌门之前的连不上属正常初始化路径，
  * 由 token 输入门负责引导，不弹断连横幅造成双重打扰。
  *
@@ -36,6 +37,15 @@ export function notifyConnected() {
 export function notifyDisconnected() {
   if (!everConnected) return
   show('与后端连接已断开，正在自动重连…', 'warning')
+}
+
+/**
+ * 服务不可达时调用（连续重连失败达阈值、或用户取消 token 门重连收尾，
+ * 见 events.js）。与断连横幅同语义：常驻直至重连成功——曾连接过时由
+ * notifyConnected 收尾显示「连接已恢复」，未连接过时静默移除不误报恢复。
+ */
+export function notifyUnreachable() {
+  show('服务不可达，请确认 WorkBench 正在运行', 'warning')
 }
 
 /**

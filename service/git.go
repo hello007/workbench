@@ -927,13 +927,13 @@ func (s *GitService) BatchPull(repos []string, concurrency int) []model.PullResu
 			}
 			mu.Unlock()
 
-			emitEvent(s.eventSink(), "pull-progress", result)
+			s.emitCurrent("pull-progress", result)
 		}(repo)
 	}
 
 	wg.Wait()
 
-	emitEvent(s.eventSink(), "pull-complete", map[string]int{
+	s.emitCurrent("pull-complete", map[string]int{
 		"success": successCount,
 		"skipped": skippedCount,
 		"failed":  failCount,

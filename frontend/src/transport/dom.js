@@ -23,12 +23,35 @@ html.dark .wb-token-gate-backdrop {
   background: rgba(2, 6, 23, 0.6);
 }
 .wb-token-gate {
+  position: relative;
   width: min(420px, 86vw);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: var(--spacing-lg);
+}
+.wb-token-gate-close {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.wb-token-gate-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
 }
 .wb-token-gate-title {
   margin: 0 0 var(--spacing-sm);

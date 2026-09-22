@@ -192,12 +192,12 @@ func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyPro
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				emitEvent(s.eventSink(), "terminal-exit", sessionID)
+				s.emitCurrent("terminal-exit", sessionID)
 			}
 			return
 		}
 		if n > 0 {
-			emitEvent(s.eventSink(), "terminal-output", sessionID, string(buf[:n]))
+			s.emitCurrent("terminal-output", sessionID, string(buf[:n]))
 		}
 	}
 }
@@ -212,7 +212,7 @@ func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProces
 			s.mu.Unlock()
 			if exists {
 				session.SetRunning(false)
-				emitEvent(s.eventSink(), "terminal-exit", sessionID)
+				s.emitCurrent("terminal-exit", sessionID)
 			}
 			return
 		}

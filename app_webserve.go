@@ -84,9 +84,16 @@ func (a *App) GetWebServeToken() (string, error) {
 }
 
 // RegenerateWebToken 重新生成访问令牌：生成 → 持久化 → 运行中服务热轮换，
-// 返回新令牌。旧令牌对后续全部 HTTP 与 WS 握手请求立即失效；已建立的 WS 连接
+// 返回新令牌。全程持 webTokenMu 互斥——并发轮换（浏览器多标签页同时触发）
+// 若不加锁， goroutine 1 落盘 token A 与 goroutine 2 落盘 token B 可交错于
+// RotateToken 之前，最终磁盘与 handler/hub 内存基准不一致（旧令牌残留在某
+// 一侧）。互斥后「落盘 + 热轮换」原子完成，最后一个完成的调用决定三处一致
+// 的最终态。旧令牌对后续全部 HTTP 与 WS 握手请求立即失效；已建立的 WS 连接
 // 保持有效至断开重连（见文件头注释的热生效语义）。
 func (a *App) RegenerateWebToken() (string, error) {
+	a.webTokenMu.Lock()
+	defer a.webTokenMu.Unlock()
+
 	token, err := server.GenerateToken()
 	if err != nil {
 		return "", fmt.Errorf("生成访问令牌失败: %w", err)

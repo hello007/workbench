@@ -70,8 +70,8 @@ func NewWebHandler(opts WebOptions) *WebHandler {
 		mux.Handle(wsPath, opts.WSHub)
 	}
 	preview := PreviewHandler()
-	mux.Handle("/preview-pdf", preview)
-	mux.Handle(previewRawPrefix, preview)
+	mux.Handle("/preview-pdf", requireSameOrigin(preview))
+	mux.Handle(previewRawPrefix, requireSameOrigin(preview))
 	mux.Handle("/", h.requireToken(http.HandlerFunc(h.serveStatic)))
 	h.mux = mux
 	return h
@@ -94,6 +94,32 @@ func (h *WebHandler) SetToken(token string) {
 func (h *WebHandler) serveHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// requireSameOrigin serve 模式预览路由的同源校验中间件：Sec-Fetch-Site 为
+// same-origin 放行，cross-site / none / 缺失一律 403 拒绝。
+//
+// 取舍说明：
+//   - 预览端点（/preview-pdf、/preview-raw/）可读取任意本地绝对路径，免 token
+//     的信任模型是「调用方为用户在 UI 中主动预览的同源页面」。该信任在 serve
+//     模式下面向网络，须以浏览器上下文约束收敛：预览仅由前端页面内嵌框架
+//     （iframe/embed 媒体元素）加载，同源加载必带 Sec-Fetch-Site: same-origin
+//     （Chromium/Firefox/Safari 自 2020 年起全量默认携带，含 WebView2），不误伤。
+//   - cross-site 拒绝恶意网站跨站嵌入/表单导航探测本地文件；none 拒绝地址栏
+//     直接导航；缺失即非浏览器客户端（curl/脚本探测），一并拒绝——端点合法
+//     调用方仅有同源页面，无「合法但缺头」的调用形态。
+//   - 桌面模式零变化：桌面预览经 AssetServer.Handler 直挂 PreviewHandler
+//     （本地信任模型，见 NewWebHandler 路由分层注释），不经本中间件。
+func requireSameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "same-origin" {
+			slog.Warn("preview request rejected by sec-fetch-site check",
+				"path", r.URL.Path, "site", site, "remote", r.RemoteAddr)
+			writePreviewError(w, http.StatusForbidden, "预览请求仅允许同源页面发起")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireToken token 认证中间件：未授权返回 401 JSON（安全失败关闭）。

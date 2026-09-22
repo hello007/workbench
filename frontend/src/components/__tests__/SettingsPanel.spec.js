@@ -798,6 +798,23 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('访问令牌已重新生成')
   })
 
+  it('重新生成成功后同步更新本页令牌持久化（浏览器模式防 401 自锁）', async () => {
+    const { RegenerateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    const { clearToken } = await import('../../transport/token')
+    ElMessageBox.confirm.mockResolvedValue()
+    const newToken = 'e'.repeat(64)
+    RegenerateWebToken.mockResolvedValue(newToken)
+    window.localStorage.removeItem('workbench.web.token')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await flushPromises()
+    // 浏览器（serve）模式下本页令牌须同步轮换，否则旧令牌失效后本页后续请求 401 自锁
+    expect(window.localStorage.getItem('workbench.web.token')).toBe(newToken)
+    clearToken()
+  })
+
   it('重新生成令牌取消则不调用', async () => {
     const { RegenerateWebToken } = await import('../../../wailsjs/go/main/App')
     const { ElMessageBox } = await import('element-plus')

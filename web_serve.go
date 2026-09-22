@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -19,8 +18,9 @@ import (
 //
 // 生命周期：
 //   - 桌面模式：startup 按设置创建并 Start（默认开启，失败仅告警降级——浏览器
-//     访问为可选增强能力，端口占用等不影响桌面本体）；shutdown Stop 优雅停机。
-//   - --serve 无头模式：runServe 创建并 Start，Wait 阻塞至服务退出。
+//     访问为可选增强能力，端口占用等不影响桌面本体）；shutdown Stop 立即断开停机。
+//   - --serve 无头模式：runServe 创建并 Start，Wait 按代际阻塞至服务真正退出
+//     （浏览器侧经 SetWebServeConfig 重启/停机不终止进程）。
 //
 // 运行期变更（桌面设置页）：SetWebServeConfig 改地址/开关经 Start/Stop 平滑
 // 重启；RegenerateWebToken 经 RotateToken 热轮换（不断监听、不断在途连接）。
@@ -33,21 +33,25 @@ type webServeManager struct {
 	hub     *server.WSHub
 	handler *server.WebHandler
 	listen  string
-	// done 每次 Start 重建，承载 Serve goroutine 的退出错误（Wait 消费）
+	// done 每次 Start 重建，承载 Serve goroutine 的退出错误（Wait 按代际消费）
 	done chan error
+	// cond 联动 mu，供 Wait 在 done 为 nil（服务未运行）时阻塞等待下一次 Start
+	cond *sync.Cond
 }
 
 // newWebServeManager 构造管理器。app 供装配（RPC target 与事件出口切换）使用。
 func newWebServeManager(app *App) *webServeManager {
-	return &webServeManager{app: app}
+	m := &webServeManager{app: app}
+	m.cond = sync.NewCond(&m.mu)
+	return m
 }
 
 // Start 启动（或按新地址重启）浏览器访问通道 HTTP 服务。
 //
-// 幂等语义：已在运行且地址未变时为 no-op；地址变化时先优雅停机再以新地址重启
-// （hub/handler 全部重建，令牌重新从 data/web_token 读取——令牌轮换后经重启
-// 或 RotateToken 均能取到最新值）。监听失败（端口占用等）同步返回错误，由调用
-// 方决定降级（桌面告警）或上抛（--serve fatal）。
+// 幂等语义：已在运行且地址未变时为 no-op；地址变化时先停旧实例（立即断开，
+// 见 stopLocked）再以新地址重启（hub/handler 全部重建，令牌重新从 data/web_token
+// 读取——令牌轮换后经重启或 RotateToken 均能取到最新值）。监听失败（端口占用
+// 等）同步返回错误，由调用方决定降级（桌面告警）或上抛（--serve fatal）。
 func (m *webServeManager) Start(listen string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -80,6 +84,9 @@ func (m *webServeManager) startLocked(listen string) error {
 	}
 	m.srv, m.ln, m.hub, m.handler, m.listen = srv, ln, hub, handler, listen
 	m.done = make(chan error, 1)
+	// 唤醒 Wait 中因服务未运行（done 为 nil）而阻塞等待的 goroutine（--serve 模式
+	// 浏览器经 SetWebServeConfig 停机后重新开启的路径）
+	m.cond.Broadcast()
 	// done 以局部变量捕获：Serve goroutine 与 stopLocked 置 nil m.done 并发，
 	// 直接读字段构成数据竞态（-race 实测），局部捕获后 goroutine 不再触碰 manager 字段
 	done := m.done
@@ -89,7 +96,7 @@ func (m *webServeManager) startLocked(listen string) error {
 	return nil
 }
 
-// Stop 优雅停机：等待在途请求收尾（上限 3s），恢复 service 事件出口为纯
+// Stop 停机：立即关闭监听与在途连接（含 WS），恢复 service 事件出口为纯
 // Wails 出口。未运行时为 no-op。
 func (m *webServeManager) Stop() error {
 	m.mu.Lock()
@@ -97,29 +104,64 @@ func (m *webServeManager) Stop() error {
 	return m.stopLocked()
 }
 
-// stopLocked 优雅停机（调用方须持 mu）。
+// stopLocked 停机（调用方须持 mu）。
+//
+// 停机语义为立即断开（srv.Close）而非优雅等待（Shutdown）：SetWebServeConfig
+// 可由浏览器经 /api/rpc 在 HTTP 处理器内触发停机/重启，此刻当前请求所在的
+// 连接正是 Shutdown 要等待的在途请求——自己等自己必然空转到超时上限（实测
+// 3s），且超时后旧连接仍滞留为僵尸。立即断开同时消除自等空转与僵尸连接，
+// 代价是触发停机的 RPC 响应可能随连接断开而不可达——操作已实际生效，前端
+// transport 具备失败提示与重连能力（改址后浏览器本就要重连新地址，可接受）。
+// 注意 http.Server.Close 不跟踪 hijacked 的 WS 连接，在途 WS 客户端由下方
+// hub.Close 显式关闭。
 func (m *webServeManager) stopLocked() error {
 	if m.srv == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	err := m.srv.Shutdown(ctx)
+	// 先关闭在途 WS 客户端（在 applySink 前调用：hub 引用尚在册，conn 关闭后
+	// readPump 走既有 unregister 收尾，防停机后事件投递到僵尸 hub 的客户端与
+	// readPump/writePump goroutine 泄漏）
+	if m.hub != nil {
+		m.hub.Close()
+	}
+	err := m.srv.Close()
 	// 出口恢复为纯 Wails（hub 随服务停用，避免事件投递到僵尸 hub）
 	m.applySink(nil)
 	m.srv, m.ln, m.hub, m.handler, m.listen, m.done = nil, nil, nil, nil, "", nil
+	// 唤醒 Wait：其消费的旧代际 done 即将收到退出错误，须感知代际已更替
+	m.cond.Broadcast()
 	return err
 }
 
-// Wait 阻塞等待当前 Serve goroutine 退出并返回其错误；未运行时立即返回 nil。
+// Wait 按代际阻塞等待当前 Serve goroutine 退出并返回其错误；服务未运行时
+// 阻塞等待下一次 Start（--serve 主进程不得因浏览器侧停机/重启而退出）。
+//
+// 代际语义：done channel 每次 Start 重建、Stop 置 nil，引用即代际标识。Wait
+// 持有当前代际的 done 等待退出错误，收到后核对代际——服务仍在（重启场景新
+// done 已建、停机场景 done 为 nil）则说明本次退出由 SetWebServeConfig 触发
+// （--serve 模式浏览器改绑定地址/关开关），非进程退出信号，继续等待当前代际；
+// 仅当代际未变（Serve 因真实错误自行退出）时才返回错误交由调用方终止进程。
+// 由此消除旧实现的缺陷：浏览器触发重启时旧 done 收到 ErrServerClosed，Wait
+// 误判为正常停机返回 → runServe 返回 → 进程意外退出。
 func (m *webServeManager) Wait() error {
 	m.mu.Lock()
-	done := m.done
-	m.mu.Unlock()
-	if done == nil {
-		return nil
+	defer m.mu.Unlock()
+	for {
+		for m.done == nil {
+			// 服务未运行（浏览器侧 SetWebServeConfig 已停机）：--serve 主进程
+			// 存活等待下一次 Start；Start 成功后 cond.Broadcast 唤醒本处
+			m.cond.Wait()
+		}
+		done := m.done
+		m.mu.Unlock()
+		err := <-done
+		m.mu.Lock()
+		if m.done == done {
+			// 代际未变：Serve 非管理器触发地退出（真实错误），返回给调用方
+			return err
+		}
+		// 代际已更替（重启/停机触发的旧实例退出）：继续等待当前代际
 	}
-	return <-done
 }
 
 // RotateToken 令牌热轮换：更新 HTTP 认证与 WS 握手的校验基准，立即生效且不断开

@@ -140,7 +140,10 @@ func runServe(listenOverride string) error {
 	consolePrint(fmt.Sprintf("WorkBench serve 模式运行中: http://%s （访问令牌见 %s）\n", listen, serveTokenFile))
 	slog.Info("serve mode listening", "addr", listen)
 
-	// 阻塞至 HTTP 服务退出（Serve 错误或进程被杀）；ErrServerClosed 视为正常停机
+	// 按代际阻塞至服务真正退出：浏览器经 SetWebServeConfig 触发的重启/停机由
+	// Wait 内部代际核对消化（进程存活，继续服务新地址/等待重新开启）；仅 Serve
+	// 因真实错误退出时才返回。ErrServerClosed 判断保留为防御兜底（正常路径下
+	// 管理器触发的退出不会再透出该错误）。
 	if err := app.webServe.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

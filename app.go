@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 
 	"workbench/util"
 )
@@ -19,6 +20,10 @@ type App struct {
 	// webServe 浏览器访问通道管理器（桌面同开 HTTP / --serve 无头共用）。
 	// startup / runServe 创建；零值构造（测试）时为 nil，方法内 nil 防护处理。
 	webServe *webServeManager
+	// webTokenMu 访问令牌轮换互斥：RegenerateWebToken 的生成→落盘→热轮换
+	// 全程串行化，防并发轮换交错导致磁盘令牌与 handler/hub 内存令牌不一致
+	//（浏览器多标签页同时触发「重新生成令牌」即真实并发入口）。
+	webTokenMu sync.Mutex
 	// webServeListenOverride 命令行 --listen 显式覆盖值（空串 = 未指定，走
 	// settings.json webServe.bindAddress；命令行覆盖配置文件）。main() 注入。
 	webServeListenOverride string
