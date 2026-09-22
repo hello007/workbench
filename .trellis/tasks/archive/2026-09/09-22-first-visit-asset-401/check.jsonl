@@ -1,0 +1,2 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对四通道契约同步与安全语义（HttpOnly/SameSite/恒定时间比较）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁复核"}
