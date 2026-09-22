@@ -836,3 +836,38 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 80: AI 对话工作台（AIChatBox）全栈落地
+
+**Date**: 2026-09-22
+**Task**: AI 对话工作台（AIChatBox）全栈落地
+**Branch**: `master`
+
+### Summary
+
+头脑风暴收敛 5 项决策（多会话/多CLI预留/标准面板/纯文本模板/权限多模式）后，PR1-4 经 trellis-implement 子代理完成：后端 ChatService（RunChat --resume 链路、chat-task:* 事件、data/ai_chat/ 存储、目录/模板/配置 CRUD）、前端 AiChatPanel（目录栏+对话区+模板+权限模型配置）、文档与 E2E。trellis-check 修复 5 处（高危：web_serve applySink 漏 chatSvc 事件出口，沉淀为 CLAUDE.md 关键规则）。service 覆盖率 79.9%、前端 83.05%、E2E 46 passed。已知环境性失败：TestApp_StartWebServe_StartupMatrix 因运行中 workbench.exe 占 36115 端口，与代码无关。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6734e2d` | (see git log) |
+| `2f5660b` | (see git log) |
+| `ec214ad` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
