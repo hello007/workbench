@@ -1,0 +1,3 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对修复后契约一致性，并回补 WSHub.Close/Wait 代际/token 原子性三契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁复核"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "日志卫生复核（token 不泄漏）"}
