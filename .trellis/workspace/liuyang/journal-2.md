@@ -732,3 +732,36 @@ WorkBench 全功能暴露为浏览器可访问：桌面默认同开 HTTP（设�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 77: 浏览器首访资产 401 修复（cookie 会话贯通）
+
+**Date**: 2026-09-22
+**Task**: 浏览器首访资产 401 修复（cookie 会话贯通）
+**Branch**: `master`
+
+### Summary
+
+用户实测发现首访 /?token= 后 /assets/*.js 全 401——查询参数只随单请求发送，应用无法启动、token 门无法出现（PR1 冒烟只测了 index.html 自身的盲区）。修复：token 中间件凭据四通道（Bearer > X-Auth-Token > wb_token cookie > ?token=），候选收集逐通道独立比对；header/query 认证成功自动 Set-Cookie（HttpOnly+SameSite=Strict+30 天，HTTPS 加 Secure）；WS authorized 三通道，前端无本地令牌裸连走 cookie。check 代理另逮两个真缺陷：轮换后旧 cookie 遮蔽 ?token= 新令牌致 30 天无法恢复（候选收集修复）、轮换窗口 TOCTOU（快照原子种 cookie）。新增 serve_cookie_smoke_test.go 真实 embed 资产全链路冒烟，复现文件 index-BjOTlykT.js 带 cookie 200 实证。覆盖率 server 93.5%，-race 绿，前端 1111 用例全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a06527` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
