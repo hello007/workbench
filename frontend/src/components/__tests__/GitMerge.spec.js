@@ -23,7 +23,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AbortRebase: vi.fn(),
   AbortCherryPick: vi.fn(),
   SkipRebase: vi.fn(),
-  OpenInVSCode: vi.fn(() => Promise.resolve(true))
+  OpenInVSCode: vi.fn(() => Promise.resolve(true)),
+  OpenInExternalMerge: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -329,6 +330,37 @@ describe('GitMerge.vue', () => {
     await flushPromises()
 
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('VSCode'))
+  })
+
+  it('点击"外部合并"调用 OpenInExternalMerge 并提示后续标记动作', async () => {
+    const { GetConflictState, OpenInExternalMerge } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    GetConflictState.mockResolvedValue({ type: 'merge', files: ['src/a.txt'] })
+    OpenInExternalMerge.mockResolvedValue(undefined)
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await findBtn(wrapper, '外部合并', true).trigger('click')
+    await flushPromises()
+
+    expect(OpenInExternalMerge).toHaveBeenCalledWith('/repo/A', 'src/a.txt')
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('标记已解决'))
+  })
+
+  it('外部合并失败时走 handleError 分流提示', async () => {
+    const { GetConflictState, OpenInExternalMerge } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    GetConflictState.mockResolvedValue({ type: 'merge', files: ['src/a.txt'] })
+    OpenInExternalMerge.mockRejectedValue(new Error('boom'))
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await findBtn(wrapper, '外部合并', true).trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
   })
 
   it('点击"标记已解决"调用 ResolveConflict 并刷新冲突态', async () => {

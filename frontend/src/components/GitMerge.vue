@@ -61,6 +61,15 @@
           <el-text class="conflict-file" :title="file">{{ file }}</el-text>
           <div class="conflict-row-actions">
             <el-button size="small" text @click="openFile(file)">打开</el-button>
+            <!-- 三向合并：base/local/remote 临时版本 + merged 工作区原文件交外部工具；
+                 未配置工具/模板时后端 AppError(NotConfigured) 经 handleError 引导设置 -->
+            <el-button
+              size="small"
+              text
+              type="primary"
+              @click="openExternalMerge(file)"
+              :loading="openingMerge === file"
+            >外部合并</el-button>
             <el-button
               size="small"
               text
@@ -93,9 +102,10 @@ import {
   Merge, Rebase, CherryPick, GetConflictState, ResolveConflict,
   ContinueMerge, ContinueRebase, ContinueCherryPick,
   AbortMerge, AbortRebase, AbortCherryPick, SkipRebase,
-  OpenInVSCode
+  OpenInVSCode, OpenInExternalMerge
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
+import { handleError } from '../utils/error'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -117,6 +127,8 @@ const continuing = ref(false)
 const aborting = ref(false)
 const skipping = ref(false)
 const resolvingFile = ref('')
+// 三向合并打开中状态（行级 loading，防重复点击）
+const openingMerge = ref('')
 // 最近一次操作输出（git stdout），超长截断展示
 const lastOutput = ref('')
 
@@ -200,6 +212,24 @@ const openFile = async (file) => {
     }
   } catch (error) {
     ElMessage.error('打开文件失败: ' + (error.message || String(error)))
+  }
+}
+
+/**
+ * 三向合并：拉起外部合并工具（base/local/remote 临时版本 + merged 工作区原文件）。
+ * 成功后引导用户在工具中保存合并结果，回面板点「标记已解决」（git add）；
+ * 未配置工具/模板时后端 AppError(NotConfigured) 经 handleError 按 warning 引导设置。
+ */
+const openExternalMerge = async (file) => {
+  if (openingMerge.value) return
+  openingMerge.value = file
+  try {
+    await OpenInExternalMerge(props.repoPath, file)
+    ElMessage.success(`已用外部合并工具打开 ${file}，保存合并结果后请点「标记已解决」`)
+  } catch (e) {
+    handleError('打开外部合并工具失败: ', e)
+  } finally {
+    openingMerge.value = ''
   }
 }
 

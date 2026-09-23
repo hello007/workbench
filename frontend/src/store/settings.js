@@ -236,6 +236,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const diffToolName = ref('beyondcompare')
   const diffToolPath = ref('')
   const diffToolArgs = ref('')
+  // 三向合并参数模板（custom 预设用，{base}{local}{remote}{merged} 占位符）；
+  // 预设工具由后端内置模板接管，本字段不消费
+  const diffToolMergeArgs = ref('')
   // 是否已配置：与后端校验对称——路径非空且参数模板含 {left}{right} 占位符，
   // 避免按钮可用但点击即报「参数模板须包含占位符」
   const diffToolConfigured = computed(() =>
@@ -406,6 +409,7 @@ export const useSettingsStore = defineStore('settings', () => {
       diffToolName.value = settings.diffToolName || 'beyondcompare'
       diffToolPath.value = settings.diffToolPath || ''
       diffToolArgs.value = settings.diffToolArgs || ''
+      diffToolMergeArgs.value = settings.diffToolMergeArgs || ''
     } catch {
       diffToolName.value = 'beyondcompare'
       diffToolPath.value = ''
@@ -421,6 +425,7 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.diffToolName = diffToolName.value
     settings.diffToolPath = diffToolPath.value
     settings.diffToolArgs = diffToolArgs.value
+    settings.diffToolMergeArgs = diffToolMergeArgs.value
     await SaveSettings(settings)
   }
 
@@ -482,6 +487,7 @@ export const useSettingsStore = defineStore('settings', () => {
     diffToolName,
     diffToolPath,
     diffToolArgs,
+    diffToolMergeArgs,
     diffToolConfigured,
     terminalFontSize,
     terminalFontFamily,
