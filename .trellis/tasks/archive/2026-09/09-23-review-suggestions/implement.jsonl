@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-23-review-suggestions/prd.md", "reason": "任务 PRD：G1-G12 修复清单（问题/修复方向/验收），实现全程逐条对照"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台契约：G8-G10 平台判定须复用 §4 shellConfigs 首项信号模式（禁 UA）；契约变化须同步本文"}
+{"file": "docs/spec/test-stability.md", "reason": "G5/G11/G12 测试质量修复须守稳定性规范（非恒真断言、渲染层断言）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增测试的覆盖率门禁"}
