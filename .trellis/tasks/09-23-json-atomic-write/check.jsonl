@@ -1,0 +1,2 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "检查全部 data JSON 落盘经统一原子核心、无新增 os.WriteFile 直写、temp 命名模式与既有测试 glob 断言兼容"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 util 包新增原子写测试不回退覆盖率门禁（util ≥40%）"}

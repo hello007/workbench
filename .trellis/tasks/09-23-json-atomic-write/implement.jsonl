@@ -1,0 +1,2 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "本任务沉淀的 data JSON 落盘原子写契约：统一入口 util.SaveJSON、禁直写与自建 temp+rename、temp 命名模式、整体覆盖模型边界"}
+{"file": "docs/spec/test-stability.md", "reason": "原子写测试用确定性断言（残留文件内容精确比较），不依赖 mtime 时序与固定端口"}

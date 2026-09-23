@@ -74,6 +74,7 @@ workbench/
 |Linux 支持：Wails 桌面构建须 `-tags webkit2_41`（Ubuntu 24.04 已移除 webkit2gtk-4.0 包）；无标签时桌面前端 CGO 不进依赖图（internal/app 桩实现），后端子包 build/test 无需 GTK 依赖；平台抽象选型——编译期字段独有走 `_windows/_other` 双文件、短行为分叉走运行时 GOOS 分支、纯逻辑抽无 tag 文件双侧同测；自更新 Linux 资产名 `workbench-linux-amd64.tar.gz` 与 release.yml 打包名严格一致；`build/` 在 gitignore，需分发文件须白名单放行（`!build/README-linux.md` 先例，漏放发版必挂）；测试平台断言拆 `_windows_test.go`/`_linux_test.go`，禁两平台共享一份平台耦合断言；前端 shell/目录兜底禁 'powershell'、'C:\\' 字面量，统一走 settings store `FALLBACK_SHELL` 与 `fallbackTerminalDir()`|[linux-platform.md](docs/spec/linux-platform.md)|
 |测试禁隐式依赖环境外部状态：文件 mtime 时序（NTFS 同 tick 不变）与固定端口（本机常驻 workbench.exe 监听 36115）均致偶发挂；web serve 启动测试注入随机端口（settings BindAddress 写 :0 或 webServeListenOverride，直调 Start 直接传参），能直绑 :0 的用例禁新增非必要 freePort 探测（TOCTOU 定性接受仅限结构性须预知端口的用例），mtime 判定用注入陈旧缓存驱动，禁 sleep 等待|[test-stability.md](docs/spec/test-stability.md)|
 |统计类派生聚合缓存（如贡献者行数 numstat 缓存）复用 `commitHistoryCacheKey` 键与 headSHA+TTL 失效判定时，失效为二态（命中/全量重拉，聚合值无增量 prepend 路径），且须在 `InvalidateCommitHistoryCache`（ClearByGitRoot）与 `ClearAllCommitHistoryCache`（ClearAll）两入口联动清除，漏联动则手动刷新后行数与提交数口径漂移|—|
+|data/ 目录 JSON 持久化必须走 `util.SaveJSON` 原子写（CreateTemp 同目录 temp → fsync → os.Rename 替换，Windows 为 MoveFileEx REPLACE_EXISTING 原子替换），禁新增 os.WriteFile 直写与自建 temp+rename 实现（saveChatJSON/atomicWriteConfig 已收敛为委托）；崩溃残留 `.<目标名>.tmp-*` 点文件无害不自动清扫；原子写不解决整体覆盖丢数据（last-writer-wins），手改 data 文件前仍须关 workbench.exe|data-atomic-write.md（docs/spec/data-atomic-write.md）|
 
 ## 文档索引
 
@@ -112,5 +113,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-09-23
-**文档版本：** v2.12
+**最后更新：** 2026-09-24
+**文档版本：** v2.13

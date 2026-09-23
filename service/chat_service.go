@@ -42,39 +42,16 @@ func newChatTaskID() string {
 	return fmt.Sprintf("chattask-%d-%d", time.Now().UnixNano(), chatTaskIDSeq.Add(1))
 }
 
-// saveChatJSON 原子写 JSON 文件：先写同目录 temp 文件，成功后把现有旧文件复制为
-// <目标>.bak（保留上一好版本，rename 后新文件若损坏仍有回退），再 os.Rename
-// temp 原子替换目标。进程崩溃不再把目标截断为半截内容（util.SaveJSON 的
-// os.WriteFile 是截断写，崩溃即丢会话历史/索引且 .bak 备份的也是已截断内容）。
-// 仅 ChatService 域使用；util.SaveJSON 有其他 service 在用，保持原样不动。
+// saveChatJSON 原子写 ChatService 域 JSON 文件：把现有旧文件复制为 <目标>.bak
+// （保留上一好版本，替换后新文件若损坏仍有回退），原子核心（同目录 temp → fsync →
+// rename 原子替换）委托 util.SaveJSON——temp+rename 管道已全仓统一，此处不再自建。
+// .bak 为写侧保险，无加载方按精确路径消费（loadIndex 损坏时回空索引并另留时间戳留底）。
 func saveChatJSON(filePath string, v interface{}) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(filePath)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	// 成功 rename 后目标名已不存在，此删除为 no-op；失败路径清理 temp 残留
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
 	// 覆写前备份上一好版本（当前文件不存在时跳过）
 	if old, rerr := os.ReadFile(filePath); rerr == nil {
 		_ = os.WriteFile(filePath+".bak", old, 0o644)
 	}
-	return os.Rename(tmpName, filePath)
+	return util.SaveJSON(filePath, v)
 }
 
 // ===== 子进程抽象（测试注入 fake，不真调 claude CLI）=====

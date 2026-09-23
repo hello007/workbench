@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"workbench/util"
 )
 
 // VaultEntry obsidian.json 中单个 vault 条目。
@@ -180,22 +182,9 @@ func backupConfig(cfgPath string) (string, error) {
 	return bak, os.WriteFile(bak, b, 0644)
 }
 
-// atomicWriteConfig 原子写入 obsidian.json：MarshalIndent -> 写同目录临时文件 -> os.Rename 替换。
-// 同目录临时文件保证同分区，os.Rename 在 Windows 上为原子替换（覆盖目标），避免半写损坏。
-// 临时文件命名带 pid，规避并发实例竞争；失败时清理临时文件。
+// atomicWriteConfig 原子写入 obsidian.json。temp+fsync+rename 原子核心已全仓统一为
+// util.SaveJSON（CreateTemp 同目录临时文件；Windows 下 os.Rename 为
+// MoveFileEx(REPLACE_EXISTING) 原子替换，避免半写损坏），此处仅保留领域入口名。
 func atomicWriteConfig(cfgPath string, cfg *obsidianConfig) error {
-	tmp := cfgPath + ".tmp." + strconv.Itoa(os.Getpid())
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, cfgPath); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return util.SaveJSON(cfgPath, cfg)
 }

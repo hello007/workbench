@@ -74,6 +74,82 @@ func TestSaveJSON_CreatesNestedDir(t *testing.T) {
 	}
 }
 
+// TestSaveJSON_OverwriteExisting 已存在目标的覆盖语义锚定：Windows 下 os.Rename 走
+// MoveFileEx(MOVEFILE_REPLACE_EXISTING) 原子替换（util.SaveJSON 原子写的前提行为）。
+func TestSaveJSON_OverwriteExisting(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "out.json")
+	if err := os.WriteFile(p, []byte(`{"old":true}`), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if err := SaveJSON(p, map[string]int{"new": 2}); err != nil {
+		t.Fatalf("SaveJSON overwrite: %v", err)
+	}
+	var got map[string]int
+	if err := LoadJSON(p, &got); err != nil {
+		t.Fatalf("LoadJSON after overwrite: %v", err)
+	}
+	if len(got) != 1 || got["new"] != 2 {
+		t.Errorf("覆盖后应为全新内容, 实际=%v", got)
+	}
+}
+
+// TestSaveJSON_StaleTempResidueDoesNotBreakTarget 模拟崩溃中断残留：预先植入同模式
+// 临时文件（点前缀隐藏名），再次保存不受影响，目标文件内容正确且无临时文件被误认为目标。
+// 残留文件按设计不做自动清扫（并发保存下清扫他方在写临时文件会误删），但其为隐藏点文件，
+// 不被精确路径读取，属无害残留。
+func TestSaveJSON_StaleTempResidueDoesNotBreakTarget(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.json")
+	stale := filepath.Join(dir, ".out.json.tmp-9999")
+	if err := os.WriteFile(stale, []byte(`{"crashed":true}`), 0o644); err != nil {
+		t.Fatalf("plant stale temp: %v", err)
+	}
+	if err := SaveJSON(p, map[string]int{"ok": 1}); err != nil {
+		t.Fatalf("SaveJSON with stale residue: %v", err)
+	}
+	var got map[string]int
+	if err := LoadJSON(p, &got); err != nil {
+		t.Fatalf("stale 残留下目标损坏: %v", err)
+	}
+	if got["ok"] != 1 {
+		t.Errorf("目标内容错误: %v", got)
+	}
+	// 残留临时文件不应被当作目标消费（内容仍是崩溃半成品，属设计内无害残留）
+	if raw, err := os.ReadFile(stale); err != nil || string(raw) != `{"crashed":true}` {
+		t.Errorf("残留临时文件不应被改动: raw=%q err=%v", raw, err)
+	}
+}
+
+// TestSaveJSON_NoTempResidueOnSuccess 成功保存后同目录无临时文件残留。
+func TestSaveJSON_NoTempResidueOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.json")
+	if err := SaveJSON(p, map[string]int{"x": 1}); err != nil {
+		t.Fatalf("SaveJSON: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, ".*.tmp-*"))
+	if len(matches) != 0 {
+		t.Errorf("成功保存不应残留临时文件: %v", matches)
+	}
+}
+
+// TestSaveJSON_MarshalFailureTargetIntact 序列化失败（不可 JSON 化的值）时目标文件
+// 保持原内容不动——原子写失败路径不触碰已有数据。
+func TestSaveJSON_MarshalFailureTargetIntact(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(p, []byte(`{"keep":true}`), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if err := SaveJSON(p, map[string]chan int{"bad": nil}); err == nil {
+		t.Fatal("不可序列化值应返回错误")
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil || string(raw) != `{"keep":true}` {
+		t.Errorf("失败路径目标文件被改动: raw=%q err=%v", raw, err)
+	}
+}
+
 // TestFileExists_Exists 文件存在返回 true。
 func TestFileExists_Exists(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "exists.txt")
