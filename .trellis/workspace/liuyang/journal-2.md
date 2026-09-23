@@ -1118,3 +1118,37 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+
+## Session 88: 修复 StartupMatrix 测试环境端口依赖
+
+**Date**: 2026-09-23
+**Task**: 修复 StartupMatrix 测试环境端口依赖
+**Branch**: `master`
+
+### Summary
+
+TestApp_StartWebServe_StartupMatrix/设置开启默认启动 稳定失败定性为测试隔离缺口：本机常驻 workbench.exe 监听默认端口 36115，startWebServe 回落默认绑定地址走告警降级致 Running()=false。修复：子测试经 settingsSvc.Save 注入 WebServe{Enabled:true, BindAddress:127.0.0.1:0}，随机端口隔离且保住 settings 选址分支覆盖（子代理审核发现 override 方案会漏掉 web_serve.go:248 分支）。沉淀 docs/spec/test-stability.md 端口/环境依赖章节 + CLAUDE.md 关键规则行。freePort TOCTOU 为既有残留未动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf8cbbe` | (see git log) |
+| `3dd9eac` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

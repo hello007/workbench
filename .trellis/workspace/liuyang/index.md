@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 87
+- **Total Sessions**: 88
 - **Last Active**: 2026-09-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1120 | Active |
+| `journal-2.md` | ~1154 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 88 | 2026-09-23 | 修复 StartupMatrix 测试环境端口依赖 | `cf8cbbe`, `3dd9eac` | `master` |
 | 87 | 2026-09-23 | AI 对话选择题交互卡片 | `5153f1b` | `master` |
 | 86 | 2026-09-23 | AI对话面板布局修复与输入区优化及三路审核 | `1a9134f`, `ae181a3` | `master` |
 | 85 | 2026-09-23 | 审核建议级修复 G1-G12 | `25c5142` | `master` |
