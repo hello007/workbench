@@ -24,7 +24,8 @@ const SessionStateVersion = "2"
 //
 // 字段对齐前端 Pinia store 实际结构（见 frontend/src/store/{directory,ui}.js）：
 //   - SelectedDirectoryID <-> directoryStore.selectedDirectoryId
-//   - ActivePanel <-> uiStore.activePanel（'directory' | 'ai' | 'stats' | 'toolbox'）
+//   - ActivePanel <-> uiStore.activePanel（'directory' | 'ai' | 'ai-chat' | 'toolbox' | 'dashboard' | 'stats'，
+//     与前端 useSessionState VALID_PANELS 白名单及 ActivityBar items 严格对齐）
 //   - Terminal <-> uiStore.terminalVisible / terminalHeight / 终端 tab 快照镜像
 //     （uiStore.terminalTabsSnapshot / terminalActiveIndex，由 TerminalPanel 同步）
 //

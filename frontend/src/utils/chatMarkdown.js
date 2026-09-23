@@ -12,9 +12,12 @@ import markdown from 'highlight.js/lib/languages/markdown'
 import bash from 'highlight.js/lib/languages/bash'
 import shell from 'highlight.js/lib/languages/shell'
 import python from 'highlight.js/lib/languages/python'
+import plaintext from 'highlight.js/lib/languages/plaintext'
 
-// 语言注册与 FilePreviewRenderer 保持同一套（hljs 为模块单例，注册幂等，
-// 两处重复注册无副作用，仅为各自独立可加载）。
+// 语言注册与 FilePreviewRenderer 同一套常规语言（hljs 为模块单例，注册幂等，
+// 两处重复注册无副作用，仅为各自独立可加载）；plaintext 为额外注册项：
+// 下方 highlight 回调对未识别语言固定回退 language:'plaintext'，漏注册会在
+// 渲染时稳定触发 hljs「Could not find the language 'plaintext'」报错。
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('xml', xml)
@@ -28,6 +31,7 @@ hljs.registerLanguage('markdown', markdown)
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', shell)
 hljs.registerLanguage('python', python)
+hljs.registerLanguage('plaintext', plaintext)
 
 // markdown-it 实例：配置对齐 FilePreviewRenderer（html:false 防 XSS、linkify
 // 自动链接），代码块走 highlight.js（未注册语言退化为 plaintext）。

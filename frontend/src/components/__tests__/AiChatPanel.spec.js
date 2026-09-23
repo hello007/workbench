@@ -127,7 +127,8 @@ const defaultStubs = {
   'el-form': { template: '<form><slot /></form>' },
   'el-form-item': { template: '<div><slot /></div>', props: ['label'] },
   'el-dialog': {
-    template: '<div v-if="modelValue" class="el-dialog"><slot /><slot name="footer" /></div>',
+    // data-width 透出 width attribute（stub 不声明该 prop，落入 $attrs），供弹窗尺寸分档断言
+    template: '<div v-if="modelValue" class="el-dialog" :data-width="$attrs.width"><slot /><slot name="footer" /></div>',
     props: ['modelValue'],
     emits: ['update:modelValue']
   },
@@ -556,6 +557,17 @@ describe('AiChatPanel.vue', () => {
   })
 
   describe('输入与发送', () => {
+    it('输入框默认 6 行且已去除 autosize（固定 rows + 原生拖拽调高，不持久化）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const ta = wrapper.find("textarea.chat-input")
+      expect(ta.element.rows).toBe(6)
+      // autosize 若未移除会经 stub $attrs 透传为 DOM attribute（其 JS 接管高度与原生 resize 冲突）
+      expect(ta.element.getAttribute('autosize')).toBe(null)
+    })
+
     it('Enter 发送：RunChat 以当前配置调用，输入框清空，乐观 user 气泡出现', async () => {
       wrapper = createWrapper()
       await flushPromises()
@@ -996,6 +1008,19 @@ describe('AiChatPanel.vue', () => {
       expect(wrapper.vm.$.setupState.tplDialogVisible).toBe(false)
       await wrapper.vm.$.setupState.applyTemplate('__manage_templates__')
       expect(wrapper.vm.$.setupState.tplDialogVisible).toBe(true)
+    })
+
+    it('管理弹窗对齐设置弹窗分档：宽 min(960px, 86vw)，正文 textarea 默认 12 行', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      await wrapper.find('.tpl-manage-item').trigger('click')
+      const dialog = wrapper.find('.el-dialog')
+      // 宽度分档与 SettingsPanel 的 settings-dialog 一致
+      expect(dialog.attributes('data-width')).toBe('min(960px, 86vw)')
+      expect(dialog.find('.tpl-manage-body').exists()).toBe(true)
+      expect(dialog.find('.tpl-form textarea').element.rows).toBe(12)
     })
 
     it('新增目录模板：模板下拉 -> 管理弹窗 DOM 路径调 AddChatTemplate 并重置表单', async () => {

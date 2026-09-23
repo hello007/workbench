@@ -176,6 +176,14 @@ describe('useSessionState - applySessionState', () => {
     expect(uiStore.activePanel).toBe('directory')
   })
 
+  it('恢复一级面板 ai-chat 与 dashboard（白名单与 ActivityBar items 对齐）', () => {
+    const uiStore = useUiStore()
+    applySessionState({ activePanel: 'ai-chat' })
+    expect(uiStore.activePanel).toBe('ai-chat')
+    applySessionState({ activePanel: 'dashboard' })
+    expect(uiStore.activePanel).toBe('dashboard')
+  })
+
   it('null 快照不恢复且返回 false（冷启动）', () => {
     const uiStore = useUiStore()
     uiStore.activePanel = 'ai'

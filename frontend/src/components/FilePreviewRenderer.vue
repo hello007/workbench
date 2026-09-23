@@ -254,6 +254,7 @@ import markdown from 'highlight.js/lib/languages/markdown'
 import bash from 'highlight.js/lib/languages/bash'
 import shell from 'highlight.js/lib/languages/shell'
 import python from 'highlight.js/lib/languages/python'
+import plaintext from 'highlight.js/lib/languages/plaintext'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
@@ -268,6 +269,9 @@ hljs.registerLanguage('markdown', markdown)
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', shell)
 hljs.registerLanguage('python', python)
+// plaintext 为额外注册项：highlight 回调对未识别语言固定回退 language:'plaintext'，
+// 漏注册会在渲染无语言标记代码块时稳定触发 hljs「Could not find the language 'plaintext'」报错。
+hljs.registerLanguage('plaintext', plaintext)
 
 // CodeMirror 6 按需引入
 import { EditorView, lineNumbers, highlightActiveLine, keymap } from '@codemirror/view'

@@ -82,6 +82,25 @@
 - 异常提示**禁裸用默认 `el-alert` 平铺**，须以 `.error-list` 卡片层包裹 `el-alert`：`border-left: 3px solid var(--warning-color)` + `--radius-md` + `--shadow-sm`（el-alert 仍在内，由外层卡片重着色提供质感，参照 `DashboardView` `.error-list`）
 - 失效行整体 `opacity: 0.5` + 仓库名 `text-decoration: line-through`（line-through 仅作用于 `.repo-name.repo-missing`，非整行）
 
+#### Home 一级面板根元素 flex 约束链
+
+`Home.vue` 的 `.main-area`（flex column）中与三栏区互斥的一级面板（AiFunctionPanel/AiChatPanel/StatsView/DashboardView），根元素**必须带完整约束链**：
+
+```css
+/* 参照 .ai-function-panel；缺失任一环的后果见注释 */
+.panel-root {
+  flex: 1;            /* 缺失 → 面板按 flex:0 1 auto 塌为内容高度（半屏残留） */
+  min-height: 0;      /* 缺失 → min-height:auto 阻止 flex 收缩，溢出挤压兄弟 */
+  min-width: 0;
+  display: flex;      /* 缺失 → 内部 .chat-layout 等 flex:1 子级失效 */
+  flex-direction: column;
+  overflow: hidden;   /* 使收缩时 min-height:auto 解析为 0，可安全让位 */
+}
+```
+
+- `overflow: hidden` 是终端不变形的关键：面板无高度约束时，展开终端（inline 固定 px）触发 flex 收缩分摊，TerminalPanel 的 inline height 被连带压缩，xterm fit 基于压缩后容器渲染异常
+- 新增一级面板时对照本链自查；StatsView/DashboardView 用 `height: 100%` 也可（flex 收缩可安全让位），但新面板统一用 flex:1 链（与 `.ai-function-panel` 对齐）
+
 ### 3. 组件视觉模式
 
 #### nav active 左侧指示条
@@ -224,6 +243,33 @@ top="15vh"                    <!-- 距顶：vh 响应式（CommandPalette 显式
 - 内容区 `max-height` 用 `min(像素, vh)` 约束，超出 `overflow-y: auto`
 - `el-dialog` 外圈圆角 `--radius-lg`，body padding `--spacing-lg`，遮罩用蓝灰着色（亮 `rgba(15,23,42,…)` / 暗 `rgba(2,6,23,…)`，禁纯黑）
 
+### 6. 库运行时行为陷阱
+
+#### Element Plus textarea 内联 min-height 压过类规则
+
+EP 2.13 对**非 autosize** 的 `el-input type="textarea"` 在挂载时执行 `resizeTextarea()`，向 `.el-textarea__inner` 写入**内联 `min-height: 31px`**（单行高）。内联样式（无 important）胜过普通类规则，自定义拖拽下限类规则静默失效（实测可拖到 31px ≈ 1.5 行）。
+
+```css
+/* 错误：被 EP 运行时内联 min-height:31px 覆盖，下限失守 */
+.chat-input :deep(.el-textarea__inner) { resize: vertical; min-height: 52px; }
+
+/* 正确：类 !important 覆盖无 important 的运行时内联值 */
+.chat-input :deep(.el-textarea__inner) {
+  resize: vertical;
+  min-height: 52px !important;   /* EP 挂载时写内联 min-height:31px，!important 压过 */
+  max-height: 40vh;              /* 上限不受影响（EP 只写 minHeight） */
+}
+```
+
+- 另一陷阱：`:autosize` 由 JS 接管高度，与原生 `resize` 拖拽互斥——要「默认 N 行 + 可拖拽调高」须去 autosize 改 `:rows="N"`
+- 先例：AiChatPanel `.chat-input`（52px）与 `.tpl-content-input`（120px）
+
+#### highlight.js 按需注册必须包含 plaintext 回退名
+
+按需注册模式（`import x from 'highlight.js/lib/languages/x'` + `hljs.registerLanguage`）下，渲染链路的 highlight 回调对未识别语言**固定回退 `language: 'plaintext'`**。该名若未显式注册，渲染无语言标记代码块时 console 稳定报 `Could not find the language 'plaintext'`（hljs 降级为异常转义分支，不崩但报错）。
+
+- 新建按需注册块时同步 `hljs.registerLanguage('plaintext', plaintext)`；先例：`chatMarkdown.js` 与 `FilePreviewRenderer.vue`（两处同款回退逻辑）
+
 ## 正反示例
 
 ### 正确：nav active 指示条 left:0
@@ -324,3 +370,5 @@ width="960px"                      <!-- 1024×768 小屏溢出，2560 屏偏小�
 ## 沉淀来源
 
 2026-09-17 WorkBench 前端视觉现代化重做（任务 `.trellis/tasks/archive/2026-09/09-16-workbench` 系列三任务）：ActivityBar/DashboardView/SettingsPanel/CommandPalette 视觉模式已确立并稳定，新增页面无统一参照易风格漂移，故将「怎么用变量搭风格」沉淀为指南层规范，与 design-tokens.md 契约层形成双子。
+
+2026-09-23 AI 对话面板布局修复与输入区优化（任务 `.trellis/tasks/09-23-ai`）：新增「Home 一级面板根元素 flex 约束链」（根元素零样式导致半屏塌陷 + 终端被压缩双重症状）与「库运行时行为陷阱」（EP 非 autosize textarea 内联 min-height 下限失守、hljs 按需注册漏 plaintext 回退名）两节。

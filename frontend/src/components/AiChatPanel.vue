@@ -212,12 +212,14 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
+              <!-- 输入框：固定 rows 默认 6 行 + 原生纵向拖拽调高（CSS 限幅）。
+                   不用 autosize：其 JS 接管高度会覆盖拖拽结果，与原生 resize 冲突 -->
               <el-input
                 ref="inputRef"
                 v-model="inputText"
                 type="textarea"
                 class="chat-input"
-                :autosize="{ minRows: 2, maxRows: 6 }"
+                :rows="6"
                 placeholder="输入需求，Enter 发送 / Shift+Enter 换行"
                 @keydown.enter="onInputEnter"
               />
@@ -282,8 +284,15 @@
       </template>
     </el-dialog>
 
-    <!-- 模板管理弹窗：列表 + 增删改表单（name/content/scope），小弹窗分档 min(560px, 80vw) -->
-    <el-dialog v-model="tplDialogVisible" title="管理对话模板" width="min(560px, 80vw)" append-to-body>
+    <!-- 模板管理弹窗：列表 + 增删改表单（name/content/scope），
+         尺寸与布局对齐设置弹窗（宽 min(960px, 86vw) 分档 + nav/content 二分，见 .tpl-manage-body） -->
+    <el-dialog
+      v-model="tplDialogVisible"
+      title="管理对话模板"
+      width="min(960px, 86vw)"
+      class="tpl-manage-dialog"
+      append-to-body
+    >
       <div class="tpl-manage-body">
         <div class="tpl-list">
           <div class="tpl-item tpl-item-new" @click="resetTplForm">
@@ -321,10 +330,12 @@
             </el-radio-group>
           </el-form-item>
           <el-form-item label="内容">
+            <!-- 正文随弹窗增高加大：默认 12 行 + 原生纵向拖拽调高（CSS 限幅，同 chat-input 风格） -->
             <el-input
               v-model="tplForm.content"
               type="textarea"
-              :rows="5"
+              class="tpl-content-input"
+              :rows="12"
               placeholder="模板正文（纯文本，点击模板整段填入输入框可再修改）"
             />
           </el-form-item>
@@ -878,6 +889,18 @@ watch(() => uiStore.activePanel, (panel) => {
 </script>
 
 <style scoped>
+/* 根元素：占满 Home 主区上半区（与 .main-panes 互斥），高度约束链从此起（对齐 .ai-function-panel）。
+   缺失时根元素按 flex:0 1 auto 塌为内容高度（仅占半屏），且展开终端后 flex 收缩分摊会压缩
+   TerminalPanel 的 inline height，导致终端显示高度异常。overflow:hidden 使收缩安全让位。 */
+.ai-chat-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
 .panel-header {
   flex-shrink: 0;
   display: flex;
@@ -1292,6 +1315,15 @@ watch(() => uiStore.activePanel, (panel) => {
   flex: 1;
   min-width: 0;
 }
+/* 输入框高度：默认 6 行（rows），允许原生纵向拖拽调高。
+   下限约 2 行防拖得过扁，上限 40vh 防拖到占满会话区；
+   拖拽高度为会话内临时态，不持久化、不入会话快照。
+   EP 非 autosize 挂载时会写内联 min-height:31px，!important 压过运行时内联值 */
+.chat-input :deep(.el-textarea__inner) {
+  resize: vertical;
+  min-height: 52px !important;
+  max-height: 40vh;
+}
 .chat-input-actions {
   flex-shrink: 0;
 }
@@ -1316,27 +1348,33 @@ watch(() => uiStore.activePanel, (panel) => {
   50% { opacity: 0.3; }
 }
 
-/* 模板管理弹窗：列表 + 表单左右二分 */
+/* 模板管理弹窗主体：列表 + 表单左右二分（对齐 SettingsPanel 的 settings-body）。
+   margin 负值与 el-dialog__body padding（同为 --spacing-lg）配对抵消，
+   使 tpl-manage-body 填满 dialog body padding-box（边缘到边缘） */
 .tpl-manage-body {
   display: flex;
-  gap: var(--spacing-md);
-  min-height: 300px;
+  height: min(560px, 78vh);
+  margin: calc(-1 * var(--spacing-lg));
 }
+/* 左侧模板列表栏（对齐 settings-nav 风格：固定宽 + 次层背景 + 右缘分隔线 + 纵向滚动） */
 .tpl-list {
   width: 200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
   overflow-y: auto;
-  max-height: min(360px, 46vh);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  padding: var(--spacing-sm) 0;
 }
+/* 模板项：position:relative 供 ::before 指示条定位；
+   指示条 left:0 贴 item 左缘（禁负 left，防父级 overflow 裁剪，同项目既有规范） */
 .tpl-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   cursor: pointer;
   transition: background var(--transition-fast);
 }
@@ -1345,6 +1383,20 @@ watch(() => uiStore.activePanel, (panel) => {
 }
 .tpl-item.is-active {
   background: var(--primary-bg);
+}
+.tpl-item.is-active:hover {
+  background: var(--primary-bg);
+}
+.tpl-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--primary-light);
 }
 .tpl-item-name {
   flex: 1;
@@ -1361,10 +1413,13 @@ watch(() => uiStore.activePanel, (panel) => {
 .tpl-item-remove:hover {
   color: var(--danger-color);
 }
+/* 新增模板项：保留列表顶部，虚线边框区分操作项与数据项（内缩留出通栏底色） */
 .tpl-item-new {
+  margin: 0 var(--spacing-sm);
   color: var(--primary-color);
   font-size: 13px;
   border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
 }
 .tpl-item-new:hover {
   border-color: var(--primary-light);
@@ -1372,9 +1427,19 @@ watch(() => uiStore.activePanel, (panel) => {
 .tpl-list-empty {
   margin-top: var(--spacing-lg);
 }
+/* 右侧表单区：吃掉剩余宽（对齐 settings-content），内容超高时表单区滚动兜底 */
 .tpl-form {
   flex: 1;
   min-width: 0;
+  padding: var(--spacing-lg);
+  overflow-y: auto;
+}
+/* 模板正文：默认 12 行，原生纵向拖拽调高限幅（同 chat-input 风格），下限约 5 行防拖得过扁；
+   EP 非 autosize 挂载时会写内联 min-height:31px，!important 压过运行时内联值 */
+.tpl-content-input :deep(.el-textarea__inner) {
+  resize: vertical;
+  min-height: 120px !important;
+  max-height: 40vh;
 }
 .tpl-form-actions {
   display: flex;
@@ -1389,5 +1454,51 @@ watch(() => uiStore.activePanel, (panel) => {
   .chat-input-status-dot {
     animation: none !important;
   }
+}
+</style>
+
+<style>
+/* 模板管理弹窗主题：对齐 settings-dialog（背景/圆角/header/body padding/遮罩着色）。
+   el-dialog 为 append-to-body 传送至组件树外，scoped 样式无法作用，须用非 scoped 块 + 专属 class 圈定。
+   body padding 显式固定为 --spacing-lg，与 .tpl-manage-body 的负 margin 配对抵消 */
+.tpl-manage-dialog .el-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.tpl-manage-dialog .el-dialog__header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+}
+
+.tpl-manage-dialog .el-dialog__title {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tpl-manage-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: var(--text-tertiary);
+}
+
+.tpl-manage-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--text-primary);
+}
+
+.tpl-manage-dialog .el-dialog__body {
+  padding: var(--spacing-lg);
+}
+
+/* el-overlay 蓝灰着色（禁纯黑）：:has() 仅作用于含 tpl-manage-dialog 的遮罩，不影响其他弹窗；
+   亮色 Slate-900 着色，暗色更深一档 Slate-950 着色 */
+.el-overlay:has(.tpl-manage-dialog) {
+  background-color: rgba(15, 23, 42, 0.5);
+}
+
+html.dark .el-overlay:has(.tpl-manage-dialog) {
+  background-color: rgba(2, 6, 23, 0.6);
 }
 </style>
