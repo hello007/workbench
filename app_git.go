@@ -206,7 +206,10 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 //   - git log 失败（库损坏等）：底层错误落 slog.Warn 后向上 %w 包裹报错，不静默返空统计
 //   - cache 未注入（测试 App{} 未经 startup）：走全量扫，超限同上采样复用
 //
-// rangeKey 控制时间窗口与 Trend 粒度（7d/30d/90d/1y/all），热力图始终按日展示最近一年。
+// 贡献者行数（Insertions/Deletions）走独立 numstat 缓存通道（resolveLineStats 二态解析），
+// 与提交历史通道平行取数后按 Author+Email 合并进 Contributors；行数通道失败降级 0 行
+// 不阻塞主链路。rangeKey 控制时间窗口与 Trend 粒度（7d/30d/90d/1y/all），两路窗口过滤
+// 共用 StatsRangeWindow，热力图始终按日展示最近一年。
 func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 	if path == "" {
 		return model.RepoStats{}, fmt.Errorf("路径不能为空")
@@ -244,9 +247,42 @@ func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 		return model.RepoStats{}, fmt.Errorf("无法获取提交历史: %w", scanErr)
 	}
 
-	stats := service.AggregateRepoStats(all, rangeKey, time.Now())
+	// 行数通道：独立 numstat 缓存二态解析（headSHA 相同 + TTL 内命中，否则全量重拉；
+	// 缓存未注入直接现拉，对齐 commitHistoryCache==nil 分支模式）。失败降级为 0 行
+	// （slog.Warn 留痕）——行数是增强维度，不阻塞提交数统计主链路。
+	lineRecords, lineErr := a.resolveLineStats(gitRoot, key, currentSHA)
+	if lineErr != nil {
+		slog.Warn("numstat line stats failed, degrade to zero lines", "gitRoot", gitRoot, "err", lineErr)
+	}
+
+	// 两路窗口过滤共用 StatsRangeWindow 单一实现，行数与提交数口径一致
+	now := time.Now()
+	stats := service.AggregateRepoStats(all, rangeKey, now)
+	sinceTs, untilTs := service.StatsRangeWindow(rangeKey, now)
+	lineContribs := service.AggregateLineStats(lineRecords, sinceTs, untilTs)
+	stats.Contributors = service.MergeContributorLineStats(stats.Contributors, lineContribs)
 	stats.Sampled = overflow
 	return stats, nil
+}
+
+// resolveLineStats 解析 numstat 行数记录。缓存命中（headSHA 相同 + TTL 内）返缓存
+// 深拷贝；miss（HEAD 前移/TTL 过期/无条目）走全量重拉并回写缓存。行数是聚合值
+// 无增量 prepend 路径，失效判定为二态，比 resolveCommitHistory 简单。
+// numstatLineCache 未注入（测试 App{} 未经 startup）时直接现拉不缓存。
+func (a *App) resolveLineStats(gitRoot, key, currentSHA string) ([]model.CommitLineStat, error) {
+	if a.numstatLineCache != nil {
+		if records, ok := a.numstatLineCache.Get(key, currentSHA); ok {
+			return records, nil
+		}
+	}
+	records, err := service.FetchCommitLineStats(gitRoot)
+	if err != nil {
+		return nil, err
+	}
+	if a.numstatLineCache != nil {
+		a.numstatLineCache.Set(key, currentSHA, records)
+	}
+	return records, nil
 }
 
 // commitHistoryIncrementalThreshold 增量 prepend 时从新 HEAD 迭代收集新提交的上限。
@@ -463,8 +499,9 @@ func commitHistoryCacheKey(gitRoot string, head *plumbing.Reference) string {
 	return gitRoot + "|HEAD|" + head.Hash().String()
 }
 
-// InvalidateCommitHistoryCache 清除指定仓库的提交历史缓存。供前端 handleRefresh 前置调用，
-// 绕过缓存命中与增量 prepend，确保下次 GetCommitHistory 全量重扫。
+// InvalidateCommitHistoryCache 清除指定仓库的提交历史缓存与行数统计缓存。供前端
+// handleRefresh 前置调用，绕过缓存命中与增量 prepend，确保下次请求全量重扫
+// （numstatLineCache 可能未注入（测试场景），判空防御）。
 func (a *App) InvalidateCommitHistoryCache(path string) {
 	if path == "" {
 		return
@@ -474,11 +511,17 @@ func (a *App) InvalidateCommitHistoryCache(path string) {
 		return
 	}
 	a.commitHistoryCache.ClearByGitRoot(gitRoot)
+	if a.numstatLineCache != nil {
+		a.numstatLineCache.ClearByGitRoot(gitRoot)
+	}
 }
 
-// ClearAllCommitHistoryCache 清除全部仓库的提交历史缓存。预留全量刷新入口。
+// ClearAllCommitHistoryCache 清除全部仓库的提交历史缓存与行数统计缓存。预留全量刷新入口。
 func (a *App) ClearAllCommitHistoryCache() {
 	a.commitHistoryCache.ClearAll()
+	if a.numstatLineCache != nil {
+		a.numstatLineCache.ClearAll()
+	}
 }
 
 // parseDateStart 解析 YYYY-MM-DD 为当天 00:00:00 本地时刻，空串或格式错返回错误。

@@ -28,10 +28,28 @@ type TimeBucket struct {
 }
 
 // Contributor 贡献者提交统计：按作者名称+邮箱归一分组。
+// Count 为提交数（提交历史通道聚合）；Insertions/Deletions 为新增/删除行数
+// （`git log --numstat` 独立通道聚合，二进制文件行不计入），两通道在 app 层
+// 按 Author+Email 合并填充。行数维度的排序展示由前端按 Insertions+Deletions 计算。
 type Contributor struct {
-	Author string `json:"author"`
-	Email  string `json:"email"`
-	Count  int    `json:"count"`
+	Author     string `json:"author"`
+	Email      string `json:"email"`
+	Count      int    `json:"count"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
+}
+
+// CommitLineStat 单提交的行数统计记录（numstat 通道最小粒度）：一条提交的
+// 作者身份、作者时间与新增/删除行数。纯值 struct（无切片字段），缓存深拷贝
+// 退化为 slice 复制。按提交粒度落缓存（非聚合值），时间窗口过滤在内存聚合时做，
+// 切档位不重扫。
+type CommitLineStat struct {
+	SHA        string `json:"sha"`
+	Author     string `json:"author"`
+	Email      string `json:"email"`
+	Timestamp  int64  `json:"timestamp"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
 }
 
 // DayCount 热力图单日提交数：一个自然日的提交数（0 表示当日无提交）。

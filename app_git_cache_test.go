@@ -41,10 +41,12 @@ func addCommits(t *testing.T, repoPath string, start, count int) {
 	}
 }
 
-// newAppWithCommitCache 构造注入提交历史缓存的 App（模拟 startup 注入，供缓存路径测试）。
+// newAppWithCommitCache 构造注入提交历史缓存与行数统计缓存的 App
+// （模拟 startup 注入，供缓存路径测试；生产 NewAppServices 两缓存同时构造）。
 func newAppWithCommitCache() *App {
 	app := NewApp()
 	app.commitHistoryCache = service.NewCommitHistoryCache()
+	app.numstatLineCache = service.NewCommitLineStatsCache()
 	return app
 }
 

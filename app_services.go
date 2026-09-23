@@ -26,16 +26,20 @@ type AppServices struct {
 	fileOpSvc          *service.FileOperationService
 	gitSvc             *service.GitService
 	commitHistoryCache *service.CommitHistoryCache // 提交历史全量快照缓存（纯内存，HEAD SHA 增量 + TTL + 手动刷新）
-	settingsSvc        *service.SettingsService
-	terminalSvc        *service.TerminalService
-	searchSvc          *service.SearchService
-	favoritesSvc       *service.FavoritesService
-	contentSearchSvc   *service.ContentSearchService
-	updateSvc          *service.UpdateService
-	repoMetaSvc        *service.RepoMetaService
-	aiFuncSvc          *service.AiFunctionService
-	skillDiscoverySvc  *service.SkillDiscoveryService
-	repoConfigSvc      *service.RepoConfigService
+	// numstatLineCache 行数统计缓存（`git log --numstat` 按作者行数，纯内存，
+	// headSHA+TTL 二态失效无增量路径）。键同 commitHistoryCacheKey，手动刷新与
+	// 提交历史缓存同步清除。
+	numstatLineCache  *service.CommitLineStatsCache
+	settingsSvc       *service.SettingsService
+	terminalSvc       *service.TerminalService
+	searchSvc         *service.SearchService
+	favoritesSvc      *service.FavoritesService
+	contentSearchSvc  *service.ContentSearchService
+	updateSvc         *service.UpdateService
+	repoMetaSvc       *service.RepoMetaService
+	aiFuncSvc         *service.AiFunctionService
+	skillDiscoverySvc *service.SkillDiscoveryService
+	repoConfigSvc     *service.RepoConfigService
 	// 会话快照服务（崩溃恢复 UI 状态，data/session.json）。复用 SettingsService 持久化模式，
 	// Load 损坏降级冷启动不阻塞；前端 debounce 写 + shutdown 最终写。见 docs/spec/cross-layer-contracts.md。
 	sessionSvc *service.SessionService
@@ -86,6 +90,8 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	s.gitSvc.SetContext(ctx)
 	// 注入提交历史缓存（纯内存，复用 filetree_cache 范式：HEAD SHA 增量 + TTL + 手动刷新）
 	s.commitHistoryCache = service.NewCommitHistoryCache()
+	// 注入行数统计缓存（numstat 通道，headSHA+TTL 二态失效，键同提交历史缓存）
+	s.numstatLineCache = service.NewCommitLineStatsCache()
 
 	// 设置面板配置（data/settings.json）
 	settingsPath := filepath.Join(dataDir, "settings.json")

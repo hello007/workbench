@@ -42,9 +42,9 @@ type rangeSpec struct {
 	// sinceDays 按日历日回退的天数（AddDate(0,0,-sinceDays)）；0 表示不走日回退。
 	sinceDays int
 	// sinceYears 按日历年回退的年数（AddDate(-sinceYears,0,0)），仅 1y 档用，闰年自动取 365/366。
-	sinceYears int
+	sinceYears  int
 	granularity StatsGranularity
-	label      string
+	label       string
 }
 
 // rangeSpecs 档位规格表。7d/30d 按日粒度可见每日波动；90d/1y 按周粒度避免桶过多；
@@ -76,17 +76,13 @@ func AggregateRepoStats(commits []model.Commit, rangeKey string, now time.Time) 
 		Granularity: string(spec.granularity),
 	}
 
-	// 时间窗口下界（AddDate 按日历日/年回退，DST 安全、闰年准确）：all 不限；1y 按日历年；
-	// 其余按日历日。untilTs 取 now（窗口上界含 now）。
-	var sinceTs int64
-	if spec.sinceYears > 0 {
-		sinceTs = now.AddDate(-spec.sinceYears, 0, 0).Unix()
-	} else if spec.sinceDays > 0 {
-		sinceTs = now.AddDate(0, 0, -spec.sinceDays).Unix()
-	}
+	// 时间窗口边界：AddDate 按日历日/年回退（DST 安全、闰年准确），untilTs 取 now
+	// （窗口上界含 now）。计算逻辑收敛于 StatsRangeWindow 单一实现，numstat 行数通道
+	// 复用同一窗口，保证行数与提交数口径一致。
+	sinceTs, untilTs := StatsRangeWindow(rangeKey, now)
 
 	// Trend + Contributors 在窗口内提交上聚合；Heatmap 独立按日最近一年
-	windowed := filterCommitsByTime(commits, sinceTs, now.Unix())
+	windowed := filterCommitsByTime(commits, sinceTs, untilTs)
 
 	stats.Trend = aggregateTrend(windowed, spec.granularity)
 	stats.Contributors = aggregateContributors(windowed)
@@ -94,6 +90,25 @@ func AggregateRepoStats(commits []model.Commit, rangeKey string, now time.Time) 
 	stats.Heatmap = aggregateHeatmap(commits, now, heatmapDays)
 
 	return stats
+}
+
+// StatsRangeWindow 计算统计时间档位的窗口边界 [sinceTs, untilTs]。
+// sinceTs=0 表示不限下界（all 档）；untilTs 取 now（上界含 now）。
+// 提交历史通道（AggregateRepoStats 内部）与 numstat 行数通道（app 层聚合前调用）
+// 共用本函数，保证两路窗口过滤口径零漂移。未知档位回退 30d（与 AggregateRepoStats
+// 兜底一致，调用方应已先 ValidateStatsRange 校验）。
+func StatsRangeWindow(rangeKey string, now time.Time) (sinceTs, untilTs int64) {
+	spec, ok := rangeSpecs[StatsRange(rangeKey)]
+	if !ok {
+		spec = rangeSpecs[StatsRange30Days]
+	}
+	untilTs = now.Unix()
+	if spec.sinceYears > 0 {
+		sinceTs = now.AddDate(-spec.sinceYears, 0, 0).Unix()
+	} else if spec.sinceDays > 0 {
+		sinceTs = now.AddDate(0, 0, -spec.sinceDays).Unix()
+	}
+	return sinceTs, untilTs
 }
 
 // filterCommitsByTime 过滤时间窗口内的提交。sinceTs=0 表示不限下界。返回新切片，不修改入参。
