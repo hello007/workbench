@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "真桌面通道选型实证与确定性断言锚点沉淀（WebView2 CDP 4 路实测不可注入、实例隔离三件套、禁追 UI 弹窗）"}
+{"file": "docs/spec/test-stability.md", "reason": "CDP/--listen 端口属结构性须预知（freePort 探测 TOCTOU 接受）；断言锚点全落文件系统与后端日志，规避 UI 时序竞争"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "真桌面 E2E 以后端 slog 日志（data/logs/app.log）为确定性断言锚点（last session exited abnormally）"}

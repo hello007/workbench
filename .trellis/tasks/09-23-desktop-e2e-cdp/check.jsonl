@@ -1,0 +1,2 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "检查真桌面通道与 mock 通道共存（独立 testDir/config/script）、产物缺失自动 skip、实例隔离不触碰用户实例"}
+{"file": "docs/spec/test-stability.md", "reason": "检查断言无 UI 时序依赖、连续多轮全绿"}

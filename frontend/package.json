@@ -10,6 +10,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "e2e": "playwright test",
+    "e2e:desktop": "playwright test --config playwright.desktop.config.js",
     "e2e:install": "playwright install chromium",
     "e2e:report": "playwright show-report"
   },

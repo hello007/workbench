@@ -99,7 +99,17 @@
 | 失败产物 | `playwright-report/` + `test-results/` 上传 artifact（`if: failure()`，保留 7 天） |
 | 版本对齐 | Go 1.26 / Node 20 / npm cache 与 release.yml 一致 |
 
-## 11. 相关文档
+## 11. 真桌面 E2E 通道（e2e-desktop，2026-09-24）
+
+mock 通道盲区的真实进程生命周期链路覆盖：会话状态真实持久化重启恢复、异常退出标记（crash.flag）强杀残留 → 重启检测。`npm run e2e:desktop`（前置：仓库根 `wails build`；非 Windows / 产物缺失自动 skip，CI Linux 天然跳过）。
+
+* **通道形态**：真实 `workbench.exe` 桌面进程 + 浏览器通道（HTTP 页面 + token query 认证），真实后端方法/事件/文件落盘全保真；渲染端差异（系统浏览器 vs WebView2 窗口）不在验证目标内
+* **选型实证**（Wails v2.16 + go-webview2 v1.0.23）：`createCoreWebView2EnvironmentWithOptions` 显式传参后，loader 层 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量与 HKCU 注册表策略**均被忽略**（含 debug 构建，4 路实测）——WebView2 `--remote-debugging-port` 无法外注入，Playwright `connectOverCDP` 路径不可行；若未来升级 Wails 暴露 BrowserArgs 选项可重评
+* **实例隔离**（用户桌面常驻真实 workbench.exe，绝不触碰）：exe 复制改名 `workbench-e2e.exe`（Wails 默认 WebView2 profile 按 exe 名隔离）+ `--listen=127.0.0.1:<探测端口>`（避开 36115）+ cwd 独立临时目录（data/ 隔离）
+* **确定性断言锚点**：文件系统（session.json 落盘、crash.flag 存在与否）与后端日志（"last session exited abnormally"）；**禁追 UI 弹窗**（ElNotification 8s 自动关闭与页面就绪存在时序竞争）
+* **已知依赖库隐患**：go-webview2 `errorCallback` 在窗口销毁链中偶发 `os.Exit(1)` 跳过 shutdown 钩子——crash.flag 清除（shutdown 末尾）因此偶发缺失，正常关闭可能被误报「异常退出」；E2E 不对 flag 方向做强断言，隐患待 wails/go-webview2 升级后复查
+
+## 12. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — mock 返回值形状契约依据（App.d.ts / models.ts 签名同步）
 - [test-stability.md](test-stability.md) — 文件系统时序 flaky 规避
