@@ -1,7 +1,7 @@
 # 测试稳定性规范（Flaky 规避）
 
-> 本文档规定 WorkBench 测试中依赖文件系统时序的 flaky 规避方案与正反例。
-> 最后更新：2026-09-11 · 来源任务：09-11-filetree-cache-mtime-flaky
+> 本文档规定 WorkBench 测试中依赖文件系统时序、环境端口等外部状态的 flaky 规避方案与正反例。
+> 最后更新：2026-09-23 · 来源任务：09-11-filetree-cache-mtime-flaky、09-23-testapp-startwebserve-startupmatrix
 
 ## 1. 适用范围
 
@@ -96,7 +96,21 @@ if len(nodes2) != 2 {  // NTFS 同 tick 时 mtime 未变 → 命中缓存返回 
 - 是 → 改用注入明确不等的时间值（`curMtime.Add(-time.Hour)`）直接驱动判定分支，不依赖真实 FS 时序
 - 必须端到端验证 mtime 触发路径时 → 用 `os.Chtimes` 显式设置，不用 `time.Sleep` 等待
 
-## 7. 相关文档
+## 7. 端口 / 环境依赖
+
+测试隐式依赖「本机某固定端口空闲」同样属于环境敏感 flaky：开发者本机常驻
+运行中的 workbench.exe 会监听默认浏览器访问端口 36115（web serve 默认开启），
+此时测试若经 `startWebServe` 走默认绑定地址 `127.0.0.1:36115`
+（`model.DefaultWebServeBindAddress`），监听失败落入告警降级路径
+（`Running()=false`），断言「应启动」即失败。表现为「审核时偶发、开发机
+常驻应用时稳定挂」，与代码提交无关。
+
+规避：涉及 web serve 启动的测试一律注入 `webServeListenOverride =
+"127.0.0.1:0"`（随机空闲端口），或对端口占用降级用例显式自占随机端口。
+正例：`web_serve_test.go` `TestApp_StartWebServe_StartupMatrix/设置开启默认启动`；
+`TestApp_GetWebServeConfig` 的 `Start("127.0.0.1:0")` 先例。
+
+## 8. 相关文档
 
 - [测试覆盖率分层门禁](test-coverage-gate.md) — service ≥76% 基线，本任务改动后覆盖率 77.7%
 - `service/filetree_cache_test.go:286` `TestInvalidateCache_BypassesStaleCache` — 同款注入陈旧缓存范式（验证 clearPath 语义）
