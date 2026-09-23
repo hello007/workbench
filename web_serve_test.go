@@ -392,9 +392,14 @@ func TestWebAccessUrls(t *testing.T) {
 func TestApp_StartWebServe_StartupMatrix(t *testing.T) {
 	t.Run("设置开启默认启动", func(t *testing.T) {
 		app := newWebServeTestApp(t)
-		// 随机端口隔离：默认绑定 127.0.0.1:36115，本机 workbench.exe 常驻监听
-		// 同端口会使 Start 走告警降级路径，误报为「设置开启未启动」
-		app.webServeListenOverride = "127.0.0.1:0"
+		// 经 settings 注入随机端口：默认绑定 127.0.0.1:36115，本机 workbench.exe
+		// 常驻监听同端口会使 Start 走告警降级路径，误报为「设置开启未启动」；
+		// 不用 webServeListenOverride，保住 settings BindAddress 选址分支的覆盖
+		if err := app.settingsSvc.Save(&model.AppSettings{
+			WebServe: &model.WebServeSettings{Enabled: true, BindAddress: "127.0.0.1:0"},
+		}); err != nil {
+			t.Fatalf("写入开启配置: %v", err)
+		}
 		app.startWebServe()
 		if !app.webServe.Running() {
 			t.Fatal("设置默认开启时应启动浏览器访问服务")

@@ -105,10 +105,13 @@ if len(nodes2) != 2 {  // NTFS 同 tick 时 mtime 未变 → 命中缓存返回 
 （`Running()=false`），断言「应启动」即失败。表现为「审核时偶发、开发机
 常驻应用时稳定挂」，与代码提交无关。
 
-规避：涉及 web serve 启动的测试一律注入 `webServeListenOverride =
-"127.0.0.1:0"`（随机空闲端口），或对端口占用降级用例显式自占随机端口。
-正例：`web_serve_test.go` `TestApp_StartWebServe_StartupMatrix/设置开启默认启动`；
-`TestApp_GetWebServeConfig` 的 `Start("127.0.0.1:0")` 先例。
+规避：经 `startWebServe` 的启动测试注入随机端口——优先在 settings 的
+`WebServe.BindAddress` 写 `"127.0.0.1:0"`（保住 settings 选址分支覆盖），
+或设 `webServeListenOverride = "127.0.0.1:0"`；直调 `webServeManager.Start`
+的用例直接传 `"127.0.0.1:0"`（override 字段对其无效）；端口占用降级用例
+显式自占随机端口。
+正例：`web_serve_test.go` `TestApp_StartWebServe_StartupMatrix/设置开启默认启动`
+（settings 注入范式）；`TestApp_GetWebServeConfig` 的 `Start("127.0.0.1:0")` 先例。
 
 ## 8. 相关文档
 
