@@ -26,8 +26,8 @@ import { useWorkspaceStore, useUiStore } from '../../store'
 const mockStats = {
   trend: [{ date: '2026-09-10', count: 2 }],
   contributors: [
-    { author: 'Alice', email: 'a@x.com', count: 10 },
-    { author: 'Bob', email: 'b@x.com', count: 3 }
+    { author: 'Alice', email: 'a@x.com', count: 10, insertions: 320, deletions: 45 },
+    { author: 'Bob', email: 'b@x.com', count: 3, insertions: 50, deletions: 120 }
   ],
   heatmap: [{ date: '2026-09-10', count: 2 }],
   totalCommits: 13,

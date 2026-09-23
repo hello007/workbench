@@ -122,3 +122,48 @@ export function buildContributorOption(contributors, limit = 15) {
     }]
   }
 }
+
+// buildContributorLineOption 构造贡献者行数排名图 option（横向柱状）。
+// contributors: [{author, email, count, insertions, deletions}]。后端 Contributors
+// 按提交数降序，行数维度在本函数内重排：按总变更行数（新增+删除）降序、同值按作者名
+// 升序，与后端 AggregateLineStats 排序规则一致。排序在副本上做，不修改入参数组
+// （props 传入的 stats.contributors 不允许原地变更）。
+// 柱值 = 总变更行数；tooltip 展示 +新增/−删除 细分（字段分开存储，细分展示不改后端）。
+// limit 控制展示数量，复用 buildContributorOption 的 inverse:true 渲染约定。
+export function buildContributorLineOption(contributors, limit = 15) {
+  const data = [...(contributors || [])]
+    .sort((a, b) =>
+      ((b.insertions || 0) + (b.deletions || 0)) - ((a.insertions || 0) + (a.deletions || 0)) ||
+      String(a.author).localeCompare(String(b.author))
+    )
+    .slice(0, limit)
+  const authors = data.map(c => c.author)
+  const totals = data.map(c => (c.insertions || 0) + (c.deletions || 0))
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const c = data[params[0].dataIndex]
+        const ins = c.insertions || 0
+        const del = c.deletions || 0
+        return `${c.author}<br/>${c.email}<br/>总变更: <b>${ins + del}</b><br/>` +
+          `<span style="color:#40c463">+${ins} 新增</span> / <span style="color:#d73a49">−${del} 删除</span>`
+      }
+    },
+    grid: { left: 100, right: 30, top: 20, bottom: 30 },
+    xAxis: { type: 'value', minInterval: 1 },
+    yAxis: {
+      type: 'category',
+      data: authors,
+      inverse: true
+    },
+    series: [{
+      name: '总变更行数',
+      type: 'bar',
+      data: totals,
+      itemStyle: { color: '#8250df' },
+      label: { show: true, position: 'right', formatter: '{c}' }
+    }]
+  }
+}

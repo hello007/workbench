@@ -3,6 +3,7 @@ import {
   buildTrendOption,
   buildHeatmapOption,
   buildContributorOption,
+  buildContributorLineOption,
   HEATMAP_PIECES
 } from '../repoStatsOptions'
 
@@ -115,6 +116,83 @@ describe('buildContributorOption', () => {
 
   it('null 输入应兜底为空', () => {
     const opt = buildContributorOption(null)
+    expect(opt.series[0].data).toEqual([])
+  })
+})
+
+describe('buildContributorLineOption', () => {
+  it('应按总变更行数（新增+删除）降序排序', () => {
+    const contributors = [
+      { author: 'Alice', email: 'a@x.com', count: 1, insertions: 10, deletions: 5 },
+      { author: 'Bob', email: 'b@x.com', count: 9, insertions: 100, deletions: 20 },
+      { author: 'Carol', email: 'c@x.com', count: 5, insertions: 3, deletions: 2 }
+    ]
+    const opt = buildContributorLineOption(contributors)
+    // Bob 120 > Alice 15 > Carol 5（提交数排序不影响行数视图重排）
+    expect(opt.yAxis.data).toEqual(['Bob', 'Alice', 'Carol'])
+    expect(opt.series[0].data).toEqual([120, 15, 5])
+    expect(opt.series[0].type).toBe('bar')
+    expect(opt.yAxis.inverse).toBe(true)
+  })
+
+  it('总变更相同时应按作者名升序（与后端 AggregateLineStats 排序规则一致）', () => {
+    const contributors = [
+      { author: 'carol', email: 'c@x.com', count: 1, insertions: 10, deletions: 0 },
+      { author: 'bob', email: 'b@x.com', count: 1, insertions: 5, deletions: 5 },
+      { author: 'alice', email: 'a@x.com', count: 1, insertions: 2, deletions: 8 }
+    ]
+    const opt = buildContributorLineOption(contributors)
+    expect(opt.yAxis.data).toEqual(['alice', 'bob', 'carol'])
+  })
+
+  it('排序应在副本上做，不修改入参数组（props 不可原地变更）', () => {
+    const contributors = [
+      { author: 'Alice', email: 'a@x.com', count: 1, insertions: 10, deletions: 5 },
+      { author: 'Bob', email: 'b@x.com', count: 9, insertions: 100, deletions: 20 }
+    ]
+    buildContributorLineOption(contributors)
+    expect(contributors.map(c => c.author)).toEqual(['Alice', 'Bob'])
+  })
+
+  it('tooltip 应展示 +新增/−删除 细分', () => {
+    const contributors = [
+      { author: 'Alice', email: 'a@x.com', count: 1, insertions: 120, deletions: 30 }
+    ]
+    const opt = buildContributorLineOption(contributors)
+    const html = opt.tooltip.formatter([{ dataIndex: 0 }])
+    expect(html).toContain('+120 新增')
+    expect(html).toContain('−30 删除')
+    expect(html).toContain('总变更: <b>150</b>')
+    expect(html).toContain('a@x.com')
+  })
+
+  it('行数字段缺失应兜底为 0 不报错', () => {
+    const contributors = [{ author: 'Legacy', email: 'l@x.com', count: 3 }]
+    const opt = buildContributorLineOption(contributors)
+    expect(opt.series[0].data).toEqual([0])
+    const html = opt.tooltip.formatter([{ dataIndex: 0 }])
+    expect(html).toContain('+0 新增')
+    expect(html).toContain('−0 删除')
+  })
+
+  it('应限制展示数量为 limit（排序后再截断，保留总变更最高者）', () => {
+    const contributors = [
+      { author: 'u0', email: 'u0@x.com', count: 1, insertions: 1, deletions: 0 },
+      { author: 'u1', email: 'u1@x.com', count: 1, insertions: 500, deletions: 0 },
+      { author: 'u2', email: 'u2@x.com', count: 1, insertions: 2, deletions: 0 }
+    ]
+    const opt = buildContributorLineOption(contributors, 2)
+    expect(opt.yAxis.data).toEqual(['u1', 'u2'])
+  })
+
+  it('空数据应返回空序列不报错', () => {
+    const opt = buildContributorLineOption([])
+    expect(opt.series[0].data).toEqual([])
+    expect(opt.yAxis.data).toEqual([])
+  })
+
+  it('null 输入应兜底为空', () => {
+    const opt = buildContributorLineOption(null)
     expect(opt.series[0].data).toEqual([])
   })
 })

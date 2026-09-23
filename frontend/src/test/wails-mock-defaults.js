@@ -127,7 +127,21 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   GetAiConcurrencyStatus: { running: 0, queued: 0, max: 3 },
   GetFunctionUsageCounts: {},
   CheckForUpdate: null,
-  GetRepoStats: null,
+  // 形状对齐 model.RepoStats（见 frontend/wailsjs/go/models.ts）；contributors 元素含
+  // insertions/deletions 行数字段（贡献者行数排名维度切换的数据源），统计页相关断言
+  // 以此表为单一数据源。stats 非 null 时统计页图表正常渲染（ECharts 真实浏览器可用）。
+  GetRepoStats: {
+    trend: [{ date: '2026-09-09', count: 1 }, { date: '2026-09-10', count: 1 }],
+    contributors: [
+      { author: 'e2e', email: 'e2e@example.com', count: 2, insertions: 120, deletions: 30 },
+      { author: 'alice', email: 'alice@example.com', count: 1, insertions: 50, deletions: 80 }
+    ],
+    heatmap: [{ date: '2026-09-09', count: 1 }, { date: '2026-09-10', count: 1 }],
+    totalCommits: 3,
+    dateRange: '最近 30 天',
+    granularity: 'day',
+    sampled: false
+  },
 
   // ---- 全局状态看板 ----
   // 形状对齐 model.RepoStatus（见 frontend/wailsjs/go/models.ts）。
