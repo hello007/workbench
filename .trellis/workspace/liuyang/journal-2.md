@@ -1009,3 +1009,36 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+
+## Session 85: 审核建议级修复 G1-G12
+
+**Date**: 2026-09-23
+**Task**: 审核建议级修复 G1-G12
+**Branch**: `master`
+
+### Summary
+
+三路审核 🟢 建议 12 项全修：换行路径拒绝生成 cd（防 PTY 截断执行）、fish 防御分支（省 -- 全版本安全）、更新资产按 GOARCH 组装 + arm64 明确报错、更新脚本 kill -9 前校验 /proc cmdline 身份防 PID 复用误杀、平台断言去恒真；CI apt 缓存（actions/cache + 包清单文件，check 拦截 xargs 不认 # 注释的阻断级缺陷）与头注释更新；前端占位符/预设表平台化（shellConfigsCache/isWindowsPlatform 新契约，禁 UA）、spec 脆断与恒真断言质量修复。Windows 零变化，双侧+前端 1350 用例全绿。审核发现至此全量闭环（10🟡+12🟢）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25c5142` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
