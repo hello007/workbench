@@ -144,7 +144,12 @@
           </div>
 
           <!-- 消息历史区：气泡列表 + markdown 渲染 + 流式增量（scroll 驱动跟底状态） -->
-          <div ref="messagesEl" class="chat-messages" @scroll="onMessagesScroll">
+          <div
+            ref="messagesEl"
+            class="chat-messages"
+            :class="{ 'chat-in-flight': aiChatStore.chatInFlight }"
+            @scroll="onMessagesScroll"
+          >
             <div v-if="!displayMessages.length" class="chat-messages-empty">
               <el-empty
                 v-if="!aiChatStore.chatSessions.length"
@@ -161,10 +166,13 @@
             >
               <div class="chat-msg-bubble" :class="{ 'is-streaming': msg.streaming }">
                 <!-- assistant：markdown 渲染（html:false 防 XSS；点击拦截防 webview 导航） -->
+                <!-- assistant：markdown 渲染（html:false 防 XSS；点击拦截防 webview 导航；
+                     data-task-id 供选择题卡片提交回填已答标记） -->
                 <div
                   v-if="msg.role === 'assistant'"
                   class="chat-msg-md"
-                  v-html="renderChatMarkdown(msg.content)"
+                  :data-task-id="msg.taskId || ''"
+                  v-html="renderMsgMarkdown(msg)"
                   @click="onChatMarkdownClick"
                 ></div>
                 <div v-else class="chat-msg-text">{{ msg.content }}</div>
@@ -638,6 +646,7 @@ const messagesEl = ref(null)
 const isExternalHref = (href) => /^(https?:|file:|mailto:|tel:|ftp:|data:)/i.test(href)
 
 const onChatMarkdownClick = (event) => {
+  if (onChatQuestionClick(event)) return
   const a = event.target.closest('a')
   if (!a) return
   const href = (a.getAttribute('href') || '').trim()
@@ -646,6 +655,88 @@ const onChatMarkdownClick = (event) => {
   event.stopPropagation()
   if (isExternalHref(href)) {
     BrowserOpenURL(href)
+  }
+}
+
+// ===== chat-question 选择题卡片交互（事件委托：v-html 内无法绑 Vue 事件） =====
+
+// 已答消息渲染：卡片追加 chat-question-answered 置灰类（renderer 输出该 class 属性
+// 固定形态，字符串替换即精准定位；重载历史与提交后重渲染均走此路径保持一致）
+const renderMsgMarkdown = (msg) => {
+  const html = renderChatMarkdown(msg.content)
+  if (
+    msg.taskId &&
+    aiChatStore.isChatQuestionAnswered(aiChatStore.selectedChatSessionId, msg.taskId)
+  ) {
+    return html.replace(/class="chat-question"/g, 'class="chat-question chat-question-answered"')
+  }
+  return html
+}
+
+// 卡片内点击分流：处理选项点选与提交，返回 true 表示命中卡片（外层链接拦截逻辑跳过）。
+// 选项点选：单选题 radio 语义（清同题他项），多选题 toggle；任一题选中即启用提交按钮。
+// 提交：按题序拼「用户通过选项卡片回答」文本走 runChat 常规链路（--resume 回传模型），
+// 成功后标记已答（store 内存态 + 卡片 DOM 即时置灰，重渲染时由 renderMsgMarkdown 兜底）。
+// 会话在途（chatInFlight）时提交守卫（PRD B9）：置灰由 .chat-in-flight CSS 承担，此处静默忽略。
+const onChatQuestionClick = (event) => {
+  const card = event.target.closest('.chat-question')
+  if (!card) return false
+
+  const option = event.target.closest('.chat-question-option')
+  if (option && !card.classList.contains('chat-question-answered')) {
+    const item = option.closest('.chat-question-item')
+    if (item && !item.hasAttribute('data-multi')) {
+      item.querySelectorAll('.chat-question-option.selected').forEach((el) => {
+        if (el !== option) el.classList.remove('selected')
+      })
+    }
+    option.classList.toggle('selected')
+    syncCardSubmitState(card)
+    return true
+  }
+
+  const submit = event.target.closest('.chat-question-submit')
+  if (submit && !card.classList.contains('chat-question-answered')) {
+    submitChatQuestionCard(card, event)
+    return true
+  }
+  return true
+}
+
+// 按卡片内各题选中态同步提交按钮可用性：每题至少选中一项才启用
+const syncCardSubmitState = (card) => {
+  const items = card.querySelectorAll('.chat-question-item')
+  const allAnswered = Array.from(items).every((item) =>
+    item.querySelector('.chat-question-option.selected')
+  )
+  const submit = card.querySelector('.chat-question-submit')
+  if (submit) submit.disabled = !allAnswered
+}
+
+// 提交选择题卡片：拼答案文本 → runChat 回传 → 标记已答置灰。
+// 会话在途或已答时静默忽略（按钮置灰由 CSS 与 chat-question-answered 类承担）。
+const submitChatQuestionCard = async (card, event) => {
+  if (aiChatStore.chatInFlight) return
+  const sessionId = aiChatStore.selectedChatSessionId
+  const taskId = event.currentTarget?.dataset?.taskId || ''
+  if (!sessionId || !taskId) return
+
+  const lines = ['用户通过选项卡片回答：']
+  card.querySelectorAll('.chat-question-item').forEach((item, i) => {
+    const picks = Array.from(item.querySelectorAll('.chat-question-option.selected')).map(
+      (el) => el.textContent.trim()
+    )
+    if (picks.length) {
+      lines.push(`${i + 1}. ${item.dataset.question || ''}：${picks.join('、')}`)
+    }
+  })
+
+  try {
+    await aiChatStore.runChat(lines.join('\n'))
+    aiChatStore.markChatQuestionAnswered(sessionId, taskId)
+    card.classList.add('chat-question-answered')
+  } catch (error) {
+    handleError('发送失败: ', error)
   }
 }
 
@@ -1294,6 +1385,84 @@ watch(() => uiStore.activePanel, (panel) => {
   border: none;
   border-top: 1px solid var(--border-color);
   margin: 0.6em 0;
+}
+
+/* chat-question 选择题卡片：内联于消息流（非模态，不阻塞会话/目录切换）。
+   选中态用 primary 色描边+浅底，禁用/已答统一降透明度弱化 */
+.chat-msg-md :deep(.chat-question) {
+  margin: 0.5em 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.chat-msg-md :deep(.chat-question-item) {
+  margin: 0.35em 0;
+}
+.chat-msg-md :deep(.chat-question-title) {
+  font-weight: 500;
+  margin-bottom: 0.3em;
+}
+.chat-msg-md :deep(.chat-question-hint) {
+  font-weight: 400;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+.chat-msg-md :deep(.chat-question-options) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chat-msg-md :deep(.chat-question-option) {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.chat-msg-md :deep(.chat-question-option:hover) {
+  border-color: var(--primary-color);
+}
+.chat-msg-md :deep(.chat-question-option.selected) {
+  border-color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  color: var(--primary-color);
+}
+.chat-msg-md :deep(.chat-question-actions) {
+  margin-top: 0.5em;
+  display: flex;
+  justify-content: flex-end;
+}
+.chat-msg-md :deep(.chat-question-submit) {
+  padding: 4px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-msg-md :deep(.chat-question-submit:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 会话在途：卡片提交按钮置灰禁点（点击委托另有 chatInFlight 守卫双保护） */
+.chat-messages.chat-in-flight .chat-msg-md :deep(.chat-question-submit:not(:disabled)) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 已答卡片：整体弱化且禁点（含选项），提交后防重复作答 */
+.chat-msg-md :deep(.chat-question-answered) {
+  opacity: 0.65;
+  pointer-events: none;
+}
+.chat-msg-md :deep(.chat-question-answered .chat-question-option.selected) {
+  border-color: var(--border-color);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
 }
 
 /* 输入区 */

@@ -48,3 +48,89 @@ describe('renderChatMarkdown - 基础行为', () => {
     expect(html).toContain('&lt;img')
   })
 })
+
+// ===== chat-question 选择题卡片渲染 =====
+// 约定：模型输出 ```chat-question JSON``` 围栏，合法渲染交互卡片，
+// 非法 JSON / 结构缺失降级普通代码块（PRD B1/B6）
+
+const validCard = JSON.stringify({
+  questions: [
+    {
+      question: '选择部署环境',
+      options: [{ label: '测试环境' }, { label: '生产环境', description: '正式对外' }],
+      multiSelect: false
+    }
+  ]
+})
+
+function fenceOf(content) {
+  return renderChatMarkdown('```chat-question\n' + content + '\n```')
+}
+
+describe('renderChatMarkdown - chat-question 卡片', () => {
+  it('合法 JSON 渲染为卡片结构（容器/选项按钮/data 定位属性）', () => {
+    const html = fenceOf(validCard)
+    expect(html).toContain('class="chat-question"')
+    expect(html).toContain('chat-question-title')
+    expect(html).toContain('data-question="选择部署环境"')
+    expect(html).toContain('data-q="0"')
+    expect(html).toContain('data-idx="1"')
+    expect(html).toContain('chat-question-submit')
+    expect(html).toContain('选择部署环境')
+    expect(html).toContain('测试环境')
+  })
+
+  it('multiSelect: true 的题项带 data-multi 与可多选提示', () => {
+    const card = JSON.stringify({
+      questions: [{ question: '选模块', options: [{ label: 'A' }, { label: 'B' }], multiSelect: true }]
+    })
+    const html = fenceOf(card)
+    expect(html).toContain('data-multi="true"')
+    expect(html).toContain('chat-question-hint')
+    expect(html).toContain('可多选')
+  })
+
+  it('选项 description 渲染为 title 提示', () => {
+    const html = fenceOf(validCard)
+    expect(html).toContain('title="正式对外"')
+  })
+
+  it('非法 JSON 降级普通代码块（不渲染卡片、不抛错）', () => {
+    const html = fenceOf('{questions: [broken')
+    expect(html).not.toContain('chat-question-submit')
+    expect(html).toContain('<pre')
+  })
+
+  it('结构缺失（questions 空/缺 label）降级普通代码块', () => {
+    for (const broken of [
+      JSON.stringify({ questions: [] }),
+      JSON.stringify({ questions: [{ question: 'q', options: [{ no: 'label' }] }] }),
+      JSON.stringify({ questions: [{ options: [{ label: 'A' }] }] }),
+      JSON.stringify({})
+    ]) {
+      const html = fenceOf(broken)
+      expect(html).not.toContain('chat-question-submit')
+      expect(html).toContain('<pre')
+    }
+  })
+
+  it('选项 label 含 HTML 时被转义（卡片属性/文本防注入）', () => {
+    const card = JSON.stringify({
+      questions: [{ question: '<b>q</b>', options: [{ label: '<img src=x>' }] }]
+    })
+    const html = fenceOf(card)
+    expect(html).not.toContain('<img src=x>')
+    expect(html).toContain('&lt;img src=x&gt;')
+  })
+
+  it('未闭合 chat-question 围栏（流式中）按普通代码块容错显示', () => {
+    const html = renderChatMarkdown('```chat-question\n{"questions":')
+    expect(html).not.toContain('chat-question-submit')
+  })
+
+  it('chat-question 之外的 info 附注不误判（如 chat-question.js 走普通代码块）', () => {
+    const html = renderChatMarkdown('```chat-question.js\nconst a = 1\n```')
+    expect(html).not.toContain('chat-question-submit')
+    expect(html).toContain('<pre')
+  })
+})

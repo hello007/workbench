@@ -1,0 +1,4 @@
+{"file": "docs/spec/ai-chat-service.md", "reason": "ChatService 契约：chat-task:* 事件流、data/ai_chat 存储布局、--resume 链路、E_CHAT_IN_PROGRESS 同会话串行保护——方案 A 改 buildChatArgs 与 prompt 注入须知"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "chips 组件视觉规范：语义配色、间距圆角档位、行内 style 禁用、事件委托——B2 渲染 chips 须守"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌：--primary-color 与 EP 派生色阶、冷暖灰统一——chips 选中/禁用态配色"}
+{"file": ".trellis/tasks/09-23-ai-chat-question-options/prd.md", "reason": "需求与验收标准（B1-B9、A1-A2）、块格式约定、非模态约束"}

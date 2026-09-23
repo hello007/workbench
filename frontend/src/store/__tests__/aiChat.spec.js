@@ -573,3 +573,31 @@ describe('aiChat store', () => {
     expect(store.chatSettings.permissionMode).toBe('bad')
   })
 })
+
+// ===== 选择题卡片域 =====
+// chat-question 已答标记：提交后置灰防重复作答；key 按会话+任务隔离；
+// 仅内存态（应用重启恢复为未答，PRD B8 决策不落盘）
+describe('aiChatStore 选择题卡片域', () => {
+  it('默认未答；markChatQuestionAnswered 后同会话同任务判已答', () => {
+    const store = useAiChatStore()
+    expect(store.isChatQuestionAnswered('s1', 't1')).toBe(false)
+    store.markChatQuestionAnswered('s1', 't1')
+    expect(store.isChatQuestionAnswered('s1', 't1')).toBe(true)
+  })
+
+  it('已答标记按会话/任务隔离：他任务、他会话不受影响', () => {
+    const store = useAiChatStore()
+    store.markChatQuestionAnswered('s1', 't1')
+    expect(store.isChatQuestionAnswered('s1', 't2')).toBe(false)
+    expect(store.isChatQuestionAnswered('s2', 't1')).toBe(false)
+  })
+
+  it('空 sessionId/taskId 入参与查询均安全（历史消息 taskId 可能缺失）', () => {
+    const store = useAiChatStore()
+    store.markChatQuestionAnswered('', 't1')
+    store.markChatQuestionAnswered('s1', '')
+    expect(store.isChatQuestionAnswered('', 't1')).toBe(false)
+    expect(store.isChatQuestionAnswered('s1', '')).toBe(false)
+    expect(store.isChatQuestionAnswered(undefined, undefined)).toBe(false)
+  })
+})

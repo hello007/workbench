@@ -443,19 +443,19 @@ func TestBuildChatArgs(t *testing.T) {
 	}{
 		{
 			name: "首轮默认模式", prompt: "hi", resume: "", mode: "default", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose"},
+			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
 			name: "续会话全参数", prompt: "hi", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
-			want: []string{"-p", "hi", "--resume", "s1", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--model", "sonnet"},
+			want: []string{"-p", "hi", "--resume", "s1", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
 			name: "权限模式为空不追加", prompt: "hi", resume: "", mode: "", mdl: "opus",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--model", "opus"},
+			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
 			name: "plan 模式", prompt: "hi", resume: "", mode: "plan", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan"},
+			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--disallowedTools", "AskUserQuestion"},
 		},
 	}
 	for _, tc := range cases {
@@ -530,8 +530,9 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		t.Errorf("工作目录: got %q", dir)
 	}
 	gotArgs := strings.Join(args, " ")
-	if !strings.Contains(gotArgs, "-p 你好") {
-		t.Errorf("args 缺 prompt: %v", args)
+	// 首轮 prompt = chat-question 环境声明前缀 + 用户原文（仅进 claude prompt）
+	if len(args) < 2 || args[1] != chatQuestionPreamble+"\n\n你好" {
+		t.Errorf("首轮 prompt 应为声明前缀+原文: %v", args)
 	}
 	if strings.Contains(gotArgs, "--resume") {
 		t.Errorf("首轮不应带 --resume: %v", args)
@@ -600,9 +601,17 @@ func TestChatService_RunChat_ResumeSecondTurn(t *testing.T) {
 	f := (*fakes)[1]
 	f.mu.Lock()
 	args := strings.Join(f.gotArgs, " ")
+	promptArg := ""
+	if len(f.gotArgs) >= 2 {
+		promptArg = f.gotArgs[1]
+	}
 	f.mu.Unlock()
 	if !strings.Contains(args, "--resume claude-s-1") {
 		t.Errorf("第二轮应带 --resume: %v", f.gotArgs)
+	}
+	// 续轮不重复注入环境声明（--resume 上下文已含）
+	if promptArg != "第二问" {
+		t.Errorf("第二轮 prompt 不应含声明前缀: %q", promptArg)
 	}
 	if result.ClaudeSessionID != "claude-s-2" {
 		t.Errorf("第二轮 claude 会话 id: got %q", result.ClaudeSessionID)

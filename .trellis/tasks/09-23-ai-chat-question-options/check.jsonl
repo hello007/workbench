@@ -1,0 +1,4 @@
+{"file": "docs/spec/ai-chat-service.md", "reason": "检查 buildChatArgs 变更未破坏 chat-task:* 事件与 --resume 链路；prompt 注入仅首轮"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查 chips 视觉守规范（语义配色、间距档位、事件委托模式）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：后端 service ≥76%、前端 ≥70%，改动后不降"}
+{"file": ".trellis/tasks/09-23-ai-chat-question-options/prd.md", "reason": "对照验收标准逐条核对（含非模态约束 B7-B9）"}

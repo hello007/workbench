@@ -1076,3 +1076,12 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+## 2026-09-23 ai-chat-question-options（AI 对话选择题交互）
+
+- 调研：headless `-p` 下 claude AskUserQuestion 不渲染 UI 且被 CLI 自动应答（模型基于「用户未答」继续输出）；真原生交互需 `--input-format stream-json` 双向流（方案 C 否决，投入产出比低）。
+- 落地方案 A+B（用户选定）：A=`--disallowedTools AskUserQuestion` + 首轮 prompt 注入 chatQuestionPreamble（仅进 claude prompt，落盘消息保持原文）；B=前端 chatMarkdown fence 分流渲染 `chat-question` 卡片 + AiChatPanel 事件委托提交 + aiChat store 内存已答态（key sessionId:taskId）。
+- 关键决策：统一提交按钮（放弃单选点击即提交，多问题卡片下语义更稳）；消息模型/绑定零变更；非法块降级普通代码块。
+- 坑：markdown-it 覆盖 `renderer.rules.fence` 前须先保存默认规则引用；已答置灰走 `class="chat-question"` 字符串替换精准追加类（renderer 输出形态是隐性契约，勿改）。
+- 既有失败上报：TestApp_StartWebServe_StartupMatrix/设置开启默认启动（web_serve_test.go:397），干净 master 复现，与本任务无关。
+- 测试：service 包全绿；前端 1369 全绿（新增 8 renderer + 3 store 用例）。文档：功能说明.md / README.md / CLAUDE.md 关键规则 / docs/spec/ai-chat-service.md §3.1。

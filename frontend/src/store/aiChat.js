@@ -399,6 +399,23 @@ export const useAiChatStore = defineStore('aiChat', () => {
     global: chatTemplates.value.filter(t => t.scope === 'global')
   }))
 
+  // ===== 选择题卡片域 =====
+  // 已提交的 chat-question 卡片：key = `${chatSessionId}:${taskId}`。
+  // 仅内存态（PRD B8 决策）：切换会话往返保留置灰，应用重启后恢复为未答可再点。
+  const answeredChatQuestions = ref({})
+
+  /** 指定会话的指定任务回复中的选择题卡片是否已提交过答案。 */
+  function isChatQuestionAnswered(sessionId, taskId) {
+    return !!(sessionId && taskId && answeredChatQuestions.value[`${sessionId}:${taskId}`])
+  }
+
+  /** 标记选择题卡片已提交答案（提交成功后调用，置灰防重复提交）。 */
+  function markChatQuestionAnswered(sessionId, taskId) {
+    if (sessionId && taskId) {
+      answeredChatQuestions.value[`${sessionId}:${taskId}`] = true
+    }
+  }
+
   // ===== 配置域（PR3）=====
   // 执行配置（权限模式 + 模型），持久化于后端 settings.json
   const chatSettings = ref({ permissionMode: 'default', modelName: '' })
@@ -470,7 +487,10 @@ export const useAiChatStore = defineStore('aiChat', () => {
     // 配置域
     chatSettings,
     loadChatSettings,
-    saveChatSettings
+    saveChatSettings,
+    // 选择题卡片域
+    isChatQuestionAnswered,
+    markChatQuestionAnswered
   }
 })
 

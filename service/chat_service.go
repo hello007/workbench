@@ -675,12 +675,26 @@ func (s *ChatService) appendMessages(sessionID string, msgs ...model.ChatMessage
 
 // ===== 对话执行 =====
 
+// chatQuestionPreamble 首轮注入 claude prompt 的交互环境声明：headless -p 模式
+// 下 AskUserQuestion 工具不渲染界面且被自动应答（模型拿不到真实选择），已通过
+// --disallowedTools 禁用；此处约定模型以 chat-question 代码块承载选择题，
+// WorkBench 前端将其渲染为可点选卡片，用户选择结果作为下一条用户消息回传。
+// 仅首轮注入（--resume 续轮上下文已含本声明，重复注入徒增 token）。
+const chatQuestionPreamble = `【交互环境说明】你运行在非交互对话环境中，AskUserQuestion 工具已被禁用。当你需要用户在有限选项中做单选或多选决策时，不要用文字罗列选项让用户打字回复，而是输出一个 chat-question 代码块并立即结束本轮回复（代码块之后不要再输出任何内容），用户会在交互卡片上点选，选择结果将作为下一条消息发给你。代码块格式（JSON，questions 数组支持一次提出多个问题）：
+` + "```chat-question" + `
+{"questions":[{"question":"问题文本","options":[{"label":"选项一"},{"label":"选项二"}],"multiSelect":false}]}
+` + "```" + `
+不需要用户选择时正常对话，不要输出该代码块。`
+
 // buildChatArgs 组装 claude headless 对话命令参数（纯函数，便于单测）。
 // 参数顺序：-p <prompt> [--resume <sid>] --output-format stream-json --verbose
-// [--permission-mode <mode>] [--model <model>]。
+// [--permission-mode <mode>] [--model <model>] --disallowedTools AskUserQuestion。
 // --resume：会话已有 claude session id 时续上下文（多轮对话）。
 // --permission-mode：仅非 default 非空时追加（default 为 claude 默认行为，不传等价）。
 // --model：仅非空时追加（空 = claude 默认模型）。
+// --disallowedTools AskUserQuestion：恒定禁用该工具——headless -p 模式下它不渲染
+// 界面且被 CLI 自动应答，模型基于「用户未作答」的错误前提继续输出；禁用后配合
+// 首轮 prompt 声明（chatQuestionPreamble）引导模型改用 chat-question 代码块。
 func buildChatArgs(prompt, resumeSessionID, permissionMode, modelName string) []string {
 	args := []string{"-p", prompt}
 	if resumeSessionID != "" {
@@ -693,6 +707,7 @@ func buildChatArgs(prompt, resumeSessionID, permissionMode, modelName string) []
 	if modelName != "" {
 		args = append(args, "--model", modelName)
 	}
+	args = append(args, "--disallowedTools", "AskUserQuestion")
 	return args
 }
 
@@ -777,7 +792,14 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	timeout := chatDefaultTimeoutMinutes
 	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(timeout)*time.Minute)
 
-	args := buildChatArgs(prompt, sess.ClaudeSessionID, permissionMode, modelName)
+	// 首轮（会话尚无 claude session id）在 prompt 前拼交互环境声明，引导模型
+	// 用 chat-question 代码块承载选择题；续轮经 --resume 续上下文不重复注入。
+	// 声明仅进 claude prompt：落盘 user 消息保持用户原文（历史重载不混入环境噪音）。
+	claudePrompt := prompt
+	if sess.ClaudeSessionID == "" {
+		claudePrompt = chatQuestionPreamble + "\n\n" + prompt
+	}
+	args := buildChatArgs(claudePrompt, sess.ClaudeSessionID, permissionMode, modelName)
 	proc := s.processFactory(ctx, "claude", args, sess.Cwd)
 
 	stdout, err := proc.StdoutPipe()

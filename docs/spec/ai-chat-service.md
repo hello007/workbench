@@ -41,6 +41,21 @@ RunChat(sessionID, prompt, permissionMode, model)
 - 失败轮无回复不留空消息。
 - provider 抽象：MVP 单 claude 实现；多 CLI 扩展点在 processFactory 与参数组装处分派，勿在业务层散落 `if cli == "xxx"`。
 
+### 3.1 选择题交互契约（chat-question）
+
+headless `-p` 模式下 claude 的 AskUserQuestion 工具不渲染 UI 且被 CLI **自动应答**（模型基于「用户未作答」的错误前提继续输出），故 ChatService 全局 `--disallowedTools AskUserQuestion` 禁用，改用输出约定承载选择题：
+
+| 环节 | 契约 |
+| --- | --- |
+| 声明注入 | 仅首轮（`ClaudeSessionID` 为空）在 claude prompt 前拼 `chatQuestionPreamble`（约定格式说明）；续轮 `--resume` 上下文已含，不重复注入。**声明只进 claude prompt，落盘 user 消息保持用户原文** |
+| 块格式 | 回复中 ` ```chat-question ` 围栏内 JSON：`{"questions":[{"question","options":[{"label","description"?}],"multiSelect"?}]}`，支持一次多问题 |
+| 渲染 | `chatMarkdown.js` fence 渲染分流：合法 JSON 渲染交互卡片；非法/缺失结构降级普通代码块（未闭合流式围栏同样容错） |
+| 交互 | AiChatPanel 在气泡容器事件委托（v-html 内无法绑 Vue 事件）：单选 radio 语义、多选 toggle，每题至少一项启用提交；提交拼「用户通过选项卡片回答」文本走 `runChat` 常规链路（`--resume` 回传） |
+| 已答态 | aiChat store 内存 map（key `sessionId:taskId`），切会话往返保留置灰，**不落盘**（重启恢复未答可再点）；消息模型零变更 |
+| 守卫 | 会话在途（chatInFlight）提交静默忽略（CSS 置灰 + 点击委托双保护，后端另有 E_CHAT_IN_PROGRESS） |
+
+改动注意：`chatQuestionPreamble` 文案变更会影响模型守约行为，改后须实测首轮提问；卡片 class 属性被 `renderMsgMarkdown` 字符串替换精准追加已答类，勿改 `class="chat-question"` 的输出形态。
+
 ## 4. 前端状态与事件纪律（aiChat store）
 
 - 单一 pinia store `aiChat`（目录/会话/消息/任务/模板/配置六域）。
