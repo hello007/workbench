@@ -557,7 +557,7 @@ describe('AiChatPanel.vue', () => {
   })
 
   describe('输入与发送', () => {
-    it('输入框默认 6 行且已去除 autosize（固定 rows + 原生拖拽调高，不持久化）', async () => {
+    it('输入框默认 6 行且已去除 autosize（固定 rows + 原生拖拽调高）', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
@@ -566,6 +566,7 @@ describe('AiChatPanel.vue', () => {
       expect(ta.element.rows).toBe(6)
       // autosize 若未移除会经 stub $attrs 透传为 DOM attribute（其 JS 接管高度与原生 resize 冲突）
       expect(ta.element.getAttribute('autosize')).toBe(null)
+      // 拖拽调高是 CSS resize:vertical 的 DOM 临时态（仅会话内有效），不持久化、不入会话快照，无断言支撑
     })
 
     it('Enter 发送：RunChat 以当前配置调用，输入框清空，乐观 user 气泡出现', async () => {

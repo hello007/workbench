@@ -178,9 +178,11 @@ describe('useSessionState - applySessionState', () => {
 
   it('恢复一级面板 ai-chat 与 dashboard（白名单与 ActivityBar items 对齐）', () => {
     const uiStore = useUiStore()
-    applySessionState({ activePanel: 'ai-chat' })
+    const touchedAiChat = applySessionState({ activePanel: 'ai-chat' })
+    expect(touchedAiChat).toBe(true)
     expect(uiStore.activePanel).toBe('ai-chat')
-    applySessionState({ activePanel: 'dashboard' })
+    const touchedDashboard = applySessionState({ activePanel: 'dashboard' })
+    expect(touchedDashboard).toBe(true)
     expect(uiStore.activePanel).toBe('dashboard')
   })
 

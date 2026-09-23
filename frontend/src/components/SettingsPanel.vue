@@ -933,7 +933,8 @@ const onThemeChange = async () => {
 <style scoped>
 /* 弹窗内容区背景
  * margin 负值与 el-dialog__body padding（同为 --spacing-lg）配对抵消，
- * 使 settings-body 填满 dialog body padding-box（边缘到边缘） */
+ * 叠加弹窗容器 padding 归零（见 .el-dialog.settings-dialog 的 padding:0），
+ * 三层配对方能使 settings-body 边缘到边缘填满 dialog body */
 .settings-body {
   display: flex;
   height: min(560px, 78vh);
@@ -1269,8 +1270,11 @@ const onThemeChange = async () => {
 
 <style>
 /* 全局：el-dialog 主题适配（浅色/暗色经 CSS 变量随 resolvedTheme 切换）
- * 圆角 --radius-lg（容器外圈较软，内卡片 --radius-md，外松内紧层级） */
-.settings-dialog .el-dialog {
+ * 圆角 --radius-lg（容器外圈较软，内卡片 --radius-md，外松内紧层级）。
+ * class 经 attrs 透传与 .el-dialog 落在同一元素，须用联合选择器，后代选择器匹配不到自身；
+ * EP 2.14.5 容器自带 padding，此处归零，防负 margin 抵消 body padding 后仍残留边缘框 */
+.el-dialog.settings-dialog {
+  padding: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);

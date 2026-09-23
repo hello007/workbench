@@ -197,7 +197,7 @@ kbd {
 
 圆角按嵌套层级递减，形成「外软内紧」节奏：
 
-- 弹窗外圈 `--radius-lg`（参照 `.settings-dialog .el-dialog`）
+- 弹窗外圈 `--radius-lg`（参照 `.el-dialog.settings-dialog`、`.el-dialog.tpl-manage-dialog`，class 经 attrs 透传与 `.el-dialog` 同元素，须用联合选择器）
 - 卡片/设置项 `--radius-md`（参照 `.settings-item`、`.error-list`）
 - 键帽/小标签 `--radius-sm`（参照 `kbd`）
 
@@ -233,7 +233,7 @@ top="15vh"                    <!-- 距顶：vh 响应式（CommandPalette 显式
 
 |弹窗类型|宽|高|参照|
 |---|---|---|---|
-|设置弹窗（多 tab + nav）|`min(960px, 86vw)`|`min(620px, 78vh)`|SettingsPanel|
+|设置弹窗（多 tab + nav）|`min(960px, 86vw)`|`min(620px, 78vh)`|SettingsPanel、AiChatPanel 管理对话模板弹窗（960 档第二实例）|
 |命令面板（搜索 + 列表）|`min(720px, 70vw)`|内容区 `min(480px, 60vh)`|CommandPalette|
 |内容多的大弹窗|`min(Npx, 85vw)` N≥900|按内容自适应|RepoFilterDialog/AiTaskHistoryPanel（目标值 900/920；现状固定 px，待迁移 min() 模式）|
 |中小弹窗（添加/选择）|`min(Npx, 80vw)` N=600-700|自适应|DashboardView 添加仓库（目标值 640；现状固定 px，待迁移 min() 模式）|
@@ -247,7 +247,7 @@ top="15vh"                    <!-- 距顶：vh 响应式（CommandPalette 显式
 
 #### Element Plus textarea 内联 min-height 压过类规则
 
-EP 2.13 对**非 autosize** 的 `el-input type="textarea"` 在挂载时执行 `resizeTextarea()`，向 `.el-textarea__inner` 写入**内联 `min-height: 31px`**（单行高）。内联样式（无 important）胜过普通类规则，自定义拖拽下限类规则静默失效（实测可拖到 31px ≈ 1.5 行）。
+EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` 在挂载时执行 `resizeTextarea()`，向 `.el-textarea__inner` 写入**内联 `min-height: 31px`**（单行高）。内联样式（无 important）胜过普通类规则，自定义拖拽下限类规则静默失效（实测可拖到 31px ≈ 1.5 行）。
 
 ```css
 /* 错误：被 EP 运行时内联 min-height:31px 覆盖，下限失守 */
@@ -263,6 +263,7 @@ EP 2.13 对**非 autosize** 的 `el-input type="textarea"` 在挂载时执行 `r
 
 - 另一陷阱：`:autosize` 由 JS 接管高度，与原生 `resize` 拖拽互斥——要「默认 N 行 + 可拖拽调高」须去 autosize 改 `:rows="N"`
 - 先例：AiChatPanel `.chat-input`（52px）与 `.tpl-content-input`（120px）
+- `!important` 方案依赖 EP 非 autosize 模式只写无 important 的 `minHeight` 这一实现细节，EP 升级后须回归验证
 
 #### highlight.js 按需注册必须包含 plaintext 回退名
 

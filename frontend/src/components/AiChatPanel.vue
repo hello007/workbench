@@ -1350,7 +1350,8 @@ watch(() => uiStore.activePanel, (panel) => {
 
 /* 模板管理弹窗主体：列表 + 表单左右二分（对齐 SettingsPanel 的 settings-body）。
    margin 负值与 el-dialog__body padding（同为 --spacing-lg）配对抵消，
-   使 tpl-manage-body 填满 dialog body padding-box（边缘到边缘） */
+   叠加弹窗容器 padding 归零（见 .el-dialog.tpl-manage-dialog 的 padding:0），
+   三层配对方能使 tpl-manage-body 边缘到边缘填满 dialog body */
 .tpl-manage-body {
   display: flex;
   height: min(560px, 78vh);
@@ -1460,8 +1461,11 @@ watch(() => uiStore.activePanel, (panel) => {
 <style>
 /* 模板管理弹窗主题：对齐 settings-dialog（背景/圆角/header/body padding/遮罩着色）。
    el-dialog 为 append-to-body 传送至组件树外，scoped 样式无法作用，须用非 scoped 块 + 专属 class 圈定。
+   class 经 attrs 透传与 .el-dialog 落在同一元素，须用联合选择器，后代选择器匹配不到自身；
+   EP 2.14.5 容器自带 padding，此处归零，防负 margin 抵消 body padding 后仍残留边缘框。
    body padding 显式固定为 --spacing-lg，与 .tpl-manage-body 的负 margin 配对抵消 */
-.tpl-manage-dialog .el-dialog {
+.el-dialog.tpl-manage-dialog {
+  padding: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
