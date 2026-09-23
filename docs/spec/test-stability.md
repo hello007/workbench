@@ -113,6 +113,23 @@ if len(nodes2) != 2 {  // NTFS 同 tick 时 mtime 未变 → 命中缓存返回 
 正例：`web_serve_test.go` `TestApp_StartWebServe_StartupMatrix/设置开启默认启动`
 （settings 注入范式）；`TestApp_GetWebServeConfig` 的 `Start("127.0.0.1:0")` 先例。
 
+### 7.1 freePort 探测的 TOCTOU 窗口（定性接受）
+
+`web_serve_test.go` 的 `freePort` 辅助先 `net.Listen("127.0.0.1:0")` 探测再
+Close 返回端口号，Close 到后续 `Start` 真实绑定之间存在 TOCTOU 窗口（端口可能
+被同机其他进程抢占）。定性**接受**，理由：
+
+- **结构性不可避免**：地址切换、改址重启类用例的被测语义依赖「具体地址字符串
+  变化」触发真实重启路径（`Start` 幂等判断走配置地址字符串比较，`"127.0.0.1:0"`
+  同串命中 no-op），必须预知具体端口，无法统一改绑 `:0`。
+- **窗口极小**：内核 `:0` 分配本身跳过已监听端口，静态常驻服务（如 36115 的
+  workbench.exe）不构成冲突源；冲突仅来自探测后瞬间恰好有其他进程绑同一随机端口。
+- **危害有界**：被抢时 `Start` 返回错误（不静默降级），表现为该用例误报一次，
+  重跑即过，不产生假通过。
+
+规则：能直接绑 `:0` 的用例一律直传 `"127.0.0.1:0"`，禁新增非必要 `freePort`
+调用；确需具体端口的用例在 freePort 注释处留痕说明。
+
 ## 8. 相关文档
 
 - [测试覆盖率分层门禁](test-coverage-gate.md) — service ≥76% 基线，本任务改动后覆盖率 77.7%

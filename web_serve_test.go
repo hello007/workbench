@@ -53,7 +53,12 @@ func newWebServeTestApp(t *testing.T) *App {
 	return app
 }
 
-// freePort 探测一个空闲 TCP 端口（存在极小 TOCTOU 窗口，测试可接受）。
+// freePort 探测一个空闲 TCP 端口，专供「必须预知具体端口」的用例（地址切换、
+// 改址重启等被测语义依赖具体地址字符串变化触发真实重启路径，127.0.0.1:0 同串
+// 会命中 Start 幂等 no-op 而触发不了）。Close 到 Start 绑定之间存在极小 TOCTOU
+// 窗口：端口可能被同机其他进程抢占，危害限于该用例误报一次（Start 返回错误），
+// 重跑即过；已排查无静态端口冲突源（内核 :0 分配本身跳过已监听端口），定性
+// 接受。能直接绑 :0 的用例一律直传 "127.0.0.1:0"，禁新增非必要 freePort 调用。
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -125,13 +130,13 @@ func TestWebServeManager_StartSameAddressIdempotent(t *testing.T) {
 	app := newWebServeTestApp(t)
 	m := app.webServe
 
-	port := freePort(t)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	if err := m.Start(addr); err != nil {
+	// 幂等判断走配置地址字符串比较，:0 同串即可覆盖「同地址不重启」语义，
+	// 且内核分配端口无探测 TOCTOU 窗口
+	if err := m.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("首次 Start: %v", err)
 	}
 	firstAddr := m.listenAddr()
-	if err := m.Start(addr); err != nil {
+	if err := m.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("同地址二次 Start: %v", err)
 	}
 	if got := m.listenAddr(); got != firstAddr {
