@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 绑定三处同步完整（App.js/App.d.ts/models.ts）且 npm run build 通过"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查错误分流：未配置引导设置、启动失败结构化错误码、非冲突文件/工作区删除报业务文案"}

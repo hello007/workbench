@@ -88,3 +88,28 @@ func RenderDiffArgsTemplate(template, left, right string) ([]string, error) {
 	}
 	return args, nil
 }
+
+// RenderMergeArgsTemplate 将三向合并工具的参数模板按空白分词，替换 {base} /
+// {local} / {remote} / {merged} 占位符为实际文件路径，返回 exec.Command 参数切片。
+// 占位符替换在分词后进行（同 RenderDiffArgsTemplate），含空格的路径整体作为单个
+// 参数传递。模板须同时包含四个占位符，否则视为配置无效。
+func RenderMergeArgsTemplate(template, base, local, remote, merged string) ([]string, error) {
+	tokens := strings.Fields(template)
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("参数模板为空")
+	}
+	for _, ph := range []string{"{base}", "{local}", "{remote}", "{merged}"} {
+		if !strings.Contains(template, ph) {
+			return nil, fmt.Errorf("参数模板须包含 %s 占位符", ph)
+		}
+	}
+	args := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		token = strings.ReplaceAll(token, "{base}", base)
+		token = strings.ReplaceAll(token, "{local}", local)
+		token = strings.ReplaceAll(token, "{remote}", remote)
+		token = strings.ReplaceAll(token, "{merged}", merged)
+		args = append(args, token)
+	}
+	return args, nil
+}

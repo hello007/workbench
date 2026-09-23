@@ -158,3 +158,36 @@ func TestCleanupDiffTempDir(t *testing.T) {
 		t.Errorf("清理后注入根应不存在, err=%v", err)
 	}
 }
+
+// TestRenderMergeArgsTemplate 三向合并模板渲染：四占位符替换、含空格路径整体传参、
+// 占位符缺失/空模板报错。
+func TestRenderMergeArgsTemplate(t *testing.T) {
+	// 四占位符全替换（含工具选项与输出参数形式）
+	args, err := RenderMergeArgsTemplate("-e -o {merged} {base} {local} {remote}", "C:/b f.txt", "C:/l f.txt", "C:/r f.txt", "C:/m f.txt")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := []string{"-e", "-o", "C:/m f.txt", "C:/b f.txt", "C:/l f.txt", "C:/r f.txt"}
+	if len(args) != len(want) {
+		t.Fatalf("args 数不符: %v", args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+
+	// 空模板
+	if _, err := RenderMergeArgsTemplate("", "b", "l", "r", "m"); err == nil {
+		t.Error("空模板应报错")
+	}
+	// 缺任一占位符均报错；含全部四占位符（重复出现亦可）不报错
+	for _, tpl := range []string{"{base} {local} {remote}", "{local} {remote} {merged}", "{base} {base} {base}"} {
+		if _, err := RenderMergeArgsTemplate(tpl, "b", "l", "r", "m"); err == nil {
+			t.Errorf("模板 %q 缺占位符应报错", tpl)
+		}
+	}
+	if _, err := RenderMergeArgsTemplate("{base} {local} {remote} {merged} {merged}", "b", "l", "r", "m"); err != nil {
+		t.Errorf("四占位符齐备应渲染成功: %v", err)
+	}
+}

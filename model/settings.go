@@ -51,6 +51,7 @@ type AppSettings struct {
 	DiffToolName           string   `json:"diffToolName"`           // 外部 diff 工具预设名：beyondcompare/winmerge/vscode/custom
 	DiffToolPath           string   `json:"diffToolPath"`           // 外部 diff 工具可执行文件路径，留空表示未配置
 	DiffToolArgs           string   `json:"diffToolArgs"`           // 外部 diff 工具参数模板，支持 {left} {right} 占位符
+	DiffToolMergeArgs      string   `json:"diffToolMergeArgs"`      // 三向合并参数模板（custom 预设用），支持 {base} {local} {remote} {merged} 占位符；预设名非 custom 时由后端内置模板接管，本字段不消费
 	// WebServe 浏览器访问通道配置段。指针形态区分「段缺失（老配置升级，视为未
 	// 配置 → 默认开启）」与「显式 enabled:false（用户主动关闭）」——Go bool 零值
 	// 为 false，非指针无法表达「默认 true」语义。加载后经 EnsureWebServeDefaults 补全。

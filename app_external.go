@@ -140,3 +140,19 @@ func (a *App) OpenInExternalDiff(path, mode, file, sha, baseSha, headSha string)
 		HeadSHA: headSha,
 	})
 }
+
+// OpenInExternalMerge 用外部三向合并工具打开冲突文件（base/local/remote 临时版本 +
+// merged 工作区原文件）。三向参数模板按预设名解析：预设工具（Beyond Compare /
+// WinMerge / VSCode / KDiff3 / Meld）由后端内置模板零配置；custom 预设读
+// settings.DiffToolMergeArgs 自定义模板。错误分流口径同 OpenInExternalDiff。
+func (a *App) OpenInExternalMerge(path, file string) error {
+	settings, err := a.settingsSvc.Load()
+	if err != nil {
+		return fmt.Errorf("读取设置失败: %w", err)
+	}
+	mergeTemplate := service.MergeToolPresetTemplate(settings.DiffToolName)
+	if mergeTemplate == "" {
+		mergeTemplate = settings.DiffToolMergeArgs
+	}
+	return a.gitSvc.OpenInExternalMerge(path, settings.DiffToolPath, mergeTemplate, file)
+}

@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App.OpenInExternalMerge 方法须手动同步 frontend/wailsjs 三处（App.js/App.d.ts 加方法、models.ts AppSettings 加 diffToolMergeArgs），本地 wails generate module 等价手动同步，npm run build 验证"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "未配置/启动失败复用 E_DIFF_TOOL_NOT_CONFIGURED / E_DIFF_TOOL_LAUNCH_FAILED 错误码，前端 handleError 按 code 分流（NotConfigured=warning 引导设置）"}
+{"file": "docs/spec/test-stability.md", "reason": "merge 冲突 fixture 对 git merge exit 1 属预期，禁用 RunGit（非零退出 t.Fatalf），须原生 exec 容忍退出码"}
+{"file": "docs/spec/e2e-testing.md", "reason": "前端 GitMerge.spec 经 vi.mock wailsjs App 模块注入 OpenInExternalMerge mock"}
