@@ -1,0 +1,32 @@
+{
+  "id": "cleanup-docs-stability",
+  "name": "cleanup-docs-stability",
+  "title": "文档收尾与稳定性清理",
+  "description": "父任务：收尾 CHANGELOG 停更、路线图滞后、空任务目录残留、xlsx 漏洞上游关注、freePort TOCTOU 五项遗留（处理顺序：CHANGELOG→路线图→归档→xlsx→TOCTOU）",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-09-23",
+  "completedAt": "2026-09-23",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-23-changelog-backfill",
+    "09-23-roadmap-tick-sync",
+    "09-23-purge-empty-task-dir",
+    "09-23-xlsx-vuln-triage",
+    "09-23-freeport-toctou-fix"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
