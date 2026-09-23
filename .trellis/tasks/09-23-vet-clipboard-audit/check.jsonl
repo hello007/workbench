@@ -1,0 +1,2 @@
+{"file": "docs/开发规范.md", "reason": "检查 vet 按规范命令 -unsafeptr=false 零警告；裸 vet 仅剩 clipboard_windows.go 既有 5 处误报（新增测试文件同受该豁免覆盖）"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新单测无系统剪贴板等环境依赖、确定性模式断言可重复"}

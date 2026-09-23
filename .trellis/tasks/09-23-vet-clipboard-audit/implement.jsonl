@@ -1,0 +1,2 @@
+{"file": "docs/开发规范.md", "reason": "项目 vet 规范命令 go vet -unsafeptr=false ./... 及误报定性（GlobalLock 返回 Windows 堆地址非 Go 堆、go#44836 无豁免机制）已沉淀该文档；本任务核实引用属实并验证规范命令零警告"}
+{"file": "docs/spec/test-stability.md", "reason": "新增 TestGlobalAllocLockView 免剪贴板设计：OpenClipboard 易受其他进程独占锁影响属环境外部状态禁入单测，仅用 GlobalAlloc/GlobalLock 族自包含锚定转换语义"}
