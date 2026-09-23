@@ -1,0 +1,6 @@
+WorkBench 弹窗外观复验 console 记录
+时间: 2026-09-23T04:57:03.563Z
+初始主题: system
+error/warning 数: 0
+
+（无 error / warning 输出）

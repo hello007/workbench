@@ -1,0 +1,384 @@
+{
+  "steps": [
+    {
+      "name": "页面加载",
+      "ok": true,
+      "detail": "initialDark=false"
+    },
+    {
+      "name": "打开设置弹窗(亮色)",
+      "ok": true,
+      "detail": "initialTheme=system"
+    },
+    {
+      "name": "截图 shot-k-设置弹窗外观.png",
+      "ok": true,
+      "detail": "亮色"
+    },
+    {
+      "name": "设置弹窗关闭再开",
+      "ok": true,
+      "detail": "{\"visible\":true,\"padding\":\"0px\",\"border\":\"1px\"}"
+    },
+    {
+      "name": "切换暗色(html.dark)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "截图 shot-k2-设置弹窗外观-暗色.png",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "打开模板弹窗(暗色)",
+      "ok": true,
+      "detail": "目录数=1"
+    },
+    {
+      "name": "截图 shot-l2-模板弹窗外观-暗色.png",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "模板弹窗关闭再开(暗色)",
+      "ok": true,
+      "detail": "{\"visible\":true,\"padding\":\"0px\",\"border\":\"1px\"}"
+    },
+    {
+      "name": "打开模板弹窗(亮色)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "截图 shot-l-模板弹窗外观.png",
+      "ok": true,
+      "detail": "亮色"
+    },
+    {
+      "name": "模板弹窗关闭再开(亮色)",
+      "ok": true,
+      "detail": "{\"visible\":true,\"padding\":\"0px\",\"border\":\"1px\"}"
+    },
+    {
+      "name": "恢复初始主题",
+      "ok": true,
+      "detail": "→ system(跟随系统)"
+    }
+  ],
+  "light": {
+    "settings": {
+      "found": true,
+      "dark": false,
+      "vars": {
+        "radiusLg": "12px",
+        "bgSecondary": "#fff",
+        "borderColor": "#e2e8f0",
+        "spacingLg": "24px"
+      },
+      "dialog": {
+        "rect": {
+          "x": 320,
+          "y": 135,
+          "w": 960,
+          "h": 620.59375
+        },
+        "padding": "0px",
+        "border": "1px solid rgb(226, 232, 240)",
+        "borderColor": "rgb(226, 232, 240)",
+        "radius": [
+          "12px",
+          "12px",
+          "12px",
+          "12px"
+        ],
+        "background": "rgb(255, 255, 255)"
+      },
+      "overlay": {
+        "bg": "rgba(15, 23, 42, 0.5)"
+      },
+      "header": {
+        "rect": {
+          "x": 321,
+          "y": 136,
+          "w": 958,
+          "h": 58.59375
+        },
+        "background": "rgb(255, 255, 255)",
+        "backgroundImage": "none",
+        "borderBottom": "1px solid rgb(226, 232, 240)",
+        "radius": [
+          "12px",
+          "12px"
+        ],
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "body": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "padding": "24px",
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "inner": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "gapLeftVsBody": 0,
+        "gapRightVsBody": 0,
+        "gapTopVsBody": 0,
+        "gapBottomVsBody": 0
+      },
+      "overflow": {
+        "docHScroll": false,
+        "dlgHScroll": false,
+        "dlgVScroll": false
+      },
+      "settingsNavWidth": 200
+    },
+    "tpl": {
+      "found": true,
+      "dark": false,
+      "vars": {
+        "radiusLg": "12px",
+        "bgSecondary": "#fff",
+        "borderColor": "#e2e8f0",
+        "spacingLg": "24px"
+      },
+      "dialog": {
+        "rect": {
+          "x": 320,
+          "y": 135,
+          "w": 960,
+          "h": 620.59375
+        },
+        "padding": "0px",
+        "border": "1px solid rgb(226, 232, 240)",
+        "borderColor": "rgb(226, 232, 240)",
+        "radius": [
+          "12px",
+          "12px",
+          "12px",
+          "12px"
+        ],
+        "background": "rgb(255, 255, 255)"
+      },
+      "overlay": {
+        "bg": "rgba(15, 23, 42, 0.5)"
+      },
+      "header": {
+        "rect": {
+          "x": 321,
+          "y": 136,
+          "w": 958,
+          "h": 58.59375
+        },
+        "background": "rgb(255, 255, 255)",
+        "backgroundImage": "none",
+        "borderBottom": "1px solid rgb(226, 232, 240)",
+        "radius": [
+          "12px",
+          "12px"
+        ],
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "body": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "padding": "24px",
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "inner": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "gapLeftVsBody": 0,
+        "gapRightVsBody": 0,
+        "gapTopVsBody": 0,
+        "gapBottomVsBody": 0
+      },
+      "overflow": {
+        "docHScroll": false,
+        "dlgHScroll": false,
+        "dlgVScroll": false
+      },
+      "tplListWidth": 200
+    }
+  },
+  "dark": {
+    "settings": {
+      "found": true,
+      "dark": true,
+      "vars": {
+        "radiusLg": "12px",
+        "bgSecondary": "#1e293b",
+        "borderColor": "#334155",
+        "spacingLg": "24px"
+      },
+      "dialog": {
+        "rect": {
+          "x": 320,
+          "y": 135,
+          "w": 960,
+          "h": 620.59375
+        },
+        "padding": "0px",
+        "border": "1px solid rgb(51, 65, 85)",
+        "borderColor": "rgb(51, 65, 85)",
+        "radius": [
+          "12px",
+          "12px",
+          "12px",
+          "12px"
+        ],
+        "background": "rgb(30, 41, 59)"
+      },
+      "overlay": {
+        "bg": "rgba(2, 6, 23, 0.6)"
+      },
+      "header": {
+        "rect": {
+          "x": 321,
+          "y": 136,
+          "w": 958,
+          "h": 58.59375
+        },
+        "background": "rgb(30, 41, 59)",
+        "backgroundImage": "none",
+        "borderBottom": "1px solid rgb(51, 65, 85)",
+        "radius": [
+          "12px",
+          "12px"
+        ],
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "body": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "padding": "24px",
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "inner": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "gapLeftVsBody": 0,
+        "gapRightVsBody": 0,
+        "gapTopVsBody": 0,
+        "gapBottomVsBody": 0
+      },
+      "overflow": {
+        "docHScroll": false,
+        "dlgHScroll": false,
+        "dlgVScroll": false
+      },
+      "settingsNavWidth": 200
+    },
+    "tpl": {
+      "found": true,
+      "dark": true,
+      "vars": {
+        "radiusLg": "12px",
+        "bgSecondary": "#1e293b",
+        "borderColor": "#334155",
+        "spacingLg": "24px"
+      },
+      "dialog": {
+        "rect": {
+          "x": 320,
+          "y": 135,
+          "w": 960,
+          "h": 620.59375
+        },
+        "padding": "0px",
+        "border": "1px solid rgb(51, 65, 85)",
+        "borderColor": "rgb(51, 65, 85)",
+        "radius": [
+          "12px",
+          "12px",
+          "12px",
+          "12px"
+        ],
+        "background": "rgb(30, 41, 59)"
+      },
+      "overlay": {
+        "bg": "rgba(2, 6, 23, 0.6)"
+      },
+      "header": {
+        "rect": {
+          "x": 321,
+          "y": 136,
+          "w": 958,
+          "h": 58.59375
+        },
+        "background": "rgb(30, 41, 59)",
+        "backgroundImage": "none",
+        "borderBottom": "1px solid rgb(51, 65, 85)",
+        "radius": [
+          "12px",
+          "12px"
+        ],
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "body": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "padding": "24px",
+        "gapLeft": 0,
+        "gapRight": 0
+      },
+      "inner": {
+        "rect": {
+          "x": 321,
+          "y": 194.59375,
+          "w": 958,
+          "h": 560
+        },
+        "gapLeftVsBody": 0,
+        "gapRightVsBody": 0,
+        "gapTopVsBody": 0,
+        "gapBottomVsBody": 0
+      },
+      "overflow": {
+        "docHScroll": false,
+        "dlgHScroll": false,
+        "dlgVScroll": false
+      },
+      "tplListWidth": 200
+    }
+  },
+  "tplLight": {},
+  "tplDark": {},
+  "initialTheme": "system"
+}

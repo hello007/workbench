@@ -1,0 +1,60 @@
+===== console-log-复验 记录 =====
+时间: 2026/9/23 12:03:48 | viewport 1600x900 | http://127.0.0.1:36116
+流程: AI 对话输入框拖矮 -> 模板弹窗正文拖矮 -> 历史会话代码块渲染 -> 文件树打开 .js/.md 预览
+
+--- 测量数据 ---
+{
+  "inputDefault": {
+    "offsetHeight": 136,
+    "inlineHeight": null,
+    "computedMinHeight": "52px",
+    "clientHeight": 136,
+    "scrollHeight": 136
+  },
+  "inputDragMode": "native-drag",
+  "inputMin": {
+    "offsetHeight": 52,
+    "inlineHeight": "15px",
+    "computedMinHeight": "52px",
+    "clientHeight": 52,
+    "scrollHeight": 52
+  },
+  "dialogWidth": 960,
+  "tplDefault": {
+    "offsetHeight": 262,
+    "inlineHeight": null,
+    "computedMinHeight": "120px",
+    "clientHeight": 262,
+    "scrollHeight": 262
+  },
+  "tplDragMode": "native-drag",
+  "tplMin": {
+    "offsetHeight": 120,
+    "inlineHeight": "15px",
+    "computedMinHeight": "120px",
+    "clientHeight": 120,
+    "scrollHeight": 178
+  },
+  "chatHljsBlocks": 2,
+  "previewOpened": false
+}
+
+--- plaintext 语言缺失报错（应无）: 0 条 ---
+
+--- error 级别记录（console.error/pageerror/requestfailed）: 0 条 ---
+
+--- console 全量（共 0 条）---
+
+============================================================
+===== 补验记录（文件预览链路 + console 监听有效性）=====
+时间: 2026/9/23 12:05:33
+
+probe: {"probeCaptured":true,"treeVisible":true,"previewClicked":true,"previewFile":"web_serve_test.go","hljsInPreview":0}
+
+--- plaintext 报错: 0 条 ---
+
+--- 真实 error（排除 probe 注入）: 0 条 ---
+
+--- console 全量（含 probe 注入，共 2 条）---
+[console.warning] probe-marker-12345 @:0
+[console.error] probe-err-marker-67890 @:0

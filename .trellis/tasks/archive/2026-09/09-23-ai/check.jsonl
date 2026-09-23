@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "校验根元素样式与一级面板互斥布局约定一致，未引入硬编码色值"}
+{"file": ".trellis/tasks/09-23-ai/prd.md", "reason": "对照 R1 样式块与 R2 回归验证矩阵逐项核对"}

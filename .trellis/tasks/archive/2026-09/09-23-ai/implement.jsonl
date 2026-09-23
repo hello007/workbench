@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "一级面板互斥占满上半区的既有视觉约定与 nav 布局规范，根元素约束须与其保持一致"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端面板高度/fit 联动约束，验证终端展开高度不被挤压时参照"}
