@@ -1,0 +1,1 @@
+{"file": "docs/spec/test-stability.md", "reason": "无直接 spec 依赖；空目录为 SessionStart fallback 残留，参照任务归档惯例处理"}
