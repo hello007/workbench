@@ -1085,3 +1085,36 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 - 坑：markdown-it 覆盖 `renderer.rules.fence` 前须先保存默认规则引用；已答置灰走 `class="chat-question"` 字符串替换精准追加类（renderer 输出形态是隐性契约，勿改）。
 - 既有失败上报：TestApp_StartWebServe_StartupMatrix/设置开启默认启动（web_serve_test.go:397），干净 master 复现，与本任务无关。
 - 测试：service 包全绿；前端 1369 全绿（新增 8 renderer + 3 store 用例）。文档：功能说明.md / README.md / CLAUDE.md 关键规则 / docs/spec/ai-chat-service.md §3.1。
+
+
+## Session 87: AI 对话选择题交互卡片
+
+**Date**: 2026-09-23
+**Task**: AI 对话选择题交互卡片
+**Branch**: `master`
+
+### Summary
+
+落地 chat-question 选择题契约：后端禁用 AskUserQuestion + 首轮声明注入（落盘消息保原文），前端 fence 分流渲染交互卡片 + 事件委托提交 + 内存已答态，消息模型与绑定零变更；trellis-check 审核过（3 处视觉规范自修），service 与前端全量测试绿；文档四处同步
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5153f1b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
