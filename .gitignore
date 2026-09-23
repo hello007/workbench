@@ -44,6 +44,8 @@ notify_error.log
 # 结构化日志落盘目录（slog + lumberjack，见 docs/spec/logging-and-errors.md）
 data/logs/
 data/ai_task*
+# AI 对话运行时存储（ChatService 会话索引与消息落盘，见 docs/spec/ai-chat-service.md）
+data/ai_chat/
 # serve 模式访问令牌（运行期生成的机密文件，见 server/token.go）
 data/web_token
 
