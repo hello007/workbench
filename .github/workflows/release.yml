@@ -10,8 +10,7 @@ permissions:
 
 jobs:
   # Windows 发版 job：行为与原单 job 版本一致（产物 workbench.exe）。
-  # Linux 与 Windows 两 job 并行上传各自资产：action-gh-release 对已存在 Release 为
-  # 追加语义（后完成的一方复用先完成一方创建的 Release，仅补传 files），两端最终态一致。
+  # Linux job 经 needs 串行在本 job 之后（见 release-linux 注释的竞态与 Re-run 语义）。
   release-windows:
     runs-on: windows-latest
 
@@ -70,23 +69,44 @@ jobs:
           generate_release_notes: true
           files: build/bin/workbench.exe
 
-  # Linux 发版 job（runner 锁 ubuntu-22.04：glibc 基线低，产物向后兼容 Ubuntu 22.04+/Debian 12+；
-  # libwebkit2gtk-4.1-dev 在 22.04 仓库可用，已对 archive.ubuntu.com 档案池复核）
+  # Linux 发版 job。
+  # 串行化（needs release-windows）：新 tag 首次发版时两 job 若并行各自调 action-gh-release，
+  # 存在「同时检测 Release 不存在→并发 create」的竞态窗口（失败方资产缺失，自更新客户端
+  # 查不到 Linux 资产）；串行后 Windows 必先建好 Release，Linux 仅追加资产，竞态消除。
+  # Re-run 语义：Windows 成功、Linux 失败时，Actions「Re-run failed jobs」仅重跑 Linux
+  # （上游成功不重跑）；Release 已存在，Linux 重跑经 action-gh-release 追加语义补传资产，
+  # 「Release 已建缺资产可单独 Re-run」语义较并行时更确定。
+  # glibc 基线（R6 评估结论，采用 container 方案）：glibc 基线由 container 镜像 ubuntu:22.04
+  # 决定（2.35，产物兼容 Ubuntu 22.04+/Debian 12+），与 runner 镜像彻底解耦——runner 升级
+  # （ubuntu-latest 后续指向 24.04/26.04）不再影响产物兼容性，规避 runner 镜像 EOL 退役
+  # 定时炸弹（ubuntu-22.04 runner 预计 2027-04 前退役，20.04 有先例）。
+  # 容器内已验证要点：setup-go/setup-node/checkout/action-gh-release 均 node action，
+  # runner 自动挂载 node 运行时进容器可用；apt 步骤去 sudo（容器内 root 无 sudo）；
+  # 镜像默认无 git，checkout 前显式安装。
   release-linux:
-    runs-on: ubuntu-22.04
+    needs: release-windows
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
 
     steps:
-      # 1. 检出代码（本 job 不生成 Release Notes，无需完整历史）
+      # 1. 安装 git（ubuntu:22.04 镜像不含，checkout 依赖）
+      - name: 安装 git
+        run: |
+          apt-get update
+          apt-get install -y git
+
+      # 2. 检出代码（本 job 不生成 Release Notes，无需完整历史）
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 2. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.6）
+      # 3. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.6）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
 
-      # 3. 安装 Node.js 20（带 npm cache 加速）
+      # 4. 安装 Node.js 20（带 npm cache 加速）
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
@@ -94,23 +114,24 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # 4. 安装 Wails Linux 桌面编译依赖（对齐 ci.yml：gcc/pkg-config 支撑 cgo，
-      #    libgtk-3-dev / libwebkit2gtk-4.1-dev 提供对应 pkg-config 包）
+      # 5. 安装 Wails Linux 桌面编译依赖（对齐 ci.yml：gcc/pkg-config 支撑 cgo，
+      #    libgtk-3-dev / libwebkit2gtk-4.1-dev 提供对应 pkg-config 包；
+      #    容器内 root，无需 sudo）
       - name: 安装 Wails Linux 桌面编译依赖
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+          apt-get update
+          apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 
-      # 5. 安装前端依赖（对齐 Windows job：显式 npm ci 按 lockfile 确定性安装，
+      # 6. 安装前端依赖（对齐 Windows job：显式 npm ci 按 lockfile 确定性安装，
       #    避免 wails build 内部 npm install 的 lock 漂移）
       - name: 安装前端依赖
         run: cd frontend && npm ci
 
-      # 6. 安装 Wails CLI（锁定 v2 大版本）
+      # 7. 安装 Wails CLI（锁定 v2 大版本）
       - name: 安装 Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2
 
-      # 7. 构建 Wails 应用（注入版本号和构建时间，对齐 Windows job 的 ldflags；
+      # 8. 构建 Wails 应用（注入版本号和构建时间，对齐 Windows job 的 ldflags；
       #    webkit2_41 标签把 pkg-config 依赖从默认 webkit2gtk-4.0 切到 4.1，
       #    Ubuntu 22.04+/Debian 12+ 仓库仅提供 4.1，与 ci.yml 编译验证口径一致）
       - name: 构建应用
@@ -119,7 +140,7 @@ jobs:
           BT=$(date +%Y%m%d-%H%M%S)
           wails build -tags webkit2_41 -ldflags "-X main.version=$VER -X main.buildTime=$BT"
 
-      # 8. 验证构建产物（--version 打印后退出，无 GUI 依赖）
+      # 9. 验证构建产物（--version 打印后退出，无 GUI 依赖）
       - name: 验证构建产物
         run: |
           if [ -f build/bin/workbench ]; then
@@ -130,14 +151,14 @@ jobs:
             exit 1
           fi
 
-      # 9. 打包 tar.gz（扁平布局：二进制 + 依赖说明，解压即用；资产名与
+      # 10. 打包 tar.gz（扁平布局：二进制 + 依赖说明，解压即用；资产名与
       #    service/update.go 的 updateAssetLinux 严格一致，自更新按名匹配下载）
       - name: 打包 Linux 产物
         run: |
           cp build/README-linux.md build/bin/README-linux.md
           tar -czf workbench-linux-amd64.tar.gz -C build/bin workbench README-linux.md
 
-      # 10. 上传 Release 资产（Release 元数据由 release-windows job 负责，本 job 仅追加文件）
+      # 11. 上传 Release 资产（Release 元数据由 release-windows job 负责，本 job 仅追加文件）
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:

@@ -119,3 +119,38 @@ func TestExtractUpdateTarGz_CorruptArchive(t *testing.T) {
 		t.Fatal("非法 gzip 应返回错误")
 	}
 }
+
+// TestExtractUpdateTarGzWithLimit_Truncated 解压炸弹防御：成员解压体积超上限时
+// 返回明确错误并删除半成品文件（LimitReader 截断经写入量探测转显式错误，
+// 不依赖底层 Copy 报错）。上限经 WithLimit 注入超小值驱动，不必构造 512MB 载荷。
+func TestExtractUpdateTarGzWithLimit_Truncated(t *testing.T) {
+	dest := t.TempDir()
+	payload := buildTestTarGz(t, map[string][]byte{
+		updateBinaryLinux: []byte("this binary exceeds the tiny limit"),
+	})
+	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, payload)
+
+	const tinyLimit = 8
+	_, err := extractUpdateTarGzWithLimit(tarGz, dest, tinyLimit)
+	if err == nil {
+		t.Fatal("超限成员应返回错误")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("大小上限")) {
+		t.Errorf("错误应说明超出大小上限: %v", err)
+	}
+	// 半成品不得残留（防损坏内容被后续流程误用）
+	if _, err := os.Stat(filepath.Join(dest, updateBinaryLinux)); !os.IsNotExist(err) {
+		t.Error("超限截断后不应残留半成品二进制")
+	}
+
+	// 边界自检：内容恰好在限内时正常解出（LimitReader 多读 1 字节探测不误伤边界值）
+	okDest := t.TempDir()
+	exact := buildTestTarGz(t, map[string][]byte{updateBinaryLinux: []byte("12345678")})
+	got, err := extractUpdateTarGzWithLimit(writeTestFile(t, t.TempDir(), updateAssetLinux, exact), okDest, tinyLimit)
+	if err != nil {
+		t.Fatalf("恰好等于上限应解包成功: %v", err)
+	}
+	if got != filepath.Join(okDest, updateBinaryLinux) {
+		t.Errorf("返回路径不符: %q", got)
+	}
+}

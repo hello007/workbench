@@ -42,7 +42,8 @@ go build -tags "desktop,production,webkit2_41" ./...
 
 - `model.GetShellConfigs()`/`ResolveShellConfig()` 按 GOOS：Linux 返回 `{bash /bin/bash}{zsh /bin/zsh}{fish /usr/bin/fish}{sh /bin/sh}`，默认 bash；Windows 四项（powershell/cmd/gitbash/wsl）逐字节保留。
 - `buildCdCommand` POSIX 输出 `cd -- '<path>'\r`：`--` 防选项解析、单引号转义 `'\''`、`\r` 是 PTY 回车执行语义两平台都保留。`isUnixShellType` 白名单外非 Windows 兜底 POSIX。
-- 前端默认 shell 三层兜底链（`store/settings.js` `FALLBACK_SHELL` 单一常量，四消费方统一引用）：用户设置 `defaultShell` → 后端 `GetShellConfigs` 首项（Windows=powershell / Linux=bash）→ `'powershell'`。`TerminalPanel` 有 `settingsReady` 门控防闪现；新增 shell 消费方禁止再写 `'powershell'` 字面量。
+- 前端默认 shell 兜底链（`store/settings.js` 单一常量 `FALLBACK_SHELL` + 单一解析函数 `resolveDefaultShell`，消费方统一引用）：用户设置 `defaultShell`（须在平台列表内）→ 后端 `GetShellConfigs` 首项（Windows=powershell / Linux=bash）→ `'powershell'`。用户设置为跨平台残留值（如 Windows 时期的 `gitbash`/`wsl` 在 Linux 主机）时收敛到首项，列表不可用（RPC 失败）时保留用户设置——保证下拉显示值 / 条件渲染 / tab 副标签 / 实际 PTY shellType 四处一致。`TerminalPanel` 有 `settingsReady` 门控防闪现；新增 shell 消费方禁止再写 `'powershell'` 字面量。
+- 终端兜底目录平台判定（`TerminalPanel` `fallbackTerminalDir`）：列表首项 type 为 `powershell` → `'C:\'`，否则 `'/'`。禁用 `navigator.userAgent`——serve 模式 PTY 跑在服务端主机，UA 反映浏览器端设备，方向相反。
 
 ## 5. 剪贴板契约（Linux）
 
@@ -54,13 +55,13 @@ go build -tags "desktop,production,webkit2_41" ./...
 
 - 资产名（`service/update.go` `updateAssetName()`）：Windows `workbench.exe` / Linux `workbench-linux-amd64.tar.gz`。**与 release.yml 打包名严格一致**，改任一侧必须同步（常量注释互指 + `TestUpdateAssetName_MatchesPlatform` 锁定）。
 - Linux 下载流：tar.gz 落盘 → `extractUpdateTarGz`（`update_extract.go`）取顶层 `workbench` 二进制 → 走既有 .sh 替换流程。
-- 解包安全约束：仅提取 `Typeflag == TypeReg` 且 `filepath.Base(name) == "workbench"` 的成员（symlink/hardlink/目录全跳过）；输出路径硬编码 `destDir/workbench` 不消费 `hdr.Name`（路径穿越免疫）；落盘后显式 `Chmod 0755`（防 umask 去位）。
-- 更新脚本：Linux `buildUpdateSh`/`buildApplySh`（POSIX：kill -0 轮询、mv -f、nohup 脱离、`rm -f -- "$0"` 自删），`update_sh_syntax_test.go` 用 `sh -n` 静态校验拦截 bashism；`.sh` 必须 LF（CR 会坏 shebang，有测试断言）。
+- 解包安全约束：仅提取 `Typeflag == TypeReg` 且 `filepath.Base(name) == "workbench"` 的成员（symlink/hardlink/目录全跳过）；输出路径硬编码 `destDir/workbench` 不消费 `hdr.Name`（路径穿越免疫）；写入经 `LimitReader` 限成员解压体积上限 `maxUpdateBinarySize`（512MB 常量，不用 asset FileSize——压缩包大小约束不了解压产物体积），超限删半成品报错（解压炸弹防御）；落盘后显式 `Chmod 0755`（防 umask 去位）。
+- 更新脚本：Linux `buildUpdateSh`/`buildApplySh`（POSIX：kill -0 轮询、mv -f 失败 `|| exit 1` 中止防假更新（清理/重启仅在成功分支，路径经 `shellQuote` 单引号转义防注入）、nohup 脱离、`rm -f -- "$0"` 自删；apply.sh 失败分支额外清除 pending 并拉起旧版本——app.go 命中 pending 即 `os.Exit(0)`，不拉起应用将死循环打不开），`update_sh_syntax_test.go` 用 `sh -n` 静态校验拦截 bashism；`.sh` 必须 LF（CR 会坏 shebang，有测试断言）。
 
 ## 7. 构建与分发
 
 - CI（ci.yml）：ubuntu-latest 跑全部门禁；`frontend/dist` 被 gitignore 但 `main.go` 有 `go:embed all:frontend/dist` —— CI 需预置占位 `index.html` + `assets/app.js`（冒烟测试 `fs.Glob(distFS, "assets/*.js")` 需真实文件名），vite build 会 `emptyOutDir` 重建真实产物。
-- Release（release.yml）：`release-linux` job 锁 `ubuntu-22.04`（glibc 基线，产物兼容老发行版；22.04 有 `libwebkit2gtk-4.1-dev` ≥2.36，经 archive.ubuntu.com 档案池实证）。产物 `workbench-linux-amd64.tar.gz` 扁平布局（二进制 + `build/README-linux.md`）。**`build/` 在 gitignore 中，白名单 `!build/README-linux.md`——新增需分发文件须同步白名单，否则发版必挂**。
+- Release（release.yml）：`release-linux` job 经 `needs: release-windows` 串行（消除两 job 并发创建 Release 的首建竞态，Windows 成功 Linux 失败可单独 Re-run failed jobs 补传资产）；glibc 基线经 `container: ubuntu:22.04`（2.35，产物兼容老发行版）与 runner 镜像解耦（runner 用 ubuntu-latest，规避 22.04 runner 镜像 EOL 退役；容器内 root 无 sudo、镜像无 git 须 checkout 前显式安装）。产物 `workbench-linux-amd64.tar.gz` 扁平布局（二进制 + `build/README-linux.md`）。**`build/` 在 gitignore 中，白名单 `!build/README-linux.md`——新增需分发文件须同步白名单，否则发版必挂**。
 
 ## 8. 测试平台拆分模式
 

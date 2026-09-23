@@ -350,7 +350,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -799,9 +799,11 @@ async function loadSettings() {
   try {
     const settings = await GetSettings()
     gpuEnabled.value = !settings.gpuDisabled
-    // 用户未设置过默认 Shell 时取平台默认（列表首项：Windows=powershell、Linux=bash），
-    // 最终兜底复用 store 的 FALLBACK_SHELL 单一常量，防各处字面量漂移
-    defaultShell.value = settings.defaultShell || shellConfigs.value[0]?.type || FALLBACK_SHELL
+    // 默认 Shell 解析走与 store 同一 resolveDefaultShell 单一实现：用户设置在平台
+    // 列表内才采用，未设置或跨平台残留值（如 Windows 时期的 gitbash/wsl 在 Linux 主机）
+    // 收敛到列表首项，保证下拉显示值 / gitbash·wsl 条件渲染与实际 PTY shellType 一致；
+    // 列表不可用时保留用户设置，最终兜底复用 store 的 FALLBACK_SHELL 单一常量
+    defaultShell.value = resolveDefaultShell(settings.defaultShell, shellConfigs.value)
     gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
     wslDistro.value = settings.wslDistro || ''
     obsidianPath.value = settings.obsidianPath || ''

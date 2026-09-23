@@ -22,7 +22,8 @@ import {
   TERMINAL_SCROLLBACK_MIN,
   TERMINAL_SCROLLBACK_MAX,
   TERMINAL_FONT_OPTIONS,
-  FALLBACK_SHELL
+  FALLBACK_SHELL,
+  resolveDefaultShell
 } from '..'
 import { GetSettings, SaveSettings, GetShellConfigs } from '../../../wailsjs/go/main/App'
 
@@ -43,12 +44,15 @@ describe('settings store - loadDefaultShell', () => {
     GetShellConfigs.mockResolvedValue([])
   })
 
-  it('用户已设置 defaultShell 时优先取用户设置', async () => {
+  it('用户已设置 defaultShell 且在平台列表内时优先取用户设置', async () => {
     GetSettings.mockResolvedValue({ defaultShell: 'zsh' })
+    GetShellConfigs.mockResolvedValue([
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' }
+    ])
     const store = useSettingsStore()
     await store.loadDefaultShell()
     expect(store.defaultShell).toBe('zsh')
-    expect(GetShellConfigs).not.toHaveBeenCalled()
   })
 
   it('用户未设置时取 GetShellConfigs 首项（平台默认：Windows=powershell、Linux=bash）', async () => {
@@ -60,6 +64,28 @@ describe('settings store - loadDefaultShell', () => {
     const store = useSettingsStore()
     await store.loadDefaultShell()
     expect(store.defaultShell).toBe('bash')
+  })
+
+  it('存量跨平台残留设置收敛到平台默认（settings 存 gitbash + Linux 列表 → bash）', async () => {
+    // Windows 时期设置的 gitbash 在 Linux 主机：列表内无匹配项，收敛到首项 bash，
+    // 避免下拉裸值 / gitbash 条件渲染误触发 / PTY shellType 无效
+    GetSettings.mockResolvedValue({ defaultShell: 'gitbash' })
+    GetShellConfigs.mockResolvedValue([
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' },
+      { type: 'fish', displayName: 'Fish' }
+    ])
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe('bash')
+  })
+
+  it('列表不可用但用户设置存在时保留用户设置（Windows 感知零变化）', async () => {
+    GetSettings.mockResolvedValue({ defaultShell: 'cmd' })
+    GetShellConfigs.mockRejectedValue(new Error('fail'))
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.defaultShell).toBe('cmd')
   })
 
   it('后端均不可用时回退 FALLBACK_SHELL（powershell，Windows 感知不变）', async () => {
@@ -77,6 +103,37 @@ describe('settings store - loadDefaultShell', () => {
     const store = useSettingsStore()
     await store.loadDefaultShell()
     expect(store.defaultShell).toBe(FALLBACK_SHELL)
+  })
+})
+
+describe('resolveDefaultShell（默认 Shell 解析纯函数）', () => {
+  const linuxConfigs = [
+    { type: 'bash', displayName: 'Bash' },
+    { type: 'zsh', displayName: 'Zsh' }
+  ]
+  const winConfigs = [
+    { type: 'powershell', displayName: 'PowerShell' },
+    { type: 'cmd', displayName: 'CMD' }
+  ]
+
+  it('用户设置在列表内 → 原样采用', () => {
+    expect(resolveDefaultShell('zsh', linuxConfigs)).toBe('zsh')
+  })
+
+  it('跨平台残留值（gitbash + Linux 列表）→ 收敛首项', () => {
+    expect(resolveDefaultShell('gitbash', linuxConfigs)).toBe('bash')
+    expect(resolveDefaultShell('wsl', linuxConfigs)).toBe('bash')
+  })
+
+  it('未设置 → 平台首项（Windows=powershell / Linux=bash）', () => {
+    expect(resolveDefaultShell('', linuxConfigs)).toBe('bash')
+    expect(resolveDefaultShell('', winConfigs)).toBe('powershell')
+  })
+
+  it('列表不可用 → 保留用户设置，未设置回退 FALLBACK_SHELL', () => {
+    expect(resolveDefaultShell('cmd', null)).toBe('cmd')
+    expect(resolveDefaultShell('cmd', [])).toBe('cmd')
+    expect(resolveDefaultShell('', null)).toBe(FALLBACK_SHELL)
   })
 })
 

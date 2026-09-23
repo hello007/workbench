@@ -146,6 +146,24 @@ export const TERMINAL_FONT_OPTIONS = [
 export const FALLBACK_SHELL = 'powershell'
 
 /**
+ * 解析默认 Shell（跨平台残留设置收敛，单一实现供 store 与组件消费方共用）：
+ * - 列表可用且用户设置值在列表内 → 采用用户设置
+ * - 列表可用但用户设置未设置、或为跨平台残留值（如 settings.json 存着 Windows 时期的
+ *   gitbash/wsl 而当前为 Linux 主机）→ 收敛到平台默认（列表首项：Windows=powershell、
+ *   Linux=bash），保证 el-select 显示值 / 条件渲染 / tab 副标签 / 实际 PTY shellType
+ *   四处一致，不留裸值
+ * - 列表不可用（RPC 失败 / 空列表）：保留用户设置（Windows 感知零变化），未设置才回退
+ *   FALLBACK_SHELL
+ */
+export function resolveDefaultShell(userShell, configs) {
+  if (!Array.isArray(configs) || configs.length === 0) {
+    return userShell || FALLBACK_SHELL
+  }
+  if (userShell && configs.some(c => c.type === userShell)) return userShell
+  return configs[0].type
+}
+
+/**
  * 读取系统是否偏好暗色主题。
  * SSR / 无 matchMedia 环境（jsdom 未注入时）回退 false。
  */
@@ -278,30 +296,28 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /**
    * 加载默认 Shell 类型（App 启动时调用）：
-   * 1. settings.json defaultShell（用户显式设置）优先
-   * 2. 未设置时取 GetShellConfigs 首项（后端按平台返回：Windows=powershell、Linux=bash）
-   * 3. 后端均不可用（RPC 桥异常等）回退 FALLBACK_SHELL，保持 Windows 感知零变化
+   * 1. settings.json defaultShell（用户显式设置）优先——但须在平台 Shell 列表内，
+   *    跨平台残留值（如 Windows 时期设置的 gitbash/wsl 在 Linux 主机）收敛到平台默认
+   * 2. 未设置或残留值时取 GetShellConfigs 首项（后端按平台返回：Windows=powershell、Linux=bash）
+   * 3. 后端均不可用（RPC 桥异常等）保留用户设置、未设置则回退 FALLBACK_SHELL，Windows 感知零变化
+   * 解析逻辑单一实现在模块级 resolveDefaultShell（与组件消费方共用），此处仅负责取数。
    */
   async function loadDefaultShell() {
+    let configs = null
+    try {
+      const c = await GetShellConfigs()
+      if (Array.isArray(c) && c.length > 0) configs = c
+    } catch {
+      // 平台 Shell 列表不可用，configs 保持 null（按不可校验处理）
+    }
+    let userShell = ''
     try {
       const settings = await GetSettings()
-      if (settings && settings.defaultShell) {
-        defaultShell.value = settings.defaultShell
-        return
-      }
+      if (settings && settings.defaultShell) userShell = settings.defaultShell
     } catch {
-      // 用户设置读取失败，继续取平台默认
+      // 用户设置读取失败，按未设置处理
     }
-    try {
-      const configs = await GetShellConfigs()
-      if (Array.isArray(configs) && configs.length > 0) {
-        defaultShell.value = configs[0].type
-        return
-      }
-    } catch {
-      // 平台 Shell 列表不可用，回退最终兜底
-    }
-    defaultShell.value = FALLBACK_SHELL
+    defaultShell.value = resolveDefaultShell(userShell, configs)
   }
 
   // 实际生效主题：light/dark。system 模式按系统偏好解析，light/dark 直接取值

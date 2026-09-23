@@ -315,10 +315,24 @@ func buildApplyBat(newExe, currentExe, pendingFile, updateDir string) string {
 	return b.String()
 }
 
+// shellQuote POSIX shell 单引号包裹：路径内单引号按 POSIX 规则转义为 '\''
+// （结束引号、转义引号、重开引号），其余字符（含 " / $ / 反引号 / $() ）在单引号内
+// 均失去特殊含义，杜绝双引号直插时路径破坏脚本或以当前用户身份执行任意命令的注入面。
+// 与 terminal.go buildPosixCdCommand 同款惯用法；仅 Linux 分支 .sh 脚本使用，
+// Windows .bat（cmd 无单引号引用语义）不在其责。
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
 // buildUpdateSh 生成 Linux 更新 shell 脚本内容（buildUpdateBat 的 POSIX 等价实现）：
 // kill -0 轮询等待旧进程退出（最多 10 秒，超时 kill -9 强杀）、mv 替换二进制、
 // 清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。
-// 与 .bat 的差异：LF 换行（CR 会导致 shebang 解析失败）、路径双引号包裹防空格。
+// 与 .bat 的差异：LF 换行（CR 会导致 shebang 解析失败）、路径经 shellQuote 单引号包裹
+// 防空格与 shell 元字符注入。
+// 替换失败（如安装目录只读）即以非零退出中止、不做任何清理：清理分支会连带删除
+// updateDir 内的新二进制与脚本自身，若照常执行将出现「旧版本静默继续 + 更新包被删 +
+// 用户误以为已更新」的假更新；此处保留 pending 标记与 updateDir 作为下次启动
+// CheckPendingUpdate 重试素材，退出码非零仅依赖 stderr 日志诊断。
 // 脚本自身位于 updateDir 内，rm -rf 时已连带删除，末行自删兜底脚本被移出临时目录的场景
 // （与 .bat 的 rd /S /Q + del %~f0 行为一致）。
 func buildUpdateSh(pid int, newExe, currentExe, pendingFile, updateDir string) string {
@@ -336,31 +350,41 @@ func buildUpdateSh(pid int, newExe, currentExe, pendingFile, updateDir string) s
 	b.WriteString("    WAIT=$((WAIT + 1))\n")
 	b.WriteString("    sleep 1\n")
 	b.WriteString("done\n\n")
-	b.WriteString("# 替换二进制\n")
-	b.WriteString("mv -f \"" + newExe + "\" \"" + currentExe + "\"\n\n")
+	b.WriteString("# 替换二进制（失败即中止，不清理不重启，保留现场待下次启动重试）\n")
+	b.WriteString("mv -f " + shellQuote(newExe) + " " + shellQuote(currentExe) +
+		" || { echo '替换二进制失败（检查安装目录写入权限）' >&2; exit 1; }\n\n")
 	b.WriteString("# 清理更新标记和临时目录\n")
-	b.WriteString("rm -f \"" + pendingFile + "\"\n")
-	b.WriteString("rm -rf \"" + updateDir + "\"\n\n")
+	b.WriteString("rm -f " + shellQuote(pendingFile) + "\n")
+	b.WriteString("rm -rf " + shellQuote(updateDir) + "\n\n")
 	b.WriteString("# 启动新版本（nohup 后台运行，脱离本脚本会话）\n")
-	b.WriteString("nohup \"" + currentExe + "\" >/dev/null 2>&1 &\n\n")
+	b.WriteString("nohup " + shellQuote(currentExe) + " >/dev/null 2>&1 &\n\n")
 	b.WriteString("# 删除脚本自身\n")
 	b.WriteString("rm -f -- \"$0\"\n")
 	return b.String()
 }
 
 // buildApplySh 生成 Linux 启动时应用更新的 shell 脚本内容（buildApplyBat 的 POSIX 等价实现）：
-// mv 替换二进制、清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。LF 换行。
+// mv 替换二进制、清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。
+// LF 换行；路径经 shellQuote 单引号包裹防空格与 shell 元字符注入。
+// 替换失败分支语义（与 update.sh 的差别：本脚本由 CheckPendingUpdate 在启动早期启动，
+// app.go 已因命中 pending 标记 os.Exit(0)）：若失败后不拉起任何进程，用户再次点击图标
+// 将无限重复「启动→检测 pending→退出→失败」，应用永久无法打开。故失败分支清除 pending
+// 标记（不再自动重试）、保留 updateDir 内新二进制（可诊断，待下次下载覆盖）、拉起未被
+// 覆盖的旧版本保证应用可用，再以非零退出留诊断痕迹。
 func buildApplySh(newExe, currentExe, pendingFile, updateDir string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("echo 正在应用更新...\n\n")
-	b.WriteString("# 替换二进制\n")
-	b.WriteString("mv -f \"" + newExe + "\" \"" + currentExe + "\"\n\n")
-	b.WriteString("# 清理更新标记和临时目录\n")
-	b.WriteString("rm -f \"" + pendingFile + "\"\n")
-	b.WriteString("rm -rf \"" + updateDir + "\"\n\n")
-	b.WriteString("# 启动新版本（nohup 后台运行，脱离本脚本会话）\n")
-	b.WriteString("nohup \"" + currentExe + "\" >/dev/null 2>&1 &\n\n")
+	b.WriteString("if mv -f " + shellQuote(newExe) + " " + shellQuote(currentExe) + "; then\n")
+	b.WriteString("    rm -f " + shellQuote(pendingFile) + "\n")
+	b.WriteString("    rm -rf " + shellQuote(updateDir) + "\n")
+	b.WriteString("    nohup " + shellQuote(currentExe) + " >/dev/null 2>&1 &\n")
+	b.WriteString("else\n")
+	b.WriteString("    echo '替换二进制失败（检查安装目录写入权限），本次更新已跳过' >&2\n")
+	b.WriteString("    rm -f " + shellQuote(pendingFile) + "\n")
+	b.WriteString("    nohup " + shellQuote(currentExe) + " >/dev/null 2>&1 &\n")
+	b.WriteString("    exit 1\n")
+	b.WriteString("fi\n\n")
 	b.WriteString("# 删除脚本自身\n")
 	b.WriteString("rm -f -- \"$0\"\n")
 	return b.String()

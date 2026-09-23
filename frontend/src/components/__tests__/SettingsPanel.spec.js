@@ -255,6 +255,22 @@ describe('SettingsPanel.vue', () => {
     expect(wrapper.vm.$.setupState.defaultShell).toBe('powershell')
   })
 
+  it('存量跨平台残留设置收敛：settings 存 gitbash + Linux 列表 → 显示 bash，gitbash 条件渲染不误触发', async () => {
+    // Windows 时期设置的 gitbash 在 Linux 主机：下拉无匹配项本会显示裸值并误渲染
+    // Git Bash 路径配置项；resolveDefaultShell 收敛到首项 bash，四处消费一致
+    wrapper = await createWrapper({ defaultShell: 'gitbash' }, {}, 'a'.repeat(64), [
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' },
+      { type: 'fish', displayName: 'Fish' }
+    ])
+    await wrapper.findAll('.settings-nav-item')[1].trigger('click')
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
+    // gitbash 条件渲染分支（Git Bash 路径输入框）不得出现
+    expect(wrapper.text()).not.toContain('Git Bash 路径')
+    // wsl 条件渲染分支（WSL 发行版输入框）同样不得出现
+    expect(wrapper.text()).not.toContain('WSL 发行版')
+  })
+
   it('切换到搜索 tab', async () => {
     wrapper = await createWrapper({ searchExcludeDirs: ['node_modules', 'dist'], searchExcludeFiles: ['.log'] })
     const searchTab = wrapper.findAll('.settings-nav-item')[2]

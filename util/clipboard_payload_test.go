@@ -132,6 +132,50 @@ func TestPathToFileURI_FileURIToPath_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestPathToFileURI_WindowsDriveRoundTrip Windows 盘符路径 round-trip：盘符路径
+// 不以 / 开头，须前置斜杠产出规范 file:///C:/...（net/url 对空 Host 不补第三斜杠，
+// 缺前置将产出 file://C:/... 使盘符落入 Host 位无法解析）；解析侧对应剥前置斜杠还原。
+func TestPathToFileURI_WindowsDriveRoundTrip(t *testing.T) {
+	drivePath := filepath.FromSlash("C:/Vault/note.md")
+	uri := pathToFileURI(drivePath)
+	if uri != "file:///C:/Vault/note.md" {
+		t.Errorf("盘符路径应产出规范三斜杠 URI, 实际=%q", uri)
+	}
+	if got := fileURIToPath(uri); got != drivePath {
+		t.Errorf("盘符路径 round-trip 应无损还原: 期望=%q, 实际=%q", drivePath, got)
+	}
+
+	// 中文 / 空格盘符路径一并覆盖（百分号编码 + 解码还原）
+	unicodePath := filepath.FromSlash("C:/我的 库/笔记.md")
+	uniURI := pathToFileURI(unicodePath)
+	if !strings.HasPrefix(uniURI, "file:///C:/") {
+		t.Errorf("中文盘符路径应产出 file:///C:/ 前缀, 实际=%q", uniURI)
+	}
+	if strings.Contains(uniURI, " ") {
+		t.Errorf("URI 不应含原始空格: %q", uniURI)
+	}
+	if got := fileURIToPath(uniURI); got != unicodePath {
+		t.Errorf("中文盘符路径 round-trip 应无损还原: 期望=%q, 实际=%q", unicodePath, got)
+	}
+}
+
+// TestFileURIToPath_LegacyDriveHostURI 历史产出缺陷形态 file://C:/a/b（盘符被
+// net/url 解析进 Host 位）：解析侧兼容还原，旧版本留在用户剪贴板的数据不丢。
+func TestFileURIToPath_LegacyDriveHostURI(t *testing.T) {
+	want := filepath.FromSlash("C:/Vault/note.md")
+	if got := fileURIToPath("file://C:/Vault/note.md"); got != want {
+		t.Errorf("历史盘符 Host 形态应还原为本地路径, 期望=%q, 实际=%q", want, got)
+	}
+}
+
+// TestPathToFileURI_PosixPathUnaffected Linux 绝对路径不以 / 开头的分支不受影响，
+// 产出仍为规范三斜杠 URI（无盘符形态时不做任何前置处理）。
+func TestPathToFileURI_PosixPathUnaffected(t *testing.T) {
+	if got := pathToFileURI("/tmp/a.txt"); got != "file:///tmp/a.txt" {
+		t.Errorf("POSIX 绝对路径 URI 不应变化, 实际=%q", got)
+	}
+}
+
 // TestFileURIToPath_LocalhostHost file://localhost/ 形式等价 file:///。
 func TestFileURIToPath_LocalhostHost(t *testing.T) {
 	if got := fileURIToPath("file://localhost/tmp/a.txt"); got != filepath.FromSlash("/tmp/a.txt") {

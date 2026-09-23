@@ -118,7 +118,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Folder, RefreshRight, FullScreen, ScaleToOriginal, WarningFilled } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
-import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL } from '../store'
+import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
 const uiStore = useUiStore()
@@ -156,17 +156,15 @@ onMounted(async () => {
       { type: 'wsl', displayName: 'WSL' }
     ]
   }
-  // 读取用户设置的默认 Shell 类型（新建 tab 使用）；未设置时取平台默认
-  // （列表首项：Windows=powershell、Linux=bash），读取失败保持当前默认
+  // 读取用户设置的默认 Shell 类型（新建 tab 使用）；解析走与 store 同一
+  // resolveDefaultShell 单一实现：用户设置在平台列表内才采用，跨平台残留值
+  // （如 Windows 时期的 gitbash/wsl 在 Linux 主机）收敛到列表首项，保证
+  // tab 副标签与实际 PTY shellType 一致不留裸值；列表与设置读取失败保持当前默认
   try {
     const settings = await GetSettings()
-    if (settings.defaultShell) {
-      defaultShell.value = settings.defaultShell
-    } else if (shellConfigs.value.length > 0) {
-      defaultShell.value = shellConfigs.value[0].type
-    }
+    defaultShell.value = resolveDefaultShell(settings.defaultShell, shellConfigs.value)
   } catch {
-    // 读取失败则保持初始 FALLBACK_SHELL（powershell，Windows 现状；Linux 正常链路下不可达）
+    // 设置读取失败则保持初始 FALLBACK_SHELL（powershell，Windows 现状；Linux 正常链路下不可达）
   }
   settingsReady.value = true
 })
@@ -179,9 +177,17 @@ function shellDisplayName(type) {
 // 终端兜底目录（平台感知）：仅文件树当前目录为空（未选目录 / 空目录快照恢复）时触发。
 // Windows 维持 'C:\\'（盘符根，历史行为不变）；非 Windows 兜底 '/'（POSIX 根目录，
 // 目录恒有效且可预测——空串会让 PTY 继承 workbench 进程 cwd，serve 模式下不可预测）。
-// 平台检测经 userAgent：Windows WebView2 含 "Windows NT"，Linux WebKitGTK 含 "Linux"。
+// 平台判定用后端信号（GetShellConfigs 按服务端 GOOS 返回，首项 Windows=powershell、
+// Linux=bash）：PTY 跑在应用进程所在主机，serve 模式下与浏览器端设备可能不同机，
+// navigator.userAgent 反映的是浏览器端平台，方向相反不可用（已移除）。
+// 判定时机：首个 tab 与快照恢复路径经 settingsReady 门控（watch 同时监听 terminalVisible
+// 与 settingsReady），此时本组件 onMounted 已拉取 shellConfigs，RPC 失败时兜底列表为
+// Windows 四项（首项 powershell → 'C:\\'，与历史 Windows 行为一致）；+ 新建 tab 按钮无
+// 门控，RPC 未就绪的毫秒级窗口内点按时列表为空 → 兜底 '/'，后果轻（PTY cd 失败落 cwd），
+// 不为该窗口引入额外门控（保持行为简单）。
 function fallbackTerminalDir() {
-  return /Windows/.test(navigator.userAgent) ? 'C:\\' : '/'
+  const first = shellConfigs.value[0]
+  return first && first.type === 'powershell' ? 'C:\\' : '/'
 }
 
 // 目录尾段名（tab 副标签）：'D:\\work\\demo' → 'demo'，兼容正反斜杠；

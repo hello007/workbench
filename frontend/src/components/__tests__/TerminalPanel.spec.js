@@ -98,16 +98,6 @@ async function addTab(wrapper) {
   await flushPromises()
 }
 
-/** 临时改写 navigator.userAgent（jsdom 默认 UA 无平台语义，用例内模拟目标平台） */
-function overrideUserAgent(ua, fn) {
-  Object.defineProperty(window.navigator, 'userAgent', { value: ua, configurable: true })
-  try {
-    fn()
-  } finally {
-    delete window.navigator.userAgent
-  }
-}
-
 describe('TerminalPanel.vue', () => {
   let wrapper
 
@@ -137,8 +127,23 @@ describe('TerminalPanel.vue', () => {
   })
 
   it('GetSettings 返回 defaultShell 时作为新建 tab 的 Shell 类型', async () => {
-    wrapper = await createWrapper(null, { defaultShell: 'gitbash' })
-    expect(wrapper.vm.$.setupState.defaultShell).toBe('gitbash')
+    // defaultShell 须在平台列表内才被采用（resolveDefaultShell 合法性校验）
+    wrapper = await createWrapper(null, { defaultShell: 'cmd' })
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('cmd')
+  })
+
+  it('存量跨平台残留设置收敛到平台默认（settings 存 gitbash + Linux 列表 → bash，tab 副标签不裸显）', async () => {
+    // Windows 时期设置的 gitbash 在 Linux 主机：列表内无匹配项，收敛到首项 bash，
+    // tab 副标签经 displayName 映射为 Bash（不回退裸「gitbash」字样）
+    wrapper = await createWrapper(
+      [
+        { type: 'bash', displayName: 'Bash' },
+        { type: 'zsh', displayName: 'Zsh' }
+      ],
+      { defaultShell: 'gitbash' }
+    )
+    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
+    expect(wrapper.vm.$.setupState.shellDisplayName('bash')).toBe('Bash')
   })
 
   it('未设置 defaultShell 时取 GetShellConfigs 首项作平台默认（Linux=bash）', async () => {
@@ -352,18 +357,24 @@ describe('TerminalPanel.vue', () => {
     expect(dirBasename('')).toBe('')
   })
 
-  it('终端兜底目录平台化：UA 含 Windows 兜底 C:\\，非 Windows 兜底 /', async () => {
+  it('终端兜底目录平台判定用后端信号：Shell 列表首项 powershell → C:\\，否则 /（serve 语义）', async () => {
+    // 平台信号来自 GetShellConfigs（按 PTY 所在主机 GOOS 返回），与浏览器端
+    // navigator.userAgent 无关：serve 模式 PTY 跑在服务端主机、UA 是浏览器端设备，
+    // UA 判定方向相反（已移除）。
+    // 默认 mock 列表首项 powershell（Windows 主机）→ C:\
     wrapper = await createWrapper()
-    const fallbackTerminalDir = wrapper.vm.$.setupState.fallbackTerminalDir
-    // 默认 jsdom UA（win32/linux）不含 "Windows" → 非 Windows 分支
-    expect(fallbackTerminalDir()).toBe('/')
-    // 模拟 Windows WebView2 UA
-    overrideUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', () => {
-      expect(fallbackTerminalDir()).toBe('C:\\')
-    })
+    expect(wrapper.vm.$.setupState.fallbackTerminalDir()).toBe('C:\\')
+
+    // Linux 列表（首项 bash）→ POSIX 根目录
+    wrapper = await createWrapper([{ type: 'bash', displayName: 'Bash' }])
+    expect(wrapper.vm.$.setupState.fallbackTerminalDir()).toBe('/')
+
+    // GetShellConfigs 失败兜底列表首项 powershell → C:\（与历史 Windows 行为一致）
+    wrapper = await createWrapper('fail')
+    expect(wrapper.vm.$.setupState.fallbackTerminalDir()).toBe('C:\\')
   })
 
-  it('文件树目录为空时新建首个 tab 走平台兜底目录（jsdom UA → /）', async () => {
+  it('文件树目录为空时新建首个 tab 走平台兜底目录（Windows 列表 → C:\\）', async () => {
     wrapper = await createWrapper()
     const uiStore = useUiStore()
     uiStore.terminalDir = ''
@@ -373,12 +384,27 @@ describe('TerminalPanel.vue', () => {
 
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
-      '/',
+      'C:\\',
       'powershell'
     )
   })
 
-  it('空目录快照恢复时 tab 目录走平台兜底（jsdom UA → /）', async () => {
+  it('文件树目录为空时新建首个 tab 走平台兜底目录（Linux 列表 → /）', async () => {
+    wrapper = await createWrapper([{ type: 'bash', displayName: 'Bash' }], {})
+    const uiStore = useUiStore()
+    uiStore.terminalDir = ''
+    uiStore.terminalVisible = true
+    await nextTick()
+    await flushPromises()
+
+    expect(terminalMock.initTerminal).toHaveBeenCalledWith(
+      expect.any(Object),
+      '/',
+      'bash'
+    )
+  })
+
+  it('空目录快照恢复时 tab 目录走平台兜底（Windows 列表 → C:\\）', async () => {
     wrapper = await createWrapper()
     const uiStore = useUiStore()
     uiStore.terminalTabsSnapshot = [{ workDir: '', shellType: 'powershell' }]
@@ -389,7 +415,7 @@ describe('TerminalPanel.vue', () => {
     expect(wrapper.vm.$.setupState.tabs).toHaveLength(1)
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
-      '/',
+      'C:\\',
       'powershell'
     )
   })

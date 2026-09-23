@@ -127,7 +127,8 @@ func TestBuildApplyBat_ContainsKeyParts(t *testing.T) {
 }
 
 // TestBuildUpdateSh_ContainsKeyParts 生成的 shell 脚本含 kill -0 等待轮询、超时强杀、
-// 二进制替换、清理、nohup 启动、脚本自删各关键片段，且为 LF 换行（CR 会导致 shebang 解析失败）。
+// 二进制替换（单引号包裹 + 失败中止）、清理、nohup 启动、脚本自删各关键片段，
+// 且为 LF 换行（CR 会导致 shebang 解析失败）。
 func TestBuildUpdateSh_ContainsKeyParts(t *testing.T) {
 	sh := buildUpdateSh(1234, "/tmp/upd/workbench", "/opt/workbench/workbench", "/tmp/upd/pending.json", "/tmp/upd")
 	wants := []string{
@@ -136,10 +137,11 @@ func TestBuildUpdateSh_ContainsKeyParts(t *testing.T) {
 		`while kill -0 "$PID" 2>/dev/null; do`,
 		`kill -9 "$PID" 2>/dev/null`,
 		"sleep 1",
-		`mv -f "/tmp/upd/workbench" "/opt/workbench/workbench"`,
-		`rm -f "/tmp/upd/pending.json"`,
-		`rm -rf "/tmp/upd"`,
-		`nohup "/opt/workbench/workbench" >/dev/null 2>&1 &`,
+		// 路径单引号包裹（shell 注入防护）+ mv 失败非零退出（防假更新：失败不得清理/重启）
+		`mv -f '/tmp/upd/workbench' '/opt/workbench/workbench' || { echo '替换二进制失败（检查安装目录写入权限）' >&2; exit 1; }`,
+		`rm -f '/tmp/upd/pending.json'`,
+		`rm -rf '/tmp/upd'`,
+		`nohup '/opt/workbench/workbench' >/dev/null 2>&1 &`,
 		`rm -f -- "$0"`,
 	}
 	for _, w := range wants {
@@ -152,15 +154,21 @@ func TestBuildUpdateSh_ContainsKeyParts(t *testing.T) {
 	}
 }
 
-// TestBuildApplySh_ContainsKeyParts 生成的应用脚本含替换、清理、启动、自删片段，且为 LF 换行。
+// TestBuildApplySh_ContainsKeyParts 生成的应用脚本含替换（单引号包裹）、成功分支清理与
+// 启动、失败分支跳过更新并拉起旧版本、自删片段，且为 LF 换行。
 func TestBuildApplySh_ContainsKeyParts(t *testing.T) {
 	sh := buildApplySh("/tmp/upd/workbench", "/opt/workbench/workbench", "/tmp/upd/pending.json", "/tmp/upd")
 	wants := []string{
 		"#!/bin/sh",
-		`mv -f "/tmp/upd/workbench" "/opt/workbench/workbench"`,
-		`rm -f "/tmp/upd/pending.json"`,
-		`rm -rf "/tmp/upd"`,
-		`nohup "/opt/workbench/workbench" >/dev/null 2>&1 &`,
+		// 成功分支：替换 → 清理 → 启动新版本
+		`if mv -f '/tmp/upd/workbench' '/opt/workbench/workbench'; then`,
+		`rm -f '/tmp/upd/pending.json'`,
+		`rm -rf '/tmp/upd'`,
+		`nohup '/opt/workbench/workbench' >/dev/null 2>&1 &`,
+		// 失败分支：清除 pending 防反复重试、拉起旧版本保证应用可用（app 已 os.Exit(0)）、非零退出
+		"else",
+		`echo '替换二进制失败（检查安装目录写入权限），本次更新已跳过' >&2`,
+		`exit 1`,
 		`rm -f -- "$0"`,
 	}
 	for _, w := range wants {
@@ -170,6 +178,36 @@ func TestBuildApplySh_ContainsKeyParts(t *testing.T) {
 	}
 	if strings.Contains(sh, "\r") {
 		t.Error("shell 脚本应为 LF 换行，不应包含 CR")
+	}
+}
+
+// TestShellQuote 单引号包裹与转义：单引号转义为 '\''，其余 shell 元字符
+// （双引号 / $() / 分号）在单引号内失去特殊含义。
+func TestShellQuote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/opt/a b/c", `'/opt/a b/c'`},
+		{`/opt/it's`, `'/opt/it'\''s'`},
+		{`a"b$(reboot)c;d`, `'a"b$(reboot)c;d'`},
+	}
+	for _, c := range cases {
+		if got := shellQuote(c.in); got != c.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestBuildShScripts_QuoteInjection 路径含 shell 元字符（双引号 / 命令替换 / 分号 /
+// 单引号）时必须整体落在单引号内且单引号经 '\'' 转义；不得以双引号直插路径
+// （双引号内 $() 会被执行）。产出合法性由 linux 侧 sh -n 静态校验双重兜底。
+func TestBuildShScripts_QuoteInjection(t *testing.T) {
+	evil := `/opt/ev"il/$(reboot)/x;rm -rf /;y'a z`
+	sh := buildUpdateSh(1, evil, "/opt/workbench/workbench", "/tmp/p", "/tmp/upd")
+	apply := buildApplySh(evil, "/opt/workbench/workbench", "/tmp/p", "/tmp/upd")
+	for name, content := range map[string]string{"update.sh": sh, "apply-update.sh": apply} {
+		// evil 中的单引号必须以 '\'' 转义形态出现（POSIX 单引号内嵌单引号惯用法）
+		if !strings.Contains(content, `y'\''a z`) {
+			t.Errorf("%s 未对路径内单引号做 '\\'' 转义\n输出:\n%s", name, content)
+		}
 	}
 }
 
