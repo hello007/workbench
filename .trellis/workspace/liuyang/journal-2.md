@@ -976,3 +976,36 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+
+## Session 84: 补提交 pdfjs-viewer build 运行时资产
+
+**Date**: 2026-09-23
+**Task**: 补提交 pdfjs-viewer build 运行时资产
+**Branch**: `master`
+
+### Summary
+
+审核遗留项处置：pdfjs-viewer/build 判定为运行时必需资产（viewer.html 引用 ../build/pdf.mjs，非 npm 依赖纯静态拷贝），漏提交会导致 clone 后 PDF 预览 404。补提交 3 个 .mjs 本体，.map 维持 gitignore。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `316a534` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
