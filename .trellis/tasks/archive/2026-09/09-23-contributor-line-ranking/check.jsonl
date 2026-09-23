@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 model.Contributor 字段变更后 frontend/wailsjs 绑定三处是否同步、npm run build 是否通过"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service 层覆盖率 ≥76% 基线不回退"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增测试无固定端口/隐式外部状态依赖"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查维度切换器视觉规范一致性"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 wails-mock-defaults.js 单一数据源是否同步 Contributor 新字段"}

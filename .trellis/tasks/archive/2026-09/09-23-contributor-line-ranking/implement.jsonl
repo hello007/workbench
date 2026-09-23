@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "model.Contributor 加 Insertions/Deletions 字段须手动同步 frontend/wailsjs 绑定三处（App.js/App.d.ts/models.ts），本地 wails generate module；否则 npm run build 报 MISSING_EXPORT"}
+{"file": "docs/spec/test-stability.md", "reason": "后端 numstat 解析/缓存单测禁隐式依赖环境外部状态（临时仓库用 util/testutil 辅助，禁固定端口与 mtime 时序依赖）"}
+{"file": "docs/spec/perf-baseline.md", "reason": "跨包共用测试辅助入 util/testutil（InitTempRepo 等），包内专用辅助留 *_test_helper.go；禁各 _test.go 重复定义 git 命令执行/临时仓库构造"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层覆盖率门禁 ≥76% 基线，新增 commit_line_stats.go 须带足够单测不回退"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "贡献者卡片维度切换器视觉须与现有档位切换器一致；配色语义、间距圆角四档、面板 flex 约束链等规范"}
+{"file": "docs/spec/e2e-testing.md", "reason": "RepoStats mock 数据单一数据源在 src/test/wails-mock-defaults.js，Contributor 新增字段后 mock 默认值须同步（vitest/E2E 共用）"}
