@@ -943,3 +943,36 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+
+## Session 83: Linux 改造三路审核与 R1-R10 缺陷修复
+
+**Date**: 2026-09-23
+**Task**: Linux 改造三路审核与 R1-R10 缺陷修复
+**Branch**: `master`
+
+### Summary
+
+三路并行 cavecrew-reviewer 审核 Linux 改造（后端 0🔴4🟡 / CI 0🔴2🟡 / 前端文档 0🔴4🟡），建任务全修 10 个应修项：更新脚本 shellQuote 注入防护与 mv 失败中止（apply 失败拉旧版防死循环）、解压 512MB 上限防炸弹、file URI 盘符 round-trip、release 串行化消除首建竞态、glibc 基线改 container:ubuntu:22.04 与 runner EOL 解耦、前端弃 UA 检测改后端 shellConfigs 信号判平台（修 serve 模式方向性错判）、resolveDefaultShell 纯函数收敛跨平台残留设置、两处文档纠错。spec §4/§6/§7 同步。Windows+WSL+前端 1345 用例全绿。遗留：pdfjs-viewer/build 非任务产物留置；R6 容器方案待推送后 CI 首跑终验；🟢 建议 12 项择机。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eef2951` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
