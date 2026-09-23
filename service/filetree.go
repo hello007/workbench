@@ -14,8 +14,8 @@ import (
 // FileTreeService 文件树服务
 type FileTreeService struct {
 	gitCmd         *util.GitCommand
-	gitRepoCache   sync.Map // path -> bool 缓存（是否 git 仓库）
-	gitRemoteCache sync.Map // path -> bool 缓存（git 仓库是否配置远程）
+	gitRepoCache   sync.Map       // path -> bool 缓存（是否 git 仓库）
+	gitRemoteCache sync.Map       // path -> bool 缓存（git 仓库是否配置远程）
 	treeCache      *FileTreeCache // 单层目录节点缓存（纯内存，mtime + TTL + 手动刷新）
 }
 

@@ -374,11 +374,11 @@ func TestImportAiFunctions_EmptyJSON(t *testing.T) {
 func TestValidateFunctions(t *testing.T) {
 	funcs := []*model.AiFunction{
 		nil,
-		{ID: "", Name: "x", Command: "/c", Cwd: "/d"},   // ID 空
-		{ID: "f1", Name: "", Command: "/c", Cwd: "/d"},  // Name 空
-		{ID: "f2", Name: "n", Command: "/c", Cwd: "/d"}, // 有效（斜杠命令模式）
+		{ID: "", Name: "x", Command: "/c", Cwd: "/d"},                                                                     // ID 空
+		{ID: "f1", Name: "", Command: "/c", Cwd: "/d"},                                                                    // Name 空
+		{ID: "f2", Name: "n", Command: "/c", Cwd: "/d"},                                                                   // 有效（斜杠命令模式）
 		{ID: "f3", Name: "n", Command: "", Cwd: "", Params: &model.AiParamSpec{Type: "form", PromptTemplate: "{{diff}}"}}, // 有效（纯 prompt 模式：Command 空但 PromptTemplate 非空，Cwd 空继承父进程）
-		{ID: "f4", Name: "n", Command: "", Cwd: "/d"},   // 非法：Command 空 + 无 PromptTemplate
+		{ID: "f4", Name: "n", Command: "", Cwd: "/d"},                                                                     // 非法：Command 空 + 无 PromptTemplate
 	}
 	valid, invalidIDs := validateFunctions(funcs)
 	if len(valid) != 2 {

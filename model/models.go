@@ -44,17 +44,17 @@ func (d *Directory) Validate() error {
 
 // FileTreeNode 文件树节点
 type FileTreeNode struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Path        string           `json:"path"`
-	Type        string           `json:"type"`
-	IsGitRepo   bool             `json:"isGitRepo"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Type      string `json:"type"`
+	IsGitRepo bool   `json:"isGitRepo"`
 	// HasRemote 表示该 git 仓库节点是否配置了远程仓库（仅 IsGitRepo=true 时有意义），
 	// 用于前端灰色图标区分无远程仓库。
-	HasRemote   bool             `json:"hasRemote"`
-	HasChildren bool             `json:"hasChildren"`
-	Children    []*FileTreeNode  `json:"children,omitempty"`
-	IsLeaf      bool             `json:"isLeaf"`
+	HasRemote   bool            `json:"hasRemote"`
+	HasChildren bool            `json:"hasChildren"`
+	Children    []*FileTreeNode `json:"children,omitempty"`
+	IsLeaf      bool            `json:"isLeaf"`
 }
 
 // NewFileTreeNode 创建文件树节点

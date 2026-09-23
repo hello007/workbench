@@ -210,9 +210,9 @@ func TestAggregateRepoStats_SampledDefaultFalse(t *testing.T) {
 
 func TestAggregateRepoStats_DateRangeAndGranularity(t *testing.T) {
 	cases := []struct {
-		rangeKey    string
-		wantLabel   string
-		wantGran    string
+		rangeKey  string
+		wantLabel string
+		wantGran  string
 	}{
 		{string(StatsRange7Days), "最近 7 天", string(GranularityDay)},
 		{string(StatsRange30Days), "最近 30 天", string(GranularityDay)},

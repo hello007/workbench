@@ -13,12 +13,12 @@ import (
 // 日志轮转参数：按大小轮转，保留 N 份，开启压缩。
 // 桌面单用户日志量小，5MB/5 份上限约 25MB，足够覆盖崩溃排查窗口。
 const (
-	logMaxSizeMB    = 5
-	logMaxBackups   = 5
-	logMaxAgeDays   = 30
-	logCompress     = true
-	logFileName     = "app.log"
-	logFilePerm os.FileMode = 0644
+	logMaxSizeMB              = 5
+	logMaxBackups             = 5
+	logMaxAgeDays             = 30
+	logCompress               = true
+	logFileName               = "app.log"
+	logFilePerm   os.FileMode = 0644
 )
 
 // InitLogger 初始化全局 slog 日志器，落盘到 logDir/app.log，按大小轮转。

@@ -331,8 +331,14 @@ func buildApplyBat(newExe, currentExe, pendingFile, updateDir string) string {
 	return b.String()
 }
 
-// shellQuote POSIX shell 单引号包裹：路径内单引号按 POSIX 规则转义为 '\''
-// （结束引号、转义引号、重开引号），其余字符（含 " / $ / 反引号 / $() ）在单引号内
+// shellQuote POSIX shell 单引号包裹：路径内单引号按 POSIX 规则转义（结束引号、
+// 转义引号、重开引号）：
+//
+//	'\''
+//
+// （示例须置于缩进码块：gofmt ≥1.19 doc comment 规范化会把行文中的连续两个单引号
+// 改写为 Unicode 右弯引号，破坏字面表达，详见 terminal.go buildPosixCdCommand 注释。）
+// 其余字符（含 " / $ / 反引号 / $() ）在单引号内
 // 均失去特殊含义，杜绝双引号直插时路径破坏脚本或以当前用户身份执行任意命令的注入面。
 // 与 terminal.go buildPosixCdCommand 同款惯用法；仅 Linux 分支 .sh 脚本使用，
 // Windows .bat（cmd 无单引号引用语义）不在其责。

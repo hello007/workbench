@@ -1,0 +1,1 @@
+{"file": "docs/开发规范.md", "reason": "gofmt 自动格式化规范；本任务发现的 gofmt ≥1.19 doc comment 弯引号陷阱（'' 被改写为 ”，缩进码块可保留字面）已沉淀至该文档 Go 代码规范节"}

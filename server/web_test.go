@@ -349,7 +349,7 @@ func TestWebHandler_QueryTokenSetsCookie(t *testing.T) {
 }
 
 // TestWebHandler_HeaderTokenSetsCookie header 通道认证成功同样种会话 cookie
-//（curl / 脚本验证后的浏览器共用场景与子集代理链路兜底）。
+// （curl / 脚本验证后的浏览器共用场景与子集代理链路兜底）。
 func TestWebHandler_HeaderTokenSetsCookie(t *testing.T) {
 	rec := get(t, newTestHandler(), "/", map[string]string{"Authorization": "Bearer " + testToken})
 	if rec.Code != http.StatusOK {

@@ -185,8 +185,8 @@ func TestBuildApplySh_ContainsKeyParts(t *testing.T) {
 	}
 }
 
-// TestShellQuote 单引号包裹与转义：单引号转义为 '\''，其余 shell 元字符
-// （双引号 / $() / 分号）在单引号内失去特殊含义。
+// TestShellQuote 单引号包裹与转义：路径内单引号按 POSIX 规则转义（转义序列字面见
+// shellQuote 注释码块），其余 shell 元字符（双引号 / $() / 分号）在单引号内失去特殊含义。
 func TestShellQuote(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/opt/a b/c", `'/opt/a b/c'`},
@@ -201,7 +201,7 @@ func TestShellQuote(t *testing.T) {
 }
 
 // TestBuildShScripts_QuoteInjection 路径含 shell 元字符（双引号 / 命令替换 / 分号 /
-// 单引号）时必须整体落在单引号内且单引号经 '\'' 转义；不得以双引号直插路径
+// 单引号）时必须整体落在单引号内且单引号按 POSIX 转义序列处理；不得以双引号直插路径
 // （双引号内 $() 会被执行）。产出合法性由 linux 侧 sh -n 静态校验双重兜底。
 func TestBuildShScripts_QuoteInjection(t *testing.T) {
 	evil := `/opt/ev"il/$(reboot)/x;rm -rf /;y'a z`

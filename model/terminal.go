@@ -9,10 +9,10 @@ import (
 
 // TerminalSession 终端会话
 type TerminalSession struct {
-	ID        string      `json:"id"`
-	Dir       string      `json:"dir"`
-	ShellType string      `json:"shellType"`
-	Running   bool        `json:"running"`
+	ID        string `json:"id"`
+	Dir       string `json:"dir"`
+	ShellType string `json:"shellType"`
+	Running   bool   `json:"running"`
 	mu        sync.Mutex
 	ptyFile   *os.File
 	cmd       *exec.Cmd

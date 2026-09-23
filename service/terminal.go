@@ -215,7 +215,12 @@ func toWslPath(path string) string {
 
 // buildPosixCdCommand 构建 POSIX shell 的 cd 命令：cd -- '<path>'（fish 为 cd '<path>'）。
 // `--` 防止以 - 开头的路径被解析为选项；单引号包裹路径，路径内单引号按 POSIX
-// 规则转义为 '\''（结束引号、转义引号、重开引号）。
+// 规则转义（结束引号、转义引号、重开引号）：
+//
+//	'\''
+//
+// 示例须置于缩进码块——gofmt ≥1.19 的 doc comment 规范化会把行文中的连续两个
+// 单引号改写为 Unicode 右弯引号，破坏转义序列的字面表达。
 // G2 fish 兼容结论（防御分支）：fish 的 cd 为函数（share/functions/cd.fish）包装
 // builtin cd；依 fish 3.0（2018-12 发布）changelog，3.0 起所有 builtin 统一支持 `--`
 // 终止选项解析，更早版本（2.x）对 `--` 的处理不一致（会把 `--` 当目录名报错）。

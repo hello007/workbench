@@ -1,0 +1,1 @@
+{"file": "docs/开发规范.md", "reason": "检查 gofmt -l 全仓无输出且 diff 为纯格式变更（对齐/缩进/doc comment 规范化），无语义改动；修复 5 处 doc comment 弯引号损坏并沉淀规范"}

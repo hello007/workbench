@@ -145,7 +145,8 @@ func TestBuildCdCommand_PosixBash(t *testing.T) {
 	}
 }
 
-// TestBuildCdCommand_PosixQuoteEscape 路径内单引号按 POSIX 规则转义为 '\''。
+// TestBuildCdCommand_PosixQuoteEscape 路径内单引号按 POSIX 规则转义（转义序列字面见
+// buildPosixCdCommand 注释码块）。
 func TestBuildCdCommand_PosixQuoteEscape(t *testing.T) {
 	svc := NewTerminalService(nil)
 	cmd := mustBuildCdCommand(t, svc, `/tmp/it's`, "zsh")

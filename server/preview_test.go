@@ -101,10 +101,10 @@ func TestPreviewRaw_WhitelistRejected(t *testing.T) {
 func TestPreviewRaw_PathTraversalRejected(t *testing.T) {
 	handler := PreviewHandler()
 	badPaths := []string{
-		previewRawPrefix,                     // 空路径
-		previewRawPrefix + "style.css",       // 相对路径（无盘符）
-		previewRawPrefix + "../style.css",    // 穿越
-		previewRawPrefix + "..%2Fstyle.css",  // 编码穿越（Go 解码到 URL.Path）
+		previewRawPrefix,                    // 空路径
+		previewRawPrefix + "style.css",      // 相对路径（无盘符）
+		previewRawPrefix + "../style.css",   // 穿越
+		previewRawPrefix + "..%2Fstyle.css", // 编码穿越（Go 解码到 URL.Path）
 		previewRawPrefix + "D%3A/style.css", // 解码后 D:/style.css（通常不存在，404 或 400 均非 200）
 	}
 	for _, p := range badPaths {
