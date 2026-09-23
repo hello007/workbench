@@ -1,0 +1,2 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "model 包覆盖率门禁 ≥80%，补 EnsureWebServeDefaults/EnsureTerminalDefaults 单测回绿（76.5%→97.1%）"}
+{"file": "docs/spec/test-stability.md", "reason": "新增表驱动单测为纯内存行为断言，无固定端口/mtime 时序等环境外部状态依赖"}

@@ -1,0 +1,2 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 model ≥80% 门禁回绿且 scripts/coverage-check.sh 全 PASS，无凑覆盖率的无断言测试"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增测试无隐式环境依赖、断言具体行为"}
