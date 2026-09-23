@@ -74,18 +74,21 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 |---|---|---|
 | GHSA-82fw-gwwq-j7x9 @vitest/mocker Path Traversal | vitest 4.1.5 → 4.1.11 | npm update（minor） |
 
-### 5.2 已知接受风险（无补丁）
+### 5.2 历史接受风险（已处置清零）
 
 | 漏洞 ID | 包 | 严重级 | 处置 |
 |---|---|---|---|
-| GHSA-4r6h-8v6p-xvw6 Prototype Pollution | xlsx@0.18.5 | high | 接受风险 |
-| GHSA-5pgg-2g8v-p4x9 ReDoS | xlsx@0.18.5 | high | 接受风险 |
+| GHSA-4r6h-8v6p-xvw6 Prototype Pollution | xlsx 0.18.5 → 0.20.3 | high | ✅ 已修复（2026-09-23） |
+| GHSA-5pgg-2g8v-p4x9 ReDoS | xlsx 0.18.5 → 0.20.3 | high | ✅ 已修复（2026-09-23） |
 
-**xlsx 无补丁版本**：SheetJS 官方已将发布迁移至自建 CDN（https://cdn.sheetjs.com），npm registry 上的 `xlsx` 包停止更新，`No fix available`。
+**背景**：SheetJS 官方已将发布迁移至自建 CDN（https://cdn.sheetjs.com），npm registry 上的 `xlsx` 包冻结在 0.18.5，故 `npm audit` 长期报 `No fix available`。两个漏洞（CVE-2023-30533 原型污染等）均在 0.19.3+ 修复。
 
-**接受理由**：WorkBench 仅用 xlsx 读取用户本地 Excel 文件并解析为 Markdown 表格，不处理不可信外部 Excel 输入，原型污染与 ReDoS 攻击面有限。
+**处置方式（2026-09-23）**：`npm install https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`，`package.json` 中 `xlsx` 依赖变为 CDN tarball URL。import 路径 `xlsx` 不变，业务代码零改动；`FilePreviewRenderer.vue` 的 Excel 只读渲染经全量前端测试（1369 用例）与生产构建验证兼容。
 
-**长期方案**（单独评估，不在本轮）：迁移至 SheetJS 官方 CDN 版本，或替换为其他 Excel 解析库。
+**注意事项**：
+- CDN tarball URL 依赖 cdn.sheetjs.com 可达，CI（GitHub Actions Linux runner）与本地安装均需网络访问该域名。
+- `npm audit` 按 lock 文件实际版本号（0.20.3）匹配 advisory 范围，实测报 0 vulnerabilities。
+- 若未来需再升级，先探测 CDN 版本存在性（0.20.4+ 并不存在，当前最新即 0.20.3），勿凭版本号臆测。
 
 ### 5.3 major 版本待评（本轮跳过）
 
