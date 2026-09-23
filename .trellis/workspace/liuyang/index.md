@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 85
+- **Total Sessions**: 86
 - **Last Active**: 2026-09-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1044 | Active |
+| `journal-2.md` | ~1078 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 86 | 2026-09-23 | AI对话面板布局修复与输入区优化及三路审核 | `1a9134f`, `ae181a3` | `master` |
 | 85 | 2026-09-23 | 审核建议级修复 G1-G12 | `25c5142` | `master` |
 | 84 | 2026-09-23 | 补提交 pdfjs-viewer build 运行时资产 | `316a534` | `master` |
 | 83 | 2026-09-23 | Linux 改造三路审核与 R1-R10 缺陷修复 | `eef2951` | `master` |

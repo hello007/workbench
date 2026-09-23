@@ -1042,3 +1042,37 @@ WorkBench Linux 支持端到端落地：PR0 WSL2 编译+serve 模式验证（含
 ### Next Steps
 
 - None - task complete
+
+
+## Session 86: AI对话面板布局修复与输入区优化及三路审核
+
+**Date**: 2026-09-23
+**Task**: AI对话面板布局修复与输入区优化及三路审核
+**Branch**: `master`
+
+### Summary
+
+修复 AiChatPanel 根元素缺失 flex 约束链导致的半屏塌陷与终端被压缩；会话快照白名单补 ai-chat/dashboard；输入框默认 6 行可拖拽调高（EP 内联 min-height 需 !important 压制）；管理模板弹窗对齐设置弹窗 960 分档 nav/content 二分；chatMarkdown/FilePreviewRenderer 补注册 plaintext 消除 console 报错。三路子 agent 审核（正确性/规范一致性/测试质量）发现弹窗主题后代选择器静默失效（EP class 透传同元素，含 SettingsPanel 既有同款）改联合选择器 + 容器 padding:0，补 chatMarkdown.spec.js plaintext 回归守卫。沉淀 frontend-visual-conventions：一级面板约束链/EP textarea 陷阱/hljs 注册契约。全量 1358 用例通过，亮/暗双主题浏览器复验通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a9134f` | (see git log) |
+| `ae181a3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
