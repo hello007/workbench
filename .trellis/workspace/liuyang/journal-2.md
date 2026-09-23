@@ -1152,3 +1152,39 @@ TestApp_StartWebServe_StartupMatrix/设置开启默认启动 稳定失败定性�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 89: 贡献者行数排名（路线图遗留补齐）
+
+**Date**: 2026-09-23
+**Task**: 贡献者行数排名（路线图遗留补齐）
+**Branch**: `master`
+
+### Summary
+
+补齐 v1.3 统计遗留子项：后端 git log --numstat 按作者聚合新增/删除行（二进制 - 排除、merge 0 行、5000 采样对齐），独立二态缓存复用 commitHistoryCacheKey 键与 headSHA+TTL 判定，GetRepoStats 双路编排合并；前端贡献者卡片提交数/行数维度切换（buildContributorLineOption，tooltip +/− 细分）；docs 功能说明与路线图同步；CLAUDE.md v2.12 沉淀派生聚合缓存二态失效与双入口联动清除规则。go/npm 测试与构建全绿，trellis-check 十维度零修复。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2671c57` | (see git log) |
+| `404810c` | (see git log) |
+| `c5fdfc3` | (see git log) |
+| `3d51cb5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
