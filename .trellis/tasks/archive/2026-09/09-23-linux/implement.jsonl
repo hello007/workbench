@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-23-linux/prd.md", "reason": "任务 PRD：R1-R10 修复清单（问题/修复方向/验收），实现全程逐条对照"}
+{"file": "docs/spec/linux-platform.md", "reason": "Linux 平台契约单一事实源：R9 依赖边界以其 §3 口径为准；平台抽象选型标准约束所有修复的落点方式"}
+{"file": "docs/spec/test-stability.md", "reason": "新增测试须守稳定性规范（平台无关断言、临时目录）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "修复点配套测试的覆盖率门禁要求"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "R7/R8 前端修复涉及 settings store 与后端 RPC 消费链路，须守跨层契约（本次无绑定签名变更）"}
