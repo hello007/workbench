@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 models.ts PathLineStat 类与 RepoStats 新字段同步、npm run build 无 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service/util 门禁不回退、rename 归一与目录上卷有确定性断言"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 mock 单一数据源已同步两字段且组件测试消费同源"}

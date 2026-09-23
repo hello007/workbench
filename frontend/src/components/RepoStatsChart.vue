@@ -38,6 +38,24 @@
         autoresize
       />
     </div>
+
+    <div class="chart-section">
+      <div class="chart-header">
+        <div class="chart-title">行数分布</div>
+        <!-- 维度切换器：目录一级上卷（模块分布）/ Top 文件（热点明细），同源
+             numstat 通道（rename 归一 new 路径、二进制排除）；样式对齐贡献者卡 -->
+        <el-radio-group v-model="pathDim" size="small">
+          <el-radio-button value="dirs">目录</el-radio-button>
+          <el-radio-button value="files">文件</el-radio-button>
+        </el-radio-group>
+      </div>
+      <v-chart
+        class="chart-canvas chart-path-line"
+        :option="pathLineOption"
+        :loading="!stats"
+        autoresize
+      />
+    </div>
   </div>
 </template>
 
@@ -57,7 +75,8 @@ import {
   buildTrendOption,
   buildHeatmapOption,
   buildContributorOption,
-  buildContributorLineOption
+  buildContributorLineOption,
+  buildPathLineOption
 } from '../utils/repoStatsOptions'
 
 // 按需注册 ECharts 模块（tree-shake，避免全量引入）
@@ -100,6 +119,19 @@ const contributorOption = computed(() => {
     return buildContributorLineOption(props.stats.contributors)
   }
   return buildContributorOption(props.stats.contributors)
+})
+
+// pathDim 行数分布维度：dirs=目录一级上卷（默认，模块分布）/ files=Top 文件（热点明细）
+const pathDim = ref('dirs')
+
+// pathLineOption 行数分布 option：目录/文件维度取后端对应聚合字段
+// （dirLineStats 全量降序 / topFileLineStats 后端已截 Top 15），后端保证排序
+const pathLineOption = computed(() => {
+  if (!props.stats) return {}
+  const entries = pathDim.value === 'files'
+    ? props.stats.topFileLineStats
+    : props.stats.dirLineStats
+  return buildPathLineOption(entries)
 })
 </script>
 
@@ -145,5 +177,8 @@ const contributorOption = computed(() => {
 }
 .chart-contributor {
   height: 320px;
+}
+.chart-path-line {
+  height: 280px;
 }
 </style>

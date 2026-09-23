@@ -31,9 +31,10 @@ import (
 //	  - ins/del 为 "-" 表示二进制文件，该行不计入行数。
 //	  - merge commit 缺省无文件统计行，自然计 0 行（merge 不引入自身行变更，与主流
 //	    统计口径一致）；不加 --diff-merges。
-//	  - rename 路径形如 `old => new` / `{a => b}/x.go` 仅影响路径列，本通道只取数值列。
-//	  - core.quotePath=false 输出原始非 ASCII 路径（与 commit_history_cli.go 一致；
-//	    路径列本通道不消费，仅为格式完整性保留该参数）。
+//	  - rename 路径形如 `old => new` / `{a => b}/x.go`，解析时归一为新路径后连同
+//	    行数一并收集进 Files 明细（normalizeNumstatPath），供路径维度聚合。
+//	  - core.quotePath=false 输出原始非 ASCII 路径（与 commit_history_cli.go 一致），
+//	    路径列供路径维度行数分布消费。
 //	  - %at = author unix 秒，与提交历史通道 Timestamp 字段同源，窗口过滤口径一致。
 
 // commitLineStatsCacheTTL 行数统计缓存 TTL，与 commitHistoryCacheTTL 同取 5min：
@@ -115,7 +116,9 @@ func parseCommitNumstatChunk(chunk string) (*model.CommitLineStat, error) {
 		Timestamp: ts,
 	}
 
-	// 文件统计行：`<ins>\t<del>\t<path>`；ins/del 为 "-"（二进制）跳过该行数值
+	// 文件统计行：`<ins>\t<del>\t<path>`；ins/del 为 "-"（二进制）跳过该行数值；
+	// 路径列经 rename 归一（normalizeNumstatPath）后收集进 Files 明细，供路径维度
+	// 行数分布聚合（目录上卷/文件 Top N）。
 	for _, line := range lines[1:] {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
@@ -138,8 +141,49 @@ func parseCommitNumstatChunk(chunk string) (*model.CommitLineStat, error) {
 		}
 		r.Insertions += ins
 		r.Deletions += del
+		if len(parts) == 3 && parts[2] != "" {
+			r.Files = append(r.Files, model.CommitFileLineStat{
+				Path:       normalizeNumstatPath(parts[2]),
+				Insertions: ins,
+				Deletions:  del,
+			})
+		}
 	}
 	return r, nil
+}
+
+// normalizeNumstatPath 归一 numstat 路径列为 rename 后的新路径（口径：行数归属
+// 「文件现在在哪」）。git numstat 的 rename 形态：
+//   - 整路径改名 `old => new`（含连续改名时取最后一个箭头右侧，git 单记录只出单箭头，
+//     LastIndex 为防御）；
+//   - 前缀/中缀改名 `{old => new}suffix` / `head{old => new}tail`，取花括号内箭头
+//     右侧替换该段。
+//
+// 普通路径（不含 " => "）原样返回。路径含 " => " 的极端文件名无法与本格式区分
+// （numstat 格式固有限制，git 不转义），接受误归一。
+func normalizeNumstatPath(p string) string {
+	if !strings.Contains(p, " => ") {
+		return p
+	}
+	open := strings.IndexByte(p, '{')
+	if open < 0 {
+		// 整路径改名：取最后一段箭头右侧
+		if i := strings.LastIndex(p, " => "); i >= 0 {
+			return p[i+len(" => "):]
+		}
+		return p
+	}
+	close := strings.IndexByte(p[open:], '}')
+	if close < 0 {
+		return p // 花括号不闭合（非 rename 格式），原样保留
+	}
+	close += open
+	arrow := strings.Index(p[open:close], " => ")
+	if arrow < 0 {
+		return p
+	}
+	arrow += open
+	return p[:open] + p[arrow+len(" => "):close] + p[close+1:]
 }
 
 // isHexSHA40 判定 40 位小写 hex SHA-1（numstat 头部强校验；与 main 包 isHexSHA
@@ -253,14 +297,21 @@ func (c *CommitLineStatsCache) ClearAll() {
 	c.entries = make(map[string]commitLineStatsCacheEntry)
 }
 
-// deepCopyLineStats 深拷贝行数记录切片。model.CommitLineStat 为纯值 struct（无切片
-// 字段），slice 复制即完成深拷贝——元素为值拷贝，修改拷贝切片元素不影响原切片。
+// deepCopyLineStats 深拷贝行数记录切片。CommitLineStat 含 Files 切片字段（文件级
+// 明细），须逐条复制元素并复制其 Files——浅 slice 复制会共享底层数组，调用方修改
+// 拷贝切片的 Files 元素会污染缓存。
 func deepCopyLineStats(in []model.CommitLineStat) []model.CommitLineStat {
 	if in == nil {
 		return nil
 	}
 	out := make([]model.CommitLineStat, len(in))
-	copy(out, in)
+	for i, r := range in {
+		out[i] = r
+		if r.Files != nil {
+			out[i].Files = make([]model.CommitFileLineStat, len(r.Files))
+			copy(out[i].Files, r.Files)
+		}
+	}
 	return out
 }
 

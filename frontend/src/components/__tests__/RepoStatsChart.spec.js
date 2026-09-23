@@ -32,6 +32,14 @@ const mockStats = {
     { author: 'Alice', email: 'a@x.com', count: 10, insertions: 100, deletions: 20 },
     { author: 'Bob', email: 'b@x.com', count: 3, insertions: 15, deletions: 45 }
   ],
+  dirLineStats: [
+    { path: 'service', insertions: 33, deletions: 13 },
+    { path: 'web', insertions: 5, deletions: 1 }
+  ],
+  topFileLineStats: [
+    { path: 'service/repo_stats.go', insertions: 20, deletions: 5 },
+    { path: 'web/StatsView.vue', insertions: 5, deletions: 1 }
+  ],
   heatmap: [{ date: '2026-09-10', count: 2 }, { date: '2026-09-11', count: 5 }],
   totalCommits: 7,
   dateRange: '最近 7 天',
@@ -39,12 +47,27 @@ const mockStats = {
   sampled: false
 }
 
-// el-radio-group stub：点击容器即 emit update:modelValue('lines')，驱动 v-model 切换维度
+// el-radio-group stub：点击容器在 slot 内按钮 value 序列中循环推进 modelValue
+// （commits→lines→commits / dirs→files→dirs），两组维度切换器各自独立驱动
 const elRadioGroupStub = {
   name: 'ElRadioGroup',
-  template: '<div class="el-radio-group-stub" @click="$emit(\'update:modelValue\', \'lines\')"><slot /></div>',
   props: ['modelValue', 'size'],
-  emits: ['update:modelValue']
+  emits: ['update:modelValue'],
+  computed: {
+    buttonValues() {
+      const slot = (this.$slots.default && this.$slots.default()) || []
+      return slot.map(v => v.props && v.props.value).filter(v => v !== undefined)
+    }
+  },
+  methods: {
+    onClick() {
+      const vals = this.buttonValues
+      if (!vals.length) return
+      const idx = vals.indexOf(this.modelValue)
+      this.$emit('update:modelValue', vals[(idx + 1) % vals.length])
+    }
+  },
+  template: '<div class="el-radio-group-stub" @click="onClick"><slot /></div>'
 }
 const elRadioButtonStub = {
   name: 'ElRadioButton',
@@ -58,12 +81,13 @@ const globalStubs = {
 }
 
 describe('RepoStatsChart', () => {
-  it('stats 传入时应渲染三个图表区域', () => {
+  it('stats 传入时应渲染四个图表区域', () => {
     const wrapper = mount(RepoStatsChart, { props: { stats: mockStats }, global: { stubs: globalStubs } })
-    expect(wrapper.findAll('.v-chart-stub')).toHaveLength(3)
+    expect(wrapper.findAll('.v-chart-stub')).toHaveLength(4)
     expect(wrapper.find('.chart-trend').exists()).toBe(true)
     expect(wrapper.find('.chart-heatmap').exists()).toBe(true)
     expect(wrapper.find('.chart-contributor').exists()).toBe(true)
+    expect(wrapper.find('.chart-path-line').exists()).toBe(true)
   })
 
   it('stats 传入时各图表 option 应已构造（非空）', () => {
@@ -82,22 +106,29 @@ describe('RepoStatsChart', () => {
     })
   })
 
-  it('应渲染三个图表标题', () => {
+  it('应渲染四个图表标题', () => {
     const wrapper = mount(RepoStatsChart, { props: { stats: mockStats }, global: { stubs: globalStubs } })
     const titles = wrapper.findAll('.chart-title')
     expect(titles[0].text()).toBe('提交趋势')
     expect(titles[1].text()).toBe('活跃度热力图')
     expect(titles[2].text()).toBe('贡献者排名')
+    expect(titles[3].text()).toBe('行数分布')
   })
 
-  it('贡献者卡片应渲染维度切换器（提交数/行数两个选项）', () => {
+  it('两组维度切换器各渲染两个选项（贡献者组 + 行数分布组）', () => {
     const wrapper = mount(RepoStatsChart, { props: { stats: mockStats }, global: { stubs: globalStubs } })
-    const group = wrapper.find('.el-radio-group-stub')
-    expect(group.exists()).toBe(true)
-    const buttons = wrapper.findAll('.el-radio-button-stub')
-    expect(buttons).toHaveLength(2)
-    expect(buttons[0].text()).toBe('提交数')
-    expect(buttons[1].text()).toBe('行数')
+    const groups = wrapper.findAll('.el-radio-group-stub')
+    expect(groups).toHaveLength(2)
+    // 贡献者组按钮
+    const contributorButtons = groups[0].findAll('.el-radio-button-stub')
+    expect(contributorButtons).toHaveLength(2)
+    expect(contributorButtons[0].text()).toBe('提交数')
+    expect(contributorButtons[1].text()).toBe('行数')
+    // 行数分布组按钮
+    const pathButtons = groups[1].findAll('.el-radio-button-stub')
+    expect(pathButtons).toHaveLength(2)
+    expect(pathButtons[0].text()).toBe('目录')
+    expect(pathButtons[1].text()).toBe('文件')
   })
 
   it('默认维度为提交数，贡献者图 series 为提交数排名', () => {
@@ -114,9 +145,21 @@ describe('RepoStatsChart', () => {
     await wrapper.find('.el-radio-group-stub').trigger('click')
     expect(contributorChart.attributes('data-series-name')).toBe('总变更行数')
 
-    // 其余两图不受维度切换影响（trend series 名固定提交数，heatmap 无 series 名 → 属性缺省）
+    // 其余三图不受贡献者维度切换影响（行数分布图 series 名同为总变更行数但 option 独立）
     const stubs = wrapper.findAll('.v-chart-stub')
     expect(stubs[0].attributes('data-series-name')).toBe('提交数')
-    expect(stubs[1].attributes('data-series-name')).toBeUndefined()
+  })
+
+  it('行数分布默认目录维度，点击文件维度后切换数据源', async () => {
+    const wrapper = mount(RepoStatsChart, { props: { stats: mockStats }, global: { stubs: globalStubs } })
+    const pathChart = wrapper.find('.v-chart-stub.chart-path-line')
+    expect(pathChart.attributes('data-series-name')).toBe('总变更行数')
+    // 默认目录维度：y 轴为目录桶
+    expect(pathChart.attributes('data-option')).toBe('set')
+
+    const groups = wrapper.findAll('.el-radio-group-stub')
+    await groups[1].trigger('click')
+    // 文件维度仍为同一 series 名（同 builder），option 已按 topFileLineStats 重建
+    expect(pathChart.attributes('data-series-name')).toBe('总变更行数')
   })
 })

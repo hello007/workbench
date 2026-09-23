@@ -18,6 +18,10 @@ type RepoStats struct {
 	// Sampled 标记统计数据是否基于采样而非全量。超限仓库（>5000 commit）无法全量缓存，
 	// 取最近 5000 条提交统计，此时 TotalCommits/Contributors 为采样值，前端应提示用户。
 	Sampled bool `json:"sampled"`
+	// DirLineStats 目录一级上卷的行数分布（降序，全量不截断），供行数分布图目录维度。
+	DirLineStats []PathLineStat `json:"dirLineStats,omitempty"`
+	// TopFileLineStats 单文件行数分布 Top N（降序截断），供行数分布图文件维度。
+	TopFileLineStats []PathLineStat `json:"topFileLineStats,omitempty"`
 }
 
 // TimeBucket 趋势图时间桶：一个聚合周期（日/周/月）的起止标识与该周期内提交数。
@@ -40,14 +44,33 @@ type Contributor struct {
 }
 
 // CommitLineStat 单提交的行数统计记录（numstat 通道最小粒度）：一条提交的
-// 作者身份、作者时间与新增/删除行数。纯值 struct（无切片字段），缓存深拷贝
-// 退化为 slice 复制。按提交粒度落缓存（非聚合值），时间窗口过滤在内存聚合时做，
-// 切档位不重扫。
+// 作者身份、作者时间、新增/删除行数与文件级行数明细。含切片字段（Files），
+// 缓存深拷贝须逐元素复制 Files（service deepCopyLineStats 负责）。按提交粒度落
+// 缓存（非聚合值），时间窗口过滤在内存聚合时做，切档位不重扫。
 type CommitLineStat struct {
-	SHA        string `json:"sha"`
-	Author     string `json:"author"`
-	Email      string `json:"email"`
-	Timestamp  int64  `json:"timestamp"`
+	SHA        string               `json:"sha"`
+	Author     string               `json:"author"`
+	Email      string               `json:"email"`
+	Timestamp  int64                `json:"timestamp"`
+	Insertions int                  `json:"insertions"`
+	Deletions  int                  `json:"deletions"`
+	Files      []CommitFileLineStat `json:"files,omitempty"`
+}
+
+// CommitFileLineStat 单文件行数变更明细（numstat 文件统计行）。
+// Path 为 rename 归一后的新路径（`old => new` 取 new、`{a => b}/x.go` 归一为
+// `b/x.go`，与「文件现在在哪」直觉一致）；二进制文件行不计入（无明细）。
+type CommitFileLineStat struct {
+	Path       string `json:"path"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
+}
+
+// PathLineStat 路径（目录/文件）行数聚合条目：路径维度行数分布图的最小展示单元。
+// 目录维度 Path 为一级目录前缀（仓库根下散文件归入「(根目录)」桶）；文件维度 Path
+// 为归一后完整路径。
+type PathLineStat struct {
+	Path       string `json:"path"`
 	Insertions int    `json:"insertions"`
 	Deletions  int    `json:"deletions"`
 }

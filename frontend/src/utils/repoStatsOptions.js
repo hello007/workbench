@@ -167,3 +167,56 @@ export function buildContributorLineOption(contributors, limit = 15) {
     }]
   }
 }
+
+// buildPathLineOption 构造路径维度行数分布图 option（横向柱状）。
+// entries: [{path, insertions, deletions}]——目录维度为一级目录上卷（后端全量降序），
+// 文件维度为 Top 15（后端 TopFileLineStatsLimit 截断，前端不二次截断）。后端已按
+// 总变更行数降序、同值按路径升序排序，本函数不再重排（与 buildContributorLineOption
+// 的前端重排不同：路径排序键在后端已含中文名 locale 语义，避免双端规则漂移）。
+// 柱值 = 总变更行数；tooltip 展示 +新增/−删除 细分。label 宽路径防溢出：
+// formatter 截断超长路径中段（保留首尾段），完整路径由 tooltip 承载。
+export function buildPathLineOption(entries) {
+  const data = entries || []
+  const paths = data.map(e => e.path)
+  const totals = data.map(e => (e.insertions || 0) + (e.deletions || 0))
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const e = data[params[0].dataIndex]
+        const ins = e.insertions || 0
+        const del = e.deletions || 0
+        return `${escapeHtml(e.path)}<br/>总变更: <b>${ins + del}</b><br/>` +
+          `<span style="color:#40c463">+${ins} 新增</span> / <span style="color:#d73a49">−${del} 删除</span>`
+      }
+    },
+    grid: { left: 160, right: 40, top: 20, bottom: 30 },
+    xAxis: { type: 'value', minInterval: 1 },
+    yAxis: {
+      type: 'category',
+      data: paths,
+      inverse: true,
+      axisLabel: {
+        // 路径标签超宽截断（中段省略），完整路径见 tooltip
+        formatter: (value) => value.length > 24 ? value.slice(0, 12) + '…' + value.slice(-11) : value
+      }
+    },
+    series: [{
+      name: '总变更行数',
+      type: 'bar',
+      data: totals,
+      itemStyle: { color: '#0969da' },
+      label: { show: true, position: 'right', formatter: '{c}' }
+    }]
+  }
+}
+
+// escapeHtml tooltip 内路径转义（文件名可含 <> 等字符，防注入破坏 tooltip 渲染）。
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}

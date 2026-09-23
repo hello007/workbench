@@ -261,6 +261,10 @@ func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 	sinceTs, untilTs := service.StatsRangeWindow(rangeKey, now)
 	lineContribs := service.AggregateLineStats(lineRecords, sinceTs, untilTs)
 	stats.Contributors = service.MergeContributorLineStats(stats.Contributors, lineContribs)
+	// 路径维度行数分布：目录一级上卷（全量不截断）+ 文件 Top N（后端截断减序列化开销），
+	// 与贡献者行数同源同窗口；行数通道降级为 0 行时 Files 明细为空，两字段自然为空切片
+	stats.DirLineStats = service.AggregateLineStatsByPath(lineRecords, sinceTs, untilTs, true, 0)
+	stats.TopFileLineStats = service.AggregateLineStatsByPath(lineRecords, sinceTs, untilTs, false, service.TopFileLineStatsLimit)
 	stats.Sampled = overflow
 	return stats, nil
 }

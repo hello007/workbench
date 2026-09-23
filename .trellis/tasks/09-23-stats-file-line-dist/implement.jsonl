@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "model.RepoStats 加 DirLineStats/TopFileLineStats 字段 + 新 PathLineStat 类型须同步 frontend/wailsjs 绑定（本次走 RepoStats 扩展字段方案零新增 App 方法，仅 models.ts 手动补 PathLineStat 类与字段，npm run build 验证 MISSING_EXPORT）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层覆盖率门禁 ≥76% 基线，新增 commit_path_stats.go 须带足够单测不回退"}
+{"file": "docs/spec/test-stability.md", "reason": "路径聚合测试纯内存确定性断言，不依赖 git 环境与 mtime 时序"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "行数分布卡片复用贡献者卡片布局先例（chart-header 标题居左 + 维度切换器居右、横向柱状），配色语义与间距档位对齐"}
+{"file": "docs/spec/e2e-testing.md", "reason": "GetRepoStats mock 新增 dirLineStats/topFileLineStats 字段须入 wails-mock-defaults.js 单一数据源（vitest/E2E 共用）"}

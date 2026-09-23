@@ -130,11 +130,23 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   // 形状对齐 model.RepoStats（见 frontend/wailsjs/go/models.ts）；contributors 元素含
   // insertions/deletions 行数字段（贡献者行数排名维度切换的数据源），统计页相关断言
   // 以此表为单一数据源。stats 非 null 时统计页图表正常渲染（ECharts 真实浏览器可用）。
+  // dirLineStats/topFileLineStats 为行数分布图目录/文件双维度数据源（dirLineStats 形状
+  // 对齐 model.PathLineStat）。
   GetRepoStats: {
     trend: [{ date: '2026-09-09', count: 1 }, { date: '2026-09-10', count: 1 }],
     contributors: [
       { author: 'e2e', email: 'e2e@example.com', count: 2, insertions: 120, deletions: 30 },
       { author: 'alice', email: 'alice@example.com', count: 1, insertions: 50, deletions: 80 }
+    ],
+    dirLineStats: [
+      { path: 'service', insertions: 120, deletions: 30 },
+      { path: 'web', insertions: 50, deletions: 20 },
+      { path: '(根目录)', insertions: 5, deletions: 2 }
+    ],
+    topFileLineStats: [
+      { path: 'service/repo_stats.go', insertions: 80, deletions: 10 },
+      { path: 'web/ui/StatsView.vue', insertions: 50, deletions: 20 },
+      { path: 'README.md', insertions: 5, deletions: 2 }
     ],
     heatmap: [{ date: '2026-09-09', count: 1 }, { date: '2026-09-10', count: 1 }],
     totalCommits: 3,

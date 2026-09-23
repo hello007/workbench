@@ -4,6 +4,7 @@ import {
   buildHeatmapOption,
   buildContributorOption,
   buildContributorLineOption,
+  buildPathLineOption,
   HEATMAP_PIECES
 } from '../repoStatsOptions'
 
@@ -194,5 +195,57 @@ describe('buildContributorLineOption', () => {
   it('null 输入应兜底为空', () => {
     const opt = buildContributorLineOption(null)
     expect(opt.series[0].data).toEqual([])
+  })
+})
+
+describe('buildPathLineOption', () => {
+  it('应保留后端排序不重排，柱值为总变更行数', () => {
+    const entries = [
+      { path: 'service', insertions: 33, deletions: 13 },
+      { path: 'web', insertions: 5, deletions: 1 },
+      { path: '(根目录)', insertions: 1, deletions: 0 }
+    ]
+    const opt = buildPathLineOption(entries)
+    expect(opt.yAxis.data).toEqual(['service', 'web', '(根目录)'])
+    expect(opt.series[0].data).toEqual([46, 6, 1])
+    expect(opt.series[0].type).toBe('bar')
+    expect(opt.yAxis.inverse).toBe(true)
+  })
+
+  it('tooltip 应展示路径与 +新增/−删除 细分', () => {
+    const entries = [{ path: 'service/a.go', insertions: 10, deletions: 2 }]
+    const opt = buildPathLineOption(entries)
+    const html = opt.tooltip.formatter([{ dataIndex: 0 }])
+    expect(html).toContain('service/a.go')
+    expect(html).toContain('总变更: <b>12</b>')
+    expect(html).toContain('+10 新增')
+    expect(html).toContain('−2 删除')
+  })
+
+  it('tooltip 路径应转义 HTML 特殊字符', () => {
+    const entries = [{ path: 'a<b>&"c.go', insertions: 1, deletions: 0 }]
+    const opt = buildPathLineOption(entries)
+    const html = opt.tooltip.formatter([{ dataIndex: 0 }])
+    expect(html).toContain('a&lt;b&gt;&amp;&quot;c.go')
+    expect(html).not.toContain('a<b>')
+  })
+
+  it('超长路径轴标签应中段截断，短路径原样', () => {
+    const longPath = 'verylongdirectoryname/sub/anotherlongname/file.go'
+    const opt = buildPathLineOption([{ path: longPath, insertions: 1, deletions: 0 }, { path: 'short.go', insertions: 1, deletions: 0 }])
+    const labels = opt.yAxis.data.map(v => opt.yAxis.axisLabel.formatter(v))
+    expect(labels[0]).toBe(longPath.slice(0, 12) + '…' + longPath.slice(-11))
+    expect(labels[0]).not.toBe(longPath)
+    expect(labels[1]).toBe('short.go')
+  })
+
+  it('行数字段缺失应兜底为 0 不报错', () => {
+    const opt = buildPathLineOption([{ path: 'legacy.go' }])
+    expect(opt.series[0].data).toEqual([0])
+  })
+
+  it('空数组与 null 输入应返回空序列不报错', () => {
+    expect(buildPathLineOption([]).series[0].data).toEqual([])
+    expect(buildPathLineOption(null).series[0].data).toEqual([])
   })
 })
