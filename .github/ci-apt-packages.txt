@@ -1,0 +1,8 @@
+# ci.yml test job「安装 Wails Linux 桌面编译依赖」的包清单（单一数据源）：
+# apt 缓存 key 经 hashFiles 引用本文件，包列表变更即自动换 key 重装；
+# 安装步骤从本文件读包名。每行一个包名，# 开头为注释行与空行
+# 由安装命令 grep -v '^#' 过滤后经 xargs 传给 apt-get install。
+build-essential
+pkg-config
+libgtk-3-dev
+libwebkit2gtk-4.1-dev

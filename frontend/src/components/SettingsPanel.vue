@@ -60,7 +60,7 @@
               <div class="settings-item-label">Obsidian 程序路径</div>
               <div class="settings-item-desc">用 Obsidian 打开时优先使用该可执行文件；留空则尝试系统已注册的 Obsidian</div>
             </div>
-            <el-input v-model="obsidianPath" size="small" class="input-w-xl" placeholder="如 C:\Users\me\AppData\Local\Obsidian\Obsidian.exe" @change="onSettingsChange" />
+            <el-input v-model="obsidianPath" size="small" class="input-w-xl" :placeholder="obsidianPathPlaceholder" @change="onSettingsChange" />
           </div>
           <!-- 外部 diff 工具 -->
           <div class="settings-section-title settings-section-title--spaced">外部 diff 工具</div>
@@ -78,7 +78,7 @@
               <div class="settings-item-label">可执行文件路径</div>
               <div class="settings-item-desc">留空表示未配置，diff 弹窗的「用外部工具打开」按钮将置灰</div>
             </div>
-            <el-input v-model="settingsStore.diffToolPath" size="small" class="input-w-xl" placeholder="如 C:\Program Files\WinMerge\WinMergeU.exe" @change="onDiffToolChange" />
+            <el-input v-model="settingsStore.diffToolPath" size="small" class="input-w-xl" :placeholder="diffToolPathPlaceholder" @change="onDiffToolChange" />
           </div>
           <div class="settings-item">
             <div class="settings-item-info">
@@ -350,7 +350,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, DIFF_TOOL_PRESETS, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -389,8 +389,22 @@ const checkingUpdate = ref(false)
 
 const settingsStore = useSettingsStore()
 
-// 外部 diff 工具预设表（模板渲染，供 el-select 遍历）
-const diffToolPresets = DIFF_TOOL_PRESETS
+// 外部 diff 工具预设表（G10 平台化：Windows 保留既有表，非 Windows 提供 meld/kdiff3 等
+// Linux 常见工具；表随 isWindowsPlatform 变化自动切换，模板 el-select 直接遍历）
+const diffToolPresets = computed(() => diffToolPresetsFor(settingsStore.isWindowsPlatform))
+
+// 占位符平台化（G9，信号源与 R7 同源——settings store isWindowsPlatform，禁 UA）：
+// Windows 保持历史文案逐字节不变，非 Windows 用对应平台真实可行的示例路径
+const obsidianPathPlaceholder = computed(() =>
+  settingsStore.isWindowsPlatform
+    ? '如 C:\\Users\\me\\AppData\\Local\\Obsidian\\Obsidian.exe'
+    : '如 /opt/Obsidian/obsidian'
+)
+const diffToolPathPlaceholder = computed(() =>
+  settingsStore.isWindowsPlatform
+    ? '如 C:\\Program Files\\WinMerge\\WinMergeU.exe'
+    : '如 meld'
+)
 
 // 终端字体下拉选项（value 空串 = 默认 Cascadia Code 栈）
 const terminalFontOptions = TERMINAL_FONT_OPTIONS
@@ -399,7 +413,8 @@ const terminalFontOptions = TERMINAL_FONT_OPTIONS
 // 模板用 :model-value 手动赋值（change 时 v-model 已写入新值，取消时无法回退）；
 // 已有非当前预设默认值的自定义配置时先确认，防误点覆盖/清空已存配置。
 const onDiffToolPresetChange = async (key) => {
-  const preset = DIFF_TOOL_PRESETS[key]
+  // 从当前平台预设表取值（G10：表随平台切换，key 不存在时忽略）
+  const preset = diffToolPresets.value[key]
   if (!preset) return
   const prevName = settingsStore.diffToolName
   const hasCustomized =
@@ -792,6 +807,8 @@ async function loadSettings() {
     const configs = await GetShellConfigs()
     if (Array.isArray(configs) && configs.length > 0) {
       shellConfigs.value = configs
+      // 同步 store 平台信号缓存（G8-G10：占位符/预设表平台化判定输入，拉取失败保留旧值）
+      settingsStore.cacheShellConfigs(configs)
     }
   } catch {
     // 保留兜底列表

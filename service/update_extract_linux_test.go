@@ -30,7 +30,7 @@ func TestExtractUpdateTarGz_Success(t *testing.T) {
 		"README-linux.md":        []byte("readme-bytes"),
 		"sub/nested-not-extract": []byte("nested-bytes"),
 	})
-	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, payload)
+	tarGz := writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", payload)
 
 	got, err := extractUpdateTarGz(tarGz, dest)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestExtractUpdateTarGz_Success(t *testing.T) {
 func TestExtractUpdateTarGz_MissingBinary(t *testing.T) {
 	dest := t.TempDir()
 	payload := buildTestTarGz(t, map[string][]byte{"README-linux.md": []byte("readme")})
-	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, payload)
+	tarGz := writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", payload)
 
 	if _, err := extractUpdateTarGz(tarGz, dest); err == nil {
 		t.Fatal("无 workbench 成员应返回错误")
@@ -100,7 +100,7 @@ func TestExtractUpdateTarGz_PathTraversal(t *testing.T) {
 	if err := gzw.Close(); err != nil {
 		t.Fatalf("关闭 gzip: %v", err)
 	}
-	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, buf.Bytes())
+	tarGz := writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", buf.Bytes())
 
 	if _, err := extractUpdateTarGz(tarGz, dest); err == nil {
 		t.Fatal("穿越成员应导致「未找到二进制」错误")
@@ -113,7 +113,7 @@ func TestExtractUpdateTarGz_PathTraversal(t *testing.T) {
 // TestExtractUpdateTarGz_CorruptArchive 非法 gzip 载荷返回错误而非 panic。
 func TestExtractUpdateTarGz_CorruptArchive(t *testing.T) {
 	dest := t.TempDir()
-	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, []byte("not a gzip"))
+	tarGz := writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", []byte("not a gzip"))
 
 	if _, err := extractUpdateTarGz(tarGz, dest); err == nil {
 		t.Fatal("非法 gzip 应返回错误")
@@ -128,7 +128,7 @@ func TestExtractUpdateTarGzWithLimit_Truncated(t *testing.T) {
 	payload := buildTestTarGz(t, map[string][]byte{
 		updateBinaryLinux: []byte("this binary exceeds the tiny limit"),
 	})
-	tarGz := writeTestFile(t, t.TempDir(), updateAssetLinux, payload)
+	tarGz := writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", payload)
 
 	const tinyLimit = 8
 	_, err := extractUpdateTarGzWithLimit(tarGz, dest, tinyLimit)
@@ -146,7 +146,7 @@ func TestExtractUpdateTarGzWithLimit_Truncated(t *testing.T) {
 	// 边界自检：内容恰好在限内时正常解出（LimitReader 多读 1 字节探测不误伤边界值）
 	okDest := t.TempDir()
 	exact := buildTestTarGz(t, map[string][]byte{updateBinaryLinux: []byte("12345678")})
-	got, err := extractUpdateTarGzWithLimit(writeTestFile(t, t.TempDir(), updateAssetLinux, exact), okDest, tinyLimit)
+	got, err := extractUpdateTarGzWithLimit(writeTestFile(t, t.TempDir(), "workbench-linux-amd64.tar.gz", exact), okDest, tinyLimit)
 	if err != nil {
 		t.Fatalf("恰好等于上限应解包成功: %v", err)
 	}

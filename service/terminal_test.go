@@ -24,9 +24,20 @@ func TestResolveShellConfig_KnownType(t *testing.T) {
 
 // === buildCdCommand 各 Shell 类型测试 ===
 
+// mustBuildCdCommand 测试辅助：buildCdCommand 自 G1 起返回 (string, error)，
+// 各 Shell 类型正常用例错误即 Fatal，拒绝分支（换行路径）单独建用例断言错误。
+func mustBuildCdCommand(t *testing.T, svc *TerminalService, dir, shellType string) string {
+	t.Helper()
+	cmd, err := svc.buildCdCommand(dir, shellType)
+	if err != nil {
+		t.Fatalf("buildCdCommand(%q, %q) 不应报错: %v", dir, shellType, err)
+	}
+	return cmd
+}
+
 func TestBuildCdCommand_Cmd(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\workspace\test`, "cmd")
+	cmd := mustBuildCdCommand(t, svc, `D:\workspace\test`, "cmd")
 	expected := `cd /d "D:\workspace\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("CMD: 期望=%q, 实际=%q", expected, cmd)
@@ -35,7 +46,7 @@ func TestBuildCdCommand_Cmd(t *testing.T) {
 
 func TestBuildCdCommand_Cmd_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\my project\test folder`, "cmd")
+	cmd := mustBuildCdCommand(t, svc, `D:\my project\test folder`, "cmd")
 	expected := `cd /d "D:\my project\test folder"` + "\r"
 	if cmd != expected {
 		t.Errorf("CMD(含空格): 期望=%q, 实际=%q", expected, cmd)
@@ -44,7 +55,7 @@ func TestBuildCdCommand_Cmd_WithSpaces(t *testing.T) {
 
 func TestBuildCdCommand_PowerShell(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\workspace\test`, "powershell")
+	cmd := mustBuildCdCommand(t, svc, `D:\workspace\test`, "powershell")
 	expected := `cd "D:\workspace\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("PowerShell: 期望=%q, 实际=%q", expected, cmd)
@@ -53,7 +64,7 @@ func TestBuildCdCommand_PowerShell(t *testing.T) {
 
 func TestBuildCdCommand_PowerShell_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "powershell")
+	cmd := mustBuildCdCommand(t, svc, `D:\工作\Doc\项目管理`, "powershell")
 	expected := `cd "D:\工作\Doc\项目管理"` + "\r"
 	if cmd != expected {
 		t.Errorf("PowerShell(含空格/中文): 期望=%q, 实际=%q", expected, cmd)
@@ -62,7 +73,7 @@ func TestBuildCdCommand_PowerShell_WithSpaces(t *testing.T) {
 
 func TestBuildCdCommand_GitBash(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\workspace\test`, "gitbash")
+	cmd := mustBuildCdCommand(t, svc, `D:\workspace\test`, "gitbash")
 	expected := `cd "D:/workspace/test"` + "\r"
 	if cmd != expected {
 		t.Errorf("Git Bash: 期望=%q, 实际=%q", expected, cmd)
@@ -71,7 +82,7 @@ func TestBuildCdCommand_GitBash(t *testing.T) {
 
 func TestBuildCdCommand_GitBash_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理\10.岗职`, "gitbash")
+	cmd := mustBuildCdCommand(t, svc, `D:\工作\Doc\项目管理\10.岗职`, "gitbash")
 	expected := `cd "D:/工作/Doc/项目管理/10.岗职"` + "\r"
 	if cmd != expected {
 		t.Errorf("Git Bash(含中文/空格): 期望=%q, 实际=%q", expected, cmd)
@@ -80,7 +91,7 @@ func TestBuildCdCommand_GitBash_WithSpaces(t *testing.T) {
 
 func TestBuildCdCommand_Wsl(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\workspace\test`, "wsl")
+	cmd := mustBuildCdCommand(t, svc, `D:\workspace\test`, "wsl")
 	expected := `cd "/mnt/d/workspace/test"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL: 期望=%q, 实际=%q", expected, cmd)
@@ -89,7 +100,7 @@ func TestBuildCdCommand_Wsl(t *testing.T) {
 
 func TestBuildCdCommand_Wsl_DriveRoot(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`C:\`, "wsl")
+	cmd := mustBuildCdCommand(t, svc, `C:\`, "wsl")
 	expected := `cd "/mnt/c/"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL(驱动器根): 期望=%q, 实际=%q", expected, cmd)
@@ -98,7 +109,7 @@ func TestBuildCdCommand_Wsl_DriveRoot(t *testing.T) {
 
 func TestBuildCdCommand_Wsl_WithSpaces(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`D:\工作\Doc\项目管理`, "wsl")
+	cmd := mustBuildCdCommand(t, svc, `D:\工作\Doc\项目管理`, "wsl")
 	expected := `cd "/mnt/d/工作/Doc/项目管理"` + "\r"
 	if cmd != expected {
 		t.Errorf("WSL(含中文): 期望=%q, 实际=%q", expected, cmd)
@@ -109,7 +120,7 @@ func TestBuildCdCommand_DefaultFallback(t *testing.T) {
 	svc := NewTerminalService(nil)
 	if runtime.GOOS == "windows" {
 		// Windows 上未知 Shell 回退 PowerShell 语法
-		cmd := svc.buildCdCommand(`C:\Users`, "unknown_shell")
+		cmd := mustBuildCdCommand(t, svc, `C:\Users`, "unknown_shell")
 		expected := `cd "C:\Users"` + "\r"
 		if cmd != expected {
 			t.Errorf("未知 Shell 应回退到 PowerShell 语法, 期望=%q, 实际=%q", expected, cmd)
@@ -117,7 +128,7 @@ func TestBuildCdCommand_DefaultFallback(t *testing.T) {
 		return
 	}
 	// 非 Windows 平台未知 Shell 兜底按 POSIX 语法输出，避免向 Unix shell 发出 Windows 语法
-	cmd := svc.buildCdCommand("/tmp/work", "unknown_shell")
+	cmd := mustBuildCdCommand(t, svc, "/tmp/work", "unknown_shell")
 	expected := "cd -- '/tmp/work'" + "\r"
 	if cmd != expected {
 		t.Errorf("非 Windows 平台未知 Shell 应回退到 POSIX 语法, 期望=%q, 实际=%q", expected, cmd)
@@ -127,7 +138,7 @@ func TestBuildCdCommand_DefaultFallback(t *testing.T) {
 // TestBuildCdCommand_PosixBash POSIX shell（bash）输出 cd -- '<path>' 语法（跨平台纯函数断言）。
 func TestBuildCdCommand_PosixBash(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("/tmp/work dir", "bash")
+	cmd := mustBuildCdCommand(t, svc, "/tmp/work dir", "bash")
 	expected := "cd -- '/tmp/work dir'" + "\r"
 	if cmd != expected {
 		t.Errorf("POSIX(bash): 期望=%q, 实际=%q", expected, cmd)
@@ -137,7 +148,7 @@ func TestBuildCdCommand_PosixBash(t *testing.T) {
 // TestBuildCdCommand_PosixQuoteEscape 路径内单引号按 POSIX 规则转义为 '\''。
 func TestBuildCdCommand_PosixQuoteEscape(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand(`/tmp/it's`, "zsh")
+	cmd := mustBuildCdCommand(t, svc, `/tmp/it's`, "zsh")
 	expected := "cd -- '/tmp/it'\\''s'" + "\r"
 	if cmd != expected {
 		t.Errorf("POSIX(单引号转义): 期望=%q, 实际=%q", expected, cmd)
@@ -146,15 +157,64 @@ func TestBuildCdCommand_PosixQuoteEscape(t *testing.T) {
 
 // TestBuildPosixCdCommand_TrailingCR POSIX 与 Windows 分支一致保留 \r 结尾（PTY 回车执行语义）。
 func TestBuildPosixCdCommand_TrailingCR(t *testing.T) {
-	cmd := buildPosixCdCommand("/tmp/work")
+	cmd, err := buildPosixCdCommand("/tmp/work", "bash")
+	if err != nil {
+		t.Fatalf("buildPosixCdCommand: %v", err)
+	}
 	if !strings.HasSuffix(cmd, "\r") {
 		t.Errorf("POSIX cd 命令应以 \\r 结尾, 实际=%q", cmd)
 	}
 }
 
+// TestBuildPosixCdCommand_RejectsNewline 路径含 \n/\r 时拒绝生成 cd 命令（G1）：
+// Linux 文件名合法含换行，单引号包裹无法阻止 PTY 按行分割，cd 截断后剩余片段会被
+// shell 当作独立命令执行（注入面），故返回错误由 ChangeDir 透传前端提示。
+func TestBuildPosixCdCommand_RejectsNewline(t *testing.T) {
+	for _, dir := range []string{"/tmp/a\nb", "/tmp/a\rb", "/tmp/a\r\nb", "\n/tmp"} {
+		if _, err := buildPosixCdCommand(dir, "bash"); err == nil {
+			t.Errorf("路径含换行应拒绝生成命令, dir=%q", dir)
+		}
+	}
+	// 正常路径不误伤
+	if _, err := buildPosixCdCommand("/tmp/work", "bash"); err != nil {
+		t.Errorf("正常路径不应报错: %v", err)
+	}
+}
+
+// TestBuildCdCommand_PosixNewlineRejected buildCdCommand 链路层面拒绝（G1）：
+// POSIX 分支透传换行错误；Windows 分支无对应注入面（Windows 文件名不允许换行）不受影响。
+func TestBuildCdCommand_PosixNewlineRejected(t *testing.T) {
+	svc := NewTerminalService(nil)
+	if _, err := svc.buildCdCommand("/tmp/a\nb", "zsh"); err == nil {
+		t.Error("POSIX 分支路径含换行应返回错误")
+	}
+	if _, err := svc.buildCdCommand("/tmp/a\nb", "fish"); err == nil {
+		t.Error("fish 分支路径含换行同样应返回错误")
+	}
+}
+
+// TestBuildPosixCdCommand_FishOmitsDashDash fish 防御省略 `--`（G2，查证结论见
+// buildPosixCdCommand 注释），bash/zsh 等其余 POSIX shell 保持 cd -- '<path>'。
+func TestBuildPosixCdCommand_FishOmitsDashDash(t *testing.T) {
+	fish, err := buildPosixCdCommand("/tmp/work dir", "fish")
+	if err != nil {
+		t.Fatalf("buildPosixCdCommand(fish): %v", err)
+	}
+	if fish != "cd '/tmp/work dir'\r" {
+		t.Errorf("fish 应输出 cd '<path>'（无 --）, 实际=%q", fish)
+	}
+	bash, err := buildPosixCdCommand("/tmp/work dir", "bash")
+	if err != nil {
+		t.Fatalf("buildPosixCdCommand(bash): %v", err)
+	}
+	if bash != "cd -- '/tmp/work dir'\r" {
+		t.Errorf("bash 应保持 cd -- '<path>', 实际=%q", bash)
+	}
+}
+
 func TestBuildCdCommand_EmptyPath(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("", "cmd")
+	cmd := mustBuildCdCommand(t, svc, "", "cmd")
 	if cmd == "" {
 		t.Error("空路径不应产生空命令")
 	}

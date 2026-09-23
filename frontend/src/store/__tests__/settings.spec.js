@@ -16,6 +16,8 @@ import {
   shortcutFromEvent,
   DEFAULTS,
   DIFF_TOOL_PRESETS,
+  DIFF_TOOL_PRESETS_LINUX,
+  diffToolPresetsFor,
   TERMINAL_APPEARANCE_DEFAULTS,
   TERMINAL_FONT_SIZE_MIN,
   TERMINAL_FONT_SIZE_MAX,
@@ -93,8 +95,10 @@ describe('settings store - loadDefaultShell', () => {
     GetShellConfigs.mockRejectedValue(new Error('fail'))
     const store = useSettingsStore()
     await store.loadDefaultShell()
+    // 断言「列表不可用时的最终解析值」为 FALLBACK_SHELL（G12：不再对导入常量与字面量
+    // 做恒真比较，行为语义由上一行解析值断言承载）
     expect(store.defaultShell).toBe(FALLBACK_SHELL)
-    expect(FALLBACK_SHELL).toBe('powershell')
+    expect(store.defaultShell).toBe('powershell')
   })
 
   it('GetShellConfigs 返回空列表时同样回退 FALLBACK_SHELL', async () => {
@@ -103,6 +107,41 @@ describe('settings store - loadDefaultShell', () => {
     const store = useSettingsStore()
     await store.loadDefaultShell()
     expect(store.defaultShell).toBe(FALLBACK_SHELL)
+  })
+
+  it('loadDefaultShell 拉到列表后写入 shellConfigsCache（G8-G10 平台信号单一数据源）', async () => {
+    GetSettings.mockResolvedValue({})
+    GetShellConfigs.mockResolvedValue([
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' }
+    ])
+    const store = useSettingsStore()
+    await store.loadDefaultShell()
+    expect(store.shellConfigsCache.map(c => c.type)).toEqual(['bash', 'zsh'])
+  })
+
+  it('isWindowsPlatform：列表首项 powershell → true，bash → false（G8-G10 平台信号，与 R7 同源）', async () => {
+    GetSettings.mockResolvedValue({})
+    const store = useSettingsStore()
+    GetShellConfigs.mockResolvedValue([
+      { type: 'powershell', displayName: 'PowerShell' },
+      { type: 'cmd', displayName: 'CMD' }
+    ])
+    await store.loadDefaultShell()
+    expect(store.isWindowsPlatform).toBe(true)
+
+    GetShellConfigs.mockResolvedValue([
+      { type: 'bash', displayName: 'Bash' },
+      { type: 'zsh', displayName: 'Zsh' }
+    ])
+    await store.loadDefaultShell()
+    expect(store.isWindowsPlatform).toBe(false)
+  })
+
+  it('isWindowsPlatform：列表未加载（空）时保守按 Windows 兜底（Windows 用户可见行为零变化）', () => {
+    // 全新 store 未执行任何加载，shellConfigsCache 为空 → 兜底 true
+    const store = useSettingsStore()
+    expect(store.isWindowsPlatform).toBe(true)
   })
 })
 
@@ -494,6 +533,30 @@ describe('settings store - 外部 diff 工具 (diffTool/loadDiffTool/saveDiffToo
       expect(preset.args).toContain('{right}')
     }
     expect(DIFF_TOOL_PRESETS.vscode.args).toBe('--diff --wait {left} {right}')
+  })
+
+  it('diffToolPresetsFor：Windows 返回既有表，非 Windows 返回 Linux 表（G10 平台化）', () => {
+    expect(diffToolPresetsFor(true)).toBe(DIFF_TOOL_PRESETS)
+    expect(diffToolPresetsFor(false)).toBe(DIFF_TOOL_PRESETS_LINUX)
+  })
+
+  it('DIFF_TOOL_PRESETS_LINUX：Linux 常见 diff 工具预设（G10）', () => {
+    const keys = Object.keys(DIFF_TOOL_PRESETS_LINUX)
+    // beyondcompare/custom 两平台共用 key：loadDiffTool 空值回退名与存量 settings.json
+    // 在 Linux 下拉中均有对应项不裸值
+    expect(keys).toEqual(expect.arrayContaining(['beyondcompare', 'meld', 'kdiff3', 'vscode', 'custom']))
+    for (const key of keys) {
+      const preset = DIFF_TOOL_PRESETS_LINUX[key]
+      expect(preset.label).toBeTruthy()
+      expect(typeof preset.path).toBe('string')
+      expect(preset.args).toContain('{left}')
+      expect(preset.args).toContain('{right}')
+    }
+    // Linux 预设用 `command -v` 可命中的裸命令名，不写 Windows 专有路径
+    expect(DIFF_TOOL_PRESETS_LINUX.meld.path).toBe('meld')
+    expect(DIFF_TOOL_PRESETS_LINUX.kdiff3.path).toBe('kdiff3')
+    expect(DIFF_TOOL_PRESETS_LINUX.beyondcompare.path).toBe('bcompare')
+    expect(DIFF_TOOL_PRESETS_LINUX.winmerge).toBeUndefined()
   })
 })
 

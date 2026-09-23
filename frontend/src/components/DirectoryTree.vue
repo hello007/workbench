@@ -120,7 +120,7 @@
           <el-input v-model="addForm.name" placeholder="例如: 我的工作空间" />
         </el-form-item>
         <el-form-item label="目录路径">
-          <el-input ref="addPathInputRef" v-model="addForm.path" placeholder="例如: C:\workspace" />
+          <el-input ref="addPathInputRef" v-model="addForm.path" :placeholder="addPathPlaceholder" />
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="addForm.isDefault" />
@@ -163,7 +163,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Star, Plus, Edit, Delete, FolderOpened, Refresh, CopyDocument, Filter, Download, Upload, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -458,6 +458,15 @@ const addLoading = ref(false)
 const addForm = ref({ name: '', path: '', isDefault: false })
 const addNameManuallySet = ref(false)
 const addPathInputRef = ref()
+
+// 目录路径占位符平台化（G8）：信号源与 R7 终端兜底目录同源——settings store
+// isWindowsPlatform（GetShellConfigs 按应用进程所在主机 GOOS 返回，首项 powershell ⇔
+// Windows；禁 navigator.userAgent，serve 模式浏览器端平台与服务端可能不同机）。
+// Windows 保持历史文案逐字节不变；非 Windows 显示 POSIX 中性示例。列表未加载时
+// isWindowsPlatform 兜底 true（回退 Windows 文案，仅 RPC 失败降级场景短暂出现）
+const addPathPlaceholder = computed(() =>
+  settingsStore.isWindowsPlatform ? '例如: C:\\workspace' : '例如: /home/user/projects'
+)
 
 watch(() => addForm.value.path, (newPath) => {
   if (addNameManuallySet.value) return

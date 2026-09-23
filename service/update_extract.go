@@ -15,7 +15,8 @@ import (
 // 该上限仅作解压炸弹防御（超大成员写满磁盘），不影响正常更新。
 const maxUpdateBinarySize = 512 << 20
 
-// extractUpdateTarGz 解压 Linux 更新 tar.gz（updateAssetLinux），提取包内顶层 workbench
+// extractUpdateTarGz 解压 Linux 更新 tar.gz（updateAssetName() 产物，workbench-linux-<GOARCH>.tar.gz），
+// 提取包内顶层 workbench
 // 二进制（updateBinaryLinux）到 destDir，返回解出二进制的路径。
 // 与 release.yml 打包布局对齐：tar 顶层为扁平的 workbench + README-linux.md，其余成员忽略。
 // 防御性说明：成员名一律经 filepath.Base 剥离目录成分后与 updateBinaryLinux 精确比对，

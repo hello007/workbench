@@ -27,9 +27,12 @@ const (
 	PendingUpdateFile = "pending-update.json"
 	// updateAssetWindows Windows 平台更新资产名（与 .github/workflows/release.yml 上传产物名严格一致）
 	updateAssetWindows = "workbench.exe"
-	// updateAssetLinux Linux 平台更新资产名（tar.gz 压缩包，与 release.yml 打包产物名严格一致；
-	// 不带版本号——版本由 Release tag 携带，固定资产名保证旧版本客户端按名匹配不失配，amd64 后缀预留 arm64 扩展）
-	updateAssetLinux = "workbench-linux-amd64.tar.gz"
+	// updateAssetLinuxFmt Linux 平台更新资产名模板（tar.gz 压缩包，%s 为 runtime.GOARCH，
+	// 与 release.yml 打包产物名严格一致；不带版本号——版本由 Release tag 携带，固定资产名
+	// 保证旧版本客户端按名匹配不失配。当前 release.yml 仅产 amd64 包，arm64 机器
+	// CheckForUpdate 未命中资产时报「暂不支持 <GOOS>/<GOARCH> 架构的自动更新」而非
+	// 误导性的「未找到可下载的更新文件」）
+	updateAssetLinuxFmt = "workbench-linux-%s.tar.gz"
 	// updateBinaryLinux Linux tar.gz 包内二进制名（扁平布局顶层成员，解包后落 updateDir）
 	updateBinaryLinux = "workbench"
 )
@@ -42,12 +45,25 @@ type UpdateService struct {
 	mu         sync.Mutex         // 保护 cancelDL 字段
 }
 
-// updateAssetName 返回当前平台的更新资产名（CheckForUpdate 按平台匹配 GitHub Release 资产）
+// updateAssetName 返回当前平台的更新资产名（CheckForUpdate 按平台匹配 GitHub Release 资产）：
+// Windows 为 workbench.exe（GOARCH 无关，release.yml 单一 exe 产物）；Linux 按 GOARCH
+// 组装 tar.gz 名（amd64 命中 release 产物；arm64 等暂无产物的架构经 noAssetError 明确报错）
 func updateAssetName() string {
 	if runtime.GOOS == "windows" {
 		return updateAssetWindows
 	}
-	return updateAssetLinux
+	return fmt.Sprintf(updateAssetLinuxFmt, runtime.GOARCH)
+}
+
+// noAssetError Release 资产未命中时的错误（goos/goarch 参数化供跨平台单测，生产调用
+// 传 runtime.GOOS/GOARCH）：Windows 与 linux/amd64（release 现有产物覆盖面）维持原文案；
+// 其余架构明确提示暂不支持，与「发版侧确实没有该架构资产」的事实一致，避免 arm64 用户
+// 误以为是网络/发版异常而反复重试。
+func noAssetError(goos, goarch string) error {
+	if goos == "windows" || goarch == "amd64" {
+		return fmt.Errorf("未找到可下载的更新文件")
+	}
+	return fmt.Errorf("暂不支持 %s/%s 架构的自动更新", goos, goarch)
 }
 
 // updateBinaryPath 返回更新目录内新版本二进制的路径：
@@ -117,7 +133,7 @@ func (s *UpdateService) CheckForUpdate(currentVersion string) (*model.UpdateInfo
 		PublishedAt:  release.PublishedAt,
 	}
 
-	// 按平台查找更新资产（Windows: workbench.exe；Linux: workbench-linux-amd64.tar.gz）
+	// 按平台查找更新资产（Windows: workbench.exe；Linux: workbench-linux-<GOARCH>.tar.gz）
 	for _, asset := range release.Assets {
 		if asset.Name == updateAssetName() {
 			info.DownloadURL = asset.BrowserDownloadURL
@@ -127,7 +143,7 @@ func (s *UpdateService) CheckForUpdate(currentVersion string) (*model.UpdateInfo
 	}
 
 	if info.DownloadURL == "" {
-		return nil, fmt.Errorf("未找到可下载的更新文件")
+		return nil, noAssetError(runtime.GOOS, runtime.GOARCH)
 	}
 
 	// 比较版本号
@@ -145,7 +161,7 @@ func (s *UpdateService) DownloadUpdate(downloadURL string) error {
 		return fmt.Errorf("创建临时目录失败: %w", err)
 	}
 
-	// 下载目标按平台资产名落地（Windows: workbench.exe；Linux: workbench-linux-amd64.tar.gz）
+	// 下载目标按平台资产名落地（Windows: workbench.exe；Linux: workbench-linux-<GOARCH>.tar.gz）
 	targetFile := filepath.Join(updateDir, updateAssetName())
 
 	// 创建可取消的请求上下文
@@ -325,8 +341,9 @@ func shellQuote(path string) string {
 }
 
 // buildUpdateSh 生成 Linux 更新 shell 脚本内容（buildUpdateBat 的 POSIX 等价实现）：
-// kill -0 轮询等待旧进程退出（最多 10 秒，超时 kill -9 强杀）、mv 替换二进制、
-// 清理更新标记与临时目录、nohup 后台启动新版本、脚本自删。
+// kill -0 轮询等待旧进程退出（最多 10 秒，超时 kill -9 强杀，强杀前校验 cmdline 身份
+// 防 PID 复用误杀）、mv 替换二进制、清理更新标记与临时目录、nohup 后台启动新版本、
+// 脚本自删。
 // 与 .bat 的差异：LF 换行（CR 会导致 shebang 解析失败）、路径经 shellQuote 单引号包裹
 // 防空格与 shell 元字符注入。
 // 替换失败（如安装目录只读）即以非零退出中止、不做任何清理：清理分支会连带删除
@@ -341,9 +358,16 @@ func buildUpdateSh(pid int, newExe, currentExe, pendingFile, updateDir string) s
 	b.WriteString("echo 正在更新 WorkBench...\n\n")
 	b.WriteString("PID=" + strconv.Itoa(pid) + "\n")
 	b.WriteString("WAIT=0\n")
-	b.WriteString("# 等待当前进程退出（最多 10 秒，超时强杀）\n")
+	b.WriteString("# 等待当前进程退出（最多 10 秒，超时强杀；强杀前校验进程身份防 PID 复用误杀）\n")
 	b.WriteString("while kill -0 \"$PID\" 2>/dev/null; do\n")
 	b.WriteString("    if [ \"$WAIT\" -ge 10 ]; then\n")
+	b.WriteString("        # PID 复用防御：/proc 为 Linux 特性（脚本仅 Linux 执行）。cmdline 以 NUL 分隔，\n")
+	b.WriteString("        # tr 转空格后 grep 匹配二进制名；/proc 不可读（内核安全限制等）时保守跳过校验按原逻辑强杀；\n")
+	b.WriteString("        # 校验命中「进程存活但非 workbench」时放弃强杀（避免误杀复用 PID 的无关进程），继续更新流程\n")
+	b.WriteString("        if [ -r \"/proc/$PID/cmdline\" ] && ! tr '\\0' ' ' < \"/proc/$PID/cmdline\" | grep -q workbench; then\n")
+	b.WriteString("            echo '旧进程 PID 已被其他进程复用，跳过强杀' >&2\n")
+	b.WriteString("            break\n")
+	b.WriteString("        fi\n")
 	b.WriteString("        kill -9 \"$PID\" 2>/dev/null\n")
 	b.WriteString("        break\n")
 	b.WriteString("    fi\n")

@@ -41,9 +41,10 @@ go build -tags "desktop,production,webkit2_41" ./...
 ## 4. Linux Shell 枚举与终端
 
 - `model.GetShellConfigs()`/`ResolveShellConfig()` 按 GOOS：Linux 返回 `{bash /bin/bash}{zsh /bin/zsh}{fish /usr/bin/fish}{sh /bin/sh}`，默认 bash；Windows 四项（powershell/cmd/gitbash/wsl）逐字节保留。
-- `buildCdCommand` POSIX 输出 `cd -- '<path>'\r`：`--` 防选项解析、单引号转义 `'\''`、`\r` 是 PTY 回车执行语义两平台都保留。`isUnixShellType` 白名单外非 Windows 兜底 POSIX。
+- `buildCdCommand` POSIX 输出 `cd -- '<path>'\r`：`--` 防选项解析、单引号转义 `'\''`、`\r` 是 PTY 回车执行语义两平台都保留。`isUnixShellType` 白名单外非 Windows 兜底 POSIX。**fish 例外（G2）**：`buildPosixCdCommand` 对 `shellType=fish` 省略 `--` 输出 `cd '<path>'`（fish 3.0 起 builtin 才统一支持 `--`，用户环境版本不可控，防御省略；代价仅为 `-` 开头罕见路径 cd 失败，无注入风险）。**换行拒绝（G1）**：路径含 `\n`/`\r` 时返回错误拒绝生成命令（Linux 文件名合法含换行，单引号无法阻止 PTY 行分割，剩余片段会被当命令执行），`buildCdCommand` 全链返回 `(string, error)`，`ChangeDir` 透传前端提示。
 - 前端默认 shell 兜底链（`store/settings.js` 单一常量 `FALLBACK_SHELL` + 单一解析函数 `resolveDefaultShell`，消费方统一引用）：用户设置 `defaultShell`（须在平台列表内）→ 后端 `GetShellConfigs` 首项（Windows=powershell / Linux=bash）→ `'powershell'`。用户设置为跨平台残留值（如 Windows 时期的 `gitbash`/`wsl` 在 Linux 主机）时收敛到首项，列表不可用（RPC 失败）时保留用户设置——保证下拉显示值 / 条件渲染 / tab 副标签 / 实际 PTY shellType 四处一致。`TerminalPanel` 有 `settingsReady` 门控防闪现；新增 shell 消费方禁止再写 `'powershell'` 字面量。
 - 终端兜底目录平台判定（`TerminalPanel` `fallbackTerminalDir`）：列表首项 type 为 `powershell` → `'C:\'`，否则 `'/'`。禁用 `navigator.userAgent`——serve 模式 PTY 跑在服务端主机，UA 反映浏览器端设备，方向相反。
+- 前端平台信号单一数据源（G8-G10）：`store/settings.js` 的 `shellConfigsCache`（`loadDefaultShell` / `SettingsPanel.loadSettings` 拉到列表时经 `cacheShellConfigs` 写入）+ `isWindowsPlatform` computed（首项 `powershell` ⇔ Windows，判定逻辑与 `fallbackTerminalDir` 同源）。平台化占位符（DirectoryTree 添加目录、SettingsPanel obsidian/diffTool 路径）与 `diffToolPresetsFor(isWindows)` 预设分流统一消费该信号，禁止组件各自 RPC 或引 UA。缓存为空（RPC 失败降级）时兜底按 Windows 处理——Windows 用户可见行为零变化。
 
 ## 5. 剪贴板契约（Linux）
 
@@ -53,10 +54,10 @@ go build -tags "desktop,production,webkit2_41" ./...
 
 ## 6. 自更新资产与解包
 
-- 资产名（`service/update.go` `updateAssetName()`）：Windows `workbench.exe` / Linux `workbench-linux-amd64.tar.gz`。**与 release.yml 打包名严格一致**，改任一侧必须同步（常量注释互指 + `TestUpdateAssetName_MatchesPlatform` 锁定）。
+- 资产名（`service/update.go` `updateAssetName()`）：Windows `workbench.exe` / Linux `workbench-linux-<GOARCH>.tar.gz`（G3 起按 `runtime.GOARCH` 组装，当前 release.yml 仅产 amd64 包；未命中资产且架构非 amd64 时 `noAssetError` 报「暂不支持 <GOOS>/<GOARCH> 架构的自动更新」，Windows/amd64 维持「未找到可下载的更新文件」）。**与 release.yml 打包名严格一致**，改任一侧必须同步（常量注释互指 + `TestUpdateAssetName_MatchesPlatform` 特征断言锁定）。
 - Linux 下载流：tar.gz 落盘 → `extractUpdateTarGz`（`update_extract.go`）取顶层 `workbench` 二进制 → 走既有 .sh 替换流程。
 - 解包安全约束：仅提取 `Typeflag == TypeReg` 且 `filepath.Base(name) == "workbench"` 的成员（symlink/hardlink/目录全跳过）；输出路径硬编码 `destDir/workbench` 不消费 `hdr.Name`（路径穿越免疫）；写入经 `LimitReader` 限成员解压体积上限 `maxUpdateBinarySize`（512MB 常量，不用 asset FileSize——压缩包大小约束不了解压产物体积），超限删半成品报错（解压炸弹防御）；落盘后显式 `Chmod 0755`（防 umask 去位）。
-- 更新脚本：Linux `buildUpdateSh`/`buildApplySh`（POSIX：kill -0 轮询、mv -f 失败 `|| exit 1` 中止防假更新（清理/重启仅在成功分支，路径经 `shellQuote` 单引号转义防注入）、nohup 脱离、`rm -f -- "$0"` 自删；apply.sh 失败分支额外清除 pending 并拉起旧版本——app.go 命中 pending 即 `os.Exit(0)`，不拉起应用将死循环打不开），`update_sh_syntax_test.go` 用 `sh -n` 静态校验拦截 bashism；`.sh` 必须 LF（CR 会坏 shebang，有测试断言）。
+- 更新脚本：Linux `buildUpdateSh`/`buildApplySh`（POSIX：kill -0 轮询、mv -f 失败 `|| exit 1` 中止防假更新（清理/重启仅在成功分支，路径经 `shellQuote` 单引号转义防注入）、nohup 脱离、`rm -f -- "$0"` 自删；apply.sh 失败分支额外清除 pending 并拉起旧版本——app.go 命中 pending 即 `os.Exit(0)`，不拉起应用将死循环打不开），`update_sh_syntax_test.go` 用 `sh -n` 静态校验拦截 bashism；`.sh` 必须 LF（CR 会坏 shebang，有测试断言）。**kill -9 前身份校验（G4）**：超时强杀前经 `tr '\0' ' ' < /proc/$PID/cmdline | grep -q workbench` 确认进程身份（cmdline 为 NUL 分隔须 tr 转换），命中「存活但非 workbench」（PID 已被复用）则跳过强杀继续更新；`/proc` 不可读时保守跳过校验按原逻辑强杀。
 
 ## 7. 构建与分发
 

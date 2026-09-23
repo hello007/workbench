@@ -1,5 +1,6 @@
 # CI：push(master) / pull_request 触发，Linux runner 跑后端编译验证/静态检查/单测/集成测试 + 前端构建/单测 + Playwright E2E。
-# 与 release.yml（tag v* 触发、windows-latest 发版）互不冲突：tag push 不匹配 branches 过滤器。
+# 与 release.yml（tag v* 触发、windows-latest + ubuntu-22.04 容器（webkit2_41 构建，glibc 2.35 基线）
+# 双 job 发版，产出 workbench.exe 与 workbench-linux-amd64.tar.gz）互不冲突：tag push 不匹配 branches 过滤器。
 # 前置事实（Linux 平台相关，改动步骤前先读）：
 # 1. frontend/wailsjs/ 与 frontend/dist/ 均在 .gitignore 中不入库。wailsjs 缺失会使 vite build
 #    失败，须先 wails generate module 重新生成绑定；而 main.go 的 //go:embed all:frontend/dist
@@ -56,66 +57,84 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # 5. 安装 Wails Linux 桌面编译依赖：gcc/pkg-config 支撑 cgo 构建，libgtk-3-dev /
+      # 5. apt 包缓存（G6）：缓存 /var/cache/apt/archives 的 .deb，命中时 apt-get install
+      #    跳过下载（GTK/webkit 依赖链数百 MB，省 30-90 秒/run）。
+      #    缓存方案评估结论：选 actions/cache@v4（GitHub 官方维护、社区使用最广、无第三方
+      #    信任面），未选 awalsh128/cache-apt-pkgs-action（第三方维护节奏慢、自带独立安装
+      #    逻辑出问题 debug 成本高）。污染风险低：apt 安装自带包完整性校验，缓存内容损坏
+      #    只会导致重新下载、不会装坏包。key 含包列表文件 hash（.github/ci-apt-packages.txt
+      #    单一数据源，包列表变更即自动换 key 重装）。release.yml 不加：发版 job 低频 +
+      #    ubuntu:22.04 容器跑 action 需 GitHub 注入 node runtime（兼容性多一层不确定），
+      #    收益/风险比不划算。security job 不装 GTK 依赖，无需缓存。
+      - name: 缓存 apt 包
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/ci-apt-packages.txt') }}
+
+      # 6. 安装 Wails Linux 桌面编译依赖：gcc/pkg-config 支撑 cgo 构建，libgtk-3-dev /
       #    libwebkit2gtk-4.1-dev 提供对应 pkg-config 包，仅「后端编译验证」的 production
-      #    桌面路径消费（Ubuntu 24.04 无 webkit2gtk-4.0，统一走 4.1 + webkit2_41 标签）
+      #    桌面路径消费（Ubuntu 24.04 无 webkit2gtk-4.0，统一走 4.1 + webkit2_41 标签）。
+      #    包名从 .github/ci-apt-packages.txt 读取（与缓存 key 同一数据源，防两处漂移）。
+      #    xargs 无注释语法（# 会被当包名传给 apt-get），故先 grep 过滤 # 注释行；
+      #    -r 防全注释/空文件时以零参数调用 apt-get install（报错退出）
       - name: 安装 Wails Linux 桌面编译依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+          grep -v '^#' .github/ci-apt-packages.txt | xargs -r sudo apt-get install -y
 
-      # 6. 安装 Wails CLI（锁定 v2 大版本）
+      # 7. 安装 Wails CLI（锁定 v2 大版本）
       - name: 安装 Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2
 
-      # 7. 生成 Wails 绑定（frontend/wailsjs/ 被 gitignore，须重新生成；generate module 以
+      # 8. 生成 Wails 绑定（frontend/wailsjs/ 被 gitignore，须重新生成；generate module 以
       #    bindings 标签编译主包产出 JS/TS 绑定，bindings 标签下桌面前端不进依赖图，
       #    无需 GTK/WebKit，仅依赖 dist 占位满足 embed）
       - name: 生成 Wails 绑定
         run: wails generate module
 
-      # 8. 后端编译验证：带 production 标签走真实 Linux 桌面编译路径（对齐 wails build 的
+      # 9. 后端编译验证：带 production 标签走真实 Linux 桌面编译路径（对齐 wails build 的
       #    -tags desktop,production），验证 Linux 平台差异代码（pty/剪贴板/文件打开/
       #    自更新 .sh 等）与 cgo 链接完整可用
       - name: 后端编译验证（Linux 桌面生产路径）
         run: go build -tags "desktop,production,webkit2_41" ./...
 
-      # 9. 后端静态检查（无标签依赖图与单元测试一致，不含 cgo 桌面前端；不加
+      # 10. 后端静态检查（无标签依赖图与单元测试一致，不含 cgo 桌面前端；不加
       #    -unsafeptr=false：该豁免针对 windows 专属的 util/clipboard_windows.go 误报，
       #    Linux 编译图不含该文件，与本地 GOOS=linux go vet 验证一致）
       - name: 后端静态检查
         run: go vet ./...
 
-      # 10. 后端单元测试（快的放前面，失败即停）
+      # 11. 后端单元测试（快的放前面，失败即停）
       - name: 后端单元测试
         run: go test ./...
 
-      # 11. 后端集成测试（临时 git 仓库 fixture，git_flows_integration_test.go，
+      # 12. 后端集成测试（临时 git 仓库 fixture，git_flows_integration_test.go，
       #     构建标签 integration 隔离，不依赖网络）
       - name: 后端集成测试
         run: go test -tags=integration ./...
 
-      # 12. 前端依赖安装
+      # 13. 前端依赖安装
       - name: 安装前端依赖
         run: cd frontend && npm ci
 
-      # 13. 前端构建（清空占位 dist 生成真实产物，验证绑定完整 + MISSING_EXPORT 类打包错误）
+      # 14. 前端构建（清空占位 dist 生成真实产物，验证绑定完整 + MISSING_EXPORT 类打包错误）
       - name: 前端构建
         run: cd frontend && npm run build
 
-      # 14. 安装 Playwright Chromium（--with-deps 同步装系统依赖，runner 有免密 sudo）
+      # 15. 安装 Playwright Chromium（--with-deps 同步装系统依赖，runner 有免密 sudo）
       - name: 安装 Playwright 浏览器
         run: cd frontend && npx playwright install --with-deps chromium
 
-      # 15. E2E 测试（webServer 自动 vite build + vite preview，CI 环境自动 retries=2）
+      # 16. E2E 测试（webServer 自动 vite build + vite preview，CI 环境自动 retries=2）
       - name: E2E 测试
         run: cd frontend && npm run e2e
 
-      # 16. 前端单元测试
+      # 17. 前端单元测试
       - name: 前端单元测试
         run: cd frontend && npm test -- --run
 
-      # 17. 失败时上传 E2E 报告与 trace（短保留期）
+      # 18. 失败时上传 E2E 报告与 trace（短保留期）
       - name: 上传 E2E 报告
         if: failure()
         uses: actions/upload-artifact@v4

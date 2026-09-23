@@ -240,19 +240,20 @@ describe('SettingsPanel.vue', () => {
       { type: 'zsh', displayName: 'Zsh' }
     ])
     await wrapper.findAll('.settings-nav-item')[1].trigger('click')
-    expect(wrapper.vm.$.setupState.shellConfigs.map(c => c.type)).toEqual(['bash', 'zsh'])
-    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
-    expect(wrapper.text()).toContain('Bash')
-    expect(wrapper.text()).toContain('Zsh')
+    // DOM 层断言（G11）：下拉渲染后端返回的两项，选中值收敛首项 bash（resolveDefaultShell 平台默认），
+    // 不触达 setupState 内部结构（脆断）
+    const options = wrapper.findAll('.default-shell-select option')
+    expect(options.map(o => o.text())).toEqual(['Bash', 'Zsh'])
+    expect(wrapper.find('.default-shell-select').element.value).toBe('bash')
   })
 
   it('GetShellConfigs 拉取失败时保留 Windows 兜底列表，defaultShell 回退 powershell', async () => {
     wrapper = await createWrapper({ defaultShell: '' }, {}, 'a'.repeat(64), 'fail')
     await wrapper.findAll('.settings-nav-item')[1].trigger('click')
-    expect(wrapper.vm.$.setupState.shellConfigs.map(c => c.type)).toEqual([
-      'powershell', 'cmd', 'gitbash', 'wsl'
-    ])
-    expect(wrapper.vm.$.setupState.defaultShell).toBe('powershell')
+    // DOM 层断言（G11）：渲染出 Windows 兜底四项、无 Linux 选项残留、选中值收敛 powershell
+    const options = wrapper.findAll('.default-shell-select option')
+    expect(options.map(o => o.text())).toEqual(['PowerShell', 'CMD', 'Git Bash', 'WSL'])
+    expect(wrapper.find('.default-shell-select').element.value).toBe('powershell')
   })
 
   it('存量跨平台残留设置收敛：settings 存 gitbash + Linux 列表 → 显示 bash，gitbash 条件渲染不误触发', async () => {
@@ -264,7 +265,8 @@ describe('SettingsPanel.vue', () => {
       { type: 'fish', displayName: 'Fish' }
     ])
     await wrapper.findAll('.settings-nav-item')[1].trigger('click')
-    expect(wrapper.vm.$.setupState.defaultShell).toBe('bash')
+    // DOM 层断言（G11）：选中值收敛首项 bash（下拉显示值与实际 PTY shellType 一致不留裸值）
+    expect(wrapper.find('.default-shell-select').element.value).toBe('bash')
     // gitbash 条件渲染分支（Git Bash 路径输入框）不得出现
     expect(wrapper.text()).not.toContain('Git Bash 路径')
     // wsl 条件渲染分支（WSL 发行版输入框）同样不得出现

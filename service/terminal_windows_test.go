@@ -42,7 +42,10 @@ func TestResolveShellConfig_UnknownType(t *testing.T) {
 // filepath.Clean 在 Windows 上会将 / 转为 \（Linux 上 \ 为合法文件名字符不参与归一）。
 func TestBuildCdCommand_PathNormalization(t *testing.T) {
 	svc := NewTerminalService(nil)
-	cmd := svc.buildCdCommand("C:/Users/test", "cmd")
+	cmd, err := svc.buildCdCommand("C:/Users/test", "cmd")
+	if err != nil {
+		t.Fatalf("buildCdCommand: %v", err)
+	}
 	expected := `cd /d "C:\Users\test"` + "\r"
 	if cmd != expected {
 		t.Errorf("路径应被规范化, 期望=%q, 实际=%q", expected, cmd)

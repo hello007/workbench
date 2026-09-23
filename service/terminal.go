@@ -83,7 +83,11 @@ func (s *TerminalService) ChangeDir(sessionID, dir string) error {
 	if !session.IsRunning() {
 		return fmt.Errorf("终端会话 %s 已停止", sessionID)
 	}
-	cdCmd := s.buildCdCommand(dir, session.ShellType)
+	cdCmd, err := s.buildCdCommand(dir, session.ShellType)
+	if err != nil {
+		// 路径不合法（如含换行符，见 buildPosixCdCommand）时不写 PTY，错误透传前端提示
+		return err
+	}
 	_, err = ptyProc.Write([]byte(cdCmd))
 	if err != nil {
 		return err
@@ -164,35 +168,37 @@ func isUnixShellType(shellType string) bool {
 }
 
 // buildCdCommand 根据 Shell 类型构建 cd 命令
-// POSIX shell（bash/zsh/fish/sh）: cd -- '<path>'（单引号包裹，路径内单引号转义）
+// POSIX shell（bash/zsh/fish/sh）: cd -- '<path>'（fish 省略 `--`，见 buildPosixCdCommand）
 // CMD: cd /d "path"（/d 标志切换驱动器+目录）
 // PowerShell: cd "path"（自动处理驱动器切换）
 // Git Bash: cd "path"（反斜杠转正斜杠）
 // WSL: cd "/mnt/x/path"（Windows 路径转 WSL 挂载路径）
-func (s *TerminalService) buildCdCommand(dir string, shellType string) string {
+// 错误返回：POSIX 分支路径含换行符时拒绝生成命令（见 buildPosixCdCommand），由 ChangeDir
+// 透传前端；Windows 分支恒返回 nil（Windows 文件名不允许含换行，无对应注入面）
+func (s *TerminalService) buildCdCommand(dir string, shellType string) (string, error) {
 	normalizedDir := filepath.Clean(dir)
 
 	if isUnixShellType(shellType) {
 		// ToSlash 归一为 POSIX 分隔符：Linux 上无操作；
 		// Windows 上误配 bash 类型时 Clean 产生的反斜杠转回正斜杠（Git Bash 兼容）
-		return buildPosixCdCommand(filepath.ToSlash(normalizedDir))
+		return buildPosixCdCommand(filepath.ToSlash(normalizedDir), shellType)
 	}
 
 	switch shellType {
 	case "cmd":
 		// CMD: /d 标志用于同时切换驱动器和目录
-		return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\r"
+		return fmt.Sprintf(`cd /d "%s"`, normalizedDir) + "\r", nil
 	case "gitbash":
 		// Git Bash: 无 /d 标志，反斜杠转正斜杠
 		unixDir := strings.ReplaceAll(normalizedDir, `\`, `/`)
-		return fmt.Sprintf(`cd "%s"`, unixDir) + "\r"
+		return fmt.Sprintf(`cd "%s"`, unixDir) + "\r", nil
 	case "wsl":
 		// WSL: D:\path → /mnt/d/path
 		wslDir := toWslPath(normalizedDir)
-		return fmt.Sprintf(`cd "%s"`, wslDir) + "\r"
+		return fmt.Sprintf(`cd "%s"`, wslDir) + "\r", nil
 	default:
 		// PowerShell 及其他: 无需 /d 标志
-		return fmt.Sprintf(`cd "%s"`, normalizedDir) + "\r"
+		return fmt.Sprintf(`cd "%s"`, normalizedDir) + "\r", nil
 	}
 }
 
@@ -207,13 +213,29 @@ func toWslPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
 }
 
-// buildPosixCdCommand 构建 POSIX shell 的 cd 命令：cd -- '<path>'。
+// buildPosixCdCommand 构建 POSIX shell 的 cd 命令：cd -- '<path>'（fish 为 cd '<path>'）。
 // `--` 防止以 - 开头的路径被解析为选项；单引号包裹路径，路径内单引号按 POSIX
 // 规则转义为 '\''（结束引号、转义引号、重开引号）。
+// G2 fish 兼容结论（防御分支）：fish 的 cd 为函数（share/functions/cd.fish）包装
+// builtin cd；依 fish 3.0（2018-12 发布）changelog，3.0 起所有 builtin 统一支持 `--`
+// 终止选项解析，更早版本（2.x）对 `--` 的处理不一致（会把 `--` 当目录名报错）。
+// 本任务实现环境无法在线复核 fishshell.com 文档原文，且用户环境 fish 版本运行时不可控，
+// 故按 PRD 防御路径：对 fish 省略 `--` 输出 cd '<path>'（该形式全版本 fish 必然有效）。
+// 代价：fish 下以 - 开头的罕见路径会被误判为选项而 cd 失败（无注入风险，属可接受降级）；
+// bash/zsh/sh 及非 Windows 未知类型兜底保持 cd -- '<path>'。
+// G1 换行防护：路径含 \n/\r 时返回错误拒绝生成命令——Linux 文件名合法含换行，
+// 单引号包裹无法阻止 PTY 按行分割，cd 截断后剩余片段会被 shell 当作独立命令执行
+// （注入面）；错误经 ChangeDir 透传前端提示路径不合法。
 // 末尾保留 \r（回车），与 Windows 分支语义一致：PTY 中回车触发命令执行。
-func buildPosixCdCommand(dir string) string {
+func buildPosixCdCommand(dir, shellType string) (string, error) {
+	if strings.ContainsAny(dir, "\n\r") {
+		return "", fmt.Errorf("路径含换行符，无法在终端中安全切换: %q", dir)
+	}
 	escaped := strings.ReplaceAll(dir, "'", `'\''`)
-	return "cd -- '" + escaped + "'\r"
+	if shellType == "fish" {
+		return "cd '" + escaped + "'\r", nil
+	}
+	return "cd -- '" + escaped + "'\r", nil
 }
 
 // startOutputPump 输出泵，持续读取 PTY 输出并经事件出口推送给前端

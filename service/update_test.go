@@ -126,15 +126,19 @@ func TestBuildApplyBat_ContainsKeyParts(t *testing.T) {
 	}
 }
 
-// TestBuildUpdateSh_ContainsKeyParts 生成的 shell 脚本含 kill -0 等待轮询、超时强杀、
-// 二进制替换（单引号包裹 + 失败中止）、清理、nohup 启动、脚本自删各关键片段，
-// 且为 LF 换行（CR 会导致 shebang 解析失败）。
+// TestBuildUpdateSh_ContainsKeyParts 生成的 shell 脚本含 kill -0 等待轮询、超时强杀
+// （强杀前 cmdline 身份校验防 PID 复用误杀，G4）、二进制替换（单引号包裹 + 失败中止）、
+// 清理、nohup 启动、脚本自删各关键片段，且为 LF 换行（CR 会导致 shebang 解析失败）。
 func TestBuildUpdateSh_ContainsKeyParts(t *testing.T) {
 	sh := buildUpdateSh(1234, "/tmp/upd/workbench", "/opt/workbench/workbench", "/tmp/upd/pending.json", "/tmp/upd")
 	wants := []string{
 		"#!/bin/sh",
 		"PID=1234",
 		`while kill -0 "$PID" 2>/dev/null; do`,
+		// G4：kill -9 前校验 /proc cmdline 含 workbench（tr 转 NUL 分隔的 cmdline 后 grep），
+		// /proc 不可读时保守跳过校验，非 workbench 进程复用 PID 时跳过强杀
+		`if [ -r "/proc/$PID/cmdline" ] && ! tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q workbench; then`,
+		`echo '旧进程 PID 已被其他进程复用，跳过强杀' >&2`,
 		`kill -9 "$PID" 2>/dev/null`,
 		"sleep 1",
 		// 路径单引号包裹（shell 注入防护）+ mv 失败非零退出（防假更新：失败不得清理/重启）
@@ -262,27 +266,74 @@ func newUpdateSvcWithMock(status int, body string) *UpdateService {
 	return svc
 }
 
-// TestUpdateAssetName_MatchesPlatform 资产名按 GOOS 返回（与 release.yml 产物名严格一致）
+// TestUpdateAssetName_MatchesPlatform 资产名平台无关断言（G5）：期望值不与实现共用
+// GOOS 分支取同一常量（分支同构恒真只验证常量绑定），改断言产物名特征——后缀/平台段/
+// 架构段，锚定与 release.yml 打包产物命名约定的行为一致（G3 起资产名按 GOARCH 组装）。
 func TestUpdateAssetName_MatchesPlatform(t *testing.T) {
-	want := updateAssetWindows
-	if runtime.GOOS != "windows" {
-		want = updateAssetLinux
+	name := updateAssetName()
+	if runtime.GOOS == "windows" {
+		// Windows 资产即二进制本体，固定 .exe（GOARCH 无关，release.yml 单一 exe 产物）
+		if !strings.HasSuffix(name, ".exe") {
+			t.Errorf("Windows 资产名应以 .exe 结尾, got %q", name)
+		}
+		return
 	}
-	if updateAssetName() != want {
-		t.Errorf("updateAssetName() = %q, want %q", updateAssetName(), want)
+	if !strings.HasSuffix(name, ".tar.gz") {
+		t.Errorf("Linux 资产名应以 .tar.gz 结尾, got %q", name)
+	}
+	if !strings.Contains(name, "linux-") {
+		t.Errorf("Linux 资产名应含平台段 linux-, got %q", name)
+	}
+	// G3：资产名按 GOARCH 组装（amd64 命中 release 产物 workbench-linux-amd64.tar.gz）
+	if !strings.Contains(name, runtime.GOARCH) {
+		t.Errorf("Linux 资产名应含架构段 %s, got %q", runtime.GOARCH, name)
 	}
 }
 
-// TestUpdateBinaryPath_MatchesPlatform 更新目录内二进制路径按平台返回：
-// Windows 资产即二进制本体；Linux 为解包产物 workbench
+// TestUpdateBinaryPath_MatchesPlatform 更新目录内二进制路径平台无关断言（G5）：
+// Windows 资产即二进制本体（.exe 落地）；Linux 断言 Base 名与 tar.gz 解包约定一致
+// （extractUpdateTarGz 仅提取 Base 为 workbench 的成员，字面量锚定该约定而非实现常量）。
 func TestUpdateBinaryPath_MatchesPlatform(t *testing.T) {
 	got := updateBinaryPath("/tmp/upd")
-	want := filepath.Join("/tmp/upd", updateAssetWindows)
-	if runtime.GOOS != "windows" {
-		want = filepath.Join("/tmp/upd", updateBinaryLinux)
+	if runtime.GOOS == "windows" {
+		if !strings.HasSuffix(filepath.Base(got), ".exe") {
+			t.Errorf("Windows 更新二进制应为 .exe 本体, got %q", got)
+		}
+		return
 	}
-	if got != want {
-		t.Errorf("updateBinaryPath() = %q, want %q", got, want)
+	if filepath.Base(got) != "workbench" {
+		t.Errorf("Linux 更新二进制 Base 名应与 tar.gz 解包约定一致（workbench）, got %q", got)
+	}
+}
+
+// TestNoAssetError 资产未命中错误按架构分流（G3）：现有产物覆盖面（Windows 任意架构 /
+// linux amd64）维持原文案；无产物的架构（linux/arm64 等）明确提示暂不支持，参数化
+// goos/goarch 使全部分支跨平台可测。
+func TestNoAssetError(t *testing.T) {
+	cases := []struct {
+		goos      string
+		goarch    string
+		wantText  string
+		notWanted string
+	}{
+		{"windows", "amd64", "未找到可下载的更新文件", "暂不支持"},
+		{"windows", "arm64", "未找到可下载的更新文件", "暂不支持"},
+		{"linux", "amd64", "未找到可下载的更新文件", "暂不支持"},
+		{"linux", "arm64", "暂不支持 linux/arm64 架构的自动更新", "未找到可下载的更新文件"},
+		{"darwin", "arm64", "暂不支持 darwin/arm64 架构的自动更新", "未找到可下载的更新文件"},
+	}
+	for _, c := range cases {
+		err := noAssetError(c.goos, c.goarch)
+		if err == nil {
+			t.Errorf("noAssetError(%s/%s) 应返回错误", c.goos, c.goarch)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.wantText) {
+			t.Errorf("noAssetError(%s/%s) = %q, 应含 %q", c.goos, c.goarch, err.Error(), c.wantText)
+		}
+		if strings.Contains(err.Error(), c.notWanted) {
+			t.Errorf("noAssetError(%s/%s) = %q, 不应含 %q", c.goos, c.goarch, err.Error(), c.notWanted)
+		}
 	}
 }
 

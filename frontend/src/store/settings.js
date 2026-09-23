@@ -106,15 +106,36 @@ function shortcutFromEvent(event) {
 const THEME_MODES = new Set(['system', 'light', 'dark'])
 
 /**
- * 外部 diff 工具预设模板：选中预设即填充默认路径与参数模板，二者仍可手动修改。
- * path 为常用默认安装路径（vscode 依赖 PATH 中的 code 命令，与 OpenInVSCode 一致）；
- * args 须包含 {left} {right} 占位符，由后端渲染为实际文件路径。
+ * 外部 diff 工具预设模板（G10 平台化，按 diffToolPresetsFor(isWindows) 分流）：
+ * 选中预设即填充默认路径与参数模板，二者仍可手动修改。
+ * Windows 表（既有，逐字节保留）：path 为常用默认安装路径（vscode 依赖 PATH 中的 code 命令，与 OpenInVSCode 一致）。
+ * Linux 表（G10 新增）：path 用 `command -v` 可命中的裸命令名（meld/kdiff3/bcompare 的
+ * deb 包安装后均落 /usr/bin），避免选中即写入不存在的 Windows 路径；beyondcompare key
+ * 两表共用，保证 loadDiffTool 空值回退名与存量 settings.json 在两平台下拉中均有对应项不裸值。
+ * args 均须包含 {left} {right} 占位符，由后端渲染为实际文件路径。
  */
 export const DIFF_TOOL_PRESETS = {
   beyondcompare: { label: 'Beyond Compare', path: 'C:\\Program Files\\Beyond Compare 5\\BComp.exe', args: '{left} {right}' },
   winmerge: { label: 'WinMerge', path: 'C:\\Program Files\\WinMerge\\WinMergeU.exe', args: '{left} {right}' },
   vscode: { label: 'VSCode diff', path: 'code', args: '--diff --wait {left} {right}' },
   custom: { label: '自定义', path: '', args: '{left} {right}' }
+}
+
+/** Linux 平台 diff 工具预设表（G10，消费方经 diffToolPresetsFor 取表，勿直接引用） */
+export const DIFF_TOOL_PRESETS_LINUX = {
+  beyondcompare: { label: 'Beyond Compare', path: 'bcompare', args: '{left} {right}' },
+  meld: { label: 'Meld', path: 'meld', args: '{left} {right}' },
+  kdiff3: { label: 'KDiff3', path: 'kdiff3', args: '{left} {right}' },
+  vscode: { label: 'VSCode diff', path: 'code', args: '--diff --wait {left} {right}' },
+  custom: { label: '自定义', path: '', args: '{left} {right}' }
+}
+
+/**
+ * 按平台返回 diff 工具预设表（G10）：isWindows 由消费方传 settings store 的
+ * isWindowsPlatform（与 R7 平台判定同源），Windows 保留既有表零行为变化。
+ */
+export function diffToolPresetsFor(isWindows) {
+  return isWindows ? DIFF_TOOL_PRESETS : DIFF_TOOL_PRESETS_LINUX
 }
 
 /**
@@ -242,6 +263,32 @@ export const useSettingsStore = defineStore('settings', () => {
   // 避免 useTerminal 内散落 'powershell' 硬编码（Linux 下会误开 PowerShell）
   const defaultShell = ref('')
 
+  // 平台 Shell 列表缓存（G8-G10 平台信号单一数据源）：loadDefaultShell / SettingsPanel
+  // loadSettings 拉到列表时写入，作 isWindowsPlatform 判定输入，避免多组件各自 RPC。
+  // 拉取失败保留旧值（启动早期为空数组）
+  const shellConfigsCache = ref([])
+
+  // 平台判定信号（R7 同款，禁 navigator.userAgent）：PTY/文件操作跑在应用进程所在主机，
+  // serve 模式下与浏览器端设备可能不同机，UA 反映浏览器端平台方向相反不可用。
+  // 判定：列表首项 type 为 powershell ⇔ Windows（GetShellConfigs 按服务端 GOOS 返回，
+  // Windows=powershell 首项、Linux=bash 首项）。列表未加载（空）时保守按 Windows 处理：
+  // Windows 用户可见行为零变化（占位符/预设均为历史文案），Linux 下 loadDefaultShell
+  // 正常完成后必为非空列表，仅在 RPC 失败的降级场景短暂回退现状
+  const isWindowsPlatform = computed(() => {
+    const first = shellConfigsCache.value[0]
+    return !first || first.type === 'powershell'
+  })
+
+  /**
+   * 缓存平台 Shell 列表（G8-G10 信号源写入点）：loadDefaultShell 与 SettingsPanel
+   * loadSettings 拉到非空列表时调用，供 isWindowsPlatform 判定与平台化占位符/预设消费。
+   */
+  function cacheShellConfigs(configs) {
+    if (Array.isArray(configs) && configs.length > 0) {
+      shellConfigsCache.value = configs
+    }
+  }
+
   // 字号 clamp：非正数/非法值回退默认，界内取整后收敛到 [10, 24]
   function clampTerminalFontSize(v) {
     const n = Number(v)
@@ -318,6 +365,8 @@ export const useSettingsStore = defineStore('settings', () => {
       // 用户设置读取失败，按未设置处理
     }
     defaultShell.value = resolveDefaultShell(userShell, configs)
+    // G8-G10 平台信号：缓存列表供 isWindowsPlatform 判定（拉取失败保留旧值/空 → 按 Windows 兜底）
+    cacheShellConfigs(configs)
   }
 
   // 实际生效主题：light/dark。system 模式按系统偏好解析，light/dark 直接取值
@@ -438,6 +487,9 @@ export const useSettingsStore = defineStore('settings', () => {
     terminalFontFamily,
     terminalScrollback,
     defaultShell,
+    shellConfigsCache,
+    isWindowsPlatform,
+    cacheShellConfigs,
     loadShortcuts,
     saveShortcuts,
     checkConflict,
