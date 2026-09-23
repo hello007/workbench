@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App.ExportDiagnostics / App.GetAndClearLastCrashFlag 方法须手动同步 frontend/wailsjs 三处（App.js/App.d.ts）；models.ts 无新类型（返回 void/bool）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "诊断包来源即 data/logs/app.log（slog+lumberjack 轮转 5MB×5）；导出失败经前端 handleError 分流提示"}
+{"file": "docs/spec/e2e-testing.md", "reason": "App.vue 挂载即调 GetAndClearLastCrashFlag，wails-mock-defaults.js 必须补默认值（E2E 浏览器环境无此函数会启动报错）"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "诊断导出与崩溃标记设计为 service 包纯函数（无依赖注入不注册 AppServices struct），规避 NewAppServices 装配成本"}

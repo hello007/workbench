@@ -1,0 +1,2 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 绑定三处同步与 npm run build 通过"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service 新增诊断/崩溃标记纯函数带足够单测（zip 内容完整性、缺失降级、flag 生命周期）不回退门禁"}

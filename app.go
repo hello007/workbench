@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
+	"workbench/service"
 	"workbench/util"
 )
 
@@ -27,6 +29,9 @@ type App struct {
 	// webServeListenOverride 命令行 --listen 显式覆盖值（空串 = 未指定，走
 	// settings.json webServe.bindAddress；命令行覆盖配置文件）。main() 注入。
 	webServeListenOverride string
+	// lastCrashFlag 上次会话异常退出标记：startup 检测 data/crash.flag 时置位，
+	// 前端 GetAndClearLastCrashFlag 读后即清（防重复提示）。见 service/diagnostics.go。
+	lastCrashFlag bool
 }
 
 // NewApp 构造空 App。AppServices 初始化为空 struct（非 nil），
@@ -44,6 +49,16 @@ func (a *App) startup(ctx context.Context) {
 
 	// 清理上次会话外部 diff 工具残留临时文件（运行中不删，避免工具仍持有文件）
 	util.CleanupDiffTempDir()
+
+	// 异常退出检测：旧 crash.flag 存在 = 上次会话未正常关闭（崩溃/强杀），
+	// 置位供前端查询提示；随后重建 flag 标记本次运行（正常 shutdown 时删除）
+	a.lastCrashFlag = service.DetectLastCrash(crashFlagPath())
+	if err := service.MarkSessionStart(crashFlagPath()); err != nil {
+		slog.Warn("mark session start failed", "err", err)
+	}
+	if a.lastCrashFlag {
+		slog.Info("last session exited abnormally (crash flag detected)")
+	}
 
 	// 启动定时清理兜底：周期性清理未归档的运行期输出文件（归档接管已 os.Rename 移走不留残，此处只清异常残留）
 	a.aiFuncSvc.StartHistoryCleanup()
@@ -81,7 +96,16 @@ func (a *App) shutdown(context.Context) {
 	if a.chatSvc != nil {
 		a.chatSvc.CloseAll()
 	}
+	// 正常退出清除异常标记（崩溃/强杀时不会走到这里，flag 残留供下次启动检测）
+	if err := service.ClearCrashFlag(crashFlagPath()); err != nil {
+		slog.Warn("clear crash flag failed", "err", err)
+	}
 	slog.Info("workbench shutting down")
+}
+
+// crashFlagPath 异常退出标记文件路径（data/ 目录，随装配 dataDir 约定）。
+func crashFlagPath() string {
+	return filepath.Join("data", "crash.flag")
 }
 
 // GetAppVersion 获取应用版本号

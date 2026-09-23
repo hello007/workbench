@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"runtime"
 
 	"workbench/model"
 	"workbench/service"
@@ -155,4 +157,27 @@ func (a *App) OpenInExternalMerge(path, file string) error {
 		mergeTemplate = settings.DiffToolMergeArgs
 	}
 	return a.gitSvc.OpenInExternalMerge(path, settings.DiffToolPath, mergeTemplate, file)
+}
+
+// ExportDiagnostics 导出诊断信息 zip 到指定路径（前端经 SaveFileDialog 选定）。
+// 包内容：diagnostics.txt（版本/构建/平台/导出时间/文件清单）+ logs/ 下全部日志
+// （含轮转备份）+ session.json（存在时）。日志缺失降级收纳并在清单注明。
+func (a *App) ExportDiagnostics(zipPath string) error {
+	if filepath.Base(zipPath) == "" {
+		return fmt.Errorf("导出路径不能为空")
+	}
+	return service.BuildDiagnosticsZip(zipPath, service.DiagnosticsInfo{
+		Version:   version,
+		BuildTime: buildTime,
+		GoVersion: runtime.Version(),
+		OSInfo:    runtime.GOOS + "/" + runtime.GOARCH,
+	}, filepath.Join("data", "logs"), filepath.Join("data", "session.json"))
+}
+
+// GetAndClearLastCrashFlag 查询并清除「上次会话异常退出」标记（读后即清，
+// 前端启动时调用一次提示用户，防重复弹提示）。
+func (a *App) GetAndClearLastCrashFlag() bool {
+	flag := a.lastCrashFlag
+	a.lastCrashFlag = false
+	return flag
 }

@@ -87,6 +87,22 @@
             </div>
             <el-input v-model="settingsStore.diffToolArgs" size="small" class="input-w-xl" placeholder="{left} {right}" @change="onDiffToolChange" />
           </div>
+          <!-- 三向合并模板：仅自定义工具需手填；预设工具（Beyond Compare / WinMerge /
+               VSCode / KDiff3 / Meld）由后端内置模板接管，冲突面板「外部合并」零配置 -->
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">三向合并参数模板</div>
+              <div class="settings-item-desc">预设工具已内置无需填写；自定义工具须包含 {base} {local} {remote} {merged} 占位符，供冲突面板「外部合并」使用</div>
+            </div>
+            <el-input
+              v-model="settingsStore.diffToolMergeArgs"
+              size="small"
+              class="input-w-xl"
+              :placeholder="settingsStore.diffToolName === 'custom' ? '{base} {local} {remote} {merged}' : '预设工具已内置'"
+              :disabled="settingsStore.diffToolName !== 'custom'"
+              @change="onDiffToolChange"
+            />
+          </div>
           <!-- 版本与更新 -->
           <div class="settings-section-title settings-section-title--spaced">关于</div>
           <div class="settings-item">
@@ -100,6 +116,19 @@
               :loading="checkingUpdate"
               @click="handleCheckUpdate"
             >检查更新</el-button>
+          </div>
+          <!-- 诊断信息导出：打包日志 + 版本/平台信息 + 会话快照为 zip，用户手动提交
+               （桌面单用户无后端，「发送」实为导出） -->
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">诊断信息</div>
+              <div class="settings-item-desc">导出日志与运行环境信息包（zip），遇到问题时提交给开发者</div>
+            </div>
+            <el-button
+              size="small"
+              :loading="exportingDiagnostics"
+              @click="handleExportDiagnostics"
+            >导出诊断信息</el-button>
           </div>
         </div>
         <!-- 终端页 -->
@@ -347,7 +376,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
@@ -856,6 +885,24 @@ async function handleCheckUpdate() {
     ElMessage.error('检查更新失败: ' + (e.message || String(e)))
   } finally {
     checkingUpdate.value = false
+  }
+}
+
+// 导出诊断信息：SaveFileDialog 选路径（默认名含日期）→ 后端打包 zip → 成功提示路径
+const exportingDiagnostics = ref(false)
+async function handleExportDiagnostics() {
+  if (exportingDiagnostics.value) return
+  exportingDiagnostics.value = true
+  try {
+    const defaultName = `workbench-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`
+    const path = await SaveFileDialog(defaultName, [{ displayName: '诊断包 (*.zip)', pattern: '*.zip' }])
+    if (!path) return // 用户取消
+    await ExportDiagnostics(path)
+    ElMessage.success(`诊断信息已导出: ${path}`)
+  } catch (e) {
+    handleError('导出诊断信息失败: ', e)
+  } finally {
+    exportingDiagnostics.value = false
   }
 }
 

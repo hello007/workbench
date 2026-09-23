@@ -19,6 +19,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SaveSettings: vi.fn(),
   GetAppVersion: vi.fn(),
   CheckForUpdate: vi.fn(),
+  SaveFileDialog: vi.fn(),
+  ExportDiagnostics: vi.fn(),
   GetShellConfigs: vi.fn(),
   GetWebServeConfig: vi.fn(),
   SetWebServeConfig: vi.fn(),
@@ -353,6 +355,32 @@ describe('SettingsPanel.vue', () => {
     await wrapper.findAll('button').find(b => b.text().includes('检查更新')).trigger('click')
     await flushPromises()
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('最新版本'))
+  })
+
+  it('导出诊断信息：选路径后调 ExportDiagnostics 并 success 提示', async () => {
+    const { SaveFileDialog, ExportDiagnostics } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SaveFileDialog.mockResolvedValue('D:/tmp/diag.zip')
+    ExportDiagnostics.mockResolvedValue(undefined)
+
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('导出诊断信息')).trigger('click')
+    await flushPromises()
+
+    expect(SaveFileDialog).toHaveBeenCalled()
+    expect(ExportDiagnostics).toHaveBeenCalledWith('D:/tmp/diag.zip')
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('D:/tmp/diag.zip'))
+  })
+
+  it('导出诊断信息：用户取消选路径时不调 ExportDiagnostics', async () => {
+    const { SaveFileDialog, ExportDiagnostics } = await import('../../../wailsjs/go/main/App')
+    SaveFileDialog.mockResolvedValue('') // 取消返回空串
+
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('导出诊断信息')).trigger('click')
+    await flushPromises()
+
+    expect(ExportDiagnostics).not.toHaveBeenCalled()
   })
 
   it('检查更新：有新版本时 emit update-available', async () => {
@@ -692,6 +720,15 @@ describe('SettingsPanel.vue - 外部 diff 工具配置区', () => {
     const inputs = wrapper.findAll('input').map(i => i.attributes('placeholder'))
     expect(inputs.some(p => p?.includes('WinMergeU.exe'))).toBe(true)
     expect(inputs).toContain('{left} {right}')
+  })
+
+  it('通用 tab 渲染三向合并参数模板行（custom 可编辑提示占位符）', async () => {
+    wrapper = await createWrapper()
+    expect(wrapper.text()).toContain('三向合并参数模板')
+    // custom 预设：输入行可编辑，placeholder 提示四占位符
+    wrapper = await createWrapper({ diffToolName: 'custom' })
+    const mergeInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('{base}'))
+    expect(mergeInput).toBeTruthy()
   })
 
   it('loadSettings 时经 store 加载已保存的 diff 工具配置', async () => {

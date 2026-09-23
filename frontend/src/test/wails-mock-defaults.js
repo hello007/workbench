@@ -25,6 +25,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   PullRepo: 'Success',
   ScanAndPullRepos: { total: 0 },
   GetAppVersion: 'dev',
+  // 崩溃检测（App.vue 挂载即调，E2E 浏览器环境必须有默认值；false=无异常退出提示）
+  GetAndClearLastCrashFlag: false,
+  ExportDiagnostics: true,
   OpenInWarp: true,
   OpenWithDefaultApp: true,
   OpenInExternalDiff: true,
