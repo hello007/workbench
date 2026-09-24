@@ -1221,3 +1221,36 @@ data/ 落盘文件与 .gitignore 全量盘点：补齐 crash.flag 唯一缺口�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 91: 文档版本 v2.14 与路线图勾选/死链同步
+
+**Date**: 2026-09-24
+**Task**: 文档版本 v2.14 与路线图勾选/死链同步
+**Branch**: `master`
+
+### Summary
+
+CLAUDE.md v2.14；路线图补勾 desktop-e2e-cdp（通道修正措辞）+ 修复 6 处归档死链；本批 4 功能勾选核对完成
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d7ec130` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
