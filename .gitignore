@@ -48,6 +48,8 @@ data/ai_task*
 data/ai_chat/
 # serve 模式访问令牌（运行期生成的机密文件，见 server/token.go）
 data/web_token
+# 异常退出标记（startup 检测上次会话崩溃/强杀，正常 shutdown 删除，见 app.go）
+data/crash.flag
 
 .claude/settings.local.json
 # Coverage report artifacts
