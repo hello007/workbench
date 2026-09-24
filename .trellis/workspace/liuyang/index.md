@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 89
-- **Last Active**: 2026-09-23
+- **Total Sessions**: 90
+- **Last Active**: 2026-09-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1190 | Active |
+| `journal-2.md` | ~1223 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 90 | 2026-09-24 | gitignore 补齐 data/crash.flag 忽略规则 | `d44ffd4` | `master` |
 | 89 | 2026-09-23 | 贡献者行数排名（路线图遗留补齐） | `2671c57`, `404810c`, `c5fdfc3`, `3d51cb5` | `master` |
 | 88 | 2026-09-23 | 修复 StartupMatrix 测试环境端口依赖 | `cf8cbbe`, `3dd9eac` | `master` |
 | 87 | 2026-09-23 | AI 对话选择题交互卡片 | `5153f1b` | `master` |

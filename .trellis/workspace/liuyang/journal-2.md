@@ -1188,3 +1188,36 @@ TestApp_StartWebServe_StartupMatrix/设置开启默认启动 稳定失败定性�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 90: gitignore 补齐 data/crash.flag 忽略规则
+
+**Date**: 2026-09-24
+**Task**: gitignore 补齐 data/crash.flag 忽略规则
+**Branch**: `master`
+
+### Summary
+
+data/ 落盘文件与 .gitignore 全量盘点：补齐 crash.flag 唯一缺口，build/bin 与 test-results 覆盖确认完整
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d44ffd4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
