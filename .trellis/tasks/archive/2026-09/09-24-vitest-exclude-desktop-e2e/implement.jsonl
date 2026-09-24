@@ -1,0 +1,1 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 通道架构与 vitest/playwright 通道隔离背景，e2e/** 排除先例来源"}
