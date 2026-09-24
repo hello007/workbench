@@ -1,0 +1,1 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "真桌面 E2E 通道节的通道修正事实（WebView2 CDP 不可行→真实进程+浏览器通道），路线图 L259 改写措辞依据"}
