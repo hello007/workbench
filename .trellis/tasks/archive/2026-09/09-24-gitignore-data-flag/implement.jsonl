@@ -1,0 +1,1 @@
+{"file": "docs/spec/linux-platform.md", "reason": "build/ 白名单放行先例（!build/README-linux.md）与 gitignore 分发文件规则背景"}
