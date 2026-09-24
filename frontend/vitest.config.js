@@ -7,8 +7,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.js'],
-    // Playwright 的 e2e/*.spec.js 语法与 vitest 不兼容，显式排除避免被 include 收集
-    exclude: [...configDefaults.exclude, 'e2e/**'],
+    // Playwright 的 e2e/（mock 通道）与 e2e-desktop/（真桌面通道）spec 语法与 vitest 不兼容，显式排除避免被 include 收集
+    exclude: [...configDefaults.exclude, 'e2e/**', 'e2e-desktop/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'html', 'lcov'],

@@ -108,6 +108,7 @@ mock 通道盲区的真实进程生命周期链路覆盖：会话状态真实持
 * **实例隔离**（用户桌面常驻真实 workbench.exe，绝不触碰）：exe 复制改名 `workbench-e2e.exe`（Wails 默认 WebView2 profile 按 exe 名隔离）+ `--listen=127.0.0.1:<探测端口>`（避开 36115）+ cwd 独立临时目录（data/ 隔离）
 * **确定性断言锚点**：文件系统（session.json 落盘、crash.flag 存在与否）与后端日志（"last session exited abnormally"）；**禁追 UI 弹窗**（ElNotification 8s 自动关闭与页面就绪存在时序竞争）
 * **已知依赖库隐患**：go-webview2 `errorCallback` 在窗口销毁链中偶发 `os.Exit(1)` 跳过 shutdown 钩子——crash.flag 清除（shutdown 末尾）因此偶发缺失，正常关闭可能被误报「异常退出」；E2E 不对 flag 方向做强断言，隐患待 wails/go-webview2 升级后复查
+* **vitest 收集隔离（常见错误）**：新增 E2E 通道目录（Playwright spec 所在目录）必须同步 `frontend/vitest.config.js` 的 `test.exclude`——Playwright spec 顶层 `test.skip(条件, 说明)` 在 vitest 环境非法，被误收集即报 `test.skip() can only be called inside test` 文件级失败（形态隐蔽：用例 0 失败但 files failed）。先例：`e2e/**` 2026-09-13 已排除；`e2e-desktop/**` 2026-09-23 落地时漏排除，2026-09-24 收口跑 `npm test` 才暴露
 
 ## 12. 相关文档
 
