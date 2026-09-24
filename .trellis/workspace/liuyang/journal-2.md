@@ -1254,3 +1254,36 @@ CLAUDE.md v2.14；路线图补勾 desktop-e2e-cdp（通道修正措辞）+ 修�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 92: vitest 排除 e2e-desktop 修复 npm test 回归
+
+**Date**: 2026-09-24
+**Task**: vitest 排除 e2e-desktop 修复 npm test 回归
+**Branch**: `master`
+
+### Summary
+
+exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用例全绿；e2e:desktop 通道实测不受影响；沉淀 e2e-testing.md vitest 收集隔离
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

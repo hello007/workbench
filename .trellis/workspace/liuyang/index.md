@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 91
+- **Total Sessions**: 92
 - **Last Active**: 2026-09-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1256 | Active |
+| `journal-2.md` | ~1289 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 92 | 2026-09-24 | vitest 排除 e2e-desktop 修复 npm test 回归 | HEAD | `master` |
 | 91 | 2026-09-24 | 文档版本 v2.14 与路线图勾选/死链同步 | `d7ec130` | `master` |
 | 90 | 2026-09-24 | gitignore 补齐 data/crash.flag 忽略规则 | `d44ffd4` | `master` |
 | 89 | 2026-09-23 | 贡献者行数排名（路线图遗留补齐） | `2671c57`, `404810c`, `c5fdfc3`, `3d51cb5` | `master` |
