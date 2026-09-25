@@ -75,6 +75,7 @@ workbench/
 |测试禁隐式依赖环境外部状态：文件 mtime 时序（NTFS 同 tick 不变）与固定端口（本机常驻 workbench.exe 监听 36115）均致偶发挂；web serve 启动测试注入随机端口（settings BindAddress 写 :0 或 webServeListenOverride，直调 Start 直接传参），能直绑 :0 的用例禁新增非必要 freePort 探测（TOCTOU 定性接受仅限结构性须预知端口的用例），mtime 判定用注入陈旧缓存驱动，禁 sleep 等待|[test-stability.md](docs/spec/test-stability.md)|
 |统计类派生聚合缓存（如贡献者行数 numstat 缓存）复用 `commitHistoryCacheKey` 键与 headSHA+TTL 失效判定时，失效为二态（命中/全量重拉，聚合值无增量 prepend 路径），且须在 `InvalidateCommitHistoryCache`（ClearByGitRoot）与 `ClearAllCommitHistoryCache`（ClearAll）两入口联动清除，漏联动则手动刷新后行数与提交数口径漂移|—|
 |data/ 目录 JSON 持久化必须走 `util.SaveJSON` 原子写（CreateTemp 同目录 temp → fsync → os.Rename 替换，Windows 为 MoveFileEx REPLACE_EXISTING 原子替换），禁新增 os.WriteFile 直写与自建 temp+rename 实现（saveChatJSON/atomicWriteConfig 已收敛为委托）；崩溃残留 `.<目标名>.tmp-*` 点文件无害不自动清扫；原子写不解决整体覆盖丢数据（last-writer-wins），手改 data 文件前仍须关 workbench.exe|data-atomic-write.md（docs/spec/data-atomic-write.md）|
+|soak/泄漏测试三档轮次（`-soak-rounds` > `-short` 缩减 > 默认档 200/200/40/200 + 主包 30），泄漏断言口径为双 `runtime.GC()` 后 heap 增量（service 8MB/主包 16MB，`-leak-heap-mb` 可调）+ goroutine Δ≤2，辅助收敛 `util/testutil/soak.go` 跨包共用禁重复定义；goleak v1.3.0 仅 service 包 TestMain 三档分策（Short 跳过 / 深跑档 `VerifyTestMain` 硬门禁 / CI 默认档观察模式仅 stderr 告警），两步走：CI 观察期无新告警后才收紧硬门禁（良性栈 `IgnoreTopFunction` 逐个登记）；缓存失效由手动入口（InvalidateCache/ClearScanCache/InvalidateCommitHistoryCache）驱动不依赖 mtime 时序；`-soak-rounds`/`-leak-heap-mb` 两包同名 flag 须按包分开传（`go test ./... -soak-rounds=N` 因未注册包报错）|perf-baseline.md 第 13/14 节（docs/spec/perf-baseline.md）|
 
 ## 文档索引
 
@@ -104,6 +105,7 @@ workbench/
 |构建应用|`wails build`|
 |后端测试|`go test ./...`|
 |后端集成测试|`go test -tags=integration ./...`|
+|长跑稳定性深跑|`go test ./service/ -soak-rounds=2000 -run TestSoak -v`|
 |前端测试|`cd frontend && npm test`|
 |E2E 测试（首次）|`cd frontend && npm run e2e:install`|
 |E2E 测试|`cd frontend && npm run e2e`|
@@ -113,5 +115,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-09-24
-**文档版本：** v2.14
+**最后更新：** 2026-09-25
+**文档版本：** v2.15

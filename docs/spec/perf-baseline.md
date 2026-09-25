@@ -2,13 +2,15 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-09-20 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf
+> 最后更新：2026-09-25 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect
 
 ## 1. 适用范围
 
 - Go 后端核心路径 benchmark 基线：文件树构建、仓库扫描、App service 装配、提交历史冷扫
 - 前端 bundle 体积基线：dist 总量、各 chunk 体积、代码分割候选
 - Go 运行时内存占用快照：HeapAlloc / HeapSys / NumGC
+- 长跑稳定性测试（soak）：核心读路径高频循环 + 检查点趋势采样（第 13 节）
+- 内存泄漏自动检测：heap/goroutine 双 GC 断言 + goleak 三档分策（第 14 节）
 - GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（手动测量，留占位）
 - 性能优化前后对比的唯一数据依据
 
@@ -155,6 +157,9 @@
 | 1b 主包 benchmark | `go test -bench=BenchmarkNewAppServices -benchmem -benchtime=500x -run=^$ ./` | `perf_bench_test.go` |
 | 1c 提交历史冷扫 benchmark | `go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./` | `commit_history_bench_test.go` |
 | 3 MemStats | `go test -run TestPerfMemStats -v ./` | `perf_bench_test.go` |
+| 13 长跑稳定性（默认档随 `go test ./...` 自动跑） | `go test ./service/ -run TestSoak -v` 与 `go test ./ -run TestSoak -v` | `service/soak_leak_test.go` / `soak_leak_test.go` |
+| 13 长跑稳定性（深跑档） | `go test ./service/ -soak-rounds=2000 -run TestSoak -v` 与 `go test ./ -soak-rounds=2000 -run TestSoak -v` | 同上（flag 须置于包名之后） |
+| 14 泄漏断言阈值调整 | 上述命令追加 `-leak-heap-mb=N`（service 缺省 8 / 主包缺省 16） | 同上 |
 | 2 前端 bundle | `cd frontend && npm run build` 后 `du -sh dist dist/assets` | `frontend/dist/` |
 
 **fixture 复用**：benchmark 用 `util/testutil`（RunGit / WriteFile）构造 fixture，不重复造轮子。testutil 函数参数为 `testing.TB` 接口，benchmark（`*testing.B`）与测试（`*testing.T`）共用。
@@ -319,3 +324,108 @@ Windows 上读放大 1-2 个数量级。优化将采集层换为 CLI `git log` �
   上限，维持现状（超出桌面仓库常见量级；凑够 limit 的常规翻页不受影响）。
 - **采集失败可观测**：全量扫/增量流式的 git 失败（启动失败、非零退出，错误含 args 与
   stderr 摘要）落 `slog.Warn` 并向上 `%w` 包裹（「无法获取提交历史: ...」），不再静默吞错。
+
+## 13. 长跑稳定性测试（soak，09-25 任务）
+
+**结论前置**：四条核心读路径 + 提交历史缓存层深跑（GetTree/Scan 2000 轮、GetLocalChanges 400 次 fork、GetCommitHistory 300 轮）全部无趋势级泄漏——heap 前后 20% 均值变化在 ±1.3 MB 内（锯齿震荡无单调增长），goroutine 全程稳定 2-3，treeCache 条目恒 11（理论上界），缓存条目单键覆盖写恒 1，400 次 fork git status 无句柄累积。
+
+### 13.1 覆盖路径与三档轮次
+
+测试文件：`service/soak_leak_test.go`（4 条 + 全仓首个 TestMain）+ 主包 `soak_leak_test.go`（GetCommitHistory App 全链路）；采样/断言辅助收敛 `util/testutil/soak.go`（跨包共用）。轮次驱动（非时间盒）：工作负载确定，heap 增量可比。flag 解析优先级：`-soak-rounds` > `-short` 缩减 > 默认档。
+
+| 路径 | 默认档（CI 裸 `go test ./...` 即此档） | Short 档 | 深跑档（`-soak-rounds=N`） |
+|---|---|---|---|
+| TestSoakFileTreeGetTree（treeCache 命中 + 每 10 轮手动 InvalidateCache 失效） | 200 轮 | 50 | N（2000 实测） |
+| TestSoakScanGitRepos（生产 scanCache 路径 + ClearScanCache 失效） | 200 轮 | 50 | N |
+| TestSoakGetLocalChanges（每轮 fork git status） | 40 轮 | 10 | N/5 |
+| TestSoakCommitHistoryCacheGrowth（单键覆盖写 + 双向深拷贝） | 200 轮 | 50 | N |
+| TestSoakGetCommitHistory（主包，命中 + 每 10 轮 InvalidateCommitHistoryCache 失效全扫） | 30 轮 | 8 | N×3/20 |
+
+### 13.2 实测数据（Windows 11 测量环境同第 2 节，2026-09-25）
+
+| 测试 | 默认档耗时 | 深跑档耗时（轮次） | 泄漏断言（heap 增量/阈值，goroutine 增量） |
+|---|---:|---:|---|
+| TestSoakFileTreeGetTree | 0.57s / 200 轮 | 1.23s（2000） | −1 MB / 8 MB，+0 |
+| TestSoakScanGitRepos | 1.66s / 200 轮 | 5.88s（2000） | −1 MB / 8 MB，+0 |
+| TestSoakGetLocalChanges | 1.99s / 40 轮 | 14.66s（400） | +0 MB / 8 MB，+0 |
+| TestSoakCommitHistoryCacheGrowth | 0.01s / 200 轮 | 0.04s（2000） | −1 MB / 8 MB，+0 |
+| TestSoakGetCommitHistory（主包） | 1.32s / 30 轮 | 3.04s（300） | +0 MB / 16 MB，+0 |
+
+时长预算：默认档（CI 档）service 4.4s + 主包 1.5s ≈ **6s 增量**；`-short` 档 ≈ 4s；深跑档 service 22s + 主包 3.2s ≈ 25s。
+
+### 13.3 趋势结论（深跑档检查点前/后 20% 均值）
+
+| 路径 | 前 20% 均值 HeapAlloc | 后 20% 均值 | 变化 | 结论 |
+|---|---:|---:|---:|---|
+| GetTree（2000 轮） | 2,528 KB | 2,536 KB | +8 KB（4 KB/千轮） | 无增长；treeCache 条目恒 11（根 + 10 子目录理论上界，断言上限 32） |
+| ScanGitRepos（2000 轮） | 2,134 KB | 1,902 KB | −232 KB | 锯齿回落，无单调增长 |
+| GetLocalChanges（400 次 fork） | 1,984 KB | 2,107 KB | +124 KB | 无句柄/僵尸进程累积（子进程 Wait 闭环有效） |
+| CommitHistoryCacheGrowth（2000 轮） | 2,354 KB | 1,066 KB | −1,289 KB | 单键覆盖写条目恒 1，每轮 50 条双向深拷贝均回收 |
+| GetCommitHistory（300 轮） | 2,468 KB | 1,625 KB | −842 KB | 缓存命中深拷贝分页 + 周期性全量重扫均无残留 |
+
+趋势采样仅输出（`t.Logf` 检查点表）不参与断言：GOGC 动态调整与碎片化可能造出伪线性段，阈值断言只抓绝对增量（第 14 节口径）。
+
+### 13.4 稳定性约定
+
+- 缓存失效全部由手动入口驱动（`InvalidateCache` / `ClearScanCache` / `InvalidateCommitHistoryCache`），不依赖 NTFS mtime 时序精度；禁 `time.Sleep`；不涉网络端口（[test-stability.md](test-stability.md) 全文有效）
+- 每条路径循环前预热一次（排除惰性初始化：缓存 map 首建、gitCmd 构造等），泄漏基线从预热后起算
+- 主包 `NewAppServices` 仅构造一次（多次构造重置全局 logger 致 lumberjack 句柄累积的 artifact，见 3.2 节，本测试天然规避）
+
+## 14. 内存泄漏自动检测（09-25 任务）
+
+### 14.1 断言口径（宁松勿紧：抓趋势级灾难泄漏，不抓噪声级波动）
+
+| 断言 | 口径 | 阈值 | 入 CI |
+|---|---|---|---|
+| heap 泄漏 | 循环前后各两次 `runtime.GC()` 后 HeapAlloc 增量（第一轮 GC 触发 finalizer 调度，第二轮回收其释放的引用链，快照才收敛为存活堆） | service 8 MB / 主包 16 MB，`-leak-heap-mb` 可调 | 是（默认档随 `go test ./...`） |
+| goroutine 泄漏（计数） | 循环前后 `runtime.NumGoroutine()` 增量 | ≤2 | 是 |
+| goroutine 泄漏（栈集合） | goleak 按栈快照 diff（能识破计数对比的「旧退新进」身份置换盲区） | 零容忍（深跑档硬门禁） | 否（两步走，见 14.3） |
+
+heap 阈值取宽（服务层常驻堆仅 ~2 MB 量级，8/16 MB 阈值意味着允许翻 4-8 倍才算泄漏）；CI 偶发失败比漏检危害大，偶发噪声靠宽松阈值兜底，出现误报先调阈值/登记良性栈，不撤门禁。
+
+### 14.2 goleak 三档分策（决策：引入 go.uber.org/goleak v1.3.0，版本钉死）
+
+依赖成本实测：go.mod +1 行 / go.sum +2 条，零传递依赖（testify 被模块图剪枝）；引入后 `govulncheck ./...` 影响代码漏洞 0。选型依据：手写计数有身份置换盲区；goleak 栈集合 diff + 自动打印泄漏栈 + `IgnoreTopFunction` 官方随版本维护；prometheus/tidb/k8s 先例。
+
+service 包 TestMain（全仓首个）三档：
+
+| 档位 | goleak 行为 | 理由 |
+|---|---|---|
+| `-short` | 完全跳过 | 保 `-short` 增量 <30s |
+| `-soak-rounds>0`（深跑档） | `goleak.VerifyTestMain` 硬门禁（泄漏打印栈并非零退出） | 显式深跑即有意观察泄漏 |
+| 默认档（CI） | 观察模式：`goleak.Find` 结果仅 stderr 告警，不改退出码 | 见 14.3 两步走 |
+
+主包不挂 goleak TestMain（websocket Hub 等常驻 goroutine 误报面大），主包 goroutine 门禁即 Δ≤2 计数断言。
+
+### 14.3 两步走：观察模式先行，基线干净后收紧硬门禁
+
+service 包既有 7 个测试文件启动 goroutine（并发压测 worker、chat fake 进程输出泵、terminal 读泵等），包级硬门禁对慢退出/残留栈有误报风险，故 CI 默认档先观察：
+
+- **观察期发现**：全量 service 套件曾捕获一次非确定性残留——`(*TerminalService).watchProcess`（`service/terminal.go` CreateTerminal 起，time.Sleep 轮询驻留），复跑未复现。此为 `IgnoreTopFunction`（全限定名）候选，登记与否待观察期积累：确定性复现才登记，非确定性残留优先修测试清理逻辑。
+- **收紧条件**：连续数周 CI 观察模式无新告警后，将默认档 `goleak.Find` 分支替换为 `VerifyTestMain`（单行改动），良性栈逐个 `IgnoreTopFunction` 登记，不放宽全包豁免。
+
+### 14.4 覆盖范围说明
+
+| 有状态路径 | 处置 |
+|---|---|
+| treeCache 增长 | 已覆盖：条目有界断言（≤32，理论 11）随 TestSoakFileTreeGetTree |
+| commitHistoryCache 增长 | 已覆盖：TestSoakCommitHistoryCacheGrowth（单键覆盖写 + 深拷贝隔离抽查）+ 主包全链路 |
+| 事件订阅 | 核实无泄漏面：`sinkHolder` 为单出口持有器（`SetEventSink` 换引用，非累积订阅者注册表），不构成泄漏路径，不专项测试 |
+| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、CI 为 Linux runner、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 观察模式兜底（14.3 已捕获 watchProcess 残留即证明该路径有暴露面） |
+
+### 14.5 运行方式速查
+
+```bash
+# 默认档（CI 即此档，自动随 go test ./... 跑）
+go test ./service/ -run TestSoak -v
+go test ./ -run TestSoak -v
+
+# 深跑档（本机手动；flag 须置于包名之后）
+go test ./service/ -soak-rounds=2000 -run TestSoak -v
+go test ./ -soak-rounds=2000 -run TestSoak -v
+
+# 调整 heap 阈值
+go test ./service/ -run TestSoak -leak-heap-mb=16 -v
+```
+
+注意：`-soak-rounds`/`-leak-heap-mb` 为 service 与主包各自注册的同名 flag（独立测试二进制无冲突），但 `go test ./... -soak-rounds=N` 会因未注册该 flag 的包报错，跨包深跑须按包分开传参。

@@ -136,6 +136,9 @@ go test ./...
 # 后端集成测试（真实 git 仓库 fixture，含 submodule 全链）
 go test -tags=integration ./...
 
+# 长跑稳定性深跑（soak + 泄漏断言，默认档已随 go test ./... 自动跑）
+go test ./service/ -soak-rounds=2000 -run TestSoak -v
+
 # 前端测试
 cd frontend && npm test
 
