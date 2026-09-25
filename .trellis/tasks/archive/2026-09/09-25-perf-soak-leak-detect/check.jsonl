@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-25-perf-soak-leak-detect/prd.md", "reason": "对照验收标准：go test 全绿、Short <30s、禁 sleep/固定端口、文档勾选项"}
+{"file": "docs/spec/test-stability.md", "reason": "审查测试是否违反稳定性约定：mtime 时序依赖、sleep、固定端口逐条对照"}
+{"file": "docs/spec/perf-baseline.md", "reason": "审查新增两章节与现有文档编号/格式衔接、数据口径一致"}
+{"file": ".trellis/tasks/09-25-perf-soak-leak-detect/research/goleak-selection.md", "reason": "审查 goleak 落地是否符合研究结论：v1.3.0 钉死、Short 短路、Find 先观察后门禁"}

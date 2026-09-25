@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/09-25-perf-soak-leak-detect/prd.md", "reason": "任务 PRD：三项决策（CI 宽松断言/goleak v1.3.0/轮次档位）、文件布局、验收标准全在此"}
+{"file": ".trellis/tasks/09-25-perf-soak-leak-detect/research/goleak-selection.md", "reason": "goleak 选型研究：依赖增量实测、VerifyTestMain 落地骨架、IgnoreTopFunction 登记策略、v1.3.0 API 边界"}
+{"file": ".trellis/tasks/09-25-perf-soak-leak-detect/research/soak-test-patterns.md", "reason": "soak 模式研究：轮次驱动结论、三档分档写法（flag 优先+Short 缩减）、采样检查点、fork 路径轮次预算"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性约定：禁 time.Sleep/固定端口、注入陈旧缓存范式、freePort TOCTOU 定性"}
+{"file": "docs/spec/perf-baseline.md", "reason": "性能基线文档：MemStats 噪声说明（§5）、约束（§10）、fixture 复用与基准不变量（§7），新增两章节要衔接现有编号"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁规则：_test.go 不入门禁，确认新增 soak 测试不触发门禁"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "NewAppServices 装配契约：主包 soak 测试构造 AppServices 的正确姿势（纯构造、perfDataDir 句柄残留处理）"}
