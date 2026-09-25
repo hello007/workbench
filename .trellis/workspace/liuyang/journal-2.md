@@ -1287,3 +1287,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 93: 性能测试收口：长跑稳定性 soak + 内存泄漏自动检测
+
+**Date**: 2026-09-25
+**Task**: 性能测试收口：长跑稳定性 soak + 内存泄漏自动检测
+**Branch**: `master`
+
+### Summary
+
+收口路线图性能测试节剩余两项。新增 service/soak_leak_test.go（全仓首个 TestMain + 4 条 soak 测试）与主包 soak_leak_test.go（GetCommitHistory 全链路），采样/断言辅助收敛 util/testutil/soak.go。三决策：(a) 宽松断言入 CI（双 GC 后 heap 增量 service 8MB/主包 16MB 可调 + goroutine Δ≤2）；(b) 引入 goleak v1.3.0 三档分策（Short 跳过/深跑 VerifyTestMain 硬门禁/CI 观察模式两步走，观察期曾捕获 TerminalService.watchProcess 非确定性残留一次）；(c) 轮次三档默认 200/200/40/200+30。深跑 2000 轮实测零趋势级泄漏（heap 前/后 20% 均值 ±1.3MB 内、goroutine 稳定 2-3、treeCache 恒 11 键、400 次 fork git 无句柄累积）。独立代码审核出 2 MEDIUM（小 N 折算 0 轮空跑已钳 1；-short+-soak-rounds 组合档位分裂已调判定顺序）+1 笔误（CLAUDE.md 轮次数值）均已修复复测。文档沉淀 perf-baseline.md §13/§14、路线图三项勾选、测试策略.md soak 节、CLAUDE.md 规则行 v2.15、README 深跑命令。go test ./... 与 -tags=integration 全绿，Short 增量 ~4.5s，govulncheck 清零。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ecd1ab` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
