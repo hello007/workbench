@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-27-frontend-memory-bench/prd.md", "reason": "检查依据：验收标准（两张量化表+路线图勾选+复测偏差标注+不改生产代码约束）"}
+{"file": "docs/spec/perf-baseline.md", "reason": "检查新维度章节与既有编号/口径/噪声标注风格一致，§9.4 不动项先例格式"}
+{"file": "docs/spec/test-stability.md", "reason": "检查测量脚本无 sleep 等待/固定端口断言"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查新增 _test.go 不破坏覆盖率门禁"}
