@@ -1386,3 +1386,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 96: 文件树大目录展开截断优化（perf-baseline §15.6 落地）
+
+**Date**: 2026-09-27
+**Task**: 文件树大目录展开截断优化（perf-baseline §15.6 落地）
+**Branch**: `master`
+
+### Summary
+
+路线 a 轻量版落地：单层 2000 截断 + 哨兵节点（NUL 合成 key 零冲突），el-tree-v2 经 research 否决（无 lazy/load）。after：10k 渲染 4.36s→509ms（-88%）/JSHeap +311→+63.7MB；100k 49.2s→647ms（-99%）/+3.14GB→+63.6MB，全达标。两轮子 agent 审核：一轮 4 🟡（快捷键 getCurrentNode 缺口/locateNode 静默/::撞 key/测试 mock），二轮翻出 getCurrentNode 返回裸 data 致过滤死代码（EP 源码验证）+mock 假契约，全修复。vitest 1408 过/E2E 6/6/覆盖率门禁过。文档：perf-baseline §15.6+路线图勾选+功能说明+CLAUDE.md 规则。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3452ed` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
