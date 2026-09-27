@@ -1353,3 +1353,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 95: 前端内存维度量化收口（perf-baseline §15）
+
+**Date**: 2026-09-27
+**Task**: 前端内存维度量化收口（perf-baseline §15）
+**Branch**: `master`
+
+### Summary
+
+收口 perf-baseline 前端内存维度空白。新增 BenchmarkFileTreeGetChildren_Scale（1k/10k/100k 单目录 N 文件，对齐前端展开单层 GetChildren 链路）与 scripts/frontend-memory-tree.mjs / frontend-memory-preview.mjs 两测量脚本（serve cwd 临时目录隔离 data 零污染、控制目录归零基线、CDP getMetrics 采样前 HeapProfiler.collectGarbage 强制 GC、waitForFunction 确定性等待）。核心结论：文件树瓶颈在前端渲染不在 Go——100k 节点渲染 49.2s + JSHeap 3.14GB 灾难级、10k 已 4.4s+311MB 明显劣化、1k 346ms 无感，路线图「限制文件树节点数量」立项实锤（量化目标 ≥10k 须节点上限/虚拟滚动）；大文件预览膨胀系数实测 1.333x、50MB 上限内峰值驻留 64MB 可控、64MB TooLarge 分支正确拒绝，「大文件分块读取」非瓶颈不动项。PRD 假设修正：文本/markdown 走 PreviewFile 1MB 通道不进 ReadFileBytes，真实 kind 为 image/office，fixture 用 .png。子 agent 审核出 4 MEDIUM（驻留列跨档残留污染 370MB 须 GC 口径重测、头部旧稿注释、尾部 CDP Nodes 弃用说明、量化目标锚点）+4 LOW（TDZ 早退泄漏、launch 在 try 外、error 回调裸 exit）全修复，GC 口径重测后增量与驻留收敛。教训：CDP Performance.getMetrics 的 Nodes 指标 headless 动态插入不刷新（+0 失真）须页内 querySelectorAll；performance.memory 同执行流内读数不刷新（分步插桩恒 0）；el-tree 无虚拟滚动下 80 万 DOM 节点每节点约 8 元素 4KB 级堆开销。go test 全绿（chat FullFlow 并行跑时序 flaky 一次，单跑+串行复跑均过，与本次改动无关）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1511326` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
