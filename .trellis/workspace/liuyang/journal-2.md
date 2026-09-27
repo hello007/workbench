@@ -1452,3 +1452,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 98: 文件树目录内按名筛选（截断优化配套盲区补齐）
+
+**Date**: 2026-09-27
+**Task**: 文件树目录内按名筛选（截断优化配套盲区补齐）
+**Branch**: `master`
+
+### Summary
+
+方案 A2 覆盖层落地：工具栏筛选框 + GetFileTree 全量拉取（Go 缓存）+ treeFilter.js 按名过滤，不受 2000 截断限制，零后端改动。覆盖层 v-show 保树挂载（v-if 卸载致 locateNode 必 miss + 展开态丢失）；哨兵点击聚焦筛选框；作用域取最后点击目录节点。两轮子 agent 审核：首轮 2红3黄（跨目录作用域泄漏/v-if 卸载/unmount timer/哨兵高亮/空目录顶替）二轮 3黄3蓝（exitFilterMode 竞态/快捷键错位/右键冒泡）全修。文档四落：路线图虚拟滚动勘误、perf-baseline §15.6、功能说明、README。vitest 1431 全绿覆盖率 83.27%，E2E 10/10。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f0d110` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
