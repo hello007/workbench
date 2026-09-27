@@ -402,5 +402,98 @@ test.describe('目录内按名筛选', () => {
         await expect(page.locator('.context-menu')).toHaveCount(0)
       })
     })
+
+    test.describe('覆盖层右键粘贴保语境', () => {
+      // GetFileTree 序列三段：树根层 -> 筛选拉取 -> 粘贴后 runFilter 重拉（列表不变，
+      // mock 后端无真实文件系统）；剪贴板注入一个源路径，CopyItem resolve 成功
+      test.use({
+        wailsOverrides: {
+          ...seqOverrides(makeLargeDirNodes(2050)),
+          ReadFromSystemClipboard: JSON.stringify({ paths: [`${E2E_REPO_PATH}/clip-src.dat`], isCut: false }),
+          CopyItem: 'ok'
+        }
+      })
+
+      test('CopyItem 参数正确，覆盖层保语境刷新（命中项仍在）', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk-2049')
+        const overlay = page.locator('.tree-filter-overlay')
+        const hitRow = overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })
+        await expect(hitRow).toBeVisible()
+
+        // 右键命中文件 -> 粘贴（目标目录 = 命中文件所在目录，即工作目录根）
+        await hitRow.click({ button: 'right' })
+        await page.locator('.context-menu-item', { hasText: '粘贴' }).click()
+
+        await expect(page.locator('.el-message', { hasText: '粘贴成功' })).toBeVisible()
+
+        const copyCalls = await getWailsCalls(page, 'CopyItem')
+        expect(copyCalls).toEqual([{ method: 'CopyItem', args: [`${E2E_REPO_PATH}/clip-src.dat`, E2E_REPO_PATH] }])
+
+        // 筛选语境保连续：覆盖层仍激活，命中列表重拉后命中项仍在（非退筛选回树）
+        await expect(overlay).toBeVisible()
+        await expect(overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })).toBeVisible()
+        await expect(overlay.locator('.tree-filter-summary')).toContainText('命中 1 项')
+      })
+    })
+
+    test.describe('覆盖层右键新建保语境', () => {
+      // 命中项为根层目录（chunk-dir，根层含子目录符合 GetFileTree 单层契约）。
+      // 新建产物落命中目录内部（createParentData = chunk-dir），与筛选作用域（根层）
+      // 不同层，故 runFilter 重拉（序列第三段）不含产物——保语境断言为「覆盖层仍激活
+      // + 命中项仍在」，产物可见性由 runFilter 语义决定（同层时出现，见 vitest 用例）
+      const dirNode = () => ({
+        id: `${E2E_REPO_PATH}/chunk-dir`,
+        name: 'chunk-dir',
+        path: `${E2E_REPO_PATH}/chunk-dir`,
+        type: 'directory',
+        isGitRepo: false,
+        hasRemote: false,
+        hasChildren: true,
+        isLeaf: false
+      })
+      test.use({
+        wailsOverrides: {
+          ...GIT_FLOW_OVERRIDES,
+          GetFileTree: {
+            // 三段语义：树根层（2050 文件 + 根层目录）-> 筛选拉取（同层重拉，命中目录）
+            // -> 新建后 runFilter 重拉（根层单层，产物在 chunk-dir 内部不出现）
+            __sequence__: [
+              makeLargeDirNodes(2050).concat([dirNode()]),
+              [dirNode()],
+              [dirNode()]
+            ]
+          }
+        }
+      })
+
+      test('CreateDirectory 参数正确，覆盖层保语境刷新（命中项仍在）', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk-dir')
+        const overlay = page.locator('.tree-filter-overlay')
+        await expect(overlay.locator('.filter-result-node', { hasText: 'chunk-dir' })).toBeVisible()
+
+        // 右键命中目录 -> 新建文件夹（父目录 = 命中目录自身）
+        await overlay.locator('.filter-result-node', { hasText: 'chunk-dir' }).click({ button: 'right' })
+        await page.locator('.context-menu-item', { hasText: '新建文件夹' }).click()
+
+        const dialog = visibleDialog(page, '新建文件夹')
+        await dialog.getByPlaceholder('例如: src').fill('new-chunk-dir')
+        await dialog.getByRole('button', { name: '确定' }).click()
+
+        await expect(page.locator('.el-message', { hasText: '文件夹创建成功' })).toBeVisible()
+
+        const createCalls = await getWailsCalls(page, 'CreateDirectory')
+        expect(createCalls).toEqual([{ method: 'CreateDirectory', args: [`${E2E_REPO_PATH}/chunk-dir`, 'new-chunk-dir'] }])
+
+        // 筛选语境保连续：覆盖层仍激活（非退筛选回树），命中列表经 runFilter 重拉后命中项仍在
+        await expect(overlay).toBeVisible()
+        await expect(overlay.locator('.filter-result-node', { hasText: 'chunk-dir' })).toBeVisible()
+      })
+    })
   })
 })

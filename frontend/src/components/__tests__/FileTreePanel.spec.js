@@ -1484,6 +1484,86 @@ describe('FileTreePanel.vue', () => {
       expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
       expect(rootExpand).toHaveBeenCalledTimes(1)
     })
+
+    it('筛选语境新建文件：保语境刷新命中列表（产物命中关键词时出现）', async () => {
+      const { GetFileTree, CreateFile, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      const hitA = { name: 'hit-a.go', path: '/path/a/hit-a.go', type: 'file', isLeaf: true }
+      GetFileTree.mockResolvedValueOnce([hitA])
+      CreateFile.mockResolvedValueOnce(true)
+      const newHit = { name: 'new-hit.go', path: '/path/a/new-hit.go', type: 'file', isLeaf: true }
+      // 操作后 runFilter 重拉：新建产物命中关键词进入命中列表
+      GetFileTree.mockResolvedValueOnce([hitA, newHit])
+
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'hit'
+      await state.runFilter()
+      await flushPromises()
+      expect(state.filteredNodes).toHaveLength(1)
+
+      state.createParentData = { name: 'a', path: '/path/a', type: 'directory' }
+      state.createType = 'file'
+      state.createName = 'new-hit.go'
+      await state.handleCreate()
+      await flushPromises()
+
+      expect(CreateFile).toHaveBeenCalledWith('/path/a', 'new-hit.go', '')
+      // refreshAfterFileOp 分流到 refreshAfterFilterOp：显式失效父目录缓存
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
+      // 筛选语境保持：覆盖层不退出，命中列表含新建产物
+      expect(state.treeFilterKeyword).toBe('hit')
+      expect(state.filteredNodes).toHaveLength(2)
+      expect(state.filteredNodes[1].path).toBe('/path/a/new-hit.go')
+    })
+
+    it('树语境新建：走 refreshNode 现状（不重跑筛选，stub 环境早退不显式失效）', async () => {
+      const { GetFileTree, CreateDirectory, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      CreateDirectory.mockResolvedValueOnce(true)
+
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      expect(state.filterModeActive).toBe(false)
+
+      state.createParentData = { name: 'a', path: '/path/a', type: 'directory' }
+      state.createType = 'directory'
+      state.createName = 'new-folder'
+      await state.handleCreate()
+      await flushPromises()
+
+      expect(CreateDirectory).toHaveBeenCalledWith('/path/a', 'new-folder')
+      expect(state.treeFilterKeyword).toBe('')
+      // 筛选未激活不重跑 runFilter：GetFileTree 仅懒加载 0 次（stub 环境无树渲染）
+      expect(GetFileTree).not.toHaveBeenCalled()
+      expect(InvalidateFileTreeCache).not.toHaveBeenCalled()
+    })
+
+    it('refreshAfterFileOp 分流：筛选激活走保语境刷新（显式失效 + 重跑筛选），树语境走 refreshNode', async () => {
+      const { GetFileTree, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      expect(state.filterModeActive).toBe(false)
+
+      // 树语境：分流到 refreshNode（stub 环境 target miss 早退，无缓存失效调用）
+      await state.refreshAfterFileOp('/path/a')
+      await flushPromises()
+      expect(InvalidateFileTreeCache).not.toHaveBeenCalled()
+
+      // 筛选激活：分流到 refreshAfterFilterOp（显式失效父目录缓存 + 重跑筛选保语境）
+      const hit = { name: 'hit.go', path: '/path/a/hit.go', type: 'file', isLeaf: true }
+      GetFileTree.mockResolvedValueOnce([hit])
+      state.treeFilterKeyword = 'hit'
+      await state.runFilter()
+      await flushPromises()
+      GetFileTree.mockResolvedValueOnce([hit])
+      await state.refreshAfterFileOp('/path/a')
+      await flushPromises()
+
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
+      expect(state.treeFilterKeyword).toBe('hit')
+      expect(state.filteredNodes).toHaveLength(1)
+      expect(state.filteredNodes[0].path).toBe('/path/a/hit.go')
+    })
   })
 })
 

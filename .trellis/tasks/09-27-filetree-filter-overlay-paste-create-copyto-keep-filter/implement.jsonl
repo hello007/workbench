@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "§15.6 哨兵过滤面六处清单 + refreshAfterFilterOp 三步链路契约 + 本任务须同步更新该节"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E fixtures import 规范 + wails-mock-defaults 单一数据源 + 禁 waitForTimeout"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 覆盖率门禁口径"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "本任务无新视觉面，核对弹窗/面板约束不回归"}

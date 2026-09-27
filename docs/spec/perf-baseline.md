@@ -583,9 +583,20 @@ early return 不弹菜单，过滤面不变式保持），补截断层外文件�
 target 命中后才执行——parentPath 目录未在树中加载（未展开子目录不在
 nodesMap 且非根）时早退不清缓存，显式失效同时兜底 mtime 同 tick 边界）+
 `refreshNode(parentPath, {keepFilter:true})`（树照常刷新不退筛选）+ 重跑
-`runFilter`（保语境连续）；树语境维持退筛选现状零回归。覆盖层「刷新」项语义
-保留为退筛选回树（refreshNode 无 keepFilter），粘贴/新建同为退筛选兜底
-（刷新链路经 refreshNode / Home.vue 父组件），与保语境刷新刻意区分。
+`runFilter`（保语境连续）；树语境维持退筛选现状零回归。粘贴/新建/拷贝到三条
+链路（09-27-filetree-filter-overlay-paste-create-copyto-keep-filter 任务收尾）
+与重命名/删除对齐：新增 `refreshAfterFileOp(parentPath)` 统一刷新出口
+（defineExpose 供 Home.vue 的 paste/copyTo 完成回调调用，组件内
+handleCreate/handleRename/handleDeleteAt 同走该方法），内部按
+`filterModeActive` 分流——筛选激活走 `refreshAfterFilterOp` 保语境
+（操作结果按名称重新匹配，与筛选作用域同层且命中关键词时经 runFilter
+重拉出现在命中列表——粘贴/拷贝到目标与命中文件同层时即此情形；2000
+名外场景树中不可见，覆盖层命中列表是唯一可见入口），树语境走
+`refreshNode` 现状。
+覆盖层「刷新」项语义保留为退筛选回树（refreshNode 无 keepFilter，
+refreshAfterFileOp 的组件注释显式区分两者），与保语境刷新刻意区分。
+Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等）
+为显式树刷新语义或 ContentPanel 侧入口，不走分流出口维持现状。
 
 ## 16. 维度 6：前端内存驻留面量化（09-27 驻留任务，收口路线图「及时释放不再使用的对象」）
 

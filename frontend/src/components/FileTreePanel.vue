@@ -931,6 +931,20 @@ const refreshAfterFilterOp = async (parentPath) => {
   await runFilter()
 }
 
+// ---- 文件操作后的统一刷新出口（defineExpose 供父组件调用）----
+// 按 filterModeActive 分流，调用方（组件内 handleCreate/handleRename/handleDeleteAt、
+// Home.vue 的 paste/copyTo 完成回调）零语境判断：
+//   筛选激活（覆盖层右键等入口）→ refreshAfterFilterOp 保语境（命中列表重拉，不退筛选）
+//   树语境                    → refreshNode 现状（含 exitFilterMode，树语境无感）
+// 注意与右键菜单「刷新」项（onMenuCommand 'refresh'）语义不同：后者在筛选语境下
+// 刻意退筛选回树（用户要看树的真实状态）。
+const refreshAfterFileOp = (parentPath) => {
+  if (filterModeActive.value) {
+    return refreshAfterFilterOp(parentPath)
+  }
+  return refreshNode(parentPath)
+}
+
 // ---- 全部刷新 ----
 // 前置清除全部后端树缓存，再触发 el-tree 整体重建（treeKey 变更 -> 逐节点重拉 GetFileTree）。
 // 不清缓存则二次重建命中陈旧缓存，拿不到最新数据。
@@ -1274,7 +1288,8 @@ const handleCreate = async () => {
     if (result) {
       ElMessage.success(createType.value === 'directory' ? '文件夹创建成功' : '文件创建成功')
       createDialogVisible.value = false
-      refreshNode(createParentData.value.path)
+      // 统一刷新出口：筛选语境保语境刷新命中列表（新建产物命中关键词时出现）；树语境现状
+      refreshAfterFileOp(createParentData.value.path)
     } else {
       ElMessage.error('创建失败')
     }
@@ -1317,12 +1332,8 @@ const handleRename = async () => {
       if (!parentPath) {
         parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
       }
-      // 筛选语境（覆盖层右键入口）：保语境刷新命中列表；树语境维持退筛选现状
-      if (filterModeActive.value) {
-        await refreshAfterFilterOp(parentPath)
-      } else {
-        refreshNode(parentPath)
-      }
+      // 统一刷新出口：筛选语境（覆盖层右键入口）保语境刷新命中列表；树语境维持退筛选现状
+      await refreshAfterFileOp(parentPath)
     } else {
       ElMessage.error('重命名失败')
     }
@@ -1359,12 +1370,8 @@ const handleDeleteAt = async (data) => {
       if (!parentPath) {
         parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
       }
-      // 筛选语境（覆盖层右键入口）：保语境刷新命中列表；树语境维持退筛选现状
-      if (filterModeActive.value) {
-        await refreshAfterFilterOp(parentPath)
-      } else {
-        refreshNode(parentPath)
-      }
+      // 统一刷新出口：筛选语境（覆盖层右键入口）保语境刷新命中列表；树语境维持退筛选现状
+      await refreshAfterFileOp(parentPath)
     } else {
       ElMessage.error('删除失败')
     }
@@ -1783,6 +1790,7 @@ const triggerDeleteCurrent = () => {
 // ---- 暴露方法 ----
 defineExpose({
   refreshNode,
+  refreshAfterFileOp,
   expandAll,
   collapseAll,
   showRenameAt,

@@ -596,7 +596,8 @@ const handlePaste = async (targetData) => {
 
     if (successCount > 0) {
       ElMessage.success(`粘贴成功：${successCount} 个项目`)
-      fileTreePanelRef.value?.refreshNode(targetDir)
+      // 统一刷新出口：FileTreePanel 内部按筛选态分流（筛选激活保语境重拉命中列表，树语境现状）
+      fileTreePanelRef.value?.refreshAfterFileOp(targetDir)
       if (isCut) workspaceStore.clearClipboard()
     } else {
       ElMessage.error('粘贴失败')
@@ -615,8 +616,9 @@ const handleCopyTo = async (data) => {
     } else {
       ElMessage.success('拷贝成功')
       fileTreePanelRef.value?.closeCopyToDialog()
-      // 刷新目标文件夹（命中后自动展开并加载最新子节点，解决拷贝后目标收起问题）
-      await fileTreePanelRef.value?.refreshNode(data.targetPath)
+      // 统一刷新出口：FileTreePanel 内部按筛选态分流（筛选激活保语境重拉命中列表，
+      // 树语境现状）；命中后自动展开并加载最新子节点，解决拷贝后目标收起问题
+      await fileTreePanelRef.value?.refreshAfterFileOp(data.targetPath)
     }
   } catch (error) {
     ElMessage.error('拷贝失败: ' + (error.message || String(error)))

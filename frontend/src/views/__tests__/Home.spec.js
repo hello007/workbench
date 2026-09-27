@@ -84,7 +84,7 @@ describe('Home.vue - Bug修复验证', () => {
           Splitpanes: { template: '<div class="splitpanes"><slot /></div>' },
           Pane: { template: '<div class="pane"><slot /></div>', props: ['size', 'minSize', 'maxSize'] },
           DirectoryTree: { template: '<div class="stub-directory-tree" />' },
-          FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {}, setCopyToLoading: () => {}, closeCopyToDialog: () => {}, refreshNode: () => {} } },
+          FileTreePanel: { template: '<div class="stub-file-tree-panel" />', methods: { saveCurrentState: () => {}, restoreTreeState: () => {}, setCopyToLoading: () => {}, closeCopyToDialog: () => {}, refreshNode: () => {}, refreshAfterFileOp: () => {} } },
           ContentPanel: { template: '<div class="stub-content-panel" />', methods: { clearPreview: () => {}, startBatchPull: () => {}, previewFile: () => {} } },
           RepoFilterDialog: { template: '<div class="stub-repo-filter-dialog" />' },
           'el-tree': true,
@@ -883,7 +883,7 @@ describe('Home.vue - handler 分支补充', () => {
   const mountHome = () => {
     fileTreeSpies = {
       saveCurrentState: vi.fn(), restoreTreeState: vi.fn(), locateNode: vi.fn().mockResolvedValue(),
-      refreshNode: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn(),
+      refreshNode: vi.fn(), refreshAfterFileOp: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn(),
       showRenameAt: vi.fn(), showCreateAt: vi.fn(), showCopyToDialog: vi.fn(),
       closeCopyToDialog: vi.fn(), setCopyToLoading: vi.fn(), closeMenu: vi.fn()
     }
@@ -981,7 +981,7 @@ describe('Home.vue - handler 分支补充', () => {
     expect(ElMessage.info).toHaveBeenCalledWith('剪贴板中没有可粘贴的内容')
   })
 
-  it('handlePaste：复制模式成功时 success + refreshNode', async () => {
+  it('handlePaste：复制模式成功时 success + refreshAfterFileOp（组件内按筛选态分流）', async () => {
     const { ElMessage } = await import('element-plus')
     const { ReadFromSystemClipboard, CopyItem } = await import('../../../wailsjs/go/main/App')
     ReadFromSystemClipboard.mockResolvedValueOnce(JSON.stringify({ paths: ['D:\\a.go'], isCut: false }))
@@ -990,7 +990,8 @@ describe('Home.vue - handler 分支补充', () => {
     await flushPromises()
     expect(CopyItem).toHaveBeenCalledWith('D:\\a.go', 'D:\\dst')
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('1'))
-    expect(fileTreeSpies.refreshNode).toHaveBeenCalledWith('D:\\dst')
+    expect(fileTreeSpies.refreshAfterFileOp).toHaveBeenCalledWith('D:\\dst')
+    expect(fileTreeSpies.refreshNode).not.toHaveBeenCalled()
   })
 
   it('handlePaste：剪切模式成功时调 MoveItem + clearClipboard', async () => {
@@ -1004,6 +1005,7 @@ describe('Home.vue - handler 分支补充', () => {
     expect(MoveItem).toHaveBeenCalledWith('D:\\a.go', 'D:\\dst')
     // clearClipboard 重置剪贴板态
     expect(ws.clipboard.mode).toBeFalsy()
+    expect(fileTreeSpies.refreshAfterFileOp).toHaveBeenCalledWith('D:\\dst')
   })
 
   it('handlePaste：全部失败时 error 提示', async () => {
@@ -1014,6 +1016,8 @@ describe('Home.vue - handler 分支补充', () => {
     await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith('粘贴失败')
+    // 失败路径不触发刷新
+    expect(fileTreeSpies.refreshAfterFileOp).not.toHaveBeenCalled()
   })
 
   it('handlePaste：抛异常时 error 提示', async () => {
@@ -1023,6 +1027,22 @@ describe('Home.vue - handler 分支补充', () => {
     await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+  })
+
+  // ---- handleCopyTo 刷新分流（09-27-filetree-filter-overlay-paste-create-copyto-keep-filter）----
+  it('handleCopyTo：成功后调 refreshAfterFileOp（组件内按筛选态分流），失败不刷新', async () => {
+    const { CopyTo } = await import('../../../wailsjs/go/main/App')
+    CopyTo.mockResolvedValueOnce('ok')
+    await wrapper.vm.handleCopyTo({ sourcePath: '/a/src.txt', targetPath: '/b', copyWholeDir: false })
+    await flushPromises()
+    expect(fileTreeSpies.refreshAfterFileOp).toHaveBeenCalledWith('/b')
+    expect(fileTreeSpies.refreshNode).not.toHaveBeenCalled()
+
+    fileTreeSpies.refreshAfterFileOp.mockClear()
+    CopyTo.mockResolvedValueOnce('错误：目标已存在')
+    await wrapper.vm.handleCopyTo({ sourcePath: '/a/src.txt', targetPath: '/b', copyWholeDir: false })
+    await flushPromises()
+    expect(fileTreeSpies.refreshAfterFileOp).not.toHaveBeenCalled()
   })
 
   // ---- onBatchPull / onAddWorkDir ----
