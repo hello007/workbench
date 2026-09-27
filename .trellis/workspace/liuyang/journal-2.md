@@ -1485,3 +1485,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 99: 文件树筛选覆盖层右键菜单
+
+**Date**: 2026-09-27
+**Task**: 文件树筛选覆盖层右键菜单
+**Branch**: `master`
+
+### Summary
+
+筛选覆盖层命中行右键复用 onNodeContextMenu 弹现有节点菜单（方案 A，命中项 data 与树节点同构），补截断层 2000 名外文件「可预览、不可操作」硬缺口。核心链路 refreshAfterFilterOp：显式 InvalidateFileTreeCache(parentPath)（补 refreshNode target miss 早退不清缓存缺口 + 兜底 mtime 同 tick）+ refreshNode(keepFilter) + 重跑 runFilter 保筛选语境；树语境维持退筛选现状零回归；覆盖层「刷新」项刻意保留退筛选语义。哨兵过滤面六处不回归（onNodeContextMenu 内 early return 天然覆盖覆盖层哨兵）。测试：组件 +5（118 过）、E2E +4（file-tree 14 过、全量 54 过）、覆盖率 83.28%。审核 3 minor：create 分流维持 PRD Out-of-Scope 决策、refresh 语义加注释澄清、E2E GetFileTree 次数断言放宽为实现无关形状断言（后两项已采纳）。spec 沉淀：CLAUDE.md §15.6 行 + perf-baseline.md §15.6 覆盖层右键小节 + 功能说明.md 筛选条目。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `091b1d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
