@@ -46,6 +46,12 @@ const argOf = (name, def) => {
 }
 const RUNS = parseInt(argOf('--runs', '3'), 10)
 const PORT = parseInt(argOf('--port', '36125'), 10)
+for (const [k, v] of [['--runs', RUNS], ['--port', PORT]]) {
+  if (!Number.isFinite(v) || v <= 0) {
+    console.error(`参数 ${k} 非法: 须为正整数`)
+    process.exit(1)
+  }
+}
 
 // 档位（MB）：48MB 为 50MB 上限内边界档，64MB 超限验证 TooLarge 分支
 const SIZES_MB = [1, 4, 16, 48, 64]
@@ -80,6 +86,7 @@ const PORT_PROBE = await new Promise((resolve, reject) => {
 }).catch(() => false)
 if (!PORT_PROBE) {
   console.error(`端口 ${PORT} 已被占用，请用 --port 指定空闲端口`)
+  cleanupWorkspace()
   process.exit(1)
 }
 
@@ -87,7 +94,8 @@ const serve = spawn(EXE, ['--serve', `--listen=127.0.0.1:${PORT}`], {
   cwd: workspace,
   stdio: 'ignore',
 })
-// 统一早退路径：kill 后等 exit 确认（Windows 句柄释放异步，立即退留孤儿占端口）
+// 统一早退路径：kill 后等 exit 确认（Windows 句柄释放异步，立即退留孤儿占端口），
+// 再清理隔离工作区（fixture 5 个伪随机文件共 133MB 残留 tmpdir）
 const killServeAndExit = async proc => {
   proc.kill()
   await new Promise(resolve => {
@@ -95,11 +103,20 @@ const killServeAndExit = async proc => {
     const t = setTimeout(resolve, 5000)
     proc.once('exit', () => { clearTimeout(t); resolve() })
   })
+  cleanupWorkspace()
   process.exit(1)
+}
+
+// 幂等工作区清理（主 finally 与各早退路径共用）
+const cleanupWorkspace = () => {
+  try { rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }) } catch (e) {
+    console.error(`清理失败（可手动删除）: ${workspace}: ${e.message}`)
+  }
 }
 serve.on('error', err => {
   console.error(`serve 进程拉起失败: ${err.message}`)
-  process.exit(1) // spawn 阶段失败：browser/测量未启动，无泄漏面
+  cleanupWorkspace() // spawn 阶段失败：browser/测量未启动，仅工作区须清理
+  process.exit(1)
 })
 
 const BASE = `http://127.0.0.1:${PORT}`
@@ -230,9 +247,7 @@ try {
     serve.once('exit', () => { clearTimeout(t); resolve() })
   })
   console.log('清理隔离工作区...')
-  try { rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }) } catch (e) {
-    console.error(`清理失败（可手动删除）: ${workspace}: ${e.message}`)
-  }
+  cleanupWorkspace()
 }
 console.log('\n口径说明：RPC 驻留 = base64 字符串驻留页面堆增量；decode 驻留 = 叠加 atob 中间串 +')
 console.log('Uint8Array 后增量（CDP JSHeapUsedSize 调用间隙采样）。image 真实路径后续 dataURL 拼接')

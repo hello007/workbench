@@ -251,12 +251,12 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - **配置文件读取（2026-09-27 冷启动量化补证）**：OnStartup 全段仅 21.4 ms（§6.2），settings.json 等本地 <2KB 文件经 OS 缓存读取占比 <5%，非瓶颈（不动）。
 - **资产 HTTP 请求（2026-09-27 冷启动量化补证）**：首屏 47 个回环请求 load 仅 ~110 ms，执行+挂载占大头（~360 ms，§6.2），请求数非瓶颈（不动）；后续优化方向若做，应指向 JS 执行/bundle 体积（懒加载已做一轮）。
 - **Wails/WebView2 宿主初始化 ~1.1 s（§6.2 大头）**：框架层耗时，项目代码可控面小，属桌面 WebView2 应用正常水平（不动）。
-- **大文件分块读取（2026-09-27 前端内存量化补证）**：ReadFileBytes 50MB 上限内峰值驻留 ~61.5 MB JSHeap（§15.3），膨胀 1.333x 与理论吻合，超限 TooLarge 降级无 OOM 面——50MB 上限即风险挡板，非瓶颈（不动）。
+- **大文件分块读取（2026-09-27 前端内存量化补证）**：ReadFileBytes 50MB 上限内峰值驻留 ~64 MB JSHeap（§15.3），膨胀 1.333x 与理论吻合，超限 TooLarge 降级无 OOM 面——50MB 上限即风险挡板，非瓶颈（不动）。
 
 ### 9.5 路线图勾选状态
 
 - 路线图「应用性能 → 启动时间优化」：**已勾选（2026-09-27 收口）**。三个子项闭环——「延迟加载非关键模块」mermaid 懒加载已落实（首屏 eager −1.8 MB）；「优化配置文件读取」「减少 HTTP 请求」经冷启动量化（§6.2）证明非瓶颈，按 9.4 先例记不动项；耗时大头 Wails/WebView2 宿主初始化为框架层不可控面，总冷启动 ~1.56 s（热态）属正常水平。
-- 路线图「应用性能 → 内存使用优化」：本轮未涉及对象释放/节点上限/分块读取，**不勾选**。（2026-09-27 更新：前端内存量化已收口（§15）——「限制文件树节点数量」立项实锤（100k 节点渲染 47.3 s + 3.2 GB，量化目标见 §15.4），「大文件分块读取」按 §15.3 记不动项；「及时释放不再使用的对象」未测保持不勾选）
+- 路线图「应用性能 → 内存使用优化」：本轮未涉及对象释放/节点上限/分块读取，**不勾选**。（2026-09-27 更新：前端内存量化已收口（§15）——「限制文件树节点数量」立项实锤（100k 节点渲染 49.2 s + 3.14 GB，量化目标见 §15.4），「大文件分块读取」按 §15.3 记不动项；「及时释放不再使用的对象」未测保持不勾选）
 
 ## 10. 约束与噪声说明
 
@@ -470,7 +470,7 @@ go test ./service/ -run TestSoak -leak-heap-mb=16 -v
 |---|---|
 | 曲线一脚本 | `node scripts/frontend-memory-tree.mjs [--runs 3] [--scales 1000,10000,100000]` |
 | 曲线一脚链路 | 选中工作目录 → `loadTreeNode` → `App.GetFileTree`（`GetChildren` 单层）→ el-tree 全量渲染（无虚拟滚动，`lazy` 懒加载展开即全量） |
-| 曲线一采样 | 独立 context 冷缓存，控制目录（空树）归零基线 → 点击 scale 目录 → `.el-tree-node` 计数达标判渲染完成；CDP `Performance.getMetrics`（JSHeapUsedSize，基线与渲染后采样前均经 `HeapProfiler.collectGarbage` 强制 GC，消除跨档残留——实测无 GC 时 10k 档驻留读数虚高 ~370 MB）+ 页内 `querySelectorAll('*')`（DOM 计数，CDP Nodes 指标 headless 动态插入不刷新已弃用） |
+| 曲线一采样 | 独立 context 冷缓存，控制目录（空树）归零基线 → 点击 scale 目录 → `.el-tree-node` 计数达标判渲染完成；CDP `Performance.getMetrics`（JSHeapUsedSize，基线与渲染后采样前均经 `HeapProfiler.collectGarbage` 强制 GC，消除跨档残留——实测无 GC 时 10k 档驻留读数虚高 255 MB（581→326））+ 页内 `querySelectorAll('*')`（DOM 计数，CDP Nodes 指标 headless 动态插入不刷新已弃用） |
 | 曲线二脚本 | `node scripts/frontend-memory-preview.mjs [--runs 3]` |
 | 曲线二链路 | 浏览器通道 RPC 直调 `App.ReadFileBytes`（单参，50MB 上限硬编码 `app_preview.go`）→ 页面堆 base64 字符串驻留 → `atob` → `Uint8Array`（与 `FilePreviewRenderer` `base64ToUint8Array` 同实现） |
 | 曲线二采样 | CDP JSHeapUsedSize 双驻留点（RPC 返回后 / decode 后，采样前强制 GC）；`performance.memory` 同执行流内读数不刷新已弃用；decode 中间串（atob）无引用 GC 即回收，实测 decode 驻留增量 ≈0，峰值在 RPC base64 驻留点 |
@@ -535,6 +535,8 @@ Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem 
 - 口径备注：首批测量（无强制 GC）与 GC 口径复测的差异集中在「驻留」列（跨档残留，
   10k 档 581 MB→326 MB），增量列两批差异为 GC 时机噪声（10k 档 211 MB→311 MB，
   首批渲染后未 GC 部分中间对象已回收）；结论不受影响。
-- `gpuDisabled: true` 沿用 §6 标注；CDP 采样为 Chromium headless 口径，WebView2 渲染端
-  存在环境差异（JSHeap 量级趋势可参考，绝对值受 V8 版本/堆配置影响）。
+- 测量环境与 §6 差异：两脚本 serve cwd 指向临时 data/，settings 走默认值
+  （gpuDisabled=false），非沿用 §6 测量机真实配置的 `gpuDisabled: true`；CDP 采样为
+  Chromium headless 口径，WebView2 渲染端存在环境差异（JSHeap 量级趋势可参考，绝对值
+  受 V8 版本/堆配置影响）。
 - 测量机同第 2 节（Windows 11 / Ryzen 7 H 255 / 31.27 GB）。

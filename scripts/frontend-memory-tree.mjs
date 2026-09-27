@@ -44,6 +44,12 @@ const RUNS = parseInt(argOf('--runs', '3'), 10)
 const PORT = parseInt(argOf('--port', '36121'), 10)
 const RENDER_TIMEOUT_MS = parseInt(argOf('--render-timeout', '120'), 10) * 1000
 const KEEP_FIXTURE = hasFlag('--keep-fixture')
+for (const [k, v] of [['--runs', RUNS], ['--port', PORT], ['--render-timeout', RENDER_TIMEOUT_MS / 1000]]) {
+  if (!Number.isFinite(v) || v <= 0) {
+    console.error(`参数 ${k} 非法: 须为正整数`)
+    process.exit(1)
+  }
+}
 
 const SCALES = (argOf('--scales', '1000,10000,100000'))
   .split(',')
@@ -99,6 +105,7 @@ const PORT_PROBE = await new Promise((resolve, reject) => {
 }).catch(() => false)
 if (!PORT_PROBE) {
   console.error(`端口 ${PORT} 已被占用，请用 --port 指定空闲端口`)
+  cleanupWorkspace()
   process.exit(1)
 }
 
@@ -108,11 +115,13 @@ const serve = spawn(EXE, ['--serve', `--listen=127.0.0.1:${PORT}`], {
 })
 serve.on('error', err => {
   console.error(`serve 进程拉起失败: ${err.message}`)
-  process.exit(1) // spawn 阶段失败：browser/测量未启动，无泄漏面
+  cleanupWorkspace() // spawn 阶段失败：browser/测量未启动，仅工作区须清理
+  process.exit(1)
 })
 
 const BASE = `http://127.0.0.1:${PORT}`
-// 统一早退路径：kill 后等 exit 确认（Windows 句柄释放异步，立即退留孤儿占端口）
+// 统一早退路径：kill 后等 exit 确认（Windows 句柄释放异步，立即退留孤儿占端口），
+// 再清理隔离工作区（早退时 fixture 已构造，最多 11 万文件残留 tmpdir）
 const killServeAndExit = async proc => {
   proc.kill()
   await new Promise(resolve => {
@@ -120,7 +129,19 @@ const killServeAndExit = async proc => {
     const t = setTimeout(resolve, 5000)
     proc.once('exit', () => { clearTimeout(t); resolve() })
   })
+  cleanupWorkspace()
   process.exit(1)
+}
+
+// 幂等工作区清理（主 finally 与各早退路径共用）
+const cleanupWorkspace = () => {
+  if (KEEP_FIXTURE) {
+    console.log(`--keep-fixture：保留工作区 ${workspace}`)
+    return
+  }
+  try { rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }) } catch (e) {
+    console.error(`清理失败（可手动删除）: ${workspace}: ${e.message}`)
+  }
 }
 
 // 等 serve 就绪后读隔离 token（首次启动生成）
@@ -269,14 +290,8 @@ try {
     const t = setTimeout(resolve, 5000)
     serve.once('exit', () => { clearTimeout(t); resolve() })
   })
-  if (!KEEP_FIXTURE) {
-    console.log('清理隔离工作区（100k 文件删除可能耗时数十秒）...')
-    try { rmSync(workspace, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }) } catch (e) {
-      console.error(`清理失败（可手动删除）: ${workspace}: ${e.message}`)
-    }
-  } else {
-    console.log(`--keep-fixture：保留工作区 ${workspace}`)
-  }
+  console.log('清理隔离工作区（100k 文件删除可能耗时数十秒）...')
+  cleanupWorkspace()
 }
 console.log('\n口径说明：独立 context = 冷缓存；浏览器进程复用 = V8 暖。')
 console.log('JSHeap 增量 = 渲染后 - 空树基线（CDP JSHeapUsedSize，采样前强制 GC）；DOM 节点为页内 querySelectorAll 全页计数。')
