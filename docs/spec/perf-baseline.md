@@ -575,6 +575,16 @@ Ctrl+P 不可达——该盲区已由树内按名筛选补齐（09-27-tree-dir-n
 误导提示「未能定位该文件」）；筛选作用域取筛选前最后点击的目录节点（treeKey
 变化时随筛选态一并清空，防跨目录作用域泄漏）。
 
+**覆盖层右键菜单（09-27-filetree-filter-overlay-context-menu 任务）**：命中行
+`@contextmenu` 复用 `onNodeContextMenu`（命中项 data 与树节点同构，哨兵在其内
+early return 不弹菜单，过滤面不变式保持），补截断层外文件「可预览、不可操作」
+缺口。操作后刷新分双语境：覆盖层右键重命名/删除走 `refreshAfterFilterOp`——
+显式 `InvalidateFileTreeCache(parentPath)`（refreshNode 在 target miss 时早退
+不清缓存——截断层外文件树中无节点必 miss，且兜底 mtime 同 tick 边界）+
+`refreshNode(parentPath, {keepFilter:true})`（树照常刷新不退筛选）+ 重跑
+`runFilter`（保语境连续）；树语境维持退筛选现状零回归。覆盖层「刷新」项语义
+保留为退筛选回树（refreshNode 无 keepFilter），与保语境刷新刻意区分。
+
 ## 16. 维度 6：前端内存驻留面量化（09-27 驻留任务，收口路线图「及时释放不再使用的对象」）
 
 > 背景：§15 收口渲染面（峰值增量）后，路线图「应用性能 → 内存使用优化」仅剩

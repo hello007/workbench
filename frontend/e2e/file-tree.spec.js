@@ -264,4 +264,143 @@ test.describe('目录内按名筛选', () => {
     // 哨兵点击不改变选中态：未触发文件预览（仅聚焦）
     expect(await getWailsCalls(page, 'GetFileTree')).toHaveLength(1)
   })
+
+  // ---- 覆盖层右键菜单（09-27-filetree-filter-overlay-context-menu）----
+  // GetFileTree 用 __sequence__ 三段：树根层加载 -> 筛选拉取 -> 操作后 runFilter
+  // 重拉（第三段反映操作后状态：目标项已删/已更名）。mock 后端无真实文件系统，
+  // 操作后列表变化全靠序列第三段表达。test.use 仅 describe 级合法，故每用例
+  // 独立子 describe 包裹注入各自的序列 override。
+  const without2049 = () => makeLargeDirNodes(2050).filter(n => n.name !== 'chunk-2049.dat')
+  const seqOverrides = (afterOpNodes) => ({
+    ...GIT_FLOW_OVERRIDES,
+    GetFileTree: {
+      __sequence__: [makeLargeDirNodes(2050), makeLargeDirNodes(2050), afterOpNodes]
+    }
+  })
+
+  test.describe('覆盖层右键菜单', () => {
+    test.describe('命中文件右键弹节点菜单', () => {
+      test.use({ wailsOverrides: seqOverrides(makeLargeDirNodes(2050)) })
+
+      test('复用树右键菜单（含重命名/删除项）', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk-2049')
+        const overlay = page.locator('.tree-filter-overlay')
+        await expect(overlay.locator('.filter-result-name', { hasText: 'chunk-2049.dat' })).toBeVisible()
+
+        // 命中行右键弹现有 context-menu（非空白区语义），含文件操作项
+        await overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' }).click({ button: 'right' })
+        const menu = page.locator('.context-menu')
+        await expect(menu).toBeVisible()
+        await expect(menu.locator('.context-menu-item', { hasText: '重命名' })).toBeVisible()
+        await expect(menu.locator('.context-menu-item', { hasText: '删除' })).toBeVisible()
+        // 文件节点菜单不含目录专属项（防错用目录语义）
+        await expect(menu.locator('.context-menu-item', { hasText: '新建文件' })).toHaveCount(0)
+      })
+    })
+
+    test.describe('截断层外文件右键删除全链', () => {
+      test.use({ wailsOverrides: seqOverrides(without2049()) })
+
+      test('确认后 DeleteFile 参数正确，覆盖层保语境刷新', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk-2049')
+        const overlay = page.locator('.tree-filter-overlay')
+        const hitRow = overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })
+        await expect(hitRow).toBeVisible()
+
+        // 右键 -> 删除 -> 确认弹窗
+        await hitRow.click({ button: 'right' })
+        await page.locator('.context-menu-item', { hasText: '删除' }).click()
+        const messageBox = page.locator('.el-message-box')
+        await expect(messageBox).toContainText('确定要删除 "chunk-2049.dat" 吗')
+        await messageBox.getByRole('button', { name: '确定' }).click()
+
+        await expect(page.locator('.el-message', { hasText: '删除成功' })).toBeVisible()
+
+        const deleteCalls = await getWailsCalls(page, 'DeleteFile')
+        expect(deleteCalls).toEqual([{ method: 'DeleteFile', args: [`${E2E_REPO_PATH}/chunk-2049.dat`] }])
+
+        // 筛选语境保连续：显式失效父目录缓存 + 重跑筛选
+        // InvalidateFileTreeCache 双调幂等：refreshAfterFilterOp 显式 1 次 +
+        // refreshNode store.root 兜底命中（真实 el-tree 根层已加载）再 1 次；
+        // GetFileTree 不锁次数（refreshNode 树重载与 runFilter 并行为内部实现细节），
+        // 保语境 + 命中刷新语义由下方覆盖层断言承载
+        const invalidateCalls = await getWailsCalls(page, 'InvalidateFileTreeCache')
+        expect(invalidateCalls).toEqual([
+          { method: 'InvalidateFileTreeCache', args: [E2E_REPO_PATH] },
+          { method: 'InvalidateFileTreeCache', args: [E2E_REPO_PATH] }
+        ])
+        const treeCallsAfterDelete = await getWailsCalls(page, 'GetFileTree')
+        expect(treeCallsAfterDelete.length).toBeGreaterThanOrEqual(3)
+        treeCallsAfterDelete.forEach(call => expect(call.args).toEqual([E2E_REPO_PATH]))
+
+        // 覆盖层仍激活且命中列表已刷新（目标项消失，非退筛选回树）
+        await expect(overlay).toBeVisible()
+        await expect(overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })).toHaveCount(0)
+        await expect(overlay.locator('.tree-filter-summary')).toContainText('命中 0 项')
+      })
+    })
+
+    test.describe('命中文件右键重命名全链', () => {
+      const renamedNodes = () => makeLargeDirNodes(2050)
+        .filter(n => n.name !== 'chunk-2049.dat')
+        .concat([{
+          ...makeLargeDirNodes(1)[0],
+          name: 'renamed-2049.dat',
+          path: `${E2E_REPO_PATH}/renamed-2049.dat`,
+          id: `${E2E_REPO_PATH}/renamed-2049.dat`
+        }])
+      test.use({ wailsOverrides: seqOverrides(renamedNodes()) })
+
+      test('RenameFile 参数正确，覆盖层保语境刷新', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk-2049')
+        const overlay = page.locator('.tree-filter-overlay')
+        const hitRow = overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })
+        await expect(hitRow).toBeVisible()
+
+        // 右键 -> 重命名 -> 对话框提交
+        await hitRow.click({ button: 'right' })
+        await page.locator('.context-menu-item', { hasText: '重命名' }).click()
+        const dialog = visibleDialog(page, '重命名')
+        const nameInput = dialog.locator('input').nth(1)
+        await expect(nameInput).toHaveValue('chunk-2049.dat')
+        await nameInput.fill('renamed-2049.dat')
+        await dialog.getByRole('button', { name: '确定' }).click()
+
+        await expect(page.locator('.el-message', { hasText: '重命名成功' })).toBeVisible()
+
+        const renameCalls = await getWailsCalls(page, 'RenameFile')
+        expect(renameCalls).toEqual([{ method: 'RenameFile', args: [`${E2E_REPO_PATH}/chunk-2049.dat`, 'renamed-2049.dat'] }])
+
+        // 覆盖层仍激活，命中列表反映更名后状态（关键词 'chunk-2049' 不再命中新名 -> 空态）
+        await expect(overlay).toBeVisible()
+        await expect(overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' })).toHaveCount(0)
+      })
+    })
+
+    test.describe('覆盖层截断哨兵右键', () => {
+      test.use({ wailsOverrides: seqOverrides(makeLargeDirNodes(2050)) })
+
+      test('不弹菜单（哨兵过滤面不回归）', async ({ page }) => {
+        await openLargeDirTreePage(page)
+
+        // 'chunk' 命中全部 2050 项 -> 覆盖层复用截断（2000 + 哨兵）
+        const filterInput = page.locator('.tree-filter-input input')
+        await filterInput.fill('chunk')
+        const overlay = page.locator('.tree-filter-overlay')
+        await expect(overlay.locator('.truncation-hint-node')).toBeVisible()
+
+        await overlay.locator('.truncation-hint-node').click({ button: 'right' })
+        await expect(page.locator('.context-menu')).toHaveCount(0)
+      })
+    })
+  })
 })

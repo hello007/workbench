@@ -1353,6 +1353,113 @@ describe('FileTreePanel.vue', () => {
       expect(setCurrentKey).toHaveBeenCalledWith(null)
       expect(wrapper.emitted('select')[0][0].path).toBe('/path/a/ghost.go')
     })
+
+    // ---- 覆盖层右键菜单（09-27-filetree-filter-overlay-context-menu）----
+
+    it('覆盖层命中行右键：复用 onNodeContextMenu 弹节点菜单（data 指向命中项）', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'hit'
+      state.filteredNodes = [{ name: 'hit.go', path: '/path/a/hit.go', type: 'file', isLeaf: true }]
+      await flushPromises()
+
+      await wrapper.find('.filter-result-node').trigger('contextmenu')
+      await flushPromises()
+
+      expect(state.contextMenu.visible).toBe(true)
+      expect(state.contextMenu.data.path).toBe('/path/a/hit.go')
+      expect(state.contextMenu.isBlankArea).toBe(false)
+    })
+
+    it('覆盖层哨兵行右键：不弹菜单（哨兵过滤面不回归）', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      state.filteredNodes = [{ name: '提示', path: '/path/a\0truncation-hint', type: 'truncation-hint', isLeaf: true }]
+      await flushPromises()
+
+      await wrapper.find('.filter-result-node').trigger('contextmenu')
+      await flushPromises()
+
+      expect(state.contextMenu.visible).toBe(false)
+    })
+
+    it('筛选语境删除命中文件：显式失效父目录缓存 + 重跑筛选保语境（不退筛选）', async () => {
+      const { GetFileTree, DeleteFile, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      const hitA = { name: 'hit-a.go', path: '/path/a/hit-a.go', type: 'file', isLeaf: true }
+      const hitB = { name: 'hit-b.go', path: '/path/a/hit-b.go', type: 'file', isLeaf: true }
+      GetFileTree.mockResolvedValueOnce([hitA, hitB])
+      DeleteFile.mockResolvedValueOnce(true)
+      // 操作后 runFilter 重拉：hit-a 已删
+      GetFileTree.mockResolvedValueOnce([hitB])
+
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'hit'
+      await state.runFilter()
+      await flushPromises()
+      expect(state.filteredNodes).toHaveLength(2)
+
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      await state.handleDeleteAt(hitA)
+      await flushPromises()
+
+      expect(DeleteFile).toHaveBeenCalledWith('/path/a/hit-a.go')
+      // refreshAfterFilterOp 显式失效父目录缓存（refreshNode target miss 早退不清缓存的缺口补齐）
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
+      // 筛选语境保持：关键词未清，命中列表反映删除后状态
+      expect(state.treeFilterKeyword).toBe('hit')
+      expect(state.filteredNodes).toHaveLength(1)
+      expect(state.filteredNodes[0].path).toBe('/path/a/hit-b.go')
+      expect(wrapper.emitted('delete')).toBeTruthy()
+    })
+
+    it('筛选语境重命名命中文件：保语境刷新命中列表（新名仍含关键词则保留）', async () => {
+      const { GetFileTree, RenameFile, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      const hit = { name: 'hit.go', path: '/path/a/hit.go', type: 'file', isLeaf: true }
+      GetFileTree.mockResolvedValueOnce([hit])
+      RenameFile.mockResolvedValueOnce(true)
+      // 操作后 runFilter 重拉：已更名为 renamed-hit.go
+      const renamed = { name: 'renamed-hit.go', path: '/path/a/renamed-hit.go', type: 'file', isLeaf: true }
+      GetFileTree.mockResolvedValueOnce([renamed])
+
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'hit'
+      await state.runFilter()
+      await flushPromises()
+
+      state.showRenameAt(hit)
+      state.renameName = 'renamed-hit.go'
+      await state.handleRename()
+      await flushPromises()
+
+      expect(RenameFile).toHaveBeenCalledWith('/path/a/hit.go', 'renamed-hit.go')
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
+      expect(state.treeFilterKeyword).toBe('hit')
+      expect(state.filteredNodes).toHaveLength(1)
+      expect(state.filteredNodes[0].path).toBe('/path/a/renamed-hit.go')
+    })
+
+    it('非筛选语境删除命中项：维持退筛选现状（不重跑筛选）', async () => {
+      const { GetFileTree, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      // 未激活筛选：右键入口为树视图，删除后走 refreshNode 现状路径
+      expect(state.filterModeActive).toBe(false)
+
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      await state.handleDeleteAt({ name: 'a.go', path: '/path/a/a.go', type: 'file' })
+      await flushPromises()
+
+      expect(state.treeFilterKeyword).toBe('')
+      // 筛选未激活不重跑 runFilter：GetFileTree 仅懒加载 0 次（stub 环境无树渲染）
+      expect(GetFileTree).not.toHaveBeenCalled()
+      // stub 环境 refreshNode target miss 早退，不产生额外缓存失效调用
+      expect(InvalidateFileTreeCache).not.toHaveBeenCalled()
+    })
   })
 })
 

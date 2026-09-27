@@ -39,7 +39,7 @@
             class="filter-result-node"
             :class="{ 'truncation-hint-node': isTruncationHint(item) }"
             @click="onFilterResultClick(item)"
-            @contextmenu.prevent.stop
+            @contextmenu.prevent.stop="onNodeContextMenu($event, item)"
           >
             <el-icon
               v-if="isTruncationHint(item)"
@@ -843,12 +843,17 @@ const findExpandedAncestor = (nodePath, store) => {
 //   2. 拷贝/粘贴后目标收起 —— loadData 会 childNodes=[] 重建子节点，丢失子树展开，
 //      此处刷新前记录子树 expandedPaths，重建后逐层恢复。
 // 命中目标后 expand() 会展开目标并加载最新子节点（拷贝到未展开目标时随之展开，符合"看到结果"预期）。
-const refreshNode = async (nodePath) => {
+const refreshNode = async (nodePath, options = {}) => {
   if (!fileTreeRef.value || !nodePath) return
 
   // 筛选态下覆盖层挡住树视图，文件操作后刷新先退出筛选，
-  // 防覆盖层命中列表与刷新后树数据脱节（过期结果误导）
-  exitFilterMode()
+  // 防覆盖层命中列表与刷新后树数据脱节（过期结果误导）。
+  // 覆盖层右键触发的重命名/删除传 keepFilter 保筛选语境（命中列表由
+  // 调用方重跑 runFilter 刷新，见 refreshAfterFilterOp）；树语境无参
+  // 调用维持退筛选现行为
+  if (!options.keepFilter) {
+    exitFilterMode()
+  }
 
   const store = fileTreeRef.value.store
   const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
@@ -903,6 +908,27 @@ const refreshNode = async (nodePath) => {
 
   // 恢复子树展开状态
   await restoreExpandedPaths(expandedSubPaths)
+}
+
+// ---- 筛选语境文件操作后的刷新（覆盖层右键重命名/删除，保语境连续）----
+// 三步链路，顺序敏感：
+//   1. 显式清父目录后端缓存：不依赖 refreshNode 内 target 查找——截断层外文件
+//      树中无节点，refreshNode 可能 target miss 静默早退不清缓存，重跑筛选会
+//      命中陈旧数据；显式失效同时兜底 mtime 同 tick 边界（filetree_cache.go
+//      mtime 差量判定在删除与紧随查询同 tick 时误判未变）
+//   2. refreshNode(keepFilter)：树保持挂载照常刷新（退筛选后即见新数据），
+//      不 await（树刷新与筛选重拉并行，2000 名外场景其 target miss 早退无副作用）
+//   3. 重跑 runFilter：保筛选语境连续，命中列表反映操作后最新状态
+//      （删除项消失；重命名后仅新名仍含关键词时保留）
+const refreshAfterFilterOp = async (parentPath) => {
+  if (!parentPath) return
+  try {
+    await InvalidateFileTreeCache(parentPath)
+  } catch (error) {
+    console.error('Error clearing file tree cache:', error)
+  }
+  refreshNode(parentPath, { keepFilter: true })
+  await runFilter()
 }
 
 // ---- 全部刷新 ----
@@ -1155,6 +1181,8 @@ const onMenuCommand = (command) => {
       handleOpenWithDefaultApp(data.path)
       break
     case 'refresh':
+      // 筛选语境下「刷新」= 退筛选回树并重载该节点（refreshNode 内 exitFilterMode）：
+      // 用户要看树的真实状态，与重命名/删除的保语境刷新（refreshAfterFilterOp）语义不同
       refreshNode(data.path)
       break
     case 'pullRepos':
@@ -1289,7 +1317,12 @@ const handleRename = async () => {
       if (!parentPath) {
         parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
       }
-      refreshNode(parentPath)
+      // 筛选语境（覆盖层右键入口）：保语境刷新命中列表；树语境维持退筛选现状
+      if (filterModeActive.value) {
+        await refreshAfterFilterOp(parentPath)
+      } else {
+        refreshNode(parentPath)
+      }
     } else {
       ElMessage.error('重命名失败')
     }
@@ -1326,7 +1359,12 @@ const handleDeleteAt = async (data) => {
       if (!parentPath) {
         parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
       }
-      refreshNode(parentPath)
+      // 筛选语境（覆盖层右键入口）：保语境刷新命中列表；树语境维持退筛选现状
+      if (filterModeActive.value) {
+        await refreshAfterFilterOp(parentPath)
+      } else {
+        refreshNode(parentPath)
+      }
     } else {
       ElMessage.error('删除失败')
     }
