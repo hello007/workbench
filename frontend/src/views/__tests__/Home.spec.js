@@ -1027,6 +1027,8 @@ describe('Home.vue - handler 分支补充', () => {
     await wrapper.vm.handlePaste({ type: 'directory', path: 'D:\\dst' })
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
+    // 异常路径不触发刷新
+    expect(fileTreeSpies.refreshAfterFileOp).not.toHaveBeenCalled()
   })
 
   // ---- handleCopyTo 刷新分流（09-27-filetree-filter-overlay-paste-create-copyto-keep-filter）----
