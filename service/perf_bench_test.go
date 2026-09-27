@@ -98,6 +98,65 @@ func BenchmarkFileTreeGetTree_Cached(b *testing.B) {
 	}
 }
 
+// buildFlatFileFixture 在 dir 下单层构造 n 个小文件，供规模曲线测量（09-27 前端内存维度）。
+//
+// 口径对齐真实链路：前端 el-tree 懒加载展开单层目录触发 App.GetFileTree ->
+// FileTreeService.GetChildren（单层扫描，非递归）。单目录海量文件是「展开一次全量
+// 渲染 N 个节点」的最坏场景，与前端内存测量脚本（scripts/frontend-memory-tree.mjs）
+// fixture 结构一致，两侧数据可比。
+//
+// 文件名零填充定宽（file000001.txt），保证任意规模下字典序稳定（GetChildren 排序
+// 行为不受文件名长度变化干扰）。构造耗时由调用方 StopTimer/StartTimer 排除。
+func buildFlatFileFixture(b *testing.B, dir string, n int) {
+	b.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		b.Fatalf("mkdir %s: %v", dir, err)
+	}
+	nameWidth := len(fmt.Sprintf("%d", n))
+	namePattern := "file%0" + fmt.Sprintf("%d", nameWidth) + "d.txt"
+	for i := 0; i < n; i++ {
+		testutil.WriteFile(b, filepath.Join(dir, fmt.Sprintf(namePattern, i)), "x")
+	}
+}
+
+// BenchmarkFileTreeGetChildren_Scale 测单层目录 GetChildren（前端展开单层的真实链路）
+// 在 1k / 10k / 100k 文件规模下的冷扫描耗时与内存分配。
+//
+// 每档独立子目录 + 独立 service 实例；每次迭代前 ClearAllCache 强制冷扫描。
+// 100k 档 fixture 构造耗时显著（NTFS 海量小文件），构造段已排除计时，但整轮
+// benchmark 墙钟时间会变长，属预期。数据回填 docs/spec/perf-baseline.md §15。
+func BenchmarkFileTreeGetChildren_Scale(b *testing.B) {
+	scales := []struct {
+		label string
+		files int
+	}{
+		{"1000", 1_000},
+		{"10000", 10_000},
+		{"100000", 100_000},
+	}
+	for _, scale := range scales {
+		b.Run(scale.label, func(b *testing.B) {
+			dir := filepath.Join(b.TempDir(), fmt.Sprintf("flat-%s", scale.label))
+			b.StopTimer()
+			buildFlatFileFixture(b, dir, scale.files)
+			svc := NewFileTreeService()
+			b.StartTimer()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				svc.ClearAllCache() // 强制冷扫描，排除缓存命中路径
+				nodes, err := svc.GetChildren(dir)
+				if err != nil {
+					b.Fatalf("GetChildren failed: %v", err)
+				}
+				if len(nodes) != scale.files {
+					b.Fatalf("expected %d nodes, got %d", scale.files, len(nodes))
+				}
+			}
+		})
+	}
+}
+
 // scanGitReposBenchCount 扫描基线的仓库数量，模拟工作目录下多仓库场景。
 const scanGitReposBenchCount = 10
 

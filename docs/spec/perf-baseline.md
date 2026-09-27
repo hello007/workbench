@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）
+> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）
 
 ## 1. 适用范围
 
@@ -12,6 +12,7 @@
 - 长跑稳定性测试（soak）：核心读路径高频循环 + 检查点趋势采样（第 13 节）
 - 内存泄漏自动检测：heap/goroutine 双 GC 断言 + goleak 三档分策（第 14 节）
 - GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（自动化测量已收口，见第 6 节）
+- 前端内存量化：文件树规模曲线（JSHeap/DOM/耗时）+ 大文件预览传输-内存曲线（第 15 节）
 - 性能优化前后对比的唯一数据依据
 
 ## 2. 测量环境
@@ -250,11 +251,12 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - **配置文件读取（2026-09-27 冷启动量化补证）**：OnStartup 全段仅 21.4 ms（§6.2），settings.json 等本地 <2KB 文件经 OS 缓存读取占比 <5%，非瓶颈（不动）。
 - **资产 HTTP 请求（2026-09-27 冷启动量化补证）**：首屏 47 个回环请求 load 仅 ~110 ms，执行+挂载占大头（~360 ms，§6.2），请求数非瓶颈（不动）；后续优化方向若做，应指向 JS 执行/bundle 体积（懒加载已做一轮）。
 - **Wails/WebView2 宿主初始化 ~1.1 s（§6.2 大头）**：框架层耗时，项目代码可控面小，属桌面 WebView2 应用正常水平（不动）。
+- **大文件分块读取（2026-09-27 前端内存量化补证）**：ReadFileBytes 50MB 上限内峰值驻留 ~61.5 MB JSHeap（§15.3），膨胀 1.333x 与理论吻合，超限 TooLarge 降级无 OOM 面——50MB 上限即风险挡板，非瓶颈（不动）。
 
 ### 9.5 路线图勾选状态
 
 - 路线图「应用性能 → 启动时间优化」：**已勾选（2026-09-27 收口）**。三个子项闭环——「延迟加载非关键模块」mermaid 懒加载已落实（首屏 eager −1.8 MB）；「优化配置文件读取」「减少 HTTP 请求」经冷启动量化（§6.2）证明非瓶颈，按 9.4 先例记不动项；耗时大头 Wails/WebView2 宿主初始化为框架层不可控面，总冷启动 ~1.56 s（热态）属正常水平。
-- 路线图「应用性能 → 内存使用优化」：本轮未涉及对象释放/节点上限/分块读取，**不勾选**。
+- 路线图「应用性能 → 内存使用优化」：本轮未涉及对象释放/节点上限/分块读取，**不勾选**。（2026-09-27 更新：前端内存量化已收口（§15）——「限制文件树节点数量」立项实锤（100k 节点渲染 47.3 s + 3.2 GB，量化目标见 §15.4），「大文件分块读取」按 §15.3 记不动项；「及时释放不再使用的对象」未测保持不勾选）
 
 ## 10. 约束与噪声说明
 
@@ -455,3 +457,84 @@ go test ./service/ -run TestSoak -leak-heap-mb=16 -v
 ```
 
 注意：`-soak-rounds`/`-leak-heap-mb` 为 service 与主包各自注册的同名 flag（独立测试二进制无冲突），但 `go test ./... -soak-rounds=N` 会因未注册该 flag 的包报错，跨包深跑须按包分开传参。
+
+## 15. 维度 5：前端内存量化（09-27 前端内存维度任务）
+
+> 背景：第 6 节冷启动收口证明进程工作集大头在 WebView2 宿主而非 Go（常驻堆仅 0.6 MB），
+> Go 侧内存优化无收益，真实内存风险在前端渲染面。本节量化两条前端内存曲线，为路线图
+> 「应用性能 → 内存使用优化」下「限制文件树节点数量」「大文件分块读取」两子项提供数据决策。
+
+### 15.1 测量方法
+
+| 项 | 说明 |
+|---|---|
+| 曲线一脚本 | `node scripts/frontend-memory-tree.mjs [--runs 3] [--scales 1000,10000,100000]` |
+| 曲线一脚链路 | 选中工作目录 → `loadTreeNode` → `App.GetFileTree`（`GetChildren` 单层）→ el-tree 全量渲染（无虚拟滚动，`lazy` 懒加载展开即全量） |
+| 曲线一采样 | 独立 context 冷缓存，控制目录（空树）归零基线 → 点击 scale 目录 → `.el-tree-node` 计数达标判渲染完成；CDP `Performance.getMetrics`（JSHeapUsedSize，基线与渲染后采样前均经 `HeapProfiler.collectGarbage` 强制 GC，消除跨档残留——实测无 GC 时 10k 档驻留读数虚高 ~370 MB）+ 页内 `querySelectorAll('*')`（DOM 计数，CDP Nodes 指标 headless 动态插入不刷新已弃用） |
+| 曲线二脚本 | `node scripts/frontend-memory-preview.mjs [--runs 3]` |
+| 曲线二链路 | 浏览器通道 RPC 直调 `App.ReadFileBytes`（单参，50MB 上限硬编码 `app_preview.go`）→ 页面堆 base64 字符串驻留 → `atob` → `Uint8Array`（与 `FilePreviewRenderer` `base64ToUint8Array` 同实现） |
+| 曲线二采样 | CDP JSHeapUsedSize 双驻留点（RPC 返回后 / decode 后，采样前强制 GC）；`performance.memory` 同执行流内读数不刷新已弃用；decode 中间串（atob）无引用 GC 即回收，实测 decode 驻留增量 ≈0，峰值在 RPC base64 驻留点 |
+| 隔离 | 两脚本 serve 进程 cwd 指向临时目录，`data/`（工作目录配置/settings/web_token）与 fixture 全部落临时目录，用户真实配置零污染 |
+| 口径 | 每轮独立 context = 冷缓存，浏览器进程复用 = V8 暖（§6 前端段同口径）；fixture 内容伪随机防 V8 字符串去重扭曲读数 |
+
+**PRD 假设修正**：任务 PRD 假设大文件用「文本与 markdown」测——实测链路核实文本/markdown
+走 `PreviewFile` 1MB 通道（`ContentPanel.vue` `needsBytes` 仅 image/office 触发
+ReadFileBytes，PDF 走 iframe + Range 流式无上限），故曲线二 fixture 用 `.png`（image kind），
+口径对齐真实用户路径。
+
+### 15.2 曲线一：文件树「规模-内存-耗时」（2026-09-27 实测，3 轮中位）
+
+| 单层节点量 | Go `GetChildren`（benchmem） | 前端渲染耗时 | DOM 节点增量 | JSHeap 增量 | JSHeap 驻留 |
+|---|---|---|---|---|---|
+| 1k | 1.31 ms / 534 KB / 5,036 allocs | ~346 ms | +7,994 | ~32 MB | ~44 MB |
+| 10k | 35.2 ms / 8.0 MB / 60,055 allocs | ~4.36 s | +79,998 | ~311 MB | ~326 MB |
+| 100k | 306 ms / 83 MB / 600,076 allocs | **~49.2 s** | +799,989 | **~3.14 GB** | **~3.15 GB** |
+
+（GC 口径重测后增量与驻留收敛，上表为最终口径数据；无强制 GC 的首批测量 10k 档驻留
+581 MB 系跨档残留，已废弃。）
+
+Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem -benchtime=2s -run='^$' ./service/`
+（fixture 单目录 N 文件，构造耗时排除计时，与前端脚本 fixture 同构可对照）。
+
+**结论：瓶颈定性在前端渲染，不在 Go。** Go 侧 100k 冷扫仅 306 ms（线性扩展），前端渲染
+100k 节点 49.2 s + 3.14 GB JSHeap（每 DOM 节点约 8 元素 × 4 KB 级开销），已属交互卡死级：
+- **1k 节点**：~346 ms 无感，属正常（不动）
+- **10k 节点**：~4.4 s + 311 MB，交互明显劣化（大数据目录/日志目录/扁平 node_modules 可触发）
+- **100k 节点**：49 s + 3.14 GB，灾难级（可致 WebView2 OOM 崩溃）
+
+### 15.3 曲线二：大文件「大小-传输-JSHeap」（2026-09-27 实测，3 轮中位）
+
+| 文件档位 | base64 传输体积 | 膨胀系数 | 峰值 JSHeap 增量 | TooLarge 分支 |
+|---|---|---|---|---|
+| 1 MB | 1.3 MB | 1.333x | +1.3 MB | - |
+| 4 MB | 5.3 MB | 1.333x | +5.1 MB | - |
+| 16 MB | 21.3 MB | 1.333x | +21.1 MB | - |
+| 48 MB（上限内边界） | 64 MB | 1.333x | +63.8 MB | - |
+| 64 MB（超限） | 不传输 | - | 0 | **TooLarge=true，后端拒绝读，无 base64 返回** |
+
+**结论：非瓶颈，50MB 上限合理（不动项）。** base64 膨胀实测 1.333x（理论 4/3 精确吻合）；
+上限内最大驻留 ~64 MB JSHeap（48 MB 文件），量级可控；decode 中间串 GC 即回收（decode
+驻留增量实测 ≈0），超限走 TooLarge 降级提示，无 OOM 风险面。image 真实路径后续 dataURL
+拼接 + `<img>` 位图由合成器持有不在 JSHeap（定性不计）。
+
+### 15.4 路线图勾选状态（「应用性能 → 内存使用优化」）
+
+- **限制文件树节点数量：立项实锤（记录量化目标，不实施）**。量化目标（GC 口径实测锚点）：
+  单层展开 ≥10k 节点渲染 ~4.4 s、JSHeap +311 MB，交互明显劣化，须限制节点数或引入
+  虚拟滚动；1k 内（~346 ms / +32 MB）无感不处理。触发面：单目录万级文件（日志目录、
+  数据导出目录、扁平 node_modules）。
+- **大文件分块读取：非瓶颈不动（§15.3）**。50MB 上限内峰值驻留 <100 MB，上限本身
+  即风险挡板；分块读取复杂度（Range 协议、渐进渲染、断点状态）收益不抵。
+- **及时释放不再使用的对象：本轮未测，保持不勾选**。
+
+### 15.5 复测与噪声说明
+
+- 复测偏差量级：曲线一 1k 档渲染 334-380 ms（±7%）、JSHeap 增量 32.1 MB 稳定；100k 档
+  渲染 47.5-51.5 s（±4%）、JSHeap 3.14 GB（±0.1%）——结论量级（100k 灾难级）远超噪声带。
+- 曲线二膨胀系数三轮稳定 1.333x；48 MB 档峰值驻留 63.8 MB（±1%）。
+- 口径备注：首批测量（无强制 GC）与 GC 口径复测的差异集中在「驻留」列（跨档残留，
+  10k 档 581 MB→326 MB），增量列两批差异为 GC 时机噪声（10k 档 211 MB→311 MB，
+  首批渲染后未 GC 部分中间对象已回收）；结论不受影响。
+- `gpuDisabled: true` 沿用 §6 标注；CDP 采样为 Chromium headless 口径，WebView2 渲染端
+  存在环境差异（JSHeap 量级趋势可参考，绝对值受 V8 版本/堆配置影响）。
+- 测量机同第 2 节（Windows 11 / Ryzen 7 H 255 / 31.27 GB）。
