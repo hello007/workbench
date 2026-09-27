@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 93
-- **Last Active**: 2026-09-25
+- **Total Sessions**: 94
+- **Last Active**: 2026-09-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1322 | Active |
+| `journal-2.md` | ~1355 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 94 | 2026-09-27 | GUI 冷启动量化收口（perf-baseline §6） | `cced9d0` | `master` |
 | 93 | 2026-09-25 | 性能测试收口：长跑稳定性 soak + 内存泄漏自动检测 | `9ecd1ab` | `master` |
 | 92 | 2026-09-24 | vitest 排除 e2e-desktop 修复 npm test 回归 | HEAD | `master` |
 | 91 | 2026-09-24 | 文档版本 v2.14 与路线图勾选/死链同步 | `d7ec130` | `master` |

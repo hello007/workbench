@@ -1320,3 +1320,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 94: GUI 冷启动量化收口（perf-baseline §6）
+
+**Date**: 2026-09-27
+**Task**: GUI 冷启动量化收口（perf-baseline §6）
+**Branch**: `master`
+
+### Summary
+
+新增 scripts/cold-start-bench.ps1（GUI 段：slog 时间戳+TCP 同循环探测+MainWindowHandle 上界代理+工作集，3 热身 5 采样中位）与 scripts/cold-start-frontend.mjs（--serve 浏览器通道+Playwright 冷缓存首屏代理），perf-baseline.md §6 占位收口为实测：感知总冷启动 ~1.56s（热态），Go OnStartup 全段 21.4ms 非瓶颈，大头 Wails/WebView2 宿主初始化（框架层）；路线图「启动时间优化」父项勾选，配置读取/HTTP 请求两子项按非瓶颈不动项收口。子 agent 审核修 7 处（offset 半截行、日志轮转复位、TCP 串行高估并循环、空集中位数、spawn error、try/finally 防孤儿、维度编号统一）。教训：PS 5.1 无 BOM UTF-8 按 GBK 误读中文须 BOM；.NET DateTime 相减不看 Kind，Local/Utc 混用差整个时区偏移；MainWindowHandle 实测晚于 workbench started 日志，只能作上界代理；工作集跨批次 57-100.7MB 受 OS 修剪波动大只可量级参考。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cced9d0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
