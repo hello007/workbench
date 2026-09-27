@@ -1419,3 +1419,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 97: 前端内存驻留面量化收口（perf-baseline §16）
+
+**Date**: 2026-09-27
+**Task**: 前端内存驻留面量化收口（perf-baseline §16）
+**Branch**: `master`
+
+### Summary
+
+路线图「及时释放对象」子项收口：新增驻留测量脚本（git 双仓 fixture + GC 三点采样），2 面实测 + 4 面审计分流。唯一实施项 FileDiffDialog 关闭残留 2.8→0.3MB（行数据清空挂 @closed 防 destroy-on-close 动画闪空 + loadSeq++ 防在途响应写回）；CommitHistory 切仓库重置实测回落 -2.5MB 机制健全；其余使用中数据不动。子 agent 审核 1🔴4🟡 全修复（面二基线混入致 4.1MB 假残留归因不成立，修正 dblclick 前采样后重测终版口径）。路线图「内存使用优化」父项三子项全勾。vitest 1410/E2E 6/6/覆盖率门禁过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f526ce9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
