@@ -1,17 +1,81 @@
 <template>
   <div class="file-tree-aside">
     <div class="tree-toolbar">
-      <el-button-group>
-        <el-button size="small" @click="refreshAll">刷新</el-button>
-        <el-button size="small" @click="expandAll" :loading="expanding">全部展开</el-button>
-        <el-button size="small" @click="collapseAll">全部收起</el-button>
-      </el-button-group>
-      <!-- 工具栏扩展位：仓库筛选器等外部按钮通过具名 slot 注入 -->
-      <slot name="toolbar-extra" />
+      <div class="tree-toolbar-row">
+        <el-button-group>
+          <el-button size="small" @click="refreshAll">刷新</el-button>
+          <el-button size="small" @click="expandAll" :loading="expanding">全部展开</el-button>
+          <el-button size="small" @click="collapseAll">全部收起</el-button>
+        </el-button-group>
+        <!-- 工具栏扩展位：仓库筛选器等外部按钮通过具名 slot 注入 -->
+        <slot name="toolbar-extra" />
+      </div>
+      <el-input
+        ref="treeFilterInputRef"
+        v-model="treeFilterKeyword"
+        size="small"
+        clearable
+        :prefix-icon="Search"
+        :placeholder="treeFilterPlaceholder"
+        class="tree-filter-input"
+        @input="onFilterInput"
+        @clear="exitFilterMode"
+        @keydown.esc.prevent="exitFilterMode"
+      />
     </div>
     <div class="tree-content" @contextmenu.prevent="onBlankAreaContextMenu">
+      <!-- 目录内按名筛选覆盖层（perf-baseline §15.6 截断配套）：激活时遮盖树视图。
+           树用 v-show 保持挂载（v-if 卸载会丢展开态 + 重挂载后 locateNode 必 miss），
+           覆盖层条件含 selectedDirectoryId 防无目录空态被顶替；
+           v-for 命中列表复用 truncateTreeNodes 限渲染上限 -->
+      <div v-if="filterModeActive && directoryStore.selectedDirectoryId" class="tree-filter-overlay">
+        <div class="tree-filter-summary">
+          在「{{ treeFilterScopeName }}」中命中 {{ filteredNodes.length }} 项
+        </div>
+        <template v-if="filteredDisplayNodes.length > 0">
+          <div
+            v-for="item in filteredDisplayNodes"
+            :key="item.path"
+            class="filter-result-node"
+            :class="{ 'truncation-hint-node': isTruncationHint(item) }"
+            @click="onFilterResultClick(item)"
+            @contextmenu.prevent.stop
+          >
+            <el-icon
+              v-if="isTruncationHint(item)"
+              color="#909399"
+              style="margin-right: 5px;"
+            >
+              <MoreFilled />
+            </el-icon>
+            <el-icon
+              v-else-if="item.type === 'directory'"
+              color="#909399"
+              style="margin-right: 5px;"
+            >
+              <Folder />
+            </el-icon>
+            <template v-else>
+              <img
+                v-if="getIconForFile(item.name)"
+                :src="getIconForFile(item.name)"
+                class="tree-node-file-icon"
+                :alt="item.name"
+              />
+              <el-icon v-else color="#606266" style="margin-right: 5px;">
+                <Document />
+              </el-icon>
+            </template>
+            <span
+              class="filter-result-name"
+              :style="{ fontStyle: isTruncationHint(item) ? 'italic' : 'normal', color: isTruncationHint(item) ? '#909399' : '#606266' }"
+            >{{ item.name }}</span>
+          </div>
+        </template>
+        <el-empty v-else description="无匹配项" :image-size="60" />
+      </div>
       <el-tree
-        v-if="directoryStore.selectedDirectoryId"
+        v-show="!filterModeActive && !!directoryStore.selectedDirectoryId"
         :key="treeKey"
         ref="fileTreeRef"
         :props="treeProps"
@@ -73,7 +137,7 @@
           </span>
         </template>
       </el-tree>
-      <el-empty v-else description="请先选择工作目录" :image-size="100" />
+      <el-empty v-if="!directoryStore.selectedDirectoryId" description="请先选择工作目录" :image-size="100" />
     </div>
 
     <!-- 新建文件夹/文件对话框 -->
@@ -392,6 +456,7 @@ import {
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { truncateTreeNodes, TRUNCATION_HINT_TYPE } from '../utils/treeTruncate'
+import { filterTreeNodesByName } from '../utils/treeFilter'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore, useAiChatStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -446,10 +511,6 @@ let treeReadyPromise = new Promise(r => { treeReadyResolve = r })
 function resetTreeReady() {
   treeReadyPromise = new Promise(r => { treeReadyResolve = r })
 }
-
-watch(treeKey, () => {
-  resetTreeReady()
-})
 
 const treeProps = {
   label: 'name',
@@ -551,6 +612,117 @@ const swapCopyToPaths = () => {
   copyToTargetName.value = defaultCopyToName()
 }
 
+// ---- 目录内按名筛选（截断优化配套，perf-baseline §15.6 盲区补齐）----
+// 覆盖层模式：筛选激活时 tree-content 切换为扁平命中列表，不碰 el-tree 懒加载/
+// 截断哨兵数据流。数据源 GetFileTree(作用域) 全量拉取（Go 侧缓存命中，10k ~35ms），
+// 前端按名过滤不受 2000 截断限制。
+const treeFilterKeyword = ref('')
+const treeFilterInputRef = ref()
+const filteredNodes = ref([])
+// 作用域：筛选前最后点击的目录节点；无点击/点击为文件时回退工作目录根层
+const lastClickedNodeData = ref(null)
+let filterDebounceTimer = null
+// 竞态守卫：连续输入多次触发 runFilter 并发，旧响应晚到须丢弃防结果回跳
+let filterSeq = 0
+
+const currentWorkDir = computed(() =>
+  directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
+)
+
+const filterModeActive = computed(() => treeFilterKeyword.value.trim().length > 0)
+
+const treeFilterScope = computed(() => {
+  const d = lastClickedNodeData.value
+  if (d && d.type === 'directory') return d
+  return null
+})
+
+const treeFilterScopeName = computed(() =>
+  treeFilterScope.value?.name || currentWorkDir.value?.name || ''
+)
+
+const treeFilterPlaceholder = computed(() =>
+  treeFilterScope.value ? `在「${treeFilterScope.value.name}」内按名筛选` : '在当前目录按名筛选'
+)
+
+// 命中列表渲染上限：复用 truncateTreeNodes（2000 + 末尾哨兵），防命中过多渲染劣化
+const filteredDisplayNodes = computed(() => {
+  const scopePath = treeFilterScope.value?.path || currentWorkDir.value?.path || ''
+  return truncateTreeNodes(filteredNodes.value, scopePath).nodes
+})
+
+const onFilterInput = () => {
+  clearTimeout(filterDebounceTimer)
+  if (!filterModeActive.value) {
+    filteredNodes.value = []
+    return
+  }
+  // 防抖 300ms：连续输入避免逐字符拉取
+  filterDebounceTimer = setTimeout(runFilter, 300)
+}
+
+const runFilter = async () => {
+  const kw = treeFilterKeyword.value.trim()
+  if (!kw) return
+  const scopePath = treeFilterScope.value?.path || currentWorkDir.value?.path
+  if (!scopePath) return
+  const seq = ++filterSeq
+  try {
+    const nodes = await GetFileTree(scopePath)
+    if (seq !== filterSeq) return
+    filteredNodes.value = filterTreeNodesByName(nodes || [], kw)
+  } catch (error) {
+    if (seq !== filterSeq) return
+    console.error('筛选失败:', error)
+    ElMessage.error('筛选失败: ' + (error.message || error))
+    filteredNodes.value = []
+  }
+}
+
+const exitFilterMode = () => {
+  clearTimeout(filterDebounceTimer)
+  // 递增序号使在途 runFilter 响应失效：否则 ESC/切目录后旧作用域响应仍写回
+  // filteredNodes（seq 相等不被丢弃），再次输入时防抖窗口内覆盖层闪现旧目录命中
+  filterSeq++
+  treeFilterKeyword.value = ''
+  filteredNodes.value = []
+}
+
+const focusTreeFilter = () => {
+  nextTick(() => treeFilterInputRef.value?.focus?.())
+}
+
+// 命中项点击：文件 emit select 预览（保持筛选态）；目录退出筛选回树定位展开；
+// 哨兵（命中超限提示）纯提示不可交互
+const onFilterResultClick = (item) => {
+  if (isTruncationHint(item)) return
+  if (item.type === 'directory') {
+    exitFilterMode()
+    locateNode(item.path)
+    return
+  }
+  // 同步树选中态：F2/Delete 快捷键经 getCurrentNode 作用于树当前节点，
+  // 不同步则「预览命中文件 A、快捷键删树上残留节点 B」错位
+  const tree = fileTreeRef.value
+  if (tree?.getNode?.(item.path)) {
+    tree.setCurrentKey(item.path)
+    currentSelectedPath.value = item.path
+  } else {
+    // 截断层外文件树中无对应节点：清当前键防快捷键命中旧节点（getCurrentNode 返回 null 早退）
+    tree?.setCurrentKey?.(null)
+  }
+  emit('select', item)
+}
+
+// 作用域取筛选前最后点击的目录节点（onNodeClick 处记录）
+watch(treeKey, () => {
+  resetTreeReady()
+  // 目录切换/整体刷新全量重建树，筛选态随之重置；lastClickedNodeData 一并清空，
+  // 防新目录内筛选误用上一目录的点击节点作作用域（跨目录数据泄漏）
+  exitFilterMode()
+  lastClickedNodeData.value = null
+})
+
 // ---- 懒加载 ----
 const loadTreeNode = async (node, resolve) => {
   debug.log('loadTreeNode called, node:', node)
@@ -600,16 +772,25 @@ const loadTreeNode = async (node, resolve) => {
 }
 
 // ---- 节点点击 ----
-// 截断哨兵节点纯提示用途：不选中、不触发预览/展开
+// 截断哨兵节点：不选中、不触发预览/展开；点击聚焦工具栏筛选框
+// （2000 名外文件定位入口，文案见 utils/treeTruncate.js）
 const isTruncationHint = (data) => data?.type === TRUNCATION_HINT_TYPE
 
 const onNodeClick = (data, node) => {
-  if (isTruncationHint(data)) return
+  if (isTruncationHint(data)) {
+    // el-tree highlight-current 在本回调前已 setCurrentNode，哨兵被高亮为当前节点；
+    // 清高亮保持「哨兵不选中」不变式（视觉 + F2/Delete 读取的 getCurrentNode 双保险）
+    fileTreeRef.value?.setCurrentKey?.(null)
+    focusTreeFilter()
+    return
+  }
   const clickedPath = data.path.replace(/\\/g, '/')
   const prevPath = currentSelectedPath.value.replace(/\\/g, '/')
   const wasSelected = prevPath === clickedPath // 点击前是否已选中
 
   currentSelectedPath.value = data.path
+  // 记录最后点击节点供筛选作用域判定（目录筛选作用于该目录，文件/其他回退根层）
+  lastClickedNodeData.value = data
   emit('select', data)
 
   if (data.isLeaf || data.type === 'file') return
@@ -664,6 +845,10 @@ const findExpandedAncestor = (nodePath, store) => {
 // 命中目标后 expand() 会展开目标并加载最新子节点（拷贝到未展开目标时随之展开，符合"看到结果"预期）。
 const refreshNode = async (nodePath) => {
   if (!fileTreeRef.value || !nodePath) return
+
+  // 筛选态下覆盖层挡住树视图，文件操作后刷新先退出筛选，
+  // 防覆盖层命中列表与刷新后树数据脱节（过期结果误导）
+  exitFilterMode()
 
   const store = fileTreeRef.value.store
   const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
@@ -1586,6 +1771,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onGlobalClick)
   document.removeEventListener('contextmenu', onGlobalContextMenu)
+  // 防抖在途时组件卸载后 runFilter 仍会拉取/写 ref/弹错误提示
+  clearTimeout(filterDebounceTimer)
 })
 </script>
 
@@ -1606,10 +1793,70 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
 }
 
+/* 工具栏首行：按钮组 + 扩展 slot；筛选输入框独立成行（面板窄，同行动线挤压） */
+.tree-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.tree-filter-input {
+  width: 100%;
+}
+
 .tree-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 目录内按名筛选覆盖层（perf-baseline §15.6 截断配套）：
+   激活时整体替换树视图，命中列表与树节点行高/间距对齐 */
+.tree-filter-overlay {
+  padding: var(--spacing-sm) var(--spacing-xs);
+}
+
+.tree-filter-summary {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  padding: var(--spacing-sm) var(--spacing-md);
+  letter-spacing: -0.01em;
+}
+
+.filter-result-node {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin: var(--spacing-sm) var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--transition-normal);
+}
+
+.filter-result-node:hover {
+  background-color: var(--bg-tertiary);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-result-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 覆盖层内截断哨兵（命中超限提示）：非可交互项，「点击按名筛选」文案引导的是
+   树视图哨兵行为，覆盖层语境下点击为空操作，视觉上去除可点击暗示 */
+.tree-filter-overlay .truncation-hint-node {
+  cursor: default;
+}
+
+.tree-filter-overlay .truncation-hint-node:hover {
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .file-tree {
@@ -1640,12 +1887,11 @@ onBeforeUnmount(() => {
   cursor: default;
   user-select: none;
 }
-/* 截断哨兵节点（单层超限提示，见 utils/treeTruncate.js）：弱化展示不可交互；
-   pointer-events:none 拦内容区点击（el-tree 行级 highlight-current 仍可能在
-   padding 区触发，快捷键路径由 triggerRenameCurrent/triggerDeleteCurrent 双重过滤） */
+/* 截断哨兵节点（单层超限提示，见 utils/treeTruncate.js）：弱化展示；
+   点击聚焦工具栏筛选框（onNodeClick 哨兵分支），快捷键路径由
+   triggerRenameCurrent/triggerDeleteCurrent 双重过滤防误弹对话框 */
 .truncation-hint-node {
   opacity: 0.75;
-  pointer-events: none;
 }
 .el-tree-node__children {
   transition: all 0.3s ease;

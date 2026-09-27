@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "验收须核哨兵过滤面六处不回归 + §15.6 勘误已落"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 规范合规检查（fixtures 来源/mock 数据源/禁 waitForTimeout）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "视觉合规检查"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁核验"}

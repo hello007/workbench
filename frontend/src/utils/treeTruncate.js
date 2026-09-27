@@ -8,8 +8,9 @@
  * settings 化成本（model.AppSettings 字段 + wailsjs 绑定三处同步 + SettingsPanel UI）
  * 不抵收益；后续若需可配置，改为此常量读 store 一处即可。
  *
- * 超出截断名单的文件定位：哨兵节点文案引导使用命令面板（Ctrl+P）文件名搜索
- * （SearchFiles 模糊匹配 + 评分排序，已覆盖按名找文件场景）。
+ * 超出截断名单的文件定位：哨兵节点文案引导两条路径——工具栏按名筛选（对该层
+ * GetFileTree 全量拉取后前端过滤，不受截断限制；SearchFiles 跳过 node_modules，
+ * 对扁平 node_modules 场景无效）与命令面板（Ctrl+P）文件名搜索。
  */
 
 /** 单层渲染节点数上限（不含哨兵提示节点） */
@@ -41,7 +42,7 @@ export function truncateTreeNodes(nodes, parentPath, limit = FILE_TREE_NODE_LIMI
     // 不可能含 NUL，故合成 key 与任何真实节点零冲突（Linux 文件名合法含 `:`，
     // `::` 之类可见分隔符存在被真实文件名撞 key 的理论可能，NUL 无此面）
     path: `${parentPath}\0truncation-hint`,
-    name: `已显示前 ${limit} 项，其余 ${hiddenCount} 项未加载（可用 Ctrl+P 文件搜索定位）`,
+    name: `已显示前 ${limit} 项，其余 ${hiddenCount} 项未加载（点击此处按名筛选，或 Ctrl+P 搜索）`,
     type: TRUNCATION_HINT_TYPE,
     isLeaf: true
   })

@@ -14,6 +14,7 @@
  */
 import { test, expect, getWailsCalls } from './fixtures'
 import { E2E_REPO_PATH, GIT_REPO_DIRECTORY, GIT_FLOW_OVERRIDES, visibleDialog } from './git-fixtures'
+import { makeLargeDirNodes } from '../src/test/wails-mock-defaults'
 
 /** 文件树用例公共前置：打开首页并选中工作目录，等待文件树根节点渲染 */
 async function openFileTreePage(page) {
@@ -24,6 +25,19 @@ async function openFileTreePage(page) {
   await dirItem.click()
   // 文件树懒加载完成：根级节点可见即代表 GetFileTree(rootPath) 链路贯通
   await expect(page.locator('.el-tree-node', { hasText: 'README.md' })).toBeVisible()
+}
+
+/**
+ * 大目录筛选用例前置：GetFileTree 被 makeLargeDirNodes(2050) 覆盖（默认值无
+ * README.md，不能复用 openFileTreePage 的 README 等待），改等首个树节点渲染。
+ */
+async function openLargeDirTreePage(page) {
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.goto('/')
+  const dirItem = page.locator('.dir-item', { hasText: GIT_REPO_DIRECTORY.name })
+  await expect(dirItem).toBeVisible()
+  await dirItem.click()
+  await expect(page.locator('.el-tree-node', { hasText: 'chunk-0.dat' })).toBeVisible()
 }
 
 test.describe('文件树操作流程', () => {
@@ -178,5 +192,76 @@ test.describe('文件树操作流程', () => {
       // 失败后树不刷新（仍只有根节点加载一次调用）
       expect(await getWailsCalls(page, 'GetFileTree')).toHaveLength(1)
     })
+  })
+})
+
+// ---- 目录内按名筛选（截断优化配套，perf-baseline §15.6 盲区补齐）----
+// 大目录 override：根层 2050 项文件（触发 2000 截断 + 哨兵），chunk-2049.dat
+// 位于树中不可见的 2000 名外，仅筛选可定位。
+test.describe('目录内按名筛选', () => {
+  const largeDirOverrides = {
+    ...GIT_FLOW_OVERRIDES,
+    GetFileTree: makeLargeDirNodes(2050)
+  }
+  test.use({ wailsOverrides: largeDirOverrides })
+
+  test('筛选命中 2000 名外文件：覆盖层渲染，点击文件保持筛选态', async ({ page }) => {
+    await openLargeDirTreePage(page)
+
+    // 工具栏筛选框输入（无目录点击，作用域默认工作目录根层）
+    const filterInput = page.locator('.tree-filter-input input')
+    await filterInput.fill('chunk-2049')
+
+    // 覆盖层激活（树视图被替换），防抖 + GetFileTree 后命中渲染
+    const overlay = page.locator('.tree-filter-overlay')
+    await expect(overlay).toBeVisible()
+    await expect(overlay.locator('.tree-filter-summary')).toContainText('命中 1 项')
+    await expect(overlay.locator('.filter-result-name', { hasText: 'chunk-2049.dat' })).toBeVisible()
+
+    // 筛选触发了对作用域路径的全量拉取（根层加载 + 筛选各一次）
+    const treeCalls = await getWailsCalls(page, 'GetFileTree')
+    expect(treeCalls[1]).toEqual({ method: 'GetFileTree', args: [E2E_REPO_PATH] })
+
+    // 点击命中文件：emit select 预览（ContentPanel 链路），筛选态保持
+    await overlay.locator('.filter-result-node', { hasText: 'chunk-2049.dat' }).click()
+    await expect(overlay).toBeVisible()
+    const previewCalls = await getWailsCalls(page, 'PreviewFile')
+    expect(previewCalls[0].args[0]).toBe(`${E2E_REPO_PATH}/chunk-2049.dat`)
+  })
+
+  test('清空关键词退出筛选：覆盖层消失树视图回归', async ({ page }) => {
+    await openLargeDirTreePage(page)
+
+    const filterInput = page.locator('.tree-filter-input input')
+    await filterInput.fill('chunk-2')
+    await expect(page.locator('.tree-filter-overlay')).toBeVisible()
+
+    await filterInput.fill('')
+    await expect(page.locator('.tree-filter-overlay')).toHaveCount(0)
+    await expect(page.locator('.el-tree-node', { hasText: 'chunk-0.dat' })).toBeVisible()
+  })
+
+  test('ESC 退出筛选', async ({ page }) => {
+    await openLargeDirTreePage(page)
+
+    const filterInput = page.locator('.tree-filter-input input')
+    await filterInput.fill('chunk-2')
+    await expect(page.locator('.tree-filter-overlay')).toBeVisible()
+
+    await filterInput.press('Escape')
+    await expect(page.locator('.tree-filter-overlay')).toHaveCount(0)
+  })
+
+  test('截断哨兵点击聚焦筛选框（2000 名外文件定位入口）', async ({ page }) => {
+    await openLargeDirTreePage(page)
+
+    // 2050 项截断后哨兵为末节点（第 2001 项），Playwright 自动滚动到可见后点击
+    const hint = page.locator('.el-tree-node .truncation-hint-node')
+    await expect(hint).toContainText('已显示前 2000 项')
+    await hint.click()
+
+    await expect(page.locator('.tree-filter-input input')).toBeFocused()
+    // 哨兵点击不改变选中态：未触发文件预览（仅聚焦）
+    expect(await getWailsCalls(page, 'GetFileTree')).toHaveLength(1)
   })
 })

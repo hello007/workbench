@@ -566,8 +566,14 @@ Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem 
 **行为变化**：超 2000 项的层仅显示前 2000 项 + 哨兵行；文件定位走既有
 CommandPalette（Ctrl+P）文件名搜索（SearchFiles 模糊匹配），目标位于截断层
 2000 项之外时树中无节点可定位，locateNode 显式 ElMessage 提示（替代静默失败）。
-SearchFiles 跳过 node_modules 的既有语义使「扁平 node_modules 内找包文件」无
-前端入口（可接受：此类操作惯用终端），后续如有需求可做树内按名筛选。
+SearchFiles 跳过 node_modules 的既有语义使「扁平 node_modules 内找包文件」经
+Ctrl+P 不可达——该盲区已由树内按名筛选补齐（09-27-tree-dir-name-filter 任务）：
+工具栏筛选框输入后该层切换为命中项覆盖视图（GetFileTree 全量拉取走 Go 侧缓存 +
+前端 `utils/treeFilter.js` 按名过滤，不受截断限制），截断哨兵点击聚焦筛选框，
+清除/ESC/切换目录/refreshNode 退出筛选态。覆盖层与 el-tree 的互斥用 v-show 保持
+树挂载（v-if 卸载会丢子树展开态，且重挂载后 locateNode 首段 getNode 必 miss、
+误导提示「未能定位该文件」）；筛选作用域取筛选前最后点击的目录节点（treeKey
+变化时随筛选态一并清空，防跨目录作用域泄漏）。
 
 ## 16. 维度 6：前端内存驻留面量化（09-27 驻留任务，收口路线图「及时释放不再使用的对象」）
 

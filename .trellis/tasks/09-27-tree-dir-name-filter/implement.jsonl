@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "§15.6 截断优化背景 + 哨兵过滤面清单 + §15.6 句须同步更新"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "工具栏控件尺寸/间距/空态视觉约束"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E fixtures import 规范 + wails-mock-defaults 单一数据源 + vitest exclude 规则"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 覆盖率门禁口径"}

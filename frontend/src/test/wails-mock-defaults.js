@@ -460,3 +460,24 @@ export const WAILS_MOCK_E2E_RETURN_VALUES = {
   ...WAILS_MOCK_DEFAULT_RETURN_VALUES,
   ...WAILS_MOCK_E2E_EXTRA_RETURN_VALUES
 }
+
+/**
+ * 大目录 fixture 生成器（目录内按名筛选 E2E 用，perf-baseline §15.6 截断配套）。
+ *
+ * 生成 count 项扁平文件节点（对齐「扁平 node_modules 超 2000 项触发截断」盲区场景），
+ * 供 file-tree.spec.js 经 wailsOverrides 覆盖 GetFileTree，验证筛选可定位
+ * 2000 名外文件。独立导出不进默认表——默认表被全部用例共享，2000+ 项数组
+ * 会拖慢无关用例的树渲染。路径挂 E2E_REPO_PATH（demo-repo 根层）。
+ */
+export function makeLargeDirNodes(count = 2050, rootPath = 'D:/e2e-demo/demo-repo') {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `${rootPath}/chunk-${i}.dat`,
+    name: `chunk-${i}.dat`,
+    path: `${rootPath}/chunk-${i}.dat`,
+    type: 'file',
+    isGitRepo: false,
+    hasRemote: false,
+    hasChildren: false,
+    isLeaf: true
+  }))
+}

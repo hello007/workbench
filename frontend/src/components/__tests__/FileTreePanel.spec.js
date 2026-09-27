@@ -593,8 +593,8 @@ describe('FileTreePanel.vue', () => {
       wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'directory')
       await flushPromises()
 
-      // 找到名称输入框（value 为空的 input）并输入名称
-      const inputs = wrapper.findAll('input')
+      // 名称输入框在对话框容器内查找（工具栏筛选框在 dialog 外，天然排除）
+      const inputs = wrapper.find('form').findAll('input')
       const nameInput = inputs.find(i => i.element.value === '')
       await nameInput.setValue('new-folder')
 
@@ -629,7 +629,7 @@ describe('FileTreePanel.vue', () => {
       wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'file')
       await flushPromises()
 
-      const inputs = wrapper.findAll('input')
+      const inputs = wrapper.find('form').findAll('input')
       const nameInput = inputs.find(i => i.element.value === '')
       await nameInput.setValue('new-file.go')
 
@@ -677,7 +677,7 @@ describe('FileTreePanel.vue', () => {
       wrapper.vm.showCreateAt({ name: 'a', path: '/path/a', type: 'directory' }, 'directory')
       await flushPromises()
 
-      const inputs = wrapper.findAll('input')
+      const inputs = wrapper.find('form').findAll('input')
       const nameInput = inputs.find(i => i.element.value === '')
       await nameInput.setValue('existing-dir')
 
@@ -1160,6 +1160,198 @@ describe('FileTreePanel.vue', () => {
       await wrapper.vm.refreshNode('/path/a/root.txt')
 
       expect(rootExpand).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ---- 目录内按名筛选（截断优化配套，perf-baseline §15.6 盲区补齐）----
+  describe('目录内按名筛选', () => {
+    const makeNodes = n => Array.from({ length: n }, (_, i) => ({
+      name: `file${i}.txt`,
+      path: `/path/a/file${i}.txt`,
+      type: 'file',
+      hasChildren: false,
+      isLeaf: true
+    }))
+
+    it('filterModeActive：关键词非空激活，空串未激活', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      expect(state.filterModeActive).toBe(false)
+      state.treeFilterKeyword = 'abc'
+      await flushPromises()
+      expect(state.filterModeActive).toBe(true)
+    })
+
+    it('runFilter：按作用域路径拉 GetFileTree 全量后过滤，命中写入 filteredNodes', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce([
+        ...makeNodes(2),
+        { name: 'README.md', path: '/path/a/README.md', type: 'file', isLeaf: true }
+      ])
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'README'
+      await state.runFilter()
+      await flushPromises()
+
+      expect(GetFileTree).toHaveBeenCalledWith('/path/a')
+      expect(state.filteredNodes).toHaveLength(1)
+      expect(state.filteredNodes[0].name).toBe('README.md')
+    })
+
+    it('runFilter：筛选前最后点击目录为作用域（目录节点），文件点击回退根层', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+
+      // 点击目录节点记录作用域
+      state.onNodeClick({ name: 'sub', path: '/path/a/sub', type: 'directory' }, { expanded: false, expand: vi.fn() })
+      state.treeFilterKeyword = 'x'
+      await state.runFilter()
+      await flushPromises()
+      expect(GetFileTree).toHaveBeenLastCalledWith('/path/a/sub')
+
+      // 点击文件节点 → 作用域回退工作目录根层
+      state.onNodeClick({ name: 'a.txt', path: '/path/a/a.txt', type: 'file' }, { expanded: false })
+      await state.runFilter()
+      await flushPromises()
+      expect(GetFileTree).toHaveBeenLastCalledWith('/path/a')
+    })
+
+    it('runFilter：GetFileTree 失败时 error 提示且 filteredNodes 清空', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockRejectedValueOnce(new Error('读取失败'))
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'x'
+      state.filteredNodes = makeNodes(1)
+      await state.runFilter()
+      await flushPromises()
+
+      expect(ElMessage.error).toHaveBeenCalled()
+      expect(state.filteredNodes).toEqual([])
+    })
+
+    it('exitFilterMode：清空关键词与命中列表', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'abc'
+      state.filteredNodes = makeNodes(2)
+      state.exitFilterMode()
+
+      expect(state.treeFilterKeyword).toBe('')
+      expect(state.filteredNodes).toEqual([])
+      expect(state.filterModeActive).toBe(false)
+    })
+
+    it('onFilterResultClick 文件：emit select 且筛选态保持', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      const item = { name: 'hit.go', path: '/path/a/hit.go', type: 'file' }
+      state.onFilterResultClick(item)
+      await flushPromises()
+
+      expect(wrapper.emitted('select')[0][0]).toEqual(item)
+      expect(state.treeFilterKeyword).toBe('kw')
+    })
+
+    it('onFilterResultClick 目录：退出筛选回树（不 emit select）', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      state.onFilterResultClick({ name: 'sub', path: '/path/a/sub', type: 'directory' })
+      await flushPromises()
+
+      expect(state.treeFilterKeyword).toBe('')
+      expect(wrapper.emitted('select')).toBeFalsy()
+    })
+
+    it('onFilterResultClick 哨兵：纯提示不可交互（不 emit select 不退筛选）', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      state.onFilterResultClick({ name: '提示', path: '/path/a\0truncation-hint', type: 'truncation-hint', isLeaf: true })
+      await flushPromises()
+
+      expect(wrapper.emitted('select')).toBeFalsy()
+      expect(state.treeFilterKeyword).toBe('kw')
+    })
+
+    it('refreshNode 前置退出筛选态', async () => {
+      wrapper = createWrapperWithStore()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      await wrapper.vm.refreshNode('/path/a/src')
+      await flushPromises()
+
+      expect(state.treeFilterKeyword).toBe('')
+    })
+
+    it('treeKey 变化（整体刷新）重置筛选态', async () => {
+      wrapper = createWrapperWithStore()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'kw'
+      state.filteredNodes = makeNodes(1)
+      await wrapper.vm.$.setupState.refreshAll()
+      await flushPromises()
+
+      expect(state.treeFilterKeyword).toBe('')
+      expect(state.filteredNodes).toEqual([])
+    })
+
+    it('filteredDisplayNodes：命中超限时复用截断（2000 + 哨兵）', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce(makeNodes(2003).map(n => ({ ...n, name: `x-${n.name}` })))
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.treeFilterKeyword = 'file'
+      await state.runFilter()
+      await flushPromises()
+
+      expect(state.filteredNodes).toHaveLength(2003)
+      expect(state.filteredDisplayNodes).toHaveLength(2001)
+      expect(state.filteredDisplayNodes[2000].type).toBe('truncation-hint')
+      expect(state.filteredDisplayNodes[2000].path).toBe('/path/a\0truncation-hint')
+    })
+
+    it('onNodeClick 哨兵分支聚焦筛选框且不 emit select', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      state.onNodeClick({
+        name: '提示', path: '/path/a\0truncation-hint', type: 'truncation-hint', isLeaf: true
+      }, { expanded: false })
+      await flushPromises()
+
+      expect(wrapper.emitted('select')).toBeFalsy()
+      expect(state.currentSelectedPath).toBe('')
+    })
+
+    it('onFilterResultClick 文件命中树中节点：同步 setCurrentKey + currentSelectedPath（防快捷键错位）', async () => {
+      wrapper = createWrapperWithStore()
+      const state = wrapper.vm.$.setupState
+      const setCurrentKey = vi.fn()
+      const getNode = vi.fn(p => (p === '/path/a/hit.go' ? { data: { path: p } } : null))
+      state.fileTreeRef = { setCurrentKey, getNode }
+
+      state.onFilterResultClick({ name: 'hit.go', path: '/path/a/hit.go', type: 'file' })
+      await flushPromises()
+
+      expect(setCurrentKey).toHaveBeenCalledWith('/path/a/hit.go')
+      expect(state.currentSelectedPath).toBe('/path/a/hit.go')
+    })
+
+    it('onFilterResultClick 文件命中树外节点（截断层外）：清当前键防快捷键命中旧节点', async () => {
+      wrapper = createWrapper()
+      const state = wrapper.vm.$.setupState
+      const setCurrentKey = vi.fn()
+      state.fileTreeRef = { setCurrentKey, getNode: vi.fn(() => null) }
+
+      state.onFilterResultClick({ name: 'ghost.go', path: '/path/a/ghost.go', type: 'file' })
+      await flushPromises()
+
+      expect(setCurrentKey).toHaveBeenCalledWith(null)
+      expect(wrapper.emitted('select')[0][0].path).toBe('/path/a/ghost.go')
     })
   })
 })
