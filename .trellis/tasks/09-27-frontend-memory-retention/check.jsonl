@@ -1,0 +1,3 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "验收对照：§16 驻留面量化表格式与分流结论口径须与 §15 系列一致"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 覆盖率门禁与新逻辑单测要求"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "释放改动若涉 store 字段/wailsjs 绑定同步须对照契约清单"}

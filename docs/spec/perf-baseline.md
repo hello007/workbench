@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）
+> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）
 
 ## 1. 适用范围
 
@@ -12,7 +12,7 @@
 - 长跑稳定性测试（soak）：核心读路径高频循环 + 检查点趋势采样（第 13 节）
 - 内存泄漏自动检测：heap/goroutine 双 GC 断言 + goleak 三档分策（第 14 节）
 - GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（自动化测量已收口，见第 6 节）
-- 前端内存量化：文件树规模曲线（JSHeap/DOM/耗时）+ 大文件预览传输-内存曲线（第 15 节）
+- 前端内存量化：文件树规模曲线（JSHeap/DOM/耗时）+ 大文件预览传输-内存曲线（第 15 节）+ 组件驻留面残留（第 16 节）
 - 性能优化前后对比的唯一数据依据
 
 ## 2. 测量环境
@@ -568,3 +568,54 @@ CommandPalette（Ctrl+P）文件名搜索（SearchFiles 模糊匹配），目标
 2000 项之外时树中无节点可定位，locateNode 显式 ElMessage 提示（替代静默失败）。
 SearchFiles 跳过 node_modules 的既有语义使「扁平 node_modules 内找包文件」无
 前端入口（可接受：此类操作惯用终端），后续如有需求可做树内按名筛选。
+
+## 16. 维度 6：前端内存驻留面量化（09-27 驻留任务，收口路线图「及时释放不再使用的对象」）
+
+> 背景：§15 收口渲染面（峰值增量）后，路线图「应用性能 → 内存使用优化」仅剩
+> 「及时释放不再使用的对象」未测待定。本节量化「操作结束后不再使用的数据是否
+> 归还」——驻留残留（与 §15 峰值互补），按数据分流实施/不动收口。
+
+### 16.1 测量方法
+
+| 项 | 说明 |
+|---|---|
+| 脚本 | `node scripts/frontend-memory-retention.mjs [--runs 3] [--commits 100] [--diff-lines 4000]` |
+| 口径 | 同 §15.1：每轮独立 context 冷缓存、采样前 `HeapProfiler.collectGarbage` 强制 GC、CDP `JSHeapUsedSize`、3 轮中位；「操作前基线 → 操作后 → 释放动作后」三点驻留差 |
+| fixture | 隔离工作区内 git 双仓：repoA（100 空提交 + 8000 行大文本改 4000 行工作区 diff）+ repoB（1 提交切换归零目标）；git 全命令显式 `-c core.autocrlf=false / user.name / user.email` 不依赖环境全局配置 |
+| 面一链路 | 选仓库 A → 提交历史 tab（PAGE_SIZE=20 点「加载更多」补足 100 条 `.commit-card`）→ 切回 B（watch 重置）→ 残留 = 切走后 - 加载后 |
+| 面二链路 | 选仓库 A → 本地变动 tab → dblclick 行打开 FileDiffDialog（单文件双栏 8000 `.diff-line`）→ 关闭 → 残留 = 关闭后 − **dblclick 前基线**（重选仓库后 CommitHistory 重载 20 条 + 本地变动表格的驻留在基线采样前已发生，不混入残留口径） |
+| 未脚本实测面 | AiFunctionPanel tasks / aiChat 消息 / ContentPanel 预览依赖 claude CLI 真实任务驱动或属使用中数据，走代码审计定性（16.3 表） |
+
+### 16.2 实测驻留数据（2026-09-27，GC 口径 3 轮中位，修正基线采样后终版口径）
+
+| 面 | 操作后驻留 | 释放动作后残留 | 结论 |
+|---|---|---|---|
+| CommitHistory 100 条历史 | +15.2 MB | 切走后 **-2.5 MB**（回落） | watch 重置生效，无驻留 |
+| FileDiffDialog 4000 行 diff | +15.9 MB | 关闭后 **+2.8 MB → 实施后 +0.3 MB** | 行对象无清理驻留，已实施关闭释放 |
+
+实施 before/after（FileDiffDialog 关闭释放：行数据清空挂 el-dialog `@closed`
+（destroy-on-close 渐隐期间 slot 未销毁，清空挂 watch 会致动画期间闪空态）；
+`loadSeq++` + loading 复位挂关闭即时（防渐隐期间在途响应写回））：关闭残留
+2.8 → 0.3 MB（≈0，噪声带内），行对象释放达标。
+> 口径备注：首批测量曾以「切走仓库后」作面二基线，CommitHistory 重载与本地变动
+> 表格驻留混入读数（6.4/4.1 MB 假残留），审核修正为 dblclick 前采样后重测，
+> 本表为终版口径。
+
+### 16.3 全驻留面分流表（2 面实测 + 4 面审计定性）
+
+| 面 | 增长操作 | 定性 | 分流 |
+|---|---|---|---|
+| CommitHistory `commits` | loadMore 只增不减（千条级） | 单仓库内属**使用中数据**（用户在浏览）；切仓库 watch 重置实测回落 -2.5 MB | **不动**（既有机制健全，16.2 实测证据） |
+| FileDiffDialog `left/right/fileGroups` | 打开大 diff | 关闭后**不再使用仍驻留**（watch 仅 visible=true 分支加载，无清理路径） | **已实施**：行数据清空挂 `@closed` + 关闭即时在途响应丢弃（16.2） |
+| AiFunctionPanel `tasks` | AI 任务每轮 push 无上限 | 单条 256KB 截断 output 已限量级；关 Tab `RemoveAiTask` 释放点已有；列表属使用中数据 | **不动**（审计定性） |
+| aiChat `chatMessages` / `answeredChatQuestions` | 会话消息累积 | 当前会话消息使用中（切会话替换）；answered 单调增长但量小（问答对文本） | **不动**（审计定性） |
+| ContentPanel `filePreview.base64` / xlsxSheets | 大文件预览 | 当前份使用中；切换即替换（§15.3 曲线二同口径：48 MB 档峰值 64 MB 属使用中峰值非驻留） | **不动**（使用中数据） |
+| EventsOn 注销完整性 | 组件挂/卸 | 3 处 `EventsOff` 全局清偏差（AiTaskHistoryPanel / ContentPanel pull 事件 / UpdateDialog），均唯一监听者：当前零误伤、无泄漏 | **不动**（规范债记录：多监听者场景出现时须按 cross-layer-contracts 改闭包注销） |
+
+### 16.4 路线图勾选状态（「应用性能 → 内存使用优化」收口）
+
+- **及时释放不再使用的对象：已测收口（2026-09-27，本节）**。唯一「不再使用仍驻留」
+  实例（FileDiffDialog 关闭残留）已实施修复（2.8 → 0.3 MB，行对象归零）；
+  其余各面为使用中数据或既有释放机制健全（审计 + 实测双证据）。
+- 三子项全收口：限制文件树节点数量（§15.6 截断实施）+ 大文件分块读取（§15.3
+  非瓶颈不动）+ 及时释放对象（本节）→ 父项「内存使用优化」勾选。

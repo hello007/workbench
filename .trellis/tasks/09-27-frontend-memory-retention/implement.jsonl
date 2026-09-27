@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "§15 测量方法论（GC 口径/隔离工作区/三点采样）与 §15.3/§15.6 不动收口先例，§16 收口目标格式"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 闭包注销与 AI 任务态重置既有契约——释放点须挂在既有机制上，验证勿重复建设"}
+{"file": "docs/spec/test-stability.md", "reason": "测量/测试禁隐式依赖外部状态（固定端口、mtime 时序），新测量脚本须遵守"}
+{"file": ".trellis/tasks/09-27-frontend-memory-retention/research/retention-surface.md", "reason": "驻留面盘点清单（research 产出，Phase A 完成后引用）"}

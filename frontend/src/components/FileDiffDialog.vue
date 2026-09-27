@@ -2,6 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
+    @closed="releaseDiffData"
     width="80%"
     append-to-body
     destroy-on-close
@@ -365,9 +366,30 @@ const loadDiff = async () => {
 watch(
   () => [props.modelValue, props.file, props.sha, props.baseSha, props.headSha, props.mode],
   ([visible]) => {
-    if (visible) loadDiff()
+    if (visible) {
+      loadDiff()
+      return
+    }
+    // 关闭立即做两件事（不等动画）：loadSeq++ 使在途请求过期（防渐隐期间旧响应
+    // 写回行数据重新驻留/闪现），loading 复位（防秒开新文件时残留加载态）。
+    // 行数据清空不在此处——destroy-on-close 渐隐期间 slot 未销毁，立即清空会让
+    // 大 diff 关闭动画期间闪空态，释放点挂 @closed（perf-baseline §16）
+    loadSeq++
+    loading.value = false
   }
 )
+
+// 对话框关闭动画结束（slot 已销毁）后释放行数据：大 diff 双栏行对象属「不再使用
+// 仍驻留」（实测 4000 行 diff 关闭后行数组驻留 ~2.3MB，perf-baseline §16），
+// 此刻组件内数组引用是唯一残留，清空即完成释放
+function releaseDiffData() {
+  left.value = []
+  right.value = []
+  fileGroups.value = []
+  error.value = ''
+  binaryHint.value = ''
+  isBinaryFile.value = false
+}
 </script>
 
 <style scoped>

@@ -31,7 +31,14 @@ const stubs = {
   'el-dialog': {
     template: '<div v-if="modelValue" class="el-dialog"><slot name="header" /><slot /><slot name="footer" /></div>',
     props: ['modelValue', 'title', 'width', 'append', 'destroyOnClose'],
-    emits: ['update:modelValue']
+    emits: ['update:modelValue', 'closed'],
+    // 模拟真实 el-dialog 关闭流程：modelValue 置 false 后触发 closed（真实组件在
+    // 离场动画结束后触发，FileDiffDialog 行数据释放挂在该事件）
+    watch: {
+      modelValue(v) {
+        if (!v) this.$emit('closed')
+      }
+    },
   },
   'el-button': {
     template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
@@ -142,6 +149,49 @@ describe('FileDiffDialog.vue', () => {
     expect(leftLines[1].classes()).toContain('diff-line-context')
     expect(leftLines[2].classes()).toContain('diff-line-del')
     expect(rightLines[3].classes()).toContain('diff-line-add')
+  })
+
+  it('关闭对话框即清空行数据（perf-baseline §16 驻留释放）', async () => {
+    const { GetFileDiff } = await import('../../../wailsjs/go/main/App')
+    const diff = ['@@ -1,2 +1,2 @@', ' context', '-old', '+new'].join('\n')
+    GetFileDiff.mockResolvedValue(diff)
+    wrapper = await createWrapper()
+    expect(wrapper.vm.left.length).toBeGreaterThan(0)
+
+    await wrapper.setProps({ modelValue: false })
+    await flushPromises()
+
+    expect(wrapper.vm.left).toHaveLength(0)
+    expect(wrapper.vm.right).toHaveLength(0)
+    expect(wrapper.vm.fileGroups).toHaveLength(0)
+    expect(wrapper.vm.error).toBe('')
+    expect(wrapper.vm.binaryHint).toBe('')
+    expect(wrapper.vm.isBinaryFile).toBe(false)
+    expect(wrapper.vm.loading).toBe(false)
+  })
+
+  it('关闭后在途响应写回被丢弃（loadSeq 过期防重新驻留）', async () => {
+    const { GetFileDiff } = await import('../../../wailsjs/go/main/App')
+    const diff = ['@@ -1,2 +1,2 @@', ' context', '-old', '+new'].join('\n')
+    let resolveDiff
+    GetFileDiff.mockImplementation(() => new Promise(r => { resolveDiff = r }))
+
+    pinia = createPinia()
+    wrapper = mount(FileDiffDialog, {
+      props: { modelValue: false, repoPath: '/repo/A', file: 'src/main.go' },
+      global: { plugins: [pinia], stubs, directives }
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises() // loadDiff 已发起，响应挂起
+    await wrapper.setProps({ modelValue: false }) // 关闭：清空 + loadSeq++
+    await flushPromises()
+
+    resolveDiff(diff) // 旧响应后到
+    await flushPromises()
+
+    expect(wrapper.vm.left).toHaveLength(0)
+    expect(wrapper.vm.right).toHaveLength(0)
+    expect(wrapper.vm.loading).toBe(false)
   })
 
   it('context 行号自 hunk 头起始并逐行递增', async () => {
