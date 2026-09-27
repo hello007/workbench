@@ -1,11 +1,12 @@
 // WorkBench 前端文件树规模-内存测量脚本（perf-baseline.md §15 收口，2026-09-27）
 //
 // 测什么：单目录 1k / 10k / 100k 文件在 el-tree 懒加载下「选中工作目录 = 展开渲染
-// 该层全部节点」的真实链路前端成本。口径对齐：
-//   - fixture 单目录 N 文件 = service 包 BenchmarkFileTreeGetChildren_Scale 同构场景
-//     （展开一次全量渲染 N 个节点的最坏情况）；
+// 该层节点」的真实链路前端成本。口径对齐：
+//   - fixture 单目录 N 文件 = service 包 BenchmarkFileTreeGetChildren_Scale 同构场景；
 //   - 链路 = 选中 .dir-item → loadTreeNode → App.GetFileTree（GetChildren 单层）→
-//     el-tree 渲染 N 个 .el-tree-node，无虚拟滚动，全量 DOM。
+//     el-tree 渲染节点。2026-09-27 截断优化后渲染 min(N, 2000) + 哨兵提示节点
+//     （utils/treeTruncate.js，§15.6 before/after）；before 数据（无截断全量渲染）
+//     见 perf-baseline.md §15.2。
 //
 // 口径（每轮独立 context = 冷缓存，浏览器进程复用 = V8 暖，跑 N 轮取中位数）：
 //   选中目录点击 → .el-tree-node 数量达标 = 渲染完成（外部时钟，waitForFunction
@@ -230,11 +231,14 @@ try {
         nodesBefore: document.querySelectorAll('*').length,
       }))
 
-      // 选中工作目录 → 根层 loadTreeNode → N 个文件节点全量渲染
+      // 选中工作目录 → 根层 loadTreeNode → 渲染 min(N, 2000) 文件节点
+      // （单层超限截断：utils/treeTruncate.js，超限档以哨兵节点 .truncation-hint-node
+      // 渲染完成 = 渲染完成信号；未超限档维持节点数达标判定，1k 档两口径兼容）
       const t0 = Date.now()
       await page.click(dirItemSel(fixture.name))
       await page.waitForFunction(
-        n => document.querySelectorAll('.el-tree-node').length >= n,
+        n => document.querySelectorAll('.el-tree-node').length >= n
+          || document.querySelector('.truncation-hint-node') !== null,
         fixture.files,
         { timeout: RENDER_TIMEOUT_MS, polling: 100 },
       )
@@ -295,4 +299,4 @@ try {
 }
 console.log('\n口径说明：独立 context = 冷缓存；浏览器进程复用 = V8 暖。')
 console.log('JSHeap 增量 = 渲染后 - 空树基线（CDP JSHeapUsedSize，采样前强制 GC）；DOM 节点为页内 querySelectorAll 全页计数。')
-console.log('渲染耗时含 RPC（GetFileTree 单层）+ el-tree 全量节点创建，无虚拟滚动。')
+console.log('渲染耗时含 RPC（GetFileTree 单层）+ el-tree 节点创建；超限档渲染 min(N, 2000)+哨兵（截断优化后口径）。')

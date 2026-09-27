@@ -76,6 +76,7 @@ workbench/
 |统计类派生聚合缓存（如贡献者行数 numstat 缓存）复用 `commitHistoryCacheKey` 键与 headSHA+TTL 失效判定时，失效为二态（命中/全量重拉，聚合值无增量 prepend 路径），且须在 `InvalidateCommitHistoryCache`（ClearByGitRoot）与 `ClearAllCommitHistoryCache`（ClearAll）两入口联动清除，漏联动则手动刷新后行数与提交数口径漂移|—|
 |data/ 目录 JSON 持久化必须走 `util.SaveJSON` 原子写（CreateTemp 同目录 temp → fsync → os.Rename 替换，Windows 为 MoveFileEx REPLACE_EXISTING 原子替换），禁新增 os.WriteFile 直写与自建 temp+rename 实现（saveChatJSON/atomicWriteConfig 已收敛为委托）；崩溃残留 `.<目标名>.tmp-*` 点文件无害不自动清扫；原子写不解决整体覆盖丢数据（last-writer-wins），手改 data 文件前仍须关 workbench.exe|data-atomic-write.md（docs/spec/data-atomic-write.md）|
 |soak/泄漏测试三档轮次（`-soak-rounds` > `-short` 缩减 > 默认档 200/200/40/200 + 主包 30），泄漏断言口径为双 `runtime.GC()` 后 heap 增量（service 8MB/主包 16MB，`-leak-heap-mb` 可调）+ goroutine Δ≤2，辅助收敛 `util/testutil/soak.go` 跨包共用禁重复定义；goleak v1.3.0 仅 service 包 TestMain 三档分策（Short 跳过 / 深跑档 `VerifyTestMain` 硬门禁 / CI 默认档观察模式仅 stderr 告警），两步走：CI 观察期无新告警后才收紧硬门禁（良性栈 `IgnoreTopFunction` 逐个登记）；缓存失效由手动入口（InvalidateCache/ClearScanCache/InvalidateCommitHistoryCache）驱动不依赖 mtime 时序；`-soak-rounds`/`-leak-heap-mb` 两包同名 flag 须按包分开传（`go test ./... -soak-rounds=N` 因未注册包报错）|perf-baseline.md 第 13/14 节（docs/spec/perf-baseline.md）|
+|文件树单层超 2000 节点截断（`utils/treeTruncate.js` `truncateTreeNodes`，`FILE_TREE_NODE_LIMIT` 硬编码常量）：`loadTreeNode` resolve 前截前 2000 项 + 末尾哨兵节点（`type='truncation-hint'`，path 为 `${parentPath}\0truncation-hint` 合成 key，NUL 为 OS 路径非法字符保证与真实 path 零冲突）；改文件树相关代码须维持哨兵过滤面（onNodeClick 不选中/onNodeContextMenu 不弹菜单/triggerRenameCurrent-triggerDeleteCurrent getCurrentNode 过滤防快捷键中招/expandAll-collapseAll 天然兼容 isLeaf）；`scripts/frontend-memory-tree.mjs` 渲染完成判定依赖 `.truncation-hint-node` class（超限档）；locateNode 定位 miss 时 ElMessage 提示（截断层外文件树中无此节点）；el-tree-v2 迁移已评估否决（无 lazy/load 支持，见 research/el-tree-v2-capability.md）|perf-baseline.md §15.6（docs/spec/perf-baseline.md）|
 
 ## 文档索引
 
@@ -115,5 +116,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-09-25
-**文档版本：** v2.15
+**最后更新：** 2026-09-27
+**文档版本：** v2.16

@@ -419,6 +419,126 @@ describe('FileTreePanel.vue', () => {
     })
   })
 
+  describe('单层超限截断（perf-baseline §15.4）', () => {
+    // 构造超限节点：默认阈值 2000，用小阈值直调组件内部截断路径不可行
+    // （loadTreeNode 用默认 limit），故 mock 大量节点走真实 2000 阈值
+    const makeNodes = n => Array.from({ length: n }, (_, i) => ({
+      name: `file${i}.txt`,
+      path: `/path/a/file${i}.txt`,
+      type: 'file',
+      hasChildren: false,
+      isLeaf: true
+    }))
+
+    it('根层超限时 resolve 列表 = limit + 1 个哨兵，哨兵 path 派生自工作目录路径', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce(makeNodes(2003))
+
+      wrapper = createWrapper()
+      const resolve = vi.fn()
+      await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+      await flushPromises()
+
+      const resolvedNodes = resolve.mock.calls[0][0]
+      expect(resolvedNodes).toHaveLength(2001)
+      const hint = resolvedNodes[resolvedNodes.length - 1]
+      expect(hint.type).toBe('truncation-hint')
+      expect(hint.path).toBe('/path/a\0truncation-hint')
+      expect(hint.isLeaf).toBe(true)
+      // 前 2000 项为真实节点，顺序保持
+      expect(resolvedNodes[0].name).toBe('file0.txt')
+      expect(resolvedNodes[1999].name).toBe('file1999.txt')
+    })
+
+    it('子层超限时哨兵 path 派生自 node.data.path（多目录截断不冲突）', async () => {
+      const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+      GetFileTree.mockResolvedValueOnce(makeNodes(2001).map(n => ({
+        ...n,
+        path: `/path/a/src/${n.name}`
+      })))
+
+      wrapper = createWrapper()
+      const resolve = vi.fn()
+      await wrapper.vm.loadTreeNode({ level: 1, data: { path: '/path/a/src' } }, resolve)
+      await flushPromises()
+
+      const resolvedNodes = resolve.mock.calls[0][0]
+      expect(resolvedNodes[resolvedNodes.length - 1].path).toBe('/path/a/src\0truncation-hint')
+    })
+
+    it('点击哨兵节点不 emit select', async () => {
+      wrapper = createWrapper()
+      const hintData = {
+        name: '已显示前 2000 项',
+        path: '/path/a\0truncation-hint',
+        type: 'truncation-hint',
+        isLeaf: true
+      }
+
+      const tree = wrapper.findComponent('.el-tree')
+      tree.vm.$attrs.onNodeClick(hintData, { expanded: false })
+      await flushPromises()
+
+      expect(wrapper.emitted('select')).toBeFalsy()
+    })
+
+    it('右键哨兵节点不打开上下文菜单', async () => {
+      wrapper = createWrapper()
+      const hintData = {
+        name: '已显示前 2000 项',
+        path: '/path/a\0truncation-hint',
+        type: 'truncation-hint',
+        isLeaf: true
+      }
+      const event = { preventDefault: vi.fn(), stopPropagation: vi.fn(), clientX: 10, clientY: 10 }
+
+      const tree = wrapper.findComponent('.el-tree')
+      tree.vm.$attrs.onNodeContextmenu(event, hintData)
+      await flushPromises()
+
+      expect(wrapper.vm.contextMenu.visible).toBe(false)
+    })
+
+    // 哨兵经 el-tree highlight-current 可能成为 getCurrentNode 结果（组件 onNodeClick
+    // 拦不住内部 setCurrentNode），F2/Delete 快捷键须过滤防对合成 path 弹对话框。
+    // getCurrentNode 契约：组件层包装返回 currentNode.data（裸 data 对象，非 Node），
+    // mock 须返回裸 data；断言副作用（对话框状态/确认弹窗）而非 spy 内部函数——
+    // script setup 绑定经 vm 代理写回不落组件内部闭包引用
+    it('F2/删除快捷键作用于哨兵节点时不弹对话框', async () => {
+      const { ElMessageBox } = await import('element-plus')
+      wrapper = createWrapper()
+      wrapper.vm.fileTreeRef = {
+        getCurrentNode: vi.fn(() => ({
+          name: '已显示前 2000 项', path: '/path/a\0truncation-hint', type: 'truncation-hint', isLeaf: true
+        }))
+      }
+
+      wrapper.vm.triggerRenameCurrent()
+      wrapper.vm.triggerDeleteCurrent()
+      await flushPromises()
+
+      expect(wrapper.vm.renameDialogVisible).toBe(false)
+      expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+    })
+
+    it('F2/删除快捷键作用于真实节点时正常触发重命名对话框', async () => {
+      wrapper = createWrapper()
+      wrapper.vm.fileTreeRef = {
+        getCurrentNode: vi.fn(() => ({
+          name: 'a.txt', path: '/path/a/a.txt', type: 'file', isLeaf: true
+        }))
+      }
+
+      wrapper.vm.triggerRenameCurrent()
+      await flushPromises()
+
+      expect(wrapper.vm.renameDialogVisible).toBe(true)
+      // 预填值来自 getCurrentNode 返回的 data 对象本身（证明真契约贯通）
+      expect(wrapper.vm.renameName).toBe('a.txt')
+      expect(wrapper.vm.renameNode).toMatchObject({ path: '/path/a/a.txt' })
+    })
+  })
+
   // ---- Story 3-1: 创建文件和文件夹 ----
 
   describe('showCreateAt 创建对话框', () => {

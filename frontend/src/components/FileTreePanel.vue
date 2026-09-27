@@ -27,9 +27,16 @@
         class="file-tree"
       >
         <template #default="{ node, data }">
-          <span class="custom-tree-node">
+          <span class="custom-tree-node" :class="{ 'truncation-hint-node': isTruncationHint(data) }">
             <el-icon
-              v-if="data.type === 'directory'"
+              v-if="isTruncationHint(data)"
+              color="#909399"
+              style="margin-right: 5px;"
+            >
+              <MoreFilled />
+            </el-icon>
+            <el-icon
+              v-else-if="data.type === 'directory'"
               :color="node.expanded ? '#409EFF' : '#909399'"
               style="margin-right: 5px;"
             >
@@ -47,9 +54,12 @@
               </el-icon>
             </template>
             <span :style="{
-              color: data.type === 'directory'
-                ? (node.expanded ? '#409EFF' : '#909399')
-                : '#606266'
+              color: isTruncationHint(data)
+                ? '#909399'
+                : data.type === 'directory'
+                  ? (node.expanded ? '#409EFF' : '#909399')
+                  : '#606266',
+              fontStyle: isTruncationHint(data) ? 'italic' : 'normal'
             }">
               {{ node.label }}
             </span>
@@ -376,10 +386,12 @@ import {
   Sort,
   TrendCharts,
   DataBoard,
-  ChatDotRound
+  ChatDotRound,
+  MoreFilled
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
+import { truncateTreeNodes, TRUNCATION_HINT_TYPE } from '../utils/treeTruncate'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore, useAiChatStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -569,8 +581,13 @@ const loadTreeNode = async (node, resolve) => {
       isLeaf: n.type === 'file' || !n.hasChildren
     }))
 
-    debug.log('Processed nodes:', processedNodes)
-    resolve(processedNodes)
+    // 单层超限截断（perf-baseline §15.4）：el-tree 无虚拟滚动，全量渲染万级节点
+    // 卡死级劣化（100k ≈ 49s / +3.14GB JSHeap），截断后渲染量与本层规模解耦；
+    // 哨兵节点（truncation-hint）提示剩余数量并引导 Ctrl+P 文件搜索定位。
+    const truncated = truncateTreeNodes(processedNodes, path)
+
+    debug.log('Processed nodes:', truncated.nodes)
+    resolve(truncated.nodes)
 
     if (!node || node.level === 0 || !node.data) {
       nextTick(() => treeReadyResolve?.())
@@ -583,7 +600,11 @@ const loadTreeNode = async (node, resolve) => {
 }
 
 // ---- 节点点击 ----
+// 截断哨兵节点纯提示用途：不选中、不触发预览/展开
+const isTruncationHint = (data) => data?.type === TRUNCATION_HINT_TYPE
+
 const onNodeClick = (data, node) => {
+  if (isTruncationHint(data)) return
   const clickedPath = data.path.replace(/\\/g, '/')
   const prevPath = currentSelectedPath.value.replace(/\\/g, '/')
   const wasSelected = prevPath === clickedPath // 点击前是否已选中
@@ -760,6 +781,9 @@ const collapseAll = () => {
 const onNodeContextMenu = (event, data) => {
   event.preventDefault()
   event.stopPropagation() // 恢复 stopPropagation()，防止事件冒泡
+
+  // 截断哨兵节点无文件语义（新建/重命名等命令不适用），不弹菜单
+  if (isTruncationHint(data)) return
 
   // 通知父组件关闭另一个组件的菜单
   emit('contextmenu')
@@ -1511,18 +1535,26 @@ async function locateNode(targetPath) {
       const offset = nodeRect.top - containerRect.top - containerRect.height / 2
       treeContainer.scrollBy({ top: offset, behavior: 'smooth' })
     }
+  } else {
+    // 大目录截断后目标可能落在未渲染的前 2000 项之外（perf-baseline §15.6），
+    // 路径已删除同样 miss；静默失败会让命令面板/收藏跳转「点了没反应」，显式提示
+    ElMessage.info('未能定位该文件：路径不存在，或位于大目录未渲染部分（可用 Ctrl+P 搜索文件内容或经终端访问）')
   }
 }
 
 // ---- 键盘快捷键入口：作用于当前高亮节点 ----
+// 哨兵节点过滤：el-tree 高亮点击（highlight-current）在组件 onNodeClick 之前已
+// setCurrentNode，F2/Delete 经 getCurrentNode 可能拿到哨兵（合成 path 无文件语义），
+// 须在此拦截防对哨兵弹重命名/删除对话框。getCurrentNode 返回的是 data 对象
+// （组件层包装 return currentNode.data，非内部 Node），isTruncationHint 直接收它
 const triggerRenameCurrent = () => {
   const node = fileTreeRef.value?.getCurrentNode()
-  if (node) showRenameAt(node)
+  if (node && !isTruncationHint(node)) showRenameAt(node)
 }
 
 const triggerDeleteCurrent = () => {
   const node = fileTreeRef.value?.getCurrentNode()
-  if (node) handleDeleteAt(node)
+  if (node && !isTruncationHint(node)) handleDeleteAt(node)
 }
 
 // ---- 暴露方法 ----
@@ -1607,6 +1639,13 @@ onBeforeUnmount(() => {
   font-size: 13px;
   cursor: default;
   user-select: none;
+}
+/* 截断哨兵节点（单层超限提示，见 utils/treeTruncate.js）：弱化展示不可交互；
+   pointer-events:none 拦内容区点击（el-tree 行级 highlight-current 仍可能在
+   padding 区触发，快捷键路径由 triggerRenameCurrent/triggerDeleteCurrent 双重过滤） */
+.truncation-hint-node {
+  opacity: 0.75;
+  pointer-events: none;
 }
 .el-tree-node__children {
   transition: all 0.3s ease;

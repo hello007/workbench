@@ -519,10 +519,11 @@ Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem 
 
 ### 15.4 路线图勾选状态（「应用性能 → 内存使用优化」）
 
-- **限制文件树节点数量：立项实锤（记录量化目标，不实施）**。量化目标（GC 口径实测锚点）：
-  单层展开 ≥10k 节点渲染 ~4.4 s、JSHeap +311 MB，交互明显劣化，须限制节点数或引入
-  虚拟滚动；1k 内（~346 ms / +32 MB）无感不处理。触发面：单目录万级文件（日志目录、
-  数据导出目录、扁平 node_modules）。
+- **限制文件树节点数量：已实施（2026-09-27 截断优化落地，before/after 见 §15.6）**。
+  立项量化锚点：单层展开 ≥10k 节点渲染 ~4.4 s、JSHeap +311 MB，交互明显劣化；
+  100k 节点 49.2 s + 3.14 GB 灾难级。实施路线为单层 2k 截断 + 哨兵提示节点
+  （el-tree-v2 迁移经评估否决：其无懒加载支持，expand-hack 属非官方路径且
+  refreshNode 依赖的 store.nodesMap/loadData 全须重写，改动面 3-5 倍）。
 - **大文件分块读取：非瓶颈不动（§15.3）**。50MB 上限内峰值驻留 <100 MB，上限本身
   即风险挡板；分块读取复杂度（Range 协议、渐进渲染、断点状态）收益不抵。
 - **及时释放不再使用的对象：本轮未测，保持不勾选**。
@@ -540,3 +541,30 @@ Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem 
   Chromium headless 口径，WebView2 渲染端存在环境差异（JSHeap 量级趋势可参考，绝对值
   受 V8 版本/堆配置影响）。
 - 测量机同第 2 节（Windows 11 / Ryzen 7 H 255 / 31.27 GB）。
+
+### 15.6 大目录展开截断优化 before/after（09-27 实施收口，§15.2 同口径 3 轮中位）
+
+**方案**：前端单层节点截断——`loadTreeNode` resolve 前经 `utils/treeTruncate.js`
+`truncateTreeNodes` 截至前 2000 项（`FILE_TREE_NODE_LIMIT` 硬编码常量，settings 化
+经评估收益不抵跨层契约成本），末尾追加哨兵提示节点（`truncation-hint` 类型，
+弱化展示、点击/右键均过滤，文案引导 Ctrl+P 文件搜索定位其余文件）。渲染量与本层
+目录规模解耦，OOM 结构性防死。
+
+**before/after 对比**（同脚本 `frontend-memory-tree.mjs`，GC 口径，3 轮中位）：
+
+| 单层节点量 | 渲染耗时（before → after） | JSHeap 增量（before → after） | JSHeap 驻留（before → after） | DOM 节点增量（after） |
+|---|---|---|---|---|
+| 1k | ~346 ms → ~287 ms | ~32 MB → ~32.1 MB | ~44 MB → ~43.9 MB | +7,998 |
+| 10k | ~4.36 s → **~509 ms（-88%）** | ~311 MB → **~63.7 MB（-80%）** | ~326 MB → **~75.4 MB（-77%）** | +16,008 |
+| 100k | ~49.2 s → **~647 ms（-99%）** | **~3.14 GB → ~63.6 MB（-98%）** | **~3.15 GB → ~75.3 MB（-98%）** | +16,008 |
+
+**达标判定（目标：10k/100k 展开首屏 <1 s / JSHeap 增量 <100 MB / 驻留 <150 MB）**：
+全档达标。10k 与 100k 档 after 收敛至同量级（~0.5-0.65 s / ~64 MB）——渲染量与
+规模解耦的直接证据；1k 档不触发截断（<2000），before/after 同量级（287 ms 属
+机器噪声带 ±7% 内）为无回归旁证。
+
+**行为变化**：超 2000 项的层仅显示前 2000 项 + 哨兵行；文件定位走既有
+CommandPalette（Ctrl+P）文件名搜索（SearchFiles 模糊匹配），目标位于截断层
+2000 项之外时树中无节点可定位，locateNode 显式 ElMessage 提示（替代静默失败）。
+SearchFiles 跳过 node_modules 的既有语义使「扁平 node_modules 内找包文件」无
+前端入口（可接受：此类操作惯用终端），后续如有需求可做树内按名筛选。
