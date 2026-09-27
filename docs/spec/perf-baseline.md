@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-09-25 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect
+> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）
 
 ## 1. 适用范围
 
@@ -11,7 +11,7 @@
 - Go 运行时内存占用快照：HeapAlloc / HeapSys / NumGC
 - 长跑稳定性测试（soak）：核心读路径高频循环 + 检查点趋势采样（第 13 节）
 - 内存泄漏自动检测：heap/goroutine 双 GC 断言 + goleak 三档分策（第 14 节）
-- GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（手动测量，留占位）
+- GUI 冷启动耗时：WebView2 初始化 + Go startup + 前端首屏（自动化测量已收口，见第 6 节）
 - 性能优化前后对比的唯一数据依据
 
 ## 2. 测量环境
@@ -123,29 +123,49 @@
 
 **噪声说明**：测试进程含 Go 运行时 + testing 框架常驻堆，HeapAlloc 绝对值与 GC 时序相关，Δ 可落在噪声内（甚至 0）。HeapSys（运行时堆系统总量）更稳定。**精确的每次操作分配量以 benchmark `-benchmem` 的 B/op 为准**（见维度 1），MemStats 仅反映进程级常驻足迹。
 
-## 6. 维度 4：GUI 冷启动（手动测量，占位）
+## 6. 维度 4：GUI 冷启动（2026-09-27 量化收口）
 
-> sub-agent 无法自动测 GUI 冷启动（须 `wails build` 产物 + 人眼/秒表观测 WebView2 到首屏）。
-> 以下为测量方法与占位表，待用户手动补数。
+> 测量机同第 2 节（Windows 11 / Ryzen 7 H 255 / 31.27 GB），采集时间 **2026-09-27**，
+> 测量对象 `build/bin/workbench.exe`（2026-09-24 构建，含当天前全部生产代码）。本机
+> settings.json `gpuDisabled: true`（WebView2 GPU 加速关闭），数据受此影响，跨机器仅看相对趋势。
+> 自动化脚本：`scripts/cold-start-bench.ps1`（GUI 段）+ `scripts/cold-start-frontend.mjs`（前端段）。
 
-### 6.1 测量方法
+### 6.1 测量方法（自动化为主 + 人工秒表交叉验证）
 
-1. 生产构建：`wails build`（生成 `build/bin/workbench.exe`）
-2. 启动计时：双击 exe 起秒表（或用日志时间戳——`slog.Info("workbench started")` 时间戳减进程启动时间）
-3. 量三段：
-   - 进程启动 → WebView2 初始化完成（窗口出现白屏）
-   - WebView2 完成 → 前端首屏渲染（工作目录列表可见）
-   - 前端首屏 → 首次可交互（树可点击）
-4. 进程内存：启动稳态后任务管理器看 `workbench.exe` 内存（工作集）
+1. **GUI 段（`cold-start-bench.ps1`，全自动）**：脚本 `Start-Process` 拉起 exe 记 t0，
+   增量解析 `data/logs/app.log` slog JSON 时间戳（`logger initialized` / `web serve listening` /
+   `workbench started`），轮询 TCP 36115 就绪（10ms 间隔）与 `MainWindowHandle != 0`
+   （WebView2 宿主窗口创建完成代理），稳态后 `Get-Process` 采样工作集；每轮 WM_CLOSE
+   优雅退出，3 轮热身 + 5 轮采样取中位数。
+2. **前端段（`cold-start-frontend.mjs`，全自动代理口径）**：同一份 embed 前端资产经
+   `--serve` 浏览器通道在 Playwright Chromium 中加载（独立 context 冷缓存，浏览器进程
+   复用 V8 暖），量 `goto` 到 `.directory-tree-panel` 可见（首屏渲染）与三栏布局挂载
+   （可交互代理），并采集请求数/传输体积佐证路线图子项定性。WebView2 与 Chromium 同核，
+   渲染端差异仅环境，资产与代码路径一致。
+3. **人工秒表交叉验证（可选，WebView2 首帧口径）**：自动化只能测到窗口句柄出现
+   （不含首帧绘制）。人工验证步骤：手机慢动作视频（或秒表）拍摄双击 exe 到窗口内容
+   首次绘制的间隔，重复 5 次取中位，与「句柄出现 1090.5 ms + 前端首屏 468 ms ≈ 1.56 s」
+   代理估算值对照（偏差应 <300 ms）。未做人工验证时，文档按代理口径标注。
 
-### 6.2 基线占位表（待手动填写）
+### 6.2 基线表（2026-09-27 实测，脚本审核修复后复测批次，5 轮中位数）
 
-| 指标 | 基线值 | 测量方法 |
-|---|---|---|
-| WebView2 初始化耗时 | _待填_ | 秒表 / 日志时间戳 |
-| Go startup 各阶段耗时 | _待填_ | slog 时间戳（NewAppServices 5.80 ms 见维度 1） |
-| 前端首屏可交互耗时 | _待填_ | 秒表（窗口出现到树可点） |
-| 进程内存（工作集） | _待填_ | 任务管理器 |
+| 指标 | 基线值 | 测量方法 | 说明 |
+|---|---|---|---|
+| 进程拉起 → logger 初始化 | 884.9 ms | slog 时间戳（`logger initialized`） | OnStartup 进入后 NewAppServices 内首条日志；该段含 Go runtime + Wails 窗口/WebView2 环境初始化（OnStartup 在窗口创建后触发）；冷态首跑批次 1107.9 ms（机器热态 ±15~25%） |
+| OnStartup 内部段 | 21.4 ms | slog 时间戳差（`logger initialized` → `workbench started`） | NewAppServices 装配 5.80 ms（维度 1）+ crash flag / 更新检查 / web serve 启动；**Go 侧非瓶颈** |
+| 后端服务就绪（TCP 36115） | 956.9 ms | 主事件循环内 TcpClient 单次探测（与日志事件同循环采样） | 浏览器通道可接受请求点 |
+| WebView2 宿主窗口创建 | 1090.5 ms | `MainWindowHandle != 0` 轮询代理（上界） | 窗口创建完成下界，不含首帧绘制；实测句柄晚于 startup 日志出现，读数含轮询启动间隙 |
+| 前端首屏渲染 | 468 ms | 浏览器通道代理（Chromium 冷缓存，`.directory-tree-panel` 可见） | 页内 first-paint ~36 ms / load ~110 ms，差值为 JS 执行 + Vue 挂载 + GetDirectories RPC |
+| 前端首屏可交互 | 488 ms | 浏览器通道代理（三栏布局全部挂载） | 与首屏渲染差 20 ms（布局挂载增量） |
+| 进程内存（稳态工作集） | 57.0 MB | `Get-Process WorkingSet64` | 跨批次波动 57–100.7 MB（受 OS 工作集修剪影响大，量级参考）；私有内存 72.2 MB；大头为 WebView2 宿主进程，Go 侧常驻堆 0.6 MB（维度 3） |
+
+**用户感知总冷启动 ≈ 1.56 s**（热态：窗口句柄 1090.5 ms + 前端首屏 468 ms 代理估算；
+冷态首跑批次 ≈ 1.85 s；人工秒表口径见 6.1 第 3 步）。
+
+**结论**：耗时大头在 Wails 窗口/WebView2 宿主初始化（~0.9 s，框架层，项目代码可控面小）
+与前端 JS 执行/挂载（~0.36 s，懒加载已优化过一轮）；Go 侧 OnStartup 全段仅 21.4 ms，
+配置文件读取与资产请求均非瓶颈（详见 9.4）。当前量级属桌面 WebView2 应用正常水平，
+无瓶颈级启动问题，启动时间优化按「不动项」收口。
 
 ## 7. 测量方法与命令（可复现）
 
@@ -157,6 +177,8 @@
 | 1b 主包 benchmark | `go test -bench=BenchmarkNewAppServices -benchmem -benchtime=500x -run=^$ ./` | `perf_bench_test.go` |
 | 1c 提交历史冷扫 benchmark | `go test -bench=BenchmarkGetCommitHistory_ColdScan -benchmem -benchtime=2s -run=^$ ./` | `commit_history_bench_test.go` |
 | 3 MemStats | `go test -run TestPerfMemStats -v ./` | `perf_bench_test.go` |
+| 4 GUI 冷启动（GUI 段） | `powershell -ExecutionPolicy Bypass -File scripts/cold-start-bench.ps1 -Runs 5` | `data/logs/app.log`（须先关闭常驻 workbench.exe） |
+| 4 前端首屏（浏览器通道代理） | `node scripts/cold-start-frontend.mjs --runs 5` | `build/bin/workbench.exe --serve`（无头，不触碰桌面 36115） |
 | 13 长跑稳定性（默认档随 `go test ./...` 自动跑） | `go test ./service/ -run TestSoak -v` 与 `go test ./ -run TestSoak -v` | `service/soak_leak_test.go` / `soak_leak_test.go` |
 | 13 长跑稳定性（深跑档） | `go test ./service/ -soak-rounds=2000 -run TestSoak -v` 与 `go test ./ -soak-rounds=2000 -run TestSoak -v` | 同上（flag 须置于包名之后） |
 | 14 泄漏断言阈值调整 | 上述命令追加 `-leak-heap-mb=N`（service 缺省 8 / 主包缺省 16） | 同上 |
@@ -225,10 +247,13 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - **NewAppServices 5.80 ms**：startup 一次，用户感知阈值 ~100 ms 占比小，优化收益不抵风险（不动）。
 - **常驻堆 0.6 MB**：已轻量（不动）。
 - **ScanGitRepos 0.34 ms / 105 allocs**：.git 预筛已优化到位（不动）。
+- **配置文件读取（2026-09-27 冷启动量化补证）**：OnStartup 全段仅 21.4 ms（§6.2），settings.json 等本地 <2KB 文件经 OS 缓存读取占比 <5%，非瓶颈（不动）。
+- **资产 HTTP 请求（2026-09-27 冷启动量化补证）**：首屏 47 个回环请求 load 仅 ~110 ms，执行+挂载占大头（~360 ms，§6.2），请求数非瓶颈（不动）；后续优化方向若做，应指向 JS 执行/bundle 体积（懒加载已做一轮）。
+- **Wails/WebView2 宿主初始化 ~1.1 s（§6.2 大头）**：框架层耗时，项目代码可控面小，属桌面 WebView2 应用正常水平（不动）。
 
 ### 9.5 路线图勾选状态
 
-- 路线图「应用性能 → 启动时间优化」子项「延迟加载非关键模块」：mermaid 懒加载已落实（首屏 eager −1.8 MB），但父项含「优化配置文件读取 / 减少 HTTP 请求」未做，且 GUI 冷启动为手动占位未量化，**父项暂不勾选**。
+- 路线图「应用性能 → 启动时间优化」：**已勾选（2026-09-27 收口）**。三个子项闭环——「延迟加载非关键模块」mermaid 懒加载已落实（首屏 eager −1.8 MB）；「优化配置文件读取」「减少 HTTP 请求」经冷启动量化（§6.2）证明非瓶颈，按 9.4 先例记不动项；耗时大头 Wails/WebView2 宿主初始化为框架层不可控面，总冷启动 ~1.56 s（热态）属正常水平。
 - 路线图「应用性能 → 内存使用优化」：本轮未涉及对象释放/节点上限/分块读取，**不勾选**。
 
 ## 10. 约束与噪声说明
@@ -236,7 +261,7 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - **不改生产代码**：本基线仅新增 `service/perf_bench_test.go` + `perf_bench_test.go` + `scripts/perf-baseline.sh` + 本文档；唯一非 _test.go 改动是 `util/testutil/testutil.go` 参数类型由 `*testing.T` 宽化为 `testing.TB`（test-only 包，不进生产二进制，向后兼容，使 benchmark 可复用 fixture 构造函数）。PR4 生产改动仅 `FilePreviewRenderer.vue`（mermaid 懒加载）+ `vite.config.js`（optimizeDeps.include）。
 - **MemStats 噪声**：进程级 HeapAlloc 受 GC 时序影响，Δ 可能落在噪声内；精确分配看 benchmark B/op
 - **NewAppServices benchmark artifact**：每次构造重置全局 logger 致 lumberjack 句柄累积，用 500x 固定迭代控制；生产仅 startup 一次无此问题，ns/op 趋势有效
-- **GUI 冷启动占位**：sub-agent 无法自动测，待用户手动补数（见维度 6）
+- **GUI 冷启动测量噪声（2026-09-27）**：复跑中位偏差 ±15%（OS 文件缓存/Defender/机器热态），脚本内置 3 轮热身缓解；复跑需先关闭常驻 workbench.exe（脚本预检拒绝端口占用与日志串场）；本机 `gpuDisabled: true` 影响首帧耗时；前端段为 Chromium 代理口径，与 WebView2 渲染端存在环境差异（资产与代码路径一致）
 - **跨机器不可比**：基线受机器配置影响，PR4 复测须同机器
 - **wails dev 动态 import 风险**：mermaid 懒加载经 `optimizeDeps.include` 缓解 dev 依赖发现问题；生产 build + vite preview（E2E）已验证通过。wails dev 实机仍建议人工首测一次 mermaid markdown 渲染（sub-agent 无法跑 GUI）
 
@@ -246,6 +271,7 @@ PR1 基线设目标「Home chunk 2.5 MB → <1 MB」。实测 mermaid 懒加载�
 - [test-stability.md](test-stability.md) — benchmark 稳定性约定（fixture 构造排除耗时、禁 sleep、缓存命中依赖 mtime 未变）
 - [app-services-assembly.md](app-services-assembly.md) — NewAppServices 装配契约（纯构造、benchmark 测的就是它）
 - [cross-layer-contracts.md](cross-layer-contracts.md) — wailsjs 绑定契约（mermaid 懒加载不涉签名变更，绑定零 diff）
+- `scripts/cold-start-bench.ps1` / `scripts/cold-start-frontend.mjs` — GUI 冷启动与前端首屏自动化测量脚本（§6，Windows 本机专用，不进 CI）
 
 ## 12. 提交历史采集层优化（09-20 任务）
 

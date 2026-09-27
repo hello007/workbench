@@ -43,5 +43,10 @@ echo "  cd frontend && npm run build     # 或 npx vite build（wailsjs 缺失�
 echo "  du -sh frontend/dist && ls -lh frontend/dist/assets"
 echo
 
+echo "--- 维度 4: GUI 冷启动（需 wails build 产物，Windows 本机，见 docs/spec/perf-baseline.md §6）---"
+echo "  powershell -ExecutionPolicy Bypass -File scripts/cold-start-bench.ps1 -Runs 5      # GUI 冷启动（需先关闭常驻 workbench.exe）"
+echo "  node scripts/cold-start-frontend.mjs --runs 5                                      # 前端首屏（浏览器通道代理，--serve 无头）"
+echo
+
 echo "=== 采集结束 ==="
 echo "将上述数据填入 docs/spec/perf-baseline.md 对应基线表。"
