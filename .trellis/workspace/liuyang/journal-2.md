@@ -1518,3 +1518,37 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 100: 文件树筛选覆盖层粘贴/新建/拷贝到保语境刷新
+
+**Date**: 2026-09-27
+**Task**: 文件树筛选覆盖层粘贴/新建/拷贝到保语境刷新
+**Branch**: `master`
+
+### Summary
+
+方案A落地：FileTreePanel defineExpose refreshAfterFileOp(parentPath)，内部按 filterModeActive 分流（激活走 refreshAfterFilterOp 保语境三步链路，否则 refreshNode 现状）；五处调用点收敛（组件内 create/rename/delete，rename/delete 既有内联分流归并 + Home.vue paste/copyTo 成功分支），父组件零语境判断。覆盖层「刷新」项维持退筛选语义，失败路径不刷新。测试：vitest 新增筛选/树语境新建与分流直测 3 用例 + Home paste/copyTo 断言更新；E2E 新增覆盖层粘贴/新建保语境 2 用例（新建用例按 GetFileTree 单层契约收窄断言：根层筛选 scope 与新建产物不同层，第三段不得平铺子层产物节点——caveman-review 与 trellis-check 两轮审核确认）。前端覆盖率 85.74%，E2E 56 全过。文档三处同步（功能说明.md 筛选条目 / perf-baseline §15.6 / CLAUDE.md 关键规则表）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fa4b10c` | (see git log) |
+| `109f632` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
