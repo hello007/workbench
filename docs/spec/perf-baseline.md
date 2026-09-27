@@ -579,11 +579,13 @@ Ctrl+P 不可达——该盲区已由树内按名筛选补齐（09-27-tree-dir-n
 `@contextmenu` 复用 `onNodeContextMenu`（命中项 data 与树节点同构，哨兵在其内
 early return 不弹菜单，过滤面不变式保持），补截断层外文件「可预览、不可操作」
 缺口。操作后刷新分双语境：覆盖层右键重命名/删除走 `refreshAfterFilterOp`——
-显式 `InvalidateFileTreeCache(parentPath)`（refreshNode 在 target miss 时早退
-不清缓存——截断层外文件树中无节点必 miss，且兜底 mtime 同 tick 边界）+
+显式 `InvalidateFileTreeCache(parentPath)`（refreshNode 的缓存失效在
+target 命中后才执行——parentPath 目录未在树中加载（未展开子目录不在
+nodesMap 且非根）时早退不清缓存，显式失效同时兜底 mtime 同 tick 边界）+
 `refreshNode(parentPath, {keepFilter:true})`（树照常刷新不退筛选）+ 重跑
 `runFilter`（保语境连续）；树语境维持退筛选现状零回归。覆盖层「刷新」项语义
-保留为退筛选回树（refreshNode 无 keepFilter），与保语境刷新刻意区分。
+保留为退筛选回树（refreshNode 无 keepFilter），粘贴/新建同为退筛选兜底
+（刷新链路经 refreshNode / Home.vue 父组件），与保语境刷新刻意区分。
 
 ## 16. 维度 6：前端内存驻留面量化（09-27 驻留任务，收口路线图「及时释放不再使用的对象」）
 

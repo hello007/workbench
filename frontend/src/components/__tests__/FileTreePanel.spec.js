@@ -1460,6 +1460,30 @@ describe('FileTreePanel.vue', () => {
       // stub 环境 refreshNode target miss 早退，不产生额外缓存失效调用
       expect(InvalidateFileTreeCache).not.toHaveBeenCalled()
     })
+
+    it('非筛选语境删除：树语境 refreshNode 真实执行（root 兜底命中清缓存 + 触发重载）', async () => {
+      // 上一用例的否定断言依赖 stub 环境 refreshNode 早退；本用例以 root 兜底命中的
+      // store mock 验证树语境 refreshNode 路径真实执行到缓存失效与 expand 重载：
+      // InvalidateFileTreeCache 父目录 1 次（refreshNode 内部，无 refreshAfterFilterOp
+      // 的第二次独立显式失效）；GetFileTree 重拉由 el-tree loadData 内部机制驱动，
+      // stub 无法真实触发，不断言（E2E 已覆盖该链路）
+      const { InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+      const rootExpand = vi.fn(function () { this.loaded = true })
+      wrapper = createWrapperWithStore({
+        root: { childNodes: [], data: null, expanded: false, loaded: false, expand: rootExpand }
+      })
+      const state = wrapper.vm.$.setupState
+
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      await state.handleDeleteAt({ name: 'a.go', path: '/path/a/a.go', type: 'file' })
+      await flushPromises()
+
+      expect(state.treeFilterKeyword).toBe('')
+      expect(InvalidateFileTreeCache).toHaveBeenCalledTimes(1)
+      expect(InvalidateFileTreeCache).toHaveBeenCalledWith('/path/a')
+      expect(rootExpand).toHaveBeenCalledTimes(1)
+    })
   })
 })
 
