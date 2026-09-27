@@ -1,0 +1,5 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "§15.6 截断哨兵过滤面六处不变式 + §16 覆盖层背景，改文件树相关代码必读"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例规范：fixtures 注入 mock、vitest exclude 同步、禁 waitForTimeout"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉约定，本任务菜单复用现有样式仍须守规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "禁隐式依赖外部状态（mtime 时序/固定端口），本任务恰涉 mtime 缓存语义"}

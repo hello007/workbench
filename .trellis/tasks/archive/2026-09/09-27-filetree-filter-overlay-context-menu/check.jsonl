@@ -1,0 +1,4 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "核查哨兵过滤面六处不回归 + 截断层外文件定位语义"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查新增 E2E 用例符合 fixtures/mock 规范"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查视觉零回归"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查覆盖率门禁达标"}
