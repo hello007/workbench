@@ -1585,3 +1585,36 @@ v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..
 ### Next Steps
 
 - None - task complete
+
+
+## Session 102: Git 操作取消功能 context 贯穿收口
+
+**Date**: 2026-09-28
+**Task**: Git 操作取消功能 context 贯穿收口
+**Branch**: `master`
+
+### Summary
+
+落地路线图并发控制留白「操作取消」：util 层 run() 统一实现 + 5 个 ctx 变体（取消检测先于退出码白名单，防 Windows TerminateProcess exit 1 被冲突白名单吞取消；超时格式零漂移）；service 层 per-repo 取消注册表（cancelEntry 条目指针身份校验防同仓并发双操作误删）+ CancelGitOperation/CancelAllGitOperations + Pull/Clone/BatchPull ctx 贯穿（BatchPull 注册前置 sem 覆盖排队仓）+ mapCancelError 统一映射 E_GIT_CANCELLED；前端批量「取消未完成」+ 行级中性标注 + 单仓/克隆取消入口（发起时路径快照）。绑定 172→174，新增单测 14 个；两轮子 agent 审核（reviewer 三发现修复 + trellis-check 清零）；go test 全绿 + race + soak/goleak + vitest 1441 + 覆盖率 83%。文档六处同步，CLAUDE.md v2.18。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `866b7a1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
