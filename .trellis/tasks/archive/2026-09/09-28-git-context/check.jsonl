@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 wailsjs 三处绑定同步完整（新方法 + model 字段增量）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "校验 E_GIT_CANCELLED 三处同步与 warning 分流"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验前端 ≥70% 覆盖率门禁与后端分层门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "校验新增测试无时序脆弱（禁 sleep/固定端口/mtime）"}
+{"file": "docs/spec/perf-baseline.md", "reason": "校验 soak 泄漏断言通过（goroutine Δ≤2、heap 增量门禁）"}

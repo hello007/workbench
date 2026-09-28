@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 新增绑定方法与 PullResult/PullSummary 字段增量须同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增错误码 E_GIT_CANCELLED 须同步 model/app_error.go 常量表 + 前端 error.js ErrorCode/WARNING_CODES"}
+{"file": "docs/spec/test-stability.md", "reason": "取消链路单测禁 sleep 等待与固定端口，用 ctx 已取消快速返回语义构造稳定用例"}
+{"file": "docs/spec/perf-baseline.md", "reason": "service 层改动须过 soak 三档轮次与 goleak 泄漏断言（注册表/锁/goroutine 不泄漏）"}
+{"file": "docs/spec/browser-channel.md", "reason": "取消进度事件复用既有 emitCurrent EventSink 路径，禁直调 EventsEmit"}
