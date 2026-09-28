@@ -33,6 +33,9 @@
         <el-button type="primary" @click="pullRepo" :loading="gitLoading">
           拉取更新
         </el-button>
+        <el-button v-if="gitLoading" type="warning" plain @click="onCancelSinglePull">
+          取消拉取
+        </el-button>
         <el-switch
           v-model="pullUseRebase"
           active-text="变基模式"
@@ -341,6 +344,7 @@
       </el-form>
       <template #footer>
         <el-button @click="cloneDialogVisible = false" :disabled="cloneLoading">取消</el-button>
+        <el-button v-if="cloneLoading" type="warning" plain @click="onCancelClone">取消克隆</el-button>
         <el-button type="primary" @click="cloneRepo" :loading="cloneLoading">确定</el-button>
       </template>
     </el-dialog>
@@ -375,7 +379,7 @@
           :status="pullCompleted ? (pullSummary.failed > 0 ? 'warning' : 'success') : undefined"
         />
         <div v-if="pullCompleted" class="pull-summary">
-          成功: {{ pullSummary.success }}，跳过: {{ pullSummary.skipped }}，失败: {{ pullSummary.failed }}
+          成功: {{ pullSummary.success }}，跳过: {{ pullSummary.skipped }}，失败: {{ pullSummary.failed }}<template v-if="pullSummary.cancelled > 0">，已取消: {{ pullSummary.cancelled }}</template>
         </div>
       </div>
 
@@ -389,6 +393,7 @@
               alt="已跳过"
               title="已跳过（未配置远程）"
             />
+            <el-icon v-else-if="row.cancelled" color="#E6A23C"><RemoveFilled /></el-icon>
             <el-icon v-else-if="row.success" color="#67C23A"><SuccessFilled /></el-icon>
             <el-icon v-else color="#F56C6C"><CircleCloseFilled /></el-icon>
           </template>
@@ -397,12 +402,21 @@
         <el-table-column prop="path" label="路径" min-width="250" show-overflow-tooltip />
         <el-table-column label="结果" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">
-            <span :class="row.skipped ? 'text-skipped' : (row.success ? 'text-success' : 'text-danger')">{{ row.skipped ? (row.output || '已跳过') : (row.success ? (row.output || '已是最新') : row.error) }}</span>
+            <span :class="row.cancelled ? 'text-cancelled' : (row.skipped ? 'text-skipped' : (row.success ? 'text-success' : 'text-danger'))">{{ row.cancelled ? (row.output || '已取消') : (row.skipped ? (row.output || '已跳过') : (row.success ? (row.output || '已是最新') : row.error)) }}</span>
           </template>
         </el-table-column>
       </el-table>
 
       <template #footer>
+        <el-button
+          v-if="!pullCompleted"
+          :loading="cancellingBatch"
+          type="warning"
+          plain
+          @click="onCancelBatchPull"
+        >
+          取消未完成
+        </el-button>
         <el-button
           v-if="!pullCompleted"
           @click="pullRunningInBackground = true; pullDialogVisible = false"
@@ -427,7 +441,7 @@
           <el-icon v-else :size="14" color="#67C23A"><SuccessFilled /></el-icon>
           <span class="pull-status-text">
             <template v-if="!pullCompleted">正在更新 {{ pullProgress.current }}/{{ pullProgress.total }}</template>
-            <template v-else>更新完成（{{ pullSummary.success }} 成功<template v-if="pullSummary.failed > 0">，{{ pullSummary.failed }} 失败</template>）</template>
+            <template v-else>更新完成（{{ pullSummary.success }} 成功<template v-if="pullSummary.failed > 0">，{{ pullSummary.failed }} 失败</template><template v-if="pullSummary.cancelled > 0">，{{ pullSummary.cancelled }} 已取消</template>）</template>
           </span>
         </div>
         <el-progress
@@ -446,7 +460,7 @@
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SuccessFilled, CircleCloseFilled, ArrowLeft, Document, Folder, CopyDocument } from '@element-plus/icons-vue'
+import { SuccessFilled, CircleCloseFilled, RemoveFilled, ArrowLeft, Document, Folder, CopyDocument } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
@@ -461,7 +475,8 @@ import {
   PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
   OpenInExplorer, OpenInVSCode, OpenInWarp, OpenInObsidian, OpenObsidianVaultManager,
   CopyObsidianVaultPath, AutoRegisterAndOpen,
-  GetBranches, CheckoutBranch
+  GetBranches, CheckoutBranch,
+  CancelGitOperation, CancelAllGitOperations, ExtractRepoName
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
 import obsidianIcon from '../assets/icons/obsidian.png'
@@ -582,8 +597,14 @@ const pullDialogVisible = ref(false)
 const pullProgress = reactive({ current: 0, total: 0 })
 const pullResults = ref([])
 const pullCompleted = ref(false)
-const pullSummary = reactive({ success: 0, failed: 0, skipped: 0 })
+const pullSummary = reactive({ success: 0, failed: 0, skipped: 0, cancelled: 0 })
 const pullRunningInBackground = ref(false)
+// 批量「取消未完成」请求进行中（防重复点击），取消完成后由 pull-complete 收口
+const cancellingBatch = ref(false)
+// 在途单仓操作发起时的仓库路径快照：取消入口读快照而非当前选中节点，
+// 防用户在拉取/克隆进行中切换选中节点后取消打到别的仓库
+const activePullPath = ref('')
+const activeClonePath = ref('')
 
 const singlePullVisible = ref(false)
 const singlePullResult = ref('')
@@ -656,10 +677,14 @@ const doCheckout = async () => {
 const pullRepo = async () => {
   if (!workspaceStore.selectedNode) return
 
+  activePullPath.value = workspaceStore.selectedNode.path
   gitLoading.value = true
   try {
     const result = await PullRepo(workspaceStore.selectedNode.path, pullUseRebase.value)
-    if (result && result.length > 200) {
+    if (result === '已取消') {
+      // 用户取消：中性提示，非 error 误报（App 层 PullRepo 取消返回 "已取消" 非 "错误: " 前缀）
+      ElMessage.info('拉取已取消')
+    } else if (result && result.length > 200) {
       singlePullResult.value = result
       singlePullVisible.value = true
     } else {
@@ -671,6 +696,53 @@ const pullRepo = async () => {
     handleGitError('拉取失败: ', error)
   } finally {
     gitLoading.value = false
+  }
+}
+
+// onCancelSinglePull 取消单仓拉取：后端终止在途 git pull 子进程，PullRepo 返回 "已取消"
+// 经 pullRepo 分支中性提示。用发起时快照路径，防在途切节点取消打错仓库
+const onCancelSinglePull = async () => {
+  if (!activePullPath.value) return
+  try {
+    const cancelled = await CancelGitOperation(activePullPath.value)
+    if (!cancelled) {
+      ElMessage.info('没有可取消的进行中操作')
+    }
+  } catch (error) {
+    ElMessage.error('取消失败: ' + (error?.message || String(error)))
+  }
+}
+
+// onCancelClone 取消克隆：后端克隆键为 父目录 + 仓库名（与 App.CloneRepo 拼接一致），
+// 前端同构拼 fullPath 命中取消注册表。父目录用发起克隆时的快照路径
+const onCancelClone = async () => {
+  if (!activeClonePath.value || !cloneUrl.value.trim()) return
+  try {
+    const repoName = await ExtractRepoName(cloneUrl.value.trim())
+    const fullPath = [activeClonePath.value, repoName].join('/')
+    const cancelled = await CancelGitOperation(fullPath)
+    if (!cancelled) {
+      ElMessage.info('没有可取消的进行中操作')
+    }
+  } catch (error) {
+    ElMessage.error('取消失败: ' + (error?.message || String(error)))
+  }
+}
+
+// onCancelBatchPull 批量「取消未完成」：后端遍历取消注册表逐个终止/跳过未完成仓库，
+// 已完成仓库结果保留；各仓取消结果经 pull-progress 逐条产出，pull-complete 收口
+const onCancelBatchPull = async () => {
+  if (cancellingBatch.value) return
+  cancellingBatch.value = true
+  try {
+    const count = await CancelAllGitOperations()
+    if (!count) {
+      ElMessage.info('没有可取消的进行中操作')
+    }
+  } catch (error) {
+    ElMessage.error('取消失败: ' + (error?.message || String(error)))
+  } finally {
+    cancellingBatch.value = false
   }
 }
 
@@ -1009,10 +1081,14 @@ const cloneRepo = async () => {
   }
   if (!workspaceStore.selectedNode) return
 
+  activeClonePath.value = workspaceStore.selectedNode.path
   cloneLoading.value = true
   try {
     const result = await CloneRepo(cloneUrl.value.trim(), workspaceStore.selectedNode.path)
-    if (result.includes('成功')) {
+    if (result === '已取消') {
+      // 用户取消：中性提示，非 error 误报（App 层 CloneRepo 取消返回 "已取消" 非 "错误: " 前缀）
+      ElMessage.info('克隆已取消')
+    } else if (result.includes('成功')) {
       ElMessage.success(result)
       cloneDialogVisible.value = false
       emit('refreshNode', workspaceStore.selectedNode.path)
@@ -1034,6 +1110,7 @@ const startBatchPull = (summary) => {
   pullSummary.success = 0
   pullSummary.failed = 0
   pullSummary.skipped = 0
+  pullSummary.cancelled = 0
   pullRunningInBackground.value = false
   pullDialogVisible.value = true
 }
@@ -1082,6 +1159,7 @@ const setupPullEvents = () => {
     pullSummary.success = summary.success || 0
     pullSummary.skipped = summary.skipped || 0
     pullSummary.failed = summary.failed || 0
+    pullSummary.cancelled = summary.cancelled || 0
     if (pullRunningInBackground.value) {
       pullRunningInBackground.value = false
       pullDialogVisible.value = true
@@ -1461,6 +1539,10 @@ defineExpose({
 
 .text-skipped {
   color: var(--text-tertiary, #909399);
+}
+
+.text-cancelled {
+  color: var(--warning-color, #E6A23C);
 }
 
 .pull-status-img {

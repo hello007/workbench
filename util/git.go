@@ -30,11 +30,12 @@ func NewGitCommandWithTimeout(timeout time.Duration) *GitCommand {
 	}
 }
 
-// Execute 执行Git命令
-func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
-	defer cancel()
-
+// run Git 命令统一执行实现：ctx 的超时/取消语义由调用方给定（WithTimeout 包在外层），
+// acceptedExitCodes 非 nil 时命中退出码视为正常返回。
+// 外部取消（ctx.Err() == context.Canceled）时错误以 %w 包装 context.Canceled，
+// 供上层 errors.Is 识别并映射为「操作已取消」；超时（DeadlineExceeded）保持既有
+// 错误格式逐字不变（stderr 摘要），避免超时路径行为漂移。
+func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workDir
 	HideCommandWindow(cmd)
@@ -45,28 +46,12 @@ func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("git %v failed: %s", args, stderr.String())
-	}
-
-	return stdout.String(), nil
-}
-
-// ExecuteWithCodes 执行 Git 命令，允许指定退出码视为正常（如 git diff --no-index 有差异时退出码 1）。
-// 若退出码在 acceptedExitCodes 中，返回 stdout 与 nil；否则按 Execute 语义返回错误。
-func (g *GitCommand) ExecuteWithCodes(workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workDir
-	HideCommandWindow(cmd)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
+		// 取消检测先于退出码白名单：Windows 下 exec.CommandContext 取消经
+		// TerminateProcess 终止进程（exit code 1），若白名单分支先行会把被取消的
+		// pull --rebase（conflictExitCodes 含 1）误报为「冲突正常返回」，取消静默丢失
+		if ctx.Err() == context.Canceled {
+			return "", fmt.Errorf("git %v failed: %w", args, ctx.Err())
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok && acceptedExitCodes[exitErr.ExitCode()] {
 			return stdout.String(), nil
 		}
@@ -74,6 +59,39 @@ func (g *GitCommand) ExecuteWithCodes(workDir string, acceptedExitCodes map[int]
 	}
 
 	return stdout.String(), nil
+}
+
+// Execute 执行Git命令
+func (g *GitCommand) Execute(workDir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+	defer cancel()
+	return g.run(ctx, workDir, nil, args...)
+}
+
+// ExecuteWithContext 执行 Git 命令，外部 ctx 取消信号可贯穿终止 git 子进程
+// （exec.CommandContext 杀进程机制现成，此变体补外部取消入口）。
+// 内部保留单命令超时语义（g.timeout），外部取消经 parent ctx 传播。
+func (g *GitCommand) ExecuteWithContext(ctx context.Context, workDir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	return g.run(ctx, workDir, nil, args...)
+}
+
+// ExecuteWithCodes 执行 Git 命令，允许指定退出码视为正常（如 git diff --no-index 有差异时退出码 1）。
+// 若退出码在 acceptedExitCodes 中，返回 stdout 与 nil；否则按 Execute 语义返回错误。
+func (g *GitCommand) ExecuteWithCodes(workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+	defer cancel()
+	return g.run(ctx, workDir, acceptedExitCodes, args...)
+}
+
+// ExecuteWithCodesWithContext 同 ExecuteWithCodes（冲突类操作退出码白名单语义保留），
+// 外部 ctx 取消信号可贯穿。pull --rebase 变基模式 Pull 的取消贯穿依赖此变体保留
+// 冲突 exit 1 接受语义。
+func (g *GitCommand) ExecuteWithCodesWithContext(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+	return g.run(ctx, workDir, acceptedExitCodes, args...)
 }
 
 // IsGitRepository 检查目录是否是Git仓库
@@ -141,7 +159,19 @@ func (g *GitCommand) ExecuteWithOutput(workDir string, args ...string) ([]string
 func (g *GitCommand) Clone(url, targetPath string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	return g.clone(ctx, url, targetPath)
+}
 
+// CloneWithContext 克隆仓库，外部 ctx 取消信号可贯穿终止 git clone 子进程。
+// 内部保留 5 分钟克隆超时语义，与 Clone 一致。
+func (g *GitCommand) CloneWithContext(ctx context.Context, url, targetPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	return g.clone(ctx, url, targetPath)
+}
+
+// clone 克隆统一实现，取消错误包装语义同 run。
+func (g *GitCommand) clone(ctx context.Context, url, targetPath string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "clone", url, targetPath)
 	HideCommandWindow(cmd)
 
@@ -151,6 +181,9 @@ func (g *GitCommand) Clone(url, targetPath string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return "", fmt.Errorf("git clone failed: %w", ctx.Err())
+		}
 		return "", fmt.Errorf("git clone failed: %s", stderr.String())
 	}
 
@@ -180,6 +213,17 @@ func FindGitRoot(path string) (string, error) {
 // Pull 拉取更新
 func (g *GitCommand) Pull(dir string) (string, error) {
 	return g.Execute(dir, "pull")
+}
+
+// PullWithContext 拉取更新，外部 ctx 取消信号可贯穿终止 git pull 子进程。
+func (g *GitCommand) PullWithContext(ctx context.Context, dir string) (string, error) {
+	return g.ExecuteWithContext(ctx, dir, "pull")
+}
+
+// PullRebaseWithContext 拉取远程更新并以变基方式重放本地提交，外部 ctx 取消可贯穿。
+// 冲突 exit 1 接受语义与 PullRebase 一致（经 conflictExitCodes）。
+func (g *GitCommand) PullRebaseWithContext(ctx context.Context, dir string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, dir, conflictExitCodes, "pull", "--rebase")
 }
 
 // GetBranchesAll 获取所有分支（本地+远程）

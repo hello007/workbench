@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **172** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
+共 **174** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -19,7 +19,7 @@
 | 文件预览与对话框 | 5 | `app_preview.go` |
 | 文件操作与剪贴板 | 6 | `app_clipboard.go` |
 | 搜索 | 2 | `app_search.go` |
-| Git 仓库信息 | 6 | `app_git.go` |
+| Git 仓库信息 | 8 | `app_git.go` |
 | 提交历史与统计 | 5 | `app_git.go` |
 | 本地变更与提交 | 7 | `app_git.go` |
 | Diff | 5 | `app_git.go` |
@@ -142,9 +142,11 @@
 |---|---|---|---|
 | `GetGitInfo` | `(path) => Promise<GitRepoInfo>` | 获取仓库概览（分支/远程/近期提交） | GitRepoInfo |
 | `CloneRepo` | `(url, targetPath) => Promise<string>` | 克隆仓库 | 操作结果消息 |
-| `PullRepo` | `(dirPath, useRebase) => Promise<string>` | 拉取（可选 rebase 模式） | 操作结果消息 |
+| `PullRepo` | `(dirPath, useRebase) => Promise<string>` | 拉取（可选 rebase 模式），可被 `CancelGitOperation` 取消 | 操作结果消息；用户取消返回 `已取消` |
 | `ScanAndPullRepos` | `(dirPath) => Promise<PullSummary>` | 扫描目录下仓库并批量拉取 | PullSummary |
 | `ExtractRepoName` | `(url) => Promise<string>` | 从 URL 提取仓库名 | 仓库名 |
+| `CancelGitOperation` | `(path) => Promise<boolean>` | 取消指定仓库在途 Git 操作（Pull/Clone/批量拉取单仓），终止在途 git 子进程 | 是否存在可取消的在途操作；无在途操作幂等 false |
+| `CancelAllGitOperations` | `() => Promise<number>` | 取消全部在途 Git 操作（批量拉取「取消未完成」，已完成仓库保留），返回取消仓库数 | 取消仓库数 |
 | `GetGitRemoteURL` | `(path) => Promise<GitRemoteInfo>` | 获取远程 URL 与当前分支 | GitRemoteInfo |
 
 ---
@@ -683,7 +685,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **RepoConfigImportResult**（`added` / `overwritten` / `skipped` / `failed` / `failedReasons`）
 
-**PullSummary**（`total`）
+**PullSummary**（`total`，`cancelled`: 取消仓库数，随 pull-complete 事件透出）
 
 **SearchResult**（`name` / `path` / `type`）
 

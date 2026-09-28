@@ -165,14 +165,20 @@ type PullResult struct {
 	Success bool   `json:"success"`
 	// Skipped 表示因无远程配置被跳过（未执行 pull），与 Success 互斥：
 	// 不计入成功也不计入失败，用于一键更新跳过无远程仓库。
-	Skipped bool   `json:"skipped"`
-	Output  string `json:"output"`
-	Error   string `json:"error,omitempty"`
+	Skipped bool `json:"skipped"`
+	// Cancelled 表示该仓库被用户取消（在途中断或排队未启动），不计入成功/失败：
+	// 前端按中性「已取消」展示（warning 色系），与失败 error 红区分。
+	Cancelled bool   `json:"cancelled"`
+	Output    string `json:"output"`
+	Error     string `json:"error,omitempty"`
 }
 
 // PullSummary ScanAndPullRepos 的初始返回值
 type PullSummary struct {
 	Total int `json:"total"`
+	// Cancelled 批量拉取中被用户取消的仓库数（含在途中断与排队未启动），
+	// 随 pull-complete 事件透出，前端汇总展示。
+	Cancelled int `json:"cancelled"`
 }
 
 // Favorite 收藏夹条目

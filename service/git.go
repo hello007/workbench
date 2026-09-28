@@ -36,14 +36,32 @@ func IsOperationInProgressError(err error) bool {
 	return strings.Contains(err.Error(), ErrOperationInProgress.Message)
 }
 
+// ErrOperationCancelled 表示 Git 操作被用户取消（ctx 取消信号贯穿终止 git 子进程）。
+// 前端按 E_GIT_CANCELLED 走中性提示（warning/info），非 error 误报；
+// 与 ErrOperationInProgress 同为 *model.AppError sentinel，经 Wails ErrorFormatter
+// 结构化传前端 {code, message}。
+var ErrOperationCancelled = model.NewAppError(model.ErrCodeGitCancelled, "操作已取消")
+
+// mapCancelError 将 ctx 取消错误（util 层以 %w 包装 context.Canceled 透传）映射为
+// ErrOperationCancelled sentinel，其余错误原样透传。Pull/Clone/pullOne 统一走此映射，
+// 保证取消语义单点实现不漂移。
+func mapCancelError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return ErrOperationCancelled
+	}
+	return err
+}
+
 // GitService Git服务
 type GitService struct {
 	gitCmd     *util.GitCommand
 	scanCache  *ScanCacheManager // 可为 nil：未注入时走纯 .git 预筛路径（兼容旧调用方与测试）
 	sinkHolder                   // 事件出口持有器（pull-progress/pull-complete 推送），SetContext 注入 + serve 模式经 SetEventSink 切换
 
-	opMu    sync.Mutex             // 保护 opLocks map 的并发读写
+	opMu    sync.Mutex             // 保护 opLocks/cancels 两个 map 的并发读写
 	opLocks map[string]*sync.Mutex // 仓库路径 -> 该仓变更操作互斥锁（懒创建）
+
+	cancels map[string]*cancelEntry // 仓库路径 -> 在途可取消操作的注册条目（与 opLocks 同 opMu 保护）
 }
 
 // NewGitService 创建服务（不注入扫描缓存，兼容现有调用方与测试）。
@@ -71,17 +89,24 @@ func NewGitServiceWithCache(cachePath string) *GitService {
 	}
 }
 
+// normalizeRepoKey 仓库操作键规范化：filepath.Abs 转绝对路径，失败（路径非法，极少见）
+// 退回原路径。tryLockRepo 与取消注册表共用，保证 CancelGitOperation 与操作方
+// （一侧传相对路径一侧传绝对路径）命中同键。
+func normalizeRepoKey(repoPath string) string {
+	abs, err := filepath.Abs(repoPath)
+	if err != nil {
+		return repoPath
+	}
+	return abs
+}
+
 // tryLockRepo 尝试获取目标仓库的变更操作互斥锁。
 // 锁粒度按仓库绝对路径为键（A1 纯仓库锁）：同一仓库的变更操作串行化，不同仓库互不阻塞。
 // 采用 TryLock 语义（方案 A 互斥拒绝）：锁已被占用立即返回 ErrOperationInProgress，不等待、不排队。
 // 成功返回 release 闭包，调用方须 defer 调用以释放锁，保证 panic 路径下也无泄漏。
-// repoPath 经 filepath.Abs 规范化为绝对路径作为键，避免相对路径与绝对路径双键绕过互斥。
+// repoPath 经 normalizeRepoKey 规范化为绝对路径作为键，避免相对路径与绝对路径双键绕过互斥。
 func (s *GitService) tryLockRepo(repoPath string) (release func(), err error) {
-	abs, aerr := filepath.Abs(repoPath)
-	if aerr != nil {
-		// Abs 失败极少见（路径非法），退回用原路径作键，不阻断主流程
-		abs = repoPath
-	}
+	abs := normalizeRepoKey(repoPath)
 
 	s.opMu.Lock()
 	mu, ok := s.opLocks[abs]
@@ -99,6 +124,81 @@ func (s *GitService) tryLockRepo(repoPath string) (release func(), err error) {
 	}
 
 	return mu.Unlock, nil
+}
+
+// cancelEntry 取消注册条目。注册表值用条目指针而非裸 CancelFunc：两次
+// context.WithCancel 产生的 cancel 闭包代码指针相同，函数指针比较无法区分实例；
+// 条目指针身份精确支撑 unregisterCancel 防误删（同仓并发双操作单槽覆盖场景）。
+type cancelEntry struct {
+	cancel context.CancelFunc
+}
+
+// registerCancel 登记在途操作的可取消入口。操作方（Pull/Clone/BatchPull）在开始
+// 执行前调用，返回本操作注册条目（注销时须原样传回校验身份）。同键重复注册为
+// 覆盖写（后注册者在途，Cancel 应命中最新操作），先注册者的条目仍在手，其注销
+// 经指针比对不会误删新注册项。与 opLocks 同 opMu 保护。
+func (s *GitService) registerCancel(repoPath string, cancel context.CancelFunc) *cancelEntry {
+	key := normalizeRepoKey(repoPath)
+	entry := &cancelEntry{cancel: cancel}
+	s.opMu.Lock()
+	if s.cancels == nil {
+		s.cancels = make(map[string]*cancelEntry)
+	}
+	s.cancels[key] = entry
+	s.opMu.Unlock()
+	return entry
+}
+
+// unregisterCancel 操作结束（成功/失败/取消/panic 经 defer）注销注册表，防 CancelFunc
+// 残留。删前校验 map 中条目与本操作注册条目指针同一：同仓并发双操作（如 BatchPull
+// 进行中用户单仓 PullRepo）单槽覆盖后，先结束操作的注销不得误删后注册操作的在途
+// 注册项。与 tryLockRepo 的 release 闭包独立，调用方以 defer LIFO 保证先注销后释放锁。
+func (s *GitService) unregisterCancel(repoPath string, entry *cancelEntry) {
+	if entry == nil {
+		return
+	}
+	key := normalizeRepoKey(repoPath)
+	s.opMu.Lock()
+	if s.cancels[key] == entry {
+		delete(s.cancels, key)
+	}
+	s.opMu.Unlock()
+}
+
+// CancelGitOperation 取消指定仓库的在途 Git 操作（取消信号经 ctx 传播终止在途 git
+// 子进程）。返回是否存在可取消的在途操作；操作已完成或无在途操作时幂等返回 false
+// （CancelFunc 幂等，取消与操作方注销的竞态无危害：注销按条目指针比对，
+// 已被取走删除的键不会误删新注册项）。
+func (s *GitService) CancelGitOperation(repoPath string) (bool, error) {
+	key := normalizeRepoKey(repoPath)
+	s.opMu.Lock()
+	entry, ok := s.cancels[key]
+	if ok {
+		delete(s.cancels, key)
+	}
+	s.opMu.Unlock()
+
+	if ok {
+		entry.cancel()
+	}
+	return ok, nil
+}
+
+// CancelAllGitOperations 取消全部在途 Git 操作（批量拉取「取消未完成」入口：对
+// 注册表中全部未完成仓库逐个取消，已完成仓库不在注册表自然保留），返回取消的仓库数。
+func (s *GitService) CancelAllGitOperations() int {
+	s.opMu.Lock()
+	entries := make([]*cancelEntry, 0, len(s.cancels))
+	for key, entry := range s.cancels {
+		entries = append(entries, entry)
+		delete(s.cancels, key)
+	}
+	s.opMu.Unlock()
+
+	for _, entry := range entries {
+		entry.cancel()
+	}
+	return len(entries)
 }
 
 // GetInfo 获取仓库信息
@@ -126,7 +226,8 @@ func (s *GitService) GetInfo(dirPath string) (*model.GitRepoInfo, error) {
 	return info, nil
 }
 
-// Clone 克隆仓库
+// Clone 克隆仓库。可取消：CancelGitOperation(targetPath) 终止在途 git clone 子进程，
+// 取消错误映射为 ErrOperationCancelled（前端中性提示）。
 func (s *GitService) Clone(url, targetPath string) (string, error) {
 	release, err := s.tryLockRepo(targetPath)
 	if err != nil {
@@ -138,11 +239,22 @@ func (s *GitService) Clone(url, targetPath string) (string, error) {
 		return "", fmt.Errorf("目标路径已存在")
 	}
 
-	return s.gitCmd.Clone(url, targetPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(targetPath, cancel)
+	defer s.unregisterCancel(targetPath, entry)
+
+	output, err := s.gitCmd.CloneWithContext(ctx, url, targetPath)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // Pull 拉取更新。useRebase=true 走 git pull --rebase（变基模式，冲突走统一冲突解决入口），
 // useRebase=false 走普通 pull，与历史行为完全一致。
+// 可取消：CancelGitOperation(dirPath) 终止在途 git pull 子进程，取消错误映射为
+// ErrOperationCancelled。defer LIFO：unregisterCancel 先于 release 执行，两清理面均不泄漏。
 func (s *GitService) Pull(dirPath string, useRebase bool) (string, error) {
 	release, err := s.tryLockRepo(dirPath)
 	if err != nil {
@@ -153,10 +265,24 @@ func (s *GitService) Pull(dirPath string, useRebase bool) (string, error) {
 	if !s.gitCmd.IsGitRepository(dirPath) {
 		return "", fmt.Errorf("不是Git仓库")
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(dirPath, cancel)
+	defer s.unregisterCancel(dirPath, entry)
+
 	if useRebase {
-		return s.gitCmd.PullRebase(dirPath)
+		output, err := s.gitCmd.PullRebaseWithContext(ctx, dirPath)
+		if err != nil {
+			return "", mapCancelError(err)
+		}
+		return output, nil
 	}
-	return s.gitCmd.Pull(dirPath)
+	output, err := s.gitCmd.PullWithContext(ctx, dirPath)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // HasRemote 检测仓库是否配置了远程仓库（git remote -v 是否非空）。
@@ -858,71 +984,119 @@ func (s *GitService) isUntracked(gitRoot, file string) (bool, error) {
 	return false, nil
 }
 
+// pullOne 批量拉取的单仓执行体：仓库检查 → 抢仓级锁 → 可取消 pull。
+// ctx 由 BatchPull 循环体创建并在 sem 排队前登记注册表（覆盖「排队中未启动」仓库的
+// 取消语义），本函数仅消费。三段取消判定：
+//   - 执行前 ctx 已取消（排队中被打断）：不抢锁不执行，直接产出已取消结果（未启动跳过）
+//   - 抢锁后二次检查（兜底取消与锁获取的竞态窗口）：同上产出已取消结果
+//   - pull 在途取消：ctx 传播终止 git 子进程，errors.Is(err, context.Canceled) 映射已取消结果
+//
+// 取消结果不计入成功/失败（Cancelled 独立标记），已完成仓库结果不受影响。
+func (s *GitService) pullOne(ctx context.Context, repoPath string) model.PullResult {
+	name := filepath.Base(repoPath)
+	result := model.PullResult{
+		Path: repoPath,
+		Name: name,
+	}
+
+	if ctx.Err() != nil {
+		result.Cancelled = true
+		result.Output = "已取消"
+		return result
+	}
+
+	if !s.gitCmd.IsGitRepository(repoPath) {
+		result.Success = false
+		result.Error = "不是 Git 仓库"
+		return result
+	}
+	if !s.HasRemote(repoPath) {
+		// 无远程配置的本地仓库无法 pull，跳过而非报错
+		result.Skipped = true
+		result.Output = "未配置远程仓库，已跳过"
+		return result
+	}
+
+	// 抢仓级锁，防止与用户手动单仓 PullRepo 并发冲突；抢失败记为失败而非跳过
+	release, lockErr := s.tryLockRepo(repoPath)
+	if lockErr != nil {
+		result.Success = false
+		result.Error = lockErr.Error()
+		return result
+	}
+	defer release()
+
+	if ctx.Err() != nil {
+		result.Cancelled = true
+		result.Output = "已取消"
+		return result
+	}
+
+	gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
+	output, err := gitCmd.PullWithContext(ctx, repoPath)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			result.Cancelled = true
+			result.Output = "已取消"
+			return result
+		}
+		result.Success = false
+		result.Error = err.Error()
+		return result
+	}
+	result.Success = true
+	result.Output = strings.TrimSpace(output)
+	return result
+}
+
 // BatchPull 并行拉取多个 Git 仓库，进度事件经构造注入的 sink 推送
 // （pull-progress 每仓一条、pull-complete 汇总一条；sink 未注入或非 Wails
 // 上下文时静默跳过，防护集中在 EventSink）。
+// 可取消：per-repo ctx 在 sem 排队前登记取消注册表（CancelAllGitOperations /
+// CancelGitOperation 可终止在途仓、跳过排队仓），pull-complete 透出 cancelled 计数。
 func (s *GitService) BatchPull(repos []string, concurrency int) []model.PullResult {
 	if concurrency <= 0 {
 		concurrency = 5
 	}
 
 	var (
-		wg           sync.WaitGroup
-		mu           sync.Mutex
-		results      []model.PullResult
-		sem          = make(chan struct{}, concurrency)
-		successCount int
-		failCount    int
-		skippedCount int
+		wg             sync.WaitGroup
+		mu             sync.Mutex
+		results        []model.PullResult
+		sem            = make(chan struct{}, concurrency)
+		successCount   int
+		failCount      int
+		skippedCount   int
+		cancelledCount int
 	)
 
 	for _, repo := range repos {
 		wg.Add(1)
 		go func(repoPath string) {
 			defer wg.Done()
+
+			// 注册前置到 sem 排队之前：排队中（未启动）仓库也可被取消注册表命中，
+			// 醒来后 pullOne 依 ctx.Err() 跳过执行
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entry := s.registerCancel(repoPath, cancel)
+			defer s.unregisterCancel(repoPath, entry)
+
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			name := filepath.Base(repoPath)
-			result := model.PullResult{
-				Path: repoPath,
-				Name: name,
-			}
-
-			if !s.gitCmd.IsGitRepository(repoPath) {
-				result.Success = false
-				result.Error = "不是 Git 仓库"
-			} else if !s.HasRemote(repoPath) {
-				// 无远程配置的本地仓库无法 pull，跳过而非报错
-				result.Skipped = true
-				result.Output = "未配置远程仓库，已跳过"
-			} else {
-				// 抢仓级锁，防止与用户手动单仓 PullRepo 并发冲突；抢失败记为失败而非跳过
-				release, lockErr := s.tryLockRepo(repoPath)
-				if lockErr != nil {
-					result.Success = false
-					result.Error = lockErr.Error()
-				} else {
-					defer release()
-					gitCmd := util.NewGitCommandWithTimeout(5 * time.Minute)
-					output, err := gitCmd.Pull(repoPath)
-					if err != nil {
-						result.Success = false
-						result.Error = err.Error()
-					} else {
-						result.Success = true
-						result.Output = strings.TrimSpace(output)
-					}
-				}
-			}
+			result := s.pullOne(ctx, repoPath)
 
 			mu.Lock()
 			results = append(results, result)
-			if result.Skipped {
+			switch {
+			case result.Cancelled:
+				cancelledCount++
+			case result.Skipped:
 				skippedCount++
-			} else if result.Success {
+			case result.Success:
 				successCount++
-			} else {
+			default:
 				failCount++
 			}
 			mu.Unlock()
@@ -934,9 +1108,10 @@ func (s *GitService) BatchPull(repos []string, concurrency int) []model.PullResu
 	wg.Wait()
 
 	s.emitCurrent("pull-complete", map[string]int{
-		"success": successCount,
-		"skipped": skippedCount,
-		"failed":  failCount,
+		"success":   successCount,
+		"skipped":   skippedCount,
+		"failed":    failCount,
+		"cancelled": cancelledCount,
 	})
 
 	return results

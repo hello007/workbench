@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -42,6 +43,9 @@ func (a *App) CloneRepo(url, targetPath string) string {
 
 	_, err := a.gitSvc.Clone(url, fullPath)
 	if err != nil {
+		if errors.Is(err, service.ErrOperationCancelled) {
+			return "已取消"
+		}
 		return "错误: " + err.Error()
 	}
 
@@ -49,6 +53,7 @@ func (a *App) CloneRepo(url, targetPath string) string {
 }
 
 // PullRepo 拉取更新。useRebase=true 走 git pull --rebase（变基模式），false 走普通 pull。
+// 用户取消（CancelGitOperation）返回 "已取消"（非 "错误: " 前缀），前端据此中性提示。
 func (a *App) PullRepo(dirPath string, useRebase bool) string {
 	if !util.NewGitCommand().IsGitRepository(dirPath) {
 		return "错误: 不是Git仓库"
@@ -58,9 +63,28 @@ func (a *App) PullRepo(dirPath string, useRebase bool) string {
 	}
 	output, err := a.gitSvc.Pull(dirPath, useRebase)
 	if err != nil {
+		if errors.Is(err, service.ErrOperationCancelled) {
+			return "已取消"
+		}
 		return "错误: " + err.Error()
 	}
 	return output
+}
+
+// CancelGitOperation 取消指定仓库的在途 Git 操作（Pull/Clone/批量拉取单仓），
+// 取消信号经 ctx 传播终止在途 git 子进程。返回是否存在可取消的在途操作；
+// 无在途操作时幂等返回 false。
+func (a *App) CancelGitOperation(path string) (bool, error) {
+	if path == "" {
+		return false, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.CancelGitOperation(path)
+}
+
+// CancelAllGitOperations 取消全部在途 Git 操作（批量拉取「取消未完成」入口：
+// 未完成仓库逐个取消，已完成仓库结果保留），返回取消的仓库数。
+func (a *App) CancelAllGitOperations() int {
+	return a.gitSvc.CancelAllGitOperations()
 }
 
 // ScanAndPullRepos 扫描并批量拉取 Git 仓库
