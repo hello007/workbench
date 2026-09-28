@@ -1552,3 +1552,36 @@ exclude 追加 e2e-desktop/** 修复 2 files failed；npm test 66 files/1392 用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 101: CHANGELOG 1.9.0 补录与文档版本 v2.17
+
+**Date**: 2026-09-28
+**Task**: CHANGELOG 1.9.0 补录与文档版本 v2.17
+**Branch**: `master`
+
+### Summary
+
+v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..v1.9.0 全部用户可见变更按 Added/Fixed/Changed 分类——文件树大目录体验三连+保语境刷新、三向合并、统计行数分布与贡献者行数排名、诊断导出+异常退出检测、性能/质量基线五项；fix 五项；原子写收口与测试加固归 Changed），CLAUDE.md 文档版本 v2.16→v2.17、最后更新 2026-09-28。零代码改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6525455` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

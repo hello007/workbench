@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 100
-- **Last Active**: 2026-09-27
+- **Total Sessions**: 101
+- **Last Active**: 2026-09-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1554 | Active |
+| `journal-2.md` | ~1587 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 101 | 2026-09-28 | CHANGELOG 1.9.0 补录与文档版本 v2.17 | `6525455` | `master` |
 | 100 | 2026-09-27 | 文件树筛选覆盖层粘贴/新建/拷贝到保语境刷新 | `fa4b10c`, `109f632` | `master` |
 | 99 | 2026-09-27 | 文件树筛选覆盖层右键菜单 | `091b1d3` | `master` |
 | 98 | 2026-09-27 | 文件树目录内按名筛选（截断优化配套盲区补齐） | `6f0d110` | `master` |
