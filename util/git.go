@@ -123,9 +123,6 @@ func (g *GitCommand) IsGitRepository(dir string) bool {
 //
 // 已知边界：bare repo（无 .git 条目）会漏判，桌面工作目录场景可忽略；
 // 损坏/残留 .git 会误判为仓库，后续真实 git 操作时会报错暴露，不产生静默数据错误。
-//
-// 注意：现有 FindGitRoot（本文件下方）使用 info.IsDir() 判定，对 worktree/submodule 漏判，
-// 属已存在的潜在 bug，本函数避免重蹈覆辙。
 func IsGitRepositoryFast(dir string) bool {
 	if dir == "" {
 		return false
