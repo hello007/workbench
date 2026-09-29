@@ -1651,3 +1651,36 @@ v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..
 ### Next Steps
 
 - index.lock 残留探测/引导留笔（research/known-risks.md），待后续任务评估
+
+
+## Session 103: Git 取消链路 index.lock 残留探测与引导收口
+
+**Date**: 2026-09-29
+**Task**: Git 取消链路 index.lock 残留探测与引导收口
+**Branch**: `master`
+
+### Summary
+
+取消链路留笔落地（A+B 组合）：util/git_lock.go 新增锁残留探测（run/clone 取消与超时分支 slog.Warn 禁自动删，worktree gitdir 双形态 + clone 禁向上）与锁占用 stderr 识别（E_GIT_LOCKED AppError 单点，桌面/serve 双通道零改动透传，前端 warning 引导人工删除）；错误码三处同步 + 顺补 GitCancelled 架构表漏行；10 后端用例（LC_ALL=C 消 locale 漂移）+ 前端分流用例；util 覆盖率 58.2%；双子 agent 审核（逐行 + 对抗性实测）3 项发现全修：畸形 gitdir 相对路径误解析、正则捕获组锚定 index.lock、clone 分支接线用例。go test/race/soak + vitest 1447 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8abb17d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
