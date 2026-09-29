@@ -1,0 +1,5 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增 E_GIT_LOCKED 错误码须守三处同步规则（model/app_error.go + error.js + 文档），复用 AppError/ErrorFormatter/handleError 链路禁另起路径"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本次不改 Wails 绑定签名（绑定零 diff），前端 error.js ErrorCode/WARNING_CODES 同步为跨层错误码契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "util ≥40%、主包无门禁但改动须带测试；新增识别/探测代码不得掉覆盖率"}
+{"file": "docs/spec/test-stability.md", "reason": "探测单测须文件构造/清除驱动无时序依赖，锁错误识别单测用真实 stderr 文案"}
+{"file": ".trellis/tasks/archive/2026-09/09-29-git-merge-rebase-cherry-pick/research/known-risks.md", "reason": "留笔文档：不自动删决策理由、探测方向、Abort 三类无此面等边界结论"}
