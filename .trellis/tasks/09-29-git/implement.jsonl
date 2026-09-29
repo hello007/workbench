@@ -1,0 +1,4 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步规则（app_error.go + error.js + 本文档）；超时错误格式推翻须在此文档明示"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "util/service 覆盖率门禁，新增超时分支须带测试不掉覆盖率"}
+{"file": "docs/spec/test-stability.md", "reason": "超时单测用 1ns timeout + ctx 预过期模式（无时序依赖），禁 sleep"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本次不新增 Wails 绑定，AppError 经 ErrorFormatter 双通道透传契约"}

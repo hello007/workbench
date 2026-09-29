@@ -1684,3 +1684,44 @@ v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..
 ### Next Steps
 
 - None - task complete
+
+## 2026-09-29 - Git 超时+冲突码白名单命中语义收口（E_GIT_TIMEOUT）
+
+### Task
+
+- Task Dir: `.trellis/tasks/09-29-git/`
+- Type: bug 修复（前序 8abb17d 审核留笔）
+
+### What Was Done
+
+- `util/git.go` `run()`/`clone()` 的 `DeadlineExceeded` 分支：锁残留告警后**立即返回**
+  `model.WrapAppError(E_GIT_TIMEOUT, "Git 操作超时已终止，请重试", ctx.Err())`，
+  不再落入 conflictExitCodes 白名单与 parseGitLockError——修复超时被杀 exit 1 被
+  白名单吞为「冲突正常返回」致冲突面板假态、超时静默丢失（方向 A+B 组合）
+- 三处同步：`model/app_error.go` `ErrCodeGitTimeout` + `frontend/src/utils/error.js`
+  ErrorCode/WARNING_CODES + `docs/spec/logging-and-errors.md` 错误码表与格式推翻说明；
+  `CLAUDE.md` 关键规则取消链路行追加超时收口句（并消除行首「超时格式不漂移」旧表述自相矛盾）
+- 测试：新增超时+白名单命中/clone 超时用例（1ns timeout，无时序依赖）；改写
+  `TestExecuteWithContext_TimeoutErrorFormatUnchanged`→`TimeoutReturnsAppError`
+  （格式推翻契约明示）；`TestExecuteWithContext_TimeoutProbesLock` 补 E_GIT_TIMEOUT
+  断言（防锁误判回归）
+
+### Lessons Learned
+
+- 前序任务为「防行为漂移」写的逐字断言（超时格式不变）会成为后续语义修复的阻力——
+  推翻时须同步改写断言注释与文档，否则留下自相矛盾的双契约
+- 审核发现的已知边界：`commit_history_cli.go` `streamCommitLog`（主包 30s 超时独立构造）
+  未收口，无白名单无吞错 bug，记录于 PRD 非目标段
+
+### Testing
+
+- [OK] go test ./... 全绿；-race（util/model）绿；vitest 1447 通过；util 覆盖率 58.9%（≥40% 门禁）
+- [OK] 非超时冲突 exit 1 接受语义、取消 E_GIT_CANCELLED、锁识别 E_GIT_LOCKED 回归全绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- `/trellis:finish-work` 归档任务

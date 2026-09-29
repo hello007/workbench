@@ -53,6 +53,7 @@ const (
 	ErrCodeGitNoStagedChanges = "E_GIT_NO_STAGED_CHANGES" // 无暂存文件，AI 提交信息生成按钮禁用（warning）
 	ErrCodeGitCancelled       = "E_GIT_CANCELLED"         // 操作被用户取消（warning，中性提示非 error）
 	ErrCodeGitLocked          = "E_GIT_LOCKED"            // index.lock 被占用或残留，写操作被拒（warning，引导人工确认后删除，禁自动删）
+	ErrCodeGitTimeout         = "E_GIT_TIMEOUT"           // Git 操作超时被终止（warning，用户可重试；超时不得误判为冲突正常返回）
 
 	// 外部 diff 工具域
 	ErrCodeDiffToolNotConfigured = "E_DIFF_TOOL_NOT_CONFIGURED" // 未配置或配置无效（缺路径/参数模板占位符），引导用户去设置（warning）

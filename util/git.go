@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"workbench/model"
 )
 
 // GitCommand Git命令执行器
@@ -33,8 +35,11 @@ func NewGitCommandWithTimeout(timeout time.Duration) *GitCommand {
 // run Git 命令统一执行实现：ctx 的超时/取消语义由调用方给定（WithTimeout 包在外层），
 // acceptedExitCodes 非 nil 时命中退出码视为正常返回。
 // 外部取消（ctx.Err() == context.Canceled）时错误以 %w 包装 context.Canceled，
-// 供上层 errors.Is 识别并映射为「操作已取消」；超时（DeadlineExceeded）保持既有
-// 错误格式逐字不变（stderr 摘要），避免超时路径行为漂移。
+// 供上层 errors.Is 识别并映射为「操作已取消」；超时（DeadlineExceeded）返回
+// E_GIT_TIMEOUT 引导级 AppError（%w 包装 DeadlineExceeded 保留 errors.Is 穿透），
+// 与取消分支对称提前返回：超时被杀 exit 1 曾被退出码白名单吞为「冲突正常返回」
+// 致冲突面板假态，且被杀子进程 stderr 半截不可信，不参与锁识别（2026-09-29 收口，
+// 既有裸错误格式 `git [args] failed: <stderr>` 有意推翻，详见 docs/spec/logging-and-errors.md）。
 func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workDir
@@ -56,10 +61,12 @@ func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes 
 			return "", fmt.Errorf("git %v failed: %w", args, ctx.Err())
 		}
 		// 超时同样 TerminateProcess 杀子进程，对称探测锁残留（置于白名单分支前：
-		// 超时被杀 exit 1 可能命中 conflictExitCodes 走「正常返回」，探测不可丢）；
-		// 仅告警不改返回值，超时错误格式逐字不变
+		// 超时被杀 exit 1 可能命中 conflictExitCodes，曾被白名单吞为「冲突正常返回」）；
+		// 告警后立即返回，不再落入白名单与锁 parse——超时不得静默吞为冲突假态，
+		// 也不得因被杀进程 stderr 半截内容误判为锁错误
 		if ctx.Err() == context.DeadlineExceeded {
 			warnIndexLockResidue(findIndexLockResidue(workDir, true))
+			return "", model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok && acceptedExitCodes[exitErr.ExitCode()] {
 			return stdout.String(), nil
@@ -198,9 +205,11 @@ func (g *GitCommand) clone(ctx context.Context, url, targetPath string) (string,
 			warnIndexLockResidue(findIndexLockResidue(targetPath, false))
 			return "", fmt.Errorf("git clone failed: %w", ctx.Err())
 		}
-		// 超时对称探测（仅告警不改返回值）
+		// 超时对称探测后立即返回 E_GIT_TIMEOUT（与 run 收口一致：告警不丢、
+		// 被杀子进程 stderr 半截不参与锁识别、超时升引导级非裸错误）
 		if ctx.Err() == context.DeadlineExceeded {
 			warnIndexLockResidue(findIndexLockResidue(targetPath, false))
+			return "", model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
 		}
 		if lockErr := parseGitLockError(stderr.String()); lockErr != nil {
 			return "", lockErr

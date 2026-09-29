@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"workbench/model"
 	"workbench/util/testutil"
 )
 
@@ -30,9 +31,12 @@ func TestExecuteWithContext_CanceledCtxReturnsCanceledError(t *testing.T) {
 	}
 }
 
-// TestExecuteWithContext_TimeoutErrorFormatUnchanged 超时路径（非取消）行为不变：
-// 错误保持既有 stderr 摘要格式，不包装 DeadlineExceeded（验收项：超时行为零漂移）。
-func TestExecuteWithContext_TimeoutErrorFormatUnchanged(t *testing.T) {
+// TestExecuteWithContext_TimeoutReturnsAppError 超时路径收口：返回 E_GIT_TIMEOUT
+// 引导级 AppError，%w 包装 DeadlineExceeded 保留 errors.Is 穿透（供上层判定超时），
+// 不误判为取消。（2026-09-29 收口：既有裸错误格式 `git [args] failed: <stderr>`
+// 有意推翻——超时曾被退出码白名单/锁 parse 吞为冲突假态或误导性空摘要，格式变更
+// 已在 docs/spec/logging-and-errors.md 明示。）
+func TestExecuteWithContext_TimeoutReturnsAppError(t *testing.T) {
 	dir := t.TempDir()
 	testutil.RunGit(t, dir, "init")
 
@@ -44,11 +48,53 @@ func TestExecuteWithContext_TimeoutErrorFormatUnchanged(t *testing.T) {
 	if errors.Is(err, context.Canceled) {
 		t.Errorf("超时不应误判为取消: %v", err)
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("超时错误保持既有格式，不包装 DeadlineExceeded: %v", err)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("超时错误应保留 DeadlineExceeded 穿透供上层判定: %v", err)
 	}
-	if !strings.HasPrefix(err.Error(), "git [status] failed:") {
-		t.Errorf("超时错误格式应与历史一致（git [...] failed: <stderr>），实际: %v", err)
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("超时应返回 AppError，实际: %v", err)
+	}
+	if appErr.Code != model.ErrCodeGitTimeout {
+		t.Errorf("错误码应为 E_GIT_TIMEOUT，实际: %s", appErr.Code)
+	}
+}
+
+// TestExecuteWithCodesWithContext_TimeoutNotSwallowedByWhitelist 核心收口验收：
+// 超时被杀 exit 1 恰命中 conflictExitCodes={1} 时，不得被白名单吞为
+// (stdout, nil)「冲突正常返回」（曾致冲突面板假态），须返回 E_GIT_TIMEOUT 错误。
+func TestExecuteWithCodesWithContext_TimeoutNotSwallowedByWhitelist(t *testing.T) {
+	dir := t.TempDir()
+	testutil.RunGit(t, dir, "init")
+
+	g := NewGitCommandWithTimeout(1 * time.Nanosecond) // 立即超时
+	output, err := g.ExecuteWithCodesWithContext(context.Background(), dir, conflictExitCodes, "status")
+	if err == nil {
+		t.Fatalf("超时不得被白名单吞为正常返回（output %q）", output)
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeGitTimeout {
+		t.Fatalf("超时应返回 E_GIT_TIMEOUT AppError，实际: %v", err)
+	}
+}
+
+// TestCloneWithContext_TimeoutReturnsAppError 克隆超时与 run 收口对称：返回
+// E_GIT_TIMEOUT 引导级 AppError，不落入锁 parse 误判、不返回裸错误。
+func TestCloneWithContext_TimeoutReturnsAppError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	g := NewGitCommand()
+	_, err := g.CloneWithContext(ctx, "https://example.com/repo.git", t.TempDir())
+	if err == nil {
+		t.Fatal("克隆超时应返回错误")
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeGitTimeout {
+		t.Fatalf("克隆超时应返回 E_GIT_TIMEOUT AppError，实际: %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Errorf("超时不应误判为取消: %v", err)
 	}
 }
 

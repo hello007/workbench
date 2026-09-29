@@ -274,7 +274,8 @@ func TestCloneWithContext_CancelProbesTargetLock(t *testing.T) {
 }
 
 // TestExecuteWithContext_TimeoutProbesLock 超时同样杀子进程，锁存在时探测命中
-// （告警副作用经 slog 捕获断言），且超时错误格式逐字不变。
+// （告警副作用经 slog 捕获断言），且超时返回 E_GIT_TIMEOUT 引导级 AppError
+// （2026-09-29 收口：探测告警副作用保留，错误不再落入锁 parse 误判）。
 func TestExecuteWithContext_TimeoutProbesLock(t *testing.T) {
 	dir := t.TempDir()
 	testutil.RunGit(t, dir, "init")
@@ -293,6 +294,12 @@ func TestExecuteWithContext_TimeoutProbesLock(t *testing.T) {
 	}
 	if errors.Is(err, context.Canceled) {
 		t.Errorf("超时不应误判为取消: %v", err)
+	}
+	// 超时收口后即使 stderr 疑似锁特征也不得误判为 E_GIT_LOCKED（被杀子进程
+	// stderr 半截不可信，不参与锁识别）
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeGitTimeout {
+		t.Fatalf("超时应返回 E_GIT_TIMEOUT 而非锁错误，实际: %v", err)
 	}
 	// 断言用稳定片段而非完整路径：TextHandler 对含空格路径走 strconv.Quote
 	// （反斜杠翻倍），完整路径断言会随临时目录命名偶发挂（test-stability 规则面）；
