@@ -48,12 +48,26 @@ func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes 
 	if err != nil {
 		// 取消检测先于退出码白名单：Windows 下 exec.CommandContext 取消经
 		// TerminateProcess 终止进程（exit code 1），若白名单分支先行会把被取消的
-		// pull --rebase（conflictExitCodes 含 1）误报为「冲突正常返回」，取消静默丢失
+		// pull --rebase（conflictExitCodes 含 1）误报为「冲突正常返回」，取消静默丢失。
+		// 被杀子进程可能残留 .git/index.lock（commit 写窗口被杀，如 ContinueMerge 显式
+		// commit），探测仅告警不自动删（残留不能断定 stale），探测失败静默降级不影响取消返回
 		if ctx.Err() == context.Canceled {
+			warnIndexLockResidue(findIndexLockResidue(workDir, true))
 			return "", fmt.Errorf("git %v failed: %w", args, ctx.Err())
+		}
+		// 超时同样 TerminateProcess 杀子进程，对称探测锁残留（置于白名单分支前：
+		// 超时被杀 exit 1 可能命中 conflictExitCodes 走「正常返回」，探测不可丢）；
+		// 仅告警不改返回值，超时错误格式逐字不变
+		if ctx.Err() == context.DeadlineExceeded {
+			warnIndexLockResidue(findIndexLockResidue(workDir, true))
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok && acceptedExitCodes[exitErr.ExitCode()] {
 			return stdout.String(), nil
+		}
+		// 锁被占用错误识别为 AppError（E_GIT_LOCKED）透传前端 warning 引导，
+		// 未命中走既有裸错误路径（非锁残留错误行为逐字不变）
+		if lockErr := parseGitLockError(stderr.String()); lockErr != nil {
+			return "", lockErr
 		}
 		return "", fmt.Errorf("git %v failed: %s", args, stderr.String())
 	}
@@ -181,8 +195,18 @@ func (g *GitCommand) clone(ctx context.Context, url, targetPath string) (string,
 
 	err := cmd.Run()
 	if err != nil {
+		// 取消/超时杀子进程后探测目标仓 index.lock 残留（resolveUpward=false：目标可能
+		// 尚未建成仓库形态，禁向上防误报父仓的锁）；仅告警不自动删，探测失败静默降级
 		if ctx.Err() == context.Canceled {
+			warnIndexLockResidue(findIndexLockResidue(targetPath, false))
 			return "", fmt.Errorf("git clone failed: %w", ctx.Err())
+		}
+		// 超时对称探测（仅告警不改返回值）
+		if ctx.Err() == context.DeadlineExceeded {
+			warnIndexLockResidue(findIndexLockResidue(targetPath, false))
+		}
+		if lockErr := parseGitLockError(stderr.String()); lockErr != nil {
+			return "", lockErr
 		}
 		return "", fmt.Errorf("git clone failed: %s", stderr.String())
 	}

@@ -1,6 +1,8 @@
 # 已知风险留笔（本次范围外，审核发现）
 
-## 取消杀 `git commit` 的 index.lock 残留面（🟡，未处理）
+## 取消杀 `git commit` 的 index.lock 残留面（🟡 → ✅ 已处理，2026-09-29 任务 09-29-git-index-lock 收口）
+
+**处理结果**：方向 A+B 组合落地——`util/git.go` `run()`/`clone()` 取消与超时分支探测 `index.lock` 残留 `slog.Warn`（不自动删）；锁被占用 stderr（`Unable to create '<path>': File exists`）识别为 `E_GIT_LOCKED` AppError（`util.parseGitLockError`），经 Wails ErrorFormatter 与 serve 通道 `rpcFailureFromCall` 双通道透传，前端 warning 分流引导人工确认后删除。详见 `docs/spec/logging-and-errors.md` 错误码表。
 
 **发现**：ContinueMerge 的取消实现为终止 `git commit --no-edit` 子进程（Windows TerminateProcess）。commit 写窗口全程持 `.git/index.lock`，进程被杀后锁文件残留，该仓后续全部写操作报 `index.lock exists`，UI 无探测无引导。
 

@@ -8,6 +8,7 @@ export const ErrorCode = Object.freeze({
   GitInProgress: 'E_GIT_IN_PROGRESS', // 变更类 Git 操作进行中，本次拒绝（warning）
   GitNoStagedChanges: 'E_GIT_NO_STAGED_CHANGES', // 无暂存文件，AI 提交信息生成按钮禁用（warning）
   GitCancelled: 'E_GIT_CANCELLED', // Git 操作被用户取消（warning，中性提示非 error）
+  GitLocked: 'E_GIT_LOCKED', // index.lock 被占用或残留，写操作被拒（warning，引导人工确认后删除）
   DiffToolNotConfigured: 'E_DIFF_TOOL_NOT_CONFIGURED', // 外部 diff 工具未配置或配置无效，引导用户去设置（warning）
   DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED', // 外部 diff 工具启动失败（error）
   RepoConfigInvalidJson: 'E_REPO_CONFIG_INVALID_JSON', // 仓库列表配置导入：文件不是合法 JSON 或顶层结构缺失（error）
@@ -32,6 +33,7 @@ const WARNING_CODES = new Set([
   ErrorCode.GitInProgress,
   ErrorCode.GitNoStagedChanges,
   ErrorCode.GitCancelled,
+  ErrorCode.GitLocked,
   ErrorCode.DiffToolNotConfigured,
   ErrorCode.ChatInProgress,
   ErrorCode.ChatEmptyPrompt

@@ -36,6 +36,17 @@ describe('error', () => {
       expect(ElMessage.error).toHaveBeenCalledWith('推送失败: 网络超时')
       expect(ElMessage.warning).not.toHaveBeenCalled()
     })
+
+    it('GitLocked code 弹 warning 引导且不拼前缀（锁残留分流，非 error）', () => {
+      const err = {
+        code: ErrorCode.GitLocked,
+        message: 'Git 锁文件被占用：D:/repo/.git/index.lock。若确认没有其他 Git 进程正在操作该仓库（如编辑器打开的 git commit），可手动删除该文件后重试。'
+      }
+      handleError('提交失败: ', err)
+      expect(ElMessage.warning).toHaveBeenCalledTimes(1)
+      expect(ElMessage.warning).toHaveBeenCalledWith(err.message)
+      expect(ElMessage.error).not.toHaveBeenCalled()
+    })
   })
 
   describe('handleError - 兼容裸 Error 路径', () => {

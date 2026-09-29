@@ -89,6 +89,7 @@ type AppError struct {
 |---|---|---|---|
 | `ErrCodeGitInProgress` | `E_GIT_IN_PROGRESS` | Git | warning（预期拒绝，用户重试） |
 | `ErrCodeGitCancelled` | `E_GIT_CANCELLED` | Git | warning（用户取消操作，中性提示非 error；2026-09-28 取消链路新增，`ErrOperationCancelled` sentinel 承载，`mapCancelError` 统一映射） |
+| `ErrCodeGitLocked` | `E_GIT_LOCKED` | Git | warning（`.git/index.lock` 被占用或残留，写操作被拒；2026-09-29 锁残留收口新增，`util.parseGitLockError` 在 `GitCommand.run`/`clone` 失败分支识别 git stderr `Unable to create '<path>': File exists` 特征构造，message 含锁路径与人工删除引导；禁自动删——残留不能断定 stale，同仓可能有用户手动 git 进程合法持锁） |
 | `ErrCodeDiffToolNotConfigured` | `E_DIFF_TOOL_NOT_CONFIGURED` | 外部 diff 工具 | warning（引导去设置） |
 | `ErrCodeDiffToolLaunchFailed` | `E_DIFF_TOOL_LAUNCH_FAILED` | 外部 diff 工具 | error |
 | `ErrCodeRepoConfigInvalidJSON` | `E_REPO_CONFIG_INVALID_JSON` | 仓库列表配置导入导出 | error（导入文件非法 JSON/顶层结构缺失） |
