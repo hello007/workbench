@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,5 +242,109 @@ func TestBatchPull_CompletePayloadHasCancelledKey(t *testing.T) {
 	}
 	if _, has := payload["cancelled"]; !has {
 		t.Errorf("pull-complete 载荷应含 cancelled 键，实际: %v", payload)
+	}
+}
+
+// TestConflictOps_CancelRegistryClearedAfterRun 冲突类七方法取消注册表生命周期：
+// 每方法真实执行一次（成功或冲突 exit 1 接受路径），断言操作穿透到执行层（无锁拒绝）、
+// 返回后注册表已清理（CancelGitOperation 返回 false，defer unregisterCancel 无条件收口）、
+// 立即重试可重新获锁执行（验收项：取消/完成后重试可正常获锁的前提）。
+// 预先注册一个占位 ctx 验证 forward 方法自建注册覆盖与清理互不干扰。
+func TestConflictOps_CancelRegistryClearedAfterRun(t *testing.T) {
+	revParse := func(t *testing.T, dir, ref string) string {
+		t.Helper()
+		out, err := NewGitService().gitCmd.Execute(dir, "rev-parse", ref)
+		if err != nil {
+			t.Fatalf("rev-parse %s: %v", ref, err)
+		}
+		return strings.TrimSpace(out)
+	}
+
+	cases := []struct {
+		name string
+		// prepare 构造该方法的前置仓库状态（如 Continue 系需先进入冲突态），返回操作目录
+		prepare func(t *testing.T) string
+		run     func(svc *GitService, dir string) (string, error)
+	}{
+		{"Merge", func(t *testing.T) string { return testutil.SetupConflictRepo(t) },
+			func(svc *GitService, dir string) (string, error) { return svc.Merge(dir, "feature", model.MergeModeFF) }},
+		{"Rebase", func(t *testing.T) string { return testutil.SetupConflictRepo(t) },
+			func(svc *GitService, dir string) (string, error) { return svc.Rebase(dir, "feature") }},
+		{"CherryPick", func(t *testing.T) string { return testutil.SetupConflictRepo(t) },
+			func(svc *GitService, dir string) (string, error) { return svc.CherryPick(dir, revParse(t, dir, "feature")) }},
+		{"ContinueMerge", func(t *testing.T) string {
+			dir := testutil.SetupConflictRepo(t)
+			if _, err := NewGitService().Merge(dir, "feature", model.MergeModeFF); err != nil {
+				t.Fatalf("prepare 进入合并冲突态失败: %v", err)
+			}
+			return dir
+		}, func(svc *GitService, dir string) (string, error) { return svc.ContinueMerge(dir) }},
+		{"ContinueRebase", func(t *testing.T) string {
+			dir := testutil.SetupConflictRepo(t)
+			if _, err := NewGitService().Rebase(dir, "feature"); err != nil {
+				t.Fatalf("prepare 进入变基冲突态失败: %v", err)
+			}
+			return dir
+		}, func(svc *GitService, dir string) (string, error) { return svc.ContinueRebase(dir) }},
+		{"ContinueCherryPick", func(t *testing.T) string {
+			dir := testutil.SetupConflictRepo(t)
+			if _, err := NewGitService().CherryPick(dir, revParse(t, dir, "feature")); err != nil {
+				t.Fatalf("prepare 进入拣选冲突态失败: %v", err)
+			}
+			return dir
+		}, func(svc *GitService, dir string) (string, error) { return svc.ContinueCherryPick(dir) }},
+		{"SkipRebase", func(t *testing.T) string {
+			dir := testutil.SetupConflictRepo(t)
+			if _, err := NewGitService().Rebase(dir, "feature"); err != nil {
+				t.Fatalf("prepare 进入变基冲突态失败: %v", err)
+			}
+			return dir
+		}, func(svc *GitService, dir string) (string, error) { return svc.SkipRebase(dir) }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewGitService()
+			dir := tc.prepare(t)
+
+			// 占位注册：验证 forward 方法自建注册覆盖单槽后，其 defer 注销
+			// 不会误删/误触发占位（单槽覆盖回归在注册表层已有专项测试）
+			_, staleCancel := context.WithCancel(context.Background())
+			defer staleCancel()
+			svc.registerCancel(dir, staleCancel)
+
+			output, err := tc.run(svc, dir)
+			if err != nil && strings.Contains(err.Error(), "该仓库有 Git 操作进行中") {
+				t.Fatalf("操作应穿透到执行层（锁拒绝不应发生）: %v", err)
+			}
+			_ = output // 冲突 exit 1 被接受为正常返回；结果内容由 git_merge_test.go 既有用例覆盖
+
+			// 操作返回后注册表必须清空（占位条目已被执行方的单槽覆盖取走并清理）
+			if cancelled, err := svc.CancelGitOperation(dir); cancelled || err != nil {
+				t.Errorf("操作返回后注册表应已清空, got cancelled=%v err=%v", cancelled, err)
+			}
+
+			// 立即重试可重新获锁执行（锁拒绝不应发生；git 层结果不关心）
+			if _, err := tc.run(svc, dir); err != nil && strings.Contains(err.Error(), "该仓库有 Git 操作进行中") {
+				t.Errorf("重试应可正常获锁: %v", err)
+			}
+		})
+	}
+}
+
+// TestConflictOps_CancelDuringPrecheckNoSideEffect 无在途注册时取消为幂等无害
+// （本设计 TryLock 互斥拒绝不排队）：取消返回 false，不报错、不影响后续执行。
+func TestConflictOps_CancelDuringPrecheckNoSideEffect(t *testing.T) {
+	svc := NewGitService()
+	dir := testutil.SetupConflictRepo(t)
+
+	cancelled, err := svc.CancelGitOperation(dir)
+	if err != nil || cancelled {
+		t.Fatalf("无在途注册取消应幂等返回 false, got cancelled=%v err=%v", cancelled, err)
+	}
+
+	// 取消探测不干扰后续操作：merge 照常穿透执行
+	if _, err := svc.Merge(dir, "feature", model.MergeModeFF); err != nil {
+		t.Fatalf("取消探测后 merge 应正常执行: %v", err)
 	}
 }

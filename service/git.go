@@ -1544,6 +1544,8 @@ func (s *GitService) precheckMutation(repoPath string) (string, error) {
 }
 
 // Merge 合并 branch 到当前分支，mode 取 ff/no-ff/squash。前置校验通过后委托 util。
+// 可取消：CancelGitOperation(repoPath) 终止在途 git merge 子进程（仅执行步贯穿，
+// precheckMutation 快命令检查不值得取消），取消错误映射为 ErrOperationCancelled。
 func (s *GitService) Merge(repoPath, branch string, mode model.MergeMode) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1558,10 +1560,22 @@ func (s *GitService) Merge(repoPath, branch string, mode model.MergeMode) (strin
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.Merge(gitRoot, branch, string(mode))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.MergeWithContext(ctx, gitRoot, branch, string(mode))
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // Rebase 将当前分支变基到 branch 之上。前置校验通过后委托 util。
+// 可取消：CancelGitOperation(repoPath) 终止在途 git rebase 子进程（仅执行步贯穿），
+// 取消错误映射为 ErrOperationCancelled。
 func (s *GitService) Rebase(repoPath, branch string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1576,10 +1590,22 @@ func (s *GitService) Rebase(repoPath, branch string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.Rebase(gitRoot, branch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.RebaseWithContext(ctx, gitRoot, branch)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // CherryPick 将 sha 拣选到当前分支。前置校验通过后委托 util。
+// 可取消：CancelGitOperation(repoPath) 终止在途 git cherry-pick 子进程（仅执行步贯穿），
+// 取消错误映射为 ErrOperationCancelled。
 func (s *GitService) CherryPick(repoPath, sha string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1594,7 +1620,17 @@ func (s *GitService) CherryPick(repoPath, sha string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.CherryPick(gitRoot, sha)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.CherryPickWithContext(ctx, gitRoot, sha)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // GetConflictState 返回当前冲突态快照。按 merge > rebase > cherry-pick 优先级判定类型，
@@ -1668,6 +1704,8 @@ func (s *GitService) requireInProgress(repoPath string, op model.ConflictType) (
 }
 
 // ContinueMerge 合并冲突解决后提交合并（git commit --no-edit，复用 MERGE_MSG）。
+// 可取消：CancelGitOperation(repoPath) 终止在途子进程（仅执行步贯穿，
+// requireInProgress 状态检测为快命令），取消错误映射为 ErrOperationCancelled。
 func (s *GitService) ContinueMerge(repoPath string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1679,10 +1717,22 @@ func (s *GitService) ContinueMerge(repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.MergeContinue(gitRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.MergeContinueWithContext(ctx, gitRoot)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // ContinueRebase 变基冲突解决后继续。可能再次冲突。
+// 可取消：CancelGitOperation(repoPath) 终止在途子进程（仅执行步贯穿），
+// 取消错误映射为 ErrOperationCancelled。
 func (s *GitService) ContinueRebase(repoPath string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1694,10 +1744,22 @@ func (s *GitService) ContinueRebase(repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.RebaseContinue(gitRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.RebaseContinueWithContext(ctx, gitRoot)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // ContinueCherryPick 拣选冲突解决后继续。可能再次冲突。
+// 可取消：CancelGitOperation(repoPath) 终止在途子进程（仅执行步贯穿），
+// 取消错误映射为 ErrOperationCancelled。
 func (s *GitService) ContinueCherryPick(repoPath string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1709,7 +1771,17 @@ func (s *GitService) ContinueCherryPick(repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.CherryPickContinue(gitRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.CherryPickContinueWithContext(ctx, gitRoot)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // AbortMerge 中止合并，回滚到合并前状态。
@@ -1761,6 +1833,8 @@ func (s *GitService) AbortCherryPick(repoPath string) error {
 }
 
 // SkipRebase 跳过当前冲突提交继续变基（仅 rebase 有 --skip 语义，merge/cherry-pick 无）。
+// 可取消：CancelGitOperation(repoPath) 终止在途子进程（仅执行步贯穿），
+// 取消错误映射为 ErrOperationCancelled。
 func (s *GitService) SkipRebase(repoPath string) (string, error) {
 	release, err := s.tryLockRepo(repoPath)
 	if err != nil {
@@ -1772,7 +1846,17 @@ func (s *GitService) SkipRebase(repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.gitCmd.RebaseSkip(gitRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entry := s.registerCancel(repoPath, cancel)
+	defer s.unregisterCancel(repoPath, entry)
+
+	output, err := s.gitCmd.RebaseSkipWithContext(ctx, gitRoot)
+	if err != nil {
+		return "", mapCancelError(err)
+	}
+	return output, nil
 }
 
 // ===== Submodule 管理 =====

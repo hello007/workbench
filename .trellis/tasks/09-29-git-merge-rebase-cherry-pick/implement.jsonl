@@ -1,0 +1,5 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "取消错误经 mapCancelError 映射 E_GIT_CANCELLED 走前端 warning 中性分流，改动不得破坏错误码三处同步规则"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本次不新增/不改 Wails 绑定签名，须确认绑定零 diff；前端还原与 AppError 序列化契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 基线门禁，新增取消链路代码须带测试不掉覆盖率"}
+{"file": "docs/spec/test-stability.md", "reason": "取消单测用 ctx 预取消模式（无时序依赖），禁 sleep/固定端口/mtime 时序"}
+{"file": "docs/spec/perf-baseline.md", "reason": "service 层改动须过 soak 与 goleak 三档轮次"}

@@ -1618,3 +1618,36 @@ v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..
 ### Next Steps
 
 - None - task complete
+
+---
+
+## 2026-09-29 21:55 - Git 冲突类操作取消贯穿
+
+**Date**: 2026-09-29
+**Task**: merge/rebase/cherry-pick 接入取消链路（git-context 留笔扩展点落地）
+**Branch**: `master`
+
+### Summary
+
+落地 866b7a1 留笔扩展点：util 层 7 个 ctx 变体（Merge/Rebase/CherryPick + Continue/Skip 系，均走 ExecuteWithCodesWithContext + conflictExitCodes 保冲突 exit 1 接受语义；Merge 参数构造提取 mergeArgs 单点共用；Abort 三类刻意无 ctx 变体——abort 是回滚终止手段，中途取消可能留半态）；service 层七方法仅执行步贯穿取消注册表（registerCancel/unregisterCancel defer LIFO 与 Pull 模式逐字一致，precheckMutation/requireInProgress 快命令不贯穿）；前端 GitMerge.vue 执行/继续/跳过 loading 态取消入口（activeOpPath 发起时快照防切仓 + E_GIT_CANCELLED 特判 ElMessage.info 中性提示）。零签名变更、wailsjs 绑定零 diff。测试：util 表驱动预取消 7 用例 + FF 成功/冲突接受冒烟、service 表驱动七方法注册表清理+重试获锁+取消探测无副作用、前端 6 个取消用例。子 agent 审核两 nit 修复（prepare t.Fatalf + 注释口径）；🟡 index.lock 残留留笔 research/known-risks.md（既有取消机制共性面，范围外）。go test 全绿 + race + 覆盖率 service 80.2%/util 55.5% + vitest 1446 全绿。文档五处同步（路线图/API参考/CLAUDE.md v2.19/README/功能说明）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (本次) | feat(git): 冲突类操作取消贯穿（merge/rebase/cherry-pick 接入取消链路） |
+
+### Testing
+
+- [OK] go test ./... 全绿（含默认档 soak/goleak）
+- [OK] go test -race ./service/ ./util/ 全绿
+- [OK] 覆盖率 service 80.2%（≥76 门禁）/ util 55.5%（≥40 门禁）
+- [OK] vitest 68 files 1446 tests 全绿 + npm run build 通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- index.lock 残留探测/引导留笔（research/known-risks.md），待后续任务评估

@@ -145,7 +145,7 @@
 | `PullRepo` | `(dirPath, useRebase) => Promise<string>` | 拉取（可选 rebase 模式），可被 `CancelGitOperation` 取消 | 操作结果消息；用户取消返回 `已取消` |
 | `ScanAndPullRepos` | `(dirPath) => Promise<PullSummary>` | 扫描目录下仓库并批量拉取 | PullSummary |
 | `ExtractRepoName` | `(url) => Promise<string>` | 从 URL 提取仓库名 | 仓库名 |
-| `CancelGitOperation` | `(path) => Promise<boolean>` | 取消指定仓库在途 Git 操作（Pull/Clone/批量拉取单仓），终止在途 git 子进程 | 是否存在可取消的在途操作；无在途操作幂等 false |
+| `CancelGitOperation` | `(path) => Promise<boolean>` | 取消指定仓库在途 Git 操作（Pull/Clone/批量拉取单仓 + 冲突类 Merge/Rebase/CherryPick 及 Continue/Skip 七方法，Abort 三类不可取消），终止在途 git 子进程 | 是否存在可取消的在途操作；无在途操作幂等 false |
 | `CancelAllGitOperations` | `() => Promise<number>` | 取消全部在途 Git 操作（批量拉取「取消未完成」，已完成仓库保留），返回取消仓库数 | 取消仓库数 |
 | `GetGitRemoteURL` | `(path) => Promise<GitRemoteInfo>` | 获取远程 URL 与当前分支 | GitRemoteInfo |
 

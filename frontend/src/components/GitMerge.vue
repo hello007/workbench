@@ -41,6 +41,8 @@
         </el-form-item>
       </el-form>
       <div class="execute-actions">
+        <!-- 执行中显示取消入口：终止在途 git merge/rebase/cherry-pick 子进程（后端取消注册表） -->
+        <el-button v-if="executing" :loading="cancellingOp" @click="onCancelCurrentOp">取消</el-button>
         <el-button type="primary" @click="execute" :loading="executing">执行</el-button>
       </div>
       <div v-if="lastOutput" class="last-output" :title="lastOutput">{{ lastOutput }}</div>
@@ -82,6 +84,12 @@
       </div>
       <el-empty v-else description="无未解决冲突文件，可直接继续" />
       <div class="conflict-actions">
+        <!-- 继续/跳过执行中显示取消入口（同执行按钮：终止在途子进程）；中止是回滚手段不提供取消 -->
+        <el-button
+          v-if="continuing || skipping"
+          :loading="cancellingOp"
+          @click="onCancelCurrentOp"
+        >取消</el-button>
         <el-button type="primary" @click="continueOp" :loading="continuing">继续</el-button>
         <el-button
           v-if="conflictState.type === 'rebase'"
@@ -102,10 +110,10 @@ import {
   Merge, Rebase, CherryPick, GetConflictState, ResolveConflict,
   ContinueMerge, ContinueRebase, ContinueCherryPick,
   AbortMerge, AbortRebase, AbortCherryPick, SkipRebase,
-  OpenInVSCode, OpenInExternalMerge
+  OpenInVSCode, OpenInExternalMerge, CancelGitOperation
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
-import { handleError } from '../utils/error'
+import { handleError, ErrorCode } from '../utils/error'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -131,6 +139,11 @@ const resolvingFile = ref('')
 const openingMerge = ref('')
 // 最近一次操作输出（git stdout），超长截断展示
 const lastOutput = ref('')
+// 在途操作发起时的仓库路径快照：取消入口读快照而非当前 props.repoPath，
+// 防用户在操作进行中切换仓库后取消打到别的仓库（对齐 ContentPanel activePullPath 模式）
+const activeOpPath = ref('')
+// 取消请求进行中（防重复点击），操作自身 finally 收口后按钮随 loading 消失
+const cancellingOp = ref(false)
 
 const targetLabel = computed(() => {
   if (opType.value === 'cherry-pick') return '提交 SHA'
@@ -175,6 +188,7 @@ const execute = async () => {
     return
   }
   executing.value = true
+  activeOpPath.value = props.repoPath
   lastOutput.value = ''
   try {
     let output = ''
@@ -195,12 +209,38 @@ const execute = async () => {
       ElMessage.warning('存在冲突，请在冲突面板解决后继续')
     }
   } catch (error) {
-    // 冲突时后端可能以 exit 1 返回，ExecuteWithCodes 已吸收为正常返回；
-    // 此处捕获的是真错误（前置校验失败、命令异常、并发拒绝等）
-    handleGitError('操作失败: ', error)
+    if (isCancelledError(error)) {
+      // 用户取消：中性提示，非 error 误报
+      ElMessage.info('操作已取消')
+    } else {
+      // 冲突时后端可能以 exit 1 返回，ExecuteWithCodes 已吸收为正常返回；
+      // 此处捕获的是真错误（前置校验失败、命令异常、并发拒绝等）
+      handleGitError('操作失败: ', error)
+    }
     await refreshConflictState()
   } finally {
     executing.value = false
+  }
+}
+
+// isCancelledError 判断错误是否为用户取消（后端 E_GIT_CANCELLED 结构化 AppError）
+const isCancelledError = (error) => error?.code === ErrorCode.GitCancelled
+
+// onCancelCurrentOp 取消在途合并/变基/拣选操作：后端终止在途 git 子进程，
+// 操作以 E_GIT_CANCELLED 返回并经各执行函数 catch 分支中性提示。
+// 用发起时快照路径，防在途切仓取消打错仓库
+const onCancelCurrentOp = async () => {
+  if (!activeOpPath.value || cancellingOp.value) return
+  cancellingOp.value = true
+  try {
+    const cancelled = await CancelGitOperation(activeOpPath.value)
+    if (!cancelled) {
+      ElMessage.info('没有可取消的进行中操作')
+    }
+  } catch (error) {
+    ElMessage.error('取消失败: ' + (error?.message || String(error)))
+  } finally {
+    cancellingOp.value = false
   }
 }
 
@@ -247,6 +287,7 @@ const resolveFile = async (file) => {
 
 const continueOp = async () => {
   continuing.value = true
+  activeOpPath.value = props.repoPath
   lastOutput.value = ''
   try {
     const type = conflictState.value.type
@@ -264,7 +305,11 @@ const continueOp = async () => {
       ElMessage.success('冲突已解决，操作完成' + (output ? `\n${output}` : ''))
     }
   } catch (error) {
-    handleGitError('继续操作失败: ', error)
+    if (isCancelledError(error)) {
+      ElMessage.info('操作已取消')
+    } else {
+      handleGitError('继续操作失败: ', error)
+    }
     await refreshConflictState()
   } finally {
     continuing.value = false
@@ -294,6 +339,7 @@ const abortOp = async () => {
 
 const skipOp = async () => {
   skipping.value = true
+  activeOpPath.value = props.repoPath
   lastOutput.value = ''
   try {
     const output = await SkipRebase(props.repoPath)
@@ -303,7 +349,11 @@ const skipOp = async () => {
       ElMessage.success('已跳过当前提交，变基完成' + (output ? `\n${output}` : ''))
     }
   } catch (error) {
-    handleGitError('跳过失败: ', error)
+    if (isCancelledError(error)) {
+      ElMessage.info('操作已取消')
+    } else {
+      handleGitError('跳过失败: ', error)
+    }
     await refreshConflictState()
   } finally {
     skipping.value = false

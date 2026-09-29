@@ -263,6 +263,12 @@ var conflictExitCodes = map[int]bool{1: true}
 // ff 走 git 默认行为（可快进时快进），no-ff 强制合并提交，squash 压缩为单个暂存变更。
 // mode 以 string 传入而非 model.MergeMode，避免 util 层反向依赖 model，保持底层纯净。
 func (g *GitCommand) Merge(workDir, branch, mode string) (string, error) {
+	return g.ExecuteWithCodes(workDir, conflictExitCodes, mergeArgs(branch, mode)...)
+}
+
+// mergeArgs 构造 git merge 参数（含按 mode 的策略 flag），Merge 与 MergeWithContext 共用，
+// 保证两条路径参数构造单点不漂移。
+func mergeArgs(branch, mode string) []string {
 	args := []string{"merge"}
 	switch mode {
 	case "no-ff":
@@ -272,8 +278,13 @@ func (g *GitCommand) Merge(workDir, branch, mode string) (string, error) {
 	default:
 		// ff：git 默认即可快进时快进，不附加 flag
 	}
-	args = append(args, branch)
-	return g.ExecuteWithCodes(workDir, conflictExitCodes, args...)
+	return append(args, branch)
+}
+
+// MergeWithContext 合并指定分支到当前分支，外部 ctx 取消信号可贯穿终止 git merge 子进程。
+// 冲突 exit 1 接受语义与 Merge 一致（经 conflictExitCodes）。
+func (g *GitCommand) MergeWithContext(ctx context.Context, workDir, branch, mode string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, mergeArgs(branch, mode)...)
 }
 
 // Rebase 将当前分支变基到指定分支之上（git rebase <branch>）。
@@ -281,9 +292,21 @@ func (g *GitCommand) Rebase(workDir, branch string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", branch)
 }
 
+// RebaseWithContext 将当前分支变基到指定分支之上，外部 ctx 取消信号可贯穿终止 git rebase 子进程。
+// 冲突 exit 1 接受语义与 Rebase 一致（经 conflictExitCodes）。
+func (g *GitCommand) RebaseWithContext(ctx context.Context, workDir, branch string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "rebase", branch)
+}
+
 // CherryPick 将指定提交拣选到当前分支（git cherry-pick <sha>）。
 func (g *GitCommand) CherryPick(workDir, sha string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "cherry-pick", sha)
+}
+
+// CherryPickWithContext 将指定提交拣选到当前分支，外部 ctx 取消信号可贯穿终止 git cherry-pick 子进程。
+// 冲突 exit 1 接受语义与 CherryPick 一致（经 conflictExitCodes）。
+func (g *GitCommand) CherryPickWithContext(ctx context.Context, workDir, sha string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "cherry-pick", sha)
 }
 
 // PullRebase 拉取远程更新并以变基方式重放本地提交（git pull --rebase）。
@@ -302,6 +325,12 @@ func (g *GitCommand) MergeContinue(workDir string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "commit", "--no-edit")
 }
 
+// MergeContinueWithContext 合并冲突解决后提交合并，外部 ctx 取消信号可贯穿终止子进程。
+// 冲突 exit 1 接受语义与 MergeContinue 一致（经 conflictExitCodes）。
+func (g *GitCommand) MergeContinueWithContext(ctx context.Context, workDir string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "commit", "--no-edit")
+}
+
 // RebaseAbort 中止进行中的变基，回滚到变基前分支位置（git rebase --abort）。
 func (g *GitCommand) RebaseAbort(workDir string) (string, error) {
 	return g.Execute(workDir, "rebase", "--abort")
@@ -312,9 +341,21 @@ func (g *GitCommand) RebaseContinue(workDir string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", "--continue")
 }
 
+// RebaseContinueWithContext 解决冲突后继续变基，外部 ctx 取消信号可贯穿终止子进程。
+// 冲突 exit 1 接受语义与 RebaseContinue 一致（经 conflictExitCodes）。
+func (g *GitCommand) RebaseContinueWithContext(ctx context.Context, workDir string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "rebase", "--continue")
+}
+
 // RebaseSkip 跳过当前冲突提交继续变基（git rebase --skip）。
 func (g *GitCommand) RebaseSkip(workDir string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "rebase", "--skip")
+}
+
+// RebaseSkipWithContext 跳过当前冲突提交继续变基，外部 ctx 取消信号可贯穿终止子进程。
+// 冲突 exit 1 接受语义与 RebaseSkip 一致（经 conflictExitCodes）。
+func (g *GitCommand) RebaseSkipWithContext(ctx context.Context, workDir string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "rebase", "--skip")
 }
 
 // CherryPickAbort 中止进行中的拣选（git cherry-pick --abort）。
@@ -325,6 +366,12 @@ func (g *GitCommand) CherryPickAbort(workDir string) (string, error) {
 // CherryPickContinue 解决冲突后继续拣选。可能再次冲突，走 ExecuteWithCodes 接受 exit 1。
 func (g *GitCommand) CherryPickContinue(workDir string) (string, error) {
 	return g.ExecuteWithCodes(workDir, conflictExitCodes, "cherry-pick", "--continue")
+}
+
+// CherryPickContinueWithContext 解决冲突后继续拣选，外部 ctx 取消信号可贯穿终止子进程。
+// 冲突 exit 1 接受语义与 CherryPickContinue 一致（经 conflictExitCodes）。
+func (g *GitCommand) CherryPickContinueWithContext(ctx context.Context, workDir string) (string, error) {
+	return g.ExecuteWithCodesWithContext(ctx, workDir, conflictExitCodes, "cherry-pick", "--continue")
 }
 
 // ListConflictFiles 列出未解决冲突文件（git diff --name-only --diff-filter=U）。

@@ -24,7 +24,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AbortCherryPick: vi.fn(),
   SkipRebase: vi.fn(),
   OpenInVSCode: vi.fn(() => Promise.resolve(true)),
-  OpenInExternalMerge: vi.fn(() => Promise.resolve())
+  OpenInExternalMerge: vi.fn(() => Promise.resolve()),
+  CancelGitOperation: vi.fn(() => Promise.resolve(true))
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -302,6 +303,120 @@ describe('GitMerge.vue', () => {
     await flushPromises()
 
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('dirty worktree'))
+  })
+
+  it('空闲时无取消按钮，执行挂起中显示取消入口', async () => {
+    const { Merge, GetConflictState } = await import('../../../wailsjs/go/main/App')
+    GetConflictState.mockResolvedValue({ type: 'none', files: [] })
+    // 挂起：Merge 不 resolve，模拟在途慢操作
+    let resolveMerge
+    Merge.mockImplementation(() => new Promise((r) => { resolveMerge = r }))
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    expect(findBtn(wrapper, '取消', true)).toBeUndefined()
+
+    await wrapper.find('input[placeholder]').setValue('feature/x')
+    await findBtn(wrapper, '执行', true).trigger('click')
+    await flushPromises()
+
+    const cancelBtn = findBtn(wrapper, '取消', true)
+    expect(cancelBtn).toBeDefined()
+
+    resolveMerge('')
+    await flushPromises()
+    // 操作收口后取消按钮随 loading 消失
+    expect(findBtn(wrapper, '取消', true)).toBeUndefined()
+  })
+
+  it('点击取消调用 CancelGitOperation 传发起时仓库路径快照', async () => {
+    const { Merge, GetConflictState, CancelGitOperation } = await import('../../../wailsjs/go/main/App')
+    GetConflictState.mockResolvedValue({ type: 'none', files: [] })
+    let resolveMerge
+    Merge.mockImplementation(() => new Promise((r) => { resolveMerge = r }))
+    CancelGitOperation.mockResolvedValue(true)
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder]').setValue('feature/x')
+    await findBtn(wrapper, '执行', true).trigger('click')
+    await flushPromises()
+
+    await findBtn(wrapper, '取消', true).trigger('click')
+    await flushPromises()
+
+    expect(CancelGitOperation).toHaveBeenCalledWith('/repo/A')
+
+    resolveMerge('')
+    await flushPromises()
+  })
+
+  it('操作以 E_GIT_CANCELLED 拒绝时 info 中性提示，不弹 error', async () => {
+    const { Merge, GetConflictState } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    GetConflictState.mockResolvedValue({ type: 'none', files: [] })
+    Merge.mockRejectedValue({ code: 'E_GIT_CANCELLED', message: '操作已取消' })
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder]').setValue('feature/x')
+    await findBtn(wrapper, '执行', true).trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.info).toHaveBeenCalledWith('操作已取消')
+    expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+
+  it('继续操作挂起中显示取消入口且取消以快照路径调用', async () => {
+    const { GetConflictState, ContinueMerge, CancelGitOperation } = await import('../../../wailsjs/go/main/App')
+    GetConflictState.mockResolvedValue({ type: 'merge', files: ['src/a.txt'] })
+    let resolveContinue
+    ContinueMerge.mockImplementation(() => new Promise((r) => { resolveContinue = r }))
+    CancelGitOperation.mockResolvedValue(true)
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    // 点「继续」使 ContinueMerge 挂起（continuing=true），取消入口随 v-if 出现
+    await findBtn(wrapper, '继续', true).trigger('click')
+    await flushPromises()
+
+    const cancelBtn = findBtn(wrapper, '取消', true)
+    expect(cancelBtn).toBeDefined()
+    await cancelBtn.trigger('click')
+    await flushPromises()
+
+    expect(CancelGitOperation).toHaveBeenCalledWith('/repo/A')
+
+    resolveContinue('')
+    await flushPromises()
+  })
+
+  it('CancelGitOperation 返回 false 时提示无可取消操作', async () => {
+    const { Merge, GetConflictState, CancelGitOperation } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    GetConflictState.mockResolvedValue({ type: 'none', files: [] })
+    let resolveMerge
+    Merge.mockImplementation(() => new Promise((r) => { resolveMerge = r }))
+    CancelGitOperation.mockResolvedValue(false)
+
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.find('input[placeholder]').setValue('feature/x')
+    await findBtn(wrapper, '执行', true).trigger('click')
+    await flushPromises()
+
+    await findBtn(wrapper, '取消', true).trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('没有可取消'))
+
+    resolveMerge('')
+    await flushPromises()
   })
 
   it('点击"打开"调用 OpenInVSCode 拼接仓库根路径', async () => {
