@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -255,16 +255,37 @@ func TestContentSearch_MultipleDirs(t *testing.T) {
 	}
 }
 
-// cancelledCtx 返回已取消的 ctx（无 sleep、无慢命令，Start 前即命中取消分支）。
+// cancelledCtx 返回已取消的 ctx（无 sleep、无慢命令）。
 func cancelledCtx() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	return ctx, cancel
 }
 
+// writeExitOneRgStub 写恒 exit 1 的 rg stub 脚本，模拟 rg 无匹配退出码。
+// 不依赖环境真实 rg（CI 无 rg 安装步骤，真实 rg 用例曾恒 Skip 致
+// 「ctx 未超时 exit 1 → nil,nil」核心约束无守护）。
+func writeExitOneRgStub(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(t.TempDir(), "rg.bat")
+		if err := os.WriteFile(path, []byte("@exit 1\r\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	path := filepath.Join(t.TempDir(), "rg")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestSearchWithRipgrep_TimeoutReturnsSearchTimeout rg 超时被杀须返回
 // E_SEARCH_TIMEOUT 引导级错误而非 nil,nil 静默「无匹配」。预取消 ctx 下
-// cmd.Run 在 Start 前即返 ctx 错误，rg 二进制是否真实存在不影响覆盖。
+// cmd.Run 必返非 nil err：rg 存在时进程创建后被 Kill，Wait 阶段返 ctx
+// 错误；rg 缺失时 Start 前返 exec.ErrNotFound——两路径均命中 ctx.Err()
+// 判定，rg 二进制是否真实存在不影响覆盖。
 func TestSearchWithRipgrep_TimeoutReturnsSearchTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("findme\n"), 0644)
@@ -290,14 +311,10 @@ func TestSearchWithRipgrep_TimeoutReturnsSearchTimeout(t *testing.T) {
 }
 
 // TestSearchWithRipgrep_NoMatchUnchanged ctx 未超时时 exit 1 无匹配语义
-// 逐字不变：仍返回 nil, nil。依赖真实 rg，缺失则跳过。
+// 逐字不变：仍返回 nil, nil。用恒 exit 1 的 rg stub 模拟无匹配退出码，
+// CI（无 rg）也能守护该核心约束。
 func TestSearchWithRipgrep_NoMatchUnchanged(t *testing.T) {
-	rgPath, err := exec.LookPath("rg")
-	if err != nil {
-		t.Skip("ripgrep not installed, skip no-match regression")
-	}
-
-	svc := &ContentSearchService{rgAvailable: true, rgPath: rgPath}
+	svc := &ContentSearchService{rgAvailable: true, rgPath: writeExitOneRgStub(t)}
 	items, err := svc.searchWithRipgrep(
 		context.Background(),
 		t.TempDir(),
@@ -305,10 +322,33 @@ func TestSearchWithRipgrep_NoMatchUnchanged(t *testing.T) {
 		"", defaultExcludeDirs, defaultExcludeFiles, 20,
 	)
 	if err != nil {
-		t.Fatalf("无匹配不应报错, got %v", err)
+		t.Fatalf("exit 1 无匹配不应报错, got %v", err)
 	}
 	if items != nil {
 		t.Fatalf("无匹配应返回 nil, got %d items", len(items))
+	}
+}
+
+// TestContentSearch_RgFailureFallsBackToGo rg 非超时真失败（二进制不存在）
+// 且 ctx 未超时时，ContentSearch 层保持回退 searchWithGo 既有语义，结果
+// 正常返回——d8b8055 控制流重排（单行 if 改嵌套两分支）的回退分支守护。
+func TestContentSearch_RgFailureFallsBackToGo(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("findme in dir\n"), 0644)
+
+	svc := &ContentSearchService{rgAvailable: true, rgPath: "rg-not-exists-anywhere"}
+	groups, err := svc.ContentSearch(
+		context.Background(),
+		[]string{tmpDir},
+		[]string{"repo1"},
+		"findme", "", "",
+		nil, nil, 20,
+	)
+	if err != nil {
+		t.Fatalf("rg 失败应回退 Go 路径正常返回, got %v", err)
+	}
+	if len(groups) != 1 || len(groups[0].Items) != 1 {
+		t.Fatalf("回退后应返回搜索结果, got %d groups", len(groups))
 	}
 }
 

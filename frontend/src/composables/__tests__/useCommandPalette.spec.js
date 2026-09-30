@@ -7,7 +7,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ContentSearch: vi.fn(() => Promise.resolve([{ repo: 'r', results: [] }]))
 }))
 
+// element-plus 仅 mock ElMessage，断言 executeContentSearch catch 的 handleError 分流
+vi.mock('element-plus', () => ({
+  ElMessage: Object.assign(vi.fn(), { warning: vi.fn(), error: vi.fn(), success: vi.fn() })
+}))
+
 import { SearchFiles, ContentSearch } from '../../../wailsjs/go/main/App'
+import { ElMessage } from 'element-plus'
 
 describe('useCommandPalette', () => {
   let palette
@@ -156,6 +162,22 @@ describe('useCommandPalette', () => {
       await palette.executeContentSearch()
       expect(palette.contentGroups.value).toEqual([])
       expect(palette.contentSearchExecuted.value).toBe(true)
+    })
+    it('真失败（非 warning 码）弹 error 提示', async () => {
+      ContentSearch.mockRejectedValueOnce(new Error('fail'))
+      palette.input.value = ':kw'
+      await palette.executeContentSearch()
+      expect(ElMessage.error).toHaveBeenCalledWith('内容搜索失败: fail')
+    })
+    it('E_SEARCH_TIMEOUT 命中 WARNING_CODES 弹 warning 引导', async () => {
+      ContentSearch.mockRejectedValueOnce({
+        code: 'E_SEARCH_TIMEOUT',
+        message: '内容搜索超时已终止，可缩小范围后重试'
+      })
+      palette.input.value = ':kw'
+      await palette.executeContentSearch()
+      expect(ElMessage.warning).toHaveBeenCalledWith('内容搜索超时已终止，可缩小范围后重试')
+      expect(ElMessage.error).not.toHaveBeenCalled()
     })
   })
 
