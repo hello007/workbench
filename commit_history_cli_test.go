@@ -9,11 +9,14 @@ package main
 // committer date 序、非本地时区 DateTime）。
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"workbench/model"
 	"workbench/service"
@@ -424,6 +427,61 @@ func TestStreamCommitLog_StopEarly(t *testing.T) {
 	}
 	if seen != 2 {
 		t.Errorf("应在第 2 条提前终止: got %d", seen)
+	}
+}
+
+// TestStreamCommitLog_TimeoutReturnsAppError 超时收口（2026-09-30，与 util run/clone
+// 的 E_GIT_TIMEOUT 语义一致）：注入 1ns 超时（defer 还原），断言返回 E_GIT_TIMEOUT
+// 引导级 AppError（%w 保留 DeadlineExceeded 穿透），不误判为取消，且不再是裸错误
+// 「读取 git log 输出失败: read |0: file already closed」形态。1ns 时 exec 对已超时
+// ctx 在 Start 前即返回 ctx.Err()，确定性命中 Start 分支收口（读循环/Wait 分支同构
+// 判定，无独立时序路径）。
+func TestStreamCommitLog_TimeoutReturnsAppError(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "r")
+	makeCommits(t, repoPath, []commitSpec{{message: "c1", file: "a.go"}})
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		t.Fatalf("FindGitRoot: %v", err)
+	}
+
+	orig := commitLogTimeout
+	commitLogTimeout = 1 * time.Nanosecond // 立即超时，defer 还原
+	defer func() { commitLogTimeout = orig }()
+
+	err = streamCommitLog(gitRoot, commitLogArgs(0), func(c model.Commit) bool { return true })
+	if err == nil {
+		t.Fatal("超时应返回错误")
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Errorf("超时不应误判为取消: %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("超时错误应保留 DeadlineExceeded 穿透供上层判定: %v", err)
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("超时应返回 AppError，实际: %v", err)
+	}
+	if appErr.Code != model.ErrCodeGitTimeout {
+		t.Errorf("错误码应为 E_GIT_TIMEOUT，实际: %s", appErr.Code)
+	}
+	for _, bare := range []string{"读取 git log 输出失败", "git log failed"} {
+		if strings.Contains(err.Error(), bare) {
+			t.Errorf("超时不应再报裸错误形态 %q: %v", bare, err)
+		}
+	}
+}
+
+// TestStreamCommitLog_NonTimeoutErrorFormatUnchanged 非超时错误格式逐字回归：非 git
+// 目录执行 git log（exit 128），Wait 分支 ctx.Err() 判定不得误伤既有裸错误格式
+// 「git log failed: %w, stderr: %s」。
+func TestStreamCommitLog_NonTimeoutErrorFormatUnchanged(t *testing.T) {
+	err := streamCommitLog(t.TempDir(), commitLogArgs(0), func(c model.Commit) bool { return true })
+	if err == nil {
+		t.Fatal("非 git 目录应报错")
+	}
+	if !strings.HasPrefix(err.Error(), "git log failed: ") {
+		t.Errorf("非超时错误应保留既有格式前缀，实际: %v", err)
 	}
 }
 

@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-30-git-log-streamcommitlog-e-git-timeout/prd.md", "reason": "完整需求文档：三处超时判定位置、cancel 覆写时序、留笔范围、验收标准"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "d9aec46 超时收口段先例与 E_GIT_TIMEOUT 错误码三处同步规则，本任务补 streamCommitLog 覆盖句"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep 与注入驱动约束，1ns 超时注入合规依据"}

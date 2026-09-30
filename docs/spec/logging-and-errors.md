@@ -90,7 +90,7 @@ type AppError struct {
 | `ErrCodeGitInProgress` | `E_GIT_IN_PROGRESS` | Git | warning（预期拒绝，用户重试） |
 | `ErrCodeGitCancelled` | `E_GIT_CANCELLED` | Git | warning（用户取消操作，中性提示非 error；2026-09-28 取消链路新增，`ErrOperationCancelled` sentinel 承载，`mapCancelError` 统一映射） |
 | `ErrCodeGitLocked` | `E_GIT_LOCKED` | Git | warning（`.git/index.lock` 被占用或残留，写操作被拒；2026-09-29 锁残留收口新增，`util.parseGitLockError` 在 `GitCommand.run`/`clone` 失败分支识别 git stderr `Unable to create '<path>': File exists` 特征构造，message 含锁路径与人工删除引导；禁自动删——残留不能断定 stale，同仓可能有用户手动 git 进程合法持锁） |
-| `ErrCodeGitTimeout` | `E_GIT_TIMEOUT` | Git | warning（Git 操作超时被终止，用户可重试；2026-09-29 超时收口新增，`GitCommand.run`/`clone` 的 `DeadlineExceeded` 分支在锁残留告警后**立即返回** `model.WrapAppError(E_GIT_TIMEOUT, "Git 操作超时已终止，请重试", ctx.Err())`，不再落入退出码白名单与锁 parse——超时被杀 exit 1 曾被 `conflictExitCodes={1}` 吞为「冲突正常返回」致冲突面板假态，且被杀子进程 stderr 半截不可信不参与锁识别） |
+| `ErrCodeGitTimeout` | `E_GIT_TIMEOUT` | Git | warning（Git 操作超时被终止，用户可重试；2026-09-29 超时收口新增，`GitCommand.run`/`clone` 的 `DeadlineExceeded` 分支在锁残留告警后**立即返回** `model.WrapAppError(E_GIT_TIMEOUT, "Git 操作超时已终止，请重试", ctx.Err())`，不再落入退出码白名单与锁 parse——超时被杀 exit 1 曾被 `conflictExitCodes={1}` 吞为「冲突正常返回」致冲突面板假态，且被杀子进程 stderr 半截不可信不参与锁识别；2026-09-30 覆盖范围扩至主包 `streamCommitLog`（Start/读循环/Wait 三处错误出口同构判定，读循环分支超时 err 在 `finish()` 先 cancel 后 Wait 之前捕获，不依赖 cancel 时序） |
 | `ErrCodeDiffToolNotConfigured` | `E_DIFF_TOOL_NOT_CONFIGURED` | 外部 diff 工具 | warning（引导去设置） |
 | `ErrCodeDiffToolLaunchFailed` | `E_DIFF_TOOL_LAUNCH_FAILED` | 外部 diff 工具 | error |
 | `ErrCodeRepoConfigInvalidJSON` | `E_REPO_CONFIG_INVALID_JSON` | 仓库列表配置导入导出 | error（导入文件非法 JSON/顶层结构缺失） |
@@ -107,6 +107,8 @@ RPC 协议层错误码不构成 AppError（传输协议错误而非业务域错�
 **新增错误码须同步**：本表 + `frontend/src/utils/error.js` `ErrorCode` + `WARNING_CODES` + 前端 `codeMap`（如有）。
 
 **Git 超时错误格式变更（2026-09-29 收口，有意推翻）**：`GitCommand.run`/`clone` 超时（`DeadlineExceeded`）错误从此前的裸错误 `git [args] failed: <stderr>`（杀进程后 stderr 常为空，呈现为无引导的 `git [pull --rebase] failed:` 空摘要）改为 `E_GIT_TIMEOUT` 引导级 AppError。非超时失败路径（含 `parseGitLockError` 锁识别）格式逐字不变。变更动机：超时被杀子进程在 Windows 下 exit code 1 恰命中 `conflictExitCodes={1}`，白名单分支曾返回 `(stdout, nil)` 把超时误判为「冲突正常返回」，service 冲突类方法进入冲突流程后 `GetConflictState` 探不到冲突，前端冲突面板卡空白假态且超时静默丢失。
+
+**streamCommitLog 超时收口（2026-09-30 补齐）**：主包 `commit_history_cli.go` 的 `streamCommitLog`（提交历史流式采集，独立构造 git log 子进程，30s 超时与 util 缺省对齐）同步收口：Start/读循环 readErr/Wait 三处错误出口均判 `ctx.Err() == context.DeadlineExceeded`，命中返回同一 `E_GIT_TIMEOUT` AppError——此前超时杀进程后管道断，呈现为裸错误「读取 git log 输出失败: read |0: file already closed」或「git log failed: exit status ...」。与 util 分叉点：git log 只读不写 index，无 `index.lock` 残留风险，不做锁残留探测。非超时错误格式（「启动 git log 失败」「读取 git log 输出失败」「git log failed: %w, stderr: %s」）与解析错误路径逐字不变；提前终止（handle 返 false）属正常控制流返 nil 不变。留笔：service 内容搜索超时（app_search.go 60s/10s）为非 git 域不复用本码，rg 超时被杀 exit 1 现命中「无匹配」分支静默返空，待后续独立收口。
 
 ### 4.4 迁移范围
 

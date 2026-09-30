@@ -55,7 +55,8 @@ import (
 )
 
 // commitLogTimeout git log 子进程超时，与 util.GitCommand 缺省 30s 对齐。
-const commitLogTimeout = 30 * time.Second
+// var 仅为测试注入点（超时单测临时改写为 1ns 并 defer 还原），生产代码不得赋值。
+var commitLogTimeout = 30 * time.Second
 
 // rootCommitFileLimit root 提交文件列表上限（全树列举），对齐 getTreeFiles。
 const rootCommitFileLimit = 100
@@ -297,6 +298,13 @@ func truncateForLog(s string) string {
 //
 // 返回 error 仅表示真实失败（启动失败 / 解析失败 / 非提前终止的 git 退出错误）；
 // 提前终止属正常控制流，返 nil。
+//
+// 超时收口（2026-09-30，与 util run/clone 的 E_GIT_TIMEOUT 语义一致）：启动失败、
+// 读循环、Wait 三处错误出口均判 ctx.Err() == context.DeadlineExceeded，命中返回
+// E_GIT_TIMEOUT 引导级 AppError（%w 包装 DeadlineExceeded 保留 errors.Is 穿透）。
+// 此前超时杀进程后管道断，表现为裸错误「读取 git log 输出失败: read |0: file
+// already closed」或「git log failed: exit status ...」，前端无引导。
+// git log 只读不写 index，无 index.lock 残留风险，不做 util run() 的锁残留探测。
 func streamCommitLog(gitRoot string, args []string, handle func(model.Commit) bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commitLogTimeout)
 	defer cancel()
@@ -312,6 +320,11 @@ func streamCommitLog(gitRoot string, args []string, handle func(model.Commit) bo
 		return fmt.Errorf("创建 git log 管道失败: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		// ctx 已超时时 Start 前即返回 ctx.Err()（exec 对已取消 ctx 不再启动进程），
+		// 归一为超时引导级错误；非超时启动失败格式不变
+		if ctx.Err() == context.DeadlineExceeded {
+			return model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
+		}
 		return fmt.Errorf("启动 git log 失败: %w, stderr: %s", err, stderr.String())
 	}
 
@@ -341,12 +354,23 @@ func streamCommitLog(gitRoot string, args []string, handle func(model.Commit) bo
 			if readErr == io.EOF {
 				break // 历史读完（最后一条记录无尾随 0x00，随 EOF 返回）
 			}
+			// 超时 err 须在 finish() 前捕获：finish 先 cancel 后 Wait，错误判定
+			// 不依赖 cancel 时序（标准库首个 cause 胜出，超时后再 cancel 为 no-op，
+			// 但正确性不悬在该语义上）
+			err := ctx.Err()
 			finish()
+			if err == context.DeadlineExceeded {
+				return model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", err)
+			}
 			return fmt.Errorf("读取 git log 输出失败: %w", readErr)
 		}
 	}
 
 	if err := cmd.Wait(); err != nil {
+		// EOF 路径未经过 finish，cancel 未触发，ctx.Err() 仍为 DeadlineExceeded 可判
+		if ctx.Err() == context.DeadlineExceeded {
+			return model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
+		}
 		return fmt.Errorf("git log failed: %w, stderr: %s", err, stderr.String())
 	}
 	return nil

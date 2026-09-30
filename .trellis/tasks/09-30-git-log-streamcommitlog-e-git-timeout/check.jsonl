@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-30-git-log-streamcommitlog-e-git-timeout/prd.md", "reason": "验收标准与不做清单（提前终止/解析错误/非超时格式逐字不变）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对收口段补句与既有 run/clone 描述一致"}
