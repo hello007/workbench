@@ -168,6 +168,7 @@ describe('useCommandPalette', () => {
       palette.input.value = ':kw'
       await palette.executeContentSearch()
       expect(ElMessage.error).toHaveBeenCalledWith('内容搜索失败: fail')
+      expect(ElMessage.warning).not.toHaveBeenCalled()
     })
     it('E_SEARCH_TIMEOUT 命中 WARNING_CODES 弹 warning 引导', async () => {
       ContentSearch.mockRejectedValueOnce({

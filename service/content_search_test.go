@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -265,11 +266,15 @@ func cancelledCtx() (context.Context, context.CancelFunc) {
 // writeExitOneRgStub 写恒 exit 1 的 rg stub 脚本，模拟 rg 无匹配退出码。
 // 不依赖环境真实 rg（CI 无 rg 安装步骤，真实 rg 用例曾恒 Skip 致
 // 「ctx 未超时 exit 1 → nil,nil」核心约束无守护）。
+//
+// Windows 分支首行 @echo ok 供探针校验 stub 真被执行：TEMP 路径含空格时
+// cmd.exe 包装层会在空格处截断路径报 not recognized（退出码恰为 1 与
+// 无匹配同值），stub 未被执行时用例会假绿——调用方须先跑探针显式甄别。
 func writeExitOneRgStub(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		path := filepath.Join(t.TempDir(), "rg.bat")
-		if err := os.WriteFile(path, []byte("@exit 1\r\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("@echo ok\r\n@exit 1\r\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return path
@@ -281,11 +286,29 @@ func writeExitOneRgStub(t *testing.T) string {
 	return path
 }
 
+// probeRgStub 校验 stub 真被执行且退出码透传（宁红勿假绿）：执行 stub
+// 断言 stdout 含标记行且 exit 1。路径含空格等环境下 stub 未被执行时
+// 显式失败，防守护静默失效。
+func probeRgStub(t *testing.T, stubPath string) {
+	t.Helper()
+	probe := exec.Command(stubPath)
+	// exit 1 时 Output 返回 ExitError，退出码经 ProcessState 读取，err 无需消费
+	out, _ := probe.Output()
+	exitCode := 0
+	if probe.ProcessState != nil {
+		exitCode = probe.ProcessState.ExitCode()
+	}
+	if !strings.Contains(string(out), "ok") || exitCode != 1 {
+		t.Fatalf("rg stub 未按预期执行（stdout=%q exit=%d），TEMP 路径含空格等环境会使 .bat 截断失效", string(out), exitCode)
+	}
+}
+
 // TestSearchWithRipgrep_TimeoutReturnsSearchTimeout rg 超时被杀须返回
 // E_SEARCH_TIMEOUT 引导级错误而非 nil,nil 静默「无匹配」。预取消 ctx 下
-// cmd.Run 必返非 nil err：rg 存在时进程创建后被 Kill，Wait 阶段返 ctx
-// 错误；rg 缺失时 Start 前返 exec.ErrNotFound——两路径均命中 ctx.Err()
-// 判定，rg 二进制是否真实存在不影响覆盖。
+// cmd.Run 必返非 nil err：Go 1.19+ Cmd.start 在 os.StartProcess 前有显式
+// ctx.Err() 检查，Start 前直接返回 context.Canceled（进程不创建）；
+// rg 缺失时 LookPath 失败 ErrNotFound 先于 ctx 检查返回——两路径均命中
+// 生产代码 ctx.Err() 判定，rg 二进制是否真实存在不影响覆盖。
 func TestSearchWithRipgrep_TimeoutReturnsSearchTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("findme\n"), 0644)
@@ -314,7 +337,9 @@ func TestSearchWithRipgrep_TimeoutReturnsSearchTimeout(t *testing.T) {
 // 逐字不变：仍返回 nil, nil。用恒 exit 1 的 rg stub 模拟无匹配退出码，
 // CI（无 rg）也能守护该核心约束。
 func TestSearchWithRipgrep_NoMatchUnchanged(t *testing.T) {
-	svc := &ContentSearchService{rgAvailable: true, rgPath: writeExitOneRgStub(t)}
+	stubPath := writeExitOneRgStub(t)
+	probeRgStub(t, stubPath)
+	svc := &ContentSearchService{rgAvailable: true, rgPath: stubPath}
 	items, err := svc.searchWithRipgrep(
 		context.Background(),
 		t.TempDir(),
@@ -349,6 +374,12 @@ func TestContentSearch_RgFailureFallsBackToGo(t *testing.T) {
 	}
 	if len(groups) != 1 || len(groups[0].Items) != 1 {
 		t.Fatalf("回退后应返回搜索结果, got %d groups", len(groups))
+	}
+	if got := groups[0].Items[0].FilePath; got != "a.txt" {
+		t.Errorf("回退结果 FilePath 应归一化为相对路径 a.txt, got %q", got)
+	}
+	if got := groups[0].Items[0].RepoName; got != "repo1" {
+		t.Errorf("回退结果 RepoName 应补全为 repo1, got %q", got)
 	}
 }
 

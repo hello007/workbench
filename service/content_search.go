@@ -294,6 +294,15 @@ func (s *ContentSearchService) searchWithGo(
 		results = results[:maxResults]
 	}
 
+	// rg 路径输出相对 searchDir 的路径，Go 路径对齐同一语义：
+	// Walk 的 path 为绝对路径，统一相对化，否则 ContentSearch 归一化层
+	// Join(绝对路径, 绝对路径) 拼接后 Rel 失效，前端展示路径形态不一致
+	for _, r := range results {
+		if rel, err := filepath.Rel(dir, r.FilePath); err == nil && rel != "" {
+			r.FilePath = rel
+		}
+	}
+
 	return results
 }
 
