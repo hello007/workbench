@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-30-content-search-timeout-review-fixes/prd.md", "reason": "6 项修复清单与 3 项留笔边界，stub 降级条件与验收标准"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep 与 stub 注入合规依据"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "4.3 表行格式参照（补括号处）"}
