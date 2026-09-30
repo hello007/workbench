@@ -144,6 +144,11 @@
             <el-icon><Folder /></el-icon>
             {{ group.repoName }}
           </div>
+          <!-- 超时目录标志组：结果可能不完整，warning 行与超时目录对号入座（slog 不进 GUI） -->
+          <div v-if="group.timedOut" class="content-group-timeout-warning">
+            <el-icon><WarningFilled /></el-icon>
+            此目录搜索超时，结果可能不完整
+          </div>
           <div
             v-for="(item, idx) in group.items"
             :key="group.repoName + '-' + idx"
@@ -181,7 +186,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { Search, Document, Folder, Star, Loading, Close } from '@element-plus/icons-vue'
+import { Search, Document, Folder, Star, Loading, Close, WarningFilled } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { useFavoritesStore, useUiStore, useDirectoryStore } from '../store'
@@ -580,6 +585,16 @@ watch(visible, async (val) => {
   gap: 6px;
   color: var(--primary-color, #409eff) !important;
   font-weight: 500;
+}
+
+/* 超时目录标志组 warning 行：warning 语义色，小字随组标题之下 */
+.content-group-timeout-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 20px 6px;
+  color: var(--warning-color, #e6a23c);
+  font-size: 12px;
 }
 
 /* 匹配行内容 */

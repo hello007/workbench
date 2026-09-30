@@ -16,6 +16,10 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   DeleteDirectory: true,
   SetDefaultDirectory: true,
   GetFileTree: [],
+  // 内容搜索（命令面板 : / :: 前缀）：默认空结果 = 未找到匹配内容空态。
+  // 元素形状对齐 model.ContentSearchGroup（repoName/repoPath/items/timedOut），
+  // 部分超时标志组形态（timedOut: true + 空 items）由组件 spec 按需 override
+  ContentSearch: [],
   GetGitInfo: {},
   CreateDirectory: true,
   CreateFile: true,

@@ -75,10 +75,12 @@ func (s *ContentSearchService) ContentSearch(
 	}
 
 	var (
-		mu           sync.Mutex
-		groups       []*model.ContentSearchGroup
-		timeoutCount int
-		wg           sync.WaitGroup
+		mu sync.Mutex
+		// groups 正常结果组（0 命中目录不产组）；timedOutGroups 超时标志组，
+		// 独立收集避免混入 groups 破坏「全部超时」态 len(groups)==0 报错判定
+		groups         []*model.ContentSearchGroup
+		timedOutGroups []*model.ContentSearchGroup
+		wg             sync.WaitGroup
 	)
 
 	for i, dir := range dirs {
@@ -120,7 +122,11 @@ func (s *ContentSearchService) ContentSearch(
 
 			if timedOut {
 				mu.Lock()
-				timeoutCount++
+				timedOutGroups = append(timedOutGroups, &model.ContentSearchGroup{
+					RepoName: repoNames[idx],
+					RepoPath: workDir,
+					TimedOut: true,
+				})
 				mu.Unlock()
 				return
 			}
@@ -151,14 +157,39 @@ func (s *ContentSearchService) ContentSearch(
 
 	// 共享 ctx 一旦超时所有在途目录同时超时：结果为空时上报引导级错误，
 	// 已有非空结果时返回结果并告警（Wails error 返回与结果互斥，报错会丢已有结果）
-	if timeoutCount > 0 {
-		if len(groups) == 0 {
-			return nil, model.NewAppError(model.ErrCodeSearchTimeout, searchTimeoutMessage)
+	groups, err := mergeTimeoutGroups(groups, timedOutGroups)
+	if err != nil {
+		return nil, err
+	}
+	if len(timedOutGroups) > 0 {
+		names := make([]string, 0, len(timedOutGroups))
+		for _, g := range timedOutGroups {
+			names = append(names, g.RepoName)
 		}
-		Logger().Warn("content search partially timed out", "timeoutDirs", timeoutCount, "totalDirs", len(dirs))
+		Logger().Warn("content search partially timed out", "timeoutDirs", names, "totalDirs", len(dirs))
 	}
 
 	return groups, nil
+}
+
+// mergeTimeoutGroups 超时标志组聚合：存在超时目录且正常结果组为空（含全部超时，
+// 及部分目录正常完成但零命中不产组的混合形态）返 E_SEARCH_TIMEOUT 引导级错误
+//（判定条件与收口前逐字一致）；正常结果组非空时把标志组尾部合并进结果组返回，
+// 前端对 TimedOut 组渲染 warning 行感知缺口（slog 不进 GUI，仅靠日志前端零感知）。
+// 纯函数无副作用（合并走新切片拷贝），三态（无超时透传/超时且无结果报错/部分
+// 超时合并）可直测——部分超时端到端因共享 ctx 结构性不可确定性构造（ctx 一超时
+// 所有在途目录同超时）。
+func mergeTimeoutGroups(groups, timedOutGroups []*model.ContentSearchGroup) ([]*model.ContentSearchGroup, error) {
+	if len(timedOutGroups) == 0 {
+		return groups, nil
+	}
+	if len(groups) == 0 {
+		return nil, model.NewAppError(model.ErrCodeSearchTimeout, searchTimeoutMessage)
+	}
+	merged := make([]*model.ContentSearchGroup, 0, len(groups)+len(timedOutGroups))
+	merged = append(merged, groups...)
+	merged = append(merged, timedOutGroups...)
+	return merged, nil
 }
 
 // searchWithRipgrep 使用 ripgrep 搜索

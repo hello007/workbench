@@ -10,6 +10,9 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   SearchFiles: vi.fn(() => Promise.resolve([
     { name: 'main.go', path: 'src/main.go', type: 'file' }
   ])),
+  // 形状对齐 model.ContentSearchGroup（repoName/repoPath/items/timedOut），
+  // 默认空结果；部分超时标志组形态由内容搜索三态用例局部覆盖
+  ContentSearch: vi.fn(() => Promise.resolve([])),
   GetFavorites: vi.fn(() => Promise.resolve([])),
   AddFavorite: vi.fn(() => Promise.resolve('')),
   RemoveFavorite: vi.fn(() => Promise.resolve('')),
@@ -262,6 +265,52 @@ describe('CommandPalette', () => {
     expect(ss.contentQuery.fileExt).toBe('.go')
     expect(ss.contentQuery.subDir).toBe('src')
     expect(ss.contentQuery.keyword).toBe('keyword')
+  })
+
+  // ===== 内容搜索部分超时感知（timedOut 标志组三态）=====
+  // 后端部分超时返正常组+标志组（tail 合并），前端对标志组渲染 warning 行；
+  // contentGroups 经 setupState 注入驱动渲染（与 getFavIndex 用例同模式）
+  it('部分超时：标志组渲染 warning 行，正常结果不受干扰', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    ss.input = '::kw'
+    ss.contentGroups = [
+      { repoName: 'repo-ok', repoPath: 'C:/r1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] },
+      { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    const warnings = wrapper.findAll('.content-group-timeout-warning')
+    expect(warnings.length).toBe(1)
+    expect(warnings[0].text()).toContain('此目录搜索超时，结果可能不完整')
+    // 正常组结果行照常渲染，标志组空 items 不产结果行
+    const items = wrapper.findAll('.result-item')
+    expect(items.length).toBe(1)
+    expect(items[0].text()).toContain('a.txt')
+    // contentTotalItems 只计正常组 items，标志组加 0 不干扰
+    expect(ss.contentTotalItems).toBe(1)
+  })
+
+  it('无超时：正常组不渲染 warning 行', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    ss.input = '::kw'
+    ss.contentGroups = [
+      { repoName: 'repo-ok', repoPath: 'C:/r1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] }
+    ]
+    await nextTick()
+    expect(wrapper.find('.content-group-timeout-warning').exists()).toBe(false)
+    expect(wrapper.findAll('.result-item').length).toBe(1)
+  })
+
+  it('timedOut 字段缺失（旧数据形态）向后兼容不渲染 warning', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    ss.input = '::kw'
+    ss.contentGroups = [
+      { repoName: 'repo-legacy', repoPath: 'C:/r1', items: [] }
+    ]
+    await nextTick()
+    expect(wrapper.find('.content-group-timeout-warning').exists()).toBe(false)
   })
 
   // ===== 空状态分支 =====

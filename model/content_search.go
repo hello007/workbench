@@ -15,6 +15,10 @@ type ContentSearchGroup struct {
 	RepoName string                 `json:"repoName"`
 	RepoPath string                 `json:"repoPath"`
 	Items    []*ContentSearchResult `json:"items"`
+	// TimedOut 该目录搜索超时标志：true 表示此目录搜索超时被终止，Items 恒为空、
+	// 结果可能不完整（前端据此渲染 warning 行；与 E_SEARCH_TIMEOUT 全部超时报错
+	// 路径互补——部分超时返结果时前端感知缺口）
+	TimedOut bool `json:"timedOut,omitempty"`
 }
 
 // ContentSearchQuery 解析后的搜索查询参数
