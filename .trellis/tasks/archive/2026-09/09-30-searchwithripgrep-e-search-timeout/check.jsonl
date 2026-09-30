@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-30-searchwithripgrep-e-search-timeout/prd.md", "reason": "验收标准与不做清单（无匹配语义逐字不变、不动 searchWithGo 签名与匹配逻辑、禁复用 E_GIT_TIMEOUT）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 4.3 表新增行与收口段补句同既有 run/clone/streamCommitLog 描述一致"}
