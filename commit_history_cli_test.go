@@ -434,8 +434,10 @@ func TestStreamCommitLog_StopEarly(t *testing.T) {
 // 的 E_GIT_TIMEOUT 语义一致）：注入 1ns 超时（defer 还原），断言返回 E_GIT_TIMEOUT
 // 引导级 AppError（%w 保留 DeadlineExceeded 穿透），不误判为取消，且不再是裸错误
 // 「读取 git log 输出失败: read |0: file already closed」形态。1ns 时 exec 对已超时
-// ctx 在 Start 前即返回 ctx.Err()，确定性命中 Start 分支收口（读循环/Wait 分支同构
-// 判定，无独立时序路径）。
+// ctx 在 Start 前即返回 ctx.Err()，确定性命中 Start 分支收口；读循环/Wait 分支判定
+// 与其同构，但无可确定性注入的时序路径（读循环分支须真实进程读中断且恰逢超时，
+// 构造依赖时序等待），「finish 前捕获超时 err」由代码结构静态保证（err := ctx.Err()
+// 位于 finish() 之前，见 streamCommitLog）。
 func TestStreamCommitLog_TimeoutReturnsAppError(t *testing.T) {
 	repoPath := filepath.Join(t.TempDir(), "r")
 	makeCommits(t, repoPath, []commitSpec{{message: "c1", file: "a.go"}})
