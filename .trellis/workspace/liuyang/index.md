@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 105
+- **Total Sessions**: 106
 - **Last Active**: 2026-09-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1794 | Active |
+| `journal-2.md` | ~1827 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 106 | 2026-09-30 | 内容搜索超时收口 E_SEARCH_TIMEOUT | `d8b8055` | `master` |
 | 105 | 2026-09-30 | Git log 流式超时收口 streamCommitLog E_GIT_TIMEOUT | `b1d67f0`, `9136f11` | `master` |
 | 104 | 2026-09-30 | Git 超时+冲突码白名单命中语义收口（E_GIT_TIMEOUT） | `d9aec46` | `master` |
 | 103 | 2026-09-29 | Git 取消链路 index.lock 残留探测与引导收口 | `8abb17d` | `master` |

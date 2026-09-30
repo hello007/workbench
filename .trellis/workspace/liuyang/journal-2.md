@@ -1792,3 +1792,36 @@ run()/clone() DeadlineExceeded 分支锁残留告警后立即返回 E_GIT_TIMEOU
 ### Next Steps
 
 - None - task complete
+
+
+## Session 106: 内容搜索超时收口 E_SEARCH_TIMEOUT
+
+**Date**: 2026-09-30
+**Task**: 内容搜索超时收口 E_SEARCH_TIMEOUT
+**Branch**: `master`
+
+### Summary
+
+searchWithRipgrep 失败分支先判 ctx.Err() 返 E_SEARCH_TIMEOUT（rg 超时 Windows exit 1 恰命中无匹配分支静默返空）；ContentSearch rg 超时禁回退 searchWithGo、Go 路径调用后 ctx.Err() 判定对称收口（不改签名）、全部超时且结果空才报错（Wails error 与结果互斥）；前端 executeContentSearch 走 handleError 分流；错误码三处同步 + logging-and-errors.md 4.3 表/收口段 + CLAUDE.md 关键规则；预取消 ctx 注入测试，go/race/vitest 1447 全绿，子 agent 审核 0 红 0 黄 2 nit 已修
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d8b8055` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
