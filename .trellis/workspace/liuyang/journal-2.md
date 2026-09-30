@@ -1891,3 +1891,36 @@ searchWithRipgrep 失败分支先判 ctx.Err() 返 E_SEARCH_TIMEOUT（rg 超时 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 109: 内容搜索部分超时前端感知收口（TimedOut 标志组）
+
+**Date**: 2026-09-30
+**Task**: 内容搜索部分超时前端感知收口（TimedOut 标志组）
+**Branch**: `master`
+
+### Summary
+
+9e1c96c 留笔落地：ContentSearchGroup 加 TimedOut bool，goroutine 超时分支 append 独立 timedOutGroups slice（禁混入 groups 保全超时报错语义），聚合抽 mergeTimeoutGroups 纯函数四态直测（透传/全超时/部分超时/混合形态守护），slog.Warn 带目录名数组；前端签名零变更仅 models.ts 补 timedOut（wails generate 实测等价），CommandPalette.vue 渲染组级 warning 行（弃 ElMessage），wails-mock-defaults.js 补 ContentSearch:[]。部分超时端到端因共享 ctx 结构性不可构造，测面=聚合单测+组件渲染用例。两轮子 agent 审核（cavecrew-reviewer 2 nit 修：新切片拷贝防 append 别名、判定措辞改「存在超时目录且正常结果组为空」含混合形态；trellis-check 10 不变式通过）。go test 全量+race、vitest 1452、build 全绿。文档：logging-and-errors.md 补段+CLAUDE.md 去留笔。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ccccc6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
