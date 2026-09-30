@@ -1825,3 +1825,36 @@ searchWithRipgrep 失败分支先判 ctx.Err() 返 E_SEARCH_TIMEOUT（rg 超时 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 107: 内容搜索收口审核修复 6 项
+
+**Date**: 2026-09-30
+**Task**: 内容搜索收口审核修复 6 项
+**Branch**: `master`
+
+### Summary
+
+双子 agent 审核 d8b8055 发现 6 项可修 + 3 项留笔。全修：exit-1 rg stub（rg.bat/sh）替代真实 rg 依赖补 CI 守护、rg 失败回退分支用例、前端 handleError 分流断言 2 用例、4.3 表括号、注释两路径精确化、CLAUDE.md 拆独立行。service 生产代码零改动。留笔：timedOutDirs 元数据（部分超时前端零感知）、聚合分支无确定性构造、Go fallback 微秒级误丢窗（保守方向）。service+race+vitest 1449 全绿
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `91479d5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
