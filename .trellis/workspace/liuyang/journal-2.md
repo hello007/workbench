@@ -1758,3 +1758,37 @@ run()/clone() DeadlineExceeded 分支锁残留告警后立即返回 E_GIT_TIMEOU
 ### Next Steps
 
 - None - task complete
+
+
+## Session 105: Git log 流式超时收口 streamCommitLog E_GIT_TIMEOUT
+
+**Date**: 2026-09-30
+**Task**: Git log 流式超时收口 streamCommitLog E_GIT_TIMEOUT
+**Branch**: `master`
+
+### Summary
+
+主包 streamCommitLog（提交历史流式采集，30s 超时）超时收口补齐：Start/读循环/Wait 三处错误出口同构判定 DeadlineExceeded 返回 E_GIT_TIMEOUT 引导级 AppError，与 util 层 d9aec46 语义一致；此前超时杀进程后管道断报裸错误（read |0: file already closed / git log failed）无引导。commitLogTimeout const→var 测试注入点；读循环分支超时 err 在 finish()（先 cancel 后 Wait）前捕获——子 agent 审核修正初版注释错误机制断言（Go context 首个 cause 胜出，超时后再 cancel 为 no-op 不覆写，原「cancel 覆写为 Canceled」说法与标准库相反）。git log 只读无锁残留探测分叉；非超时格式与提前终止控制流逐字不变。留笔：service 内容搜索超时（60s/10s）非 git 域，rg 超时被杀 exit 1 恰命中「无匹配」分支静默返空，待独立收口。trellis-check + trellis-check 子 agent 双审通过；go test ./... + race + vitest 1447 全绿。文档同步 logging-and-errors.md + CLAUDE.md。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1d67f0` | (see git log) |
+| `9136f11` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
