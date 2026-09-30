@@ -4,10 +4,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"workbench/model"
 )
 
 func TestSearchWithGo_BasicMatch(t *testing.T) {
@@ -248,5 +252,97 @@ func TestContentSearch_MultipleDirs(t *testing.T) {
 	}
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+}
+
+// cancelledCtx 返回已取消的 ctx（无 sleep、无慢命令，Start 前即命中取消分支）。
+func cancelledCtx() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx, cancel
+}
+
+// TestSearchWithRipgrep_TimeoutReturnsSearchTimeout rg 超时被杀须返回
+// E_SEARCH_TIMEOUT 引导级错误而非 nil,nil 静默「无匹配」。预取消 ctx 下
+// cmd.Run 在 Start 前即返 ctx 错误，rg 二进制是否真实存在不影响覆盖。
+func TestSearchWithRipgrep_TimeoutReturnsSearchTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("findme\n"), 0644)
+
+	svc := &ContentSearchService{rgAvailable: true, rgPath: "rg"}
+	ctx, cancel := cancelledCtx()
+	defer cancel()
+
+	items, err := svc.searchWithRipgrep(ctx, tmpDir, "findme", "", defaultExcludeDirs, defaultExcludeFiles, 20)
+	if items != nil {
+		t.Fatalf("超时应无结果, got %d items", len(items))
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("超时应返回 AppError, got %v", err)
+	}
+	if appErr.Code != model.ErrCodeSearchTimeout {
+		t.Errorf("错误码应为 %s, got %s", model.ErrCodeSearchTimeout, appErr.Code)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("根因应穿透为 context.Canceled, got %v", err)
+	}
+}
+
+// TestSearchWithRipgrep_NoMatchUnchanged ctx 未超时时 exit 1 无匹配语义
+// 逐字不变：仍返回 nil, nil。依赖真实 rg，缺失则跳过。
+func TestSearchWithRipgrep_NoMatchUnchanged(t *testing.T) {
+	rgPath, err := exec.LookPath("rg")
+	if err != nil {
+		t.Skip("ripgrep not installed, skip no-match regression")
+	}
+
+	svc := &ContentSearchService{rgAvailable: true, rgPath: rgPath}
+	items, err := svc.searchWithRipgrep(
+		context.Background(),
+		t.TempDir(),
+		"keyword-that-never-exists",
+		"", defaultExcludeDirs, defaultExcludeFiles, 20,
+	)
+	if err != nil {
+		t.Fatalf("无匹配不应报错, got %v", err)
+	}
+	if items != nil {
+		t.Fatalf("无匹配应返回 nil, got %d items", len(items))
+	}
+}
+
+// TestContentSearch_TimeoutReturnsSearchTimeout Go 原生回退路径对称收口：
+// 已超时 ctx 下 searchWithGo 中途 SkipAll 的部分结果不可信，目录计超时；
+// 全部目录超时且结果为空时返回 E_SEARCH_TIMEOUT 而非 nil,nil。
+func TestContentSearch_TimeoutReturnsSearchTimeout(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	os.WriteFile(filepath.Join(dir1, "a.txt"), []byte("findme in dir1\n"), 0644)
+	os.WriteFile(filepath.Join(dir2, "b.txt"), []byte("findme in dir2\n"), 0644)
+
+	svc := &ContentSearchService{rgAvailable: false}
+	ctx, cancel := cancelledCtx()
+	defer cancel()
+
+	groups, err := svc.ContentSearch(
+		ctx,
+		[]string{dir1, dir2},
+		[]string{"repo1", "repo2"},
+		"findme",
+		"", "",
+		nil, nil,
+		20,
+	)
+
+	if len(groups) != 0 {
+		t.Fatalf("超时不应返回结果, got %d groups", len(groups))
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("全部目录超时应返回 AppError, got %v", err)
+	}
+	if appErr.Code != model.ErrCodeSearchTimeout {
+		t.Errorf("错误码应为 %s, got %s", model.ErrCodeSearchTimeout, appErr.Code)
 	}
 }

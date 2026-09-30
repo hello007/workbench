@@ -10,6 +10,7 @@ export const ErrorCode = Object.freeze({
   GitCancelled: 'E_GIT_CANCELLED', // Git 操作被用户取消（warning，中性提示非 error）
   GitLocked: 'E_GIT_LOCKED', // index.lock 被占用或残留，写操作被拒（warning，引导人工确认后删除）
   GitTimeout: 'E_GIT_TIMEOUT', // Git 操作超时被终止（warning，用户可重试；超时不得误判为冲突正常返回）
+  SearchTimeout: 'E_SEARCH_TIMEOUT', // 内容搜索超时被终止（warning，可缩小范围后重试；超时不得误判为无匹配）
   DiffToolNotConfigured: 'E_DIFF_TOOL_NOT_CONFIGURED', // 外部 diff 工具未配置或配置无效，引导用户去设置（warning）
   DiffToolLaunchFailed: 'E_DIFF_TOOL_LAUNCH_FAILED', // 外部 diff 工具启动失败（error）
   RepoConfigInvalidJson: 'E_REPO_CONFIG_INVALID_JSON', // 仓库列表配置导入：文件不是合法 JSON 或顶层结构缺失（error）
@@ -36,6 +37,7 @@ const WARNING_CODES = new Set([
   ErrorCode.GitCancelled,
   ErrorCode.GitLocked,
   ErrorCode.GitTimeout,
+  ErrorCode.SearchTimeout,
   ErrorCode.DiffToolNotConfigured,
   ErrorCode.ChatInProgress,
   ErrorCode.ChatEmptyPrompt

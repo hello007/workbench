@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { SearchFiles, ContentSearch } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
 
 export function useCommandPalette() {
   const visible = ref(false)
@@ -115,6 +116,8 @@ export function useCommandPalette() {
       contentGroups.value = groups || []
     } catch (e) {
       contentGroups.value = []
+      // E_SEARCH_TIMEOUT 等 warning 级错误弹引导提示，真失败弹 error（此前 catch 静默吞错）
+      handleError('内容搜索失败: ', e)
     } finally {
       contentSearching.value = false
       contentSearchExecuted.value = true

@@ -52,6 +52,9 @@ func (s *ContentSearchService) detectRipgrep() {
 	}
 }
 
+// searchTimeoutMessage 内容搜索超时统一文案（warning 引导级，前端按错误码分流展示）
+const searchTimeoutMessage = "内容搜索超时已终止，可缩小范围后重试"
+
 // ContentSearch 执行内容搜索
 func (s *ContentSearchService) ContentSearch(
 	ctx context.Context,
@@ -72,9 +75,10 @@ func (s *ContentSearchService) ContentSearch(
 	}
 
 	var (
-		mu     sync.Mutex
-		groups []*model.ContentSearchGroup
-		wg     sync.WaitGroup
+		mu           sync.Mutex
+		groups       []*model.ContentSearchGroup
+		timeoutCount int
+		wg           sync.WaitGroup
 	)
 
 	for i, dir := range dirs {
@@ -88,12 +92,37 @@ func (s *ContentSearchService) ContentSearch(
 
 			var items []*model.ContentSearchResult
 			var err error
+			usedGoFallback := false
+			timedOut := false
 
 			if s.rgAvailable {
 				items, err = s.searchWithRipgrep(ctx, searchDir, keyword, fileExt, excludeDirs, excludeFiles, maxPerRepo)
-			}
-			if !s.rgAvailable || err != nil {
+				if err != nil {
+					if ctx.Err() != nil {
+						// rg 超时被杀：已超时 ctx 下回退 searchWithGo 只会立即空返，掩盖超时，禁回退
+						timedOut = true
+					} else {
+						// rg 其他失败（如 exit 2 真错误）：保持降级原生搜索现状
+						usedGoFallback = true
+						items = s.searchWithGo(ctx, searchDir, keyword, fileExt, excludeDirs, excludeFiles, maxPerRepo)
+					}
+				}
+			} else {
+				usedGoFallback = true
 				items = s.searchWithGo(ctx, searchDir, keyword, fileExt, excludeDirs, excludeFiles, maxPerRepo)
+			}
+
+			// searchWithGo 无错误返回，ctx 被中断时 Walk 中途 SkipAll 留下的部分结果不可信，
+			// 与 rg 路径超时语义对称：丢弃并计超时（ctx 未超时时结果完整，不受影响）
+			if usedGoFallback && ctx.Err() != nil {
+				timedOut = true
+			}
+
+			if timedOut {
+				mu.Lock()
+				timeoutCount++
+				mu.Unlock()
+				return
 			}
 
 			// 补全结果中的仓库信息
@@ -119,6 +148,16 @@ func (s *ContentSearchService) ContentSearch(
 	}
 
 	wg.Wait()
+
+	// 共享 ctx 一旦超时所有在途目录同时超时：结果为空时上报引导级错误，
+	// 已有非空结果时返回结果并告警（Wails error 返回与结果互斥，报错会丢已有结果）
+	if timeoutCount > 0 {
+		if len(groups) == 0 {
+			return nil, model.NewAppError(model.ErrCodeSearchTimeout, searchTimeoutMessage)
+		}
+		Logger().Warn("content search partially timed out", "timeoutDirs", timeoutCount, "totalDirs", len(dirs))
+	}
+
 	return groups, nil
 }
 
@@ -165,6 +204,12 @@ func (s *ContentSearchService) searchWithRipgrep(
 
 	err := cmd.Run()
 	if err != nil {
+		// 超时/取消被杀先于 exit code 判定：Windows TerminateProcess exit 1 恰命中
+		// 无匹配分支、Unix signal kill exit -1 落入失败分支，两平台均须先判 ctx，
+		// 否则超时表现为「搜索无结果」静默假态
+		if ctx.Err() != nil {
+			return nil, model.WrapAppError(model.ErrCodeSearchTimeout, searchTimeoutMessage, ctx.Err())
+		}
 		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1 {
 			return nil, nil
 		}

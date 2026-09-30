@@ -55,6 +55,9 @@ const (
 	ErrCodeGitLocked          = "E_GIT_LOCKED"            // index.lock 被占用或残留，写操作被拒（warning，引导人工确认后删除，禁自动删）
 	ErrCodeGitTimeout         = "E_GIT_TIMEOUT"           // Git 操作超时被终止（warning，用户可重试；超时不得误判为冲突正常返回）
 
+	// 内容搜索域
+	ErrCodeSearchTimeout = "E_SEARCH_TIMEOUT" // 内容搜索超时被终止，结果不完整或为空（warning，用户可缩小范围后重试；超时不得误判为无匹配）
+
 	// 外部 diff 工具域
 	ErrCodeDiffToolNotConfigured = "E_DIFF_TOOL_NOT_CONFIGURED" // 未配置或配置无效（缺路径/参数模板占位符），引导用户去设置（warning）
 	ErrCodeDiffToolLaunchFailed  = "E_DIFF_TOOL_LAUNCH_FAILED"  // 可执行文件不存在或启动失败（error）
