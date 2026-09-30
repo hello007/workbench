@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 103
-- **Last Active**: 2026-09-29
+- **Total Sessions**: 104
+- **Last Active**: 2026-09-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1686 | Active |
+| `journal-2.md` | ~1760 | Active |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 104 | 2026-09-30 | Git 超时+冲突码白名单命中语义收口（E_GIT_TIMEOUT） | `d9aec46` | `master` |
 | 103 | 2026-09-29 | Git 取消链路 index.lock 残留探测与引导收口 | `8abb17d` | `master` |
 | 102 | 2026-09-28 | Git 操作取消功能 context 贯穿收口 | `866b7a1` | `master` |
 | 101 | 2026-09-28 | CHANGELOG 1.9.0 补录与文档版本 v2.17 | `6525455` | `master` |

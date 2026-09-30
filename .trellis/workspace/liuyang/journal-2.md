@@ -1725,3 +1725,36 @@ v1.9.0 发版后补录：CHANGELOG.md 增 [1.9.0] - 2026-09-28 条目（v1.8.0..
 ### Next Steps
 
 - `/trellis:finish-work` 归档任务
+
+
+## Session 104: Git 超时+冲突码白名单命中语义收口（E_GIT_TIMEOUT）
+
+**Date**: 2026-09-30
+**Task**: Git 超时+冲突码白名单命中语义收口（E_GIT_TIMEOUT）
+**Branch**: `master`
+
+### Summary
+
+run()/clone() DeadlineExceeded 分支锁残留告警后立即返回 E_GIT_TIMEOUT 引导级 AppError，修复超时被杀 exit 1 被 conflictExitCodes={1} 吞为「冲突正常返回」致冲突面板假态；三处同步错误码 + 前端 warning 分流；有意推翻既有超时裸错误格式（文档明示）；取消/锁识别/非超时冲突语义零改动；1ns timeout 单测无时序依赖，go test 全量 + race + vitest 1447 全绿，util 覆盖率 58.9% 达门禁；子 agent 审核通过（无问题）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9aec46` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
