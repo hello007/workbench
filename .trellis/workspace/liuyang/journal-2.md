@@ -1858,3 +1858,36 @@ searchWithRipgrep 失败分支先判 ctx.Err() 返 E_SEARCH_TIMEOUT（rg 超时 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 108: 搜索收口二轮审核修复 5 项
+
+**Date**: 2026-09-30
+**Task**: 搜索收口二轮审核修复 5 项
+**Branch**: `master`
+
+### Summary
+
+二轮双子 agent 审核 91479d5：stub 专项 12 组实验发现 Windows TEMP 路径含空格时 .bat 截断致用例假绿（守护失效无信号），加 @echo ok 探针显式甄别；字段断言暴露 searchWithGo 回退路径 FilePath 绝对路径既有 bug（与 rg 相对语义不一致），末尾统一相对化；注释改回预取消 Start 前真实机制（Go 1.19+ Cmd.start 显式 ctx 检查，前轮误述为 Wait 阶段）；4.3 表 93 行历史括号 + 前端对称断言。service+race+vitest 1449 全绿
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e1c96c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
