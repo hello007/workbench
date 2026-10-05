@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/logging-and-errors.md", "reason": "内容搜索超时收口链路（E_SEARCH_TIMEOUT/mergeTimeoutGroups/TimedOut 组）本任务直接承接，错误码分流与文案约束在此"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "改 App 方法/绑定须同步 wailsjs 三处（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "warning 行可点击重试的视觉规范（语义色/hover/loading 态）"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep、注入驱动等稳定性约束"}

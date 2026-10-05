@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/logging-and-errors.md", "reason": "校验 E_SEARCH_TIMEOUT 语义未变、错误码三处同步"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验绑定三处同步完整性"}
+{"file": "docs/spec/e2e-testing.md", "reason": "mock defaults 单一数据源约束（新增绑定方法须补默认值）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁基线"}
