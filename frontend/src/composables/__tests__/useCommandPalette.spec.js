@@ -4,7 +4,8 @@ import { useCommandPalette } from '../useCommandPalette'
 // wailsjs 在 frontend/wailsjs，从 src/composables/__tests__/ 解析为 ../../../wailsjs
 vi.mock('../../../wailsjs/go/main/App', () => ({
   SearchFiles: vi.fn(() => Promise.resolve([{ name: 'a.go', path: 'src/a.go', type: 'file' }])),
-  ContentSearch: vi.fn(() => Promise.resolve([{ repo: 'r', results: [] }]))
+  ContentSearch: vi.fn(() => Promise.resolve([{ repo: 'r', results: [] }])),
+  ContentSearchDirs: vi.fn(() => Promise.resolve([]))
 }))
 
 // element-plus 仅 mock ElMessage，断言 executeContentSearch catch 的 handleError 分流
@@ -12,7 +13,7 @@ vi.mock('element-plus', () => ({
   ElMessage: Object.assign(vi.fn(), { warning: vi.fn(), error: vi.fn(), success: vi.fn() })
 }))
 
-import { SearchFiles, ContentSearch } from '../../../wailsjs/go/main/App'
+import { SearchFiles, ContentSearch, ContentSearchDirs } from '../../../wailsjs/go/main/App'
 import { ElMessage } from 'element-plus'
 
 describe('useCommandPalette', () => {
@@ -179,6 +180,119 @@ describe('useCommandPalette', () => {
       await palette.executeContentSearch()
       expect(ElMessage.warning).toHaveBeenCalledWith('内容搜索超时已终止，可缩小范围后重试')
       expect(ElMessage.error).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('retryTimedOutGroup 超时目录单目录重试', () => {
+    const timeoutGroup = { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [], timedOut: true }
+
+    beforeEach(async () => {
+      // 先执行一次完整搜索建立 lastContentQuery 快照与标志组现状
+      palette.input.value = '::kw'
+      await palette.executeContentSearch()
+      palette.contentGroups.value = [
+        { repoName: 'repo-ok', repoPath: 'C:/r1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] },
+        { ...timeoutGroup }
+      ]
+      ElMessage.warning.mockClear()
+      ElMessage.error.mockClear()
+    })
+
+    it('重试成功移除标志组并原位插入结果组', async () => {
+      ContentSearchDirs.mockResolvedValueOnce([
+        { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [{ filePath: 'b.txt', lineNum: 2, lineText: 'kw' }] }
+      ])
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(ContentSearchDirs).toHaveBeenCalledWith('kw', '', '', ['C:/r2'], ['repo-timeout'])
+      expect(palette.contentGroups.value.length).toBe(2)
+      expect(palette.contentGroups.value.some(g => g.timedOut)).toBe(false)
+      expect(palette.contentGroups.value[1].items[0].filePath).toBe('b.txt')
+      expect(palette.isGroupRetrying(timeoutGroup)).toBe(false)
+    })
+
+    it('重试零命中仅移除标志组', async () => {
+      ContentSearchDirs.mockResolvedValueOnce([])
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.contentGroups.value.length).toBe(1)
+      expect(palette.contentGroups.value[0].repoPath).toBe('C:/r1')
+    })
+
+    it('重试再超时保留标志组并弹 warning 引导', async () => {
+      ContentSearchDirs.mockRejectedValueOnce({
+        code: 'E_SEARCH_TIMEOUT',
+        message: '内容搜索超时已终止，可缩小范围后重试'
+      })
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.contentGroups.value.length).toBe(2)
+      expect(palette.contentGroups.value.some(g => g.timedOut)).toBe(true)
+      expect(ElMessage.warning).toHaveBeenCalledWith('内容搜索超时已终止，可缩小范围后重试')
+      expect(palette.isGroupRetrying(timeoutGroup)).toBe(false)
+    })
+
+    it('重试中同目录重复触发被拒，loading 态期间置位', async () => {
+      let resolveRetry
+      ContentSearchDirs.mockReturnValueOnce(new Promise(r => { resolveRetry = r }))
+      const pending = palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.isGroupRetrying(timeoutGroup)).toBe(true)
+      // 重试中再次点击（组件层经 isGroupRetrying 守卫，此处验证 composable 层兜底）
+      await palette.retryTimedOutGroup({ ...timeoutGroup })
+      expect(ContentSearchDirs).toHaveBeenCalledTimes(1)
+      resolveRetry([])
+      await pending
+      expect(palette.isGroupRetrying(timeoutGroup)).toBe(false)
+    })
+
+    it('非 timedOut 组不触发重试', async () => {
+      await palette.retryTimedOutGroup({ repoName: 'repo-ok', repoPath: 'C:/r1', items: [] })
+      expect(ContentSearchDirs).not.toHaveBeenCalled()
+    })
+
+    it('重试使用发起搜索时的参数快照，不取实时 contentQuery', async () => {
+      // 用户改词后旧结果组仍在（onInput 不清 contentGroups 既有行为），重试须用快照参数
+      palette.input.value = '::changed'
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(ContentSearchDirs).toHaveBeenCalledWith('kw', '', '', ['C:/r2'], ['repo-timeout'])
+    })
+
+    it('close 清空重试中状态', async () => {
+      let resolveRetry
+      ContentSearchDirs.mockReturnValueOnce(new Promise(r => { resolveRetry = r }))
+      const pending = palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.retryingRepoPaths.value.length).toBe(1)
+      palette.close()
+      expect(palette.retryingRepoPaths.value).toEqual([])
+      resolveRetry([])
+      await pending
+    })
+
+    it('改词重搜清空旧重试态，pending 期间同目录可重新触发重试', async () => {
+      // 旧 retry pending 中用户改词重搜，retryingRepoPaths 须清空否则同目录又超时被误拒
+      let resolveOldRetry
+      ContentSearchDirs.mockReturnValueOnce(new Promise(r => { resolveOldRetry = r }))
+      const oldPending = palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.retryingRepoPaths.value.length).toBe(1)
+
+      palette.input.value = '::kw2'
+      await palette.executeContentSearch()
+      expect(palette.retryingRepoPaths.value).toEqual([])
+
+      // 旧 retry 仍未 resolve，新重试应能立即触发（不被旧态阻塞）
+      ContentSearchDirs.mockResolvedValueOnce([])
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(ContentSearchDirs).toHaveBeenLastCalledWith('kw2', '', '', ['C:/r2'], ['repo-timeout'])
+
+      resolveOldRetry([])
+      await oldPending
+    })
+
+    it('重试成功后 selectedIndex 复位避免键盘高亮错位', async () => {
+      // 用户键盘选了第二项后点 warning 行重试，splice 替换标志组后 selectedIndex 须归 0
+      palette.selectedIndex.value = 1
+      ContentSearchDirs.mockResolvedValueOnce([
+        { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [{ filePath: 'b.txt', lineNum: 2, lineText: 'kw' }] }
+      ])
+      await palette.retryTimedOutGroup(timeoutGroup)
+      expect(palette.selectedIndex.value).toBe(0)
     })
   })
 

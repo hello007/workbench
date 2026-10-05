@@ -13,6 +13,8 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   // 形状对齐 model.ContentSearchGroup（repoName/repoPath/items/timedOut），
   // 默认空结果；部分超时标志组形态由内容搜索三态用例局部覆盖
   ContentSearch: vi.fn(() => Promise.resolve([])),
+  // 超时目录单目录重试默认空结果（零命中移除标志组），交互用例局部 override
+  ContentSearchDirs: vi.fn(() => Promise.resolve([])),
   GetFavorites: vi.fn(() => Promise.resolve([])),
   AddFavorite: vi.fn(() => Promise.resolve('')),
   RemoveFavorite: vi.fn(() => Promise.resolve('')),
@@ -311,6 +313,68 @@ describe('CommandPalette', () => {
     ]
     await nextTick()
     expect(wrapper.find('.content-group-timeout-warning').exists()).toBe(false)
+  })
+
+  // ===== 超时目录 warning 行交互（单目录重试，prd Req6 组件标志组交互用例）=====
+  // composable 层已覆盖逻辑分支，此处验证交互表面：点击触发 + loading class + 防重复 + 标志组增删
+  it('点击 warning 行触发单目录重试，成功移除标志组并插入结果组', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-ok', repoPath: 'C:/r1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] },
+      { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    ContentSearchDirs.mockResolvedValueOnce([
+      { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [{ filePath: 'b.txt', lineNum: 2, lineText: 'kw' }] }
+    ])
+    await wrapper.find('.content-group-timeout-warning').trigger('click')
+    expect(ContentSearchDirs).toHaveBeenCalledWith('kw', '', '', ['C:/r2'], ['repo-timeout'])
+    await nextTick()
+    expect(wrapper.findAll('.content-group-timeout-warning').length).toBe(0)
+    expect(wrapper.findAll('.result-item').length).toBe(2)
+  })
+
+  it('重试中显示 loading 文案与 is-retrying class，重复点击不重复调用', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    let resolveRetry
+    ContentSearchDirs.mockReturnValueOnce(new Promise(r => { resolveRetry = r }))
+    await wrapper.find('.content-group-timeout-warning').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.content-group-timeout-warning').classes()).toContain('is-retrying')
+    expect(wrapper.text()).toContain('重试中')
+    await wrapper.find('.content-group-timeout-warning').trigger('click')
+    expect(ContentSearchDirs).toHaveBeenCalledTimes(1)
+    resolveRetry([])
+    await nextTick()
+  })
+
+  it('重试零命中仅移除标志组，无结果行渲染', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-timeout', repoPath: 'C:/r2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    ContentSearchDirs.mockResolvedValueOnce([])
+    await wrapper.find('.content-group-timeout-warning').trigger('click')
+    await nextTick()
+    expect(wrapper.findAll('.content-group-timeout-warning').length).toBe(0)
+    expect(wrapper.findAll('.result-item').length).toBe(0)
   })
 
   // ===== 空状态分支 =====

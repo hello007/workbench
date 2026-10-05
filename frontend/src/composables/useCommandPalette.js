@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { SearchFiles, ContentSearch } from '../../wailsjs/go/main/App'
+import { SearchFiles, ContentSearch, ContentSearchDirs } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 
 export function useCommandPalette() {
@@ -13,6 +13,11 @@ export function useCommandPalette() {
   const contentGroups = ref([])
   const contentSearching = ref(false)
   const contentSearchExecuted = ref(false)
+  // 发起搜索时的查询参数快照：超时目录重试须用与标志组同源的参数，
+  // 禁取实时 contentQuery（用户改词后旧结果组仍在，参数错位）
+  const lastContentQuery = ref({ keyword: '', fileExt: '', subDir: '' })
+  // 正在重试的超时目录 repoPath 列表（行内 loading 态 + 防同目录重复触发）
+  const retryingRepoPaths = ref([])
 
   const mode = computed(() => {
     if (input.value.startsWith('::')) return 'content-global'
@@ -68,6 +73,7 @@ export function useCommandPalette() {
     fileResults.value = []
     contentGroups.value = []
     contentSearchExecuted.value = false
+    retryingRepoPaths.value = []
   }
 
   function close() {
@@ -76,6 +82,7 @@ export function useCommandPalette() {
     fileResults.value = []
     contentGroups.value = []
     contentSearchExecuted.value = false
+    retryingRepoPaths.value = []
   }
 
   function openWithContentSearch(subDir) {
@@ -85,6 +92,7 @@ export function useCommandPalette() {
     fileResults.value = []
     contentGroups.value = []
     contentSearchExecuted.value = false
+    retryingRepoPaths.value = []
   }
 
   async function searchFiles(rootDir) {
@@ -110,6 +118,9 @@ export function useCommandPalette() {
     contentSearching.value = true
     contentGroups.value = []
     contentSearchExecuted.value = false
+    // 改词重搜清空旧重试态：旧 retry pending 期间同目录又超时会被 isGroupRetrying 误拒
+    retryingRepoPaths.value = []
+    lastContentQuery.value = { keyword, fileExt, subDir }
 
     try {
       const groups = await ContentSearch(keyword, fileExt, subDir, isGlobal)
@@ -122,6 +133,36 @@ export function useCommandPalette() {
       contentSearching.value = false
       contentSearchExecuted.value = true
     }
+  }
+
+  // 重试单个超时目录：成功移除标志组并原位插入返回组（零命中仅移除，空态兜底），
+  // 再超时（单目录零正常组命中 mergeTimeoutGroups 报错路径）保留原标志组仅弹提示
+  async function retryTimedOutGroup(group) {
+    if (!group?.timedOut || retryingRepoPaths.value.includes(group.repoPath)) return
+    const { keyword, fileExt, subDir } = lastContentQuery.value
+    if (!keyword) return
+
+    retryingRepoPaths.value = [...retryingRepoPaths.value, group.repoPath]
+    try {
+      const groups = await ContentSearchDirs(keyword, fileExt, subDir, [group.repoPath], [group.repoName])
+      const idx = contentGroups.value.findIndex(g => g.repoPath === group.repoPath)
+      if (idx >= 0) {
+        const next = contentGroups.value.slice()
+        next.splice(idx, 1, ...(groups || []))
+        contentGroups.value = next
+        // 标志组增删后 selectedIndex 数值不变但指向内容已变，复位避免键盘高亮/Enter 错位
+        resetSelection()
+      }
+    } catch (e) {
+      // 再超时等失败：标志组即「此目录超时」的现状表示，保留不动
+      handleError('内容搜索失败: ', e)
+    } finally {
+      retryingRepoPaths.value = retryingRepoPaths.value.filter(p => p !== group.repoPath)
+    }
+  }
+
+  function isGroupRetrying(group) {
+    return !!group && retryingRepoPaths.value.includes(group.repoPath)
   }
 
   function moveSelection(delta) {
@@ -145,11 +186,15 @@ export function useCommandPalette() {
     contentGroups,
     contentSearching,
     contentSearchExecuted,
+    lastContentQuery,
+    retryingRepoPaths,
     open,
     close,
     openWithContentSearch,
     searchFiles,
     executeContentSearch,
+    retryTimedOutGroup,
+    isGroupRetrying,
     moveSelection,
     resetSelection
   }

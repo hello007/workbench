@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,39 +31,10 @@ func (a *App) ContentSearch(keyword, fileExt, subDir string, searchAll bool) ([]
 		return nil, nil
 	}
 
-	// 加载设置获取排除配置
-	settings, _ := a.settingsSvc.Load()
-
-	// 确定搜索目录列表
-	var dirs []string
-	var repoNames []string
-
-	if searchAll {
-		directories, err := a.directorySvc.Load()
-		if err != nil {
-			return nil, err
-		}
-		for _, d := range directories {
-			dirs = append(dirs, d.Path)
-			repoNames = append(repoNames, d.Name)
-		}
-	} else {
-		// 仅当前选中的工作目录
-		directories, _ := a.directorySvc.Load()
-		for _, d := range directories {
-			if d.IsDefault {
-				dirs = append(dirs, d.Path)
-				repoNames = append(repoNames, d.Name)
-				break
-			}
-		}
-		// 如果没有默认目录，用第一个
-		if len(dirs) == 0 && len(directories) > 0 {
-			dirs = append(dirs, directories[0].Path)
-			repoNames = append(repoNames, directories[0].Name)
-		}
+	dirs, repoNames, err := a.resolveSearchDirs(searchAll)
+	if err != nil {
+		return nil, err
 	}
-
 	if len(dirs) == 0 {
 		return nil, nil
 	}
@@ -72,7 +44,59 @@ func (a *App) ContentSearch(keyword, fileExt, subDir string, searchAll bool) ([]
 	if searchAll {
 		timeout = 60
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	return a.searchContentInDirs(dirs, repoNames, keyword, fileExt, subDir, timeout)
+}
+
+// ContentSearchDirs 在指定工作目录列表中搜索内容（命令面板超时目录单目录重试入口）
+// dirs 与 repoNames 按下标一一对应，均来自上次搜索结果组，目录合法性由上游保证；
+// 重试目标多为 10s 内跑不完的大目录，固定 60s 给足第二次机会（与全局搜索同语义）
+func (a *App) ContentSearchDirs(keyword, fileExt, subDir string, dirs, repoNames []string) ([]*model.ContentSearchGroup, error) {
+	if keyword == "" || len(dirs) == 0 {
+		return nil, nil
+	}
+	if len(repoNames) != len(dirs) {
+		return nil, fmt.Errorf("dirs 与 repoNames 数量不一致: %d vs %d", len(dirs), len(repoNames))
+	}
+	return a.searchContentInDirs(dirs, repoNames, keyword, fileExt, subDir, 60)
+}
+
+// resolveSearchDirs 确定搜索目录列表
+func (a *App) resolveSearchDirs(searchAll bool) (dirs []string, repoNames []string, err error) {
+	if searchAll {
+		directories, loadErr := a.directorySvc.Load()
+		if loadErr != nil {
+			return nil, nil, loadErr
+		}
+		for _, d := range directories {
+			dirs = append(dirs, d.Path)
+			repoNames = append(repoNames, d.Name)
+		}
+		return dirs, repoNames, nil
+	}
+
+	// 仅当前选中的工作目录
+	directories, _ := a.directorySvc.Load()
+	for _, d := range directories {
+		if d.IsDefault {
+			dirs = append(dirs, d.Path)
+			repoNames = append(repoNames, d.Name)
+			break
+		}
+	}
+	// 如果没有默认目录，用第一个
+	if len(dirs) == 0 && len(directories) > 0 {
+		dirs = append(dirs, directories[0].Path)
+		repoNames = append(repoNames, directories[0].Name)
+	}
+	return dirs, repoNames, nil
+}
+
+// searchContentInDirs 按目录列表执行内容搜索（ContentSearch 与 ContentSearchDirs 公共出口）
+func (a *App) searchContentInDirs(dirs, repoNames []string, keyword, fileExt, subDir string, timeoutSec int) ([]*model.ContentSearchGroup, error) {
+	// 加载设置获取排除配置
+	settings, _ := a.settingsSvc.Load()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	return a.contentSearchSvc.ContentSearch(

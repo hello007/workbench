@@ -144,10 +144,24 @@
             <el-icon><Folder /></el-icon>
             {{ group.repoName }}
           </div>
-          <!-- 超时目录标志组：结果可能不完整，warning 行与超时目录对号入座（slog 不进 GUI） -->
-          <div v-if="group.timedOut" class="content-group-timeout-warning">
+          <!-- 超时目录标志组：结果可能不完整，warning 行与超时目录对号入座（slog 不进 GUI）；
+               整行可点击触发单目录重试，重试中图标转圈并禁重复触发 -->
+          <div
+            v-if="group.timedOut"
+            class="content-group-timeout-warning"
+            :class="{ 'is-retrying': isGroupRetrying(group) }"
+            @click="retryTimedOutGroup(group)"
+          >
             <el-icon><WarningFilled /></el-icon>
             此目录搜索超时，结果可能不完整
+            <span v-if="!isGroupRetrying(group)" class="retry-hint">
+              <el-icon><RefreshRight /></el-icon>
+              重试此目录
+            </span>
+            <span v-else class="retry-hint">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              重试中...
+            </span>
           </div>
           <div
             v-for="(item, idx) in group.items"
@@ -186,7 +200,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { Search, Document, Folder, Star, Loading, Close, WarningFilled } from '@element-plus/icons-vue'
+import { Search, Document, Folder, Star, Loading, Close, WarningFilled, RefreshRight } from '@element-plus/icons-vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { useFavoritesStore, useUiStore, useDirectoryStore } from '../store'
@@ -198,7 +212,7 @@ const {
   input, mode, query, selectedIndex,
   fileResults, searchLoading,
   contentQuery, contentGroups, contentSearching, contentSearchExecuted,
-  searchFiles, executeContentSearch, resetSelection
+  retryingRepoPaths, searchFiles, executeContentSearch, retryTimedOutGroup, isGroupRetrying, resetSelection
 } = useCommandPalette()
 const { getRecent } = useRecentAccess()
 const favoritesStore = useFavoritesStore()
@@ -383,6 +397,7 @@ function onClose() {
   favoriteResults.value = []
   contentGroups.value = []
   contentSearchExecuted.value = false
+  retryingRepoPaths.value = []
   resetSelection()
 }
 
@@ -587,7 +602,7 @@ watch(visible, async (val) => {
   font-weight: 500;
 }
 
-/* 超时目录标志组 warning 行：warning 语义色，小字随组标题之下 */
+/* 超时目录标志组 warning 行：warning 语义色，小字随组标题之下；整行可点击触发单目录重试 */
 .content-group-timeout-warning {
   display: flex;
   align-items: center;
@@ -595,6 +610,30 @@ watch(visible, async (val) => {
   padding: 4px 20px 6px;
   color: var(--warning-color, #e6a23c);
   font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.content-group-timeout-warning:hover,
+.content-group-timeout-warning.is-retrying {
+  background: var(--bg-tertiary, #f5f7fa);
+}
+
+.content-group-timeout-warning.is-retrying {
+  cursor: default;
+}
+
+.retry-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.content-group-timeout-warning:hover .retry-hint {
+  opacity: 1;
 }
 
 /* 匹配行内容 */

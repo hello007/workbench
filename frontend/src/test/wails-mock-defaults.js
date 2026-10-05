@@ -20,6 +20,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 元素形状对齐 model.ContentSearchGroup（repoName/repoPath/items/timedOut），
   // 部分超时标志组形态（timedOut: true + 空 items）由组件 spec 按需 override
   ContentSearch: [],
+  // 超时目录单目录重试（命令面板 warning 行点击）：默认空结果 = 重试后零命中移除标志组
+  ContentSearchDirs: [],
   GetGitInfo: {},
   CreateDirectory: true,
   CreateFile: true,

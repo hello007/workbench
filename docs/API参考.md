@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **174** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
+共 **175** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -132,7 +132,8 @@
 | 方法 | 签名 | 语义 | 返回值 |
 |---|---|---|---|
 | `SearchFiles` | `(rootDir, query, maxResults) => Promise<SearchResult[]>` | 文件名搜索 | SearchResult 数组 |
-| `ContentSearch` | `(keyword, fileExt, subDir, searchAll) => Promise<ContentSearchGroup[]>` | 文件内容搜索（按仓库分组） | ContentSearchGroup 数组 |
+| `ContentSearch` | `(keyword, fileExt, subDir, searchAll) => Promise<ContentSearchGroup[]>` | 文件内容搜索（按仓库分组，全局 60s / 单目录 10s ctx） | ContentSearchGroup 数组 |
+| `ContentSearchDirs` | `(keyword, fileExt, subDir, dirs, repoNames) => Promise<ContentSearchGroup[]>` | 指定目录列表内容搜索（命令面板超时目录单目录重试入口，固定 60s ctx 给大目录第二次机会） | ContentSearchGroup 数组 |
 
 ---
 
@@ -689,7 +690,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **SearchResult**（`name` / `path` / `type`）
 
-**ContentSearchGroup**（`repoName` / `repoPath` / `items`: ContentSearchResult[]）
+**ContentSearchGroup**（`repoName` / `repoPath` / `items`: ContentSearchResult[] / `timedOut?`: 该目录搜索超时时为 true，items 恒空，前端渲染 warning 行供单目录重试）
 
 **ShellConfig**（`type` / `executable` / `args` / `displayName`）
 
