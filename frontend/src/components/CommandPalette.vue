@@ -137,6 +137,21 @@
         </div>
       </div>
 
+      <!-- 批量重试 banner：超时目录 ≥2 或批量进行中显示，与各 warning 行的「重试此目录」分工 -->
+      <div v-if="showBatchRetryBanner" class="content-batch-retry-banner" :class="{ 'is-retrying': batchRetrying }">
+        <el-icon><WarningFilled /></el-icon>
+        <span class="batch-retry-label">{{ batchRetryLabel }}</span>
+        <button
+          class="batch-retry-btn"
+          :disabled="batchRetrying"
+          @click="retryAllTimedOutGroups()"
+        >
+          <el-icon v-if="batchRetrying" class="is-loading"><Loading /></el-icon>
+          <el-icon v-else><RefreshRight /></el-icon>
+          {{ batchRetryBtnLabel }}
+        </button>
+      </div>
+
       <!-- 内容搜索结果 -->
       <div v-if="contentGroups.length > 0" class="result-section">
         <div v-for="group in contentGroups" :key="group.repoName" class="content-group">
@@ -212,7 +227,8 @@ const {
   input, mode, query, selectedIndex,
   fileResults, searchLoading,
   contentQuery, contentGroups, contentSearching, contentSearchExecuted,
-  retryingRepoPaths, searchFiles, executeContentSearch, retryTimedOutGroup, isGroupRetrying, resetSelection
+  retryingRepoPaths, batchRetrying, batchRetryTotal, batchRetryDone, hasBatchRetried,
+  searchFiles, executeContentSearch, retryTimedOutGroup, retryAllTimedOutGroups, isGroupRetrying, resetSelection
 } = useCommandPalette()
 const { getRecent } = useRecentAccess()
 const favoritesStore = useFavoritesStore()
@@ -228,6 +244,23 @@ const visible = computed({
 })
 
 const showRecent = computed(() => mode.value === 'general' && !query.value && recentItems.value.length > 0)
+
+// 超时目录数：banner 显示条件（≥2 显示；批量进行中持续显示进度态）
+const timedOutCount = computed(() => contentGroups.value.filter(g => g.timedOut).length)
+// banner 显示条件：批量进行中或 ≥2 超时目录
+const showBatchRetryBanner = computed(() => batchRetrying.value || timedOutCount.value >= 2)
+// banner 文案：进度态显 done/total；完成态有剩余显「仍有 N 个」；初始态显「检测到 N 个」
+const batchRetryLabel = computed(() => {
+  if (batchRetrying.value) return `重试中 (${batchRetryDone.value}/${batchRetryTotal.value})...`
+  if (hasBatchRetried.value) return `仍有 ${timedOutCount.value} 个目录超时`
+  return `检测到 ${timedOutCount.value} 个目录搜索超时`
+})
+// 按钮文案：进度态空（Loading 图标占位）；完成态「重试剩余 N 个」；初始态「重试全部」
+const batchRetryBtnLabel = computed(() => {
+  if (batchRetrying.value) return ''
+  if (hasBatchRetried.value) return `重试剩余 ${timedOutCount.value} 个`
+  return '重试全部'
+})
 
 const filteredWorkDirs = computed(() => {
   if (!query.value) return directoryStore.directories || []
@@ -634,6 +667,47 @@ watch(visible, async (val) => {
 
 .content-group-timeout-warning:hover .retry-hint {
   opacity: 1;
+}
+
+/* 批量重试 banner：warning 语义色，结果区顶部聚合多超时目录重试入口；
+   进行中态按钮禁用 + Loading 图标，与各 warning 行「重试此目录」分工 */
+.content-batch-retry-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  margin-bottom: 4px;
+  background: color-mix(in srgb, var(--warning-color, #e6a23c) 12%, transparent);
+  color: var(--warning-color, #e6a23c);
+  font-size: 13px;
+}
+
+.content-batch-retry-banner .batch-retry-label {
+  flex: 1;
+}
+
+.content-batch-retry-banner .batch-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--warning-color, #e6a23c);
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--warning-color, #e6a23c);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.content-batch-retry-banner .batch-retry-btn:not(:disabled):hover {
+  background: var(--warning-color, #e6a23c);
+  color: var(--bg-primary, #fff);
+}
+
+.content-batch-retry-banner .batch-retry-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 /* 匹配行内容 */

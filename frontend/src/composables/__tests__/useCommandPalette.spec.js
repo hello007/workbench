@@ -296,6 +296,202 @@ describe('useCommandPalette', () => {
     })
   })
 
+  describe('retryAllTimedOutGroups 批量重试', () => {
+    const timeoutGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true },
+      { repoName: 'repo-t2', repoPath: 'C:/t2', items: [], timedOut: true },
+      { repoName: 'repo-t3', repoPath: 'C:/t3', items: [], timedOut: true },
+      { repoName: 'repo-t4', repoPath: 'C:/t4', items: [], timedOut: true },
+      { repoName: 'repo-t5', repoPath: 'C:/t5', items: [], timedOut: true }
+    ]
+
+    beforeEach(async () => {
+      palette.input.value = '::kw'
+      await palette.executeContentSearch()
+      palette.contentGroups.value = [...timeoutGroups]
+      ElMessage.warning.mockClear()
+      ElMessage.error.mockClear()
+    })
+
+    it('批量重试全部成功，标志组逐个原位替换为结果组', async () => {
+      timeoutGroups.forEach((g, i) => {
+        ContentSearchDirs.mockResolvedValueOnce([
+          { repoName: g.repoName, repoPath: g.repoPath, items: [{ filePath: `f${i}.txt`, lineNum: i + 1, lineText: 'kw' }] }
+        ])
+      })
+      await palette.retryAllTimedOutGroups()
+      expect(palette.contentGroups.value.length).toBe(5)
+      expect(palette.contentGroups.value.some(g => g.timedOut)).toBe(false)
+      expect(palette.contentGroups.value[0].items[0].filePath).toBe('f0.txt')
+      expect(palette.contentGroups.value[4].items[0].filePath).toBe('f4.txt')
+      expect(palette.batchRetrying.value).toBe(false)
+      expect(palette.batchRetryDone.value).toBe(5)
+      expect(palette.retryingRepoPaths.value).toEqual([])
+    })
+
+    it('批量重试部分成功部分再超时，成功替换结果组再超时保留标志组', async () => {
+      ContentSearchDirs
+        .mockResolvedValueOnce([{ repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] }])
+        .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+        .mockResolvedValueOnce([{ repoName: 'repo-t3', repoPath: 'C:/t3', items: [{ filePath: 'c.txt', lineNum: 3, lineText: 'kw' }] }])
+        .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+        .mockResolvedValueOnce([{ repoName: 'repo-t5', repoPath: 'C:/t5', items: [{ filePath: 'e.txt', lineNum: 5, lineText: 'kw' }] }])
+      await palette.retryAllTimedOutGroups()
+      const timedOutRemaining = palette.contentGroups.value.filter(g => g.timedOut)
+      expect(timedOutRemaining.length).toBe(2)
+      expect(timedOutRemaining.map(g => g.repoPath).sort()).toEqual(['C:/t2', 'C:/t4'])
+      expect(palette.batchRetrying.value).toBe(false)
+      expect(palette.batchRetryDone.value).toBe(5)
+    })
+
+    it('批量重试启动预先占用全部目标目录 retryingRepoPaths', async () => {
+      const resolvers = []
+      let callCount = 0
+      ContentSearchDirs.mockImplementation(() => {
+        callCount++
+        if (callCount <= 3) return new Promise(r => { resolvers.push(r) })
+        return Promise.resolve([])
+      })
+      const pending = palette.retryAllTimedOutGroups()
+      // 并发 3，5 目录 → 3 in-flight + 2 排队，retryingRepoPaths 预占全部 5
+      expect(palette.retryingRepoPaths.value.length).toBe(5)
+      expect(palette.batchRetrying.value).toBe(true)
+      expect(palette.batchRetryTotal.value).toBe(5)
+      expect(ContentSearchDirs).toHaveBeenCalledTimes(3)
+      // 手动点单目录重试被预占挡住
+      await palette.retryTimedOutGroup(timeoutGroups[0])
+      expect(ContentSearchDirs).toHaveBeenCalledTimes(3)
+      // resolve 第一批，第二批立即 resolve，批量完成
+      resolvers.forEach(r => r([]))
+      await pending
+      expect(palette.batchRetrying.value).toBe(false)
+    })
+
+    it('批量重试并发上限 3，最多 3 个同时 in-flight', async () => {
+      let inFlight = 0, maxInFlight = 0
+      ContentSearchDirs.mockImplementation(() => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        return new Promise(r => { setTimeout(() => { inFlight--; r([]) }, 0) })
+      })
+      await palette.retryAllTimedOutGroups()
+      expect(maxInFlight).toBe(3)
+      expect(ContentSearchDirs).toHaveBeenCalledTimes(5)
+    })
+
+    it('批量进行中改词重搜，旧请求写回被版本号守卫丢弃不污染新结果', async () => {
+      const resolvers = []
+      let callCount = 0
+      ContentSearchDirs.mockImplementation(() => {
+        callCount++
+        if (callCount <= 3) return new Promise(r => { resolvers.push(r) })
+        return Promise.resolve([])
+      })
+      const oldPending = palette.retryAllTimedOutGroups()
+      expect(palette.batchRetrying.value).toBe(true)
+
+      // 改词重搜触发版本号自增，batchRetrying 复位
+      palette.input.value = '::kw2'
+      ContentSearch.mockResolvedValueOnce([{ repoName: 'new-repo', repoPath: 'C:/new', items: [{ filePath: 'n.txt', lineNum: 1, lineText: 'kw2' }] }])
+      await palette.executeContentSearch()
+      expect(palette.batchRetrying.value).toBe(false)
+      expect(palette.retryingRepoPaths.value).toEqual([])
+      expect(palette.contentGroups.value.length).toBe(1)
+      expect(palette.contentGroups.value[0].repoPath).toBe('C:/new')
+
+      // 旧批量请求 resolve：版本不匹配，写回被丢弃，contentGroups 保持新结果
+      resolvers.forEach(r => r([{ repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'stale.txt', lineNum: 99, lineText: 'kw' }] }]))
+      await oldPending
+      expect(palette.contentGroups.value.length).toBe(1)
+      expect(palette.contentGroups.value[0].repoPath).toBe('C:/new')
+    })
+
+    it('批量进行中关闭面板，旧请求写回被版本号守卫丢弃', async () => {
+      const resolvers = []
+      let callCount = 0
+      ContentSearchDirs.mockImplementation(() => {
+        callCount++
+        if (callCount <= 3) return new Promise(r => { resolvers.push(r) })
+        return Promise.resolve([])
+      })
+      const oldPending = palette.retryAllTimedOutGroups()
+      palette.close()
+      expect(palette.batchRetrying.value).toBe(false)
+      resolvers.forEach(r => r([{ repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'stale.txt', lineNum: 99, lineText: 'kw' }] }]))
+      await oldPending
+      expect(palette.contentGroups.value).toEqual([])
+    })
+
+    it('关闭面板自增版本号终止 worker，在途 reject 被版本守卫挡住不弹 stale 提示', async () => {
+      // M1 回归守护：close 须自增 searchVersion，worker while 头部版本失效 return 不再发请求；
+      // 在途 ContentSearchDirs reject 时 retryOneDir catch 版本不匹配 return，不调 handleError 弹 stale 提示
+      const rejectors = []
+      let callCount = 0
+      ContentSearchDirs.mockImplementation(() => {
+        callCount++
+        if (callCount <= 3) return new Promise((_, reject) => { rejectors.push(reject) })
+        return Promise.resolve([])
+      })
+      const oldPending = palette.retryAllTimedOutGroups()
+      expect(callCount).toBe(3) // 3 并发 in-flight
+      palette.close()
+      // close 自增版本号：worker 终止不再发第 4+ 请求
+      rejectors.forEach(rej => rej({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' }))
+      await oldPending
+      expect(callCount).toBe(3) // worker 终止，未取第 4/5 批
+      expect(ElMessage.warning).not.toHaveBeenCalled()
+      expect(ElMessage.error).not.toHaveBeenCalled()
+    })
+
+    it('批量进行中重复触发被拒', async () => {
+      const resolvers = []
+      let callCount = 0
+      ContentSearchDirs.mockImplementation(() => {
+        callCount++
+        if (callCount <= 3) return new Promise(r => { resolvers.push(r) })
+        return Promise.resolve([])
+      })
+      const pending = palette.retryAllTimedOutGroups()
+      expect(palette.retryingRepoPaths.value.length).toBe(5)
+      await palette.retryAllTimedOutGroups()
+      expect(ContentSearchDirs).toHaveBeenCalledTimes(3) // 第二次被 retryingRepoPaths 防重复挡住
+      // resolve 让批量完成
+      resolvers.forEach(r => r([]))
+      await pending
+      expect(palette.batchRetrying.value).toBe(false)
+    })
+
+    it('timedOut 组 <2 防御性不触发批量', async () => {
+      palette.contentGroups.value = [timeoutGroups[0]]
+      await palette.retryAllTimedOutGroups()
+      expect(ContentSearchDirs).not.toHaveBeenCalled()
+      expect(palette.batchRetrying.value).toBe(false)
+    })
+
+    it('全部成功后可基于剩余超时目录发起多轮重试', async () => {
+      // 第一轮：3 成功 2 再超时
+      ContentSearchDirs
+        .mockResolvedValueOnce([{ repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] }])
+        .mockResolvedValueOnce([{ repoName: 'repo-t2', repoPath: 'C:/t2', items: [{ filePath: 'b.txt', lineNum: 2, lineText: 'kw' }] }])
+        .mockResolvedValueOnce([{ repoName: 'repo-t3', repoPath: 'C:/t3', items: [{ filePath: 'c.txt', lineNum: 3, lineText: 'kw' }] }])
+        .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+        .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+      await palette.retryAllTimedOutGroups()
+      expect(palette.contentGroups.value.filter(g => g.timedOut).length).toBe(2)
+      expect(palette.batchRetrying.value).toBe(false)
+      expect(palette.retryingRepoPaths.value).toEqual([])
+      expect(palette.hasBatchRetried.value).toBe(true) // 首轮完成有剩余 → 完成态文案
+      // 第二轮：剩余 2 目录全成功
+      ContentSearchDirs
+        .mockResolvedValueOnce([{ repoName: 'repo-t4', repoPath: 'C:/t4', items: [{ filePath: 'd.txt', lineNum: 4, lineText: 'kw' }] }])
+        .mockResolvedValueOnce([{ repoName: 'repo-t5', repoPath: 'C:/t5', items: [{ filePath: 'e.txt', lineNum: 5, lineText: 'kw' }] }])
+      await palette.retryAllTimedOutGroups()
+      expect(palette.contentGroups.value.filter(g => g.timedOut).length).toBe(0)
+      expect(palette.contentGroups.value.length).toBe(5)
+      expect(palette.hasBatchRetried.value).toBe(false) // 全成功 → banner 消失，文案复位
+    })
+  })
+
   describe('moveSelection / resetSelection', () => {
     it('下移选中索引', () => {
       palette.fileResults.value = [{}, {}, {}]

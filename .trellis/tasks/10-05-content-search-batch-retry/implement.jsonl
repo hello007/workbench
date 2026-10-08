@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定三处同步规则；本任务后端零改动不新增方法，但前端调既有 ContentSearchDirs 须确认绑定签名一致"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "内容搜索超时收口约束（E_SEARCH_TIMEOUT/ContentSearchDirs/TimedOut 标志组）；前端编排复用既有后端入口，错误分流走 handleError 既有路径，须守约束不破坏收口"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "banner 视觉规范：语义色（warning）+ 弹窗尺寸 + section-title 字重梯度 + 行内 style 禁用全迁语义类；批量重试 banner 须守视觉约定"}
+{"file": "docs/spec/e2e-testing.md", "reason": "测试规范：wails-mock-defaults.js 单一数据源 + vitest 用例构造 + 禁 waitForTimeout 靠 expect 重试；composable 单测/组件用例须守约定"}

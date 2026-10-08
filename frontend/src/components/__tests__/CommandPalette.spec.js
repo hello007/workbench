@@ -377,6 +377,103 @@ describe('CommandPalette', () => {
     expect(wrapper.findAll('.result-item').length).toBe(0)
   })
 
+  // ===== 批量重试 banner（多超时目录批量入口，prd Req1/2/3 组件交互）=====
+  it('超时目录 ≥2 显示批量重试 banner，<2 不显示', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    ss.input = '::kw'
+    ss.contentGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true }
+    ]
+    await nextTick()
+    expect(wrapper.find('.content-batch-retry-banner').exists()).toBe(false)
+
+    ss.contentGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true },
+      { repoName: 'repo-t2', repoPath: 'C:/t2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    expect(wrapper.find('.content-batch-retry-banner').exists()).toBe(true)
+    expect(wrapper.find('.content-batch-retry-banner').text()).toContain('检测到 2 个目录搜索超时')
+    expect(wrapper.find('.batch-retry-btn').text()).toContain('重试全部')
+  })
+
+  it('点击重试全部触发批量重试，全部成功 banner 消失', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true },
+      { repoName: 'repo-t2', repoPath: 'C:/t2', items: [], timedOut: true }
+    ]
+    await nextTick()
+    ContentSearchDirs.mockResolvedValue([
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] }
+    ])
+    await wrapper.find('.batch-retry-btn').trigger('click')
+    await nextTick()
+    await nextTick()
+    expect(ContentSearchDirs).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.content-batch-retry-banner').exists()).toBe(false)
+    expect(wrapper.findAll('.content-group-timeout-warning').length).toBe(0)
+  })
+
+  it('批量进行中 banner 显示进度态，按钮禁用', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true },
+      { repoName: 'repo-t2', repoPath: 'C:/t2', items: [], timedOut: true },
+      { repoName: 'repo-t3', repoPath: 'C:/t3', items: [], timedOut: true }
+    ]
+    await nextTick()
+    const resolvers = []
+    let callCount = 0
+    ContentSearchDirs.mockImplementation(() => {
+      callCount++
+      if (callCount <= 3) return new Promise(r => { resolvers.push(r) })
+      return Promise.resolve([])
+    })
+    await wrapper.find('.batch-retry-btn').trigger('click')
+    await nextTick()
+    expect(ss.batchRetrying).toBe(true)
+    expect(wrapper.find('.batch-retry-btn').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.content-batch-retry-banner').text()).toContain('重试中 (0/3)')
+    resolvers.forEach(r => r([]))
+    await new Promise(r => setTimeout(r, 0))
+    expect(ss.batchRetrying).toBe(false)
+  })
+
+  it('首轮完成有剩余：banner 文案切「仍有 N 个」+ 按钮「重试剩余 N 个」', async () => {
+    wrapper = createWrapper()
+    const ss = wrapper.vm.$.setupState
+    const { ContentSearchDirs } = await import('../../../wailsjs/go/main/App')
+    ss.input = '::kw'
+    await ss.executeContentSearch()
+    ss.contentGroups = [
+      { repoName: 'repo-t1', repoPath: 'C:/t1', items: [], timedOut: true },
+      { repoName: 'repo-t2', repoPath: 'C:/t2', items: [], timedOut: true },
+      { repoName: 'repo-t3', repoPath: 'C:/t3', items: [], timedOut: true }
+    ]
+    await nextTick()
+    // t1 成功，t2/t3 再超时
+    ContentSearchDirs
+      .mockResolvedValueOnce([{ repoName: 'repo-t1', repoPath: 'C:/t1', items: [{ filePath: 'a.txt', lineNum: 1, lineText: 'kw' }] }])
+      .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+      .mockRejectedValueOnce({ code: 'E_SEARCH_TIMEOUT', message: '内容搜索超时已终止，可缩小范围后重试' })
+    await wrapper.find('.batch-retry-btn').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(ss.batchRetrying).toBe(false)
+    expect(ss.hasBatchRetried).toBe(true)
+    expect(wrapper.find('.content-batch-retry-banner').text()).toContain('仍有 2 个目录超时')
+    expect(wrapper.find('.batch-retry-btn').text()).toContain('重试剩余 2 个')
+  })
+
   // ===== 空状态分支 =====
   it('general 模式无匹配时展示未找到匹配项', async () => {
     wrapper = createWrapper()

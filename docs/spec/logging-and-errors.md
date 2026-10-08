@@ -115,6 +115,14 @@ RPC 协议层错误码不构成 AppError（传输协议错误而非业务域错�
 
 **部分超时前端感知（2026-09-30 补齐，TimedOut 标志组）**：收口留笔「已有非空结果返结果 + slog.Warn 前端零感知」落地——`model.ContentSearchGroup` 加 `TimedOut bool`（`json:"timedOut,omitempty"`，true 时 Items 恒空）；goroutine 超时分支 append 进**独立 `timedOutGroups` slice**（禁直接混入 `groups`，否则超时且无正常结果组态 `len(groups)==0` 报错判定失效误走返结果路径）；聚合抽 `mergeTimeoutGroups` 纯函数（三态：无超时透传 / 存在超时目录且正常结果组为空时报错——判定条件与收口前逐字一致，含部分目录正常完成但零命中不产组的混合形态 / 部分超时标志组尾部合并，合并走新切片拷贝不原地扩展调用方底层数组），slog.Warn 改带超时目录名数组（原仅数量难对号）。前端零签名变更：Wails 方法签名不动，仅 `models.ts` `ContentSearchGroup` class 补 `timedOut` 字段（App.js/App.d.ts 零改动）；`CommandPalette.vue` 对标志组渲染组级 warning 行「此目录搜索超时，结果可能不完整」（持久可见、与超时目录对号入座，弃 ElMessage 3 秒消失方案）；`group.timedOut` undefined falsy 向后兼容旧数据形态。测试：部分超时端到端因共享 ctx 结构性不可确定性构造（ctx 一超时所有在途目录同超时），由 `mergeTimeoutGroups` 三态单测 + 组件级标志组渲染用例覆盖；`wails-mock-defaults.js` 补 `ContentSearch: []` 默认值。
 
+**多超时目录批量重试前端编排（2026-10-08，承接 fc5c733 单目录重试 MVP）**：单目录重试 MVP 仅 warning 行逐个点重试，多目录同时超时（全局搜索 5 大目录 3 超时）体验差。批量重试走**路径 B：前端编排 N 个单目录 `ContentSearchDirs` 调用并发 + 前端信号量 3 限流**，非一次调 `ContentSearchDirs(allDirs, allRepoNames)`——后者经 service 层 `ContentSearch` 共享 60s ctx，一目录超时全超时，不满足「每目录独立 60s ctx 互不阻塞」；路径 B 每目录独立一次后端调用 = 独立 60s ctx，service 层零改动（`mergeTimeoutGroups`/`searchWithRipgrep`/`searchWithGo` 不动），只加前端编排层。抽 `retryOneDir(group, version)` 核心函数（调 `ContentSearchDirs` + 原位 splice 替换标志组 + 版本号守卫），单目录入口 `retryTimedOutGroup` 与批量入口 `retryAllTimedOutGroups` 共用。
+
+**搜索版本号守卫**：`searchVersion` ref，`executeContentSearch`/`open`/`close`/`openWithContentSearch` 自增（与 `retryingRepoPaths` 清空 + `resetBatchRetry` 同步）。批量编排闭包捕获起始版本号 `version`，`retryOneDir` 在 `await ContentSearchDirs` 写回前比对 `version !== searchVersion.value` 丢弃结果（防改词重搜/关闭面板后旧请求污染新 `contentGroups`）；worker `while` 循环开头版本失效提前 `return` 终止（防版本失效后继续 `cursor++` 取下一批调 `ContentSearchDirs` 永挂 pending）；`finally` 内版本失效时不更新 `retryingRepoPaths`/`batchRetryDone`（保留 `batchRetrying` 复位由 `executeContentSearch` 的 `resetBatchRetry` 兜底）。单目录重试 `retryTimedOutGroup` 内部改调 `retryOneDir` 顺带获版本守卫（既有改词重搜污染漏洞顺带修，行为增强非破坏）。
+
+**批量启动预占 `retryingRepoPaths`**：`retryAllTimedOutGroups` 启动时一次性加入全部目标目录 `repoPath`——排队中目录 warning 行也显「重试中...」（`isGroupRetrying` 天然覆盖批量态），且防用户手动点单目录重试与批量编排竞态（`retryTimedOutGroup` 的 `retryingRepoPaths.includes` 检查挡住）。`batchRetrying`/`batchRetryTotal`/`batchRetryDone` ref 驱动 banner 进度态（进行中「重试中 (done/total)...」+ 按钮 disabled + Loading 图标；静态「检测到 N 个目录搜索超时」+「重试全部」；完成后全成功 banner 消失，有剩余转「重试剩余」可再轮重试）。banner 显示条件 `batchRetrying || timedOutCount >= 2`（<2 走单目录 warning 行避免冗余）。
+
+**测试**：composable 9 用例（全部成功原位替换 / 部分成功部分再超时分流 / 预占 retryingRepoPaths 防手动重复 / 并发上限 3 maxInFlight / 改词重搜版本守卫丢弃 / 关闭面板版本守卫丢弃 / 重复触发被拒 / <2 防御 / 多轮重试）+ 组件 3 用例（banner ≥2 显示与 <2 不显示 / 点击触发全部成功 banner 消失 / 进行中进度态按钮禁用）。mock 构造：前 3 次 `ContentSearchDirs` 返回 pending resolver 捕获中间态，第 4+ 次返 `Promise.resolve([])` 防第二批 worker 永挂。
+
 ### 4.4 迁移范围
 
 - **已迁移**：git 域 `ErrOperationInProgress`（`*model.AppError`，`errors.As` 识别 + 文案兜底）

@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验后端零改动约束：本任务不动 app_search.go/ContentSearchDirs 签名，wailsjs 绑定三处无新增"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "校验内容搜索超时收口约束未破坏：service 层 mergeTimeoutGroups/searchWithRipgrep/searchWithGo 零改动，前端错误分流走 handleError 既有路径"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "校验 banner 视觉规范：warning 语义色 + 语义类 + 字重梯度，无行内 style"}
+{"file": "docs/spec/e2e-testing.md", "reason": "校验测试规范：wails-mock-defaults.js 单一数据源 + vitest 用例无 waitForTimeout + expect 自动重试"}
