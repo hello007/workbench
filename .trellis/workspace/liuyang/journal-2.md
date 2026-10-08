@@ -1924,3 +1924,36 @@ searchWithRipgrep 失败分支先判 ctx.Err() 返 E_SEARCH_TIMEOUT（rg 超时 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 110: 内容搜索多超时目录批量重试
+
+**Date**: 2026-10-08
+**Task**: 内容搜索多超时目录批量重试
+**Branch**: `master`
+
+### Summary
+
+承接 fc5c733 单目录重试 MVP 扩展批量重试。路径 B 前端编排 N 个单目录 ContentSearchDirs 调用并发 + 信号量 3 限流（每目录独立 60s ctx 互不阻塞，service 层零改动）。抽 retryOneDir 核心函数单目录与批量共用。searchVersion 版本号守卫防改词重搜/关闭面板在途请求污染新结果（executeContentSearch/open/close/openWithContentSearch 自增，retryOneDir await 写回前比对丢弃，worker while 头部版本失效终止）。批量启动预占 retryingRepoPaths 排队中 warning 行也显态 + 防手动重复。hasBatchRetried ref 驱动 banner 完成态文案分流。trellis-check sub-agent 审核：修 1 MAJOR（close/open/openWithContentSearch 未自增 searchVersion 致 close-during-batch worker 不终止 + stale 提示）+ 3 minor（banner 未定义令牌改 color-mix / 完成态文案 / 单目录 finally 版本守卫不对称）+ 补 2 回归测试。前端 1478 全绿 build 通过，后端零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `94161d9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
