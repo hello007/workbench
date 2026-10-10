@@ -47,3 +47,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 112: 工具箱图标替换为内联 SVG 组件
+
+**Date**: 2026-10-10
+**Task**: 工具箱图标替换为内联 SVG 组件
+**Branch**: `master`
+
+### Summary
+
+sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 ToolboxIcon.vue（内联 SVG + fill=currentColor），三态由容器文字色自动驱动。原需求的 工具箱.png 为纯黑单色，在深色 sidebar（--sidebar-bg #0f172a）上零像素可见且不吃 currentColor，故改 SVG。规范沉淀：frontend-visual-conventions.md 新增「图标着色与接入」章节 + 正反示例；CLAUDE.md 关键规则表追加子句；docs/常见问题.md 新增「wails dev 后任务栏图标变通用图标」条目（根因=Windows 图标缓存陈旧，非代码问题）。验证：1497 用例通过、覆盖率四指标 ≥70%、build 通过、headless 三态渲染实测。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b0b9fec` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
