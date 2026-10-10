@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉规范：配色按语义选色、图标与字体族约定、ActivityBar 48px 活动栏的视觉约束，指导新图标组件的形态与接入方式"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌：--sidebar-bg/--sidebar-text/--sidebar-text-hover/--sidebar-active-text 的定义与亮暗色分档，是 currentColor 三态可见性判断的依据"}
