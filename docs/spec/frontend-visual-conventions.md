@@ -15,6 +15,7 @@
 - 新增卡片、表格、异常提示等展示型组件
 - 调整弹窗尺寸或响应式断点
 - 新增 hover/active 交互态视觉
+- 新增/替换图标（尤其深色容器内的图标）
 
 ## 规范
 
@@ -172,6 +173,20 @@ kbd {
 
 参照 SettingsPanel `.shortcut-keys kbd`、`style.css` `.context-menu-shortcut`。
 
+#### 图标着色与接入
+
+深色容器（ActivityBar 活动栏 `--sidebar-bg` = `#0f172a`，暗色主题 `#020617`）内的图标**必须用内联 SVG + `fill="currentColor"`**，禁用固定色 PNG / `<img>`：
+
+|问题|成因|
+|---|---|
+|三态不变色|固定色图不吃 `currentColor`，无法跟随容器文字色（常态 `--sidebar-text` / hover `--sidebar-text-hover` / active `--sidebar-active-text`）|
+|深色底不可见|深色或纯黑图贴在 `#0f172a` 上对比度趋零（实测纯黑单色 PNG 在深色底零像素可见）|
+|外链 SVG 同样失效|`<img src="x.svg">` 为独立文档，`currentColor` 不跨文档继承，只有内联才继承|
+
+元素级图标抽单文件 SFC 放 `frontend/src/components/icons/`，经组件数组 `<component :is>` 接入，天然兼容 `el-icon`（`.el-icon svg { width:1em; height:1em }` 控尺寸，`:size` 设 `font-size`，无需自写尺寸样式）。参照 `icons/ToolboxIcon.vue` → `ActivityBar.vue` 的 `panels` 数组。
+
+从 iconfont 等导出的 SVG 入库前须清洗：删除占位矩形 path（整画布方块 + `opacity=".01"`）、`t` / `p-id` / `class` / `xmlns:xlink` / DOCTYPE 等导出残留、`width` / `height` 属性（尺寸交 `el-icon`），并将硬编码 `fill` 色值改为 `currentColor`。
+
 #### 行内 style 禁用
 
 **所有样式迁语义 class**，禁用 `style="..."` 行内写法（守 redesign-skill Code Quality）。常见迁移模式：
@@ -314,6 +329,26 @@ width="960px"                      <!-- 1024×768 小屏溢出，2560 屏偏小�
 
 ```css
 .card:hover { background: var(--primary-color); }   /* 压字、文字对比度失衡 */
+```
+
+### 正确：深色容器图标用内联 SVG + currentColor
+
+```vue
+<!-- components/icons/ToolboxIcon.vue -->
+<svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true">
+  <path d="M409.6 68.266667a136.53..." />
+</svg>
+```
+
+```js
+// ActivityBar.vue：三态由容器 color 驱动，零额外 CSS
+{ id: 'toolbox', icon: ToolboxIcon, label: '工具箱' }
+```
+
+### 错误：深色容器图标用固定色 PNG
+
+```vue
+<img src="../../assets/icons/工具箱.png" />   <!-- 纯黑单色图贴 #0f172a 零像素可见，且不吃 currentColor 三态不变 -->
 ```
 
 ### 正确：异常提示卡片化

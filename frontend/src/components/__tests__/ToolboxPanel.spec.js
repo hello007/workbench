@@ -19,12 +19,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   KillProcess: vi.fn(() => Promise.resolve())
 }))
 
-// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / SetUp / Sort，
-// 进程管理弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Sort（标题栏图标已换为本地 ToolboxIcon 组件，
+// 不走 element-plus），进程管理弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
   Cpu: { template: '<i class="i-cpu" />' },
-  SetUp: { template: '<i class="i-setup" />' },
   Sort: { template: '<i class="i-sort" />' },
   Refresh: { template: '<i class="i-refresh" />' }
 }))

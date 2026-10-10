@@ -1,7 +1,7 @@
 <template>
   <div class="toolbox-panel">
     <div class="toolbox-header">
-      <span class="toolbox-title"><el-icon :size="18" style="margin-right:4px;vertical-align:middle;"><SetUp /></el-icon>工具箱</span>
+      <span class="toolbox-title"><el-icon :size="18" style="margin-right:4px;vertical-align:middle;"><ToolboxIcon /></el-icon>工具箱</span>
       <span class="toolbox-close" @click="$emit('close')">&#10005;</span>
     </div>
     <div class="toolbox-content">
@@ -88,9 +88,10 @@
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Cpu, SetUp, Sort } from '@element-plus/icons-vue'
+import { CopyDocument, Cpu, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 import ProcessManagerDialog from './ProcessManagerDialog.vue'
+import ToolboxIcon from './icons/ToolboxIcon.vue'
 
 defineEmits(['close'])
 
