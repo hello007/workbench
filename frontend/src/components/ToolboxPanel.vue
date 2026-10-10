@@ -80,19 +80,29 @@
         <el-button type="primary" @click="handleCopyTo" :loading="copyToLoading">确定</el-button>
       </template>
     </el-dialog>
+    <!-- 进程管理：检索端口/进程名并结束进程（独立组件，弹窗尺寸按列表内容量走 900 档） -->
+    <ProcessManagerDialog v-model="processManagerVisible" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, SetUp, Sort } from '@element-plus/icons-vue'
+import { CopyDocument, Cpu, SetUp, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
+import ProcessManagerDialog from './ProcessManagerDialog.vue'
 
 defineEmits(['close'])
 
 // ---- 工具项定义 ----
 const copyToDialogVisible = ref(false)
+const processManagerVisible = ref(false)
+
+// 进程管理弹窗：打开动作只置可见，首次枚举由组件 @open 触发（destroy-on-close 下每次打开重拉）
+const openProcessManager = () => {
+  processManagerVisible.value = true
+}
+
 const copyToSourcePath = ref('')
 const copyToTargetPath = ref('')
 const copyToWholeDir = ref(true)
@@ -193,6 +203,13 @@ const tools = [
     icon: CopyDocument,
     description: '将文件/文件夹拷贝到指定目录',
     handler: showCopyToDialog
+  },
+  {
+    id: 'processManager',
+    name: '进程管理',
+    icon: Cpu,
+    description: '按端口或进程名检索并结束进程',
+    handler: openProcessManager
   }
 ]
 </script>

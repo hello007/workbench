@@ -11,14 +11,22 @@ vi.mock('element-plus', async () => {
   }
 })
 
+// 进程管理方法形状对齐 model.ProcessInfo / ProcessStopResult（详见 wails-mock-defaults.js）
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  CopyTo: vi.fn()
+  CopyTo: vi.fn(),
+  ListProcesses: vi.fn(() => Promise.resolve([])),
+  StopProcess: vi.fn(() => Promise.resolve({ stopped: true, method: 'forced' })),
+  KillProcess: vi.fn(() => Promise.resolve())
 }))
 
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / SetUp / Sort，
+// 进程管理弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
+  Cpu: { template: '<i class="i-cpu" />' },
   SetUp: { template: '<i class="i-setup" />' },
-  Sort: { template: '<i class="i-sort" />' }
+  Sort: { template: '<i class="i-sort" />' },
+  Refresh: { template: '<i class="i-refresh" />' }
 }))
 
 const stubs = {
@@ -39,6 +47,12 @@ const stubs = {
     template: '<input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
     props: ['modelValue', 'disabled'],
     emits: ['update:modelValue']
+  },
+  // 进程管理弹窗为独立组件（列表面由自身 spec 覆盖），此处桩掉避免 el-table 系列
+  // 在工具箱用例里渲染：弹窗经 v-model 打开，桩仅反映打开态
+  ProcessManagerDialog: {
+    template: '<div v-if="modelValue" class="pm-dialog-stub" />',
+    props: ['modelValue']
   },
   'el-button': {
     template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /><slot name="icon" /></button>',
@@ -83,8 +97,19 @@ describe('ToolboxPanel', () => {
   it('渲染标题栏与工具项', () => {
     wrapper = createWrapper()
     expect(wrapper.find('.toolbox-header').text()).toContain('工具箱')
-    expect(wrapper.findAll('.toolbox-item').length).toBe(1)
+    expect(wrapper.findAll('.toolbox-item').length).toBe(2)
     expect(wrapper.text()).toContain('拷贝到')
+    expect(wrapper.text()).toContain('进程管理')
+  })
+
+  it('点击进程管理工具项打开进程管理弹窗', async () => {
+    wrapper = createWrapper()
+    // 弹窗为独立组件（append-to-body + 900 档尺寸），此处仅验证入口可打开
+    expect(wrapper.find('.pm-dialog-stub').exists()).toBe(false)
+    const processItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('进程管理'))
+    await processItem.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.pm-dialog-stub').exists()).toBe(true)
   })
 
   it('点击关闭按钮 emit close', async () => {

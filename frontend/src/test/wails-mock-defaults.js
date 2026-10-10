@@ -48,6 +48,15 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   UpdateFavoriteAlias: '',
   UpdateFavoriteGroup: '',
 
+  // ---- 进程管理（工具箱·进程管理：端口/关键字查进程 + 停止/强杀）----
+  // 形状对齐 model.ProcessInfo / ProcessStopResult（见 frontend/wailsjs/go/models.ts）。
+  // ListProcesses 默认空列表 = 未匹配到进程的空态；StopProcess 默认 forced 手段
+  // （Windows 上目标进程常忽略优雅请求、最终由强杀生效的真实常见形态）；
+  // KillProcess 返回 void，null 为安全 no-op。
+  ListProcesses: [],
+  StopProcess: { stopped: true, method: 'forced' },
+  KillProcess: null,
+
   // ---- 仓库列表配置导入导出（形状对齐 model.RepoConfigImportPreview / Result）----
   // SaveFileDialog / OpenFileDialog 默认空串 = 用户取消，安全 no-op
   SaveFileDialog: '',
