@@ -19,6 +19,14 @@ export const ErrorCode = Object.freeze({
   ChatSessionNotFound: 'E_CHAT_SESSION_NOT_FOUND', // 会话不存在或已删除（error）
   ChatInProgress: 'E_CHAT_IN_PROGRESS', // 该会话已有对话进行中，本轮拒绝（warning）
   ChatEmptyPrompt: 'E_CHAT_EMPTY_PROMPT', // 对话内容为空（warning）
+  // 进程管理域错误码（工具箱·进程管理：端口/关键字查进程 + 停止/强杀），
+  // 取值与 model/app_error.go Process 域段一致。
+  ProcessEnumFailed: 'E_PROCESS_ENUM_FAILED', // 进程枚举命令执行失败（error）
+  ProcessEnumTimeout: 'E_PROCESS_ENUM_TIMEOUT', // 进程枚举超时被终止（warning，可重试；超时不得误判为「无进程」）
+  ProcessNotFound: 'E_PROCESS_NOT_FOUND', // 目标进程已不存在，列表已过期（warning，自动刷新列表）
+  ProcessAccessDenied: 'E_PROCESS_ACCESS_DENIED', // 权限不足或受保护进程（warning，引导以管理员身份运行）
+  ProcessSelfProtect: 'E_PROCESS_SELF_PROTECT', // 拒绝终止本应用自身或父进程链（warning）
+  ProcessKillFailed: 'E_PROCESS_KILL_FAILED', // 终止进程失败（error）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。
@@ -40,7 +48,11 @@ const WARNING_CODES = new Set([
   ErrorCode.SearchTimeout,
   ErrorCode.DiffToolNotConfigured,
   ErrorCode.ChatInProgress,
-  ErrorCode.ChatEmptyPrompt
+  ErrorCode.ChatEmptyPrompt,
+  ErrorCode.ProcessEnumTimeout,
+  ErrorCode.ProcessNotFound,
+  ErrorCode.ProcessAccessDenied,
+  ErrorCode.ProcessSelfProtect
 ])
 
 /**

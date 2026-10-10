@@ -50,6 +50,10 @@ type AppServices struct {
 	// 事件推送复用 sinkHolder 范式（chat-task:* 独立前缀），子进程执行经
 	// processFactory 抽象（测试注入 fake 不真调 claude CLI）。
 	chatSvc *service.ChatService
+	// 进程管理服务（工具箱「进程管理」：端口/进程名检索 + 停止/强杀编排）。
+	// 枚举与终止经 ProcessProvider 抽象委托 util 平台分叉实现（Windows netstat/tasklist/taskkill，
+	// Linux /proc + 信号），测试注入 fake 不依赖真实进程。
+	processSvc *service.ProcessService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -130,6 +134,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// AI 对话服务（AI 对话工作台「AI 对话」页：会话索引 + 每会话消息文件，
 	// 独立 data/ai_chat/ 目录不与其他 service 数据交叉）
 	s.chatSvc = service.NewChatService(ctx, filepath.Join(dataDir, "ai_chat"))
+
+	// 进程管理服务（工具箱「进程管理」，无持久化数据）
+	s.processSvc = service.NewProcessService()
 
 	return s
 }
