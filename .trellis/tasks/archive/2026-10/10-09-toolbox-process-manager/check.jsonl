@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验收跨层契约：frontend/wailsjs/ 的 App.js / App.d.ts / models.ts 三处是否已同步新增的 ProcessInfo / ProcessPort / ProcessStopResult 与三个 App 方法"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "验收错误码是否同步 model/app_error.go + frontend/src/utils/error.js 两处；验收枚举超时先判 ctx.Err() 不得误判为无结果；验收 service 层用 Logger() 且无 println"}
+{"file": "docs/spec/linux-platform.md", "reason": "验收平台分叉文件是否成对（_windows.go / _other.go）、测试是否按平台拆分而非共享断言、前端是否禁用 C 盘与 powershell 字面量"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验收 go test ./... 与 npm test 绿且各包覆盖率达门禁"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "验收进程管理弹窗尺寸分档、行内 style 是否迁移语义类、配色与字重梯度符合约定"}
+{"file": "docs/spec/e2e-testing.md", "reason": "验收自我保护判据为 PID 而非进程名；验收 mock 返回值是否落在 wails-mock-defaults.js 单一数据源"}
+{"file": ".trellis/tasks/10-09-toolbox-process-manager/research/process-enumeration.md", "reason": "验收依据：Windows 解析三条硬约束是否遵守、停止/强杀语义与研究中降级策略一致、进程树默认关闭"}

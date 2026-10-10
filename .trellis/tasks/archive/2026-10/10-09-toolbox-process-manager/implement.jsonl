@@ -1,0 +1,9 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法与 model/ 导出结构体须手动同步 frontend/wailsjs/ 的 App.js / App.d.ts / models.ts 三处；具名 string 类型不生成 models.ts 别名会导致 build 报 MISSING_EXPORT（故 ListProcesses 的 mode 参数用普通 string）"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 service/process.go 须在 app_services.go 的 AppServices struct 加字段 + NewAppServices 加构造行（2 处）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增 E_PROCESS_* 错误码须同步 model/app_error.go 常量表 + frontend/src/utils/error.js 的 ErrorCode 与 WARNING_CODES；枚举超时须先判 ctx.Err() 再判命令退出码（对齐内容搜索超时收口范式）；错误走 model.AppError 经 ErrorFormatter 透传"}
+{"file": "docs/spec/linux-platform.md", "reason": "进程枚举与终止须走 util/process_windows.go + util/process_other.go 编译期平台分叉；平台耦合断言拆 _windows_test.go / _linux_test.go，禁两平台共享一份断言"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "进程列表弹窗为内容量大的列表类，须走 900+ 档响应式尺寸（非工具箱现有 480px）；配色按语义选色、三列布局与 section-title 字重梯度、卡片 hover 层级等约定"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76% / util ≥40% 基线、前端 ≥70% 硬失败门禁，实施须按包达标"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态——本机常驻 workbench.exe 监听 36115，进程管理测试不得依赖固定端口或真实进程存活时序，须用注入的 fake 命令执行器与 fixture 输出驱动"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 会把 exe 改名 workbench-e2e.exe，故自我保护判据只能用自身 PID + 父进程链，禁止用进程名 workbench.exe"}
+{"file": ".trellis/tasks/10-09-toolbox-process-manager/research/process-enumeration.md", "reason": "技术选型依据：零依赖方案 A（netstat -ano + tasklist /FO CSV /NH；Linux /proc）与 Windows 解析三条硬约束；Windows 无 SIGTERM 等价物，「停止」为尽力优雅+5s 超时降级"}
