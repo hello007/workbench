@@ -71,6 +71,14 @@ const (
 	ErrCodeChatInProgress      = "E_CHAT_IN_PROGRESS"       // 该会话已有对话进行中，本轮拒绝（warning）
 	ErrCodeChatEmptyPrompt     = "E_CHAT_EMPTY_PROMPT"      // 对话内容为空（warning）
 
+	// 进程管理域（工具箱·进程管理）
+	ErrCodeProcessEnumFailed   = "E_PROCESS_ENUM_FAILED"   // 进程枚举命令执行失败（error）
+	ErrCodeProcessEnumTimeout  = "E_PROCESS_ENUM_TIMEOUT"  // 进程枚举超时被终止，可重试（warning；须先判 ctx.Err() 再判命令退出码，不得误判为「无进程」）
+	ErrCodeProcessNotFound     = "E_PROCESS_NOT_FOUND"     // 目标进程已不存在，列表已过期（warning）
+	ErrCodeProcessAccessDenied = "E_PROCESS_ACCESS_DENIED" // 权限不足或受保护进程（PPL），引导以管理员身份运行（warning）
+	ErrCodeProcessSelfProtect  = "E_PROCESS_SELF_PROTECT"  // 拒绝终止本应用自身或父进程链（warning）
+	ErrCodeProcessKillFailed   = "E_PROCESS_KILL_FAILED"   // 终止进程失败（error）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值
