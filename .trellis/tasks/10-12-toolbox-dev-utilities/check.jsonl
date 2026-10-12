@@ -1,0 +1,5 @@
+{"file": "docs/spec/process-management.md", "reason": "检查端口一览终止链路是否复用既定语义（禁 taskkill SUCCESS 当已退出、stderr 拼接、超时）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 绑定三处同步、跨层契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁四指标不回退"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查新 Dialog 视觉规范（弹窗尺寸分档、图标 currentColor）"}
+{"file": "docs/spec/linux-platform.md", "reason": "检查 Linux 交叉编译与平台分叉测试文件拆分（_windows_test/_linux_test）"}

@@ -1,0 +1,7 @@
+{"file": "docs/spec/process-management.md", "reason": "端口一览复用进程枚举/终止链路底座——停止链路、平台分叉、错误形态识别、自我保护判据均以此为准"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台抽象选型（_windows/_other 双文件 vs 运行时 GOOS 分支）与 Linux 构建约束"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名变更须手动同步 frontend/wailsjs/ 绑定三处（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 日志规范与 model.AppError 错误码跨层分流，新增错误码须同步 model/app_error.go 与 error.js"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "如新增 service 方法/文件的装配规则（AppServices 字段+构造行）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "深色容器内联 SVG 图标规则、弹窗响应式尺寸分档、面板视觉规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁阈值：service ≥76%、前端 ≥70%，测试分层要求"}

@@ -82,15 +82,21 @@
     </el-dialog>
     <!-- 进程管理：检索端口/进程名并结束进程（独立组件，弹窗尺寸按列表内容量走 900 档） -->
     <ProcessManagerDialog v-model="processManagerVisible" />
+    <!-- 端口占用：监听端口一览 + 行内终止（复用进程枚举与停止链路底座，零后端新增） -->
+    <PortListDialog v-model="portListVisible" />
+    <!-- JSON/YAML 工具：校验/格式化/压缩/互转，纯前端实现（js-yaml） -->
+    <JsonYamlToolDialog v-model="jsonYamlVisible" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Cpu, Sort } from '@element-plus/icons-vue'
+import { Connection, CopyDocument, Cpu, Document, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 import ProcessManagerDialog from './ProcessManagerDialog.vue'
+import PortListDialog from './PortListDialog.vue'
+import JsonYamlToolDialog from './JsonYamlToolDialog.vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 
 defineEmits(['close'])
@@ -98,10 +104,22 @@ defineEmits(['close'])
 // ---- 工具项定义 ----
 const copyToDialogVisible = ref(false)
 const processManagerVisible = ref(false)
+const portListVisible = ref(false)
+const jsonYamlVisible = ref(false)
+
+// JSON/YAML 工具弹窗：纯前端无枚举，无需 @open 预拉数据
+const openJsonYamlTool = () => {
+  jsonYamlVisible.value = true
+}
 
 // 进程管理弹窗：打开动作只置可见，首次枚举由组件 @open 触发（destroy-on-close 下每次打开重拉）
 const openProcessManager = () => {
   processManagerVisible.value = true
+}
+
+// 端口占用弹窗：同上，打开时机交由组件 @open
+const openPortList = () => {
+  portListVisible.value = true
 }
 
 const copyToSourcePath = ref('')
@@ -211,6 +229,20 @@ const tools = [
     icon: Cpu,
     description: '按端口或进程名检索并结束进程',
     handler: openProcessManager
+  },
+  {
+    id: 'portList',
+    name: '端口占用',
+    icon: Connection,
+    description: '查看本机监听端口与占用进程，可快速终止',
+    handler: openPortList
+  },
+  {
+    id: 'jsonYamlTool',
+    name: 'JSON/YAML 工具',
+    icon: Document,
+    description: 'JSON/YAML 校验、格式化、压缩与互转',
+    handler: openJsonYamlTool
   }
 ]
 </script>

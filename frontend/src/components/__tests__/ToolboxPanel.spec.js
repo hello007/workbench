@@ -19,11 +19,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   KillProcess: vi.fn(() => Promise.resolve())
 }))
 
-// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Sort（标题栏图标已换为本地 ToolboxIcon 组件，
-// 不走 element-plus），进程管理弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort（标题栏图标已换为本地
+// ToolboxIcon 组件，不走 element-plus），弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
   Cpu: { template: '<i class="i-cpu" />' },
+  Connection: { template: '<i class="i-connection" />' },
+  Document: { template: '<i class="i-document" />' },
   Sort: { template: '<i class="i-sort" />' },
   Refresh: { template: '<i class="i-refresh" />' }
 }))
@@ -51,6 +53,15 @@ const stubs = {
   // 在工具箱用例里渲染：弹窗经 v-model 打开，桩仅反映打开态
   ProcessManagerDialog: {
     template: '<div v-if="modelValue" class="pm-dialog-stub" />',
+    props: ['modelValue']
+  },
+  // 端口占用弹窗同上：列表面由自身 spec 覆盖，此处桩掉避免 el-table 系列渲染
+  PortListDialog: {
+    template: '<div v-if="modelValue" class="pl-dialog-stub" />',
+    props: ['modelValue']
+  },
+  JsonYamlToolDialog: {
+    template: '<div v-if="modelValue" class="jt-dialog-stub" />',
     props: ['modelValue']
   },
   'el-button': {
@@ -96,9 +107,29 @@ describe('ToolboxPanel', () => {
   it('渲染标题栏与工具项', () => {
     wrapper = createWrapper()
     expect(wrapper.find('.toolbox-header').text()).toContain('工具箱')
-    expect(wrapper.findAll('.toolbox-item').length).toBe(2)
+    expect(wrapper.findAll('.toolbox-item').length).toBe(4)
     expect(wrapper.text()).toContain('拷贝到')
     expect(wrapper.text()).toContain('进程管理')
+    expect(wrapper.text()).toContain('端口占用')
+    expect(wrapper.text()).toContain('JSON/YAML 工具')
+  })
+
+  it('点击 JSON/YAML 工具项打开工具弹窗', async () => {
+    wrapper = createWrapper()
+    expect(wrapper.find('.jt-dialog-stub').exists()).toBe(false)
+    const item = wrapper.findAll('.toolbox-item').find(el => el.text().includes('JSON/YAML'))
+    await item.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.jt-dialog-stub').exists()).toBe(true)
+  })
+
+  it('点击端口占用工具项打开端口占用弹窗', async () => {
+    wrapper = createWrapper()
+    expect(wrapper.find('.pl-dialog-stub').exists()).toBe(false)
+    const portItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('端口占用'))
+    await portItem.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.pl-dialog-stub').exists()).toBe(true)
   })
 
   it('点击进程管理工具项打开进程管理弹窗', async () => {

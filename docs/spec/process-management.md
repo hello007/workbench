@@ -245,6 +245,14 @@ Windows `netstat -ano` + `tasklist /FO CSV /NH`；Linux 解析 `/proc/net/tcp{,6
 
 ---
 
+## 9.1 复用面：工具箱「端口占用」一览（2026-10-12）
+
+端口占用一览（`PortListDialog.vue`）**零后端新增**：直接调 `ListProcesses('', '')`（空关键字默认视图即「仅监听态」，含本地化状态名保守保留语义，见 `filterListeningProcesses`），前端扁平化 `进程 × 端口 → 一行一个端口` 并按端口号升序排序。终止复用 `StopProcess`（两级停止链路）与同一套确认交互（isSelf 禁用 / isSystem 红色强确认 / 通用 warning 确认）。
+
+**后续扩展约束**：同进程多端口行共享 PID——行级防重须按 PID 而非端口（`pendingPids` 语义），否则同进程另一端口行可重复发起终止；确认文案须按端口数提示「终止将连带释放其余端口」（终止单位是进程）。
+
+---
+
 ## 10. 相关文档
 
 | 文档 | 关联点 |
