@@ -115,3 +115,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 114: 工具箱环境变量查看器
+
+**Date**: 2026-10-13
+**Task**: 工具箱环境变量查看器
+**Branch**: `master`
+
+### Summary
+
+工具箱第 5 项「环境变量」只读查看器：Windows 系统/用户/进程三级（注册表 HKLM/HKCU + REG_EXPAND_SZ 展开，进程级 os.Environ 双平台共享省 /proc 分叉），Linux 仅进程级；util provider 注入对齐 ProcessService，单来源失败写 Group.Error 不拖垮整体、全失败 E_ENV_ENUM_FAILED；前端 EnvVarDialog 动态 tab + 过滤 + 敏感命名打码临时显值 + 复制恒真实值；wailsjs 三处同步（Source 普通 string 避 MISSING_EXPORT）；测试 fixture 注入零依赖本机环境，覆盖率全档达标；check 修注册表 fixture 句柄泄漏；文档功能说明/README/CHANGELOG 更新，无新 spec 沉淀
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a6d0b1e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
