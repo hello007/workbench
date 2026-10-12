@@ -1,0 +1,6 @@
+{"file": "docs/spec/linux-platform.md", "reason": "平台分叉选型：编译期字段独有走 _windows/_other 双文件、短行为分叉走运行时 GOOS、纯逻辑抽无 tag 文件；env 枚举平台分叉设计依据"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名变更须同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；具名 string 类型须手动补 models.ts 别名防 MISSING_EXPORT"}
+{"file": "docs/spec/process-management.md", "reason": "工具箱先例：工具箱接入模式、平台分叉枚举底座、前端 Dialog 形态与确认交互范式（§9.1 复用模式）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉规范：弹窗响应式尺寸分档、深色容器内联 SVG 图标 fill=currentColor、三列布局约束、语义类"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态：环境变量 fixture 注入、注册表读取注入点设计依据"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：util ≥40% + service ≥76% + 前端 ≥70%，改阈值须同步文档"}
