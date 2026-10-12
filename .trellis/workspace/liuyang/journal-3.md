@@ -80,3 +80,38 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 113: 工具箱续作：端口占用一览 + JSON/YAML 格式化校验
+
+**Date**: 2026-10-13
+**Task**: 工具箱续作：端口占用一览 + JSON/YAML 格式化校验
+**Branch**: `master`
+
+### Summary
+
+工具箱新增两个工具：①端口占用一览（PortListDialog）——零后端新增，复用 ListProcesses 空关键字监听态默认视图前端扁平化为一行一端口按端口号升序，行内终止复用两级停止链路（优雅→5s 轮询→强杀）与确认交互，行级防重按 PID 使同进程多端口行联动禁用；②JSON/YAML 工具（JsonYamlToolDialog）——纯前端 js-yaml（既有依赖零安装），显式选格式不做自动探测，校验错误带行号定位（JSON position 换算 / YAML mark.line+1），格式化缩进 2/4、压缩、互转，有损场景显式处理：多文档拒绝转换、注释/锚点 token 级检测后确认再转。PRD 偏离记录：原方案后端加端口视图方法改为前端扁平化（枚举底座已含全部所需字段），复用约束沉淀 process-management.md §9.1。质量门禁：1532 前端用例全绿（新增 53）、覆盖率四指标 83.6/76.7/80.5/86.1 全过 ≥70 门禁、build 通过、后端零改动。代码审核（cavecrew-reviewer）0 critical/major，3 minor 中采纳 1 条（e.line 死代码清理 96af911），2 条驳回并留评估理由（pendingPids 复合键违背终止单位语义、# 误报为保守方向有意取舍）。文档同步：功能说明 13.3/13.4、README 工具箱条目、CLAUDE.md 关键规则追加子句。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `623e132` | (see git log) |
+| `c97cb05` | (see git log) |
+| `96af911` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

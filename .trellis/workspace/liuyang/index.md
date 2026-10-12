@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 112
-- **Last Active**: 2026-10-10
+- **Total Sessions**: 113
+- **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~82 | Active |
+| `journal-3.md` | ~117 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 113 | 2026-10-13 | 工具箱续作：端口占用一览 + JSON/YAML 格式化校验 | `623e132`, `c97cb05`, `96af911` | `master` |
 | 112 | 2026-10-10 | 工具箱图标替换为内联 SVG 组件 | `b0b9fec` | `master` |
 | 111 | 2026-10-10 | 工具箱新增进程管理（端口/关键字查进程 + 停止/强杀） | `6ec28e9`, `8d9cca4`, `b9e60ca`, `0614b4e` | `master` |
 | 110 | 2026-10-08 | 内容搜索多超时目录批量重试 | `94161d9` | `master` |
