@@ -27,6 +27,8 @@ export const ErrorCode = Object.freeze({
   ProcessAccessDenied: 'E_PROCESS_ACCESS_DENIED', // 权限不足或受保护进程（warning，引导以管理员身份运行）
   ProcessSelfProtect: 'E_PROCESS_SELF_PROTECT', // 拒绝终止本应用自身或父进程链（warning）
   ProcessKillFailed: 'E_PROCESS_KILL_FAILED', // 终止进程失败（error）
+  // 环境变量查看域错误码（工具箱·环境变量），取值与 model/app_error.go 环境变量域段一致。
+  EnvEnumFailed: 'E_ENV_ENUM_FAILED', // 环境变量枚举失败（error；单来源失败不进此错误，走分组 error 字段下发）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。

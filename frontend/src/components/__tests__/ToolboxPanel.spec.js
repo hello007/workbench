@@ -11,15 +11,16 @@ vi.mock('element-plus', async () => {
   }
 })
 
-// 进程管理方法形状对齐 model.ProcessInfo / ProcessStopResult（详见 wails-mock-defaults.js）
+// 进程管理/环境变量方法形状对齐 model.ProcessInfo / ProcessStopResult / EnvVarGroup（详见 wails-mock-defaults.js）
 vi.mock('../../../wailsjs/go/main/App', () => ({
   CopyTo: vi.fn(),
   ListProcesses: vi.fn(() => Promise.resolve([])),
   StopProcess: vi.fn(() => Promise.resolve({ stopped: true, method: 'forced' })),
-  KillProcess: vi.fn(() => Promise.resolve())
+  KillProcess: vi.fn(() => Promise.resolve()),
+  ListEnvVars: vi.fn(() => Promise.resolve([]))
 }))
 
-// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort（标题栏图标已换为本地
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort / Key（标题栏图标已换为本地
 // ToolboxIcon 组件，不走 element-plus），弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
@@ -27,6 +28,7 @@ vi.mock('@element-plus/icons-vue', () => ({
   Connection: { template: '<i class="i-connection" />' },
   Document: { template: '<i class="i-document" />' },
   Sort: { template: '<i class="i-sort" />' },
+  Key: { template: '<i class="i-key" />' },
   Refresh: { template: '<i class="i-refresh" />' }
 }))
 
@@ -62,6 +64,11 @@ const stubs = {
   },
   JsonYamlToolDialog: {
     template: '<div v-if="modelValue" class="jt-dialog-stub" />',
+    props: ['modelValue']
+  },
+  // 环境变量弹窗同上：列表面由自身 spec 覆盖，此处桩掉避免 el-tabs/el-table 系列渲染
+  EnvVarDialog: {
+    template: '<div v-if="modelValue" class="ev-dialog-stub" />',
     props: ['modelValue']
   },
   'el-button': {
@@ -107,11 +114,12 @@ describe('ToolboxPanel', () => {
   it('渲染标题栏与工具项', () => {
     wrapper = createWrapper()
     expect(wrapper.find('.toolbox-header').text()).toContain('工具箱')
-    expect(wrapper.findAll('.toolbox-item').length).toBe(4)
+    expect(wrapper.findAll('.toolbox-item').length).toBe(5)
     expect(wrapper.text()).toContain('拷贝到')
     expect(wrapper.text()).toContain('进程管理')
     expect(wrapper.text()).toContain('端口占用')
     expect(wrapper.text()).toContain('JSON/YAML 工具')
+    expect(wrapper.text()).toContain('环境变量')
   })
 
   it('点击 JSON/YAML 工具项打开工具弹窗', async () => {
@@ -140,6 +148,15 @@ describe('ToolboxPanel', () => {
     await processItem.trigger('click')
     await nextTick()
     expect(wrapper.find('.pm-dialog-stub').exists()).toBe(true)
+  })
+
+  it('点击环境变量工具项打开环境变量弹窗', async () => {
+    wrapper = createWrapper()
+    expect(wrapper.find('.ev-dialog-stub').exists()).toBe(false)
+    const envItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('环境变量'))
+    await envItem.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.ev-dialog-stub').exists()).toBe(true)
   })
 
   it('点击关闭按钮 emit close', async () => {

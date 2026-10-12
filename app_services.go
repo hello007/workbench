@@ -54,6 +54,11 @@ type AppServices struct {
 	// 枚举与终止经 ProcessProvider 抽象委托 util 平台分叉实现（Windows netstat/tasklist/taskkill，
 	// Linux /proc + 信号），测试注入 fake 不依赖真实进程。
 	processSvc *service.ProcessService
+	// 环境变量查看服务（工具箱「环境变量」：多来源只读枚举 + 脱敏标记 + 组内排序）。
+	// 来源枚举经 EnvSourceProvider 抽象委托 util 平台分叉实现（Windows 读注册表区分
+	// 系统/用户级 + os.Environ 进程级；Linux 仅进程级），测试注入 fake 不依赖本机
+	// 真实环境变量与注册表内容。
+	envSvc *service.EnvService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -137,6 +142,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 进程管理服务（工具箱「进程管理」，无持久化数据）
 	s.processSvc = service.NewProcessService()
+
+	// 环境变量查看服务（工具箱「环境变量」，无持久化数据）
+	s.envSvc = service.NewEnvService()
 
 	return s
 }

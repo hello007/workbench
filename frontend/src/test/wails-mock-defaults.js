@@ -57,6 +57,41 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   StopProcess: { stopped: true, method: 'forced' },
   KillProcess: null,
 
+  // ---- 环境变量查看器（工具箱·环境变量：多来源只读枚举 + 脱敏标记）----
+  // 形状对齐 model.EnvVarGroup / EnvVarInfo（见 frontend/wailsjs/go/models.ts）。
+  // 默认 Windows 三组形态（Linux 实机仅 process 一组）；组内按名称大小写不敏感排序
+  // 对齐后端 buildEnvVarInfos；sensitive=true 项（FAKE_TOKEN / ANTHROPIC_API_KEY）
+  // 供前端打码与点击临时显值场景测试——value 恒为真实值（打码是前端展示层职责）。
+  ListEnvVars: [
+    {
+      source: 'system',
+      name: '系统环境变量',
+      vars: [
+        { name: 'JAVA_HOME', value: 'C:\\Program Files\\Java\\jdk-17', sensitive: false },
+        { name: 'PATH', value: 'C:\\Windows\\system32;C:\\Windows', sensitive: false }
+      ],
+      error: ''
+    },
+    {
+      source: 'user',
+      name: '用户环境变量',
+      vars: [
+        { name: 'ANTHROPIC_API_KEY', value: 'sk-ant-fake-123456', sensitive: true },
+        { name: 'TEMP', value: 'C:\\Users\\demo\\AppData\\Local\\Temp', sensitive: false }
+      ],
+      error: ''
+    },
+    {
+      source: 'process',
+      name: '进程环境变量',
+      vars: [
+        { name: 'FAKE_TOKEN', value: 'tok-fake-abcdef', sensitive: true },
+        { name: 'NUMBER_OF_PROCESSORS', value: '8', sensitive: false }
+      ],
+      error: ''
+    }
+  ],
+
   // ---- 仓库列表配置导入导出（形状对齐 model.RepoConfigImportPreview / Result）----
   // SaveFileDialog / OpenFileDialog 默认空串 = 用户取消，安全 no-op
   SaveFileDialog: '',

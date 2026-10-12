@@ -86,17 +86,20 @@
     <PortListDialog v-model="portListVisible" />
     <!-- JSON/YAML 工具：校验/格式化/压缩/互转，纯前端实现（js-yaml） -->
     <JsonYamlToolDialog v-model="jsonYamlVisible" />
+    <!-- 环境变量：系统/用户/进程三来源只读查看（Windows 三组 / Linux 仅进程组），敏感值打码 -->
+    <EnvVarDialog v-model="envVarsVisible" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, CopyDocument, Cpu, Document, Sort } from '@element-plus/icons-vue'
+import { Connection, CopyDocument, Cpu, Document, Key, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 import ProcessManagerDialog from './ProcessManagerDialog.vue'
 import PortListDialog from './PortListDialog.vue'
 import JsonYamlToolDialog from './JsonYamlToolDialog.vue'
+import EnvVarDialog from './EnvVarDialog.vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 
 defineEmits(['close'])
@@ -106,6 +109,7 @@ const copyToDialogVisible = ref(false)
 const processManagerVisible = ref(false)
 const portListVisible = ref(false)
 const jsonYamlVisible = ref(false)
+const envVarsVisible = ref(false)
 
 // JSON/YAML 工具弹窗：纯前端无枚举，无需 @open 预拉数据
 const openJsonYamlTool = () => {
@@ -120,6 +124,11 @@ const openProcessManager = () => {
 // 端口占用弹窗：同上，打开时机交由组件 @open
 const openPortList = () => {
   portListVisible.value = true
+}
+
+// 环境变量弹窗：同上，打开时机交由组件 @open
+const openEnvVars = () => {
+  envVarsVisible.value = true
 }
 
 const copyToSourcePath = ref('')
@@ -243,6 +252,13 @@ const tools = [
     icon: Document,
     description: 'JSON/YAML 校验、格式化、压缩与互转',
     handler: openJsonYamlTool
+  },
+  {
+    id: 'envVars',
+    name: '环境变量',
+    icon: Key,
+    description: '查看系统/用户/进程环境变量，敏感值打码',
+    handler: openEnvVars
   }
 ]
 </script>

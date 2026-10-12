@@ -79,6 +79,9 @@ const (
 	ErrCodeProcessSelfProtect  = "E_PROCESS_SELF_PROTECT"  // 拒绝终止本应用自身或父进程链（warning）
 	ErrCodeProcessKillFailed   = "E_PROCESS_KILL_FAILED"   // 终止进程失败（error）
 
+	// 环境变量查看域（工具箱·环境变量）
+	ErrCodeEnvEnumFailed = "E_ENV_ENUM_FAILED" // 环境变量枚举失败（error，引导重试；单来源失败不进此错误——走分组 Error 字段下发，仅全部来源失败时返回）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值
