@@ -110,7 +110,7 @@ const describeError = (e) => {
     }
     return { message: e.message, line }
   }
-  return { message: e.reason || e.message, line: e.mark ? e.mark.line + 1 : (e.line ?? null) }
+  return { message: e.reason || e.message, line: e.mark ? e.mark.line + 1 : null }
 }
 
 const fail = (e) => {
