@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 114
+- **Total Sessions**: 115
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~150 | Active |
+| `journal-3.md` | ~183 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 115 | 2026-10-13 | 工具箱第三期：hosts 查看器（只读） | `f2a6803` | `master` |
 | 114 | 2026-10-13 | 工具箱环境变量查看器 | `a6d0b1e` | `master` |
 | 113 | 2026-10-13 | 工具箱续作：端口占用一览 + JSON/YAML 格式化校验 | `623e132`, `c97cb05`, `96af911` | `master` |
 | 112 | 2026-10-10 | 工具箱图标替换为内联 SVG 组件 | `b0b9fec` | `master` |

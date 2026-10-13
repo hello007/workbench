@@ -148,3 +148,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 115: 工具箱第三期：hosts 查看器（只读）
+
+**Date**: 2026-10-13
+**Task**: 工具箱第三期：hosts 查看器（只读）
+**Branch**: `master`
+
+### Summary
+
+沿用 env-viewer 模式新增 hosts 只读查看器：util 无 tag 共享解析（netip 兼容 IPv6 zone/BOM/CRLF/未识别行）+ 路径常量 _windows/_other 分叉；service 组级 Error 形态复用 sourceFailureMessage；HostsDialog 720 档弹窗带过滤/注释开关/复制单行复制 IP/loadSeq 守卫；测试 t.TempDir fixture 全注入零依赖本机 hosts；覆盖率 service 80.9% util 65.9% 门禁全达标； Kind 用普通 string 规避 MISSING_EXPORT 坑。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2a6803` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
