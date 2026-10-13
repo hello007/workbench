@@ -286,6 +286,10 @@ EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` �
 
 - 新建按需注册块时同步 `hljs.registerLanguage('plaintext', plaintext)`；先例：`chatMarkdown.js` 与 `FilePreviewRenderer.vue`（两处同款回退逻辑）
 
+#### 自绘右键菜单二级飞出子菜单
+
+自绘 `.context-menu`（全局样式在 `style.css`，非 Element Plus）扩展二级子菜单时：`.context-menu-item` 默认 `overflow: hidden`（为 `::before` 指示条服务），子菜单作为 li 子元素会被裁剪——父项加 `has-submenu` 类覆写 `overflow: visible`；子菜单纯 CSS hover 展开（`has-submenu:hover > .context-submenu { display: block }`，子菜单是 li 子元素故悬停不脱离 `:hover` 范围，无需 JS 态），定位 `left: 100%` 贴父项右侧，视觉令牌（`--menu-bg`/`--menu-border`/`--menu-shadow`/`--radius-md`）与主菜单严格一致。已知边界：主菜单位置校正逻辑只测主菜单自身尺寸，菜单贴近屏幕右缘时子菜单可能溢出视口。先例：FileTreePanel「复制路径」二级菜单（绝对/相对/@引用/文件名）。
+
 ## 正反示例
 
 ### 正确：nav active 指示条 left:0

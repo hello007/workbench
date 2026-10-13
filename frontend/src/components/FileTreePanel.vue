@@ -319,8 +319,15 @@
           <el-icon><FolderAdd /></el-icon>拷贝到...
         </li>
         <li class="context-menu-divider" />
-        <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+        <li class="context-menu-item has-submenu">
           <el-icon><CopyDocument /></el-icon>复制路径
+          <span class="context-menu-arrow">›</span>
+          <ul class="context-submenu">
+            <li class="context-menu-item" @click="onMenuCommand('copyPath')">复制绝对路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyRelativePath')">复制相对路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyRefPath')">文件引用路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyName')">复制文件名</li>
+          </ul>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
           <img :src="explorerIcon" class="context-menu-img-icon" alt="资源管理器" />在资源管理器中打开
@@ -391,11 +398,15 @@
           <el-icon><FolderAdd /></el-icon>拷贝到...
         </li>
         <li class="context-menu-divider" />
-        <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+        <li class="context-menu-item has-submenu">
           <el-icon><CopyDocument /></el-icon>复制路径
-        </li>
-        <li class="context-menu-item" @click="onMenuCommand('copyName')">
-          <el-icon><CopyDocument /></el-icon>复制文件名
+          <span class="context-menu-arrow">›</span>
+          <ul class="context-submenu">
+            <li class="context-menu-item" @click="onMenuCommand('copyPath')">复制绝对路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyRelativePath')">复制相对路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyRefPath')">文件引用路径</li>
+            <li class="context-menu-item" @click="onMenuCommand('copyName')">复制文件名</li>
+          </ul>
         </li>
         <li class="context-menu-item" @click="onMenuCommand('openExplorer')">
           <img :src="explorerIcon" class="context-menu-img-icon" alt="资源管理器" />在资源管理器中打开
@@ -457,6 +468,7 @@ import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
 import { truncateTreeNodes, TRUNCATION_HINT_TYPE } from '../utils/treeTruncate'
 import { filterTreeNodesByName } from '../utils/treeFilter'
+import { toRelativePath, toFileRefPath } from '../utils/relativePath'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore, useAiChatStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -1176,8 +1188,14 @@ const onMenuCommand = (command) => {
     case 'copyPath':
       copyToClipboard(data.path.replaceAll('\\', '/'), '路径')
       break
+    case 'copyRelativePath':
+      copyToClipboard(toRelativePath(data.path, directoryStore.currentDirPath), '相对路径')
+      break
+    case 'copyRefPath':
+      copyToClipboard(toFileRefPath(data.path, directoryStore.currentDirPath), '文件引用路径')
+      break
     case 'copyName':
-      copyToClipboard(data.name, '文件名')
+      copyToClipboard(data.name, data.type === 'directory' ? '文件夹名' : '文件名')
       break
     case 'openExplorer':
       handleOpenExplorer(data.path)

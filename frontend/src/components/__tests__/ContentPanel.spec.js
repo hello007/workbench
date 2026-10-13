@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import ContentPanel from '../ContentPanel.vue'
-import { useWorkspaceStore } from '../../store'
+import { useWorkspaceStore, useDirectoryStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -855,6 +855,51 @@ describe('ContentPanel.vue - handler 分支补充', () => {
       mountWith(dirNode)
       await wrapper.vm.$.setupState.handleCopyName()
       expect(ElMessage.success).toHaveBeenCalledWith('文件夹名已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyPathCommand relative 以工作目录根求相对并提示', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      const dirStore = useDirectoryStore()
+      dirStore.directories = [{ id: 'd1', name: 'proj', path: 'D:\\proj', isDefault: true }]
+      dirStore.selectedDirectoryId = 'd1'
+      await wrapper.vm.$.setupState.handleCopyPathCommand('relative')
+      expect(writeText).toHaveBeenCalledWith('a.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('相对路径已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyPathCommand ref 复制 @ 引用路径', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      const dirStore = useDirectoryStore()
+      dirStore.directories = [{ id: 'd1', name: 'proj', path: 'D:\\proj', isDefault: true }]
+      dirStore.selectedDirectoryId = 'd1'
+      await wrapper.vm.$.setupState.handleCopyPathCommand('ref')
+      expect(writeText).toHaveBeenCalledWith('@a.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件引用路径已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyPathCommand absolute 复用 handleCopyPath 行为', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      await wrapper.vm.$.setupState.handleCopyPathCommand('absolute')
+      expect(writeText).toHaveBeenCalledWith('D:/proj/a.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('路径已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
+    it('handleCopyPathCommand 失败时 error', async () => {
+      const writeText = vi.fn(() => Promise.reject(new Error('x')))
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      mountWith(fileNode)
+      await wrapper.vm.$.setupState.handleCopyPathCommand('relative')
+      expect(ElMessage.error).toHaveBeenCalledWith('复制失败')
       vi.unstubAllGlobals()
     })
   })

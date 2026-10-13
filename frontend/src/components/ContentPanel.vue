@@ -14,17 +14,25 @@
         <h2>{{ workspaceStore.selectedNode.name }}</h2>
       </div>
 
-      <!-- 路径行：弱化灰字 + 行尾内联复制按钮 -->
+      <!-- 路径行：弱化灰字 + 行尾内联复制下拉（绝对/相对/@文件引用 三种路径口径） -->
       <div class="panel-path-row">
         <span class="panel-path" :title="workspaceStore.selectedNode.path">{{ workspaceStore.selectedNode.path }}</span>
         <div class="panel-path-actions">
-          <el-button
-            :icon="CopyDocument"
-            size="small"
-            text
-            title="复制路径"
-            @click="handleCopyPath"
-          />
+          <el-dropdown trigger="click" @command="handleCopyPathCommand">
+            <el-button
+              :icon="CopyDocument"
+              size="small"
+              text
+              title="复制路径"
+            />
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="absolute">复制绝对路径</el-dropdown-item>
+                <el-dropdown-item command="relative">复制相对路径</el-dropdown-item>
+                <el-dropdown-item command="ref">文件引用路径</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
 
@@ -484,13 +492,16 @@ import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
 import warpIcon from '../assets/icons/warp.ico'
 import gitGrayIcon from '../assets/icons/git-gray.png'
-import { useWorkspaceStore } from '../store'
+import { useWorkspaceStore, useDirectoryStore } from '../store'
+import { toRelativePath, toFileRefPath } from '../utils/relativePath'
 
 // workspace 域共享态（selectedNode/latestCommit）已迁 store，本组件直读直写：
 //   - selectedNode：原 props.selectedNode，30+ 处消费改为 workspaceStore.selectedNode
 //   - latestCommit：CommitHistory emit latest-commit 时直写 workspaceStore.latestCommit（不再经 Home emit 中转）
 //   - clipboard prop 已删（本组件零消费，仅 Home 内部 handleCopy/Cut/Paste 用）
 const workspaceStore = useWorkspaceStore()
+// 相对路径复制基准：当前工作目录根（与文件树右键「复制相对路径」口径一致）
+const directoryStore = useDirectoryStore()
 
 const emit = defineEmits([
   'refreshNode',
@@ -852,6 +863,26 @@ const handleCopyPath = async () => {
   try {
     await navigator.clipboard.writeText(workspaceStore.selectedNode.path.replaceAll('\\', '/'))
     ElMessage.success('路径已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+// 路径行复制下拉分发：三种路径口径共用剪贴板写入（绝对 = 原有 handleCopyPath 行为）
+const handleCopyPathCommand = async (command) => {
+  if (!workspaceStore.selectedNode) return
+  if (command === 'absolute') {
+    await handleCopyPath()
+    return
+  }
+  const rootPath = directoryStore.currentDirPath
+  const text = command === 'ref'
+    ? toFileRefPath(workspaceStore.selectedNode.path, rootPath)
+    : toRelativePath(workspaceStore.selectedNode.path, rootPath)
+  const label = command === 'ref' ? '文件引用路径' : '相对路径'
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制到剪贴板`)
   } catch {
     ElMessage.error('复制失败')
   }

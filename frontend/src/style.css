@@ -390,6 +390,43 @@ html, body {
   white-space: nowrap;
 }
 
+/* 二级子菜单父项（「复制路径」）：默认 overflow:hidden 裁剪飞出子菜单，父项放开 */
+.context-menu-item.has-submenu {
+  overflow: visible;
+}
+
+/* 子菜单展开箭头（右侧提示，与 shortcut 同位同类但无键位文本） */
+.context-menu-arrow {
+  margin-left: auto;
+  padding-left: 24px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+
+/* 二级飞出子菜单：纯 CSS hover 展开（悬停父项即展开，移入子菜单仍是父项 :hover 范围不中断）。
+   样式继承主菜单视觉（背景/边框/阴影令牌一致）；定位贴父项右侧，top 微调对齐首项 */
+.context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  z-index: 2001;
+  min-width: 150px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--menu-shadow);
+  backdrop-filter: blur(10px);
+}
+
+.context-menu-item.has-submenu:hover > .context-submenu {
+  display: block;
+}
+
 /* 拷贝预览 — 全局样式 */
 .copy-to-preview {
   margin: 0 0 16px;

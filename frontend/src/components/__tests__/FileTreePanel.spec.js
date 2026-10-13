@@ -1673,6 +1673,40 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       vi.unstubAllGlobals()
     })
 
+    it('copyRelativePath / copyRefPath 以当前工作目录根求相对并写剪贴板', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      // 工作目录根 = /path/a（mockDirectories dir-1）
+      const relData = { name: 'a.go', path: '/path/a/src/a.go', type: 'file' }
+      setMenuDataAndCommand('copyRelativePath', relData)
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('src/a.go')
+      setMenuDataAndCommand('copyRefPath', relData)
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('@src/a.go')
+      vi.unstubAllGlobals()
+    })
+
+    it('copyRelativePath：节点不在工作目录根下时复制归一化绝对路径（防御分支）', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      setMenuDataAndCommand('copyRelativePath')
+      await flushPromises()
+      // nodeData.path = D:\proj\a.go 不在 /path/a 下 → 归一化绝对路径
+      expect(writeText).toHaveBeenCalledWith('D:/proj/a.go')
+      vi.unstubAllGlobals()
+    })
+
+    it('copyName 目录节点提示文件夹名', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      vi.stubGlobal('navigator', { clipboard: { writeText } })
+      setMenuDataAndCommand('copyName', { ...nodeData, type: 'directory' })
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('a.go')
+      expect(ElMessage.success).toHaveBeenCalledWith('文件夹名已复制到剪贴板')
+      vi.unstubAllGlobals()
+    })
+
     it('openExplorer / openInVSCode / openWithDefaultApp 调后端绑定', async () => {
       const { OpenInExplorer, OpenInVSCode, OpenWithDefaultApp } = await import('../../../wailsjs/go/main/App')
       setMenuDataAndCommand('openExplorer')
