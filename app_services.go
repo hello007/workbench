@@ -63,6 +63,11 @@ type AppServices struct {
 	// 路径取 util.HostsFilePath 平台常量（Windows drivers/etc/hosts / Linux /etc/hosts），
 	// service 测试注入 fixture 路径不依赖本机真实 hosts 内容。
 	hostsSvc *service.HostsService
+	// PPT 按页拆分服务（工具箱「PPT 拆分」：.pptx 按页拆分为单页文件，无持久化数据）。
+	// 拆分经 PptxSplitProvider 抽象（生产实现为纯 Go OOXML 标准库核心，不依赖本机
+	// Office），测试注入 fake 验证编排透传；进度/终态事件走 sinkHolder（pptx-split:*
+	// 前缀，web_serve.go applySink 须同步切换），可取消（注册表键 = 源文件规范化路径）。
+	pptxSplitSvc *service.PptxSplitService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -152,6 +157,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// hosts 文件查看服务（工具箱「hosts 文件」，无持久化数据）
 	s.hostsSvc = service.NewHostsService()
+
+	// PPT 按页拆分服务（工具箱「PPT 拆分」，无持久化数据；ctx 构造注入 Wails 桌面事件出口）
+	s.pptxSplitSvc = service.NewPptxSplitService(ctx)
 
 	return s
 }

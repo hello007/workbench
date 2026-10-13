@@ -34,6 +34,7 @@
 |[browser-channel.md](browser-channel.md)|浏览器访问通道契约（v1.7 浏览器模式 epic）：service 层事件唯一出口 EventSink（wailsEventSink/WSHub/multicastSink 三实现 + sinkHolder 切换防竞态）；/api/rpc reflect 翻译层协议与 E_RPC_* 错误矩阵；WS 帧格式与升级前认证；token 三通道与热轮换语义；polyfill 注入时序（wrapper 调用时才解引用 window.go）；serve 模式 wailsRuntimeUnavailable 守卫（runtime.EventsEmit/对话框对非 Wails ctx 会 log.Fatalf 杀进程）|
 |[terminal-multi-session.md](terminal-multi-session.md)|终端多会话契约（v1.7 终端优化 epic）：xterm 多实例（禁重挂载、隐藏容器 fit 静默失败、激活 refit、EventsOn 闭包注销）；tab 状态与实例分离（MAX_TERMINAL_TABS=8 前端单一来源）；快照 v2 多 tab 归一化（WorkDir 兼容降级、幂等、置空防复写）；Vue watch 多源引用比较陷阱（getter 投影）；全屏 z-index 层级表 1500 + fullscreen⇒visible 不变式 + ESC 冒泡过滤；外观设置热更契约（el-input-number 必带 :value-on-clear）|
 |[process-management.md](process-management.md)|进程管理契约（工具箱「进程管理」）：三个 Wails 方法签名与 `mode` 禁用具名 string（MISSING_EXPORT 坑）；`IsSelf`/`IsSystem` 后端填充前端只消费；自我保护三层且**判据只用 PID**（E2E 改名 workbench-e2e.exe 致进程名判据失效）；**Windows 优雅停止能否生效取决于目标进程是否响应、无法按「有无窗口」预判**（本机实测 ping 响应退出 / cmd /k 拒绝且存活，推翻常见结论），故统一「发请求 → 5s 轮询实测存活 → 未退转强杀」，`SUCCESS` 只代表信号送达不等于已退出；默认视图状态无法识别时保守保留防中文系统空列表；netstat/tasklist 解析三硬约束 + 失败须拼 stderr + 终止命令必带超时|
+|[pptx-split.md](pptx-split.md)|PPT 按页拆分契约（工具箱「PPT 拆分」）：纯 Go OOXML 最小编辑集（sldIdLst/rels/Content_Types/删 slide+notesSlide/剥离 custShowLst+extLst/跨页链接清理）与页序三跳映射（slide 文件名 ≠ 页序）；XML 编辑用「解析定位 + 字节删除」禁 Encoder 重序列化（保真度）；OPC 关系 Target 相对关系源 part 目录（非 `_rels/` 目录，实测踩坑）；取消复用 E_GIT_CANCELLED 不新增错误码；事件 `pptx-split:*` 仅 PptSplitDialog 监听（右键入口 Promise 直返规避共听面）；fixture 程序化构造禁依赖本机 Office|
 
 ## 新增文档约定
 

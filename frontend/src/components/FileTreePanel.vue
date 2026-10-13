@@ -423,6 +423,9 @@
         <li class="context-menu-item" @click="onMenuCommand('openWithDefaultApp')">
           <el-icon><Open /></el-icon>用默认程序打开
         </li>
+        <li v-if="isPptxFile(contextMenu.data)" class="context-menu-item" @click="onMenuCommand('splitPptx')">
+          <el-icon><Files /></el-icon>按页拆分
+        </li>
         <li class="context-menu-item" @click="onMenuCommand('refresh')">
           <el-icon><Refresh /></el-icon>刷新
           <span class="context-menu-shortcut">F5</span>
@@ -462,7 +465,8 @@ import {
   TrendCharts,
   DataBoard,
   ChatDotRound,
-  MoreFilled
+  MoreFilled,
+  Files
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
@@ -488,7 +492,8 @@ import {
   ScanAndPullRepos,
   IsDashboardPinned,
   AddDashboardPin,
-  RemoveDashboardPin
+  RemoveDashboardPin,
+  SplitPptxPerPage
 } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import obsidianIcon from '../assets/icons/obsidian.png'
@@ -1248,6 +1253,9 @@ const onMenuCommand = (command) => {
     case 'toggleDashboardPin':
       handleToggleDashboardPin(data)
       break
+    case 'splitPptx':
+      handleSplitPptx(data)
+      break
   }
 }
 
@@ -1547,6 +1555,33 @@ const handleOpenWithDefaultApp = async (path) => {
     }
   } catch (error) {
     ElMessage.error('打开文件失败: ' + (error.message || String(error)))
+  }
+}
+
+// ---- PPT 按页拆分（文件右键菜单项，仅 .pptx 文件显示，大小写不敏感）----
+// 哨兵节点不弹菜单（onNodeContextMenu early return），本菜单项天然不触达哨兵
+const isPptxFile = (data) =>
+  data?.type === 'file' && typeof data.name === 'string' && data.name.toLowerCase().endsWith('.pptx')
+
+// 确认弹窗预告输出目录与覆盖行为；拆分为长操作，Promise 完成前不持 UI 状态，
+// 成功/失败经 message 反馈；进度展示由工具箱 PptSplitDialog 负责（本组件不监听
+// pptx-split:* 事件，避免多组件共听面；两入口拆分事件载荷含 srcPath 可区分归属）
+const handleSplitPptx = async (data) => {
+  const baseName = data.name.replace(/\.pptx$/i, '')
+  try {
+    await ElMessageBox.confirm(
+      `将在 PPT 同级目录生成「${baseName}」文件夹，每页一个独立 PPT（命名如 ${baseName}-01.pptx）。已存在的同名输出文件将被覆盖。是否继续？`,
+      '按页拆分 PPT',
+      { confirmButtonText: '开始拆分', cancelButtonText: '取消', type: 'info' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const result = await SplitPptxPerPage(data.path)
+    ElMessage.success(`拆分完成：${result.pageCount} 页已输出到 ${result.outputDir}`)
+  } catch (error) {
+    handleError('PPT 拆分失败: ', error)
   }
 }
 

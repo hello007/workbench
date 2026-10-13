@@ -1,0 +1,7 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查 service 覆盖率 ≥76% 门禁达标"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查取消链路 LIFO 顺序、错误码 AppError 三处同步（model/app_error.go + error.js）、EventSink 走法"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处绑定同步与 MISSING_EXPORT 坑（npm run build 验证）"}
+{"file": "docs/spec/browser-channel.md", "reason": "检查 web_serve.go applySink 是否补 SetEventSink 行"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查前端对话框/右键菜单视觉规范合规"}
+{"file": ".trellis/tasks/10-13-ppt-split-per-page/research/pptx-split-approaches.md", "reason": "对照最小编辑集与已知坑逐项检查实现完整性（页序三跳、sections 剥离、跨页链接清理、原子写）"}
+{"file": ".trellis/tasks/10-13-ppt-split-per-page/prd.md", "reason": "对照验收标准逐条检查"}

@@ -1,0 +1,10 @@
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 PptxSplitService 须在 app_services.go 加字段+构造两处，AppServices 必须在 package main，App 内嵌保委托零 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "取消链路（registerCancel/unregisterCancel defer LIFO + mapCancelError → E_GIT_CANCELLED）与 EventSink 事件发射（禁直调 EventsEmit）契约"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法须手动同步 frontend/wailsjs 三处绑定（App.js/App.d.ts/models.ts），具名 string 类型不加 models.ts 别名的坑"}
+{"file": "docs/spec/browser-channel.md", "reason": "新 service 有事件须同步 web_serve.go applySink 补 SetEventSink，否则浏览器通道静默收不到"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 覆盖率门禁，新 service 单测须达标"}
+{"file": "docs/spec/test-stability.md", "reason": "单测禁隐式依赖环境外部状态，fixture 程序化构造 pptx 禁依赖本机 Office"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "输出文件原子写惯例（CreateTemp 同目录 → Rename，Windows MoveFileEx），二进制 zip 复刻同序列"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "PR3 前端对话框/右键菜单视觉规范（弹窗尺寸分档、nav active 指示条等）"}
+{"file": ".trellis/tasks/10-13-ppt-split-per-page/research/pptx-split-approaches.md", "reason": "方案 B 最小编辑集明细（sldIdLst/rels/Content_Types/notesSlide/sections/custShows）与 6 项已知坑，实现核心依据"}
+{"file": ".trellis/tasks/10-13-ppt-split-per-page/prd.md", "reason": "需求、验收标准、决策与 Out of Scope"}

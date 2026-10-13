@@ -18,10 +18,20 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   StopProcess: vi.fn(() => Promise.resolve({ stopped: true, method: 'forced' })),
   KillProcess: vi.fn(() => Promise.resolve()),
   ListEnvVars: vi.fn(() => Promise.resolve([])),
-  GetHosts: vi.fn(() => Promise.resolve({ path: '', entries: [], error: '' }))
+  GetHosts: vi.fn(() => Promise.resolve({ path: '', entries: [], error: '' })),
+  // PPT 拆分（PptSplitDialog 被 stub 不真正调用，补齐 import 链所需导出）
+  SplitPptxPerPage: vi.fn(() => Promise.resolve({ outputDir: '', files: [], pageCount: 0 })),
+  CancelPptxSplit: vi.fn(() => Promise.resolve(false)),
+  OpenFileDialog: vi.fn(() => Promise.resolve(''))
 }))
 
-// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort / Key / Guide（标题栏图标已换为本地
+// PptSplitDialog 随父组件 import EventsOn（工具箱现有弹窗均不监听事件，本 mock 为其新增）
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(),
+  EventsOff: vi.fn()
+}))
+
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort / Key / Guide / Files（标题栏图标已换为本地
 // ToolboxIcon 组件，不走 element-plus），弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
@@ -31,6 +41,7 @@ vi.mock('@element-plus/icons-vue', () => ({
   Sort: { template: '<i class="i-sort" />' },
   Key: { template: '<i class="i-key" />' },
   Guide: { template: '<i class="i-guide" />' },
+  Files: { template: '<i class="i-files" />' },
   Refresh: { template: '<i class="i-refresh" />' }
 }))
 
@@ -78,6 +89,11 @@ const stubs = {
     template: '<div v-if="modelValue" class="hosts-dialog-stub" />',
     props: ['modelValue']
   },
+  // PPT 拆分弹窗同上：交互面由自身 spec 覆盖，此处桩掉避免 el-dialog/事件注册渲染
+  PptSplitDialog: {
+    template: '<div v-if="modelValue" class="ppt-split-dialog-stub" />',
+    props: ['modelValue']
+  },
   'el-button': {
     template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /><slot name="icon" /></button>',
     props: ['type', 'size', 'text', 'loading', 'disabled'],
@@ -121,13 +137,14 @@ describe('ToolboxPanel', () => {
   it('渲染标题栏与工具项', () => {
     wrapper = createWrapper()
     expect(wrapper.find('.toolbox-header').text()).toContain('工具箱')
-    expect(wrapper.findAll('.toolbox-item').length).toBe(6)
+    expect(wrapper.findAll('.toolbox-item').length).toBe(7)
     expect(wrapper.text()).toContain('拷贝到')
     expect(wrapper.text()).toContain('进程管理')
     expect(wrapper.text()).toContain('端口占用')
     expect(wrapper.text()).toContain('JSON/YAML 工具')
     expect(wrapper.text()).toContain('环境变量')
     expect(wrapper.text()).toContain('hosts 文件')
+    expect(wrapper.text()).toContain('PPT 拆分')
   })
 
   it('点击 JSON/YAML 工具项打开工具弹窗', async () => {
@@ -174,6 +191,15 @@ describe('ToolboxPanel', () => {
     await hostsItem.trigger('click')
     await nextTick()
     expect(wrapper.find('.hosts-dialog-stub').exists()).toBe(true)
+  })
+
+  it('点击 PPT 拆分工具项打开 PPT 拆分弹窗', async () => {
+    wrapper = createWrapper()
+    expect(wrapper.find('.ppt-split-dialog-stub').exists()).toBe(false)
+    const pptItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('PPT 拆分'))
+    await pptItem.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.ppt-split-dialog-stub').exists()).toBe(true)
   })
 
   it('点击关闭按钮 emit close', async () => {

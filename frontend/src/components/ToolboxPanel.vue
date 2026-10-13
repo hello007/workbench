@@ -90,19 +90,22 @@
     <EnvVarDialog v-model="envVarsVisible" />
     <!-- hosts 文件：本机 hosts 只读解析查看（IP/主机名/注释），支持过滤与复制 -->
     <HostsDialog v-model="hostsVisible" />
+    <!-- PPT 按页拆分：.pptx 按页拆分为多个单页 PPT（监听 pptx-split:* 进度/终态事件） -->
+    <PptSplitDialog v-model="pptSplitVisible" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, CopyDocument, Cpu, Document, Guide, Key, Sort } from '@element-plus/icons-vue'
+import { Connection, CopyDocument, Cpu, Document, Files, Guide, Key, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 import ProcessManagerDialog from './ProcessManagerDialog.vue'
 import PortListDialog from './PortListDialog.vue'
 import JsonYamlToolDialog from './JsonYamlToolDialog.vue'
 import EnvVarDialog from './EnvVarDialog.vue'
 import HostsDialog from './HostsDialog.vue'
+import PptSplitDialog from './PptSplitDialog.vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 
 defineEmits(['close'])
@@ -114,6 +117,7 @@ const portListVisible = ref(false)
 const jsonYamlVisible = ref(false)
 const envVarsVisible = ref(false)
 const hostsVisible = ref(false)
+const pptSplitVisible = ref(false)
 
 // JSON/YAML 工具弹窗：纯前端无枚举，无需 @open 预拉数据
 const openJsonYamlTool = () => {
@@ -138,6 +142,11 @@ const openEnvVars = () => {
 // hosts 文件弹窗：同上，打开时机交由组件 @open
 const openHosts = () => {
   hostsVisible.value = true
+}
+
+// PPT 拆分弹窗：纯输入入口无预拉数据，打开动作只置可见
+const openPptSplit = () => {
+  pptSplitVisible.value = true
 }
 
 const copyToSourcePath = ref('')
@@ -275,6 +284,13 @@ const tools = [
     icon: Guide,
     description: '查看本机 hosts 解析映射，支持过滤与复制',
     handler: openHosts
+  },
+  {
+    id: 'pptSplit',
+    name: 'PPT 拆分',
+    icon: Files,
+    description: '将 .pptx 按页拆分为多个单页 PPT',
+    handler: openPptSplit
   }
 ]
 </script>

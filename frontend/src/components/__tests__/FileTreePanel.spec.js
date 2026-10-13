@@ -49,7 +49,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddChatDirectory: vi.fn(() => Promise.resolve({ id: 'chatdir-1', path: '/path/a/sub', displayName: 'sub', sortOrder: 0, createdAt: 1000 })),
   UpdateChatDirectory: vi.fn(() => Promise.resolve()),
   RemoveChatDirectory: vi.fn(() => Promise.resolve()),
-  ReorderChatDirectories: vi.fn(() => Promise.resolve())
+  ReorderChatDirectories: vi.fn(() => Promise.resolve()),
+  // PPT 按页拆分（右键 .pptx 文件「按页拆分」入口），形状对齐 model.PptxSplitResult
+  SplitPptxPerPage: vi.fn(() =>
+    Promise.resolve({ outputDir: '/path/a/演示', files: ['/path/a/演示/演示-01.pptx'], pageCount: 1 })
+  ),
+  CancelPptxSplit: vi.fn(() => Promise.resolve(false))
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -102,7 +107,8 @@ const defaultStubs = {
   Open: { template: '<span>open</span>' },
   Promotion: { template: '<span>prom</span>' },
   Scissor: { template: '<span>sci</span>' },
-  DocumentCopy: { template: '<span>dc</span>' }
+  DocumentCopy: { template: '<span>dc</span>' },
+  Files: { template: '<span>files</span>' }
 }
 
 const mockDirectories = [
@@ -2136,6 +2142,106 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       expect(wrapper.vm.$.setupState.contextMenu.targetPinned).toBe(false)
       expect(IsDashboardPinned).toHaveBeenCalledWith('D:\\proj\\repo-a')
       expect(IsDashboardPinned).toHaveBeenCalledWith('D:\\proj\\repo-b')
+    })
+  })
+
+  describe('PPT 按页拆分（右键 .pptx 文件入口）', () => {
+    const fakeEvent = { preventDefault: () => {}, stopPropagation: () => {}, clientX: 100, clientY: 200 }
+
+    // 右键打开菜单后按文本查找菜单项
+    const findMenuItem = (wrapper, text) =>
+      wrapper.findAll('.context-menu .context-menu-item').find(li => li.text().includes(text))
+
+    it('右键 .pptx 文件显示「按页拆分」菜单项', async () => {
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: '汇报.pptx', path: 'D:\\proj\\汇报.pptx', type: 'file' })
+      await flushPromises()
+
+      const item = findMenuItem(wrapper, '按页拆分')
+      expect(item).toBeTruthy()
+    })
+
+    it('右键 .pptx 判断大小写不敏感（.PPTX 同样显示）', async () => {
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: 'DECK.PPTX', path: 'D:\\proj\\DECK.PPTX', type: 'file' })
+      await flushPromises()
+
+      expect(findMenuItem(wrapper, '按页拆分')).toBeTruthy()
+    })
+
+    it('右键非 .pptx 文件不显示「按页拆分」菜单项', async () => {
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: 'a.go', path: 'D:\\proj\\a.go', type: 'file' })
+      await flushPromises()
+
+      expect(findMenuItem(wrapper, '按页拆分')).toBeUndefined()
+    })
+
+    it('点击菜单项弹覆盖确认框，确认后调 SplitPptxPerPage 并 success 提示输出目录与页数', async () => {
+      const { SplitPptxPerPage } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: '汇报.pptx', path: 'D:\\proj\\汇报.pptx', type: 'file' })
+      await flushPromises()
+
+      await findMenuItem(wrapper, '按页拆分').trigger('click')
+      await flushPromises()
+
+      // 确认框预告覆盖行为与输出位置
+      expect(ElMessageBox.confirm).toHaveBeenCalled()
+      const [message] = ElMessageBox.confirm.mock.calls[0]
+      expect(message).toContain('汇报')
+      expect(message).toContain('覆盖')
+      expect(SplitPptxPerPage).toHaveBeenCalledWith('D:\\proj\\汇报.pptx')
+      expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('/path/a/演示'))
+      expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('1 页'))
+    })
+
+    it('用户取消确认不调用 SplitPptxPerPage', async () => {
+      const { SplitPptxPerPage } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: '汇报.pptx', path: 'D:\\proj\\汇报.pptx', type: 'file' })
+      await flushPromises()
+
+      await findMenuItem(wrapper, '按页拆分').trigger('click')
+      await flushPromises()
+
+      expect(SplitPptxPerPage).not.toHaveBeenCalled()
+    })
+
+    it('拆分被取消（E_GIT_CANCELLED）经 handleError 分流为 warning 中性提示', async () => {
+      const { SplitPptxPerPage } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      SplitPptxPerPage.mockRejectedValueOnce({ code: 'E_GIT_CANCELLED', message: '操作已取消' })
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: '汇报.pptx', path: 'D:\\proj\\汇报.pptx', type: 'file' })
+      await flushPromises()
+
+      await findMenuItem(wrapper, '按页拆分').trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.warning).toHaveBeenCalledWith('操作已取消')
+      expect(ElMessage.error).not.toHaveBeenCalled()
+    })
+
+    it('拆分真失败经 handleError 分流为 error（带前缀）', async () => {
+      const { SplitPptxPerPage } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      SplitPptxPerPage.mockRejectedValueOnce({ code: 'E_REPO_CONFIG_INVALID_JSON', message: '文件损坏' })
+      wrapper = createWrapper()
+      wrapper.vm.$.setupState.onNodeContextMenu(fakeEvent, { name: '汇报.pptx', path: 'D:\\proj\\汇报.pptx', type: 'file' })
+      await flushPromises()
+
+      await findMenuItem(wrapper, '按页拆分').trigger('click')
+      await flushPromises()
+
+      expect(ElMessage.error).toHaveBeenCalledWith('PPT 拆分失败: 文件损坏')
+      expect(ElMessage.warning).not.toHaveBeenCalled()
     })
   })
 })

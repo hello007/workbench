@@ -180,7 +180,14 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   ListChatDirectories: [],
   UpdateChatDirectory: true,
   RemoveChatDirectory: true,
-  ReorderChatDirectories: true
+  ReorderChatDirectories: true,
+
+  // ---- PPT 按页拆分（工具箱·PPT 拆分弹窗 + 文件树右键入口）----
+  // 形状对齐 model.PptxSplitResult（见 frontend/wailsjs/go/models.ts）；
+  // 默认空结果 = 拆分仅在用户操作时调用，空态安全 no-op，用例按需 override
+  SplitPptxPerPage: { outputDir: '', files: [], pageCount: 0 },
+  // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelGitOperation 语义）
+  CancelPptxSplit: false
 }
 
 /**
