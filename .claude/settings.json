@@ -33,6 +33,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d .codegraph ] && command -v codegraph >/dev/null 2>&1 && codegraph sync || true",
+            "timeout": 120,
+            "statusMessage": "Syncing CodeGraph index..."
+          }
+        ]
       }
     ],
     "PreToolUse": [
