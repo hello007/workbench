@@ -247,3 +247,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 118: 侧边栏素材管理 MVP——纯 Go SQLite+FTS5 中文检索 + PPT 单页索引
+
+**Date**: 2026-10-13
+**Task**: 侧边栏素材管理 MVP——纯 Go SQLite+FTS5 中文检索 + PPT 单页索引
+**Branch**: `master`
+
+### Summary
+
+落地素材管理 V1.0 SRS 的 MVP 纵切片（纯 Go 零 COM）：modernc/sqlite 每库一 db + user_version 迁移；OOXML 解析页文本/标题回退链/演讲者备注，加密/损坏/权限分类降级；mtime+size 增量扫描 + 派生产物按真实拆分布局排除 + 可取消；FTS5 unicode61+CJK 按字切分同源+phrase+bm25 加权检索，聚合折叠/标签继承，10 万页基准 45ms/op；ActivityBar 素材管理面板（库管理/画廊双视图/检索/详情编辑/溯源/扫描进度）+ OpenDirectoryDialog 桥接。后端覆盖率 81.5%，前端 1627 用例，Linux 编译过。质量检查修复派生产物排除口径错（derived/ 凭空目录致拆分副本重复索引）等 5 项。spec 沉淀 docs/spec/assets-management.md（FTS 五契约/单连接池自锁/rowid 编码）+ CLAUDE.md 关键规则。遗留：聚合展开超 200 命中子页可能不全、COM 缩略图/导出/单页元数据编辑为二批。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `013032e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

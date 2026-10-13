@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 117
+- **Total Sessions**: 118
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~249 | Active |
+| `journal-3.md` | ~282 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 118 | 2026-10-13 | 侧边栏素材管理 MVP——纯 Go SQLite+FTS5 中文检索 + PPT 单页索引 | `013032e` | `master` |
 | 117 | 2026-10-13 | 工具箱 PPT 按页拆分功能全流程落地 | `915888a` | `master` |
 | 116 | 2026-10-13 | 文件树复制路径二级菜单——绝对/相对/@文件引用 + 内容面板路径下拉 | `6c5a987` | `master` |
 | 115 | 2026-10-13 | 工具箱第三期：hosts 查看器（只读） | `f2a6803` | `master` |
