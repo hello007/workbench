@@ -280,3 +280,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 119: 素材管理审核修复 14 项——写回守卫/分页/FTS 边界/关停收口
+
+**Date**: 2026-10-14
+**Task**: 素材管理审核修复 14 项——写回守卫/分页/FTS 边界/关停收口
+**Branch**: `master`
+
+### Summary
+
+双路子代理审核 013032e（后端 cavecrew-reviewer + 前端 cavecrew-reviewer）发现 14 项：后端 FTS 纯标点词（实测零 token phrase 恒 0 行非报错，防御跳过）、zip 解压上限（共用函数透传不设限保拆分链路零变化）、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、.-01.pptx 误判、多词摘要逐词定位；前端双代次守卫（librarySeq/searchSeq）、切视图空兜底、tagOptions 预载、检索空态引导、扫描单刷新、聚合在途守卫、LIB_NOT_FOUND 自愈。质量核查读代码逐项验证另抓出 4 处守卫缺口（滚动追加/溯源路径无库代次守卫、contextChanged 缺库代次、loadingMore 防重失效）一并修复。覆盖率 service 81.6%，前端 1636 用例，Linux 编译过，spec 同步 assets-management.md。遗留：util/clipboard_windows.go 存量 vet 告警 7 处（先于本次，另案）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5bbf04e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
