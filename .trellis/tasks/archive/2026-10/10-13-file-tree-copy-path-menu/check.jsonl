@@ -1,0 +1,2 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查二级子菜单/下拉的视觉一致性（间距/圆角/hover 态/图标）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率门禁 ≥70% 硬失败，新增 utils 函数与组件分支须带测试"}
