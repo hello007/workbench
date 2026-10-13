@@ -100,7 +100,7 @@ echo "" > frontend/dist/index.html // 冒烟测试 Glob assets/*.js 必红
 |---|---|---|
 | `go build ./...` | 必绿 | 必绿（WSL 实机） |
 | `go test ./service/ ./util/ ./model/` | 必绿 | 必绿 |
-| `go vet ./...` | 手动跑须 `-unsafeptr=false`（clipboard_windows.go 既有误报） | 裸跑即可（编译图不含 windows 文件） |
+| `go vet ./...` | 裸跑即可（clipboard_windows.go 已改 RtlMoveMemory 中转，unsafeptr 告警已消除） | 裸跑即可（编译图不含 windows 文件） |
 | `wails build -tags webkit2_41` | — | 发布前必验 |
 | `npm test` | 必绿（含平台分支用例） | 同 |
 | CI ubuntu job | — | 推送后绿 |

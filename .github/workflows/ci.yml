@@ -99,9 +99,9 @@ jobs:
       - name: 后端编译验证（Linux 桌面生产路径）
         run: go build -tags "desktop,production,webkit2_41" ./...
 
-      # 10. 后端静态检查（无标签依赖图与单元测试一致，不含 cgo 桌面前端；不加
-      #    -unsafeptr=false：该豁免针对 windows 专属的 util/clipboard_windows.go 误报，
-      #    Linux 编译图不含该文件，与本地 GOOS=linux go vet 验证一致）
+      # 10. 后端静态检查（无标签依赖图与单元测试一致，不含 cgo 桌面前端；
+      #    util/clipboard_windows.go 已用 RtlMoveMemory 中转消除 unsafeptr 告警，
+      #    Windows 本机裸 go vet 亦全绿）
       - name: 后端静态检查
         run: go vet ./...
 
