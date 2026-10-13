@@ -397,3 +397,97 @@ func TestAssetTagColorFor(t *testing.T) {
 		t.Errorf("默认色应出自色板，实际 %q", c1)
 	}
 }
+
+// ---------- zip 解压上限（防 zip 炸弹 OOM）----------
+
+// buildHighlyCompressibleZip 程序化构造高压缩比 zip（单条目解压后 expanded 字节，
+// 压缩后极小），写入 dir/name 返回源路径——zip 炸弹形态的最小模拟。
+func buildHighlyCompressibleZip(t *testing.T, dir, name string, entries map[string]int) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for entry, size := range entries {
+		w, err := zw.Create(entry)
+		if err != nil {
+			t.Fatalf("构造条目 %s: %v", entry, err)
+		}
+		if _, err := w.Write(bytes.Repeat([]byte{0x00}, size)); err != nil {
+			t.Fatalf("写入条目 %s: %v", entry, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("收口 zip: %v", err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("写入样本: %v", err)
+	}
+	return p
+}
+
+// TestReadZipPackageWithLimits 解压字节上限：单条目超限与全包累计超限均报错且
+// 不再解压剩余条目；上限内正常读取；不设限（readZipPackage 透传）行为不变——
+// 拆分链路共用函数语义逐字不变的守护。
+func TestReadZipPackageWithLimits(t *testing.T) {
+	dir := t.TempDir()
+
+	// 单条目超限：1MB 上限 vs 2MB 解压体积
+	single := buildHighlyCompressibleZip(t, dir, "single.zip", map[string]int{"big.bin": 2 << 20})
+	zr, err := zip.OpenReader(single)
+	if err != nil {
+		t.Fatalf("打开样本: %v", err)
+	}
+	defer zr.Close()
+	if _, err := readZipPackageWithLimits(&zr.Reader, 1<<20, 1<<30); err == nil {
+		t.Error("单条目解压超上限应报错")
+	} else if !strings.Contains(err.Error(), "单条目上限") {
+		t.Errorf("单条目超限错误应含「单条目上限」，实际：%v", err)
+	}
+	// 恰好等于上限：不报错（多读 1 字节探测不误伤边界）
+	if _, err := readZipPackageWithLimits(&zr.Reader, 2<<20, 1<<30); err != nil {
+		t.Errorf("恰好等于上限不应报错: %v", err)
+	}
+
+	// 全包累计超限：两个 600KB 条目 vs 1MB 上限
+	multi := buildHighlyCompressibleZip(t, dir, "multi.zip", map[string]int{
+		"a.bin": 600 << 10,
+		"b.bin": 600 << 10,
+	})
+	zr2, err := zip.OpenReader(multi)
+	if err != nil {
+		t.Fatalf("打开样本: %v", err)
+	}
+	defer zr2.Close()
+	if _, err := readZipPackageWithLimits(&zr2.Reader, 1<<20, 1<<20); err == nil {
+		t.Error("全包解压累计超上限应报错")
+	} else if !strings.Contains(err.Error(), "累计超过上限") {
+		t.Errorf("累计超限错误应含「累计超过上限」，实际：%v", err)
+	}
+
+	// 不设限透传：readZipPackage 对超限样本正常读取（拆分链路行为不变）
+	if _, err := zip.OpenReader(single); err != nil {
+		t.Fatalf("重开样本: %v", err)
+	} else {
+		pkg, err := readZipPackage(&zr.Reader)
+		if err != nil {
+			t.Errorf("不设限应正常解压: %v", err)
+		} else if len(pkg.entries) != 1 || len(pkg.entries[0].data) != 2<<20 {
+			t.Errorf("不设限解压结果不符：%d 条目", len(pkg.entries))
+		}
+	}
+}
+
+// TestParsePptxSlides_ZipLimitCorrupted 超限样本经解析链路按「文件损坏」分类
+// 降级（不中断批量的既定语义），错误链保留上限根因。
+func TestParsePptxSlides_ZipLimitCorrupted(t *testing.T) {
+	dir := t.TempDir()
+	src := buildHighlyCompressibleZip(t, dir, "炸弹.pptx", map[string]int{"huge.bin": 300 << 20})
+	_, err := parsePptxSlides(src, "炸弹")
+	var pe *assetParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("应返回带分类的解析错误，实际：%v", err)
+	}
+	if pe.kind != assetParseCorrupted {
+		t.Errorf("超限应按文件损坏分类，实际 kind=%q", pe.kind)
+	}
+}

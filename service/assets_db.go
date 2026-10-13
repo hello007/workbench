@@ -424,15 +424,22 @@ func (s *assetsStore) listFileTagGroups() (map[int64][]model.AssetTag, error) {
 	return groups, rows.Err()
 }
 
-// listSlideEntries 幻灯片索引条目（按文件路径 + 页序），标签继承归属文件。
-// rows 在标签查询前显式关闭：单连接池下未关先查会自锁（见 libraryStats 注释）。
-func (s *assetsStore) listSlideEntries() ([]model.AssetSlideEntry, error) {
+// listSlideEntries 幻灯片索引条目分页（按文件路径 + 页序），标签继承归属文件。
+// 分页契约对齐 SearchAssets：Total 为总条目数（不随页变化），翻页以 offset 递增
+// limit 驱动。rows 在标签查询前显式关闭：单连接池下未关先查会自锁（见
+// libraryStats 注释）；COUNT 走 QueryRow+Scan（自动排空）先于分页查询发出。
+func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage, error) {
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&total); err != nil {
+		return model.AssetSlidePage{}, err
+	}
 	rows, err := s.db.Query(
 		"SELECT s.id, s.file_id, f.path, s.slide_num, s.title, s.text, s.speaker_notes " +
-			"FROM slides s JOIN files f ON f.id = s.file_id ORDER BY f.path, s.slide_num",
+			"FROM slides s JOIN files f ON f.id = s.file_id ORDER BY f.path, s.slide_num LIMIT ? OFFSET ?",
+		limit, offset,
 	)
 	if err != nil {
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
 
 	entries := make([]model.AssetSlideEntry, 0)
@@ -441,7 +448,7 @@ func (s *assetsStore) listSlideEntries() ([]model.AssetSlideEntry, error) {
 		var e model.AssetSlideEntry
 		if err := rows.Scan(&e.ID, &e.FileID, &e.FilePath, &e.SlideNum, &e.Title, &e.Text, &e.SpeakerNotes); err != nil {
 			_ = rows.Close()
-			return nil, err
+			return model.AssetSlidePage{}, err
 		}
 		e.Tags = []model.AssetTag{}
 		idIndex[e.ID] = len(entries)
@@ -449,15 +456,15 @@ func (s *assetsStore) listSlideEntries() ([]model.AssetSlideEntry, error) {
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
 
 	tagsByFile, err := s.listFileTagGroups()
 	if err != nil {
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
 	for i := range entries {
 		entries[i].Tags = tagsByFile[entries[i].FileID]
@@ -465,7 +472,7 @@ func (s *assetsStore) listSlideEntries() ([]model.AssetSlideEntry, error) {
 			entries[i].Tags = []model.AssetTag{}
 		}
 	}
-	return entries, nil
+	return model.AssetSlidePage{Items: entries, Total: total}, nil
 }
 
 // updateFileMeta 文件级元数据整体替换（单事务）：星级/备注 + 标签集重建；

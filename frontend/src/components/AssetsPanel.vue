@@ -1,10 +1,13 @@
 <!-- frontend/src/components/AssetsPanel.vue -->
 <!-- 素材管理面板（活动栏一级入口）：本地 DAM 素材索引库 MVP 前端。
      数据链路：库切换（ListAssetLibraries）→ 文件清单（ListAssetFiles，兼作标签聚合
-     与幻灯片溯源的文件底册）+ 幻灯片清单（ListAssetSlides，按需加载）→ 关键词/标签
-     检索（SearchAssets，分页懒加载 + 同 PPT 聚合折叠）→ 文件级元数据编辑
-     （UpdateAssetFileMeta 整体替换）→ 扫描/重建（StartAssetScan/RebuildAssetLibrary，
-     进度经 assets-scan:* 事件推送、可取消）。
+     与幻灯片溯源的文件底册）+ 幻灯片清单（ListAssetSlides，limit/offset 分页懒加载）
+     → 关键词/标签检索（SearchAssets，分页懒加载 + 同 PPT 聚合折叠）→ 文件级元数据
+     编辑（UpdateAssetFileMeta 整体替换）→ 扫描/重建（StartAssetScan/RebuildAssetLibrary，
+     进度经 assets-scan:* 事件推送、可取消；done 事件仅复位进度，数据刷新由扫描
+     Promise 成功分支统一执行防双拉取）。
+     异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
+     比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
      根元素保持完整 flex 约束链（flex:1 + min-height:0 + min-width:0 + display:flex +
      flex-direction:column + overflow:hidden），防面板塌陷挤压终端（frontend-visual-conventions）。 -->
@@ -124,8 +127,8 @@
         >
           <el-button type="primary" @click="onScan">开始扫描</el-button>
         </el-empty>
-        <!-- 空态三：检索无结果 -->
-        <el-empty v-else-if="searchMode && !loading && displayCards.length === 0" description="没有匹配的素材，换个关键词或筛选条件试试" />
+        <!-- 空态三：检索无结果（命中存在但被当前视图类型过滤时给切换引导） -->
+        <el-empty v-else-if="searchMode && !loading && displayCards.length === 0" :description="searchEmptyText" />
         <!-- 空态四：视图无数据（如幻灯片视图下未扫描/无页面） -->
         <el-empty v-else-if="hasLibrary && !loading && !searchMode && browseCards.length === 0 && stats && stats.fileCount > 0" description="该视图下暂无条目" />
 
@@ -157,7 +160,7 @@
             </div>
             <!-- 聚合条目展开态：同 PPT 的逐页命中（点击聚合卡切换展开/收起） -->
             <div v-if="card.hitCount > 1 && isAggExpanded(card.filePath)" class="agg-children" @click.stop>
-              <div v-if="aggLoading === card.filePath" class="agg-loading">加载命中页…</div>
+              <div v-if="aggLoadingPaths.includes(card.filePath)" class="agg-loading">加载命中页…</div>
               <div
                 v-for="child in aggChildren[card.filePath] || []"
                 :key="child.key"
@@ -309,11 +312,19 @@ import {
   OpenDirectoryDialog
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import { handleError } from '../utils/error'
+import { handleError, ErrorCode } from '../utils/error'
 import AssetsIcon from './icons/AssetsIcon.vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
+
+// ---- 异步写回守卫（跨库串入防护，参照 useCommandPalette searchVersion 模式）----
+// librarySeq：库数据代次，库切换落定 / 扫描刷新（resetAndReloadView）时自增；
+// 统计与清单写回前比对，代次已变（期间又切库/刷新）即丢弃旧响应。
+// searchSeq：检索代次，语境变更点（applySearch/切库/扫描刷新/平铺切换/退出检索）
+// 自增；检索结果写回前比对，不一致丢弃——防慢响应把旧库/旧词结果串入新语境。
+let librarySeq = 0
+let searchSeq = 0
 
 // ---- 库状态 ----
 const libraries = ref([])
@@ -329,7 +340,8 @@ const selectedTagIds = ref([]) // 标签筛选（非空即检索模式）
 
 // ---- 数据 ----
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
-const slideEntries = ref([]) // 幻灯片清单（幻灯片视图数据源，按需加载）
+const slideEntries = ref([]) // 幻灯片清单累计条目（幻灯片视图数据源，分页懒加载追加）
+const slideTotal = ref(0) // 幻灯片清单总条目数（分页懒加载判定，对齐后端 ListAssetSlides total）
 const searchItems = ref([]) // 检索结果累计条目（懒加载追加）
 const searchTotal = ref(0) // 检索总条目数（过滤/聚合后口径）
 const loading = ref(false)
@@ -347,7 +359,7 @@ const scanProgress = ref(null) // assets-scan:progress 载荷 {libraryId, done, 
 // ---- 聚合展开态 ----
 const expandedAggPaths = ref([]) // 已展开聚合条目的文件路径集合
 const aggChildren = ref({}) // 文件路径 -> 展开的逐页命中卡片
-const aggLoading = ref('') // 正在加载命中页的文件路径
+const aggLoadingPaths = ref([]) // 正在加载命中页的文件路径集合（Set 语义，并发展开互不覆盖）
 
 // ---- 新建库弹窗 ----
 const createDialogVisible = ref(false)
@@ -425,6 +437,22 @@ const displayCards = computed(() => (searchMode.value ? searchCards.value : brow
 
 const canLoadMore = computed(() => searchMode.value && searchItems.value.length < searchTotal.value)
 
+// 浏览模式幻灯片视图的分页懒加载判定（文件视图为全量清单无分页）
+const canLoadMoreSlides = computed(() =>
+  !searchMode.value && viewMode.value === 'slide' && slideEntries.value.length < slideTotal.value
+)
+
+// 检索空态文案：命中存在但当前视图类型过滤后为空时给引导。审核 11 的最小改法
+// 取舍——选引导文案而非把 searchTotal 改为按视图过滤口径：searchTotal 同时驱动
+// 懒加载判定（canLoadMore 依赖后端混合类型 total），改口径会破坏分页判定；切换
+// 视图 / 开启平铺即可见全部命中，文案引导直达。
+const searchEmptyText = computed(() => {
+  if (searchTotal.value > 0) {
+    return `已命中 ${searchTotal.value} 条，但当前视图类型下没有可展示条目，试试切换文件/幻灯片视图或开启「平铺」`
+  }
+  return '没有匹配的素材，换个关键词或筛选条件试试'
+})
+
 // ---- 详情面板展示计算 ----
 const detailTitle = computed(() => {
   if (!selected.value) return ''
@@ -471,6 +499,14 @@ const formatSize = (bytes) => {
 
 // ================= 数据加载 =================
 
+// 库不存在（已在别处删除、前端列表过期）判定：自愈路径静默重拉库列表并重新
+// 落定剩余库，不弹错误（error.js 对 E_ASSETS_LIB_NOT_FOUND 的行为承诺落地）
+const isLibNotFound = (error) => error?.code === ErrorCode.AssetsLibNotFound
+
+// 库代次守卫判定：seq 为 null 的调用方（无守卫语境）恒允许写回；否则须与当前
+// 库代次一致（期间又切库/刷新即丢弃旧响应）
+const librarySeqAlive = (seq) => seq === null || seq === librarySeq
+
 const loadLibraries = async () => {
   try {
     libraries.value = (await ListAssetLibraries()) || []
@@ -484,25 +520,46 @@ const loadLibraries = async () => {
   }
 }
 
-// 库选择落定后的统一加载：统计 + 文件底册 + 当前视图（清旧库残留数据防串库）
-const onLibrarySelectionSettled = async () => {
+// 库选择落定后的统一加载（库切换 / 新建库 / 删除库回退共用入口）
+const onLibrarySelectionSettled = () => resetAndReloadView()
+
+// 库数据整体重载（库切换落定 / 扫描重建完成共用）：清全部视图状态 + 并行拉取
+// 统计 / 当前视图 / 文件底册。底册是标签聚合（tagOptions）与溯源定位的共用数据
+// 源，幻灯片/检索视图下也预载，防标签筛选选项恒空与点击兜底反复触发；文件浏览
+// 视图下由 loadView 自带底册加载，不重复拉取。seq 守卫：期间再次切库/刷新时旧
+// 库响应全部丢弃（审核 8：跨库串入防护）。
+const resetAndReloadView = async () => {
+  const seq = ++librarySeq
+  searchSeq++ // 语境变更点：在途检索/旧库清单写回全部失效
   stats.value = null
   fileEntries.value = []
   slideEntries.value = []
+  slideTotal.value = 0
   searchItems.value = []
   searchTotal.value = 0
   expandedAggPaths.value = []
   aggChildren.value = {}
+  aggLoadingPaths.value = []
   closeDetail()
   if (!hasLibrary.value) return
-  await Promise.all([loadStats(), loadView()])
+  const fileViewLoadedHere = viewMode.value === 'file' && !searchMode.value
+  const tasks = [loadStats(seq), loadView(seq)]
+  if (!fileViewLoadedHere) tasks.push(ensureFileEntries(seq))
+  await Promise.all(tasks)
 }
 
-const loadStats = async () => {
+const loadStats = async (seq = null) => {
   if (!hasLibrary.value) return
   try {
-    stats.value = await GetAssetLibraryStats(currentLibraryId.value)
+    const result = await GetAssetLibraryStats(currentLibraryId.value)
+    if (!librarySeqAlive(seq)) return // 库代次已变：旧库统计丢弃防串库
+    stats.value = result
   } catch (error) {
+    if (!librarySeqAlive(seq)) return
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
     handleError('加载库统计失败: ', error)
   }
 }
@@ -510,7 +567,8 @@ const loadStats = async () => {
 const onLibraryChange = () => onLibrarySelectionSettled()
 
 // 当前视图数据加载：检索模式重跑检索（复位分页），浏览模式按视图拉清单
-const loadView = async () => {
+// （文件视图全量、幻灯片视图分页首页）
+const loadView = async (seq = null) => {
   if (searchMode.value) {
     await runSearch(true)
     return
@@ -518,23 +576,70 @@ const loadView = async () => {
   loading.value = true
   try {
     if (viewMode.value === 'file') {
-      fileEntries.value = (await ListAssetFiles(currentLibraryId.value)) || []
+      const entries = await ListAssetFiles(currentLibraryId.value)
+      if (!librarySeqAlive(seq)) return
+      fileEntries.value = entries || []
     } else {
-      slideEntries.value = (await ListAssetSlides(currentLibraryId.value)) || []
+      await loadSlidesPage(true, seq)
     }
   } catch (error) {
+    if (!librarySeqAlive(seq)) return
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
     handleError('加载素材列表失败: ', error)
   } finally {
     loading.value = false
   }
 }
 
-// 文件底册加载：标签聚合 / 溯源定位 / 文件视图共用（库切换与扫描完成后均刷新）
-const ensureFileEntries = async () => {
+// 幻灯片清单分页加载（后端分页契约对齐 SearchAssets：limit/offset 驱动翻页，
+// total 恒为总条目数）。reset=true 拉首页并复位累计；false 追加下一页（懒加载）。
+// seq 库代次守卫：写回前比对，期间切库即丢弃旧库响应；未显式传代的调用点
+// （画廊滚动追加）在调用时快照当前库代次，滚动加载在途切库同样被拦截。
+const loadSlidesPage = async (reset, seq = null) => {
+  if (seq === null) seq = librarySeq
+  // 追加页在途置 loadingMore：滚动事件在途窗口内连续触发时被 onGalleryScroll
+  // 的防重检查拦截（offset 以已加载条目数计算，重复触发会追加重复条目）
+  if (!reset) loadingMore.value = true
+  try {
+    const page = await ListAssetSlides(
+      currentLibraryId.value,
+      PAGE_SIZE,
+      reset ? 0 : slideEntries.value.length
+    )
+    if (!librarySeqAlive(seq)) return
+    const items = page?.items || []
+    slideEntries.value = reset ? items : slideEntries.value.concat(items)
+    slideTotal.value = page?.total || 0
+  } catch (error) {
+    if (!librarySeqAlive(seq)) return
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
+    handleError('加载幻灯片列表失败: ', error)
+  } finally {
+    if (!reset) loadingMore.value = false
+  }
+}
+
+// 文件底册加载：标签聚合 / 溯源定位 / 文件视图共用（库切换与扫描完成后均刷新）。
+// seq 未显式传代（如溯源点击）时在调用时快照当前库代次，await 期间切库写回被拦截。
+const ensureFileEntries = async (seq = null) => {
+  if (seq === null) seq = librarySeq
   if (fileEntries.value.length > 0) return
   try {
-    fileEntries.value = (await ListAssetFiles(currentLibraryId.value)) || []
+    const entries = await ListAssetFiles(currentLibraryId.value)
+    if (!librarySeqAlive(seq)) return
+    fileEntries.value = entries || []
   } catch (error) {
+    if (!librarySeqAlive(seq)) return
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
     handleError('加载文件列表失败: ', error)
   }
 }
@@ -543,10 +648,12 @@ const ensureFileEntries = async () => {
 
 // 应用搜索条件：输入框值落定为 activeKeyword；关键词与标签全空则退出检索回浏览
 const applySearch = async () => {
+  searchSeq++ // 语境变更点：改词/改筛选使在途检索写回失效
   activeKeyword.value = keywordInput.value.trim()
   closeDetail()
   expandedAggPaths.value = []
   aggChildren.value = {}
+  aggLoadingPaths.value = []
   if (!searchMode.value) {
     await loadView()
     return
@@ -554,7 +661,9 @@ const applySearch = async () => {
   await runSearch(true)
 }
 
-// 检索执行：reset=true 复位分页从头加载；false 追加下一页（懒加载）
+// 检索执行：reset=true 复位分页从头加载；false 追加下一页（懒加载）。
+// 检索代次守卫：语境变更点已自增 searchSeq，此处捕获当前值，写回前比对，不一致
+// （期间改词重搜/切库/刷新）丢弃旧响应，防慢响应把旧语境结果串入新视图。
 const runSearch = async (reset) => {
   if (!hasLibrary.value) return
   if (reset) {
@@ -562,6 +671,7 @@ const runSearch = async (reset) => {
   } else {
     loadingMore.value = true
   }
+  const capturedSeq = searchSeq
   try {
     const page = await SearchAssets(currentLibraryId.value, activeKeyword.value.trim(), {
       flatten: flatten.value,
@@ -569,6 +679,7 @@ const runSearch = async (reset) => {
       limit: PAGE_SIZE,
       offset: reset ? 0 : searchItems.value.length
     })
+    if (searchSeq !== capturedSeq) return // 语境已变：旧检索响应丢弃
     const items = (page?.items || []).map(hit => ({
       key: `hit-${hit.refType}-${hit.refId}`,
       kind: hit.refType,
@@ -590,6 +701,7 @@ const runSearch = async (reset) => {
     }
     searchTotal.value = page?.total || 0
   } catch (error) {
+    if (searchSeq !== capturedSeq) return // 语境已变：旧检索失败静默丢弃（错误也属旧语境）
     handleError('检索失败: ', error)
   } finally {
     loading.value = false
@@ -597,30 +709,40 @@ const runSearch = async (reset) => {
   }
 }
 
-// 画廊滚动到底部增量加载（仅检索模式分页；浏览模式为全量清单无分页）
+// 画廊滚动到底部增量加载：检索模式加载检索下一页；浏览模式幻灯片视图加载清单
+// 下一页（文件视图为全量清单无分页）
 const onGalleryScroll = () => {
   const el = galleryRef.value
-  if (!el || !searchMode.value || loadingMore.value || loading.value || !canLoadMore.value) return
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
-    runSearch(false)
+  if (!el || loading.value) return
+  if (el.scrollTop + el.clientHeight < el.scrollHeight - 80) return
+  if (searchMode.value) {
+    if (!loadingMore.value && canLoadMore.value) runSearch(false)
+  } else if (viewMode.value === 'slide' && !loadingMore.value && canLoadMoreSlides.value) {
+    loadSlidesPage(false)
   }
 }
 
 const onFlattenChange = () => {
   // 平铺开关只影响检索聚合形态；展开态随形态切换失效
+  searchSeq++ // 语境变更点：聚合形态变化使在途检索写回失效
   expandedAggPaths.value = []
   aggChildren.value = {}
+  aggLoadingPaths.value = []
   if (searchMode.value) {
     runSearch(true)
   }
 }
 
 const onViewModeChange = () => {
-  // 视图切换：检索模式为客户端类型过滤（displayCards 已响应），浏览模式需拉对应清单
+  // 视图切换：检索模式为客户端类型过滤（displayCards 已响应）；浏览模式目标清单
+  // 为空即拉取——覆盖「库切换/扫描落定在幻灯片视图后切回文件视图」时文件底册未
+  // 加载（审核 9 同根因）与幻灯片清单未加载两种形态
   closeDetail()
-  if (!searchMode.value && viewMode.value === 'slide') {
-    loadView()
-  }
+  if (searchMode.value) return
+  const targetEmpty = viewMode.value === 'file'
+    ? fileEntries.value.length === 0
+    : slideEntries.value.length === 0
+  if (targetEmpty) loadView()
 }
 
 // ---- 聚合条目展开/收起：按归属文件路径懒加载逐页命中（flatten 检索后客户端过滤）----
@@ -633,14 +755,25 @@ const toggleAgg = async (filePath) => {
   }
   expandedAggPaths.value = expandedAggPaths.value.concat(filePath)
   if (aggChildren.value[filePath]) return
-  aggLoading.value = filePath
+  // 加载态按路径记录（Set 语义，并发展开多卡片互不覆盖，审核 13）；写回前比对
+  // 发起时的检索条件与库代次，条件已变（改词/改筛选/切库）丢弃旧响应，防陈旧
+  // 命中页写入新语境（aggChildren 残留会被 toggleAgg 早退命中，同路径跨库串数据）
+  aggLoadingPaths.value = aggLoadingPaths.value.concat(filePath)
+  const keywordAtStart = activeKeyword.value.trim()
+  const tagsAtStart = [...selectedTagIds.value]
+  const libSeqAtStart = librarySeq
+  const contextChanged = () => libSeqAtStart !== librarySeq ||
+    keywordAtStart !== activeKeyword.value.trim() ||
+    tagsAtStart.length !== selectedTagIds.value.length ||
+    tagsAtStart.some((tagId, i) => tagId !== selectedTagIds.value[i])
   try {
-    const page = await SearchAssets(currentLibraryId.value, activeKeyword.value.trim(), {
+    const page = await SearchAssets(currentLibraryId.value, keywordAtStart, {
       flatten: true,
-      tagIds: selectedTagIds.value,
+      tagIds: tagsAtStart,
       limit: 200,
       offset: 0
     })
+    if (contextChanged()) return // 检索条件已变：旧聚合响应丢弃
     const children = (page?.items || [])
       .filter(hit => hit.refType === 'slide' && hit.filePath === filePath)
       .map(hit => ({
@@ -659,9 +792,10 @@ const toggleAgg = async (filePath) => {
       }))
     aggChildren.value = { ...aggChildren.value, [filePath]: children }
   } catch (error) {
+    if (contextChanged()) return // 条件已变：旧聚合失败静默丢弃
     handleError('加载命中页失败: ', error)
   } finally {
-    aggLoading.value = ''
+    aggLoadingPaths.value = aggLoadingPaths.value.filter(p => p !== filePath)
   }
 }
 
@@ -747,6 +881,7 @@ const onSaveMeta = async () => {
 const traceToSourceFile = async () => {
   const fileId = selected.value?.slideEntry?.fileId ?? selected.value?.hit?.fileId
   if (!fileId) return
+  searchSeq++ // 语境变更点：退出检索使在途检索写回失效
   activeKeyword.value = ''
   keywordInput.value = ''
   selectedTagIds.value = []
@@ -906,17 +1041,9 @@ const scanResultSummary = (prefix, result) => {
   return `${prefix}：共 ${result.total ?? 0} 个文件（${parts.join('，')}）`
 }
 
-// 扫描/重建完成后刷新：统计 + 文件底册 + 当前视图（清聚合展开态与详情防陈旧）
-const refreshAfterScan = async () => {
-  expandedAggPaths.value = []
-  aggChildren.value = {}
-  closeDetail()
-  fileEntries.value = []
-  slideEntries.value = []
-  searchItems.value = []
-  searchTotal.value = 0
-  await Promise.all([loadStats(), loadView()])
-}
+// 扫描/重建完成后刷新（数据刷新唯一入口：done 事件回调仅复位进度态，审核 12
+// 防双路径各拉一次全量清单）；语义与库切换落定一致
+const refreshAfterScan = () => resetAndReloadView()
 
 // ================= 扫描事件（assets-scan:*）=================
 // EventsOn 返回注销闭包，onBeforeUnmount 精准注销本组件监听器（禁 EventsOff 全局移除）
@@ -929,10 +1056,12 @@ const onScanProgress = (payload) => {
   scanProgress.value = payload
 }
 
-const onScanDone = async (payload) => {
+const onScanDone = (payload) => {
   if (!payload || payload.libraryId !== currentLibraryId.value) return
-  // 终态数据刷新（提示文案由扫描 Promise 统一给出，此处不弹消息防双弹）
-  await refreshAfterScan()
+  // 仅复位进度展示；数据刷新由扫描/重建 Promise 成功分支的 refreshAfterScan 统一
+  // 执行——done 事件先于 Promise 返回到达，双路径各刷一次会使大库全量清单拉取
+  // 翻倍（审核 12：二选一，Promise 分支为准）
+  scanProgress.value = null
 }
 
 const onScanError = (payload) => {

@@ -488,7 +488,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `CancelAssetScan` | `(libraryID) => Promise<boolean>` | 取消指定库在途扫描（幂等，无在途扫描返回 false） | boolean |
 | `RebuildAssetLibrary` | `(libraryID) => Promise<AssetScanResult>` | 手动全量重建（清该库文件/幻灯片/FTS 记录后全量重扫；文件标签按相对路径重绑，星级/备注不保留；索引自愈入口） | AssetScanResult |
 | `ListAssetFiles` | `(libraryID) => Promise<AssetFileEntry[]>` | 文件索引条目（含标签，按相对路径序；画廊文件视图数据源） | AssetFileEntry[] |
-| `ListAssetSlides` | `(libraryID) => Promise<AssetSlideEntry[]>` | 幻灯片索引条目（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准） | AssetSlideEntry[] |
+| `ListAssetSlides` | `(libraryID, limit, offset) => Promise<AssetSlidePage>` | 幻灯片索引条目分页（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准；limit ≤0 取 50 上限 200、offset<0 按 0，total 恒为总条目数） | AssetSlidePage |
 | `UpdateAssetFileMeta` | `(libraryID, fileID, meta: AssetFileMetaUpdate) => Promise<void>` | 文件级元数据编辑（整体替换：星级 0-5（0 清除）、备注、标签集（不存在的标签自动创建并分配默认色）） | — |
 | `SearchAssets` | `(libraryID, keyword, opts: AssetSearchOptions) => Promise<AssetSearchPage>` | 素材检索：关键词全文检索（bm25 列加权 文件名 > 幻灯片标题 > 页文本 > 备注，CJK 按字切分 phrase 匹配）与标签筛选（文件直接绑定、幻灯片继承归属文件）可组合；`flatten=false` 同 PPT 多页命中折叠为聚合条目 | AssetSearchPage |
 

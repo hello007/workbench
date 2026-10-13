@@ -160,24 +160,52 @@ type pptxPackage struct {
 	byName  map[string]*zipEntry
 }
 
-// readZipPackage 读取 zip 全部条目解压进内存。
+// readZipPackage 读取 zip 全部条目解压进内存（不设字节上限，拆分链路既有语义
+// 逐字不变——拆分入口已有文件级校验且为用户主动单文件操作）。
 func readZipPackage(r *zip.Reader) (*pptxPackage, error) {
+	return readZipPackageWithLimits(r, 0, 0)
+}
+
+// readZipPackageWithLimits 带字节上限的 zip 全量解压：maxEntryBytes 限单条目
+// 解压体积，maxTotalBytes 限全部条目解压累计体积；两者 ≤0 表示不设限（透传为
+// readZipPackage 的无限语义）。超限立即返回错误（不再继续解压剩余条目），调用
+// 方按自身语义分类降级（素材索引侧按「文件损坏」处理）。
+//
+// 上限用途：素材目录扫描批量解析外来 pptx，畸形包（zip 炸弹：压缩后极小、解压
+// 后巨大）无上限解压会拖垮进程内存；真实演示文稿解压量级为数十 MB（媒体为主），
+// 上限给足裕量仅拦截异常形态。
+func readZipPackageWithLimits(r *zip.Reader, maxEntryBytes, maxTotalBytes int64) (*pptxPackage, error) {
 	pkg := &pptxPackage{
 		entries: make([]zipEntry, 0, len(r.File)),
 		byName:  make(map[string]*zipEntry, len(r.File)),
 	}
+	var total int64
 	for _, f := range r.File {
 		rc, err := f.Open()
 		if err != nil {
 			return nil, fmt.Errorf("打开 %s 失败: %w", f.Name, err)
 		}
-		data, readErr := io.ReadAll(rc)
+		var data []byte
+		var readErr error
+		if maxEntryBytes > 0 {
+			// 多读 1 字节探测超限（LimitReader 读满即截断，无法区分「恰好等于上限」）
+			data, readErr = io.ReadAll(io.LimitReader(rc, maxEntryBytes+1))
+		} else {
+			data, readErr = io.ReadAll(rc)
+		}
 		closeErr := rc.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("读取 %s 失败: %w", f.Name, readErr)
 		}
 		if closeErr != nil {
 			return nil, fmt.Errorf("关闭 %s 失败: %w", f.Name, closeErr)
+		}
+		if maxEntryBytes > 0 && int64(len(data)) > maxEntryBytes {
+			return nil, fmt.Errorf("条目 %s 解压后超过单条目上限（%d 字节）", f.Name, maxEntryBytes)
+		}
+		total += int64(len(data))
+		if maxTotalBytes > 0 && total > maxTotalBytes {
+			return nil, fmt.Errorf("全部条目解压累计超过上限（%d 字节）", maxTotalBytes)
 		}
 		pkg.entries = append(pkg.entries, zipEntry{name: f.Name, method: f.Method, modified: f.Modified, data: data})
 		pkg.byName[f.Name] = &pkg.entries[len(pkg.entries)-1]

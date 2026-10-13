@@ -218,7 +218,7 @@ describe('AssetsPanel', () => {
     wailsMock.ListAssetLibraries.mockResolvedValue([mockLibrary])
     wailsMock.GetAssetLibraryStats.mockResolvedValue(mockStats)
     wailsMock.ListAssetFiles.mockResolvedValue(mockFiles)
-    wailsMock.ListAssetSlides.mockResolvedValue(mockSlides)
+    wailsMock.ListAssetSlides.mockResolvedValue({ items: mockSlides, total: mockSlides.length })
     wailsMock.SearchAssets.mockResolvedValue(mockSearchPage)
     wailsMock.StartAssetScan.mockResolvedValue({ total: 2, new: 1, updated: 1, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 })
     wailsMock.RebuildAssetLibrary.mockResolvedValue({ total: 2, new: 2, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 })
@@ -270,18 +270,57 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.assets-stats-line').text()).toContain('幻灯片 3')
   })
 
-  it('视图切换到幻灯片视图：调用 ListAssetSlides 并渲染页码卡片', async () => {
+  it('视图切换到幻灯片视图：按分页参数调用 ListAssetSlides 并渲染页码卡片', async () => {
     const wrapper = await createWrapper()
     const group = wrapper.findComponent(ElRadioGroupStub)
     await group.vm.$emit('update:modelValue', 'slide')
     await group.vm.$emit('change', 'slide')
     await flushPromises()
 
-    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1')
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1', 50, 0)
     const cards = wrapper.findAll('.asset-card')
     expect(cards.length).toBe(2)
     expect(cards[0].text()).toContain('幻灯片')
     expect(cards[0].text()).toContain('第 1 页')
+  })
+
+  it('幻灯片视图分页懒加载：滚动到底部以 offset 追加下一页', async () => {
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: mockSlides, total: 4 })
+      return Promise.resolve({ items: [{ ...mockSlides[0], id: 23, slideNum: 3 }], total: 4 })
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+
+    // 滚动到底部触发下一页（offset = 已加载条目数）
+    const gallery = wrapper.find('.assets-gallery')
+    Object.defineProperty(gallery.element, 'scrollHeight', { value: 500, configurable: true })
+    Object.defineProperty(gallery.element, 'clientHeight', { value: 400, configurable: true })
+    gallery.element.scrollTop = 150
+    await gallery.trigger('scroll')
+    await flushPromises()
+
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 2)
+    expect(wrapper.findAll('.asset-card').length).toBe(3)
+  })
+
+  it('视图切换兜底：目标视图清单为空即重新拉取（文件空底册切走再切回）', async () => {
+    wailsMock.ListAssetFiles.mockResolvedValue([]) // 文件底册为空（如空库）
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    // 切到幻灯片视图（幻灯片清单加载）
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    // 切回文件视图：底册为空应触发兜底拉取（审核 9 同根因）
+    await group.vm.$emit('update:modelValue', 'file')
+    await group.vm.$emit('change', 'file')
+    await flushPromises()
+    expect(wailsMock.ListAssetFiles).toHaveBeenCalledTimes(2)
   })
 
   it('搜索（文件视图）：以当前库与关键词调用 SearchAssets（分页参数对齐），仅渲染文件命中并带类型标记与命中摘要', async () => {
@@ -463,8 +502,9 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.el-rate').exists()).toBe(true)
   })
 
-  it('扫描：进度事件按库 ID 过滤更新进度条，done 事件触发视图刷新，可取消', async () => {
-    wailsMock.StartAssetScan.mockReturnValue(new Promise(() => {}))
+  it('扫描：进度事件按库过滤更新进度条，done 事件仅复位进度（数据刷新由 Promise 分支统一执行防双拉取），可取消', async () => {
+    let resolveScan
+    wailsMock.StartAssetScan.mockImplementation(() => new Promise((resolve) => { resolveScan = resolve }))
     const wrapper = await createWrapper()
     const filesCallsBefore = wailsMock.ListAssetFiles.mock.calls.length
 
@@ -483,15 +523,23 @@ describe('AssetsPanel', () => {
     await flushPromises()
     expect(wrapper.find('.scan-progress').text()).toContain('扫描中 2/5')
 
-    // done 事件刷新当前视图（ListAssetFiles 再被调用）
+    // done 事件到达：仅复位进度展示，不触发数据刷新（审核 12：双刷新二选一，
+    // 防大库全量清单拉取翻倍）
     eventHandlers['assets-scan:done']({ libraryId: 'lib-1', result: { total: 5, new: 2, updated: 1, unchanged: 2, failed: 0, encrypted: 0, denied: 0, removed: 0 } })
+    await flushPromises()
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBe(filesCallsBefore)
+    expect(wrapper.find('.scan-progress').text()).toContain('正在准备扫描')
+
+    // 扫描 Promise 仍在途（scanning=true）：取消入口可用
+    await clickButton(wrapper, '取消扫描')
+    expect(wailsMock.CancelAssetScan).toHaveBeenCalledWith('lib-1')
+
+    // Promise 落定：统一执行数据刷新（唯一刷新路径）
+    resolveScan({ total: 5, new: 2, updated: 1, unchanged: 2, failed: 0, encrypted: 0, denied: 0, removed: 0 })
     await flushPromises()
     expect(wailsMock.ListAssetFiles.mock.calls.length).toBe(filesCallsBefore + 1)
     expect(wailsMock.GetAssetLibraryStats.mock.calls.length).toBe(2)
-
-    // 取消扫描
-    await clickButton(wrapper, '取消扫描')
-    expect(wailsMock.CancelAssetScan).toHaveBeenCalledWith('lib-1')
+    expect(wrapper.find('.scan-progress').exists()).toBe(false)
   })
 
   it('扫描完成：Promise 返回结果汇总提示（新增/更新口径）', async () => {
@@ -600,5 +648,230 @@ describe('AssetsPanel', () => {
     // 删除后自动切换到剩余库并加载其数据
     expect(wailsMock.GetAssetLibraryStats).toHaveBeenCalledWith('lib-2')
     expect(wailsMock.ListAssetFiles).toHaveBeenCalledWith('lib-2')
+  })
+
+  // ---- 异步写回守卫（审核 8：跨库串入 / 慢响应覆写防护）----
+
+  it('版本守卫：库切换在途时旧库统计响应写回被丢弃（不覆写新库统计）', async () => {
+    const stats2 = { libraryId: 'lib-2', fileCount: 7, slideCount: 9, failedCount: 0, encryptedCount: 0 }
+    const stats3 = { libraryId: 'lib-3', fileCount: 1, slideCount: 1, failedCount: 0, encryptedCount: 0 }
+    let resolveStats2
+    wailsMock.GetAssetLibraryStats.mockImplementation((id) => {
+      if (id === 'lib-2') return new Promise((resolve) => { resolveStats2 = () => resolve(stats2) })
+      return Promise.resolve(id === 'lib-3' ? stats3 : mockStats)
+    })
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '库二' },
+      { ...mockLibrary, id: 'lib-3', name: '库三' }
+    ])
+    const wrapper = await createWrapper()
+    const select = wrapper.findComponent(ElSelectStub)
+
+    // 切到 lib-2（统计响应挂起），未落定即再切 lib-3（快速落定）
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+    await select.vm.$emit('update:modelValue', 'lib-3')
+    await select.vm.$emit('change', 'lib-3')
+    await flushPromises()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('文件 1') // lib-3
+
+    // lib-2 慢响应后到：库代次已变，不得覆写 lib-3 统计
+    resolveStats2()
+    await flushPromises()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('文件 1')
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('文件 7')
+  })
+
+  it('版本守卫：检索在途时改词重搜，旧检索响应写回被丢弃', async () => {
+    let resolveSlowSearch
+    wailsMock.SearchAssets.mockImplementation((libId, keyword) => {
+      if (keyword === '慢词') {
+        return new Promise((resolve) => { resolveSlowSearch = () => resolve({ ...mockSearchPage, total: 99, keyword }) })
+      }
+      return Promise.resolve({ items: [], total: 5, keyword, flattened: false })
+    })
+    const wrapper = await createWrapper()
+
+    // 「慢词」检索在途，改词重搜「快词」（快速落定 命中 5）
+    await wrapper.find('input').setValue('慢词')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await wrapper.find('input').setValue('快词')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('命中 5 条')
+
+    // 旧词慢响应后到：检索代次已变，不得覆写新词结果
+    resolveSlowSearch()
+    await flushPromises()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('命中 5 条')
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('命中 99')
+  })
+
+  it('版本守卫：幻灯片滚动追加在途时切库，旧库追加响应丢弃（滚动路径受库代次守卫）', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '库二' }
+    ])
+    let resolveSlowAppend
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (libId === 'lib-1' && offset > 0) {
+        return new Promise((resolve) => {
+          resolveSlowAppend = () => resolve({ items: [{ ...mockSlides[0], id: 23, slideNum: 3 }], total: 4 })
+        })
+      }
+      if (libId === 'lib-2') return Promise.resolve({ items: [], total: 0 })
+      return Promise.resolve({ items: mockSlides, total: 4 })
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+
+    // 滚动触发下一页追加（响应挂起在途）
+    const gallery = wrapper.find('.assets-gallery')
+    Object.defineProperty(gallery.element, 'scrollHeight', { value: 500, configurable: true })
+    Object.defineProperty(gallery.element, 'clientHeight', { value: 400, configurable: true })
+    gallery.element.scrollTop = 150
+    await gallery.trigger('scroll')
+
+    // 追加在途切到 lib-2（空库）
+    const select = wrapper.findComponent(ElSelectStub)
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+    expect(wrapper.findAll('.asset-card').length).toBe(0)
+
+    // 旧库追加慢响应后到：库代次已变，不得拼入 lib-2 视图
+    resolveSlowAppend()
+    await flushPromises()
+    expect(wrapper.findAll('.asset-card').length).toBe(0)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-2', 50, 0)
+  })
+
+  it('幻灯片滚动追加在途防重：loadingMore 置位拦截在途窗口内的连续滚动触发（不重复追加同 offset）', async () => {
+    let appendCalls = 0
+    let resolveAppend
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: mockSlides, total: 4 })
+      appendCalls++
+      return new Promise((resolve) => {
+        resolveAppend = () => resolve({ items: [{ ...mockSlides[0], id: 23, slideNum: 3 }], total: 4 })
+      })
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    const gallery = wrapper.find('.assets-gallery')
+    Object.defineProperty(gallery.element, 'scrollHeight', { value: 500, configurable: true })
+    Object.defineProperty(gallery.element, 'clientHeight', { value: 400, configurable: true })
+    gallery.element.scrollTop = 150
+    // 首次 scroll 触发追加（响应挂起保持 loadingMore=true），在途窗口内第二次
+    // scroll 应被防重检查拦截——不发同 offset 的重复请求
+    await gallery.trigger('scroll')
+    await gallery.trigger('scroll')
+    expect(appendCalls).toBe(1)
+
+    resolveAppend()
+    await flushPromises()
+    expect(wrapper.findAll('.asset-card').length).toBe(3)
+  })
+
+  it('检索空态引导：命中存在但被当前视图类型过滤为空时提示切换视图（审核 11）', async () => {
+    // 命中全为幻灯片类型（文件视图下被类型过滤清空），total > 0
+    wailsMock.SearchAssets.mockResolvedValue({
+      items: [{ ...mockSearchPage.items[1] }],
+      total: 3,
+      keyword: '城商行',
+      flattened: false
+    })
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    expect(wrapper.find('.el-empty').exists()).toBe(true)
+    expect(wrapper.find('.el-empty').text()).toContain('已命中 3 条')
+    expect(wrapper.find('.el-empty').text()).toContain('切换文件/幻灯片视图')
+  })
+
+  it('聚合展开在途守卫：检索条件变更后旧聚合响应丢弃，重新展开重新拉取（审核 13）', async () => {
+    let resolveAgg
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.flatten) {
+        return new Promise((resolve) => { resolveAgg = () => resolve(mockSearchPage) })
+      }
+      return Promise.resolve(mockSearchPage)
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡：flatten 检索挂起
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    // 改词重搜（检索条件变更），随后旧聚合响应才返回
+    await wrapper.find('input').setValue('新词')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    resolveAgg()
+    await flushPromises()
+
+    // 守卫生效：旧响应未写入 aggChildren → 重新展开应再次发起 flatten 检索
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '新词', {
+      flatten: true,
+      tagIds: [],
+      limit: 200,
+      offset: 0
+    })
+  })
+
+  it('库不存在自愈：统计报 E_ASSETS_LIB_NOT_FOUND 时静默重拉库列表并落定剩余库（审核 14）', async () => {
+    const remainingLib = { ...mockLibrary, id: 'lib-2', name: '剩余库' }
+    let listCalls = 0
+    wailsMock.ListAssetLibraries.mockImplementation(() => {
+      listCalls++
+      // 首拉含已删库（前端列表过期），重拉仅剩剩余库（模拟外部删除后自愈）
+      return listCalls === 1
+        ? Promise.resolve([{ ...mockLibrary, id: 'lib-gone', name: '已删库' }, remainingLib])
+        : Promise.resolve([remainingLib])
+    })
+    let statsCalls = 0
+    wailsMock.GetAssetLibraryStats.mockImplementation((id) => {
+      statsCalls++
+      if (id === 'lib-gone') {
+        return Promise.reject({ code: 'E_ASSETS_LIB_NOT_FOUND', message: '素材库不存在或已被删除，请刷新素材库列表' })
+      }
+      return Promise.resolve({ libraryId: id, fileCount: 3, slideCount: 3, failedCount: 0, encryptedCount: 0 })
+    })
+    const wrapper = await createWrapper()
+    await flushPromises()
+
+    // 自愈链：重拉库列表 → 当前库不在新列表 → 自动落定剩余库并加载其数据
+    expect(wailsMock.ListAssetLibraries).toHaveBeenCalledTimes(2)
+    expect(wailsMock.GetAssetLibraryStats).toHaveBeenCalledWith('lib-2')
+    expect(wailsMock.ListAssetFiles).toHaveBeenCalledWith('lib-2')
+    expect(wrapper.find('.assets-stats-line').text()).toContain('文件 3')
+    // 自愈路径静默（不弹 error 误导用户）
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.error).not.toHaveBeenCalled()
   })
 })

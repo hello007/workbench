@@ -31,6 +31,15 @@ const (
 // assetParseTitleFallback 无任何文本来源时的标题兜底文案。
 const assetParseTitleFallback = "[无标题]"
 
+// 素材解析的 zip 解压字节上限（扫描批量解析外来文件，防 zip 炸弹类畸形包无上限
+// 解压拖垮进程内存）：真实演示文稿解压量级为数十 MB（媒体为主），单条目 256MB /
+// 全包 1GB 给足裕量，仅拦截异常形态；超限按「文件损坏」分类降级（不中断批量）。
+// 拆分链路（pptx_split.go readZipPackage）不设限，行为逐字不变。
+const (
+	assetZipMaxEntryBytes = 256 << 20 // 单条目解压上限 256MB
+	assetZipMaxTotalBytes = 1 << 30   // 全包解压累计上限 1GB
+)
+
 // oleCompoundFileMagic OLE2 复合文档魔数：PowerPoint 密码加密后的文件是 OLE
 // 容器（内含 EncryptedPackage 流）而非 zip 包，读头 8 字节即可与普通损坏区分。
 var oleCompoundFileMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
@@ -71,7 +80,7 @@ func parsePptxSlides(srcPath, baseName string) ([]parsedSlide, error) {
 	}
 	defer zr.Close()
 
-	pkg, err := readZipPackage(&zr.Reader)
+	pkg, err := readZipPackageWithLimits(&zr.Reader, assetZipMaxEntryBytes, assetZipMaxTotalBytes)
 	if err != nil {
 		return nil, &assetParseError{kind: assetParseCorrupted, err: err}
 	}

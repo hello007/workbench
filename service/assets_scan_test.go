@@ -127,7 +127,8 @@ func TestAssetScan_IndexesNewFiles(t *testing.T) {
 		}
 	}
 
-	slides, err := svc.ListSlides(lib.ID)
+	slidePage, err := svc.ListSlides(lib.ID, 0, 0)
+	slides := slidePage.Items
 	if err != nil {
 		t.Fatalf("ListSlides: %v", err)
 	}
@@ -207,7 +208,8 @@ func TestAssetScan_IncrementalSkipAndReprocess(t *testing.T) {
 		t.Errorf("增量判定不符（unchanged=1 updated=1），实际：%+v", result)
 	}
 	// 重处理后幻灯片仍完整（删旧插新无残留）
-	slides, err := svc.ListSlides(lib.ID)
+	slidePage, err := svc.ListSlides(lib.ID, 0, 0)
+	slides := slidePage.Items
 	if err != nil {
 		t.Fatalf("ListSlides: %v", err)
 	}
@@ -266,7 +268,8 @@ func TestAssetScan_RemovesDeletedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
-	slides, err := svc.ListSlides(lib.ID)
+	slidePage, err := svc.ListSlides(lib.ID, 0, 0)
+	slides := slidePage.Items
 	if err != nil {
 		t.Fatalf("ListSlides: %v", err)
 	}
@@ -475,6 +478,33 @@ func TestAssetScan_DerivedDirAndExtensionFilter(t *testing.T) {
 	}
 }
 
+// TestIsPptxSplitDerivative 派生判定单测：标准拆分布局命中；根目录直置
+//「名字-01.pptx」与「.」主干等异构命名不误伤。回归锚点：根目录文件的
+// parentBase="."，文件名主干以「.」开头时（如 .-01.pptx）曾因前缀恰与「.」
+// 匹配被误判为派生而漏索引（审核发现，2026-10-14 修复）。
+func TestIsPptxSplitDerivative(t *testing.T) {
+	cases := []struct {
+		rel  string
+		want bool
+	}{
+		{"源文件/源文件-01.pptx", true},       // 标准拆分产物（两位页序）
+		{"源文件/源文件-100.pptx", true},      // 三位页序（≥100 页）
+		{"子目录/源文件/源文件-01.pptx", true}, // 多级目录下的标准拆分布局
+		{"源文件.pptx", false},                // 根目录源文件
+		{"直置-01.pptx", false},               // 根目录直置「名字-01.pptx」
+		{".-01.pptx", false},                 // 回归：根目录「.」主干误判
+		{"素材包/介绍-01.pptx", false},         // 目录名与文件主干不同
+		{"源文件/源文件-x1.pptx", false},       // 页序段含非数字
+		{"源文件/源文件-.pptx", false},         // 页序段为空
+		{"说明.txt", false},                   // 非 .pptx 后缀
+	}
+	for _, tc := range cases {
+		if got := isPptxSplitDerivative(tc.rel); got != tc.want {
+			t.Errorf("isPptxSplitDerivative(%q) = %v, want %v", tc.rel, got, tc.want)
+		}
+	}
+}
+
 // ---------- 库管理用例 ----------
 
 // TestAssetLibrary_CreateValidation 建库校验：名称非空、目录存在且为目录；
@@ -511,6 +541,176 @@ func TestAssetLibrary_CreateValidation(t *testing.T) {
 	// 索引库文件预建
 	if _, err := os.Stat(svc.libraryDBPath(lib.ID)); err != nil {
 		t.Errorf("索引库文件应已预建: %v", err)
+	}
+}
+
+// TestAssetLibrary_CreateRollsBackOrphanDB 注册表写失败时回删预建索引库文件
+// （防孤儿 <id>.db 残留：库里无此库登记，删库流程不会清理它）。注入方式：注册表
+// 路径被同名目录占位，util.SaveJSON 必失败。
+func TestAssetLibrary_CreateRollsBackOrphanDB(t *testing.T) {
+	assetsDir := filepath.Join(t.TempDir(), "assets")
+	// libraries.json 占位为目录：SaveJSON 的 temp 创建/rename 必失败
+	if err := os.MkdirAll(filepath.Join(assetsDir, "libraries.json"), 0755); err != nil {
+		t.Fatalf("占位注册表路径: %v", err)
+	}
+	svc := NewAssetLibraryService(context.Background(), assetsDir)
+	t.Cleanup(svc.CloseAll)
+
+	if _, err := svc.CreateLibrary("孤儿库", t.TempDir()); err == nil {
+		t.Fatal("注册表写失败应使建库失败")
+	}
+	leftovers, err := filepath.Glob(filepath.Join(assetsDir, "*.db*"))
+	if err != nil {
+		t.Fatalf("扫描残留文件: %v", err)
+	}
+	if len(leftovers) > 0 {
+		t.Errorf("注册表写失败后应回删孤儿索引库文件（含 WAL/SHM），残留：%v", leftovers)
+	}
+	// 连接缓存同步清理：回滚路径必须关连接并 delete(s.open, lib.ID)
+	svc.mu.Lock()
+	cached := len(svc.open)
+	svc.mu.Unlock()
+	if cached != 0 {
+		t.Errorf("回滚后连接缓存应清空，实际残留 %d 条", cached)
+	}
+}
+
+// TestAssetLibrary_WaitScansDone 关停收口：WaitScansDone 触发在途扫描取消并等待
+// 其退出——扫描阻塞期间不返回（无超时强断语义），取消信号放行后即返回。
+func TestAssetLibrary_WaitScansDone(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "收口库", dir)
+	buildAssetsPptx(t, dir, "阻塞一.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	buildAssetsPptx(t, dir, "阻塞二.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+
+	blocker := &blockingAssetsParse{started: make(chan struct{}), release: make(chan struct{})}
+	svc.parseFn = blocker.parse
+
+	scanDone := make(chan error, 1)
+	go func() {
+		_, err := svc.StartScan(context.Background(), lib.ID)
+		scanDone <- err
+	}()
+	<-blocker.started
+
+	drained := make(chan struct{})
+	go func() {
+		svc.WaitScansDone()
+		close(drained)
+	}()
+
+	// 解析阻塞在 channel 上（ctx 取消检查点不可达）：WaitScansDone 必须仍等待
+	//（负向断言需时间窗，阻塞为确定性 channel 等待，无时序脆弱性）
+	select {
+	case <-drained:
+		t.Fatal("在途扫描未退出时 WaitScansDone 不应返回")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// 放行阻塞：扫描在下一文件检查点感知取消并退出，WaitScansDone 随之返回
+	close(blocker.release)
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("取消后 WaitScansDone 未返回")
+	}
+	select {
+	case err := <-scanDone:
+		var appErr *model.AppError
+		if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
+			t.Fatalf("在途扫描应被 WaitScansDone 取消（E_ASSETS_CANCELLED），实际：%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("在途扫描未按取消收尾")
+	}
+
+	// 无在途扫描时幂等立即返回
+	done := make(chan struct{})
+	go func() {
+		svc.WaitScansDone()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("无在途扫描时 WaitScansDone 应立即返回")
+	}
+}
+
+// TestAssetLibrary_ListSlidesPagination 幻灯片清单分页（对齐 SearchAssets 分页
+// 契约）：limit/offset 窗口、Total 恒为总数不随页变化、默认值/钳制（limit ≤0
+// 取 50、>200 钳 200、offset<0 按 0）、库不存在报 E_ASSETS_LIB_NOT_FOUND。
+func TestAssetLibrary_ListSlidesPagination(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "分页库", dir)
+	buildAssetsPptx(t, dir, "甲.pptx", []assetsSlideSpec{
+		{titlePh: "甲一", body: []string{"内容"}},
+		{titlePh: "甲二", body: []string{"内容"}},
+	})
+	buildAssetsPptx(t, dir, "乙.pptx", []assetsSlideSpec{
+		{titlePh: "乙一", body: []string{"内容"}},
+		{titlePh: "乙二", body: []string{"内容"}},
+	})
+	if _, err := svc.StartScan(context.Background(), lib.ID); err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+
+	// 分页窗口：limit=3 offset 0/3 → 3+1，Total 恒 4
+	page1, err := svc.ListSlides(lib.ID, 3, 0)
+	if err != nil {
+		t.Fatalf("首页: %v", err)
+	}
+	if len(page1.Items) != 3 || page1.Total != 4 {
+		t.Errorf("首页应为 3 条且 Total=4，实际：%d 条 Total=%d", len(page1.Items), page1.Total)
+	}
+	page2, err := svc.ListSlides(lib.ID, 3, 3)
+	if err != nil {
+		t.Fatalf("次页: %v", err)
+	}
+	if len(page2.Items) != 1 || page2.Total != 4 {
+		t.Errorf("次页应为 1 条且 Total=4，实际：%d 条 Total=%d", len(page2.Items), page2.Total)
+	}
+	// 分页窗口无缝衔接：首页 + 次页拼接与全量清单（同序键）逐位一致
+	allPage, err := svc.ListSlides(lib.ID, 50, 0)
+	if err != nil {
+		t.Fatalf("全量页: %v", err)
+	}
+	if len(allPage.Items) != 4 {
+		t.Fatalf("全量应为 4 条，实际 %d", len(allPage.Items))
+	}
+	seam := append(append([]model.AssetSlideEntry{}, page1.Items...), page2.Items...)
+	for i, want := range allPage.Items {
+		if seam[i].ID != want.ID {
+			t.Errorf("分页拼接第 %d 位应与全量一致，实际 %+v vs %+v", i, seam[i], want)
+		}
+	}
+	// 越界 offset：空页、Total 不变
+	page3, err := svc.ListSlides(lib.ID, 3, 4)
+	if err != nil {
+		t.Fatalf("越界页: %v", err)
+	}
+	if len(page3.Items) != 0 || page3.Total != 4 {
+		t.Errorf("越界页应为空且 Total=4，实际：%d 条 Total=%d", len(page3.Items), page3.Total)
+	}
+
+	// 默认值与钳制：limit=0 → 默认 50（4 条全回）；limit=-1/offset=-5 → 同默认钳制
+	for _, tc := range []struct{ limit, offset int }{{0, 0}, {-1, -5}} {
+		page, err := svc.ListSlides(lib.ID, tc.limit, tc.offset)
+		if err != nil {
+			t.Fatalf("默认值用例 (%d,%d): %v", tc.limit, tc.offset, err)
+		}
+		if len(page.Items) != 4 || page.Total != 4 {
+			t.Errorf("默认值用例 (%d,%d) 应取全部 4 条，实际：%d 条", tc.limit, tc.offset, len(page.Items))
+		}
+	}
+
+	// 库不存在
+	_, err = svc.ListSlides("不存在的库", 10, 0)
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsLibNotFound {
+		t.Errorf("库不存在应报 E_ASSETS_LIB_NOT_FOUND，实际：%v", err)
 	}
 }
 
@@ -621,7 +821,8 @@ func TestAssetLibrary_UpdateFileMetaAndTags(t *testing.T) {
 	}
 
 	// 幻灯片继承文件标签
-	slides, err := svc.ListSlides(lib.ID)
+	slidePage, err := svc.ListSlides(lib.ID, 0, 0)
+	slides := slidePage.Items
 	if err != nil {
 		t.Fatalf("ListSlides: %v", err)
 	}

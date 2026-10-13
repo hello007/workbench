@@ -97,6 +97,9 @@ func (a *App) shutdown(context.Context) {
 		a.chatSvc.CloseAll()
 	}
 	if a.assetsSvc != nil {
+		// 先通知在途扫描取消并等待退出，再关库连接（顺序颠倒会让扫描写已关
+		// 连接，产生成片 sql: database is closed 噪音）
+		a.assetsSvc.WaitScansDone()
 		a.assetsSvc.CloseAll()
 	}
 	// 正常退出清除异常标记（崩溃/强杀时不会走到这里，flag 残留供下次启动检测）

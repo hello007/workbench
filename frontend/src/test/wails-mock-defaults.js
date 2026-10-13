@@ -205,7 +205,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
   ListAssetFiles: [],
-  ListAssetSlides: [],
+  // 幻灯片清单默认空分页页（items/total 对齐 model.AssetSlidePage，2026-10-14 起分页）
+  ListAssetSlides: { items: [], total: 0 },
   UpdateAssetFileMeta: null,
   // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）
   SearchAssets: { items: [], total: 0, keyword: '', flattened: false }

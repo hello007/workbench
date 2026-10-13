@@ -44,6 +44,8 @@ type AssetLibraryService struct {
 	opLocks map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
 	cancels map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
 
+	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
+
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
 }
 
@@ -121,6 +123,21 @@ func (s *AssetLibraryService) CreateLibrary(name, rootPath string) (model.AssetL
 	}
 	s.libs = append(s.libs, lib)
 	if err := s.saveRegistryLocked(); err != nil {
+		// 回滚预建的索引库文件：注册表写失败若留下 <id>.db，库里无此库登记，
+		// 形成孤儿文件（删库流程不会清理它）。先关连接再删（Windows 下打开句柄
+		// 占用会致删除失败），WAL/SHM 伴生文件一并清理；回删失败仅告警不掩盖
+		// 原始错误（下次建库走新 ID，旧文件无害）。
+		if store, ok := s.open[lib.ID]; ok {
+			if closeErr := store.Close(); closeErr != nil {
+				Logger().Warn("close rolled-back assets store failed", "libraryId", lib.ID, "err", closeErr)
+			}
+			delete(s.open, lib.ID)
+		}
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			if rmErr := os.Remove(s.libraryDBPath(lib.ID) + suffix); rmErr != nil && !os.IsNotExist(rmErr) {
+				Logger().Warn("remove rolled-back assets db failed", "libraryId", lib.ID, "err", rmErr)
+			}
+		}
 		return model.AssetLibrary{}, err
 	}
 	return lib, nil
@@ -245,20 +262,31 @@ func (s *AssetLibraryService) ListFiles(libraryID string) ([]model.AssetFileEntr
 	return entries, nil
 }
 
-// ListSlides 幻灯片索引条目（标签继承归属文件），按文件路径 + 页序。
-func (s *AssetLibraryService) ListSlides(libraryID string) ([]model.AssetSlideEntry, error) {
+// ListSlides 幻灯片索引条目分页（标签继承归属文件），按文件路径 + 页序。
+// 分页契约对齐 SearchAssets：limit ≤0 取默认 50（上限 200）、offset <0 按 0
+// 处理，Total 为总条目数（不随页变化），翻页以 offset 递增 limit 驱动。
+func (s *AssetLibraryService) ListSlides(libraryID string, limit, offset int) (model.AssetSlidePage, error) {
 	if _, err := s.getLibrary(libraryID); err != nil {
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
-	var entries []model.AssetSlideEntry
+	if limit <= 0 {
+		limit = assetSearchDefaultLimit
+	}
+	if limit > assetSearchMaxLimit {
+		limit = assetSearchMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var page model.AssetSlidePage
 	err := s.withStore(libraryID, func(store *assetsStore) (err error) {
-		entries, err = store.listSlideEntries()
+		page, err = store.listSlideEntries(limit, offset)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return model.AssetSlidePage{}, err
 	}
-	return entries, nil
+	return page, nil
 }
 
 // UpdateFileMeta 文件级元数据编辑（整体替换语义）：星级 0-5（0 = 清除）、备注、
@@ -276,8 +304,28 @@ func (s *AssetLibraryService) UpdateFileMeta(libraryID string, fileID int64, met
 	})
 }
 
+// WaitScansDone 通知全部在途扫描取消并等待其退出（App.shutdown 关停收口，先于
+// CloseAll 调用）：逐个触发取消注册表中的 CancelFunc（扫描在文件间检查点感知
+// ctx 取消后收尾），再等扫描计数归零。没有本收口时，CloseAll 先关库连接、在途
+// 扫描继续写已关连接，产生成片「sql: database is closed」噪音日志。
+// 单文件解析内部无取消检查点，等待时长以其为上界（解析有界：zip 上限 + 单页
+// 流式解析，秒级）；无在途扫描时立即返回。
+func (s *AssetLibraryService) WaitScansDone() {
+	s.opMu.Lock()
+	entries := make([]*cancelEntry, 0, len(s.cancels))
+	for _, entry := range s.cancels {
+		entries = append(entries, entry)
+	}
+	s.opMu.Unlock()
+	for _, entry := range entries {
+		entry.cancel()
+	}
+	s.scanWG.Wait()
+}
+
 // CloseAll 关闭全部已打开的库连接（App.shutdown 关停期调用；库删除路径经
-// DeleteLibrary 单独收口）。
+// DeleteLibrary 单独收口）。调用方须先经 WaitScansDone 排空在途扫描，防扫描
+// 写已关连接。
 func (s *AssetLibraryService) CloseAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

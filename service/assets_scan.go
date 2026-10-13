@@ -30,6 +30,12 @@ import (
 // 同名-数字.pptx」与拆分产物同构不可区分，同样被排除（防重优先的取舍）。
 func isPptxSplitDerivative(rel string) bool {
 	parentBase := path.Base(path.Dir(rel))
+	if parentBase == "." {
+		// 根目录直置文件：拆分产物恒落「同名文件夹」内（真实子目录），根目录
+		// 形态不可能是派生副本。不提前排除时，形如「.-01.pptx」的文件名主干
+		// 以「.」开头恰与 parentBase="." 前缀匹配，被误判为派生而漏索引。
+		return false
+	}
 	name := path.Base(rel)
 	stem := strings.TrimSuffix(name, ".pptx")
 	if stem == name {
@@ -37,7 +43,7 @@ func isPptxSplitDerivative(rel string) bool {
 	}
 	sep := len(parentBase)
 	if len(stem) < sep+2 || stem[:sep] != parentBase || stem[sep] != '-' {
-		return false // 前缀非父目录名或无「-页序」段（含根目录文件：parentBase="."）
+		return false // 前缀非父目录名或无「-页序」段
 	}
 	for i := sep + 1; i < len(stem); i++ {
 		if stem[i] < '0' || stem[i] > '9' {
@@ -120,6 +126,11 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 	defer cancel()
 	entry := s.registerCancel(libraryID, cancel)
 	defer s.unregisterCancel(libraryID, entry)
+
+	// 在途扫描计数：WaitScansDone（关停收口）以此等待全部扫描退出，防 CloseAll
+	// 关连接后扫描继续写库报 sql: database is closed 噪音
+	s.scanWG.Add(1)
+	defer s.scanWG.Done()
 
 	store, err := s.storeForScan(libraryID)
 	if err != nil {

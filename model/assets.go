@@ -63,6 +63,14 @@ type AssetSlideEntry struct {
 	Tags         []AssetTag `json:"tags"`         // 标签：继承归属文件标签（本批幻灯片无自有标签）
 }
 
+// AssetSlidePage 幻灯片索引分页结果（ListAssetSlides 返回）。分页契约与
+// AssetSearchPage 一致：Total 为总条目数（不随页变化），翻页以 Offset 递增
+// Limit 驱动。
+type AssetSlidePage struct {
+	Items []AssetSlideEntry `json:"items"` // 当前页条目（按文件路径 + 页序）
+	Total int               `json:"total"` // 幻灯片总条目数
+}
+
 // AssetLibraryStats 素材库统计（GetAssetLibraryStats 返回，库切换/看板徽标用）。
 type AssetLibraryStats struct {
 	LibraryID      string `json:"libraryId"`      // 所属库 ID

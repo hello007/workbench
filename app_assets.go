@@ -56,10 +56,11 @@ func (a *App) ListAssetFiles(libraryID string) ([]model.AssetFileEntry, error) {
 	return a.assetsSvc.ListFiles(libraryID)
 }
 
-// ListAssetSlides 幻灯片索引条目（标签继承归属文件），按文件路径 + 页序
-// （画廊幻灯片视图数据源，页序以 sldIdLst 为准）。
-func (a *App) ListAssetSlides(libraryID string) ([]model.AssetSlideEntry, error) {
-	return a.assetsSvc.ListSlides(libraryID)
+// ListAssetSlides 幻灯片索引条目分页（标签继承归属文件），按文件路径 + 页序
+// （画廊幻灯片视图数据源，页序以 sldIdLst 为准）。分页契约对齐 SearchAssets：
+// limit ≤0 取默认 50（上限 200）、offset <0 按 0 处理，Total 为总条目数。
+func (a *App) ListAssetSlides(libraryID string, limit, offset int) (model.AssetSlidePage, error) {
+	return a.assetsSvc.ListSlides(libraryID, limit, offset)
 }
 
 // UpdateAssetFileMeta 文件级元数据编辑（整体替换）：星级 0-5（0 = 清除）、备注、
