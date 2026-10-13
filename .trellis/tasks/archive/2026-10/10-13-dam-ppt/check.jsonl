@@ -1,0 +1,10 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新 service 覆盖率 ≥76% 门禁与分层测试要求"}
+{"file": "docs/spec/test-stability.md", "reason": "核对扫描增量测试无 mtime 时序隐式依赖、无固定端口、无 sleep 等待"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 slog/AppError 分流、新增错误码三处同步（app_error.go/error.js/绑定）、取消链路 LIFO 注销"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对绑定三处同步、具名 string 类型 models.ts 别名、前端禁裸 atob"}
+{"file": "docs/spec/linux-platform.md", "reason": "核对 COM 相关 _windows/_other 分叉、GOOS=linux 编译通过、无 CGO 新依赖"}
+{"file": "docs/spec/perf-baseline.md", "reason": "核对 FTS 基准测试与 soak 轮次规范、检索 P95 守护"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "核对 AppServices 装配两处登记、构造纯 new、副作用留 startup/shutdown"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对 data/ JSON 持久化走 util.SaveJSON 原子写"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对派生产物扫描排除、pptx fixture 程序化构造"}
+{"file": "research/sqlite-fts5-chinese.md", "reason": "核对 FTS5 实现符合研究结论：切分同源、standalone 双写、detail=full、禁隐藏列 LIKE、snippet 后处理"}

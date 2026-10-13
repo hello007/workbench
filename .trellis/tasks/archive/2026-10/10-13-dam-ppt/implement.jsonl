@@ -1,0 +1,12 @@
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增素材管理 service 须按 AppServices 装配模式登记 app_services.go 两处，App 内嵌字段提升保 Wails 绑定零 diff"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "绑定同步三处（App.js/App.d.ts/models.ts）、具名 string 类型 models.ts 手动补别名、ReadFileBytes base64 通道规约"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 规约、model.AppError 错误码分流、新增错误码同步 app_error.go + error.js、扫描/解析任务取消链路 registerCancel 模式"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "素材库配置等 data/ JSON 持久化必须走 util.SaveJSON 原子写，禁 os.WriteFile 直写"}
+{"file": "docs/spec/linux-platform.md", "reason": "COM/缩略图相关代码必须 _windows/_other 双文件分叉，Linux 构建不引入 CGO 与 GTK 依赖"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新 service 覆盖率门禁 ≥76%，测试分层与豁免规则"}
+{"file": "docs/spec/test-stability.md", "reason": "扫描增量判定用 mtime+size——测试禁隐式依赖文件 mtime 时序（NTFS 同 tick），须注入陈旧缓存驱动；端口随机化规则"}
+{"file": "docs/spec/perf-baseline.md", "reason": "FTS 检索基准测试规范（soak 三档轮次、testutil 辅助复用）、大结果集与画廊懒加载性能约束"}
+{"file": "docs/spec/pptx-split.md", "reason": "已有纯 Go OOXML 拆分实现——页文本解析链路、fixture 程序化构造 pptx 禁依赖本机 Office，扫描器须强制排除拆分派生产物"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "PR3 新面板视觉规约：ActivityBar 深色底内联 SVG 图标、三列布局 flex 约束链、间距/圆角分档"}
+{"file": "docs/spec/design-tokens.md", "reason": "PR3 画廊卡片/标签颜色使用设计令牌，禁硬编码色值"}
+{"file": "research/sqlite-fts5-chinese.md", "reason": "核心选型研究：modernc/sqlite 驱动、FTS5 中文按字切分+phrase+bm25 方案、已知坑清单（切分同源/detail=full/snippet 后处理）、建表建议"}
