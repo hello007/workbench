@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 119
+- **Total Sessions**: 120
 - **Last Active**: 2026-10-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~315 | Active |
+| `journal-3.md` | ~348 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 120 | 2026-10-14 | util 剪贴板 unsafeptr 告警真修复：RtlMoveMemory 中转收口 | `0a2040d` | `master` |
 | 119 | 2026-10-14 | 素材管理审核修复 14 项——写回守卫/分页/FTS 边界/关停收口 | `5bbf04e` | `master` |
 | 118 | 2026-10-13 | 侧边栏素材管理 MVP——纯 Go SQLite+FTS5 中文检索 + PPT 单页索引 | `013032e` | `master` |
 | 117 | 2026-10-13 | 工具箱 PPT 按页拆分功能全流程落地 | `915888a` | `master` |

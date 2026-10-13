@@ -313,3 +313,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 120: util 剪贴板 unsafeptr 告警真修复：RtlMoveMemory 中转收口
+
+**Date**: 2026-10-14
+**Task**: util 剪贴板 unsafeptr 告警真修复：RtlMoveMemory 中转收口
+**Branch**: `master`
+
+### Summary
+
+裸 go vet ./util/ 7 处 unsafeptr 告警（源码5+测试2）真修复。实证三结论：vet unsafeptr 无 syscall 白名单（Syscall/SyscallN 结果转换实测均 flag，检查器仅豁免 reflect.Value.Pointer/UnsafeAddr、SliceHeader.Data、指针算术回转三类）；x/sys v0.30-v0.48 全版本无 GlobalLock/GlobalUnlock/Clipboard API，封装路径不存在；RtlMoveMemory 中转模式 vet 构造性干净。d7d5b51 复发真相=当年未修，仅加注释+固化 -unsafeptr=false 压制。修法：Go 堆 []byte 编码 DROPFILES/UTF-16 + GlobalLock 裸 uintptr + RtlMoveMemory 单次拷入拷出，全程零 uintptr→unsafe.Pointer 回转，字节布局逐位不变，调用方签名零变化；新增 copyToHeap/readFromHeap 单点辅助（空缓冲防护）+零长防护用例，测试改走辅助锚定可移动堆重锁往返语义。压制移除四处同步：开发规范.md 静态检查章节、贡献指南 PR 清单、linux-platform.md §10、ci.yml 注释。验证全绿：go vet ./... 零告警、双平台 build、全量 6 包 go test、gofmt。Windows 手工验证点（本机未验，用户可验）：文件复制/剪切粘贴（含 Preferred DropEffect 剪切语义）、中文文本复制粘贴、资源管理器间跨应用拖拽源。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0a2040d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
