@@ -1,0 +1,2 @@
+{"file": "docs/spec/linux-platform.md", "reason": "§10 已知误报登记为本次收口对象，须删除或改写"}
+{"file": "docs/spec/test-stability.md", "reason": "测试改造守约束：禁环境外部状态依赖（剪贴板系统锁禁入单测，沿用既有 GlobalAlloc 往返锚点模式）"}

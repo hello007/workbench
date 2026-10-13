@@ -1,0 +1,2 @@
+{"file": "docs/spec/linux-platform.md", "reason": "核对 §10 登记与实际 vet 状态一致（不再需要 -unsafeptr=false）"}
+{"file": "docs/spec/test-stability.md", "reason": "核对改造后测试无环境外部状态依赖"}
