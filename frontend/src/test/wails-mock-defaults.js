@@ -110,9 +110,10 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   },
 
   // ---- 仓库列表配置导入导出（形状对齐 model.RepoConfigImportPreview / Result）----
-  // SaveFileDialog / OpenFileDialog 默认空串 = 用户取消，安全 no-op
+  // SaveFileDialog / OpenFileDialog / OpenDirectoryDialog 默认空串 = 用户取消，安全 no-op
   SaveFileDialog: '',
   OpenFileDialog: '',
+  OpenDirectoryDialog: '',
   SaveFile: true,
   ReadFileBytes: { base64: '', error: '', tooLarge: false },
   ExportRepoConfig: '{"manifestVersion":1,"exportedAt":"2026-09-13T00:00:00Z","directories":[],"favorites":[]}',
@@ -187,7 +188,27 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 默认空结果 = 拆分仅在用户操作时调用，空态安全 no-op，用例按需 override
   SplitPptxPerPage: { outputDir: '', files: [], pageCount: 0 },
   // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelGitOperation 语义）
-  CancelPptxSplit: false
+  CancelPptxSplit: false,
+
+  // ---- 素材管理（侧边栏·素材管理面板，AssetsPanel 挂载即调 ListAssetLibraries）----
+  // 形状对齐 model.AssetLibrary / AssetLibraryStats / AssetScanResult / AssetSearchPage
+  // （见 frontend/wailsjs/go/models.ts）。默认空库 = 无库空态（面板引导建库），
+  // 检索/扫描/编辑仅在用户操作时调用；void 返回（DeleteAssetLibrary/
+  // UpdateAssetFileMeta）用 null 表示安全 no-op。
+  CreateAssetLibrary: { id: 'lib-test', name: '素材库', rootPath: '/assets', createdAt: '', updatedAt: '' },
+  ListAssetLibraries: [],
+  DeleteAssetLibrary: null,
+  GetAssetLibraryStats: { libraryId: '', fileCount: 0, slideCount: 0, failedCount: 0, encryptedCount: 0 },
+  // 扫描默认零结果汇总（total/new/updated/unchanged/failed/encrypted/denied/removed）
+  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 },
+  RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 },
+  // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
+  CancelAssetScan: false,
+  ListAssetFiles: [],
+  ListAssetSlides: [],
+  UpdateAssetFileMeta: null,
+  // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）
+  SearchAssets: { items: [], total: 0, keyword: '', flattened: false }
 }
 
 /**

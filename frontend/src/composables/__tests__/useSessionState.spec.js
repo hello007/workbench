@@ -186,6 +186,13 @@ describe('useSessionState - applySessionState', () => {
     expect(uiStore.activePanel).toBe('dashboard')
   })
 
+  it('恢复一级面板 assets 素材管理（白名单与 ActivityBar items 对齐）', () => {
+    const uiStore = useUiStore()
+    const touched = applySessionState({ activePanel: 'assets' })
+    expect(touched).toBe(true)
+    expect(uiStore.activePanel).toBe('assets')
+  })
+
   it('null 快照不恢复且返回 false（冷启动）', () => {
     const uiStore = useUiStore()
     uiStore.activePanel = 'ai'

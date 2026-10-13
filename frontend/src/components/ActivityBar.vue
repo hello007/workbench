@@ -48,6 +48,7 @@
 <script setup>
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
+import AssetsIcon from './icons/AssetsIcon.vue'
 import { useUiStore } from '../store'
 
 const uiStore = useUiStore()
@@ -59,6 +60,7 @@ const panels = [
   { id: 'ai', icon: MagicStick, label: 'AI 功能' },
   { id: 'ai-chat', icon: ChatDotRound, label: 'AI 对话' },
   { id: 'toolbox', icon: ToolboxIcon, label: '工具箱' },
+  { id: 'assets', icon: AssetsIcon, label: '素材管理' },
   { id: 'dashboard', icon: DataBoard, label: '状态看板' },
   { id: 'stats', icon: TrendCharts, label: '仓库统计' }
 ]

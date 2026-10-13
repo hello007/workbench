@@ -60,3 +60,16 @@ func (a *App) OpenFileDialog(title string, filters []runtime.FileFilter) (string
 		Filters: filters,
 	})
 }
+
+// OpenDirectoryDialog 弹出原生目录选择对话框，返回用户选择的目录路径（取消返回空串）。
+// 前端新建素材库时由前端调此方法选素材根目录，保留手动输入路径的能力作为
+// E2E / 无窗口环境兜底。ctx 取自 startup 注入的 a.ctx，title 为对话框标题。
+// serve 无头模式下经 wailsRuntimeUnavailable 守卫前置拒绝（同 OpenFileDialog）。
+func (a *App) OpenDirectoryDialog(title string) (string, error) {
+	if err := a.wailsRuntimeUnavailable(); err != nil {
+		return "", err
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: title,
+	})
+}

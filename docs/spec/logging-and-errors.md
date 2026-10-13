@@ -96,6 +96,9 @@ type AppError struct {
 | `ErrCodeDiffToolLaunchFailed` | `E_DIFF_TOOL_LAUNCH_FAILED` | 外部 diff 工具 | error |
 | `ErrCodeRepoConfigInvalidJSON` | `E_REPO_CONFIG_INVALID_JSON` | 仓库列表配置导入导出 | error（导入文件非法 JSON/顶层结构缺失） |
 | `ErrCodeRepoConfigUnsupportedVersion` | `E_REPO_CONFIG_UNSUPPORTED_VERSION` | 仓库列表配置导入导出 | error（manifestVersion 缺失或高于支持） |
+| `ErrCodeAssetsCancelled` | `E_ASSETS_CANCELLED` | 素材管理 | warning（素材扫描被用户取消，中性提示非 error；2026-10-13 素材管理 MVP 新增，`ErrAssetsCancelled` sentinel 承载，`mapAssetsCancelError` 统一映射，对齐 `E_GIT_CANCELLED` 模式） |
+| `ErrCodeAssetsLibNotFound` | `E_ASSETS_LIB_NOT_FOUND` | 素材管理 | error（素材库不存在或已删除、前端列表过期，引导刷新库列表） |
+| `ErrCodeAssetsScanInProgress` | `E_ASSETS_SCAN_IN_PROGRESS` | 素材管理 | warning（该素材库已有扫描进行中，本次拒绝，可稍后重试；`tryLockScan` TryLock 互斥拒绝时返回，`DeleteLibrary` 复用同锁与在途扫描互斥） |
 | `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
 | `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |
 | `ErrCodeRPCMethodUnsupported` | `E_RPC_METHOD_UNSUPPORTED` | RPC 协议层（serve 浏览器模式） | error（签名形态不受支持，如变参） |

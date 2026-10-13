@@ -68,6 +68,12 @@ type AppServices struct {
 	// Office），测试注入 fake 验证编排透传；进度/终态事件走 sinkHolder（pptx-split:*
 	// 前缀，web_serve.go applySink 须同步切换），可取消（注册表键 = 源文件规范化路径）。
 	pptxSplitSvc *service.PptxSplitService
+	// 素材管理服务（侧边栏「素材管理」：本地 DAM 素材库 + PPT 单页索引，
+	// data/assets/）。注册表 libraries.json 走 util.SaveJSON 原子写；各库 SQLite
+	// 索引（modernc.org/sqlite 纯 Go 零 CGO）懒打开缓存；目录扫描进度/终态事件走
+	// sinkHolder（assets-scan:* 前缀，web_serve.go applySink 须同步切换），可取消
+	// （注册表键 = 库 ID 规范化）；解析为纯 Go OOXML（复用拆分核心读取链路）。
+	assetsSvc *service.AssetLibraryService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -160,6 +166,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// PPT 按页拆分服务（工具箱「PPT 拆分」，无持久化数据；ctx 构造注入 Wails 桌面事件出口）
 	s.pptxSplitSvc = service.NewPptxSplitService(ctx)
+
+	// 素材管理服务（侧边栏「素材管理」，data/assets/；ctx 构造注入 Wails 桌面事件出口）
+	s.assetsSvc = service.NewAssetLibraryService(ctx, filepath.Join(dataDir, "assets"))
 
 	return s
 }

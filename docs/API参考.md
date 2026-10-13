@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **175** 个导出方法，分布在 18 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 18 个 service/cache。按 27 个业务域分组：
+共 **197** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -16,7 +16,7 @@
 | 目录管理 | 8 | `app_directory.go` |
 | 收藏夹 | 5 | `app_favorites.go` |
 | 文件树 | 8 | `app_filetree.go` |
-| 文件预览与对话框 | 5 | `app_preview.go` |
+| 文件预览与对话框 | 6 | `app_preview.go` |
 | 文件操作与剪贴板 | 6 | `app_clipboard.go` |
 | 搜索 | 2 | `app_search.go` |
 | Git 仓库信息 | 8 | `app_git.go` |
@@ -39,6 +39,9 @@
 | 设置 | 2 | `app_settings.go` |
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
+| 素材管理 | 11 | `app_assets.go` |
+
+> 既有缺口（与本表总数差 18）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域及部分域的行内计数为历史遗留未登记项，方法总数以 `App.d.ts` 为准，待另案补齐。
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
@@ -111,6 +114,7 @@
 | `SaveFile` | `(filePath, content, encoding) => Promise<void>` | 保存文件（按 encoding 转回原编码写入） | — |
 | `SaveFileDialog` | `(defaultFilename, filters) => Promise<string>` | 原生保存对话框 | 选定路径（取消返回空串） |
 | `OpenFileDialog` | `(title, filters) => Promise<string>` | 原生打开对话框 | 选定路径（取消返回空串） |
+| `OpenDirectoryDialog` | `(title) => Promise<string>` | 原生目录选择对话框（素材库新建等场景，serve 无头模式拒绝） | 选定目录路径（取消返回空串） |
 
 ---
 
@@ -468,11 +472,33 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 29. 数据模型
+## 29. 素材管理
+
+侧边栏「素材管理」本地 DAM 素材索引库（MVP）：素材库 CRUD + 目录扫描（增量索引）+ 幻灯片单页索引 + 检索 + 文件级元数据编辑。索引库以 SQLite 文件落盘 `data/assets/<library-id>.db`（modernc 纯 Go 驱动 + FTS5），库注册表 `data/assets/libraries.json`；索引模式只读引用原始文件，扫描不修改源文件。
+
+扫描进度/终态经事件推送（EventSink 通道）：`assets-scan:progress`（`{libraryId, done, total, currentFile}`）/ `assets-scan:done`（`{libraryId, result: AssetScanResult}`）/ `assets-scan:error`（`{libraryId, message}`）。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `CreateAssetLibrary` | `(name, rootPath) => Promise<AssetLibrary>` | 新建素材库（校验名称非空、根目录存在且为目录；登记注册表并预建索引库文件） | AssetLibrary |
+| `ListAssetLibraries` | `() => Promise<AssetLibrary[]>` | 全部素材库（注册表顺序，库切换下拉数据源） | AssetLibrary[] |
+| `DeleteAssetLibrary` | `(libraryID) => Promise<void>` | 删除素材库（关连接 + 删 db 含 WAL/SHM + 删注册表项；扫描中拒绝，`E_ASSETS_SCAN_IN_PROGRESS`） | — |
+| `GetAssetLibraryStats` | `(libraryID) => Promise<AssetLibraryStats>` | 库统计（文件/幻灯片总数、失败/加密跳过数） | AssetLibraryStats |
+| `StartAssetScan` | `(libraryID) => Promise<AssetScanResult>` | 增量扫描（递归索引根目录 .pptx，mtime+size 判变，变更才哈希重解析；加密/损坏/权限不足单文件降级跳过不中断批量；同库并发扫描拒绝） | AssetScanResult |
+| `CancelAssetScan` | `(libraryID) => Promise<boolean>` | 取消指定库在途扫描（幂等，无在途扫描返回 false） | boolean |
+| `RebuildAssetLibrary` | `(libraryID) => Promise<AssetScanResult>` | 手动全量重建（清该库文件/幻灯片/FTS 记录后全量重扫；文件标签按相对路径重绑，星级/备注不保留；索引自愈入口） | AssetScanResult |
+| `ListAssetFiles` | `(libraryID) => Promise<AssetFileEntry[]>` | 文件索引条目（含标签，按相对路径序；画廊文件视图数据源） | AssetFileEntry[] |
+| `ListAssetSlides` | `(libraryID) => Promise<AssetSlideEntry[]>` | 幻灯片索引条目（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准） | AssetSlideEntry[] |
+| `UpdateAssetFileMeta` | `(libraryID, fileID, meta: AssetFileMetaUpdate) => Promise<void>` | 文件级元数据编辑（整体替换：星级 0-5（0 清除）、备注、标签集（不存在的标签自动创建并分配默认色）） | — |
+| `SearchAssets` | `(libraryID, keyword, opts: AssetSearchOptions) => Promise<AssetSearchPage>` | 素材检索：关键词全文检索（bm25 列加权 文件名 > 幻灯片标题 > 页文本 > 备注，CJK 按字切分 phrase 匹配）与标签筛选（文件直接绑定、幻灯片继承归属文件）可组合；`flatten=false` 同 PPT 多页命中折叠为聚合条目 | AssetSearchPage |
+
+---
+
+## 30. 数据模型
 
 全部提取自 `frontend/wailsjs/go/models.ts`（`model` namespace；`frontend` namespace 含 `FileFilter`）。字段名按 Go json tag 映射，`omitempty` 对应 TS `?:` 可选。以下列出关键 struct，完整定义见 `models.ts`。
 
-### 29.1 目录与文件
+### 30.1 目录与文件
 
 **Directory** — 工作目录
 
@@ -527,7 +553,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `status` | string | 变更状态：M/A/D/R/? |
 | `staged` | boolean | 是否已暂存 |
 
-### 29.2 Git
+### 30.2 Git
 
 **GitRepoInfo** — 仓库概览
 
@@ -569,21 +595,21 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **RepoStats** — 仓库统计（`trend`: TimeBucket[]，`contributors`: Contributor[]，`heatmap`: DayCount[]，`totalCommits` / `dateRange` / `granularity` / `sampled`）
 
-### 29.3 会话快照
+### 30.3 会话快照
 
 **SessionState** — 崩溃恢复 UI 状态快照
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `selectedDirectoryId` | string? | 当前工作目录 ID |
-| `activePanel` | string? | 活动面板：directory/ai/stats/toolbox |
+| `activePanel` | string? | 活动面板：directory/ai/ai-chat/toolbox/assets/dashboard/stats |
 | `terminal` | TerminalSnapshot? | 终端面板快照 |
 | `version` | string? | 快照格式版本 |
 | `savedAt` | number? | 保存时间戳 |
 
 **TerminalSnapshot**（`visible` / `height` / `workDir`（旧版单终端兼容读取源，新快照不写入）/ `tabs`（v2 多终端 tab 列表 `TerminalTabSnapshot[]`：`workDir` / `shellType`）/ `activeIndex` / `fullscreen`）
 
-### 29.4 设置与更新
+### 30.4 设置与更新
 
 **AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
 
@@ -605,7 +631,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **UpdateInfo** — 更新信息（`hasUpdate` / `currentVer` / `latestVer` / `downloadUrl` / `releaseNotes` / `publishedAt` / `fileSize`）
 
-### 29.5 AI
+### 30.5 AI
 
 **AiFunction** — AI 功能配置（`id` / `name` / `description` / `icon` / `command` / `cwd` / `addDirs` / `env` / `mcp` / `permissionMode` / `timeoutMinutes` / `completion` / `params` / `followUps` / `tags` / `pinned`）
 
@@ -623,7 +649,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ImportPreview** — AI 功能导入预览（`new` / `conflict`: AiFunction[]，`invalid`: string[]）
 
-### 29.6 AI 对话
+### 30.6 AI 对话
 
 **ChatSession** — 对话会话（元数据入 `data/ai_chat/sessions.json` 索引；消息逐会话存 `data/ai_chat/messages/<sessionId>.json`，`GetChatSession` 加载时填充）
 
@@ -672,7 +698,31 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ChatTaskRunResult** — 单轮对话执行结果（`chat-task:done` 事件 payload；`taskId` / `chatSessionId` / `claudeSessionId` / `reply`（assistant 回复全文）/ `exitCode` / `error` / `canceled`）
 
-### 29.7 其他
+### 30.7 素材管理
+
+**AssetLibrary** — 素材库注册信息（`id`（随机 hex，同时是库 db 文件名）/ `name` / `rootPath` / `createdAt` / `updatedAt`）
+
+**AssetTag** — 标签（`id` / `name`（库内唯一）/ `color`（#RRGGBB，自动创建走默认色板）/ `parentId`（预留多级树，恒 0））
+
+**AssetFileEntry** — 文件索引条目（`id` / `path`（相对库根目录，正斜杠分隔，库内唯一）/ `size` / `modTime` / `status`（`processing`/`ok`/`failed`/`encrypted`/`denied`）/ `title`（源文件名去扩展名）/ `note` / `rating`（0-5，0 = 未评分）/ `tags`: AssetTag[] / `createdAt` / `updatedAt`）
+
+**AssetSlideEntry** — 幻灯片单页索引条目（`id` / `fileId`（归属文件记录 ID）/ `filePath` / `slideNum`（展示页序从 1 计）/ `title`（回退链：标题占位符 → 首行短文本 → 文件名+页码，空页兜底「[无标题]」）/ `text` / `speakerNotes` / `tags`（继承归属文件标签））
+
+**AssetLibraryStats** — 库统计（`libraryId` / `fileCount` / `slideCount` / `failedCount` / `encryptedCount`）
+
+**AssetScanProgress** — 扫描进度事件载荷（`libraryId` / `done` / `total` / `currentFile`）
+
+**AssetScanResult** — 扫描结果汇总（`total` / `new` / `updated` / `unchanged` / `failed` / `encrypted` / `denied` / `removed`）
+
+**AssetFileMetaUpdate** — 元数据编辑入参（`rating` / `note` / `tags`: string[]，整体替换语义）
+
+**AssetSearchOptions** — 检索入参（`flatten`（true 平铺 / false 聚合折叠）/ `tagIds`: number[] / `limit`（默认 50，上限 200）/ `offset`）
+
+**AssetSearchHit** — 检索命中条目（`refType`（`file`/`slide`）/ `refId`（文件条目 = files.id，幻灯片条目 = slides.id）/ `fileId` / `filePath` / `title` / `slideNum` / `snippet`（原文子串窗口含省略号）/ `score`（bm25 负值口径，越小越相关）/ `hitCount`（聚合条目命中页数，其余恒 1）/ `tags`）
+
+**AssetSearchPage** — 检索结果页（`items`: AssetSearchHit[] / `total`（过滤/聚合后总条目数，翻页以 offset 递增驱动，Total 不随页变化）/ `keyword` / `flattened`）
+
+### 30.8 其他
 
 **Favorite**（`path` / `alias` / `group` / `createdAt`）
 
@@ -696,7 +746,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **SkillDescriptor**（`name` / `description` / `command` / `cwd` / `source` / `sourceDir` / `plugin`）
 
-### 29.8 具名 string 类型
+### 30.9 具名 string 类型
 
 `model/commit.go` 定义的两个具名 string 类型，作方法参数时 `App.d.ts` 保留 `model.X` 引用：
 
@@ -709,7 +759,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 30. 深度查询入口
+## 31. 深度查询入口
 
 本清单为静态快照。需要查询方法调用链、service 实现、字段影响面等动态结构信息时，使用项目内置的 CodeGraph 索引（`.codegraph/`，SQLite 知识图谱，全仓库符号/调用边/文件索引，规模以 `codegraph status` 实时查询为准）：
 
@@ -725,4 +775,4 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-**最后更新：** 2026-09-22
+**最后更新：** 2026-10-13
