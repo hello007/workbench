@@ -181,3 +181,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 116: 文件树复制路径二级菜单——绝对/相对/@文件引用 + 内容面板路径下拉
+
+**Date**: 2026-10-13
+**Task**: 文件树复制路径二级菜单——绝对/相对/@文件引用 + 内容面板路径下拉
+**Branch**: `master`
+
+### Summary
+
+文件树右键「复制路径」改二级菜单（绝对/相对/@引用/文件名，纯 CSS hover 飞出，目录节点补齐复制文件名）；新增 utils/relativePath.js（分隔符归一 + 根外防御分支）；内容面板路径行改 el-dropdown 三项同口径；vitest 全量 1580 绿；spec 沉淀自绘菜单二级飞出子菜单模式（overflow:hidden 裁剪陷阱 + hover 不脱范围原理）至 frontend-visual-conventions.md
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c5a987` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
