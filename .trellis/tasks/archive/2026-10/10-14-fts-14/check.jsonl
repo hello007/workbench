@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "核对修复不违背 FTS 契约与错误矩阵"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 ListAssetSlides 分页绑定三处同步"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新测试无 mtime/sleep 隐式依赖"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁不回退"}

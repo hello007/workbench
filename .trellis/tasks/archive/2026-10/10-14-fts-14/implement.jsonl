@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材管理契约基准：FTS 五契约（切分同源/detail=full/standalone 双写/禁 trigram/原文窗口摘要）、单连接池自锁、派生产物排除口径、错误矩阵——修复不得违背"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "绑定三处同步规则、EventsOn 闭包注销、ListAssetSlides 分页签名变更须重生成绑定"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "AppError 错误码分流、取消链路 LIFO——shutdown 收口与错误处理修复对照"}
+{"file": "docs/spec/test-stability.md", "reason": "新测试禁 mtime 时序/sleep/固定端口，复现测试用注入驱动"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "AssetsPanel 前端改动守视觉规约（引导文案/空态渲染）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁 service ≥76% 不回退"}
