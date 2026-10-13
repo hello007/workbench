@@ -214,3 +214,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 117: 工具箱 PPT 按页拆分功能全流程落地
+
+**Date**: 2026-10-13
+**Task**: 工具箱 PPT 按页拆分功能全流程落地
+**Branch**: `master`
+
+### Summary
+
+头脑风暴+调研收敛方案 B 纯 Go OOXML 拆分（四方案对比，COM 因 CI 不可测+无 Office 保证被排除）；PR1 拆分核心（最小编辑集六项 + 页序三跳映射 + 解析定位字节删除保真 + 原子写，16 用例）；PR2 取消注册表（复用 E_GIT_CANCELLED）+ EventSink 进度事件 pptx-split:* + App 绑定 + applySink 第六服务；PR3 前端双入口（文件树右键 Promise 直返规避共听面 + PptSplitDialog 闭包注销）+ 文档。后端 22 + 前端 23 新用例，service 覆盖 81.3%。trellis-check 修复 gofmt+过时注释；cavecrew-reviewer 独立审核零发现。沉淀 docs/spec/pptx-split.md + CLAUDE.md 关键规则。遗留：docs/API参考.md 建议单独任务全量重对
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `915888a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
