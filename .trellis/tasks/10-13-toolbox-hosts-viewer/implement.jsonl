@@ -1,0 +1,6 @@
+{"file": "docs/spec/linux-platform.md", "reason": "平台分叉选型：路径常量独有走 _windows/_other 双文件、读/解析纯逻辑抽无 tag 文件双侧同测；hosts 路径平台分叉设计依据"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名变更须同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；新增具名 string 类型须手动补 models.ts 别名防 MISSING_EXPORT"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉规范：弹窗响应式尺寸分档、深色容器内联 SVG 图标 fill=currentColor、语义类、间距圆角梯度"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态：hosts fixture 注入路径，禁依赖本机真实 hosts 内容"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：util ≥40% + service ≥76% + 前端 ≥70%，改阈值须同步文档"}
+{"file": "docs/spec/process-management.md", "reason": "工具箱接入先例：tools 数组 + 独立 Dialog 组件模式、EnvVarGroup.Error 单来源失败形态（§9.1 复用模式）"}

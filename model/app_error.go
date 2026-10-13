@@ -82,6 +82,12 @@ const (
 	// 环境变量查看域（工具箱·环境变量）
 	ErrCodeEnvEnumFailed = "E_ENV_ENUM_FAILED" // 环境变量枚举失败（error，引导重试；单来源失败不进此错误——走分组 Error 字段下发，仅全部来源失败时返回）
 
+	// hosts 文件查看域（工具箱·hosts 文件）
+	// 读取失败不整体外抛：错误消息随 model.HostsView.Error 组级字段下发（对齐
+	// EnvVarGroup.Error 单来源失败形态），错误码不经 ErrorFormatter 到前端，
+	// 故不同步 frontend/src/utils/error.js（该表仅收「前端按 code 分流」的错误码）。
+	ErrCodeHostsReadFailed = "E_HOSTS_READ_FAILED" // hosts 文件读取失败（不存在 / 无权限等，用户可读消息按根因分类）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

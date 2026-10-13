@@ -88,18 +88,21 @@
     <JsonYamlToolDialog v-model="jsonYamlVisible" />
     <!-- 环境变量：系统/用户/进程三来源只读查看（Windows 三组 / Linux 仅进程组），敏感值打码 -->
     <EnvVarDialog v-model="envVarsVisible" />
+    <!-- hosts 文件：本机 hosts 只读解析查看（IP/主机名/注释），支持过滤与复制 -->
+    <HostsDialog v-model="hostsVisible" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, CopyDocument, Cpu, Document, Key, Sort } from '@element-plus/icons-vue'
+import { Connection, CopyDocument, Cpu, Document, Guide, Key, Sort } from '@element-plus/icons-vue'
 import { CopyTo } from '../../wailsjs/go/main/App'
 import ProcessManagerDialog from './ProcessManagerDialog.vue'
 import PortListDialog from './PortListDialog.vue'
 import JsonYamlToolDialog from './JsonYamlToolDialog.vue'
 import EnvVarDialog from './EnvVarDialog.vue'
+import HostsDialog from './HostsDialog.vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 
 defineEmits(['close'])
@@ -110,6 +113,7 @@ const processManagerVisible = ref(false)
 const portListVisible = ref(false)
 const jsonYamlVisible = ref(false)
 const envVarsVisible = ref(false)
+const hostsVisible = ref(false)
 
 // JSON/YAML 工具弹窗：纯前端无枚举，无需 @open 预拉数据
 const openJsonYamlTool = () => {
@@ -129,6 +133,11 @@ const openPortList = () => {
 // 环境变量弹窗：同上，打开时机交由组件 @open
 const openEnvVars = () => {
   envVarsVisible.value = true
+}
+
+// hosts 文件弹窗：同上，打开时机交由组件 @open
+const openHosts = () => {
+  hostsVisible.value = true
 }
 
 const copyToSourcePath = ref('')
@@ -259,6 +268,13 @@ const tools = [
     icon: Key,
     description: '查看系统/用户/进程环境变量，敏感值打码',
     handler: openEnvVars
+  },
+  {
+    id: 'hosts',
+    name: 'hosts 文件',
+    icon: Guide,
+    description: '查看本机 hosts 解析映射，支持过滤与复制',
+    handler: openHosts
   }
 ]
 </script>

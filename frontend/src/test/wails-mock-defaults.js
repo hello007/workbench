@@ -92,6 +92,23 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
     }
   ],
 
+  // ---- hosts 文件查看器（工具箱·hosts 文件：只读解析 + 过滤 + 复制）----
+  // 形状对齐 model.HostsView / HostsEntry（见 frontend/wailsjs/go/models.ts）。
+  // 默认 Windows 路径形态（Linux 实机为 /etc/hosts）；entries 覆盖 entry/comment/
+  // unknown/blank 四种行类别，供过滤与「显示注释」开关场景断言；error 空串 = 读取成功。
+  GetHosts: {
+    path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+    entries: [
+      { kind: 'entry', ip: '127.0.0.1', hostnames: ['localhost'], comment: '', raw: '127.0.0.1 localhost' },
+      { kind: 'entry', ip: '::1', hostnames: ['ip6-local'], comment: 'IPv6 回环', raw: '::1 ip6-local # IPv6 回环' },
+      { kind: 'entry', ip: '10.20.30.40', hostnames: ['dev.internal.example.com'], comment: '', raw: '10.20.30.40 dev.internal.example.com' },
+      { kind: 'comment', ip: '', hostnames: [], comment: '', raw: '# 屏蔽广告域名示例' },
+      { kind: 'unknown', ip: '', hostnames: [], comment: '', raw: 'broken-line-without-ip' },
+      { kind: 'blank', ip: '', hostnames: [], comment: '', raw: '' }
+    ],
+    error: ''
+  },
+
   // ---- 仓库列表配置导入导出（形状对齐 model.RepoConfigImportPreview / Result）----
   // SaveFileDialog / OpenFileDialog 默认空串 = 用户取消，安全 no-op
   SaveFileDialog: '',

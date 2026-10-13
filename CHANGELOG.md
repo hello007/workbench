@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- 工具箱新增「hosts 文件」只读查看器：解析展示本机 hosts 行结构（IP / 主机名 / 行内注释，兼容 IPv4 / IPv6 及带 zone 的 link-local，容忍 UTF-8 BOM 与 CRLF），注释与空行默认隐藏、「显示注释」开关切回，未识别行灰色标注不静默丢弃，支持按 IP / 主机名过滤（大小写不敏感）与复制单行 / 复制 IP；读取失败就地组级提示（Windows `C:\Windows\System32\drivers\etc\hosts` / Linux `/etc/hosts`）
 - 工具箱新增「环境变量」只读查看器：按来源分页展示（Windows 系统 / 用户 / 进程三级，系统与用户级读注册表、进程级为实际生效值；Linux 仅进程级），支持按名称/值过滤、按名称排序、复制单值；敏感命名（含 TOKEN/SECRET/PASSWORD/PASSWD/KEY/CREDENTIAL，大小写不敏感）默认打码、点击临时显示，复制始终为真实值
 
 ## [1.9.0] - 2026-09-28

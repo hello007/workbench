@@ -1,0 +1,5 @@
+{"file": "docs/spec/linux-platform.md", "reason": "校验平台分叉符合选型规则：路径常量 _windows/_other 双文件、解析逻辑无 tag 共享、测试平台断言拆分禁两平台共享平台耦合断言"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 wailsjs 三处同步完整、新增具名 string 类型 models.ts 别名补齐（npm run build 不报 MISSING_EXPORT）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "校验 Dialog 弹窗尺寸分档、图标内联 SVG 规则、间距圆角梯度"}
+{"file": "docs/spec/test-stability.md", "reason": "校验测试 fixture 注入、无本机真实 hosts 依赖、无 sleep 等待"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验覆盖率门禁达标不回退"}

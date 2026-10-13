@@ -59,6 +59,10 @@ type AppServices struct {
 	// 系统/用户级 + os.Environ 进程级；Linux 仅进程级），测试注入 fake 不依赖本机
 	// 真实环境变量与注册表内容。
 	envSvc *service.EnvService
+	// hosts 文件查看服务（工具箱「hosts 文件」：本机 hosts 只读读取 + 行解析）。
+	// 路径取 util.HostsFilePath 平台常量（Windows drivers/etc/hosts / Linux /etc/hosts），
+	// service 测试注入 fixture 路径不依赖本机真实 hosts 内容。
+	hostsSvc *service.HostsService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -145,6 +149,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 环境变量查看服务（工具箱「环境变量」，无持久化数据）
 	s.envSvc = service.NewEnvService()
+
+	// hosts 文件查看服务（工具箱「hosts 文件」，无持久化数据）
+	s.hostsSvc = service.NewHostsService()
 
 	return s
 }
