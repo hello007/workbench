@@ -83,6 +83,7 @@ type goOleThumbExporter struct {
 	availableSet atomic.Bool // 缓存是否已初始化（零值 false 不等于「不可用」）
 	dirty        atomic.Bool // 会话脏标记（主侧 Discard 置位 / worker ensureApp 检查并清位——跨线程经实例 atomic，不用包级变量防多实例互染）
 	startOnce    sync.Once
+	shutdownOnce sync.Once // Shutdown 幂等（close(e.quit) 双重 close 会 panic——并发/重复调用收敛到首次执行，check P2）
 
 	ownedMu     sync.Mutex   // 保护 ownedMirror（worker 线程写、主侧杀进程路径读）
 	ownedMirror map[int]bool // 自启 PID 镜像：超时强杀路径在 worker 阻塞于 Invoke 时无法经任务通道取快照（通道请求永不被消费），镜像让主侧无需 worker 配合即可定位自启 PID。发布时整体替换新 map，读侧持锁取引用后可无锁遍历
@@ -440,24 +441,24 @@ func (e *goOleThumbExporter) Discard() {
 }
 
 // Shutdown 关停收口：停 worker（内部 Quit 自启实例）+ 残留强杀兜底。
+// sync.Once 全包裹：并发/重复调用幂等——「select default 判已收口 → close」
+// 非原子，双重 close(e.quit) 会 panic（check P2）；等待与兜底语义由首次调用
+// 承担，后续调用等首次完成后原样返回（Do 阻塞至首次 f 返回）。
 func (e *goOleThumbExporter) Shutdown() {
-	select {
-	case <-e.quit:
-		return // 已收口
-	default:
-	}
-	e.startWorker() // 未启动过则无需收口——quit close 前确保通道语义一致
-	close(e.quit)
-	select {
-	case <-e.workerDone:
-	case <-time.After(5 * time.Second):
-		// worker 卡死（如复用用户实例被模态弹窗阻塞）：按归属镜像强杀自启
-		// 残留兜底（镜像空 = 复用用户实例，不可杀——不误伤）
-		Logger().Warn("COM worker 关停超时（按归属镜像强杀自启残留兜底）")
-		e.killOwnedPowerpnt()
-	}
-	// worker 正常退出路径由 cleanup 收口（Quit + 3s 强杀兜底），此处不重复
-	// 枚举进程（避免误杀用户实例）。
+	e.shutdownOnce.Do(func() {
+		e.startWorker() // 未启动过则启动——quit close 前确保通道语义一致
+		close(e.quit)
+		select {
+		case <-e.workerDone:
+		case <-time.After(5 * time.Second):
+			// worker 卡死（如复用用户实例被模态弹窗阻塞）：按归属镜像强杀自启
+			// 残留兜底（镜像空 = 复用用户实例，不可杀——不误伤）
+			Logger().Warn("COM worker 关停超时（按归属镜像强杀自启残留兜底）")
+			e.killOwnedPowerpnt()
+		}
+		// worker 正常退出路径由 cleanup 收口（Quit + 3s 强杀兜底），此处不重复
+		// 枚举进程（避免误杀用户实例）。
+	})
 }
 
 // isComClassError 判定「PowerPoint 未安装」类错误（首次任务修正探测缓存）。
@@ -482,12 +483,15 @@ func (w *comWorkerState) exportSession(spec thumbFileSpec, thumbsDir string, tie
 	if err != nil {
 		return 0, err
 	}
-	releasable := !reused // 复用的 Presentation 是用户的，不 Close 不 Release 归属
-	if releasable {
-		// defer LIFO：先 Close（让 PowerPoint 关闭演示文稿）后 Release（释放本
-		// 侧 COM 引用）——顺序颠倒会对已 Release 的指针调 Close，违反 COM 引用
-		// 规则（代理断连时表现为 RPC_E_DISCONNECTED 等未定义行为）
-		defer pres.Release()
+	// Release 恒做（复用与否）：findOrOpen 返回的接口指针是本侧自有引用——
+	// 复用路径只是不 Close 用户的 Presentation（Close 属归属操作），Release
+	// 释放的是本侧 COM 代理引用，与归属无关，不释放 = 代理引用泄漏累积
+	// （check P2）。defer LIFO：先注册 Release 后注册 Close → 执行序 Close
+	// （让 PowerPoint 关闭演示文稿）先于 Release（释放本侧 COM 引用）——顺序
+	// 颠倒会对已 Release 的指针调 Close，违反 COM 引用规则（代理断连时表现
+	// 为 RPC_E_DISCONNECTED 等未定义行为）。
+	defer pres.Release()
+	if !reused {
 		defer oleutil.CallMethod(pres, "Close")
 	}
 
@@ -602,6 +606,7 @@ func (w *comWorkerState) findOrOpen(app *ole.IDispatch, absPath string, readOnly
 				continue
 			}
 			fullName, _ := fnV.Value().(string)
+			_ = fnV.Clear() // 释放 VT_BSTR（先取值后 Clear，漏 Clear = BSTR 泄漏累积——check P2）
 			if strings.EqualFold(fullName, absPath) {
 				return item, true, nil // 复用（FullName 匹配大小写不敏感）
 			}

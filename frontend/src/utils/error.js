@@ -35,6 +35,7 @@ export const ErrorCode = Object.freeze({
   AssetsScanInProgress: 'E_ASSETS_SCAN_IN_PROGRESS', // 该素材库已有扫描进行中，本次拒绝（warning，可稍后重试）
   AssetsThumbsUnavailable: 'E_ASSETS_THUMBS_UNAVAILABLE', // 本机无 PowerPoint COM，缩略图/打开跳转不可用（error；前端提示条常驻 + 跳转入口隐藏）
   AssetsThumbsBusy: 'E_ASSETS_THUMBS_BUSY', // 缩略图跳转排队/执行超时（warning，COM 队列瞬态忙，可重试）
+  AssetsThumbsJumpFailed: 'E_ASSETS_THUMBS_JUMP_FAILED', // 跳转执行失败：文件不存在/损坏/COM 调用失败（error，消息含可读原因）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。

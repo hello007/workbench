@@ -34,7 +34,7 @@
 ### `jr.Result` 单写契约（P0 死锁教训）
 
 - `thumbJumpRequest.Result`（缓冲 1）**只允许恰一次写回**：JumpOnly 契约内写回（成败均写）；preempt 页间插队路径由 COM 实现写回；`handleJump` **不得二次写**——Result 仅 `JumpToSlide` 单读者，双写 = worker 永久阻塞 = 整个队列停摆（check 实测抓出的 P0）。
-- `JumpToSlide` 结果等待带 90s 兜底（`thumbJumpResultTimeout` ≥ 实现内部 60s jumpTimeout + 10s 收尾宽限），防 worker 永挂传染到前端 RPC。
+- `JumpToSlide` 提交等待带 `thumbJumpEnqueueTimeout`（60s）超时：与单页导出最坏耗时对齐（HD 档复杂页可超 5s，批量在途时页边界 preempt 是唯一消费点——提交窗过短会在发送方退队后被 preempt 摘到 stale 请求静默执行）；结果等待带 90s 兜底（`thumbJumpResultTimeout` ≥ 实现内部 60s jumpTimeout + 10s 收尾宽限），防 worker 永挂传染到前端 RPC。
 
 ### 双引擎兼容（WPS / MS Office）
 
@@ -42,7 +42,7 @@
 |---|---|---|---|
 | `Presentations` 访问 | 属性（GetProperty） | 同 | **禁 `CallMethod`**（只走 DISPATCH_METHOD 报「找不到成员」） |
 | ww=0 无窗口导出 | 可用（社区共识） | **可用且渲染正常** | 恒 `Open(ro=-1, untitled=0, ww=0)` |
-| 同名文件二次 Open | 报「已打开」错 | **允许双开** | 先直接 Open，报错时遍历 Presentations 集合按 FullName 复用兜底 |
+| 同名文件二次 Open | 报「已打开」错 | **允许双开** | 先按 FullName 尽力遍历复用（不依赖 Count 完整性——Count=0 时遍历空集自然落 Open），未命中直接 Open；WPS 同名双开允许下未命中 Open 直接成功 |
 | Presentations.Count | 可靠 | **不可靠**（开着 1 个报 0） | 复用检查不能依赖集合完整枚举 |
 | 显式尺寸导出 | 精确生效 | 精确生效（2560x1440 默认口径被绕开） | **纵横比调用方自算**（Export 传什么出什么，不 fit-inside——从 presentation.xml sldSz 读幻灯片比例算高度） |
 | CreateInstance 忙态 | `0x8001010A` 瞬态 | **可持续数秒**（强杀后激活管线卡死） | 5 次 × 1s 重试，非瞬态失败才算实例不可用 |
@@ -53,7 +53,7 @@
 
 ### 队列与失败隔离
 
-- 单 worker 串行消费 `batchCh`（缓冲 8）+ `jumpCh`（**无缓冲**：交接即消费，提交阻塞等消费方，消除「页边界错过提交」竞态）；跳转优先 = worker 每轮非阻塞摘 jumpCh + 批量在途时 preempt 页间摘取（D3「最多等一页」；导出快于提交时兜底走批次后主循环消费，语义自洽）。
+- 单 worker 串行消费 `batchCh`（缓冲 8）+ `jumpCh`（**无缓冲**：交接即消费，提交阻塞等消费方，消除「页边界错过提交」竞态）；跳转优先 = worker 每轮非阻塞摘 jumpCh + 批量在途时 preempt 页间摘取（D3「最多等一页」；导出快于提交时兜底走批次后主循环消费，语义自洽）。**停泊 select（第二 select）必须与 first select 同集收 jumpCh**（check P0 教训：停泊分支漏 jumpCh = 批次完成后的空闲期跳转无人接收，JumpToSlide 撞入队超时报 BUSY 假态，stale 请求被后续批量唤醒误执行）。
 - 单文件失败（含超时强杀）→ `exporter.Discard()`（置脏，下任务重建会话）→ 继续后续文件（SRS 失败隔离）。**fake 注入测试会掩蔽 COM 实现的回写遗漏**——preempt 路径的 `jr.Result` 写回必须有真链路验证或契约断言。
 - 关停顺序：`WaitScansDone()` → `WaitThumbsDone()` → `CloseAll()`（app.go shutdown）；WaitThumbsDone = 取消全部批次 → worker 退出 → exporter.Shutdown（Quit 自启实例 + 镜像 PID 强杀残留兜底）→ `closed` 置位拒绝新任务。
 
@@ -67,6 +67,7 @@
 |---|---|
 | 无 PowerPoint（探测不可用） | 入队静默跳过（无事件）；跳转返回 `E_ASSETS_THUMBS_UNAVAILABLE`（error，前端提示条常驻 + 入口隐藏） |
 | 跳转排队超时 / 队列忙 | `E_ASSETS_THUMBS_BUSY`（warning 可重试；**禁复用 UNAVAILABLE**——语义为环境缺失，会误触降级 UI） |
+| 跳转执行失败（文件不存在/损坏/COM 调用失败） | `E_ASSETS_THUMBS_JUMP_FAILED`（error，JumpToSlide 出口包装——nil 与既有 AppError 原样返回，COM 原始错误 `WrapAppError` 包裹保留根因 `errors.Is` 穿透） |
 | 单 PPT 超时（300s） | 杀自启实例（精确 PID + 镜像快照）→ 文件记失败 → 继续后续 |
 | 批次取消 | ctx 传播 → `done.Canceled=true` → 中断剩余文件 |
 | 复用用户实例被模态弹窗卡死 | 结构性不可杀：90s 结果兜底 + slog 告警，后续任务逐个烧超时（接受，观测面已有） |

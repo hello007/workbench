@@ -291,6 +291,42 @@ func TestThumbQueue_JumpDirectWhenIdle(t *testing.T) {
 	}
 }
 
+// TestThumbQueue_JumpAfterBatchIdleParked 批次完成后 worker 停泊于第二个 select
+// （阻塞等 batchCh/quit/jumpCh）期间的空闲态跳转仍可达——P0 回归守护：停泊
+// select 未含 jumpCh 时空闲期跳转无人接收，JumpToSlide 撞入队超时报 BUSY
+// （队列空闲却报忙的假态），且 stale 请求会被后续批量唤醒时误执行。确定性
+// 构造：入队小批次（exportFn 直返）→ waitDone 等批次完成（worker 已回停泊
+// select）→ 再 JumpToSlide 断言成功且恰执行一次（修复前此用例确定性失败）。
+func TestThumbQueue_JumpAfterBatchIdleParked(t *testing.T) {
+	fake := &fakeThumbExporter{available: true}
+	s, sink := newThumbTestService(t, fake)
+
+	s.EnqueueAssetThumbs("lib1", thumbSpecs(1), t.TempDir())
+	waitDone(t, sink) // 批次完成：worker 已回到停泊 select
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.JumpToSlide(`C:\素材\a.pptx`, 3) }()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("空闲停泊期跳转应成功: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("5s 内跳转未被执行（停泊 select 未消费 jumpCh——P0 回归）")
+	}
+	if _, jumps, _, _ := fake.stats(); jumps != 1 {
+		t.Fatalf("跳转应恰执行一次, got %d", jumps)
+	}
+
+	// worker 存活性守护（spec §6）：停泊期跳转后批次仍能消费（防 handleJump
+	// 二次写阻塞等形态——跳转通道集扩张不得破坏主循环完整性）
+	s.EnqueueAssetThumbs("lib1", thumbSpecs(1), t.TempDir())
+	waitDone(t, sink)
+	if exports, _, _, _ := fake.stats(); exports != 2 {
+		t.Fatalf("跳转后批次应正常执行, got %d 次导出", exports)
+	}
+}
+
 // TestThumbQueue_JumpErrorIsolated 跳转失败不拖垮队列：错误回传调用方
 // （jr.Result 由 JumpOnly 契约写回恰一次），worker 存活并继续消费后续批次。
 func TestThumbQueue_JumpErrorIsolated(t *testing.T) {

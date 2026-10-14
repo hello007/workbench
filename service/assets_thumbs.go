@@ -53,6 +53,12 @@ var thumbPerFileTimeout = 300 * time.Second
 // 场景（复用用户实例被模态弹窗阻塞且不可杀），防 JumpToSlide 前端 RPC 永挂。
 const thumbJumpResultTimeout = 90 * time.Second
 
+// thumbJumpEnqueueTimeout 跳转入队提交超时：与单页导出最坏耗时对齐（HD 档复杂
+// 页可超 5s，批量在途时页边界 preempt 是唯一消费点——提交窗过短会在发送方退队
+// 后被 preempt 摘到 stale 请求静默执行，check P2）；结果等待仍由
+// thumbJumpResultTimeout(90s) 兜底。
+const thumbJumpEnqueueTimeout = 60 * time.Second
+
 // thumbFileSpec 批量任务中的单文件规格。
 type thumbFileSpec struct {
 	FileID  int64  `json:"fileId"`  // files.id（稳定，缓存键组成部分——slides.id 禁用）
@@ -165,7 +171,7 @@ func (q *thumbQueue) start() {
 	go q.run()
 }
 
-// run worker 主循环：每轮先非阻塞摘跳转（严格优先），再阻塞等批次/退出。
+// run worker 主循环：每轮先非阻塞摘跳转（严格优先），再阻塞等批次/跳转/退出。
 // 批量在途期间的跳转由 handleBatch 内 preempt 回调承接（页间插队）。
 func (q *thumbQueue) run() {
 	defer q.wg.Done()
@@ -177,6 +183,14 @@ func (q *thumbQueue) run() {
 		default:
 		}
 		select {
+		case jr := <-q.jumpCh:
+			// 停泊分支与 first select 同集消费 jumpCh：批次完成后 worker 停泊于
+			// 本 select 的空闲窗口内，新跳转在此被消费——漏掉则空闲期跳转无人
+			// 接收，JumpToSlide 撞入队超时报 BUSY（队列空闲却报忙的假态），且
+			// 停泊期挂起的 stale 请求会被后续批量唤醒时误执行（check P0）。
+			// first select 保留非阻塞摘取：批量在途时提前一轮摘走维持「跳转
+			// 优先于批次」，空闲期跳转经任一分支到达均零额外延迟。
+			q.handleJump(jr)
 		case b := <-q.batchCh:
 			q.handleBatch(b)
 		case <-q.quit:
@@ -342,7 +356,7 @@ func (s *AssetLibraryService) JumpToSlide(absPath string, slideNum int) error {
 	q.start()
 	select {
 	case q.jumpCh <- jr:
-	case <-time.After(5 * time.Second):
+	case <-time.After(thumbJumpEnqueueTimeout):
 		// 排队超时 = worker 忙且页间插队窗口未及消费（瞬态可重试），按 busy
 		// warning 分流——不可复用 E_ASSETS_THUMBS_UNAVAILABLE（语义为环境无
 		// PowerPoint，前端会误触降级 UI）
@@ -350,7 +364,18 @@ func (s *AssetLibraryService) JumpToSlide(absPath string, slideNum int) error {
 	}
 	select {
 	case err := <-jr.Result:
-		return err
+		// 出口分流（check P2）：COM 原始错误（文件不存在/损坏/Invoke 失败）包装
+		// 引导级 AppError——裸 HRESULT 文案前端不可读；nil 与既有 AppError
+		// （排队/结果超时、不可用）语义已定，原样返回。
+		if err == nil {
+			return nil
+		}
+		var appErr *model.AppError
+		if errors.As(err, &appErr) {
+			return err
+		}
+		return model.WrapAppError(model.ErrCodeAssetsThumbsJumpFailed,
+			"打开 PPT 或跳转失败，请确认文件存在且未被破坏", err)
 	case <-time.After(thumbJumpResultTimeout):
 		// exporter 侧 jumpTimeout + 杀进程收尾宽限内正常返回；此为 worker 永挂
 		// 兜底（复用用户实例被模态弹窗阻塞且不可杀），防前端 RPC 与 goroutine
@@ -398,8 +423,8 @@ func (s *AssetLibraryService) WaitThumbsDone() {
 		b.Cancel()
 	}
 	// jumpCh 中已排队的请求无法逐个回复（无注册表）——worker 退出前会消费或
-	// 随 quit 丢弃；等待方永挂风险由 JumpToSlide 双超时兜底（5s 入队排队 +
-	// 90s 结果等待）。
+	// 随 quit 丢弃；等待方永挂风险由 JumpToSlide 双超时兜底（thumbJumpEnqueueTimeout
+	// 入队提交 + thumbJumpResultTimeout 结果等待）。
 	close(q.quit)
 	q.wg.Wait()
 	q.exporter.Shutdown()
