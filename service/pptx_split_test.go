@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,8 +88,22 @@ const pptxFixtureRootRels = pptxFixtureXMLDecl +
 	`<Relationship Id="rId1" Type="` + testOfficeRelNS + `/officeDocument" Target="ppt/presentation.xml"/>` +
 	`</Relationships>`
 
-const pptxFixtureMasterXML = pptxFixtureXMLDecl +
-	`<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`
+// pptxFixtureMasterXML 母版 XML：带 <p:sldLayoutIdLst>（该母版全部版式的
+// sldLayoutId 条目，id 递增、r:id 与母版 rels 的版式 rId 严格对应——真实 OOXML
+// 形态；GC 剪除版式后条目残留的悬空引用由「part→rels 方向 r:id 可解析」断言面
+// 与多母版用例守护）。
+func pptxFixtureMasterXML(layouts []pptxFixtureLayoutDef) string {
+	var b strings.Builder
+	b.WriteString(pptxFixtureXMLDecl)
+	b.WriteString(`<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">`)
+	b.WriteString(`<p:sldLayoutIdLst>`)
+	for i := range layouts {
+		fmt.Fprintf(&b, `<p:sldLayoutId id="%d" r:id="rId%d"/>`, 2147483648+i, i+1)
+	}
+	b.WriteString(`</p:sldLayoutIdLst>`)
+	b.WriteString(`</p:sldMaster>`)
+	return b.String()
+}
 
 const pptxFixtureLayoutXML = pptxFixtureXMLDecl +
 	`<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`
@@ -298,7 +313,7 @@ func buildPptxFixture(t *testing.T, dir, name string, fx pptxFixture) *pptxFixtu
 	add(pptxPresentationPart, pptxFixturePresentationXML(len(masters), rids, fx.withSections))
 	add(pptxPresentationRelsPart, pptxFixturePresentationRels(masterFiles, slideFiles))
 	for _, m := range masters {
-		add("ppt/slideMasters/"+m.part, pptxFixtureMasterXML)
+		add("ppt/slideMasters/"+m.part, pptxFixtureMasterXML(m.layouts))
 		add("ppt/slideMasters/_rels/"+m.part+".rels", pptxFixtureMasterRels(m))
 		for _, l := range m.layouts {
 			add("ppt/slideLayouts/"+l.part, pptxFixtureLayoutXML)
@@ -376,6 +391,10 @@ func mustZipPart(t *testing.T, r *zip.Reader, name string) []byte {
 	return nil
 }
 
+// ridRefRegex part XML 字节内 r:id="..." 引用的提取（测试断言面足够，无需完整
+// 解析；xmlns:r 声明形态 xmlns:r=" 不匹配本模式）。
+var ridRefRegex = regexp.MustCompile(`r:id="([^"]+)"`)
+
 // assertSinglePageOutput 单页输出的通用断言面：
 //   - sldIdLst 恰一条且 r:id 为期望值；presentation.xml 无其他页 r:id 引用，
 //     无 custShowLst / sectionLst / extLst 残留，未编辑区域（sldSz）保留；
@@ -383,6 +402,9 @@ func mustZipPart(t *testing.T, r *zip.Reader, name string) []byte {
 //   - 删除集 part 全部不存在；
 //   - [Content_Types].xml 全部 Override 指向存在的 part（无悬空声明）；
 //   - 全包 .rels 无悬空关系（除 TargetMode=External 外 Target 均可解析到存在的 part）；
+//   - part→rels 反向引用可解析：带 .rels 的 part 其 XML 字节内全部 r:id 引用在
+//     对应 rels 的 Id 集合中存在（GC 联动编辑漏 XML 条目剪除即在此暴露，如保留
+//     母版 sldLayoutIdLst 残留被剪版式条目）；
 //   - 保留 part 与构造基准逐字节一致。
 func assertSinglePageOutput(t *testing.T, outPath, wantRid, wantPart, wantMarker string, deletedParts map[string]bool, keptBaselines map[string][]byte, otherRids []string) {
 	t.Helper()
@@ -464,6 +486,35 @@ func assertSinglePageOutput(t *testing.T, outPath, wantRid, wantPart, wantMarker
 			target := resolveRelTarget(source, rel.Target)
 			if !names[target] {
 				t.Errorf("%s 关系悬空：%s → %s", f.Name, rel.ID, target)
+			}
+		}
+	}
+
+	// part→rels 反向引用：带 .rels 的 part，其 XML 字节内引用的 r:id 必须在对应
+	// rels 的 Id 集合中（rels→Target 方向断言只兜「关系指空」，兜不住「XML 引用
+	// 已删关系」的双向悬空面）。包根 .rels 源 part 为空串无 XML 本体，.rels 文件
+	// 自身无引用面，均在 .rels 后缀过滤中天然跳过；无 .rels 的 part（如 theme）
+	// 无校验基准，跳过。
+	for _, f := range zr.Reader.File {
+		if strings.HasSuffix(f.Name, ".rels") {
+			continue
+		}
+		relsName := relsPartOf(f.Name)
+		if !names[relsName] {
+			continue
+		}
+		var rels pptxRelationships
+		if err := xml.Unmarshal(mustZipPart(t, &zr.Reader, relsName), &rels); err != nil {
+			t.Fatalf("%s 解析 %s: %v", filepath.Base(outPath), relsName, err)
+		}
+		relIDs := make(map[string]bool, len(rels.Relationships))
+		for _, rel := range rels.Relationships {
+			relIDs[rel.ID] = true
+		}
+		for _, m := range ridRefRegex.FindAllSubmatch(mustZipPart(t, &zr.Reader, f.Name), -1) {
+			if !relIDs[string(m[1])] {
+				t.Errorf("%s 的 part %s 引用了 rels 不存在的 r:id=%q（悬空引用，GC 联动编辑缺位）",
+					filepath.Base(outPath), f.Name, m[1])
 			}
 		}
 	}
@@ -916,6 +967,17 @@ func TestSplitPptxPerPage_MultiMasterPrunesUnusedMasterChain(t *testing.T) {
 	if !bytes.Contains(masterRels, []byte("slideLayout1.xml")) {
 		t.Error("保留母版 rels 应保留版式 1 关系")
 	}
+	// 母版 XML sldLayoutIdLst 联动（P0 修复面）：保留母版条目保留，全部 r:id
+	// 引用可解析（母版本体字节拷贝，条目残留即悬空引用触发 PowerPoint 修复弹窗）
+	masterXML := mustZipPart(t, &zr.Reader, "ppt/slideMasters/slideMaster1.xml")
+	if !bytes.Contains(masterXML, []byte(`r:id="rId1"`)) {
+		t.Error("保留母版 XML 应保留版式 1 的 sldLayoutId 条目")
+	}
+	for _, m := range ridRefRegex.FindAllSubmatch(masterXML, -1) {
+		if !bytes.Contains(masterRels, []byte(`Id="`+string(m[1])+`"`)) {
+			t.Errorf("母版 1 XML 的 sldLayoutId 引用 r:id=%q 在母版 rels 中不存在（悬空引用）", m[1])
+		}
+	}
 	for _, part := range []string{
 		"ppt/slideMasters/slideMaster1.xml",
 		"ppt/slideMasters/_rels/slideMaster1.xml.rels",
@@ -961,7 +1023,9 @@ func TestSplitPptxPerPage_OrphanMediaDropped(t *testing.T) {
 
 // TestSplitPptxPerPage_SiblingLayoutPrunedWithItsMedia 保留母版的未用版式剪除：
 // 同母版下页 1 用版式 1、版式 2 未被任何页使用且独占媒体——输出无版式 2 及其
-// 媒体，保留母版 rels 不再引用版式 2（悬挂关系联动清理）。
+// 媒体，保留母版 rels 不再引用版式 2（悬挂关系联动清理），母版 XML 的
+// sldLayoutIdLst 同步剪除版式 2 条目（字节外科删除：条目区间移除、其余逐字节
+// 不变），版式 1 条目保留。
 func TestSplitPptxPerPage_SiblingLayoutPrunedWithItsMedia(t *testing.T) {
 	dir := t.TempDir()
 	built := buildPptxFixture(t, dir, "未用版式.pptx", pptxFixture{
@@ -1006,6 +1070,21 @@ func TestSplitPptxPerPage_SiblingLayoutPrunedWithItsMedia(t *testing.T) {
 	if bytes.Contains(masterRels, []byte("slideLayout2.xml")) {
 		t.Error("保留母版 rels 不应残留被剪版式关系")
 	}
+	// 母版 XML sldLayoutIdLst 联动剪除（P0 修复面）：版式 2 条目（r:id="rId2"）
+	// 随 rels 关系一并删除，版式 1 条目保留；编辑为字节外科——基线仅少版式 2
+	// 条目区间，其余逐字节一致
+	masterXML := mustZipPart(t, &zr.Reader, "ppt/slideMasters/slideMaster1.xml")
+	if bytes.Contains(masterXML, []byte(`r:id="rId2"`)) {
+		t.Error("保留母版 XML 不应残留被剪版式 2 的 sldLayoutId 条目")
+	}
+	if !bytes.Contains(masterXML, []byte(`r:id="rId1"`)) {
+		t.Error("保留母版 XML 应保留版式 1 的 sldLayoutId 条目")
+	}
+	wantMasterXML := bytes.Replace(built.parts["ppt/slideMasters/slideMaster1.xml"],
+		[]byte(`<p:sldLayoutId id="2147483649" r:id="rId2"/>`), nil, 1)
+	if !bytes.Equal(masterXML, wantMasterXML) {
+		t.Error("母版 XML 编辑应为字节外科（仅少版式 2 条目区间，其余逐字节一致）")
+	}
 	if _, err := os.Stat(built.src); err != nil {
 		t.Errorf("源文件不应被改动: %v", err)
 	}
@@ -1048,6 +1127,13 @@ func TestSplitPptxPerPage_ChainUnresolvedKeepsAllParts(t *testing.T) {
 	} {
 		if !names[kept] {
 			t.Errorf("GC 降级形态应保留 %s", kept)
+		}
+	}
+	// 零编辑面：两母版 XML 的 sldLayoutIdLst 完整保留（降级形态不做 sldLayoutId
+	// 剪枝编辑，逐字节一致）
+	for _, part := range []string{"ppt/slideMasters/slideMaster1.xml", "ppt/slideMasters/slideMaster2.xml"} {
+		if got := mustZipPart(t, &zr.Reader, part); !bytes.Equal(got, built.parts[part]) {
+			t.Errorf("GC 降级形态母版 %s 应零编辑（sldLayoutIdLst 完整保留，逐字节一致）", part)
 		}
 	}
 }

@@ -121,7 +121,7 @@ func buildAssetsPptx(t *testing.T, dir, name string, specs []assetsSlideSpec) st
 	relsB.WriteString(`</Relationships>`)
 	add(pptxPresentationRelsPart, relsB.String())
 
-	add("ppt/slideMasters/slideMaster1.xml", pptxFixtureMasterXML)
+	add("ppt/slideMasters/slideMaster1.xml", pptxFixtureMasterXML(defaultPptxMasters()[0].layouts))
 	add("ppt/slideMasters/_rels/slideMaster1.xml.rels", pptxFixtureMasterRels(defaultPptxMasters()[0]))
 	add("ppt/slideLayouts/slideLayout1.xml", pptxFixtureLayoutXML)
 	add("ppt/slideLayouts/_rels/slideLayout1.xml.rels", pptxFixtureLayoutRels("slideMaster1.xml", ""))
