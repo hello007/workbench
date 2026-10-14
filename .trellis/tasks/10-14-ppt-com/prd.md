@@ -101,6 +101,20 @@
 - 契约必读：docs/spec/assets-management.md、docs/spec/pptx-split.md、docs/spec/linux-platform.md
 - 首日实测清单（research 文末 7 项，一次跑定）：Slide.Export 纵横比行为（决定前端卡片占位宽高比）、ppAlertsNone 数值、显式尺寸是否绕开 ExportBitmapResolution、WithWindow:=msoFalse 与用户已开文档并存（D3 前提）、占用文件 ReadOnly 打开、0x800706BA 阻塞返回时序、进程快照 diff 归属判定
 
+## PR2 独立审核遗留项（PR3 处理，2026-10-14 cavecrew-reviewer 审 f221ddb）
+
+| # | 位置 | 问题 | PR3 处置 |
+|---|---|---|---|
+| 1 | service/assets_thumbs_ledger.go:199 | flushThumbEntries 瞬态失败（busy_timeout 耗尽/IO）时整批 dirty 已从内存删除且无重试——PNG 在而记账永久缺失，SUM 低估致配额淘汰长期失准（touch/重导才自愈） | flush 失败批回灌 dirty（storeFn 成功但落盘失败的条目重入队） |
+| 2 | service/assets_thumbs_ledger.go:227 | evictTier 快照早于文件重导出的 flush 中，淘汰按旧 last_access 行删 PNG（刚被重写的同路径文件），新 dirty 行随后落盘 → 记账称存在而文件缺（下次扫描补缺自愈） | 淘汰游标排除 dirty 在册键（或删文件前对 dirty 对账一次） |
+| 3 | service/assets_library.go:234 | flusher 持连接执行事务中 DeleteLibrary 删 db 文件撞 Windows 句柄 → 删库瞬态报错（45s 周期 × 毫秒级事务，窗口极窄） | 仅登记已知瞬态口径（删库可重试），不加锁不改链路 |
+| 4 | docs/API参考.md:494 | SearchAssets 行与四个缩略图方法行之间空行断开 markdown 表格，495-498 渲染为无表头孤立碎片 | 删空行并入上表（顺手修） |
+
+## Research References
+
+- [research/com-thumbnail-export.md](research/com-thumbnail-export.md) — go-ole COM 导出缩略图链路（七问全解 + 落地建议 10 条 + 待实测 7 项）
+- [research/lru-thumbnail-cache.md](research/lru-thumbnail-cache.md) — 磁盘缩略图缓存 LRU 实践（记账/淘汰/命名/失效联动 + 落地建议 10 条）
+
 ## Research References
 
 - [research/com-thumbnail-export.md](research/com-thumbnail-export.md) — go-ole COM 导出缩略图链路（七问全解 + 落地建议 10 条 + 待实测 7 项）
