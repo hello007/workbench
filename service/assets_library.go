@@ -28,9 +28,13 @@ import (
 //   - 扫描串行保护：同库同时仅允许一个扫描（tryLockScan TryLock 互斥拒绝，
 //     对齐 GitService.tryLockRepo 模式）；DeleteLibrary 以同把锁 TryLock 与在途
 //     扫描互斥（扫描中禁删库，防连接被关闭）；
-//   - 取消注册表（cancels + opMu）：键 = normalizeRepoKey(libraryID)，CancelScan
-//     命中在途扫描；defer LIFO 先注销后释放锁（docs/spec/logging-and-errors.md
-//     取消链路契约）。
+//   - 拆分串行保护：同库同时仅允许一个拆分任务（tryLockSplit，独立 splitLocks
+//     map——拆分与扫描语义可并发：拆分不写 files/slides 索引表，仅读写
+//     split_records，单连接池串行化；仅拆分自身互斥）；DeleteLibrary 以同把锁
+//     TryLock 与在途拆分互斥（拆分中禁删库）；
+//   - 取消注册表（cancels/splitCancels + opMu）：键 = normalizeRepoKey(libraryID)，
+//     键空间独立——CancelScan 不得误杀拆分、CancelAssetSplit 亦不影响扫描；
+//     defer LIFO 先注销后释放锁（docs/spec/logging-and-errors.md 取消链路契约）。
 type AssetLibraryService struct {
 	assetsDir  string // data/assets（注册表 libraries.json + 各库 <id>.db）
 	sinkHolder        // 事件出口持有器（assets-scan:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换
@@ -40,13 +44,22 @@ type AssetLibraryService struct {
 	loaded bool                    // 注册表是否已从磁盘加载
 	open   map[string]*assetsStore // libraryID -> 已打开的库连接缓存
 
-	opMu    sync.Mutex              // 保护 opLocks/cancels 的并发读写
-	opLocks map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
-	cancels map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
+	opMu         sync.Mutex              // 保护 opLocks/cancels/splitLocks/splitCancels 的并发读写
+	opLocks      map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
+	cancels      map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
+	splitLocks   map[string]*sync.Mutex  // libraryID（规范化）-> 拆分互斥锁（懒创建；与扫描锁独立）
+	splitCancels map[string]*cancelEntry // libraryID（规范化）-> 在途拆分注册条目（assets_split.go）
 
 	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
 
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
+
+	// splitCoreFn 拆分核心注入点（nil = 生产实现 SplitPptxPerPageWithProgress，
+	// 单测注入 fake 驱动阻塞/取消，assets_split.go）；openSplitPageFn 拆分单页
+	// 打开动作注入点（默认 openWithSystemHandler 跨平台实现，单测注入 fake 隔离
+	// 真实系统调用）
+	splitCoreFn     assetsSplitCore
+	openSplitPageFn func(path string) error
 
 	thumbQ      *thumbQueue       // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
 	thumbLedger *thumbCacheLedger // 缩略图记账 ledger（assets_thumbs_ledger.go，LRU 记账 + 失效 + 配额淘汰）
@@ -85,6 +98,9 @@ func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibrary
 		open:      make(map[string]*assetsStore),
 	}
 	s.SetEventSink(NewWailsEventSink(ctx))
+	// 拆分单页打开动作默认实现（方式 2，openWithSystemHandler 跨平台现成实现的
+	// 导出薄封装；单测可注入 fake 隔离真实系统调用）
+	s.openSplitPageFn = NewFileOperationService().OpenWithSystemHandler
 	// 先建 ledger（storeFn/dirFn/quotaFn 注入宿主方法），再建 queue（传 ledger
 	// 与档位读取口）——flusher goroutine 由首次 record 惰性启动（对齐
 	// thumbQueue.start 模式）
@@ -216,6 +232,14 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 	}
 	defer release()
 
+	// 在途拆分保护：tryLockSplit 与拆分互斥（同扫描口径：拆分中禁删库，防拆分
+	// 写已关连接；先扫描锁后拆分锁顺序获取，无反向获取路径不成环）
+	releaseSplit, err := s.tryLockSplit(libraryID)
+	if err != nil {
+		return err
+	}
+	defer releaseSplit()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	index := -1
@@ -254,6 +278,11 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 	// 不会再生，残留目录可手动清理）
 	if err := os.RemoveAll(s.assetThumbsDir(libraryID)); err != nil {
 		Logger().Warn("删除缩略图目录失败（残留可手动清理）", "libraryId", libraryID, "err", err)
+	}
+	// 删拆分产物目录（derived 镜像源树；同缩略图目录口径：失败仅告警不阻断，
+	// 残留可手动清理）
+	if err := os.RemoveAll(s.assetDerivedDir(libraryID)); err != nil {
+		Logger().Warn("删除拆分产物目录失败（残留可手动清理）", "libraryId", libraryID, "err", err)
 	}
 	// 清记账 dirty（防 flusher 经 storeForThumbs 惰性重建孤儿 db 的第二道收口）
 	s.thumbLedger.dropLibrary(libraryID)
@@ -379,8 +408,10 @@ func (s *AssetLibraryService) CloseAll() {
 	s.open = make(map[string]*assetsStore)
 }
 
-// withStore 在锁内取（懒打开）库连接并执行 fn。连接缓存命中零开销；删除库与
-// 扫描互斥（tryLockScan），故 fn 执行期间连接不会被 DeleteLibrary 关闭。
+// withStore 在锁内取（懒打开）库连接并执行 fn。连接缓存命中零开销。fn 执行期间
+// 连接不会被 DeleteLibrary 关闭，保证来自 s.mu 全程互斥（本方法与 DeleteLibrary
+// 的关连接段同锁串行）；长时间持连接的扫描另靠 tryLockScan 与删库互斥（不适用
+// 本方法的短查询消费者，如拆分记录查询/打开单页）。
 func (s *AssetLibraryService) withStore(libraryID string, fn func(store *assetsStore) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -478,6 +509,61 @@ func (s *AssetLibraryService) tryLockScan(libraryID string) (release func(), err
 			"该素材库正在扫描中，请等待当前扫描结束后再试")
 	}
 	return mu.Unlock, nil
+}
+
+// tryLockSplit 尝试获取目标库的拆分互斥锁（TryLock 语义，对齐 tryLockScan 模式；
+// 独立 splitLocks map——拆分与扫描语义可并发，仅拆分自身互斥）。DeleteLibrary
+// 复用本锁与在途拆分互斥（拆分中禁删库）。错误码复用 E_ASSETS_SCAN_IN_PROGRESS
+// （素材域「操作进行中」既有一类，前端 warning 分流同款），消息按拆分措辞区分。
+func (s *AssetLibraryService) tryLockSplit(libraryID string) (release func(), err error) {
+	key := normalizeRepoKey(libraryID)
+
+	s.opMu.Lock()
+	mu, ok := s.splitLocks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		if s.splitLocks == nil {
+			s.splitLocks = make(map[string]*sync.Mutex)
+		}
+		s.splitLocks[key] = mu
+	}
+	s.opMu.Unlock()
+
+	if !mu.TryLock() {
+		return nil, model.NewAppError(model.ErrCodeAssetsScanInProgress,
+			"该素材库正在拆分中，请等待当前拆分结束后再试")
+	}
+	return mu.Unlock, nil
+}
+
+// registerSplitCancel 登记在途拆分的可取消入口（独立 splitCancels 注册表——
+// CancelScan 不得误杀拆分、CancelAssetSplit 亦不影响扫描；对齐 registerCancel：
+// 同键覆盖写 + 注销按条目指针比对防误删）。
+func (s *AssetLibraryService) registerSplitCancel(libraryID string, cancel context.CancelFunc) *cancelEntry {
+	key := normalizeRepoKey(libraryID)
+	entry := &cancelEntry{cancel: cancel}
+	s.opMu.Lock()
+	if s.splitCancels == nil {
+		s.splitCancels = make(map[string]*cancelEntry)
+	}
+	s.splitCancels[key] = entry
+	s.opMu.Unlock()
+	return entry
+}
+
+// unregisterSplitCancel 拆分结束（成功/失败/取消/panic 经 defer）注销注册表，
+// 防 CancelFunc 残留（对齐 unregisterCancel：删前校验条目指针同一，同键覆盖后
+// 先结束方不误删后注册项）。
+func (s *AssetLibraryService) unregisterSplitCancel(libraryID string, entry *cancelEntry) {
+	if entry == nil {
+		return
+	}
+	key := normalizeRepoKey(libraryID)
+	s.opMu.Lock()
+	if s.splitCancels[key] == entry {
+		delete(s.splitCancels, key)
+	}
+	s.opMu.Unlock()
 }
 
 // registerCancel 登记在途扫描的可取消入口（对齐 PptxSplitService.registerCancel：

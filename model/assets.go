@@ -169,3 +169,64 @@ type AssetSearchPage struct {
 	Keyword   string           `json:"keyword"`   // 本次检索关键词（原样回显）
 	Flattened bool             `json:"flattened"` // 是否平铺模式（与入参 Flatten 一致）
 }
+
+// 素材拆分单文件处理结果状态取值（AssetSplitFileOutcome.Status，普通 string
+// 常量非具名类型，不经 Wails 绑定层别名机制）。
+const (
+	AssetSplitStatusSplit   = "split"   // 拆分成功
+	AssetSplitStatusSkipped = "skipped" // 增量命中跳过（已拆分且源未变化）
+	AssetSplitStatusFailed  = "failed"  // 拆分失败（损坏/加密/只读等，批量异常隔离计数）
+)
+
+// AssetSplitResult 单文件拆分结果（SplitAssetFile 返回）。增量命中跳过时
+// Skipped=true 且 Files 为空（产物未重写），PageCount 取已拆分记录的页数。
+type AssetSplitResult struct {
+	OutputDir  string   `json:"outputDir"`  // 拆分产物目录绝对路径
+	Files      []string `json:"files"`      // 本次生成的单页文件绝对路径列表（按页序；跳过时为空）
+	PageCount  int      `json:"pageCount"`  // 拆出页数（跳过时为记录页数）
+	Skipped    bool     `json:"skipped"`    // 是否命中增量判定被跳过（已拆分且源未变化）
+	SkipReason string   `json:"skipReason"` // 跳过原因（用户可读；Skipped=false 时为空）
+}
+
+// AssetSplitFileOutcome 批量拆分单文件处理结果条目（异常隔离明细）。
+type AssetSplitFileOutcome struct {
+	RelPath string `json:"relPath"` // 文件相对库根目录路径（正斜杠）
+	Status  string `json:"status"`  // 处理结果（AssetSplitStatus* 取值）
+	Message string `json:"message"` // 补充说明（跳过原因/失败原因；成功为空）
+}
+
+// AssetSplitBatchResult 批量拆分结果汇总（SplitAssetLibrary 返回 +
+// assets-split:done 事件载荷；单文件入口同形状：Total=1）。批量中单文件失败
+// 隔离计数不入 Items 的不算错误——整体失败（取消/库不存在/db 系统性错误）走
+// assets-split:error 事件与 error 返回。
+type AssetSplitBatchResult struct {
+	Total   int                     `json:"total"`   // 启动时快照圈定的文件总数
+	Split   int                     `json:"split"`   // 成功拆分文件数
+	Skipped int                     `json:"skipped"` // 增量命中跳过数
+	Failed  int                     `json:"failed"`  // 失败文件数（逐文件记日志跳过，批量不中断）
+	Items   []AssetSplitFileOutcome `json:"items"`   // 逐文件明细（顺序同处理序）
+}
+
+// AssetSplitRecordView 拆分记录查询视图（GetAssetSplitRecord 返回，前端判定
+// 「打开拆分单页」按钮展示与「已最新」提示）。
+type AssetSplitRecordView struct {
+	Exists    bool   `json:"exists"`    // 是否已有拆分记录
+	OutputDir string `json:"outputDir"` // 拆分产物目录绝对路径
+	PageCount int    `json:"pageCount"` // 已拆分页数
+	SplitAt   string `json:"splitAt"`   // 最近拆分时间（"2006-01-02 15:04:05"）
+	UpToDate  bool   `json:"upToDate"`  // 记录哈希与当前源哈希一致（源未变化）
+}
+
+// AssetSplitProgress 拆分进度事件载荷（assets-split:progress 事件，EventSink
+// 下发）。Done/Total 为文件级计数（批量驱动总进度条），PageDone/PageTotal 为
+// 当前文件页级透传（拆分核心逐页回调）。文件页级回调期间 Done = 已完成文件数
+// （当前文件进行中）；文件收尾事件 Done 计入该文件（完成数口径，对齐
+// assets-scan:progress）。
+type AssetSplitProgress struct {
+	LibraryID   string `json:"libraryId"`   // 正在拆分的库 ID
+	Done        int    `json:"done"`        // 已完成文件数（含跳过/失败）
+	Total       int    `json:"total"`       // 本次任务文件总数（单文件恒 1）
+	CurrentFile string `json:"currentFile"` // 当前文件相对路径
+	PageDone    int    `json:"pageDone"`    // 当前文件已完成页数（页级回调透传）
+	PageTotal   int    `json:"pageTotal"`   // 当前文件总页数
+}

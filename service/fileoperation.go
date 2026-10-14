@@ -278,6 +278,14 @@ func (s *FileOperationService) OpenWithDefaultApp(path string) error {
 	return openWithSystemHandler(path)
 }
 
+// OpenWithSystemHandler 用系统默认关联程序打开文件路径或 URI（openWithSystemHandler
+// 跨平台实现的导出薄封装）。与 OpenWithDefaultApp 的差别仅在校验责任：本封装不做
+// Stat/目录校验，调用方自行保证目标存在且为文件（素材拆分单页打开方式 2 消费，
+// 打开前已完成存在性校验）。
+func (s *FileOperationService) OpenWithSystemHandler(path string) error {
+	return openWithSystemHandler(path)
+}
+
 // resolveObsidianVault 解析 Obsidian vault 目录：文件夹→自身，文件→父目录。
 // 纯函数，便于单测；路径不存在时返回错误。
 func resolveObsidianVault(path string) (string, error) {

@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 3
+const assetsSchemaVersion = 4
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -125,6 +125,28 @@ CREATE TABLE IF NOT EXISTS thumb_cache (
 CREATE INDEX IF NOT EXISTS idx_thumb_cache_access ON thumb_cache(tier, last_access_ns);
 `
 
+// assetsSchemaV4SQL v4 迁移：PPT 拆分记录表（素材管理第三批，SRS §2.2.3——增量
+// 拆分判定 + 跳转方式 2 产物路径反查的事实源）。
+//
+// 设计要点：
+//   - source_rel_path 主键 = 相对库根目录的正斜杠路径，与 files.path 同口径
+//     （库内唯一键）：同库不同目录同名 pptx 拆分记录天然区分；路径键而非 files.id
+//     外键——拆分记录的生命周期独立于索引重建（重建清 files 不清拆分记录，产物
+//     落在 derived 目录不受重建影响，重拆判定按内容哈希自愈）。
+//   - source_hash 为拆分时源文件 sha256（增量判定基准）；output_dir 记录产物
+//     目录（跳转方式 2 反查路径）；page_count + split_at 供前端展示。
+//   - 无 Go 层回填（存量库无拆分记录，首次拆分自然填充）；删库随 db 文件级联
+//     清理（表不落独立文件），与 thumb_cache 同口径。
+const assetsSchemaV4SQL = `
+CREATE TABLE IF NOT EXISTS split_records (
+	source_rel_path TEXT    PRIMARY KEY,
+	source_hash     TEXT    NOT NULL,
+	output_dir      TEXT    NOT NULL,
+	page_count      INTEGER NOT NULL,
+	split_at        TEXT    NOT NULL
+);
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -133,6 +155,7 @@ var assetsMigrations = map[int]string{
 	1: assetsSchemaSQL,
 	2: assetsSchemaV2SQL,
 	3: assetsSchemaV3SQL,
+	4: assetsSchemaV4SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

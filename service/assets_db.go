@@ -894,3 +894,87 @@ func (s *assetsStore) rebindFileTagsAfterRebuild(bindings map[string][]int64) (i
 	}
 	return rebound, tx.Commit()
 }
+
+// ---------- 拆分记录（split_records 表，assets_split.go 编排的数据源） ----------
+
+// assetSplitRecord 拆分记录行（split_records 表最小视图，列语义见
+// assets_schema.go assetsSchemaV4SQL 注释）。
+type assetSplitRecord struct {
+	sourceRelPath string
+	sourceHash    string
+	outputDir     string
+	pageCount     int
+	splitAt       string
+}
+
+// getSplitRecord 按相对路径读单条拆分记录。未命中返回 (nil, nil)——调用方以
+// nil 判定「尚未拆分」，sql.ErrNoRows 不上抛（QueryRow+Scan 单行口径，单连接
+// 池下自动排空结果集，见 libraryStats 注释）。
+func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) {
+	var r assetSplitRecord
+	err := s.db.QueryRow(
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at FROM split_records WHERE source_rel_path = ?",
+		relPath,
+	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// upsertSplitRecord 写入/覆盖拆分记录（重拆覆盖语义，主键 upsert 单语句，
+// SQLite 自动提交保证原子性——多语句写才走显式事务，对齐 markProcessing 口径）。
+func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt string) error {
+	_, err := s.db.Exec(
+		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at) VALUES(?, ?, ?, ?, ?) "+
+			"ON CONFLICT(source_rel_path) DO UPDATE SET source_hash = excluded.source_hash, output_dir = excluded.output_dir, "+
+			"page_count = excluded.page_count, split_at = excluded.split_at",
+		relPath, sourceHash, outputDir, pageCount, splitAt)
+	return err
+}
+
+// deleteSplitRecord 删除拆分记录（预留清理口：当前无删除链路消费——拆分记录
+// 随源文件路径变化由 upsert 覆盖、随库删除级联清理 db 文件；保留单点实现防
+// 后续清理链路各写一套 SQL）。
+func (s *assetsStore) deleteSplitRecord(relPath string) error {
+	_, err := s.db.Exec("DELETE FROM split_records WHERE source_rel_path = ?", relPath)
+	return err
+}
+
+// fileHashStatusByPath 按相对路径取文件记录的哈希与状态（拆分增量判定的源
+// 哈希权威源）。sql.ErrNoRows 透传，调用方转用户可读错误。QueryRow+Scan 单行
+// 口径（单连接池自锁纪律见 libraryStats 注释）。
+func (s *assetsStore) fileHashStatusByPath(relPath string) (hash, status string, err error) {
+	err = s.db.QueryRow("SELECT hash, status FROM files WHERE path = ?", relPath).Scan(&hash, &status)
+	return hash, status, err
+}
+
+// assetSplitSource 拆分批量快照条目：相对路径 + 扫描链路维护的内容哈希。
+type assetSplitSource struct {
+	rel  string
+	hash string
+}
+
+// listOKFileSplitSources 拆分批量快照：全部 ok 状态文件的（相对路径, 哈希）
+// 清单，按路径序（进度与结果顺序确定，对齐 collectPptxEntries 排序口径）。
+// 哈希列为拆分增量判定基准（为空时调用方经 hashFileSHA256 现算）。rows 收齐
+// 后显式 Close（单连接池自锁纪律）。
+func (s *assetsStore) listOKFileSplitSources() ([]assetSplitSource, error) {
+	rows, err := s.db.Query("SELECT path, hash FROM files WHERE status = ? ORDER BY path", model.AssetFileStatusOK)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sources := make([]assetSplitSource, 0, 64)
+	for rows.Next() {
+		var src assetSplitSource
+		if err := rows.Scan(&src.rel, &src.hash); err != nil {
+			return nil, err
+		}
+		sources = append(sources, src)
+	}
+	return sources, rows.Err()
+}

@@ -9,11 +9,12 @@ import (
 // ===== 素材管理（侧边栏） =====
 //
 // 委托 AssetLibraryService：素材库 CRUD + 目录扫描（增量索引）+ 文件/幻灯片
-// 列表 + 文件级元数据编辑。扫描进度/终态经 assets-scan:* 事件推送，扫描过程
-// 可经 CancelAssetScan 取消（取消属预期拒绝，前端按 warning 中性提示）。跨层
-// 契约见 docs/spec/cross-layer-contracts.md：新增 App 方法与 model 导出 struct
-// 须经 wails generate module 同步 frontend/wailsjs/ 三处（App.js / App.d.ts /
-// models.ts）。
+// 列表 + 文件级元数据编辑 + PPT 按页拆分（单文件/库级批量 + 增量判定 + 跳转
+// 方式 2）。扫描进度/终态经 assets-scan:* 事件推送（可经 CancelAssetScan 取消），
+// 拆分进度/终态经 assets-split:* 事件推送（可经 CancelAssetSplit 取消；取消属
+// 预期拒绝，前端按 warning 中性提示）。跨层契约见 docs/spec/cross-layer-contracts.md：
+// 新增 App 方法与 model 导出 struct 须经 wails generate module 同步 frontend/wailsjs/
+// 三处（App.js / App.d.ts / models.ts）。
 
 // CreateAssetLibrary 新建素材库：登记注册表并预建索引库文件。校验名称非空、
 // 根目录存在且为目录；索引模式只读引用原始文件（扫描不修改源文件）。
@@ -116,4 +117,41 @@ func (a *App) GetAssetThumb(libraryID string, fileID int64, slideNum, tierIndex 
 // 队列链路（同库旧批次取消语义已有）。无 PowerPoint 返回 E_ASSETS_THUMBS_UNAVAILABLE。
 func (a *App) RetryAssetThumb(libraryID string, fileID int64, relPath string) error {
 	return a.assetsSvc.RetryAssetThumb(libraryID, fileID, relPath)
+}
+
+// SplitAssetFile 拆分单个素材文件（SRS §2.2.3，画廊卡/详情侧边栏入口）：复用
+// 工具箱拆分核心（纯 Go OOXML），落点二选一——默认素材库缓存目录（derived 镜像
+// 源树，库根之外天然隔离扫描）；outputToSourceDir=true 落源目录（与源同目录，
+// isPptxSplitDerivative 已自动排除索引）。增量命中跳过返回 Skipped=true（前端
+// 提示「已最新」），核心失败（损坏/加密/只读等）返回错误。进度/终态经
+// assets-split:* 事件推送（素材面板独听），在途任务可经 CancelAssetSplit 取消。
+func (a *App) SplitAssetFile(libraryID, relPath string, outputToSourceDir bool) (model.AssetSplitResult, error) {
+	return a.assetsSvc.SplitAssetFile(context.Background(), libraryID, relPath, outputToSourceDir)
+}
+
+// SplitAssetLibrary 库级批量拆分（SRS §2.2.3「批量目录拆分」，库面板「拆分全部
+// PPT」入口）：启动时快照圈定全部 ok 状态文件逐个处理；单文件失败逐文件记日志
+// 跳过，批量不中断，返回汇总（total/split/skipped/failed + 逐文件明细）。同库
+// 并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经 CancelAssetSplit 取消。
+func (a *App) SplitAssetLibrary(libraryID string, outputToSourceDir bool) (model.AssetSplitBatchResult, error) {
+	return a.assetsSvc.SplitAssetLibrary(context.Background(), libraryID, outputToSourceDir)
+}
+
+// CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义，取消
+// 错误前端按 E_ASSETS_CANCELLED warning 中性提示）。返回是否存在可取消的在途拆分。
+func (a *App) CancelAssetSplit(libraryID string) bool {
+	return a.assetsSvc.CancelAssetSplit(libraryID)
+}
+
+// GetAssetSplitRecord 查询文件拆分记录（跳转方式 2 判定面）：Exists=false 未拆分；
+// UpToDate=true 源未变化（前端提示「已最新」）。PageCount 供页序校验展示。
+func (a *App) GetAssetSplitRecord(libraryID, relPath string) (model.AssetSplitRecordView, error) {
+	return a.assetsSvc.GetAssetSplitRecord(libraryID, relPath)
+}
+
+// OpenAssetSplitPage 打开拆分单页产物（SRS §2.2.5 方式 2，无 PowerPoint COM 依赖，
+// 与方式 1 JumpToAssetSlide 并存）：按拆分记录定位 <产物目录>/<源名>-NNN.pptx，
+// 页序越界或产物缺失报错，系统默认关联程序打开。
+func (a *App) OpenAssetSplitPage(libraryID, relPath string, slideNum int) error {
+	return a.assetsSvc.OpenAssetSplitPage(libraryID, relPath, slideNum)
 }
