@@ -47,6 +47,8 @@ type AssetLibraryService struct {
 	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
 
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
+
+	thumbQ *thumbQueue // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
 }
 
 // ErrAssetsCancelled 素材扫描被用户取消（对齐 ErrOperationCancelled 模式）。
@@ -80,6 +82,7 @@ func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibrary
 		open:      make(map[string]*assetsStore),
 	}
 	s.SetEventSink(NewWailsEventSink(ctx))
+	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink)
 	return s
 }
 

@@ -1,0 +1,43 @@
+工作目录: C:\Users\liuyang\AppData\Local\Temp\ppt-com-probe-790984501
+
+── P1 初始化链路 + DisplayAlerts 数值探测（ppAlertsNone 预判 1）
+   [OK] PASS: DisplayAlerts=1 被接受(回读=1); DisplayAlerts=2 被接受(回读=2); AutomationSecurity=3 被接受（耗时 1.641s）
+
+── P2 进程快照 diff 归属判定（CreateInstance 前后 POWERPNT.EXE 集合）
+   before=[] after=[57720] 新增=[57720]
+   tasklist 原始输出: "wpp.exe/57720"
+   [OK] PASS: 自启实例经 diff 检出且强杀收口生效（耗时 4.708s）
+
+── P3 Slide.Export 纵横比行为（16:9 与 4:3 × 多组传参，读 PNG IHDR）
+   [OK] PASS（fit-inside 结论人工判读）: 16:9 传 480x270 -> 实际 480x270; 16:9 传 480x480 -> 实际 480x480; 16:9 传 1920x1080 -> 实际 1920x1080; 4:3 传 480x270 -> 实际 480x270; 4:3 传 1600x1200 -> 实际 1600x1200（耗时 1.826s）
+
+── P4 显式 ScaleWidth/Height 是否绕开 ExportBitmapResolution
+   [OK] PASS: 注册表[?（查询失败）] 默认=2560x1440 显式480x270=480x270 绕开=true（耗时 3.701s）
+
+── P5 WithWindow:=msoFalse 无窗口导出可用性（PNG 解码 + 像素多样性）
+   [!!] FAIL: 疑似黑图/纯色（多样性=1, 1595 bytes）（耗时 1.398s）
+
+── P6 用户实例复用（先手动开一个空 PowerPoint 再跑，进程数应不变）
+   SKIP（需人工配合，加 -with-p6 启用）
+
+── P7 强杀自启实例后阻塞 Invoke 返回时序（预期 0x800706BA，秒级返回）
+   tasklist 原始输出: "wpp.exe/55476"
+   [OK] PASS: 阻塞 Invoke 经 5.469s 返回 hr=0xFFFFFFFF err=Open(ro=-1,ww=0): 远程过程调用失败。 (<nil>) (desc=<nil>)（耗时 6.592s）
+
+── P8 同文件二次打开行为 + Presentations 集合 FullName 复用检查
+   [!!] FAIL: 首次 WithWindow 打开: Open(ro=0,ww=-1): 发生意外。 (<nil>) (desc=<nil>)（耗时 915ms）
+
+panic: assignment to entry in nil map
+
+goroutine 1 [running]:
+main.main()
+	D:/workspace/workspace_ai/demo_OpenSpec/git_tools/git-manager/scripts/ppt-com-probe/main.go:68 +0x1be
+exit status 2
+工作目录: C:\Users\liuyang\AppData\Local\Temp\ppt-com-probe-1591652100
+
+── P5 WithWindow:=msoFalse 无窗口导出可用性（PNG 解码 + 像素多样性）
+   [OK] PASS（结论人工判读）: 形态a ww=0: 多样性=1（≤1 即黑图）; WindowState=2（最小化）被接受; 形态b ww=-1+最小化: 多样性=1（耗时 1.523s）
+
+── P8 同文件二次打开行为 + Presentations 集合 FullName 复用检查
+   [OK] PASS（结论人工判读）: (a) ww=-1 打开成功; (b) 已开状态下 ww=0 二次打开成功（同名双开允许）; (c) Presentations.Count=0（耗时 1.917s）
+

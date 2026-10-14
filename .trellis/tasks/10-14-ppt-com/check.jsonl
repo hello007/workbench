@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-14-ppt-com/prd.md", "reason": "验收标准清单（AC 13 项）——check 逐条核对"}
+{"file": ".trellis/tasks/10-14-ppt-com/research/com-thumbnail-export.md", "reason": "核对 COM 实现是否符合 research 结论（强杀归属判定/WithWindow 语义/S_FALSE 放行/错误码识别），首日实测清单是否已跑定"}
+{"file": ".trellis/tasks/10-14-ppt-com/research/lru-thumbnail-cache.md", "reason": "核对缓存设计（缓存键 file-id 口径/攒批参数/淘汰异步性/失效联动三路径）"}
+{"file": "docs/spec/assets-management.md", "reason": "核对缩略图链路未破坏既有契约（单连接自锁/事件 done 仅复位/扫描串行/关停收口顺序）"}
+{"file": "docs/spec/linux-platform.md", "reason": "核对 GOOS=linux 编译零影响、_other 桩完整性、平台断言拆分"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步 + base64 解码规约 + EventsOn 闭包注销"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对新增错误码三处同步 + slog 无 println + E_GIT_CANCELLED 式取消映射惯例"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无 mtime 时序/进程探测/固定端口隐式依赖"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 service ≥76% 覆盖达标"}

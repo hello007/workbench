@@ -89,9 +89,11 @@ const (
 	ErrCodeHostsReadFailed = "E_HOSTS_READ_FAILED" // hosts 文件读取失败（不存在 / 无权限等，用户可读消息按根因分类）
 
 	// 素材管理域（侧边栏「素材管理」：本地 DAM 素材库 + PPT 单页索引）
-	ErrCodeAssetsCancelled      = "E_ASSETS_CANCELLED"        // 素材扫描被用户取消（warning，中性提示非 error；对齐 E_GIT_CANCELLED 模式）
-	ErrCodeAssetsLibNotFound    = "E_ASSETS_LIB_NOT_FOUND"    // 素材库不存在或已删除，列表已过期（error，前端刷新库列表）
-	ErrCodeAssetsScanInProgress = "E_ASSETS_SCAN_IN_PROGRESS" // 该素材库已有扫描进行中，本次拒绝（warning，用户可稍后重试）
+	ErrCodeAssetsCancelled         = "E_ASSETS_CANCELLED"          // 素材扫描被用户取消（warning，中性提示非 error；对齐 E_GIT_CANCELLED 模式）
+	ErrCodeAssetsLibNotFound       = "E_ASSETS_LIB_NOT_FOUND"      // 素材库不存在或已删除，列表已过期（error，前端刷新库列表）
+	ErrCodeAssetsScanInProgress    = "E_ASSETS_SCAN_IN_PROGRESS"   // 该素材库已有扫描进行中，本次拒绝（warning，用户可稍后重试）
+	ErrCodeAssetsThumbsUnavailable = "E_ASSETS_THUMBS_UNAVAILABLE" // 本机无 PowerPoint COM，缩略图/打开跳转不可用（error，前端提示条常驻 + 跳转入口隐藏）
+	ErrCodeAssetsThumbsBusy        = "E_ASSETS_THUMBS_BUSY"        // 缩略图跳转请求排队/执行超时（warning，COM 队列瞬态忙，可重试；禁复用 UNAVAILABLE——语义为环境无 PowerPoint，前端会误触降级 UI）
 
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表

@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/10-14-ppt-com/prd.md", "reason": "本任务需求与四项已确认决策（D1-D4）、验收标准、PR 拆分——实施唯一权威依据"}
+{"file": ".trellis/tasks/10-14-ppt-com/research/com-thumbnail-export.md", "reason": "go-ole COM 链路全部技术结论（STA 初始化/WithWindow 语义/强杀归属判定/错误码）+ 首日实测清单 7 项，PR1 COM 层实现直接依据"}
+{"file": ".trellis/tasks/10-14-ppt-com/research/lru-thumbnail-cache.md", "reason": "缓存记账/淘汰/命名/失效联动设计依据（slides.id 禁作缓存键、攒批落盘参数、v3 迁移表设计）"}
+{"file": "docs/spec/assets-management.md", "reason": "素材管理既有契约（SQLite 单连接自锁坑/FTS 链路/扫描语义/事件契约/前端双代次守卫）——缩略图链路挂接现扫描与画廊必须沿用"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台分叉选型规则（_windows/_other 双文件、GOOS 分支判据、测试平台断言拆分）——COM 层分叉必须遵守"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处绑定同步规则 + decodeBase64Utf8 规约 + 事件多组件共监听注销规则——前端 PR3 必读"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新 service 装配两处登记（AppServices struct + 构造）与生命周期约定（构造纯 new，副作用留 startup/shutdown）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 日志 + AppError 错误码三处同步规则（app_error.go 常量 + error.js + ErrorFormatter）——新增 E_ASSETS_THUMBS_* 错误码依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态（mtime 时序/固定端口/进程探测）——队列与缓存单测的取消/超时构造方式约束"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 覆盖门禁——新增 COM 队列/缓存记账代码的测试范围要求"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/ 目录持久化原子写约束（缩略图临时文件写法对齐 temp+rename 序列）"}

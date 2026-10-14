@@ -100,6 +100,28 @@ type AssetScanResult struct {
 	Removed   int `json:"removed"`   // 清理的已删文件记录数
 }
 
+// AssetThumbsProgress 缩略图批量生成进度事件载荷（assets-thumbs:progress 事件，
+// EventSink 下发）。计数口径按文件（done/total 为文件数，非页数——单页耗时毫秒级
+// 无感知价值）；Failed 含超时/损坏/占用等生成失败文件。
+type AssetThumbsProgress struct {
+	LibraryID   string `json:"libraryId"`   // 正在生成缩略图的库 ID
+	Done        int    `json:"done"`        // 已处理文件数（含失败，从 1 计）
+	Total       int    `json:"total"`       // 本次批次文件总数
+	CurrentFile string `json:"currentFile"` // 当前处理文件的相对路径
+	Failed      int    `json:"failed"`      // 已失败文件数（前端进度提示用）
+}
+
+// AssetThumbsResult 单批缩略图生成结果汇总（assets-thumbs:done 事件载荷）。
+// Generated 为成功生成全部页双档缩略图的文件数；Skipped 为缓存命中/源未变跳过数。
+type AssetThumbsResult struct {
+	LibraryID string `json:"libraryId"` // 所属库 ID
+	Total     int    `json:"total"`     // 批次文件总数
+	Generated int    `json:"generated"` // 生成成功文件数
+	Skipped   int    `json:"skipped"`   // 跳过文件数（缓存命中）
+	Failed    int    `json:"failed"`    // 生成失败文件数
+	Canceled  bool   `json:"canceled"`  // 是否被用户取消中断
+}
+
 // AssetFileMetaUpdate 文件级元数据编辑入参（UpdateAssetFileMeta 整体替换语义：
 // 星级/备注/标签以本次提交值为准，未提及的标签即移除）。
 type AssetFileMetaUpdate struct {

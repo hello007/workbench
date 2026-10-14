@@ -85,3 +85,21 @@ func (a *App) SearchAssets(libraryID string, keyword string, opts model.AssetSea
 func (a *App) RebuildAssetLibrary(libraryID string) (model.AssetScanResult, error) {
 	return a.assetsSvc.RebuildScan(context.Background(), libraryID)
 }
+
+// AssetThumbsAvailable 探测本机 PowerPoint COM 可用性（前端 D4 降级依据：
+// false 时画廊提示条常驻 + 跳转入口隐藏）。结果由 service 层按进程生命周期缓存。
+func (a *App) AssetThumbsAvailable() bool {
+	return a.assetsSvc.ThumbsAvailable()
+}
+
+// JumpToAssetSlide 打开 PPT 并跳到指定页（SRS §2.2.5；PowerPoint COM）。
+// 同步语义：批量生成在途时经页间插队执行（PRD D3）。无 PowerPoint 环境返回
+// E_ASSETS_THUMBS_UNAVAILABLE（前端入口已隐藏，此为防御）。
+func (a *App) JumpToAssetSlide(absPath string, slideNum int) error {
+	return a.assetsSvc.JumpToSlide(absPath, slideNum)
+}
+
+// CancelAssetThumbs 取消指定库的缩略图批量生成（对齐 CancelAssetScan 交互语义）。
+func (a *App) CancelAssetThumbs(libraryID string) bool {
+	return a.assetsSvc.CancelAssetThumbs(libraryID)
+}
