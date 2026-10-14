@@ -117,7 +117,36 @@
 - 真机冒烟（WPS 环境，`assets_thumbs_smoke_integration_windows_test.go`，`go test -tags=integration -run TestSmokeAssetsThumbsEndToEnd`）：抓出 Slide.Export 目录 P0（探针掩蔽）+ 补缺幂等回归（flush 时序依赖）两个真问题；D3 并存/记账落盘/幂等重扫/读取 API 全断言过（约 7s 端到端）。
 - 独立审核（cavecrew-reviewer）抓出：FK 幽灵键吞整批（WHERE EXISTS 修）、重建不取消在途批次、DeleteLibrary 取消异步口径、补缺 Stat 风暴与入队位置约束的取舍登记。
 
+## 9. 设置链路与前端消费（PR3，2026-10-14）
+
+### 设置段 AssetThumbsSettings（model.AppSettings.assets，指针段）
+
+- 五项：`auto`（扫描后自动生成，默认 true）/ `smallWidth`（320，clamp 120-800）/ `hdWidth`（1600，clamp 480-3840）/ `smallQuotaMB`（1024，clamp 64-8192）/ `hdQuotaMB`（1024，clamp 64-8192）。段指针形态区分「老配置缺失（→ 全默认）」与显式取值（WebServe 先例）；`NormalizeAssetThumbsSettings` 单点归一（nil → 默认 + 零值回退 + clamp），高按 16:9 自算（320×9/16=180、1600×9/16=900 与既有默认严格一致）。
+- **SettingsService 缓存语义**（PR3 起）：Load 首读后缓存，缩略图读路径（画廊逐卡片）高频消费不能每次读盘。不变式：**Load 返回对象恒已 Ensure**（缓存 miss 分支 Ensure 后才入缓存；Save 落盘成功换缓存前同样 Ensure）；**Load 返回共享指针，消费方只读禁改**（原地改与并发读者竞态——需改先复制，app_webserve.go SetWebServeConfig 先例）；Save 锁跨「落盘+缓存换新」全程持有（两通道并发 Save 磁盘序与缓存序不可相反）；**运行期手改 settings.json 不再即时生效**（须重启）。Load 吞错降级无错误信号——SaveSettings 的 prev 对比在「缓存 miss + 盘损坏」窗口退化为默认值，存量非默认宽度会被误判清档重导（概率极窄、后果仅一次自愈重导，已登记接受）。
+
+### 设置生效链路（SaveSettings → ApplyThumbsSettingsChange）
+
+- diff（宽度变 → cleared 档；MB 变 → requota 档）→ 异步逐库：`resetThumbTier` = CancelAssetThumbs → `deleteThumbCacheTier`（db 单语句）→ `dropTier`（dirty）→ `os.RemoveAll` 档目录（**重试一次**——协作式取消不等待在途页导出，Windows 句柄可致首删部分失败）→ 全部 cleared 档清完后 `Auto && Available` 短路重入队补缺（一次一批覆盖双档）；requota 逐库 `checkQuota`（复用 evictTier 后台语义）。错误全部仅告警，不回滚保存。
+- **关停竞态口径（结构性接受）**：应用 goroutine 不感知 shutdown——closed 置位后重入队被拒；窗口内批次滞留 batchCh、CloseAll 后 storeForThumbs 惰性重开做一次清档，均仅发生在退出收尾期，无 COM 调用无可观察危害。
+- **清档残留口径**：RemoveAll 重试仍失败的旧分辨率 PNG 无链路再清（记账已删、Auto=false 不重导、补缺 PNG 存在性权威放行旧图）——照常展示直至重建索引/手动清理，注释登记非「自愈」。
+- 测试直调 `applyThumbsSettingsChangeSync`（公开方法异步包装），chan 通知驱动禁 sleep。
+
+### 前端消费契约（AssetThumb.vue + AssetsPanel.vue）
+
+- **GetAssetThumb 返回串直接拼 `data:image/png;base64,<串>`**（禁 decodeBase64Utf8 文本专用 / 禁裸 atob）；画廊一律 tier=0，hd（tier=1）仅详情侧边栏单张 `hide-on-miss`。
+- 懒加载：IntersectionObserver（threshold 0.05 触发一次即断）+ 无 IO 环境挂载即加载兜底（jsdom 单测免 stub）；组件内请求序号守卫（props 变更/卸载自增，在途响应写回前比对丢弃）；读取失败静默回退占位（逐卡弹错噪音大，后台 slog 已有日志——登记口径）。
+- 补图代次：`thumbEpoch` 于 assets-thumbs:done 自增，AssetThumb 仅 miss 态响应 epoch 重拉（ready 卡不重拉）。
+- 失败收集：progress 事件 `failed` 为批次内累计数，`failed > lastThumbsFailedCount` 时把 `currentFile` 记入失败集合；done 清集合 + 复位计数；**切库 watch 复位运行态**（thumbsRunning/thumbsProgress/失败集合——终态事件按 libraryId 过滤，不复位则进度条在新库页面永挂、取消打到新库恒 false 自相矛盾）。内存态刷新即清可接受（重扫/重试可恢复，PRD 认可）。
+- 降级 UI：`AssetThumbsAvailable()` 探测（mount 时一次，探测失败按 false 处理不弹错）——false 时画廊顶部常驻信息条（非 error 红）+ 跳转入口隐藏 + 占位卡保留。
+- 打开跳转：详情侧边栏按钮 → `JumpToAssetSlide(joinAssetPath(root, rel), slideNum)`（根去尾斜杠拼接，相对路径保持正斜杠）；错误分流 handleError 既有三码自动覆盖（BUSY warning 可重试 / UNAVAILABLE、JUMP_FAILED error）。
+- 设置弹窗：GetSettings 整体拉取 → assets 段归一化回显（缺失/零值逐字段回退默认）→ 保存回填 assets 段整体提交；**基底 null 禁止保存**（GetSettings 失败时空壳整体提交会清掉其他全部设置段，拦截提示重开）。
+
+### RetryAssetThumb 越界遏制
+
+- relPath 来自前端（浏览器通道可达），`..`/绝对路径可逃逸库根让 PowerPoint 渲染库外文件、经 GetAssetThumb 回读内容——`FromSlash` 后先拒 `IsAbs`，`Join` 后 `filepath.Rel` 校验无 `..` 前缀才放行。
+
 ## 4. Validation & Error Matrix
+
 
 | 条件 | 行为 |
 |---|---|

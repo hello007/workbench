@@ -244,3 +244,83 @@ func TestSettingsLoad_TerminalClamp(t *testing.T) {
 		t.Errorf("界内取值应原样保留, got fontSize=%d scrollback=%d", got.TerminalFontSize, got.TerminalScrollback)
 	}
 }
+
+// TestSettingsLoad_CacheHit 缓存语义（素材缩略图 PR3 起）：首次 Load 读盘并写入
+// 缓存，后续 Load 命中直接返回同一指针；Save 落盘成功后缓存整体换新为保存入参。
+// 守护热路径契约（画廊逐卡片 GetAssetThumb 解析分辨率档位，不落盘）。
+func TestSettingsLoad_CacheHit(t *testing.T) {
+	svc := newSettingsSvc(t)
+	first, err := svc.Load()
+	if err != nil {
+		t.Fatalf("首次 Load: %v", err)
+	}
+	second, err := svc.Load()
+	if err != nil {
+		t.Fatalf("二次 Load: %v", err)
+	}
+	if first != second {
+		t.Fatal("缓存命中应返回同一指针（不重复读盘构造新对象）")
+	}
+
+	next := &model.AppSettings{DefaultShell: "cmd"}
+	if err := svc.Save(next); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	third, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Save 后 Load: %v", err)
+	}
+	if third != next {
+		t.Fatal("Save 成功后缓存应整体换新为保存入参（整体替换语义）")
+	}
+}
+
+// TestSettingsLoad_CacheSkipsDiskReload 缓存命中后手改盘上配置文件不再即时生效
+// （service/settings.go 语义变化登记的行为面：运行期手改 settings.json 须重启
+// 应用，与 data-atomic-write 整体覆盖模型口径一致）。
+func TestSettingsLoad_CacheSkipsDiskReload(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	svc := NewSettingsService(p)
+	if _, err := svc.Load(); err != nil {
+		t.Fatalf("预热缓存: %v", err)
+	}
+
+	if err := os.WriteFile(p, []byte(`{"defaultShell":"cmd"}`), 0o644); err != nil {
+		t.Fatalf("手改盘上配置: %v", err)
+	}
+	got, err := svc.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.DefaultShell != "" {
+		t.Fatalf("缓存命中不应重读盘上手改值, got DefaultShell=%q", got.DefaultShell)
+	}
+}
+
+// TestSettingsSave_FailureKeepsCache Save 落盘失败时缓存保持旧值不换新（失败
+// 不应让内存态与磁盘态脱钩——下次 Load 仍返回最后成功保存的配置）。
+func TestSettingsSave_FailureKeepsCache(t *testing.T) {
+	svc := newSettingsSvc(t)
+	if _, err := svc.Load(); err != nil {
+		t.Fatalf("预热缓存: %v", err)
+	}
+
+	// 落盘失败构造：configPath 父路径指向已存在的文件（MkdirAll 报 ENOTDIR，
+	// 跨平台稳定的确定性失败，不依赖权限/占用等环境态）
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("准备阻塞文件: %v", err)
+	}
+	svc.configPath = filepath.Join(blocker, "settings.json")
+
+	if err := svc.Save(&model.AppSettings{DefaultShell: "cmd"}); err == nil {
+		t.Fatal("父路径为文件时 Save 应报错")
+	}
+	got, err := svc.Load()
+	if err != nil {
+		t.Fatalf("失败后 Load: %v", err)
+	}
+	if got.DefaultShell != "" {
+		t.Fatalf("Save 失败缓存应保持旧值, got DefaultShell=%q", got.DefaultShell)
+	}
+}

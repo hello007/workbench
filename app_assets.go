@@ -111,3 +111,9 @@ func (a *App) CancelAssetThumbs(libraryID string) bool {
 func (a *App) GetAssetThumb(libraryID string, fileID int64, slideNum, tierIndex int) (string, error) {
 	return a.assetsSvc.GetAssetThumb(libraryID, fileID, slideNum, tierIndex)
 }
+
+// RetryAssetThumb 单文件缩略图重试（D4）：画廊/详情「重试」按钮入口，复用缩略图
+// 队列链路（同库旧批次取消语义已有）。无 PowerPoint 返回 E_ASSETS_THUMBS_UNAVAILABLE。
+func (a *App) RetryAssetThumb(libraryID string, fileID int64, relPath string) error {
+	return a.assetsSvc.RetryAssetThumb(libraryID, fileID, relPath)
+}

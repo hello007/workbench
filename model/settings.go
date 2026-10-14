@@ -20,6 +20,93 @@ type WebServeConfig struct {
 	AccessUrls  []string `json:"accessUrls"`  // 候选访问地址（含回环与本机局域网 IPv4，同网段设备可达）
 }
 
+// 素材缩略图设置默认值与取值边界（素材管理面板内设置区，PRD D2；前端 settings
+// store 的对应常量与此对齐）。宽度为 Export 目标像素（高按 16:9 自算，不在设置
+// 面板暴露）；配额 MB 为单档位 PNG 缓存上限（LRU 淘汰依据）。
+const (
+	DefaultAssetThumbSmallWidth   = 320
+	MinAssetThumbSmallWidth       = 120
+	MaxAssetThumbSmallWidth       = 800
+	DefaultAssetThumbHDWidth      = 1600
+	MinAssetThumbHDWidth          = 480
+	MaxAssetThumbHDWidth          = 3840
+	DefaultAssetThumbSmallQuotaMB = 1024
+	DefaultAssetThumbHDQuotaMB    = 1024
+	MinAssetThumbQuotaMB          = 64
+	MaxAssetThumbQuotaMB          = 8192
+)
+
+// AssetThumbsSettings 素材缩略图设置段（素材管理面板内设置区，D2 五项）。
+// 段指针形态区分「老配置缺失（→ 默认）」与显式取值（对齐 WebServe 先例）。
+type AssetThumbsSettings struct {
+	Auto         bool `json:"auto"`         // 扫描完成后自动生成缩略图（默认 true）
+	SmallWidth   int  `json:"smallWidth"`   // 画廊小图宽度 px（默认 320，clamp 120-800；高按 16:9 自算）
+	HDWidth      int  `json:"hdWidth"`      // 详情高清宽度 px（默认 1600，clamp 480-3840）
+	SmallQuotaMB int  `json:"smallQuotaMB"` // 小图缓存上限 MB（默认 1024，clamp 64-8192）
+	HDQuotaMB    int  `json:"hdQuotaMB"`    // 高清缓存上限 MB（默认 1024，clamp 64-8192）
+}
+
+// DefaultAssetThumbsSettings 素材缩略图默认设置（老配置升级与损坏降级统一入口）。
+func DefaultAssetThumbsSettings() AssetThumbsSettings {
+	return AssetThumbsSettings{
+		Auto:         true,
+		SmallWidth:   DefaultAssetThumbSmallWidth,
+		HDWidth:      DefaultAssetThumbHDWidth,
+		SmallQuotaMB: DefaultAssetThumbSmallQuotaMB,
+		HDQuotaMB:    DefaultAssetThumbHDQuotaMB,
+	}
+}
+
+// normalize 零值回退默认，越界 clamp 收敛（Auto 为 bool 无 clamp 语义，显式
+// false 被尊重；对齐 clampTerminalInt 模式）。
+func (s *AssetThumbsSettings) normalize() {
+	s.SmallWidth = clampAssetThumbInt(s.SmallWidth, MinAssetThumbSmallWidth, MaxAssetThumbSmallWidth, DefaultAssetThumbSmallWidth)
+	s.HDWidth = clampAssetThumbInt(s.HDWidth, MinAssetThumbHDWidth, MaxAssetThumbHDWidth, DefaultAssetThumbHDWidth)
+	s.SmallQuotaMB = clampAssetThumbInt(s.SmallQuotaMB, MinAssetThumbQuotaMB, MaxAssetThumbQuotaMB, DefaultAssetThumbSmallQuotaMB)
+	s.HDQuotaMB = clampAssetThumbInt(s.HDQuotaMB, MinAssetThumbQuotaMB, MaxAssetThumbQuotaMB, DefaultAssetThumbHDQuotaMB)
+}
+
+// NormalizeAssetThumbsSettings 归一化入口：nil（老配置缺失/降级）→ 默认值；
+// 非 nil → 拷贝 normalize 后返回，不改写入参（调用方可能传入共享的设置缓存
+// 指针，原地改会与并发读者竞态）。
+func NormalizeAssetThumbsSettings(s *AssetThumbsSettings) AssetThumbsSettings {
+	if s == nil {
+		return DefaultAssetThumbsSettings()
+	}
+	out := *s
+	out.normalize()
+	return out
+}
+
+// EnsureAssetsThumbsDefaults 补全素材缩略图段默认值并收敛越界值：
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 五项全默认；
+//   - 段存在 → 零值回退默认、越界 clamp（Auto 显式 false 尊重用户关闭）。
+//
+// 在 SettingsService.Load 返回前统一调用，保证缩略图链路消费方拿到的段始终
+// 完整可用。
+func (s *AppSettings) EnsureAssetsThumbsDefaults() {
+	if s.Assets == nil {
+		def := DefaultAssetThumbsSettings()
+		s.Assets = &def
+		return
+	}
+	s.Assets.normalize()
+}
+
+// clampAssetThumbInt 零值回退默认，越界收敛到 [min, max]。
+func clampAssetThumbInt(v, min, max, def int) int {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // 终端外观默认值与取值边界（设置页控件与工具栏 A-/A+ 快捷调节共用同一边界；
 // 前端 settings store 的 TERMINAL_APPEARANCE_DEFAULTS 等常量与此对齐）
 const (
@@ -56,6 +143,10 @@ type AppSettings struct {
 	// 配置 → 默认开启）」与「显式 enabled:false（用户主动关闭）」——Go bool 零值
 	// 为 false，非指针无法表达「默认 true」语义。加载后经 EnsureWebServeDefaults 补全。
 	WebServe *WebServeSettings `json:"webServe,omitempty"`
+	// Assets 素材缩略图设置段（素材管理面板设置区 D2 五项）。指针形态区分
+	// 「老配置缺失 → 默认」与显式取值（对齐 WebServe 先例），加载后经
+	// EnsureAssetsThumbsDefaults 补全。
+	Assets *AssetThumbsSettings `json:"assets,omitempty"`
 }
 
 // EnsureWebServeDefaults 补全 webServe 段默认值：

@@ -171,3 +171,82 @@ func TestAppSettings_EnsureTerminalDefaults(t *testing.T) {
 		})
 	}
 }
+
+// TestAppSettings_EnsureAssetsThumbsDefaults 覆盖素材缩略图段默认值与越界收敛：
+// 段缺失补五项全默认、零值回默认、越界 clamp、界内保留、Auto 显式关闭被尊重。
+func TestAppSettings_EnsureAssetsThumbsDefaults(t *testing.T) {
+	t.Run("段缺失补五项全默认", func(t *testing.T) {
+		s := &AppSettings{}
+		s.EnsureAssetsThumbsDefaults()
+		want := DefaultAssetThumbsSettings()
+		if s.Assets == nil || *s.Assets != want {
+			t.Fatalf("段缺失应补默认值, got %+v", s.Assets)
+		}
+	})
+
+	t.Run("零值字段回默认且Auto显式关闭被尊重", func(t *testing.T) {
+		s := &AppSettings{Assets: &AssetThumbsSettings{Auto: false}}
+		s.EnsureAssetsThumbsDefaults()
+		if s.Assets.Auto {
+			t.Error("Auto 显式 false 应被尊重（用户主动关闭），不得回退 true")
+		}
+		if s.Assets.SmallWidth != DefaultAssetThumbSmallWidth ||
+			s.Assets.HDWidth != DefaultAssetThumbHDWidth ||
+			s.Assets.SmallQuotaMB != DefaultAssetThumbSmallQuotaMB ||
+			s.Assets.HDQuotaMB != DefaultAssetThumbHDQuotaMB {
+			t.Errorf("零值字段应回默认, got %+v", s.Assets)
+		}
+	})
+
+	cases := []struct {
+		name             string
+		smallWidth       int
+		hdWidth          int
+		smallQuotaMB     int
+		hdQuotaMB        int
+		wantSmallWidth   int
+		wantHDWidth      int
+		wantSmallQuotaMB int
+		wantHDQuotaMB    int
+	}{
+		{name: "宽度越界收敛", smallWidth: 50, hdWidth: 9999, smallQuotaMB: 1024, hdQuotaMB: 1024,
+			wantSmallWidth: MinAssetThumbSmallWidth, wantHDWidth: MaxAssetThumbHDWidth,
+			wantSmallQuotaMB: 1024, wantHDQuotaMB: 1024},
+		{name: "配额越界收敛", smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1, hdQuotaMB: 99999,
+			wantSmallWidth: 320, wantHDWidth: 1600,
+			wantSmallQuotaMB: MinAssetThumbQuotaMB, wantHDQuotaMB: MaxAssetThumbQuotaMB},
+		{name: "界内取值原样保留", smallWidth: 480, hdWidth: 2560, smallQuotaMB: 2048, hdQuotaMB: 4096,
+			wantSmallWidth: 480, wantHDWidth: 2560, wantSmallQuotaMB: 2048, wantHDQuotaMB: 4096},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &AppSettings{Assets: &AssetThumbsSettings{
+				SmallWidth: c.smallWidth, HDWidth: c.hdWidth,
+				SmallQuotaMB: c.smallQuotaMB, HDQuotaMB: c.hdQuotaMB,
+			}}
+			s.EnsureAssetsThumbsDefaults()
+			if s.Assets.SmallWidth != c.wantSmallWidth || s.Assets.HDWidth != c.wantHDWidth ||
+				s.Assets.SmallQuotaMB != c.wantSmallQuotaMB || s.Assets.HDQuotaMB != c.wantHDQuotaMB {
+				t.Errorf("clamp 结果不符, got %+v", s.Assets)
+			}
+		})
+	}
+}
+
+// TestNormalizeAssetThumbsSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝
+// normalize 后返回且不改写入参（调用方可能传入共享的设置缓存指针）。
+func TestNormalizeAssetThumbsSettings(t *testing.T) {
+	if got := NormalizeAssetThumbsSettings(nil); got != DefaultAssetThumbsSettings() {
+		t.Fatalf("nil 应返回默认值, got %+v", got)
+	}
+	in := &AssetThumbsSettings{SmallWidth: 99, HDWidth: 0, SmallQuotaMB: 10, HDQuotaMB: 5}
+	got := NormalizeAssetThumbsSettings(in)
+	if got.SmallWidth != MinAssetThumbSmallWidth || got.HDWidth != DefaultAssetThumbHDWidth ||
+		got.SmallQuotaMB != MinAssetThumbQuotaMB || got.HDQuotaMB != MinAssetThumbQuotaMB {
+		t.Fatalf("越界值应 clamp, got %+v", got)
+	}
+	// 入参不被修改（共享缓存指针防竞态纪律）
+	if in.SmallWidth != 99 || in.HDWidth != 0 || in.SmallQuotaMB != 10 || in.HDQuotaMB != 5 {
+		t.Fatalf("入参不应被原地修改, got %+v", in)
+	}
+}

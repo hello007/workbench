@@ -52,10 +52,19 @@ func (a *App) SetWebServeConfig(enabled bool, bindAddress string) error {
 		return fmt.Errorf("绑定地址格式无效（须为 host:port，如 127.0.0.1:36115）: %w", err)
 	}
 
-	// 持久化（以磁盘现有设置为基底合并写，避免覆盖其他字段）
-	settings := a.GetSettings()
+	// 持久化（以磁盘现有设置为基底合并写，避免覆盖其他字段）。GetSettings 经
+	// settingsSvc 缓存命中返回共享指针（service/settings.go 并发口径：消费方
+	// 只读禁改），此处复制后替换 webServe 段，防原地改与并发读者竞态。
+	base := a.GetSettings()
+	settings := *base
 	settings.WebServe = &model.WebServeSettings{Enabled: enabled, BindAddress: addr}
-	if err := a.settingsSvc.Save(settings); err != nil {
+	// Assets 段同为指针共享，而 Save 入口会对入参执行 EnsureAssetsThumbsDefaults
+	// （normalize 含无条件字段赋值）——一并复制为私有段，防同值写与并发读者竞态
+	if base.Assets != nil {
+		assets := *base.Assets
+		settings.Assets = &assets
+	}
+	if err := a.settingsSvc.Save(&settings); err != nil {
 		return fmt.Errorf("保存设置失败: %w", err)
 	}
 

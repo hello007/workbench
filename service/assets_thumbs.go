@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,11 +40,22 @@ type thumbTier struct {
 	Height int    // 目标高度像素
 }
 
-// thumbTiers 双档分辨率默认值（PRD D2：可配置——设置项落地前恒定值，设置链路
-// 在前端 PR3 接入时改为从设置读取注入）。
+// thumbTiers 双档分辨率默认值（PRD D2 设置链路落地后保留作默认值来源：队列
+// tiersFn 未注入时的回退 + thumbTiersFromSettings 默认一致性校验基准）。
 var thumbTiers = []thumbTier{
 	{Key: "small", Width: 320, Height: 180},
 	{Key: "hd", Width: 1600, Height: 900},
+}
+
+// thumbTiersFromSettings 由设置构造双档分辨率（纯函数，可直测）：key 恒
+// small/hd 固定顺序（GetAssetThumb 的 tierIndex 为序号非宽度，分辨率可配后
+// 宽度漂移、序号稳定），宽度取设置值，高按 16:9 自算——320*9/16=180、
+// 1600*9/16=900，与既有默认严格一致。
+func thumbTiersFromSettings(cfg model.AssetThumbsSettings) []thumbTier {
+	return []thumbTier{
+		{Key: "small", Width: cfg.SmallWidth, Height: cfg.SmallWidth * 9 / 16},
+		{Key: "hd", Width: cfg.HDWidth, Height: cfg.HDWidth * 9 / 16},
+	}
 }
 
 // thumbPerFileTimeout 单文件导出超时（SRS §2.2.2 推荐 300s）。超时路径由
@@ -130,8 +142,9 @@ var errThumbsUnavailable = model.NewAppError(model.ErrCodeAssetsThumbsUnavailabl
 // thumbQueue 缩略图串行队列（全局单实例，挂 AssetLibraryService 生命周期）。
 type thumbQueue struct {
 	exporter ThumbExporter
-	sinkFn   func() EventSink  // 事件出口（复用宿主 AssetLibraryService 的 sinkHolder，防双出口漂移）
-	ledger   *thumbCacheLedger // 记账 ledger（生成成功后记账 + 页数缩减对账，assets_thumbs_ledger.go）
+	sinkFn   func() EventSink   // 事件出口（复用宿主 AssetLibraryService 的 sinkHolder，防双出口漂移）
+	ledger   *thumbCacheLedger  // 记账 ledger（生成成功后记账 + 页数缩减对账，assets_thumbs_ledger.go）
+	tiersFn  func() []thumbTier // 当前生效档位读取口（设置注入，nil 回退包级 thumbTiers 默认）
 
 	batchCh chan *thumbBatchTask   // 容量 thumbBatchQueueCap，多库并发入队不阻塞
 	jumpCh  chan *thumbJumpRequest // 无缓冲：交接即被消费（worker 空闲直收 / 批量在途由 preempt 页间摘取），提交阻塞等消费方消除时序竞态
@@ -148,17 +161,27 @@ type thumbQueue struct {
 const thumbBatchQueueCap = 8
 
 // newThumbQueue 构造队列（exporter 由 newThumbExporter 平台分叉注入，sinkFn
-// 取宿主 AssetLibraryService.eventSink，ledger 为记账出口）。
-func newThumbQueue(exp ThumbExporter, sinkFn func() EventSink, ledger *thumbCacheLedger) *thumbQueue {
+// 取宿主 AssetLibraryService.eventSink，ledger 为记账出口，tiersFn 为设置注入
+// 的档位读取口——nil 回退包级 thumbTiers，单测与 serve 精简装配兼容）。
+func newThumbQueue(exp ThumbExporter, sinkFn func() EventSink, ledger *thumbCacheLedger, tiersFn func() []thumbTier) *thumbQueue {
 	return &thumbQueue{
 		exporter: exp,
 		sinkFn:   sinkFn,
 		ledger:   ledger,
+		tiersFn:  tiersFn,
 		batchCh:  make(chan *thumbBatchTask, thumbBatchQueueCap),
 		jumpCh:   make(chan *thumbJumpRequest),
 		quit:     make(chan struct{}),
 		batches:  make(map[string]*thumbBatchTask),
 	}
+}
+
+// tiers 当前生效档位（每批解析一次）：nil tiersFn 回退包级默认（单测构造未注入）。
+func (q *thumbQueue) tiers() []thumbTier {
+	if q.tiersFn == nil {
+		return thumbTiers
+	}
+	return q.tiersFn()
 }
 
 // start 惰性启动 worker（首次入队时触发，构造保持纯 new——app-services-assembly
@@ -245,6 +268,10 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 		}
 	}
 
+	// 当前生效档位每批解析一次（设置注入，分辨率变更经 ApplyThumbsSettingsChange
+	// 清档后重入队，批内恒一致）
+	tiers := q.tiers()
+
 	generated, failed, skipped := 0, 0, 0
 	canceled := false
 	for i, f := range b.Files {
@@ -253,7 +280,7 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 			break
 		}
 		fctx, cancel := context.WithTimeout(b.Ctx, thumbPerFileTimeout)
-		n, err := q.exporter.ExportPresentation(fctx, f, b.ThumbsDir, thumbTiers, preempt)
+		n, err := q.exporter.ExportPresentation(fctx, f, b.ThumbsDir, tiers, preempt)
 		cancel()
 		switch {
 		case err == nil:
@@ -262,7 +289,7 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 			// 已由扫描失效联动处理）。记账粒度：逐档逐页 Stat 成功才记账（PNG
 			// 缺失的页留给下次补缺链路重导出）。
 			if q.ledger != nil {
-				for _, tier := range thumbTiers {
+				for _, tier := range tiers {
 					for page := 1; page <= n; page++ {
 						if info, statErr := os.Stat(thumbPNGPath(b.ThumbsDir, tier.Key, f.FileID, page)); statErr == nil {
 							q.ledger.record(b.LibraryID, f.FileID, tier.Key, page, info.Size())
@@ -480,8 +507,9 @@ func (s *AssetLibraryService) GetAssetThumb(libraryID string, fileID int64, slid
 	if _, err := s.getLibrary(libraryID); err != nil {
 		return "", err
 	}
-	if tierIndex < 0 || tierIndex >= len(thumbTiers) {
-		return "", fmt.Errorf("缩略图档位非法（tierIndex=%d，取值 0-%d）", tierIndex, len(thumbTiers)-1)
+	tiers := s.resolvedThumbTiers()
+	if tierIndex < 0 || tierIndex >= len(tiers) {
+		return "", fmt.Errorf("缩略图档位非法（tierIndex=%d，取值 0-%d）", tierIndex, len(tiers)-1)
 	}
 	if slideNum < 1 {
 		return "", fmt.Errorf("页序非法（slideNum=%d，从 1 计）", slideNum)
@@ -489,7 +517,7 @@ func (s *AssetLibraryService) GetAssetThumb(libraryID string, fileID int64, slid
 	if fileID < 1 {
 		return "", fmt.Errorf("文件 ID 非法（fileId=%d）", fileID)
 	}
-	path := thumbPNGPath(s.assetThumbsDir(libraryID), thumbTiers[tierIndex].Key, fileID, slideNum)
+	path := thumbPNGPath(s.assetThumbsDir(libraryID), tiers[tierIndex].Key, fileID, slideNum)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -497,6 +525,188 @@ func (s *AssetLibraryService) GetAssetThumb(libraryID string, fileID int64, slid
 		}
 		return "", fmt.Errorf("读取缩略图失败: %w", err)
 	}
-	s.thumbLedger.record(libraryID, fileID, thumbTiers[tierIndex].Key, slideNum, int64(len(data)))
+	s.thumbLedger.record(libraryID, fileID, tiers[tierIndex].Key, slideNum, int64(len(data)))
 	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// ---------- 设置注入（PRD D2 设置链路，PR3） ----------
+
+// SetThumbsSettingsProvider 注入缩略图设置读取口（app_services.go 装配期调用；
+// nil = 未注入走默认值——单测与 serve 精简装配兼容）。
+func (s *AssetLibraryService) SetThumbsSettingsProvider(fn func() model.AssetThumbsSettings) {
+	s.thumbsCfgFn = fn
+}
+
+// thumbsSettings 当前生效设置（nil provider → 默认；返回值已 normalize）。
+func (s *AssetLibraryService) thumbsSettings() model.AssetThumbsSettings {
+	cfg := model.DefaultAssetThumbsSettings()
+	if s.thumbsCfgFn != nil {
+		cfg = s.thumbsCfgFn()
+	}
+	return model.NormalizeAssetThumbsSettings(&cfg)
+}
+
+// resolvedThumbTiers 当前生效双档分辨率（key 恒 small/hd 固定顺序，宽度来自
+// 设置，高按 16:9 自算——320*9/16=180、1600*9/16=900 与既有默认严格一致）。
+func (s *AssetLibraryService) resolvedThumbTiers() []thumbTier {
+	return thumbTiersFromSettings(s.thumbsSettings())
+}
+
+// thumbQuotaBytes 档位配额字节（small/hd 分别取设置 MB << 20；未知档位按 small
+// 口径防御返回——档位集合由 resolvedThumbTiers 单点构造，恒为 small/hd）。
+func (s *AssetLibraryService) thumbQuotaBytes(tier string) int64 {
+	cfg := s.thumbsSettings()
+	if tier == "hd" {
+		return int64(cfg.HDQuotaMB) << 20
+	}
+	return int64(cfg.SmallQuotaMB) << 20
+}
+
+// RetryAssetThumb 单文件缩略图重试（D4：详情侧边栏「重试」按钮入口；复用队列
+// 链路，同库旧批次经 EnqueueAssetThumbs 既有取消语义覆盖）。
+// 校验顺序：库不存在（E_ASSETS_LIB_NOT_FOUND 透传）→ 无 PowerPoint
+// （E_ASSETS_THUMBS_UNAVAILABLE）→ 参数非法 → 源文件存在性。
+func (s *AssetLibraryService) RetryAssetThumb(libraryID string, fileID int64, relPath string) error {
+	lib, err := s.getLibrary(libraryID)
+	if err != nil {
+		return err
+	}
+	if !s.thumbQ.exporter.Available() {
+		return errThumbsUnavailable
+	}
+	if fileID < 1 {
+		return fmt.Errorf("文件 ID 非法（fileId=%d）", fileID)
+	}
+	if relPath == "" {
+		return fmt.Errorf("文件相对路径不能为空")
+	}
+	// 越界遏制：relPath 来自前端（浏览器通道可达本方法），`..` 或绝对路径可逃逸
+	// 库根——让 PowerPoint 渲染库外任意可打开文件并把 PNG 落入本库缩略图目录，
+	// 经 GetAssetThumb 回读内容。校验 Join 后仍在库根内（Rel 无 `..` 前缀）才放行。
+	rel := filepath.FromSlash(relPath)
+	if filepath.IsAbs(rel) {
+		return fmt.Errorf("文件路径非法（须为素材根目录内的相对路径）")
+	}
+	absPath := filepath.Join(lib.RootPath, rel)
+	if back, relErr := filepath.Rel(lib.RootPath, absPath); relErr != nil ||
+		back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("文件路径越界（须位于素材根目录内）")
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return fmt.Errorf("源文件不存在或无法访问: %w", err)
+	}
+	s.EnqueueAssetThumbs(libraryID, []thumbFileSpec{{
+		FileID:  fileID,
+		Path:    relPath,
+		AbsPath: absPath,
+	}}, s.assetThumbsDir(libraryID))
+	return nil
+}
+
+// ApplyThumbsSettingsChange 缩略图设置变更应用（App.SaveSettings 保存成功后调用）：
+// 分辨率变更 → 清该档（全部库：取消在途批次 + 删记账该档行 + 清 dirty 该档 +
+// 删该档目录 + 重入队补缺，重入队受 Auto 开关与 Available 短路）；上限变更 →
+// 触发一次惰性淘汰检查。异步执行不阻塞保存 RPC；prev/cur 传值（App 层先
+// Normalize）。错误全部仅告警（清档幂等可自愈，不回滚保存）。
+//
+// 关停竞态口径（结构性接受，与 DeleteLibrary 取消异步同风格）：本 goroutine 不
+// 感知 App.shutdown——WaitThumbsDone 置位 closed 后入队被拒绝（重入队面收口）；
+// 窗口内已入队批次滞留 batchCh 无 worker 消费、CloseAll 后 storeForThumbs 可能
+// 惰性重开连接做一次清档/淘汰——两者仅发生在进程退出收尾期，无 COM 调用、无
+// 可观察危害，不为收尾竞态加关停等待。
+func (s *AssetLibraryService) ApplyThumbsSettingsChange(prev, cur model.AssetThumbsSettings) {
+	go s.applyThumbsSettingsChangeSync(prev, cur)
+}
+
+// applyThumbsSettingsChangeSync 设置变更应用同步实现（公开方法异步包装本方法，
+// 测试直调以 chan 通知驱动替代 sleep 等待竞态——test-stability 契约）。
+func (s *AssetLibraryService) applyThumbsSettingsChangeSync(prev, cur model.AssetThumbsSettings) {
+	cleared, requota := diffThumbsSettings(prev, cur)
+	if len(cleared) == 0 && len(requota) == 0 {
+		return
+	}
+	libs, err := s.ListLibraries()
+	if err != nil {
+		Logger().Warn("缩略图设置变更应用跳过（库列表读取失败）", "err", err)
+		return
+	}
+	for _, lib := range libs {
+		for _, tier := range cleared {
+			s.resetThumbTier(lib, tier)
+		}
+		// 全部 cleared 档清完后重入队补缺（一次一批覆盖双档——文件级粒度本就
+		// 整文件重导出）：受 Auto 开关与 COM 可用性短路
+		if len(cleared) > 0 && cur.Auto && s.thumbQ.exporter.Available() {
+			s.reenqueueThumbsAfterTierReset(lib)
+		}
+		for _, tier := range requota {
+			s.thumbLedger.checkQuota(lib.ID, tier)
+		}
+	}
+}
+
+// diffThumbsSettings 比较新旧设置得出受影响档位：宽度变 → 需清档重建（分辨率
+// 变更旧 PNG 尺寸不符须全量重导出）；上限 MB 变 → 需一次性惰性淘汰检查。
+// key 恒 small/hd 固定顺序。
+func diffThumbsSettings(prev, cur model.AssetThumbsSettings) (cleared, requota []string) {
+	if prev.SmallWidth != cur.SmallWidth {
+		cleared = append(cleared, "small")
+	}
+	if prev.HDWidth != cur.HDWidth {
+		cleared = append(cleared, "hd")
+	}
+	if prev.SmallQuotaMB != cur.SmallQuotaMB {
+		requota = append(requota, "small")
+	}
+	if prev.HDQuotaMB != cur.HDQuotaMB {
+		requota = append(requota, "hd")
+	}
+	return cleared, requota
+}
+
+// resetThumbTier 清除单库单档缩略图产物（分辨率变更清档联动）：取消在途批次 →
+// 删记账该档行（db）→ 清 dirty 该档（防旧分辨率记账复活）→ 删该档 PNG 目录。
+// 各步失败仅告警不中断。目录删除重试一次（CancelAssetThumbs 协作式取消不等待
+// 在途页导出收口，Windows 上在途 PNG 句柄可致首删部分失败）；仍失败的残留旧
+// 分辨率 PNG 无链路再清（记账行已删、Auto=false 时不重导出，补缺判定的 PNG
+// 存在性权威会放行旧图），照常展示直至重建索引或手动清理——已登记口径。
+func (s *AssetLibraryService) resetThumbTier(lib model.AssetLibrary, tier string) {
+	s.CancelAssetThumbs(lib.ID)
+	store, err := s.storeForThumbs(lib.ID)
+	if err != nil {
+		Logger().Warn("缩略图清档跳过（库不可用）", "libraryId", lib.ID, "tier", tier, "err", err)
+		return
+	}
+	if err := store.deleteThumbCacheTier(tier); err != nil {
+		Logger().Warn("删除缩略图记账档位失败", "libraryId", lib.ID, "tier", tier, "err", err)
+	}
+	s.thumbLedger.dropTier(lib.ID, tier)
+	dir := filepath.Join(s.assetThumbsDir(lib.ID), tier)
+	if err := os.RemoveAll(dir); err != nil {
+		if err := os.RemoveAll(dir); err != nil {
+			Logger().Warn("删除缩略图档位目录失败（重试后仍失败，残留旧分辨率 PNG 将照常展示）",
+				"libraryId", lib.ID, "tier", tier, "err", err)
+		}
+	}
+}
+
+// reenqueueThumbsAfterTierReset 清档后重入队补缺（可用性/Auto 判断由调用方
+// applyThumbsSettingsChangeSync 完成）。补缺收集失败仅告警，下次扫描重试。
+func (s *AssetLibraryService) reenqueueThumbsAfterTierReset(lib model.AssetLibrary) {
+	store, err := s.storeForThumbs(lib.ID)
+	if err != nil {
+		Logger().Warn("缩略图清档重入队跳过（库不可用）", "libraryId", lib.ID, "err", err)
+		return
+	}
+	thumbsDir := s.assetThumbsDir(lib.ID)
+	backlog, err := s.collectThumbsBacklog(store, lib, thumbsDir)
+	if err != nil {
+		Logger().Warn("缩略图清档重入队收集失败（下次扫描重试）", "libraryId", lib.ID, "err", err)
+		return
+	}
+	if len(backlog) == 0 {
+		return
+	}
+	Logger().Info("缩略图清档重入队", "libraryId", lib.ID, "files", len(backlog))
+	s.EnqueueAssetThumbs(lib.ID, backlog, thumbsDir)
 }

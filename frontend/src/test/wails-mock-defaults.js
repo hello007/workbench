@@ -209,7 +209,24 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   ListAssetSlides: { items: [], total: 0 },
   UpdateAssetFileMeta: null,
   // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）
-  SearchAssets: { items: [], total: 0, keyword: '', flattened: false }
+  SearchAssets: { items: [], total: 0, keyword: '', flattened: false },
+
+  // ---- 素材缩略图（PR3：画廊/详情懒加载 + 能力探测 + 打开跳转 + 失败重试 + 设置）----
+  // GetAssetThumb 默认空串 = 未生成回退「无预览」占位（契约见 docs/spec/assets-thumbs-com.md
+  // 第 8 节：返回串直接拼 data:image/png;base64,<串>；base64 大载荷不经 mock 回传，
+  // 画廊一律 tier=0 懒加载禁整库预取，hd 仅详情单张按需）
+  GetAssetThumb: '',
+  // 能力探测默认降级态（本机无 PowerPoint）：占位卡 + 降级提示条路径稳定，用例按需 override true
+  AssetThumbsAvailable: false,
+  // 打开并跳到指定页：void 返回 null 安全 no-op（PPT 窗口由后端 COM 打开）
+  JumpToAssetSlide: null,
+  // 失败缩略图重新入队：void 返回 null 安全 no-op
+  RetryAssetThumb: null,
+  // 默认无可取消在途生成：false = 幂等 no-op（对齐 CancelAssetScan 语义）
+  CancelAssetThumbs: false,
+  // 设置保存（AppSettings.assets 段缩略图设置入口，整体提交语义）：void 返回 null 安全
+  // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
+  SaveSettings: null
 }
 
 /**

@@ -273,6 +273,7 @@ func TestThumbLedger_FlushDropsDirtyWhenStoreUnavailable(t *testing.T) {
 			return store, nil
 		},
 		func(string) string { return svc.assetThumbsDir(lib.ID) },
+		nil,
 	)
 	t.Cleanup(l.Shutdown)
 
@@ -331,8 +332,9 @@ func TestThumbLedger_PruneBeyond(t *testing.T) {
 	}
 }
 
-// TestThumbLedger_EvictTierUnderQuota 配额 LRU 淘汰：注入小配额（400B）+ 5 条各
-// 100B 记账（显式 last_access_ns 递增定序）→ 超配额删最旧至 90% 水位（500-200=300
+// TestThumbLedger_EvictTierUnderQuota 配额 LRU 淘汰：注入小配额（400B，构造时
+// 注入 quotaFn 闭包——var 补丁方式会跨用例污染包级状态）+ 5 条各 100B 记账
+// （显式 last_access_ns 递增定序）→ 超配额删最旧至 90% 水位（500-200=300
 // ≤ 360），被淘汰条目的 PNG 文件同步删除。
 func TestThumbLedger_EvictTierUnderQuota(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -340,16 +342,19 @@ func TestThumbLedger_EvictTierUnderQuota(t *testing.T) {
 	store := svc.openStoreForTest(t, lib.ID)
 	thumbsDir := svc.assetThumbsDir(lib.ID)
 
-	origQuota := thumbTierQuotaBytes
-	thumbTierQuotaBytes = 400
-	t.Cleanup(func() { thumbTierQuotaBytes = origQuota })
+	l := newThumbCacheLedger(
+		svc.storeForThumbs,
+		func(string) string { return thumbsDir },
+		func(string) int64 { return 400 }, // 小配额注入
+	)
+	t.Cleanup(l.Shutdown)
 
 	for i := 1; i <= 5; i++ {
 		id := insertHostFile(t, store, fmt.Sprintf("素材%d.pptx", i))
 		insertThumbLedgerRow(t, store, id, "small", 1, 100, int64(i)) // last_access_ns = i（1 最旧）
 		writeThumbPNG(t, thumbsDir, "small", id, 1, "x")
 	}
-	svc.thumbLedger.evictTier(store, thumbsDir, "small")
+	l.evictTier(store, lib.ID, thumbsDir, "small")
 
 	if n := countThumbCacheRows(t, store); n != 3 {
 		t.Fatalf("淘汰后应余 3 行（300B 不超 90%% 水位 360B）, got %d", n)
@@ -370,6 +375,181 @@ func TestThumbLedger_EvictTierUnderQuota(t *testing.T) {
 			t.Errorf("保留条目的 PNG fileID=%d 不应被删: %v", id, err)
 		}
 	}
+}
+
+// TestThumbLedger_FlushFailureRequeuesDirty flush 瞬态失败批回灌（独立审核遗留
+// 项 1）：storeFn 成功但落盘失败（已 Close 的 store 模拟 sql: database is closed）
+// 时整批回灌 dirty，恢复后再次 flush 完整落盘；flush 窗口内同键新 record（更新鲜）
+// 优先，回灌不覆盖已存在的键。
+func TestThumbLedger_FlushFailureRequeuesDirty(t *testing.T) {
+	svc := newTestAssetService(t)
+	lib := mustCreateLibrary(t, svc, "回灌库", t.TempDir())
+	store := svc.openStoreForTest(t, lib.ID)
+
+	// 构造已关闭 store：flushThumbEntries 首个 db 操作即报 database is closed
+	// （落盘瞬态失败模拟，不依赖真实 IO 故障时序）
+	dead, err := openAssetsStore(filepath.Join(t.TempDir(), "dead.db"))
+	if err != nil {
+		t.Fatalf("打开构造用 store: %v", err)
+	}
+	if err := dead.Close(); err != nil {
+		t.Fatalf("关闭构造用 store: %v", err)
+	}
+
+	hostID := insertHostFile(t, store, "甲.pptx")
+	var failFlush atomic.Bool
+	failFlush.Store(true)
+	l := newThumbCacheLedger(
+		func(string) (*assetsStore, error) {
+			if failFlush.Load() {
+				return dead, nil
+			}
+			return store, nil
+		},
+		func(string) string { return svc.assetThumbsDir(lib.ID) },
+		nil,
+	)
+	t.Cleanup(l.Shutdown)
+
+	l.record(lib.ID, hostID, "small", 1, 100)
+	l.record(lib.ID, hostID, "hd", 2, 200)
+	l.flushLibrary(lib.ID) // 落盘失败 → 整批回灌 dirty（不写活库）
+	if n := countThumbCacheRows(t, store); n != 0 {
+		t.Fatalf("落盘失败时不应写入活库, got %d 行", n)
+	}
+
+	// flush 窗口内同键新 record（更新鲜）：回灌不得覆盖
+	l.record(lib.ID, hostID, "small", 1, 999)
+
+	failFlush.Store(false)
+	l.flushLibrary(lib.ID) // 恢复后回灌批落盘成功
+	if n := countThumbCacheRows(t, store); n != 2 {
+		t.Fatalf("回灌批应完整落盘 2 行, got %d", n)
+	}
+	if bytes, ok := thumbCacheBytesFor(t, store, hostID, "small", 1); !ok || bytes != 999 {
+		t.Fatalf("flush 窗口内同键新 record 应优先（不被回灌覆盖）, ok=%v bytes=%d", ok, bytes)
+	}
+	if bytes, ok := thumbCacheBytesFor(t, store, hostID, "hd", 2); !ok || bytes != 200 {
+		t.Fatalf("回灌批的 hd 条目应落盘, ok=%v bytes=%d", ok, bytes)
+	}
+}
+
+// TestThumbLedger_EvictSkipsDirtyKeys evict 排除 dirty 在册键（独立审核遗留项 2）：
+// db 旧行 A（旧 access）/B（新 access）+ PNG 双双在盘，A 重导出/读取命中产生
+// dirty（最新 last_access）未 flush；直调 evictTier——A 因 dirty 在册被排除
+// （行与 PNG 保留，即将以新 last_access 落盘），B 作为唯一非 dirty 候选被回收
+// （记账 + PNG 同删）。无排除时 A 会被按 db 旧行误删，形成「记账称存在而文件缺」。
+func TestThumbLedger_EvictSkipsDirtyKeys(t *testing.T) {
+	svc := newTestAssetService(t)
+	lib := mustCreateLibrary(t, svc, "排除库", t.TempDir())
+	store := svc.openStoreForTest(t, lib.ID)
+	thumbsDir := svc.assetThumbsDir(lib.ID)
+
+	l := newThumbCacheLedger(
+		svc.storeForThumbs,
+		func(string) string { return thumbsDir },
+		func(string) int64 { return 400 }, // 小配额：600B 总量超 90% 水位 360B
+	)
+	t.Cleanup(l.Shutdown)
+
+	dirtyID := insertHostFile(t, store, "重导出.pptx") // A：db 旧行 + dirty 在册
+	plainID := insertHostFile(t, store, "普通.pptx")  // B：仅 db 旧行
+	insertThumbLedgerRow(t, store, dirtyID, "small", 1, 300, 1)
+	writeThumbPNG(t, thumbsDir, "small", dirtyID, 1, "a")
+	insertThumbLedgerRow(t, store, plainID, "small", 1, 300, 2)
+	writeThumbPNG(t, thumbsDir, "small", plainID, 1, "b")
+	// A 产生 dirty（flush 快照取出后并发 record / flush 窗口重导出记账的模拟）
+	l.record(lib.ID, dirtyID, "small", 1, 300)
+
+	l.evictTier(store, lib.ID, thumbsDir, "small")
+
+	if _, ok := thumbCacheBytesFor(t, store, plainID, "small", 1); ok {
+		t.Fatal("非 dirty 的 B 行应被淘汰回收")
+	}
+	if _, err := os.Stat(thumbPNGPath(thumbsDir, "small", plainID, 1)); !os.IsNotExist(err) {
+		t.Errorf("被淘汰 B 的 PNG 应同步删除, stat err=%v", err)
+	}
+	if _, ok := thumbCacheBytesFor(t, store, dirtyID, "small", 1); !ok {
+		t.Fatal("dirty 在册键 A 不应被淘汰（即将以新 last_access 落盘）")
+	}
+	if _, err := os.Stat(thumbPNGPath(thumbsDir, "small", dirtyID, 1)); err != nil {
+		t.Errorf("dirty 在册键 A 的 PNG 不应被删: %v", err)
+	}
+}
+
+// TestThumbLedger_DropTier dropTier 仅清指定库指定档 dirty，其余档保留
+// （分辨率变更清档联动，防旧分辨率记账复活）。
+func TestThumbLedger_DropTier(t *testing.T) {
+	svc := newTestAssetService(t)
+	lib := mustCreateLibrary(t, svc, "清档库", t.TempDir())
+	store := svc.openStoreForTest(t, lib.ID)
+	l := svc.thumbLedger
+	t.Cleanup(l.Shutdown)
+
+	hostID := insertHostFile(t, store, "甲.pptx")
+	l.record(lib.ID, hostID, "small", 1, 100)
+	l.record(lib.ID, hostID, "hd", 1, 200)
+	l.dropTier(lib.ID, "small")
+	l.flushLibrary(lib.ID)
+
+	if n := countThumbCacheRows(t, store); n != 1 {
+		t.Fatalf("dropTier(small) 后 flush 应仅落盘 hd 1 行, got %d", n)
+	}
+	if _, ok := thumbCacheBytesFor(t, store, hostID, "hd", 1); !ok {
+		t.Fatal("hd 档 dirty 不应被 dropTier(small) 误清")
+	}
+}
+
+// TestStore_DeleteThumbCacheTier deleteThumbCacheTier 仅删指定档记账行
+// （分辨率变更清档的 db 侧单点）。
+func TestStore_DeleteThumbCacheTier(t *testing.T) {
+	svc := newTestAssetService(t)
+	lib := mustCreateLibrary(t, svc, "删档库", t.TempDir())
+	store := svc.openStoreForTest(t, lib.ID)
+
+	hostID := insertHostFile(t, store, "甲.pptx")
+	insertThumbLedgerRow(t, store, hostID, "small", 1, 100, 1)
+	insertThumbLedgerRow(t, store, hostID, "small", 2, 100, 2)
+	insertThumbLedgerRow(t, store, hostID, "hd", 1, 200, 1)
+
+	if err := store.deleteThumbCacheTier("small"); err != nil {
+		t.Fatalf("deleteThumbCacheTier: %v", err)
+	}
+	if n := countThumbCacheRows(t, store); n != 1 {
+		t.Fatalf("清 small 档后应仅余 hd 1 行, got %d", n)
+	}
+	if _, ok := thumbCacheBytesFor(t, store, hostID, "hd", 1); !ok {
+		t.Fatal("hd 档记账不应被误删")
+	}
+}
+
+// TestThumbLedger_CheckQuota checkQuota 上限变更触发的一次性惰性淘汰（复用
+// evictTier 语义：超配额删至水位）；库不可用静默跳过不 panic。
+func TestThumbLedger_CheckQuota(t *testing.T) {
+	svc := newTestAssetService(t)
+	lib := mustCreateLibrary(t, svc, "查额库", t.TempDir())
+	store := svc.openStoreForTest(t, lib.ID)
+	thumbsDir := svc.assetThumbsDir(lib.ID)
+
+	l := newThumbCacheLedger(
+		svc.storeForThumbs,
+		func(string) string { return thumbsDir },
+		func(string) int64 { return 400 },
+	)
+	t.Cleanup(l.Shutdown)
+
+	for i := 1; i <= 5; i++ {
+		id := insertHostFile(t, store, fmt.Sprintf("素材%d.pptx", i))
+		insertThumbLedgerRow(t, store, id, "small", 1, 100, int64(i))
+		writeThumbPNG(t, thumbsDir, "small", id, 1, "x")
+	}
+	l.checkQuota(lib.ID, "small")
+	if n := countThumbCacheRows(t, store); n != 3 {
+		t.Fatalf("checkQuota 应淘汰至水位（余 3 行 300B ≤ 360B）, got %d", n)
+	}
+
+	// 库不可用：storeFn 报错静默跳过（不 panic、不惰性重建孤儿 db）
+	l.checkQuota("不存在的库", "small")
 }
 
 // ---------- 补缺收集 ----------
@@ -543,7 +723,7 @@ func TestThumbsBacklog_UnavailableExporterSkips(t *testing.T) {
 func TestThumbsBacklog_EnqueueAfterScan(t *testing.T) {
 	fake := &fakeThumbExporter{available: true}
 	svc := newTestAssetService(t)
-	svc.thumbQ = newThumbQueue(fake, svc.eventSink, svc.thumbLedger)
+	svc.thumbQ = newThumbQueue(fake, svc.eventSink, svc.thumbLedger, nil)
 	t.Cleanup(svc.thumbLedger.Shutdown)
 	t.Cleanup(func() { s := svc; s.WaitThumbsDone() })
 
@@ -817,7 +997,7 @@ func TestThumbQueue_EnqueueFullEmitsErrorEvent(t *testing.T) {
 	s := NewAssetLibraryService(nil, filepath.Join(t.TempDir(), "assets"))
 	sink := &errorNotifySink{inner: &fakeEventSink{}, errCh: make(chan map[string]any, 4)}
 	s.SetEventSink(sink)
-	s.thumbQ = newThumbQueue(fake, s.eventSink, s.thumbLedger)
+	s.thumbQ = newThumbQueue(fake, s.eventSink, s.thumbLedger, nil)
 	t.Cleanup(s.thumbLedger.Shutdown)
 	t.Cleanup(func() { s.WaitThumbsDone() })
 

@@ -163,6 +163,11 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 // 覆盖写幂等）。无 PowerPoint 静默跳过（D1 降级）；补缺收集失败仅告警不上抛
 // （不阻断扫描成功语义，下次扫描重试）。
 func (s *AssetLibraryService) enqueueThumbsBacklog(store *assetsStore, lib model.AssetLibrary) {
+	// D1 自动生成开关（设置段）：关闭时扫描完成不入队（用户显式操作的单文件
+	// 重试链路 D4 不受限——RetryAssetThumb 不经本短路）
+	if !s.thumbsSettings().Auto {
+		return
+	}
 	if !s.thumbQ.exporter.Available() {
 		return
 	}
@@ -251,13 +256,14 @@ func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model
 	//   - 记账 miss 而文件在的页不漏记账：读取路径 GetAssetThumb touch 会补
 	//     记账（LRU 口径自愈），补缺判定与 LRU 记账解耦。
 	backlog := make([]thumbFileSpec, 0, len(okFiles))
+	tiers := s.resolvedThumbTiers() // 当前生效档位收集前解析一次（设置注入）
 	for _, f := range okFiles {
 		n := pageByFile[f.id]
 		if n <= 0 {
 			continue // 无幻灯片记录（页解析为空等）：无可导出页
 		}
 		missing := false
-		for _, tier := range thumbTiers {
+		for _, tier := range tiers {
 			for page := 1; page <= n; page++ {
 				if _, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, f.id, page)); err != nil {
 					missing = true

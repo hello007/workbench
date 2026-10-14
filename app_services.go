@@ -6,6 +6,7 @@ import (
 
 	"log/slog"
 
+	"workbench/model"
 	"workbench/service"
 	"workbench/util"
 )
@@ -169,6 +170,15 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 素材管理服务（侧边栏「素材管理」，data/assets/；ctx 构造注入 Wails 桌面事件出口）
 	s.assetsSvc = service.NewAssetLibraryService(ctx, filepath.Join(dataDir, "assets"))
+	// 素材缩略图设置读取口（D2 五项）：读 settingsSvc 内存缓存（Load 带缓存，
+	// 热路径画廊逐卡片消费不落盘）。
+	s.assetsSvc.SetThumbsSettingsProvider(func() model.AssetThumbsSettings {
+		cfg, err := s.settingsSvc.Load()
+		if err != nil || cfg == nil {
+			return model.DefaultAssetThumbsSettings()
+		}
+		return *cfg.Assets // Load 已 Ensure，段非 nil
+	})
 
 	return s
 }

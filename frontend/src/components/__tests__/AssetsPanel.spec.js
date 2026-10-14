@@ -103,6 +103,31 @@ const mockSearchPage = {
   flattened: false
 }
 
+// AppSettings 完整形状（含 assets 段，形状对齐 frontend/wailsjs/go/models.ts AppSettings）
+const mockSettings = {
+  gpuDisabled: false,
+  defaultShell: '',
+  gitBashPath: '',
+  wslDistro: '',
+  terminalFontSize: 14,
+  terminalFontFamily: 'Geist',
+  terminalScrollback: 5000,
+  searchExcludeDirs: [],
+  searchExcludeFiles: [],
+  shortcutCommandPalette: 'ctrl+k',
+  shortcutToggleTerminal: 'ctrl+`',
+  shortcutRename: 'f2',
+  shortcutDelete: 'delete',
+  obsidianPath: '',
+  themeMode: 'system',
+  diffToolName: '',
+  diffToolPath: '',
+  diffToolArgs: '',
+  diffToolMergeArgs: '',
+  webServe: { enabled: false, bindAddress: '127.0.0.1:36115' },
+  assets: { auto: true, smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1024, hdQuotaMB: 1024 }
+}
+
 // vi.mock 工厂被 hoist，不能引用外部变量；用 vi.hoisted 提升可变的 mock 函数集合
 const { wailsMock } = vi.hoisted(() => ({
   wailsMock: {
@@ -117,7 +142,14 @@ const { wailsMock } = vi.hoisted(() => ({
     ListAssetSlides: vi.fn(),
     UpdateAssetFileMeta: vi.fn(),
     SearchAssets: vi.fn(),
-    OpenDirectoryDialog: vi.fn()
+    OpenDirectoryDialog: vi.fn(),
+    AssetThumbsAvailable: vi.fn(),
+    CancelAssetThumbs: vi.fn(),
+    JumpToAssetSlide: vi.fn(),
+    RetryAssetThumb: vi.fn(),
+    GetAssetThumb: vi.fn(),
+    GetSettings: vi.fn(),
+    SaveSettings: vi.fn()
   }
 }))
 
@@ -167,6 +199,13 @@ const ElRateStub = {
   props: ['modelValue', 'clearable', 'disabled'],
   emits: ['update:modelValue']
 }
+// 数字输入（缩略图设置弹窗）：valueOnClear 透传供断言防清空写 null 脏值契约
+const ElInputNumberStub = {
+  template: '<input class="el-input-number" :value="modelValue" @input="$emit(\'update:modelValue\', Number($event.target.value))" />',
+  props: ['modelValue', 'min', 'max', 'step', 'valueOnClear', 'disabled'],
+  emits: ['update:modelValue']
+}
+
 const stubs = {
   'el-select': ElSelectStub,
   'el-option': { template: '<option :value="value"><slot /></option>', props: ['label', 'value'] },
@@ -197,9 +236,10 @@ const stubs = {
   'el-empty': { template: '<div class="el-empty">{{ description }}<slot /></div>', props: ['description'] },
   'el-tooltip': { template: '<span><slot /></span>', props: ['content', 'placement'] },
   'el-icon': { template: '<i><slot /></i>', props: ['size'] },
-  'el-alert': { template: '<div class="el-alert"><slot /></div>', props: ['type', 'title', 'closable'] },
+  'el-alert': { template: '<div class="el-alert"><span class="el-alert__title">{{ title }}</span><slot /></div>', props: ['type', 'title', 'closable'] },
   'el-form': { template: '<form><slot /></form>', props: ['labelWidth'] },
-  'el-form-item': { template: '<div><slot /></div>', props: ['label'] }
+  'el-form-item': { template: '<div><slot /></div>', props: ['label'] },
+  'el-input-number': ElInputNumberStub
 }
 
 const createWrapper = async () => {
@@ -228,20 +268,38 @@ describe('AssetsPanel', () => {
     wailsMock.UpdateAssetFileMeta.mockResolvedValue(null)
     // 目录对话框默认空串 = 用户取消（安全 no-op）
     wailsMock.OpenDirectoryDialog.mockResolvedValue('')
+    // ---- 缩略图（PR3）默认值：Available=false 走降级提示条 + 占位卡稳定路径，按用例覆盖 ----
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(false)
+    wailsMock.GetAssetThumb.mockResolvedValue('')
+    wailsMock.CancelAssetThumbs.mockResolvedValue(false)
+    wailsMock.JumpToAssetSlide.mockResolvedValue(null)
+    wailsMock.RetryAssetThumb.mockResolvedValue(null)
+    wailsMock.GetSettings.mockResolvedValue(mockSettings)
+    wailsMock.SaveSettings.mockResolvedValue(null)
+    // AssetThumb 懒加载确定性：移除 IO（若未来 jsdom 提供）使画廊缩略图走挂载即加载
+    // 兜底路径——卡片在测试中不会进入可视区，走 IO 路径则缩略图用例不可判定
+    delete globalThis.IntersectionObserver
     for (const key of Object.keys(eventHandlers)) delete eventHandlers[key]
     offFns = []
   })
 
-  it('挂载注册 assets-scan 三个事件监听（progress/done/error），卸载时闭包精准注销且未走 EventsOff', async () => {
+  it('挂载注册 assets-scan 与 assets-thumbs 共六个事件监听，卸载时闭包精准注销且未走 EventsOff', async () => {
     const { EventsOff } = await import('../../../wailsjs/runtime/runtime')
     const wrapper = await createWrapper()
     expect(Object.keys(eventHandlers)).toEqual(
-      expect.arrayContaining(['assets-scan:progress', 'assets-scan:done', 'assets-scan:error'])
+      expect.arrayContaining([
+        'assets-scan:progress',
+        'assets-scan:done',
+        'assets-scan:error',
+        'assets-thumbs:progress',
+        'assets-thumbs:done',
+        'assets-thumbs:error'
+      ])
     )
-    expect(offFns.length).toBe(3)
+    expect(offFns.length).toBe(6)
 
     wrapper.unmount()
-    expect(offFns.filter((off) => off.mock.calls.length > 0).length).toBe(3)
+    expect(offFns.filter((off) => off.mock.calls.length > 0).length).toBe(6)
     expect(Object.keys(eventHandlers)).toHaveLength(0)
     expect(EventsOff).not.toHaveBeenCalled()
   })
@@ -873,5 +931,247 @@ describe('AssetsPanel', () => {
     // 自愈路径静默（不弹 error 误导用户）
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+
+  // ---- 缩略图链路（PR3：懒加载 / 降级 / 进度与失败收集 / 跳转 / 设置）----
+
+  it('降级提示条：本机无 PowerPoint（Available=false）常驻信息提示，可用时不显示', async () => {
+    const wrapper = await createWrapper()
+    expect(wrapper.find('.thumbs-degrade-banner').exists()).toBe(true)
+    expect(wrapper.find('.thumbs-degrade-banner').text()).toContain('未检测到 PowerPoint')
+    expect(wrapper.find('.thumbs-degrade-banner').text()).toContain('缩略图与跳转不可用')
+
+    // 探测可用：不显示提示条
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const okWrapper = await createWrapper()
+    expect(okWrapper.find('.thumbs-degrade-banner').exists()).toBe(false)
+  })
+
+  it('画廊缩略图：命中返回串渲染 data URL 图片（前缀 data:image/png;base64,，画廊一律 tier=0），空串回退无预览占位', async () => {
+    wailsMock.GetAssetThumb.mockResolvedValue('QUFB')
+    const wrapper = await createWrapper()
+    const imgs = wrapper.findAll('.asset-card .asset-thumb img')
+    expect(imgs.length).toBe(2)
+    expect(imgs[0].attributes('src')).toBe('data:image/png;base64,QUFB')
+    // 文件卡取第 1 页封面、档位 small（tier=0）
+    expect(wailsMock.GetAssetThumb).toHaveBeenCalledWith('lib-1', 11, 1, 0)
+    expect(wailsMock.GetAssetThumb).toHaveBeenCalledWith('lib-1', 12, 1, 0)
+
+    // 空串 = 未生成：占位文案
+    wailsMock.GetAssetThumb.mockResolvedValue('')
+    const missWrapper = await createWrapper()
+    const placeholders = missWrapper.findAll('.asset-card .asset-thumb-placeholder')
+    expect(placeholders.length).toBe(2)
+    expect(placeholders[0].text()).toBe('无预览')
+  })
+
+  it('缩略图进度与失败收集：progress 事件更新进度条并按增量收集失败文件，详情侧边栏提供重试入口，done 事件复位', async () => {
+    const wrapper = await createWrapper()
+
+    // 本库进度事件：failed 0→1，当前文件即新失败文件；他库事件不串入
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-other', done: 1, total: 2, currentFile: '其他库文件.pptx', failed: 1 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(false)
+
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+    expect(wrapper.find('.thumbs-progress').text()).toContain('生成缩略图 1/2')
+    expect(wrapper.find('.thumbs-progress').text()).toContain('方案B/损坏文件.pptx')
+
+    // 打开失败文件（id=12）详情：出现失败告警与重试入口
+    await wrapper.findAll('.asset-card')[1].trigger('click')
+    await flushPromises()
+    const failed = wrapper.find('.detail-thumb-failed')
+    expect(failed.exists()).toBe(true)
+    expect(failed.text()).toContain('缩略图生成失败')
+    expect(failed.text()).toContain('重试生成')
+
+    // 点重试：以当前库 + 详情文件 ID + 归属路径重新入队
+    await clickButton(wrapper, '重试生成')
+    await flushPromises()
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledWith('lib-1', 12, '方案B/损坏文件.pptx')
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已重新入队生成')
+
+    // done 事件：进度复位 + 失败集合清空（详情告警随之消失）+ 失效代次自增触发补图
+    const epochBefore = wrapper.findComponent({ name: 'AssetThumb' })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 2, generated: 1, skipped: 0, failed: 1, canceled: false })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(false)
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(false)
+    // epoch 自增：详情大图 AssetThumb 收到新代次（补图入口）
+    expect(epochBefore.props('epoch')).not.toBe(0)
+  })
+
+  it('打开跳转：幻灯片详情以根路径+相对路径与页码调用 JumpToAssetSlide，BUSY 预期拒绝分流 warning 无 error', async () => {
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 幻灯片详情：跳转按钮可见（Available=true）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    const jumpBtn = wrapper.findAll('button').find((b) => b.text().trim() === '打开并跳到此页')
+    expect(jumpBtn).toBeTruthy()
+
+    // 成功：绝对路径 = 库根路径（去尾斜杠）+ 相对路径（正斜杠保持），页码取详情页码
+    await jumpBtn.trigger('click')
+    await flushPromises()
+    expect(wailsMock.JumpToAssetSlide).toHaveBeenCalledWith('D:/assets/方案A/城商行方案.pptx', 1)
+
+    // BUSY 预期拒绝：handleError 分流 warning（不拼前缀），无 error
+    const { ElMessage } = await import('element-plus')
+    wailsMock.JumpToAssetSlide.mockRejectedValue({ code: 'E_ASSETS_THUMBS_BUSY', message: '缩略图队列忙，请稍后重试' })
+    await jumpBtn.trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('缩略图队列忙，请稍后重试')
+    expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+
+  it('打开跳转：Available=false（降级态）时跳转按钮不渲染', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    const jumpBtn = wrapper.findAll('button').find((b) => b.text().trim() === '打开并跳到此页')
+    expect(jumpBtn).toBeUndefined()
+  })
+
+  it('缩略图设置弹窗：打开拉取设置，老配置无 assets 段时草稿回退默认值，保存回填 assets 段整体提交', async () => {
+    // 老配置无 assets 段：draft 逐字段回退默认（320/1600/1024/1024/auto true）
+    wailsMock.GetSettings.mockResolvedValue({ themeMode: 'system', terminalFontSize: 14 })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '缩略图设置')
+    await flushPromises()
+
+    expect(wailsMock.GetSettings).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.stub-dialog').exists()).toBe(true)
+    const inputNumbers = wrapper.findAllComponents(ElInputNumberStub)
+    expect(inputNumbers.length).toBe(4)
+    expect(inputNumbers[0].props('modelValue')).toBe(320) // 小图分辨率
+    expect(inputNumbers[1].props('modelValue')).toBe(1600) // 高清分辨率
+    expect(inputNumbers[2].props('modelValue')).toBe(1024) // 小图缓存上限
+    expect(inputNumbers[3].props('modelValue')).toBe(1024) // 高清缓存上限
+    // 防清空写 null 脏值契约：value-on-clear 必带
+    expect(inputNumbers[0].props('valueOnClear')).toBe(320)
+    expect(inputNumbers[1].props('valueOnClear')).toBe(1600)
+    expect(inputNumbers[2].props('valueOnClear')).toBe(1024)
+    expect(inputNumbers[3].props('valueOnClear')).toBe(1024)
+
+    // 修改高清分辨率后保存：SaveSettings 收到含 assets 段的完整设置对象，其余段保留
+    await inputNumbers[1].vm.$emit('update:modelValue', 1920)
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.SaveSettings).toHaveBeenCalledTimes(1)
+    const saved = wailsMock.SaveSettings.mock.calls[0][0]
+    expect(saved.assets).toEqual({ auto: true, smallWidth: 320, hdWidth: 1920, smallQuotaMB: 1024, hdQuotaMB: 1024 })
+    expect(saved.themeMode).toBe('system')
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('缩略图设置已保存，分辨率变更将自动重新生成')
+    expect(wrapper.find('.stub-dialog').exists()).toBe(false)
+  })
+
+  it('缩略图设置弹窗：含 assets 段配置回显真实值（非默认值）', async () => {
+    wailsMock.GetSettings.mockResolvedValue({
+      ...mockSettings,
+      assets: { auto: false, smallWidth: 480, hdWidth: 2560, smallQuotaMB: 2048, hdQuotaMB: 4096 }
+    })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '缩略图设置')
+    await flushPromises()
+
+    const inputNumbers = wrapper.findAllComponents(ElInputNumberStub)
+    expect(inputNumbers[0].props('modelValue')).toBe(480)
+    expect(inputNumbers[1].props('modelValue')).toBe(2560)
+    expect(inputNumbers[2].props('modelValue')).toBe(2048)
+    expect(inputNumbers[3].props('modelValue')).toBe(4096)
+    const { ElMessage } = await import('element-plus')
+    // 保存失败经 handleError 分流（真失败 error 带前缀）
+    wailsMock.SaveSettings.mockRejectedValue({ message: '磁盘写入失败' })
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('保存设置失败: 磁盘写入失败')
+    expect(wrapper.find('.stub-dialog').exists()).toBe(true) // 保存失败弹窗不关
+  })
+
+  it('缩略图设置弹窗：GetSettings 失败时基底缺失拦截保存（整体替换语义防空壳清掉其他段）', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.GetSettings.mockRejectedValue({ message: '磁盘读取失败' })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '缩略图设置')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('加载设置失败: 磁盘读取失败')
+
+    // 基底 null：保存被拦截提示重开，不调 SaveSettings（空壳提交会清掉其他设置段）
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('设置加载失败，请关闭后重新打开设置')
+    expect(wailsMock.SaveSettings).not.toHaveBeenCalled()
+    expect(wrapper.find('.stub-dialog').exists()).toBe(true)
+  })
+
+  it('切库复位缩略图运行态：旧库批次进行中切库后进度条消失（防终态事件被 libraryId 过滤致永挂）', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '备份库' }
+    ])
+    const wrapper = await createWrapper()
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 3, currentFile: '方案A/城商行方案.pptx', failed: 1 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+
+    // 切到 lib-2：进度条复位（旧库 done/error 事件按 libraryId 过滤不会到达）
+    const select = wrapper.findComponent(ElSelectStub)
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(false)
+
+    // 失败集合随切库清空：旧库失败路径不归因到新库语境
+    expect(wrapper.text()).not.toContain('缩略图生成失败')
+  })
+
+  it('取消缩略图生成：CancelAssetThumbs 按 true/false 分流 info 与 warning 提示', async () => {
+    const wrapper = await createWrapper()
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案A/城商行方案.pptx', failed: 0 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+
+    // 有在途批次：true → info 中性提示
+    wailsMock.CancelAssetThumbs.mockResolvedValue(true)
+    await clickButton(wrapper, '取消生成')
+    await flushPromises()
+    expect(wailsMock.CancelAssetThumbs).toHaveBeenCalledWith('lib-1')
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.info).toHaveBeenCalledWith('已请求取消缩略图生成')
+
+    // 无可取消任务：false → warning
+    wailsMock.CancelAssetThumbs.mockResolvedValue(false)
+    await clickButton(wrapper, '取消生成')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('当前没有可取消的生成任务')
+  })
+
+  it('缩略图 error 事件：仅复位进度不弹提示（契约：错误详情后端 slog 已记录，防与 Promise catch 双弹）', async () => {
+    const { ElMessage } = await import('element-plus')
+    const wrapper = await createWrapper()
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案A/城商行方案.pptx', failed: 0 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+
+    eventHandlers['assets-thumbs:error']({ libraryId: 'lib-1', message: '入队队列满' })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(false)
+    expect(ElMessage.error).not.toHaveBeenCalled()
+    expect(ElMessage.warning).not.toHaveBeenCalled()
   })
 })

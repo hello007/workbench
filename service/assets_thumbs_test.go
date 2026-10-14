@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -99,7 +101,7 @@ func newThumbTestService(t *testing.T, fake *fakeThumbExporter) (*AssetLibrarySe
 	s := NewAssetLibraryService(nil, filepath.Join(t.TempDir(), "assets"))
 	sink := &doneNotifySink{inner: &fakeEventSink{}, doneCh: make(chan model.AssetThumbsResult, 16)}
 	s.SetEventSink(sink)
-	s.thumbQ = newThumbQueue(fake, s.eventSink, s.thumbLedger)
+	s.thumbQ = newThumbQueue(fake, s.eventSink, s.thumbLedger, nil)
 	t.Cleanup(s.thumbLedger.Shutdown)
 	return s, sink
 }
@@ -489,5 +491,349 @@ func TestAssetLibraryService_ThumbQueueDefaultConstruction(t *testing.T) {
 	}
 	if s.thumbQ.exporter == nil {
 		t.Fatal("队列应注入平台 exporter")
+	}
+}
+
+// ---------- 设置链路（PRD D2/D1/D4，PR3） ----------
+
+// TestThumbTiersFromSettings 档位构造纯函数表驱动：默认值与包级 thumbTiers 严格
+// 一致（320/180、1600/900——缓存子目录与历史产物兼容的基准），注入宽度生效且
+// 高按 16:9 自算；thumbsSettings 的 normalize 使未注入 provider / 零值设置与
+// 默认档位等价。
+func TestThumbTiersFromSettings(t *testing.T) {
+	cases := []struct {
+		name      string
+		cfg       model.AssetThumbsSettings
+		wantSmall thumbTier
+		wantHD    thumbTier
+	}{
+		{
+			name:      "默认值与包级基准严格一致",
+			cfg:       model.DefaultAssetThumbsSettings(),
+			wantSmall: thumbTier{Key: "small", Width: 320, Height: 180},
+			wantHD:    thumbTier{Key: "hd", Width: 1600, Height: 900},
+		},
+		{
+			name:      "零值设置经 normalize 与默认档位等价",
+			cfg:       model.AssetThumbsSettings{},
+			wantSmall: thumbTier{Key: "small", Width: 320, Height: 180},
+			wantHD:    thumbTier{Key: "hd", Width: 1600, Height: 900},
+		},
+		{
+			name:      "注入宽度生效高按16比9自算",
+			cfg:       model.AssetThumbsSettings{SmallWidth: 640, HDWidth: 1920},
+			wantSmall: thumbTier{Key: "small", Width: 640, Height: 360},
+			wantHD:    thumbTier{Key: "hd", Width: 1920, Height: 1080},
+		},
+		{
+			name:      "clamp 边界收敛后构造（小图下限/高清上限）",
+			cfg:       model.AssetThumbsSettings{SmallWidth: 1, HDWidth: 99999},
+			wantSmall: thumbTier{Key: "small", Width: 120, Height: 67},
+			wantHD:    thumbTier{Key: "hd", Width: 3840, Height: 2160},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			norm := model.NormalizeAssetThumbsSettings(&tc.cfg)
+			got := thumbTiersFromSettings(norm)
+			if len(got) != 2 {
+				t.Fatalf("应恒为双档, got %d 档", len(got))
+			}
+			if got[0] != tc.wantSmall {
+				t.Errorf("small 档不符: got %+v want %+v", got[0], tc.wantSmall)
+			}
+			if got[1] != tc.wantHD {
+				t.Errorf("hd 档不符: got %+v want %+v", got[1], tc.wantHD)
+			}
+		})
+	}
+	// 默认一致性对照包级基准（回退路径不漂移的守护）
+	got := thumbTiersFromSettings(model.DefaultAssetThumbsSettings())
+	for i := range thumbTiers {
+		if got[i] != thumbTiers[i] {
+			t.Fatalf("默认档位应与包级 thumbTiers 逐字段一致: got %+v want %+v", got, thumbTiers)
+		}
+	}
+}
+
+// newThumbsSettingsTestService 设置链路用例公共构造：Available=true fake + 阻塞
+// 型 exportFn（chan 交接防批次完成竞态）+ 可注册的宿主库。返回 svc/lib/store/
+// thumbsDir 与放行闭包。
+func newThumbsSettingsTestService(t *testing.T) (*AssetLibraryService, *fakeThumbExporter, model.AssetLibrary, *assetsStore, string, func()) {
+	t.Helper()
+	fake := &fakeThumbExporter{available: true}
+	svc := newTestAssetService(t)
+	svc.thumbQ = newThumbQueue(fake, svc.eventSink, svc.thumbLedger, nil)
+	t.Cleanup(svc.thumbLedger.Shutdown)
+	t.Cleanup(func() { svc.WaitThumbsDone() })
+
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "设置库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	fileID := insertHostFile(t, store, "甲.pptx")
+	if _, err := store.db.Exec(
+		"INSERT INTO slides(file_id, slide_num) VALUES(?, 1)", fileID,
+	); err != nil {
+		t.Fatalf("插幻灯片行: %v", err)
+	}
+
+	releaseCh := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+		<-releaseCh
+		return 1, nil
+	}
+	return svc, fake, lib, store, svc.assetThumbsDir(lib.ID), release
+}
+
+// registeredThumbBatch 快照指定库当前注册批次（q.mu 内读取，断言入队面用）。
+func registeredThumbBatch(s *AssetLibraryService, libraryID string) *thumbBatchTask {
+	s.thumbQ.mu.Lock()
+	defer s.thumbQ.mu.Unlock()
+	return s.thumbQ.batches[libraryID]
+}
+
+// TestThumbsBacklog_AutoDisabledSkipsEnqueue D1 自动生成开关：Auto=false 扫描
+// 完成不入队（无导出无事件）；Auto=true 对照入队且 worker 消费（chan 交接
+// 确定性等待）。
+func TestThumbsBacklog_AutoDisabledSkipsEnqueue(t *testing.T) {
+	svc, fake, lib, store, _, release := newThumbsSettingsTestService(t)
+
+	svc.SetThumbsSettingsProvider(func() model.AssetThumbsSettings {
+		return model.AssetThumbsSettings{Auto: false} // normalize 后其余四项走默认
+	})
+	svc.enqueueThumbsBacklog(store, lib)
+	if exports, _, _, _ := fake.stats(); exports != 0 {
+		t.Fatalf("Auto=false 不应入队导出, got %d 次", exports)
+	}
+	if registeredThumbBatch(svc, lib.ID) != nil {
+		t.Fatal("Auto=false 不应注册批次")
+	}
+
+	// Auto=true 对照：入队且 worker 已消费首文件（确定性同步）
+	svc.SetThumbsSettingsProvider(func() model.AssetThumbsSettings {
+		return model.AssetThumbsSettings{Auto: true}
+	})
+	svc.enqueueThumbsBacklog(store, lib)
+	b := registeredThumbBatch(svc, lib.ID)
+	if b == nil {
+		t.Fatal("Auto=true 应注册批次")
+	}
+	if len(b.Files) != 1 || b.Files[0].FileID == 0 {
+		t.Fatalf("批次应含 ok 文件甲.pptx: %+v", b.Files)
+	}
+	release() // 放行 worker 收口（cleanup WaitThumbsDone 防永挂）
+}
+
+// TestApplyThumbsSettingsChange_WidthClearsTierAndReenqueues 分辨率变更清档重入队：
+// prev/cur 宽度变 → 双档目录删、记账行删、dirty 同清（flush 不复活）、重入队
+// 批次含全部 ok 文件（一次一批覆盖双档）。
+func TestApplyThumbsSettingsChange_WidthClearsTierAndReenqueues(t *testing.T) {
+	svc, _, lib, store, thumbsDir, release := newThumbsSettingsTestService(t)
+
+	fileID := fileIDByPath(t, store, "甲.pptx")
+	writeThumbPNG(t, thumbsDir, "small", fileID, 1, "old-small")
+	writeThumbPNG(t, thumbsDir, "hd", fileID, 1, "old-hd")
+	insertThumbLedgerRow(t, store, fileID, "small", 1, 100, 1)
+	insertThumbLedgerRow(t, store, fileID, "hd", 1, 200, 1)
+	// dirty 注入：清档须连 dirty 一起清（防旧分辨率记账经 flush 复活）
+	svc.thumbLedger.record(lib.ID, fileID, "small", 1, 100)
+
+	prev := model.DefaultAssetThumbsSettings()
+	cur := model.DefaultAssetThumbsSettings()
+	cur.SmallWidth = 640
+	cur.HDWidth = 1920
+
+	svc.applyThumbsSettingsChangeSync(prev, cur)
+
+	for _, tier := range []string{"small", "hd"} {
+		if _, err := os.Stat(filepath.Join(thumbsDir, tier)); !os.IsNotExist(err) {
+			t.Errorf("%s 档目录应删除, stat err=%v", tier, err)
+		}
+	}
+	if n := countThumbCacheRows(t, store); n != 0 {
+		t.Fatalf("清档后记账行应删空, got %d", n)
+	}
+	svc.thumbLedger.flushLibrary(lib.ID)
+	if n := countThumbCacheRows(t, store); n != 0 {
+		t.Fatalf("dirty 应随清档清除（flush 不复活）, got %d", n)
+	}
+
+	b := registeredThumbBatch(svc, lib.ID)
+	if b == nil {
+		t.Fatal("清档后应重入队补缺批次")
+	}
+	if len(b.Files) != 1 {
+		t.Fatalf("重入队批次应含全部 ok 文件, got %+v", b.Files)
+	}
+	if b.Files[0].FileID != fileID || b.Files[0].Path != "甲.pptx" {
+		t.Fatalf("重入队批次文件不符: %+v", b.Files[0])
+	}
+	if wantAbs := filepath.Join(lib.RootPath, "甲.pptx"); b.Files[0].AbsPath != wantAbs {
+		t.Errorf("AbsPath 应为 %s, got %s", wantAbs, b.Files[0].AbsPath)
+	}
+	release() // 放行 worker 收口批次
+}
+
+// TestApplyThumbsSettingsChange_AutoDisabledSkipsReenqueue Auto=false 时分辨率
+// 变更仍清档（残留旧分辨率产物只会误导）但不重入队（用户关闭了自动生成）。
+func TestApplyThumbsSettingsChange_AutoDisabledSkipsReenqueue(t *testing.T) {
+	svc, _, lib, store, thumbsDir, release := newThumbsSettingsTestService(t)
+	defer release()
+
+	fileID := fileIDByPath(t, store, "甲.pptx")
+	writeThumbPNG(t, thumbsDir, "small", fileID, 1, "old-small")
+	insertThumbLedgerRow(t, store, fileID, "small", 1, 100, 1)
+
+	prev := model.DefaultAssetThumbsSettings()
+	cur := model.DefaultAssetThumbsSettings()
+	cur.SmallWidth = 640
+	cur.Auto = false
+
+	svc.applyThumbsSettingsChangeSync(prev, cur)
+
+	if _, err := os.Stat(filepath.Join(thumbsDir, "small")); !os.IsNotExist(err) {
+		t.Errorf("清档不受 Auto 开关影响（旧分辨率产物应删）, stat err=%v", err)
+	}
+	if n := countThumbCacheRows(t, store); n != 0 {
+		t.Fatalf("清档后记账行应删空, got %d", n)
+	}
+	if registeredThumbBatch(svc, lib.ID) != nil {
+		t.Fatal("Auto=false 不应重入队补缺批次")
+	}
+}
+
+// TestApplyThumbsSettingsChange_QuotaChangeTriggersEviction 上限变更触发一次
+// 惰性淘汰（ledger 配额注入小值——真实设置下限 64MB，字节级测试语料须经注入点）。
+func TestApplyThumbsSettingsChange_QuotaChangeTriggersEviction(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "改额库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	thumbsDir := svc.assetThumbsDir(lib.ID)
+
+	// 替换服务 ledger：quotaFn 注入小配额（service 配额注入链路的测试面）
+	l := newThumbCacheLedger(
+		svc.storeForThumbs,
+		func(string) string { return thumbsDir },
+		func(string) int64 { return 400 },
+	)
+	svc.thumbLedger = l
+	t.Cleanup(l.Shutdown)
+
+	for i := 1; i <= 5; i++ {
+		id := insertHostFile(t, store, fmt.Sprintf("素材%d.pptx", i))
+		insertThumbLedgerRow(t, store, id, "small", 1, 100, int64(i))
+		writeThumbPNG(t, thumbsDir, "small", id, 1, "x")
+	}
+
+	prev := model.DefaultAssetThumbsSettings()
+	cur := model.DefaultAssetThumbsSettings()
+	cur.SmallQuotaMB = 100 // 仅上限变（宽度不变）→ requota 路径
+
+	svc.applyThumbsSettingsChangeSync(prev, cur)
+
+	if n := countThumbCacheRows(t, store); n != 3 {
+		t.Fatalf("上限变更应触发淘汰至水位（余 3 行 300B ≤ 360B）, got %d", n)
+	}
+}
+
+// TestApplyThumbsSettingsChange_NoChangeNoop prev/cur 无差异时不触发任何清档与
+// 淘汰（守卫误伤面：每次保存设置都重清库是不可接受行为）。
+func TestApplyThumbsSettingsChange_NoChangeNoop(t *testing.T) {
+	svc, _, lib, store, thumbsDir, release := newThumbsSettingsTestService(t)
+	defer release()
+
+	fileID := fileIDByPath(t, store, "甲.pptx")
+	writeThumbPNG(t, thumbsDir, "small", fileID, 1, "keep")
+	insertThumbLedgerRow(t, store, fileID, "small", 1, 100, 1)
+
+	svc.applyThumbsSettingsChangeSync(model.DefaultAssetThumbsSettings(), model.DefaultAssetThumbsSettings())
+
+	if n := countThumbCacheRows(t, store); n != 1 {
+		t.Fatalf("无差异不应清记账, got %d 行", n)
+	}
+	if _, err := os.Stat(thumbPNGPath(thumbsDir, "small", fileID, 1)); err != nil {
+		t.Errorf("无差异不应删 PNG: %v", err)
+	}
+	if registeredThumbBatch(svc, lib.ID) != nil {
+		t.Fatal("无差异不应重入队")
+	}
+}
+
+// TestRetryAssetThumb 单文件重试（D4）四分支：正常路径注册单文件批次
+// （FileID/Path/AbsPath 正确，AbsPath = root+rel）、无 COM 返回
+// E_ASSETS_THUMBS_UNAVAILABLE、库不存在透传 E_ASSETS_LIB_NOT_FOUND、
+// 源文件缺失/参数非法报错。
+func TestRetryAssetThumb(t *testing.T) {
+	svc, _, lib, _, _, release := newThumbsSettingsTestService(t)
+
+	dir := lib.RootPath
+	if err := os.WriteFile(filepath.Join(dir, "甲.pptx"), []byte("fake pptx"), 0644); err != nil {
+		t.Fatalf("写源文件: %v", err)
+	}
+
+	// 正常路径：单文件批次注册（worker 阻塞在 releaseCh，注册态稳定可断言）
+	if err := svc.RetryAssetThumb(lib.ID, 42, "甲.pptx"); err != nil {
+		t.Fatalf("重试应成功入队: %v", err)
+	}
+	b := registeredThumbBatch(svc, lib.ID)
+	if b == nil {
+		t.Fatal("应注册单文件批次")
+	}
+	if len(b.Files) != 1 {
+		t.Fatalf("应为单文件批次, got %d 文件", len(b.Files))
+	}
+	f := b.Files[0]
+	if f.FileID != 42 || f.Path != "甲.pptx" {
+		t.Fatalf("FileID/Path 不符: %+v", f)
+	}
+	if wantAbs := filepath.Join(lib.RootPath, "甲.pptx"); f.AbsPath != wantAbs {
+		t.Fatalf("AbsPath 应为 %s, got %s", wantAbs, f.AbsPath)
+	}
+	if wantDir := svc.assetThumbsDir(lib.ID); b.ThumbsDir != wantDir {
+		t.Fatalf("ThumbsDir 应为 %s, got %s", wantDir, b.ThumbsDir)
+	}
+	release() // 放行 worker 收口批次
+
+	// 库不存在：透传 E_ASSETS_LIB_NOT_FOUND（可用服务上判，隔离库缺失分支）
+	if err := svc.RetryAssetThumb("不存在的库", 1, "甲.pptx"); appErrCode(t, err) != model.ErrCodeAssetsLibNotFound {
+		t.Fatalf("库不存在应透传 E_ASSETS_LIB_NOT_FOUND, got %v", err)
+	}
+
+	// 无 COM：返回 E_ASSETS_THUMBS_UNAVAILABLE
+	offSvc := newTestAssetService(t) // 默认 unavailable fake exporter
+	offLib := mustCreateLibrary(t, offSvc, "无COM库", t.TempDir())
+	if err := offSvc.RetryAssetThumb(offLib.ID, 1, "x.pptx"); appErrCode(t, err) != model.ErrCodeAssetsThumbsUnavailable {
+		t.Fatalf("无 COM 应返回 E_ASSETS_THUMBS_UNAVAILABLE, got %v", err)
+	}
+
+	// 源文件缺失：报「源文件不存在或无法访问」包装错
+	if err := svc.RetryAssetThumb(lib.ID, 1, "缺失.pptx"); err == nil ||
+		!strings.Contains(err.Error(), "源文件不存在或无法访问") {
+		t.Fatalf("源文件缺失应报可读错误, got %v", err)
+	}
+
+	// 参数非法：fileID<1 / relPath 空
+	if err := svc.RetryAssetThumb(lib.ID, 0, "甲.pptx"); err == nil {
+		t.Fatal("fileID<1 应报错")
+	}
+	if err := svc.RetryAssetThumb(lib.ID, 1, ""); err == nil {
+		t.Fatal("relPath 空应报错")
+	}
+
+	// 路径越界遏制：`..` 逃逸库根与绝对路径均拒绝（防 PowerPoint 渲染库外文件
+	// 经 GetAssetThumb 回读内容）；库根内子目录相对路径正常放行
+	if err := svc.RetryAssetThumb(lib.ID, 1, "../外部.pptx"); err == nil ||
+		!strings.Contains(err.Error(), "越界") {
+		t.Fatalf("`..` 逃逸应拒绝, got %v", err)
+	}
+	if err := svc.RetryAssetThumb(lib.ID, 1, "a/../../外部.pptx"); err == nil ||
+		!strings.Contains(err.Error(), "越界") {
+		t.Fatalf("嵌套 `..` 逃逸应拒绝, got %v", err)
+	}
+	if err := svc.RetryAssetThumb(lib.ID, 1, `C:\外部.pptx`); err == nil {
+		t.Fatal("绝对路径应拒绝")
 	}
 }

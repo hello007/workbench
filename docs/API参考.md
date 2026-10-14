@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **197** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
+共 **198** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -39,7 +39,7 @@
 | 设置 | 2 | `app_settings.go` |
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
-| 素材管理 | 15 | `app_assets.go` |
+| 素材管理 | 16 | `app_assets.go` |
 
 > 既有缺口（与本表总数差 18）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域及部分域的行内计数为历史遗留未登记项，方法总数以 `App.d.ts` 为准，待另案补齐。
 
@@ -491,11 +491,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `ListAssetSlides` | `(libraryID, limit, offset) => Promise<AssetSlidePage>` | 幻灯片索引条目分页（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准；limit ≤0 取 50 上限 200、offset<0 按 0，total 恒为总条目数） | AssetSlidePage |
 | `UpdateAssetFileMeta` | `(libraryID, fileID, meta: AssetFileMetaUpdate) => Promise<void>` | 文件级元数据编辑（整体替换：星级 0-5（0 清除）、备注、标签集（不存在的标签自动创建并分配默认色）） | — |
 | `SearchAssets` | `(libraryID, keyword, opts: AssetSearchOptions) => Promise<AssetSearchPage>` | 素材检索：关键词全文检索（bm25 列加权 文件名 > 幻灯片标题 > 页文本 > 备注，CJK 按字切分 phrase 匹配）与标签筛选（文件直接绑定、幻灯片继承归属文件）可组合；`flatten=false` 同 PPT 多页命中折叠为聚合条目 | AssetSearchPage |
-
 | `AssetThumbsAvailable` | `() => Promise<boolean>` | 探测本机 PowerPoint COM 可用性（前端降级依据：false 时画廊提示条常驻 + 跳转入口隐藏） | boolean |
 | `JumpToAssetSlide` | `(absPath, slideNum) => Promise<void>` | 打开 PPT 并跳到指定页（PowerPoint COM；批量生成在途时经页间插队执行；无 PowerPoint 报 `E_ASSETS_THUMBS_UNAVAILABLE`，排队/执行超时报 `E_ASSETS_THUMBS_BUSY`） | — |
 | `CancelAssetThumbs` | `(libraryID) => Promise<boolean>` | 取消指定库的缩略图批量生成（幂等，无在途批次返回 false） | boolean |
 | `GetAssetThumb` | `(libraryID, fileID, slideNum, tierIndex) => Promise<string>` | 读取单页缩略图 PNG（base64 标准编码裸串；tierIndex 0=small 画廊卡片 1=hd 详情大图；未生成/已淘汰返回空串非错误，前端回退占位卡；消费契约：直接拼 data URL，禁 decodeBase64Utf8 禁裸 atob） | string |
+| `RetryAssetThumb` | `(libraryID, fileID, relPath) => Promise<void>` | 单文件缩略图重试（详情侧边栏「重试」入口；复用 COM 串行队列链路，触发时取消同库在途批量批次（既有取消语义）；源文件不存在报错，无 PowerPoint 返回 `E_ASSETS_THUMBS_UNAVAILABLE`） | — |
 
 ---
 
@@ -616,7 +616,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ### 30.4 设置与更新
 
-**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe`）。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
+**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe` / `assets`（AssetThumbsSettings 缩略图设置段））。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
 
 **WebServeSettings** — 浏览器访问通道配置（`AppSettings.webServe` 段；指针形态区分「段缺失」与「显式关闭」，加载时经 `EnsureWebServeDefaults` 补默认值）
 
@@ -727,6 +727,16 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **AssetSearchPage** — 检索结果页（`items`: AssetSearchHit[] / `total`（过滤/聚合后总条目数，翻页以 offset 递增驱动，Total 不随页变化）/ `keyword` / `flattened`）
 
+**AssetThumbsSettings** — 缩略图设置（`AppSettings.assets` 段，老配置段缺失走默认值；素材管理面板「缩略图设置」消费，随 `SaveSettings` 整体持久化）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `auto` | boolean | 扫描完成后自动生成缩略图（默认 true；关闭时扫描后不再自动入队） |
+| `smallWidth` | number | 画廊小图宽度 px（默认 320，clamp 120-800；变更自动清该档缓存并按新分辨率重新生成） |
+| `hdWidth` | number | 详情高清大图宽度 px（默认 1600，clamp 480-3840；变更自动清该档缓存并按新分辨率重新生成） |
+| `smallQuotaMB` | number | 小图缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
+| `hdQuotaMB` | number | 高清缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
+
 ### 30.8 其他
 
 **Favorite**（`path` / `alias` / `group` / `createdAt`）
@@ -780,4 +790,4 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-**最后更新：** 2026-10-13
+**最后更新：** 2026-10-14

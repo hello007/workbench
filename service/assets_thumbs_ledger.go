@@ -40,8 +40,8 @@ const thumbLedgerFlushThreshold = 200
 // 测试直接调 flushLibrary 同步断言——test-stability 契约禁 sleep 等待竞态）。
 var thumbLedgerFlushInterval = 45 * time.Second
 
-// thumbTierQuotaBytes 单档位缓存配额（small/hd 各 1GB，PR3 设置界面接入前读
-// 常量；var 便于测试注入小配额驱动淘汰路径）。
+// thumbTierQuotaBytes 单档位缓存配额（small/hd 各 1GB，PR3 起设置链路经 ledger
+// 的 quotaFn 注入生效；var 保留作 quotaFn 未注入时的回退与测试注入点）。
 var thumbTierQuotaBytes int64 = 1 << 30
 
 // thumbEvictWatermark 淘汰水位：超配额时删至配额的 90%（留余量防抖动——每轮
@@ -58,6 +58,7 @@ type thumbCacheLedger struct {
 	dirty   map[string]map[thumbCacheKey]thumbCacheEntry // libraryID -> key -> entry
 	storeFn func(libraryID string) (*assetsStore, error) // 取库连接（storeForThumbs；库不存在返回错误）
 	dirFn   func(libraryID string) string                // 取库缩略图根目录（assetThumbsDir）
+	quotaFn func(tier string) int64                      // 档位配额读取口（设置注入；nil 回退 thumbTierQuotaBytes）
 	notify  chan struct{}                                // 缓冲 1 去抖信号：攒批满时通知 flusher（重复通知合并）
 
 	quit    chan struct{} // Shutdown 关闭，flusher 退出
@@ -66,15 +67,26 @@ type thumbCacheLedger struct {
 	stopped bool // Shutdown 置位：此后 record 丢弃（进程退出路径，防 flusher 重启）
 }
 
-// newThumbCacheLedger 构造 ledger（storeFn/dirFn 由宿主 AssetLibraryService 注入）。
-func newThumbCacheLedger(storeFn func(libraryID string) (*assetsStore, error), dirFn func(libraryID string) string) *thumbCacheLedger {
+// newThumbCacheLedger 构造 ledger（storeFn/dirFn/quotaFn 由宿主
+// AssetLibraryService 注入；quotaFn nil 回退包级 thumbTierQuotaBytes）。
+func newThumbCacheLedger(storeFn func(libraryID string) (*assetsStore, error), dirFn func(libraryID string) string, quotaFn func(tier string) int64) *thumbCacheLedger {
 	return &thumbCacheLedger{
 		dirty:   make(map[string]map[thumbCacheKey]thumbCacheEntry),
 		storeFn: storeFn,
 		dirFn:   dirFn,
+		quotaFn: quotaFn,
 		notify:  make(chan struct{}, 1),
 		quit:    make(chan struct{}),
 	}
+}
+
+// quotaFor 档位配额字节：quotaFn 注入优先（设置链路），nil 回退包级 var
+// （单测回退与测试注入点）。
+func (l *thumbCacheLedger) quotaFor(tier string) int64 {
+	if l.quotaFn != nil {
+		return l.quotaFn(tier)
+	}
+	return thumbTierQuotaBytes
 }
 
 // start 惰性启动 flusher goroutine（首次 record 触发——对齐 thumbQueue.start 的
@@ -199,6 +211,10 @@ func (l *thumbCacheLedger) flushLibrary(libraryID string) {
 	persisted, err := store.flushThumbEntries(entries)
 	if err != nil {
 		Logger().Warn("缩略图记账落盘失败", "libraryId", libraryID, "entries", len(entries), "err", err)
+		// flush 瞬态失败（busy_timeout 耗尽/IO 瞬态）：整批回灌 dirty 重试下轮
+		// flush，不直接丢弃（丢弃会令 PNG 在而记账永久缺失，SUM 低估致配额淘汰
+		// 长期失准——独立审核遗留项 1）
+		l.requeueDirty(libraryID, entries)
 		return
 	}
 	if dropped := int64(len(entries)) - persisted; dropped > 0 {
@@ -216,16 +232,38 @@ func (l *thumbCacheLedger) flushLibrary(libraryID string) {
 			continue
 		}
 		seen[k.tier] = true
-		l.evictTier(store, thumbsDir, k.tier)
+		l.evictTier(store, libraryID, thumbsDir, k.tier)
+	}
+}
+
+// requeueDirty flush 瞬态失败批回灌（独立审核遗留项 1）：storeFn 成功但落盘失败
+// （busy_timeout 耗尽/IO 瞬态）时整批 dirty 已被快照取出，直接丢弃会令 PNG 在而
+// 记账永久缺失，SUM 低估致配额淘汰长期失准。回灌仅在未 stopped 时进行；flush
+// 窗口内同键新 record（更新鲜）优先，回灌不覆盖已存在的键。
+func (l *thumbCacheLedger) requeueDirty(libraryID string, entries map[thumbCacheKey]thumbCacheEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopped {
+		return
+	}
+	byKey, ok := l.dirty[libraryID]
+	if !ok {
+		byKey = make(map[thumbCacheKey]thumbCacheEntry)
+		l.dirty[libraryID] = byKey
+	}
+	for k, e := range entries {
+		if _, exists := byKey[k]; !exists {
+			byKey[k] = e
+		}
 	}
 }
 
 // evictTier 档位配额 LRU 淘汰：SUM 超配额时按 last_access_ns 最旧优先游标收集
 // 待删条目，删至配额水位（90%）止；单事务批量 DELETE 记账 + 删 PNG 文件
 // （NotExist 忽略——记账与文件的删除非原子，文件已消失属正常形态）。
-// 仅由 flushLibrary 后台路径调用；淘汰只在此发生，禁在写入路径同步淘汰。
-func (l *thumbCacheLedger) evictTier(store *assetsStore, thumbsDir, tierKey string) {
-	quota := thumbTierQuotaBytes
+// 仅由 flushLibrary / checkQuota 后台路径调用；淘汰只在此发生，禁在写入路径同步淘汰。
+func (l *thumbCacheLedger) evictTier(store *assetsStore, libraryID, thumbsDir, tierKey string) {
+	quota := l.quotaFor(tierKey)
 	if quota <= 0 {
 		return
 	}
@@ -240,6 +278,20 @@ func (l *thumbCacheLedger) evictTier(store *assetsStore, thumbsDir, tierKey stri
 	if total <= target {
 		return
 	}
+
+	// 快照该库该档 dirty 在册键（收集游标前）：dirty 键即将以新 last_access 落盘
+	// （flush 快照取出后并发 record 的新条目 / flush 窗口重导出记账），按 db 旧行
+	// 淘汰会删掉刚被重写的同路径 PNG，随后新 dirty 行落盘形成「记账称存在而文件
+	// 缺」——排除后本轮回收量可能不足水位，下次 flush 落盘后自然重查（自愈，
+	// 非错误；独立审核遗留项 2）。
+	l.mu.Lock()
+	dirtyKeys := make(map[thumbCacheKey]struct{})
+	for k := range l.dirty[libraryID] {
+		if k.tier == tierKey {
+			dirtyKeys[k] = struct{}{}
+		}
+	}
+	l.mu.Unlock()
 
 	// 游标收集待删条目（rows 收集完毕显式 Close 后再开删除事务——单连接池
 	// SetMaxOpenConns(1) 下 rows 未关先查会自锁，docs/spec/assets-management.md）
@@ -262,6 +314,9 @@ func (l *thumbCacheLedger) evictTier(store *assetsStore, thumbsDir, tierKey stri
 			_ = rows.Close()
 			Logger().Warn("缩略图淘汰游标读取失败", "tier", tierKey, "err", err)
 			return
+		}
+		if _, isDirty := dirtyKeys[v.key]; isDirty {
+			continue // dirty 在册键跳过淘汰（注释见上方快照处）
 		}
 		victims = append(victims, v)
 		reclaimed += v.bytes
@@ -332,6 +387,28 @@ func (l *thumbCacheLedger) pruneBeyond(libraryID string, thumbsDir string, fileI
 		}
 	}
 	l.mu.Unlock()
+}
+
+// dropTier 清指定库指定档的 dirty 条目（分辨率变更清档联动，防旧分辨率记账
+// 复活——ApplyThumbsSettingsChange 清档链路调用）。
+func (l *thumbCacheLedger) dropTier(libraryID, tier string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k := range l.dirty[libraryID] {
+		if k.tier == tier {
+			delete(l.dirty[libraryID], k)
+		}
+	}
+}
+
+// checkQuota 上限变更触发的一次性惰性配额检查（后台语义与 flushLibrary 尾部
+// 同源，复用 evictTier；库不可用静默跳过）。
+func (l *thumbCacheLedger) checkQuota(libraryID, tier string) {
+	store, err := l.storeFn(libraryID)
+	if err != nil {
+		return // 库不可用（已删除等竞态）：静默跳过
+	}
+	l.evictTier(store, libraryID, l.dirFn(libraryID), tier)
 }
 
 // Shutdown 关停收口（WaitThumbsDone 尾部、库连接关闭前调用）：先同步 flush 全部
@@ -455,5 +532,11 @@ func (s *assetsStore) deleteThumbCacheKeys(keys []thumbCacheKey) error {
 // 联动；外键级联为兜底，显式删除为契约——见 invalidateFileThumbs 注释）。
 func (s *assetsStore) deleteThumbCacheForFile(fileID int64) error {
 	_, err := s.db.Exec("DELETE FROM thumb_cache WHERE file_id = ?", fileID)
+	return err
+}
+
+// deleteThumbCacheTier 清指定档位全部记账行（分辨率变更清档；单语句，外键无涉）。
+func (s *assetsStore) deleteThumbCacheTier(tier string) error {
+	_, err := s.db.Exec("DELETE FROM thumb_cache WHERE tier = ?", tier)
 	return err
 }

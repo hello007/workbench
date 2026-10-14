@@ -22,7 +22,7 @@ import (
 func newTestAssetService(t *testing.T) *AssetLibraryService {
 	t.Helper()
 	svc := NewAssetLibraryService(context.Background(), filepath.Join(t.TempDir(), "assets"))
-	svc.thumbQ = newThumbQueue(&fakeThumbExporter{available: false}, svc.eventSink, svc.thumbLedger)
+	svc.thumbQ = newThumbQueue(&fakeThumbExporter{available: false}, svc.eventSink, svc.thumbLedger, nil)
 	t.Cleanup(svc.CloseAll)
 	return svc
 }

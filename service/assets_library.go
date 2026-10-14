@@ -50,6 +50,8 @@ type AssetLibraryService struct {
 
 	thumbQ      *thumbQueue       // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
 	thumbLedger *thumbCacheLedger // 缩略图记账 ledger（assets_thumbs_ledger.go，LRU 记账 + 失效 + 配额淘汰）
+
+	thumbsCfgFn func() model.AssetThumbsSettings // 缩略图设置读取口（装配期 SetThumbsSettingsProvider 注入，nil 走默认值）
 }
 
 // ErrAssetsCancelled 素材扫描被用户取消（对齐 ErrOperationCancelled 模式）。
@@ -83,10 +85,11 @@ func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibrary
 		open:      make(map[string]*assetsStore),
 	}
 	s.SetEventSink(NewWailsEventSink(ctx))
-	// 先建 ledger（storeFn/dirFn 注入宿主方法），再建 queue（传 ledger）——
-	// flusher goroutine 由首次 record 惰性启动（对齐 thumbQueue.start 模式）
-	s.thumbLedger = newThumbCacheLedger(s.storeForThumbs, s.assetThumbsDir)
-	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink, s.thumbLedger)
+	// 先建 ledger（storeFn/dirFn/quotaFn 注入宿主方法），再建 queue（传 ledger
+	// 与档位读取口）——flusher goroutine 由首次 record 惰性启动（对齐
+	// thumbQueue.start 模式）
+	s.thumbLedger = newThumbCacheLedger(s.storeForThumbs, s.assetThumbsDir, s.thumbQuotaBytes)
+	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink, s.thumbLedger, s.resolvedThumbTiers)
 	return s
 }
 
@@ -236,7 +239,11 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 		}
 		delete(s.open, libraryID)
 	}
-	// 删库文件（含 WAL/SHM 伴生文件；不存在忽略——从未扫描的库可能无 db 文件）
+	// 删库文件（含 WAL/SHM 伴生文件；不存在忽略——从未扫描的库可能无 db 文件）。
+	// 已知瞬态（独立审核遗留项 3 处置口径）：缩略图记账 flusher 持库连接事务中
+	// （45s 周期 × 毫秒级单事务）并发删库时，Windows 上可能撞句柄致本次删除
+	// 瞬态失败；删除可重试即可恢复，窗口极窄，不加锁不改链路（与 flusher 互斥
+	// 会把删库阻塞在 flush 时长上，收益不成比例）。
 	dbPath := s.libraryDBPath(libraryID)
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if err := os.Remove(dbPath + suffix); err != nil && !os.IsNotExist(err) {

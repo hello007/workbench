@@ -20,7 +20,9 @@ package service
 //     → thumbPNGPath 产物落盘 → GetAssetThumb 读取 API 数据就绪；
 //  3. 记账落盘：WaitThumbsDone（ledger Shutdown flush）后 thumb_cache 行数 =
 //     页数 × 档位数；
-//  4. 幂等重扫：全量命中时补缺清单为空，不重导出（PNG mtime 不变）。
+//  4. 幂等重扫：全量命中时补缺清单为空，不重导出（PNG mtime 不变）；
+//  5. 设置变更生效（PR3 D2）：小图分辨率 320→480 → 清该档 + 重入队真实重导出
+//     （PNG IHDR 宽度直读 480 为端到端证据）+ 记账重记满。
 //
 // fixture 经 COM 自产（不依赖仓库内样例文件；手写 OOXML zip 被 WPS 拒开，见
 // smokeProduceFixtures 注释）。
@@ -28,6 +30,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +40,8 @@ import (
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
+
+	"workbench/model"
 )
 
 // smokeWaitThumbsTotal 批量产物就绪等待上限（单文件超时 300s × 2 文件 + 扫描
@@ -67,6 +72,11 @@ func TestSmokeAssetsThumbsEndToEnd(t *testing.T) {
 
 	svc := NewAssetLibraryService(nil, filepath.Join(root, "data-assets"))
 	defer svc.CloseAll()
+	// 注入设置读取口（镜像 app_services.go 生产装配）：闭包共享可变 cfg，队列
+	// tiersFn 在批次执行时解析到最新宽度——对齐生产「SaveSettings 先更新设置、
+	// 后应用变更」的时序（漏注入则重导出恒读默认 320，设置链路断路）
+	cfg := model.DefaultAssetThumbsSettings()
+	svc.SetThumbsSettingsProvider(func() model.AssetThumbsSettings { return cfg })
 	lib, err := svc.CreateLibrary("冒烟库", root)
 	if err != nil {
 		t.Fatalf("建库失败: %v", err)
@@ -138,7 +148,27 @@ func TestSmokeAssetsThumbsEndToEnd(t *testing.T) {
 		}
 	}
 
-	// ---- 6. 关停收口（ledger flush）+ 记账落盘行数对账 ----
+	// ---- 6. 设置变更生效（D2）：小图分辨率变更 → 清该档 + 重入队真实重导出 ----
+	// 清档前小图宽度 = 默认 320；变更 480 后重导出的 PNG 宽度应为 480（IHDR 头
+	// 直读，显式尺寸精确生效的端到端证据）。同步直调 applyThumbsSettingsChangeSync
+	// （生产入口 ApplyThumbsSettingsChange 为异步包装）。
+	smallDir := filepath.Join(thumbsDir, "small")
+	wBefore, _, err := smokeFirstPNGDims(smallDir)
+	if err != nil {
+		t.Fatalf("读取清档前小图尺寸失败: %v", err)
+	}
+	if wBefore != 320 {
+		t.Errorf("清档前小图宽度 = %d，期望 320（默认档）", wBefore)
+	}
+	prevCfg := cfg
+	cfg.SmallWidth = 480 // 先更新设置（生产时序：SaveSettings 落盘换缓存后才应用变更）
+	curCfg := cfg
+	svc.applyThumbsSettingsChangeSync(prevCfg, curCfg)
+	if err := smokeWaitSmallPNGWidth(smallDir, 5, 480, smokeWaitThumbsTotal); err != nil {
+		t.Fatalf("分辨率变更后小图重导出未就绪: %v", err)
+	}
+
+	// ---- 7. 关停收口（ledger flush）+ 记账落盘行数对账（含清档重导出的新记账） ----
 	svc.WaitThumbsDone()
 	svc.WaitScansDone()
 	var rows int
@@ -148,10 +178,10 @@ func TestSmokeAssetsThumbsEndToEnd(t *testing.T) {
 		t.Fatalf("查询记账表失败: %v", err)
 	}
 	if rows != 10 {
-		t.Errorf("thumb_cache 行数 = %d，期望 10（5 页 × 2 档）", rows)
+		t.Errorf("thumb_cache 行数 = %d，期望 10（5 页 × 2 档，清档重导出后重新记满）", rows)
 	}
 
-	// ---- 7. D3 核心断言：导图并存后用户文档仍可读 ----
+	// ---- 8. D3 核心断言：导图并存后用户文档仍可读 ----
 	if err := doc.verifyAlive(); err != nil {
 		t.Errorf("导出完成后用户文档不可读（并存破坏）: %v", err)
 	}
@@ -396,6 +426,54 @@ func smokeWaitPNGCount(t *testing.T, thumbsDir string, want int, deadline time.D
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("%v 内 PNG 未达 %d 张", deadline, want)
+}
+
+// smokeFirstPNGDims 读目录下首个 PNG 的像素尺寸（IHDR 头：宽高各 4 字节大端，
+// 偏移 16/20——显式尺寸精确生效的端到端证据源）。
+func smokeFirstPNGDims(dir string) (w, h int, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".png" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return 0, 0, err
+		}
+		if len(data) < 24 || string(data[:4]) != "\x89PNG" {
+			return 0, 0, fmt.Errorf("%s 非 PNG 数据", e.Name())
+		}
+		return int(binary.BigEndian.Uint32(data[16:20])), int(binary.BigEndian.Uint32(data[20:24])), nil
+	}
+	return 0, 0, os.ErrNotExist
+}
+
+// smokeWaitSmallPNGWidth 轮询等待小图目录 PNG 数达标且首个 PNG 宽度等于期望值
+//（分辨率变更重导出就绪判定；冒烟工具允许轮询等待）。
+func smokeWaitSmallPNGWidth(dir string, wantCount, wantWidth int, deadline time.Duration) error {
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			n := 0
+			for _, e := range entries {
+				if filepath.Ext(e.Name()) == ".png" {
+					n++
+				}
+			}
+			if n >= wantCount {
+				w, _, derr := smokeFirstPNGDims(dir)
+				if derr == nil && w == wantWidth {
+					return nil
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("%v 内小图未达 %d 张或宽度未变为 %d", deadline, wantCount, wantWidth)
 }
 
 // smokeFileIDsByPath 库内文件 ID 映射（相对路径 → files.id）。

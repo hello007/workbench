@@ -5,7 +5,11 @@
      → 关键词/标签检索（SearchAssets，分页懒加载 + 同 PPT 聚合折叠）→ 文件级元数据
      编辑（UpdateAssetFileMeta 整体替换）→ 扫描/重建（StartAssetScan/RebuildAssetLibrary，
      进度经 assets-scan:* 事件推送、可取消；done 事件仅复位进度，数据刷新由扫描
-     Promise 成功分支统一执行防双拉取）。
+     Promise 成功分支统一执行防双拉取）。缩略图链路（PR3）：画廊卡片 tier=0 可视区
+     懒加载 + 详情侧边栏 tier=1 单张按需（AssetThumb 子组件封装），批量生成进度经
+     assets-thumbs:* 事件推送（progress 收集失败文件、done 复位并自增失效代次触发
+     miss 卡补图、error 仅复位不弹提示）、可取消；本机无 PowerPoint 时降级提示条
+     常驻、跳转入口隐藏。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
@@ -33,6 +37,7 @@
         <el-button size="small" @click="openCreateDialog">新建库</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onDeleteLibrary">删除库</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onRebuild">重建索引</el-button>
+        <el-button size="small" @click="openThumbSettings">缩略图设置</el-button>
         <el-button
           size="small"
           type="primary"
@@ -57,6 +62,24 @@
         {{ scanProgress.currentFile }}
       </span>
       <el-button size="small" text type="danger" @click="onCancelScan">取消扫描</el-button>
+    </div>
+
+    <!-- 缩略图生成进度条：仅批次生成中可见；与扫描进度条同层并存（各自 v-if、内容
+         不同）；进度载荷按库 ID 过滤（他库事件不串入），视觉复用扫描进度条模式 -->
+    <div v-if="thumbsRunning" class="scan-progress thumbs-progress">
+      <el-progress
+        class="scan-progress-bar"
+        :percentage="thumbsPercent"
+        :stroke-width="8"
+        :show-text="false"
+      />
+      <span class="scan-progress-text">
+        {{ thumbsProgress ? `生成缩略图 ${thumbsProgress.done}/${thumbsProgress.total}` : '正在准备生成缩略图…' }}
+      </span>
+      <span v-if="thumbsProgress && thumbsProgress.currentFile" class="scan-progress-file" :title="thumbsProgress.currentFile">
+        {{ thumbsProgress.currentFile }}
+      </span>
+      <el-button size="small" text type="danger" @click="onCancelThumbs">取消生成</el-button>
     </div>
 
     <!-- 搜索/筛选区：关键词（回车或按钮触发）+ 标签多选 + 视图切换 + 平铺开关 -->
@@ -113,6 +136,12 @@
       <span v-if="searchMode" class="stats-hit">命中 {{ searchTotal }} 条</span>
     </div>
 
+    <!-- 缩略图能力降级提示条：本机无 PowerPoint（探测不可用/探测失败）时常驻提示，
+         信息样式非 error 红——环境缺失属正常降级非故障 -->
+    <div v-if="hasLibrary && thumbsAvailable === false" class="thumbs-degrade-banner">
+      未检测到 PowerPoint，仅文本索引，缩略图与跳转不可用
+    </div>
+
     <!-- 主体：画廊网格 + 详情侧边栏 -->
     <div class="assets-body">
       <div ref="galleryRef" class="assets-gallery" @scroll="onGalleryScroll">
@@ -140,6 +169,15 @@
             :class="{ 'is-selected': isCardSelected(card), 'is-expandable': card.hitCount > 1 }"
             @click="onCardClick(card)"
           >
+            <!-- 缩略图：画廊一律 tier=0（small 档）可视区懒加载；文件卡取第 1 页封面 -->
+            <AssetThumb
+              :library-id="currentLibraryId"
+              :file-id="card.kind === 'file' ? card.id : card.fileId"
+              :slide-num="card.kind === 'slide' ? card.slideNum : 1"
+              :tier="0"
+              :epoch="thumbEpoch"
+              class="asset-card-thumb"
+            />
             <div class="asset-card-head">
               <el-tag size="small" :type="card.kind === 'file' ? 'primary' : 'success'">
                 {{ card.kind === 'file' ? '文件' : '幻灯片' }}
@@ -184,6 +222,25 @@
         <div class="detail-head">
           <span class="detail-title" :title="detailTitle">{{ detailTitle }}</span>
           <span class="detail-close" @click="closeDetail">&#10005;</span>
+        </div>
+
+        <!-- 高清大图：文件与幻灯片两形态共用区块；hd（tier=1）单张按需加载，
+             未生成时整块隐藏（hide-on-miss）不占位；失败标记按归属文件路径命中
+             批次失败集合显示重试入口 -->
+        <div class="detail-section detail-thumb-section">
+          <AssetThumb
+            :library-id="currentLibraryId"
+            :file-id="detailFileId"
+            :slide-num="detailSlideNum || 1"
+            :tier="1"
+            :epoch="thumbEpoch"
+            hide-on-miss
+            class="detail-thumb"
+          />
+          <div v-if="isDetailThumbFailed" class="detail-thumb-failed">
+            <el-alert type="warning" :closable="false" title="缩略图生成失败（超时/文件被占用/文件损坏）" />
+            <el-button size="small" text type="primary" :loading="retrying" @click="onRetryThumb">重试生成</el-button>
+          </div>
         </div>
 
         <!-- 文件详情 -->
@@ -264,6 +321,15 @@
             <span v-else class="detail-empty-hint">归属文件暂无标签</span>
           </div>
           <div class="detail-actions">
+            <!-- 打开跳转：仅本机 PowerPoint 可用时提供（降级态隐藏入口，与提示条联动） -->
+            <el-button
+              v-if="thumbsAvailable"
+              size="small"
+              type="primary"
+              plain
+              :loading="jumping"
+              @click="onJumpToSlide"
+            >打开并跳到此页</el-button>
             <el-button size="small" type="primary" plain @click="traceToSourceFile">查看归属文件</el-button>
           </div>
         </template>
@@ -291,11 +357,75 @@
         <el-button type="primary" :loading="creating" @click="onCreateLibrary">创建</el-button>
       </template>
     </el-dialog>
+
+    <!-- 缩略图设置弹窗：assets 段独立设置（分辨率变更后端自动清空对应档位缓存并
+         重新生成；上限变更后台自动 LRU 淘汰）。保存为整体提交：rawSettings 回填
+         assets 段，其余设置段原样保留 -->
+    <el-dialog
+      v-model="thumbSettingsVisible"
+      title="缩略图设置"
+      width="min(520px, 90vw)"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-form label-width="110px">
+        <el-form-item label="自动生成">
+          <el-switch v-model="thumbSettingsDraft.auto" />
+        </el-form-item>
+        <el-form-item label="小图分辨率">
+          <el-input-number
+            v-model="thumbSettingsDraft.smallWidth"
+            :min="120"
+            :max="800"
+            :step="40"
+            :value-on-clear="320"
+          />
+          <span class="settings-unit">px</span>
+        </el-form-item>
+        <el-form-item label="高清分辨率">
+          <el-input-number
+            v-model="thumbSettingsDraft.hdWidth"
+            :min="480"
+            :max="3840"
+            :step="160"
+            :value-on-clear="1600"
+          />
+          <span class="settings-unit">px</span>
+        </el-form-item>
+        <el-form-item label="小图缓存上限">
+          <el-input-number
+            v-model="thumbSettingsDraft.smallQuotaMB"
+            :min="64"
+            :max="8192"
+            :step="64"
+            :value-on-clear="1024"
+          />
+          <span class="settings-unit">MB</span>
+        </el-form-item>
+        <el-form-item label="高清缓存上限">
+          <el-input-number
+            v-model="thumbSettingsDraft.hdQuotaMB"
+            :min="64"
+            :max="8192"
+            :step="64"
+            :value-on-clear="1024"
+          />
+          <span class="settings-unit">MB</span>
+        </el-form-item>
+      </el-form>
+      <div class="thumb-settings-hint">
+        修改分辨率将清空对应档位缓存并自动重新生成；修改上限后后台自动淘汰最久未用的缩略图
+      </div>
+      <template #footer>
+        <el-button :disabled="thumbSettingsSaving" @click="thumbSettingsVisible = false">取消</el-button>
+        <el-button type="primary" :loading="thumbSettingsSaving" @click="onSaveThumbSettings">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ListAssetLibraries,
@@ -309,14 +439,31 @@ import {
   ListAssetSlides,
   UpdateAssetFileMeta,
   SearchAssets,
-  OpenDirectoryDialog
+  OpenDirectoryDialog,
+  AssetThumbsAvailable,
+  JumpToAssetSlide,
+  RetryAssetThumb,
+  CancelAssetThumbs,
+  GetSettings,
+  SaveSettings
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { handleError, ErrorCode } from '../utils/error'
 import AssetsIcon from './icons/AssetsIcon.vue'
+import AssetThumb from './AssetThumb.vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
+
+// ---- 缩略图设置默认值（与后端 model.AssetThumbsSettings 默认一致；老配置 assets
+// 段缺失/字段零值时逐字段回退，防 el-input-number 绑到 undefined/null 脏值）----
+const THUMB_SETTINGS_DEFAULTS = {
+  auto: true,
+  smallWidth: 320,
+  hdWidth: 1600,
+  smallQuotaMB: 1024,
+  hdQuotaMB: 1024
+}
 
 // ---- 异步写回守卫（跨库串入防护，参照 useCommandPalette searchVersion 模式）----
 // librarySeq：库数据代次，库切换落定 / 扫描刷新（resetAndReloadView）时自增；
@@ -356,6 +503,22 @@ const savingMeta = ref(false)
 const scanning = ref(false)
 const scanProgress = ref(null) // assets-scan:progress 载荷 {libraryId, done, total, currentFile}
 
+// ---- 缩略图状态（assets-thumbs:*）----
+const thumbsAvailable = ref(null) // null=探测中，false=降级（提示条常驻），true=可用
+const thumbsRunning = ref(false)
+const thumbsProgress = ref(null) // assets-thumbs:progress 载荷 {libraryId, done, total, currentFile, failed}
+const thumbEpoch = ref(0) // 失效代次：done 事件自增，触发 miss 缩略图自动补图
+const failedThumbPaths = ref([]) // 批次内失败文件相对路径集合（数组当 Set 用，避免响应式 Set 兼容问题）
+let lastThumbsFailedCount = 0 // 上次 progress 的累计失败数（非响应式，仅增量比对）
+const jumping = ref(false)
+const retrying = ref(false)
+
+// ---- 缩略图设置弹窗 ----
+const thumbSettingsVisible = ref(false)
+const thumbSettingsSaving = ref(false)
+const thumbSettingsDraft = ref({ ...THUMB_SETTINGS_DEFAULTS })
+const rawSettings = ref(null) // GetSettings 返回的完整设置对象（保存时回填 assets 段整体提交，避免覆盖其他设置段）
+
 // ---- 聚合展开态 ----
 const expandedAggPaths = ref([]) // 已展开聚合条目的文件路径集合
 const aggChildren = ref({}) // 文件路径 -> 展开的逐页命中卡片
@@ -378,6 +541,22 @@ const searchMode = computed(() => activeKeyword.value.trim() !== '' || selectedT
 const scanPercent = computed(() => {
   if (!scanProgress.value || !scanProgress.value.total) return 0
   return Math.round((scanProgress.value.done / scanProgress.value.total) * 100)
+})
+
+const thumbsPercent = computed(() => {
+  if (!thumbsProgress.value || !thumbsProgress.value.total) return 0
+  return Math.round((thumbsProgress.value.done / thumbsProgress.value.total) * 100)
+})
+
+// 切库复位缩略图运行态：done/error 事件按 libraryId 过滤，批次运行中切库后旧库
+// 终态事件不会命中新语境——不复位则进度条在新库页面永挂，且「取消生成」打到新库
+// 恒返 false 与可见进度条自相矛盾。失败集合为旧库相对路径口径，一并清空防误归因
+// （切回原库后由下一批 progress/done 重新收集，重试链路可恢复）。
+watch(currentLibraryId, () => {
+  thumbsRunning.value = false
+  thumbsProgress.value = null
+  lastThumbsFailedCount = 0
+  failedThumbPaths.value = []
 })
 
 // 标签选项：后端未提供独立标签列表接口，从当前库文件底册聚合去重
@@ -468,6 +647,23 @@ const detailSlideNotes = computed(() => selected.value?.slideEntry?.speakerNotes
 const detailSlideSnippet = computed(() => selected.value?.hit?.snippet || '')
 // 幻灯片标签为继承口径（本批幻灯片无自有标签），只读展示不提供编辑
 const detailTags = computed(() => selected.value?.slideEntry?.tags || selected.value?.hit?.tags || [])
+
+// 详情条目对应的文件 ID 兜底链：文件详情取底册 id，幻灯片/检索命中取 fileId
+//（缩略图缓存键以 files.id 为准，0 = 无底册记录不发请求）
+const detailFileId = computed(
+  () => selected.value?.fileEntry?.id ?? selected.value?.slideEntry?.fileId ?? selected.value?.hit?.fileId ?? 0
+)
+
+// 缩略图失败标记/重试/跳转的路径口径：文件详情取底册 path，幻灯片/检索命中取 filePath
+const detailThumbPath = computed(
+  () => selected.value?.fileEntry?.path ?? selected.value?.slideEntry?.filePath ?? selected.value?.hit?.filePath ?? ''
+)
+
+// 当前详情条目的缩略图是否在本批次生成失败（按归属文件路径命中失败集合）
+const isDetailThumbFailed = computed(() => {
+  const path = detailThumbPath.value
+  return !!path && failedThumbPaths.value.includes(path)
+})
 
 // ---- 索引状态展示映射（对齐 model/assets.go 状态机取值）----
 const statusLabel = (status) => ({
@@ -1045,6 +1241,112 @@ const scanResultSummary = (prefix, result) => {
 // 防双路径各拉一次全量清单）；语义与库切换落定一致
 const refreshAfterScan = () => resetAndReloadView()
 
+// ================= 缩略图生成 / 跳转 / 设置 =================
+
+// 素材绝对路径拼接：根路径去尾斜杠 + '/' + 相对路径（相对路径保持正斜杠形态直接拼）
+const joinAssetPath = (rootPath, relPath) => {
+  const root = (rootPath || '').replace(/[\\/]+$/, '')
+  if (!root) return relPath || ''
+  if (!relPath) return root
+  return `${root}/${relPath}`
+}
+
+const onCancelThumbs = async () => {
+  if (!hasLibrary.value) return
+  try {
+    const requested = await CancelAssetThumbs(currentLibraryId.value)
+    if (requested) {
+      ElMessage.info('已请求取消缩略图生成')
+    } else {
+      ElMessage.warning('当前没有可取消的生成任务')
+    }
+  } catch (error) {
+    handleError('取消缩略图生成失败: ', error)
+  }
+}
+
+// 失败缩略图重新入队（后台重新生成，done 事件经 epoch 自增驱动 miss 卡自动补图）
+const onRetryThumb = async () => {
+  if (!hasLibrary.value || retrying.value) return
+  const path = detailThumbPath.value
+  if (!detailFileId.value || !path) return
+  retrying.value = true
+  try {
+    await RetryAssetThumb(currentLibraryId.value, detailFileId.value, path)
+    ElMessage.success('已重新入队生成')
+  } catch (error) {
+    handleError('重试缩略图生成失败: ', error)
+  } finally {
+    retrying.value = false
+  }
+}
+
+// 打开 PPT 并跳到当前幻灯片页（后端 COM 打开；成功不弹提示——PPT 窗口已打开，
+// 弹窗反而抢焦点；BUSY 预期拒绝经 handleError 自动分流 warning 可重试）
+const onJumpToSlide = async () => {
+  if (!hasLibrary.value || jumping.value) return
+  const path = detailThumbPath.value
+  const slideNum = detailSlideNum.value
+  if (!path || !slideNum) return
+  jumping.value = true
+  try {
+    const absPath = joinAssetPath(currentLibrary.value?.rootPath, path)
+    await JumpToAssetSlide(absPath, slideNum)
+  } catch (error) {
+    handleError('打开跳转失败: ', error)
+  } finally {
+    jumping.value = false
+  }
+}
+
+// 打开设置弹窗：先以默认值填充草稿（防上一次脏值闪烁），再异步拉取当前设置回填。
+// 基底先行置 null：上次打开的旧基底不可复用（期间设置可能已变），拉取失败保持
+// null 由保存侧拦截（空壳整体提交会清掉其他设置段）
+const openThumbSettings = async () => {
+  thumbSettingsDraft.value = { ...THUMB_SETTINGS_DEFAULTS }
+  rawSettings.value = null
+  thumbSettingsVisible.value = true
+  try {
+    const settings = await GetSettings()
+    rawSettings.value = settings || null
+    thumbSettingsDraft.value = normalizeThumbSettings(rawSettings.value?.assets)
+  } catch (error) {
+    // 拉取失败保留默认草稿可继续编辑，保存时经基底缺失拦截提示重开
+    handleError('加载设置失败: ', error)
+  }
+}
+
+// assets 段归一化：缺失/字段零值逐字段回退默认（老配置无 assets 段场景）
+const normalizeThumbSettings = (assets) => ({
+  auto: typeof assets?.auto === 'boolean' ? assets.auto : THUMB_SETTINGS_DEFAULTS.auto,
+  smallWidth: assets?.smallWidth > 0 ? assets.smallWidth : THUMB_SETTINGS_DEFAULTS.smallWidth,
+  hdWidth: assets?.hdWidth > 0 ? assets.hdWidth : THUMB_SETTINGS_DEFAULTS.hdWidth,
+  smallQuotaMB: assets?.smallQuotaMB > 0 ? assets.smallQuotaMB : THUMB_SETTINGS_DEFAULTS.smallQuotaMB,
+  hdQuotaMB: assets?.hdQuotaMB > 0 ? assets.hdQuotaMB : THUMB_SETTINGS_DEFAULTS.hdQuotaMB
+})
+
+const onSaveThumbSettings = async () => {
+  // 基底缺失禁止保存：SaveSettings 整体替换语义下，仅含 assets 段的空壳提交会
+  // 清掉 defaultShell/themeMode/快捷键等全部其他段（后端 Ensure 仅补 webServe/
+  // terminal/assets 三段）。提示重开弹窗重拉完整基底。
+  if (!rawSettings.value) {
+    ElMessage.warning('设置加载失败，请关闭后重新打开设置')
+    return
+  }
+  thumbSettingsSaving.value = true
+  try {
+    // 回填 assets 段整体提交：其余设置段原样保留（SaveSettings 整体替换语义）
+    rawSettings.value.assets = { ...thumbSettingsDraft.value }
+    await SaveSettings(rawSettings.value)
+    ElMessage.success('缩略图设置已保存，分辨率变更将自动重新生成')
+    thumbSettingsVisible.value = false
+  } catch (error) {
+    handleError('保存设置失败: ', error)
+  } finally {
+    thumbSettingsSaving.value = false
+  }
+}
+
 // ================= 扫描事件（assets-scan:*）=================
 // EventsOn 返回注销闭包，onBeforeUnmount 精准注销本组件监听器（禁 EventsOff 全局移除）
 let offProgress = null
@@ -1070,11 +1372,64 @@ const onScanError = (payload) => {
   scanProgress.value = null
 }
 
+// ================= 缩略图事件（assets-thumbs:*）=================
+// EventsOn 返回注销闭包，onBeforeUnmount 精准注销本组件监听器（禁 EventsOff 全局移除）
+let offThumbsProgress = null
+let offThumbsDone = null
+let offThumbsError = null
+
+const onThumbsProgress = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  thumbsRunning.value = true
+  thumbsProgress.value = payload
+  // 失败收集：failed 为批次内累计失败数，增量大于上次时当前文件即新失败文件
+  //（后端串行队列，failed 递增时刻的 currentFile 即刚失败文件）
+  if (payload.failed > lastThumbsFailedCount && payload.currentFile) {
+    if (!failedThumbPaths.value.includes(payload.currentFile)) {
+      failedThumbPaths.value = failedThumbPaths.value.concat(payload.currentFile)
+    }
+    lastThumbsFailedCount = payload.failed
+  }
+}
+
+const onThumbsDone = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  thumbsRunning.value = false
+  thumbsProgress.value = null
+  lastThumbsFailedCount = 0
+  // 失败集合为内存态，批次结束即清（PRD 认可：失败标记只覆盖当前批次语境）
+  failedThumbPaths.value = []
+  // 失效代次自增：触发 miss 缩略图卡自动补图
+  thumbEpoch.value++
+}
+
+const onThumbsError = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  // 契约：仅复位进度不弹提示（错误详情后端 slog 已记录；防与 Promise catch 双弹）
+  thumbsRunning.value = false
+  thumbsProgress.value = null
+}
+
+// 探测本机 PowerPoint 缩略图能力：失败（含绑定缺失等同步抛错场景）按降级处理，
+// 不弹错、提示条常驻引导；await + try/catch 保证同步异常同样被降级吸收（.catch()
+// 链只能捕获 rejected promise，捕获不了调用本身的同步 throw，会炸挂载链）
+const probeThumbsAvailable = async () => {
+  try {
+    thumbsAvailable.value = await AssetThumbsAvailable()
+  } catch {
+    thumbsAvailable.value = false
+  }
+}
+
 onMounted(() => {
   // 先注册事件监听再异步加载数据：保证卸载路径必能拿到全部 off 闭包
   offProgress = EventsOn('assets-scan:progress', onScanProgress)
   offDone = EventsOn('assets-scan:done', onScanDone)
   offError = EventsOn('assets-scan:error', onScanError)
+  offThumbsProgress = EventsOn('assets-thumbs:progress', onThumbsProgress)
+  offThumbsDone = EventsOn('assets-thumbs:done', onThumbsDone)
+  offThumbsError = EventsOn('assets-thumbs:error', onThumbsError)
+  probeThumbsAvailable()
   loadLibraries()
 })
 
@@ -1082,9 +1437,15 @@ onBeforeUnmount(() => {
   offProgress && offProgress()
   offDone && offDone()
   offError && offError()
+  offThumbsProgress && offThumbsProgress()
+  offThumbsDone && offThumbsDone()
+  offThumbsError && offThumbsError()
   offProgress = null
   offDone = null
   offError = null
+  offThumbsProgress = null
+  offThumbsDone = null
+  offThumbsError = null
 })
 
 defineExpose({ loadLibraries, refreshAfterScan })
@@ -1210,6 +1571,16 @@ defineExpose({ loadLibraries, refreshAfterScan })
 .stats-hit {
   color: var(--primary-color);
   font-weight: 500;
+}
+
+/* ---- 缩略图能力降级提示条（信息样式：环境缺失属正常降级非故障，勿用 error 红）---- */
+.thumbs-degrade-banner {
+  flex-shrink: 0;
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 12px;
+  color: var(--info-color);
+  background: var(--primary-bg);
+  border-bottom: 1px solid var(--border-color);
 }
 
 /* ---- 主体：画廊 + 详情 ---- */
@@ -1511,5 +1882,27 @@ defineExpose({ loadLibraries, refreshAfterScan })
   padding: var(--spacing-md);
   display: flex;
   gap: var(--spacing-sm);
+}
+
+/* ---- 详情缩略图与失败标记 ---- */
+.detail-thumb-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+}
+
+/* ---- 缩略图设置弹窗 ---- */
+.thumb-settings-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  padding: 0 var(--spacing-md) var(--spacing-sm);
+}
+
+.settings-unit {
+  margin-left: var(--spacing-sm);
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 </style>
