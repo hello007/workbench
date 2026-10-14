@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/10-14-ppt-srs-2-2-3/prd.md", "reason": "本任务需求与七项已确认决策（Q1-Q6 含 B 档 GC）、验收标准、PR 拆分——实施唯一权威依据"}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分核心契约（最小编辑集/页序三跳映射/OPC Target 基准/字节删除/取消/事件）——PR1 B 档 GC 扩展删除集必须沿用其方法论，PR2 编排直接调 SplitPptxPerPageWithProgress"}
+{"file": "docs/spec/assets-management.md", "reason": "素材管理既有契约（SQLite 单连接自锁坑/FTS/扫描语义/isPptxSplitDerivative 排除/事件契约/迁移 user_version 递增）——split_records 表与扫描共存依据"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "缓存目录单点 assetThumbsDir 先例 + 补缺「文件存在唯一权威」双验先例 + 设置段模式——增量判定双验与 derived 目录设计参照"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处绑定同步规则 + 事件多组件共监听 EventsOn 闭包注销禁 EventsOff——新增 5 绑定与 assets-split:* 监听必读"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "AppServices 装配规则——assetsSplit 编排挂 AssetLibraryService 既有服务不新建，但 App 绑定 5 个新增须核对委托方法模式"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog + AppError 错误码三处同步 + 取消链路（registerCancel/unregisterCancel defer LIFO、E_GIT_CANCELLED 映射）——拆分取消复用依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖（禁 sleep/固定端口/mtime 时序，chan 交接、预取消 ctx 注入）——拆分取消与批量测试构造依据"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台分叉选型（_windows/_other 双文件、GOOS 分支判据）——openWithSystemHandler 已跨平台现成，GOOS=linux 编译 vet 绿须守住"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "原子写与临时文件序列——拆分输出原子写已有实现（CreateTemp+Sync+Rename），split_records 落盘沿用事务语义"}

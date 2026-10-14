@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-14-ppt-srs-2-2-3/prd.md", "reason": "验收标准核对唯一依据（GC 断言/排除一致性/覆盖率门禁/绑定三处同步）"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对拆分方法论红线：字节删除非 Encoder 重序列化、OPC Target 基准、页序三跳、fixture 程序化构造——B 档 GC 改动重点审查面"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 SQLite 单连接池纪律（rows Close 再查）、迁移 user_version 递增、isPptxSplitDerivative 单点不新增第二套判定"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核对缓存目录单点模式与「文件存在唯一权威」双验口径一致性"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步、EventsOn 闭包注销禁 EventsOff、具名 string 类型 models.ts 别名规则"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对取消链路（defer LIFO、E_GIT_CANCELLED 映射、注册表无残留）与错误码三处同步"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无 sleep/mtime 时序/固定端口隐式依赖，取消测试用预取消 ctx 驱动"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对前端面板 flex 约束链、语义色、四档间距、弹窗响应式尺寸分档（PR3 拆分弹窗）"}

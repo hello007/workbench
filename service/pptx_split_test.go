@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,13 +38,30 @@ type pptxFixtureSlide struct {
 	notes    bool     // 是否生成备注页（notesSlide 按展示页序编号）
 	jumpsTo  []string // 内部跳转目标 slide 文件名（跨页超链接/动作按钮形态），可指向自身
 	extLink  bool     // 是否带外部 URL 超链接关系（TargetMode=External，拆分必须保留）
+	layout   string   // 该页 rels 指向的版式文件名（空 = slideLayout1.xml）
+	noLayout bool     // 不生成版式关系（页 rels 缺版式跳的降级形态，驱动 GC 保守路径）
+}
+
+// pptxFixtureLayoutDef fixture 中一个版式的定义。
+type pptxFixtureLayoutDef struct {
+	part  string // ppt/slideLayouts/ 下的文件名
+	media string // 版式独占媒体文件名（ppt/media/ 下，版式 rels 指向；空 = 无）
+}
+
+// pptxFixtureMasterDef fixture 中一个母版的定义。
+type pptxFixtureMasterDef struct {
+	part    string                 // ppt/slideMasters/ 下的文件名
+	theme   string                 // ppt/theme/ 下的文件名（空 = 无主题关系）
+	layouts []pptxFixtureLayoutDef // 该母版 rels 指向的版式
 }
 
 // pptxFixture 拆分 fixture 的整体定义。
 type pptxFixture struct {
-	slides       []pptxFixtureSlide // 顺序即 sldIdLst 展示页序
-	withSections bool               // 是否生成 custShowLst 与根级 extLst（p14:sectionLst）
-	media        bool               // 是否生成 media 图片 part 并由第 1 页（展示序）引用
+	slides       []pptxFixtureSlide     // 顺序即 sldIdLst 展示页序
+	withSections bool                   // 是否生成 custShowLst 与根级 extLst（p14:sectionLst）
+	media        bool                   // 是否生成 media 图片 part 并由第 1 页（展示序）引用
+	masters      []pptxFixtureMasterDef // 母版/版式/主题清单；空 = 默认单母版形态（slideMaster1 + slideLayout1 + theme1）
+	orphanMedia  []string               // ppt/media/ 下无任何引用的媒体文件名（GC 孤儿剪除断言用）
 }
 
 // pptxFixtureBuild 构造产物：src 源文件路径；parts 为全部 part 原始字节
@@ -56,6 +72,16 @@ type pptxFixtureBuild struct {
 	order []string
 }
 
+// defaultPptxMasters 默认单母版形态（fx.masters 为空时的最低配，与历史 fixture
+// 字节一致的默认路径）。
+func defaultPptxMasters() []pptxFixtureMasterDef {
+	return []pptxFixtureMasterDef{{
+		part:    "slideMaster1.xml",
+		theme:   "theme1.xml",
+		layouts: []pptxFixtureLayoutDef{{part: "slideLayout1.xml"}},
+	}}
+}
+
 const pptxFixtureRootRels = pptxFixtureXMLDecl +
 	`<Relationships xmlns="` + testPackageRelsNS + `">` +
 	`<Relationship Id="rId1" Type="` + testOfficeRelNS + `/officeDocument" Target="ppt/presentation.xml"/>` +
@@ -64,18 +90,8 @@ const pptxFixtureRootRels = pptxFixtureXMLDecl +
 const pptxFixtureMasterXML = pptxFixtureXMLDecl +
 	`<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`
 
-const pptxFixtureMasterRels = pptxFixtureXMLDecl +
-	`<Relationships xmlns="` + testPackageRelsNS + `">` +
-	`<Relationship Id="rId1" Type="` + testOfficeRelNS + `/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>` +
-	`</Relationships>`
-
 const pptxFixtureLayoutXML = pptxFixtureXMLDecl +
 	`<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`
-
-const pptxFixtureLayoutRels = pptxFixtureXMLDecl +
-	`<Relationships xmlns="` + testPackageRelsNS + `">` +
-	`<Relationship Id="rId1" Type="` + testOfficeRelNS + `/slideMaster" Target="../slideMasters/slideMaster1.xml"/>` +
-	`</Relationships>`
 
 const pptxFixtureThemeXML = pptxFixtureXMLDecl +
 	`<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="主题 1"/>`
@@ -97,7 +113,7 @@ func pptxFixtureNotesSlideRels(slideFile string) string {
 }
 
 // pptxFixtureContentTypes 包内容类型声明：Default 按扩展名、Override 按 part 声明。
-func pptxFixtureContentTypes(slideFiles, notesFiles []string, withMedia bool) string {
+func pptxFixtureContentTypes(slideFiles, notesFiles []string, masters []pptxFixtureMasterDef, withMedia bool) string {
 	var b strings.Builder
 	b.WriteString(pptxFixtureXMLDecl)
 	b.WriteString(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`)
@@ -107,9 +123,15 @@ func pptxFixtureContentTypes(slideFiles, notesFiles []string, withMedia bool) st
 		b.WriteString(`<Default Extension="png" ContentType="image/png"/>`)
 	}
 	b.WriteString(`<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>`)
-	b.WriteString(`<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`)
-	b.WriteString(`<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>`)
-	b.WriteString(`<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`)
+	for _, m := range masters {
+		b.WriteString(`<Override PartName="/ppt/slideMasters/` + m.part + `" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`)
+		for _, l := range m.layouts {
+			b.WriteString(`<Override PartName="/ppt/slideLayouts/` + l.part + `" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>`)
+		}
+		if m.theme != "" {
+			b.WriteString(`<Override PartName="/ppt/theme/` + m.theme + `" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`)
+		}
+	}
 	for _, f := range slideFiles {
 		b.WriteString(`<Override PartName="/ppt/slides/` + f + `" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`)
 	}
@@ -120,13 +142,18 @@ func pptxFixtureContentTypes(slideFiles, notesFiles []string, withMedia bool) st
 	return b.String()
 }
 
-// pptxFixturePresentationXML presentation.xml：sldIdLst 页条目（页序权威来源），
-// withSections 时附 custShowLst（按页 rId 引用）与根级 extLst（p14:sectionLst 按数字 id 引用页）。
-func pptxFixturePresentationXML(rids []string, withSections bool) string {
+// pptxFixturePresentationXML presentation.xml：sldMasterIdLst 母版条目（rId1 起
+// 按母版顺序编号）+ sldIdLst 页条目（页序权威来源），withSections 时附 custShowLst
+// （按页 rId 引用）与根级 extLst（p14:sectionLst 按数字 id 引用页）。
+func pptxFixturePresentationXML(masterCount int, rids []string, withSections bool) string {
 	var b strings.Builder
 	b.WriteString(pptxFixtureXMLDecl)
 	b.WriteString(`<p:presentation xmlns:r="` + testOfficeRelNS + `" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main">`)
-	b.WriteString(`<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>`)
+	b.WriteString(`<p:sldMasterIdLst>`)
+	for i := 0; i < masterCount; i++ {
+		fmt.Fprintf(&b, `<p:sldMasterId id="%d" r:id="rId%d"/>`, 2147483648+i, i+1)
+	}
+	b.WriteString(`</p:sldMasterIdLst>`)
 	b.WriteString(`<p:sldIdLst>`)
 	for i, rid := range rids {
 		fmt.Fprintf(&b, `<p:sldId id="%d" r:id="%s"/>`, 256+i, rid)
@@ -150,26 +177,61 @@ func pptxFixturePresentationXML(rids []string, withSections bool) string {
 	return b.String()
 }
 
-// pptxFixturePresentationRels presentation.xml.rels：rId1 母版，rId2.. 按展示页序对应各 slide 文件。
-func pptxFixturePresentationRels(slideFiles []string) string {
+// pptxFixturePresentationRels presentation.xml.rels：rId1.. 按母版顺序对应各
+// slideMaster，其后 rId 按展示页序对应各 slide 文件。
+func pptxFixturePresentationRels(masterFiles, slideFiles []string) string {
 	var b strings.Builder
 	b.WriteString(pptxFixtureXMLDecl)
 	b.WriteString(`<Relationships xmlns="` + testPackageRelsNS + `">`)
-	b.WriteString(`<Relationship Id="rId1" Type="` + testOfficeRelNS + `/slideMaster" Target="slideMasters/slideMaster1.xml"/>`)
-	for i, f := range slideFiles {
-		fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s/slide" Target="slides/%s"/>`, i+2, testOfficeRelNS, f)
+	for i, m := range masterFiles {
+		fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s/slideMaster" Target="slideMasters/%s"/>`, i+1, testOfficeRelNS, m)
+	}
+	next := len(masterFiles) + 1
+	for _, f := range slideFiles {
+		fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s/slide" Target="slides/%s"/>`, next, testOfficeRelNS, f)
+		next++
 	}
 	b.WriteString(`</Relationships>`)
 	return b.String()
 }
 
-// pptxFixtureSlideRels 单页 rels：版式必带，备注页/内部跳转/外部链接/媒体按定义追加。
-func pptxFixtureSlideRels(notesFile string, jumpsTo []string, extLink, media bool) string {
+// pptxFixtureMasterRels 母版 rels：rId1.. 对应版式，其后为主题（如有）。
+func pptxFixtureMasterRels(m pptxFixtureMasterDef) string {
 	var b strings.Builder
 	b.WriteString(pptxFixtureXMLDecl)
 	b.WriteString(`<Relationships xmlns="` + testPackageRelsNS + `">`)
-	fmt.Fprintf(&b, `<Relationship Id="rId1" Type="%s/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`, testOfficeRelNS)
-	next := 2
+	next := 1
+	for _, l := range m.layouts {
+		fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s/slideLayout" Target="../slideLayouts/%s"/>`, next, testOfficeRelNS, l.part)
+		next++
+	}
+	if m.theme != "" {
+		fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s/theme" Target="../theme/%s"/>`, next, testOfficeRelNS, m.theme)
+	}
+	b.WriteString(`</Relationships>`)
+	return b.String()
+}
+
+// pptxFixtureLayoutRels 版式 rels：rId1 母版，rId2 独占媒体（如有）。
+func pptxFixtureLayoutRels(masterPart, mediaFile string) string {
+	var b strings.Builder
+	b.WriteString(pptxFixtureXMLDecl)
+	b.WriteString(`<Relationships xmlns="` + testPackageRelsNS + `">`)
+	fmt.Fprintf(&b, `<Relationship Id="rId1" Type="%s/slideMaster" Target="../slideMasters/%s"/>`, testOfficeRelNS, masterPart)
+	if mediaFile != "" {
+		fmt.Fprintf(&b, `<Relationship Id="rId2" Type="%s/image" Target="../media/%s"/>`, testOfficeRelNS, mediaFile)
+	}
+	b.WriteString(`</Relationships>`)
+	return b.String()
+}
+
+// pptxFixtureSlideRels 单页 rels：版式（layoutFile 空 = 不生成版式关系，驱动
+// GC 降级路径），备注页/内部跳转/外部链接/媒体按定义追加。
+func pptxFixtureSlideRels(layoutFile, notesFile string, jumpsTo []string, extLink, media bool) string {
+	var b strings.Builder
+	b.WriteString(pptxFixtureXMLDecl)
+	b.WriteString(`<Relationships xmlns="` + testPackageRelsNS + `">`)
+	next := 1
 	add := func(relType, target, mode string) {
 		if mode != "" {
 			fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s%s" Target="%s" TargetMode="%s"/>`, next, testOfficeRelNS, relType, target, mode)
@@ -177,6 +239,9 @@ func pptxFixtureSlideRels(notesFile string, jumpsTo []string, extLink, media boo
 			fmt.Fprintf(&b, `<Relationship Id="rId%d" Type="%s%s" Target="%s"/>`, next, testOfficeRelNS, relType, target)
 		}
 		next++
+	}
+	if layoutFile != "" {
+		add("/slideLayout", "../slideLayouts/"+layoutFile, "")
 	}
 	if notesFile != "" {
 		add("/notesSlide", "../notesSlides/"+notesFile, "")
@@ -197,6 +262,10 @@ func pptxFixtureSlideRels(notesFile string, jumpsTo []string, extLink, media boo
 // buildPptxFixture 按定义程序化构造 pptx 并写入 dir/name，返回构造产物。
 func buildPptxFixture(t *testing.T, dir, name string, fx pptxFixture) *pptxFixtureBuild {
 	t.Helper()
+	masters := fx.masters
+	if len(masters) == 0 {
+		masters = defaultPptxMasters()
+	}
 	slideFiles := make([]string, len(fx.slides))
 	notesFileByIndex := make(map[int]string)
 	var notesFiles []string
@@ -208,9 +277,14 @@ func buildPptxFixture(t *testing.T, dir, name string, fx pptxFixture) *pptxFixtu
 			notesFiles = append(notesFiles, n)
 		}
 	}
+	// rId 分配：母版 rId1..rIdM，页紧随其后（单母版形态与历史 fixture 起止一致）
+	masterFiles := make([]string, len(masters))
+	for i, m := range masters {
+		masterFiles[i] = m.part
+	}
 	rids := make([]string, len(fx.slides))
 	for i := range fx.slides {
-		rids[i] = fmt.Sprintf("rId%d", i+2)
+		rids[i] = fmt.Sprintf("rId%d", len(masters)+i+1)
 	}
 
 	built := &pptxFixtureBuild{parts: make(map[string][]byte)}
@@ -219,23 +293,39 @@ func buildPptxFixture(t *testing.T, dir, name string, fx pptxFixture) *pptxFixtu
 		built.order = append(built.order, part)
 	}
 
-	add(pptxContentTypesPart, pptxFixtureContentTypes(slideFiles, notesFiles, fx.media))
+	add(pptxContentTypesPart, pptxFixtureContentTypes(slideFiles, notesFiles, masters, fx.media || len(fx.orphanMedia) > 0))
 	add("_rels/.rels", pptxFixtureRootRels)
-	add(pptxPresentationPart, pptxFixturePresentationXML(rids, fx.withSections))
-	add(pptxPresentationRelsPart, pptxFixturePresentationRels(slideFiles))
-	add("ppt/slideMasters/slideMaster1.xml", pptxFixtureMasterXML)
-	add("ppt/slideMasters/_rels/slideMaster1.xml.rels", pptxFixtureMasterRels)
-	add("ppt/slideLayouts/slideLayout1.xml", pptxFixtureLayoutXML)
-	add("ppt/slideLayouts/_rels/slideLayout1.xml.rels", pptxFixtureLayoutRels)
-	add("ppt/theme/theme1.xml", pptxFixtureThemeXML)
+	add(pptxPresentationPart, pptxFixturePresentationXML(len(masters), rids, fx.withSections))
+	add(pptxPresentationRelsPart, pptxFixturePresentationRels(masterFiles, slideFiles))
+	for _, m := range masters {
+		add("ppt/slideMasters/"+m.part, pptxFixtureMasterXML)
+		add("ppt/slideMasters/_rels/"+m.part+".rels", pptxFixtureMasterRels(m))
+		for _, l := range m.layouts {
+			add("ppt/slideLayouts/"+l.part, pptxFixtureLayoutXML)
+			add("ppt/slideLayouts/_rels/"+l.part+".rels", pptxFixtureLayoutRels(m.part, l.media))
+			if l.media != "" {
+				add("ppt/media/"+l.media, string(pptxFixtureMediaBytes))
+			}
+		}
+		if m.theme != "" {
+			add("ppt/theme/"+m.theme, pptxFixtureThemeXML)
+		}
+	}
 	if fx.media {
 		add("ppt/media/image1.png", string(pptxFixtureMediaBytes))
 	}
+	for _, om := range fx.orphanMedia {
+		add("ppt/media/"+om, string(pptxFixtureMediaBytes))
+	}
 	for i, s := range fx.slides {
 		slidePart := "ppt/slides/" + s.fileName
+		layoutFile := s.layout
+		if layoutFile == "" && !s.noLayout {
+			layoutFile = masters[0].layouts[0].part
+		}
 		add(slidePart, pptxFixtureSlideXML(s.marker))
 		add("ppt/slides/_rels/"+s.fileName+".rels",
-			pptxFixtureSlideRels(notesFileByIndex[i], s.jumpsTo, s.extLink, fx.media && i == 0))
+			pptxFixtureSlideRels(layoutFile, notesFileByIndex[i], s.jumpsTo, s.extLink, fx.media && i == 0))
 		if n, ok := notesFileByIndex[i]; ok {
 			add("ppt/notesSlides/"+n, pptxFixtureNotesSlideXML)
 			add("ppt/notesSlides/_rels/"+n+".rels", pptxFixtureNotesSlideRels(s.fileName))
@@ -284,17 +374,6 @@ func mustZipPart(t *testing.T, r *zip.Reader, name string) []byte {
 	}
 	t.Fatalf("zip 内缺少 part：%s", name)
 	return nil
-}
-
-// relsSourcePart .rels 文件路径反推其关系源 part（包根 .rels 对应空路径）。
-func relsSourcePart(relsName string) string {
-	dir, base := path.Split(relsName)
-	sourceDir := strings.TrimSuffix(dir, "_rels/")
-	name := strings.TrimSuffix(base, ".rels")
-	if name == "" {
-		return sourceDir
-	}
-	return sourceDir + name
 }
 
 // assertSinglePageOutput 单页输出的通用断言面：
@@ -439,13 +518,14 @@ func TestSplitPptxPerPage_MultiPageShuffledFiles(t *testing.T) {
 	if result.PageCount != 3 || len(result.Files) != 3 {
 		t.Fatalf("应拆出 3 页，实际 PageCount=%d len(Files)=%d", result.PageCount, len(result.Files))
 	}
-	for i, wantName := range []string{"季度汇报-01.pptx", "季度汇报-02.pptx", "季度汇报-03.pptx"} {
+	for i, wantName := range []string{"季度汇报-001.pptx", "季度汇报-002.pptx", "季度汇报-003.pptx"} {
 		if result.Files[i] != filepath.Join(wantOutDir, wantName) {
 			t.Errorf("Files[%d] = %q, want %q", i, result.Files[i], filepath.Join(wantOutDir, wantName))
 		}
 	}
 
-	// 共享保留 part（三页输出中均应逐字节一致）
+	// 共享保留 part（三页输出中均应逐字节一致；媒体 image1.png 仅被展示第 1 页
+	// 引用——B 档 GC 下只出现在第 1 页输出，不进共享面）
 	sharedKept := map[string][]byte{
 		"_rels/.rels":                                  built.parts["_rels/.rels"],
 		"ppt/slideMasters/slideMaster1.xml":            built.parts["ppt/slideMasters/slideMaster1.xml"],
@@ -453,7 +533,6 @@ func TestSplitPptxPerPage_MultiPageShuffledFiles(t *testing.T) {
 		"ppt/slideLayouts/slideLayout1.xml":            built.parts["ppt/slideLayouts/slideLayout1.xml"],
 		"ppt/slideLayouts/_rels/slideLayout1.xml.rels": built.parts["ppt/slideLayouts/_rels/slideLayout1.xml.rels"],
 		"ppt/theme/theme1.xml":                         built.parts["ppt/theme/theme1.xml"],
-		"ppt/media/image1.png":                         built.parts["ppt/media/image1.png"],
 	}
 
 	// 第 1 页：保留 slide3.xml（sldIdLst 首位），其余页与其备注页删除
@@ -470,6 +549,7 @@ func TestSplitPptxPerPage_MultiPageShuffledFiles(t *testing.T) {
 		"ppt/slides/_rels/slide3.xml.rels":           built.parts["ppt/slides/_rels/slide3.xml.rels"],
 		"ppt/notesSlides/notesSlide1.xml":            built.parts["ppt/notesSlides/notesSlide1.xml"],
 		"ppt/notesSlides/_rels/notesSlide1.xml.rels": built.parts["ppt/notesSlides/_rels/notesSlide1.xml.rels"],
+		"ppt/media/image1.png":                       built.parts["ppt/media/image1.png"],
 	}
 	for k, v := range sharedKept {
 		page1Kept[k] = v
@@ -772,6 +852,203 @@ func TestSplitPptxPerPage_MissingPresentationPart(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "不是有效的 PowerPoint 演示文稿") {
 		t.Errorf("错误提示口径不符，实际：%v", err)
+	}
+}
+
+// TestSplitPptxPerPage_MultiMasterPrunesUnusedMasterChain B 档 GC 主用例：双母版
+// 各带独立版式与主题，页 1 属母版 1 链路——输出不携带母版 2 / 版式 2 / 主题 2
+// 及其 rels，sldMasterIdLst 剪至保留母版一条，presentation.xml.rels 无母版 2
+// 关系，保留链 part 逐字节一致，Content_Types 与关系表无悬空。
+func TestSplitPptxPerPage_MultiMasterPrunesUnusedMasterChain(t *testing.T) {
+	dir := t.TempDir()
+	built := buildPptxFixture(t, dir, "双母版.pptx", pptxFixture{
+		slides: []pptxFixtureSlide{
+			{fileName: "slide1.xml", marker: "母版一首页", layout: "slideLayout1.xml"},
+			{fileName: "slide2.xml", marker: "母版二页", layout: "slideLayout2.xml"},
+		},
+		masters: []pptxFixtureMasterDef{
+			{part: "slideMaster1.xml", theme: "theme1.xml", layouts: []pptxFixtureLayoutDef{{part: "slideLayout1.xml"}}},
+			{part: "slideMaster2.xml", theme: "theme2.xml", layouts: []pptxFixtureLayoutDef{{part: "slideLayout2.xml"}}},
+		},
+	})
+
+	result, err := SplitPptxPerPage(context.Background(), built.src)
+	if err != nil {
+		t.Fatalf("SplitPptxPerPage: %v", err)
+	}
+	if len(result.Files) != 2 {
+		t.Fatalf("应拆出 2 页，实际 %d", len(result.Files))
+	}
+
+	zr, err := zip.OpenReader(result.Files[0])
+	if err != nil {
+		t.Fatalf("打开输出: %v", err)
+	}
+	defer zr.Close()
+	names := make(map[string]bool)
+	for _, f := range zr.Reader.File {
+		names[f.Name] = true
+	}
+	for _, gone := range []string{
+		"ppt/slideMasters/slideMaster2.xml",
+		"ppt/slideMasters/_rels/slideMaster2.xml.rels",
+		"ppt/slideLayouts/slideLayout2.xml",
+		"ppt/slideLayouts/_rels/slideLayout2.xml.rels",
+		"ppt/theme/theme2.xml",
+	} {
+		if names[gone] {
+			t.Errorf("母版 1 链路输出不应携带 %s", gone)
+		}
+	}
+	presBytes := mustZipPart(t, &zr.Reader, pptxPresentationPart)
+	var meta pptxPresentationMeta
+	if err := xml.Unmarshal(presBytes, &meta); err != nil {
+		t.Fatalf("presentation.xml 解析: %v", err)
+	}
+	if len(meta.SldMasterIdLst.SldMasterIds) != 1 || meta.SldMasterIdLst.SldMasterIds[0].RID != "rId1" {
+		t.Errorf("sldMasterIdLst 应剪至保留母版 rId1 一条，实际 %+v", meta.SldMasterIdLst.SldMasterIds)
+	}
+	presRels := mustZipPart(t, &zr.Reader, pptxPresentationRelsPart)
+	if bytes.Contains(presRels, []byte("slideMaster2.xml")) {
+		t.Error("presentation.xml.rels 不应残留母版 2 关系")
+	}
+	masterRels := mustZipPart(t, &zr.Reader, "ppt/slideMasters/_rels/slideMaster1.xml.rels")
+	if !bytes.Contains(masterRels, []byte("slideLayout1.xml")) {
+		t.Error("保留母版 rels 应保留版式 1 关系")
+	}
+	for _, part := range []string{
+		"ppt/slideMasters/slideMaster1.xml",
+		"ppt/slideMasters/_rels/slideMaster1.xml.rels",
+		"ppt/slideLayouts/slideLayout1.xml",
+		"ppt/theme/theme1.xml",
+	} {
+		if got, want := mustZipPart(t, &zr.Reader, part), built.parts[part]; !bytes.Equal(got, want) {
+			t.Errorf("保留链 part %s 应逐字节一致", part)
+		}
+	}
+}
+
+// TestSplitPptxPerPage_OrphanMediaDropped 孤儿媒体剪除：无任何关系引用的媒体
+// part 不出现在任何单页输出中（其余页独占媒体随页删除同理，此处单测直接形态）。
+func TestSplitPptxPerPage_OrphanMediaDropped(t *testing.T) {
+	dir := t.TempDir()
+	built := buildPptxFixture(t, dir, "孤儿媒体.pptx", pptxFixture{
+		slides: []pptxFixtureSlide{
+			{fileName: "slide1.xml", marker: "首页内容"},
+			{fileName: "slide2.xml", marker: "次页内容"},
+		},
+		media:       true,
+		orphanMedia: []string{"image9.png", "image10.png"},
+	})
+
+	result, err := SplitPptxPerPage(context.Background(), built.src)
+	if err != nil {
+		t.Fatalf("SplitPptxPerPage: %v", err)
+	}
+	for _, out := range result.Files {
+		zr, err := zip.OpenReader(out)
+		if err != nil {
+			t.Fatalf("打开输出 %s: %v", filepath.Base(out), err)
+		}
+		for _, f := range zr.Reader.File {
+			if f.Name == "ppt/media/image9.png" || f.Name == "ppt/media/image10.png" {
+				t.Errorf("%s 不应携带孤儿媒体 %s", filepath.Base(out), f.Name)
+			}
+		}
+		zr.Close()
+	}
+}
+
+// TestSplitPptxPerPage_SiblingLayoutPrunedWithItsMedia 保留母版的未用版式剪除：
+// 同母版下页 1 用版式 1、版式 2 未被任何页使用且独占媒体——输出无版式 2 及其
+// 媒体，保留母版 rels 不再引用版式 2（悬挂关系联动清理）。
+func TestSplitPptxPerPage_SiblingLayoutPrunedWithItsMedia(t *testing.T) {
+	dir := t.TempDir()
+	built := buildPptxFixture(t, dir, "未用版式.pptx", pptxFixture{
+		slides: []pptxFixtureSlide{
+			{fileName: "slide1.xml", marker: "首页内容"},
+			{fileName: "slide2.xml", marker: "次页内容"},
+		},
+		masters: []pptxFixtureMasterDef{{
+			part:  "slideMaster1.xml",
+			theme: "theme1.xml",
+			layouts: []pptxFixtureLayoutDef{
+				{part: "slideLayout1.xml"},
+				{part: "slideLayout2.xml", media: "image5.png"},
+			},
+		}},
+	})
+
+	result, err := SplitPptxPerPage(context.Background(), built.src)
+	if err != nil {
+		t.Fatalf("SplitPptxPerPage: %v", err)
+	}
+
+	zr, err := zip.OpenReader(result.Files[0])
+	if err != nil {
+		t.Fatalf("打开输出: %v", err)
+	}
+	defer zr.Close()
+	names := make(map[string]bool)
+	for _, f := range zr.Reader.File {
+		names[f.Name] = true
+	}
+	for _, gone := range []string{
+		"ppt/slideLayouts/slideLayout2.xml",
+		"ppt/slideLayouts/_rels/slideLayout2.xml.rels",
+		"ppt/media/image5.png",
+	} {
+		if names[gone] {
+			t.Errorf("未用版式链路 %s 不应出现在输出中", gone)
+		}
+	}
+	masterRels := mustZipPart(t, &zr.Reader, "ppt/slideMasters/_rels/slideMaster1.xml.rels")
+	if bytes.Contains(masterRels, []byte("slideLayout2.xml")) {
+		t.Error("保留母版 rels 不应残留被剪版式关系")
+	}
+	if _, err := os.Stat(built.src); err != nil {
+		t.Errorf("源文件不应被改动: %v", err)
+	}
+}
+
+// TestSplitPptxPerPage_ChainUnresolvedKeepsAllParts GC 保守降级：页 rels 缺版式
+// 关系（链路首跳断裂）时整段 GC 关闭——母版/版式/主题全保留（旧行为），仅删
+// 页与备注页，输出合法无悬空。
+func TestSplitPptxPerPage_ChainUnresolvedKeepsAllParts(t *testing.T) {
+	dir := t.TempDir()
+	built := buildPptxFixture(t, dir, "降级形态.pptx", pptxFixture{
+		slides: []pptxFixtureSlide{
+			{fileName: "slide1.xml", marker: "首页内容", noLayout: true},
+			{fileName: "slide2.xml", marker: "次页内容", noLayout: true},
+		},
+		masters: []pptxFixtureMasterDef{
+			{part: "slideMaster1.xml", theme: "theme1.xml", layouts: []pptxFixtureLayoutDef{{part: "slideLayout1.xml"}}},
+			{part: "slideMaster2.xml", theme: "theme2.xml", layouts: []pptxFixtureLayoutDef{{part: "slideLayout2.xml"}}},
+		},
+	})
+
+	result, err := SplitPptxPerPage(context.Background(), built.src)
+	if err != nil {
+		t.Fatalf("SplitPptxPerPage: %v", err)
+	}
+
+	zr, err := zip.OpenReader(result.Files[0])
+	if err != nil {
+		t.Fatalf("打开输出: %v", err)
+	}
+	defer zr.Close()
+	names := make(map[string]bool)
+	for _, f := range zr.Reader.File {
+		names[f.Name] = true
+	}
+	for _, kept := range []string{
+		"ppt/slideMasters/slideMaster1.xml", "ppt/slideMasters/slideMaster2.xml",
+		"ppt/slideLayouts/slideLayout1.xml", "ppt/slideLayouts/slideLayout2.xml",
+		"ppt/theme/theme1.xml", "ppt/theme/theme2.xml",
+	} {
+		if !names[kept] {
+			t.Errorf("GC 降级形态应保留 %s", kept)
+		}
 	}
 }
 

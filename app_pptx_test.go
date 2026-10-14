@@ -88,8 +88,8 @@ func TestApp_SplitPptxPerPage_Delegates(t *testing.T) {
 	if got.PageCount != 1 || len(got.Files) != 1 {
 		t.Fatalf("应拆出 1 页，实际 PageCount=%d len(Files)=%d", got.PageCount, len(got.Files))
 	}
-	if got.Files[0] != filepath.Join(wantOutDir, "委托拆分-01.pptx") {
-		t.Errorf("Files[0] = %q, want %q", got.Files[0], filepath.Join(wantOutDir, "委托拆分-01.pptx"))
+	if got.Files[0] != filepath.Join(wantOutDir, "委托拆分-001.pptx") {
+		t.Errorf("Files[0] = %q, want %q", got.Files[0], filepath.Join(wantOutDir, "委托拆分-001.pptx"))
 	}
 	if _, err := os.Stat(got.Files[0]); err != nil {
 		t.Errorf("输出文件应存在: %v", err)

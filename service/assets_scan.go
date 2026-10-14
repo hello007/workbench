@@ -26,9 +26,10 @@ import (
 
 // PPT 拆分派生副本排除（PRD：派生产物不入索引，防与源文件重复入库）。拆分输出
 // 布局见 service/pptx_split.go SplitPptxPerPage：源 <dir>/<name>.pptx 的产物落
-// <dir>/<name>/<name>-<两位页序号>.pptx（同名文件夹 + 同名-页序命名，页序 %02d
-// 对 ≥100 页输出三位数字）。仅排除严格符合该布局的文件；用户自组织的「同名目录/
-// 同名-数字.pptx」与拆分产物同构不可区分，同样被排除（防重优先的取舍）。
+// <dir>/<name>/<name>-<页序号>.pptx（同名文件夹 + 同名-页序命名，页序 %03d 固定
+// 三位，本判定只验数字不限位数，两位/三位通吃）。仅排除严格符合该布局的文件；
+// 用户自组织的「同名目录/同名-数字.pptx」与拆分产物同构不可区分，同样被排除
+// （防重优先的取舍）。
 func isPptxSplitDerivative(rel string) bool {
 	parentBase := path.Base(path.Dir(rel))
 	if parentBase == "." {

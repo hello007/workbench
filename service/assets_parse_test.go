@@ -96,7 +96,7 @@ func buildAssetsPptx(t *testing.T, dir, name string, specs []assetsSlideSpec) st
 			notesFiles = append(notesFiles, fmt.Sprintf("notesSlide%d.xml", i+1))
 		}
 	}
-	add(pptxContentTypesPart, pptxFixtureContentTypes(slideFiles, notesFiles, false))
+	add(pptxContentTypesPart, pptxFixtureContentTypes(slideFiles, notesFiles, defaultPptxMasters(), false))
 	add("_rels/.rels", pptxFixtureRootRels)
 
 	// presentation.xml：sldIdLst 页条目（页序权威来源）
@@ -122,9 +122,9 @@ func buildAssetsPptx(t *testing.T, dir, name string, specs []assetsSlideSpec) st
 	add(pptxPresentationRelsPart, relsB.String())
 
 	add("ppt/slideMasters/slideMaster1.xml", pptxFixtureMasterXML)
-	add("ppt/slideMasters/_rels/slideMaster1.xml.rels", pptxFixtureMasterRels)
+	add("ppt/slideMasters/_rels/slideMaster1.xml.rels", pptxFixtureMasterRels(defaultPptxMasters()[0]))
 	add("ppt/slideLayouts/slideLayout1.xml", pptxFixtureLayoutXML)
-	add("ppt/slideLayouts/_rels/slideLayout1.xml.rels", pptxFixtureLayoutRels)
+	add("ppt/slideLayouts/_rels/slideLayout1.xml.rels", pptxFixtureLayoutRels("slideMaster1.xml", ""))
 	add("ppt/theme/theme1.xml", pptxFixtureThemeXML)
 
 	for i, spec := range specs {
