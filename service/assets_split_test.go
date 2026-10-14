@@ -532,6 +532,77 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	}
 }
 
+// TestAssetSplit_SourceDirResplitKeepsForeignFiles 源目录落点重拆清旧页的破坏面
+// 收口：落点目录与用户自建内容共享，重拆仅删产物命名形态（<源名主干>-<纯数字>.
+// pptx）文件——用户自建文件（说明.txt）与同名非产物文件（<源名>-草稿.pptx，
+// 页序段非数字）必须保留；旧页产物（页数减少的越界页）照常收敛。derived 落点
+// 为应用自属目录不受影响（保持整目录清空，TestAssetSplit_HashChangedResplits-
+// CleansOld 已覆盖）。
+func TestAssetSplit_SourceDirResplitKeepsForeignFiles(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "源目录重拆库", dir)
+	src := buildAssetsPptx(t, dir, "讲义.pptx", []assetsSlideSpec{
+		{titlePh: "一", body: []string{"内容"}},
+		{titlePh: "二", body: []string{"内容"}},
+		{titlePh: "三", body: []string{"内容"}},
+	})
+	mustScanLibrary(t, svc, lib.ID)
+
+	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", true); err != nil {
+		t.Fatalf("首次拆分: %v", err)
+	}
+	outDir := filepath.Join(dir, "讲义")
+	// 用户自建内容：普通文件 + 文件名主干相同但页序段非数字的同名异构 pptx
+	note := filepath.Join(outDir, "说明.txt")
+	draft := filepath.Join(outDir, "讲义-草稿.pptx")
+	if err := os.WriteFile(note, []byte("用户笔记，拆分不得删除"), 0644); err != nil {
+		t.Fatalf("放置用户文件: %v", err)
+	}
+	if err := os.WriteFile(draft, []byte("draft"), 0644); err != nil {
+		t.Fatalf("放置草稿文件: %v", err)
+	}
+
+	// 源文件 3 页 → 2 页 + 库存 hash 同步更新（确定性驱动重拆，不依赖 mtime 时序）
+	buildAssetsPptx(t, dir, "讲义.pptx", []assetsSlideSpec{
+		{titlePh: "新一", body: []string{"内容"}},
+		{titlePh: "新二", body: []string{"内容"}},
+	})
+	newHash, err := hashFileSHA256(src)
+	if err != nil {
+		t.Fatalf("算新哈希: %v", err)
+	}
+	store := svc.openStoreForTest(t, lib.ID)
+	if _, err := store.db.Exec("UPDATE files SET hash = ? WHERE path = ?", newHash, "讲义.pptx"); err != nil {
+		t.Fatalf("更新库存哈希: %v", err)
+	}
+
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", true)
+	if err != nil {
+		t.Fatalf("源目录落点重拆: %v", err)
+	}
+	if res.Skipped || res.PageCount != 2 {
+		t.Fatalf("重拆应产出 2 页：%+v", res)
+	}
+	// 旧页产物收敛（页数减少的 003 不残留），新产物在位
+	if _, err := os.Stat(filepath.Join(outDir, "讲义-003.pptx")); !os.IsNotExist(err) {
+		t.Errorf("页数减少后旧页产物应收敛，err=%v", err)
+	}
+	for _, page := range []string{"讲义-001.pptx", "讲义-002.pptx"} {
+		if _, err := os.Stat(filepath.Join(outDir, page)); err != nil {
+			t.Errorf("新产物 %s 应存在: %v", page, err)
+		}
+	}
+	// 用户自建内容原样保留（P1 修复面：逐文件删除不误伤）
+	gotNote, err := os.ReadFile(note)
+	if err != nil || string(gotNote) != "用户笔记，拆分不得删除" {
+		t.Errorf("用户自建文件应原样保留（err=%v, content=%q）", err, gotNote)
+	}
+	if got, err := os.ReadFile(draft); err != nil || string(got) != "draft" {
+		t.Errorf("同名非产物文件（页序段非数字）应原样保留（err=%v, content=%q）", err, got)
+	}
+}
+
 // ---------- 库级批量 ----------
 
 // TestAssetSplit_BatchIsolation 批量异常隔离：ok 快照 3 文件其一在扫描后损坏 →
@@ -709,6 +780,86 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 	}
 	if !found {
 		t.Error("取消应发 assets-split:error 事件")
+	}
+}
+
+// TestAssetLibrary_ShutdownCancelsInFlightSplit 关停收口链（CancelAllSplits →
+// WaitSplitsDone）：在途拆分（阻塞型核心 fake）被取消且 WaitSplitsDone 等待拆分
+// 退出后才返回——返回顺序以共享序录断言（batch 先于 wait；无拆分计数时 Wait 会
+// 先返回，顺序翻转即暴露）；拆分返回 E_ASSETS_CANCELLED、注册表无残留；无在途
+// 拆分时 WaitSplitsDone 立即返回。chan 交接驱动，禁 sleep 时序。
+func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "关停拆分库", dir)
+	buildAssetsPptx(t, dir, "甲.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	buildAssetsPptx(t, dir, "乙.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	mustScanLibrary(t, svc, lib.ID)
+
+	blocker := &blockingSplitCore{started: make(chan struct{}), release: make(chan struct{})}
+	svc.splitCoreFn = blocker.split
+
+	var orderMu sync.Mutex
+	var order []string
+	record := func(stage string) {
+		orderMu.Lock()
+		order = append(order, stage)
+		orderMu.Unlock()
+	}
+
+	batchDone := make(chan error, 1)
+	go func() {
+		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
+		record("batch")
+		batchDone <- err
+	}()
+	<-blocker.started
+
+	waitDone := make(chan struct{})
+	go func() {
+		svc.CancelAllSplits()
+		svc.WaitSplitsDone()
+		record("wait")
+		close(waitDone)
+	}()
+
+	// 放行阻塞：核心在 ctx 取消后返回取消错误 → 批量中止退出 → splitWG 归零 →
+	// WaitSplitsDone 返回。返回顺序必须 batch 先于 wait（等待真实 join 在途拆分）
+	close(blocker.release)
+	var appErr *model.AppError
+	select {
+	case err := <-batchDone:
+		if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
+			t.Fatalf("关停取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("关停取消后批量未返回")
+	}
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CancelAllSplits 后 WaitSplitsDone 未返回")
+	}
+	orderMu.Lock()
+	gotOrder := append([]string(nil), order...)
+	orderMu.Unlock()
+	if len(gotOrder) != 2 || gotOrder[0] != "batch" || gotOrder[1] != "wait" {
+		t.Errorf("WaitSplitsDone 应等待拆分退出后返回（顺序 [batch wait]），实际 %v", gotOrder)
+	}
+	if svc.CancelAssetSplit(lib.ID) {
+		t.Error("关停收口后注册表应无残留")
+	}
+
+	// 无在途拆分：WaitSplitsDone 立即返回（计数归零不阻塞）
+	immediate := make(chan struct{})
+	go func() {
+		svc.WaitSplitsDone()
+		close(immediate)
+	}()
+	select {
+	case <-immediate:
+	case <-time.After(2 * time.Second):
+		t.Fatal("无在途拆分时 WaitSplitsDone 未立即返回")
 	}
 }
 

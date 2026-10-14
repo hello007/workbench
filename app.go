@@ -97,11 +97,14 @@ func (a *App) shutdown(context.Context) {
 		a.chatSvc.CloseAll()
 	}
 	if a.assetsSvc != nil {
-		// 先通知在途扫描/缩略图批次取消并等待退出，再关库连接（顺序颠倒会让
-		// 扫描写已关连接，产生成片 sql: database is closed 噪音）；缩略图收口
-		// 额外清理自启 PowerPoint COM 进程残留
+		// 先通知在途扫描/缩略图批次/在途拆分取消并等待退出，再关库连接（顺序颠倒
+		// 会让扫描/拆分写已关连接，产生成片 sql: database is closed 噪音）；缩略图
+		// 收口额外清理自启 PowerPoint COM 进程残留。拆分收口取消先于等待（取消
+		// 检查点在文件间，等待可收敛）
 		a.assetsSvc.WaitScansDone()
 		a.assetsSvc.WaitThumbsDone()
+		a.assetsSvc.CancelAllSplits()
+		a.assetsSvc.WaitSplitsDone()
 		a.assetsSvc.CloseAll()
 	}
 	// 正常退出清除异常标记（崩溃/强杀时不会走到这里，flag 残留供下次启动检测）

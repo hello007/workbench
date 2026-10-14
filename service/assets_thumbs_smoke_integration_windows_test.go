@@ -452,7 +452,7 @@ func smokeFirstPNGDims(dir string) (w, h int, err error) {
 }
 
 // smokeWaitSmallPNGWidth 轮询等待小图目录 PNG 数达标且首个 PNG 宽度等于期望值
-//（分辨率变更重导出就绪判定；冒烟工具允许轮询等待）。
+// （分辨率变更重导出就绪判定；冒烟工具允许轮询等待）。
 func smokeWaitSmallPNGWidth(dir string, wantCount, wantWidth int, deadline time.Duration) error {
 	end := time.Now().Add(deadline)
 	for time.Now().Before(end) {

@@ -113,6 +113,11 @@ func (s *AssetLibraryService) SplitAssetFile(ctx context.Context, libraryID, rel
 	entry := s.registerSplitCancel(libraryID, cancel)
 	defer s.unregisterSplitCancel(libraryID, entry)
 
+	// 在途拆分计数：WaitSplitsDone（关停收口）以此等待全部拆分退出，防 CloseAll
+	// 关连接后拆分继续写 split_records（对齐 scanWG 模式）
+	s.splitWG.Add(1)
+	defer s.splitWG.Done()
+
 	store, err := s.storeForScan(libraryID)
 	if err != nil {
 		return model.AssetSplitResult{}, err
@@ -181,6 +186,11 @@ func (s *AssetLibraryService) SplitAssetLibrary(ctx context.Context, libraryID s
 	defer cancel()
 	entry := s.registerSplitCancel(libraryID, cancel)
 	defer s.unregisterSplitCancel(libraryID, entry)
+
+	// 在途拆分计数：WaitSplitsDone（关停收口）以此等待全部拆分退出（对齐
+	// scanWG 模式，见 SplitAssetFile 同款注释）
+	s.splitWG.Add(1)
+	defer s.splitWG.Done()
 
 	store, err := s.storeForScan(libraryID)
 	if err != nil {
@@ -288,9 +298,13 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		}, nil
 	}
 
-	// 4. 重拆清旧页（PRD：防页数减少残留 + 旧 %02d 产物收敛）。删除失败仅告警
-	//    继续拆（同名单文件覆盖写幂等，残留由下次重拆收敛）
-	if err := os.RemoveAll(outDir); err != nil {
+	// 4. 重拆清旧页（PRD：防页数减少残留 + 旧 %02d 产物收敛）。derived 落点是
+	//    应用自属目录（data/assets/<id>/derived），整目录清空安全；源目录落点与
+	//    用户自建目录共享，按产物命名形态逐文件删除（其余内容一律不动）。删除
+	//    失败仅告警继续拆（同名单文件覆盖写幂等，残留由下次重拆收敛）
+	if outputToSourceDir {
+		removeSplitArtifacts(outDir, baseName)
+	} else if err := os.RemoveAll(outDir); err != nil {
 		Logger().Warn("清空拆分产物目录失败（覆盖写继续，残留由下次重拆收敛）",
 			"libraryId", lib.ID, "dir", outDir, "err", err)
 	}
@@ -495,6 +509,42 @@ func splitSourceBaseName(rel string) string {
 // 顺序写盘，001 恒存在；手删产物目录时「记录命中」误判已拆被本检查兜住）。
 func splitFirstPagePath(outputDir, baseName string) string {
 	return filepath.Join(outputDir, fmt.Sprintf("%s-%03d.pptx", baseName, 1))
+}
+
+// removeSplitArtifacts 源目录落点的重拆清旧页：仅删除匹配产物命名形态
+// `<源名主干>-<纯数字>.pptx` 的文件（页序段纯数字、不限位数——旧 %02d 产物与
+// 越界页一并收敛，口径与 isPptxSplitDerivative 的数字判定一致），目录内其余
+// 内容（用户自建文件、`<源名>-草稿.pptx` 等同名异构文件、子目录）一律不动。
+// 目录不存在（首次拆分）或不可读时静默返回——无旧页可清，覆盖写继续。
+func removeSplitArtifacts(dir, baseName string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := baseName + "-"
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".pptx") {
+			continue
+		}
+		seq := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".pptx")
+		if seq == "" || !isAllDigits(seq) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			Logger().Warn("删除旧拆分产物失败（覆盖写继续）", "dir", dir, "file", name, "err", err)
+		}
+	}
+}
+
+// isAllDigits 非空纯数字串判定（重拆清旧页的页序段口径）。
+func isAllDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // splitOutputDir 落点解析（PRD Q4 落点契约，见文件头注释布局说明）：

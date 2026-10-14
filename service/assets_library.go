@@ -52,6 +52,8 @@ type AssetLibraryService struct {
 
 	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
 
+	splitWG sync.WaitGroup // 在途拆分计数（拆分入口增减，对齐 scanWG），WaitSplitsDone 关停收口等待
+
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
 
 	// splitCoreFn 拆分核心注入点（nil = 生产实现 SplitPptxPerPageWithProgress，
@@ -394,9 +396,33 @@ func (s *AssetLibraryService) WaitScansDone() {
 	s.scanWG.Wait()
 }
 
+// CancelAllSplits 取消全部在途拆分（App.shutdown 关停收口，先于 WaitSplitsDone）：
+// 快照拆分取消注册表逐个触发 CancelFunc（拆分在文件间检查点感知 ctx 取消后收尾，
+// 等待可收敛）。与 WaitScansDone 分立：拆分注册表（splitCancels）键空间独立，
+// CancelScan 不得误杀拆分，关停收口亦各自归属；只取消不等待，等待由
+// WaitSplitsDone 承担（取消先于等待，对齐 WaitScansDone 内部两步顺序）。
+func (s *AssetLibraryService) CancelAllSplits() {
+	s.opMu.Lock()
+	entries := make([]*cancelEntry, 0, len(s.splitCancels))
+	for _, entry := range s.splitCancels {
+		entries = append(entries, entry)
+	}
+	s.opMu.Unlock()
+	for _, entry := range entries {
+		entry.cancel()
+	}
+}
+
+// WaitSplitsDone 等待全部在途拆分退出（App.shutdown 关停收口，CancelAllSplits
+// 之后、CloseAll 之前调用）：无在途拆分立即返回；等待上界 = 剩余单文件拆分时长
+// （取消检查点在文件间、单文件内不中断——与 WaitScansDone 的单文件解析上界同口径）。
+func (s *AssetLibraryService) WaitSplitsDone() {
+	s.splitWG.Wait()
+}
+
 // CloseAll 关闭全部已打开的库连接（App.shutdown 关停期调用；库删除路径经
-// DeleteLibrary 单独收口）。调用方须先经 WaitScansDone 排空在途扫描，防扫描
-// 写已关连接。
+// DeleteLibrary 单独收口）。调用方须先经 WaitScansDone 排空在途扫描、经
+// CancelAllSplits + WaitSplitsDone 排空在途拆分，防扫描/拆分写已关连接。
 func (s *AssetLibraryService) CloseAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
