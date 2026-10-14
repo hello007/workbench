@@ -26,6 +26,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -478,6 +479,13 @@ func (w *comWorkerState) exportSession(spec thumbFileSpec, thumbsDir string, tie
 	app, err := w.ensureApp()
 	if err != nil {
 		return 0, err
+	}
+	// 档位目录预建（幂等）：Slide.Export 不自建父目录，目标目录缺失时 E_FAIL
+	// （「发生意外」无定位信息——真机冒烟实测抓出，探针预建目录曾掩蔽）
+	for _, tier := range tiers {
+		if err := os.MkdirAll(filepath.Join(thumbsDir, tier.Key), 0o755); err != nil {
+			return 0, fmt.Errorf("创建缩略图目录失败（%s）: %w", tier.Key, err)
+		}
 	}
 	pres, reused, err := w.findOrOpen(app, spec.AbsPath, msoTrue, msoFalse)
 	if err != nil {

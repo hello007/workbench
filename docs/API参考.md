@@ -39,7 +39,7 @@
 | 设置 | 2 | `app_settings.go` |
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
-| 素材管理 | 11 | `app_assets.go` |
+| 素材管理 | 15 | `app_assets.go` |
 
 > 既有缺口（与本表总数差 18）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域及部分域的行内计数为历史遗留未登记项，方法总数以 `App.d.ts` 为准，待另案补齐。
 
@@ -491,6 +491,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `ListAssetSlides` | `(libraryID, limit, offset) => Promise<AssetSlidePage>` | 幻灯片索引条目分页（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准；limit ≤0 取 50 上限 200、offset<0 按 0，total 恒为总条目数） | AssetSlidePage |
 | `UpdateAssetFileMeta` | `(libraryID, fileID, meta: AssetFileMetaUpdate) => Promise<void>` | 文件级元数据编辑（整体替换：星级 0-5（0 清除）、备注、标签集（不存在的标签自动创建并分配默认色）） | — |
 | `SearchAssets` | `(libraryID, keyword, opts: AssetSearchOptions) => Promise<AssetSearchPage>` | 素材检索：关键词全文检索（bm25 列加权 文件名 > 幻灯片标题 > 页文本 > 备注，CJK 按字切分 phrase 匹配）与标签筛选（文件直接绑定、幻灯片继承归属文件）可组合；`flatten=false` 同 PPT 多页命中折叠为聚合条目 | AssetSearchPage |
+
+| `AssetThumbsAvailable` | `() => Promise<boolean>` | 探测本机 PowerPoint COM 可用性（前端降级依据：false 时画廊提示条常驻 + 跳转入口隐藏） | boolean |
+| `JumpToAssetSlide` | `(absPath, slideNum) => Promise<void>` | 打开 PPT 并跳到指定页（PowerPoint COM；批量生成在途时经页间插队执行；无 PowerPoint 报 `E_ASSETS_THUMBS_UNAVAILABLE`，排队/执行超时报 `E_ASSETS_THUMBS_BUSY`） | — |
+| `CancelAssetThumbs` | `(libraryID) => Promise<boolean>` | 取消指定库的缩略图批量生成（幂等，无在途批次返回 false） | boolean |
+| `GetAssetThumb` | `(libraryID, fileID, slideNum, tierIndex) => Promise<string>` | 读取单页缩略图 PNG（base64 标准编码裸串；tierIndex 0=small 画廊卡片 1=hd 详情大图；未生成/已淘汰返回空串非错误，前端回退占位卡；消费契约：直接拼 data URL，禁 decodeBase64Utf8 禁裸 atob） | string |
 
 ---
 

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -128,7 +130,8 @@ var errThumbsUnavailable = model.NewAppError(model.ErrCodeAssetsThumbsUnavailabl
 // thumbQueue 缩略图串行队列（全局单实例，挂 AssetLibraryService 生命周期）。
 type thumbQueue struct {
 	exporter ThumbExporter
-	sinkFn   func() EventSink // 事件出口（复用宿主 AssetLibraryService 的 sinkHolder，防双出口漂移）
+	sinkFn   func() EventSink  // 事件出口（复用宿主 AssetLibraryService 的 sinkHolder，防双出口漂移）
+	ledger   *thumbCacheLedger // 记账 ledger（生成成功后记账 + 页数缩减对账，assets_thumbs_ledger.go）
 
 	batchCh chan *thumbBatchTask   // 容量 thumbBatchQueueCap，多库并发入队不阻塞
 	jumpCh  chan *thumbJumpRequest // 无缓冲：交接即被消费（worker 空闲直收 / 批量在途由 preempt 页间摘取），提交阻塞等消费方消除时序竞态
@@ -145,11 +148,12 @@ type thumbQueue struct {
 const thumbBatchQueueCap = 8
 
 // newThumbQueue 构造队列（exporter 由 newThumbExporter 平台分叉注入，sinkFn
-// 取宿主 AssetLibraryService.eventSink）。
-func newThumbQueue(exp ThumbExporter, sinkFn func() EventSink) *thumbQueue {
+// 取宿主 AssetLibraryService.eventSink，ledger 为记账出口）。
+func newThumbQueue(exp ThumbExporter, sinkFn func() EventSink, ledger *thumbCacheLedger) *thumbQueue {
 	return &thumbQueue{
 		exporter: exp,
 		sinkFn:   sinkFn,
+		ledger:   ledger,
 		batchCh:  make(chan *thumbBatchTask, thumbBatchQueueCap),
 		jumpCh:   make(chan *thumbJumpRequest),
 		quit:     make(chan struct{}),
@@ -254,7 +258,21 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 		switch {
 		case err == nil:
 			generated++
-			_ = n // 页数供日志与 PR2 记账使用
+			// 记账 + 页数缩减对账（仅成功路径——失败文件旧图仍有效，内容失效
+			// 已由扫描失效联动处理）。记账粒度：逐档逐页 Stat 成功才记账（PNG
+			// 缺失的页留给下次补缺链路重导出）。
+			if q.ledger != nil {
+				for _, tier := range thumbTiers {
+					for page := 1; page <= n; page++ {
+						if info, statErr := os.Stat(thumbPNGPath(b.ThumbsDir, tier.Key, f.FileID, page)); statErr == nil {
+							q.ledger.record(b.LibraryID, f.FileID, tier.Key, page, info.Size())
+						}
+					}
+					// 页数缩减对账（20 页 → 15 页清越界记账与旧图；文件级导出
+					// 全量覆盖写幂等，越界页不覆盖须显式清）
+					q.ledger.pruneBeyond(b.LibraryID, b.ThumbsDir, f.FileID, tier.Key, n)
+				}
+			}
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			// 批次取消（用户/关停）：中断剩余文件；单文件超时（DeadlineExceeded
 			// 且批次未取消）不应走到这里——exporter 超时自兜底返回非 ctx 错误
@@ -322,7 +340,9 @@ func (s *AssetLibraryService) EnqueueAssetThumbs(libraryID string, files []thumb
 	select {
 	case q.batchCh <- b:
 	default:
-		// 队列满（异常形态：8 库并发扫描）：放弃入队并清理注册项
+		// 队列满（异常形态：8 库并发扫描）：放弃入队并清理注册项，补发 error
+		// 事件（载荷 {libraryId, message}，沿用 assets-scan:error 契约——前端不弹
+		// 提示仅复位，防与调用方错误处理双弹）
 		cancel()
 		q.mu.Lock()
 		if cur, ok := q.batches[libraryID]; ok && cur == b {
@@ -330,6 +350,9 @@ func (s *AssetLibraryService) EnqueueAssetThumbs(libraryID string, files []thumb
 		}
 		q.mu.Unlock()
 		Logger().Warn("缩略图批次入队被拒（队列满）", "libraryId", libraryID, "files", len(files))
+		emitEvent(s.eventSink(), "assets-thumbs:error", map[string]any{
+			"libraryId": libraryID, "message": "缩略图生成队列已满，本次批次未入队",
+		})
 	}
 }
 
@@ -402,7 +425,8 @@ func (s *AssetLibraryService) CancelAssetThumbs(libraryID string) bool {
 }
 
 // WaitThumbsDone 关停收口（App.shutdown 内 WaitScansDone 之后调用）：取消全部
-// 待处理/在途批次，等 worker 退出，再收口 exporter（杀自启 powerpnt 残留）。
+// 待处理/在途批次，等 worker 退出，再收口 exporter（杀自启 powerpnt 残留）与
+// 记账 ledger（同步 flush 全库攒批——此刻库连接仍开着，CloseAll 在其后）。
 // 关闭后队列拒绝新任务（closed 标志）。
 func (s *AssetLibraryService) WaitThumbsDone() {
 	q := s.thumbQ
@@ -428,4 +452,51 @@ func (s *AssetLibraryService) WaitThumbsDone() {
 	close(q.quit)
 	q.wg.Wait()
 	q.exporter.Shutdown()
+	// 记账 ledger 关停：flush 全部有 dirty 的库后停 flusher（幂等，重复调用
+	// 直接返回）。必须在库连接 CloseAll 之前——flush 需要活连接。
+	s.thumbLedger.Shutdown()
+}
+
+// assetThumbsDir 库缩略图根目录单点（data/assets/<library-id>/thumbs，双档子目录
+// small/、hd/）。所有 thumbsDir 来源统一走本方法：队列任务、ledger dirFn、失效
+// 联动删文件、读取 API，防路径口径漂移。
+func (s *AssetLibraryService) assetThumbsDir(libraryID string) string {
+	return filepath.Join(s.assetsDir, libraryID, "thumbs")
+}
+
+// GetAssetThumb 读取单页缩略图 PNG（base64 标准编码裸串）。
+//
+// tierIndex：0=small（画廊卡片）1=hd（详情大图），非法值返回错误；未生成/已淘汰
+// 返回 ("", nil)——非错误，前端回退占位卡。命中即 ledger.record 记账 touch（LRU
+// 新鲜度，攒批落盘零同步写）。
+//
+// PR3 前端消费契约：返回值直接拼 data URL（`data:image/png;base64,<返回串>`），
+// 禁 decodeBase64Utf8（文本专用，PNG 二进制会被双重编码破坏）禁裸 atob。
+//
+// 量级口径（PR3 接入约束）：hd 档 1600px 单张约 1-3MB、base64 再 +33%，经 Wails
+// JSON 桥单次传输数 MB 级——仅详情大图单张按需调用；画廊卡片一律 small 档
+// （320px 约 30-150KB），分页 50 张懒加载单屏峰值约 5MB，禁画廊直拉 hd 档。
+func (s *AssetLibraryService) GetAssetThumb(libraryID string, fileID int64, slideNum, tierIndex int) (string, error) {
+	if _, err := s.getLibrary(libraryID); err != nil {
+		return "", err
+	}
+	if tierIndex < 0 || tierIndex >= len(thumbTiers) {
+		return "", fmt.Errorf("缩略图档位非法（tierIndex=%d，取值 0-%d）", tierIndex, len(thumbTiers)-1)
+	}
+	if slideNum < 1 {
+		return "", fmt.Errorf("页序非法（slideNum=%d，从 1 计）", slideNum)
+	}
+	if fileID < 1 {
+		return "", fmt.Errorf("文件 ID 非法（fileId=%d）", fileID)
+	}
+	path := thumbPNGPath(s.assetThumbsDir(libraryID), thumbTiers[tierIndex].Key, fileID, slideNum)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil // 未生成/已淘汰：前端回退占位卡
+		}
+		return "", fmt.Errorf("读取缩略图失败: %w", err)
+	}
+	s.thumbLedger.record(libraryID, fileID, thumbTiers[tierIndex].Key, slideNum, int64(len(data)))
+	return base64.StdEncoding.EncodeToString(data), nil
 }

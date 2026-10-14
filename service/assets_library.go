@@ -48,7 +48,8 @@ type AssetLibraryService struct {
 
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
 
-	thumbQ *thumbQueue // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
+	thumbQ      *thumbQueue       // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
+	thumbLedger *thumbCacheLedger // 缩略图记账 ledger（assets_thumbs_ledger.go，LRU 记账 + 失效 + 配额淘汰）
 }
 
 // ErrAssetsCancelled 素材扫描被用户取消（对齐 ErrOperationCancelled 模式）。
@@ -82,8 +83,24 @@ func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibrary
 		open:      make(map[string]*assetsStore),
 	}
 	s.SetEventSink(NewWailsEventSink(ctx))
-	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink)
+	// 先建 ledger（storeFn/dirFn 注入宿主方法），再建 queue（传 ledger）——
+	// flusher goroutine 由首次 record 惰性启动（对齐 thumbQueue.start 模式）
+	s.thumbLedger = newThumbCacheLedger(s.storeForThumbs, s.assetThumbsDir)
+	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink, s.thumbLedger)
 	return s
+}
+
+// storeForThumbs 缩略图记账落盘专用连接获取：锁内先验库注册在册再取缓存连接
+// （单次持锁完成校验与打开，防「校验通过→放锁→删库→重新拿锁惰性建库」窗口
+// 重建已删库的孤儿 db——对齐 runLibraryScan 锁内复验的坑）。返回后 db 操作在
+// 锁外执行（ledger flushLibrary 已保证）。
+func (s *AssetLibraryService) storeForThumbs(libraryID string) (*assetsStore, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.getLibraryLocked(libraryID); err != nil {
+		return nil, err
+	}
+	return s.storeForLocked(libraryID)
 }
 
 // CreateLibrary 新建素材库：登记注册表并预建索引库文件（schema 初始化前移，
@@ -177,10 +194,18 @@ func (s *AssetLibraryService) getLibraryLocked(libraryID string) (model.AssetLib
 	return model.AssetLibrary{}, errAssetLibraryNotFound
 }
 
-// DeleteLibrary 删除素材库：关连接 → 删 db 文件（含 WAL/SHM 伴生文件）→
-// 删注册表项（原子落盘）。标签体系随库文件删除天然隔离，无需逐表清理。
+// DeleteLibrary 删除素材库：取消缩略图批次 → 关连接 → 删 db 文件（含 WAL/SHM
+// 伴生文件）→ 删缩略图目录 → 清记账 dirty → 删注册表项（原子落盘）。标签体系
+// 随库文件删除天然隔离，无需逐表清理。
 // 在途扫描保护：库正在扫描时拒绝删除（warning 引导稍后再试），防扫描写已关连接。
 func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
+	// 缩略图批次取消（进入删除前）：缩小「worker 向已删目录写 PNG」窗口。取消
+	// 异步不等待——在途单文件（最长单文件超时）仍可能经 MkdirAll 重建空 tier
+	// 目录并残留少量 PNG（已删库 ID 下不进任何清理链路），量级可手动清理，注释
+	// 口径为「缩小窗口 + 残留可手动清理」而非完全防止。CancelFunc 幂等，无在途
+	// 批次无害。
+	s.CancelAssetThumbs(libraryID)
+
 	// 在途扫描保护：tryLockScan 与扫描互斥（锁被占用 = 库正在扫描，互斥拒绝）
 	release, err := s.tryLockScan(libraryID)
 	if err != nil {
@@ -218,6 +243,13 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 			return fmt.Errorf("删除素材索引库文件失败: %w", err)
 		}
 	}
+	// 删缩略图目录（库已删，目录该删；失败仅告警不阻断注册表删除——db 已删
+	// 不会再生，残留目录可手动清理）
+	if err := os.RemoveAll(s.assetThumbsDir(libraryID)); err != nil {
+		Logger().Warn("删除缩略图目录失败（残留可手动清理）", "libraryId", libraryID, "err", err)
+	}
+	// 清记账 dirty（防 flusher 经 storeForThumbs 惰性重建孤儿 db 的第二道收口）
+	s.thumbLedger.dropLibrary(libraryID)
 
 	s.libs = append(s.libs[:index], s.libs[index+1:]...)
 	return s.saveRegistryLocked()

@@ -103,3 +103,11 @@ func (a *App) JumpToAssetSlide(absPath string, slideNum int) error {
 func (a *App) CancelAssetThumbs(libraryID string) bool {
 	return a.assetsSvc.CancelAssetThumbs(libraryID)
 }
+
+// GetAssetThumb 读取单页缩略图 PNG（base64 标准编码裸串）。tierIndex：0=small
+// （画廊卡片）1=hd（详情大图）；未生成/已淘汰返回空串（非错误，前端回退占位卡）。
+// 前端消费契约：返回值直接拼 data URL（`data:image/png;base64,<返回串>`），
+// 禁 decodeBase64Utf8（文本专用）禁裸 atob（PR3 画廊接入时遵守）。
+func (a *App) GetAssetThumb(libraryID string, fileID int64, slideNum, tierIndex int) (string, error) {
+	return a.assetsSvc.GetAssetThumb(libraryID, fileID, slideNum, tierIndex)
+}

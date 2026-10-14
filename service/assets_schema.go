@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 2
+const assetsSchemaVersion = 3
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -99,6 +99,32 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
 );
 `
 
+// assetsSchemaV3SQL v3 迁移：缩略图记账表（LRU 淘汰 + 失效联动的事实源）。
+//
+// 设计要点（docs/spec/assets-thumbs-com.md 缓存键契约 + 任务 10-14-ppt-com
+// research/lru-thumbnail-cache.md）：
+//   - 主键 = file_id + tier + page：缓存键锚定 files.id（重解析仅 UPDATE 同行，
+//     稳定不变）；slides.id 为 AUTOINCREMENT 删旧插新、每轮重解析全变，禁作键。
+//   - 外键 ON DELETE CASCADE 删文件时级联清记账（兜底），代码在删除/重解析链路
+//     仍显式 DELETE（双保险：单连接池 + WAL 下级联触发时机不受控，显式删除保证
+//     记账与 PNG 文件同批收口）。
+//   - last_access_ns 为 LRU 依据：NTFS atime 落盘延迟最多 1 小时且受系统策略与
+//     第三方读流量影响（research §1.2），不可作持久化记账依据，应用层自记访问时间；
+//     idx_thumb_cache_access 支撑淘汰游标按最旧优先扫描。
+//   - 新表空启动：无 Go 层回填（存量库无缩略图，首次扫描后由记账链路自然填充）。
+const assetsSchemaV3SQL = `
+CREATE TABLE IF NOT EXISTS thumb_cache (
+    file_id        INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    tier           TEXT    NOT NULL,
+    page           INTEGER NOT NULL,
+    bytes          INTEGER NOT NULL DEFAULT 0,
+    last_access_ns INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (file_id, tier, page)
+);
+
+CREATE INDEX IF NOT EXISTS idx_thumb_cache_access ON thumb_cache(tier, last_access_ns);
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -106,6 +132,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
 var assetsMigrations = map[int]string{
 	1: assetsSchemaSQL,
 	2: assetsSchemaV2SQL,
+	3: assetsSchemaV3SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

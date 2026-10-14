@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,7 +150,134 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 		"unchanged", result.Unchanged, "failed", result.Failed,
 		"encrypted", result.Encrypted, "denied", result.Denied, "removed", result.Removed)
 	s.emitCurrent("assets-scan:done", map[string]any{"libraryId": libraryID, "result": result})
+	// 扫描完成自动入队缩略图补缺（本函数运行于扫描 goroutine，且 scanWG 计数
+	// 尚未归零——结构性保证 WaitScansDone join 时批次已注册，CloseAll 不会先于
+	// 入队关连接）。异步入队不阻塞扫描返回。
+	s.enqueueThumbsBacklog(store, lib)
 	return result, nil
+}
+
+// enqueueThumbsBacklog 扫描完成后自动补缺入队：按 thumb_cache 记账 + PNG 文件
+// 存在性比对出缺失缩略图的文件清单，整批入队（文件级粒度——COM 打开粒度为
+// 文件，ExportPresentation 无页清单参数，任一页缺失即整文件重导出，已有页
+// 覆盖写幂等）。无 PowerPoint 静默跳过（D1 降级）；补缺收集失败仅告警不上抛
+// （不阻断扫描成功语义，下次扫描重试）。
+func (s *AssetLibraryService) enqueueThumbsBacklog(store *assetsStore, lib model.AssetLibrary) {
+	if !s.thumbQ.exporter.Available() {
+		return
+	}
+	thumbsDir := s.assetThumbsDir(lib.ID)
+	backlog, err := s.collectThumbsBacklog(store, lib, thumbsDir)
+	if err != nil {
+		Logger().Warn("缩略图补缺收集失败（下次扫描重试）", "libraryId", lib.ID, "err", err)
+		return
+	}
+	if len(backlog) == 0 {
+		return
+	}
+	Logger().Info("缩略图补缺入队", "libraryId", lib.ID, "files", len(backlog))
+	s.EnqueueAssetThumbs(lib.ID, backlog, thumbsDir)
+}
+
+// collectThumbsBacklog 收集缺失缩略图的文件清单：ok 状态文件 × 现有页数，逐档
+// 逐页以 PNG 文件存在性判定页已生成（存在性为唯一权威口径，见步骤 3 注释），
+// 任一页缺失即该文件入队。
+// 两条查询各自收齐结果并显式 Close 后再发下一条（单连接池 SetMaxOpenConns(1)
+// 下 rows 未关先查会自锁，docs/spec/assets-management.md Gotcha）。
+//
+// 性能边界（有意取舍）：同步跑在扫描 goroutine 内（runLibraryScan 返回前），
+// ok 文件 × 页数 × 2 档逐页 os.Stat——千文件 × 20 页 ≈ 4 万次 stat，秒级；不移
+// 后台 goroutine 是为保住「入队在扫描 goroutine 内」的结构性保证（WaitScansDone
+// join 时批次必已注册，WaitThumbsDone 才取消得到）。设计目标为桌面千级库
+// （listFileRecords 同口径）；万级库补缺 Stat 十秒级，与扫描本身同量级，不做
+// 异步化（若未来成为问题，优先方案 = worker 消费批次时再做补缺过滤）。
+func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model.AssetLibrary, thumbsDir string) ([]thumbFileSpec, error) {
+	// 1. ok 状态文件清单
+	type okFile struct {
+		id   int64
+		path string
+	}
+	okFiles := make([]okFile, 0, 64)
+	rows, err := store.db.Query("SELECT id, path FROM files WHERE status = ?", model.AssetFileStatusOK)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var f okFile
+		if err := rows.Scan(&f.id, &f.path); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		okFiles = append(okFiles, f)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// 2. 各文件现有页数（slides 表页数权威口径）
+	pageByFile := make(map[int64]int, len(okFiles))
+	rows, err = store.db.Query("SELECT file_id, MAX(slide_num) FROM slides GROUP BY file_id")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var fileID int
+		var maxNum int
+		if err := rows.Scan(&fileID, &maxNum); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		pageByFile[int64(fileID)] = maxNum
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// 3. 逐文件比对：任一档任一页 PNG 缺失 → 整文件入队（文件级粒度，注释见
+	// enqueueThumbsBacklog）。页命中判定 = PNG 文件存在（唯一权威口径）：
+	//   - 记账（thumb_cache）不参与补缺判定——记账落盘是攒批异步的（dirty 未
+	//     flush 时 db 查不到），参与判定会因 flush 时序把已生成页误判缺失，
+	//     连续两次扫描重复入队重导出（真机冒烟实测抓出）；
+	//   - 「记账命中但文件缺失」同样判缺失（崩溃/手动清理可致记账与文件脱钩，
+	//     画廊无图可展示，物理事实优先）；
+	//   - 记账 miss 而文件在的页不漏记账：读取路径 GetAssetThumb touch 会补
+	//     记账（LRU 口径自愈），补缺判定与 LRU 记账解耦。
+	backlog := make([]thumbFileSpec, 0, len(okFiles))
+	for _, f := range okFiles {
+		n := pageByFile[f.id]
+		if n <= 0 {
+			continue // 无幻灯片记录（页解析为空等）：无可导出页
+		}
+		missing := false
+		for _, tier := range thumbTiers {
+			for page := 1; page <= n; page++ {
+				if _, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, f.id, page)); err != nil {
+					missing = true
+					break
+				}
+			}
+			if missing {
+				break
+			}
+		}
+		if !missing {
+			continue
+		}
+		backlog = append(backlog, thumbFileSpec{
+			FileID:  f.id,
+			Path:    f.path,
+			AbsPath: filepath.Join(lib.RootPath, filepath.FromSlash(f.path)),
+		})
+	}
+	return backlog, nil
 }
 
 // rebuildLibrary 全量重建主体：备份标签绑定 → 清 files/FTS → 全量扫描（记录
@@ -157,16 +285,32 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 // （部分重建态由再次重建自愈；清理与扫描非同一事务，中断后索引可能为空，
 // 语义与「重建后重新扫描」一致，不阻塞增量扫描修复）。
 func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
+	// 0. 取消该库在途缩略图批次（独立审核发现）：不清则 worker 在清表+删目录后
+	// 继续导出——MkdirAll 重建 tier 目录、旧 fileID PNG 落盘（AUTOINCREMENT 旧 ID
+	// 永不复用，既不匹配新索引补缺也不进配额记账，超配额永久残留）。取消异步、
+	// 在途单文件仍可能写入（同 DeleteLibrary 口径：窗口缩小，残留可手动清理）
+	s.CancelAssetThumbs(lib.ID)
+
 	// 1. 备份用户标签绑定（重建清 files 时 file_tags 级联清除）
 	bindings, err := store.fileTagBindingsByPath()
 	if err != nil {
 		return model.AssetScanResult{}, fmt.Errorf("备份文件标签绑定失败: %w", err)
 	}
 
-	// 2. 清索引数据（files/slides/file_tags + FTS 全表）
+	// 2. 清索引数据（files/slides/file_tags + FTS 全表 + 缩略图记账表）
 	if err := store.clearIndexForRebuild(); err != nil {
 		return model.AssetScanResult{}, fmt.Errorf("清空素材索引失败: %w", err)
 	}
+
+	// 2.1 缩略图整目录清空重来（research §4.2：重建语义下逐条保留无意义——
+	// 重解析后页 id 全变、页数可能变，记账已清，残留 PNG 由补缺链路重导出
+	// 幂等覆盖；目录删除失败仅告警不中断，残留文件无害）
+	if err := os.RemoveAll(s.assetThumbsDir(lib.ID)); err != nil {
+		Logger().Warn("清空缩略图目录失败（重建后残留文件将被覆盖）", "libraryId", lib.ID, "err", err)
+	}
+	// 2.2 同步清内存 dirty 旧条目：重建后旧 fileID 的 slides 已删除，残留 dirty
+	// flush 时会因外键约束失败整批丢弃（含重建后新记账）并产生告警噪音
+	s.thumbLedger.dropLibrary(lib.ID)
 
 	// 3. 全量扫描（库存记录已空，全部文件走新增解析路径，FTS 随写路径双写）
 	result, err := s.scanLibrary(ctx, store, lib)
@@ -247,7 +391,8 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
 	}
 
-	// 清理磁盘已消失的文件记录（幻灯片/文件标签随外键级联清除）
+	// 清理磁盘已消失的文件记录（幻灯片/文件标签/缩略图记账随事务清除；缩略图
+	// PNG 文件在事务提交后删除——文件系统操作不可回滚，db 先行、文件后删）
 	var removed int64
 	gone := make([]string, 0)
 	diskPaths := make(map[string]bool, len(entries))
@@ -263,12 +408,60 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		if err := ctx.Err(); err != nil {
 			return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
 		}
-		if removed, err = store.deleteFilesByPaths(gone); err != nil {
+		deletedIDs, removedN, err := store.deleteFilesByPaths(gone)
+		if err != nil {
 			return model.AssetScanResult{}, fmt.Errorf("清理已删除文件记录失败: %w", err)
+		}
+		removed = removedN
+		thumbsDir := s.assetThumbsDir(lib.ID)
+		for _, fileID := range deletedIDs {
+			// 记账 dirty 同步失效（防 flush 复活已删行——幽灵行虽无害，显式清
+			// 更精确）；PNG 文件删除失败仅告警不中断（残留孤儿文件无害，下次
+			// 同 ID 复用场景由重导出覆盖）
+			s.thumbLedger.invalidateFile(lib.ID, fileID)
+			removeThumbFilesForFile(thumbsDir, fileID)
 		}
 	}
 	result.Removed = int(removed)
 	return result, nil
+}
+
+// invalidateFileThumbs 缩略图失效联动（文件重解析前调用，parse 成败两分支均生效）：
+// 记账表单语句删除该文件全部行 + 清 ledger dirty（防复活）+ 删 small/hd 两档旧
+// PNG 文件。外键 ON DELETE CASCADE 为兜底，显式 DELETE 为契约（双保险：级联触发
+// 时机不受连接池调度影响，显式删除保证记账与 PNG 文件同批收口）。PNG 前缀用
+// `fileID + "-"` 完整形态（禁裸数字前缀——`102` 会误伤 `1023-…`，research §4.3）。
+// 任一步失败仅告警不中断扫描：缓存清理幂等可自愈（下次扫描重处理再清）。
+func (s *AssetLibraryService) invalidateFileThumbs(lib model.AssetLibrary, store *assetsStore, fileID int64) {
+	if err := store.deleteThumbCacheForFile(fileID); err != nil {
+		Logger().Warn("清除缩略图记账失败", "libraryId", lib.ID, "fileId", fileID, "err", err)
+	}
+	s.thumbLedger.invalidateFile(lib.ID, fileID)
+	removeThumbFilesForFile(s.assetThumbsDir(lib.ID), fileID)
+}
+
+// removeThumbFilesForFile 删除指定文件的全部缩略图 PNG（small/hd 两档子目录遍历，
+// `fileID + "-"` 精确前缀匹配防误伤）。失效联动与文件删除联动共用的单点函数。
+func removeThumbFilesForFile(thumbsDir string, fileID int64) {
+	prefix := strconv.FormatInt(fileID, 10) + "-"
+	for _, tier := range thumbTiers {
+		dir := filepath.Join(thumbsDir, tier.Key)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				Logger().Warn("枚举缩略图目录失败", "dir", dir, "err", err)
+			}
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
+				Logger().Warn("删除缩略图文件失败", "path", filepath.Join(dir, e.Name()), "err", err)
+			}
+		}
+	}
 }
 
 // emitScanProgress 逐文件进度事件（done 从 1 计，含未变跳过的文件）。
@@ -297,6 +490,12 @@ func (s *AssetLibraryService) processScanFile(store *assetsStore, lib model.Asse
 		fileID = id
 	} else if err := store.markProcessing(fileID, now); err != nil {
 		return 0, fmt.Errorf("更新文件处理状态失败（%s）: %w", e.rel, err)
+	} else {
+		// 缩略图失效联动（重解析清旧图）：文件内容已变旧图必失效，置于解析
+		// 之前——parse 成败两分支全覆盖（解析失败降级 failed/encrypted 状态的
+		// 文件同样不得残留旧缩略图）。任一步失败仅告警不中断扫描：缓存清理
+		// 幂等可自愈（下次扫描重处理再清）。新文件分支无旧图，不触发。
+		s.invalidateFileThumbs(lib, store, fileID)
 	}
 
 	parse := s.parseFn

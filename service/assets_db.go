@@ -293,15 +293,19 @@ func (s *assetsStore) replaceFileSlides(fileID int64, size, mtimeNs int64, hash,
 	return tx.Commit()
 }
 
-// deleteFilesByPaths 删除磁盘已消失的文件记录（slides/file_tags 由外键级联
-// 清除），FTS 行（文件行 + 全部幻灯片行）同步清除防检索脏数据。
-func (s *assetsStore) deleteFilesByPaths(relPaths []string) (int64, error) {
+// deleteFilesByPaths 删除磁盘已消失的文件记录（slides/file_tags/thumb_cache 由
+// 外键级联清除），FTS 行（文件行 + 全部幻灯片行）与缩略图记账（显式 DELETE，
+// 外键级联为兜底的双保险口径）同步清除防脏数据。返回删除的 fileID 列表与总数
+// （调用方据 fileID 清理缩略图 PNG 文件——文件系统操作不可回滚，db 先行、文件
+// 后删，对齐「建库回滚先关连接再删文件」的收口顺序）。
+func (s *assetsStore) deleteFilesByPaths(relPaths []string) ([]int64, int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var removed int64
+	deletedIDs := make([]int64, 0)
 	for _, p := range relPaths {
 		var fileID int64
 		err := tx.QueryRow("SELECT id FROM files WHERE path = ?", p).Scan(&fileID)
@@ -309,32 +313,36 @@ func (s *assetsStore) deleteFilesByPaths(relPaths []string) (int64, error) {
 			continue // 记录已不存在：幂等跳过
 		}
 		if err != nil {
-			return 0, err
+			return nil, 0, err
 		}
 		// FTS 清理先行（需幻灯片 ID 定位），再删主表行（级联清 slides）
 		slideIDs, err := selectSlideIDsTx(tx, fileID)
 		if err != nil {
-			return 0, err
+			return nil, 0, err
 		}
 		for _, id := range slideIDs {
 			if err := deleteFtsRowTx(tx, -id); err != nil {
-				return 0, err
+				return nil, 0, err
 			}
 		}
 		if err := deleteFtsRowTx(tx, fileID); err != nil {
-			return 0, err
+			return nil, 0, err
+		}
+		if _, err := tx.Exec("DELETE FROM thumb_cache WHERE file_id = ?", fileID); err != nil {
+			return nil, 0, err
 		}
 		res, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID)
 		if err != nil {
-			return 0, err
+			return nil, 0, err
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
-			return 0, err
+			return nil, 0, err
 		}
 		removed += n
+		deletedIDs = append(deletedIDs, fileID)
 	}
-	return removed, tx.Commit()
+	return deletedIDs, removed, tx.Commit()
 }
 
 // libraryStats 统计：文件总数（含各状态）、幻灯片总数、失败数、加密跳过数。
@@ -819,9 +827,10 @@ func (s *assetsStore) fileTagBindingsByPath() (map[string][]int64, error) {
 }
 
 // clearIndexForRebuild 全量重建前置清理（单事务）：清 files（slides/file_tags
-// 随外键级联清除）+ FTS 全表。FTS 清空用 DELETE FROM（standalone FTS5 表不支持
-// contentless/external content 专用的 'delete-all' 命令）。标签本体（tags 表）
-// 保留——重建后经路径映射重绑。
+// 随外键级联清除）+ FTS 全表 + 缩略图记账表（thumb_cache——files 级联本会清，
+// 显式删除与调用方「thumbs 目录整体清空」同口径的双保险）。FTS 清空用 DELETE
+// FROM（standalone FTS5 表不支持 contentless/external content 专用的 'delete-all'
+// 命令）。标签本体（tags 表）保留——重建后经路径映射重绑。
 func (s *assetsStore) clearIndexForRebuild() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -832,6 +841,9 @@ func (s *assetsStore) clearIndexForRebuild() error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM search_fts"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM thumb_cache"); err != nil {
 		return err
 	}
 	return tx.Commit()

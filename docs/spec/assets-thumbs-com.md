@@ -12,11 +12,12 @@
 | 层 | 签名 | 位置 |
 |---|---|---|
 | 接口 | `ThumbExporter`：`Available() bool` / `ExportPresentation(ctx, spec, thumbsDir, tiers, preempt) (int, error)` / `JumpOnly(jr) error` / `Discard()` / `Shutdown()` | `assets_thumbs.go` |
-| 队列 | `EnqueueAssetThumbs(libraryID, files, thumbsDir)` / `JumpToSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `WaitThumbsDone()` / `ThumbsAvailable() bool` | `AssetLibraryService` |
-| App 绑定 | `AssetThumbsAvailable() bool` / `JumpToAssetSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` | `app_assets.go` |
-| 事件 | `assets-thumbs:progress`（AssetThumbsProgress）/ `assets-thumbs:done`（AssetThumbsResult）/ `assets-thumbs:error`（PR2 触发点出现时补） | EventSink |
+| 队列 | `EnqueueAssetThumbs(libraryID, files, thumbsDir)` / `JumpToSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `WaitThumbsDone()` / `ThumbsAvailable() bool` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `AssetLibraryService` |
+| App 绑定 | `AssetThumbsAvailable() bool` / `JumpToAssetSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `app_assets.go` |
+| 事件 | `assets-thumbs:progress`（AssetThumbsProgress）/ `assets-thumbs:done`（AssetThumbsResult）/ `assets-thumbs:error`（{libraryId, message}，当前触发点 = 入队队列满；沿用 assets-scan:error 不弹提示仅复位契约） | EventSink |
 | 缓存命名 | `thumbPNGPath(thumbsDir, tierKey, fileID, slideNum)` = `<thumbsDir>/<tier>/<fileID>-<3位页>.png` | 单点函数 |
-| 分叉构造 | `newThumbExporter()`（_windows=go-ole / _other=桩）/ `newThumbQueue(exp, sinkFn)` | 平台分叉点 |
+| 分叉构造 | `newThumbExporter()`（_windows=go-ole / _other=桩）/ `newThumbQueue(exp, sinkFn, ledger)`（第三参 = 记账 ledger，五处构造点全部注入） | 平台分叉点 |
+| 记账 | `thumbCacheLedger`：`record` / `invalidateFile` / `dropLibrary` / `flushLibrary` / `pruneBeyond` / `Shutdown`；`storeForThumbs`（锁内校验+取连接单点） | `assets_thumbs_ledger.go` |
 
 ## 3. Contracts
 
@@ -60,6 +61,61 @@
 ### 缓存键契约
 
 - `<thumbsDir>/<tier>/<fileID>-<3位页>.png`；**slides.id 禁作缓存键**（每轮重解析 AUTOINCREMENT 删旧插新全变），files.id 稳定。`thumbPNGPath` 单点函数，PR2 记账表以同规则反查。
+- **`Slide.Export` 不自建父目录**：目标 tier 目录缺失时 E_FAIL（「发生意外」无定位信息）——`exportSession` 导出前必须逐档 `os.MkdirAll`（PR2 真机冒烟抓出的 P0；PR1 探针预建导出目录曾掩蔽）。
+
+### 导图与用户文档并存（D3 前提，真机实测成立）
+
+- 复用用户实例（快照 diff 为空）场景下，无窗口 `ww=0` 只读打开 + `Slide.Export` 正常工作（变体矩阵实测：无窗口/带窗口/最小化/复用窗口化文档自身导出全通过）；全新实例无窗口导出（PR1 P5）与并存场景互不推导，两条都须真机验证。
+
+### fixture 构造（冒烟/集成验证）
+
+- **手写 OOXML zip fixture 会被 WPS 拒开**（`Presentations.Open` E_FAIL `0x80020009`）——真机验证一律 **COM 自产 fixture**（新建 → `Slides.Add(i, 12)` 逐页空白版式 → `SaveAs(path, 24)` → Close），合法性与真实文档同级（`service/assets_thumbs_smoke_integration_windows_test.go` `smokeProduceFixtures` 同款）。
+- 冒烟前置硬性要求：进程预检发现 `powerpnt.exe/wpp.exe` 残留即 skip 拒跑（冒烟会 Quit 唯一实例，防误关用户文档）；上一轮失败可能残留孤儿 wpp.exe，重跑前 `tasklist` 核查。
+
+## 8. 记账与失效联动（PR2，2026-10-14）
+
+### thumb_cache 表（schema v3）
+
+- 列：`file_id REFERENCES files(id) ON DELETE CASCADE` + `tier` + `page`，主键 `(file_id, tier, page)`；`bytes` + `last_access_ns`（LRU 依据——NTFS atime 落盘延迟 ≤1h 且受系统策略控制，**应用层自记时间戳**，禁依赖文件系统 atime/mtime 做访问序）。索引 `idx_thumb_cache_access(tier, last_access_ns)` 供淘汰游标。
+- 双保险口径：外键级联兜底 + 代码显式 DELETE（失效/重建路径），两者并存防 pragma 漂移静默漏清。
+
+### ledger 攒批（assets_thumbs_ledger.go）
+
+- 写路径只进内存 dirty buffer（`record` 微秒级持锁），攒批 **200 条**或 **45s**（`thumbLedgerFlushInterval` var 注入点）触发单 goroutine flusher；落盘 **单事务** `INSERT OR REPLACE ... SELECT ... WHERE EXISTS(SELECT 1 FROM files WHERE id = ?)`——**幽灵键（file_id 已不在 files 表）必须 WHERE EXISTS 过滤**：外键已启用，裸 INSERT 会因单个毒键（stale touch / 快照竞态 / 重建在途旧 ID）令**整批事务失败丢弃**；落盘行数与批大小差额告警登记。硬约束「禁逐条 UPDATE」指正常路径；flush 快照（持 mu 取出 dirty 后放锁）→ 锁外 db/文件操作。
+- `Shutdown()`：同步 flush 全部有 dirty 的库 → close(quit) → wg.Wait；由 `WaitThumbsDone` 尾部调用（**连接关闭前**），置位 stopped 后 record 丢弃（幂等可重入）。
+
+### LRU 淘汰
+
+- 只允许后台异步路径：`flushLibrary` 落盘成功后对涉及档位 `evictTier`（SUM 超配额 → `last_access_ns` 最旧优先游标收集至 90% 水位 → rows Close 后单事务批量 DELETE + 逐个删 PNG，NotExist 忽略）。**禁在 record/读取路径同步淘汰**。配额 small/hd 各 1GB 常量（`thumbTierQuotaBytes` var，PR3 设置界面接）。
+- 页数缩减对账 `pruneBeyond`（导出成功后按返回页数清越界记账+PNG）属对账语义非配额淘汰，仅成功路径调用（失败文件旧图仍有效）。
+
+### 失效联动三路径（记账 + PNG + dirty 三处状态同清）
+
+| 路径 | 触发点 | 动作 |
+|---|---|---|
+| 重解析 | `processScanFile` exists 分支（markProcessing 后、parse 前——成败两分支都覆盖） | `invalidateFileThumbs`：显式 DELETE 记账 + `ledger.invalidateFile` + 前缀删 PNG（`fileID + "-"` 完整形态防 `102`/`1023` 误伤） |
+| 文件删除 | `scanLibrary` 尾部 gone 清理 | `deleteFilesByPaths` 事务内显式 DELETE 记账（返回 fileIDs）→ 事务提交后删 PNG + `invalidateFile` |
+| 重建 | `rebuildLibrary` 步骤 2/2.1/2.2 | 清表（事务内）+ `RemoveAll` 整目录 + **`dropLibrary` 清 dirty**（残留 dirty flush 时 FK 失败整批丢弃）+ 开头 `CancelAssetThumbs`（防在途批次向已清目录写旧 ID PNG——旧 ID 永不复用，残留超配额永久孤儿） |
+
+- DeleteLibrary 同构：`CancelAssetThumbs`（**缩小窗口**口径——取消异步不等待，在途单文件仍可能重建空 tier 目录残留少量 PNG，可手动清理）+ RemoveAll + dropLibrary。
+- flush 快照与失效清理的竞态窗口残留幽灵行判定无害（同 key 重导出覆盖 / 读取不查 db / 淘汰删文件 NotExist 忽略），由 WHERE EXISTS 兜底落盘面。
+
+### 补缺判定（扫描完成自动入队）
+
+- **页命中唯一权威口径 = PNG 文件存在（os.Stat）**；记账表**不参与**补缺判定。原因：记账落盘攒批异步（dirty 未 flush 时 db 查不到），参与判定会把已生成页误判缺失，连续扫描重复入队重导出（真机冒烟抓出的幂等回归）——幂等不得依赖 flush 时序；记账 miss 而文件在的页由读取路径 touch 自愈补记账。反向（记账命中文件缺失）同样判缺失重导。
+- 入队位置：`runLibraryScan` 尾部扫描 goroutine 内（结构性保证 `WaitScansDone` join 时批次已注册）——补缺收集的 Stat 开销（千文件 × 20 页 ≈ 4 万次，秒级）为此保证的接受成本，设计目标千级库，禁为省 Stat 移后台 goroutine 破坏该保证。
+- 文件级粒度：任一页缺失 → 整文件重导出（COM 打开粒度 = 文件；已有页覆盖写幂等）。
+
+### GetAssetThumb 读取 API
+
+- `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)`：tierIndex 0=small/1=hd（**序号非宽度**——分辨率可配后宽度会漂移，序号稳定）；未生成/已淘汰返回 `("", nil)`（前端回退占位，非错误）；参数校验 slideNum≥1、fileID≥1、tierIndex 越界报错。
+- 读路径零 db 访问（注册表锁 + 内存 record），与 flusher 不争单连接；命中即 `record` touch（LRU 新鲜度，攒批零同步写）。
+- 前端消费（PR3）：返回串直接拼 `data:image/png;base64,<串>`，禁 `decodeBase64Utf8`（文本专用）禁裸 atob；量级口径 hd 档单张 1-3MB（base64 +33%）仅详情大图单张按需，画廊一律 small 档懒加载禁拉 hd。
+
+### 沉淀来源（PR2）
+
+- 真机冒烟（WPS 环境，`assets_thumbs_smoke_integration_windows_test.go`，`go test -tags=integration -run TestSmokeAssetsThumbsEndToEnd`）：抓出 Slide.Export 目录 P0（探针掩蔽）+ 补缺幂等回归（flush 时序依赖）两个真问题；D3 并存/记账落盘/幂等重扫/读取 API 全断言过（约 7s 端到端）。
+- 独立审核（cavecrew-reviewer）抓出：FK 幽灵键吞整批（WHERE EXISTS 修）、重建不取消在途批次、DeleteLibrary 取消异步口径、补缺 Stat 风暴与入队位置约束的取舍登记。
 
 ## 4. Validation & Error Matrix
 

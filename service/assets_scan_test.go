@@ -16,10 +16,13 @@ import (
 // ---------- 测试辅助 ----------
 
 // newTestAssetService 构造注入临时数据目录的素材服务（CloseAll 挂 Cleanup 收口
-// 全部库连接，防 sqlite 连接残留干扰 goleak 观察面）。
+// 全部库连接，防 sqlite 连接残留干扰 goleak 观察面）。默认注入不可用 fake
+// exporter：PR2 起扫描完成会触发缩略图补缺入队，不替换则装 PowerPoint 的开发机
+// 会真跑 COM（环境依赖 + 拖慢测试）；需真入队链路的用例显式覆盖 svc.thumbQ。
 func newTestAssetService(t *testing.T) *AssetLibraryService {
 	t.Helper()
 	svc := NewAssetLibraryService(context.Background(), filepath.Join(t.TempDir(), "assets"))
+	svc.thumbQ = newThumbQueue(&fakeThumbExporter{available: false}, svc.eventSink, svc.thumbLedger)
 	t.Cleanup(svc.CloseAll)
 	return svc
 }
