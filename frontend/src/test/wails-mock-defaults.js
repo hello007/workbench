@@ -224,6 +224,20 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   RetryAssetThumb: null,
   // 默认无可取消在途生成：false = 幂等 no-op（对齐 CancelAssetScan 语义）
   CancelAssetThumbs: false,
+
+  // ---- 素材 PPT 拆分（SRS §2.2.3 / §2.2.5 方式 2：单文件与库级批量拆分 +
+  // 取消 + 方式 2 打开拆分单页）----
+  // 形状对齐 model.AssetSplitResult / AssetSplitBatchResult / AssetSplitRecordView
+  // （见 frontend/wailsjs/go/models.ts）。拆分仅在用户操作时调用，零结果/零页为
+  // 安全 no-op；GetAssetSplitRecord 默认无记录（exists=false = 方式 2 按钮隐藏），
+  // 用例按需 override；OpenAssetSplitPage void 返回 null 安全 no-op
+  SplitAssetFile: { outputDir: '', files: [], pageCount: 0, skipped: false, skipReason: '' },
+  SplitAssetLibrary: { total: 0, split: 0, skipped: 0, failed: 0, items: [] },
+  // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelAssetScan 语义）
+  CancelAssetSplit: false,
+  GetAssetSplitRecord: { exists: false, outputDir: '', pageCount: 0, splitAt: '', upToDate: false },
+  OpenAssetSplitPage: null,
+
   // 设置保存（AppSettings.assets 段缩略图设置入口，整体提交语义）：void 返回 null 安全
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
   SaveSettings: null

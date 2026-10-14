@@ -478,6 +478,8 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 扫描进度/终态经事件推送（EventSink 通道）：`assets-scan:progress`（`{libraryId, done, total, currentFile}`）/ `assets-scan:done`（`{libraryId, result: AssetScanResult}`）/ `assets-scan:error`（`{libraryId, message}`）。
 
+拆分进度/终态经事件推送（素材面板独听，与工具箱 `pptx-split:*` 隔离）：`assets-split:progress`（`{libraryId, done, total, currentFile, pageDone, pageTotal}`，文件级计数 + 当前文件页级透传）/ `assets-split:done`（`{libraryId, result: AssetSplitBatchResult}`，单文件同形状 Total=1）/ `assets-split:error`（`{libraryId, message}`，仅整体失败——批量内单文件失败走结果统计）。
+
 | 方法 | 签名 | 语义 | 返回值 |
 |---|---|---|---|
 | `CreateAssetLibrary` | `(name, rootPath) => Promise<AssetLibrary>` | 新建素材库（校验名称非空、根目录存在且为目录；登记注册表并预建索引库文件） | AssetLibrary |
@@ -496,6 +498,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `CancelAssetThumbs` | `(libraryID) => Promise<boolean>` | 取消指定库的缩略图批量生成（幂等，无在途批次返回 false） | boolean |
 | `GetAssetThumb` | `(libraryID, fileID, slideNum, tierIndex) => Promise<string>` | 读取单页缩略图 PNG（base64 标准编码裸串；tierIndex 0=small 画廊卡片 1=hd 详情大图；未生成/已淘汰返回空串非错误，前端回退占位卡；消费契约：直接拼 data URL，禁 decodeBase64Utf8 禁裸 atob） | string |
 | `RetryAssetThumb` | `(libraryID, fileID, relPath) => Promise<void>` | 单文件缩略图重试（详情侧边栏「重试」入口；复用 COM 串行队列链路，触发时取消同库在途批量批次（既有取消语义）；源文件不存在报错，无 PowerPoint 返回 `E_ASSETS_THUMBS_UNAVAILABLE`） | — |
+| `SplitAssetFile` | `(libraryID, relPath, outputToSourceDir) => Promise<AssetSplitResult>` | 单文件 PPT 按页拆分（详情侧边栏「拆分此 PPT」入口；落点二选一：缓存目录 derived 镜像源树（默认）/ 源目录（自动排除索引）；增量命中跳过返回 `skipped=true`；核心失败（损坏/加密/只读）报错，取消复用 `E_ASSETS_CANCELLED`） | AssetSplitResult |
+| `SplitAssetLibrary` | `(libraryID, outputToSourceDir) => Promise<AssetSplitBatchResult>` | 库级批量拆分（「拆分全部 PPT」入口；启动时快照圈定全部 ok 状态文件，单文件失败逐文件记日志跳过不中断批量，返回汇总与逐文件明细；同库并发拆分拒绝 `E_ASSETS_SCAN_IN_PROGRESS`） | AssetSplitBatchResult |
+| `CancelAssetSplit` | `(libraryID) => Promise<boolean>` | 取消指定库在途拆分（幂等，无在途拆分返回 false；取消错误前端按 `E_ASSETS_CANCELLED` warning 中性提示） | boolean |
+| `GetAssetSplitRecord` | `(libraryID, relPath) => Promise<AssetSplitRecordView>` | 查询文件拆分记录（跳转方式 2 判定面：`exists` 决定「打开拆分单页」按钮显隐，`upToDate` 指示源未变化） | AssetSplitRecordView |
+| `OpenAssetSplitPage` | `(libraryID, relPath, slideNum) => Promise<void>` | 打开拆分单页产物（SRS §2.2.5 方式 2，无 PowerPoint 依赖，系统默认关联程序；页序越界或产物缺失报错） | — |
 
 ---
 
@@ -736,6 +743,16 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `hdWidth` | number | 详情高清大图宽度 px（默认 1600，clamp 480-3840；变更自动清该档缓存并按新分辨率重新生成） |
 | `smallQuotaMB` | number | 小图缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
 | `hdQuotaMB` | number | 高清缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
+
+**AssetSplitResult** — 单文件拆分结果（`outputDir`（产物目录绝对路径）/ `files`: string[]（本次生成的单页文件路径，按页序）/ `pageCount`（拆出页数）/ `skipped`（增量命中被跳过）/ `skipReason`（跳过原因，用户可读））
+
+**AssetSplitFileOutcome** — 批量拆分逐文件处理结果（`relPath`（相对库根路径）/ `status`（`split`/`skipped`/`failed`）/ `message`（跳过/失败原因，成功为空））
+
+**AssetSplitBatchResult** — 批量拆分汇总（`total`（快照圈定文件总数）/ `split` / `skipped` / `failed` / `items`: AssetSplitFileOutcome[]；单文件入口同形状 Total=1，done 事件载荷复用）
+
+**AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致））
+
+**AssetSplitProgress** — 拆分进度事件载荷（`libraryId` / `done` / `total`（文件级计数）/ `currentFile` / `pageDone` / `pageTotal`（当前文件页级透传））
 
 ### 30.8 其他
 

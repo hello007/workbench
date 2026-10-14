@@ -10,9 +10,21 @@
      assets-thumbs:* 事件推送（progress 收集失败文件、done 复位并自增失效代次触发
      miss 卡补图、error 仅复位不弹提示）、可取消；本机无 PowerPoint 时降级提示条
      常驻、跳转入口隐藏。
+     拆分链路（SRS §2.2.3 / §2.2.5 方式 2）：库级「拆分全部 PPT」+ 文件详情「拆分
+     此 PPT」两入口共用落点确认弹窗（素材库缓存目录 derived 镜像源树为默认落点，
+     源目录落点带自动排除索引警示）；进度经 assets-split:* 事件推送（文件级
+     done/total + 页级 pageDone/pageTotal 透传）、可取消（取消走 warning 中性提示）；
+     done/error 事件仅复位进度展示——汇总提示与错误分流由拆分 Promise 分支统一
+     执行（防双弹双刷新，对齐扫描契约）；已拆分文件的幻灯片详情提供「打开拆分单页」
+     （GetAssetSplitRecord exists 判定显隐 + OpenAssetSplitPage 打开，与 COM 跳转
+     方式并存）。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
+     （拆分监听器属面板层——进度条与弹窗互斥常态：确认弹窗可随时关闭、任务继续
+     在后台执行且面板层进度可见，故监听器生命周期 = 面板组件生命周期，注销时机 =
+     onBeforeUnmount；弹窗非监听器属主，无「弹窗关闭注销点」，对比 PptSplitDialog
+     的弹窗内监听双时机形态。）
      根元素保持完整 flex 约束链（flex:1 + min-height:0 + min-width:0 + display:flex +
      flex-direction:column + overflow:hidden），防面板塌陷挤压终端（frontend-visual-conventions）。 -->
 <template>
@@ -37,6 +49,11 @@
         <el-button size="small" @click="openCreateDialog">新建库</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onDeleteLibrary">删除库</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onRebuild">重建索引</el-button>
+        <el-button
+          size="small"
+          :disabled="!hasLibrary || scanning || splitting"
+          @click="openSplitDialog('library')"
+        >拆分全部 PPT</el-button>
         <el-button size="small" @click="openThumbSettings">缩略图设置</el-button>
         <el-button
           size="small"
@@ -80,6 +97,27 @@
         {{ thumbsProgress.currentFile }}
       </span>
       <el-button size="small" text type="danger" @click="onCancelThumbs">取消生成</el-button>
+    </div>
+
+    <!-- 拆分进度条：仅拆分任务进行中可见；与扫描/缩略图进度条同层并存。文件级
+         done/total 驱动主进度，页级 pageDone/pageTotal（当前文件拆到第几页）追加
+         展示；进度载荷按库 ID 过滤（他库事件不串入）。确认弹窗可随时关闭，任务
+         继续在后台执行且本进度条持续可见 -->
+    <div v-if="splitting" class="scan-progress split-progress">
+      <el-progress
+        class="scan-progress-bar"
+        :percentage="splitPercent"
+        :stroke-width="8"
+        :show-text="false"
+      />
+      <span class="scan-progress-text">
+        {{ splitProgress ? `拆分中 ${splitProgress.done}/${splitProgress.total}` : '正在准备拆分…' }}
+      </span>
+      <span v-if="splitPageText" class="scan-progress-text">{{ splitPageText }}</span>
+      <span v-if="splitProgress && splitProgress.currentFile" class="scan-progress-file" :title="splitProgress.currentFile">
+        {{ splitProgress.currentFile }}
+      </span>
+      <el-button size="small" text type="danger" @click="onCancelSplit">取消拆分</el-button>
     </div>
 
     <!-- 搜索/筛选区：关键词（回车或按钮触发）+ 标签多选 + 视图切换 + 平铺开关 -->
@@ -288,6 +326,14 @@
             <div class="detail-actions">
               <el-button size="small" type="primary" :loading="savingMeta" @click="onSaveMeta">保存</el-button>
               <el-button size="small" :disabled="savingMeta" @click="resetDraft">重置</el-button>
+              <!-- 单文件拆分入口（对齐库级入口共用同一确认弹窗）：仅 pptx 文件提供 -->
+              <el-button
+                v-if="isDetailFilePptx"
+                size="small"
+                plain
+                :disabled="splitting"
+                @click="openSplitDialog('file')"
+              >拆分此 PPT</el-button>
             </div>
           </template>
           <el-alert v-else type="warning" :closable="false" title="文件索引记录不存在，请重新扫描后操作" />
@@ -330,6 +376,17 @@
               :loading="jumping"
               @click="onJumpToSlide"
             >打开并跳到此页</el-button>
+            <!-- 打开拆分单页（SRS §2.2.5 方式 2，无 PowerPoint 依赖）：仅已拆分文件
+                 提供（GetAssetSplitRecord exists 判定显隐，隐藏非禁用）；与方式 1
+                 （COM 打开跳转）并存 -->
+            <el-button
+              v-if="detailSplitExists"
+              size="small"
+              type="primary"
+              plain
+              :loading="openingSplitPage"
+              @click="onOpenSplitPage"
+            >打开拆分单页</el-button>
             <el-button size="small" type="primary" plain @click="traceToSourceFile">查看归属文件</el-button>
           </div>
         </template>
@@ -355,6 +412,62 @@
       <template #footer>
         <el-button :disabled="creating" @click="createDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="onCreateLibrary">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 拆分确认弹窗：单文件与库级批量两入口共用（splitDialogCtx 区分语境）。
+         落点二选一：素材库缓存目录（derived 镜像源树，默认推荐——库根之外天然
+         隔离扫描索引）；源文件所在目录（与源同目录，后端 isPptxSplitDerivative
+         已自动排除索引，选中时展示警示说明）。进行中态防重复提交 -->
+    <el-dialog
+      v-model="splitDialogVisible"
+      title="拆分 PPT"
+      width="min(520px, 90vw)"
+      :close-on-click-modal="false"
+      append-to-body
+      @closed="onSplitDialogClosed"
+    >
+      <div class="split-dialog-scope">
+        <span v-if="splitDialogCtx.scope === 'file'">将把「{{ splitDialogCtx.fileName }}」按页拆分为多个独立 PPT（每页一个文件）。</span>
+        <span v-else>将对当前素材库中全部正常状态的 PPT 文件按页拆分（每页一个独立文件），已拆分且未变化的文件自动跳过。</span>
+      </div>
+      <el-form label-width="88px">
+        <el-form-item label="产物位置">
+          <el-radio-group v-model="splitTarget" :disabled="splitConfirming">
+            <el-radio value="cache">素材库缓存目录（推荐）</el-radio>
+            <el-radio value="source">源文件所在目录</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <div v-if="splitTarget === 'source'" class="split-source-warning">
+        拆分产物将与源文件同目录存放（已自动排除索引，不会被重复收录）。
+      </div>
+      <div v-else class="split-cache-hint">
+        产物存入素材库缓存目录（按源目录结构镜像存放），与原始文件隔离，不会被重复索引。
+      </div>
+      <template #footer>
+        <el-button :disabled="splitConfirming" @click="splitDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="splitConfirming" @click="onConfirmSplit">开始拆分</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 拆分结果明细弹窗：批量拆分存在失败文件时自动弹出（异常隔离明细逐文件
+         展示：路径 + 处理结果 + 跳过/失败原因），仅展示可关闭 -->
+    <el-dialog
+      v-model="splitOutcomeVisible"
+      title="拆分结果明细"
+      width="min(600px, 90vw)"
+      append-to-body
+    >
+      <div class="split-outcome-list">
+        <div v-for="(item, i) in splitOutcomeItems" :key="i" class="split-outcome-row">
+          <el-tag size="small" :type="splitOutcomeTagType(item.status)">{{ splitOutcomeLabel(item.status) }}</el-tag>
+          <span class="split-outcome-path" :title="item.relPath">{{ item.relPath }}</span>
+          <span v-if="item.message" class="split-outcome-msg" :title="item.message">{{ item.message }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="splitOutcomeVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -444,6 +557,11 @@ import {
   JumpToAssetSlide,
   RetryAssetThumb,
   CancelAssetThumbs,
+  SplitAssetFile,
+  SplitAssetLibrary,
+  CancelAssetSplit,
+  GetAssetSplitRecord,
+  OpenAssetSplitPage,
   GetSettings,
   SaveSettings
 } from '../../wailsjs/go/main/App'
@@ -513,6 +631,21 @@ let lastThumbsFailedCount = 0 // 上次 progress 的累计失败数（非响应�
 const jumping = ref(false)
 const retrying = ref(false)
 
+// ---- 拆分状态（assets-split:*，SRS §2.2.3 / §2.2.5 方式 2）----
+const splitting = ref(false)
+const splitProgress = ref(null) // assets-split:progress 载荷 {libraryId, done, total, currentFile, pageDone, pageTotal}
+const splitDialogVisible = ref(false)
+const splitDialogCtx = ref({ scope: 'library', relPath: '', fileName: '' }) // 确认弹窗语境（scope: 'file'|'library'）
+const splitTarget = ref('cache') // 落点选择：'cache'=素材库缓存目录（默认推荐）| 'source'=源文件所在目录
+const splitConfirming = ref(false) // 确认提交中（防重复提交）
+const splitOutcomeVisible = ref(false)
+const splitOutcomeItems = ref([]) // 批量拆分逐文件明细（failed>0 时弹窗展示）
+const splitRecord = ref(null) // 详情文件的拆分记录（GetAssetSplitRecord 结果，exists 决定方式 2 按钮显隐）
+const openingSplitPage = ref(false)
+// 拆分代次：拆分启动 / 切库复位时自增；在途 Promise 落定写回前比对，代次已变
+// 即丢弃（旧库任务态/提示不得污染新库语境，模式对齐本文件 librarySeq）
+let splitSeq = 0
+
 // ---- 缩略图设置弹窗 ----
 const thumbSettingsVisible = ref(false)
 const thumbSettingsSaving = ref(false)
@@ -548,15 +681,49 @@ const thumbsPercent = computed(() => {
   return Math.round((thumbsProgress.value.done / thumbsProgress.value.total) * 100)
 })
 
+const splitPercent = computed(() => {
+  if (!splitProgress.value || !splitProgress.value.total) return 0
+  return Math.round((splitProgress.value.done / splitProgress.value.total) * 100)
+})
+
+// 页级进度文案（当前文件拆到第几页；无页级计数时不展示）
+const splitPageText = computed(() => {
+  const p = splitProgress.value
+  if (!p || !p.pageTotal) return ''
+  return `第 ${p.pageDone}/${p.pageTotal} 页`
+})
+
+// 单文件拆分入口显隐：文件详情 + .pptx 扩展名（大小写不敏感；后端对状态/索引
+// 记录仍有最终校验，此处仅收窄入口减少必然失败的提交）
+const isDetailFilePptx = computed(() => {
+  if (selected.value?.kind !== 'file') return false
+  return /\.pptx$/i.test(selected.value?.fileEntry?.path || '')
+})
+
+// 方式 2 按钮显隐：详情为幻灯片且归属文件已有拆分记录（隐藏非禁用）
+const detailSplitExists = computed(() => {
+  if (selected.value?.kind !== 'slide') return false
+  return !!splitRecord.value?.exists
+})
+
 // 切库复位缩略图运行态：done/error 事件按 libraryId 过滤，批次运行中切库后旧库
 // 终态事件不会命中新语境——不复位则进度条在新库页面永挂，且「取消生成」打到新库
 // 恒返 false 与可见进度条自相矛盾。失败集合为旧库相对路径口径，一并清空防误归因
 // （切回原库后由下一批 progress/done 重新收集，重试链路可恢复）。
+// 拆分任务态同理复位：在途任务不被打断（后台继续跑），仅复位 UI 态——旧库
+// done/error 事件因 libraryId 不匹配被忽略，不复位则进度条永挂。splitSeq 自增
+// 使旧库在途拆分 Promise 的落定写回全部失效（防误清新库任务进度态 + 旧库
+// toast 误弹，onConfirmSplit 写回前比对）。
 watch(currentLibraryId, () => {
+  splitSeq++
   thumbsRunning.value = false
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
   failedThumbPaths.value = []
+  splitConfirming.value = false
+  splitting.value = false
+  splitProgress.value = null
+  splitRecord.value = null
 })
 
 // 标签选项：后端未提供独立标签列表接口，从当前库文件底册聚合去重
@@ -1299,6 +1466,155 @@ const onJumpToSlide = async () => {
   }
 }
 
+// ================= PPT 拆分（SRS §2.2.3 / §2.2.5 方式 2）=================
+
+// 打开拆分确认弹窗（单文件 / 库级两入口共用）：重置落点为默认缓存目录
+const openSplitDialog = (scope) => {
+  if (splitting.value) return
+  splitTarget.value = 'cache'
+  if (scope === 'file') {
+    const entry = selected.value?.fileEntry
+    if (!entry) return
+    splitDialogCtx.value = { scope, relPath: entry.path, fileName: entry.title || entry.path }
+  } else {
+    splitDialogCtx.value = { scope, relPath: '', fileName: '' }
+  }
+  splitDialogVisible.value = true
+}
+
+// 弹窗关闭回调：仅复位提交中态。在途拆分任务继续后台执行，进度经面板层进度条
+// 持续展示（拆分监听器属面板层，随组件生命周期注销——见文件头注释取舍说明）
+const onSplitDialogClosed = () => {
+  splitConfirming.value = false
+}
+
+// 确认拆分：调对应绑定（单文件 SplitAssetFile / 库级 SplitAssetLibrary），汇总
+// 提示由本 Promise 分支统一弹出（done 事件仅复位进度，防双提示）；进行中态防
+// 重复提交。取消（E_ASSETS_CANCELLED）与真失败经 handleError 自动分流。
+// 请求序号守卫：启动时捕获拆分代次，await 落定写回（任务态/提示/弹窗）前比对
+// ——切库自增 splitSeq 后旧库 Promise 落定全部丢弃（防旧库 toast 误弹、误清
+// 新库在途任务进度态）
+const onConfirmSplit = async () => {
+  if (splitConfirming.value || splitting.value) return
+  const ctx = splitDialogCtx.value
+  const toSource = splitTarget.value === 'source'
+  const seq = ++splitSeq
+  splitConfirming.value = true
+  splitting.value = true
+  splitProgress.value = null
+  try {
+    if (ctx.scope === 'file') {
+      const result = await SplitAssetFile(currentLibraryId.value, ctx.relPath, toSource)
+      if (seq !== splitSeq) return
+      if (result?.skipped) {
+        ElMessage.info(result.skipReason || '该文件已拆分且未变化，无需重复拆分')
+      } else {
+        ElMessage.success(`拆分完成：共 ${result?.pageCount ?? 0} 页`)
+      }
+    } else {
+      const batch = await SplitAssetLibrary(currentLibraryId.value, toSource)
+      if (seq !== splitSeq) return
+      if (!batch || !batch.total) {
+        ElMessage.info('当前库没有可拆分的 PPT 文件')
+      } else {
+        ElMessage.success(
+          `拆分完成：共 ${batch.total} 个文件（拆分 ${batch.split ?? 0}，跳过 ${batch.skipped ?? 0}，失败 ${batch.failed ?? 0}）`
+        )
+        // 失败明细 >0：弹出逐文件明细（异常隔离原因：损坏/加密/只读等）
+        if ((batch.failed ?? 0) > 0 && Array.isArray(batch.items) && batch.items.length > 0) {
+          splitOutcomeItems.value = batch.items
+          splitOutcomeVisible.value = true
+        }
+      }
+    }
+    if (seq !== splitSeq) return
+    splitDialogVisible.value = false
+  } catch (error) {
+    if (seq !== splitSeq) return // 旧语境失败静默丢弃（handleError 不弹旧库 toast）
+    handleError('拆分失败: ', error)
+  } finally {
+    // splitConfirming 归属本次提交点击，恒复位（旧 Promise 延迟落定不得把
+    // 「提交中」残留阻塞后续提交）；splitting/splitProgress 属拆分任务运行态，
+    // 代次已变时不复位（切库 watch 已复位过，且新库在途任务进度态不可被清除）
+    splitConfirming.value = false
+    if (seq === splitSeq) {
+      splitting.value = false
+      splitProgress.value = null
+    }
+  }
+}
+
+const onCancelSplit = async () => {
+  if (!hasLibrary.value) return
+  try {
+    const requested = await CancelAssetSplit(currentLibraryId.value)
+    if (requested) {
+      ElMessage.info('已请求取消拆分')
+    } else {
+      ElMessage.warning('当前没有可取消的拆分任务')
+    }
+  } catch (error) {
+    handleError('取消拆分失败: ', error)
+  }
+}
+
+// ---- 方式 2：拆分记录查询与打开单页 ----
+
+let splitRecordReqSeq = 0
+
+// 查询详情归属文件的拆分记录（方式 2 按钮显隐判定面）：详情切换/拆分完成时刷新。
+// 写回守卫：请求序号比对，详情快速切换时旧响应丢弃防旧文件记录误标新文件。
+const refreshSplitRecord = async () => {
+  if (selected.value?.kind !== 'slide' || !hasLibrary.value) {
+    splitRecord.value = null
+    return
+  }
+  const seq = ++splitRecordReqSeq
+  try {
+    const record = await GetAssetSplitRecord(currentLibraryId.value, detailFilePath.value)
+    if (seq !== splitRecordReqSeq) return
+    splitRecord.value = record || null
+  } catch {
+    // 显隐判定查询失败静默降级（按钮隐藏）：弹错会打断浏览主流程，重新打开
+    // 详情即可重试（登记口径，对齐 AssetThumb 读取失败静默回退）
+    if (seq === splitRecordReqSeq) splitRecord.value = null
+  }
+}
+
+// 详情切换即刷新拆分记录（幻灯片详情拉取、其他形态复位隐藏）
+watch(selected, () => {
+  refreshSplitRecord()
+})
+
+// 打开拆分单页产物（系统默认关联程序，无 PowerPoint 依赖）；成功不弹提示——
+// 产物文件已被系统打开，弹窗反而抢焦点
+const onOpenSplitPage = async () => {
+  if (!hasLibrary.value || openingSplitPage.value) return
+  const relPath = detailFilePath.value
+  const slideNum = detailSlideNum.value
+  if (!relPath || !slideNum) return
+  openingSplitPage.value = true
+  try {
+    await OpenAssetSplitPage(currentLibraryId.value, relPath, slideNum)
+  } catch (error) {
+    handleError('打开拆分单页失败: ', error)
+  } finally {
+    openingSplitPage.value = false
+  }
+}
+
+// 拆分结果明细展示映射（对齐 model.AssetSplitStatus* 取值）
+const splitOutcomeLabel = (status) => ({
+  split: '已拆分',
+  skipped: '已跳过',
+  failed: '失败'
+}[status] || status)
+const splitOutcomeTagType = (status) => ({
+  split: 'success',
+  skipped: 'info',
+  failed: 'danger'
+}[status] || 'info')
+
 // 打开设置弹窗：先以默认值填充草稿（防上一次脏值闪烁），再异步拉取当前设置回填。
 // 基底先行置 null：上次打开的旧基底不可复用（期间设置可能已变），拉取失败保持
 // null 由保存侧拦截（空壳整体提交会清掉其他设置段）
@@ -1410,6 +1726,36 @@ const onThumbsError = (payload) => {
   thumbsProgress.value = null
 }
 
+// ================= 拆分事件（assets-split:*）=================
+// EventsOn 返回注销闭包，onBeforeUnmount 精准注销本组件监听器（禁 EventsOff 全局
+// 移除）。监听器属面板层（确认弹窗可随时关闭、在途任务进度持续可见），故注销
+// 时机 = 组件卸载，弹窗关闭无注销点（取舍见文件头注释）
+let offSplitProgress = null
+let offSplitDone = null
+let offSplitError = null
+
+const onSplitProgress = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  splitting.value = true
+  splitProgress.value = payload
+}
+
+const onSplitDone = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  // 仅复位进度展示；汇总提示由拆分 Promise 分支统一弹出（done 事件先于 Promise
+  // 返回到达，双路径各提示一次会重复，对齐扫描契约）；本库拆分完成后刷新方式 2
+  // 拆分记录（幻灯片详情的「打开拆分单页」按钮随之出现）
+  splitProgress.value = null
+  refreshSplitRecord()
+}
+
+const onSplitError = (payload) => {
+  if (!payload || payload.libraryId !== currentLibraryId.value) return
+  // 契约：仅复位进度不弹提示（error 事件与 Promise reject 同刻到达，错误分流由
+  // Promise catch 的 handleError 统一执行，防双弹——对齐 assets-scan 契约）
+  splitProgress.value = null
+}
+
 // 探测本机 PowerPoint 缩略图能力：失败（含绑定缺失等同步抛错场景）按降级处理，
 // 不弹错、提示条常驻引导；await + try/catch 保证同步异常同样被降级吸收（.catch()
 // 链只能捕获 rejected promise，捕获不了调用本身的同步 throw，会炸挂载链）
@@ -1429,6 +1775,9 @@ onMounted(() => {
   offThumbsProgress = EventsOn('assets-thumbs:progress', onThumbsProgress)
   offThumbsDone = EventsOn('assets-thumbs:done', onThumbsDone)
   offThumbsError = EventsOn('assets-thumbs:error', onThumbsError)
+  offSplitProgress = EventsOn('assets-split:progress', onSplitProgress)
+  offSplitDone = EventsOn('assets-split:done', onSplitDone)
+  offSplitError = EventsOn('assets-split:error', onSplitError)
   probeThumbsAvailable()
   loadLibraries()
 })
@@ -1440,12 +1789,18 @@ onBeforeUnmount(() => {
   offThumbsProgress && offThumbsProgress()
   offThumbsDone && offThumbsDone()
   offThumbsError && offThumbsError()
+  offSplitProgress && offSplitProgress()
+  offSplitDone && offSplitDone()
+  offSplitError && offSplitError()
   offProgress = null
   offDone = null
   offError = null
   offThumbsProgress = null
   offThumbsDone = null
   offThumbsError = null
+  offSplitProgress = null
+  offSplitDone = null
+  offSplitError = null
 })
 
 defineExpose({ loadLibraries, refreshAfterScan })
@@ -1904,5 +2259,74 @@ defineExpose({ loadLibraries, refreshAfterScan })
   margin-left: var(--spacing-sm);
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* ---- 拆分确认弹窗与结果明细 ---- */
+.split-dialog-scope {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  padding: 0 var(--spacing-md) var(--spacing-sm);
+}
+
+/* 源目录落点警示（warning 语义色：产物与源同目录存放的行为提示） */
+.split-source-warning {
+  margin: 0 var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--warning-color);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.split-cache-hint {
+  margin: 0 var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.split-outcome-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: 0 var(--spacing-md);
+}
+
+.split-outcome-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 12px;
+  padding: var(--spacing-xs) 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.split-outcome-row:last-child {
+  border-bottom: none;
+}
+
+.split-outcome-path {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.split-outcome-msg {
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 2;
+  min-width: 0;
 }
 </style>

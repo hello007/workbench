@@ -15,7 +15,7 @@
 4. **增量拆分**：split_records 表（source_rel_path 主键、source_hash、output_dir、page_count、split_at）+ 输出文件存在双验。手动触发时判定：未拆/哈希变 → 拆；已拆哈希同 → 提示「已最新」跳过；哈希变重拆前清空产物目录（防页数减少残留 + 旧 %02d 产物收敛）。
 5. **批量异常口径**：同名冲突/只读/无权限/磁盘不足/加密（OLE 容器 zip 打开失败）逐文件记日志跳过，批量不中断；结果汇总 `{total, split, skipped, failed, 明细}`。
 6. **事件**：新增 `assets-split:progress/done/error` 前缀，素材面板独听（与工具箱 pptx-split:* 隔离）；progress 载荷 `{libraryId, done, total, currentFile, pageDone, pageTotal}`（批量文件级 + 单文件页级透传）。
-7. **取消**：CancelAssetSplit 按库取消注册表（对齐扫描链路 registerCancel/unregisterCancel defer LIFO），取消错误复用 E_GIT_CANCELLED 映射。
+7. **取消**：CancelAssetSplit 按库取消注册表（对齐扫描链路 registerCancel/unregisterCancel defer LIFO），取消错误复用素材域既有的 E_ASSETS_CANCELLED（实现期决议：素材域 warning 分流同款，不取 E_GIT_CANCELLED——git 域错误码不跨域借用，前端 error.js WARNING_CODES 已覆盖该码零改动）。
 8. **跳转方式 2**：幻灯片详情已拆分时显示「打开拆分单页」按钮 → `openWithSystemHandler`（复用 fileoperation 跨平台实现）打开 `<产物>/<源名>-{slide_num:03d}.pptx`；与方式 1 JumpToAssetSlide 并存，无 PowerPoint 可用。
 9. **文档**：README/功能说明/API参考/pptx-split.md 或 assets-management.md 增补。
 10. **拆分体积 GC（B 档，共享核心改动，用户已授权同步修改工具箱拆分代码）**：
