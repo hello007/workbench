@@ -434,7 +434,7 @@ func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage,
 		return model.AssetSlidePage{}, err
 	}
 	rows, err := s.db.Query(
-		"SELECT s.id, s.file_id, f.path, s.slide_num, s.title, s.text, s.speaker_notes " +
+		"SELECT s.id, s.file_id, f.path, s.slide_num, s.title, s.text, s.speaker_notes "+
 			"FROM slides s JOIN files f ON f.id = s.file_id ORDER BY f.path, s.slide_num LIMIT ? OFFSET ?",
 		limit, offset,
 	)

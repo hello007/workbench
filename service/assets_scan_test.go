@@ -420,7 +420,7 @@ func TestAssetScan_ConcurrentRejectedAndCancel(t *testing.T) {
 }
 
 // TestAssetScan_DerivedDirAndExtensionFilter 清单过滤：PPT 拆分派生副本
-//（<同名文件夹>/<同名>-<页序>.pptx 布局，对齐 pptx_split.go 输出约定）整类
+// （<同名文件夹>/<同名>-<页序>.pptx 布局，对齐 pptx_split.go 输出约定）整类
 // 排除（含 ≥100 页的三位页序形态）；同名异构非派生命名不误伤；仅 .pptx 后缀
 // 入库（大小写不敏感）；子目录递归。
 func TestAssetScan_DerivedDirAndExtensionFilter(t *testing.T) {
@@ -479,7 +479,7 @@ func TestAssetScan_DerivedDirAndExtensionFilter(t *testing.T) {
 }
 
 // TestIsPptxSplitDerivative 派生判定单测：标准拆分布局命中；根目录直置
-//「名字-01.pptx」与「.」主干等异构命名不误伤。回归锚点：根目录文件的
+// 「名字-01.pptx」与「.」主干等异构命名不误伤。回归锚点：根目录文件的
 // parentBase="."，文件名主干以「.」开头时（如 .-01.pptx）曾因前缀恰与「.」
 // 匹配被误判为派生而漏索引（审核发现，2026-10-14 修复）。
 func TestIsPptxSplitDerivative(t *testing.T) {
@@ -487,16 +487,16 @@ func TestIsPptxSplitDerivative(t *testing.T) {
 		rel  string
 		want bool
 	}{
-		{"源文件/源文件-01.pptx", true},       // 标准拆分产物（两位页序）
-		{"源文件/源文件-100.pptx", true},      // 三位页序（≥100 页）
+		{"源文件/源文件-01.pptx", true},     // 标准拆分产物（两位页序）
+		{"源文件/源文件-100.pptx", true},    // 三位页序（≥100 页）
 		{"子目录/源文件/源文件-01.pptx", true}, // 多级目录下的标准拆分布局
-		{"源文件.pptx", false},                // 根目录源文件
-		{"直置-01.pptx", false},               // 根目录直置「名字-01.pptx」
-		{".-01.pptx", false},                 // 回归：根目录「.」主干误判
-		{"素材包/介绍-01.pptx", false},         // 目录名与文件主干不同
-		{"源文件/源文件-x1.pptx", false},       // 页序段含非数字
-		{"源文件/源文件-.pptx", false},         // 页序段为空
-		{"说明.txt", false},                   // 非 .pptx 后缀
+		{"源文件.pptx", false},           // 根目录源文件
+		{"直置-01.pptx", false},         // 根目录直置「名字-01.pptx」
+		{".-01.pptx", false},          // 回归：根目录「.」主干误判
+		{"素材包/介绍-01.pptx", false},     // 目录名与文件主干不同
+		{"源文件/源文件-x1.pptx", false},    // 页序段含非数字
+		{"源文件/源文件-.pptx", false},      // 页序段为空
+		{"说明.txt", false},             // 非 .pptx 后缀
 	}
 	for _, tc := range cases {
 		if got := isPptxSplitDerivative(tc.rel); got != tc.want {

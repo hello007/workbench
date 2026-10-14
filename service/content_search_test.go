@@ -463,7 +463,7 @@ func TestMergeTimeoutGroups_AllTimeoutReturnsError(t *testing.T) {
 
 // TestMergeTimeoutGroups_NormalDirsZeroMatchMixedTimeout 混合形态守护：部分
 // 目录正常完成但零命中不产组 + 其余超时 → 正常结果组为空，仍报 E_SEARCH_TIMEOUT
-//（判定条件与收口前逐字一致，不因「非全部目录超时」误返空结果）。
+// （判定条件与收口前逐字一致，不因「非全部目录超时」误返空结果）。
 func TestMergeTimeoutGroups_NormalDirsZeroMatchMixedTimeout(t *testing.T) {
 	timedOut := []*model.ContentSearchGroup{
 		{RepoName: "repo1", RepoPath: "/r1", TimedOut: true},

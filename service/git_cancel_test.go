@@ -271,7 +271,9 @@ func TestConflictOps_CancelRegistryClearedAfterRun(t *testing.T) {
 		{"Rebase", func(t *testing.T) string { return testutil.SetupConflictRepo(t) },
 			func(svc *GitService, dir string) (string, error) { return svc.Rebase(dir, "feature") }},
 		{"CherryPick", func(t *testing.T) string { return testutil.SetupConflictRepo(t) },
-			func(svc *GitService, dir string) (string, error) { return svc.CherryPick(dir, revParse(t, dir, "feature")) }},
+			func(svc *GitService, dir string) (string, error) {
+				return svc.CherryPick(dir, revParse(t, dir, "feature"))
+			}},
 		{"ContinueMerge", func(t *testing.T) string {
 			dir := testutil.SetupConflictRepo(t)
 			if _, err := NewGitService().Merge(dir, "feature", model.MergeModeFF); err != nil {
