@@ -346,3 +346,37 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 121: 素材管理第五批：素材视图与选中体系（SRS §2.3）
+
+**Date**: 2026-10-15
+**Task**: 素材管理第五批：素材视图与选中体系（SRS §2.3）
+**Branch**: `master`
+
+### Summary
+
+列表视图（三语境列集+底册join）、全屏预览翻页（视图序列D1零后端）、文件/幻灯片双模式选中（键契约禁slides.id+浮动条+清空点位矩阵）、缩放滑块（固定卡宽消突变）、双击交互（预览/文件过滤）、失败缩略图自动补恰一轮；真机反馈六项修复全过。附带D7跳转零可见修复（真机两轮定性）：owned镜像持久化+残留回收+楔死实例并回+WPS应用级不可见Visible兜底。前端1746用例+后端全量绿，覆盖率84.5%；spec沉淀assets-management §8+assets-thumbs-com §9.1
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bebaeee` | (see git log) |
+| `f024a52` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
