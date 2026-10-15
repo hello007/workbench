@@ -62,3 +62,6 @@ coverage.out
 # Playwright E2E artifacts
 frontend/test-results/
 frontend/playwright-report/
+
+# cc-connect 桥接会话产物（附件缓存，环境运行时目录）
+.cc-connect/
