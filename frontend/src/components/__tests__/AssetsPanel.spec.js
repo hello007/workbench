@@ -56,7 +56,10 @@ const mockSlides = [
     title: '封面页',
     text: '城商行零售转型方案',
     speakerNotes: '开场白',
-    tags: [mockTags[0]]
+    tags: [mockTags[0]],
+    ownTags: [{ id: 9, name: '封面页标签', color: '#f59e0b', parentId: 0 }],
+    note: '开场页业务备注',
+    rating: 2
   },
   {
     id: 22,
@@ -66,7 +69,10 @@ const mockSlides = [
     title: '背景页',
     text: '获客成本持续上升',
     speakerNotes: '',
-    tags: [mockTags[0]]
+    tags: [mockTags[0]],
+    ownTags: [],
+    note: '',
+    rating: 0
   }
 ]
 
@@ -95,7 +101,10 @@ const mockSearchPage = {
       snippet: '…城商行获客…',
       score: -2.1,
       hitCount: 3,
-      tags: [mockTags[0]]
+      tags: [mockTags[0]],
+      ownTags: [],
+      note: '',
+      rating: 0
     }
   ],
   total: 2,
@@ -141,6 +150,7 @@ const { wailsMock } = vi.hoisted(() => ({
     ListAssetFiles: vi.fn(),
     ListAssetSlides: vi.fn(),
     UpdateAssetFileMeta: vi.fn(),
+    UpdateAssetSlideMeta: vi.fn(),
     SearchAssets: vi.fn(),
     OpenDirectoryDialog: vi.fn(),
     AssetThumbsAvailable: vi.fn(),
@@ -278,6 +288,7 @@ describe('AssetsPanel', () => {
     wailsMock.CreateAssetLibrary.mockResolvedValue({ ...mockLibrary, id: 'lib-2', name: '新库' })
     wailsMock.DeleteAssetLibrary.mockResolvedValue(null)
     wailsMock.UpdateAssetFileMeta.mockResolvedValue(null)
+    wailsMock.UpdateAssetSlideMeta.mockResolvedValue(null)
     // 目录对话框默认空串 = 用户取消（安全 no-op）
     wailsMock.OpenDirectoryDialog.mockResolvedValue('')
     // ---- 缩略图（PR3）默认值：Available=false 走降级提示条 + 占位卡稳定路径，按用例覆盖 ----
@@ -412,6 +423,7 @@ describe('AssetsPanel', () => {
     expect(wailsMock.SearchAssets).toHaveBeenCalledWith('lib-1', '城商行', {
       flatten: false,
       tagIds: [],
+      slideTagOnlyOwn: false,
       limit: 50,
       offset: 0
     })
@@ -473,6 +485,7 @@ describe('AssetsPanel', () => {
     expect(wailsMock.SearchAssets).toHaveBeenNthCalledWith(callsBefore + 1, 'lib-1', '城商行', {
       flatten: true,
       tagIds: [],
+      slideTagOnlyOwn: false,
       limit: 200,
       offset: 0
     })
@@ -518,6 +531,7 @@ describe('AssetsPanel', () => {
     expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
       flatten: true,
       tagIds: [],
+      slideTagOnlyOwn: false,
       limit: 50,
       offset: 0
     })
@@ -553,7 +567,367 @@ describe('AssetsPanel', () => {
     expect(wailsMock.ListAssetFiles).toHaveBeenCalledTimes(2)
   })
 
-  it('幻灯片详情：继承标签只读展示带「继承」标记，溯源按钮跳文件视图并选中归属文件', async () => {
+  it('幻灯片标注保存（浏览模式）：星级/业务备注/自有标签经 UpdateAssetSlideMeta 整体替换保存并重拉幻灯片清单，无扫描/缩略图副作用', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 打开无标注基线的第 2 页详情：草稿取条目零值标注初始化
+    await wrapper.findAll('.asset-card')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(0)
+    expect(wrapper.find('textarea').element.value).toBe('')
+
+    // 编辑：打 3 星 + 填业务备注 + 选自有标签
+    await wrapper.findAll('.rate-star')[2].trigger('click')
+    await wrapper.find('textarea').setValue('适配分行场景')
+    const slideTagsSelect = wrapper.findComponent('.slide-tags-select')
+    await slideTagsSelect.vm.$emit('update:modelValue', ['重点页', '新页标签'])
+    await flushPromises()
+
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    // 入参形状对齐 model.AssetSlideMetaUpdate（note/rating/tagNames），定位键 fileId+slideNum
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledWith('lib-1', 11, 2, {
+      rating: 3,
+      note: '适配分行场景',
+      tagNames: ['重点页', '新页标签']
+    })
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已保存')
+    // 浏览语境刷新路径：重拉幻灯片清单（对齐文件保存后重拉底册），检索不重跑
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(2)
+    expect(wailsMock.SearchAssets).not.toHaveBeenCalled()
+    // 纯标注层写入：不触发重解析与缩略图失效（断言无副作用）
+    expect(wailsMock.StartAssetScan).not.toHaveBeenCalled()
+    expect(wailsMock.RetryAssetThumb).not.toHaveBeenCalled()
+  })
+
+  it('检索命中幻灯片详情：草稿取命中条目自有标注初始化（自有标签不在文件聚合仍正常显示），保存后重跑检索', async () => {
+    // 单页命中（hitCount=1 可直接点进详情），自带独立标注三字段
+    wailsMock.SearchAssets.mockResolvedValue({
+      items: [{
+        refType: 'slide',
+        refId: 22,
+        fileId: 11,
+        filePath: '方案A/城商行方案.pptx',
+        title: '背景页',
+        slideNum: 2,
+        snippet: '…获客…',
+        score: -1,
+        hitCount: 1,
+        tags: [mockTags[0]],
+        ownTags: [{ id: 9, name: '获客页标签', color: '#f59e0b', parentId: 0 }],
+        note: '命中页备注',
+        rating: 4
+      }],
+      total: 1,
+      keyword: '获客',
+      flattened: false
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('获客')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    const detail = wrapper.find('.assets-detail')
+    // 草稿初始化（检索命中条目路径）：星级/业务备注取命中条目标注
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(4)
+    expect(detail.find('textarea').element.value).toBe('命中页备注')
+    // 页自有标签不在文件底册聚合选项（tagOptions 仅 重点/方案），并集兜底后仍作为选项/已选值正常显示
+    const optionValues = wrapper.findAll('.slide-tags-select option').map((o) => o.element.value)
+    expect(optionValues).toContain('获客页标签')
+
+    // 编辑星级后保存：检索语境重跑检索刷新命中数据（不重拉清单）
+    await wrapper.findAll('.rate-star')[4].trigger('click')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledWith('lib-1', 11, 2, {
+      rating: 5,
+      note: '命中页备注',
+      tagNames: ['获客页标签']
+    })
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(2)
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(1)
+  })
+
+  it('保存后刷新 miss（浏览语境，条目不在复位首页）：草稿保留刚保存值且 selected 引用按提交值回填（审查 P1：防旧快照回退二次写回）', async () => {
+    // 首次加载返回 2 条；保存后刷新复位首页仅返回第 1 条（模拟深页条目 miss）
+    wailsMock.ListAssetSlides
+      .mockResolvedValueOnce({ items: mockSlides, total: 4 })
+      .mockResolvedValue({ items: [mockSlides[0]], total: 4 })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 打开第 2 条（id=22，无标注基线）详情并编辑保存
+    await wrapper.findAll('.asset-card')[1].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.rate-star')[2].trigger('click')
+    await wrapper.find('textarea').setValue('适配分行场景')
+    const slideTagsSelect = wrapper.findComponent('.slide-tags-select')
+    await slideTagsSelect.vm.$emit('update:modelValue', ['重点页', '新页标签'])
+    await flushPromises()
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledTimes(1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(2)
+
+    // miss 分支：草稿不回读旧快照（保持刚保存值，无回退）
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(3)
+    expect(wrapper.find('textarea').element.value).toBe('适配分行场景')
+
+    // selected 引用已按提交值就地回填：点「重置」（草稿从 selected 引用重读）仍是刚保存值
+    await clickButton(wrapper, '重置')
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(3)
+    expect(wrapper.find('textarea').element.value).toBe('适配分行场景')
+    expect(wrapper.findComponent('.slide-tags-select').props('modelValue')).toEqual(['重点页', '新页标签'])
+  })
+
+  it('保存后刷新 miss（检索语境，命中不在重跑结果页）：草稿保留刚保存值且 hit 引用按提交值回填（审查 P1）', async () => {
+    const hitItem = {
+      refType: 'slide',
+      refId: 22,
+      fileId: 11,
+      filePath: '方案A/城商行方案.pptx',
+      title: '背景页',
+      slideNum: 2,
+      snippet: '…获客…',
+      score: -1,
+      hitCount: 1,
+      tags: [mockTags[0]],
+      ownTags: [],
+      note: '',
+      rating: 0
+    }
+    // 首次检索返回命中；保存后重跑检索返回空页（模拟保存条目不在返回页）
+    wailsMock.SearchAssets
+      .mockResolvedValueOnce({ items: [hitItem], total: 1, keyword: '获客', flattened: false })
+      .mockResolvedValue({ items: [], total: 0, keyword: '获客', flattened: false })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('获客')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(0)
+
+    // 编辑星级（5 星）后保存：重跑检索 miss
+    await wrapper.findAll('.rate-star')[4].trigger('click')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledWith('lib-1', 11, 2, {
+      rating: 5,
+      note: '',
+      tagNames: []
+    })
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(2)
+
+    // miss 分支：星级保持 5 不回退；点「重置」（草稿从 selected.hit 重读）仍是刚保存值
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(5)
+    await clickButton(wrapper, '重置')
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(5)
+  })
+
+  it('保存刷新期间检索语境变更（切仅自身标签开关）：守卫判定退出，不写回 selected 也不重置草稿（审查 risk 1）', async () => {
+    const initialPage = {
+      items: [{
+        refType: 'slide',
+        refId: 22,
+        fileId: 11,
+        filePath: '方案A/城商行方案.pptx',
+        title: '背景页',
+        slideNum: 2,
+        snippet: '…获客…',
+        score: -1,
+        hitCount: 1,
+        tags: [mockTags[0]],
+        ownTags: [{ id: 9, name: '获客页标签', color: '#f59e0b', parentId: 0 }],
+        note: '命中页备注',
+        rating: 4
+      }],
+      total: 1,
+      keyword: '获客',
+      flattened: false
+    }
+    // 开关重跑后的新语境页：同 refId 但标注值不同——若无守卫，保存链写回会把
+    // 该新语境 hit 同步进 selected 并 reset 草稿（表单回退为新语境值）
+    const switchedPage = {
+      items: [{ ...initialPage.items[0], rating: 1, note: '语境切换后数据' }],
+      total: 1,
+      keyword: '获客',
+      flattened: false
+    }
+    // 请求按发起序分流：第 1 次 = 初始检索（快落定）；第 2 次 = 保存后的重跑检索
+    // （挂起，制造在途窗口）；第 3 次 = 在途窗口内切开关触发的重跑（快落定）。
+    // 保存刷新慢响应最后放行——此时 searchSeq 已变，runSearch 内部守卫丢弃响应，
+    // onSaveSlideMeta 的守卫快照比对应整体退出
+    let searchCalls = 0
+    let resolveSaveRefresh
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      searchCalls++
+      if (searchCalls === 2) {
+        return new Promise((resolve) => { resolveSaveRefresh = () => resolve(switchedPage) })
+      }
+      return Promise.resolve(searchCalls === 1 ? initialPage : switchedPage)
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('获客')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(4)
+
+    // 编辑星级（5）后保存：保存刷新检索挂起在途
+    await wrapper.findAll('.rate-star')[4].trigger('click')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    expect(searchCalls).toBe(2)
+
+    // 在途窗口内切「仅幻灯片自身标签」开关（searchSeq++ 且不关详情，自行重跑检索）
+    const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    await ownSwitch.vm.$emit('update:modelValue', true)
+    await ownSwitch.vm.$emit('change', true)
+    await flushPromises()
+    expect(searchCalls).toBe(3)
+
+    // 保存刷新慢响应后到：守卫判定退出，草稿不被 reset 也不被新语境数据写回
+    resolveSaveRefresh()
+    await flushPromises()
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(5)
+    expect(wrapper.find('.assets-detail textarea').element.value).toBe('命中页备注')
+    // 保存调用本身已发生（成功语义不变），无二次写回
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledTimes(1)
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledWith('lib-1', 11, 2, {
+      rating: 5,
+      note: '命中页备注',
+      tagNames: ['获客页标签']
+    })
+  })
+
+  it('保存成功后清空聚合展开态：重展开重新按当前口径拉取（审查 risk 2：旧 aggChildren 缓存持有保存前标注）', async () => {
+    // 聚合命中（hitCount=3）；flatten 聚合检索返回逐页子项（保存前标注基线 rating 0）
+    const childHit = {
+      refType: 'slide',
+      refId: 22,
+      fileId: 11,
+      filePath: '方案A/城商行方案.pptx',
+      title: '背景页',
+      slideNum: 2,
+      snippet: '…城商行获客…',
+      score: -1,
+      hitCount: 1,
+      tags: [mockTags[0]],
+      ownTags: [],
+      note: '',
+      rating: 0
+    }
+    const aggPage = { items: [mockSearchPage.items[1]], total: 1, keyword: '城商行', flattened: false }
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.flatten) return Promise.resolve({ items: [childHit], total: 1, keyword, flattened: true })
+      return Promise.resolve(aggPage)
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡（flatten 检索写入 aggChildren），点子项进详情，编辑星级保存
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.agg-child').length).toBe(1)
+    await wrapper.find('.agg-child').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.rate-star')[3].trigger('click')
+    const callsBeforeSave = wailsMock.SearchAssets.mock.calls.length
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledTimes(1)
+    // 保存成功（命中分支）：重跑检索已发生
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBeforeSave + 1)
+
+    // 聚合展开态已随保存清空：子项区收起（旧缓存不清时此处置位仍展开）
+    expect(wrapper.find('.agg-child').exists()).toBe(false)
+
+    // 重展开重新发起 flatten 检索（不受旧 aggChildren 早退），带当前检索口径
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
+      flatten: true,
+      tagIds: [],
+      slideTagOnlyOwn: false,
+      limit: 200,
+      offset: 0
+    })
+    expect(wrapper.findAll('.agg-child').length).toBe(1)
+  })
+
+  it('继承筛选开关：仅幻灯片视图显示（文件视图隐藏），切换后 SearchAssets 收到 slideTagOnlyOwn=true 且立即重跑检索', async () => {
+    const wrapper = await createWrapper()
+    // 文件视图（检索结果只含文件条目，开关无可见效果）下隐藏
+    expect(wrapper.find('.slide-own-switch').exists()).toBe(false)
+
+    // 切幻灯片视图：开关出现且默认关闭
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.find('.slide-own-switch').exists()).toBe(true)
+    expect(wrapper.find('.slide-own-switch').text()).toContain('仅幻灯片自身标签')
+    const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    expect(ownSwitch.props('modelValue')).toBe(false)
+
+    // 纯标签筛选触发检索（选中标签即进入检索模式）
+    const tagSelect = wrapper.findComponent('.tag-filter')
+    await tagSelect.vm.$emit('update:modelValue', [1])
+    await tagSelect.vm.$emit('change', [1])
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(1)
+
+    // 切开关：立即以 slideTagOnlyOwn=true 重跑检索（纯标签浏览路径同样生效）
+    await ownSwitch.vm.$emit('update:modelValue', true)
+    await ownSwitch.vm.$emit('change', true)
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '', {
+      flatten: false,
+      tagIds: [1],
+      slideTagOnlyOwn: true,
+      limit: 50,
+      offset: 0
+    })
+  })
+
+  it('幻灯片详情：文件标签（继承）只读弱化带「继承」标记，三层独立标注编辑区与双备注命名并存，溯源跳转保留', async () => {
     const wrapper = await createWrapper()
     // 切幻灯片视图
     const group = wrapper.findComponent(ElRadioGroupStub)
@@ -567,9 +941,21 @@ describe('AssetsPanel', () => {
     const detail = wrapper.find('.assets-detail')
     expect(detail.text()).toContain('第 1 页')
     expect(detail.text()).toContain('方案A/城商行方案.pptx')
-    expect(detail.text()).toContain('继承')
-    // 幻灯片详情无编辑表单（星级/备注/标签编辑为文件级）
-    expect(wrapper.find('.el-rate').exists()).toBe(false)
+    // 继承区：只读弱化（标题改名 + 无输入控件），标签带「继承」标记
+    expect(detail.text()).toContain('文件标签（继承）')
+    expect(detail.find('.detail-inherit-tags .inherit-mark').exists()).toBe(true)
+    expect(detail.find('.detail-inherit-tags input, .detail-inherit-tags textarea, .detail-inherit-tags select').exists()).toBe(false)
+    // 编辑区：星级/幻灯片标签/业务备注三控件齐备（对齐文件详情编辑形态）
+    expect(detail.find('.el-rate').exists()).toBe(true)
+    expect(detail.find('.slide-tags-select').exists()).toBe(true)
+    // 双备注命名并存：业务备注（用户标注 textarea）与演讲者备注（解析自带只读）严格区分
+    expect(detail.text()).toContain('业务备注')
+    expect(detail.text()).toContain('演讲者备注')
+    expect(detail.find('textarea').exists()).toBe(true)
+
+    // 草稿初始化（画廊清单条目路径）：星级/业务备注/自有标签取条目自带标注
+    expect(wrapper.findComponent(ElRateStub).props('modelValue')).toBe(2)
+    expect(detail.find('textarea').element.value).toBe('开场页业务备注')
 
     // 溯源：切回文件视图并选中归属文件（id=11）
     await clickButton(wrapper, '查看归属文件')
@@ -919,9 +1305,99 @@ describe('AssetsPanel', () => {
     expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '新词', {
       flatten: true,
       tagIds: [],
+      slideTagOnlyOwn: false,
       limit: 200,
       offset: 0
     })
+  })
+
+  it('聚合展开在途守卫：仅自身标签开关切换后旧聚合响应丢弃，重新展开按新口径重拉（审查 P2：contextChanged 快照含 slideTagOnlyOwn）', async () => {
+    let resolveAgg
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.flatten) {
+        return new Promise((resolve) => { resolveAgg = () => resolve(mockSearchPage) })
+      }
+      return Promise.resolve(mockSearchPage)
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡：flatten 检索挂起
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    // 展开在途切「仅幻灯片自身标签」开关（清空 aggChildren 的语境变更点），
+    // 随后旧口径聚合响应才返回
+    const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    await ownSwitch.vm.$emit('update:modelValue', true)
+    await ownSwitch.vm.$emit('change', true)
+    await flushPromises()
+    resolveAgg()
+    await flushPromises()
+
+    // 守卫生效：旧响应未复活 aggChildren → 重新展开应再次发起 flatten 检索，
+    // 且以新开关口径发起（快照值透传）
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
+      flatten: true,
+      tagIds: [],
+      slideTagOnlyOwn: true,
+      limit: 200,
+      offset: 0
+    })
+  })
+
+  it('聚合展开在途守卫：平铺开关切换后旧聚合响应丢弃，重新展开重新拉取（审查 P2：contextChanged 快照含 flatten）', async () => {
+    // flatten 请求按发起序挂起：pendingAgg[0] = toggleAgg 的聚合请求；切平铺开关
+    // 后 onFlattenChange 触发的 runSearch 也是 flatten 形态（v-model 先更新）会入队
+    // pendingAgg[1]，须精确 resolve 第一个才能驱动 toggleAgg 的在途写回分支
+    const pendingAgg = []
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.flatten) {
+        return new Promise((resolve) => { pendingAgg.push(resolve) })
+      }
+      return Promise.resolve(mockSearchPage)
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡：flatten 检索挂起（pendingAgg[0]）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(pendingAgg.length).toBe(1)
+
+    // 展开在途切平铺开关（onFlattenChange 清空 aggChildren 的语境变更点；开关自身
+    // 触发的检索入队 pendingAgg[1] 挂起），随后旧聚合响应才返回
+    const flattenSwitch = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitch.vm.$emit('update:modelValue', true)
+    await flattenSwitch.vm.$emit('change', true)
+    await flushPromises()
+    expect(pendingAgg.length).toBe(2)
+    pendingAgg[0](mockSearchPage)
+    await flushPromises()
+
+    // 守卫生效：旧响应未复活 aggChildren → 重新展开应再次发起 flatten 检索
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
   })
 
   it('库不存在自愈：统计报 E_ASSETS_LIB_NOT_FOUND 时静默重拉库列表并落定剩余库（审核 14）', async () => {

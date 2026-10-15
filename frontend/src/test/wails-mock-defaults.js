@@ -205,10 +205,18 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
   ListAssetFiles: [],
-  // 幻灯片清单默认空分页页（items/total 对齐 model.AssetSlidePage，2026-10-14 起分页）
+  // 幻灯片清单默认空分页页（items/total 对齐 model.AssetSlidePage，2026-10-14 起分页）。
+  // 幻灯片条目形状对齐 model.AssetSlideEntry：基础字段（id/fileId/filePath/slideNum/
+  // title/text/speakerNotes/tags）+ 独立标注三字段（SRS §2.2.4：ownTags 页自有标签
+  // 数组 / note 业务备注 / rating 星级 0-5），用例注入条目 fixture 时须带全三字段
   ListAssetSlides: { items: [], total: 0 },
   UpdateAssetFileMeta: null,
-  // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）
+  // 幻灯片页级标注保存（整体替换：note/rating/tagNames）：void 返回 null 安全 no-op；
+  // 纯标注层写入，不触发重解析与缩略图失效
+  UpdateAssetSlideMeta: null,
+  // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）。
+  // 幻灯片命中条目（refType='slide'）自带 ownTags/note/rating 三字段（文件条目恒零值），
+  // opts 含 slideTagOnlyOwn 继承开关（默认 false = 合并归属文件标签命中）
   SearchAssets: { items: [], total: 0, keyword: '', flattened: false },
 
   // ---- 素材缩略图（PR3：画廊/详情懒加载 + 能力探测 + 打开跳转 + 失败重试 + 设置）----

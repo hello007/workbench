@@ -18,6 +18,12 @@
      执行（防双弹双刷新，对齐扫描契约）；已拆分文件的幻灯片详情提供「打开拆分单页」
      （GetAssetSplitRecord exists 判定显隐 + OpenAssetSplitPage 打开，与 COM 跳转
      方式并存）。
+     幻灯片独立标注（SRS §2.2.4）：单页三层标注（星级/幻灯片标签/业务备注）经
+     UpdateAssetSlideMeta 整体替换保存（存储 slide_tags/slide_meta，键 file_id +
+     slide_num，与文件标签存储完全独立、不触发重解析与缩略图失效）；详情面板
+     「文件标签（继承）」只读弱化展示归属文件标签，与自有标签编辑区上下分区；
+     标签筛选「仅幻灯片自身标签」开关（opts.slideTagOnlyOwn）切换继承合并/仅自身
+     两种命中口径（默认合并向后兼容，仅作用于标签筛选，关键词命中不受影响）。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
@@ -152,6 +158,15 @@
           </span>
         </el-option>
       </el-select>
+      <!-- 幻灯片标签继承开关（SRS §2.2.4）：false = 幻灯片条目按【页自身标签 ∪ 归属
+           文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中。仅幻灯片视图
+           语义相关——文件视图下检索结果只含文件条目（开关不产生可见效果），隐藏 -->
+      <el-tooltip v-if="showSlideTagOwnSwitch" content="开启后标签筛选仅匹配幻灯片页自身标签，不再合并归属文件标签（文件条目不受影响）" placement="bottom">
+        <span class="flatten-switch slide-own-switch">
+          <el-switch v-model="slideTagOnlyOwn" size="small" @change="onSlideTagOwnChange" />
+          仅幻灯片自身标签
+        </span>
+      </el-tooltip>
       <el-radio-group v-model="viewMode" size="small" @change="onViewModeChange">
         <el-radio-button value="file">文件视图</el-radio-button>
         <el-radio-button value="slide">幻灯片视图</el-radio-button>
@@ -255,7 +270,8 @@
         </template>
       </div>
 
-      <!-- 详情侧边栏：文件可编辑（星级/备注/标签），幻灯片只读 + 溯源跳转 -->
+      <!-- 详情侧边栏：文件与幻灯片均可编辑（文件级星级/备注/标签；幻灯片级星级/
+           业务备注/自有标签），幻灯片另带归属文件标签（继承）只读区与溯源跳转 -->
       <div v-if="selected" class="assets-detail">
         <div class="detail-head">
           <span class="detail-title" :title="detailTitle">{{ detailTitle }}</span>
@@ -339,7 +355,9 @@
           <el-alert v-else type="warning" :closable="false" title="文件索引记录不存在，请重新扫描后操作" />
         </template>
 
-        <!-- 幻灯片详情：只读展示 + 归属文件溯源 + 继承标签只读标记 -->
+        <!-- 幻灯片详情：三层独立标注（星级/幻灯片标签/业务备注）可编辑（对齐文件
+             详情编辑形态）+ 归属文件标签（继承）只读弱化 + 解析自带内容只读展示 +
+             溯源跳转。业务备注与演讲者备注严格命名区分（前者用户标注、后者解析自带） -->
         <template v-else>
           <div class="detail-section">
             <div class="detail-row"><span class="detail-label">页码</span><span class="detail-value">第 {{ detailSlideNum }} 页</span></div>
@@ -357,14 +375,49 @@
             <div class="detail-label">命中摘要</div>
             <div class="detail-pre">{{ detailSlideSnippet }}</div>
           </div>
+          <!-- 文件标签（继承）：只读弱化区（无输入控件），与下方幻灯片自有标签编辑区上下分区 -->
           <div class="detail-section">
-            <div class="detail-label">标签（继承自归属文件）</div>
+            <div class="detail-label">文件标签（继承）</div>
             <div v-if="detailTags.length > 0" class="detail-inherit-tags">
               <span v-for="tag in detailTags" :key="tag.id" class="card-tag">
                 <span class="tag-color-dot" :style="{ background: tag.color }"></span>{{ tag.name }}<span class="inherit-mark">继承</span>
               </span>
             </div>
             <span v-else class="detail-empty-hint">归属文件暂无标签</span>
+          </div>
+          <!-- 独立标注编辑区（存储于 slide_tags/slide_meta，键 file_id+slide_num，
+               与文件标签存储完全独立；保存不触发重解析与缩略图失效） -->
+          <div class="detail-section">
+            <div class="detail-label">星级</div>
+            <el-rate v-model="slideDraft.rating" clearable />
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">幻灯片标签</div>
+            <el-select
+              v-model="slideDraft.tags"
+              class="detail-tags-select slide-tags-select"
+              placeholder="选择或输入新标签"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              :loading="savingMeta"
+            >
+              <el-option v-for="tag in slideTagOptions" :key="tag.id" :label="tag.name" :value="tag.name" />
+            </el-select>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">业务备注</div>
+            <el-input
+              v-model="slideDraft.note"
+              type="textarea"
+              :rows="4"
+              placeholder="记录本页素材用途、适配场景等业务备注（区别于演讲者备注）"
+            />
+          </div>
+          <div class="detail-actions">
+            <el-button size="small" type="primary" :loading="savingMeta" @click="onSaveSlideMeta">保存</el-button>
+            <el-button size="small" :disabled="savingMeta" @click="resetSlideDraft">重置</el-button>
           </div>
           <div class="detail-actions">
             <!-- 打开跳转：仅本机 PowerPoint 可用时提供（降级态隐藏入口，与提示条联动） -->
@@ -551,6 +604,7 @@ import {
   ListAssetFiles,
   ListAssetSlides,
   UpdateAssetFileMeta,
+  UpdateAssetSlideMeta,
   SearchAssets,
   OpenDirectoryDialog,
   AssetThumbsAvailable,
@@ -602,6 +656,9 @@ const flatten = ref(false) // 检索聚合折叠/平铺开关（SearchAssets opt
 const keywordInput = ref('') // 输入框绑定值（未应用）
 const activeKeyword = ref('') // 已应用关键词（非空即检索模式）
 const selectedTagIds = ref([]) // 标签筛选（非空即检索模式）
+// 标签筛选继承开关（SearchAssets opts.slideTagOnlyOwn）：false = 幻灯片条目【页自
+// 身标签 ∪ 归属文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中
+const slideTagOnlyOwn = ref(false)
 
 // ---- 数据 ----
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
@@ -615,6 +672,9 @@ const loadingMore = ref(false)
 // ---- 详情与编辑 ----
 const selected = ref(null) // { kind: 'file'|'slide', fileEntry?, slideEntry?, hit? }
 const detailDraft = ref({ rating: 0, note: '', tags: [] })
+// 幻灯片独立标注草稿（SRS §2.2.4，与文件级 detailDraft 相互独立）：tags 为页自
+// 有标签名列表（保存经 UpdateAssetSlideMeta 整体替换）
+const slideDraft = ref({ rating: 0, note: '', tags: [] })
 const savingMeta = ref(false)
 
 // ---- 扫描状态 ----
@@ -738,6 +798,22 @@ const tagOptions = computed(() => {
   return Array.from(byId.values())
 })
 
+// 「仅使用幻灯片自身标签」开关可见性：仅幻灯片视图语义相关（SRS §2.2.4 开关只
+// 作用于幻灯片条目筛选；文件视图下检索结果只含文件条目，开关不产生可见效果，隐藏）
+const showSlideTagOwnSwitch = computed(() => viewMode.value === 'slide')
+
+// 幻灯片标签编辑选项：文件底册聚合选项 ∪ 当前草稿已选值（页自有标签不在文件聚
+// 合中——slide_tags 与文件标签存储独立——仍须作为已选值正常显示；el-select 对不在
+// options 的已选值渲染原值，并集兜底让选项下拉与已选 tag 展示一致）
+const slideTagOptions = computed(() => {
+  const known = new Set(tagOptions.value.map(t => t.name))
+  const extra = slideDraft.value.tags.filter(name => !known.has(name))
+  if (extra.length === 0) return tagOptions.value
+  return tagOptions.value.concat(
+    extra.map((name, i) => ({ id: `own-extra-${i}-${name}`, name, color: '', parentId: 0 }))
+  )
+})
+
 // ---- 卡片视图模型 ----
 // 浏览模式卡片（清单数据），检索模式卡片（命中条目）统一为同构形态供画廊渲染
 const browseCards = computed(() => {
@@ -812,7 +888,8 @@ const detailFilePath = computed(() => selected.value?.slideEntry?.filePath ?? se
 const detailSlideText = computed(() => selected.value?.slideEntry?.text || '')
 const detailSlideNotes = computed(() => selected.value?.slideEntry?.speakerNotes || '')
 const detailSlideSnippet = computed(() => selected.value?.hit?.snippet || '')
-// 幻灯片标签为继承口径（本批幻灯片无自有标签），只读展示不提供编辑
+// 幻灯片详情继承标签（归属文件标签，继承语义不变）：只读弱化展示，编辑走
+// slideDraft.tags（页自有标签，存储独立）
 const detailTags = computed(() => selected.value?.slideEntry?.tags || selected.value?.hit?.tags || [])
 
 // 详情条目对应的文件 ID 兜底链：文件详情取底册 id，幻灯片/检索命中取 fileId
@@ -1039,6 +1116,7 @@ const runSearch = async (reset) => {
     const page = await SearchAssets(currentLibraryId.value, activeKeyword.value.trim(), {
       flatten: flatten.value,
       tagIds: selectedTagIds.value,
+      slideTagOnlyOwn: slideTagOnlyOwn.value,
       limit: PAGE_SIZE,
       offset: reset ? 0 : searchItems.value.length
     })
@@ -1096,6 +1174,20 @@ const onFlattenChange = () => {
   }
 }
 
+// 「仅使用幻灯片自身标签」开关变更（对齐 onFlattenChange 的语境重置面）：检索
+// 条件变更点——在途检索写回失效 + 聚合展开态清空（子项按旧筛选条件拉取）；
+// 检索态立即重跑检索，浏览态仅记录条件待下次检索生效（开关不改变 searchMode
+// 判定，无检索可重跑）
+const onSlideTagOwnChange = () => {
+  searchSeq++
+  expandedAggPaths.value = []
+  aggChildren.value = {}
+  aggLoadingPaths.value = []
+  if (searchMode.value) {
+    runSearch(true)
+  }
+}
+
 const onViewModeChange = () => {
   // 视图切换：检索模式为客户端类型过滤（displayCards 已响应）；浏览模式目标清单
   // 为空即拉取——覆盖「库切换/扫描落定在幻灯片视图后切回文件视图」时文件底册未
@@ -1124,15 +1216,24 @@ const toggleAgg = async (filePath) => {
   aggLoadingPaths.value = aggLoadingPaths.value.concat(filePath)
   const keywordAtStart = activeKeyword.value.trim()
   const tagsAtStart = [...selectedTagIds.value]
+  // 平铺/仅自身标签开关同属检索语境快照面（审查 P2）：在途展开期间切换（对应
+  // onFlattenChange/onSlideTagOwnChange 已清空 aggChildren）时，旧口径响应若照常
+  // 写回会让重展开在 aggChildren 缓存上早退，恒显旧筛选语义子项——快照纳入
+  // contextChanged 比对（对齐 tagsAtStart 形态），发起参数同取快照值
+  const flattenAtStart = flatten.value
+  const onlyOwnAtStart = slideTagOnlyOwn.value
   const libSeqAtStart = librarySeq
   const contextChanged = () => libSeqAtStart !== librarySeq ||
     keywordAtStart !== activeKeyword.value.trim() ||
     tagsAtStart.length !== selectedTagIds.value.length ||
-    tagsAtStart.some((tagId, i) => tagId !== selectedTagIds.value[i])
+    tagsAtStart.some((tagId, i) => tagId !== selectedTagIds.value[i]) ||
+    flattenAtStart !== flatten.value ||
+    onlyOwnAtStart !== slideTagOnlyOwn.value
   try {
     const page = await SearchAssets(currentLibraryId.value, keywordAtStart, {
       flatten: true,
       tagIds: tagsAtStart,
+      slideTagOnlyOwn: onlyOwnAtStart,
       limit: 200,
       offset: 0
     })
@@ -1187,6 +1288,9 @@ const onCardClick = async (card) => {
   } else {
     const slide = card.slide || slideEntries.value.find(s => s.id === card.id) || null
     selected.value = { kind: 'slide', slideEntry: slide, hit: card.slide ? null : card.hit }
+    // 选中条目切换即重置幻灯片标注草稿（画廊清单条目与检索命中条目两条路径
+    // 均初始化，数据源取条目自带 ownTags/note/rating）
+    resetSlideDraft()
   }
 }
 
@@ -1201,6 +1305,19 @@ const resetDraft = () => {
     rating: entry?.rating || 0,
     note: entry?.note || '',
     tags: (entry?.tags || []).map(t => t.name)
+  }
+}
+
+// 幻灯片标注草稿重置：数据源优先 hit（检索命中详情保存后 hit 已刷新为最新标注；
+// 浏览模式 hit 为空自然落到 slideEntry 清单条目），两路径（画廊条目/检索命中条目）
+// 选中时草稿都能初始化
+const resetSlideDraft = () => {
+  const hit = selected.value?.hit
+  const entry = selected.value?.slideEntry
+  slideDraft.value = {
+    rating: hit?.rating ?? entry?.rating ?? 0,
+    note: hit?.note ?? entry?.note ?? '',
+    tags: (hit?.ownTags ?? entry?.ownTags ?? []).map(t => t.name)
   }
 }
 
@@ -1232,6 +1349,120 @@ const onSaveMeta = async () => {
     resetDraft()
     if (searchMode.value) {
       await runSearch(true)
+    }
+  } catch (error) {
+    handleError('保存失败: ', error)
+  } finally {
+    savingMeta.value = false
+  }
+}
+
+// 浏览清单双引用同步：检索语境保存后 slideEntries 可能仍持旧标注快照（清单未
+// 随检索刷新），以刷新后的命中数据原地同步标注三字段（ownTags 为后端规范完整
+// 对象，无形态偏差），防切回浏览视图再开该页时草稿读到保存前数据
+const syncSlideEntryAnnotation = (entryId, hit) => {
+  slideEntries.value = slideEntries.value.map(s =>
+    s.id === entryId ? { ...s, rating: hit.rating, note: hit.note, ownTags: hit.ownTags || [] } : s
+  )
+}
+
+// 按标签名回构页自有标签对象（形态对齐后端标签对象 {id,name,color,parentId}）：
+// 从底册聚合选项尽力匹配完整对象（含真实 id/颜色），新标签不在聚合中时合成占位
+// 对象（id 仅供 v-for key，展示层以 name 为主），待下次刷新由服务端规范数据覆盖
+const buildOwnTagsFromNames = (tagNames) => {
+  const known = new Map(tagOptions.value.map(t => [t.name, t]))
+  return (tagNames || []).map((name, i) =>
+    known.get(name) || { id: `own-submitted-${i}-${name}`, name, color: '', parentId: 0 }
+  )
+}
+
+// 刷新 miss 分支的就地回填：以刚保存提交值为权威源补齐条目标注三字段（字段面与
+// syncSlideEntryAnnotation 一致），防详情草稿从保存前旧快照回退（审查 P1）
+const applySubmittedAnnotation = (target, submitted) => ({
+  ...target,
+  rating: submitted.rating,
+  note: submitted.note,
+  ownTags: buildOwnTagsFromNames(submitted.tagNames)
+})
+
+// 保存幻灯片页级标注（整体替换语义对齐文件 onSaveMeta，入参形状对齐
+// model.AssetSlideMetaUpdate）：星级/业务备注/页自有标签以本次提交值为准；
+// 纯标注层写入（slide_tags/slide_meta），不触发重解析与缩略图失效。保存成功后
+// 刷新当前条目所在清单（对齐文件 onSaveMeta 成功后的刷新模式：浏览模式重拉
+// 幻灯片清单、检索模式重跑检索——取回含新建标签完整对象的规范数据），详情引用
+// 同步指向新条目。刷新后按命中与否分流（审查 P1）：命中 → 引用同步为服务端
+// 新数据后草稿重读权威数据；miss（保存条目在懒加载深页/聚合子项，刷新复位首页
+// 后不在返回页）→ selected 引用仍持保存前旧快照，此时 resetSlideDraft 会回读
+// 旧值（刚保存的标注在表单回退、再点保存即写回旧数据）——以提交值为权威源就地
+// 回填引用三字段，草稿保留提交值不动（表单与数据一致，无回退）。
+// 双守卫（审查 risk 1）：刷新 await 期间检索语境（平铺/仅自身标签开关切换——
+// searchSeq 自增且不关详情）或库代次（切库/扫描刷新，librarySeq 自增）可能变化，
+// 刷新响应已被 runSearch/loadSlidesPage 内部守卫丢弃（searchItems/slideEntries
+// 仍持保存前旧数据），写回前比对发起时快照，语境已变即整体退出：不写回 selected
+// （find 命中的是旧数据，写回即保存前快照）、不 reset 草稿（防表单回退旧值被再
+// 次保存写回）；守卫计数器为普通 let 变量（非 ref），快照对齐 toggleAgg
+// libSeqAtStart 既有形态
+const onSaveSlideMeta = async () => {
+  const slideEntry = selected.value?.slideEntry
+  const hit = selected.value?.hit
+  const fileId = slideEntry?.fileId ?? hit?.fileId
+  const slideNum = slideEntry?.slideNum ?? hit?.slideNum
+  if (!fileId || !slideNum) return
+  savingMeta.value = true
+  // 提交值快照：刷新 await 期间草稿可能被重置，miss 分支回填以保存时刻提交值为准
+  const submitted = {
+    rating: slideDraft.value.rating,
+    note: slideDraft.value.note,
+    tagNames: [...slideDraft.value.tags]
+  }
+  // 守卫快照：searchSeq 覆盖检索语境（切库/扫描刷新路径同样自增），librarySeq
+  // 覆盖浏览语境的库切换/扫描刷新（浏览态 slideEntries 不受检索开关影响）
+  const searchSeqAtStart = searchSeq
+  const libSeqAtStart = librarySeq
+  try {
+    await UpdateAssetSlideMeta(currentLibraryId.value, fileId, slideNum, submitted)
+    ElMessage.success('已保存')
+    const entryId = slideEntry?.id ?? hit?.refId
+    if (searchMode.value) {
+      // 检索语境：重跑检索，详情命中引用同步指向刷新后的数据
+      await runSearch(true)
+      if (searchSeq !== searchSeqAtStart) return // 语境已变：在途响应已被守卫丢弃，不写回不重置
+      // 页标注变化改变命中口径（页自身标签参与标签合并命中），旧展开缓存必须失效：
+      // 聚合子项保存后重展开若经 aggChildren 早退命中旧缓存，详情回读保存前标注、
+      // 再保存即写回旧数据——清空展开态强制重展开按当前口径重拉（审查 risk 2，
+      // 对齐 onSlideTagOwnChange 清法）；置于守卫之后：语境已变 return 分支无需
+      // 重复清（开关切换路径自身已清过）
+      expandedAggPaths.value = []
+      aggChildren.value = {}
+      aggLoadingPaths.value = []
+      const card = searchItems.value.find(c => c.kind === 'slide' && c.id === entryId)
+      if (card && selected.value?.hit?.refId === entryId) {
+        // 命中：引用已同步为服务端新数据，草稿重读权威数据
+        selected.value = { ...selected.value, hit: card.hit }
+        syncSlideEntryAnnotation(entryId, card.hit)
+        resetSlideDraft()
+      } else if (selected.value?.hit?.refId === entryId) {
+        // miss：hit 按提交值回填（草稿保留提交值不动），浏览清单旧快照同步防回退
+        const patched = applySubmittedAnnotation(selected.value.hit, submitted)
+        selected.value = { ...selected.value, hit: patched }
+        syncSlideEntryAnnotation(entryId, patched)
+      }
+    } else {
+      // 浏览语境：重拉幻灯片清单（复位首页），详情条目引用同步指向新数据
+      await loadSlidesPage(true)
+      if (libSeqAtStart !== librarySeq) return // 保存期间切库/刷新：旧清单响应已被守卫丢弃，不写回不重置
+      const updated = slideEntries.value.find(s => s.id === entryId)
+      if (updated && selected.value?.slideEntry?.id === entryId) {
+        // 命中：引用已同步为服务端新数据，草稿重读权威数据
+        selected.value = { ...selected.value, slideEntry: updated }
+        resetSlideDraft()
+      } else if (selected.value?.slideEntry?.id === entryId) {
+        // miss：条目按提交值回填（草稿保留提交值不动）
+        selected.value = {
+          ...selected.value,
+          slideEntry: applySubmittedAnnotation(selected.value.slideEntry, submitted)
+        }
+      }
     }
   } catch (error) {
     handleError('保存失败: ', error)
