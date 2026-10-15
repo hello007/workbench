@@ -36,7 +36,7 @@ import (
 //     键空间独立——CancelScan 不得误杀拆分、CancelAssetSplit 亦不影响扫描；
 //     defer LIFO 先注销后释放锁（docs/spec/logging-and-errors.md 取消链路契约）。
 type AssetLibraryService struct {
-	assetsDir  string // data/assets（注册表 libraries.json + 各库 <id>.db）
+	assetsDir  string // data/assets（注册表 libraries.json + 各库 <id>.db）；构造时经 filepath.Abs 绝对化（COM 跨进程路径契约，见 NewAssetLibraryService）
 	sinkHolder        // 事件出口持有器（assets-scan:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换
 
 	mu     sync.Mutex              // 保护 libs/openDbs 的并发读写
@@ -92,9 +92,23 @@ type assetLibraryRegistryJSON struct {
 
 // NewAssetLibraryService 创建素材库管理服务。assetsDir 为索引数据目录
 // （生产装配传 data/assets），目录不存在时首次写注册表自动创建。
+//
+// assetsDir 契约（构造时绝对化收口）：thumb PNG 路径（assetThumbsDir 产出）
+// 最终经 COM 服务器进程（wpp.exe/powerpnt.exe）的 Slide.Export 解析，COM 服务
+// 器按自身 cwd 解析相对路径（WPS 启动后自改 cwd，继承不可靠）——相对 assetsDir
+// 会让导出目标落在对方进程视图的不存在目录，表现为 DISP_E_EXCEPTION「发生意外」
+// 且重试无法救（真机三文件确定性全挂，PowerShell 探针绝对路径同参成功佐证）。
+// 故构造时 filepath.Abs 一处收口，保护全部消费面（db 路径/注册表/thumbs/未来
+// 跨进程消费者）；Abs 失败仅可能在 cwd 被删时发生，保底沿用原值并告警。
+//
 // ctx 仅用于构造注入 Wails 桌面事件出口（PptxSplitService 同款；允许 nil/
 // Background——wailsEventSink 对非 Wails 上下文集中防护静默跳过）。
 func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibraryService {
+	if abs, err := filepath.Abs(assetsDir); err == nil {
+		assetsDir = abs
+	} else {
+		Logger().Warn("素材索引目录绝对化失败，沿用原相对路径", "assetsDir", assetsDir, "err", err)
+	}
 	s := &AssetLibraryService{
 		assetsDir: assetsDir,
 		open:      make(map[string]*assetsStore),
