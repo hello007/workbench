@@ -56,6 +56,8 @@
 
 - 单 worker 串行消费 `batchCh`（缓冲 8）+ `jumpCh`（**无缓冲**：交接即消费，提交阻塞等消费方，消除「页边界错过提交」竞态）；跳转优先 = worker 每轮非阻塞摘 jumpCh + 批量在途时 preempt 页间摘取（D3「最多等一页」；导出快于提交时兜底走批次后主循环消费，语义自洽）。**停泊 select（第二 select）必须与 first select 同集收 jumpCh**（check P0 教训：停泊分支漏 jumpCh = 批次完成后的空闲期跳转无人接收，JumpToSlide 撞入队超时报 BUSY 假态，stale 请求被后续批量唤醒误执行）。
 - 单文件失败（含超时强杀）→ `exporter.Discard()`（置脏，下任务重建会话）→ 继续后续文件（SRS 失败隔离）。**fake 注入测试会掩蔽 COM 实现的回写遗漏**——preempt 路径的 `jr.Result` 写回必须有真链路验证或契约断言。
+- **页级 Export 瞬态重试（2026-10-15 真机实证）**：`Slide.Export` 失败按 `isTransientExportError` 判定重试（同页同参至多 3 次，退避线性 1s/2s，`thumbExportMaxAttempts`/`thumbExportRetryDelay` var 注入；ctx 取消/超时**绝不重试**且判定前置）。瞬态口径：`DISP_E_EXCEPTION(0x80020009)` 且 ExcepInfo 空——go-ole 对空 bstrDescription 渲染字面量 `"<nil>"`，真机形态「发生意外。 (<nil>)」即 hr 的 FormatMessage 中文本地化**非 ExcepInfo 自带描述**（41MB/116 页真实文件冷启动未就绪实测，PowerPoint 探针同参延后成功佐证瞬态）；描述含「发生意外」的任一形态亦判瞬态；带实质业务描述的 0x80020009 与文件损坏类非瞬态立即返回。重试在 Export 调用内部不跨 preempt 边界，`jr.Result` 恰一次写回不受影响。
+- **Discard 重建落定等待**：COM 单实例激活会重连尚未退净的旧进程（Quit 异步）——dirty 重建路径 `releaseApp` 后轮询 ownedPIDs 实际退出（200ms 间隔 / 3s 上界，var 注入，探针 `thumbOwnedExitProbe` 可注入）再 `CreateInstance`；超时未退继续重建走 0x8001010A 重试链兜底。owned 空（复用用户实例）不等待不探针（禁杀语义）。等待落定是重建语义的一部分，非可选优化——缺失则下批 277ms 内「重建」实为连到垂死实例秒败（真机实测）。
 - 关停顺序：`WaitScansDone()` → `WaitThumbsDone()` → `CloseAll()`（app.go shutdown）；WaitThumbsDone = 取消全部批次 → worker 退出 → exporter.Shutdown（Quit 自启实例 + 镜像 PID 强杀残留兜底）→ `closed` 置位拒绝新任务。
 
 ### 缓存键契约

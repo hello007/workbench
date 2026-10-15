@@ -25,6 +25,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,6 +69,29 @@ const (
 	comCreateRetries    = 5
 	comCreateRetryDelay = time.Second
 )
+
+// dispEException DISP_E_EXCEPTION（0x80020009）：COM 服务器内部异常。空 ExcepInfo
+// 时 go-ole 把 null bstrDescription 渲染为字面量 "<nil>"（idispatch_windows.go
+// Invoke 失败分支 + ole.go renderStrings 实测源码）——真机日志「发生意外。 (<nil>)」
+// 即 hr=0x80020009 + bstrDescription 为 null 的形态，「发生意外。」来自 FormatMessage
+// 对该 scode 的中文本地化文案，非 ExcepInfo 自带描述。
+const dispEException = 0x80020009
+
+// 页级 Export 瞬态重试与 owned 退出等待参数（包级 var 注入点：单测注入极小间隔
+// 快速跑——test-stability 契约禁 sleep 等待竞态，禁依赖真实退避时长）。
+var (
+	thumbExportMaxAttempts = 3               // 页导出总尝试次数（含首次；即至多重试 2 次）
+	thumbExportRetryDelay  = 1 * time.Second // 退避基准：第 n 次重试前等待 delay*n（1s/2s）
+)
+
+var (
+	thumbOwnedExitPollInterval = 200 * time.Millisecond // owned 退出轮询间隔
+	thumbOwnedExitWait         = 3 * time.Second        // owned 退出等待上限
+)
+
+// thumbOwnedExitProbe owned 实例存活探针（生产 = officeServerPIDSet 全局枚举；
+// 单测注入 fake PID 集驱动「退出/恒存」分支——勿在测试路径直调全局枚举）。
+var thumbOwnedExitProbe = officeServerPIDSet
 
 // goOleThumbExporter ThumbExporter 的 Windows COM 实现。
 //
@@ -269,7 +293,16 @@ func (w *comWorkerState) ensureApp() (*ole.IDispatch, error) {
 	if w.app != nil && (w.owner == nil || !w.owner.dirty.Load()) {
 		return w.app, nil
 	}
+	// Discard 重建链（修复：Quit 异步——COM 单实例激活会重连尚未退出的旧进程，
+	// 真机实测 Discard 后 277ms 内重建即连到垂死 wpp.exe、Export 秒败）：快照
+	// owned PID 后 Quit，等待进程实际退出再 CreateInstance。复用用户实例路径
+	// （ownedPIDs 空）不等待——禁杀语义下 Quit 本就未调用。
+	staleOwned := make(map[int]bool, len(w.ownedPIDs))
+	for pid := range w.ownedPIDs {
+		staleOwned[pid] = true
+	}
 	w.releaseApp()
+	waitForOwnedProcessesExit(staleOwned)
 
 	// CreateInstance 带 0x8001010A（RPC_E_SERVERCALL_RETRYLATER，应用忙）重试：
 	// 语义为「目标应用忙」应等待重试而非判实例死亡（research §3.4）；强杀后的
@@ -358,6 +391,106 @@ func oleErrorHresult(err error) uintptr {
 	return 0xFFFFFFFF
 }
 
+// isTransientExportError 页导出失败瞬态判定（重试准入口径，输入必须是 go-ole
+// 返回的原始错误——调用方勿先 %w 包装再判，直接类型断言会失效）：
+//   - scode == DISP_E_EXCEPTION 且 ExcepInfo 为空（description 为空串或 go-ole
+//     对 null bstrDescription 的字面量渲染 "<nil>"）——WPS 冷启动、大文件页内容
+//     未就绪的实测形态，仅 scode 有信息量；
+//   - EXCEPINFO 描述含「发生意外」（WPS/Office 通用异常文案，bstrDescription
+//     非空的另一形态）。
+//
+// ctx 取消/超时错误绝不瞬态（errors.Is 判定前置保证零重试）；其余错误（文件
+// 损坏类 OleError、非 COM 包装错误）非瞬态，调用方立即返回不重试。
+func isTransientExportError(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	oe, ok := err.(*ole.OleError)
+	if !ok {
+		return false
+	}
+	desc := oe.Description()
+	if strings.Contains(desc, "发生意外") {
+		return true
+	}
+	return oleErrorHresult(err) == dispEException && (desc == "" || desc == "<nil>")
+}
+
+// retryTransientSlideExport 页级 Export 瞬态重试：WPS 冷启动、大文件页内容未
+// 就绪时 Export 以 DISP_E_EXCEPTION 空 ExcepInfo 瞬态失败（真机实测：41MB/116 页
+// 首批「发生意外。」7s 内秒败、本地 COM 探针延后执行成功佐证瞬态），同页同参
+// 退避重试至 thumbExportMaxAttempts 次（总尝试含首次，退避 delay*n 线性增长）。
+// ctx 取消/超时绝不重试（errors.Is 判定前置 + 退避等待可被 ctx 打断——超时强杀
+// 收口路径不被重试拖延）；非瞬态（文件损坏类）立即返回，单次失败错误格式与
+// 既有逐字一致。重试耗尽返回最后一次错误并追加「（已重试 N 次）」便于真机
+// 定位；每次重试 slog.Warn 一行（page/tier/attempt/err）不刷屏。重试发生在
+// Export 调用内部不跨页边界，preempt/jr.Result 契约不受影响。attempt 由调用方
+// 闭包注入（单测注入 fake，COM 真调用不进单测）。
+func retryTransientSlideExport(ctx context.Context, page int, tierKey string, attempt func() error) error {
+	fail := func(err error) error {
+		return fmt.Errorf("第 %d 页导出 %s 档失败: %w", page, tierKey, err)
+	}
+	var lastErr error
+	for n := 1; ; n++ {
+		if n > 1 && ctx.Err() != nil {
+			// 重试准入前查 ctx：取消/超时后零重试，杀进程收口路径的错误即刻上抛
+			return fail(lastErr)
+		}
+		err := attempt()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientExportError(err) {
+			return fail(err) // 非瞬态：立即返回，错误格式与既有逐字一致
+		}
+		if n >= thumbExportMaxAttempts {
+			if n > 1 {
+				return fail(fmt.Errorf("%w（已重试 %d 次）", err, n-1))
+			}
+			return fail(err)
+		}
+		Logger().Warn("页导出瞬态失败，退避重试", "page", page, "tier", tierKey, "attempt", n, "err", err)
+		select {
+		case <-time.After(thumbExportRetryDelay * time.Duration(n)):
+		case <-ctx.Done():
+			return fail(lastErr)
+		}
+	}
+}
+
+// waitForOwnedProcessesExit 等待刚 Quit 的 owned 实例进程实际退出（Discard 重建
+// 链，ensureApp 在 releaseApp 后调用）：COM 单实例激活会重连尚未退出的垂死进程
+// （真机实测 Quit 异步、277ms 内重建即连到垂死 wpp.exe 致 Export 秒败），等待
+// 落定是重建语义的一部分。轮询 thumbOwnedExitProbe，间隔 thumbOwnedExitPollInterval、
+// 上限 thumbOwnedExitWait；超时未退继续重建（CreateInstance 0x8001010A 重试链
+// 兜底），slog.Warn 记录观测。pids 为空（复用用户实例路径 / 无历史会话）不等待
+// ——禁杀语义下 Quit 本就未调用。
+func waitForOwnedProcessesExit(pids map[int]bool) {
+	if len(pids) == 0 {
+		return
+	}
+	deadline := time.Now().Add(thumbOwnedExitWait)
+	for {
+		cur := thumbOwnedExitProbe()
+		alive := false
+		for pid := range pids {
+			if cur[pid] {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			Logger().Warn("owned PowerPoint 实例 Quit 后未退出（超等待上限，继续重建走 CreateInstance 重试链兜底）", "pids", pids)
+			return
+		}
+		time.Sleep(thumbOwnedExitPollInterval)
+	}
+}
+
 // ---- ThumbExporter 接口实现（主侧） ----
 
 // Available 两阶段探测：注册表预检（ProgID 键存在，不启动进程）→ 缓存；
@@ -395,7 +528,7 @@ func (e *goOleThumbExporter) ExportPresentation(ctx context.Context, spec thumbF
 	resCh := make(chan error, 1)
 	pagesCh := make(chan int, 1)
 	task := func(w *comWorkerState) {
-		pages, err := w.exportSession(spec, thumbsDir, tiers, preempt)
+		pages, err := w.exportSession(ctx, spec, thumbsDir, tiers, preempt)
 		pagesCh <- pages
 		resCh <- err
 	}
@@ -474,8 +607,9 @@ func isComClassError(err error) bool {
 // ---- COM 任务实现（worker STA 线程内执行） ----
 
 // exportSession 单文件导出会话：复用检查 → ReadOnly 无窗口打开 → 逐页双档
-// Export（页间 preempt 跳转插队）→ Close（复用的不 Close）。返回导出页数。
-func (w *comWorkerState) exportSession(spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
+// Export（页级瞬态重试 + 页间 preempt 跳转插队）→ Close（复用的不 Close）。
+// ctx 供页级重试的准入判定与退避等待消费（取消/超时零重试）。返回导出页数。
+func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
 	app, err := w.ensureApp()
 	if err != nil {
 		return 0, err
@@ -524,9 +658,15 @@ func (w *comWorkerState) exportSession(spec thumbFileSpec, thumbsDir string, tie
 		slide := slideV.ToIDispatch()
 		for _, tier := range tiers {
 			pngPath := thumbPNGPath(thumbsDir, tier.Key, spec.FileID, i)
-			if _, err := oleutil.CallMethod(slide, "Export", pngPath, "PNG", tier.Width, tier.Height); err != nil {
+			// 页级瞬态重试（WPS 冷启动/大文件页内容未就绪 DISP_E_EXCEPTION 瞬态，
+			// 真机 41MB/116 页首批导出「发生意外。」秒败、探针延后执行成功佐证）。
+			// 重试在 Export 调用内部不跨页边界，preempt/jr.Result 契约不受影响。
+			if err := retryTransientSlideExport(ctx, i, tier.Key, func() error {
+				_, err := oleutil.CallMethod(slide, "Export", pngPath, "PNG", tier.Width, tier.Height)
+				return err
+			}); err != nil {
 				slide.Release()
-				return exported, fmt.Errorf("第 %d 页导出 %s 档失败: %w", i, tier.Key, err)
+				return exported, err
 			}
 		}
 		slide.Release()
