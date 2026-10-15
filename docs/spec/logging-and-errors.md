@@ -155,6 +155,14 @@ catch (error) {
 - 7 组件（LocalChanges/GitMerge/GitTags/GitRemotes/GitBranches/GitSubmodules/ContentPanel）import 路径不变
 - 新代码直接 `import from '@/utils/error'`
 
+### 5.3 Wails 调用错误桥（v2.16 runtime 回归适配，任务 10-14-srs-2-2-4）
+
+**wails 升级须回归验证 ErrorFormatter reject 链路**。v2.16 runtime（`internal/frontend/runtime/desktop/calls.js`）对失败应答统一 `new Error(message.error)` 后 reject——`message.error` 经 JSON.parse 必为普通对象，永不满足 `instanceof Error`，`new Error(对象).message = String(对象) = "[object Object]"`，`{code, message}` 结构化错误被压扁：全应用 code 分流（WARNING_CODES warning/error）与可读消息同时失效。v2.12 行为是 `reject(message.error)` 原对象透传，本项目 error.js 契约基于该语义。上游自带测试只钉字符串错误形态（issue #4379 面）。
+
+适配层 `frontend/src/utils/wails-call-error-bridge.js`（`main.js` 安装，早于任何绑定调用）：包装 `window.wails.Callback`，应答 error 为结构化对象时按 runtime 同款收口协议（`clearTimeout` + `delete callbacks[id]`）直接以原对象 reject pending 调用（恢复 v2.12 语义）；字符串错误/成功应答/非法 JSON/未注册回调原样委托 runtime。单点覆盖全部绑定方法，禁在各调用点单补。浏览器模式仅 polyfill `window.go`/`window.runtime` 不触碰 `window.wails`，桥 no-op。`extractError` 另有防御兜底：message 缺失/非字符串的对象形态走 `JSON.stringify`（循环引用退 `String()`），任何路径不再产出 `[object Object]`。
+
+**wails 未来版本升级检查项**：核对 runtime desktop calls.js 的 reject 形态是否仍为结构化对象透传（桥若失效应静默 no-op 不叠加破坏）；升级后真机跑一次触发后端 error 的路径（如不存在的库 ID 调用）验证 toast 文案非 `[object Object]` 且 code 分流正确。
+
 ## 6. 新增错误码步骤
 
 1. `model/app_error.go` 加常量 `ErrCodeXxx = "E_域_动作"`
