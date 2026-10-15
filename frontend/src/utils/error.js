@@ -79,8 +79,20 @@ const WARNING_CODES = new Set([
 function extractError(error) {
   if (!error) return { code: null, message: '' }
   const code = error?.code ?? null
-  const message = error?.message ?? String(error)
-  return { code, message }
+  const rawMessage = error?.message
+  if (typeof rawMessage === 'string') {
+    return { code, message: rawMessage }
+  }
+  // 兜底：message 字段缺失或非字符串的对象形态（如 reject 值为无 message 字段
+  // 的普通对象）禁止产出 "[object Object]"——plain object 走 JSON.stringify
+  // 保留可诊断字段，其余（字符串/数字等原始值）走 String()。
+  try {
+    const message = typeof error === 'object' ? JSON.stringify(error) : String(error)
+    return { code, message }
+  } catch {
+    // 循环引用等 stringify 失败：退回 String()（至多 "[object Object]"，不抛错）
+    return { code, message: String(error) }
+  }
 }
 
 /**

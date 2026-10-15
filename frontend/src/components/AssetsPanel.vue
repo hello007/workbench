@@ -159,11 +159,12 @@
         </el-option>
       </el-select>
       <!-- 幻灯片标签继承开关（SRS §2.2.4）：false = 幻灯片条目按【页自身标签 ∪ 归属
-           文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中。仅幻灯片视图
-           语义相关——文件视图下检索结果只含文件条目（开关不产生可见效果），隐藏 -->
-      <el-tooltip v-if="showSlideTagOwnSwitch" content="开启后标签筛选仅匹配幻灯片页自身标签，不再合并归属文件标签（文件条目不受影响）" placement="bottom">
-        <span class="flatten-switch slide-own-switch">
-          <el-switch v-model="slideTagOnlyOwn" size="small" @change="onSlideTagOwnChange" />
+           文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中。恒渲染占位
+           防视图切换时同行控件跳动；文件视图下检索结果只含文件条目（开关不产生
+           可见效果），禁用 + tooltip 声明作用域 -->
+      <el-tooltip :content="slideTagOwnTooltip" placement="bottom">
+        <span class="flatten-switch slide-own-switch" :class="{ 'is-scope-disabled': !isSlideView }">
+          <el-switch v-model="slideTagOnlyOwn" size="small" :disabled="!isSlideView" @change="onSlideTagOwnChange" />
           仅幻灯片自身标签
         </span>
       </el-tooltip>
@@ -798,9 +799,15 @@ const tagOptions = computed(() => {
   return Array.from(byId.values())
 })
 
-// 「仅使用幻灯片自身标签」开关可见性：仅幻灯片视图语义相关（SRS §2.2.4 开关只
-// 作用于幻灯片条目筛选；文件视图下检索结果只含文件条目，开关不产生可见效果，隐藏）
-const showSlideTagOwnSwitch = computed(() => viewMode.value === 'slide')
+// 「仅使用幻灯片自身标签」开关作用域：仅幻灯片视图可操作（SRS §2.2.4 开关只
+// 作用于幻灯片条目筛选；文件视图下检索结果只含文件条目，开关不产生可见效果，
+// 禁用 + tooltip 声明作用域——恒渲染占位，防视图切换时同行控件跳动）
+const isSlideView = computed(() => viewMode.value === 'slide')
+const slideTagOwnTooltip = computed(() =>
+  isSlideView.value
+    ? '开启后标签筛选仅匹配幻灯片页自身标签，不再合并归属文件标签（文件条目不受影响）'
+    : '仅作用于幻灯片条目：请切换到幻灯片视图后使用'
+)
 
 // 幻灯片标签编辑选项：文件底册聚合选项 ∪ 当前草稿已选值（页自有标签不在文件聚
 // 合中——slide_tags 与文件标签存储独立——仍须作为已选值正常显示；el-select 对不在
@@ -2136,6 +2143,12 @@ defineExpose({ loadLibraries, refreshAfterScan })
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* 开关作用域禁用态（文件视图）：整体弱化 + 禁用光标，与 EP switch disabled 样式同语义 */
+.slide-own-switch.is-scope-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ---- 库统计行 ---- */

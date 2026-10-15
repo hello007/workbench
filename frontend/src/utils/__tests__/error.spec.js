@@ -66,6 +66,32 @@ describe('error', () => {
     })
   })
 
+  describe('handleError - 兜底：message 字段缺失/非字符串的对象形态', () => {
+    it('无 message 字段的普通对象产出 JSON 摘要而非 "[object Object]"', () => {
+      handleError('操作失败: ', { code: 'E_X' })
+      expect(ElMessage.error).toHaveBeenCalledWith('操作失败: {"code":"E_X"}')
+    })
+
+    it('message 字段为非字符串值时整体 JSON 序列化', () => {
+      handleError('操作失败: ', { code: 'E_Y', message: { detail: '结构化详情' } })
+      expect(ElMessage.error).toHaveBeenCalledWith(
+        '操作失败: {"code":"E_Y","message":{"detail":"结构化详情"}}'
+      )
+    })
+
+    it('循环引用对象不抛错（退回 String()）', () => {
+      const circular = {}
+      circular.self = circular
+      expect(() => handleError('操作失败: ', circular)).not.toThrow()
+      expect(ElMessage.error).toHaveBeenCalledTimes(1)
+    })
+
+    it('字符串错误仍走 String() 原样', () => {
+      handleError('操作失败: ', '裸字符串')
+      expect(ElMessage.error).toHaveBeenCalledWith('操作失败: 裸字符串')
+    })
+  })
+
   describe('isGitOperationInProgress', () => {
     it('code 路径识别', () => {
       expect(isGitOperationInProgress({ code: ErrorCode.GitInProgress, message: 'x' })).toBe(true)

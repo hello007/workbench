@@ -523,7 +523,8 @@ describe('AssetsPanel', () => {
     await clickButton(wrapper, '搜索')
     await flushPromises()
 
-    const switchStub = wrapper.findComponent(ElSwitchStub)
+    // 平铺开关选择器排除同类的幻灯片自身标签开关（后者恒渲染占位，DOM 序在前）
+    const switchStub = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
     await switchStub.vm.$emit('update:modelValue', true)
     await switchStub.vm.$emit('change', true)
     await flushPromises()
@@ -892,12 +893,15 @@ describe('AssetsPanel', () => {
     expect(wrapper.findAll('.agg-child').length).toBe(1)
   })
 
-  it('继承筛选开关：仅幻灯片视图显示（文件视图隐藏），切换后 SearchAssets 收到 slideTagOnlyOwn=true 且立即重跑检索', async () => {
+  it('继承筛选开关：恒渲染占位（文件视图禁用不跳动），切幻灯片视图启用，切换后 SearchAssets 收到 slideTagOnlyOwn=true 且立即重跑检索', async () => {
     const wrapper = await createWrapper()
-    // 文件视图（检索结果只含文件条目，开关无可见效果）下隐藏
-    expect(wrapper.find('.slide-own-switch').exists()).toBe(false)
+    // 文件视图（检索结果只含文件条目，开关无可见效果）下渲染占位但禁用（防视图切换同行控件跳动）
+    const fileViewSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    expect(fileViewSwitch.exists()).toBe(true)
+    expect(fileViewSwitch.props('disabled')).toBe(true)
+    expect(wrapper.find('.slide-own-switch').classes()).toContain('is-scope-disabled')
 
-    // 切幻灯片视图：开关出现且默认关闭
+    // 切幻灯片视图：开关启用且默认关闭（占位不重建，无布局跳动）
     const group = wrapper.findComponent(ElRadioGroupStub)
     await group.vm.$emit('update:modelValue', 'slide')
     await group.vm.$emit('change', 'slide')
@@ -906,6 +910,8 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.slide-own-switch').text()).toContain('仅幻灯片自身标签')
     const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
     expect(ownSwitch.props('modelValue')).toBe(false)
+    expect(ownSwitch.props('disabled')).toBe(false)
+    expect(wrapper.find('.slide-own-switch').classes()).not.toContain('is-scope-disabled')
 
     // 纯标签筛选触发检索（选中标签即进入检索模式）
     const tagSelect = wrapper.findComponent('.tag-filter')

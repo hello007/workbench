@@ -9,6 +9,7 @@ import router from './router'
 import pinia from './store'
 import App from './App.vue'
 import { installBrowserTransport } from './transport'
+import { installWailsCallErrorBridge } from './utils/wails-call-error-bridge'
 
 // 浏览器访问模式 polyfill：必须在 createApp/mount 前安装。wailsjs 生成 wrapper
 // （App.js/runtime.js）在方法调用时才解引用 window.go/window.runtime，组件亦在
@@ -16,6 +17,13 @@ import { installBrowserTransport } from './transport'
 // 的模块均不在模块求值期触碰 window.go/window.runtime（已逐一核对），顺序安全。
 // 桌面模式（存在 window.go.main.App）下本调用为 no-op，行为零变化。
 installBrowserTransport()
+
+// Wails 调用错误桥：v2.16 runtime 把 ErrorFormatter 结构化错误 {code, message}
+// 经 new Error(对象) 压成 "[object Object]" 且 code 丢失（详见
+// utils/wails-call-error-bridge.js），桌面模式在包装层恢复 v2.12 的结构化
+// reject 语义；浏览器模式（无 window.wails）no-op。必须在任何绑定方法调用前
+// 安装（应用 bundle 执行期早于组件 onMounted 调用，顺序安全）。
+installWailsCallErrorBridge()
 
 const app = createApp(App)
 
