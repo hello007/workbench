@@ -90,7 +90,17 @@ OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模
 - 聚合展开：加载态按文件路径集合记录（`aggLoadingPaths`，并发互不覆盖）；写回前比对发起时 activeKeyword/selectedTagIds **与 `librarySeq`**（aggChildren 残留会被 toggleAgg 早退命中，同路径跨库串数据），条件变更丢弃旧响应。
 - 幻灯片滚动追加防重：`loadSlidesPage(false)` 在途须置 `loadingMore`，否则滚动事件在途窗口内连续触发以相同 offset 重复追加条目（onGalleryScroll 的防重检查依赖该标志）。
 
-## 4. Validation & Error Matrix
+### 幻灯片独立标注（schema v5，任务 10-14-srs-2-2-4）
+
+- **表形态**：`slide_tags` + `slide_meta` 独立表，**键 `(file_id, slide_num)`**，外键 `files(id)`/`tags(id)` 双 CASCADE。**禁用 slides.id 作键**——slides 每轮重解析删旧插新全变（files.id UPDATE 同行稳定），键 slides.id 则增量重解析必丢标注。无时间戳列（updateSlideMeta 无 now 参数）。
+- **增量语义（位置标注）**：页数不变标注原样保留；页数减少 `deleteStaleSlideAnnotationsTx`（挂 replaceFileSlides 事务内）清失配；页内容移位标注跟随页码不跟随内容（与缩略图缓存键 file_id+page 同口径）；非 ok 终态（setFileOutcome）slides 删而标注保留，文件修复重解析后现存页序标注按位置复活。
+- **重建保留**：`slideAnnotationsByPath` 按 `files.path + slide_num` 备份（两表全量）→ 重绑 defer 化（备份成功后注册，**扫描失败/取消路径也执行**——失败时部分重绑：已重扫文件恢复、未扫文件无 slides 行自然丢弃，优于全丢且二次重建可自愈；备份自身失败仍 fail-fast 中止于清库前）；`rebindSlideAnnotationsAfterRebuild` 按新 slides 现存页号写回（INSERT OR REPLACE/IGNORE），页消失静默丢弃；重绑 error 只 slog 不覆盖扫描主错误；`clearIndexForRebuild` 对两表显式 DELETE 双保险（FK 级联已覆盖，对齐 thumb_cache 先例）。
+- **标签继承三契约（单点后端）**：存储层 file_tags 与 slide_tags 互不写入；筛选层默认合并【页自身 ∪ 归属文件标签】、`AssetSearchOptions.SlideTagOnlyOwn=true` 仅页自身——FTS 检索路径 `slideTagRowMatches` 与纯标签浏览 `listTagFilteredSlides` SQL 子查询消费同源关系表与同一开关，禁两套口径；文件条目不受 OnlyOwn 影响；关键词命中与标签无关不受开关影响。
+- **FTS 红线**：标签与幻灯片业务备注均不入 FTS（关键词检索行为不变）；备注可检索性文件/幻灯片不对称是已知限制。`searchAssetsInStore` 早退分流：纯标签浏览路径不发 `fileIDsForTagFilter`/`slideOwnTagFilterSet` 预取查询（其结果仅 FTS 关键词路径消费）。
+- **前端保存链守卫（onSaveSlideMeta）**：刷新 await 后双代次守卫（`searchSeq`/`librarySeq` 快照比对，语境变更整体 return 不写回 selected 不 reset 草稿）；保存成功先清聚合展开态（`expandedAggPaths/aggChildren/aggLoadingPaths`——页标注变化改变命中口径，旧 `aggChildren` 早退缓存=回读保存前标注再保存写回旧值）再分流命中/miss。
+- **绑定**：`UpdateAssetSlideMeta(libraryID, fileID, slideNum, AssetSlideMetaUpdate{note,rating,tagNames})` 整体替换语义（对齐 updateFileMeta）；条目（AssetSlideEntry/AssetSearchHit）携带 `ownTags/note/rating` 三字段，文件条目 OwnTags 恒空切片（nonNull 契约）；保存不触发重解析/缩略图失效。
+
+
 
 | 条件 | 行为 |
 |---|---|
@@ -143,4 +153,4 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）。
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）。
