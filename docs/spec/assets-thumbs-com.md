@@ -148,6 +148,34 @@
 
 - relPath 来自前端（浏览器通道可达），`..`/绝对路径可逃逸库根让 PowerPoint 渲染库外文件、经 GetAssetThumb 回读内容——`FromSlash` 后先拒 `IsAbs`，`Join` 后 `filepath.Rel` 校验无 `..` 前缀才放行。
 
+## 9.1 跳转零可见修复：owned 镜像持久化 + 残留回收 + WPS 可见性（D7，2026-10-15）
+
+### 根因（真机两轮定性）
+
+「打开并跳到此页」零可见效果（COM 链路日志全成功、无报错、无窗口）两个叠加根因：
+1. **幽灵残留误判用户实例**：上会话缩略图批次自启的 wpp.exe 因会话崩溃（Shutdown 未跑）残留；下会话 `CreateObject` 命中幽灵（进程 diff 无新增）→ `ownedPIDs` 空 → 误判「复用用户已开实例（禁 Quit 禁杀）」→ 在后台幽灵进程内 Open+GotoSlide「成功」零可见。归属判定纯内存态，崩溃即失忆。
+2. **WPS 应用级不可见**：COM `CreateInstance` 激活的 wpp.exe 应用级默认不可见；PowerPoint 的 `Open(WithWindow:=msoTrue)` 顺带显示窗口，**WPS 兼容层无此行为**——全新 owned 实例下 Open/GotoSlide/Activate 全成功仍零可见（research §2 按 PowerPoint 语义，WPS 差异真机实测补出）。
+
+### owned 镜像持久化契约
+
+- 文件 `data/assets/com_owned_pids.json`（`comOwnedPIDsFileName` 单点常量），内容 `{"pids":[...]}`，`util.SaveJSON` 原子写（禁 os.WriteFile）。
+- **写**：`publishOwned`（worker 发布镜像时）锁外同步落盘；清空发布同样落盘 `{"pids":[]}`（本会话已无 owned 时旧残留集立即失效）。落盘失败仅 Warn（内存镜像仍有效，持久化只是跨会话辅助）。
+- **读**：ensureApp **先于首个 CreateInstance** load-once（时序要害：首个 CreateInstance 可能直接新建进程跳过 diff 空分支，懒加载会读到本会话内容而非上会话残留，归属自证失效）；过滤文件 mtime 24h 窗口；损坏/无文件/超窗统一降级空集合。
+- **清**：正常 Shutdown 收口后删文件（自有实例已 Quit，识别依据失效——**崩溃路径不执行该步，文件恰为下会话识别依据，这是修复成立前提**）。
+
+### ensureApp 残留回收链
+
+- diff 空（判「复用」）时 `classifyReusedInstance(aliveAfter, staleOwned)` 求交集：非空 = **自有残留自证**（非用户实例）→ `killPids` 精确强杀（禁 taskkill /IM 全杀）→ `waitForOwnedProcessesExit`（3s 上界，返回仍存活子集）→ 重走 0x8001010A 重试链重建，**单次回收禁循环**。
+- **仍存活 PID 并回 `w.ownedPIDs`**（楔死实例归属仍自证，禁杀语义内；并回在 `diffPIDs` 之后——垂死 PID 在 before 快照已在集，先并回会被覆盖）——缺此步则 Quit 失败的楔死 owned 实例被当未知实例放行，D7 症状会话内复现。
+- 重建仍 diff 空（WPS 单实例激活到另一已开实例等罕见态）→ 按原「复用用户实例」兜底放行（保守安全侧）。
+- reclaim 覆盖写 `app` 前必须 `Release()` 垂死代理（指向已 kill 进程，对齐 releaseApp 先例）。
+- 双保险防 PID 复用误杀：进程名白名单（officeServerPIDSet 枚举侧天然过滤）+ 24h mtime 窗口；残余风险 PRD 已登记接受。
+
+### 跳转可见性兜底与日志
+
+- `jumpInSession` 在 findOrOpen 后显式 `PutProperty(app, "Visible", msoTrue)`——WPS 兼容层不随 WithWindow 显示窗口；PowerPoint 已可见时幂等无害；失败仅 Warn。exportSession 的 ReadOnly 无窗口导出路径不经此函数不受影响；preempt 插队跳转共用本函数同获兜底。
+- 成功路径日志 `"缩略图跳转完成"` 带 `file`/`slide`/`reused` 三字段（reused 区分「落在用户已开实例」vs「自启新窗口」——排障要害）。
+
 ## 4. Validation & Error Matrix
 
 

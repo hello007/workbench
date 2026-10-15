@@ -15,7 +15,9 @@ import "context"
 type unavailableThumbExporter struct{}
 
 // newThumbExporter 平台分叉构造点（无 tag 侧 NewAssetLibraryService 调用）。
-func newThumbExporter() ThumbExporter {
+// ownedPersistPath 与 Windows 侧同签名（自启 PID 持久化文件路径，D7）；桩无
+// COM 会话恒不产生 owned 实例，参数忽略。
+func newThumbExporter(_ string) ThumbExporter {
 	return unavailableThumbExporter{}
 }
 

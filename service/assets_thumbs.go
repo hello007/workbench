@@ -47,6 +47,12 @@ var thumbTiers = []thumbTier{
 	{Key: "hd", Width: 1600, Height: 900},
 }
 
+// comOwnedPIDsFileName 自启 Office 实例 PID 持久化文件名（data/assets/ 下）：
+// 上会话崩溃（Shutdown 未跑）残留的幽灵实例跨会话归属自证依据（D7）——下会话
+// 建 COM 会话时「存活进程 ∩ 盘上残留集非空」即判定自有残留并精确强杀后重建，
+// 区分「用户已开 WPS/PPT」与「本应用上会话自启残留」（真机跳转零可见效果定性）。
+const comOwnedPIDsFileName = "com_owned_pids.json"
+
 // thumbTiersFromSettings 由设置构造双档分辨率（纯函数，可直测）：key 恒
 // small/hd 固定顺序（GetAssetThumb 的 tierIndex 为序号非宽度，分辨率可配后
 // 宽度漂移、序号稳定），宽度取设置值，高按 16:9 自算——320*9/16=180、

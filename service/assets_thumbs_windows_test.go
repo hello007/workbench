@@ -2,9 +2,9 @@
 
 // 素材缩略图 COM 实现可注入面单测（Windows 原生，零 COM 真调用——COM 真链路归
 // 集成冒烟验证）：页级 Export 瞬态重试（修复 1）+ Discard 重建 owned 退出等待
-// （修复 2）。退避/轮询间隔经包级 var 注入 0 或极小值，禁 sleep 等待竞态
-// （test-stability 契约）；平台耦合断言独立 _windows_test.go 文件
-// （linux-platform 契约）。
+// （修复 2）+ owned PID 持久化与上会话残留回收判定（D7）。退避/轮询间隔经包级
+// var 注入 0 或极小值，禁 sleep 等待竞态（test-stability 契约）；平台耦合断言
+// 独立 _windows_test.go 文件（linux-platform 契约）。
 
 package service
 
@@ -12,11 +12,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-ole/go-ole"
+
+	"workbench/util"
 )
 
 // transientExportErr 按 go-ole 真实形态构造瞬态错误：DISP_E_EXCEPTION + 空
@@ -246,5 +250,145 @@ func TestWaitForOwnedProcessesExit_EmptyOwnedSkipsProbe(t *testing.T) {
 	waitForOwnedProcessesExit(nil)
 	if probed {
 		t.Fatal("owned 集为空不应触发探针（复用用户实例路径禁等待）")
+	}
+}
+
+// TestWaitForOwnedProcessesExit_TimeoutReturnsStillAliveSubset 垂死实例困局修复
+// 的返回值契约：超时未退时返回仍存活的 PID 子集——调用方并回 w.ownedPIDs 恢复
+// 归属自证（不并回则 Quit 失败的残留 owned 实例被误归「复用用户实例」禁杀）；
+// 已退出成员从返回集剔除。
+func TestWaitForOwnedProcessesExit_TimeoutReturnsStillAliveSubset(t *testing.T) {
+	calls := 0
+	withThumbOwnedExitWaitParams(t, time.Millisecond, 20*time.Millisecond, func() map[int]bool {
+		calls++
+		if calls == 1 {
+			return map[int]bool{4242: true, 108: true}
+		}
+		return map[int]bool{4242: true} // 108 退出、4242 恒存活
+	})
+	stillAlive := waitForOwnedProcessesExit(map[int]bool{4242: true, 108: true})
+	if len(stillAlive) != 1 || !stillAlive[4242] {
+		t.Fatalf("超时应返回仍存活的子集 {4242}, got %v", stillAlive)
+	}
+}
+
+// TestWaitForOwnedProcessesExit_AllExitedReturnsEmpty 返回值契约另一面：全部退出
+// 返回空集（调用方零并回，不污染 diff 归属判定）。
+func TestWaitForOwnedProcessesExit_AllExitedReturnsEmpty(t *testing.T) {
+	withThumbOwnedExitWaitParams(t, time.Millisecond, 50*time.Millisecond, func() map[int]bool {
+		return map[int]bool{}
+	})
+	stillAlive := waitForOwnedProcessesExit(map[int]bool{4242: true})
+	if len(stillAlive) != 0 {
+		t.Fatalf("全部退出应返回空集, got %v", stillAlive)
+	}
+}
+
+// ---- owned PID 持久化与残留回收判定（D7）----
+
+// TestOwnedPIDsFileRoundTrip 持久化 round-trip：persistOwnedMirror 落盘 →
+// loadOwnedPIDsFile 读回一致；空镜像发布（releaseApp 语义）落盘 {"pids":[]}，
+// 读回空集合——本会话已知自身无 owned 实例，旧残留集据此失效。
+func TestOwnedPIDsFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), comOwnedPIDsFileName)
+	e := &goOleThumbExporter{ownedPersistPath: path}
+
+	e.ownedMu.Lock()
+	e.ownedMirror = map[int]bool{4242: true, 108: true}
+	e.ownedMu.Unlock()
+	e.persistOwnedMirror()
+
+	got := loadOwnedPIDsFile(path)
+	if len(got) != 2 || !got[4242] || !got[108] {
+		t.Fatalf("round-trip 读回不一致: %v", got)
+	}
+
+	e.ownedMu.Lock()
+	e.ownedMirror = nil
+	e.ownedMu.Unlock()
+	e.persistOwnedMirror()
+	if got := loadOwnedPIDsFile(path); len(got) != 0 {
+		t.Fatalf("空镜像应读回空集合: %v", got)
+	}
+}
+
+// TestPersistOwnedMirror_EmptyPathSkips 持久化路径空（非 Windows 桩/单测构造
+// 形态）：不落盘任何文件。
+func TestPersistOwnedMirror_EmptyPathSkips(t *testing.T) {
+	dir := t.TempDir()
+	e := &goOleThumbExporter{ownedPersistPath: ""}
+	e.ownedMu.Lock()
+	e.ownedMirror = map[int]bool{4242: true}
+	e.ownedMu.Unlock()
+	e.persistOwnedMirror()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("读临时目录失败: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("空持久化路径不应产生文件: %v", entries)
+	}
+}
+
+// TestLoadOwnedPIDsFile_StaleMtimeFiltered mtime 超 24h：视同无残留（os.Chtimes
+// 注入陈旧时间驱动——test-stability 契约禁 mtime 写入时序依赖，注入时间戳合规）。
+func TestLoadOwnedPIDsFile_StaleMtimeFiltered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), comOwnedPIDsFileName)
+	if err := util.SaveJSON(path, ownedPIDsFilePayload{PIDs: []int{4242}}); err != nil {
+		t.Fatalf("写持久化文件失败: %v", err)
+	}
+	stale := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("注入陈旧 mtime 失败: %v", err)
+	}
+	if got := loadOwnedPIDsFile(path); len(got) != 0 {
+		t.Fatalf("mtime 超 24h 应过滤为空集合: %v", got)
+	}
+}
+
+// TestLoadOwnedPIDsFile_CorruptedJSONDegradesEmpty 损坏 JSON：降级空集合不致命
+// （读失败/无文件同口径）；LoadJSON 产出的合法文件读回一致。
+func TestLoadOwnedPIDsFile_CorruptedJSONDegradesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, comOwnedPIDsFileName)
+	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("写损坏文件失败: %v", err)
+	}
+	if got := loadOwnedPIDsFile(path); len(got) != 0 {
+		t.Fatalf("损坏 JSON 应降级空集合: %v", got)
+	}
+	if got := loadOwnedPIDsFile(filepath.Join(dir, "absent.json")); len(got) != 0 {
+		t.Fatalf("无文件应返回空集合: %v", got)
+	}
+	if got := loadOwnedPIDsFile(""); len(got) != 0 {
+		t.Fatalf("空路径（未启用持久化）应返回空集合: %v", got)
+	}
+}
+
+// TestClassifyReusedInstance 残留判定三态：交集命中（自有残留，可回收）/
+// 双非空无交集（真用户实例，禁杀兜底）/ 残留集空（无盘上证据）。
+func TestClassifyReusedInstance(t *testing.T) {
+	cases := []struct {
+		name         string
+		aliveAfter   map[int]bool
+		staleOwned   map[int]bool
+		wantResidual map[int]bool
+	}{
+		{"交集命中", map[int]bool{101: true, 4242: true}, map[int]bool{4242: true}, map[int]bool{4242: true}},
+		{"双非空无交集（真用户实例）", map[int]bool{101: true}, map[int]bool{4242: true}, map[int]bool{}},
+		{"残留集空（无盘上证据）", map[int]bool{101: true}, nil, map[int]bool{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyReusedInstance(tc.aliveAfter, tc.staleOwned)
+			if len(got) != len(tc.wantResidual) {
+				t.Fatalf("residual = %v, want %v", got, tc.wantResidual)
+			}
+			for pid := range tc.wantResidual {
+				if !got[pid] {
+					t.Fatalf("residual 缺 %d: %v", pid, got)
+				}
+			}
+		})
 	}
 }

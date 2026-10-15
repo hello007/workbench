@@ -1,0 +1,10 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材管理既有契约：面板数据链路/标注体系/检索口径/懒加载分页——列表视图与选中体系必须对齐"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "缩略图消费纪律（tier=0 画廊/tier=1 hide-on-miss/直拼 data:image/png;base64,/失败静默回退/epoch 补图）与失败重试链路——本批全屏预览与失败自动补的硬约束来源"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉规范：flex 约束链/语义色/间距圆角档位/深色容器图标——新增列表视图、全屏预览层、浮动条必须遵守"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌：缩放滑块驱动卡宽的 CSS 变量须用既有令牌体系"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 精准注销/双代序号守卫惯例——选中清空点位与预览态守卫的实现参照"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 覆盖率硬门禁——测试计划口径"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 从 fixtures.js import、mock 单一数据源 wails-mock-defaults.js、禁 waitForTimeout——新增列表/预览/选中用例的约束"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "handleError 分流/错误码同步——自动重试失败提示与既有链路对齐"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "全屏层 z-index 1500 惯例与 ESC 过滤 defaultPrevented/.el-overlay 惯例——预览层选型参照"}
+{"file": "docs/spec/perf-baseline.md", "reason": "懒加载/驻留面约束（FileDiffDialog 关闭释放等先例）——预览层与选中集合不引入新驻留面"}

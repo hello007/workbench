@@ -1,0 +1,8 @@
+{"file": "docs/spec/assets-management.md", "reason": "核查列表视图/选中体系与素材管理既有契约（分页懒加载口径/标注链路/检索守卫）一致性"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核查缩略图消费纪律：画廊 tier=0/预览 tier=1 hide-on-miss/直拼 data URL/失败静默回退/自动重试一轮不放大"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查新组件视觉规范：flex 约束链/语义色/间距档位/弹窗响应式尺寸分档"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 EventsOn 注销/序号守卫/事件多组件共听惯例在新增预览与选中链路的落实"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查前端 ≥70% 覆盖率门禁达成"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查 E2E 规范：fixtures.js import/mock 单一数据源/禁 waitForTimeout/vitest exclude 同步"}
+{"file": "docs/spec/test-stability.md", "reason": "核查测试稳定性：禁 sleep/mtime 时序/隐式环境依赖"}
+{"file": ".trellis/tasks/10-15-srs-2-3/prd.md", "reason": "核查实现与 prd 五决策（D1-D5）与验收清单逐条对齐"}

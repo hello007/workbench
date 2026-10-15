@@ -121,7 +121,9 @@ func NewAssetLibraryService(ctx context.Context, assetsDir string) *AssetLibrary
 	// 与档位读取口）——flusher goroutine 由首次 record 惰性启动（对齐
 	// thumbQueue.start 模式）
 	s.thumbLedger = newThumbCacheLedger(s.storeForThumbs, s.assetThumbsDir, s.thumbQuotaBytes)
-	s.thumbQ = newThumbQueue(newThumbExporter(), s.eventSink, s.thumbLedger, s.resolvedThumbTiers)
+	// 自启 PID 持久化路径随 assetsDir 绝对化基准（COM 跨进程路径契约同源）；
+	// 崩溃残留的幽灵实例跨会话归属自证（D7），本行在 Abs 收口之后。
+	s.thumbQ = newThumbQueue(newThumbExporter(filepath.Join(s.assetsDir, comOwnedPIDsFileName)), s.eventSink, s.thumbLedger, s.resolvedThumbTiers)
 	return s
 }
 
