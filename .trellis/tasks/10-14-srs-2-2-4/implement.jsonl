@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-14-srs-2-2-4/prd.md", "reason": "本任务需求与六项定案决策（Q1-Q6 存储形态/增量语义/FTS 排除/开关/重建重绑/UI）、验收标准、PR 拆分——实施唯一权威依据"}
+{"file": "docs/spec/assets-management.md", "reason": "素材管理核心契约（SQLite 单连接自锁坑/迁移 user_version 递增/FTS 禁改面/扫描语义/file_tags 先例）——v5 迁移与标注表设计、updateSlideMeta 整体替换语义、重建重绑链路必读"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "slides.id 重解析全变教训（缓存键禁 slides.id）——标注键选 (file_id, slide_num) 的依据；缩略图失效面核对（标注变更不触发）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处绑定同步规则（App.js/App.d.ts/models.ts）+ 具名 string 类型 models.ts 别名坑 + EventsOn 闭包注销——新绑定 UpdateAssetSlideMeta 与 model 字段扩展必读"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "AppServices 装配规则——标注编排在 AssetLibraryService 既有服务内不新建服务，App 绑定委托方法模式核对"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog + AppError{Code,Message} 错误码三处同步（app_error.go 常量表 + error.js）——slide 不存在/页不存在错误语义定义依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖（禁 sleep/mtime 时序，fixture 程序化构造）——标注保留/清理单测构造依据"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉约定（详情面板编辑形态/语义色/弱化视觉/四档间距）——幻灯片详情编辑区与继承标签弱化样式依据"}

@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-14-srs-2-2-4/prd.md", "reason": "验收标准核对唯一依据（存储独立性/继承两模式/重建重绑/增量语义/迁移/绑定三处同步/覆盖率门禁）"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 SQLite 单连接池纪律（rows Close 再查）、迁移 user_version 递增 + 过新拒绝、FTS 行为不变红线（标签与幻灯片备注不入 FTS）"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核对标注变更不触发缩略图失效/重解析副作用；slides.id 不稳定教训未被违反（键为 (file_id, slide_num)）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步、models.ts 新字段、具名 string 类型禁用、EventsOn 闭包注销"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对新增错误语义走 AppError 且三处同步（若新增错误码）；slog 无 println"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无 sleep/mtime 时序/环境外部状态依赖，fixture 程序化构造"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对详情面板编辑区对齐文件详情形态、继承标签弱化视觉、语义色与间距档位"}
