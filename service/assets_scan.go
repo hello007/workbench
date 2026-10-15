@@ -94,10 +94,13 @@ func (s *AssetLibraryService) StartScan(ctx context.Context, libraryID string) (
 }
 
 // RebuildScan 手动全量重建（PRD：索引损坏/统计口径漂移时的自愈入口）：清该库
-// files/slides/FTS 记录后走一次全量扫描。用户标注（文件标签绑定）按「文件相对
-// 路径 → 标签 ID」映射在重建后写回，path 未变的文件标签不丢；标签本体（tags 表）
-// 与星级/备注随 files 清除（元数据重建语义，注释明示不做保留）。
-// 串行锁/取消注册/事件与增量扫描共用同一链路（assets-scan:* 前缀）。
+// files/slides/FTS 记录后走一次全量扫描。用户标注按「文件相对路径」映射在重建后
+// 写回，path 未变不丢：文件标签绑定（path → 标签 ID）与页级标注（path + slide_num
+// → 标签/业务备注/星级，页已消失的标注静默丢弃）；标签本体（tags 表）跨重建保留。
+// 重建中途失败/取消时备份重绑经 defer 仍执行（部分重绑语义：已重扫文件恢复、
+// 未扫文件丢弃，见 rebuildLibrary）。文件级星级/备注随 files 清除（文件元数据
+// 重建语义，注释明示不做保留）。串行锁/取消注册/事件与增量扫描共用同一链路
+// （assets-scan:* 前缀）。
 func (s *AssetLibraryService) RebuildScan(ctx context.Context, libraryID string) (model.AssetScanResult, error) {
 	return s.runLibraryScan(ctx, libraryID, "assets rebuild", s.rebuildLibrary)
 }
@@ -288,9 +291,13 @@ func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model
 }
 
 // rebuildLibrary 全量重建主体：备份标签绑定 → 清 files/FTS → 全量扫描（记录
-// 已清空，全部文件按新增处理）→ 按路径映射重绑标签。任何一步失败即中断
-// （部分重建态由再次重建自愈；清理与扫描非同一事务，中断后索引可能为空，
-// 语义与「重建后重新扫描」一致，不阻塞增量扫描修复）。
+// 已清空，全部文件按新增处理）→ 按路径映射重绑标签。备份成功后重绑以 defer
+// 注册：扫描成功与失败/取消路径都执行写回。中途失败为部分重绑语义——已重扫
+// 文件恢复标注，未重扫文件无 files/slides 行可匹配自然丢弃，优于全丢（重绑若
+// 只挂成功路径，失败直接 return：两表已随清库清空而备份仅存内存，标注永久
+// 丢失，且二次重建备份到的是空表无法自愈）。重绑自身失败仅记日志，不覆盖
+// 扫描主错误（失败路径主错误优先）；备份自身失败仍中止重建（备份不到就清库
+// = 必丢，保持 fail-fast，此时清库尚未发生索引未破坏）。
 func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
 	// 0. 取消该库在途缩略图批次（独立审核发现）：不清则 worker 在清表+删目录后
 	// 继续导出——MkdirAll 重建 tier 目录、旧 fileID PNG 落盘（AUTOINCREMENT 旧 ID
@@ -298,11 +305,40 @@ func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsS
 	// 在途单文件仍可能写入（同 DeleteLibrary 口径：窗口缩小，残留可手动清理）
 	s.CancelAssetThumbs(lib.ID)
 
-	// 1. 备份用户标签绑定（重建清 files 时 file_tags 级联清除）
+	// 1. 备份用户标注（重建清 files 时 file_tags/slide_tags/slide_meta 随外键级联
+	// 清除）：文件标签绑定 + 页级标注（标签/业务备注/星级）
 	bindings, err := store.fileTagBindingsByPath()
 	if err != nil {
 		return model.AssetScanResult{}, fmt.Errorf("备份文件标签绑定失败: %w", err)
 	}
+	slideAnnots, err := store.slideAnnotationsByPath()
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("备份幻灯片标注失败: %w", err)
+	}
+
+	// 1.1 注册重绑 defer（文件标签 + 页级标注统一走 defer，备份成功后才注册）。
+	// 时序核对：本 defer 于 rebuildLibrary 返回时执行，LIFO 上先于 runLibraryScan
+	// 的取消注销/扫描锁释放（后者注册更早、于外层函数返回时才触发），执行点
+	// store 连接必可用——连接仅由 CloseAll（服务级关停，被 WaitScansDone 挡在
+	// 本扫描退出之后）或 DeleteLibrary（与本扫描经 tryLockScan 互斥）关闭，两者
+	// 均未发生。重绑函数签名不变（接备份 map）；重绑 error 只记日志不上抛
+	// （失败路径扫描主错误优先，成功路径重绑失败不推翻已完成的重建结果）。
+	defer func() {
+		if len(bindings) > 0 {
+			if rebound, err := store.rebindFileTagsAfterRebuild(bindings); err != nil {
+				Logger().Warn("assets rebuild tags rebind failed", "libraryId", lib.ID, "err", err)
+			} else {
+				Logger().Info("assets rebuild tags rebound", "libraryId", lib.ID, "rebound", rebound)
+			}
+		}
+		if len(slideAnnots) > 0 {
+			if rebound, err := store.rebindSlideAnnotationsAfterRebuild(slideAnnots); err != nil {
+				Logger().Warn("assets rebuild slide annotations rebind failed", "libraryId", lib.ID, "err", err)
+			} else {
+				Logger().Info("assets rebuild slide annotations rebound", "libraryId", lib.ID, "rebound", rebound)
+			}
+		}
+	}()
 
 	// 2. 清索引数据（files/slides/file_tags + FTS 全表 + 缩略图记账表）
 	if err := store.clearIndexForRebuild(); err != nil {
@@ -319,19 +355,11 @@ func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsS
 	// flush 时会因外键约束失败整批丢弃（含重建后新记账）并产生告警噪音
 	s.thumbLedger.dropLibrary(lib.ID)
 
-	// 3. 全量扫描（库存记录已空，全部文件走新增解析路径，FTS 随写路径双写）
+	// 3. 全量扫描（库存记录已空，全部文件走新增解析路径，FTS 随写路径双写）。
+	// 失败/取消直接返回：重绑已由 1.1 的 defer 执行（部分恢复语义，见函数头注释）
 	result, err := s.scanLibrary(ctx, store, lib)
 	if err != nil {
 		return model.AssetScanResult{}, err
-	}
-
-	// 4. 标签重绑（path 未变的文件恢复用户标注）
-	if len(bindings) > 0 {
-		rebound, err := store.rebindFileTagsAfterRebuild(bindings)
-		if err != nil {
-			return model.AssetScanResult{}, fmt.Errorf("重绑文件标签失败: %w", err)
-		}
-		Logger().Info("assets rebuild tags rebound", "libraryId", lib.ID, "rebound", rebound)
 	}
 	return result, nil
 }

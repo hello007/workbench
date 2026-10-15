@@ -70,6 +70,13 @@ func (a *App) UpdateAssetFileMeta(libraryID string, fileID int64, meta model.Ass
 	return a.assetsSvc.UpdateFileMeta(libraryID, fileID, meta)
 }
 
+// UpdateAssetSlideMeta 幻灯片页级标注编辑（整体替换）：业务备注/星级/页自有标签
+// （区别于解析自带演讲者备注；与文件标签存储完全独立）。纯标注层——不触发重解析
+// 与缩略图失效，业务备注不入 FTS。
+func (a *App) UpdateAssetSlideMeta(libraryID string, fileID int64, slideNum int, meta model.AssetSlideMetaUpdate) error {
+	return a.assetsSvc.UpdateSlideMeta(libraryID, fileID, slideNum, meta)
+}
+
 // SearchAssets 素材检索：关键词全文检索（文件名 > 幻灯片标题 > 页文本 > 备注
 // bm25 加权，CJK 按字切分 phrase 匹配）与标签筛选（文件直接绑定、幻灯片继承
 // 归属文件标签）可组合。Flatten=false 时同一 PPT 多页命中折叠为聚合条目
@@ -80,8 +87,9 @@ func (a *App) SearchAssets(libraryID string, keyword string, opts model.AssetSea
 }
 
 // RebuildAssetLibrary 手动全量重建：清该库文件/幻灯片/检索索引记录后全量重扫
-// （索引自愈入口，统计口径漂移时使用）。文件标签绑定按相对路径映射重绑；
-// 星级/备注不保留（重建语义）。进度/终态事件与增量扫描同通道
+// （索引自愈入口，统计口径漂移时使用）。文件标签绑定与幻灯片页级标注（标签/
+// 业务备注/星级）按「相对路径 + 页序」映射重绑（页已消失的页标注丢弃）；文件级
+// 星级/备注不保留（文件元数据重建语义）。进度/终态事件与增量扫描同通道
 // （assets-scan:*），扫描中并发触发被拒（E_ASSETS_SCAN_IN_PROGRESS）。
 func (a *App) RebuildAssetLibrary(libraryID string) (model.AssetScanResult, error) {
 	return a.assetsSvc.RebuildScan(context.Background(), libraryID)

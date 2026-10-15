@@ -211,6 +211,11 @@ func (s *assetsStore) markProcessing(fileID int64, now string) error {
 // setFileOutcome 写入单文件解析终态（成功之外的分支：失败/加密/权限）。旧 slides
 // 同步清除（文件内容已变，旧页索引不可再信），FTS 行同步清除（非 ok 终态不入
 // 检索索引，含原 ok 状态降级为失败的场景）。权限跳过时 hash 为空（文件不可读）。
+//
+// 页级标注（slide_tags/slide_meta，键 (file_id, slide_num)）刻意保留不删：与
+// file_tags 在文件行存续期间保留的语义一致——文件修复重解析成功后，replaceFileSlides
+// 的失配清理仅剔除新页序中不存在的标注，现存页序的标注按位置语义复活（PRD 定案
+// Q2：标注跟随页码不跟随内容）。文件记录被删除时两表经 files 外键 CASCADE 清除。
 func (s *assetsStore) setFileOutcome(fileID int64, size, mtimeNs int64, hash, status, now string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -290,7 +295,28 @@ func (s *assetsStore) replaceFileSlides(fileID int64, size, mtimeNs int64, hash,
 			return err
 		}
 	}
+	// 页级标注失配清理（增量语义：页数不变时 NOT IN 为空集即无操作，标注天然
+	// 保留；页数减少时失配页标注清除；页内容移位标注跟随页码——位置语义，与
+	// 缩略图缓存键 file_id+page 同口径）
+	if err := deleteStaleSlideAnnotationsTx(tx, fileID); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// deleteStaleSlideAnnotationsTx 清理指定文件的失配页级标注（slides 删旧插新后
+// 事务内调用）：slide_num 已不存在于新 slides 的 slide_tags/slide_meta 行删除。
+// 须在事务内调用（与页替换同事务，失败整体回滚不留半态）。
+func deleteStaleSlideAnnotationsTx(tx *sql.Tx, fileID int64) error {
+	for _, table := range []string{"slide_tags", "slide_meta"} {
+		if _, err := tx.Exec(
+			"DELETE FROM "+table+" WHERE file_id = ? AND slide_num NOT IN "+
+				"(SELECT slide_num FROM slides WHERE file_id = ?)", fileID, fileID,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // deleteFilesByPaths 删除磁盘已消失的文件记录（slides/file_tags/thumb_cache 由
@@ -432,10 +458,70 @@ func (s *assetsStore) listFileTagGroups() (map[int64][]model.AssetTag, error) {
 	return groups, rows.Err()
 }
 
-// listSlideEntries 幻灯片索引条目分页（按文件路径 + 页序），标签继承归属文件。
-// 分页契约对齐 SearchAssets：Total 为总条目数（不随页变化），翻页以 offset 递增
-// limit 驱动。rows 在标签查询前显式关闭：单连接池下未关先查会自锁（见
-// libraryStats 注释）；COUNT 走 QueryRow+Scan（自动排空）先于分页查询发出。
+// slideAnnotKey 页级标注的复合键（slide_tags/slide_meta 主键口径，struct 作
+// map 键）：锚定 (files.id, 页序) 而非 slides.id——重解析删旧插新页记录 ID 全变，
+// files.id 稳定（schema v5 设计要点，见 assets_schema.go assetsSchemaV5SQL 注释）。
+type slideAnnotKey struct {
+	fileID   int64
+	slideNum int64
+}
+
+// slideMetaAnnot 页级标注的备注/星级载荷（listSlideMetaMap 的值形态）。
+type slideMetaAnnot struct {
+	note   string
+	rating int
+}
+
+// listSlideTagGroups 全库页自有标签分组（(file_id, slide_num) → 标签列表，按
+// 标签名排序，形态对齐 listFileTagGroups）。
+func (s *assetsStore) listSlideTagGroups() (map[slideAnnotKey][]model.AssetTag, error) {
+	rows, err := s.db.Query(
+		"SELECT st.file_id, st.slide_num, t.id, t.name, t.color, t.parent_id FROM slide_tags st " +
+			"JOIN tags t ON t.id = st.tag_id ORDER BY t.name",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	groups := make(map[slideAnnotKey][]model.AssetTag)
+	for rows.Next() {
+		var key slideAnnotKey
+		var tag model.AssetTag
+		var parentID sql.NullInt64
+		if err := rows.Scan(&key.fileID, &key.slideNum, &tag.ID, &tag.Name, &tag.Color, &parentID); err != nil {
+			return nil, err
+		}
+		tag.ParentID = parentID.Int64
+		groups[key] = append(groups[key], tag)
+	}
+	return groups, rows.Err()
+}
+
+// listSlideMetaMap 全库页级备注/星级批量（slide_meta 全表）。
+func (s *assetsStore) listSlideMetaMap() (map[slideAnnotKey]slideMetaAnnot, error) {
+	rows, err := s.db.Query("SELECT file_id, slide_num, note, rating FROM slide_meta")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	metas := make(map[slideAnnotKey]slideMetaAnnot)
+	for rows.Next() {
+		var key slideAnnotKey
+		var m slideMetaAnnot
+		if err := rows.Scan(&key.fileID, &key.slideNum, &m.note, &m.rating); err != nil {
+			return nil, err
+		}
+		metas[key] = m
+	}
+	return metas, rows.Err()
+}
+
+// listSlideEntries 幻灯片索引条目分页（按文件路径 + 页序），标签继承归属文件；
+// 页自有标注（自有标签/业务备注/星级）随条目携带（详情面板数据源，不新增查询
+// 绑定）。分页契约对齐 SearchAssets：Total 为总条目数（不随页变化），翻页以
+// offset 递增 limit 驱动。rows 在标签/标注查询前显式关闭：单连接池下未关先查
+// 会自锁（见 libraryStats 注释）；COUNT 走 QueryRow+Scan（自动排空）先于分页
+// 查询发出。
 func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage, error) {
 	var total int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&total); err != nil {
@@ -459,6 +545,7 @@ func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage,
 			return model.AssetSlidePage{}, err
 		}
 		e.Tags = []model.AssetTag{}
+		e.OwnTags = []model.AssetTag{}
 		idIndex[e.ID] = len(entries)
 		entries = append(entries, e)
 	}
@@ -470,7 +557,16 @@ func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage,
 		return model.AssetSlidePage{}, err
 	}
 
+	// 三条全库批量查询顺序发出（前一条 rows 均已收口，单连接池纪律）
 	tagsByFile, err := s.listFileTagGroups()
+	if err != nil {
+		return model.AssetSlidePage{}, err
+	}
+	ownTagsBySlide, err := s.listSlideTagGroups()
+	if err != nil {
+		return model.AssetSlidePage{}, err
+	}
+	metaBySlide, err := s.listSlideMetaMap()
 	if err != nil {
 		return model.AssetSlidePage{}, err
 	}
@@ -478,6 +574,12 @@ func (s *assetsStore) listSlideEntries(limit, offset int) (model.AssetSlidePage,
 		entries[i].Tags = tagsByFile[entries[i].FileID]
 		if entries[i].Tags == nil {
 			entries[i].Tags = []model.AssetTag{}
+		}
+		key := slideAnnotKey{fileID: entries[i].FileID, slideNum: int64(entries[i].SlideNum)}
+		entries[i].OwnTags = nonNilTags(ownTagsBySlide[key])
+		if m, ok := metaBySlide[key]; ok {
+			entries[i].Note = m.note
+			entries[i].Rating = m.rating
 		}
 	}
 	return model.AssetSlidePage{Items: entries, Total: total}, nil
@@ -525,6 +627,70 @@ func (s *assetsStore) updateFileMeta(fileID int64, rating int, note string, tagN
 	// （内部按 files.status 分流，非 ok 文件幂等清行为空操作）
 	if err := syncFtsFileRowTx(tx, fileID); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// updateSlideMeta 幻灯片页级标注整体替换（单事务）：业务备注/星级 upsert
+// slide_meta + 页自有标签集重建（按 (file_id, slide_num) 整体替换，DELETE 后
+// ensureTagTx 循环 INSERT OR IGNORE，去空白去重对齐 updateFileMeta）。
+//
+// 纯标注层约束：不写 FTS（页业务备注不入检索，关键词行为不变）、不碰
+// thumb_cache、不触发重解析——页标注生命周期独立于解析产物（SRS §2.2.4 存储层
+// 独立契约）。文件或页不存在返回可读错误（对齐 updateFileMeta 形态，非 AppError）。
+func (s *assetsStore) updateSlideMeta(fileID, slideNum int64, rating int, note string, tagNames []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 宿主行校验：文件行 + 页行（页标注锚定 (file_id, slide_num)，页不存在的
+	// 写入属前端数据过期，引导刷新）
+	var exists int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM files WHERE id = ?", fileID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return fmt.Errorf("素材文件不存在或已被删除（fileId=%d），请刷新列表", fileID)
+	}
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM slides WHERE file_id = ? AND slide_num = ?", fileID, slideNum,
+	).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return fmt.Errorf("幻灯片页不存在或已被重新解析（fileId=%d，slideNum=%d），请刷新列表", fileID, slideNum)
+	}
+
+	if _, err := tx.Exec(
+		"INSERT OR REPLACE INTO slide_meta(file_id, slide_num, note, rating) VALUES(?, ?, ?, ?)",
+		fileID, slideNum, note, rating,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"DELETE FROM slide_tags WHERE file_id = ? AND slide_num = ?", fileID, slideNum,
+	); err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(tagNames))
+	for _, name := range tagNames {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		tagID, err := ensureTagTx(tx, name)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO slide_tags(file_id, slide_num, tag_id) VALUES(?, ?, ?)",
+			fileID, slideNum, tagID,
+		); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -736,6 +902,61 @@ func (s *assetsStore) fileIDsForTagFilter(tagIDs []int64) (map[int64]bool, error
 	return set, rows.Err()
 }
 
+// slideOwnTagFilterSet 标签筛选的「页自身绑定」命中集合（slides.id 视角）：
+// slide_tags 中绑定任一给定标签的 (file_id, slide_num)，经 slides 唯一索引
+// idx_slides_file_num 等价解析为页记录 ID（与 FTS 命中行的 refID 同口径，检索
+// 过滤 O(1) 判定，无需为每个命中回查页序）。标签列表为空返回 nil（调用方跳过
+// 筛选）；已消失页的残留标注（重解析失配清理前的窗口）经 JOIN slides 自然出局。
+//
+// 继承合并语义单点：与 listTagFilteredSlides 的 SQL 子查询同源（同两关系表、同
+// 标签参数），合并规则（默认【文件绑定 ∪ 页自身绑定】/ OnlyOwn 仅页自身）统一在
+// slideTagRowMatches（FTS 路径）与 listTagFilteredSlides WHERE（纯标签浏览路径）
+// 表达，禁两套口径。
+func (s *assetsStore) slideOwnTagFilterSet(tagIDs []int64) (map[int64]bool, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
+	args := make([]any, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(
+		"SELECT s.id FROM slide_tags st "+
+			"JOIN slides s ON s.file_id = st.file_id AND s.slide_num = st.slide_num "+
+			"WHERE st.tag_id IN ("+placeholders+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		set[id] = true
+	}
+	return set, rows.Err()
+}
+
+// slideTagRowMatches 标签筛选的行级命中判定（继承合并语义单点，FTS 检索路径
+// 消费）：文件行仅看归属文件绑定（不受 OnlyOwn 影响——文件条目只有 file_tags）；
+// 幻灯片行默认【归属文件绑定 ∪ 页自身绑定】，OnlyOwn=true 仅页自身绑定。两个
+// 集合均为 nil 表示未启用标签筛选（全放行）。
+func slideTagRowMatches(onlyOwn bool, fileFilter, ownSlideFilter map[int64]bool, refType string, refID, fileID int64) bool {
+	if fileFilter == nil && ownSlideFilter == nil {
+		return true // 未启用标签筛选：全部命中
+	}
+	if refType == model.AssetRefTypeFile {
+		return fileFilter == nil || fileFilter[fileID]
+	}
+	if ownSlideFilter != nil && ownSlideFilter[refID] {
+		return true
+	}
+	return !onlyOwn && fileFilter != nil && fileFilter[fileID]
+}
+
 // tagFilteredFileOrdering 纯标签筛选的文件条目全量序（按路径序）：仅 ok 状态
 // 且直接绑定任一给定标签。
 type tagFilteredFileOrdering struct {
@@ -777,19 +998,35 @@ type tagFilteredSlideOrdering struct {
 	num    int
 }
 
-// listTagFilteredSlides 纯标签浏览的幻灯片条目序（标签继承语义：归属文件绑定
-// 即命中）。
-func (s *assetsStore) listTagFilteredSlides(tagIDs []int64) ([]tagFilteredSlideOrdering, error) {
+// listTagFilteredSlides 纯标签浏览的幻灯片条目序（标签继承合并语义：默认【归属
+// 文件绑定 ∪ 页自身绑定】命中，onlyOwn=true 仅页自身绑定——与 FTS 检索路径的
+// slideTagRowMatches 同一语义，SQL 子查询与 slideOwnTagFilterSet 同源）。
+// onlyOwn 时文件绑定分支整段裁剪（仅页自身标签语义）。
+func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool) ([]tagFilteredSlideOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
-	args := make([]any, 0, len(tagIDs))
+	baseArgs := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
-		args = append(args, id)
+		baseArgs = append(baseArgs, id)
 	}
-	rows, err := s.db.Query(
-		"SELECT s.id, s.file_id, f.path, s.slide_num FROM slides s JOIN files f ON f.id = s.file_id "+
-			"WHERE f.status = ? AND s.file_id IN "+
-			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+")) ORDER BY f.path, s.slide_num",
-		append([]any{model.AssetFileStatusOK}, args...)...)
+	// 双子查询形态的参数序：status 占位 + 文件绑定子查询标签参数 + 页自身绑定
+	// 子查询标签参数（placeholders 构造复用现有形态）
+	query := "SELECT s.id, s.file_id, f.path, s.slide_num FROM slides s JOIN files f ON f.id = s.file_id "
+	var args []any
+	if onlyOwn {
+		query += "WHERE f.status = ? AND (s.file_id, s.slide_num) IN " +
+			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + ")) " +
+			"ORDER BY f.path, s.slide_num"
+		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
+	} else {
+		query += "WHERE f.status = ? AND (s.file_id IN " +
+			"(SELECT file_id FROM file_tags WHERE tag_id IN (" + placeholders + ")) OR " +
+			"(s.file_id, s.slide_num) IN " +
+			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + "))) " +
+			"ORDER BY f.path, s.slide_num"
+		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
+		args = append(args, baseArgs...)
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -826,11 +1063,13 @@ func (s *assetsStore) fileTagBindingsByPath() (map[string][]int64, error) {
 	return bindings, rows.Err()
 }
 
-// clearIndexForRebuild 全量重建前置清理（单事务）：清 files（slides/file_tags
-// 随外键级联清除）+ FTS 全表 + 缩略图记账表（thumb_cache——files 级联本会清，
-// 显式删除与调用方「thumbs 目录整体清空」同口径的双保险）。FTS 清空用 DELETE
-// FROM（standalone FTS5 表不支持 contentless/external content 专用的 'delete-all'
-// 命令）。标签本体（tags 表）保留——重建后经路径映射重绑。
+// clearIndexForRebuild 全量重建前置清理（单事务）：清 files（slides/file_tags/
+// slide_tags/slide_meta/thumb_cache 随外键级联清除）+ FTS 全表 + 缩略图记账表
+// + 页级标注两表（slide_tags/slide_meta——files 级联本会清，显式删除为对齐
+// thumb_cache 先例的双保险，防 pragma 漂移静默漏清致重绑与残留行合并半态；
+// 调用方已先经 slideAnnotationsByPath 备份）。FTS 清空用 DELETE FROM（standalone
+// FTS5 表不支持 contentless/external content 专用的 'delete-all' 命令）。标签
+// 本体（tags 表）保留——重建后经路径映射重绑。
 func (s *assetsStore) clearIndexForRebuild() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -844,6 +1083,12 @@ func (s *assetsStore) clearIndexForRebuild() error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM thumb_cache"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM slide_tags"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM slide_meta"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -891,6 +1136,156 @@ func (s *assetsStore) rebindFileTagsAfterRebuild(bindings map[string][]int64) (i
 			}
 		}
 		rebound++
+	}
+	return rebound, tx.Commit()
+}
+
+// slideAnnotation 页级标注备份条目（slideAnnotationsByPath 的值形态）：标签 ID
+// 引用 tags 表（重建清 files 不清 tags，标签本体跨重建保留，ID 稳定可直写回）。
+type slideAnnotation struct {
+	slideNum int64
+	tagIDs   []int64
+	note     string
+	rating   int
+}
+
+// slideAnnotationsByPath 重建前的页级标注备份：文件相对路径 → 页标注列表
+// （slide_tags + slide_meta 两表 JOIN files 按 path 聚合，形态对齐
+// fileTagBindingsByPath）。两条查询各自收齐结果显式 Close 后再发下一条（单连接
+// 池自锁纪律，见 libraryStats 注释）。
+func (s *assetsStore) slideAnnotationsByPath() (map[string][]slideAnnotation, error) {
+	// 1. 页自有标签绑定
+	tagIDsByPath := make(map[string]map[int64][]int64)
+	rows, err := s.db.Query(
+		"SELECT f.path, st.slide_num, st.tag_id FROM slide_tags st JOIN files f ON f.id = st.file_id " +
+			"ORDER BY f.path, st.slide_num, st.tag_id")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var p string
+		var num, tagID int64
+		if err := rows.Scan(&p, &num, &tagID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if tagIDsByPath[p] == nil {
+			tagIDsByPath[p] = make(map[int64][]int64)
+		}
+		tagIDsByPath[p][num] = append(tagIDsByPath[p][num], tagID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// 2. 页级备注/星级 + 按路径聚合（标签与元数据两表合一）
+	annotations := make(map[string][]slideAnnotation)
+	rows, err = s.db.Query(
+		"SELECT f.path, sm.slide_num, sm.note, sm.rating FROM slide_meta sm JOIN files f ON f.id = sm.file_id " +
+			"ORDER BY f.path, sm.slide_num")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		var num, rating int64
+		var note string
+		if err := rows.Scan(&p, &num, &note, &rating); err != nil {
+			return nil, err
+		}
+		annotations[p] = append(annotations[p], slideAnnotation{
+			slideNum: num,
+			note:     note,
+			rating:   int(rating),
+			tagIDs:   tagIDsByPath[p][num],
+		})
+		delete(tagIDsByPath[p], num)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// 仅有标签无备注/星级的页（slide_meta 无行）：补占位条目
+	for p, byNum := range tagIDsByPath {
+		for num, tagIDs := range byNum {
+			annotations[p] = append(annotations[p], slideAnnotation{slideNum: num, tagIDs: tagIDs})
+		}
+	}
+	return annotations, nil
+}
+
+// rebindSlideAnnotationsAfterRebuild 全量重建后的页级标注重绑：按「文件相对路径
+// + 页序」映射将重建前备份写回新页记录（slide_meta INSERT OR REPLACE + slide_tags
+// INSERT OR IGNORE，单事务；path 未变且页在新 slides 中存在才写回，页已消失的
+// 标注静默丢弃——位置语义，对齐缩略图缓存键口径）。返回重绑页数。
+func (s *assetsStore) rebindSlideAnnotationsAfterRebuild(annotations map[string][]slideAnnotation) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// 新 slides 现存页集合：path → (slide_num → file_id)。rows 收齐后显式 Close
+	// 再发写语句（单连接池自锁纪律，事务内同理）。
+	rows, err := tx.Query(
+		"SELECT f.path, s.slide_num, s.file_id FROM slides s JOIN files f ON f.id = s.file_id")
+	if err != nil {
+		return 0, err
+	}
+	type newPage struct {
+		fileID int64
+	}
+	pagesByPath := make(map[string]map[int64]newPage)
+	for rows.Next() {
+		var p string
+		var num, fileID int64
+		if err := rows.Scan(&p, &num, &fileID); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		if pagesByPath[p] == nil {
+			pagesByPath[p] = make(map[int64]newPage)
+		}
+		pagesByPath[p][num] = newPage{fileID: fileID}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	rebound := 0
+	for p, annots := range annotations {
+		pages, ok := pagesByPath[p]
+		if !ok {
+			continue // 重建后文件已消失：整文件页标注丢弃
+		}
+		for _, a := range annots {
+			page, ok := pages[a.slideNum]
+			if !ok {
+				continue // 页已消失（重解析页数减少）：该页标注静默丢弃
+			}
+			if _, err := tx.Exec(
+				"INSERT OR REPLACE INTO slide_meta(file_id, slide_num, note, rating) VALUES(?, ?, ?, ?)",
+				page.fileID, a.slideNum, a.note, a.rating,
+			); err != nil {
+				return 0, err
+			}
+			for _, tagID := range a.tagIDs {
+				if _, err := tx.Exec(
+					"INSERT OR IGNORE INTO slide_tags(file_id, slide_num, tag_id) VALUES(?, ?, ?)",
+					page.fileID, a.slideNum, tagID,
+				); err != nil {
+					return 0, err
+				}
+			}
+			rebound++
+		}
 	}
 	return rebound, tx.Commit()
 }

@@ -74,14 +74,11 @@ type assetSearchEntry struct {
 }
 
 // searchAssetsInStore 检索主体（store 连接内执行）：分流关键词检索与纯标签浏览。
+// 标签筛选集合（fileIDsForTagFilter/slideOwnTagFilterSet）仅关键词路径预取——其
+// 结果只被 FTS 命中行的 Go 层行级判定消费；纯标签浏览路径的筛选由
+// listTagFilteredFiles/listTagFilteredSlides 的 SQL 子查询完成（继承合并语义同
+// 源），提前返回避免两条无消费的 JOIN 查询。
 func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSearchOptions) (model.AssetSearchPage, error) {
-	// 标签筛选集合：文件条目要求自身绑定，幻灯片条目要求归属文件绑定——两者
-	// 的 FTS 行 file_id 口径一致（文件行 = 自身 ID），统一用 fileID ∈ 集合判定
-	tagFilter, err := store.fileIDsForTagFilter(opts.TagIDs)
-	if err != nil {
-		return model.AssetSearchPage{}, fmt.Errorf("读取标签筛选集合失败: %w", err)
-	}
-
 	if keyword == "" {
 		if len(opts.TagIDs) == 0 {
 			// 空查询语义：无关键词且无筛选条件返回空结果页，不报错
@@ -89,11 +86,23 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 		}
 		return searchByTagsOnly(store, opts)
 	}
-	return searchByKeyword(store, keyword, opts, tagFilter)
+	// 关键词路径：标签筛选集合（继承合并语义，见 slideTagRowMatches）——文件条目
+	// 要求自身绑定；幻灯片条目默认【归属文件绑定 ∪ 页自身绑定】，OnlyOwn=true 仅
+	// 页自身（开关仅作用于标签筛选，关键词命中与文件条目不受影响）。TagIDs 为空
+	// 时两函数短路返回 nil，无查询、行级判定全放行。
+	tagFilter, err := store.fileIDsForTagFilter(opts.TagIDs)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("读取标签筛选集合失败: %w", err)
+	}
+	ownSlideFilter, err := store.slideOwnTagFilterSet(opts.TagIDs)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("读取标签筛选集合失败: %w", err)
+	}
+	return searchByKeyword(store, keyword, opts, tagFilter, ownSlideFilter)
 }
 
 // searchByKeyword 关键词全文检索路径。
-func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchOptions, tagFilter map[int64]bool) (model.AssetSearchPage, error) {
+func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchOptions, tagFilter, ownSlideFilter map[int64]bool) (model.AssetSearchPage, error) {
 	matchExpr := buildFtsQuery(keyword)
 	if matchExpr == "" {
 		// 纯空白/全标点关键词：无有效查询词，空结果不报错
@@ -107,7 +116,7 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 	entries := make([]assetSearchEntry, 0, len(hits))
 	for _, h := range hits {
 		refType, refID := decodeFtsRowid(h.rowid)
-		if tagFilter != nil && !tagFilter[h.fileID] {
+		if !slideTagRowMatches(opts.SlideTagOnlyOwn, tagFilter, ownSlideFilter, refType, refID, h.fileID) {
 			continue
 		}
 		entries = append(entries, assetSearchEntry{
@@ -132,14 +141,15 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 }
 
 // searchByTagsOnly 纯标签浏览路径（keyword 为空）：不经 FTS，直接按标签绑定
-// 关系列出文件与幻灯片（幻灯片继承归属文件标签），全量取 ID 后内存聚合分页
-// （无相关性语义，Score 恒 0、Snippet 为空；库规模 = 已索引文件/页数，量级可控）。
+// 关系列出文件与幻灯片（幻灯片默认【归属文件绑定 ∪ 页自身绑定】命中，
+// SlideTagOnlyOwn=true 仅页自身；文件条目不受开关影响），全量取 ID 后内存聚合
+// 分页（无相关性语义，Score 恒 0、Snippet 为空；库规模 = 已索引文件/页数，量级可控）。
 func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions) (model.AssetSearchPage, error) {
 	files, err := store.listTagFilteredFiles(opts.TagIDs)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("标签筛选失败: %w", err)
 	}
-	slides, err := store.listTagFilteredSlides(opts.TagIDs)
+	slides, err := store.listTagFilteredSlides(opts.TagIDs, opts.SlideTagOnlyOwn)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("标签筛选失败: %w", err)
 	}
@@ -275,6 +285,14 @@ func pageAndFillEntries(store *assetsStore, entries []assetSearchEntry, opts mod
 	if err != nil {
 		return nil, 0, fmt.Errorf("读取检索结果标签失败: %w", err)
 	}
+	ownTagsBySlide, err := store.listSlideTagGroups()
+	if err != nil {
+		return nil, 0, fmt.Errorf("读取检索结果页标签失败: %w", err)
+	}
+	metaBySlide, err := store.listSlideMetaMap()
+	if err != nil {
+		return nil, 0, fmt.Errorf("读取检索结果页标注失败: %w", err)
+	}
 
 	for _, e := range pageEntries {
 		hit := model.AssetSearchHit{
@@ -283,6 +301,8 @@ func pageAndFillEntries(store *assetsStore, entries []assetSearchEntry, opts mod
 			Score:    e.score,
 			HitCount: e.hitCount,
 			Tags:     []model.AssetTag{},
+			// 文件条目无页自有标注，空切片保证序列化为 [] 而非 null（nonNilTags 同款契约）
+			OwnTags: []model.AssetTag{},
 		}
 		if e.refType == model.AssetRefTypeFile {
 			m, ok := fileMetas[e.refID]
@@ -305,6 +325,14 @@ func pageAndFillEntries(store *assetsStore, entries []assetSearchEntry, opts mod
 			hit.SlideNum = m.num
 			hit.Snippet = snippetFromTexts(keyword, []string{m.title, m.text, m.notes})
 			hit.Tags = nonNilTags(tagsByFile[m.fileID])
+			// 页自有标注（详情面板数据源；文件条目不填充——文件自有标注经
+			// ListAssetFiles 的 AssetFileEntry 携带）
+			key := slideAnnotKey{fileID: m.fileID, slideNum: int64(m.num)}
+			hit.OwnTags = nonNilTags(ownTagsBySlide[key])
+			if annot, ok := metaBySlide[key]; ok {
+				hit.Note = annot.note
+				hit.Rating = annot.rating
+			}
 		}
 		items = append(items, hit)
 	}

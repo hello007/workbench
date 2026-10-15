@@ -377,6 +377,24 @@ func (s *AssetLibraryService) UpdateFileMeta(libraryID string, fileID int64, met
 	})
 }
 
+// UpdateSlideMeta 幻灯片页级标注编辑（整体替换语义，对齐 UpdateFileMeta）：
+// 业务备注/星级/页自有标签集（不存在的标签自动创建并按色板分配颜色）。
+// 纯标注层：不触发重解析与缩略图失效，业务备注不入 FTS（SRS §2.2.4）。
+func (s *AssetLibraryService) UpdateSlideMeta(libraryID string, fileID int64, slideNum int, meta model.AssetSlideMetaUpdate) error {
+	if meta.Rating < 0 || meta.Rating > 5 {
+		return fmt.Errorf("星级取值须在 0-5 之间（0 = 清除评分），当前：%d", meta.Rating)
+	}
+	if slideNum < 1 {
+		return fmt.Errorf("页序须从 1 计，当前：%d", slideNum)
+	}
+	if _, err := s.getLibrary(libraryID); err != nil {
+		return err
+	}
+	return s.withStore(libraryID, func(store *assetsStore) error {
+		return store.updateSlideMeta(fileID, int64(slideNum), meta.Rating, meta.Note, meta.TagNames)
+	})
+}
+
 // WaitScansDone 通知全部在途扫描取消并等待其退出（App.shutdown 关停收口，先于
 // CloseAll 调用）：逐个触发取消注册表中的 CancelFunc（扫描在文件间检查点感知
 // ctx 取消后收尾），再等扫描计数归零。没有本收口时，CloseAll 先关库连接、在途

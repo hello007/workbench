@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 4
+const assetsSchemaVersion = 5
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -147,6 +147,38 @@ CREATE TABLE IF NOT EXISTS split_records (
 );
 `
 
+// assetsSchemaV5SQL v5 迁移：幻灯片页级独立标注表（素材管理第四批，SRS §2.2.4
+// ——独立标签 + 业务备注 + 星级评分，与解析产物生命周期解耦）。
+//
+// 设计要点：
+//   - 键 = (file_id, slide_num) 而非 slides.id：slides 为 AUTOINCREMENT 删旧插新，
+//     每轮重解析 ID 全变（docs/spec/assets-thumbs-com.md 缓存键契约同款教训），
+//     files.id 稳定；页标注跟随页码（位置语义，与缩略图缓存键 file_id+page 同口径）。
+//   - 外键锚 files(id) ON DELETE CASCADE：删文件/重建清表时标注随 files 级联清除
+//     （重建先经 slideAnnotationsByPath 备份、后按 path+slide_num 重绑）；页数变化
+//     的失配清理由重解析链路显式 DELETE（页数不变时天然保留，零迁移逻辑）。
+//   - slide_tags.tag_id 外键 tags(id) ON DELETE CASCADE：标签本体删除时绑定随之
+//     清除，与 file_tags 同构。文件标签与页标签互不写入（存储层完全独立）。
+//   - 业务备注（note）独立于 slides.speaker_notes（解析自带演讲者备注），不入 FTS
+//     （关键词检索行为不变，不对称性为已登记限制）。
+//   - 无 Go 层回填：存量库无页级标注（该能力随本版本引入），空表即正确初态。
+const assetsSchemaV5SQL = `
+CREATE TABLE IF NOT EXISTS slide_tags (
+    file_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    slide_num INTEGER NOT NULL,
+    tag_id    INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (file_id, slide_num, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS slide_meta (
+    file_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    slide_num INTEGER NOT NULL,
+    note      TEXT    NOT NULL DEFAULT '',
+    rating    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (file_id, slide_num)
+);
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -156,6 +188,7 @@ var assetsMigrations = map[int]string{
 	2: assetsSchemaV2SQL,
 	3: assetsSchemaV3SQL,
 	4: assetsSchemaV4SQL,
+	5: assetsSchemaV5SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

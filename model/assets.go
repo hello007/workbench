@@ -60,7 +60,10 @@ type AssetSlideEntry struct {
 	Title        string     `json:"title"`        // 页标题（回退链结果，空页兜底「[无标题]」）
 	Text         string     `json:"text"`         // 页文本框正文
 	SpeakerNotes string     `json:"speakerNotes"` // 演讲者备注
-	Tags         []AssetTag `json:"tags"`         // 标签：继承归属文件标签（本批幻灯片无自有标签）
+	Tags         []AssetTag `json:"tags"`         // 标签：继承归属文件标签（继承语义不变，详情面板只读弱化展示）
+	OwnTags      []AssetTag `json:"ownTags"`      // 页自有标签（slide_tags 独立存储，与文件标签互不写入）
+	Note         string     `json:"note"`         // 页业务备注（用户标注，区别于解析自带演讲者备注；不入 FTS）
+	Rating       int        `json:"rating"`       // 页星级 0-5（0 = 未评分）
 }
 
 // AssetSlidePage 幻灯片索引分页结果（ListAssetSlides 返回）。分页契约与
@@ -130,6 +133,16 @@ type AssetFileMetaUpdate struct {
 	Tags   []string `json:"tags"`   // 标签名列表（整体替换；不存在的标签自动创建）
 }
 
+// AssetSlideMetaUpdate 幻灯片页级标注编辑入参（UpdateAssetSlideMeta 整体替换
+// 语义，对齐 AssetFileMetaUpdate）：业务备注/星级/自有标签以本次提交值为准；
+// 不触碰解析链路与缩略图缓存（纯标注层）。标签写入 slide_tags（页自有），
+// 与文件标签（file_tags）存储完全独立。
+type AssetSlideMetaUpdate struct {
+	Note     string   `json:"note"`     // 业务备注（整体替换）
+	Rating   int      `json:"rating"`   // 星级 0-5（0 = 清除评分）
+	TagNames []string `json:"tagNames"` // 页自有标签名列表（整体替换；不存在的标签自动创建）
+}
+
 // 素材检索条目类型标记（AssetSearchHit.RefType 取值，普通 string 常量非具名
 // 类型，不经 Wails 绑定层别名机制）。
 const (
@@ -141,9 +154,13 @@ const (
 // 关键词为空且给定标签时退化为纯标签浏览。
 type AssetSearchOptions struct {
 	Flatten bool    `json:"flatten"` // true = 平铺返回全部命中；false = 同 PPT 多页命中折叠为聚合条目
-	TagIDs  []int64 `json:"tagIds"`  // 标签筛选：文件条目须直接绑定其中之一，幻灯片条目须归属文件绑定其中之一（继承）；空 = 不筛选
-	Limit   int     `json:"limit"`   // 分页大小（≤0 取默认 50，上限 200）
-	Offset  int     `json:"offset"`  // 分页偏移（<0 按 0 处理）
+	TagIDs  []int64 `json:"tagIds"`  // 标签筛选：文件条目须直接绑定其中之一，幻灯片条目默认【归属文件绑定 ∪ 页自身绑定】命中；空 = 不筛选
+	// SlideTagOnlyOwn 标签筛选继承开关（仅作用于标签筛选，关键词命中不受影响；
+	// 文件条目不受影响）：false（默认，向后兼容）= 幻灯片条目【页自身标签 ∪ 归属
+	// 文件标签】合并命中；true = 幻灯片条目仅页自身标签命中。
+	SlideTagOnlyOwn bool    `json:"slideTagOnlyOwn"`
+	Limit           int     `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset          int     `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或
@@ -159,6 +176,11 @@ type AssetSearchHit struct {
 	Score    float64    `json:"score"`    // bm25 相关性（FTS5 负值口径：越小越相关，仅排序用）；纯标签筛选 = 0
 	HitCount int        `json:"hitCount"` // 聚合条目命中页数（平铺条目与文件条目 = 1）
 	Tags     []AssetTag `json:"tags"`     // 文件标签（幻灯片条目继承归属文件标签）
+	// 以下三字段仅幻灯片条目填充（页自有标注，详情面板数据源）；文件条目恒零值
+	// （文件自有标注经 ListAssetFiles 的 AssetFileEntry 携带）。
+	OwnTags []AssetTag `json:"ownTags"` // 页自有标签（幻灯片条目；文件条目恒空）
+	Note    string     `json:"note"`    // 页业务备注（幻灯片条目；文件条目恒空串）
+	Rating  int        `json:"rating"`  // 页星级 0-5（幻灯片条目；文件条目恒 0）
 }
 
 // AssetSearchPage 素材检索结果页（分页契约：Total 为过滤/聚合后的总条目数，
