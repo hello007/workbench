@@ -153,4 +153,45 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）。
+## 8. 视图与选中体系（SRS §2.3，2026-10-15 第五批沉淀）
+
+### 8.1 选中键契约（第六批批量操作的消费入口）
+
+- 键形态**单点** `frontend/src/utils/assetSelection.js` 的 `assetSelectionKey(card)`：文件 `'file:<fileId>'`、幻灯片 `'slide:<fileId>:<slideNum>'`。**禁用 slides.id 作选中键**（每轮重解析全变，与缩略图缓存键用 files.id 同理由）；类型前缀防批量消费时类型歧义。新增卡片消费点必须经该函数，禁第二处手拼键。
+- 宿主持 `selectedKeys = ref(new Set())`，响应式走**整体替换**（`new Set(selectedKeys.value)` 拷贝后增删再赋值），禁原地变异（Vue 不拦截 Set 变异方法）。
+- 选中维度跟随 `viewMode`（文件视图选文件/幻灯片视图选页），不设独立开关；呈现切换（网格↔列表 displayMode）**不清空**（同数据语境）。
+
+### 8.2 清空点位矩阵（语境变更即清，漏点=幽灵选中）
+
+| 点位 | 函数 | 行为 |
+|---|---|---|
+| 切库 | `watch(currentLibraryId)` | 清选中 + 关预览 |
+| 检索条件变更 | `applySearch` / `onFlattenChange` / `onSlideTagOnlyOwnChange` | 清选中 + 关预览 |
+| viewMode 切换 | `onViewModeChange` | 清选中 + 关预览（维度不通约） |
+| 扫描刷新 | `resetAndReloadView` | 清选中 + 关预览（底册 id 重解析） |
+| **溯源跳转** | `traceToSourceFile` | 清选中 + 关预览——**直赋 `viewMode.value='file'` 不经 applySearch/onViewModeChange**，是唯一同时命中 #2/#3 却绕过常规入口的路径，新增语境变更函数时对照本表逐一过 |
+| 呈现切换 | displayMode radio | 不清（同数据语境） |
+| 全屏预览翻页 | — | 不清（预览即详情导航，侧栏标注编辑照常可用） |
+
+- 全选/反选作用域 = **当前渲染独立卡键集**（检索模式含已加载段，懒加载未加载段不在范围）；反选 = 渲染集 ∖ 当前选中（渲染集外键结构性清零防幽灵）。聚合父卡（hitCount>1）与聚合展开子行无复选框（勾选语义歧义）。
+
+### 8.3 全屏预览层
+
+- **层级选型**：预览层 z-index **10、浮动操作条 5——面板内局部值**，定位语境 `.assets-view-wrap`（画廊列自身 relative，**非** `.assets-body`——以 body 为 containing block 会连详情侧栏一并覆盖，违反「预览态详情可编辑」）；不触碰全局右键菜单 2000 / EP 弹窗 2001+ 惯例档。预览层内 `.preview-nav` 须显式 `z-index:2` 压过 `.preview-thumb` 的 `z-index:1`（hd 图 ready 后铺满 stage，漏设则按钮被绘制层盖死——jsdom 无布局引擎测不出，真机冒烟项）。
+- **翻页序列** = `displayCards.filter(kind==='slide')`（浏览清单已加载段滚动续拉 / 检索命中序列；聚合展开子项不在序列，从子项详情打开按归属文件路径回退定位）。零后端改动；「单文件内翻全部页」需 `ListAssetFileSlides` 类只读绑定，留后续批独立增量。
+- **键盘守卫**：document keydown 过滤 `event.defaultPrevented`、目标 `.el-overlay`/`.xterm-helper-textarea`（终端全屏 ESC 惯例）+ **方向键追加可编辑元素聚焦跳过**（INPUT/TEXTAREA/SELECT/contenteditable——预览态侧栏标注编辑时方向键是光标移动语义，翻页会打断编辑）；`onBeforeUnmount` 注销监听。
+- **序列收缩兜底**：`watch(previewSlides.length)` 越界即关预览——浏览态保存标注触发 `loadSlidesPage(true)` 复位首页后序列可能短于当前下标，漏兜底则 overlay 进入「非空 index 但不渲染」的不可见卡死态。
+- 保存标注触发的检索重跑**不关预览**（同条件重跑序列内容不变，预览态编辑属预期 UX），越界由收缩兜底覆盖。
+
+### 8.4 失败缩略图自动补（恰一轮）
+
+- `onThumbsDone` 内 `failedThumbPaths` 非空且本轮未自动重试过 → 逐个 `RetryAssetThumb`（fileId 从 fileEntries 按 path 反查，miss 跳过）→ 普通 let 标记已重试；下轮 done 不再触发（损坏类必然再失败，一轮即止不放大）；切库 watch 复位标记（新库新批次语义）。fire-and-forget 不弹提示，epoch 代次驱动 miss 卡补图不变。
+
+### 8.5 列表视图（AssetListView）
+
+- 受控组件零业务状态：选中/详情/检索代次/分页判定全留宿主；行点击 emit `card-click`、滚动到底 emit `load-more`（防重与分页知识在宿主 `loadMoreInView` 单点，网格 scroll 与列表/预览 load-more 三入口共用）。
+- 列集分语境（prd D3）：幻灯片与检索条目的 size/modTime 经 fileEntries 底册按 filePath 反查 join（归属文件属性口径，表头 tooltip 声明），底册 miss 显 `—` 不猜值；聚合条目大小 `—`；星级 `0` 显 `—` 且**不落底册兜底**（`0` 非 nullish，页级标注独立于文件标注，兜底会伪造页星级）。检索幻灯片条目追加命中摘要列。
+
+---
+
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）。

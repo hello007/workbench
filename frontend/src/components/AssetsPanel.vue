@@ -26,6 +26,36 @@
      两种命中口径（默认合并向后兼容，仅作用于标签筛选，关键词命中不受影响）。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
+     呈现维度（SRS §2.3 PR1）：displayMode 网格/列表两形态共用同一 displayCards
+     卡片模型与数据语境（切换不改分页累计/检索结果）；列表呈现为受控子组件
+     AssetListView（无自有业务状态），行点击/滚动到底仅上报事件，分派复用
+     onGalleryScroll 的同一 loadMoreInView 单点；空态四组与呈现维度无关，外提共用。
+     全屏预览（SRS §2.3 PR2）：AssetPreviewOverlay 受控层覆盖画廊列（详情侧栏在
+     层外保持可见可编辑，D5#6 预览即详情导航）；序列 = displayCards 过滤幻灯片子
+     序列（不含聚合展开子项），翻页写回 previewIndex 经 watch 同步详情侧栏，末页
+     「→」经 load-more 触发续拉不预翻；语境变更点位（检索/视图/平铺/切库/刷新）
+     统一关闭预览。
+     选中体系（SRS §2.3 PR3，PRD D2/D5）：selectedKeys Set（整体替换驱动响应式，
+     不依赖 Vue 对 Set 变异方法的拦截），键形态 'file:<fileId>' / 'slide:<fileId>:<slideNum>'
+     （禁 slides.id——重解析全变，映射收敛 utils/assetSelection 共享单点）；网格卡
+     左上角与列表行首常驻复选框（@click.stop 防进详情，D5#7），聚合父卡不渲染复选
+     框、聚合子行保持展示型（D5#1）；底部浮动操作条（AssetSelectionBar 受控组件）
+     选中数 > 0 浮出，全选/反选作用域 = 当前渲染独立卡键集（D5#8），反选 = 渲染集
+     内取反且渲染集外旧选中一并清除（防幽灵选中）；清空点位与预览关闭同批语境
+     变更函数（D5#2/#3/#4：检索/视图/平铺/仅自身标签/切库/扫描刷新），呈现切换
+     不清空（D5#5）。
+     失败缩略图自动补（SRS §2.3 PR3，PRD D4）：assets-thumbs:done 后失败集逐个
+     RetryAssetThumb 自动重新入队，恰好一轮——普通 let 标记防下轮 done 再触发
+     （手动重试不受限），切库 watch 复位（新库新批次重新获得资格）；fire-and-forget
+     allSettled 收口不弹提示，fileId 从文件底册按路径反查，miss 跳过。
+     文件内过滤与卡片尺寸（D6 真机增量）：网格固定卡宽（CSS 变量 --asset-card-w
+     驱动 auto-fill，详情栏开合只减列数不改卡宽，消除 minmax+1fr 满铺在详情栏
+     挤压画廊时的重排突变）+ 工具条缩放滑块（220-420 步长 20 默认 280，会话态
+     不持久化，仅网格呈现提供）；文件卡双击进入「仅看该文件页」过滤浏览（检索态
+     先退检索，目标页不在已加载段时自动续拉直到出现或全局拉完），幻灯片卡双击
+     直接进全屏预览（双击序 click→click→dblclick，首击已装配详情）；幻灯片详情
+     解析文本（页文本/演讲者备注/命中摘要）下沉到操作按钮区之后（标注编辑与
+     跳转操作优先，解析自带内容垫底）。
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
      （拆分监听器属面板层——进度条与弹窗互斥常态：确认弹窗可随时关闭、任务继续
      在后台执行且面板层进度可见，故监听器生命周期 = 面板组件生命周期，注销时机 =
@@ -172,11 +202,25 @@
         <el-radio-button value="file">文件视图</el-radio-button>
         <el-radio-button value="slide">幻灯片视图</el-radio-button>
       </el-radio-group>
+      <!-- 呈现维度切换（网格/列表，SRS §2.3 PR1）：纯呈现形态切换，数据语境与
+           分页累计不变（对齐 PRD D5#5）；无 @change 处理器即无数据侧动作 -->
+      <el-radio-group v-model="displayMode" size="small">
+        <el-radio-button value="grid">网格</el-radio-button>
+        <el-radio-button value="list">列表</el-radio-button>
+      </el-radio-group>
       <el-tooltip content="开启后同一 PPT 的多页命中不再折叠为一个条目，逐页平铺展示" placement="bottom">
         <span class="flatten-switch">
           <el-switch v-model="flatten" size="small" :disabled="!hasLibrary" @change="onFlattenChange" />
           平铺
         </span>
+      </el-tooltip>
+      <!-- 卡片大小滑块（D6 真机增量，PRD D4）：固定卡宽网格的宽度调节入口，经
+           --asset-card-w CSS 变量驱动画廊；仅网格呈现提供（列表行固定尺寸无缩放
+           对象，v-if 防列表视图占位跳动）；会话态不持久化，重开应用回默认 280 -->
+      <el-tooltip v-if="displayMode === 'grid'" content="卡片大小" placement="bottom">
+        <div class="card-size-slider">
+          <el-slider v-model="cardWidth" :min="220" :max="420" :step="20" size="small" />
+        </div>
       </el-tooltip>
       <el-button size="small" type="primary" plain :disabled="!hasLibrary" @click="applySearch">搜索</el-button>
     </div>
@@ -196,9 +240,17 @@
       未检测到 PowerPoint，仅文本索引，缩略图与跳转不可用
     </div>
 
-    <!-- 主体：画廊网格 + 详情侧边栏 -->
+    <!-- 主体：画廊网格/列表（呈现维度切换）+ 详情侧边栏。空态四组与呈现维度无关
+         （判定仅依赖库/清单/检索语境），外提到网格与列表分支共用，防两分支模板重复 -->
     <div class="assets-body">
-      <div ref="galleryRef" class="assets-gallery" @scroll="onGalleryScroll">
+      <div class="assets-view-wrap">
+        <!-- 文件内过滤提示条（D6 真机增量）：双击文件卡进入「仅看该文件页」浏览
+             语境的弱化提示（info 色对齐缩略图降级条，非警示红）；N = 过滤后已加载
+             页数，自动续拉完成前可能暂小于该文件实际页数 -->
+        <div v-if="isFileFilterActive" class="file-filter-banner">
+          <span>正在筛选：{{ fileFilterName }} 的幻灯片页（{{ filteredSlideCount }} 页）</span>
+          <el-button size="small" text type="primary" @click="clearFileFilter">清除过滤</el-button>
+        </div>
         <!-- 空态一：无任何素材库，引导建库 -->
         <el-empty v-if="libraries.length === 0 && !loading" description="还没有素材库，新建一个并选择素材根目录（原始文件不会被修改，仅建索引）">
           <el-button type="primary" @click="openCreateDialog">新建素材库</el-button>
@@ -215,14 +267,35 @@
         <!-- 空态四：视图无数据（如幻灯片视图下未扫描/无页面） -->
         <el-empty v-else-if="hasLibrary && !loading && !searchMode && browseCards.length === 0 && stats && stats.fileCount > 0" description="该视图下暂无条目" />
 
-        <template v-else>
+        <!-- 网格呈现（默认）：滚动容器 + 卡片网格。固定卡宽（--asset-card-w 经
+             auto-fill 排列，禁 minmax+1fr 满铺——详情栏开合挤压画廊时 1fr 拉伸
+             致卡片尺寸突变，D6 真机修复）；卡片宽度由滑块经 CSS 变量注入 -->
+        <div
+          v-else-if="displayMode === 'grid'"
+          ref="galleryRef"
+          class="assets-gallery"
+          :style="{ '--asset-card-w': cardWidth + 'px' }"
+          @scroll="onGalleryScroll"
+        >
           <div
             v-for="card in displayCards"
             :key="card.key"
             class="asset-card"
             :class="{ 'is-selected': isCardSelected(card), 'is-expandable': card.hitCount > 1 }"
             @click="onCardClick(card)"
+            @dblclick="onCardDblclick(card)"
           >
+            <!-- 勾选复选框（SRS §2.3 PR3，常驻左上角）：聚合父卡不渲染（D5#1）；
+                 @click.stop 阻断进详情（D5#7 勾选与浏览两套交互并行不互斥） -->
+            <input
+              v-if="card.hitCount <= 1"
+              type="checkbox"
+              class="asset-card-check"
+              :checked="isCardChecked(card)"
+              :aria-label="`选中 ${card.title}`"
+              @click.stop
+              @change="toggleCardSelection(card)"
+            />
             <!-- 缩略图：画廊一律 tier=0（small 档）可视区懒加载；文件卡取第 1 页封面 -->
             <AssetThumb
               :library-id="currentLibraryId"
@@ -268,7 +341,54 @@
           <!-- 懒加载提示：检索模式滚动到底部增量加载下一页 -->
           <div v-if="searchMode && loadingMore" class="load-more-hint">加载中…</div>
           <div v-else-if="searchMode && canLoadMore" class="load-more-hint">下拉加载更多</div>
-        </template>
+        </div>
+
+        <!-- 列表呈现：受控组件（选中/详情/分页判定留宿主），行点击与滚动到底仅上报
+             事件，分派复用网格 onGalleryScroll 的同一分派函数防两份判定漂移 -->
+        <AssetListView
+          v-else
+          :cards="displayCards"
+          :file-entries="fileEntries"
+          :library-id="currentLibraryId"
+          :thumb-epoch="thumbEpoch"
+          :search-mode="searchMode"
+          :loading-more="loadingMore"
+          :can-load-more="listCanLoadMore"
+          :expanded-agg-paths="expandedAggPaths"
+          :agg-children="aggChildren"
+          :agg-loading-paths="aggLoadingPaths"
+          :selected-keys="selectedKeys"
+          @card-click="onCardClick"
+          @load-more="loadMoreInView"
+          @toggle-select="toggleCardSelection"
+        />
+
+        <!-- 全屏预览层（SRS §2.3 PR2）：面板内覆盖画廊列（详情侧栏在外保持可见可编辑，
+             D5#6）；受控组件——序列/下标在宿主，翻页写回经 watch 同步详情，末页「→」
+             触发 loadMoreInView 续拉不预翻（懒加载边界写入回后用户再点翻页） -->
+        <AssetPreviewOverlay
+          v-if="previewIndex !== null && previewSlides.length > 0"
+          :slides="previewSlides"
+          :index="previewIndex"
+          :library-id="currentLibraryId"
+          :thumb-epoch="thumbEpoch"
+          :can-load-more="listCanLoadMore"
+          @update:index="previewIndex = $event"
+          @load-more="loadMoreInView"
+          @close="closePreview"
+        />
+
+        <!-- 选中浮动操作条（SRS §2.3 PR3，PRD D2）：选中数 > 0 浮出于画廊区底部
+             居中（absolute 挂 .assets-view-wrap relative 语境，z-index 5 低于预览
+             层 10）；受控组件——计数传入选中集合大小，全选/反选/清空分派留宿主
+             （作用域 = 当前渲染独立卡键集，D5#8），第六批批量操作按钮挂此条的
+             预留位 -->
+        <AssetSelectionBar
+          :count="selectedKeys.size"
+          @select-all="selectAllRendered"
+          @invert="invertSelection"
+          @clear="clearSelection"
+        />
       </div>
 
       <!-- 详情侧边栏：文件与幻灯片均可编辑（文件级星级/备注/标签；幻灯片级星级/
@@ -296,6 +416,17 @@
             <el-alert type="warning" :closable="false" title="缩略图生成失败（超时/文件被占用/文件损坏）" />
             <el-button size="small" text type="primary" :loading="retrying" @click="onRetryThumb">重试生成</el-button>
           </div>
+          <!-- 全屏预览入口（SRS §2.3 PR2）：仅幻灯片详情提供（预览序列 = 当前视图
+               幻灯片子序列，文件视图序列空入口隐藏非禁用）；打开即以当前详情页
+               在序列中的下标定位（详情已定位到页） -->
+          <el-button
+            v-if="canPreview"
+            size="small"
+            text
+            type="primary"
+            class="detail-preview-btn"
+            @click="openPreview"
+          >全屏预览</el-button>
         </div>
 
         <!-- 文件详情 -->
@@ -358,23 +489,14 @@
 
         <!-- 幻灯片详情：三层独立标注（星级/幻灯片标签/业务备注）可编辑（对齐文件
              详情编辑形态）+ 归属文件标签（继承）只读弱化 + 解析自带内容只读展示 +
-             溯源跳转。业务备注与演讲者备注严格命名区分（前者用户标注、后者解析自带） -->
+             溯源跳转。业务备注与演讲者备注严格命名区分（前者用户标注、后者解析自带）。
+             解析文本三区（页文本/演讲者备注/命中摘要）下沉到操作按钮区之后（D6 真机
+             增量：标注编辑与跳转操作优先，解析自带内容垫底——内容长时不再把编辑区
+             与操作区顶出可视范围） -->
         <template v-else>
           <div class="detail-section">
             <div class="detail-row"><span class="detail-label">页码</span><span class="detail-value">第 {{ detailSlideNum }} 页</span></div>
             <div class="detail-row"><span class="detail-label">归属文件</span><span class="detail-value" :title="detailFilePath">{{ detailFilePath }}</span></div>
-          </div>
-          <div v-if="detailSlideText" class="detail-section">
-            <div class="detail-label">页文本</div>
-            <div class="detail-pre">{{ detailSlideText }}</div>
-          </div>
-          <div v-if="detailSlideNotes" class="detail-section">
-            <div class="detail-label">演讲者备注</div>
-            <div class="detail-pre">{{ detailSlideNotes }}</div>
-          </div>
-          <div v-if="detailSlideSnippet" class="detail-section">
-            <div class="detail-label">命中摘要</div>
-            <div class="detail-pre">{{ detailSlideSnippet }}</div>
           </div>
           <!-- 文件标签（继承）：只读弱化区（无输入控件），与下方幻灯片自有标签编辑区上下分区 -->
           <div class="detail-section">
@@ -442,6 +564,19 @@
               @click="onOpenSplitPage"
             >打开拆分单页</el-button>
             <el-button size="small" type="primary" plain @click="traceToSourceFile">查看归属文件</el-button>
+          </div>
+          <!-- 解析自带内容只读展示区（下沉到操作区之后，展示优先级低于标注编辑） -->
+          <div v-if="detailSlideText" class="detail-section">
+            <div class="detail-label">页文本</div>
+            <div class="detail-pre">{{ detailSlideText }}</div>
+          </div>
+          <div v-if="detailSlideNotes" class="detail-section">
+            <div class="detail-label">演讲者备注</div>
+            <div class="detail-pre">{{ detailSlideNotes }}</div>
+          </div>
+          <div v-if="detailSlideSnippet" class="detail-section">
+            <div class="detail-label">命中摘要</div>
+            <div class="detail-pre">{{ detailSlideSnippet }}</div>
           </div>
         </template>
       </div>
@@ -622,8 +757,19 @@ import {
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { handleError, ErrorCode } from '../utils/error'
+// 素材展示格式化共享单点（网格卡与列表行同一映射，禁本地复制防两份口径漂移）
+import {
+  assetStatusLabel as statusLabel,
+  assetStatusTagType as statusTagType,
+  formatAssetSize as formatSize
+} from '../utils/assetFormat'
+// 选中键映射共享单点（网格卡勾选/列表行勾选/全选/反选四处消费同一映射）
+import { assetSelectionKey } from '../utils/assetSelection'
 import AssetsIcon from './icons/AssetsIcon.vue'
 import AssetThumb from './AssetThumb.vue'
+import AssetListView from './AssetListView.vue'
+import AssetPreviewOverlay from './AssetPreviewOverlay.vue'
+import AssetSelectionBar from './AssetSelectionBar.vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
@@ -653,6 +799,28 @@ const stats = ref(null)
 
 // ---- 视图状态 ----
 const viewMode = ref('file') // 'file' | 'slide'
+// 呈现维度（SRS §2.3 PR1）：'grid' | 'list'，仅切换呈现形态不改数据语境（分页
+// 累计/检索结果保留，对齐 PRD D5#5）；会话态不持久化（不进 SaveSettings 链路，
+// 重开应用回默认网格）
+const displayMode = ref('grid')
+// 全屏预览态（SRS §2.3 PR2）：null=关闭，数字=预览序列当前下标。序列与详情装配见
+// previewSlides/selectSlideCard；语境变更点位（applySearch/onViewModeChange/
+// onFlattenChange/onSlideTagOwnChange/切库 watch/resetAndReloadView）统一关闭——
+// 与 PR3 选中清空同批点位，本批只做预览关闭
+const previewIndex = ref(null)
+// 卡片大小滑块（D6 真机增量，PRD D4）：经 --asset-card-w CSS 变量驱动网格固定
+// 卡宽，会话态不持久化（不进 SaveSettings 链路，切库/重开应用回默认 280）
+const cardWidth = ref(280)
+// 文件内过滤态（D6 真机增量）：双击文件卡进入「仅看该文件页」浏览语境，值 =
+// 过滤目标文件相对路径；空串 = 非过滤态。清空点位与预览/选中同批语境变更函数
+// （切库/检索/视图切换/平铺/仅自身标签/扫描刷新）
+const fileFilterPath = ref('')
+// 选中集合（SRS §2.3 PR3，PRD D2）：Set 形态，键映射见 utils/assetSelection 共享
+// 单点。响应式策略：整体替换新 Set（new Set(selectedKeys.value) 拷贝后增删再赋值）
+// 触发引用变化——不依赖 Vue 对 Set 变异方法（add/delete）的响应式拦截（项目既有
+// 「数组当 Set 用」先例 failedThumbPaths 同款规避思路；整体替换口径变更点少、
+// 语义直白，放弃数组口径的理由是全选/反选需要集合运算，Set 原生语义更贴切）
+const selectedKeys = ref(new Set())
 const flatten = ref(false) // 检索聚合折叠/平铺开关（SearchAssets opts.flatten）
 const keywordInput = ref('') // 输入框绑定值（未应用）
 const activeKeyword = ref('') // 已应用关键词（非空即检索模式）
@@ -689,6 +857,10 @@ const thumbsProgress = ref(null) // assets-thumbs:progress 载荷 {libraryId, do
 const thumbEpoch = ref(0) // 失效代次：done 事件自增，触发 miss 缩略图自动补图
 const failedThumbPaths = ref([]) // 批次内失败文件相对路径集合（数组当 Set 用，避免响应式 Set 兼容问题）
 let lastThumbsFailedCount = 0 // 上次 progress 的累计失败数（非响应式，仅增量比对）
+// 失败缩略图自动补一轮标记（SRS §2.3 PR3，PRD D4，非响应式）：本库批次已自动
+// 重试过即置位，下轮 done 不再自动触发（恰好一轮；手动重试不受限）；切库 watch
+// 复位——新库新批次重新获得一轮自动补资格
+let thumbAutoRetried = false
 const jumping = ref(false)
 const retrying = ref(false)
 
@@ -777,6 +949,10 @@ const detailSplitExists = computed(() => {
 // toast 误弹，onConfirmSplit 写回前比对）。
 watch(currentLibraryId, () => {
   splitSeq++
+  closePreview() // 语境变更点：切库清预览（序列属库语境，驻留即串库页）
+  clearSelection() // 语境变更点：切库清选中（键属库语境，驻留即幽灵选中，D5#2）
+  fileFilterPath.value = '' // 语境变更点：切库清文件过滤（过滤目标属库内路径）
+  thumbAutoRetried = false // 新库新批次：恢复一轮失败缩略图自动补资格（D4）
   thumbsRunning.value = false
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
@@ -839,20 +1015,25 @@ const browseCards = computed(() => {
       entry
     }))
   }
-  return slideEntries.value.map(slide => ({
-    key: `slide-${slide.id}`,
-    kind: 'slide',
-    id: slide.id,
-    fileId: slide.fileId,
-    title: slide.title,
-    filePath: slide.filePath,
-    slideNum: slide.slideNum,
-    tags: slide.tags || [],
-    hitCount: 1,
-    status: '',
-    snippet: '',
-    slide
-  }))
+  // 文件内过滤（D6 真机增量）：过滤态仅显示目标文件的页（非过滤态全量透传）；
+  // 过滤是全局分页流上的客户端收敛——目标页不在已加载段时由 ensureFilteredSlidesLoaded
+  // 自动续拉（canLoadMoreSlides 判定与统计行口径均不受过滤影响）
+  return slideEntries.value
+    .filter(s => !fileFilterPath.value || s.filePath === fileFilterPath.value)
+    .map(slide => ({
+      key: `slide-${slide.id}`,
+      kind: 'slide',
+      id: slide.id,
+      fileId: slide.fileId,
+      title: slide.title,
+      filePath: slide.filePath,
+      slideNum: slide.slideNum,
+      tags: slide.tags || [],
+      hitCount: 1,
+      status: '',
+      snippet: '',
+      slide
+    }))
 })
 
 // 检索模式卡片：按视图切换做类型过滤（检索结果天然含文件/幻灯片混合类型）
@@ -864,11 +1045,38 @@ const searchCards = computed(() => {
 
 const displayCards = computed(() => (searchMode.value ? searchCards.value : browseCards.value))
 
+// 全屏预览序列（PRD D1）：displayCards 过滤幻灯片子序列——浏览幻灯片清单已加载段 /
+// 检索命中幻灯片条目（含聚合父卡）。聚合展开子项（aggChildren）不在 displayCards，
+// 不进序列（取舍登记：预览只翻独立卡片）；文件视图 displayCards 全为文件条目 →
+// 序列空 → 预览入口隐藏非禁用
+const previewSlides = computed(() => displayCards.value.filter(card => card.kind === 'slide'))
+
 const canLoadMore = computed(() => searchMode.value && searchItems.value.length < searchTotal.value)
 
 // 浏览模式幻灯片视图的分页懒加载判定（文件视图为全量清单无分页）
 const canLoadMoreSlides = computed(() =>
   !searchMode.value && viewMode.value === 'slide' && slideEntries.value.length < slideTotal.value
+)
+
+// 列表呈现的懒加载提示判定：检索模式对齐网格 canLoadMore；浏览幻灯片对齐
+// canLoadMoreSlides（网格浏览分页无提示是既有形态，列表提示补齐不回改网格行为）
+const listCanLoadMore = computed(() => (searchMode.value ? canLoadMore.value : canLoadMoreSlides.value))
+
+// 文件过滤激活态（D6 真机增量）：过滤目标存在且处于幻灯片视图。过滤属幻灯片
+// 浏览语境——溯源切到文件视图后残留值由本条件屏蔽（文件视图不显示过滤条，
+// 清空在手动切回幻灯片视图的 onViewModeChange 兜底）
+const isFileFilterActive = computed(() => !!fileFilterPath.value && viewMode.value === 'slide')
+// 过滤条文件名：相对路径末段（目录层级不进提示行，长路径截断观感差）
+const fileFilterName = computed(() => {
+  const p = fileFilterPath.value
+  if (!p) return ''
+  const segs = p.split(/[\\/]/)
+  return segs[segs.length - 1] || p
+})
+// 过滤后已加载页数（过滤条计数；自动续拉完成前可能暂小于该文件实际页数，
+// 续拉到位后自动增长至该文件总页数或全局拉完）
+const filteredSlideCount = computed(() =>
+  slideEntries.value.filter(s => s.filePath === fileFilterPath.value).length
 )
 
 // 检索空态文案：命中存在但当前视图类型过滤后为空时给引导。审核 11 的最小改法
@@ -916,33 +1124,8 @@ const isDetailThumbFailed = computed(() => {
   return !!path && failedThumbPaths.value.includes(path)
 })
 
-// ---- 索引状态展示映射（对齐 model/assets.go 状态机取值）----
-const statusLabel = (status) => ({
-  processing: '解析中',
-  ok: '正常',
-  failed: '解析失败',
-  encrypted: '已加密',
-  denied: '权限不足'
-}[status] || status)
-const statusTagType = (status) => ({
-  processing: 'info',
-  ok: 'success',
-  failed: 'danger',
-  encrypted: 'warning',
-  denied: 'warning'
-}[status] || 'info')
-
-const formatSize = (bytes) => {
-  if (!bytes || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[unit]}`
-}
+// 索引状态展示映射与大小格式化已收敛至 utils/assetFormat 共享单点（网格卡与
+// 列表行消费同一映射），此处 import 别名保持模板既有引用名不变
 
 // ================= 数据加载 =================
 
@@ -988,6 +1171,9 @@ const resetAndReloadView = async () => {
   aggChildren.value = {}
   aggLoadingPaths.value = []
   closeDetail()
+  closePreview() // 语境变更点：扫描刷新/切库落定清预览（底册重解析条目序列已变）
+  clearSelection() // 语境变更点：扫描刷新清选中（条目重解析底册 id 变，D5#4）
+  fileFilterPath.value = '' // 语境变更点：扫描刷新清文件过滤（底册重解析路径集合已变）
   if (!hasLibrary.value) return
   const fileViewLoadedHere = viewMode.value === 'file' && !searchMode.value
   const tasks = [loadStats(seq), loadView(seq)]
@@ -1098,6 +1284,9 @@ const applySearch = async () => {
   searchSeq++ // 语境变更点：改词/改筛选使在途检索写回失效
   activeKeyword.value = keywordInput.value.trim()
   closeDetail()
+  closePreview() // 语境变更点：检索条件变更清预览（命中序列已变）
+  clearSelection() // 语境变更点：检索语境变更清选中（D5#2，驻留即幽灵选中）
+  fileFilterPath.value = '' // 语境变更点：检索与文件过滤互斥（filterByFile 退检索的同款语义）
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
@@ -1157,17 +1346,24 @@ const runSearch = async (reset) => {
   }
 }
 
-// 画廊滚动到底部增量加载：检索模式加载检索下一页；浏览模式幻灯片视图加载清单
-// 下一页（文件视图为全量清单无分页）
-const onGalleryScroll = () => {
-  const el = galleryRef.value
-  if (!el || loading.value) return
-  if (el.scrollTop + el.clientHeight < el.scrollHeight - 80) return
+// 懒加载分派单点（网格滚动与列表组件 load-more 事件共用）：检索模式加载检索
+// 下一页；浏览模式幻灯片视图加载清单下一页（文件视图为全量清单无分页）。防重
+// （loading/loadingMore）与分页判定集中此处——列表组件只上报「已滚动到底」事件，
+// 不持分页知识，网格/列表两呈现共用同一份判定防漂移
+const loadMoreInView = () => {
+  if (loading.value) return
   if (searchMode.value) {
     if (!loadingMore.value && canLoadMore.value) runSearch(false)
   } else if (viewMode.value === 'slide' && !loadingMore.value && canLoadMoreSlides.value) {
     loadSlidesPage(false)
   }
+}
+
+const onGalleryScroll = () => {
+  const el = galleryRef.value
+  if (!el) return
+  if (el.scrollTop + el.clientHeight < el.scrollHeight - 80) return
+  loadMoreInView()
 }
 
 const onFlattenChange = () => {
@@ -1176,6 +1372,9 @@ const onFlattenChange = () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  closePreview() // 语境变更点：聚合形态变更清预览（命中序列口径已变）
+  clearSelection() // 语境变更点：检索语境变更清选中（D5#2）
+  fileFilterPath.value = '' // 语境变更点：对齐检索语境变更同批清空文件过滤
   if (searchMode.value) {
     runSearch(true)
   }
@@ -1190,6 +1389,9 @@ const onSlideTagOwnChange = () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  closePreview() // 语境变更点：标签口径变更清预览（命中序列已变）
+  clearSelection() // 语境变更点：检索语境变更清选中（D5#2）
+  fileFilterPath.value = '' // 语境变更点：对齐检索语境变更同批清空文件过滤
   if (searchMode.value) {
     runSearch(true)
   }
@@ -1200,11 +1402,65 @@ const onViewModeChange = () => {
   // 为空即拉取——覆盖「库切换/扫描落定在幻灯片视图后切回文件视图」时文件底册未
   // 加载（审核 9 同根因）与幻灯片清单未加载两种形态
   closeDetail()
+  closePreview() // 语境变更点：文件/幻灯片视图互换清预览（选中维度不通约）
+  clearSelection() // 语境变更点：选中维度互换不通约，切视图清选中（D5#3）
+  fileFilterPath.value = '' // 语境变更点：手动切视图即离开过滤语境（filterByFile 直赋不经此处，无自清问题）
   if (searchMode.value) return
   const targetEmpty = viewMode.value === 'file'
     ? fileEntries.value.length === 0
     : slideEntries.value.length === 0
   if (targetEmpty) loadView()
+}
+
+// ================= 选中体系（SRS §2.3 PR3，PRD D2/D5）=================
+
+// 可勾选卡片集：当前渲染卡片剔除聚合父卡（hitCount>1 勾选语义歧义不渲染复选框，
+// D5#1）——全选/反选作用域与浮动条计数口径的同一数据源（D5#8：检索含已加载段，
+// 懒加载未加载段不进范围；聚合展开子项不在 displayCards，天然不进范围）
+const selectableCards = computed(() => displayCards.value.filter(card => card.hitCount <= 1))
+
+// 勾选态判定：消费共享键映射查选中集合（网格卡与列表行同键，D5#5 呈现切换保留）
+const isCardChecked = (card) => selectedKeys.value.has(assetSelectionKey(card))
+
+// 单卡勾选切换（网格卡与列表行 toggle-select 共用出口）：整体替换新 Set 触发响应
+const toggleCardSelection = (card) => {
+  const key = assetSelectionKey(card)
+  if (!key) return
+  const next = new Set(selectedKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  selectedKeys.value = next
+}
+
+// 全选：当前渲染独立卡键集并入选中集合（已选中的重复并入幂等）
+const selectAllRendered = () => {
+  const next = new Set(selectedKeys.value)
+  for (const card of selectableCards.value) {
+    next.add(assetSelectionKey(card))
+  }
+  selectedKeys.value = next
+}
+
+// 反选：渲染键集内取反。口径登记（PRD D2「对称差」的落地收窄）：反选后选中集合
+// = 渲染集 ∖ 当前选中——严格对称差中的「渲染集外旧选中」部分一并清除（从渲染集
+// 重建新集合，结构上不可能保留渲染集外键），防语境残留的幽灵选中；渲染集外键
+// 在 D5#2/#3/#4 清空点位兜底下理论不存在，此处为防御性收口
+const invertSelection = () => {
+  const next = new Set()
+  for (const card of selectableCards.value) {
+    const key = assetSelectionKey(card)
+    if (!selectedKeys.value.has(key)) next.add(key)
+  }
+  selectedKeys.value = next
+}
+
+// 清空选中：D5#2/#3/#4 清空点位的统一出口（各语境变更函数内一行调用）
+const clearSelection = () => {
+  if (selectedKeys.value.size === 0) return
+  selectedKeys.value = new Set()
 }
 
 // ---- 聚合条目展开/收起：按归属文件路径懒加载逐页命中（flatten 检索后客户端过滤）----
@@ -1293,18 +1549,140 @@ const onCardClick = async (card) => {
     selected.value = { kind: 'file', fileEntry: entry, hit: card.entry ? null : card.hit }
     if (entry) resetDraft()
   } else {
-    const slide = card.slide || slideEntries.value.find(s => s.id === card.id) || null
-    selected.value = { kind: 'slide', slideEntry: slide, hit: card.slide ? null : card.hit }
-    // 选中条目切换即重置幻灯片标注草稿（画廊清单条目与检索命中条目两条路径
-    // 均初始化，数据源取条目自带 ownTags/note/rating）
-    resetSlideDraft()
+    selectSlideCard(card)
   }
+}
+
+// 幻灯片卡片详情装配单点：画廊/列表点击与预览翻页共用（D5#6 预览即详情导航——
+// 翻页时详情侧栏同步跟随当前页）；选中切换即重置幻灯片标注草稿（画廊清单条目与
+// 检索命中条目两条路径均初始化，数据源取条目自带 ownTags/note/rating）
+const selectSlideCard = (card) => {
+  const slide = card.slide || slideEntries.value.find(s => s.id === card.id) || null
+  selected.value = { kind: 'slide', slideEntry: slide, hit: card.slide ? null : card.hit }
+  resetSlideDraft()
 }
 
 const closeDetail = () => {
   selected.value = null
   savingMeta.value = false
 }
+
+// ---- 全屏预览（SRS §2.3 PR2）----
+
+// 预览入口可用性：幻灯片详情 + 当前视图存在可预览序列（文件视图序列空 → 隐藏非禁用）
+const canPreview = computed(() => {
+  if (selected.value?.kind !== 'slide') return false
+  return previewSlides.value.length > 0
+})
+
+// 打开预览：以当前详情页在序列中的下标定位（详情已定位到页，打开点语义）；聚合
+// 展开子项进详情后不在序列（子项不进 previewSlides），按归属文件路径回退定位
+// （聚合父卡同路径命中），仍 miss 落序列首页
+const openPreview = () => {
+  if (!canPreview.value) return
+  const currentId = selected.value?.slideEntry?.id ?? selected.value?.hit?.refId
+  let idx = previewSlides.value.findIndex(card => card.id === currentId)
+  if (idx < 0 && detailFilePath.value) {
+    idx = previewSlides.value.findIndex(card => card.filePath === detailFilePath.value)
+  }
+  previewIndex.value = idx >= 0 ? idx : 0
+}
+
+const closePreview = () => {
+  previewIndex.value = null
+}
+
+// ---- 网格卡双击分派（D6 真机增量）----
+
+// 文件卡双击 = 文件内过滤浏览；幻灯片卡双击 = 全屏预览（浏览器双击序
+// click→click→dblclick，首击已装配该卡详情，openPreview 以当前详情定位序列
+// 下标——语义闭环）；聚合父卡（hitCount>1）不动作：单击语义是展开/收起，双击
+// 介入会与两次 click 的展开-收起交错混乱
+const onCardDblclick = (card) => {
+  if (card.hitCount > 1) return
+  if (card.kind === 'file') {
+    filterByFile(card)
+  } else {
+    openPreview()
+  }
+}
+
+// 文件内过滤浏览（D6 真机增量）：双击文件卡切幻灯片视图仅显示该文件的页。
+// 检索态先退检索（清全部检索条件并失效在途写回——过滤属浏览语境，两者互斥）；
+// 直赋 viewMode 不经 onViewModeChange（编程赋值不触发 radio @change，无自清
+// 问题，对齐 traceToSourceFile 直赋先例），选中/预览/详情按语境变更同批清空
+// （D5#3 视图切换清选中，直赋路径须手动执行）
+const filterByFile = async (card) => {
+  const path = card.entry?.path ?? card.filePath
+  if (!path) return
+  if (searchMode.value) {
+    searchSeq++ // 语境变更点：退出检索使在途检索写回失效
+    activeKeyword.value = ''
+    keywordInput.value = ''
+    selectedTagIds.value = []
+    expandedAggPaths.value = []
+    aggChildren.value = {}
+    aggLoadingPaths.value = []
+  }
+  fileFilterPath.value = path
+  viewMode.value = 'slide'
+  closeDetail()
+  closePreview() // 语境变更点：进入过滤浏览清预览（序列已按过滤收敛）
+  clearSelection() // 语境变更点：视图切换清选中（D5#3，直赋路径手动清）
+  // 幻灯片清单未拉过（切库/扫描落定后未进过幻灯片视图）：slideTotal 为 0 时
+  // canLoadMoreSlides 恒假，先 await 拉首页才有续拉基准（不 await 则续拉判定
+  // 读到旧 total=0 直接退出）；已拉过则直接续拉。await 后 ensureFilteredSlidesLoaded
+  // 内部按 target 逐轮校验，期间清过滤/切库竞态自然退出
+  if (slideEntries.value.length === 0 && slideTotal.value === 0) {
+    await loadSlidesPage(true)
+  }
+  await ensureFilteredSlidesLoaded()
+}
+
+// 清除文件过滤：恢复该库幻灯片清单（已加载段照常展示，滚动懒加载续拉不变——
+// 过滤是浏览流上的客户端收敛，清除只是撤掉收敛条件不重置分页）
+const clearFileFilter = () => {
+  fileFilterPath.value = ''
+}
+
+// 过滤空自动续拉：目标文件的页可能不在幻灯片清单已加载段（全局分页流），逐页
+// 拉取直到目标文件页出现或全局拉完。每轮循环校验过滤目标未变（await 期间清除
+// 过滤/切换语境的快速竞态立即退出）；loadingMore 条件防与滚动懒加载并发重复
+// 请求（loadSlidesPage 本身无防重，防重在调用方——复用同款约定）
+const ensureFilteredSlidesLoaded = async () => {
+  const target = fileFilterPath.value
+  if (!target) return
+  while (
+    fileFilterPath.value === target &&
+    !slideEntries.value.some(s => s.filePath === target) &&
+    canLoadMoreSlides.value &&
+    !loadingMore.value
+  ) {
+    await loadSlidesPage(false)
+  }
+}
+
+// 过滤目标变化即触发续拉（filterByFile 已手动调用，此处兜底其他写入路径；
+// 幂等——续拉中 loadingMore 置位使重复触发的循环直接退出）
+watch(fileFilterPath, (path) => {
+  if (path) ensureFilteredSlidesLoaded()
+})
+
+// 预览翻页写回：详情侧栏同步跟随（D5#6 预览即详情导航）。已定位同页（打开预览的
+// 进入点 / 翻回已选中页）不重选——防重置未保存的标注草稿
+watch(previewIndex, (idx) => {
+  if (idx === null) return
+  const card = previewSlides.value[idx]
+  if (!card || isCardSelected(card)) return
+  selectSlideCard(card)
+})
+
+// 序列收缩兜底：保存刷新（loadSlidesPage(true) 复位首页）/ 检索重跑可能使序列短于
+// 当前下标——越界即关闭预览，防「previewIndex 非空但 overlay 内层 v-if 不渲染」的
+// 不可见卡死态（覆盖层不渲染时无法翻页也无法关闭）
+watch(() => previewSlides.value.length, (len) => {
+  if (previewIndex.value !== null && previewIndex.value >= len) closePreview()
+})
 
 const resetDraft = () => {
   const entry = selected.value?.fileEntry
@@ -1488,6 +1866,11 @@ const traceToSourceFile = async () => {
   selectedTagIds.value = []
   viewMode.value = 'file'
   closeDetail()
+  closePreview() // 语境变更点：溯源切文件视图清预览（文件视图无预览序列）
+  // 溯源同时命中 D5#2（退出检索）与 D5#3（切文件视图）两个清空触发点，但走直赋
+  // 不经 applySearch/onViewModeChange——漏清则幻灯片选中键驻留成幽灵选中（文件
+  // 视图无可见勾选行，浮动条清空是唯一出口）
+  clearSelection()
   loading.value = true
   try {
     await ensureFileEntries()
@@ -1951,10 +2334,35 @@ const onThumbsDone = (payload) => {
   thumbsRunning.value = false
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
-  // 失败集合为内存态，批次结束即清（PRD 认可：失败标记只覆盖当前批次语境）
+  // 失败集合为内存态，批次结束即清（PRD 认可：失败标记只覆盖当前批次语境）；
+  // 自动补在清空前取快照发起
+  const failedSnapshot = failedThumbPaths.value
   failedThumbPaths.value = []
   // 失效代次自增：触发 miss 缩略图卡自动补图
   thumbEpoch.value++
+  autoRetryFailedThumbs(failedSnapshot)
+}
+
+// 失败缩略图自动补一轮（SRS §2.3 PR3，PRD D4）：done 后失败集逐个 RetryAssetThumb
+// 自动重新入队，恰好一轮——thumbAutoRetried 标记防下轮 done 再触发（手动重试不受
+// 限），切库 watch 复位（新库新批次重新获得资格）。fire-and-forget：allSettled 收口
+// 不弹提示（覆盖瞬态失败如 COM 队列占用；损坏类必然再失败但一轮即止不放大），成功
+// 与否由下一批 done 事件 epoch 自增照常驱动 miss 卡补图。fileId 从文件底册按相对
+// 路径反查（底册未含该路径——已删除/未加载——跳过不重试）。
+const autoRetryFailedThumbs = (failedPaths) => {
+  if (thumbAutoRetried || !failedPaths.length || !hasLibrary.value) return
+  thumbAutoRetried = true
+  const libId = currentLibraryId.value
+  const retries = failedPaths
+    .map((relPath) => {
+      const entry = fileEntries.value.find(f => f.path === relPath)
+      if (!entry) return null // 底册 miss：跳过（无 fileId 无法定位重入队）
+      return RetryAssetThumb(libId, entry.id, relPath).catch(() => {}) // 单文件失败静默（后台链路）
+    })
+    .filter(Boolean)
+  if (retries.length > 0) {
+    Promise.allSettled(retries)
+  }
 }
 
 const onThumbsError = (payload) => {
@@ -2182,7 +2590,29 @@ defineExpose({ loadLibraries, refreshAfterScan })
   border-bottom: 1px solid var(--border-color);
 }
 
-/* ---- 主体：画廊 + 详情 ---- */
+/* ---- 文件内过滤提示条（D6 真机增量）：弱化形态对齐缩略图降级条（info 色非警示红）---- */
+.file-filter-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 12px;
+  color: var(--info-color);
+  background: var(--primary-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* ---- 卡片大小滑块（D6 真机增量）：工具条内固定窄宽（真实 el-slider 在容器内
+     自占满），垂直居中对齐工具条既有控件 ---- */
+.card-size-slider {
+  width: 90px;
+  display: flex;
+  align-items: center;
+}
+
+/* ---- 主体：画廊/列表 + 详情 ---- */
 .assets-body {
   flex: 1;
   min-height: 0;
@@ -2190,21 +2620,39 @@ defineExpose({ loadLibraries, refreshAfterScan })
   overflow: hidden;
 }
 
+/* 视图包裹层：空态与网格/列表分支的共同父级（flex column 约束链），网格与列表
+     两个滚动分支在其余量空间内各自滚动；relative 为全屏预览层（AssetPreviewOverlay
+     absolute inset:0）的定位语境——预览只铺满画廊列，详情侧栏在覆盖层外保持可见
+     可编辑（PRD D5#6） */
+.assets-view-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 空态（el-empty）在包裹层 flex 容器内居中（呈现维度无关，网格/列表共用） */
+.assets-view-wrap > .el-empty {
+  margin: auto;
+}
+
 .assets-gallery {
   flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow-y: auto;
   padding: var(--spacing-md);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* 固定卡宽（D6 真机修复）：禁 minmax+1fr 满铺——详情栏（300px flex 兄弟）开合
+       挤压画廊时 auto-fill 重排列数、每列 1fr 拉伸致卡片尺寸突变；固定轨宽下
+       详情开关只减列数不改卡宽，右侧留白为固定卡宽网格常态（Eagle 式画廊）。
+       变量由宿主经滑块注入，缺省 280 兜底 */
+  grid-template-columns: repeat(auto-fill, var(--asset-card-w, 280px));
   gap: var(--spacing-sm);
   align-content: start;
-}
-
-/* 空态（el-empty）占满整行避免被网格切分 */
-.assets-gallery > .el-empty {
-  grid-column: 1 / -1;
-  margin: auto;
 }
 
 .load-more-hint {
@@ -2216,6 +2664,7 @@ defineExpose({ loadLibraries, refreshAfterScan })
 }
 
 .asset-card {
+  position: relative;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -2236,6 +2685,19 @@ defineExpose({ loadLibraries, refreshAfterScan })
 .asset-card.is-selected {
   border-color: var(--primary-color);
   background: var(--primary-bg);
+}
+
+/* 勾选复选框（常驻左上角）：accent-color 跟随主色（亮暗主题自动适配原生勾选态
+     视觉）；z-index 盖过缩略图区防遮挡 */
+.asset-card-check {
+  position: absolute;
+  top: var(--spacing-sm);
+  left: var(--spacing-sm);
+  z-index: 1;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
 }
 
 .asset-card-head {
@@ -2480,6 +2942,9 @@ defineExpose({ loadLibraries, refreshAfterScan })
 .detail-actions {
   padding: var(--spacing-md);
   display: flex;
+  /* 换行（D6 真机修复）：300px 栏内「打开并跳到此页/打开拆分单页/查看归属文件」
+       三按钮单行溢出被裁切，wrap 后折行完整可见 */
+  flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
 
@@ -2489,6 +2954,11 @@ defineExpose({ loadLibraries, refreshAfterScan })
   flex-direction: column;
   align-items: flex-start;
   gap: var(--spacing-xs);
+}
+
+/* 全屏预览入口（弱化样式）：detail-section 为 flex column，默认拉伸全宽，左对齐 */
+.detail-preview-btn {
+  align-self: flex-start;
 }
 
 /* ---- 缩略图设置弹窗 ---- */

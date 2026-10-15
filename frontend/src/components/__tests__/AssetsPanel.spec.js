@@ -226,6 +226,13 @@ const ElInputNumberStub = {
   props: ['modelValue', 'min', 'max', 'step', 'valueOnClear', 'disabled'],
   emits: ['update:modelValue']
 }
+// 卡片大小滑块（D6 真机增量）：range input 形态，input 事件 emit 数字值
+// （对齐真实 el-slider 的 v-model 数字语义，min/max/step 透传供边界断言）
+const ElSliderStub = {
+  template: '<input class="el-slider" type="range" :min="min" :max="max" :step="step" :value="modelValue" @input="$emit(\'update:modelValue\', Number($event.target.value))" />',
+  props: ['modelValue', 'min', 'max', 'step', 'size'],
+  emits: ['update:modelValue']
+}
 
 const stubs = {
   'el-select': ElSelectStub,
@@ -261,7 +268,8 @@ const stubs = {
   'el-alert': { template: '<div class="el-alert"><span class="el-alert__title">{{ title }}</span><slot /></div>', props: ['type', 'title', 'closable'] },
   'el-form': { template: '<form><slot /></form>', props: ['labelWidth'] },
   'el-form-item': { template: '<div><slot /></div>', props: ['label'] },
-  'el-input-number': ElInputNumberStub
+  'el-input-number': ElInputNumberStub,
+  'el-slider': ElSliderStub
 }
 
 const createWrapper = async () => {
@@ -2004,5 +2012,650 @@ describe('AssetsPanel', () => {
     expect(ElMessage.success).toHaveBeenCalledTimes(1)
     expect(ElMessage.info).not.toHaveBeenCalled()
     expect(wrapper.find('.split-progress').exists()).toBe(false)
+  })
+
+  // ---- 列表视图（SRS §2.3 PR1）：displayMode 呈现维度切换 ----
+
+  // 呈现维度切换控件是第二个 el-radio-group（DOM 序在视图切换之后）
+  const switchDisplayMode = async (wrapper, mode) => {
+    const group = wrapper.findAllComponents(ElRadioGroupStub)[1]
+    await group.vm.$emit('update:modelValue', mode)
+    await flushPromises()
+  }
+
+  it('呈现维度切换：网格/列表互斥渲染，数据语境同一（列表行同源卡片模型）', async () => {
+    const wrapper = await createWrapper()
+    // 默认网格：画廊容器存在、列表容器不存在
+    expect(wrapper.find('.assets-gallery').exists()).toBe(true)
+    expect(wrapper.find('.asset-list').exists()).toBe(false)
+
+    await switchDisplayMode(wrapper, 'list')
+    expect(wrapper.find('.asset-list').exists()).toBe(true)
+    expect(wrapper.find('.assets-gallery').exists()).toBe(false)
+    // 列表行消费同一 displayCards：文件条目标题/路径/大小在行内可见
+    const rows = wrapper.findAll('.asset-list-row')
+    expect(rows.length).toBe(2)
+    expect(rows[0].text()).toContain('城商行方案')
+    expect(rows[0].text()).toContain('1 MB')
+
+    // 切回网格照常渲染（双向切换）
+    await switchDisplayMode(wrapper, 'grid')
+    expect(wrapper.find('.assets-gallery').exists()).toBe(true)
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+  })
+
+  it('列表行点击进详情（与网格 onCardClick 同一语义）', async () => {
+    const wrapper = await createWrapper()
+    await switchDisplayMode(wrapper, 'list')
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+
+    await wrapper.findAll('.asset-list-row')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.find('.assets-detail').text()).toContain('城商行方案')
+  })
+
+  it('列表滚动懒加载（浏览幻灯片）：到底后走与网格同一分派（ListAssetSlides offset 追加）', async () => {
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: mockSlides, total: 4 })
+      return Promise.resolve({ items: [{ ...mockSlides[0], id: 23, slideNum: 3 }], total: 4 })
+    })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await switchDisplayMode(wrapper, 'list')
+    expect(wrapper.findAll('.asset-list-row').length).toBe(2)
+
+    // 列表容器滚动到底：分派逻辑在宿主 loadMoreInView 单点（组件只上报事件）
+    const listEl = wrapper.find('.asset-list')
+    Object.defineProperty(listEl.element, 'scrollHeight', { value: 500, configurable: true })
+    Object.defineProperty(listEl.element, 'clientHeight', { value: 400, configurable: true })
+    listEl.element.scrollTop = 150
+    await listEl.trigger('scroll')
+    await flushPromises()
+
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 2)
+    expect(wrapper.findAll('.asset-list-row').length).toBe(3)
+  })
+
+  it('列表滚动懒加载（检索模式）：到底后追加检索下一页', async () => {
+    let searchCalls = 0
+    wailsMock.SearchAssets.mockImplementation(() => {
+      searchCalls++
+      if (searchCalls === 1) {
+        return Promise.resolve({ items: mockSearchPage.items, total: 3, keyword: '城商行', flattened: false })
+      }
+      return Promise.resolve({
+        items: [{ ...mockSearchPage.items[0], refId: 12, title: '第二页命中' }],
+        total: 3,
+        keyword: '城商行',
+        flattened: false
+      })
+    })
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await switchDisplayMode(wrapper, 'list')
+    expect(wrapper.findAll('.asset-list-row').length).toBe(1)
+
+    const listEl = wrapper.find('.asset-list')
+    Object.defineProperty(listEl.element, 'scrollHeight', { value: 500, configurable: true })
+    Object.defineProperty(listEl.element, 'clientHeight', { value: 400, configurable: true })
+    listEl.element.scrollTop = 150
+    await listEl.trigger('scroll')
+    await flushPromises()
+
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
+      flatten: false,
+      tagIds: [],
+      slideTagOnlyOwn: false,
+      limit: 50,
+      offset: 2
+    })
+    expect(wrapper.findAll('.asset-list-row').length).toBe(2)
+  })
+
+  // ---- 全屏预览（SRS §2.3 PR2）：AssetPreviewOverlay 宿主接线 ----
+
+  // 切到幻灯片视图并打开第一张卡详情（预览入口的前置语境）
+  const openSlideDetail = async (wrapper) => {
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+  }
+
+  it('全屏预览入口：文件视图序列空，详情不提供「全屏预览」按钮（隐藏非禁用）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.findAll('button').some((b) => b.text().trim() === '全屏预览')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('全屏预览：详情入口打开覆盖层（页码/信息行），键盘翻页详情跟随，ESC 关闭详情保留', async () => {
+    const wrapper = await createWrapper()
+    await openSlideDetail(wrapper)
+
+    const previewBtn = wrapper.findAll('button').find((b) => b.text().trim() === '全屏预览')
+    expect(previewBtn).toBeTruthy()
+    await previewBtn.trigger('click')
+    await flushPromises()
+
+    // 打开点 = 当前详情页在序列中的下标（第 1 页 → index 0）
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(true)
+    expect(wrapper.find('.preview-counter').text()).toBe('1 / 2')
+    expect(wrapper.find('.preview-title').text()).toBe('封面页')
+
+    // 键盘 → 翻页：详情侧栏同步跟随当前页（D5#6 预览即详情导航）
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    await flushPromises()
+    expect(wrapper.find('.preview-counter').text()).toBe('2 / 2')
+    expect(wrapper.find('.assets-detail').text()).toContain('背景页')
+    expect(wrapper.find('.assets-detail').text()).toContain('第 2 页')
+
+    // ESC 关闭：预览消失，详情保留在最后预览页
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(false)
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.find('.assets-detail').text()).toContain('背景页')
+    wrapper.unmount()
+  })
+
+  it('全屏预览语境变更关闭：视图切换与检索触发 previewIndex 复位', async () => {
+    const wrapper = await createWrapper()
+    await openSlideDetail(wrapper)
+    await clickButton(wrapper, '全屏预览')
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(true)
+
+    // 视图切换（文件 ↔ 幻灯片，D5#3）关闭预览
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'file')
+    await group.vm.$emit('change', 'file')
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(false)
+
+    // 重开（幻灯片视图）→ 检索语境变更（D5#2）关闭预览
+    await openSlideDetail(wrapper)
+    await clickButton(wrapper, '全屏预览')
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(true)
+
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('全屏预览懒加载边界：末页「→」触发续拉不预翻，写回后序列变长可继续翻', async () => {
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: mockSlides, total: 4 })
+      return Promise.resolve({ items: [{ ...mockSlides[0], id: 23, slideNum: 3 }], total: 4 })
+    })
+    const wrapper = await createWrapper()
+    await openSlideDetail(wrapper)
+    await clickButton(wrapper, '全屏预览')
+    await flushPromises()
+    expect(wrapper.find('.preview-counter').text()).toBe('1 / 2')
+
+    // 键盘翻到已加载段末页
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    await flushPromises()
+    expect(wrapper.find('.preview-counter').text()).toBe('2 / 2')
+
+    // 末页「→」：canLoadMore 为真按钮保持可用，点击触发续拉（offset=2）不翻页
+    expect(wrapper.find('.preview-nav-next').attributes('disabled')).toBeUndefined()
+    await wrapper.find('.preview-nav-next').trigger('click')
+    await flushPromises()
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 2)
+    expect(wrapper.find('.preview-counter').text()).toBe('2 / 3')
+
+    // 序列变长后同按钮继续翻页正常
+    await wrapper.find('.preview-nav-next').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.preview-counter').text()).toBe('3 / 3')
+    wrapper.unmount()
+  })
+
+  // ---- 选中体系（SRS §2.3 PR3）：selectedKeys + 复选框 + 浮动操作条 ----
+
+  it('网格勾选：复选框写入选中集合并浮出操作条（计数正确），勾选不进详情、主体点击照常进详情', async () => {
+    const wrapper = await createWrapper()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+
+    // 勾选第 1 张卡：浮动条浮出、计数 1；@click.stop 阻断进详情（D5#7）
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+    expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+
+    // 点卡片主体照常进详情，勾选不受影响（勾选与浏览两套交互并行不互斥）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+
+    // 再勾选同卡取消：计数归零浮动条收起
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('网格/列表同键：网格勾选后切列表呈现选中保留（D5#5），列表行取消勾选与网格共享同一键', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await switchDisplayMode(wrapper, 'list')
+
+    // 呈现切换不清空选中：列表行首复选框保持勾选（键 file:11，网格列表同一映射）
+    const rowCheck = wrapper.findAll('.asset-list-row')[0].find('.asset-row-check')
+    expect(rowCheck.exists()).toBe(true)
+    expect(rowCheck.element.checked).toBe(true)
+    expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+
+    // 列表行取消勾选：与网格同一键，浮动条收起
+    await rowCheck.trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('聚合父卡与聚合子行无复选框（D5#1），浏览态独立卡有复选框', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 浏览幻灯片清单：全部独立卡有复选框
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+    expect(wrapper.findAll('.asset-card-check').length).toBe(2)
+
+    // 检索聚合：聚合卡（hitCount=3）无复选框；展开子行保持展示型也无复选框
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    const aggCard = wrapper.findAll('.asset-card')[0]
+    expect(aggCard.classes()).toContain('is-expandable')
+    expect(aggCard.find('.asset-card-check').exists()).toBe(false)
+    await aggCard.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.agg-child').length).toBe(1)
+    expect(wrapper.find('.agg-child .asset-card-check').exists()).toBe(false)
+  })
+
+  it('全选/反选/清空：作用域为当前渲染独立卡键集（D5#8），反选为渲染集内取反', async () => {
+    const wrapper = await createWrapper()
+    // 先勾 1 张卡浮动条才浮出（D2 交互：全选入口在浮动条上，选中数 > 0 才可见）
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await flushPromises()
+
+    // 全选：2 张独立卡全部选中（计数 = 渲染独立卡数）
+    await clickButton(wrapper, '全选')
+    await flushPromises()
+    expect(wrapper.find('.selection-count').text()).toBe('已选 2 项')
+    const allChecks = wrapper.findAll('.asset-card-check')
+    expect(allChecks.every((c) => c.element.checked)).toBe(true)
+
+    // 反选：渲染集内全部取反 → 全部取消（浮动条收起）
+    await clickButton(wrapper, '反选')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+
+    // 重新勾第 1 张后反选：仅第 2 张被选中（渲染集内取反语义）
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '反选')
+    await flushPromises()
+    const checks = wrapper.findAll('.asset-card-check')
+    expect(checks[0].element.checked).toBe(false)
+    expect(checks[1].element.checked).toBe(true)
+    expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+
+    // 清空：浮动条收起
+    await clickButton(wrapper, '清空')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('清空点位：检索条件变更与视图切换清空选中（D5#2/#3）', async () => {
+    const wrapper = await createWrapper()
+
+    // 勾选后检索：清空
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+
+    // 检索态（文件视图 1 个命中）勾选后切幻灯片视图：清空（选中维度不通约）
+    const hitCardCheck = wrapper.find('.asset-card-check')
+    expect(hitCardCheck.exists()).toBe(true)
+    await hitCardCheck.trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('清空点位：平铺开关切换清空选中（D5#2 检索语境变更同批点位）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    const flattenSwitch = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitch.vm.$emit('update:modelValue', true)
+    await flattenSwitch.vm.$emit('change', true)
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('清空点位：仅自身标签开关切换清空选中（D5#2）', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    await ownSwitch.vm.$emit('update:modelValue', true)
+    await ownSwitch.vm.$emit('change', true)
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('清空点位：切库与扫描刷新清空选中（D5#2/#4），呈现切换保留不受影响', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '备份库' }
+    ])
+    const wrapper = await createWrapper()
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    // 切库清空
+    const select = wrapper.findComponent(ElSelectStub)
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+
+    // 扫描刷新清空（resetAndReloadView 走 D5#4 点位）：新库重新勾选后扫描完成
+    const lib2Check = wrapper.find('.asset-card-check')
+    expect(lib2Check.exists()).toBe(true)
+    await lib2Check.trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    await clickButton(wrapper, '扫描')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('清空点位：溯源跳转清空选中（D5#2/#3 同命中——直赋路径不经 applySearch/onViewModeChange）', async () => {
+    const wrapper = await createWrapper()
+    // 切幻灯片视图勾选一张卡（选中键属幻灯片维度）
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    // 打开详情后点「查看归属文件」：溯源直赋 viewMode='file' + 退出检索，两个
+    // 清空触发点同命中——漏清则幻灯片选中键驻留成幽灵选中（文件视图无可见勾选行）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    await clickButton(wrapper, '查看归属文件')
+    await flushPromises()
+
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+    // 溯源语义保持：文件视图 + 归属文件选中
+    expect(wrapper.find('.asset-card.is-selected').exists()).toBe(true)
+  })
+
+  // ---- 失败缩略图自动补（SRS §2.3 PR3，PRD D4）----
+
+  it('失败缩略图自动补：done 后失败集自动重试恰好一轮（fileId 从底册反查），第二轮 done 不再触发', async () => {
+    const wrapper = await createWrapper()
+    expect(wailsMock.RetryAssetThumb).not.toHaveBeenCalled()
+
+    // 批次 progress 收集 1 个失败文件 → done：自动重试恰一轮（底册反查 fileId=12）
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 2, generated: 1, skipped: 0, failed: 1, canceled: false })
+    await flushPromises()
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledTimes(1)
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledWith('lib-1', 12, '方案B/损坏文件.pptx')
+
+    // 第二轮批次仍失败（progress 重新收集）→ done：不再自动触发（恰好一轮，D4）
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 2, generated: 0, skipped: 0, failed: 1, canceled: false })
+    await flushPromises()
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('失败缩略图自动补：底册反查 miss 的失败路径跳过（无 fileId 不重试）', async () => {
+    const wrapper = await createWrapper()
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '不存在/未知.pptx', failed: 1 })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 2, failed: 1 })
+    await flushPromises()
+    // 底册（mockFiles 两条路径）无该文件：跳过不发起重试
+    expect(wailsMock.RetryAssetThumb).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('失败缩略图自动补：切库复位一轮资格，新库批次可再触发（D4 新库新批次语义）', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '备份库' }
+    ])
+    const wrapper = await createWrapper()
+
+    // lib-1 批次失败 → done 自动重试一轮
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 2, failed: 1 })
+    await flushPromises()
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledTimes(1)
+
+    // 切 lib-2：资格复位；lib-2 批次失败 → done 再次自动重试（以 lib-2 底册反查）
+    const select = wrapper.findComponent(ElSelectStub)
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-2', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-2', total: 2, failed: 1 })
+    await flushPromises()
+    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledTimes(2)
+    expect(wailsMock.RetryAssetThumb).toHaveBeenLastCalledWith('lib-2', 12, '方案B/损坏文件.pptx')
+    wrapper.unmount()
+  })
+
+  // ---- D6 真机增量：固定卡宽网格 + 缩放滑块 + 双击交互 + 文件内过滤 + 详情文本下沉 ----
+
+  it('固定卡宽：画廊容器注入 --asset-card-w CSS 变量（默认 280），滑块变更后变量跟随，列表视图滑块不渲染', async () => {
+    const wrapper = await createWrapper()
+    const gallery = wrapper.find('.assets-gallery')
+    expect(gallery.attributes('style')).toContain('--asset-card-w: 280px')
+
+    // 网格视图滑块存在，边界对齐 PRD D4（220-420 步长 20）
+    const slider = wrapper.find('.card-size-slider')
+    expect(slider.exists()).toBe(true)
+    const sliderComp = slider.findComponent(ElSliderStub)
+    expect(sliderComp.props('min')).toBe(220)
+    expect(sliderComp.props('max')).toBe(420)
+    expect(sliderComp.props('step')).toBe(20)
+    // 滑块变更后 CSS 变量跟随（详情栏开合只减列数不改卡宽的宽度来源）
+    await sliderComp.vm.$emit('update:modelValue', 360)
+    await flushPromises()
+    expect(wrapper.find('.assets-gallery').attributes('style')).toContain('--asset-card-w: 360px')
+
+    // 列表视图滑块不渲染（列表行固定尺寸无缩放对象，防占位跳动）
+    await switchDisplayMode(wrapper, 'list')
+    expect(wrapper.find('.card-size-slider').exists()).toBe(false)
+  })
+
+  it('双击幻灯片卡进全屏预览：以该卡定位序列下标（页码指示匹配）', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 双击第 2 张卡（背景页）：浏览器双击序 click→click→dblclick，首击已装配详情，
+    // dblclick 以当前详情定位序列下标
+    const card = wrapper.findAll('.asset-card')[1]
+    await card.trigger('click')
+    await card.trigger('dblclick')
+    await flushPromises()
+
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(true)
+    expect(wrapper.find('.preview-counter').text()).toBe('2 / 2')
+    expect(wrapper.find('.preview-title').text()).toBe('背景页')
+    wrapper.unmount()
+  })
+
+  it('双击文件卡进入文件内过滤浏览：切幻灯片视图 + 过滤条出现 + 仅显示该文件页，清除过滤恢复全量', async () => {
+    const slideOfOther = { ...mockSlides[0], id: 31, fileId: 12, filePath: '方案B/损坏文件.pptx', slideNum: 1, title: '损坏页一' }
+    wailsMock.ListAssetSlides.mockResolvedValue({ items: [...mockSlides, slideOfOther], total: 3 })
+    const wrapper = await createWrapper()
+
+    // 文件视图双击第一个文件卡（城商行方案）
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+
+    // 切到幻灯片视图（卡片为幻灯片形态）且过滤生效
+    const cards = wrapper.findAll('.asset-card')
+    expect(cards.length).toBe(2)
+    expect(cards[0].text()).toContain('幻灯片')
+    expect(cards.every((c) => c.text().includes('城商行方案.pptx'))).toBe(true)
+    const banner = wrapper.find('.file-filter-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('城商行方案.pptx')
+    expect(banner.text()).toContain('2 页')
+
+    // 清除过滤：过滤条消失，恢复全量（3 页含其他文件）
+    await clickButton(wrapper, '清除过滤')
+    await flushPromises()
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(false)
+    expect(wrapper.findAll('.asset-card').length).toBe(3)
+  })
+
+  it('过滤空自动续拉：目标文件页不在已加载段时逐页拉取直到出现（或全局拉完）', async () => {
+    const page2 = [{ ...mockSlides[0], id: 31, fileId: 12, filePath: '方案B/损坏文件.pptx', slideNum: 1, title: '损坏页一' }]
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: mockSlides, total: 3 })
+      return Promise.resolve({ items: page2, total: 3 })
+    })
+    const wrapper = await createWrapper()
+
+    // 文件视图双击「损坏文件」卡（其页在第 2 页分页流中）
+    await wrapper.findAll('.asset-card')[1].trigger('dblclick')
+    await flushPromises()
+
+    // 自动续拉到位（首页 offset=0 + 续拉 offset=2），过滤结果出现且计数正确
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 2)
+    const cards = wrapper.findAll('.asset-card')
+    expect(cards.length).toBe(1)
+    expect(cards[0].text()).toContain('损坏文件')
+    expect(wrapper.find('.file-filter-banner').text()).toContain('1 页')
+  })
+
+  it('检索态双击文件卡：先退检索再进入过滤浏览（过滤与检索互斥，退检索语境清空条件）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('命中 2 条')
+
+    // 检索态（文件视图命中 1 卡）双击
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+
+    // 退检索：统计行命中口径消失、输入框清空；进入过滤态
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('命中')
+    expect(wrapper.find('input').element.value).toBe('')
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(true)
+  })
+
+  it('幻灯片详情解析文本下沉：页文本/演讲者备注/命中摘要区位于操作按钮区之后（标注编辑优先）', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    // DOM 序断言（jsdom 无布局，样式断言不可行）：含解析文本（detail-pre）的
+    // section 全部在最后一个操作区（detail-actions）之后。浏览态无命中摘要
+    // （hit 为空 snippet 恒空，该区 v-if 不渲染），pre 区为页文本 + 演讲者备注
+    const detail = wrapper.find('.assets-detail')
+    const blocks = detail.findAll('.detail-section, .detail-actions')
+    const preIndexes = []
+    const actionIndexes = []
+    blocks.forEach((b, i) => {
+      if (b.element.querySelector('.detail-pre')) preIndexes.push(i)
+      if (b.classes().includes('detail-actions')) actionIndexes.push(i)
+    })
+    expect(preIndexes.length).toBe(2)
+    expect(detail.text()).toContain('页文本')
+    expect(detail.text()).toContain('演讲者备注')
+    expect(actionIndexes.length).toBe(2) // 保存/重置区 + 跳转按钮区
+    expect(Math.min(...preIndexes)).toBeGreaterThan(Math.max(...actionIndexes))
+  })
+
+  it('过滤语境清空点位：手动切视图清过滤（过滤条消失且恢复全量），聚合父卡双击不动作', async () => {
+    const slideOfOther = { ...mockSlides[0], id: 31, fileId: 12, filePath: '方案B/损坏文件.pptx', slideNum: 1, title: '损坏页一' }
+    wailsMock.ListAssetSlides.mockResolvedValue({ items: [...mockSlides, slideOfOther], total: 3 })
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(true)
+
+    // 手动切视图（文件 → 幻灯片 → 文件）：离开过滤语境
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'file')
+    await group.vm.$emit('change', 'file')
+    await flushPromises()
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(false)
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('筛选')
+
+    // 聚合父卡（检索态 hitCount>1）双击不动作：不切视图不进预览（单击语义是展开/收起）
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    const aggCard = wrapper.findAll('.asset-card')[0]
+    expect(aggCard.classes()).toContain('is-expandable')
+    await aggCard.trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(false)
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(false)
+    // 双击后聚合展开态未被两次 click 语义误触发（dblclick 处理器 early return，
+    // trigger('dblclick') 不派发 click，展开态保持收起）
+    expect(wrapper.find('.agg-child').exists()).toBe(false)
   })
 })
