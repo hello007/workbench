@@ -696,11 +696,18 @@ func (s *assetsStore) updateSlideMeta(fileID, slideNum int64, rating int, note s
 }
 
 // ensureTagTx 取标签 ID，不存在则自动创建（默认色板按标签名哈希确定性分配，
-// 同名标签跨库/多次创建颜色稳定）。须在事务内调用。
+// 同名标签跨库/多次创建颜色稳定）。自动创建为根标签，sort_order 追加根组末尾
+// （组内 MAX+1，PRD D8#1 兄弟序契约——避免 DEFAULT 0 插队组内首位）；已存在的
+// 标签序号计算结果不使用（多一次组内 MAX 查询，标签量级百级成本可忽略）。
+// 须在事务内调用。
 func ensureTagTx(tx *sql.Tx, name string) (int64, error) {
+	sortOrder, err := nextTagSortOrder(tx, 0)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(
-		"INSERT INTO tags(name, color) VALUES(?, ?) ON CONFLICT(name) DO NOTHING",
-		name, assetTagColorFor(name),
+		"INSERT INTO tags(name, color, parent_id, sort_order) VALUES(?, ?, NULL, ?) ON CONFLICT(name) DO NOTHING",
+		name, assetTagColorFor(name), sortOrder,
 	); err != nil {
 		return 0, err
 	}

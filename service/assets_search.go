@@ -74,11 +74,21 @@ type assetSearchEntry struct {
 }
 
 // searchAssetsInStore 检索主体（store 连接内执行）：分流关键词检索与纯标签浏览。
-// 标签筛选集合（fileIDsForTagFilter/slideOwnTagFilterSet）仅关键词路径预取——其
-// 结果只被 FTS 命中行的 Go 层行级判定消费；纯标签浏览路径的筛选由
+// 标签筛选入参先经 expandTagDescendants 级联展开（多级标签树命中口径 = 所选
+// 标签 ∪ 全部后代，PRD D2；平铺老数据全 parent_id=0 时展开 = 自身集合，行为
+// 不变）——单点展开后透传两路径，禁在单一路径内另行展开。标签筛选集合
+// （fileIDsForTagFilter/slideOwnTagFilterSet）仅关键词路径预取——其结果只被
+// FTS 命中行的 Go 层行级判定消费；纯标签浏览路径的筛选由
 // listTagFilteredFiles/listTagFilteredSlides 的 SQL 子查询完成（继承合并语义同
 // 源），提前返回避免两条无消费的 JOIN 查询。
 func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSearchOptions) (model.AssetSearchPage, error) {
+	if len(opts.TagIDs) > 0 {
+		expanded, err := store.expandTagDescendants(opts.TagIDs)
+		if err != nil {
+			return model.AssetSearchPage{}, fmt.Errorf("标签子树展开失败: %w", err)
+		}
+		opts.TagIDs = expanded
+	}
 	if keyword == "" {
 		if len(opts.TagIDs) == 0 {
 			// 空查询语义：无关键词且无筛选条件返回空结果页，不报错

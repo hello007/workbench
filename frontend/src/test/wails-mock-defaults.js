@@ -219,6 +219,27 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // opts 含 slideTagOnlyOwn 继承开关（默认 false = 合并归属文件标签命中）
   SearchAssets: { items: [], total: 0, keyword: '', flattened: false },
 
+  // ---- 素材标签树与批量打标签（第六批 SRS §2.4：标签树 + 标签管理 + 批量打标签）----
+  // ListAssetTags 默认两级标签样例（根 + 子级；形状对齐 model.AssetTagListItem：
+  // id/name/color/parentId/count，count 为直接绑定行数，含未使用标签），标签树
+  // 构建 / 名称映射 / 删除影响面用例以此为基础；Create/Update/Delete 仅在用户
+  // 操作时调用，默认值安全 no-op（DeleteAssetTag 0 = 无绑定行解除）；Batch×2
+  // 为批量打标签弹窗（AssetBatchTagDialog 经宿主 execute 分派）后端链，默认
+  // 全零空明细（形状对齐 model.AssetBatchTagResult），用例按需 override
+  ListAssetTags: [
+    { id: 1, name: '重点客户', color: '#2563eb', parentId: 0, count: 3, sortOrder: 0 },
+    { id: 2, name: '城商行', color: '#0891b2', parentId: 1, count: 2, sortOrder: 0 },
+    { id: 3, name: '方案', color: '#16a34a', parentId: 0, count: 1, sortOrder: 1 }
+  ],
+  CreateAssetTag: { id: 99, name: '新标签', color: '#7c3aed', parentId: 0, sortOrder: 0 },
+  UpdateAssetTag: null,
+  // 拖拽排序/移动父级（D8#1）：void 返回 null 安全 no-op；管理弹窗乐观更新失败
+  // 回滚链路用例按需 override reject
+  MoveAssetTag: null,
+  DeleteAssetTag: 0,
+  BatchUpdateAssetFileTags: { total: 0, succeeded: 0, failed: 0, items: [] },
+  BatchUpdateAssetSlideTags: { total: 0, succeeded: 0, failed: 0, items: [] },
+
   // ---- 素材缩略图（PR3：画廊/详情懒加载 + 能力探测 + 打开跳转 + 失败重试 + 设置）----
   // GetAssetThumb 默认空串 = 未生成回退「无预览」占位（契约见 docs/spec/assets-thumbs-com.md
   // 第 8 节：返回串直接拼 data:image/png;base64,<串>；base64 大载荷不经 mock 回传，

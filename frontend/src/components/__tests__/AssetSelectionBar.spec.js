@@ -33,4 +33,12 @@ describe('AssetSelectionBar', () => {
     expect(wrapper.emitted('invert')).toHaveLength(1)
     expect(wrapper.emitted('clear')).toHaveLength(1)
   })
+
+  it('批量打标签按钮（第六批 PR3）：上报 batch-tag 事件（targets 构建与 API 分派留宿主）', async () => {
+    const wrapper = mountBar(2)
+    const byText = (text) => wrapper.findAll('button').find((b) => b.text().trim() === text)
+    expect(byText('批量打标签')).toBeTruthy()
+    await byText('批量打标签').trigger('click')
+    expect(wrapper.emitted('batch-tag')).toHaveLength(1)
+  })
 })

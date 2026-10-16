@@ -86,6 +86,55 @@ func (a *App) SearchAssets(libraryID string, keyword string, opts model.AssetSea
 	return a.assetsSvc.SearchAssets(libraryID, keyword, opts)
 }
 
+// ListAssetTags 全量标签清单（父级分组 + 组内 sort_order 序，D8#1 拖拽排序契约）：
+// 标签树构建数据源（含未使用标签），条目带直接绑定计数（文件绑定 + 页自有绑定
+// 行数之和）、父级 ID（0 = 根标签，前端按 ParentID 组织树形）与组内序号。
+func (a *App) ListAssetTags(libraryID string) ([]model.AssetTagListItem, error) {
+	return a.assetsSvc.ListTags(libraryID)
+}
+
+// CreateAssetTag 新建标签：重名拒绝；parentID ≠ 0 须为已存在标签（新建无子代
+// 不存在成环）；color 空则按标签名确定性分配默认色板。
+func (a *App) CreateAssetTag(libraryID, name string, parentID int64, color string) (model.AssetTag, error) {
+	return a.assetsSvc.CreateTag(libraryID, name, parentID, color)
+}
+
+// UpdateAssetTag 标签编辑（重命名/改色/移动父级整体提交）：重名拒绝；移动父级
+// 防环（新父不能是自身或自身后代，会形成循环引用）。
+func (a *App) UpdateAssetTag(libraryID string, tagID int64, name string, parentID int64, color string) error {
+	return a.assetsSvc.UpdateTag(libraryID, tagID, name, parentID, color)
+}
+
+// DeleteAssetTag 删除标签：级联删除自身 + 全部后代并解除全部绑定（删除标签不删
+// 素材，单事务）。返回解除关联的绑定行数（前端确认弹窗影响面展示口径）。
+func (a *App) DeleteAssetTag(libraryID string, tagID int64) (int64, error) {
+	return a.assetsSvc.DeleteTag(libraryID, tagID)
+}
+
+// MoveAssetTag 标签拖拽排序/移动父级（PRD D8#1 真机增量，标签管理弹窗 el-tree
+// 拖拽入口）：newParentID = 0 表示移到根级；index = 落位后自身在目标父下兄弟组
+// 内的最终序号（before/after 落点 = 同级排序、inner 落点 = 变子级组尾，前端经
+// resolveTagMoveDrop 换算）。事务内防环（新父不能是自身/自身后代）+ 目标组与
+// 旧组兄弟序号连续化重排。
+func (a *App) MoveAssetTag(libraryID string, tagID int64, newParentID int64, index int) error {
+	return a.assetsSvc.MoveTag(libraryID, tagID, newParentID, index)
+}
+
+// BatchUpdateAssetFileTags 文件批量打标签（SRS §2.4，文件模式选中集操作）：
+// op 为相对语义「现标签集 − removeTags ∪ addTags」（非整体替换），不存在的
+// 添加标签名自动创建为根标签。每条目一事务逐条目提交，部分失败不中断不回滚，
+// 逐条目明细返回（Total/Succeeded/Failed + Items）。
+func (a *App) BatchUpdateAssetFileTags(libraryID string, fileIDs []int64, op model.AssetBatchTagOp) (model.AssetBatchTagResult, error) {
+	return a.assetsSvc.BatchUpdateFileTags(libraryID, fileIDs, op)
+}
+
+// BatchUpdateAssetSlideTags 页自有标签批量打标签（幻灯片模式选中集操作）：目标
+// 键 (fileId, slideNum)。纯标注层——不触发重解析与缩略图失效；明细与参数校验
+// 口径对齐 BatchUpdateAssetFileTags。
+func (a *App) BatchUpdateAssetSlideTags(libraryID string, targets []model.AssetSlideTarget, op model.AssetBatchTagOp) (model.AssetBatchTagResult, error) {
+	return a.assetsSvc.BatchUpdateSlideTags(libraryID, targets, op)
+}
+
 // RebuildAssetLibrary 手动全量重建：清该库文件/幻灯片/检索索引记录后全量重扫
 // （索引自愈入口，统计口径漂移时使用）。文件标签绑定与幻灯片页级标注（标签/
 // 业务备注/星级）按「相对路径 + 页序」映射重绑（页已消失的页标注丢弃）；文件级

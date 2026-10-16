@@ -171,6 +171,8 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 | 扫描刷新 | `resetAndReloadView` | 清选中 + 关预览（底册 id 重解析） |
 | **溯源跳转** | `traceToSourceFile` | 清选中 + 关预览——**直赋 `viewMode.value='file'` 不经 applySearch/onViewModeChange**，是唯一同时命中 #2/#3 却绕过常规入口的路径，新增语境变更函数时对照本表逐一过 |
 | 呈现切换 | displayMode radio | 不清（同数据语境） |
+| **批量打标签完成** | `refreshAfterBatchTag` | **不清选中**（数据变更点位非语境变更，D5：支持对同批继续操作与失败手动重试；选中键 file:<id>/slide:<fileId>:<slideNum> 均稳定无脏键风险） |
+| 标签管理变更 | `refreshAfterTagChange` | 不清选中（同上性质；检索残留已删标签 ID 命中为空无害，用户手动清） |
 | 全屏预览翻页 | — | 不清（预览即详情导航，侧栏标注编辑照常可用） |
 
 - 全选/反选作用域 = **当前渲染独立卡键集**（检索模式含已加载段，懒加载未加载段不在范围）；反选 = 渲染集 ∖ 当前选中（渲染集外键结构性清零防幽灵）。聚合父卡（hitCount>1）与聚合展开子行无复选框（勾选语义歧义）。
@@ -192,6 +194,43 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 - 受控组件零业务状态：选中/详情/检索代次/分页判定全留宿主；行点击 emit `card-click`、滚动到底 emit `load-more`（防重与分页知识在宿主 `loadMoreInView` 单点，网格 scroll 与列表/预览 load-more 三入口共用）。
 - 列集分语境（prd D3）：幻灯片与检索条目的 size/modTime 经 fileEntries 底册按 filePath 反查 join（归属文件属性口径，表头 tooltip 声明），底册 miss 显 `—` 不猜值；聚合条目大小 `—`；星级 `0` 显 `—` 且**不落底册兜底**（`0` 非 nullish，页级标注独立于文件标注，兜底会伪造页星级）。检索幻灯片条目追加命中摘要列。
 
+## 9. 批量打标签与多级标签树（SRS §2.4，2026-10-16 第六批沉淀）
+
+### 9.1 标签树数据源与级联命中
+
+- **数据源**：单一 tags 表，`parent_id` 启用（0=根；v1 基线建表已含该列，**零迁移**）。父标签同为 tags 表一行；标签自动创建（遇新名）落为根标签。标签选项独立 API `ListAssetTags`（全量含未使用标签 + 直接绑定计数 = file_tags 与 slide_tags 两处绑定行数合计；父节点子树合计**前端自算** `sumSubtreeCounts`）——前端 `tagOptions` 底册聚合已降级为兜底，主源切该 API。
+- **级联命中（筛选聚合语义）**：`searchAssetsInStore` **两路径分流前**单点调 `expandTagDescendants` 把所选 tagIDs 展开为「自身 ∪ 全部后代」闭包集（FTS 关键词路径与纯标签浏览路径同源，禁只展开一路）；平铺老数据（全 parent_id=0）展开=自身集合，行为与历史完全一致。
+- **级联边界**：**批量打标签勾父标签只绑定被勾标签行本身，不做级联绑定**——绑定是精确动作，筛选才是聚合语义（混用会静默污染未勾选条目）。
+
+### 9.2 批量 API 契约（每条目一事务 + 明细）
+
+- 两独立方法按形态分叉：`BatchUpdateAssetFileTags(libraryID, fileIDs, op)` / `BatchUpdateAssetSlideTags(libraryID, targets[]{fileId,slideNum}, op)`；**禁 kind 参数单方法**（service 层两套存储分流在签名内显式化）。
+- `AssetBatchTagOp{AddTags, RemoveTags []string}`（标签名）：语义 = 每条目「现标签集 − remove ∪ add」，**相对条目现状追加/移除非整体替换**；只动标签不动星级/备注。交集非空/两数组全空/目标空 = 参数错误（跟随 UpdateFileMeta 既有普通 error 形态，**未新增错误码**，前端弹窗提交禁用为第一防线）。
+- **事务边界：每条目一个事务**逐条目 commit，失败记 `Item{fileId, slideNum, status, message}` 继续下一条（部分失败不中断不回滚，对齐拆分 splitOutcome 明细先例）；返回 `AssetBatchTagResult{Total, Succeeded, Failed, Items}`。
+- **批量内标签创建单点**：`ensureTagsByNames` 批量前一次性 ensure 全部 add 名（自动建根标签 + 库内 name UNIQUE 兜底），禁逐条目重复 ensure（同名词重复创建竞态 + 每条目重复查询浪费）。
+- slide_tags 批量变更**无需 FTS 写入**：标签不入 FTS 检索列（既有契约），筛选命中口径由关系表实时读天然同步。
+
+### 9.3 标签 CRUD 契约
+
+- 删除 = `deleteTagTree` **单事务**：先闭包收集子树 ID 集，逐 ID 显式 DELETE 两绑定表（**双保险**——不解绑直接删标签会留悬挂绑定行），返回解除关联绑定行数；SRS「删除标签不删素材」逐级适用。确认弹窗影响面：N=前端子树后代数、M=子树计数合计，删除后以后端返回值为权威展示。
+- 防环 = `updateTagFull` 沿 parent 链向上遍历途经自身即拒绝（visited 防脏数据死循环）；前端管理弹窗父级选项编辑态排除自身与子树（预拦截，后端主防线）。
+- 重名拒绝（库内 name UNIQUE）；`ListTags` 计数 SQL 用两独立相关子查询 COALESCE 归一。
+
+### 9.4 前端组件契约
+
+- **AssetTagTreeSelect 单组件三处复用**（筛选下拉/详情编辑/批量弹窗）：基于 el-tree-select（multiple + filterable + checkbox）；**组件统一 ID 口径**，消费方映射（详情编辑经 detailTagIds/slideTagIds 可写计算属性转标签名数组提交，保持 UpdateAssetFileMeta 名称契约不变）；挂载即拉 + 下拉展开重拉 + libraryId watch 重拉，**fetchSeq 代次守卫**防快速切库旧库慢响应写回；`loading` 刻意不透传 select（EP 透传会隐藏下拉主体且 disable 关闭打断展开重拉，重拉期间树保持可见原位更新）。
+- **AssetBatchTagDialog 不感知 viewMode**：只收 `targets`（含宿主拼装定位 label）与 `execute` 分派回调 props，宿主按 viewMode 决定调哪个批量 API；失败明细 label 反查 `(t.slideNum || 0) === (item.slideNum || 0)` 双侧归一（文件形态后端 omitempty 省略 slideNum）；`succeeded > 0` 恒上报 completed（每条目一事务成功已写入）。
+- **批量刷新链** `refreshAfterBatchTag` / **标签管理刷新链** `refreshAfterTagChange`：树 reload + 底册重拉 + 检索态重搜 + **检索态清聚合展开缓存**（expandedAggPaths/aggChildren/aggLoadingPaths——删除/移除页自有标签改变继承合并命中口径，旧 aggChildren 缓存早退会回读变更前数据）+ **librarySeq/searchSeq 双代次快照守卫**（await 期间切库/退检索防旧数据写回，对齐 onSaveSlideMeta 先例）。刷新链刻意不触碰已打开详情草稿（防覆盖未保存编辑，重选条目即得新数据）。
+- 树构建 `buildTagTree`（utils/assetTagTree.js）对悬空父引用/自引用按根处理（容错不炸渲染）；插槽作用域解构须 `scope && scope.data` 守卫（宿主测试环境未注册 el-tree-select 时无参插槽解构炸渲染链，Home.spec 曾 79 用例全挂）。
+- **过滤浏览语境刷新缺口（真机冒烟修复）**：`fileFilterPath` 客户端过滤语境下，任何对幻灯片清单 `loadSlidesPage(true)` 复位首页的刷新链（`refreshAfterBatchTag` / `onSaveSlideMeta` 浏览分支）**必须接 `ensureFilteredSlidesLoaded()` 续拉兜底**——复位后目标文件页大概率不在已加载段，过滤收敛 0 卡（用户见「全部卡片消失」）；`watch(fileFilterPath)` 续拉只在过滤值变化时触发，刷新场景过滤值不变接不上。非过滤语境该函数空目标直接返回零行为变化。
+
+### 9.5 标签兄弟序与拖拽排序（D8#1 真机增量，schema v6）
+
+- **schema v6 迁移**：`ALTER TABLE tags ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0` + 迁移内纯 SQL 回填——按迁移前展示序（同父内 name 升序、同名按 id，对齐 v5 `ORDER BY name` 口径）经相关子查询计数赋组内 0..n-1，升级后视觉顺序与迁移前完全一致，用户再拖拽自定义；**v1 基线 tags 表不含该列**（基线含列时旧库 ALTER 会撞 duplicate column），新旧库统一经 v6 补列；回填仅随迁移执行一次（user_version 门禁），新库 tags 空表天然空操作。
+- **兄弟序写入契约（组尾追加 + 连续化重排）**：`createTag` / `ensureTagTx`（批量自动建根标签）/ `updateTagFull` 移父三类入口经 `nextTagSortOrder`（组内 MAX+1，空组 0）追加组尾，防 DEFAULT 0 插队组首——updateTagFull 移父**仅追加新组组尾、旧组留断号**（ORDER BY sort_order, id 相对序语义不受影响，仅拖拽路径 MoveTag 做连续化）；`MoveTag` 单事务 = 防环（tx 内读边集沿 parent 链向上遍历，收集与落位同事务无「校验与写入之间树被改」窗口）+ index 越界钳 [0, 组尾]（前端落点正常不越界，钳制为防御）+ **目标组整组连续化重排 0..n-1**（写整组而非只写落位标签，防断号失档）+ 跨父时旧组剩余兄弟连续化（消除断号，同父移动由目标组重排覆盖）；`ListAssetTags` 平铺序 = 父级分组（根组在前按父 ID 升序）+ 组内 sort_order、同序按 id——前端 `buildTagTree` 保序消费即兄弟展示序单一来源，前端不重排。
+- **前端拖拽换算单点**：`utils/assetTagTree.js` 的 `resolveTagMoveDrop`（before/after = 同级排序，取落点节点在排除自身后兄弟列表中的序位；inner = 变子级组尾追加）与 `applyTagMoveToFlat`（乐观更新平铺清单，返回新数组不改入参）；el-tree `allow-drop` 预拦截与 `node-drop` 落点换算**必须同走 resolveTagMoveDrop**（两处口径分叉 = 预拦截放行而落点拒绝的错位形态）；防环两层（前端拖入自身子树一律拒绝 + 后端 moveTag 沿 parent 链主防线）；乐观更新失败回滚 + 重拉保权威，落位在途（moveBusy）暂停 draggable 防并发拖拽叠加。
+- **flatten 默认 true（D8#2）**：检索聚合折叠/平铺开关默认平铺打开（同一 PPT 多页命中逐页平铺为主路径），聚合折叠按需关回；聚合形态相关断言须先显式回关再触发（勿依赖旧默认 false）。
+
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）。
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）。

@@ -24,6 +24,19 @@
      「文件标签（继承）」只读弱化展示归属文件标签，与自有标签编辑区上下分区；
      标签筛选「仅幻灯片自身标签」开关（opts.slideTagOnlyOwn）切换继承合并/仅自身
      两种命中口径（默认合并向后兼容，仅作用于标签筛选，关键词命中不受影响）。
+     标签树与标签管理（第六批 SRS §2.4）：标签数据源切换为 ListAssetTags 独立
+     API（PRD D1，含未使用标签与直接绑定计数，底册聚合降级为兜底）；筛选与详情
+     编辑消费 AssetTagTreeSelect 单组件（ID 口径，保存契约标签名数组在宿主侧
+     双向映射）；「管理标签」弹窗（AssetTagManagerDialog）承载标签 CRUD，变更
+     成功经 changed 事件触发宿主刷新链（树重拉 + 底册重拉 + 检索态重跑，数据
+     变更点位不清选中）。批量打标签（第六批 PR3，PRD D3/D4/D5/D7）：入口挂
+     AssetSelectionBar batch-tag 事件，targets 由选中键经当前渲染卡反查
+     （assetSelectionKey 单点映射，miss 跳过计数）；AssetBatchTagDialog 弹窗不
+     感知 viewMode——宿主 execute 分派回调按 viewMode 分派
+     BatchUpdateAssetFileTags（fileIDs）/ BatchUpdateAssetSlideTags（(fileId,
+     slideNum) 目标，禁 slides.id）；completed 触发刷新链（树重拉 + 底册重拉 +
+     检索态重搜 + 幻灯片浏览清单补拉，双代次守卫防在途写回污染），选中保留
+     （D5：数据变更点位非语境变更）。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      呈现维度（SRS §2.3 PR1）：displayMode 网格/列表两形态共用同一 displayCards
@@ -168,26 +181,26 @@
         @keyup.enter="applySearch"
         @clear="applySearch"
       />
-      <el-select
+      <!-- 标签筛选（第六批起树形化）：AssetTagTreeSelect 单组件 ID 口径（后端
+           SearchAssets opts.tagIds 既有入参口径不变，级联展开选父含后代由后端
+           检索链完成，前端不展开）；拉取成功经 loaded 事件回传共享标签列表 -->
+      <AssetTagTreeSelect
+        ref="filterTagSelectRef"
         v-model="selectedTagIds"
         class="tag-filter"
+        :library-id="currentLibraryId"
         placeholder="按标签筛选"
         size="small"
-        multiple
-        collapse-tags
-        collapse-tags-tooltip
-        clearable
         :disabled="!hasLibrary"
         @change="applySearch"
-      >
-        <el-option v-for="tag in tagOptions" :key="tag.id" :label="tag.name" :value="tag.id">
-          <span class="tag-option-row">
-            <!-- 标签色为后端数据（#RRGGBB），动态绑定是唯一呈现方式，非静态行内样式 -->
-            <span class="tag-color-dot" :style="{ background: tag.color }"></span>
-            {{ tag.name }}
-          </span>
-        </el-option>
-      </el-select>
+        @loaded="onAssetTagsLoaded"
+      />
+      <!-- 标签管理入口（PRD D6）：标签 CRUD 统一弹窗，筛选/详情编辑的标签消费点
+           共用同一数据链路（弹窗变更后经 changed 事件触发宿主刷新链） -->
+      <el-button size="small" text type="primary" :disabled="!hasLibrary" @click="openTagManager">
+        <el-icon><CollectionTag /></el-icon>
+        管理标签
+      </el-button>
       <!-- 幻灯片标签继承开关（SRS §2.2.4）：false = 幻灯片条目按【页自身标签 ∪ 归属
            文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中。恒渲染占位
            防视图切换时同行控件跳动；文件视图下检索结果只含文件条目（开关不产生
@@ -381,12 +394,13 @@
         <!-- 选中浮动操作条（SRS §2.3 PR3，PRD D2）：选中数 > 0 浮出于画廊区底部
              居中（absolute 挂 .assets-view-wrap relative 语境，z-index 5 低于预览
              层 10）；受控组件——计数传入选中集合大小，全选/反选/清空分派留宿主
-             （作用域 = 当前渲染独立卡键集，D5#8），第六批批量操作按钮挂此条的
-             预留位 -->
+             （作用域 = 当前渲染独立卡键集，D5#8），批量打标签（第六批 PR3）经
+             batch-tag 事件触发宿主 targets 构建与弹窗打开 -->
         <AssetSelectionBar
           :count="selectedKeys.size"
           @select-all="selectAllRendered"
           @invert="invertSelection"
+          @batch-tag="openBatchTagDialog"
           @clear="clearSelection"
         />
       </div>
@@ -449,18 +463,24 @@
             </div>
             <div class="detail-section">
               <div class="detail-label">标签</div>
-              <el-select
-                v-model="detailDraft.tags"
-                class="detail-tags-select"
-                placeholder="选择或输入新标签"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                :loading="savingMeta"
-              >
-                <el-option v-for="tag in tagOptions" :key="tag.id" :label="tag.name" :value="tag.name" />
-              </el-select>
+              <div class="detail-tags-row">
+                <!-- 树形标签选择（PRD D6，去 allow-create）：组件统一 ID 口径，保存
+                     契约 UpdateAssetFileMeta 入参为标签名数组不变——detailTagIds
+                     计算属性在宿主侧做 ID↔名称双向映射（见脚本注释） -->
+                <AssetTagTreeSelect
+                  ref="detailTagSelectRef"
+                  v-model="detailTagIds"
+                  class="detail-tags-select"
+                  :library-id="currentLibraryId"
+                  placeholder="选择标签"
+                  empty-text="暂无标签，点「+ 新建标签」创建"
+                  :disabled="savingMeta"
+                  @loaded="onAssetTagsLoaded"
+                />
+                <!-- 新建标签快捷入口（PRD D6：替代原 allow-create 的输入即建，
+                     预填管理弹窗为新增根标签表单态） -->
+                <el-button size="small" text type="primary" :disabled="savingMeta" @click="openTagManagerForCreate">+ 新建标签</el-button>
+              </div>
             </div>
             <div class="detail-section">
               <div class="detail-label">备注</div>
@@ -516,18 +536,21 @@
           </div>
           <div class="detail-section">
             <div class="detail-label">幻灯片标签</div>
-            <el-select
-              v-model="slideDraft.tags"
-              class="detail-tags-select slide-tags-select"
-              placeholder="选择或输入新标签"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              :loading="savingMeta"
-            >
-              <el-option v-for="tag in slideTagOptions" :key="tag.id" :label="tag.name" :value="tag.name" />
-            </el-select>
+            <div class="detail-tags-row">
+              <!-- 树形标签选择（对齐文件详情，第六批去 allow-create）：slideTagIds
+                   计算属性在宿主侧做 ID↔名称双向映射（保存契约 tagNames 数组不变） -->
+              <AssetTagTreeSelect
+                ref="detailTagSelectRef"
+                v-model="slideTagIds"
+                class="detail-tags-select slide-tags-select"
+                :library-id="currentLibraryId"
+                placeholder="选择页标签"
+                empty-text="暂无标签，点「+ 新建标签」创建"
+                :disabled="savingMeta"
+                @loaded="onAssetTagsLoaded"
+              />
+              <el-button size="small" text type="primary" :disabled="savingMeta" @click="openTagManagerForCreate">+ 新建标签</el-button>
+            </div>
           </div>
           <div class="detail-section">
             <div class="detail-label">业务备注</div>
@@ -723,6 +746,28 @@
         <el-button type="primary" :loading="thumbSettingsSaving" @click="onSaveThumbSettings">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 标签管理弹窗（PRD D6）：标签 CRUD 统一入口；变更成功经 changed 事件触发
+         宿主刷新链（树组件重拉 + 底册/检索刷新，见 refreshAfterTagChange）。
+         presetCreate 供详情「+ 新建标签」快捷入口预填新增表单态 -->
+    <AssetTagManagerDialog
+      v-model="tagManagerVisible"
+      :library-id="currentLibraryId"
+      :preset-create="tagManagerPresetCreate"
+      @changed="refreshAfterTagChange"
+    />
+
+    <!-- 批量打标签弹窗（第六批 PR3，PRD D3/D4/D5）：targets 由选中键经当前渲染
+         卡反查构建（assetSelectionKey 单点映射），execute 按 viewMode 分派两批量
+         API（弹窗不感知 viewMode）；completed 触发刷新链（底册/检索/树重拉），
+         选中保留（D5 数据变更点位不清空） -->
+    <AssetBatchTagDialog
+      v-model="batchTagDialogVisible"
+      :library-id="currentLibraryId"
+      :targets="batchTagTargets"
+      :execute="executeBatchTagUpdate"
+      @completed="refreshAfterBatchTag"
+    />
   </div>
 </template>
 
@@ -741,6 +786,8 @@ import {
   ListAssetSlides,
   UpdateAssetFileMeta,
   UpdateAssetSlideMeta,
+  BatchUpdateAssetFileTags,
+  BatchUpdateAssetSlideTags,
   SearchAssets,
   OpenDirectoryDialog,
   AssetThumbsAvailable,
@@ -770,6 +817,14 @@ import AssetThumb from './AssetThumb.vue'
 import AssetListView from './AssetListView.vue'
 import AssetPreviewOverlay from './AssetPreviewOverlay.vue'
 import AssetSelectionBar from './AssetSelectionBar.vue'
+// 标签树消费组件（第六批，PRD D6）：筛选/详情编辑复用同一树形多选组件 + 标签管理弹窗
+import AssetTagTreeSelect from './AssetTagTreeSelect.vue'
+import AssetTagManagerDialog from './AssetTagManagerDialog.vue'
+// 批量打标签弹窗（第六批 PR3，PRD D3/D4/D5）：targets 构建与两批量 API 分派在宿主，
+// 弹窗不感知 viewMode（只收 targets 与 execute 分派回调）
+import AssetBatchTagDialog from './AssetBatchTagDialog.vue'
+// 标签管理入口按钮图标（EP 图标族，浅色工具条容器内用 el-icon 承载）
+import { CollectionTag } from '@element-plus/icons-vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
@@ -821,10 +876,12 @@ const fileFilterPath = ref('')
 // 「数组当 Set 用」先例 failedThumbPaths 同款规避思路；整体替换口径变更点少、
 // 语义直白，放弃数组口径的理由是全选/反选需要集合运算，Set 原生语义更贴切）
 const selectedKeys = ref(new Set())
-const flatten = ref(false) // 检索聚合折叠/平铺开关（SearchAssets opts.flatten）
+const flatten = ref(true) // 检索聚合折叠/平铺开关（SearchAssets opts.flatten；D8#2 默认平铺打开——同一 PPT 多页命中逐页平铺为主路径，聚合折叠按需关回）
 const keywordInput = ref('') // 输入框绑定值（未应用）
 const activeKeyword = ref('') // 已应用关键词（非空即检索模式）
-const selectedTagIds = ref([]) // 标签筛选（非空即检索模式）
+// 标签筛选（第六批起树形多选）：ID 数组口径与后端 opts.tagIds 一致（非空即检索
+// 模式）；级联展开（选父含后代）由后端检索链完成，前端不展开
+const selectedTagIds = ref([])
 // 标签筛选继承开关（SearchAssets opts.slideTagOnlyOwn）：false = 幻灯片条目【页自
 // 身标签 ∪ 归属文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中
 const slideTagOnlyOwn = ref(false)
@@ -963,9 +1020,20 @@ watch(currentLibraryId, () => {
   splitRecord.value = null
 })
 
-// 标签选项：后端未提供独立标签列表接口，从当前库文件底册聚合去重
-// （注释说明：接口补齐后可替换为独立数据源，聚合逻辑无消费方感知）
+// ---- 标签共享列表（第六批起独立数据源，PRD D1：ListAssetTags 独立标签 API）----
+// 树形选择组件（AssetTagTreeSelect）拉取成功后经 loaded 事件回传平铺清单，宿主
+// 据此维持一份共享列表，供详情编辑 ID↔名称映射、页自有标签回构（buildOwnTags
+// FromNames）等场景消费（含未使用标签与直接绑定计数，替代原「接口补齐前从文件
+// 底册聚合」的明账）。底册聚合降级为兜底：组件尚未完成首拉或拉取失败且底册已
+// 就绪时以聚合值顶上，保底选项不断链；聚合口径仅含文件标签（页自有标签缺席），
+// 兜底期详情映射可能少选项，属降级可接受面（重新打开下拉即重拉恢复）
+const assetTags = ref([])
+const onAssetTagsLoaded = (items) => {
+  assetTags.value = items || []
+}
+
 const tagOptions = computed(() => {
+  if (assetTags.value.length > 0) return assetTags.value
   const byId = new Map()
   for (const entry of fileEntries.value) {
     for (const tag of entry.tags || []) {
@@ -974,6 +1042,10 @@ const tagOptions = computed(() => {
   }
   return Array.from(byId.values())
 })
+
+// 标签名↔ID 双向映射（详情编辑树形选择的适配层，见 detailTagIds/slideTagIds 注释）
+const tagIdByName = computed(() => new Map(tagOptions.value.map(t => [t.name, t.id])))
+const tagNameById = computed(() => new Map(tagOptions.value.map(t => [t.id, t.name])))
 
 // 「仅使用幻灯片自身标签」开关作用域：仅幻灯片视图可操作（SRS §2.2.4 开关只
 // 作用于幻灯片条目筛选；文件视图下检索结果只含文件条目，开关不产生可见效果，
@@ -985,17 +1057,195 @@ const slideTagOwnTooltip = computed(() =>
     : '仅作用于幻灯片条目：请切换到幻灯片视图后使用'
 )
 
-// 幻灯片标签编辑选项：文件底册聚合选项 ∪ 当前草稿已选值（页自有标签不在文件聚
-// 合中——slide_tags 与文件标签存储独立——仍须作为已选值正常显示；el-select 对不在
-// options 的已选值渲染原值，并集兜底让选项下拉与已选 tag 展示一致）
-const slideTagOptions = computed(() => {
-  const known = new Set(tagOptions.value.map(t => t.name))
-  const extra = slideDraft.value.tags.filter(name => !known.has(name))
-  if (extra.length === 0) return tagOptions.value
-  return tagOptions.value.concat(
-    extra.map((name, i) => ({ id: `own-extra-${i}-${name}`, name, color: '', parentId: 0 }))
-  )
+// 详情编辑树形选择的双向映射适配层（PRD D6：组件统一 ID 口径，消费方映射）：
+// get 把草稿标签名数组映射为 ID 数组供组件勾选回显，set 把组件勾选的 ID 数组
+// 映射回名称写回草稿——保存契约（UpdateAssetFileMeta 的 tags / UpdateAssetSlideMeta
+// 的 tagNames 均为标签名数组）在宿主侧保持不变，组件与存储两侧口径互不渗透。
+// 草稿名恒来自后端标签对象（entry.tags / 命中 ownTags），共享标签列表为全量标签
+// 表（页自有标签与文件标签同表存储，原 slideTagOptions 并集兜底随之删除），正常
+// 均能解析；映射不中的名（共享列表尚未加载完成的极短窗口）在 get 端被丢弃——
+// 窗口内组件树尚未渲染无用户交互可能，注释登记不设防
+const detailTagIds = computed({
+  get: () => detailDraft.value.tags
+    .map(name => tagIdByName.value.get(name))
+    .filter(id => id != null),
+  set: (ids) => {
+    detailDraft.value = {
+      ...detailDraft.value,
+      tags: (ids || []).map(id => tagNameById.value.get(id)).filter(Boolean)
+    }
+  }
 })
+
+const slideTagIds = computed({
+  get: () => slideDraft.value.tags
+    .map(name => tagIdByName.value.get(name))
+    .filter(id => id != null),
+  set: (ids) => {
+    slideDraft.value = {
+      ...slideDraft.value,
+      tags: (ids || []).map(id => tagNameById.value.get(id)).filter(Boolean)
+    }
+  }
+})
+
+// ---- 标签管理弹窗（第六批，PRD D6/D7）----
+
+const tagManagerVisible = ref(false)
+const tagManagerPresetCreate = ref(false)
+const filterTagSelectRef = ref(null)
+const detailTagSelectRef = ref(null) // 文件/幻灯片详情两分支互斥渲染，同一 ref 复用
+
+const openTagManager = () => {
+  tagManagerPresetCreate.value = false
+  tagManagerVisible.value = true
+}
+
+// 详情编辑「+ 新建标签」快捷入口（PRD D6）：预填管理弹窗为新增根标签表单态
+const openTagManagerForCreate = () => {
+  tagManagerPresetCreate.value = true
+  tagManagerVisible.value = true
+}
+
+// 标签管理变更（新增/重命名/删除成功）后的刷新链（对齐 onSaveMeta 先例）：
+// 1) 树组件 reload——打开时重拉 ListAssetTags，loaded 事件回传刷新宿主共享列表
+//    （详情编辑映射与页自有标签回构随之取到最新标签表）；
+// 2) 文件底册重拉——卡片/详情展示的标签名与绑定同步；
+// 3) 检索态重跑——命中条目携带的标签对象同步（对齐保存链重搜口径）。
+// 数据变更点位不清选中（PRD D5 同性质：批量打标签完成保留选中）；已打开详情的
+// 草稿不自动重算（防覆盖未保存编辑，重新点选条目即得新数据——重命名后草稿中的
+// 旧名需手动调整，属已登记边界）
+const refreshAfterTagChange = async () => {
+  filterTagSelectRef.value?.reload()
+  detailTagSelectRef.value?.reload()
+  if (!hasLibrary.value) return
+  // 双代次守卫（对齐 refreshAfterBatchTag/onSaveSlideMeta 先例）：刷新 await 期间
+  // 切库/扫描刷新（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应
+  // 已被各加载函数内部守卫丢弃，本函数随之中止
+  const libSeqAtStart = librarySeq
+  const searchSeqAtStart = searchSeq
+  try {
+    const entries = await ListAssetFiles(currentLibraryId.value)
+    if (libSeqAtStart !== librarySeq) return // 期间切库/扫描刷新：旧库底册丢弃
+    fileEntries.value = entries || []
+    if (searchMode.value) {
+      await runSearch(true)
+      if (searchSeqAtStart !== searchSeq) return // 检索语境已变：变更方已自清展开态
+      // 标签变更（删除页自有标签等）改变标签合并命中口径，聚合展开缓存必须失效
+      //（对齐 onSaveSlideMeta risk 2 清法：旧 aggChildren 早退命中=回读变更前口径）
+      expandedAggPaths.value = []
+      aggChildren.value = {}
+      aggLoadingPaths.value = []
+    }
+  } catch (error) {
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
+    handleError('刷新标签数据失败: ', error)
+  }
+}
+
+// ---- 批量打标签（第六批 PR3，SRS §2.4，PRD D3/D4/D5/D7）----
+
+const batchTagDialogVisible = ref(false)
+// 批量目标清单 [{ fileId, slideNum?, label }]：label 为按 viewMode 拼装的定位展示
+// 文案（文件模式 = 文件路径；幻灯片模式 = 「文件路径 · 第 N 页」），弹窗失败明细
+// 行定位展示与结果条目反查共用（弹窗不感知 viewMode，契约见 AssetBatchTagDialog）
+const batchTagTargets = ref([])
+
+// 打开批量弹窗：selectedKeys 经当前渲染独立卡反查目标——消费 assetSelectionKey
+// 共享单点做键映射（禁第二处手拼键，utils/assetSelection 键形态契约），渲染集内
+// 匹配天然滤掉陈旧选中键（反查 miss 跳过并计数）；全 miss 不开弹窗直接提示
+const openBatchTagDialog = () => {
+  const targets = []
+  for (const card of selectableCards.value) {
+    if (!selectedKeys.value.has(assetSelectionKey(card))) continue
+    if (viewMode.value === 'file') {
+      targets.push({ fileId: card.id, label: card.filePath })
+    } else {
+      targets.push({ fileId: card.fileId, slideNum: card.slideNum, label: `${card.filePath} · 第 ${card.slideNum} 页` })
+    }
+  }
+  // 反查 miss = 陈旧选中（键在集合但条目已不在渲染集，如底册刷新后文件被删），
+  // 跳过并计数提示；全部失效不开弹窗（空目标提交无意义）
+  const missCount = selectedKeys.value.size - targets.length
+  if (missCount > 0) {
+    ElMessage.warning(`${missCount} 项已失效跳过`)
+  }
+  if (targets.length === 0) return
+  batchTagTargets.value = targets
+  batchTagDialogVisible.value = true
+}
+
+// 批量执行分派回调（弹窗经 props.execute 调用，op = {addTags, removeTags} 标签名
+// 数组）：按 viewMode 分派两独立 API（PRD D3 两套存储形态在签名内显式化）——
+// 文件模式提交 fileIDs 数组，幻灯片模式提交 (fileId, slideNum) 目标数组
+//（键契约禁 slides.id，与 slide_tags 存储键同口径）。弹窗打开为模态，viewMode
+// 在提交期间不会被切换，分派读取当下 viewMode 即与打开时构建的 targets 一致
+const executeBatchTagUpdate = (op) => {
+  if (viewMode.value === 'file') {
+    return BatchUpdateAssetFileTags(
+      currentLibraryId.value,
+      batchTagTargets.value.map(t => t.fileId),
+      op
+    )
+  }
+  return BatchUpdateAssetSlideTags(
+    currentLibraryId.value,
+    batchTagTargets.value.map(t => ({ fileId: t.fileId, slideNum: t.slideNum })),
+    op
+  )
+}
+
+// 批量打标签完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目
+// 一事务成功条目已写入不回滚，PRD D3）：对齐 refreshAfterTagChange/onSaveMeta
+// 先例——树组件 reload（标签直接绑定计数可能变）+ 底册重拉 + 检索态重搜；
+// 幻灯片浏览模式补拉幻灯片清单首页（slideEntries 的 ownTags 快照随批量更新，
+// 详情草稿回读数据源，对齐 onSaveSlideMeta 浏览分支刷新口径），过滤浏览语境
+// 复位首页后接续拉兜底（见分支内注释）。选中保留（PRD
+// D5：数据变更点位非语境变更，键 file:<id>/slide:<fileId>:<slideNum> 稳定不受
+// 重解析影响）。双代次守卫（对齐 onSaveSlideMeta 先例）：刷新 await 期间切库/
+// 扫描刷新（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应已被
+// 各加载函数内部守卫丢弃，本函数随之中止，不再触碰新语境的展开缓存
+const refreshAfterBatchTag = async () => {
+  filterTagSelectRef.value?.reload()
+  detailTagSelectRef.value?.reload()
+  if (!hasLibrary.value) return
+  const libSeqAtStart = librarySeq
+  const searchSeqAtStart = searchSeq
+  try {
+    const entries = await ListAssetFiles(currentLibraryId.value)
+    if (libSeqAtStart !== librarySeq) return // 期间切库/扫描刷新：旧库底册丢弃
+    fileEntries.value = entries || []
+    if (searchMode.value) {
+      await runSearch(true)
+      if (searchSeqAtStart !== searchSeq) return // 检索语境已变：变更方已自清展开态
+      // 页自有标签变化改变标签合并命中口径，聚合展开缓存必须失效（对齐
+      // onSaveSlideMeta risk 2 清法：旧 aggChildren 早退命中会回读保存前标注）
+      expandedAggPaths.value = []
+      aggChildren.value = {}
+      aggLoadingPaths.value = []
+    } else if (viewMode.value === 'slide') {
+      await loadSlidesPage(true)
+      // 过滤浏览语境兜底（真机冒烟修复）：复位首页把全局分页流拉回首页段，目标
+      // 文件的页大概率不在已加载段，客户端 fileFilterPath 过滤收敛为 0 张——批量
+      // 成功提示后当前页全部卡片消失。watch(fileFilterPath) 只在过滤值变化时触发
+      // 续拉，刷新场景过滤值不变接不上，须在此显式兜底：对齐 filterByFile 进入
+      // 路径接 ensureFilteredSlidesLoaded 续拉，直到目标文件页重新出现或全局拉完；
+      // 非过滤语境 fileFilterPath 为空时该函数直接返回（复位首页语义不变），await
+      // 期间清过滤/切库/切视图竞态由其内部每轮校验（过滤目标未变 + loadingMore
+      // 防重）自然退出
+      await ensureFilteredSlidesLoaded()
+    }
+  } catch (error) {
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
+    handleError('刷新标签数据失败: ', error)
+  }
+}
 
 // ---- 卡片视图模型 ----
 // 浏览模式卡片（清单数据），检索模式卡片（命中条目）统一为同构形态供画廊渲染
@@ -1752,8 +2002,9 @@ const syncSlideEntryAnnotation = (entryId, hit) => {
 }
 
 // 按标签名回构页自有标签对象（形态对齐后端标签对象 {id,name,color,parentId}）：
-// 从底册聚合选项尽力匹配完整对象（含真实 id/颜色），新标签不在聚合中时合成占位
-// 对象（id 仅供 v-for key，展示层以 name 为主），待下次刷新由服务端规范数据覆盖
+// 从标签共享列表（ListAssetTags 数据源，第六批起含全量标签）尽力匹配完整对象
+//（含真实 id/颜色），名不在列表中时合成占位对象（id 仅供 v-for key，展示层以
+// name 为主），待下次刷新由服务端规范数据覆盖
 const buildOwnTagsFromNames = (tagNames) => {
   const known = new Map(tagOptions.value.map(t => [t.name, t]))
   return (tagNames || []).map((name, i) =>
@@ -1836,6 +2087,14 @@ const onSaveSlideMeta = async () => {
       // 浏览语境：重拉幻灯片清单（复位首页），详情条目引用同步指向新数据
       await loadSlidesPage(true)
       if (libSeqAtStart !== librarySeq) return // 保存期间切库/刷新：旧清单响应已被守卫丢弃，不写回不重置
+      // 过滤浏览语境兜底（同 refreshAfterBatchTag 真机修复根因）：复位首页后目标
+      // 文件的页大概率不在已加载段，客户端 fileFilterPath 过滤收敛 0 张致画廊全空
+      // ——过滤视图点卡片进详情编辑保存即触发。对齐 filterByFile 进入路径接续拉
+      // 兜底（内部每轮校验过滤目标未变 + loadingMore 防重，await 期间语境变更自然
+      // 退出）；续拉到位后保存条目回到已加载段走命中分支以服务端数据回读，非过滤
+      // 语境为空操作不改变既有 miss 回填语义。期间切库/扫描刷新路径 selected 已被
+      // resetAndReloadView 同步前缀 closeDetail 置空，下方写回判定自然跳过
+      await ensureFilteredSlidesLoaded()
       const updated = slideEntries.value.find(s => s.id === entryId)
       if (updated && selected.value?.slideEntry?.id === entryId) {
         // 命中：引用已同步为服务端新数据，草稿重读权威数据
@@ -2534,6 +2793,16 @@ defineExpose({ loadLibraries, refreshAfterScan })
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--border-color);
+  /* 窄窗口收缩策略（D8#4）：控件组整体换行而非组内收缩换行——radio 组等不可
+       压缩控件以整组为单位落到下一行，宽窗口单行排布与原行为一致 */
+  flex-wrap: wrap;
+}
+
+/* radio 组整组换行（D8#4）：禁收缩 + 禁组内文本换行，防「文件视图/幻灯片视图」
+     label 在非最大化窗口下被压成上下堆叠 */
+.assets-toolbar :deep(.el-radio-group) {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .keyword-input {
@@ -2772,10 +3041,16 @@ defineExpose({ loadLibraries, refreshAfterScan })
   flex-shrink: 0;
 }
 
-.tag-option-row {
+/* ---- 详情标签编辑行（第六批树形化）：树形选择器占满余量 + 新建快捷按钮固定内容宽 ---- */
+.detail-tags-row {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
+}
+
+.detail-tags-row .detail-tags-select {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ---- 聚合展开子页 ---- */

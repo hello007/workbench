@@ -1,0 +1,8 @@
+{"file": "docs/spec/assets-management.md", "reason": "核查批量/标签树改动是否破坏既有契约：(file_id,slide_num) 键禁 slides.id、FTS 切分同源、继承合并两路径同源、清空点位矩阵联动、事务边界"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 三处同步完整（App.js/App.d.ts/models.ts）+ 无具名 string 类型别名坑"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service ≥76% / 前端 ≥70% 覆盖率达标"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查新增错误码三处同步（app_error.go 常量 + error.js ErrorCode/WARNING_CODES）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查树形组件/弹窗尺寸分档/语义色遵循视觉约定"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查 E2E fixture import / mock 单一数据源 / 禁 waitForTimeout"}
+{"file": "docs/spec/test-stability.md", "reason": "核查测试无 sleep/mtime/固定端口隐式依赖"}
+{"file": ".trellis/tasks/10-15-10-15-srs-2-4/prd.md", "reason": "对照 PRD 验收标准（AC 9 条）与 D1-D7 决议逐项核查"}

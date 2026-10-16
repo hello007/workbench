@@ -143,6 +143,62 @@ type AssetSlideMetaUpdate struct {
 	TagNames []string `json:"tagNames"` // 页自有标签名列表（整体替换；不存在的标签自动创建）
 }
 
+// AssetBatchTagOp 批量打标签操作入参（BatchUpdateAssetFileTags /
+// BatchUpdateAssetSlideTags 共用）：标签名列表（非 ID——不存在的添加名自动创建
+// 为根标签）。语义 = 每条目「现标签集 − RemoveTags ∪ AddTags」，相对条目现状
+// 追加/移除，非整体替换；两数组交集须为空（参数校验拒绝，前后端双防线）。
+type AssetBatchTagOp struct {
+	AddTags    []string `json:"addTags"`    // 追加标签名列表（可空）
+	RemoveTags []string `json:"removeTags"` // 移除标签名列表（可空）
+}
+
+// AssetSlideTarget 批量页标签操作的目标页定位。键契约 = (fileId, slideNum)，
+// 禁 slides.id（每轮重解析删旧插新全变，见 docs/spec/assets-management.md
+// 幻灯片独立标注节，与 slide_tags 存储键同口径）。
+type AssetSlideTarget struct {
+	FileID   int64 `json:"fileId"`   // 归属文件记录 ID
+	SlideNum int   `json:"slideNum"` // 展示页序（从 1 计，以 sldIdLst 为准）
+}
+
+// 素材批量打标签单条目结果状态取值（AssetBatchTagItem.Status，普通 string 常量
+// 非具名类型，不经 Wails 绑定层别名机制）。
+const (
+	AssetBatchTagStatusOK     = "ok"     // 写入成功
+	AssetBatchTagStatusFailed = "failed" // 写入失败（Message 带原因，批量不中断）
+)
+
+// AssetBatchTagItem 批量打标签单条目结果明细（异常隔离，对齐
+// AssetSplitFileOutcome 先例）。
+type AssetBatchTagItem struct {
+	FileID   int64  `json:"fileId"`             // 条目归属文件记录 ID
+	SlideNum int    `json:"slideNum,omitempty"` // 页序（页标签条目从 1 计；文件标签条目恒 0 省略）
+	Status   string `json:"status"`             // AssetBatchTagStatus* 取值
+	Message  string `json:"message,omitempty"`  // 失败原因（成功为空）
+}
+
+// AssetBatchTagResult 批量打标签结果汇总。事务边界 = 每条目一事务逐条目提交，
+// 部分失败不回滚已成功条目（成功条目已写入）。
+type AssetBatchTagResult struct {
+	Total     int                 `json:"total"`     // 提交条目总数
+	Succeeded int                 `json:"succeeded"` // 成功条目数
+	Failed    int                 `json:"failed"`    // 失败条目数
+	Items     []AssetBatchTagItem `json:"items"`     // 逐条目明细（顺序同提交序，恒非 nil）
+}
+
+// AssetTagListItem 标签清单条目（ListAssetTags 返回，标签树构建数据源）：标签
+// 本体五字段 + 直接绑定计数。Count = file_tags 绑定行数 + slide_tags 绑定行数
+// 之和（父节点子树合计由前端按树结构自算，后端不聚合）；含未使用标签（Count=0）。
+// SortOrder 为同父兄弟内的展示序号（PRD D8#1 拖拽排序），平铺清单按「父级分组 +
+// 组内 SortOrder 升序、同序按 id」返回，前端树构建保序消费即得兄弟序。
+type AssetTagListItem struct {
+	ID        int64  `json:"id"`        // 标签 ID
+	Name      string `json:"name"`      // 标签名（库内唯一）
+	Color     string `json:"color"`     // 展示色（#RRGGBB）
+	ParentID  int64  `json:"parentId"`  // 父标签 ID，0 = 根标签
+	Count     int    `json:"count"`     // 直接绑定计数（文件绑定 + 页自有绑定行数之和）
+	SortOrder int    `json:"sortOrder"` // 同父兄弟内展示序号（拖拽排序契约，PRD D8#1）
+}
+
 // 素材检索条目类型标记（AssetSearchHit.RefType 取值，普通 string 常量非具名
 // 类型，不经 Wails 绑定层别名机制）。
 const (
@@ -158,9 +214,9 @@ type AssetSearchOptions struct {
 	// SlideTagOnlyOwn 标签筛选继承开关（仅作用于标签筛选，关键词命中不受影响；
 	// 文件条目不受影响）：false（默认，向后兼容）= 幻灯片条目【页自身标签 ∪ 归属
 	// 文件标签】合并命中；true = 幻灯片条目仅页自身标签命中。
-	SlideTagOnlyOwn bool    `json:"slideTagOnlyOwn"`
-	Limit           int     `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
-	Offset          int     `json:"offset"` // 分页偏移（<0 按 0 处理）
+	SlideTagOnlyOwn bool `json:"slideTagOnlyOwn"`
+	Limit           int  `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset          int  `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或

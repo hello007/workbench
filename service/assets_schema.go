@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 5
+const assetsSchemaVersion = 6
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -179,6 +179,31 @@ CREATE TABLE IF NOT EXISTS slide_meta (
 );
 `
 
+// assetsSchemaV6SQL v6 迁移：标签排序列（素材管理第六批真机增量，PRD D8#1
+// ——标签管理弹窗拖拽排序 + 跨父移动的数据基础）。
+//
+// 设计要点：
+//   - ALTER TABLE ADD COLUMN（SQLite 支持）：v1 基线 tags 表保持原样（若基线
+//     即含该列，本迁移对旧库会撞 duplicate column），新旧库统一经本迁移补列；
+//   - NOT NULL DEFAULT 0：列语义「同父兄弟内的展示序号」，0 起连续编号（moveTag
+//     每次落位后同组重排为 0..n-1，createTag/ensureTagTx 追加组尾 MAX+1）；
+//   - 迁移回填（纯 SQL 可完成，无 Go 层回填必要）：按迁移前的展示序「同父内按
+//     名称升序、同名按 id」（对齐 v5 及之前 listTagsWithCounts 的 ORDER BY name
+//     口径）为每个标签赋组内序号——升级后视觉顺序与迁移前完全一致，用户再拖拽
+//     自定义。回填公式 = 组内 (name, id) 序排名（相关子查询计数），仅随本版本
+//     执行一次（user_version 门禁），新库直建时 tags 为空表即天然空操作；
+//   - 平铺老数据（全 parent_id=NULL/0）回填后同组连续编号，行为与多级标签
+//     引入前一致。
+const assetsSchemaV6SQL = `
+ALTER TABLE tags ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+UPDATE tags SET sort_order = (
+	SELECT COUNT(*) FROM tags t2
+	WHERE COALESCE(t2.parent_id, 0) = COALESCE(tags.parent_id, 0)
+	  AND (t2.name < tags.name OR (t2.name = tags.name AND t2.id < tags.id))
+);
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -189,6 +214,7 @@ var assetsMigrations = map[int]string{
 	3: assetsSchemaV3SQL,
 	4: assetsSchemaV4SQL,
 	5: assetsSchemaV5SQL,
+	6: assetsSchemaV6SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态
