@@ -380,3 +380,37 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 122: 素材管理第六批：批量打标签与多级标签树（SRS §2.4）
+
+**Date**: 2026-10-16
+**Task**: 素材管理第六批：批量打标签与多级标签树（SRS §2.4）
+**Branch**: `master`
+
+### Summary
+
+批量打标签（AssetSelectionBar 入口，文件/幻灯片双模式，addTags/removeTags 双数组每条目一事务逐条目明细）+ 多级标签树（tags.parent_id 启用，ListAssetTags 独立 API，级联命中两路径同源展开）+ 标签管理弹窗（CRUD/级联删/防环/schema v6 sort_order 拖拽排序）。AssetTagTreeSelect 单组件三处复用；真机修复过滤浏览语境刷新链卡片全消（ensureFilteredSlidesLoaded 续拉兜底）；冒烟反馈四条（拖拽排序/平铺默认开/控件高度统一/radio 不堆叠）+ 小树默认全展开。spec 沉淀 assets-management.md §9 + CLAUDE.md v2.22。service 79.3%，前端 1813 用例，E2E 58 用例，两轮 cavecrew-reviewer 零实质缺陷。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `63b9d6b` | (see git log) |
+| `7362962` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
