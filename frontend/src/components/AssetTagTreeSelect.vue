@@ -35,6 +35,7 @@
     collapse-tags-tooltip
     show-checkbox
     check-strictly
+    :default-expand-all="defaultExpandAll"
     :render-after-expand="false"
     @visible-change="onVisibleChange"
     @change="onChange"
@@ -83,12 +84,19 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'change', 'loaded'])
 
+// 标签总数少于此阈值时下拉树默认全部展开（少量标签免逐级点开即可直达目标；
+// 达到阈值后保持默认收起，防长列表全展开刷屏）
+const DEFAULT_EXPAND_THRESHOLD = 20
+
 const flatTags = ref([])
 const loading = ref(false)
 // 拉取代次守卫：切库 / 连续重拉的旧响应写回前比对，代次已变丢弃（防旧库标签串入新库树）
 let fetchSeq = 0
 
 const treeData = computed(() => buildTagTree(flatTags.value))
+
+// 少量标签默认全部展开（免逐级点开），阈值见 DEFAULT_EXPAND_THRESHOLD
+const defaultExpandAll = computed(() => flatTags.value.length < DEFAULT_EXPAND_THRESHOLD)
 
 // modelValue 代理：整体写回新数组（消费方 v-model 直绑响应式 ref，保持禁原地
 // 变异的响应式纪律——口径与宿主 selectedKeys 的整体替换策略一致）

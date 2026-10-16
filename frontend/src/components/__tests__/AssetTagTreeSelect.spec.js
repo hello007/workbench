@@ -46,7 +46,7 @@ const ElTreeSelectStub = {
       <button class="stub-open" @click="$emit('visible-change', true)">展开下拉</button>
       <button class="stub-check" @click="$emit('update:modelValue', [1, 2]); $emit('change', [1, 2])">勾选</button>
     </div>`,
-  props: ['modelValue', 'data', 'placeholder', 'disabled', 'loading', 'multiple', 'filterable', 'clearable', 'showCheckbox', 'checkStrictly', 'renderAfterExpand', 'collapseTags', 'collapseTagsTooltip'],
+  props: ['modelValue', 'data', 'placeholder', 'disabled', 'loading', 'multiple', 'filterable', 'clearable', 'showCheckbox', 'checkStrictly', 'defaultExpandAll', 'renderAfterExpand', 'collapseTags', 'collapseTagsTooltip'],
   emits: ['update:modelValue', 'change', 'visible-change']
 }
 
@@ -74,6 +74,20 @@ describe('AssetTagTreeSelect', () => {
     // 子节点渲染在父节点内
     expect(roots[0].find('.stub-child-node').text()).toContain('城商行')
     expect(roots[1].text()).toContain('方案')
+  })
+
+  it('标签总数少于阈值（20）时下拉树默认全部展开，达到阈值后保持收起', async () => {
+    // 少标签（mockTagList 3 个）：default-expand-all 透传为 true，免逐级点开
+    const few = await createWrapper()
+    expect(few.findComponent(ElTreeSelectStub).props('defaultExpandAll')).toBe(true)
+
+    // 达到阈值（20 个平铺标签）：保持默认收起，防长列表全展开刷屏
+    const manyTags = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1, name: `标签${i + 1}`, color: '#2563eb', parentId: 0, count: 0
+    }))
+    wailsMock.ListAssetTags.mockResolvedValue(manyTags)
+    const many = await createWrapper()
+    expect(many.findComponent(ElTreeSelectStub).props('defaultExpandAll')).toBe(false)
   })
 
   it('节点呈现：色点用标签色数据 + 直接绑定计数徽标仅 count>0 渲染', async () => {
