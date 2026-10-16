@@ -137,6 +137,26 @@ const mockSettings = {
   assets: { auto: true, smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1024, hdQuotaMB: 1024 }
 }
 
+// 保存的检索条件条目工厂（形状对齐 model.AssetSavedSearch 十四字段）：本库条目
+// 默认带全维条件（关键词 + 标签 + facet 大小档 + 两开关），供调取回填断言
+const savedSearchEntry = (overrides = {}) => ({
+  id: 1,
+  name: '近期高分',
+  libraryId: 'lib-1',
+  keyword: '获客',
+  tagIds: [2],
+  tagNames: ['方案'],
+  ratings: [4],
+  mtimeFrom: 0,
+  mtimeTo: 0,
+  sizeFrom: 50 * 1024 * 1024,
+  sizeTo: 0,
+  flatten: false,
+  slideTagOnlyOwn: true,
+  createdAt: '2026-10-16T09:00:00+08:00',
+  ...overrides
+})
+
 // vi.mock 工厂被 hoist，不能引用外部变量；用 vi.hoisted 提升可变的 mock 函数集合
 const { wailsMock } = vi.hoisted(() => ({
   wailsMock: {
@@ -152,6 +172,10 @@ const { wailsMock } = vi.hoisted(() => ({
     UpdateAssetFileMeta: vi.fn(),
     UpdateAssetSlideMeta: vi.fn(),
     SearchAssets: vi.fn(),
+    // 保存检索条件（第七批 PR3）：宿主直连三绑定（保存/调取/覆盖/删除）
+    ListAssetSavedSearches: vi.fn(),
+    SaveAssetSavedSearch: vi.fn(),
+    DeleteAssetSavedSearch: vi.fn(),
     // 标签树与标签管理（第六批）：宿主经树形选择组件间接消费 ListAssetTags
     //（本 spec 内该组件被打桩不实拉），Create/Update/Delete 为管理弹窗（同打桩）
     // 后端链，登记保证 mock 表完整性防漏 mock 报 undefined
@@ -314,6 +338,28 @@ const stubs = {
     template: '<div v-if="modelValue" class="asset-batch-tag-dialog-stub"></div>',
     props: ['modelValue', 'libraryId', 'targets', 'execute'],
     emits: ['update:modelValue', 'completed']
+  },
+  // facet 筛选弹层桩（第七批）：受控 emit 形态对齐真实组件（update:modelValue +
+  // change 双事件同步快照）。档位→检索参数换算为组件模块纯函数（独立 spec 以注入
+  // now 覆盖），本 spec 只断言宿主接线（SearchAssets 参数 / facets-only 链路切换 /
+  // 空态引导 / 语境清空点位）
+  AssetFilterPopover: {
+    name: 'AssetFilterPopoverStub',
+    template: '<div class="asset-filter-popover-stub"></div>',
+    props: ['modelValue', 'disabled'],
+    emits: ['update:modelValue', 'change']
+  },
+  // 保存检索条件弹层桩（第七批 PR3）：双 slot 全渲染（免触发机制直测内容）；
+  // mounted 即 emit show（真实弹层首次打开触发宿主 List 重拉，行数据因此加载）；
+  // hide 方法供调取后收起弹层的可选调用（真实 EP popover 实例方法）
+  'el-popover': {
+    template: '<div class="el-popover-stub"><slot name="reference" /><div class="el-popover-content"><slot /></div></div>',
+    props: ['placement', 'width', 'trigger', 'popperClass'],
+    emits: ['show'],
+    mounted() {
+      this.$emit('show')
+    },
+    methods: { hide() {} }
   }
 }
 
@@ -325,6 +371,15 @@ const createWrapper = async () => {
 
 const clickButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text().trim() === text)?.trigger('click')
+
+// facet 快照变更（真实弹层控件交互在组件独立 spec 覆盖）：update:modelValue 与
+// change 双事件同步（对齐真实组件 emitState 形态），change 触发宿主语境变更链
+const emitFacetChange = async (wrapper, state) => {
+  const stub = wrapper.findComponent({ name: 'AssetFilterPopoverStub' })
+  stub.vm.$emit('update:modelValue', state)
+  await stub.vm.$emit('change', state)
+  await flushPromises()
+}
 
 describe('AssetsPanel', () => {
   beforeEach(() => {
@@ -351,6 +406,10 @@ describe('AssetsPanel', () => {
     // 批量打标签（第六批 PR3）默认全成功空明细（形状对齐 model.AssetBatchTagResult）
     wailsMock.BatchUpdateAssetFileTags.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
     wailsMock.BatchUpdateAssetSlideTags.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
+    // 保存检索条件（第七批 PR3）默认值：空清单 + upsert 返回带 ID 对象 + 删除 no-op
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([])
+    wailsMock.SaveAssetSavedSearch.mockResolvedValue(savedSearchEntry())
+    wailsMock.DeleteAssetSavedSearch.mockResolvedValue(null)
     // 目录对话框默认空串 = 用户取消（安全 no-op）
     wailsMock.OpenDirectoryDialog.mockResolvedValue('')
     // ---- 缩略图（PR3）默认值：Available=false 走降级提示条 + 占位卡稳定路径，按用例覆盖 ----
@@ -486,6 +545,11 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      ratings: [],
+      mtimeFrom: 0,
+      mtimeTo: 0,
+      sizeFrom: 0,
+      sizeTo: 0,
       limit: 50,
       offset: 0
     })
@@ -590,6 +654,11 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      ratings: [],
+      mtimeFrom: 0,
+      mtimeTo: 0,
+      sizeFrom: 0,
+      sizeTo: 0,
       limit: 50,
       offset: 0
     })
@@ -605,6 +674,11 @@ describe('AssetsPanel', () => {
       flatten: false,
       tagIds: [],
       slideTagOnlyOwn: false,
+      ratings: [],
+      mtimeFrom: 0,
+      mtimeTo: 0,
+      sizeFrom: 0,
+      sizeTo: 0,
       limit: 50,
       offset: 0
     })
@@ -1086,6 +1160,11 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [1],
       slideTagOnlyOwn: true,
+      ratings: [],
+      mtimeFrom: 0,
+      mtimeTo: 0,
+      sizeFrom: 0,
+      sizeTo: 0,
       limit: 50,
       offset: 0
     })
@@ -2280,6 +2359,11 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      ratings: [],
+      mtimeFrom: 0,
+      mtimeTo: 0,
+      sizeFrom: 0,
+      sizeTo: 0,
       limit: 50,
       offset: 2
     })
@@ -3042,5 +3126,455 @@ describe('AssetsPanel', () => {
     // 双击后聚合展开态未被两次 click 语义误触发（dblclick 处理器 early return，
     // trigger('dblclick') 不派发 click，展开态保持收起）
     expect(wrapper.find('.agg-child').exists()).toBe(false)
+  })
+
+  // ---- facet 多维筛选（第七批 SRS §2.5 PR2）：双语境接入 / 链路切换 / 空态引导 /
+  // 语境清空点位。档位→参数换算纯函数（注入 now）在 AssetFilterPopover 独立 spec
+  // 覆盖，此处只断言宿主接线 ----
+
+  it('浏览语境 facet 激活：空关键词+facet 条件走 SearchAssets 分页链路（facets-only，D3）', async () => {
+    const wrapper = await createWrapper()
+    wailsMock.SearchAssets.mockClear()
+    await emitFacetChange(wrapper, {
+      ratings: [4],
+      mtimePreset: 'any',
+      mtimeRange: null,
+      sizePreset: '1to10'
+    })
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(1)
+    const [libId, keyword, opts] = wailsMock.SearchAssets.mock.calls[0]
+    expect(libId).toBe('lib-1')
+    expect(keyword).toBe('')
+    // facet 五字段由组件换算单点产出（大小档 1-10MB → 字节闭区间），其余检索参数原样
+    expect(opts.ratings).toEqual([4])
+    expect(opts.sizeFrom).toBe(1024 * 1024)
+    expect(opts.sizeTo).toBe(10 * 1024 * 1024 - 1)
+    expect(opts.mtimeFrom).toBe(0)
+    expect(opts.mtimeTo).toBe(0)
+    expect(opts.flatten).toBe(true)
+    expect(opts.tagIds).toEqual([])
+    expect(opts.limit).toBe(50)
+    expect(opts.offset).toBe(0)
+    // 检索链路接管渲染：统计行命中口径出现，文件视图下只显文件条目（聚合幻灯片卡被类型过滤）
+    expect(wrapper.find('.assets-stats-line').text()).toContain('命中 2 条')
+    expect(wrapper.findAll('.asset-card').length).toBe(1)
+  })
+
+  it('相对档「今天」在检索调用时换算为本地零点起的绝对纳秒区间（现算不冻结）', async () => {
+    const wrapper = await createWrapper()
+    await emitFacetChange(wrapper, { ratings: [], mtimePreset: 'today', mtimeRange: null, sizePreset: 'any' })
+    const opts = wailsMock.SearchAssets.mock.calls[0][2]
+    // 零点边界当日稳定（断言与调用时刻跨毫秒无竞争），上界为调用时刻
+    expect(opts.mtimeFrom).toBe(new Date(new Date().setHours(0, 0, 0, 0)).getTime() * 1e6)
+    expect(opts.mtimeTo).toBeGreaterThan(opts.mtimeFrom)
+    expect(opts.mtimeTo).toBeLessThanOrEqual(Date.now() * 1e6)
+  })
+
+  it('检索语境 facet 组合：关键词与 facet 条件并入同一次 SearchAssets', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    wailsMock.SearchAssets.mockClear()
+    await emitFacetChange(wrapper, { ratings: [0, 5], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    const [libId, keyword, opts] = wailsMock.SearchAssets.mock.calls[0]
+    expect(libId).toBe('lib-1')
+    expect(keyword).toBe('城商行')
+    expect(opts.ratings).toEqual([0, 5])
+    expect(opts.tagIds).toEqual([])
+  })
+
+  it('浏览语境 facet 清除：回底册链路（ListAssetFiles 重新加载，D3）', async () => {
+    const wrapper = await createWrapper()
+    await emitFacetChange(wrapper, { ratings: [4], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    expect(wrapper.find('.assets-stats-line').text()).toContain('命中')
+    const callsBefore = wailsMock.ListAssetFiles.mock.calls.length
+    await emitFacetChange(wrapper, { ratings: [], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBeGreaterThan(callsBefore)
+    // 底册重新成为数据源（浏览卡片全量回归，命中口径消失）
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('命中')
+  })
+
+  it('facet 激活零命中：空态文案 + 「清除全部筛选」一键复位 facet 与标签（D6）', async () => {
+    wailsMock.SearchAssets.mockResolvedValue({ items: [], total: 0, keyword: '', flattened: false })
+    const wrapper = await createWrapper()
+    // 先落一个标签筛选（一并验证「清除全部筛选」的标签复位面）
+    const tagSelect = wrapper.findComponent({ name: 'AssetTagTreeSelectStub' })
+    await tagSelect.vm.$emit('update:modelValue', [1])
+    await tagSelect.vm.$emit('change', [1])
+    await flushPromises()
+    await emitFacetChange(wrapper, { ratings: [3], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    const empty = wrapper.find('.el-empty')
+    expect(empty.text()).toContain('当前筛选条件下无命中，可调整筛选条件。')
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().trim() === '清除全部筛选')
+    expect(clearBtn).toBeTruthy()
+    await clearBtn.trigger('click')
+    await flushPromises()
+    // facet 快照与标签选择一并复位；关键词本就为空 → 全清回底册（空态消失）
+    const facetStub = wrapper.findComponent({ name: 'AssetFilterPopoverStub' })
+    expect(facetStub.props('modelValue')).toEqual({ ratings: [], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    expect(wrapper.findComponent({ name: 'AssetTagTreeSelectStub' }).props('modelValue')).toEqual([])
+    expect(wrapper.find('.el-empty').exists()).toBe(false)
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+  })
+
+  it('关键词仍在时「清除全部筛选」：facet+标签复位后退回关键词检索', async () => {
+    wailsMock.SearchAssets.mockResolvedValue({ items: [], total: 0, keyword: '', flattened: false })
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    wailsMock.SearchAssets.mockClear()
+    await emitFacetChange(wrapper, { ratings: [3], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    await clickButton(wrapper, '清除全部筛选')
+    await flushPromises()
+    // 两次调用 = facet 变更重查 + 清除全部筛选后退回关键词检索（关键词保留语义）
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(2)
+    const [, keyword, opts] = wailsMock.SearchAssets.mock.calls[1]
+    expect(keyword).toBe('城商行')
+    expect(opts.ratings).toEqual([])
+  })
+
+  it('facet 变更为语境变更点：关闭详情侧栏（复位面对齐检索条件变更同类点位）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    await emitFacetChange(wrapper, { ratings: [4], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+  })
+
+  it('双击文件卡进入过滤浏览：连 facet 一并复位（过滤浏览与检索/facet 语境互斥）', async () => {
+    const wrapper = await createWrapper()
+    await emitFacetChange(wrapper, { ratings: [4], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    wailsMock.ListAssetSlides.mockClear()
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+    // facet 已清 → searchMode 失效 → 幻灯片视图浏览链路接管（loadSlidesPage 首页）
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1', 50, 0)
+    const facetStub = wrapper.findComponent({ name: 'AssetFilterPopoverStub' })
+    expect(facetStub.props('modelValue').ratings).toEqual([])
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(true)
+  })
+
+  it('溯源跳转清 facet：直赋文件视图路径连 facet 一并复位（§8.2 矩阵登记点位）', async () => {
+    // 检索页固定单页独立幻灯片命中（hitCount=1，点击直达详情不经聚合展开）
+    wailsMock.SearchAssets.mockResolvedValue({
+      items: [
+        {
+          refType: 'slide',
+          refId: 21,
+          fileId: 11,
+          filePath: '方案A/城商行方案.pptx',
+          title: '封面页',
+          slideNum: 1,
+          snippet: '',
+          score: -1.0,
+          hitCount: 1,
+          tags: [mockTags[0]],
+          ownTags: [],
+          note: '',
+          rating: 0
+        }
+      ],
+      total: 1,
+      keyword: '城商行',
+      flattened: false
+    })
+    const wrapper = await createWrapper()
+    // 切幻灯片视图让命中幻灯片条目可见，再叠关键词与 facet（组合检索语境）
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await emitFacetChange(wrapper, { ratings: [4], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    await clickButton(wrapper, '查看归属文件')
+    await flushPromises()
+    // facet 复位 + 落到文件底册详情（溯源语义完整，画廊回底册文件清单）
+    const facetStub = wrapper.findComponent({ name: 'AssetFilterPopoverStub' })
+    expect(facetStub.props('modelValue')).toEqual({ ratings: [], mtimePreset: 'any', mtimeRange: null, sizePreset: 'any' })
+    expect(wrapper.find('.assets-detail').text()).toContain('城商行方案')
+    expect(wrapper.findAll('.asset-card').length).toBe(2)
+  })
+
+  // ---- 保存检索条件（第七批 SRS §2.5 PR3）：保存快照 D7 全维 / 命名校验与重名
+  // 拒绝透传 / 调取回填与异库按名重映射降级 / 本库异库分组管理 / 覆盖与删除链 ----
+
+  it('「保存搜索」入口可用性：非检索语境禁用，检索语境可用（浏览语境 facet 激活同样可保存）', async () => {
+    const wrapper = await createWrapper()
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().trim() === '保存搜索')
+    expect(saveBtn.attributes('disabled')).toBeDefined()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(saveBtn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('保存弹窗摘要预览：展示快照全维人读形态（facet 时间维为解析后的绝对区间，与还原口径一致）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await emitFacetChange(wrapper, {
+      ratings: [4],
+      mtimePreset: 'custom',
+      mtimeRange: [new Date(2026, 9, 1), new Date(2026, 9, 15)],
+      sizePreset: '1to10'
+    })
+    await clickButton(wrapper, '保存搜索')
+    const summary = wrapper.find('.save-search-summary')
+    expect(summary.text()).toContain('城商行')
+    expect(summary.text()).toContain('4 星')
+    expect(summary.text()).toContain('2026-10-01 ~ 2026-10-15')
+    expect(summary.text()).toContain('1-10MB')
+    expect(summary.text()).toContain('开启（命中逐页平铺）')
+    expect(summary.text()).toContain('仅幻灯片自身标签')
+  })
+
+  it('保存快照 D7 全维：SaveAssetSavedSearch 收到全字段（tagNames 冗余 + facet 区间原始值 + 两开关 + libraryId），成功后关弹窗并重拉清单', async () => {
+    const wrapper = await createWrapper()
+    // 组合语境：关键词 + 标签 + facet 三维（自定义区间）
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    const tagSelect = wrapper.findComponent({ name: 'AssetTagTreeSelectStub' })
+    await tagSelect.vm.$emit('update:modelValue', [1])
+    await tagSelect.vm.$emit('change', [1])
+    await flushPromises()
+    await emitFacetChange(wrapper, {
+      ratings: [4],
+      mtimePreset: 'custom',
+      mtimeRange: [new Date(2026, 9, 1), new Date(2026, 9, 15)],
+      sizePreset: '1to10'
+    })
+    // 切幻灯片视图开「仅幻灯片自身标签」+ 关平铺（快照全维覆盖）
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    const ownSwitch = wrapper.find('.slide-own-switch').findComponent(ElSwitchStub)
+    await ownSwitch.vm.$emit('update:modelValue', true)
+    await ownSwitch.vm.$emit('change', true)
+    await flushPromises()
+    const flattenSwitch = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitch.vm.$emit('update:modelValue', false)
+    await flattenSwitch.vm.$emit('change', false)
+    await flushPromises()
+
+    await clickButton(wrapper, '保存搜索')
+    await wrapper.find('.stub-dialog input').setValue('组合条件')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    expect(wailsMock.SaveAssetSavedSearch).toHaveBeenCalledTimes(1)
+    expect(wailsMock.SaveAssetSavedSearch).toHaveBeenCalledWith({
+      id: 0,
+      name: '组合条件',
+      libraryId: 'lib-1',
+      keyword: '城商行',
+      tagIds: [1],
+      tagNames: ['重点'],
+      ratings: [4],
+      mtimeFrom: new Date(2026, 9, 1).getTime() * 1e6,
+      mtimeTo: (new Date(2026, 9, 16).getTime() - 1) * 1e6,
+      sizeFrom: 1024 * 1024,
+      sizeTo: 10 * 1024 * 1024 - 1,
+      flatten: false,
+      slideTagOnlyOwn: true
+    })
+    expect(wrapper.find('.stub-dialog').exists()).toBe(false)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('检索条件已保存')
+    // 挂载 @show 重拉一次 + 保存成功重拉一次
+    expect(wailsMock.ListAssetSavedSearches).toHaveBeenCalledTimes(2)
+  })
+
+  it('保存名称必填校验：空名不调 Save 仅警告', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await clickButton(wrapper, '保存搜索')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.warning).toHaveBeenCalledWith('请输入保存条件名称')
+    expect(wailsMock.SaveAssetSavedSearch).not.toHaveBeenCalled()
+  })
+
+  it('重名保存被后端拒绝：错误 toast 透传且弹窗保持打开（用户可改名重试）', async () => {
+    wailsMock.SaveAssetSavedSearch.mockRejectedValue({
+      message: '已存在同名保存条件「组合条件」，请换一个名称或直接覆盖原条件'
+    })
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await clickButton(wrapper, '保存搜索')
+    await wrapper.find('.stub-dialog input').setValue('组合条件')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.error).toHaveBeenCalledWith(
+      '保存检索条件失败: 已存在同名保存条件「组合条件」，请换一个名称或直接覆盖原条件'
+    )
+    expect(wrapper.find('.stub-dialog').exists()).toBe(true)
+  })
+
+  it('已存搜索弹层按库分组：本库条件可覆盖（非检索语境禁用），其他库条目标注库名且覆盖恒禁用（D4 全局存储带库归属）', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { id: 'lib-2', name: '市场素材库', rootPath: 'D:/market', createdAt: '', updatedAt: '' }
+    ])
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([
+      savedSearchEntry({ id: 1, name: '本库条件A' }),
+      savedSearchEntry({ id: 2, name: '本库条件B' }),
+      savedSearchEntry({ id: 3, name: '他库条件', libraryId: 'lib-2', tagIds: [9], tagNames: [] })
+    ])
+    const wrapper = await createWrapper()
+    const groups = wrapper.findAll('.saved-search-group')
+    expect(groups.length).toBe(2)
+    expect(groups[0].text()).toContain('本库条件')
+    expect(groups[0].text()).toContain('本库条件A')
+    expect(groups[0].text()).toContain('本库条件B')
+    expect(groups[1].text()).toContain('其他库条件')
+    expect(groups[1].text()).toContain('他库条件')
+    // 异库条目标注归属库名（库注册表命中）
+    expect(groups[1].find('.saved-search-lib-mark').text()).toBe('市场素材库')
+    // 非检索语境：本库覆盖禁用（无可快照条件）
+    const ownOverwrite = groups[0].findAll('button').find((b) => b.text().trim() === '覆盖')
+    expect(ownOverwrite.attributes('disabled')).toBeDefined()
+    // 异库覆盖恒禁用（覆盖会按当前库重写条目 libraryId 使条目静默搬家）
+    const otherOverwrite = groups[1].findAll('button').find((b) => b.text().trim() === '覆盖')
+    expect(otherOverwrite.attributes('disabled')).toBeDefined()
+  })
+
+  it('调取本库条目：全维条件回填并触发检索链（keyword/tagIds/两开关/facet 快照反推，D7 完整还原）', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([
+      savedSearchEntry({
+        id: 7,
+        name: '组合条件',
+        keyword: '获客',
+        tagIds: [2],
+        tagNames: ['方案'],
+        ratings: [4],
+        mtimeFrom: 0,
+        mtimeTo: 0,
+        sizeFrom: 50 * 1024 * 1024,
+        sizeTo: 0,
+        flatten: false,
+        slideTagOnlyOwn: true
+      })
+    ])
+    const wrapper = await createWrapper()
+    wailsMock.SearchAssets.mockClear()
+    await clickButton(wrapper, '组合条件')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(1)
+    const [libId, keyword, opts] = wailsMock.SearchAssets.mock.calls[0]
+    expect(libId).toBe('lib-1')
+    expect(keyword).toBe('获客')
+    expect(opts.tagIds).toEqual([2])
+    expect(opts.slideTagOnlyOwn).toBe(true)
+    expect(opts.flatten).toBe(false)
+    expect(opts.ratings).toEqual([4])
+    // gt50 档快照区间经反推回 UI 档位后检索参数与保存值一致（round-trip）
+    expect(opts.sizeFrom).toBe(50 * 1024 * 1024)
+    expect(opts.sizeTo).toBe(0)
+    expect(opts.mtimeFrom).toBe(0)
+    expect(opts.mtimeTo).toBe(0)
+    // 关键词输入框回填（后续手动改词在此基础上）
+    expect(wrapper.find('input').element.value).toBe('获客')
+  })
+
+  it('调取异库条目：tagIds 失效按 tagNames 重映射（miss 丢弃计数提示，关键词/facet 照回填，D4 降级）', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([
+      savedSearchEntry({
+        id: 8,
+        name: '他库条件',
+        libraryId: 'lib-other',
+        keyword: '方案',
+        tagIds: [77, 88],
+        tagNames: ['重点', '不存在的标签'],
+        ratings: [5]
+      })
+    ])
+    const wrapper = await createWrapper()
+    wailsMock.SearchAssets.mockClear()
+    const applyBtn = wrapper.findAll('.saved-search-apply').find((b) => b.text().includes('他库条件'))
+    await applyBtn.trigger('click')
+    await flushPromises()
+    // 「重点」在当前库标签表命中 id=1，「不存在的标签」miss 丢弃并计数提示；
+    // tagIds [77,88] 属保存时所在库不直接复用
+    const [, keyword, opts] = wailsMock.SearchAssets.mock.calls[0]
+    expect(keyword).toBe('方案')
+    expect(opts.tagIds).toEqual([1])
+    expect(opts.ratings).toEqual([5])
+    expect(opts.slideTagOnlyOwn).toBe(true)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.warning).toHaveBeenCalledWith('1 个标签在当前库不存在，已忽略')
+  })
+
+  it('调取为语境变更点：关闭详情侧栏并清空选中（§8.2 矩阵「保存条件调取」点位，复位面由 applySearch 统一执行）', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([
+      savedSearchEntry({ id: 3, name: '条件C', keyword: '城商行', ratings: [], sizeFrom: 0, sizeTo: 0 })
+    ])
+    const wrapper = await createWrapper()
+    // 建立详情与选中态
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+    await clickButton(wrapper, '条件C')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+  })
+
+  it('覆盖更新：以当前检索条件 Save 同 id（名称沿用原名），成功后重拉清单', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([savedSearchEntry({ id: 5, name: '旧条件', keyword: '旧词' })])
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('新关键词')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    await clickButton(wrapper, '覆盖')
+    await flushPromises()
+    expect(wailsMock.SaveAssetSavedSearch).toHaveBeenCalledTimes(1)
+    const arg = wailsMock.SaveAssetSavedSearch.mock.calls[0][0]
+    expect(arg.id).toBe(5)
+    expect(arg.name).toBe('旧条件')
+    expect(arg.keyword).toBe('新关键词')
+    expect(arg.libraryId).toBe('lib-1')
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已覆盖更新「旧条件」')
+    // 挂载 @show 重拉一次 + 覆盖成功重拉一次
+    expect(wailsMock.ListAssetSavedSearches).toHaveBeenCalledTimes(2)
+  })
+
+  it('删除保存条件：确认弹窗后 Delete 并重拉清单', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([savedSearchEntry({ id: 9, name: '待删除' })])
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '删除')
+    await flushPromises()
+    const { ElMessageBox } = await import('element-plus')
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      '确定删除保存的检索条件「待删除」？',
+      '删除保存条件',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    expect(wailsMock.DeleteAssetSavedSearch).toHaveBeenCalledWith(9)
+    expect(ElMessageBox.confirm.mock.calls.length).toBeGreaterThan(0)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已删除')
+    // 挂载 @show 重拉一次 + 删除成功重拉一次
+    expect(wailsMock.ListAssetSavedSearches).toHaveBeenCalledTimes(2)
   })
 })

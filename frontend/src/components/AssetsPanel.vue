@@ -37,6 +37,27 @@
      slideNum) 目标，禁 slides.id）；completed 触发刷新链（树重拉 + 底册重拉 +
      检索态重搜 + 幻灯片浏览清单补拉，双代次守卫防在途写回污染），选中保留
      （D5：数据变更点位非语境变更）。
+     facet 多维筛选（第七批 SRS §2.5 PR2）：工具行「筛选」弹层三维条件（星级/
+     修改时间/文件大小，文件维度口径，幻灯片条目继承归属文件属性判定）与关键
+     词/标签组合检索；浏览语境 facet 激活（任一维度生效）时放开「空关键词+空
+     标签返回空页」语义改走 SearchAssets 的 facets-only 分页链路（后端返回文件
+     条目，底册退位），清除后回底册。UI 档位快照宿主持有（facetState 受控），
+     档位→绝对纳秒/字节区间换算单点在 AssetFilterPopover 模块具名导出
+     （buildFacetOptions 每次检索调用时现算，相对档边界随检索时刻刷新）；facet
+     变更为数据过滤语境变更——清详情/预览/选中/文件过滤/聚合展开缓存后按检索
+     语境分流重查，清空点位登记见 docs/spec/assets-management.md §8.2。
+     保存检索条件（第七批 SRS §2.5 PR3，PRD D4/D7）：工具行「保存搜索」把当前
+     检索语境快照命名保存（检索语境与浏览语境 facet 激活组合均可保存——两者都
+     是合法检索条件，全空禁用），快照 = AssetSavedSearch 全维字段（keyword/
+     tagIds/tagNames 冗余/facet 区间原始值/flatten/slideTagOnlyOwn/libraryId）；
+     「已存搜索」弹层按本库/异库分组管理（行点击调取、覆盖 Save 同 id、删除确认
+     后 Delete，变更后 List 重拉）；调取完整还原检索语境（D7，facet 区间经
+     restoreFacetStateFromSnapshot 反推 UI 档位——相对档保存即冻结为绝对区间）
+     并走 applySearch 与手动改条件同路径（searchSeq 代次守卫天然覆盖，复位面由
+     其统一执行）；异库条目降级调取（D4）——tagIds 属保存时所在库不可复用，按
+     tagNames 在当前库标签表重查 ID，miss 丢弃该标签并计数提示；覆盖会按当前库
+     重写条目 libraryId（静默搬家）故仅本库条目可覆盖。调取为语境变更点位
+     （§8.2 矩阵登记），命名弹窗重名拒绝由后端 Save 返回、handleError 透传。
      异步写回守卫：库代次（librarySeq）与检索代次（searchSeq）双序号，await 写回前
      比对，不一致丢弃旧响应（防切库在途/改词重搜的慢响应跨语境串入）。
      呈现维度（SRS §2.3 PR1）：displayMode 网格/列表两形态共用同一 displayCards
@@ -195,6 +216,103 @@
         @change="applySearch"
         @loaded="onAssetTagsLoaded"
       />
+      <!-- facet 多维筛选（第七批 SRS §2.5，D2/D3）：弹层三维控件（星级/修改时间/
+           文件大小），badge 常显生效维度数；受控组件——UI 档位快照宿主持有
+           （facetState），档位→检索参数换算在组件模块单点，检索时经
+           buildFacetOptions 现算并入 SearchAssets opts；change 触发语境变更链 -->
+      <AssetFilterPopover
+        v-model="facetState"
+        class="facet-filter"
+        :disabled="!hasLibrary"
+        @change="onFacetChange"
+      />
+      <!-- 保存检索条件（第七批 PR3，D7）：当前检索语境一键命名快照。检索语境
+           （关键词/标签）与浏览语境 facet 激活组合均可保存——两者都是合法检索
+           条件；全空（非检索语境）禁用，无可快照内容 -->
+      <el-button
+        size="small"
+        text
+        type="primary"
+        :disabled="!hasLibrary || !searchMode"
+        @click="openSaveSearchDialog"
+      >保存搜索</el-button>
+      <!-- 已存检索条件入口（D4 全局存储带库归属）：弹层按本库/异库分组列出，
+           行点击调取（异库按名重映射降级），行内覆盖/删除管理操作；打开即重拉
+           最新清单，变更后重拉（List 权威，本地不缓存增删） -->
+      <el-popover
+        ref="savedSearchPopoverRef"
+        placement="bottom-start"
+        :width="340"
+        trigger="click"
+        popper-class="asset-saved-search-popper"
+        @show="reloadSavedSearches"
+      >
+        <template #reference>
+          <el-button size="small" text type="primary" :disabled="!hasLibrary">已存搜索</el-button>
+        </template>
+        <div class="saved-search-panel">
+          <div v-if="savedSearchesLoading" class="saved-search-hint">加载中…</div>
+          <div v-else-if="savedSearches.length === 0" class="saved-search-hint">
+            暂无保存的检索条件，点「保存搜索」把当前条件存起来
+          </div>
+          <template v-else>
+            <div v-if="currentLibrarySavedSearches.length > 0" class="saved-search-group">
+              <div class="saved-search-group-title">本库条件</div>
+              <div v-for="item in currentLibrarySavedSearches" :key="item.id" class="saved-search-item">
+                <button
+                  type="button"
+                  class="saved-search-apply"
+                  :title="item.keyword ? `关键词：${item.keyword}` : '点击调取此条件'"
+                  @click="applySavedSearch(item)"
+                >{{ item.name }}</button>
+                <el-button
+                  size="small"
+                  text
+                  type="primary"
+                  :disabled="!canOverwriteSavedSearch(item)"
+                  :title="canOverwriteSavedSearch(item) ? '以当前检索条件覆盖此条目' : '覆盖需在条目所在库且当前有检索条件时可用'"
+                  @click="overwriteSavedSearch(item)"
+                >覆盖</el-button>
+                <el-button
+                  size="small"
+                  text
+                  type="danger"
+                  :disabled="savedSearchMutatingId !== 0"
+                  @click="deleteSavedSearch(item)"
+                >删除</el-button>
+              </div>
+            </div>
+            <div v-if="otherLibrarySavedSearches.length > 0" class="saved-search-group">
+              <div class="saved-search-group-title">其他库条件</div>
+              <div v-for="item in otherLibrarySavedSearches" :key="item.id" class="saved-search-item">
+                <button
+                  type="button"
+                  class="saved-search-apply"
+                  :title="`保存于「${savedSearchLibraryName(item)}」，调取时标签按名重映射`"
+                  @click="applySavedSearch(item)"
+                >
+                  {{ item.name }}
+                  <span class="saved-search-lib-mark">{{ savedSearchLibraryName(item) }}</span>
+                </button>
+                <el-button
+                  size="small"
+                  text
+                  type="primary"
+                  :disabled="true"
+                  title="覆盖会按当前库重写条目归属，请切换到条目所在库后操作"
+                >覆盖</el-button>
+                <el-button
+                  size="small"
+                  text
+                  type="danger"
+                  :disabled="savedSearchMutatingId !== 0"
+                  @click="deleteSavedSearch(item)"
+                >删除</el-button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </el-popover>
       <!-- 标签管理入口（PRD D6）：标签 CRUD 统一弹窗，筛选/详情编辑的标签消费点
            共用同一数据链路（弹窗变更后经 changed 事件触发宿主刷新链） -->
       <el-button size="small" text type="primary" :disabled="!hasLibrary" @click="openTagManager">
@@ -275,8 +393,11 @@
         >
           <el-button type="primary" @click="onScan">开始扫描</el-button>
         </el-empty>
-        <!-- 空态三：检索无结果（命中存在但被当前视图类型过滤时给切换引导） -->
-        <el-empty v-else-if="searchMode && !loading && displayCards.length === 0" :description="searchEmptyText" />
+        <!-- 空态三：检索无结果（命中存在但被当前视图类型过滤时给切换引导；facet
+             激活时零命中/视图过滤均给「清除全部筛选」一键复位，D6 两语境共用） -->
+        <el-empty v-else-if="searchMode && !loading && displayCards.length === 0" :description="searchEmptyText">
+          <el-button v-if="facetActiveCount > 0" @click="clearAllFilters">清除全部筛选</el-button>
+        </el-empty>
         <!-- 空态四：视图无数据（如幻灯片视图下未扫描/无页面） -->
         <el-empty v-else-if="hasLibrary && !loading && !searchMode && browseCards.length === 0 && stats && stats.fileCount > 0" description="该视图下暂无条目" />
 
@@ -768,6 +889,41 @@
       :execute="executeBatchTagUpdate"
       @completed="refreshAfterBatchTag"
     />
+
+    <!-- 保存检索条件命名弹窗（第七批 PR3，PRD D4/D7）：名称必填（重名拒绝由后端
+         Save 返回，handleError 透传 toast）；条件摘要预览展示快照全维（facet 时间
+         维展示解析后的绝对区间——相对档保存即冻结为区间，摘要与调取还原口径一致）。
+         小弹窗分档（min() 响应式，frontend-visual-conventions） -->
+    <el-dialog
+      v-model="saveSearchDialogVisible"
+      title="保存检索条件"
+      width="min(480px, 80vw)"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="条件名称">
+          <el-input
+            v-model="saveSearchForm.name"
+            placeholder="例如：近期高分方案"
+            maxlength="50"
+            :disabled="savingSearch"
+            @keyup.enter="onConfirmSaveSearch"
+          />
+        </el-form-item>
+      </el-form>
+      <div class="save-search-summary">
+        <div class="save-search-summary-title">将保存以下检索条件</div>
+        <div v-for="row in saveSearchSummaryRows" :key="row.label" class="save-search-summary-row">
+          <span class="save-search-summary-label">{{ row.label }}</span>
+          <span class="save-search-summary-value">{{ row.value }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="savingSearch" @click="saveSearchDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingSearch" @click="onConfirmSaveSearch">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -789,6 +945,9 @@ import {
   BatchUpdateAssetFileTags,
   BatchUpdateAssetSlideTags,
   SearchAssets,
+  ListAssetSavedSearches,
+  SaveAssetSavedSearch,
+  DeleteAssetSavedSearch,
   OpenDirectoryDialog,
   AssetThumbsAvailable,
   JumpToAssetSlide,
@@ -823,6 +982,17 @@ import AssetTagManagerDialog from './AssetTagManagerDialog.vue'
 // 批量打标签弹窗（第六批 PR3，PRD D3/D4/D5）：targets 构建与两批量 API 分派在宿主，
 // 弹窗不感知 viewMode（只收 targets 与 execute 分派回调）
 import AssetBatchTagDialog from './AssetBatchTagDialog.vue'
+// facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
+// 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
+// countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
+// 初始化与「清除全部筛选」复位（形态单一来源）
+import AssetFilterPopover, {
+  buildFacetOptions,
+  countActiveFacets,
+  createDefaultFacetState,
+  restoreFacetStateFromSnapshot,
+  describeFacetState
+} from './AssetFilterPopover.vue'
 // 标签管理入口按钮图标（EP 图标族，浅色工具条容器内用 el-icon 承载）
 import { CollectionTag } from '@element-plus/icons-vue'
 
@@ -885,6 +1055,14 @@ const selectedTagIds = ref([])
 // 标签筛选继承开关（SearchAssets opts.slideTagOnlyOwn）：false = 幻灯片条目【页自
 // 身标签 ∪ 归属文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中
 const slideTagOnlyOwn = ref(false)
+// facet 三维筛选快照（第七批 SRS §2.5，D1/D2/D3）：UI 档位形态的受控快照（组件
+// 受控、宿主持有），检索参数经 buildFacetOptions 在检索调用时现算——相对档边界
+// 随检索时刻刷新，禁在此缓存换算结果。星级/时间/大小为库无关条件，切库保留
+//（对齐关键词/标签跨库保留先例，见 watch(currentLibraryId) 注释与 §8.2 矩阵）
+const facetState = ref(createDefaultFacetState())
+// facet 生效维度数（0-3，badge 口径）：>0 即 searchMode 激活（浏览语境切
+// facets-only 分页链路，D3），与后端 assetsFacetFilter.active 判定口径对齐
+const facetActiveCount = computed(() => countActiveFacets(facetState.value))
 
 // ---- 数据 ----
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
@@ -957,9 +1135,12 @@ const galleryRef = ref(null)
 const hasLibrary = computed(() => !!currentLibrary.value)
 const currentLibrary = computed(() => libraries.value.find(l => l.id === currentLibraryId.value) || null)
 
-// 检索模式判定：关键词与标签任一非空（对齐后端「空查询返回空结果页」语义，
-// 前端直接不发起空检索，回落清单浏览）
-const searchMode = computed(() => activeKeyword.value.trim() !== '' || selectedTagIds.value.length > 0)
+// 检索模式判定：关键词/标签/facet 任一生效（对齐后端空查询语义重定义——无关键
+// 词无标签但有 facet 走 facets-only 文件清单路径，全空返回空结果页；前端 facet
+// 生效即不回落清单浏览，改走检索分页链路）
+const searchMode = computed(
+  () => activeKeyword.value.trim() !== '' || selectedTagIds.value.length > 0 || facetActiveCount.value > 0
+)
 
 const scanPercent = computed(() => {
   if (!scanProgress.value || !scanProgress.value.total) return 0
@@ -1006,6 +1187,8 @@ const detailSplitExists = computed(() => {
 // toast 误弹，onConfirmSplit 写回前比对）。
 watch(currentLibraryId, () => {
   splitSeq++
+  // facet 快照与关键词/标签同批保留（§8.2 矩阵登记）：星级/时间/大小为库无关
+  // 条件，切库落定后按检索语境在新库重查（facets-only 或组合检索随语境自然分流）
   closePreview() // 语境变更点：切库清预览（序列属库语境，驻留即串库页）
   clearSelection() // 语境变更点：切库清选中（键属库语境，驻留即幽灵选中，D5#2）
   fileFilterPath.value = '' // 语境变更点：切库清文件过滤（过滤目标属库内路径）
@@ -1247,6 +1430,185 @@ const refreshAfterBatchTag = async () => {
   }
 }
 
+// ---- 保存检索条件（第七批 SRS §2.5 PR3，PRD D4/D7）----
+
+const saveSearchDialogVisible = ref(false)
+const savingSearch = ref(false)
+const saveSearchForm = ref({ name: '' })
+// 已存清单（「已存搜索」弹层打开即重拉，变更后重拉——List 恒权威，本地不缓存增删）
+const savedSearches = ref([])
+const savedSearchesLoading = ref(false)
+const savedSearchPopoverRef = ref(null)
+// 行级防重占位：覆盖/删除在途条目 ID（0 = 空闲），防同条目连点重复提交
+const savedSearchMutatingId = ref(0)
+
+// 当前检索状态快照 → model.AssetSavedSearch 形态（D7 全维入快照）。tagNames 从
+// 共享标签列表按 id 反查冗余（与 tagIds 同序对应，映射 miss 的成对丢弃防两份数据
+// 错位——正常态 id 恒来自同一标签表不会 miss）；facet 三维经换算单点存区间原始值
+//（AssetSavedSearch 字段口径，ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo，调取时
+// 经 restoreFacetStateFromSnapshot 反推 UI 档位）；createdAt 由后端权威生成不传
+const buildSavedSearchSnapshot = (name, id = 0) => {
+  const tagPairs = selectedTagIds.value
+    .map(tagId => ({ tagId, name: tagNameById.value.get(tagId) }))
+    .filter(pair => pair.name)
+  return {
+    id,
+    name,
+    libraryId: currentLibraryId.value,
+    keyword: activeKeyword.value.trim(),
+    tagIds: tagPairs.map(pair => pair.tagId),
+    tagNames: tagPairs.map(pair => pair.name),
+    ...buildFacetOptions(facetState.value),
+    flatten: flatten.value,
+    slideTagOnlyOwn: slideTagOnlyOwn.value
+  }
+}
+
+const openSaveSearchDialog = () => {
+  saveSearchForm.value = { name: '' }
+  saveSearchDialogVisible.value = true
+}
+
+// 保存弹窗条件摘要（D7 预览面）：快照字段的人读形态，与 buildSavedSearchSnapshot
+// 同一状态源（activeKeyword/selectedTagIds/tagOptions/facetState/两开关），摘要与
+// 实存内容不会漂移；facet 摘要经 describeFacetState 单点产出
+const saveSearchSummaryRows = computed(() => {
+  const facetText = describeFacetState(facetState.value)
+  const tagNames = selectedTagIds.value
+    .map(id => tagNameById.value.get(id))
+    .filter(Boolean)
+  return [
+    { label: '关键词', value: activeKeyword.value.trim() || '无' },
+    { label: '标签', value: tagNames.length > 0 ? tagNames.join('、') : '无' },
+    { label: '星级', value: facetText.ratingText },
+    { label: '修改时间', value: facetText.mtimeText },
+    { label: '文件大小', value: facetText.sizeText },
+    { label: '平铺聚合', value: flatten.value ? '开启（命中逐页平铺）' : '关闭（同 PPT 命中折叠）' },
+    { label: '仅幻灯片自身标签', value: slideTagOnlyOwn.value ? '开启' : '关闭' }
+  ]
+})
+
+const onConfirmSaveSearch = async () => {
+  const name = saveSearchForm.value.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入保存条件名称')
+    return
+  }
+  savingSearch.value = true
+  try {
+    // 新增（id=0）走后端 upsert 新建分支：重名拒绝/名称校验由后端返回，经
+    // handleError 透传 toast（文案含换名或覆盖引导）
+    await SaveAssetSavedSearch(buildSavedSearchSnapshot(name))
+    ElMessage.success('检索条件已保存')
+    saveSearchDialogVisible.value = false
+    await reloadSavedSearches()
+  } catch (error) {
+    handleError('保存检索条件失败: ', error)
+  } finally {
+    savingSearch.value = false
+  }
+}
+
+const reloadSavedSearches = async () => {
+  savedSearchesLoading.value = true
+  try {
+    savedSearches.value = (await ListAssetSavedSearches()) || []
+  } catch (error) {
+    handleError('加载保存的检索条件失败: ', error)
+  } finally {
+    savedSearchesLoading.value = false
+  }
+}
+
+// 本库/异库分组（D4 全局存储带 libraryId）：本库组可调取可覆盖；异库组仅调取
+//（降级）与删除——覆盖以当前检索状态整体替换条目并按当前库重写 libraryId，
+// 在异库语境操作会让条目静默搬家，禁用（见弹层按钮 title 说明）
+const currentLibrarySavedSearches = computed(() =>
+  savedSearches.value.filter(item => item.libraryId === currentLibraryId.value)
+)
+const otherLibrarySavedSearches = computed(() =>
+  savedSearches.value.filter(item => item.libraryId !== currentLibraryId.value)
+)
+
+// 异库条目的归属库名展示（库已删除时降级「未知库」——注册表已无该 ID）
+const savedSearchLibraryName = (item) =>
+  libraries.value.find(lib => lib.id === item.libraryId)?.name || '未知库'
+
+// 覆盖可用性：有检索条件（可快照）+ 本库条目 + 无在途行级变更
+const canOverwriteSavedSearch = (item) =>
+  searchMode.value &&
+  item.libraryId === currentLibraryId.value &&
+  savedSearchMutatingId.value === 0
+
+// 调取保存条件：完整还原检索语境（D7）——关键词/标签/facet/平铺/仅自身标签回填
+// 后走 applySearch 与手动改条件同路径（searchSeq 代次守卫 + 清详情/预览/选中/文件
+// 过滤/聚合展开缓存复位面由其统一执行，§8.2 矩阵登记「保存条件调取」点位）。
+// 异库条目降级（D4）：tagIds 属保存时所在库不可复用，按 tagNames 在当前库标签表
+// 重查 ID，miss 丢弃该标签并计数提示；同库条目 tagIds 直接可用（保存时所在库即
+// 当前库，标签删除导致的陈旧 ID 由检索零命中自然呈现，可手动清除）
+const applySavedSearch = async (item) => {
+  let tagIds
+  if (item.libraryId === currentLibraryId.value) {
+    tagIds = Array.isArray(item.tagIds) ? [...item.tagIds] : []
+  } else {
+    const names = Array.isArray(item.tagNames) ? item.tagNames : []
+    const remapped = names
+      .map(name => tagIdByName.value.get(name))
+      .filter(id => id != null)
+    if (remapped.length < names.length) {
+      ElMessage.warning(`${names.length - remapped.length} 个标签在当前库不存在，已忽略`)
+    }
+    tagIds = remapped
+  }
+  keywordInput.value = item.keyword || ''
+  selectedTagIds.value = tagIds
+  slideTagOnlyOwn.value = !!item.slideTagOnlyOwn
+  flatten.value = !!item.flatten
+  facetState.value = restoreFacetStateFromSnapshot(item)
+  // 调取后面板收起（结果区让位）；桩环境无该方法时静默跳过
+  savedSearchPopoverRef.value?.hide?.()
+  await applySearch()
+}
+
+// 覆盖更新：以当前检索状态快照整体替换条目内容（Save 同 id 走后端更新分支，
+// 名称沿用条目原名——MVP 无改名语义，createdAt 由后端保留原值）
+const overwriteSavedSearch = async (item) => {
+  if (!canOverwriteSavedSearch(item)) return
+  savedSearchMutatingId.value = item.id
+  try {
+    await SaveAssetSavedSearch(buildSavedSearchSnapshot(item.name, item.id))
+    ElMessage.success(`已覆盖更新「${item.name}」`)
+    await reloadSavedSearches()
+  } catch (error) {
+    handleError('覆盖更新失败: ', error)
+  } finally {
+    savedSearchMutatingId.value = 0
+  }
+}
+
+const deleteSavedSearch = async (item) => {
+  if (savedSearchMutatingId.value !== 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除保存的检索条件「${item.name}」？`,
+      '删除保存条件',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  savedSearchMutatingId.value = item.id
+  try {
+    await DeleteAssetSavedSearch(item.id)
+    ElMessage.success('已删除')
+    await reloadSavedSearches()
+  } catch (error) {
+    handleError('删除保存条件失败: ', error)
+  } finally {
+    savedSearchMutatingId.value = 0
+  }
+}
+
 // ---- 卡片视图模型 ----
 // 浏览模式卡片（清单数据），检索模式卡片（命中条目）统一为同构形态供画廊渲染
 const browseCards = computed(() => {
@@ -1332,10 +1694,19 @@ const filteredSlideCount = computed(() =>
 // 检索空态文案：命中存在但当前视图类型过滤后为空时给引导。审核 11 的最小改法
 // 取舍——选引导文案而非把 searchTotal 改为按视图过滤口径：searchTotal 同时驱动
 // 懒加载判定（canLoadMore 依赖后端混合类型 total），改口径会破坏分页判定；切换
-// 视图 / 开启平铺即可见全部命中，文案引导直达。
+// 视图 / 开启平铺即可见全部命中，文案引导直达。facets-only 语境（无关键词无标签
+// 纯 facet）后端只返回文件条目，幻灯片视图下恒空——文案直达「切文件视图」（平铺
+// /幻灯片视图对该路径无意义）；facet 激活零命中给「调整筛选条件」文案（D6，配套
+// 空态模板的「清除全部筛选」按钮，两语境共用同一空态）。
 const searchEmptyText = computed(() => {
   if (searchTotal.value > 0) {
+    if (activeKeyword.value.trim() === '' && selectedTagIds.value.length === 0) {
+      return `已按当前筛选条件命中 ${searchTotal.value} 个文件，切换到「文件视图」查看`
+    }
     return `已命中 ${searchTotal.value} 条，但当前视图类型下没有可展示条目，试试切换文件/幻灯片视图或开启「平铺」`
+  }
+  if (facetActiveCount.value > 0) {
+    return '当前筛选条件下无命中，可调整筛选条件。'
   }
   return '没有匹配的素材，换个关键词或筛选条件试试'
 })
@@ -1547,6 +1918,47 @@ const applySearch = async () => {
   await runSearch(true)
 }
 
+// facet 变更（弹层三维任一调整，双语境共用入口，D3）：数据过滤语境变更——复位面
+// 对齐 applySearch 同类点位（清详情/预览/选中/文件过滤/聚合展开缓存），检索语境
+// （关键词/标签在）并入组合重查；浏览语境 facet 激活切 facets-only 分页链路
+//（SearchAssets 空关键词+空标签+facet，后端返回文件条目，底册退位）、facet 清除
+// 回底册。代次守卫：searchSeq 先自增使在途检索写回失效，runSearch 内部快照比对
+const onFacetChange = async () => {
+  searchSeq++ // 语境变更点：facet 变更使在途检索写回失效
+  closeDetail()
+  closePreview() // 语境变更点：facet 变更清预览（命中序列已变）
+  clearSelection() // 语境变更点：数据过滤语境变更清选中（§8.2 同类点位先例）
+  fileFilterPath.value = '' // 语境变更点：facet 与文件过滤互斥（对齐检索语境同款语义）
+  expandedAggPaths.value = []
+  aggChildren.value = {}
+  aggLoadingPaths.value = []
+  if (searchMode.value) {
+    await runSearch(true)
+  } else {
+    await loadView()
+  }
+}
+
+// 清除全部筛选（空态引导按钮，D6）：facet + 标签一键复位（关键词保留——属「搜索」
+// 非「筛选」，仍在则回关键词检索，全清回底册）。复位面对齐 onFacetChange 同批点位
+const clearAllFilters = async () => {
+  searchSeq++ // 语境变更点：筛选条件清空使在途检索写回失效
+  facetState.value = createDefaultFacetState()
+  selectedTagIds.value = []
+  closeDetail()
+  closePreview() // 语境变更点：筛选清空清预览（命中序列已变）
+  clearSelection() // 语境变更点：检索语境变更清选中（§8.2 同类点位先例）
+  fileFilterPath.value = '' // 语境变更点：对齐检索语境变更同批清空文件过滤
+  expandedAggPaths.value = []
+  aggChildren.value = {}
+  aggLoadingPaths.value = []
+  if (searchMode.value) {
+    await runSearch(true)
+  } else {
+    await loadView()
+  }
+}
+
 // 检索执行：reset=true 复位分页从头加载；false 追加下一页（懒加载）。
 // 检索代次守卫：语境变更点已自增 searchSeq，此处捕获当前值，写回前比对，不一致
 // （期间改词重搜/切库/刷新）丢弃旧响应，防慢响应把旧语境结果串入新视图。
@@ -1563,6 +1975,9 @@ const runSearch = async (reset) => {
       flatten: flatten.value,
       tagIds: selectedTagIds.value,
       slideTagOnlyOwn: slideTagOnlyOwn.value,
+      // facet 三维条件（第七批）：检索调用时经换算单点现算（相对档边界随检索
+      // 时刻刷新），spread 展开 ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo 五字段
+      ...buildFacetOptions(facetState.value),
       limit: PAGE_SIZE,
       offset: reset ? 0 : searchItems.value.length
     })
@@ -1743,6 +2158,9 @@ const toggleAgg = async (filePath) => {
     flattenAtStart !== flatten.value ||
     onlyOwnAtStart !== slideTagOnlyOwn.value
   try {
+    // 聚合子项查询刻意不带 facet 条件（第七批）：facet 为文件维度判定，聚合父卡
+    // 能出现即归属文件已通过 facet 筛选，同文件全部页继承同一判定结果——带上
+    // facet 是语义 no-op，省一次重复换算；关键词/标签/平铺/仅自身标签仍需携带
     const page = await SearchAssets(currentLibraryId.value, keywordAtStart, {
       flatten: true,
       tagIds: tagsAtStart,
@@ -1870,6 +2288,7 @@ const filterByFile = async (card) => {
     activeKeyword.value = ''
     keywordInput.value = ''
     selectedTagIds.value = []
+    facetState.value = createDefaultFacetState() // 语境变更点：过滤浏览与检索/facet 语境互斥，连 facet 一并复位（§8.2 矩阵登记）
     expandedAggPaths.value = []
     aggChildren.value = {}
     aggLoadingPaths.value = []
@@ -2123,6 +2542,7 @@ const traceToSourceFile = async () => {
   activeKeyword.value = ''
   keywordInput.value = ''
   selectedTagIds.value = []
+  facetState.value = createDefaultFacetState() // 语境变更点：直赋路径不经 applySearch，facet 须在此一并复位（§8.2 矩阵登记）
   viewMode.value = 'file'
   closeDetail()
   closePreview() // 语境变更点：溯源切文件视图清预览（文件视图无预览序列）
@@ -2813,6 +3233,75 @@ defineExpose({ loadLibraries, refreshAfterScan })
   width: 220px;
 }
 
+/* facet 筛选弹层触发按钮（badge 包裹）：工具行内联对齐，badge 上标不破坏基线 */
+.facet-filter {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- 保存检索条件弹层（第七批 PR3）：本库/异库分组 + 条目行（名称可点调取 +
+     行内覆盖/删除）。弹层内容由本组件渲染（EP popper 传送后仍带 scoped 标记，
+     对齐 AssetFilterPopover 弹层样式先例） ---- */
+.saved-search-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs);
+}
+
+.saved-search-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: var(--spacing-xs) 0;
+}
+
+.saved-search-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.saved-search-group-title {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.saved-search-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+/* 条目名称按钮：原生 button 承载点击调取（长名截断防撑破弹层），hover 主色反馈 */
+.saved-search-apply {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: color var(--transition-fast);
+}
+
+.saved-search-apply:hover {
+  color: var(--primary-color);
+}
+
+.saved-search-lib-mark {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 .flatten-switch {
   display: flex;
   align-items: center;
@@ -3248,6 +3737,44 @@ defineExpose({ loadLibraries, refreshAfterScan })
   margin-left: var(--spacing-sm);
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* ---- 保存检索条件弹窗摘要（第七批 PR3）：内嵌弱化区（bg-tertiary 第三层）承载
+     快照全维预览，标签列固定宽对齐标签值列 ---- */
+.save-search-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  margin: 0 var(--spacing-md) var(--spacing-sm);
+}
+
+.save-search-summary-title {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.save-search-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  font-size: 12px;
+}
+
+.save-search-summary-label {
+  flex-shrink: 0;
+  width: 110px;
+  color: var(--text-tertiary);
+}
+
+.save-search-summary-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-all;
 }
 
 /* ---- 拆分确认弹窗与结果明细 ---- */

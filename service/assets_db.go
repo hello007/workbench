@@ -972,15 +972,24 @@ type tagFilteredFileOrdering struct {
 }
 
 // listTagFilteredFiles 纯标签浏览的文件条目序（keyword 为空时的数据源）。
-func (s *assetsStore) listTagFilteredFiles(tagIDs []int64) ([]tagFilteredFileOrdering, error) {
+// facet 非空时在标签子查询之外追加 facet 条件（同表列判定，单点构造见
+// assetsFacetFilter.whereClause）。
+func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFilter) ([]tagFilteredFileOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
 	args := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
 		args = append(args, id)
 	}
+	facetClause := ""
+	if facet != nil {
+		var facetArgs []any
+		facetClause, facetArgs = facet.whereClause("f.")
+		args = append(args, facetArgs...)
+	}
 	rows, err := s.db.Query(
 		"SELECT f.id, f.path FROM files f WHERE f.status = ? AND f.id IN "+
-			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+")) ORDER BY f.path",
+			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+"))"+
+			facetClause+" ORDER BY f.path",
 		append([]any{model.AssetFileStatusOK}, args...)...)
 	if err != nil {
 		return nil, err
@@ -1009,29 +1018,39 @@ type tagFilteredSlideOrdering struct {
 // 文件绑定 ∪ 页自身绑定】命中，onlyOwn=true 仅页自身绑定——与 FTS 检索路径的
 // slideTagRowMatches 同一语义，SQL 子查询与 slideOwnTagFilterSet 同源）。
 // onlyOwn 时文件绑定分支整段裁剪（仅页自身标签语义）。
-func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool) ([]tagFilteredSlideOrdering, error) {
+// facet 非空时对归属文件列追加 facet 条件（幻灯片条目按归属文件属性继承判定，
+// 已 JOIN files，单点构造见 assetsFacetFilter.whereClause）。
+func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet *assetsFacetFilter) ([]tagFilteredSlideOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
 	baseArgs := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
 		baseArgs = append(baseArgs, id)
 	}
+	facetClause := ""
+	var facetArgs []any
+	if facet != nil {
+		facetClause, facetArgs = facet.whereClause("f.")
+	}
 	// 双子查询形态的参数序：status 占位 + 文件绑定子查询标签参数 + 页自身绑定
-	// 子查询标签参数（placeholders 构造复用现有形态）
+	// 子查询标签参数 + facet 条件参数（facetClause 位于两类标签子查询之后，参数
+	// 须随 SQL 片段位置收尾——placeholders 构造复用现有形态）
 	query := "SELECT s.id, s.file_id, f.path, s.slide_num FROM slides s JOIN files f ON f.id = s.file_id "
 	var args []any
 	if onlyOwn {
 		query += "WHERE f.status = ? AND (s.file_id, s.slide_num) IN " +
-			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + ")) " +
-			"ORDER BY f.path, s.slide_num"
+			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + "))" +
+			facetClause + " ORDER BY f.path, s.slide_num"
 		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
+		args = append(args, facetArgs...)
 	} else {
 		query += "WHERE f.status = ? AND (s.file_id IN " +
 			"(SELECT file_id FROM file_tags WHERE tag_id IN (" + placeholders + ")) OR " +
 			"(s.file_id, s.slide_num) IN " +
-			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + "))) " +
-			"ORDER BY f.path, s.slide_num"
+			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + ")))" +
+			facetClause + " ORDER BY f.path, s.slide_num"
 		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
 		args = append(args, baseArgs...)
+		args = append(args, facetArgs...)
 	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -1379,4 +1398,167 @@ func (s *assetsStore) listOKFileSplitSources() ([]assetSplitSource, error) {
 		sources = append(sources, src)
 	}
 	return sources, rows.Err()
+}
+
+// ---------- facet 多维筛选（SRS §2.5，文件维度 + 幻灯片条目继承归属文件属性） ----------
+
+// assetsFacetFilter facet 三维筛选条件（星级/修改时间/文件大小，文件级口径）。
+// 单点持有条件语义与 SQL 片段构造：keyword 路径（经 filterFileIDsByFacet 批量
+// 判定 FTS 命中文件集合）、tagsOnly 路径（listTagFilteredFiles/listTagFilteredSlides
+// SQL 追加）、facets-only 路径（listFacetFilteredFiles）三条 SQL 路径全部消费
+// whereClause 的同一构造，禁在单一路径内自行拼条件（口径分叉 = 判定不一致）。
+//
+// 继承规则（SRS §2.5 D1）：三 facet 均为文件维度——文件条目按自身属性判定，
+// 幻灯片条目按归属文件属性判定（页级评分 slide_meta.rating 纯展示不参与筛选，
+// 与修改时间/文件大小口径一致）。
+type assetsFacetFilter struct {
+	ratings   []int64 // nil = 不筛选；含 0 = 未评分（rating=0），非零值等值匹配
+	mtimeFrom int64   // 纳秒时间戳，0 = 不设下界
+	mtimeTo   int64   // 纳秒时间戳，0 = 不设上界
+	sizeFrom  int64   // 字节，0 = 不设下界
+	sizeTo    int64   // 字节，0 = 不设上界
+}
+
+// newAssetsFacetFilter 从检索入参提取 facet 条件；未启用任何 facet 返回 nil
+// （调用方零行为变化，SQL 不追加条件）。
+func newAssetsFacetFilter(opts model.AssetSearchOptions) *assetsFacetFilter {
+	f := &assetsFacetFilter{
+		ratings:   opts.Ratings,
+		mtimeFrom: opts.MtimeFrom,
+		mtimeTo:   opts.MtimeTo,
+		sizeFrom:  opts.SizeFrom,
+		sizeTo:    opts.SizeTo,
+	}
+	if !f.active() {
+		return nil
+	}
+	return f
+}
+
+// active 判定是否启用了任一 facet 条件（Ratings 空切片与 nil 同义 = 不筛选）。
+func (f *assetsFacetFilter) active() bool {
+	return f != nil && (len(f.ratings) > 0 || f.mtimeFrom != 0 || f.mtimeTo != 0 || f.sizeFrom != 0 || f.sizeTo != 0)
+}
+
+// whereClause facet 条件 SQL 片段构造（单点）：colPrefix 为列限定前缀（join
+// 语境的表别名，如 "f."；无别名查询传 ""）。返回追加在 WHERE 后的片段（已带
+// AND 前导，恒非空——仅 active 时调用）与按序参数。Rating 空切片不产生条件，
+// 含 0 走 rating=0 分支（未评分语义）。
+func (f *assetsFacetFilter) whereClause(colPrefix string) (string, []any) {
+	var b strings.Builder
+	var args []any
+	if len(f.ratings) > 0 {
+		nonZero := make([]int64, 0, len(f.ratings))
+		hasZero := false
+		for _, r := range f.ratings {
+			if r == 0 {
+				hasZero = true
+			} else {
+				nonZero = append(nonZero, r)
+			}
+		}
+		switch {
+		case hasZero && len(nonZero) == 0:
+			b.WriteString(" AND " + colPrefix + "rating = 0")
+		case hasZero:
+			b.WriteString(" AND (" + colPrefix + "rating = 0 OR " + colPrefix + "rating IN (" +
+				strings.TrimSuffix(strings.Repeat("?, ", len(nonZero)), ", ") + "))")
+			for _, r := range nonZero {
+				args = append(args, r)
+			}
+		default:
+			b.WriteString(" AND " + colPrefix + "rating IN (" +
+				strings.TrimSuffix(strings.Repeat("?, ", len(nonZero)), ", ") + ")")
+			for _, r := range nonZero {
+				args = append(args, r)
+			}
+		}
+	}
+	if f.mtimeFrom != 0 {
+		b.WriteString(" AND " + colPrefix + "mtime_ns >= ?")
+		args = append(args, f.mtimeFrom)
+	}
+	if f.mtimeTo != 0 {
+		b.WriteString(" AND " + colPrefix + "mtime_ns <= ?")
+		args = append(args, f.mtimeTo)
+	}
+	if f.sizeFrom != 0 {
+		b.WriteString(" AND " + colPrefix + "size >= ?")
+		args = append(args, f.sizeFrom)
+	}
+	if f.sizeTo != 0 {
+		b.WriteString(" AND " + colPrefix + "size <= ?")
+		args = append(args, f.sizeTo)
+	}
+	return b.String(), args
+}
+
+// listFacetFilteredFiles facets-only 路径数据源（无关键词无标签但有 facet）：
+// 按 facet 条件列 ok 状态文件（文件维度筛选天然是文件清单语义，无幻灯片条目、
+// 无聚合折叠），按路径序返回。
+func (s *assetsStore) listFacetFilteredFiles(facet *assetsFacetFilter) ([]tagFilteredFileOrdering, error) {
+	clause, facetArgs := facet.whereClause("f.")
+	rows, err := s.db.Query(
+		"SELECT f.id, f.path FROM files f WHERE f.status = ?"+clause+" ORDER BY f.path",
+		append([]any{model.AssetFileStatusOK}, facetArgs...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]tagFilteredFileOrdering, 0)
+	for rows.Next() {
+		var r tagFilteredFileOrdering
+		if err := rows.Scan(&r.id, &r.path); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// filterFileIDsByFacet 批量判定文件 ID 集合的 facet 命中（keyword 路径消费）：
+// FTS 命中行携带的 fileID 全集一次 SQL 判定（WHERE id IN + facet 条件），返回
+// 通过 facet 的文件 ID 集合；FTS 命中循环按行 fileID 查集合 O(1) 判定（幻灯片
+// 条目按归属文件 ID 继承判定），避免逐命中回查的 N+1。分批处理 FTS 大命中量
+// （对齐 fileMetaByIDs 的 assetsQueryIDBatch 批量口径）。ID 列表为空直接返回
+// 空集合。已消失文件的 ID 不在返回集合中（并发删除窗口的条目自然出局）。
+func (s *assetsStore) filterFileIDsByFacet(ids []int64, facet *assetsFacetFilter) (map[int64]bool, error) {
+	out := make(map[int64]bool)
+	for start := 0; start < len(ids); start += assetsQueryIDBatch {
+		end := start + assetsQueryIDBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		clause, facetArgs := facet.whereClause("f.")
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(batch)), ", ")
+		args := make([]any, 0, len(batch)+len(facetArgs))
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		args = append(args, facetArgs...)
+		rows, err := s.db.Query(
+			"SELECT f.id FROM files f WHERE f.id IN ("+placeholders+")"+clause, args...)
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				out[id] = true
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

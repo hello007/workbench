@@ -212,3 +212,25 @@ func (a *App) GetAssetSplitRecord(libraryID, relPath string) (model.AssetSplitRe
 func (a *App) OpenAssetSplitPage(libraryID, relPath string, slideNum int) error {
 	return a.assetsSvc.OpenAssetSplitPage(libraryID, relPath, slideNum)
 }
+
+// ===== 保存检索条件（SRS §2.5 素材管理第七批） =====
+
+// ListAssetSavedSearches 全部保存的检索条件（全局存储，条目带 libraryId 库归属，
+// 供前端区分同/异库调取）。TagIDs 为保存时所在库的标签 ID，异库调取时前端按
+// TagNames 冗余快照重映射（miss 丢弃该标签）。
+func (a *App) ListAssetSavedSearches() ([]model.AssetSavedSearch, error) {
+	return a.assetSavedSearchSvc.List()
+}
+
+// SaveAssetSavedSearch 保存检索条件（upsert）：条件对象 ID 为 0 = 新增（后端生成
+// ID 与 createdAt 并回传）；非 0 = 更新覆盖（保留原 createdAt，不存在报错）。
+// 名称全局唯一，重名拒绝；快照含关键词/标签（ID + 名称冗余双份）/facet 三维/
+// flatten/页标签继承开关。
+func (a *App) SaveAssetSavedSearch(search model.AssetSavedSearch) (model.AssetSavedSearch, error) {
+	return a.assetSavedSearchSvc.Save(search)
+}
+
+// DeleteAssetSavedSearch 删除指定保存条件（不存在报错，前端列表过期时刷新重试）。
+func (a *App) DeleteAssetSavedSearch(id int64) error {
+	return a.assetSavedSearchSvc.Delete(id)
+}

@@ -216,7 +216,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   UpdateAssetSlideMeta: null,
   // 检索默认空结果页（items/total/keyword/flattened 四字段对齐 model.AssetSearchPage）。
   // 幻灯片命中条目（refType='slide'）自带 ownTags/note/rating 三字段（文件条目恒零值），
-  // opts 含 slideTagOnlyOwn 继承开关（默认 false = 合并归属文件标签命中）
+  // opts 含 slideTagOnlyOwn 继承开关（默认 false = 合并归属文件标签命中）+ facet
+  // 三维字段（第七批 SRS §2.5：ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo，档位→
+  // 区间换算在前端 AssetFilterPopover 模块单点，mock 经调用参数断言消费不校验值）
   SearchAssets: { items: [], total: 0, keyword: '', flattened: false },
 
   // ---- 素材标签树与批量打标签（第六批 SRS §2.4：标签树 + 标签管理 + 批量打标签）----
@@ -239,6 +241,17 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   DeleteAssetTag: 0,
   BatchUpdateAssetFileTags: { total: 0, succeeded: 0, failed: 0, items: [] },
   BatchUpdateAssetSlideTags: { total: 0, succeeded: 0, failed: 0, items: [] },
+
+  // ---- 素材保存检索条件（第七批 SRS §2.5：命名/调取/删除/覆盖，全局存储）----
+  // ListAssetSavedSearches 默认空列表（条目形状对齐 model.AssetSavedSearch：
+  // id/name/libraryId/keyword/tagIds/tagNames/ratings/mtimeFrom/mtimeTo/
+  // sizeFrom/sizeTo/flatten/slideTagOnlyOwn/createdAt）；SaveAssetSavedSearch
+  // 为 upsert（返回带生成 ID 的条件对象，前端 PR3 已接入消费——保存/覆盖成功
+  // toast 后 List 重拉，返回值本身不参与渲染，默认 null 安全 no-op，用例按需
+  // override 具体对象）；DeleteAssetSavedSearch void 安全 no-op
+  ListAssetSavedSearches: [],
+  SaveAssetSavedSearch: null,
+  DeleteAssetSavedSearch: null,
 
   // ---- 素材缩略图（PR3：画廊/详情懒加载 + 能力探测 + 打开跳转 + 失败重试 + 设置）----
   // GetAssetThumb 默认空串 = 未生成回退「无预览」占位（契约见 docs/spec/assets-thumbs-com.md

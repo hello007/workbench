@@ -207,7 +207,8 @@ const (
 )
 
 // AssetSearchOptions 素材检索入参（SearchAssets）。关键词与标签筛选可组合；
-// 关键词为空且给定标签时退化为纯标签浏览。
+// 关键词为空且给定标签时退化为纯标签浏览；关键词与标签均为空但有 facet 条件
+// 时走 facets-only 文件清单路径；全空返回空结果页。
 type AssetSearchOptions struct {
 	Flatten bool    `json:"flatten"` // true = 平铺返回全部命中；false = 同 PPT 多页命中折叠为聚合条目
 	TagIDs  []int64 `json:"tagIds"`  // 标签筛选：文件条目须直接绑定其中之一，幻灯片条目默认【归属文件绑定 ∪ 页自身绑定】命中；空 = 不筛选
@@ -215,8 +216,23 @@ type AssetSearchOptions struct {
 	// 文件条目不受影响）：false（默认，向后兼容）= 幻灯片条目【页自身标签 ∪ 归属
 	// 文件标签】合并命中；true = 幻灯片条目仅页自身标签命中。
 	SlideTagOnlyOwn bool `json:"slideTagOnlyOwn"`
-	Limit           int  `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
-	Offset          int  `json:"offset"` // 分页偏移（<0 按 0 处理）
+	// Ratings 星级档筛选（facet，文件级口径，SRS §2.5 D1）：nil = 不筛选；
+	// 含 0 表示「未评分」（files.rating=0），非零值按等值匹配 files.rating。
+	// 幻灯片条目不按页级评分（slide_meta.rating）参与筛选，而是继承归属文件
+	// 的星级判定（与修改时间/文件大小 facet 同为文件维度，三 facet 口径一致）。
+	Ratings []int64 `json:"ratings"`
+	// MtimeFrom/MtimeTo 修改时间区间筛选（facet，文件维度）：纳秒 Unix 时间戳
+	// （与 files.mtime_ns 同单位），0 = 不设该侧边界；闭区间 [MtimeFrom, MtimeTo]。
+	// 相对时间档（今天/近 7 天/近 30 天）由前端换算为绝对区间传入，后端只认区间
+	// （档位语义单一数据源在前端）。幻灯片条目按归属文件的 mtime 判定（继承）。
+	MtimeFrom int64 `json:"mtimeFrom"`
+	MtimeTo   int64 `json:"mtimeTo"`
+	// SizeFrom/SizeTo 文件大小区间筛选（facet，文件维度）：字节，0 = 不设该侧
+	// 边界；闭区间 [SizeFrom, SizeTo]。幻灯片条目按归属文件的大小判定（继承）。
+	SizeFrom int64 `json:"sizeFrom"`
+	SizeTo   int64 `json:"sizeTo"`
+	Limit    int   `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset   int   `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或
@@ -307,4 +323,34 @@ type AssetSplitProgress struct {
 	CurrentFile string `json:"currentFile"` // 当前文件相对路径
 	PageDone    int    `json:"pageDone"`    // 当前文件已完成页数（页级回调透传）
 	PageTotal   int    `json:"pageTotal"`   // 当前文件总页数
+}
+
+// AssetSavedSearch 保存的素材检索条件（data/asset_saved_searches.json 全局存储，
+// 命名/调取/删除/覆盖，SRS §2.5）。快照 = 检索语境完整还原面：关键词 + 标签 +
+// facet 三维 + flatten + 页标签继承开关。
+//
+// 跨库调取降级契约（PRD D4）：TagIDs 为保存时所在库的标签 ID，仅同库调取直接
+// 可用；TagNames 按名冗余一份，调取异库时前端按名在当前库标签清单中重查 ID，
+// 查不到的标签丢弃（TagIDs 异库一律弃用，TagNames 仍可重映射）。关键词 /
+// facet / Flatten / SlideTagOnlyOwn 跨库照常回填（不依赖库内容）。
+type AssetSavedSearch struct {
+	ID        int64  `json:"id"`        // 条目自增 ID（新增时由后端生成；非 0 = 更新覆盖语义）
+	Name      string `json:"name"`      // 用户命名（全局唯一，重名拒绝）
+	LibraryID string `json:"libraryId"` // 保存时所在素材库 ID（全局存储带库归属，供前端区分同/异库调取）
+	Keyword   string `json:"keyword"`   // 关键词（空 = 无关键词）
+	// TagIDs 保存时所在库的标签 ID 列表（仅同库调取直接可用，异库由前端按
+	// TagNames 重映射）
+	TagIDs []int64 `json:"tagIds"`
+	// TagNames 标签名冗余快照（跨库重映射数据源；与 TagIDs 同序对应，保存时同步写入）
+	TagNames []string `json:"tagNames"`
+	// Ratings/MtimeFrom/MtimeTo/SizeFrom/SizeTo facet 三维快照，语义与
+	// AssetSearchOptions 同名字段一致（文件级口径 + 幻灯片继承规则同源）
+	Ratings         []int64 `json:"ratings"`         // 星级档（nil = 未启用；含 0 = 未评分）
+	MtimeFrom       int64   `json:"mtimeFrom"`       // 修改时间区间下界（纳秒，0 = 不设界）
+	MtimeTo         int64   `json:"mtimeTo"`         // 修改时间区间上界（纳秒，0 = 不设界）
+	SizeFrom        int64   `json:"sizeFrom"`        // 文件大小区间下界（字节，0 = 不设界）
+	SizeTo          int64   `json:"sizeTo"`          // 文件大小区间上界（字节，0 = 不设界）
+	Flatten         bool    `json:"flatten"`         // 平铺开关快照（检索语境完整还原）
+	SlideTagOnlyOwn bool    `json:"slideTagOnlyOwn"` // 页标签继承开关快照
+	CreatedAt       string  `json:"createdAt"`       // 保存时间（RFC3339；更新覆盖时保留原值）
 }

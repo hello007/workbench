@@ -29,6 +29,7 @@ CreateAssetLibrary(name, rootPath) / ListAssetLibraries / DeleteAssetLibrary(id)
 GetAssetLibraryStats(id) / StartAssetScan(id) / CancelAssetScan(id) / RebuildAssetLibrary(id)
 ListAssetFiles(id) / ListAssetSlides(id, limit, offset) (model.AssetSlidePage) / UpdateAssetFileMeta(fileId, AssetFileMetaUpdate)
 SearchAssets(id, keyword, AssetSearchOptions)
+ListAssetSavedSearches / SaveAssetSavedSearch(AssetSavedSearch) / DeleteAssetSavedSearch(id)   // 保存检索条件，2026-10-16 第七批
 OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模式 wailsRuntimeUnavailable 拒绝
 ```
 
@@ -59,6 +60,17 @@ OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模
 - **禁对 FTS 表隐藏列做 LIKE**：实测恒 0 行；模糊匹配走业务表列。
 - **摘要不使用 FTS `snippet()`**：输出含切分空格需后处理，坑多于收益；改 `snippetFromTexts` 原文子串窗口（命中前 20 字后 40 字，rune 口径截取防截半）。
 - **bm25 IDF 钳制现象**：微型语料全命中时 IDF 触及 1e-6 下限，列权重保持方向但同权重行间顺序由长度归一定——测试断言排序须构造确定性分数分层（标题命中 vs 正文命中），勿依赖小语料 bm25 绝对值。
+
+### facet 多维筛选（SRS §2.5，2026-10-16 第七批）
+
+- **条件构造单点**：`assetsFacetFilter`（service/assets_db.go）是三条 SQL 路径共用的唯一 facet 条件构造（`active()` / `whereClause(colPrefix)`）——keyword 批量判定 / tagsOnly 两查询追加 / facets-only 数据源；**禁单一路径自行拼条件**（口径分叉 = 判定不一致）。`active()` 判 `len(ratings)>0 || 四区间字段任一非零`；sizeFrom=0 语义「不设下界」（前端 <1MB 档 sizeFrom:0 经 sizeTo!=0 激活，0 字节文件由 `size<=上界` 天然覆盖）。
+- **空查询语义重定义**：无关键词且无标签**但有 facet** → `searchByFacetsOnly`（按 facet 条件查 files 返回**文件条目**，复用 pageAndFillEntries 分页，Score=0、无聚合折叠）；关键词、标签、facet 全空仍返空页（原不变式保留）。facets-only 返回文件条目是文件维度筛选的天然清单语义，禁扩幻灯片条目（48 页 PPT 会灌满结果）。
+- **幻灯片条目 facet 继承**：keyword/tagsOnly 路径幻灯片条目按**归属文件**属性判定（星级/时间/大小均文件级口径，D1——页级评分 slide_meta.rating 纯展示不参与筛选）；keyword 路径防 N+1：FTS 命中 fileID 去重全集一次 `filterFileIDsByFacet`（WHERE id IN 分批 500），循环按 fileID 查集合 O(1) 判定；判定在分页前完成（Total 按过滤后口径计）。
+- **前端换算单点**：AssetFilterPopover.vue 模块级具名导出（`buildFacetOptions`/`resolveMtimeRangeNs`/`resolveSizeRangeBytes`/`countActiveFacets`/`restoreFacetStateFromSnapshot`/`describeFacetState`）——相对档→纳秒区间**每次检索现算**（防「今天」档冻结漏当日新文件）、时间相对档语义单一数据源在前端（后端只认区间）；自定义档 mtime 上界可逆锚点与快照反推详见 §8.6。`toggleAgg` 聚合子项查询刻意不带 facet（文件维度判定，父卡通过即全页通过）。
+
+### 保存检索条件存储（service/asset_saved_search.go）
+
+- data/asset_saved_searches.json，util.SaveJSON 原子写（整体覆盖 last-writer-wins，沿用 settings 约束）；损坏降级空列表 + slog.Warn；`sync.Mutex` 跨读改写全程；自增 ID = max+1；Save 为 upsert（ID=0 新增 / 非 0 覆盖保留原 createdAt），重名拒绝排除自身 ID。App 绑定：`ListAssetSavedSearches` / `SaveAssetSavedSearch` / `DeleteAssetSavedSearch`。
 
 ### 单连接池自锁（Gotcha）
 
@@ -165,14 +177,18 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 | 点位 | 函数 | 行为 |
 |---|---|---|
-| 切库 | `watch(currentLibraryId)` | 清选中 + 关预览 |
-| 检索条件变更 | `applySearch` / `onFlattenChange` / `onSlideTagOnlyOwnChange` | 清选中 + 关预览 |
+| 切库 | `watch(currentLibraryId)` | 清选中 + 关预览；关键词/标签/facet **保留**（facet 星级/时间/大小库无关，跨库保留对齐关键词/标签先例，库落定按检索语境在新库重查） |
+| 检索条件变更 | `applySearch` / `onFlattenChange` / `onSlideTagOnlyOwnChange` | 清选中 + 关预览（facet 保留——与关键词/标签组合检索语义） |
 | viewMode 切换 | `onViewModeChange` | 清选中 + 关预览（维度不通约） |
 | 扫描刷新 | `resetAndReloadView` | 清选中 + 关预览（底册 id 重解析） |
-| **溯源跳转** | `traceToSourceFile` | 清选中 + 关预览——**直赋 `viewMode.value='file'` 不经 applySearch/onViewModeChange**，是唯一同时命中 #2/#3 却绕过常规入口的路径，新增语境变更函数时对照本表逐一过 |
+| **溯源跳转** | `traceToSourceFile` | 清选中 + 关预览——**直赋 `viewMode.value='file'` 不经 applySearch/onViewModeChange**，是唯一同时命中 #2/#3 却绕过常规入口的路径，新增语境变更函数时对照本表逐一过；facet 同点复位（第七批：直赋路径须连 facet 一并清，否则 searchMode 残留致画廊仍显检索态而非底册） |
+| **facet 变更**（第七批，双语境共用） | `onFacetChange` | 清选中 + 关预览 + 关详情 + 清文件过滤 + 清聚合展开缓存（数据过滤语境变更，按检索条件变更同类点位定性；浏览语境 facet 激活切 facets-only 链路、清除回底册） |
+| **清除全部筛选**（第七批空态引导，D6） | `clearAllFilters` | 清 facet + 标签（关键词保留属「搜索」非「筛选」），其余复位面同 facet 变更；全清后回底册、关键词仍在回关键词检索 |
+| **双击文件过滤进入** | `filterByFile` | 退检索分支连 facet 一并复位（过滤浏览与检索/facet 语境互斥，对齐退检索清标签同款语义） |
 | 呈现切换 | displayMode radio | 不清（同数据语境） |
 | **批量打标签完成** | `refreshAfterBatchTag` | **不清选中**（数据变更点位非语境变更，D5：支持对同批继续操作与失败手动重试；选中键 file:<id>/slide:<fileId>:<slideNum> 均稳定无脏键风险） |
 | 标签管理变更 | `refreshAfterTagChange` | 不清选中（同上性质；检索残留已删标签 ID 命中为空无害，用户手动清） |
+| **保存条件调取**（第七批 PR3） | `applySavedSearch` | 清选中 + 关预览 + 关详情 + 清文件过滤 + 清聚合展开缓存——调取即检索条件变更语境：回填（关键词含空串回填/标签/facet/两开关）后走 `applySearch` 同路径，复位面与 searchSeq 代次守卫由其统一执行；facet 快照经 `restoreFacetStateFromSnapshot` 反推（详见 §8.6） |
 | 全屏预览翻页 | — | 不清（预览即详情导航，侧栏标注编辑照常可用） |
 
 - 全选/反选作用域 = **当前渲染独立卡键集**（检索模式含已加载段，懒加载未加载段不在范围）；反选 = 渲染集 ∖ 当前选中（渲染集外键结构性清零防幽灵）。聚合父卡（hitCount>1）与聚合展开子行无复选框（勾选语义歧义）。
@@ -193,6 +209,14 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 - 受控组件零业务状态：选中/详情/检索代次/分页判定全留宿主；行点击 emit `card-click`、滚动到底 emit `load-more`（防重与分页知识在宿主 `loadMoreInView` 单点，网格 scroll 与列表/预览 load-more 三入口共用）。
 - 列集分语境（prd D3）：幻灯片与检索条目的 size/modTime 经 fileEntries 底册按 filePath 反查 join（归属文件属性口径，表头 tooltip 声明），底册 miss 显 `—` 不猜值；聚合条目大小 `—`；星级 `0` 显 `—` 且**不落底册兜底**（`0` 非 nullish，页级标注独立于文件标注，兜底会伪造页星级）。检索幻灯片条目追加命中摘要列。
+
+### 8.6 保存检索条件（SRS §2.5 PR3，2026-10-16 第七批沉淀）
+
+- **快照口径**：`buildSavedSearchSnapshot` 单点产出 `model.AssetSavedSearch` 全维字段（keyword/tagIds/tagNames 冗余/ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo/flatten/slideTagOnlyOwn/libraryId；id=0 新增、非 0 覆盖，createdAt 后端权威生成不传）。tagNames 从共享标签列表按 id 反查、与 tagIds **同序对应**（映射 miss 成对丢弃防两份数据错位）；facet 存**区间原始值**（`buildFacetOptions` 换算单点产出），摘要预览（`describeFacetState`）时间维展示解析后的绝对区间与还原口径一致，禁摘要显档位而数据存区间的两套口径。
+- **区间反推可逆锚点（换算单点在 AssetFilterPopover 模块）**：自定义档 mtime 上界取**止日末毫秒**（非 1ns）——纳秒值量级 ~1.8e18 超出 JS Number 2^53 安全整数，1ns 尾差经双精度舍入（该量级 ULP≈256ns）完全丢失不可反推，毫秒尾差可精确还原（毫秒级尾差在文件系统 mtime 实际粒度 NTFS 100ns / ext4 ns 下闭区间含止日全天语义等价）；`restoreFacetStateFromSnapshot` 反推：mtime 双侧非零 → custom 冻结区间（**相对档保存即冻结为绝对区间，保存的是什么区间调取就是什么区间**）、双侧反推毫秒用 `Math.round` 而非 floor（JSON 传输存在 ±128ns 双精度舍入，floor 在舍入向下时跨过整毫秒边界落错一日）；size 精确匹配四档闭区间、未匹配防御回退不限（无自定义大小档 UI 不为异常数据造档）；mtime 单侧非零为异常数据回不限档（本组件换算恒双侧成对产出）。
+- **调取即语境变更**（§8.2 矩阵登记）：回填走 `applySearch` 同路径，与手动改条件无分叉；关键词空串照回填（facet-only 条件调取后正确退关键词）；异库条目降级（D4）——tagIds 属保存时所在库不可复用，按 tagNames 在当前库标签表重查 ID，miss 丢弃该标签并计数提示（warning toast），关键词/facet/两开关照回填。
+- **覆盖边界**：覆盖 = 以当前检索状态 Save 同 id（名称沿用原名，MVP 无改名语义，createdAt 后端保留原值）；**仅本库条目可覆盖**——覆盖按当前库重写 libraryId 会使条目静默搬家；非 searchMode（无可快照条件）禁用。重名拒绝/名称校验由后端 Save 返回经 handleError 透传（弹窗保持打开可改名重试）。
+- **列表权威**：「已存搜索」弹层打开（@show）与保存/覆盖/删除成功后均 List 重拉（本地不缓存增删）；行级防重 `savedSearchMutatingId` 占位（覆盖/删除在途禁同行重复提交）。
 
 ## 9. 批量打标签与多级标签树（SRS §2.4，2026-10-16 第六批沉淀）
 
@@ -233,4 +257,4 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）。
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）。

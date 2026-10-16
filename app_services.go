@@ -75,6 +75,10 @@ type AppServices struct {
 	// sinkHolder（assets-scan:* 前缀，web_serve.go applySink 须同步切换），可取消
 	// （注册表键 = 库 ID 规范化）；解析为纯 Go OOXML（复用拆分核心读取链路）。
 	assetsSvc *service.AssetLibraryService
+	// 保存的素材检索条件服务（SRS §2.5 素材管理第七批：命名/调取/删除/覆盖，
+	// data/asset_saved_searches.json 全局存储走 util.SaveJSON 原子写；损坏降级
+	// 空列表 + slog.Warn，对齐 SettingsService 模式）。
+	assetSavedSearchSvc *service.AssetSavedSearchService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -179,6 +183,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 		}
 		return *cfg.Assets // Load 已 Ensure，段非 nil
 	})
+
+	// 保存的素材检索条件服务（SRS §2.5，独立 data/asset_saved_searches.json
+	// 不与素材库注册表数据交叉）
+	s.assetSavedSearchSvc = service.NewAssetSavedSearchService(filepath.Join(dataDir, "asset_saved_searches.json"))
 
 	return s
 }

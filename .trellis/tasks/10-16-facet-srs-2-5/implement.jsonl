@@ -1,0 +1,8 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材管理主契约：FTS 五契约 §3/检索两路径/继承合并筛选/清空点位矩阵 §8.2/选中键单点 §8.1/幻灯片标注 §9——facet 判定与 facets-only 路径直接落在这些契约上，矩阵登记与双代次守卫为硬约束"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 绑定（保存条件 CRUD 4 方法 + AssetSearchOptions 扩字段）须 wails generate 三处同步（App.js/App.d.ts/models.ts）+ 具名类型别名坑 + base64/事件注销规则"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "保存检索条件落 data/asset_saved_searches.json 必须走 util.SaveJSON 原子写（CreateTemp+fsync+Rename），禁 os.WriteFile 直写与自建 temp+rename"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "工具行/弹层（el-popover）视觉约束：四档间距圆角、flex-wrap、badge 形态、行内 style 禁用——AssetFilterPopover 新组件须守"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% + 前端 ≥70% 覆盖率门禁阈值与排除口径"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep/mtime 时序/固定端口；时间 facet 单测须注入式构造（禁依赖真实时钟推进）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 从 fixtures.js import {test,expect}（Wails mock 自动注入）、mock 默认值改 wails-mock-defaults.js 单一数据源、禁 waitForTimeout"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "service 层 slog 日志规范 + AppError 错误码链路（新增错误码须同步 model/app_error.go 与前端 error.js 两处）"}

@@ -1,0 +1,7 @@
+{"file": "docs/spec/assets-management.md", "reason": "验收基准：FTS 五契约不破（切分同源/detail=full/双写/禁 trigram/弃 snippet）、清空点位矩阵完整性、双代次守卫、选中键口径——facet 改动逐条对照"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验收基准：wailsjs 三处同步无 diff 遗漏、models.ts 具名类型别名、前端消费签名一致"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "验收基准：saved_searches 落盘走 util.SaveJSON，无 os.WriteFile 直写新增"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "验收基准：弹层/工具行/badge 视觉规范、无行内 style 违例"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验收基准：service ≥76% / 前端 ≥70% 门禁实测达标"}
+{"file": "docs/spec/test-stability.md", "reason": "验收基准：新测试无 sleep/mtime 时序/固定端口隐式依赖；时间 facet 用注入陈旧/固定时刻驱动"}
+{"file": "docs/spec/e2e-testing.md", "reason": "验收基准：E2E import 面、mock 单一数据源、无 waitForTimeout"}
