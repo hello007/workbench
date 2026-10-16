@@ -447,3 +447,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 124: 素材管理第八批：检索排序器 + 批量修改评分
+
+**Date**: 2026-10-16
+**Task**: 素材管理第八批：检索排序器 + 批量修改评分
+**Branch**: `master`
+
+### Summary
+
+SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关性档零行为变化，聚合前分页前执行），排序口径统一文件级与 facet 同源，次级键 score→sortPath→sortNum→refID 跨分页稳定，并发删除窗口 props 缺键剔除防零值异常序；AssetSavedSearch 补 sortBy/sortDir 零值向后兼容；BatchSetAssetRating 单一入口混合目标每条目一事务（页条目整行回写备注，键 (file_id,slide_num)），AssetBatchRatingDialog 复刻标签弹窗形态成功不清选中。service 79.6%/前端 85.28% 门禁绿，trellis-check + 三轮独立审核，spec 沉淀 assets-management.md §10；真机冒烟暂缓由用户后续执行。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5def99f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
