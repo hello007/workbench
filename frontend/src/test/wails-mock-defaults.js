@@ -219,6 +219,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // opts 含 slideTagOnlyOwn 继承开关（默认 false = 合并归属文件标签命中）+ facet
   // 三维字段（第七批 SRS §2.5：ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo，档位→
   // 区间换算在前端 AssetFilterPopover 模块单点，mock 经调用参数断言消费不校验值）
+  // + 排序档位字段（SRS §2.5.3：sortBy/sortDir，mock 固定返回集合不消费排序键，
+  // 调用参数断言消费透传值）
   SearchAssets: { items: [], total: 0, keyword: '', flattened: false },
 
   // ---- 素材标签树与批量打标签（第六批 SRS §2.4：标签树 + 标签管理 + 批量打标签）----
@@ -241,6 +243,10 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   DeleteAssetTag: 0,
   BatchUpdateAssetFileTags: { total: 0, succeeded: 0, failed: 0, items: [] },
   BatchUpdateAssetSlideTags: { total: 0, succeeded: 0, failed: 0, items: [] },
+  // 批量评分弹窗（第八批，SRS §2.6 P0，AssetBatchRatingDialog 经宿主 execute
+  // 分派）后端链：默认全零空明细（形状对齐 model.AssetBatchRatingResult，条目
+  // 含后端拼装 label 字段），用例按需 override
+  BatchSetAssetRating: { total: 0, succeeded: 0, failed: 0, items: [] },
 
   // ---- 素材保存检索条件（第七批 SRS §2.5：命名/调取/删除/覆盖，全局存储）----
   // ListAssetSavedSearches 默认空列表（条目形状对齐 model.AssetSavedSearch：

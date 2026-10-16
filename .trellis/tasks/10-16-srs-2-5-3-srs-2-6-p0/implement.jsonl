@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-16-srs-2-5-3-srs-2-6-p0/prd.md", "reason": "本批需求契约：排序档位/口径决策 D1-D6、三路径排序方案、批量评分作用对象矩阵与 PR 拆分"}
+{"file": "docs/spec/assets-management.md", "reason": "素材管理全域契约：FTS 五契约、选中体系与清空点位矩阵 §8.2、批量打标签先例（targets+execute/失败明细反查 slideNum||0）、facet assetsFacetFilter 单点三路径"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wails 绑定三处同步规则、nonNull 空切片契约、model 导出字段同步面"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁基线（service ≥76% / 前端 ≥70%）与分层口径"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep/mtime 时序/固定端口；排序确定性测试须注入固定 mtime_ns/rating 构造分层"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "工具行/操作条视觉约束：间距圆角档位、nav 指示条、语义类、弹窗响应式尺寸分档"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 从 fixtures.js import、禁 waitForTimeout、mock 单一数据源 wails-mock-defaults.js"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "保存检索条件快照落盘走 util.SaveJSON 原子写契约（本批只加字段不动写链，仍须遵守）"}

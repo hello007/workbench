@@ -1,10 +1,11 @@
 <!-- frontend/src/components/AssetSelectionBar.vue -->
 <!-- 素材选中浮动操作条（SRS §2.3 PR3，PRD D2）：选中数 > 0 时悬浮于画廊区底部
-     居中，展示「已选 N 项」计数 + 全选/反选/批量打标签/清空操作。
+     居中，展示「已选 N 项」计数 + 全选/反选/批量打标签/批量评分/清空操作。
      受控组件契约：无自有业务状态——计数与全选/反选作用域（当前渲染独立卡片键集，
      PRD D5#8：检索含已加载段，懒加载未加载段不进范围）由宿主计算，本层只上报
-     select-all / invert / batch-tag / clear 四个事件，分派逻辑留宿主单点
-     （第六批 PR3 批量打标签入口消费 batch-tag，targets 构建与 API 分派在宿主）。
+     select-all / invert / batch-tag / batch-rating / clear 五个事件，分派逻辑留
+     宿主单点（第六批 PR3 批量打标签入口消费 batch-tag，第八批批量评分入口消费
+     batch-rating，targets 构建与 API 分派在宿主）。
      层级取舍：z-index 取面板内局部值 5——低于全屏预览层 10（预览打开时浮动条
      沉底不挡预览操作），不触碰全局右键菜单 2000 / EP 弹窗 2001+ 层级表。
      视觉：主色弱化底（--primary-bg）+ 卡片阴影层级（--shadow-md），对齐
@@ -15,9 +16,11 @@
     <div class="selection-actions">
       <el-button size="small" text type="primary" @click="emit('select-all')">全选</el-button>
       <el-button size="small" text type="primary" @click="emit('invert')">反选</el-button>
-      <!-- 批量打标签（第六批 PR3，SRS §2.4）：主操作入口，text+primary 与既有
-           选择类操作同排同风格；targets 构建与两批量 API 分派留宿主 -->
+      <!-- 批量打标签（第六批 PR3，SRS §2.4）与批量评分（第八批，SRS §2.6 P0）：
+           主操作入口，text+primary 与既有选择类操作同排同风格；targets 构建与
+           API 分派留宿主 -->
       <el-button size="small" text type="primary" @click="emit('batch-tag')">批量打标签</el-button>
+      <el-button size="small" text type="primary" @click="emit('batch-rating')">评分</el-button>
       <el-button size="small" text @click="emit('clear')">清空</el-button>
     </div>
   </div>
@@ -29,7 +32,7 @@ defineProps({
   count: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['select-all', 'invert', 'batch-tag', 'clear'])
+const emit = defineEmits(['select-all', 'invert', 'batch-tag', 'batch-rating', 'clear'])
 </script>
 
 <style scoped>

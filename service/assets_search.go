@@ -40,6 +40,12 @@ const (
 // opts.Limit ≤0 取默认 50（上限 200）；Offset <0 按 0 处理。Flatten=false 时
 // 同一 PPT 的多页命中折叠为一个聚合条目（HitCount = 命中页数，取最高分页展示，
 // 按 bm25 最相关页计分），文件条目独立参与排序（SRS 2.5.3）。
+//
+// 排序档位（opts.SortBy，SRS §2.5.3）：相关性（默认，三路径现状序：关键词 FTS
+// bm25 序 / 标签与 facets-only 路径序）；mtime（files.mtime_ns）与 rating
+// （files.rating，文件级口径，幻灯片/聚合条目继承归属文件属性）两档在聚合与
+// 分页之前对全量命中 Go 层稳定排序，SortDir 控制升降（默认降序），次级键确定性
+// 见 sortEntriesByOptions。非法档位/方向值按相关性/降序处理。
 func (s *AssetLibraryService) SearchAssets(libraryID, keyword string, opts model.AssetSearchOptions) (model.AssetSearchPage, error) {
 	if _, err := s.getLibrary(libraryID); err != nil {
 		return model.AssetSearchPage{}, err
@@ -71,13 +77,15 @@ func (s *AssetLibraryService) SearchAssets(libraryID, keyword string, opts model
 // assetSearchEntry 检索中间条目（聚合/排序/分页处理单元，元数据补全前的最小
 // 形态）。
 type assetSearchEntry struct {
-	refType  string  // model.AssetRefTypeFile / AssetRefTypeSlide
-	refID    int64   // 文件条目 = files.id；幻灯片条目 = slides.id
-	fileID   int64   // 归属文件 ID（标签过滤与继承口径）
-	score    float64 // bm25 负值口径：越小越相关（纯标签模式恒 0）
-	hitCount int     // 聚合条目命中页数（其余恒 1）
-	sortPath string  // 纯标签模式确定性排序键（文件相对路径；关键词模式留空按 FTS 序）
-	sortNum  int     // 纯标签模式页序次级键（文件条目恒 0 排同路径最前）
+	refType     string  // model.AssetRefTypeFile / AssetRefTypeSlide
+	refID       int64   // 文件条目 = files.id；幻灯片条目 = slides.id
+	fileID      int64   // 归属文件 ID（标签过滤与继承口径）
+	score       float64 // bm25 负值口径：越小越相关（纯标签模式恒 0）
+	hitCount    int     // 聚合条目命中页数（其余恒 1）
+	sortPath    string  // 纯标签模式确定性排序键（文件相对路径；关键词模式留空按 FTS 序）
+	sortNum     int     // 纯标签模式页序次级键（文件条目恒 0 排同路径最前）
+	sortMtimeNs int64   // mtime 排序键：归属文件 mtime_ns（幻灯片条目继承；仅 mtime 档填充消费）
+	sortRating  int64   // rating 排序键：归属文件星级（幻灯片条目继承；仅 rating 档填充消费）
 }
 
 // searchAssetsInStore 检索主体（store 连接内执行）：分流关键词检索、纯标签浏览
@@ -178,6 +186,42 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 		})
 	}
 
+	// mtime/rating 排序档：facet/标签过滤后 entries 的 fileID 全集一次批量取文件
+	// 排序属性（fileSortPropsByIDs），填充排序键后 Go 层稳定排序（在聚合之前执行，
+	// 聚合组首 = 排序后首现条目，文件维度单值继承天然正确）。相关性档不触发查询，
+	// FTS bm25 序现状不动。
+	if key, _ := assetSortKey(opts); key != "" {
+		fileIDs := make([]int64, 0, len(entries))
+		seen := make(map[int64]bool, len(entries))
+		for _, e := range entries {
+			if !seen[e.fileID] {
+				seen[e.fileID] = true
+				fileIDs = append(fileIDs, e.fileID)
+			}
+		}
+		props, err := store.fileSortPropsByIDs(fileIDs)
+		if err != nil {
+			return model.AssetSearchPage{}, fmt.Errorf("读取排序文件属性失败: %w", err)
+		}
+		// props 缺键 = 文件行已消失（并发删除窗口）：直接剔除该 fileID 的全部条目，
+		// 避免零值 mtime/rating 把已删文件排到序端形成用户可见异常序；与
+		// pageAndFillEntries 填充层「元数据消失条目跳过」语义一致（剔除发生在
+		// Total 计数与分页之前，total 口径随剔除收敛为存活条目）。
+		filtered := entries[:0]
+		for _, e := range entries {
+			if _, ok := props[e.fileID]; ok {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+		for i := range entries {
+			p := props[entries[i].fileID]
+			entries[i].sortMtimeNs = p.mtimeNs
+			entries[i].sortRating = p.rating
+		}
+		sortEntriesByOptions(entries, opts)
+	}
+
 	ordered := entries
 	if !opts.Flatten {
 		ordered = aggregateSlideEntries(entries)
@@ -192,8 +236,9 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 
 // searchByFacetsOnly facets-only 路径（无关键词无标签但有 facet 条件，SRS §2.5）：
 // 按 facet 条件列 ok 状态文件，返回文件条目（文件维度筛选天然是文件清单语义，
-// 无幻灯片条目、无聚合折叠；Flatten 开关对结果无影响）。排序按路径序（无相关性
-// 语义，Score 恒 0、Snippet 为空），分页复用 pageAndFillEntries（对齐纯标签浏览
+// 无幻灯片条目、无聚合折叠；Flatten 开关对结果无影响）。相关性档按路径序（无
+// 相关性语义，Score 恒 0、Snippet 为空）；mtime/rating 档在分页前按文件维度
+// 属性重排（sortEntriesByOptions），分页复用 pageAndFillEntries（对齐纯标签浏览
 // 的内存分页契约）。
 func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *assetsFacetFilter) (model.AssetSearchPage, error) {
 	files, err := store.listFacetFilteredFiles(facet)
@@ -203,13 +248,17 @@ func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet
 	entries := make([]assetSearchEntry, 0, len(files))
 	for _, f := range files {
 		entries = append(entries, assetSearchEntry{
-			refType:  model.AssetRefTypeFile,
-			refID:    f.id,
-			fileID:   f.id,
-			hitCount: 1,
-			sortPath: f.path,
+			refType:     model.AssetRefTypeFile,
+			refID:       f.id,
+			fileID:      f.id,
+			hitCount:    1,
+			sortPath:    f.path,
+			sortMtimeNs: f.mtimeNs,
+			sortRating:  f.rating,
 		})
 	}
+	// mtime/rating 排序档重排（相关性档该函数原样返回，路径序现状不动）
+	sortEntriesByOptions(entries, opts)
 	items, total, err := pageAndFillEntries(store, entries, opts, "")
 	if err != nil {
 		return model.AssetSearchPage{}, err
@@ -236,21 +285,25 @@ func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *
 	entries := make([]assetSearchEntry, 0, len(files)+len(slides))
 	for _, f := range files {
 		entries = append(entries, assetSearchEntry{
-			refType:  model.AssetRefTypeFile,
-			refID:    f.id,
-			fileID:   f.id,
-			hitCount: 1,
-			sortPath: f.path,
+			refType:     model.AssetRefTypeFile,
+			refID:       f.id,
+			fileID:      f.id,
+			hitCount:    1,
+			sortPath:    f.path,
+			sortMtimeNs: f.mtimeNs,
+			sortRating:  f.rating,
 		})
 	}
 	for _, sl := range slides {
 		entries = append(entries, assetSearchEntry{
-			refType:  model.AssetRefTypeSlide,
-			refID:    sl.id,
-			fileID:   sl.fileID,
-			hitCount: 1,
-			sortPath: sl.path,
-			sortNum:  sl.num,
+			refType:     model.AssetRefTypeSlide,
+			refID:       sl.id,
+			fileID:      sl.fileID,
+			hitCount:    1,
+			sortPath:    sl.path,
+			sortNum:     sl.num,
+			sortMtimeNs: sl.mtimeNs,
+			sortRating:  sl.rating,
 		})
 	}
 
@@ -266,6 +319,11 @@ func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *
 		}
 		return a.sortNum < b.sortNum
 	})
+	// mtime/rating 排序档在路径序基础上按主键重排（同路径文件/页条目主键同值，
+	// 次级键 sortNum 显式保留上述路径序的「文件本体先于其页」分组语义，见
+	// sortEntriesByOptions 注释；相关性档该函数原样返回，现状不动），聚合与
+	// 分页均消费重排后的最终序
+	sortEntriesByOptions(entries, opts)
 
 	if !opts.Flatten {
 		entries = aggregateSlideEntries(entries)
@@ -276,6 +334,65 @@ func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *
 		return model.AssetSearchPage{}, err
 	}
 	return model.AssetSearchPage{Items: items, Total: total}, nil
+}
+
+// assetSortKey 排序入参归一化（SRS §2.5.3）：SortBy 合法档位为 mtime/rating，
+// 其余取值（空串、relevance 与非法值）一律按相关性处理；SortDir 仅 "asc" 为
+// 升序，其余取值（空串、desc 与非法值）一律按降序处理。返回排序主键（"" =
+// 相关性/现状序）与是否升序。
+func assetSortKey(opts model.AssetSearchOptions) (key string, asc bool) {
+	switch opts.SortBy {
+	case model.AssetSortByMtime, model.AssetSortByRating:
+		key = opts.SortBy
+	}
+	return key, opts.SortDir == model.AssetSortDirAsc
+}
+
+// entrySortPrimary 条目排序主键取值：mtime 档 = 归属文件 mtime_ns；rating 档 =
+// 归属文件星级（文件级口径单一数据源，幻灯片/聚合条目经 fileID 继承，与星级
+// facet 口径同源）。
+func entrySortPrimary(e assetSearchEntry, key string) int64 {
+	if key == model.AssetSortByRating {
+		return e.sortRating
+	}
+	return e.sortMtimeNs
+}
+
+// sortEntriesByOptions mtime/rating 排序档的 Go 层稳定排序（SRS §2.5.3）：调用方
+// 须在聚合与分页之前执行——聚合组首 = 排序后首现条目，分页切片基于最终全量序。
+// 主键方向随 SortDir 翻转；次级键方向恒定不随 SortDir 翻转（score 升序 = 越相关
+// 越前 → sortPath 升序 → sortNum 升序 → refID 升序），保证主键同值条目跨分页顺序
+// 稳定。sortNum 次级键显式化「文件本体先于其页」分组语义（文件条目恒 0，标签路径
+// 页条目为页序）——同路径文件/页条目主键同值且 refID 属独立自增序列，缺该键时
+// 相对序依赖 ID 分配顺序（重解析后页 ID 大幅增长才成立），属脆弱隐式依赖；关键词
+// 路径各条目 sortNum 恒 0，补键零行为变化。相关性档
+// （key == ""）原样返回不重排：关键词路径保持 FTS bm25 序、标签/facets-only 路径
+// 保持调用方既有路径序（现状不动）。
+func sortEntriesByOptions(entries []assetSearchEntry, opts model.AssetSearchOptions) {
+	key, asc := assetSortKey(opts)
+	if key == "" {
+		return
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		pa, pb := entrySortPrimary(a, key), entrySortPrimary(b, key)
+		if pa != pb {
+			if asc {
+				return pa < pb
+			}
+			return pa > pb
+		}
+		if a.score != b.score {
+			return a.score < b.score
+		}
+		if a.sortPath != b.sortPath {
+			return a.sortPath < b.sortPath
+		}
+		if a.sortNum != b.sortNum {
+			return a.sortNum < b.sortNum
+		}
+		return a.refID < b.refID
+	})
 }
 
 // entryTypeRank 排序辅助：文件条目（0）先于幻灯片条目（1）。

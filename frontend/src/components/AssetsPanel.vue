@@ -36,7 +36,13 @@
      BatchUpdateAssetFileTags（fileIDs）/ BatchUpdateAssetSlideTags（(fileId,
      slideNum) 目标，禁 slides.id）；completed 触发刷新链（树重拉 + 底册重拉 +
      检索态重搜 + 幻灯片浏览清单补拉，双代次守卫防在途写回污染），选中保留
-     （D5：数据变更点位非语境变更）。
+     （D5：数据变更点位非语境变更）。批量评分（第八批，SRS §2.6 P0，PRD D4/D5）：
+     入口挂 AssetSelectionBar batch-rating 事件，targets 反查链路复用批量打标签
+     同款（assetSelectionKey 单点映射）；AssetBatchRatingDialog 弹窗不感知
+     viewMode——宿主 execute 分派回调以 targets 调 BatchSetAssetRating（单一
+     入口混合文件/页目标，slideNum 0 = 文件条目，0 星 = 清除）；completed 走
+     同款刷新链（底册重拉 + 检索态重搜 + 幻灯片浏览清单补拉，标签树不涉评分子
+     变更故不重拉），选中保留（D5）。
      facet 多维筛选（第七批 SRS §2.5 PR2）：工具行「筛选」弹层三维条件（星级/
      修改时间/文件大小，文件维度口径，幻灯片条目继承归属文件属性判定）与关键
      词/标签组合检索；浏览语境 facet 激活（任一维度生效）时放开「空关键词+空
@@ -226,6 +232,27 @@
         :disabled="!hasLibrary"
         @change="onFacetChange"
       />
+      <!-- 排序档位下拉（SRS §2.5.3，D1）：检索工具行独立控件，与 facet 低频筛选
+           不同频、高频切换直出工具栏。相关性默认（FTS bm25 序，无向）；mtime/
+           rating 档默认降序，同档再点翻转升降（菜单项即时标注当前方向）。变更走
+           applySearch 同路径（排序属检索条件变更点位，§8.2 矩阵复位面统一覆盖） -->
+      <el-dropdown trigger="click" @command="onSortCommand">
+        <el-button size="small" text type="primary" :disabled="!hasLibrary" class="sort-trigger">
+          {{ sortTriggerLabel }}
+          <el-icon class="sort-trigger-arrow"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu class="sort-menu">
+            <el-dropdown-item command="relevance">相关性（默认）</el-dropdown-item>
+            <el-dropdown-item command="mtime">
+              修改时间{{ sortBy === 'mtime' ? (sortDir === 'desc' ? '（降序）' : '（升序）') : '' }}
+            </el-dropdown-item>
+            <el-dropdown-item command="rating">
+              评分{{ sortBy === 'rating' ? (sortDir === 'desc' ? '（降序）' : '（升序）') : '' }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <!-- 保存检索条件（第七批 PR3，D7）：当前检索语境一键命名快照。检索语境
            （关键词/标签）与浏览语境 facet 激活组合均可保存——两者都是合法检索
            条件；全空（非检索语境）禁用，无可快照内容 -->
@@ -515,13 +542,15 @@
         <!-- 选中浮动操作条（SRS §2.3 PR3，PRD D2）：选中数 > 0 浮出于画廊区底部
              居中（absolute 挂 .assets-view-wrap relative 语境，z-index 5 低于预览
              层 10）；受控组件——计数传入选中集合大小，全选/反选/清空分派留宿主
-             （作用域 = 当前渲染独立卡键集，D5#8），批量打标签（第六批 PR3）经
-             batch-tag 事件触发宿主 targets 构建与弹窗打开 -->
+             （作用域 = 当前渲染独立卡键集，D5#8），批量打标签（第六批 PR3）与
+             批量评分（第八批）分别经 batch-tag / batch-rating 事件触发宿主
+             targets 构建与弹窗打开 -->
         <AssetSelectionBar
           :count="selectedKeys.size"
           @select-all="selectAllRendered"
           @invert="invertSelection"
           @batch-tag="openBatchTagDialog"
+          @batch-rating="openBatchRatingDialog"
           @clear="clearSelection"
         />
       </div>
@@ -890,6 +919,17 @@
       @completed="refreshAfterBatchTag"
     />
 
+    <!-- 批量评分弹窗（第八批，SRS §2.6 P0，PRD D4/D5）：targets 反查与构建链路
+         复用批量打标签同款；execute 以星级值分派 BatchSetAssetRating（单一入口
+         混合文件/页目标，slideNum 0 = 文件条目）；completed 走同款刷新链
+         （评分不涉标签变更，标签树不重拉），选中保留（D5） -->
+    <AssetBatchRatingDialog
+      v-model="batchRatingDialogVisible"
+      :targets="batchRatingTargets"
+      :execute="executeBatchRating"
+      @completed="refreshAfterBatchRating"
+    />
+
     <!-- 保存检索条件命名弹窗（第七批 PR3，PRD D4/D7）：名称必填（重名拒绝由后端
          Save 返回，handleError 透传 toast）；条件摘要预览展示快照全维（facet 时间
          维展示解析后的绝对区间——相对档保存即冻结为区间，摘要与调取还原口径一致）。
@@ -944,6 +984,7 @@ import {
   UpdateAssetSlideMeta,
   BatchUpdateAssetFileTags,
   BatchUpdateAssetSlideTags,
+  BatchSetAssetRating,
   SearchAssets,
   ListAssetSavedSearches,
   SaveAssetSavedSearch,
@@ -982,6 +1023,9 @@ import AssetTagManagerDialog from './AssetTagManagerDialog.vue'
 // 批量打标签弹窗（第六批 PR3，PRD D3/D4/D5）：targets 构建与两批量 API 分派在宿主，
 // 弹窗不感知 viewMode（只收 targets 与 execute 分派回调）
 import AssetBatchTagDialog from './AssetBatchTagDialog.vue'
+// 批量评分弹窗（第八批，SRS §2.6 P0，PRD D4/D5）：形态复刻批量打标签弹窗，
+// targets 反查链路共用，execute 分派回调以星级值调 BatchSetAssetRating
+import AssetBatchRatingDialog from './AssetBatchRatingDialog.vue'
 // facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
 // 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
 // countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
@@ -994,7 +1038,7 @@ import AssetFilterPopover, {
   describeFacetState
 } from './AssetFilterPopover.vue'
 // 标签管理入口按钮图标（EP 图标族，浅色工具条容器内用 el-icon 承载）
-import { CollectionTag } from '@element-plus/icons-vue'
+import { CollectionTag, ArrowDown } from '@element-plus/icons-vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
@@ -1047,6 +1091,16 @@ const fileFilterPath = ref('')
 // 语义直白，放弃数组口径的理由是全选/反选需要集合运算，Set 原生语义更贴切）
 const selectedKeys = ref(new Set())
 const flatten = ref(true) // 检索聚合折叠/平铺开关（SearchAssets opts.flatten；D8#2 默认平铺打开——同一 PPT 多页命中逐页平铺为主路径，聚合折叠按需关回）
+// 排序档位与方向（SRS §2.5.3，SearchAssets opts.sortBy/sortDir，取值对齐 model
+// AssetSortBy* 常量）：'relevance' 相关性（默认，FTS bm25 序，无向）/'mtime'
+// 修改时间/'rating' 星级——两档均为文件级口径（幻灯片/聚合条目继承归属文件属性，
+// 与星级 facet 口径同源，页级 slide_meta.rating 不参与排序），排序在后端分页前
+// 对全量命中执行（分页懒加载下前端内存排序必错段）。'desc' 降序默认/'asc' 升序，
+// 仅 mtime/rating 档有意义。排序属检索条件维度：跨库保留（对齐关键词/标签/facet
+// 先例，切库 watch 不复位）；快照随检索条件持久化（buildSavedSearchSnapshot，
+// D3），不做用户偏好持久化
+const sortBy = ref('relevance')
+const sortDir = ref('desc')
 const keywordInput = ref('') // 输入框绑定值（未应用）
 const activeKeyword = ref('') // 已应用关键词（非空即检索模式）
 // 标签筛选（第六批起树形多选）：ID 数组口径与后端 opts.tagIds 一致（非空即检索
@@ -1063,6 +1117,13 @@ const facetState = ref(createDefaultFacetState())
 // facet 生效维度数（0-3，badge 口径）：>0 即 searchMode 激活（浏览语境切
 // facets-only 分页链路，D3），与后端 assetsFacetFilter.active 判定口径对齐
 const facetActiveCount = computed(() => countActiveFacets(facetState.value))
+
+// 排序触发按钮人读标签（相关性无向不标方向；mtime/rating 标当前升降）
+const sortTriggerLabel = computed(() => {
+  if (sortBy.value === 'mtime') return `修改时间 ${sortDir.value === 'asc' ? '↑' : '↓'}`
+  if (sortBy.value === 'rating') return `评分 ${sortDir.value === 'asc' ? '↑' : '↓'}`
+  return '排序：相关性'
+})
 
 // ---- 数据 ----
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
@@ -1329,18 +1390,22 @@ const refreshAfterTagChange = async () => {
   }
 }
 
-// ---- 批量打标签（第六批 PR3，SRS §2.4，PRD D3/D4/D5/D7）----
+// ---- 批量打标签（第六批 PR3，SRS §2.4，PRD D3/D4/D5/D7）与批量评分
+//（第八批，SRS §2.6 P0，PRD D4/D5）---- 两批量弹窗共用 targets 反查构建与
+// 刷新链（差异点：标签树 reload 仅打标签需要），分派回调各按语义独立。
 
 const batchTagDialogVisible = ref(false)
 // 批量目标清单 [{ fileId, slideNum?, label }]：label 为按 viewMode 拼装的定位展示
 // 文案（文件模式 = 文件路径；幻灯片模式 = 「文件路径 · 第 N 页」），弹窗失败明细
 // 行定位展示与结果条目反查共用（弹窗不感知 viewMode，契约见 AssetBatchTagDialog）
 const batchTagTargets = ref([])
+const batchRatingDialogVisible = ref(false)
+const batchRatingTargets = ref([])
 
-// 打开批量弹窗：selectedKeys 经当前渲染独立卡反查目标——消费 assetSelectionKey
-// 共享单点做键映射（禁第二处手拼键，utils/assetSelection 键形态契约），渲染集内
-// 匹配天然滤掉陈旧选中键（反查 miss 跳过并计数）；全 miss 不开弹窗直接提示
-const openBatchTagDialog = () => {
+// 选中集目标反查单点（两批量弹窗共用）：selectedKeys 经当前渲染独立卡反查目标——
+// 消费 assetSelectionKey 共享单点做键映射（禁第二处手拼键，utils/assetSelection
+// 键形态契约），渲染集内匹配天然滤掉陈旧选中键（反查 miss 跳过并计数）
+const collectSelectionTargets = () => {
   const targets = []
   for (const card of selectableCards.value) {
     if (!selectedKeys.value.has(assetSelectionKey(card))) continue
@@ -1356,9 +1421,21 @@ const openBatchTagDialog = () => {
   if (missCount > 0) {
     ElMessage.warning(`${missCount} 项已失效跳过`)
   }
+  return targets
+}
+
+const openBatchTagDialog = () => {
+  const targets = collectSelectionTargets()
   if (targets.length === 0) return
   batchTagTargets.value = targets
   batchTagDialogVisible.value = true
+}
+
+const openBatchRatingDialog = () => {
+  const targets = collectSelectionTargets()
+  if (targets.length === 0) return
+  batchRatingTargets.value = targets
+  batchRatingDialogVisible.value = true
 }
 
 // 批量执行分派回调（弹窗经 props.execute 调用，op = {addTags, removeTags} 标签名
@@ -1381,19 +1458,34 @@ const executeBatchTagUpdate = (op) => {
   )
 }
 
-// 批量打标签完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目
-// 一事务成功条目已写入不回滚，PRD D3）：对齐 refreshAfterTagChange/onSaveMeta
-// 先例——树组件 reload（标签直接绑定计数可能变）+ 底册重拉 + 检索态重搜；
-// 幻灯片浏览模式补拉幻灯片清单首页（slideEntries 的 ownTags 快照随批量更新，
-// 详情草稿回读数据源，对齐 onSaveSlideMeta 浏览分支刷新口径），过滤浏览语境
-// 复位首页后接续拉兜底（见分支内注释）。选中保留（PRD
-// D5：数据变更点位非语境变更，键 file:<id>/slide:<fileId>:<slideNum> 稳定不受
-// 重解析影响）。双代次守卫（对齐 onSaveSlideMeta 先例）：刷新 await 期间切库/
-// 扫描刷新（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应已被
-// 各加载函数内部守卫丢弃，本函数随之中止，不再触碰新语境的展开缓存
-const refreshAfterBatchTag = async () => {
-  filterTagSelectRef.value?.reload()
-  detailTagSelectRef.value?.reload()
+// 批量评分分派回调（弹窗经 props.execute 调用，入参 = 星级 0-5，0 = 清除）：
+// 以打开时构建的 targets 调 BatchSetAssetRating（单一入口混合文件/页目标，
+// slideNum 0 = 文件条目——targets 幻灯片形态携带 slideNum，文件形态字段缺省经
+// `|| 0` 归一，键契约禁 slides.id）。弹窗打开为模态，viewMode 在提交期间不会被
+// 切换，分派读取当下 viewMode 构建的反查 targets 与打开时一致
+const executeBatchRating = (rating) => {
+  return BatchSetAssetRating(
+    currentLibraryId.value,
+    batchRatingTargets.value.map(t => ({ fileId: t.fileId, slideNum: t.slideNum || 0 })),
+    rating
+  )
+}
+
+// 批量完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目一事务
+// 成功条目已写入不回滚，PRD D3）：对齐 refreshAfterTagChange/onSaveMeta 先例——
+// 标签树 reload（仅打标签链需要：标签直接绑定计数可能变；评分不涉标签变更跳过）
+// + 底册重拉 + 检索态重搜；幻灯片浏览模式补拉幻灯片清单首页（ownTags/页星级
+// 快照随批量更新，详情草稿回读数据源，对齐 onSaveSlideMeta 浏览分支刷新口径），
+// 过滤浏览语境复位首页后接续拉兜底（见分支内注释）。选中保留（PRD D5：数据变更
+// 点位非语境变更，键 file:<id>/slide:<fileId>:<slideNum> 稳定不受重解析影响）。
+// 双代次守卫（对齐 onSaveSlideMeta 先例）：刷新 await 期间切库/扫描刷新
+//（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应已被各加载函数
+// 内部守卫丢弃，本函数随之中止，不再触碰新语境的展开缓存
+const refreshAfterBatchAnnotation = async ({ reloadTagTrees = true } = {}) => {
+  if (reloadTagTrees) {
+    filterTagSelectRef.value?.reload()
+    detailTagSelectRef.value?.reload()
+  }
   if (!hasLibrary.value) return
   const libSeqAtStart = librarySeq
   const searchSeqAtStart = searchSeq
@@ -1430,6 +1522,11 @@ const refreshAfterBatchTag = async () => {
   }
 }
 
+// 批量打标签 completed 入口（含标签树 reload）
+const refreshAfterBatchTag = () => refreshAfterBatchAnnotation({ reloadTagTrees: true })
+// 批量评分 completed 入口（评分不涉标签变更，跳过标签树 reload）
+const refreshAfterBatchRating = () => refreshAfterBatchAnnotation({ reloadTagTrees: false })
+
 // ---- 保存检索条件（第七批 SRS §2.5 PR3，PRD D4/D7）----
 
 const saveSearchDialogVisible = ref(false)
@@ -1460,7 +1557,11 @@ const buildSavedSearchSnapshot = (name, id = 0) => {
     tagNames: tagPairs.map(pair => pair.name),
     ...buildFacetOptions(facetState.value),
     flatten: flatten.value,
-    slideTagOnlyOwn: slideTagOnlyOwn.value
+    slideTagOnlyOwn: slideTagOnlyOwn.value,
+    // 排序快照（SRS §2.5.3，D3）：档位与方向随检索条件一并保存，调取时还原；
+    // 旧快照缺字段调取侧容错回退默认（applySavedSearch）
+    sortBy: sortBy.value,
+    sortDir: sortDir.value
   }
 }
 
@@ -1470,8 +1571,17 @@ const openSaveSearchDialog = () => {
 }
 
 // 保存弹窗条件摘要（D7 预览面）：快照字段的人读形态，与 buildSavedSearchSnapshot
-// 同一状态源（activeKeyword/selectedTagIds/tagOptions/facetState/两开关），摘要与
-// 实存内容不会漂移；facet 摘要经 describeFacetState 单点产出
+// 同一状态源（activeKeyword/selectedTagIds/tagOptions/facetState/两开关/排序档位），
+// 摘要与实存内容不会漂移；facet 摘要经 describeFacetState 单点产出，排序摘要经
+// sortSummaryText 单点产出
+// 排序摘要人读形态（保存弹窗条件摘要行）：与快照 sortBy/sortDir 同一状态源，
+// 摘要与实存内容不会漂移
+const sortSummaryText = computed(() => {
+  if (sortBy.value === 'mtime') return `修改时间·${sortDir.value === 'asc' ? '升序' : '降序'}`
+  if (sortBy.value === 'rating') return `评分·${sortDir.value === 'asc' ? '升序' : '降序'}`
+  return '相关性（默认）'
+})
+
 const saveSearchSummaryRows = computed(() => {
   const facetText = describeFacetState(facetState.value)
   const tagNames = selectedTagIds.value
@@ -1484,7 +1594,8 @@ const saveSearchSummaryRows = computed(() => {
     { label: '修改时间', value: facetText.mtimeText },
     { label: '文件大小', value: facetText.sizeText },
     { label: '平铺聚合', value: flatten.value ? '开启（命中逐页平铺）' : '关闭（同 PPT 命中折叠）' },
-    { label: '仅幻灯片自身标签', value: slideTagOnlyOwn.value ? '开启' : '关闭' }
+    { label: '仅幻灯片自身标签', value: slideTagOnlyOwn.value ? '开启' : '关闭' },
+    { label: '排序', value: sortSummaryText.value }
   ]
 })
 
@@ -1564,6 +1675,10 @@ const applySavedSearch = async (item) => {
   selectedTagIds.value = tagIds
   slideTagOnlyOwn.value = !!item.slideTagOnlyOwn
   flatten.value = !!item.flatten
+  // 排序快照还原（SRS §2.5.3，D3）：旧快照缺字段（JSON 容错反序列化为 undefined）
+  // 回退默认相关性/降序，向后兼容无版本号
+  sortBy.value = item.sortBy || 'relevance'
+  sortDir.value = item.sortDir || 'desc'
   facetState.value = restoreFacetStateFromSnapshot(item)
   // 调取后面板收起（结果区让位）；桩环境无该方法时静默跳过
   savedSearchPopoverRef.value?.hide?.()
@@ -1900,6 +2015,23 @@ const ensureFileEntries = async (seq = null) => {
 
 // ================= 检索 =================
 
+// 排序档位变更（SRS §2.5.3，D1）：同档再点翻转升降（相关性无向不翻转），切档回
+// 默认降序。排序属检索条件变更点位（§8.2 矩阵登记）：走 applySearch 同路径——
+// searchSeq 代次守卫与清详情/预览/选中/文件过滤/聚合展开缓存复位面由其统一执行，
+// 勿重复清理；浏览语境（非检索态）排序仅记录待下次检索生效，不触发清单重载
+const onSortCommand = async (command) => {
+  if (command === sortBy.value) {
+    if (command === 'relevance') return
+    sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
+  } else {
+    sortBy.value = command
+    sortDir.value = 'desc'
+  }
+  if (searchMode.value) {
+    await applySearch()
+  }
+}
+
 // 应用搜索条件：输入框值落定为 activeKeyword；关键词与标签全空则退出检索回浏览
 const applySearch = async () => {
   searchSeq++ // 语境变更点：改词/改筛选使在途检索写回失效
@@ -1978,6 +2110,10 @@ const runSearch = async (reset) => {
       // facet 三维条件（第七批）：检索调用时经换算单点现算（相对档边界随检索
       // 时刻刷新），spread 展开 ratings/mtimeFrom/mtimeTo/sizeFrom/sizeTo 五字段
       ...buildFacetOptions(facetState.value),
+      // 排序档位（SRS §2.5.3）：档位与升降随检索下发，后端在分页前对全量命中
+      // 排序保证跨页顺序一致（禁前端内存排序——分页懒加载下必错段）
+      sortBy: sortBy.value,
+      sortDir: sortDir.value,
       limit: PAGE_SIZE,
       offset: reset ? 0 : searchItems.value.length
     })
@@ -2160,7 +2296,9 @@ const toggleAgg = async (filePath) => {
   try {
     // 聚合子项查询刻意不带 facet 条件（第七批）：facet 为文件维度判定，聚合父卡
     // 能出现即归属文件已通过 facet 筛选，同文件全部页继承同一判定结果——带上
-    // facet 是语义 no-op，省一次重复换算；关键词/标签/平铺/仅自身标签仍需携带
+    // facet 是语义 no-op，省一次重复换算；关键词/标签/平铺/仅自身标签仍需携带。
+    // 排序参数同理不传（SRS §2.5.3）：mtime/rating 为文件级口径，同文件子项排序
+    // 主键同值，后端次级键（score→path）序与相关性档 FTS 序一致，不带零行为差异
     const page = await SearchAssets(currentLibraryId.value, keywordAtStart, {
       flatten: true,
       tagIds: tagsAtStart,

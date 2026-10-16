@@ -41,4 +41,12 @@ describe('AssetSelectionBar', () => {
     await byText('批量打标签').trigger('click')
     expect(wrapper.emitted('batch-tag')).toHaveLength(1)
   })
+
+  it('批量评分按钮（第八批，SRS §2.6 P0）：上报 batch-rating 事件（targets 构建与 API 分派留宿主）', async () => {
+    const wrapper = mountBar(2)
+    const byText = (text) => wrapper.findAll('button').find((b) => b.text().trim() === text)
+    expect(byText('评分')).toBeTruthy()
+    await byText('评分').trigger('click')
+    expect(wrapper.emitted('batch-rating')).toHaveLength(1)
+  })
 })

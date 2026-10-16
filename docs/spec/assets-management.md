@@ -257,4 +257,26 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）。
+## 10. 检索排序器与批量评分（SRS §2.5.3 / §2.6，2026-10-16 第八批沉淀）
+
+### 10.1 检索排序契约
+
+- **排序参数**：`AssetSearchOptions.SortBy`（"" / `AssetSortByRelevance`="relevance" 默认 / `AssetSortByMtime`="mtime" / `AssetSortByRating`="rating"；非法值按相关性处理）+ `SortDir`（"" / "desc" 默认降序 / "asc"；仅 mtime/rating 有意义）。常量为**普通 string 常量**非具名 string 类型（规避 wails models.ts 别名缺失坑，见 cross-layer-contracts）。
+- **排序口径统一文件级**（与星级 facet 第七批 D1 同源）：mtime 档 = `files.mtime_ns`、rating 档 = `files.rating`，幻灯片条目/聚合条目**继承归属文件**；页级 `slide_meta.rating` 纯展示与详情编辑，不参与排序。相关性档 = FTS bm25 序现状不动（聚合组首 = 组内最高分页，SRS「聚合按最高单页相关性」天然满足）。
+- **排序实现三层单点**：`assetSortKey`（入参归一化）→ `sortEntriesByOptions`（Go 层稳定排序唯一出口，三路径共用禁分叉）→ 主键方向随 SortDir 翻转、**次级键链方向恒定**（score → sortPath → sortNum → refID）保证同值条目跨分页稳定。**次级键必须含 sortNum**：同路径文件条目与页条目主键/路径同值时若无 sortNum，落到 refID（files.id 与 slides.id 独立自增序列）决序，「文件本体先于其页」语义依赖 ID 分配顺序这一脆弱隐式依赖（重解析后页 ID 大增即破）。
+- **执行位置**：严格在**聚合之前、分页切片之前**（聚合组首 = 排序后首现条目，文件维度单值继承天然正确；排序后聚合无需改 `aggregateSlideEntries`）。相关性档 `sortEntriesByOptions` 直接原样返回，零查询零重排。
+- **关键词路径排序键获取**：FTS 命中 fileID 全集一次 `fileSortPropsByIDs` 批量 IN 查询（分批 `assetsQueryIDBatch` 防 N+1）；标签/facets-only 路径 SELECT 扩列（mtime_ns/rating，幻灯片 JOIN files 继承）。**props 缺键 = 文件行已消失（并发删除窗口）→ 该 fileID 全部条目剔除**而非零值参与排序（零值 mtime 把已删文件排到序端成可见异常序；剔除语义与 pageAndFillEntries 填充层「元数据消失跳过」一致，且剔除发生在 total 计数前，total 收敛为存活条目）。
+- **保存检索条件快照**：`AssetSavedSearch` 补 `sortBy`/`sortDir`；JSON 容错反序列化零值 = 相关性（旧快照无版本号向后兼容）；前端 `applySavedSearch` 还原且 undefined 容错回退。
+- **前端**：检索工具行独立排序下拉（不入 AssetFilterPopover——排序高频切换与 facet 低频筛选不同频）；相关性无升降、mtime/rating 同档再点翻转升降（切档回默认降序）；排序变更 = 检索条件变更点位走 `applySearch` 同路径（searchSeq 守卫 + 复位面统一执行，§8.2 矩阵登记）；排序参数随 `SearchAssets` opts 下发，**前端零内存排序**（分页懒加载下前端排序必错段）；聚合展开子项查询（toggleAgg）刻意不传排序参数（同文件子项主键同值，次级键序与 FTS 序一致零行为差异）。排序状态跨库保留（对齐 facet 切库保留先例）。
+
+### 10.2 批量修改评分契约（SRS §2.6 P0）
+
+- **API**：`BatchSetAssetRating(libraryID, targets []AssetRatingTarget{FileID, SlideNum}, rating int64)` 单一入口混合文件/页目标（slideNum 0 = 文件条目）——与批量打标签「两方法按形态分叉」刻意不同：评分无标签树联动、无 Add/Remove 相对语义，单方法足矣。rating 0-5 越界/空目标/库不存在 = 参数错误普通 error（未新增错误码）；0 = 清除评分。
+- **每条目一事务**逐条目 commit（splitOutcome 先例，部分失败不中断）；返回 `AssetBatchRatingResult{Total, Succeeded, Failed, Items}`，Item 含后端拼装 `Label`（条目事务内存在性校验处顺带 SELECT path，零额外开销；弹窗以后端 Label 第一数据源、targets 反查 `slideNum||0` 兜底）。Status 复用 `AssetBatchTagStatus*` 常量。
+- **页条目 upsert slide_meta 键 (file_id, slide_num) 禁 slides.id**；INSERT OR REPLACE 整行必须**回读现存业务备注再整行写回**（漏回写清备注）；文件存在性+页行校验在写入同事务内。
+- **前端**：AssetSelectionBar「评分」按钮 + `AssetBatchRatingDialog`（复刻 AssetBatchTagDialog 形态：targets+execute props、不感知 viewMode）；el-rate 星级 0-5 单选 clearable（0=清除）；targets 反查收敛共享单点 `collectSelectionTargets`（打标签/评分两消费方 slideNum `||0` 双侧归一）；刷新链抽 `refreshAfterBatchAnnotation` 共享体（评分跳过标签树 reload），completed 后**不清选中**（§8.2 数据变更点位）；星级 facet 命中联动属正常数据变更不清选中。
+- **评分不入 FTS**（评分非检索列，五契约「切分写入/查询同源」不涉及；rating 排序键实时读 files 表天然同步）。
+
+---
+
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）；任务 10-16-srs-2-5-3-srs-2-6-p0（2026-10-16，第八批 §10：三路径排序单点 sortEntriesByOptions/次级键含 sortNum 防 refID 隐式依赖/并发删除窗口 props 缺键剔除/快照补排序字段零值兼容/批量评分单方法每条目一事务整行回写备注/collectSelectionTargets 与刷新链共享化）。

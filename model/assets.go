@@ -185,6 +185,37 @@ type AssetBatchTagResult struct {
 	Items     []AssetBatchTagItem `json:"items"`     // 逐条目明细（顺序同提交序，恒非 nil）
 }
 
+// AssetRatingTarget 批量评分操作的目标定位（BatchSetAssetRating 单一入口混合
+// 文件条目与页条目，SRS §2.6 P0）：键契约 = (fileId, slideNum)，禁 slides.id
+// （每轮重解析删旧插新全变，与 slide_meta 存储键同口径，见
+// docs/spec/assets-management.md 幻灯片独立标注节）。SlideNum = 0 表示文件条目
+// （评 files.rating），≥ 1 表示页条目（评 slide_meta.rating 页级标注）。
+type AssetRatingTarget struct {
+	FileID   int64 `json:"fileId"`             // 归属文件记录 ID
+	SlideNum int   `json:"slideNum,omitempty"` // 页序（从 1 计，以 sldIdLst 为准）；0 = 文件条目
+}
+
+// AssetBatchRatingItem 批量评分单条目结果明细（形态对齐 AssetBatchTagItem 先例，
+// 额外携带后端拼装的定位展示 Label——文件路径从条目事务内的存在性校验顺带读出，
+// 免二次 JOIN 查询；Status 取值复用 AssetBatchTagStatus* 常量，ok/failed 同值
+// 语义）。前端弹窗失败明细行优先消费 Label，targets 反查仅作兜底。
+type AssetBatchRatingItem struct {
+	FileID   int64  `json:"fileId"`             // 条目归属文件记录 ID
+	SlideNum int    `json:"slideNum,omitempty"` // 页序（页条目从 1 计；文件条目恒 0 省略）
+	Status   string `json:"status"`             // AssetBatchTagStatus* 取值（ok / failed）
+	Message  string `json:"message,omitempty"`  // 失败原因（成功为空）
+	Label    string `json:"label,omitempty"`    // 定位展示文案（文件路径；页条目追加「 · 第 N 页」）
+}
+
+// AssetBatchRatingResult 批量评分结果汇总。事务边界与部分失败语义对齐
+// AssetBatchTagResult（每条目一事务，成功条目不回滚）。
+type AssetBatchRatingResult struct {
+	Total     int                    `json:"total"`     // 提交条目总数
+	Succeeded int                    `json:"succeeded"` // 成功条目数
+	Failed    int                    `json:"failed"`    // 失败条目数
+	Items     []AssetBatchRatingItem `json:"items"`     // 逐条目明细（顺序同提交序，恒非 nil）
+}
+
 // AssetTagListItem 标签清单条目（ListAssetTags 返回，标签树构建数据源）：标签
 // 本体五字段 + 直接绑定计数。Count = file_tags 绑定行数 + slide_tags 绑定行数
 // 之和（父节点子树合计由前端按树结构自算，后端不聚合）；含未使用标签（Count=0）。
@@ -204,6 +235,17 @@ type AssetTagListItem struct {
 const (
 	AssetRefTypeFile  = "file"  // 文件条目（整份 pptx 命中，如文件名/备注命中）
 	AssetRefTypeSlide = "slide" // 幻灯片条目（单页命中）
+)
+
+// 素材检索排序档位与方向取值（AssetSearchOptions.SortBy/SortDir 与
+// AssetSavedSearch 同名字段共用，普通 string 常量非具名类型，不经 Wails 绑定层
+// 别名机制）。
+const (
+	AssetSortByRelevance = "relevance" // 相关性（FTS bm25 序，默认档；空串等价）
+	AssetSortByMtime     = "mtime"     // 修改时间（files.mtime_ns，文件级口径）
+	AssetSortByRating    = "rating"    // 星级（files.rating，文件级口径）
+	AssetSortDirAsc      = "asc"       // 升序
+	AssetSortDirDesc     = "desc"      // 降序（默认；空串等价）
 )
 
 // AssetSearchOptions 素材检索入参（SearchAssets）。关键词与标签筛选可组合；
@@ -231,8 +273,18 @@ type AssetSearchOptions struct {
 	// 边界；闭区间 [SizeFrom, SizeTo]。幻灯片条目按归属文件的大小判定（继承）。
 	SizeFrom int64 `json:"sizeFrom"`
 	SizeTo   int64 `json:"sizeTo"`
-	Limit    int   `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
-	Offset   int   `json:"offset"` // 分页偏移（<0 按 0 处理）
+	// SortBy 排序档位（SRS §2.5.3）："" / "relevance" = 相关性（默认，FTS bm25
+	// 序；纯标签/facets-only 路径为路径序现状）；"mtime" = 修改时间（文件级口径，
+	// 取 files.mtime_ns）；"rating" = 星级（文件级口径，取 files.rating，与星级
+	// facet 同源——幻灯片/聚合条目继承归属文件属性，页级 slide_meta.rating 纯展示
+	// 不参与排序）。非法值按相关性处理。mtime/rating 档在分页前对全量命中排序，
+	// 跨页顺序一致（次级键确定性见 sortEntriesByOptions）。
+	SortBy string `json:"sortBy"`
+	// SortDir 排序方向："" / "desc" = 降序（默认）；"asc" = 升序。仅 mtime/rating
+	// 档有意义（相关性无向）；非法值按降序处理。
+	SortDir string `json:"sortDir"`
+	Limit   int    `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset  int    `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或
@@ -258,7 +310,7 @@ type AssetSearchHit struct {
 // AssetSearchPage 素材检索结果页（分页契约：Total 为过滤/聚合后的总条目数，
 // 翻页以 Offset 递增 Limit 驱动，Total 不随页变化）。
 type AssetSearchPage struct {
-	Items     []AssetSearchHit `json:"items"`     // 当前页条目（按相关性降序；纯标签筛选按路径序）
+	Items     []AssetSearchHit `json:"items"`     // 当前页条目（按 SortBy 档位：相关性默认 FTS bm25 序，mtime/rating 按文件维度属性，纯标签/facets-only 相关性档按路径序）
 	Total     int              `json:"total"`     // 过滤/聚合后的总条目数
 	Keyword   string           `json:"keyword"`   // 本次检索关键词（原样回显）
 	Flattened bool             `json:"flattened"` // 是否平铺模式（与入参 Flatten 一致）
@@ -352,5 +404,9 @@ type AssetSavedSearch struct {
 	SizeTo          int64   `json:"sizeTo"`          // 文件大小区间上界（字节，0 = 不设界）
 	Flatten         bool    `json:"flatten"`         // 平铺开关快照（检索语境完整还原）
 	SlideTagOnlyOwn bool    `json:"slideTagOnlyOwn"` // 页标签继承开关快照
-	CreatedAt       string  `json:"createdAt"`       // 保存时间（RFC3339；更新覆盖时保留原值）
+	// SortBy/SortDir 排序档位与方向快照，语义与 AssetSearchOptions 同名字段一致。
+	// 旧快照缺字段反序列化为零值 = 相关性排序（JSON 容错，向后兼容无版本号）。
+	SortBy    string `json:"sortBy"`
+	SortDir   string `json:"sortDir"`
+	CreatedAt string `json:"createdAt"` // 保存时间（RFC3339；更新覆盖时保留原值）
 }

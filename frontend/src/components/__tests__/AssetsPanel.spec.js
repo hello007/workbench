@@ -137,8 +137,8 @@ const mockSettings = {
   assets: { auto: true, smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1024, hdQuotaMB: 1024 }
 }
 
-// 保存的检索条件条目工厂（形状对齐 model.AssetSavedSearch 十四字段）：本库条目
-// 默认带全维条件（关键词 + 标签 + facet 大小档 + 两开关），供调取回填断言
+// 保存的检索条件条目工厂（形状对齐 model.AssetSavedSearch 十六字段）：本库条目
+// 默认带全维条件（关键词 + 标签 + facet 大小档 + 两开关 + 排序档位），供调取回填断言
 const savedSearchEntry = (overrides = {}) => ({
   id: 1,
   name: '近期高分',
@@ -153,6 +153,8 @@ const savedSearchEntry = (overrides = {}) => ({
   sizeTo: 0,
   flatten: false,
   slideTagOnlyOwn: true,
+  sortBy: 'rating',
+  sortDir: 'asc',
   createdAt: '2026-10-16T09:00:00+08:00',
   ...overrides
 })
@@ -186,6 +188,9 @@ const { wailsMock } = vi.hoisted(() => ({
     // 批量打标签（第六批 PR3）：宿主 execute 分派回调按 viewMode 调其一
     BatchUpdateAssetFileTags: vi.fn(),
     BatchUpdateAssetSlideTags: vi.fn(),
+    // 批量评分（第八批，SRS §2.6 P0）：单一入口混合文件/页目标，宿主 execute
+    // 分派回调以 targets（slideNum||0）+ 星级值调用
+    BatchSetAssetRating: vi.fn(),
     OpenDirectoryDialog: vi.fn(),
     AssetThumbsAvailable: vi.fn(),
     CancelAssetThumbs: vi.fn(),
@@ -339,6 +344,14 @@ const stubs = {
     props: ['modelValue', 'libraryId', 'targets', 'execute'],
     emits: ['update:modelValue', 'completed']
   },
+  // 批量评分弹窗桩（第八批）：显隐/targets/execute 受控透出 + completed 事件透出
+  //（复刻批量打标签弹窗桩形态，targets/execute 形状断言见批量评分用例）
+  AssetBatchRatingDialog: {
+    name: 'AssetBatchRatingDialogStub',
+    template: '<div v-if="modelValue" class="asset-batch-rating-dialog-stub"></div>',
+    props: ['modelValue', 'targets', 'execute'],
+    emits: ['update:modelValue', 'completed']
+  },
   // facet 筛选弹层桩（第七批）：受控 emit 形态对齐真实组件（update:modelValue +
   // change 双事件同步快照）。档位→检索参数换算为组件模块纯函数（独立 spec 以注入
   // now 覆盖），本 spec 只断言宿主接线（SearchAssets 参数 / facets-only 链路切换 /
@@ -360,6 +373,28 @@ const stubs = {
       this.$emit('show')
     },
     methods: { hide() {} }
+  },
+  // 排序档位下拉桩（SRS §2.5.3）：经 provide 向后代 el-dropdown-item 下发命令
+  // 派发函数，使下拉项可 DOM 点击触发 @command（对齐真实 EP 组件的 item 点击
+  // 行为，AiChatPanel spec 同款先例）
+  'el-dropdown': {
+    template: '<div class="el-dropdown"><slot /><slot name="dropdown" /></div>',
+    emits: ['command'],
+    provide() {
+      return { __dropdownCommand: (cmd) => this.$emit('command', cmd) }
+    }
+  },
+  'el-dropdown-menu': { template: '<div class="el-dropdown-menu"><slot /></div>' },
+  'el-dropdown-item': {
+    template: '<div class="el-dropdown-item" @click="onClick"><slot /></div>',
+    props: ['command', 'disabled', 'divided'],
+    inject: { __dropdownCommand: { default: null } },
+    methods: {
+      onClick() {
+        if (this.disabled) return
+        if (this.__dropdownCommand) this.__dropdownCommand(this.command)
+      }
+    }
   }
 }
 
@@ -406,6 +441,8 @@ describe('AssetsPanel', () => {
     // 批量打标签（第六批 PR3）默认全成功空明细（形状对齐 model.AssetBatchTagResult）
     wailsMock.BatchUpdateAssetFileTags.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
     wailsMock.BatchUpdateAssetSlideTags.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
+    // 批量评分（第八批）默认全成功空明细（形状对齐 model.AssetBatchRatingResult）
+    wailsMock.BatchSetAssetRating.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
     // 保存检索条件（第七批 PR3）默认值：空清单 + upsert 返回带 ID 对象 + 删除 no-op
     wailsMock.ListAssetSavedSearches.mockResolvedValue([])
     wailsMock.SaveAssetSavedSearch.mockResolvedValue(savedSearchEntry())
@@ -550,6 +587,8 @@ describe('AssetsPanel', () => {
       mtimeTo: 0,
       sizeFrom: 0,
       sizeTo: 0,
+      sortBy: 'relevance',
+      sortDir: 'desc',
       limit: 50,
       offset: 0
     })
@@ -626,6 +665,119 @@ describe('AssetsPanel', () => {
     expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
   })
 
+  // ---- 排序档位（SRS §2.5.3，D1）：工具行下拉切换 / 同档再点翻转升降 / 切档回
+  // 默认降序 / 相关性无向 / 非检索语境仅记录 / 走 applySearch 同路径 ----
+
+  it('排序切换：mtime 档以 sortBy=mtime/sortDir=desc 重跑检索，同档再点翻转升序，切档回默认降序，相关性回默认', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    const sortItem = (text) =>
+      wrapper.findAll('.sort-menu .el-dropdown-item').find((i) => i.text().includes(text))
+    await sortItem('修改时间').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'mtime', sortDir: 'desc' }))
+    // 触发按钮标注当前档位与方向（人读反馈）
+    expect(wrapper.find('.sort-trigger').text()).toContain('修改时间')
+
+    // 同档再点翻转升降（D1）
+    await sortItem('修改时间').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'mtime', sortDir: 'asc' }))
+
+    // 切档回默认降序
+    await sortItem('评分').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'rating', sortDir: 'desc' }))
+
+    // 切回相关性档（默认无向）
+    await sortItem('相关性').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'relevance', sortDir: 'desc' }))
+  })
+
+  it('排序变更走 applySearch 同路径：检索语境下语境复位面统一执行（§8.2 矩阵，不重复清理）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    // 选中一张命中卡（排序变更应被 applySearch 清掉——驻留即幽灵选中）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+
+    const sortItem = (text) =>
+      wrapper.findAll('.sort-menu .el-dropdown-item').find((i) => i.text().includes(text))
+    await sortItem('评分').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'rating', sortDir: 'desc' }))
+  })
+
+  it('排序变更（非检索语境）：仅记录待下次检索生效不触发清单重载；相关性同档再点无翻转（无向）', async () => {
+    const wrapper = await createWrapper()
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    const sortItem = (text) =>
+      wrapper.findAll('.sort-menu .el-dropdown-item').find((i) => i.text().includes(text))
+    await sortItem('评分').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore) // 浏览态不重载
+    // 切到检索语境后按已记录档位发起
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'rating', sortDir: 'desc' }))
+
+    // 切回相关性档（切档语义，正常重跑）；相关性同档再点：无向不翻转、不重跑
+    await sortItem('相关性').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ sortBy: 'relevance', sortDir: 'desc' }))
+    const callsAfterSwitch = wailsMock.SearchAssets.mock.calls.length
+    await sortItem('相关性').trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsAfterSwitch)
+  })
+
+  it('保存弹窗摘要含排序档位行：切档后摘要与快照口径一致（人读形态）', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    const sortItem = (text) =>
+      wrapper.findAll('.sort-menu .el-dropdown-item').find((i) => i.text().includes(text))
+    await sortItem('修改时间').trigger('click')
+    await flushPromises()
+    await sortItem('修改时间').trigger('click') // 翻转为升序
+    await flushPromises()
+    await clickButton(wrapper, '保存搜索')
+    const summary = wrapper.find('.save-search-summary')
+    expect(summary.text()).toContain('排序')
+    expect(summary.text()).toContain('修改时间·升序')
+  })
+
+  it('调取旧快照（无排序字段）：容错回退默认相关性/降序（D3 向后兼容无版本号）', async () => {
+    wailsMock.ListAssetSavedSearches.mockResolvedValue([
+      savedSearchEntry({ id: 11, name: '旧条件', sortBy: undefined, sortDir: undefined })
+    ])
+    const wrapper = await createWrapper()
+    wailsMock.SearchAssets.mockClear()
+    await clickButton(wrapper, '旧条件')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenCalledTimes(1)
+    const [, , opts] = wailsMock.SearchAssets.mock.calls[0]
+    expect(opts.sortBy).toBe('relevance')
+    expect(opts.sortDir).toBe('desc')
+  })
+
   it('检索命中文件点击：底册未加载时兜底拉取 ListAssetFiles 并显示详情（非「记录不存在」告警）', async () => {
     // 挂载时底册加载为空（第 1 次），检索命中文件卡片点击触发兜底重拉（第 2 次）
     wailsMock.ListAssetFiles.mockResolvedValueOnce([]).mockResolvedValue(mockFiles)
@@ -659,6 +811,8 @@ describe('AssetsPanel', () => {
       mtimeTo: 0,
       sizeFrom: 0,
       sizeTo: 0,
+      sortBy: 'relevance',
+      sortDir: 'desc',
       limit: 50,
       offset: 0
     })
@@ -679,6 +833,8 @@ describe('AssetsPanel', () => {
       mtimeTo: 0,
       sizeFrom: 0,
       sizeTo: 0,
+      sortBy: 'relevance',
+      sortDir: 'desc',
       limit: 50,
       offset: 0
     })
@@ -1165,6 +1321,8 @@ describe('AssetsPanel', () => {
       mtimeTo: 0,
       sizeFrom: 0,
       sizeTo: 0,
+      sortBy: 'relevance',
+      sortDir: 'desc',
       limit: 50,
       offset: 0
     })
@@ -2364,6 +2522,8 @@ describe('AssetsPanel', () => {
       mtimeTo: 0,
       sizeFrom: 0,
       sizeTo: 0,
+      sortBy: 'relevance',
+      sortDir: 'desc',
       limit: 50,
       offset: 2
     })
@@ -2902,6 +3062,96 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.selection-count').text()).toBe('已选 2 项')
   })
 
+  // ---- 批量评分（第八批，SRS §2.6 P0，PRD D4/D5）：入口反查分派 + completed 刷新链 ----
+
+  it('批量评分入口文件模式：targets 复用反查链路，execute 分派 BatchSetAssetRating（slideNum 0 = 文件条目）', async () => {
+    wailsMock.BatchSetAssetRating.mockResolvedValue({
+      total: 2, succeeded: 2, failed: 0,
+      items: [
+        { fileId: 11, status: 'ok', label: '方案A/城商行方案.pptx' },
+        { fileId: 12, status: 'ok', label: '方案B/损坏文件.pptx' }
+      ]
+    })
+    const wrapper = await createWrapper()
+    const checks = wrapper.findAll('.asset-card-check')
+    await checks[0].trigger('change')
+    await checks[1].trigger('change')
+    await flushPromises()
+
+    // 打开弹窗：targets 与批量打标签同款形态（fileId + label = 文件路径）
+    await clickButton(wrapper, '评分')
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'AssetBatchRatingDialogStub' })
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('targets')).toEqual([
+      { fileId: 11, label: '方案A/城商行方案.pptx' },
+      { fileId: 12, label: '方案B/损坏文件.pptx' }
+    ])
+
+    // execute 分派回调：调 BatchSetAssetRating（targets 的 slideNum 缺省归一 0 =
+    // 文件条目契约 + 星级值），打标签两 API 不触碰
+    const result = await dialog.props('execute')(4)
+    expect(wailsMock.BatchSetAssetRating).toHaveBeenCalledTimes(1)
+    expect(wailsMock.BatchSetAssetRating).toHaveBeenCalledWith(
+      'lib-1',
+      [{ fileId: 11, slideNum: 0 }, { fileId: 12, slideNum: 0 }],
+      4
+    )
+    expect(wailsMock.BatchUpdateAssetFileTags).not.toHaveBeenCalled()
+    expect(wailsMock.BatchUpdateAssetSlideTags).not.toHaveBeenCalled()
+    expect(result.total).toBe(2)
+  })
+
+  it('批量评分入口幻灯片模式：targets 携带 (fileId, slideNum)，execute 分派保留页序', async () => {
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    const checks = wrapper.findAll('.asset-card-check')
+    await checks[0].trigger('change')
+    await checks[1].trigger('change')
+    await flushPromises()
+
+    await clickButton(wrapper, '评分')
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'AssetBatchRatingDialogStub' })
+    expect(dialog.props('targets')).toEqual([
+      { fileId: 11, slideNum: 1, label: '方案A/城商行方案.pptx · 第 1 页' },
+      { fileId: 11, slideNum: 2, label: '方案A/城商行方案.pptx · 第 2 页' }
+    ])
+    // execute 分派：页条目 slideNum 原样透传（键契约禁 slides.id，页级评
+    // slide_meta.rating）
+    await dialog.props('execute')(5)
+    expect(wailsMock.BatchSetAssetRating).toHaveBeenCalledWith(
+      'lib-1',
+      [{ fileId: 11, slideNum: 1 }, { fileId: 11, slideNum: 2 }],
+      5
+    )
+  })
+
+  it('批量评分 completed 刷新链：底册重拉 + 标签树不 reload（评分不涉标签变更）+ 选中保留', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '评分')
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'AssetBatchRatingDialogStub' })
+
+    const reloadSpy = vi.spyOn(
+      wrapper.findAllComponents({ name: 'AssetTagTreeSelectStub' })[0].vm, 'reload'
+    )
+    const filesCallsBefore = wailsMock.ListAssetFiles.mock.calls.length
+    await dialog.vm.$emit('completed')
+    await flushPromises()
+
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBe(filesCallsBefore + 1)
+    // 评分不涉标签变更：跳过标签树 reload（与批量打标签刷新链的差异点）
+    expect(reloadSpy).not.toHaveBeenCalled()
+    // 选中保留（D5 数据变更点位不清空）：用户可继续对这批操作（如再打标签）
+    expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+  })
+
   // ---- 失败缩略图自动补（SRS §2.3 PR3，PRD D4）----
 
   it('失败缩略图自动补：done 后失败集自动重试恰好一轮（fileId 从底册反查），第二轮 done 不再触发', async () => {
@@ -3386,7 +3636,9 @@ describe('AssetsPanel', () => {
       sizeFrom: 1024 * 1024,
       sizeTo: 10 * 1024 * 1024 - 1,
       flatten: false,
-      slideTagOnlyOwn: true
+      slideTagOnlyOwn: true,
+      sortBy: 'relevance',
+      sortDir: 'desc'
     })
     expect(wrapper.find('.stub-dialog').exists()).toBe(false)
     const { ElMessage } = await import('element-plus')
@@ -3469,7 +3721,9 @@ describe('AssetsPanel', () => {
         sizeFrom: 50 * 1024 * 1024,
         sizeTo: 0,
         flatten: false,
-        slideTagOnlyOwn: true
+        slideTagOnlyOwn: true,
+        sortBy: 'rating',
+        sortDir: 'asc'
       })
     ])
     const wrapper = await createWrapper()
@@ -3484,6 +3738,9 @@ describe('AssetsPanel', () => {
     expect(opts.slideTagOnlyOwn).toBe(true)
     expect(opts.flatten).toBe(false)
     expect(opts.ratings).toEqual([4])
+    // 排序快照还原（SRS §2.5.3，D3）：调取后检索按快照档位/方向发起（round-trip）
+    expect(opts.sortBy).toBe('rating')
+    expect(opts.sortDir).toBe('asc')
     // gt50 档快照区间经反推回 UI 档位后检索参数与保存值一致（round-trip）
     expect(opts.sizeFrom).toBe(50 * 1024 * 1024)
     expect(opts.sizeTo).toBe(0)

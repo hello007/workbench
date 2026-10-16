@@ -135,6 +135,14 @@ func (a *App) BatchUpdateAssetSlideTags(libraryID string, targets []model.AssetS
 	return a.assetsSvc.BatchUpdateSlideTags(libraryID, targets, op)
 }
 
+// BatchSetAssetRating 批量修改评分（SRS §2.6 P0，选中集操作）：单一入口混合
+// 文件条目（slideNum 0 → files.rating）与页条目（slideNum ≥ 1 → slide_meta.rating
+// 页级标注，业务备注保留）。rating 0-5，0 = 清除评分。每条目一事务逐条目提交，
+// 部分失败不中断不回滚，逐条目明细返回（Status/Message + 后端拼装定位 Label）。
+func (a *App) BatchSetAssetRating(libraryID string, targets []model.AssetRatingTarget, rating int64) (model.AssetBatchRatingResult, error) {
+	return a.assetsSvc.BatchSetRating(libraryID, targets, rating)
+}
+
 // RebuildAssetLibrary 手动全量重建：清该库文件/幻灯片/检索索引记录后全量重扫
 // （索引自愈入口，统计口径漂移时使用）。文件标签绑定与幻灯片页级标注（标签/
 // 业务备注/星级）按「相对路径 + 页序」映射重绑（页已消失的页标注丢弃）；文件级

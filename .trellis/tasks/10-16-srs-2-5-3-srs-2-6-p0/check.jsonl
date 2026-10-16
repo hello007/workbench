@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-16-srs-2-5-3-srs-2-6-p0/prd.md", "reason": "验收标准与 DoD 核对面：三路径排序、快照兼容、批量评分明细、门禁"}
+{"file": "docs/spec/assets-management.md", "reason": "核对排序/评分改动未破坏 FTS 五契约、矩阵点位登记、批量链路先例一致性"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "门禁阈值核对（service ≥76% / 前端 ≥70%），wailsjs exclude 口径"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无 sleep/mtime 时序/固定端口隐式依赖"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码/AppError 分流契约：批量评分失败明细、前端 handleError 分流"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步与 model 字段导出面"}

@@ -964,11 +964,14 @@ func slideTagRowMatches(onlyOwn bool, fileFilter, ownSlideFilter map[int64]bool,
 	return !onlyOwn && fileFilter != nil && fileFilter[fileID]
 }
 
-// tagFilteredFileOrdering 纯标签筛选的文件条目全量序（按路径序）：仅 ok 状态
-// 且直接绑定任一给定标签。
+// tagFilteredFileOrdering 纯标签筛选/facets-only 路径的文件条目全量序（按路径序）：
+// 仅 ok 状态且满足筛选条件。mtimeNs/rating 供 mtime/rating 排序档填充排序键
+// （SRS §2.5.3，文件级口径）。
 type tagFilteredFileOrdering struct {
-	id   int64
-	path string
+	id      int64
+	path    string
+	mtimeNs int64
+	rating  int64
 }
 
 // listTagFilteredFiles 纯标签浏览的文件条目序（keyword 为空时的数据源）。
@@ -987,7 +990,7 @@ func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFil
 		args = append(args, facetArgs...)
 	}
 	rows, err := s.db.Query(
-		"SELECT f.id, f.path FROM files f WHERE f.status = ? AND f.id IN "+
+		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ? AND f.id IN "+
 			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+"))"+
 			facetClause+" ORDER BY f.path",
 		append([]any{model.AssetFileStatusOK}, args...)...)
@@ -998,7 +1001,7 @@ func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFil
 	out := make([]tagFilteredFileOrdering, 0)
 	for rows.Next() {
 		var r tagFilteredFileOrdering
-		if err := rows.Scan(&r.id, &r.path); err != nil {
+		if err := rows.Scan(&r.id, &r.path, &r.mtimeNs, &r.rating); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1007,11 +1010,15 @@ func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFil
 }
 
 // tagFilteredSlideOrdering 纯标签筛选的幻灯片条目全量序（按文件路径 + 页序）。
+// mtimeNs/rating 取归属文件属性（JOIN files 继承口径，供 mtime/rating 排序档
+// 填充排序键）。
 type tagFilteredSlideOrdering struct {
-	id     int64
-	fileID int64
-	path   string
-	num    int
+	id      int64
+	fileID  int64
+	path    string
+	num     int
+	mtimeNs int64
+	rating  int64
 }
 
 // listTagFilteredSlides 纯标签浏览的幻灯片条目序（标签继承合并语义：默认【归属
@@ -1034,7 +1041,7 @@ func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet 
 	// 双子查询形态的参数序：status 占位 + 文件绑定子查询标签参数 + 页自身绑定
 	// 子查询标签参数 + facet 条件参数（facetClause 位于两类标签子查询之后，参数
 	// 须随 SQL 片段位置收尾——placeholders 构造复用现有形态）
-	query := "SELECT s.id, s.file_id, f.path, s.slide_num FROM slides s JOIN files f ON f.id = s.file_id "
+	query := "SELECT s.id, s.file_id, f.path, s.slide_num, f.mtime_ns, f.rating FROM slides s JOIN files f ON f.id = s.file_id "
 	var args []any
 	if onlyOwn {
 		query += "WHERE f.status = ? AND (s.file_id, s.slide_num) IN " +
@@ -1060,7 +1067,7 @@ func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet 
 	out := make([]tagFilteredSlideOrdering, 0)
 	for rows.Next() {
 		var r tagFilteredSlideOrdering
-		if err := rows.Scan(&r.id, &r.fileID, &r.path, &r.num); err != nil {
+		if err := rows.Scan(&r.id, &r.fileID, &r.path, &r.num, &r.mtimeNs, &r.rating); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1495,11 +1502,11 @@ func (f *assetsFacetFilter) whereClause(colPrefix string) (string, []any) {
 
 // listFacetFilteredFiles facets-only 路径数据源（无关键词无标签但有 facet）：
 // 按 facet 条件列 ok 状态文件（文件维度筛选天然是文件清单语义，无幻灯片条目、
-// 无聚合折叠），按路径序返回。
+// 无聚合折叠），按路径序返回。mtimeNs/rating 供 mtime/rating 排序档填充排序键。
 func (s *assetsStore) listFacetFilteredFiles(facet *assetsFacetFilter) ([]tagFilteredFileOrdering, error) {
 	clause, facetArgs := facet.whereClause("f.")
 	rows, err := s.db.Query(
-		"SELECT f.id, f.path FROM files f WHERE f.status = ?"+clause+" ORDER BY f.path",
+		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ?"+clause+" ORDER BY f.path",
 		append([]any{model.AssetFileStatusOK}, facetArgs...)...)
 	if err != nil {
 		return nil, err
@@ -1508,7 +1515,7 @@ func (s *assetsStore) listFacetFilteredFiles(facet *assetsFacetFilter) ([]tagFil
 	out := make([]tagFilteredFileOrdering, 0)
 	for rows.Next() {
 		var r tagFilteredFileOrdering
-		if err := rows.Scan(&r.id, &r.path); err != nil {
+		if err := rows.Scan(&r.id, &r.path, &r.mtimeNs, &r.rating); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1550,6 +1557,54 @@ func (s *assetsStore) filterFileIDsByFacet(ids []int64, facet *assetsFacetFilter
 					return err
 				}
 				out[id] = true
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// assetFileSortProps 排序档的文件属性（mtime 排序档消费 mtimeNs，rating 排序档
+// 消费 rating；文件级口径单一数据源，幻灯片/聚合条目经 fileID 继承）。
+type assetFileSortProps struct {
+	mtimeNs int64
+	rating  int64
+}
+
+// fileSortPropsByIDs 批量取文件排序属性（关键词路径 mtime/rating 排序档消费：
+// FTS 命中 fileID 全集一次 IN 查询防逐命中回查 N+1，分批对齐 assetsQueryIDBatch）。
+// 返回 map 缺键 = 文件已不存在（并发删除窗口：排序按零值参与，补全层该条目跳过）。
+func (s *assetsStore) fileSortPropsByIDs(ids []int64) (map[int64]assetFileSortProps, error) {
+	out := make(map[int64]assetFileSortProps, len(ids))
+	for start := 0; start < len(ids); start += assetsQueryIDBatch {
+		end := start + assetsQueryIDBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", end-start), ", ")
+		args := make([]any, 0, end-start)
+		for _, id := range ids[start:end] {
+			args = append(args, id)
+		}
+		rows, err := s.db.Query(
+			"SELECT id, mtime_ns, rating FROM files WHERE id IN ("+placeholders+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var id, mtimeNs, rating int64
+				if err := rows.Scan(&id, &mtimeNs, &rating); err != nil {
+					return err
+				}
+				out[id] = assetFileSortProps{mtimeNs: mtimeNs, rating: rating}
 			}
 			return rows.Err()
 		}()
