@@ -414,3 +414,36 @@ sidebar 与工具箱面板标题栏图标由 element-plus SetUp 换为新增的 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 123: 素材管理第七批：facet 多维筛选 + 保存检索条件（SRS §2.5）
+
+**Date**: 2026-10-16
+**Task**: 素材管理第七批：facet 多维筛选 + 保存检索条件（SRS §2.5）
+**Branch**: `master`
+
+### Summary
+
+第七批落地 SRS §2.5：后端 AssetSearchOptions 扩 facet 字段（星级/修改时间/文件大小，文件级口径，幻灯片条目继承归属文件属性），assetsFacetFilter 条件单点三路径共用，空查询语义重定义（有 facet 走 searchByFacetsOnly 返文件条目），保存检索条件 service（data/asset_saved_searches.json 原子写 upsert + 3 App 绑定）；前端 AssetFilterPopover 三维弹层（换算单点，相对档现算 + 止日末毫秒可逆锚点）+ 双语境接入 + 空态引导 + 保存/调取/覆盖/删除与异库 tagNames 重映射。加权方向实测一致未动权重。service 覆盖 79.6%、前端 1857 用例全绿 85%。审核两轮零修复（第二轮严重项核实为误读）。spec 沉淀 assets-management.md §3/§8.2/§8.6 + CLAUDE.md v2.23 + 功能说明 14.3。真机冒烟过后 feat commit 39b8ba2。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39b8ba2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

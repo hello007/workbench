@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 122
+- **Total Sessions**: 123
 - **Last Active**: 2026-10-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~416 | Active |
+| `journal-3.md` | ~449 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 123 | 2026-10-16 | 素材管理第七批：facet 多维筛选 + 保存检索条件（SRS §2.5） | `39b8ba2` | `master` |
 | 122 | 2026-10-16 | 素材管理第六批：批量打标签与多级标签树（SRS §2.4） | `63b9d6b`, `7362962` | `master` |
 | 121 | 2026-10-15 | 素材管理第五批：素材视图与选中体系（SRS §2.3） | `bebaeee`, `f024a52` | `master` |
 | 120 | 2026-10-14 | util 剪贴板 unsafeptr 告警真修复：RtlMoveMemory 中转收口 | `0a2040d` | `master` |
