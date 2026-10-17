@@ -27,13 +27,16 @@ type AssetTag struct {
 
 // 素材文件索引状态机取值（files.status 列与前端状态标记共用）。
 // 单文件解析结果分类：成功 / 失败(损坏等) / 跳过(加密) / 跳过(权限不足)；
-// processing 为扫描过程中的瞬态（崩溃残留时下次扫描会重新处理）。
+// processing 为扫描过程中的瞬态（崩溃残留时下次扫描会重新处理）；
+// lost 为扫描发现磁盘文件消失时的标记态（SRS §2.6.5，素材管理第九批 PR2）：
+// 记录与标签/标注/评分/缩略图全保留，等待文件回归（自动复活）/手动重链/清理。
 const (
 	AssetFileStatusProcessing = "processing" // 解析中（瞬态）
 	AssetFileStatusOK         = "ok"         // 解析成功
 	AssetFileStatusFailed     = "failed"     // 解析失败（损坏 / 非演示文稿）
 	AssetFileStatusEncrypted  = "encrypted"  // 加密文件，跳过索引
 	AssetFileStatusDenied     = "denied"     // 权限不足，跳过索引
+	AssetFileStatusLost       = "lost"       // 磁盘文件丢失（元数据保留待重链）
 )
 
 // AssetFileEntry 素材文件索引条目（画廊文件视图卡片 + 详情侧边栏元数据编辑载体）。
@@ -81,6 +84,7 @@ type AssetLibraryStats struct {
 	SlideCount     int    `json:"slideCount"`     // 幻灯片索引总数
 	FailedCount    int    `json:"failedCount"`    // 解析失败文件数（status=failed）
 	EncryptedCount int    `json:"encryptedCount"` // 加密跳过文件数（status=encrypted）
+	LostCount      int    `json:"lostCount"`      // 丢失文件数（status=lost，SRS §2.6.5；前端统计行与清理丢失入口确认弹窗展示）
 }
 
 // AssetScanProgress 扫描进度事件载荷（assets-scan:progress 事件，EventSink 下发）。
@@ -96,11 +100,19 @@ type AssetScanResult struct {
 	Total     int `json:"total"`     // 发现的 pptx 总数
 	New       int `json:"new"`       // 新入库文件数
 	Updated   int `json:"updated"`   // 变更重解析文件数
-	Unchanged int `json:"unchanged"` // mtime+size 未变跳过数
+	Unchanged int `json:"unchanged"` // mtime+size 未变跳过数（不含 lost 复活，见 Revived）
 	Failed    int `json:"failed"`    // 解析失败数
 	Encrypted int `json:"encrypted"` // 加密跳过数
 	Denied    int `json:"denied"`    // 权限不足跳过数
-	Removed   int `json:"removed"`   // 清理的已删文件记录数
+	// Lost 本次扫描新标记丢失的文件数（磁盘消失，SRS §2.6.5 lost 态引入后替代
+	// 删除语义；已处于 lost 的行不重复计数）
+	Lost int `json:"lost"`
+	// Revived lost 文件回归且 mtime+size 未变、直接复活 ok 的数量（内容未变
+	// 旧解析/缩略图仍有效，不重解析）
+	Revived int `json:"revived"`
+	// Removed 兼容保留字段：lost 态引入前扫描直接删除消失记录的计数；现恒 0
+	//（删除语义由 lost 标记 + ClearLostAssetFiles 手动清理承接）
+	Removed int `json:"removed"`
 }
 
 // AssetThumbsProgress 缩略图批量生成进度事件载荷（assets-thumbs:progress 事件，
@@ -375,6 +387,101 @@ type AssetSplitProgress struct {
 	CurrentFile string `json:"currentFile"` // 当前文件相对路径
 	PageDone    int    `json:"pageDone"`    // 当前文件已完成页数（页级回调透传）
 	PageTotal   int    `json:"pageTotal"`   // 当前文件总页数
+}
+
+// ===== 素材元数据导出（SRS §2.6.4 / 附录A，素材管理第九批 PR1） =====
+
+// 导出格式取值（AssetExportOptions.Formats 元素；CSV 与 Markdown 可同选）。
+const (
+	AssetExportFormatCSV = "csv" // CSV 单文件（UTF-8 BOM + RFC 4180）
+	AssetExportFormatMD  = "md"  // Markdown+YAML frontmatter 卡片（每行一个 .md 到目录）
+)
+
+// 导出路径口径取值（AssetExportOptions.PathMode，作用于 source_file_path 与
+// single_pptx_path；thumbnail_path 恒绝对不受口径影响）。
+const (
+	AssetExportPathModeRelative = "relative" // 库相对路径（基准 root_path，正斜杠；默认，空串等价）
+	AssetExportPathModeAbsolute = "absolute" // 本地绝对路径
+)
+
+// AssetExportOptions 素材元数据导出入参（ExportAssetMetadata）。
+//
+// 范围三态（D2，优先级 选中 > 检索命中 > 全库）：
+//  1. FileIDs/SlideTargets 任一非空 = 选中语境（文件 ID → 文件行，页目标 → 页行；
+//     已失效的陈旧 ID 静默忽略）；
+//  2. 选中为空且检索条件激活（Keyword/TagIDs/facet 任一非空）= 检索语境，后端以
+//     Keyword+Search 快照重放查询取全集（恒平铺口径，与前端已加载页无关）；
+//  3. 两者皆空 = 全库导出。
+type AssetExportOptions struct {
+	// CSVPath CSV 导出目标文件完整路径（Formats 含 csv 时必填；已存在时按
+	// Overwrite 语义处理）
+	CSVPath string `json:"csvPath"`
+	// MDDir Markdown 导出目标目录（Formats 含 md 时必填；目录非空时按 Overwrite
+	// 语义处理——覆盖同名卡文件，不清理目录内其他内容）
+	MDDir string `json:"mdDir"`
+	// Formats 导出格式列表（csv / md，可同选，至少一个）
+	Formats []string `json:"formats"`
+	// PathMode 路径口径：relative（默认）/ absolute，取值见
+	// AssetExportPathMode* 常量
+	PathMode string `json:"pathMode"`
+	// Overwrite 覆盖已存在目标：false 时目标已存在返回确认型错误
+	// （E_ASSETS_EXPORT_TARGET_EXISTS），前端确认后以 true 重调
+	Overwrite bool `json:"overwrite"`
+	// FileIDs 选中范围的文件条目 ID 集（文件行目标）
+	FileIDs []int64 `json:"fileIds"`
+	// SlideTargets 选中范围的页条目目标（页行目标；键 (fileId, slideNum) 与
+	// 批量操作目标同口径）
+	SlideTargets []AssetSlideTarget `json:"slideTargets"`
+	// Keyword 检索语境关键词（与 Search 组成检索快照，选中语境非空时忽略）
+	Keyword string `json:"keyword"`
+	// Search 检索语境参数快照（标签/facet/排序/继承开关，语义与 SearchAssets
+	// 同名入参一致；重放恒平铺取全集，Flatten 由后端强制）
+	Search AssetSearchOptions `json:"search"`
+}
+
+// AssetExportResult 素材元数据导出结果（写出的行数与目标回执，前端 toast 展示）。
+type AssetExportResult struct {
+	LibraryID string `json:"libraryId"`         // 所属库 ID
+	CSVPath   string `json:"csvPath,omitempty"` // 实际写出的 CSV 文件路径（未选 csv 为空）
+	MDDir     string `json:"mdDir,omitempty"`   // 实际写出的 Markdown 目录（未选 md 为空）
+	Rows      int    `json:"rows"`              // 导出数据行数（文件行 + 页行）
+	MDFiles   int    `json:"mdFiles"`           // 写出的 Markdown 卡片文件数（未选 md 为 0）
+}
+
+// ===== 文件丢失与重链（SRS §2.6.5，素材管理第九批 PR2） =====
+
+// AssetRelocateResult 手动重链单文件结果（RelocateAssetFile 返回，前端按字段
+// 分型 toast：哈希匹配直接复活 / 跳过校验重解析 / 强制重链重解析）。
+type AssetRelocateResult struct {
+	FileID  int64  `json:"fileId"`  // 重链的文件记录 ID
+	OldPath string `json:"oldPath"` // 重链前相对路径（正斜杠）
+	NewPath string `json:"newPath"` // 重链后相对路径（正斜杠）
+	// HashMatched 目标文件哈希与记录哈希相等（内容同旧，解析/缩略图仍有效，
+	// 仅改路径直接复活 ok）
+	HashMatched bool `json:"hashMatched"`
+	// SkippedHashCheck 记录哈希为空（加密/权限跳过文件无哈希）跳过校验直接重链
+	// 并重解析（前端提示「未校验内容」）
+	SkippedHashCheck bool `json:"skippedHashCheck"`
+	// Reparsed 已按新位置文件重新解析（哈希不等经 force 确认，或哈希为空跳过
+	// 校验的重链路径）
+	Reparsed bool `json:"reparsed"`
+}
+
+// AssetPrefixReplaceResult 根目录路径前缀批量替换结果（ReplaceAssetPathPrefix
+// 返回）。Replaced 为路径更新的记录总数；Revived/Reparsed/StillLost 为替换后
+// 逐条探测新位置的三态收敛计数（匹配复活 ok / 已变重解析 / 缺失保持 lost），
+// 三者之和 ≤ Replaced（部分行替换前已是 ok 且匹配时不产生状态迁移，不计数）。
+// Scan 为替换完成后自动触发的增量扫描结果（索引与磁盘全量收敛，含新位置外的
+// 变化面）；扫描失败时 Scan 为零值且整体调用报错（替换本身已提交，前端刷新即得）。
+type AssetPrefixReplaceResult struct {
+	LibraryID string          `json:"libraryId"` // 所属库 ID
+	OldPrefix string          `json:"oldPrefix"` // 归一化后的旧前缀（去尾斜杠）
+	NewPrefix string          `json:"newPrefix"` // 归一化后的新前缀（去尾斜杠）
+	Replaced  int64           `json:"replaced"`  // 路径批量更新记录数
+	Revived   int             `json:"revived"`   // 新位置探测匹配复活 ok 数
+	Reparsed  int             `json:"reparsed"`  // 新位置文件已变触发重解析数
+	StillLost int             `json:"stillLost"` // 新位置不存在保持 lost 数
+	Scan      AssetScanResult `json:"scan"`      // 替换后自动增量扫描结果
 }
 
 // AssetSavedSearch 保存的素材检索条件（data/asset_saved_searches.json 全局存储，

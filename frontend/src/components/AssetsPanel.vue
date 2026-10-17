@@ -346,6 +346,26 @@
         <el-icon><CollectionTag /></el-icon>
         管理标签
       </el-button>
+      <!-- 元数据导出入口（第九批 SRS §2.6.4）：范围语境自动跟随（选中 > 检索命中 >
+           全库，D2），「将导出 N 条」预览与检索快照在打开弹窗时解析 -->
+      <el-button size="small" text type="primary" :disabled="!hasLibrary" @click="openExportDialog">导出</el-button>
+      <!-- 文件维护菜单（第九批 SRS §2.6.5）：前缀替换（库内子目录重组批量重链）+
+           清理丢失记录（lost 兜底删除，仅有丢失记录时可用）；「重新定位」单文件
+           重链在丢失文件的详情侧边栏提供 -->
+      <el-dropdown trigger="click" @command="onMaintainCommand">
+        <el-button size="small" text type="primary" :disabled="!hasLibrary">
+          维护
+          <el-icon class="sort-trigger-arrow"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu class="maintain-menu">
+            <el-dropdown-item command="replace-prefix">路径前缀替换…</el-dropdown-item>
+            <el-dropdown-item command="clear-lost" :disabled="lostFileCount === 0">
+              清理丢失记录{{ lostFileCount > 0 ? `（${lostFileCount}）` : '' }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <!-- 幻灯片标签继承开关（SRS §2.2.4）：false = 幻灯片条目按【页自身标签 ∪ 归属
            文件标签】合并命中（默认向后兼容）；true = 仅页自身标签命中。恒渲染占位
            防视图切换时同行控件跳动；文件视图下检索结果只含文件条目（开关不产生
@@ -383,12 +403,13 @@
       <el-button size="small" type="primary" plain :disabled="!hasLibrary" @click="applySearch">搜索</el-button>
     </div>
 
-    <!-- 库统计行：口径来自 GetAssetLibraryStats；失败/加密计数仅在 >0 时显示 -->
+    <!-- 库统计行：口径来自 GetAssetLibraryStats；失败/加密/丢失计数仅在 >0 时显示 -->
     <div v-if="stats" class="assets-stats-line">
       <span>文件 {{ stats.fileCount }}</span>
       <span>幻灯片 {{ stats.slideCount }}</span>
       <span v-if="stats.failedCount > 0" class="stats-warn">解析失败 {{ stats.failedCount }}</span>
       <span v-if="stats.encryptedCount > 0" class="stats-warn">已加密 {{ stats.encryptedCount }}</span>
+      <span v-if="lostFileCount > 0" class="stats-warn">丢失 {{ lostFileCount }}</span>
       <span v-if="searchMode" class="stats-hit">命中 {{ searchTotal }} 条</span>
     </div>
 
@@ -652,6 +673,16 @@
                 :disabled="splitting"
                 @click="openSplitDialog('file')"
               >拆分此 PPT</el-button>
+              <!-- 手动重链入口（第九批 SRS §2.6.5，仅丢失文件提供）：选库内新位置
+                   现存文件，哈希不等时二次确认强制重链（后端校验主防线） -->
+              <el-button
+                v-if="isDetailFileLost"
+                size="small"
+                type="warning"
+                plain
+                :loading="relocating"
+                @click="onRelocateDetail"
+              >重新定位</el-button>
             </div>
           </template>
           <el-alert v-else type="warning" :closable="false" title="文件索引记录不存在，请重新扫描后操作" />
@@ -930,6 +961,32 @@
       @completed="refreshAfterBatchRating"
     />
 
+    <!-- 元数据导出弹窗（第九批 PR1，SRS §2.6.4）：范围解析与检索快照构建在宿主
+         （panel 检索状态单源），弹窗只收预览数与 execute/pick/cancel 回调；覆盖确认
+         （E_ASSETS_EXPORT_TARGET_EXISTS → overwrite=true 重调）在弹窗内闭环。
+         cancel = 提交中关闭弹窗（放弃本次导出）触发的后端中止通道
+         （CancelAssetExport → exportCancels 注册表）。exported 后无需刷新——
+         纯只读导出不改索引数据 -->
+    <AssetExportDialog
+      v-model="exportDialogVisible"
+      :preview-count="exportPreviewCount"
+      :preview-scope-label="exportPreviewScopeLabel"
+      :execute="executeExport"
+      :pick-csv-path="pickExportCsvPath"
+      :pick-md-dir="pickExportMdDir"
+      :cancel="cancelAssetExport"
+    />
+
+    <!-- 路径前缀替换弹窗（第九批 PR2，SRS §2.6.5）：命中预览（防抖）与执行分派
+         经回调注入宿主绑定（弹窗零绑定 import）；二次确认在弹窗内闭环；completed
+         成败均上报（单事务替换 + 自动扫描，扫描失败时替换已提交，宿主都要刷新） -->
+    <AssetPrefixReplaceDialog
+      v-model="prefixReplaceDialogVisible"
+      :preview="previewPrefixReplace"
+      :execute="executePrefixReplace"
+      @completed="refreshAfterMaintain"
+    />
+
     <!-- 保存检索条件命名弹窗（第七批 PR3，PRD D4/D7）：名称必填（重名拒绝由后端
          Save 返回，handleError 透传 toast）；条件摘要预览展示快照全维（facet 时间
          维展示解析后的绝对区间——相对档保存即冻结为区间，摘要与调取还原口径一致）。
@@ -990,6 +1047,14 @@ import {
   SaveAssetSavedSearch,
   DeleteAssetSavedSearch,
   OpenDirectoryDialog,
+  OpenFileDialog,
+  SaveFileDialog,
+  ExportAssetMetadata,
+  CancelAssetExport,
+  RelocateAssetFile,
+  ClearLostAssetFiles,
+  PreviewAssetPathPrefixReplace,
+  ReplaceAssetPathPrefix,
   AssetThumbsAvailable,
   JumpToAssetSlide,
   RetryAssetThumb,
@@ -1026,6 +1091,12 @@ import AssetBatchTagDialog from './AssetBatchTagDialog.vue'
 // 批量评分弹窗（第八批，SRS §2.6 P0，PRD D4/D5）：形态复刻批量打标签弹窗，
 // targets 反查链路共用，execute 分派回调以星级值调 BatchSetAssetRating
 import AssetBatchRatingDialog from './AssetBatchRatingDialog.vue'
+// 元数据导出弹窗（第九批 PR1，SRS §2.6.4）：范围解析/检索快照/目标浏览回调留宿主，
+// 弹窗收预览数与 execute 分派（覆盖确认链路弹窗内闭环）
+import AssetExportDialog from './AssetExportDialog.vue'
+// 路径前缀替换弹窗（第九批 PR2，SRS §2.6.5）：命中预览（防抖）与执行分派回调
+// 留宿主，二次确认与结果 toast 在弹窗内闭环
+import AssetPrefixReplaceDialog from './AssetPrefixReplaceDialog.vue'
 // facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
 // 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
 // countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
@@ -1526,6 +1597,284 @@ const refreshAfterBatchAnnotation = async ({ reloadTagTrees = true } = {}) => {
 const refreshAfterBatchTag = () => refreshAfterBatchAnnotation({ reloadTagTrees: true })
 // 批量评分 completed 入口（评分不涉标签变更，跳过标签树 reload）
 const refreshAfterBatchRating = () => refreshAfterBatchAnnotation({ reloadTagTrees: false })
+
+// ---- 元数据导出（第九批 SRS §2.6.4，D2 范围三态：选中 > 检索命中 > 全库）----
+
+const exportDialogVisible = ref(false)
+// 「将导出 N 条」预览数与范围人读文案（打开弹窗时解析；-1 = 统计中占位——0 是
+// 检索零命中/空库的合法终态，禁与统计中混用）
+const exportPreviewCount = ref(-1)
+const exportPreviewScopeLabel = ref('')
+// 预览统计写回代次（openExportDialog 自增）：快速关开弹窗时丢弃旧在途
+// SearchAssets 统计响应，防旧检索 total 覆盖新弹窗的选中数/新统计（对齐面板
+// 双代次写回守卫契约）
+let exportPreviewSeq = 0
+
+// 选中集静默反查（导出专用）：与 collectSelectionTargets 同键映射消费
+// assetSelectionKey 单点，但不弹「已失效跳过」toast——预览统计与执行分派语境
+// 无操作反馈语义；文件卡出 fileIds（→ 文件行）、页卡出 slideTargets（→ 页行），
+// 条目与导出行一一对应（后端选中范围不做展开，预览 N 精确）
+const collectExportTargets = () => {
+  const fileIds = []
+  const slideTargets = []
+  for (const card of selectableCards.value) {
+    if (!selectedKeys.value.has(assetSelectionKey(card))) continue
+    if (card.kind === 'file') {
+      fileIds.push(card.id)
+    } else {
+      slideTargets.push({ fileId: card.fileId, slideNum: card.slideNum })
+    }
+  }
+  return { fileIds, slideTargets }
+}
+
+// 检索条件激活判定（与后端 assetExportSearchActive 同口径：关键词/标签/facet 任一
+// 非空；排序档不构成检索语境——全库导出不因排序参数缩窄）
+const exportSearchActive = () =>
+  activeKeyword.value.trim() !== '' ||
+  selectedTagIds.value.length > 0 ||
+  facetActiveCount.value > 0
+
+// 预览数解析（打开弹窗时执行一次）：选中 → 条目数同步返回；检索 → 后端重放 total
+//（flatten 恒 true + limit 1 的轻量查询，total = 文件行+页行全集口径，与后端导出
+// 重放一致——前端已加载页分页快照不可用作全集）；全库 → 库统计合计。检索分支
+// await 写回前比对代次，弹窗重开（代次自增）后旧在途响应整体丢弃
+const resolveExportPreview = async () => {
+  const seq = ++exportPreviewSeq
+  const { fileIds, slideTargets } = collectExportTargets()
+  if (fileIds.length + slideTargets.length > 0) {
+    // 陈旧 ID 留痕（既定口径，勿当 bug 修）：选中集虽有代次守卫，仍可能含重解析
+    // 前的旧 ID，后端对失效 ID 静默忽略（model.AssetExportOptions.FileIDs 注释），
+    // 此时预览数 N 可能大于实际导出行数
+    exportPreviewScopeLabel.value = `选中 ${fileIds.length + slideTargets.length} 项`
+    exportPreviewCount.value = fileIds.length + slideTargets.length
+    return
+  }
+  if (exportSearchActive()) {
+    exportPreviewScopeLabel.value = '当前检索命中'
+    try {
+      const page = await SearchAssets(currentLibraryId.value, activeKeyword.value.trim(), {
+        flatten: true,
+        tagIds: selectedTagIds.value,
+        slideTagOnlyOwn: slideTagOnlyOwn.value,
+        ...buildFacetOptions(facetState.value),
+        limit: 1,
+        offset: 0
+      })
+      if (seq !== exportPreviewSeq) return
+      exportPreviewCount.value = page?.total || 0
+    } catch (error) {
+      if (seq !== exportPreviewSeq) return
+      exportPreviewCount.value = -1
+      handleError('统计导出范围失败: ', error)
+    }
+    return
+  }
+  exportPreviewScopeLabel.value = '全库'
+  exportPreviewCount.value = (stats.value?.fileCount || 0) + (stats.value?.slideCount || 0)
+}
+
+const openExportDialog = () => {
+  if (!hasLibrary.value) return
+  exportPreviewCount.value = -1
+  exportPreviewScopeLabel.value = ''
+  exportDialogVisible.value = true
+  resolveExportPreview()
+}
+
+// 导出执行分派（弹窗经 props.execute 调用）：范围字段（选中目标 > 检索快照）与
+// 目标/格式/口径/覆盖参数合并下发，后端同优先级口径解析（选中非空时忽略检索快照）。
+// 检索快照不带排序参数——导出行按 path + slide_num 稳定排序，排序档与行集无关
+const executeExport = (partial) => {
+  const { fileIds, slideTargets } = collectExportTargets()
+  return ExportAssetMetadata(currentLibraryId.value, {
+    csvPath: partial.csvPath,
+    mdDir: partial.mdDir,
+    formats: partial.formats,
+    pathMode: partial.pathMode,
+    overwrite: partial.overwrite,
+    fileIds,
+    slideTargets,
+    keyword: activeKeyword.value.trim(),
+    search: {
+      flatten: true,
+      tagIds: selectedTagIds.value,
+      slideTagOnlyOwn: slideTagOnlyOwn.value,
+      ...buildFacetOptions(facetState.value)
+    }
+  })
+}
+
+// 导出目标浏览（宿主持有对话框绑定；空串 = 用户取消 no-op，弹窗内不回填）
+const pickExportCsvPath = () =>
+  SaveFileDialog('素材元数据.csv', [{ DisplayName: 'CSV 文件', Pattern: '*.csv' }])
+const pickExportMdDir = () => OpenDirectoryDialog('选择 Markdown 导出目录')
+
+// 导出中止（弹窗提交中关闭 = 放弃本次导出，经 cancel prop 触发）：转发后端
+// CancelAssetExport（exportCancels 注册表命中 → 批间 ctx 检查 → w.abort() 删
+// 半成品 CSV）；无在途导出幂等 false，绑定异常由弹窗侧静默消化
+const cancelAssetExport = () => CancelAssetExport(currentLibraryId.value)
+
+// ---- 文件丢失与重链（第九批 SRS §2.6.5：lost 呈现 + 维护菜单 + 手动重链）----
+
+// 丢失文件计数（统计行 / 维护菜单禁用态 / 清理确认弹窗共用口径；stats 未加载按 0）
+const lostFileCount = computed(() => stats.value?.lostCount || 0)
+
+// 详情文件是否丢失（「重新定位」入口显隐）
+const isDetailFileLost = computed(
+  () => selected.value?.kind === 'file' && selected.value?.fileEntry?.status === 'lost'
+)
+
+// ---- 维护菜单（前缀替换 + 清理丢失）----
+
+const prefixReplaceDialogVisible = ref(false)
+
+const onMaintainCommand = (command) => {
+  if (command === 'replace-prefix') {
+    prefixReplaceDialogVisible.value = true
+  } else if (command === 'clear-lost') {
+    onClearLost()
+  }
+}
+
+// 清理丢失记录（lost 兜底删除，等效 lost 引入前的扫描删除语义）：确认弹窗列出
+// 将删除记录数 → ClearLostAssetFiles → 刷新。删除属数据变更点位（不清选中）；
+// 标签绑定随记录删除变化，刷新链含标签树重拉
+const clearingLost = ref(false)
+const onClearLost = async () => {
+  const count = lostFileCount.value
+  if (count <= 0 || clearingLost.value) return
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${count} 条丢失记录及其关联的标签、标注、评分与缩略图缓存，不可恢复。确定清理？`,
+      '清理丢失记录',
+      { type: 'warning', confirmButtonText: '清理', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  clearingLost.value = true
+  try {
+    const removed = await ClearLostAssetFiles(currentLibraryId.value)
+    ElMessage.success(`已清理 ${removed} 条丢失记录`)
+    await refreshAfterMaintain()
+  } catch (error) {
+    handleError('清理丢失记录失败: ', error)
+  } finally {
+    clearingLost.value = false
+  }
+}
+
+// 前缀替换弹窗回调（宿主持有绑定，弹窗零绑定 import）：preview 防抖驱动实时
+// 命中数，execute 为确认后的执行分派（后端单事务替换 + 逐条探测 + 自动增量扫描）
+const previewPrefixReplace = (oldPrefix, newPrefix) =>
+  PreviewAssetPathPrefixReplace(currentLibraryId.value, oldPrefix, newPrefix)
+const executePrefixReplace = (oldPrefix, newPrefix) =>
+  ReplaceAssetPathPrefix(currentLibraryId.value, oldPrefix, newPrefix)
+
+// 维护操作后的统一刷新链（清理丢失 / 前缀替换共用；对齐 refreshAfterBatchAnnotation
+// 的数据变更刷新口径）：统计重拉（丢失数/文件数口径）+ 标签树重拉（绑定计数变化）
+// + 底册重拉 + 检索态重搜 / 幻灯片视图复位首页（含过滤浏览续拉兜底）。选中保留
+//（数据变更点位非语境变更，§8.2 同性质）；双代次守卫防 await 期间切库串写。
+// 前缀替换弹窗成败均上报 completed（单事务替换 + 自动扫描，扫描失败时替换已提交，
+// 两种终态都刷新），本链幂等无副作用
+const refreshAfterMaintain = async () => {
+  filterTagSelectRef.value?.reload()
+  detailTagSelectRef.value?.reload()
+  if (!hasLibrary.value) return
+  const libSeqAtStart = librarySeq
+  try {
+    await loadStats(libSeqAtStart)
+    if (libSeqAtStart !== librarySeq) return // 期间切库：旧库响应已被内部守卫丢弃
+    const entries = await ListAssetFiles(currentLibraryId.value)
+    if (libSeqAtStart !== librarySeq) return
+    fileEntries.value = entries || []
+    if (searchMode.value) {
+      await runSearch(true)
+    } else if (viewMode.value === 'slide') {
+      await loadSlidesPage(true)
+      // 过滤浏览语境兜底（对齐 refreshAfterBatchAnnotation 同款）
+      await ensureFilteredSlidesLoaded()
+    }
+  } catch (error) {
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
+    handleError('刷新数据失败: ', error)
+  }
+}
+
+// ---- 手动重链（详情侧边栏「重新定位」，仅丢失文件提供）----
+
+const relocating = ref(false)
+
+const onRelocateDetail = async () => {
+  const fileEntry = selected.value?.fileEntry
+  if (!fileEntry || relocating.value) return
+  let picked = ''
+  try {
+    picked = await OpenFileDialog(`选择「${fileEntry.title}」的新位置`)
+  } catch (error) {
+    handleError('选择文件失败: ', error)
+    return
+  }
+  if (!picked) return // 用户取消（空串 no-op）
+  relocating.value = true
+  try {
+    await relocateWithForceConfirm(currentLibraryId.value, fileEntry.id, picked)
+  } finally {
+    relocating.value = false
+  }
+}
+
+// 重链执行与哈希不等确认链路（D6 必校验哈希）：force=false 首调，命中
+// E_ASSETS_RELINK_MISMATCH 确认型错误时列后果二次确认，确认后 force=true 重调；
+// 结果按形态分型 toast（先判 reparsed 重解析分型——processing 残留行哈希相等也
+// 必重处理补半态，后端返回 hashMatched=true 且 reparsed=true，以 hashMatched
+// 首判会把重解析形态误报成「元数据直接恢复」；再按 hashMatched/skippedHashCheck
+// 分直接恢复 / 跳过校验形态），终态刷新（路径/状态变更 + 缩略图重生成面）
+const relocateWithForceConfirm = async (libraryId, fileId, newAbsPath) => {
+  const run = (force) => RelocateAssetFile(libraryId, fileId, newAbsPath, force)
+  let result
+  try {
+    result = await run(false)
+  } catch (error) {
+    if (error?.code !== ErrorCode.AssetsRelinkMismatch) {
+      handleError('重新定位失败: ', error)
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `${error.message}（确认后按新文件重新解析，缩略图将重新生成。）`,
+        '强制重链确认',
+        { type: 'warning', confirmButtonText: '强制重链', cancelButtonText: '取消' }
+      )
+    } catch {
+      return // 用户取消强制：不做任何事
+    }
+    try {
+      result = await run(true)
+    } catch (forceError) {
+      handleError('强制重链失败: ', forceError)
+      return
+    }
+  }
+  if (result?.reparsed) {
+    if (result?.skippedHashCheck) {
+      ElMessage.success('已重链并重新解析（原记录无哈希，未做内容校验）')
+    } else if (result?.hashMatched) {
+      ElMessage.success('已重链并重新解析（内容与原记录一致，补齐解析产物）')
+    } else {
+      ElMessage.success('已强制重链并按新文件重新解析（标签与标注保留）')
+    }
+  } else if (result?.hashMatched) {
+    ElMessage.success('已重链：文件内容与原记录一致，元数据直接恢复')
+  } else {
+    ElMessage.success('已重链完成')
+  }
+  await refreshAfterMaintain()
+}
 
 // ---- 保存检索条件（第七批 SRS §2.5 PR3，PRD D4/D7）----
 
@@ -2831,13 +3180,16 @@ const onCancelScan = async () => {
   }
 }
 
-// 扫描结果摘要文案（新增/更新/跳过口径对齐 model.AssetScanResult）
+// 扫描结果摘要文案（新增/更新/跳过口径对齐 model.AssetScanResult；丢失/复活为
+// SRS §2.6.5 lost 态计数，仅非零时追加）
 const scanResultSummary = (prefix, result) => {
   if (!result) return prefix
   const parts = [`新增 ${result.new ?? 0}`, `更新 ${result.updated ?? 0}`, `未变 ${result.unchanged ?? 0}`]
   if (result.failed) parts.push(`失败 ${result.failed}`)
   if (result.encrypted) parts.push(`加密 ${result.encrypted}`)
   if (result.denied) parts.push(`权限不足 ${result.denied}`)
+  if (result.lost) parts.push(`标记丢失 ${result.lost}`)
+  if (result.revived) parts.push(`复活 ${result.revived}`)
   if (result.removed) parts.push(`清理 ${result.removed}`)
   return `${prefix}：共 ${result.total ?? 0} 个文件（${parts.join('，')}）`
 }

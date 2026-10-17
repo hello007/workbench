@@ -221,6 +221,62 @@ func (a *App) OpenAssetSplitPage(libraryID, relPath string, slideNum int) error 
 	return a.assetsSvc.OpenAssetSplitPage(libraryID, relPath, slideNum)
 }
 
+// ExportAssetMetadata 导出素材元数据（SRS §2.6.4 / 附录A，素材管理第九批 PR1，
+// 工具行「导出」入口）：范围三态（D2 选中 > 检索命中 > 全库；检索语境后端重放
+// 查询取全集）、行粒度（D3 文件行 slide_num=0 + 页行）、CSV（UTF-8 BOM，11 列
+// SRS 清单）与 Markdown+YAML frontmatter（D4 每行一卡）可同选、路径口径（D5
+// relative 基准 root_path / absolute，thumbnail 恒绝对）、覆盖确认（目标已存在
+// 返回 E_ASSETS_EXPORT_TARGET_EXISTS，前端确认后 overwrite=true 重调）。纯只读：
+// 索引零写入；大库流式写。在途导出可经 CancelAssetExport 取消（前端「提交中关闭
+// 导出弹窗 = 放弃本次导出」）。
+func (a *App) ExportAssetMetadata(libraryID string, opts model.AssetExportOptions) (model.AssetExportResult, error) {
+	return a.assetsSvc.ExportAssetMetadata(context.Background(), libraryID, opts)
+}
+
+// CancelAssetExport 取消指定库的在途元数据导出（对齐 CancelAssetScan 交互语义，
+// 取消错误前端按 E_ASSETS_CANCELLED warning 中性提示）。返回是否存在可取消的
+// 在途导出；无在途导出幂等返回 false。
+func (a *App) CancelAssetExport(libraryID string) bool {
+	return a.assetsSvc.CancelExport(libraryID)
+}
+
+// ===== 文件丢失与重链（SRS §2.6.5，素材管理第九批 PR2） =====
+
+// RelocateAssetFile 手动重链（工具行/详情「重新定位」入口）：把文件记录重定向
+// 到库内新位置的现存文件。哈希校验相等直接改路径复活（内容同旧，解析/缩略图
+// 全有效）；不等且 force=false 返回 E_ASSETS_RELINK_MISMATCH 确认型拒绝（前端
+// 确认后 force=true 重调，按新文件重解析、标注保留）；记录无哈希（加密/权限
+// 跳过）跳过校验直接重链重解析（SkippedHashCheck=true 供前端提示）。目标越界
+// 库外返回 E_ASSETS_RELINK_OUT_OF_LIB。与扫描互斥（E_ASSETS_SCAN_IN_PROGRESS）。
+func (a *App) RelocateAssetFile(libraryID string, fileID int64, newAbsPath string, force bool) (model.AssetRelocateResult, error) {
+	return a.assetsSvc.RelocateAssetFile(libraryID, fileID, newAbsPath, force)
+}
+
+// ClearLostAssetFiles 清理全部丢失记录（工具行「维护」入口，等效旧删除语义）：
+// 删除 status=lost 的文件记录及关联幻灯片/标签/标注/缩略图记账与 PNG 文件。
+// 返回删除的记录数（前端确认弹窗展示口径来自 GetAssetLibraryStats.LostCount，
+// 本返回值用于结果 toast）。
+func (a *App) ClearLostAssetFiles(libraryID string) (int64, error) {
+	return a.assetsSvc.ClearLostAssetFiles(libraryID)
+}
+
+// PreviewAssetPathPrefixReplace 前缀替换命中数预览（前缀替换弹窗实时预览，
+// 防抖驱动）：旧前缀按目录边界语义匹配（path 恰等于前缀或以「前缀/」开头），
+// 命中口径与 ReplaceAssetPathPrefix 同一存储层构造。新旧前缀非法时返回参数错误。
+func (a *App) PreviewAssetPathPrefixReplace(libraryID, oldPrefix, newPrefix string) (int, error) {
+	return a.assetsSvc.PreviewAssetPathPrefixReplace(libraryID, oldPrefix, newPrefix)
+}
+
+// ReplaceAssetPathPrefix 根目录路径前缀批量替换（前缀替换弹窗提交，库内子目录
+// 重组的批量重链）：单事务批量更新命中记录路径后逐条探测新位置三态收敛
+// （匹配复活 ok / 已变重解析 / 缺失保持 lost），并自动触发增量扫描全量收敛
+// （结果随 Scan 字段返回）。任一新路径越界库外（E_ASSETS_RELINK_OUT_OF_LIB）
+// 或旧前缀零命中（E_ASSETS_PREFIX_REPLACE_NO_MATCH）整体拒绝零半态。与扫描
+// 互斥（替换与探测段持锁，自动扫描段经 StartScan 自取锁）。
+func (a *App) ReplaceAssetPathPrefix(libraryID, oldPrefix, newPrefix string) (model.AssetPrefixReplaceResult, error) {
+	return a.assetsSvc.ReplaceAssetPathPrefix(libraryID, oldPrefix, newPrefix)
+}
+
 // ===== 保存检索条件（SRS §2.5 素材管理第七批） =====
 
 // ListAssetSavedSearches 全部保存的检索条件（全局存储，条目带 libraryId 库归属，

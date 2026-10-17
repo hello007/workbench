@@ -9,17 +9,20 @@ export const assetStatusLabel = (status) => ({
   ok: '正常',
   failed: '解析失败',
   encrypted: '已加密',
-  denied: '权限不足'
+  denied: '权限不足',
+  lost: '丢失'
 }[status] || status)
 
 // 状态标签语义色（el-tag type）：解析中 info / 正常 success / 解析失败 danger /
-// 已加密与权限不足 warning（异常提示语义，非 error 红）
+// 已加密、权限不足与丢失 warning（异常提示语义，非 error 红；丢失可经重链/
+// 复活/清理处置，属「待处理」而非终态故障）
 export const assetStatusTagType = (status) => ({
   processing: 'info',
   ok: 'success',
   failed: 'danger',
   encrypted: 'warning',
-  denied: 'warning'
+  denied: 'warning',
+  lost: 'warning'
 }[status] || 'info')
 
 // ---- 文件大小格式化（B → KB → MB → GB，整数值不带小数位）----

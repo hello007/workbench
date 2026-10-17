@@ -416,8 +416,9 @@ func TestAssetSearch_Pagination(t *testing.T) {
 	}
 }
 
-// TestAssetSearch_FtsSyncOnDeleteAndReparse FTS 与主表同步（禁脏数据）：删除
-// 文件后 FTS 行同步清零；变更重解析（页数变化）后 FTS 行数等于新页数 + 文件行。
+// TestAssetSearch_FtsSyncOnDeleteAndReparse FTS 与主表同步（禁脏数据）：变更重
+// 解析（页数变化）后 FTS 行数等于新页数 + 文件行；磁盘文件删除标记 lost 后 FTS
+// 行保留（SRS §2.6.5 lost 态：元数据存续辅助重链），「清理丢失记录」后清零。
 // 重处理驱动用注入陈旧 mtime 实现，不依赖文件系统时序（docs/spec/test-stability.md）。
 func TestAssetSearch_FtsSyncOnDeleteAndReparse(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -452,14 +453,20 @@ func TestAssetSearch_FtsSyncOnDeleteAndReparse(t *testing.T) {
 		t.Errorf("重解析后「城商行」应命中 2 页，实际 %d", page.Total)
 	}
 
-	// 删除文件：FTS 行同步清零
+	// 删除文件：标记 lost，FTS 行保留（元数据存续辅助重链）
 	if err := os.Remove(src); err != nil {
 		t.Fatalf("删除源文件: %v", err)
 	}
 	if _, err := svc.StartScan(context.Background(), lib.ID); err != nil {
 		t.Fatalf("删除后重扫: %v", err)
 	}
-	assertFtsRows(t, store, 0, "删除文件后（全部清零）")
+	assertFtsRows(t, store, 1+3, "标记 lost 后（FTS 行保留）")
+
+	// 清理丢失记录：FTS 行同步清零（删除语义收口于 ClearLostAssetFiles）
+	if _, err := svc.ClearLostAssetFiles(lib.ID); err != nil {
+		t.Fatalf("清理丢失记录: %v", err)
+	}
+	assertFtsRows(t, store, 0, "清理丢失记录后（全部清零）")
 }
 
 // assertFtsRows FTS 行数断言（同步完整性白盒断言）。

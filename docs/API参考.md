@@ -39,7 +39,7 @@
 | 设置 | 2 | `app_settings.go` |
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
-| 素材管理 | 16 | `app_assets.go` |
+| 素材管理 | 22 | `app_assets.go` |
 
 > 既有缺口（与本表总数差 18）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域及部分域的行内计数为历史遗留未登记项，方法总数以 `App.d.ts` 为准，待另案补齐。
 
@@ -474,7 +474,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ## 29. 素材管理
 
-侧边栏「素材管理」本地 DAM 素材索引库（MVP）：素材库 CRUD + 目录扫描（增量索引）+ 幻灯片单页索引 + 检索 + 文件级元数据编辑。索引库以 SQLite 文件落盘 `data/assets/<library-id>.db`（modernc 纯 Go 驱动 + FTS5），库注册表 `data/assets/libraries.json`；索引模式只读引用原始文件，扫描不修改源文件。
+侧边栏「素材管理」本地 DAM 素材索引库（MVP）：素材库 CRUD + 目录扫描（增量索引）+ 幻灯片单页索引 + 检索 + 文件级元数据编辑 + 元数据导出（CSV / Markdown+YAML，SRS §2.6.4）+ 文件丢失标记与重链（lost 状态机 / 手动重定位 / 路径前缀替换，SRS §2.6.5）。索引库以 SQLite 文件落盘 `data/assets/<library-id>.db`（modernc 纯 Go 驱动 + FTS5），库注册表 `data/assets/libraries.json`；索引模式只读引用原始文件，扫描不修改源文件。导出与丢失重链契约详见 [spec/assets-management.md](spec/assets-management.md) §11。
 
 扫描进度/终态经事件推送（EventSink 通道）：`assets-scan:progress`（`{libraryId, done, total, currentFile}`）/ `assets-scan:done`（`{libraryId, result: AssetScanResult}`）/ `assets-scan:error`（`{libraryId, message}`）。
 
@@ -503,6 +503,12 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `CancelAssetSplit` | `(libraryID) => Promise<boolean>` | 取消指定库在途拆分（幂等，无在途拆分返回 false；取消错误前端按 `E_ASSETS_CANCELLED` warning 中性提示） | boolean |
 | `GetAssetSplitRecord` | `(libraryID, relPath) => Promise<AssetSplitRecordView>` | 查询文件拆分记录（跳转方式 2 判定面：`exists` 决定「打开拆分单页」按钮显隐，`upToDate` 指示源未变化） | AssetSplitRecordView |
 | `OpenAssetSplitPage` | `(libraryID, relPath, slideNum) => Promise<void>` | 打开拆分单页产物（SRS §2.2.5 方式 2，无 PowerPoint 依赖，系统默认关联程序；页序越界或产物缺失报错） | — |
+| `ExportAssetMetadata` | `(libraryID, opts: AssetExportOptions) => Promise<AssetExportResult>` | 元数据导出（SRS §2.6.4）：CSV（UTF-8 BOM）与 Markdown+YAML（Obsidian 每页一卡）可同选；范围选中条目 > 检索条件重放 > 全库；路径口径库相对（默认）/绝对；目标已存在报 `E_ASSETS_EXPORT_TARGET_EXISTS`（warning 确认后 overwrite 重调） | AssetExportResult |
+| `CancelAssetExport` | `(libraryID) => Promise<boolean>` | 取消指定库在途导出（幂等；半成品 CSV 由后端 abort 清理） | boolean |
+| `RelocateAssetFile` | `(libraryID, fileID, newAbsPath, force) => Promise<AssetRelocateResult>` | lost 文件手动重链（SRS §2.6.5）：哈希相等直复活全元数据；不等报 `E_ASSETS_RELINK_MISMATCH`（force=true 强制重链并重解析）；库外目标报 `E_ASSETS_RELINK_OUT_OF_LIB` | AssetRelocateResult |
+| `ClearLostAssetFiles` | `(libraryID) => Promise<number>` | 清理全部丢失记录（等效删除语义：级联标注/标签 + FTS/缩略图记账/PNG 收口；返回实际删除数） | number |
+| `PreviewAssetPathPrefixReplace` | `(libraryID, oldPrefix, newPrefix) => Promise<number>` | 路径前缀替换预览（目录边界语义命中数；零命中报 `E_ASSETS_PREFIX_REPLACE_NO_MATCH`） | number |
+| `ReplaceAssetPathPrefix` | `(libraryID, oldPrefix, newPrefix) => Promise<AssetPrefixReplaceResult>` | 执行前缀替换（库内子目录重组修复：单事务批量改 path + 三态收敛（匹配复活/重解析/保持 lost）+ 自动增量扫描；越界任一整体拒绝 `E_ASSETS_RELINK_OUT_OF_LIB`） | AssetPrefixReplaceResult |
 
 ---
 

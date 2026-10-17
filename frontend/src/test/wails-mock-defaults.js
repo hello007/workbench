@@ -198,10 +198,12 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   CreateAssetLibrary: { id: 'lib-test', name: '素材库', rootPath: '/assets', createdAt: '', updatedAt: '' },
   ListAssetLibraries: [],
   DeleteAssetLibrary: null,
-  GetAssetLibraryStats: { libraryId: '', fileCount: 0, slideCount: 0, failedCount: 0, encryptedCount: 0 },
-  // 扫描默认零结果汇总（total/new/updated/unchanged/failed/encrypted/denied/removed）
-  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 },
-  RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 },
+  GetAssetLibraryStats: { libraryId: '', fileCount: 0, slideCount: 0, failedCount: 0, encryptedCount: 0, lostCount: 0 },
+  // 扫描默认零结果汇总（total/new/updated/unchanged/failed/encrypted/denied/
+  // lost/revived/removed——lost/revived 为第九批 SRS §2.6.5 lost 态新增计数，
+  // 旧数据 undefined falsy 向后兼容）
+  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 },
+  RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 },
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
   ListAssetFiles: [],
@@ -285,6 +287,24 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   CancelAssetSplit: false,
   GetAssetSplitRecord: { exists: false, outputDir: '', pageCount: 0, splitAt: '', upToDate: false },
   OpenAssetSplitPage: null,
+
+  // ---- 素材元数据导出（第九批 SRS §2.6.4：CSV / Markdown+YAML，工具行「导出」入口）----
+  // 形状对齐 model.AssetExportResult；默认零行空回执（导出仅在用户操作时调用，
+  // 用例按需 override；目标已存在确认型拒绝经 {__error__, __code__} 描述符注入）
+  ExportAssetMetadata: { libraryId: '', csvPath: '', mdDir: '', rows: 0, mdFiles: 0 },
+  // 默认无可取消在途导出：false = 幂等 no-op（对齐 CancelAssetScan 语义）
+  CancelAssetExport: false,
+
+  // ---- 素材文件丢失与重链（第九批 SRS §2.6.5：lost 呈现 + 重链 + 前缀替换 +
+  // 清理丢失）----
+  // 形状对齐 model.AssetRelocateResult / AssetPrefixReplaceResult；重链默认哈希
+  // 匹配直复活形态、前缀替换默认零替换空扫描（均仅在用户操作时调用，用例按需
+  // override；哈希不等确认型拒绝经 {__error__, __code__} 描述符注入）；清理丢失
+  // 默认 0 = 无丢失记录可清；预览默认 0 = 零命中合法终态
+  RelocateAssetFile: { fileId: 0, oldPath: '', newPath: '', hashMatched: true, skippedHashCheck: false, reparsed: false },
+  ClearLostAssetFiles: 0,
+  PreviewAssetPathPrefixReplace: 0,
+  ReplaceAssetPathPrefix: { libraryId: '', oldPrefix: '', newPrefix: '', replaced: 0, revived: 0, reparsed: 0, stillLost: 0, scan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 } },
 
   // 设置保存（AppSettings.assets 段缩略图设置入口，整体提交语义）：void 返回 null 安全
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）

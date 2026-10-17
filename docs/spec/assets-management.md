@@ -279,4 +279,71 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）；任务 10-16-srs-2-5-3-srs-2-6-p0（2026-10-16，第八批 §10：三路径排序单点 sortEntriesByOptions/次级键含 sortNum 防 refID 隐式依赖/并发删除窗口 props 缺键剔除/快照补排序字段零值兼容/批量评分单方法每条目一事务整行回写备注/collectSelectionTargets 与刷新链共享化）。
+## 11. 导出元数据与文件丢失重链（SRS §2.6.4 / §2.6.5，2026-10-17 第九批沉淀）
+
+### 11.1 导出契约（service/assets_export.go）
+
+- **API**：`ExportAssetMetadata(libraryID string, opts model.AssetExportOptions) (model.AssetExportResult, error)` + `CancelAssetExport(libraryID) bool`（App 层透传 `context.Background()`，对齐 StartAssetScan 形态——绑定签名不带 ctx）。
+- **范围三态（D2）**：选中（`FileIDs` 非空，**条目集 = 行集一一对应**：文件条目出文件行、页条目出页行，不做文件展开全部页——与 collectSelectionTargets 批量操作语义对称）> 检索重放（`Search` 非零值，复用 `searchAssetsInStore` 三路径，Flatten 恒 true 分页循环取满 Total，前端已加载页不参与）> 全库（双 nil 不设界）。**排序档单独存在不构成检索语境**（前后端同口径）。
+- **三段式锁解耦（P1 教训）**：`withStore` 持全部库共享一把 `s.mu`，万文件级导出全程包单会话 = 分钟级阻塞素材域全部操作（检索/统计/扫描/拆分）。正确形态：①短会话物化行键（`assetExportRowKey{fileID,path,slideNum}`）→ ②行键分批（`assetsQueryIDBatch=500`）每批**新开短 withStore 会话**水合 → ③批内产物**锁外**写汇 + os.Stat 存在性探测。**批间禁 OFFSET 续读**（释放锁后并发写插入使分页漂移），物化快照语义：物化后新增文件不进本次导出、水合 miss（物化后被删）跳过计数。
+- **物化 SQL 文件行必须独立 UNION ALL 一路**：单条 `LEFT JOIN + COALESCE` 只为**无页文件**产出文件行、有页文件不产文件行（thumb/split 探测用例捕获）——文件行一路 + 页行 JOIN 一路，`ORDER BY path, row_num` 作用于复合查询整体（SQLite 合法）。
+- **CSV**：BOM 三字节（0xEF 0xBB 0xBF）+ `encoding/csv` `UseCRLF:true` 全字段引号；目标打开 overwrite=false 走 `O_WRONLY|O_CREATE|O_EXCL`（失败且目标实存 → `E_ASSETS_EXPORT_TARGET_EXISTS` warning 确认型），overwrite=true `O_TRUNC` 直写——入口 os.Stat 预检仅作 UX 提前返回（TOCTOU 收口在打开原语）。中途失败 `w.abort()` 删半成品 CSV。
+- **MD**：目录形态每页一卡 `<3位序号>-<标题清洗>.md`（Windows 非法字符/控制符/尾点空格清洗 + 60 rune 截断，**全局流水号前缀兜重名碰撞**）；YAML 路径反斜杠统一 `/`（`yamlAssetPath` 单点）；覆盖 = 同名卡覆盖写不清理陌生文件。
+- **路径口径（D5）**：`source_file_path` 默认库相对（基准 root_path，`filepath.Join(rootPath, FromSlash(rel))`）可选绝对；`thumbnail_path` **恒绝对**（缓存在 data/ 不在库内，small 档 `thumbPNGPath` 单点同口径，缺档导空）；`single_pptx_path` 跟随 source 口径 + **split_records 为权威探测**（库内产物 relative 化正斜杠、库外 derived 恒绝对、页序越界导空）。
+- **字段与粒度（D3/D4）**：SRS 11 列清单，`ocr_text`/`summary` 保留列恒空（向前兼容 OCR/AI 摘要）；页行（slide_num≥1，note/rating 页级 slide_meta）+ 文件行（slide_num=0，文件级）；tags 继承合并**后端单点 mergedTags**（CSV/MD 共用，禁导出层第二口径）。
+- **中止通道（真中止，镜像扫描/拆分形态）**：`exportCancels` 注册表三件套（同键覆盖写 + 条目指针比对防误删 + 无在途幂等 false）；`CancelExport` 仅取 `opMu` **不触 `s.mu`**（否则被在途导出 withStore 会话阻塞，取消恰恰在导出进行中调用）；ctx 检查点在行键分批环顶部（物化与单批水合有界不可中断，头注释声明）；取消错误复用 `E_ASSETS_CANCELLED` + 导出措辞消息（`mapAssetExportCancelError` 单点）。abort 一次性语义：每次调用全新 writer，失败/中止统一 abort 删半成品。
+- **弹窗放弃语义**：提交中关闭 = 标记 `abandoned` + 触发 cancel + 放行 done（不做硬阻断——无取消出口时用户锁死弹窗）；放弃后成功竞态（后端先于取消完成）= info「已中止等待，导出已在后台完成」+ 照常 emit exported 不重复关窗；放弃后失败（含 E_ASSETS_CANCELLED）静默；覆盖确认期间放弃不重调；footer 中止按钮显式走 abandonExport 单点。
+
+### 11.2 lost 状态机（扫描/清理/统计）
+
+- **标记**：扫描消失分支 DELETE → `markFileLost`（仅非 lost 行幂等；**size/mtime/hash 原值保留**作复活与重链判定基准；FTS 行保留——lost 文件仍可关键词检索辅助重链；标签/页标注/评分/缩略图记账与 PNG 全存续）。`AssetScanResult` 加 `Lost`（本次新标记）/`Revived`（本次复活）计数，`Removed` 兼容保留恒 0。
+- **复活资格门槛 `fileHasSlides` 单点**（扫描复活与前缀替换匹配收敛**共用**，禁第二口径）：有解析产物（曾成功解析）才直复活 ok；`failed/encrypted/denied` 或 0 页空演示文稿行回归**落既有重解析链路按实际内容重分类**——直复活会让无产物行谎报 ok 且此后 `unchanged` 跳过永不纠正。**processing 行永不直复活**（扫描 `markProcessing` 自愈不变式「必重处理」，重链 relocateFileOK 与替换匹配收敛两口径对齐，防崩溃残留行绕过自愈）。
+- **复活语义**：磁盘命中且 mtime+size 未变 → 直 ok 不重解析（内容未变旧页/缩略图有效）；已变走既有重解析（失效缩略图联动）。
+- **清理 `ClearLostAssetFiles`**：事务内逐条 `SELECT status` **复验资格**（同写事务串行化无复验窗口；并发复活行跳过含 FTS/thumb_cache 清理）+ `DELETE AND status='lost'` 双保险 + **RowsAffected 实际删除数回传**（返回数语义 = 实际删除，非收集快照数）；等效旧 deleteFilesByPaths 删除语义（FTS 文件行+页行显式删 + thumb_cache 显式删 + files 四表级联 + 记账 dirty 失效 + PNG 事后删）。与扫描并发定性接受（最坏 FK 日志噪音，下次扫描自愈；换取清理入口不被长扫描阻塞）。
+- **统计两口径**：`GetLibraryStats.LostCount`（存量）与扫描结果 Lost/Revived（本次增量）分离呈现，勿混用。
+
+### 11.3 手动重链与前缀替换（service/assets_relink.go）
+
+- **`RelocateAssetFile(libraryID, fileID, newAbsPath, force)`**：越界遏制（IsAbs + Rel + `..` 前缀，对齐 RetryAssetThumb 先例，`E_ASSETS_RELINK_OUT_OF_LIB`）；目标 path UNIQUE 冲突预检（owner==自身放行；预检-UPDATE 间隙 TOCTOU 定性接受——单用户桌面 + 前端按钮级防重，UNIQUE 约束兜底非裸 500）；哈希相等**且非 processing** → 单 UPDATE 改 path + 刷 mtime/size + status=ok 直复活（防「下次扫描误判变更」）；不等 → `E_ASSETS_RELINK_MISMATCH` warning 确认型，force=true 后改 path + markProcessing + `processScanFile` 重解析（tryLockScan 与扫描互斥 + 锁内复验库存在）；hash 空记录（加密/权限跳过）跳过校验。不做扫描时自动哈希匹配（万文件级成本，SRS 仅要求手动重定位）。
+- **前缀替换目录边界语义**：命中 = `path == oldPrefix OR path LIKE oldPrefix || '/%'`（**`escapeLikePattern` 转义单点** `%`/`_`/转义符自身 + `ESCAPE '\\'`）；Preview 与执行同一构造禁两口径。越界判定 = 新路径逐条 IsAbs+Rel，**「中段 `..` 清理后仍逃逸」才真越界**（`旧/../逃逸` 被 filepath.Clean 消化不越界，勿凭字面误拒）；任一越界整体拒绝（零半态）。**冲突预检排除替换集自身记录**（其旧路径在本事务内全部腾空，「旧目录 → 旧目录/归档」归档重组合法，勿误拒）。
+- **嵌套腾位与探测配对（P0 教训双坑）**：renames 按 **oldPath 长度降序**落库（嵌套链式腾位安全序：碰撞链中占位方 oldPath 恒严格长于被占位方新路径，无环，长度降序即事务内无瞬态 UNIQUE 撞击；`sort.SliceStable` 无输入序假设）；**三态探测配对禁下标 zip**——renames 已按长度降序重排、records 保持 path 升序，两者不同序，`records[i]` 配 `renames[i]` = 页索引/哈希/FTS 串写进错误记录 + 现存文件误标 lost（混合长度路径即触发；既有嵌套用例因 UTF-8 字节序巧合未暴露，`TestAssetPrefixReplace_MixedLengthPairing` 以两序分化夹具 + 前置断言守护）。正确形态：renames 遍历 + `map[int64]assetFileRecord` 按 fileID 取记录（缺键防御上抛——结构性不可达但防未来来源变更零值静默错写）。
+- **写面 RowsAffected 校验（并发清理窗口）**：`replaceFilePaths`/`relocateFileOK`/`relocateFileProcessing` 校验 RowsAffected，零命中（记录已被并发 ClearLostAssetFiles 删除）= `sql.ErrNoRows` 上抛 → 调用层转「记录已被清理，请刷新后重试」可读错误；替换零命中即事务整体回滚（旁观行不落库，探测段自然不进入）——防 Replaced 按名册计数虚报 + 幽灵行探测段 FK 违例模糊错误。
+- **执行链**：单事务批量 UPDATE → 事务后逐条探测三态（匹配复活[非 processing]/已变 markProcessing+重解析/缺失保持 lost）→ **锁释放后** `StartScan` 自动收敛（锁未放自取锁会自撞 SCAN_IN_PROGRESS）。
+- **前端**：重链结果 toast 分型**先判 `reparsed`** 再判 `hashMatched`/`skippedHashCheck`（processing 行后端返回 hashMatched=true 且 reparsed=true，hashMatched 首判误报「元数据直接恢复」）；维护下拉（前缀替换/清理丢失，零丢失禁用）；`refreshAfterMaintain` 共享刷新链双代次守卫；AssetPrefixReplaceDialog 防抖预览（`previewCount` -1 哨兵区分统计中/零命中两态 + 输入即置 null 回占位防陈旧 0 误拦提交 + 代次守卫）。
+
+### 11.4 Wrong vs Correct
+
+**Wrong（导出锁形态）**：
+```go
+func (s *AssetLibraryService) ExportAssetMetadata(...) {
+    return s.withStore(libraryID, func(store *assetsStore) error {
+        // 全程单会话：物化 + 水合 + 写汇全在锁内，分钟级阻塞素材域
+    })
+}
+```
+**Correct**：
+```go
+keys := s.withStore(...materializeRowKeys...)   // ① 短会话物化
+for batch := range batches(keys) {              // ② 分批
+    rows := s.withStore(...hydrateBatch...)     //    每批新开短会话
+    writeToSink(rows)                           // ③ 锁外写汇 + os.Stat
+}
+```
+
+**Wrong（探测配对）**：
+```go
+for i, rec := range records {
+    probe(records[i], renames[i].newRel) // renames 已重排，下标 zip 串写
+}
+```
+**Correct**：
+```go
+recByID := map[int64]assetFileRecord{...}
+for _, rn := range renames { // 按 renames（腾位安全序）迭代
+    rec, ok := recByID[rn.fileID] // fileID 配对，缺键防御
+}
+```
+
+---
+
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）；任务 10-16-srs-2-5-3-srs-2-6-p0（2026-10-16，第八批 §10：三路径排序单点 sortEntriesByOptions/次级键含 sortNum 防 refID 隐式依赖/并发删除窗口 props 缺键剔除/快照补排序字段零值兼容/批量评分单方法每条目一事务整行回写备注/collectSelectionTargets 与刷新链共享化）；任务 10-16-srs-2-6-4-srs-2-6-5（2026-10-17，第九批 §11：导出三段式锁解耦/文件行独立 UNION ALL 路/批间禁 OFFSET 续读/O_EXCL 覆盖收口/真中止 exportCancels 走 opMu/弹窗放弃语义含成功竞态收口；lost 状态机标记保留 hash 基准/复活资格门槛 fileHasSlides/processing 永不直复活/清理事务内资格复验 RowsAffected；重链哈希校验 force/嵌套腾位长度降序 + 探测配对禁下标 zip（P0 串写教训）/写面 RowsAffected 零命中上抛/前端 toast 先判 reparsed）。

@@ -95,13 +95,15 @@ func (s *assetsStore) migrate() error {
 	return nil
 }
 
-// assetFileRecord 扫描增量判定所需的文件记录最小视图。
+// assetFileRecord 扫描增量判定与重链所需的文件记录最小视图（hash 供重链哈希
+// 校验基准，扫描差分不消费）。
 type assetFileRecord struct {
 	id      int64
 	path    string
 	size    int64
 	mtimeNs int64
 	status  string
+	hash    string
 }
 
 // ---------- FTS 双写辅助（写路径统一收口，事务内调用） ----------
@@ -170,7 +172,7 @@ func insertFtsSlideRowTx(tx *sql.Tx, slideID, fileID int64, title, text, notes s
 
 // listFileRecords 全量文件记录（库规模 = 素材 pptx 数，桌面场景千级以内，全量载入内存做增量差集）。
 func (s *assetsStore) listFileRecords() ([]assetFileRecord, error) {
-	rows, err := s.db.Query("SELECT id, path, size, mtime_ns, status FROM files")
+	rows, err := s.db.Query("SELECT id, path, size, mtime_ns, status, hash FROM files")
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +180,7 @@ func (s *assetsStore) listFileRecords() ([]assetFileRecord, error) {
 	var records []assetFileRecord
 	for rows.Next() {
 		var rec assetFileRecord
-		if err := rows.Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status); err != nil {
+		if err := rows.Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
@@ -319,30 +321,237 @@ func deleteStaleSlideAnnotationsTx(tx *sql.Tx, fileID int64) error {
 	return nil
 }
 
-// deleteFilesByPaths 删除磁盘已消失的文件记录（slides/file_tags/thumb_cache 由
-// 外键级联清除），FTS 行（文件行 + 全部幻灯片行）与缩略图记账（显式 DELETE，
-// 外键级联为兜底的双保险口径）同步清除防脏数据。返回删除的 fileID 列表与总数
-// （调用方据 fileID 清理缩略图 PNG 文件——文件系统操作不可回滚，db 先行、文件
-// 后删，对齐「建库回滚先关连接再删文件」的收口顺序）。
-func (s *assetsStore) deleteFilesByPaths(relPaths []string) ([]int64, int64, error) {
+// pathOwnedByOther 目标路径是否已被其他记录占用（重链/前缀替换的 UNIQUE 冲突
+// 预检）：ownerID == fileID 视为未占用（记录自身已指向该路径，重链同路径为
+// no-op 放行）。
+func (s *assetsStore) pathOwnedByOther(newRel string, fileID int64) (bool, error) {
+	var ownerID int64
+	err := s.db.QueryRow("SELECT id FROM files WHERE path = ?", newRel).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ownerID != fileID, nil
+}
+
+// ---------- 丢失与重链（SRS §2.6.5，素材管理第九批 PR2 数据面） ----------
+// （lost 引入前的「删除磁盘已消失记录」实现已由「扫描标记 lost + clearLostFiles
+// 手动清理」替代移除；删除语义收口于 clearLostFiles 单点。）
+
+// fileRecordByID 按记录 ID 读单个文件记录（重链链路的现状读取）。
+// sql.ErrNoRows 透传，调用方转用户可读错误（QueryRow+Scan 单行口径，单连接池
+// 自锁纪律见 libraryStats 注释）。
+func (s *assetsStore) fileRecordByID(fileID int64) (assetFileRecord, error) {
+	var rec assetFileRecord
+	err := s.db.QueryRow(
+		"SELECT id, path, size, mtime_ns, status, hash FROM files WHERE id = ?", fileID,
+	).Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash)
+	return rec, err
+}
+
+// markFileLost 扫描发现磁盘文件消失时的标记（lost 态，D1）：仅改 status 与
+// updated_at——size/mtime_ns/hash 保持原值，作为文件回归（lost 复活判定
+// mtime+size 匹配）与手动重链（哈希校验基准）的依据；slides/标注/标签/缩略图
+// 记账全保留（不再级联删除）。仅对非 lost 行生效（幂等：重复扫描不重复计数）。
+func (s *assetsStore) markFileLost(fileID int64, now string) (int64, error) {
+	res, err := s.db.Exec(
+		"UPDATE files SET status = ?, updated_at = ? WHERE id = ? AND status != ?",
+		model.AssetFileStatusLost, now, fileID, model.AssetFileStatusLost,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// reviveLostFile lost 文件回归且 mtime+size 未变的直接复活（内容未变旧解析/
+// 缩略图/FTS 仍有效，仅翻转状态不重解析）。调用方须先过 fileHasSlides 资格门槛
+// ——本函数不校验解析产物，对 failed/encrypted/denied 行直复活会把坏文件翻成 ok。
+func (s *assetsStore) reviveLostFile(fileID int64, now string) error {
+	_, err := s.db.Exec(
+		"UPDATE files SET status = ?, updated_at = ? WHERE id = ?",
+		model.AssetFileStatusOK, now, fileID,
+	)
+	return err
+}
+
+// fileHasSlides 文件是否存在解析产物幻灯片行——lost 复活资格判定单点（扫描
+// 复活与前缀替换匹配收敛两调用方共用，禁分叉）：有产物 = 曾成功解析，旧解析/
+// 缩略图/FTS 对 mtime+size 未变的内容仍有效，可直复活；无产物 = failed/
+// encrypted/denied 跳过类或 0 页空演示文稿，直复活会把坏文件谎报为 ok 且此后
+// 增量扫描 unchanged 跳过永不纠正，须走重解析按实际内容重新分类。
+// QueryRow+Scan 单行口径（单连接池自锁纪律）。
+func (s *assetsStore) fileHasSlides(fileID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM slides WHERE file_id = ?)", fileID,
+	).Scan(&n)
+	return n == 1, err
+}
+
+// relocateFileOK 哈希校验通过的重链落库：改 path + 刷新 size/mtime_ns（新位置
+// 文件的 stat 实值——副本/移动可能改 mtime，不刷新则下次扫描误判变更重解析、
+// 无谓失效缩略图）+ status=ok（内容同旧，解析/缩略图/FTS 全有效零恢复成本）。
+// 零命中 = 行已被并发「清理丢失记录」删除（ClearLostAssetFiles 不持扫描锁，与
+// 重链存在并发窗口）：UPDATE 空命中零操作，静默返回会按名册虚报重链成功——以
+// sql.ErrNoRows 上抛（对齐 fileRecordByID 无行语义），调用方转可读错误。
+func (s *assetsStore) relocateFileOK(fileID int64, newPath string, size, mtimeNs int64, now string) error {
+	res, err := s.db.Exec(
+		"UPDATE files SET path = ?, size = ?, mtime_ns = ?, status = ?, updated_at = ? WHERE id = ?",
+		newPath, size, mtimeNs, model.AssetFileStatusOK, now, fileID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// relocateFileProcessing 哈希不等（force 确认）或记录无哈希的重链落库第一步：
+// 改 path + 标记 processing（mtime/size/hash 暂不动，重解析按新位置写入终态；
+// 解析中途崩溃残留 processing 行由下次扫描「必重处理」语义自愈，与扫描链路
+// 同口径）。FTS/slides/缩略图由随后的单文件重解析链路处理。零命中 = 行已被
+// 并发「清理丢失记录」删除（并发窗口同 relocateFileOK）：sql.ErrNoRows 上抛，
+// 调用方转可读错误（且不再进入随后的重解析探测段）。
+func (s *assetsStore) relocateFileProcessing(fileID int64, newPath string, now string) error {
+	res, err := s.db.Exec(
+		"UPDATE files SET path = ?, status = ?, updated_at = ? WHERE id = ?",
+		newPath, model.AssetFileStatusProcessing, now, fileID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// listFilesByPathPrefix 旧前缀命中的文件记录（目录边界语义单点：path 恰等于
+// 前缀，或以「前缀 + /」开头——`old` 命中 `old` 与 `old/...`，不误伤 `oldx/...`
+// 同头缀目录）。LIKE 通配符转义（%/_/\）防前缀含通配符时扩大命中面。
+func (s *assetsStore) listFilesByPathPrefix(oldPrefix string) ([]assetFileRecord, error) {
+	escaped := escapeLikePattern(oldPrefix)
+	rows, err := s.db.Query(
+		"SELECT id, path, size, mtime_ns, status, hash FROM files "+
+			"WHERE path = ? OR path LIKE ? ESCAPE '\\' ORDER BY path",
+		oldPrefix, escaped+"/%",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := make([]assetFileRecord, 0)
+	for rows.Next() {
+		var rec assetFileRecord
+		if err := rows.Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// escapeLikePattern LIKE 模式转义单点：反斜杠（ESCAPE 字符自身）→ % → _。
+func escapeLikePattern(raw string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(raw)
+}
+
+// countFilesByPathPrefix 前缀命中计数（PreviewAssetPathPrefixReplace 预览面，
+// 与 listFilesByPathPrefix 同一 WHERE 构造——预览与执行的命中口径单点禁分叉）。
+func (s *assetsStore) countFilesByPathPrefix(oldPrefix string) (int, error) {
+	escaped := escapeLikePattern(oldPrefix)
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM files WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+		oldPrefix, escaped+"/%",
+	).Scan(&n)
+	return n, err
+}
+
+// replaceFilePaths 批量路径前缀替换落库（单事务，任一 UPDATE 失败整体回滚——
+// 调用方已做 UNIQUE 冲突与越界预检，事务保证是最后的原子性防线）。
+type assetPathRename struct {
+	fileID  int64
+	oldPath string // 替换前相对路径（执行序排序依据：嵌套前缀链式腾位按旧路径长度降序）
+	newRel  string
+}
+
+func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, r := range renames {
+		res, err := tx.Exec(
+			"UPDATE files SET path = ?, updated_at = ? WHERE id = ?", r.newRel, now, r.fileID,
+		)
+		if err != nil {
+			return err
+		}
+		// 零命中 = 该行已被并发「清理丢失记录」删除（ClearLostAssetFiles 不持扫描
+		// 锁，与替换存在并发窗口）：静默零操作会让 Replaced 按名册虚报计数，且
+		// 事务后探测段对幽灵行 processScanFile 落 replaceFileSlides 会因 slides
+		// 外键违例上抛模糊错误——此处即中断（事务整体回滚，探测段自然不再进入），
+		// 以 sql.ErrNoRows 上抛，调用方转「记录已被清理」可读错误
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return sql.ErrNoRows
+		}
+	}
+	return tx.Commit()
+}
+
+// clearLostFiles 删除全部 lost 状态文件记录（「清理丢失记录」入口，等效 lost
+// 引入前的扫描删除语义）：单事务逐条 FTS 行（文件行 + 幻灯片行显式删除，对齐
+// deleteFilesByPaths 双保险口径）+ thumb_cache 显式删除 + files 行删除（slides/
+// file_tags/slide_tags/slide_meta 随外键级联）。返回实际删除的 fileID 列表与
+// 总数（调用方据 fileID 清理缩略图 PNG 与记账 dirty——文件系统操作不可回滚，
+// db 先行、文件后删，对齐 deleteFilesByPaths 收口顺序）。
+//
+// 资格复验不变式：收集（listLostFileRecords）与事务删除之间并发扫描可把行复活
+// （lost→ok，扫描复活不经本服务锁），逐条删除前须同事务复验行仍为 lost——已复活
+// 行连同其标签/标注/缩略图记账全保留；行已消失（并发清理窗口）同样跳过。同事务
+// 读后写在 SQLite 写事务串行化下无复验窗口。
+func (s *assetsStore) clearLostFiles() ([]int64, int64, error) {
+	// 先收集 lost 记录（rows 收齐显式 Close 后再发写语句，单连接池自锁纪律；
+	// 事务内同理——收集在事务外完成，事务只做删除）
+	records, err := s.listLostFileRecords()
+	if err != nil {
+		return nil, 0, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	deletedIDs := make([]int64, 0, len(records))
 	var removed int64
-	deletedIDs := make([]int64, 0)
-	for _, p := range relPaths {
-		var fileID int64
-		err := tx.QueryRow("SELECT id FROM files WHERE path = ?", p).Scan(&fileID)
+	for _, rec := range records {
+		// 资格复验：仅仍为 lost 的行才删（正向窗口防误删已复活行）
+		var status string
+		err := tx.QueryRow("SELECT status FROM files WHERE id = ?", rec.id).Scan(&status)
 		if errors.Is(err, sql.ErrNoRows) {
-			continue // 记录已不存在：幂等跳过
+			continue // 已被并发清理删除：跳过
 		}
 		if err != nil {
 			return nil, 0, err
 		}
-		// FTS 清理先行（需幻灯片 ID 定位），再删主表行（级联清 slides）
-		slideIDs, err := selectSlideIDsTx(tx, fileID)
+		if status != model.AssetFileStatusLost {
+			continue // 已被并发扫描复活（lost→ok）：保留该行及其全部元数据
+		}
+		slideIDs, err := selectSlideIDsTx(tx, rec.id)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -351,13 +560,17 @@ func (s *assetsStore) deleteFilesByPaths(relPaths []string) ([]int64, int64, err
 				return nil, 0, err
 			}
 		}
-		if err := deleteFtsRowTx(tx, fileID); err != nil {
+		if err := deleteFtsRowTx(tx, rec.id); err != nil {
 			return nil, 0, err
 		}
-		if _, err := tx.Exec("DELETE FROM thumb_cache WHERE file_id = ?", fileID); err != nil {
+		if _, err := tx.Exec("DELETE FROM thumb_cache WHERE file_id = ?", rec.id); err != nil {
 			return nil, 0, err
 		}
-		res, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID)
+		// 删除语句同带 lost 资格条件（与上方复验双保险），按 RowsAffected
+		// 实际命中计数——返回数语义 = 实际删除数
+		res, err := tx.Exec(
+			"DELETE FROM files WHERE id = ? AND status = ?", rec.id, model.AssetFileStatusLost,
+		)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -365,28 +578,52 @@ func (s *assetsStore) deleteFilesByPaths(relPaths []string) ([]int64, int64, err
 		if err != nil {
 			return nil, 0, err
 		}
+		if n == 0 {
+			continue // 防御：资格复验已过仍零命中（理论不达），不计入
+		}
+		deletedIDs = append(deletedIDs, rec.id)
 		removed += n
-		deletedIDs = append(deletedIDs, fileID)
 	}
 	return deletedIDs, removed, tx.Commit()
 }
 
-// libraryStats 统计：文件总数（含各状态）、幻灯片总数、失败数、加密跳过数。
-// 全部走 QueryRow+Scan（自动排空结果集）：单连接池（SetMaxOpenConns(1)）下
-// rows 未关闭就发下一条查询会自锁，禁止 Query+defer Close 后再查的写法。
-func (s *assetsStore) libraryStats() (fileCount, slideCount, failedCount, encryptedCount int, err error) {
-	err = s.db.QueryRow(
-		"SELECT COUNT(*), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0) FROM files",
-		model.AssetFileStatusFailed, model.AssetFileStatusEncrypted,
-	).Scan(&fileCount, &failedCount, &encryptedCount)
+// listLostFileRecords 全部 lost 状态记录（清理前的收集）。
+func (s *assetsStore) listLostFileRecords() ([]assetFileRecord, error) {
+	rows, err := s.db.Query(
+		"SELECT id, path, size, mtime_ns, status, hash FROM files WHERE status = ?", model.AssetFileStatusLost,
+	)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return nil, err
+	}
+	defer rows.Close()
+	records := make([]assetFileRecord, 0)
+	for rows.Next() {
+		var rec assetFileRecord
+		if err := rows.Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+// libraryStats 统计：文件总数（含各状态）、幻灯片总数、失败数、加密跳过数、
+// 丢失数（status=lost，SRS §2.6.5）。全部走 QueryRow+Scan（自动排空结果集）：
+// 单连接池（SetMaxOpenConns(1)）下 rows 未关闭就发下一条查询会自锁，禁止
+// Query+defer Close 后再查的写法。
+func (s *assetsStore) libraryStats() (fileCount, slideCount, failedCount, encryptedCount, lostCount int, err error) {
+	err = s.db.QueryRow(
+		"SELECT COUNT(*), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0) FROM files",
+		model.AssetFileStatusFailed, model.AssetFileStatusEncrypted, model.AssetFileStatusLost,
+	).Scan(&fileCount, &failedCount, &encryptedCount, &lostCount)
+	if err != nil {
+		return 0, 0, 0, 0, 0, err
 	}
 	err = s.db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&slideCount)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, err
 	}
-	return fileCount, slideCount, failedCount, encryptedCount, nil
+	return fileCount, slideCount, failedCount, encryptedCount, lostCount, nil
 }
 
 // listFileEntries 文件索引条目（按相对路径序），标签经二次查询按 file_id 聚合。

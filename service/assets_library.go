@@ -32,9 +32,10 @@ import (
 //     map——拆分与扫描语义可并发：拆分不写 files/slides 索引表，仅读写
 //     split_records，单连接池串行化；仅拆分自身互斥）；DeleteLibrary 以同把锁
 //     TryLock 与在途拆分互斥（拆分中禁删库）；
-//   - 取消注册表（cancels/splitCancels + opMu）：键 = normalizeRepoKey(libraryID)，
-//     键空间独立——CancelScan 不得误杀拆分、CancelAssetSplit 亦不影响扫描；
-//     defer LIFO 先注销后释放锁（docs/spec/logging-and-errors.md 取消链路契约）。
+//   - 取消注册表（cancels/splitCancels/exportCancels + opMu）：键 =
+//     normalizeRepoKey(libraryID)，键空间独立——CancelScan 不得误杀拆分/导出、
+//     CancelAssetSplit 亦不影响扫描；defer LIFO 先注销后释放锁
+//     （docs/spec/logging-and-errors.md 取消链路契约）。
 type AssetLibraryService struct {
 	assetsDir  string // data/assets（注册表 libraries.json + 各库 <id>.db）；构造时经 filepath.Abs 绝对化（COM 跨进程路径契约，见 NewAssetLibraryService）
 	sinkHolder        // 事件出口持有器（assets-scan:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换
@@ -44,11 +45,12 @@ type AssetLibraryService struct {
 	loaded bool                    // 注册表是否已从磁盘加载
 	open   map[string]*assetsStore // libraryID -> 已打开的库连接缓存
 
-	opMu         sync.Mutex              // 保护 opLocks/cancels/splitLocks/splitCancels 的并发读写
-	opLocks      map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
-	cancels      map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
-	splitLocks   map[string]*sync.Mutex  // libraryID（规范化）-> 拆分互斥锁（懒创建；与扫描锁独立）
-	splitCancels map[string]*cancelEntry // libraryID（规范化）-> 在途拆分注册条目（assets_split.go）
+	opMu          sync.Mutex              // 保护 opLocks/cancels/splitLocks/splitCancels/exportCancels 的并发读写
+	opLocks       map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
+	cancels       map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
+	splitLocks    map[string]*sync.Mutex  // libraryID（规范化）-> 拆分互斥锁（懒创建；与扫描锁独立）
+	splitCancels  map[string]*cancelEntry // libraryID（规范化）-> 在途拆分注册条目（assets_split.go）
+	exportCancels map[string]*cancelEntry // libraryID（规范化）-> 在途导出注册条目（assets_export.go）
 
 	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
 
@@ -309,14 +311,15 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 	return s.saveRegistryLocked()
 }
 
-// GetLibraryStats 库统计：文件/幻灯片总数与失败/加密跳过数（库徽标与看板用）。
+// GetLibraryStats 库统计：文件/幻灯片总数与失败/加密跳过数、丢失数（库徽标与
+// 看板用；丢失数供前端统计行展示与「清理丢失记录」确认弹窗口径）。
 func (s *AssetLibraryService) GetLibraryStats(libraryID string) (model.AssetLibraryStats, error) {
 	if _, err := s.getLibrary(libraryID); err != nil {
 		return model.AssetLibraryStats{}, err
 	}
 	var stats model.AssetLibraryStats
 	err := s.withStore(libraryID, func(store *assetsStore) error {
-		fileCount, slideCount, failedCount, encryptedCount, err := store.libraryStats()
+		fileCount, slideCount, failedCount, encryptedCount, lostCount, err := store.libraryStats()
 		if err != nil {
 			return err
 		}
@@ -326,6 +329,7 @@ func (s *AssetLibraryService) GetLibraryStats(libraryID string) (model.AssetLibr
 			SlideCount:     slideCount,
 			FailedCount:    failedCount,
 			EncryptedCount: encryptedCount,
+			LostCount:      lostCount,
 		}
 		return nil
 	})
@@ -662,6 +666,54 @@ func (s *AssetLibraryService) CancelScan(libraryID string) bool {
 	entry, ok := s.cancels[key]
 	if ok {
 		delete(s.cancels, key)
+	}
+	s.opMu.Unlock()
+	if !ok {
+		return false
+	}
+	entry.cancel()
+	return true
+}
+
+// registerExportCancel 登记在途导出的可取消入口（独立 exportCancels 注册表——
+// CancelScan/CancelAssetSplit 不得误杀导出，对齐 registerSplitCancel：同键覆盖
+// 写 + 注销按条目指针比对防误删）。
+func (s *AssetLibraryService) registerExportCancel(libraryID string, cancel context.CancelFunc) *cancelEntry {
+	key := normalizeRepoKey(libraryID)
+	entry := &cancelEntry{cancel: cancel}
+	s.opMu.Lock()
+	if s.exportCancels == nil {
+		s.exportCancels = make(map[string]*cancelEntry)
+	}
+	s.exportCancels[key] = entry
+	s.opMu.Unlock()
+	return entry
+}
+
+// unregisterExportCancel 导出结束（成功/失败/取消/panic 经 defer）注销注册表，
+// 防 CancelFunc 残留（对齐 unregisterSplitCancel：删前校验条目指针同一，同键
+// 覆盖后先结束方不误删后注册项）。
+func (s *AssetLibraryService) unregisterExportCancel(libraryID string, entry *cancelEntry) {
+	if entry == nil {
+		return
+	}
+	key := normalizeRepoKey(libraryID)
+	s.opMu.Lock()
+	if s.exportCancels[key] == entry {
+		delete(s.exportCancels, key)
+	}
+	s.opMu.Unlock()
+}
+
+// CancelExport 取消指定库的在途元数据导出。返回是否存在可取消的在途导出；无
+// 在途导出幂等返回 false（CancelFunc 幂等，取消与注销的竞态无危害）。前端语义：
+// 关闭导出弹窗 = 放弃本次导出，宿主经 CancelAssetExport 绑定触发。
+func (s *AssetLibraryService) CancelExport(libraryID string) bool {
+	key := normalizeRepoKey(libraryID)
+	s.opMu.Lock()
+	entry, ok := s.exportCancels[key]
+	if ok {
+		delete(s.exportCancels, key)
 	}
 	s.opMu.Unlock()
 	if !ok {

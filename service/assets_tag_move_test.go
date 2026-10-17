@@ -69,7 +69,7 @@ func TestAssetTagMove_CrossParent(t *testing.T) {
 	hangye := mustCreateTag(t, svc, lib.ID, "行业", 0, "") // 根组 0
 	mustCreateTag(t, svc, lib.ID, "方案", 0, "")           // 根组 1
 	mubiao := mustCreateTag(t, svc, lib.ID, "目标", 0, "") // 根组 2
-	mustCreateTag(t, svc, lib.ID, "城商行", hangye.ID, "") // 行业子组 0
+	mustCreateTag(t, svc, lib.ID, "城商行", hangye.ID, "")  // 行业子组 0
 
 	// 「目标」移入「行业」且排在「城商行」之后（after 落点 index=1）：
 	// 行业子组 → [城商行 目标]，根组剩余 [行业 方案] 连续化 0..1

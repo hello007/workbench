@@ -246,11 +246,13 @@ func TestAssetScan_ProcessingStatusResidue(t *testing.T) {
 	}
 }
 
-// TestAssetScan_RemovesDeletedRecords 磁盘文件删除后记录同步清除（幻灯片随级联清除）。
-func TestAssetScan_RemovesDeletedRecords(t *testing.T) {
+// TestAssetScan_MarksLostOnDiskRemoval 磁盘文件删除后记录标记 lost（SRS §2.6.5
+// D1，替代 lost 引入前的删除语义）：记录保留、幻灯片保留（标注语义存活）、
+// 统计行丢失数 +1；重复扫描不重复计数（幂等）。
+func TestAssetScan_MarksLostOnDiskRemoval(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
-	lib := mustCreateLibrary(t, svc, "删除清理库", dir)
+	lib := mustCreateLibrary(t, svc, "丢失标记库", dir)
 	src := buildAssetsPptx(t, dir, "待删.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
 
 	if _, err := svc.StartScan(context.Background(), lib.ID); err != nil {
@@ -264,8 +266,8 @@ func TestAssetScan_RemovesDeletedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("二次扫描: %v", err)
 	}
-	if result.Removed != 1 {
-		t.Errorf("应清理 1 条已删记录，实际 %+v", result)
+	if result.Lost != 1 || result.Removed != 0 {
+		t.Errorf("应标记 1 条丢失且不删除（lost=1 removed=0），实际 %+v", result)
 	}
 	files, err := svc.ListFiles(lib.ID)
 	if err != nil {
@@ -276,8 +278,28 @@ func TestAssetScan_RemovesDeletedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSlides: %v", err)
 	}
-	if len(files) != 0 || len(slides) != 0 {
-		t.Errorf("已删文件的记录与幻灯片应同步清除，实际 files=%d slides=%d", len(files), len(slides))
+	if len(files) != 1 || files[0].Status != model.AssetFileStatusLost {
+		t.Fatalf("记录应保留且 status=lost，实际：%+v", files)
+	}
+	if len(slides) != 1 {
+		t.Errorf("幻灯片应随 lost 记录保留（元数据存续），实际 %d 页", len(slides))
+	}
+	// 统计行丢失数
+	stats, err := svc.GetLibraryStats(lib.ID)
+	if err != nil {
+		t.Fatalf("GetLibraryStats: %v", err)
+	}
+	if stats.LostCount != 1 {
+		t.Errorf("统计丢失数应为 1，实际 %d", stats.LostCount)
+	}
+
+	// 重复扫描：lost 行保持 lost 不重复计数（幂等）
+	result, err = svc.StartScan(context.Background(), lib.ID)
+	if err != nil {
+		t.Fatalf("三次扫描: %v", err)
+	}
+	if result.Lost != 0 {
+		t.Errorf("已 lost 的行不应重复计数，实际 %+v", result)
 	}
 }
 

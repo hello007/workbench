@@ -36,6 +36,10 @@ export const ErrorCode = Object.freeze({
   AssetsThumbsUnavailable: 'E_ASSETS_THUMBS_UNAVAILABLE', // 本机无 PowerPoint COM，缩略图/打开跳转不可用（error；前端提示条常驻 + 跳转入口隐藏）
   AssetsThumbsBusy: 'E_ASSETS_THUMBS_BUSY', // 缩略图跳转排队/执行超时（warning，COM 队列瞬态忙，可重试）
   AssetsThumbsJumpFailed: 'E_ASSETS_THUMBS_JUMP_FAILED', // 跳转执行失败：文件不存在/损坏/COM 调用失败（error，消息含可读原因）
+  AssetsExportTargetExists: 'E_ASSETS_EXPORT_TARGET_EXISTS', // 导出目标已存在（CSV 文件已存在 / md 目录非空），确认覆盖后以 overwrite=true 重调（warning，确认型拒绝非真失败）
+  AssetsRelinkMismatch: 'E_ASSETS_RELINK_MISMATCH', // 重链目标文件哈希与记录不一致，确认后以 force=true 重调（warning，确认型拒绝非真失败；强制重链按新文件重解析、标注保留）
+  AssetsRelinkOutsideLib: 'E_ASSETS_RELINK_OUT_OF_LIB', // 重链目标位于素材根目录之外（warning，引导在库内重新选择；前缀替换新路径越界整体拒绝同码）
+  AssetsPrefixNoMatch: 'E_ASSETS_PREFIX_REPLACE_NO_MATCH', // 前缀替换旧前缀零命中（warning，引导核对前缀拼写）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。
@@ -64,7 +68,11 @@ const WARNING_CODES = new Set([
   ErrorCode.ProcessSelfProtect,
   ErrorCode.AssetsCancelled,
   ErrorCode.AssetsScanInProgress,
-  ErrorCode.AssetsThumbsBusy
+  ErrorCode.AssetsThumbsBusy,
+  ErrorCode.AssetsExportTargetExists,
+  ErrorCode.AssetsRelinkMismatch,
+  ErrorCode.AssetsRelinkOutsideLib,
+  ErrorCode.AssetsPrefixNoMatch
 ])
 
 /**

@@ -89,12 +89,18 @@ const (
 	ErrCodeHostsReadFailed = "E_HOSTS_READ_FAILED" // hosts 文件读取失败（不存在 / 无权限等，用户可读消息按根因分类）
 
 	// 素材管理域（侧边栏「素材管理」：本地 DAM 素材库 + PPT 单页索引）
-	ErrCodeAssetsCancelled         = "E_ASSETS_CANCELLED"          // 素材扫描被用户取消（warning，中性提示非 error；对齐 E_GIT_CANCELLED 模式）
-	ErrCodeAssetsLibNotFound       = "E_ASSETS_LIB_NOT_FOUND"      // 素材库不存在或已删除，列表已过期（error，前端刷新库列表）
-	ErrCodeAssetsScanInProgress    = "E_ASSETS_SCAN_IN_PROGRESS"   // 该素材库已有扫描进行中，本次拒绝（warning，用户可稍后重试）
-	ErrCodeAssetsThumbsUnavailable = "E_ASSETS_THUMBS_UNAVAILABLE" // 本机无 PowerPoint COM，缩略图/打开跳转不可用（error，前端提示条常驻 + 跳转入口隐藏）
-	ErrCodeAssetsThumbsBusy        = "E_ASSETS_THUMBS_BUSY"        // 缩略图跳转请求排队/执行超时（warning，COM 队列瞬态忙，可重试；禁复用 UNAVAILABLE——语义为环境无 PowerPoint，前端会误触降级 UI）
-	ErrCodeAssetsThumbsJumpFailed  = "E_ASSETS_THUMBS_JUMP_FAILED" // 跳转执行失败：文件不存在/损坏/COM 调用失败（error，消息含可读原因）
+	ErrCodeAssetsCancelled          = "E_ASSETS_CANCELLED"            // 素材扫描被用户取消（warning，中性提示非 error；对齐 E_GIT_CANCELLED 模式）
+	ErrCodeAssetsLibNotFound        = "E_ASSETS_LIB_NOT_FOUND"        // 素材库不存在或已删除，列表已过期（error，前端刷新库列表）
+	ErrCodeAssetsScanInProgress     = "E_ASSETS_SCAN_IN_PROGRESS"     // 该素材库已有扫描进行中，本次拒绝（warning，用户可稍后重试）
+	ErrCodeAssetsThumbsUnavailable  = "E_ASSETS_THUMBS_UNAVAILABLE"   // 本机无 PowerPoint COM，缩略图/打开跳转不可用（error，前端提示条常驻 + 跳转入口隐藏）
+	ErrCodeAssetsThumbsBusy         = "E_ASSETS_THUMBS_BUSY"          // 缩略图跳转请求排队/执行超时（warning，COM 队列瞬态忙，可重试；禁复用 UNAVAILABLE——语义为环境无 PowerPoint，前端会误触降级 UI）
+	ErrCodeAssetsThumbsJumpFailed   = "E_ASSETS_THUMBS_JUMP_FAILED"   // 跳转执行失败：文件不存在/损坏/COM 调用失败（error，消息含可读原因）
+	ErrCodeAssetsExportTargetExists = "E_ASSETS_EXPORT_TARGET_EXISTS" // 导出目标已存在（CSV 文件已存在 / md 目录非空），确认覆盖后以 overwrite=true 重调（warning，确认型拒绝非真失败）
+	// 文件丢失与重链（SRS §2.6.5，素材管理第九批 PR2）三码：均为预期拒绝/引导类
+	//（warning），前端 error.js WARNING_CODES 同步分流。
+	ErrCodeAssetsRelinkMismatch   = "E_ASSETS_RELINK_MISMATCH"         // 重链目标文件哈希与记录不一致（warning，确认型拒绝——前端确认后以 force=true 重调，强制重链按新文件重解析、标注保留）
+	ErrCodeAssetsRelinkOutsideLib = "E_ASSETS_RELINK_OUT_OF_LIB"       // 重链目标位于素材根目录之外（warning，引导在库内重新选择；前缀替换的新路径越界整体拒绝复用本码）
+	ErrCodeAssetsPrefixNoMatch    = "E_ASSETS_PREFIX_REPLACE_NO_MATCH" // 前缀替换旧前缀零命中（warning，引导核对前缀拼写；目录边界语义见 service/assets_relink.go）
 
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表

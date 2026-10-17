@@ -152,7 +152,8 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 	Logger().Info(opName+" done", "libraryId", libraryID, "rootPath", lib.RootPath,
 		"total", result.Total, "new", result.New, "updated", result.Updated,
 		"unchanged", result.Unchanged, "failed", result.Failed,
-		"encrypted", result.Encrypted, "denied", result.Denied, "removed", result.Removed)
+		"encrypted", result.Encrypted, "denied", result.Denied,
+		"lost", result.Lost, "revived", result.Revived, "removed", result.Removed)
 	s.emitCurrent("assets-scan:done", map[string]any{"libraryId": libraryID, "result": result})
 	// 扫描完成自动入队缩略图补缺（本函数运行于扫描 goroutine，且 scanWG 计数
 	// 尚未归零——结构性保证 WaitScansDone join 时批次已注册，CloseAll 不会先于
@@ -376,8 +377,9 @@ func (s *AssetLibraryService) storeForScan(libraryID string) (*assetsStore, erro
 	return store, nil
 }
 
-// scanLibrary 扫描主体：磁盘清单收集 → 与库存记录差分 → 逐文件处理 → 清理
-// 已删记录。ctx 取消在文件间检查点生效（单文件处理内不中断）。
+// scanLibrary 扫描主体：磁盘清单收集 → 与库存记录差分 → 逐文件处理 → 磁盘消失
+// 记录标记 lost（SRS §2.6.5，元数据保留待重链/复活/清理）。ctx 取消在文件间
+// 检查点生效（单文件处理内不中断）。
 func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
 	entries, err := collectPptxEntries(lib.RootPath)
 	if err != nil {
@@ -399,13 +401,36 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 			return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
 		}
 		rec, exists := recordByID[e.rel]
-		// 增量判定：mtime+size 均未变且非 processing 残留（上次扫描中断的
-		// processing 行必重处理，自愈崩溃半态）→ 跳过
-		if exists && rec.status != model.AssetFileStatusProcessing &&
-			rec.size == e.size && rec.mtimeNs == e.mtimeNs {
-			result.Unchanged++
-			s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
-			continue
+		// 增量判定（三态不变式：未变跳过 / 变更重解析 / 消失标记 lost）：
+		// mtime+size 均未变时按行状态分流——
+		//   lost 行：文件已回归且内容未变 → 有解析产物（曾成功解析）直接复活 ok
+		//   （旧解析/缩略图/FTS 仍有效，零恢复成本，SRS §2.6.5 D1）；无产物行
+		//   （failed/encrypted/denied 跳过类或 0 页空演示文稿）落入重解析按实际
+		//   内容重新分类——直复活会把坏文件谎报为 ok 且此后 unchanged 跳过永不
+		//   纠正（资格门槛单点 fileHasSlides，与前缀替换匹配收敛共用）；
+		//   processing 行：上次扫描中断的残留必重处理（自愈崩溃半态）；
+		//   其余（ok/failed/encrypted/denied）：未变跳过。
+		if exists && rec.size == e.size && rec.mtimeNs == e.mtimeNs {
+			if rec.status == model.AssetFileStatusLost {
+				hasSlides, err := store.fileHasSlides(rec.id)
+				if err != nil {
+					return model.AssetScanResult{}, fmt.Errorf("检查丢失文件解析产物失败（%s）: %w", e.rel, err)
+				}
+				if hasSlides {
+					now := time.Now().Format("2006-01-02 15:04:05")
+					if err := store.reviveLostFile(rec.id, now); err != nil {
+						return model.AssetScanResult{}, fmt.Errorf("复活丢失文件记录失败（%s）: %w", e.rel, err)
+					}
+					result.Revived++
+					s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
+					continue
+				}
+				// 无产物：不 continue，走下方重解析重新分类
+			} else if rec.status != model.AssetFileStatusProcessing {
+				result.Unchanged++
+				s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
+				continue
+			}
 		}
 		outcome, err := s.processScanFile(store, lib, e, rec, exists)
 		if err != nil {
@@ -426,38 +451,34 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
 	}
 
-	// 清理磁盘已消失的文件记录（幻灯片/文件标签/缩略图记账随事务清除；缩略图
-	// PNG 文件在事务提交后删除——文件系统操作不可回滚，db 先行、文件后删）
-	var removed int64
-	gone := make([]string, 0)
+	// 磁盘已消失的文件记录标记 lost（SRS §2.6.5 D1：替代 lost 引入前的删除
+	// 语义）——标签/页级标注/评分/缩略图记账与 PNG 全保留，等待文件回归（下次
+	// 扫描 mtime+size 未变自动复活）或手动重链；「清理丢失记录」手动入口兜底
+	// 真删除。仅对非 lost 行标记（幂等：lost 行保持原状不重复计数，Size/mtime
+	// 原值留作复活与重链判定基准）。
+	gone := make([]assetFileRecord, 0)
 	diskPaths := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		diskPaths[e.rel] = true
 	}
 	for _, rec := range records {
-		if !diskPaths[rec.path] {
-			gone = append(gone, rec.path)
+		if !diskPaths[rec.path] && rec.status != model.AssetFileStatusLost {
+			gone = append(gone, rec)
 		}
 	}
 	if len(gone) > 0 {
 		if err := ctx.Err(); err != nil {
 			return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
 		}
-		deletedIDs, removedN, err := store.deleteFilesByPaths(gone)
-		if err != nil {
-			return model.AssetScanResult{}, fmt.Errorf("清理已删除文件记录失败: %w", err)
-		}
-		removed = removedN
-		thumbsDir := s.assetThumbsDir(lib.ID)
-		for _, fileID := range deletedIDs {
-			// 记账 dirty 同步失效（防 flush 复活已删行——幽灵行虽无害，显式清
-			// 更精确）；PNG 文件删除失败仅告警不中断（残留孤儿文件无害，下次
-			// 同 ID 复用场景由重导出覆盖）
-			s.thumbLedger.invalidateFile(lib.ID, fileID)
-			removeThumbFilesForFile(thumbsDir, fileID)
+		now := time.Now().Format("2006-01-02 15:04:05")
+		for _, rec := range gone {
+			n, err := store.markFileLost(rec.id, now)
+			if err != nil {
+				return model.AssetScanResult{}, fmt.Errorf("标记丢失文件记录失败（%s）: %w", rec.path, err)
+			}
+			result.Lost += int(n)
 		}
 	}
-	result.Removed = int(removed)
 	return result, nil
 }
 

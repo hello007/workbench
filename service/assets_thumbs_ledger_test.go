@@ -786,6 +786,39 @@ func setupInvalidationFixture(t *testing.T) (*AssetLibraryService, *assetsStore,
 	return svc, store, lib, fileID, thumbsDir
 }
 
+// assertThumbsKept 断言指定文件的记账行与全部 PNG 保留（lost 态存续语义）。
+func assertThumbsKept(t *testing.T, store *assetsStore, thumbsDir string, fileID int64) {
+	t.Helper()
+	var n int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM thumb_cache WHERE file_id = ?", fileID,
+	).Scan(&n); err != nil {
+		t.Fatalf("统计记账行: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("该文件的记账行应保留")
+	}
+	for _, tier := range thumbTiers {
+		entries, err := os.ReadDir(filepath.Join(thumbsDir, tier.Key))
+		if os.IsNotExist(err) {
+			t.Fatalf("缩略图档位目录应存在: %s", tier.Key)
+		}
+		if err != nil {
+			t.Fatalf("枚举缩略图目录: %v", err)
+		}
+		prefix := fmt.Sprintf("%d-", fileID)
+		found := false
+		for _, e := range entries {
+			if len(e.Name()) > len(prefix) && e.Name()[:len(prefix)] == prefix {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("缩略图文件应保留: %s 档无 %d-* 文件", tier.Key, fileID)
+		}
+	}
+}
+
 // assertThumbsGone 断言指定文件的记账行与全部 PNG 已清除。
 func assertThumbsGone(t *testing.T, store *assetsStore, thumbsDir string, fileID int64) {
 	t.Helper()
@@ -861,8 +894,9 @@ func TestThumbInvalidation_OnRescanParseFailed(t *testing.T) {
 	assertThumbsGone(t, store, thumbsDir, fileID)
 }
 
-// TestThumbInvalidation_OnFileDeleted 文件删除联动：磁盘文件消失 → 记账行随
-// deleteFilesByPaths 事务清除 + PNG 文件事后删除。
+// TestThumbInvalidation_OnFileDeleted 文件删除联动（SRS §2.6.5 lost 态语义迁移）：
+// 磁盘文件消失 → 扫描标记 lost，记账行与 PNG 全保留（不再清除）；「清理丢失
+// 记录」手动入口执行旧删除语义（记账事务清除 + PNG 事后删除）。
 func TestThumbInvalidation_OnFileDeleted(t *testing.T) {
 	svc, store, lib, fileID, thumbsDir := setupInvalidationFixture(t)
 	if err := os.Remove(filepath.Join(lib.RootPath, "甲.pptx")); err != nil {
@@ -873,8 +907,19 @@ func TestThumbInvalidation_OnFileDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("重扫: %v", err)
 	}
-	if result.Removed != 1 {
-		t.Fatalf("应清理 1 条已删记录, got %+v", result)
+	if result.Lost != 1 || result.Removed != 0 {
+		t.Fatalf("应标记 1 条丢失且不删除, got %+v", result)
+	}
+	// lost 态：记账与 PNG 保留（夹具 1 文件 3 页 small 档 = 3 行记账）
+	if n := countThumbCacheRows(t, store); n != 3 {
+		t.Fatalf("lost 态记账行应保留 3 行, got %d", n)
+	}
+	assertThumbsKept(t, store, thumbsDir, fileID)
+
+	// 清理丢失记录：等效旧删除语义
+	removed, err := svc.ClearLostAssetFiles(lib.ID)
+	if err != nil || removed != 1 {
+		t.Fatalf("清理丢失记录: removed=%d err=%v", removed, err)
 	}
 	assertThumbsGone(t, store, thumbsDir, fileID)
 }

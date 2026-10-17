@@ -8,16 +8,20 @@ describe('assetFormat', () => {
     expect(assetStatusLabel('failed')).toBe('解析失败')
     expect(assetStatusLabel('encrypted')).toBe('已加密')
     expect(assetStatusLabel('denied')).toBe('权限不足')
+    // lost（SRS §2.6.5 第九批）：丢失态映射
+    expect(assetStatusLabel('lost')).toBe('丢失')
     // 未知状态原样回显（后端新增状态时前端不至于渲染空串）
     expect(assetStatusLabel('unknown')).toBe('unknown')
   })
 
-  it('状态标签语义色映射：解析中 info / 正常 success / 解析失败 danger / 加密与权限 warning，未知回退 info', () => {
+  it('状态标签语义色映射：解析中 info / 正常 success / 解析失败 danger / 加密、权限与丢失 warning，未知回退 info', () => {
     expect(assetStatusTagType('processing')).toBe('info')
     expect(assetStatusTagType('ok')).toBe('success')
     expect(assetStatusTagType('failed')).toBe('danger')
     expect(assetStatusTagType('encrypted')).toBe('warning')
     expect(assetStatusTagType('denied')).toBe('warning')
+    // lost：可经重链/复活/清理处置，属「待处理」warning 语义（非 error 红）
+    expect(assetStatusTagType('lost')).toBe('warning')
     expect(assetStatusTagType('unknown')).toBe('info')
   })
 

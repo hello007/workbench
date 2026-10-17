@@ -192,6 +192,20 @@ const { wailsMock } = vi.hoisted(() => ({
     // 分派回调以 targets（slideNum||0）+ 星级值调用
     BatchSetAssetRating: vi.fn(),
     OpenDirectoryDialog: vi.fn(),
+    // 文件选择对话框（重链「重新定位」选库内新位置文件，PRD D6 文件选择交互先例）
+    OpenFileDialog: vi.fn(),
+    // 元数据导出（第九批 PR1）：宿主 execute 分派回调合并范围字段后调用；
+    // SaveFileDialog 为导出 CSV 目标浏览回调消费；CancelAssetExport 为提交中
+    // 关闭弹窗（放弃导出）的中止通道
+    ExportAssetMetadata: vi.fn(),
+    CancelAssetExport: vi.fn(),
+    SaveFileDialog: vi.fn(),
+    // 文件丢失与重链（第九批 PR2，SRS §2.6.5）：宿主直连四绑定（重链/清理丢失/
+    // 前缀替换预览与执行）
+    RelocateAssetFile: vi.fn(),
+    ClearLostAssetFiles: vi.fn(),
+    PreviewAssetPathPrefixReplace: vi.fn(),
+    ReplaceAssetPathPrefix: vi.fn(),
     AssetThumbsAvailable: vi.fn(),
     CancelAssetThumbs: vi.fn(),
     JumpToAssetSlide: vi.fn(),
@@ -352,6 +366,24 @@ const stubs = {
     props: ['modelValue', 'targets', 'execute'],
     emits: ['update:modelValue', 'completed']
   },
+  // 元数据导出弹窗桩（第九批 PR1）：显隐/预览数/execute 受控透出（范围解析与
+  // 检索快照为宿主职责，弹窗交互与 execute 形状断言见导出弹窗独立 spec；
+  // 宿主接线（工具行打开弹窗 / 范围字段下发 / 预览统计链路）由 E2E
+  // frontend/e2e/assets-export.spec.js 覆盖，本 spec 不重复断言）
+  AssetExportDialog: {
+    name: 'AssetExportDialogStub',
+    template: '<div v-if="modelValue" class="asset-export-dialog-stub"></div>',
+    props: ['modelValue', 'previewCount', 'previewScopeLabel', 'execute', 'pickCsvPath', 'pickMdDir', 'cancel'],
+    emits: ['update:modelValue', 'exported']
+  },
+  // 路径前缀替换弹窗桩（第九批 PR2）：显隐/preview/execute 受控透出 + completed
+  // 事件透出（宿主接线与刷新链断言入口；弹窗交互细节见独立 spec）
+  AssetPrefixReplaceDialog: {
+    name: 'AssetPrefixReplaceDialogStub',
+    template: '<div v-if="modelValue" class="asset-prefix-replace-dialog-stub"></div>',
+    props: ['modelValue', 'preview', 'execute'],
+    emits: ['update:modelValue', 'completed']
+  },
   // facet 筛选弹层桩（第七批）：受控 emit 形态对齐真实组件（update:modelValue +
   // change 双事件同步快照）。档位→检索参数换算为组件模块纯函数（独立 spec 以注入
   // now 覆盖），本 spec 只断言宿主接线（SearchAssets 参数 / facets-only 链路切换 /
@@ -386,7 +418,7 @@ const stubs = {
   },
   'el-dropdown-menu': { template: '<div class="el-dropdown-menu"><slot /></div>' },
   'el-dropdown-item': {
-    template: '<div class="el-dropdown-item" @click="onClick"><slot /></div>',
+    template: '<div class="el-dropdown-item" :class="{ \'is-disabled\': disabled }" @click="onClick"><slot /></div>',
     props: ['command', 'disabled', 'divided'],
     inject: { __dropdownCommand: { default: null } },
     methods: {
@@ -449,6 +481,16 @@ describe('AssetsPanel', () => {
     wailsMock.DeleteAssetSavedSearch.mockResolvedValue(null)
     // 目录对话框默认空串 = 用户取消（安全 no-op）
     wailsMock.OpenDirectoryDialog.mockResolvedValue('')
+    // 文件选择对话框默认空串 = 用户取消（重链选文件按用例覆盖）
+    wailsMock.OpenFileDialog.mockResolvedValue('')
+    // ---- 文件丢失与重链（第九批 PR2）默认值：重链默认哈希匹配直复活形态 +
+    // 清理零条 + 预览零命中 + 替换空结果（形状对齐 model.AssetRelocateResult /
+    // AssetPrefixReplaceResult），按用例覆盖；文件对话框默认空串 = 用户取消 ----
+    wailsMock.SaveFileDialog.mockResolvedValue('')
+    wailsMock.RelocateAssetFile.mockResolvedValue({ fileId: 11, oldPath: '方案A/城商行方案.pptx', newPath: '新目录/城商行方案.pptx', hashMatched: true, skippedHashCheck: false, reparsed: false })
+    wailsMock.ClearLostAssetFiles.mockResolvedValue(0)
+    wailsMock.PreviewAssetPathPrefixReplace.mockResolvedValue(0)
+    wailsMock.ReplaceAssetPathPrefix.mockResolvedValue({ libraryId: 'lib-1', oldPrefix: '', newPrefix: '', replaced: 0, revived: 0, reparsed: 0, stillLost: 0, scan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 } })
     // ---- 缩略图（PR3）默认值：Available=false 走降级提示条 + 占位卡稳定路径，按用例覆盖 ----
     wailsMock.AssetThumbsAvailable.mockResolvedValue(false)
     wailsMock.GetAssetThumb.mockResolvedValue('')
@@ -3833,5 +3875,147 @@ describe('AssetsPanel', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('已删除')
     // 挂载 @show 重拉一次 + 删除成功重拉一次
     expect(wailsMock.ListAssetSavedSearches).toHaveBeenCalledTimes(2)
+  })
+
+  // ---- 文件丢失与重链（第九批 PR2，SRS §2.6.5）----
+
+  it('lost 呈现：统计行丢失计数、卡片丢失标签、丢失文件详情提供「重新定位」入口', async () => {
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, lostCount: 1 })
+    const wrapper = await createWrapper()
+    // 统计行
+    expect(wrapper.find('.assets-stats-line').text()).toContain('丢失 1')
+    // 丢失文件卡片带丢失标签（warning 语义色）
+    const lostFile = { ...mockFiles[0], id: 13, path: '方案C/已移走.pptx', status: 'lost', title: '已移走' }
+    wailsMock.ListAssetFiles.mockResolvedValue([...mockFiles, lostFile])
+    const wrapper2 = await createWrapper()
+    const cards = wrapper2.findAll('.asset-card')
+    const lostCard = cards.find((c) => c.text().includes('已移走'))
+    expect(lostCard).toBeTruthy()
+    expect(lostCard.findAll('.el-tag').map((t) => t.text())).toContain('丢失')
+    // 详情侧边栏：丢失文件提供「重新定位」，正常文件不提供
+    await lostCard.trigger('click')
+    await flushPromises()
+    expect(wrapper2.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper2.findAll('.detail-actions button').some((b) => b.text().includes('重新定位'))).toBe(true)
+    const okCard = cards.find((c) => c.text().includes('城商行方案'))
+    await okCard.trigger('click')
+    await flushPromises()
+    expect(wrapper2.findAll('.detail-actions button').some((b) => b.text().includes('重新定位'))).toBe(false)
+  })
+
+  it('手动重链主链路：选文件 → 哈希匹配直复活 toast → 刷新（Relocate 参数与刷新链断言）', async () => {
+    const lostFile = { ...mockFiles[0], id: 13, path: '方案C/已移走.pptx', status: 'lost', title: '已移走' }
+    wailsMock.ListAssetFiles.mockResolvedValue([...mockFiles, lostFile])
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    await cards.find((c) => c.text().includes('已移走')).trigger('click')
+    await flushPromises()
+    // 文件对话框选中库内新位置（重链走 OpenFileDialog 文件选择）
+    wailsMock.OpenFileDialog.mockResolvedValue('D:/assets/新目录/已移走.pptx')
+    const relocateBtn = wrapper.findAll('.detail-actions button').find((b) => b.text().includes('重新定位'))
+    await relocateBtn.trigger('click')
+    await flushPromises()
+    expect(wailsMock.RelocateAssetFile).toHaveBeenCalledWith('lib-1', 13, 'D:/assets/新目录/已移走.pptx', false)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已重链：文件内容与原记录一致，元数据直接恢复')
+    // 终态刷新：底册重拉（首次挂载 + 刷新 ≥ 2 次）+ 统计重拉
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(wailsMock.GetAssetLibraryStats.mock.calls.length).toBeGreaterThanOrEqual(2)
+    // 用户取消对话框（空串）不触发重链
+    wailsMock.RelocateAssetFile.mockClear()
+    wailsMock.OpenFileDialog.mockResolvedValue('')
+    await relocateBtn.trigger('click')
+    await flushPromises()
+    expect(wailsMock.RelocateAssetFile).not.toHaveBeenCalled()
+  })
+
+  it('哈希不等确认链路：E_ASSETS_RELINK_MISMATCH → ElMessageBox 确认 → force=true 重调', async () => {
+    const lostFile = { ...mockFiles[0], id: 13, path: '方案C/已移走.pptx', status: 'lost', title: '已移走' }
+    wailsMock.ListAssetFiles.mockResolvedValue([...mockFiles, lostFile])
+    wailsMock.RelocateAssetFile
+      .mockRejectedValueOnce({ code: 'E_ASSETS_RELINK_MISMATCH', message: '目标文件内容与原记录不一致' })
+      .mockResolvedValueOnce({ fileId: 13, oldPath: '', newPath: '', hashMatched: false, skippedHashCheck: false, reparsed: true })
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    await cards.find((c) => c.text().includes('已移走')).trigger('click')
+    await flushPromises()
+    wailsMock.OpenFileDialog.mockResolvedValue('D:/assets/另一份.pptx')
+    const relocateBtn = wrapper.findAll('.detail-actions button').find((b) => b.text().includes('重新定位'))
+    await relocateBtn.trigger('click')
+    await flushPromises()
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('目标文件内容与原记录不一致'),
+      '强制重链确认',
+      expect.objectContaining({ type: 'warning', confirmButtonText: '强制重链' })
+    )
+    // 确认后 force=true 重调 + 强制重链分型 toast
+    expect(wailsMock.RelocateAssetFile).toHaveBeenLastCalledWith('lib-1', 13, 'D:/assets/另一份.pptx', true)
+    expect(ElMessage.success).toHaveBeenCalledWith('已强制重链并按新文件重新解析（标签与标注保留）')
+  })
+
+  it('重链分型先判 reparsed：processing 残留行（hashMatched=true 且 reparsed=true）走重解析文案，不误报元数据直接恢复', async () => {
+    const lostFile = { ...mockFiles[0], id: 13, path: '方案C/已移走.pptx', status: 'lost', title: '已移走' }
+    wailsMock.ListAssetFiles.mockResolvedValue([...mockFiles, lostFile])
+    // 后端 processing 残留行重链形态：HashMatched=true 是哈希事实陈述，
+    // Reparsed=true 才是必经自愈动作——toast 分型须先判 reparsed
+    wailsMock.RelocateAssetFile.mockResolvedValue({ fileId: 13, oldPath: '', newPath: '', hashMatched: true, skippedHashCheck: false, reparsed: true })
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    await cards.find((c) => c.text().includes('已移走')).trigger('click')
+    await flushPromises()
+    wailsMock.OpenFileDialog.mockResolvedValue('D:/assets/新目录/已移走.pptx')
+    const relocateBtn = wrapper.findAll('.detail-actions button').find((b) => b.text().includes('重新定位'))
+    await relocateBtn.trigger('click')
+    await flushPromises()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已重链并重新解析（内容与原记录一致，补齐解析产物）')
+    expect(ElMessage.success).not.toHaveBeenCalledWith('已重链：文件内容与原记录一致，元数据直接恢复')
+  })
+
+  it('重链分型：空哈希跳过校验（skippedHashCheck=true）走未做内容校验文案', async () => {
+    const lostFile = { ...mockFiles[0], id: 13, path: '方案C/已移走.pptx', status: 'lost', title: '已移走' }
+    wailsMock.ListAssetFiles.mockResolvedValue([...mockFiles, lostFile])
+    wailsMock.RelocateAssetFile.mockResolvedValue({ fileId: 13, oldPath: '', newPath: '', hashMatched: false, skippedHashCheck: true, reparsed: true })
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    await cards.find((c) => c.text().includes('已移走')).trigger('click')
+    await flushPromises()
+    wailsMock.OpenFileDialog.mockResolvedValue('D:/assets/新目录/已移走.pptx')
+    const relocateBtn = wrapper.findAll('.detail-actions button').find((b) => b.text().includes('重新定位'))
+    await relocateBtn.trigger('click')
+    await flushPromises()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已重链并重新解析（原记录无哈希，未做内容校验）')
+  })
+
+  it('维护菜单：清理丢失确认弹窗列出记录数并 Clear + 刷新；前缀替换打开弹窗（零丢失时清理项禁用）', async () => {
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, lostCount: 2 })
+    wailsMock.ClearLostAssetFiles.mockResolvedValue(2)
+    const wrapper = await createWrapper()
+    // el-dropdown 桩常显 dropdown slot：菜单项直接 DOM 可见，点击触发命令分派
+    const clearItem = wrapper.findAll('.el-dropdown-item').find((i) => i.text().includes('清理丢失记录'))
+    expect(clearItem).toBeTruthy()
+    expect(clearItem.classes()).not.toContain('is-disabled')
+    await clearItem.trigger('click')
+    await flushPromises()
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('将删除 2 条丢失记录'),
+      '清理丢失记录',
+      expect.objectContaining({ type: 'warning' })
+    )
+    expect(wailsMock.ClearLostAssetFiles).toHaveBeenCalledWith('lib-1')
+    expect(ElMessage.success).toHaveBeenCalledWith('已清理 2 条丢失记录')
+    // 前缀替换：菜单项打开弹窗
+    const replaceItem = wrapper.findAll('.el-dropdown-item').find((i) => i.text().includes('路径前缀替换'))
+    await replaceItem.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.asset-prefix-replace-dialog-stub').exists()).toBe(true)
+    // 零丢失：清理项禁用
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, lostCount: 0 })
+    const wrapper2 = await createWrapper()
+    const clearItem2 = wrapper2.findAll('.el-dropdown-item').find((i) => i.text().includes('清理丢失记录'))
+    expect(clearItem2.classes()).toContain('is-disabled')
   })
 })
