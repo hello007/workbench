@@ -546,3 +546,37 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 127: 素材管理八/九/十批真机冒烟（RPC 驱动面）+ 缺陷修复
+
+**Date**: 2026-10-18
+**Task**: 素材管理八/九/十批真机冒烟（RPC 驱动面）+ 缺陷修复
+**Branch**: `master`
+
+### Summary
+
+冒烟 RPC 驱动 45/46 过（S1 建库/S2 排除规则全生命周期含 FTS 重建验证点/S3 备份还原哈希恢复/S4 导出 lost 重链前缀替换/S5 排序 facet 聚合/S6 删库失败升级链），驱动脚本归档 archive/2026-10/10-18-srs-2-7-3/rpc_smoke.py（fixture 程序化构造复刻 service 测试形态，无头 serve 独立目录端口隔离桌面实例）。唯一缺陷=排除后缀归一未去重，任务 10-18-s2-1b 修复（保序去重+大小写边界守护+修正锚定缺陷行为的既有断言），commit 0035b86。UI 呈现面（toast/弹窗/进度条/Excel/Obsidian/COM 缩略图跳转）待用户真机手点。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a492a06` | (see git log) |
+| `0035b86` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
