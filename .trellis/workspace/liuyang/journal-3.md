@@ -580,3 +580,34 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 128: 素材管理八/九/十批冒烟收尾：UI 手点面通过
+
+**Date**: 2026-10-18
+**Task**: 素材管理八/九/十批冒烟收尾：UI 手点面通过
+**Branch**: `master`
+
+### Summary
+
+用户真机手点通过全部剩余项（UI 呈现面：导出弹窗三态/Excel CSV/Obsidian MD/lost 标记与重定位入口/索引设置弹窗/重扫进度条/备份清单弹层/还原与删库强确认/已排除统计；COM 链：缩略图生成→画廊预览→单页跳转）。八/九/十批冒烟全部收口，删除 assets-smoke-pending 记忆。下一批预告：单页 OCR（SRS §2.2/§2.4，提示词已备）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
