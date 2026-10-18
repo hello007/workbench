@@ -1,0 +1,7 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域主契约：FTS 五契约、扫描增量三态不变式、检索三路径、选中体系、excluded/lost 状态机改动须对齐"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "libraries.json（AssetLibrary 新增排除规则字段）与备份相关 data/ 域写面必须走 util.SaveJSON 原子写"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增备份/排除相关错误码须同步 model/app_error.go 常量表与前端 error.js 双处"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新 App 绑定方法须 wails generate 三处同步；具名 string 类型作绑定点参数时 models.ts 别名坑"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁 sleep/mtime 时序/固定端口/真实 FS 事件等待；备份文件时间戳命名等时序面用注入驱动"}
+{"file": ".trellis/tasks/10-18-srs-2-7-3/research/exclude-rules-semantics.md", "reason": "排除规则匹配语义最终推荐（glob 形态/后缀归一/WalkDir 剪枝要点），PR1 实现依据"}
+{"file": ".trellis/tasks/10-18-srs-2-7-3/research/sqlite-backup-restore.md", "reason": "VACUUM INTO 可行性、integrity_check 用法、还原步骤序与并发防护，PR2 实现依据"}

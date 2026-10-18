@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "审查素材域契约遵守：FTS 五契约、三态不变式、检索三入口 excluded 过滤完整性"}
+{"file": "docs/spec/test-stability.md", "reason": "审查测试稳定性：无 sleep/mtime 时序/固定端口/真实事件等待"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "审查 wails 绑定三处同步与 models.ts 具名类型别名"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "审查 data/ 域写面原子写口径（备份淘汰记录、libraries.json）"}
+{"file": ".trellis/tasks/10-18-srs-2-7-3/research/exclude-rules-semantics.md", "reason": "对照研究结论审查排除规则实现语义一致性"}
+{"file": ".trellis/tasks/10-18-srs-2-7-3/research/sqlite-backup-restore.md", "reason": "对照研究结论审查备份/还原步骤序与并发防护"}
