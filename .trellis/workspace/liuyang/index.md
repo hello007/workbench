@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 125
+- **Total Sessions**: 126
 - **Last Active**: 2026-10-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~515 | Active |
+| `journal-3.md` | ~548 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 126 | 2026-10-18 | 素材管理第十批：索引配置与素材库备份（SRS §2.7.3/§2.7.5/§14.16） | `411154c` | `master` |
 | 125 | 2026-10-18 | 素材管理第九批：导出元数据 + 文件丢失重链（SRS §2.6.4/§2.6.5） | `404b142` | `master` |
 | 124 | 2026-10-16 | 素材管理第八批：检索排序器 + 批量修改评分 | `5def99f` | `master` |
 | 123 | 2026-10-16 | 素材管理第七批：facet 多维筛选 + 保存检索条件（SRS §2.5） | `39b8ba2` | `master` |

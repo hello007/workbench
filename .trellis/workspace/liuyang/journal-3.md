@@ -513,3 +513,36 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 126: 素材管理第十批：索引配置与素材库备份（SRS §2.7.3/§2.7.5/§14.16）
+
+**Date**: 2026-10-18
+**Task**: 素材管理第十批：索引配置与素材库备份（SRS §2.7.3/§2.7.5/§14.16）
+**Branch**: `master`
+
+### Summary
+
+第十批完成：每库排除规则（单段 glob+后缀归一，保存即自动重扫）+ excluded 索引态（先排除后存在性/与 lost 互斥/检索不可见导出照导/直复活单事务重建 FTS）+ 备份域（VACUUM INTO+integrity_check/保留 5 份 _N 深序/重建删库前自动/删库 allowNoBackup 升级确认/还原步骤序含导出复查封竞态）+ 哈希恢复（路径优先 hash 兜底字典序后者胜）。流程：brainstorm 6 问收敛 prd → 双 research 实证（glob 语义/VACUUM INTO）→ 3 PR 实施 → check 修 3 处 → 独立审核两轮 9 项修复+复审 → spec 沉淀 §12+CLAUDE.md v2.24。门禁 service 80.0%/前端 85.14%。遗留：八/九/十批真机冒烟（清单 archive/2026-10/10-18-srs-2-7-3/smoke-checklist.md）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `411154c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
