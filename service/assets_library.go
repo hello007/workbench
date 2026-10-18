@@ -45,16 +45,19 @@ type AssetLibraryService struct {
 	loaded bool                    // 注册表是否已从磁盘加载
 	open   map[string]*assetsStore // libraryID -> 已打开的库连接缓存
 
-	opMu          sync.Mutex              // 保护 opLocks/cancels/splitLocks/splitCancels/exportCancels 的并发读写
+	opMu          sync.Mutex              // 保护 opLocks/cancels/splitLocks/splitCancels/exportCancels/backupLocks 的并发读写
 	opLocks       map[string]*sync.Mutex  // libraryID（规范化）-> 扫描互斥锁（懒创建）
 	cancels       map[string]*cancelEntry // libraryID（规范化）-> 在途扫描注册条目（复用 git.go 的 cancelEntry）
 	splitLocks    map[string]*sync.Mutex  // libraryID（规范化）-> 拆分互斥锁（懒创建；与扫描锁独立）
 	splitCancels  map[string]*cancelEntry // libraryID（规范化）-> 在途拆分注册条目（assets_split.go）
 	exportCancels map[string]*cancelEntry // libraryID（规范化）-> 在途导出注册条目（assets_export.go）
+	backupLocks   map[string]*sync.Mutex  // libraryID（规范化）-> 备份互斥锁（懒创建；与扫描/拆分锁独立，assets_backup.go）
 
 	scanWG sync.WaitGroup // 在途扫描计数（runLibraryScan 增减），WaitScansDone 关停收口等待
 
 	splitWG sync.WaitGroup // 在途拆分计数（拆分入口增减，对齐 scanWG），WaitSplitsDone 关停收口等待
+
+	exportWG sync.WaitGroup // 在途导出计数（ExportAssetMetadata 增减，对齐 splitWG），WaitExportsDone 还原/关停收口等待
 
 	parseFn assetsParseFn // 解析注入点（nil = 生产实现 parsePptxSlides，单测注入 fake）
 
@@ -233,11 +236,26 @@ func (s *AssetLibraryService) getLibraryLocked(libraryID string) (model.AssetLib
 	return model.AssetLibrary{}, errAssetLibraryNotFound
 }
 
-// DeleteLibrary 删除素材库：取消缩略图批次 → 关连接 → 删 db 文件（含 WAL/SHM
-// 伴生文件）→ 删缩略图目录 → 清记账 dirty → 删注册表项（原子落盘）。标签体系
-// 随库文件删除天然隔离，无需逐表清理。
+// DeleteLibrary 删除素材库：取消缩略图批次 → 删库前自动备份（SRS §2.7.5）→
+// 关连接 → 删 db 文件（含 WAL/SHM 伴生文件）→ 删缩略图目录 → 清记账 dirty →
+// 删注册表项（原子落盘）。标签体系随库文件删除天然隔离，无需逐表清理。
+//
+// 删库前自动备份（素材管理第十批 PR2，PRD R3「删库前备份失败升级确认」）：备份
+// 失败时**不静默不阻断**——allowNoBackup=false 返回 E_ASSETS_DELETE_BACKUP_FAILED
+// 确认型拒绝（warning，删除未发生），前端弹「备份失败，删除后无恢复点」强提示，
+// 用户二次确认后以 allowNoBackup=true 重调；true 时告警继续删除。形态对齐
+// RelocateAssetFile 的 force 重调交互模式（E_ASSETS_RELINK_MISMATCH 先例）。
+//
+// 备份目录（data/assets/backups/<libId>）不随库删除清理：删库后备份是唯一恢复点
+// 必须存续（库 ID 随机生成不复用，备份经由文件系统手动访问）。
+//
 // 在途扫描保护：库正在扫描时拒绝删除（warning 引导稍后再试），防扫描写已关连接。
-func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
+func (s *AssetLibraryService) DeleteLibrary(libraryID string, allowNoBackup bool) error {
+	// 库存在预检：不存在直接返回 E_ASSETS_LIB_NOT_FOUND，不落入备份失败分支误报
+	if _, err := s.getLibrary(libraryID); err != nil {
+		return err
+	}
+
 	// 缩略图批次取消（进入删除前）：缩小「worker 向已删目录写 PNG」窗口。取消
 	// 异步不等待——在途单文件（最长单文件超时）仍可能经 MkdirAll 重建空 tier
 	// 目录并残留少量 PNG（已删库 ID 下不进任何清理链路），量级可手动清理，注释
@@ -259,6 +277,18 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 		return err
 	}
 	defer releaseSplit()
+
+	// 删库前自动备份（须在关连接前——VACUUM INTO 需活连接；持扫描锁段内执行，
+	// 与并发扫描/删库互斥，withStore 经单连接池排队）。失败按 allowNoBackup 分流，
+	// 见函数头注释。
+	if err := s.backupLibraryForCriticalOp(libraryID); err != nil {
+		if !allowNoBackup {
+			return model.NewAppError(model.ErrCodeAssetsDeleteBackupFailed,
+				fmt.Sprintf("删除前自动备份失败，删除后该库将无恢复点（%s）。确认仍要删除请在二次确认后重试", err.Error()))
+		}
+		Logger().Warn("删除前自动备份失败（用户已确认，继续无恢复点删除）",
+			"libraryId", libraryID, "err", err)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -311,15 +341,16 @@ func (s *AssetLibraryService) DeleteLibrary(libraryID string) error {
 	return s.saveRegistryLocked()
 }
 
-// GetLibraryStats 库统计：文件/幻灯片总数与失败/加密跳过数、丢失数（库徽标与
-// 看板用；丢失数供前端统计行展示与「清理丢失记录」确认弹窗口径）。
+// GetLibraryStats 库统计：文件/幻灯片总数与失败/加密跳过数、丢失数、排除规则
+// 命中数（库徽标与看板用；丢失数供前端统计行展示与「清理丢失记录」确认弹窗
+// 口径；排除数对齐 lost 计入——检索不可见但占索引口径，SRS §2.7.3）。
 func (s *AssetLibraryService) GetLibraryStats(libraryID string) (model.AssetLibraryStats, error) {
 	if _, err := s.getLibrary(libraryID); err != nil {
 		return model.AssetLibraryStats{}, err
 	}
 	var stats model.AssetLibraryStats
 	err := s.withStore(libraryID, func(store *assetsStore) error {
-		fileCount, slideCount, failedCount, encryptedCount, lostCount, err := store.libraryStats()
+		fileCount, slideCount, failedCount, encryptedCount, lostCount, excludedCount, err := store.libraryStats()
 		if err != nil {
 			return err
 		}
@@ -330,6 +361,7 @@ func (s *AssetLibraryService) GetLibraryStats(libraryID string) (model.AssetLibr
 			FailedCount:    failedCount,
 			EncryptedCount: encryptedCount,
 			LostCount:      lostCount,
+			ExcludedCount:  excludedCount,
 		}
 		return nil
 	})
@@ -415,6 +447,46 @@ func (s *AssetLibraryService) UpdateSlideMeta(libraryID string, fileID int64, sl
 	})
 }
 
+// UpdateLibraryRules 更新库排除规则（SRS §2.7.3 索引配置，整体替换语义）并在
+// 保存成功后自动触发该库增量重扫使规则即时生效（PRD R1）：规则命中的已入库
+// 文件转 excluded（检索/标签/facet 不可见、标注与缩略图保留）、解除命中的
+// excluded 文件复活。
+// 校验（第一道防线，normalizeAssetExcludeRules）：目录模式含路径分隔符或坏
+// glob 语法拒绝；后缀三形态归一带点小写。
+// 重扫复用 StartScan 既有链路：串行锁（同库在途扫描时返回
+// E_ASSETS_SCAN_IN_PROGRESS——规则已保存，在途扫描按启动时快照的旧规则执行，
+// 结束后手动重扫即可生效）、取消注册、assets-scan:* 事件通道一致。ctx 取
+// Background 对齐 StartAssetScan 绑定形态（绑定签名不带 ctx）。
+func (s *AssetLibraryService) UpdateLibraryRules(libraryID string, excludeDirs, excludeExts []string) (model.AssetScanResult, error) {
+	dirs, exts, err := normalizeAssetExcludeRules(excludeDirs, excludeExts)
+	if err != nil {
+		return model.AssetScanResult{}, err
+	}
+	if err := s.setLibraryRules(libraryID, dirs, exts); err != nil {
+		return model.AssetScanResult{}, err
+	}
+	return s.StartScan(context.Background(), libraryID)
+}
+
+// setLibraryRules 仅更新注册表中该库的排除规则两字段（其余字段不动，UpdatedAt
+// 刷新），s.mu 全程持锁原子落盘（util.SaveJSON，data-atomic-write 契约）。
+func (s *AssetLibraryService) setLibraryRules(libraryID string, dirs, exts []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadRegistryLocked(); err != nil {
+		return err
+	}
+	for i := range s.libs {
+		if s.libs[i].ID == libraryID {
+			s.libs[i].ExcludeDirs = dirs
+			s.libs[i].ExcludeExts = exts
+			s.libs[i].UpdatedAt = time.Now().Format("2006-01-02 15:04:05")
+			return s.saveRegistryLocked()
+		}
+	}
+	return errAssetLibraryNotFound
+}
+
 // WaitScansDone 通知全部在途扫描取消并等待其退出（App.shutdown 关停收口，先于
 // CloseAll 调用）：逐个触发取消注册表中的 CancelFunc（扫描在文件间检查点感知
 // ctx 取消后收尾），再等扫描计数归零。没有本收口时，CloseAll 先关库连接、在途
@@ -456,6 +528,16 @@ func (s *AssetLibraryService) CancelAllSplits() {
 // （取消检查点在文件间、单文件内不中断——与 WaitScansDone 的单文件解析上界同口径）。
 func (s *AssetLibraryService) WaitSplitsDone() {
 	s.splitWG.Wait()
+}
+
+// WaitExportsDone 等待全部在途元数据导出退出（对齐 WaitSplitsDone 形态）：导出
+// 取消检查点在行键分批环顶部，取消后当前批次水合完成即收口，等待上界 = 单批处理
+// 时长（assetsQueryIDBatch 封顶）。还原链在 CancelExport 命中在途导出后调用
+// （防还原换库后半批行键失配被静默剔除产出混批 CSV）；无在途导出立即返回。
+// 等待面为全局计数（导出无按库等待原语），还原期间罕见并发他库导出时最多多等
+// 一个批次，无正确性影响。
+func (s *AssetLibraryService) WaitExportsDone() {
+	s.exportWG.Wait()
 }
 
 // CloseAll 关闭全部已打开的库连接（App.shutdown 关停期调用；库删除路径经
@@ -573,6 +655,51 @@ func (s *AssetLibraryService) tryLockScan(libraryID string) (release func(), err
 			"该素材库正在扫描中，请等待当前扫描结束后再试")
 	}
 	return mu.Unlock, nil
+}
+
+// lockScanBlocking 阻塞获取目标库的扫描互斥锁（等待语义，与 tryLockScan 的
+// TryLock 拒绝语义互补）：先触发取消（调用方自行 CancelScan）再经本方法等在途
+// 扫描真正退出。还原链路专用（RestoreAssetLibrary）——取消信号在扫描文件间
+// 检查点生效，TryLock 会立即拒绝尚未退出的在途扫描，须阻塞等待；tryLockScan
+// 的互斥拒绝语义（扫描中禁删库/禁重链等快速失败面）不受影响。
+// 成功返回 release 闭包，调用方须 defer 调用。
+func (s *AssetLibraryService) lockScanBlocking(libraryID string) (release func(), err error) {
+	key := normalizeRepoKey(libraryID)
+
+	s.opMu.Lock()
+	mu, ok := s.opLocks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		if s.opLocks == nil {
+			s.opLocks = make(map[string]*sync.Mutex)
+		}
+		s.opLocks[key] = mu
+	}
+	s.opMu.Unlock()
+
+	mu.Lock()
+	return mu.Unlock, nil
+}
+
+// lockLibraryBackups 阻塞获取目标库的备份互斥锁（同库备份全程串行——手动备份与
+// 重建/删库前自动备份共用 createAssetBackup 且可并发，同秒两调用竞态选同一 target
+// 时，后到者 VACUUM INTO 失败的清理会误删先到者刚生成的有效备份）。与扫描/拆分锁
+// 独立（备份与扫描可并发：VACUUM INTO 单语句在该库单连接池上与扫描查询天然排队，
+// research 实证毫秒级）；懒创建对齐 opLocks/splitLocks 模式。
+func (s *AssetLibraryService) lockLibraryBackups(libraryID string) func() {
+	key := normalizeRepoKey(libraryID)
+	s.opMu.Lock()
+	mu, ok := s.backupLocks[key]
+	if !ok {
+		if s.backupLocks == nil {
+			s.backupLocks = make(map[string]*sync.Mutex)
+		}
+		mu = &sync.Mutex{}
+		s.backupLocks[key] = mu
+	}
+	s.opMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // tryLockSplit 尝试获取目标库的拆分互斥锁（TryLock 语义，对齐 tryLockScan 模式；
@@ -721,4 +848,17 @@ func (s *AssetLibraryService) CancelExport(libraryID string) bool {
 	}
 	entry.cancel()
 	return true
+}
+
+// hasPendingExportLocked 复查指定库是否存在在途导出注册（exportCancels 读取须
+// opMu，方法名 Locked 后缀 = 调用方须持 s.mu，对齐 storeForLocked 命名约定）。
+// 供还原链（RestoreAssetLibrary）在持 s.mu 期间调用——复查与还原的关连接/rename
+// 同锁串行是窗口封死的必要条件（放锁再查会复开「查空 → 导出注册并抢先物化旧库
+// → 取锁 rename」窗口）。锁序 s.mu → opMu 单向：opMu 各临界区均为注册表/锁表纯
+// map 操作，从不反向嵌套 s.mu，无 ABBA 死锁环。
+func (s *AssetLibraryService) hasPendingExportLocked(libraryID string) bool {
+	key := normalizeRepoKey(libraryID)
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.exportCancels[key] != nil
 }

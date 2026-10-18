@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **198** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
+共 **229** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -39,9 +39,9 @@
 | 设置 | 2 | `app_settings.go` |
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
-| 素材管理 | 22 | `app_assets.go` |
+| 素材管理 | 43 | `app_assets.go` |
 
-> 既有缺口（与本表总数差 18）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域及部分域的行内计数为历史遗留未登记项，方法总数以 `App.d.ts` 为准，待另案补齐。
+> 既有缺口（与本表合计 218 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
@@ -474,7 +474,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ## 29. 素材管理
 
-侧边栏「素材管理」本地 DAM 素材索引库（MVP）：素材库 CRUD + 目录扫描（增量索引）+ 幻灯片单页索引 + 检索 + 文件级元数据编辑 + 元数据导出（CSV / Markdown+YAML，SRS §2.6.4）+ 文件丢失标记与重链（lost 状态机 / 手动重定位 / 路径前缀替换，SRS §2.6.5）。索引库以 SQLite 文件落盘 `data/assets/<library-id>.db`（modernc 纯 Go 驱动 + FTS5），库注册表 `data/assets/libraries.json`；索引模式只读引用原始文件，扫描不修改源文件。导出与丢失重链契约详见 [spec/assets-management.md](spec/assets-management.md) §11。
+侧边栏「素材管理」本地 DAM 素材索引库（MVP）：素材库 CRUD + 目录扫描（增量索引）+ 幻灯片单页索引 + 检索 + 文件级元数据编辑 + 元数据导出（CSV / Markdown+YAML，SRS §2.6.4）+ 文件丢失标记与重链（lost 状态机 / 手动重定位 / 路径前缀替换，SRS §2.6.5）+ 素材库备份与还原（手动 + 重建/删库前自动快照，SRS §2.7.5）。索引库以 SQLite 文件落盘 `data/assets/<library-id>.db`（modernc 纯 Go 驱动 + FTS5），库注册表 `data/assets/libraries.json`；索引模式只读引用原始文件，扫描不修改源文件。导出与丢失重链契约详见 [spec/assets-management.md](spec/assets-management.md) §11。
 
 扫描进度/终态经事件推送（EventSink 通道）：`assets-scan:progress`（`{libraryId, done, total, currentFile}`）/ `assets-scan:done`（`{libraryId, result: AssetScanResult}`）/ `assets-scan:error`（`{libraryId, message}`）。
 
@@ -484,10 +484,11 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 |---|---|---|---|
 | `CreateAssetLibrary` | `(name, rootPath) => Promise<AssetLibrary>` | 新建素材库（校验名称非空、根目录存在且为目录；登记注册表并预建索引库文件） | AssetLibrary |
 | `ListAssetLibraries` | `() => Promise<AssetLibrary[]>` | 全部素材库（注册表顺序，库切换下拉数据源） | AssetLibrary[] |
-| `DeleteAssetLibrary` | `(libraryID) => Promise<void>` | 删除素材库（关连接 + 删 db 含 WAL/SHM + 删注册表项；扫描中拒绝，`E_ASSETS_SCAN_IN_PROGRESS`） | — |
+| `DeleteAssetLibrary` | `(libraryID, allowNoBackup) => Promise<void>` | 删除素材库（删库前自动备份 + 关连接 + 删 db 含 WAL/SHM + 删注册表项；备份目录不随库删除清理；扫描中拒绝，`E_ASSETS_SCAN_IN_PROGRESS`；备份失败且 `allowNoBackup=false` 返回 `E_ASSETS_DELETE_BACKUP_FAILED` 确认型拒绝，用户二次确认后 `true` 重调） | — |
 | `GetAssetLibraryStats` | `(libraryID) => Promise<AssetLibraryStats>` | 库统计（文件/幻灯片总数、失败/加密跳过数） | AssetLibraryStats |
 | `StartAssetScan` | `(libraryID) => Promise<AssetScanResult>` | 增量扫描（递归索引根目录 .pptx，mtime+size 判变，变更才哈希重解析；加密/损坏/权限不足单文件降级跳过不中断批量；同库并发扫描拒绝） | AssetScanResult |
 | `CancelAssetScan` | `(libraryID) => Promise<boolean>` | 取消指定库在途扫描（幂等，无在途扫描返回 false） | boolean |
+| `UpdateAssetLibraryRules` | `(libraryID, excludeDirs: string[], excludeExts: string[]) => Promise<AssetScanResult>` | 更新库排除规则（SRS §2.7.3 索引配置，整体替换）并保存后自动增量重扫使规则即时生效：目录模式按文件夹名匹配（单段通配 `*` `?` `[...]`，大小写不敏感，不含路径分隔符）、后缀宽容 `tmp`/`.tmp`/`*.tmp` 三形态；规则命中存量转 excluded（检索不可见、标注保留），改宽后复活；同库扫描中时规则已保存但重扫被拒（`E_ASSETS_SCAN_IN_PROGRESS`） | AssetScanResult |
 | `RebuildAssetLibrary` | `(libraryID) => Promise<AssetScanResult>` | 手动全量重建（清该库文件/幻灯片/FTS 记录后全量重扫；文件标签按相对路径重绑，星级/备注不保留；索引自愈入口） | AssetScanResult |
 | `ListAssetFiles` | `(libraryID) => Promise<AssetFileEntry[]>` | 文件索引条目（含标签，按相对路径序；画廊文件视图数据源） | AssetFileEntry[] |
 | `ListAssetSlides` | `(libraryID, limit, offset) => Promise<AssetSlidePage>` | 幻灯片索引条目分页（标签继承归属文件，按文件路径 + 页序；页序以 sldIdLst 为准；limit ≤0 取 50 上限 200、offset<0 按 0，total 恒为总条目数） | AssetSlidePage |
@@ -509,6 +510,9 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `ClearLostAssetFiles` | `(libraryID) => Promise<number>` | 清理全部丢失记录（等效删除语义：级联标注/标签 + FTS/缩略图记账/PNG 收口；返回实际删除数） | number |
 | `PreviewAssetPathPrefixReplace` | `(libraryID, oldPrefix, newPrefix) => Promise<number>` | 路径前缀替换预览（目录边界语义命中数；零命中报 `E_ASSETS_PREFIX_REPLACE_NO_MATCH`） | number |
 | `ReplaceAssetPathPrefix` | `(libraryID, oldPrefix, newPrefix) => Promise<AssetPrefixReplaceResult>` | 执行前缀替换（库内子目录重组修复：单事务批量改 path + 三态收敛（匹配复活/重解析/保持 lost）+ 自动增量扫描；越界任一整体拒绝 `E_ASSETS_RELINK_OUT_OF_LIB`） | AssetPrefixReplaceResult |
+| `BackupAssetLibrary` | `(libraryID) => Promise<AssetBackupEntry>` | 手动备份（SRS §2.7.5，整库 VACUUM INTO 快照 + integrity_check 校验（非 ok 删备份报错）+ 每库最近 5 份保留淘汰；落点 `data/assets/backups/<libraryId>/<yyyyMMdd-HHmmss>.db`；缩略图 PNG 与拆分产物不在备份范围；重建/删库前自动快照复用同一实现） | AssetBackupEntry |
+| `ListAssetLibraryBackups` | `(libraryID) => Promise<AssetBackupEntry[]>` | 备份清单（按备份时间倒序，条目含文件名/时间/大小/绝对路径；从未备份返回空清单非错误） | AssetBackupEntry[] |
+| `RestoreAssetLibrary` | `(libraryID, backupFile) => Promise<void>` | 还原备份（备份文件整体替换 `<id>.db`：取消并等待在途扫描退出 + 关连接 + 删 WAL/SHM 残留 + `os.Rename` 覆盖 + 惰性重开并复验；`backupFile` 须为该库备份目录内的备份文件（`ListAssetLibraryBackups` 返回的 `path` 原样回传）；覆盖前预检备份完整性，损坏备份不动当前库；还原后前端提示重扫） | — |
 
 ---
 
@@ -718,19 +722,19 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ### 30.7 素材管理
 
-**AssetLibrary** — 素材库注册信息（`id`（随机 hex，同时是库 db 文件名）/ `name` / `rootPath` / `createdAt` / `updatedAt`）
+**AssetLibrary** — 素材库注册信息（`id`（随机 hex，同时是库 db 文件名）/ `name` / `rootPath` / `excludeDirs`?: string[]（排除文件夹 glob 规则，单段通配按文件夹名匹配）/ `excludeExts`?: string[]（忽略后缀，带点小写归一）/ `createdAt` / `updatedAt`）
 
 **AssetTag** — 标签（`id` / `name`（库内唯一）/ `color`（#RRGGBB，自动创建走默认色板）/ `parentId`（预留多级树，恒 0））
 
-**AssetFileEntry** — 文件索引条目（`id` / `path`（相对库根目录，正斜杠分隔，库内唯一）/ `size` / `modTime` / `status`（`processing`/`ok`/`failed`/`encrypted`/`denied`）/ `title`（源文件名去扩展名）/ `note` / `rating`（0-5，0 = 未评分）/ `tags`: AssetTag[] / `createdAt` / `updatedAt`）
+**AssetFileEntry** — 文件索引条目（`id` / `path`（相对库根目录，正斜杠分隔，库内唯一）/ `size` / `modTime` / `status`（`processing`/`ok`/`failed`/`encrypted`/`denied`/`lost`/`excluded`）/ `title`（源文件名去扩展名）/ `note` / `rating`（0-5，0 = 未评分）/ `tags`: AssetTag[] / `createdAt` / `updatedAt`）
 
 **AssetSlideEntry** — 幻灯片单页索引条目（`id` / `fileId`（归属文件记录 ID）/ `filePath` / `slideNum`（展示页序从 1 计）/ `title`（回退链：标题占位符 → 首行短文本 → 文件名+页码，空页兜底「[无标题]」）/ `text` / `speakerNotes` / `tags`（继承归属文件标签））
 
-**AssetLibraryStats** — 库统计（`libraryId` / `fileCount` / `slideCount` / `failedCount` / `encryptedCount`）
+**AssetLibraryStats** — 库统计（`libraryId` / `fileCount`（含各状态）/ `slideCount` / `failedCount` / `encryptedCount` / `lostCount` / `excludedCount`）
 
 **AssetScanProgress** — 扫描进度事件载荷（`libraryId` / `done` / `total` / `currentFile`）
 
-**AssetScanResult** — 扫描结果汇总（`total` / `new` / `updated` / `unchanged` / `failed` / `encrypted` / `denied` / `removed`）
+**AssetScanResult** — 扫描结果汇总（`total` / `new` / `updated` / `unchanged` / `failed` / `encrypted` / `denied` / `lost`（本次新标记丢失）/ `revived`（直接复活未重解析：lost 回归或 excluded 解除）/ `excluded`（本次新标记排除）/ `removed`（兼容保留恒 0））
 
 **AssetFileMetaUpdate** — 元数据编辑入参（`rating` / `note` / `tags`: string[]，整体替换语义）
 
@@ -759,6 +763,8 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 **AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致））
 
 **AssetSplitProgress** — 拆分进度事件载荷（`libraryId` / `done` / `total`（文件级计数）/ `currentFile` / `pageDone` / `pageTotal`（当前文件页级透传））
+
+**AssetBackupEntry** — 素材库备份条目（SRS §2.7.5：`libraryId` / `fileName`（`<yyyyMMdd-HHmmss>[_序号].db`）/ `path`（备份文件绝对路径，还原时原样回传）/ `sizeBytes` / `createdAt`（由文件名时间戳解析）；备份为整库 SQLite 快照（VACUUM INTO 产物），缩略图 PNG 与拆分产物不在范围）
 
 ### 30.8 其他
 

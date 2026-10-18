@@ -140,6 +140,10 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 // 批量 SQL 判定（filterFileIDsByFacet，防逐命中 N+1），命中循环按行 fileID 查
 // 命中集合 O(1) 判定——文件条目按自身属性、幻灯片条目按归属文件属性（继承），
 // 判定位置与 slideTagRowMatches 同层（FTS 命中 → entries 构建处，分页前完成）。
+// excluded 过滤（SRS §2.7.3）：excluded 文件 FTS 行保留（无损保留语义）但检索
+// 不可见——命中 fileID 全集一次批量取排除集合（excludedFileIDSet），循环内剔除
+// （与 facet 过滤同层同形态；lost 行 FTS 亦保留且有意可见引导重链，此处仅剔
+// excluded）。
 func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchOptions, facet *assetsFacetFilter, tagFilter, ownSlideFilter map[int64]bool) (model.AssetSearchPage, error) {
 	matchExpr := buildFtsQuery(keyword)
 	if matchExpr == "" {
@@ -151,17 +155,23 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 		return model.AssetSearchPage{}, fmt.Errorf("素材检索失败: %w", err)
 	}
 
+	// 命中 fileID 去重全集一次收集（excluded 与 facet 两个批量判定共用）
+	fileIDs := make([]int64, 0, len(hits))
+	seen := make(map[int64]bool, len(hits))
+	for _, h := range hits {
+		if !seen[h.fileID] {
+			seen[h.fileID] = true
+			fileIDs = append(fileIDs, h.fileID)
+		}
+	}
+	excludedSet, err := store.excludedFileIDSet(fileIDs)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("读取排除文件集合失败: %w", err)
+	}
+
 	// facet 命中文件集合批量预取（分页前完成判定，Total 按过滤后口径计）
 	var facetHits map[int64]bool
 	if facet != nil {
-		fileIDs := make([]int64, 0, len(hits))
-		seen := make(map[int64]bool, len(hits))
-		for _, h := range hits {
-			if !seen[h.fileID] {
-				seen[h.fileID] = true
-				fileIDs = append(fileIDs, h.fileID)
-			}
-		}
 		facetHits, err = store.filterFileIDsByFacet(fileIDs, facet)
 		if err != nil {
 			return model.AssetSearchPage{}, fmt.Errorf("facet 筛选失败: %w", err)
@@ -170,6 +180,9 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 
 	entries := make([]assetSearchEntry, 0, len(hits))
 	for _, h := range hits {
+		if excludedSet[h.fileID] {
+			continue // excluded 文件（幻灯片条目随归属文件一并出局，SRS §2.7.3）
+		}
 		if facetHits != nil && !facetHits[h.fileID] {
 			continue // facet 未命中（幻灯片条目随归属文件一并出局）
 		}

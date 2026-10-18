@@ -422,7 +422,7 @@ func TestAssetScan_ConcurrentRejectedAndCancel(t *testing.T) {
 		t.Fatalf("同库并发扫描应被拒（E_ASSETS_SCAN_IN_PROGRESS），实际：%v", err)
 	}
 	// 在途期间删除库同样被拒（复用扫描锁互斥）
-	if err := svc.DeleteLibrary(lib.ID); !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsScanInProgress {
+	if err := svc.DeleteLibrary(lib.ID, false); !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsScanInProgress {
 		t.Fatalf("扫描中删库应被拒，实际：%v", err)
 	}
 
@@ -756,7 +756,7 @@ func TestAssetLibrary_ListDelete(t *testing.T) {
 		t.Fatalf("应列举 2 个库，实际 %d", len(libs))
 	}
 
-	if err := svc.DeleteLibrary(libA.ID); err != nil {
+	if err := svc.DeleteLibrary(libA.ID, true); err != nil {
 		t.Fatalf("DeleteLibrary: %v", err)
 	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -772,7 +772,7 @@ func TestAssetLibrary_ListDelete(t *testing.T) {
 		t.Errorf("删除后应仅剩库B，实际：%+v", libs)
 	}
 
-	err = svc.DeleteLibrary(libA.ID)
+	err = svc.DeleteLibrary(libA.ID, true)
 	var appErr *model.AppError
 	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsLibNotFound {
 		t.Fatalf("重复删除应报 E_ASSETS_LIB_NOT_FOUND，实际：%v", err)

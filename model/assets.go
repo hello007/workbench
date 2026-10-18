@@ -10,11 +10,19 @@ package model
 
 // AssetLibrary 素材库注册信息（data/assets/libraries.json 注册表 + 前端库切换下拉）。
 type AssetLibrary struct {
-	ID        string `json:"id"`        // 库唯一标识（随机 hex），同时是库 db 文件名（<id>.db）
-	Name      string `json:"name"`      // 库显示名（用户输入，可重名）
-	RootPath  string `json:"rootPath"`  // 素材根目录绝对路径（扫描范围，原始文件不动）
-	CreatedAt string `json:"createdAt"` // 创建时间（"2006-01-02 15:04:05"）
-	UpdatedAt string `json:"updatedAt"` // 最近更新时间（同上格式）
+	ID       string `json:"id"`       // 库唯一标识（随机 hex），同时是库 db 文件名（<id>.db）
+	Name     string `json:"name"`     // 库显示名（用户输入，可重名）
+	RootPath string `json:"rootPath"` // 素材根目录绝对路径（扫描范围，原始文件不动）
+	// ExcludeDirs 排除文件夹规则（SRS §2.7.3，素材管理第十批）：每项一个 glob
+	// 模式（filepath.Match 单段语法 * ? [...]，大小写不敏感），匹配相对库根路径
+	// 任意单层目录段名（剪枝用目录基名匹配）；不支持「/」与「**」多段路径模式；
+	// 库根目录自身豁免匹配（防整库剪空）。空 = 不排除。
+	ExcludeDirs []string `json:"excludeDirs,omitempty"`
+	// ExcludeExts 忽略后缀规则（SRS §2.7.3）：存储归一为带点小写（如 .tmp），
+	// 输入宽容 tmp / .tmp / *.tmp 三形态等价。空 = 不忽略。
+	ExcludeExts []string `json:"excludeExts,omitempty"`
+	CreatedAt   string   `json:"createdAt"` // 创建时间（"2006-01-02 15:04:05"）
+	UpdatedAt   string   `json:"updatedAt"` // 最近更新时间（同上格式）
 }
 
 // AssetTag 标签（平铺单级；ParentID 预留多级树，本批不建 UI）。
@@ -29,7 +37,13 @@ type AssetTag struct {
 // 单文件解析结果分类：成功 / 失败(损坏等) / 跳过(加密) / 跳过(权限不足)；
 // processing 为扫描过程中的瞬态（崩溃残留时下次扫描会重新处理）；
 // lost 为扫描发现磁盘文件消失时的标记态（SRS §2.6.5，素材管理第九批 PR2）：
-// 记录与标签/标注/评分/缩略图全保留，等待文件回归（自动复活）/手动重链/清理。
+// 记录与标签/标注/评分/缩略图全保留，等待文件回归（自动复活）/手动重链/清理；
+// excluded 为用户排除规则命中态（SRS §2.7.3，素材管理第十批 PR1）：扫描先判
+// 排除规则再判存在性，命中即标 excluded（不做磁盘探测）；标注/评分/备注/缩略图/
+// FTS 全保留（无损保留语义对齐 lost），但检索/标签浏览/facet 不可见（与 lost
+// 可见性相反——excluded 语义是「用户不要」，可见即规则失效）；导出照导；规则
+// 改宽后下轮扫描磁盘仍在走增量三态复活转正常态、规则仍命中即使文件消失也不转
+// lost（规则优先），规则改宽后消失的文件才可见 lost。
 const (
 	AssetFileStatusProcessing = "processing" // 解析中（瞬态）
 	AssetFileStatusOK         = "ok"         // 解析成功
@@ -37,6 +51,7 @@ const (
 	AssetFileStatusEncrypted  = "encrypted"  // 加密文件，跳过索引
 	AssetFileStatusDenied     = "denied"     // 权限不足，跳过索引
 	AssetFileStatusLost       = "lost"       // 磁盘文件丢失（元数据保留待重链）
+	AssetFileStatusExcluded   = "excluded"   // 排除规则命中（检索不可见，无损保留待复活）
 )
 
 // AssetFileEntry 素材文件索引条目（画廊文件视图卡片 + 详情侧边栏元数据编辑载体）。
@@ -85,6 +100,9 @@ type AssetLibraryStats struct {
 	FailedCount    int    `json:"failedCount"`    // 解析失败文件数（status=failed）
 	EncryptedCount int    `json:"encryptedCount"` // 加密跳过文件数（status=encrypted）
 	LostCount      int    `json:"lostCount"`      // 丢失文件数（status=lost，SRS §2.6.5；前端统计行与清理丢失入口确认弹窗展示）
+	// ExcludedCount 排除规则命中文件数（status=excluded，SRS §2.7.3）：检索/
+	// 标签/facet 不可见但占索引与统计口径（FileCount 含之），对齐 lost 计入口径
+	ExcludedCount int `json:"excludedCount"` // 排除规则命中文件数（status=excluded）
 }
 
 // AssetScanProgress 扫描进度事件载荷（assets-scan:progress 事件，EventSink 下发）。
@@ -107,9 +125,13 @@ type AssetScanResult struct {
 	// Lost 本次扫描新标记丢失的文件数（磁盘消失，SRS §2.6.5 lost 态引入后替代
 	// 删除语义；已处于 lost 的行不重复计数）
 	Lost int `json:"lost"`
-	// Revived lost 文件回归且 mtime+size 未变、直接复活 ok 的数量（内容未变
-	// 旧解析/缩略图仍有效，不重解析）
+	// Revived 直接复活 ok 未重解析的数量（内容未变旧解析/缩略图仍有效）：lost
+	// 文件回归且 mtime+size 未变，或 excluded 文件规则改宽后磁盘仍在且未变
+	// （SRS §2.7.3，两类直复活共用同一 fileHasSlides 资格门槛与计数）
 	Revived int `json:"revived"`
+	// Excluded 本次扫描新标记排除的文件数（用户排除规则命中存量索引，任意现存态
+	// 命中即标，SRS §2.7.3；已 excluded 行幂等不重复计数）
+	Excluded int `json:"excluded"`
 	// Removed 兼容保留字段：lost 态引入前扫描直接删除消失记录的计数；现恒 0
 	//（删除语义由 lost 标记 + ClearLostAssetFiles 手动清理承接）
 	Removed int `json:"removed"`
@@ -516,4 +538,20 @@ type AssetSavedSearch struct {
 	SortBy    string `json:"sortBy"`
 	SortDir   string `json:"sortDir"`
 	CreatedAt string `json:"createdAt"` // 保存时间（RFC3339；更新覆盖时保留原值）
+}
+
+// ===== 素材库备份（SRS §2.7.5，素材管理第十批 PR2） =====
+
+// AssetBackupEntry 素材库备份文件条目（ListAssetLibraryBackups 清单元素 +
+// BackupAssetLibrary 单次备份回执）。备份为整库 SQLite 快照（VACUUM INTO 产物，
+// 独立紧凑 db，含索引/标注/标签/FTS 全部内容）；缩略图 PNG 与拆分产物目录不在
+// 备份范围（仅 db + libraries.json 注册表元数据随库存续）。
+type AssetBackupEntry struct {
+	LibraryID string `json:"libraryId"` // 所属库 ID
+	FileName  string `json:"fileName"`  // 备份文件名（<yyyyMMdd-HHmmss>[_序号].db，_序号为同秒多次备份深序后缀）
+	// Path 备份文件绝对路径（data/assets/backups/<libId>/<fileName>），还原时
+	// 原样回传（后端校验必须位于该库备份目录内，防任意文件覆盖 <id>.db）
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"sizeBytes"` // 文件大小（字节，前端清单展示）
+	CreatedAt string `json:"createdAt"` // 备份时间（"2006-01-02 15:04:05"，由文件名时间戳解析）
 }

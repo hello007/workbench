@@ -20,9 +20,11 @@ import (
 )
 
 // 目录扫描（素材管理·增量索引）：递归扫库根目录，后缀白名单 .pptx（大小写
-// 不敏感）；强制排除拆分派生产物目录 derived/。增量判定 mtime+size（未变跳过，
-// 变更才哈希+重解析），单文件解析失败降级标记状态不中断批量；进度/终态事件经
-// EventSink（assets-scan:*），取消经注册表派生 ctx 贯通。
+// 不敏感）；强制排除拆分派生产物（同名文件夹布局）+ 用户排除规则（SRS §2.7.3
+// ExcludeDirs/ExcludeExts，matcher 见 assets_exclude.go，规则命中存量标 excluded
+// 态无损保留）。增量判定 mtime+size（未变跳过，变更才哈希+重解析），单文件解析
+// 失败降级标记状态不中断批量；进度/终态事件经 EventSink（assets-scan:*），取消
+// 经注册表派生 ctx 贯通。
 
 // PPT 拆分派生副本排除（PRD：派生产物不入索引，防与源文件重复入库）。拆分输出
 // 布局见 service/pptx_split.go SplitPptxPerPage：源 <dir>/<name>.pptx 的产物落
@@ -153,7 +155,8 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 		"total", result.Total, "new", result.New, "updated", result.Updated,
 		"unchanged", result.Unchanged, "failed", result.Failed,
 		"encrypted", result.Encrypted, "denied", result.Denied,
-		"lost", result.Lost, "revived", result.Revived, "removed", result.Removed)
+		"lost", result.Lost, "revived", result.Revived, "excluded", result.Excluded,
+		"removed", result.Removed)
 	s.emitCurrent("assets-scan:done", map[string]any{"libraryId": libraryID, "result": result})
 	// 扫描完成自动入队缩略图补缺（本函数运行于扫描 goroutine，且 scanWG 计数
 	// 尚未归零——结构性保证 WaitScansDone join 时批次已注册，CloseAll 不会先于
@@ -291,14 +294,16 @@ func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model
 	return backlog, nil
 }
 
-// rebuildLibrary 全量重建主体：备份标签绑定 → 清 files/FTS → 全量扫描（记录
-// 已清空，全部文件按新增处理）→ 按路径映射重绑标签。备份成功后重绑以 defer
-// 注册：扫描成功与失败/取消路径都执行写回。中途失败为部分重绑语义——已重扫
-// 文件恢复标注，未重扫文件无 files/slides 行可匹配自然丢弃，优于全丢（重绑若
-// 只挂成功路径，失败直接 return：两表已随清库清空而备份仅存内存，标注永久
-// 丢失，且二次重建备份到的是空表无法自愈）。重绑自身失败仅记日志，不覆盖
-// 扫描主错误（失败路径主错误优先）；备份自身失败仍中止重建（备份不到就清库
-// = 必丢，保持 fail-fast，此时清库尚未发生索引未破坏）。
+// rebuildLibrary 全量重建主体：备份标签绑定 → 整库磁盘备份 → 清 files/FTS →
+// 全量扫描（记录已清空，全部文件按新增处理）→ 按路径（miss 后哈希兜底）映射
+// 重绑标注。标注备份成功后重绑以 defer 注册：扫描成功与失败/取消路径都执行写
+// 回。中途失败为部分重绑语义——已重扫文件恢复标注，未重扫文件无 files/slides
+// 行可匹配自然丢弃，优于全丢（重绑若只挂成功路径，失败直接 return：两表已随
+// 清库清空而备份仅存内存，标注永久丢失，且二次重建备份到的是空表无法自愈）。
+// 重绑自身失败仅记日志，不覆盖扫描主错误（失败路径主错误优先）；内存标注备份
+// 自身失败仍中止重建（备份不到就清库 = 必丢，保持 fail-fast，此时清库尚未发生
+// 索引未破坏）；整库磁盘备份失败仅告警不中止（SRS §2.7.5 重大操作自动快照，
+// best-effort，见 1.2 步注释）。
 func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
 	// 0. 取消该库在途缩略图批次（独立审核发现）：不清则 worker 在清表+删目录后
 	// 继续导出——MkdirAll 重建 tier 目录、旧 fileID PNG 落盘（AUTOINCREMENT 旧 ID
@@ -322,24 +327,38 @@ func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsS
 	// 的取消注销/扫描锁释放（后者注册更早、于外层函数返回时才触发），执行点
 	// store 连接必可用——连接仅由 CloseAll（服务级关停，被 WaitScansDone 挡在
 	// 本扫描退出之后）或 DeleteLibrary（与本扫描经 tryLockScan 互斥）关闭，两者
-	// 均未发生。重绑函数签名不变（接备份 map）；重绑 error 只记日志不上抛
-	// （失败路径扫描主错误优先，成功路径重绑失败不推翻已完成的重建结果）。
+	// 均未发生。重绑按「路径直命中 + 哈希兜底」两级匹配返回双计数（SRS §14.16
+	// 哈希恢复，素材管理第十批 PR2）；重绑 error 只记日志不上抛（失败路径扫描
+	// 主错误优先，成功路径重绑失败不推翻已完成的重建结果）。
 	defer func() {
 		if len(bindings) > 0 {
-			if rebound, err := store.rebindFileTagsAfterRebuild(bindings); err != nil {
+			if pathHit, hashHit, err := store.rebindFileTagsAfterRebuild(bindings); err != nil {
 				Logger().Warn("assets rebuild tags rebind failed", "libraryId", lib.ID, "err", err)
 			} else {
-				Logger().Info("assets rebuild tags rebound", "libraryId", lib.ID, "rebound", rebound)
+				Logger().Info("assets rebuild tags rebound", "libraryId", lib.ID,
+					"byPath", pathHit, "byHash", hashHit)
 			}
 		}
 		if len(slideAnnots) > 0 {
-			if rebound, err := store.rebindSlideAnnotationsAfterRebuild(slideAnnots); err != nil {
+			if pathHit, hashHit, err := store.rebindSlideAnnotationsAfterRebuild(slideAnnots); err != nil {
 				Logger().Warn("assets rebuild slide annotations rebind failed", "libraryId", lib.ID, "err", err)
 			} else {
-				Logger().Info("assets rebuild slide annotations rebound", "libraryId", lib.ID, "rebound", rebound)
+				Logger().Info("assets rebuild slide annotations rebound", "libraryId", lib.ID,
+					"byPath", pathHit, "byHash", hashHit)
 			}
 		}
 	}()
+
+	// 1.2 磁盘备份（SRS §2.7.5 重大操作自动快照，素材管理第十批 PR2）：整库
+	// VACUUM INTO 快照落 data/assets/backups/<libId>/，重建前最后恢复点（页级
+	// 标注重绑仅覆盖标签/标注/备注，文件级星级/备注与解析产物随清库重建，备份
+	// 可整库回到重建前时点）。失败仅告警不中止重建——重建可重扫恢复（标注有
+	// 哈希兜底），备份缺失损失有限（research §5：best-effort 备份对可逆操作不
+	// 放大故障面，对齐 DeleteLibrary 缩略图目录删除失败仅告警口径）。经 withStore
+	// 取连接（扫描锁内、s.mu 空闲，取到即本扫描在用的缓存连接，无额外互斥诉求）。
+	if err := s.backupLibraryForCriticalOp(lib.ID); err != nil {
+		Logger().Warn("重建前自动备份失败（继续重建，无本次恢复点）", "libraryId", lib.ID, "err", err)
+	}
 
 	// 2. 清索引数据（files/slides/file_tags + FTS 全表 + 缩略图记账表）
 	if err := store.clearIndexForRebuild(); err != nil {
@@ -377,11 +396,15 @@ func (s *AssetLibraryService) storeForScan(libraryID string) (*assetsStore, erro
 	return store, nil
 }
 
-// scanLibrary 扫描主体：磁盘清单收集 → 与库存记录差分 → 逐文件处理 → 磁盘消失
+// scanLibrary 扫描主体：磁盘清单收集（含用户排除规则过滤）→ 存量规则命中
+// 标记 excluded（先排除后存在性）→ 与库存记录差分 → 逐文件处理 → 磁盘消失
 // 记录标记 lost（SRS §2.6.5，元数据保留待重链/复活/清理）。ctx 取消在文件间
 // 检查点生效（单文件处理内不中断）。
 func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
-	entries, err := collectPptxEntries(lib.RootPath)
+	// 排除规则编译一次（SRS §2.7.3）：收集层磁盘过滤与存量 excluded 判定两条
+	// 链共用同一 matcher（禁两套口径）
+	matcher := newAssetExcludeMatcher(lib.ExcludeDirs, lib.ExcludeExts)
+	entries, err := collectPptxEntries(lib.RootPath, matcher)
 	if err != nil {
 		return model.AssetScanResult{}, err
 	}
@@ -395,7 +418,31 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		recordByID[rec.path] = rec
 	}
 
+	// 存量规则命中标记 excluded（SRS §2.7.3，先排除后存在性：规则命中即标，
+	// 不做磁盘存在性探测——规则命中的磁盘文件也不会出现在 entries 里，收集层
+	// 已过滤）：任意现存态命中即标 excluded（幂等：已 excluded 行跳过不重复
+	// 计数）；标注/评分/备注/缩略图/FTS 全保留（markFileExcluded 仅翻状态，
+	// 无损保留语义对齐 markFileLost）。
 	result := model.AssetScanResult{Total: len(entries)}
+	if matcher.active() {
+		now := time.Now().Format("2006-01-02 15:04:05")
+		for _, rec := range records {
+			// 逐行取消检查点（对齐下方 entries 循环与 gone 段检查点形态）：万文件级
+			// 存量逐行 UPDATE，无检查点时取消在整个循环结束前不生效
+			if err := ctx.Err(); err != nil {
+				return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
+			}
+			if rec.status == model.AssetFileStatusExcluded || !matcher.matchPath(rec.path) {
+				continue
+			}
+			n, err := store.markFileExcluded(rec.id, now)
+			if err != nil {
+				return model.AssetScanResult{}, fmt.Errorf("标记排除文件记录失败（%s）: %w", rec.path, err)
+			}
+			result.Excluded += int(n)
+		}
+	}
+
 	for i, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
@@ -408,10 +455,13 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		//   （failed/encrypted/denied 跳过类或 0 页空演示文稿）落入重解析按实际
 		//   内容重新分类——直复活会把坏文件谎报为 ok 且此后 unchanged 跳过永不
 		//   纠正（资格门槛单点 fileHasSlides，与前缀替换匹配收敛共用）；
+		//   excluded 行：规则改宽后（能进 entries 即本轮规则不命中）磁盘仍在且
+		//   未变 → 同 lost 口径经 fileHasSlides 资格门槛直接复活 ok（解除排除，
+		//   SRS §2.7.3）；无产物行同 lost 落入重解析重新分类；
 		//   processing 行：上次扫描中断的残留必重处理（自愈崩溃半态）；
 		//   其余（ok/failed/encrypted/denied）：未变跳过。
 		if exists && rec.size == e.size && rec.mtimeNs == e.mtimeNs {
-			if rec.status == model.AssetFileStatusLost {
+			if rec.status == model.AssetFileStatusLost || rec.status == model.AssetFileStatusExcluded {
 				hasSlides, err := store.fileHasSlides(rec.id)
 				if err != nil {
 					return model.AssetScanResult{}, fmt.Errorf("检查丢失文件解析产物失败（%s）: %w", e.rel, err)
@@ -456,12 +506,18 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 	// 扫描 mtime+size 未变自动复活）或手动重链；「清理丢失记录」手动入口兜底
 	// 真删除。仅对非 lost 行标记（幂等：lost 行保持原状不重复计数，Size/mtime
 	// 原值留作复活与重链判定基准）。
+	// 规则命中行排除优先于 lost（SRS §2.7.3）：规则仍命中的存量行不做存在性
+	// 探测、保持 excluded（excluded + 磁盘消失不转 lost——规则优先）；规则改宽
+	// 后消失的文件才可见 lost（excluded 行经下方正常链路标记）。
 	gone := make([]assetFileRecord, 0)
 	diskPaths := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		diskPaths[e.rel] = true
 	}
 	for _, rec := range records {
+		if matcher.matchPath(rec.path) {
+			continue
+		}
 		if !diskPaths[rec.path] && rec.status != model.AssetFileStatusLost {
 			gone = append(gone, rec)
 		}
@@ -627,8 +683,14 @@ func hashFileSHA256(absPath string) (string, error) {
 
 // collectPptxEntries 递归收集库根目录下待索引 pptx 清单（相对路径字典序，进度
 // 与结果顺序确定）。目录级异常（无权限子目录）降级跳过不中断；PPT 拆分派生
-// 副本（同名文件夹布局）排除不索引。
-func collectPptxEntries(root string) ([]pptxDiskEntry, error) {
+// 副本（同名文件夹布局）排除不索引。matcher 非 nil 时叠加用户排除规则（SRS
+// §2.7.3）：目录段基名命中（大小写不敏感）SkipDir 剪除整棵子树（该子树全部
+// 文件与子目录不再进入，排除语义正确）；文件后缀命中不入清单。库根目录自身
+// 豁免目录匹配（p == root 时 d.Name() 为根目录名，参与匹配会把整库剪空）。
+// 用目录基名匹配无需 Rel，天然与分隔符无关（规避 Windows 下 filepath.Match 的
+// 「/」不匹配「\」分隔符坑）。拆分派生排除与用户规则并存互不覆盖（两者均排除，
+// 系统内置不可被用户规则反向包含——本链路无包含语义）。
+func collectPptxEntries(root string, matcher *assetExcludeMatcher) ([]pptxDiskEntry, error) {
 	var entries []pptxDiskEntry
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -640,10 +702,18 @@ func collectPptxEntries(root string) ([]pptxDiskEntry, error) {
 			return nil
 		}
 		if d.IsDir() {
+			// 用户排除规则目录剪枝（root 自身豁免）；与上方的不可入 SkipDir
+			// 权限降级互不干扰（两处返回值语义相同）
+			if p != root && matcher.matchDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.EqualFold(path.Ext(p), ".pptx") {
 			return nil
+		}
+		if matcher.matchExt(path.Ext(p)) {
+			return nil // 后缀黑名单命中：不入清单
 		}
 		info, err := d.Info()
 		if err != nil {

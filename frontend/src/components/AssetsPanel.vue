@@ -124,12 +124,20 @@
         </el-select>
         <el-button size="small" @click="openCreateDialog">新建库</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onDeleteLibrary">删除库</el-button>
+        <!-- 备份/还原（第十批 SRS §2.7.5）：备份一键快照（VACUUM INTO 整库索引），
+             在途 loading 防连点（onBackupLibrary 内另有 backingUp 守卫双保险）；
+             还原打开备份清单弹层选份回滚（确认后覆盖当前索引与标注） -->
+        <el-button size="small" :disabled="!hasLibrary || scanning" :loading="backingUp" @click="onBackupLibrary">备份</el-button>
+        <el-button size="small" :disabled="!hasLibrary || scanning" @click="openBackupDialog">还原</el-button>
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="onRebuild">重建索引</el-button>
         <el-button
           size="small"
           :disabled="!hasLibrary || scanning || splitting"
           @click="openSplitDialog('library')"
         >拆分全部 PPT</el-button>
+        <!-- 索引设置（第十批 SRS §2.7.3）：库级扫描排除规则（排除文件夹/忽略后缀），
+             保存即自动增量重扫使规则即时生效 -->
+        <el-button size="small" :disabled="!hasLibrary || scanning" @click="openRulesDialog">索引设置</el-button>
         <el-button size="small" @click="openThumbSettings">缩略图设置</el-button>
         <el-button
           size="small"
@@ -410,6 +418,9 @@
       <span v-if="stats.failedCount > 0" class="stats-warn">解析失败 {{ stats.failedCount }}</span>
       <span v-if="stats.encryptedCount > 0" class="stats-warn">已加密 {{ stats.encryptedCount }}</span>
       <span v-if="lostFileCount > 0" class="stats-warn">丢失 {{ lostFileCount }}</span>
+      <!-- 排除计数（第十批 SRS §2.7.3）：排除规则命中的已入库文件（检索不可见），
+           仅非零显示（对齐丢失计数先例）；无独立排除列表视图（prd 本批明确不做） -->
+      <span v-if="excludedFileCount > 0" class="stats-warn">已排除 {{ excludedFileCount }}</span>
       <span v-if="searchMode" class="stats-hit">命中 {{ searchTotal }} 条</span>
     </div>
 
@@ -987,6 +998,28 @@
       @completed="refreshAfterMaintain"
     />
 
+    <!-- 索引设置弹窗（第十批 PR3，SRS §2.7.3）：规则编辑在弹窗、保存分派留宿主
+         （UpdateAssetLibraryRules 绑定，后端保存后自动增量重扫）；saved 触发库
+         列表重拉（规则回显同步）+ 库数据刷新链（excluded/复活生效） -->
+    <AssetRulesDialog
+      v-model="rulesDialogVisible"
+      :library="currentLibrary"
+      :execute="executeUpdateRules"
+      @saved="refreshAfterRulesSaved"
+    />
+
+    <!-- 备份还原弹窗（第十批 PR3，SRS §2.7.5）：清单拉取与还原分派留宿主
+         （ListAssetLibraryBackups / RestoreAssetLibrary 绑定）；restored 触发
+         库数据刷新链（索引回备份时点，含过滤不可见面与统计口径） -->
+    <AssetBackupDialog
+      v-model="backupDialogVisible"
+      :library-id="currentLibraryId"
+      :library-name="currentLibrary?.name || ''"
+      :list-backups="listLibraryBackups"
+      :execute-restore="executeRestoreBackup"
+      @restored="refreshAfterRestore"
+    />
+
     <!-- 保存检索条件命名弹窗（第七批 PR3，PRD D4/D7）：名称必填（重名拒绝由后端
          Save 返回，handleError 透传 toast）；条件摘要预览展示快照全维（facet 时间
          维展示解析后的绝对区间——相对档保存即冻结为区间，摘要与调取还原口径一致）。
@@ -1055,6 +1088,10 @@ import {
   ClearLostAssetFiles,
   PreviewAssetPathPrefixReplace,
   ReplaceAssetPathPrefix,
+  UpdateAssetLibraryRules,
+  BackupAssetLibrary,
+  ListAssetLibraryBackups,
+  RestoreAssetLibrary,
   AssetThumbsAvailable,
   JumpToAssetSlide,
   RetryAssetThumb,
@@ -1097,6 +1134,12 @@ import AssetExportDialog from './AssetExportDialog.vue'
 // 路径前缀替换弹窗（第九批 PR2，SRS §2.6.5）：命中预览（防抖）与执行分派回调
 // 留宿主，二次确认与结果 toast 在弹窗内闭环
 import AssetPrefixReplaceDialog from './AssetPrefixReplaceDialog.vue'
+// 索引设置弹窗（第十批 PR3，SRS §2.7.3）：排除规则增删编辑在弹窗、保存分派
+// 回调留宿主（UpdateAssetLibraryRules，后端保存后自动增量重扫）
+import AssetRulesDialog from './AssetRulesDialog.vue'
+// 备份还原弹窗（第十批 PR3，SRS §2.7.5）：备份清单拉取与还原分派回调留宿主，
+// 选份确认链在弹窗内闭环
+import AssetBackupDialog from './AssetBackupDialog.vue'
 // facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
 // 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
 // countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
@@ -1720,6 +1763,10 @@ const cancelAssetExport = () => CancelAssetExport(currentLibraryId.value)
 // 丢失文件计数（统计行 / 维护菜单禁用态 / 清理确认弹窗共用口径；stats 未加载按 0）
 const lostFileCount = computed(() => stats.value?.lostCount || 0)
 
+// 排除文件计数（第十批 SRS §2.7.3，统计行呈现口径）：排除规则命中的已入库文件
+//（检索/标签/facet 不可见，无损保留），对齐 lost 计数先例仅非零显示
+const excludedFileCount = computed(() => stats.value?.excludedCount || 0)
+
 // 详情文件是否丢失（「重新定位」入口显隐）
 const isDetailFileLost = computed(
   () => selected.value?.kind === 'file' && selected.value?.fileEntry?.status === 'lost'
@@ -1803,6 +1850,85 @@ const refreshAfterMaintain = async () => {
     }
     handleError('刷新数据失败: ', error)
   }
+}
+
+// ---- 索引设置（第十批 SRS §2.7.3）：排除规则编辑弹窗接线 ----
+
+const rulesDialogVisible = ref(false)
+
+const openRulesDialog = () => {
+  if (!hasLibrary.value) return
+  rulesDialogVisible.value = true
+}
+
+// 保存分派（弹窗经 props.execute 调用）：整体替换下发两组规则，后端保存成功后
+// 自动增量重扫并返回扫描汇总（Promise 返回时重扫已完成）。重扫期间复用现有
+// 扫描进度条（assets-scan:progress 事件更新 scanProgress，scanning 置位使其
+// 渲染）且可取消（后端规则重扫与增量扫描同取消注册表，取消经 handleError
+// warning 中性提示、规则已保存不回滚）
+const executeUpdateRules = async (excludeDirs, excludeExts) => {
+  scanning.value = true
+  scanProgress.value = null
+  try {
+    return await UpdateAssetLibraryRules(currentLibraryId.value, excludeDirs, excludeExts)
+  } finally {
+    scanning.value = false
+    scanProgress.value = null
+  }
+}
+
+// 规则保存成功刷新链：库列表重拉（规则回显与 UpdatedAt 同步）+ 数据视图刷新
+//（重扫已把存量命中标 excluded / 解除的复活，统计与检索口径同步）。扫描摘要
+// toast 由弹窗统一弹出，本链只刷数据
+const refreshAfterRulesSaved = async () => {
+  await loadLibraries()
+  await refreshAfterMaintain()
+}
+
+// ---- 备份与还原（第十批 SRS §2.7.5）：备份一键快照 + 备份清单弹层选份还原 ----
+
+const backupDialogVisible = ref(false)
+const backingUp = ref(false)
+
+// 手动备份（库操作「备份」入口）：成功提示落点路径（data/assets/backups/<库>/
+// <时间戳>.db，每库保留最近 5 份）；失败经 handleError（备份失败不静默）
+const onBackupLibrary = async () => {
+  if (!hasLibrary.value || backingUp.value) return
+  backingUp.value = true
+  try {
+    const entry = await BackupAssetLibrary(currentLibraryId.value)
+    ElMessage.success(`备份完成：${entry?.path || entry?.fileName || '已保存'}`)
+  } catch (error) {
+    handleError('备份失败: ', error)
+  } finally {
+    backingUp.value = false
+  }
+}
+
+const openBackupDialog = () => {
+  if (!hasLibrary.value) return
+  backupDialogVisible.value = true
+}
+
+// 备份清单拉取分派（弹窗经 props.listBackups 调用）
+const listLibraryBackups = (libraryId) => ListAssetLibraryBackups(libraryId)
+
+// 还原分派（弹窗经 props.executeRestore 调用，条目绝对路径原样回传——后端校验
+// 路径必须位于该库备份目录内）：成功后弹窗统一 toast，本链只刷数据
+const executeRestoreBackup = (backupFilePath) => RestoreAssetLibrary(currentLibraryId.value, backupFilePath)
+
+// 还原成功刷新链（数据刷新对齐 refreshAfterMaintain 口径）：索引整体回到备份
+// 时点，统计/底册/检索态全部重拉；在途扫描已被后端取消并等待退出，前端
+// scanning 态由既有 Promise/事件链自然收尾。库注册表不受还原影响，无需重拉。
+// 还原 = 索引整体回滚，属语境变更点位而非数据变更点位（与规则保存/批量标注等
+// 刻意保留选中的刷新链不同）：还原前选中的文件/幻灯片可能已不在回滚后索引，
+// 详情侧栏驻留陈旧条目会使用户后续备注/评分编辑向已不存在条目写回——先关详情
+// 与预览并清选中（对齐 resetAndReloadView 语境变更先例）再走既有刷新
+const refreshAfterRestore = () => {
+  closeDetail()
+  closePreview()
+  clearSelection()
+  return refreshAfterMaintain()
 }
 
 // ---- 手动重链（详情侧边栏「重新定位」，仅丢失文件提供）----
@@ -3111,14 +3237,41 @@ const onDeleteLibrary = async () => {
   } catch {
     return
   }
-  try {
-    await DeleteAssetLibrary(lib.id)
+  // 删除执行单点（首调 allowNoBackup=false；备份失败强确认后带 true 重调）：
+  // 成功后从注册表移除并回退剩余库
+  const doDelete = async (allowNoBackup) => {
+    await DeleteAssetLibrary(lib.id, allowNoBackup)
     ElMessage.success('素材库已删除')
     libraries.value = libraries.value.filter(l => l.id !== lib.id)
     currentLibraryId.value = libraries.value[0]?.id || ''
     await onLibrarySelectionSettled()
+  }
+  try {
+    // allowNoBackup=false：删库前自动备份失败时后端拒绝删除（确认型错误
+    // E_ASSETS_DELETE_BACKUP_FAILED，删除未发生），升级强确认后带 true 重调
+    await doDelete(false)
   } catch (error) {
-    handleError('删除素材库失败: ', error)
+    if (error?.code !== ErrorCode.AssetsDeleteBackupFailed) {
+      handleError('删除素材库失败: ', error)
+      return
+    }
+    // 备份失败升级确认（PRD R3 零恢复点删除残余风险缓解）：error 弹窗（danger
+    // 语义非 warning）明示「删除后无恢复点」，用户二次确认才继续；取消则终止
+    // 且不误删（删除在首调被拒时已未发生）
+    try {
+      await ElMessageBox.confirm(
+        `删除前自动备份失败（${error.message || '备份未生成'}）。确定在无备份的情况下删除「${lib.name}」？删除后无法恢复。`,
+        '无备份删除确认',
+        { type: 'error', confirmButtonText: '仍要删除', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+    try {
+      await doDelete(true)
+    } catch (forceError) {
+      handleError('删除素材库失败: ', forceError)
+    }
   }
 }
 
@@ -3181,13 +3334,14 @@ const onCancelScan = async () => {
 }
 
 // 扫描结果摘要文案（新增/更新/跳过口径对齐 model.AssetScanResult；丢失/复活为
-// SRS §2.6.5 lost 态计数，仅非零时追加）
+// SRS §2.6.5 lost 态计数、排除为第十批 SRS §2.7.3 excluded 态计数，仅非零时追加）
 const scanResultSummary = (prefix, result) => {
   if (!result) return prefix
   const parts = [`新增 ${result.new ?? 0}`, `更新 ${result.updated ?? 0}`, `未变 ${result.unchanged ?? 0}`]
   if (result.failed) parts.push(`失败 ${result.failed}`)
   if (result.encrypted) parts.push(`加密 ${result.encrypted}`)
   if (result.denied) parts.push(`权限不足 ${result.denied}`)
+  if (result.excluded) parts.push(`排除 ${result.excluded}`)
   if (result.lost) parts.push(`标记丢失 ${result.lost}`)
   if (result.revived) parts.push(`复活 ${result.revived}`)
   if (result.removed) parts.push(`清理 ${result.removed}`)
@@ -3658,7 +3812,11 @@ defineExpose({ loadLibraries, refreshAfterScan })
 .header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--spacing-sm);
+  /* wrap 后行间距单独收窄（row-gap 须在 gap 简写之后声明，防被简写重置）：
+       窄窗口换行时按钮行距小于列间距，防上下行贴死 */
+  row-gap: var(--spacing-xs);
 }
 
 .library-select {

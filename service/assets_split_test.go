@@ -749,7 +749,7 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 		t.Fatalf("同库并发拆分应被拒，实际：%v", err)
 	}
 	// 在途期间删库同样被拒（DeleteLibrary 复用拆分锁互斥）
-	if err := svc.DeleteLibrary(lib.ID); !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsScanInProgress {
+	if err := svc.DeleteLibrary(lib.ID, false); !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsScanInProgress {
 		t.Fatalf("拆分中删库应被拒，实际：%v", err)
 	}
 
@@ -968,7 +968,7 @@ func TestAssetLibrary_DeleteLibraryRemovesDerivedDir(t *testing.T) {
 	if _, err := os.Stat(derivedDir); err != nil {
 		t.Fatalf("拆分产物目录应存在: %v", err)
 	}
-	if err := svc.DeleteLibrary(lib.ID); err != nil {
+	if err := svc.DeleteLibrary(lib.ID, false); err != nil {
 		t.Fatalf("DeleteLibrary: %v", err)
 	}
 	if _, err := os.Stat(derivedDir); !os.IsNotExist(err) {

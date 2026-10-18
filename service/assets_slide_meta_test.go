@@ -675,19 +675,19 @@ func TestRebindAfterRebuild_PartialRescan(t *testing.T) {
 		t.Fatalf("重灌 a.pptx: %v", err)
 	}
 
-	fileRebound, err := store.rebindFileTagsAfterRebuild(bindings)
+	fileRebound, fileHashRebound, err := store.rebindFileTagsAfterRebuild(bindings)
 	if err != nil {
 		t.Fatalf("重绑文件标签: %v", err)
 	}
-	if fileRebound != 1 {
-		t.Errorf("文件标签应仅恢复已重扫的 a.pptx（b 无行可匹配丢弃），实际重绑 %d 个文件", fileRebound)
+	if fileRebound != 1 || fileHashRebound != 0 {
+		t.Errorf("文件标签应仅恢复已重扫的 a.pptx（b 无行可匹配丢弃，无哈希兜底命中），实际 path=%d hash=%d", fileRebound, fileHashRebound)
 	}
-	slideRebound, err := store.rebindSlideAnnotationsAfterRebuild(annots)
+	slideRebound, slideHashRebound, err := store.rebindSlideAnnotationsAfterRebuild(annots)
 	if err != nil {
 		t.Fatalf("重绑页级标注: %v", err)
 	}
-	if slideRebound != 1 {
-		t.Errorf("页级标注应仅恢复 a.pptx 第 1 页（b 标注随文件缺席丢弃），实际重绑 %d 页", slideRebound)
+	if slideRebound != 1 || slideHashRebound != 0 {
+		t.Errorf("页级标注应仅恢复 a.pptx 第 1 页（b 标注随文件缺席丢弃），实际 path=%d hash=%d", slideRebound, slideHashRebound)
 	}
 
 	// 已重扫文件：标注与文件标签恢复

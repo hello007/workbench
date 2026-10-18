@@ -27,10 +27,13 @@ func (a *App) ListAssetLibraries() ([]model.AssetLibrary, error) {
 	return a.assetsSvc.ListLibraries()
 }
 
-// DeleteAssetLibrary 删除素材库：关连接 + 删 db 文件（含 WAL/SHM）+ 删注册表项。
-// 标签体系随库文件删除天然隔离；库正在扫描时拒绝删除（E_ASSETS_SCAN_IN_PROGRESS）。
-func (a *App) DeleteAssetLibrary(libraryID string) error {
-	return a.assetsSvc.DeleteLibrary(libraryID)
+// DeleteAssetLibrary 删除素材库：删库前自动备份（SRS §2.7.5）+ 关连接 + 删 db
+// 文件（含 WAL/SHM）+ 删注册表项。标签体系随库文件删除天然隔离；库正在扫描时
+// 拒绝删除（E_ASSETS_SCAN_IN_PROGRESS）。allowNoBackup=false 时删库前自动备份
+// 失败返回 E_ASSETS_DELETE_BACKUP_FAILED 确认型拒绝（删除未发生，前端弹「备份
+// 失败，删除后无恢复点」强提示），用户二次确认后以 allowNoBackup=true 重调。
+func (a *App) DeleteAssetLibrary(libraryID string, allowNoBackup bool) error {
+	return a.assetsSvc.DeleteLibrary(libraryID, allowNoBackup)
 }
 
 // GetAssetLibraryStats 库统计：文件/幻灯片总数与失败/加密跳过数。
@@ -44,6 +47,17 @@ func (a *App) GetAssetLibraryStats(libraryID string) (model.AssetLibraryStats, e
 // （E_ASSETS_SCAN_IN_PROGRESS）。
 func (a *App) StartAssetScan(libraryID string) (model.AssetScanResult, error) {
 	return a.assetsSvc.StartScan(context.Background(), libraryID)
+}
+
+// UpdateAssetLibraryRules 更新库排除规则（SRS §2.7.3 库设置「排除文件夹/忽略
+// 后缀」，整体替换语义）并保存后自动触发增量重扫使规则即时生效：规则命中的
+// 已入库文件转 excluded（检索/标签/facet 不可见，标注/评分/缩略图保留，导出
+// 照导），规则改宽后 excluded 复活转正常态。目录模式按文件夹名匹配（单段通配
+// * ? [...]，大小写不敏感，不含路径分隔符）；后缀宽容 tmp/.tmp/*.tmp 三形态。
+// 重扫进度/终态事件与增量扫描同通道（assets-scan:*，可取消）；同库扫描进行中
+// 时规则已保存但重扫被拒（E_ASSETS_SCAN_IN_PROGRESS，结束后手动重扫生效）。
+func (a *App) UpdateAssetLibraryRules(libraryID string, excludeDirs, excludeExts []string) (model.AssetScanResult, error) {
+	return a.assetsSvc.UpdateLibraryRules(libraryID, excludeDirs, excludeExts)
 }
 
 // CancelAssetScan 取消指定库的在途扫描。返回是否存在可取消的在途扫描；无在途
@@ -275,6 +289,30 @@ func (a *App) PreviewAssetPathPrefixReplace(libraryID, oldPrefix, newPrefix stri
 // 互斥（替换与探测段持锁，自动扫描段经 StartScan 自取锁）。
 func (a *App) ReplaceAssetPathPrefix(libraryID, oldPrefix, newPrefix string) (model.AssetPrefixReplaceResult, error) {
 	return a.assetsSvc.ReplaceAssetPathPrefix(libraryID, oldPrefix, newPrefix)
+}
+
+// ===== 素材库备份与还原（SRS §2.7.5，素材管理第十批 PR2） =====
+
+// BackupAssetLibrary 手动备份（库操作「备份」入口）：整库 VACUUM INTO 快照 +
+// integrity_check 校验（非 ok 删备份报错，备份失败不静默）+ 每库最近 5 份保留
+// 淘汰，落点 data/assets/backups/<libraryId>/<yyyyMMdd-HHmmss>.db，返回本次备份
+// 条目。缩略图 PNG 与拆分产物目录不在备份范围。
+func (a *App) BackupAssetLibrary(libraryID string) (model.AssetBackupEntry, error) {
+	return a.assetsSvc.BackupAssetLibrary(libraryID)
+}
+
+// ListAssetLibraryBackups 备份清单（还原入口选份用）：按备份时间倒序，条目含
+// 文件名/时间/大小/绝对路径。从未备份返回空清单非错误。
+func (a *App) ListAssetLibraryBackups(libraryID string) ([]model.AssetBackupEntry, error) {
+	return a.assetsSvc.ListAssetLibraryBackups(libraryID)
+}
+
+// RestoreAssetLibrary 还原备份（前端确认弹窗「覆盖当前索引与标注」后调用）：取消
+// 并等待在途扫描退出、关连接、备份文件整体替换 <id>.db（覆盖前预检备份完整性，
+// 损坏备份不动当前库）、惰性重开并复验。backupFile 必须为该库备份目录内的备份
+// 文件（ListAssetLibraryBackups 返回的 Path 原样回传）。还原后前端提示重扫。
+func (a *App) RestoreAssetLibrary(libraryID, backupFile string) error {
+	return a.assetsSvc.RestoreAssetLibrary(libraryID, backupFile)
 }
 
 // ===== 保存检索条件（SRS §2.5 素材管理第七批） =====

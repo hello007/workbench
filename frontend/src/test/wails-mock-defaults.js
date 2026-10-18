@@ -195,15 +195,28 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // （见 frontend/wailsjs/go/models.ts）。默认空库 = 无库空态（面板引导建库），
   // 检索/扫描/编辑仅在用户操作时调用；void 返回（DeleteAssetLibrary/
   // UpdateAssetFileMeta）用 null 表示安全 no-op。
-  CreateAssetLibrary: { id: 'lib-test', name: '素材库', rootPath: '/assets', createdAt: '', updatedAt: '' },
+  CreateAssetLibrary: { id: 'lib-test', name: '素材库', rootPath: '/assets', createdAt: '', updatedAt: '', excludeDirs: [], excludeExts: [] },
   ListAssetLibraries: [],
+  // 删库第二参数 allowNoBackup（第十批 SRS §2.7.5 删库前自动备份）：false = 备份
+  // 失败返回 E_ASSETS_DELETE_BACKUP_FAILED 确认型拒绝，true = 用户二次确认后强制
+  // 删除；void 返回 null 安全 no-op
   DeleteAssetLibrary: null,
-  GetAssetLibraryStats: { libraryId: '', fileCount: 0, slideCount: 0, failedCount: 0, encryptedCount: 0, lostCount: 0 },
+
+  // ---- 素材库备份与还原（第十批 SRS §2.7.5：手动备份 + 清单 + 还原）----
+  // 形状对齐 model.AssetBackupEntry；默认空清单 = 从未备份空态（还原入口空态
+  // 安全 no-op，用例按需 override），备份/还原仅在用户操作时调用
+  BackupAssetLibrary: { libraryId: '', fileName: '', path: '', sizeBytes: 0, createdAt: '' },
+  ListAssetLibraryBackups: [],
+  RestoreAssetLibrary: null,
+  // 库排除规则保存（第十批 SRS §2.7.3，整体替换 + 保存后自动增量重扫）：返回
+  // 重扫汇总（形状对齐 model.AssetScanResult）；仅用户操作时调用，用例按需 override
+  UpdateAssetLibraryRules: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 },
+  GetAssetLibraryStats: { libraryId: '', fileCount: 0, slideCount: 0, failedCount: 0, encryptedCount: 0, lostCount: 0, excludedCount: 0 },
   // 扫描默认零结果汇总（total/new/updated/unchanged/failed/encrypted/denied/
-  // lost/revived/removed——lost/revived 为第九批 SRS §2.6.5 lost 态新增计数，
-  // 旧数据 undefined falsy 向后兼容）
-  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 },
-  RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 },
+  // excluded/lost/revived/removed——lost/revived 为第九批 SRS §2.6.5 lost 态、
+  // excluded 为第十批 SRS §2.7.3 排除态新增计数，旧数据 undefined falsy 向后兼容）
+  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 },
+  RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 },
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
   ListAssetFiles: [],

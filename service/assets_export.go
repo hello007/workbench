@@ -898,6 +898,11 @@ func (s *AssetLibraryService) ExportAssetMetadata(ctx context.Context, libraryID
 	defer cancel()
 	entry := s.registerExportCancel(libraryID, cancel)
 	defer s.unregisterExportCancel(libraryID, entry)
+	// 在途计数（对齐 splitWG 形态）：还原链经 CancelExport + WaitExportsDone 排空
+	// 在途导出后才换库文件，防半批行键失配产出混批 CSV（defer LIFO：Done 先于
+	// unregisterExportCancel 执行，Wait 归零时注册表必已清空）
+	s.exportWG.Add(1)
+	defer s.exportWG.Done()
 	formats, err := normalizeAssetExportFormats(opts.Formats)
 	if err != nil {
 		return model.AssetExportResult{}, err

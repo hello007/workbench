@@ -739,6 +739,60 @@ func TestAssetExport_SearchReplayPagingBeyondMaxLimit(t *testing.T) {
 	}
 }
 
+// TestAssetExport_IncludesExcludedRows excluded 行照导（素材管理第十批 PR1，SRS
+// §2.7.3 可见性分叉）：排除规则命中的已入库文件检索三入口不可见，但导出行键无
+// status 过滤（对齐 lost 现状）——全库导出须含 excluded 文件行与其页行。
+func TestAssetExport_IncludesExcludedRows(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "导出排除库", dir)
+	buildAssetsPptx(t, dir, "保留件.pptx", []assetsSlideSpec{
+		{titlePh: "保留标题", body: []string{"保留正文"}},
+	})
+	if err := os.MkdirAll(filepath.Join(dir, "营销草稿2024"), 0o755); err != nil {
+		t.Fatalf("建排除目录: %v", err)
+	}
+	buildAssetsPptx(t, filepath.Join(dir, "营销草稿2024"), "草稿件.pptx", []assetsSlideSpec{
+		{titlePh: "草稿标题", body: []string{"草稿正文"}},
+	})
+	mustScanIndex(t, svc, lib)
+
+	// 规则命中存量转 excluded（UpdateLibraryRules 保存即自动重扫）
+	if _, err := svc.UpdateLibraryRules(lib.ID, []string{"*草稿*"}, nil); err != nil {
+		t.Fatalf("UpdateLibraryRules: %v", err)
+	}
+	files, err := svc.ListFiles(lib.ID)
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	excludedSeen := false
+	for _, f := range files {
+		if f.Path == filepath.ToSlash(filepath.Join("营销草稿2024", "草稿件.pptx")) {
+			excludedSeen = f.Status == model.AssetFileStatusExcluded
+		}
+	}
+	if !excludedSeen {
+		t.Fatalf("前置失败：草稿件.pptx 应处于 excluded 态")
+	}
+
+	csvPath := filepath.Join(t.TempDir(), "out.csv")
+	mustExport(t, svc, lib.ID, model.AssetExportOptions{
+		CSVPath: csvPath, Formats: []string{model.AssetExportFormatCSV},
+	})
+	rows := readExportCSV(t, csvPath)
+	paths := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		paths[r[0]] = true
+	}
+	excludedRel := filepath.ToSlash(filepath.Join("营销草稿2024", "草稿件.pptx"))
+	if !paths[excludedRel] {
+		t.Errorf("excluded 文件行应照常导出（行键无 status 过滤），实际行集：%v", paths)
+	}
+	if !paths["保留件.pptx"] {
+		t.Errorf("正常文件行应存在，实际行集：%v", paths)
+	}
+}
+
 // TestAssetExport_ParamsRejected 参数校验：空格式/未知格式/目标空缺/口径非法/
 // 库不存在分别拒绝（库不存在走 E_ASSETS_LIB_NOT_FOUND 语义）。
 func TestAssetExport_ParamsRejected(t *testing.T) {

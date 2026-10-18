@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,53 @@ func (s *assetsStore) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// vacuumInto 执行 VACUUM INTO 整库快照备份（素材库备份域，assets_backup.go 调用）。
+// 约束（research 实证，.trellis/tasks/10-18-srs-2-7-3/research/sqlite-backup-restore.md）：
+//   - 目标文件必须不存在（已存在报 output file already exists），调用方以时间戳
+//     命名保证唯一；
+//   - 不能在事务内执行（database/sql 自动提交下单条 Exec 无碍，禁包显式 Tx）；
+//   - 输出为独立紧凑 db，WAL 未 checkpoint 的数据完整进入备份（无需预 checkpoint）；
+//   - 单连接池下执行期间该库其他查询在池上排队（连接占用，60 万行 127ms，
+//     素材库量级毫秒~百毫秒级，可接受）。
+//
+// 路径统一正斜杠（对齐 openAssetsStore DSN 惯例；SQL 字符串字面量内的单引号
+// 双写转义防路径含引号破坏语句）。
+func (s *assetsStore) vacuumInto(targetPath string) error {
+	literal := strings.ReplaceAll(filepath.ToSlash(targetPath), "'", "''")
+	_, err := s.db.Exec("VACUUM INTO '" + literal + "'")
+	return err
+}
+
+// integrityCheck PRAGMA integrity_check 完整性校验。必须 Query 读结果集——
+// Exec 方式拿不到结果（不报错但结果被丢弃，形同没校验，research 实证）；健康库
+// 返回单行 "ok"，损坏库将全部问题聚合在单行文本内（内嵌换行），首行 != ok 即
+// 判失败。须由调用方保证 rows 生命周期（本方法收齐首行后经 defer Close 释放
+// 连接，对齐单连接池自锁纪律）。
+func (s *assetsStore) integrityCheck() error {
+	if s == nil || s.db == nil {
+		return errors.New("索引库连接未打开")
+	}
+	rows, err := s.db.Query("PRAGMA integrity_check")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return errors.New("integrity_check 未返回结果")
+	}
+	var line string
+	if err := rows.Scan(&line); err != nil {
+		return err
+	}
+	if line != "ok" {
+		return fmt.Errorf("integrity_check: %s", line)
+	}
+	return nil
 }
 
 // migrate 按 PRAGMA user_version 递增执行迁移：版本相同幂等跳过；库文件版本
@@ -366,23 +414,59 @@ func (s *assetsStore) markFileLost(fileID int64, now string) (int64, error) {
 	return res.RowsAffected()
 }
 
-// reviveLostFile lost 文件回归且 mtime+size 未变的直接复活（内容未变旧解析/
-// 缩略图/FTS 仍有效，仅翻转状态不重解析）。调用方须先过 fileHasSlides 资格门槛
-// ——本函数不校验解析产物，对 failed/encrypted/denied 行直复活会把坏文件翻成 ok。
+// reviveLostFile lost/excluded 文件直接复活 ok（内容未变旧解析/缩略图/FTS 仍
+// 有效，仅翻转状态不重解析）：lost = 文件回归且 mtime+size 未变（SRS §2.6.5）；
+// excluded = 规则改宽后磁盘仍在且未变（SRS §2.7.3，两类直复活共用）。调用方须
+// 先过 fileHasSlides 资格门槛——本函数不校验解析产物，对 failed/encrypted/denied
+// 行直复活会把坏文件翻成 ok。
+//
+// FTS 文件行同事务重建：非 ok 期间用户经文件底册编辑过备注/标题时（updateFileMeta
+// → syncFtsFileRowTx 对非 ok 行先删后不插），FTS 文件行已缺失；若仅翻状态不重建，
+// 此后每轮增量扫描 unchanged 跳过永不重解析，FTS 行永久缺失 → 关键词检索永久漏
+// 该文件（扫描复活与前缀替换匹配收敛两处调用方共用本函数，一处收口）。页级 FTS
+// 行不受影响（updateFileMeta 仅同步文件行），无需重建。syncFtsFileRowTx 读事务内
+// 最新 status（已翻 ok）按 files 现存 title/note 重建；行未缺失时先删后插幂等无害。
 func (s *assetsStore) reviveLostFile(fileID int64, now string) error {
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(
 		"UPDATE files SET status = ?, updated_at = ? WHERE id = ?",
 		model.AssetFileStatusOK, now, fileID,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if err := syncFtsFileRowTx(tx, fileID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// fileHasSlides 文件是否存在解析产物幻灯片行——lost 复活资格判定单点（扫描
-// 复活与前缀替换匹配收敛两调用方共用，禁分叉）：有产物 = 曾成功解析，旧解析/
-// 缩略图/FTS 对 mtime+size 未变的内容仍有效，可直复活；无产物 = failed/
-// encrypted/denied 跳过类或 0 页空演示文稿，直复活会把坏文件谎报为 ok 且此后
-// 增量扫描 unchanged 跳过永不纠正，须走重解析按实际内容重新分类。
-// QueryRow+Scan 单行口径（单连接池自锁纪律）。
+// markFileExcluded 存量索引路径命中用户排除规则时的标记（excluded 态，SRS
+// §2.7.3）：仅改 status 与 updated_at——size/mtime_ns/hash 保持原值（规则改宽
+// 后的复活判定与 lost 同口径走 mtime+size 匹配）；slides/标注/标签/FTS 行/
+// 缩略图记账与 PNG 全保留（无损保留语义，对齐 markFileLost；可见性与 lost 相反：
+// excluded 检索/标签/facet 不可见）。仅对非 excluded 行生效（幂等：重复扫描
+// 不重复计数）。
+func (s *assetsStore) markFileExcluded(fileID int64, now string) (int64, error) {
+	res, err := s.db.Exec(
+		"UPDATE files SET status = ?, updated_at = ? WHERE id = ? AND status != ?",
+		model.AssetFileStatusExcluded, now, fileID, model.AssetFileStatusExcluded,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// fileHasSlides 文件是否存在解析产物幻灯片行——lost/excluded 直复活资格判定
+// 单点（扫描复活〔lost 回归与 excluded 解除〕与前缀替换匹配收敛调用方共用，
+// 禁分叉）：有产物 = 曾成功解析，旧解析/缩略图/FTS 对 mtime+size 未变的内容
+// 仍有效，可直复活；无产物 = failed/encrypted/denied 跳过类或 0 页空演示文稿，
+// 直复活会把坏文件谎报为 ok 且此后增量扫描 unchanged 跳过永不纠正，须走重解析
+// 按实际内容重新分类。QueryRow+Scan 单行口径（单连接池自锁纪律）。
 func (s *assetsStore) fileHasSlides(fileID int64) (bool, error) {
 	var n int
 	err := s.db.QueryRow(
@@ -608,22 +692,23 @@ func (s *assetsStore) listLostFileRecords() ([]assetFileRecord, error) {
 }
 
 // libraryStats 统计：文件总数（含各状态）、幻灯片总数、失败数、加密跳过数、
-// 丢失数（status=lost，SRS §2.6.5）。全部走 QueryRow+Scan（自动排空结果集）：
-// 单连接池（SetMaxOpenConns(1)）下 rows 未关闭就发下一条查询会自锁，禁止
+// 丢失数（status=lost，SRS §2.6.5）、排除规则命中数（status=excluded，SRS
+// §2.7.3）。全部走 QueryRow+Scan（自动排空结果集）：单连接池
+// （SetMaxOpenConns(1)）下 rows 未关闭就发下一条查询会自锁，禁止
 // Query+defer Close 后再查的写法。
-func (s *assetsStore) libraryStats() (fileCount, slideCount, failedCount, encryptedCount, lostCount int, err error) {
+func (s *assetsStore) libraryStats() (fileCount, slideCount, failedCount, encryptedCount, lostCount, excludedCount int, err error) {
 	err = s.db.QueryRow(
-		"SELECT COUNT(*), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0) FROM files",
-		model.AssetFileStatusFailed, model.AssetFileStatusEncrypted, model.AssetFileStatusLost,
-	).Scan(&fileCount, &failedCount, &encryptedCount, &lostCount)
+		"SELECT COUNT(*), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0), COALESCE(SUM(status = ?), 0) FROM files",
+		model.AssetFileStatusFailed, model.AssetFileStatusEncrypted, model.AssetFileStatusLost, model.AssetFileStatusExcluded,
+	).Scan(&fileCount, &failedCount, &encryptedCount, &lostCount, &excludedCount)
 	if err != nil {
-		return 0, 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, 0, err
 	}
 	err = s.db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&slideCount)
 	if err != nil {
-		return 0, 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, 0, err
 	}
-	return fileCount, slideCount, failedCount, encryptedCount, lostCount, nil
+	return fileCount, slideCount, failedCount, encryptedCount, lostCount, excludedCount, nil
 }
 
 // listFileEntries 文件索引条目（按相对路径序），标签经二次查询按 file_id 聚合。
@@ -1312,23 +1397,36 @@ func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet 
 	return out, rows.Err()
 }
 
-// fileTagBindingsByPath 重建前的用户标注备份：文件相对路径 → 标签 ID 列表
-// （重建清 files 会级联清 file_tags，按路径映射在重建后写回，用户标注不丢）。
-func (s *assetsStore) fileTagBindingsByPath() (map[string][]int64, error) {
+// assetFileTagBinding 文件标签绑定的重建备份条目（fileTagBindingsByPath 值形态）：
+// hash 为该文件内容 sha256（SRS §14.16 哈希恢复，素材管理第十批 PR2——重建后
+// 文件改名/移动导致路径失配时按 hash 兜底重绑）；hash 为空（加密/权限跳过文件）
+// 时不参与兜底。
+type assetFileTagBinding struct {
+	hash   string
+	tagIDs []int64
+}
+
+// fileTagBindingsByPath 重建前的用户标注备份：文件相对路径 → 标签 ID 列表 + 内容
+// hash（重建清 files 会级联清 file_tags，按路径映射在重建后写回，用户标注不丢；
+// hash 供路径失配时的哈希兜底匹配，见 rebindFileTagsAfterRebuild）。
+func (s *assetsStore) fileTagBindingsByPath() (map[string]assetFileTagBinding, error) {
 	rows, err := s.db.Query(
-		"SELECT f.path, ft.tag_id FROM file_tags ft JOIN files f ON f.id = ft.file_id ORDER BY f.path, ft.tag_id")
+		"SELECT f.path, f.hash, ft.tag_id FROM file_tags ft JOIN files f ON f.id = ft.file_id ORDER BY f.path, ft.tag_id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	bindings := make(map[string][]int64)
+	bindings := make(map[string]assetFileTagBinding)
 	for rows.Next() {
-		var p string
+		var p, hash string
 		var tagID int64
-		if err := rows.Scan(&p, &tagID); err != nil {
+		if err := rows.Scan(&p, &hash, &tagID); err != nil {
 			return nil, err
 		}
-		bindings[p] = append(bindings[p], tagID)
+		b := bindings[p]
+		b.hash = hash
+		b.tagIDs = append(b.tagIDs, tagID)
+		bindings[p] = b
 	}
 	return bindings, rows.Err()
 }
@@ -1364,50 +1462,79 @@ func (s *assetsStore) clearIndexForRebuild() error {
 	return tx.Commit()
 }
 
-// rebindFileTagsAfterRebuild 全量重建后的标签重绑：按「文件相对路径 → 标签 ID
-// 列表」映射将重建前保存的用户标注写回新文件记录（重建后 path 相同的文件保留
-// 标签，path 已消失的映射自然丢弃）。返回重绑文件数。
-func (s *assetsStore) rebindFileTagsAfterRebuild(bindings map[string][]int64) (int, error) {
+// rebindFileTagsAfterRebuild 全量重建后的标签重绑（两级匹配，SRS §14.16 哈希恢复）：
+// 先按「文件相对路径 → 标签 ID 列表」写回（重建后 path 相同的文件直接命中，现状
+// 语义不变）；path 已消失（重建后文件改名/移动）且备份带内容 hash 时按 hash 兜底
+// ——命中多个同内容文件取首个（files 按 id 升序确定性取最小 id）并告警（同内容
+// 文件误绑概率低，标注语义损失小，PRD R4 定案）。返回值区分两级命中计数
+// （pathRebound 路径命中 / hashRebound 哈希兜底命中，文件数口径，日志可观测）。
+func (s *assetsStore) rebindFileTagsAfterRebuild(bindings map[string]assetFileTagBinding) (pathRebound, hashRebound int, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.Query("SELECT id, path FROM files")
+	// 新 files 全量：path → id 与 hash → 首个 id（ORDER BY id 保证「取首个」
+	// 确定性 = 重建后最小文件 id）。rows 收齐后显式 Close 再发写语句（单连接池
+	// 自锁纪律，事务内同理）。
+	rows, err := tx.Query("SELECT id, path, hash FROM files ORDER BY id")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	pathToID := make(map[string]int64, len(bindings))
+	hashToID := make(map[string]int64)
+	hashDupCount := make(map[string]int)
 	for rows.Next() {
 		var id int64
-		var p string
-		if err := rows.Scan(&id, &p); err != nil {
+		var p, hash string
+		if err := rows.Scan(&id, &p, &hash); err != nil {
 			_ = rows.Close()
-			return 0, err
+			return 0, 0, err
 		}
 		pathToID[p] = id
+		if hash == "" {
+			continue // 无哈希基准（加密/权限跳过类）：不参与兜底索引
+		}
+		if _, seen := hashToID[hash]; !seen {
+			hashToID[hash] = id
+			hashDupCount[hash] = 1
+		} else {
+			hashDupCount[hash]++
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return 0, err
+		return 0, 0, err
 	}
 	if err := rows.Close(); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	rebound := 0
-	for p, tagIDs := range bindings {
+	for p, b := range bindings {
 		fileID, ok := pathToID[p]
-		if !ok {
-			continue // 重建后文件已消失（扫描期间被删）：映射丢弃
+		if ok {
+			pathRebound++
+		} else {
+			// path miss：hash 兜底（hash 为空 = 无基准，映射丢弃）
+			if b.hash == "" {
+				continue
+			}
+			fileID, ok = hashToID[b.hash]
+			if !ok {
+				continue // 重建后无同内容文件：映射丢弃
+			}
+			if hashDupCount[b.hash] > 1 {
+				Logger().Warn("重建文件标签哈希兜底多命中，取首个（同内容多副本，标注可能归并）",
+					"oldPath", p, "hash", b.hash, "candidates", hashDupCount[b.hash], "pickedFileId", fileID)
+			}
+			hashRebound++
 		}
-		for _, tagID := range tagIDs {
+		for _, tagID := range b.tagIDs {
 			if _, err := tx.Exec("INSERT OR IGNORE INTO file_tags(file_id, tag_id) VALUES(?, ?)", fileID, tagID); err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 		}
-		rebound++
 	}
-	return rebound, tx.Commit()
+	return pathRebound, hashRebound, tx.Commit()
 }
 
 // slideAnnotation 页级标注备份条目（slideAnnotationsByPath 的值形态）：标签 ID
@@ -1419,23 +1546,32 @@ type slideAnnotation struct {
 	rating   int
 }
 
-// slideAnnotationsByPath 重建前的页级标注备份：文件相对路径 → 页标注列表
-// （slide_tags + slide_meta 两表 JOIN files 按 path 聚合，形态对齐
-// fileTagBindingsByPath）。两条查询各自收齐结果显式 Close 后再发下一条（单连接
+// assetFileSlideAnnotations 单文件页级标注的重建备份条目（slideAnnotationsByPath
+// 值形态）：hash 为归属文件内容 sha256（SRS §14.16 哈希恢复——路径失配时按 hash
+// 兜底重绑，见 rebindSlideAnnotationsAfterRebuild），pages 为页标注列表。
+type assetFileSlideAnnotations struct {
+	hash  string
+	pages []slideAnnotation
+}
+
+// slideAnnotationsByPath 重建前的页级标注备份：文件相对路径 → 页标注列表 + 内容
+// hash（slide_tags + slide_meta 两表 JOIN files 按 path 聚合，形态对齐
+// fileTagBindingsByPath）。三条查询各自收齐结果显式 Close 后再发下一条（单连接
 // 池自锁纪律，见 libraryStats 注释）。
-func (s *assetsStore) slideAnnotationsByPath() (map[string][]slideAnnotation, error) {
-	// 1. 页自有标签绑定
+func (s *assetsStore) slideAnnotationsByPath() (map[string]assetFileSlideAnnotations, error) {
+	// 1. 页自有标签绑定（顺带记录各 path 的文件内容 hash）
 	tagIDsByPath := make(map[string]map[int64][]int64)
+	hashByPath := make(map[string]string)
 	rows, err := s.db.Query(
-		"SELECT f.path, st.slide_num, st.tag_id FROM slide_tags st JOIN files f ON f.id = st.file_id " +
+		"SELECT f.path, f.hash, st.slide_num, st.tag_id FROM slide_tags st JOIN files f ON f.id = st.file_id " +
 			"ORDER BY f.path, st.slide_num, st.tag_id")
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var p string
+		var p, hash string
 		var num, tagID int64
-		if err := rows.Scan(&p, &num, &tagID); err != nil {
+		if err := rows.Scan(&p, &hash, &num, &tagID); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -1443,6 +1579,7 @@ func (s *assetsStore) slideAnnotationsByPath() (map[string][]slideAnnotation, er
 			tagIDsByPath[p] = make(map[int64][]int64)
 		}
 		tagIDsByPath[p][num] = append(tagIDsByPath[p][num], tagID)
+		hashByPath[p] = hash
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -1453,27 +1590,31 @@ func (s *assetsStore) slideAnnotationsByPath() (map[string][]slideAnnotation, er
 	}
 
 	// 2. 页级备注/星级 + 按路径聚合（标签与元数据两表合一）
-	annotations := make(map[string][]slideAnnotation)
+	annotations := make(map[string]assetFileSlideAnnotations)
 	rows, err = s.db.Query(
-		"SELECT f.path, sm.slide_num, sm.note, sm.rating FROM slide_meta sm JOIN files f ON f.id = sm.file_id " +
+		"SELECT f.path, f.hash, sm.slide_num, sm.note, sm.rating FROM slide_meta sm JOIN files f ON f.id = sm.file_id " +
 			"ORDER BY f.path, sm.slide_num")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var p string
+		var p, hash string
 		var num, rating int64
 		var note string
-		if err := rows.Scan(&p, &num, &note, &rating); err != nil {
+		if err := rows.Scan(&p, &hash, &num, &note, &rating); err != nil {
 			return nil, err
 		}
-		annotations[p] = append(annotations[p], slideAnnotation{
+		fa := annotations[p]
+		fa.hash = hash
+		fa.pages = append(fa.pages, slideAnnotation{
 			slideNum: num,
 			note:     note,
 			rating:   int(rating),
 			tagIDs:   tagIDsByPath[p][num],
 		})
+		annotations[p] = fa
+		hashByPath[p] = hash
 		delete(tagIDsByPath[p], num)
 	}
 	if err := rows.Err(); err != nil {
@@ -1482,82 +1623,176 @@ func (s *assetsStore) slideAnnotationsByPath() (map[string][]slideAnnotation, er
 	// 仅有标签无备注/星级的页（slide_meta 无行）：补占位条目
 	for p, byNum := range tagIDsByPath {
 		for num, tagIDs := range byNum {
-			annotations[p] = append(annotations[p], slideAnnotation{slideNum: num, tagIDs: tagIDs})
+			fa := annotations[p]
+			fa.hash = hashByPath[p]
+			fa.pages = append(fa.pages, slideAnnotation{slideNum: num, tagIDs: tagIDs})
+			annotations[p] = fa
 		}
 	}
 	return annotations, nil
 }
 
-// rebindSlideAnnotationsAfterRebuild 全量重建后的页级标注重绑：按「文件相对路径
-// + 页序」映射将重建前备份写回新页记录（slide_meta INSERT OR REPLACE + slide_tags
-// INSERT OR IGNORE，单事务；path 未变且页在新 slides 中存在才写回，页已消失的
-// 标注静默丢弃——位置语义，对齐缩略图缓存键口径）。返回重绑页数。
-func (s *assetsStore) rebindSlideAnnotationsAfterRebuild(annotations map[string][]slideAnnotation) (int, error) {
+// rebindSlideAnnotationsAfterRebuild 全量重建后的页级标注重绑（两级匹配，SRS
+// §14.16 哈希恢复）：先按「文件相对路径 + 页序」映射写回（slide_meta INSERT OR
+// REPLACE + slide_tags INSERT OR IGNORE，单事务；path 未变且页在新 slides 中存在
+// 才写回，页已消失的标注静默丢弃——位置语义，对齐缩略图缓存键口径）；文件级
+// path miss（重建后改名/移动）且备份带内容 hash 时按 hash 兜底定位新文件再按
+// 页序映射，hash 命中多个同内容文件取首个（files 按 id 升序取最小 id）并告警。
+// 返回值区分两级命中计数（pathRebound / hashRebound，页数口径）。
+//
+// 多旧绑定同 hash 的确定性收敛（素材审核 2026-10-18）：两个旧文件内容相同且重建后
+// 双双改名（均 path miss）时，全部页标注落同一新文件——slide_meta INSERT OR
+// REPLACE 后写覆盖，若按 map 遍历序处理则胜负跨运行不确定。收敛两点：①旧路径
+// 字典序升序处理（字典序后者胜，note/rating 后写覆盖；标签为 INSERT OR IGNORE
+// 并集语义无冲突，仅 note/rating 有胜负）；②任一 hash 组被多个旧绑定兜底命中时
+// slog.Warn 同源路径列表（组级统一告警，不区分组内是否有冲突页——告警语义是
+// 「标注可能归并丢失」，与命中页是否重叠无关）。
+func (s *assetsStore) rebindSlideAnnotationsAfterRebuild(annotations map[string]assetFileSlideAnnotations) (pathRebound, hashRebound int, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// 新 slides 现存页集合：path → (slide_num → file_id)。rows 收齐后显式 Close
-	// 再发写语句（单连接池自锁纪律，事务内同理）。
-	rows, err := tx.Query(
-		"SELECT f.path, s.slide_num, s.file_id FROM slides s JOIN files f ON f.id = s.file_id")
+
+	// 1. 新 files 全量：hash → 首个 path（ORDER BY id 保证「取首个」确定性；
+	// 不取 id 列——旧实现顺带维护的 path→id 映射已删，页级落位经页集合的 file_id）。
+	// rows 收齐后显式 Close 再发下一条（单连接池自锁纪律，事务内同理）。
+	rows, err := tx.Query("SELECT path, hash FROM files ORDER BY id")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	type newPage struct {
-		fileID int64
+	hashToPath := make(map[string]string)
+	hashDupCount := make(map[string]int)
+	for rows.Next() {
+		var p, hash string
+		if err := rows.Scan(&p, &hash); err != nil {
+			_ = rows.Close()
+			return 0, 0, err
+		}
+		if hash == "" {
+			continue // 无哈希基准：不参与兜底索引
+		}
+		if _, seen := hashToPath[hash]; !seen {
+			hashToPath[hash] = p
+			hashDupCount[hash] = 1
+		} else {
+			hashDupCount[hash]++
+		}
 	}
-	pagesByPath := make(map[string]map[int64]newPage)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, 0, err
+	}
+
+	// 2. 新 slides 现存页集合：path → (slide_num → file_id)。
+	rows, err = tx.Query(
+		"SELECT f.path, s.slide_num, s.file_id FROM slides s JOIN files f ON f.id = s.file_id " +
+			"ORDER BY f.path, s.slide_num")
+	if err != nil {
+		return 0, 0, err
+	}
+	pagesByPath := make(map[string]map[int64]int64)
 	for rows.Next() {
 		var p string
 		var num, fileID int64
 		if err := rows.Scan(&p, &num, &fileID); err != nil {
 			_ = rows.Close()
-			return 0, err
+			return 0, 0, err
 		}
 		if pagesByPath[p] == nil {
-			pagesByPath[p] = make(map[int64]newPage)
+			pagesByPath[p] = make(map[int64]int64)
 		}
-		pagesByPath[p][num] = newPage{fileID: fileID}
+		pagesByPath[p][num] = fileID
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return 0, err
+		return 0, 0, err
 	}
 	if err := rows.Close(); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	rebound := 0
-	for p, annots := range annotations {
+	// 3. 旧绑定解析（确定性：旧路径字典序升序），同 hash 多旧绑定聚组供组级告警。
+	sortedPaths := make([]string, 0, len(annotations))
+	for p := range annotations {
+		sortedPaths = append(sortedPaths, p)
+	}
+	sort.Strings(sortedPaths)
+	type resolvedAnnot struct {
+		pages  map[int64]int64
+		byHash bool
+	}
+	resolved := make(map[string]resolvedAnnot, len(sortedPaths))
+	pathsByHash := make(map[string][]string) // hash 兜底命中的旧路径按 hash 聚组（告警面）
+	for _, p := range sortedPaths {
+		fa := annotations[p]
 		pages, ok := pagesByPath[p]
-		if !ok {
-			continue // 重建后文件已消失：整文件页标注丢弃
+		if ok {
+			resolved[p] = resolvedAnnot{pages: pages}
+			continue
 		}
-		for _, a := range annots {
-			page, ok := pages[a.slideNum]
+		// 文件级 path miss：hash 兜底定位新文件（hash 为空或无同内容文件则整
+		// 文件页标注丢弃）
+		if fa.hash == "" {
+			continue
+		}
+		matchedPath, ok := hashToPath[fa.hash]
+		if !ok {
+			continue
+		}
+		if hashDupCount[fa.hash] > 1 {
+			Logger().Warn("重建页级标注哈希兜底多命中，取首个（同内容多副本，标注可能归并）",
+				"oldPath", p, "hash", fa.hash, "candidates", hashDupCount[fa.hash], "newPath", matchedPath)
+		}
+		if len(pagesByPath[matchedPath]) == 0 {
+			continue // 同内容新文件无页产物（解析中断半态）：标注丢弃
+		}
+		resolved[p] = resolvedAnnot{pages: pagesByPath[matchedPath], byHash: true}
+		pathsByHash[fa.hash] = append(pathsByHash[fa.hash], p)
+	}
+	for hash, paths := range pathsByHash {
+		if len(paths) > 1 {
+			Logger().Warn("重建页级标注多个旧绑定同哈希兜底落同一新文件，按旧路径字典序后者胜（note/rating 后写覆盖，标签并集）",
+				"hash", hash, "sourcePaths", paths)
+		}
+	}
+
+	// 4. 按解析结果写入（旧路径字典序处理，同 (file_id, slide_num) 冲突后者胜）。
+	for _, p := range sortedPaths {
+		rb, ok := resolved[p]
+		if !ok {
+			continue
+		}
+		for _, a := range annotations[p].pages {
+			fileID, ok := rb.pages[a.slideNum]
 			if !ok {
 				continue // 页已消失（重解析页数减少）：该页标注静默丢弃
 			}
 			if _, err := tx.Exec(
 				"INSERT OR REPLACE INTO slide_meta(file_id, slide_num, note, rating) VALUES(?, ?, ?, ?)",
-				page.fileID, a.slideNum, a.note, a.rating,
+				fileID, a.slideNum, a.note, a.rating,
 			); err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 			for _, tagID := range a.tagIDs {
 				if _, err := tx.Exec(
 					"INSERT OR IGNORE INTO slide_tags(file_id, slide_num, tag_id) VALUES(?, ?, ?)",
-					page.fileID, a.slideNum, tagID,
+					fileID, a.slideNum, tagID,
 				); err != nil {
-					return 0, err
+					return 0, 0, err
 				}
 			}
-			rebound++
+			if rb.byHash {
+				hashRebound++
+			} else {
+				pathRebound++
+			}
 		}
 	}
-	return rebound, tx.Commit()
+	return pathRebound, hashRebound, tx.Commit()
 }
 
 // ---------- 拆分记录（split_records 表，assets_split.go 编排的数据源） ----------
@@ -1783,6 +2018,50 @@ func (s *assetsStore) filterFileIDsByFacet(ids []int64, facet *assetsFacetFilter
 		args = append(args, facetArgs...)
 		rows, err := s.db.Query(
 			"SELECT f.id FROM files f WHERE f.id IN ("+placeholders+")"+clause, args...)
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				out[id] = true
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// excludedFileIDSet 批量判定文件 ID 集合中处于 excluded 状态的子集（关键词检索
+// 路径消费：excluded 文件 FTS 行保留——无损保留语义，解除排除后免重解析即可恢复
+// 检索——但检索入口不可见，SRS §2.7.3；命中行按 fileID 查集合 O(1) 剔除，形态
+// 对齐 filterFileIDsByFacet 的批量预取，分批防 IN 参数过量）。ID 列表为空返回
+// 空集合；已消失文件的 ID 不在返回集合中。
+func (s *assetsStore) excludedFileIDSet(ids []int64) (map[int64]bool, error) {
+	out := make(map[int64]bool)
+	for start := 0; start < len(ids); start += assetsQueryIDBatch {
+		end := start + assetsQueryIDBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", end-start), ", ")
+		args := make([]any, 0, end-start+1)
+		args = append(args, model.AssetFileStatusExcluded)
+		for _, id := range ids[start:end] {
+			args = append(args, id)
+		}
+		rows, err := s.db.Query(
+			"SELECT id FROM files WHERE status = ? AND id IN ("+placeholders+")", args...)
 		if err != nil {
 			return nil, err
 		}

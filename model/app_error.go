@@ -101,6 +101,11 @@ const (
 	ErrCodeAssetsRelinkMismatch   = "E_ASSETS_RELINK_MISMATCH"         // 重链目标文件哈希与记录不一致（warning，确认型拒绝——前端确认后以 force=true 重调，强制重链按新文件重解析、标注保留）
 	ErrCodeAssetsRelinkOutsideLib = "E_ASSETS_RELINK_OUT_OF_LIB"       // 重链目标位于素材根目录之外（warning，引导在库内重新选择；前缀替换的新路径越界整体拒绝复用本码）
 	ErrCodeAssetsPrefixNoMatch    = "E_ASSETS_PREFIX_REPLACE_NO_MATCH" // 前缀替换旧前缀零命中（warning，引导核对前缀拼写；目录边界语义见 service/assets_relink.go）
+	// 删库前自动备份失败（SRS §2.7.5，素材管理第十批 PR2；warning，确认型拒绝）：
+	// 删除被拒绝但库未受损，前端弹「备份失败，删除后无恢复点」强提示，用户二次
+	// 确认后以 allowNoBackup=true 重调（对齐 E_ASSETS_RELINK_MISMATCH 的 force 重调
+	// 交互模式）。备份生成失败的具体原因经消息透出。
+	ErrCodeAssetsDeleteBackupFailed = "E_ASSETS_DELETE_BACKUP_FAILED"
 
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表

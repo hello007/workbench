@@ -8,10 +8,12 @@ const mockLibrary = {
   name: '产品素材库',
   rootPath: 'D:/assets',
   createdAt: '2026-10-13 10:00:00',
-  updatedAt: '2026-10-13 10:00:00'
+  updatedAt: '2026-10-13 10:00:00',
+  excludeDirs: [],
+  excludeExts: []
 }
 
-const mockStats = { libraryId: 'lib-1', fileCount: 2, slideCount: 3, failedCount: 0, encryptedCount: 0 }
+const mockStats = { libraryId: 'lib-1', fileCount: 2, slideCount: 3, failedCount: 0, encryptedCount: 0, excludedCount: 0 }
 
 const mockTags = [
   { id: 1, name: '重点', color: '#2563eb', parentId: 0 },
@@ -206,6 +208,12 @@ const { wailsMock } = vi.hoisted(() => ({
     ClearLostAssetFiles: vi.fn(),
     PreviewAssetPathPrefixReplace: vi.fn(),
     ReplaceAssetPathPrefix: vi.fn(),
+    // 索引设置与备份还原（第十批 SRS §2.7.3 / §2.7.5）：宿主直连四绑定（规则保存
+    // 自动重扫 / 手动备份 / 备份清单 / 还原）
+    UpdateAssetLibraryRules: vi.fn(),
+    BackupAssetLibrary: vi.fn(),
+    ListAssetLibraryBackups: vi.fn(),
+    RestoreAssetLibrary: vi.fn(),
     AssetThumbsAvailable: vi.fn(),
     CancelAssetThumbs: vi.fn(),
     JumpToAssetSlide: vi.fn(),
@@ -384,6 +392,23 @@ const stubs = {
     props: ['modelValue', 'preview', 'execute'],
     emits: ['update:modelValue', 'completed']
   },
+  // 索引设置弹窗桩（第十批 PR3）：显隐/library/execute 受控透出 + saved 事件透出
+  // （宿主接线与保存后刷新链断言入口；规则编辑交互细节见 AssetRulesDialog 独立 spec）
+  AssetRulesDialog: {
+    name: 'AssetRulesDialogStub',
+    template: '<div v-if="modelValue" class="asset-rules-dialog-stub"></div>',
+    props: ['modelValue', 'library', 'execute'],
+    emits: ['update:modelValue', 'saved']
+  },
+  // 备份还原弹窗桩（第十批 PR3）：显隐/libraryId/libraryName/listBackups/
+  // executeRestore 受控透出 + restored 事件透出（宿主接线与还原后刷新链断言入口；
+  // 清单与确认链细节见 AssetBackupDialog 独立 spec）
+  AssetBackupDialog: {
+    name: 'AssetBackupDialogStub',
+    template: '<div v-if="modelValue" class="asset-backup-dialog-stub"></div>',
+    props: ['modelValue', 'libraryId', 'libraryName', 'listBackups', 'executeRestore'],
+    emits: ['update:modelValue', 'restored']
+  },
   // facet 筛选弹层桩（第七批）：受控 emit 形态对齐真实组件（update:modelValue +
   // change 双事件同步快照）。档位→检索参数换算为组件模块纯函数（独立 spec 以注入
   // now 覆盖），本 spec 只断言宿主接线（SearchAssets 参数 / facets-only 链路切换 /
@@ -491,6 +516,13 @@ describe('AssetsPanel', () => {
     wailsMock.ClearLostAssetFiles.mockResolvedValue(0)
     wailsMock.PreviewAssetPathPrefixReplace.mockResolvedValue(0)
     wailsMock.ReplaceAssetPathPrefix.mockResolvedValue({ libraryId: 'lib-1', oldPrefix: '', newPrefix: '', replaced: 0, revived: 0, reparsed: 0, stillLost: 0, scan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 } })
+    // ---- 索引设置与备份还原（第十批）默认值：规则保存零排除汇总 + 备份回执 +
+    // 空清单 + 还原 no-op（形状对齐 model.AssetScanResult / AssetBackupEntry），
+    // 按用例覆盖 ----
+    wailsMock.UpdateAssetLibraryRules.mockResolvedValue({ total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 })
+    wailsMock.BackupAssetLibrary.mockResolvedValue({ libraryId: 'lib-1', fileName: '20261018-100000.db', path: 'D:/data/assets/backups/lib-1/20261018-100000.db', sizeBytes: 1024, createdAt: '2026-10-18 10:00:00' })
+    wailsMock.ListAssetLibraryBackups.mockResolvedValue([])
+    wailsMock.RestoreAssetLibrary.mockResolvedValue(null)
     // ---- 缩略图（PR3）默认值：Available=false 走降级提示条 + 占位卡稳定路径，按用例覆盖 ----
     wailsMock.AssetThumbsAvailable.mockResolvedValue(false)
     wailsMock.GetAssetThumb.mockResolvedValue('')
@@ -1553,10 +1585,224 @@ describe('AssetsPanel', () => {
     await clickButton(wrapper, '删除库')
     await flushPromises()
 
-    expect(wailsMock.DeleteAssetLibrary).toHaveBeenCalledWith('lib-1')
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenCalledWith('lib-1', false)
     // 删除后自动切换到剩余库并加载其数据
     expect(wailsMock.GetAssetLibraryStats).toHaveBeenCalledWith('lib-2')
     expect(wailsMock.ListAssetFiles).toHaveBeenCalledWith('lib-2')
+  })
+
+  // ---- 删库备份失败升级确认（第十批 SRS §2.7.5，PRD R3 零恢复点删除残余风险缓解）----
+
+  it('删除库备份失败：升级强确认（删除后无法恢复文案）后带 true 重调', async () => {
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '备份库' }
+    ])
+    wailsMock.DeleteAssetLibrary
+      .mockRejectedValueOnce({ code: 'E_ASSETS_DELETE_BACKUP_FAILED', message: '删除前自动备份失败' })
+      .mockResolvedValueOnce(null)
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '删除库')
+    await flushPromises()
+
+    // 首调 allowNoBackup=false 被确认型拒绝 → 升级 error 语义强确认框 → 确认后
+    // 带 allowNoBackup=true 重调并完成删除
+    const { ElMessage, ElMessageBox } = await import('element-plus')
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenCalledTimes(2)
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenNthCalledWith(1, 'lib-1', false)
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenNthCalledWith(2, 'lib-1', true)
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('删除后无法恢复'),
+      '无备份删除确认',
+      expect.objectContaining({ type: 'error' })
+    )
+    expect(ElMessage.success).toHaveBeenCalledWith('素材库已删除')
+  })
+
+  it('删除库备份失败后取消强确认：不重调不误删', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    // 首次删除确认通过、升级强确认取消
+    ElMessageBox.confirm.mockResolvedValueOnce(true)
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+    wailsMock.DeleteAssetLibrary.mockRejectedValue({ code: 'E_ASSETS_DELETE_BACKUP_FAILED', message: '删除前自动备份失败' })
+    const wrapper = await createWrapper()
+    const statsCallsBefore = wailsMock.GetAssetLibraryStats.mock.calls.length
+    await clickButton(wrapper, '删除库')
+    await flushPromises()
+
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenCalledTimes(1)
+    // 取消后终止：无库切换重载（统计未被再次拉取，当前库保持）
+    expect(wailsMock.GetAssetLibraryStats.mock.calls.length).toBe(statsCallsBefore)
+  })
+
+  it('删除库其他真失败：走 handleError 分流不进升级确认', async () => {
+    const { ElMessage, ElMessageBox } = await import('element-plus')
+    wailsMock.DeleteAssetLibrary.mockRejectedValue({ code: 'E_ASSETS_SCAN_IN_PROGRESS', message: '该素材库已有扫描进行中' })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '删除库')
+    await flushPromises()
+
+    expect(wailsMock.DeleteAssetLibrary).toHaveBeenCalledTimes(1)
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1) // 仅首次删除确认，无升级确认
+    expect(ElMessage.warning).toHaveBeenCalledWith('该素材库已有扫描进行中')
+  })
+
+  // ---- 索引设置（第十批 SRS §2.7.3）：排除规则弹窗接线 ----
+
+  it('索引设置弹窗接线：打开传当前库对象回填，保存分派 UpdateAssetLibraryRules 并刷新', async () => {
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '索引设置')
+    await flushPromises()
+
+    const rulesStub = wrapper.findComponent({ name: 'AssetRulesDialogStub' })
+    expect(rulesStub.exists()).toBe(true)
+    expect(rulesStub.props('library')).toMatchObject({ id: 'lib-1' })
+    expect(typeof rulesStub.props('execute')).toBe('function')
+
+    // execute 分派：目录/后缀规则透传（弹窗内交互由独立 spec 覆盖）
+    await rulesStub.props('execute')(['*草稿*'], ['.tmp'])
+    await flushPromises()
+    expect(wailsMock.UpdateAssetLibraryRules).toHaveBeenCalledWith('lib-1', ['*草稿*'], ['.tmp'])
+
+    // saved 刷新链：库列表重拉（规则回显同步）+ 库数据刷新（统计/底册）
+    const listCallsBefore = wailsMock.ListAssetLibraries.mock.calls.length
+    await rulesStub.vm.$emit('saved', { total: 2, excluded: 1 })
+    await flushPromises()
+    expect(wailsMock.ListAssetLibraries.mock.calls.length).toBeGreaterThan(listCallsBefore)
+    expect(wailsMock.GetAssetLibraryStats).toHaveBeenCalledWith('lib-1')
+  })
+
+  it('规则保存分派期间置扫描态：重扫进度走现有扫描事件链，落定后复位', async () => {
+    let resolveRules
+    wailsMock.UpdateAssetLibraryRules.mockImplementation(() => new Promise((resolve) => {
+      resolveRules = () => resolve({ total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 })
+    }))
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '索引设置')
+    await flushPromises()
+    const rulesStub = wrapper.findComponent({ name: 'AssetRulesDialogStub' })
+    const pending = rulesStub.props('execute')([], [])
+    await flushPromises()
+    // 重扫期间进度条可见（scanning 置位，progress 事件链复用），落定后复位
+    expect(wrapper.find('.scan-progress').exists()).toBe(true)
+    resolveRules()
+    await pending
+    await flushPromises()
+    expect(wrapper.find('.scan-progress').exists()).toBe(false)
+  })
+
+  // ---- 备份与还原（第十批 SRS §2.7.5）----
+
+  it('备份按钮：调 BackupAssetLibrary 且成功提示含落点路径', async () => {
+    const { ElMessage } = await import('element-plus')
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '备份')
+    await flushPromises()
+
+    expect(wailsMock.BackupAssetLibrary).toHaveBeenCalledWith('lib-1')
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('D:/data/assets/backups/lib-1/20261018-100000.db'))
+  })
+
+  it('备份失败经 handleError 分流为 error', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.BackupAssetLibrary.mockRejectedValue({ message: '备份生成失败' })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '备份')
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('备份失败: 备份生成失败')
+  })
+
+  it('备份按钮在途 loading 防连点：backingUp 驱动 loading 态，完成即恢复可点', async () => {
+    let resolveBackup
+    wailsMock.BackupAssetLibrary.mockImplementation(() => new Promise((resolve) => { resolveBackup = resolve }))
+    const wrapper = await createWrapper()
+    const backupBtn = wrapper.findAll('button').find((b) => b.text().trim() === '备份')
+    await backupBtn.trigger('click')
+    await flushPromises()
+
+    // 在途：按钮 loading（el-button 桩以 disabled 承载 loading），重复点击被
+    // onBackupLibrary 的 backingUp 守卫跳过（只发一次请求）
+    expect(backupBtn.attributes('disabled')).toBeDefined()
+    await backupBtn.trigger('click')
+    expect(wailsMock.BackupAssetLibrary).toHaveBeenCalledTimes(1)
+
+    resolveBackup({ libraryId: 'lib-1', fileName: 'x.db', path: 'D:/data/assets/backups/lib-1/x.db' })
+    await flushPromises()
+    expect(backupBtn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('还原弹窗接线：打开传库 ID 与清单/还原分派，restored 触发库数据刷新链', async () => {
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '还原')
+    await flushPromises()
+
+    const backupStub = wrapper.findComponent({ name: 'AssetBackupDialogStub' })
+    expect(backupStub.exists()).toBe(true)
+    expect(backupStub.props('libraryId')).toBe('lib-1')
+    expect(typeof backupStub.props('listBackups')).toBe('function')
+    expect(typeof backupStub.props('executeRestore')).toBe('function')
+
+    // 分派回调透传绑定（清单按库 ID、还原按条目绝对路径）
+    await backupStub.props('listBackups')('lib-1')
+    expect(wailsMock.ListAssetLibraryBackups).toHaveBeenCalledWith('lib-1')
+    await backupStub.props('executeRestore')('D:/data/assets/backups/lib-1/20261017-090000.db')
+    await flushPromises()
+    expect(wailsMock.RestoreAssetLibrary).toHaveBeenCalledWith('lib-1', 'D:/data/assets/backups/lib-1/20261017-090000.db')
+
+    // restored 刷新链：统计/底册重拉（索引回备份时点）
+    const statsCallsBefore = wailsMock.GetAssetLibraryStats.mock.calls.length
+    await backupStub.vm.$emit('restored', { path: 'x' })
+    await flushPromises()
+    expect(wailsMock.GetAssetLibraryStats.mock.calls.length).toBeGreaterThan(statsCallsBefore)
+  })
+
+  it('还原成功刷新链：索引整体回滚，详情/预览/选中语境全清（语境变更点位，非数据变更）', async () => {
+    const wrapper = await createWrapper()
+    // 预置还原前语境：打开幻灯片详情 + 勾选一卡 + 全屏预览
+    await openSlideDetail(wrapper)
+    await wrapper.findAll('.asset-card')[0].find('.asset-card-check').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '全屏预览')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(true)
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(true)
+
+    await clickButton(wrapper, '还原')
+    await flushPromises()
+    const backupStub = wrapper.findComponent({ name: 'AssetBackupDialogStub' })
+    await backupStub.vm.$emit('restored', { path: 'x' })
+    await flushPromises()
+
+    // 还原前选中的条目可能已不在回滚后索引：详情侧栏驻留陈旧条目会让后续
+    // 备注/评分编辑向已不存在条目写回，故详情/预览/选中随刷新链一并清除
+    expect(wrapper.find('.asset-preview-overlay').exists()).toBe(false)
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    expect(wrapper.find('.asset-selection-bar').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  // ---- excluded 呈现（第十批 SRS §2.7.3）----
+
+  it('统计行排除计数：excludedCount 非零显示「已排除 N」，零值不显示', async () => {
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, excludedCount: 3 })
+    let wrapper = await createWrapper()
+    expect(wrapper.find('.assets-stats-line').text()).toContain('已排除 3')
+
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, excludedCount: 0 })
+    wrapper = await createWrapper()
+    expect(wrapper.find('.assets-stats-line').text()).not.toContain('已排除')
+  })
+
+  it('扫描汇总含排除计数（规则重扫/增量扫描 excluded 非零时追加）', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.StartAssetScan.mockResolvedValue({ total: 5, new: 0, updated: 1, unchanged: 2, failed: 0, encrypted: 0, denied: 0, excluded: 2, lost: 0, revived: 0, removed: 0 })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '扫描')
+    await flushPromises()
+
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('排除 2'))
   })
 
   // ---- 异步写回守卫（审核 8：跨库串入 / 慢响应覆写防护）----

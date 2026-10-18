@@ -94,6 +94,8 @@ workbench/
 |批量修改评分（assets v8，SRS §2.6 P0）：`BatchSetAssetRating` 单一入口混合文件/页目标（slideNum 0=文件；与打标签两方法分叉刻意不同——评分无相对语义）；每条目一事务逐条目明细（splitOutcome 先例），页条目 INSERT OR REPLACE 整行**必须回读现存业务备注再整行写回**（漏回写清备注）、键 (file_id, slide_num) 禁 slides.id；Item 后端拼装 Label（存在性校验处顺带 SELECT path 零开销）；前端 AssetBatchRatingDialog 复刻标签弹窗形态，targets 反查收敛 `collectSelectionTargets` 共享单点 + 刷新链 `refreshAfterBatchAnnotation` 共享体（评分跳过标签树 reload），completed 不清选中（§8.2 数据变更点位），0=清除评分、rating 不入 FTS|assets-management.md §10.2（docs/spec/assets-management.md）|
 |导出元数据（assets 第九批 §11.1）：长活导出**禁全程单 withStore**（全局 s.mu 分钟级阻塞素材域）——三段式：短会话物化行键（文件行必须独立 UNION ALL 一路，LEFT JOIN 丢有页文件行）→ 行键分批每批新开短会话水合 → 锁外写汇/os.Stat；**批间禁 OFFSET 续读**（释放锁后写插入漂移，只能物化快照）；CSV 覆盖收口在 O_EXCL 打开原语（预检仅 UX）；真中止 exportCancels 镜像扫描形态但 CancelExport 仅取 opMu 不触 s.mu（否则被在途导出阻塞）；弹窗提交中关闭=放弃语义（abandoned 标记 + cancel + 成功竞态 info 收口），非硬阻断；thumbnail_path 恒绝对、single_pptx 跟随 source 口径 split_records 权威探测|assets-management.md §11.1（docs/spec/assets-management.md）|
 |lost 状态机与重链（assets 第九批 §11.2/11.3）：扫描消失 DELETE 改 markFileLost（size/mtime/hash 原值保留作重链基准 + FTS 行保留辅助检索 + 标注/缩略图全存续），清理入口事务内资格复验 + RowsAffected 实际删除数；**复活资格门槛 fileHasSlides 单点**（扫描复活与前缀替换共用；failed/encrypted/denied/0 页行回归走重解析重分类禁直复活谎报 ok）+ **processing 永不直复活**（自愈不变式，扫描/重链/替换三口径对齐）；前缀替换嵌套腾位 renames 按 oldPath 长度降序落库 + **三态探测配对禁下标 zip**（renames 重排后与 records 异序，fileID map 配对——下标 zip 数据串写，混合长度即触发）；替换/重链写面 RowsAffected 零命中=并发清理窗口 sql.ErrNoRows 上抛；前端重链 toast 分型先判 reparsed 再判 hashMatched（processing 行 hashMatched=true 且 reparsed=true，首判误报直接恢复）|assets-management.md §11.2/§11.3（docs/spec/assets-management.md）|
+|排除规则与 excluded 态（assets 第十批 §12.1/12.2）：ExcludeDirs **单段 glob**（`filepath.Match` 语法，禁 `/` 与 `**` 多段——四对标工具均无此语义）大小写不敏感、目录基名匹配（避 Windows `/`≠`\` 坑）、root 自身豁免防整库剪空，ExcludeExts 归一带点小写三形态等价；**收集层剪枝与存量 excluded 判定共用同一 matcher**（禁两套口径）；excluded 判定**先排除后存在性**（规则命中不做存在性探测，规则命中+文件消失保持 excluded 不转 lost）；excluded 无损保留（对齐 lost）但**检索不可见导出照导**——标签浏览/facets-only SQL 恒 `status='ok'` 天然排除，**关键词路径须 excludedFileIDSet 显式剔除（新增检索入口漏补=规则失效可见）**；非 ok→ok 翻转（直复活/前缀替换收敛）**必须走 reviveLostFile 单事务重建 FTS**（excluded/lost 期间底册可编辑备注清 FTS 行，裸 UPDATE 翻状态=直复活后 unchanged 永跳过、关键词检索永久漏该文件无报错）|assets-management.md §12.1/§12.2（docs/spec/assets-management.md）|
+|素材库备份与还原（assets 第十批 §12.3/12.4）：`VACUUM INTO` 单语句（**禁包显式 Tx、禁裸拷贝 db**——WAL 未 checkpoint 必丢数据）、`integrity_check` **必须 Query 非 Exec**（Exec 丢结果集形同没校验）首行 != ok 即失败删备份；备份名 `<yyyyMMdd-HHmmss>[_N].db` 深序分隔符取 `_`（`-` 会使字典序与时间序颠倒、淘汰误删新份）；**还原步骤序乱序即半态**：阻塞等扫描退出（TryLock 立即拒绝不等待）→ CancelExport+WaitExportsDone（导出分批懒重开，rename 后旧行键静默水合新库混批 CSV 无声产出）→ **持 s.mu 复查 exportCancels 非空拒还原**（封 Cancel 与注册竞态窗口，复用 E_ASSETS_SCAN_IN_PROGRESS）→ 关连接→删 -wal/-shm→os.Rename 直接覆盖（Windows 原子，禁先 Remove）；删库前备份失败走 `allowNoBackup` 升级确认（E_ASSETS_DELETE_BACKUP_FAILED 强确认后 true 重调）；同库备份互斥 backupLocks（恒最内层锁）+ VACUUM 失败清理仅删零字节残留（非空可能是并发方有效备份）；重建前整库磁盘备份失败仅告警不中止，哈希恢复两级匹配（路径优先、hash 兜底多命中取首个、多旧绑定同 hash 旧路径字典序后者胜+组级告警）|assets-management.md §12.3/§12.4（docs/spec/assets-management.md）|
 
 ## 文档索引
 
@@ -133,5 +135,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-10-16
-**文档版本：** v2.23
+**最后更新：** 2026-10-18
+**文档版本：** v2.24
