@@ -72,6 +72,67 @@ func TestAssetExcludeRules_NormalizeRejectsInvalid(t *testing.T) {
 	}
 }
 
+// TestAssetExcludeRules_NormalizeDedup 归一后保序去重（冒烟 S2.1b 缺陷修复）：
+// 后缀三形态等价输入只落一条；目录模式 TrimSpace 后同串只落一条；重复项剔除后
+// 首次出现位置保留（保序）。去重发生在校验之后（坏模式拒绝语义不受影响）；
+// 目录模式大小写不归一（匹配侧才 ToLower），DRAFT 与 draft 是两条不同规则。
+func TestAssetExcludeRules_NormalizeDedup(t *testing.T) {
+	// 三形态混合输入回显单条 .tmp
+	_, exts, err := normalizeAssetExcludeRules(nil, []string{"tmp", ".tmp", "*.TMP"})
+	if err != nil {
+		t.Fatalf("合法规则不应报错: %v", err)
+	}
+	if len(exts) != 1 || exts[0] != ".tmp" {
+		t.Errorf("三形态等价输入应去重为单条 .tmp，实际：%v", exts)
+	}
+
+	// 重复目录模式回显单条；TrimSpace 后同串视为重复
+	dirs, _, err := normalizeAssetExcludeRules([]string{"archive", "archive", "  archive  "}, nil)
+	if err != nil {
+		t.Fatalf("合法规则不应报错: %v", err)
+	}
+	if len(dirs) != 1 || dirs[0] != "archive" {
+		t.Errorf("重复目录模式应去重为单条，实际：%v", dirs)
+	}
+
+	// 保序：首次出现位置保留，重复项剔除不改变其余项相对顺序
+	dirs, exts, err = normalizeAssetExcludeRules(
+		[]string{"草稿*", "DRAFT", "草稿*", "正式", "DRAFT"},
+		[]string{".mp4", "tmp", ".mp4", "*.TMP", "doc"},
+	)
+	if err != nil {
+		t.Fatalf("合法规则不应报错: %v", err)
+	}
+	wantDirs := []string{"草稿*", "DRAFT", "正式"}
+	if len(dirs) != len(wantDirs) {
+		t.Fatalf("目录去重后应剩 %d 条，实际 %d：%v", len(wantDirs), len(dirs), dirs)
+	}
+	for i, want := range wantDirs {
+		if dirs[i] != want {
+			t.Errorf("目录去重应保序 dirs[%d] = %q, want %q（全部：%v）", i, dirs[i], want, dirs)
+		}
+	}
+	wantExts := []string{".mp4", ".tmp", ".doc"}
+	if len(exts) != len(wantExts) {
+		t.Fatalf("后缀去重后应剩 %d 条，实际 %d：%v", len(wantExts), len(exts), exts)
+	}
+	for i, want := range wantExts {
+		if exts[i] != want {
+			t.Errorf("后缀去重应保序 exts[%d] = %q, want %q（全部：%v）", i, exts[i], want, exts)
+		}
+	}
+
+	// 大小写不归一边界：目录模式 DRAFT 与 draft 不去重（归一仅 TrimSpace，
+	// 大小写归一在匹配侧；误去重会丢规则改变语义）
+	dirs, _, err = normalizeAssetExcludeRules([]string{"DRAFT", "draft"}, nil)
+	if err != nil {
+		t.Fatalf("合法规则不应报错: %v", err)
+	}
+	if len(dirs) != 2 {
+		t.Errorf("目录模式大小写不同不去重，实际：%v", dirs)
+	}
+}
+
 // TestAssetExcludeMatcher_DirGlob 目录段匹配：大小写不敏感（双侧归一小写）、
 // 单段通配 * ? [...]、中文按 rune 匹配；坏模式编译期剔除后其余规则仍生效
 // （手改 libraries.json 绕过保存校验的防御，剔错不炸扫描）。
@@ -577,8 +638,9 @@ func TestAssetLibrary_UpdateRulesValidationAndPersist(t *testing.T) {
 		t.Errorf("被拒绝的规则不应落盘，实际：%v", libs[0].ExcludeDirs)
 	}
 
-	// 合法规则归一落盘（逐项归一带点小写，不去重——编译期 map 天然收敛）+
-	// 自动重扫（以新规则执行：草稿目录剪除 total=1，存量命中标 excluded=1）
+	// 合法规则归一落盘（逐项归一带点小写 + 保序去重，tmp/.TMP 两形态等价只落
+	// 一条 .tmp）+ 自动重扫（以新规则执行：草稿目录剪除 total=1，存量命中标
+	// excluded=1）
 	result, err := svc.UpdateLibraryRules(lib.ID, []string{"*草稿*"}, []string{"tmp", ".TMP"})
 	if err != nil {
 		t.Fatalf("UpdateLibraryRules: %v", err)
@@ -593,8 +655,8 @@ func TestAssetLibrary_UpdateRulesValidationAndPersist(t *testing.T) {
 	if len(libs[0].ExcludeDirs) != 1 || libs[0].ExcludeDirs[0] != "*草稿*" {
 		t.Errorf("目录规则应落盘，实际：%v", libs[0].ExcludeDirs)
 	}
-	if len(libs[0].ExcludeExts) != 2 || libs[0].ExcludeExts[0] != ".tmp" || libs[0].ExcludeExts[1] != ".tmp" {
-		t.Errorf("后缀规则应逐项归一落盘（两形态同值各归一为 .tmp），实际：%v", libs[0].ExcludeExts)
+	if len(libs[0].ExcludeExts) != 1 || libs[0].ExcludeExts[0] != ".tmp" {
+		t.Errorf("后缀规则应归一去重落盘单条 .tmp，实际：%v", libs[0].ExcludeExts)
 	}
 	if libs[0].UpdatedAt == "" {
 		t.Error("规则保存应刷新 UpdatedAt")

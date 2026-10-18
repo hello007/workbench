@@ -132,13 +132,16 @@ func normalizeAssetExcludeExt(raw string) string {
 	return "." + strings.ToLower(e)
 }
 
-// normalizeAssetExcludeRules 库规则保存前的校验与归一（UpdateLibraryRules 入口，
-// 第一道防线）：目录模式 TrimSpace、空白项丢弃、含路径分隔符（「/」与「\」——
-// 单段语义下永不命中，拒绝防用户误配静默失效）与坏 glob 语法（filepath.Match
-// ErrBadPattern 探测）拒绝；后缀三形态归一。返回归一后的两规则列表（可能为空
-// 切片，整体替换语义）。
+// normalizeAssetExcludeRules 库规则保存前的校验、归一与去重（UpdateLibraryRules
+// 入口，第一道防线）：目录模式 TrimSpace、空白项丢弃、含路径分隔符（「/」与
+// 「\」——单段语义下永不命中，拒绝防用户误配静默失效）与坏 glob 语法
+// （filepath.Match ErrBadPattern 探测）拒绝；后缀三形态归一。校验通过后保序
+// 去重（首次出现位置保留）——目录模式 TrimSpace 后同串视为重复，后缀归一后
+// 同值视为重复（如 tmp / .tmp / *.TMP 三形态等价只落一条），否则前端弹窗回显
+// 多条重复规则。返回处理后的两规则列表（可能为空切片，整体替换语义）。
 func normalizeAssetExcludeRules(dirs, exts []string) ([]string, []string, error) {
 	outDirs := make([]string, 0, len(dirs))
+	seenDirs := make(map[string]bool, len(dirs))
 	for _, d := range dirs {
 		d = strings.TrimSpace(d)
 		if d == "" {
@@ -150,14 +153,23 @@ func normalizeAssetExcludeRules(dirs, exts []string) ([]string, []string, error)
 		if _, err := filepath.Match(d, ""); err != nil {
 			return nil, nil, fmt.Errorf("排除文件夹规则 %q 非法：%w", d, err)
 		}
+		if seenDirs[d] {
+			continue
+		}
+		seenDirs[d] = true
 		outDirs = append(outDirs, d)
 	}
 	outExts := make([]string, 0, len(exts))
+	seenExts := make(map[string]bool, len(exts))
 	for _, e := range exts {
 		e = normalizeAssetExcludeExt(e)
 		if e == "" {
 			continue
 		}
+		if seenExts[e] {
+			continue
+		}
+		seenExts[e] = true
 		outExts = append(outExts, e)
 	}
 	return outDirs, outExts, nil
