@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-16-srs-2-6-4-srs-2-6-5/prd.md", "reason": "本任务 PRD：8 项 ADR 决策、两批 PR 需求与验收标准、导出字段口径与 lost 态语义"}
+{"file": "docs/spec/assets-management.md", "reason": "素材管理主 spec：schema/检索/标注/选中体系/facet/排序/批量评分既有契约，导出与重链须对齐（继承合并单点、越界遏制先例、每条目事务先例）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码新增同步规则（model/app_error.go + frontend/src/utils/error.js 两处）、超时收口先例、导出确认型错误码设计参照"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wails 绑定三处同步规则（App.js/App.d.ts/models.ts）与具名 string 类型 models.ts 手动补别名规则（AssetFileStatusLost 新值必须同步）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "工具行/弹窗/卡片呈现约束：导出弹窗与重链入口、lost 卡片标记的视觉规范（语义色、弹窗尺寸分档、flex 约束链）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 从 fixtures.js import {test,expect}、禁 waitForTimeout、mock 改 wails-mock-defaults.js 单一数据源、新通道目录同步 vitest exclude"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态：禁 sleep/mtime 时序/固定端口；扫描增量测试用注入驱动"}
+{"file": "docs/原始需求/202610-素材管理系统需求说明书-V1.0.md", "reason": "SRS 原文 §2.6.4/§2.6.5/附录A：导出 11 字段清单、CSV UTF-8 BOM、YAML 反斜杠转 /、丢失重链与前缀替换需求原文"}

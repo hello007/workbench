@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-16-srs-2-6-4-srs-2-6-5/prd.md", "reason": "验收标准清单：CSV BOM/转义、YAML 反斜杠、lost 语义三态（标记/复活/清理）、重链哈希校验、前缀替换越界遏制、门禁"}
+{"file": "docs/spec/assets-management.md", "reason": "检查导出只读面未碰索引写链路、FTS 五契约未破、继承合并单点未分叉、越界遏制对齐先例"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wails 绑定三处同步完整、AssetFileStatusLost 在 models.ts 手动补别名（vitest 不报 MISSING_EXPORT 易漏）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查新增错误码三处同步（app_error.go/error.js/前端分流）、 slog 用法、AppError 结构"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76%、前端 ≥70%（exclude wailsjs）"}
+{"file": "docs/spec/test-stability.md", "reason": "检查测试无 sleep/mtime 时序/固定端口隐式依赖"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E import 源、mock 单一数据源、无 waitForTimeout"}
