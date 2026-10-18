@@ -480,3 +480,36 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 125: 素材管理第九批：导出元数据 + 文件丢失重链（SRS §2.6.4/§2.6.5）
+
+**Date**: 2026-10-18
+**Task**: 素材管理第九批：导出元数据 + 文件丢失重链（SRS §2.6.4/§2.6.5）
+**Branch**: `master`
+
+### Summary
+
+第九批两 PR 全链路：brainstorm 定 8 项 ADR（lost 扫描标记替代删除/范围语境跟随/页行+文件行粒度/MD 每页一卡/路径口径/哈希校验重链/前缀替换预览+自动扫描/两批 PR）。PR1 导出：trellis-check 修 4（预览代次守卫/0 命中哨兵/placeholder/分页边界测试），审核 1P1 全局锁阻塞修为三段式（物化 UNION ALL 文件行独立一路+批间短会话水合+锁外写汇）+ O_EXCL 收口 + 真中止通道（exportCancels 走 opMu + 弹窗放弃语义），定向 check 全过。PR2 丢失重链：check 修 2（复活资格门槛 fileHasSlides/嵌套前缀误拒+腾位降序），审核 1🔴 探测配对下标 zip 串写（fileID map 修复+两序分化用例，缺陷还原实证）+3🟡（清理资格复验 RowsAffected/processing 永不直复活/预览输入置空），复核 2🟡（toast 先判 reparsed/写面零命中上抛）+1🔵 均修。门禁 service 80.0%/前端 85.02%，E2E+6。spec 沉淀 §11 三节 + CLAUDE.md 关键规则 2 行 + API参考 6 绑定 + README。真机冒烟暂缓，清单登记任务目录 smoke-checklist.md（含第八批遗留四项）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `404b142` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
