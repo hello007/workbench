@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 128
-- **Last Active**: 2026-10-18
+- **Total Sessions**: 129
+- **Last Active**: 2026-10-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~613 | Active |
+| `journal-3.md` | ~646 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 129 | 2026-10-19 | 工具箱全窗口面板化 + PPT 拆分文件夹批量拆分 | `476d647` | `master` |
 | 128 | 2026-10-18 | 素材管理八/九/十批冒烟收尾：UI 手点面通过 | - | `master` |
 | 127 | 2026-10-18 | 素材管理八/九/十批真机冒烟（RPC 驱动面）+ 缺陷修复 | `a492a06`, `0035b86` | `master` |
 | 126 | 2026-10-18 | 素材管理第十批：索引配置与素材库备份（SRS §2.7.3/§2.7.5/§14.16） | `411154c` | `master` |

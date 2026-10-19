@@ -611,3 +611,36 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 129: 工具箱全窗口面板化 + PPT 拆分文件夹批量拆分
+
+**Date**: 2026-10-19
+**Task**: 工具箱全窗口面板化 + PPT 拆分文件夹批量拆分
+**Branch**: `master`
+
+### Summary
+
+工具箱改造为第二个独占一级面板（左功能清单+右内容画布），7 个工具 Dialog→Panel 去弹窗内嵌（@open 初始化迁 onMounted、事件监听生命周期=组件挂载/卸载），拷贝到抽为 CopyToPanel；后端新增 PptxSplitService.SplitFolder 递归扫描串行批量拆分（产物排除复用 isPptxSplitDerivative、整批可取消 ctx 键=目录、单文件失败续跑记 Item.Error、新增 pptx-split:batch:progress 文件级事件、终态仅经返回值汇总不逐文件发 done/error）；前端 PptSplitPanel 单文件/文件夹双模式+双层进度+成败汇总。go test 与 vitest 全绿（service 覆盖 80.2%、前端 85.3%），spec 沉淀 pptx-split.md/frontend-visual-conventions.md/CLAUDE.md 关键规则
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `476d647` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
