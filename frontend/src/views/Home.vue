@@ -3,16 +3,15 @@
     <div class="home-layout">
       <ActivityBar @toggle-terminal="uiStore.toggleTerminal" @open-settings="uiStore.settingsVisible = true" />
       <div class="main-area">
-        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页 / AI 对话页 / 素材管理 / 看板 / 仓库统计页激活时整体隐藏，
-             v-show 保状态：运行中任务、已选文件、预览内容均保留，切回即恢复）。
-             白名单排除：directory/toolbox 之外的占满面板（ai/ai-chat/assets/dashboard/stats）
+        <!-- 上半区：原有 Splitpanes 三栏（AI 功能页 / 工具箱 / AI 对话页 / 素材管理 / 看板 / 仓库统计页
+             激活时整体隐藏，v-show 保状态：运行中任务、已选文件、预览内容均保留，切回即恢复）。
+             白名单排除：directory 之外的占满面板（toolbox/ai/ai-chat/assets/dashboard/stats）
              激活时三栏隐藏，与 AiFunctionPanel/AiChatPanel 等的互斥占满对称。 -->
-        <div v-show="uiStore.activePanel === 'directory' || uiStore.activePanel === 'toolbox'" class="main-panes">
+        <div v-show="uiStore.activePanel === 'directory'" class="main-panes">
           <Splitpanes class="default-theme splitpanes-container" :push-other-panes="false" :maximize-panes="false">
             <Pane :size="20" :min-size="10">
               <div class="pane-content" style="position:relative;" @mousedown.capture="workspaceStore.lastInteractedTree = 'directory'">
                 <DirectoryTree
-                  v-show="uiStore.activePanel === 'directory'"
                   ref="directoryTreeRef"
                   @select="onDirectorySelect"
                   @change="directoryStore.loadDirectories"
@@ -20,14 +19,10 @@
                   @batch-pull="onBatchPull"
                   @open-repo-filter="uiStore.openRepoFilter"
                 />
-                <ToolboxPanel
-                  v-show="uiStore.activePanel === 'toolbox'"
-                  @close="uiStore.activePanel = 'directory'"
-                />
               </div>
             </Pane>
             <Pane :size="30" :min-size="15">
-              <div class="pane-content" @mousedown.capture="workspaceStore.lastInteractedTree = 'file'" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+              <div class="pane-content" @mousedown.capture="workspaceStore.lastInteractedTree = 'file'">
                 <FileTreePanel
                   ref="fileTreePanelRef"
                   @select="onNodeSelect"
@@ -51,7 +46,7 @@
               </div>
             </Pane>
             <Pane :size="50" :min-size="30">
-              <div class="pane-content" @mousedown="closeToolbox" @contextmenu="closeToolbox">
+              <div class="pane-content">
                 <ContentPanel
                   ref="contentPanelRef"
                   @refresh-node="onRefreshNode"
@@ -70,10 +65,16 @@
           </Splitpanes>
         </div>
         <!-- AI 功能页：活动栏一级入口，与三栏区互斥占满主窗口上半区。
-             v-show 常驻挂载：切走再切回不丢运行中任务/已开 Tab/已录参数。
-             与 .main-panes 同级，点击本面板不会冒泡进三栏 pane 的
-             closeToolbox handler（该 handler 仅绑定在 Splitpanes 内部 pane 上） -->
+             v-show 常驻挂载：切走再切回不丢运行中任务/已开 Tab/已录参数。 -->
         <AiFunctionPanel v-show="uiStore.activePanel === 'ai'" />
+        <!-- 工具箱：活动栏一级入口，与三栏区互斥独占整个窗口区域（全窗口面板化，
+             左侧功能清单 + 右侧选中工具内容面板，与 AiFunctionPanel 同级同互斥语义）。
+             v-show 常驻挂载：切走再切回保留选中工具与各面板内已录参数；
+             @close 切回 directory（关闭按钮语义对齐其他独占面板）。 -->
+        <ToolboxPanel
+          v-show="uiStore.activePanel === 'toolbox'"
+          @close="uiStore.activePanel = 'directory'"
+        />
         <!-- 仓库统计页：活动栏一级入口，与三栏区互斥占满主窗口上半区。
              v-show 常驻挂载：切走再切回不丢已加载统计与档位选择。
              从 workspaceStore.selectedNode 取仓库路径，后端 FindGitRoot 定位 git 根。 -->
@@ -164,13 +165,6 @@ const uiStore = useUiStore()
 const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
 const contentPanelRef = ref()
-
-// ---- 右键菜单事件处理 ----
-const closeToolbox = () => {
-  if (uiStore.activePanel === 'toolbox') {
-    uiStore.activePanel = 'directory'
-  }
-}
 
 // 当点击 DirectoryTree 右键菜单时，关闭 FileTreePanel 的菜单
 const onDirectoryContextMenu = () => {
@@ -364,9 +358,9 @@ function onPaletteSelectWorkDir(dir) {
 //   4. locateNode 内部 await treeReadyPromise 兜底等新树就绪，再沿父路径逐级展开 + setCurrentKey + scrollBy
 //   同工作目录：跳过步骤 3，treeKey 不变、treeReadyPromise 旧值已 resolve，locateNode 立即执行
 // 状态看板入口（activePanel==='dashboard'）须切到 directory：看板与三栏 .main-panes v-show 互斥
-// （仅 directory/toolbox 显示三栏），看板下不切则文件树 display:none、locateNode 对隐藏树不可见 = 无反应。
-// 仓库筛选器入口（activePanel 为 directory/toolbox）三栏本就可见（toolbox 下 FileTreePanel 仍展示），
-// 保持当前面板不强制切 directory，避免 toolbox 下跳转误退出工具箱——严格满足「仓库筛选器跳转不受回归影响」。
+// （仅 directory 显示三栏），看板下不切则文件树 display:none、locateNode 对隐藏树不可见 = 无反应。
+// 仓库筛选器入口仅存在于三栏内（DirectoryTree/FileTreePanel），activePanel==='directory' 时
+// 三栏可见，保持当前面板不强制切换；工具箱等独占面板下三栏隐藏、无此入口，不涉及本函数。
 // 工作目录查找用 findOwningDirectory 最长前缀匹配，嵌套工作目录（D:\projects 与 D:\projects\sub 并存）
 // 取最具体者，避免选中外层导致 locateNode 在错误树里定位。
 const onRepoLocate = async (repoPath) => {

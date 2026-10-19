@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import JsonYamlToolDialog from '../JsonYamlToolDialog.vue'
+import JsonYamlToolPanel from '../JsonYamlToolPanel.vue'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -12,11 +12,6 @@ vi.mock('element-plus', async () => {
 })
 
 const stubs = {
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="jt-dialog"><slot name="header" /><slot /></div>',
-    props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue']
-  },
   'el-select': {
     // 数值选项（缩进 2/4）转 Number 回传——字符串缩进会被 JSON.stringify 逐层重复
     template: '<select :class="$attrs.class" :value="modelValue" @change="$emit(\'update:modelValue\', coerce($event.target.value))"><slot /></select>',
@@ -42,9 +37,8 @@ const stubs = {
   }
 }
 
-const createWrapper = (visible = true) =>
-  mount(JsonYamlToolDialog, {
-    props: { modelValue: visible },
+const createWrapper = () =>
+  mount(JsonYamlToolPanel, {
     global: { stubs }
   })
 
@@ -56,7 +50,7 @@ const setText = async (wrapper, text) => {
 const clickButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text() === text).trigger('click')
 
-describe('JsonYamlToolDialog', () => {
+describe('JsonYamlToolPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

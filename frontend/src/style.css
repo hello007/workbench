@@ -512,3 +512,24 @@ h4, h5, h6 {
   font-size: 11px;
   font-weight: 500;
 }
+
+/* 工具箱内嵌面板共享标题栏（CopyTo/ProcessManager/PortList/JsonYaml/EnvVar/Hosts/PptSplit 七面板共用，
+   替代原 el-dialog header；布局约束由 ToolboxPanel .toolbox-main 承担，面板自身流式排版） */
+.tool-panel-titlebar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.tool-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.tool-panel-titlebar-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}

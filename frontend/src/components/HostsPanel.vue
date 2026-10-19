@@ -1,26 +1,16 @@
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    width="min(720px, 85vw)"
-    class="hosts-dialog"
-    append-to-body
-    destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)"
-    @open="onOpen"
-  >
-    <template #header>
-      <div class="hosts-header">
-        <span class="hosts-title">hosts 文件</span>
-        <el-button
-          size="small"
-          :loading="loading"
-          @click="loadHosts"
-        >
-          <el-icon class="hosts-refresh-icon"><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </template>
+  <div class="hosts-panel">
+    <div class="tool-panel-titlebar">
+      <span class="tool-panel-title">hosts 文件</span>
+      <el-button
+        size="small"
+        :loading="loading"
+        @click="loadHosts"
+      >
+        <el-icon class="hosts-refresh-icon"><Refresh /></el-icon>
+        刷新
+      </el-button>
+    </div>
 
     <!-- 总览：实际读取路径 + 展示口径说明（路径随平台不同，排障时确认读的是哪个文件） -->
     <div class="hosts-meta">
@@ -28,7 +18,7 @@
       <span class="hosts-meta-hint">映射行展示 IP / 主机名 / 行内注释，注释与空行默认隐藏；复制单行复制原始行文本</span>
     </div>
 
-    <!-- 组级错误：读取失败不整体报错，warning 行就地提示（单来源失败形态，对齐 EnvVarDialog） -->
+    <!-- 组级错误：读取失败不整体报错，warning 行就地提示（单来源失败形态，对齐 EnvVarPanel 同类面板） -->
     <div v-if="view?.error" class="hosts-error">
       <el-icon><WarningFilled /></el-icon>
       <span>{{ view.error }}</span>
@@ -88,20 +78,15 @@
         </el-table-column>
       </el-table>
     </template>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { GetHosts } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
-
-defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-defineEmits(['update:modelValue'])
 
 const loading = ref(false)
 const view = ref(null)
@@ -109,7 +94,7 @@ const keyword = ref('')
 // 注释/空行默认隐藏，「显示注释」开关切回展示（未识别行恒展示——非空非注释行不因开关消失）
 const showComments = ref(false)
 
-// 加载序号：快速重复刷新时旧响应后到会覆盖新列表，过期响应整体丢弃（对齐 EnvVarDialog）
+// 加载序号：快速重复刷新时旧响应后到会覆盖新列表，过期响应整体丢弃（对齐 EnvVarPanel）
 let loadSeq = 0
 
 const loadHosts = async () => {
@@ -130,10 +115,11 @@ const loadHosts = async () => {
   }
 }
 
-// destroy-on-close 下每次打开重新读取（hosts 可能被外部修改，配合手动刷新兜底）
-const onOpen = () => {
+// 面板挂载即读取（工具切换 = 卸载重挂，等价原弹窗 destroy-on-close + @open 语义；
+// hosts 可能被外部修改，配合手动刷新兜底）
+onMounted(() => {
   loadHosts()
-}
+})
 
 // 注释/空行随开关显隐；entry 与未识别行恒展示
 const visibleEntries = computed(() => {
@@ -185,21 +171,6 @@ const copyIp = async (row) => {
 </script>
 
 <style scoped>
-.hosts-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-md);
-  padding-right: var(--spacing-lg);
-}
-
-.hosts-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
 .hosts-refresh-icon {
   margin-right: 4px;
 }
@@ -273,10 +244,6 @@ const copyIp = async (row) => {
   border: 1px solid color-mix(in srgb, var(--warning-color) 35%, transparent);
 }
 
-/* 列表区限高滚动：el-table max-height 内部滚动（表头吸顶），超出部分由弹窗 body 滚动兜底 */
-.hosts-dialog :deep(.el-dialog__body) {
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
-  max-height: 72vh;
-  overflow-y: auto;
-}
+/* 列表区限高滚动：el-table max-height 内部滚动（表头吸顶），
+   面板整体滚动由 ToolboxPanel .toolbox-main 容器兜底 */
 </style>

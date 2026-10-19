@@ -1,15 +1,9 @@
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    width="min(900px, 85vw)"
-    class="json-yaml-tool-dialog"
-    append-to-body
-    destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)"
-  >
-    <template #header>
-      <span class="jt-title">JSON / YAML 工具</span>
-    </template>
+  <div class="json-yaml-tool-panel">
+    <div class="tool-panel-titlebar">
+      <span class="tool-panel-title">JSON / YAML 工具</span>
+      <span class="tool-panel-titlebar-hint">校验 / 格式化 / 压缩 / 互转，纯前端实现</span>
+    </div>
 
     <!-- 格式类型 + JSON 缩进：显式选择而非自动探测，避免合法值在两种格式间歧义 -->
     <div class="jt-toolbar">
@@ -55,18 +49,13 @@
         <span v-if="result.line !== null">第 {{ result.line }} 行：</span>{{ result.message }}
       </template>
     </div>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import yaml from 'js-yaml'
-
-defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-defineEmits(['update:modelValue'])
 
 const FORMAT_JSON = 'json'
 const FORMAT_YAML = 'yaml'
@@ -210,13 +199,6 @@ const doConvertToJson = (text) => {
 </script>
 
 <style scoped>
-.jt-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
 .jt-toolbar {
   display: flex;
   align-items: center;

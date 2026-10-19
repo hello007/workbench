@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { mount } from '@vue/test-utils'
 import ToolboxPanel from '../ToolboxPanel.vue'
 
 vi.mock('element-plus', async () => {
@@ -11,7 +10,7 @@ vi.mock('element-plus', async () => {
   }
 })
 
-// 进程管理/环境变量/hosts 方法形状对齐 model.ProcessInfo / ProcessStopResult / EnvVarGroup / HostsView（详见 wails-mock-defaults.js）
+// 七个内容面板均被 stub（各自交互面由自身 spec 覆盖），仅需补齐 import 链所需导出
 vi.mock('../../../wailsjs/go/main/App', () => ({
   CopyTo: vi.fn(),
   ListProcesses: vi.fn(() => Promise.resolve([])),
@@ -19,105 +18,53 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   KillProcess: vi.fn(() => Promise.resolve()),
   ListEnvVars: vi.fn(() => Promise.resolve([])),
   GetHosts: vi.fn(() => Promise.resolve({ path: '', entries: [], error: '' })),
-  // PPT 拆分（PptSplitDialog 被 stub 不真正调用，补齐 import 链所需导出）
   SplitPptxPerPage: vi.fn(() => Promise.resolve({ outputDir: '', files: [], pageCount: 0 })),
+  SplitPptxFolder: vi.fn(() => Promise.resolve({ dirPath: '', total: 0, items: [] })),
   CancelPptxSplit: vi.fn(() => Promise.resolve(false)),
-  OpenFileDialog: vi.fn(() => Promise.resolve(''))
+  OpenFileDialog: vi.fn(() => Promise.resolve('')),
+  OpenDirectoryDialog: vi.fn(() => Promise.resolve(''))
 }))
 
-// PptSplitDialog 随父组件 import EventsOn（工具箱现有弹窗均不监听事件，本 mock 为其新增）
+// PptSplitPanel 随父组件 import EventsOn（事件监听随其挂载注册）
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(),
   EventsOff: vi.fn()
 }))
 
-// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Sort / Key / Guide / Files（标题栏图标已换为本地
-// ToolboxIcon 组件，不走 element-plus），弹窗用 Refresh（弹窗未打开也随父组件 import，缺项会触发组件解析告警）
+// 图标按需 mock：ToolboxPanel 用 CopyDocument / Cpu / Connection / Document / Key / Guide / Files
+// （标题栏图标为本地 ToolboxIcon 组件，不走 element-plus）
 vi.mock('@element-plus/icons-vue', () => ({
   CopyDocument: { template: '<i class="i-copy" />' },
   Cpu: { template: '<i class="i-cpu" />' },
   Connection: { template: '<i class="i-connection" />' },
   Document: { template: '<i class="i-document" />' },
-  Sort: { template: '<i class="i-sort" />' },
   Key: { template: '<i class="i-key" />' },
   Guide: { template: '<i class="i-guide" />' },
-  Files: { template: '<i class="i-files" />' },
-  Refresh: { template: '<i class="i-refresh" />' }
+  Files: { template: '<i class="i-files" />' }
 }))
 
 const stubs = {
   'el-icon': { template: '<i><slot /></i>', props: ['size'] },
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="el-dialog"><slot /><slot name="footer" /></div>',
-    props: ['modelValue', 'title', 'width', 'append'],
-    emits: ['update:modelValue']
-  },
-  'el-form': { template: '<form><slot /></form>', props: ['labelWidth'] },
-  'el-form-item': { template: '<div class="el-form-item"><slot /></div>', props: ['label'] },
-  'el-input': {
-    template: '<input type="text" :value="modelValue" :placeholder="placeholder" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)" @keyup="$emit(\'keyup\', $event)" />',
-    props: ['modelValue', 'placeholder', 'disabled', 'clearable'],
-    emits: ['update:modelValue', 'keyup']
-  },
-  'el-checkbox': {
-    template: '<input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
-    props: ['modelValue', 'disabled'],
-    emits: ['update:modelValue']
-  },
-  // 进程管理弹窗为独立组件（列表面由自身 spec 覆盖），此处桩掉避免 el-table 系列
-  // 在工具箱用例里渲染：弹窗经 v-model 打开，桩仅反映打开态
-  ProcessManagerDialog: {
-    template: '<div v-if="modelValue" class="pm-dialog-stub" />',
-    props: ['modelValue']
-  },
-  // 端口占用弹窗同上：列表面由自身 spec 覆盖，此处桩掉避免 el-table 系列渲染
-  PortListDialog: {
-    template: '<div v-if="modelValue" class="pl-dialog-stub" />',
-    props: ['modelValue']
-  },
-  JsonYamlToolDialog: {
-    template: '<div v-if="modelValue" class="jt-dialog-stub" />',
-    props: ['modelValue']
-  },
-  // 环境变量弹窗同上：列表面由自身 spec 覆盖，此处桩掉避免 el-tabs/el-table 系列渲染
-  EnvVarDialog: {
-    template: '<div v-if="modelValue" class="ev-dialog-stub" />',
-    props: ['modelValue']
-  },
-  // hosts 文件弹窗同上：列表面由自身 spec 覆盖，此处桩掉避免 el-table 系列渲染
-  HostsDialog: {
-    template: '<div v-if="modelValue" class="hosts-dialog-stub" />',
-    props: ['modelValue']
-  },
-  // PPT 拆分弹窗同上：交互面由自身 spec 覆盖，此处桩掉避免 el-dialog/事件注册渲染
-  PptSplitDialog: {
-    template: '<div v-if="modelValue" class="ppt-split-dialog-stub" />',
-    props: ['modelValue']
-  },
-  'el-button': {
-    template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /><slot name="icon" /></button>',
-    props: ['type', 'size', 'text', 'loading', 'disabled'],
-    emits: ['click']
-  }
+  // 七个内容面板：桩仅以特征 class 反映挂载与否（v-if 切换 = 卸载/挂载）
+  CopyToPanel: { template: '<div class="copy-to-panel-stub" />' },
+  ProcessManagerPanel: { template: '<div class="process-manager-panel-stub" />' },
+  PortListPanel: { template: '<div class="port-list-panel-stub" />' },
+  JsonYamlToolPanel: { template: '<div class="json-yaml-tool-panel-stub" />' },
+  EnvVarPanel: { template: '<div class="env-var-panel-stub" />' },
+  HostsPanel: { template: '<div class="hosts-panel-stub" />' },
+  PptSplitPanel: { template: '<div class="ppt-split-panel-stub" />' }
 }
 
-function createWrapper() {
-  return mount(ToolboxPanel, { global: { stubs } })
-}
+const createWrapper = () => mount(ToolboxPanel, { global: { stubs } })
 
-// 打开拷贝到对话框并填入源/目标/文件名（name 未传时跳过，让 watch 自动同步默认名）
-async function openCopyToDialog(wrapper, { source = 'D:\\src\\file.go', target = 'D:\\dst', name } = {}) {
-  await wrapper.findAll('.toolbox-item')[0].trigger('click')
-  await nextTick()
-  const inputs = wrapper.find('.el-dialog').findAll('input')
-  // 输入框顺序：原地址(0) 目标地址(1) 文件名(2)；checkbox 为 (3)
-  const textInputs = inputs.filter(i => i.element.type !== 'checkbox')
-  if (source !== undefined) await inputs[0].setValue(source)
-  if (target !== undefined) await inputs[1].setValue(target)
-  if (name !== undefined) await inputs[2].setValue(name)
-  // 等待 copyToSourcePath watch 触发默认名同步 + 重渲
-  await flushPromises()
-  return inputs
+const panelStubClass = {
+  copyTo: '.copy-to-panel-stub',
+  processManager: '.process-manager-panel-stub',
+  portList: '.port-list-panel-stub',
+  jsonYamlTool: '.json-yaml-tool-panel-stub',
+  envVars: '.env-var-panel-stub',
+  hosts: '.hosts-panel-stub',
+  pptSplit: '.ppt-split-panel-stub'
 }
 
 describe('ToolboxPanel', () => {
@@ -134,221 +81,73 @@ describe('ToolboxPanel', () => {
     }
   })
 
-  it('渲染标题栏与工具项', () => {
+  it('渲染标题栏与 7 个功能清单项', () => {
     wrapper = createWrapper()
-    expect(wrapper.find('.toolbox-header').text()).toContain('工具箱')
-    expect(wrapper.findAll('.toolbox-item').length).toBe(7)
-    expect(wrapper.text()).toContain('拷贝到')
-    expect(wrapper.text()).toContain('进程管理')
-    expect(wrapper.text()).toContain('端口占用')
-    expect(wrapper.text()).toContain('JSON/YAML 工具')
-    expect(wrapper.text()).toContain('环境变量')
-    expect(wrapper.text()).toContain('hosts 文件')
-    expect(wrapper.text()).toContain('PPT 拆分')
+    expect(wrapper.find('.panel-header').text()).toContain('工具箱')
+    expect(wrapper.findAll('.toolbox-nav-item').length).toBe(7)
+    const names = wrapper.findAll('.toolbox-nav-name').map((n) => n.text())
+    expect(names).toEqual([
+      '拷贝到',
+      '进程管理',
+      '端口占用',
+      'JSON/YAML 工具',
+      '环境变量',
+      'hosts 文件',
+      'PPT 拆分'
+    ])
   })
 
-  it('点击 JSON/YAML 工具项打开工具弹窗', async () => {
+  it('默认选中首个工具（拷贝到）并渲染其内容面板', () => {
     wrapper = createWrapper()
-    expect(wrapper.find('.jt-dialog-stub').exists()).toBe(false)
-    const item = wrapper.findAll('.toolbox-item').find(el => el.text().includes('JSON/YAML'))
-    await item.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.jt-dialog-stub').exists()).toBe(true)
+    expect(wrapper.find(panelStubClass.copyTo).exists()).toBe(true)
+    // 其余面板不渲染（v-if 卸载切换）
+    expect(wrapper.find(panelStubClass.pptSplit).exists()).toBe(false)
+    // 默认项带 active 态（左侧指示条依赖的 class）
+    expect(wrapper.findAll('.toolbox-nav-item')[0].classes()).toContain('is-active')
   })
 
-  it('点击端口占用工具项打开端口占用弹窗', async () => {
+  it('点击清单项切换右侧内容面板（弹窗化改为面板内嵌切换）', async () => {
     wrapper = createWrapper()
-    expect(wrapper.find('.pl-dialog-stub').exists()).toBe(false)
-    const portItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('端口占用'))
-    await portItem.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.pl-dialog-stub').exists()).toBe(true)
-  })
-
-  it('点击进程管理工具项打开进程管理弹窗', async () => {
-    wrapper = createWrapper()
-    // 弹窗为独立组件（append-to-body + 900 档尺寸），此处仅验证入口可打开
-    expect(wrapper.find('.pm-dialog-stub').exists()).toBe(false)
-    const processItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('进程管理'))
-    await processItem.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.pm-dialog-stub').exists()).toBe(true)
-  })
-
-  it('点击环境变量工具项打开环境变量弹窗', async () => {
-    wrapper = createWrapper()
-    expect(wrapper.find('.ev-dialog-stub').exists()).toBe(false)
-    const envItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('环境变量'))
-    await envItem.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.ev-dialog-stub').exists()).toBe(true)
-  })
-
-  it('点击 hosts 文件工具项打开 hosts 弹窗', async () => {
-    wrapper = createWrapper()
-    expect(wrapper.find('.hosts-dialog-stub').exists()).toBe(false)
-    const hostsItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('hosts 文件'))
-    await hostsItem.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.hosts-dialog-stub').exists()).toBe(true)
-  })
-
-  it('点击 PPT 拆分工具项打开 PPT 拆分弹窗', async () => {
-    wrapper = createWrapper()
-    expect(wrapper.find('.ppt-split-dialog-stub').exists()).toBe(false)
-    const pptItem = wrapper.findAll('.toolbox-item').find(el => el.text().includes('PPT 拆分'))
+    // 点「PPT 拆分」→ 渲染 PptSplitPanel、拷贝到面板卸载
+    const pptItem = wrapper.findAll('.toolbox-nav-item').find((el) => el.text().includes('PPT 拆分'))
     await pptItem.trigger('click')
-    await nextTick()
-    expect(wrapper.find('.ppt-split-dialog-stub').exists()).toBe(true)
+    expect(wrapper.find(panelStubClass.pptSplit).exists()).toBe(true)
+    expect(wrapper.find(panelStubClass.copyTo).exists()).toBe(false)
+    expect(wrapper.findAll('.toolbox-nav-item')[6].classes()).toContain('is-active')
+
+    // 点「进程管理」→ 再次切换
+    const processItem = wrapper.findAll('.toolbox-nav-item').find((el) => el.text().includes('进程管理'))
+    await processItem.trigger('click')
+    expect(wrapper.find(panelStubClass.processManager).exists()).toBe(true)
+    expect(wrapper.find(panelStubClass.pptSplit).exists()).toBe(false)
   })
 
-  it('点击关闭按钮 emit close', async () => {
+  it('逐一切换 7 个工具均渲染对应内容面板（全程无弹窗）', async () => {
+    wrapper = createWrapper()
+    for (const [id, stubClass] of Object.entries(panelStubClass)) {
+      const item = wrapper.findAll('.toolbox-nav-item').find((el) => {
+        const key = Object.keys(panelStubClass).find((k) => panelStubClass[k] === stubClass)
+        const toolNames = {
+          copyTo: '拷贝到',
+          processManager: '进程管理',
+          portList: '端口占用',
+          jsonYamlTool: 'JSON/YAML',
+          envVars: '环境变量',
+          hosts: 'hosts',
+          pptSplit: 'PPT 拆分'
+        }
+        return el.text().includes(toolNames[id])
+      })
+      await item.trigger('click')
+      expect(wrapper.find(stubClass).exists()).toBe(true)
+    }
+    // 全程无 el-dialog（去弹窗化）
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+  })
+
+  it('点击关闭按钮 emit close（Home 切回 directory）', async () => {
     wrapper = createWrapper()
     await wrapper.find('.toolbox-close').trigger('click')
     expect(wrapper.emitted('close')).toBeTruthy()
-  })
-
-  it('点击拷贝到工具项打开对话框', async () => {
-    wrapper = createWrapper()
-    await wrapper.findAll('.toolbox-item')[0].trigger('click')
-    await nextTick()
-    expect(wrapper.find('.el-dialog').exists()).toBe(true)
-  })
-
-  it('源路径变化时自动同步默认文件名', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\proj\\main.go', target: 'D:\\dst' })
-    const nameInput = wrapper.find('.el-dialog').findAll('input[type="text"]')[2]
-    expect(nameInput.element.value).toBe('main.go')
-  })
-
-  it('用户自定义文件名不被源路径变化覆盖', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst', name: 'custom.go' })
-    const inputs = wrapper.find('.el-dialog').findAll('input[type="text"]')
-    // 改源路径，文件名应保持 custom.go（不等于旧默认 a.go）
-    await inputs[0].setValue('D:\\b.go')
-    await nextTick()
-    expect(inputs[2].element.value).toBe('custom.go')
-  })
-
-  it('copyToPreview：整目录拷贝展示 from → dst/name', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\src', target: 'D:\\dst' })
-    // 默认 copyToWholeDir=true
-    const preview = wrapper.find('.copy-to-preview')
-    expect(preview.exists()).toBe(true)
-    expect(preview.text()).toContain('D:/src')
-    expect(preview.text()).toContain('D:/dst/src')
-  })
-
-  it('copyToPreview：非整目录展示 from/* → dst/*', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\src', target: 'D:\\dst' })
-    // 取消勾选包含文件夹本身
-    const checkbox = wrapper.find('.el-dialog input[type="checkbox"]')
-    await checkbox.setValue(false)
-    await nextTick()
-    const preview = wrapper.find('.copy-to-preview')
-    expect(preview.text()).toContain('D:/src/*')
-    expect(preview.text()).toContain('D:/dst/*')
-  })
-
-  it('互换按钮交换原地址与目标地址', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\b.go' })
-    const swapBtn = wrapper.findAll('button').find(b => b.text().includes('互换'))
-    await swapBtn.trigger('click')
-    await nextTick()
-    const inputs = wrapper.find('.el-dialog').findAll('input[type="text"]')
-    expect(inputs[0].element.value).toBe('D:\\b.go')
-    expect(inputs[1].element.value).toBe('D:\\a.go')
-  })
-
-  it('handleCopyTo：原地址为空时 warning', async () => {
-    const { ElMessage } = await import('element-plus')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: '', target: 'D:\\dst' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    expect(ElMessage.warning).toHaveBeenCalledWith('请输入原地址')
-  })
-
-  it('handleCopyTo：目标地址为空时 warning', async () => {
-    const { ElMessage } = await import('element-plus')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: '' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    expect(ElMessage.warning).toHaveBeenCalledWith('请输入目标地址')
-  })
-
-  it('handleCopyTo：文件名含非法字符时 warning', async () => {
-    const { ElMessage } = await import('element-plus')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst', name: 'a:b' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('非法字符'))
-  })
-
-  it('handleCopyTo：文件名为 . 或 .. 时 warning', async () => {
-    const { ElMessage } = await import('element-plus')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst', name: '..' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('非法字符'))
-  })
-
-  it('handleCopyTo：成功时 success 提示并关闭对话框', async () => {
-    const { ElMessage } = await import('element-plus')
-    const { CopyTo } = await import('../../../wailsjs/go/main/App')
-    CopyTo.mockResolvedValue('')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    await flushPromises()
-    expect(CopyTo).toHaveBeenCalled()
-    expect(ElMessage.success).toHaveBeenCalledWith('拷贝成功')
-    expect(wrapper.find('.el-dialog').exists()).toBe(false)
-  })
-
-  it('handleCopyTo：结果含附加提示时完整展示', async () => {
-    const { ElMessage } = await import('element-plus')
-    const { CopyTo } = await import('../../../wailsjs/go/main/App')
-    CopyTo.mockResolvedValue('已忽略自定义名')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    await flushPromises()
-    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('已忽略自定义名'))
-  })
-
-  it('handleCopyTo：后端返回错误串时 error 提示', async () => {
-    const { ElMessage } = await import('element-plus')
-    const { CopyTo } = await import('../../../wailsjs/go/main/App')
-    CopyTo.mockResolvedValue('错误：源不存在')
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    await flushPromises()
-    expect(ElMessage.error).toHaveBeenCalledWith('错误：源不存在')
-    // 错误时不关闭对话框
-    expect(wrapper.find('.el-dialog').exists()).toBe(true)
-  })
-
-  it('handleCopyTo：抛异常时 error 提示', async () => {
-    const { ElMessage } = await import('element-plus')
-    const { CopyTo } = await import('../../../wailsjs/go/main/App')
-    CopyTo.mockRejectedValue(new Error('boom'))
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper, { source: 'D:\\a.go', target: 'D:\\dst' })
-    await wrapper.findAll('button').find(b => b.text() === '确定').trigger('click')
-    await flushPromises()
-    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('boom'))
-  })
-
-  it('取消按钮关闭对话框', async () => {
-    wrapper = createWrapper()
-    await openCopyToDialog(wrapper)
-    await wrapper.findAll('button').find(b => b.text() === '取消').trigger('click')
-    expect(wrapper.find('.el-dialog').exists()).toBe(false)
   })
 })

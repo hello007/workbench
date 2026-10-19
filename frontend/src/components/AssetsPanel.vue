@@ -99,7 +99,7 @@
      事件注销遵循 cross-layer-contracts：EventsOn 返回闭包精准注销，禁 EventsOff 全局移除。
      （拆分监听器属面板层——进度条与弹窗互斥常态：确认弹窗可随时关闭、任务继续
      在后台执行且面板层进度可见，故监听器生命周期 = 面板组件生命周期，注销时机 =
-     onBeforeUnmount；弹窗非监听器属主，无「弹窗关闭注销点」，对比 PptSplitDialog
+     onBeforeUnmount；弹窗非监听器属主，无「弹窗关闭注销点」，对比 PptSplitPanel
      的弹窗内监听双时机形态。）
      根元素保持完整 flex 约束链（flex:1 + min-height:0 + min-width:0 + display:flex +
      flex-direction:column + overflow:hidden），防面板塌陷挤压终端（frontend-visual-conventions）。 -->

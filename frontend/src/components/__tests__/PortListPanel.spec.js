@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import PortListDialog from '../PortListDialog.vue'
+import PortListPanel from '../PortListPanel.vue'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -51,19 +51,6 @@ const mockProcesses = [
 ]
 
 const stubs = {
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="pl-dialog"><slot name="header" /><slot /></div>',
-    props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'open'],
-    mounted() {
-      if (this.modelValue) this.$emit('open')
-    },
-    watch: {
-      modelValue(v) {
-        if (v) this.$emit('open')
-      }
-    }
-  },
   'el-button': {
     template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
     props: ['disabled', 'size', 'type', 'link', 'loading'],
@@ -83,9 +70,8 @@ const stubs = {
   }
 }
 
-const createWrapper = (visible = true) =>
-  mount(PortListDialog, {
-    props: { modelValue: visible },
+const createWrapper = () =>
+  mount(PortListPanel, {
     global: { stubs }
   })
 
@@ -99,7 +85,7 @@ const rowButtons = (wrapper, rowIndex) => {
 const findButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text() === text)
 
-describe('PortListDialog', () => {
+describe('PortListPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     listProcessesMock.mockResolvedValue(mockProcesses)
@@ -107,7 +93,7 @@ describe('PortListDialog', () => {
   })
 
   it('打开时枚举监听进程并扁平化为一行一个端口、按端口号升序', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // 空关键字默认视图：后端返回全部监听态进程
@@ -123,21 +109,21 @@ describe('PortListDialog', () => {
     expect(text).toContain('127.0.0.1')
   })
 
-  it('未打开时不枚举端口', async () => {
-    createWrapper(false)
+  it('挂载即枚举端口（面板化：onMounted 替代原弹窗 @open 语义）', async () => {
+    createWrapper()
     await flushPromises()
-    expect(listProcessesMock).not.toHaveBeenCalled()
+    expect(listProcessesMock).toHaveBeenCalledTimes(1)
   })
 
   it('空列表展示空态文案', async () => {
     listProcessesMock.mockResolvedValue([])
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
     expect(wrapper.find('.empty-text').text()).toBe('当前没有监听端口')
   })
 
   it('本应用行标注「本应用」且终止按钮禁用', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // isSelf 行 = 端口 36115（升序末行）
@@ -151,7 +137,7 @@ describe('PortListDialog', () => {
   })
 
   it('系统关键进程触发红色强确认', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // 系统进程行 = 端口 445（升序首行）
@@ -169,7 +155,7 @@ describe('PortListDialog', () => {
   })
 
   it('普通进程确认文案含数据丢失提示；多端口进程提示连带释放', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // node 占 2 端口：确认文案须提示终止会连带其余端口（升序第 2 行 = 端口 3000）
@@ -186,7 +172,7 @@ describe('PortListDialog', () => {
   })
 
   it('单端口进程确认文案不含连带提示', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // System（445）只占 1 端口（升序首行）
@@ -200,7 +186,7 @@ describe('PortListDialog', () => {
   it('用户取消确认时不调用终止方法', async () => {
     const { ElMessageBox } = await import('element-plus')
     ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -211,7 +197,7 @@ describe('PortListDialog', () => {
 
   it('终止返回 graceful 提示「进程已正常退出」并刷新列表', async () => {
     stopProcessMock.mockResolvedValue({ stopped: true, method: 'graceful' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -224,7 +210,7 @@ describe('PortListDialog', () => {
 
   it('终止返回 forced 提示「进程已强制结束」（如实反映生效手段）', async () => {
     stopProcessMock.mockResolvedValue({ stopped: true, method: 'forced' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -237,7 +223,7 @@ describe('PortListDialog', () => {
 
   it('进程已不存在时提示并自动刷新列表', async () => {
     stopProcessMock.mockRejectedValue({ code: 'E_PROCESS_NOT_FOUND', message: '进程已不存在' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -251,7 +237,7 @@ describe('PortListDialog', () => {
 
   it('枚举失败按 error 级提示', async () => {
     listProcessesMock.mockRejectedValue({ code: 'E_PROCESS_ENUM_FAILED', message: 'netstat 执行失败' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const { ElMessage } = await import('element-plus')
@@ -260,7 +246,7 @@ describe('PortListDialog', () => {
 
   it('枚举超时按 warning 级提示可重试', async () => {
     listProcessesMock.mockRejectedValue({ code: 'E_PROCESS_ENUM_TIMEOUT', message: '进程枚举超时，请重试' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const { ElMessage } = await import('element-plus')
@@ -271,7 +257,7 @@ describe('PortListDialog', () => {
     // 挂起 StopProcess 模拟停止耗时（最坏约 11s：3s 优雅超时 + 5s 轮询 + 3s 强杀）
     let resolveStop
     stopProcessMock.mockReturnValue(new Promise((resolve) => { resolveStop = resolve }))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -297,7 +283,7 @@ describe('PortListDialog', () => {
   it('确认框取消时不进入等待态，按钮保持可用', async () => {
     const { ElMessageBox } = await import('element-plus')
     ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -308,7 +294,7 @@ describe('PortListDialog', () => {
   })
 
   it('刷新按钮重新枚举', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
     expect(listProcessesMock).toHaveBeenCalledTimes(1)
 

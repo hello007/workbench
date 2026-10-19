@@ -548,11 +548,14 @@ describe('Home.vue - Bug修复验证', () => {
       expect(useUiStore().activePanel).toBe('directory')
     })
 
-    it('activePanel 为 toolbox 时不显示 DirectoryTree', async () => {
+    it('activePanel 为 toolbox 时三栏区隐藏、ToolboxPanel 独占窗口渲染', async () => {
       const wrapper = createWrapper()
       useUiStore().activePanel = 'toolbox'
       await wrapper.vm.$nextTick()
+      // 全窗口面板化：ToolboxPanel 移出 .main-panes（与 AiFunctionPanel 同级互斥），
+      // 三栏区 v-show 隐藏（文件树三栏不再与工具箱共存）
       expect(wrapper.find('.stub-toolbox-panel').exists()).toBe(true)
+      expect(wrapper.find('.main-panes').isVisible()).toBe(false)
     })
   })
 
@@ -925,22 +928,26 @@ describe('Home.vue - handler 分支补充', () => {
     target: document.body, preventDefault: () => {}, ...over
   })
 
-  // ---- resolveTargetDir / closeToolbox / onRefreshNode ----
+  // ---- resolveTargetDir / ToolboxPanel 关闭绑定 / onRefreshNode ----
   it('resolveTargetDir：directory 直接返回 path，file 取父目录', () => {
     expect(wrapper.vm.resolveTargetDir({ type: 'directory', path: 'D:\\dir' })).toBe('D:\\dir')
     expect(wrapper.vm.resolveTargetDir({ type: 'file', path: 'D:\\dir\\a.go' })).toBe('D:\\dir')
     expect(wrapper.vm.resolveTargetDir({ type: 'file', path: 'a.go' })).toBe('')
   })
 
-  it('closeToolbox：toolbox 激活时切回 directory', () => {
+  it('ToolboxPanel 关闭按钮（emit close）切回 directory，且 toolbox 下三栏隐藏', async () => {
     const ui = useUiStore()
     ui.activePanel = 'toolbox'
-    wrapper.vm.closeToolbox()
+    await wrapper.vm.$nextTick()
+    // 独占窗口布局：toolbox 激活时三栏区 v-show 隐藏、ToolboxPanel 移至 main-panes 外渲染
+    // （inline display 断言而非 isVisible：后者递归 getComputedStyle，jsdom 下不稳定）
+    expect(wrapper.find('.main-panes').element.style.display).toBe('none')
+    expect(wrapper.find('.toolbox-panel').exists()).toBe(true)
+    // 面板 header 关闭按钮 emit close → Home 绑定切回 directory
+    await wrapper.find('.toolbox-close').trigger('click')
     expect(ui.activePanel).toBe('directory')
-    // 非 toolbox 时不变
-    ui.activePanel = 'directory'
-    wrapper.vm.closeToolbox()
-    expect(ui.activePanel).toBe('directory')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.main-panes').element.style.display).not.toBe('none')
   })
 
   it('onRefreshNode 透传给 fileTreePanel.refreshNode', () => {

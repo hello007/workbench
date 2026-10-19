@@ -1,26 +1,16 @@
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    width="min(900px, 85vw)"
-    class="env-var-dialog"
-    append-to-body
-    destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)"
-    @open="onOpen"
-  >
-    <template #header>
-      <div class="ev-header">
-        <span class="ev-title">环境变量</span>
-        <el-button
-          size="small"
-          :loading="loading"
-          @click="loadList"
-        >
-          <el-icon class="ev-refresh-icon"><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </template>
+  <div class="env-var-panel">
+    <div class="tool-panel-titlebar">
+      <span class="tool-panel-title">环境变量</span>
+      <el-button
+        size="small"
+        :loading="loading"
+        @click="loadList"
+      >
+        <el-icon class="ev-refresh-icon"><Refresh /></el-icon>
+        刷新
+      </el-button>
+    </div>
 
     <!-- 总览：来源数与变量数 + 脱敏交互说明 -->
     <div class="ev-meta">
@@ -103,20 +93,15 @@
       </el-tab-pane>
     </el-tabs>
     <div v-else-if="!loading" class="ev-empty">暂无可展示的环境变量</div>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Hide, Refresh, View, WarningFilled } from '@element-plus/icons-vue'
 import { ListEnvVars } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
-
-defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-defineEmits(['update:modelValue'])
 
 const loading = ref(false)
 const groups = ref([])
@@ -157,10 +142,11 @@ const loadList = async () => {
   }
 }
 
-// destroy-on-close 下每次打开重新枚举（注册表来源可能被外部修改，配合手动刷新兜底）
-const onOpen = () => {
+// 面板挂载即枚举（工具切换 = 卸载重挂，等价原弹窗 destroy-on-close + @open 语义；
+// 注册表来源可能被外部修改，配合手动刷新兜底）
+onMounted(() => {
   loadList()
-}
+})
 
 const totalVarCount = computed(() =>
   groups.value.reduce((sum, g) => sum + (g.vars ? g.vars.length : 0), 0)
@@ -192,7 +178,7 @@ const revealKey = (group, row) => `${group.source}\u0000${row.name}`
 
 const isRevealed = (group, row) => revealedKeys.value.includes(revealKey(group, row))
 
-// 用数组整体重赋值而非 Set：增删时稳定触发响应更新（与 PortListDialog pendingPids 同款）
+// 用数组整体重赋值而非 Set：增删时稳定触发响应更新（与 PortListPanel pendingPids 同款）
 const toggleReveal = (group, row) => {
   const key = revealKey(group, row)
   revealedKeys.value = isRevealed(group, row)
@@ -212,21 +198,6 @@ const copyValue = async (row) => {
 </script>
 
 <style scoped>
-.ev-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-md);
-  padding-right: var(--spacing-lg);
-}
-
-.ev-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
 .ev-refresh-icon {
   margin-right: 4px;
 }
@@ -302,10 +273,5 @@ const copyValue = async (row) => {
 }
 
 /* 列表区限高滚动：进程环境变量可达数百行，el-table max-height 内部滚动（表头吸顶），
-   超出部分由弹窗 body 滚动兜底 */
-.env-var-dialog :deep(.el-dialog__body) {
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
-  max-height: 72vh;
-  overflow-y: auto;
-}
+   面板整体滚动由 ToolboxPanel .toolbox-main 容器兜底 */
 </style>

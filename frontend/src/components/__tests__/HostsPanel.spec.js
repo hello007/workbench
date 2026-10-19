@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import HostsDialog from '../HostsDialog.vue'
+import HostsPanel from '../HostsPanel.vue'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -16,26 +16,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetHosts: (...args) => getHostsMock(...args)
 }))
 
-// 图标按需 mock：HostsDialog 用 Refresh / WarningFilled
+// 图标按需 mock：HostsPanel 用 Refresh / WarningFilled
 vi.mock('@element-plus/icons-vue', () => ({
   Refresh: { name: 'Refresh', template: '<span class="i-refresh" />' },
   WarningFilled: { name: 'WarningFilled', template: '<span class="i-warning" />' }
 }))
 
 const stubs = {
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="hosts-dialog-stub"><slot name="header" /><slot /></div>',
-    props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'open'],
-    mounted() {
-      if (this.modelValue) this.$emit('open')
-    },
-    watch: {
-      modelValue(v) {
-        if (v) this.$emit('open')
-      }
-    }
-  },
   'el-button': {
     // emits 声明必须存在：@click 属声明事件才不落入 $attrs，否则与 $emit 双路径各触发一次
     template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
@@ -78,9 +65,8 @@ const mockView = {
   error: ''
 }
 
-const createWrapper = (visible = true) =>
-  mount(HostsDialog, {
-    props: { modelValue: visible },
+const createWrapper = () =>
+  mount(HostsPanel, {
     global: { stubs }
   })
 
@@ -90,14 +76,14 @@ const colRows = (wrapper, colIndex) => wrapper.findAll('.el-table-col')[colIndex
 const findButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text() === text)
 
-describe('HostsDialog', () => {
+describe('HostsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getHostsMock.mockResolvedValue(mockView)
   })
 
   it('打开时读取 hosts 并渲染路径与默认视图（注释/空行隐藏，未识别行恒展示）', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(getHostsMock).toHaveBeenCalledTimes(1)
@@ -107,14 +93,14 @@ describe('HostsDialog', () => {
     expect(wrapper.find('.hosts-count').text()).toContain('4 / 4 条')
   })
 
-  it('未打开时不读取 hosts', async () => {
-    createWrapper(false)
+  it('挂载即读取 hosts（面板化：onMounted 替代原弹窗 @open 语义）', async () => {
+    createWrapper()
     await flushPromises()
-    expect(getHostsMock).not.toHaveBeenCalled()
+    expect(getHostsMock).toHaveBeenCalledTimes(1)
   })
 
   it('默认视图隐藏纯注释与空行，显示注释开关切回展示', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('# 屏蔽广告域名示例')
@@ -129,7 +115,7 @@ describe('HostsDialog', () => {
   })
 
   it('未识别行灰色展示原文并带未识别标注，提供复制单行', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const unknownRow = colRows(wrapper, 1)[3]
@@ -138,7 +124,7 @@ describe('HostsDialog', () => {
   })
 
   it('过滤关键字命中 IP', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('input[type="text"]').setValue('10.20.30')
@@ -150,7 +136,7 @@ describe('HostsDialog', () => {
   })
 
   it('过滤关键字命中主机名，大小写不敏感', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('input[type="text"]').setValue('LOCALHOST')
@@ -161,7 +147,7 @@ describe('HostsDialog', () => {
   })
 
   it('显示注释开启时纯注释行参与关键字过滤（按原文匹配）', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('.el-checkbox input').setValue(true)
@@ -174,7 +160,7 @@ describe('HostsDialog', () => {
   })
 
   it('过滤无命中时展示空态文案', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('input[type="text"]').setValue('zzz-not-exist')
@@ -186,7 +172,7 @@ describe('HostsDialog', () => {
   it('复制单行复制原始行文本并成功提示', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // 操作列第 2 行（::1 entry）的「复制单行」
@@ -202,7 +188,7 @@ describe('HostsDialog', () => {
   it('复制 IP 仅 entry 行提供且复制地址 token', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // entry 行两个按钮（复制单行 + 复制 IP）；未识别行仅复制单行
@@ -221,7 +207,7 @@ describe('HostsDialog', () => {
   it('clipboard.writeText 失败时提示复制失败', async () => {
     const writeText = vi.fn(() => Promise.reject(new Error('denied')))
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await colRows(wrapper, 3)[0].findAll('button')[0].trigger('click')
@@ -237,7 +223,7 @@ describe('HostsDialog', () => {
       entries: [],
       error: 'hosts 文件不存在'
     })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(wrapper.find('.hosts-error').exists()).toBe(true)
@@ -246,7 +232,7 @@ describe('HostsDialog', () => {
   })
 
   it('刷新按钮重新读取', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
     expect(getHostsMock).toHaveBeenCalledTimes(1)
 

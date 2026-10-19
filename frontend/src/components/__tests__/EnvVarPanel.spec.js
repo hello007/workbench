@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import EnvVarDialog from '../EnvVarDialog.vue'
+import EnvVarPanel from '../EnvVarPanel.vue'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -16,7 +16,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ListEnvVars: (...args) => listEnvVarsMock(...args)
 }))
 
-// 图标按需 mock：EnvVarDialog 用 Refresh / WarningFilled / View / Hide
+// 图标按需 mock：EnvVarPanel 用 Refresh / WarningFilled / View / Hide
 vi.mock('@element-plus/icons-vue', () => ({
   Refresh: { name: 'Refresh', template: '<span class="i-refresh" />' },
   WarningFilled: { name: 'WarningFilled', template: '<span class="i-warning" />' },
@@ -25,19 +25,6 @@ vi.mock('@element-plus/icons-vue', () => ({
 }))
 
 const stubs = {
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="ev-dialog"><slot name="header" /><slot /></div>',
-    props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'open'],
-    mounted() {
-      if (this.modelValue) this.$emit('open')
-    },
-    watch: {
-      modelValue(v) {
-        if (v) this.$emit('open')
-      }
-    }
-  },
   'el-button': {
     // emits 声明必须存在：@click 属声明事件才不落入 $attrs，否则 v-bind="$attrs" 把
     // onClick 直接挂到 button 上与 $emit 双路径各触发一次（toggle 显隐抵消、刷新计数翻倍）
@@ -99,9 +86,8 @@ const mockGroups = [
   }
 ]
 
-const createWrapper = (visible = true) =>
-  mount(EnvVarDialog, {
-    props: { modelValue: visible },
+const createWrapper = () =>
+  mount(EnvVarPanel, {
     global: { stubs }
   })
 
@@ -117,14 +103,14 @@ const opRows = (wrapper, source) => colRows(wrapper, source, 2)
 const findButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text() === text)
 
-describe('EnvVarDialog', () => {
+describe('EnvVarPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     listEnvVarsMock.mockResolvedValue(mockGroups)
   })
 
   it('打开时枚举环境变量并按来源渲染三个 tab 与总览计数', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(listEnvVarsMock).toHaveBeenCalledTimes(1)
@@ -137,17 +123,17 @@ describe('EnvVarDialog', () => {
     expect(wrapper.find('.ev-meta').text()).toContain('共 3 个来源、6 个变量')
   })
 
-  it('未打开时不枚举环境变量', async () => {
-    createWrapper(false)
+  it('挂载即枚举环境变量（面板化：onMounted 替代原弹窗 @open 语义）', async () => {
+    createWrapper()
     await flushPromises()
-    expect(listEnvVarsMock).not.toHaveBeenCalled()
+    expect(listEnvVarsMock).toHaveBeenCalledTimes(1)
   })
 
   it('仅单来源分组时只渲染一个 tab（Linux 形态）', async () => {
     listEnvVarsMock.mockResolvedValue([
       { source: 'process', name: '进程环境变量', vars: [{ name: 'HOME', value: '/root', sensitive: false }], error: '' }
     ])
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(wrapper.findAll('.el-tab-pane').length).toBe(1)
@@ -156,7 +142,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('敏感项默认打码（首字符保留 + 打码位），非敏感项直接展示', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const maskedRow = valueRows(wrapper, 'process')[0]
@@ -167,7 +153,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('点击眼睛图标临时显示真实值，再次点击恢复打码', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await valueRows(wrapper, 'process')[0].find('button').trigger('click')
@@ -181,7 +167,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('刷新后重置临时显值态', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await valueRows(wrapper, 'process')[0].find('button').trigger('click')
@@ -196,7 +182,7 @@ describe('EnvVarDialog', () => {
   it('复制单值始终复制真实值（打码状态下也复制真实值）并成功提示', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // 打码行（未点击显值）复制：取真实值
@@ -211,7 +197,7 @@ describe('EnvVarDialog', () => {
   it('clipboard.writeText 失败时提示复制失败', async () => {
     const writeText = vi.fn(() => Promise.reject(new Error('denied')))
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await opRows(wrapper, 'process')[0].find('button').trigger('click')
@@ -222,7 +208,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('过滤关键字命中名称，大小写不敏感，计数随之变化', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const input = pane(wrapper, 'system').find('input')
@@ -236,7 +222,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('过滤关键字命中值', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await pane(wrapper, 'system').find('input').setValue('jdk-17')
@@ -248,7 +234,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('过滤无命中时展示空态文案', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await pane(wrapper, 'system').find('input').setValue('zzz-not-exist')
@@ -262,7 +248,7 @@ describe('EnvVarDialog', () => {
       { source: 'system', name: '系统环境变量', vars: [], error: '注册表读取失败：拒绝访问' },
       { source: 'process', name: '进程环境变量', vars: [{ name: 'PATH', value: '/usr/bin', sensitive: false }], error: '' }
     ])
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const errPane = pane(wrapper, 'system')
@@ -277,7 +263,7 @@ describe('EnvVarDialog', () => {
 
   it('整体枚举失败（全部来源失败）走 handleError 提示并展示空态', async () => {
     listEnvVarsMock.mockRejectedValue({ code: 'E_ENV_ENUM_FAILED', message: '环境变量枚举失败，请重试' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const { ElMessage } = await import('element-plus')
@@ -288,7 +274,7 @@ describe('EnvVarDialog', () => {
   })
 
   it('刷新按钮重新枚举', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
     expect(listEnvVarsMock).toHaveBeenCalledTimes(1)
 
@@ -301,7 +287,7 @@ describe('EnvVarDialog', () => {
     listEnvVarsMock.mockResolvedValue([
       { source: 'process', name: '进程环境变量', vars: [{ name: 'EMPTY_VAR', value: '', sensitive: false }], error: '' }
     ])
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     expect(valueRows(wrapper, 'process')[0].text()).toContain('（空）')

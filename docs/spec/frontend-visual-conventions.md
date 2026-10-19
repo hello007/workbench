@@ -75,6 +75,16 @@
 - **nav 区**：固定宽（SettingsPanel 为 200px）+ `flex-shrink: 0` + `border-right` 分隔
 - **content 区**：`flex: 1` + `overflow-y: auto`（内容溢出仅 content 滚动，nav 固定不动）
 
+#### 工具箱全窗口面板化（独占一级面板，2026-10-19）
+
+工具箱为第二个独占整个窗口区域的一级面板（首个为 AI 功能），激活时文件树三栏隐藏（`.main-panes` v-show 仅 `directory`）：
+
+- **根元素 flex 约束链必须完整**：`flex:1` + `min-height:0` + `min-width:0` + `display:flex` + `flex-direction:column` + `overflow:hidden`（缺失则面板塌为内容高度并挤压终端 inline height）
+- **布局**：顶部渐变 `panel-header`（图标 + 标题 + 右侧动作）+ 左 nav（208px 固定宽，功能清单，active 态左 3px 指示条 `left:0` 禁负 left）+ 右 content（白底 `--radius-md` 圆角画布，`flex:1` + `overflow-y:auto`）
+- **新工具禁走 el-dialog 弹窗**：工具内容一律实现为内嵌 Panel 组件（`XxxPanel.vue`），由 ToolboxPanel 经 `<component :is>` 按 activeToolId 渲染，**v-if 卸载切换**（切走即卸载、回来重建）
+- **Dialog → Panel 去壳模式**：el-dialog 壳换面板容器 div；props `modelValue`/`v-model` 移除；原 `@open`/watch(visible) 初始化逻辑迁 `onMounted`（挂载即拉数据，自然替代 destroy-on-close + @open 语义）；事件监听器生命周期 = 组件挂载/卸载（`onBeforeUnmount` 闭包注销）
+- 弹窗尺寸策略（§5）不适用于工具内容面板（已非弹窗），但面板内部若再开二级弹窗仍按 §5 分档
+
 #### Dashboard 表格 + 卡片化异常提示
 
 数据看板用 `el-table` 主展示 + 卡片化辅助提示：

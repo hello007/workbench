@@ -1,26 +1,16 @@
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    width="min(900px, 85vw)"
-    class="port-list-dialog"
-    append-to-body
-    destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)"
-    @open="onOpen"
-  >
-    <template #header>
-      <div class="pl-header">
-        <span class="pl-title">端口占用</span>
-        <el-button
-          size="small"
-          :loading="loading"
-          @click="loadList"
-        >
-          <el-icon class="pl-refresh-icon"><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </template>
+  <div class="port-list-panel">
+    <div class="tool-panel-titlebar">
+      <span class="tool-panel-title">端口占用</span>
+      <el-button
+        size="small"
+        :loading="loading"
+        @click="loadList"
+      >
+        <el-icon class="pl-refresh-icon"><Refresh /></el-icon>
+        刷新
+      </el-button>
+    </div>
 
     <!-- 视图说明：与进程管理共用同一枚举底座，这里只展开监听态端口，一行一个端口 -->
     <div class="pl-meta">
@@ -63,20 +53,15 @@
         </template>
       </el-table-column>
     </el-table>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { ListProcesses, StopProcess } from '../../wailsjs/go/main/App'
 import { handleError, ErrorCode } from '../utils/error'
-
-defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-defineEmits(['update:modelValue'])
 
 // 停止生效手段：取值对齐 model/process.go 的 ProcessStopMethod* 常量（与进程管理同语义：
 // 后端统一「发请求 → 5s 轮询实测存活 → 未退转强杀」，graceful 表示实测确已退出）
@@ -119,10 +104,11 @@ const loadList = async () => {
   }
 }
 
-// destroy-on-close 下每次打开重新枚举（端口占用实时变化，不做缓存）
-const onOpen = () => {
+// 面板挂载即枚举（工具切换 = 卸载重挂，等价原弹窗 destroy-on-close + @open 语义；
+// 端口占用实时变化，不做缓存）
+onMounted(() => {
   loadList()
-}
+})
 
 // 扁平化：进程 × 端口 → 行。端口行保留进程级自我保护标志（前端禁用依据，后端终止入口仍会再拒一次）
 const flattenPortRows = (processes) => {
@@ -227,21 +213,6 @@ const terminate = async (row) => {
 </script>
 
 <style scoped>
-.pl-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-md);
-  padding-right: var(--spacing-lg);
-}
-
-.pl-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
 .pl-refresh-icon {
   margin-right: 4px;
 }
@@ -264,10 +235,6 @@ const terminate = async (row) => {
   margin-left: var(--spacing-xs);
 }
 
-/* 列表区限高滚动：监听端口可达数百行，超出视口时不撑高弹窗 */
-.port-list-dialog :deep(.el-dialog__body) {
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
-  max-height: 72vh;
-  overflow-y: auto;
-}
+/* 列表区限高滚动：监听端口可达数百行，el-table max-height 内部滚动（表头吸顶），
+   面板整体滚动由 ToolboxPanel .toolbox-main 容器兜底 */
 </style>

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import ProcessManagerDialog from '../ProcessManagerDialog.vue'
+import ProcessManagerPanel from '../ProcessManagerPanel.vue'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -53,19 +53,6 @@ const mockProcesses = [
 ]
 
 const stubs = {
-  'el-dialog': {
-    template: '<div v-if="modelValue" class="pm-dialog"><slot name="header" /><slot /></div>',
-    props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'open'],
-    mounted() {
-      if (this.modelValue) this.$emit('open')
-    },
-    watch: {
-      modelValue(v) {
-        if (v) this.$emit('open')
-      }
-    }
-  },
   'el-input': {
     template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @keyup="$emit(\'keyup\', $event)" />',
     props: ['modelValue', 'placeholder', 'size', 'clearable'],
@@ -98,9 +85,8 @@ const stubs = {
   }
 }
 
-const createWrapper = (visible = true) =>
-  mount(ProcessManagerDialog, {
-    props: { modelValue: visible },
+const createWrapper = () =>
+  mount(ProcessManagerPanel, {
     global: { stubs }
   })
 
@@ -115,7 +101,7 @@ const rowButtons = (wrapper, rowIndex) => {
 const findButton = (wrapper, text) =>
   wrapper.findAll('button').find((b) => b.text() === text)
 
-describe('ProcessManagerDialog', () => {
+describe('ProcessManagerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     listProcessesMock.mockResolvedValue(mockProcesses)
@@ -124,7 +110,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('打开时枚举全部监听进程并渲染端口/协议/状态/内存列', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     // 空输入 + auto 模式：后端返回全部监听进程
@@ -140,14 +126,14 @@ describe('ProcessManagerDialog', () => {
     expect(text).toContain('3000, 3001')
   })
 
-  it('未打开时不枚举进程', async () => {
-    createWrapper(false)
+  it('挂载即枚举进程（面板化：onMounted 替代原弹窗 @open 语义）', async () => {
+    createWrapper()
     await flushPromises()
-    expect(listProcessesMock).not.toHaveBeenCalled()
+    expect(listProcessesMock).toHaveBeenCalledTimes(1)
   })
 
   it('本应用行标注「本应用」且停止/强杀按钮禁用', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const nameCol = wrapper.findAll('.el-table-col')[0]
@@ -162,7 +148,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('系统关键进程触发红色强确认', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 2)[0].trigger('click')
@@ -180,7 +166,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('普通进程触发通用确认，文案含数据丢失提示', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -197,7 +183,7 @@ describe('ProcessManagerDialog', () => {
   it('用户取消确认时不调用终止方法', async () => {
     const { ElMessageBox } = await import('element-plus')
     ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -208,7 +194,7 @@ describe('ProcessManagerDialog', () => {
 
   it('停止返回 graceful 提示「进程已正常退出」', async () => {
     stopProcessMock.mockResolvedValue({ stopped: true, method: 'graceful' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -222,7 +208,7 @@ describe('ProcessManagerDialog', () => {
 
   it('停止返回 forced 提示「进程已强制结束」（如实反映生效手段）', async () => {
     stopProcessMock.mockResolvedValue({ stopped: true, method: 'forced' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -235,7 +221,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('强杀直接调用 KillProcess 并提示已强制结束', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[1].trigger('click')
@@ -251,7 +237,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('进程树勾选默认关闭，勾选后终止参数透传 true', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[1].trigger('click')
@@ -265,7 +251,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('模式切换下拉强制按端口检索', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('input').setValue('36115')
@@ -277,7 +263,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('输入框回车触发检索（默认 auto 模式）', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await wrapper.find('input').setValue('node')
@@ -288,7 +274,7 @@ describe('ProcessManagerDialog', () => {
   })
 
   it('刷新按钮重新枚举进程', async () => {
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
     expect(listProcessesMock).toHaveBeenCalledTimes(1)
 
@@ -299,7 +285,7 @@ describe('ProcessManagerDialog', () => {
 
   it('进程已不存在时提示并自动刷新列表', async () => {
     stopProcessMock.mockRejectedValue({ code: 'E_PROCESS_NOT_FOUND', message: '进程已不存在' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -314,7 +300,7 @@ describe('ProcessManagerDialog', () => {
 
   it('枚举失败按 error 级提示', async () => {
     listProcessesMock.mockRejectedValue({ code: 'E_PROCESS_ENUM_FAILED', message: 'netstat 执行失败' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const { ElMessage } = await import('element-plus')
@@ -325,7 +311,7 @@ describe('ProcessManagerDialog', () => {
     // 挂起 StopProcess 模拟停止耗时（最坏约 11s：3s 优雅超时 + 5s 轮询 + 3s 强杀）
     let resolveStop
     stopProcessMock.mockReturnValue(new Promise((resolve) => { resolveStop = resolve }))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -352,7 +338,7 @@ describe('ProcessManagerDialog', () => {
   it('确认框取消时不进入等待态，按钮保持可用', async () => {
     const { ElMessageBox } = await import('element-plus')
     ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     await rowButtons(wrapper, 1)[0].trigger('click')
@@ -365,7 +351,7 @@ describe('ProcessManagerDialog', () => {
 
   it('枚举超时按 warning 级提示可重试', async () => {
     listProcessesMock.mockRejectedValue({ code: 'E_PROCESS_ENUM_TIMEOUT', message: '进程枚举超时，请重试' })
-    const wrapper = createWrapper(true)
+    const wrapper = createWrapper()
     await flushPromises()
 
     const { ElMessage } = await import('element-plus')

@@ -35,7 +35,7 @@ const stubs = {
     template: '<div class="el-table"><slot /></div>',
     props: ['data', 'size', 'maxHeight']
   },
-  // 行 stub：遍历 el-table 的 data 逐行渲染 scoped slot（EnvVarDialog.spec 同款
+  // 行 stub：遍历 el-table 的 data 逐行渲染 scoped slot（EnvVarPanel.spec 同款
   // $parent.data 形态），prop 列直渲行值、模板列走 :row 作用域插槽
   'el-table-column': {
     props: ['prop', 'label', 'width', 'minWidth', 'fixed', 'showOverflowTooltip'],

@@ -1564,7 +1564,7 @@ const isPptxFile = (data) =>
   data?.type === 'file' && typeof data.name === 'string' && data.name.toLowerCase().endsWith('.pptx')
 
 // 确认弹窗预告输出目录与覆盖行为；拆分为长操作，Promise 完成前不持 UI 状态，
-// 成功/失败经 message 反馈；进度展示由工具箱 PptSplitDialog 负责（本组件不监听
+// 成功/失败经 message 反馈；进度展示由工具箱 PptSplitPanel 负责（本组件不监听
 // pptx-split:* 事件，避免多组件共听面；两入口拆分事件载荷含 srcPath 可区分归属）
 const handleSplitPptx = async (data) => {
   const baseName = data.name.replace(/\.pptx$/i, '')

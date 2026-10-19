@@ -11,10 +11,11 @@
 | 层 | 签名 | 位置 |
 |---|---|---|
 | 核心 | `SplitPptxPerPageWithProgress(ctx, srcPath string, onProgress func(done, total int)) (model.PptxSplitResult, error)`；`SplitPptxPerPage(ctx, srcPath)` 为 nil 回调直通 | `service/pptx_split.go` |
-| 编排 | `PptxSplitService.Split(ctx, srcPath) (model.PptxSplitResult, error)` / `Cancel()`；自持 `opMu + cancels` 注册表，复用包内 `cancelEntry` | `service/pptx_split_service.go` |
-| App 绑定 | `SplitPptxPerPage(srcPath string) (model.PptxSplitResult, error)` / `CancelPptxSplit() bool`（无参 = 全量取消，返回是否取消至少一项） | `app_pptx.go` |
-| 事件 | `pptx-split:progress` `{srcPath, done, total}` / `pptx-split:done` `{srcPath, result}` / `pptx-split:error` `{srcPath, message}` | EventSink 通道 |
-| 结果模型 | `model.PptxSplitResult{OutputDir string; Files []string; PageCount int}`（普通字段，无具名 string 类型，不触发 models.ts 别名规则） | `model/pptx.go` |
+| 编排 | `PptxSplitService.Split(ctx, srcPath) (model.PptxSplitResult, error)`；自持 `opMu + cancels` 注册表，复用包内 `cancelEntry` | `service/pptx_split_service.go` |
+| 批量编排 | `PptxSplitService.SplitFolder(ctx, dirPath) (model.PptxBatchResult, error)`（2026-10-19 增补：递归扫描 + 串行拆分 + 失败续跑，复用同一取消注册表与事件出口） | `service/pptx_split_batch.go` |
+| App 绑定 | `SplitPptxPerPage(srcPath string) (model.PptxSplitResult, error)` / `SplitPptxFolder(dirPath string) (model.PptxBatchResult, error)` / `CancelPptxSplit() bool`（无参 = 全量取消，同时命中单文件与批量在途项） | `app_pptx.go` |
+| 事件 | `pptx-split:progress` `{srcPath, done, total}` / `pptx-split:done` `{srcPath, result}` / `pptx-split:error` `{srcPath, message}` / `pptx-split:batch:progress` `{dirPath, index, total, currentFile}`（文件级，批量独有） | EventSink 通道 |
+| 结果模型 | `model.PptxSplitResult{OutputDir string; Files []string; PageCount int}`；`model.PptxBatchResult{DirPath string; Total int; Items []PptxBatchItem}`，Item `{SrcPath, OutputDir, PageCount, Error}`（均普通字段，无具名 string 类型，不触发 models.ts 别名规则） | `model/pptx.go` |
 
 ## 3. Contracts
 
@@ -36,6 +37,7 @@
 - **输出**：同级 `<原文件名>/` 文件夹，文件名 `<原文件名>-<三位页序号>.pptx`（2026-10-14 起 %02d→%03d：≥100 页字典序与页序一致；`isPptxSplitDerivative` 纯数字判定两位三位通吃，排除面零影响）；文件夹已存在覆盖重生成。**核心不清理目录**：页数减少/改名残留的旧文件由调用方处理——素材拆分链路重拆前清理（derived 落点 RemoveAll 整目录；源目录落点仅逐文件删产物命名形态，用户自建内容不动）；工具箱链路维持旧行为（重拆后新旧命名并存属已知取舍）。
 - **原子写**：`os.CreateTemp` 同目录 → 写入 → Sync → `os.Rename`（复刻 `util/json.go` SaveJSON 序列；二进制 zip 不适用 SaveJSON 本体）。
 - **取消**：`context.WithCancel` + `registerCancel`/`unregisterCancel` defer LIFO（先注销后 cancel），键 `normalizeRepoKey(srcPath)`，取消错误 `%w` 包装 `context.Canceled` 经 `mapCancelError` 映射 `ErrOperationCancelled`（**复用** `E_GIT_CANCELLED`，不新增错误码）。
+- **文件夹批量拆分**（2026-10-19 增补，任务 10-19-ppt）：`SplitFolder` 递归扫描（`filepath.WalkDir` 字典序）目录下全部 .pptx 串行逐个拆分；产物排除复用素材域 `isPptxSplitDerivative` 单点（rel 路径先 `filepath.ToSlash` 归一，Windows 反斜杠兼容）；目录不可入降级 SkipDir 记 Warn 不中断。单文件失败经 `appErrMessage` 记 `Item.Error` 后继续（不中断整批）；取消双检查点（每文件开始前 `ctx.Err()` + 单文件错误返回后 `errors.Is(context.Canceled) || ctx.Err()` 兜底）——取消非单文件业务失败，整批映射 `E_GIT_CANCELLED` 上抛、Items 仅含已完成。**批量模式不逐文件发 done/error 事件**（终态仅经返回值汇总，单文件失败展示唯一通道 = `Item.Error`）；整批取消时 error 非 nil，Wails 通道丢弃返回值（reject 收尾），已完成文件仅物理保留在磁盘。
 - **事件注入**：走 `s.emitCurrent`（EventSink 持锁投递契约），禁直调 `runtime.EventsEmit`；`web_serve.go` `applySink` 已补 `SetEventSink`（现七服务，含 pptxSplit/assets）。
 
 ## 4. Validation & Error Matrix
@@ -80,7 +82,7 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 
 ## 8. 前端契约
 
-- 事件仅 `PptSplitDialog.vue` 监听；`FileTreePanel.vue` 右键入口刻意不监听（Promise 直返 + message 反馈），规避多组件共听面。关闭对话框与 `onBeforeUnmount` 双时机用 `EventsOn` 返回闭包精准注销，禁 `EventsOff`。
-- 关闭即重置输入/结果/在途态；后端在途任务继续跑，事件载荷经 `pendingSrcPath` 过滤防旧结果串入。
+- 2026-10-19 起工具箱全窗口面板化：`PptSplitDialog.vue` 弹窗已删除，事件监听方为工具箱内嵌 `PptSplitPanel.vue`（单文件/文件夹批量双模式，`component :is` 切换即卸载重建，监听器生命周期 = 组件挂载/卸载）；`FileTreePanel.vue` 右键入口刻意不监听（Promise 直返 + message 反馈），规避多组件共听面。组件卸载用 `EventsOn` 返回闭包精准注销，禁 `EventsOff`。
+- 关闭/切走即重置输入/结果/在途态；后端在途任务继续跑，事件载荷经过滤防串入：单文件按 `pendingSrcPath`、批量文件级按 `pendingDirPath`、批量页级 `progress` 按当前文件 `batchCurrentFile`。
 - error 事件只复位状态不弹提示（提示由 Promise reject 的 `handleError` 统一分流，防双弹）；`E_GIT_CANCELLED` 命中 WARNING_CODES 中性提示。
 - wailsjs 三处绑定（App.js / App.d.ts / models.ts）经 `wails generate module` 重生成，不入库。

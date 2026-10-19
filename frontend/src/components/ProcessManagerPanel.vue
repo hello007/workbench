@@ -1,26 +1,16 @@
 <template>
-  <el-dialog
-    :model-value="modelValue"
-    width="min(900px, 85vw)"
-    class="process-manager-dialog"
-    append-to-body
-    destroy-on-close
-    @update:model-value="$emit('update:modelValue', $event)"
-    @open="onOpen"
-  >
-    <template #header>
-      <div class="pm-header">
-        <span class="pm-title">进程管理</span>
-        <el-button
-          size="small"
-          :loading="loading"
-          @click="loadList"
-        >
-          <el-icon class="pm-refresh-icon"><Refresh /></el-icon>
-          刷新
-        </el-button>
-      </div>
-    </template>
+  <div class="process-manager-panel">
+    <div class="tool-panel-titlebar">
+      <span class="tool-panel-title">进程管理</span>
+      <el-button
+        size="small"
+        :loading="loading"
+        @click="loadList"
+      >
+        <el-icon class="pm-refresh-icon"><Refresh /></el-icon>
+        刷新
+      </el-button>
+    </div>
 
     <!-- 检索区：单输入框（纯数字按端口 / 含非数字按进程名）+ 模式下拉消除歧义 -->
     <div class="pm-search">
@@ -94,20 +84,15 @@
         </template>
       </el-table-column>
     </el-table>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { ListProcesses, StopProcess, KillProcess } from '../../wailsjs/go/main/App'
 import { handleError, ErrorCode } from '../utils/error'
-
-defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-defineEmits(['update:modelValue'])
 
 // 检索模式：auto / port / name，取值对齐 service/process.go 的 ProcessFilterMode* 常量
 const MODE_AUTO = 'auto'
@@ -157,10 +142,11 @@ const loadList = async () => {
   }
 }
 
-// destroy-on-close 下每次打开重新枚举（进程状态实时变化，不做缓存）
-const onOpen = () => {
+// 面板挂载即枚举（工具切换 = 卸载重挂，等价原弹窗 destroy-on-close + @open 语义；
+// 进程状态实时变化，不做缓存）
+onMounted(() => {
   loadList()
-}
+})
 
 /**
  * 三级确认。判据全部取后端下发的 isSelf / isSystem 标志，前端不自判
@@ -269,21 +255,6 @@ const memoryText = (row) => {
 </script>
 
 <style scoped>
-.pm-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-md);
-  padding-right: var(--spacing-lg);
-}
-
-.pm-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
 .pm-refresh-icon {
   margin-right: 4px;
 }
@@ -324,10 +295,6 @@ const memoryText = (row) => {
   margin-left: var(--spacing-xs);
 }
 
-/* 列表区限高滚动：进程条目可达数百行，超出视口时不撑高弹窗 */
-.process-manager-dialog :deep(.el-dialog__body) {
-  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
-  max-height: 72vh;
-  overflow-y: auto;
-}
+/* 列表区限高滚动：进程条目可达数百行，el-table max-height 内部滚动（表头吸顶），
+   面板整体滚动由 ToolboxPanel .toolbox-main 容器兜底 */
 </style>
