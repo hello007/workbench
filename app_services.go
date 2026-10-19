@@ -79,6 +79,15 @@ type AppServices struct {
 	// data/asset_saved_searches.json 全局存储走 util.SaveJSON 原子写；损坏降级
 	// 空列表 + slog.Warn，对齐 SettingsService 模式）。
 	assetSavedSearchSvc *service.AssetSavedSearchService
+	// 多源页合并导出服务（素材购物栏「合并导出」的合并编排：基底注入式合并编排 +
+	// 取消注册表 + assets-cart:* 事件出口 sinkHolder——web_serve.go applySink 须
+	// 同步切换）。核心为纯 Go OOXML 标准库实现（MergePptxPages，不依赖本机 Office）。
+	pptxMergeSvc *service.PptxMergeService
+	// 素材购物栏服务（素材管理「购物栏」：跨库页级收集 + 拖拽排序 + 按序合并导出，
+	// data/asset_cart.json 走 util.SaveJSON 原子写；损坏降级空购物栏 + slog.Warn）。
+	// 合并导出复用 pptxMergeSvc（构造注入），导出互斥 E_CART_EXPORT_IN_PROGRESS，
+	// 取消转发其取消注册表。
+	assetCartSvc *service.AssetCartService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -187,6 +196,12 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 保存的素材检索条件服务（SRS §2.5，独立 data/asset_saved_searches.json
 	// 不与素材库注册表数据交叉）
 	s.assetSavedSearchSvc = service.NewAssetSavedSearchService(filepath.Join(dataDir, "asset_saved_searches.json"))
+
+	// 多源页合并导出服务（素材购物栏「合并导出」；ctx 构造注入 Wails 桌面事件出口）
+	s.pptxMergeSvc = service.NewPptxMergeService(ctx)
+	// 素材购物栏服务（素材管理「购物栏」，独立 data/asset_cart.json 不与素材库
+	// 数据交叉；合并导出复用 pptxMergeSvc）
+	s.assetCartSvc = service.NewAssetCartService(filepath.Join(dataDir, "asset_cart.json"), s.pptxMergeSvc)
 
 	return s
 }

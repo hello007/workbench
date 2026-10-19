@@ -4,7 +4,8 @@
      画廊区，详情侧栏位于覆盖层之外保持可见可编辑（PRD D5#6 预览即详情导航）。
      受控组件契约：翻页序列（slides = displayCards 过滤 kind==='slide' 子序列）与
      当前下标（index）全由宿主持有，本层只上报 update:index（翻页）/ close（关闭）/
-     load-more（懒加载边界续拉）三个事件；分页判定与详情装配都在宿主。
+     load-more（懒加载边界续拉）/ add-to-cart（加入购物栏，PR3）四个事件；分页判定
+     与详情装配都在宿主。
      层级取舍：z-index 取面板内局部值 10（盖过画廊卡与列表 sticky 表头 z-index:1，
      不触碰全局右键菜单 2000 / EP 弹窗 2001+ 层级表，真机确认后 spec 沉淀定稿）。
      大图消费纪律：AssetThumb 恒 tier=1（hd 档）+ hide-on-miss，禁改组件——miss 时
@@ -20,7 +21,19 @@
   <div v-if="current" class="asset-preview-overlay">
     <div class="preview-toolbar">
       <span class="preview-counter">{{ index + 1 }} / {{ slides.length }}</span>
-      <button class="preview-close" type="button" aria-label="关闭预览" @click="emit('close')">&#10005;</button>
+      <div class="preview-actions">
+        <!-- 加入购物栏（PR3 预览层入口）：已收集态图标反馈（in-cart 由宿主键判定），
+             点击上报 add-to-cart 分派宿主幂等入栏 -->
+        <button
+          class="preview-cart-btn"
+          :class="{ 'is-in-cart': inCart }"
+          type="button"
+          :title="inCart ? '已在购物栏' : '加入购物栏'"
+          :aria-label="inCart ? '已在购物栏' : '加入购物栏'"
+          @click="emit('add-to-cart')"
+        >{{ inCart ? '✓ 已在购物栏' : '＋ 加入购物栏' }}</button>
+        <button class="preview-close" type="button" aria-label="关闭预览" @click="emit('close')">&#10005;</button>
+      </div>
     </div>
     <div class="preview-stage">
       <!-- miss 兜底占位：常驻底层，AssetThumb（hide-on-miss）loading/ready 时覆盖其上 -->
@@ -70,10 +83,12 @@ const props = defineProps({
   libraryId: { type: String, default: '' },
   thumbEpoch: { type: Number, default: 0 },
   // 懒加载边界判定（宿主 listCanLoadMore 同源）：末页「→」为真时上报 load-more 续拉
-  canLoadMore: { type: Boolean, default: false }
+  canLoadMore: { type: Boolean, default: false },
+  // 当前预览页是否已在购物栏（PR3：宿主键判定传入，本层只做图标反馈）
+  inCart: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['update:index', 'close', 'load-more'])
+const emit = defineEmits(['update:index', 'close', 'load-more', 'add-to-cart'])
 
 // 当前页卡片：下标越界（序列收缩竞态兜底）时为 null，整层不渲染（宿主侧另有越界
 // 关闭 watch，此处为组件级防御）
@@ -178,6 +193,38 @@ onBeforeUnmount(() => {
 .preview-close:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
+}
+
+/* 工具行右侧动作组（PR3）：加入购物栏 + 关闭同排 */
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* 加入购物栏按钮（PR3 预览层入口）：键帽/工具行小按钮形态；已收集态主色弱化底
+     反馈（semantic primary，正向动作） */
+.preview-cart-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.preview-cart-btn:hover {
+  border-color: var(--primary-light);
+  color: var(--primary-color);
+}
+
+.preview-cart-btn.is-in-cart {
+  border-color: var(--primary-light);
+  background: var(--primary-bg);
+  color: var(--primary-color);
+  cursor: default;
 }
 
 .preview-stage {

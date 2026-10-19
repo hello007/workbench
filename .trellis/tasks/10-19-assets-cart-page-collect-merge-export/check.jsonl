@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-19-assets-cart-page-collect-merge-export/research/ooxml-merge-approaches.md", "reason": "核对实现是否遵循定案路线 A：注入层三重冲突消解、MVP 边界（剔除备注/嵌入字体/sldSz warning/跨页链接删除）"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对合并输出正确性契约：GC 四处联动、悬挂关系清理、Override 清理、fixture 断言面含 part→rels 方向 r:id 可解析校验"}
+{"file": "docs/spec/assets-management.md", "reason": "核对购物栏 UI 批量操作约束：选中体系矩阵、双代次守卫、清聚合展开缓存、不清选中"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 slog 日志规范与 AppError 错误码链路（新增错误码须同步 model 常量表 + 前端 error.js）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁与测试策略（fixture 程序化构造禁依赖 Office）"}
+{"file": "docs/spec/browser-channel.md", "reason": "核对 applySink 补 SetEventSink 与 serve 模式对话框守卫（wailsRuntimeUnavailable）"}

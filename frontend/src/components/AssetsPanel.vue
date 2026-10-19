@@ -139,6 +139,15 @@
              保存即自动增量重扫使规则即时生效 -->
         <el-button size="small" :disabled="!hasLibrary || scanning" @click="openRulesDialog">索引设置</el-button>
         <el-button size="small" @click="openThumbSettings">缩略图设置</el-button>
+        <!-- 购物栏入口（PR3）：数量徽标 + 抽屉开关（跨库页级收集，数据源
+             data/asset_cart.json 持久化，切库不重载） -->
+        <el-badge :value="cartItems.length" :hidden="cartItems.length === 0" class="cart-entry-badge">
+          <el-button
+            size="small"
+            :type="cartDrawerVisible ? 'primary' : 'default'"
+            @click="cartDrawerVisible = !cartDrawerVisible"
+          >购物栏</el-button>
+        </el-badge>
         <el-button
           size="small"
           type="primary"
@@ -516,6 +525,17 @@
                 <span class="tag-color-dot" :style="{ background: tag.color }"></span>{{ tag.name }}
               </span>
             </div>
+            <!-- 加入购物栏悬浮按钮（PR3）：仅幻灯片卡提供（页级收集）；hover 显现，
+                 已收集态常显并切换对勾图标反馈；@click.stop 阻断进详情 -->
+            <button
+              v-if="card.kind === 'slide' && card.hitCount <= 1"
+              type="button"
+              class="asset-card-cart"
+              :class="{ 'is-in-cart': isCardInCart(card) }"
+              :title="isCardInCart(card) ? '已在购物栏' : '加入购物栏'"
+              :aria-label="isCardInCart(card) ? '已在购物栏' : '加入购物栏'"
+              @click.stop="addToCart(card)"
+            >{{ isCardInCart(card) ? '✓' : '＋' }}</button>
             <!-- 聚合条目展开态：同 PPT 的逐页命中（点击聚合卡切换展开/收起） -->
             <div v-if="card.hitCount > 1 && isAggExpanded(card.filePath)" class="agg-children" @click.stop>
               <div v-if="aggLoadingPaths.includes(card.filePath)" class="agg-loading">加载命中页…</div>
@@ -566,9 +586,27 @@
           :library-id="currentLibraryId"
           :thumb-epoch="thumbEpoch"
           :can-load-more="listCanLoadMore"
+          :in-cart="isPreviewInCart"
           @update:index="previewIndex = $event"
           @load-more="loadMoreInView"
+          @add-to-cart="addToCart(previewSlides[previewIndex])"
           @close="closePreview"
+        />
+
+        <!-- 购物栏抽屉（PR3）：覆盖画廊列的受控组件，条目清单/导出运行态留宿主
+             （List/Reorder/导出分派与 assets-cart:* 事件消费在宿主单点） -->
+        <AssetCartDrawer
+          :visible="cartDrawerVisible"
+          :items="cartItems"
+          :exporting="cartExporting"
+          :export-progress="cartExportProgress"
+          @close="cartDrawerVisible = false"
+          @remove="onCartRemove"
+          @clear="onCartClear"
+          @reorder="onCartReorder"
+          @export="onCartExport"
+          @cancel-export="onCartCancelExport"
+          @trace="locateCartEntry"
         />
 
         <!-- 选中浮动操作条（SRS §2.3 PR3，PRD D2）：选中数 > 0 浮出于画廊区底部
@@ -583,6 +621,7 @@
           @invert="invertSelection"
           @batch-tag="openBatchTagDialog"
           @batch-rating="openBatchRatingDialog"
+          @batch-cart="openBatchAddCart"
           @clear="clearSelection"
         />
       </div>
@@ -779,6 +818,14 @@
               @click="onOpenSplitPage"
             >打开拆分单页</el-button>
             <el-button size="small" type="primary" plain @click="traceToSourceFile">查看归属文件</el-button>
+            <!-- 加入购物栏（PR3 详情侧栏入口）：已收集态图标反馈，重复添加幂等提示 -->
+            <el-button
+              size="small"
+              :type="isDetailInCart ? 'success' : 'primary'"
+              plain
+              :disabled="cartExporting"
+              @click="addToCart(detailCartCard)"
+            >{{ isDetailInCart ? '✓ 已在购物栏' : '加入购物栏' }}</el-button>
           </div>
           <!-- 解析自带内容只读展示区（下沉到操作区之后，展示优先级低于标注编辑） -->
           <div v-if="detailSlideText" class="detail-section">
@@ -1101,6 +1148,14 @@ import {
   CancelAssetSplit,
   GetAssetSplitRecord,
   OpenAssetSplitPage,
+  // 购物栏（PR3：跨库页级收集 + 拖拽排序 + 合并导出，data/asset_cart.json 持久化）
+  ListAssetCartItems,
+  AddAssetCartItems,
+  RemoveAssetCartItems,
+  ClearAssetCart,
+  ReorderAssetCart,
+  MergeAssetCartToPptx,
+  CancelAssetCartExport,
   GetSettings,
   SaveSettings
 } from '../../wailsjs/go/main/App'
@@ -1114,6 +1169,8 @@ import {
 } from '../utils/assetFormat'
 // 选中键映射共享单点（网格卡勾选/列表行勾选/全选/反选四处消费同一映射）
 import { assetSelectionKey } from '../utils/assetSelection'
+// 购物栏条目键映射共享单点（已收集态判定/批量构造/拖拽回写与后端 Key 同构）
+import { assetCartItemKey } from '../utils/assetCart'
 import AssetsIcon from './icons/AssetsIcon.vue'
 import AssetThumb from './AssetThumb.vue'
 import AssetListView from './AssetListView.vue'
@@ -1140,6 +1197,9 @@ import AssetRulesDialog from './AssetRulesDialog.vue'
 // 备份还原弹窗（第十批 PR3，SRS §2.7.5）：备份清单拉取与还原分派回调留宿主，
 // 选份确认链在弹窗内闭环
 import AssetBackupDialog from './AssetBackupDialog.vue'
+// 购物栏抽屉（PR3）：受控组件——条目清单/导出运行态留宿主，remove/clear/reorder/
+// export/cancel-export/trace 六事件分派宿主单点；拖拽排序在抽屉内
+import AssetCartDrawer from './AssetCartDrawer.vue'
 // facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
 // 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
 // countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
@@ -1757,6 +1817,301 @@ const pickExportMdDir = () => OpenDirectoryDialog('选择 Markdown 导出目录'
 // CancelAssetExport（exportCancels 注册表命中 → 批间 ctx 检查 → w.abort() 删
 // 半成品 CSV）；无在途导出幂等 false，绑定异常由弹窗侧静默消化
 const cancelAssetExport = () => CancelAssetExport(currentLibraryId.value)
+
+// ================= 素材购物栏（PR3：跨库页级收集 + 拖拽排序 + 合并导出）=================
+// 数据链路：ListAssetCartItems 挂载即拉（跨库全局清单，切库不重载）→ 三处加号
+// 入口（页卡 hover / 详情侧栏 / 预览层）与批量加页（选中浮动条）经
+// AddAssetCartItems 幂等去重入栏 → 抽屉内拖拽经 ReorderAssetCart 回写 → 合并导出
+// 经 MergeAssetCartToPptx（可取消长操作，进度经 assets-cart:export-progress 事件，
+// 终态 toast 由本 Promise 分支统一弹出防双弹，对齐扫描契约）。
+// 条目键 = libraryId|fileId|slideNum（utils/assetCart 共享单点，与后端 Key 同构）；
+// 已收集态判定消费同一键映射。合并导出运行态禁改购物栏（前端禁用为第一防线，
+// 后端 E_CART_EXPORT_IN_PROGRESS 为兜底）。
+
+const cartItems = ref([]) // 购物栏条目（List 快照，含 stale 探测标志）
+const cartDrawerVisible = ref(false)
+const cartExporting = ref(false)
+const cartExportProgress = ref(null) // assets-cart:export-progress 载荷 {outPath, done, total}
+
+// 已收集键集合（Set 由 computed 整体重建驱动响应式，对齐 selectedKeys 整体替换口径）
+const cartKeySet = computed(() => new Set(cartItems.value.map(assetCartItemKey)))
+
+const isCardInCart = (card) =>
+  card?.kind === 'slide' && cartKeySet.value.has(`${currentLibraryId.value}|${card.fileId}|${card.slideNum}`)
+
+const loadCart = async () => {
+  try {
+    cartItems.value = (await ListAssetCartItems()) || []
+  } catch (error) {
+    handleError('加载购物栏失败: ', error)
+  }
+}
+
+// 购物栏条目构造（三处加号入口与批量加页共用）：快照字段取当下底册数据——
+// srcPath = 库根 + 相对路径（失效探测与合并清单来源），display 字段定格展示
+const buildCartItem = (card) => ({
+  libraryId: currentLibraryId.value,
+  fileId: card.fileId,
+  slideNum: card.slideNum,
+  srcPath: joinAssetPath(currentLibrary.value?.rootPath, card.filePath),
+  fileName: (card.filePath || '').split(/[\\/]/).pop(),
+  slideTitle: card.title || '',
+  libraryName: currentLibrary.value?.name || ''
+})
+
+// 加入购物栏（幂等去重）：已收集（前端键判定 + 后端权威去重双口径）提示已在栏；
+// 合并导出运行态禁改（warning 引导）。仅幻灯片卡提供（页级收集）。
+const addToCart = async (card) => {
+  if (!card || card.kind !== 'slide' || !hasLibrary.value) return
+  if (cartExporting.value) {
+    ElMessage.warning('合并导出进行中，暂不能修改购物栏')
+    return
+  }
+  const key = `${currentLibraryId.value}|${card.fileId}|${card.slideNum}`
+  if (cartKeySet.value.has(key)) {
+    ElMessage.info('该页已在购物栏')
+    return
+  }
+  try {
+    const result = await AddAssetCartItems([buildCartItem(card)])
+    if ((result?.added || 0) > 0) {
+      ElMessage.success('已加入购物栏')
+    } else {
+      ElMessage.info('该页已在购物栏')
+    }
+    await loadCart()
+  } catch (error) {
+    handleError('加入购物栏失败: ', error)
+  }
+}
+
+// 批量加页（选中浮动条入口，PRD：筛选/检索结果勾选多页一次入栏）：仅幻灯片卡
+// 可入栏（文件卡页级语义不通约，info 引导）；追加顺序 = 渲染集顺序（后端按入参
+// 顺序追加）
+const openBatchAddCart = async () => {
+  if (cartExporting.value) {
+    ElMessage.warning('合并导出进行中，暂不能修改购物栏')
+    return
+  }
+  const items = []
+  let dupCount = 0
+  for (const card of selectableCards.value) {
+    if (card.kind !== 'slide') continue
+    if (!selectedKeys.value.has(assetSelectionKey(card))) continue
+    if (cartKeySet.value.has(`${currentLibraryId.value}|${card.fileId}|${card.slideNum}`)) {
+      dupCount++
+      continue
+    }
+    items.push(buildCartItem(card))
+  }
+  if (items.length === 0) {
+    ElMessage.info(dupCount > 0 ? '所选页均已在购物栏' : '当前选中没有可加入的幻灯片页')
+    return
+  }
+  try {
+    const result = await AddAssetCartItems(items)
+    const added = result?.added || 0
+    const dup = Math.max(result?.duplicates || 0, dupCount)
+    ElMessage.success(dup > 0 ? `已加入 ${added} 页（${dup} 页已在购物栏跳过）` : `已加入 ${added} 页`)
+    await loadCart()
+  } catch (error) {
+    handleError('批量加入购物栏失败: ', error)
+  }
+}
+
+// 详情侧栏购物栏条目（幻灯片详情的加入入口消费；文件详情模板分支不渲染该按钮）
+const detailCartCard = computed(() => {
+  if (selected.value?.kind !== 'slide') return null
+  return {
+    kind: 'slide',
+    fileId: detailFileId.value,
+    slideNum: detailSlideNum.value,
+    filePath: detailThumbPath.value,
+    title: detailTitle.value
+  }
+})
+const isDetailInCart = computed(() => isCardInCart(detailCartCard.value))
+
+// 预览层已收集态（AssetPreviewOverlay in-cart prop 消费）
+const isPreviewInCart = computed(() => {
+  const card = previewSlides.value[previewIndex.value]
+  return card ? isCardInCart(card) : false
+})
+
+const onCartRemove = async (item) => {
+  if (cartExporting.value) {
+    ElMessage.warning('合并导出进行中，暂不能修改购物栏')
+    return
+  }
+  try {
+    await RemoveAssetCartItems([assetCartItemKey(item)])
+    await loadCart()
+  } catch (error) {
+    handleError('移出购物栏失败: ', error)
+  }
+}
+
+const onCartClear = async () => {
+  if (cartExporting.value) {
+    ElMessage.warning('合并导出进行中，暂不能修改购物栏')
+    return
+  }
+  try {
+    await ClearAssetCart()
+    ElMessage.success('已清空购物栏')
+    await loadCart()
+  } catch (error) {
+    handleError('清空购物栏失败: ', error)
+  }
+}
+
+// 拖拽排序回写（抽屉 @end 上报按键列表）：成功重拉 List 使 props 快照与后端一致；
+// 失败重拉还原副本（抽屉 localItems 随 watch 还原，不残留拖拽后的临时顺序）
+const onCartReorder = async (orderedKeys) => {
+  try {
+    await ReorderAssetCart(orderedKeys)
+    await loadCart()
+  } catch (error) {
+    handleError('调整购物栏顺序失败: ', error)
+    await loadCart()
+  }
+}
+
+// 溯源定位（抽屉条目点击）：目标库非当前库先切库（locateNode 类先例），随后对齐
+// filterByFile 进入「仅看该文件页」过滤语境并选中目标页进详情；miss（源文件
+// lost/被排除/分页未达）提示不猜值
+const locateCartEntry = async (item) => {
+  if (!item) return
+  cartDrawerVisible.value = false
+  if (item.libraryId !== currentLibraryId.value) {
+    if (!libraries.value.some(l => l.id === item.libraryId)) {
+      ElMessage.warning('该条目所属素材库已删除')
+      return
+    }
+    currentLibraryId.value = item.libraryId
+    await onLibrarySelectionSettled()
+  }
+  if (searchMode.value) {
+    searchSeq++ // 语境变更点：退出检索使在途检索写回失效
+    activeKeyword.value = ''
+    keywordInput.value = ''
+    selectedTagIds.value = []
+    facetState.value = createDefaultFacetState() // 语境变更点：直赋路径不经 applySearch，facet 一并复位（§8.2 矩阵登记）
+    expandedAggPaths.value = []
+    aggChildren.value = {}
+    aggLoadingPaths.value = [] // 检索态清聚合展开缓存（对齐 filterByFile 退出检索三分支，防旧口径响应回读）
+  }
+  viewMode.value = 'slide'
+  closeDetail()
+  closePreview() // 语境变更点：进入过滤浏览清预览
+  clearSelection() // 语境变更点：视图切换清选中（D5#3，直赋路径手动清）
+  fileFilterPath.value = item.filePath
+  if (slideEntries.value.length === 0 && slideTotal.value === 0) {
+    await loadSlidesPage(true)
+  }
+  await ensureFilteredSlidesLoaded()
+  const entry = slideEntries.value.find(s => s.filePath === item.filePath && s.slideNum === item.slideNum)
+  if (entry) {
+    selectSlideCard({
+      key: `slide-${entry.id}`,
+      kind: 'slide',
+      id: entry.id,
+      fileId: entry.fileId,
+      title: entry.title,
+      filePath: entry.filePath,
+      slideNum: entry.slideNum,
+      hitCount: 1,
+      slide: entry
+    })
+  } else {
+    ElMessage.warning('目标页暂不可定位（源文件可能已丢失或被排除），请重新扫描后重试')
+  }
+}
+
+// 导出默认文件名（PRD：自动预填 `合并导出-yyyyMMdd-HHmm.pptx`）
+const cartExportDefaultName = () => {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `合并导出-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.pptx`
+}
+
+// 合并导出（SaveFileDialog 一步选位置+命名，AssetsPanel 导出先例同款）：取消选择
+// 空串 no-op；serve 无头模式对话框被后端拒绝经 handleError 透传。成功保留购物栏
+//（PRD：确认弹窗提供可选「清空购物栏」动作，关闭/取消 = 保留）；跳过项与尺寸
+// 混排 warning 在结果中报告。进度由 assets-cart:export-progress 事件维护（本
+// Promise 分支只管终态），done/error 事件仅复位进度防双弹（对齐扫描契约）。
+const onCartExport = async () => {
+  if (cartExporting.value || cartItems.value.length === 0) return
+  let outPath = ''
+  try {
+    outPath = await SaveFileDialog(cartExportDefaultName(), [
+      { DisplayName: 'PowerPoint 演示文稿', Pattern: '*.pptx' }
+    ])
+  } catch (error) {
+    handleError('选择保存位置失败: ', error)
+    return
+  }
+  if (!outPath) return // 用户取消（空串 no-op）
+  cartExporting.value = true
+  cartExportProgress.value = null
+  try {
+    const result = await MergeAssetCartToPptx(outPath)
+    if (result?.sldSzMixed) {
+      ElMessage.warning('各源页面尺寸不一致，外来页可能变形（合并不自动缩放）')
+    }
+    const skippedCount = result?.skippedItems?.length || 0
+    const summary = skippedCount > 0
+      ? `已导出 ${result?.pageCount ?? 0} 页（跳过 ${skippedCount} 项失效或越界条目，详见导出提示）`
+      : `已导出 ${result?.pageCount ?? 0} 页`
+    try {
+      await ElMessageBox.confirm(summary, '合并导出完成', {
+        confirmButtonText: '清空购物栏',
+        cancelButtonText: '保留',
+        type: 'success'
+      })
+      await ClearAssetCart()
+      await loadCart()
+      ElMessage.success('已清空购物栏')
+    } catch {
+      // 保留购物栏（PRD：成功不清空，清空为可选动作）
+    }
+  } catch (error) {
+    handleError('合并导出失败: ', error)
+  } finally {
+    cartExporting.value = false
+    cartExportProgress.value = null
+  }
+}
+
+const onCartCancelExport = async () => {
+  try {
+    const requested = await CancelAssetCartExport()
+    if (requested) {
+      ElMessage.info('已请求取消合并导出')
+    } else {
+      ElMessage.warning('当前没有可取消的导出任务')
+    }
+  } catch (error) {
+    handleError('取消导出失败: ', error)
+  }
+}
+
+// ---- 购物栏导出事件（assets-cart:export-*）----
+// done/error 仅复位进度（终态 toast 由导出 Promise 分支统一弹出防双弹，对齐扫描
+// 契约）；进度载荷无库归属（购物栏跨库全局），直接更新
+const onCartExportProgress = (payload) => {
+  if (!payload) return
+  cartExporting.value = true
+  cartExportProgress.value = payload
+}
+const onCartExportDone = () => {
+  cartExportProgress.value = null
+}
+const onCartExportError = () => {
+  // 契约：仅复位进度不弹提示（错误分流由 Promise catch 的 handleError 统一执行）
+  cartExportProgress.value = null
+}
+
 
 // ---- 文件丢失与重链（第九批 SRS §2.6.5：lost 呈现 + 维护菜单 + 手动重链）----
 
@@ -3612,6 +3967,9 @@ const onSaveThumbSettings = async () => {
 let offProgress = null
 let offDone = null
 let offError = null
+let offCartExportProgress = null
+let offCartExportDone = null
+let offCartExportError = null
 
 const onScanProgress = (payload) => {
   if (!payload || payload.libraryId !== currentLibraryId.value) return
@@ -3747,8 +4105,12 @@ onMounted(() => {
   offSplitProgress = EventsOn('assets-split:progress', onSplitProgress)
   offSplitDone = EventsOn('assets-split:done', onSplitDone)
   offSplitError = EventsOn('assets-split:error', onSplitError)
+  offCartExportProgress = EventsOn('assets-cart:export-progress', onCartExportProgress)
+  offCartExportDone = EventsOn('assets-cart:export-done', onCartExportDone)
+  offCartExportError = EventsOn('assets-cart:export-error', onCartExportError)
   probeThumbsAvailable()
   loadLibraries()
+  loadCart()
 })
 
 onBeforeUnmount(() => {
@@ -3761,6 +4123,9 @@ onBeforeUnmount(() => {
   offSplitProgress && offSplitProgress()
   offSplitDone && offSplitDone()
   offSplitError && offSplitError()
+  offCartExportProgress && offCartExportProgress()
+  offCartExportDone && offCartExportDone()
+  offCartExportError && offCartExportError()
   offProgress = null
   offDone = null
   offError = null
@@ -3770,6 +4135,9 @@ onBeforeUnmount(() => {
   offSplitProgress = null
   offSplitDone = null
   offSplitError = null
+  offCartExportProgress = null
+  offCartExportDone = null
+  offCartExportError = null
 })
 
 defineExpose({ loadLibraries, refreshAfterScan })
@@ -4091,6 +4459,57 @@ defineExpose({ loadLibraries, refreshAfterScan })
 .asset-card.is-selected {
   border-color: var(--primary-color);
   background: var(--primary-bg);
+}
+
+/* 加入购物栏悬浮按钮（PR3，右上角）：hover 卡片显现；已收集态常显并切主色填充
+     反馈（PRD 已收集态图标反馈）；@click.stop 阻断进详情 */
+.asset-card-cart {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), color var(--transition-fast);
+}
+
+.asset-card:hover .asset-card-cart,
+.asset-card-cart:focus-visible {
+  opacity: 1;
+}
+
+.asset-card-cart:hover {
+  border-color: var(--primary-light);
+  color: var(--primary-color);
+}
+
+/* 已收集态：常显 + 主色弱化底（semantic primary，非 danger——收集是正向动作） */
+.asset-card-cart.is-in-cart {
+  opacity: 1;
+  border-color: var(--primary-light);
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+/* 工具行购物栏入口徽标：badge 跟随按钮基线，零计数隐藏 */
+.cart-entry-badge {
+  display: inline-flex;
+}
+
+.cart-entry-badge :deep(.el-badge__content) {
+  background: var(--primary-color);
 }
 
 /* 勾选复选框（常驻左上角）：accent-color 跟随主色（亮暗主题自动适配原生勾选态

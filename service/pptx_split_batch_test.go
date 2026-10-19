@@ -23,10 +23,10 @@ func TestScanPptxFilesForSplit_DerivativeExcluded(t *testing.T) {
 	dir := t.TempDir()
 	// 扫入面
 	included := []string{
-		"汇报.pptx",          // 根目录源文件
-		"汇报/其他-01.pptx",     // 与产物同文件夹但主干不同：非产物
-		"旧目录/汇报-01.pptx",    // 同名形态但父目录名不匹配：非产物
-		"子目录/大写.PPTX",       // 深层递归 + 大小写不敏感扩展名
+		"汇报.pptx",        // 根目录源文件
+		"汇报/其他-01.pptx",  // 与产物同文件夹但主干不同：非产物
+		"旧目录/汇报-01.pptx", // 同名形态但父目录名不匹配：非产物
+		"子目录/大写.PPTX",    // 深层递归 + 大小写不敏感扩展名
 	}
 	// 排除面（拆分产物）
 	excluded := []string{

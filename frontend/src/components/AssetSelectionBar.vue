@@ -3,9 +3,10 @@
      居中，展示「已选 N 项」计数 + 全选/反选/批量打标签/批量评分/清空操作。
      受控组件契约：无自有业务状态——计数与全选/反选作用域（当前渲染独立卡片键集，
      PRD D5#8：检索含已加载段，懒加载未加载段不进范围）由宿主计算，本层只上报
-     select-all / invert / batch-tag / batch-rating / clear 五个事件，分派逻辑留
-     宿主单点（第六批 PR3 批量打标签入口消费 batch-tag，第八批批量评分入口消费
-     batch-rating，targets 构建与 API 分派在宿主）。
+     select-all / invert / batch-tag / batch-rating / batch-cart / clear 六个事件，
+     分派逻辑留宿主单点（第六批 PR3 批量打标签入口消费 batch-tag，第八批批量评分
+     入口消费 batch-rating，PR3 购物栏批量加页入口消费 batch-cart，targets 构建
+     与 API 分派在宿主）。
      层级取舍：z-index 取面板内局部值 5——低于全屏预览层 10（预览打开时浮动条
      沉底不挡预览操作），不触碰全局右键菜单 2000 / EP 弹窗 2001+ 层级表。
      视觉：主色弱化底（--primary-bg）+ 卡片阴影层级（--shadow-md），对齐
@@ -21,6 +22,9 @@
            API 分派留宿主 -->
       <el-button size="small" text type="primary" @click="emit('batch-tag')">批量打标签</el-button>
       <el-button size="small" text type="primary" @click="emit('batch-rating')">评分</el-button>
+      <!-- 批量加页入购物栏（PR3）：仅幻灯片卡可入栏（页级收集语义），targets 构建
+           与幂等去重分派留宿主 -->
+      <el-button size="small" text type="primary" @click="emit('batch-cart')">加入购物栏</el-button>
       <el-button size="small" text @click="emit('clear')">清空</el-button>
     </div>
   </div>
@@ -32,7 +36,7 @@ defineProps({
   count: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['select-all', 'invert', 'batch-tag', 'batch-rating', 'clear'])
+const emit = defineEmits(['select-all', 'invert', 'batch-tag', 'batch-rating', 'batch-cart', 'clear'])
 </script>
 
 <style scoped>

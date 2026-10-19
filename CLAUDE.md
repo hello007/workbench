@@ -98,6 +98,7 @@ workbench/
 |lost 状态机与重链（assets 第九批 §11.2/11.3）：扫描消失 DELETE 改 markFileLost（size/mtime/hash 原值保留作重链基准 + FTS 行保留辅助检索 + 标注/缩略图全存续），清理入口事务内资格复验 + RowsAffected 实际删除数；**复活资格门槛 fileHasSlides 单点**（扫描复活与前缀替换共用；failed/encrypted/denied/0 页行回归走重解析重分类禁直复活谎报 ok）+ **processing 永不直复活**（自愈不变式，扫描/重链/替换三口径对齐）；前缀替换嵌套腾位 renames 按 oldPath 长度降序落库 + **三态探测配对禁下标 zip**（renames 重排后与 records 异序，fileID map 配对——下标 zip 数据串写，混合长度即触发）；替换/重链写面 RowsAffected 零命中=并发清理窗口 sql.ErrNoRows 上抛；前端重链 toast 分型先判 reparsed 再判 hashMatched（processing 行 hashMatched=true 且 reparsed=true，首判误报直接恢复）|assets-management.md §11.2/§11.3（docs/spec/assets-management.md）|
 |排除规则与 excluded 态（assets 第十批 §12.1/12.2）：ExcludeDirs **单段 glob**（`filepath.Match` 语法，禁 `/` 与 `**` 多段——四对标工具均无此语义）大小写不敏感、目录基名匹配（避 Windows `/`≠`\` 坑）、root 自身豁免防整库剪空，ExcludeExts 归一带点小写三形态等价；**收集层剪枝与存量 excluded 判定共用同一 matcher**（禁两套口径）；excluded 判定**先排除后存在性**（规则命中不做存在性探测，规则命中+文件消失保持 excluded 不转 lost）；excluded 无损保留（对齐 lost）但**检索不可见导出照导**——标签浏览/facets-only SQL 恒 `status='ok'` 天然排除，**关键词路径须 excludedFileIDSet 显式剔除（新增检索入口漏补=规则失效可见）**；非 ok→ok 翻转（直复活/前缀替换收敛）**必须走 reviveLostFile 单事务重建 FTS**（excluded/lost 期间底册可编辑备注清 FTS 行，裸 UPDATE 翻状态=直复活后 unchanged 永跳过、关键词检索永久漏该文件无报错）|assets-management.md §12.1/§12.2（docs/spec/assets-management.md）|
 |素材库备份与还原（assets 第十批 §12.3/12.4）：`VACUUM INTO` 单语句（**禁包显式 Tx、禁裸拷贝 db**——WAL 未 checkpoint 必丢数据）、`integrity_check` **必须 Query 非 Exec**（Exec 丢结果集形同没校验）首行 != ok 即失败删备份；备份名 `<yyyyMMdd-HHmmss>[_N].db` 深序分隔符取 `_`（`-` 会使字典序与时间序颠倒、淘汰误删新份）；**还原步骤序乱序即半态**：阻塞等扫描退出（TryLock 立即拒绝不等待）→ CancelExport+WaitExportsDone（导出分批懒重开，rename 后旧行键静默水合新库混批 CSV 无声产出）→ **持 s.mu 复查 exportCancels 非空拒还原**（封 Cancel 与注册竞态窗口，复用 E_ASSETS_SCAN_IN_PROGRESS）→ 关连接→删 -wal/-shm→os.Rename 直接覆盖（Windows 原子，禁先 Remove）；删库前备份失败走 `allowNoBackup` 升级确认（E_ASSETS_DELETE_BACKUP_FAILED 强确认后 true 重调）；同库备份互斥 backupLocks（恒最内层锁）+ VACUUM 失败清理仅删零字节残留（非空可能是并发方有效备份）；重建前整库磁盘备份失败仅告警不中止，哈希恢复两级匹配（路径优先、hash 兜底多命中取首个、多旧绑定同 hash 旧路径字典序后者胜+组级告警）|assets-management.md §12.3/§12.4（docs/spec/assets-management.md）|
+|素材购物栏与合并导出（2026-10-19）：条目键 `<libraryId>\|<fileId>\|<slideNum>` 三处同构（model.AssetCartItem.Key / utils/assetCart.js / Remove/Reorder 入参）且 fileId 用 files.id 禁 slides.id；合并核心 sldId/sldMasterId 数字 id 解析**禁 `xml:"id,attr"` 结构体标签**（encoding/xml 对任意命名空间同名 attr 都命中且后者覆盖，sldId 条目恒取 r:id 值——须按属性 Name.Space 精确解析，parsePptxListIDs 单点）；三重冲突消解（注入 part 名分配器 / presentation.xml.rels rId 递增 / sldId≥256 与 sldMasterId≥2147483648 两数字命名空间独立）与失效条目跳过口径**单点在合并核心**（购物栏 stale 不预剔除，由 SkippedItems 统一报告）；装配两字段 pptxMergeSvc+assetCartSvc（merge 先构造）+ web_serve applySink 补 pptxMergeSvc.SetEventSink（assets-cart:export-* 出口持有者是合并编排服务）；导出互斥 E_CART_EXPORT_IN_PROGRESS 三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）|pptx-merge.md（docs/spec/pptx-merge.md）|
 
 ## 文档索引
 
@@ -137,5 +138,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-10-18
-**文档版本：** v2.24
+**最后更新：** 2026-10-19
+**文档版本：** v2.25

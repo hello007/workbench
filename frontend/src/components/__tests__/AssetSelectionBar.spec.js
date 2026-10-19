@@ -49,4 +49,12 @@ describe('AssetSelectionBar', () => {
     await byText('评分').trigger('click')
     expect(wrapper.emitted('batch-rating')).toHaveLength(1)
   })
+
+  it('批量加页入购物栏按钮（PR3）：上报 batch-cart 事件（幻灯片目标筛选与幂等入栏分派留宿主）', async () => {
+    const wrapper = mountBar(2)
+    const byText = (text) => wrapper.findAll('button').find((b) => b.text().trim() === text)
+    expect(byText('加入购物栏')).toBeTruthy()
+    await byText('加入购物栏').trigger('click')
+    expect(wrapper.emitted('batch-cart')).toHaveLength(1)
+  })
 })

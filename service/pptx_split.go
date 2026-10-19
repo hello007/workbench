@@ -134,12 +134,17 @@ func SplitPptxPerPageWithProgress(ctx context.Context, srcPath string, onProgres
 		if err := ctx.Err(); err != nil {
 			return model.PptxSplitResult{}, fmt.Errorf("拆分已取消: %w", err)
 		}
-		deleted, keptMasterRid, droppedLayoutRids := gc.deleteSetForPage(pkg, pages, notesOf, page)
+		// 单页拆分 = 保留页集合恰一页的集合化形态（deleteSetForPages 泛化入口，
+		// 与多页子集导出共用同一删除集计算与联动编辑语义）
+		gcPlan := gc.deleteSetForPages(pkg, pages, notesOf, []pptxPage{page})
 		outPath := filepath.Join(outDir, fmt.Sprintf("%s-%03d.pptx", baseName, i+1))
-		plan := splitPagePlan{keptRid: page.rid, keptPart: page.part, deleted: deleted, keptMasterRid: keptMasterRid,
-			keptMasterDroppedLayoutRids: droppedLayoutRids}
-		if keptMasterRid != "" {
-			plan.keptMasterPart = gc.masterPartOfRid(keptMasterRid)
+		plan := splitPagePlan{
+			keptRids:                    map[string]bool{page.rid: true},
+			deleted:                     gcPlan.deleted,
+			keptPageParts:               []string{page.part},
+			keptMasterRids:              gcPlan.keptMasterRids,
+			keptMasterParts:             gcPlan.keptMasterParts,
+			keptMasterDroppedLayoutRids: gcPlan.keptMasterDroppedLayoutRids,
 		}
 		if err := writeSplitOutput(pkg, plan, outPath); err != nil {
 			return model.PptxSplitResult{}, err
@@ -224,6 +229,12 @@ func readZipPackageWithLimits(r *zip.Reader, maxEntryBytes, maxTotalBytes int64)
 
 // pptxSldIdEntry presentation.xml 中 <p:sldId> 的最小解析视图：
 // ID 为页数字标识（p:id），RID 为关系表键（r:id）。
+//
+// Warning：ID 的标签 `xml:"id,attr"` 无命名空间限定，对任意命名空间的同名属性
+// 都命中且后出现者覆盖——sldId 同时带无前缀 id 与 r:id 两个属性，该字段解析值
+// 会被 r:id 污染（实证 2026-10-19：`id="256" r:id="rId2"` → ID="rId2"），不可
+// 作为数字 id 消费；数字 id 须用 parsePptxListIDs（service/pptx_merge.go，按
+// 属性命名空间精确解析）。本结构当前仅消费 RID，ID 字段留作解析视图完整性。
 type pptxSldIdEntry struct {
 	ID  string `xml:"id,attr"`
 	RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
@@ -235,6 +246,8 @@ type pptxSldIdList struct {
 }
 
 // pptxSldMasterIdEntry <p:sldMasterId> 的最小解析视图（母版条目，结构同页条目）。
+// ID 字段同样受 `xml:"id,attr"` 命名空间不分缺陷影响（见 pptxSldIdEntry 注释），
+// 不可作为数字 id 消费。
 type pptxSldMasterIdEntry struct {
 	ID  string `xml:"id,attr"`
 	RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
@@ -348,14 +361,13 @@ type pptxRelsEdge struct {
 // splitGCContext 单文件拆分的 GC 共享上下文：关系图与母版/版式清单一次构建
 // 全页复用。
 type splitGCContext struct {
-	graph      map[string][]pptxRelsEdge // 关系源 part → 边集（包根 .rels 以空串为源）
-	masters    map[string]string         // 母版 part → sldMasterIdLst 对应 rId
-	masterRids map[string]string         // rId → 母版 part（剪枝联动编辑定位用）
-	layouts    map[string]bool           // 全部版式 part（母版 rels 收集，含未用版式）
+	graph   map[string][]pptxRelsEdge // 关系源 part → 边集（包根 .rels 以空串为源）
+	masters map[string]string         // 母版 part → sldMasterIdLst 对应 rId
+	layouts map[string]bool           // 全部版式 part（母版 rels 收集，含未用版式）
 }
 
 // newSplitGCContext 构建 GC 共享上下文。sldMasterIdLst 为空或 rId 悬空时返回
-// 空母版表——deleteSetForPage 对空表整段降级，不视为文件损坏。
+// 空母版表——deleteSetForPages 对空表整段降级，不视为文件损坏。
 func newSplitGCContext(pkg *pptxPackage) (*splitGCContext, error) {
 	var meta pptxPresentationMeta
 	if err := parsePartXML(pkg, pptxPresentationPart, &meta); err != nil {
@@ -373,15 +385,13 @@ func newSplitGCContext(pkg *pptxPackage) (*splitGCContext, error) {
 		ridToTarget[rel.ID] = resolveRelTarget(pptxPresentationPart, rel.Target)
 	}
 	gc := &splitGCContext{
-		graph:      buildPptxRelsGraph(pkg),
-		masters:    make(map[string]string),
-		masterRids: make(map[string]string),
-		layouts:    make(map[string]bool),
+		graph:   buildPptxRelsGraph(pkg),
+		masters: make(map[string]string),
+		layouts: make(map[string]bool),
 	}
 	for _, m := range meta.SldMasterIdLst.SldMasterIds {
 		if part, ok := ridToTarget[m.RID]; ok && pkg.byName[part] != nil {
 			gc.masters[part] = m.RID
-			gc.masterRids[m.RID] = part
 		}
 	}
 	// 版式全集从各母版 rels 收集（OPC 规范上版式只被母版与页引用，页引用的
@@ -425,61 +435,110 @@ func buildPptxRelsGraph(pkg *pptxPackage) map[string][]pptxRelsEdge {
 	return graph
 }
 
-// deleteSetForPage 计算单页输出删除集：页/备注页基础删除集（旧行为）+ B 档 GC
-// 剪除集。返回 keptMasterRid 供 sldMasterIdLst 剪枝联动（空串 = GC 降级，调用方
-// 据此跳过母版 rels 编辑）、keptMasterDroppedLayoutRids 供保留母版 XML 的
-// sldLayoutIdLst 剪枝联动（nil = 无被剪版式或 rels 不可解析，零编辑面）。
-func (g *splitGCContext) deleteSetForPage(pkg *pptxPackage, pages []pptxPage, notesOf map[string]string, kept pptxPage) (map[string]bool, string, map[string]bool) {
-	// 基础删除集：其余页 part + 其 rels + 其备注页 + 备注页 rels；保留页自身
+// splitGCPlan GC 删除集计算产物：删除集 + sldMasterIdLst 剪枝保留集合与母版
+// 联动编辑定位。keptMasterRids/keptMasterParts 为空 = GC 降级（调用方跳过全部
+// 母版联动编辑）。
+type splitGCPlan struct {
+	deleted         map[string]bool // 输出删除集（页/备注页/被剪母版版式主题/闭包孤儿）
+	keptMasterRids  map[string]bool // sldMasterIdLst 剪枝保留集合（母版 rId）
+	keptMasterParts map[string]bool // 保留母版 part 集合（母版 rels 悬空清理编辑面）
+	// keptMasterDroppedLayoutRids 保留母版 part → 被剪版式的 rId 集合（母版 XML
+	// sldLayoutIdLst 剪枝谓词入参）；缺失键 = 该母版无被剪版式或 rels 不可解析，
+	// 母版 XML 零编辑面
+	keptMasterDroppedLayoutRids map[string]map[string]bool
+}
+
+// deleteSetForPages 计算保留页集合输出的删除集：页/备注页基础删除集（旧行为）+
+// B 档 GC 剪除集。保留面为页集合语义（单页拆分即恰一页的特例，多页子集导出/
+// 购物栏合并导出的前置能力），与单页口径的三点差异：
+//  1. 保留母版/版式为集合——全部保留页链路（页 → 版式 → 母版）上的母版与版式
+//     保留（rels 图可达性闭包自动多母版化），其余母版/版式进删除集；
+//  2. 任一保留页链路不可解析（页 rels 缺版式跳 / 版式 rels 缺母版跳 / 保留母版
+//     不在 sldMasterIdLst）时整段 GC 降级——单页版为该页降级，集合版保守放大为
+//     整段降级（GC 是体积优化非正确性依赖，保真优先于体积）；
+//  3. 保留母版被剪版式的 rId 集合按母版分组返回（多保留母版各自的 sldLayoutIdLst
+//     剪枝面互不相干）。
+//
+// 其余语义与单页口径一致：闭包屏障逻辑不变、presentation 级非页引用保留、
+// keptMasterDroppedLayoutRids 计算口径不变（rels 缺失/不可解析返回缺键）。
+// keptPages 须非空（调用方入口校验，空集合语义未定义）。
+func (g *splitGCContext) deleteSetForPages(pkg *pptxPackage, pages []pptxPage, notesOf map[string]string, keptPages []pptxPage) splitGCPlan {
+	// 基础删除集：未保留页 part + 其 rels + 其备注页 + 备注页 rels；保留页自身
 	// 三件套与所属备注页不进删除集（备注页随保留页原样带走）
-	deleted := make(map[string]bool, len(pages)*4)
+	keptByPart := make(map[string]bool, len(keptPages))
+	for _, kept := range keptPages {
+		keptByPart[kept.part] = true
+	}
+	plan := splitGCPlan{deleted: make(map[string]bool, len(pages)*4)}
 	for _, other := range pages {
-		if other.part == kept.part {
+		if keptByPart[other.part] {
 			continue
 		}
-		deleted[other.part] = true
-		deleted[relsPartOf(other.part)] = true
+		plan.deleted[other.part] = true
+		plan.deleted[relsPartOf(other.part)] = true
 		if notes, ok := notesOf[other.part]; ok {
-			deleted[notes] = true
-			deleted[relsPartOf(notes)] = true
+			plan.deleted[notes] = true
+			plan.deleted[relsPartOf(notes)] = true
 		}
 	}
-	if len(g.masters) == 0 {
-		return deleted, "", nil
+	if len(g.masters) == 0 || len(keptPages) == 0 {
+		return plan
 	}
-	keptLayout, keptMaster := g.resolveKeptChain(kept.part)
-	keptMasterRid, ok := g.masters[keptMaster]
-	if keptLayout == "" || keptMaster == "" || !ok {
-		return deleted, "", nil // 链路不可解析：保守降级，保真优先于体积
+	// 全部保留页链路解析：任一页断链即整段降级（保守口径，见函数注释差异第 2 条）
+	keptLayouts := make(map[string]bool)
+	keptMasters := make(map[string]bool)
+	for _, kept := range keptPages {
+		layout, master := g.resolveKeptChain(kept.part)
+		if layout == "" || master == "" {
+			return splitGCPlan{deleted: plan.deleted}
+		}
+		if _, ok := g.masters[master]; !ok {
+			return splitGCPlan{deleted: plan.deleted}
+		}
+		keptLayouts[layout] = true
+		keptMasters[master] = true
 	}
-	// 其余母版与未用版式进删除集（主题不显式剪：保留母版的主题经图可达保留，
+	plan.keptMasterRids = make(map[string]bool, len(keptMasters))
+	plan.keptMasterParts = make(map[string]bool, len(keptMasters))
+	plan.keptMasterDroppedLayoutRids = make(map[string]map[string]bool, len(keptMasters))
+	for master := range keptMasters {
+		plan.keptMasterRids[g.masters[master]] = true
+		plan.keptMasterParts[master] = true
+	}
+	// 未保留的母版与未用版式进删除集（主题不显式剪：保留母版的主题经图可达保留，
 	// 被剪母版的主题因屏障不可达由闭包扫描剪除）
 	for master := range g.masters {
-		if master != keptMaster {
-			deleted[master] = true
-			deleted[relsPartOf(master)] = true
+		if !keptMasters[master] {
+			plan.deleted[master] = true
+			plan.deleted[relsPartOf(master)] = true
 		}
 	}
 	for layout := range g.layouts {
-		if layout != keptLayout {
-			deleted[layout] = true
-			deleted[relsPartOf(layout)] = true
+		if !keptLayouts[layout] {
+			plan.deleted[layout] = true
+			plan.deleted[relsPartOf(layout)] = true
 		}
 	}
-	// 保留母版被剪版式的 rId 集合（母版 XML sldLayoutIdLst 剪枝联动，见
-	// keptMasterDroppedLayoutRids 注释）
-	droppedLayoutRids := g.keptMasterDroppedLayoutRids(pkg, keptMaster, deleted)
 	// 可达性闭包：包根 .rels（docProps）、presentation 级引用（presProps/
-	// viewProps/tableStyles/notesMaster 等）、保留页 + 备注 + 版式 + 母版为根，
-	// deleted 作屏障（被剪母版/版式的下挂资源不可达）。闭包外 part（其余页
-	// 独占媒体、孤儿媒体、被剪母版主题等）进删除集。
+	// viewProps/tableStyles/notesMaster 等）、全部保留页 + 备注 + 版式 + 母版为
+	// 根，deleted 作屏障（被剪母版/版式的下挂资源不可达）。闭包外 part（未保留
+	// 页独占媒体、孤儿媒体、被剪母版主题等）进删除集。
 	keep := make(map[string]bool, len(pkg.entries))
-	roots := []string{"", pptxContentTypesPart, pptxPresentationPart, kept.part, keptLayout, keptMaster}
-	if notes, ok := notesOf[kept.part]; ok {
-		roots = append(roots, notes)
+	roots := []string{"", pptxContentTypesPart, pptxPresentationPart}
+	for _, kept := range keptPages {
+		roots = append(roots, kept.part)
+		if notes, ok := notesOf[kept.part]; ok {
+			roots = append(roots, notes)
+		}
+	}
+	for layout := range keptLayouts {
+		roots = append(roots, layout)
+	}
+	for master := range keptMasters {
+		roots = append(roots, master)
 	}
 	for _, e := range g.graph[pptxPresentationPart] {
-		if !deleted[e.target] {
+		if !plan.deleted[e.target] {
 			roots = append(roots, e.target)
 		}
 	}
@@ -495,17 +554,24 @@ func (g *splitGCContext) deleteSetForPage(pkg *pptxPackage, pages []pptxPage, no
 			keep[rp] = true
 		}
 		for _, e := range g.graph[part] {
-			if !deleted[e.target] && !keep[e.target] {
+			if !plan.deleted[e.target] && !keep[e.target] {
 				queue = append(queue, e.target)
 			}
 		}
 	}
 	for i := range pkg.entries {
 		if !keep[pkg.entries[i].name] {
-			deleted[pkg.entries[i].name] = true
+			plan.deleted[pkg.entries[i].name] = true
 		}
 	}
-	return deleted, keptMasterRid, droppedLayoutRids
+	// 保留母版被剪版式的 rId 集合（母版 XML sldLayoutIdLst 剪枝联动，按保留母版
+	// 分组；此时删除集已含闭包剪除面，口径为最终删除集）
+	for master := range keptMasters {
+		if rids := g.keptMasterDroppedLayoutRids(pkg, master, plan.deleted); len(rids) > 0 {
+			plan.keptMasterDroppedLayoutRids[master] = rids
+		}
+	}
+	return plan
 }
 
 // keptMasterDroppedLayoutRids 保留母版 rels 中指向被剪版式的 rId 集合：母版 XML
@@ -558,11 +624,6 @@ func (g *splitGCContext) firstRelTarget(part, typeSuffix string) string {
 	return ""
 }
 
-// masterPartOfRid 母版 rId 反查 part（GC 联动的母版 rels 编辑定位）。
-func (g *splitGCContext) masterPartOfRid(rid string) string {
-	return g.masterRids[rid]
-}
-
 // relsSourcePart .rels 文件路径反推其关系源 part（OPC：<dir>/_rels/<名>.rels 的
 // 源为 <dir>/<名>；包根 _rels/.rels 的源为空串即包根本身）。
 func relsSourcePart(relsName string) string {
@@ -584,22 +645,25 @@ func parsePartXML(pkg *pptxPackage, name string, v any) error {
 	return nil
 }
 
-// splitPagePlan 单页输出的编辑计划：删除集 + GC 联动编辑定位。
+// splitPagePlan 单次输出的编辑计划：删除集 + GC 联动编辑定位。保留面为页集合
+// 语义（单页拆分与多页子集导出共用，单页即单元素集合）。
 type splitPagePlan struct {
-	keptRid        string          // presentation.xml sldIdLst 保留页 rId
-	keptPart       string          // 保留页 part
+	keptRids       map[string]bool // presentation.xml sldIdLst 保留页 rId 集合
 	deleted        map[string]bool // 输出删除集（页/备注页/被剪母版版式主题/闭包孤儿）
-	keptMasterRid  string          // sldMasterIdLst 剪枝保留目标；空 = GC 降级不剪
-	keptMasterPart string          // 保留母版 part（与 keptMasterRid 同生共死，供母版 rels 悬挂清理）
-	// keptMasterDroppedLayoutRids 保留母版被剪版式的 rId 集合（sldLayoutIdLst
-	// 剪枝谓词入参）；空集 = 无被剪版式/rels 不可解析，母版 XML 零编辑面
-	keptMasterDroppedLayoutRids map[string]bool
+	keptPageParts  []string        // 保留页 part 集合（页 rels 悬空跳转清理编辑面）
+	keptMasterRids map[string]bool // sldMasterIdLst 剪枝保留集合；空 = GC 降级不剪
+	// keptMasterParts 保留母版 part 集合（母版 rels 悬挂清理编辑面；空 = GC 降级）
+	keptMasterParts map[string]bool
+	// keptMasterDroppedLayoutRids 保留母版 part → 被剪版式的 rId 集合（母版 XML
+	// sldLayoutIdLst 剪枝谓词入参）；缺失键 = 该母版无被剪版式/rels 不可解析，
+	// 母版 XML 零编辑面
+	keptMasterDroppedLayoutRids map[string]map[string]bool
 }
 
-// writeSplitOutput 生成单页输出文件：编辑在内存中完成后按原条目顺序重写
+// writeSplitOutput 生成输出文件：编辑在内存中完成后按原条目顺序重写
 // zip，原子写序列与 util.SaveJSON 一致（CreateTemp 同目录 → 写入 → Sync →
 // Rename；成功 rename 后 defer 删除为 no-op，失败路径清理临时文件残留）。
-// plan.keptMasterRid 非空时 presentation.xml 的 sldMasterIdLst 同步剪枝（B 档
+// plan.keptMasterRids 非空时 presentation.xml 的 sldMasterIdLst 同步剪枝（B 档
 // GC 联动），空则不剪（GC 降级形态，母版条目原样保留）。
 func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) error {
 	deleted := plan.deleted
@@ -616,9 +680,9 @@ func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) erro
 		edited[name] = data
 		return nil
 	}
-	// presentation.xml：sldIdLst 只留当前页 + sldMasterIdLst 剪枝（GC 生效时）
+	// presentation.xml：sldIdLst 只留保留页 + sldMasterIdLst 剪枝（GC 生效时）
 	// + 剥离 custShowLst / 根级 extLst
-	if err := edit(pptxPresentationPart, presentationDropPredicate(plan.keptRid, plan.keptMasterRid)); err != nil {
+	if err := edit(pptxPresentationPart, presentationDropPredicate(plan.keptRids, plan.keptMasterRids)); err != nil {
 		return err
 	}
 	// presentation.xml.rels 与保留页 rels：Target 落在删除集的关系一律移除。
@@ -627,23 +691,28 @@ func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) erro
 	if err := edit(pptxPresentationRelsPart, danglingRelsDropPredicate(pptxPresentationPart, deleted)); err != nil {
 		return err
 	}
-	if err := edit(relsPartOf(plan.keptPart), danglingRelsDropPredicate(plan.keptPart, deleted)); err != nil {
-		return err
+	for _, pagePart := range plan.keptPageParts {
+		if err := edit(relsPartOf(pagePart), danglingRelsDropPredicate(pagePart, deleted)); err != nil {
+			return err
+		}
 	}
 	// 保留母版 rels：指向被剪版式的 Relationship 移除（GC 生效时才有删除面；
 	// 母版 rels 缺失时 edit 内部跳过）。Target 相对母版所在目录解析。
-	if plan.keptMasterPart != "" {
-		if err := edit(relsPartOf(plan.keptMasterPart), danglingRelsDropPredicate(plan.keptMasterPart, deleted)); err != nil {
+	for masterPart := range plan.keptMasterParts {
+		if err := edit(relsPartOf(masterPart), danglingRelsDropPredicate(masterPart, deleted)); err != nil {
 			return err
 		}
-		// 保留母版 XML：sldLayoutIdLst 剪除指向被剪版式的条目（母版本体字节拷贝，
-		// 条目残留 = 悬空 r:id 引用触发 PowerPoint 修复弹窗）。集合空时跳过编辑
-		// （降级形态/无未用版式零编辑面，字节不变）。与母版 rels 关系删除、
-		// Content_Types Override 清理三处联动齐。
-		if len(plan.keptMasterDroppedLayoutRids) > 0 {
-			if err := edit(plan.keptMasterPart, masterLayoutIdDropPredicate(plan.keptMasterDroppedLayoutRids)); err != nil {
-				return err
-			}
+	}
+	// 保留母版 XML：sldLayoutIdLst 剪除指向被剪版式的条目（母版本体字节拷贝，
+	// 条目残留 = 悬空 r:id 引用触发 PowerPoint 修复弹窗）。集合空时跳过编辑
+	// （降级形态/无未用版式零编辑面，字节不变）。与母版 rels 关系删除、
+	// Content_Types Override 清理三处联动齐。
+	for masterPart, dropRids := range plan.keptMasterDroppedLayoutRids {
+		if len(dropRids) == 0 {
+			continue
+		}
+		if err := edit(masterPart, masterLayoutIdDropPredicate(dropRids)); err != nil {
+			return err
 		}
 	}
 	// [Content_Types].xml：已删 part 的 Override 声明移除
@@ -651,6 +720,24 @@ func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) erro
 		return err
 	}
 
+	entries := make([]zipEntry, 0, len(pkg.entries))
+	for i := range pkg.entries {
+		entry := pkg.entries[i]
+		if deleted[entry.name] {
+			continue
+		}
+		if ed, ok := edited[entry.name]; ok {
+			entry.data = ed
+		}
+		entries = append(entries, entry)
+	}
+	return writeZipAtomic(entries, outPath)
+}
+
+// writeZipAtomic 按 entries 顺序重写 zip 并原子落盘（CreateTemp 同目录 → 写入 →
+// Sync → Rename，与 util.SaveJSON 序列一致；成功 rename 后 defer 删除为 no-op，
+// 失败路径清理临时文件残留）。单页拆分与多源合并共用同一落盘序列。
+func writeZipAtomic(entries []zipEntry, outPath string) error {
 	dir := filepath.Dir(outPath)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(outPath)+".tmp-*")
 	if err != nil {
@@ -660,22 +747,15 @@ func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) erro
 	defer func() { _ = os.Remove(tmpName) }() // 成功 rename 后目标名已不存在，删除为 no-op
 
 	zw := zip.NewWriter(tmp)
-	for i := range pkg.entries {
-		entry := &pkg.entries[i]
-		if deleted[entry.name] {
-			continue
-		}
-		data := entry.data
-		if ed, ok := edited[entry.name]; ok {
-			data = ed
-		}
+	for i := range entries {
+		entry := &entries[i]
 		header := &zip.FileHeader{Name: entry.name, Method: entry.method, Modified: entry.modified}
 		writer, err := zw.CreateHeader(header)
 		if err != nil {
 			_ = tmp.Close()
 			return fmt.Errorf("写入 %s 失败: %w", entry.name, err)
 		}
-		if _, err := writer.Write(data); err != nil {
+		if _, err := writer.Write(entry.data); err != nil {
 			_ = tmp.Close()
 			return fmt.Errorf("写入 %s 失败: %w", entry.name, err)
 		}
@@ -699,26 +779,26 @@ func writeSplitOutput(pkg *pptxPackage, plan splitPagePlan, outPath string) erro
 
 // presentationDropPredicate presentation.xml 的删除谓词：根级 custShowLst
 // （按页 rId 引用的自定义放映）、根级 extLst（p14:sectionLst 节信息挂在其中，
-// 按数字 sldId 引用页，引用被删页即悬空），sldIdLst 中非当前页的 sldId 条目，
-// 以及 sldMasterIdLst 中非保留母版的条目（keptMasterRid 非空时；空 = GC 降级
+// 按数字 sldId 引用页，引用被删页即悬空），sldIdLst 中非保留页的 sldId 条目，
+// 以及 sldMasterIdLst 中非保留母版的条目（keptMasterRids 非空时；空 = GC 降级
 // 不剪）。depth 口径：根元素为 0，其直接子元素为 1。
 //
 // 层级双保险说明：节信息内部的 p14:sldId 与真实页条目局部名相同（父同为
 // sldIdLst），但位于 depth>=6 的 extLst 子树内——depth==2 限制 + 删除 extLst
 // 时整子树跳过（删除中不再评估谓词）双重隔离，节内条目不会被误判。
-func presentationDropPredicate(keptRid, keptMasterRid string) func(int, []string, xml.Name, []xml.Attr) bool {
+func presentationDropPredicate(keptRids, keptMasterRids map[string]bool) func(int, []string, xml.Name, []xml.Attr) bool {
 	return func(depth int, ancestors []string, name xml.Name, attrs []xml.Attr) bool {
 		if depth == 2 && len(ancestors) > 0 {
 			switch ancestors[len(ancestors)-1] {
 			case "sldIdLst":
 				if name.Local == "sldId" {
 					rid := relIDAttr(attrs)
-					return rid != "" && rid != keptRid
+					return rid != "" && !keptRids[rid]
 				}
 			case "sldMasterIdLst":
 				if name.Local == "sldMasterId" {
 					rid := relIDAttr(attrs)
-					return keptMasterRid != "" && rid != "" && rid != keptMasterRid
+					return len(keptMasterRids) > 0 && rid != "" && !keptMasterRids[rid]
 				}
 			}
 		}

@@ -224,6 +224,14 @@ const { wailsMock } = vi.hoisted(() => ({
     CancelAssetSplit: vi.fn(),
     GetAssetSplitRecord: vi.fn(),
     OpenAssetSplitPage: vi.fn(),
+    // 购物栏（PR3）：宿主直连七绑定（List/Add/Remove/Clear/Reorder/导出/取消导出）
+    ListAssetCartItems: vi.fn(),
+    AddAssetCartItems: vi.fn(),
+    RemoveAssetCartItems: vi.fn(),
+    ClearAssetCart: vi.fn(),
+    ReorderAssetCart: vi.fn(),
+    MergeAssetCartToPptx: vi.fn(),
+    CancelAssetCartExport: vi.fn(),
     GetSettings: vi.fn(),
     SaveSettings: vi.fn()
   }
@@ -322,6 +330,11 @@ const stubs = {
     emits: ['update:modelValue']
   },
   'el-tag': { template: '<span class="el-tag" :data-type="type"><slot /></span>', props: ['type', 'size'] },
+  // 购物栏入口徽标（PR3）：value>0 且未 hidden 时渲染计数（对齐真实 el-badge 显隐语义）
+  'el-badge': {
+    template: '<div class="el-badge"><slot /><sup v-if="!hidden && value > 0" class="el-badge__content">{{ value }}</sup></div>',
+    props: ['value', 'hidden']
+  },
   'el-progress': { template: '<div class="el-progress" :data-percentage="percentage" />', props: ['percentage', 'strokeWidth', 'showText'] },
   'el-empty': { template: '<div class="el-empty">{{ description }}<slot /></div>', props: ['description'] },
   'el-tooltip': { template: '<span><slot /></span>', props: ['content', 'placement'] },
@@ -418,6 +431,14 @@ const stubs = {
     template: '<div class="asset-filter-popover-stub"></div>',
     props: ['modelValue', 'disabled'],
     emits: ['update:modelValue', 'change']
+  },
+  // 购物栏抽屉桩（PR3）：显隐/条目/导出运行态受控透出 + 七事件透出（宿主接线断言
+  // 入口；抽屉渲染与拖拽交互细节见 AssetCartDrawer 独立 spec）
+  AssetCartDrawer: {
+    name: 'AssetCartDrawerStub',
+    template: '<div v-if="visible" class="asset-cart-drawer-stub" :data-items="items.length"></div>',
+    props: ['visible', 'items', 'exporting', 'exportProgress'],
+    emits: ['close', 'remove', 'clear', 'reorder', 'export', 'cancel-export', 'trace']
   },
   // 保存检索条件弹层桩（第七批 PR3）：双 slot 全渲染（免触发机制直测内容）；
   // mounted 即 emit show（真实弹层首次打开触发宿主 List 重拉，行数据因此加载）；
@@ -538,6 +559,16 @@ describe('AssetsPanel', () => {
     wailsMock.OpenAssetSplitPage.mockResolvedValue(null)
     wailsMock.GetSettings.mockResolvedValue(mockSettings)
     wailsMock.SaveSettings.mockResolvedValue(null)
+    // ---- 购物栏（PR3）默认值：空购物栏 + 新增 1 条回执 + 导出成功 2 页结果 +
+    // 变更/取消 no-op（形状对齐 model.AssetCartItem / AssetCartAddResult /
+    // PptxMergeResult），按用例覆盖 ----
+    wailsMock.ListAssetCartItems.mockResolvedValue([])
+    wailsMock.AddAssetCartItems.mockResolvedValue({ added: 1, duplicates: 0 })
+    wailsMock.RemoveAssetCartItems.mockResolvedValue(null)
+    wailsMock.ClearAssetCart.mockResolvedValue(null)
+    wailsMock.ReorderAssetCart.mockResolvedValue(null)
+    wailsMock.MergeAssetCartToPptx.mockResolvedValue({ outputPath: 'D:/out/合并导出.pptx', pages: [], pageCount: 2, skippedItems: [], sldSzMixed: false })
+    wailsMock.CancelAssetCartExport.mockResolvedValue(false)
     // AssetThumb 懒加载确定性：移除 IO（若未来 jsdom 提供）使画廊缩略图走挂载即加载
     // 兜底路径——卡片在测试中不会进入可视区，走 IO 路径则缩略图用例不可判定
     delete globalThis.IntersectionObserver
@@ -545,7 +576,7 @@ describe('AssetsPanel', () => {
     offFns = []
   })
 
-  it('挂载注册 assets-scan / assets-thumbs / assets-split 共九个事件监听，卸载时闭包精准注销且未走 EventsOff', async () => {
+  it('挂载注册 assets-scan / assets-thumbs / assets-split / assets-cart 共十二个事件监听，卸载时闭包精准注销且未走 EventsOff', async () => {
     const { EventsOff } = await import('../../../wailsjs/runtime/runtime')
     const wrapper = await createWrapper()
     expect(Object.keys(eventHandlers)).toEqual(
@@ -558,13 +589,16 @@ describe('AssetsPanel', () => {
         'assets-thumbs:error',
         'assets-split:progress',
         'assets-split:done',
-        'assets-split:error'
+        'assets-split:error',
+        'assets-cart:export-progress',
+        'assets-cart:export-done',
+        'assets-cart:export-error'
       ])
     )
-    expect(offFns.length).toBe(9)
+    expect(offFns.length).toBe(12)
 
     wrapper.unmount()
-    expect(offFns.filter((off) => off.mock.calls.length > 0).length).toBe(9)
+    expect(offFns.filter((off) => off.mock.calls.length > 0).length).toBe(12)
     expect(Object.keys(eventHandlers)).toHaveLength(0)
     expect(EventsOff).not.toHaveBeenCalled()
   })
@@ -4263,5 +4297,224 @@ describe('AssetsPanel', () => {
     const wrapper2 = await createWrapper()
     const clearItem2 = wrapper2.findAll('.el-dropdown-item').find((i) => i.text().includes('清理丢失记录'))
     expect(clearItem2.classes()).toContain('is-disabled')
+  })
+
+  // ---- 素材购物栏（PR3：三处加号入口 + 批量加页 + 溯源定位 + 合并导出）----
+
+  // 购物栏条目工厂（形状对齐 model.AssetCartItem；stale 为 List 探测态；filePath
+  // 为溯源定位消费的库相对路径，与后端 srcPath 快照来源一致）
+  const cartItemOf = (overrides = {}) => ({
+    libraryId: 'lib-1',
+    fileId: 11,
+    slideNum: 1,
+    filePath: '方案A/城商行方案.pptx',
+    srcPath: 'D:/assets/方案A/城商行方案.pptx',
+    fileName: '城商行方案.pptx',
+    slideTitle: '封面页',
+    libraryName: '产品素材库',
+    addedAt: '2026-10-19T10:00:00+08:00',
+    ...overrides
+  })
+
+  const switchToSlideView = async (wrapper) => {
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+  }
+
+  it('挂载即拉购物栏：ListAssetCartItems 调用 + 工具行入口徽标计数（跨库全局清单切库不重载）', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf(), cartItemOf({ fileId: 22, slideNum: 3 })])
+    const wrapper = await createWrapper()
+    expect(wailsMock.ListAssetCartItems).toHaveBeenCalledTimes(1)
+    const badge = wrapper.find('.cart-entry-badge .el-badge__content')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('2')
+
+    // 切库不重载（购物栏为跨库全局清单）：统计与底册重拉而购物栏不重复拉取
+    const callsBefore = wailsMock.ListAssetCartItems.mock.calls.length
+    await wrapper.find('.el-select').setValue('lib-1')
+    await flushPromises()
+    expect(wailsMock.ListAssetCartItems.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('页卡 hover 加号（PRD 入口一）：未收集卡点击入栏（条目快照形状对齐后端契约），已收集卡幂等提示不重复调 Add', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()]) // 封面页已在栏
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+    const cartBtns = wrapper.findAll('.asset-card-cart')
+    expect(cartBtns.length).toBe(2)
+
+    // 已收集态：封面页卡（slideNum 1）常显对勾，点击幂等不调 Add
+    expect(cartBtns[0].classes()).toContain('is-in-cart')
+    expect(cartBtns[0].text()).toBe('✓')
+    await cartBtns[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.AddAssetCartItems).not.toHaveBeenCalled()
+
+    // 未收集卡（背景页 slideNum 2）：点击入栏，快照字段取当下底册数据
+    expect(cartBtns[1].text()).toBe('＋')
+    await cartBtns[1].trigger('click')
+    await flushPromises()
+    expect(wailsMock.AddAssetCartItems).toHaveBeenCalledWith([
+      {
+        libraryId: 'lib-1',
+        fileId: 11,
+        slideNum: 2,
+        srcPath: 'D:/assets/方案A/城商行方案.pptx',
+        fileName: '城商行方案.pptx',
+        slideTitle: '背景页',
+        libraryName: '产品素材库'
+      }
+    ])
+  })
+
+  it('批量加页（PRD 入口四·选中浮动条）：幻灯片视图勾选多页一次入栏（追加顺序 = 渲染集顺序）', async () => {
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+    const checks = wrapper.findAll('.asset-card-check')
+    await checks[0].setValue(true)
+    await checks[1].setValue(true)
+    await flushPromises()
+    const cartBtn = wrapper.findAll('button').find((b) => b.text().trim() === '加入购物栏')
+    await cartBtn.trigger('click')
+    await flushPromises()
+    expect(wailsMock.AddAssetCartItems).toHaveBeenCalledTimes(1)
+    const items = wailsMock.AddAssetCartItems.mock.calls[0][0]
+    expect(items.map((i) => i.slideNum)).toEqual([1, 2])
+    expect(items[0].srcPath).toBe('D:/assets/方案A/城商行方案.pptx')
+  })
+
+  it('详情侧栏加号（PRD 入口二）：幻灯片详情展示加入按钮与已收集态', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()])
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    const detailActions = wrapper.findAll('.detail-actions .el-button')
+    const cartBtn = detailActions.find((b) => b.text().includes('已在购物栏'))
+    expect(cartBtn).toBeTruthy()
+    await cartBtn.trigger('click')
+    await flushPromises()
+    expect(wailsMock.AddAssetCartItems).not.toHaveBeenCalled()
+  })
+
+  it('拖拽排序回写：抽屉上报按键列表经 ReorderAssetCart 持久化并重拉清单', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf(), cartItemOf({ fileId: 22, slideNum: 3 })])
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('reorder', ['lib-1|22|3', 'lib-1|11|1'])
+    await flushPromises()
+    expect(wailsMock.ReorderAssetCart).toHaveBeenCalledWith(['lib-1|22|3', 'lib-1|11|1'])
+    // 回写后重拉（props 快照与后端一致）
+    expect(wailsMock.ListAssetCartItems.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('溯源定位：抽屉条目点击关闭抽屉、切幻灯片视图过滤浏览并选中目标页进详情', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf({ fileId: 11, slideNum: 2, slideTitle: '背景页', fileName: '城商行方案.pptx' })])
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('trace', cartItemOf({ fileId: 11, slideNum: 2 }))
+    await flushPromises()
+    expect(drawer.props('visible')).toBe(false)
+    // 幻灯片视图 + 该文件页已加载（过滤语境详情命中目标页）
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalled()
+    const detail = wrapper.find('.assets-detail')
+    expect(detail.exists()).toBe(true)
+    expect(detail.text()).toContain('第 2 页')
+  })
+
+  it('合并导出：SaveFileDialog 预填默认名 → MergeAssetCartToPptx → 成功确认弹窗提供可选清空动作（保留为默认）', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf(), cartItemOf({ fileId: 22, slideNum: 3 })])
+    wailsMock.SaveFileDialog.mockResolvedValue('D:/out/合并导出-20261019-2330.pptx')
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('export')
+    await flushPromises()
+    expect(wailsMock.SaveFileDialog).toHaveBeenCalledWith(
+      expect.stringMatching(/^合并导出-\d{8}-\d{4}\.pptx$/),
+      [{ DisplayName: 'PowerPoint 演示文稿', Pattern: '*.pptx' }]
+    )
+    expect(wailsMock.MergeAssetCartToPptx).toHaveBeenCalledWith('D:/out/合并导出-20261019-2330.pptx')
+    // 成功确认弹窗（可选清空动作）：确认 → 清空 + 重拉
+    const { ElMessageBox } = await import('element-plus')
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('已导出 2 页'),
+      '合并导出完成',
+      expect.objectContaining({ confirmButtonText: '清空购物栏' })
+    )
+    expect(wailsMock.ClearAssetCart).toHaveBeenCalledTimes(1)
+    expect(wailsMock.ListAssetCartItems.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('合并导出成功确认取消 = 保留购物栏（不清空）', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()])
+    wailsMock.SaveFileDialog.mockResolvedValue('D:/out/x.pptx')
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('export')
+    await flushPromises()
+    expect(wailsMock.MergeAssetCartToPptx).toHaveBeenCalled()
+    expect(wailsMock.ClearAssetCart).not.toHaveBeenCalled()
+    expect(wailsMock.ListAssetCartItems.mock.calls.length).toBe(1)
+  })
+
+  it('合并导出跳过项与尺寸混排结果报告（SkippedItems 计数 + SldSzMixed warning）', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()])
+    wailsMock.SaveFileDialog.mockResolvedValue('D:/out/x.pptx')
+    wailsMock.MergeAssetCartToPptx.mockResolvedValue({
+      outputPath: 'D:/out/x.pptx',
+      pages: [],
+      pageCount: 1,
+      skippedItems: [{ srcPath: 'D:/gone.pptx', pageNum: 9, reason: '页码超出范围' }],
+      sldSzMixed: true
+    })
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('export')
+    await flushPromises()
+    const { ElMessageBox } = await import('element-plus')
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('尺寸不一致'))
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('跳过 1 项'),
+      '合并导出完成',
+      expect.anything()
+    )
+  })
+
+  it('导出事件仅复位进度（终态 toast 由 Promise 分支统一执行防双弹），取消转发后端', async () => {
+    wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()])
+    wailsMock.SaveFileDialog.mockResolvedValue('D:/out/x.pptx')
+    wailsMock.MergeAssetCartToPptx.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ outputPath: 'D:/out/x.pptx', pages: [], pageCount: 1, skippedItems: [], sldSzMixed: false }), 20)))
+    const wrapper = await createWrapper()
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    drawer.vm.$emit('export')
+    await flushPromises()
+    // 导出运行态透传抽屉（进度事件驱动）
+    await eventHandlers['assets-cart:export-progress']({ outPath: 'D:/out/x.pptx', done: 1, total: 1 })
+    await flushPromises()
+    expect(drawer.props('exporting')).toBe(true)
+    expect(drawer.props('exportProgress')).toEqual({ outPath: 'D:/out/x.pptx', done: 1, total: 1 })
+    // done 事件仅复位进度，不弹提示（对齐扫描契约）
+    const { ElMessage } = await import('element-plus')
+    const successCalls = ElMessage.success.mock.calls.length
+    await eventHandlers['assets-cart:export-done']({ outPath: 'D:/out/x.pptx', result: {} })
+    await flushPromises()
+    expect(drawer.props('exportProgress')).toBe(null)
+    expect(ElMessage.success.mock.calls.length).toBe(successCalls)
+    // Promise 落定后终态提示由本分支统一弹出（清空确认）
+    await new Promise((r) => setTimeout(r, 40))
+    await flushPromises()
+    expect(ElMessage.success.mock.calls.length).toBeGreaterThan(successCalls)
+
+    // 取消导出：转发后端（无在途 false → warning 引导）
+    const drawer2 = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer2.vm.$emit('cancel-export')
+    await flushPromises()
+    expect(wailsMock.CancelAssetCartExport).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 })

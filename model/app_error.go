@@ -107,6 +107,9 @@ const (
 	// 交互模式）。备份生成失败的具体原因经消息透出。
 	ErrCodeAssetsDeleteBackupFailed = "E_ASSETS_DELETE_BACKUP_FAILED"
 
+	// 素材购物栏域（素材管理「购物栏」：跨库页级收集 + 按序合并导出）
+	ErrCodeCartExportInProgress = "E_CART_EXPORT_IN_PROGRESS" // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

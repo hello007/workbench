@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-19-assets-cart-page-collect-merge-export/research/ooxml-merge-approaches.md", "reason": "合并技术路线定案：GC 集合化泛化 + 跨包注入层实现步骤、ID 冲突三命名空间、MVP 边界依据"}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分核心契约（GC 四处联动、三跳映射、字节级 XML 编辑、fixture 断言须含 part→rels 方向 r:id 可解析校验），合并层直接复用其基建"}
+{"file": "docs/spec/assets-management.md", "reason": "素材域选中体系/刷新矩阵/批量操作约束（选中键禁 slides.id、双代次守卫、批量不清选中），购物栏 UI 与批量加页须遵守"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 service 装配契约：AppServices 字段+构造两处、package main 约束、133 委托方法零 diff"}
+{"file": "docs/spec/browser-channel.md", "reason": "EventSink 事件出口契约（禁直调 EventsEmit）与 web_serve.go applySink 须补 SetEventSink 行，assets-cart:* 新事件前缀接入"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/asset_cart.json 持久化必须走 util.SaveJSON 原子写"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 绑定三处同步规则与具名 string 类型 models.ts 手补约束（新增 Wails 方法/模型时）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "抽屉/覆盖层/面板 flex 约束链、覆盖层 z-index、深色容器图标内联 SVG 等视觉契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁基线，新增 service/前端代码测试须达标"}

@@ -321,6 +321,22 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   PreviewAssetPathPrefixReplace: 0,
   ReplaceAssetPathPrefix: { libraryId: '', oldPrefix: '', newPrefix: '', replaced: 0, revived: 0, reparsed: 0, stillLost: 0, scan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, lost: 0, revived: 0, removed: 0 } },
 
+  // ---- 素材购物栏（PR3：跨库页级收集 + 拖拽排序 + 合并导出）----
+  // 形状对齐 model.AssetCartItem / AssetCartAddResult / PptxMergeResult（见
+  // frontend/wailsjs/go/models.ts）。ListAssetCartItems 默认空购物栏（挂载即拉，
+  // 空态 = 抽屉空态 + 徽标隐藏）；AddAssetCartItems 默认全去重空新增（幂等 no-op，
+  // 用例按需 override {added, duplicates}）；Remove/Clear/Reorder void 返回 null
+  // 安全 no-op；MergeAssetCartToPptx 默认 null（仅用户操作触发，用例按需 override
+  // 完整结果）；CancelAssetCartExport 默认无可取消在途导出 false（对齐取消绑定
+  // 语义）
+  ListAssetCartItems: [],
+  AddAssetCartItems: { added: 0, duplicates: 0 },
+  RemoveAssetCartItems: null,
+  ClearAssetCart: null,
+  ReorderAssetCart: null,
+  MergeAssetCartToPptx: null,
+  CancelAssetCartExport: false,
+
   // 设置保存（AppSettings.assets 段缩略图设置入口，整体提交语义）：void 返回 null 安全
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
   SaveSettings: null

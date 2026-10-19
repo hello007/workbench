@@ -202,4 +202,21 @@ describe('AssetPreviewOverlay', () => {
     expect(onUpdateIndex).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it('加入购物栏按钮（PR3）：上报 add-to-cart 事件（幂等入栏分派留宿主）', async () => {
+    wrapper = mountOverlay()
+    await wrapper.find('.preview-cart-btn').trigger('click')
+    expect(wrapper.emitted('add-to-cart')).toHaveLength(1)
+  })
+
+  it('加入购物栏已收集态（PR3）：in-cart=true 切换 is-in-cart class 与文案反馈', () => {
+    wrapper = mountOverlay({ inCart: true })
+    const btn = wrapper.find('.preview-cart-btn')
+    expect(btn.classes()).toContain('is-in-cart')
+    expect(btn.text()).toContain('已在购物栏')
+    wrapper.unmount()
+    wrapper = mountOverlay({ inCart: false })
+    expect(wrapper.find('.preview-cart-btn').classes()).not.toContain('is-in-cart')
+    expect(wrapper.find('.preview-cart-btn').text()).toContain('加入购物栏')
+  })
 })
