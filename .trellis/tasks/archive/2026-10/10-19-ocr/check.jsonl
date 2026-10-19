@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-19-ocr/prd.md", "reason": "验收标准 11 条逐项核查基准"}
+{"file": "docs/spec/assets-management.md", "reason": "核查 FTS 五契约不破（ocr_text 切分同源/双写/detail=full）、slides.id 禁用、迁移回填切分同源"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核查队列约束：杀进程集合精确性、jr.Result 恰一次写回、关停顺序、事件过滤、error 不双弹"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查错误码三处同步（常量表/error.js/文档）与 slog 用法"}
+{"file": "docs/spec/browser-channel.md", "reason": "核查 web_serve.go applySink 补 SetEventSink 行（assets-ocr 事件浏览器通道可达）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 绑定三处同步与 models.ts 别名"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service ≥76% / 前端 ≥70% 门禁达成"}
+{"file": "docs/spec/test-stability.md", "reason": "核查无 sleep/真实事件等待、stub 注入、ctx 预取消构造"}

@@ -1,0 +1,11 @@
+{"file": ".trellis/tasks/10-19-ocr/prd.md", "reason": "定案需求 10 条 + PR 拆分 + 技术要点，实施唯一需求来源"}
+{"file": ".trellis/tasks/10-19-ocr/research/ocr-engine-comparison.md", "reason": "PaddleOCR-json 协议/分发体积/VC 运行库坑/PoC 清单 §9（PR4 前置）"}
+{"file": "docs/spec/assets-management.md", "reason": "FTS 五契约（splitFtsText 单点/standalone 双写/detail=full/弃 snippet/原文窗口）、扫描增量三态、slides.id 禁用契约、user_version 迁移先例、EventSink 事件契约"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "OCR 队列形态蓝本：backlog 入队/取消链路/关停顺序 WaitXxxDone 插 CloseAll 前/超时杀进程集合/事件 libraryId 过滤/error 不双弹"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 约定、AppError 错误码新增同步规则（model/app_error.go + frontend error.js 两处）、超时收口先例"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 绑定三处同步（App.js/App.d.ts/models.ts）、具名 string 类型 models.ts 别名坑、base64 解码约束"}
+{"file": "docs/spec/browser-channel.md", "reason": "EventSink 契约：web_serve.go applySink 须补 SetEventSink 行（漏加浏览器通道静默收不到 assets-ocr:* 事件）"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "若引擎包装层独立 service 结构体的装配面：AppServices 字段+构造两处、package main 约束"}
+{"file": "docs/spec/test-stability.md", "reason": "引擎测试 stub 注入、禁 sleep/真实事件等待、ctx 预取消驱动、随机端口（web serve 回归）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% / 前端 ≥70% 门禁数字与分档"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "PR1 设置 UI / PR3 呈现面：语义配色、弹窗尺寸分档、面板 flex 约束链、内联 SVG 图标"}
