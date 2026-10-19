@@ -1,0 +1,6 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核查批量拆分是否破坏既有契约：事件前缀 pptx-split:*、取消语义、fixture 程序化构造、页序号两位、XML 字节删除不重序列化"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 三处同步完整（App.js/App.d.ts/models.ts）、新 model struct 字段导出、事件监听闭包注销"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查面板化布局：根元素 flex 约束链、nav 左指示条、语义类、间距档位、暗色适配"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查取消链路 LIFO、错误码映射 E_GIT_CANCELLED、EventSink 事件出口（禁直调 runtime.EventsEmit）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service/前端覆盖率达标与测试形态（无环境外部状态依赖、无 sleep）"}
+{"file": "docs/spec/test-stability.md", "reason": "核查测试稳定性：fixture 不依赖 Office、无固定端口、无 mtime 时序依赖"}

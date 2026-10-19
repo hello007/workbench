@@ -1,0 +1,7 @@
+{"file": "docs/spec/pptx-split.md", "reason": "PPT 拆分核心契约：最小编辑集、页序三跳映射、取消复用、事件前缀、fixture 程序化构造——批量拆分复用同一核心与事件域，新增 batch 编排须遵守"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 Wails 方法与 model 导出 struct 须同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；EventsOn 闭包精准注销禁 EventsOff；具名 string 类型 models.ts 别名坑"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "工具箱面板化布局规范：VSCode 式三列、面板 nav+content 二分、nav active 左指示条 left:0、Home 一级面板根元素完整 flex 约束链、四档间距圆角、语义类"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "取消链路契约：context.WithCancel + registerCancel/unregisterCancel defer LIFO + mapCancelError；AppError{Code,Message} 经 ErrorFormatter/handleError 分流；slog 日志规范"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "复用 PptxSplitService 加方法（app_services.go 零改动的前提是只加方法不新增 service），构造纯 new 生命周期副作用留 startup/shutdown"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76% 基线、前端 ≥70% 硬失败（exclude wailsjs）；新增代码须带测试达门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态：fixture 程序化构造 pptx 禁依赖本机 Office；无 sleep 等待；临时仓库/文件辅助用 util/testutil"}
