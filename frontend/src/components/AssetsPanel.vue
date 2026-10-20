@@ -439,9 +439,55 @@
       未检测到 PowerPoint，仅文本索引，缩略图与跳转不可用
     </div>
 
-    <!-- 主体：画廊网格/列表（呈现维度切换）+ 详情侧边栏。空态四组与呈现维度无关
-         （判定仅依赖库/清单/检索语境），外提到网格与列表分支共用，防两分支模板重复 -->
+    <!-- 主体：文件夹树栏（PRD PR1，可收缩）+ 画廊网格/列表（呈现维度切换）+ 详情
+         侧边栏。空态四组与呈现维度无关（判定仅依赖库/清单/检索语境），外提到网格
+         与列表分支共用，防两分支模板重复 -->
     <div class="assets-body">
+      <!-- 文件夹树栏（PRD PR1/PR2）：库根真实子目录树，点击节点递归过滤主区素材
+           （R7 检索联动：folderPath 为独立过滤维度与关键词/标签/facet AND 叠加，
+           浏览语境客户端前缀过滤）；节点管理菜单（新增/重命名/删除）经
+           create/rename/delete 事件分派宿主执行；收起用 v-show 保 DOM 禁 v-if
+           重建树（xterm 同款保 DOM 纪律），收起态留窄条切换按钮 -->
+      <div v-show="folderTreeExpanded" class="folder-tree-pane">
+        <div class="folder-tree-head">
+          <span class="folder-tree-title">文件夹</span>
+          <button
+            type="button"
+            class="folder-tree-toggle"
+            title="收起文件夹树"
+            aria-label="收起文件夹树"
+            @click="folderTreeExpanded = false"
+          >
+            <el-icon :size="14"><Fold /></el-icon>
+          </button>
+        </div>
+        <FolderTree
+          :nodes="folderNodes"
+          :count-map="folderCountMap"
+          :selected-path="folderPath"
+          :loading="folderTreeLoading"
+          :busy="folderOpsBusy || moveBusy"
+          :drop-enabled="!moveBusy && !folderOpsBusy"
+          @select="onFolderSelect"
+          @create="onCreateFolder"
+          @rename="onRenameFolder"
+          @delete="onDeleteFolder"
+          @annotate="onAnnotateFolder"
+          @drop-files="onFolderDrop"
+          @drop-folder="onFolderDropFolder"
+        />
+      </div>
+      <div v-if="!folderTreeExpanded" class="folder-tree-rail">
+        <button
+          type="button"
+          class="folder-tree-toggle"
+          title="展开文件夹树"
+          aria-label="展开文件夹树"
+          @click="folderTreeExpanded = true"
+        >
+          <el-icon :size="14"><Expand /></el-icon>
+        </button>
+      </div>
       <div class="assets-view-wrap">
         <!-- 文件内过滤提示条（D6 真机增量）：双击文件卡进入「仅看该文件页」浏览
              语境的弱化提示（info 色对齐缩略图降级条，非警示红）；N = 过滤后已加载
@@ -484,8 +530,10 @@
             :key="card.key"
             class="asset-card"
             :class="{ 'is-selected': isCardSelected(card), 'is-expandable': card.hitCount > 1 }"
-            @click="onCardClick(card)"
+            :draggable="card.kind === 'file'"
+            @click="onCardClick(card, $event)"
             @dblclick="onCardDblclick(card)"
+            @dragstart="onCardDragStart(card, $event)"
           >
             <!-- 勾选复选框（SRS §2.3 PR3，常驻左上角）：聚合父卡不渲染（D5#1）；
                  @click.stop 阻断进详情（D5#7 勾选与浏览两套交互并行不互斥） -->
@@ -572,6 +620,7 @@
           :agg-loading-paths="aggLoadingPaths"
           :selected-keys="selectedKeys"
           @card-click="onCardClick"
+          @card-drag-start="onCardDragStart"
           @load-more="loadMoreInView"
           @toggle-select="toggleCardSelection"
         />
@@ -1101,6 +1150,45 @@
         <el-button type="primary" :loading="savingSearch" @click="onConfirmSaveSearch">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 文件夹标注弹窗（PRD R8/PR4）：业务备注 + 标签集整体替换（对齐文件/页级
+         标注体系，星级不设——目录无星级语义）。打开时 GetAssetFolderMeta 预填，
+         保存走 UpdateAssetFolderMeta（标签经组件统一 ID 口径，提交映射回名称数组
+         ——对齐详情编辑 detailTagIds 适配模式）；排除命中/派生容器/库根由菜单禁用
+         与后端守卫双防线拦截 -->
+    <el-dialog
+      v-model="folderAnnotateVisible"
+      title="文件夹标注"
+      width="min(480px, 80vw)"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <div class="folder-annotate-path">{{ folderAnnotatePath || '—' }}</div>
+      <div class="detail-section">
+        <div class="detail-label">标签</div>
+        <AssetTagTreeSelect
+          ref="folderTagSelectRef"
+          v-model="folderAnnotateTagIds"
+          :library-id="currentLibraryId"
+          placeholder="选择标签"
+          :disabled="folderAnnotateSaving"
+        />
+      </div>
+      <div class="detail-section">
+        <div class="detail-label">备注</div>
+        <el-input
+          v-model="folderAnnotateNote"
+          type="textarea"
+          :rows="4"
+          placeholder="记录文件夹用途、来源等备注"
+          :disabled="folderAnnotateSaving"
+        />
+      </div>
+      <template #footer>
+        <el-button :disabled="folderAnnotateSaving" @click="folderAnnotateVisible = false">取消</el-button>
+        <el-button type="primary" :loading="folderAnnotateSaving" @click="onSaveFolderAnnotation">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1116,6 +1204,14 @@ import {
   CancelAssetScan,
   RebuildAssetLibrary,
   ListAssetFiles,
+  ListAssetFolders,
+  CreateAssetFolder,
+  DeleteAssetFolder,
+  RenameAssetFolder,
+  MoveAssetFiles,
+  MoveAssetFolder,
+  GetAssetFolderMeta,
+  UpdateAssetFolderMeta,
   ListAssetSlides,
   UpdateAssetFileMeta,
   UpdateAssetSlideMeta,
@@ -1169,6 +1265,10 @@ import {
 } from '../utils/assetFormat'
 // 选中键映射共享单点（网格卡勾选/列表行勾选/全选/反选四处消费同一映射）
 import { assetSelectionKey } from '../utils/assetSelection'
+// 文件夹树前缀匹配与徽标计数共享单点（PRD PR1：主区递归过滤与徽标聚合唯一实现，
+// 禁消费点手拼——前缀边界口径漂移 =「a」误匹配「ab/」类静默过滤错误）；拖拽载荷
+// 构造单点（PRD PR3：dragstart/drop 两端唯一 MIME 与序列化实现）
+import { buildFolderCountMap, folderPrefixMatch, ASSET_FILE_DRAG_MIME, buildAssetDragPayload } from '../utils/assetFolder'
 // 购物栏条目键映射共享单点（已收集态判定/批量构造/拖拽回写与后端 Key 同构）
 import { assetCartItemKey } from '../utils/assetCart'
 import AssetsIcon from './icons/AssetsIcon.vue'
@@ -1200,6 +1300,9 @@ import AssetBackupDialog from './AssetBackupDialog.vue'
 // 购物栏抽屉（PR3）：受控组件——条目清单/导出运行态留宿主，remove/clear/reorder/
 // export/cancel-export/trace 六事件分派宿主单点；拖拽排序在抽屉内
 import AssetCartDrawer from './AssetCartDrawer.vue'
+// 文件夹树（PRD PR1）：受控组件——树数据/徽标计数/选中态留宿主，组件仅承载展示
+// 与选中上报；目录管理与拖拽移动入口为 PR2/PR3/PR4 范围
+import FolderTree from './FolderTree.vue'
 // facet 多维筛选弹层（第七批 SRS §2.5）：受控组件 + 档位→检索参数换算单点（具名
 // 导出）；buildFacetOptions 每次检索调用时现算（相对档边界随检索时刻刷新），
 // countActiveFacets 驱动 searchMode 判定与 badge，createDefaultFacetState 供
@@ -1212,7 +1315,7 @@ import AssetFilterPopover, {
   describeFacetState
 } from './AssetFilterPopover.vue'
 // 标签管理入口按钮图标（EP 图标族，浅色工具条容器内用 el-icon 承载）
-import { CollectionTag, ArrowDown } from '@element-plus/icons-vue'
+import { CollectionTag, ArrowDown, Fold, Expand } from '@element-plus/icons-vue'
 
 // ---- 分页与检索参数（对齐后端 assetSearchDefaultLimit）----
 const PAGE_SIZE = 50
@@ -1307,6 +1410,20 @@ const searchItems = ref([]) // 检索结果累计条目（懒加载追加）
 const searchTotal = ref(0) // 检索总条目数（过滤/聚合后口径）
 const loading = ref(false)
 const loadingMore = ref(false)
+
+// ---- 文件夹树（PRD「素材管理：文件夹树与拖拽整理」PR1/PR2）----
+// 树数据源 = ListAssetFolders（后端读库根真实子目录，空目录可见，PRD D1）；
+// folderPath = 当前选中目录（'' = 根「全部素材」），R7 检索联动后为独立过滤维度：
+// 检索语境经 SearchAssets opts.folderPath 与关键词/标签/facet AND 叠加（后端三
+// 路径单点收敛），浏览语境客户端前缀过滤（文件视图过滤 fileEntries 全量清单；
+// 幻灯片视图过滤分页已加载段 + ensureFolderSlidesLoaded 续拉兜底）。
+// 树栏展开态为会话态不持久化，默认展开。
+const folderTreeExpanded = ref(true)
+const folderNodes = ref([]) // ListAssetFolders 返回的子目录树（不含根，根节点组件固定）
+const folderPath = ref('') // 当前选中目录（'' = 全部素材）
+const folderTreeLoading = ref(false)
+const folderOpsBusy = ref(false) // 目录管理操作在途（禁树菜单并发操作，FolderTree busy prop）
+const moveBusy = ref(false) // 文件拖拽移动在途（PRD PR3：Promise 期间禁再次发起，drop 分派与树 busy 双读）
 
 // ---- 详情与编辑 ----
 const selected = ref(null) // { kind: 'file'|'slide', fileEntry?, slideEntry?, hit? }
@@ -1731,12 +1848,14 @@ const collectExportTargets = () => {
   return { fileIds, slideTargets }
 }
 
-// 检索条件激活判定（与后端 assetExportSearchActive 同口径：关键词/标签/facet 任一
-// 非空；排序档不构成检索语境——全库导出不因排序参数缩窄）
+// 检索条件激活判定（与后端检索重放同口径：关键词/标签/facet/folderPath 任一
+// 非空；排序档不构成检索语境——全库导出不因排序参数缩窄。folderPath 仅目录选中
+// 也构成缩窄语境——后端按文件夹前缀重放文件清单，全库导出不得忽略目录过滤）
 const exportSearchActive = () =>
   activeKeyword.value.trim() !== '' ||
   selectedTagIds.value.length > 0 ||
-  facetActiveCount.value > 0
+  facetActiveCount.value > 0 ||
+  !!folderPath.value
 
 // 预览数解析（打开弹窗时执行一次）：选中 → 条目数同步返回；检索 → 后端重放 total
 //（flatten 恒 true + limit 1 的轻量查询，total = 文件行+页行全集口径，与后端导出
@@ -1761,6 +1880,7 @@ const resolveExportPreview = async () => {
         tagIds: selectedTagIds.value,
         slideTagOnlyOwn: slideTagOnlyOwn.value,
         ...buildFacetOptions(facetState.value),
+        folderPath: folderPath.value,
         limit: 1,
         offset: 0
       })
@@ -1803,7 +1923,8 @@ const executeExport = (partial) => {
       flatten: true,
       tagIds: selectedTagIds.value,
       slideTagOnlyOwn: slideTagOnlyOwn.value,
-      ...buildFacetOptions(facetState.value)
+      ...buildFacetOptions(facetState.value),
+      folderPath: folderPath.value
     }
   })
 }
@@ -2558,7 +2679,13 @@ const deleteSavedSearch = async (item) => {
 // 浏览模式卡片（清单数据），检索模式卡片（命中条目）统一为同构形态供画廊渲染
 const browseCards = computed(() => {
   if (viewMode.value === 'file') {
-    return fileEntries.value.map(entry => ({
+    // 文件夹树递归过滤（PRD PR1，PRD D3）：文件视图浏览语境按选中目录前缀过滤
+    // （含自身与任意深度子目录，slash 边界见 utils/assetFolder 单点）；检索语境
+    // 不经过本分支（searchMode 时 displayCards 取 searchCards，树过滤自动让位、
+    // 树选中保留）；幻灯片视图联动为 PR2 范围（本分支不过滤 slideEntries）
+    return fileEntries.value
+      .filter(entry => folderPrefixMatch(entry.path, folderPath.value))
+      .map(entry => ({
       key: `file-${entry.id}`,
       kind: 'file',
       id: entry.id,
@@ -2574,9 +2701,12 @@ const browseCards = computed(() => {
   }
   // 文件内过滤（D6 真机增量）：过滤态仅显示目标文件的页（非过滤态全量透传）；
   // 过滤是全局分页流上的客户端收敛——目标页不在已加载段时由 ensureFilteredSlidesLoaded
-  // 自动续拉（canLoadMoreSlides 判定与统计行口径均不受过滤影响）
+  // 自动续拉（canLoadMoreSlides 判定与统计行口径均不受过滤影响）。
+  // 目录过滤（PR2 R7）同口径叠加：按归属文件 relPath 前缀（页条目继承归属文件
+  // 位置语义），目标页不在已加载段由 ensureFolderSlidesLoaded 续拉兜底
   return slideEntries.value
     .filter(s => !fileFilterPath.value || s.filePath === fileFilterPath.value)
+    .filter(s => folderPrefixMatch(s.filePath, folderPath.value))
     .map(slide => ({
       key: `slide-${slide.id}`,
       kind: 'slide',
@@ -2601,6 +2731,12 @@ const searchCards = computed(() => {
 })
 
 const displayCards = computed(() => (searchMode.value ? searchCards.value : browseCards.value))
+
+// 文件夹树徽标递归计数（PRD R2 a）：按索引底册（fileEntries 全量清单）前缀聚合
+// （utils/assetFolder 单点，禁本地重写口径），根 '' 含全部文件；底册刷新自动重算。
+// 以索引口径为准（与画廊数据源一致），后端 AssetFolderNode.FileCount 磁盘口径仅
+// 兜底展示，两者短暂不一致（索引滞后磁盘）以下次扫描收敛
+const folderCountMap = computed(() => buildFolderCountMap(fileEntries.value))
 
 // 全屏预览序列（PRD D1）：displayCards 过滤幻灯片子序列——浏览幻灯片清单已加载段 /
 // 检索命中幻灯片条目（含聚合父卡）。聚合展开子项（aggChildren）不在 displayCards，
@@ -2736,13 +2872,15 @@ const resetAndReloadView = async () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  folderNodes.value = [] // 语境变更点：树数据属库语境（旧库目录树一并清空）
+  folderPath.value = '' // 语境变更点：选中目录属库语境（切库/扫描刷新回「全部素材」）
   closeDetail()
   closePreview() // 语境变更点：扫描刷新/切库落定清预览（底册重解析条目序列已变）
   clearSelection() // 语境变更点：扫描刷新清选中（条目重解析底册 id 变，D5#4）
   fileFilterPath.value = '' // 语境变更点：扫描刷新清文件过滤（底册重解析路径集合已变）
   if (!hasLibrary.value) return
   const fileViewLoadedHere = viewMode.value === 'file' && !searchMode.value
-  const tasks = [loadStats(seq), loadView(seq)]
+  const tasks = [loadStats(seq), loadView(seq), loadFolders(seq)]
   if (!fileViewLoadedHere) tasks.push(ensureFileEntries(seq))
   await Promise.all(tasks)
 }
@@ -2840,6 +2978,299 @@ const ensureFileEntries = async (seq = null) => {
       return
     }
     handleError('加载文件列表失败: ', error)
+  }
+}
+
+// 文件夹树加载（PRD PR1，库切换落定/扫描刷新共用，resetAndReloadView 并行任务
+// 之一）：ListAssetFolders 读库根真实子目录。库根目录不存在后端返回空树非错误
+// （对齐扫描降级语义），树栏显示「暂无子文件夹」不阻塞面板。seq 库代次守卫：
+// 写回前比对，期间切库/刷新即丢弃旧库树。
+const loadFolders = async (seq = null) => {
+  if (seq === null) seq = librarySeq
+  folderTreeLoading.value = true
+  try {
+    const nodes = await ListAssetFolders(currentLibraryId.value)
+    if (!librarySeqAlive(seq)) return
+    folderNodes.value = nodes || []
+  } catch (error) {
+    if (!librarySeqAlive(seq)) return
+    if (isLibNotFound(error)) {
+      await loadLibraries()
+      return
+    }
+    handleError('加载文件夹树失败: ', error)
+  } finally {
+    folderTreeLoading.value = false
+  }
+}
+
+// 文件夹树节点选中（FolderTree select 事件，含根「全部素材」folderPath=''）：
+// folderPath 为独立过滤维度（R7），语境变更复位面对齐 onFacetChange 同类点位
+//（数据过滤语境变更——清详情/预览/选中/文件过滤/聚合展开缓存）；检索语境重跑
+// 检索（folderPath AND 叠加进 opts），浏览幻灯片视图接目录过滤续拉兜底（目标页
+// 可能不在已加载段）。清空点位矩阵登记见 docs/spec/assets-management.md §8.7。
+const onFolderSelect = async (path) => {
+  folderPath.value = path || ''
+  searchSeq++ // 语境变更点：过滤维度变更使在途检索写回失效
+  closeDetail()
+  closePreview() // 语境变更点：目录过滤变更清预览（数据集已变）
+  clearSelection() // 语境变更点：数据过滤语境变更清选中（§8.2 同类点位先例）
+  fileFilterPath.value = '' // 语境变更点：目录过滤与单文件过滤互斥（对齐 facet 同款）
+  expandedAggPaths.value = []
+  aggChildren.value = {}
+  aggLoadingPaths.value = []
+  if (searchMode.value) {
+    await runSearch(true)
+  } else if (viewMode.value === 'slide') {
+    await ensureFolderSlidesLoaded()
+  }
+}
+
+// ---- 文件夹树管理操作（PR2 R3：新增/重命名/删除，操作在宿主单点分派）----
+// 完成后局部刷新树（loadFolders 复用：seq 内部快照守卫）；folderPath 选中面按
+// 操作类型收口——删除前缀命中选中即复位根、重命名前缀命中选中按新前缀改写
+//（保留用户在子树内的浏览语境）。
+
+// 新建子目录：分派 CreateAssetFolder（重名/父不存在/父禁操作由后端校验返回，
+// handleError 透传 toast）
+const onCreateFolder = async (parentPath, name) => {
+  if (!hasLibrary.value || folderOpsBusy.value) return
+  folderOpsBusy.value = true
+  try {
+    await CreateAssetFolder(currentLibraryId.value, parentPath, name)
+    ElMessage.success(`已创建「${name}」`)
+    await loadFolders()
+  } catch (error) {
+    handleError('新建文件夹失败: ', error)
+  } finally {
+    folderOpsBusy.value = false
+  }
+}
+
+// 重命名目录：分派 RenameAssetFolder（索引前缀同步与排除翻转在后端单事务收敛，
+// 明细计数随结果 toast）；选中目录位于重命名前缀下时按新前缀改写（浏览语境保留）
+const onRenameFolder = async (oldPath, newName) => {
+  if (!hasLibrary.value || folderOpsBusy.value) return
+  folderOpsBusy.value = true
+  try {
+    const result = await RenameAssetFolder(currentLibraryId.value, oldPath, newName)
+    const parts = [`索引同步 ${result?.replaced || 0} 条`]
+    if (result?.excluded > 0) parts.push(`排除 ${result.excluded} 条`)
+    if (result?.revived > 0) parts.push(`恢复 ${result.revived} 条`)
+    ElMessage.success(`已重命名为「${newName}」（${parts.join('，')}）`)
+    if (folderPath.value === oldPath || folderPath.value.startsWith(oldPath + '/')) {
+      folderPath.value = (result?.newPath || oldPath) + folderPath.value.slice(oldPath.length)
+    }
+    await loadFolders()
+  } catch (error) {
+    handleError('重命名文件夹失败: ', error)
+  } finally {
+    folderOpsBusy.value = false
+  }
+}
+
+// 删除目录：PRD R3 非空目录（递归 PPT 数 > 0，前端已知面）先二次确认；后端对
+// 非空目录（含非 PPT 条目，前端无法可靠判定）force=false 返回
+// E_ASSETS_FOLDER_NOT_EMPTY 确认型拒绝，命中该码弹后端计数文案二次确认后以
+// force=true 重调（对齐 E_ASSETS_RELINK_MISMATCH 的 force 重调交互模式）。删除
+// 成功后选中位于删除前缀下即复位根；拆分派生容器/排除命中目录由后端拒绝。
+const onDeleteFolder = async (node) => {
+  if (!hasLibrary.value || folderOpsBusy.value || !node?.path) return
+  const recursiveCount = folderCountMap.value[node.path] || 0
+  try {
+    if (recursiveCount > 0) {
+      await ElMessageBox.confirm(
+        `目录「${node.name}」下有 ${recursiveCount} 个 PPT 文件（含子目录）。删除后对应索引记录转为「丢失」待恢复，确定删除？`,
+        '删除文件夹',
+        { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      )
+    }
+    folderOpsBusy.value = true
+    let lostMarked
+    try {
+      lostMarked = await DeleteAssetFolder(currentLibraryId.value, node.path, recursiveCount > 0)
+    } catch (error) {
+      if (error?.code !== ErrorCode.AssetsFolderNotEmpty) throw error
+      // 后端实测非空（含非 PPT 条目）：二次确认后强删
+      await ElMessageBox.confirm(error.message || '目录不是空目录，确定删除？', '删除文件夹', {
+        confirmButtonText: '连同内容删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      })
+      lostMarked = await DeleteAssetFolder(currentLibraryId.value, node.path, true)
+    }
+    ElMessage.success(lostMarked > 0 ? `已删除（${lostMarked} 条索引记录转为丢失待恢复）` : '已删除')
+    if (folderPath.value === node.path || folderPath.value.startsWith(node.path + '/')) {
+      folderPath.value = ''
+    }
+    await loadFolders()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return // 用户取消确认弹窗，非错误
+    handleError('删除文件夹失败: ', error)
+  } finally {
+    folderOpsBusy.value = false
+  }
+}
+
+// 目录过滤的幻灯片续拉兜底（对齐 ensureFilteredSlidesLoaded 单文件过滤先例）：
+// 目录过滤在分页流上做客户端收敛，目标页可能不在已加载段——持续追加直到目录内
+// 页出现或全局拉完。folderPath 为空（全库）直接返回；await 期间清过滤/切库/在途
+// 防重由循环条件自然退出
+const ensureFolderSlidesLoaded = async () => {
+  const target = folderPath.value
+  if (!target) return
+  while (
+    folderPath.value === target &&
+    !searchMode.value &&
+    viewMode.value === 'slide' &&
+    !slideEntries.value.some(s => folderPrefixMatch(s.filePath, target)) &&
+    canLoadMoreSlides.value &&
+    !loadingMore.value
+  ) {
+    await loadSlidesPage(false)
+  }
+}
+
+// 过滤维度变更即触发续拉（onFolderSelect 已显式调用，此处兜底其他写入路径；
+// 幂等——续拉中 loadingMore 置位使重复触发的循环直接退出）
+watch(folderPath, (path) => {
+  if (path && !searchMode.value && viewMode.value === 'slide') ensureFolderSlidesLoaded()
+})
+
+// ---- 文件拖拽移动（PRD R4/R6/R9，PR3：HTML5 DnD 编排，分派在宿主单点）----
+// dragstart 载荷 = fileIDs（files.id）列表：拖拽卡在选中集内 → 整个选中集的文件卡
+//（批量拖拽），否则仅该卡；slide 卡不可拖（页归属文件，页不可独立移动）。
+// drop 落点 = FolderTree 节点（排除/派生落点在组件内拒绝，不出网）。
+
+// 网格卡与列表行共用的 dragstart 出口：构造拖拽载荷（MIME 与序列化经
+// utils/assetFolder 单点）并标记 move 效果
+const onCardDragStart = (card, event) => {
+  if (!hasLibrary.value || card?.kind !== 'file' || !event?.dataTransfer) return
+  const key = assetSelectionKey(card)
+  let fileIds
+  if (selectedKeys.value.has(key)) {
+    // 拖拽卡在选中集内：整个选中集的文件卡一起移动（选中集内 slide 卡天然不进
+    // 文件清单——页不可独立移动）
+    fileIds = selectableCards.value
+      .filter(c => c.kind === 'file' && selectedKeys.value.has(assetSelectionKey(c)))
+      .map(c => c.id)
+  } else {
+    fileIds = [card.id]
+  }
+  event.dataTransfer.setData(ASSET_FILE_DRAG_MIME, buildAssetDragPayload(fileIds))
+  event.dataTransfer.effectAllowed = 'move'
+}
+
+// 树节点 drop 分派（FolderTree drop-files 事件，含根「全部素材」path=''）：
+// MoveAssetFiles 返回值汇总分流（对齐批量打标签弹窗 completed 口径——全部成功
+// success、部分失败 warning 带明细提示）；成功后刷新文件清单与树徽标（数据变更
+// 点位：保留 folderPath 与树选中——§8.7 矩阵，被移出当前目录的条目随清单刷新
+// 自然消失）、清空多选集（拖拽操作收口）。在途防重：moveBusy 期间拒绝再次分派。
+const onFolderDrop = async (targetPath, fileIds) => {
+  if (!hasLibrary.value || moveBusy.value || !fileIds || fileIds.length === 0) return
+  moveBusy.value = true
+  try {
+    const result = await MoveAssetFiles(currentLibraryId.value, fileIds, targetPath)
+    const targetName = targetPath ? `「${targetPath.split('/').pop()}」` : '库根'
+    if (result?.failed > 0) {
+      ElMessage.warning(`移动到${targetName}：${result.succeeded} 个成功，${result.failed} 个失败（首个失败：${result.items.find(i => i.status === 'failed')?.message || '未知原因'}）`)
+    } else {
+      ElMessage.success(`已移动 ${result?.succeeded || 0} 个文件到${targetName}`)
+    }
+    // 数据变更刷新（对齐 refreshAfterBatchAnnotation 精简面）：文件底册重拉 +
+    // 树徽标重拉；双代次守卫防在途切库写回
+    const libSeqAtStart = librarySeq
+    const entries = await ListAssetFiles(currentLibraryId.value)
+    if (libSeqAtStart !== librarySeq) return
+    fileEntries.value = entries || []
+    await loadFolders()
+    // 拖拽多选收口：移动完成清空选中集（普通勾选集共用同键空间，一并清）
+    clearSelection()
+  } catch (error) {
+    handleError('移动文件失败: ', error)
+  } finally {
+    moveBusy.value = false
+  }
+}
+
+// 目录级拖拽移动（PRD R5/D，PR4：FolderTree drop-folder 事件，sourcePath →
+// targetPath）：MoveAssetFolder 统一核心（磁盘 rename + 索引前缀同步 + 排除翻转
+// + folder_meta 键同事务级联）；返回值/错误分流对齐文件移动口径（自身子树/排除/
+// 派生落点已由组件软拦截，后端守卫为第二防线）。在途防重复用 folderOpsBusy
+//（目录管理操作同族：菜单与 drop 分派已由 busy 联动禁用，不再单设 moveFolderBusy
+// 造成两套在途态漂移）。成功后按新前缀改写选中目录（浏览语境保留，对齐重命名）
+// + 刷新树徽标；folderPath 保留（数据变更点位，§8.7 登记）。
+const onFolderDropFolder = async (sourcePath, targetPath) => {
+  if (!hasLibrary.value || folderOpsBusy.value || !sourcePath) return
+  folderOpsBusy.value = true
+  try {
+    const result = await MoveAssetFolder(currentLibraryId.value, sourcePath, targetPath)
+    const targetName = targetPath ? `「${targetPath.split('/').pop()}」` : '库根'
+    const parts = [`索引同步 ${result?.replaced || 0} 条`]
+    if (result?.excluded > 0) parts.push(`排除 ${result.excluded} 条`)
+    if (result?.revived > 0) parts.push(`恢复 ${result.revived} 条`)
+    ElMessage.success(`已移动到${targetName}（${parts.join('，')}）`)
+    // 选中目录位于源前缀下：按新前缀改写（newPath + 子路径），浏览语境保留
+    if (folderPath.value === sourcePath || folderPath.value.startsWith(sourcePath + '/')) {
+      folderPath.value = (result?.newPath || sourcePath) + folderPath.value.slice(sourcePath.length)
+    }
+    await loadFolders()
+  } catch (error) {
+    handleError('移动文件夹失败: ', error)
+  } finally {
+    folderOpsBusy.value = false
+  }
+}
+
+// ---- 文件夹标注（PRD R8/PR4）：菜单「标注」入口 → 弹窗加载预填 → 整体替换保存 ----
+const folderAnnotateVisible = ref(false)
+const folderAnnotatePath = ref('')
+const folderAnnotateNote = ref('')
+const folderAnnotateTagIds = ref([])
+const folderAnnotateSaving = ref(false)
+const folderTagSelectRef = ref(null)
+
+// 打开标注弹窗：GetAssetFolderMeta 预填（标签本体 → ID 数组供树形选择回显，
+// ID↔名称映射消费共享标签列表——对齐详情编辑 detailTagIds 适配模式）；库代次
+// 快照守卫防在途切库写回（对齐 onSaveSlideMeta 模式）
+const onAnnotateFolder = async (node) => {
+  if (!hasLibrary.value || folderOpsBusy.value || !node?.path) return
+  folderAnnotatePath.value = node.path
+  folderAnnotateNote.value = ''
+  folderAnnotateTagIds.value = []
+  folderAnnotateVisible.value = true
+  const libSeqAtStart = librarySeq
+  try {
+    const meta = await GetAssetFolderMeta(currentLibraryId.value, node.path)
+    if (libSeqAtStart !== librarySeq || folderAnnotatePath.value !== node.path) return
+    folderAnnotateNote.value = meta?.note || ''
+    // 标签本体 → ID 数组供树形选择回显；映射 miss（共享标签表未含的陈旧绑定）丢弃
+    folderAnnotateTagIds.value = (meta?.tags || [])
+      .map(tag => tag.id)
+      .filter(id => tagNameById.value.has(id))
+  } catch (error) {
+    handleError('读取文件夹标注失败: ', error)
+  }
+}
+
+// 保存标注：整体替换（备注 + 标签名数组——ID 映射回名称，保存契约与文件/页级
+// 一致）；成功后无清单面变化（纯标注层），弹窗关闭即收口；双代次守卫防在途切库
+const onSaveFolderAnnotation = async () => {
+  if (!hasLibrary.value || folderAnnotateSaving.value || !folderAnnotatePath.value) return
+  folderAnnotateSaving.value = true
+  const libSeqAtStart = librarySeq
+  try {
+    await UpdateAssetFolderMeta(currentLibraryId.value, folderAnnotatePath.value, {
+      note: folderAnnotateNote.value,
+      tagNames: folderAnnotateTagIds.value.map(id => tagNameById.value.get(id)).filter(Boolean)
+    })
+    if (libSeqAtStart !== librarySeq) return
+    ElMessage.success('文件夹标注已保存')
+    folderAnnotateVisible.value = false
+  } catch (error) {
+    handleError('保存文件夹标注失败: ', error)
+  } finally {
+    folderAnnotateSaving.value = false
   }
 }
 
@@ -2944,6 +3375,9 @@ const runSearch = async (reset) => {
       // 排序保证跨页顺序一致（禁前端内存排序——分页懒加载下必错段）
       sortBy: sortBy.value,
       sortDir: sortDir.value,
+      // 文件夹维度（PR2 R7 检索联动）：与关键词/标签/facet AND 叠加（空串 = 全库
+      // 不筛选，后端三路径单点收敛）
+      folderPath: folderPath.value,
       limit: PAGE_SIZE,
       offset: reset ? 0 : searchItems.value.length
     })
@@ -3041,6 +3475,12 @@ const onViewModeChange = () => {
     ? fileEntries.value.length === 0
     : slideEntries.value.length === 0
   if (targetEmpty) loadView()
+  // 目录过滤跨视图同口径（PR2 R7，§8.7 矩阵：viewMode 切换不清 folderPath——
+  // 文件/幻灯片两视图同按归属文件前缀过滤）：切到幻灯片视图时目标页可能不在
+  // 已加载段，续拉兜底（对齐 fileFilterPath 的 ensureFilteredSlidesLoaded 先例）
+  if (viewMode.value === 'slide' && folderPath.value) {
+    ensureFolderSlidesLoaded()
+  }
 }
 
 // ================= 选中体系（SRS §2.3 PR3，PRD D2/D5）=================
@@ -3172,12 +3612,26 @@ const isCardSelected = (card) => {
     : (selected.value.slideEntry?.id === card.id || selected.value.hit?.refId === card.id)
 }
 
-const onCardClick = async (card) => {
+const onCardClick = async (card, event) => {
   // 聚合条目：点击切换展开/收起，不进详情
   if (card.hitCount > 1) {
     await toggleAgg(card.filePath)
     return
   }
+  // 轻量多选修饰键（PRD R4 拖拽配套）：Ctrl/Cmd+点击 = 勾选切换（与复选框同一
+  // 选中集，D5 键形态契约不变）、Shift+点击 = 区间选（锚点 = 上次修饰点击卡）；
+  // 普通点击维持既有详情选中语义不变
+  if (event && (event.ctrlKey || event.metaKey || event.shiftKey) && card.hitCount <= 1) {
+    const key = assetSelectionKey(card)
+    if (event.shiftKey && shiftAnchorKey.value) {
+      selectCardRange(key)
+    } else {
+      toggleCardSelection(card)
+    }
+    shiftAnchorKey.value = key
+    return
+  }
+  if (card.hitCount <= 1) shiftAnchorKey.value = assetSelectionKey(card)
   if (card.kind === 'file') {
     // 检索命中的文件条目按 fileId 解析完整底册记录（含星级/备注，供编辑）；
     // 底册未加载时经 resolveFileEntry 兜底拉取（直接查空底册会误报「记录不存在」）
@@ -3187,6 +3641,24 @@ const onCardClick = async (card) => {
   } else {
     selectSlideCard(card)
   }
+}
+
+// Shift 区间选锚点（上次点击卡键；非修饰点击亦更新锚点，对齐资源管理器惯例）
+const shiftAnchorKey = ref('')
+
+// 区间选：渲染独立卡序内 [锚点, 当前卡] 全部勾选（整体替换新 Set，勾选键经
+// assetSelectionKey 单点；聚合父卡不在 selectableCards 天然排除）
+const selectCardRange = (targetKey) => {
+  const cards = selectableCards.value
+  const anchorIdx = cards.findIndex(c => assetSelectionKey(c) === shiftAnchorKey.value)
+  const targetIdx = cards.findIndex(c => assetSelectionKey(c) === targetKey)
+  if (anchorIdx < 0 || targetIdx < 0) return
+  const [from, to] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx]
+  const next = new Set(selectedKeys.value)
+  for (let i = from; i <= to; i++) {
+    next.add(assetSelectionKey(cards[i]))
+  }
+  selectedKeys.value = next
 }
 
 // 幻灯片卡片详情装配单点：画廊/列表点击与预览翻页共用（D5#6 预览即详情导航——
@@ -3511,6 +3983,7 @@ const traceToSourceFile = async () => {
   keywordInput.value = ''
   selectedTagIds.value = []
   facetState.value = createDefaultFacetState() // 语境变更点：直赋路径不经 applySearch，facet 须在此一并复位（§8.2 矩阵登记）
+  folderPath.value = '' // 语境变更点：直赋路径不经 onFolderSelect，目录过滤须一并复位（§8.7 矩阵登记——溯源到具体文件语境，目录过滤会掩盖目标）
   viewMode.value = 'file'
   closeDetail()
   closePreview() // 语境变更点：溯源切文件视图清预览（文件视图无预览序列）
@@ -4394,6 +4867,71 @@ defineExpose({ loadLibraries, refreshAfterScan })
   overflow: hidden;
 }
 
+/* 文件夹树栏（PRD PR1）：assets-body 内首个 flex 项，固定宽 + 完整纵向约束链
+   （min-height/min-width + overflow:hidden 防内容撑破挤压画廊列，对齐
+   frontend-visual-conventions 一级面板约束链纪律）；收起经 v-show 切换
+   display:none 保 DOM */
+.folder-tree-pane {
+  flex-shrink: 0;
+  width: 208px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.folder-tree-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.folder-tree-title {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+/* 收起/展开切换按钮（树头与收起态窄条共用）：原生 button + 语义 class（禁行内
+   style），hover 主色反馈 */
+.folder-tree-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.folder-tree-toggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--primary-color);
+}
+
+/* 收起态窄条：树栏隐藏后留 28px 竖条承载展开按钮（v-show 展开恢复） */
+.folder-tree-rail {
+  flex-shrink: 0;
+  width: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: var(--spacing-sm);
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
 /* 视图包裹层：空态与网格/列表分支的共同父级（flex column 约束链），网格与列表
      两个滚动分支在其余量空间内各自滚动；relative 为全屏预览层（AssetPreviewOverlay
      absolute inset:0）的定位语境——预览只铺满画廊列，详情侧栏在覆盖层外保持可见
@@ -4911,5 +5449,15 @@ defineExpose({ loadLibraries, refreshAfterScan })
   white-space: nowrap;
   flex-shrink: 2;
   min-width: 0;
+}
+
+/* 文件夹标注弹窗路径行（PR4 R8）：标注对象目录回显，弱化展示防长路径喧宾 */
+.folder-annotate-path {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import AssetsPanel from '../AssetsPanel.vue'
+import { ErrorCode } from '../../../src/utils/error'
+import { ASSET_FILE_DRAG_MIME } from '../../../src/utils/assetFolder'
 
 // ---- 测试数据（形状对齐 model/assets.go 经 Wails 绑定的 JSON 字段）----
 const mockLibrary = {
@@ -172,6 +174,16 @@ const { wailsMock } = vi.hoisted(() => ({
     CancelAssetScan: vi.fn(),
     RebuildAssetLibrary: vi.fn(),
     ListAssetFiles: vi.fn(),
+    ListAssetFolders: vi.fn(),
+    CreateAssetFolder: vi.fn(),
+    DeleteAssetFolder: vi.fn(),
+    RenameAssetFolder: vi.fn(),
+    // 文件批量移动（PR3 拖拽移动，R4/R6/R9）：宿主 drop 分派单点
+    MoveAssetFiles: vi.fn(),
+    // 目录级移动与文件夹标注（PR4）：宿主 drop-folder 分派 + 标注弹窗加载/保存
+    MoveAssetFolder: vi.fn(),
+    GetAssetFolderMeta: vi.fn(),
+    UpdateAssetFolderMeta: vi.fn(),
     ListAssetSlides: vi.fn(),
     UpdateAssetFileMeta: vi.fn(),
     UpdateAssetSlideMeta: vi.fn(),
@@ -364,6 +376,14 @@ const stubs = {
       reload() {}
     }
   },
+  // 文件夹树桩（PRD PR1）：树数据/徽标计数/选中态受控透出 + select 事件透出
+  //（宿主过滤链与树数据接线断言入口；树渲染细节见 FolderTree 独立 spec）
+  FolderTree: {
+    name: 'FolderTreeStub',
+    template: '<div class="folder-tree-stub"></div>',
+    props: ['nodes', 'countMap', 'selectedPath', 'loading'],
+    emits: ['select']
+  },
   // 标签管理弹窗桩：显隐受控 + changed 事件透出（宿主刷新链断言入口）
   AssetTagManagerDialog: {
     name: 'AssetTagManagerDialogStub',
@@ -501,6 +521,18 @@ describe('AssetsPanel', () => {
     wailsMock.ListAssetLibraries.mockResolvedValue([mockLibrary])
     wailsMock.GetAssetLibraryStats.mockResolvedValue(mockStats)
     wailsMock.ListAssetFiles.mockResolvedValue(mockFiles)
+    // 文件夹树（PRD PR1）默认空树（节点形状 model.AssetFolderNode），按用例覆盖
+    wailsMock.ListAssetFolders.mockResolvedValue([])
+    // 文件夹管理（PRD PR2）默认安全形态：新建返回空节点、删除 0 条 lost、重命名零同步
+    wailsMock.CreateAssetFolder.mockResolvedValue({ path: '', name: '', children: [], excluded: false, derived: false, fileCount: 0 })
+    wailsMock.DeleteAssetFolder.mockResolvedValue(0)
+    wailsMock.RenameAssetFolder.mockResolvedValue({ oldPath: '', newPath: '', replaced: 0, excluded: 0, revived: 0 })
+    // 文件批量移动（PR3）默认空汇总（形状对齐 model.AssetBatchMoveResult）
+    wailsMock.MoveAssetFiles.mockResolvedValue({ total: 0, succeeded: 0, failed: 0, items: [] })
+    // 目录级移动与文件夹标注（PR4）默认安全形态
+    wailsMock.MoveAssetFolder.mockResolvedValue({ oldPath: '', newPath: '', replaced: 0, excluded: 0, revived: 0 })
+    wailsMock.GetAssetFolderMeta.mockResolvedValue({ folderPath: '', note: '', tags: [], updatedAt: '' })
+    wailsMock.UpdateAssetFolderMeta.mockResolvedValue(null)
     wailsMock.ListAssetSlides.mockResolvedValue({ items: mockSlides, total: mockSlides.length })
     wailsMock.SearchAssets.mockResolvedValue(mockSearchPage)
     wailsMock.StartAssetScan.mockResolvedValue({ total: 2, new: 1, updated: 1, unchanged: 0, failed: 0, encrypted: 0, denied: 0, removed: 0 })
@@ -627,6 +659,323 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.assets-stats-line').text()).toContain('幻灯片 3')
   })
 
+  // ---- 文件夹树（PRD「素材管理：文件夹树与拖拽整理」PR1）----
+
+  it('文件夹树加载：挂载即以当前库调 ListAssetFolders，树数据与徽标计数映射传入 FolderTree', async () => {
+    wailsMock.ListAssetFolders.mockResolvedValue([
+      { path: '方案A', name: '方案A', children: [], excluded: false, fileCount: 1 }
+    ])
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    expect(wailsMock.ListAssetFolders).toHaveBeenCalledWith('lib-1')
+    expect(tree.props('nodes')).toHaveLength(1)
+    expect(tree.props('nodes')[0].path).toBe('方案A')
+    // 徽标计数映射随底册聚合（utils/assetFolder 单点）：根含全部、目录递归计数
+    expect(tree.props('countMap')['']).toBe(2)
+    expect(tree.props('countMap')['方案A']).toBe(1)
+  })
+
+  it('文件夹树选中过滤：文件视图按选中目录前缀递归过滤主区卡片（a vs ab 边界）', async () => {
+    // 前缀边界夹具：方案A 与 方案AB 为兄弟目录，「方案A」选中不得命中 方案AB 下文件
+    wailsMock.ListAssetFiles.mockResolvedValue([
+      ...mockFiles,
+      {
+        id: 13, path: '方案AB/兄弟目录文件.pptx', size: 1, modTime: '', status: 'ok',
+        title: '兄弟目录文件', note: '', rating: 0, tags: [], createdAt: '', updatedAt: ''
+      }
+    ])
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    let cards = wrapper.findAll('.asset-card')
+    expect(cards.length).toBe(1)
+    expect(cards[0].text()).toContain('城商行方案')
+
+    // 递归含子目录（D3）：选中带子目录的前缀命中任意深度后代
+    wailsMock.ListAssetFiles.mockResolvedValue([
+      mockFiles[0],
+      {
+        id: 14, path: '方案A/子目录/深层文件.pptx', size: 1, modTime: '', status: 'ok',
+        title: '深层文件', note: '', rating: 0, tags: [], createdAt: '', updatedAt: ''
+      }
+    ])
+    const wrapper2 = await createWrapper()
+    const tree2 = wrapper2.findComponent({ name: 'FolderTreeStub' })
+    await tree2.vm.$emit('select', '方案A')
+    await flushPromises()
+    cards = wrapper2.findAll('.asset-card')
+    expect(cards.length).toBe(2) // 方案A 自身文件 + 子目录内文件
+
+    // 回根「全部素材」（folderPath=''）恢复全量
+    await tree2.vm.$emit('select', '')
+    await flushPromises()
+    expect(wrapper2.findAll('.asset-card').length).toBe(2)
+  })
+
+  it('检索语境树过滤叠加：选中目录后检索，folderPath 随 opts 下发（R7 AND 叠加）且树选中保留', async () => {
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    expect(tree.props('selectedPath')).toBe('方案A')
+
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    // 检索联动（PR2）：opts.folderPath 随检索下发，与关键词 AND 叠加（mock 不做
+    // 真实过滤，卡片数断言仅验证渲染链路）；树选中保留不清空（§8.7 矩阵）
+    expect(wrapper.findAll('.asset-card').length).toBe(1) // 文件视图下仅文件命中
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行',
+      expect.objectContaining({ folderPath: '方案A' }))
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('方案A')
+  })
+
+  // ---- 文件夹树管理操作（PRD PR2 R3：新增/重命名/删除，分派与刷新在宿主）----
+
+  it('新建子目录：分派 CreateAssetFolder（父路径 + 名称）并局部刷新树', async () => {
+    const wrapper = await createWrapper()
+    const callsBefore = wailsMock.ListAssetFolders.mock.calls.length
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('create', '方案A', '新子目录')
+    await flushPromises()
+
+    expect(wailsMock.CreateAssetFolder).toHaveBeenCalledWith('lib-1', '方案A', '新子目录')
+    expect(wailsMock.ListAssetFolders.mock.calls.length).toBe(callsBefore + 1)
+  })
+
+  it('重命名目录：分派 RenameAssetFolder 并按返回前缀改写选中目录（浏览语境保留）', async () => {
+    wailsMock.RenameAssetFolder.mockResolvedValue({ oldPath: '方案A', newPath: '方案A2', replaced: 2, excluded: 0, revived: 0 })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+
+    await tree.vm.$emit('rename', '方案A', '方案A2')
+    await flushPromises()
+
+    expect(wailsMock.RenameAssetFolder).toHaveBeenCalledWith('lib-1', '方案A', '方案A2')
+    // 选中目录位于重命名前缀下：按新前缀改写（folderPath = newPath + 子路径）
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('方案A2')
+  })
+
+  it('删除目录：非空（递归 PPT 数 > 0）先二次确认后以 force=true 分派，选中位于删除前缀下复位根', async () => {
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+
+    await tree.vm.$emit('delete', { path: '方案A', name: '方案A' })
+    await flushPromises()
+
+    // mockFiles 中方案A 下有 1 个 PPT（countMap 递归计数 > 0）→ 前端预确认 + force=true
+    expect(wailsMock.DeleteAssetFolder).toHaveBeenCalledWith('lib-1', '方案A', true)
+    expect(wailsMock.ListAssetFolders).toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('')
+  })
+
+  it('删除目录：后端实测非空返回 E_ASSETS_FOLDER_NOT_EMPTY 时二次确认后以 force=true 重调', async () => {
+    wailsMock.DeleteAssetFolder.mockRejectedValueOnce({
+      code: ErrorCode.AssetsFolderNotEmpty,
+      message: '目录「空目录」不是空目录（含 3 个条目），确定要连同内容一起删除吗？'
+    })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    // 空目录（countMap 计数 0）跳过前端预确认，直接以 force=false 首调
+    await tree.vm.$emit('delete', { path: '空目录', name: '空目录' })
+    await flushPromises()
+
+    expect(wailsMock.DeleteAssetFolder).toHaveBeenNthCalledWith(1, 'lib-1', '空目录', false)
+    // 命中确认型拒绝：二次确认后 force=true 重调
+    expect(wailsMock.DeleteAssetFolder).toHaveBeenNthCalledWith(2, 'lib-1', '空目录', true)
+  })
+
+  it('目录选中矩阵复位面：清详情/预览/选中/文件过滤/聚合展开缓存（§8.7 登记点位）', async () => {
+    const wrapper = await createWrapper()
+    // 先装配详情 + 选中态
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    const check = wrapper.find('.asset-card-check')
+    await check.setValue(true)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AssetSelectionBar' }).props('count')).toBe(1)
+
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+
+    // 数据过滤语境变更：详情/预览/选中/文件过滤清空（对齐 onFacetChange 同类点位）
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'AssetSelectionBar' }).props('count')).toBe(0)
+  })
+
+  // ---- 文件拖拽移动（PRD PR3 R4/R6/R9：HTML5 DnD 编排，分派在宿主单点）----
+
+  const makeDataTransfer = () => ({ setData: vi.fn(), effectAllowed: null })
+
+  it('Ctrl+点击轻量多选：勾选切换进选中集（普通点击详情语义不变）', async () => {
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    await cards[0].trigger('click', { ctrlKey: true })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AssetSelectionBar' }).props('count')).toBe(1)
+    // Ctrl+点击进选中集后不进详情
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    // 普通点击维持详情语义
+    await cards[1].trigger('click', {})
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+  })
+
+  it('dragstart 载荷：拖拽卡在选中集内带整个选中集文件 ID，否则仅该卡', async () => {
+    const wrapper = await createWrapper()
+    const cards = wrapper.findAll('.asset-card')
+    // 选中两张（Ctrl+点击）
+    await cards[0].trigger('click', { ctrlKey: true })
+    await cards[1].trigger('click', { ctrlKey: true })
+    await flushPromises()
+    const dt1 = makeDataTransfer()
+    await cards[0].trigger('dragstart', { dataTransfer: dt1 })
+    expect(dt1.setData).toHaveBeenCalledWith(
+      ASSET_FILE_DRAG_MIME,
+      JSON.stringify({ fileIds: [11, 12] })
+    )
+    // 未选中卡拖拽：仅该卡
+    const dt2 = makeDataTransfer()
+    const wrapper2 = await createWrapper()
+    await wrapper2.findAll('.asset-card')[0].trigger('dragstart', { dataTransfer: dt2 })
+    expect(dt2.setData).toHaveBeenCalledWith(
+      ASSET_FILE_DRAG_MIME,
+      JSON.stringify({ fileIds: [11] })
+    )
+  })
+
+  it('drop 分派：MoveAssetFiles（库 + fileIDs + 目标）+ 底册/树刷新 + 选中集清空 + 成功 toast', async () => {
+    wailsMock.MoveAssetFiles.mockResolvedValue({ total: 1, succeeded: 1, failed: 0, items: [{ fileId: 11, status: 'ok', label: '方案A/城商行方案.pptx' }] })
+    const wrapper = await createWrapper()
+    const listCallsBefore = wailsMock.ListAssetFiles.mock.calls.length
+    const folderCallsBefore = wailsMock.ListAssetFolders.mock.calls.length
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    await tree.vm.$emit('drop-files', '归档', [11])
+    await flushPromises()
+
+    expect(wailsMock.MoveAssetFiles).toHaveBeenCalledWith('lib-1', [11], '归档')
+    // 数据变更点位：底册与树徽标刷新，folderPath 保留（§8.7 登记）
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBe(listCallsBefore + 1)
+    expect(wailsMock.ListAssetFolders.mock.calls.length).toBe(folderCallsBefore + 1)
+    expect(tree.props('selectedPath')).toBe('方案A')
+    // 拖拽多选收口：选中集清空
+    expect(wrapper.findComponent({ name: 'AssetSelectionBar' }).props('count')).toBe(0)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('drop 汇总分流：部分失败 warning 带首个失败原因（对齐批量打标签汇总口径）', async () => {
+    wailsMock.MoveAssetFiles.mockResolvedValue({
+      total: 2, succeeded: 1, failed: 1,
+      items: [
+        { fileId: 11, status: 'ok', label: 'a' },
+        { fileId: 12, status: 'failed', message: '目标目录已存在同名文件「b.pptx」' }
+      ]
+    })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('drop-files', '归档', [11, 12])
+    await flushPromises()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.warning).toHaveBeenCalledWith(
+      expect.stringContaining('目标目录已存在同名文件「b.pptx」')
+    )
+  })
+
+  it('drop 在途防重：移动 Promise 期间再次 drop 被拒绝（busy 标记）', async () => {
+    let resolveMove
+    wailsMock.MoveAssetFiles.mockImplementation(() => new Promise((resolve) => { resolveMove = resolve }))
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('drop-files', '归档', [11])
+    await tree.vm.$emit('drop-files', '归档', [12])
+    await flushPromises()
+    expect(wailsMock.MoveAssetFiles).toHaveBeenCalledTimes(1)
+    resolveMove({ total: 1, succeeded: 1, failed: 0, items: [] })
+    await flushPromises()
+    expect(wailsMock.MoveAssetFiles).toHaveBeenCalledTimes(1)
+  })
+
+  // ---- 目录级拖拽移动与文件夹标注（PRD R5/R8，PR4）----
+
+  it('drop-folder 分派：MoveAssetFolder + 选中目录按新前缀改写 + 树刷新', async () => {
+    wailsMock.MoveAssetFolder.mockResolvedValue({ oldPath: '方案A', newPath: '归档/方案A', replaced: 1, excluded: 0, revived: 0 })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    const folderCallsBefore = wailsMock.ListAssetFolders.mock.calls.length
+
+    await tree.vm.$emit('drop-folder', '方案A', '归档')
+    await flushPromises()
+
+    expect(wailsMock.MoveAssetFolder).toHaveBeenCalledWith('lib-1', '方案A', '归档')
+    // 选中目录位于源前缀下：按新前缀改写（浏览语境保留）
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('归档/方案A')
+    expect(wailsMock.ListAssetFolders.mock.calls.length).toBe(folderCallsBefore + 1)
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('文件夹标注：菜单入口加载预填（标签 ID 口径映射），保存按名称数组整体替换', async () => {
+    wailsMock.GetAssetFolderMeta.mockResolvedValue({
+      folderPath: '方案A', note: '原有备注',
+      tags: [{ id: 1, name: '重点', color: '#2563eb', parentId: 0 }],
+      updatedAt: '2026-10-20 10:00:00'
+    })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('annotate', { path: '方案A', name: '方案A' })
+    await flushPromises()
+
+    expect(wailsMock.GetAssetFolderMeta).toHaveBeenCalledWith('lib-1', '方案A')
+    // 弹窗预填：备注 + 标签 ID（经共享标签列表映射回显）
+    const dialog = wrapper.find('.stub-dialog')
+    expect(dialog.exists()).toBe(true)
+
+    await wrapper.find('textarea').setValue('更新后的备注')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+
+    expect(wailsMock.UpdateAssetFolderMeta).toHaveBeenCalledWith('lib-1', '方案A', {
+      note: '更新后的备注',
+      tagNames: ['重点'] // ID 1 → 名称映射（AssetTagTreeSelect 桩 loaded 回传的共享标签表）
+    })
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalled()
+  })
+
+  it('切库复位：树选中与树数据属库语境，库切换落定后回「全部素材」并重拉树', async () => {
+    // lib-2 须在库列表内（切库后 hasLibrary 判定依赖库列表命中）
+    wailsMock.ListAssetLibraries.mockResolvedValue([
+      mockLibrary,
+      { ...mockLibrary, id: 'lib-2', name: '第二库' }
+    ])
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+
+    wailsMock.ListAssetFolders.mockClear()
+    const select = wrapper.findComponent(ElSelectStub)
+    // 切库经 el-select stub change 事件（onLibraryChange → resetAndReloadView）
+    await select.vm.$emit('update:modelValue', 'lib-2')
+    await select.vm.$emit('change', 'lib-2')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('')
+    expect(wailsMock.ListAssetFolders).toHaveBeenCalledWith('lib-2')
+  })
+
   it('视图切换到幻灯片视图：按分页参数调用 ListAssetSlides 并渲染页码卡片', async () => {
     const wrapper = await createWrapper()
     const group = wrapper.findComponent(ElRadioGroupStub)
@@ -697,6 +1046,7 @@ describe('AssetsPanel', () => {
       sizeTo: 0,
       sortBy: 'relevance',
       sortDir: 'desc',
+      folderPath: '',
       limit: 50,
       offset: 0
     })
@@ -921,6 +1271,7 @@ describe('AssetsPanel', () => {
       sizeTo: 0,
       sortBy: 'relevance',
       sortDir: 'desc',
+      folderPath: '',
       limit: 50,
       offset: 0
     })
@@ -943,6 +1294,7 @@ describe('AssetsPanel', () => {
       sizeTo: 0,
       sortBy: 'relevance',
       sortDir: 'desc',
+      folderPath: '',
       limit: 50,
       offset: 0
     })
@@ -1431,6 +1783,7 @@ describe('AssetsPanel', () => {
       sizeTo: 0,
       sortBy: 'relevance',
       sortDir: 'desc',
+      folderPath: '',
       limit: 50,
       offset: 0
     })
@@ -2846,6 +3199,7 @@ describe('AssetsPanel', () => {
       sizeTo: 0,
       sortBy: 'relevance',
       sortDir: 'desc',
+      folderPath: '',
       limit: 50,
       offset: 2
     })

@@ -107,6 +107,12 @@ const (
 	// 交互模式）。备份生成失败的具体原因经消息透出。
 	ErrCodeAssetsDeleteBackupFailed = "E_ASSETS_DELETE_BACKUP_FAILED"
 
+	// 文件夹管理域（PRD「素材管理：文件夹树与拖拽整理」PR2；warning，确认型拒绝）：
+	// 非空目录 force=false 删除被拒（删除未发生，目录未受损），前端弹二次确认
+	//（文案含目录内条目数）后以 force=true 重调（对齐 E_ASSETS_RELINK_MISMATCH
+	// 的 force 重调交互模式）。
+	ErrCodeAssetsFolderNotEmpty = "E_ASSETS_FOLDER_NOT_EMPTY"
+
 	// 素材购物栏域（素材管理「购物栏」：跨库页级收集 + 按序合并导出）
 	ErrCodeCartExportInProgress = "E_CART_EXPORT_IN_PROGRESS" // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
 

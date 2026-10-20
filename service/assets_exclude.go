@@ -116,6 +116,22 @@ func (m *assetExcludeMatcher) matchPath(relSlash string) bool {
 	return m.matchExt(path.Ext(relSlash))
 }
 
+// matchDirPath 目录相对路径判定（文件夹树管理面专用，PRD PR2）：目录路径的
+// 全部段均按目录规则判定（区别于 matchPath 的「末段按文件后缀」——目录基名可能
+// 形似带后缀如「x.tmp」，按文件后缀判定会误命中）。逐段复用 matchDir 单点，
+// 禁第二套目录匹配口径。空路径（库根）不命中（root 豁免同语义）。
+func (m *assetExcludeMatcher) matchDirPath(relSlash string) bool {
+	if !m.active() || relSlash == "" {
+		return false
+	}
+	for _, seg := range strings.Split(relSlash, "/") {
+		if m.matchDir(seg) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeAssetExcludeExt 后缀规则归一：TrimSpace → 剥「*.」前缀 → 剥前导点
 // → 补前导点 → ToLower。三输入形态 tmp / .tmp / *.tmp 归一为同一存储值 .tmp；
 // 空白与归一后为空（如输入「.」）返回空串（调用方丢弃）。

@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 6
+const assetsSchemaVersion = 7
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -204,6 +204,35 @@ UPDATE tags SET sort_order = (
 );
 `
 
+// assetsSchemaV7SQL v7 迁移：文件夹级标注表（素材管理 PRD R8，文件夹树 PR4
+// ——对齐文件/页级标注体系：标签集 + 业务备注，星级不设（目录无星级语义））。
+//
+// 设计要点：
+//   - 键 = folder_path（相对库根目录的正斜杠路径，与 files.path / split_records
+//     同一口径）而非数值 ID——目录无索引行（树为磁盘真实目录派生，PRD D1），
+//     路径是目录唯一稳定标识；重命名/移动目录时键随前缀替换同事务级联改键
+//     （replaceFilePaths 统一收口），删除目录时级联删标注（DeleteAssetFolder
+//     显式 DELETE，对齐拆分记录清理口径）。
+//   - 标签集独立绑定表 folder_tags（键 (folder_path, tag_id)）而非 folder_meta
+//     内嵌 JSON：与 file_tags/slide_tags 同构——tag_id 外键 tags(id) ON DELETE
+//     CASCADE 保证标签本体删除时绑定随之清除（与 deleteTagTree 显式 DELETE 双
+//     保险口径一致），嵌 JSON 会留悬挂 ID 需额外清扫链路。
+//   - 业务备注（note）不入 FTS（对齐页级口径，文件夹备注不参与关键词检索）；
+//     无 Go 层回填（存量库无文件夹标注，空表即正确初态）。
+const assetsSchemaV7SQL = `
+CREATE TABLE IF NOT EXISTS folder_meta (
+	folder_path TEXT    PRIMARY KEY,
+	note        TEXT    NOT NULL DEFAULT '',
+	updated_at  TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS folder_tags (
+	folder_path TEXT    NOT NULL,
+	tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+	PRIMARY KEY (folder_path, tag_id)
+);
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -215,6 +244,7 @@ var assetsMigrations = map[int]string{
 	4: assetsSchemaV4SQL,
 	5: assetsSchemaV5SQL,
 	6: assetsSchemaV6SQL,
+	7: assetsSchemaV7SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

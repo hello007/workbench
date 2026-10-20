@@ -218,6 +218,18 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 - **覆盖边界**：覆盖 = 以当前检索状态 Save 同 id（名称沿用原名，MVP 无改名语义，createdAt 后端保留原值）；**仅本库条目可覆盖**——覆盖按当前库重写 libraryId 会使条目静默搬家；非 searchMode（无可快照条件）禁用。重名拒绝/名称校验由后端 Save 返回经 handleError 透传（弹窗保持打开可改名重试）。
 - **列表权威**：「已存搜索」弹层打开（@show）与保存/覆盖/删除成功后均 List 重拉（本地不缓存增删）；行级防重 `savedSearchMutatingId` 占位（覆盖/删除在途禁同行重复提交）。
 
+### 8.7 文件夹树维度（folderPath，PRD「素材管理：文件夹树与拖拽整理」PR2 沉淀）
+
+- **维度定性**：folderPath（左侧文件夹树选中目录，'' = 根「全部素材」）为独立过滤维度——检索语境经 `SearchAssets opts.folderPath` 与关键词/标签/facet AND 叠加（后端三路径共用 `assetsFolderFilter` 单点，目录边界语义 = path 恰等于前缀或以「前缀/」开头，禁同头缀误伤）；浏览语境客户端前缀过滤（文件视图滤 `fileEntries` 全量清单；幻灯片视图滤分页已加载段 + `ensureFolderSlidesLoaded` 续拉兜底，单文件过滤 `fileFilterPath` 同款先例）。
+- **清空点位矩阵（§8.2 同构登记）**：切库（`watch(currentLibraryId)`→`resetAndReloadView`）清（树数据与选中属库语境）；扫描刷新（`resetAndReloadView`）清（底册重解析路径集合已变）；**溯源跳转**（`traceToSourceFile` 直赋路径）清——直赋不经 onFolderSelect，须单独补清（对齐 facet 直赋同坑），目录过滤会掩盖溯源目标。**其余点位保留**：检索条件变更（applySearch/onFacetChange/clearAllFilters/排序变更）、viewMode 切换（文件/幻灯片两视图同按归属文件前缀过滤，维度通约）、平铺/仅自身标签开关、保存条件调取（走 applySearch 同路径）均不清 folderPath（AND 组合维度语义，对齐 facet 跨检索保留先例）。
+- **选中目录即语境变更**（`onFolderSelect`）：复位面对齐 onFacetChange 同类点位——清详情/预览/选中/文件过滤/聚合展开缓存 + searchSeq 自增；检索语境重跑检索（folderPath 并入 opts），浏览幻灯片视图接目录续拉兜底。
+- **保存检索条件快照不含 folderPath**（登记边界）：树选中属会话态导航语境而非检索条件，调取后树选中保留现状；导出「检索命中」范围**含 folderPath**（`exportSearchActive` 将 folderPath 计入激活判定——仅目录选中也构成缩窄语境，后端按文件夹前缀重放文件清单，全库导出不得忽略目录过滤）。
+- **聚合展开子项查询（toggleAgg）刻意不带 folderPath**：目录过滤为文件维度判定，聚合父卡能出现即归属文件已过目录筛选，同文件全部页继承同一判定（与 facet 省略同款 no-op 语义）。
+- **文件拖拽移动（PR3 R4）为数据变更点位非语境变更**：移动成功刷新文件底册与树徽标，**不清 folderPath / 不清树选中**（对齐批量打标签「数据变更不清选中」同性质），被移出当前目录的条目随清单刷新自然消失；拖拽多选集（与勾选集共用 selectedKeys 键空间）在移动完成后清空（拖拽操作收口，协调项拍板）。dragstart 载荷 MIME/序列化单点 `utils/assetFolder`（`ASSET_FILE_DRAG_MIME`/`buildAssetDragPayload`/`parseAssetDragPayload`），禁消费点手拼；拖拽卡在选中集内 = 整个选中集的文件卡批量移动，否则仅该卡。
+- **目录级移动（PR4 R5/D）与重命名统一核心**：`moveAssetFolderCore` 单点（RenameAssetFolder 委托同父形态 / MoveAssetFolder 传目标目录），磁盘 rename 先行 → 索引前缀同步（assetPathRenamesForPrefix + replaceFilePaths）→ 排除规则双向翻转 → 自动增量扫描收敛（锁段收拢闭包，扫描在锁释放后自取锁）。**目标不得位于源目录自身子树内**（rename 进后代语义未定义，前后端双防线——前端软拦截 drop、后端核心硬拒绝）；排除命中源刻意放行（移出排除名是恢复索引可见的唯一目录级出口，与重命名同口径）；源含拆分记录维持拒绝（宁严勿错）。
+- **folder_meta 键级联契约（PR4 R8）**：文件夹标注 = `folder_meta`（folder_path 主键，note）+ `folder_tags`（(folder_path, tag_id)，FK tags CASCADE——与 file_tags/slide_tags 同构，禁 folder_meta 内嵌 JSON（标签删除留悬挂 ID））；**键 = folder_path 随目录重命名/移动在同事务级联改键**（replaceFilePaths 扩参 folderKeyOld/New，与 files.path 更新同一事务保证原子，分裂则中途失败留标注孤儿键；ReplaceAssetPathPrefix 前缀替换同样联动改键）；删除目录级联删标注（deleteFolderMetaByPathPrefix 前缀边界语义）；标签删除经 deleteTagTree 级联解绑（folder_tags 纳入三绑定表清单）。标注纯标注层不入 FTS（对齐页级口径）；库根/排除命中目录/派生容器禁标注（refuseFolderAnnotation 单点）。schema v7 迁移，无 Go 层回填（空表即正确初态）。
+- **folder 键级联的两个实测坑（trellis-check P0/P1）**：① `replaceFilePaths` 的 substr 偏移必须按 **SQLite 字符口径**（`substr(folder_path, length(?) + 1)`）而非 Go `len()` 字节数——旧目录名含中文时字节偏移截断错位（`素材/a.pptx` 按字节截出 `ptx`），folder_meta/folder_tags 键迁移后内容损坏，回归用例 `TestAssetFolderMove_NonASCIIKeyCascade`（中文目录名，修复前必失败）守护；② renames 清单为空（空目录/仅非 PPT 文件的目录，均可合法标注）**不得提前 return 跳过键级联**——replaceFilePaths 对空 renames 仅做文件夹键更新，跳过则重命名后标注留旧路径孤儿键，回归用例 `TestAssetFolderMove_EmptyFolderKeyCascade` 守护。
+
 ## 9. 批量打标签与多级标签树（SRS §2.4，2026-10-16 第六批沉淀）
 
 ### 9.1 标签树数据源与级联命中

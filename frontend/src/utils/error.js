@@ -41,6 +41,7 @@ export const ErrorCode = Object.freeze({
   AssetsRelinkOutsideLib: 'E_ASSETS_RELINK_OUT_OF_LIB', // 重链目标位于素材根目录之外（warning，引导在库内重新选择；前缀替换新路径越界整体拒绝同码）
   AssetsPrefixNoMatch: 'E_ASSETS_PREFIX_REPLACE_NO_MATCH', // 前缀替换旧前缀零命中（warning，引导核对前缀拼写）
   AssetsDeleteBackupFailed: 'E_ASSETS_DELETE_BACKUP_FAILED', // 删库前自动备份失败（warning，确认型拒绝非真失败——删除未发生，用户确认「删除后无恢复点」后以 allowNoBackup=true 重调）
+  AssetsFolderNotEmpty: 'E_ASSETS_FOLDER_NOT_EMPTY', // 非空目录 force=false 删除被拒（warning，确认型拒绝非真失败——删除未发生，前端二次确认后以 force=true 重调）
   // 素材购物栏域错误码（素材管理·购物栏），取值与 model/app_error.go 购物栏域段一致。
   CartExportInProgress: 'E_CART_EXPORT_IN_PROGRESS', // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
   // PPTX 预览转换域错误码（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer），
@@ -81,6 +82,7 @@ const WARNING_CODES = new Set([
   ErrorCode.AssetsRelinkOutsideLib,
   ErrorCode.AssetsPrefixNoMatch,
   ErrorCode.AssetsDeleteBackupFailed,
+  ErrorCode.AssetsFolderNotEmpty,
   ErrorCode.CartExportInProgress
 ])
 

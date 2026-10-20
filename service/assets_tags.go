@@ -410,7 +410,9 @@ func (s *assetsStore) deleteTagTree(tagID int64) (int64, error) {
 		args = append(args, id)
 	}
 	var affected int64
-	for _, table := range []string{"file_tags", "slide_tags"} {
+	// folder_tags 纳入级联解绑（PR4 R8 文件夹标注：标签删除时绑定随之清除，
+	// 与 file_tags/slide_tags 同构双保险口径）
+	for _, table := range []string{"file_tags", "slide_tags", "folder_tags"} {
 		res, err := tx.Exec("DELETE FROM "+table+" WHERE tag_id IN ("+placeholders+")", args...)
 		if err != nil {
 			return 0, err

@@ -570,7 +570,7 @@ type assetPathRename struct {
 	newRel  string
 }
 
-func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string) error {
+func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string, folderKeyOld, folderKeyNew string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -592,6 +592,31 @@ func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string) er
 			return err
 		} else if n == 0 {
 			return sql.ErrNoRows
+		}
+	}
+	// 文件夹标注键同事务级联改键（PRD R8/PR4：folder_meta/folder_tags 以
+	// folder_path 为键，目录重命名/移动时键随路径前缀替换——与 files.path 更新
+	// 同事务保证「文件路径更新 + 标注键迁移」原子，分裂则中途失败留标注孤儿键）。
+	// 空串 = 调用方无文件夹键语义（防御预留），零行为变化。目录边界语义与
+	// listFilesByPathPrefix 同构（恰等 + LIKE 前缀/%，LIKE 转义单点）。
+	// substr 偏移必须用 SQL length(?)（字符数）而非 Go len()（字节数）：SQLite
+	// substr 对 TEXT 按字符计位，非 ASCII 目录名（中文，字节长 > 字符长）用字节
+	// 偏移会跳过错误数量的字符致新键截断错位（如「素材」→ 后缀丢失），故在 SQL
+	// 侧对绑定参数求字符长度。
+	if folderKeyOld != "" {
+		if _, err := tx.Exec(
+			"UPDATE folder_meta SET folder_path = ? || substr(folder_path, length(?) + 1), updated_at = ? "+
+				"WHERE folder_path = ? OR folder_path LIKE ? ESCAPE '\\'",
+			folderKeyNew, folderKeyOld, now, folderKeyOld, escapeLikePattern(folderKeyOld)+"/%",
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"UPDATE folder_tags SET folder_path = ? || substr(folder_path, length(?) + 1) "+
+				"WHERE folder_path = ? OR folder_path LIKE ? ESCAPE '\\'",
+			folderKeyNew, folderKeyOld, folderKeyOld, escapeLikePattern(folderKeyOld)+"/%",
+		); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
@@ -1298,23 +1323,30 @@ type tagFilteredFileOrdering struct {
 
 // listTagFilteredFiles 纯标签浏览的文件条目序（keyword 为空时的数据源）。
 // facet 非空时在标签子查询之外追加 facet 条件（同表列判定，单点构造见
-// assetsFacetFilter.whereClause）。
-func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFilter) ([]tagFilteredFileOrdering, error) {
+// assetsFacetFilter.whereClause）；folder 非空时同层追加 folderPath 前缀条件
+// （单点构造见 assetsFolderFilter.whereClause，R7 检索联动）。
+func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFilter, folder *assetsFolderFilter) ([]tagFilteredFileOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
 	args := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
 		args = append(args, id)
 	}
-	facetClause := ""
+	extraClause := ""
 	if facet != nil {
 		var facetArgs []any
-		facetClause, facetArgs = facet.whereClause("f.")
+		extraClause, facetArgs = facet.whereClause("f.")
 		args = append(args, facetArgs...)
+	}
+	if folder != nil {
+		var folderArgs []any
+		folderClause, folderArgs := folder.whereClause("f.path")
+		extraClause += folderClause
+		args = append(args, folderArgs...)
 	}
 	rows, err := s.db.Query(
 		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ? AND f.id IN "+
 			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+"))"+
-			facetClause+" ORDER BY f.path",
+			extraClause+" ORDER BY f.path",
 		append([]any{model.AssetFileStatusOK}, args...)...)
 	if err != nil {
 		return nil, err
@@ -1347,39 +1379,48 @@ type tagFilteredSlideOrdering struct {
 // 文件绑定 ∪ 页自身绑定】命中，onlyOwn=true 仅页自身绑定——与 FTS 检索路径的
 // slideTagRowMatches 同一语义，SQL 子查询与 slideOwnTagFilterSet 同源）。
 // onlyOwn 时文件绑定分支整段裁剪（仅页自身标签语义）。
-// facet 非空时对归属文件列追加 facet 条件（幻灯片条目按归属文件属性继承判定，
-// 已 JOIN files，单点构造见 assetsFacetFilter.whereClause）。
-func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet *assetsFacetFilter) ([]tagFilteredSlideOrdering, error) {
+// facet 非空时对归属文件列追加 facet 条件、folder 非空时同层追加 folderPath 前缀
+// 条件（幻灯片条目按归属文件 f.path 继承判定，已 JOIN files，单点构造见
+// assetsFacetFilter/assetsFolderFilter whereClause）。
+func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet *assetsFacetFilter, folder *assetsFolderFilter) ([]tagFilteredSlideOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
 	baseArgs := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
 		baseArgs = append(baseArgs, id)
 	}
-	facetClause := ""
-	var facetArgs []any
+	extraClause := ""
+	var extraArgs []any
 	if facet != nil {
-		facetClause, facetArgs = facet.whereClause("f.")
+		var facetArgs []any
+		extraClause, facetArgs = facet.whereClause("f.")
+		extraArgs = append(extraArgs, facetArgs...)
 	}
-	// 双子查询形态的参数序：status 占位 + 文件绑定子查询标签参数 + 页自身绑定
-	// 子查询标签参数 + facet 条件参数（facetClause 位于两类标签子查询之后，参数
-	// 须随 SQL 片段位置收尾——placeholders 构造复用现有形态）
+	if folder != nil {
+		var folderArgs []any
+		folderClause, folderArgs := folder.whereClause("f.path")
+		extraClause += folderClause
+		extraArgs = append(extraArgs, folderArgs...)
+	}
+	// 双子查询形态的参数序：status 占位 + 标签子查询参数 + 附加条件参数
+	//（extraClause 位于两类标签子查询之后，参数须随 SQL 片段位置收尾——
+	// placeholders 构造复用现有形态）
 	query := "SELECT s.id, s.file_id, f.path, s.slide_num, f.mtime_ns, f.rating FROM slides s JOIN files f ON f.id = s.file_id "
 	var args []any
 	if onlyOwn {
 		query += "WHERE f.status = ? AND (s.file_id, s.slide_num) IN " +
 			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + "))" +
-			facetClause + " ORDER BY f.path, s.slide_num"
+			extraClause + " ORDER BY f.path, s.slide_num"
 		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
-		args = append(args, facetArgs...)
+		args = append(args, extraArgs...)
 	} else {
 		query += "WHERE f.status = ? AND (s.file_id IN " +
 			"(SELECT file_id FROM file_tags WHERE tag_id IN (" + placeholders + ")) OR " +
 			"(s.file_id, s.slide_num) IN " +
 			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + ")))" +
-			facetClause + " ORDER BY f.path, s.slide_num"
+			extraClause + " ORDER BY f.path, s.slide_num"
 		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
 		args = append(args, baseArgs...)
-		args = append(args, facetArgs...)
+		args = append(args, extraArgs...)
 	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -1844,6 +1885,33 @@ func (s *assetsStore) deleteSplitRecord(relPath string) error {
 	return err
 }
 
+// splitRecordExistsByPathPrefix 目录前缀下是否存在拆分记录（文件夹重命名守卫
+// 判定用，PRD PR2 宁严勿错）：source_rel_path 恰等于前缀或以「前缀 + /」开头，
+// 目录边界语义与 listFilesByPathPrefix 同构（LIKE 转义单点 escapeLikePattern）。
+func (s *assetsStore) splitRecordExistsByPathPrefix(relDir string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM split_records WHERE source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\'",
+		relDir, escapeLikePattern(relDir)+"/%",
+	).Scan(&n)
+	return n > 0, err
+}
+
+// deleteSplitRecordsByPathPrefix 删除目录前缀下全部拆分记录并返回删除行数
+// （文件夹删除后的索引收口：源文件物理已删，记录保留会以陈旧哈希误判复拆增量
+// 跳过；派生缓存目录产物成孤儿无害，随库删除统一收口）。目录边界语义与
+// splitRecordExistsByPathPrefix 同构（同一 WHERE 构造，禁两套口径）。
+func (s *assetsStore) deleteSplitRecordsByPathPrefix(relDir string) (int64, error) {
+	res, err := s.db.Exec(
+		"DELETE FROM split_records WHERE source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\'",
+		relDir, escapeLikePattern(relDir)+"/%",
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // fileHashStatusByPath 按相对路径取文件记录的哈希与状态（拆分增量判定的源
 // 哈希权威源）。sql.ErrNoRows 透传，调用方转用户可读错误。QueryRow+Scan 单行
 // 口径（单连接池自锁纪律见 libraryStats 注释）。
@@ -1877,6 +1945,128 @@ func (s *assetsStore) listOKFileSplitSources() ([]assetSplitSource, error) {
 		sources = append(sources, src)
 	}
 	return sources, rows.Err()
+}
+
+// ---------- 文件夹维度筛选（PRD R7 检索联动，素材管理 PR2） ----------
+
+// assetsFolderFilter folderPath 维度筛选条件（PRD R7：文件夹为独立过滤维度，与
+// 关键词/标签/facet AND 叠加）。与 assetsFacetFilter 同层单点：检索三路径（keyword
+// 批量判定 / tagsOnly 两查询 / facets-only 数据源）全部消费 whereClause 的同一
+// 构造，禁在单一路径内自行拼条件（口径分叉 = 判定不一致）。
+//
+// 匹配语义 = 目录边界前缀（col 恰等于前缀，或以「前缀 + /」开头）：`a` 命中
+// `a` 与 `a/...`，不误伤 `ab/...` 同头缀兄弟目录（LIKE 转义单点 escapeLikePattern，
+// 与 listFilesByPathPrefix 同构）。幻灯片条目按归属文件 path 判定（JOIN files 的
+// f.path 列，继承口径与 facet 一致）。
+type assetsFolderFilter struct {
+	prefix string // 库内相对目录前缀（正斜杠，不含尾斜杠）
+}
+
+// newAssetsFolderFilter folderPath 入参归一与单点提取（searchAssetsInStore 调用，
+// 与 newAssetsFacetFilter 同层）：反斜杠统一正斜杠、修剪首尾斜杠与空白；空串
+// = 全库不筛选（返回 nil，全部路径零行为变化）。
+func newAssetsFolderFilter(raw string) *assetsFolderFilter {
+	p := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return nil
+	}
+	return &assetsFolderFilter{prefix: p}
+}
+
+// whereClause folder 条件 SQL 片段构造（单点）：col 为完整列名（join 语境带表
+// 别名，如 "f.path"；无别名查询传 "path"）。返回追加在 WHERE 后的片段（已带
+// AND 前导，恒非空——仅非 nil 时调用）与按序参数。
+func (f *assetsFolderFilter) whereClause(col string) (string, []any) {
+	escaped := escapeLikePattern(f.prefix)
+	return " AND (" + col + " = ? OR " + col + " LIKE ? ESCAPE '\\')",
+		[]any{f.prefix, escaped + "/%"}
+}
+
+// ---------- 文件夹级标注（PRD R8，文件夹树 PR4） ----------
+
+// getFolderMeta 读文件夹标注（QueryRow+Scan 单行 + 标签 JOIN 两查询各自收齐后
+// 再发下一条，单连接池自锁纪律）。无标注行 = 零值返回（note 空、Tags 空切片，
+// 前端免判空）；标签绑定行 JOIN tags 取本体（ID 口径与文件/页标签同源）。
+func (s *assetsStore) getFolderMeta(folderPath string) (note, updatedAt string, tags []model.AssetTag, err error) {
+	tags = []model.AssetTag{}
+	err = s.db.QueryRow(
+		"SELECT note, updated_at FROM folder_meta WHERE folder_path = ?", folderPath,
+	).Scan(&note, &updatedAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", "", tags, err
+	}
+	rows, err := s.db.Query(
+		"SELECT t.id, t.name, t.color, COALESCE(t.parent_id, 0) FROM folder_tags ft "+
+			"JOIN tags t ON t.id = ft.tag_id WHERE ft.folder_path = ? ORDER BY t.name", folderPath,
+	)
+	if err != nil {
+		return "", "", tags, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tag model.AssetTag
+		if err := rows.Scan(&tag.ID, &tag.Name, &tag.Color, &tag.ParentID); err != nil {
+			return "", "", tags, err
+		}
+		tags = append(tags, tag)
+	}
+	return note, updatedAt, tags, rows.Err()
+}
+
+// updateFolderMeta 文件夹标注整体替换（单事务，对齐 updateFileMeta 形态）：
+// upsert folder_meta + folder_tags 整体替换（DELETE 后 ensureTagTx 循环
+// INSERT OR IGNORE，去空白去重同款）；不存在的标签自动创建（对齐文件/页级标注）。
+// 纯标注层：不入 FTS（对齐页级口径）、不触碰缩略图与解析链路。
+func (s *assetsStore) updateFolderMeta(folderPath, note string, tagNames []string, now string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(
+		"INSERT INTO folder_meta(folder_path, note, updated_at) VALUES(?, ?, ?) "+
+			"ON CONFLICT(folder_path) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at",
+		folderPath, note, now,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM folder_tags WHERE folder_path = ?", folderPath); err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(tagNames))
+	for _, name := range tagNames {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		tagID, err := ensureTagTx(tx, name)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO folder_tags(folder_path, tag_id) VALUES(?, ?)", folderPath, tagID,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// deleteFolderMetaByPathPrefix 删除目录前缀下的文件夹标注（meta + 标签绑定，
+// DeleteAssetFolder 级联收口：目录物理已删，标注保留成孤儿键）。目录边界语义
+// 与 splitRecordExistsByPathPrefix 同构（恰等 + LIKE 前缀/%）。
+func (s *assetsStore) deleteFolderMetaByPathPrefix(relDir string) error {
+	for _, table := range []string{"folder_meta", "folder_tags"} {
+		if _, err := s.db.Exec(
+			"DELETE FROM "+table+" WHERE folder_path = ? OR folder_path LIKE ? ESCAPE '\\'",
+			relDir, escapeLikePattern(relDir)+"/%",
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------- facet 多维筛选（SRS §2.5，文件维度 + 幻灯片条目继承归属文件属性） ----------
@@ -1972,14 +2162,24 @@ func (f *assetsFacetFilter) whereClause(colPrefix string) (string, []any) {
 	return b.String(), args
 }
 
-// listFacetFilteredFiles facets-only 路径数据源（无关键词无标签但有 facet）：
-// 按 facet 条件列 ok 状态文件（文件维度筛选天然是文件清单语义，无幻灯片条目、
-// 无聚合折叠），按路径序返回。mtimeNs/rating 供 mtime/rating 排序档填充排序键。
-func (s *assetsStore) listFacetFilteredFiles(facet *assetsFacetFilter) ([]tagFilteredFileOrdering, error) {
-	clause, facetArgs := facet.whereClause("f.")
+// listFacetFilteredFiles facets-only 路径数据源（无关键词无标签但有 facet 或
+// folderPath 条件）：按 facet 条件列 ok 状态文件（文件维度筛选天然是文件清单
+// 语义，无幻灯片条目、无聚合折叠），按路径序返回。mtimeNs/rating 供 mtime/rating
+// 排序档填充排序键；folder 非空时同层追加 folderPath 前缀条件（单点构造见
+// assetsFolderFilter.whereClause，R7 检索联动）。
+func (s *assetsStore) listFacetFilteredFiles(facet *assetsFacetFilter, folder *assetsFolderFilter) ([]tagFilteredFileOrdering, error) {
+	clause, clauseArgs := "", []any(nil)
+	if facet != nil {
+		clause, clauseArgs = facet.whereClause("f.")
+	}
+	if folder != nil {
+		folderClause, folderArgs := folder.whereClause("f.path")
+		clause += folderClause
+		clauseArgs = append(clauseArgs, folderArgs...)
+	}
 	rows, err := s.db.Query(
 		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ?"+clause+" ORDER BY f.path",
-		append([]any{model.AssetFileStatusOK}, facetArgs...)...)
+		append([]any{model.AssetFileStatusOK}, clauseArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -2018,6 +2218,59 @@ func (s *assetsStore) filterFileIDsByFacet(ids []int64, facet *assetsFacetFilter
 		args = append(args, facetArgs...)
 		rows, err := s.db.Query(
 			"SELECT f.id FROM files f WHERE f.id IN ("+placeholders+")"+clause, args...)
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				out[id] = true
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// filterFileIDsByFolder 批量判定文件 ID 集合的 folderPath 前缀命中（keyword 路径
+// 消费，R7 检索联动）：FTS 命中行携带的 fileID 全集一次 SQL 判定（WHERE id IN +
+// 目录边界前缀条件），返回通过 folder 过滤的文件 ID 集合；命中循环按行 fileID 查
+// 集合 O(1) 判定（幻灯片条目按归属文件 ID 继承判定），避免逐命中回查的 N+1。
+// 形态对齐 filterFileIDsByFacet（分批 assetsQueryIDBatch 防 IN 参数过量）。ID 列表
+// 为空直接返回空集合；已消失文件的 ID 不在返回集合中（并发删除窗口的条目自然出局）。
+func (s *assetsStore) filterFileIDsByFolder(ids []int64, folder *assetsFolderFilter) (map[int64]bool, error) {
+	out := make(map[int64]bool)
+	if folder == nil {
+		for _, id := range ids {
+			out[id] = true
+		}
+		return out, nil
+	}
+	clause, folderArgs := folder.whereClause("path")
+	for start := 0; start < len(ids); start += assetsQueryIDBatch {
+		end := start + assetsQueryIDBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(batch)), ", ")
+		args := make([]any, 0, len(batch)+len(folderArgs))
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		args = append(args, folderArgs...)
+		rows, err := s.db.Query(
+			"SELECT id FROM files WHERE id IN ("+placeholders+")"+clause, args...)
 		if err != nil {
 			return nil, err
 		}

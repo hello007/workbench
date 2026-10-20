@@ -269,6 +269,46 @@ func (s *AssetLibraryService) PreviewAssetPathPrefixReplace(libraryID, oldPrefix
 	return n, nil
 }
 
+// assetPathRenamesForPrefix 前缀替换的 rename 清单构造 + UNIQUE 冲突预检
+// （ReplaceAssetPathPrefix 与 RenameAssetFolder 共用单点，禁复制第二份）：
+// records = 旧前缀命中记录集，allPaths = 全量文件记录。后缀（含前导 /）原样
+// 保留：old/a.pptx → new/a.pptx；恰等于前缀的行（目录行形态，理论不出现）后缀
+// 为空串。冲突预检排除替换集自身记录——其旧路径在本事务内全部腾空；嵌套前缀
+// 形态（新前缀位于旧前缀子树内，如旧目录 → 旧目录/归档）中本集记录的新路径可能
+// 撞上另一条本集记录的旧路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突
+// = 撞未替换记录的路径，仍拒）。返回按旧路径长度降序的 rename 清单（嵌套链式
+// 腾位安全序：碰撞链中占位方旧路径恒长于被占位方新路径，长度降序即事务内无
+// 瞬态 UNIQUE 撞击）。冲突返回可读错误（调用方整体拒绝零半态）。
+func assetPathRenamesForPrefix(records, allPaths []assetFileRecord, oldPrefix, newPrefix string) ([]assetPathRename, error) {
+	matched := make(map[int64]bool, len(records))
+	for _, rec := range records {
+		matched[rec.id] = true
+	}
+	existingPaths := make(map[string]int64, len(allPaths))
+	for _, rec := range allPaths {
+		if matched[rec.id] {
+			continue
+		}
+		existingPaths[rec.path] = rec.id
+	}
+	renames := make([]assetPathRename, 0, len(records))
+	for _, rec := range records {
+		suffix := strings.TrimPrefix(strings.TrimPrefix(rec.path, oldPrefix), "/")
+		newRel := newPrefix
+		if suffix != "" {
+			newRel = newPrefix + "/" + suffix
+		}
+		if _, ok := existingPaths[newRel]; ok {
+			return nil, fmt.Errorf("新路径「%s」与现有索引记录冲突，请调整新前缀后重试", newRel)
+		}
+		renames = append(renames, assetPathRename{fileID: rec.id, oldPath: rec.path, newRel: newRel})
+	}
+	sort.SliceStable(renames, func(i, j int) bool {
+		return len(renames[i].oldPath) > len(renames[j].oldPath)
+	})
+	return renames, nil
+}
+
 // ReplaceAssetPathPrefix 根目录路径前缀批量替换（D7）：旧前缀命中非空校验 →
 // 新前缀拼接后逐条越界遏制（任一越界整体拒绝，写面前置零半态）→ 目标路径
 // UNIQUE 冲突预检 → 单事务批量 UPDATE path → 事务后逐条探测新位置三态收敛 →
@@ -333,55 +373,28 @@ func (s *AssetLibraryService) ReplaceAssetPathPrefix(libraryID, oldPrefix, newPr
 				fmt.Sprintf("旧前缀「%s」没有命中的索引记录，请核对前缀拼写", oldNorm))
 		}
 
-		// 预检（写面前置，任一失败整体拒绝零半态）：新路径逐条越界遏制 +
-		// 与未替换记录的 UNIQUE 冲突检测。替换集自身记录不进冲突表——其旧路径
-		// 在本事务内全部腾空；嵌套前缀形态（新前缀位于旧前缀子树内，如
-		// 旧目录 → 旧目录/归档）中本集记录的新路径可能撞上另一条本集记录的旧
-		// 路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突 = 撞未替换
-		// 记录的路径，仍拒）
-		renames := make([]assetPathRename, 0, len(records))
-		existingPaths := make(map[string]int64)
+		// 预检（写面前置，任一失败整体拒绝零半态）：rename 清单构造 + UNIQUE 冲突
+		// 检测经共用单点 assetPathRenamesForPrefix（与文件夹重命名共用，禁复制
+		// 第二份）；新路径逐条越界遏制为本入口（前缀替换）独有校验
 		allPaths, err := store.listFileRecords()
 		if err != nil {
 			return fmt.Errorf("读取文件索引失败: %w", err)
 		}
-		matched := make(map[int64]bool, len(records))
-		for _, rec := range records {
-			matched[rec.id] = true
+		renames, err := assetPathRenamesForPrefix(records, allPaths, oldNorm, newNorm)
+		if err != nil {
+			return err
 		}
-		for _, rec := range allPaths {
-			if matched[rec.id] {
-				continue
+		for _, rn := range renames {
+			if _, err := assetRelPathWithinRoot(lib.RootPath, filepath.Join(lib.RootPath, filepath.FromSlash(rn.newRel))); err != nil {
+				return fmt.Errorf("新路径「%s」越界: %w", rn.newRel, err)
 			}
-			existingPaths[rec.path] = rec.id
 		}
-		for _, rec := range records {
-			// 后缀（含前导 /）原样保留：old/a.pptx → new/a.pptx；
-			// 恰等于前缀的行（目录行形态，理论不出现）后缀为空串
-			suffix := strings.TrimPrefix(strings.TrimPrefix(rec.path, oldNorm), "/")
-			newRel := newNorm
-			if suffix != "" {
-				newRel = newNorm + "/" + suffix
-			}
-			if _, err := assetRelPathWithinRoot(lib.RootPath, filepath.Join(lib.RootPath, filepath.FromSlash(newRel))); err != nil {
-				return fmt.Errorf("新路径「%s」越界: %w", newRel, err)
-			}
-			if _, ok := existingPaths[newRel]; ok {
-				return fmt.Errorf("新路径「%s」与现有索引记录冲突，请调整新前缀后重试", newRel)
-			}
-			renames = append(renames, assetPathRename{fileID: rec.id, oldPath: rec.path, newRel: newRel})
-		}
-		// 执行序：旧路径长者先落库（嵌套前缀的链式腾位——碰撞链中占位方的旧
-		// 路径 = 被占位方的新路径 = 其旧路径 + 中段子路径，恒长于后者，故长度
-		// 降序即安全序：深层记录先让出目标槽位，浅层记录后落位），防事务内
-		// 瞬态 UNIQUE 撞击整体回滚
-		sort.SliceStable(renames, func(i, j int) bool {
-			return len(renames[i].oldPath) > len(renames[j].oldPath)
-		})
 
 		// 单事务批量改路径（预检后写入，任一失败整体回滚）
 		now := time.Now().Format("2006-01-02 15:04:05")
-		if err := store.replaceFilePaths(renames, now); err != nil {
+		// 文件夹标注键同事务级联改键（PR4 R8：前缀替换即目录级重组，folder_meta/
+		// folder_tags 键随前缀替换迁移，与 files.path 更新同一事务保证原子）
+		if err := store.replaceFilePaths(renames, now, oldNorm, newNorm); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// 并发窗口：命中集行在收集与事务之间被「清理丢失记录」删除
 				//（ClearLostAssetFiles 不持扫描锁）——事务已整体回滚，如实报错

@@ -222,6 +222,23 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
   ListAssetFiles: [],
+  // 文件夹树默认空树（形状对齐 model.AssetFolderNode 数组，PRD PR1）：默认无库
+  // 语境不拉取；需要树节点的用例按需 override（节点形状 {path,name,children,
+  // excluded,fileCount}）
+  ListAssetFolders: [],
+  // 文件夹管理（PRD PR2：新增/重命名/删除）：默认安全形态（新建返回空节点、
+  // 删除 0 条 lost、重命名零同步），用例按需 override
+  CreateAssetFolder: { path: '', name: '', children: [], excluded: false, derived: false, fileCount: 0 },
+  DeleteAssetFolder: 0,
+  RenameAssetFolder: { oldPath: '', newPath: '', replaced: 0, excluded: 0, revived: 0 },
+  // 文件批量移动（PRD PR3 拖拽移动）：默认空汇总（形状对齐 model.AssetBatchMoveResult，
+  // Item 含 fileId/status/message/label），用例按需 override
+  MoveAssetFiles: { total: 0, succeeded: 0, failed: 0, items: [] },
+  // 目录级移动与文件夹标注（PRD PR4）：默认安全形态（移动零同步返回、标注读取
+  // 零值 / 保存 no-op），用例按需 override
+  MoveAssetFolder: { oldPath: '', newPath: '', replaced: 0, excluded: 0, revived: 0 },
+  GetAssetFolderMeta: { folderPath: '', note: '', tags: [], updatedAt: '' },
+  UpdateAssetFolderMeta: null,
   // 幻灯片清单默认空分页页（items/total 对齐 model.AssetSlidePage，2026-10-14 起分页）。
   // 幻灯片条目形状对齐 model.AssetSlideEntry：基础字段（id/fileId/filePath/slideNum/
   // title/text/speakerNotes/tags）+ 独立标注三字段（SRS §2.2.4：ownTags 页自有标签

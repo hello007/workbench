@@ -317,8 +317,14 @@ type AssetSearchOptions struct {
 	// SortDir 排序方向："" / "desc" = 降序（默认）；"asc" = 升序。仅 mtime/rating
 	// 档有意义（相关性无向）；非法值按降序处理。
 	SortDir string `json:"sortDir"`
-	Limit   int    `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
-	Offset  int    `json:"offset"` // 分页偏移（<0 按 0 处理）
+	// FolderPath 文件夹维度筛选（PRD R7 检索联动）：相对库根目录路径（正斜杠，
+	// 不含尾斜杠），空串 = 全库不筛选；与关键词/标签/facet AND 叠加——文件条目
+	// 按自身 path 前缀判定，幻灯片条目按归属文件 path 前缀判定（目录边界语义：
+	// path 恰等于前缀或以「前缀/」开头，不误伤同头缀兄弟目录）。检索三路径共用
+	// 同一 assetsFolderFilter 构造（与 assetsFacetFilter 同层单点，禁路径分叉）。
+	FolderPath string `json:"folderPath"`
+	Limit      int    `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset     int    `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或
@@ -541,6 +547,91 @@ type AssetSavedSearch struct {
 }
 
 // ===== 素材库备份（SRS §2.7.5，素材管理第十批 PR2） =====
+
+// AssetFolderNode 素材库文件夹树节点（ListAssetFolders 返回，素材面板左侧可收缩
+// 文件夹树数据源，PRD「素材管理：文件夹树与拖拽整理」PR1）。树 = 库根目录的真实
+// 子目录（D1 虚拟分组不引入，管理/拖拽即真实磁盘操作），读文件系统而非索引派生
+// ——空目录天然可见、与后续目录管理操作同源。
+type AssetFolderNode struct {
+	// Path 相对库根目录路径（正斜杠，不含尾斜杠；一级目录为单段名如「子目录」，
+	// 深层为多段如「a/b」）。库根自身不返回节点——前端固定「全部素材」根节点以
+	// 空串 folderPath 语义表达（PRD R2）。
+	Path string `json:"path"`
+	// Name 目录基名（树节点显示文本）。
+	Name string `json:"name"`
+	// Children 子目录节点（文件系统字典序，与 WalkDir 遍历序一致）。空目录为空
+	// 切片恒非 nil，前端免判空。
+	Children []AssetFolderNode `json:"children"`
+	// Excluded 排除规则命中标记（SRS §2.7.3 ExcludeDirs 目录段命中）：含被排除
+	// 祖先目录的继承——扫描侧目录段命中 SkipDir 剪除整棵子树，树侧对应整棵子树
+	// 带标记（口径同源）。库根自身豁免匹配（对齐扫描 root 豁免，防整库标排除）。
+	// 命中目录禁管理操作：新增子目录/删除前后端双防线拒绝；重命名刻意放行——
+	// 重命名出排除名是 excluded 文件恢复索引可见的唯一目录级出口（后端按受影响
+	// 文件重过 matcher 双向翻转收敛）。
+	Excluded bool `json:"excluded"`
+	// Derived PPT 拆分派生容器标记：该目录直属文件中存在拆分派生副本
+	//（isPptxSplitDerivative 命中的「<源名主干>/<源名主干>-NNN.pptx」同名文件夹
+	// 布局，outputToSourceDir 落源目录的拆分产物）。派生产物由拆分链路管理，
+	// 禁文件夹管理操作（删除/重命名会破坏拆分记录溯源，前后端双防线）。
+	Derived bool `json:"derived"`
+	// FileCount 该目录直属 PPT 文件数（不含子目录；磁盘口径：.pptx 后缀大小写
+	// 不敏感 − 排除规则后缀命中 − 拆分派生副本，与扫描收集口径同源）。树节点
+	// 徽标的递归 PPT 数由前端按索引底册（fileEntries）前缀聚合，本字段作磁盘
+	// 真值兜底展示。
+	FileCount int `json:"fileCount"`
+}
+
+// AssetFolderRenameResult 文件夹重命名结果汇总（RenameAssetFolder 返回，前端
+// toast 展示口径）。Replaced 为索引路径批量更新记录数；Excluded/Revived 为
+// 重命名后受影响文件重过排除规则的双向翻转计数（新名命中排除 → 翻 excluded；
+// 原排除新名解除且有解析产物 → 经 reviveLostFile 复活 ok——FTS 同事务重建，
+// 无产物行交由随后自动扫描重解析重分类）。
+type AssetFolderRenameResult struct {
+	OldPath  string `json:"oldPath"`  // 重命名前相对路径（正斜杠）
+	NewPath  string `json:"newPath"`  // 重命名后相对路径（正斜杠）
+	Replaced int64  `json:"replaced"` // 索引路径更新记录数
+	Excluded int    `json:"excluded"` // 重命名后新命中排除规则翻转 excluded 数
+	Revived  int    `json:"revived"`  // 排除解除后经 reviveLostFile 复活数（含 FTS 重建）
+}
+
+// AssetBatchMoveItem 文件拖拽移动单条目结果明细（异常隔离，形态对齐
+// AssetBatchRatingItem 先例：Status 取值复用 AssetBatchTagStatus* 常量，Label 为
+// 后端从 files.path 拼装的定位展示文案，Error 走 Message）。
+type AssetBatchMoveItem struct {
+	FileID  int64  `json:"fileId"`            // 移动的文件记录 ID
+	Status  string `json:"status"`            // AssetBatchTagStatus* 取值（ok / failed）
+	Message string `json:"message,omitempty"` // 失败原因（成功为空）
+	Label   string `json:"label,omitempty"`   // 定位展示文案（移动前相对路径）
+}
+
+// AssetBatchMoveResult 文件批量移动结果汇总（MoveAssetFiles 返回，前端汇总
+// toast 口径）。事务边界 = 每条目一事务逐条目提交，部分失败不中断不回滚（成功
+// 条目已落盘），对齐批量打标签/批量评分先例。终态仅经返回值汇总，无逐文件事件。
+type AssetBatchMoveResult struct {
+	Total     int                  `json:"total"`     // 提交条目总数（fileID 去重后）
+	Succeeded int                  `json:"succeeded"` // 成功条目数
+	Failed    int                  `json:"failed"`    // 失败条目数
+	Items     []AssetBatchMoveItem `json:"items"`     // 逐条目明细（顺序同提交序，恒非 nil）
+}
+
+// AssetFolderMeta 文件夹级标注（GetAssetFolderMeta 返回，PRD R8 对齐文件/页级
+// 标注体系）：业务备注 + 标签集（Tags 为标签本体对象，ID 口径与文件/页标签同源
+// tags 表）。键 = folder_path（相对库根正斜杠路径），重命名/移动目录时随前缀
+// 替换同事务级联改键，删除目录级联删标注。星级不设（目录无星级语义）。
+type AssetFolderMeta struct {
+	FolderPath string     `json:"folderPath"` // 目录相对路径（正斜杠，查询键回显）
+	Note       string     `json:"note"`       // 业务备注（不入 FTS，对齐页级口径）
+	Tags       []AssetTag `json:"tags"`       // 标签集（整体替换语义保存）
+	UpdatedAt  string     `json:"updatedAt"`  // 最近更新时间（"2006-01-02 15:04:05"；未标注过为零值）
+}
+
+// AssetFolderMetaUpdate 文件夹级标注编辑入参（UpdateAssetFolderMeta 整体替换
+// 语义，对齐 AssetFileMetaUpdate——备注/标签以本次提交值为准，不存在的标签自动
+// 创建；不设星级）。
+type AssetFolderMetaUpdate struct {
+	Note     string   `json:"note"`     // 业务备注（整体替换）
+	TagNames []string `json:"tagNames"` // 标签名列表（整体替换；不存在的标签自动创建）
+}
 
 // AssetBackupEntry 素材库备份文件条目（ListAssetLibraryBackups 清单元素 +
 // BackupAssetLibrary 单次备份回执）。备份为整库 SQLite 快照（VACUUM INTO 产物，

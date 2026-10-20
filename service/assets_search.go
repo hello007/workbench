@@ -111,15 +111,19 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 	// facet 条件单点提取：三条路径共用同一 assetsFacetFilter（nil = 未启用任何
 	// facet，全部路径零行为变化）
 	facet := newAssetsFacetFilter(opts)
+	// folderPath 维度单点提取（R7 检索联动，与 facet 同层）：三条路径共用同一
+	// assetsFolderFilter（nil = 未启用，全部路径零行为变化）
+	folder := newAssetsFolderFilter(opts.FolderPath)
 	if keyword == "" {
 		if len(opts.TagIDs) == 0 {
-			if facet == nil {
-				// 空查询语义：无关键词、无标签且无 facet 条件返回空结果页，不报错
+			if facet == nil && folder == nil {
+				// 空查询语义：无关键词、无标签且无 facet/folder 条件返回空结果页，
+				// 不报错
 				return model.AssetSearchPage{Items: []model.AssetSearchHit{}}, nil
 			}
-			return searchByFacetsOnly(store, opts, facet)
+			return searchByFacetsOnly(store, opts, facet, folder)
 		}
-		return searchByTagsOnly(store, opts, facet)
+		return searchByTagsOnly(store, opts, facet, folder)
 	}
 	// 关键词路径：标签筛选集合（继承合并语义，见 slideTagRowMatches）——文件条目
 	// 要求自身绑定；幻灯片条目默认【归属文件绑定 ∪ 页自身绑定】，OnlyOwn=true 仅
@@ -133,7 +137,7 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("读取标签筛选集合失败: %w", err)
 	}
-	return searchByKeyword(store, keyword, opts, facet, tagFilter, ownSlideFilter)
+	return searchByKeyword(store, keyword, opts, facet, folder, tagFilter, ownSlideFilter)
 }
 
 // searchByKeyword 关键词全文检索路径。facet 非空时对 FTS 命中 fileID 全集一次
@@ -144,7 +148,7 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 // 不可见——命中 fileID 全集一次批量取排除集合（excludedFileIDSet），循环内剔除
 // （与 facet 过滤同层同形态；lost 行 FTS 亦保留且有意可见引导重链，此处仅剔
 // excluded）。
-func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchOptions, facet *assetsFacetFilter, tagFilter, ownSlideFilter map[int64]bool) (model.AssetSearchPage, error) {
+func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchOptions, facet *assetsFacetFilter, folder *assetsFolderFilter, tagFilter, ownSlideFilter map[int64]bool) (model.AssetSearchPage, error) {
 	matchExpr := buildFtsQuery(keyword)
 	if matchExpr == "" {
 		// 纯空白/全标点关键词：无有效查询词，空结果不报错
@@ -155,7 +159,7 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 		return model.AssetSearchPage{}, fmt.Errorf("素材检索失败: %w", err)
 	}
 
-	// 命中 fileID 去重全集一次收集（excluded 与 facet 两个批量判定共用）
+	// 命中 fileID 去重全集一次收集（excluded / facet / folder 三个批量判定共用）
 	fileIDs := make([]int64, 0, len(hits))
 	seen := make(map[int64]bool, len(hits))
 	for _, h := range hits {
@@ -177,6 +181,15 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 			return model.AssetSearchPage{}, fmt.Errorf("facet 筛选失败: %w", err)
 		}
 	}
+	// folderPath 命中文件集合批量预取（R7 检索联动，与 facet 同层同形态；幻灯片
+	// 条目按归属文件 ID 继承判定）
+	var folderHits map[int64]bool
+	if folder != nil {
+		folderHits, err = store.filterFileIDsByFolder(fileIDs, folder)
+		if err != nil {
+			return model.AssetSearchPage{}, fmt.Errorf("文件夹筛选失败: %w", err)
+		}
+	}
 
 	entries := make([]assetSearchEntry, 0, len(hits))
 	for _, h := range hits {
@@ -185,6 +198,9 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 		}
 		if facetHits != nil && !facetHits[h.fileID] {
 			continue // facet 未命中（幻灯片条目随归属文件一并出局）
+		}
+		if folderHits != nil && !folderHits[h.fileID] {
+			continue // folderPath 未命中（幻灯片条目随归属文件一并出局）
 		}
 		refType, refID := decodeFtsRowid(h.rowid)
 		if !slideTagRowMatches(opts.SlideTagOnlyOwn, tagFilter, ownSlideFilter, refType, refID, h.fileID) {
@@ -247,14 +263,14 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 	return model.AssetSearchPage{Items: items, Total: total}, nil
 }
 
-// searchByFacetsOnly facets-only 路径（无关键词无标签但有 facet 条件，SRS §2.5）：
-// 按 facet 条件列 ok 状态文件，返回文件条目（文件维度筛选天然是文件清单语义，
-// 无幻灯片条目、无聚合折叠；Flatten 开关对结果无影响）。相关性档按路径序（无
-// 相关性语义，Score 恒 0、Snippet 为空）；mtime/rating 档在分页前按文件维度
-// 属性重排（sortEntriesByOptions），分页复用 pageAndFillEntries（对齐纯标签浏览
-// 的内存分页契约）。
-func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *assetsFacetFilter) (model.AssetSearchPage, error) {
-	files, err := store.listFacetFilteredFiles(facet)
+// searchByFacetsOnly facets-only 路径（无关键词无标签但有 facet 或 folderPath
+// 条件，SRS §2.5）：按 facet/folder 条件列 ok 状态文件，返回文件条目（文件维度
+// 筛选天然是文件清单语义，无幻灯片条目、无聚合折叠；Flatten 开关对结果无影响）。
+// 相关性档按路径序（无相关性语义，Score 恒 0、Snippet 为空）；mtime/rating 档在
+// 分页前按文件维度属性重排（sortEntriesByOptions），分页复用 pageAndFillEntries
+// （对齐纯标签浏览的内存分页契约）。
+func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *assetsFacetFilter, folder *assetsFolderFilter) (model.AssetSearchPage, error) {
+	files, err := store.listFacetFilteredFiles(facet, folder)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("facet 筛选失败: %w", err)
 	}
@@ -285,12 +301,12 @@ func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet
 // 分页（无相关性语义，Score 恒 0、Snippet 为空；库规模 = 已索引文件/页数，量级可控）。
 // facet 非空时两查询各追加 facet 条件（文件条目按自身属性、幻灯片条目经 JOIN
 // files 按归属文件属性判定，继承语义与关键词路径同源）。
-func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *assetsFacetFilter) (model.AssetSearchPage, error) {
-	files, err := store.listTagFilteredFiles(opts.TagIDs, facet)
+func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *assetsFacetFilter, folder *assetsFolderFilter) (model.AssetSearchPage, error) {
+	files, err := store.listTagFilteredFiles(opts.TagIDs, facet, folder)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("标签筛选失败: %w", err)
 	}
-	slides, err := store.listTagFilteredSlides(opts.TagIDs, opts.SlideTagOnlyOwn, facet)
+	slides, err := store.listTagFilteredSlides(opts.TagIDs, opts.SlideTagOnlyOwn, facet, folder)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("标签筛选失败: %w", err)
 	}

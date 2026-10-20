@@ -32,7 +32,12 @@
       </thead>
       <tbody>
         <template v-for="card in cards" :key="card.key">
-          <tr class="asset-list-row" @click="emit('card-click', card)">
+          <tr
+            class="asset-list-row"
+            :draggable="card.kind === 'file'"
+            @click="emit('card-click', card, $event)"
+            @dragstart="emit('card-drag-start', card, $event)"
+          >
             <td class="col-check">
               <!-- 行首复选框（受控）：聚合父卡不渲染（D5#1）；@click.stop 阻断行
                    点击进详情（D5#7），勾选仅上报 toggle-select 由宿主写选中键集 -->
@@ -97,7 +102,7 @@
               v-for="child in aggChildren[card.filePath] || []"
               :key="child.key"
               class="agg-child-row is-clickable"
-              @click.stop="emit('card-click', child)"
+              @click.stop="emit('card-click', child, $event)"
             >
               <td :colspan="columns.length + 2">
                 <span class="agg-child-page">第 {{ child.slideNum }} 页</span>
@@ -146,7 +151,7 @@ const props = defineProps({
   selectedKeys: { type: Set, default: () => new Set() }
 })
 
-const emit = defineEmits(['card-click', 'load-more', 'toggle-select'])
+const emit = defineEmits(['card-click', 'load-more', 'toggle-select', 'card-drag-start'])
 
 const listRef = ref(null)
 

@@ -1093,7 +1093,7 @@ func TestRelinkWrites_ZeroRowsAffectedOnClearedRecord(t *testing.T) {
 	err := store.replaceFilePaths([]assetPathRename{
 		{fileID: keepID, oldPath: "旁观.pptx", newRel: "新目录/旁观.pptx"},
 		{fileID: ghostID, oldPath: "被清理.pptx", newRel: "新目录/被清理.pptx"},
-	}, "now")
+	}, "now", "", "")
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("replaceFilePaths 零命中应返回 sql.ErrNoRows，实际：%v", err)
 	}

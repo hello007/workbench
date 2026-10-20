@@ -523,6 +523,14 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `BackupAssetLibrary` | `(libraryID) => Promise<AssetBackupEntry>` | 手动备份（SRS §2.7.5，整库 VACUUM INTO 快照 + integrity_check 校验（非 ok 删备份报错）+ 每库最近 5 份保留淘汰；落点 `data/assets/backups/<libraryId>/<yyyyMMdd-HHmmss>.db`；缩略图 PNG 与拆分产物不在备份范围；重建/删库前自动快照复用同一实现） | AssetBackupEntry |
 | `ListAssetLibraryBackups` | `(libraryID) => Promise<AssetBackupEntry[]>` | 备份清单（按备份时间倒序，条目含文件名/时间/大小/绝对路径；从未备份返回空清单非错误） | AssetBackupEntry[] |
 | `RestoreAssetLibrary` | `(libraryID, backupFile) => Promise<void>` | 还原备份（备份文件整体替换 `<id>.db`：取消并等待在途扫描退出 + 关连接 + 删 WAL/SHM 残留 + `os.Rename` 覆盖 + 惰性重开并复验；`backupFile` 须为该库备份目录内的备份文件（`ListAssetLibraryBackups` 返回的 `path` 原样回传）；覆盖前预检备份完整性，损坏备份不动当前库；还原后前端提示重扫） | — |
+| `ListAssetFolders` | `(libraryID) => Promise<AssetFolderNode[]>` | 库根目录真实子目录树（文件夹树数据源，读文件系统非索引派生——空目录可见；排除规则命中目录整棵子树带 `excluded` 标记、拆分派生容器带 `derived` 标记，均复用扫描侧 matcher 单点；库根目录不存在返回空树非错误） | AssetFolderNode[] |
+| `CreateAssetFolder` | `(libraryID, parentRelPath, name) => Promise<AssetFolderNode>` | 新建子目录（父目录磁盘 mkdir；重名（os.ErrExist 口径）/父目录不存在/父为排除命中目录或派生容器拒绝；纯磁盘操作不触碰索引，返回新建节点） | AssetFolderNode |
+| `DeleteAssetFolder` | `(libraryID, relPath, force) => Promise<number>` | 删除目录（磁盘递归删除 + 索引内该前缀文件行 markFileLost 收口（标注保留待复活）+ 拆分记录与文件夹标注按前缀清理；非空目录 `force=false` 返回 `E_ASSETS_FOLDER_NOT_EMPTY` 确认型拒绝（二次确认后 `true` 重调）；排除命中目录与派生容器拒绝；返回标记 lost 的索引行数） | number |
+| `RenameAssetFolder` | `(libraryID, relPath, newName) => Promise<AssetFolderRenameResult>` | 同父重命名（与目录移动共用统一核心：磁盘 rename + 索引路径前缀批量更新（前缀替换单点）+ 排除规则双向翻转（新名命中翻 excluded / 原排除解除经 reviveLostFile 复活，FTS 同事务重建）+ folder_meta/folder_tags 键同事务级联改键 + 自动增量扫描收敛；重名拒绝；子树内存在拆分记录拒绝） | AssetFolderRenameResult |
+| `MoveAssetFolder` | `(libraryID, folderRelPath, targetFolder) => Promise<AssetFolderRenameResult>` | 目录级移动（移入目标目录下保持自身名称，`targetFolder` 空串 = 库根；与重命名共用统一核心；目标不得位于源目录自身子树内，目标校验与拆分记录拒绝口径同重命名） | AssetFolderRenameResult |
+| `MoveAssetFiles` | `(libraryID, fileIDs: number[], targetFolder) => Promise<AssetBatchMoveResult>` | 文件批量移动（fileIDs 去重；目标目录存在/非排除命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中拒绝；每条目一事务逐条目提交（files.path 更新 + split_records 源路径同事务重写），部分失败不中断逐条目明细返回；FTS 零重建（检索列不含路径）+ 排除规则双向翻转） | AssetBatchMoveResult |
+| `GetAssetFolderMeta` | `(libraryID, folderPath) => Promise<AssetFolderMeta>` | 读文件夹标注（业务备注 + 标签集，标签 ID 口径与文件/页标签同源 tags 表；未标注目录返回零值形态；库根/排除命中目录/派生容器禁标注） | AssetFolderMeta |
+| `UpdateAssetFolderMeta` | `(libraryID, folderPath, meta: AssetFolderMetaUpdate) => Promise<void>` | 文件夹标注编辑（整体替换：备注 + 标签集（不存在的标签自动创建）；纯标注层不入 FTS、不触发重解析与缩略图失效；守卫与读取同口径） | — |
 
 ### 29.1 素材购物栏（跨库页级收集与合并导出）
 
@@ -770,7 +778,17 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **AssetFileMetaUpdate** — 元数据编辑入参（`rating` / `note` / `tags`: string[]，整体替换语义）
 
-**AssetSearchOptions** — 检索入参（`flatten`（true 平铺 / false 聚合折叠）/ `tagIds`: number[] / `limit`（默认 50，上限 200）/ `offset`）
+**AssetSearchOptions** — 检索入参（`flatten`（true 平铺 / false 聚合折叠）/ `tagIds`: number[] / `folderPath`（文件夹维度筛选，相对库根目录前缀，与关键词/标签/facet AND 叠加，空串 = 全库）/ `limit`（默认 50，上限 200）/ `offset`）
+
+**AssetFolderNode** — 文件夹树节点（`path`（相对库根正斜杠路径，库根不返回节点——前端固定「全部素材」根节点以空串语义表达）/ `name` / `children`: AssetFolderNode[]（文件系统字典序，空目录恒非 nil 空切片）/ `excluded`（排除规则命中，整棵子树继承）/ `derived`（拆分派生容器）/ `fileCount`（直属 PPT 磁盘口径计数））
+
+**AssetFolderMeta** — 文件夹级标注（`folderPath` / `note`（业务备注，不入 FTS）/ `tags`: AssetTag[]（ID 口径与文件/页标签同源）/ `updatedAt`；键 = folder_path，重命名/移动目录时同事务级联改键，删除目录级联删标注）
+
+**AssetFolderMetaUpdate** — 文件夹标注编辑入参（`note` / `tagNames`: string[]，整体替换语义，不存在的标签自动创建）
+
+**AssetBatchMoveResult** — 文件批量移动汇总（`total`（fileID 去重后）/ `succeeded` / `failed` / `items`: AssetBatchMoveItem[]（`fileId` / `status`（`ok`/`failed`）/ `message`（失败原因）/ `label`（移动前路径定位展示）））
+
+**AssetFolderRenameResult** — 目录重命名/移动结果（`oldPath` / `newPath`（正斜杠）/ `replaced`（索引路径更新数）/ `excluded`（新命中排除翻转数）/ `revived`（排除解除复活数））
 
 **AssetSearchHit** — 检索命中条目（`refType`（`file`/`slide`）/ `refId`（文件条目 = files.id，幻灯片条目 = slides.id）/ `fileId` / `filePath` / `title` / `slideNum` / `snippet`（原文子串窗口含省略号）/ `score`（bm25 负值口径，越小越相关）/ `hitCount`（聚合条目命中页数，其余恒 1）/ `tags`）
 

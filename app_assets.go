@@ -71,6 +71,71 @@ func (a *App) ListAssetFiles(libraryID string) ([]model.AssetFileEntry, error) {
 	return a.assetsSvc.ListFiles(libraryID)
 }
 
+// ListAssetFolders 库根目录真实子目录树（素材面板左侧可收缩文件夹树数据源，
+// PRD「素材管理：文件夹树与拖拽整理」PR1）：读文件系统非索引派生（空目录可见），
+// 排除规则命中目录整棵子树带 Excluded 标记、拆分派生容器带 Derived 标记（复用
+// 扫描侧 matcher 单点）；库根目录不存在返回空树非错误（对齐扫描降级语义）。
+// 纯只读。
+func (a *App) ListAssetFolders(libraryID string) ([]model.AssetFolderNode, error) {
+	return a.assetsSvc.ListFolders(libraryID)
+}
+
+// CreateAssetFolder 新建子目录（PR2 目录管理）：父目录磁盘 mkdir，重名（os.ErrExist
+// 口径）与父目录不存在明确报错；父为排除命中目录或拆分派生容器拒绝。纯磁盘操作
+// 不触碰索引，返回新建节点（树局部刷新回显）。
+func (a *App) CreateAssetFolder(libraryID, parentRelPath, name string) (model.AssetFolderNode, error) {
+	return a.assetsSvc.CreateAssetFolder(libraryID, parentRelPath, name)
+}
+
+// DeleteAssetFolder 删除目录（PR2 目录管理）：磁盘递归删除 + 索引内该前缀文件行
+// markFileLost 收口（标注保留待复活，§11.2 语义）+ 拆分记录按前缀清理。非空目录
+// force=false 返回 E_ASSETS_FOLDER_NOT_EMPTY 确认型拒绝（前端二次确认后传 true）；
+// 排除命中目录与拆分派生容器拒绝。返回标记 lost 的索引行数（结果 toast 口径）。
+func (a *App) DeleteAssetFolder(libraryID, relPath string, force bool) (int64, error) {
+	return a.assetsSvc.DeleteAssetFolder(libraryID, relPath, force)
+}
+
+// RenameAssetFolder 同父重命名（PR2 目录管理，目录级移动）：磁盘 rename + 索引
+// 路径前缀批量更新（复用前缀替换单点机制）+ 受影响文件重过排除规则双向翻转
+// （新名命中翻 excluded / 原排除解除经 reviveLostFile 复活，FTS 同事务重建）+
+// 自动增量扫描收敛。重名拒绝；子树内存在拆分记录拒绝（拆分溯源宁严勿错）。
+func (a *App) RenameAssetFolder(libraryID, relPath, newName string) (model.AssetFolderRenameResult, error) {
+	return a.assetsSvc.RenameAssetFolder(libraryID, relPath, newName)
+}
+
+// MoveAssetFiles 文件批量移动（PR3 拖拽移动，R4/R6/R9）：把文件（fileIDs 去重）
+// 及其磁盘文件移动到目标目录（targetFolder 空串 = 库根）。目标目录存在/非排除
+// 命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中拒绝。每条目一事务
+// 逐条目提交（files.path 更新 + split_records 源路径同事务重写），部分失败不
+// 中断，逐条目明细返回（终态仅经返回值汇总，无逐文件事件）；FTS 零重建（检索
+// 列不含路径）+ 排除规则双向翻转经既有单点。
+func (a *App) MoveAssetFiles(libraryID string, fileIDs []int64, targetFolder string) (model.AssetBatchMoveResult, error) {
+	return a.assetsSvc.MoveAssetFiles(libraryID, fileIDs, targetFolder)
+}
+
+// MoveAssetFolder 目录级移动（PRD R5/D，PR4）：把目录整体移动到目标目录下
+// （targetFolder 空串 = 库根），保持自身名称。与 RenameAssetFolder 共用统一核心
+// （磁盘 rename + 前缀替换单点 + 排除双向翻转 + folder_meta/folder_tags 键同事务
+// 级联 + 自动增量扫描收敛）；目标不得位于源目录自身子树内，目标校验与源含拆分
+// 记录拒绝口径同 PR2。
+func (a *App) MoveAssetFolder(libraryID, folderRelPath, targetFolder string) (model.AssetFolderRenameResult, error) {
+	return a.assetsSvc.MoveAssetFolder(libraryID, folderRelPath, targetFolder)
+}
+
+// GetAssetFolderMeta 读文件夹标注（PRD R8）：业务备注 + 标签集（标签本体对象，
+// ID 口径与文件/页标签同源）。未标注过的目录返回零值形态；库根/排除命中目录/
+// 拆分派生容器禁标注。
+func (a *App) GetAssetFolderMeta(libraryID, folderPath string) (model.AssetFolderMeta, error) {
+	return a.assetsSvc.GetAssetFolderMeta(libraryID, folderPath)
+}
+
+// UpdateAssetFolderMeta 文件夹标注编辑（整体替换，对齐 UpdateAssetFileMeta）：
+// 业务备注 + 标签集（不存在的标签自动创建）。纯标注层——不入 FTS、不触发重解析
+// 与缩略图失效；守卫与读取同口径。
+func (a *App) UpdateAssetFolderMeta(libraryID, folderPath string, meta model.AssetFolderMetaUpdate) error {
+	return a.assetsSvc.UpdateAssetFolderMeta(libraryID, folderPath, meta)
+}
+
 // ListAssetSlides 幻灯片索引条目分页（标签继承归属文件），按文件路径 + 页序
 // （画廊幻灯片视图数据源，页序以 sldIdLst 为准）。分页契约对齐 SearchAssets：
 // limit ≤0 取默认 50（上限 200）、offset <0 按 0 处理，Total 为总条目数。
