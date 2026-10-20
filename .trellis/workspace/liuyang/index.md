@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 137
+- **Total Sessions**: 138
 - **Last Active**: 2026-10-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~913 | Active |
+| `journal-3.md` | ~946 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 138 | 2026-10-21 | tilde 档上游走查升级 7 项（10-21-tilde-upgrade） | `254a90c` | `master` |
 | 137 | 2026-10-21 | goleak 硬门禁收口 + CI Linux 三问题修复（10-21-goleak-gate） | `de14d99` | `master` |
 | 136 | 2026-10-21 | 前端依赖版本漂移治理（EP caret 漂移根源收口） | `00c332a` | `master` |
 | 135 | 2026-10-20 | EP 2.14.5 确认型弹框回归排查 + drop-folder E2E 增补 | `a9330d5` | `master` |

@@ -911,3 +911,36 @@ goleak 两步走第二步：观察模式 26 天实为未观察（告警不改退
 ### Next Steps
 
 - None - task complete
+
+
+## Session 138: tilde 档上游走查升级 7 项（10-21-tilde-upgrade）
+
+**Date**: 2026-10-21
+**Task**: tilde 档上游走查升级 7 项（10-21-tilde-upgrade）
+**Branch**: `master`
+
+### Summary
+
+28 项 tilde 依赖上游盘点（官方 registry）：升级 7 项一次合并（patch 5 声明不动 npm update + minor 2 显式改声明，升前 changelog 逐项核对无 breaking——pinia 4.1.0 getStores 可选 API、@codemirror/language 6.13 StreamParser 拆包向后兼容带新传递依赖 streamparser）；跳过留痕 5 项 major/0.x-minor（js-yaml 5/markdown-it 15/mermaid 12/vue-router 5/docx-preview 0.4）；必跑面全项：一致性绿+vitest 2022+E2E 72+3+哨兵 32+audit 7→6 无新增 high；trellis-check 独立复跑全部必跑面证实+2 处 research 留痕精度修正。批次进度 hardening-batch [2/3]
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `254a90c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
