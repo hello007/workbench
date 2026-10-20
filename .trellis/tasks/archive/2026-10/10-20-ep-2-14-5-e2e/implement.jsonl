@@ -1,0 +1,7 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 增补须守 fixtures.js import、wails-mock-defaults 单一数据源、禁 waitForTimeout、新通道目录同步 vitest.config.js exclude 契约"}
+{"file": "docs/spec/assets-management.md", "reason": "§8.7 统一刷新入口契约 + §11.3 重链 toast 分型（RelinkMismatch 确认消费核对依据）+ 选中/刷新链矩阵"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "确认型错误码分流契约（WARNING_CODES / handleError 分型），A 类核对与共性契约沉淀候选落点"}
+{"file": "docs/spec/process-management.md", "reason": "PortListPanel/ProcessManagerPanel 强杀二段确认链权威行为来源（优雅停止→5s 轮询→强杀）"}
+{"file": "frontend/e2e/assets-folder-drag.spec.js", "reason": "drop-folder E2E 增补的 dispatchEvent + 真实 DataTransfer 构造先例（同文件新增用例）"}
+{"file": "frontend/e2e/assets-export.spec.js", "reason": "bb7a1fa 修复先例：.first()/.last() 多实例选择器与递归重弹断言模式"}
+{"file": "frontend/src/test/setup.js", "reason": "ElMessageBox.confirm 全局 mock 面，vitest 断言边界依据"}

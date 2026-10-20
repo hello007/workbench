@@ -1,0 +1,4 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 用例是否守契约（fixtures import/mock 单一数据源/禁 waitForTimeout/exclude 同步）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查确认型错误分流对齐 + 共性契约沉淀是否与既有错误码契约一致"}
+{"file": "docs/spec/assets-management.md", "reason": "检查 §8.7 刷新链与选中矩阵未被 E2E 增补破坏"}
+{"file": ".trellis/tasks/10-20-ep-2-14-5-e2e/prd.md", "reason": "验收清单与 Out of Scope 边界（B 类不逐处登记/去重不动代码）"}
