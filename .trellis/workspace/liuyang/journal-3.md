@@ -779,3 +779,36 @@ user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 134: 素材清单刷新链统一化 + 文件夹树拖拽 E2E 补齐
+
+**Date**: 2026-10-20
+**Task**: 素材清单刷新链统一化 + 文件夹树拖拽 E2E 补齐
+**Branch**: `master`
+
+### Summary
+
+素材面板数据变更刷新收敛单一入口 refreshDataAfterMutation（六链迁移：批量打标签/评分/标签管理/维护清理/文件与目录拖拽/保存标注清单段），slidesStale 惰性重拉消灭文件视图停留陈旧整类问题（三直赋消费点：切视图/filterByFile/locateCartEntry）；双路续拉兜底 + onFolderDrop 补 searchSeq 守卫 + onFolderDropFolder 纳入刷新；新增拖拽 E2E 三用例；修复 assets-export 既有失败用例（EP 2.14.5 确认型错误行为变化）；§8.7 契约 + CLAUDE.md 关键规则行；vitest 2016/E2E 71 全绿
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb7a1fa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

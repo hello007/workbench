@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 133
+- **Total Sessions**: 134
 - **Last Active**: 2026-10-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~781 | Active |
+| `journal-3.md` | ~814 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 134 | 2026-10-20 | 素材清单刷新链统一化 + 文件夹树拖拽 E2E 补齐 | `bb7a1fa` | `master` |
 | 133 | 2026-10-20 | 素材管理文件夹树与拖拽整理 | `f93d106`, `24fcf4e` | `master` |
 | 132 | 2026-10-20 | 项目记忆迁移 docs/memory 并加自动加载 hook | `1ece1c4` | `master` |
 | 131 | 2026-10-20 | pptx 文件树预览：COM 转 PDF 复用 pdfjs viewer | `c6d4c27`, `b6a2852` | `master` |
