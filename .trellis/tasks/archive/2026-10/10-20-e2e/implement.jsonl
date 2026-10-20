@@ -1,0 +1,5 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域核心契约：§8 语境矩阵与清空点位、§8.7 folderPath 维度与拖拽数据变更点位、§9.4 批量刷新链（refreshAfterBatchTag 双代次守卫/清聚合展开缓存先例）、§8.2 选中清空点位矩阵——统一刷新函数必须对齐这些既有契约禁分叉"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约：fixtures.js import {test,expect}（禁直接 import @playwright/test）、wails-mock-defaults 单一数据源、禁 waitForTimeout、新增通道目录同步 vitest.config.js exclude——拖拽三用例必守"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态、禁 sleep 等待——vitest 断言 stale 置位/E2E 等待口径"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁（前端 ≥70% 硬失败），新增刷新链与 E2E 测试面规划"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "拖拽交互先例（resolveTagMoveDrop 单点模式）与组件测试形态约束——onCardDragStart/分派宿主单点模式对齐"}

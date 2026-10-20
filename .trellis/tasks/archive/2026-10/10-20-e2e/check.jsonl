@@ -1,0 +1,3 @@
+{"file": "docs/spec/assets-management.md", "reason": "检查统一刷新是否破坏语境矩阵/数据变更点位登记/双代次守卫先例/聚合展开缓存清法等既有契约"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 三用例遵守 fixtures import/mock 单一数据源/禁 waitForTimeout/vitest exclude 同步"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对前端门禁达标与测试分层"}
