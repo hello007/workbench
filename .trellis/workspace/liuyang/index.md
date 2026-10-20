@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 130
+- **Total Sessions**: 131
 - **Last Active**: 2026-10-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~680 | Active |
+| `journal-3.md` | ~714 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 131 | 2026-10-20 | pptx 文件树预览：COM 转 PDF 复用 pdfjs viewer | `c6d4c27`, `b6a2852` | `master` |
 | 130 | 2026-10-20 | 素材购物栏：页级收集 + 拖拽排序 + 跨库合并导出 PPT | `bc631e3`, `5f411eb` | `master` |
 | 129 | 2026-10-19 | 工具箱全窗口面板化 + PPT 拆分文件夹批量拆分 | `476d647` | `master` |
 | 128 | 2026-10-18 | 素材管理八/九/十批冒烟收尾：UI 手点面通过 | - | `master` |

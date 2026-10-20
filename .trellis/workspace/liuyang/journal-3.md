@@ -678,3 +678,37 @@ brainstorm 收敛 PRD（路线 A 基底注入式合并，研究确认纯 Go 无�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 131: pptx 文件树预览：COM 转 PDF 复用 pdfjs viewer
+
+**Date**: 2026-10-20
+**Task**: pptx 文件树预览：COM 转 PDF 复用 pdfjs viewer
+**Branch**: `master`
+
+### Summary
+
+文件树 .pptx/.ppsx 点击预览落地：PptxPreviewService（缓存索引+LRU 512MB+在途防抖+瞬态重试）编排，COM 转换排进 assets-thumbs 既有 STA worker（ConvertToPdf，禁双队列互杀；失败/超时 Discard 置脏；复用用户实例禁 SaveAs 走 ExportAsFixedFormat，SaveAs(32) 失败回退 FixedFormat(2)）；前端 pptx 分支复用 buildPdfViewerSrc 走 pdfjs，代次守卫+卸载复位。真机验证踩出并修复 dev 模式缺陷：Vite SPA fallback 吞 /preview-pdf 致 PreviewHandler 永不命中（dev 黑屏生产正常），vite.config.js 前置中间件 404 触发 Wails dev 回退 Handler——新契约：新增不经 Vite 静态链路的同源路由须同步加进该插件前缀判定。spec 沉淀 docs/spec/pptx-preview.md + CLAUDE.md v2.26；check 修复 P1 会话自愈缺陷等 3 项；WPS SaveAs(32) 兼容性真机通过。遗留：转换与缩略图批次共用单队列串行（大批量导图时首开延迟拉长，契约内代价）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c6d4c27` | (see git log) |
+| `b6a2852` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
