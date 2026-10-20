@@ -227,6 +227,7 @@ cd frontend && npm run test:coverage
 | [常见问题](docs/常见问题.md) | 开发与使用问题排查 |
 | [路线图](docs/路线图.md) | 发展规划 |
 | [规范沉淀](docs/spec/README.md) | 跨层契约等项目规范索引 |
+| [记忆索引](docs/memory/MEMORY.md) | 项目长期记忆索引（AI 会话经 SessionStart hook 自动加载，权威源在 docs/memory/） |
 
 ## License
 

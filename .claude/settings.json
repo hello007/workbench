@@ -11,6 +11,11 @@
             "type": "command",
             "command": "python .claude/hooks/session-start.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-memory.py",
+            "timeout": 15
           }
         ]
       },
@@ -21,6 +26,11 @@
             "type": "command",
             "command": "python .claude/hooks/session-start.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-memory.py",
+            "timeout": 15
           }
         ]
       },
@@ -31,6 +41,11 @@
             "type": "command",
             "command": "python .claude/hooks/session-start.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-memory.py",
+            "timeout": 15
           }
         ]
       },

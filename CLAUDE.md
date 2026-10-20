@@ -101,10 +101,20 @@ workbench/
 |素材购物栏与合并导出（2026-10-19）：条目键 `<libraryId>\|<fileId>\|<slideNum>` 三处同构（model.AssetCartItem.Key / utils/assetCart.js / Remove/Reorder 入参）且 fileId 用 files.id 禁 slides.id；合并核心 sldId/sldMasterId 数字 id 解析**禁 `xml:"id,attr"` 结构体标签**（encoding/xml 对任意命名空间同名 attr 都命中且后者覆盖，sldId 条目恒取 r:id 值——须按属性 Name.Space 精确解析，parsePptxListIDs 单点）；三重冲突消解（注入 part 名分配器 / presentation.xml.rels rId 递增 / sldId≥256 与 sldMasterId≥2147483648 两数字命名空间独立）与失效条目跳过口径**单点在合并核心**（购物栏 stale 不预剔除，由 SkippedItems 统一报告）；装配两字段 pptxMergeSvc+assetCartSvc（merge 先构造）+ web_serve applySink 补 pptxMergeSvc.SetEventSink（assets-cart:export-* 出口持有者是合并编排服务）；导出互斥 E_CART_EXPORT_IN_PROGRESS 三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）|pptx-merge.md（docs/spec/pptx-merge.md）|
 |pptx 文件树预览（COM 转 PDF + pdfjs viewer，2026-10-20）：转换任务排进 assets-thumbs 既有 STA worker（ConvertToPdf 走 e.submit()，**禁建第二 COM 队列**——双队列进程快照 diff 互杀对方 COM 进程）；**失败/超时路径必须 Discard() 置脏**（否则死代理后续任务全撞全败不自愈）；**复用用户已开实例禁 SaveAs**（FullName 重定向污染用户会话，走 ExportAsFixedFormat 发布语义），自启实例 SaveAs(32) 失败回退 ExportAsFixedFormat(2)（WPS 对 32 无权威佐证待真机）；缓存 data/pptx_preview_pdf/ 键=srcPath+size+mtime、LRU 512MB、索引走 util.SaveJSON、在途防抖 chan 缓冲 1；前端 pptx 分支代次守卫 + onBeforeUnmount 须显式复位转换态（缺=卸载后响应写回销毁 ref）；App 方法签名不带 ctx（本仓无 Wails ctx 注入先例），60s 超时 service 层 WithTimeout 兜底；**dev 模式 Vite SPA fallback 吞 /preview-pdf**——vite.config.js 前置中间件对 /preview-pdf、/preview-raw 提前 404 触发 Wails dev 回退 AssetServer.Handler，今后新增不经 Vite 静态链路的同源路由必须同步加进该插件前缀判定（漏加=dev 黑屏生产正常、测试测不出）；隐藏页不导出/视频海报帧为预期行为|pptx-preview.md（docs/spec/pptx-preview.md）|
 
+## 项目记忆（docs/memory）
+
+项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。
+
+- 每条记忆一个 markdown 文件：frontmatter（`name`/`description`/`metadata.type`，type 取 user/feedback/project/reference）+ 正文，正文内用 `[[name]]` 互链
+- 索引统一登记在 `docs/memory/MEMORY.md`，一行一条（标题 + 一句话摘要）
+- 自动加载：SessionStart（startup/clear/compact）经 `.claude/hooks/inject-memory.py` 注入索引内容，正文按索引相对路径按需读取
+- **新增记忆**：写入 `docs/memory/<name>.md` 并同步更新 `MEMORY.md` 索引；若发现 user 级目录（`~/.claude/projects/<工程>/memory/`）出现索引未收录的新条目（harness auto-memory 仍可能写入），先人工合并回 `docs/memory/` 再消费
+
 ## 文档索引
 
 |文档|说明|
 |---|---|
+|[记忆索引](docs/memory/MEMORY.md)|项目长期记忆索引（hook 自动加载）|
 |[快速入门.md](docs/快速入门.md)|安装、首次配置、核心流程上手指南|
 |[功能说明.md](docs/功能说明.md)|工作目录管理、文件树、文件操作、Git集成、导航中心、终端、快捷键、浏览器访问|
 |[开发工作流.md](docs/开发工作流.md)|启动开发、运行测试、构建、运行应用|
