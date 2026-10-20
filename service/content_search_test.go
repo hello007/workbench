@@ -272,7 +272,8 @@ func cancelledCtx() (context.Context, context.CancelFunc) {
 // 不依赖环境真实 rg（CI 无 rg 安装步骤，真实 rg 用例曾恒 Skip 致
 // 「ctx 未超时 exit 1 → nil,nil」核心约束无守护）。
 //
-// Windows 分支首行 @echo ok 供探针校验 stub 真被执行：TEMP 路径含空格时
+// 两侧分支均打印标记行 ok 供探针校验 stub 真被执行：Windows 为 @echo ok，
+// Unix 为 echo ok（探针语义跨平台一致）。TEMP 路径含空格时 Windows 的
 // cmd.exe 包装层会在空格处截断路径报 not recognized（退出码恰为 1 与
 // 无匹配同值），stub 未被执行时用例会假绿——调用方须先跑探针显式甄别。
 func writeExitOneRgStub(t *testing.T) string {
@@ -285,7 +286,7 @@ func writeExitOneRgStub(t *testing.T) string {
 		return path
 	}
 	path := filepath.Join(t.TempDir(), "rg")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho ok\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path

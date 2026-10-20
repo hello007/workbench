@@ -94,15 +94,18 @@ func (s *doneNotifySink) Emit(name string, data ...any) {
 }
 
 // newThumbTestService 构造注入 fake exporter 的 AssetLibraryService + done 通知 sink。
-// ledger 复用服务构造的真实例（storeForThumbs 对未注册库返回错误，flush 安全丢弃），
-// Cleanup 收口 flusher goroutine（record 惰性启动，不收口会污染 goleak 观察面）。
+// ledger 复用服务构造的真实例（storeForThumbs 对未注册库返回错误，flush 安全丢弃）。
+// Cleanup 走 WaitThumbsDone 全链收口：等 worker 退出（惰性启动的 run goroutine
+// 不收口会污染 goleak 观察面）→ exporter.Shutdown → ledger.Shutdown（幂等，测试
+// 主体已显式调用时重复执行安全）；不可用环境未启动 worker 时同样安全（close 未
+// 消费的 quit 与空 WaitGroup 均为 no-op）。
 func newThumbTestService(t *testing.T, fake *fakeThumbExporter) (*AssetLibraryService, *doneNotifySink) {
 	t.Helper()
 	s := NewAssetLibraryService(nil, filepath.Join(t.TempDir(), "assets"))
 	sink := &doneNotifySink{inner: &fakeEventSink{}, doneCh: make(chan model.AssetThumbsResult, 16)}
 	s.SetEventSink(sink)
 	s.thumbQ = newThumbQueue(fake, s.eventSink, s.thumbLedger, nil)
-	t.Cleanup(s.thumbLedger.Shutdown)
+	t.Cleanup(s.WaitThumbsDone)
 	return s, sink
 }
 

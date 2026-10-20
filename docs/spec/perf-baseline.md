@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-09-27 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）
+> 最后更新：2026-10-21 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）/ 10-21-goleak-gate（§14 goleak 硬门禁收口）
 
 ## 1. 适用范围
 
@@ -407,7 +407,7 @@ Windows 上读放大 1-2 个数量级。优化将采集层换为 CLI `git log` �
 |---|---|---|---|
 | heap 泄漏 | 循环前后各两次 `runtime.GC()` 后 HeapAlloc 增量（第一轮 GC 触发 finalizer 调度，第二轮回收其释放的引用链，快照才收敛为存活堆） | service 8 MB / 主包 16 MB，`-leak-heap-mb` 可调 | 是（默认档随 `go test ./...`） |
 | goroutine 泄漏（计数） | 循环前后 `runtime.NumGoroutine()` 增量 | ≤2 | 是 |
-| goroutine 泄漏（栈集合） | goleak 按栈快照 diff（能识破计数对比的「旧退新进」身份置换盲区） | 零容忍（深跑档硬门禁） | 否（两步走，见 14.3） |
+| goroutine 泄漏（栈集合） | goleak 按栈快照 diff（能识破计数对比的「旧退新进」身份置换盲区） | 零容忍（`VerifyTestMain` 硬门禁，空白名单） | 是（默认档随 `go test ./...`，2026-10-21 收口，见 14.3） |
 
 heap 阈值取宽（服务层常驻堆仅 ~2 MB 量级，8/16 MB 阈值意味着允许翻 4-8 倍才算泄漏）；CI 偶发失败比漏检危害大，偶发噪声靠宽松阈值兜底，出现误报先调阈值/登记良性栈，不撤门禁。
 
@@ -415,22 +415,25 @@ heap 阈值取宽（服务层常驻堆仅 ~2 MB 量级，8/16 MB 阈值意味着
 
 依赖成本实测：go.mod +1 行 / go.sum +2 条，零传递依赖（testify 被模块图剪枝）；引入后 `govulncheck ./...` 影响代码漏洞 0。选型依据：手写计数有身份置换盲区；goleak 栈集合 diff + 自动打印泄漏栈 + `IgnoreTopFunction` 官方随版本维护；prometheus/tidb/k8s 先例。
 
-service 包 TestMain（全仓首个）三档：
+service 包 TestMain（全仓首个）两档（2026-10-21 收口，原三档的观察模式档位撤销）：
 
 | 档位 | goleak 行为 | 理由 |
 |---|---|---|
-| `-short` | 完全跳过 | 保 `-short` 增量 <30s |
-| `-soak-rounds>0`（深跑档） | `goleak.VerifyTestMain` 硬门禁（泄漏打印栈并非零退出） | 显式深跑即有意观察泄漏 |
-| 默认档（CI） | 观察模式：`goleak.Find` 结果仅 stderr 告警，不改退出码 | 见 14.3 两步走 |
+| `-short`（未显式深跑） | 完全跳过 | 保 `-short` 增量 <30s |
+| 默认档（CI）与深跑档（`-soak-rounds>0`，含 `-short` 组合） | `goleak.VerifyTestMain` 硬门禁（同一空白名单，泄漏打印栈并非零退出） | 默认档收紧依据见 14.3；显式深跑即有意观察泄漏，不因 `-short` 跳过门禁 |
 
 主包不挂 goleak TestMain（websocket Hub 等常驻 goroutine 误报面大），主包 goroutine 门禁即 Δ≤2 计数断言。
 
-### 14.3 两步走：观察模式先行，基线干净后收紧硬门禁
+### 14.3 两步走收口（2026-10-21：观察模式已撤销，默认档切 VerifyTestMain 硬门禁）
 
-service 包既有 7 个测试文件启动 goroutine（并发压测 worker、chat fake 进程输出泵、terminal 读泵等），包级硬门禁对慢退出/残留栈有误报风险，故 CI 默认档先观察：
+两步走策略第二步落地。**收口依据（Windows/Linux 双侧证据链）**：
 
-- **观察期发现**：全量 service 套件曾捕获一次非确定性残留——`(*TerminalService).watchProcess`（`service/terminal.go` CreateTerminal 起，time.Sleep 轮询驻留），复跑未复现。此为 `IgnoreTopFunction`（全限定名）候选，登记与否待观察期积累：确定性复现才登记，非确定性残留优先修测试清理逻辑。
-- **收紧条件**：连续数周 CI 观察模式无新告警后，将默认档 `goleak.Find` 分支替换为 `VerifyTestMain`（单行改动），良性栈逐个 `IgnoreTopFunction` 登记，不放宽全包豁免。
+- 观察期 26 天事后定性为「未观察」：镜像仓 CI 的观察模式不改退出码且日志无人看——Linux 侧存在 thumbQueue 8 实例真泄漏而零告警（WSL Ubuntu 复现全套证据见任务 10-21-goleak-gate research/ci-linux-repro.md），「观察期无新告警」的前提在 Linux 不成立。
+- 收紧前置修复（修完白名单为空）：
+  - **thumbQueue 8 实例泄漏**：`newThumbTestService`（assets_thumbs_test.go）只 Cleanup 了 ledger flusher，未收口惰性启动的 queue worker（`EnqueueAssetThumbs`/`JumpToSlide` 触发 `q.start()`）；9 个 available=true 的队列测试中 8 个漏收口。单点修复 = Cleanup 改走 `WaitThumbsDone` 全链收口（worker 退出 → exporter.Shutdown → ledger.Shutdown，幂等）。
+  - **terminal watchProcess 驻留**（观察期曾捕获一次的同一形态，本次硬门禁生效后确定性复现）：`TestTerminalService_CreateTerminal_InvalidShellFallback` 在套件尾部创建真实 conpty，`PtyProcess.Close()` 只断 ConPTY 句柄不杀交互 shell 进程，watchProcess 仅依赖 `IsProcessRunning` 翻转自证退出 → 套件结束时仍驻留。生产修复 = 会话级停止/确认双 chan（`watchDones` + `watchExits` per-session map）+ `CloseTerminal`/`CloseAll` 锁内摘除会话条目后锁外 close(done) 并 `<-exit` 等待（关闭返回时该会话监视 goroutine 已收口；per-session chan 避免服务级共享计数——共享 WaitGroup 形态下双 tab 关其一的等待会被在册会话的 watch 永久阻塞，审查后改定，对齐 `WaitThumbsDone` 形态）。
+- 收紧后自证：临时注入 `select{}` 永驻 goroutine，`go test ./service/` 硬失败打印泄漏栈（验证后已还原）；WSL Linux 与 Windows 双侧全量 `go test ./...` 绿且 stderr 零 goleak 告警。
+- **后续口径**：白名单当前为零豁免；良性栈确定性复现时才用 `IgnoreTopFunction`（全限定名）逐个登记，非确定性残留优先修测试清理逻辑，不放宽全包豁免。
 
 ### 14.4 覆盖范围说明
 
@@ -439,7 +442,7 @@ service 包既有 7 个测试文件启动 goroutine（并发压测 worker、chat
 | treeCache 增长 | 已覆盖：条目有界断言（≤32，理论 11）随 TestSoakFileTreeGetTree |
 | commitHistoryCache 增长 | 已覆盖：TestSoakCommitHistoryCacheGrowth（单键覆盖写 + 深拷贝隔离抽查）+ 主包全链路 |
 | 事件订阅 | 核实无泄漏面：`sinkHolder` 为单出口持有器（`SetEventSink` 换引用，非累积订阅者注册表），不构成泄漏路径，不专项测试 |
-| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、CI 为 Linux runner、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 观察模式兜底（14.3 已捕获 watchProcess 残留即证明该路径有暴露面） |
+| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、CI 为 Linux runner、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 硬门禁兜底（观察期与收紧后两次捕获 watchProcess 残留，2026-10-21 已修：watchProcess 挂会话级停止信号，CloseTerminal/CloseAll 等待其退出，见 14.3） |
 
 ### 14.5 运行方式速查
 

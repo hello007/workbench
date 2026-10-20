@@ -785,9 +785,14 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 
 // TestAssetLibrary_ShutdownCancelsInFlightSplit 关停收口链（CancelAllSplits →
 // WaitSplitsDone）：在途拆分（阻塞型核心 fake）被取消且 WaitSplitsDone 等待拆分
-// 退出后才返回——返回顺序以共享序录断言（batch 先于 wait；无拆分计数时 Wait 会
-// 先返回，顺序翻转即暴露）；拆分返回 E_ASSETS_CANCELLED、注册表无残留；无在途
-// 拆分时 WaitSplitsDone 立即返回。chan 交接驱动，禁 sleep 时序。
+// 退出后才返回——join 顺序以共享序录断言，锚点取拆分核心退出路径（splitCoreFn
+// 返回前的 core-exit 记录，先于生产链上的 splitWG.Done）：WaitSplitsDone 返回必
+// 晚于核心退出，核心阻塞期间 Wait 不返回（无计数时才可能提前），顺序翻转即暴露。
+// 批量函数完全返回（batchDone 可收）与 Wait 返回之间无生产顺序保证——Done 之后
+// 测试 goroutine 尚余 defer 收尾与记录多步，与 Wait 侧无同步，调度差异可翻转
+// （Windows 稳定 batch 先、Linux 曾 wait 先），不构成断言面。拆分返回
+// E_ASSETS_CANCELLED、注册表无残留；无在途拆分时 WaitSplitsDone 立即返回。
+// chan 交接驱动，禁 sleep 时序。
 func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -797,7 +802,6 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	mustScanLibrary(t, svc, lib.ID)
 
 	blocker := &blockingSplitCore{started: make(chan struct{}), release: make(chan struct{})}
-	svc.splitCoreFn = blocker.split
 
 	var orderMu sync.Mutex
 	var order []string
@@ -807,10 +811,17 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 		orderMu.Unlock()
 	}
 
+	// 核心退出锚点：blocker.split 返回后（阻塞已解除、取消错误已定型）同步记录，
+	// 该记录先于 splitOneFileWithHash 返回与 splitWG.Done，是 join 契约的合法前序锚点
+	svc.splitCoreFn = func(ctx context.Context, srcPath string, onProgress func(done, total int)) (model.PptxSplitResult, error) {
+		result, err := blocker.split(ctx, srcPath, onProgress)
+		record("core-exit")
+		return result, err
+	}
+
 	batchDone := make(chan error, 1)
 	go func() {
 		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
-		record("batch")
 		batchDone <- err
 	}()
 	<-blocker.started
@@ -824,7 +835,7 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	}()
 
 	// 放行阻塞：核心在 ctx 取消后返回取消错误 → 批量中止退出 → splitWG 归零 →
-	// WaitSplitsDone 返回。返回顺序必须 batch 先于 wait（等待真实 join 在途拆分）
+	// WaitSplitsDone 返回。返回顺序必须 core-exit 先于 wait（等待真实 join 在途拆分）
 	close(blocker.release)
 	var appErr *model.AppError
 	select {
@@ -843,8 +854,8 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	orderMu.Lock()
 	gotOrder := append([]string(nil), order...)
 	orderMu.Unlock()
-	if len(gotOrder) != 2 || gotOrder[0] != "batch" || gotOrder[1] != "wait" {
-		t.Errorf("WaitSplitsDone 应等待拆分退出后返回（顺序 [batch wait]），实际 %v", gotOrder)
+	if len(gotOrder) != 2 || gotOrder[0] != "core-exit" || gotOrder[1] != "wait" {
+		t.Errorf("WaitSplitsDone 应等待拆分核心退出后返回（顺序 [core-exit wait]），实际 %v", gotOrder)
 	}
 	if svc.CancelAssetSplit(lib.ID) {
 		t.Error("关停收口后注册表应无残留")

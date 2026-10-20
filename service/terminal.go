@@ -18,6 +18,15 @@ type TerminalService struct {
 	sinkHolder // 事件出口持有器（terminal-output/terminal-exit 推送），构造注入 + serve 模式经 SetEventSink 切换
 	sessions   map[string]*model.TerminalSession
 	mu         sync.Mutex
+
+	// 会话级 watch 停止信号 + 退出确认：CloseTerminal/CloseAll close(done) 让
+	// watchProcess 立即退出（不等 500ms 轮询周期），watch goroutine defer
+	// close(watchExit) 反向确认，关闭入口 <-watchExit 等待且仅等待本会话 watch
+	// 退出——per-session chan 无服务级共享计数（共享 WaitGroup 会让双 tab 关其一
+	// 的等待被在册会话的 watch 计数永久阻塞），PTY Close 只断 ConPTY 句柄不杀
+	// 子进程，watch 不得依赖进程退出自证退出（goleak 硬门禁实测抓出的驻留面）
+	watchDones map[string]chan struct{}
+	watchExits map[string]chan struct{}
 }
 
 // NewTerminalService 创建终端服务实例。
@@ -25,7 +34,9 @@ type TerminalService struct {
 // 时事件推送静默跳过（防护集中在 EventSink，修复原直调 EventsEmit 的 fatal 隐患）。
 func NewTerminalService(ctx context.Context) *TerminalService {
 	s := &TerminalService{
-		sessions: make(map[string]*model.TerminalSession),
+		sessions:   make(map[string]*model.TerminalSession),
+		watchDones: make(map[string]chan struct{}),
+		watchExits: make(map[string]chan struct{}),
 	}
 	s.SetEventSink(NewWailsEventSink(ctx))
 	return s
@@ -53,10 +64,17 @@ func (s *TerminalService) CreateTerminal(dir, shellType, customPath string, cols
 
 	s.mu.Lock()
 	s.sessions[sessionID] = session
+	done := make(chan struct{})
+	exit := make(chan struct{})
+	s.watchDones[sessionID] = done
+	s.watchExits[sessionID] = exit
 	s.mu.Unlock()
 
 	go s.startOutputPump(sessionID, ptyProc)
-	go s.watchProcess(sessionID, ptyProc)
+	go func() {
+		defer close(exit)
+		s.watchProcess(sessionID, ptyProc, done)
+	}()
 
 	return sessionID, nil
 }
@@ -114,6 +132,10 @@ func (s *TerminalService) CloseTerminal(sessionID string) error {
 		return fmt.Errorf("终端会话 %s 不存在", sessionID)
 	}
 	delete(s.sessions, sessionID)
+	done := s.watchDones[sessionID]
+	exit := s.watchExits[sessionID]
+	delete(s.watchDones, sessionID)
+	delete(s.watchExits, sessionID)
 	s.mu.Unlock()
 
 	session.SetRunning(false)
@@ -122,6 +144,13 @@ func (s *TerminalService) CloseTerminal(sessionID string) error {
 	if ptyProc != nil {
 		ptyProc.Close()
 	}
+	// 关闭信号立即唤醒本会话 watchProcess（不等轮询周期），等待其退出确认返回：
+	// per-session chan 无共享计数，双 tab 场景关其一不耦合他会话；输出泵经 Read
+	// 断开自行退出，不在等待面
+	if done != nil {
+		close(done)
+		<-exit
+	}
 	return nil
 }
 
@@ -129,10 +158,20 @@ func (s *TerminalService) CloseTerminal(sessionID string) error {
 func (s *TerminalService) CloseAll() {
 	s.mu.Lock()
 	sessions := make([]*model.TerminalSession, 0, len(s.sessions))
-	for _, session := range s.sessions {
+	dones := make([]chan struct{}, 0, len(s.watchDones))
+	exits := make([]chan struct{}, 0, len(s.watchExits))
+	for id, session := range s.sessions {
 		sessions = append(sessions, session)
+		if done, ok := s.watchDones[id]; ok {
+			dones = append(dones, done)
+		}
+		if exit, ok := s.watchExits[id]; ok {
+			exits = append(exits, exit)
+		}
 	}
 	s.sessions = make(map[string]*model.TerminalSession)
+	s.watchDones = make(map[string]chan struct{})
+	s.watchExits = make(map[string]chan struct{})
 	s.mu.Unlock()
 
 	for _, session := range sessions {
@@ -141,6 +180,13 @@ func (s *TerminalService) CloseAll() {
 		if ptyProc != nil {
 			ptyProc.Close()
 		}
+	}
+	// 同 CloseTerminal：全部关闭信号立即唤醒各自 watchProcess，逐个等退出确认
+	for _, done := range dones {
+		close(done)
+	}
+	for _, exit := range exits {
+		<-exit
 	}
 }
 
@@ -264,15 +310,33 @@ func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyPro
 	}
 }
 
-// watchProcess 监控进程退出
-func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProcess) {
+// watchProcess 监控进程退出。退出条件双通道：进程退出（生产主路径，仍在册会话
+// 发 terminal-exit）或关闭信号（CloseTerminal/CloseAll close done 立即触发，静默
+// 退出——terminal-exit 由关闭入口自身语义决定不发）。PTY Close 只断 ConPTY 句柄
+// 不杀子进程，交互 shell 可在句柄断开后驻留，watch 不得依赖 IsProcessRunning
+// 翻转自证退出（goleak 硬门禁实测抓出的驻留面）；done 信号让关闭路径零轮询周期
+// 等待，会话存在性检查兜底 close 前的窗口。
+func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProcess, done <-chan struct{}) {
 	for {
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-done:
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+		s.mu.Lock()
+		session, exists := s.sessions[sessionID]
+		s.mu.Unlock()
+		if !exists || !session.IsRunning() {
+			return
+		}
 		if !ptyProc.IsProcessRunning() {
+			// emit 前持锁复验存在性：上方读 map 到此处 emit 的窗口内会话可能已被
+			// CloseTerminal/CloseAll 移除（关闭入口自身不发 terminal-exit，前端
+			// 已收到关闭语义），复验收紧误发窗口
 			s.mu.Lock()
-			session, exists := s.sessions[sessionID]
+			_, stillExists := s.sessions[sessionID]
 			s.mu.Unlock()
-			if exists {
+			if stillExists {
 				session.SetRunning(false)
 				s.emitCurrent("terminal-exit", sessionID)
 			}

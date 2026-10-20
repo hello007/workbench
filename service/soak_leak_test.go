@@ -23,16 +23,16 @@ package service
 // finalizer 调度，第二轮回收 finalizer 释放的引用链，快照才收敛为当前存活堆。
 //
 // goleak（决策 (b)）：go.uber.org/goleak v1.3.0（版本钉死，不追 main 分支未发版 API）。
-// goroutine 泄漏检测经 TestMain 三档分策（全仓首个 TestMain），判定优先级：
-// 深跑档 > -short 跳过 > 默认档（深跑档最高，含 -short 组合，与 soakRounds/soakForkRounds
-// 的 flag 优先级一致）：
-//   - -soak-rounds>0（深跑档）：goleak.VerifyTestMain 硬门禁，发现泄漏打印栈并非零退出
-//   - -short（未传 -soak-rounds）：完全跳过 goleak，保 <30s 约束
-//   - 默认档（CI 裸 go test ./... 即此档）：观察模式——m.Run() 后 goleak.Find 结果仅
-//     stderr 告警，不改退出码。原因：service 包既有 7 个测试文件启动 goroutine（并发
-//     压测的 worker、chat fake 进程输出泵等），包级硬门禁对慢退出/残留栈有误报风险，
-//     先观察模式跑绿收集基线，确认干净后再收紧为硬门禁（良性栈用 IgnoreTopFunction
-//     全限定名逐个登记，不放宽全包豁免）。
+// goroutine 泄漏检测经 TestMain 两档分策（全仓首个 TestMain，2026-10-21 收口——
+// 依据：WSL Linux 复现收口。此前观察期 26 天定性为「未观察」：镜像仓 CI 观察模式
+// 不改退出码且日志无人看，Linux 侧存在 thumbQueue 8 实例真泄漏而零告警；修复测试
+// 收口缺口后 Windows/Linux 双侧全量绿方收紧）：
+//   - 硬门禁：默认档（CI 裸 go test ./... 即此档）与深跑档（-soak-rounds=N）统一
+//     goleak.VerifyTestMain（同一空白名单——当前零豁免；良性栈确定性复现时才用
+//     IgnoreTopFunction 全限定名逐个登记，不放宽全包豁免），发现泄漏打印栈并非零退出
+//   - -short（未显式深跑）：完全跳过 goleak，保 <30s 约束；显式 -soak-rounds 压过
+//     -short（深跑档不因 -short 跳过门禁，与 soakRounds/soakForkRounds 的 flag
+//     优先级一致）
 //
 // 稳定性约束（docs/spec/test-stability.md 全文有效）：禁 time.Sleep；禁固定端口；
 // 缓存失效全部由手动入口（InvalidateCache/ClearScanCache）驱动，不依赖 mtime 时序精度。
@@ -73,30 +73,22 @@ const (
 	soakCacheShortRounds     = 50
 )
 
-// TestMain 全仓首个 TestMain（service 包）。goroutine 泄漏检测三档分策，见文件头「goleak」。
+// TestMain 全仓首个 TestMain（service 包）。goroutine 泄漏检测两档分策，见文件头「goleak」。
 func TestMain(m *testing.M) {
-	// 手动解析：三档判定须在 m.Run() 之前读取 -short 与 -soak-rounds 的解析值；
+	// 手动解析：档位判定须在 m.Run() 之前读取 -short 与 -soak-rounds 的解析值；
 	// flag.Parse 之后 m.Run() 检测 flag.Parsed() 为真跳过二次解析（Go 1.13+ 语义），不冲突。
 	flag.Parse()
 
-	if *soakRoundsFlag > 0 {
-		// 深跑档：显式深跑即有意观察泄漏，goleak 硬门禁（发现泄漏打印栈并非零退出）。
-		// 判定优先级最高（含 -short 组合：显式 -soak-rounds 压过 -short，与 soakRounds/
-		// soakForkRounds 的 flag 优先级一致），深跑档不因 -short 跳过门禁，守「深跑档 =
-		// 硬门禁」语义
-		goleak.VerifyTestMain(m)
-		return
-	}
-	if testing.Short() {
-		// Short 档：完全跳过 goleak（含观察模式），保 -short 增量 <30s 约束
+	if testing.Short() && *soakRoundsFlag == 0 {
+		// Short 档（未显式深跑）：完全跳过 goleak，保 -short 增量 <30s 约束；
+		// 显式 -soak-rounds 压过 -short（深跑档不因 -short 跳过门禁，守「深跑档 =
+		// 硬门禁」语义，与 soakRounds/soakForkRounds 的 flag 优先级一致）
 		os.Exit(m.Run())
 	}
-	// 默认档（CI）：观察模式，仅告警不改退出码（两步走第一步，见文件头）
-	code := m.Run()
-	if leak := goleak.Find(); leak != nil {
-		fmt.Fprintf(os.Stderr, "goleak 观察模式：检测到疑似 goroutine 泄漏（不影响退出码，仅记录基线）：%v\n", leak)
-	}
-	os.Exit(code)
+	// 默认档（CI）与深跑档统一 VerifyTestMain 硬门禁（2026-10-21 收口，同一空白
+	// 名单）：显式深跑即有意观察泄漏，默认档收紧依据见文件头「goleak」——发现
+	// 泄漏打印栈并非零退出。
+	goleak.VerifyTestMain(m)
 }
 
 // soakRounds 当前档位轮次：显式 -soak-rounds=N 优先（非 fork 路径直接取 N），其次
