@@ -376,13 +376,14 @@ const stubs = {
       reload() {}
     }
   },
-  // 文件夹树桩（PRD PR1）：树数据/徽标计数/选中态受控透出 + select 事件透出
-  //（宿主过滤链与树数据接线断言入口；树渲染细节见 FolderTree 独立 spec）
+  // 文件夹树桩（PRD PR1）：树数据/徽标计数/选中态受控透出 + select/drop-files/
+  // drop-folder/annotate 事件透出（宿主过滤链、拖拽分派与标注入口断言；树渲染
+  // 细节见 FolderTree 独立 spec）
   FolderTree: {
     name: 'FolderTreeStub',
     template: '<div class="folder-tree-stub"></div>',
     props: ['nodes', 'countMap', 'selectedPath', 'loading'],
-    emits: ['select']
+    emits: ['select', 'drop-files', 'drop-folder', 'annotate']
   },
   // 标签管理弹窗桩：显隐受控 + changed 事件透出（宿主刷新链断言入口）
   AssetTagManagerDialog: {
@@ -3608,6 +3609,8 @@ describe('AssetsPanel', () => {
     await flushPromises()
     expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore + 1)
     expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+    // 幻灯片视图停留：直接补拉不置 stale（方案 B 惰性重拉仅文件视图停留时置位）
+    expect(wrapper.vm.slidesStale).toBe(false)
     expect(wrapper.find('.selection-count').text()).toBe('已选 2 项')
   })
 
@@ -3844,6 +3847,157 @@ describe('AssetsPanel', () => {
     expect(reloadSpy).not.toHaveBeenCalled()
     // 选中保留（D5 数据变更点位不清空）：用户可继续对这批操作（如再打标签）
     expect(wrapper.find('.selection-count').text()).toBe('已选 1 项')
+  })
+
+  // ---- 数据变更统一刷新入口（清单刷新收敛批）：stale 惰性重拉语义 + 双路兜底 ----
+
+  it('stale 惰性重拉：文件视图停留时批量 completed 置 slidesStale 不补拉，切入幻灯片视图重拉首页并复位', async () => {
+    const wrapper = await createWrapper()
+    expect(wrapper.vm.slidesStale).toBe(false)
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '批量打标签')
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'AssetBatchTagDialogStub' })
+    const slidesCallsBefore = wailsMock.ListAssetSlides.mock.calls.length
+
+    // 文件视图停留 completed：置 stale，不补拉幻灯片清单（方案 B 惰性重拉核心）
+    await dialog.vm.$emit('completed')
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(true)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore)
+
+    // 切入幻灯片视图：onViewModeChange 消费 stale 重拉首页并复位
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(false)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore + 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+  })
+
+  it('统一刷新双路兜底：folderPath 与 fileFilterPath 叠加语境两路续拉都执行（独立判断非互斥）', async () => {
+    // completed 复位首页返回方案B页（目录「方案A」与过滤目标文件 11 双双未命中）
+    // → folder 路续拉 offset 1（方案A 他文件页，目录命中即停）→ filtered 路续拉
+    // offset 2（目标文件页到位）——两路各拉一页，缺任一路则停在前一页
+    const slideOfB = { ...mockSlides[0], id: 31, fileId: 12, filePath: '方案B/损坏文件.pptx', slideNum: 1, title: '损坏页一' }
+    const slideOfA13 = { ...mockSlides[0], id: 32, fileId: 13, filePath: '方案A/其他方案.pptx', slideNum: 1, title: '其他页一' }
+    wailsMock.ListAssetSlides
+      .mockResolvedValueOnce({ items: mockSlides, total: 4 })
+      .mockImplementation((libId, limit, offset) => {
+        if (offset === 0) return Promise.resolve({ items: [slideOfB], total: 4 })
+        if (offset === 1) return Promise.resolve({ items: [slideOfA13], total: 4 })
+        return Promise.resolve({ items: mockSlides, total: 4 })
+      })
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    // 双击文件卡进入过滤浏览（fileFilterPath 与 folderPath 叠加，slide 视图）
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(true)
+    const checks = wrapper.findAll('.asset-card-check')
+    await checks[0].trigger('change')
+    await checks[1].trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '批量打标签')
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'AssetBatchTagDialogStub' })
+
+    await dialog.vm.$emit('completed')
+    await flushPromises()
+    // 两路续拉都执行：folder 路 offset 1 + filtered 路 offset 2
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1', 50, 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 2)
+    const cards = wrapper.findAll('.asset-card')
+    expect(cards.length).toBe(2)
+    expect(cards.every((c) => c.text().includes('城商行方案.pptx'))).toBe(true)
+  })
+
+  it('drop-folder 纳入统一刷新：浏览幻灯片语境目录移动后清单复位重拉，文件视图停留置 stale', async () => {
+    wailsMock.MoveAssetFolder.mockResolvedValue({ oldPath: '方案A', newPath: '归档/方案A', replaced: 1, excluded: 0, revived: 0 })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    // 选中源目录（前缀改写判定依赖 folderPath 命中源前缀）
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('select', '方案A')
+    await flushPromises()
+    const slidesCallsBefore = wailsMock.ListAssetSlides.mock.calls.length
+    await tree.vm.$emit('drop-folder', '方案A', '归档')
+    await flushPromises()
+
+    // 清单刷新走统一入口：底册重拉 + 幻灯片复位首页（不再单纯依赖扫描 done 兜底，
+    // 扫描失败降级时 done 不来的陈旧面收口）
+    expect(wailsMock.MoveAssetFolder).toHaveBeenCalledWith('lib-1', '方案A', '归档')
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore + 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+    expect(wailsMock.ListAssetFiles).toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'FolderTreeStub' }).props('selectedPath')).toBe('归档/方案A')
+
+    // 文件视图停留：目录移动后置 stale 不补拉（切回幻灯片视图由 onViewModeChange 消费）
+    const wrapper2 = await createWrapper()
+    await wrapper2.findComponent({ name: 'FolderTreeStub' }).vm.$emit('drop-folder', '方案B', '归档')
+    await flushPromises()
+    expect(wrapper2.vm.slidesStale).toBe(true)
+  })
+
+  it('标签管理变更收敛统一刷新：文件视图停留 changed 置 stale 不补拉，切入幻灯片视图重拉首页并复位', async () => {
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'file')
+    await group.vm.$emit('change', 'file')
+    await flushPromises()
+    const slidesCallsBefore = wailsMock.ListAssetSlides.mock.calls.length
+    // 文件视图停留标签管理 changed：置 stale 不补拉（标签重命名/解绑改变页
+    // ownTags 展示与继承合并命中口径——第六条数据变更链随收敛批纳入）
+    await wrapper.findComponent({ name: 'AssetTagManagerDialogStub' }).vm.$emit('changed')
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(true)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore)
+    // 切入幻灯片视图：onViewModeChange 消费 stale 重拉首页并复位
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(false)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore + 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+  })
+
+  it('溯源定位消费 stale：文件视图停留数据变更后购物栏溯源直赋切幻灯片视图重拉首页并复位', async () => {
+    const wrapper = await createWrapper()
+    // 先进幻灯片视图建立非空 slideEntries 前置，再回文件视图（清单不重拉）
+    await switchToSlideView(wrapper)
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'file')
+    await group.vm.$emit('change', 'file')
+    await flushPromises()
+    const slidesCallsBefore = wailsMock.ListAssetSlides.mock.calls.length
+    // 文件视图停留批量 completed：置 stale 不补拉
+    await wrapper.find('.asset-card-check').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '批量打标签')
+    await flushPromises()
+    await wrapper.findComponent({ name: 'AssetBatchTagDialogStub' }).vm.$emit('completed')
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(true)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore)
+    // 溯源定位（viewMode 直赋不经 onViewModeChange）：消费 stale 重拉首页——漏消费
+    // 则溯源落地页显示变更前旧标注/旧路径
+    const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
+    await drawer.vm.$emit('trace', cartItemOf({ fileId: 11, slideNum: 2, slideTitle: '背景页' }))
+    await flushPromises()
+    expect(wrapper.vm.slidesStale).toBe(false)
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slidesCallsBefore + 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+    const detail = wrapper.find('.assets-detail')
+    expect(detail.exists()).toBe(true)
+    expect(detail.text()).toContain('第 2 页')
   })
 
   // ---- 失败缩略图自动补（SRS §2.3 PR3，PRD D4）----

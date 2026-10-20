@@ -1406,6 +1406,13 @@ const sortTriggerLabel = computed(() => {
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
 const slideEntries = ref([]) // 幻灯片清单累计条目（幻灯片视图数据源，分页懒加载追加）
 const slideTotal = ref(0) // 幻灯片清单总条目数（分页懒加载判定，对齐后端 ListAssetSlides total）
+// 幻灯片清单陈旧标记（数据变更统一刷新入口收敛批，方案 B 惰性重拉）：数据变更刷新
+// 链（refreshDataAfterMutation）在非幻灯片视图停留时置位不补拉——文件视图停留时操
+// 作不白拉首页且不截断已加载懒加载段；onViewModeChange 切入幻灯片视图遇 stale 即重
+// 拉首页（消费复位）。复位点：loadSlidesPage(true)（任何首页复位重拉 = 清单回新鲜，
+// 集中复位覆盖 loadView/filterByFile/保存链等全部重拉路径）与 resetAndReloadView
+//（语境全清后清单必然重拉，stale 无意义）
+const slidesStale = ref(false)
 const searchItems = ref([]) // 检索结果累计条目（懒加载追加）
 const searchTotal = ref(0) // 检索总条目数（过滤/聚合后口径）
 const loading = ref(false)
@@ -1642,44 +1649,15 @@ const openTagManagerForCreate = () => {
   tagManagerVisible.value = true
 }
 
-// 标签管理变更（新增/重命名/删除成功）后的刷新链（对齐 onSaveMeta 先例）：
-// 1) 树组件 reload——打开时重拉 ListAssetTags，loaded 事件回传刷新宿主共享列表
-//    （详情编辑映射与页自有标签回构随之取到最新标签表）；
-// 2) 文件底册重拉——卡片/详情展示的标签名与绑定同步；
-// 3) 检索态重跑——命中条目携带的标签对象同步（对齐保存链重搜口径）。
-// 数据变更点位不清选中（PRD D5 同性质：批量打标签完成保留选中）；已打开详情的
-// 草稿不自动重算（防覆盖未保存编辑，重新点选条目即得新数据——重命名后草稿中的
-// 旧名需手动调整，属已登记边界）
-const refreshAfterTagChange = async () => {
-  filterTagSelectRef.value?.reload()
-  detailTagSelectRef.value?.reload()
-  if (!hasLibrary.value) return
-  // 双代次守卫（对齐 refreshAfterBatchTag/onSaveSlideMeta 先例）：刷新 await 期间
-  // 切库/扫描刷新（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应
-  // 已被各加载函数内部守卫丢弃，本函数随之中止
-  const libSeqAtStart = librarySeq
-  const searchSeqAtStart = searchSeq
-  try {
-    const entries = await ListAssetFiles(currentLibraryId.value)
-    if (libSeqAtStart !== librarySeq) return // 期间切库/扫描刷新：旧库底册丢弃
-    fileEntries.value = entries || []
-    if (searchMode.value) {
-      await runSearch(true)
-      if (searchSeqAtStart !== searchSeq) return // 检索语境已变：变更方已自清展开态
-      // 标签变更（删除页自有标签等）改变标签合并命中口径，聚合展开缓存必须失效
-      //（对齐 onSaveSlideMeta risk 2 清法：旧 aggChildren 早退命中=回读变更前口径）
-      expandedAggPaths.value = []
-      aggChildren.value = {}
-      aggLoadingPaths.value = []
-    }
-  } catch (error) {
-    if (isLibNotFound(error)) {
-      await loadLibraries()
-      return
-    }
-    handleError('刷新标签数据失败: ', error)
-  }
-}
+// 标签管理变更（新增/重命名/删除成功）后的刷新链：清单刷新走统一入口
+// refreshDataAfterMutation（本批收敛——标签 CRUD 是数据变更链：重命名/解绑改变
+// 幻灯片条目 ownTags 展示与继承合并命中口径，文件视图停留时变更后切幻灯片视图
+// 同样见陈旧段，stale 惰性重拉一并覆盖）。差异面 = 树组件 reload（打开时重拉
+// ListAssetTags，loaded 事件回传刷新宿主共享列表——详情编辑映射与页自有标签回
+// 构随之取到最新标签表）。数据变更点位不清选中（PRD D5 同性质：批量打标签完成
+// 保留选中）；已打开详情的草稿不自动重算（防覆盖未保存编辑，重新点选条目即得
+// 新数据——重命名后草稿中的旧名需手动调整，属已登记边界）
+const refreshAfterTagChange = () => refreshDataAfterMutation({ reloadTagTrees: true })
 
 // ---- 批量打标签（第六批 PR3，SRS §2.4，PRD D3/D4/D5/D7）与批量评分
 //（第八批，SRS §2.6 P0，PRD D4/D5）---- 两批量弹窗共用 targets 反查构建与
@@ -1762,17 +1740,20 @@ const executeBatchRating = (rating) => {
   )
 }
 
-// 批量完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目一事务
-// 成功条目已写入不回滚，PRD D3）：对齐 refreshAfterTagChange/onSaveMeta 先例——
-// 标签树 reload（仅打标签链需要：标签直接绑定计数可能变；评分不涉标签变更跳过）
-// + 底册重拉 + 检索态重搜；幻灯片浏览模式补拉幻灯片清单首页（ownTags/页星级
-// 快照随批量更新，详情草稿回读数据源，对齐 onSaveSlideMeta 浏览分支刷新口径），
-// 过滤浏览语境复位首页后接续拉兜底（见分支内注释）。选中保留（PRD D5：数据变更
-// 点位非语境变更，键 file:<id>/slide:<fileId>:<slideNum> 稳定不受重解析影响）。
-// 双代次守卫（对齐 onSaveSlideMeta 先例）：刷新 await 期间切库/扫描刷新
-//（librarySeq 自增）或检索语境变更（searchSeq 自增）时，旧响应已被各加载函数
-// 内部守卫丢弃，本函数随之中止，不再触碰新语境的展开缓存
-const refreshAfterBatchAnnotation = async ({ reloadTagTrees = true } = {}) => {
+// ---- 数据变更统一刷新入口（清单刷新收敛批）：六条数据变更链（批量打标签/评分、
+// 维护、文件拖拽、目录拖拽、保存页标注浏览分支、标签管理变更）共用的唯一清单刷
+// 新出口，差异面经参数表达（stats/tagTrees/folders 可选段）。恒做：文件底册重拉（ListAssetFiles，
+// 文件视图/标签聚合/溯源定位数据源）；检索态：重跑检索 + 清聚合展开缓存（页标注/
+// 路径变化改变命中口径，旧 aggChildren 早退命中 = 回读变更前数据）；浏览幻灯片视
+// 图停留：复位首页重拉 + folder/fileFilter 两路续拉兜底（目录过滤与单文件过滤语境
+// 可叠加，两路独立判断非互斥，空目标在函数内部直返）；**非幻灯片视图停留（即文件
+// 视图）：置 slidesStale 不补拉**——文件视图停留时操作后不白拉首页且不截断已加载
+// 懒加载段，切入幻灯片视图由 onViewModeChange 消费 stale 重拉（消灭「文件视图停留
+// 操作 → 切回见陈旧段」整类问题）。选中保留（数据变更点位非语境变更，§8.2 同性
+// 质）。双代次守卫（librarySeq + searchSeq 发起时快照，写回点逐个比对）：刷新
+// await 期间切库/扫描刷新或检索语境变更时，旧响应已被各加载函数内部守卫丢弃，本
+// 函数随之中止，不再触碰新语境的展开缓存。isLibNotFound 自愈：静默重拉库列表。
+const refreshDataAfterMutation = async ({ reloadStats = false, reloadTagTrees = false, reloadFolders = false } = {}) => {
   if (reloadTagTrees) {
     filterTagSelectRef.value?.reload()
     detailTagSelectRef.value?.reload()
@@ -1781,36 +1762,54 @@ const refreshAfterBatchAnnotation = async ({ reloadTagTrees = true } = {}) => {
   const libSeqAtStart = librarySeq
   const searchSeqAtStart = searchSeq
   try {
+    if (reloadStats) {
+      await loadStats(libSeqAtStart)
+      if (libSeqAtStart !== librarySeq) return // 期间切库：旧库统计已被内部守卫丢弃
+    }
     const entries = await ListAssetFiles(currentLibraryId.value)
     if (libSeqAtStart !== librarySeq) return // 期间切库/扫描刷新：旧库底册丢弃
     fileEntries.value = entries || []
     if (searchMode.value) {
       await runSearch(true)
       if (searchSeqAtStart !== searchSeq) return // 检索语境已变：变更方已自清展开态
-      // 页自有标签变化改变标签合并命中口径，聚合展开缓存必须失效（对齐
-      // onSaveSlideMeta risk 2 清法：旧 aggChildren 早退命中会回读保存前标注）
+      // 页自有标签/路径变化改变标签合并命中口径，聚合展开缓存必须失效（对齐
+      // onSaveSlideMeta risk 2 清法：旧 aggChildren 早退命中会回读变更前标注）
       expandedAggPaths.value = []
       aggChildren.value = {}
       aggLoadingPaths.value = []
     } else if (viewMode.value === 'slide') {
       await loadSlidesPage(true)
-      // 过滤浏览语境兜底（真机冒烟修复）：复位首页把全局分页流拉回首页段，目标
-      // 文件的页大概率不在已加载段，客户端 fileFilterPath 过滤收敛为 0 张——批量
-      // 成功提示后当前页全部卡片消失。watch(fileFilterPath) 只在过滤值变化时触发
-      // 续拉，刷新场景过滤值不变接不上，须在此显式兜底：对齐 filterByFile 进入
-      // 路径接 ensureFilteredSlidesLoaded 续拉，直到目标文件页重新出现或全局拉完；
-      // 非过滤语境 fileFilterPath 为空时该函数直接返回（复位首页语义不变），await
-      // 期间清过滤/切库/切视图竞态由其内部每轮校验（过滤目标未变 + loadingMore
-      // 防重）自然退出
+      // 双路续拉兜底：复位首页把全局分页流拉回首页段，目录/单文件过滤语境下目标
+      // 页大概率不在已加载段（watch(fileFilterPath/folderPath) 只在过滤值变化时触
+      // 发续拉，刷新场景过滤值不变接不上，须在此显式兜底）；两路独立判断——folder
+      // 非空接 ensureFolderSlidesLoaded、fileFilter 非空接 ensureFilteredSlidesLoaded
+      //（空目标各自内部直返），await 期间清过滤/切库/切视图竞态由其内部每轮校验
+      //（过滤目标未变 + loadingMore 防重）自然退出
+      await ensureFolderSlidesLoaded()
       await ensureFilteredSlidesLoaded()
+    } else {
+      // 非幻灯片视图停留：置 stale 不补拉（方案 B 惰性重拉），切入幻灯片视图时
+      // onViewModeChange 消费重拉首页
+      slidesStale.value = true
+    }
+    if (reloadFolders) {
+      await loadFolders()
     }
   } catch (error) {
     if (isLibNotFound(error)) {
       await loadLibraries()
       return
     }
-    handleError('刷新标签数据失败: ', error)
+    handleError('刷新数据失败: ', error)
   }
+}
+
+// 批量完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目一事务
+// 成功条目已写入不回滚，PRD D3）：清单刷新走统一入口 refreshDataAfterMutation
+//（本批收敛），标签树 reload 仅打标签链需要（标签直接绑定计数可能变；评分不涉
+// 标签变更跳过）
+const refreshAfterBatchAnnotation = async ({ reloadTagTrees = true } = {}) => {
+  await refreshDataAfterMutation({ reloadTagTrees })
 }
 
 // 批量打标签 completed 入口（含标签树 reload）
@@ -2127,7 +2126,10 @@ const locateCartEntry = async (item) => {
   closePreview() // 语境变更点：进入过滤浏览清预览
   clearSelection() // 语境变更点：视图切换清选中（D5#3，直赋路径手动清）
   fileFilterPath.value = item.filePath
-  if (slideEntries.value.length === 0 && slideTotal.value === 0) {
+  // 幻灯片清单未拉过先拉首页（续拉基准），stale（数据变更刷新链在文件视图停留时
+  // 置位）同语义消费——直赋路径与 filterByFile/onViewModeChange 消费口径一致，
+  // 漏消费则溯源落地页显示变更前旧标注/旧路径
+  if ((slideEntries.value.length === 0 && slideTotal.value === 0) || slidesStale.value) {
     await loadSlidesPage(true)
   }
   await ensureFilteredSlidesLoaded()
@@ -2295,38 +2297,11 @@ const previewPrefixReplace = (oldPrefix, newPrefix) =>
 const executePrefixReplace = (oldPrefix, newPrefix) =>
   ReplaceAssetPathPrefix(currentLibraryId.value, oldPrefix, newPrefix)
 
-// 维护操作后的统一刷新链（清理丢失 / 前缀替换共用；对齐 refreshAfterBatchAnnotation
-// 的数据变更刷新口径）：统计重拉（丢失数/文件数口径）+ 标签树重拉（绑定计数变化）
-// + 底册重拉 + 检索态重搜 / 幻灯片视图复位首页（含过滤浏览续拉兜底）。选中保留
-//（数据变更点位非语境变更，§8.2 同性质）；双代次守卫防 await 期间切库串写。
-// 前缀替换弹窗成败均上报 completed（单事务替换 + 自动扫描，扫描失败时替换已提交，
-// 两种终态都刷新），本链幂等无副作用
-const refreshAfterMaintain = async () => {
-  filterTagSelectRef.value?.reload()
-  detailTagSelectRef.value?.reload()
-  if (!hasLibrary.value) return
-  const libSeqAtStart = librarySeq
-  try {
-    await loadStats(libSeqAtStart)
-    if (libSeqAtStart !== librarySeq) return // 期间切库：旧库响应已被内部守卫丢弃
-    const entries = await ListAssetFiles(currentLibraryId.value)
-    if (libSeqAtStart !== librarySeq) return
-    fileEntries.value = entries || []
-    if (searchMode.value) {
-      await runSearch(true)
-    } else if (viewMode.value === 'slide') {
-      await loadSlidesPage(true)
-      // 过滤浏览语境兜底（对齐 refreshAfterBatchAnnotation 同款）
-      await ensureFilteredSlidesLoaded()
-    }
-  } catch (error) {
-    if (isLibNotFound(error)) {
-      await loadLibraries()
-      return
-    }
-    handleError('刷新数据失败: ', error)
-  }
-}
+// 维护操作后的统一刷新链（清理丢失 / 前缀替换共用）：清单刷新走统一入口
+// refreshDataAfterMutation（本批收敛），差异面 = 统计重拉（丢失数/文件数口径）+
+// 标签树重拉（绑定计数变化）。前缀替换弹窗成败均上报 completed（单事务替换 +
+// 自动扫描，扫描失败时替换已提交，两种终态都刷新），本链幂等无副作用
+const refreshAfterMaintain = () => refreshDataAfterMutation({ reloadStats: true, reloadTagTrees: true })
 
 // ---- 索引设置（第十批 SRS §2.7.3）：排除规则编辑弹窗接线 ----
 
@@ -2867,6 +2842,7 @@ const resetAndReloadView = async () => {
   fileEntries.value = []
   slideEntries.value = []
   slideTotal.value = 0
+  slidesStale.value = false // 语境全清后清单必然重拉（loadView），stale 标记无意义
   searchItems.value = []
   searchTotal.value = 0
   expandedAggPaths.value = []
@@ -2937,6 +2913,9 @@ const loadView = async (seq = null) => {
 // （画廊滚动追加）在调用时快照当前库代次，滚动加载在途切库同样被拦截。
 const loadSlidesPage = async (reset, seq = null) => {
   if (seq === null) seq = librarySeq
+  // 首页复位重拉 = 清单回新鲜：集中复位 stale 标记（覆盖 loadView/filterByFile/
+  // 统一刷新入口/保存链等全部 reset=true 路径，防消费复位漏点）
+  if (reset) slidesStale.value = false
   // 追加页在途置 loadingMore：滚动事件在途窗口内连续触发时被 onGalleryScroll
   // 的防重检查拦截（offset 以已加载条目数计算，重复触发会追加重复条目）
   if (!reset) loadingMore.value = true
@@ -3163,8 +3142,9 @@ const onCardDragStart = (card, event) => {
 
 // 树节点 drop 分派（FolderTree drop-files 事件，含根「全部素材」path=''）：
 // MoveAssetFiles 返回值汇总分流（对齐批量打标签弹窗 completed 口径——全部成功
-// success、部分失败 warning 带明细提示）；成功后刷新文件清单与树徽标（数据变更
-// 点位：保留 folderPath 与树选中——§8.7 矩阵，被移出当前目录的条目随清单刷新
+// success、部分失败 warning 带明细提示）；成功后清单刷新走统一入口
+// refreshDataAfterMutation（本批收敛，reloadFolders 表达树徽标重拉差异面——数据
+// 变更点位：保留 folderPath 与树选中，§8.7 矩阵，被移出当前目录的条目随清单刷新
 // 自然消失）、清空多选集（拖拽操作收口）。在途防重：moveBusy 期间拒绝再次分派。
 const onFolderDrop = async (targetPath, fileIds) => {
   if (!hasLibrary.value || moveBusy.value || !fileIds || fileIds.length === 0) return
@@ -3177,20 +3157,7 @@ const onFolderDrop = async (targetPath, fileIds) => {
     } else {
       ElMessage.success(`已移动 ${result?.succeeded || 0} 个文件到${targetName}`)
     }
-    // 数据变更刷新（对齐 refreshAfterBatchAnnotation 精简面）：文件底册重拉 +
-    // 树徽标重拉 + 幻灯片视图浏览清单复位重拉（移动成功后幻灯片视图已加载段可能
-    // 含已移走文件的页——对齐批量打标签刷新链的幻灯片补拉路径）；目录过滤语境接
-    // ensureFolderSlidesLoaded 续拉兜底，防过滤后已加载段陈旧收敛为 0 卡；双代次
-    // 守卫防在途切库写回
-    const libSeqAtStart = librarySeq
-    const entries = await ListAssetFiles(currentLibraryId.value)
-    if (libSeqAtStart !== librarySeq) return
-    fileEntries.value = entries || []
-    if (!searchMode.value && viewMode.value === 'slide') {
-      await loadSlidesPage(true)
-      await ensureFolderSlidesLoaded()
-    }
-    await loadFolders()
+    await refreshDataAfterMutation({ reloadFolders: true })
     // 拖拽多选收口：移动完成清空选中集（普通勾选集共用同键空间，一并清）
     clearSelection()
   } catch (error) {
@@ -3205,8 +3172,11 @@ const onFolderDrop = async (targetPath, fileIds) => {
 // + folder_meta 键同事务级联）；返回值/错误分流对齐文件移动口径（自身子树/排除/
 // 派生落点已由组件软拦截，后端守卫为第二防线）。在途防重复用 folderOpsBusy
 //（目录管理操作同族：菜单与 drop 分派已由 busy 联动禁用，不再单设 moveFolderBusy
-// 造成两套在途态漂移）。成功后按新前缀改写选中目录（浏览语境保留，对齐重命名）
-// + 刷新树徽标；folderPath 保留（数据变更点位，§8.7 登记）。
+// 造成两套在途态漂移）。成功后按新前缀改写选中目录（浏览语境保留，对齐重命名），
+// 清单刷新走统一入口 refreshDataAfterMutation（本批 Q2 纳入：底册/幻灯片清单与树
+// 徽标同步刷新，不再单纯依赖尾部自动扫描 done 事件兜底——扫描失败降级时 done 不
+// 来，陈旧无救；与扫描 done 的双重刷新一轮属可接受代价，正确性优先）；folderPath
+// 保留（数据变更点位，§8.7 登记）。
 const onFolderDropFolder = async (sourcePath, targetPath) => {
   if (!hasLibrary.value || folderOpsBusy.value || !sourcePath) return
   folderOpsBusy.value = true
@@ -3221,7 +3191,7 @@ const onFolderDropFolder = async (sourcePath, targetPath) => {
     if (folderPath.value === sourcePath || folderPath.value.startsWith(sourcePath + '/')) {
       folderPath.value = (result?.newPath || sourcePath) + folderPath.value.slice(sourcePath.length)
     }
-    await loadFolders()
+    await refreshDataAfterMutation({ reloadFolders: true })
   } catch (error) {
     handleError('移动文件夹失败: ', error)
   } finally {
@@ -3472,16 +3442,25 @@ const onSlideTagOwnChange = () => {
 const onViewModeChange = () => {
   // 视图切换：检索模式为客户端类型过滤（displayCards 已响应）；浏览模式目标清单
   // 为空即拉取——覆盖「库切换/扫描落定在幻灯片视图后切回文件视图」时文件底册未
-  // 加载（审核 9 同根因）与幻灯片清单未加载两种形态
+  // 加载（审核 9 同根因）与幻灯片清单未加载两种形态；幻灯片清单 stale（数据变更
+  // 统一刷新入口在文件视图停留时置位）则切入即重拉首页，消灭「文件视图停留操作
+  // → 切回见陈旧段」
   closeDetail()
   closePreview() // 语境变更点：文件/幻灯片视图互换清预览（选中维度不通约）
   clearSelection() // 语境变更点：选中维度互换不通约，切视图清选中（D5#3）
   fileFilterPath.value = '' // 语境变更点：手动切视图即离开过滤语境（filterByFile 直赋不经此处，无自清问题）
   if (searchMode.value) return
-  const targetEmpty = viewMode.value === 'file'
-    ? fileEntries.value.length === 0
-    : slideEntries.value.length === 0
-  if (targetEmpty) loadView()
+  if (viewMode.value === 'slide' && slidesStale.value) {
+    // stale 消费（方案 B 惰性重拉）：无条件重拉首页（loadSlidesPage(true) 内部
+    // 同步复位 stale，此处显式复位为意图声明 + 冗余防御）
+    slidesStale.value = false
+    loadView()
+  } else {
+    const targetEmpty = viewMode.value === 'file'
+      ? fileEntries.value.length === 0
+      : slideEntries.value.length === 0
+    if (targetEmpty) loadView()
+  }
   // 目录过滤跨视图同口径（PR2 R7，§8.7 矩阵：viewMode 切换不清 folderPath——
   // 文件/幻灯片两视图同按归属文件前缀过滤）：切到幻灯片视图时目标页可能不在
   // 已加载段，续拉兜底（对齐 fileFilterPath 的 ensureFilteredSlidesLoaded 先例）
@@ -3747,9 +3726,11 @@ const filterByFile = async (card) => {
   clearSelection() // 语境变更点：视图切换清选中（D5#3，直赋路径手动清）
   // 幻灯片清单未拉过（切库/扫描落定后未进过幻灯片视图）：slideTotal 为 0 时
   // canLoadMoreSlides 恒假，先 await 拉首页才有续拉基准（不 await 则续拉判定
-  // 读到旧 total=0 直接退出）；已拉过则直接续拉。await 后 ensureFilteredSlidesLoaded
-  // 内部按 target 逐轮校验，期间清过滤/切库竞态自然退出
-  if (slideEntries.value.length === 0 && slideTotal.value === 0) {
+  // 读到旧 total=0 直接退出）；stale（数据变更刷新链在文件视图停留时置位）时同
+  // 样复位重拉——直赋路径切入幻灯片视图与 onViewModeChange 消费 stale 同语义。
+  // 已拉过且新鲜则直接续拉。await 后 ensureFilteredSlidesLoaded 内部按 target 逐
+  // 轮校验，期间清过滤/切库竞态自然退出
+  if ((slideEntries.value.length === 0 && slideTotal.value === 0) || slidesStale.value) {
     await loadSlidesPage(true)
   }
   await ensureFilteredSlidesLoaded()
@@ -3950,17 +3931,13 @@ const onSaveSlideMeta = async () => {
         syncSlideEntryAnnotation(entryId, patched)
       }
     } else {
-      // 浏览语境：重拉幻灯片清单（复位首页），详情条目引用同步指向新数据
-      await loadSlidesPage(true)
+      // 浏览语境：清单重拉段走统一入口 refreshDataAfterMutation（本批收敛——恒做
+      // 底册重拉 + 幻灯片复位首页 + folder/fileFilter 双路续拉兜底；保存语境为浏览
+      // 幻灯片视图停留，stale 置位路径不涉及）。期间切库/扫描刷新路径 selected 已
+      // 被 resetAndReloadView 同步前缀 closeDetail 置空，下方写回判定自然跳过；
+      // 条目引用命中/miss 回读分支保留原地（保存链特有回读语义，见下）
+      await refreshDataAfterMutation()
       if (libSeqAtStart !== librarySeq) return // 保存期间切库/刷新：旧清单响应已被守卫丢弃，不写回不重置
-      // 过滤浏览语境兜底（同 refreshAfterBatchTag 真机修复根因）：复位首页后目标
-      // 文件的页大概率不在已加载段，客户端 fileFilterPath 过滤收敛 0 张致画廊全空
-      // ——过滤视图点卡片进详情编辑保存即触发。对齐 filterByFile 进入路径接续拉
-      // 兜底（内部每轮校验过滤目标未变 + loadingMore 防重，await 期间语境变更自然
-      // 退出）；续拉到位后保存条目回到已加载段走命中分支以服务端数据回读，非过滤
-      // 语境为空操作不改变既有 miss 回填语义。期间切库/扫描刷新路径 selected 已被
-      // resetAndReloadView 同步前缀 closeDetail 置空，下方写回判定自然跳过
-      await ensureFilteredSlidesLoaded()
       const updated = slideEntries.value.find(s => s.id === entryId)
       if (updated && selected.value?.slideEntry?.id === entryId) {
         // 命中：引用已同步为服务端新数据，草稿重读权威数据

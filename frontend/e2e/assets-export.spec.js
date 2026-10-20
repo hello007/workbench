@@ -91,7 +91,8 @@ test.describe('素材管理元数据导出：目标已存在确认链路', () =>
     wailsOverrides: {
       ...baseOverrides,
       // 恒拒 override（E2E 描述符无「先错后成」序列形态）：确认型错误码驱动
-      // ElMessageBox 覆盖确认链路；重调仍拒走 handleError warning 分流
+      // ElMessageBox 覆盖确认链路；重调仍拒在组件内闭环再次弹确认框
+      //（runExport 递归语义：确认型错误恒弹覆盖确认，非 handleError 分流）
       ExportAssetMetadata: {
         __error__: '导出目标已存在：D:/e2e-export/out.csv。确认覆盖将重写同名内容',
         __code__: 'E_ASSETS_EXPORT_TARGET_EXISTS'
@@ -99,7 +100,7 @@ test.describe('素材管理元数据导出：目标已存在确认链路', () =>
     }
   })
 
-  test('确认框覆盖写入重调 overwrite=true，恒拒下 warning 提示且弹窗保持', async ({ page }) => {
+  test('确认框覆盖写入重调 overwrite=true，恒拒下再次弹确认框且导出弹窗保持', async ({ page }) => {
     await openPanel(page)
 
     await page.locator('.assets-panel').getByRole('button', { name: '导出' }).click()
@@ -108,14 +109,18 @@ test.describe('素材管理元数据导出：目标已存在确认链路', () =>
     await dialog.locator('.el-input__inner').first().fill('D:/e2e-export/out.csv')
     await dialog.locator('.el-dialog__footer').getByRole('button', { name: '导出' }).click()
 
-    // 确认框弹出（消息含后端目标路径），点「覆盖写入」→ overwrite=true 重调
+    // 确认框弹出（消息含后端目标路径），点「覆盖写入」→ overwrite=true 重调。
+    // EP 2.14 关闭后的 message-box 实例仍驻留 DOM 且二次弹出后同名选择器命中
+    // 2 元素——首框取 .first()、重调后的新框取 .last()（DOM 追加序 = 弹出序）
     const msgbox = page.locator('.el-message-box')
-    await expect(msgbox).toBeVisible()
-    await expect(msgbox).toContainText('导出目标已存在：D:/e2e-export/out.csv')
-    await msgbox.getByRole('button', { name: '覆盖写入' }).click()
+    await expect(msgbox.first()).toBeVisible()
+    await expect(msgbox.first()).toContainText('导出目标已存在：D:/e2e-export/out.csv')
+    await msgbox.first().getByRole('button', { name: '覆盖写入' }).click()
 
-    // 重调仍拒（mock 恒拒）：warning 分流提示（确认型码不拼前缀）+ 弹窗保持打开
-    await expect(page.locator('.el-message').filter({ hasText: '导出目标已存在' })).toBeVisible()
+    // 重调仍拒（mock 恒拒）：确认型错误在组件内闭环再次弹覆盖确认框（EP 2.14 起
+    // 关闭动画期间重开正常显示，覆盖链路可重复），导出弹窗保持打开
+    await expect(msgbox.last()).toBeVisible()
+    await expect(msgbox.last()).toContainText('导出目标已存在：D:/e2e-export/out.csv')
     await expect(dialog).toBeVisible()
 
     // 两次调用：首次 overwrite=false，确认后重调 overwrite=true
