@@ -158,6 +158,16 @@ type FileBytes struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// PptxPreviewResult pptx/ppsx 预览转换结果（文件树点击 pptx → 后端 COM 转 PDF →
+// 前端复用 pdfjs viewer 链路）。PdfPath 为缓存 PDF 绝对路径（前端拼 /preview-pdf
+// 同源 URL），空串 = 未产出；Error 为用户可读中文消息、ErrorCode 为机器可读
+// 错误码（对齐 AppError 三处同步契约，取值 E_PPTX_PREVIEW_*），两者非空 = 失败。
+type PptxPreviewResult struct {
+	PdfPath   string `json:"pdfPath,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
+}
+
 // PullResult 单个仓库的拉取结果
 type PullResult struct {
 	Path    string `json:"path"`

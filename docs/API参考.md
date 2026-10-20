@@ -8,7 +8,7 @@
 
 ## 1. 方法清单总览
 
-共 **229** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 24 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 24 个 service/cache。按 28 个业务域分组：
+共 **230** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 25 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 25 个 service/cache。按 29 个业务域分组：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
@@ -17,6 +17,7 @@
 | 收藏夹 | 5 | `app_favorites.go` |
 | 文件树 | 8 | `app_filetree.go` |
 | 文件预览与对话框 | 6 | `app_preview.go` |
+| PPTX 预览转换 | 1 | `app_pptx_preview.go` |
 | 文件操作与剪贴板 | 6 | `app_clipboard.go` |
 | 搜索 | 2 | `app_search.go` |
 | Git 仓库信息 | 8 | `app_git.go` |
@@ -42,7 +43,7 @@
 | 素材管理 | 43 | `app_assets.go` |
 | 素材购物栏 | 7 | `app_asset_cart.go` |
 
-> 既有缺口（与本表合计 218 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。）
+> 既有缺口（与本表合计 219 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。）
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
@@ -116,6 +117,14 @@
 | `SaveFileDialog` | `(defaultFilename, filters) => Promise<string>` | 原生保存对话框 | 选定路径（取消返回空串） |
 | `OpenFileDialog` | `(title, filters) => Promise<string>` | 原生打开对话框 | 选定路径（取消返回空串） |
 | `OpenDirectoryDialog` | `(title) => Promise<string>` | 原生目录选择对话框（素材库新建等场景，serve 无头模式拒绝） | 选定目录路径（取消返回空串） |
+
+### 6.1 PPTX 预览转换（`app_pptx_preview.go`）
+
+`.pptx/.ppsx` 文件树内嵌预览：后端经本机 PowerPoint/WPS COM 整体转换为 PDF（复用素材缩略图同一 COM STA 单队列），前端把 `pdfPath` 当 kind=pdf 走现成 pdfjs viewer iframe 链路（`/preview-pdf` 同源 handler 零改动）。错误经返回结构 `error`/`errorCode` 字段下发（不走 Wails reject 通道），前端降级提示 + 「用默认程序打开」。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `ConvertPptxForPreview` | `(filePath) => Promise<PptxPreviewResult>` | 转换 pptx/ppsx 为 PDF：缓存命中（源未变）直接返回缓存路径零 COM 延迟；未命中经 COM 转换（60s 超时、瞬态失败重试 1 次、同文件在途转换防抖共享）。缓存目录 `data/pptx_preview_pdf/`，键 = 源路径+size+mtime（源变更自动失效），LRU 上限 512MB 淘汰最旧，索引 `index.json` 走 util.SaveJSON 原子写 | PptxPreviewResult |
 
 ---
 
@@ -581,6 +590,14 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `base64` | string? | 原始字节 base64（前端用 `decodeBase64Utf8` 还原文本） |
 | `tooLarge` | boolean | 是否超大 |
 | `error` | string? | 错误信息 |
+
+**PptxPreviewResult** — pptx 预览转换结果（`ConvertPptxForPreview`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `pdfPath` | string? | 缓存 PDF 绝对路径（空串 = 未产出）；前端拼 `/preview-pdf?path=` 同源 URL 交 pdfjs viewer |
+| `error` | string? | 用户可读中文错误消息（非空 = 失败，前端降级提示 + 用默认程序打开） |
+| `errorCode` | string? | 机器可读错误码：`E_PPTX_PREVIEW_UNAVAILABLE`（非 Windows / 未检测到 PowerPoint/WPS）/ `E_PPTX_PREVIEW_FAILED`（文件损坏 / COM 调用失败 / 超时） |
 
 **FileChange** — 本地变更文件
 

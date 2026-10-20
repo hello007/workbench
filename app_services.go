@@ -88,6 +88,11 @@ type AppServices struct {
 	// 合并导出复用 pptxMergeSvc（构造注入），导出互斥 E_CART_EXPORT_IN_PROGRESS，
 	// 取消转发其取消注册表。
 	assetCartSvc *service.AssetCartService
+	// PPTX 预览转换编排服务（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer
+	// 复用链路，data/pptx_preview_pdf/ 缓存索引 + LRU + 在途防抖）。COM 执行器
+	// 复用 assetsSvc 缩略图同一 STA worker 单队列（PptxPdfConverter 注入，避免
+	// 双 COM 队列进程互杀）；不发生前端事件，web_serve.go applySink 无需同步。
+	pptxPreviewSvc *service.PptxPreviewService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -202,6 +207,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 素材购物栏服务（素材管理「购物栏」，独立 data/asset_cart.json 不与素材库
 	// 数据交叉；合并导出复用 pptxMergeSvc）
 	s.assetCartSvc = service.NewAssetCartService(filepath.Join(dataDir, "asset_cart.json"), s.pptxMergeSvc)
+
+	// PPTX 预览转换编排服务（文件树 pptx/ppsx 内嵌预览，data/pptx_preview_pdf/
+	// 缓存目录；COM 执行器 = assets 缩略图同一 STA worker 单队列导出器）
+	s.pptxPreviewSvc = service.NewPptxPreviewService(filepath.Join(dataDir, "pptx_preview_pdf"), s.assetsSvc.PptxPdfConverter())
 
 	return s
 }

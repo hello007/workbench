@@ -31,6 +31,12 @@ vi.mock('mermaid', () => ({
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   BrowserOpenURL: vi.fn()
 }))
+
+// PPTX 预览转换绑定（.pptx/.ppsx → COM 转 PDF → pdf viewer 链路）：
+// 用例内按需配置 mockReturnValue（成功 / 失败 / 不可用 / 挂起）
+vi.mock('../../../wailsjs/go/main/App', () => ({
+  ConvertPptxForPreview: vi.fn()
+}))
 vi.mock('xlsx', () => ({
   read: vi.fn(() => ({ SheetNames: [], Sheets: {} })),
   utils: { sheet_to_json: vi.fn(() => []) }
@@ -642,5 +648,93 @@ describe('FilePreviewRenderer.vue - HTML 渲染预览', () => {
     await flushPromises()
     expect(wrapper.find('iframe.html-frame').exists()).toBe(false)
     expect(wrapper.find('.preview-codemirror-wrap').exists()).toBe(true)
+  })
+})
+
+describe('FilePreviewRenderer.vue - PPTX 预览转换（COM 转 PDF + pdf viewer 复用）', () => {
+  let wrapper
+
+  const getConvertMock = async () => (await import('../../../wailsjs/go/main/App')).ConvertPptxForPreview
+
+  beforeEach(() => { vi.clearAllMocks() })
+  afterEach(() => { if (wrapper) { wrapper.unmount(); wrapper = null } })
+
+  const mountPptx = (props = {}) => mountRenderer({
+    kind: 'office', fileName: 'demo.pptx',
+    filePath: 'D:/repo/demo.pptx', base64: 'x0x0',
+    ...props
+  })
+
+  it('转换成功：iframe 走 pdfjs viewer 链路渲染缓存 PDF，绑定收到 filePath', async () => {
+    const convert = await getConvertMock()
+    convert.mockResolvedValue({ pdfPath: 'D:/data/pptx_preview_pdf/abc-1-2.pdf', error: '', errorCode: '' })
+    wrapper = mountPptx()
+    await flushPromises()
+
+    expect(convert).toHaveBeenCalledWith('D:/repo/demo.pptx')
+    const frame = wrapper.find('.preview-pdf-frame-wrap iframe.pdf-frame')
+    expect(frame.exists()).toBe(true)
+    const src = frame.attributes('src')
+    expect(src).toContain('/pdfjs-viewer/web/viewer.html?file=')
+    // file 参数整体 encode 后内含 /preview-pdf?path=<encode 的缓存 PDF 路径>
+    const fileParam = decodeURIComponent(src.split('file=')[1])
+    expect(fileParam).toContain('/preview-pdf?path=')
+    expect(fileParam).toContain(encodeURIComponent('D:/data/pptx_preview_pdf/abc-1-2.pdf'))
+  })
+
+  it('转换失败：降级提示 + 用默认程序打开按钮', async () => {
+    const convert = await getConvertMock()
+    convert.mockResolvedValue({ pdfPath: '', error: 'PPT 转换 PDF 失败，请用默认程序打开查看', errorCode: 'E_PPTX_PREVIEW_FAILED' })
+    wrapper = mountPptx()
+    await flushPromises()
+
+    expect(convert).toHaveBeenCalled()
+    expect(wrapper.find('iframe.pdf-frame').exists()).toBe(false)
+    const fallback = wrapper.find('.preview-fallback')
+    expect(fallback.exists()).toBe(true)
+    expect(fallback.text()).toContain('PPT 转换 PDF 失败')
+    expect(fallback.text()).toContain('用默认程序打开')
+  })
+
+  it('环境不可用（无 PowerPoint/WPS）：降级提示含后端消息', async () => {
+    const convert = await getConvertMock()
+    convert.mockResolvedValue({ pdfPath: '', error: '未检测到 PowerPoint/WPS，无法内嵌预览 PPT 文件', errorCode: 'E_PPTX_PREVIEW_UNAVAILABLE' })
+    wrapper = mountPptx()
+    await flushPromises()
+
+    const fallback = wrapper.find('.preview-fallback')
+    expect(fallback.exists()).toBe(true)
+    expect(fallback.text()).toContain('未检测到 PowerPoint/WPS')
+  })
+
+  it('旧格式 .ppt 不触发转换，保留降级提示', async () => {
+    const convert = await getConvertMock()
+    wrapper = mountPptx({ fileName: 'old.ppt' })
+    await flushPromises()
+
+    expect(convert).not.toHaveBeenCalled()
+    const fallback = wrapper.find('.preview-fallback')
+    expect(fallback.exists()).toBe(true)
+    expect(fallback.text()).toContain('旧版 PowerPoint 格式暂不支持内嵌预览')
+  })
+
+  it('转换中显示 loading 容器（转换结果返回前不渲染 iframe）', async () => {
+    const convert = await getConvertMock()
+    convert.mockReturnValue(new Promise(() => {})) // 挂起模拟在途转换
+    wrapper = mountPptx()
+    await flushPromises()
+
+    expect(wrapper.find('.preview-pptx-converting').exists()).toBe(true)
+    expect(wrapper.find('iframe.pdf-frame').exists()).toBe(false)
+  })
+
+  it('切换到 .ppsx 同样触发转换（ppsx 在支持面内）', async () => {
+    const convert = await getConvertMock()
+    convert.mockResolvedValue({ pdfPath: 'D:/data/pptx_preview_pdf/ppsx.pdf', error: '', errorCode: '' })
+    wrapper = mountPptx({ fileName: 'show.ppsx', filePath: 'D:/repo/show.ppsx' })
+    await flushPromises()
+
+    expect(convert).toHaveBeenCalledWith('D:/repo/show.ppsx')
+    expect(wrapper.find('.preview-pdf-frame-wrap iframe.pdf-frame').exists()).toBe(true)
   })
 })

@@ -43,6 +43,10 @@ export const ErrorCode = Object.freeze({
   AssetsDeleteBackupFailed: 'E_ASSETS_DELETE_BACKUP_FAILED', // 删库前自动备份失败（warning，确认型拒绝非真失败——删除未发生，用户确认「删除后无恢复点」后以 allowNoBackup=true 重调）
   // 素材购物栏域错误码（素材管理·购物栏），取值与 model/app_error.go 购物栏域段一致。
   CartExportInProgress: 'E_CART_EXPORT_IN_PROGRESS', // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
+  // PPTX 预览转换域错误码（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer），
+  // 取值与 model/app_error.go PPTX 预览转换域段一致。
+  PptxPreviewUnavailable: 'E_PPTX_PREVIEW_UNAVAILABLE', // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
+  PptxPreviewFailed: 'E_PPTX_PREVIEW_FAILED', // 转换失败：文件损坏/COM 调用失败/超时（error，前端降级提示 + 用默认程序打开）
   // RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误）。
   // 取值与 model/app_error.go RPC 协议段常量表一致（server/rpc.go 以别名引用），
   // 由 src/transport/rpc.js 在浏览器模式下 reject 出，前端按 error 分流提示。

@@ -339,7 +339,14 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
 
   // 设置保存（AppSettings.assets 段缩略图设置入口，整体提交语义）：void 返回 null 安全
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
-  SaveSettings: null
+  SaveSettings: null,
+
+  // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----
+  // 形状对齐 model.PptxPreviewResult { pdfPath, error, errorCode }（见
+  // frontend/wailsjs/go/models.ts）。默认降级态（CI 无 PowerPoint）：
+  // errorCode = E_PPTX_PREVIEW_UNAVAILABLE → 渲染器显示降级提示 + 用默认程序
+  // 打开按钮；用例按需 override { pdfPath: 'D:/cache/xxx.pdf' } 验证 viewer 链路
+  ConvertPptxForPreview: { pdfPath: '', error: '未检测到 PowerPoint/WPS，无法内嵌预览 PPT 文件', errorCode: 'E_PPTX_PREVIEW_UNAVAILABLE' }
 }
 
 /**

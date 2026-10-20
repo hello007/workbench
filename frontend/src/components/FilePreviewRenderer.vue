@@ -158,11 +158,33 @@
         </div>
       </template>
 
-      <!-- PowerPoint .pptx/.ppt：保真较低，降级提示 + 打开 -->
-      <div v-else-if="officeSubType === 'pptx'" class="preview-fallback">
-        <p class="fallback-tip">PowerPoint 内嵌预览保真较低，建议用默认程序打开查看完整效果。</p>
-        <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
-      </div>
+      <!-- PowerPoint .pptx/.ppsx：后端 COM 转 PDF（data/pptx_preview_pdf 缓存，
+           命中零延迟）+ 复用 kind=pdf 的 pdfjs viewer iframe 链路（翻页/缩放/
+           搜索/缩略图全功能）；.ppt/.pptm/.pps 旧格式与转换失败/环境不可用保留
+           降级提示 + 用默认程序打开 -->
+      <template v-else-if="officeSubType === 'pptx'">
+        <!-- 旧版格式（.ppt/.pptm/.pps）：不在转换支持面内，保留降级 -->
+        <div v-if="!isPptxConvertible" class="preview-fallback">
+          <p class="fallback-tip">旧版 PowerPoint 格式暂不支持内嵌预览，请用默认程序打开。</p>
+          <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+        </div>
+        <!-- 转换成功：缓存 PDF 走 pdfjs viewer 同源链路（与 kind=pdf 分支同构） -->
+        <div v-else-if="pptxPdfPath" class="preview-pdf-frame-wrap">
+          <iframe v-if="pptxViewerSrc" :src="pptxViewerSrc" class="pdf-frame" frameborder="0" />
+        </div>
+        <!-- 转换失败 / 环境不可用（无 PowerPoint/WPS / 文件损坏 / 超时）：降级提示 -->
+        <div v-else-if="pptxError" class="preview-fallback">
+          <p class="fallback-tip">{{ pptxError }}</p>
+          <el-button type="primary" @click="$emit('openExternal')">用默认程序打开</el-button>
+        </div>
+        <!-- 转换中（首次 1-3s+，缓存命中秒回；同文件在途转换后端防抖共享） -->
+        <div
+          v-else
+          v-loading="pptxConverting"
+          class="preview-pptx-converting"
+          element-loading-text="正在转换 PowerPoint 文档..."
+        ></div>
+      </template>
 
       <!-- 旧版 Office 格式 .doc/.dot/.odt/.odp/.ods/.rtf 等：前端库不支持，降级 -->
       <div v-else class="preview-fallback">
@@ -238,6 +260,8 @@ import MarkdownIt from 'markdown-it'
 // YAML frontmatter 解析（v4+ 默认 safe schema），用于 markdown 预览属性面板
 import jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
+// PPTX 预览转换绑定（.pptx/.ppsx → 后端 COM 转 PDF → 复用 pdf viewer 链路）
+import { ConvertPptxForPreview } from '../../wailsjs/go/main/App'
 import { buildHtmlPreviewDoc } from '../utils/htmlPreview'
 import { useSettingsStore } from '../store'
 import hljs from 'highlight.js/lib/core'
@@ -618,9 +642,89 @@ const imageDataUrl = computed(() => {
 // （含 PagesMapper）只在 iframe 内定义一份，从架构上规避前端 pdfjs 双实例。
 const pdfViewerSrc = computed(() => {
   if (props.kind !== 'pdf' || !props.pdfPath) return ''
-  const pdfUrl = `/preview-pdf?path=${encodeURIComponent(props.pdfPath)}`
-  return `/pdfjs-viewer/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`
+  return buildPdfViewerSrc(props.pdfPath)
 })
+
+// buildPdfViewerSrc PDF 本地绝对路径 → pdfjs viewer 同源 URL（双重 encode，
+// 见上方 pdfViewerSrc 注释）。kind=pdf 分支与 pptx 转换产物分支共用单点。
+const buildPdfViewerSrc = (localPdfPath) => {
+  const pdfUrl = `/preview-pdf?path=${encodeURIComponent(localPdfPath)}`
+  return `/pdfjs-viewer/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`
+}
+
+// ---------- PPTX 预览转换（.pptx/.ppsx → COM 转 PDF → 复用 pdf viewer） ----------
+// 后端 ConvertPptxForPreview：缓存命中直接返回缓存路径（零 COM 延迟），未命中
+// 经 PowerPoint/WPS COM 整体转换（首次 1-3s+，60s 超时，失败重试 1 次）；同文件
+// 在途转换在后端防抖共享。成功后把缓存 PDF 路径当 kind=pdf 走 pdfjs viewer
+// iframe 链路；失败 / 环境不可用降级提示 + 用默认程序打开。
+const PPTX_CONVERTIBLE_EXTS = new Set(['pptx', 'ppsx'])
+
+const isPptxConvertible = computed(() => {
+  if (props.kind !== 'office' || officeSubType.value !== 'pptx') return false
+  return PPTX_CONVERTIBLE_EXTS.has(getExt(props.fileName))
+})
+
+const pptxPdfPath = ref('')
+const pptxError = ref('')
+const pptxConverting = ref(false)
+// 代次守卫：props 变更（切换文件/重新预览）使在途转换响应写回前比对丢弃，
+// 防旧文件的转换结果渲染进新文件的预览区
+let pptxConvertSeq = 0
+
+const pptxViewerSrc = computed(() => {
+  if (!pptxPdfPath.value) return ''
+  return buildPdfViewerSrc(pptxPdfPath.value)
+})
+
+const resetPptxState = () => {
+  pptxPdfPath.value = ''
+  pptxError.value = ''
+  pptxConverting.value = false
+  pptxConvertSeq++ // 使在途转换响应失效
+}
+
+const convertPptx = async () => {
+  const seq = ++pptxConvertSeq
+  pptxPdfPath.value = ''
+  pptxError.value = ''
+  pptxConverting.value = true
+  try {
+    const result = await ConvertPptxForPreview(props.filePath)
+    if (seq !== pptxConvertSeq) return // 代次失效：旧文件转换结果丢弃
+    if (result && result.pdfPath) {
+      pptxPdfPath.value = result.pdfPath
+    } else {
+      pptxError.value = (result && result.error) || 'PPT 预览转换失败，请用默认程序打开。'
+    }
+  } catch (e) {
+    if (seq !== pptxConvertSeq) return
+    pptxError.value = (e && e.message) || 'PPT 预览转换失败，请用默认程序打开。'
+  } finally {
+    if (seq === pptxConvertSeq) {
+      pptxConverting.value = false
+    }
+  }
+}
+
+// 转换触发去重：ContentPanel 每次预览先把 base64 重置为空再异步拉字节，watch
+// 会因 base64 变化触发两次 renderOfficeBySubType——base64 非空的重复触发（字节
+// 到达）不重转；base64 为空 = 新预览周期信号（同文件修改后重新预览也先清空
+// base64），此时重新走转换（后端按 mtime+size 缓存键自动失效旧产物）。
+let pptxActiveKey = ''
+
+const maybeConvertPptx = async () => {
+  const key = `${props.filePath}|${props.fileName}`
+  const freshCycle = props.base64 === ''
+  if (key === pptxActiveKey && !freshCycle) return
+  pptxActiveKey = key
+  resetPptxState()
+  if (!props.filePath) {
+    pptxError.value = '缺少文件路径，无法转换预览。'
+    return
+  }
+  await nextTick()
+  await convertPptx()
+}
 
 const imageScale = ref(1)
 const imageScrollRef = ref(null)
@@ -809,8 +913,17 @@ const renderOfficeBySubType = async () => {
   } else if (officeSubType.value === 'xlsx') {
     await nextTick()
     await renderXlsx()
+  } else if (officeSubType.value === 'pptx') {
+    // .pptx/.ppsx 走后端 COM 转 PDF 链路（maybeConvertPptx 内部按文件标识 +
+    // base64 空值信号去重，防字节到达的重复触发重转）；旧格式（.ppt 等）仅
+    // 重置转换态走降级分支
+    if (isPptxConvertible.value) {
+      await maybeConvertPptx()
+    } else {
+      resetPptxState()
+    }
   }
-  // pptx / legacy 无需渲染，模板走降级分支
+  // legacy 无需渲染，模板走降级分支
 }
 
 watch(() => [props.kind, props.fileName, props.base64, props.content, props.htmlMode], async () => {
@@ -824,6 +937,8 @@ watch(() => [props.kind, props.fileName, props.base64, props.content, props.html
     officeError.value = ''
     xlsxSheets.value = []
     activeSheetName.value = ''
+    pptxActiveKey = ''
+    resetPptxState()
     if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
   }
   if (props.kind === 'text' && !isHtmlRenderView.value) {
@@ -1069,6 +1184,8 @@ onBeforeUnmount(() => {
   if (cmView) { cmView.destroy(); cmView = null }
   // 卸载时清空 docx 渲染容器，避免 DOM 残留
   if (docxContainerRef.value) docxContainerRef.value.innerHTML = ''
+  // 卸载时复位 PPTX 转换态（代次自增使在途转换响应写回被代次守卫丢弃）
+  resetPptxState()
 })
 </script>
 
@@ -1529,6 +1646,15 @@ onBeforeUnmount(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* PPTX 转换中容器（与 PDF iframe 同占位，loading 由 v-loading 指令渲染） */
+.preview-pptx-converting {
+  flex: 1;
+  min-height: 200px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-secondary);
 }
 
 .pdf-frame {

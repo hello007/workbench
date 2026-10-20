@@ -99,6 +99,7 @@ workbench/
 |排除规则与 excluded 态（assets 第十批 §12.1/12.2）：ExcludeDirs **单段 glob**（`filepath.Match` 语法，禁 `/` 与 `**` 多段——四对标工具均无此语义）大小写不敏感、目录基名匹配（避 Windows `/`≠`\` 坑）、root 自身豁免防整库剪空，ExcludeExts 归一带点小写三形态等价；**收集层剪枝与存量 excluded 判定共用同一 matcher**（禁两套口径）；excluded 判定**先排除后存在性**（规则命中不做存在性探测，规则命中+文件消失保持 excluded 不转 lost）；excluded 无损保留（对齐 lost）但**检索不可见导出照导**——标签浏览/facets-only SQL 恒 `status='ok'` 天然排除，**关键词路径须 excludedFileIDSet 显式剔除（新增检索入口漏补=规则失效可见）**；非 ok→ok 翻转（直复活/前缀替换收敛）**必须走 reviveLostFile 单事务重建 FTS**（excluded/lost 期间底册可编辑备注清 FTS 行，裸 UPDATE 翻状态=直复活后 unchanged 永跳过、关键词检索永久漏该文件无报错）|assets-management.md §12.1/§12.2（docs/spec/assets-management.md）|
 |素材库备份与还原（assets 第十批 §12.3/12.4）：`VACUUM INTO` 单语句（**禁包显式 Tx、禁裸拷贝 db**——WAL 未 checkpoint 必丢数据）、`integrity_check` **必须 Query 非 Exec**（Exec 丢结果集形同没校验）首行 != ok 即失败删备份；备份名 `<yyyyMMdd-HHmmss>[_N].db` 深序分隔符取 `_`（`-` 会使字典序与时间序颠倒、淘汰误删新份）；**还原步骤序乱序即半态**：阻塞等扫描退出（TryLock 立即拒绝不等待）→ CancelExport+WaitExportsDone（导出分批懒重开，rename 后旧行键静默水合新库混批 CSV 无声产出）→ **持 s.mu 复查 exportCancels 非空拒还原**（封 Cancel 与注册竞态窗口，复用 E_ASSETS_SCAN_IN_PROGRESS）→ 关连接→删 -wal/-shm→os.Rename 直接覆盖（Windows 原子，禁先 Remove）；删库前备份失败走 `allowNoBackup` 升级确认（E_ASSETS_DELETE_BACKUP_FAILED 强确认后 true 重调）；同库备份互斥 backupLocks（恒最内层锁）+ VACUUM 失败清理仅删零字节残留（非空可能是并发方有效备份）；重建前整库磁盘备份失败仅告警不中止，哈希恢复两级匹配（路径优先、hash 兜底多命中取首个、多旧绑定同 hash 旧路径字典序后者胜+组级告警）|assets-management.md §12.3/§12.4（docs/spec/assets-management.md）|
 |素材购物栏与合并导出（2026-10-19）：条目键 `<libraryId>\|<fileId>\|<slideNum>` 三处同构（model.AssetCartItem.Key / utils/assetCart.js / Remove/Reorder 入参）且 fileId 用 files.id 禁 slides.id；合并核心 sldId/sldMasterId 数字 id 解析**禁 `xml:"id,attr"` 结构体标签**（encoding/xml 对任意命名空间同名 attr 都命中且后者覆盖，sldId 条目恒取 r:id 值——须按属性 Name.Space 精确解析，parsePptxListIDs 单点）；三重冲突消解（注入 part 名分配器 / presentation.xml.rels rId 递增 / sldId≥256 与 sldMasterId≥2147483648 两数字命名空间独立）与失效条目跳过口径**单点在合并核心**（购物栏 stale 不预剔除，由 SkippedItems 统一报告）；装配两字段 pptxMergeSvc+assetCartSvc（merge 先构造）+ web_serve applySink 补 pptxMergeSvc.SetEventSink（assets-cart:export-* 出口持有者是合并编排服务）；导出互斥 E_CART_EXPORT_IN_PROGRESS 三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）|pptx-merge.md（docs/spec/pptx-merge.md）|
+|pptx 文件树预览（COM 转 PDF + pdfjs viewer，2026-10-20）：转换任务排进 assets-thumbs 既有 STA worker（ConvertToPdf 走 e.submit()，**禁建第二 COM 队列**——双队列进程快照 diff 互杀对方 COM 进程）；**失败/超时路径必须 Discard() 置脏**（否则死代理后续任务全撞全败不自愈）；**复用用户已开实例禁 SaveAs**（FullName 重定向污染用户会话，走 ExportAsFixedFormat 发布语义），自启实例 SaveAs(32) 失败回退 ExportAsFixedFormat(2)（WPS 对 32 无权威佐证待真机）；缓存 data/pptx_preview_pdf/ 键=srcPath+size+mtime、LRU 512MB、索引走 util.SaveJSON、在途防抖 chan 缓冲 1；前端 pptx 分支代次守卫 + onBeforeUnmount 须显式复位转换态（缺=卸载后响应写回销毁 ref）；App 方法签名不带 ctx（本仓无 Wails ctx 注入先例），60s 超时 service 层 WithTimeout 兜底；**dev 模式 Vite SPA fallback 吞 /preview-pdf**——vite.config.js 前置中间件对 /preview-pdf、/preview-raw 提前 404 触发 Wails dev 回退 AssetServer.Handler，今后新增不经 Vite 静态链路的同源路由必须同步加进该插件前缀判定（漏加=dev 黑屏生产正常、测试测不出）；隐藏页不导出/视频海报帧为预期行为|pptx-preview.md（docs/spec/pptx-preview.md）|
 
 ## 文档索引
 
@@ -138,5 +139,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-10-19
-**文档版本：** v2.25
+**最后更新：** 2026-10-20
+**文档版本：** v2.26

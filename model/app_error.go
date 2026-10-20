@@ -110,6 +110,10 @@ const (
 	// 素材购物栏域（素材管理「购物栏」：跨库页级收集 + 按序合并导出）
 	ErrCodeCartExportInProgress = "E_CART_EXPORT_IN_PROGRESS" // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
 
+	// PPTX 预览转换域（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）
+	ErrCodePptxPreviewUnavailable = "E_PPTX_PREVIEW_UNAVAILABLE" // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
+	ErrCodePptxPreviewFailed      = "E_PPTX_PREVIEW_FAILED"      // 转换失败：文件损坏/COM 调用失败/超时（重试 1 次后仍失败）（error，前端降级提示 + 用默认程序打开）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值
