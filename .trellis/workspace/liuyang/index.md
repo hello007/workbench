@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 135
-- **Last Active**: 2026-10-20
+- **Total Sessions**: 136
+- **Last Active**: 2026-10-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~847 | Active |
+| `journal-3.md` | ~880 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 136 | 2026-10-21 | 前端依赖版本漂移治理（EP caret 漂移根源收口） | `00c332a` | `master` |
 | 135 | 2026-10-20 | EP 2.14.5 确认型弹框回归排查 + drop-folder E2E 增补 | `a9330d5` | `master` |
 | 134 | 2026-10-20 | 素材清单刷新链统一化 + 文件夹树拖拽 E2E 补齐 | `bb7a1fa` | `master` |
 | 133 | 2026-10-20 | 素材管理文件夹树与拖拽整理 | `f93d106`, `24fcf4e` | `master` |

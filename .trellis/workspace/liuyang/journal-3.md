@@ -845,3 +845,36 @@ user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 136: 前端依赖版本漂移治理（EP caret 漂移根源收口）
+
+**Date**: 2026-10-21
+**Task**: 前端依赖版本漂移治理（EP caret 漂移根源收口）
+**Branch**: `master`
+
+### Summary
+
+39 顶层依赖四档钳制（exact element-plus 2.14.5 全家 / tilde 运行时 UI 面 28 项锁 minor / caret 工具链 8 项 / url xlsx），lock 仅 spec 元数据同步版本零变化；新增 scripts/check-dep-consistency.mjs 三维校验（档位登记×声明格式×lock 版本，未登记即拦）+ --selftest 11 用例 + ci.yml 步骤 2.5 快速失败；漂移注入实机自测三形态（exact 错位/tilde 越 minor/caret 越范围）全拦；SOP 沉淀 docs/spec/frontend-dep-upgrade.md 与 confirm-dialog.md 互链 + CLAUDE.md 关键规则行；vitest 2022 + E2E 75 全绿；trellis-check 3 findings 全修（spec 索引登记、0.0.x caret 语义、node 版本兼容）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `00c332a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
