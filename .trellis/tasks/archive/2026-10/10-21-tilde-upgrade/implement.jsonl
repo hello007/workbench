@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-tilde-upgrade/prd.md", "reason": "任务需求、盘点结论、升级操作链、ADR"}
+{"file": ".trellis/tasks/10-21-tilde-upgrade/research/upstream-inventory.md", "reason": "28 项盘点全表（升级批/跳过批/已最新）权威清单"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "升级 SOP（§3 操作规程、§3.3 必跑面、§3.4 EP 专项联动）"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "确认弹框哨兵 5 spec 清单与断言范式（pinia 升级回归面）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约（fixtures import、mock 单一数据源、双通道口径）"}
+{"file": "docs/spec/security-scan.md", "reason": "npm audit 官方 registry 命令形态与已知接受风险"}
