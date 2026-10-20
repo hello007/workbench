@@ -878,3 +878,36 @@ user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 137: goleak 硬门禁收口 + CI Linux 三问题修复（10-21-goleak-gate）
+
+**Date**: 2026-10-21
+**Task**: goleak 硬门禁收口 + CI Linux 三问题修复（10-21-goleak-gate）
+**Branch**: `master`
+
+### Summary
+
+goleak 两步走第二步：观察模式 26 天实为未观察（告警不改退出码+Linux 从未跑硬门禁）。WSL Ubuntu 复现 CI Linux 三问题全修——thumbQueue 8 实例泄漏（测试收口缺口，Cleanup 改 WaitThumbsDone 全链）、watchProcess 驻留（生产生命周期缺口，per-session watchDones+watchExits 双 chan 重构，trellis-check 审出共享 watchWG 多会话死锁 P0 后二次修复+补多会话回归用例）、rg stub 平台分流遗漏（Unix 分支补探针）、split 断言锚点时序脆弱（前移至确定性同步点）。TestMain 两档收紧（默认+深跑统一 VerifyTestMain 空白名单）+注入自证验拦。WSL Linux+Windows 双侧全量绿，文档三处同步（perf-baseline/CLAUDE.md v2.28/文件头）。镜像仓 CI 滞后与 security job 红点不在本任务范围
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `de14d99` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

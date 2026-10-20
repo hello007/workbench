@@ -1,0 +1,30 @@
+{
+  "id": "hardening-batch",
+  "name": "hardening-batch",
+  "title": "工程加固收口批（goleak 硬门禁 + tilde 走查 + E2E 覆盖）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-10-21",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-21-goleak-gate",
+    "10-21-tilde-upgrade",
+    "10-21-e2e-coverage"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
