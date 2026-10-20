@@ -40,8 +40,9 @@
 | 网络访问 | 4 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
 | 素材管理 | 43 | `app_assets.go` |
+| 素材购物栏 | 7 | `app_asset_cart.go` |
 
-> 既有缺口（与本表合计 218 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。
+> 既有缺口（与本表合计 218 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。）
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
@@ -514,6 +515,20 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `ListAssetLibraryBackups` | `(libraryID) => Promise<AssetBackupEntry[]>` | 备份清单（按备份时间倒序，条目含文件名/时间/大小/绝对路径；从未备份返回空清单非错误） | AssetBackupEntry[] |
 | `RestoreAssetLibrary` | `(libraryID, backupFile) => Promise<void>` | 还原备份（备份文件整体替换 `<id>.db`：取消并等待在途扫描退出 + 关连接 + 删 WAL/SHM 残留 + `os.Rename` 覆盖 + 惰性重开并复验；`backupFile` 须为该库备份目录内的备份文件（`ListAssetLibraryBackups` 返回的 `path` 原样回传）；覆盖前预检备份完整性，损坏备份不动当前库；还原后前端提示重扫） | — |
 
+### 29.1 素材购物栏（跨库页级收集与合并导出）
+
+素材管理「购物栏」：跨库把任意 PPT 的任意页加入购物栏（键 `<libraryId>|<fileId>|<slideNum>`，fileId 为 files.id 跨重解析稳定），抽屉内拖拽调整顺序，导出按购物栏顺序将全部页合并为单一 .pptx（纯 Go OOXML 基底注入式合并，契约见 [spec/pptx-merge.md](spec/pptx-merge.md)）。导出进度/终态经事件推送（前端闭包注销监听）：`assets-cart:export-progress` / `assets-cart:export-done` / `assets-cart:export-error`。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `ListAssetCartItems` | `() => Promise<AssetCartItem[]>` | 购物栏清单（按栏内顺序；逐条 `os.Stat` 探测源文件存在性，缺失条目 `stale=true` 置灰展示、不自动移除） | AssetCartItem[] |
+| `AddAssetCartItems` | `(items: AssetCartItem[]) => Promise<AssetCartAddResult>` | 批量加入（追加语义，顺序=入参顺序；按条目键幂等去重，重复项计入 duplicates） | AssetCartAddResult |
+| `RemoveAssetCartItems` | `(keys: string[]) => Promise<void>` | 按条目键移除（容忍未知键） | — |
+| `ClearAssetCart` | `() => Promise<void>` | 清空购物栏 | — |
+| `ReorderAssetCart` | `(orderedKeys: string[]) => Promise<void>` | 拖拽排序回写（须为当前栏内键的完整排列，缺失/多余报错防丢条目） | — |
+| `MergeAssetCartToPptx` | `(outPath) => Promise<PptxMergeResult>` | 按购物栏顺序合并导出新 PPT（基底=清单第一项源文件 GC 后，其余源整链注入；失效条目跳过计入 SkippedItems，基底缺失整体失败；导出中重复触发报 `E_CART_EXPORT_IN_PROGRESS`；可取消，取消无半态产物） | PptxMergeResult |
+| `CancelAssetCartExport` | `() => boolean` | 取消在途导出（幂等，无在途返回 false） | boolean |
+
 ---
 
 ## 30. 数据模型
@@ -789,6 +804,20 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 **ShellConfig**（`type` / `executable` / `args` / `displayName`）
 
 **SkillDescriptor**（`name` / `description` / `command` / `cwd` / `source` / `sourceDir` / `plugin`）
+
+**AssetCartItem** — 素材购物栏条目（`libraryId` / `fileId`（files.id，重解析稳定）/ `slideNum`（1 起展示页序）/ `srcPath`（源文件绝对路径快照，失效探测基准）/ `fileName` / `slideTitle?` / `libraryName?`（展示快照，入栏时定格不回写）/ `addedAt`（RFC3339，后端权威）/ `stale?`（List 探测态非持久化字段））
+
+**AssetCartAddResult** — 加入购物栏结果（`added` 新增数 / `duplicates` 键已在栏去重跳过数）
+
+**PptxMergeItem** — 合并导出页项（`srcPath` / `pageNum`，按购物栏顺序排列）
+
+**PptxMergedPage** — 合并产物页明细（`srcPath` / `srcPageNum` / `outPageNum`，按输出页序排列）
+
+**PptxMergeSkipped** — 跳过页项（`srcPath` / `pageNum` / `reason`；单源打不开/页越界只跳该项继续，基底失败为整体错误）
+
+**PptxMergeResult** — 合并导出结果（`outputPath` / `pages`: PptxMergedPage[]（购物栏顺序）/ `pageCount` / `skippedItems`: PptxMergeSkipped[] / `sldSzMixed`（各源尺寸不一致，16:9/4:3 混排不自动缩放，前端 warning））
+
+**PptxSubsetResult** — 多页子集导出结果（`outputPath` / `pages`: number[]（去重升序）/ `pageCount`；单文件内页集合导出核心，供合并层复用）
 
 ### 30.9 具名 string 类型
 
