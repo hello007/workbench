@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-21-goleak-gate/prd.md", "reason": "AC 清单与技术方案基准"}
+{"file": ".trellis/tasks/10-21-goleak-gate/research/ci-linux-repro.md", "reason": "复现证据对照（修复后须逐条消项）"}
+{"file": "docs/spec/perf-baseline.md", "reason": "文档同步核验（第 13/14 节与收紧后实现一致）"}
+{"file": "docs/spec/test-stability.md", "reason": "修复用例稳定性核验"}

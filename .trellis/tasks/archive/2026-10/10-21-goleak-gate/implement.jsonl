@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-21-goleak-gate/prd.md", "reason": "任务需求、修复面清单、ADR 决策"}
+{"file": ".trellis/tasks/10-21-goleak-gate/research/ci-linux-repro.md", "reason": "WSL 复现证据（泄漏栈、失败详情）、CI run 核对、观察期结论"}
+{"file": "docs/spec/perf-baseline.md", "reason": "第 13/14 节 soak/goleak 三档分策原文（收紧后须同步改写）"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性约束（禁 sleep/端口/mtime 时序），修复不得引入 flaky"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "thumbQueue 生命周期与关停顺序契约（WaitScansDone→WaitThumbsDone→CloseAll）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "内容搜索 rg stub 相关错误码与超时收口契约（TestSearchWithRipgrep 修复面）"}
