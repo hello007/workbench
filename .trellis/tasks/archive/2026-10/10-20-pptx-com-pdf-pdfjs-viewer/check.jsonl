@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-20-pptx-com-pdf-pdfjs-viewer/prd.md", "reason": "对照验收标准与 Out of Scope 检查实现边界"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "检查 COM 调用是否踩已知坑（STA、杀进程、ownedPIDs、fake 测试须断言 worker 存活性）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处绑定同步与类型别名补齐"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76%、前端 ≥70% 硬失败"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查错误码三处同步与 slog 用法"}
+{"file": "docs/spec/linux-platform.md", "reason": "检查平台抽象（_windows/_other 双文件、非 Windows 降级路径）"}

@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-20-pptx-com-pdf-pdfjs-viewer/prd.md", "reason": "任务需求、决策（D1-D5）、技术方案、验收标准全量上下文"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "COM 管线全部已知坑（STA 单 goroutine、GetProperty、杀进程快照 diff、WPS Visible、绝对路径、0x8001010A 重试、fake 注入掩蔽回写遗漏教训）——ConvertToPdf 必须遵守"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新 service 装配规则：AppServices struct 加字段 + NewAppServices 构造行两处，App 内嵌提升保 Wails 绑定零 diff"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "日志用 slog、错误码 AppError{Code,Message} 三处同步规则（app_error.go + error.js ErrorCode/WARNING_CODES）"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "缓存索引 JSON 必须走 util.SaveJSON 原子写，禁 os.WriteFile 直写"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "改 App 方法签名/模型 struct 须手动同步 frontend/wailsjs/ 三处绑定（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态：固定端口、mtime 时序、sleep 等待等禁忌"}
+{"file": ".trellis/tasks/10-20-pptx-com-pdf-pdfjs-viewer/research/com-saveas-pdf.md", "reason": "COM SaveAs PDF 调用方式与 WPS 兼容性调研结论（实现 ConvertToPdf 前必读）"}
