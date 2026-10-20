@@ -72,6 +72,10 @@ type AssetLibraryService struct {
 	thumbLedger *thumbCacheLedger // 缩略图记账 ledger（assets_thumbs_ledger.go，LRU 记账 + 失效 + 配额淘汰）
 
 	thumbsCfgFn func() model.AssetThumbsSettings // 缩略图设置读取口（装配期 SetThumbsSettingsProvider 注入，nil 走默认值）
+
+	// autoScanFn 移动/重定位后自动增量扫描注入点（nil = 生产实现 StartScan，单测
+	// 注入 fake 驱动扫描失败降级断言；注入模式对齐 parseFn/splitCoreFn 先例）
+	autoScanFn func(ctx context.Context, libraryID string) (model.AssetScanResult, error)
 }
 
 // ErrAssetsCancelled 素材扫描被用户取消（对齐 ErrOperationCancelled 模式）。

@@ -3178,11 +3178,18 @@ const onFolderDrop = async (targetPath, fileIds) => {
       ElMessage.success(`已移动 ${result?.succeeded || 0} 个文件到${targetName}`)
     }
     // 数据变更刷新（对齐 refreshAfterBatchAnnotation 精简面）：文件底册重拉 +
-    // 树徽标重拉；双代次守卫防在途切库写回
+    // 树徽标重拉 + 幻灯片视图浏览清单复位重拉（移动成功后幻灯片视图已加载段可能
+    // 含已移走文件的页——对齐批量打标签刷新链的幻灯片补拉路径）；目录过滤语境接
+    // ensureFolderSlidesLoaded 续拉兜底，防过滤后已加载段陈旧收敛为 0 卡；双代次
+    // 守卫防在途切库写回
     const libSeqAtStart = librarySeq
     const entries = await ListAssetFiles(currentLibraryId.value)
     if (libSeqAtStart !== librarySeq) return
     fileEntries.value = entries || []
+    if (!searchMode.value && viewMode.value === 'slide') {
+      await loadSlidesPage(true)
+      await ensureFolderSlidesLoaded()
+    }
     await loadFolders()
     // 拖拽多选收口：移动完成清空选中集（普通勾选集共用同键空间，一并清）
     clearSelection()

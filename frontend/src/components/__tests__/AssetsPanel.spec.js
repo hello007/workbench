@@ -908,6 +908,24 @@ describe('AssetsPanel', () => {
 
   // ---- 目录级拖拽移动与文件夹标注（PRD R5/R8，PR4）----
 
+  it('drop 成功后刷新幻灯片视图：浏览幻灯片语境复位首页重拉（P2 收口），防已加载段陈旧', async () => {
+    wailsMock.MoveAssetFiles.mockResolvedValue({ total: 1, succeeded: 1, failed: 0, items: [] })
+    const wrapper = await createWrapper()
+    // 切幻灯片视图（触发幻灯片清单首拉）
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    const slideCallsBefore = wailsMock.ListAssetSlides.mock.calls.length
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('drop-files', '归档', [11])
+    await flushPromises()
+
+    // 移动成功刷新链补幻灯片清单复位重拉（对齐批量打标签刷新链的幻灯片补拉路径）
+    expect(wailsMock.ListAssetSlides.mock.calls.length).toBe(slideCallsBefore + 1)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 0)
+  })
+
   it('drop-folder 分派：MoveAssetFolder + 选中目录按新前缀改写 + 树刷新', async () => {
     wailsMock.MoveAssetFolder.mockResolvedValue({ oldPath: '方案A', newPath: '归档/方案A', replaced: 1, excluded: 0, revived: 0 })
     const wrapper = await createWrapper()

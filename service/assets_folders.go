@@ -501,11 +501,13 @@ func (s *AssetLibraryService) runFolderRelocate(libraryID, rel, abs, newParentRe
 		"replaced", result.Replaced, "excluded", result.Excluded, "revived", result.Revived)
 
 	// 自动增量扫描收敛（锁已释放，StartScan 自取锁）：翻转遗留（无产物行重分类、
-	// 新名命中而显式翻转遗漏面等）与库内其余变化一并收敛。扫描失败不掩盖重定位
-	// 结果——重定位已提交，错误随整体调用上抛由前端刷新兜底
-	if _, err := s.StartScan(context.Background(), libraryID); err != nil {
-		Logger().Warn("文件夹"+opName+"后的自动扫描失败", "libraryId", libraryID, "err", err)
-		return result, err
+	// 新名命中而显式翻转遗漏面等）与库内其余变化一并收敛。重定位（磁盘 + 索引）
+	// 已提交，扫描失败（含 E_ASSETS_SCAN_IN_PROGRESS 被并发扫描抢占）**降级为
+	// 告警照常返回成功结果，不随调用上抛**——前端成功分支刷新链保持、失败提示
+	// 自然消失；最终一致由在途扫描（用户手动或后续操作触发）的 done 事件兜底
+	if _, err := s.autoScan(context.Background(), libraryID); err != nil {
+		Logger().Warn("文件夹"+opName+"后的自动增量扫描失败（操作已提交，最终一致由在途扫描兜底）",
+			"libraryId", libraryID, "err", err)
 	}
 	return result, nil
 }
@@ -742,14 +744,25 @@ func (s *AssetLibraryService) MoveAssetFiles(libraryID string, fileIDs []int64, 
 			"succeeded", result.Succeeded, "failed", result.Failed)
 	}
 	// 自动增量扫描收敛（锁已释放）：排除翻转遗漏面（无产物行重分类）与库内其余
-	// 变化一并收敛。失败不掩盖移动结果——成功条目已提交，错误随整体调用上抛
+	// 变化一并收敛。移动（磁盘 + 索引）已提交，扫描失败（含 E_ASSETS_SCAN_IN_PROGRESS
+	// 被并发扫描抢占）**降级为告警照常返回成功结果，不随调用上抛**——前端成功分支
+	// 刷新链保持、失败提示自然消失；最终一致由在途扫描的 done 事件兜底
 	if result.Succeeded > 0 {
-		if _, err := s.StartScan(context.Background(), libraryID); err != nil {
-			Logger().Warn("文件移动后的自动扫描失败", "libraryId", libraryID, "err", err)
-			return result, err
+		if _, err := s.autoScan(context.Background(), libraryID); err != nil {
+			Logger().Warn("文件移动后的自动增量扫描失败（操作已提交，最终一致由在途扫描兜底）",
+				"libraryId", libraryID, "err", err)
 		}
 	}
 	return result, nil
+}
+
+// autoScan 自动增量扫描入口（runFolderRelocate/MoveAssetFiles 消费）：autoScanFn
+// 注入优先（单测 fake），nil 回退生产实现 StartScan。
+func (s *AssetLibraryService) autoScan(ctx context.Context, libraryID string) (model.AssetScanResult, error) {
+	if s.autoScanFn != nil {
+		return s.autoScanFn(ctx, libraryID)
+	}
+	return s.StartScan(ctx, libraryID)
 }
 
 // moveOneAssetFile 单文件移动（每条目一事务 + 明细，批量评分 applyRatingTarget
@@ -783,6 +796,12 @@ func (s *AssetLibraryService) moveOneAssetFile(store *assetsStore, lib model.Ass
 	newRel := base
 	if targetRel != "" {
 		newRel = targetRel + "/" + base
+	}
+	// no-op 识别（P2 收口）：移入文件当前所在目录（新路径与现路径相同）单独报错，
+	// 与目标内重名区分——重名报错语义是「目标有别的同名文件」，no-op 是「文件本身
+	// 已就位」；计入 failed 明细正常返回（非错误码新增），磁盘与索引零操作
+	if newRel == rec.path {
+		return fail(item.Label, "文件已在该目录中，无需移动")
 	}
 	newAbs := filepath.Join(targetAbs, base)
 

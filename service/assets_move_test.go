@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,6 +259,97 @@ func TestAssetMoveFiles_SplitRecordRewritten(t *testing.T) {
 	}
 	if stale, _ := svc.openStoreForTest(t, lib.ID).getSplitRecord("media/a.pptx"); stale != nil {
 		t.Errorf("旧源路径的拆分记录不应残留")
+	}
+}
+
+// 自动扫描失败降级（P2 收口）：移动/重定位已提交，StartScan 失败（含
+// E_ASSETS_SCAN_IN_PROGRESS 被并发扫描抢占）经 autoScanFn 注入驱动，断言整体
+// 调用照常返回成功结果（错误不上抛）——最终一致由在途扫描 done 事件兜底。
+func TestAssetMoveAndRelocate_ScanFailureDegraded(t *testing.T) {
+	svc := newTestAssetService(t)
+	svc.parseFn = okParseForAll
+	svc.autoScanFn = func(ctx context.Context, libraryID string) (model.AssetScanResult, error) {
+		return model.AssetScanResult{}, model.NewAppError(model.ErrCodeAssetsScanInProgress,
+			"该素材库正在扫描中，请等待当前扫描结束后再试")
+	}
+	root := t.TempDir()
+	mustWritePptxFile(t, filepath.Join(root, "media", "a.pptx"))
+	if err := os.MkdirAll(filepath.Join(root, "归档"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lib := mustCreateLibrary(t, svc, "扫描降级库", root)
+	mustScan(t, svc, lib.ID)
+	entries, _ := svc.ListFiles(lib.ID)
+	var fileID int64
+	for _, e := range entries {
+		fileID = e.ID
+	}
+
+	// 文件批量移动：扫描失败降级，调用成功返回且移动结果完整
+	result, err := svc.MoveAssetFiles(lib.ID, []int64{fileID}, "归档")
+	if err != nil {
+		t.Fatalf("扫描失败应降级不阻断（文件移动），实际 err：%v", err)
+	}
+	if result.Succeeded != 1 {
+		t.Fatalf("移动应成功返回，实际 %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "归档", "a.pptx")); err != nil {
+		t.Fatalf("移动应已落盘")
+	}
+
+	// 目录移动：同口径降级（runFolderRelocate 统一编排面，注入复用）
+	result2, err := svc.RenameAssetFolder(lib.ID, "归档", "归档2")
+	if err != nil {
+		t.Fatalf("扫描失败应降级不阻断（目录重命名），实际 err：%v", err)
+	}
+	if result2.Replaced != 1 {
+		t.Fatalf("重命名索引同步应 1 条，实际 %+v", result2)
+	}
+	// 目录移动入口同核（MoveAssetFolder → runFolderRelocate）：移入另一目录
+	if err := os.MkdirAll(filepath.Join(root, "目标区"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if _, err := svc.MoveAssetFolder(lib.ID, "归档2", "目标区"); err != nil {
+		t.Fatalf("扫描失败应降级不阻断（目录移动），实际 err：%v", err)
+	}
+}
+
+// no-op 文件移动（P2 收口）：移入文件当前所在目录单独识别，文案与目标内重名区分，
+// 计入 failed 明细正常返回（非错误码新增），磁盘与索引零操作。
+func TestAssetMoveFiles_NoOpSameDirectory(t *testing.T) {
+	svc := newTestAssetService(t)
+	svc.parseFn = okParseForAll
+	root := t.TempDir()
+	mustWritePptxFile(t, filepath.Join(root, "media", "a.pptx"))
+	lib := mustCreateLibrary(t, svc, "no-op 移动库", root)
+	mustScan(t, svc, lib.ID)
+	entries, _ := svc.ListFiles(lib.ID)
+	var fileID int64
+	var oldPath string
+	for _, e := range entries {
+		fileID = e.ID
+		oldPath = e.Path
+	}
+
+	result, err := svc.MoveAssetFiles(lib.ID, []int64{fileID}, "media")
+	if err != nil {
+		t.Fatalf("no-op 移动应正常返回，实际 err：%v", err)
+	}
+	if result.Failed != 1 || len(result.Items) != 1 {
+		t.Fatalf("no-op 应记 failed 明细，实际 %+v", result)
+	}
+	if !strings.Contains(result.Items[0].Message, "文件已在该目录中") {
+		t.Errorf("no-op 文案应明确「文件已在该目录中，无需移动」，实际 %q", result.Items[0].Message)
+	}
+	if result.Items[0].Label != oldPath {
+		t.Errorf("no-op 明细应带 Label（当前路径），实际 %q", result.Items[0].Label)
+	}
+	// 零操作：磁盘与索引原样
+	if _, err := os.Stat(filepath.Join(root, "media", "a.pptx")); err != nil {
+		t.Errorf("no-op 移动不应触碰磁盘文件")
+	}
+	if entries, _ := svc.ListFiles(lib.ID); entries[0].Path != oldPath || entries[0].Status != model.AssetFileStatusOK {
+		t.Errorf("no-op 移动不应变更索引，实际 %+v", entries[0])
 	}
 }
 
