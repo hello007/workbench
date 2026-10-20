@@ -712,3 +712,36 @@ brainstorm 收敛 PRD（路线 A 基底注入式合并，研究确认纯 Go 无�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 132: 项目记忆迁移 docs/memory 并加自动加载 hook
+
+**Date**: 2026-10-20
+**Task**: 项目记忆迁移 docs/memory 并加自动加载 hook
+**Branch**: `master`
+
+### Summary
+
+user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 docs/memory/（MEMORY.md 索引 + 2 条记忆，格式不变，diff 逐字节校验后删除源目录）；新增 .claude/hooks/inject-memory.py 经 SessionStart（startup/clear/compact）注入记忆索引与权威源声明（docs/memory 唯一权威源、新记忆写入此处、user 级残留先合并再消费），索引缺失/空文件静默降级 exit 0；settings.json 三 matcher 各追加条目；CLAUDE.md 新增「项目记忆」节 + README 文档表补行。hook 回归：正常注入、降级路径单测均通过。决策记录：机制选独立 hook（方案 B）、迁移方式 move、注入深度仅索引（与原机制一致防体积膨胀）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ece1c4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

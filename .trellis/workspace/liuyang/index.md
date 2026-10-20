@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 131
+- **Total Sessions**: 132
 - **Last Active**: 2026-10-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~714 | Active |
+| `journal-3.md` | ~747 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 132 | 2026-10-20 | 项目记忆迁移 docs/memory 并加自动加载 hook | `1ece1c4` | `master` |
 | 131 | 2026-10-20 | pptx 文件树预览：COM 转 PDF 复用 pdfjs viewer | `c6d4c27`, `b6a2852` | `master` |
 | 130 | 2026-10-20 | 素材购物栏：页级收集 + 拖拽排序 + 跨库合并导出 PPT | `bc631e3`, `5f411eb` | `master` |
 | 129 | 2026-10-19 | 工具箱全窗口面板化 + PPT 拆分文件夹批量拆分 | `476d647` | `master` |
