@@ -812,3 +812,36 @@ user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 135: EP 2.14.5 确认型弹框回归排查 + drop-folder E2E 增补
+
+**Date**: 2026-10-20
+**Task**: EP 2.14.5 确认型弹框回归排查 + drop-folder E2E 增补
+**Branch**: `master`
+
+### Summary
+
+全仓排查 ElMessageBox.confirm 消费链 48 处/24 组件：三形态分类学（递归恒弹/顺序两段/单次确认），0 处现存漂移（bb7a1fa 修复本质为 E2E 断言侧漂移）；Obsidian 顺序两段链三处守护用例补齐（times(2)+静默语义，check 阶段断言面拉齐 7 处）；目录级 drop-folder E2E（MoveAssetFolder 参数+前缀改写三态断言+刷新链）；双重刷新去重评估结论=前提失实（onScanDone 仅复位进度从不刷数据），方案零维持现状，修正 onFolderDropFolder 失实注释；沉淀 docs/spec/confirm-dialog.md（三形态契约+E2E 多实例选择器两范式+EP 再升级排查方法论）；回归 vitest 2022 passed / E2E 72 passed，后端零改动
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a9330d5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
