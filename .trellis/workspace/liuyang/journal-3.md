@@ -644,3 +644,37 @@ SRS §2.5.3/§2.6 收尾：三路径排序单点 sortEntriesByOptions（相关�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 130: 素材购物栏：页级收集 + 拖拽排序 + 跨库合并导出 PPT
+
+**Date**: 2026-10-20
+**Task**: 素材购物栏：页级收集 + 拖拽排序 + 跨库合并导出 PPT
+**Branch**: `master`
+
+### Summary
+
+brainstorm 收敛 PRD（路线 A 基底注入式合并，研究确认纯 Go 无现成合并库）；PR1 拆分 GC 集合化泛化 + ExportPptxPageSubset；PR2 跨包子图注入 MergePptxPages（抓出 sldId 数字 id 被 r:id 污染的 encoding/xml 标签缺陷，parsePptxListIDs 命名空间精确解析）+ PptxMergeService 编排；PR3 购物栏存储 service + AssetCartDrawer 前端（三处加号/批量加页/溯源/SaveFileDialog 导出）+ 装配与 wailsjs 同步 + 文档 spec 沉淀（pptx-merge.md）；三轮 trellis-check 全过，后端/前端全量测试绿；真机冒烟通过，任务归档
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc631e3` | (see git log) |
+| `5f411eb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
