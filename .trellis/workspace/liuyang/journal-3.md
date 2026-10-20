@@ -745,3 +745,37 @@ user 级自动记忆目录（~/.claude/projects/.../memory/）迁移至项目 do
 ### Next Steps
 
 - None - task complete
+
+
+## Session 133: 素材管理文件夹树与拖拽整理
+
+**Date**: 2026-10-20
+**Task**: 素材管理文件夹树与拖拽整理
+**Branch**: `master`
+
+### Summary
+
+素材面板新增可收缩文件夹树（真实目录口径）：递归过滤+徽标+排除/派生标记；目录管理（创建/删除/重命名，lost收口+排除双向翻转）；文件/目录级拖拽移动（每条目一事务+split_records重写+FTS/排除单点）；folder_meta标注（schema v7键级联）；folderPath检索AND维度+§8.7矩阵登记。trellis-check修P0（substr字节/字符偏移中文目录名键损坏）+P1（空目录键级联跳过）；3项P2行为收口（扫描失败降级/幻灯片视图重拉/no-op文案）。service覆盖率80.1%、前端2011用例全绿。待办：真机冒烟（拖拽/目录管理/文件夹标注/中文目录名）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f93d106` | (see git log) |
+| `24fcf4e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
