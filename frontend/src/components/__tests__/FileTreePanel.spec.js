@@ -34,6 +34,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenInVSCode: vi.fn(() => Promise.resolve(true)),
   OpenInWarp: vi.fn(() => Promise.resolve(true)),
   OpenWithDefaultApp: vi.fn(() => Promise.resolve(true)),
+  // Obsidian 域（未注册顺序两段链守护用例触达；默认 '' = 已注册零分支，用例按需 Once 覆盖）
+  OpenInObsidian: vi.fn(() => Promise.resolve('')),
+  AutoRegisterAndOpen: vi.fn(() => Promise.resolve(0)),
+  OpenObsidianVaultManager: vi.fn(() => Promise.resolve(true)),
+  CopyObsidianVaultPath: vi.fn(() => Promise.resolve('')),
   ScanAndPullRepos: vi.fn(() => Promise.resolve({ total: 0 })),
   GetFavorites: vi.fn(() => Promise.resolve([])),
   AddFavorite: vi.fn(() => Promise.resolve(true)),
@@ -2242,6 +2247,60 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
 
       expect(ElMessage.error).toHaveBeenCalledWith('PPT 拆分失败: 文件损坏')
       expect(ElMessage.warning).not.toHaveBeenCalled()
+    })
+  })
+
+  // EP 2.14.5 顺序两段链守护（10-20-ep-2-14-5-e2e Q3）：与 DirectoryTree/ContentPanel
+  // 逐字节同构的三处之一，独立守护防一处改坏他处不知（对齐 AiChatPanel 删除在途
+  // 会话 times(2) 先例）。
+  describe('Obsidian 未注册顺序两段链守护', () => {
+    it('两段确认到底：confirm times(2)，首段注册意向/次段信任提示语义，AutoRegisterAndOpen 调用', async () => {
+      const { OpenInObsidian, AutoRegisterAndOpen } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      OpenInObsidian.mockResolvedValueOnce('not-registered')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm') // 第一段：注册意向
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm') // 第二段：信任提示
+      AutoRegisterAndOpen.mockResolvedValueOnce('') // 组件 '' 分支 = 注册成功
+
+      wrapper = createWrapper()
+      await wrapper.vm.$.setupState.handleOpenObsidian('/path/vault')
+      await flushPromises()
+
+      expect(OpenInObsidian).toHaveBeenCalledWith('/path/vault')
+      expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)
+      // 第一段：未注册提示（distinguishCancelAndClose：cancel = 打开仓库管理器）
+      const [msg1, title1, opts1] = ElMessageBox.confirm.mock.calls[0]
+      expect(title1).toBe('提示')
+      expect(msg1).toContain('未注册为 Obsidian vault')
+      expect(opts1.confirmButtonText).toBe('自动注册并打开')
+      expect(opts1.distinguishCancelAndClose).toBe(true)
+      // 第二段：确认自动注册（信任提示/备份/运行中需关闭预告，HTML 渲染）
+      const [msg2, title2, opts2] = ElMessageBox.confirm.mock.calls[1]
+      expect(title2).toBe('确认自动注册')
+      expect(msg2).toContain('Trust author and enable plugins')
+      expect(opts2.dangerouslyUseHTMLString).toBe(true)
+      expect(AutoRegisterAndOpen).toHaveBeenCalledWith('/path/vault')
+      expect(ElMessage.success).toHaveBeenCalledWith('已注册为 Obsidian vault 并打开，首次会弹信任提示请确认')
+    })
+
+    it('第二段取消：两段 confirm 弹出后取消，AutoRegisterAndOpen 不调用（静默收口）', async () => {
+      const { OpenInObsidian, AutoRegisterAndOpen, CopyObsidianVaultPath, OpenObsidianVaultManager } = await import('../../../wailsjs/go/main/App')
+      const { ElMessageBox } = await import('element-plus')
+      OpenInObsidian.mockResolvedValueOnce('not-registered')
+      ElMessageBox.confirm.mockResolvedValueOnce('confirm')
+      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+
+      wrapper = createWrapper()
+      await wrapper.vm.$.setupState.handleOpenObsidian('/path/vault')
+      await flushPromises()
+
+      expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)
+      expect(AutoRegisterAndOpen).not.toHaveBeenCalled()
+      // 静默面：第二段「取消」被组件内层 catch 吞掉（异常不冒泡到外层 catch），不弹
+      // 成功提示，也不误入外层 cancel 分支的仓库管理器链
+      expect(ElMessage.success).not.toHaveBeenCalled()
+      expect(CopyObsidianVaultPath).not.toHaveBeenCalled()
+      expect(OpenObsidianVaultManager).not.toHaveBeenCalled()
     })
   })
 })

@@ -1,23 +1,31 @@
 /**
  * 素材管理文件夹树拖拽 E2E（PRD R4 主链路补齐，mock 驱动）。
  *
- * 覆盖三条拖拽链（此前仅单测覆盖，E2E 补真实 DOM 编排面）：
+ * 覆盖四条拖拽链（此前仅单测覆盖，E2E 补真实 DOM 编排面）：
  * 1. 文件卡拖到树节点移动成功：dragstart 载荷（HTML5 DnD）→ drop 分派
  *    MoveAssetFiles（库 + fileIDs + 目标）→ 成功 toast + 统一刷新链底册重拉
  *    （ListAssetFiles 序列第二帧带新路径，条目卡片与文件夹徽标 DOM 更新）；
  * 2. 禁落点拒绝：排除命中目录节点 drop 在 FolderTree 组件内拒绝（warning toast），
  *    MoveAssetFiles 零调用（不出网）；
  * 3. 多选拖拽批量：勾选两卡后拖拽，dragstart 载荷携带全部选中 fileIds，移动成功
- *    后选中集清空（拖拽操作收口）。
+ *    后选中集清空（拖拽操作收口）；
+ * 4. 目录拖到树节点（PRD R5，10-20-ep-2-14-5-e2e R3 增补）：先进入源目录构造
+ *    folderPath 前缀语境，dragstart 在源目录树节点 → drop 分派 MoveAssetFolder
+ *    （库 + 源 + 目标）→ 成功 toast + folderPath 按新前缀改写（newPath + 子路径）
+ *    + 统一刷新链（底册/文件夹树重拉）。无需模拟扫描事件：后端 autoScan 同步
+ *    收敛后才返回，mock 同步 resolve 与真实时序在「返回后仅显式刷新一轮」上等价
+ *    （research/scan-done-dedup.md）。
  *
  * 拖拽模拟：Playwright page.dragAndDrop 依赖真实指针拖拽对 el-tree 插槽 DOM 结构
  * 生效性不稳，改 dispatchEvent 构造 dragstart/dragover/drop 事件序列——页面上下文
- * 内 new DataTransfer() 作载荷载体，dragstart 由组件 onCardDragStart 写入 MIME 载荷
- * （utils/assetFolder 单点 ASSET_FILE_DRAG_MIME），drop 端 parseAssetDragPayload 消费，
- * 与真实 DnD 数据流同构。
- * mock 数据源为 wails-mock-defaults.js E2E 合并表（MoveAssetFiles/ListAssetFolders/
- * ListAssetSlides 等已登记）+ 本文件 overrides（形状对齐 model.AssetLibrary /
- * AssetFileEntry / AssetFolderNode / AssetBatchMoveResult）。
+ * 内 new DataTransfer() 作载荷载体，dragstart 由组件 onCardDragStart / FolderTree
+ * onNodeDragStart 写入 MIME 载荷（utils/assetFolder 单点 ASSET_FILE_DRAG_MIME /
+ * ASSET_FOLDER_DRAG_MIME），drop 端 parseAssetDragPayload / parseFolderDragPayload
+ * 消费，与真实 DnD 数据流同构。
+ * mock 数据源为 wails-mock-defaults.js E2E 合并表（MoveAssetFiles/MoveAssetFolder/
+ * ListAssetFolders/ListAssetSlides 等已登记）+ 本文件 overrides（形状对齐
+ * model.AssetLibrary / AssetFileEntry / AssetFolderNode / AssetBatchMoveResult /
+ * AssetFolderMoveResult）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
 import { test, expect, getWailsCalls } from './fixtures'
@@ -94,6 +102,26 @@ async function dragCardToFolder(page, cardTitle, folderName) {
     node.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
     node.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
   }, [cardTitle, folderName])
+}
+
+/**
+ * 目录级拖拽（PRD R5）：dragstart 在源目录树节点（FolderTree onNodeDragStart 写入
+ * ASSET_FOLDER_DRAG_MIME 载荷），drop 在目标树节点（onNodeDrop 解析分派
+ * drop-folder），事件序列与文件卡拖拽同构。
+ */
+async function dragFolderToFolder(page, sourceName, targetName) {
+  await page.evaluate(([sourceName, targetName]) => {
+    const dt = new DataTransfer()
+    const nameEls = [...document.querySelectorAll('.folder-node-name')]
+    const srcEl = nameEls.find((el) => el.textContent.trim() === sourceName)
+    if (!srcEl) throw new Error(`源目录树节点未找到: ${sourceName}`)
+    srcEl.closest('.folder-node').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }))
+    const tgtEl = nameEls.find((el) => el.textContent.trim() === targetName)
+    if (!tgtEl) throw new Error(`目标树节点未找到: ${targetName}`)
+    const node = tgtEl.closest('.folder-node')
+    node.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
+    node.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+  }, [sourceName, targetName])
 }
 
 test.describe('素材管理文件夹树拖拽（单卡）', () => {
@@ -179,5 +207,71 @@ test.describe('素材管理文件夹树拖拽（多选）', () => {
     expect(calls[0].args).toEqual(['lib-e2e', [11, 12], '归档'])
     // 拖拽多选收口：移动完成清空选中集（浮动条隐藏）
     await expect(bar).toBeHidden()
+  })
+})
+
+test.describe('素材管理文件夹树拖拽（目录级）', () => {
+  test.use({
+    wailsOverrides: {
+      ...baseOverrides,
+      // 底册两帧：第二帧按目录级移动后的新前缀布局（方案A 整体挪入 归档 下）
+      ListAssetFiles: {
+        __sequence__: [
+          [makeFile(11, '方案A', '城商行方案'), makeFile(12, '方案B', '获客方案')],
+          [makeFile(11, '归档/方案A', '城商行方案'), makeFile(12, '方案B', '获客方案')]
+        ]
+      },
+      // 树两帧：第二帧为移动后布局（顶层 方案A 节点消失、归档 徽标归位），节点
+      // 结构差异同时充当 refreshDataAfterMutation({reloadFolders:true}) 树重拉的
+      // 确定性 DOM 信号
+      ListAssetFolders: {
+        __sequence__: [
+          [
+            { path: '方案A', name: '方案A', children: [], excluded: false, derived: false, fileCount: 1 },
+            { path: '归档', name: '归档', children: [], excluded: false, derived: false, fileCount: 0 },
+            { path: '已排除目录', name: '已排除目录', children: [], excluded: true, derived: false, fileCount: 1 }
+          ],
+          [
+            { path: '归档', name: '归档', children: [], excluded: false, derived: false, fileCount: 1 },
+            { path: '方案B', name: '方案B', children: [], excluded: false, derived: false, fileCount: 1 },
+            { path: '已排除目录', name: '已排除目录', children: [], excluded: true, derived: false, fileCount: 1 }
+          ]
+        ]
+      },
+      // 形状对齐 model.AssetFolderMoveResult（wails-mock-defaults.js 同形默认值；
+      // newPath 落在目标目录下 = 目录级移动真实语义）
+      MoveAssetFolder: { oldPath: '方案A', newPath: '归档/方案A', replaced: 2, excluded: 0, revived: 0 }
+    }
+  })
+
+  test('目录拖到树节点：MoveAssetFolder 分派 + 成功 toast + folderPath 前缀改写 + 统一刷新链', async ({ page }) => {
+    const panel = await openAssetsPanel(page)
+    // 先进入源目录（folderPath = 方案A，画廊按前缀过滤为 1 卡），构造「选中目录
+    // 处于源前缀下」的前缀改写语境
+    await page.locator('.folder-node-name', { hasText: /^方案A$/ }).click()
+    await expect(panel.locator('.asset-card')).toHaveCount(1)
+    await expect(panel.locator('.asset-card').filter({ hasText: '方案A/城商行方案.pptx' })).toHaveCount(1)
+
+    await dragFolderToFolder(page, '方案A', '归档')
+
+    // 成功 toast（replaced 计数口径）
+    await expect(page.locator('.el-message').filter({ hasText: '已移动到「归档」（索引同步 2 条）' })).toBeVisible()
+    // 调用参数断言：库 ID + 源目录 + 目标目录
+    const calls = await getWailsCalls(page, 'MoveAssetFolder')
+    expect(calls.length).toBe(1)
+    expect(calls[0].args).toEqual(['lib-e2e', '方案A', '归档'])
+
+    // 统一刷新链：底册重拉（序列第二帧）+ 树重拉（ListAssetFolders 首载 +
+    // reloadFolders 共 2 次，顶层 方案A 节点随第二帧消失）；folderPath 按新前缀
+    // 改写（newPath + 子路径）——画廊仍恰 1 卡且路径为新前缀（若 folderPath 残留
+    // 旧前缀「方案A」则 0 卡、若复位根则 2 卡，三态可分辨）；归档徽标随底册前缀
+    // 聚合更新
+    await expect(panel.locator('.asset-card').filter({ hasText: '归档/方案A/城商行方案.pptx' })).toHaveCount(1)
+    await expect(panel.locator('.asset-card')).toHaveCount(1)
+    await expect(page.locator('.folder-node-name', { hasText: /^方案A$/ })).toHaveCount(0)
+    const folderCalls = await getWailsCalls(page, 'ListAssetFolders')
+    expect(folderCalls.length).toBe(2)
+    const archiveNode = page.locator('.folder-node').filter({ has: page.locator('.folder-node-name', { hasText: /^归档$/ }) })
+    await expect(archiveNode.locator('.folder-node-badge')).toHaveText('1')
   })
 })

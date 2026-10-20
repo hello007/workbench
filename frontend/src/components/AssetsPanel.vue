@@ -3173,10 +3173,11 @@ const onFolderDrop = async (targetPath, fileIds) => {
 // 派生落点已由组件软拦截，后端守卫为第二防线）。在途防重复用 folderOpsBusy
 //（目录管理操作同族：菜单与 drop 分派已由 busy 联动禁用，不再单设 moveFolderBusy
 // 造成两套在途态漂移）。成功后按新前缀改写选中目录（浏览语境保留，对齐重命名），
-// 清单刷新走统一入口 refreshDataAfterMutation（本批 Q2 纳入：底册/幻灯片清单与树
-// 徽标同步刷新，不再单纯依赖尾部自动扫描 done 事件兜底——扫描失败降级时 done 不
-// 来，陈旧无救；与扫描 done 的双重刷新一轮属可接受代价，正确性优先）；folderPath
-// 保留（数据变更点位，§8.7 登记）。
+// 清单刷新走统一入口 refreshDataAfterMutation（显式一轮即唯一一轮数据刷新：后端
+// autoScan 同步执行，MoveAssetFolder 返回时自动重扫已收敛，本轮读到的即最终态；
+// assets-scan:done 的 onScanDone 仅复位进度从不刷数据，与扫描事件之间不存在双重
+// 刷新——显式轮的正当性在扫描失败降级/被抢占零事件时不依赖 done 兜底，数据面仍
+// 有本轮保底）；folderPath 保留（数据变更点位，§8.7 登记）。
 const onFolderDropFolder = async (sourcePath, targetPath) => {
   if (!hasLibrary.value || folderOpsBusy.value || !sourcePath) return
   folderOpsBusy.value = true
