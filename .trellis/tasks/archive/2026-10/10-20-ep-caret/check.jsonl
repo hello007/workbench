@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-20-ep-caret/prd.md", "reason": "验收标准清单（AC 六项）与技术方案基准"}
+{"file": ".trellis/tasks/10-20-ep-caret/research/dep-inventory.md", "reason": "分档清单权威对照（package.json 修订逐项核验）"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "SOP 文档与 confirm-dialog.md 联动面核验（§5 互链、哨兵清单一致性）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 全量回归执行口径核验"}

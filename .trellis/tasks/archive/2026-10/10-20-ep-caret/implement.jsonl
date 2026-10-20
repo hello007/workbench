@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-20-ep-caret/prd.md", "reason": "任务需求、分档定案、技术方案、ADR 决策"}
+{"file": ".trellis/tasks/10-20-ep-caret/research/dep-inventory.md", "reason": "39 依赖逐项分档清单（exact/tilde/caret/url 新声明值表）与 CI 插入点"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "EP 升级回归排查方法论（SOP 必跑面联动源）与确认弹框三形态分类学"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约（fixtures import、mock 单一数据源、排除面），SOP 必跑面执行约束"}
+{"file": "docs/spec/security-scan.md", "reason": "npm audit 命令形态（官方 registry 绕过）与已知接受风险（xlsx），SOP 安全扫描节联动"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态约束（脚本 selftest 设计需规避时序/端口类偶发）"}
