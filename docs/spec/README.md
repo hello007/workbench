@@ -38,6 +38,7 @@
 |[pptx-split.md](pptx-split.md)|PPT 按页拆分契约（工具箱「PPT 拆分」）：纯 Go OOXML 最小编辑集（sldIdLst/rels/Content_Types/删 slide+notesSlide/剥离 custShowLst+extLst/跨页链接清理）与页序三跳映射（slide 文件名 ≠ 页序）；XML 编辑用「解析定位 + 字节删除」禁 Encoder 重序列化（保真度）；OPC 关系 Target 相对关系源 part 目录（非 `_rels/` 目录，实测踩坑）；取消复用 E_GIT_CANCELLED 不新增错误码；事件 `pptx-split:*` 仅 PptSplitDialog 监听（右键入口 Promise 直返规避共听面）；fixture 程序化构造禁依赖本机 Office|
 |[assets-management.md](assets-management.md)|素材管理契约（侧边栏「素材管理」）：SQLite 只用 modernc.org/sqlite 纯 Go 零 CGO；FTS5 中文检索五契约（切分同源 splitFtsText 单点、detail=full 必须保留、standalone 表事务双写、trigram 禁用——2 字词静默 0 命中、弃 snippet() 改原文窗口）；单连接池自锁坑（SetMaxOpenConns(1) 下 rows 未 Close 再查 = 永久死锁）；FTS rowid 编码（文件 +id/幻灯片 -id）；派生产物排除按真实拆分布局 `<源文件名>/<源文件名>-NN.pptx` 同名文件夹判定（禁凭空目录名）；user_version 迁移 + Go 回填；事件 assets-scan:* 带 libraryId；standalone FTS 表不支持 'delete-all' 命令|
 |[pptx-merge.md](pptx-merge.md)|多源页合并导出与素材购物栏契约（素材管理「购物栏」）：基底注入式合并（基底 = 清单首项源文件，母版/版式/主题整链注入等价「保留源格式」）；三重冲突消解（part 名分配器 / rId 递增 / sldId≥256 与 sldMasterId≥2147483648 两数字命名空间独立）；**sldId/sldMasterId 数字 id 解析禁 `xml:"id,attr"` 结构体标签**（恒命中 r:id，须按属性 Name.Space 精确解析）；XML 编辑「解析定位 + 字节编辑」；购物栏存储 data/asset_cart.json（条目键三处同构、stale 探测不预剔除、导出互斥 E_CART_EXPORT_IN_PROGRESS）、取消复用 E_GIT_CANCELLED、事件 assets-cart:export-*；MVP 边界（备注页剔除/嵌入字体剥离/尺寸混排不缩放仅 warning）|
+|[frontend-dep-upgrade.md](frontend-dep-upgrade.md)|前端依赖分档钳制与升级 SOP（EP caret 漂移治理）：39 顶层依赖四档（exact 仅 element-plus 全家 / tilde 运行时 UI 面锁 minor 放 patch / caret 工具链 / url tarball）；CI 一致性检查 `scripts/check-dep-consistency.mjs`（ci.yml 步骤 2.5，未登记新依赖即失败强制归类，--selftest 注入漂移自证）；升级后必跑面（vitest 全量 + E2E 全量 + 确认弹框哨兵 5 spec + npm audit）；EP 升级 3.4 专项联动 confirm-dialog.md 排查方法论|
 
 ## 新增文档约定
 
@@ -49,4 +50,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-10-13
+**最后更新：** 2026-10-20

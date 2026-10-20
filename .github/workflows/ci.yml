@@ -43,6 +43,16 @@ jobs:
           echo '<!doctype html><title>ci placeholder</title>' > frontend/dist/index.html
           echo '/* ci placeholder */' > frontend/dist/assets/app.js
 
+      # 2.5 前端依赖分档一致性检查：纯读 package.json + package-lock.json（零安装零网络，
+      #    checkout 后即可跑，快速失败）。校验「档位登记 × 声明格式 × lock 实际版本」三维一致
+      #    （exact 相等 / tilde 同 minor / caret 范围内），未登记新依赖一律失败强制归类。
+      #    --selftest 注入各档漂移 fixture 自证检查器有效（防检查器本身失效）。
+      #    分档策略与升级操作规程见 docs/spec/frontend-dep-upgrade.md。
+      - name: 前端依赖分档一致性检查
+        run: |
+          node scripts/check-dep-consistency.mjs --selftest
+          node scripts/check-dep-consistency.mjs
+
       # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.6；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5

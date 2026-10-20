@@ -46,6 +46,7 @@
 
 ## 5. 关联
 
+- 前端依赖分档钳制与升级 SOP（EP 升级必走 3.4 专项，防 caret 漂移再发）：[frontend-dep-upgrade.md](frontend-dep-upgrade.md)
 - 错误码分流契约（确认型码 = WARNING_CODES 集合）：[logging-and-errors.md](logging-and-errors.md)
 - 素材域确认型消费点上下文（重链/导出/空目录删除）：[assets-management.md](assets-management.md)
 - E2E 通用契约：[e2e-testing.md](e2e-testing.md)
