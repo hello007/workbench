@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "检查改动是否破坏语境矩阵/排除规则单点 matcher/FTS 检索两路径同源等既有契约"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 Wails 绑定三处同步与 models.ts 导出完整性"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对门禁达标与测试分层"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码三处同步与 AppError 分级"}

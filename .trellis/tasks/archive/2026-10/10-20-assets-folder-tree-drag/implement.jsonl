@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域核心契约：语境矩阵 §8、排除规则 §12.1、FTS 检索口径、标注体系——文件夹树/移动/联动全部触碰这些既有契约，禁分叉"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定三处同步规则（App.js/App.d.ts/models.ts）+ EventSink 事件契约 + 前端消费约束，新增 ListFolders/移动 API 必守"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "面板布局 flex 约束链、el-tree 先例（AssetTagTreeSelect/resolveTagMoveDrop 单点）、拖拽交互与样式规范"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码新增同步三处（app_error.go + error.js）、AppError 分级、slog 规范——重名/跨盘/移动失败错误需走统一链路"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁（service ≥76%/前端 ≥70%），新增代码测试面规划"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态——列目录/移动用例的临时目录 fixture 构造口径"}
