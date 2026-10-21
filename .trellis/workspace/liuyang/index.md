@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 141
+- **Total Sessions**: 142
 - **Last Active**: 2026-10-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1047 | Active |
+| `journal-3.md` | ~1080 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 142 | 2026-10-21 | E2E 第二批 12 条落地 + wails-init 事件派发三硬化 | `bf5b2f7` | `master` |
 | 141 | 2026-10-21 | mermaid 12.2.0 升级清零 katex 传递链漏洞 | `098a3c1` | `master` |
 | 140 | 2026-10-21 | CI push 验证闭环 + 镜像仓同步规程 | `57f17d6`, `5cd6b65`, `12e7299` | `master` |
 | 139 | 2026-10-21 | E2E 五高价值链路补齐 + hardening-batch 批次收口（10-21-e2e-coverage） | `3065efd` | `master` |

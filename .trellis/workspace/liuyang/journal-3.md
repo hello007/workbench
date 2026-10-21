@@ -1045,3 +1045,36 @@ mermaid ~11.17.2 → ~12.2.0（lock 落 12.2.0，传递 katex 0.18.11 出 GHSA-2
 ### Next Steps
 
 - None - task complete
+
+
+## Session 142: E2E 第二批 12 条落地 + wails-init 事件派发三硬化
+
+**Date**: 2026-10-21
+**Task**: E2E 第二批 12 条落地 + wails-init 事件派发三硬化
+**Branch**: `master`
+
+### Summary
+
+矩阵候选 #8-#20 时效复核（13 项全未变）后第二批落地 12 条：看板钉选/终端全屏 ESC 过滤/facet 筛选参数换算/排序透传/批量评分/幻灯片标注双代次守卫/缩略图补缺恰一轮/标签树拖拽回滚/保存检索 upsert 异库重映射/端口一览行级防重/AI 选择题卡片/PPT 拆分批量链；wails-init 三硬化收口（dispatch 快照正序 per-handler try/catch、EventsOn/OnMultiple/Once 返回注销闭包对齐真实 runtime、once 自移除）+ wails-mock.spec.js 3 条自证；两遗留面均实施收口（EventsOn 闭包契约 / KillProcess 强杀链）；GetRepoFilterList mock 缺省补齐；web 通道 87→107 用例全绿，vitest 2022 零回归；文档同步四处（测试策略 32 spec/107、e2e-testing §6、归档矩阵 §4.2、AssetFilterPopover 注释纠偏）；镜像 CI run#20 test+security 双绿
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bf5b2f7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
