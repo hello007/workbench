@@ -1078,3 +1078,36 @@ mermaid ~11.17.2 → ~12.2.0（lock 落 12.2.0，传递 katex 0.18.11 出 GHSA-2
 ### Next Steps
 
 - None - task complete
+
+
+## Session 143: deps-upgrade-batch3 前端四 major 出清
+
+**Date**: 2026-10-21
+**Task**: deps-upgrade-batch3 前端四 major 出清
+**Branch**: `master`
+
+### Summary
+
+vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1 全出清；唯一代码适配 = js-yaml 2 处 namespace import（v5 无 ESM default export）；回归全绿（一致性+selftest / vitest 2022 / E2E web 107 + desktop 3 / audit 0 / build）；4 份 breaking research 落任务目录；沉淀 frontend-dep-upgrade.md §3.6 + security-scan.md §5.4 出清记录 + CLAUDE.md 关键规则与技术栈勘误；遗留人工项 = docx 真机目检（多页/表格/页眉页脚）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b80f8f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
