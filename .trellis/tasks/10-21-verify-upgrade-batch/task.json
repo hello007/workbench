@@ -1,0 +1,30 @@
+{
+  "id": "verify-upgrade-batch",
+  "name": "verify-upgrade-batch",
+  "title": "验证闭环与升级专项批（CI push 闭环 + mermaid 12 + E2E 第二批）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-10-21",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-21-ci-push-loop",
+    "10-21-mermaid-12",
+    "10-21-e2e-batch2"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

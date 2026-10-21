@@ -977,3 +977,38 @@ goleak 两步走第二步：观察模式 26 天实为未观察（告警不改退
 ### Next Steps
 
 - None - task complete
+
+
+## Session 140: CI push 验证闭环 + 镜像仓同步规程
+
+**Date**: 2026-10-21
+**Task**: CI push 验证闭环 + 镜像仓同步规程
+**Branch**: `master`
+
+### Summary
+
+29 提交推 gitee 并实证服务端自动镜像至 GitHub（非手动）；push 前 Windows/WSL 双侧 + vitest + E2E web/desktop 组合态自检绿（3 处并发负载偶发单跑定性）。CI 四轮闭环：run#13 暴露 govulncheck 11 标准库可达漏洞（toolchain 升 go1.26.10 + x/net v0.60.0 修复），run#14 分层暴露前端 3 high（npm audit fix lock-only 修复），run#15/16 test+security 双 job 全绿（2.5 首跑绿 + goleak Linux 首跑绿 + run 11/12 旧红点收口）。规程沉淀贡献指南 5.3（同步机制/三步验证/红点处置/责任口）。残留：KaTeX 2 low 归 mermaid-12 专项；GO-2026-5932 接受风险登记 security-scan.md §5.3。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `57f17d6` | (see git log) |
+| `5cd6b65` | (see git log) |
+| `12e7299` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
