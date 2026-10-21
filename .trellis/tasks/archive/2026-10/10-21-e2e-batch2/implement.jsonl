@@ -1,0 +1,4 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "§6 硬化方向（per-handler try/catch + 派发遍历语义）与 per-test 覆盖/fixtures 助手契约"}
+{"file": ".trellis/tasks/archive/2026-10/10-21-e2e-coverage/research/coverage-matrix.md", "reason": "覆盖矩阵 §4.1 候选 #8-#20 状态（第二批清单来源）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "终端全屏 z-index/ESC 过滤等视觉契约（候选用例断言依据）"}
+{"file": "docs/spec/assets-management.md", "reason": "素材 facet/批量评分契约（候选用例 mock 形状与刷新链断言依据）"}

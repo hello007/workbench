@@ -16,11 +16,11 @@
 
 ## Acceptance Criteria
 
-- [ ] wails-init 硬化 + 自证用例绿
-- [ ] 第二批用例落地全绿（数量 brainstorm 定，≤12）
-- [ ] vitest / E2E 全量零回归
-- [ ] 两遗留面有结论（实施或留痕）
-- [ ] 文档与矩阵状态同步
+- [x] wails-init 硬化 + 自证用例绿（dispatch 快照正序 try/catch + EventsOn/OnMultiple/Once 注销闭包；wails-mock.spec.js 3 条自证）
+- [x] 第二批用例落地全绿（12 条：矩阵 #8/9/11/12/13/14/15/17/18/19 + 无编号 2 条全屏 ESC/AI 选择题，另强杀链收口 #4 留痕；web 87→107）
+- [x] vitest / E2E 全量零回归（vitest 96 文件 2022 用例 / E2E web 107 / desktop 3）
+- [x] 两遗留面有结论（均实施：EventsOn 闭包契约补齐+自证；KillProcess 强杀链挂点存在已落地）
+- [x] 文档与矩阵状态同步（测试策略 32 spec/107、e2e-testing §6 收口+嵌套限制留痕、归档矩阵 §4.2、AssetFilterPopover 注释纠偏）
 
 ## Definition of Done
 
