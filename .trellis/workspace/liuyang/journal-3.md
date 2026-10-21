@@ -1012,3 +1012,36 @@ goleak 两步走第二步：观察模式 26 天实为未观察（告警不改退
 ### Next Steps
 
 - None - task complete
+
+
+## Session 141: mermaid 12.2.0 升级清零 katex 传递链漏洞
+
+**Date**: 2026-10-21
+**Task**: mermaid 12.2.0 升级清零 katex 传递链漏洞
+**Branch**: `master`
+
+### Summary
+
+mermaid ~11.17.2 → ~12.2.0（lock 落 12.2.0，传递 katex 0.18.11 出 GHSA-238p-pmpm-9mq7 漏洞区间，npm audit 2 low → 0 清零）；FilePreviewRenderer initialize 加视觉保持双键 layout:'dagre'+look:'classic' 钉回 v11 观感（v12 默认 ELK/redux-color+neo）；CI node 20→22 四处对齐 engines >=22.12；新增 E2E 冒烟 markdown-mermaid.spec.js 三类型图真实 SVG 断言；沉淀 docs/spec/mermaid-rendering.md + security-scan.md §5.2 基线 + 根 README Node 版本；回归全绿（一致性 selftest / vitest 2022 / E2E web 88 / desktop 3 / npm ci / build），镜像仓 CI run#18 test+security 双 job success
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `098a3c1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
