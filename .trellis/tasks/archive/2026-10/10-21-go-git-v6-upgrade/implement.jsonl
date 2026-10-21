@@ -1,0 +1,7 @@
+{"file": "docs/spec/security-scan.md", "reason": "任务目标文件：§5.4 go-git 条目出清后须更新为仅剩 wails v3；govulncheck 清零核对规则在此"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "硬约束：util 层 exec 封装语义冻结（超时收口/锁残留探测/E_GIT_TIMEOUT 链路逐字保持），升级期间禁动"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "回归门禁：model/server ≥80% + service ≥76% 不回退，改测试消费文件时须知基线"}
+{"file": "docs/spec/test-stability.md", "reason": "改 *_test.go 消费文件时禁隐式依赖环境外部状态（mtime 时序/固定端口），go-git 换 CLI fixture 或 v6 适配都受此约束"}
+{"file": "docs/spec/perf-baseline.md", "reason": "soak 档按需跑的轮次/泄漏断言口径（-soak-rounds/-leak-heap-mb 分包传参）"}
+{"file": ".trellis/tasks/10-21-go-git-v6-upgrade/research/go-git-v6-migration.md", "reason": "外部研究线产出：v6 breaking 逐条清单/module path/Go 版本联动/依赖树变化——改 v6 API 路线的适配依据"}
+{"file": ".trellis/tasks/10-21-go-git-v6-upgrade/research/consumer-api-inventory.md", "reason": "本仓研究线产出：6 消费文件 API 明细 + 双路线判定与胜出推荐——执行的路线依据"}

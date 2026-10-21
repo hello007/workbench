@@ -1,0 +1,6 @@
+{"file": "docs/spec/security-scan.md", "reason": "核对 §5.4 是否与依赖实际状态一致（go-git 出清仅剩 wails v3）；govulncheck 清零结论是否落实"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 util 层 exec 封装语义零改动（git [args] failed 格式/E_GIT_TIMEOUT/E_GIT_LOCKED 链路逐字未动）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 coverage 门禁不回退（model/server ≥80% + service ≥76%）"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新增/改动测试无 mtime 时序、固定端口等隐式环境依赖"}
+{"file": ".trellis/tasks/10-21-go-git-v6-upgrade/research/go-git-v6-migration.md", "reason": "核对升级执行是否覆盖 breaking 清单全部命中项"}
+{"file": ".trellis/tasks/10-21-go-git-v6-upgrade/research/consumer-api-inventory.md", "reason": "核对执行与胜出路线结论一致（逐消费点改法可追溯）"}
