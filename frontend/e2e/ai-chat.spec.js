@@ -215,4 +215,113 @@ test.describe('AI 对话工作台', () => {
       expect(calls.map((c) => c.args[0])).toEqual(['chatsession-b', 'chatsession-a'])
     })
   })
+
+  test.describe('选择题卡片交互', () => {
+    // 围栏 JSON 契约（唯一契约源 frontend/src/utils/chatMarkdown.js parseChatQuestion）：
+    // { questions: [{ question, options: [{ label, description? }], multiSelect? }] }
+    // 渲染为 .chat-question 卡片（题目 + 选项按钮 + 初始禁用的「发送选择」提交钮）；
+    // 点选/提交交互由 AiChatPanel 在气泡容器上事件委托处理（v-html 内无法绑 Vue 事件）
+    const QUESTION_JSON = {
+      questions: [
+        {
+          question: '部署环境选哪种？',
+          options: [{ label: '物理机' }, { label: '容器化', description: 'K8s 集群部署' }]
+        },
+        {
+          question: '是否启用灰度发布？',
+          options: [{ label: '启用' }, { label: '不启用' }]
+        }
+      ]
+    }
+    // assistant 消息携带 ```chat-question JSON``` 围栏（真实链路：RunChat output
+    // 事件流式累积后随 done 持久化；本用例直接经 GetChatSession 会话 fixture 注入，
+    // 事件流渲染已由「对话闭环」用例覆盖，此处聚焦卡片渲染与交互链）
+    const QUESTION_CONTENT =
+      '为确认部署方案，请回答以下问题：\n\n' +
+      '```chat-question\n' +
+      JSON.stringify(QUESTION_JSON, null, 2) +
+      '\n```'
+    const QUESTION_SESSION = {
+      id: 'chatsession-e2e-1',
+      directoryId: 'chatdir-1',
+      // 非默认标题：提交答案不触发首条消息自动改名（UpdateChatSessionTitle 不出现）
+      title: '部署方案确认',
+      cwd: 'D:/e2e-demo/demo-repo',
+      claudeSessionId: 'claude-e2e-1',
+      createdAt: 1757400000000,
+      updatedAt: 1757400000000
+    }
+    const QUESTION_SESSION_FULL = {
+      ...QUESTION_SESSION,
+      messages: [
+        { role: 'user', content: '帮我确认部署方案', timestamp: 1757400001000, taskId: 'chattask-q1' },
+        // taskId 必带（model.ChatMessage.TaskID）：卡片提交经 data-task-id 对号
+        // 标记已答（renderMsgMarkdown 据此在重渲染时兜底追加置灰类）
+        { role: 'assistant', content: QUESTION_CONTENT, timestamp: 1757400002000, taskId: 'chattask-q1' }
+      ]
+    }
+
+    test.use({
+      wailsOverrides: {
+        ListChatDirectories: [CHAT_DIR],
+        ListChatSessions: [QUESTION_SESSION],
+        GetChatSession: QUESTION_SESSION_FULL,
+        // 提交答案走 runChat 常规链路：RunChat 第二轮返回新任务 id（答案文本本轮
+        // 无 output/done 事件不影响被断言面——置灰在 runChat resolve 后即写入）
+        RunChat: 'chattask-answer-2'
+      }
+    })
+
+    test('卡片渲染 → 点选启用提交 → 提交置灰并按题序回传答案消息', async ({ page }) => {
+      await openAiChatPage(page)
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+
+      // 卡片渲染：两道题 + 选项 + 提交钮初始禁用；description 进选项 title 提示
+      const card = page.locator('.chat-question')
+      await expect(card).toBeVisible()
+      const items = card.locator('.chat-question-item')
+      await expect(items).toHaveCount(2)
+      await expect(items.nth(0).locator('.chat-question-title')).toHaveText('部署环境选哪种？')
+      await expect(items.nth(1).locator('.chat-question-title')).toHaveText('是否启用灰度发布？')
+      await expect(items.nth(0).locator('.chat-question-option')).toHaveCount(2)
+      const submit = card.locator('.chat-question-submit')
+      await expect(submit).toBeDisabled()
+      await expect(submit).toHaveText('发送选择')
+      await expect(
+        items.nth(0).locator('.chat-question-option', { hasText: '容器化' })
+      ).toHaveAttribute('title', 'K8s 集群部署')
+
+      // 点选选项：selected 态 + 单选 radio 语义（同题重选清除前选）
+      const q1 = items.nth(0)
+      const q2 = items.nth(1)
+      await q1.locator('.chat-question-option', { hasText: '物理机' }).click()
+      await expect(q1.locator('.chat-question-option', { hasText: '物理机' })).toHaveClass(/selected/)
+      await q1.locator('.chat-question-option', { hasText: '容器化' }).click()
+      await expect(q1.locator('.chat-question-option', { hasText: '容器化' })).toHaveClass(/selected/)
+      await expect(q1.locator('.chat-question-option', { hasText: '物理机' })).not.toHaveClass(/selected/)
+
+      // 每题至少选中一项才启用提交（第 2 题未答仍禁用）
+      await expect(submit).toBeDisabled()
+      await q2.locator('.chat-question-option', { hasText: '不启用' }).click()
+      await expect(submit).toBeEnabled()
+
+      // 提交：答案按题序拼文本作为新消息发出（用户气泡就地追加 + RunChat 回传）
+      await submit.click()
+      const answerText =
+        '用户通过选项卡片回答：\n1. 部署环境选哪种？：容器化\n2. 是否启用灰度发布？：不启用'
+      const answerBubble = page
+        .locator('.chat-msg-row.user .chat-msg-text')
+        .filter({ hasText: '用户通过选项卡片回答' })
+      await expect(answerBubble).toBeVisible()
+      await expect(answerBubble).toContainText('1. 部署环境选哪种？：容器化')
+      await expect(answerBubble).toContainText('2. 是否启用灰度发布？：不启用')
+      await expect(page.locator('.chat-input-status')).toHaveText('回复生成中…')
+      await expect.poll(async () => getWailsCalls(page, 'RunChat')).toEqual([
+        { method: 'RunChat', args: ['chatsession-e2e-1', answerText, 'default', ''] }
+      ])
+
+      // 卡片置灰（chat-question-answered：store 标记 + renderMsgMarkdown 兜底重渲染）
+      await expect(page.locator('.chat-question')).toHaveClass(/chat-question-answered/)
+    })
+  })
 })

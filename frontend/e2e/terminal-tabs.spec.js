@@ -12,6 +12,12 @@
  *    CloseTerminal 收到被关 tab 的 sessionId（__sequence__ 分配）、列表收缩退徽章模式；
  *    收起再展开面板不重复建会话（冷启动判定 tabs.length === 0 短路——末 tab 无关闭
  *    入口（D1 设计），「关闭全部 → 冷启动重建」不可达，冷启动路径由用例 1 覆盖）
+ * 4. 整窗全屏与全局 ESC 过滤链（TerminalPanel onFullscreenKeydown 三过滤规则的
+ *    真实浏览器验证面，jsdom 无层叠/焦点语义测不出）：is-fullscreen fixed 层
+ *    z-index 1500、ESC 退出恢复停靠、EP 弹窗（命令面板）内 ESC 仅关弹窗全屏保持
+ *    （defaultPrevented + .el-overlay 目标双过滤）、非全屏期 keydown 监听随态
+ *    挂载/卸载（window 级 keydown 注册计数——仅 TerminalPanel 全屏监听注册在
+ *    window，Home 快捷键监听在 document 不混入）
  *
  * mock 前置：终端 5 方法缺省已入 wails-mock-defaults.js 基础表（单一数据源）；
  * 本 spec 用 __sequence__ 让 CreateTerminal 按调用序分配可区分的 sessionId。
@@ -138,5 +144,83 @@ test.describe('终端多 tab：关闭生命周期与冷启动', () => {
     await expect(panel.locator('.terminal-tab')).toHaveCount(2)
     await expect(panel.locator('.terminal-tab').nth(1)).toHaveClass(/is-active/)
     await expect.poll(async () => (await getWailsCalls(page, 'CreateTerminal')).length).toBe(3)
+  })
+})
+
+test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
+  test.use({ wailsOverrides: shellOverrides })
+
+  test('全屏开合 + ESC 退出 + EP 弹窗内 ESC 仅关弹窗 + 监听随态挂载卸载', async ({ page }) => {
+    // window 级 keydown 注册计数（仅 TerminalPanel 全屏 ESC 监听注册在 window；
+    // Home 全局快捷键监听在 document，不混入计数）。计数以 openTerminal 挂载后的
+    // 值为基线取增量，不依赖挂载期 immediate watch 的 no-op remove 行为
+    await page.addInitScript(() => {
+      window.__keydownAdded = 0
+      window.__keydownRemoved = 0
+      const add = window.addEventListener.bind(window)
+      const remove = window.removeEventListener.bind(window)
+      window.addEventListener = function (type, listener, options) {
+        if (type === 'keydown') window.__keydownAdded++
+        return add(type, listener, options)
+      }
+      window.removeEventListener = function (type, listener, options) {
+        if (type === 'keydown') window.__keydownRemoved++
+        return remove(type, listener, options)
+      }
+    })
+
+    const panel = await openTerminal(page)
+    const addBase = await page.evaluate(() => window.__keydownAdded)
+    const removeBase = await page.evaluate(() => window.__keydownRemoved)
+    expect(addBase).toBe(0)
+
+    // 点全屏按钮 → is-fullscreen（fixed 层 z-index 1500：低于 EP 弹窗 2001+ 与
+    // 右键菜单 2000，保证全屏态弹窗正常置顶）
+    await panel.locator('.fullscreen-btn').click()
+    const fullscreenPanel = page.locator('.terminal-panel.is-fullscreen')
+    await expect(fullscreenPanel).toBeVisible()
+    expect(await fullscreenPanel.evaluate((el) => getComputedStyle(el).zIndex)).toBe('1500')
+    // 全屏态挂载 window keydown 监听
+    expect(await page.evaluate(() => window.__keydownAdded)).toBe(addBase + 1)
+
+    // 失焦再按 ESC：xterm textarea 持焦时 ESC 被终端消费（过滤规则 c 的真实形态，
+    // vim 的 ESC 不得退全屏），点工具栏中段空白（无交互 handler）移出焦点
+    await panel.locator('.terminal-toolbar').click({ position: { x: 600, y: 18 } })
+    await page.keyboard.press('Escape')
+
+    // ESC 退出全屏恢复停靠，非全屏期监听随态卸载（不占全局监听）
+    await expect(page.locator('.terminal-panel.is-fullscreen')).toHaveCount(0)
+    await expect(panel).toBeVisible()
+    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 1)
+
+    // 再次全屏 + 打开 EP 弹窗（命令面板）：键盘入口有挂载竞态（Home onMounted 注册
+    // 全局 keydown 晚于 load 事件），按键 + 断言整体 toPass 重试（e2e-testing.md §6.1）
+    await panel.locator('.fullscreen-btn').click()
+    await expect(page.locator('.terminal-panel.is-fullscreen')).toBeVisible()
+    expect(await page.evaluate(() => window.__keydownAdded)).toBe(addBase + 2)
+    await panel.locator('.terminal-toolbar').click({ position: { x: 600, y: 18 } })
+
+    const dialog = page.locator('.command-palette-dialog')
+    await expect(async () => {
+      await page.keyboard.press('Control+p')
+      await expect(dialog).toBeVisible()
+    }).toPass({ timeout: 10_000 })
+    // 等焦点落进弹窗输入框（.el-overlay 子树内）再按 ESC，保证目标命中过滤规则
+    const paletteInput = dialog.getByPlaceholder(/搜索文件、目录/)
+    await expect(paletteInput).toBeFocused()
+
+    // 弹窗内 ESC：input @keydown.esc.prevent 先消费（defaultPrevented）+ 目标在
+    // .el-overlay 内（过滤规则 a + b 双命中）→ 仅关弹窗，全屏保持、监听不卸载
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await expect(page.locator('.terminal-panel.is-fullscreen')).toBeVisible()
+    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 1)
+
+    // 弹窗已关（目标不在 .el-overlay 内、无 defaultPrevented）→ ESC 退出全屏 + 卸载监听
+    await panel.locator('.terminal-toolbar').click({ position: { x: 600, y: 18 } })
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.terminal-panel.is-fullscreen')).toHaveCount(0)
+    await expect(panel).toBeVisible()
+    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 2)
   })
 })

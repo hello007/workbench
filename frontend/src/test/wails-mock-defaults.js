@@ -48,6 +48,13 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   UpdateFavoriteAlias: '',
   UpdateFavoriteGroup: '',
 
+  // ---- 全局状态看板（DashboardView「添加关注仓库」弹窗按工作目录扫描仓库候选）----
+  // 消费方 DashboardView.vue scanReposForAdd：await GetRepoFilterList(dirId) 后直接
+  // 遍历填充候选列表，Proxy 兜底 resolve null 会 TypeError 中断添加链，基础表必须
+  // 登记空数组（空态 = 候选列表为空）；条目形状对齐 model.RepoFilterItem，钉选链
+  // 用例（e2e/dashboard.spec.js）按需 override 具体清单
+  GetRepoFilterList: [],
+
   // ---- 进程管理（工具箱·进程管理：端口/关键字查进程 + 停止/强杀）----
   // 形状对齐 model.ProcessInfo / ProcessStopResult（见 frontend/wailsjs/go/models.ts）。
   // ListProcesses 默认空列表 = 未匹配到进程的空态；StopProcess 默认 forced 手段

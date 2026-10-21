@@ -37,9 +37,13 @@
  * （{method, args}），用例经 fixtures.js 的 getWailsCalls 断言「UI 操作触发了
  * 正确的 Wails 调用与参数」。
  *
- * 事件注册：window.runtime.EventsOn/EventsOnMultiple 将回调登记到
- * window.__wailsEventHandlers（按事件名分组），__events__ 派发时逐一调用，
- * EventsOff 移除该事件全部回调——语义对齐 Wails runtime。
+ * 事件注册：window.runtime.EventsOn/EventsOnMultiple/EventsOnce 将回调登记到
+ * window.__wailsEventHandlers（按事件名分组），派发统一经 dispatch 单点
+ * （快照拷贝 + 正序遍历 + per-handler try/catch，见其注释），EventsOff
+ * 移除该事件全部回调——语义对齐 Wails runtime；EventsOn 系列返回「按引用
+ * 注销本 handler」的闭包（对齐真实 Wails runtime 契约：组件卸载时精准注销
+ * 自身监听器，多组件共听同事件不误删其余监听；vitest 侧组件 spec 的 runtime
+ * mock 已是该形态，E2E mock 为唯一偏差点，本实现消除该偏差）。
  */
 
 /**
@@ -49,6 +53,30 @@
 export function injectWailsMocks(returnValues) {
   // bound method 调用记录（按时间序），供用例断言调用链
   window.__wailsCalls = []
+
+  /**
+   * 同步派发一个 Wails 事件到全部已注册同名 handler（__preEvents__ /
+   * __events__ / runtime.EventsEmit 三处派发点共用单点）：
+   * 快照拷贝 + 正序遍历 + per-handler try/catch，语义对齐真实 Wails runtime——
+   * - 快照拷贝：EventsOnce 的 splice 自移除只影响 live 数组、不影响本次遍历
+   *   序列，消除「forEach live 数组中被移除元素之后的元素索引左移被跳过」；
+   *   派发期间新注册的同名 handler 不进本次快照（边缘语义，不加特判）
+   * - 正序遍历：保持 handler 按注册序触发的真实 runtime 语义
+   * - try/catch：单个 handler 抛错不中断其余同名 handler、不上抛（真实 runtime
+   *   事件派发不因订阅者异常中断），错误记 console 便于用例排查
+   * @param {string} name 事件名
+   * @param {Array} args 事件参数（逐个透传给 handler）
+   */
+  const dispatch = (name, args) => {
+    const handlers = ((window.__wailsEventHandlers || {})[name] || []).slice()
+    handlers.forEach((handler) => {
+      try {
+        handler(...args)
+      } catch (e) {
+        console.error('[wails-mock] event handler error:', name, e)
+      }
+    })
+  }
 
   /**
    * 为指定方法名生成 mock 实现：记录调用 + 按描述符决定 resolve/reject。
@@ -78,16 +106,12 @@ export function injectWailsMocks(returnValues) {
           // __preEvents__：resolve 前同步派发，对齐真实后端「先 emit 再返回」时序
           // （前端事件 handler 在页面加载即注册，此时回调同步执行）
           const preEvents = Array.isArray(value.__preEvents__) ? value.__preEvents__ : []
-          const handlersNow = window.__wailsEventHandlers || {}
-          preEvents.forEach((ev) => {
-            ;(handlersNow[ev.event] || []).forEach((handler) => handler(ev.payload))
-          })
+          preEvents.forEach((ev) => dispatch(ev.event, [ev.payload]))
           // __events__：resolve 后按序经 setTimeout 派发（保持异步时序，
           // delayMs 支持用例编排「运行中→完成」等中间态断言窗口）
           value.__events__.forEach((ev) => {
             setTimeout(() => {
-              const handlers = (window.__wailsEventHandlers || {})[ev.event] || []
-              handlers.forEach((handler) => handler(ev.payload))
+              dispatch(ev.event, [ev.payload])
             }, ev.delayMs || 0)
           })
           return Promise.resolve(value.__value__ !== undefined ? value.__value__ : null)
@@ -135,13 +159,23 @@ export function injectWailsMocks(returnValues) {
   window.__wailsEventHandlers = Object.create(null)
   const registerHandler = (name, callback, once) => {
     const handlers = (window.__wailsEventHandlers[name] = window.__wailsEventHandlers[name] || [])
-    handlers.push(once ? (...args) => {
+    let wrapped
+    // 按引用注销本 handler 的闭包：多组件共听同事件时只移除自身，不误删其余监听
+    // （对齐真实 Wails runtime 的 EventsOn 返回取消函数契约，组件卸载即精准注销）
+    const off = () => {
       const idx = handlers.indexOf(wrapped)
       if (idx >= 0) handlers.splice(idx, 1)
-      callback(...args)
-    } : callback)
-    // once 包装后的函数名占位：闭包内自引用，splice 时按引用定位
-    const wrapped = handlers[handlers.length - 1]
+    }
+    wrapped = once
+      ? (...args) => {
+          // once 自移除同样按引用定位：派发期间的 splice 只影响 live 数组，
+          // dispatch 的快照遍历序列不受影响（同事件多 handler 不被索引位移跳过）
+          off()
+          callback(...args)
+        }
+      : callback
+    handlers.push(wrapped)
+    return off
   }
   window.runtime = {
     EventsOn: (name, callback) => registerHandler(name, callback, false),
@@ -154,9 +188,7 @@ export function injectWailsMocks(returnValues) {
       window.__wailsEventHandlers = Object.create(null)
     },
     EventsEmit: function (name) {
-      const args = Array.prototype.slice.call(arguments, 1)
-      const handlers = (window.__wailsEventHandlers || {})[name] || []
-      handlers.forEach((handler) => handler(...args))
+      dispatch(name, Array.prototype.slice.call(arguments, 1))
     },
     BrowserOpenURL: () => {},
     WindowReload: () => {},

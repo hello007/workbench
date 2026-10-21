@@ -171,6 +171,29 @@ mock 盲区说明：真实 pty 在后端，E2E 只能验前端编排；`terminal
 
 本批新增基础设施（后续候选用例可直接复用）：`{__deferred__}` 挂起解析器描述符 + `releaseDeferred`/`pendingDeferredCount`（fixtures.js）+ `emitWailsEvent`（EventsEmit 同步广播，wails-init.js）；终端 5 方法 mock 缺省已入 wails-mock-defaults.js 基础表。范式沉淀见 docs/spec/e2e-testing.md §6。
 
+### 4.2 第二批落地标注（2026-10-21，e2e-batch2 任务，候选 #8-#20 复核后 ≤12 条收尾）
+
+时效复核（3065efd..HEAD）确认 #8-#20 涉及组件零改动、矩阵风险档继续有效，详见 `.trellis/tasks/archive/2026-10/10-21-e2e-batch2/research/batch2-candidates.md`。
+
+| 候选 # | 状态 | 落地载体 |
+|---|---|---|
+| 8（PPT 拆分批量链） | **第二批落地** | pptx-split-panel.spec.js（挂起解析器进度中间态 + dirPath 过滤守卫反断言 + CancelPptxSplit + 汇总明细） |
+| 9（看板渲染与钉选） | **第二批落地** | dashboard.spec.js（渲染 + 刷新 + Add/IsPinned 翻转/Remove + GetRepoFilterList 参数）；前置补齐 `GetRepoFilterList: []` mock 缺省 |
+| 10（AI 目录 CRUD） | **候补未落地** | ai-chat.spec 已部分覆盖（添加目录入口链）；选中过滤/重命名/删除确认留后续 |
+| 11（幻灯片标注双代次守卫） | **第二批落地** | assets-slide-meta.spec.js（`__sequence__` 旧代次注入 + 表单不回退 + 提交值回填） |
+| 12/14（facet 换算 + 排序透传） | **第二批落地** | assets-filter-sort.spec.js 两用例（五字段精确断言含止日末毫秒锚点 + sortBy/sortDir 透传） |
+| 13（批量评分主链） | **第二批落地** | assets-batch-rating.spec.js（混合明细 + 失败行染 + completed 不清选中） |
+| 15（端口占用一览） | **第二批落地** | toolbox-panel.spec.js（扁平化一行一端口 + 同 PID 行级防重 + StopProcess 参数） |
+| 16（hosts/env 只读渲染） | **候补未落地**（12 条满额第一替补，未启用） | — |
+| 17（缩略图懒加载+重试恰一轮） | **第二批落地** | assets-thumbs.spec.js（tier=0 逐卡懒加载 + done 事件驱动自动补缺恰一次） |
+| 18（标签树拖拽+回滚） | **第二批落地** | assets-tag-tree.spec.js（node-drop 成功重排 + reject 乐观更新回滚重拉） |
+| 19（保存检索 upsert+重映射） | **第二批落地** | assets-saved-search.spec.js（保存/覆盖排除自身/异库调取重映射丢弃计数/重名拒绝） |
+| 20（pptx 预览降级链） | **未落地**（mock 缺省即降级态，近零成本留后续） | — |
+
+第二批补充项（非矩阵编号）：终端整窗全屏 ESC 过滤链（terminal-tabs.spec.js 追加）、AI 选择题卡片交互（ai-chat.spec.js 追加）、进程强杀链同构补全（toolbox-panel.spec.js，收口第一批 #4 留痕）、EventsOn 闭包注销契约（wails-init.js 返回注销闭包 + wails-mock.spec.js 自证，收口第一批 #3 留痕前置——缓冲区写入断言仍以 CloseTerminal 调用为销毁代理）。
+
+第二批后总量：32 spec / 107 用例（web 通道全量绿），基建三硬化（dispatch 快照正序 try/catch / EventsOn 闭包 / once 自移除）见 e2e-testing.md §6。
+
 ---
 
 ## 5. 契约对照（写用例时生效）
