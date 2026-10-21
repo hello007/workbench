@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/prd.md", "reason": "任务需求、升前基线、消费点清单、AC"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/vue-router-5-breaking.md", "reason": "vue-router 5 breaking 逐条与本仓影响判定"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/js-yaml-5-breaking.md", "reason": "js-yaml 5 breaking 与 load/dump 适配判定"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/markdown-it-15-breaking.md", "reason": "markdown-it 15 breaking 与双渲染链影响"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/docx-preview-04-breaking.md", "reason": "docx-preview 0.4 breaking 与 renderAsync/样式判定"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "升级 SOP（§3 操作规程、§3.3 必跑面、tilde 以 lock 落点重写规则）"}
+{"file": "docs/spec/mermaid-rendering.md", "reason": "mermaid 渲染链锁定面（markdown-it 升级不得破坏 fence 分流/双键/包说明符）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约（fixtures import、mock 单一数据源、双通道口径）"}
+{"file": "docs/spec/security-scan.md", "reason": "npm audit 官方 registry 命令形态；§5.4 评估表为本次同步目标"}

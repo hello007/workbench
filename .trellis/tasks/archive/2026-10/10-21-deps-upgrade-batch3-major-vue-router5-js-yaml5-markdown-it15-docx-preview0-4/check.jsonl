@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/prd.md", "reason": "AC 清单基准"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/vue-router-5-breaking.md", "reason": "适配面完整性核验对照"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/js-yaml-5-breaking.md", "reason": "适配面完整性核验对照"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/markdown-it-15-breaking.md", "reason": "双渲染链回归面核验对照"}
+{"file": ".trellis/tasks/10-21-deps-upgrade-batch3-major-vue-router5-js-yaml5-markdown-it15-docx-preview0-4/research/docx-preview-04-breaking.md", "reason": "renderAsync 适配完整性核验对照"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "SOP 必跑面执行完整性核验"}
+{"file": "docs/spec/security-scan.md", "reason": "§5.4 评估表同步核验 + audit 清零核对"}
