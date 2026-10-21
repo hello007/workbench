@@ -88,6 +88,14 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 残留 1 个 Module 级提示：GO-2026-5932（`golang.org/x/crypto/openpgp` 包停止维护，`Fixed in: N/A` 无修复版本），代码不可达（Symbol/Package 级均 0），计入 §5.3 接受风险。
 
+**npm（2 low → 0，全部清零）**：
+
+> mermaid 传递链：katex 0.16.47 落在 GHSA-238p-pmpm-9mq7（prototype pollution）影响区间 0.11.0–0.18.1，audit 另报 mermaid 10.9.0-rc.1–12.1.0「Depends on vulnerable versions of katex」衍生提示；唯一修复线为 mermaid 12 major（12.2.0 起 katex 依赖升 `^0.18.0`）。
+
+| 漏洞 ID | 包 | 修复方式 |
+|---|---|---|
+| GHSA-238p-pmpm-9mq7 Prototype Pollution | katex 0.16.47 → 0.18.11（mermaid 传递链，indirect） | mermaid 11.17.2 → 12.2.0 major 升级（2026-10-21）；实测 `npm audit` 0 vulnerabilities |
+
 ### 5.3 历史接受风险（已处置清零）
 
 | 漏洞 ID | 包 | 严重级 | 处置 |

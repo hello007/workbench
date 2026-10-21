@@ -59,11 +59,11 @@ jobs:
         with:
           go-version: '1.26'
 
-      # 4. 安装 Node.js 20（带 npm cache 加速，对齐 release.yml）
+      # 4. 安装 Node.js 22（带 npm cache 加速，对齐 release.yml）
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -182,7 +182,7 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 

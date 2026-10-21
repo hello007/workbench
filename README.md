@@ -62,7 +62,7 @@
 开发环境通用要求：
 
 - Go 1.26+
-- Node.js 18+
+- Node.js 22.12+（前端依赖 mermaid 12 engines 硬要求）
 - [Wails CLI](https://wails.io/docs/gettingstarted/installation) v2
 
 ### 开发
@@ -122,7 +122,7 @@ git push origin v1.0.8
 ```
 
 流水线会自动完成以下步骤：
-1. 在 Windows 与 Ubuntu 22.04 runner 上并行安装 Go 1.26 + Node.js 20 + Wails CLI（Linux 侧另装 GTK/WebKit 开发依赖）
+1. 在 Windows 与 Ubuntu 22.04 runner 上并行安装 Go 1.26 + Node.js 22 + Wails CLI（Linux 侧另装 GTK/WebKit 开发依赖）
 2. 执行 `wails build`（自动注入版本号和构建时间；Linux 侧叠加 `webkit2_41` 标签）
 3. 创建 GitHub Release 并上传 `workbench.exe`（Windows）与 `workbench-linux-amd64.tar.gz`（Linux，扁平布局：`workbench` 二进制 + `README-linux.md` 依赖说明，解压即用）
 

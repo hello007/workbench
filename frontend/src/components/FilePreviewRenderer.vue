@@ -419,9 +419,15 @@ const ensureMermaid = async () => {
     mermaidModule = (await import('mermaid')).default
   }
   // 按当前生效主题配置 mermaid（initialize 可重复调用，重新配置主题）
+  // layout:'dagre' + look:'classic' 是 mermaid 12 的视觉保持双键：
+  // 12 起 ELK 取代 dagre 成为默认布局、redux-color/neo 取代 default/classic
+  // 成为默认主题与 look；预览场景要求用户已有图表渲染观感跨升级稳定，
+  // 故显式钉回 v11 行为。去掉这两个键即切换到 mermaid 12 新观感。
   mermaidModule.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    layout: 'dagre',
+    look: 'classic',
     theme: settingsStore.resolvedTheme === 'dark' ? 'dark' : 'default'
   })
   return mermaidModule
