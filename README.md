@@ -6,7 +6,7 @@
 
 | 层级 | 技术 | 版本 |
 | ---- | ---- | ---- |
-| 后端 | Go | 1.26.6 |
+| 后端 | Go | 1.26.0（toolchain go1.26.10） |
 | 桌面框架 | Wails | v2.16.0 |
 | 前端 | Vue 3 (Composition API) | 3.5.33 |
 | UI 组件 | Element Plus | 2.13.7 |

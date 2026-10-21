@@ -53,7 +53,7 @@ jobs:
           node scripts/check-dep-consistency.mjs --selftest
           node scripts/check-dep-consistency.mjs
 
-      # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.6；setup-go 默认缓存 go module/build）
+      # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.10；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
@@ -187,7 +187,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       # Go 漏洞扫描：govulncheck 基于代码实际调用链分析已知漏洞（非全依赖树扫描），
-      # 只报代码可达的漏洞，噪声低。go.mod toolchain go1.26.6 确保标准库漏洞已修复。
+      # 只报代码可达的漏洞，噪声低。go.mod toolchain go1.26.10 确保标准库漏洞已修复。
       - name: 安装 govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 

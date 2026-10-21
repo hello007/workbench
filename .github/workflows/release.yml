@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 2. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.6）
+      # 2. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.10）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
@@ -100,7 +100,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 3. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.6）
+      # 3. 安装 Go 1.26（对齐 ci.yml 与 go.mod toolchain go1.26.10）
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:

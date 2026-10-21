@@ -50,7 +50,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 - 与 `test` job 并行，不阻塞测试
 - `continue-on-error: true`：发现 high 漏洞时标记 job 失败但不阻塞 PR 合并（信息性扫描，漏洞在 PR check 可见）
-- Go 版本与 test job 一致（`1.26`，配合 go.mod `toolchain go1.26.6`）
+- Go 版本与 test job 一致（`1.26`，配合 go.mod `toolchain go1.26.10`）
 - 步骤：安装 govulncheck → `govulncheck ./...` → 安装前端依赖 → `npm audit --registry=https://registry.npmjs.org --audit-level=high`
 
 详细配置见 `.github/workflows/ci.yml` 的 `security` job。
@@ -74,10 +74,25 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 |---|---|---|
 | GHSA-82fw-gwwq-j7x9 @vitest/mocker Path Traversal | vitest 4.1.5 → 4.1.11 | npm update（minor） |
 
-### 5.2 历史接受风险（已处置清零）
+### 5.2 已修复（2026-10-21 升级轮）
+
+**Go（代码可达 11 → 0，全部清零；Module/Package 级 4 → 1，残留见 §5.3）**：
+
+> 漏洞来源：GitHub 镜像仓（hello007/workbench）CI run#13 security job「Go 漏洞扫描」红点 + 本地 `govulncheck ./...` 复现；逐 ID 清单以该 run 的 security job 输出为准。
+
+| 漏洞 ID | 模块 / 包 | 修复方式 |
+|---|---|---|
+| GO-2026-6809（crypto/x509，须 go1.26.10）等 11 个代码可达标准库漏洞，其余 GO-2026-6603/6605/6607/6608/6609/6610/6611/6612/6613/6617 在 go1.26.9 已修复 | crypto/x509、net/http、crypto/tls、mime/multipart、net/textproto 等标准库 | Go 工具链 go1.26.6 → go1.26.10（go.mod `toolchain` directive，唯一修法） |
+| GO-2026-6600/6599（stdlib）、GO-2026-6604（os）——Package/Module 级不可达，go1.26.9 已修复 | 标准库 | 同上，随本轮工具链升级一并清零 |
+| GO-2026-6603/6610/6611/6612/6617 的 x/net 模块形态（均 Module 级不可达；可达性来自同 ID 的标准库 net/http 形态，已计入上行） | golang.org/x/net v0.59.0 → v0.60.0（indirect） | 依赖升级（minor） |
+
+残留 1 个 Module 级提示：GO-2026-5932（`golang.org/x/crypto/openpgp` 包停止维护，`Fixed in: N/A` 无修复版本），代码不可达（Symbol/Package 级均 0），计入 §5.3 接受风险。
+
+### 5.3 历史接受风险（已处置清零）
 
 | 漏洞 ID | 包 | 严重级 | 处置 |
 |---|---|---|---|
+| GO-2026-5932（openpgp 包停止维护、设计上不安全） | golang.org/x/crypto v0.57.0（openpgp 子包，本项目未 import） | 未定级（弃用通告，Fixed in: N/A 无补丁） | ⏸ 持续接受（2026-10-21 复核：代码不可达，Symbol/Package 级均 0） |
 | GHSA-4r6h-8v6p-xvw6 Prototype Pollution | xlsx 0.18.5 → 0.20.3 | high | ✅ 已修复（2026-09-23） |
 | GHSA-5pgg-2g8v-p4x9 ReDoS | xlsx 0.18.5 → 0.20.3 | high | ✅ 已修复（2026-09-23） |
 
@@ -90,7 +105,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 - `npm audit` 按 lock 文件实际版本号（0.20.3）匹配 advisory 范围，实测报 0 vulnerabilities。
 - 若未来需再升级，先探测 CDN 版本存在性（0.20.4+ 并不存在，当前最新即 0.20.3），勿凭版本号臆测。
 
-### 5.3 major 版本待评（本轮跳过）
+### 5.4 major 版本待评（本轮跳过）
 
 | 包 | 当前版本 | 可用 major | 说明 |
 |---|---|---|---|
@@ -102,8 +117,8 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 govulncheck 报告的标准库漏洞（`net/url`、`crypto/tls` 等）**只能通过升级 Go 工具链修复**，无法通过 `go get` 修复。
 
 - go.mod `go 1.26.0` 为最低兼容声明
-- go.mod `toolchain go1.26.6` 指定实际使用的工具链版本（GOTOOLCHAIN=auto 自动下载）
-- CI `setup-go` 安装 `1.26` 后，go 命令遵循 `toolchain` directive 自动切换到 1.26.6
+- go.mod `toolchain go1.26.10` 指定实际使用的工具链版本（GOTOOLCHAIN=auto 自动下载）
+- CI `setup-go` 安装 `1.26` 后，go 命令遵循 `toolchain` directive 自动切换到 1.26.10
 - 升级工具链后须重跑 `govulncheck ./...` 确认标准库漏洞清零
 
 ## 7. 维护规则
@@ -112,7 +127,7 @@ govulncheck 报告的标准库漏洞（`net/url`、`crypto/tls` 等）**只能�
 - 新增 npm 依赖：提交前跑 `npm audit --registry=https://registry.npmjs.org --audit-level=high` 确认无 high 漏洞
 - Go 工具链升级：`toolchain` directive 须对齐 govulncheck 报告的最高标准库修复版本
 - 季度复核：每季度跑一次全量扫描，更新本文档 §5 漏洞清单
-- 新增无补丁漏洞：按 §5.2 格式记录漏洞 ID、包、严重级、接受理由、长期方案
+- 新增无补丁漏洞：按 §5.3 格式记录漏洞 ID、包、严重级、接受理由、长期方案
 
 ## 8. 相关文档
 
