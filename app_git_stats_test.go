@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
 	"workbench/model"
 	"workbench/util"
 )
@@ -161,15 +160,11 @@ func currentHeadInfo(t *testing.T, repoPath string) (gitRoot, key, sha string) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
-		t.Fatalf("PlainOpen: %v", err)
+		t.Fatalf("ResolveHead: %v", err)
 	}
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
-	}
-	return gitRoot, commitHistoryCacheKey(gitRoot, head), head.Hash().String()
+	return gitRoot, commitHistoryCacheKey(gitRoot, head), head.SHA
 }
 
 // TestGetRepoStats_LineStatsFilled 行数通道端到端：5 提交各 1 行新增（"content N"），

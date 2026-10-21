@@ -144,6 +144,46 @@ func TestHasRemotesBatch_Empty(t *testing.T) {
 	}
 }
 
+// TestHasRemotesBatch_WorktreeGitFile .git 为文件的 worktree 形态：config 重定向
+// 到真实 gitdir，远程判定应取重定向后的 config（对齐原 go-git PlainOpen 行为）。
+func TestHasRemotesBatch_WorktreeGitFile(t *testing.T) {
+	// 主仓：init + commit（worktree add 需有效 HEAD）+ 配置 origin 远程
+	mainRepo := testutil.InitTempRepo(t)
+	testutil.RunGit(t, mainRepo, "remote", "add", "origin", "https://example.com/main.git")
+	testutil.RunGit(t, mainRepo, "config", "user.email", "test@test.com")
+	testutil.RunGit(t, mainRepo, "config", "user.name", "test")
+	testutil.WriteFile(t, filepath.Join(mainRepo, "a.txt"), "x")
+	testutil.RunGit(t, mainRepo, "add", ".")
+	testutil.RunGit(t, mainRepo, "commit", "-m", "init")
+
+	// worktree：主仓旁建 .git 文件形态的工作树（gitdir 指向主仓 .git/worktrees/<name>）
+	wtRoot := t.TempDir()
+	worktreePath := filepath.Join(wtRoot, "wt")
+	testutil.RunGit(t, mainRepo, "worktree", "add", worktreePath, "-b", "wt-branch")
+	// 判定读 worktrees/<name>/config（无 commondir 展开）——与原 go-git PlainOpen
+	// 默认行为（EnableDotGitCommonDir=false）逐字对齐：worktree 无本地 remote 段判 false
+	svc := NewGitService()
+	result := svc.HasRemotesBatch([]string{worktreePath})
+	if result[worktreePath] {
+		t.Error("worktree（.git 文件形态，gitdir 重定向后无 remote 段）应判 false，对齐原 go-git 默认行为")
+	}
+
+	// 裸段 [remote]（无子节名）不应计为已配置远程（对齐 go-git Subsections 口径）
+	bareSectionRepo := testutil.InitTempRepo(t)
+	cfgPath := filepath.Join(bareSectionRepo, ".git", "config")
+	cfg, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, append(cfg, []byte("\n[remote]\n\tprune = true\n")...), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	result = svc.HasRemotesBatch([]string{bareSectionRepo})
+	if result[bareSectionRepo] {
+		t.Error("[remote] 裸段（无子节名）不应计为已配置远程")
+	}
+}
+
 // TestClearScanCache_NoCache 未注入缓存时 ClearScanCache 为空操作不 panic。
 func TestClearScanCache_NoCache(t *testing.T) {
 	svc := NewGitService() // 无缓存

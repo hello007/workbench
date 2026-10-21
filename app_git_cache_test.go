@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
 	"workbench/model"
 	"workbench/service"
 	"workbench/util"
@@ -61,13 +60,9 @@ func TestGetCommitHistory_ShaChainBreak_FallsBackToFullScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
-		t.Fatalf("PlainOpen: %v", err)
-	}
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
+		t.Fatalf("ResolveHead: %v", err)
 	}
 	key := commitHistoryCacheKey(gitRoot, head)
 
@@ -111,13 +106,9 @@ func TestGetCommitHistory_CacheHit_UsesInjectedCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
-		t.Fatalf("PlainOpen: %v", err)
-	}
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
+		t.Fatalf("ResolveHead: %v", err)
 	}
 	key := commitHistoryCacheKey(gitRoot, head)
 
@@ -129,7 +120,7 @@ func TestGetCommitHistory_CacheHit_UsesInjectedCache(t *testing.T) {
 		Author:   "faker",
 		Files:    []string{"fake.go"},
 	}}
-	app.commitHistoryCache.Set(key, head.Hash().String(), fakeCommits)
+	app.commitHistoryCache.Set(key, head.SHA, fakeCommits)
 
 	// GetCommitHistory 应命中缓存返 fake（不重扫真实 5 commit）
 	got, err := app.GetCommitHistory(repoPath, 5, 0, model.CommitFilter{})
@@ -213,18 +204,14 @@ func TestGetCommitHistory_InvalidateCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
-		t.Fatalf("PlainOpen: %v", err)
-	}
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
+		t.Fatalf("ResolveHead: %v", err)
 	}
 	key := commitHistoryCacheKey(gitRoot, head)
 
 	// 注入陈旧缓存：headSHA 正确（直接请求会命中），数据为 fake
-	app.commitHistoryCache.Set(key, head.Hash().String(), []model.Commit{{
+	app.commitHistoryCache.Set(key, head.SHA, []model.Commit{{
 		SHA: "fake", Message: "fake\n", Files: []string{},
 	}})
 
@@ -260,13 +247,9 @@ func TestGetCommitHistory_CacheHit_MemoryFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindGitRoot: %v", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
-		t.Fatalf("PlainOpen: %v", err)
-	}
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
+		t.Fatalf("ResolveHead: %v", err)
 	}
 	key := commitHistoryCacheKey(gitRoot, head)
 
@@ -277,7 +260,7 @@ func TestGetCommitHistory_CacheHit_MemoryFilter(t *testing.T) {
 		{SHA: "s2", Message: "alice init\n", Author: "alice", Email: "a@x.com", Timestamp: 200, Files: []string{"src/c.go"}},
 		{SHA: "s1", Message: "bob setup\n", Author: "bob", Email: "b@x.com", Timestamp: 100, Files: []string{"doc/d.md"}},
 	}
-	app.commitHistoryCache.Set(key, head.Hash().String(), injected)
+	app.commitHistoryCache.Set(key, head.SHA, injected)
 
 	// 内存过滤 author=alice + filePath=src：命中 s4（alice src/a.go）与 s2（alice src/c.go）
 	got, err := app.GetCommitHistory(repoPath, 10, 0, model.CommitFilter{Author: "alice", FilePath: "src"})

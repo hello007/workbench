@@ -51,6 +51,7 @@ workbench/
 
 |规则|详细文档|
 |---|---|
+|go-git 依赖已出清（2026-10-21，v6 仅 beta 不升级），**禁重新引入**；Git 元数据读取（HEAD SHA/分支名/detached/unborn）走 `util.ResolveHead`（unborn 不报错由调用方分流）；批量 remote 判定走 `repoHasRemote` 手写 .git/config 解析（对齐 go-git v5.19.2 三口径：`[remote "name"]` 子段计数不要求 url、裸 `[remote]` 段不计、PlainOpen 默认不展开 commondir）；refs 枚举走 `git for-each-ref`|[go-git-deprecation.md](docs/spec/go-git-deprecation.md)|
 |修改 `app.go` App 方法签名或 `model/` 导出 struct 字段时，须手动同步 `frontend/wailsjs/` 绑定（App.js / App.d.ts / models.ts 三处）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |`model/` 下 `type X string` 具名 string 类型作 Wails 绑定方法参数/返回值时，wails generate 不为它在 models.ts 生成 `export type X = string` 别名，须手动补，否则 `npm run build` 报 MISSING_EXPORT（vitest 不报、易漏）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |定制 `.trellis/workflow.md` 时只改正文描述；若增删 `[required · once]` 标记或步骤，必须同步修改对应 `[workflow-state:*]` 标签块，否则 trellis 回归测试失败|[workflow.md Customizing 章节](.trellis/workflow.md)|

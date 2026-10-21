@@ -115,11 +115,14 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 ### 5.4 major 版本待评（本轮跳过）
 
-前端遗留四 major 已于 2026-10-21 全部出清（vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1，breaking 评估与适配记录见 frontend-dep-upgrade.md §3.6），升级后 `npm audit` 保持 0 vulnerabilities。本节剩余仅 Go/框架侧两项：
+前端遗留四 major 已于 2026-10-21 全部出清（vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1，breaking 评估与适配记录见 frontend-dep-upgrade.md §3.6），升级后 `npm audit` 保持 0 vulnerabilities。
+
+**go-git 已于 2026-10-21 出清**：未升 v6（正式版未发布，最新 v6.0.0-beta.1 为 prerelease，生产不可依赖），而是评估后**整体移除 go-git 依赖**——消费面 5 处活跃点（HEAD SHA/分支名/ref 枚举/remote 列表四类元数据读取 + object 死代码删除）全部改为 CLI/纯 Go 等价实现（`util.ResolveHead` helper + `git for-each-ref` + 手写 .git/config `[remote "x"]` 子段解析，语义对齐 v5.19.2 `PlainOpen`/`Remotes()` 行为，含 `EnableDotGitCommonDir=false` 与「裸 `[remote]` 段不计」两处口径），go-git/go-billy/gcfg 依赖链全部出清，`govulncheck ./...` 清零。详见 `.trellis/tasks/10-21-go-git-v6-upgrade/research/`（消费面盘点 + v6 breaking 核对）。
+
+本节剩余仅框架侧一项：
 
 | 包 | 当前版本 | 可用 major | 说明 |
 |---|---|---|---|
-| go-git | v5.19.2 | v6 | major 升级涉及 API 变更，单独评估 |
 | wails | v2.16.0 | v3 | v3 仍在 beta，跟踪官方稳定版发布后再评 |
 
 ## 6. Go 工具链与标准库漏洞

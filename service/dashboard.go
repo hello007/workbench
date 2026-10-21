@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"workbench/model"
 	"workbench/util"
 )
@@ -295,21 +293,16 @@ func ComputeBranchSyncInfo(repoPath string) (*model.BranchSyncInfo, error) {
 	}
 	branch = strings.TrimSpace(branch)
 
-	repo, err := git.PlainOpen(gitRoot)
-	if err != nil {
-		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
-	}
-
-	head, headErr := repo.Head()
+	head, headErr := util.ResolveHead(gitRoot)
 	if headErr != nil {
-		if branch != "" {
-			// unborn branch（空仓库有分支名但无 commit）：降级分支名 + 零值，不报错
-			info.Branch = branch
-			return info, nil
-		}
 		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", headErr)
 	}
-	info.HeadSha = head.Hash().String()
+	if head.Unborn {
+		// unborn branch（空仓库有分支名但无 commit）：降级分支名 + 零值，不报错
+		info.Branch = branch
+		return info, nil
+	}
+	info.HeadSha = head.SHA
 
 	// detached HEAD：branch --show-current 返回空串；Branch 展示短 SHA（对齐 ComputeRepoStatus），
 	// refs 仅含 HEAD 条目（detached 时 @{u} 无法解析上游，无 local/remote 条目）
@@ -344,38 +337,42 @@ func ComputeBranchSyncInfo(repoPath string) (*model.BranchSyncInfo, error) {
 		}
 	}
 
-	// refs 遍历：过滤当前本地分支与上游远程引用两类条目。非 detached 时 HEAD 与当前分支
-	// 同 commit，位置由 local 条目承载（detached 的 HEAD 条目已在上方单独构造）
-	localRefName := plumbing.ReferenceName("refs/heads/" + branch)
-	remoteRefName := plumbing.ReferenceName("refs/remotes/" + upstreamName)
-	iter, err := repo.References()
+	// refs 遍历（git for-each-ref 单次 fork，替代原 go-git References 迭代）：输出行
+	// 格式 "<sha> <refname>"，天然仅含 hash 型引用（等价原 plumbing.HashReference 过滤）。
+	// 过滤当前本地分支与上游远程引用两类条目。非 detached 时 HEAD 与当前分支同 commit，
+	// 位置由 local 条目承载（detached 的 HEAD 条目已在上方单独构造）
+	refsOut, err := gitCmd.Execute(gitRoot, "for-each-ref", "--format=%(objectname) %(refname)")
 	if err != nil {
 		return nil, fmt.Errorf("遍历仓库引用失败: %w", err)
 	}
-	defer iter.Close()
-	err = iter.ForEach(func(ref *plumbing.Reference) error {
-		if ref.Type() != plumbing.HashReference {
-			return nil
+	localRefName := "refs/heads/" + branch
+	remoteRefName := "refs/remotes/" + upstreamName
+	for _, line := range strings.Split(strings.TrimSpace(refsOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		switch ref.Name() {
+		// %(objectname) 为固定 40/64 位十六进制，无空格；首空格右侧即 refname
+		sp := strings.IndexByte(line, ' ')
+		if sp <= 0 {
+			continue
+		}
+		sha, refName := line[:sp], line[sp+1:]
+		switch refName {
 		case localRefName:
 			info.Refs = append(info.Refs, model.CommitRef{
-				Sha:  ref.Hash().String(),
+				Sha:  sha,
 				Kind: model.CommitRefKindLocal,
 				Name: branch,
 			})
 		case remoteRefName:
 			// upstreamName 为空时 remoteRefName 不可能匹配任何引用，此分支仅在有效上游时命中
 			info.Refs = append(info.Refs, model.CommitRef{
-				Sha:  ref.Hash().String(),
+				Sha:  sha,
 				Kind: model.CommitRefKindRemote,
 				Name: upstreamName,
 			})
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("遍历仓库引用失败: %w", err)
 	}
 
 	return info, nil

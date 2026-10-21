@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"workbench/model"
 	"workbench/service"
 	"workbench/util"
@@ -108,7 +105,9 @@ func (a *App) ExtractRepoName(url string) string {
 	return a.gitSvc.ExtractRepoName(url)
 }
 
-// GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息
+// GetGitRemoteURL 获取 Git 仓库的远程地址和当前分支信息。
+// CLI 实现（git config --get remote.origin.url + util.ResolveHead），替代原 go-git
+// PlainOpen+Remote+Head 引用元数据读取（2026-10-21 去依赖，语义逐条平移）。
 func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 	if path == "" {
 		return nil, fmt.Errorf("路径不能为空")
@@ -119,15 +118,10 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
 
-	repo, err := git.PlainOpen(gitRoot)
-	if err != nil {
-		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
-	}
-
-	// Get remote configuration
-	remote, err := repo.Remote("origin")
-	if err != nil {
-		// No origin remote, return empty info
+	// 取 origin 远程 URL；git config --get 非零退出（无 origin 段）时返回空信息
+	// （与原 go-git Remote("origin") 缺失语义一致：无 origin 连分支名也不展示）
+	remoteURL, rerr := util.NewGitCommand().Execute(gitRoot, "config", "--get", "remote.origin.url")
+	if rerr != nil {
 		return &model.GitRemoteInfo{
 			RemoteURL:  "",
 			Branch:     "",
@@ -135,26 +129,25 @@ func (a *App) GetGitRemoteURL(path string) (*model.GitRemoteInfo, error) {
 		}, nil
 	}
 
-	// Get remote URL
-	remoteURL := ""
-	if len(remote.Config().URLs) > 0 {
-		remoteURL = remote.Config().URLs[0]
+	// 解析当前 HEAD 引用；unborn（git init 后未 commit）视同无 HEAD 引用
+	head, herr := util.ResolveHead(gitRoot)
+	if herr != nil {
+		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", herr)
+	}
+	if head.Unborn {
+		return nil, fmt.Errorf("无法获取 HEAD 引用: 仓库尚无任何提交")
 	}
 
-	// Get current HEAD reference
-	head, err := repo.Head()
-	if err != nil {
-		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", err)
+	// detached HEAD 时原实现 head.Name().Short() 返回 "HEAD"，Branch 字段保持同值
+	branchName := head.Branch
+	if head.Detached {
+		branchName = head.RefName
 	}
-
-	// Check if detached HEAD
-	branchName := head.Name().Short()
-	isDetached := !head.Name().IsBranch()
 
 	return &model.GitRemoteInfo{
-		RemoteURL:  remoteURL,
+		RemoteURL:  strings.TrimSpace(remoteURL),
 		Branch:     branchName,
-		IsDetached: isDetached,
+		IsDetached: head.Detached,
 	}, nil
 }
 
@@ -188,17 +181,16 @@ func (a *App) GetCommitHistory(path string, limit, offset int, filter model.Comm
 		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
 
-	// HEAD SHA/ref 供缓存键与增量判定；仓库（含空仓）合法性由 PlainOpen/Head 保证
-	repo, err := git.PlainOpen(gitRoot)
-	if err != nil {
-		return nil, fmt.Errorf("无法打开 Git 仓库: %w", err)
-	}
-
-	head, err := repo.Head()
+	// HEAD SHA/ref 供缓存键与增量判定；unborn（空仓）视同无 HEAD 引用报错，
+	// 与原 go-git repo.Head() 失败语义一致
+	head, err := util.ResolveHead(gitRoot)
 	if err != nil {
 		return nil, fmt.Errorf("无法获取 HEAD 引用: %w", err)
 	}
-	currentSHA := head.Hash().String()
+	if head.Unborn {
+		return nil, fmt.Errorf("无法获取 HEAD 引用: 仓库尚无任何提交")
+	}
+	currentSHA := head.SHA
 	key := commitHistoryCacheKey(gitRoot, head)
 
 	// cache 未注入（如测试 App{} 未经 startup）走 CLI 流式翻页路径，向后兼容
@@ -246,15 +238,15 @@ func (a *App) GetRepoStats(path, rangeKey string) (model.RepoStats, error) {
 	if err != nil {
 		return model.RepoStats{}, fmt.Errorf("无法打开 Git 仓库: %w", err)
 	}
-	repo, err := git.PlainOpen(gitRoot)
-	if err != nil {
-		return model.RepoStats{}, fmt.Errorf("无法打开 Git 仓库: %w", err)
+	// unborn（空仓）视同无 HEAD 引用报错，与原 go-git repo.Head() 失败语义一致
+	head, herr := util.ResolveHead(gitRoot)
+	if herr != nil {
+		return model.RepoStats{}, fmt.Errorf("无法获取 HEAD 引用: %w", herr)
 	}
-	head, err := repo.Head()
-	if err != nil {
-		return model.RepoStats{}, fmt.Errorf("无法获取 HEAD 引用: %w", err)
+	if head.Unborn {
+		return model.RepoStats{}, fmt.Errorf("无法获取 HEAD 引用: 仓库尚无任何提交")
 	}
-	currentSHA := head.Hash().String()
+	currentSHA := head.SHA
 	key := commitHistoryCacheKey(gitRoot, head)
 
 	// 取全量快照：cache 注入走缓存三态解析，未注入走全量扫；两路径统一返 (commits, overflow)
@@ -520,11 +512,12 @@ func fetchCommitHistoryFromGit(gitRoot string, limit, offset int, filter model.C
 
 // commitHistoryCacheKey 构造缓存键。分支用 ref 全名（refs/heads/master），HEAD 前移时
 // 同 ref 靠 headSHA 增量判定；detached HEAD 用 SHA 隔离不同提交，避免跳转串历史。
-func commitHistoryCacheKey(gitRoot string, head *plumbing.Reference) string {
-	if head.Name().IsBranch() {
-		return gitRoot + "|" + head.Name().String()
+// 参数为 util.HeadInfo（util.ResolveHead 产出），与 go-git 引用类型解耦。
+func commitHistoryCacheKey(gitRoot string, head util.HeadInfo) string {
+	if !head.Detached {
+		return gitRoot + "|" + head.RefName
 	}
-	return gitRoot + "|HEAD|" + head.Hash().String()
+	return gitRoot + "|HEAD|" + head.SHA
 }
 
 // InvalidateCommitHistoryCache 清除指定仓库的提交历史缓存与行数统计缓存。供前端
@@ -564,57 +557,6 @@ func parseDateEnd(s string) (time.Time, error) {
 		return t, err
 	}
 	return t.Add(24*time.Hour - time.Second), nil
-}
-
-// getCommitFiles 获取提交中变更的文件列表
-func getCommitFiles(repo *git.Repository, commit *object.Commit) []string {
-	var files []string
-
-	currentTree, err := commit.Tree()
-	if err != nil {
-		return files
-	}
-
-	parentCommit, err := commit.Parent(0)
-	if err != nil {
-		return getTreeFiles(currentTree)
-	}
-
-	parentTree, err := parentCommit.Tree()
-	if err != nil {
-		return files
-	}
-
-	patch, err := currentTree.Patch(parentTree)
-	if err != nil {
-		return files
-	}
-
-	for _, patchObj := range patch.FilePatches() {
-		from, to := patchObj.Files()
-		if from != nil {
-			files = append(files, from.Path())
-		} else if to != nil {
-			files = append(files, to.Path())
-		}
-	}
-
-	return files
-}
-
-// getTreeFiles 获取树中的文件路径（最多返回100个）
-func getTreeFiles(tree *object.Tree) []string {
-	files := make([]string, 0, 100)
-	count := 0
-	tree.Files().ForEach(func(file *object.File) error {
-		if count >= 100 {
-			return fmt.Errorf("limit reached")
-		}
-		files = append(files, file.Name)
-		count++
-		return nil
-	})
-	return files
 }
 
 // GetLocalChanges 获取仓库本地变动文件列表

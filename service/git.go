@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-
 	"workbench/model"
 	"workbench/util"
 )
@@ -550,7 +548,7 @@ func (s *GitService) ClearScanCache(rootPath string) {
 }
 
 // HasRemotesBatch 批量检测多个仓库是否配置了远程仓库。
-// 用 go-git（读取 .git/config）实现，不 fork git 子进程，规避逐个 git remote -v 的子进程开销。
+// 纯 Go 解析 .git/config（不 fork git 子进程），规避逐个 git remote -v 的子进程开销。
 // 并发执行（concurrency=8），用于仓库筛选器列表场景，保证 NF1（100 仓库 < 3s）。
 // 返回 map[路径]是否配置远程；判定失败（路径不存在/非仓库）记为 false。
 func (s *GitService) HasRemotesBatch(repoPaths []string) map[string]bool {
@@ -571,12 +569,7 @@ func (s *GitService) HasRemotesBatch(repoPaths []string) map[string]bool {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			has := false
-			if repo, err := git.PlainOpen(path); err == nil {
-				if remotes, err := repo.Remotes(); err == nil {
-					has = len(remotes) > 0
-				}
-			}
+			has := repoHasRemote(resolveGitConfigPath(path))
 			mu.Lock()
 			result[path] = has
 			mu.Unlock()
@@ -584,6 +577,74 @@ func (s *GitService) HasRemotesBatch(repoPaths []string) map[string]bool {
 	}
 	wg.Wait()
 	return result
+}
+
+// resolveGitConfigPath 定位仓库的 config 文件路径。.git 目录形态取 <repoPath>/.git/config；
+// worktree/submodule 的 .git 是文件（内容形如 "gitdir: <path>"），解析重定向定位真实
+// gitdir（相对路径以 repoPath 为基准解析）。路径不存在或形态异常返回空串（判 false）。
+func resolveGitConfigPath(repoPath string) string {
+	dotGit := filepath.Join(repoPath, ".git")
+	fi, err := os.Stat(dotGit)
+	if err != nil {
+		return ""
+	}
+	if fi.IsDir() {
+		return filepath.Join(dotGit, "config")
+	}
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(content, "gitdir:") {
+		return ""
+	}
+	gitdir := strings.TrimSpace(strings.TrimPrefix(content, "gitdir:"))
+	if gitdir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(repoPath, gitdir)
+	}
+	return filepath.Join(gitdir, "config")
+}
+
+// repoHasRemote 零子进程解析 .git/config 判定是否配置了远程。语义对齐原 go-git
+// Remotes()（v5.19.2 config/config.go unmarshalRemotes）：统计 `[remote "name"]`
+// 子段（不要求段内配置 url；`[remote]` 裸段无子节名不计，与 go-git Subsections
+// 口径一致；本地 config 不展开 include，两侧行为相同）。config 不可读视为无远程。
+func repoHasRemote(configPath string) bool {
+	if configPath == "" {
+		return false
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		// 跳过空行与注释（git config 支持 # 与 ; 两种注释前缀）；段内选项行不匹配 `[` 前缀自然跳过
+		if len(line) == 0 || line[0] == '#' || line[0] == ';' || line[0] != '[' {
+			continue
+		}
+		end := strings.IndexByte(line, ']')
+		if end < 0 {
+			continue
+		}
+		header := strings.TrimSpace(line[1:end])
+		// 段头形如 remote "origin" 或 remote."origin"（老式点分）；段名大小写不敏感
+		sp := strings.IndexAny(header, " \t.\"")
+		if sp < 0 {
+			continue
+		}
+		if !strings.EqualFold(header[:sp], "remote") {
+			continue
+		}
+		if strings.TrimSpace(header[sp:]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetLocalChanges 获取本地变动文件列表

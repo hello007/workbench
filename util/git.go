@@ -138,6 +138,47 @@ func IsGitRepositoryFast(dir string) bool {
 	return err == nil
 }
 
+// HeadInfo 解析 HEAD 后的引用元数据（SHA/分支名/detached/unborn），供缓存键构造
+// 与远程信息展示消费，替代原先经 go-git PlainOpen+Head 的引用元数据读取。
+type HeadInfo struct {
+	SHA      string // HEAD 指向的提交 SHA；unborn（空仓库有分支名但无提交）时为空串
+	RefName  string // 分支 ref 全名（refs/heads/<branch>）；detached 时为 "HEAD"
+	Branch   string // 短分支名；detached 时为空串
+	Detached bool   // HEAD 游离（不指向任何分支）
+	Unborn   bool   // 空仓库 unborn branch（分支名存在但尚无任何提交）
+}
+
+// ResolveHead 解析仓库 HEAD 引用元数据（两次轻量 CLI，无对象库读取）：
+// git symbolic-ref --short -q HEAD 取分支名（exit 1 = detached HEAD），
+// git rev-parse HEAD 取 SHA（失败 = 仓库损坏或 unborn）。
+// unborn 不视为错误（Branch/RefName 已可解析，SHA 为空），由调用方按 Unborn 分流。
+func ResolveHead(gitRoot string) (HeadInfo, error) {
+	info := HeadInfo{RefName: "HEAD"}
+	gitCmd := NewGitCommand()
+	// -q 静默 + exit 1 接受：detached HEAD 时输出为空，非 detached 返回短分支名；
+	// 其余退出码（仓库损坏等）走错误分支，交由 rev-parse 的失败统一暴露
+	branch, err := gitCmd.ExecuteWithCodes(gitRoot, map[int]bool{1: true}, "symbolic-ref", "--short", "-q", "HEAD")
+	branch = strings.TrimSpace(branch)
+	if err == nil && branch != "" {
+		info.Branch = branch
+		info.RefName = "refs/heads/" + branch
+	} else {
+		info.Detached = true
+	}
+
+	sha, err := gitCmd.Execute(gitRoot, "rev-parse", "HEAD")
+	if err != nil {
+		if info.Branch != "" {
+			// 分支名可解析但 HEAD 无提交：unborn（git init / 新建分支后未 commit）
+			info.Unborn = true
+			return info, nil
+		}
+		return info, err
+	}
+	info.SHA = strings.TrimSpace(sha)
+	return info, nil
+}
+
 // GetBranch 获取当前分支名
 func (g *GitCommand) GetBranch(dir string) (string, error) {
 	return g.Execute(dir, "branch", "--show-current")
