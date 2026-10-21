@@ -2097,6 +2097,21 @@ const onCartReorder = async (orderedKeys) => {
   }
 }
 
+// 溯源库相对路径还原：AssetCartItem 快照无库相对路径字段（真实模型仅 srcPath
+// 绝对路径快照），由 srcPath 剥离所属库根路径还原（入栏时 srcPath =
+// joinAssetPath(rootPath, card.filePath) 的逆变换，单一还原点）；跨库条目按其
+// 所属库根剥离（切库后语义一致）。前缀判等大小写不敏感（Windows 路径语义），
+// 剥离结果保留原大小写；根外路径/空值返回空串走 miss 分支（不猜值）
+const cartEntryRelPath = (item) => {
+  const lib = libraries.value.find(l => l.id === item?.libraryId)
+  const root = (lib?.rootPath || '').replace(/[\\/]+$/, '').replace(/\\/g, '/')
+  const src = (item?.srcPath || '').replace(/\\/g, '/')
+  if (!root || !src) return ''
+  const prefix = root + '/'
+  if (src.length <= prefix.length || !src.toLowerCase().startsWith(prefix.toLowerCase())) return ''
+  return src.slice(prefix.length)
+}
+
 // 溯源定位（抽屉条目点击）：目标库非当前库先切库（locateNode 类先例），随后对齐
 // filterByFile 进入「仅看该文件页」过滤语境并选中目标页进详情；miss（源文件
 // lost/被排除/分页未达）提示不猜值
@@ -2111,6 +2126,7 @@ const locateCartEntry = async (item) => {
     currentLibraryId.value = item.libraryId
     await onLibrarySelectionSettled()
   }
+  const targetPath = cartEntryRelPath(item)
   if (searchMode.value) {
     searchSeq++ // 语境变更点：退出检索使在途检索写回失效
     activeKeyword.value = ''
@@ -2125,7 +2141,7 @@ const locateCartEntry = async (item) => {
   closeDetail()
   closePreview() // 语境变更点：进入过滤浏览清预览
   clearSelection() // 语境变更点：视图切换清选中（D5#3，直赋路径手动清）
-  fileFilterPath.value = item.filePath
+  fileFilterPath.value = targetPath
   // 幻灯片清单未拉过先拉首页（续拉基准），stale（数据变更刷新链在文件视图停留时
   // 置位）同语义消费——直赋路径与 filterByFile/onViewModeChange 消费口径一致，
   // 漏消费则溯源落地页显示变更前旧标注/旧路径
@@ -2133,7 +2149,7 @@ const locateCartEntry = async (item) => {
     await loadSlidesPage(true)
   }
   await ensureFilteredSlidesLoaded()
-  const entry = slideEntries.value.find(s => s.filePath === item.filePath && s.slideNum === item.slideNum)
+  const entry = slideEntries.value.find(s => s.filePath === targetPath && s.slideNum === item.slideNum)
   if (entry) {
     selectSlideCard({
       key: `slide-${entry.id}`,

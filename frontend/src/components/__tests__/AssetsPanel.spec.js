@@ -4827,13 +4827,12 @@ describe('AssetsPanel', () => {
 
   // ---- 素材购物栏（PR3：三处加号入口 + 批量加页 + 溯源定位 + 合并导出）----
 
-  // 购物栏条目工厂（形状对齐 model.AssetCartItem；stale 为 List 探测态；filePath
-  // 为溯源定位消费的库相对路径，与后端 srcPath 快照来源一致）
+  // 购物栏条目工厂（形状对齐 model.AssetCartItem：快照字段仅 srcPath 绝对路径，
+  // 无库相对路径字段——溯源定位由 srcPath 剥离所属库根还原；stale 为 List 探测态）
   const cartItemOf = (overrides = {}) => ({
     libraryId: 'lib-1',
     fileId: 11,
     slideNum: 1,
-    filePath: '方案A/城商行方案.pptx',
     srcPath: 'D:/assets/方案A/城商行方案.pptx',
     fileName: '城商行方案.pptx',
     slideTitle: '封面页',

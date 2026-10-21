@@ -43,4 +43,47 @@ async function getWailsCalls(page, method) {
   )
 }
 
-export { test, expect, getWailsCalls }
+/**
+ * 放行 `__deferred__` 描述符挂起的调用（FIFO 取最早挂起的一个），以 value resolve。
+ * 用于先断言「在途中间态」（行级 loading / 信号量在途数 / 进度条），再放行结果的链路
+ * （批量重试编排、素材购物栏合并导出等）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} key 描述符 `__deferred__` 的键名
+ * @param {*} value resolve 载荷（纯 JSON，可结构化克隆）
+ * @returns {Promise<boolean>} 是否存在挂起项（false = 无在途调用可放行）
+ */
+async function releaseDeferred(page, key, value) {
+  return page.evaluate(({ key, value }) => {
+    const bucket = (window.__wailsDeferred || {})[key] || []
+    const entry = bucket.shift()
+    if (!entry) return false
+    entry.resolve(value)
+    return true
+  }, { key, value })
+}
+
+/**
+ * 读取 `__deferred__` 指定键当前挂起（未放行）的调用数。
+ * 断言信号量限流中间态（如并发上限 3 时第 4 个调用仍在排队）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} key 描述符 `__deferred__` 的键名
+ * @returns {Promise<number>}
+ */
+async function pendingDeferredCount(page, key) {
+  return page.evaluate((k) => ((window.__wailsDeferred || {})[k] || []).length, key)
+}
+
+/**
+ * 页面上下文派发 Wails 事件（经 mock 的 runtime.EventsEmit 同步广播到全部已注册
+ * handler，语义与真实后端 EventsEmit 推送一致，多组件共听同事件均收到）。
+ * 用于驱动「事件先于 bound method resolve」的进度中间态（如素材购物栏导出进度，
+ * 真实链路事件在合并期间推送，`__events__` 描述符的 setTimeout 派发晚于 resolve）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} event 事件名
+ * @param {*} payload 事件载荷（纯 JSON，可结构化克隆）
+ */
+async function emitWailsEvent(page, event, payload) {
+  await page.evaluate(([name, pl]) => window.runtime.EventsEmit(name, pl), [event, payload])
+}
+
+export { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, emitWailsEvent }

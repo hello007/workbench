@@ -38,10 +38,10 @@ Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`�
 | 文件 | 职责 |
 |---|---|
 | `playwright.config.js` | testDir / projects（仅 Chromium）/ retries / webServer（build + preview） |
-| `e2e/fixtures.js` | 扩展 `test`：每个用例自动 `addInitScript` 注入 Wails mock，用例统一从这里 import；导出 `getWailsCalls(page, method?)` 读取页面内 `window.__wailsCalls` 调用记录 |
-| `e2e/wails-init.js` | 浏览器页面上下文执行的注入函数（`window.go.main.App` + `window.runtime` stub + `__wailsCalls` 调用记录 + `{__error__}` / `{__sequence__}` / `{__value__, __events__, __preEvents__}` 返回值描述符） |
+| `e2e/fixtures.js` | 扩展 `test`：每个用例自动 `addInitScript` 注入 Wails mock，用例统一从这里 import；导出 `getWailsCalls(page, method?)`（调用记录）、`releaseDeferred(page, key, value)` / `pendingDeferredCount(page, key)`（挂起解析器放行与在途数）、`emitWailsEvent(page, event, payload)`（页面上下文广播 Wails 事件） |
+| `e2e/wails-init.js` | 浏览器页面上下文执行的注入函数（`window.go.main.App` + `window.runtime` stub + `__wailsCalls` 调用记录 + `{__error__}` / `{__sequence__}` / `{__value__, __events__, __preEvents__}` / `{__deferred__}` 返回值描述符；`EventsEmit` 同步广播到已注册 handler） |
 | `e2e/git-fixtures.js` | Git 三流程共享上下文：mock 工作目录常量（`GIT_FLOW_OVERRIDES`）、公共前置 `openGitRepoPage`、对话框定位 `visibleDialog` |
-| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发 / ai-chat AI 对话工作台） |
+| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发 / ai-chat AI 对话工作台 / command-palette-retry 搜索超时重试编排 / terminal-tabs 终端多 tab / toolbox-panel 工具箱与进程管理 / assets-cart 购物栏收集溯源导出 / settings-save 设置保存链） |
 | `../src/test/wails-mock-defaults.js` | mock 默认返回值表单一数据源（vitest setup.js 与 E2E 共用基础表，E2E 另有专属补充表） |
 
 ## mock 机制说明
@@ -55,7 +55,11 @@ Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`�
   EventsOn 系列将回调登记到页面全局 `window.__wailsEventHandlers`，供
   `{__events__}` 描述符派发事件（模拟 AI 任务 queued/started/output/done 异步事件流）；
   `{__preEvents__}` 在 resolve 前同步派发，对齐真实后端「先 emit 再返回 bound call」时序
-  （如 chat-task:queued/started 先于 RunChat resolve 到达）。
+  （如 chat-task:queued/started 先于 RunChat resolve 到达）。`EventsEmit` 同步广播到
+  已注册 handler（对齐真实 runtime 语义），经 fixtures 的 `emitWailsEvent` 驱动
+  「事件先于 promise resolve」的进度中间态；`{__deferred__: 'key'}` 挂起解析器把
+  resolve 时机交给用例（`releaseDeferred` 放行 / `pendingDeferredCount` 读在途数），
+  覆盖信号量限流与长操作等待期中间态（范式详见 docs/spec/e2e-testing.md §6）。
 - **与单测一致性**：默认值表由 `src/test/wails-mock-defaults.js` 统一提供，
   vitest 全局兜底（`src/test/setup.js`）与 E2E 共用基础表，mock 行为不漂移。
 

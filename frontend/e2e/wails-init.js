@@ -26,6 +26,12 @@
  *   __preEvents__（可选）在 resolve 前同步派发，对齐真实后端「先 emit 再返回 bound call」
  *   的时序（如 chat-task:queued/started 先于 RunChat resolve 到达）；__events__ 在
  *   resolve 后按序经 setTimeout 派发（保持异步时序，可编排「运行中→完成」断言窗口）。
+ * - { __deferred__: 'key' }：挂起解析器。调用即返回永不自行 settle 的 Promise，并把
+ *   { resolve, reject } 按 FIFO 存入页面全局 window.__wailsDeferred[key]；用例先断言
+ *   「在途中间态」（行级 loading / 信号量限流在途数 / 进度条），再经 fixtures.js 的
+ *   releaseDeferred(page, key, value) 手动放行、pendingDeferredCount(page, key) 读在途数。
+ *   用于批量重试编排（信号量 3 限流中间态）与长操作进度事件（素材购物栏合并导出）等
+ *   「resolve 时机需由用例控制」的链路；用例结束未放行的挂起随页面销毁丢弃，无泄漏面。
  *
  * 调用记录：每次 bound method 调用都会 push 到 window.__wailsCalls
  * （{method, args}），用例经 fixtures.js 的 getWailsCalls 断言「UI 操作触发了
@@ -86,6 +92,16 @@ export function injectWailsMocks(returnValues) {
           })
           return Promise.resolve(value.__value__ !== undefined ? value.__value__ : null)
         }
+        if (typeof value.__deferred__ === 'string') {
+          // 挂起解析器：调用即挂起，{resolve, reject} 按 FIFO 入 window.__wailsDeferred[key]，
+          // 由用例经 fixtures.js 的 releaseDeferred/pendingDeferredCount 手动放行/读数
+          const key = value.__deferred__
+          window.__wailsDeferred = window.__wailsDeferred || {}
+          const bucket = (window.__wailsDeferred[key] = window.__wailsDeferred[key] || [])
+          return new Promise((resolve, reject) => {
+            bucket.push({ resolve: resolve, reject: reject })
+          })
+        }
       }
       return Promise.resolve(value)
     }
@@ -113,6 +129,9 @@ export function injectWailsMocks(returnValues) {
   // BrowserOpenURL 等，见 wailsjs/runtime/runtime.js 转发表）。
   // EventsOn/EventsOnMultiple/EventsOnce 将回调登记到 window.__wailsEventHandlers
   // （按事件名分组），供 __events__ 描述符派发；EventsOff 移除该事件全部回调。
+  // EventsEmit 同步广播到已注册 handler（对齐真实 Wails runtime 语义：后端
+  // EventsEmit → 前端全部同名 handler 收到），供用例经 fixtures.js 的
+  // emitWailsEvent 驱动「事件先于 promise resolve」的进度中间态（导出/合并等）。
   window.__wailsEventHandlers = Object.create(null)
   const registerHandler = (name, callback, once) => {
     const handlers = (window.__wailsEventHandlers[name] = window.__wailsEventHandlers[name] || [])
@@ -134,7 +153,11 @@ export function injectWailsMocks(returnValues) {
     EventsOffAll: () => {
       window.__wailsEventHandlers = Object.create(null)
     },
-    EventsEmit: () => {},
+    EventsEmit: function (name) {
+      const args = Array.prototype.slice.call(arguments, 1)
+      const handlers = (window.__wailsEventHandlers || {})[name] || []
+      handlers.forEach((handler) => handler(...args))
+    },
     BrowserOpenURL: () => {},
     WindowReload: () => {},
     LogPrint: () => {},

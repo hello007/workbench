@@ -1,7 +1,7 @@
 # E2E 测试规范（方案 C 混合架构）
 
 > 本文档规定 WorkBench E2E 测试的分层架构、mock 约束、调用断言模式、构建标签隔离与 CI 绑定生成要求。
-> 最后更新：2026-09-13 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock
+> 最后更新：2026-10-21 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）
 
 ## 1. 适用范围
 
@@ -50,7 +50,13 @@
 - 用例 / describe 级动态行为经 `test.use({ wailsOverrides: { 方法名: 值 | 描述符 } })` 覆盖默认表
 - value 描述符：纯值恒 resolve；`{__error__, __code__?}` reject（带 `__code__` 时对齐 Wails ErrorFormatter 的 `{code, message}` AppError 形态）；`{__sequence__: [...]}` 按序返回、耗尽后 hold last；`{__value__, __events__: [{event, payload, delayMs?}]}` resolve `__value__`（缺省 null）并按序经 `setTimeout` 派发 Wails 事件（`delayMs` 缺省 0；每次调用完整派发，无状态消费）
 - `__events__` 派发机制：`wails-init.js` 的 `runtime.EventsOn/EventsOnMultiple/EventsOnce` 将回调登记到页面全局 `window.__wailsEventHandlers`（按事件名分组），描述符派发时逐一调用；`EventsOff` 移除该事件全部回调。用于模拟 AI 任务（`ai-task:queued/started/output/done`）等异步事件流——真实链路由后端 `runtime.EventsEmit` 推送，E2E 侧无需真实子进程
+- **挂起解析器 `{ __deferred__: 'key' }`（2026-10-21 批量重试批次新增）**：调用即挂起（返回永不自行 settle 的 Promise），`{resolve, reject}` 按 FIFO 存入页面全局 `window.__wailsDeferred[key]`；用例先断言「在途中间态」（行级 loading / 信号量在途数 / 进度条），再经 `fixtures.js` 的 `releaseDeferred(page, key, value)` 手动放行、`pendingDeferredCount(page, key)` 读在途数。适用两类链路：批量重试编排（信号量 3 限流的第 4 个调用排队中间态，`command-palette-retry.spec.js`）与「resolve 时机需用例控制」的长操作（进程终止等待期行级防重、素材购物栏合并导出）。vitest 侧同形态先例为 `mockImplementation` + 捕获 resolver（logging-and-errors.md 批量重试节），E2E 描述符为其通用化
+- **`emitWailsEvent(page, event, payload)`（同批新增）**：页面上下文调 mock 的 `runtime.EventsEmit`（已改为同步广播到 `__wailsEventHandlers` 全部同名 handler，对齐真实 Wails runtime 语义），驱动「事件先于 bound method resolve」的进度中间态——`__events__` 描述符的派发在 resolve 之后（setTimeout），不能表达真实后端合并/导出期间推送进度、promise 末步 resolve 的时序（`assets-cart.spec.js` 导出进度先事件后放行结果）。已知硬化点（后续批次处理）：forEach 同步派发中某 handler 抛错会中断后续同名 handler 并上抛用例，且 EventsOnce 的 splice 自移除在同事件多 handler 时有索引位移跳过——现无用例命中该组合，硬化方向为 per-handler try/catch + 倒序遍历
 - 每测试独享新页面，覆盖互不影响（无跨用例状态泄漏）
+
+### 6.1 键盘快捷键入口的挂载竞态（command-palette 先例）
+
+`page.goto('/')` 在 load 事件返回，而 Vue 应用挂载 + Home `onMounted` 的全局 `keydown` 注册晚于此——goto 后立即 `keyboard.press('Control+p')` 会**静默丢失按键**（监听未注册），命令面板不打开。处理范式（`command-palette-retry.spec.js` `searchKeyword`）：先 `expect(活动栏首项).toBeVisible()` 确认挂载，再把「按键 + 断言面板可见」整体包进 `expect(fn).toPass({ timeout })` 重试（重复按 Ctrl+P 幂等：已开时仅重设 `commandPaletteVisible = true`）。点击型入口（activity-bar-item 等）无此问题——Playwright 点击自带存在性等待。
 
 ## 7. 构建标签隔离（后端集成测试）
 

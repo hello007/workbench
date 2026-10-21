@@ -132,6 +132,18 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // SaveSessionState 默认 true = mock no-op（debounce / beforeunload 调用，失败静默不阻塞 UI）
   SaveSessionState: true,
 
+  // ---- 终端多 tab（TerminalPanel + useTerminal：PTY 编排的前端消费面）----
+  // 形状对齐 service 层签名：CreateTerminal(dir, shellType, cols, rows) 返回 sessionId
+  // 字符串；WriteTerminalInput/ResizeTerminal/CloseTerminal/ChangeTerminalDir 返回
+  // void（null 安全 no-op）。真实 pty 在后端，E2E 只验前端编排（tab 生命周期与调用
+  // 序列），断言不深入终端缓冲区内容；需要区分会话 id 的用例（如断言 CloseTerminal
+  // 收到被关 tab 的 sid）经 E2E 用 __sequence__ 描述符 override（按调用序分配 id）。
+  CreateTerminal: 'session-e2e',
+  WriteTerminalInput: null,
+  ResizeTerminal: null,
+  CloseTerminal: null,
+  ChangeTerminalDir: null,
+
   // ---- AI 提交信息生成（PR2）----
   // GetStagedDiffText 默认示例 diff（LocalChanges 用户点「AI 生成」才调，挂载不触发）
   // GetRecentCommitSubjects 默认 3 条 few-shot 示例（形状对齐 []string）
