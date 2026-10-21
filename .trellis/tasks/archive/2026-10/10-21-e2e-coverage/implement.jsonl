@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-21-e2e-coverage/prd.md", "reason": "本批范围（Top 5 链路）、需求与 AC"}
+{"file": ".trellis/tasks/10-21-e2e-coverage/research/coverage-matrix.md", "reason": "五域缺口矩阵 + mock 可行性 + Top 20 候选清单（本批范围权威源）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约全文（fixtures/mock 单一数据源/通道排除面/断言规则）"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox 三形态断言范式（§4 E2E 规则）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "命令面板批量重试编排契约与 pending resolver mock 形态"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端多 tab 契约（getter 投影/快照归一化/冷启动判据——链路 2 断言源）"}
+{"file": "docs/spec/pptx-merge.md", "reason": "购物栏三处同构条目键与合并导出契约（链路 4 断言源）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 闭包注销范式与 mock 面结构（链路 4 事件断言参照）"}

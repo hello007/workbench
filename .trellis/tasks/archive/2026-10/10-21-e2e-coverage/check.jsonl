@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/10-21-e2e-coverage/prd.md", "reason": "AC 清单与 Top 5 范围基准"}
+{"file": ".trellis/tasks/10-21-e2e-coverage/research/coverage-matrix.md", "reason": "缺口矩阵对照（本批落地状态标注核验）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约逐条核验（fixtures/waitForTimeout/排除面）"}
