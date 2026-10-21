@@ -70,6 +70,24 @@ element-plus 升级除 3.3 常规面外，按 confirm-dialog.md §1 排查方法
 
 升级失败回退 = `git checkout frontend/package.json frontend/package-lock.json` + `npm ci`（lock 与声明同源回滚，无半态）。exact 档回退后版本即回到上一个已验证态。
 
+### 3.6 major 升级要点（10-21 deps-upgrade-batch3 实证）
+
+四个前端 major（vue-router 4→5、js-yaml 4→5、markdown-it 14→15、docx-preview 0.3→0.4）升级实证结论，后续再评 major 时按此方法论：
+
+**升前取证方法**：
+
+- **官方 CHANGELOG 缺失时用 npm tarball 逐文件 diff 取证**：markdown-it v15 起不再随包发布 CHANGELOG，且 GitHub 系域名可能不可达；`npm pack <pkg>@<ver>` 下载两版 tarball 全量 diff 是源码级权威证据（docx-preview 0.4.1 无 release 条目同法确认，仅 35 行 bug fix）。
+- **breaking 清单必须对照本仓消费面逐条判定**，全仓 grep 消费点（含测试文件与 `:deep` 样式覆盖）先行——batch3 四包消费面极小（1~2 文件/包）是低风险主因，评估结论按「不受影响 / 需适配（写明改法）/ 无法确认（列兜底测试面）」三态落 research。
+
+**单包要点**：
+
+- **js-yaml v5 无 ESM default export（by design，d.ts 已核实）**：`import jsyaml from 'js-yaml'` 拿到 undefined，须 namespace import `import * as yaml from 'js-yaml'`；`load`/`loadAll`/`dump` 具名调用零改动。消费点：`FilePreviewRenderer.vue`（frontmatter）+ `JsonYamlToolPanel.vue`（互转工具）。行为变化（默认 schema 变 CORE_SCHEMA、日期变字符串、`<<` merge 失效、空输入 throw）本仓均有既有兜底，升级时跑 `JsonYamlToolPanel.spec.js` 逐字断言证实 dump 标量风格未漂移。
+- **vue-router v5**：官方定性为 unplugin-vue-router 合入核心的过渡版，未用该插件场景零代码改动；本仓仅 `createRouter`/`createWebHashHistory`/`<router-view>` 三点全在 unchanged 主 API。注意 `@vue/devtools-api` 随升为运行时依赖（^8），`wails dev` 冒烟兜底。
+- **markdown-it v15**：exports 深路径 `./*` 通配删除、`md.utils` 删 assign/has/isString、default 导出改 callable 包装——本仓零命中（仅主入口 `new MarkdownIt`）。mermaid 协同链依赖的「fence 调 highlight 传 lang」+「`<pre` 开头跳过 wrapper」两点 v15 源码逐字保留，E2E 哨兵 markdown-mermaid.spec.js 照常守护。
+- **docx-preview 0.x tilde = minor+patch 全锁**：0.3→0.4 跨 minor 必须显式改声明，`npm update` 不会带过去；0.4.0 的 `!!!BREAKING CHANGE!!!` 仅影响 undocumented API（`renderAsync` 签名与生成 DOM 结构两版逐字一致，`renderDocument` 旧签名移除本仓无引用）。
+
+**兜底冒烟（静态分析无法确证项）**：docx 真机打开多页/表格/页眉页脚文件目检（0.4.0 release 自述「edge cases」无具体清单）；`wails dev` 启动冒烟（vue-router 依赖树变化）。
+
 ## 4. 关联
 
 - 确认弹框消费契约与 EP 回归排查方法论：[confirm-dialog.md](confirm-dialog.md)

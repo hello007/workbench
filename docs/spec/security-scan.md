@@ -115,6 +115,8 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 ### 5.4 major 版本待评（本轮跳过）
 
+前端遗留四 major 已于 2026-10-21 全部出清（vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1，breaking 评估与适配记录见 frontend-dep-upgrade.md §3.6），升级后 `npm audit` 保持 0 vulnerabilities。本节剩余仅 Go/框架侧两项：
+
 | 包 | 当前版本 | 可用 major | 说明 |
 |---|---|---|---|
 | go-git | v5.19.2 | v6 | major 升级涉及 API 变更，单独评估 |

@@ -55,7 +55,8 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import yaml from 'js-yaml'
+// js-yaml v5 无 ESM default export，须 namespace import（load/loadAll/dump 具名调用不受影响）
+import * as yaml from 'js-yaml'
 
 const FORMAT_JSON = 'json'
 const FORMAT_YAML = 'yaml'

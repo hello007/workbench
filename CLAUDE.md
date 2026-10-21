@@ -16,10 +16,10 @@
 |---|---|---|
 |后端语言|Go|1.26.10|
 |桌面框架|Wails|v2.16.0|
-|前端框架|Vue 3 (Composition API)|3.5.33|
-|UI组件|Element Plus|2.13.7|
-|路由|Vue Router|4.6.4|
-|构建工具|Vite|8.0.10|
+|前端框架|Vue 3 (Composition API)|3.5.44|
+|UI组件|Element Plus|2.14.5|
+|路由|Vue Router|5.4.0|
+|构建工具|Vite|8.3.4|
 |后端测试|Go testing|-|
 |前端测试|Vitest + Vue Test Utils|-|
 
@@ -104,6 +104,7 @@ workbench/
 |ElMessageBox.confirm 消费链三形态：递归恒弹（确认型错误码→confirm→重调→再弹组件内闭环，仅素材导出 runExport）/顺序两段（首段关闭立即弹次段，如 Obsidian 注册链、删除会话、备份升级确认）/单次确认（大多数删除/终止确认，无 EP 漂移暴露面）；EP 2.14 起 message-box 关闭后实例驻留 DOM（同名选择器命中多元素）+ 关闭动画期重开正常（2.13.7 曾异常 reject 落静默 catch 测试不可知）——E2E 递归/两段链须 `.first()`/`.last()`（DOM 追加序=弹出序）或 `:visible`+`filter(hasText)` 范式，裸 `.el-message-box` 仅单次链安全；ElMessageBox mock 是各 spec 文件级 `vi.mock('element-plus')`（setup.js 仅 mock Wails 绑定），vitest 面被 mock 屏蔽、断言以组件代码分支为准；同构组件（Obsidian 三处 handleOpenObsidian）无共享单点须各补守护且断言面拉齐；判形态看 confirm 后动作路径能否再达 confirm 调用点，不能凭「在 catch 里」判定递归|confirm-dialog.md（docs/spec/confirm-dialog.md）|
 |前端依赖分档钳制（2026-10-20）：39 顶层依赖四档登记——exact（element-plus 2.14.5 + @element-plus/icons-vue，UI 事故源禁漂移）/tilde（运行时 UI 面 28 项 `~x.y.0` 锁 minor 放 patch）/caret（测试构建工具链 8 项）/url（xlsx tarball）；**新增依赖须先在 `scripts/check-dep-consistency.mjs` 四清单登记再改 package.json**（未登记 CI 步骤 2.5 即失败强制归类）；tilde minor 升级须以 lock 实际落点 minor 重写声明（`~<原声明值>` 会因 lock 已漂走而 CI 红）；检查脚本改判定逻辑必须先过 `--selftest`（11 组漂移 fixture）；EP 升级走 SOP 3.4 专项（三形态核对 + 确认弹框哨兵 5 spec）|frontend-dep-upgrade.md（docs/spec/frontend-dep-upgrade.md）|
 |mermaid 渲染链（2026-10-21 v12 升级）：消费面锁定 `import('mermaid')` 包说明符（禁直指 `dist/mermaid.esm.min.mjs`，v12 含 es-module-lexer 拒绝语法）+ initialize 五键 + `run({nodes, suppressErrors:true})`（v12 起默认 false 会 throw，必须显式 true）；**视觉保持双键 `layout:'dagre'`+`look:'classic'` 是有意决策**（v12 默认 ELK 布局/redux-color+neo 主题，去键即吃新观感；ELK 1.46MB chunk 钉 dagre 后永不触发）；engines node>=22.12——CI 4 处 node 22（ci.yml 2 + release.yml 2）不得再降；E2E mock 坑：`PreviewFile` 覆盖值必含 `kind:'text'`（真实 model 字段，缺则静默走 CodeMirror 分支 mermaid 永不触发）；动渲染链回归面=一致性脚本+vitest+E2E markdown-mermaid.spec.js+audit|mermaid-rendering.md（docs/spec/mermaid-rendering.md）|
+|前端依赖 major 升级要点（2026-10-21 四 major 出清）：js-yaml v5 无 ESM default export 须 namespace import `import * as yaml from 'js-yaml'`（default import 得 undefined，load/loadAll/dump 具名调用零改动，消费点 FilePreviewRenderer.vue + JsonYamlToolPanel.vue）；markdown-it v15 起不随包发 CHANGELOG，GitHub 不可达时用 npm tarball 两版逐文件 diff 取证（docx-preview 0.4.1 同法）；0.x 包 tilde=minor+patch 全锁，跨 minor 须显式改声明 npm update 带不过去；vue-router 5 未用 unplugin-vue-router 场景零代码改动（@vue/devtools-api 随升运行时依赖，wails dev 冒烟兜底）；breaking 评估须全仓 grep 消费点（含测试与 ：deep 样式）逐条三态判定落 research|frontend-dep-upgrade.md §3.6（docs/spec/frontend-dep-upgrade.md）|
 
 ## 项目记忆（docs/memory）
 

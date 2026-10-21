@@ -257,8 +257,8 @@ import MarkdownIt from 'markdown-it'
 // mermaid 改为懒加载（见下方 ensureMermaid）：仅在 markdown 含 mermaid 代码块时动态 import，
 // 使 mermaid 及其依赖（cytoscape 425KB / katex 253KB / 各 mermaid 子图）移出 Home chunk，
 // 首屏不再加载图表库。dev 模式经 vite optimizeDeps.include 预构建（见 vite.config.js）。
-// YAML frontmatter 解析（v4+ 默认 safe schema），用于 markdown 预览属性面板
-import jsyaml from 'js-yaml'
+// YAML frontmatter 解析，用于 markdown 预览属性面板；v5 无 ESM default export，须 namespace import
+import * as jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 // PPTX 预览转换绑定（.pptx/.ppsx → 后端 COM 转 PDF → 复用 pdf viewer 链路）
 import { ConvertPptxForPreview } from '../../wailsjs/go/main/App'
