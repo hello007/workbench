@@ -18,11 +18,11 @@ mermaid 11.17.2→12.2.0 major 升级。npm audit 剩余 3 组 high 中 2 组（
 
 ## Acceptance Criteria
 
-- [ ] mermaid 12.2.0 落 lock 且检查脚本三维一致绿
-- [ ] 消费面适配完成，渲染专项验证通过（三类型图）
-- [ ] audit 无 mermaid 传递链漏洞（6→≤4）
-- [ ] vitest / E2E 全量零回归
-- [ ] security-scan.md 同步；消费面坑如有沉淀
+- [x] mermaid 12.2.0 落 lock 且检查脚本三维一致绿
+- [x] 消费面适配完成，渲染专项验证通过（三类型图：E2E 冒烟 markdown-mermaid.spec.js，真实 Chromium SVG 断言）
+- [x] audit 无 mermaid 传递链漏洞（实际 2 low → **0**，优于 ≤2 口径；katex 0.18.11 出漏洞区间）
+- [x] vitest / E2E 全量零回归（vitest 96 文件 2022 用例 / E2E web 88 / desktop 3）
+- [x] security-scan.md 同步；消费面坑已沉淀 docs/spec/mermaid-rendering.md
 
 ## Definition of Done
 
