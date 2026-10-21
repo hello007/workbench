@@ -944,3 +944,36 @@ goleak 两步走第二步：观察模式 26 天实为未观察（告警不改退
 ### Next Steps
 
 - None - task complete
+
+
+## Session 139: E2E 五高价值链路补齐 + hardening-batch 批次收口（10-21-e2e-coverage）
+
+**Date**: 2026-10-21
+**Task**: E2E 五高价值链路补齐 + hardening-batch 批次收口（10-21-e2e-coverage）
+**Branch**: `master`
+
+### Summary
+
+缺口矩阵五域盘点（research/coverage-matrix.md：17 spec/72 用例现状、66 绑定方法无 mock 缺省、改动频次 Top3）选 Top 5 链路落地 15 用例（E2E 72→87）：命令面板批量重试编排/终端多 tab/工具箱 Panel 化/购物栏事件链/设置保存链。mock 基建：__deferred__ 挂起解析器描述符 + EventsEmit 同步广播 + 终端 5 方法缺省补课。真缺陷修复：AssetsPanel.locateCartEntry 消费后端不存在的 filePath 字段（fixture 形状漂移掩盖，溯源恒 miss）——cartEntryRelPath 单点修复 + fixture 对齐后端 model。vitest 2022 + E2E 87 全绿。文档三处沉淀（e2e-testing §6 两范式/测试策略 22 spec 清单/CLAUDE.md 规则行）。hardening-batch 三子任务全归档（goleak-gate→tilde-upgrade→e2e-coverage），父任务同步归档收口
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3065efd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
