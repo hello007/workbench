@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 143
+- **Total Sessions**: 144
 - **Last Active**: 2026-10-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1113 | Active |
+| `journal-3.md` | ~1146 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 144 | 2026-10-21 | go-git v5 依赖出清（消依赖路线） | `ddb6bfe` | `master` |
 | 143 | 2026-10-21 | deps-upgrade-batch3 前端四 major 出清 | `9b80f8f` | `master` |
 | 142 | 2026-10-21 | E2E 第二批 12 条落地 + wails-init 事件派发三硬化 | `bf5b2f7` | `master` |
 | 141 | 2026-10-21 | mermaid 12.2.0 升级清零 katex 传递链漏洞 | `098a3c1` | `master` |

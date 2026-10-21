@@ -1111,3 +1111,36 @@ vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1 �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 144: go-git v5 依赖出清（消依赖路线）
+
+**Date**: 2026-10-21
+**Task**: go-git v5 依赖出清（消依赖路线）
+**Branch**: `master`
+
+### Summary
+
+go-git v6 升级评估胜出消依赖路线：整体移除 go-git/v5，remote 探测改纯 Go 解析 .git/config（含 worktree gitdir 重定向），HEAD 元数据改 git symbolic-ref/rev-parse（ResolveHead）。util 层 exec 封装语义零变更，回归全绿，govulncheck 清零，沉淀 go-git-deprecation.md，security-scan §5.4 收尾仅剩 wails v3 跟踪项。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ddb6bfe` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
