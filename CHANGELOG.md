@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.11.0] - 2026-10-23
+
+### Added
+
+- 分支对比面板（活动栏一级入口，只读第一期）：A/B 分支选择（本地+远程，默认 A=当前分支）+ 一键交换；双列对齐提交表——两侧独有提交同行配对，三级匹配 hash → patch-id → 归一化 subject（patch-id 徽标即疑似 cherry-pick，merge commit 天然不误配），行按 max(a,b) 日期降序；统计条（A 独有 / 匹配含疑似拣选 / B 独有 / merge-base 之下共同历史），2000 条上限明示截断，无共同祖先显式提示
+- 分支差异文件树：两侧 `ls-tree -r` 并集（含 unchanged），状态着色与多选过滤（added/deleted/renamed/copied/typechange/modified/unchanged）+ 路径过滤，rename 展示新旧双路径，numstat 单趟统计增删行数（`-` 识别二进制）
+- 双栏/统一 diff 查看器：选中文件解析 `git diff` 原文（解析器自 FileDiffDialog 抽取为共享 `utils/diffParse.js`，行为零变化），二进制占位与超大 diff 截断提示；点击对齐表提交行弹层查看变更文件列表 + 单文件提交 diff（复用 `GetCommitFileDiff`）
+- 后端 `BranchCompareService`：对齐数据一次调用全返回（merge-base 容忍不相干历史）；patch-id 批量管道 `git log -p | git patch-id --stable` 走新增 `util.GitCommand.ExecutePipeline`（专用 2min 超时，失败降级为仅 hash/subject 匹配）；配对在后端（浏览器模式与 mock 同形状）；本服务全部 git 命令带 UTF-8 `-c` 前缀 + `%x00/%x01` 分隔解析；只读不抢仓库锁，零新增错误码（复用 E_GIT_TIMEOUT/E_GIT_CANCELLED/E_GIT_LOCKED）
+
 ## [1.10.1] - 2026-10-22
 
 ### Added
