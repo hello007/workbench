@@ -70,7 +70,9 @@ const mountTree = (props = {}, extra = {}) =>
     },
     global: { stubs: {
       'el-tree': ElTreeStub,
-      'el-dialog': { template: '<div v-if="modelValue" class="stub-dialog"><slot /><template v-if="$slots.footer"><div class="dialog-footer"><slot name="footer" /></div></template></div>', props: ['modelValue', 'title', 'width', 'appendToBody'], emits: ['update:modelValue', 'open'], watch: { modelValue(v, o) { if (v && !o) this.$emit('open') } } },
+      // 聚焦事件须按 opened（组件 @opened 绑定）：@open 时点早于 EP focus-trap 初始聚焦，
+      // 真机焦点会被夺回 wrapper——桩无 focus-trap 行为，watch modelValue 翻真即 emit
+      'el-dialog': { template: '<div v-if="modelValue" class="stub-dialog"><slot /><template v-if="$slots.footer"><div class="dialog-footer"><slot name="footer" /></div></template></div>', props: ['modelValue', 'title', 'width', 'appendToBody'], emits: ['update:modelValue', 'opened'], watch: { modelValue(v, o) { if (v && !o) this.$emit('opened') } } },
       'el-input': {
         template: '<input class="el-input" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @keyup="$emit(\'keyup\', $event)" />',
         props: ['modelValue', 'placeholder', 'maxlength'],
@@ -170,7 +172,8 @@ describe('FolderTree', () => {
   })
 
   // 聚焦断言依赖元素在文档树内（jsdom 对游离元素 focus 不生效），须 attachTo 挂载
-  it('新建子目录弹窗打开后输入框自动获焦（@open + nextTick）', async () => {
+  // 用例名与断言面按 @opened 时点（打开动画结束、focus-trap 落定后聚焦输入框）
+  it('新建子目录弹窗打开后输入框自动获焦（@opened + nextTick）', async () => {
     const wrapper = mountTree({}, { attachTo: document.body })
     await clickMenuItem(wrapper, '方案A', 'create')
     await nextTick()
@@ -178,7 +181,7 @@ describe('FolderTree', () => {
     wrapper.unmount()
   })
 
-  it('重命名弹窗打开后输入框自动获焦（两弹窗对称复用同一 helper）', async () => {
+  it('重命名弹窗打开后输入框自动获焦（两弹窗对称复用同一 helper，@opened 时点）', async () => {
     const wrapper = mountTree({}, { attachTo: document.body })
     await clickMenuItem(wrapper, '方案A', 'rename')
     await nextTick()

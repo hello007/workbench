@@ -96,7 +96,7 @@
       title="新建子目录"
       width="420px"
       append-to-body
-      @open="onCreateDialogOpen"
+      @opened="onCreateDialogOpen"
       @closed="createDialogName = ''"
     >
       <el-input
@@ -118,7 +118,7 @@
       title="重命名文件夹"
       width="420px"
       append-to-body
-      @open="onRenameDialogOpen"
+      @opened="onRenameDialogOpen"
       @closed="renameDialogPath = ''"
     >
       <el-input
@@ -335,8 +335,11 @@ const renameDialogPath = ref('')
 const renameDialogName = ref('')
 const renameInputRef = ref(null)
 
-// 弹层打开后自动聚焦输入框（@open 触发时弹层内容可能尚未挂载，nextTick 后再取 ref
-// 调 el-input 的 focus()；注意 ref 经模板表达式传参会自动解包，故以闭包直引而非传参）
+// 弹层打开后自动聚焦输入框（@opened = 打开动画完全结束后触发，此时 ref 已挂载，nextTick
+// 后调 el-input 的 focus()；注意 ref 经模板表达式传参会自动解包，故以闭包直引而非传参。
+// 须按 @opened 而非 @open：@open 时点早于 EP dialog focus-trap 的初始聚焦（其会把焦点
+// 夺回 dialog wrapper），nextTick 里的 input focus 会被覆盖——jsdom 测试桩无 focus-trap
+// 行为故测不出，真机 EP 2.14.5 实测不获焦）
 const focusDialogInput = (inputRef) => {
   nextTick(() => inputRef.value?.focus?.())
 }
