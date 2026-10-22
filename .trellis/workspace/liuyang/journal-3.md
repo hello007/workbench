@@ -1216,3 +1216,36 @@ v1.10.0 发版收口（v1.9.0→HEAD 180 commits）：RPC 驱动冒烟 35/35 PAS
 ### Next Steps
 
 - None - task complete
+
+
+## Session 147: 浏览器断线重连续传（10-22-ws-reconnect-resume）
+
+**Date**: 2026-10-22
+**Task**: 浏览器断线重连续传（10-22-ws-reconnect-resume）
+**Branch**: `master`
+
+### Summary
+
+WSHub 事件帧加全局单调 seq + 2000 帧环形缓冲，readPump 解析 resume 握手按 lastSeq 精确补发，缓冲溢出与 hub 重建两形态发 ws-gap 断层帧；前端 transport 记 lastSeq、重连 resume、ws-synced 同步模式按 seq 升序去重落地，connBanner 断层横幅。后端 -race 8 新用例 + 前端 7 新用例全绿。沉淀 browser-channel.md §2.4、CLAUDE.md 关键规则 v2.29、功能说明 §11.4。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c8e5f8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

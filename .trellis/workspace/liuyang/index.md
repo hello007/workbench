@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 146
+- **Total Sessions**: 147
 - **Last Active**: 2026-10-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1218 | Active |
+| `journal-3.md` | ~1251 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 147 | 2026-10-22 | 浏览器断线重连续传（10-22-ws-reconnect-resume） | `2c8e5f8` | `master` |
 | 146 | 2026-10-22 | 素材与预览遗留收口：聚合子页分页 + PPT 预览 STA 插队 | `32df32d`, `008d583` | `master` |
 | 145 | 2026-10-22 | v1.10.0 发版收口：RPC 冒烟 35 项 + UI 手点三问题修复 + 发版文档 | `238642c`, `27e8798`, `9d701c9`, `cfe4e2c`, `1f97e20`, `fe25132` | `master` |
 | 144 | 2026-10-21 | go-git v5 依赖出清（消依赖路线） | `ddb6bfe` | `master` |
