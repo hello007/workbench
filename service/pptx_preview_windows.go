@@ -45,13 +45,16 @@ const (
 )
 
 // ConvertToPdf PptxPdfConverter 接口实现（主侧）：提交转换任务到 STA worker
-// 并等待结果。ctx 触发超时/取消时经 waitFor 杀自启实例让阻塞 Invoke 返回。
+// 并等待结果。转换属用户可感知交互（文件树点开 pptx 预览首开延迟），走
+// submitUrgent 严格优先通道——批量缩略图导图在途时插队，先于 FIFO 存量缩略图
+// 任务被消费（单 worker 契约不变，正在执行的导图任务不可打断）。ctx 触发
+// 超时/取消时经 waitFor 杀自启实例让阻塞 Invoke 返回。
 func (e *goOleThumbExporter) ConvertToPdf(ctx context.Context, srcPath, dstPath string) error {
 	resCh := make(chan error, 1)
 	task := func(w *comWorkerState) {
 		resCh <- w.convertToPdfSession(ctx, srcPath, dstPath)
 	}
-	if err := e.submit(ctx, task); err != nil {
+	if err := e.submitUrgent(ctx, task); err != nil {
 		return err
 	}
 	err := e.waitFor(ctx, resCh)

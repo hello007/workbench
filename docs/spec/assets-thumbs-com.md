@@ -55,6 +55,7 @@
 ### 队列与失败隔离
 
 - 单 worker 串行消费 `batchCh`（缓冲 8）+ `jumpCh`（**无缓冲**：交接即消费，提交阻塞等消费方，消除「页边界错过提交」竞态）；跳转优先 = worker 每轮非阻塞摘 jumpCh + 批量在途时 preempt 页间摘取（D3「最多等一页」；导出快于提交时兜底走批次后主循环消费，语义自洽）。**停泊 select（第二 select）必须与 first select 同集收 jumpCh**（check P0 教训：停泊分支漏 jumpCh = 批次完成后的空闲期跳转无人接收，JumpToSlide 撞入队超时报 BUSY 假态，stale 请求被后续批量唤醒误执行）。
+- **urgent 通道严格优先（2026-10-22，PPT 预览转换插队）**：COM 实现层（`goOleThumbExporter`）双通道——`taskCh`（普通，缩略图批量/跳转提交）+ `urgentCh`（无缓冲同构）；`submit`/`submitUrgent` 共用 `submitTo` 单点，消费决策单点 `receiveNextTask`（先非阻塞探测 urgentCh，未命中降级三路阻塞选择；worker 主循环与 STA 初始化失败排空路径共用）。语义红线：**单 worker 单 STA 契约不破**（仅通道 +1，禁双队列）；优先级只作用于「下一个被消费任务」的选取——正在执行的 COM 任务不可打断（阻塞 Invoke 契约），紧急任务最早在当前任务返回后的下一轮被消费；urgent 与普通任务共用同一 `comWorkerState`（publishOwned/清理路径/Discard/超时杀进程收口全部不动）。消费面：当前仅 `ConvertToPdf`（PPT 预览用户可感知交互）走 urgent，后续新增用户交互类高优任务复用 `submitUrgent`；缩略图批量/跳转链路恒普通通道零行为变化。新增通道时 `receiveNextTask` 两个 select 必须同步扩集（漏 urgentCh = 插队失效退化为 FIFO）。
 - 单文件失败（含超时强杀）→ `exporter.Discard()`（置脏，下任务重建会话）→ 继续后续文件（SRS 失败隔离）。**fake 注入测试会掩蔽 COM 实现的回写遗漏**——preempt 路径的 `jr.Result` 写回必须有真链路验证或契约断言。
 - **Export 目标路径必须绝对（2026-10-15 真机实锤，相对路径 = 确定性「发生意外」）**：`Slide.Export` 的 pngPath 由 **COM 服务器进程（wpp.exe/powerpnt.exe）在自己的 cwd 下解析**，非调用方进程——WPS 启动后自改 cwd，继承不可靠。dataDir 相对字面量（`"data"`）使 thumbs 目录相对化：进程内消费者（MkdirAll/Stat/ledger/读 API）按 app cwd 解析全部正常，唯独 Export 跨进程解析非法 → DISP_E_EXCEPTION 空 ExcepInfo，逐文件确定性失败且重试无效。修复 = `NewAssetLibraryService` 构造单点 `filepath.Abs` 收口（Abs 失败保底原值 + Warn），db/注册表/thumbs 全消费面同一绝对基准。**凡路径交给 COM 服务器的调用（Export/SaveAs/Open 参数）一律绝对路径**；早前冒烟通过属 fresh-spawn 实例 cwd 恰好继承的侥幸，非契约保证。
 - **页级 Export 瞬态重试（2026-10-15 真机实证）**：`Slide.Export` 失败按 `isTransientExportError` 判定重试（同页同参至多 3 次，退避线性 1s/2s，`thumbExportMaxAttempts`/`thumbExportRetryDelay` var 注入；ctx 取消/超时**绝不重试**且判定前置）。瞬态口径：`DISP_E_EXCEPTION(0x80020009)` 且 ExcepInfo 空——go-ole 对空 bstrDescription 渲染字面量 `"<nil>"`，真机形态「发生意外。 (<nil>)」即 hr 的 FormatMessage 中文本地化**非 ExcepInfo 自带描述**（41MB/116 页真实文件冷启动未就绪实测，PowerPoint 探针同参延后成功佐证瞬态）；描述含「发生意外」的任一形态亦判瞬态；带实质业务描述的 0x80020009 与文件损坏类非瞬态立即返回。重试在 Export 调用内部不跨 preempt 边界，`jr.Result` 恰一次写回不受影响。注意：「发生意外」空 ExcepInfo 形态是**多因一果**（冷启动未就绪=瞬态 / 相对路径=确定性），先核路径绝对性再归因瞬态。
@@ -200,6 +201,7 @@
 - fake 注入（`fakeThumbExporter`）：串行事件序列（progress 1→N + done 汇总）、失败隔离（Discard + 继续）、取消（ctx 传播 + Canceled 终态）、同库批次覆盖、关停收口（worker 退出 + Shutdown 恰一次 + closed 拒绝）、跳转双路径（preempt 快路径 / 主循环兜底——断言用户可感知语义：跳转必达且恰执行一次，不断言路径）、不可用降级（无事件 + errThumbsUnavailable）。
 - **chan 交接替代 sleep**：无缓冲 release chan 放行 = 「批次已进入第 N 页」确定性同步；done 事件经通知 sink channel 等待（禁 sleep 等待竞态）。
 - **测试须跑 worker 存活性守护**：跳转失败/双路径用例后断言批次仍能执行（P0 二次写死锁的回归形态——fake 不写 Result 会永挂，超时守护兜底暴露）。
+- urgent 优先级（`TestGoOleThumbExporter_UrgentJumpsQueuedNormalTask`，Windows 原生零 COM）：普通任务执行中（body 阻塞）+ 普通提交方挂起于 taskCh（FIFO 存量），urgent 提交后经 guReady 无缓冲会合 + 放行断言先于存量被消费；收尾断言 worker 存活（urgent 消费后普通通道仍消费）。
 - COM 实现文件按 test-coverage-gate「系统调用核心不强行补测」接受 0% 覆盖，真机冒烟归集成验证。
 
 ## 7. Wrong vs Correct

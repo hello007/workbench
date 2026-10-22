@@ -108,7 +108,8 @@ var thumbOwnedExitProbe = officeServerPIDSet
 // Application 会话）。主侧超时/取消以「杀自启 powerpnt」驱动 worker 内阻塞
 // Invoke 返回（Go 无法中断 syscall，research §3.2）。
 type goOleThumbExporter struct {
-	taskCh     chan func(*comWorkerState) // STA worker 任务通道（无缓冲：提交即等待交接）
+	taskCh     chan func(*comWorkerState) // STA worker 任务通道（无缓冲：提交即等待交接）——缩略图批量链路
+	urgentCh   chan func(*comWorkerState) // 紧急任务通道（无缓冲，与 taskCh 同构）——用户可感知交互类任务（PPT 预览 PDF 转换）严格优先消费
 	quit       chan struct{}
 	workerDone chan struct{}
 
@@ -139,6 +140,7 @@ type comWorkerState struct {
 func newThumbExporter(ownedPersistPath string) ThumbExporter {
 	e := &goOleThumbExporter{
 		taskCh:           make(chan func(*comWorkerState)),
+		urgentCh:         make(chan func(*comWorkerState)),
 		quit:             make(chan struct{}),
 		workerDone:       make(chan struct{}),
 		ownedPersistPath: ownedPersistPath,
@@ -163,17 +165,16 @@ func (e *goOleThumbExporter) workerLoop() {
 		// S_FALSE(0x1) = 线程已是 STA：go-ole 当错误返回，放行（仍须配对 CoUninitialize）
 		if oleErrorHresult(err) != 1 {
 			Logger().Error("COM STA 初始化失败，缩略图 worker 退出", "err", err)
-			// 排空任务通道：主侧 select 等待会超时收口
+			// 排空任务通道（含 urgent 通道）：主侧 select 等待会超时收口
 			for {
-				select {
-				case t := <-e.taskCh:
-					// 任务无法执行（无 STA）：调用方经 resCh 超时或任务自行报错——
-					// 约定任务闭包内首查 w.app，此处直接以空状态执行让任务报错
-					// （owner 必填：任务内 ensureApp 失败路径经 publishOwned 发布镜像）
-					t(&comWorkerState{owner: e})
-				case <-e.quit:
+				t := e.receiveNextTask()
+				if t == nil {
 					return
 				}
+				// 任务无法执行（无 STA）：调用方经 resCh 超时或任务自行报错——
+				// 约定任务闭包内首查 w.app，此处直接以空状态执行让任务报错
+				// （owner 必填：任务内 ensureApp 失败路径经 publishOwned 发布镜像）
+				t(&comWorkerState{owner: e})
 			}
 		}
 	}
@@ -181,24 +182,60 @@ func (e *goOleThumbExporter) workerLoop() {
 
 	w := &comWorkerState{ownedPIDs: map[int]bool{}, owner: e}
 	for {
-		select {
-		case t := <-e.taskCh:
-			t(w)
-		case <-e.quit:
+		t := e.receiveNextTask()
+		if t == nil {
 			w.cleanup()
 			return
 		}
+		t(w)
 	}
 }
 
-// submit 提交任务到 STA worker（阻塞至交接成功，不等执行完成——结果经任务
-// 写入的 resCh 由 waitFor 等待）。ctx 仅约束提交等待；COM 调用不可中断——
-// ctx 触发时杀自启实例促使 worker 内 Invoke 返回（用户实例复用场景不可杀，
-// 仅放弃等待并告警）。
+// receiveNextTask 单轮消费决策（worker 主循环与 STA 初始化失败排空路径共用）：
+// urgent 通道严格优先——先非阻塞探测 urgentCh，命中即取；未命中降级为
+// urgentCh/taskCh/quit 三路阻塞选择。优先级只作用于「下一个被消费任务」的
+// 选取：正在执行的 COM 任务不可打断（阻塞 Invoke 契约），紧急任务最早在当前
+// 任务返回后的下一轮被消费。返回 nil = quit 收口（提交侧任务闭包恒非 nil，
+// nil 不会与真实任务混淆）。
+func (e *goOleThumbExporter) receiveNextTask() func(*comWorkerState) {
+	select {
+	case t := <-e.urgentCh:
+		return t
+	default:
+	}
+	select {
+	case t := <-e.urgentCh:
+		return t
+	case t := <-e.taskCh:
+		return t
+	case <-e.quit:
+		return nil
+	}
+}
+
+// submit 提交任务到 STA worker 普通通道（FIFO 排队语义；缩略图批量/跳转链路）。
+// 阻塞至交接成功，不等执行完成——结果经任务写入的 resCh 由 waitFor 等待。
+// ctx 仅约束提交等待；COM 调用不可中断——ctx 触发时杀自启实例促使 worker 内
+// Invoke 返回（用户实例复用场景不可杀，仅放弃等待并告警）。
 func (e *goOleThumbExporter) submit(ctx context.Context, task func(*comWorkerState)) error {
+	return e.submitTo(ctx, e.taskCh, task)
+}
+
+// submitUrgent 提交紧急任务到 STA worker urgent 通道（严格优先）：worker 每轮
+// 消费决策先探测 urgentCh（receiveNextTask），批量缩略图导图在途时用户可感知
+// 的交互类任务——当前即 PPT 预览 PDF 转换（ConvertToPdf）——经此通道插队。
+// 正在执行的 COM 任务不可打断，紧急任务最早在当前任务返回后的下一轮被消费。
+// 其余语义与 submit 完全一致（单 worker 单 STA、阻塞至交接、quit/ctx 分支同构）。
+func (e *goOleThumbExporter) submitUrgent(ctx context.Context, task func(*comWorkerState)) error {
+	return e.submitTo(ctx, e.urgentCh, task)
+}
+
+// submitTo 提交等待共用实现（submit/submitUrgent 单点）：无缓冲通道阻塞至
+// worker 交接成功；ctx 仅约束提交等待；quit 已收口返回 errThumbsUnavailable。
+func (e *goOleThumbExporter) submitTo(ctx context.Context, ch chan func(*comWorkerState), task func(*comWorkerState)) error {
 	e.startWorker()
 	select {
-	case e.taskCh <- task:
+	case ch <- task:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-e.quit:

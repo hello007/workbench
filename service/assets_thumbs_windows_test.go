@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -390,5 +391,92 @@ func TestClassifyReusedInstance(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---- urgent 通道严格优先（PPT 预览转换插队，2026-10-22）----
+
+// TestGoOleThumbExporter_UrgentJumpsQueuedNormalTask 优先级语义：普通任务 N0
+// 执行中（body 阻塞 = 批量缩略图导图在途形态）+ 普通任务 N1 提交方挂起于
+// taskCh（FIFO 存量：无缓冲通道 worker 忙时 submit 必然挂起，无第二接收方），
+// urgent 提交后在 N0 放行后的首个消费决策点先于 N1 被消费。确定性构造：guReady
+// 无缓冲会合——main 收到会合即知 urgent 发送方下一语句进入通道发送，先于
+// close(hold) 的 worker 决策点到达挂起态（对齐 TestThumbQueue_JumpDuringBatch
+// 的 runtime.Gosched 会合余量先例）；消费序经 order 通道记录断言（chan 交接
+// 同步点，禁 sleep 等待）；收尾断言 worker 存活（urgent 消费后普通通道仍正常
+// 消费——spec §6 存活性守护）。
+func TestGoOleThumbExporter_UrgentJumpsQueuedNormalTask(t *testing.T) {
+	e := newThumbExporter("").(*goOleThumbExporter)
+	defer e.Shutdown()
+
+	ctx := context.Background()
+	order := make(chan string, 8)
+
+	// 阶段 1：N0 占住 worker（body 阻塞在 hold 上，submit 返回 = 交接完成，
+	// worker 正在执行 N0）
+	hold := make(chan struct{})
+	if err := e.submit(ctx, func(*comWorkerState) {
+		order <- "normal#0"
+		<-hold
+	}); err != nil {
+		t.Fatalf("提交 N0 失败: %v", err)
+	}
+	if got := <-order; got != "normal#0" {
+		t.Fatalf("N0 应最先被消费, got %q", got)
+	}
+
+	// 阶段 2：N1 提交方挂起于 taskCh（worker 忙，交接只能等 N0 放行——FIFO 存量）
+	normalDone := make(chan error, 1)
+	go func() {
+		normalDone <- e.submit(ctx, func(*comWorkerState) { order <- "normal#1" })
+	}()
+
+	// 阶段 3：urgent 提交——guReady 无缓冲会合保证发送方在放行前已到达发送点
+	guReady := make(chan struct{})
+	urgentDone := make(chan error, 1)
+	go func() {
+		guReady <- struct{}{}
+		urgentDone <- e.submitUrgent(ctx, func(*comWorkerState) { order <- "urgent#0" })
+	}()
+	<-guReady
+	runtime.Gosched() // 会合余量：给 urgent 发送方进入通道发送的调度机会
+
+	// 阶段 4：放行 N0 → 决策点上 urgent 发送方已挂起 → 严格优先先于 N1 消费
+	close(hold)
+	select {
+	case got := <-order:
+		if got != "urgent#0" {
+			t.Fatalf("urgent 应先于挂起的普通任务被消费, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("5s 内 urgent 任务未被消费（urgentCh 未纳入消费决策）")
+	}
+	select {
+	case got := <-order:
+		if got != "normal#1" {
+			t.Fatalf("挂起的普通任务应在 urgent 之后被消费, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("5s 内挂起的普通任务未被消费（消费决策丢失提交方）")
+	}
+	// 提交侧返回序 = 消费序（单 worker 串行 + 无缓冲通道交接即消费）双检
+	if err := <-urgentDone; err != nil {
+		t.Fatalf("urgent 提交应成功: %v", err)
+	}
+	if err := <-normalDone; err != nil {
+		t.Fatalf("普通提交应成功: %v", err)
+	}
+
+	// 阶段 5：worker 存活性守护——urgent 消费后普通通道仍正常消费
+	if err := e.submit(ctx, func(*comWorkerState) { order <- "normal#2" }); err != nil {
+		t.Fatalf("提交存活性任务失败: %v", err)
+	}
+	select {
+	case got := <-order:
+		if got != "normal#2" {
+			t.Fatalf("存活性任务消费序不符, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("5s 内 worker 未继续消费普通任务（urgent 消费后主循环存活性破坏）")
 	}
 }
