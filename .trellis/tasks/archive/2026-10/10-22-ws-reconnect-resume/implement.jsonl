@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "三通道与热轮换契约基础，本任务在其上扩展 seq/resume 契约，Emit/send 队列语义不可破坏"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端快照 v2 与 refit 契约；断层时终端面板走既有快照/重拉整屏重建须对齐"}
+{"file": "docs/spec/ai-chat-service.md", "reason": "chat-task:* 事件流契约与 data/ai_chat 存储布局；断层后前端拉会话消息 RPC 对齐"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E fixture/mock 契约与 vitest exclude 规则；events.spec.js 扩展用例须遵循"}
+{"file": "docs/spec/test-stability.md", "reason": "禁隐式依赖环境外部状态；WS 并发补发测试禁 sleep 等待模式参考"}

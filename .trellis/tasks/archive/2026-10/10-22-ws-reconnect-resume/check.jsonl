@@ -1,0 +1,3 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对 seq/resume 扩展未破坏 EventSink/emitCurrent/慢消费者踢出既有契约"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "断层标记与错误提示链路核对（前端 handleError 分流、错误码同步三处）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例须从 fixtures.js import test/expect，mock 对齐 wails-mock-defaults 单一数据源"}
