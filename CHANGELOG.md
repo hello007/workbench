@@ -1,10 +1,36 @@
 # Changelog
 
-## [Unreleased]
+## [1.10.0] - 2026-10-22
 
 ### Added
-- 工具箱新增「hosts 文件」只读查看器：解析展示本机 hosts 行结构（IP / 主机名 / 行内注释，兼容 IPv4 / IPv6 及带 zone 的 link-local，容忍 UTF-8 BOM 与 CRLF），注释与空行默认隐藏、「显示注释」开关切回，未识别行灰色标注不静默丢弃，支持按 IP / 主机名过滤（大小写不敏感）与复制单行 / 复制 IP；读取失败就地组级提示（Windows `C:\Windows\System32\drivers\etc\hosts` / Linux `/etc/hosts`）
-- 工具箱新增「环境变量」只读查看器：按来源分页展示（Windows 系统 / 用户 / 进程三级，系统与用户级读注册表、进程级为实际生效值；Linux 仅进程级），支持按名称/值过滤、按名称排序、复制单值；敏感命名（含 TOKEN/SECRET/PASSWORD/PASSWD/KEY/CREDENTIAL，大小写不敏感）默认打码、点击临时显示，复制始终为真实值
+
+- 素材管理全量上线（侧边栏素材库：纯 Go SQLite + FTS5 中文检索 + PPT 单页索引）：十批迭代覆盖素材拆分集成（单文件/库级批量、增量判定、落点双选）、COM 缩略图（PowerPoint/WPS 双引擎串行队列、画廊懒加载/详情高清/单页跳转、设置五项）、幻灯片独立标注（页级标签/评分/备注 + 继承合并筛选）、批量打标签与多级标签树（拖拽排序/级联/防环）、facet 多维筛选与保存检索条件（星级/时间/大小 + 命名检索）、检索排序器与批量修改评分、元数据导出与文件丢失重链（CSV/Excel/Markdown + lost 标记 + 前缀替换重绑）、排除规则与索引态（目录 glob/后缀归一 + 备份还原 VACUUM INTO/哈希恢复）、视图与选中体系（列表视图三语境列集/全屏预览翻页/文件页双模式选中/缩放）、文件夹树与拖拽整理（真实目录树/徽标/目录管理/文件与目录拖拽移动/folderPath 检索）
+- 素材购物栏与 PPT 页级合并导出：跨库页级收集（条目键契约/幂等去重/排序）、合并导出冲突消解（sldId/rels 递增/数字命名空间独立）、失效条目跳过报告
+- 工具箱「PPT 按页拆分」：纯 Go OOXML 拆分核心（页序三跳映射）+ 体积 GC（保留页可达性闭包剪除未用母版/版式/主题与孤儿媒体）+ 文件夹批量拆分（串行可取消 + 派生产物排除）
+- 工具箱「pptx 预览」：COM 转 PDF 复用 pdfjs viewer（缓存 LRU/在途防抖/绝对路径契约）
+- 工具箱全窗口面板化：7 工具 Dialog 去壳内嵌独立一级面板
+- 工具箱「进程管理」：进程枚举与优雅/强杀两级停止、自我保护（PID+父进程链）、检索弹窗
+- 工具箱「端口占用一览」：监听端口扁平化 + 行内终止复用进程停止链路
+- 工具箱「JSON/YAML 工具」：校验/格式化/压缩/互转
+- 工具箱「hosts 文件」只读查看器：解析展示本机 hosts 行结构（IP / 主机名 / 行内注释，兼容 IPv4 / IPv6 及带 zone 的 link-local，容忍 UTF-8 BOM 与 CRLF），注释与空行默认隐藏、「显示注释」开关切回，未识别行灰色标注不静默丢弃，支持按 IP / 主机名过滤（大小写不敏感）与复制单行 / 复制 IP；读取失败就地组级提示（Windows `C:\Windows\System32\drivers\etc\hosts` / Linux `/etc/hosts`）
+- 工具箱「环境变量」只读查看器：按来源分页展示（Windows 系统 / 用户 / 进程三级，系统与用户级读注册表、进程级为实际生效值；Linux 仅进程级），支持按名称/值过滤、按名称排序、复制单值；敏感命名（含 TOKEN/SECRET/PASSWORD/PASSWD/KEY/CREDENTIAL，大小写不敏感）默认打码、点击临时显示，复制始终为真实值
+- 文件树「复制路径」二级菜单：绝对/相对/@文件引用；内容面板路径下拉
+- Git 操作取消链路：context 贯穿收口（Pull/Clone/批量拉取/冲突类 merge/rebase/cherry-pick），取消统一映射中性提示
+- Git 锁与超时引导级错误：index.lock 残留探测与锁占用分流（E_GIT_LOCKED）、超时被杀不再误判冲突（E_GIT_TIMEOUT，含提交历史流式）、内容搜索超时收口（E_SEARCH_TIMEOUT，Windows/Unix 双平台）
+- 内容搜索超时目录重试：单目录重试入口 + 多目录批量重试（3 并发/版本号守卫/进度横幅）+ 部分超时结果组级感知
+
+### Fixed
+
+- Wails v2.16 结构化错误压扁致前端 code 分流失效（桥接恢复原对象 reject）
+- 缩略图 COM 瞬态失败（页级 Export 重试 + Discard 重建落定等待）、Export 相对路径缺陷、上会话自启 COM 残留误判禁杀 + WPS 应用级不可见跳转兜底
+- 排除规则后缀归一保序去重、素材清单刷新链统一化（双代次守卫/惰性重拉）
+
+### Changed
+
+- go-git 依赖出清（消依赖路线，Git 元数据走 ResolveHead/.git/config 解析/for-each-ref）
+- 前端四 major 升级：vue-router 5 / js-yaml 5（namespace import）/ markdown-it 15 / docx-preview 0.4；Element Plus 2.14.5（依赖分档钳制 exact/tilde/caret/url 四档 + CI 一致性检查）；mermaid 12（dagre/classic 视觉保持双键，katex 传递链漏洞清零）；tilde 档 7 项上游走查
+- Go toolchain 1.26.10 + x/net v0.60.0（govulncheck 可达漏洞清零）
+- 稳定性基线：goleak 硬门禁（service 包 VerifyTestMain）、soak 三档轮次、E2E 高价值链路批量补齐
 
 ## [1.9.0] - 2026-09-28
 
