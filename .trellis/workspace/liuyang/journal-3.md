@@ -1144,3 +1144,41 @@ go-git v6 升级评估胜出消依赖路线：整体移除 go-git/v5，remote �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 145: v1.10.0 发版收口：RPC 冒烟 35 项 + UI 手点三问题修复 + 发版文档
+
+**Date**: 2026-10-22
+**Task**: v1.10.0 发版收口：RPC 冒烟 35 项 + UI 手点三问题修复 + 发版文档
+**Branch**: `master`
+
+### Summary
+
+v1.10.0 发版收口（v1.9.0→HEAD 180 commits）：RPC 驱动冒烟 35/35 PASS（serve 无头 /api/rpc，git 全功能 18 项 go-git 出清无回归/PPT 拆分合并购物栏 9 项/COM 转 PDF），留痕归档任务目录 smoke/；UI 手点 28/31 过，三问题当版修复——P1 PdfPath 相对路径契约漂移（service 返回点 absCachePath 归一+测试）、A2 弹窗聚焦（首修 @open 被 EP focus-trap 覆盖真机暴露，改挂 @opened——jsdom 无 focus-trap 测不出的坑留痕）、A9 文件夹标签级联检索（文件有效标签含归属目录及后代 folder_tags 继承，两检索路径同源谓词单点 substr 前缀防通配符，性能实测万级 2.6ms）；B2 拆分面板补打开输出文件夹入口。门禁全绿：go test+integration+vitest 2027+E2E+govulncheck 0+npm audit 0。CHANGELOG [1.10.0] 补全（54 条功能提交核验，纠 1 行跨版错登）+ 路线图里程碑表补 v1.9.0/v1.10.0。check 代理自查引入的 listTagFilteredFiles 参数错位 P0 被既有 facet 用例兜底暴露即修。发版走 release.sh v1.10.0 tag。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `238642c` | (see git log) |
+| `27e8798` | (see git log) |
+| `9d701c9` | (see git log) |
+| `cfe4e2c` | (see git log) |
+| `1f97e20` | (see git log) |
+| `fe25132` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

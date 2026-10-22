@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 144
-- **Last Active**: 2026-10-21
+- **Total Sessions**: 145
+- **Last Active**: 2026-10-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1146 | Active |
+| `journal-3.md` | ~1184 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 145 | 2026-10-22 | v1.10.0 发版收口：RPC 冒烟 35 项 + UI 手点三问题修复 + 发版文档 | `238642c`, `27e8798`, `9d701c9`, `cfe4e2c`, `1f97e20`, `fe25132` | `master` |
 | 144 | 2026-10-21 | go-git v5 依赖出清（消依赖路线） | `ddb6bfe` | `master` |
 | 143 | 2026-10-21 | deps-upgrade-batch3 前端四 major 出清 | `9b80f8f` | `master` |
 | 142 | 2026-10-21 | E2E 第二批 12 条落地 + wails-init 事件派发三硬化 | `bf5b2f7` | `master` |
