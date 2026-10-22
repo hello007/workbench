@@ -1,0 +1,30 @@
+{
+  "id": "experience-browser-batch",
+  "name": "experience-browser-batch",
+  "title": "体验优化与浏览器能力批次",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-10-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-22-legacy-trio-cleanup",
+    "10-22-ws-reconnect-resume",
+    "10-22-agent-interactive-session"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

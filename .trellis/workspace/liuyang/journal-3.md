@@ -1182,3 +1182,37 @@ v1.10.0 发版收口（v1.9.0→HEAD 180 commits）：RPC 驱动冒烟 35/35 PAS
 ### Next Steps
 
 - None - task complete
+
+
+## Session 146: 素材与预览遗留收口：聚合子页分页 + PPT 预览 STA 插队
+
+**Date**: 2026-10-22
+**Task**: 素材与预览遗留收口：聚合子页分页 + PPT 预览 STA 插队
+**Branch**: `master`
+
+### Summary
+
+子任务 1/3（legacy-trio-cleanup）完成。R1 聚合展开子页不全修复：AssetSearchOptions.FilePath 汇聚层单点过滤（三路径一致，先于排序/聚合/分页）+ toggleAgg 单文件窗口与加载更多分页续拉，双代次守卫增强不削弱，check 抓 P1 保存链竞态（清空后在途响应复活旧缓存）已修并有回归用例。R2 PPT 预览 STA 队列 urgent 通道插队：urgentCh + submitTo/receiveNextTask 双单点，单 worker 契约不破，ConvertToPdf 走 urgent，优先级单测 -count=10 稳定。原第三项 clipboard vet 告警经查已被 0a2040d 修复，从 PRD 移除。spec 沉淀：assets-management.md FilePath 过滤节、assets-thumbs-com.md urgent 通道契约。验证：vet 零告警 / go test 全绿 / vitest 2030 用例 / build 过 / service 覆盖率 80.4%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32df32d` | (see git log) |
+| `008d583` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
