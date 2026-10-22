@@ -93,6 +93,10 @@ type AppServices struct {
 	// 复用 assetsSvc 缩略图同一 STA worker 单队列（PptxPdfConverter 注入，避免
 	// 双 COM 队列进程互杀）；不发生前端事件，web_serve.go applySink 无需同步。
 	pptxPreviewSvc *service.PptxPreviewService
+	// 分支对比服务（活动栏「分支对比」面板 batch 1，纯只读：提交对齐 + 差异文件树
+	// + 文件 diff + 提交变更文件，无持久化数据）。只读查询不抢 tryLockRepo 仓级锁；
+	// patch-id 批量管道专用 2 分钟长超时 GitCommand 构造内置。
+	branchCompareSvc *service.BranchCompareService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -211,6 +215,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// PPTX 预览转换编排服务（文件树 pptx/ppsx 内嵌预览，data/pptx_preview_pdf/
 	// 缓存目录；COM 执行器 = assets 缩略图同一 STA worker 单队列导出器）
 	s.pptxPreviewSvc = service.NewPptxPreviewService(filepath.Join(dataDir, "pptx_preview_pdf"), s.assetsSvc.PptxPdfConverter())
+
+	// 分支对比服务（活动栏「分支对比」面板，纯只读无持久化数据；ctx 在各方法调用点
+	// 传 context.Background() 下传，service 层 ctx 全贯穿为 batch 2 取消预留）
+	s.branchCompareSvc = service.NewBranchCompareService()
 
 	return s
 }

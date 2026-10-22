@@ -115,6 +115,81 @@ func (g *GitCommand) ExecuteWithCodesWithContext(ctx context.Context, workDir st
 	return g.run(ctx, workDir, acceptedExitCodes, args...)
 }
 
+// ExecutePipeline 执行两进程 git 管道（无 shell）：first 的 stdout 经 OS 管道直连
+// second 的 stdin（git log <range> -p --format=%H | git patch-id --stable 场景）。
+// first/second 均为 git 参数（不含程序名，"git" 由本方法统一前置——与 run() 的
+// git-only 语义一致，patch-id 等子命令无独立可执行文件）。
+// 返回 second 的 stdout。错误归一化与 run() 语义逐项对齐：
+//   - 外部取消（ctx.Err() == context.Canceled）：裸错误以 %w 包装 context.Canceled
+//     （上层 errors.Is 识别映射「已取消」；只读管道无 index.lock 残留风险，不做锁探测）
+//   - 超时（DeadlineExceeded）：E_GIT_TIMEOUT 引导级 AppError（%w 包装保留 errors.Is 穿透）
+//   - 锁错误识别（parseGitLockError）→ E_GIT_LOCKED（对齐 run()，管道场景实际罕见）
+//   - 其余：裸错误附两段 stderr 上下文
+//
+// 生命周期：先收 second 再收 first；second 提前退出（patch-id 参数错等）时关闭
+// first 的 stdout 读端，使仍在写入的 first 进程立即收到 EPIPE/EOF 退出，
+// 避免 first.Wait 永挂。
+func (g *GitCommand) ExecutePipeline(ctx context.Context, workDir string, first, second []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, g.timeout)
+	defer cancel()
+
+	cmd1 := exec.CommandContext(ctx, "git", first...)
+	cmd1.Dir = workDir
+	HideCommandWindow(cmd1)
+	pipe1, err := cmd1.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("git %v | git %v failed: 创建管道失败: %w", first, second, err)
+	}
+	var stderr1 bytes.Buffer
+	cmd1.Stderr = &stderr1
+
+	cmd2 := exec.CommandContext(ctx, "git", second...)
+	cmd2.Dir = workDir
+	HideCommandWindow(cmd2)
+	cmd2.Stdin = pipe1
+	var stdout2, stderr2 bytes.Buffer
+	cmd2.Stdout = &stdout2
+	cmd2.Stderr = &stderr2
+
+	if err := cmd1.Start(); err != nil {
+		return "", fmt.Errorf("git %v | git %v failed: %s", first, second, stderr1.String())
+	}
+	if err := cmd2.Start(); err != nil {
+		// second 起不来：关闭读端解阻塞 first，再收尸，防 first.Wait 永挂
+		_ = pipe1.Close()
+		_ = cmd1.Wait()
+		return "", fmt.Errorf("git %v | git %v failed: %s", first, second, stderr2.String())
+	}
+
+	err2 := cmd2.Wait()
+	// second 失败时主动关读端：first 写满管道缓冲后立即失败退出，Wait 可返回
+	if err2 != nil {
+		_ = pipe1.Close()
+	}
+	err1 := cmd1.Wait()
+
+	// 取消/超时判定先于子进程错误（对齐 run()：被杀子进程 stderr 半截不可信）
+	if ctx.Err() == context.Canceled {
+		return "", fmt.Errorf("git %v | git %v failed: %w", first, second, ctx.Err())
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return "", model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
+	}
+	if err2 != nil {
+		if lockErr := parseGitLockError(stderr2.String()); lockErr != nil {
+			return "", lockErr
+		}
+		return "", fmt.Errorf("git %v | git %v failed: %s", first, second, strings.TrimSpace(stderr2.String()))
+	}
+	if err1 != nil {
+		if lockErr := parseGitLockError(stderr1.String()); lockErr != nil {
+			return "", lockErr
+		}
+		return "", fmt.Errorf("git %v | git %v failed: %s", first, second, strings.TrimSpace(stderr1.String()))
+	}
+	return stdout2.String(), nil
+}
+
 // IsGitRepository 检查目录是否是Git仓库
 func (g *GitCommand) IsGitRepository(dir string) bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
