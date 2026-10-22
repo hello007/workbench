@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/ai-chat-service.md", "reason": "核对执行模型重构后契约更新是否同步（--permission-prompt-tool 单点/终态判定/事件语义）"}
+{"file": "docs/spec/browser-channel.md", "reason": "核对审批上行通道与断线续传契约一致性"}
+{"file": ".trellis/tasks/10-22-agent-interactive-session/research/claude-cli-streaming-input.md", "reason": "核对已知坑守护：stdio 漏配静默拒绝/system/init 重复/subtype+is_error 组合判定"}
+{"file": ".trellis/tasks/10-22-agent-interactive-session/research/repo-current-state.md", "reason": "核对影响面各守卫点（串行保护放宽面/前端置灰/EventsOn 注销）均处置"}

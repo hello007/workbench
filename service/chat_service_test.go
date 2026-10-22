@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +25,7 @@ import (
 type capturedSink struct {
 	mu     sync.Mutex
 	events []capturedEvent
-	done   chan struct{} // 每次 chat-task:done 发信号（容量 1，非阻塞发送）
+	done   chan model.ChatTaskRunResult // chat-task:done 载荷队列（多轮并发下按发生序取，防「取 last」错位）
 }
 
 type capturedEvent struct {
@@ -32,7 +34,7 @@ type capturedEvent struct {
 }
 
 func newCapturedSink() *capturedSink {
-	return &capturedSink{done: make(chan struct{}, 8)}
+	return &capturedSink{done: make(chan model.ChatTaskRunResult, 16)}
 }
 
 func (c *capturedSink) Emit(name string, data ...any) {
@@ -40,9 +42,11 @@ func (c *capturedSink) Emit(name string, data ...any) {
 	c.events = append(c.events, capturedEvent{name: name, data: data})
 	c.mu.Unlock()
 	if name == "chat-task:done" {
-		select {
-		case c.done <- struct{}{}:
-		default:
+		if r, ok := data[0].(model.ChatTaskRunResult); ok {
+			select {
+			case c.done <- r:
+			default: // 队列满丢弃（测试断言面不消费如此多 done）
+			}
 		}
 	}
 }
@@ -101,25 +105,27 @@ func (c *capturedSink) queuedIDs() []string {
 	return ids
 }
 
-// waitDone 等待一次 chat-task:done 事件并返回 payload（超时 fail）。
+// waitDone 等待一次 chat-task:done 事件并返回其载荷（按发生序消费，
+// 多轮并发测试下不错位；超时 fail）。
 func (c *capturedSink) waitDone(t *testing.T) model.ChatTaskRunResult {
 	t.Helper()
 	select {
-	case <-c.done:
+	case r := <-c.done:
+		return r
 	case <-time.After(5 * time.Second):
 		t.Fatal("等待 chat-task:done 超时")
+		return model.ChatTaskRunResult{}
 	}
-	return c.last(t, "chat-task:done").(model.ChatTaskRunResult)
 }
 
-// fakeChatProcess chatProcess 的 fake 实现：按预设行回放 stream-json 输出。
-// lineCh 由调用方构造（正常流：带缓冲且已关闭；取消流：不关闭，靠 Kill 退出）。
+// fakeChatProcess chatProcess 的 fake 实现：按预设行回放 stream-json 输出，
+// 并捕获写入 stdin 的协议行（user 消息/control_response/interrupt 断言用）。
+// lineCh 由调用方构造（正常流：带缓冲且已关闭；阻塞流：不关闭，靠 Kill 退出）。
 type fakeChatProcess struct {
 	lineCh     <-chan string
 	startErr   error
 	waitErr    error
-	pipeGate   chan struct{} // 非 nil 时 StdoutPipe 阻塞直至关闭（复现 queued 翻转后到 proc 赋值前的启动窗口）
-	pipeErr    error         // 非 nil 时输出流末尾以该错误关闭（scanner.Err 透传路径）
+	pipeErr    error // 非 nil 时输出流末尾以该错误关闭（scanner.Err 透传路径）
 	mu         sync.Mutex
 	started    bool
 	killCalled bool
@@ -131,9 +137,11 @@ type fakeChatProcess struct {
 	writeDone  chan struct{}
 	killCh     chan struct{}
 	killOnce   sync.Once
+	stdinLines      []string      // 写入 stdin 的协议行（advanceSession/审批应答/中断断言用）
+	stdinReadCloser io.ReadCloser // stdin 捕获管道读端（Kill 时关闭防捕获 goroutine 泄漏）
 }
 
-// newFakeLines 构造「立即回放全部行」的 fake。
+// newFakeLines 构造「立即回放全部行」的 fake（回放完进程退出，模拟单轮收尾）。
 func newFakeLines(lines []string) *fakeChatProcess {
 	ch := make(chan string, len(lines))
 	for _, l := range lines {
@@ -143,7 +151,8 @@ func newFakeLines(lines []string) *fakeChatProcess {
 	return &fakeChatProcess{lineCh: ch, exitCode: -1, killCh: make(chan struct{})}
 }
 
-// newFakeBlocking 构造「输出后挂起等 Kill」的 fake，返回可继续发送行的发送端。
+// newFakeBlocking 构造「输出后挂起等 Kill」的 fake，返回可继续发送行的发送端
+// （持续会话进程模型：轮次结果由测试按需推送，进程长驻不退出）。
 func newFakeBlocking(firstLine string) (*fakeChatProcess, chan<- string) {
 	ch := make(chan string, 8)
 	if firstLine != "" {
@@ -152,13 +161,48 @@ func newFakeBlocking(firstLine string) (*fakeChatProcess, chan<- string) {
 	return &fakeChatProcess{lineCh: ch, exitCode: -1, killCh: make(chan struct{})}, ch
 }
 
-func (f *fakeChatProcess) StdoutPipe() (io.ReadCloser, error) {
-	if f.pipeGate != nil {
-		<-f.pipeGate
+// newFakeLinesThenIdle 构造「回放全部行后进程保持存活」的 fake（行 channel 不
+// 关闭，回放完阻塞至 Kill——模拟轮次收尾后空闲常驻的进程）。
+func newFakeLinesThenIdle(lines ...string) *fakeChatProcess {
+	ch := make(chan string, len(lines))
+	for _, l := range lines {
+		ch <- l
 	}
+	return &fakeChatProcess{lineCh: ch, exitCode: -1, killCh: make(chan struct{})}
+}
+
+func (f *fakeChatProcess) StdoutPipe() (io.ReadCloser, error) {
 	r, w := io.Pipe()
+	f.mu.Lock()
 	f.writer = w
+	f.mu.Unlock()
 	return r, nil
+}
+
+// StdinPipe 返回捕获型 stdin 写端：写入行记录进 stdinLines（并发安全）。
+// 读端句柄留存 Kill 时关闭（真实 exec.Cmd 进程退出后管道随之关闭，
+// fake 须显式收口，否则捕获 goroutine 泄漏——goleak 门禁会拦截）。
+func (f *fakeChatProcess) StdinPipe() (io.WriteCloser, error) {
+	r, w := io.Pipe()
+	f.mu.Lock()
+	f.stdinReadCloser = r
+	f.mu.Unlock()
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			f.mu.Lock()
+			f.stdinLines = append(f.stdinLines, sc.Text())
+			f.mu.Unlock()
+		}
+	}()
+	return w, nil
+}
+
+// stdinSnapshot 返回已写入 stdin 的协议行快照。
+func (f *fakeChatProcess) stdinSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.stdinLines...)
 }
 
 func (f *fakeChatProcess) Start() error {
@@ -203,14 +247,28 @@ func (f *fakeChatProcess) Wait() error {
 		f.exitCode = 0
 		f.mu.Unlock()
 	}
+	// 进程退出后 stdin 管道随之关闭（对齐 exec.Cmd 行为，防捕获 goroutine 泄漏）
+	f.mu.Lock()
+	stdinRC := f.stdinReadCloser
+	f.mu.Unlock()
+	if stdinRC != nil {
+		_ = stdinRC.Close()
+	}
 	return f.waitErr
 }
 
 func (f *fakeChatProcess) Kill() {
 	f.mu.Lock()
 	f.killCalled = true
+	stdinRC := f.stdinReadCloser
 	f.mu.Unlock()
-	f.killOnce.Do(func() { close(f.killCh) })
+	f.killOnce.Do(func() {
+		close(f.killCh)
+		// 关闭 stdin 读端：捕获 goroutine 随 Scan 退出（防泄漏）
+		if stdinRC != nil {
+			_ = stdinRC.Close()
+		}
+	})
 }
 
 func (f *fakeChatProcess) ExitCode() int {
@@ -254,6 +312,12 @@ func resultLine(sessionID string) string {
 	return fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"duration_ms":120,"num_turns":1,"total_cost_usd":0.01,"session_id":%q,"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`, sessionID)
 }
 
+// resultLineError 构造一条指定 subtype/is_error 的 result 失败事件行
+// （error_during_execution = 中断收尾形态）。
+func resultLineError(sessionID, subtype string) string {
+	return fmt.Sprintf(`{"type":"result","subtype":%q,"is_error":true,"duration_ms":50,"num_turns":1,"total_cost_usd":0,"session_id":%q,"result":"已被用户中断"}`, subtype, sessionID)
+}
+
 // waitFor 轮询等待条件成立（超时 fail），替代固定 sleep（非 flaky 约定）。
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -265,6 +329,14 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("等待条件超时")
+}
+
+// chatApprovalPending 锁内查询审批是否待应答（-race 下测试直读 svc.approvals
+// 会与 pump 写入竞态，统一走本访问器）。
+func chatApprovalPending(svc *ChatService, requestID string) bool {
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	return svc.approvals[requestID] != nil
 }
 
 // appErrCode 断言 err 为 AppError 并返回其 Code。
@@ -431,36 +503,37 @@ func TestChatService_IndexCorruptFallback(t *testing.T) {
 
 // ===== 参数组装 =====
 
-// TestBuildChatArgs 表驱动：resume/permission-mode/model 的追加规则。
+// TestBuildChatArgs 表驱动：持续会话进程形态的 resume/permission-mode/model
+// 追加规则与审批协议开关（--permission-prompt-tool stdio 漏配 = 审批静默自动
+// 拒绝，单测守护该开关恒在）。
 func TestBuildChatArgs(t *testing.T) {
 	cases := []struct {
 		name   string
-		prompt string
 		resume string
 		mode   string
 		mdl    string
 		want   []string
 	}{
 		{
-			name: "首轮默认模式", prompt: "hi", resume: "", mode: "default", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion"},
+			name: "首轮默认模式", resume: "", mode: "default", mdl: "",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
-			name: "续会话全参数", prompt: "hi", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
-			want: []string{"-p", "hi", "--resume", "s1", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion"},
+			name: "恢复会话全参数", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", "s1", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
-			name: "权限模式为空不追加", prompt: "hi", resume: "", mode: "", mdl: "opus",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion"},
+			name: "权限模式为空不追加", resume: "", mode: "", mdl: "opus",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
-			name: "plan 模式", prompt: "hi", resume: "", mode: "plan", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--disallowedTools", "AskUserQuestion"},
+			name: "plan 模式", resume: "", mode: "plan", mdl: "",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildChatArgs(tc.prompt, tc.resume, tc.mode, tc.mdl)
+			got := buildChatArgs(tc.resume, tc.mode, tc.mdl)
 			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 				t.Errorf("buildChatArgs:\n got  %v\n want %v", got, tc.want)
 			}
@@ -470,8 +543,37 @@ func TestBuildChatArgs(t *testing.T) {
 
 // ===== RunChat 全链路（fake 进程注入，不真调 claude）=====
 
-// TestChatService_RunChat_FullFlow 首轮对话全链路：事件序列、参数组装、
-// user/assistant 消息入档、claude session id 回写会话。
+// controlRequestLine 构造一条 control_request/can_use_tool 审批下发事件行。
+func controlRequestLine(requestID, toolName, inputJSON, description string) string {
+	return fmt.Sprintf(`{"type":"control_request","request_id":%q,"request":{"subtype":"can_use_tool","tool_name":%q,"input":%s,"description":%q}}`,
+		requestID, toolName, inputJSON, description)
+}
+
+// stdinUserText 解析 fake 捕获的 stdin user 消息行，返回 claude 收到的文本。
+func stdinUserText(t *testing.T, line string) string {
+	t.Helper()
+	var payload struct {
+		Type    string `json:"type"`
+		Message struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(line), &payload); err != nil {
+		t.Fatalf("解析 stdin user 消息行失败: %v\nline: %s", err, line)
+	}
+	if payload.Type != "user" || payload.Message.Role != "user" || len(payload.Message.Content) == 0 {
+		t.Fatalf("stdin user 消息形态异常: %+v", payload)
+	}
+	return payload.Message.Content[0].Text
+}
+
+// TestChatService_RunChat_FullFlow 首轮对话全链路：事件序列、进程参数组装
+// （审批协议开关恒在）、stdin user 消息声明注入、user/assistant 消息入档、
+// claude session id 回写会话。
 func TestChatService_RunChat_FullFlow(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
 	sess, err := svc.CreateChatSession("dir-1", "流程", "C:/proj/a")
@@ -516,7 +618,7 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		}
 	}
 
-	// 子进程参数与工作目录
+	// 子进程参数与工作目录：prompt 不走命令行（经 stdin 注入）
 	f := (*fakes)[0]
 	f.mu.Lock()
 	args := f.gotArgs
@@ -530,9 +632,8 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		t.Errorf("工作目录: got %q", dir)
 	}
 	gotArgs := strings.Join(args, " ")
-	// 首轮 prompt = chat-question 环境声明前缀 + 用户原文（仅进 claude prompt）
-	if len(args) < 2 || args[1] != chatQuestionPreamble+"\n\n你好" {
-		t.Errorf("首轮 prompt 应为声明前缀+原文: %v", args)
+	if !strings.Contains(gotArgs, "--input-format stream-json") || !strings.Contains(gotArgs, "--output-format stream-json --verbose") {
+		t.Errorf("args 缺流式双向格式: %v", args)
 	}
 	if strings.Contains(gotArgs, "--resume") {
 		t.Errorf("首轮不应带 --resume: %v", args)
@@ -543,11 +644,25 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 	if !strings.Contains(gotArgs, "--model sonnet") {
 		t.Errorf("args 缺 model: %v", args)
 	}
-	if !strings.Contains(gotArgs, "--output-format stream-json --verbose") {
-		t.Errorf("args 缺 stream-json: %v", args)
+	// 审批协议开关恒在（漏配 = 审批静默自动拒绝，无报错极难察觉）
+	if !strings.Contains(gotArgs, "--permission-prompt-tool stdio") {
+		t.Errorf("args 缺 --permission-prompt-tool stdio: %v", args)
+	}
+	if !strings.Contains(gotArgs, "--disallowedTools AskUserQuestion") {
+		t.Errorf("args 缺 --disallowedTools: %v", args)
 	}
 
-	// 消息入档：user + assistant 各一条，taskID 关联
+	// stdin user 消息：首轮 = chat-question 环境声明前缀 + 用户原文（仅进 claude stdin）
+	stdinLines := f.stdinSnapshot()
+	if len(stdinLines) != 1 {
+		t.Fatalf("stdin 写入行数: got %d, want 1 (%v)", len(stdinLines), stdinLines)
+	}
+	text := stdinUserText(t, stdinLines[0])
+	if !strings.HasPrefix(text, chatQuestionPreamble) || !strings.HasSuffix(text, "你好") {
+		t.Errorf("首轮 claude 文本应为声明前缀+原文: %q", text)
+	}
+
+	// 消息入档：user + assistant 各一条，taskID 关联（落盘 user 消息保持原文）
 	got, err := svc.GetChatSession(sess.ID)
 	if err != nil {
 		t.Fatalf("GetChatSession: %v", err)
@@ -562,19 +677,20 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		t.Errorf("assistant 消息异常: %+v", got.Messages[1])
 	}
 
-	// claude session id 回写会话元数据（下一轮 --resume 依据）
+	// claude session id 回写会话元数据（下次 spawn --resume 依据）
 	if got.ClaudeSessionID != "claude-s-1" {
 		t.Errorf("会话 ClaudeSessionID 未回写: %q", got.ClaudeSessionID)
 	}
 
-	// 终态任务已从任务表摘除：GetChatTaskState 返回 nil（前端
+	// 终态轮次已从在途表摘除：GetChatTaskState 返回 nil（前端
 	// restoreChatTaskState 对「查无此任务」按终态清态处理，恢复链路不破坏）
 	if st := svc.GetChatTaskState(taskID); st != nil {
-		t.Errorf("终态任务应已摘除, got %+v", st)
+		t.Errorf("终态轮次应已摘除, got %+v", st)
 	}
 }
 
-// TestChatService_RunChat_ResumeSecondTurn 第二轮对话自动 --resume 续上一轮 claude 会话。
+// TestChatService_RunChat_ResumeSecondTurn 进程退出后再次发消息自动 respawn 并
+// --resume 续上一轮 claude 会话；续轮不重复注入环境声明。
 func TestChatService_RunChat_ResumeSecondTurn(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
 	sess, _ := svc.CreateChatSession("dir-1", "续会话", "C:/proj")
@@ -592,26 +708,34 @@ func TestChatService_RunChat_ResumeSecondTurn(t *testing.T) {
 		t.Fatalf("第一轮 RunChat: %v", err)
 	}
 	sink.waitDone(t)
+	// 第一轮 fake 回放完即退出（单轮回放形态），注册表应已摘除
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+
 	if _, err := svc.RunChat(sess.ID, "第二问", "default", ""); err != nil {
 		t.Fatalf("第二轮 RunChat: %v", err)
 	}
 	result := sink.waitDone(t)
 
-	// 第二轮参数带 --resume claude-s-1（第一轮回写的会话 id）
+	// 第二轮 spawn 参数带 --resume claude-s-1（第一轮回写的会话 id）
+	waitFor(t, 5*time.Second, func() bool { return len(*fakes) >= 2 })
 	f := (*fakes)[1]
 	f.mu.Lock()
 	args := strings.Join(f.gotArgs, " ")
-	promptArg := ""
-	if len(f.gotArgs) >= 2 {
-		promptArg = f.gotArgs[1]
-	}
 	f.mu.Unlock()
 	if !strings.Contains(args, "--resume claude-s-1") {
 		t.Errorf("第二轮应带 --resume: %v", f.gotArgs)
 	}
-	// 续轮不重复注入环境声明（--resume 上下文已含）
-	if promptArg != "第二问" {
-		t.Errorf("第二轮 prompt 不应含声明前缀: %q", promptArg)
+	// 续轮不重复注入环境声明（claude 上下文已含）
+	stdinLines := f.stdinSnapshot()
+	if len(stdinLines) != 1 {
+		t.Fatalf("第二轮 stdin 写入行数: got %d, want 1", len(stdinLines))
+	}
+	if text := stdinUserText(t, stdinLines[0]); text != "第二问" {
+		t.Errorf("第二轮 claude 文本不应含声明前缀: %q", text)
 	}
 	if result.ClaudeSessionID != "claude-s-2" {
 		t.Errorf("第二轮 claude 会话 id: got %q", result.ClaudeSessionID)
@@ -624,42 +748,90 @@ func TestChatService_RunChat_ResumeSecondTurn(t *testing.T) {
 	}
 }
 
-// TestChatService_RunChat_InProgress 同会话串行保护：进行中再发一轮被拒绝。
-func TestChatService_RunChat_InProgress(t *testing.T) {
-	svc, _ := newChatSvcForTest(t)
-	sess, _ := svc.CreateChatSession("dir-1", "串行", "C:/proj")
+// TestChatService_RunChat_InterjectionQueue 运行中插话（排队注入）：同会话
+// 执行轮在途时再发消息不再拒绝（原 ErrCodeChatInProgress 语义退役），进入
+// FIFO 队列，前序轮 result 后依序写入 stdin、逐轮收尾。
+func TestChatService_RunChat_InterjectionQueue(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "插话", "C:/proj")
 
-	fake, _ := newFakeBlocking(assistantLine("claude-s-1", "部分"))
+	fake, sender := newFakeBlocking("")
 	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
 
-	taskID, err := svc.RunChat(sess.ID, "第一问", "default", "")
+	// 第一轮：阻塞在执行中（无 result）
+	taskID1, err := svc.RunChat(sess.ID, "第一问", "default", "")
 	if err != nil {
-		t.Fatalf("RunChat: %v", err)
+		t.Fatalf("第一轮 RunChat: %v", err)
 	}
 	waitFor(t, 5*time.Second, func() bool {
-		st := svc.GetChatTaskState(taskID)
+		st := svc.GetChatTaskState(taskID1)
 		return st != nil && st.Running
 	})
 
-	_, err = svc.RunChat(sess.ID, "第二问", "default", "")
-	if code := appErrCode(t, err); code != model.ErrCodeChatInProgress {
-		t.Errorf("同会话并发轮次应拒绝, got %v", err)
+	// 插话：同会话第二条消息被接受（排队态），不报 ErrCodeChatInProgress
+	taskID2, err := svc.RunChat(sess.ID, "插话内容", "default", "")
+	if err != nil {
+		t.Fatalf("插话 RunChat 应被接受: %v", err)
+	}
+	st := svc.GetChatTaskState(taskID2)
+	if st == nil || !st.Queued {
+		t.Errorf("插话轮应处于排队态: %+v", st)
+	}
+	// 排队轮尚未写 stdin（前序轮 result 前不推进）
+	if n := len(fake.stdinSnapshot()); n != 1 {
+		t.Errorf("排队轮不应写 stdin, stdin 行数: %d", n)
 	}
 
-	// 收尾取消并等待任务终止（终态任务被摘除，查无此任务即收尾完成）
-	svc.CancelChatTask(taskID)
+	// 第一轮收尾：result#1 → 插话轮自动推进写入 stdin
+	sender <- assistantLine("claude-s-1", "答一")
+	sender <- resultLine("claude-s-1")
+	result1 := sink.waitDone(t)
+	if result1.TaskID != taskID1 {
+		t.Errorf("第一个 done 应为第一轮: %+v", result1)
+	}
 	waitFor(t, 5*time.Second, func() bool {
-		return svc.GetChatTaskState(taskID) == nil
+		st := svc.GetChatTaskState(taskID2)
+		return st != nil && st.Running
 	})
+	waitFor(t, 5*time.Second, func() bool { return len(fake.stdinSnapshot()) >= 2 })
+	stdinLines := fake.stdinSnapshot()
+	if text := stdinUserText(t, stdinLines[1]); text != "插话内容" {
+		t.Errorf("第二条 stdin 消息应为插话原文: %q", text)
+	}
+	// 插话轮不再注入环境声明（init 已收到，claudeSessionID 非空）
+	if strings.Contains(stdinLines[1], "chat-question") {
+		t.Error("插话轮不应注入环境声明")
+	}
+
+	// 插话轮收尾
+	sender <- assistantLine("claude-s-1", "答二")
+	sender <- resultLine("claude-s-1")
+	result2 := sink.waitDone(t)
+	if result2.TaskID != taskID2 || result2.Reply != "答二" {
+		t.Errorf("插话轮收尾异常: %+v", result2)
+	}
+
+	// 两轮消息入档 4 条（user+assistant 各二）
+	got, _ := svc.GetChatSession(sess.ID)
+	if len(got.Messages) != 4 {
+		t.Errorf("两轮消息应为 4 条, got %d", len(got.Messages))
+	}
+
+	// 收尾：杀进程防 goroutine 泄漏
 	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskID2) == nil
+	})
 }
 
-// TestChatService_CancelChatTask_Running 运行中取消：杀进程、done canceled、部分回复入档。
+// TestChatService_CancelChatTask_Running 执行中取消：发 interrupt 控制请求、
+// 被中断轮 result 收尾后 done canceled、部分回复保留入档、进程不被杀
+// （持续会话进程存活，后续消息可继续）。
 func TestChatService_CancelChatTask_Running(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
 	sess, _ := svc.CreateChatSession("dir-1", "取消", "C:/proj")
 
-	fake, _ := newFakeBlocking(assistantLine("claude-s-1", "部分回复"))
+	fake, sender := newFakeBlocking(assistantLine("claude-s-1", "部分回复"))
 	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
 
 	taskID, err := svc.RunChat(sess.ID, "长任务", "default", "")
@@ -674,9 +846,24 @@ func TestChatService_CancelChatTask_Running(t *testing.T) {
 	if !svc.CancelChatTask(taskID) {
 		t.Fatal("CancelChatTask 应返回 true")
 	}
-	// 幂等：重复取消不 panic、不重复 emit done（任务或仍在表返回 true，
-	// 或已被 pump 摘除返回 false，两者皆合法；done 恒一次由尾部断言保证）
+	// 幂等：重复取消不重复发 interrupt、不重复 emit done
 	_ = svc.CancelChatTask(taskID)
+	// stdin 应收到 interrupt 控制请求恰一次
+	waitFor(t, 5*time.Second, func() bool {
+		return len(fake.stdinSnapshot()) == 2 // 第 1 行 user 消息 + 第 2 行 interrupt
+	})
+	var interruptCount int
+	for _, line := range fake.stdinSnapshot() {
+		if strings.Contains(line, `"subtype":"interrupt"`) {
+			interruptCount++
+		}
+	}
+	if interruptCount != 1 {
+		t.Errorf("interrupt 应恰一次, got %d", interruptCount)
+	}
+
+	// 被中断轮以 error_during_execution result 收尾 → done canceled
+	sender <- resultLineError("claude-s-1", "error_during_execution")
 	result := sink.waitDone(t)
 	if !result.Canceled || result.Error == "" {
 		t.Errorf("取消结果异常: %+v", result)
@@ -687,8 +874,8 @@ func TestChatService_CancelChatTask_Running(t *testing.T) {
 	fake.mu.Lock()
 	killed := fake.killCalled
 	fake.mu.Unlock()
-	if !killed {
-		t.Error("运行中取消应调用 Kill")
+	if killed {
+		t.Error("执行中取消应走 interrupt 协议，不应杀进程（会话需继续可用）")
 	}
 
 	// 部分回复已入档（取消轮 user+assistant 各一条）
@@ -704,98 +891,139 @@ func TestChatService_CancelChatTask_Running(t *testing.T) {
 	if n := sink.countEvents("chat-task:done"); n != 1 {
 		t.Errorf("done 事件应恰一次, got %d", n)
 	}
+
+	// 进程仍存活：后续消息可直接复用（不重新 spawn）
+	if _, err := svc.RunChat(sess.ID, "继续", "default", ""); err != nil {
+		t.Fatalf("取消后继续会话失败: %v", err)
+	}
+	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.turns) == 0
+	})
 }
 
-// TestChatService_CancelChatTask_Queued 排队中取消：占满槽位后取消第 4 个任务。
-func TestChatService_CancelChatTask_Queued(t *testing.T) {
+// TestChatService_CancelChatTask_QueuedInjection 排队轮取消：插话排队中的轮次
+// 从 Go 侧队列摘除、立即 done canceled、不写 stdin、user 消息不落盘。
+func TestChatService_CancelChatTask_QueuedInjection(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "排队取消", "C:/proj")
 
-	// 三个不同会话占满并发槽位（blocking fake 挂起）
-	type runningTask struct {
-		taskID string
-		fake   *fakeChatProcess
+	fake, sender := newFakeBlocking("")
+	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
+
+	taskID1, err := svc.RunChat(sess.ID, "第一问", "default", "")
+	if err != nil {
+		t.Fatalf("第一轮 RunChat: %v", err)
 	}
-	var running []runningTask
+	waitFor(t, 5*time.Second, func() bool {
+		st := svc.GetChatTaskState(taskID1)
+		return st != nil && st.Running
+	})
+	taskID2, err := svc.RunChat(sess.ID, "排队消息", "default", "")
+	if err != nil {
+		t.Fatalf("插话 RunChat: %v", err)
+	}
+
+	if !svc.CancelChatTask(taskID2) {
+		t.Fatal("排队取消应返回 true")
+	}
+	_ = svc.CancelChatTask(taskID2) // 幂等
+	result := sink.waitDone(t)
+	if result.TaskID != taskID2 || !result.Canceled {
+		t.Errorf("排队取消 done 异常: %+v", result)
+	}
+
+	// 第一轮收尾：被取消的排队轮不再推进（stdin 恒 1 行 user 消息）
+	sender <- assistantLine("claude-s-1", "答一")
+	sender <- resultLine("claude-s-1")
+	result1 := sink.waitDone(t)
+	if result1.TaskID != taskID1 {
+		t.Errorf("剩余 done 应为第一轮: %+v", result1)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskID1) == nil
+	})
+	if n := len(fake.stdinSnapshot()); n != 1 {
+		t.Errorf("被取消排队轮不应写 stdin, stdin 行数: %d", n)
+	}
+	// user 消息只落盘第一轮的（排队取消不留痕）
+	got, _ := svc.GetChatSession(sess.ID)
+	if len(got.Messages) != 2 || got.Messages[0].Content != "第一问" {
+		t.Errorf("排队取消轮不应落盘消息: %+v", got.Messages)
+	}
+	if n := sink.countEvents("chat-task:done"); n != 2 {
+		t.Errorf("done 事件应恰两次（排队取消+第一轮收尾）, got %d", n)
+	}
+	svc.CloseAll()
+}
+
+// TestChatService_RunChat_ProcessLimit 进程槽位上限：第 chatMaxConcurrent+1 个
+// 会话首条消息直接报 ErrCodeChatProcessLimit（不排队占位）。
+func TestChatService_RunChat_ProcessLimit(t *testing.T) {
+	svc, _ := newChatSvcForTest(t)
+
 	for i := 0; i < chatMaxConcurrent; i++ {
 		sess, _ := svc.CreateChatSession(fmt.Sprintf("dir-%d", i), "占位", "C:/p")
 		fake, _ := newFakeBlocking("")
 		wireFakeFactory(svc, func() *fakeChatProcess { return fake })
-		taskID, err := svc.RunChat(sess.ID, "占用", "default", "")
-		if err != nil {
+		if _, err := svc.RunChat(sess.ID, "占用", "default", ""); err != nil {
 			t.Fatalf("占位 RunChat: %v", err)
 		}
-		running = append(running, runningTask{taskID, fake})
 	}
-	waitFor(t, 5*time.Second, func() bool {
-		for _, rt := range running {
-			st := svc.GetChatTaskState(rt.taskID)
-			if st == nil || !st.Running {
-				return false
-			}
-		}
-		return true
+
+	limSess, _ := svc.CreateChatSession("dir-limit", "超限", "C:/p")
+	_, err := svc.RunChat(limSess.ID, "超限消息", "default", "")
+	if code := appErrCode(t, err); code != model.ErrCodeChatProcessLimit {
+		t.Errorf("超限应返回 ProcessLimit, got %v", err)
+	}
+	// 已占位会话不受影响（同会话轮次不新增进程）
+	svc.CloseAll()
+}
+
+// TestChatService_RunChat_ParamChangeRestart 权限模式/模型变更且进程空闲：
+// 优雅重启进程（旧进程摘除，新进程 spawn 带 --resume 与新参数）；执行中变更
+// 沿用旧参数不重启。
+func TestChatService_RunChat_ParamChangeRestart(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "参数重启", "C:/proj")
+
+	turn := 0
+	fakes := wireFakeFactory(svc, func() *fakeChatProcess {
+		turn++
+		return newFakeLines([]string{
+			assistantLine(fmt.Sprintf("claude-s-%d", turn), fmt.Sprintf("答%d", turn)),
+			resultLine(fmt.Sprintf("claude-s-%d", turn)),
+		})
 	})
 
-	// 第 4 个任务（新会话）进入排队
-	qsess, _ := svc.CreateChatSession("dir-q", "排队", "C:/p")
-	fake, _ := newFakeBlocking("")
-	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
-	type runResult struct {
-		taskID string
-		err    error
+	if _, err := svc.RunChat(sess.ID, "第一问", "acceptEdits", ""); err != nil {
+		t.Fatalf("第一轮 RunChat: %v", err)
 	}
-	resCh := make(chan runResult, 1)
-	go func() {
-		taskID, err := svc.RunChat(qsess.ID, "排队任务", "default", "")
-		resCh <- runResult{taskID, err}
-	}()
-
-	// 从 queued 事件取第 4 个任务 id（前 3 个为占位任务）后取消
-	var queuedTaskID string
+	sink.waitDone(t)
 	waitFor(t, 5*time.Second, func() bool {
-		ids := sink.queuedIDs()
-		if len(ids) >= chatMaxConcurrent+1 {
-			queuedTaskID = ids[chatMaxConcurrent]
-			return true
-		}
-		return false
-	})
-	if !svc.CancelChatTask(queuedTaskID) {
-		t.Fatal("排队取消应返回 true")
-	}
-	// 幂等：重复取消已排队任务不 double-close queueCancel（修复前此处 panic）；
-	// 任务或仍在表（幂等 true）或已被 RunChat 清理（false），两者皆合法
-	_ = svc.CancelChatTask(queuedTaskID)
-
-	select {
-	case res := <-resCh:
-		if res.err == nil {
-			t.Error("排队取消后 RunChat 应返回错误")
-		}
-		if res.taskID != "" {
-			t.Errorf("排队取消不返回任务 id, got %q", res.taskID)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("排队取消后 RunChat 未返回")
-	}
-
-	// done 事件带 canceled
-	waitFor(t, 5*time.Second, func() bool {
-		return strings.Contains(strings.Join(sink.names(), ","), "chat-task:done")
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
 	})
 
-	// 收尾：取消占位任务并等待全部终止（终态任务被摘除，防 pump goroutine 泄漏）
-	for _, rt := range running {
-		svc.CancelChatTask(rt.taskID)
+	// 参数变更且空闲：重启进程，新参数生效 + --resume 续上下文
+	if _, err := svc.RunChat(sess.ID, "第二问", "plan", "sonnet"); err != nil {
+		t.Fatalf("参数变更 RunChat: %v", err)
 	}
-	waitFor(t, 5*time.Second, func() bool {
-		for _, rt := range running {
-			if svc.GetChatTaskState(rt.taskID) != nil {
-				return false
-			}
-		}
-		return true
-	})
+	sink.waitDone(t)
+	waitFor(t, 5*time.Second, func() bool { return len(*fakes) >= 2 })
+	f := (*fakes)[1]
+	f.mu.Lock()
+	args := strings.Join(f.gotArgs, " ")
+	f.mu.Unlock()
+	if !strings.Contains(args, "--resume claude-s-1") {
+		t.Errorf("重启进程应带 --resume: %v", f.gotArgs)
+	}
+	if !strings.Contains(args, "--permission-mode plan") || !strings.Contains(args, "--model sonnet") {
+		t.Errorf("重启进程应带新参数: %v", f.gotArgs)
+	}
 	svc.CloseAll()
 }
 
@@ -812,7 +1040,7 @@ func TestChatService_RunChat_Validation(t *testing.T) {
 }
 
 // TestChatService_RunChat_StartFailure 进程启动失败：同步报错、不留 user 消息、
-// 槽位归还、失败任务不残留任务表。
+// 槽位归还、失败轮次不残留在途表与注册表。
 func TestChatService_RunChat_StartFailure(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
 	sess, _ := svc.CreateChatSession("dir-1", "启动失败", "C:/proj")
@@ -825,12 +1053,12 @@ func TestChatService_RunChat_StartFailure(t *testing.T) {
 		t.Fatal("启动失败应返回错误")
 	}
 
-	// 失败任务不残留任务表（终态/失败任务均摘除，防内存无界增长）
+	// 失败轮次不残留在途表与进程注册表（防内存无界增长与假性进程占用）
 	svc.mu.Lock()
-	residue := len(svc.tasks)
+	residueTurns, residueSessions := len(svc.turns), len(svc.sessions)
 	svc.mu.Unlock()
-	if residue != 0 {
-		t.Errorf("启动失败后任务表应无残留, got %d", residue)
+	if residueTurns != 0 || residueSessions != 0 {
+		t.Errorf("启动失败后应无残留, turns=%d sessions=%d", residueTurns, residueSessions)
 	}
 
 	// 槽位已归还：后续任务可正常获取（再注入正常 fake 跑通一轮）
@@ -845,7 +1073,7 @@ func TestChatService_RunChat_StartFailure(t *testing.T) {
 	waitFor(t, 5*time.Second, func() bool {
 		svc.mu.Lock()
 		defer svc.mu.Unlock()
-		return len(svc.tasks) == 0
+		return len(svc.turns) == 0
 	})
 
 	// 启动失败轮不留 user 消息（仅正常轮 2 条）
@@ -882,196 +1110,460 @@ func TestNewChatTaskID_Unique(t *testing.T) {
 	}
 }
 
-// TestChatService_RunChat_CancelDuringStartupWindow B1+B3：复现 queued 翻转后
-// 到 proc 赋值前的启动窗口——取消不 panic（proc nil 守卫）、同会话第二轮被拒绝
-// （串行保护无双 false 绕过窗口）、进程启动成功后取消信号补杀。
-func TestChatService_RunChat_CancelDuringStartupWindow(t *testing.T) {
-	svc, sink := newChatSvcForTest(t)
-	sess, _ := svc.CreateChatSession("dir-1", "启动窗口", "C:/proj")
+// ===== 审批与生命周期（持续会话进程模型）=====
 
-	fake := newFakeLines([]string{assistantLine("claude-s-1", "窗口回复"), resultLine("claude-s-1")})
-	fake.pipeGate = make(chan struct{})
+// TestChatService_Approval_AllowDeny 工具授权审批双路径：control_request 下发
+// → chat-approval:request 事件 → RespondChatApproval allow/deny → stdin 收到
+// 对应 control_response（按 request_id 匹配）。
+func TestChatService_Approval_AllowDeny(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "审批", "C:/proj")
+
+	fake, sender := newFakeBlocking(assistantLine("claude-s-1", "开始"))
 	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
 
-	type runResult struct {
-		taskID string
-		err    error
-	}
-	resCh := make(chan runResult, 1)
-	go func() {
-		taskID, err := svc.RunChat(sess.ID, "窗口问题", "default", "")
-		resCh <- runResult{taskID, err}
-	}()
-
-	// 从 queued 事件拿 taskID（此时任务已注册）
-	var taskID string
-	waitFor(t, 5*time.Second, func() bool {
-		ids := sink.queuedIDs()
-		if len(ids) > 0 {
-			taskID = ids[0]
-			return true
-		}
-		return false
-	})
-	// started 事件已发出 = queued 已翻转（fake 阻塞在 StdoutPipe，proc 尚未赋值）
-	waitFor(t, 5*time.Second, func() bool {
-		return strings.Contains(strings.Join(sink.names(), ","), "chat-task:started")
-	})
-
-	// B3：启动窗口内同会话第二轮必须被拒绝（修复前 running/queued 双 false 放行，
-	// 两 claude 并行同会话破坏 --resume 上下文）
-	if _, err := svc.RunChat(sess.ID, "插队", "default", ""); appErrCode(t, err) != model.ErrCodeChatInProgress {
-		t.Errorf("启动窗口内同会话第二轮应拒绝, got %v", err)
-	}
-
-	// B1：启动窗口内取消（修复前 task.proc 为 nil 直接 Kill → panic）
-	if !svc.CancelChatTask(taskID) {
-		t.Fatal("启动窗口内取消应返回 true")
-	}
-
-	// 放行启动流程：进程启动成功，lateCanceled 检查补杀
-	close(fake.pipeGate)
-	select {
-	case res := <-resCh:
-		if res.err != nil {
-			t.Fatalf("取消发生在启动窗口，RunChat 仍应正常返回 taskId: %v", res.err)
-		}
-		if res.taskID != taskID {
-			t.Errorf("taskID 不符: got %q, want %q", res.taskID, taskID)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("RunChat 未返回")
-	}
-	result := sink.waitDone(t)
-	if !result.Canceled {
-		t.Errorf("启动窗口取消轮 done 应标记 canceled: %+v", result)
-	}
-	waitFor(t, 5*time.Second, func() bool {
-		return svc.GetChatTaskState(taskID) == nil
-	})
-	svc.CloseAll()
-}
-
-// TestChatService_RunChat_CancelTimerReleased B6：任务终结后执行 ctx 已取消，
-// 超时定时器不悬挂至 10 分钟自然到期。
-func TestChatService_RunChat_CancelTimerReleased(t *testing.T) {
-	svc, sink := newChatSvcForTest(t)
-	sess, _ := svc.CreateChatSession("dir-1", "定时器", "C:/proj")
-	wireFakeFactory(svc, func() *fakeChatProcess {
-		return newFakeLines([]string{assistantLine("claude-s-1", "ok"), resultLine("claude-s-1")})
-	})
-
-	taskID, err := svc.RunChat(sess.ID, "hi", "default", "")
+	taskID, err := svc.RunChat(sess.ID, "建目录", "default", "")
 	if err != nil {
 		t.Fatalf("RunChat: %v", err)
 	}
-	sink.waitDone(t)
-	// done 后任务或已摘除、或处于摘除前窗口；两者都蕴含 cancelFn 已调用
-	// （摘除路径必经 cancelFn 调用点）
 	waitFor(t, 5*time.Second, func() bool {
-		svc.mu.Lock()
-		defer svc.mu.Unlock()
-		task := svc.tasks[taskID]
-		if task == nil {
-			return true
+		st := svc.GetChatTaskState(taskID)
+		return st != nil && st.Running
+	})
+
+	// CLI 下发审批请求 → 事件推送
+	sender <- controlRequestLine("req-allow-1", "Bash", `{"command":"mkdir d1"}`, "创建目录 d1")
+	var approvalEv model.ChatApprovalRequest
+	waitFor(t, 5*time.Second, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for i := len(sink.events) - 1; i >= 0; i-- {
+			if sink.events[i].name == "chat-approval:request" {
+				approvalEv = sink.events[i].data[0].(model.ChatApprovalRequest)
+				return true
+			}
 		}
-		return task.ctx != nil && task.ctx.Err() != nil
+		return false
+	})
+	if approvalEv.RequestID != "req-allow-1" || approvalEv.ToolName != "Bash" || approvalEv.TaskID != taskID {
+		t.Errorf("审批事件载荷异常: %+v", approvalEv)
+	}
+
+	// allow 应答：stdin 收到 control_response/allow（updatedInput 回传原 input）
+	if err := svc.RespondChatApproval("req-allow-1", true); err != nil {
+		t.Fatalf("RespondChatApproval allow: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool { return len(fake.stdinSnapshot()) >= 2 })
+	lines := fake.stdinSnapshot()
+	var found bool
+	for _, line := range lines[1:] {
+		var payload map[string]any
+		if json.Unmarshal([]byte(line), &payload) != nil || payload["type"] != "control_response" {
+			continue
+		}
+		resp := payload["response"].(map[string]any)
+		if resp["request_id"] == "req-allow-1" {
+			found = true
+			inner := resp["response"].(map[string]any)
+			if inner["behavior"] != "allow" {
+				t.Errorf("allow 应答应带 behavior=allow: %v", inner)
+			}
+			if _, ok := inner["updatedInput"].(map[string]any); !ok {
+				t.Errorf("allow 应答须带 updatedInput（旧版 CLI 缺失判校验错误）: %v", inner)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("stdin 未收到 req-allow-1 的 control_response: %v", lines)
+	}
+
+	// deny 应答
+	sender <- controlRequestLine("req-deny-1", "Write", `{"path":"x"}`, "写文件")
+	// 等审批请求注册（事件推送先于应答，stdin 行数才可能增长）
+	waitFor(t, 5*time.Second, func() bool { return chatApprovalPending(svc, "req-deny-1") })
+	if err := svc.RespondChatApproval("req-deny-1", false); err != nil {
+		t.Fatalf("RespondChatApproval deny: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool { return len(fake.stdinSnapshot()) >= 3 })
+	for _, line := range fake.stdinSnapshot()[2:] {
+		var payload map[string]any
+		if json.Unmarshal([]byte(line), &payload) != nil || payload["type"] != "control_response" {
+			continue
+		}
+		resp := payload["response"].(map[string]any)
+		if resp["request_id"] == "req-deny-1" {
+			inner := resp["response"].(map[string]any)
+			if inner["behavior"] != "deny" || inner["message"] == "" {
+				t.Errorf("deny 应答形态异常: %v", inner)
+			}
+		}
+	}
+
+	// 不存在的请求报错
+	if err := svc.RespondChatApproval("req-nonexistent", true); err == nil {
+		t.Error("不存在的审批请求应报错")
+	}
+
+	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskID) == nil
 	})
 }
 
-// TestChatService_RunChat_QueuedTimeoutCtxNotStarted B12：占满并发槽位使任务
-// 排队，排队期执行 ctx（超时定时器）未创建——排队等待不侵蚀超时预算。
-func TestChatService_RunChat_QueuedTimeoutCtxNotStarted(t *testing.T) {
+// TestChatService_Approval_AutoSettleOnTurnEnd 轮结束自动拒绝未决审批：result
+// 收尾时该轮未决审批以 deny 回写（CLI 解除阻塞）+ chat-approval:cancelled 事件
+// （前端撤弹窗），后续 RespondChatApproval 报错。
+func TestChatService_Approval_AutoSettleOnTurnEnd(t *testing.T) {
 	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "审批失效", "C:/proj")
 
-	// 不同会话占满并发槽位（blocking fake 挂起）
-	type runningTask struct {
-		taskID string
-		fake   *fakeChatProcess
-	}
-	var running []runningTask
-	for i := 0; i < chatMaxConcurrent; i++ {
-		sess, _ := svc.CreateChatSession(fmt.Sprintf("dir-%d", i), "占位", "C:/p")
-		fake, _ := newFakeBlocking("")
-		wireFakeFactory(svc, func() *fakeChatProcess { return fake })
-		taskID, err := svc.RunChat(sess.ID, "占用", "default", "")
-		if err != nil {
-			t.Fatalf("占位 RunChat: %v", err)
-		}
-		running = append(running, runningTask{taskID, fake})
+	fake, sender := newFakeBlocking("")
+	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
+
+	taskID, err := svc.RunChat(sess.ID, "长任务", "default", "")
+	if err != nil {
+		t.Fatalf("RunChat: %v", err)
 	}
 	waitFor(t, 5*time.Second, func() bool {
-		for _, rt := range running {
-			st := svc.GetChatTaskState(rt.taskID)
-			if st == nil || !st.Running {
-				return false
-			}
-		}
-		return true
+		st := svc.GetChatTaskState(taskID)
+		return st != nil && st.Running
 	})
 
-	// 第 4 个任务（新会话）进入排队
-	qsess, _ := svc.CreateChatSession("dir-q", "排队", "C:/p")
+	sender <- controlRequestLine("req-stale-1", "Bash", `{"command":"rm -rf x"}`, "危险操作")
+	waitFor(t, 5*time.Second, func() bool { return chatApprovalPending(svc, "req-stale-1") })
+
+	// 轮直接收尾（模拟 CLI 自行结束）：未决审批自动拒绝
+	sender <- assistantLine("claude-s-1", "跳过该工具")
+	sender <- resultLine("claude-s-1")
+	sink.waitDone(t)
+
+	// cancelled 事件 + deny 回写 stdin
+	waitFor(t, 5*time.Second, func() bool {
+		return sink.countEvents("chat-approval:cancelled") >= 1
+	})
+	waitFor(t, 5*time.Second, func() bool { return len(fake.stdinSnapshot()) >= 2 })
+	var denyWritten bool
+	for _, line := range fake.stdinSnapshot()[1:] {
+		if strings.Contains(line, `"request_id":"req-stale-1"`) && strings.Contains(line, `"behavior":"deny"`) {
+			denyWritten = true
+		}
+	}
+	if !denyWritten {
+		t.Errorf("未决审批应以 deny 回写 stdin: %v", fake.stdinSnapshot())
+	}
+	if err := svc.RespondChatApproval("req-stale-1", true); err == nil {
+		t.Error("已失效审批应答应报错")
+	}
+	svc.CloseAll()
+}
+
+// TestChatService_TurnTimeoutWatchdog 轮超时：执行轮超过 chatTurnTimeout 无
+// result，watchdog 发 interrupt 并标记超时（done 展示超时文案）。
+func TestChatService_TurnTimeoutWatchdog(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	// 短时限注入走实例字段（不改全局 var：watchdog goroutine 与全局恢复存在竞态窗口）
+	svc.scanInterval = 20 * time.Millisecond
+	svc.turnTimeout = 50 * time.Millisecond
+	sess, _ := svc.CreateChatSession("dir-1", "轮超时", "C:/proj")
+
+	fake, sender := newFakeBlocking("")
+	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
+
+	taskID, err := svc.RunChat(sess.ID, "慢任务", "default", "")
+	if err != nil {
+		t.Fatalf("RunChat: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		st := svc.GetChatTaskState(taskID)
+		return st != nil && st.Running
+	})
+
+	// watchdog 发 interrupt（stdin 第 2 行）
+	waitFor(t, 5*time.Second, func() bool { return len(fake.stdinSnapshot()) >= 2 })
+	if line := fake.stdinSnapshot()[1]; !strings.Contains(line, `"subtype":"interrupt"`) {
+		t.Errorf("watchdog 应发 interrupt: %q", line)
+	}
+
+	// CLI 以 error_during_execution 收尾 → done 带超时文案
+	sender <- resultLineError("claude-s-1", "error_during_execution")
+	result := sink.waitDone(t)
+	if !strings.Contains(result.Error, "执行超时") {
+		t.Errorf("done 应展示超时文案: %q", result.Error)
+	}
+	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskID) == nil
+	})
+	// 等 watchdog goroutine 全部退出（defer 恢复全局超时变量前，防 -race 竞态）
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+}
+
+// TestChatService_IdleProcessRecycle 空闲回收：无在途轮次超过 chatIdleTimeout，
+// watchdog 强杀进程并摘除注册表；下次发消息 respawn（--resume 由会话元数据驱动）。
+func TestChatService_IdleProcessRecycle(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	// 短时限注入走实例字段（不改全局 var：watchdog goroutine 与全局恢复存在竞态窗口）
+	svc.scanInterval = 20 * time.Millisecond
+	svc.idleTimeout = 60 * time.Millisecond
+	sess, _ := svc.CreateChatSession("dir-1", "空闲回收", "C:/proj")
+
+	turn := 0
+	fakes := wireFakeFactory(svc, func() *fakeChatProcess {
+		turn++
+		if turn == 1 {
+			// 第一次 spawn：回放一轮完整结果后进程保持存活（空闲，
+			// 等待 watchdog 回收）
+			return newFakeLinesThenIdle(assistantLine("claude-s-1", "答一"), resultLine("claude-s-1"))
+		}
+		return newFakeLines([]string{
+			assistantLine("claude-s-2", "答二"),
+			resultLine("claude-s-2"),
+		})
+	})
+
+	if _, err := svc.RunChat(sess.ID, "第一问", "default", ""); err != nil {
+		t.Fatalf("第一轮 RunChat: %v", err)
+	}
+	sink.waitDone(t) // 消费第一轮 done 信号（防错位污染后续 waitDone）
+
+	// 等待空闲回收（无在途轮 + 超时限 → Kill → 注册表摘除）
+	waitFor(t, 10*time.Second, func() bool {
+		fake := (*fakes)[0]
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return fake.killCalled
+	})
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+	fake := (*fakes)[0]
+	fake.mu.Lock()
+	killed := fake.killCalled
+	fake.mu.Unlock()
+	if !killed {
+		t.Error("空闲回收应 Kill 进程")
+	}
+
+	// 回收后再次发消息：respawn（--resume claude-s-1 由第一轮回写的元数据驱动）
+	if _, err := svc.RunChat(sess.ID, "第二问", "default", ""); err != nil {
+		t.Fatalf("回收后 respawn RunChat: %v", err)
+	}
+	sink.waitDone(t)
+	waitFor(t, 5*time.Second, func() bool { return len(*fakes) >= 2 })
+	f := (*fakes)[1]
+	f.mu.Lock()
+	args := strings.Join(f.gotArgs, " ")
+	f.mu.Unlock()
+	if !strings.Contains(args, "--resume claude-s-1") {
+		t.Errorf("回收后 respawn 应带 --resume: %v", f.gotArgs)
+	}
+	svc.CloseAll()
+	// 等 watchdog goroutine 全部退出（defer 恢复全局超时变量前，防 -race 竞态）
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+}
+
+// TestChatService_ListChatActiveTasks 在途轮次列表：排队+执行中按开始时间升序，
+// 会话过滤生效；空会话返回空。
+func TestChatService_ListChatActiveTasks(t *testing.T) {
+	svc, _ := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "列表", "C:/proj")
+
+	fake, _ := newFakeBlocking("")
+	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
+
+	if _, err := svc.RunChat(sess.ID, "第一问", "default", ""); err != nil {
+		t.Fatalf("RunChat: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		st := svc.ListChatActiveTasks(sess.ID)
+		return len(st) == 1 && st[0].Running
+	})
+	if _, err := svc.RunChat(sess.ID, "插话", "default", ""); err != nil {
+		t.Fatalf("插话 RunChat: %v", err)
+	}
+
+	tasks := svc.ListChatActiveTasks(sess.ID)
+	if len(tasks) != 2 {
+		t.Fatalf("在途轮次数: got %d, want 2", len(tasks))
+	}
+	if !tasks[0].Running || !tasks[1].Queued {
+		t.Errorf("轮次状态序异常: %+v", tasks)
+	}
+	if tasks[0].ChatSessionID != sess.ID {
+		t.Errorf("会话过滤异常: %+v", tasks[0])
+	}
+	other := svc.ListChatActiveTasks("sess-other")
+	if len(other) != 0 {
+		t.Errorf("其他会话应为空列表, got %d", len(other))
+	}
+	svc.CloseAll()
+	// 等 watchdog goroutine 全部退出（注册表摘除 = ctx 已取消，防 goroutine 泄漏）
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+}
+
+// ===== 多会话并行（PR2）=====
+
+// TestChatService_MultiSessionParallel 两会话并行互不串流：各自常驻进程独立
+// 推进，输出事件按 taskId 归属各轮，回复累积与落盘不交叉。
+func TestChatService_MultiSessionParallel(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sessA, _ := svc.CreateChatSession("dir-a", "会话A", "C:/proj/a")
+	sessB, _ := svc.CreateChatSession("dir-b", "会话B", "C:/proj/b")
+
 	wireFakeFactory(svc, func() *fakeChatProcess {
 		f, _ := newFakeBlocking("")
 		return f
 	})
-	type runResult struct {
-		taskID string
-		err    error
-	}
-	resCh := make(chan runResult, 1)
-	go func() {
-		taskID, err := svc.RunChat(qsess.ID, "排队任务", "default", "")
-		resCh <- runResult{taskID, err}
-	}()
-	var queuedID string
-	waitFor(t, 5*time.Second, func() bool {
-		ids := sink.queuedIDs()
-		if len(ids) >= chatMaxConcurrent+1 {
-			queuedID = ids[chatMaxConcurrent]
-			return true
-		}
-		return false
-	})
 
-	// 排队态确认 + 执行 ctx 未创建（WithTimeout 在获取槽位后才调用）
-	st := svc.GetChatTaskState(queuedID)
-	if st == nil || !st.Queued {
-		t.Fatalf("任务应处于排队态: %+v", st)
+	taskA, err := svc.RunChat(sessA.ID, "A 问", "default", "")
+	if err != nil {
+		t.Fatalf("A 会话 RunChat: %v", err)
 	}
+	taskB, err := svc.RunChat(sessB.ID, "B 问", "default", "")
+	if err != nil {
+		t.Fatalf("B 会话 RunChat: %v", err)
+	}
+	// 拿两个 fake 实例（spawn 后注册表内 proc，blocking fake 长驻不退出）
 	svc.mu.Lock()
-	ctxCreated := svc.tasks[queuedID] != nil && svc.tasks[queuedID].ctx != nil
+	procA := svc.sessions[sessA.ID].proc
+	procB := svc.sessions[sessB.ID].proc
 	svc.mu.Unlock()
-	if ctxCreated {
-		t.Error("排队期执行 ctx 不应创建（超时预算不被排队侵蚀）")
+	fakeA, okA := procA.(*fakeChatProcess)
+	fakeB, okB := procB.(*fakeChatProcess)
+	if !okA || !okB {
+		t.Fatal("两会话进程应为 fake 实例")
 	}
 
-	// 收尾：取消排队任务与占位任务并等待终态摘除（防 goroutine 泄漏）
-	svc.CancelChatTask(queuedID)
-	select {
-	case res := <-resCh:
-		if res.err == nil {
-			t.Error("排队取消后 RunChat 应返回错误")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("排队取消后 RunChat 未返回")
+	// 交错推进：A 输出 → B 输出 → A result → B result（直接写 fake stdout 管道，
+	// blocking fake 的回放 goroutine 阻塞在空 lineCh 上不触碰 writer）
+	fakeA.mu.Lock()
+	writerA := fakeA.writer
+	fakeA.mu.Unlock()
+	fakeB.mu.Lock()
+	writerB := fakeB.writer
+	fakeB.mu.Unlock()
+	_, _ = io.WriteString(writerA, assistantLine("claude-a", "A 部分回复")+"\n")
+	_, _ = io.WriteString(writerB, assistantLine("claude-b", "B 部分回复")+"\n")
+	_, _ = io.WriteString(writerA, resultLine("claude-a")+"\n")
+	_, _ = io.WriteString(writerB, resultLine("claude-b")+"\n")
+
+	resultA := sink.waitDone(t)
+	resultB := sink.waitDone(t)
+	// done 序不定（两 pump 并发），按 taskId 归配断言互不串流
+	byID := map[string]model.ChatTaskRunResult{resultA.TaskID: resultA, resultB.TaskID: resultB}
+	if byID[taskA].Reply != "A 部分回复" || byID[taskA].ChatSessionID != sessA.ID {
+		t.Errorf("A 轮结果串流: %+v", byID[taskA])
 	}
-	for _, rt := range running {
-		svc.CancelChatTask(rt.taskID)
+	if byID[taskB].Reply != "B 部分回复" || byID[taskB].ChatSessionID != sessB.ID {
+		t.Errorf("B 轮结果串流: %+v", byID[taskB])
+	}
+	// 落盘隔离：各会话消息文件只含本会话轮次
+	gotA, _ := svc.GetChatSession(sessA.ID)
+	gotB, _ := svc.GetChatSession(sessB.ID)
+	if len(gotA.Messages) != 2 || gotA.Messages[1].Content != "A 部分回复" {
+		t.Errorf("A 会话消息串流: %+v", gotA.Messages)
+	}
+	if len(gotB.Messages) != 2 || gotB.Messages[1].Content != "B 部分回复" {
+		t.Errorf("B 会话消息串流: %+v", gotB.Messages)
+	}
+	if gotA.ClaudeSessionID != "claude-a" || gotB.ClaudeSessionID != "claude-b" {
+		t.Errorf("claude session id 回写串流: %q / %q", gotA.ClaudeSessionID, gotB.ClaudeSessionID)
+	}
+	// 两进程均在册（并行共存）
+	svc.mu.Lock()
+	n := len(svc.sessions)
+	svc.mu.Unlock()
+	if n != 2 {
+		t.Errorf("并行会话进程数: got %d, want 2", n)
+	}
+	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskA) == nil && svc.GetChatTaskState(taskB) == nil
+	})
+}
+
+// TestChatService_DeleteSessionKillsProcess 删除会话终止其常驻进程：注册表
+// 摘除、进程槽位归还（删除后可继续 spawn 到上限），其他会话不受影响。
+func TestChatService_DeleteSessionKillsProcess(t *testing.T) {
+	svc, _ := newChatSvcForTest(t)
+	sessA, _ := svc.CreateChatSession("dir-a", "删除目标", "C:/a")
+	sessB, _ := svc.CreateChatSession("dir-b", "共存会话", "C:/b")
+
+	fakesA := wireFakeFactory(svc, func() *fakeChatProcess {
+		return newFakeLinesThenIdle(assistantLine("claude-a", "答"), resultLine("claude-a"))
+	})
+	if _, err := svc.RunChat(sessA.ID, "问", "default", ""); err != nil {
+		t.Fatalf("A RunChat: %v", err)
+	}
+	wireFakeFactory(svc, func() *fakeChatProcess {
+		return newFakeLinesThenIdle(assistantLine("claude-b", "答B"), resultLine("claude-b"))
+	})
+	if _, err := svc.RunChat(sessB.ID, "问B", "default", ""); err != nil {
+		t.Fatalf("B RunChat: %v", err)
+	}
+	// 两轮收尾（进程仍存活长驻，空闲回收未触发）
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.turns) == 0
+	})
+
+	if err := svc.DeleteChatSession(sessA.ID); err != nil {
+		t.Fatalf("DeleteChatSession: %v", err)
 	}
 	waitFor(t, 5*time.Second, func() bool {
-		if svc.GetChatTaskState(queuedID) != nil {
-			return false
-		}
-		for _, rt := range running {
-			if svc.GetChatTaskState(rt.taskID) != nil {
-				return false
-			}
-		}
-		return true
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		_, alive := svc.sessions[sessA.ID]
+		return !alive
 	})
+	(*fakesA)[0].mu.Lock()
+	killed := (*fakesA)[0].killCalled
+	(*fakesA)[0].mu.Unlock()
+	if !killed {
+		t.Error("删除会话应终止其常驻进程")
+	}
+	// B 不受影响
+	svc.mu.Lock()
+	_, bAlive := svc.sessions[sessB.ID]
+	n := len(svc.sessions)
+	svc.mu.Unlock()
+	if !bAlive || n != 1 {
+		t.Errorf("共存会话不应受删除影响: bAlive=%v n=%d", bAlive, n)
+	}
+	// 槽位已归还：可再起 3 个新会话进程（注册表现 1 + 新 3 = 4 恰满上限）
+	for i := 0; i < 3; i++ {
+		s, _ := svc.CreateChatSession(fmt.Sprintf("dir-n%d", i), "新增", "C:/n")
+		wireFakeFactory(svc, func() *fakeChatProcess {
+			return newFakeLinesThenIdle(
+				assistantLine(fmt.Sprintf("claude-n%d", i), "答"),
+				resultLine(fmt.Sprintf("claude-n%d", i)),
+			)
+		})
+		if _, err := svc.RunChat(s.ID, "问", "default", ""); err != nil {
+			t.Fatalf("槽位归还后第 %d 个新会话失败: %v", i+1, err)
+		}
+	}
 	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
 }
 
 // TestChatService_RunChat_ScanErrorSurfaced B9：输出流读取中断（读错误）时

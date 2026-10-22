@@ -68,8 +68,9 @@ const (
 
 	// AI 对话域（AI 对话工作台多轮会话）
 	ErrCodeChatSessionNotFound = "E_CHAT_SESSION_NOT_FOUND" // 会话不存在或已删除（error）
-	ErrCodeChatInProgress      = "E_CHAT_IN_PROGRESS"       // 该会话已有对话进行中，本轮拒绝（warning）
+	ErrCodeChatInProgress      = "E_CHAT_IN_PROGRESS"       // 该会话已有对话进行中，本轮拒绝（warning；持续会话模型下 RunChat 已不再产生，常量保留给潜在调用方）
 	ErrCodeChatEmptyPrompt     = "E_CHAT_EMPTY_PROMPT"      // 对话内容为空（warning）
+	ErrCodeChatProcessLimit    = "E_CHAT_PROCESS_LIMIT"     // 同时活跃的对话会话进程已达上限，新会话无法启动（warning）
 
 	// 进程管理域（工具箱·进程管理）
 	ErrCodeProcessEnumFailed   = "E_PROCESS_ENUM_FAILED"   // 进程枚举命令执行失败（error）

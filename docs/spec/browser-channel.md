@@ -71,6 +71,8 @@ func newWSHubTuned(token string, writeWait, pongWait time.Duration, resumeBuffer
 // WSHub 内部：seqMu 保护「占号-入环-广播/取补发集」临界区，锁序恒 seqMu → mu
 ```
 
+> **WS 上行边界刻意保持**：WS 仅 resume 握手一帧业务上行，交互类上行（终端输入、AI 对话工具授权审批应答 `RespondChatApproval` 等）一律走 `/api/rpc` 通用方法通道——不因新交互需求扩 WS 上行协议，readLimit 4096 与「唯一业务上行」契约不被打破。chat 域新增事件（`chat-task:*`、`chat-approval:request/cancelled`）经 applySink 的 chat 行自动进 hub 广播，零特判。
+
 ### 2.5 webServe 绑定方法（app_webserve.go，2026-09 新增 4 个）
 
 `GetWebServeConfig` / `SetWebServeConfig(enabled bool, bindAddress string)` / `GetWebServeToken` / `RegenerateWebToken`。

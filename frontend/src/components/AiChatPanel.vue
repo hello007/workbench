@@ -147,7 +147,6 @@
           <div
             ref="messagesEl"
             class="chat-messages"
-            :class="{ 'chat-in-flight': aiChatStore.chatInFlight }"
             @scroll="onMessagesScroll"
           >
             <div v-if="!displayMessages.length" class="chat-messages-empty">
@@ -232,22 +231,25 @@
                 @keydown.enter="onInputEnter"
               />
               <div class="chat-input-actions">
-                <el-button
-                  v-if="!aiChatStore.chatInFlight"
-                  type="primary"
-                  class="chat-send-btn"
-                  @click="handleSend"
-                >
+                <!-- 持续会话模型：运行中发送 = 排队注入（插话），发送按钮恒可用；
+                     有在途轮次时并列展示停止按钮（中断当前轮 + 摘除排队轮） -->
+                <el-button type="primary" class="chat-send-btn" @click="handleSend">
                   <el-icon><Position /></el-icon>发送
                 </el-button>
-                <el-button v-else type="danger" plain class="chat-stop-btn" @click="handleStop">
+                <el-button
+                  v-if="aiChatStore.chatInFlight"
+                  type="danger"
+                  plain
+                  class="chat-stop-btn"
+                  @click="handleStop"
+                >
                   <el-icon><VideoPause /></el-icon>停止
                 </el-button>
               </div>
             </div>
             <div v-if="aiChatStore.chatInFlight" class="chat-input-status">
               <span class="chat-input-status-dot"></span>
-              {{ aiChatStore.chatTask?.status === 'queued' ? '排队等待中…' : '回复生成中…' }}
+              {{ aiChatStore.currentSessionChatTasks.some(t => t.status === 'running') ? '回复生成中…' : '排队等待中…' }}
             </div>
           </div>
         </template>
@@ -371,6 +373,8 @@ import { useAiChatStore, useUiStore } from '../store'
 import { handleError } from '../utils/error'
 import { shortenPath } from '../utils/pathFormat'
 import { renderChatMarkdown } from '../utils/chatMarkdown'
+import { debug } from '../utils/debug'
+import { RespondChatApproval } from '../../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
 const aiChatStore = useAiChatStore()
@@ -417,33 +421,11 @@ const onDragEnd = async () => {
   }
 }
 
-// --- 在途任务时切换目录/会话/新建/删除的统一确认（继续则取消当前任务） ---
-// actionLabel 描述后续动作（切换/新建/删除），确认取消任务后继续；取消失败则中止，
-// 防承诺「取消任务并继续」时带着仍在运行的任务继续。
-const confirmDiscardInFlight = async (actionLabel) => {
-  if (!aiChatStore.chatInFlight) return true
-  try {
-    await ElMessageBox.confirm(
-      `当前有对话进行中，${actionLabel}将取消该任务。确定${actionLabel}吗？`,
-      `${actionLabel}确认`,
-      { confirmButtonText: `取消任务并${actionLabel}`, cancelButtonText: '留在当前', type: 'warning' }
-    )
-  } catch {
-    return false
-  }
-  try {
-    await aiChatStore.cancelChatTask()
-  } catch (error) {
-    handleError('取消任务失败: ', error)
-    return false
-  }
-  return true
-}
-
-// --- 侧栏目录点击（在途任务先确认） ---
+// --- 侧栏目录点击 ---
+// 持续会话进程模型：切换目录/会话不再打断在途对话（后台会话继续运行），
+// 原确认取消链（confirmDiscardInFlight）随之撤销。
 const handleSelectDirectory = async (dir) => {
   if (dir.id === aiChatStore.selectedChatDirectoryId) return
-  if (!(await confirmDiscardInFlight('切换'))) return
   aiChatStore.selectChatDirectory(dir.id)
 }
 
@@ -587,12 +569,10 @@ const onSessionCommand = async (cmd) => {
 
 const handleSelectSession = async (id) => {
   if (!id || id === aiChatStore.selectedChatSessionId) return
-  if (!(await confirmDiscardInFlight('切换'))) return
   await aiChatStore.selectChatSession(id)
 }
 
 const handleNewSession = async () => {
-  if (!(await confirmDiscardInFlight('新建'))) return
   try {
     await aiChatStore.createChatSession()
   } catch (error) {
@@ -603,10 +583,7 @@ const handleNewSession = async () => {
 const handleDeleteSession = async () => {
   const id = aiChatStore.selectedChatSessionId
   if (!id) return
-  // 在途任务属于该会话时先确认并取消：防删除后进程继续跑、完成后复活孤儿消息文件
-  if (aiChatStore.chatTask && aiChatStore.chatTask.chatSessionId === id) {
-    if (!(await confirmDiscardInFlight('删除'))) return
-  }
+  // 在途轮次取消由 store.deleteChatSession 统一处理（防删除后进程继续写孤儿消息文件）
   const title = aiChatStore.selectedChatSession?.title || '该会话'
   try {
     await ElMessageBox.confirm(
@@ -627,14 +604,15 @@ const handleDeleteSession = async () => {
 
 // ===== 消息渲染与流式 =====
 
-// 展示消息 = 持久化消息 + 在途任务的流式 assistant 气泡（仅当前会话视图追加）
+// 展示消息 = 持久化消息 + 在途轮次的流式 assistant 气泡（仅当前会话视图追加，
+// 多条在途轮次各一气泡，插入序 = 提交先后）
 const displayMessages = computed(() => {
   const base = aiChatStore.chatMessages
-  if (!aiChatStore.chatTaskInCurrentSession) return base
-  const task = aiChatStore.chatTask
+  const tasks = aiChatStore.currentSessionChatTasks
+  if (!tasks.length) return base
   return [
     ...base,
-    { role: 'assistant', content: task.reply, streaming: true, taskId: task.taskId }
+    ...tasks.map(t => ({ role: 'assistant', content: t.reply, streaming: true, taskId: t.taskId }))
   ]
 })
 
@@ -677,7 +655,6 @@ const renderMsgMarkdown = (msg) => {
 // 选项点选：单选题 radio 语义（清同题他项），多选题 toggle；任一题选中即启用提交按钮。
 // 提交：按题序拼「用户通过选项卡片回答」文本走 runChat 常规链路（--resume 回传模型），
 // 成功后标记已答（store 内存态 + 卡片 DOM 即时置灰，重渲染时由 renderMsgMarkdown 兜底）。
-// 会话在途（chatInFlight）时提交守卫（PRD B9）：置灰由 .chat-in-flight CSS 承担，此处静默忽略。
 const onChatQuestionClick = (event) => {
   const card = event.target.closest('.chat-question')
   if (!card) return false
@@ -714,9 +691,9 @@ const syncCardSubmitState = (card) => {
 }
 
 // 提交选择题卡片：拼答案文本 → runChat 回传 → 标记已答置灰。
-// 会话在途或已答时静默忽略（按钮置灰由 CSS 与 chat-question-answered 类承担）。
+// 已答时静默忽略（置灰由 chat-question-answered 类承担）；运行中提交合法
+// （排队注入，答案轮次在前序轮 result 后执行）。
 const submitChatQuestionCard = async (card, event) => {
-  if (aiChatStore.chatInFlight) return
   const sessionId = aiChatStore.selectedChatSessionId
   const taskId = event.currentTarget?.dataset?.taskId || ''
   if (!sessionId || !taskId) return
@@ -765,8 +742,11 @@ const scrollToBottom = (force = false) => {
     }
   })
 }
-// 消息条数变化 / 流式内容增长时近底部才跟随；会话切换强制滚到底部
-watch(() => [aiChatStore.chatMessages.length, aiChatStore.chatTask?.reply], () => scrollToBottom())
+// 消息条数变化 / 任一在途轮次流式内容增长时近底部才跟随；会话切换强制滚到底部
+watch(
+  () => [aiChatStore.chatMessages.length, aiChatStore.currentSessionChatTasks.map(t => t.reply).join('\u0000')],
+  () => scrollToBottom()
+)
 watch(() => aiChatStore.selectedChatSessionId, () => scrollToBottom(true))
 
 // ===== 输入与发送 =====
@@ -794,8 +774,8 @@ const handleSend = async () => {
     ElMessage.warning('请输入对话内容')
     return
   }
-  // 进行中禁发（按钮已切换为停止，此处双保护；后端另有 E_CHAT_IN_PROGRESS 拒绝）
-  if (aiChatStore.chatInFlight) return
+  // 持续会话模型：进行中发送 = 排队注入（后端排队，前序轮 result 后执行），
+  // 不再禁发
   sending = true
   try {
     if (!aiChatStore.selectedChatSessionId) {
@@ -925,12 +905,14 @@ const onPermissionModeChange = async () => {
   await persistChatSettings()
 }
 
-// ===== chat-task:* 事件监听（闭包精准注销，禁 EventsOff 全局移除） =====
+// ===== chat-task:* / chat-approval:* 事件监听（闭包精准注销，禁 EventsOff 全局移除） =====
 
 let offQueued = null
 let offStarted = null
 let offOutput = null
 let offDone = null
+let offApprovalRequest = null
+let offApprovalCancelled = null
 
 const onTaskDone = async (result) => {
   const handled = await aiChatStore.handleChatTaskDone(result)
@@ -942,6 +924,67 @@ const onTaskDone = async (result) => {
   }
 }
 
+// ===== 工具授权审批弹窗（chat-approval:* 事件驱动） =====
+
+// 审批请求 FIFO 队列 + 串行处理（ElMessageBox 单实例，逐个弹窗应答）
+const approvalQueue = ref([])
+const approvalBusy = ref(false)
+
+const onApprovalRequest = (req) => {
+  if (!req?.requestId) return
+  approvalQueue.value = [...approvalQueue.value, req]
+  processApprovalQueue()
+}
+
+// chat-approval:cancelled：轮结束/进程退出自动拒绝——撤队列中的待弹项；
+// 正在展示的弹窗保留（用户应答时后端报「已失效」，静默降级不提示）
+const onApprovalCancelled = (ev) => {
+  approvalQueue.value = approvalQueue.value.filter(r => r.requestId !== ev?.requestId)
+}
+
+const processApprovalQueue = async () => {
+  if (approvalBusy.value || !approvalQueue.value.length) return
+  approvalBusy.value = true
+  const req = approvalQueue.value[0]
+  const inputText = (() => {
+    try {
+      const json = JSON.stringify(req.input ?? {}, null, 2)
+      return json === '{}' ? '' : json
+    } catch {
+      return ''
+    }
+  })()
+  const message = [
+    req.description || `AI 请求调用工具「${req.toolName}」`,
+    inputText
+  ].filter(Boolean).join('\n')
+  let allowed = false
+  try {
+    await ElMessageBox.confirm(message, `工具授权：${req.toolName}`, {
+      confirmButtonText: '允许',
+      cancelButtonText: '拒绝',
+      type: 'warning'
+    })
+    allowed = true
+  } catch {
+    allowed = false
+  }
+  try {
+    await RespondChatApproval(req.requestId, allowed)
+  } catch (error) {
+    // 请求已失效（轮结束/进程退出自动拒绝）属预期竞态，静默降级
+    if (String(error?.message || error).includes('失效')) {
+      debug.log('审批请求已失效:', error)
+    } else {
+      handleError('审批应答失败: ', error)
+    }
+  } finally {
+    approvalQueue.value = approvalQueue.value.filter(r => r.requestId !== req.requestId)
+    approvalBusy.value = false
+    processApprovalQueue()
+  }
+}
+
 onMounted(() => {
   // 先同步注册事件监听再异步加载数据：保证卸载路径必能拿到全部 off 闭包
   // （若先 await 加载，await 期间卸载则 off 闭包未赋值、监听器泄漏）
@@ -949,6 +992,8 @@ onMounted(() => {
   offStarted = EventsOn('chat-task:started', aiChatStore.onChatTaskStarted)
   offOutput = EventsOn('chat-task:output', aiChatStore.onChatTaskOutput)
   offDone = EventsOn('chat-task:done', onTaskDone)
+  offApprovalRequest = EventsOn('chat-approval:request', onApprovalRequest)
+  offApprovalCancelled = EventsOn('chat-approval:cancelled', onApprovalCancelled)
 
   ;(async () => {
     await aiChatStore.loadChatDirectories()
@@ -965,10 +1010,14 @@ onBeforeUnmount(() => {
   offStarted && offStarted()
   offOutput && offOutput()
   offDone && offDone()
+  offApprovalRequest && offApprovalRequest()
+  offApprovalCancelled && offApprovalCancelled()
   offQueued = null
   offStarted = null
   offOutput = null
   offDone = null
+  offApprovalRequest = null
+  offApprovalCancelled = null
 })
 
 // 面板切走再切回时恢复在途任务状态（事件丢失兜底，防 loading 卡死）
@@ -1446,11 +1495,6 @@ watch(() => uiStore.activePanel, (panel) => {
   cursor: pointer;
 }
 .chat-msg-md :deep(.chat-question-submit:disabled) {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-/* 会话在途：卡片提交按钮置灰禁点（点击委托另有 chatInFlight 守卫双保护） */
-.chat-messages.chat-in-flight .chat-msg-md :deep(.chat-question-submit:not(:disabled)) {
   opacity: 0.45;
   cursor: not-allowed;
 }

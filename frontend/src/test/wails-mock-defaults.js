@@ -187,6 +187,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   UpdateChatSessionTitle: true,
   RunChat: null,
   CancelChatTask: false,
+  ListChatActiveTasks: [],
+  RespondChatApproval: null,
   GetChatTaskState: null,
   // PR3 模板与执行配置：GetChatSettings 给默认值（default + 空 model），
   // 组件挂载即调，空对象会破坏权限模式下拉的取值绑定

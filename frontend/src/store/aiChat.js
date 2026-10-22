@@ -13,7 +13,8 @@ import {
   UpdateChatSessionTitle,
   RunChat,
   CancelChatTask,
-  GetChatTaskState,
+  ListChatActiveTasks,
+  RespondChatApproval,
   ListChatTemplates,
   AddChatTemplate,
   UpdateChatTemplate,
@@ -203,9 +204,17 @@ export const useAiChatStore = defineStore('aiChat', () => {
 
   /**
    * 删除会话。删的是当前选中会话时切换到剩余最近会话（无则清空）。
+   * 删除前取消该会话全部在途轮次（防删除后常驻进程继续写孤儿消息文件）。
    * @param {string} id 会话 id
    */
   async function deleteChatSession(id) {
+    for (const t of Object.values(chatTasks.value)) {
+      if (t.chatSessionId === id) {
+        CancelChatTask(t.taskId).catch((error) => {
+          debug.log('删除前取消在途轮次失败:', error)
+        })
+      }
+    }
     await DeleteChatSession(id)
     if (selectedChatSessionId.value === id) {
       selectedChatSessionId.value = ''
@@ -223,23 +232,27 @@ export const useAiChatStore = defineStore('aiChat', () => {
     }
   }
 
-  // ===== 任务域（PR3）=====
-  // 在途对话任务态：{ taskId, chatSessionId, status: 'queued'|'running', reply, prompt }。
-  // null = 无在途任务。RunChat resolve 即置 running（后端返回时进程已启动，
-  // queued/started 事件此时早已发过；先到的事件因本地任务尚未建立按 taskId 对不上被忽略）。
-  const chatTask = ref(null)
+  // ===== 任务域 =====
+  // 在途对话轮次注册表：taskId → { taskId, chatSessionId, status: 'queued'|'running', reply, prompt }。
+  // 持续会话进程模型：同会话可有多条在途轮次（运行中插话 = 排队注入，前序轮
+  // result 后依序执行），事件与轮次按 taskId 对号；终态（done）从表摘除。
+  const chatTasks = ref({})
 
-  /** 是否有在途（排队/运行中）对话任务。 */
-  const chatInFlight = computed(() => !!chatTask.value)
-
-  /** 在途任务是否属于当前选中会话（流式气泡仅在该会话视图渲染）。 */
-  const chatTaskInCurrentSession = computed(
-    () => !!chatTask.value && chatTask.value.chatSessionId === selectedChatSessionId.value
+  /** 当前选中会话的在途轮次列表（插入序 = 提交先后）。 */
+  const currentSessionChatTasks = computed(() =>
+    Object.values(chatTasks.value).filter(t => t.chatSessionId === selectedChatSessionId.value)
   )
+
+  /** 当前会话是否有在途轮次（停止按钮与状态条展示依据；不再禁发新消息）。 */
+  const chatInFlight = computed(() => currentSessionChatTasks.value.length > 0)
 
   /**
    * 发送一轮对话：RunChat 自由 prompt（权限模式/模型取当前配置）。
-   * 成功后任务置 running + 追加本地 user 气泡；首条消息自动生成会话标题。
+   * 运行中再发即排队注入（后端不再拒绝）。成功后登记轮次 + 追加本地 user 气泡；
+   * 首条消息自动生成会话标题。
+   * 乐观态判定：会话已有在途轮次时本条将排队（置 queued），否则置 running——
+   * 空闲路径下 started 事件先于 RunChat resolve 发出（本地任务尚未登记被忽略），
+   * busy 路径下 started 事件在轮次推进时到达（正常对号）。
    * @param {string} prompt 用户输入
    * @returns {Promise<string>} 任务 id
    */
@@ -249,14 +262,16 @@ export const useAiChatStore = defineStore('aiChat', () => {
     const isFirstTurn = !chatMessages.value.some(m => m.role === 'user')
     const settings = chatSettings.value
     const taskId = await RunChat(sessionId, prompt, settings.permissionMode, settings.modelName)
-    // 乐观态：resolve 即进程已启动，任务直接置 running（queued 态仅由 queued 事件
-    // 兜底，且不回退已运行任务）+ user 气泡就地追加
-    chatTask.value = {
-      taskId,
-      chatSessionId: sessionId,
-      status: 'running',
-      reply: '',
-      prompt
+    const sessionBusy = Object.values(chatTasks.value).some(t => t.chatSessionId === sessionId)
+    chatTasks.value = {
+      ...chatTasks.value,
+      [taskId]: {
+        taskId,
+        chatSessionId: sessionId,
+        status: sessionBusy ? 'queued' : 'running',
+        reply: '',
+        prompt
+      }
     }
     chatMessages.value = [
       ...chatMessages.value,
@@ -276,81 +291,87 @@ export const useAiChatStore = defineStore('aiChat', () => {
     return taskId
   }
 
-  /** 取消在途对话任务（杀 claude 进程树）。无在途任务返回 false。 */
+  /**
+   * 取消当前会话的全部在途轮次（执行中发 interrupt 中断，排队中直接摘除，
+   * 终态均经 done 事件收尾）。无在途轮次返回 false。
+   */
   async function cancelChatTask() {
-    if (!chatTask.value) return false
-    const taskId = chatTask.value.taskId
-    const ok = await CancelChatTask(taskId)
-    // 排队取消立即生效（后端直接 emit done）；运行中取消等 done 事件收尾
-    if (chatTask.value && chatTask.value.status === 'queued') {
-      chatTask.value = null
-    }
-    return ok
+    const tasks = currentSessionChatTasks.value
+    if (!tasks.length) return false
+    await Promise.all(tasks.map(t => CancelChatTask(t.taskId)))
+    return true
   }
 
   /**
-   * 在途任务状态恢复（事件丢失兜底）：拉 GetChatTaskState 覆盖本地任务态。
-   * 任务已不存在（后端重启等）时清空任务态防卡死。
+   * 在途轮次状态恢复（事件丢失兜底）：拉后端全量在途轮次覆盖本地注册表。
+   * 本地有而后端查无的轮次（已终态但 done 丢失）摘除，其会话为当前选中时
+   * 重载消息定型。
    */
   async function restoreChatTaskState() {
-    const task = chatTask.value
-    if (!task) return
+    let tasks
     try {
-      const state = await GetChatTaskState(task.taskId)
-      if (!state) {
-        chatTask.value = null
-        return
-      }
-      if (state.running) {
-        task.status = 'running'
-        task.reply = state.reply || task.reply
-      } else if (!state.queued) {
-        // 已终止但 done 事件丢失：清任务态，消息定型交由 GetChatSession 重载
-        chatTask.value = null
-        if (task.chatSessionId === selectedChatSessionId.value) {
-          await selectChatSession(task.chatSessionId)
-        }
-      }
+      tasks = (await ListChatActiveTasks('')) || []
     } catch (error) {
       debug.log('恢复对话任务状态失败:', error)
+      return
+    }
+    const next = {}
+    for (const st of tasks) {
+      next[st.taskId] = {
+        taskId: st.taskId,
+        chatSessionId: st.chatSessionId,
+        status: st.running ? 'running' : 'queued',
+        reply: st.reply || '',
+        prompt: ''
+      }
+    }
+    // 本地有而后端查无：done 事件丢失的已终态轮次，摘除并重载其会话
+    const lostSessions = new Set()
+    for (const t of Object.values(chatTasks.value)) {
+      if (!next[t.taskId]) lostSessions.add(t.chatSessionId)
+    }
+    chatTasks.value = next
+    for (const sessionId of lostSessions) {
+      if (sessionId === selectedChatSessionId.value) {
+        await selectChatSession(sessionId)
+      }
     }
   }
 
   // ----- chat-task:* 事件 handler（组件 EventsOn 绑定，按 taskId 对号）-----
 
-  /** chat-task:queued：排队兜底确认。仅补排队态，不把已运行的任务回退为排队。 */
+  /** chat-task:queued：排队兜底确认。仅补排队态，不把已运行的轮次回退为排队。 */
   function onChatTaskQueued(ev) {
-    const task = chatTask.value
-    if (!task || task.taskId !== ev?.taskId) return
-    if (task.status === 'running') return
+    const task = chatTasks.value[ev?.taskId]
+    if (!task || task.status === 'running') return
     task.status = 'queued'
   }
 
-  /** chat-task:started：后端取得并发槽位转执行态（幂等）。 */
+  /** chat-task:started：轮次写入 stdin 开始执行（排队轮推进，幂等）。 */
   function onChatTaskStarted(ev) {
-    const task = chatTask.value
-    if (!task || task.taskId !== ev?.taskId) return
-    task.status = 'running'
+    const task = chatTasks.value[ev?.taskId]
+    if (task) task.status = 'running'
   }
 
   /** chat-task:output：流式增量追加到本轮回复累积。 */
   function onChatTaskOutput(ev) {
-    const task = chatTask.value
-    if (!task || task.taskId !== ev?.taskId) return
-    task.reply += ev.text || ''
+    const task = chatTasks.value[ev?.taskId]
+    if (task) task.reply += ev.text || ''
   }
 
   /**
-   * chat-task:done：任务定型。清理任务态、重载会话列表（活跃时间排序变化）、
+   * chat-task:done：轮次定型。从注册表摘除、重载会话列表（活跃时间排序变化）、
    * done 会话为当前选中会话时重载消息（与后端持久化对齐，覆盖乐观态）。
    * @param {object} result model.ChatTaskRunResult 形状
-   * @returns {boolean} 是否为本 store 持有的任务（供调用方决定是否提示）
+   * @returns {boolean} 是否为本 store 持有的轮次（供调用方决定是否提示）
    */
   async function handleChatTaskDone(result) {
-    const task = chatTask.value
-    if (!task || task.taskId !== result?.taskId) return false
+    const task = chatTasks.value[result?.taskId]
+    if (!task) return false
     const sessionId = task.chatSessionId
-    chatTask.value = null
+    const next = { ...chatTasks.value }
+    delete next[result.taskId]
+    chatTasks.value = next
     await loadChatSessions()
     if (sessionId === selectedChatSessionId.value) {
       await selectChatSession(sessionId)
@@ -467,9 +488,9 @@ export const useAiChatStore = defineStore('aiChat', () => {
     deleteChatSession,
     renameChatSession,
     // 任务域
-    chatTask,
+    chatTasks,
+    currentSessionChatTasks,
     chatInFlight,
-    chatTaskInCurrentSession,
     runChat,
     cancelChatTask,
     restoreChatTaskState,

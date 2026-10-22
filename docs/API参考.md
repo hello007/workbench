@@ -353,7 +353,7 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 
 ## 22. AI 对话
 
-AI 对话工作台（活动栏「AI 对话」面板）：多会话持续式对话。会话/消息/目录/模板/配置独立持久化到 `data/ai_chat/`。对话任务异步事件流经 EventSink 推送（`chat-task:*`，各事件 payload 形状不同）：`queued` 载荷 `{taskId}`；`started` 载荷 `{taskId, chatSessionId}`；`output` 载荷 `{taskId, chatSessionId, text}`（流式文本增量）；仅 `done` 载荷为 `model.ChatTaskRunResult` 全量结果（全文回复/claude 会话 id/退出码/错误/取消标记）。`RunChat` 自动在会话已有 claude session id 时追加 `--resume` 续上下文。
+AI 对话工作台（活动栏「AI 对话」面板）：**持续会话进程式**多会话对话（每会话一个常驻 claude 进程，stdin 流式注入驱动轮次）。会话/消息/目录/模板/配置独立持久化到 `data/ai_chat/`。对话任务异步事件流经 EventSink 推送：轮次流 `chat-task:*`（`queued` 载荷 `{taskId}`；`started` 载荷 `{taskId, chatSessionId}`；`output` 载荷 `{taskId, chatSessionId, text}`（流式文本增量）；`done` 载荷为 `model.ChatTaskRunResult` 全量结果）+ 审批流 `chat-approval:*`（`request` 载荷 `model.ChatApprovalRequest`；`cancelled` 载荷 `{requestId, chatSessionId, reason}`）。运行中插话 = 同会话再调 `RunChat`（排队注入，不再拒绝）；工具授权经 `RespondChatApproval` 弹窗应答；进程空闲/参数变更自动重启并 `--resume` 续上下文。
 
 ### 会话 CRUD
 
@@ -379,9 +379,11 @@ AI 对话工作台（活动栏「AI 对话」面板）：多会话持续式对�
 
 | 方法 | 签名 | 语义 | 返回值 |
 |---|---|---|---|
-| `RunChat` | `(chatSessionID, prompt, permissionMode, modelName) => Promise<string>` | 执行一轮对话（permissionMode 仅非 default 时传 claude，modelName 空 = claude 默认），返回任务 id；prompt 为空拒绝（`E_CHAT_EMPTY_PROMPT`），同会话已有进行中/排队任务拒绝（`E_CHAT_IN_PROGRESS`） | taskID |
-| `GetChatTaskState` | `(taskID) => Promise<ChatTaskState>` | 查询对话任务状态（回复累积文本/claude 会话 id/运行态，切页恢复用；不存在返回 null） | ChatTaskState |
-| `CancelChatTask` | `(taskID) => Promise<boolean>` | 取消运行中/排队中的对话任务（杀 claude 及其子进程树） | 是否成功 |
+| `RunChat` | `(chatSessionID, prompt, permissionMode, modelName) => Promise<string>` | 提交一轮对话（permissionMode 仅非 default 时传 claude，modelName 空 = claude 默认），返回轮次 id；运行中再发 = 排队注入（前序轮 result 后依序执行）；prompt 为空拒绝（`E_CHAT_EMPTY_PROMPT`）；新会话进程槽满拒绝（`E_CHAT_PROCESS_LIMIT`，上限 4） | taskID |
+| `GetChatTaskState` | `(taskID) => Promise<ChatTaskState>` | 查询单轮次状态（回复累积文本/claude 会话 id/运行态；不存在返回 null；多轮次恢复用 `ListChatActiveTasks`） | ChatTaskState |
+| `ListChatActiveTasks` | `(chatSessionID) => Promise<ChatTaskState[]>` | 列出会话全部在途轮次（排队+执行中，按开始时间升序；chatSessionID 空 = 全部会话），面板切回恢复用 | ChatTaskState 数组 |
+| `CancelChatTask` | `(taskID) => Promise<boolean>` | 取消对话轮次（执行中发 interrupt 中断当前轮 / 排队中直接摘除），被中断轮部分回复保留入档 | 是否成功 |
+| `RespondChatApproval` | `(requestID, allow) => Promise<void>` | 应答工具授权审批弹窗（`chat-approval:request` 事件驱动）：allow=true 放行（回传原 input 作 updatedInput），false 拒绝（模型收到拒绝原因）；请求不存在/已失效报错 | — |
 
 ### 模板 CRUD
 
@@ -759,6 +761,8 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 **ChatTaskState** — 对话任务当前状态（`GetChatTaskState` 拉取，切页恢复/轮询兜底；`taskId` / `chatSessionId` / `running` / `queued` / `claudeSessionId` / `reply`（本轮回复累积文本）/ `error` / `startedAt`）
 
 **ChatTaskRunResult** — 单轮对话执行结果（`chat-task:done` 事件 payload；`taskId` / `chatSessionId` / `claudeSessionId` / `reply`（assistant 回复全文）/ `exitCode` / `error` / `canceled`）
+
+**ChatApprovalRequest** — 工具授权请求（`chat-approval:request` 事件 payload；`requestId`（claude 侧 UUID，应答匹配键）/ `chatSessionId` / `taskId`（所属在途轮次）/ `toolName` / `input`（工具入参 map，弹窗展示） / `description`）
 
 ### 30.7 素材管理
 

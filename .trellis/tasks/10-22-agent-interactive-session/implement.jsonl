@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/ai-chat-service.md", "reason": "ChatService 现契约：RunChat 链路/chat-question 块/processFactory/串行保护/落盘时序，执行模型重构的对照基线"}
+{"file": "docs/spec/browser-channel.md", "reason": "WS 通道契约与断线续传 seq/resume，审批上行通道设计前置"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "AppError 三处同步规则（app_error.go + error.js + API参考），新错误码与 E_CHAT_IN_PROGRESS 退役涉及"}
+{"file": ".trellis/tasks/10-22-agent-interactive-session/research/claude-cli-streaming-input.md", "reason": "CLI 流式协议实测报告：参数组合/control_request 应答格式/生命周期/已知坑"}
+{"file": ".trellis/tasks/10-22-agent-interactive-session/research/repo-current-state.md", "reason": "仓内影响面分层梳理：chatProcess 接口/串行保护守卫面/WS 上行/复用点"}

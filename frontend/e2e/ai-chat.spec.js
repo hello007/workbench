@@ -14,7 +14,7 @@
  * done 事件 delayMs 延后派发，为「流式中」断言留出确定性观察窗口
  * （模式同 ai-function.spec.js 取消链路的 done 延迟派发）。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, emitWailsEvent } from './fixtures'
 
 const PROMPT = '帮我梳理这个项目的目录结构'
 const REPLY = '这是 AI 的回复：**加粗要点**。\n'
@@ -148,6 +148,161 @@ test.describe('AI 对话工作台', () => {
       await expect
         .poll(() => getWailsCalls(page, 'UpdateChatSessionTitle'))
         .toEqual([{ method: 'UpdateChatSessionTitle', args: ['chatsession-e2e-1', PROMPT] }])
+    })
+
+    test('运行中插话：流式未完成时再发消息直接入队（不弹确认不取消）', async ({ page }) => {
+      await openAiChatPage(page)
+
+      await page.locator('.panel-actions').getByRole('button', { name: '添加目录' }).click()
+      const dialog = page.locator('.el-dialog:visible')
+      await dialog.getByPlaceholder('例如: D:\\workspace\\demo').fill('D:/e2e-demo/demo-repo')
+      await dialog.getByRole('button', { name: '确定' }).click()
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+      await expect(page.locator('.session-btn-label')).toHaveText('新会话')
+
+      // 第一条消息：done 延迟 2.5s，制造流式窗口
+      await page.getByPlaceholder('输入需求').fill(PROMPT)
+      await page.locator('.chat-send-btn').click()
+      await expect(page.locator('.chat-msg-bubble.is-streaming')).toBeVisible()
+
+      // 流式中直接发第二条（插话）：无确认弹窗、RunChat 第二次调用
+      const SECOND = '补充一下：重点看 service 层'
+      await page.getByPlaceholder('输入需求').fill(SECOND)
+      await page.locator('.chat-send-btn').click()
+
+      await expect
+        .poll(async () => (await getWailsCalls(page, 'RunChat')).length, { timeout: 5000 })
+        .toBe(2)
+      const runCalls = await getWailsCalls(page, 'RunChat')
+      expect(runCalls[1]).toEqual({
+        method: 'RunChat',
+        args: ['chatsession-e2e-1', SECOND, 'default', '']
+      })
+      // 插话 user 气泡就地追加（两条 user 消息）
+      await expect(page.locator('.chat-msg-row.user .chat-msg-text')).toHaveText([PROMPT, SECOND])
+      // 停止按钮出现（有在途轮次），发送按钮仍在（发送恒可用）
+      await expect(page.locator('.chat-stop-btn')).toBeVisible()
+      await expect(page.locator('.chat-send-btn')).toBeVisible()
+      // 无任何确认弹窗（持续会话模型：切换/插话不打断）
+      await expect(page.locator('.el-message-box')).toHaveCount(0)
+    })
+
+    test('停止按钮：中断当前轮（CancelChatTask 按在途轮次调用）', async ({ page }) => {
+      await openAiChatPage(page)
+
+      await page.locator('.panel-actions').getByRole('button', { name: '添加目录' }).click()
+      const dialog = page.locator('.el-dialog:visible')
+      await dialog.getByPlaceholder('例如: D:\\workspace\\demo').fill('D:/e2e-demo/demo-repo')
+      await dialog.getByRole('button', { name: '确定' }).click()
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+
+      await page.getByPlaceholder('输入需求').fill(PROMPT)
+      await page.locator('.chat-send-btn').click()
+      await expect(page.locator('.chat-stop-btn')).toBeVisible()
+
+      await page.locator('.chat-stop-btn').click()
+      await expect
+        .poll(() => getWailsCalls(page, 'CancelChatTask'))
+        .toEqual([{ method: 'CancelChatTask', args: ['chattask-e2e-1'] }])
+    })
+  })
+
+  test.describe('工具授权审批', () => {
+    test.use({
+      wailsOverrides: {
+        ListChatDirectories: [CHAT_DIR],
+        ListChatSessions: [EMPTY_SESSION],
+        GetChatSession: EMPTY_SESSION,
+        RunChat: 'chattask-approval-1',
+        RespondChatApproval: null
+      }
+    })
+
+    test('审批请求弹窗：允许应答 RespondChatApproval(requestId, true)', async ({ page }) => {
+      await openAiChatPage(page)
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+      await expect(page.locator('.session-btn-label')).toHaveText('新会话')
+
+      await page.getByPlaceholder('输入需求').fill('创建一个目录')
+      await page.locator('.chat-send-btn').click()
+
+      // 后端下发审批请求（chat-approval:request 事件）
+      await emitWailsEvent(page, 'chat-approval:request', {
+        requestId: 'approval-req-1',
+        chatSessionId: 'chatsession-e2e-1',
+        taskId: 'chattask-approval-1',
+        toolName: 'Bash',
+        input: { command: 'mkdir demo', description: '' },
+        description: '创建目录 demo'
+      })
+
+      // 审批弹窗：工具名 + 描述 + 入参
+      const box = page.locator('.el-message-box')
+      await expect(box).toBeVisible()
+      await expect(box).toContainText('工具授权：Bash')
+      await expect(box).toContainText('创建目录 demo')
+      await expect(box).toContainText('mkdir demo')
+
+      // 允许：按 requestId 应答
+      await box.getByRole('button', { name: '允许' }).click()
+      await expect
+        .poll(() => getWailsCalls(page, 'RespondChatApproval'))
+        .toEqual([{ method: 'RespondChatApproval', args: ['approval-req-1', true] }])
+    })
+
+    test('审批请求弹窗：拒绝应答 RespondChatApproval(requestId, false)', async ({ page }) => {
+      await openAiChatPage(page)
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+
+      await page.getByPlaceholder('输入需求').fill('删除文件')
+      await page.locator('.chat-send-btn').click()
+
+      await emitWailsEvent(page, 'chat-approval:request', {
+        requestId: 'approval-req-2',
+        chatSessionId: 'chatsession-e2e-1',
+        taskId: 'chattask-approval-1',
+        toolName: 'Bash',
+        input: { command: 'rm -rf tmp' },
+        description: ''
+      })
+      const box = page.locator('.el-message-box')
+      await expect(box).toBeVisible()
+
+      // 拒绝：行为 deny + 拒绝原因回传模型
+      await box.getByRole('button', { name: '拒绝' }).click()
+      await expect
+        .poll(() => getWailsCalls(page, 'RespondChatApproval'))
+        .toEqual([{ method: 'RespondChatApproval', args: ['approval-req-2', false] }])
+    })
+
+    test('审批请求失效（轮结束自动拒绝）：cancelled 撤队列不再重复弹窗', async ({ page }) => {
+      // 弹窗确认挂起：审批仍在展示时收到 cancelled
+      await openAiChatPage(page)
+      await page.locator('.chat-dir-item', { hasText: '示例项目' }).click()
+
+      await page.getByPlaceholder('输入需求').fill('建目录')
+      await page.locator('.chat-send-btn').click()
+
+      await emitWailsEvent(page, 'chat-approval:request', {
+        requestId: 'approval-req-3',
+        chatSessionId: 'chatsession-e2e-1',
+        taskId: 'chattask-approval-1',
+        toolName: 'Bash',
+        input: {},
+        description: ''
+      })
+      await expect(page.locator('.el-message-box')).toBeVisible()
+
+      // 轮结束自动拒绝：cancelled 事件不影响已展示弹窗（用户应答时后端报已失效静默降级）
+      await emitWailsEvent(page, 'chat-approval:cancelled', {
+        requestId: 'approval-req-3',
+        chatSessionId: 'chatsession-e2e-1',
+        reason: '该轮对话已结束，审批请求已失效'
+      })
+      await expect(page.locator('.el-message-box')).toBeVisible()
+      await expect
+        .poll(() => getWailsCalls(page, 'RespondChatApproval').then((c) => c.length))
+        .toBe(0)
     })
   })
 

@@ -56,7 +56,7 @@ type ChatTaskState struct {
 	TaskID          string `json:"taskId"`
 	ChatSessionID   string `json:"chatSessionId"` // 所属 WorkBench 会话 id
 	Running         bool   `json:"running"`
-	Queued          bool   `json:"queued"`          // 排队中（等待并发槽位，未起进程）
+	Queued          bool   `json:"queued"`          // 排队中（Go 侧 FIFO 排队注入，等待前序轮 result 后写入 stdin）
 	ClaudeSessionID string `json:"claudeSessionId"` // claude 会话 id（result 事件提取，供下一轮 --resume）
 	Reply           string `json:"reply"`           // 本轮 assistant 回复累积文本
 	Error           string `json:"error"`
@@ -73,6 +73,19 @@ type ChatTaskRunResult struct {
 	ExitCode        int    `json:"exitCode"`
 	Error           string `json:"error"`
 	Canceled        bool   `json:"canceled"`
+}
+
+// ChatApprovalRequest 工具授权请求（claude control_request/can_use_tool），
+// 经 chat-approval:request 事件推送前端弹窗审批，应答经 RespondChatApproval
+// 回写（按 RequestID 匹配 control_response）。所属轮结束/进程退出时未决请求
+// 自动拒绝并经 chat-approval:cancelled 事件通知前端撤弹窗。
+type ChatApprovalRequest struct {
+	RequestID     string         `json:"requestId"`     // 审批请求 id（claude 侧 UUID，应答匹配键）
+	ChatSessionID string         `json:"chatSessionId"` // 所属 WorkBench 会话 id
+	TaskID        string         `json:"taskId"`        // 所属对话轮次 id（产生该请求的在途轮）
+	ToolName      string         `json:"toolName"`      // 请求授权的工具名（如 Bash/Write）
+	Input         map[string]any `json:"input"`         // 工具入参（弹窗展示；allow 时原样回传作 updatedInput）
+	Description   string         `json:"description"`   // 工具调用描述（弹窗展示辅助）
 }
 
 // ChatDirectory AI 对话侧栏常用目录项。

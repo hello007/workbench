@@ -16,6 +16,8 @@ import {
   DeleteChatSession,
   RunChat,
   CancelChatTask,
+  ListChatActiveTasks,
+  RespondChatApproval,
   ListChatTemplates,
   AddChatTemplate,
   UpdateChatTemplate,
@@ -85,6 +87,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UpdateChatSessionTitle: vi.fn(() => Promise.resolve()),
   RunChat: vi.fn(() => Promise.resolve('chattask-1')),
   CancelChatTask: vi.fn(() => Promise.resolve(true)),
+  ListChatActiveTasks: vi.fn(() => Promise.resolve([])),
+  RespondChatApproval: vi.fn(() => Promise.resolve()),
   GetChatTaskState: vi.fn(() => Promise.resolve(null)),
   ListChatTemplates: vi.fn(() => Promise.resolve([
     { id: 'tpl-dir', scope: 'directory', directoryId: 'chatdir-1', name: '目录模板', content: '目录模板内容' },
@@ -832,8 +836,7 @@ describe('AiChatPanel.vue', () => {
       expect(wrapper.findAll('.chat-msg-row.assistant').length).toBe(1)
     })
 
-    it('在途任务时切换目录：确认后取消任务并切换', async () => {
-      ElMessageBox.confirm.mockResolvedValueOnce()
+    it('在途任务时切换目录：不打断在途对话直接切换（持续会话模型）', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
@@ -845,30 +848,13 @@ describe('AiChatPanel.vue', () => {
       await wrapper.findAll('.chat-dir-item')[1].trigger('click')
       await flushPromises()
 
-      expect(ElMessageBox.confirm).toHaveBeenCalled()
-      expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
+      // 不确认、不取消：后台会话继续运行
+      expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+      expect(CancelChatTask).not.toHaveBeenCalled()
       expect(useAiChatStore().selectedChatDirectoryId).toBe('chatdir-2')
     })
 
-    it('在途任务时切换目录：留在当前不切换不取消', async () => {
-      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
-      wrapper = createWrapper()
-      await flushPromises()
-      await selectFirstDirectory(wrapper)
-
-      wrapper.vm.$.setupState.inputText = 'hi'
-      await wrapper.vm.$.setupState.handleSend()
-      await flushPromises()
-
-      await wrapper.findAll('.chat-dir-item')[1].trigger('click')
-      await flushPromises()
-
-      expect(CancelChatTask).not.toHaveBeenCalled()
-      expect(useAiChatStore().selectedChatDirectoryId).toBe('chatdir-1')
-    })
-
-    it('在途任务时切换会话同样确认拦截', async () => {
-      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+    it('在途任务时切换会话：不打断在途对话直接切换', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
@@ -880,31 +866,12 @@ describe('AiChatPanel.vue', () => {
       await wrapper.vm.$.setupState.handleSelectSession('chatsession-old')
       await flushPromises()
 
-      expect(ElMessageBox.confirm).toHaveBeenCalled()
-      expect(useAiChatStore().selectedChatSessionId).toBe('chatsession-new')
+      expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+      expect(CancelChatTask).not.toHaveBeenCalled()
+      expect(useAiChatStore().selectedChatSessionId).toBe('chatsession-old')
     })
 
-    it('取消任务失败时中止切换（不带着在途任务切走）', async () => {
-      ElMessageBox.confirm.mockResolvedValueOnce()
-      CancelChatTask.mockRejectedValueOnce({ message: '进程句柄失效' })
-      wrapper = createWrapper()
-      await flushPromises()
-      await selectFirstDirectory(wrapper)
-
-      wrapper.vm.$.setupState.inputText = 'hi'
-      await wrapper.vm.$.setupState.handleSend()
-      await flushPromises()
-
-      await wrapper.findAll('.chat-dir-item')[1].trigger('click')
-      await flushPromises()
-
-      expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
-      expect(ElMessage.error).toHaveBeenCalledWith('取消任务失败: 进程句柄失效')
-      // 取消失败：不切换，留在当前目录
-      expect(useAiChatStore().selectedChatDirectoryId).toBe('chatdir-1')
-    })
-
-    it('删除在途会话：先确认取消任务再删除（防孤儿消息复活）', async () => {
+    it('删除在途会话：确认后先取消该会话在途轮次再删除（防孤儿消息复活）', async () => {
       ElMessageBox.confirm.mockResolvedValue()
       wrapper = createWrapper()
       await flushPromises()
@@ -917,13 +884,13 @@ describe('AiChatPanel.vue', () => {
       await wrapper.vm.$.setupState.handleDeleteSession()
       await flushPromises()
 
-      // 两次确认：先「取消任务并删除」再「删除会话」
-      expect(ElMessageBox.confirm).toHaveBeenCalledTimes(2)
+      // 一次确认（删除会话）；在途轮次取消由 store.deleteChatSession 统一处理
+      expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
       expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
       expect(DeleteChatSession).toHaveBeenCalledWith('chatsession-new')
     })
 
-    it('删除在途会话：取消确认被拒时不删除不取消', async () => {
+    it('删除会话确认被拒时不删除不取消', async () => {
       ElMessageBox.confirm.mockRejectedValueOnce('cancel')
       wrapper = createWrapper()
       await flushPromises()
@@ -938,6 +905,51 @@ describe('AiChatPanel.vue', () => {
 
       expect(CancelChatTask).not.toHaveBeenCalled()
       expect(DeleteChatSession).not.toHaveBeenCalled()
+    })
+
+    it('chat-approval:request 弹窗允许：RespondChatApproval(requestId, true)', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+
+      eventHandlers['chat-approval:request']({
+        requestId: 'req-1', chatSessionId: 'chatsession-new', taskId: 'chattask-1',
+        toolName: 'Bash', input: { command: 'mkdir d1' }, description: '创建目录 d1'
+      })
+      await flushPromises()
+
+      expect(ElMessageBox.confirm).toHaveBeenCalled()
+      expect(RespondChatApproval).toHaveBeenCalledWith('req-1', true)
+    })
+
+    it('chat-approval:request 弹窗拒绝：RespondChatApproval(requestId, false)', async () => {
+      ElMessageBox.confirm.mockRejectedValueOnce('cancel')
+      wrapper = createWrapper()
+      await flushPromises()
+
+      eventHandlers['chat-approval:request']({
+        requestId: 'req-2', chatSessionId: 'chatsession-new', taskId: 'chattask-1',
+        toolName: 'Write', input: { path: 'x' }, description: ''
+      })
+      await flushPromises()
+
+      expect(RespondChatApproval).toHaveBeenCalledWith('req-2', false)
+    })
+
+    it('chat-approval:cancelled 撤销队列中的待弹审批', async () => {
+      ElMessageBox.confirm.mockImplementation(() => new Promise(() => {})) // 挂起不决
+      wrapper = createWrapper()
+      await flushPromises()
+
+      eventHandlers['chat-approval:request']({
+        requestId: 'req-3', chatSessionId: 'chatsession-new', taskId: 'chattask-1',
+        toolName: 'Bash', input: {}, description: ''
+      })
+      await flushPromises()
+      // 弹窗展示中收到 cancelled：用户应答时后端报已失效（静默降级）
+      eventHandlers['chat-approval:cancelled']({ requestId: 'req-3', chatSessionId: 'chatsession-new' })
+      expect(RespondChatApproval).not.toHaveBeenCalled()
+      wrapper.unmount()
+      wrapper = null
     })
 
     it('数据加载完成前卸载也能注销全部监听器（先注册后加载）', async () => {

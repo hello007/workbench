@@ -17,8 +17,9 @@ export const ErrorCode = Object.freeze({
   RepoConfigUnsupportedVersion: 'E_REPO_CONFIG_UNSUPPORTED_VERSION', // 仓库列表配置导入：manifestVersion 缺失或高于当前支持（error）
   // AI 对话域错误码（AI 对话工作台多轮会话），取值与 model/app_error.go Chat 域段一致。
   ChatSessionNotFound: 'E_CHAT_SESSION_NOT_FOUND', // 会话不存在或已删除（error）
-  ChatInProgress: 'E_CHAT_IN_PROGRESS', // 该会话已有对话进行中，本轮拒绝（warning）
+  ChatInProgress: 'E_CHAT_IN_PROGRESS', // 该会话已有对话进行中，本轮拒绝（warning；持续会话模型下后端已不再产生，保留映射兼容旧数据）
   ChatEmptyPrompt: 'E_CHAT_EMPTY_PROMPT', // 对话内容为空（warning）
+  ChatProcessLimit: 'E_CHAT_PROCESS_LIMIT', // 同时活跃的对话会话进程已达上限，新会话无法启动（warning）
   // 进程管理域错误码（工具箱·进程管理：端口/关键字查进程 + 停止/强杀），
   // 取值与 model/app_error.go Process 域段一致。
   ProcessEnumFailed: 'E_PROCESS_ENUM_FAILED', // 进程枚举命令执行失败（error）
@@ -69,6 +70,7 @@ const WARNING_CODES = new Set([
   ErrorCode.SearchTimeout,
   ErrorCode.DiffToolNotConfigured,
   ErrorCode.ChatInProgress,
+  ErrorCode.ChatProcessLimit,
   ErrorCode.ChatEmptyPrompt,
   ErrorCode.ProcessEnumTimeout,
   ErrorCode.ProcessNotFound,

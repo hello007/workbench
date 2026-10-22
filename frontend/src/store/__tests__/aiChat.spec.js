@@ -15,7 +15,8 @@ import {
   UpdateChatSessionTitle,
   RunChat,
   CancelChatTask,
-  GetChatTaskState,
+  ListChatActiveTasks,
+  RespondChatApproval,
   ListChatTemplates,
   AddChatTemplate,
   UpdateChatTemplate,
@@ -57,6 +58,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UpdateChatSessionTitle: vi.fn(() => Promise.resolve()),
   RunChat: vi.fn(() => Promise.resolve('chattask-1')),
   CancelChatTask: vi.fn(() => Promise.resolve(true)),
+  ListChatActiveTasks: vi.fn(() => Promise.resolve([])),
+  RespondChatApproval: vi.fn(() => Promise.resolve()),
   GetChatTaskState: vi.fn(() => Promise.resolve(null)),
   ListChatTemplates: vi.fn(() => Promise.resolve([
     { id: 'tpl-dir', scope: 'directory', directoryId: 'chatdir-1', name: '目录模板', content: 'D' },
@@ -305,9 +308,9 @@ describe('aiChat store', () => {
     expect(store.selectedChatSession.title).toBe('改名')
   })
 
-  // ===== 任务域（PR3）=====
+  // ===== 任务域（持续会话模型：多轮次注册表 + 排队注入）=====
 
-  it('runChat 以当前配置发送并乐观置 running 任务态与 user 气泡', async () => {
+  it('runChat 以当前配置发送并乐观登记轮次与 user 气泡', async () => {
     const store = await setupWithDirectory()
     await store.saveChatSettings('acceptEdits', 'opus')
 
@@ -315,14 +318,26 @@ describe('aiChat store', () => {
     expect(RunChat).toHaveBeenCalledWith('chatsession-new', '帮我看看这个项目', 'acceptEdits', 'opus')
     expect(taskId).toBe('chattask-1')
     expect(store.chatInFlight).toBe(true)
-    expect(store.chatTask.taskId).toBe('chattask-1')
-    expect(store.chatTask.chatSessionId).toBe('chatsession-new')
-    // RunChat resolve 即进程已启动，任务直接为 running（非排队态）
-    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTasks['chattask-1'].chatSessionId).toBe('chatsession-new')
+    // 空闲路径：会话无在途轮次，乐观置 running（started 事件先于 resolve 被忽略）
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
     // 乐观 user 气泡追加（GetChatSession 基准 2 条 + 1 条乐观）
     expect(store.chatMessages.length).toBe(3)
     expect(store.chatMessages[2].role).toBe('user')
     expect(store.chatMessages[2].content).toBe('帮我看看这个项目')
+  })
+
+  it('runChat 运行中再发（插话）被接受且乐观置 queued', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('第一问')
+    RunChat.mockResolvedValueOnce('chattask-2')
+
+    const taskId2 = await store.runChat('插话内容')
+    expect(taskId2).toBe('chattask-2')
+    expect(store.chatInFlight).toBe(true)
+    // 会话已有在途轮次：本条将排队（busy 路径 started 事件后到正常对号）
+    expect(store.chatTasks['chattask-2'].status).toBe('queued')
+    expect(store.currentSessionChatTasks.length).toBe(2)
   })
 
   it('runChat 首条消息且默认标题时自动生成会话标题', async () => {
@@ -378,41 +393,52 @@ describe('aiChat store', () => {
     let resolveRun
     RunChat.mockImplementationOnce(() => new Promise((r) => { resolveRun = r }))
     const pending = store.runChat('hi')
-    // 真实时序：后端先 emit 事件再返回 bound call，此时本地任务尚未建立
+    // 真实时序：后端先 emit 事件再返回 bound call，此时本地轮次尚未登记
     store.onChatTaskQueued({ taskId: 'chattask-1' })
     store.onChatTaskStarted({ taskId: 'chattask-1', chatSessionId: 'chatsession-new' })
     store.onChatTaskOutput({ taskId: 'chattask-1', text: '早到增量' })
-    expect(store.chatTask).toBeNull()
+    expect(store.chatInFlight).toBe(false)
     resolveRun('chattask-1')
     await pending
     // resolve 即 running，早到的增量不被误记
-    expect(store.chatTask.status).toBe('running')
-    expect(store.chatTask.reply).toBe('')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
+    expect(store.chatTasks['chattask-1'].reply).toBe('')
   })
 
   it('onChatTaskStarted / onChatTaskOutput 按 taskId 对号更新，queued 不回退运行态', async () => {
     const store = await setupWithDirectory()
     await store.runChat('hi')
     // resolve 即 running；不匹配 taskId 的 started 不改状态
-    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
     store.onChatTaskStarted({ taskId: 'other' })
-    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
 
     // 已 running 时同任务 queued 事件不回退为排队态（F2 回归）
     store.onChatTaskQueued({ taskId: 'chattask-1' })
-    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
 
     // started 幂等
     store.onChatTaskStarted({ taskId: 'chattask-1' })
-    expect(store.chatTask.status).toBe('running')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
 
     store.onChatTaskOutput({ taskId: 'chattask-1', text: '你' })
     store.onChatTaskOutput({ taskId: 'chattask-1', text: '好' })
     store.onChatTaskOutput({ taskId: 'other', text: '忽略' })
-    expect(store.chatTask.reply).toBe('你好')
+    expect(store.chatTasks['chattask-1'].reply).toBe('你好')
   })
 
-  it('handleChatTaskDone 定型：清任务态 + 重载当前会话消息 + 重载列表', async () => {
+  it('排队轮 started 推进后转 running（插话轮正常对号）', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('第一问')
+    RunChat.mockResolvedValueOnce('chattask-2')
+    await store.runChat('插话')
+    expect(store.chatTasks['chattask-2'].status).toBe('queued')
+
+    store.onChatTaskStarted({ taskId: 'chattask-2', chatSessionId: 'chatsession-new' })
+    expect(store.chatTasks['chattask-2'].status).toBe('running')
+  })
+
+  it('handleChatTaskDone 定型：摘除轮次 + 重载当前会话消息 + 重载列表', async () => {
     const store = await setupWithDirectory()
     await store.runChat('hi')
     store.onChatTaskOutput({ taskId: 'chattask-1', text: '回复' })
@@ -437,68 +463,93 @@ describe('aiChat store', () => {
     expect(store.chatInFlight).toBe(true)
   })
 
-  it('cancelChatTask 运行中等 done 收尾，排队态兜底立即清任务态', async () => {
+  it('cancelChatTask 取消当前会话全部在途轮次，等 done 事件收尾', async () => {
     const store = await setupWithDirectory()
-    // RunChat resolve 即 running：取消后任务态保留，等 done 事件收尾
-    await store.runChat('hi')
+    await store.runChat('第一问')
+    RunChat.mockResolvedValueOnce('chattask-2')
+    await store.runChat('插话')
+
     await store.cancelChatTask()
     expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
+    expect(CancelChatTask).toHaveBeenCalledWith('chattask-2')
+    // 终态经 done 事件收尾（轮次仍登记）
     expect(store.chatInFlight).toBe(true)
 
-    // done 到达后清理
     await store.handleChatTaskDone({ taskId: 'chattask-1', canceled: true })
-    expect(store.chatInFlight).toBe(false)
-
-    // 排队态（兜底路径）：取消立即清任务态
-    store.chatTask = {
-      taskId: 'chattask-2', chatSessionId: 'chatsession-new', status: 'queued', reply: '', prompt: 'p'
-    }
-    await store.cancelChatTask()
-    expect(CancelChatTask).toHaveBeenCalledWith('chattask-2')
+    await store.handleChatTaskDone({ taskId: 'chattask-2', canceled: true })
     expect(store.chatInFlight).toBe(false)
   })
 
-  it('cancelChatTask 无在途任务返回 false', async () => {
+  it('cancelChatTask 无在途轮次返回 false', async () => {
     const store = await setupWithDirectory()
     expect(await store.cancelChatTask()).toBe(false)
     expect(CancelChatTask).not.toHaveBeenCalled()
   })
 
-  it('restoreChatTaskState 恢复运行中任务的回复累积', async () => {
+  it('restoreChatTaskState 以 ListChatActiveTasks 重建轮次注册表', async () => {
     const store = await setupWithDirectory()
     await store.runChat('hi')
-    GetChatTaskState.mockResolvedValueOnce({
-      taskId: 'chattask-1', running: true, queued: false, reply: '服务端累积回复'
-    })
+    ListChatActiveTasks.mockResolvedValueOnce([
+      { taskId: 'chattask-1', chatSessionId: 'chatsession-new', running: true, queued: false, reply: '服务端累积回复' },
+      { taskId: 'chattask-9', chatSessionId: 'chatsession-other', running: false, queued: true, reply: '' }
+    ])
     await store.restoreChatTaskState()
-    expect(store.chatTask.status).toBe('running')
-    expect(store.chatTask.reply).toBe('服务端累积回复')
+    expect(store.chatTasks['chattask-1'].status).toBe('running')
+    expect(store.chatTasks['chattask-1'].reply).toBe('服务端累积回复')
+    expect(store.chatTasks['chattask-9'].status).toBe('queued')
   })
 
-  it('restoreChatTaskState 任务已不存在时清空任务态', async () => {
-    const store = await setupWithDirectory()
-    await store.runChat('hi')
-    GetChatTaskState.mockResolvedValueOnce(null)
-    await store.restoreChatTaskState()
-    expect(store.chatInFlight).toBe(false)
-  })
-
-  it('restoreChatTaskState 终态且 done 丢失时清任务态并重载消息', async () => {
+  it('restoreChatTaskState 本地有而后端查无的轮次摘除并重载其会话（done 丢失兜底）', async () => {
     const store = await setupWithDirectory()
     await store.runChat('hi')
     GetChatSession.mockClear()
-    GetChatTaskState.mockResolvedValueOnce({
-      taskId: 'chattask-1', running: false, queued: false, reply: ''
-    })
+    ListChatActiveTasks.mockResolvedValueOnce([])
     await store.restoreChatTaskState()
     expect(store.chatInFlight).toBe(false)
     expect(GetChatSession).toHaveBeenCalledWith('chatsession-new')
   })
 
-  it('restoreChatTaskState 无任务时不调后端', async () => {
+  it('restoreChatTaskState 拉取失败静默保留本地态', async () => {
     const store = await setupWithDirectory()
+    await store.runChat('hi')
+    ListChatActiveTasks.mockRejectedValueOnce(new Error('boom'))
     await store.restoreChatTaskState()
-    expect(GetChatTaskState).not.toHaveBeenCalled()
+    expect(store.chatInFlight).toBe(true)
+  })
+
+  it('多会话并行：后台会话轮次事件不串入当前会话视图', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('当前会话问题')
+
+    // 模拟后台会话（chatsession-old）的在途轮次经恢复链路登记
+    ListChatActiveTasks.mockResolvedValueOnce([
+      { taskId: 'chattask-1', chatSessionId: 'chatsession-new', running: true, queued: false, reply: '当前回复' },
+      { taskId: 'chattask-bg', chatSessionId: 'chatsession-old', running: true, queued: false, reply: '后台回复' }
+    ])
+    await store.restoreChatTaskState()
+    // 当前会话视图只含本会话轮次（后台轮次不入流式气泡）
+    expect(store.currentSessionChatTasks.length).toBe(1)
+    expect(store.currentSessionChatTasks[0].taskId).toBe('chattask-1')
+
+    // 后台会话流式输出只更新其注册表条目（taskId 对号）
+    store.onChatTaskOutput({ taskId: 'chattask-bg', text: '后台增量' })
+    expect(store.chatTasks['chattask-bg'].reply).toBe('后台回复后台增量')
+    expect(store.chatTasks['chattask-1'].reply).toBe('当前回复')
+
+    // 后台会话 done：重载列表但不动当前会话消息视图
+    GetChatSession.mockClear()
+    await store.handleChatTaskDone({ taskId: 'chattask-bg', chatSessionId: 'chatsession-old' })
+    expect(GetChatSession).not.toHaveBeenCalled()
+    expect(store.chatTasks['chattask-bg']).toBeUndefined()
+    expect(store.chatTasks['chattask-1']).toBeDefined()
+  })
+
+  it('deleteChatSession 删除前取消该会话全部在途轮次（防孤儿消息复活）', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('hi')
+    await store.deleteChatSession('chatsession-new')
+    expect(CancelChatTask).toHaveBeenCalledWith('chattask-1')
+    expect(DeleteChatSession).toHaveBeenCalledWith('chatsession-new')
   })
 
   // ===== 模板域（PR3）=====

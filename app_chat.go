@@ -67,12 +67,31 @@ func (a *App) RunChat(chatSessionID, prompt, permissionMode, modelName string) (
 	return a.chatSvc.RunChat(chatSessionID, prompt, permissionMode, modelName)
 }
 
-// CancelChatTask 取消运行中/排队中的对话任务（杀 claude 及其子进程树）。
+// CancelChatTask 取消运行中/排队中的对话轮次（运行中发 interrupt 中断当前轮，
+// 排队中直接摘除）。
 func (a *App) CancelChatTask(taskID string) bool {
 	if a.chatSvc == nil {
 		return false
 	}
 	return a.chatSvc.CancelChatTask(taskID)
+}
+
+// ListChatActiveTasks 列出会话全部在途对话轮次（排队+执行中），面板切回时
+// 恢复任务态用。chatSessionID 为空返回全部会话的在途轮次。
+func (a *App) ListChatActiveTasks(chatSessionID string) []model.ChatTaskState {
+	if a.chatSvc == nil {
+		return nil
+	}
+	return a.chatSvc.ListChatActiveTasks(chatSessionID)
+}
+
+// RespondChatApproval 应答工具授权审批弹窗：allow=true 放行该工具调用，
+// false 拒绝（模型收到拒绝原因后可调整方案）。
+func (a *App) RespondChatApproval(requestID string, allow bool) error {
+	if a.chatSvc == nil {
+		return errors.New("AI 对话服务未初始化")
+	}
+	return a.chatSvc.RespondChatApproval(requestID, allow)
 }
 
 // GetChatTaskState 查询对话任务状态（回复累积文本、claude 会话 id、运行态）。
