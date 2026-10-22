@@ -20,6 +20,18 @@
  *     localStorage 清空后刷新页面的场景；
  *   - 注册表常驻：断线自动重连（指数退避，1s 起步、2 倍递增、30s 封顶），
  *     服务端向全部客户端广播，重连成功后事件自然恢复分发，无需重发订阅；
+ *   - 断线重连续传（见 server/ws.go 续传契约）：事件帧携带 hub 级单调序号
+ *     seq，本模块记录已收最大序号 lastSeq（内存态，多标签页各记各的）；
+ *     重连 open 时若已有基准（lastSeq 非空）发送握手帧 {"resume": lastSeq}
+ *     请求补发缺口，首连不发送（服务端从当前序号起广播，不重放历史）；
+ *   - 补发帧与重连注册窗口内的实时广播共用服务端发送队列（FIFO 交错到达，
+ *     补发集是窗口广播的超集），故握手后进入同步模式：序号帧先进缓冲不落地，
+ *     收到 ws-synced 完成标记后按 seq 升序去重一次性落地，保证业务事件有序
+ *     且不重不漏；缓冲量超限（服务端标记帧异常缺失的兜底）按断层处理；
+ *   - ws-gap 断层标记帧（补发判定为缺口：服务端缓冲溢出或重启后序号归零）：
+ *     放弃补发窗口，以服务端当前序号为新基准继续接收，经 connBanner 提示
+ *     「部分更新已跳过」，由各面板既有冷启动/状态查询链路或手动刷新补齐状态；
+ *   - 无 seq 字段的帧（老服务端兼容形态）直接分发，不推进序号基准；
  *   - 首次连接（页面生命周期内从未 open 成功）失败视为令牌缺失/失效
  *     （含裸连 cookie 认证 401），弹 token 输入门重试；已成功连接过的断线走
  *     静默退避重连（横幅提示，见 connBanner.js），连续失败达 3 次后终止静默
@@ -34,13 +46,17 @@
 
 import { getToken } from './token'
 import { requestToken } from './tokenGate'
-import { notifyConnected, notifyDisconnected, notifyUnreachable } from './connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap } from './connBanner'
 
 // 重连退避参数：基础 1s，指数递增，封顶 30s。
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 // 连续重连失败次数上限：达到后终止静默退避循环，转 token 门重新认证。
 const RECONNECT_FAIL_LIMIT = 3
+// 重连同步模式缓冲上限（帧数）：正常情况下服务端补发后必发 ws-synced 标记，
+// 缓冲不会累积到该量级；超限说明标记帧异常缺失（服务端版本错配等），按断层
+// 兜底处理，防止无界缓冲。服务端环形缓冲容量见 server/ws.go wsResumeBuffer。
+const SYNC_BUFFER_LIMIT = 5000
 // 服务端签发的访问令牌为 32 字节 hex（64 字符，见 server/token.go GenerateToken）。
 // 用于拦截「非空但形态非法」的令牌：非法字符作为子协议传入会使 new WebSocket
 // 同步抛 SyntaxError 未捕获，杀死重连链。空令牌不走此拦截——无令牌时裸连，
@@ -64,6 +80,13 @@ export function createEventBridge({ wsUrl }) {
   let reconnectAttempts = 0
   // 页面生命周期内是否成功 open 过（首次连接失败走 token 门、其后走静默重连的分界）。
   let everOpened = false
+  // 已收到的最大事件序号（null = 本页面尚未收过任何带 seq 的帧）。内存态，
+  // 多标签页各记各的；页面刷新后归 null，重连按新连接处理（不重放历史）。
+  let lastSeq = null
+  // 重连同步模式：resume 握手已发出、尚未收到 ws-synced 标记。期间序号帧
+  // 进缓冲不落地，待标记后按 seq 升序去重一次性落地（保证业务事件有序）。
+  let syncMode = false
+  let syncBuffer = null
 
   /**
    * 确保建立 WS 连接（已连接/连接中/等待令牌时为 no-op）。
@@ -93,6 +116,18 @@ export function createEventBridge({ wsUrl }) {
     socket.onopen = () => {
       everOpened = true
       reconnectAttempts = 0
+      if (lastSeq !== null) {
+        // 断线重连：携带已收最大序号请求补发缺口（首连无基准不发送，
+        // 服务端从当前序号起广播、不重放历史）。发送失败不单独处理——
+        // 连接异常会随即触发 onclose 走既有重连/门链路。
+        syncMode = true
+        syncBuffer = new Map()
+        try {
+          socket.send(JSON.stringify({ resume: lastSeq }))
+        } catch {
+          /* 连接异常路径由 onclose 兜底 */
+        }
+      }
       notifyConnected()
       emitState(true)
     }
@@ -104,6 +139,20 @@ export function createEventBridge({ wsUrl }) {
         return
       }
       if (!frame || typeof frame.event !== 'string') return
+      // 续传控制帧（无 seq，服务端不广播给业务监听器）：分发层拦截处理
+      if (frame.event === 'ws-gap') {
+        handleGap(frame)
+        return
+      }
+      if (frame.event === 'ws-synced') {
+        handleSynced()
+        return
+      }
+      if (typeof frame.seq === 'number' && Number.isFinite(frame.seq)) {
+        receiveSequenced(frame)
+        return
+      }
+      // 无 seq 帧（老服务端兼容形态）：直接分发，不推进序号基准
       dispatch(frame.event, Array.isArray(frame.data) ? frame.data : [])
     }
     socket.onclose = () => {
@@ -186,6 +235,80 @@ export function createEventBridge({ wsUrl }) {
         }
       }
     }
+  }
+
+  /**
+   * 处理带序号的业务事件帧：实时模式落地并推进序号基准；同步模式（重连
+   * 补发窗口）先进缓冲，待 ws-synced 标记后按序落地。
+   * @param {{event: string, data: unknown[], seq: number}} frame
+   */
+  function receiveSequenced(frame) {
+    if (syncMode) {
+      if (lastSeq !== null && frame.seq <= lastSeq) {
+        // 补发窗口内不应出现已收序号（防御：跨代际/异常服务端形态）
+        return
+      }
+      // 同 Map 键去重：同一帧可能经「注册窗口实时广播」与「补发集」两条
+      // 路径各到达一次（服务端同一 FIFO 队列交错），保留一份
+      if (!syncBuffer.has(frame.seq)) {
+        syncBuffer.set(frame.seq, frame)
+      }
+      if (syncBuffer.size > SYNC_BUFFER_LIMIT) {
+        // 兜底：ws-synced 标记异常缺失（服务端版本错配等），缓冲量失控，
+        // 按断层语义放弃等待，已缓冲帧按序落地后恢复实时分发
+        flushSyncBuffer()
+        notifyGap()
+      }
+      return
+    }
+    if (lastSeq !== null && frame.seq <= lastSeq) {
+      // 重复帧（重连补发与实时广播的残余交叠）：丢弃
+      return
+    }
+    lastSeq = frame.seq
+    dispatch(frame.event, Array.isArray(frame.data) ? frame.data : [])
+  }
+
+  /**
+   * 落地同步缓冲：按 seq 升序去重逐帧分发并推进序号基准。补发帧与注册窗口
+   * 内的实时广播在服务端队列中交错，到达顺序不代表序号顺序，升序排序保证
+   * 业务事件（如终端输出分块）按产生序消费。
+   */
+  function flushSyncBuffer() {
+    syncMode = false
+    const buffered = syncBuffer
+    syncBuffer = null
+    if (!buffered) return
+    const seqs = [...buffered.keys()].sort((a, b) => a - b)
+    for (const seq of seqs) {
+      if (lastSeq !== null && seq <= lastSeq) continue
+      const frame = buffered.get(seq)
+      lastSeq = seq
+      dispatch(frame.event, Array.isArray(frame.data) ? frame.data : [])
+    }
+  }
+
+  /**
+   * 处理补发完成标记（ws-synced）：同步缓冲按序落地，恢复实时分发。
+   * 非同步模式收到（重复 resume 握手等异常形态）忽略。
+   */
+  function handleSynced() {
+    if (!syncMode) return
+    flushSyncBuffer()
+  }
+
+  /**
+   * 处理断层标记帧（ws-gap）：补发判定为缺口（服务端缓冲溢出或重启后序号
+   * 归零），放弃补发窗口，以服务端当前序号为新基准继续接收，并提示部分
+   * 更新已跳过——各面板既有冷启动快照 / 状态查询链路或手动刷新负责补齐状态。
+   * @param {{data: unknown[]}} frame data[0] 为服务端当前序号
+   */
+  function handleGap(frame) {
+    syncMode = false
+    syncBuffer = null
+    const current = Array.isArray(frame.data) ? frame.data[0] : undefined
+    lastSeq = typeof current === 'number' && current >= 0 ? current : 0
+    notifyGap()
   }
 
   /**

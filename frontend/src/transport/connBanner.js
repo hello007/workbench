@@ -12,6 +12,8 @@
 
 // 恢复提示自动消失时长。
 const RECOVER_HINT_MS = 3000
+// 断层提示自动消失时长：文案含操作建议（刷新页面），留足阅读时间。
+const GAP_HINT_MS = 8000
 
 let bannerEl = null
 let everConnected = false
@@ -49,16 +51,28 @@ export function notifyUnreachable() {
 }
 
 /**
+ * 事件断层时调用（重连补发判定为缺口：缓冲溢出或服务端重启序号归零，
+ * 见 events.js 的 ws-gap 处理）。展示数秒后自动消失；各面板的既有冷启动
+ * 快照 / 状态查询链路在重连后本就会对齐后端当前态，横幅仅解释「为何可能
+ * 看到旧状态」并给出刷新指引，不强制打断。
+ */
+export function notifyGap() {
+  show('连接中断，部分更新可能已跳过，建议刷新页面获取最新状态', 'warning', GAP_HINT_MS)
+}
+
+/**
  * 展示横幅（同类提示复用同一 DOM 节点）。
  * @param {string} text 提示文案
  * @param {'warning'|'success'} kind 语义色档位
+ * @param {number} [autoHideMs] 自动消失时长（缺省常驻，由后续状态收尾）
  */
-function show(text, kind) {
+function show(text, kind, autoHideMs) {
   ensureBanner()
   clearTimeout(hideTimer)
   hideTimer = null
   bannerEl.textContent = text
   bannerEl.className = `wb-conn-banner wb-conn-banner--${kind}`
+  if (autoHideMs) scheduleHide(autoHideMs)
 }
 
 /**
@@ -74,10 +88,11 @@ function hide() {
 }
 
 /**
- * 延时移除恢复提示。
+ * 延时移除自动消失类提示。
+ * @param {number} [ms] 消失时长（缺省恢复提示时长）
  */
-function scheduleHide() {
-  hideTimer = setTimeout(hide, RECOVER_HINT_MS)
+function scheduleHide(ms = RECOVER_HINT_MS) {
+  hideTimer = setTimeout(hide, ms)
 }
 
 /**

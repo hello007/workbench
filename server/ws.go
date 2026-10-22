@@ -33,19 +33,50 @@ const (
 	// wsSendBuffer 每连接发送队列容量：单连接写串行化的缓冲窗口，
 	// 溢出即判慢消费者踢出（见 WSHub.Emit）。
 	wsSendBuffer = 64
-	// wsMaxMessageSize 上行消息上限：浏览器端一期仅接收事件（终端输入走
-	// /api/rpc），上行仅协议层 pong，收紧上限防异常客户端耗内存。
+	// wsMaxMessageSize 上行消息上限：浏览器端业务上行仅重连续传握手帧
+	//（{"resume":<序号>}，终端输入走 /api/rpc），其余为协议层 pong，
+	// 收紧上限防异常客户端耗内存。
 	wsMaxMessageSize int64 = 4096
+	// wsResumeBuffer 重连续传环形缓冲容量（帧数）：断线期间的事件帧在此
+	// 有界保留，重连握手携带已收序号后补发缺口。溢出即丢最旧帧——补发
+	// 判定为断层（ws-gap 控制帧），客户端提示后走全量刷新，不静默截断。
+	wsResumeBuffer = 2000
+)
+
+// 续传控制帧事件名（无 seq 字段，不参与序号基准；浏览器 transport 在分发层
+// 拦截处理，不进入业务监听器）。
+const (
+	// wsGapEvent 断层标记帧：data[0] 为服务端当前序号。缓存溢出（客户端
+	// 断线期间事件量超出环形缓冲）或 hub 重建（webServeManager 重启使序号
+	// 归零）导致客户端序号无法衔接时发送，客户端据此重置基准并提示断层。
+	wsGapEvent = "ws-gap"
+	// wsSyncedEvent 补发完成标记帧：data[0] 为补发快照时的服务端当前序号。
+	// 补发帧与重连注册窗口内的实时广播共用同一 send 队列（FIFO 交错到达），
+	// 客户端以该标记为界将缓冲帧按序号去重落地，保证业务事件有序且不重不漏。
+	wsSyncedEvent = "ws-synced"
 )
 
 // wsFrame 服务端推送的事件帧。
 //
 // Data 为变参数组，与前端 Wails `EventsOn(name, callback)` 的回调 ...data
-// 形态对齐：桌面模式回调直接收变参，浏览器 transport shim（后续 PR）以
+// 形态对齐：桌面模式回调直接收变参，浏览器 transport shim 以
 // `callback(...frame.data)` 展开还原，两端业务回调签名一致。
+//
+// Seq 为 hub 级单调递增事件序号（自 1 起，仅成功广播的事件占号），浏览器端
+// 记录已收最大序号，重连握手据此请求缺口补发；omitempty 使无序号的控制帧
+//（ws-gap / ws-synced）不携带该字段，向后兼容仅识别 {event,data} 的消费方。
 type wsFrame struct {
 	Event string `json:"event"`
 	Data  []any  `json:"data"`
+	Seq   uint64 `json:"seq,omitempty"`
+}
+
+// wsRingEntry 环形缓冲条目：已序列化帧字节与其序号成对存储。序号显式落条目
+// 使缺口判定不依赖「按位置推算」的实现细节；字节在入环时序列化一次，补发
+// 复用同一份，避免重连风暴下的重复 marshal。
+type wsRingEntry struct {
+	seq   uint64
+	frame []byte
 }
 
 // WSHub WebSocket 事件广播 hub（serve 模式事件出口，实现 service.EventSink）。
@@ -57,6 +88,16 @@ type WSHub struct {
 	upgrader websocket.Upgrader
 	mu       sync.RWMutex // 保护 clients；send channel 的 close 仅发生在持写锁的 unregister
 	clients  map[*wsClient]struct{}
+
+	// 续传序号与环形缓冲（seqMu 保护）。锁序恒为 seqMu → mu：Emit 在 seqMu
+	// 临界区内完成「占号-入环-广播」，resume 补发在同一临界区取补发集，保证
+	// 序号单调、缓冲与序号一致、补发集与实时广播不重不漏；mu 的写侧路径
+	//（register/unregister/SetToken）均不获取 seqMu，无反向嵌套死锁面。
+	seqMu     sync.Mutex
+	seq       uint64        // 已分配的最大事件序号（自 0 起，广播前自增）
+	ring      []wsRingEntry // 环形缓冲：未满时尾追、满后覆写最旧（ringHead 指向最旧条目）
+	ringHead  int
+	resumeBuf int // 环形缓冲容量（构造后只读）
 
 	// 保活参数（构造后只读，pump goroutine 无锁读取）
 	writeWait  time.Duration // 单次写超时：写阻塞超过该时长判定对端不可达
@@ -75,11 +116,14 @@ type wsClient struct {
 // NewWSHub 构造 WebSocket hub。token 为访问令牌（main.runServe 传入
 // LoadOrCreateToken 结果），空串视为未配置，所有升级请求 fail closed 拒绝。
 func NewWSHub(token string) *WSHub {
-	return newWSHubTuned(token, defaultWriteWait, defaultPongWait)
+	return newWSHubTuned(token, defaultWriteWait, defaultPongWait, wsResumeBuffer)
 }
 
-// newWSHubTuned 以指定保活超时构造 hub（测试收紧用，非生产入口）。
-func newWSHubTuned(token string, writeWait, pongWait time.Duration) *WSHub {
+// newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
+func newWSHubTuned(token string, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
+	if resumeBuffer < 0 {
+		resumeBuffer = 0
+	}
 	return &WSHub{
 		token: token,
 		upgrader: websocket.Upgrader{
@@ -92,25 +136,38 @@ func newWSHubTuned(token string, writeWait, pongWait time.Duration) *WSHub {
 			ReadBufferSize: 4096,
 		},
 		clients:    make(map[*wsClient]struct{}),
+		resumeBuf:  resumeBuffer,
+		ring:       make([]wsRingEntry, 0, resumeBuffer),
 		writeWait:  writeWait,
 		pongWait:   pongWait,
 		pingPeriod: pongWait * 9 / 10,
 	}
 }
 
-// Emit 实现 service.EventSink：广播一条事件帧给全部已连接客户端。
+// Emit 实现 service.EventSink：分配单调序号、写入续传环形缓冲后广播一条
+// 事件帧给全部已连接客户端。
+//
+// 整个「占号-入环-广播」在 seqMu 临界区内完成：序号分配与入环同锁防乱序，
+// 广播同锁使任一帧的投递先于其后续快照的补发集计算（客户端视角序号单调）。
+// 广播投递为非阻塞 select，持锁不引入阻塞放大。
 func (h *WSHub) Emit(name string, data ...any) {
 	if data == nil {
 		data = []any{}
 	}
-	frame, err := json.Marshal(wsFrame{Event: name, Data: data})
+	h.seqMu.Lock()
+	h.seq++
+	frame, err := json.Marshal(wsFrame{Event: name, Data: data, Seq: h.seq})
 	if err != nil {
-		// 载荷不可序列化（含 func/channel 等）只影响本条事件，不中断 hub
+		// 载荷不可序列化（含 func/channel 等）只影响本条事件，不中断 hub；
+		// 序号尚未对外发布即回退，保持「仅成功广播占号」的连续分配不变式，
+		// 简化缺口判定与按位置推算的推理
+		h.seq--
+		h.seqMu.Unlock()
 		slog.Error("marshal ws event frame failed", "event", name, "err", err)
 		return
 	}
+	h.ringAppendLocked(wsRingEntry{seq: h.seq, frame: frame})
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for c := range h.clients {
 		select {
 		case c.send <- frame:
@@ -121,6 +178,73 @@ func (h *WSHub) Emit(name string, data ...any) {
 			_ = c.conn.Close()
 		}
 	}
+	h.mu.RUnlock()
+	h.seqMu.Unlock()
+}
+
+// ringAppendLocked 追加条目到续传环形缓冲（seqMu 持有方可调用）：
+// 未满尾追、满后覆写最旧并前移 head，容量为构造时给定的 resumeBuf。
+func (h *WSHub) ringAppendLocked(e wsRingEntry) {
+	if len(h.ring) < h.resumeBuf {
+		h.ring = append(h.ring, e)
+		return
+	}
+	if h.resumeBuf == 0 {
+		return
+	}
+	h.ring[h.ringHead] = e
+	h.ringHead = (h.ringHead + 1) % h.resumeBuf
+}
+
+// ringIterateLocked 按最旧到最新遍历环形缓冲（seqMu 持有方可调用）。
+// 未满时 head 恒为 0（从未前移），下标即遍历序；满后从 head 起环形取模。
+func (h *WSHub) ringIterateLocked(fn func(e wsRingEntry) bool) {
+	n := len(h.ring)
+	for i := 0; i < n; i++ {
+		if !fn(h.ring[(h.ringHead+i)%n]) {
+			return
+		}
+	}
+}
+
+// resumePlanLocked 计算重连补发集（seqMu 持有方可调用）。
+//
+// 返回 gap=true 表示断层、无法补发，两种成因：
+//  1. 缓冲溢出：客户端断线期间事件量超出环形缓冲，缺口帧已被覆写丢弃；
+//  2. hub 重建：webServeManager 重启使序号归零，客户端携带的已收序号超前于
+//     服务端当前序号（跨代际序号不可比较）。
+//
+// gap=false 时 frames 为序号大于 lastSeq 的全部缓冲帧（按序号升序）；环形
+// 缓冲为空且 lastSeq>0 属成因 2（hub 从未广播过事件而客户端已收过帧）。
+func (h *WSHub) resumePlanLocked(lastSeq uint64) (frames []wsRingEntry, gap bool, current uint64) {
+	current = h.seq
+	if lastSeq > current {
+		// 客户端序号超前于服务端：hub 重建（seq 归零）后唯一可能的形态
+		return nil, true, current
+	}
+	if len(h.ring) == 0 {
+		// 缓冲为空：lastSeq==current 时本就无缺口（current==0 即全新 hub）；
+		// lastSeq<current 时缺口帧不在缓冲中（容量 0 的构造从未入环），无从
+		// 补发，按断层处理。环形缓冲满后 len 恒等于容量，非空态不会归空，
+		// 故空缓冲只有「从未入环」一种成因
+		return nil, lastSeq < current, current
+	}
+	var oldest uint64
+	h.ringIterateLocked(func(e wsRingEntry) bool {
+		oldest = e.seq
+		return false
+	})
+	if lastSeq+1 < oldest {
+		// lastSeq 与缓冲最旧序号之间存在已被覆写丢弃的帧：溢出断层
+		return nil, true, current
+	}
+	h.ringIterateLocked(func(e wsRingEntry) bool {
+		if e.seq > lastSeq {
+			frames = append(frames, e)
+		}
+		return true
+	})
+	return frames, false, current
 }
 
 // ClientCount 当前已连接客户端数（测试与运行期诊断用）。
@@ -240,8 +364,9 @@ func (h *WSHub) unregister(c *wsClient) {
 	}
 }
 
-// readPump 读泵：在升级请求的 goroutine 内运行，仅消费协议层 pong 做保活
-// 判定；断连（对端关闭/超时/踢出）时注销自身并关闭底层连接。
+// readPump 读泵：在升级请求的 goroutine 内运行，消费协议层 pong 做保活判定，
+// 并解析客户端上行帧——目前唯一业务上行是重连续传握手 {"resume":<已收序号>}；
+// 断连（对端关闭/超时/踢出）时注销自身并关闭底层连接。
 func (h *WSHub) readPump(c *wsClient) {
 	defer func() {
 		h.unregister(c)
@@ -253,10 +378,76 @@ func (h *WSHub) readPump(c *wsClient) {
 		return c.conn.SetReadDeadline(time.Now().Add(c.hub.pongWait))
 	})
 	for {
-		// 一期浏览器端无业务上行（终端输入走 /api/rpc），非控制帧一律忽略
-		if _, _, err := c.conn.ReadMessage(); err != nil {
+		_, payload, err := c.conn.ReadMessage()
+		if err != nil {
 			return
 		}
+		h.handleClientFrame(c, payload)
+	}
+}
+
+// handleClientFrame 解析客户端上行帧。非法 JSON、非对象或缺少 resume 字段
+// 的帧一律静默忽略（客户端协议外的上行不存在，不响应不记日志防刷屏）。
+func (h *WSHub) handleClientFrame(c *wsClient, payload []byte) {
+	var msg struct {
+		Resume *uint64 `json:"resume"`
+	}
+	if json.Unmarshal(payload, &msg) != nil || msg.Resume == nil {
+		return
+	}
+	h.resumeClient(c, *msg.Resume)
+}
+
+// resumeClient 处理重连续传握手：按客户端已收序号补发环形缓冲内的缺口帧，
+// 再发同步完成标记；断层（缓冲溢出 / hub 重建序号归零）则只发断层标记帧，
+// 由客户端重置基准、提示断层后走全量刷新，此后广播从当前序号正常继续。
+//
+// 并发安全论证（补发写入路径选型：经既有 send 队列，与广播同路）：
+//   - send channel 的 close 仅发生在 unregister（写锁下），而 unregister 只由
+//     本 goroutine（readPump）的 defer 调用，补发投递与 close 无并发窗口；
+//   - 补发投递与广播投递同为 channel send（无需持锁），writePump 单写者消费
+//     保持单连接写串行化，不引入 gorilla 禁止的并发 conn 写；
+//   - 补发帧与重连注册窗口内已入队的实时广播帧在 FIFO 队列中交错到达，
+//     由客户端以 ws-synced 标记为界按序号去重落地（见 events.js sync 模式），
+//     服务端无需额外排序协调。
+//
+// 补发投递为非阻塞 select：队列满说明客户端消费不及时，阻塞式灌入会拖住
+// readPump（无法读 pong 被保活判定断开，且注销 defer 无法执行形成 goroutine
+// 停滞），故按慢消费者同语义关连接终止补发，客户端重连后重新走 resume 流程。
+func (h *WSHub) resumeClient(c *wsClient, lastSeq uint64) {
+	h.seqMu.Lock()
+	fill, gap, current := h.resumePlanLocked(lastSeq)
+	h.seqMu.Unlock()
+	if gap {
+		h.sendControlFrame(c, wsGapEvent, current)
+		return
+	}
+	for _, e := range fill {
+		select {
+		case c.send <- e.frame:
+		default:
+			_ = c.conn.Close()
+			return
+		}
+	}
+	// 补发完成（含空补发的已追平形态）必发同步完成标记：客户端据此把补发
+	// 窗口内的缓冲帧按序落地并恢复实时分发；标记无 seq，不推进序号基准
+	h.sendControlFrame(c, wsSyncedEvent, current)
+}
+
+// sendControlFrame 向单客户端投递一条无序号控制帧（ws-gap / ws-synced）。
+// 投递失败（队列满）同补发路径：关连接终止，客户端重连恢复。
+func (h *WSHub) sendControlFrame(c *wsClient, event string, current uint64) {
+	frame, err := json.Marshal(wsFrame{Event: event, Data: []any{current}})
+	if err != nil {
+		// 固定字段载荷不会失败，防御保留
+		slog.Error("marshal ws control frame failed", "event", event, "err", err)
+		return
+	}
+	select {
+	case c.send <- frame:
+	default:
+		_ = c.conn.Close()
 	}
 }
 

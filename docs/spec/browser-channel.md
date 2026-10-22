@@ -1,7 +1,7 @@
 # 浏览器访问通道契约
 
-> 适用范围：WorkBench 浏览器访问模式（桌面同开 HTTP 与 `--serve` 无头）涉及的全部跨层契约：事件出口（EventSink）、RPC 翻译层（/api/rpc）、WebSocket 事件 hub、token 认证与热轮换、前端 transport polyfill。改动本通道任何一环前必读。
-> 来源：v1.7 浏览器访问模式 epic（任务 `.trellis/tasks/09-21-agent`，2026-09）；审核缺陷修复补强（任务 `.trellis/tasks/09-22-browser-audit-fixes`，2026-09）。
+> 适用范围：WorkBench 浏览器访问模式（桌面同开 HTTP 与 `--serve` 无头）涉及的全部跨层契约：事件出口（EventSink）、RPC 翻译层（/api/rpc）、WebSocket 事件 hub、token 认证与热轮换、断线重连续传、前端 transport polyfill。改动本通道任何一环前必读。
+> 来源：v1.7 浏览器访问模式 epic（任务 `.trellis/tasks/09-21-agent`，2026-09）；审核缺陷修复补强（任务 `.trellis/tasks/09-22-browser-audit-fixes`，2026-09）；断线重连续传（任务 `.trellis/tasks/10-22-ws-reconnect-resume`，2026-10）。
 
 ## 1. Scope / Trigger
 
@@ -10,6 +10,7 @@
 * service 层新增/修改向前端推送的事件
 * 新增/修改 App 绑定方法（浏览器经 /api/rpc 可达）
 * /api/rpc 请求-响应协议、WS 帧格式、token 校验通道变更
+* WS 续传机制（序号分配、环形缓冲、resume 握手、控制帧）变更
 * settings.json `webServe` 段结构变更
 * webServeManager 生命周期（Start/Stop/Wait/令牌轮换）与预览路由认证语义变更
 
@@ -54,11 +55,27 @@ func (h *WSHub) Close()   // 停机关闭：写锁遍历 clients 逐个 conn.Clo
 
 浏览器 shim 以 `callback(...frame.data)` 还原 Wails `EventsOn` 回调形态。
 
-### 2.4 webServe 绑定方法（app_webserve.go，2026-09 新增 4 个）
+### 2.4 断线重连续传（server/ws.go，2026-10 新增）
+
+```text
+事件帧: {"event":"<名>","data":[...],"seq":<N>}    seq 为 hub 级单调序号（自 1 起，omitempty）
+控制帧: {"event":"ws-gap","data":[<服务端当前序号>]}      断层标记（无 seq）
+        {"event":"ws-synced","data":[<补发快照当前序号>]} 补发完成标记（无 seq）
+握手帧: {"resume":<客户端已收最大序号>}                    客户端 → 服务端，唯一业务上行
+```
+
+```go
+const wsResumeBuffer = 2000                                  // 环形缓冲容量（帧数，满后覆写最旧）
+func NewWSHub(token string) *WSHub
+func newWSHubTuned(token string, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub
+// WSHub 内部：seqMu 保护「占号-入环-广播/取补发集」临界区，锁序恒 seqMu → mu
+```
+
+### 2.5 webServe 绑定方法（app_webserve.go，2026-09 新增 4 个）
 
 `GetWebServeConfig` / `SetWebServeConfig(enabled bool, bindAddress string)` / `GetWebServeToken` / `RegenerateWebToken`。
 
-### 2.5 webServeManager 生命周期（web_serve.go）
+### 2.6 webServeManager 生命周期（web_serve.go）
 
 ```go
 func (m *webServeManager) Start(listen string) error  // 幂等；改址先 stopLocked 再 startLocked（重建 hub/handler/done）
@@ -82,6 +99,12 @@ done chan error                                       // 每次 Start 重建、S
 | webServe 设置段 | `AppSettings.WebServe *WebServeSettings` 指针字段：段缺失→`EnsureWebServeDefaults` 补 `enabled:true`（默认同开）、`bindAddress:"127.0.0.1:36115"`；`--listen` 命令行 > settings.json > 默认值 |
 | polyfill 注入时序 | wailsjs 生成 wrapper 在**函数调用体内**才解引用 `window.go`；`main.js` 在 `createApp` 前 `installBrowserTransport()`（有 Wails runtime 则 no-op）即全链路生效。新增模块顶层代码禁止触碰 `window.go`/`window.runtime` |
 | 桌面/serve 装配同构 | 桌面同开与 `--serve` 共用 `assembleWebServe`（main.go），禁复制装配逻辑产生第二份 |
+| WS 续传序号单调 | `WSHub.Emit` 在 `seqMu` 临界区内完成「占号-入环-广播」：序号分配与环形缓冲写入同锁防乱序，广播同锁保证任一帧的投递先于后续 resume 快照的补发集计算；marshal 失败回退占号（未对外发布），保持「仅成功广播占号」的连续分配。锁序恒 `seqMu → mu`，`mu` 写侧路径（register/unregister/SetToken）不获取 `seqMu`，无反向嵌套死锁面 |
+| WS 重连握手 | 浏览器 transport 记录已收最大 `seq`（内存态，多标签页各记各的，页面刷新归零），重连 `onopen` 且有基准时发送 `{"resume": lastSeq}`；首连不发送——服务端从当前序号起广播，**不重放历史** |
+| WS 补发与断层 | resume 处理在 `seqMu` 临界区取补发集：`lastSeq > 当前序号`（hub 重建序号归零，跨代际不可比较）或 `lastSeq+1 < 环形缓冲最旧序号`（断线期间事件量超出 2000 帧缓冲，缺口被覆写）→ 只发 `ws-gap` 标记帧，前端重置基准、经 connBanner 提示「部分更新已跳过」，由各面板既有冷启动快照/状态查询链路或手动刷新补齐；否则补发缓冲内 `seq > lastSeq` 全部帧（复用入环时的序列化字节）+ `ws-synced` 完成标记（空补发的追平形态同样必发） |
+| WS 补发写入路径 | 补发帧经既有 `send` 队列（与广播同路）：`send` channel 的 close 仅发生在 unregister（写锁下）且 unregister 只由 readPump 自身 defer 调用，补发投递与 close 无并发窗口；writePump 单写者消费保持单连接写串行化。投递非阻塞 select——队列满按慢消费者同语义关连接终止补发（阻塞式灌入会拖住 readPump 使其无法读 pong 且注销 defer 停滞）；**禁**在 readPump 直接 `conn.WriteMessage`（gorilla 禁止并发写同一连接） |
+| WS 事件有序性 | 补发帧与重连注册窗口内的实时广播共用 FIFO 发送队列、交错到达且补发集是窗口广播的超集：前端以 `ws-synced` 为界进入同步模式，序号帧先进缓冲不落地，标记到达后按 `seq` 升序去重（同 seq 必为同一事件——一次 Emit 占一个序号、载荷不可变）一次性落地；`ws-gap` 放弃缓冲。无 `seq` 帧直接分发不推进基准（老服务端兼容形态）；实时模式 `seq <= lastSeq` 的重复帧丢弃 |
+| 多设备/多标签页语义 | 维持广播共享语义：多标签页/多设备共享同一后端状态（终端会话共享、输入 last-write-wins）；`lastSeq` 为页面内存态各记各的，hub 重建（webServeManager 重启）使序号归零属预期——重连握手判定为断层走 `ws-gap` 提示，非异常 |
 
 ## 4. Validation & Error Matrix
 
@@ -99,12 +122,17 @@ done chan error                                       // 每次 Start 重建、S
 | 桌面启动端口被占 | `slog.Warn` 降级，Running=false，桌面不崩；`SetWebServeConfig` 可重试 |
 | 非回环绑定 | 后端 slog.Warn + 前端 ElMessageBox 风险确认双保险 |
 | 运行中服务被浏览器侧停机后再重启 | `Wait` 经 cond 唤醒继续监视新代际，`--serve` 进程不退出 |
+| resume 握手 `lastSeq` 可精确补发 | 补发缓冲内 `seq > lastSeq` 全部帧 + `ws-synced` 标记（`TestWSHub_ResumeFillExact`） |
+| resume `lastSeq` 追平（等于服务端当前序号） | 无帧可补，仅发 `ws-synced`（`TestWSHub_ResumeCaughtUp`） |
+| resume `lastSeq+1` 早于缓冲最旧序号（溢出）/ `lastSeq` 超前（hub 重建） | 只发 `ws-gap` 标记帧（data[0]=服务端当前序号），不补发（`TestWSHub_ResumeGapOnOverflow` / `TestWSHub_ResumeGapOnHubRestart`） |
+| 新连接（无 resume） | 从当前序号起广播，不重放历史（`TestWSHub_FreshConnectionNoReplay`） |
+| 客户端上行非协议帧（非法 JSON / 缺 resume / 类型不符） | 静默忽略，连接存活（`TestWSHub_ClientFrameGarbageIgnored`） |
 
 ## 5. Good/Base/Bad Cases
 
 * **Good**：新 service 需要推事件 → 嵌 `sinkHolder`，构造注入 wails sink，发事件处 `s.emitCurrent("xxx", data)`；`AppServices` 装配行 + `assembleWebServe` 切换点各一处接入。
 * **Base**：只跑桌面不开 HTTP → `webServe.enabled=false`；`--serve` 无头 → 跳过 `wails.Run`，`multicastSink` 对 Background ctx 的 Wails 出口静默跳过，等效 hub only。
-* **Bad**：service 直调 `runtime.EventsEmit`（见 §7）；先 `eventSink()` 取值释放锁再 Emit（顺序缺口，B5 已消除）；`stopLocked` 改回 `Shutdown` 优雅等待（RPC 处理器内触发停机自等 3s 死锁复现）；`WSHub.Close` 直接 `close(c.send)`（与 readPump unregister 双重 close）；`RegenerateWebToken` 去掉 `webTokenMu`（并发轮换三处不一致）；测试用 `127.0.0.1:0` 构造「改址重启」（同串命中 Start 幂等 no-op，触发不了真实重启路径，须用 freePort 具体端口）。
+* **Bad**：service 直调 `runtime.EventsEmit`（见 §7）；先 `eventSink()` 取值释放锁再 Emit（顺序缺口，B5 已消除）；`stopLocked` 改回 `Shutdown` 优雅等待（RPC 处理器内触发停机自等 3s 死锁复现）；`WSHub.Close` 直接 `close(c.send)`（与 readPump unregister 双重 close）；`RegenerateWebToken` 去掉 `webTokenMu`（并发轮换三处不一致）；测试用 `127.0.0.1:0` 构造「改址重启」（同串命中 Start 幂等 no-op，触发不了真实重启路径，须用 freePort 具体端口）；resume 补发在 readPump 直写 `conn`（与 writePump 并发写同一连接，gorilla 禁止）或阻塞式灌 send 队列（readPump 停滞 + 注销 defer 无法执行）；服务端在补发路径做与广播的排序协调（补发集/注册窗口广播经同一 FIFO 队列交叠属预期，有序性由前端 `ws-synced` 同步模式保证，服务端侧二次协调是过度设计）；前端实时模式直接丢弃 `seq <= lastSeq` 的补发窗口帧外的乱序帧（同步模式缓冲按 seq 升序落地前，先到的注册窗口广播会推进 lastSeq——去重只能在同步缓冲内做）。
 
 ## 6. Tests Required
 
@@ -112,6 +140,8 @@ done chan error                                       // 每次 Start 重建、S
 * RPC：成功/未知方法/参数矩阵/AppError 透传/未认证 401/32MB 上限
 * cookie 会话：认证矩阵（有效 cookie 200/错 cookie 唯一凭据 401/错 cookie + 对 query 重验证重种）、首访 Set-Cookie 属性（HttpOnly/SameSite=Strict/Max-Age/Path、TLS 加 Secure）、cookie 命中不重复 Set-Cookie、旧 cookie 轮换后 401、header 认证重种、轮换后同浏览器 `?token=` 重验证恢复（`TestWebHandler_RotationRecoveryViaQueryToken`）、首访资产级联（`TestWebHandler_CookieSessionCascade`）与真实 embed 资产全链路（`serve_cookie_smoke_test.go`：?token= 拿 Set-Cookie → 带 cookie 资产 200 → 无凭据 401 → cookie RPC 200）
 * WS：认证矩阵（三 token 通道）、帧格式 `data:[]`、断连清理无 goroutine 泄漏、慢消费者踢出、SetToken 热轮换、cookie 通道裸连升级（`TestWSHub_CookieAuthChannel`）、`Close` 断开全部在途客户端 + 幂等（`TestWSHub_CloseDisconnectsAllClients`）+ manager Stop 集成（`TestWebServeManager_StopClosesWSClients`）
+* WS 续传：序号单调与多客户端一致（`TestWSHub_EmitSeqMonotonicShared`）、resume 精确补发/追平/溢出断层/hub 重建断层/新连接不重放（上表四用例）、非协议上行帧忽略（`TestWSHub_ClientFrameGarbageIgnored`）、广播与 resume 补发并发 `-race` + 收帧序号不回退（`TestWSHub_ResumeConcurrentWithEmitRace`）
+* 前端续传（`frontend/src/transport/__tests__/events.spec.js`）：lastSeq 记录与 resume 握手发送（首连/无基准不发送）、同步模式缓冲按 seq 升序去重落地、ws-gap 断层处理（提示+基准重置）、同步缓冲超限兜底、无 seq 帧向后兼容、实时模式重复帧丢弃
 * webServe：manager 幂等/改址重启/端口占用三态、RegenerateWebToken 真实 HTTP 链路旧 401 新 200、并发轮换三处一致（磁盘==handler==hub）、Wait 代际（重启/停机/重开不返回 + 绕过管理器关 listener 真实退出返回错误）
 * 预览同源：`Sec-Fetch-Site` 矩阵（same-origin 过关入业务校验 / cross-site、none、缺失 403）
 * serve 端到端：`serve_rpc_smoke_test.go`（真实 *App + httptest：401/Bearer/query/WS 广播/对话框守卫不杀进程）

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -380,7 +381,7 @@ func TestWSHub_CloseDisconnectsAllClients(t *testing.T) {
 // 与 TCP 缓冲塞满后写超时触发断连，慢消费者被踢出（不拖垮广播方与其余客户端）。
 func TestWSHub_SlowConsumerDropped(t *testing.T) {
 	// 收紧写超时加速断连判定（hub 实例字段，构造后只读，无跨 goroutine 竞态）
-	hub := newWSHubTuned("right-token", 200*time.Millisecond, defaultPongWait)
+	hub := newWSHubTuned("right-token", 200*time.Millisecond, defaultPongWait, wsResumeBuffer)
 	srv := httptest.NewServer(hub)
 	defer srv.Close()
 
@@ -409,4 +410,262 @@ func TestWSHub_SlowConsumerDropped(t *testing.T) {
 	// 广播方未被拖垮：踢出后新客户端照常可用
 	mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
+}
+
+// sendResume 向服务端发送重连续传握手帧 {"resume":<lastSeq>}。
+func sendResume(t *testing.T, conn *websocket.Conn, lastSeq uint64) {
+	t.Helper()
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"resume":`+strconv.FormatUint(lastSeq, 10)+`}`)); err != nil {
+		t.Fatalf("发送 resume 握手失败: %v", err)
+	}
+}
+
+// TestWSHub_EmitSeqMonotonicShared 序号契约：每条广播帧带 hub 级单调序号，
+// 多客户端收到的同一条事件帧序号一致（帧共享同一份序列化字节）。
+func TestWSHub_EmitSeqMonotonicShared(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conns := []*websocket.Conn{
+		mustDialWS(t, srv, "?token=right-token"),
+		mustDialWS(t, srv, "?token=right-token"),
+	}
+	waitClientCount(t, hub, 2)
+
+	for i := 0; i < 3; i++ {
+		hub.Emit("e", i)
+	}
+	want := []uint64{1, 2, 3}
+	for i, conn := range conns {
+		for j := 0; j < 3; j++ {
+			frame := readFrame(t, conn)
+			if frame.Event != "e" || frame.Seq != want[j] {
+				t.Errorf("客户端 %d 第 %d 帧不符: event=%q seq=%d, want seq=%d", i, j, frame.Event, frame.Seq, want[j])
+			}
+		}
+	}
+}
+
+// TestWSHub_ResumeFillExact 重连精确补发：断线期间的缺口帧按序补发，
+// 无缺失无重复，补发完成后收到 ws-synced 同步完成标记。
+func TestWSHub_ResumeFillExact(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	// 第一段连接收 seq1..3 后断线
+	conn1 := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	for i := 1; i <= 3; i++ {
+		hub.Emit("e", i)
+		frame := readFrame(t, conn1)
+		if frame.Seq != uint64(i) {
+			t.Fatalf("第 %d 帧序号不符: %d", i, frame.Seq)
+		}
+	}
+	_ = conn1.Close()
+	waitClientCount(t, hub, 0)
+
+	// 断线期间产生 seq4..5 缺口
+	hub.Emit("e", 4)
+	hub.Emit("e", 5)
+
+	// 重连握手 resume=3：补发 seq4..5 + ws-synced 标记
+	conn2 := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	sendResume(t, conn2, 3)
+	for i := 4; i <= 5; i++ {
+		frame := readFrame(t, conn2)
+		if frame.Event != "e" || frame.Seq != uint64(i) {
+			t.Errorf("补发帧应为 e/seq%d, got event=%q seq=%d", i, frame.Event, frame.Seq)
+		}
+	}
+	synced := readFrame(t, conn2)
+	if synced.Event != wsSyncedEvent {
+		t.Fatalf("补发后应收到同步完成标记, got %q", synced.Event)
+	}
+	if len(synced.Data) != 1 || synced.Data[0] != float64(5) {
+		t.Errorf("ws-synced data[0] 应为服务端当前序号 5, got %#v", synced.Data)
+	}
+	// 补发不影响后续实时广播
+	hub.Emit("e", 6)
+	if frame := readFrame(t, conn2); frame.Seq != 6 {
+		t.Errorf("补发后实时帧 seq 应为 6, got %d", frame.Seq)
+	}
+}
+
+// TestWSHub_ResumeCaughtUp 追平形态：resume 序号等于服务端当前序号时无帧
+// 可补，仅发 ws-synced 标记（客户端凭该标记结束同步模式）。
+func TestWSHub_ResumeCaughtUp(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conn := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+
+	hub.Emit("e", 1)
+	readFrame(t, conn)
+	sendResume(t, conn, 1)
+
+	synced := readFrame(t, conn)
+	if synced.Event != wsSyncedEvent || len(synced.Data) != 1 || synced.Data[0] != float64(1) {
+		t.Fatalf("追平形态应仅收到 ws-synced[1], got %#v", synced)
+	}
+}
+
+// TestWSHub_FreshConnectionNoReplay 新连接不重放历史：连接前产生的事件帧
+// 不补发，连接后从当前序号起正常接收。
+func TestWSHub_FreshConnectionNoReplay(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	hub.Emit("history", 1)
+	hub.Emit("history", 2)
+
+	conn := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	hub.Emit("live", 3)
+	frame := readFrame(t, conn)
+	if frame.Event != "live" || frame.Seq != 3 {
+		t.Errorf("新连接首帧应为 live/seq3, got event=%q seq=%d", frame.Event, frame.Seq)
+	}
+}
+
+// TestWSHub_ResumeGapOnOverflow 缓冲溢出断层：续传缓冲容量收紧为 4，客户端
+// 断线期间产生超量事件致缺口帧被覆写，重连握手返回 ws-gap 断层标记帧
+//（data[0] 为服务端当前序号），此后广播从当前序号正常继续。
+func TestWSHub_ResumeGapOnOverflow(t *testing.T) {
+	hub := newWSHubTuned("right-token", defaultWriteWait, defaultPongWait, 4)
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	conn1 := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	hub.Emit("e", 1)
+	readFrame(t, conn1)
+	_ = conn1.Close()
+	waitClientCount(t, hub, 0)
+
+	// 断线期间 10 条事件（seq2..11），容量 4 的环形缓冲仅保留 seq8..11
+	for i := 2; i <= 11; i++ {
+		hub.Emit("e", i)
+	}
+
+	conn2 := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	sendResume(t, conn2, 1)
+	gap := readFrame(t, conn2)
+	if gap.Event != wsGapEvent {
+		t.Fatalf("溢出应返回断层标记帧, got %q", gap.Event)
+	}
+	if len(gap.Data) != 1 || gap.Data[0] != float64(11) {
+		t.Errorf("ws-gap data[0] 应为服务端当前序号 11, got %#v", gap.Data)
+	}
+	// 断层后广播从当前序号正常继续
+	hub.Emit("e", 12)
+	if frame := readFrame(t, conn2); frame.Event != "e" || frame.Seq != 12 {
+		t.Errorf("断层后实时帧应为 e/seq12, got event=%q seq=%d", frame.Event, frame.Seq)
+	}
+}
+
+// TestWSHub_ResumeGapOnHubRestart hub 重建断层：webServeManager 重启重建 hub
+// 使序号归零，客户端携带旧代际序号（超前于新 hub 当前序号）重连，返回
+// ws-gap 标记帧；此后新代际序号正常推进。
+func TestWSHub_ResumeGapOnHubRestart(t *testing.T) {
+	hub1, srv1 := newTestWSHub(t, "right-token")
+	conn1 := mustDialWS(t, srv1, "?token=right-token")
+	waitClientCount(t, hub1, 1)
+	for i := 1; i <= 3; i++ {
+		hub1.Emit("e", i)
+		readFrame(t, conn1)
+	}
+	_ = conn1.Close()
+	waitClientCount(t, hub1, 0)
+	// srv1.Close 等待 hijacked 连接收尾，先行关闭让位新服务器
+	srv1.Close()
+
+	// hub 重建（新实例、序号从 0 起），期间已产生 seq1
+	hub2, srv2 := newTestWSHub(t, "right-token")
+	hub2.Emit("e", "post-restart")
+
+	conn2 := mustDialWS(t, srv2, "?token=right-token")
+	waitClientCount(t, hub2, 1)
+	sendResume(t, conn2, 3)
+	gap := readFrame(t, conn2)
+	if gap.Event != wsGapEvent {
+		t.Fatalf("跨代际重连应返回断层标记帧, got %q", gap.Event)
+	}
+	if len(gap.Data) != 1 || gap.Data[0] != float64(1) {
+		t.Errorf("ws-gap data[0] 应为新 hub 当前序号 1, got %#v", gap.Data)
+	}
+	hub2.Emit("e", "after-gap")
+	if frame := readFrame(t, conn2); frame.Event != "e" || frame.Seq != 2 {
+		t.Errorf("断层后实时帧应为 e/seq2, got event=%q seq=%d", frame.Event, frame.Seq)
+	}
+}
+
+// TestWSHub_ClientFrameGarbageIgnored 非协议上行帧静默忽略：连接保持存活，
+// 后续广播照常送达（resume 握手是唯一业务上行，异常帧不响应不记日志）。
+func TestWSHub_ClientFrameGarbageIgnored(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conn := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+
+	for _, payload := range []string{`not json`, `{"other":1}`, `{"resume":"NaN"}`, `[1,2]`, `{"resume":-1}`} {
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
+			t.Fatalf("写入测试帧失败: %v", err)
+		}
+	}
+	hub.Emit("still-alive", "x")
+	if frame := readFrame(t, conn); frame.Event != "still-alive" {
+		t.Errorf("异常上行帧后连接应存活且广播可达, got %q", frame.Event)
+	}
+}
+
+// TestWSHub_ResumeConcurrentWithEmitRace 并发安全（-race 抽查）：持续广播与
+// 反复重连握手（resume 补发）交错，无竞态、无 panic；收到的补发/实时帧序号
+// 单调不回退（重复序号合法——注册窗口广播与补发集经同一 FIFO 队列交叠，
+// 由客户端按序号去重）。
+func TestWSHub_ResumeConcurrentWithEmitRace(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	stop := make(chan struct{})
+	var emitWG sync.WaitGroup
+	emitWG.Add(1)
+	go func() {
+		defer emitWG.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			hub.Emit("race", i)
+		}
+	}()
+
+	dialer := &websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	for round := 0; round < 5; round++ {
+		conn, _, err := dialer.Dial("ws://"+srv.Listener.Addr().String()+wsPath+"?token=right-token", nil)
+		if err != nil {
+			continue
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var lastSeen uint64
+		for i := 0; i < 20; i++ {
+			_, payload, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+			var frame wsFrame
+			if json.Unmarshal(payload, &frame) != nil {
+				continue
+			}
+			if frame.Seq > 0 && frame.Seq < lastSeen {
+				t.Fatalf("序号回退: lastSeen=%d, got %d", lastSeen, frame.Seq)
+			}
+			if frame.Seq > 0 {
+				lastSeen = frame.Seq
+			}
+		}
+		// 以当前已收序号发起续传握手后立即断开，制造补发与广播的交错窗口
+		sendResume(t, conn, lastSeen)
+		_ = conn.Close()
+	}
+	close(stop)
+	emitWG.Wait()
 }

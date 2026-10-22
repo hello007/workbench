@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createEventBridge } from '../events'
 import { requestToken } from '../tokenGate'
-import { notifyConnected, notifyDisconnected, notifyUnreachable } from '../connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap } from '../connBanner'
 
 // 隔离 token 门与横幅的真实实现（DOM/持久化副作用），仅验证事件桥对它们的调用契约
 vi.mock('../tokenGate', () => ({
@@ -10,7 +10,8 @@ vi.mock('../tokenGate', () => ({
 vi.mock('../connBanner', () => ({
   notifyConnected: vi.fn(),
   notifyDisconnected: vi.fn(),
-  notifyUnreachable: vi.fn()
+  notifyUnreachable: vi.fn(),
+  notifyGap: vi.fn()
 }))
 
 // 服务端签发令牌为 32 字节 hex（64 字符），建连前按该形态校验（见 events.js TOKEN_PATTERN）
@@ -41,7 +42,14 @@ class FakeWebSocket {
     this.onopen = null
     this.onmessage = null
     this.onclose = null
+    // 客户端上行帧记录（重连续传握手 {"resume":<seq>} 断言用）
+    this.sent = []
     FakeWebSocket.instances.push(this)
+  }
+
+  /** 记录客户端上行帧（服务端收到后的 resume 解析在服务端测，此处仅记录） */
+  send(data) {
+    this.sent.push(data)
   }
 
   /** 模拟服务端握手完成 */
@@ -466,5 +474,155 @@ describe('事件桥（window.runtime shim）', () => {
     vi.stubGlobal('open', openMock)
     bridge.BrowserOpenURL('https://example.com')
     expect(openMock).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener')
+  })
+
+  it('首连不发送 resume 握手；收到带 seq 帧后重连按已收最大序号发送', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    // 首连无序号基准：open 不发 resume（服务端从当前序号起广播，不重放历史）
+    lastSocket().open()
+    expect(lastSocket().sent).toHaveLength(0)
+    // 收到 seq=5 的事件帧后断线，重连握手携带 lastSeq=5
+    lastSocket().receive({ event: 'e', data: ['x'], seq: 5 })
+    lastSocket().close()
+    vi.advanceTimersByTime(1000)
+    const s2 = lastSocket()
+    s2.open()
+    expect(s2.sent).toHaveLength(1)
+    expect(JSON.parse(s2.sent[0])).toEqual({ resume: 5 })
+  })
+
+  it('open 过但未收过任何带 seq 帧的重连不发送 resume（无基准不补发）', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    lastSocket().open()
+    // 只收过无 seq 帧（老服务端兼容形态）：不构成序号基准
+    lastSocket().receive({ event: 'legacy', data: [] })
+    lastSocket().close()
+    vi.advanceTimersByTime(1000)
+    lastSocket().open()
+    expect(lastSocket().sent).toHaveLength(0)
+  })
+
+  it('同步模式缓冲补发窗口帧，ws-synced 后按 seq 升序去重落地', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const calls = []
+    bridge.EventsOn('e', (...data) => calls.push(data[0]))
+    const s1 = lastSocket()
+    s1.open()
+    s1.receive({ event: 'e', data: ['m3'], seq: 3 })
+    s1.close()
+    vi.advanceTimersByTime(1000)
+    // 重连握手进入同步模式：服务端补发帧与注册窗口实时广播交错到达（乱序、
+    // 补发集是窗口广播的超集），缓冲不落地
+    const s2 = lastSocket()
+    s2.open()
+    // 断线前 s1 已实时落地 m3
+    expect(calls).toEqual(['m3'])
+    // 同一 seq 的重复帧是同一事件的两次投递（服务端一次 Emit 占一个序号、
+    // 载荷不变），仅到达两次：注册窗口广播 + 补发集
+    s2.receive({ event: 'e', data: ['m5'], seq: 5 })
+    s2.receive({ event: 'e', data: ['m7'], seq: 7 })
+    s2.receive({ event: 'e', data: ['m5'], seq: 5 })
+    expect(calls).toEqual(['m3'])
+    // 完成标记到达：按 seq 升序去重一次性落地，序号基准推进到最大值
+    s2.receive({ event: 'ws-synced', data: [7] })
+    expect(calls).toEqual(['m3', 'm5', 'm7'])
+    // 此后实时帧正常分发
+    s2.receive({ event: 'e', data: ['m8'], seq: 8 })
+    expect(calls).toEqual(['m3', 'm5', 'm7', 'm8'])
+  })
+
+  it('ws-gap 断层标记：提示断层、重置基准、放弃缓冲并恢复实时分发', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const calls = []
+    bridge.EventsOn('e', (...data) => calls.push(data[0]))
+    const s1 = lastSocket()
+    s1.open()
+    s1.receive({ event: 'e', data: ['m9'], seq: 9 })
+    s1.close()
+    vi.advanceTimersByTime(1000)
+    const s2 = lastSocket()
+    s2.open()
+    expect(JSON.parse(s2.sent[0])).toEqual({ resume: 9 })
+    // 服务端判定断层（缓冲溢出/重启序号归零）：data[0] 为服务端当前序号
+    s2.receive({ event: 'ws-gap', data: [2] })
+    expect(notifyGap).toHaveBeenCalledTimes(1)
+    // 缓冲放弃、基准重置为服务端当前序号，后续帧正常落地
+    //（断线前 s1 已实时落地 m9）
+    s2.receive({ event: 'e', data: ['m3'], seq: 3 })
+    expect(calls).toEqual(['m9', 'm3'])
+    // 重连断线后新握手以重置后的基准发送
+    s2.close()
+    vi.advanceTimersByTime(1000)
+    const s3 = lastSocket()
+    s3.open()
+    expect(JSON.parse(s3.sent[0])).toEqual({ resume: 3 })
+  })
+
+  it('同步缓冲超限兜底：按断层语义落地缓冲并提示，不再无限缓冲', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const calls = []
+    bridge.EventsOn('e', (...data) => calls.push(data[0]))
+    const s1 = lastSocket()
+    s1.open()
+    s1.receive({ event: 'e', data: ['m1'], seq: 1 })
+    s1.close()
+    vi.advanceTimersByTime(1000)
+    const s2 = lastSocket()
+    s2.open()
+    // ws-synced 异常缺失，缓冲持续累积超限
+    for (let seq = 2; seq <= 5002; seq++) {
+      s2.receive({ event: 'e', data: ['m' + seq], seq })
+    }
+    expect(notifyGap).toHaveBeenCalledTimes(1)
+    // 缓冲帧按序落地（m1 为断线前 s1 实时落地），恢复实时分发
+    expect(calls[0]).toBe('m1')
+    expect(calls[1]).toBe('m2')
+    expect(calls[calls.length - 1]).toBe('m5002')
+    s2.receive({ event: 'e', data: ['m5003'], seq: 5003 })
+    expect(calls[calls.length - 1]).toBe('m5003')
+  })
+
+  it('实时模式重复 seq 帧跳过（落地不重复），无 seq 帧向后兼容直接分发', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const calls = []
+    bridge.EventsOn('e', (...data) => calls.push(data[0]))
+    const socket = lastSocket()
+    socket.open()
+    socket.receive({ event: 'e', data: ['a'], seq: 1 })
+    socket.receive({ event: 'e', data: ['a-dup'], seq: 1 })
+    // 无 seq 的兼容形态帧：直接分发
+    socket.receive({ event: 'e', data: ['b'] })
+    expect(calls).toEqual(['a', 'b'])
+    // 无 seq 帧不推进序号基准：下次重连握手仍以最后带 seq 帧为准
+    socket.close()
+    vi.advanceTimersByTime(1000)
+    lastSocket().open()
+    expect(JSON.parse(lastSocket().sent[0])).toEqual({ resume: 1 })
+  })
+
+  it('同步模式中序号不大于基准的帧直接丢弃（防御跨代际异常帧）', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    const calls = []
+    bridge.EventsOn('e', (...data) => calls.push(data[0]))
+    const s1 = lastSocket()
+    s1.open()
+    s1.receive({ event: 'e', data: ['m4'], seq: 4 })
+    s1.close()
+    vi.advanceTimersByTime(1000)
+    const s2 = lastSocket()
+    s2.open()
+    s2.receive({ event: 'e', data: ['stale'], seq: 4 })
+    s2.receive({ event: 'ws-synced', data: [4] })
+    // 断线前 s1 已实时落地 m4；同步窗口内的 stale 帧丢弃、缓冲落地为空
+    expect(calls).toEqual(['m4'])
   })
 })
