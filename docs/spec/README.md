@@ -41,6 +41,7 @@
 |[go-git-deprecation.md](go-git-deprecation.md)|go-git 依赖出清契约（2026-10-21）：go-git/go-billy/gcfg 依赖链整体移除（v6 仅 beta 不升级）；`util.ResolveHead` 统一 HEAD 元数据解析（unborn 不报错由调用方分流）；`repoHasRemote` 手写 .git/config 解析对齐 go-git v5.19.2 三口径（`[remote "name"]` 子段计数不要求 url、裸 `[remote]` 段不计、**PlainOpen 默认不展开 commondir**——worktree 判 false）；refs 枚举走 `git for-each-ref`；**禁重新引入 go-git**|
 |[frontend-dep-upgrade.md](frontend-dep-upgrade.md)|前端依赖分档钳制与升级 SOP（EP caret 漂移治理）：39 顶层依赖四档（exact 仅 element-plus 全家 / tilde 运行时 UI 面锁 minor 放 patch / caret 工具链 / url tarball）；CI 一致性检查 `scripts/check-dep-consistency.mjs`（ci.yml 步骤 2.5，未登记新依赖即失败强制归类，--selftest 注入漂移自证）；升级后必跑面（vitest 全量 + E2E 全量 + 确认弹框哨兵 5 spec + npm audit）；EP 升级 3.4 专项联动 confirm-dialog.md 排查方法论|
 |[mermaid-rendering.md](mermaid-rendering.md)|mermaid 渲染契约（markdown 预览，v12 升级沉淀）：消费面锁定 `import('mermaid')` 包说明符 + initialize 五键（startOnLoad/securityLevel/layout/look/theme）+ `run({nodes, suppressErrors:true})`；v12 视觉保持双键 `layout:'dagre'`+`look:'classic'`（去键即吃 ELK/redux 新观感，ELK 1.46MB chunk 永不触发）；engines node>=22.12（CI 4 处 node 22，不得再降）；E2E mock 坑（PreviewFile 覆盖必含 `kind:'text'`，缺则静默走 CodeMirror 文本分支）；katex 链 audit 清零线与 security-scan.md 联动|
+|[branch-compare.md](branch-compare.md)|分支对比契约（侧边栏「分支对比」，移植 git-branch-compare 算法）：4 只读绑定与方向语义（文件树 diff 为 A→B）；配对在后端（贪心一配一 hash→patch-id→归一化 subject）；patch-id 管道 `log -p \| patch-id --stable` 走 `ExecutePipeline`（专用 2min 超时、失败降级不阻塞）；本服务 git 命令必带 UTF-8 `-c` 前缀（GitCommand 不默认带）；日志解析 %x00/%x01 范式；只读不抢 tryLockRepo、零新增错误码；diff 解析复用抽取后的 utils/diffParse.js|
 
 ## 新增文档约定
 
