@@ -91,7 +91,7 @@ describe('ActivityBar', () => {
   // 组件内直读 uiStore.activePanel / uiStore.terminalVisible；
   // 点击面板项直写 store（不再 emit update:modelValue），设置/终端仍 emit 由 Home 处理。
   // 图标顺序：directory(0) / ai(1) / ai-chat(2) / toolbox(3) / assets(4) / dashboard(5)
-  //           / stats(6) / 设置(7) / 终端(8)
+  //           / stats(6) / branchcompare(7) / 设置(8) / 终端(9)
   const createWrapper = (activePanel = 'directory') => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -108,10 +108,10 @@ describe('ActivityBar', () => {
     })
   }
 
-  it('应该渲染九个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、设置、终端）', () => {
+  it('应该渲染十个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、分支对比、设置、终端）', () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    expect(items.length).toBe(9)
+    expect(items.length).toBe(10)
   })
 
   it('默认选中工作目录', () => {
@@ -235,11 +235,28 @@ describe('ActivityBar', () => {
     expect(useUiStore().activePanel).toBe('toolbox')
   })
 
+  it('选中分支对比时高亮对应图标', () => {
+    const wrapper = createWrapper('branchcompare')
+    const items = wrapper.findAll('.activity-bar-item')
+    expect(items[0].classes()).not.toContain('is-active')
+    // branchcompare 是第8个图标（index=7）
+    expect(items[7].classes()).toContain('is-active')
+    expect(items[2].classes()).not.toContain('is-active')
+  })
+
+  it('点击分支对比图标应将 activePanel 置为 branchcompare', async () => {
+    const wrapper = createWrapper('directory')
+    const items = wrapper.findAll('.activity-bar-item')
+    // branchcompare 是第8个图标（index=7）
+    await items[7].trigger('click')
+    expect(useUiStore().activePanel).toBe('branchcompare')
+  })
+
   it('点击设置图标应触发 openSettings 事件', async () => {
     const wrapper = createWrapper()
     const items = wrapper.findAll('.activity-bar-item')
-    // settings 是第8个图标（index=7）
-    await items[7].trigger('click')
+    // settings 是第9个图标（index=8，branchcompare 之后）
+    await items[8].trigger('click')
     expect(wrapper.emitted('openSettings')).toBeTruthy()
   })
 })

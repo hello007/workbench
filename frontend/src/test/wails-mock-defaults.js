@@ -300,6 +300,71 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelPptxSplit: false,
 
+  // ---- 分支对比（活动栏·分支对比面板，只读 batch 1）----
+  // 形状对齐分支对比契约（PRD .trellis/tasks/10-22-branch-compare/prd.md R3-R8）：
+  // GetBranchCompareAlignment 返回 {branchA, branchB, mergeBaseHash, commonHistoryCount,
+  // rows, stats, truncated}；rows 元素 {key, a, b, side, matchedBy}，a/b 为提交对象
+  // （hash/shortHash/author/email/date/subject/...）或 null。默认两条可配对提交 +
+  // 两侧各一条独有提交的确定性小样，覆盖三种 side 形态；E2E 面板冒烟以行数与
+  // 徽标断言为主，具体用例经 wailsOverrides 按需覆盖。
+  GetBranchCompareAlignment: {
+    branchA: 'feature/login',
+    branchB: 'origin/main',
+    mergeBaseHash: '00112233445566778899aabbccddeeff00112233',
+    commonHistoryCount: 12,
+    rows: [
+      {
+        key: 'pair-1',
+        a: { hash: 'aaa111122223333444455556666777788889999a', shortHash: 'aaa1111', author: 'e2e', email: 'e2e@example.com', date: 1757400000, subject: 'feat: 登录表单校验' },
+        b: { hash: 'bbb111122223333444455556666777788889999b', shortHash: 'bbb1111', author: 'e2e', email: 'e2e@example.com', date: 1757486400, subject: 'feat: 登录表单校验' },
+        side: 'matched',
+        matchedBy: 'hash'
+      },
+      {
+        key: 'pair-2',
+        a: { hash: 'aaa22223333444455556666777788889999aaa2', shortHash: 'aaa2222', author: 'alice', email: 'alice@example.com', date: 1757486400, subject: 'refactor: 抽取校验工具' },
+        b: { hash: 'bbb22223333444455556666777788889999bbb2', shortHash: 'bbb2222', author: 'alice', email: 'alice@example.com', date: 1757572800, subject: 'refactor: 抽取校验工具（rebased）' },
+        side: 'matched',
+        matchedBy: 'patch-id'
+      },
+      {
+        key: 'a-only-1',
+        a: { hash: 'aaa3333444455556666777788889999aaaabbb3', shortHash: 'aaa3333', author: 'e2e', email: 'e2e@example.com', date: 1757486400, subject: 'feat: 仅分支 A 的功能' },
+        b: null,
+        side: 'a-only',
+        matchedBy: 'none'
+      },
+      {
+        key: 'b-only-1',
+        a: null,
+        b: { hash: 'bbb3333444455556666777788889999bbbbccc4', shortHash: 'bbb3333', author: 'bob', email: 'bob@example.com', date: 1757572800, subject: 'fix: 仅分支 B 的修复' },
+        side: 'b-only',
+        matchedBy: 'none'
+      }
+    ],
+    stats: { aOnly: 1, bOnly: 1, matched: 2, patchMatched: 1, commonBelow: 12 },
+    truncated: false
+  },
+  // GetBranchCompareFileTree 返回 BranchDiffFile 数组（path/oldPath/status/additions/
+  // deletions/binary），按 path 排序；默认覆盖 added/deleted/renamed/modified/unchanged
+  // 五种常见状态（二进制一条，前端不做行数统计展示）
+  GetBranchCompareFileTree: [
+    { path: 'README.md', status: 'modified', additions: 4, deletions: 2, binary: false },
+    { path: 'src/auth/login.js', status: 'added', additions: 30, deletions: 0, binary: false },
+    { path: 'src/legacy.js', status: 'deleted', additions: 0, deletions: 18, binary: false },
+    { path: 'src/logo.png', status: 'modified', additions: 0, deletions: 0, binary: true },
+    { path: 'src/util.js', status: 'unchanged', additions: 0, deletions: 0, binary: false },
+    { path: 'src/helpers/format.js', oldPath: 'src/format.js', status: 'renamed', additions: 3, deletions: 1, binary: false }
+  ],
+  // GetBranchCompareFileDiff 默认一段最小 unified diff（选中文件时渲染双栏用）
+  GetBranchCompareFileDiff: '@@ -1,2 +1,3 @@\n context line\n-added line\n+new line\n+tail line\n',
+  // GetCommitChangedFiles（提交详情弹层）：形状对齐 model.FileChange（path/status/staged），
+  // 默认两条；status 为 git 短码（M/A/D/R）；staged 恒 false（后端历史提交无暂存语义）
+  GetCommitChangedFiles: [
+    { path: 'src/auth/login.js', status: 'M', staged: false },
+    { path: 'src/util.js', status: 'A', staged: false }
+  ],
+
   // ---- 素材管理（侧边栏·素材管理面板，AssetsPanel 挂载即调 ListAssetLibraries）----
   // 形状对齐 model.AssetLibrary / AssetLibraryStats / AssetScanResult / AssetSearchPage
   // （见 frontend/wailsjs/go/models.ts）。默认空库 = 无库空态（面板引导建库），

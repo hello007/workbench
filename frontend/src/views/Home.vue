@@ -89,6 +89,10 @@
         <!-- 素材管理：活动栏一级入口，与三栏区互斥占满主窗口上半区。
              v-show 常驻挂载：切走再切回不丢选中库/检索条件/详情选中态。 -->
         <AssetsPanel v-show="uiStore.activePanel === 'assets'" />
+        <!-- 分支对比：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回不丢分支选择与对比结果（PRD 非目标：不持久化，
+             仅会话内保留）。只读面板：不提供 cherry-pick/merge/rebase 等写操作入口。 -->
+        <BranchCompareView v-show="uiStore.activePanel === 'branchcompare'" />
         <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
           v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
@@ -128,6 +132,7 @@ import AiChatPanel from '../components/AiChatPanel.vue'
 import AssetsPanel from '../components/AssetsPanel.vue'
 import StatsView from './StatsView.vue'
 import DashboardView from './DashboardView.vue'
+import BranchCompareView from './BranchCompareView.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import CommandPalette from '../components/CommandPalette.vue'
