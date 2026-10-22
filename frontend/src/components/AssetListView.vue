@@ -16,8 +16,9 @@
      追加命中摘要列）。幻灯片条目与检索条目的大小/修改时间经 fileEntries 底册按
      filePath 反查 join（† 归属文件属性口径，表头 tooltip 声明），底册 miss 一律
      显 — 不猜值；聚合条目（hitCount>1）大小列显 —（多页命中不显单文件大小）。
-     聚合展开态经宿主透传（expandedAggPaths/aggChildren/aggLoadingPaths）渲染缩进
-     子行，保持聚合展开交互在列表语境可用（对齐 PRD「现有交互兼容」）。 -->
+     聚合展开态经宿主透传（expandedAggPaths/aggChildren/aggLoadingPaths + 子页分页
+     态 aggTotals/aggLoadingMorePaths）渲染缩进子行与「加载更多」行，保持聚合展开
+     交互在列表语境可用（对齐 PRD「现有交互兼容」）。 -->
 <template>
   <div ref="listRef" class="asset-list" @scroll="onListScroll">
     <table class="asset-list-table">
@@ -93,7 +94,9 @@
             </td>
           </tr>
           <!-- 聚合条目展开态：同 PPT 逐页命中的缩进子行（展开态/子项数据均为宿主
-               透传，组件不持展开知识；@click.stop 防子行点击冒泡触发父行聚合切换） -->
+               透传，组件不持展开知识；@click.stop 防子行点击冒泡触发父行聚合切换）；
+               子页超出首窗时尾部「加载更多」行仅上报 agg-load-more（续拉分派与守卫
+               知识留宿主，对齐组件受控契约） -->
           <template v-if="card.hitCount > 1 && expandedAggPaths.includes(card.filePath)">
             <tr v-if="aggLoadingPaths.includes(card.filePath)" class="agg-child-row">
               <td :colspan="columns.length + 2">加载命中页…</td>
@@ -109,6 +112,13 @@
                 <span class="agg-child-title" :title="child.title">{{ child.title }}</span>
                 <span v-if="child.snippet" class="agg-child-snippet" :title="child.snippet">{{ child.snippet }}</span>
               </td>
+            </tr>
+            <tr
+              v-if="aggHasMore(card.filePath)"
+              class="agg-child-row agg-load-more-row"
+              @click.stop="emit('agg-load-more', card.filePath)"
+            >
+              <td :colspan="columns.length + 2">{{ aggLoadMoreLabel(card.filePath) }}</td>
             </tr>
           </template>
         </template>
@@ -146,12 +156,16 @@ const props = defineProps({
   expandedAggPaths: { type: Array, default: () => [] },
   aggChildren: { type: Object, default: () => ({}) },
   aggLoadingPaths: { type: Array, default: () => [] },
+  // 聚合子页分页态（宿主透传，与网格「加载更多」同口径）：totals = 单文件命中页
+  // 总数（首拉 page.total），loadingMorePaths = 在途续拉防重集合
+  aggTotals: { type: Object, default: () => ({}) },
+  aggLoadingMorePaths: { type: Array, default: () => [] },
   // 选中键集（宿主 selectedKeys Set 整体替换透传，本组件只读；键形态见
   // utils/assetSelection 共享单点）
   selectedKeys: { type: Set, default: () => new Set() }
 })
 
-const emit = defineEmits(['card-click', 'load-more', 'toggle-select', 'card-drag-start'])
+const emit = defineEmits(['card-click', 'load-more', 'agg-load-more', 'toggle-select', 'card-drag-start'])
 
 const listRef = ref(null)
 
@@ -229,6 +243,15 @@ const statusOf = (card) => {
   if (card.entry) return card.entry.status || ''
   return joinEntry(card)?.status || ''
 }
+
+// 聚合子页「加载更多」：可见性与文案均由宿主透传态派生（分页判定知识在宿主
+// loadMoreAggChildren，这里只做展示投影，与网格同口径）
+const aggHasMore = (filePath) =>
+  (props.aggTotals[filePath] || 0) > (props.aggChildren[filePath]?.length || 0)
+
+const aggLoadMoreLabel = (filePath) => props.aggLoadingMorePaths.includes(filePath)
+  ? '加载中…'
+  : `加载更多（已显 ${props.aggChildren[filePath]?.length || 0} / 共 ${props.aggTotals[filePath] || 0} 页）`
 
 // 单元格悬浮提示：截断列给全文（snippet 同时是检索语境的关键命中上下文）
 const cellTip = (card, key) => {
@@ -420,6 +443,13 @@ const onListScroll = () => {
 
 .agg-child-row.is-clickable:hover {
   background: var(--primary-bg);
+}
+
+/* 聚合子页「加载更多」行：可点弱化层（文案居中，hover 同子行高亮） */
+.agg-load-more-row {
+  cursor: pointer;
+  text-align: center;
+  color: var(--text-secondary);
 }
 
 .agg-child-page {

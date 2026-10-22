@@ -68,6 +68,13 @@ OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模
 - **幻灯片条目 facet 继承**：keyword/tagsOnly 路径幻灯片条目按**归属文件**属性判定（星级/时间/大小均文件级口径，D1——页级评分 slide_meta.rating 纯展示不参与筛选）；keyword 路径防 N+1：FTS 命中 fileID 去重全集一次 `filterFileIDsByFacet`（WHERE id IN 分批 500），循环按 fileID 查集合 O(1) 判定；判定在分页前完成（Total 按过滤后口径计）。
 - **前端换算单点**：AssetFilterPopover.vue 模块级具名导出（`buildFacetOptions`/`resolveMtimeRangeNs`/`resolveSizeRangeBytes`/`countActiveFacets`/`restoreFacetStateFromSnapshot`/`describeFacetState`）——相对档→纳秒区间**每次检索现算**（防「今天」档冻结漏当日新文件）、时间相对档语义单一数据源在前端（后端只认区间）；自定义档 mtime 上界可逆锚点与快照反推详见 §8.6。`toggleAgg` 聚合子项查询刻意不带 facet（文件维度判定，父卡通过即全页通过）。
 
+### 单文件子页窗口过滤（opts.FilePath，2026-10-22 聚合展开懒加载）
+
+- **语义**：`AssetSearchOptions.FilePath` 非空时仅保留归属该文件的幻灯片条目（refType=slide 且 fileID 精确匹配，文件条目被滤除——聚合展开只需逐页命中清单）；空串 = 不过滤，全部既有调用零行为变化。消费方为前端聚合展开「按文件取逐页命中」查询（此前取全局命中前 200 再客户端过滤，多文件命中时目标文件子页被挤出窗口且无提示）。
+- **过滤单点与位置**：`filterEntriesByFilePath`（service/assets_search.go）是三条路径共用的唯一过滤实现（keyword/facets-only/tagsOnly 行为一致，禁路径内另写第二套判定）；调用位置恒在**排序/聚合/分页之前**——Limit/Offset 作用于过滤后集合，Total 为过滤后总数；keyword 路径的排序属性批量查询（fileSortPropsByIDs）同样按过滤后 fileID 全集收敛。路径 → files.id 解析单点 `fileIDForPath`（service/assets_db.go，files.path 库内 UNIQUE，ID 与路径一一等价；未命中返回 (0, nil) 走空结果页不报错）。
+- **facets-only 组合口径**：该路径仅产出文件条目，过滤谓词（仅保留幻灯片条目）下返回空结果页——聚合展开从不携带 FilePath+facets-only 组合（无聚合条目即无展开面），此为三路径同一谓词的一致性收口而非生产路径（`TestAssetSearch_FilePathFilter_FacetsOnlyPath` 锚定）。
+- **前端消费契约**（AssetsPanel.vue）：`toggleAgg` 首拉带 filePath（limit 200）+ `aggTotals`（首拉 page.total）+ `aggLoadingMorePaths`（续拉在途防重）；超窗尾部「加载更多」经 `loadMoreAggChildren` 按 offset=已加载数续拉**追加**非覆盖。首拉与续拉共用 `buildAggContextGuard` 语境快照（原 contextChanged 全部比对面 + searchSeq 代次），写回前**双重失效判定**：`changed()` 拦检索语境变更，**在途标记被外部清空（aggLoadingPaths/aggLoadingMorePaths 不再含本路径）拦截写回**——保存标注链（onSaveSlideMeta 经 runSearch 清聚合缓存）不自增 searchSeq，seq 与条件比对均无从感知迟到响应，缺第二判定则旧口径子页灌回被清空的 aggChildren，重展开早退命中保存前标注（对齐保存链 P1 教训形态）；收起路径不清在途标记，缓存预取语义不受影响。检索语境变更/切库/保存链等全部清空点位同步清 `aggTotals`/`aggLoadingMorePaths`（§8.2 矩阵扩展面）。
+
 ### 保存检索条件存储（service/asset_saved_search.go）
 
 - data/asset_saved_searches.json，util.SaveJSON 原子写（整体覆盖 last-writer-wins，沿用 settings 约束）；损坏降级空列表 + slog.Warn；`sync.Mutex` 跨读改写全程；自增 ID = max+1；Save 为 upsert（ID=0 新增 / 非 0 覆盖保留原 createdAt），重名拒绝排除自身 ID。App 绑定：`ListAssetSavedSearches` / `SaveAssetSavedSearch` / `DeleteAssetSavedSearch`。

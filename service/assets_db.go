@@ -1129,6 +1129,21 @@ func (s *assetsStore) searchFts(matchExpr string) ([]assetsFtsHit, error) {
 	return hits, rows.Err()
 }
 
+// fileIDForPath 按相对路径取文件记录 ID（检索 FilePath 单文件子页过滤的路径解析
+// 单点，files.path 库内 UNIQUE 故 ID 与路径一一等价）。未命中返回 (0, nil)，调用
+// 方按空结果处理（不报错）；QueryRow+Scan 单行口径，遵守单连接池自锁纪律。
+func (s *assetsStore) fileIDForPath(relPath string) (int64, error) {
+	var id int64
+	err := s.db.QueryRow("SELECT id FROM files WHERE path = ?", relPath).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // fileMetaByIDs 批量取文件元数据（检索结果条目补全用，单批 IN 参数量受分页
 // Limit 上限约束）。返回 map 缺键即文件已不存在（并发删除窗口，条目跳过）。
 func (s *assetsStore) fileMetaByIDs(ids []int64) (map[int64]model.AssetFileEntry, error) {

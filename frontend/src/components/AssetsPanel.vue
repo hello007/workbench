@@ -597,6 +597,14 @@
                 <span class="agg-child-title" :title="child.title">{{ child.title }}</span>
                 <span v-if="child.snippet" class="agg-child-snippet" :title="child.snippet">{{ child.snippet }}</span>
               </div>
+              <!-- 单文件命中页超出首窗（200）时的续拉入口：点击按 offset=已加载数
+                   追加拉取（在途显加载中，语境变更后由守卫丢弃在途响应） -->
+              <div
+                v-if="aggHasMore(card.filePath)"
+                class="agg-load-more"
+                role="button"
+                @click.stop="loadMoreAggChildren(card.filePath)"
+              >{{ aggLoadMoreLabel(card.filePath) }}</div>
             </div>
           </div>
           <!-- 懒加载提示：检索模式滚动到底部增量加载下一页 -->
@@ -618,10 +626,13 @@
           :expanded-agg-paths="expandedAggPaths"
           :agg-children="aggChildren"
           :agg-loading-paths="aggLoadingPaths"
+          :agg-totals="aggTotals"
+          :agg-loading-more-paths="aggLoadingMorePaths"
           :selected-keys="selectedKeys"
           @card-click="onCardClick"
           @card-drag-start="onCardDragStart"
           @load-more="loadMoreInView"
+          @agg-load-more="loadMoreAggChildren"
           @toggle-select="toggleCardSelection"
         />
 
@@ -1483,6 +1494,10 @@ const rawSettings = ref(null) // GetSettings 返回的完整设置对象（保�
 const expandedAggPaths = ref([]) // 已展开聚合条目的文件路径集合
 const aggChildren = ref({}) // 文件路径 -> 展开的逐页命中卡片
 const aggLoadingPaths = ref([]) // 正在加载命中页的文件路径集合（Set 语义，并发展开互不覆盖）
+// 单文件子页窗口分页（后端 opts.filePath 过滤后口径）：total 为该文件命中页总数，
+// 超出首窗（limit 200）时子项尾部渲染「加载更多」按 offset 续拉追加
+const aggTotals = ref({}) // 文件路径 -> 单文件命中页总数（首拉响应 page.total）
+const aggLoadingMorePaths = ref([]) // 正在续拉「加载更多」的文件路径集合（在途防重）
 
 // ---- 新建库弹窗 ----
 const createDialogVisible = ref(false)
@@ -1777,6 +1792,8 @@ const refreshDataAfterMutation = async ({ reloadStats = false, reloadTagTrees = 
       expandedAggPaths.value = []
       aggChildren.value = {}
       aggLoadingPaths.value = []
+      aggTotals.value = {}
+      aggLoadingMorePaths.value = []
     } else if (viewMode.value === 'slide') {
       await loadSlidesPage(true)
       // 双路续拉兜底：复位首页把全局分页流拉回首页段，目录/单文件过滤语境下目标
@@ -2135,7 +2152,9 @@ const locateCartEntry = async (item) => {
     facetState.value = createDefaultFacetState() // 语境变更点：直赋路径不经 applySearch，facet 一并复位（§8.2 矩阵登记）
     expandedAggPaths.value = []
     aggChildren.value = {}
-    aggLoadingPaths.value = [] // 检索态清聚合展开缓存（对齐 filterByFile 退出检索三分支，防旧口径响应回读）
+    aggLoadingPaths.value = []
+    aggTotals.value = {}
+    aggLoadingMorePaths.value = [] // 检索态清聚合展开缓存（对齐 filterByFile 退出检索三分支，防旧口径响应回读）
   }
   viewMode.value = 'slide'
   closeDetail()
@@ -2864,6 +2883,8 @@ const resetAndReloadView = async () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   folderNodes.value = [] // 语境变更点：树数据属库语境（旧库目录树一并清空）
   folderPath.value = '' // 语境变更点：选中目录属库语境（切库/扫描刷新回「全部素材」）
   closeDetail()
@@ -3014,6 +3035,8 @@ const onFolderSelect = async (path) => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   if (searchMode.value) {
     await runSearch(true)
   } else if (viewMode.value === 'slide') {
@@ -3298,6 +3321,8 @@ const applySearch = async () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   if (!searchMode.value) {
     await loadView()
     return
@@ -3319,6 +3344,8 @@ const onFacetChange = async () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   if (searchMode.value) {
     await runSearch(true)
   } else {
@@ -3339,6 +3366,8 @@ const clearAllFilters = async () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   if (searchMode.value) {
     await runSearch(true)
   } else {
@@ -3431,6 +3460,8 @@ const onFlattenChange = () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   closePreview() // 语境变更点：聚合形态变更清预览（命中序列口径已变）
   clearSelection() // 语境变更点：检索语境变更清选中（D5#2）
   fileFilterPath.value = '' // 语境变更点：对齐检索语境变更同批清空文件过滤
@@ -3448,6 +3479,8 @@ const onSlideTagOwnChange = () => {
   expandedAggPaths.value = []
   aggChildren.value = {}
   aggLoadingPaths.value = []
+  aggTotals.value = {}
+  aggLoadingMorePaths.value = []
   closePreview() // 语境变更点：标签口径变更清预览（命中序列已变）
   clearSelection() // 语境变更点：检索语境变更清选中（D5#2）
   fileFilterPath.value = '' // 语境变更点：对齐检索语境变更同批清空文件过滤
@@ -3537,8 +3570,69 @@ const clearSelection = () => {
   selectedKeys.value = new Set()
 }
 
-// ---- 聚合条目展开/收起：按归属文件路径懒加载逐页命中（flatten 检索后客户端过滤）----
+// ---- 聚合条目展开/收起：按归属文件路径懒加载逐页命中（后端 opts.filePath 单文件
+// 子页窗口过滤 + 超窗「加载更多」分页续拉）----
 const isAggExpanded = (filePath) => expandedAggPaths.value.includes(filePath)
+
+// 聚合子页检索语境快照（首拉 toggleAgg 与「加载更多」续拉共用）：快照检索条件与
+// 双代次（librarySeq/searchSeq），写回前 changed() 比对，失效丢弃——防陈旧命中页
+// 写入新语境（aggChildren 残留会被 toggleAgg 早退命中，同路径跨库串数据）。检索
+// 语境变更点（applySearch/平铺开关/仅自身标签开关/facet/排序/退出检索）均自增
+// searchSeq 且按 §8.2 矩阵清空聚合展开缓存，切库/扫描刷新自增 librarySeq：seq
+// 比对覆盖快照面之外的条件变更（facet/排序——聚合子项查询刻意不携带、条件比对
+// 无从判定），并封死续拉追加写回把半窗写进被变更方清空的 aggChildren 的竞态；
+// 条件比对为防御兜底（值同形但代次未动的窗口）。
+const buildAggContextGuard = () => {
+  const keywordAtStart = activeKeyword.value.trim()
+  const tagsAtStart = [...selectedTagIds.value]
+  // 平铺/仅自身标签开关同属检索语境快照面（审查 P2）：在途展开期间切换（对应
+  // onFlattenChange/onSlideTagOwnChange 已清空 aggChildren）时，旧口径响应若照常
+  // 写回会让重展开在 aggChildren 缓存上早退，恒显旧筛选语义子项——快照纳入
+  // changed 比对（对齐 tagsAtStart 形态），发起参数同取快照值
+  const flattenAtStart = flatten.value
+  const onlyOwnAtStart = slideTagOnlyOwn.value
+  const libSeqAtStart = librarySeq
+  const searchSeqAtStart = searchSeq
+  return {
+    keyword: keywordAtStart,
+    tags: tagsAtStart,
+    onlyOwn: onlyOwnAtStart,
+    changed: () => libSeqAtStart !== librarySeq ||
+      searchSeqAtStart !== searchSeq ||
+      keywordAtStart !== activeKeyword.value.trim() ||
+      tagsAtStart.length !== selectedTagIds.value.length ||
+      tagsAtStart.some((tagId, i) => tagId !== selectedTagIds.value[i]) ||
+      flattenAtStart !== flatten.value ||
+      onlyOwnAtStart !== slideTagOnlyOwn.value
+  }
+}
+
+// 命中条目 → 聚合子项卡片映射（首拉与续拉共用；后端已按 filePath 过滤为单文件
+// 逐页命中，键形态与 displayCards 幻灯片卡同构）
+const aggChildFromHit = (hit) => ({
+  key: `hit-slide-${hit.refId}`,
+  kind: 'slide',
+  id: hit.refId,
+  fileId: hit.fileId,
+  title: hit.title,
+  filePath: hit.filePath,
+  slideNum: hit.slideNum,
+  snippet: hit.snippet,
+  hitCount: 1,
+  status: '',
+  tags: hit.tags || [],
+  hit
+})
+
+// 聚合子页查询公共入参（首拉与续拉同构，offset 由调用方按已加载数传入）
+const aggSearchRequest = (ctx, filePath, offset) => ({
+  flatten: true,
+  tagIds: ctx.tags,
+  slideTagOnlyOwn: ctx.onlyOwn,
+  filePath,
+  limit: 200,
+  offset
+})
 
 const toggleAgg = async (filePath) => {
   if (isAggExpanded(filePath)) {
@@ -3547,61 +3641,67 @@ const toggleAgg = async (filePath) => {
   }
   expandedAggPaths.value = expandedAggPaths.value.concat(filePath)
   if (aggChildren.value[filePath]) return
-  // 加载态按路径记录（Set 语义，并发展开多卡片互不覆盖，审核 13）；写回前比对
-  // 发起时的检索条件与库代次，条件已变（改词/改筛选/切库）丢弃旧响应，防陈旧
-  // 命中页写入新语境（aggChildren 残留会被 toggleAgg 早退命中，同路径跨库串数据）
+  // 加载态按路径记录（Set 语义，并发展开多卡片互不覆盖，审核 13）
   aggLoadingPaths.value = aggLoadingPaths.value.concat(filePath)
-  const keywordAtStart = activeKeyword.value.trim()
-  const tagsAtStart = [...selectedTagIds.value]
-  // 平铺/仅自身标签开关同属检索语境快照面（审查 P2）：在途展开期间切换（对应
-  // onFlattenChange/onSlideTagOwnChange 已清空 aggChildren）时，旧口径响应若照常
-  // 写回会让重展开在 aggChildren 缓存上早退，恒显旧筛选语义子项——快照纳入
-  // contextChanged 比对（对齐 tagsAtStart 形态），发起参数同取快照值
-  const flattenAtStart = flatten.value
-  const onlyOwnAtStart = slideTagOnlyOwn.value
-  const libSeqAtStart = librarySeq
-  const contextChanged = () => libSeqAtStart !== librarySeq ||
-    keywordAtStart !== activeKeyword.value.trim() ||
-    tagsAtStart.length !== selectedTagIds.value.length ||
-    tagsAtStart.some((tagId, i) => tagId !== selectedTagIds.value[i]) ||
-    flattenAtStart !== flatten.value ||
-    onlyOwnAtStart !== slideTagOnlyOwn.value
+  const ctx = buildAggContextGuard()
   try {
     // 聚合子项查询刻意不带 facet 条件（第七批）：facet 为文件维度判定，聚合父卡
     // 能出现即归属文件已通过 facet 筛选，同文件全部页继承同一判定结果——带上
     // facet 是语义 no-op，省一次重复换算；关键词/标签/平铺/仅自身标签仍需携带。
     // 排序参数同理不传（SRS §2.5.3）：mtime/rating 为文件级口径，同文件子项排序
-    // 主键同值，后端次级键（score→path）序与相关性档 FTS 序一致，不带零行为差异
-    const page = await SearchAssets(currentLibraryId.value, keywordAtStart, {
-      flatten: true,
-      tagIds: tagsAtStart,
-      slideTagOnlyOwn: onlyOwnAtStart,
-      limit: 200,
-      offset: 0
-    })
-    if (contextChanged()) return // 检索条件已变：旧聚合响应丢弃
-    const children = (page?.items || [])
-      .filter(hit => hit.refType === 'slide' && hit.filePath === filePath)
-      .map(hit => ({
-        key: `hit-slide-${hit.refId}`,
-        kind: 'slide',
-        id: hit.refId,
-        fileId: hit.fileId,
-        title: hit.title,
-        filePath: hit.filePath,
-        slideNum: hit.slideNum,
-        snippet: hit.snippet,
-        hitCount: 1,
-        status: '',
-        tags: hit.tags || [],
-        hit
-      }))
+    // 主键同值，后端次级键（score→path）序与相关性档 FTS 序一致，不带零行为差异。
+    // filePath 单文件子页窗口（后端汇聚层过滤单点）：limit/offset/total 即该文件
+    // 命中页口径，多文件命中不再互相挤出窗口
+    const page = await SearchAssets(currentLibraryId.value, ctx.keyword, aggSearchRequest(ctx, filePath, 0))
+    // 双重失效判定：changed() 拦检索语境/代次变更；在途标记被外部清空（保存标注链
+    // onSaveSlideMeta 经 runSearch 清聚合缓存但 runSearch 不自增 searchSeq，seq 与
+    // 条件比对均无从感知）拦截写回，防旧口径子页灌回被清空的 aggChildren——重展开
+    // 早退命中旧缓存即回读保存前标注。写回在 finally 移除标记之前执行，正常路径恒
+    // 通过；收起路径不清 loading 标记，缓存预取语义不受影响
+    if (ctx.changed() || !aggLoadingPaths.value.includes(filePath)) return
+    const children = (page?.items || []).map(aggChildFromHit)
     aggChildren.value = { ...aggChildren.value, [filePath]: children }
+    aggTotals.value = { ...aggTotals.value, [filePath]: page?.total || 0 }
   } catch (error) {
-    if (contextChanged()) return // 条件已变：旧聚合失败静默丢弃
+    if (ctx.changed()) return // 语境已变：旧聚合失败静默丢弃
     handleError('加载命中页失败: ', error)
   } finally {
     aggLoadingPaths.value = aggLoadingPaths.value.filter(p => p !== filePath)
+  }
+}
+
+// 「加载更多」可见性：单文件命中页总数（首拉 page.total）> 已加载数
+const aggHasMore = (filePath) =>
+  (aggTotals.value[filePath] || 0) > (aggChildren.value[filePath]?.length || 0)
+
+// 「加载更多」文案：共 N 页已显 M 形态（在途显加载中）
+const aggLoadMoreLabel = (filePath) => aggLoadingMorePaths.value.includes(filePath)
+  ? '加载中…'
+  : `加载更多（已显 ${aggChildren.value[filePath]?.length || 0} / 共 ${aggTotals.value[filePath] || 0} 页）`
+
+// 「加载更多」续拉：同走首拉语境快照模式（发起时快照、写回前比对、失效丢弃），
+// 结果追加非覆盖（已加载子页保留）；在途防重（aggLoadingMorePaths，连续点击/
+// 重复触发不重复发请求）
+const loadMoreAggChildren = async (filePath) => {
+  if (aggLoadingMorePaths.value.includes(filePath) || !aggHasMore(filePath)) return
+  const loaded = aggChildren.value[filePath] || []
+  aggLoadingMorePaths.value = aggLoadingMorePaths.value.concat(filePath)
+  const ctx = buildAggContextGuard()
+  try {
+    const page = await SearchAssets(currentLibraryId.value, ctx.keyword, aggSearchRequest(ctx, filePath, loaded.length))
+    // 在途标记被外部清空（保存标注链清聚合缓存不自增 searchSeq 的窗口，同
+    // toggleAgg 双重失效判定）拦截追加写回，防半窗+续拉灌回已清空的缓存
+    if (ctx.changed() || !aggLoadingMorePaths.value.includes(filePath)) return
+    const more = (page?.items || []).map(aggChildFromHit)
+    // 追加非覆盖：守卫已排除语境变更（其会清空 aggChildren，两侧不交叉），
+    // loaded 即当前已加载子页全集
+    aggChildren.value = { ...aggChildren.value, [filePath]: loaded.concat(more) }
+    aggTotals.value = { ...aggTotals.value, [filePath]: page?.total || 0 }
+  } catch (error) {
+    if (ctx.changed()) return // 语境已变：旧响应失败静默丢弃
+    handleError('加载更多命中页失败: ', error)
+  } finally {
+    aggLoadingMorePaths.value = aggLoadingMorePaths.value.filter(p => p !== filePath)
   }
 }
 
@@ -3735,6 +3835,8 @@ const filterByFile = async (card) => {
     expandedAggPaths.value = []
     aggChildren.value = {}
     aggLoadingPaths.value = []
+    aggTotals.value = {}
+    aggLoadingMorePaths.value = []
   }
   fileFilterPath.value = path
   viewMode.value = 'slide'
@@ -3935,6 +4037,8 @@ const onSaveSlideMeta = async () => {
       expandedAggPaths.value = []
       aggChildren.value = {}
       aggLoadingPaths.value = []
+      aggTotals.value = {}
+      aggLoadingMorePaths.value = []
       const card = searchItems.value.find(c => c.kind === 'slide' && c.id === entryId)
       if (card && selected.value?.hit?.refId === entryId) {
         // 命中：引用已同步为服务端新数据，草稿重读权威数据
@@ -5197,6 +5301,22 @@ defineExpose({ loadLibraries, refreshAfterScan })
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* 聚合子页「加载更多」续拉入口：弱化交互层（对齐 agg-loading 弱化文案层级），
+   hover 轻量高亮提示可点 */
+.agg-load-more {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  transition: background var(--transition-fast);
+}
+
+.agg-load-more:hover {
+  background: var(--bg-tertiary);
 }
 
 /* ---- 详情侧边栏 ---- */

@@ -323,8 +323,18 @@ type AssetSearchOptions struct {
 	// path 恰等于前缀或以「前缀/」开头，不误伤同头缀兄弟目录）。检索三路径共用
 	// 同一 assetsFolderFilter 构造（与 assetsFacetFilter 同层单点，禁路径分叉）。
 	FolderPath string `json:"folderPath"`
-	Limit      int    `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
-	Offset     int    `json:"offset"` // 分页偏移（<0 按 0 处理）
+	// FilePath 单文件子页窗口过滤（聚合展开懒加载，2026-10-22）：相对库根目录
+	// 路径（正斜杠，与 AssetSearchHit.FilePath 同口径），空串 = 不过滤（全部既有
+	// 调用零行为变化）。非空时仅保留归属该文件的幻灯片条目（refType=slide 且
+	// filePath 精确匹配；文件条目被滤除——聚合展开只需逐页命中清单），过滤发生在
+	// 排序与分页之前：Limit/Offset 作用于过滤后集合，Total 为过滤后总数。三条检索
+	// 路径共用同一汇聚层过滤单点（filterEntriesByFilePath，禁路径分叉）；纯
+	// facets-only 路径仅产出文件条目，该过滤语义下返回空结果页。消费方为前端聚合
+	// 展开的「按文件取逐页命中」查询（此前取全局命中前 200 再客户端过滤，多文件
+	// 命中时目标文件子页会被挤出窗口）。
+	FilePath string `json:"filePath"`
+	Limit    int    `json:"limit"`  // 分页大小（≤0 取默认 50，上限 200）
+	Offset   int    `json:"offset"` // 分页偏移（<0 按 0 处理）
 }
 
 // AssetSearchHit 素材检索单元条目（平铺模式的一行；聚合模式的一个聚合条目或

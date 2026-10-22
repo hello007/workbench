@@ -1107,6 +1107,14 @@ describe('AssetsPanel', () => {
   })
 
   it('聚合折叠：幻灯片视图下点击聚合卡以 flatten 检索展开逐页命中，再点收起', async () => {
+    // 聚合子页检索（flatten + filePath）返回后端单文件过滤后形状（仅幻灯片条目）；
+    // 其余检索返回 mockSearchPage（聚合卡形态）
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.filePath) {
+        return Promise.resolve({ items: [mockSearchPage.items[1]], total: 1, keyword, flattened: true })
+      }
+      return Promise.resolve(mockSearchPage)
+    })
     const wrapper = await createWrapper()
     // 聚合条目为幻灯片命中，切到幻灯片视图后可见
     const group = wrapper.findComponent(ElRadioGroupStub)
@@ -1123,11 +1131,13 @@ describe('AssetsPanel', () => {
     await wrapper.findAll('.asset-card')[0].trigger('click')
     await flushPromises()
 
-    // 展开触发 flatten 检索（limit 200 全量取回后客户端按文件路径过滤）
+    // 展开触发 flatten 检索（filePath 单文件子页窗口：后端汇聚层过滤，limit/offset
+    // 即该文件命中页口径）
     expect(wailsMock.SearchAssets).toHaveBeenNthCalledWith(callsBefore + 1, 'lib-1', '城商行', {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
       limit: 200,
       offset: 0
     })
@@ -1754,10 +1764,99 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
       limit: 200,
       offset: 0
     })
     expect(wrapper.findAll('.agg-child').length).toBe(1)
+  })
+
+  it('保存刷新在途窗口内续拉响应迟到：写回守卫以在途标记拦截，聚合缓存不复活旧口径子页', async () => {
+    // 保存链清聚合缓存经 runSearch（不自增 searchSeq），seq 与条件比对均感知不到
+    // 迟到的续拉响应——写回判定须以 aggLoadingMorePaths 标记被保存链清空为准，
+    // 否则旧口径子页灌回缓存，重展开早退命中保存前标注（risk 2 同形态）
+    const childHit = {
+      refType: 'slide',
+      refId: 22,
+      fileId: 11,
+      filePath: '方案A/城商行方案.pptx',
+      title: '背景页',
+      slideNum: 2,
+      snippet: '…城商行获客…',
+      score: -1,
+      hitCount: 1,
+      tags: [mockTags[0]],
+      ownTags: [],
+      note: '',
+      rating: 0
+    }
+    const aggPage = { items: [mockSearchPage.items[1]], total: 1, keyword: '城商行', flattened: false }
+    let resolveLoadMore = null
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.filePath && opts.offset > 0) {
+        // 续拉挂起：保存链清空动作先落定，随后才放行迟到响应
+        return new Promise((resolve) => {
+          resolveLoadMore = () => resolve({
+            items: [{ ...childHit, refId: 23, slideNum: 3 }],
+            total: 2, keyword, flattened: true
+          })
+        })
+      }
+      if (opts.filePath) {
+        // 首拉：total 2 > 已加载 1 条，渲染「加载更多」入口
+        return Promise.resolve({ items: [childHit], total: 2, keyword, flattened: true })
+      }
+      return Promise.resolve(aggPage)
+    })
+    const wrapper = await createWrapper()
+    // D8#2 平铺默认开：先回关平铺使检索返回聚合卡（同前序聚合展开用例）
+    const flattenSwitchOff = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitchOff.vm.$emit('update:modelValue', false)
+    await flattenSwitchOff.vm.$emit('change', false)
+    await flushPromises()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡（首窗 1 条落定）后点「加载更多」：续拉挂起在途
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.agg-child').length).toBe(1)
+    await wrapper.find('.agg-load-more').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.agg-load-more').text()).toContain('加载中')
+
+    // 点子项进详情编辑星级保存：保存链重跑检索并清空聚合展开态（含在途标记，
+    // runSearch 不自增 searchSeq）
+    await wrapper.find('.agg-child').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.rate-star')[3].trigger('click')
+    await clickButton(wrapper, '保存')
+    await flushPromises()
+    expect(wailsMock.UpdateAssetSlideMeta).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.agg-child').exists()).toBe(false)
+
+    // 迟到续拉响应放行：在途标记已被保存链清空，写回被拦截，缓存不复活
+    resolveLoadMore()
+    await flushPromises()
+
+    // 重展开重新首拉（缓存无残留早退），按当前口径取 offset 0 首窗
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
+      flatten: true,
+      tagIds: [],
+      slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
+      limit: 200,
+      offset: 0
+    })
   })
 
   it('继承筛选开关：恒渲染占位（文件视图禁用不跳动），切幻灯片视图启用，切换后 SearchAssets 收到 slideTagOnlyOwn=true 且立即重跑检索', async () => {
@@ -2407,6 +2506,7 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
       limit: 200,
       offset: 0
     })
@@ -2459,6 +2559,7 @@ describe('AssetsPanel', () => {
       flatten: true,
       tagIds: [],
       slideTagOnlyOwn: true,
+      filePath: '方案A/城商行方案.pptx',
       limit: 200,
       offset: 0
     })
@@ -2511,6 +2612,127 @@ describe('AssetsPanel', () => {
     await wrapper.findAll('.asset-card')[0].trigger('click')
     await flushPromises()
     expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
+  })
+
+  // ---- 聚合子页「加载更多」续拉（后端 opts.filePath 单文件子页窗口 + 分页追加）----
+
+  // 聚合子页命中构造器：refId/slideNum 逐页递增（子项键 hit-slide-<refId> 不碰撞）
+  const mkAggChild = (i) => ({
+    refType: 'slide', refId: 1000 + i, fileId: 11, filePath: '方案A/城商行方案.pptx',
+    title: `第${i + 1}页`, slideNum: i + 1, snippet: '…城商行获客…', score: -1,
+    hitCount: 1, tags: [], ownTags: [], note: '', rating: 0
+  })
+
+  it('聚合子页超窗：首拉 200 条后渲染「加载更多」，点击按 offset 续拉追加不覆盖，拉满后入口消失', async () => {
+    const firstWindow = {
+      items: Array.from({ length: 200 }, (_, i) => mkAggChild(i)),
+      total: 205, keyword: '城商行', flattened: true
+    }
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (!opts.filePath) return Promise.resolve(mockSearchPage) // 首次检索（聚合卡形态）
+      if (opts.offset === 0) return Promise.resolve(firstWindow)
+      return Promise.resolve({
+        items: Array.from({ length: 5 }, (_, i) => mkAggChild(200 + i)),
+        total: 205, keyword, flattened: true
+      })
+    })
+    const wrapper = await createWrapper()
+    // D8#2 平铺默认开：聚合展开链路用例先回关平铺，使检索返回聚合卡
+    const flattenSwitchOff = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitchOff.vm.$emit('update:modelValue', false)
+    await flattenSwitchOff.vm.$emit('change', false)
+    await flushPromises()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡：首窗 200 条 + 「加载更多」入口（共 N 页已显 M 形态）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.agg-child').length).toBe(200)
+    const loadMore = wrapper.find('.agg-load-more')
+    expect(loadMore.exists()).toBe(true)
+    expect(loadMore.text()).toContain('已显 200')
+    expect(loadMore.text()).toContain('共 205 页')
+
+    // 点击续拉：offset = 已加载数，结果追加（200 + 5 = 205）后入口消失
+    await loadMore.trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '城商行', {
+      flatten: true,
+      tagIds: [],
+      slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
+      limit: 200,
+      offset: 200
+    })
+    expect(wrapper.findAll('.agg-child').length).toBe(205)
+    expect(wrapper.find('.agg-load-more').exists()).toBe(false)
+  })
+
+  it('聚合子页续拉在途语境变更（改词重搜）：旧追加响应丢弃不写回，重展开按新语境重拉', async () => {
+    const firstWindow = {
+      items: Array.from({ length: 200 }, (_, i) => mkAggChild(i)),
+      total: 205, keyword: '城商行', flattened: true
+    }
+    const pending = []
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (!opts.filePath) return Promise.resolve(mockSearchPage)
+      if (opts.offset === 0) return Promise.resolve(firstWindow)
+      // 续拉挂起：resolve 注入按发起序入队，语境变更后精确放行旧响应
+      return new Promise((resolve) => pending.push(() => resolve({
+        items: Array.from({ length: 5 }, (_, i) => mkAggChild(200 + i)),
+        total: 205, keyword, flattened: true
+      })))
+    })
+    const wrapper = await createWrapper()
+    const flattenSwitchOff = wrapper.find('.flatten-switch:not(.slide-own-switch)').findComponent(ElSwitchStub)
+    await flattenSwitchOff.vm.$emit('update:modelValue', false)
+    await flattenSwitchOff.vm.$emit('change', false)
+    await flushPromises()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    await wrapper.find('input').setValue('城商行')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+
+    // 展开聚合卡（首窗落定）后点「加载更多」：续拉挂起
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    await wrapper.find('.agg-load-more').trigger('click')
+    await flushPromises()
+    expect(pending.length).toBe(1)
+
+    // 续拉在途改词重搜（检索语境变更点：searchSeq 自增 + 清聚合展开缓存），
+    // 随后旧续拉响应才返回
+    await wrapper.find('input').setValue('新词')
+    await clickButton(wrapper, '搜索')
+    await flushPromises()
+    pending[0]()
+    await flushPromises()
+
+    // 守卫生效：旧追加响应未写回（变更方已清空展开态，不得复活半窗数据）
+    expect(wrapper.find('.agg-children').exists()).toBe(false)
+
+    // 重新展开：aggChildren 已清空，按新语境重拉首窗（非续拉），不受旧在途污染
+    const callsBefore = wailsMock.SearchAssets.mock.calls.length
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.SearchAssets.mock.calls.length).toBe(callsBefore + 1)
+    expect(wailsMock.SearchAssets).toHaveBeenLastCalledWith('lib-1', '新词', {
+      flatten: true,
+      tagIds: [],
+      slideTagOnlyOwn: false,
+      filePath: '方案A/城商行方案.pptx',
+      limit: 200,
+      offset: 0
+    })
   })
 
   it('库不存在自愈：统计报 E_ASSETS_LIB_NOT_FOUND 时静默重拉库列表并落定剩余库（审核 14）', async () => {
@@ -3376,6 +3598,13 @@ describe('AssetsPanel', () => {
   })
 
   it('聚合父卡与聚合子行无复选框（D5#1），浏览态独立卡有复选框', async () => {
+    // 聚合子页检索（flatten + filePath）返回后端单文件过滤后形状（仅幻灯片条目）
+    wailsMock.SearchAssets.mockImplementation((libId, keyword, opts) => {
+      if (opts.filePath) {
+        return Promise.resolve({ items: [mockSearchPage.items[1]], total: 1, keyword, flattened: true })
+      }
+      return Promise.resolve(mockSearchPage)
+    })
     const wrapper = await createWrapper()
     const group = wrapper.findComponent(ElRadioGroupStub)
     await group.vm.$emit('update:modelValue', 'slide')

@@ -47,6 +47,10 @@ const (
 // （files.rating，文件级口径，幻灯片/聚合条目继承归属文件属性）两档在聚合与
 // 分页之前对全量命中 Go 层稳定排序，SortDir 控制升降（默认降序），次级键确定性
 // 见 sortEntriesByOptions。非法档位/方向值按相关性/降序处理。
+//
+// opts.FilePath 非空时按文件路径过滤命中条目（单文件子页窗口，聚合展开懒加载）：
+// 三条路径在条目构建后统一经 filterEntriesByFilePath 汇聚层单点过滤（排序/聚合/
+// 分页之前），Limit/Offset 与 Total 均按过滤后口径计。
 func (s *AssetLibraryService) SearchAssets(libraryID, keyword string, opts model.AssetSearchOptions) (model.AssetSearchPage, error) {
 	if _, err := s.getLibrary(libraryID); err != nil {
 		return model.AssetSearchPage{}, err
@@ -217,6 +221,13 @@ func searchByKeyword(store *assetsStore, keyword string, opts model.AssetSearchO
 		})
 	}
 
+	// 单文件子页窗口过滤（opts.FilePath 非空时，汇聚层单点，排序/聚合/分页之前）：
+	// 后续排序属性批量查询（fileSortPropsByIDs）与 Total 计数均按过滤后口径
+	entries, err = filterEntriesByFilePath(store, entries, opts.FilePath)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("文件子页过滤失败: %w", err)
+	}
+
 	// mtime/rating 排序档：facet/标签过滤后 entries 的 fileID 全集一次批量取文件
 	// 排序属性（fileSortPropsByIDs），填充排序键后 Go 层稳定排序（在聚合之前执行，
 	// 聚合组首 = 排序后首现条目，文件维度单值继承天然正确）。相关性档不触发查询，
@@ -288,6 +299,14 @@ func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet
 			sortRating:  f.rating,
 		})
 	}
+	// 单文件子页窗口过滤（opts.FilePath 非空时，汇聚层单点与另两路径同口径）：
+	// 本路径仅产出文件条目，过滤谓词（仅保留幻灯片条目）下返回空结果页——聚合
+	// 展开从不携带 FilePath+facets-only 组合（无聚合条目即无展开面），此为口径
+	// 一致性收口而非生产路径
+	entries, err = filterEntriesByFilePath(store, entries, opts.FilePath)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("文件子页过滤失败: %w", err)
+	}
 	// mtime/rating 排序档重排（相关性档该函数原样返回，路径序现状不动）
 	sortEntriesByOptions(entries, opts)
 	items, total, err := pageAndFillEntries(store, entries, opts, "")
@@ -337,6 +356,13 @@ func searchByTagsOnly(store *assetsStore, opts model.AssetSearchOptions, facet *
 			sortMtimeNs: sl.mtimeNs,
 			sortRating:  sl.rating,
 		})
+	}
+
+	// 单文件子页窗口过滤（opts.FilePath 非空时，汇聚层单点）：在路径序排序/聚合/
+	// 分页之前收敛条目集，Total 与 limit/offset 均按过滤后口径
+	entries, err = filterEntriesByFilePath(store, entries, opts.FilePath)
+	if err != nil {
+		return model.AssetSearchPage{}, fmt.Errorf("文件子页过滤失败: %w", err)
 	}
 
 	// 排序：路径序 → 文件条目排同路径最前（文件本体先于其页）→ 页序
@@ -442,6 +468,31 @@ func decodeFtsRowid(rowid int64) (refType string, refID int64) {
 		return model.AssetRefTypeFile, rowid
 	}
 	return model.AssetRefTypeSlide, -rowid
+}
+
+// filterEntriesByFilePath 单文件子页窗口过滤（opts.FilePath 非空时生效，聚合展开
+// 懒加载的消费形态）：仅保留归属该文件的幻灯片条目（refType=slide 且文件路径精确
+// 匹配；文件条目被滤除——聚合展开只需逐页命中清单）。路径 → files.id 先解析一次
+//（path 库内 UNIQUE，按 fileID 判定与按路径逐条比对等价，且关键词路径条目不携带
+// 路径、fileID 是三路径条目共有的稳定键）；路径未命中（已删除/不存在）返回空集
+// 不报错。空串 = 不过滤，原样返回（全部既有调用零行为变化）。调用方须在排序/聚合/
+// 分页之前调用——limit/offset 作用于过滤后集合，Total 为过滤后总数。三条检索路径
+// 共用本单点（keyword/facets-only/tagsOnly 行为一致），禁在路径内另写第二套判定。
+func filterEntriesByFilePath(store *assetsStore, entries []assetSearchEntry, filePath string) ([]assetSearchEntry, error) {
+	if filePath == "" {
+		return entries, nil
+	}
+	targetFileID, err := store.fileIDForPath(filePath)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]assetSearchEntry, 0)
+	for _, e := range entries {
+		if e.refType == model.AssetRefTypeSlide && e.fileID == targetFileID {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered, nil
 }
 
 // aggregateSlideEntries 聚合折叠：幻灯片条目按归属文件分组折叠为聚合条目
