@@ -1,0 +1,3 @@
+{"file": "docs/spec/assets-management.md", "reason": "核查聚合展开改动未破坏 §8.2 守卫矩阵与 aggChildren 追加态清空"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核查 urgent 通道未破坏单 worker 契约与 COM 调用全部硬规则"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 models.ts AssetSearchOptions 与后端 struct 字段一致"}

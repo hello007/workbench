@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "R1 聚合展开契约：§8.2 双代次守卫矩阵、aggChildren 缓存与检索态清空面、§8.7 刷新入口——FilePath 过滤与分页追加须守全部既有守卫"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "R2 STA 队列全契约：单 worker/禁双队列/Discard 置脏/jr.Result 恰一次写回/超时杀进程收口——urgent 通道不得破坏任一条"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "AssetSearchOptions 加字段须手动同步 frontend/wailsjs/go/models.ts（wails generate 不覆盖的场景）"}
+{"file": "docs/spec/pptx-preview.md", "reason": "R2 预览转换提交点 ConvertToPdf 走 e.submit() 的现状与 dev 路由前置 404 契约"}
