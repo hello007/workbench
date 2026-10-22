@@ -31,10 +31,11 @@ const (
 )
 
 // SearchAssets 素材检索：关键词全文检索（文件名/备注/页标题/页文本/备注，CJK
-// 按字切分 phrase + bm25 列加权）、标签筛选（文件直接绑定、幻灯片继承归属文件
-// 标签，PRD D4）与 facet 三维筛选（星级/修改时间/文件大小，文件维度 + 幻灯片
-// 继承归属文件属性，SRS §2.5）可组合。关键词为空且给定标签时退化为纯标签浏览
-// （不走 FTS）；关键词与标签均为空但有 facet 时走 facets-only 文件清单路径
+// 按字切分 phrase + bm25 列加权）、标签筛选（文件有效标签 = 自身绑定 ∪ 归属
+// 文件夹级联继承的文件夹标签，幻灯片条目经归属文件继承同一有效标签集合，PRD D4
+// + 文件夹标签级联检索）与 facet 三维筛选（星级/修改时间/文件大小，文件维度 +
+// 幻灯片继承归属文件属性，SRS §2.5）可组合。关键词为空且给定标签时退化为纯标签
+// 浏览（不走 FTS）；关键词与标签均为空但有 facet 时走 facets-only 文件清单路径
 // （返回文件条目）；三者全空返回空结果页（不报错）。
 //
 // opts.Limit ≤0 取默认 50（上限 200）；Offset <0 按 0 处理。Flatten=false 时
@@ -126,9 +127,10 @@ func searchAssetsInStore(store *assetsStore, keyword string, opts model.AssetSea
 		return searchByTagsOnly(store, opts, facet, folder)
 	}
 	// 关键词路径：标签筛选集合（继承合并语义，见 slideTagRowMatches）——文件条目
-	// 要求自身绑定；幻灯片条目默认【归属文件绑定 ∪ 页自身绑定】，OnlyOwn=true 仅
-	// 页自身（开关仅作用于标签筛选，关键词命中与文件条目不受影响）。TagIDs 为空
-	// 时两函数短路返回 nil，无查询、行级判定全放行。
+	// 按有效标签命中（自身绑定 ∪ 归属文件夹级联继承，fileIDsForTagFilter 单点
+	// 扩展）；幻灯片条目默认【归属文件有效标签 ∪ 页自身绑定】，OnlyOwn=true 仅
+	// 页自身（文件夹级联继承同被裁剪；开关仅作用于标签筛选，关键词命中与文件条目
+	// 不受影响）。TagIDs 为空时两函数短路返回 nil，无查询、行级判定全放行。
 	tagFilter, err := store.fileIDsForTagFilter(opts.TagIDs)
 	if err != nil {
 		return model.AssetSearchPage{}, fmt.Errorf("读取标签筛选集合失败: %w", err)
@@ -296,8 +298,9 @@ func searchByFacetsOnly(store *assetsStore, opts model.AssetSearchOptions, facet
 }
 
 // searchByTagsOnly 纯标签浏览路径（keyword 为空）：不经 FTS，直接按标签绑定
-// 关系列出文件与幻灯片（幻灯片默认【归属文件绑定 ∪ 页自身绑定】命中，
-// SlideTagOnlyOwn=true 仅页自身；文件条目不受开关影响），全量取 ID 后内存聚合
+// 关系列出文件与幻灯片（文件按有效标签命中 = 自身绑定 ∪ 归属文件夹级联继承，
+// 幻灯片默认【归属文件有效标签 ∪ 页自身绑定】命中，SlideTagOnlyOwn=true 仅页
+// 自身；文件条目不受开关影响），全量取 ID 后内存聚合
 // 分页（无相关性语义，Score 恒 0、Snippet 为空；库规模 = 已索引文件/页数，量级可控）。
 // facet 非空时两查询各追加 facet 条件（文件条目按自身属性、幻灯片条目经 JOIN
 // files 按归属文件属性判定，继承语义与关键词路径同源）。

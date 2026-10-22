@@ -1228,8 +1228,33 @@ func (s *assetsStore) slideMetaByIDs(ids []int64) (map[int64]slideMetaRow, error
 // 取安全余量；调用方数据量受分页 Limit 上限约束，通常单批完成）。
 const assetsQueryIDBatch = 500
 
-// fileIDsForTagFilter 标签筛选命中的文件 ID 集合（直接绑定任一给定标签）。
-// 标签列表为空返回 nil（调用方跳过筛选）。
+// assetFolderTagInheritPredicate 文件夹标签级联继承命中谓词（单点，文件夹标签
+// 级联检索）：返回判定「pathCol 路径位于 folder_tags 行别名 ft 的 folder_path
+// 目录之下」的 SQL 片段（目录边界前缀：path 以「folder_path + /」开头，folder_path
+// 为目录键恒非空且无尾斜杠——GetAssetFolderMeta/UpdateAssetFolderMeta 经
+// resolveLibraryRelPath 拒绝空路径）。用 substr 等值比较而非 LIKE 前缀：folder_path
+// 是存量数据列，无法逐行预转义 LIKE 通配符（含 %/_ 的目录名会破坏 LIKE 语义），
+// substr+等值比较天然无通配符语义；与既有 folderPath 维度（assetsFolderFilter，
+// 前缀来自检索入参可预转义走 escapeLikePattern）机制不同属刻意取舍。两消费面
+// 同源消费本构造：纯标签浏览 SQL 子查询（listTagFilteredFiles/listTagFilteredSlides）
+// 与关键词路径 Go 层预取（fileIDsForTagFilter），禁两套口径。别名 ft 与 pathCol
+// 由调用方语境提供，本函数只拼接片段。
+func assetFolderTagInheritPredicate(pathCol string) string {
+	return "substr(" + pathCol + ", 1, length(ft.folder_path) + 1) = ft.folder_path || '/'"
+}
+
+// fileIDsForTagFilter 标签筛选命中的文件 ID 集合（关键词路径 Go 层预取消费）：
+// 文件有效标签 = 自身绑定 ∪ 归属文件夹（含全部后代目录，目录边界前缀）级联继承
+// 的文件夹标签——两路命中同集合合并（继承谓词单点见 assetFolderTagInheritPredicate，
+// 与 listTagFilteredFiles/listTagFilteredSlides 的 SQL 子查询禁两套口径）。
+// 代价模型（实测 2026-10-22，scratch EXPLAIN + 计时）：继承 JOIN 无前缀索引可用
+// （substr 函数谓词），plan 为 files 全扫 × folder_tags 过滤扫描（tag_id IN 子查询
+// 带 bloom filter）嵌套——代价 = files 行数 × 命中 folder_tags 行数的 substr 评估，
+// folder_tags 为用户标注目录（量级数十），万级文件 × 50 目录行 2.6ms、× 1000 目录
+// 行 69ms，检索链路占比可忽略，不设索引不加缓存。
+// 不筛 status：与 file_tags 直绑路同口径，可见性由关键词路径下游统一收口
+// （excludedFileIDSet 剔除 / lost 有意可见引导重链）。标签列表为空返回 nil
+// （调用方跳过筛选）。
 func (s *assetsStore) fileIDsForTagFilter(tagIDs []int64) (map[int64]bool, error) {
 	if len(tagIDs) == 0 {
 		return nil, nil
@@ -1239,21 +1264,34 @@ func (s *assetsStore) fileIDsForTagFilter(tagIDs []int64) (map[int64]bool, error
 	for _, id := range tagIDs {
 		args = append(args, id)
 	}
-	rows, err := s.db.Query(
-		"SELECT DISTINCT file_id FROM file_tags WHERE tag_id IN ("+placeholders+")", args...)
-	if err != nil {
-		return nil, err
+	queries := []string{
+		"SELECT DISTINCT file_id FROM file_tags WHERE tag_id IN (" + placeholders + ")",
+		"SELECT DISTINCT f.id FROM files f JOIN folder_tags ft ON " +
+			assetFolderTagInheritPredicate("f.path") +
+			" WHERE ft.tag_id IN (" + placeholders + ")",
 	}
-	defer rows.Close()
 	set := make(map[int64]bool)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+	for _, query := range queries {
+		rows, err := s.db.Query(query, args...)
+		if err != nil {
 			return nil, err
 		}
-		set[id] = true
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				set[id] = true
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return set, rows.Err()
+	return set, nil
 }
 
 // slideOwnTagFilterSet 标签筛选的「页自身绑定」命中集合（slides.id 视角）：
@@ -1297,7 +1335,9 @@ func (s *assetsStore) slideOwnTagFilterSet(tagIDs []int64) (map[int64]bool, erro
 // slideTagRowMatches 标签筛选的行级命中判定（继承合并语义单点，FTS 检索路径
 // 消费）：文件行仅看归属文件绑定（不受 OnlyOwn 影响——文件条目只有 file_tags）；
 // 幻灯片行默认【归属文件绑定 ∪ 页自身绑定】，OnlyOwn=true 仅页自身绑定。两个
-// 集合均为 nil 表示未启用标签筛选（全放行）。
+// 集合均为 nil 表示未启用标签筛选（全放行）。fileFilter 集合已含归属文件夹级联
+// 继承命中（fileIDsForTagFilter 单点扩展，文件夹标签级联检索），行级判定形态
+// 不变——OnlyOwn=true 时页条目同样不吃文件夹级联继承（仅页自身层语义）。
 func slideTagRowMatches(onlyOwn bool, fileFilter, ownSlideFilter map[int64]bool, refType string, refID, fileID int64) bool {
 	if fileFilter == nil && ownSlideFilter == nil {
 		return true // 未启用标签筛选：全部命中
@@ -1322,32 +1362,46 @@ type tagFilteredFileOrdering struct {
 }
 
 // listTagFilteredFiles 纯标签浏览的文件条目序（keyword 为空时的数据源）。
+// 标签命中口径 = 文件自身绑定 ∪ 归属文件夹（含全部后代目录）级联继承的文件夹
+// 标签（继承谓词单点 assetFolderTagInheritPredicate，与关键词路径
+// fileIDsForTagFilter 同源禁两套口径）。
 // facet 非空时在标签子查询之外追加 facet 条件（同表列判定，单点构造见
 // assetsFacetFilter.whereClause）；folder 非空时同层追加 folderPath 前缀条件
-// （单点构造见 assetsFolderFilter.whereClause，R7 检索联动）。
+// （单点构造见 assetsFolderFilter.whereClause，R7 检索联动）。status='ok' 过滤
+// 恒在外层（excluded/lost 不因文件夹标签命中而复活）。
 func (s *assetsStore) listTagFilteredFiles(tagIDs []int64, facet *assetsFacetFilter, folder *assetsFolderFilter) ([]tagFilteredFileOrdering, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(tagIDs)), ", ")
-	args := make([]any, 0, len(tagIDs))
+	baseArgs := make([]any, 0, len(tagIDs))
 	for _, id := range tagIDs {
-		args = append(args, id)
+		baseArgs = append(baseArgs, id)
 	}
 	extraClause := ""
+	var extraArgs []any
 	if facet != nil {
 		var facetArgs []any
 		extraClause, facetArgs = facet.whereClause("f.")
-		args = append(args, facetArgs...)
+		extraArgs = append(extraArgs, facetArgs...)
 	}
 	if folder != nil {
 		var folderArgs []any
 		folderClause, folderArgs := folder.whereClause("f.path")
 		extraClause += folderClause
-		args = append(args, folderArgs...)
+		extraArgs = append(extraArgs, folderArgs...)
 	}
+	// 参数序（与 SQL 片段出现序对齐）：status 占位 + file_tags 直绑子查询参数 +
+	// folder_tags 级联继承子查询参数 + 附加条件参数（extraClause 位于标签子查询
+	// 之后，参数随 SQL 片段位置收尾）。注意本查询仅两组标签子查询（幻灯片查询
+	// 为三组），追加段数勿照搬 listTagFilteredSlides。
+	args := append([]any{model.AssetFileStatusOK}, baseArgs...) // status + file_tags 直绑子查询
+	args = append(args, baseArgs...)                            // folder_tags 级联继承子查询
+	args = append(args, extraArgs...)
 	rows, err := s.db.Query(
-		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ? AND f.id IN "+
-			"(SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+"))"+
+		"SELECT f.id, f.path, f.mtime_ns, f.rating FROM files f WHERE f.status = ? AND "+
+			"(f.id IN (SELECT file_id FROM file_tags WHERE tag_id IN ("+placeholders+")) OR "+
+			"EXISTS (SELECT 1 FROM folder_tags ft WHERE ft.tag_id IN ("+placeholders+") AND "+
+			assetFolderTagInheritPredicate("f.path")+"))"+
 			extraClause+" ORDER BY f.path",
-		append([]any{model.AssetFileStatusOK}, args...)...)
+		args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1376,9 +1430,11 @@ type tagFilteredSlideOrdering struct {
 }
 
 // listTagFilteredSlides 纯标签浏览的幻灯片条目序（标签继承合并语义：默认【归属
-// 文件绑定 ∪ 页自身绑定】命中，onlyOwn=true 仅页自身绑定——与 FTS 检索路径的
-// slideTagRowMatches 同一语义，SQL 子查询与 slideOwnTagFilterSet 同源）。
-// onlyOwn 时文件绑定分支整段裁剪（仅页自身标签语义）。
+// 文件有效标签 ∪ 页自身绑定】命中——文件有效标签含归属文件夹级联继承的文件夹
+// 标签（继承谓词单点 assetFolderTagInheritPredicate，与关键词路径
+// fileIDsForTagFilter 同源），onlyOwn=true 仅页自身绑定（文件夹级联继承同被裁剪，
+// 仅页自身层语义不变）——与 FTS 检索路径的 slideTagRowMatches 同一语义，SQL 子
+// 查询与 slideOwnTagFilterSet 同源）。
 // facet 非空时对归属文件列追加 facet 条件、folder 非空时同层追加 folderPath 前缀
 // 条件（幻灯片条目按归属文件 f.path 继承判定，已 JOIN files，单点构造见
 // assetsFacetFilter/assetsFolderFilter whereClause）。
@@ -1401,9 +1457,9 @@ func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet 
 		extraClause += folderClause
 		extraArgs = append(extraArgs, folderArgs...)
 	}
-	// 双子查询形态的参数序：status 占位 + 标签子查询参数 + 附加条件参数
-	//（extraClause 位于两类标签子查询之后，参数须随 SQL 片段位置收尾——
-	// placeholders 构造复用现有形态）
+	// 多子查询形态的参数序：status 占位 + 各标签子查询参数（按 SQL 片段出现序）
+	// + 附加条件参数（extraClause 位于标签子查询之后，参数须随 SQL 片段位置
+	// 收尾——placeholders 构造复用现有形态）
 	query := "SELECT s.id, s.file_id, f.path, s.slide_num, f.mtime_ns, f.rating FROM slides s JOIN files f ON f.id = s.file_id "
 	var args []any
 	if onlyOwn {
@@ -1415,11 +1471,14 @@ func (s *assetsStore) listTagFilteredSlides(tagIDs []int64, onlyOwn bool, facet 
 	} else {
 		query += "WHERE f.status = ? AND (s.file_id IN " +
 			"(SELECT file_id FROM file_tags WHERE tag_id IN (" + placeholders + ")) OR " +
+			"EXISTS (SELECT 1 FROM folder_tags ft WHERE ft.tag_id IN (" + placeholders + ") AND " +
+			assetFolderTagInheritPredicate("f.path") + ") OR " +
 			"(s.file_id, s.slide_num) IN " +
 			"(SELECT file_id, slide_num FROM slide_tags WHERE tag_id IN (" + placeholders + ")))" +
 			extraClause + " ORDER BY f.path, s.slide_num"
 		args = append([]any{model.AssetFileStatusOK}, baseArgs...)
-		args = append(args, baseArgs...)
+		args = append(args, baseArgs...) // folder_tags 级联继承子查询
+		args = append(args, baseArgs...) // slide_tags 页自身子查询
 		args = append(args, extraArgs...)
 	}
 	rows, err := s.db.Query(query, args...)

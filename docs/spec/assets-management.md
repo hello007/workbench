@@ -269,6 +269,18 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 - **前端拖拽换算单点**：`utils/assetTagTree.js` 的 `resolveTagMoveDrop`（before/after = 同级排序，取落点节点在排除自身后兄弟列表中的序位；inner = 变子级组尾追加）与 `applyTagMoveToFlat`（乐观更新平铺清单，返回新数组不改入参）；el-tree `allow-drop` 预拦截与 `node-drop` 落点换算**必须同走 resolveTagMoveDrop**（两处口径分叉 = 预拦截放行而落点拒绝的错位形态）；防环两层（前端拖入自身子树一律拒绝 + 后端 moveTag 沿 parent 链主防线）；乐观更新失败回滚 + 重拉保权威，落位在途（moveBusy）暂停 draggable 防并发拖拽叠加。
 - **flatten 默认 true（D8#2）**：检索聚合折叠/平铺开关默认平铺打开（同一 PPT 多页命中逐页平铺为主路径），聚合折叠按需关回；聚合形态相关断言须先显式回关再触发（勿依赖旧默认 false）。
 
+### 9.6 文件夹标签级联检索（2026-10-22 增量，v1.10.0 冒烟 A9）
+
+- **语义口径（文件有效标签）**：文件有效标签 = 文件自身绑定（file_tags）∪ 归属文件夹（含全部后代目录，目录边界前缀）的文件夹标签（folder_tags）；幻灯片条目经归属文件继承同一有效标签集合。此前 folder_tags 仅管理面展示（GetAssetFolderMeta/UpdateAssetFolderMeta），标签筛选两消费面均不查它——用户给文件夹打标后按标签筛不出该目录下文件。
+- **两消费面同源扩展（禁双口径）**：①纯标签浏览 SQL 子查询——`listTagFilteredFiles` 文件命中 = `file_tags` 子查询 `OR EXISTS(folder_tags ft ... 继承谓词)`、`listTagFilteredSlides` 默认分支在「文件绑定 ∪ 页自身绑定」之间插入同一 EXISTS 分支；②关键词路径 Go 层预取——`fileIDsForTagFilter` 两查询同集合合并（file_tags 直绑 + files JOIN folder_tags 继承）。继承谓词单点 `assetFolderTagInheritPredicate(pathCol)`，两消费面禁两套口径。
+- **参数序踩坑留痕**：`listTagFilteredFiles` 仅**两组**标签子查询（file_tags + folder_tags），`listTagFilteredSlides` 默认分支为**三组**（+slide_tags）——实参 append 段数两函数不同构，照搬幻灯片查询的追加段数会把多出的一组实参错位绑定（facet 场景 mtime 下界被绑成 tagID，文件条目静默漏检；`TestAssetSearchFacets_TagsOnlyCombination` 既有用例兜底暴露）。
+- **继承谓词 = substr 等值比较而非 LIKE**：`substr(path, 1, length(ft.folder_path) + 1) = ft.folder_path || '/'`——folder_path 是存量数据列，无法逐行预转义 LIKE 通配符（含 `%`/`_` 的目录名会破坏 LIKE 语义致误伤同构形目录），substr+等值天然无通配符语义且目录边界精确（`a` 不误伤 `ab/`）；与既有 folderPath 维度（assetsFolderFilter，前缀来自检索入参可预转义走 `escapeLikePattern`）机制不同属刻意取舍。folder_path 键恒非空无尾斜杠（resolveLibraryRelPath 拒绝空路径，根目录不可打标）。
+- **SlideTagOnlyOwn 语义不变**：开关仅控页自身层——`onlyOwn=true` 时页条目仅页自身绑定命中（文件直绑与文件夹级联继承同被裁剪，listTagFilteredSlides onlyOwn 分支零改动）；文件条目不受开关影响。
+- **检索可见性口径不变**：excluded/lost 文件不因文件夹标签命中而复活——SQL 路径 status='ok' 恒在外层 WHERE；关键词路径 excludedFileIDSet 剔除在行级判定之后维持（fileIDsForTagFilter 与 file_tags 直绑路同不筛 status，可见性由下游统一收口）。
+- **零改动面**：标签删除级联解绑（deleteTagTree 三绑定表已含 folder_tags，双保险口径无需动）；前端零改动（AssetTagTreeSelect 数据源 tags 表全局，级联后自然生效）；expandTagDescendants（标签子树展开）与文件夹级联正交。
+- **测试锚点**（service/assets_folder_tag_search_test.go）：直接命中/后代目录级联/幻灯片经文件继承（两消费面同测）、目录边界前缀（`media` 不误伤前缀兄弟 `mediax`）、SlideTagOnlyOwn 交互不回归、通配符目录名（`a%b` 不误伤 `axb`）、excluded 不复活（两路径）、无文件夹标签时零行为变化。
+- **性能核查**（2026-10-22 scratch EXPLAIN + 计时）：继承 JOIN 无前缀索引可用（substr 函数谓词），plan 为 files 全扫 × folder_tags 过滤扫描（tag_id IN 子查询带 bloom filter）嵌套——代价 = files 行数 × 命中 folder_tags 行数的 substr 评估，folder_tags 为用户标注目录量级数十；万级文件 × 50 目录行 2.6ms、× 1000 目录行 69ms，检索链路占比可忽略（`fileIDsForTagFilter` 注释留痕，不设索引不加缓存）。
+
 ---
 
 ## 10. 检索排序器与批量评分（SRS §2.5.3 / §2.6，2026-10-16 第八批沉淀）
