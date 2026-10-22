@@ -1249,3 +1249,37 @@ WSHub 事件帧加全局单调 seq + 2000 帧环形缓冲，readPump 解析 resu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 148: Agent 交互式多轮会话（持续会话进程模型）
+
+**Date**: 2026-10-22
+**Task**: Agent 交互式多轮会话（持续会话进程模型）
+**Branch**: `master`
+
+### Summary
+
+AI 对话执行模型从每轮一进程重构为每会话常驻 claude 进程（stdin 流式注入）：运行中插话（Go 侧 FIFO 排队注入，E_CHAT_IN_PROGRESS 退役）、权限审批（control_request 协议+chat-approval 事件+前端弹窗 FIFO 应答，--permission-prompt-tool stdio 漏配守护）、生命周期（watchdog 轮超时 interrupt/空闲回收/参数变更优雅重启/respawn 自动 --resume/进程槽位上限 4）、多会话并行原生隔离+删除会话进程回收。后端全量+race 全绿、vitest 2041、ai-chat E2E 8/8。trellis-check 修复同轮双 finalizer 竞态（finished 认领字段）。spec 沉淀 ai-chat-service.md 重写+browser-channel.md WS 上行边界。遗留：真机冒烟 2026-10-23（记忆 chat-interactive-smoke-pending：审批弹窗/插话/中断后续聊三核心），父批次 10-22-experience-browser-batch 待冒烟通过后归档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5b00149` | (see git log) |
+| `46b0cd5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
