@@ -96,9 +96,11 @@
       title="新建子目录"
       width="420px"
       append-to-body
+      @open="onCreateDialogOpen"
       @closed="createDialogName = ''"
     >
       <el-input
+        ref="createInputRef"
         v-model="createDialogName"
         placeholder="输入文件夹名称"
         maxlength="255"
@@ -116,9 +118,11 @@
       title="重命名文件夹"
       width="420px"
       append-to-body
+      @open="onRenameDialogOpen"
       @closed="renameDialogPath = ''"
     >
       <el-input
+        ref="renameInputRef"
         v-model="renameDialogName"
         placeholder="输入新名称"
         maxlength="255"
@@ -133,7 +137,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Folder, MoreFilled } from '@element-plus/icons-vue'
 // 拖拽数据载荷单点（dragstart/drop 两端唯一实现，MIME 与解析禁第二处手拼）
@@ -325,9 +329,19 @@ const onNodeDrop = (data, event) => {
 const createDialogVisible = ref(false)
 const createDialogPath = ref('')
 const createDialogName = ref('')
+const createInputRef = ref(null)
 const renameDialogVisible = ref(false)
 const renameDialogPath = ref('')
 const renameDialogName = ref('')
+const renameInputRef = ref(null)
+
+// 弹层打开后自动聚焦输入框（@open 触发时弹层内容可能尚未挂载，nextTick 后再取 ref
+// 调 el-input 的 focus()；注意 ref 经模板表达式传参会自动解包，故以闭包直引而非传参）
+const focusDialogInput = (inputRef) => {
+  nextTick(() => inputRef.value?.focus?.())
+}
+const onCreateDialogOpen = () => focusDialogInput(createInputRef)
+const onRenameDialogOpen = () => focusDialogInput(renameInputRef)
 
 const confirmCreate = () => {
   const name = createDialogName.value.trim()

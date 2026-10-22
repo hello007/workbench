@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { h } from 'vue'
+import { h, nextTick } from 'vue'
 import FolderTree from '../FolderTree.vue'
 import { ASSET_FILE_DRAG_MIME, ASSET_FOLDER_DRAG_MIME } from '../../utils/assetFolder'
 
@@ -58,8 +58,9 @@ const ElTreeStub = {
   }
 }
 
-const mountTree = (props = {}) =>
+const mountTree = (props = {}, extra = {}) =>
   mount(FolderTree, {
+    attachTo: extra.attachTo,
     props: {
       nodes: [nodeA, nodeB, nodeExcluded, nodeDerived],
       countMap: { '': 4, 方案A: 2, 归档: 1, '归档/2025': 1 },
@@ -69,11 +70,13 @@ const mountTree = (props = {}) =>
     },
     global: { stubs: {
       'el-tree': ElTreeStub,
-      'el-dialog': { template: '<div v-if="modelValue" class="stub-dialog"><slot /><template v-if="$slots.footer"><div class="dialog-footer"><slot name="footer" /></div></template></div>', props: ['modelValue', 'title', 'width', 'appendToBody'], emits: ['update:modelValue'] },
+      'el-dialog': { template: '<div v-if="modelValue" class="stub-dialog"><slot /><template v-if="$slots.footer"><div class="dialog-footer"><slot name="footer" /></div></template></div>', props: ['modelValue', 'title', 'width', 'appendToBody'], emits: ['update:modelValue', 'open'], watch: { modelValue(v, o) { if (v && !o) this.$emit('open') } } },
       'el-input': {
         template: '<input class="el-input" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" @keyup="$emit(\'keyup\', $event)" />',
         props: ['modelValue', 'placeholder', 'maxlength'],
-        emits: ['update:modelValue', 'keyup']
+        emits: ['update:modelValue', 'keyup'],
+        // 对齐真实 el-input 对外暴露的 focus()（转发到原生 input，jsdom 可断言 activeElement）
+        methods: { focus() { this.$el && this.$el.focus && this.$el.focus() } }
       },
       'el-button': {
         template: '<button class="el-button" :disabled="disabled || loading" @click="$emit(\'click\')"><slot /></button>',
@@ -164,6 +167,23 @@ describe('FolderTree', () => {
     await wrapper.find('.stub-dialog input').setValue('方案A2')
     await wrapper.findAll('.dialog-footer button').find(b => b.text() === '重命名').trigger('click')
     expect(wrapper.emitted('rename')[0]).toEqual(['方案A', '方案A2'])
+  })
+
+  // 聚焦断言依赖元素在文档树内（jsdom 对游离元素 focus 不生效），须 attachTo 挂载
+  it('新建子目录弹窗打开后输入框自动获焦（@open + nextTick）', async () => {
+    const wrapper = mountTree({}, { attachTo: document.body })
+    await clickMenuItem(wrapper, '方案A', 'create')
+    await nextTick()
+    expect(wrapper.find('.stub-dialog input').element).toBe(document.activeElement)
+    wrapper.unmount()
+  })
+
+  it('重命名弹窗打开后输入框自动获焦（两弹窗对称复用同一 helper）', async () => {
+    const wrapper = mountTree({}, { attachTo: document.body })
+    await clickMenuItem(wrapper, '方案A', 'rename')
+    await nextTick()
+    expect(wrapper.find('.stub-dialog input').element).toBe(document.activeElement)
+    wrapper.unmount()
   })
 
   it('删除：emit delete 上报节点对象（确认弹窗与 API 分派在宿主）', async () => {

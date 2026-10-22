@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import PptSplitPanel from '../PptSplitPanel.vue'
-import { SplitPptxPerPage, SplitPptxFolder, CancelPptxSplit, OpenFileDialog, OpenDirectoryDialog } from '../../../wailsjs/go/main/App'
+import { SplitPptxPerPage, SplitPptxFolder, CancelPptxSplit, OpenFileDialog, OpenDirectoryDialog, OpenInExplorer } from '../../../wailsjs/go/main/App'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -18,7 +18,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SplitPptxFolder: vi.fn(() => Promise.resolve({ dirPath: 'D:/docs', total: 2, items: [] })),
   CancelPptxSplit: vi.fn(() => Promise.resolve(true)),
   OpenFileDialog: vi.fn(() => Promise.resolve('')),
-  OpenDirectoryDialog: vi.fn(() => Promise.resolve(''))
+  OpenDirectoryDialog: vi.fn(() => Promise.resolve('')),
+  OpenInExplorer: vi.fn(() => Promise.resolve(true))
 }))
 
 // 捕获 EventsOn 注册的事件回调：用例内直接调回调模拟后端事件推送；
@@ -107,6 +108,7 @@ describe('PptSplitPanel', () => {
     CancelPptxSplit.mockImplementation(() => Promise.resolve(true))
     OpenFileDialog.mockImplementation(() => Promise.resolve(''))
     OpenDirectoryDialog.mockImplementation(() => Promise.resolve(''))
+    OpenInExplorer.mockImplementation(() => Promise.resolve(true))
     for (const key of Object.keys(eventHandlers)) delete eventHandlers[key]
     offFns = []
   })
@@ -172,6 +174,31 @@ describe('PptSplitPanel', () => {
     expect(wrapper.find('.ps-file-item').text()).toBe('D:/docs/汇报/汇报-01.pptx')
     // 拆分结束后进度区复位
     expect(wrapper.find('.ps-progress').exists()).toBe(false)
+  })
+
+  it('拆分成功后「打开文件夹」按钮调 OpenInExplorer 传入输出目录', async () => {
+    const wrapper = createWrapper()
+    await setInput(wrapper, 'D:/docs/汇报.pptx')
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    await clickButton(wrapper, '打开文件夹')
+    await flushPromises()
+    expect(OpenInExplorer).toHaveBeenCalledWith('D:/docs/汇报')
+  })
+
+  it('打开输出目录失败（返回 false）warning 中性提示（不 error）', async () => {
+    const { ElMessage } = await import('element-plus')
+    OpenInExplorer.mockResolvedValue(false)
+    const wrapper = createWrapper()
+    await setInput(wrapper, 'D:/docs/汇报.pptx')
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    await clickButton(wrapper, '打开文件夹')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('打开输出文件夹失败')
+    expect(ElMessage.error).not.toHaveBeenCalled()
   })
 
   it('单文件拆分中展示页级进度（progress 事件按 srcPath 过滤更新）', async () => {
@@ -331,6 +358,30 @@ describe('PptSplitPanel', () => {
     // 全部成功 success 提示
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith('批量拆分完成：2 个文件全部成功')
+  })
+
+  it('批量明细行仅成功项有「打开文件夹」入口且传入各自 outputDir', async () => {
+    SplitPptxFolder.mockResolvedValue({
+      dirPath: 'D:/docs',
+      total: 2,
+      items: [
+        { srcPath: 'D:/docs/汇报.pptx', outputDir: 'D:/docs/汇报', pageCount: 12, error: '' },
+        { srcPath: 'D:/docs/损坏.pptx', outputDir: '', pageCount: 0, error: 'zip 损坏' }
+      ]
+    })
+    const wrapper = createWrapper()
+    await switchToFolderMode(wrapper)
+    await setInput(wrapper, 'D:/docs')
+    await clickButton(wrapper, '开始批量拆分')
+    await flushPromises()
+
+    const rows = wrapper.findAll('.ps-batch-item')
+    // 成功项有入口，失败项（outputDir 空）无入口
+    expect(rows[0].findAll('button').some((b) => b.text() === '打开文件夹')).toBe(true)
+    expect(rows[1].findAll('button').some((b) => b.text() === '打开文件夹')).toBe(false)
+    await rows[0].findAll('button').find((b) => b.text() === '打开文件夹').trigger('click')
+    await flushPromises()
+    expect(OpenInExplorer).toHaveBeenCalledWith('D:/docs/汇报')
   })
 
   it('批量文件级进度事件按 dirPath 过滤更新（第 N/M 个 + 当前文件名）', async () => {

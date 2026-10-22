@@ -39,9 +39,12 @@
         {{ progress ? `正在拆分：${progress.done} / ${progress.total} 页` : '正在拆分：准备中…' }}
       </div>
 
-      <!-- 结果展示：输出目录 + 生成文件列表 -->
+      <!-- 结果展示：输出目录 + 生成文件列表（「打开文件夹」经 OpenInExplorer 桥接资源管理器） -->
       <div v-if="result" class="ps-result">
-        <div class="ps-result-summary">已拆分 {{ result.pageCount }} 页，输出目录：{{ result.outputDir }}</div>
+        <div class="ps-result-head">
+          <div class="ps-result-summary">已拆分 {{ result.pageCount }} 页，输出目录：{{ result.outputDir }}</div>
+          <el-button size="small" @click="openOutputDir(result.outputDir)">打开文件夹</el-button>
+        </div>
         <div class="ps-file-list">
           <div v-for="f in result.files" :key="f" class="ps-file-item">{{ f }}</div>
         </div>
@@ -104,7 +107,10 @@
               </el-tag>
               <span v-if="!item.error" class="ps-batch-item-pages">{{ item.pageCount }} 页</span>
             </div>
-            <div v-if="item.outputDir" class="ps-batch-item-path">输出目录：{{ item.outputDir }}</div>
+            <div v-if="item.outputDir" class="ps-batch-item-path">
+              <span class="ps-batch-item-path-text">输出目录：{{ item.outputDir }}</span>
+              <el-button size="small" link type="primary" @click="openOutputDir(item.outputDir)">打开文件夹</el-button>
+            </div>
             <div v-if="item.error" class="ps-batch-item-error">失败原因：{{ item.error }}</div>
           </div>
         </div>
@@ -126,7 +132,8 @@ import {
   SplitPptxFolder,
   CancelPptxSplit,
   OpenFileDialog,
-  OpenDirectoryDialog
+  OpenDirectoryDialog,
+  OpenInExplorer
 } from '../../wailsjs/go/main/App'
 // 仅引 EventsOn：用其返回的「注销本监听器」闭包在组件卸载时调用，
 // 精准移除本组件的 pptx-split:* 监听器。禁用 EventsOff——Wails v2 EventsOff 按
@@ -281,6 +288,19 @@ const cancelBatchSplit = async () => {
   }
 }
 
+// 打开输出目录（桌面端资源管理器桥接，OpenInExplorer 绑定）：打开失败（返回
+// false）与调用异常（serve 浏览器通道后端守卫返回错误）均 warning 中性提示，
+// 对齐组件既有 toast 风格（DirectoryTree handleOpenExplorer 先例），不阻塞拆分主流程
+const openOutputDir = async (dir) => {
+  if (!dir) return
+  try {
+    const ok = await OpenInExplorer(dir)
+    if (!ok) ElMessage.warning('打开输出文件夹失败')
+  } catch {
+    ElMessage.warning('打开输出文件夹失败')
+  }
+}
+
 // 浏览选择文件夹：桌面端目录选择对话框桥接；serve 浏览器通道不可用时 catch 静默
 // 返回（输入框手动输入路径仍可用），对齐 browseFile 先例
 const browseDir = async () => {
@@ -418,6 +438,14 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-md);
 }
 
+/* 结果汇总行 + 「打开文件夹」入口（两端对齐，路径长文本占主位） */
+.ps-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
 .ps-result-summary {
   font-size: 13px;
   font-weight: 500;
@@ -480,10 +508,18 @@ onBeforeUnmount(() => {
 }
 
 .ps-batch-item-path {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
   margin-top: 2px;
   font-size: 12px;
   color: var(--text-tertiary);
   word-break: break-all;
+}
+
+.ps-batch-item-path-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .ps-batch-item-error {
