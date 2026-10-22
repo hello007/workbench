@@ -49,6 +49,7 @@
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
+import BranchCompareIcon from './icons/BranchCompareIcon.vue'
 import { useUiStore } from '../store'
 
 const uiStore = useUiStore()
@@ -62,7 +63,8 @@ const panels = [
   { id: 'toolbox', icon: ToolboxIcon, label: '工具箱' },
   { id: 'assets', icon: AssetsIcon, label: '素材管理' },
   { id: 'dashboard', icon: DataBoard, label: '状态看板' },
-  { id: 'stats', icon: TrendCharts, label: '仓库统计' }
+  { id: 'stats', icon: TrendCharts, label: '仓库统计' },
+  { id: 'branchcompare', icon: BranchCompareIcon, label: '分支对比' }
 ]
 </script>
 

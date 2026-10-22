@@ -67,7 +67,16 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(() => Promise.resolve({})),
   // 会话快照（崩溃恢复）：默认无快照（冷启动），SaveSessionState mock no-op
   GetSessionState: vi.fn(() => Promise.resolve(null)),
-  SaveSessionState: vi.fn(() => Promise.resolve(true))
+  SaveSessionState: vi.fn(() => Promise.resolve(true)),
+  // 分支对比面板（BranchCompareView v-show 常驻挂载于 Home）：无目录时面板空态不触发，
+  // 但 import 的绑定须存在于 mock 否则 undefined 调用抛 TypeError
+  GetGitInfo: vi.fn(() => Promise.resolve({ isRepo: false })),
+  GetBranches: vi.fn(() => Promise.resolve({ branches: [] })),
+  GetBranchCompareAlignment: vi.fn(() => Promise.resolve(null)),
+  GetBranchCompareFileTree: vi.fn(() => Promise.resolve([])),
+  GetBranchCompareFileDiff: vi.fn(() => Promise.resolve('')),
+  GetCommitChangedFiles: vi.fn(() => Promise.resolve([])),
+  GetCommitFileDiff: vi.fn(() => Promise.resolve(''))
 }))
 
 describe('Home.vue - Bug修复验证', () => {
