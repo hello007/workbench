@@ -441,6 +441,44 @@ func TestPptxPreviewCacheKey_KeyFields(t *testing.T) {
 	}
 }
 
+// TestConvertForPreview_ReturnsAbsPath 返回的 PdfPath 恒为绝对路径
+// （PptxPreviewResult.PdfPath 契约：前端拼 /preview-pdf 同源 URL，serve 模式
+// cwd 变化时相对路径会解析失效）。用相对 cacheDir 构造驱动两个返回点：
+// 转换成功返回与缓存命中返回均须归一为绝对路径。测试结束清理相对目录残留。
+func TestConvertForPreview_ReturnsAbsPath(t *testing.T) {
+	conv := &fakePptxConverter{available: true, convertFn: func(_ int, _, dst string) error {
+		return writeFakePdf(t, dst)
+	}}
+	relCacheDir := filepath.Join("pptx_preview_test_rel_cache", "pptx_preview_pdf")
+	t.Cleanup(func() { os.RemoveAll(filepath.Join("pptx_preview_test_rel_cache")) })
+	svc := NewPptxPreviewService(relCacheDir, conv)
+	src := filepath.Join(t.TempDir(), "abs.pptx")
+	mustWritePptx(t, src, time.Date(2026, 10, 20, 10, 0, 0, 0, time.Local))
+
+	path1, err := svc.ConvertForPreview(context.Background(), src)
+	if err != nil {
+		t.Fatalf("首次转换: %v", err)
+	}
+	if !filepath.IsAbs(path1) {
+		t.Errorf("转换返回的 PdfPath 应为绝对路径: %s", path1)
+	}
+	// 产物须落在归一后的绝对缓存目录（相对目录形态也归一到同处）
+	if filepath.Dir(path1) != absCachePath(relCacheDir) {
+		t.Errorf("产物应位于缓存目录内: %s", path1)
+	}
+
+	path2, err := svc.ConvertForPreview(context.Background(), src)
+	if err != nil {
+		t.Fatalf("二次调用（缓存命中）: %v", err)
+	}
+	if path1 != path2 {
+		t.Errorf("缓存命中应返回同一绝对路径: %s != %s", path1, path2)
+	}
+	if !filepath.IsAbs(path2) {
+		t.Errorf("缓存命中返回的 PdfPath 应为绝对路径: %s", path2)
+	}
+}
+
 // TestUnavailablePptxConverter 兜底桩：Available 恒 false / ConvertToPdf 返回
 // E_PPTX_PREVIEW_UNAVAILABLE（exporter 未实现转换能力时的降级出口）。
 func TestUnavailablePptxConverter(t *testing.T) {

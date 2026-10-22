@@ -28,7 +28,7 @@ func (e *goOleThumbExporter) ConvertToPdf(ctx context.Context, src, dst string) 
 
 ## 3. Contracts
 
-- **model.PptxPreviewResult**：`{pdfPath string, error string, errorCode string}`——容错结构（错误走字段不走 reject），与 FilePreview 模式一致
+- **model.PptxPreviewResult**：`{pdfPath string, error string, errorCode string}`——容错结构（错误走字段不走 reject），与 FilePreview 模式一致；**pdfPath 恒绝对路径**（service 返回点经 `absCachePath` 归一，Abs 失败降级原值；前端逐字 encode 进 `/preview-pdf?path=`，契约对齐 model 注释，serve 模式 cwd 变化场景健壮）
 - **错误码**：`E_PPTX_PREVIEW_UNAVAILABLE`（非 Windows / 无 Office，降级提示）/ `E_PPTX_PREVIEW_FAILED`（转换失败，降级 + 可用默认程序打开）。三处同步：`model/app_error.go` + `frontend/src/utils/error.js` ErrorCode（均 error 级，不入 WARNING_CODES）
 - **缓存布局**：`data/pptx_preview_pdf/<路径哈希>-<size>-<mtime纳秒>.pdf` + `index.json`（util.SaveJSON 原子写；键字段 = srcPath+size+mtime，任一变化即 miss）；LRU 上限 512MB 常量（硬编码，未进设置页），按 lastAccess 淘汰文件+索引项
 - **前端链路**：`FilePreviewRenderer.vue` pptx 分支 → 调 ConvertPptxForPreview → 成功复用 `buildPdfViewerSrc` 单点走 pdfjs iframe；失败/不可用保留降级提示

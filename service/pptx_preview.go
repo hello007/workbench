@@ -195,7 +195,7 @@ func (s *PptxPreviewService) lookup(key, absPath string) (string, bool) {
 	if err := s.saveLocked(); err != nil {
 		Logger().Warn("预览缓存索引落盘失败（不影响本次命中返回）", "path", s.indexPath, "err", err)
 	}
-	return path, true
+	return absCachePath(path), true
 }
 
 // convert 执行一次转换（含超时兜底 + 瞬态重试 1 次 + 成功后记账 + LRU 淘汰）。
@@ -260,7 +260,7 @@ func (s *PptxPreviewService) convert(ctx context.Context, key, absPath string, i
 			Logger().Warn("预览缓存索引加载失败，本次产物不入索引", "path", s.indexPath, "err", err)
 		}
 		s.mu.Unlock()
-		return pptxConvertResult{pdfPath: dst}
+		return pptxConvertResult{pdfPath: absCachePath(dst)}
 	}
 	if errors.Is(lastErr, context.Canceled) || errors.Is(lastErr, context.DeadlineExceeded) {
 		return pptxConvertResult{err: model.WrapAppError(model.ErrCodePptxPreviewFailed,
@@ -326,6 +326,18 @@ func (s *PptxPreviewService) loadLocked() error {
 // os.WriteFile 直写）。须持 s.mu。
 func (s *PptxPreviewService) saveLocked() error {
 	return util.SaveJSON(s.indexPath, pptxPreviewIndexJSON{Entries: s.entries})
+}
+
+// absCachePath 把缓存产物路径归一为绝对路径（PptxPreviewResult.PdfPath 契约
+// 要求绝对路径：前端 FilePreviewRenderer 把 pdfPath 原样 encode 进
+// /preview-pdf?path=<pdfPath> 同源 URL，后端 handler 若按进程 cwd 解析相对路径，
+// serve 模式下 cwd 变化时会失效——返回点即归一，不依赖调用方 cwd 假设）。
+// Abs 失败（理论不发生：入参已由 filepath.Join 构造）降级返回原值不报错。
+func absCachePath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // pptxPreviewCacheKey 缓存键单点：<源路径哈希>-<size>-<mtime纳秒>（哈希取
