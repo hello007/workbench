@@ -1,0 +1,5 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "check 阶段核对门禁阈值与实际覆盖率"}
+{"file": "docs/spec/security-scan.md", "reason": "check 阶段核对 govulncheck/npm audit 清零"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 通道约束：fixtures.js import、mock 单一数据源、通道目录 vitest exclude"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性约束：端口/mtime 隐式依赖禁用，门禁全绿判定前提"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步规则（app_error.go + error.js），修复类改动核对"}

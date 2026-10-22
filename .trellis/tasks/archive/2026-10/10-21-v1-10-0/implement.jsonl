@@ -1,0 +1,10 @@
+{"file": "docs/spec/go-git-deprecation.md", "reason": "git 全功能回归核心约束：禁 go-git、ResolveHead/repoHasRemote/for-each-ref 三口径，冒烟中 git 面判定基准"}
+{"file": "docs/spec/pptx-split.md", "reason": "PPT 按页/文件夹批量拆分冒烟约束：页序三跳映射、批量事件口径、取消语义"}
+{"file": "docs/spec/pptx-merge.md", "reason": "购物栏合并导出冒烟约束：条目键三处同构、冲突消解单点、SkippedItems 口径"}
+{"file": "docs/spec/pptx-preview.md", "reason": "COM 转 PDF 预览冒烟约束：缓存键、失败 Discard 置脏、dev 模式路由黑屏坑"}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "COM 缩略图/跳转冒烟约束：owned PIDs 残留识别、Visible 兜底、冒烟前置进程预检"}
+{"file": "docs/spec/browser-channel.md", "reason": "浏览器通道回归约束：EventSink 三通道、serve 模式对话框守卫"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "发版门禁阈值表：后端/前端覆盖率分层门禁"}
+{"file": "docs/spec/security-scan.md", "reason": "govulncheck/npm audit 清零判定与已知基线"}
+{"file": "docs/memory/workbench-data-write-constraint.md", "reason": "手改 data/ 产物 JSON 前须关 workbench.exe，冒烟 fixture 操作约束"}
+{"file": "docs/memory/trellis-finish-work-entry.md", "reason": "任务归档走 /trellis:finish-work，收尾入口约束"}

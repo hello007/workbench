@@ -1,0 +1,3 @@
+{"time":"2026-10-22T09:27:10.5433745+08:00","level":"INFO","msg":"logger initialized","app":"workbench","logDir":"D:\\workspace\\workspace_ai\\demo_OpenSpec\\git_tools\\git-manager\\.trellis\\tasks\\10-21-v1-10-0\\smoke\\run\\data\\logs","dev":true}
+WorkBench serve 模式运行中: http://127.0.0.1:36115 （访问令牌见 data\web_token）
+{"time":"2026-10-22T09:27:10.5597138+08:00","level":"INFO","msg":"serve mode listening","app":"workbench","addr":"127.0.0.1:36115"}
