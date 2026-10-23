@@ -18,7 +18,7 @@ const (
 
 // claude 权限模式取值（对话执行配置下拉可选集）。
 const (
-	ChatPermissionModeDefault          = "default"           // claude 默认行为（不传 --permission-mode）
+	ChatPermissionModeDefault          = "default"           // claude 默认行为（buildChatArgs 显式传 --permission-mode default，防继承用户全局 settings defaultMode 绕过审批协议；空串归一为该值）
 	ChatPermissionModeAcceptEdits      = "acceptEdits"       // 自动接受文件编辑
 	ChatPermissionModePlan             = "plan"              // 仅规划不执行变更
 	ChatPermissionModeBypassPermission = "bypassPermissions" // 跳过全部权限确认（高危）

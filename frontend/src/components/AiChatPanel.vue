@@ -752,6 +752,21 @@ watch(() => aiChatStore.selectedChatSessionId, () => scrollToBottom(true))
 // ===== 输入与发送 =====
 
 const inputText = ref('')
+
+// 按会话隔离的输入草稿（组件内部瞬时态，不进 store）：切换会话时保存旧会话
+// 草稿、载入新会话草稿。键统一 `sessionId ?? ''`（无选中会话归空串键，避免
+// undefined 键泄漏）。会话删除不订阅清理事件——删除路径 selectedChatSessionId
+// 变化的本 watch 已覆盖保存面，过期键残留无害（会话 id 不复用）。
+const chatDrafts = new Map()
+const chatDraftKey = (sessionId) => sessionId ?? ''
+watch(
+  () => aiChatStore.selectedChatSessionId,
+  (newId, oldId) => {
+    chatDrafts.set(chatDraftKey(oldId), inputText.value)
+    inputText.value = chatDrafts.get(chatDraftKey(newId)) ?? ''
+    // 滚动复位由上方 selectedChatSessionId 的既有 watch 统一处理，此处不重复调用
+  }
+)
 const inputRef = ref()
 
 // Enter 发送 / Shift+Enter 换行（textarea 内组合键交给默认行为）。
@@ -790,6 +805,11 @@ const handleSend = async () => {
     try {
       await aiChatStore.runChat(prompt)
       inputText.value = ''
+      // 发送成功清当前会话草稿；无会话首发路径（先建会话）切换时草稿被存入
+      // 空串键，一并清除防残留复活
+      const sendKey = chatDraftKey(aiChatStore.selectedChatSessionId)
+      chatDrafts.delete(sendKey)
+      if (sendKey !== '') chatDrafts.delete('')
     } catch (error) {
       handleError('发送失败: ', error)
     }

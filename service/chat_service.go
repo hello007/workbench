@@ -743,7 +743,12 @@ const chatQuestionPreamble = `【交互环境说明】你运行在非交互对�
 //     进程长驻；prompt 不走命令行，经 stdin 逐条写入（advanceSession）。
 //   - --resume：重启/恢复场景续 claude 上下文（claudeSessionID 来自会话元数据
 //     或 init/result 事件；首轮新会话不传）。
-//   - --permission-mode：仅非 default 非空时追加（spawn 快照，变更且空闲时重启进程）。
+//   - --permission-mode：恒传（空串归一为 default）。「默认」也必须显式传——
+//     省略参数会让 CLI 继承用户全局 ~/.claude/settings.json 的
+//     permissions.defaultMode（如 auto 走 classifier 判安全，不下发 can_use_tool
+//     审批请求，审批协议被静默绕过；2026-10-23 真机缺陷）；CLI flag 优先级高于
+//     settings defaultMode，显式 default 保证「标准审批」语义不被全局配置覆盖。
+//     spawn 快照，变更且空闲时重启进程。
 //   - --model：仅非空时追加（空 = claude 默认模型）。
 //   - --disallowedTools AskUserQuestion：headless 流式下该工具仍被 CLI 自动应答
 //     （模型基于「用户未作答」的错误前提继续输出），禁用后配合首条消息声明
@@ -757,9 +762,13 @@ func buildChatArgs(resumeSessionID, permissionMode, modelName string) []string {
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
-	if permissionMode != "" && permissionMode != model.ChatPermissionModeDefault {
-		args = append(args, "--permission-mode", permissionMode)
+	// 权限模式恒传：空串（老数据/未选）归一为 default，「默认」也显式传参，
+	// 防止 CLI 继承用户全局 settings 的 defaultMode（auto 等）绕过审批协议。
+	mode := permissionMode
+	if mode == "" {
+		mode = model.ChatPermissionModeDefault
 	}
+	args = append(args, "--permission-mode", mode)
 	if modelName != "" {
 		args = append(args, "--model", modelName)
 	}
@@ -839,6 +848,11 @@ func chatInterruptLine(requestID string) string {
 func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", model.NewAppError(model.ErrCodeChatEmptyPrompt, "对话内容不能为空")
+	}
+	// 空串权限模式（老数据/未选）归一为 default：spawn 快照比较（下方变更检测）
+	// 与 buildChatArgs 显式传参共用同一口径，空串与 default 等价不触发空闲重启。
+	if permissionMode == "" {
+		permissionMode = model.ChatPermissionModeDefault
 	}
 	sess, err := s.GetChatSession(chatSessionID)
 	if err != nil {

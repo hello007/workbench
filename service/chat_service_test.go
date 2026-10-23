@@ -505,7 +505,8 @@ func TestChatService_IndexCorruptFallback(t *testing.T) {
 
 // TestBuildChatArgs 表驱动：持续会话进程形态的 resume/permission-mode/model
 // 追加规则与审批协议开关（--permission-prompt-tool stdio 漏配 = 审批静默自动
-// 拒绝，单测守护该开关恒在）。
+// 拒绝，单测守护该开关恒在）。permission-mode 恒传（含 default 与空串归一），
+// 防 CLI 继承用户全局 settings defaultMode 绕过审批协议。
 func TestBuildChatArgs(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -515,16 +516,16 @@ func TestBuildChatArgs(t *testing.T) {
 		want   []string
 	}{
 		{
-			name: "首轮默认模式", resume: "", mode: "default", mdl: "",
-			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
+			name: "首轮默认模式显式传参", resume: "", mode: "default", mdl: "",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "default", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
 			name: "恢复会话全参数", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
 			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", "s1", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
-			name: "权限模式为空不追加", resume: "", mode: "", mdl: "opus",
-			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
+			name: "权限模式为空归一为 default", resume: "", mode: "", mdl: "opus",
+			want: []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "default", "--model", "opus", "--disallowedTools", "AskUserQuestion", "--permission-prompt-tool", "stdio"},
 		},
 		{
 			name: "plan 模式", resume: "", mode: "plan", mdl: "",

@@ -668,6 +668,9 @@ describe('AiChatPanel.vue', () => {
 
       expect(CreateChatSession).toHaveBeenCalled()
       expect(RunChat).toHaveBeenCalledWith('chatsession-created', '第一句', 'default', '')
+      // 建会话触发的草稿 watch（null→created）会把已捕获的原文存入空串键，
+      // 发送成功须一并清除，防切回无会话态时已发送内容作为草稿复活
+      expect(wrapper.vm.$.setupState.chatDrafts.get('')).toBeUndefined()
     })
 
     it('首发建会话挂起期间重复发送被忽略（防双击双会话双发）', async () => {
@@ -705,6 +708,45 @@ describe('AiChatPanel.vue', () => {
       // 预期拒绝类走 warning（handleError 分流）
       expect(ElMessage.warning).toHaveBeenCalledWith('该会话有对话进行中')
       expect(wrapper.vm.$.setupState.inputText).toBe('hi')
+    })
+
+    it('输入草稿按会话隔离：切走保存、切入恢复', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      // 会话 a（chatsession-new）输入草稿
+      wrapper.vm.$.setupState.inputText = '会话A的草稿'
+      // 切到会话 b（chatsession-old）：输入框清空
+      await wrapper.vm.$.setupState.handleSelectSession('chatsession-old')
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.inputText).toBe('')
+
+      // 切回会话 a：草稿恢复
+      await wrapper.vm.$.setupState.handleSelectSession('chatsession-new')
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.inputText).toBe('会话A的草稿')
+    })
+
+    it('发送成功后清当前会话草稿（切走再切回不复活）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = '待发送内容'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.inputText).toBe('')
+      // 强断言：发送成功立即清草稿 Map（不依赖切换时 inputText='' 的覆盖写回，
+      // 后者会掩盖 delete 缺失使本用例恒真）
+      expect(wrapper.vm.$.setupState.chatDrafts.get('chatsession-new')).toBeUndefined()
+
+      // 切走再切回：草稿不应复活（发送成功已清）
+      await wrapper.vm.$.setupState.handleSelectSession('chatsession-old')
+      await flushPromises()
+      await wrapper.vm.$.setupState.handleSelectSession('chatsession-new')
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.inputText).toBe('')
     })
 
     it('停止按钮调 CancelChatTask', async () => {
