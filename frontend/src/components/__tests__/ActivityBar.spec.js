@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -15,6 +15,17 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
       delete eventHandlers[name]
     }
   })
+}))
+
+// 踢出链依赖（连接管控任务）：App 绑定 + ElMessageBox/ElMessage（确认弹窗与
+// handleError 分流断言；文件级工厂，对齐 confirm-dialog vitest mock 形态）
+vi.mock('../../../wailsjs/go/main/App', () => ({
+  KickConnection: vi.fn()
+}))
+
+vi.mock('element-plus', () => ({
+  ElMessageBox: { confirm: vi.fn() },
+  ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }
 }))
 
 describe('ActivityBar', () => {
@@ -271,4 +282,113 @@ describe('ActivityBar - 多设备连接指示', () => {
     expect(wrapper.find('.devices-panel-list').exists()).toBe(false)
     wrapper.unmount()
   })
+})
+
+// ---- 明细面板踢出交互（连接管控：断开单个连接，非封禁）----
+
+describe('ActivityBar - 明细面板踢出', () => {
+  const createWrapper = () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'directory'
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
+        }
+      }
+    })
+  }
+
+  /** 注入桌面通道两条连接明细并返回挂载后的 wrapper（行内各带踢出按钮） */
+  const mountWithConnections = async () => {
+    const wrapper = createWrapper()
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() },
+      { id: 2, ip: '10.0.0.8', tokenId: 't2', tokenName: '', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    return wrapper
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('每行渲染踢出按钮；点击弹单次确认（含可重连/撤令牌互补警示），确认后调 KickConnection(连接 ID)', async () => {
+    const { KickConnection } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    KickConnection.mockResolvedValue()
+    const wrapper = await mountWithConnections()
+    const kicks = wrapper.findAll('.devices-panel-kick')
+    expect(kicks.length).toBe(2)
+    await kicks[0].trigger('click')
+    await flushConfirm()
+    // 单次确认（confirm-dialog 单次确认形态），警示文案含两手段互补语义
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    const [message, title] = ElMessageBox.confirm.mock.calls[0]
+    expect(title).toBe('踢出连接')
+    expect(message).toContain('192.168.1.5')
+    expect(message).toContain('自动重连')
+    expect(message).toContain('撤销')
+    expect(KickConnection).toHaveBeenCalledTimes(1)
+    expect(KickConnection).toHaveBeenCalledWith(1)
+    // 行消失靠明细事件自动更新，不手动删（此处仅断言调用面）
+    wrapper.unmount()
+  })
+
+  it('确认取消则不调用 KickConnection', async () => {
+    const { KickConnection } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    const wrapper = await mountWithConnections()
+    await wrapper.findAll('.devices-panel-kick')[0].trigger('click')
+    await flushConfirm()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(KickConnection).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('踢出失败走 handleError 分流（E_CONNECTION_NOT_FOUND 预期拒绝 warning，不带前缀）', async () => {
+    const { KickConnection } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    KickConnection.mockRejectedValue({ code: 'E_CONNECTION_NOT_FOUND', message: '连接不存在或已断开（列表已过期，请刷新后重试）' })
+    const wrapper = await mountWithConnections()
+    await wrapper.findAll('.devices-panel-kick')[1].trigger('click')
+    await flushConfirm()
+    expect(KickConnection).toHaveBeenCalledWith(2)
+    expect(ElMessage.warning).toHaveBeenCalledWith('连接不存在或已断开（列表已过期，请刷新后重试）')
+    expect(ElMessage.error).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('踢出真失败（非预期拒绝码）走 error 提示并拼前缀', async () => {
+    const { KickConnection } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    // 非预期拒绝码（E_RPC_INTERNAL 不在 WARNING_CODES）：error 提示拼前缀
+    KickConnection.mockRejectedValue({ code: 'E_RPC_INTERNAL', message: '内部错误' })
+    const wrapper = await mountWithConnections()
+    await wrapper.findAll('.devices-panel-kick')[0].trigger('click')
+    await flushConfirm()
+    expect(ElMessage.error).toHaveBeenCalledWith('踢出失败: 内部错误')
+    expect(ElMessage.warning).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  /** 等待确认链微任务收敛（confirm resolve/reject 与后续调用的 flush） */
+  async function flushConfirm() {
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+  }
 })

@@ -52,6 +52,10 @@ export const ErrorCode = Object.freeze({
   TokenExpiryInvalid: 'E_TOKEN_EXPIRY_INVALID', // 有效期早于当前时间（自定义过期档位校验拒绝）
   // 浏览器访问通道 TLS 域错误码（内置 TLS），取值与 model/app_error.go TLS 域段一致。
   TLSCertInvalid: 'E_TLS_CERT_INVALID', // TLS 证书加载/生成失败：路径无效、文件损坏、过期或证书私钥不配对（error，修正配置或删除自签文件后重试）
+  // 浏览器访问通道连接管控域错误码（踢出连接），取值与 model/app_error.go
+  // 连接管控域段一致，均为预期拒绝/引导类（warning）。
+  WebServeNotRunning: 'E_WEBSERVE_NOT_RUNNING', // 浏览器访问服务未运行，踢出连接不可达（warning；停机/未启用态）
+  ConnNotFound: 'E_CONNECTION_NOT_FOUND', // 目标连接不存在或已断开，列表已过期（warning，引导刷新后重试）
   // PPTX 预览转换域错误码（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer），
   // 取值与 model/app_error.go PPTX 预览转换域段一致。
   PptxPreviewUnavailable: 'E_PPTX_PREVIEW_UNAVAILABLE', // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
@@ -95,7 +99,9 @@ const WARNING_CODES = new Set([
   ErrorCode.CartExportInProgress,
   ErrorCode.TokenNotFound,
   ErrorCode.TokenNameRequired,
-  ErrorCode.TokenExpiryInvalid
+  ErrorCode.TokenExpiryInvalid,
+  ErrorCode.WebServeNotRunning,
+  ErrorCode.ConnNotFound
 ])
 
 /**

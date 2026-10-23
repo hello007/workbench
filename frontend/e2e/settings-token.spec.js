@@ -24,6 +24,9 @@ const tokenRecord = (over = {}) => ({
   ...over
 })
 
+/** ListWebTokens 条目形状（对齐 model.WebTokenStatus：record + onlineConns，连接管控任务） */
+const tokenItem = (over = {}, onlineConns = 0) => ({ record: tokenRecord(over), onlineConns })
+
 /** 打开设置弹窗并切到网络访问页（第 5 个导航项） */
 async function openNetworkTab(page) {
   await page.locator('.activity-bar-item').nth(7).click()
@@ -37,8 +40,8 @@ test.describe('设置：令牌管理（多 token）', () => {
   test.use({
     wailsOverrides: {
       ListWebTokens: [
-        tokenRecord({ id: 'tok-1', name: '手机' }),
-        tokenRecord({ id: 'tok-2', name: '遗失设备', revoked: true })
+        tokenItem({ id: 'tok-1', name: '手机' }, 1),
+        tokenItem({ id: 'tok-2', name: '遗失设备', revoked: true }, 0)
       ],
       CreateWebToken: {
         plainText: 'b1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8b1b2c3d4e5f6a7b8b1b2c3d4e5f6a7b8',
@@ -51,11 +54,13 @@ test.describe('设置：令牌管理（多 token）', () => {
     await page.goto('/')
     const dialog = await openNetworkTab(page)
 
-    // 列表渲染：名称 + 有效/已撤销状态 tag
+    // 列表渲染：名称 + 有效/已撤销状态 tag + 在线连接数徽标（onlineConns>0）
     await expect(dialog.locator('.token-list-row')).toHaveCount(2)
     await expect(dialog.locator('.token-list-row').first()).toContainText('手机')
     await expect(dialog.locator('.token-list-row').first()).toContainText('有效')
+    await expect(dialog.locator('.token-list-row').first().locator('.token-online-badge')).toHaveText('在线 1')
     await expect(dialog.locator('.token-list-row').nth(1)).toContainText('已撤销')
+    await expect(dialog.locator('.token-list-row').nth(1).locator('.token-online-badge')).toHaveCount(0)
 
     // 新建令牌（永久档）：明文一次性回显在 warning alert 内
     await dialog.locator('.token-name-input input').fill('Mac')

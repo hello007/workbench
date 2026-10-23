@@ -130,6 +130,11 @@ const (
 	// 浏览器访问通道 TLS 域（内置 TLS，2026-10 三期 PR2）：
 	ErrCodeTLSCertInvalid = "E_TLS_CERT_INVALID" // TLS 证书加载/生成失败：路径无效、文件损坏、过期或证书私钥不配对（error，用户修正配置或删除自签文件后重试）
 
+	// 浏览器访问通道连接管控域（踢出连接，2026-10-23 连接管控任务）：
+	// 均为预期拒绝/引导类（warning），前端 error.js WARNING_CODES 同步分流。
+	ErrCodeWebServeNotRunning = "E_WEBSERVE_NOT_RUNNING" // 浏览器访问服务未运行，踢出连接不可达（warning；停机/未启用态）
+	ErrCodeConnNotFound       = "E_CONNECTION_NOT_FOUND" // 目标连接不存在或已断开（列表过期，引导刷新后重试；warning）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

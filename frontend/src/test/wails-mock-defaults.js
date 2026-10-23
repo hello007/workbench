@@ -174,19 +174,24 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   SetWebServeConfig: true,
   // RegenerateWebToken 返回新令牌（64 位 hex 形态缩写，仅断言被调用与回填展示）
   RegenerateWebToken: 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8',
-  // 多 token 管理（设置页「网络访问」令牌管理区，PR1）：形状对齐 model.WebTokenRecord
-  // （id/name/hash/createdAt/lastUsedAt/expiresAt 均为 unix 秒，0 = 永不过期/未使用；
-  // revoked 标记已撤销）。默认「默认」令牌单条 + 长期保存；明文回显（CreateWebToken）
+  // 多 token 管理（设置页「网络访问」令牌管理区，PR1）：条目形状对齐
+  // model.WebTokenStatus（record + onlineConns，连接管控任务新增——record 为
+  // WebTokenRecord：id/name/hash/createdAt/lastUsedAt/expiresAt 均为 unix 秒，
+  // 0 = 永不过期/未使用，revoked 标记已撤销；onlineConns 为该令牌在途 WS 连接数，
+  // 0 = 无在线连接）。默认「默认」令牌单条 + 长期保存；明文回显（CreateWebToken）
   // 与撤销（RevokeWebToken）仅在用户操作时调用，null 为安全 no-op
   ListWebTokens: [
     {
-      id: 'tok-default',
-      name: '默认',
-      hash: '0'.repeat(64),
-      createdAt: 1735689600,
-      lastUsedAt: 0,
-      expiresAt: 0,
-      revoked: false
+      record: {
+        id: 'tok-default',
+        name: '默认',
+        hash: '0'.repeat(64),
+        createdAt: 1735689600,
+        lastUsedAt: 0,
+        expiresAt: 0,
+        revoked: false
+      },
+      onlineConns: 0
     }
   ],
   CreateWebToken: {
@@ -202,6 +207,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
     }
   },
   RevokeWebToken: null,
+  // 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务）：void 返回 null
+  // 安全 no-op（命中即断开对端连接；错误经 {__error__, __code__} 描述符注入）
+  KickConnection: null,
 
   // ---- AI 对话工作台（PR1 ChatService 会话链路 + PR2 目录项 CRUD + PR3 对话闭环）----
   // 会话方法：选中目录后调 ListChatSessions，选中会话后调 GetChatSession；

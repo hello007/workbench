@@ -185,7 +185,11 @@ func (m *webServeManager) startLocked(listen string, tlsConf *tls.Config, cfg We
 	// 静默跳过（既有 sink 行为，无新分支）。
 	wailsSink := service.NewWailsEventSink(m.app.ctx)
 	hub.SetOnConnectionsChange(func(details []server.ConnDetail) {
-		wailsSink.Emit(webServeConnectionsEvent, m.app.webTokenNamedDetails(details))
+		named := m.app.webTokenNamedDetails(details)
+		// 连接明细缓存同步写入（令牌在线数聚合数据源，ListWebTokens 消费）：
+		// 回调载荷即最新全量快照，整体替换语义
+		m.app.rememberConnDetails(named)
+		wailsSink.Emit(webServeConnectionsEvent, named)
 	})
 	srv := &http.Server{
 		Handler:           handler,
@@ -242,9 +246,11 @@ func (m *webServeManager) stopLocked() error {
 	m.applySink(nil)
 	// 桌面连接明细显式清空：hub.Close 收口期回调被抑制（closing 置位后逐连接
 	// unregister 不触发回调），浏览器仍连接时停机桌面须熄指示并清空明细列表。
-	// 仅在 hub 曾在册时发（m.srv 非 nil 早退已保证）；--serve 无头模式下该 emit
-	// 对非 Wails ctx 静默跳过
+	// 连接明细缓存同处清零（停机后在途连接全部断开，ListWebTokens 在线数归零；
+	// 回调被抑制不会自动清，须显式写空快照）。仅在 hub 曾在册时发（m.srv 非 nil
+	// 早退已保证）；--serve 无头模式下该 emit 对非 Wails ctx 静默跳过
 	if m.hub != nil {
+		m.app.rememberConnDetails([]server.ConnDetail{})
 		service.NewWailsEventSink(m.app.ctx).Emit(webServeConnectionsEvent, []server.ConnDetail{})
 	}
 	m.srv, m.ln, m.hub, m.handler, m.listen, m.done = nil, nil, nil, nil, "", nil
@@ -288,6 +294,26 @@ func (m *webServeManager) Wait() error {
 // RotateToken 令牌热轮换（已随多 token 改造删除）：校验基准经 verify 闭包直读
 // WebTokenService，RegenerateWebToken 的撤旧建新在服务层即时生效，本方法失去
 // 存在意义，不再保留。
+
+// KickConnection 踢出指定 WS 连接（桌面明细面板处置入口，App 绑定委托本方法）。
+// mu 内取当前 hub 引用后立即释放，断开动作委托 hub.DisconnectClient（其内部
+// 自持锁，锁序无嵌套）；服务停机/未启用（hub nil）返回 E_WEBSERVE_NOT_RUNNING，
+// 连接已断开/不存在（明细列表过期或并发断开竞态）返回 E_CONNECTION_NOT_FOUND。
+// 踢出语义 = 断开当前连接（对端同令牌可重连，非封禁；防重连由撤销令牌承担）。
+func (m *webServeManager) KickConnection(connID uint64) error {
+	m.mu.Lock()
+	hub := m.hub
+	m.mu.Unlock()
+	if hub == nil {
+		return model.NewAppError(model.ErrCodeWebServeNotRunning,
+			"浏览器访问服务未运行，无法踢出连接")
+	}
+	if !hub.DisconnectClient(connID) {
+		return model.NewAppError(model.ErrCodeConnNotFound,
+			"连接不存在或已断开（列表已过期，请刷新后重试）")
+	}
+	return nil
+}
 
 // Running 返回 HTTP 服务当前是否运行中。
 func (m *webServeManager) Running() bool {

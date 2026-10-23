@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"workbench/server"
 	"workbench/service"
 	"workbench/util"
 )
@@ -29,6 +30,13 @@ type App struct {
 	// webServeListenOverride 命令行 --listen 显式覆盖值（空串 = 未指定，走
 	// settings.json webServe.bindAddress；命令行覆盖配置文件）。main() 注入。
 	webServeListenOverride string
+	// connDetails 当前在册浏览器连接明细缓存（整体替换语义的最新全量快照）：
+	// hub SetOnConnectionsChange 回调写入（web_serve.go startLocked）、stopLocked
+	// 停机清零，ListWebTokens 据此按 TokenID 聚合令牌在线连接数（连接管控任务）。
+	// 回调在 hub 内部 goroutine 触发、ListWebTokens 由绑定调用读，connDetailsMu
+	// 保护并发（写侧整体替换、读侧拷贝出锁后聚合）。
+	connDetailsMu sync.Mutex
+	connDetails   []server.ConnDetail
 	// lastCrashFlag 上次会话异常退出标记：startup 检测 data/crash.flag 时置位，
 	// 前端 GetAndClearLastCrashFlag 读后即清（防重复提示）。见 service/diagnostics.go。
 	lastCrashFlag bool

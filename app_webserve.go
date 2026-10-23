@@ -176,12 +176,67 @@ func (a *App) RegenerateWebToken() (string, error) {
 }
 
 // ListWebTokens 列出全部访问令牌记录（按创建时间升序；只含哈希不含明文，
-// 含已撤销/已过期记录供列表展示与审计可见性）。
-func (a *App) ListWebTokens() []model.WebTokenRecord {
+// 含已撤销/已过期记录供列表展示与审计可见性），每条附带在线连接数（连接管控
+// 任务新增）：由连接明细缓存按 TokenID 聚合 join 而来，列表与计数单调用原子
+// 一致，与桌面明细面板行数口径相同（同一缓存快照）。在线数不落盘——返回的
+// WebTokenStatus 为绑定面包装形态，data/web_tokens.json 落盘仍为纯
+// WebTokenRecord（零污染）。
+func (a *App) ListWebTokens() []model.WebTokenStatus {
 	if a.webTokenSvc == nil {
-		return []model.WebTokenRecord{}
+		return []model.WebTokenStatus{}
 	}
-	return a.webTokenSvc.List()
+	records := a.webTokenSvc.List()
+	online := a.onlineConnCountsByToken()
+	statuses := make([]model.WebTokenStatus, 0, len(records))
+	for _, rec := range records {
+		statuses = append(statuses, model.WebTokenStatus{Record: rec, OnlineConns: online[rec.ID]})
+	}
+	return statuses
+}
+
+// rememberConnDetails 更新连接明细缓存（整体替换语义）。写入点两处：hub
+// SetOnConnectionsChange 回调（web_serve.go startLocked，载荷为最新全量快照）
+// 与 stopLocked 停机清零（hub.Close 收口期回调被抑制，须显式写空快照）。
+func (a *App) rememberConnDetails(details []server.ConnDetail) {
+	a.connDetailsMu.Lock()
+	a.connDetails = details
+	a.connDetailsMu.Unlock()
+}
+
+// cachedConnDetails 读取连接明细缓存副本（回调 goroutine 写 + 绑定调用读并发
+// 安全；拷贝出锁后消费，不持锁聚合）。
+func (a *App) cachedConnDetails() []server.ConnDetail {
+	a.connDetailsMu.Lock()
+	defer a.connDetailsMu.Unlock()
+	out := make([]server.ConnDetail, len(a.connDetails))
+	copy(out, a.connDetails)
+	return out
+}
+
+// onlineConnCountsByToken 按令牌 ID 聚合在途连接数（ListWebTokens 在线数
+// 数据源）。聚合在缓存拷贝出锁后进行；miss（令牌已撤销但连接未断）不进计数——
+// 名册无该 ID 记录可 join，计数仅对现存记录生效（已撤销记录仍在名册，其在途
+// 连接照常计入，与明细面板 TokenName 空串降级同款语义）。
+func (a *App) onlineConnCountsByToken() map[string]int {
+	counts := make(map[string]int)
+	for _, d := range a.cachedConnDetails() {
+		counts[d.TokenID]++
+	}
+	return counts
+}
+
+// KickConnection 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务新增）。
+// 委托 webServeManager（停机/未启用返回 E_WEBSERVE_NOT_RUNNING，连接不存在返回
+// E_CONNECTION_NOT_FOUND，均 warning 级引导）。踢出语义 = 断开当前连接，对端同
+// 令牌可重连（非封禁）；防重连由 RevokeWebToken 承担（撤销即时生效于新连接，
+// 不影响已建立连接，两手段互补）。浏览器 UI 无此入口（同构暴露面不特判，认证
+// 由外层 token 把关，与停服务/撤令牌同能力面）。
+func (a *App) KickConnection(connID uint64) error {
+	if a.webServe == nil {
+		return model.NewAppError(model.ErrCodeWebServeNotRunning,
+			"浏览器访问服务未运行，无法踢出连接")
+	}
+	return a.webServe.KickConnection(connID)
 }
 
 // webTokenNamedDetails 为连接明细快照补全令牌名（web_serve.go startLocked 桌面

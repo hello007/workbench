@@ -398,13 +398,17 @@
               <el-button size="small" type="primary" :loading="creatingToken" @click="createToken">新建令牌</el-button>
             </div>
             <div class="token-list">
-              <div v-for="rec in webTokens" :key="rec.id" class="token-list-row">
-                <span class="token-name">{{ rec.name }}</span>
-                <el-tag size="small" :type="tokenStatus(rec).tagType">{{ tokenStatus(rec).label }}</el-tag>
-                <span class="token-meta">创建 {{ formatUnixTime(rec.createdAt) }}</span>
-                <span class="token-meta">{{ rec.lastUsedAt ? '最后使用 ' + formatUnixTime(rec.lastUsedAt) : '从未使用' }}</span>
-                <span class="token-meta">{{ rec.expiresAt ? '过期 ' + formatUnixTime(rec.expiresAt) : '永久有效' }}</span>
-                <el-button v-if="!rec.revoked" size="small" text type="danger" @click="revokeToken(rec)">撤销</el-button>
+              <!-- 条目形状对齐 model.WebTokenStatus（record + onlineConns，连接管控
+                   任务）：在线徽标 onlineConns>0 显示，计数与桌面明细面板行数同源
+                   （同一连接明细缓存快照 join） -->
+              <div v-for="item in webTokens" :key="item.record.id" class="token-list-row">
+                <span class="token-name">{{ item.record.name }}</span>
+                <el-tag size="small" :type="tokenStatus(item.record).tagType">{{ tokenStatus(item.record).label }}</el-tag>
+                <el-tag v-if="item.onlineConns > 0" size="small" type="success" class="token-online-badge">在线 {{ item.onlineConns }}</el-tag>
+                <span class="token-meta">创建 {{ formatUnixTime(item.record.createdAt) }}</span>
+                <span class="token-meta">{{ item.record.lastUsedAt ? '最后使用 ' + formatUnixTime(item.record.lastUsedAt) : '从未使用' }}</span>
+                <span class="token-meta">{{ item.record.expiresAt ? '过期 ' + formatUnixTime(item.record.expiresAt) : '永久有效' }}</span>
+                <el-button v-if="!item.record.revoked" size="small" text type="danger" @click="revokeToken(item.record)">撤销</el-button>
               </div>
               <div v-if="!webTokens.length" class="webserve-url-empty">暂无令牌记录</div>
             </div>

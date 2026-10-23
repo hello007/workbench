@@ -62,6 +62,18 @@
                 <span class="devices-panel-ip" :title="c.ip">{{ c.ip }}</span>
                 <span class="devices-panel-token">{{ c.tokenName || '已撤销令牌' }}</span>
                 <span class="devices-panel-time">{{ formatConnTime(c.connectedAt) }}</span>
+                <!-- 踢出（断开该连接，非封禁）：popover 内容区直挂按钮，不在
+                     tooltip/popover reference 链上，无嵌套 forwardRef 约束问题 -->
+                <button
+                  class="devices-panel-kick"
+                  type="button"
+                  title="踢出该连接"
+                  @click.stop="kickConnection(c)"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                  </svg>
+                </button>
               </div>
             </div>
             <div v-else class="devices-panel-empty">
@@ -89,8 +101,11 @@
 <script setup>
 import { computed } from 'vue'
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
+import { KickConnection } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 
@@ -104,6 +119,29 @@ const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceCon
 const deviceHint = computed(() =>
   `${deviceCount.value} 个设备已连接：点击查看明细`
 )
+
+/**
+ * 踢出单个连接（断开该 WS 连接，非封禁）：单次确认（confirm-dialog 单次确认
+ * 形态）→ 调 KickConnection → 错误走 handleError 分流。警示文案明示「对端可用
+ * 同一令牌自动重连」与「防重连请配合撤销令牌（撤销不影响已建立连接，两手段
+ * 互补）」。行消失靠明细事件自动更新（connections 全量快照落地），不手动删。
+ */
+async function kickConnection(c) {
+  try {
+    await ElMessageBox.confirm(
+      `踢出后该连接（${c.ip}）将立即断开；对端可用同一令牌自动重连（踢出不是封禁）。如需阻止其再连，请到设置中撤销对应令牌——撤销不影响已建立连接，两手段互补。是否踢出？`,
+      '踢出连接',
+      { type: 'warning', confirmButtonText: '踢出', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await KickConnection(c.id)
+  } catch (e) {
+    handleError('踢出失败: ', e)
+  }
+}
 
 // 明细接入时间格式化：非法时间返回 '--'；同日只显 HH:mm:ss，跨日加 MM-dd 前缀
 const formatConnTime = (iso) => {
@@ -230,7 +268,7 @@ const panels = [
 
 .devices-panel-row {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto;
+  grid-template-columns: 120px minmax(0, 1fr) auto auto;
   gap: var(--spacing-sm);
   align-items: center;
   padding: var(--spacing-xs) var(--spacing-sm);
@@ -239,6 +277,27 @@ const panels = [
 
 .devices-panel-row:hover {
   background: var(--bg-tertiary);
+}
+
+/* 踢出按钮：danger 语义色小图标钮（hover 提亮背景），行内紧凑不抢明细信息 */
+.devices-panel-kick {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.devices-panel-kick:hover {
+  background: color-mix(in srgb, var(--danger-color) 14%, transparent);
+  color: var(--danger-color);
 }
 
 .devices-panel-ip {

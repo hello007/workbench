@@ -219,9 +219,10 @@ async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a
   }
   GetWebServeConfig.mockResolvedValue(baseWebServeConfig(webServeOver))
   GetWebServeToken.mockResolvedValue(webToken)
-  // 令牌列表默认「默认」令牌单条；tokensOver 显式传数组覆盖 / null 模拟拉取失败
+  // 令牌列表默认「默认」令牌单条（形状对齐 model.WebTokenStatus：record +
+  // onlineConns）；tokensOver 显式传数组覆盖 / null 模拟拉取失败
   ListWebTokens.mockResolvedValue(tokensOver === undefined ? [
-    { id: 'tok-default', name: '默认', hash: '0'.repeat(64), createdAt: 1735689600, lastUsedAt: 0, expiresAt: 0, revoked: false }
+    { record: { id: 'tok-default', name: '默认', hash: '0'.repeat(64), createdAt: 1735689600, lastUsedAt: 0, expiresAt: 0, revoked: false }, onlineConns: 0 }
   ] : baseWebTokens(tokensOver))
   const uiStore = useUiStore()
   uiStore.settingsVisible = true
@@ -1319,6 +1320,10 @@ describe('SettingsPanel.vue - 令牌管理区', () => {
     ...over
   })
 
+  // ListWebTokens 条目形状（对齐 model.WebTokenStatus：record + onlineConns，
+  // 连接管控任务）；rec() 保持纯 WebTokenRecord（CreateWebToken.record 消费）
+  const tok = (over = {}, onlineConns = 0) => ({ record: rec(over), onlineConns })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -1332,9 +1337,9 @@ describe('SettingsPanel.vue - 令牌管理区', () => {
 
   it('列表渲染名称与状态 tag（有效/已过期/已撤销分流）', async () => {
     wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
-      rec({ id: 'tok-1', name: '手机' }),
-      rec({ id: 'tok-2', name: '旧设备', expiresAt: 1000, revoked: false }),
-      rec({ id: 'tok-3', name: '遗失设备', revoked: true })
+      tok({ id: 'tok-1', name: '手机' }),
+      tok({ id: 'tok-2', name: '旧设备', expiresAt: 1000, revoked: false }),
+      tok({ id: 'tok-3', name: '遗失设备', revoked: true })
     ])
     await openNetworkTab()
     expect(wrapper.text()).toContain('令牌管理')
@@ -1348,10 +1353,26 @@ describe('SettingsPanel.vue - 令牌管理区', () => {
     expect(tags[2].text()).toBe('已撤销')
   })
 
+  it('在线连接数徽标：onlineConns > 0 显示成功态徽标，0 隐藏', async () => {
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      tok({ id: 'tok-1', name: '手机' }, 2),
+      tok({ id: 'tok-2', name: '闲置设备' }, 0)
+    ])
+    await openNetworkTab()
+    const rows = wrapper.findAll('.token-list-row')
+    expect(rows.length).toBe(2)
+    // 在线徽标：计数与成功语义（与状态 tag 同 el-tag 形态）
+    const badges = wrapper.findAll('.token-list-row .token-online-badge')
+    expect(badges.length).toBe(1)
+    expect(badges[0].text()).toBe('在线 2')
+    // onlineConns=0 的行不渲染徽标
+    expect(rows[1].find('.token-online-badge').exists()).toBe(false)
+  })
+
   it('已撤销记录不显示撤销按钮，未撤销记录显示', async () => {
     wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
-      rec({ id: 'tok-1', name: '手机' }),
-      rec({ id: 'tok-3', name: '遗失设备', revoked: true })
+      tok({ id: 'tok-1', name: '手机' }),
+      tok({ id: 'tok-3', name: '遗失设备', revoked: true })
     ])
     await openNetworkTab()
     const rows = wrapper.findAll('.token-list-row')
@@ -1436,10 +1457,10 @@ describe('SettingsPanel.vue - 令牌管理区', () => {
     const { ElMessageBox } = await import('element-plus')
     ElMessageBox.confirm.mockResolvedValue()
     RevokeWebToken.mockResolvedValue()
-    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [rec({ id: 'tok-1', name: '手机' })])
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [tok({ id: 'tok-1', name: '手机' })])
     await openNetworkTab()
     // 撤销后刷新列表：mock 重设为已撤销态（createWrapper 的默认 mock 已返回未撤销初态）
-    ListWebTokens.mockResolvedValue([rec({ id: 'tok-1', name: '手机', revoked: true })])
+    ListWebTokens.mockResolvedValue([tok({ id: 'tok-1', name: '手机', revoked: true })])
     await wrapper.findAll('.token-list-row button').find(b => b.text() === '撤销').trigger('click')
     await flushPromises()
     // 单次确认（confirm-dialog 单次确认形态：confirm 恰一次）

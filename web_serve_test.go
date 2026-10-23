@@ -1034,3 +1034,183 @@ func TestApp_WebTokenNamedDetails(t *testing.T) {
 		}
 	}
 }
+
+// ===== 连接管控（踢出连接 + 令牌在线数）=====
+
+// waitConnCacheCount 轮询等待连接明细缓存条数达到期望值（hub 回调经缓存写入，
+// register/unregister 均异步），返回达到时的缓存快照。
+func waitConnCacheCount(t *testing.T, app *App, want int) []server.ConnDetail {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		details := app.cachedConnDetails()
+		if len(details) == want {
+			return details
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("等待连接明细缓存超时: len = %d, want %d", len(app.cachedConnDetails()), want)
+	return nil
+}
+
+// TestApp_KickConnection_NotRunning 停机/未启用（hub nil）与零值管理器 nil 两形态
+// 均返回 E_WEBSERVE_NOT_RUNNING AppError，不崩。
+func TestApp_KickConnection_NotRunning(t *testing.T) {
+	app := newWebServeTestApp(t)
+
+	// 管理器在、服务未启动：hub nil
+	err := app.KickConnection(1)
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeWebServeNotRunning {
+		t.Fatalf("未启动时踢出应返 E_WEBSERVE_NOT_RUNNING, got %v", err)
+	}
+
+	// 零值管理器 nil：同码不 panic
+	app.webServe = nil
+	err = app.KickConnection(1)
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeWebServeNotRunning {
+		t.Fatalf("nil 管理器踢出应返 E_WEBSERVE_NOT_RUNNING, got %v", err)
+	}
+
+	// 启动后停机：回到 hub nil 形态
+	app.webServe = newWebServeManager(app)
+	if err := app.webServe.Start("127.0.0.1:0", nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := app.webServe.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	err = app.KickConnection(1)
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeWebServeNotRunning {
+		t.Fatalf("停机后踢出应返 E_WEBSERVE_NOT_RUNNING, got %v", err)
+	}
+}
+
+// TestApp_KickConnection_EndToEnd 踢出端到端：真实 WS 客户端接入后按明细缓存中
+// 的连接 ID 踢出——客户端读侧感知断开、明细缓存随回调自动收敛清零（行消失靠
+// 明细事件）；不存在的 ID 返 E_CONNECTION_NOT_FOUND（列表过期引导刷新）。
+func TestApp_KickConnection_EndToEnd(t *testing.T) {
+	app := newWebServeTestApp(t)
+	m := app.webServe
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	token, err := server.LoadOrCreateToken(serveTokenFile)
+	if err != nil {
+		t.Fatalf("读访问令牌: %v", err)
+	}
+	conn, _, err := (&websocket.Dialer{
+		Subprotocols:     []string{token},
+		HandshakeTimeout: 5 * time.Second,
+	}).Dial("ws://"+m.listenAddr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("WS 升级失败: %v", err)
+	}
+	defer conn.Close()
+
+	// register 回调写入明细缓存：单条、TokenID 非空
+	details := waitConnCacheCount(t, app, 1)
+	if details[0].TokenID == "" {
+		t.Fatalf("明细缓存 TokenID 应非空, got %+v", details[0])
+	}
+
+	// miss：不存在的连接 ID 返 E_CONNECTION_NOT_FOUND
+	err = app.KickConnection(424242)
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeConnNotFound {
+		t.Fatalf("不存在连接应返 E_CONNECTION_NOT_FOUND, got %v", err)
+	}
+
+	// hit：按缓存中的真实 ID 踢出，客户端读侧断开（已入队帧可先送达，读到错为止）
+	connID := details[0].ID
+	if err := app.KickConnection(connID); err != nil {
+		t.Fatalf("踢出在册连接: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	kickSeen := false
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			kickSeen = true
+			break
+		}
+	}
+	if !kickSeen {
+		t.Error("被踢连接读侧应感知断开")
+	}
+	// 明细缓存自动收敛清零（unregister 收尾触发回调写入空快照）
+	waitConnCacheCount(t, app, 0)
+}
+
+// TestApp_ListWebTokens_OnlineConns 令牌在线数 join：缓存按 TokenID 聚合与名册
+// join——无连接 0、多连接累加、已撤销令牌仍有在途连接（revoked=true 且
+// OnlineConns>0，与明细面板 TokenName 空串同款语义）；撤销后新连接不再计入的
+// 防重连面由 WebTokenService 认证层保证，不在本用例面。
+func TestApp_ListWebTokens_OnlineConns(t *testing.T) {
+	app := newWebServeTestApp(t)
+	if app.webTokenSvc == nil {
+		t.Fatal("前置：测试 App 应已装配 webTokenSvc")
+	}
+	_, rec, err := app.webTokenSvc.Create("手机", 0)
+	if err != nil {
+		t.Fatalf("前置：创建令牌失败: %v", err)
+	}
+
+	findOnline := func(id string) (int, bool) {
+		for _, st := range app.ListWebTokens() {
+			if st.Record.ID == id {
+				return st.OnlineConns, true
+			}
+		}
+		return 0, false
+	}
+
+	// 无连接：0
+	if n, ok := findOnline(rec.ID); !ok || n != 0 {
+		t.Fatalf("无连接时在线数应为 0, got n=%d ok=%v", n, ok)
+	}
+
+	// 注入缓存：该令牌 2 条在途连接 + 1 条已撤销令牌（名册外 ID）连接
+	app.rememberConnDetails([]server.ConnDetail{
+		{ID: 1, IP: "192.168.1.5", TokenID: rec.ID},
+		{ID: 2, IP: "192.168.1.6", TokenID: rec.ID},
+		{ID: 3, IP: "10.0.0.8", TokenID: "revoked-token-id"},
+	})
+	if n, ok := findOnline(rec.ID); !ok || n != 2 {
+		t.Fatalf("该令牌在线数应聚合为 2, got n=%d ok=%v", n, ok)
+	}
+	// 名册外 TokenID（已撤销并已删除语义）无记录可 join，不产生幽灵条目
+	if _, ok := findOnline("revoked-token-id"); ok {
+		t.Error("名册外 TokenID 不应产生在线数条目")
+	}
+
+	// 撤销令牌仍有在途连接：记录 revoked=true 且 OnlineConns>0（连接不随撤销断开，
+	// 防重连由撤销即时生效于新连接承担——两手段互补）
+	if err := app.webTokenSvc.Revoke(rec.ID); err != nil {
+		t.Fatalf("撤销令牌: %v", err)
+	}
+	var revoked model.WebTokenStatus
+	found := false
+	for _, st := range app.ListWebTokens() {
+		if st.Record.ID == rec.ID {
+			revoked, found = st, true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("已撤销记录应保留在列表（审计可见性）")
+	}
+	if !revoked.Record.Revoked {
+		t.Error("记录应标记已撤销")
+	}
+	if revoked.OnlineConns != 2 {
+		t.Fatalf("已撤销令牌在途连接应照常计入（OnlineConns=2）, got %d", revoked.OnlineConns)
+	}
+
+	// 停机清零链：rememberConnDetails 空快照后在线数归零（stopLocked 同款写入点，
+	// hub 回调抑制态下在线数不得残留）
+	app.rememberConnDetails([]server.ConnDetail{})
+	if n, ok := findOnline(rec.ID); !ok || n != 0 {
+		t.Fatalf("空快照写入后在线数应归零, got n=%d ok=%v", n, ok)
+	}
+}

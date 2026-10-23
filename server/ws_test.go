@@ -929,3 +929,169 @@ func TestWSHub_OnConnectionsChangeNilSafe(t *testing.T) {
 		t.Fatalf("未设置回调时连接数广播应照常, got event=%q data=%v", frame.Event, frame.Data)
 	}
 }
+
+// ===== DisconnectClient（连接管控：按 ID 踢出单个在途连接）=====
+
+// TestWSHub_DisconnectClientHit 踢出命中：目标连接读侧感知断开（conn.Close 使
+// readPump ReadMessage 出错），明细回调自动更新（零新增事件——unregister 既有
+// 收尾路径触发快照双出口），其余连接收到 ws-connections:changed count 回落广播。
+func TestWSHub_DisconnectClientHit(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	callbacks := make(chan []ConnDetail, 8)
+	hub.SetOnConnectionsChange(func(details []ConnDetail) { callbacks <- details })
+
+	connA := mustDialWS(t, srv, "?token=right-token")
+	connB := mustDialWS(t, srv, "?token=right-token")
+	if got := <-callbacks; len(got) != 1 {
+		t.Fatalf("前置：首个连接回调应为 1 条明细, got %d", len(got))
+	}
+	if got := <-callbacks; len(got) != 2 {
+		t.Fatalf("前置：第二个连接回调应为 2 条明细, got %d", len(got))
+	}
+
+	if !hub.DisconnectClient(1) {
+		t.Fatal("在册连接踢出应命中返 true")
+	}
+
+	// 被踢连接读侧感知断开：conn.Close 前已入队帧（注册窗口 count 广播）可先
+	// 正常送达，循环读到错误为止（读超时 5s 兜底防永挂）
+	_ = connA.SetReadDeadline(time.Now().Add(5 * time.Second))
+	kickSeen := false
+	for {
+		if _, _, err := connA.ReadMessage(); err != nil {
+			kickSeen = true
+			break
+		}
+	}
+	if !kickSeen {
+		t.Error("被踢连接读侧应感知断开（ReadMessage 返回错误）")
+	}
+
+	// 明细回调自动更新：剩 B（ID=2）一条；行消失靠事件驱动（零新增事件）
+	afterKick := <-callbacks
+	if len(afterKick) != 1 || afterKick[0].ID != 2 {
+		t.Fatalf("踢出后明细回调应剩 ID=2 一条, got %v", afterKick)
+	}
+	waitClientCount(t, hub, 1)
+
+	// 其余连接收到 count 回落广播：B 先后收到注册窗口 count=2 与踢出后 count=1
+	f1 := readFrame(t, connB)
+	if n, ok := frameDataCount(f1); !ok || f1.Event != wsConnectionsEvent || n != 2 {
+		t.Fatalf("B 首帧应为注册窗口 count=2, got event=%q data=%v", f1.Event, f1.Data)
+	}
+	f2 := readFrame(t, connB)
+	if n, ok := frameDataCount(f2); !ok || f2.Event != wsConnectionsEvent || n != 1 {
+		t.Fatalf("踢出后 B 应收到 count=1 广播, got event=%q data=%v", f2.Event, f2.Data)
+	}
+
+	_ = connB.Close()
+	empty := <-callbacks
+	if len(empty) != 0 {
+		t.Fatalf("B 断开后回调应为空快照, got %v", empty)
+	}
+	waitClientCount(t, hub, 0)
+}
+
+// TestWSHub_DisconnectClientMissAndIdempotent miss 与幂等：不存在的 ID 返 false；
+// 重复踢出第二次 miss（已注销连接不在 clients，天然幂等），不误伤其余连接。
+func TestWSHub_DisconnectClientMissAndIdempotent(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	callbacks := make(chan []ConnDetail, 8)
+	hub.SetOnConnectionsChange(func(details []ConnDetail) { callbacks <- details })
+
+	connA := mustDialWS(t, srv, "?token=right-token")
+	connB := mustDialWS(t, srv, "?token=right-token")
+	<-callbacks
+	<-callbacks
+
+	if hub.DisconnectClient(999) {
+		t.Error("不存在的连接 ID 应 miss 返 false")
+	}
+	if !hub.DisconnectClient(1) {
+		t.Fatal("首连（ID=1）踢出应命中")
+	}
+	waitClientCount(t, hub, 1)
+	if got := <-callbacks; len(got) != 1 || got[0].ID != 2 {
+		t.Fatalf("踢出后应剩 ID=2, got %v", got)
+	}
+	// 重复踢出同一 ID：幂等 miss，不产生第二次明细回调
+	if hub.DisconnectClient(1) {
+		t.Error("重复踢出已注销连接应幂等 miss 返 false")
+	}
+	select {
+	case got := <-callbacks:
+		t.Fatalf("幂等 miss 不应触发明细回调, got %v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	// B 未被误伤：仍能收到广播
+	hub.Emit("probe", "x")
+	f := readBusinessFrame(t, connB)
+	if f.Event != "probe" {
+		t.Fatalf("未被踢连接应继续收到广播, got event=%q", f.Event)
+	}
+	_ = connA.Close()
+	_ = connB.Close()
+}
+
+// TestWSHub_DisconnectClientConcurrentRace 踢出与并发断开/广播竞态（-race 形态）：
+// 踢出方、客户端反复建连/断开、广播方三方并发，收口后 hub 归零且无 goroutine
+// 泄漏症状（竞态由 -race 暴露，本用例钉住交错窗口不 panic、计数收敛）。
+func TestWSHub_DisconnectClientConcurrentRace(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	// 客户端反复建连/断开（对齐 TestWSHub_ConcurrentEmitAndDisconnectRace 范式）
+	stop := make(chan struct{})
+	var cliWG sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		cliWG.Add(1)
+		go func() {
+			defer cliWG.Done()
+			dialer := &websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				conn, _, err := dialer.Dial("ws://"+srv.Listener.Addr().String()+wsPath+"?token=right-token", nil)
+				if err != nil {
+					continue
+				}
+				_ = conn.Close()
+			}
+		}()
+	}
+
+	// 踢出方并发按 ID 踢（ID 空间 1..200 覆盖连接分配区间，miss/命中混合）
+	var kickWG sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		kickWG.Add(1)
+		go func(n int) {
+			defer kickWG.Done()
+			for id := uint64(1); id <= 200; id++ {
+				if n%2 == 0 && id%3 == 0 {
+					continue // 制造两踢出方节奏差异
+				}
+				hub.DisconnectClient(id)
+			}
+		}(i)
+	}
+
+	// 广播方并发 Emit
+	var emitWG sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		emitWG.Add(1)
+		go func(n int) {
+			defer emitWG.Done()
+			for j := 0; j < 200; j++ {
+				hub.Emit("race", n, j)
+			}
+		}(i)
+	}
+	emitWG.Wait()
+	close(stop)
+	kickWG.Wait()
+	cliWG.Wait()
+
+	waitClientCount(t, hub, 0)
+}

@@ -45,3 +45,16 @@ type WebTokenCreated struct {
 	// Record 新建的 token 记录（含 ID/Name/CreatedAt 等，Hash 非明文）。
 	Record WebTokenRecord `json:"record"`
 }
+
+// WebTokenStatus 令牌记录 + 在线连接数（App.ListWebTokens 的返回包装形态，
+// 连接管控任务新增）。在线数由 App 层连接明细缓存（hub 连接回调写入）按
+// TokenID 聚合 join 而来，单调用列表+计数原子一致；**不参与落盘序列化**——
+// data/web_tokens.json 仍以 WebTokenRecord 单独落盘（运行时字段不污染存储
+// 形态），本结构仅存在于绑定返回值面。
+type WebTokenStatus struct {
+	// Record 令牌记录（含已撤销/已过期记录，与原 ListWebTokens 列表口径一致）。
+	Record WebTokenRecord `json:"record"`
+	// OnlineConns 该令牌当前在途 WS 连接数（0 = 无在线连接；令牌已撤销但连接
+	// 未断时 Record.Revoked=true 且本值 > 0，与明细面板 TokenName 空串同款语义）。
+	OnlineConns int `json:"onlineConns"`
+}

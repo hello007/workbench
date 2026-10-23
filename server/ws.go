@@ -324,6 +324,36 @@ func (h *WSHub) Close() {
 	}
 }
 
+// DisconnectClient 按连接 ID 踢出单个在途客户端（桌面明细面板处置入口，main 层
+// webServeManager.KickConnection 委托）。mu 写锁内遍历 clients 定位目标，命中关
+// 闭底层 conn——net 层非阻塞锁内安全，完全对齐 Close 的「只关 conn 不 close(send)」
+// 模式：readPump 的 ReadMessage 感知断连后走既有 defer unregister（写锁下
+// delete + close(send)，仅当客户端仍在册）自然收尾，并经 notifyConnectionDetails
+// 触发明细快照双出口（桌面事件 + 浏览器 count 广播），**零新增事件**。
+//
+// 幂等：已注销连接不在 clients，重复踢出天然 miss 返 false。本方法自身不在锁内
+// 调 notify/Emit（锁序红线：Emit 内部按 seqMu → mu.RLock 加锁，mu 写锁临界区内
+// 直调会形成同 goroutine 重入 RLock 死锁）——断连收尾的 notify 由 readPump 自己
+// 的 goroutine 出锁后触发，与本调用无并发锁窗口。
+//
+// 踢出语义 = 断开当前连接，对端同令牌可重连（重连须用有效令牌），非封禁；防重
+// 连由撤销令牌承担（撤销即时生效于新连接，两手段互补不互替）。
+func (h *WSHub) DisconnectClient(connID uint64) bool {
+	h.mu.Lock()
+	var target *wsClient
+	for c := range h.clients {
+		if c.detail.ID == connID {
+			target = c
+			break
+		}
+	}
+	if target != nil {
+		_ = target.conn.Close()
+	}
+	h.mu.Unlock()
+	return target != nil
+}
+
 // ServeHTTP 处理 GET /ws 升级请求。
 //
 // 认证必须在升级前完成：失败以 HTTP 401 拒绝（若先升级再踢，客户端已进入
