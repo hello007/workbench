@@ -11,7 +11,12 @@ const stubs = {
     template: '<input class="el-input" :value="modelValue" :placeholder="placeholder" @input="$emit(\'update:modelValue\', $event.target.value)" />'
   },
   'el-select': { template: '<div class="el-select"><slot /></div>', props: ['modelValue', 'multiple', 'placeholder', 'size', 'collapseTags', 'clearable'] },
-  'el-option': { template: '<div class="el-option" />', props: ['label', 'value'] }
+  'el-option': { template: '<div class="el-option" />', props: ['label', 'value'] },
+  'el-checkbox': {
+    props: ['modelValue', 'size', 'label'],
+    emits: ['update:modelValue'],
+    template: '<label class="el-checkbox"><input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />{{ label }}</label>'
+  }
 }
 
 const FILES = [
@@ -66,14 +71,45 @@ describe('BranchCompareFileTree.vue', () => {
     const dirNodes = wrapper.findAll('.tree-node-dir')
     const fileNodes = wrapper.findAll('.tree-node-file')
     expect(dirNodes.length).toBeGreaterThanOrEqual(1)
-    // 7 个文件全部渲染
-    expect(fileNodes).toHaveLength(7)
+    // unchanged 默认隐藏：7 个文件渲染 6 个
+    expect(fileNodes).toHaveLength(6)
+    expect(wrapper.find('.file-count').text()).toBe('6/7')
     // 目录名
     expect(dirNodes[0].text()).toContain('src')
   })
 
-  it('文件节点按状态着色（status-* class）', () => {
+  it('unchanged 默认隐藏，「未变更」开关或状态过滤显式勾选时显示', async () => {
     const wrapper = mountTree()
+    expect(wrapper.find('.status-unchanged.tree-node-file').exists()).toBe(false)
+    wrapper.vm.showUnchanged = true
+    await nextTick()
+    expect(wrapper.find('.status-unchanged.tree-node-file').exists()).toBe(true)
+    expect(wrapper.findAll('.tree-node-file')).toHaveLength(7)
+    // 回关开关、改走状态过滤显式勾选 unchanged 亦可见
+    wrapper.vm.showUnchanged = false
+    wrapper.vm.statusFilter = ['unchanged']
+    await nextTick()
+    expect(wrapper.find('.status-unchanged.tree-node-file').exists()).toBe(true)
+  })
+
+  it('目录行点击收放（点击后子树隐藏、再点恢复）', async () => {
+    const wrapper = mountTree()
+    const dir = wrapper.find('.tree-node-dir')
+    expect(dir.text()).toContain('src')
+    // 默认展开：src 下可见 auth 等子节点
+    expect(wrapper.find('.status-added.tree-node-file').exists()).toBe(true)
+    await dir.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.status-added.tree-node-file').exists()).toBe(false)
+    await dir.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.status-added.tree-node-file').exists()).toBe(true)
+  })
+
+  it('文件节点按状态着色（status-* class）', async () => {
+    const wrapper = mountTree()
+    wrapper.vm.showUnchanged = true
+    await nextTick()
     expect(wrapper.find('.status-added .node-name').text()).toBe('login.js')
     expect(wrapper.find('.status-deleted .node-name').text()).toBe('legacy.js')
     expect(wrapper.find('.status-unchanged .node-name').text()).toBe('util.js')
