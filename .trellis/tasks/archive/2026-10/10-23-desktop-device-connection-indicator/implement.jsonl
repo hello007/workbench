@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核心契约：§2.3 连接数事件契约（mu 写锁内快照出锁后 Emit 锁序红线、count=0 与 closing 双抑制态、事件占 seq 进环形缓冲）、EventSink 分层（server 包不知 Wails）、webServeManager Start/Stop 代际与 applySink 收口序——本任务 hub 回调与桌面事件出口全部踩在该文档契约面上"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "前端 EventsOn 返回闭包精准注销契约（多组件共听同事件禁 EventsOff）——useDeviceConnections 加桌面监听须遵守；model 字段变更 wailsjs 三处同步规则（本任务预期零绑定变更，仍须核对）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端 slog 日志规范；本任务预期无新增错误码，若有告警日志（如 Stop 收口发 0 失败）须按此规范"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态；hub 回调用例并发构造（预取消/预置状态驱动）与端口随机化约束适用于 webServeManager 生命周期用例"}

@@ -1,0 +1,3 @@
+{"file": "docs/spec/browser-channel.md", "reason": "验收对照：§2.3 连接数事件锁序红线与抑制态在 hub 回调改造后必须原样保持（WS 广播路径逐字节不变）；新增桌面事件出口契约须回写本文档"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验收对照：EventsOn 闭包注销、wailsjs 绑定三处同步（预期零 diff，须核实未意外改 App 方法签名/model 导出字段）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service/server 包改动后 go test 覆盖率须过基线（server 包相关用例新增）"}
