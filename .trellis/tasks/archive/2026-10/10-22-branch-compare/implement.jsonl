@@ -1,0 +1,11 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定/模型同步/方法暴露约定"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "AppServices 装配纪律"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码/超时/取消语义"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "面板/组件视觉约定"}
+{"file": "docs/spec/design-tokens.md", "reason": "深浅主题 CSS 变量"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门槛"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性纪律"}
+{"file": "docs/spec/linux-platform.md", "reason": "跨平台 git 命令/路径"}
+{"file": ".trellis/tasks/10-22-branch-compare/research/branch-compare-algorithms.md", "reason": "源项目算法移植摘要"}
+{"file": ".trellis/tasks/10-22-branch-compare/research/workbench-git-plumbing.md", "reason": "WorkBench git 管道与接入点"}

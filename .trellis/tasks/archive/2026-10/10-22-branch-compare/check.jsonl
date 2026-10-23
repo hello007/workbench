@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对绑定/模型同步"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码双侧同步"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门槛"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试稳定性"}
+{"file": ".trellis/tasks/10-22-branch-compare/research/branch-compare-algorithms.md", "reason": "核对算法语义保真"}
+{"file": ".trellis/tasks/10-22-branch-compare/research/workbench-git-plumbing.md", "reason": "核对管道复用正确性"}
