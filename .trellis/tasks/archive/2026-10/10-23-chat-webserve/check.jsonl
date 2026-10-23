@@ -1,0 +1,2 @@
+{"file": "docs/spec/ai-chat-service.md", "reason": "检查 buildChatArgs 契约同步（显式 default 传参注释与 spec 一致）、审批协议语义未破坏"}
+{"file": ".trellis/tasks/10-23-chat-webserve/prd.md", "reason": "对照验收标准：草稿按会话隔离、default 显式传参断言、测试全绿"}
