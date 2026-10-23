@@ -24,6 +24,7 @@
       >
         <el-option v-for="s in STATUS_LIST" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
+      <el-checkbox v-model="showUnchanged" size="small">未变更</el-checkbox>
       <span class="file-count">{{ matchedFiles.length }}/{{ files.length }}</span>
     </div>
     <div class="tree-body">
@@ -41,7 +42,7 @@
 </template>
 
 <script setup>
-import { ref, computed, h, defineComponent } from 'vue'
+import { ref, computed, reactive, h, defineComponent } from 'vue'
 import { CaretRight, CaretBottom, Document, Folder as FolderIcon } from '@element-plus/icons-vue'
 import { buildTree, STATUS_LIST } from '../utils/branchFileTree'
 
@@ -56,15 +57,18 @@ const props = defineProps({
 
 const emit = defineEmits(['selectFile'])
 
-// 过滤态
+// 过滤态；unchanged 默认隐藏（「未变更」开关或状态过滤显式勾选时显示）
 const pathKeyword = ref('')
 const statusFilter = ref([])
+const showUnchanged = ref(false)
 
-// 过滤后文件集：状态多选（空 = 不过滤）+ 路径子串（大小写不敏感）
+// 过滤后文件集：unchanged 开关 + 状态多选（空 = 不过滤）+ 路径子串（大小写不敏感）
 const matchedFiles = computed(() => {
   const kw = pathKeyword.value.trim().toLowerCase()
   const statuses = statusFilter.value
+  const allowUnchanged = showUnchanged.value || statuses.includes('unchanged')
   return props.files.filter(f => {
+    if (f.status === 'unchanged' && !allowUnchanged) return false
     if (statuses.length > 0 && !statuses.includes(f.status)) return false
     if (kw && !f.path.toLowerCase().includes(kw)) return false
     return true
@@ -90,8 +94,8 @@ const FileNode = defineComponent({
   },
   emits: ['selectFile'],
   setup(nodeProps, { emit: emitFile }) {
-    // 展开态按目录路径记忆（闭包 Map：树重建后保留用户展开结果）
-    const expandedMap = new Map()
+    // 展开态按目录路径记忆；必须 reactive——渲染函数闭包内的普通 Map 变更不触发重渲染（点击收放失效根因）
+    const expandedMap = reactive(new Map())
     const isExpanded = (path) => expandedMap.get(path) !== false
     const toggle = (path) => expandedMap.set(path, !isExpanded(path))
 

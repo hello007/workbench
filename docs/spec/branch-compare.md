@@ -32,6 +32,7 @@ App 方法不带 ctx（对齐 `GetCommitHistory` 模式），内部 `context.Bac
 - 面板 id `branchcompare`（ActivityBar panels 数组 + `store/ui.js` 注释并集 + `Home.vue` v-show 常驻挂载）；仓库默认取 `useDirectoryStore().currentDirPath`，非仓库空态引导浏览（`OpenDirectoryDialog` + `GetGitInfo` 校验）。
 - diff 解析复用 `utils/diffParse.js`（自 `FileDiffDialog.vue` 逐字抽取的 `parseDiff`/`parseRangeDiff`，FileDiffDialog 改 import，行为零变化）；文件树构建在 `utils/branchFileTree.js` 纯函数。
 - 每个异步请求带 `requestSeq` 守卫丢旧响应；文件 diff 走 `gitCache`（键 `branchCompare:<repo>:<a>:<b>:<file>`），刷新按钮清缓存强拉。
+- 文件树 UI 行为：**unchanged 默认隐藏**（工具栏「未变更」开关或状态过滤显式勾选「未变更」时显示，两者 OR）；目录行点击收放——展开态 Map 必须 `reactive`（渲染函数闭包内的普通 Map 变更不触发重渲染，v1.11.0 冒烟曾因此点击无反应）。
 - UI 文案中文硬编码；状态色全部走 design tokens（typechange 无青色 token，用 `--info-color`）。
 
 ## 测试分层
