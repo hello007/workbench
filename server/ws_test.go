@@ -827,66 +827,101 @@ func TestWSHub_CloseSuppressesConnectionEvents(t *testing.T) {
 	waitClientCount(t, hub, 0)
 }
 
-// TestWSHub_OnCountChangeCallback 桌面连接数回调（SetOnCountChange）：register/
-// unregister 出 mu 写锁后触发，count 全值透传——含最后一个浏览器断开的 count=0
-// （桌面视角计数为纯浏览器数，须据此熄指示）。回调与 hub 内部 WS 广播是两条独立
-// 出口：WS 广播侧对 count=0 的抑制不影响回调透传。
+// TestWSHub_OnConnectionsChangeCallback 桌面连接明细快照回调（SetOnConnectionsChange）：
+// register/unregister 出 mu 写锁后触发，全量明细透传——含最后一个浏览器断开的空
+// 快照（桌面据此熄指示并清空明细列表）。回调与 hub 内部 WS 广播是两条独立出口：
+// WS 广播侧对 count=0 的抑制不影响回调透传，且广播载荷恒为 count 数字（隐私红线：
+// 他人 IP/token 明细不进浏览器通道）。
 //
-// 计数值断言与触发者无关：计数为 hub 级单调快照，两次注册必然先后产生 1、2，
-// 两次断开必然先后产生 1、0（与哪条连接的 readPump 先感知无关），channel 收值
-// 顺序确定，无时序依赖。
-func TestWSHub_OnCountChangeCallback(t *testing.T) {
+// 快照内容断言与触发者无关：快照为 hub 级全量状态，两次注册必然先后产生 1、2 条
+// 明细，两次断开必然先后产生 1、0 条（与哪条连接的 readPump 先感知无关），channel
+// 收值顺序确定，无时序依赖。连接 ID 按 dial 顺序单调分配（ServeHTTP 串行处理升级，
+// dial 返回即 Upgrade 完成后），快照按 ID 升序即接入顺序。
+func TestWSHub_OnConnectionsChangeCallback(t *testing.T) {
 	hub, srv := newTestWSHub(t, "right-token")
-	callbacks := make(chan int, 8)
-	hub.SetOnCountChange(func(count int) { callbacks <- count })
+	callbacks := make(chan []ConnDetail, 8)
+	hub.SetOnConnectionsChange(func(details []ConnDetail) { callbacks <- details })
 
 	connA := mustDialWS(t, srv, "?token=right-token")
-	if n := <-callbacks; n != 1 {
-		t.Fatalf("首个连接回调应为 1, got %d", n)
+	first := <-callbacks
+	if len(first) != 1 {
+		t.Fatalf("首个连接回调应为 1 条明细, got %d", len(first))
 	}
-	connB := mustDialWS(t, srv, "?token=right-token")
-	if n := <-callbacks; n != 2 {
-		t.Fatalf("第二个连接回调应为 2, got %d", n)
+	// 元数据字段断言：ID 单调分配、IP 剥端口（httptest 客户端恒 127.0.0.1）、
+	// tokenID 为命中记录 ID（StaticVerifier 伪 ID "static"）、接入时间非零值
+	d := first[0]
+	if d.ID != 1 {
+		t.Fatalf("首个连接 ID 应为 1, got %d", d.ID)
+	}
+	if d.IP != "127.0.0.1" {
+		t.Fatalf("IP 应剥端口为 127.0.0.1, got %q", d.IP)
+	}
+	if d.TokenID != "static" {
+		t.Fatalf("TokenID 应为 StaticVerifier 伪 ID static, got %q", d.TokenID)
+	}
+	if d.ConnectedAt.IsZero() {
+		t.Fatal("接入时间不应为零值")
+	}
+	if d.TokenName != "" {
+		t.Fatalf("server 侧 TokenName 应恒空（装配层映射）, got %q", d.TokenName)
 	}
 
-	// A 断开：回调 1；B 断开：回调 0（关键：count=0 须透传给桌面熄指示）
+	connB := mustDialWS(t, srv, "?token=right-token")
+	second := <-callbacks
+	if len(second) != 2 {
+		t.Fatalf("第二个连接回调应为 2 条明细, got %d", len(second))
+	}
+	// 快照按 ID 升序（接入顺序），载荷顺序确定
+	if second[0].ID != 1 || second[1].ID != 2 {
+		t.Fatalf("快照应按连接 ID 升序, got [%d, %d]", second[0].ID, second[1].ID)
+	}
+
+	// A 断开：回调剩 B（ID=2）；B 断开：空快照（关键：空快照须透传给桌面熄指示
+	// 并清空明细列表）
 	_ = connA.Close()
-	if n := <-callbacks; n != 1 {
-		t.Fatalf("第一个断开回调应为 1, got %d", n)
+	afterClose := <-callbacks
+	if len(afterClose) != 1 || afterClose[0].ID != 2 {
+		t.Fatalf("第一个断开后应剩连接 ID=2 一条明细, got %v", afterClose)
 	}
 	_ = connB.Close()
-	if n := <-callbacks; n != 0 {
-		t.Fatalf("最后一个浏览器断开回调应为 0, got %d", n)
+	empty := <-callbacks
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("最后一个浏览器断开回调应为空快照（非 nil）, got %v", empty)
 	}
 	waitClientCount(t, hub, 0)
+
+	// 隐私红线：浏览器通道载荷恒为 count 数字（int），不含明细
+	if n, ok := frameDataCount(readFrame(t, mustDialWS(t, srv, "?token=right-token"))); !ok || n != 1 {
+		t.Fatalf("浏览器通道广播载荷应为 count 数字, got n=%d ok=%v", n, ok)
+	}
 }
 
-// TestWSHub_CloseSuppressesOnCountChangeCallback hub.Close 收口期回调与 WS 广播
-// 同受 closing 抑制：逐连接 unregister 不再触发回调。manager 停机路径据契约在
-// hub.Close 后经 Wails 出口显式补发 count=0（web_serve.go stopLocked），hub 侧
-// 不重复发。
-func TestWSHub_CloseSuppressesOnCountChangeCallback(t *testing.T) {
+// TestWSHub_CloseSuppressesOnConnectionsChangeCallback hub.Close 收口期回调与 WS
+// 广播同受 closing 抑制：逐连接 unregister 不再触发回调。manager 停机路径据契约
+// 在 hub.Close 后经 Wails 出口显式补发空明细快照（web_serve.go stopLocked），
+// hub 侧不重复发。
+func TestWSHub_CloseSuppressesOnConnectionsChangeCallback(t *testing.T) {
 	hub, srv := newTestWSHub(t, "right-token")
-	callbacks := make(chan int, 8)
-	hub.SetOnCountChange(func(count int) { callbacks <- count })
+	callbacks := make(chan []ConnDetail, 8)
+	hub.SetOnConnectionsChange(func(details []ConnDetail) { callbacks <- details })
 
 	conn := mustDialWS(t, srv, "?token=right-token")
-	if n := <-callbacks; n != 1 {
-		t.Fatalf("前置：register 回调应为 1, got %d", n)
+	if got := <-callbacks; len(got) != 1 {
+		t.Fatalf("前置：register 回调应为 1 条明细, got %d", len(got))
 	}
 	hub.Close()
 	waitClientCount(t, hub, 0)
 	select {
-	case n := <-callbacks:
-		t.Fatalf("Close 收口期不应触发连接数回调, got count=%d", n)
+	case got := <-callbacks:
+		t.Fatalf("Close 收口期不应触发连接明细回调, got %v", got)
 	case <-time.After(100 * time.Millisecond):
 	}
 	_ = conn.Close()
 }
 
-// TestWSHub_OnCountChangeNilSafe 未设置回调（nil）时 register/unregister 正常：
+// TestWSHub_OnConnectionsChangeNilSafe 未设置回调（nil）时 register/unregister 正常：
 // 连接数 WS 广播路径零波及（既有用例均未设置回调，此处显式钉住 nil 安全契约）。
-func TestWSHub_OnCountChangeNilSafe(t *testing.T) {
+func TestWSHub_OnConnectionsChangeNilSafe(t *testing.T) {
 	_, srv := newTestWSHub(t, "right-token")
 	conn := mustDialWS(t, srv, "?token=right-token")
 	frame := readFrame(t, conn)

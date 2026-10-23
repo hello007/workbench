@@ -18,11 +18,30 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
   })
 }))
 
-// 挂载一个消费 composable 的最小组件（composable 依赖组件生命周期注册/注销监听）
+// 桌面明细条目 fixture（形状对齐后端 server.ConnDetail：id/ip/tokenId/tokenName/
+// connectedAt，connectedAt 为 RFC3339 字符串）
+const connDetail = (id, overrides = {}) => ({
+  id,
+  ip: `192.168.1.${id}`,
+  tokenId: `t${id}`,
+  tokenName: `手机${id}`,
+  connectedAt: new Date().toISOString(),
+  ...overrides
+})
+
+// 挂载一个消费 composable 的最小组件（composable 依赖组件生命周期注册/注销监听）。
+// 前两段保持 deviceCount/multiDevice 原文渲染（既有用例断言不变），后三段结构化
+// 输出通道归属与明细（ids 取 JSON 数组形态，避免与其他数字段混淆）
 const Harness = defineComponent({
   setup() {
-    const { deviceCount, multiDevice } = useDeviceConnections()
-    return () => h('div', { class: 'harness' }, [String(deviceCount.value), String(multiDevice.value)])
+    const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceConnections()
+    return () => h('div', { class: 'harness' }, [
+      String(deviceCount.value),
+      String(multiDevice.value),
+      `desktop=${isDesktopChannel.value}`,
+      `n=${connections.value.length}`,
+      `ids=${JSON.stringify(connections.value.map((c) => c.id))}`
+    ])
   }
 })
 
@@ -68,31 +87,37 @@ describe('useDeviceConnections', () => {
     wrapper.unmount()
   })
 
-  it('桌面事件锁定通道：count=1 即显示（桌面视角计数为纯浏览器数）', async () => {
+  it('桌面事件锁定通道：一条明细即显示（桌面视角计数为纯浏览器数）', async () => {
     const wrapper = mount(Harness)
     const desktop = eventHandlers[WEBSERVE_CONNECTIONS_EVENT]
     expect(desktop).toBeTypeOf('function')
-    desktop(1)
+    desktop([connDetail(1)])
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('1')
     expect(wrapper.text()).toContain('true')
+    expect(wrapper.text()).toContain('desktop=true')
+    expect(wrapper.text()).toContain('n=1')
+    expect(wrapper.text()).toContain('ids=[1]')
     wrapper.unmount()
   })
 
-  it('桌面事件接受 count=0（最后一个浏览器断开/webServe 停机熄指示）', async () => {
+  it('桌面事件接受空数组（最后一个浏览器断开/webServe 停机熄指示并清空明细）', async () => {
     const wrapper = mount(Harness)
     const desktop = eventHandlers[WEBSERVE_CONNECTIONS_EVENT]
-    desktop(2)
+    desktop([connDetail(1), connDetail(2)])
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('true')
-    desktop(0)
+    desktop([])
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('0')
     expect(wrapper.text()).toContain('false')
+    expect(wrapper.text()).toContain('desktop=true')
+    expect(wrapper.text()).toContain('n=0')
+    expect(wrapper.text()).toContain('ids=[]')
     wrapper.unmount()
   })
 
-  it('桌面非法载荷忽略且不锁定通道归属（后续仍走浏览器口径）', async () => {
+  it('桌面非法载荷（非数组）忽略且不锁定通道归属（后续仍走浏览器口径）', async () => {
     const wrapper = mount(Harness)
     const desktop = eventHandlers[WEBSERVE_CONNECTIONS_EVENT]
     desktop(-1)
@@ -100,6 +125,7 @@ describe('useDeviceConnections', () => {
     desktop(undefined)
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('false')
+    expect(wrapper.text()).toContain('desktop=false')
     // 浏览器通道事件仍按浏览器口径判定（isDesktopChannel 未被非法载荷置位）
     const browser = eventHandlers[WS_CONNECTIONS_EVENT]
     browser(2)
@@ -108,6 +134,30 @@ describe('useDeviceConnections', () => {
     browser(1)
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('false')
+    wrapper.unmount()
+  })
+
+  it('桌面通道 deviceCount 恒等于明细行数（两条明细显示 2，回落一条显示 1）', async () => {
+    const wrapper = mount(Harness)
+    const desktop = eventHandlers[WEBSERVE_CONNECTIONS_EVENT]
+    desktop([connDetail(1), connDetail(2)])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('n=2')
+    expect(wrapper.text()).toContain('ids=[1,2]')
+    desktop([connDetail(3)])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('n=1')
+    expect(wrapper.text()).toContain('ids=[3]')
+    wrapper.unmount()
+  })
+
+  it('tokenName 空串（令牌已撤销）明细原样落地，composable 不加工（fallback 展示为组件职责）', async () => {
+    const wrapper = mount(Harness)
+    const desktop = eventHandlers[WEBSERVE_CONNECTIONS_EVENT]
+    desktop([connDetail(1, { tokenName: '' })])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('desktop=true')
+    expect(wrapper.text()).toContain('n=1')
     wrapper.unmount()
   })
 

@@ -3,8 +3,11 @@ package server
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -90,13 +93,14 @@ type wsRingEntry struct {
 // 广播语义：一条事件推给全部已连接客户端（个人单用户多标签页场景，各标签
 // 共享同一后端状态）。单用户工具不做订阅过滤/单播，保持实现最小面。
 type WSHub struct {
-	verify        TokenVerifier   // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
-	onAuth        func(AuthEvent) // 认证事件出口（可 nil）
-	onCountChange func(count int) // 连接数变化回调（桌面事件出口用，可 nil；见 SetOnCountChange）
-	upgrader      websocket.Upgrader
-	mu            sync.RWMutex // 保护 clients 与 closing；send channel 的 close 仅发生在持写锁的 unregister
-	clients       map[*wsClient]struct{}
-	closing       bool // hub 已进入关停（Close 调用后置位）：register/unregister 不再广播连接数事件
+	verify              TokenVerifier          // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
+	onAuth              func(AuthEvent)        // 认证事件出口（可 nil）
+	onConnectionsChange func([]ConnDetail)     // 连接明细快照变化回调（桌面事件出口用，可 nil；见 SetOnConnectionsChange）
+	upgrader            websocket.Upgrader
+	mu                  sync.RWMutex // 保护 clients 与 closing；send channel 的 close 仅发生在持写锁的 unregister
+	clients             map[*wsClient]struct{}
+	closing             bool // hub 已进入关停（Close 调用后置位）：register/unregister 不再广播连接数事件
+	connSeq             atomic.Uint64 // 连接 ID 分配器（自 1 起）：ServeHTTP 升级成功时取号，跨连接单调
 
 	// 续传序号与环形缓冲（seqMu 保护）。锁序恒为 seqMu → mu：Emit 在 seqMu
 	// 临界区内完成「占号-入环-广播」，resume 补发在同一临界区取补发集，保证
@@ -114,12 +118,33 @@ type WSHub struct {
 	pingPeriod time.Duration // ping 周期：pongWait * 9 / 10，留 pong 往返余量
 }
 
+// ConnDetail 单个在册 WebSocket 连接的元数据快照（桌面连接明细出口载荷，多设备
+// 「是谁连着」可见性）。字段在 ServeHTTP 升级成功时一次性赋值，此后不可变——
+// register/unregister 持 mu 写锁遍历 clients 构造全量快照，无并发读改面。
+//
+// TokenName 由装配层（web_serve.go startLocked 闭包持 WebTokenService）映射填充，
+// server 包恒留空：名称映射依赖 service 层令牌名册，server 不反向依赖（分层红线）。
+// 映射 miss（令牌已撤销但连接未断）由装配层降级，前端 fallback 展示。
+type ConnDetail struct {
+	// ID 连接 ID（hub 级自增，自 1 起）：前端列表 key 与快照排序键（即接入顺序）。
+	ID uint64 `json:"id"`
+	// IP 对端来源地址（RemoteAddr 剥端口；SplitHostPort 失败时原样保留）。
+	IP string `json:"ip"`
+	// TokenID 命中的令牌记录 ID（authorized 返回的审计归因键）。
+	TokenID string `json:"tokenId"`
+	// TokenName 令牌名（装配层映射填充，server 恒空；前端空值 fallback「已撤销令牌」）。
+	TokenName string `json:"tokenName"`
+	// ConnectedAt 本次连接建立时间（重连即新连接条目，取新值；RFC3339 序列化）。
+	ConnectedAt time.Time `json:"connectedAt"`
+}
+
 // wsClient 单个已连接客户端：send 队列由 writePump 独占消费，保证单连接
 // 写串行化（gorilla 禁止并发写同一连接，防 interleaved write panic）。
 type wsClient struct {
-	hub  *WSHub
-	conn *websocket.Conn
-	send chan []byte
+	hub    *WSHub
+	conn   *websocket.Conn
+	send   chan []byte
+	detail ConnDetail // 连接元数据（ServeHTTP 升级成功时构造，此后不可变）
 }
 
 // NewWSHub 构造 WebSocket hub。verify 为握手令牌校验函数（main 装配传入
@@ -130,14 +155,17 @@ func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent)) *WSHub {
 	return newWSHubTuned(verify, onAuth, defaultWriteWait, defaultPongWait, wsResumeBuffer)
 }
 
-// SetOnCountChange 设置连接数变化回调（桌面事件出口用，main 装配层在 hub 服务
-// 开始前注入——web_serve.go startLocked 在 applySink 之后调用）。须在 ServeHTTP
-// 开始服务前设置：回调为纯函数指针无内部锁，启动后热更换闭包不做线程安全承诺
-// （生产装配一次即定，无运行期热更路径）。回调与 hub 内部 WS 广播（ws-connections:changed）
-// 是两条独立出口：count=0 也须透传（桌面最后一个浏览器断开要熄指示，WS 广播
-// 侧对 count=0 的抑制不影响回调），closing 收口期统一抑制（见 notifyConnectionCount）。
-func (h *WSHub) SetOnCountChange(fn func(count int)) {
-	h.onCountChange = fn
+// SetOnConnectionsChange 设置连接明细快照变化回调（桌面事件出口用，main 装配层
+// 在 hub 服务开始前注入——web_serve.go startLocked 在 applySink 之后调用）。须在
+// ServeHTTP 开始服务前设置：回调为纯函数指针无内部锁，启动后热更换闭包不做线程
+// 安全承诺（生产装配一次即定，无运行期热更路径）。回调载荷为全量明细快照（幂等
+// 可重放，连接数由 len 派生——明细与计数单事件单真相，无两事件间时序窗口）；回调
+// 与 hub 内部 WS 广播（ws-connections:changed，仅 count 数字——他人 IP/token 明细
+// 不进浏览器通道，隐私红线）是两条独立出口：空快照（count=0）也须透传（桌面最后
+// 一个浏览器断开要熄指示并清空明细列表，WS 广播侧对 count=0 的抑制不影响回调），
+// closing 收口期统一抑制（见 notifyConnectionDetails）。
+func (h *WSHub) SetOnConnectionsChange(fn func(details []ConnDetail)) {
+	h.onConnectionsChange = fn
 }
 
 // newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
@@ -289,7 +317,7 @@ func (h *WSHub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	// 置位关停标记：此后 readPump defer 触发的逐连接 unregister 不再广播
-	// 连接数事件（收口期无意义，见 notifyConnectionCount 注释）
+	// 连接数事件（收口期无意义，见 notifyConnectionDetails 注释）
 	h.closing = true
 	for c := range h.clients {
 		_ = c.conn.Close()
@@ -337,10 +365,27 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("websocket upgrade failed", "remote", r.RemoteAddr, "err", err)
 		return
 	}
-	c := &wsClient{hub: h, conn: conn, send: make(chan []byte, wsSendBuffer)}
+	c := &wsClient{hub: h, conn: conn, send: make(chan []byte, wsSendBuffer), detail: newConnDetail(h, r, tokenID)}
 	h.register(c)
 	go c.writePump()
 	h.readPump(c)
+}
+
+// newConnDetail 从升级请求采集连接元数据（ServeHTTP 升级成功后调用一次，此后
+// 不可变——register/unregister 的快照构造仅读该值，无并发写面）。IP 取 RemoteAddr
+// 剥端口（SplitHostPort 失败原样保留，Unix socket 等无端口形态兜底）；连接 ID 取
+// hub 级自增号（跨连接单调，即接入顺序，兼作快照排序键保证载荷顺序确定）。
+func newConnDetail(h *WSHub, r *http.Request, tokenID string) ConnDetail {
+	ip := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		ip = host
+	}
+	return ConnDetail{
+		ID:          h.connSeq.Add(1),
+		IP:          ip,
+		TokenID:     tokenID,
+		ConnectedAt: time.Now(),
+	}
 }
 
 // authorized 校验升级请求令牌：三种通道任一命中即通过——Sec-WebSocket-Protocol
@@ -381,10 +426,10 @@ func (h *WSHub) authorized(r *http.Request) (matched, tokenID string, ok bool) {
 func (h *WSHub) register(c *wsClient) {
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
-	count := len(h.clients)
+	details := h.snapshotDetailsLocked()
 	notify := !h.closing
 	h.mu.Unlock()
-	h.notifyConnectionCount(count, notify)
+	h.notifyConnectionDetails(details, notify)
 }
 
 // unregister 注销客户端并关闭其发送队列。close 仅在此处（写锁下、且仅当
@@ -395,43 +440,58 @@ func (h *WSHub) unregister(c *wsClient) {
 		delete(h.clients, c)
 		close(c.send)
 	}
-	count := len(h.clients)
+	details := h.snapshotDetailsLocked()
 	notify := !h.closing
 	h.mu.Unlock()
-	h.notifyConnectionCount(count, notify)
+	h.notifyConnectionDetails(details, notify)
 }
 
-// notifyConnectionCount 连接数变化的双出口分发（多设备语义明示，多端共享同一
-// 后端状态的前端可见性提示）：
-//   - 桌面回调出口（onCountChange）：count 全值透传（含 0——桌面视角计数为纯
-//     浏览器连接数，最后一个浏览器断开须熄指示；桌面事件 webserve-connections:changed
-//     由 main 装配层闭包发射，server 包不知 Wails，分层红线）；
-//   - hub 内部 WS 广播（ws-connections:changed）：仅 count>0 时广播——浏览器
-//     视角计数含自身连接（指示条件 count>1），count=0 时无接收者，仅徒增环形
-//     缓冲噪声。两出口语义分叉刻意不同名不同判定，前端 useDeviceConnections
-//     双通道消费分流。
+// snapshotDetailsLocked 构造当前在册连接的全量明细快照（mu 写锁持有方可调用）。
+// 各连接 detail 构造后不可变，遍历仅读；按连接 ID 升序排序使事件载荷顺序确定
+//（即接入顺序，前端列表无需再排）。
+func (h *WSHub) snapshotDetailsLocked() []ConnDetail {
+	details := make([]ConnDetail, 0, len(h.clients))
+	for c := range h.clients {
+		details = append(details, c.detail)
+	}
+	sort.Slice(details, func(i, j int) bool { return details[i].ID < details[j].ID })
+	return details
+}
+
+// notifyConnectionDetails 连接集合变化的双出口分发（多设备语义明示，多端共享
+// 同一后端状态的前端可见性提示）：
+//   - 桌面回调出口（onConnectionsChange）：全量明细快照透传（含空快照——桌面视角
+//     明细为纯浏览器连接列表，最后一个浏览器断开须熄指示并清空列表；桌面事件
+//     webserve-connections:changed 由 main 装配层闭包发射（载荷经令牌名映射补全），
+//     server 包不知 Wails，分层红线）；
+//   - hub 内部 WS 广播（ws-connections:changed）：仅 count>0 时广播且载荷恒为
+//     count 数字——浏览器视角计数含自身连接（指示条件 count>1），count=0 时无
+//     接收者；**隐私红线**：他人 IP/token 明细不进浏览器通道，浏览器载荷逐字节
+//     不变。两出口语义分叉刻意不同名不同判定，前端 useDeviceConnections 双通道
+//     消费分流。
 //
 // **锁序红线**：调用方必须在释放 mu 写锁之后调用——Emit 内部按 seqMu → mu.RLock
 // 加锁，若在 mu 写锁临界区内调用会形成同 goroutine 重入 RLock 死锁（RWMutex
-// 写锁持有方再取读锁不被允许）。计数在写锁临界区内快照出局部变量，出锁后发射。
+// 写锁持有方再取读锁不被允许）。明细快照在写锁临界区内构造出局部变量，出锁后
+// 触发回调与广播。
 //
 // WS 广播事件经常规 Emit 进环形缓冲占用 seq：resume 补发面包含该事件，计数为
 // 幂等快照（最后到达值即当前态），重放无碍，续传契约不变。并发连接/断开场景
 // 下两条 changed 事件的发送顺序可能与计数变化顺序不一致（各自独立加 seqMu），
 // 事件仅信息提示用途可接受。共同抑制态：hub 关停（closing）后不触发——Close
 // 收口期逐连接 unregister 的递减序列对前端无意义（连接即将随服务停机断开），
-// 桌面归零由 manager 停机路径显式补发（web_serve.go stopLocked）。
-func (h *WSHub) notifyConnectionCount(count int, notify bool) {
+// 桌面归零由 manager 停机路径显式补发空快照（web_serve.go stopLocked）。
+func (h *WSHub) notifyConnectionDetails(details []ConnDetail, notify bool) {
 	if !notify {
 		return
 	}
-	if fn := h.onCountChange; fn != nil {
-		fn(count)
+	if fn := h.onConnectionsChange; fn != nil {
+		fn(details)
 	}
-	if count == 0 {
+	if len(details) == 0 {
 		return
 	}
-	h.Emit(wsConnectionsEvent, count)
+	h.Emit(wsConnectionsEvent, len(details))
 }
 
 // readPump 读泵：在升级请求的 goroutine 内运行，消费协议层 pong 做保活判定，

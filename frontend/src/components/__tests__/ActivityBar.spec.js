@@ -188,7 +188,12 @@ describe('ActivityBar - 多设备连接指示', () => {
         plugins: [pinia],
         stubs: {
           'el-icon': { template: '<span><slot /></span>' },
-          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] }
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          // 明细 popover 桩（参照 AssetsPanel 模式）：双 slot 全渲染（免触发机制直测面板内容）
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
         }
       }
     })
@@ -229,5 +234,41 @@ describe('ActivityBar - 多设备连接指示', () => {
     expect(eventHandlers['ws-connections:changed']).toBeTypeOf('function')
     wrapper.unmount()
     expect(eventHandlers['ws-connections:changed']).toBeUndefined()
+  })
+
+  it('桌面通道明细面板：三列明细（IP/token 名/接入时间），空 tokenName 降级「已撤销令牌」，非法时间显「--」', async () => {
+    const wrapper = createWrapper()
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() },
+      { id: 2, ip: '10.0.0.8', tokenId: 't2', tokenName: '', connectedAt: new Date().toISOString() },
+      { id: 3, ip: '172.16.0.2', tokenId: 't3', tokenName: '平板', connectedAt: 'invalid' }
+    ])
+    await nextTick()
+    expect(wrapper.find('.devices-panel').exists()).toBe(true)
+    expect(wrapper.find('.devices-panel-title').text()).toBe('已连接设备（3）')
+    const rows = wrapper.findAll('.devices-panel-row')
+    expect(rows.length).toBe(3)
+    expect(rows[0].find('.devices-panel-ip').text()).toBe('192.168.1.5')
+    expect(rows[0].find('.devices-panel-token').text()).toBe('手机')
+    // 同日接入时间只显 HH:mm:ss
+    expect(rows[0].find('.devices-panel-time').text()).toMatch(/^\d{1,2}:\d{2}:\d{2}$/)
+    // tokenName 空串（令牌已撤销）降级展示
+    expect(rows[1].find('.devices-panel-token').text()).toBe('已撤销令牌')
+    // 非法接入时间降级 '--'
+    expect(rows[2].find('.devices-panel-time').text()).toBe('--')
+    // 底部固定共享语义提示
+    expect(wrapper.find('.devices-panel-hint').text()).toBe('多端共享同一后端状态，后操作覆盖先操作')
+    wrapper.unmount()
+  })
+
+  it('浏览器通道明细面板显示隐私引导文案（他人 IP/token 明细不进浏览器通道）', async () => {
+    const wrapper = createWrapper()
+    eventHandlers['ws-connections:changed'](3)
+    await nextTick()
+    expect(wrapper.find('.devices-panel').exists()).toBe(true)
+    expect(wrapper.find('.devices-panel-empty').text()).toBe('明细仅在桌面端显示')
+    // 浏览器通道无明细数据，列表不渲染
+    expect(wrapper.find('.devices-panel-list').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

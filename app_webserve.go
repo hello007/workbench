@@ -184,6 +184,26 @@ func (a *App) ListWebTokens() []model.WebTokenRecord {
 	return a.webTokenSvc.List()
 }
 
+// webTokenNamedDetails 为连接明细快照补全令牌名（web_serve.go startLocked 桌面
+// 明细回调专用）。tokenID→名称映射在装配层完成：server 包不知令牌名册（分层
+// 红线），回调闭包持 App 引用查本方法。每次回调重建 ID→Name map——连接变化为
+// 低频事件、名册量小，无缓存必要。映射 miss（令牌已撤销但连接未断、webTokenSvc
+// 未装配）TokenName 留空串，前端 fallback「已撤销令牌」展示，不阻断明细呈现。
+func (a *App) webTokenNamedDetails(details []server.ConnDetail) []server.ConnDetail {
+	named := make([]server.ConnDetail, len(details))
+	nameByID := make(map[string]string)
+	if a.webTokenSvc != nil {
+		for _, rec := range a.webTokenSvc.List() {
+			nameByID[rec.ID] = rec.Name
+		}
+	}
+	for i, d := range details {
+		d.TokenName = nameByID[d.TokenID]
+		named[i] = d
+	}
+	return named
+}
+
 // CreateWebToken 新建访问令牌：明文经返回值一次性下发（不落盘），记录只含
 // 哈希。name 空 / expiresAt 过去的校验拒绝以 AppError 错误码下发（前端按码
 // 分流提示级别）。Wails 绑定形态为单结构体返回（Wails v2.16 仅支持 1~2 个

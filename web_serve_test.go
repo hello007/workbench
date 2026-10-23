@@ -568,12 +568,12 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 // 显式断开——Stop 后客户端读侧感知连接关闭（无僵尸客户端、pump goroutine 经
 // readPump unregister 收尾）。
 // TestWebServeManager_StopClosesWSClients Stop 后在途 WS 客户端应感知断开。
-// 同时覆盖桌面连接数收口链路（webServeConnectionsEvent）：stopLocked 在
-// hub.Close 后经 Wails 出口显式补发 count=0——测试 app.ctx 为 Background
+// 同时覆盖桌面连接明细收口链路（webServeConnectionsEvent）：stopLocked 在
+// hub.Close 后经 Wails 出口显式补发空明细快照——测试 app.ctx 为 Background
 //（非 Wails 上下文），wailsEventSink 静默跳过，本用例验证该 emit 分支在
 // --serve 无头形态下执行且不 panic；桌面 emit 的事件名/载荷契约由
 // webServeConnectionsEvent 常量单点与 hub 回调单测（server 包
-// TestWSHub_OnCountChangeCallback）覆盖，manager 级不做载荷断言（伪造 Wails
+// TestWSHub_OnConnectionsChangeCallback）覆盖，manager 级不做载荷断言（伪造 Wails
 // 运行时上下文的基建过重，非必要）。
 func TestWebServeManager_StopClosesWSClients(t *testing.T) {
 	app := newWebServeTestApp(t)
@@ -991,5 +991,46 @@ func TestWebServeManager_TLSWSSOverTLS(t *testing.T) {
 	}
 	if !strings.Contains(string(msg), "tls-ws-test") || !strings.Contains(string(msg), "payload-1") {
 		t.Errorf("wss 帧内容不符: %s", msg)
+	}
+}
+
+// TestApp_WebTokenNamedDetails 连接明细快照的令牌名映射（装配层单点
+// webTokenNamedDetails）：命中名册补全 TokenName 且其余字段原样保留；名册
+// miss（令牌已撤销但连接未断）降级空串；webTokenSvc 未装配全部降级空串。
+// 三形态均不 panic、不阻断明细呈现（前端对空串 fallback「已撤销令牌」）。
+func TestApp_WebTokenNamedDetails(t *testing.T) {
+	app := newWebServeTestApp(t)
+	if app.webTokenSvc == nil {
+		t.Fatal("前置：测试 App 应已装配 webTokenSvc")
+	}
+	_, rec, err := app.webTokenSvc.Create("手机", 0)
+	if err != nil {
+		t.Fatalf("前置：创建令牌失败: %v", err)
+	}
+	details := []server.ConnDetail{
+		{ID: 1, IP: "192.168.1.5", TokenID: rec.ID},
+		{ID: 2, IP: "10.0.0.8", TokenID: "revoked-token-id"},
+	}
+	named := app.webTokenNamedDetails(details)
+	if len(named) != 2 {
+		t.Fatalf("映射后明细条数应不变, got %d", len(named))
+	}
+	if named[0].TokenName != "手机" {
+		t.Fatalf("命中名册应补全 TokenName=手机, got %q", named[0].TokenName)
+	}
+	if named[0].ID != 1 || named[0].IP != "192.168.1.5" || named[0].TokenID != rec.ID {
+		t.Fatalf("映射不应改动其余字段, got %+v", named[0])
+	}
+	if named[1].TokenName != "" {
+		t.Fatalf("名册 miss（令牌已撤销）应降级空串, got %q", named[1].TokenName)
+	}
+
+	// webTokenSvc 未装配：全部降级空串不 panic
+	app.webTokenSvc = nil
+	named = app.webTokenNamedDetails(details)
+	for i, d := range named {
+		if d.TokenName != "" {
+			t.Fatalf("webTokenSvc 未装配时 TokenName 应为空串, got [%d]=%q", i, d.TokenName)
+		}
 	}
 }

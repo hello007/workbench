@@ -31,19 +31,45 @@
     </el-tooltip>
     <!-- 终端图标（底部） -->
     <div class="activity-bar-spacer"></div>
-    <!-- 多设备连接指示（PR3 多设备语义明示，D1 决策：架构零改动只提示）：仅存在
-         其他设备接入（连接数 >1）时显示，info 级克制提示，tooltip 说明共享语义。
-         浏览器 serve 模式由 WSHub ws-connections:changed 事件驱动；桌面模式后端
-         不产生该事件，composable 恒 1，指示不显示（空安全）。深色容器图标用内联
-         SVG fill=currentColor（视觉规范），计数角标走 primary 语义色 -->
+    <!-- 多设备连接指示 + 连接明细面板（D2 决策：el-popover 点击展开）：仅存在
+         其他设备接入时显示，hover 走 tooltip 提示层，点击展开逐连接明细（IP /
+         token 名 / 接入时间）。明细仅桌面通道有数据（隐私红线：他人 IP/token
+         明细不进浏览器通道，浏览器端面板显示引导文案）。深色容器图标用内联
+         SVG fill=currentColor（视觉规范），计数角标走 primary 语义色。
+         嵌套次序实证约束（2026-10-23，真实 EP 组件 jsdom 双链路验证）：tooltip
+         与 popover 各自的 forwardRef 指令都必须落在原生元素上——popover 外层 +
+         tooltip 进 #reference 时 popover 触发器绑定失效点击永不展开（Vue 警告
+         "Runtime directive used on component with non-element root node"）；
+         故终态为 tooltip 外层，tooltip 与 popover 之间加 anchor 原生 div 隔离，
+         popover #reference 直挂原生 div，点击展开与 hover 提示双链路实测通过 -->
     <el-tooltip v-if="multiDevice" :content="deviceHint" placement="right" :show-after="300">
-      <div class="activity-bar-item activity-bar-devices">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <rect x="2" y="4" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
-          <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6" fill="var(--sidebar-bg)"/>
-          <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
-        </svg>
-        <span class="devices-badge">{{ deviceCount }}</span>
+      <div class="devices-indicator-anchor">
+        <el-popover trigger="click" placement="right" :width="320" :persistent="false">
+          <template #reference>
+            <div class="activity-bar-item activity-bar-devices">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="4" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+                <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6" fill="var(--sidebar-bg)"/>
+                <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+              </svg>
+              <span class="devices-badge">{{ deviceCount }}</span>
+            </div>
+          </template>
+          <div class="devices-panel">
+            <div class="devices-panel-title">已连接设备（{{ deviceCount }}）</div>
+            <div v-if="connections.length" class="devices-panel-list">
+              <div v-for="c in connections" :key="c.id" class="devices-panel-row">
+                <span class="devices-panel-ip" :title="c.ip">{{ c.ip }}</span>
+                <span class="devices-panel-token">{{ c.tokenName || '已撤销令牌' }}</span>
+                <span class="devices-panel-time">{{ formatConnTime(c.connectedAt) }}</span>
+              </div>
+            </div>
+            <div v-else class="devices-panel-empty">
+              {{ isDesktopChannel ? '无设备连接' : '明细仅在桌面端显示' }}
+            </div>
+            <div class="devices-panel-hint">多端共享同一后端状态，后操作覆盖先操作</div>
+          </div>
+        </el-popover>
       </div>
     </el-tooltip>
     <el-tooltip content="终端" placement="right" :show-after="300">
@@ -72,11 +98,26 @@ const uiStore = useUiStore()
 
 defineEmits(['toggleTerminal', 'openSettings'])
 
-// 多设备连接感知（PR3 语义明示）：连接数 >1 时底部显示设备指示项
-const { deviceCount, multiDevice } = useDeviceConnections()
+// 多设备连接感知（PR3 语义明示 + 明细面板 D2）：指示项显示条件沿用 composable
+// 分流口径（桌面 len>=1 / 浏览器 count>1），明细列表与通道归属供 popover 消费
+const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceConnections()
 const deviceHint = computed(() =>
-  `${deviceCount.value} 个设备已连接：多端共享同一后端状态，后操作覆盖先操作`
+  `${deviceCount.value} 个设备已连接：点击查看明细`
 )
+
+// 明细接入时间格式化：非法时间返回 '--'；同日只显 HH:mm:ss，跨日加 MM-dd 前缀
+const formatConnTime = (iso) => {
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) {
+    return '--'
+  }
+  const time = t.toLocaleTimeString('zh-CN', { hour12: false })
+  if (t.toDateString() === new Date().toDateString()) {
+    return time
+  }
+  const date = t.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  return `${date} ${time}`
+}
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
@@ -162,5 +203,83 @@ const panels = [
   background: var(--bg-secondary);
   border: 1px solid var(--primary-color);
   border-radius: 999px;
+}
+
+/* 多设备连接明细面板（D2 决策，popover 内容）：标题 + 三列明细 + 空态 + 底部
+ * 共享语义提示，全部走语义变量与四档间距/圆角；明细行 hover 用弱层背景轻提亮 */
+.devices-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.devices-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.devices-panel-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.devices-panel-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: var(--spacing-sm);
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+}
+
+.devices-panel-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.devices-panel-ip {
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.devices-panel-token {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.devices-panel-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.devices-panel-empty {
+  padding: var(--spacing-md) var(--spacing-sm);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.devices-panel-hint {
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
 }
 </style>

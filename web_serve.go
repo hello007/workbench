@@ -20,11 +20,15 @@ import (
 // 包级变量供测试重定向到临时目录（对齐 serveTokenFile 先例），生产恒为相对 data/。
 var webServeDataDir = "data"
 
-// webServeConnectionsEvent 桌面端浏览器连接数变化事件（前端 useDeviceConnections
+// webServeConnectionsEvent 桌面端浏览器连接明细变化事件（前端 useDeviceConnections
 // 桌面通道消费）。与浏览器通道 ws-connections:changed 同义不同名刻意分叉：hub
-// 计数口径为浏览器 WS 客户端数，桌面视角 = 纯浏览器数（指示条件 count>=1，且
-// 须接收 count=0 熄指示），浏览器视角含自身连接（count>1）；桌面事件浏览器端
-// 永不到达，前端通道分流零歧义。data[0] 为事件后的浏览器连接总数。
+// 计数口径为浏览器 WS 客户端数，桌面视角 = 纯浏览器连接列表（指示条件 len>=1，且
+// 须接收空数组熄指示并清空明细），浏览器视角含自身连接（count>1）；桌面事件浏览器端
+// 永不到达，前端通道分流零歧义。data[0] 为事件后的连接明细快照（[]server.ConnDetail，
+// 空数组 marshal 为 [] 非 null；TokenName 已由装配层经令牌名册映射补全）。载荷为
+// 明细数组而非计数：多设备「是谁连着」（IP/token 名/接入时间）可见性，连接数由
+// len 派生，单事件单真相无时序窗口；**隐私红线**：明细仅走本桌面事件，浏览器
+// 通道 ws-connections:changed 载荷恒为 count 数字逐字节不变。
 const webServeConnectionsEvent = "webserve-connections:changed"
 
 // webServeManager 浏览器访问通道管理器：桌面模式同开 HTTP 服务与 --serve 无头
@@ -174,14 +178,14 @@ func (m *webServeManager) startLocked(listen string, tlsConf *tls.Config, cfg We
 	// 事件出口切换为复合 sink：Wails 桌面出口（窗口内事件）+ WS hub 广播（浏览器）。
 	// Wails 出口对非 Wails 上下文（--serve 无头）静默跳过，等效仅 hub 广播。
 	m.applySink(hub)
-	// 桌面连接数回调：hub 计数变化经 Wails 出口发桌面事件（纯事件面，Wails
-	// 绑定零新增）。sink 在闭包外构造一次捕获，勿每次回调重复新建；回调仅由
-	// hub register/unregister 出 mu 锁后触发（须在 hub 服务开始前注入，见
-	// SetOnCountChange），--serve 无头模式下 wailsEventSink 对非 Wails ctx
+	// 桌面连接明细回调：hub 明细快照变化经 Wails 出口发桌面事件（纯事件面，
+	// Wails 绑定零新增）。sink 在闭包外构造一次捕获，勿每次回调重复新建；回调
+	// 仅由 hub register/unregister 出 mu 锁后触发（须在 hub 服务开始前注入，见
+	// SetOnConnectionsChange），--serve 无头模式下 wailsEventSink 对非 Wails ctx
 	// 静默跳过（既有 sink 行为，无新分支）。
 	wailsSink := service.NewWailsEventSink(m.app.ctx)
-	hub.SetOnCountChange(func(count int) {
-		wailsSink.Emit(webServeConnectionsEvent, count)
+	hub.SetOnConnectionsChange(func(details []server.ConnDetail) {
+		wailsSink.Emit(webServeConnectionsEvent, m.app.webTokenNamedDetails(details))
 	})
 	srv := &http.Server{
 		Handler:           handler,
@@ -236,12 +240,12 @@ func (m *webServeManager) stopLocked() error {
 	err := m.srv.Close()
 	// 出口恢复为纯 Wails（hub 随服务停用，避免事件投递到僵尸 hub）
 	m.applySink(nil)
-	// 桌面连接数显式归零：hub.Close 收口期回调被抑制（closing 置位后逐连接
-	// unregister 不触发回调），浏览器仍连接时停机桌面须熄指示。仅在 hub 曾
-	// 在册时发（m.srv 非 nil 早退已保证）；--serve 无头模式下该 emit 对非
-	// Wails ctx 静默跳过
+	// 桌面连接明细显式清空：hub.Close 收口期回调被抑制（closing 置位后逐连接
+	// unregister 不触发回调），浏览器仍连接时停机桌面须熄指示并清空明细列表。
+	// 仅在 hub 曾在册时发（m.srv 非 nil 早退已保证）；--serve 无头模式下该 emit
+	// 对非 Wails ctx 静默跳过
 	if m.hub != nil {
-		service.NewWailsEventSink(m.app.ctx).Emit(webServeConnectionsEvent, 0)
+		service.NewWailsEventSink(m.app.ctx).Emit(webServeConnectionsEvent, []server.ConnDetail{})
 	}
 	m.srv, m.ln, m.hub, m.handler, m.listen, m.done = nil, nil, nil, nil, "", nil
 	m.tls = WebServeTLSConfig{}
