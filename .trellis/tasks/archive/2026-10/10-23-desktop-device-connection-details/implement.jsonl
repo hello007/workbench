@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核心契约：§2.3 连接数双通道语义（桌面回调 count=0 透传/WS 广播侧抑制、锁序红线 seqMu→mu、stopLocked 显式归零补发点、前端 isDesktopChannel 分流）——本任务升级载荷为明细数组的主契约面"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 返回闭包精准注销（多组件共听禁 EventsOff）、事件载荷形状契约、wailsjs models.ts 生成规则（纯事件载荷不自动生成，前端手写 interface）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "fixture 必须对齐后端 model 真实形状、wails-mock-defaults.js 单一数据源、E2E 事件驱动链（settings-token.spec.js）回归面"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "ActivityBar 深容器内 popover 面板视觉规范（行内 SVG 图标 fill=currentColor、语义色、间距圆角归并、弹窗响应式分档）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 server 包 ≥80% 覆盖率门禁与前端 ≥70% 硬失败线，新增测试面须维持基线"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 日志规范（禁 println）与 AppError 错误码三处同步规则——元数据采集/映射 miss 降级若加日志须合规"}

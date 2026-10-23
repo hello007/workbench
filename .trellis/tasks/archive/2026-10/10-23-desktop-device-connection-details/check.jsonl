@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "检查回归面：浏览器通道 ws-connections:changed 逐字节不变（隐私红线）、锁序红线未破坏（快照出 mu 写锁后触发）、stopLocked 空数组补发、hub 代际语义"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查前端监听注销闭包、wailsjs 绑定三处同步（预期零变更）、事件载荷字段命名契约"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 mock 单一数据源同步（wails-mock-defaults.js 载荷改数组）、禁 waitForTimeout、fixture 形状对齐"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁维持（server ≥80%、前端 ≥70%）"}
