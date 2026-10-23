@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "踢出链路（§2.3 连接管控段 DisconnectClient 只关 conn 模式）、控制帧先例（§2.4 ws-gap/ws-synced 无 seq 不进环形缓冲）、send 队列写入路径契约、隐私红线（ws-connections:changed 恒 count）——单播帧与审计改造的契约基线"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "审计链路契约：AuditLogger JSONL O_APPEND 轮转、禁落明文 token 与完整 URL、生命周期审计事件在落盘成功后发的时序纪律——conn_kick 事件落地须对齐"}
+{"file": "docs/spec/e2e-testing.md", "reason": "前端测试约束：vitest mock 形状（wails-mock-defaults 单一数据源）、E2E fixtures.js import 契约——events.spec/connBanner.spec 用例落点"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 闭包精准注销契约与 wailsjs 绑定同步规则（本任务对外签名零变更，须守住零 diff 面）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76%、util/server 门禁与前端 ≥70%——新增代码的测试量基线"}

@@ -1,0 +1,3 @@
+{"file": "docs/spec/browser-channel.md", "reason": "验收对照：踢出帧不进环形缓冲、单播隔离、ws-connections:changed 载荷恒 count 红线、send 队列写入路径契约未被破坏"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "验收对照：审计行无明文 token 无完整 URL、时序纪律（踢出生效才写）、旁路降级语义（写失败仅 Warn 不阻塞）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验收对照：go test -race 全绿 + vitest 回归 + 覆盖率门禁不回退"}
