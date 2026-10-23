@@ -46,7 +46,9 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   // 仓库列表配置导出链路（manifest 文本 → 选路径 → 落盘）
   ExportRepoConfig: vi.fn(() => Promise.resolve('{"manifestVersion":1,"directories":[],"favorites":[]}')),
   SaveFileDialog: vi.fn(() => Promise.resolve('D:/out/repo_config.json')),
-  SaveFile: vi.fn(() => Promise.resolve())
+  SaveFile: vi.fn(() => Promise.resolve()),
+  // 添加工作目录「选择目录」原生对话框（默认空串 = 用户取消 no-op）
+  OpenDirectoryDialog: vi.fn(() => Promise.resolve(''))
 }))
 
 vi.mock('../../../utils/debug', () => ({
@@ -214,6 +216,26 @@ describe('DirectoryTree.vue', () => {
       expect(AddDirectory).toHaveBeenCalledWith('新目录', '/new', false)
       expect(ElMessage.success).toHaveBeenCalledWith('添加成功')
       expect(wrapper.emitted('change')).toBeTruthy()
+    })
+
+    it('选择目录：对话框回填路径（取消不覆盖）', async () => {
+      wrapper = createWrapper()
+      const { OpenDirectoryDialog } = await import('../../../wailsjs/go/main/App')
+
+      // 选定目录回填路径（目录名由既有 watch 自动带出）
+      OpenDirectoryDialog.mockResolvedValueOnce('D:\\workspace\\demo')
+      await wrapper.vm.pickAddPath()
+      await flushPromises()
+      expect(OpenDirectoryDialog).toHaveBeenCalledWith('选择工作目录')
+      expect(wrapper.vm.addForm.path).toBe('D:\\workspace\\demo')
+      expect(wrapper.vm.addForm.name).toBe('demo')
+
+      // 取消（空串）不覆盖已填路径
+      wrapper.vm.addForm.path = '/keep/me'
+      OpenDirectoryDialog.mockResolvedValueOnce('')
+      await wrapper.vm.pickAddPath()
+      await flushPromises()
+      expect(wrapper.vm.addForm.path).toBe('/keep/me')
     })
 
     it('添加失败应该显示错误', async () => {

@@ -120,7 +120,11 @@
           <el-input v-model="addForm.name" placeholder="例如: 我的工作空间" />
         </el-form-item>
         <el-form-item label="目录路径">
-          <el-input ref="addPathInputRef" v-model="addForm.path" :placeholder="addPathPlaceholder" />
+          <el-input ref="addPathInputRef" v-model="addForm.path" :placeholder="addPathPlaceholder">
+            <template #append>
+              <el-button @click="pickAddPath">选择目录</el-button>
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="addForm.isDefault" />
@@ -183,6 +187,7 @@ import {
   ExportRepoConfig,
   SaveFileDialog,
   SaveFile,
+  OpenDirectoryDialog,
   IsDashboardPinned,
   AddDashboardPin,
   RemoveDashboardPin
@@ -491,6 +496,18 @@ const showAddDialog = () => {
       input.focus()
     }
   }, 100)
+}
+
+// 原生目录对话框选择回填（空串 = 用户取消 no-op）；路径回填自动带出目录名（上方 watch 联动）
+const pickAddPath = async () => {
+  try {
+    const dir = await OpenDirectoryDialog('选择工作目录')
+    if (dir) {
+      addForm.value.path = dir
+    }
+  } catch (error) {
+    handleError('选择目录失败: ', error)
+  }
 }
 
 const handleAdd = async () => {
