@@ -1283,3 +1283,36 @@ AI 对话执行模型从每轮一进程重构为每会话常驻 claude 进程（
 ### Next Steps
 
 - None - task complete
+
+
+## Session 149: 浏览器模式三期：多 token 管理+认证审计、内置 TLS、多设备连接语义明示
+
+**Date**: 2026-10-23
+**Task**: 浏览器模式三期：多 token 管理+认证审计、内置 TLS、多设备连接语义明示
+**Branch**: `master`
+
+### Summary
+
+三期批次交付（任务 10-22-tls-token，PRD 四项 ADR 决策：共享广播语义明示/审计仅认证事件级/自签+用户证书双形态/永久默认+短命档）。PR1 认证链 verify 化（TokenVerifier 注入，SetToken/RotateToken 删除）+ 多 token SHA-256 哈希落盘（存量 web_token 迁移）+ 审计 JSONL 5MB 轮转；PR2 内置 TLS（tls.NewListener 钉 ALPN http/1.1、幂等键 listen+TLS、证书加载前置无半死态、自签 ECDSA P-256 fail-fast）；PR3 ws-connections:changed 连接数事件（mu 写锁外 Emit）+ 前端令牌管理/TLS 设置/多设备提示。trellis-check 修复 1 处审计顺序缺陷（RevokeAllExcept 落盘失败不得留已发审计行）。测试全绿（go test+race / vitest 2069 / Playwright 113）。遗留：真机冒烟（TLS 浏览器例外+token 轮换重验证）连同 chat-interactive-smoke-pending 欠账一起做。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ec50aa4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
