@@ -90,7 +90,10 @@
           <GitRemotes :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
         <el-tab-pane label="合并/变基" name="merge" lazy>
-          <GitMerge :repo-path="workspaceStore.selectedNode.path" />
+          <!-- 独立滚动容器：冲突卡片+表单+输出内容超高时面板内滚动（tab-pane 全局 overflow:hidden 会裁剪） -->
+          <div class="merge-pane">
+            <GitMerge :repo-path="workspaceStore.selectedNode.path" />
+          </div>
         </el-tab-pane>
         <el-tab-pane label="子模块" name="submodules" lazy>
           <GitSubmodules :repo-path="workspaceStore.selectedNode.path" />
@@ -1609,6 +1612,12 @@ defineExpose({
 .git-tabs :deep(.el-tab-pane) {
   height: 100%;
   overflow: hidden;
+}
+
+/* 合并/变基 tab：内容自然生长（冲突卡片 + 表单 + 输出），超高时自身滚动而非被裁剪 */
+.merge-pane {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .el-tabs__header {
