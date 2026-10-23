@@ -1316,3 +1316,36 @@ AI 对话执行模型从每轮一进程重构为每会话常驻 claude 进程（
 ### Next Steps
 
 - None - task complete
+
+
+## Session 150: 冒烟缺陷修复：chat 草稿会话隔离 + 审批模式显式传参
+
+**Date**: 2026-10-23
+**Task**: 冒烟缺陷修复：chat 草稿会话隔离 + 审批模式显式传参
+**Branch**: `master`
+
+### Summary
+
+A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对话输入框单 ref 改按会话草稿 Map（切换存旧载新/发送清键/空串键覆盖无会话态）；② 审批弹窗未生效根因=用户全局 ~/.claude/settings.json defaultMode:auto（classifier 不发 can_use_tool）+ buildChatArgs 默认模式省略参数继承之——改为恒传 --permission-mode（default 显式+空串归一），同源消除插话挂起 classifier 依赖。trellis-check 修 3 处（冗余 watch/2 处断言区分力）。B 组浏览器安全三期冒烟除桌面多设备提示（设计预期）全过。遗留复测：A1 审批弹窗/A2 插话链路；上一轮反馈 webServe 开关不启动未在本轮复现，复现再立项。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2feb5ee` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

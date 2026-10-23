@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 149
+- **Total Sessions**: 150
 - **Last Active**: 2026-10-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1318 | Active |
+| `journal-3.md` | ~1351 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 150 | 2026-10-23 | 冒烟缺陷修复：chat 草稿会话隔离 + 审批模式显式传参 | `2feb5ee` | `master` |
 | 149 | 2026-10-23 | 浏览器模式三期：多 token 管理+认证审计、内置 TLS、多设备连接语义明示 | `ec50aa4` | `master` |
 | 148 | 2026-10-22 | Agent 交互式多轮会话（持续会话进程模型） | `5b00149`, `46b0cd5` | `master` |
 | 147 | 2026-10-22 | 浏览器断线重连续传（10-22-ws-reconnect-resume） | `2c8e5f8` | `master` |
