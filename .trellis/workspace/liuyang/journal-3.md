@@ -1382,3 +1382,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 152: 多设备连接明细（连接数升级为设备明细列表）
+
+**Date**: 2026-10-23
+**Task**: 多设备连接明细（连接数升级为设备明细列表）
+**Branch**: `master`
+
+### Summary
+
+桌面事件 webserve-connections:changed 载荷升级为 ConnDetail 明细数组（逐连接快照，count=len 派生）：server 包 ConnDetail 元数据采集（ServeHTTP 升级时 ID/IP/tokenID/接入时间）+ SetOnConnectionsChange(func([]ConnDetail)) 全量快照回调（快照 mu 写锁内构造出锁后触发，锁序红线保持）+ 装配层 webTokenNamedDetails 令牌名映射（miss 空串降级）；浏览器通道载荷恒为 count 数字（隐私红线）；前端 useDeviceConnections 明细 ref + ActivityBar tooltip+popover 双层明细面板（EP popover 套 tooltip 嵌套失效实证：forwardRef 落多根 fragment，改 tooltip 外层+popover 直挂原生 div）；.gitignore 补 web_tokens.json/web_audit.log；browser-channel.md §2.3 重写 + CLAUDE.md 规则行同步；go 全量/-race/前端 2079 用例/E2E 全绿，真机验收通过
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d298597` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
