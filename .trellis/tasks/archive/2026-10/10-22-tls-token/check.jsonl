@@ -1,0 +1,7 @@
+{"file": "docs/spec/browser-channel.md", "reason": "检查认证链改造与 TLS 改造是否维持续传契约（resume 锁序 seqMu→mu、恒定时间比较、热轮换不断连接语义），文档是否同步更新"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查新增 App 方法与 model 字段是否同步 frontend/wailsjs 三处绑定（App.js/App.d.ts/models.ts），具名 string 类型是否补 models.ts 别名"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查新增错误码是否三处同步（app_error.go + error.js 两表）、审计日志是否泄漏明文 token、slog 用法是否符合规范"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "检查 web_tokens.json 是否走 util.SaveJSON 原子写、审计 JSONL append 实现是否处理损坏残留"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查覆盖率门禁达标（server/model ≥80%、service ≥76%）与测试禁外部状态依赖（随机端口、注入时钟）"}
+{"file": "docs/spec/security-scan.md", "reason": "安全相关改动（TLS/token/审计）检查是否有新增依赖须过 govulncheck 清零确认"}
+{"file": ".trellis/tasks/10-22-tls-token/prd.md", "reason": "对照验收标准逐条核对实现完整性与四项 ADR 决策一致性"}

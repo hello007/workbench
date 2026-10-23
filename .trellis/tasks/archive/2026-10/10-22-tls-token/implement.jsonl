@@ -1,0 +1,10 @@
+{"file": "docs/spec/browser-channel.md", "reason": "浏览器通道核心契约：/api/rpc 三通道与 token 认证、WSHub 断线续传（resume 契约与锁序）、RotateToken 热轮换语义——本任务认证链改造与 TLS 改造均触碰该契约，改后须同步本文档"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步规则（model/app_error.go + error.js ErrorCode/WARNING_CODES）、AppError 分级引导——新增 token 管理错误码与 TLS 加载失败错误须走该链路"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名 / model 导出 struct 字段变更须手动同步 frontend/wailsjs 三处绑定——token 管理/TLS 设置新增绑定方法与 model 字段均触发"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/ 目录 JSON 持久化必须走 util.SaveJSON 原子写（web_tokens.json 迁移与保存）；审计 JSONL 是 append 语义的例外，例外实现须对齐该文档口径"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 service（如 token/审计服务）须在 AppServices struct 加字段 + 构造行，App 内嵌保持委托零 diff"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁基线——新代码须达 model/server ≥80% + service ≥76%，测试面规划依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态（固定端口/mtime 时序）——TLS 用例须随机端口，token 过期用例须注入时钟或预置陈旧数据"}
+{"file": ".trellis/tasks/10-22-tls-token/research/web-tls-compat.md", "reason": "TLS 落地权威依据：tls.NewListener + 钉 ALPN http/1.1、Start 幂等键扩展、自签 ECDSA P-256 + SAN、fail-fast 无半死态、不发 HSTS——PR2 实现直接照此执行"}
+{"file": ".trellis/tasks/10-22-tls-token/research/multi-device-token-semantics.md", "reason": "多 token 数据模型与审计粒度权威依据：GitHub PAT 式字段集、SHA-256 哈希落盘、惰性失效、RotateToken 新建+撤旧编排、JSONL 认证事件级——PR1 实现直接照此执行"}
+{"file": ".trellis/tasks/10-22-tls-token/prd.md", "reason": "任务需求与四项 ADR 决策、验收标准、PR 拆分——实现范围唯一权威"}
