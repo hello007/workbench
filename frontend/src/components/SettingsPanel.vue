@@ -344,13 +344,99 @@
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">访问令牌</div>
-              <div class="settings-item-desc">浏览器首次访问须输入该令牌，请勿外泄</div>
+              <div class="settings-item-desc">「默认」令牌明文（初始引导/重新生成时写入兼容文件），浏览器首次访问须输入；每台设备建议在下方令牌管理中签发独立令牌</div>
             </div>
             <div class="webserve-token-actions">
               <span class="webserve-token-text" :title="tokenVisible ? webToken : ''">{{ tokenMask }}</span>
               <el-button size="small" text type="primary" @click="tokenVisible = !tokenVisible">{{ tokenVisible ? '隐藏' : '显示' }}</el-button>
               <el-button size="small" text type="primary" @click="copyToken">复制</el-button>
-              <el-button size="small" text type="danger" @click="regenerateToken">重新生成</el-button>
+              <el-button size="small" text type="danger" @click="regenerateToken">重新生成默认令牌</el-button>
+            </div>
+          </div>
+          <!-- 令牌管理（多 token，PR1）：GitHub PAT 式列表 + 新建（明文一次性回显）+ 撤销 -->
+          <div class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">令牌管理</div>
+              <div class="settings-item-desc">每台设备签发独立令牌，可单独撤销不影响其他设备；明文仅创建时显示一次，请立即复制保存</div>
+            </div>
+            <el-alert
+              v-if="createdPlain"
+              class="token-plain-alert"
+              type="warning"
+              :title="'新令牌仅显示一次，请立即复制保存，关闭后不可再查看'"
+              :closable="true"
+              @close="createdPlain = ''"
+            >
+              <div class="token-plain-row">
+                <code class="token-plain-text">{{ createdPlain }}</code>
+                <el-button size="small" text type="primary" @click="copyCreatedPlain">复制</el-button>
+              </div>
+            </el-alert>
+            <div class="token-create-row">
+              <el-input
+                v-model="newTokenName"
+                size="small"
+                class="token-name-input"
+                placeholder="令牌名称（如 手机 / Mac）"
+                @keyup.enter="createToken"
+              />
+              <el-select v-model="tokenExpiry" size="small" class="token-expiry-select">
+                <el-option label="永久" value="never" />
+                <el-option label="7 天" value="7" />
+                <el-option label="30 天" value="30" />
+                <el-option label="自定义日期" value="custom" />
+              </el-select>
+              <el-date-picker
+                v-if="tokenExpiry === 'custom'"
+                v-model="customExpiryDate"
+                type="date"
+                size="small"
+                class="token-expiry-date"
+                placeholder="过期日期"
+                :disabled-date="disablePastDate"
+              />
+              <el-button size="small" type="primary" :loading="creatingToken" @click="createToken">新建令牌</el-button>
+            </div>
+            <div class="token-list">
+              <div v-for="rec in webTokens" :key="rec.id" class="token-list-row">
+                <span class="token-name">{{ rec.name }}</span>
+                <el-tag size="small" :type="tokenStatus(rec).tagType">{{ tokenStatus(rec).label }}</el-tag>
+                <span class="token-meta">创建 {{ formatUnixTime(rec.createdAt) }}</span>
+                <span class="token-meta">{{ rec.lastUsedAt ? '最后使用 ' + formatUnixTime(rec.lastUsedAt) : '从未使用' }}</span>
+                <span class="token-meta">{{ rec.expiresAt ? '过期 ' + formatUnixTime(rec.expiresAt) : '永久有效' }}</span>
+                <el-button v-if="!rec.revoked" size="small" text type="danger" @click="revokeToken(rec)">撤销</el-button>
+              </div>
+              <div v-if="!webTokens.length" class="webserve-url-empty">暂无令牌记录</div>
+            </div>
+          </div>
+          <!-- TLS 加密传输（内置 TLS，PR2）：开关 + 用户证书路径（留空 = 自签引导） -->
+          <div class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">HTTPS 加密（TLS）</div>
+              <div class="settings-item-desc">开启后浏览器以 https/wss 访问；自签证书首次访问浏览器会提示不安全，需手动信任。证书/私钥留空 = 自动生成自签证书，两者须同时填写且为未加密 PEM 格式</div>
+            </div>
+            <el-switch
+              v-model="webTlsEnabled"
+              class="webserve-tls-switch"
+              active-text="开启"
+              inactive-text="关闭"
+              @change="onTlsToggle"
+            />
+            <div v-if="webTlsEnabled" class="webserve-tls-paths">
+              <el-input
+                v-model="webTlsCertPath"
+                size="small"
+                class="webserve-tls-input"
+                placeholder="证书路径留空 = 自签引导（如 C:\certs\fullchain.pem）"
+                @change="onTlsPathChange"
+              />
+              <el-input
+                v-model="webTlsKeyPath"
+                size="small"
+                class="webserve-tls-input"
+                placeholder="私钥路径留空 = 自签引导（如 C:\certs\privkey.pem）"
+                @change="onTlsPathChange"
+              />
             </div>
           </div>
           <div class="settings-item settings-item--column">
@@ -376,7 +462,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
@@ -498,6 +584,182 @@ const webAccessUrls = ref([])
 const webToken = ref('')
 const tokenVisible = ref(false)
 
+// TLS 设置（内置 TLS）：开关 + 用户证书/私钥 PEM 路径（双空 = 自签引导）。
+// 保存链：GetSettings 基底合并写（SaveSettings）→ SetWebServeConfig 使运行时
+// 生效（后端读磁盘 TLS 配置决定是否平滑重启；证书加载失败 E_TLS_CERT_INVALID
+// 在 startLocked 字段赋值前 fail-fast，服务保持原态不半死）
+const webTlsEnabled = ref(false)
+const webTlsCertPath = ref('')
+const webTlsKeyPath = ref('')
+
+// 令牌管理（多 token，PR1）：列表 + 新建表单 + 一次性明文回显
+const webTokens = ref([])
+const newTokenName = ref('')
+const tokenExpiry = ref('never')
+const customExpiryDate = ref(null)
+const creatingToken = ref(false)
+const createdPlain = ref('')
+
+/**
+ * 令牌记录状态分流：已撤销 > 已过期（惰性失效，按 expiresAt 与当前时间判定，
+ * 与后端认证判定同口径）> 有效。
+ */
+function tokenStatus(rec) {
+  if (rec?.revoked) return { label: '已撤销', tagType: 'info' }
+  if (rec?.expiresAt > 0 && rec.expiresAt * 1000 <= Date.now()) return { label: '已过期', tagType: 'warning' }
+  return { label: '有效', tagType: 'success' }
+}
+
+/**
+ * unix 秒 → 本地时间短格式（令牌列表展示用；0/空 = 未定义时刻，返回占位）。
+ */
+function formatUnixTime(sec) {
+  if (!sec) return '—'
+  const d = new Date(sec * 1000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
+ * 自定义过期日期禁选过去（与后端 E_TOKEN_EXPIRY_INVALID 校验对齐的前端引导）。
+ */
+function disablePastDate(date) {
+  return date.getTime() < Date.now() - 24 * 3600 * 1000
+}
+
+/**
+ * 拉取令牌列表（进面板 / 新建撤销后刷新）。失败静默保留现列表：令牌管理为
+ * 增强信息区，不阻塞其他设置页；操作类错误走 handleError 分流提示。
+ */
+async function loadWebTokens() {
+  try {
+    webTokens.value = await ListWebTokens() || []
+  } catch {
+    // 保留现列表
+  }
+}
+
+/**
+ * 由有效期档位换算后端 expiresAt（unix 秒；0 = 永不过期）：
+ * 7/30 天档自当前时刻起算；自定义档取所选日期的当日末尾（23:59:59），
+ * 保证「选择当天」语义为当天全天有效（对齐后端「须晚于当前时间」判定）。
+ */
+function computeExpiryUnix() {
+  if (tokenExpiry.value === 'never') return 0
+  if (tokenExpiry.value === '7' || tokenExpiry.value === '30') {
+    return Math.floor(Date.now() / 1000) + Number(tokenExpiry.value) * 86400
+  }
+  if (tokenExpiry.value === 'custom' && customExpiryDate.value) {
+    const d = new Date(customExpiryDate.value)
+    d.setHours(23, 59, 59, 0)
+    return Math.floor(d.getTime() / 1000)
+  }
+  return 0
+}
+
+/**
+ * 新建令牌：名称必填（后端 E_TOKEN_NAME_REQUIRED 校验，前端预拦截空值），
+ * 成功后明文一次性回显（el-alert warning，关闭后不可再取），列表刷新。
+ */
+async function createToken() {
+  const name = newTokenName.value.trim()
+  if (!name) {
+    ElMessage.warning('请填写令牌名称（用于标识设备或用途）')
+    return
+  }
+  if (creatingToken.value) return
+  creatingToken.value = true
+  try {
+    const res = await CreateWebToken(name, computeExpiryUnix())
+    createdPlain.value = res?.plainText || ''
+    newTokenName.value = ''
+    ElMessage.success(`令牌「${name}」已创建`)
+    await loadWebTokens()
+  } catch (e) {
+    handleError('新建令牌失败: ', e)
+  } finally {
+    creatingToken.value = false
+  }
+}
+
+/**
+ * 复制一次性明文回显。
+ */
+async function copyCreatedPlain() {
+  if (!createdPlain.value) return
+  try {
+    await navigator.clipboard.writeText(createdPlain.value)
+    ElMessage.success('新令牌已复制，请妥善保存')
+  } catch (e) {
+    ElMessage.error('复制失败: ' + (e?.message || String(e)))
+  }
+}
+
+/**
+ * 撤销令牌：单次确认（对齐 confirm-dialog 单次确认形态；撤销立即生效，该设备
+ * 下次连接须重新认证）→ 撤销 → 刷新列表。重复撤销幂等（后端 no-op 成功）。
+ */
+async function revokeToken(rec) {
+  try {
+    await ElMessageBox.confirm(
+      `撤销后令牌「${rec.name}」立即失效：该设备下次连接时须重新认证，其他设备不受影响。是否继续？`,
+      '撤销访问令牌',
+      { type: 'warning', confirmButtonText: '撤销', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await RevokeWebToken(rec.id)
+    ElMessage.success(`令牌「${rec.name}」已撤销`)
+    await loadWebTokens()
+  } catch (e) {
+    handleError('撤销令牌失败: ', e)
+  }
+}
+
+/**
+ * TLS 开关变更：直接保存并使运行时生效（后端同地址同 TLS 配置为 no-op，
+ * 开关变化触发平滑重启）。
+ */
+const onTlsToggle = async () => {
+  await saveTlsSettings()
+}
+
+/**
+ * 证书/私钥路径变更：保存并使运行时生效（路径错误 E_TLS_CERT_INVALID 由后端
+ * Start 前置校验报错，服务保持原态；前端 handleError 分流提示后回刷真实状态）。
+ */
+const onTlsPathChange = async () => {
+  await saveTlsSettings()
+}
+
+/**
+ * TLS 设置保存链：GetSettings 基底合并写 → SetWebServeConfig 使运行时生效 →
+ * 回刷运行状态（保存失败/回滚由 loadWebServeConfig 从后端取真实值兜底）。
+ */
+async function saveTlsSettings() {
+  try {
+    const settings = await GetSettings()
+    // 段缺失防御（GetSettings 已 EnsureWebServeDefaults，理论不缺；mock/异常形态兜底）
+    if (!settings.webServe) {
+      settings.webServe = { enabled: webEnabled.value, bindAddress: webBindAddress.value }
+    }
+    settings.webServe.tls = webTlsEnabled.value
+    settings.webServe.tlsCertPath = webTlsCertPath.value.trim()
+    settings.webServe.tlsKeyPath = webTlsKeyPath.value.trim()
+    await SaveSettings(settings)
+    // 使运行时生效：SetWebServeConfig 以磁盘现有 TLS 配置为基底重启/保持
+    await SetWebServeConfig(webEnabled.value, webBindAddress.value)
+    ElMessage.success(webTlsEnabled.value ? 'TLS 已开启，浏览器请以 https:// 访问' : 'TLS 已关闭')
+  } catch (e) {
+    if (e && (e.code || e.message)) {
+      handleError('保存 TLS 设置失败: ', e)
+    }
+  }
+  await loadWebServeConfig()
+}
+
 // 令牌展示：隐藏态以圆点遮蔽（等长截断，长 hex 不撑破布局）；无令牌给占位
 const tokenMask = computed(() => {
   if (!webToken.value) return '（未生成）'
@@ -559,7 +821,7 @@ function confirmNonLoopbackRisk() {
 }
 
 /**
- * 加载浏览器访问通道配置与令牌（弹窗打开 / 变更刷新时调用）。
+ * 加载浏览器访问通道配置、令牌与 TLS 设置（弹窗打开 / 变更刷新时调用）。
  * 失败静默保持当前表单值：网络分区为增强信息，不阻塞其他设置页。
  */
 async function loadWebServeConfig() {
@@ -575,10 +837,20 @@ async function loadWebServeConfig() {
     // 保持默认值
   }
   try {
+    // TLS 开关与证书路径经 GetSettings（整体读写 AppSettings）透传，段缺失时保持默认关闭
+    const settings = await GetSettings()
+    webTlsEnabled.value = !!settings?.webServe?.tls
+    webTlsCertPath.value = settings?.webServe?.tlsCertPath || ''
+    webTlsKeyPath.value = settings?.webServe?.tlsKeyPath || ''
+  } catch {
+    // 保持当前值
+  }
+  try {
     webToken.value = await GetWebServeToken()
   } catch {
     webToken.value = ''
   }
+  await loadWebTokens()
 }
 
 /**
@@ -693,8 +965,8 @@ async function copyAccessLink(url) {
 const regenerateToken = async () => {
   try {
     await ElMessageBox.confirm(
-      '重新生成后，当前令牌立即失效：已连接的浏览器在下次连接时须重新输入新令牌。是否继续？',
-      '重新生成访问令牌',
+      '重新生成后，「默认」令牌立即更换，且全部已有令牌将被撤销：已连接的浏览器在下次连接时须重新输入新令牌。仅为某台设备换发凭据建议使用上方令牌管理的撤销 + 新建。是否继续？',
+      '重新生成默认令牌',
       { type: 'warning', confirmButtonText: '重新生成', cancelButtonText: '取消' }
     )
   } catch {
@@ -1215,6 +1487,103 @@ const onThemeChange = async () => {
 .webserve-url-empty {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* 令牌管理区（多 token） */
+/* 一次性明文回显 alert：等宽明文 + 复制按钮横排 */
+.token-plain-alert {
+  width: 100%;
+}
+
+.token-plain-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+}
+
+.token-plain-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* 新建行：名称输入 + 有效期档位 +（自定义）日期 + 提交按钮 */
+.token-create-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  width: 100%;
+}
+
+.token-name-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.token-expiry-select {
+  width: 120px;
+}
+
+.token-expiry-date {
+  width: 140px;
+}
+
+/* 令牌列表：名称 + 状态 tag + 元信息横排的记录行 */
+.token-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.token-list-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.token-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* TLS 区：证书/私钥路径纵向排布 */
+.webserve-tls-paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  width: 100%;
+}
+
+.webserve-tls-input {
+  width: 100%;
 }
 
 /* 快捷键列表 */

@@ -1,8 +1,21 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import ActivityBar from '../ActivityBar.vue'
 import { useUiStore } from '../../store'
+
+// Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动断言用
+const eventHandlers = {}
+
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn((name, cb) => {
+    eventHandlers[name] = cb
+    return () => {
+      delete eventHandlers[name]
+    }
+  })
+}))
 
 describe('ActivityBar', () => {
   // activePanel / terminalActive 已迁 ui store：mount 前在 uiStore 上设初值，
@@ -159,5 +172,62 @@ describe('ActivityBar', () => {
     // settings 是第8个图标（index=7）
     await items[7].trigger('click')
     expect(wrapper.emitted('openSettings')).toBeTruthy()
+  })
+})
+
+// ---- 多设备连接指示（PR3 语义明示）：连接数事件驱动显隐 ----
+
+describe('ActivityBar - 多设备连接指示', () => {
+  const createWrapper = (activePanel = 'directory') => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = activePanel
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] }
+        }
+      }
+    })
+  }
+
+  it('连接数 <=1 时指示不显示（桌面模式无事件恒此形态，空安全）', () => {
+    const wrapper = createWrapper()
+    expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
+    // 图标数仍为 9（指示项不占位）
+    expect(wrapper.findAll('.activity-bar-item').length).toBe(9)
+    wrapper.unmount()
+  })
+
+  it('ws-connections:changed 事件连接数 >1 时显示指示与计数角标', async () => {
+    const wrapper = createWrapper()
+    eventHandlers['ws-connections:changed'](3)
+    await nextTick()
+    expect(wrapper.find('.activity-bar-devices').exists()).toBe(true)
+    expect(wrapper.text()).toContain('3 个设备已连接')
+    // 角标显示连接数
+    expect(wrapper.find('.devices-badge').text()).toBe('3')
+    wrapper.unmount()
+  })
+
+  it('连接数回落 1（其他设备全部断开）时指示隐藏', async () => {
+    const wrapper = createWrapper()
+    eventHandlers['ws-connections:changed'](2)
+    await nextTick()
+    expect(wrapper.find('.activity-bar-devices').exists()).toBe(true)
+    eventHandlers['ws-connections:changed'](1)
+    await nextTick()
+    expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('卸载时经 EventsOn 返回闭包精准注销监听器', () => {
+    const wrapper = createWrapper()
+    expect(eventHandlers['ws-connections:changed']).toBeTypeOf('function')
+    wrapper.unmount()
+    expect(eventHandlers['ws-connections:changed']).toBeUndefined()
   })
 })

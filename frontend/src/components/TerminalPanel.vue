@@ -88,6 +88,13 @@
         </div>
       </div>
     </div>
+    <!-- 多设备写入提示（PR3 多设备语义明示，D1 决策：架构零改动只提示）：
+         仅存在其他设备连接（连接数 >1）时显示一行次要文案，明示共享终端的
+         字节流交织语义（对齐 tmux 共享 attach），不做弹窗打断。桌面模式无
+         连接数事件，composable 恒 1，提示不显示 -->
+    <div v-if="multiDevice" class="terminal-multi-device-hint">
+      多设备已连接，多端同时操作终端时后输入覆盖先输入
+    </div>
     <!-- 终端区域：每 tab 独立容器，v-show 仅活动 tab 可见（保 DOM 保会话，xterm 不重挂载） -->
     <div ref="terminalArea" class="terminal-area">
       <div
@@ -118,6 +125,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Folder, RefreshRight, FullScreen, ScaleToOriginal, WarningFilled } from '@element-plus/icons-vue'
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
+import { useDeviceConnections } from '../composables/useDeviceConnections'
 import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
 
@@ -129,6 +137,9 @@ defineEmits(['toggle'])
 // tab 列表状态（useTerminalTabs）与 xterm 实例（Map: tabId → useTerminal()）分离持有：
 // tab 状态驱动渲染（tab 栏/容器显隐），实例句柄仅生命周期方法消费（init/resize/focus/destroy）
 const { tabs, activeId, atLimit, createTab, activateTab, closeTab, markExited, markRunning } = useTerminalTabs()
+
+// 多设备连接感知（PR3 语义明示）：multiDevice 为 true 时工具栏下显示多端写入提示行
+const { multiDevice } = useDeviceConnections()
 
 const terminalArea = ref(null)
 const tabStrip = ref(null)
@@ -530,6 +541,17 @@ onBeforeUnmount(async () => {
   gap: var(--spacing-sm, 8px);
   min-width: 0;
   flex: 1;
+}
+
+/* 多设备写入提示行（PR3 语义明示）：工具栏下一条次要文案，tertiary 弱化不抢眼 */
+.terminal-multi-device-hint {
+  flex-shrink: 0;
+  padding: 2px var(--spacing-md, 16px);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  user-select: none;
 }
 
 /* ── tab 序列 ── */

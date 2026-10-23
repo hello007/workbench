@@ -9,6 +9,14 @@ const DefaultWebServeBindAddress = "127.0.0.1:36115"
 type WebServeSettings struct {
 	Enabled     bool   `json:"enabled"`     // 桌面模式是否同开 HTTP 服务（默认 true）
 	BindAddress string `json:"bindAddress"` // HTTP 监听地址 host:port（默认回环 127.0.0.1:36115）
+	// TLS 是否启用 HTTPS/WSS（默认 false = 纯 HTTP，向后兼容老配置零值语义）。
+	// TLS 是显式决策项，EnsureWebServeDefaults 不补默认值。
+	TLS bool `json:"tls"`
+	// TLSCertPath / TLSKeyPath 用户自带证书的 PEM 文件路径（tls=true 时生效）。
+	// 双空 = 自签引导（首次自动生成并持久化 data/tls_cert.pem / data/tls_key.pem）；
+	// 仅填其一为无效配置，启动时报 E_TLS_CERT_INVALID。
+	TLSCertPath string `json:"tlsCertPath,omitempty"`
+	TLSKeyPath  string `json:"tlsKeyPath,omitempty"`
 }
 
 // WebServeConfig 浏览器访问通道配置与运行状态（GetWebServeConfig 返回）。
@@ -163,6 +171,8 @@ func (s *AppSettings) EnsureWebServeDefaults() {
 	if s.WebServe.BindAddress == "" {
 		s.WebServe.BindAddress = DefaultWebServeBindAddress
 	}
+	// TLS 段零值即向后兼容默认（tls=false = 纯 HTTP；证书路径双空 = 自签引导），
+	// 刻意不补默认值：TLS 是显式决策项，老配置升级必须保持原纯 HTTP 行为不变。
 }
 
 // EnsureTerminalDefaults 补全终端外观默认值并收敛越界值：

@@ -140,6 +140,57 @@ func TestAppSettings_EnsureWebServeDefaults(t *testing.T) {
 	}
 }
 
+// TestAppSettings_EnsureWebServeDefaults_TLSFields TLS 字段零值语义（内置 TLS
+// 三期 PR2）：Ensure 不补 TLS 默认值（TLS 是显式决策项，false = 纯 HTTP 向后
+// 兼容老配置），已配置值原样保留；JSON 往返与老配置（缺 tls 字段）反序列化
+// 均得零值。
+func TestAppSettings_EnsureWebServeDefaults_TLSFields(t *testing.T) {
+	// 段缺失补默认后 TLS 三字段应为零值（不默认开启 TLS）
+	s := &AppSettings{}
+	s.EnsureWebServeDefaults()
+	if s.WebServe.TLS {
+		t.Error("TLS 默认应为 false（纯 HTTP 向后兼容）")
+	}
+	if s.WebServe.TLSCertPath != "" || s.WebServe.TLSKeyPath != "" {
+		t.Errorf("证书路径默认应为空（双空 = 自签引导）, got %q / %q", s.WebServe.TLSCertPath, s.WebServe.TLSKeyPath)
+	}
+
+	// 已配置 TLS 值原样保留（Ensure 不覆盖显式取值）
+	s2 := &AppSettings{WebServe: &WebServeSettings{
+		Enabled:     true,
+		BindAddress: "127.0.0.1:36115",
+		TLS:         true,
+		TLSCertPath: "a.pem",
+		TLSKeyPath:  "b.pem",
+	}}
+	s2.EnsureWebServeDefaults()
+	if !s2.WebServe.TLS || s2.WebServe.TLSCertPath != "a.pem" || s2.WebServe.TLSKeyPath != "b.pem" {
+		t.Errorf("已配置 TLS 值应原样保留: %+v", s2.WebServe)
+	}
+
+	// JSON 往返：TLS 字段随 webServe 段序列化
+	data, err := json.Marshal(s2)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+	var decoded AppSettings
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+	if decoded.WebServe == nil || !decoded.WebServe.TLS || decoded.WebServe.TLSCertPath != "a.pem" {
+		t.Errorf("TLS 字段应随 JSON 往返保留: %+v", decoded.WebServe)
+	}
+
+	// 老配置（JSON 缺 tls 字段）反序列化 → 零值 = 纯 HTTP，行为不变
+	var legacy AppSettings
+	if err := json.Unmarshal([]byte(`{"webServe":{"enabled":true,"bindAddress":"127.0.0.1:36115"}}`), &legacy); err != nil {
+		t.Fatalf("老配置反序列化失败: %v", err)
+	}
+	if legacy.WebServe.TLS || legacy.WebServe.TLSCertPath != "" || legacy.WebServe.TLSKeyPath != "" {
+		t.Errorf("老配置缺 tls 字段应得零值: %+v", legacy.WebServe)
+	}
+}
+
 // TestAppSettings_EnsureTerminalDefaults 覆盖终端外观默认值与越界收敛：
 // 零值回默认、低于下限收敛下限、高于上限收敛上限、合法值不动。
 func TestAppSettings_EnsureTerminalDefaults(t *testing.T) {

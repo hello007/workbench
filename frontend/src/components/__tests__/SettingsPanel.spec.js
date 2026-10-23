@@ -25,7 +25,10 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetWebServeConfig: vi.fn(),
   SetWebServeConfig: vi.fn(),
   GetWebServeToken: vi.fn(),
-  RegenerateWebToken: vi.fn()
+  RegenerateWebToken: vi.fn(),
+  ListWebTokens: vi.fn(),
+  CreateWebToken: vi.fn(),
+  RevokeWebToken: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -148,6 +151,18 @@ const stubs = {
         }
       }
     }
+  },
+  // el-alert stub：默认插槽内容渲染（令牌一次性明文回显断言），close 事件透传
+  'el-alert': {
+    template: '<div class="el-alert" :class="type"><div class="el-alert__title">{{ title }}</div><slot /><span v-if="closable" class="el-alert__close" @click="$emit(\'close\')">x</span></div>',
+    props: ['title', 'type', 'closable'],
+    emits: ['close']
+  },
+  // el-date-picker stub：date 形态退化为一文本输入（change 双向 emit，令牌自定义过期档透传断言）
+  'el-date-picker': {
+    template: '<input class="el-date-picker" :value="modelValue || \'\'" :placeholder="placeholder" @change="$emit(\'update:modelValue\', $event.target.value)" />',
+    props: ['modelValue', 'type', 'placeholder', 'disabledDate', 'size'],
+    emits: ['update:modelValue']
   }
 }
 
@@ -179,10 +194,13 @@ const baseWebServeConfig = (over = {}) => ({
   ...over
 })
 
-async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a'.repeat(64), shellConfigsOver = null) {
+// 令牌列表 mock 默认值（形状对齐 model.WebTokenRecord，unix 秒；0 = 永不过期/未使用）
+const baseWebTokens = (over = []) => (over !== null ? over : [])
+
+async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a'.repeat(64), shellConfigsOver = null, tokensOver = undefined) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  const { GetSettings, GetAppVersion, GetShellConfigs, GetWebServeConfig, GetWebServeToken } = await import('../../../wailsjs/go/main/App')
+  const { GetSettings, GetAppVersion, GetShellConfigs, GetWebServeConfig, GetWebServeToken, ListWebTokens } = await import('../../../wailsjs/go/main/App')
   GetSettings.mockResolvedValue(baseSettings(settingsOver))
   GetAppVersion.mockResolvedValue('1.0.0')
   // Shell 列表默认返回与原硬编码一致的 Windows 4 种（数据源已改后端拉取，兜底列表不变）；
@@ -201,6 +219,10 @@ async function createWrapper(settingsOver = {}, webServeOver = {}, webToken = 'a
   }
   GetWebServeConfig.mockResolvedValue(baseWebServeConfig(webServeOver))
   GetWebServeToken.mockResolvedValue(webToken)
+  // 令牌列表默认「默认」令牌单条；tokensOver 显式传数组覆盖 / null 模拟拉取失败
+  ListWebTokens.mockResolvedValue(tokensOver === undefined ? [
+    { id: 'tok-default', name: '默认', hash: '0'.repeat(64), createdAt: 1735689600, lastUsedAt: 0, expiresAt: 0, revoked: false }
+  ] : baseWebTokens(tokensOver))
   const uiStore = useUiStore()
   uiStore.settingsVisible = true
   const wrapper = mount(SettingsPanel, { global: { stubs, plugins: [pinia] } })
@@ -989,11 +1011,11 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     RegenerateWebToken.mockResolvedValue('f'.repeat(64))
     wrapper = await createWrapper()
     await openNetworkTab()
-    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === '重新生成默认令牌').trigger('click')
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(
       expect.stringContaining('重新输入新令牌'),
-      '重新生成访问令牌',
+      '重新生成默认令牌',
       expect.objectContaining({ type: 'warning' })
     )
     expect(RegenerateWebToken).toHaveBeenCalled()
@@ -1012,7 +1034,7 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     window.localStorage.removeItem('workbench.web.token')
     wrapper = await createWrapper()
     await openNetworkTab()
-    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === '重新生成默认令牌').trigger('click')
     await flushPromises()
     // 浏览器（serve）模式下本页令牌须同步轮换，否则旧令牌失效后本页后续请求 401 自锁
     expect(window.localStorage.getItem('workbench.web.token')).toBe(newToken)
@@ -1025,7 +1047,7 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     ElMessageBox.confirm.mockRejectedValue('cancel')
     wrapper = await createWrapper()
     await openNetworkTab()
-    await wrapper.findAll('button').find(b => b.text() === '重新生成').trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === '重新生成默认令牌').trigger('click')
     await flushPromises()
     expect(ElMessageBox.confirm).toHaveBeenCalled()
     expect(RegenerateWebToken).not.toHaveBeenCalled()
@@ -1174,5 +1196,307 @@ describe('SettingsPanel.vue - 网络访问分区', () => {
     await flushPromises()
     expect(writeText).not.toHaveBeenCalled()
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('未生成'))
+  })
+})
+
+// ---- TLS 设置区（内置 TLS：开关 + 证书路径留空 = 自签引导）----
+
+describe('SettingsPanel.vue - TLS 设置区', () => {
+  let wrapper
+
+  async function openNetworkTab() {
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+  }
+
+  function tlsSwitch() {
+    return wrapper.find('input.webserve-tls-switch')
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('TLS 开关默认关闭（settings 无 tls 字段时零值语义 = 纯 HTTP）', async () => {
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    expect(tlsSwitch().exists()).toBe(true)
+    expect(tlsSwitch().element.checked).toBe(false)
+  })
+
+  it('loadWebServeConfig 读取已保存的 TLS 开关与证书路径', async () => {
+    wrapper = await createWrapper({
+      webServe: { enabled: true, bindAddress: '127.0.0.1:36115', tls: true, tlsCertPath: 'C:\\certs\\fullchain.pem', tlsKeyPath: 'C:\\certs\\privkey.pem' }
+    })
+    await openNetworkTab()
+    expect(tlsSwitch().element.checked).toBe(true)
+    const inputs = wrapper.findAll('.webserve-tls-input')
+    expect(inputs.length).toBe(2)
+    expect(inputs[0].element.value).toBe('C:\\certs\\fullchain.pem')
+    expect(inputs[1].element.value).toBe('C:\\certs\\privkey.pem')
+  })
+
+  it('开启 TLS 保存：SaveSettings 收到 tls=true 与路径字段，SetWebServeConfig 使运行时生效', async () => {
+    const { SaveSettings, SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue()
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const sw = tlsSwitch()
+    sw.element.checked = true
+    await sw.trigger('change')
+    await flushPromises()
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    const payload = SaveSettings.mock.calls[0][0]
+    expect(payload.webServe.tls).toBe(true)
+    expect(payload.webServe.tlsCertPath).toBe('')
+    expect(payload.webServe.tlsKeyPath).toBe('')
+    // 未改段原样保留（整体提交语义）
+    expect(payload.webServe.enabled).toBe(true)
+    expect(payload.webServe.bindAddress).toBe('127.0.0.1:36115')
+    expect(SetWebServeConfig).toHaveBeenCalledWith(true, '127.0.0.1:36115')
+  })
+
+  it('证书路径 change 透传到 SaveSettings（合并写基底）', async () => {
+    const { SaveSettings, SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue()
+    SetWebServeConfig.mockResolvedValue()
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    // 先开 TLS 再填路径（路径输入仅在开启态渲染）
+    const sw = tlsSwitch()
+    sw.element.checked = true
+    await sw.trigger('change')
+    await flushPromises()
+    const inputs = wrapper.findAll('.webserve-tls-input')
+    await inputs[0].setValue('C:\\certs\\fullchain.pem')
+    await inputs[0].trigger('change')
+    await flushPromises()
+    const payload = SaveSettings.mock.calls[SaveSettings.mock.calls.length - 1][0]
+    expect(payload.webServe.tls).toBe(true)
+    expect(payload.webServe.tlsCertPath).toBe('C:\\certs\\fullchain.pem')
+    expect(payload.webServe.tlsKeyPath).toBe('')
+  })
+
+  it('E_TLS_CERT_INVALID 错误分流：证书无效错误提示', async () => {
+    const { SaveSettings, SetWebServeConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SaveSettings.mockResolvedValue()
+    SetWebServeConfig.mockRejectedValue({ code: 'E_TLS_CERT_INVALID', message: 'TLS 证书加载失败：私钥与证书不配对' })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    const sw = tlsSwitch()
+    sw.element.checked = true
+    await sw.trigger('change')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('TLS 证书加载失败'))
+  })
+})
+
+// ---- 令牌管理区（多 token：列表 / 新建明文一次性回显 / 撤销确认 / 状态 tag 分流）----
+
+describe('SettingsPanel.vue - 令牌管理区', () => {
+  let wrapper
+
+  async function openNetworkTab() {
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+  }
+
+  const rec = (over = {}) => ({
+    id: 'tok-1',
+    name: '手机',
+    hash: '1'.repeat(64),
+    createdAt: 1735689600,
+    lastUsedAt: 0,
+    expiresAt: 0,
+    revoked: false,
+    ...over
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('列表渲染名称与状态 tag（有效/已过期/已撤销分流）', async () => {
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      rec({ id: 'tok-1', name: '手机' }),
+      rec({ id: 'tok-2', name: '旧设备', expiresAt: 1000, revoked: false }),
+      rec({ id: 'tok-3', name: '遗失设备', revoked: true })
+    ])
+    await openNetworkTab()
+    expect(wrapper.text()).toContain('令牌管理')
+    expect(wrapper.text()).toContain('手机')
+    expect(wrapper.text()).toContain('旧设备')
+    expect(wrapper.text()).toContain('遗失设备')
+    const tags = wrapper.findAll('.token-list-row .el-tag')
+    expect(tags.length).toBe(3)
+    expect(tags[0].text()).toBe('有效')
+    expect(tags[1].text()).toBe('已过期')
+    expect(tags[2].text()).toBe('已撤销')
+  })
+
+  it('已撤销记录不显示撤销按钮，未撤销记录显示', async () => {
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      rec({ id: 'tok-1', name: '手机' }),
+      rec({ id: 'tok-3', name: '遗失设备', revoked: true })
+    ])
+    await openNetworkTab()
+    const rows = wrapper.findAll('.token-list-row')
+    expect(rows.length).toBe(2)
+    expect(rows[0].findAll('button').some(b => b.text() === '撤销')).toBe(true)
+    expect(rows[1].findAll('button').some(b => b.text() === '撤销')).toBe(false)
+  })
+
+  it('新建令牌：调 CreateWebToken 且明文一次性回显（仅此一处可见）', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    const plain = 'b'.repeat(64)
+    CreateWebToken.mockResolvedValue({ plainText: plain, record: rec({ id: 'tok-new', name: 'Mac' }) })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.find('input.token-name-input').setValue('Mac')
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    expect(CreateWebToken).toHaveBeenCalledWith('Mac', 0) // 永久档 expiresAt=0
+    // 明文回显仅出现在 el-alert 内（列表只含哈希不含明文）
+    expect(wrapper.text()).toContain(plain)
+    expect(wrapper.text()).toContain('仅显示一次')
+  })
+
+  it('新建 7 天档：expiresAt 为当前时间 + 7 天（unix 秒）', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    CreateWebToken.mockResolvedValue({ plainText: 'b'.repeat(64), record: rec() })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.find('input.token-name-input').setValue('手机')
+    // 切 7 天档（el-select stub 原生 select change）
+    await wrapper.find('select.token-expiry-select').setValue('7')
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    const [, expiresAt] = CreateWebToken.mock.calls[0]
+    const now = Math.floor(Date.now() / 1000)
+    expect(expiresAt).toBeGreaterThanOrEqual(now + 7 * 86400 - 5)
+    expect(expiresAt).toBeLessThanOrEqual(now + 7 * 86400 + 5)
+  })
+
+  it('新建名称为空时前端预拦截，不调 CreateWebToken', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    expect(CreateWebToken).not.toHaveBeenCalled()
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('令牌名称'))
+  })
+
+  it('新建失败走 handleError 分流（E_TOKEN_EXPIRY_INVALID 预期拒绝 warning）', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    CreateWebToken.mockRejectedValue({ code: 'E_TOKEN_EXPIRY_INVALID', message: '有效期必须晚于当前时间' })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.find('input.token-name-input').setValue('Mac')
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('有效期必须晚于当前时间')
+    expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+
+  it('明文回显 alert 关闭后明文不可再取', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    const plain = 'c'.repeat(64)
+    CreateWebToken.mockResolvedValue({ plainText: plain, record: rec() })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.find('input.token-name-input').setValue('Mac')
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(plain)
+    // el-alert stub 的关闭入口（真实组件右上角 close 图标）触发 @close 清空
+    await wrapper.find('.el-alert__close').trigger('click')
+    await nextTick()
+    expect(wrapper.text()).not.toContain(plain)
+  })
+
+  it('撤销令牌：单次确认通过后调 RevokeWebToken 并刷新列表', async () => {
+    const { RevokeWebToken, ListWebTokens } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    RevokeWebToken.mockResolvedValue()
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [rec({ id: 'tok-1', name: '手机' })])
+    await openNetworkTab()
+    // 撤销后刷新列表：mock 重设为已撤销态（createWrapper 的默认 mock 已返回未撤销初态）
+    ListWebTokens.mockResolvedValue([rec({ id: 'tok-1', name: '手机', revoked: true })])
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '撤销').trigger('click')
+    await flushPromises()
+    // 单次确认（confirm-dialog 单次确认形态：confirm 恰一次）
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(RevokeWebToken).toHaveBeenCalledWith('tok-1')
+    // 撤销后刷新列表，状态 tag 翻转为已撤销
+    const tags = wrapper.findAll('.token-list-row .el-tag')
+    expect(tags.length).toBe(1)
+    expect(tags[0].text()).toBe('已撤销')
+  })
+
+  it('撤销确认取消则不调用 RevokeWebToken', async () => {
+    const { RevokeWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '撤销').trigger('click')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(RevokeWebToken).not.toHaveBeenCalled()
+  })
+
+  it('撤销失败走 handleError 分流（E_TOKEN_NOT_FOUND 预期拒绝 warning）', async () => {
+    const { RevokeWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage, ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    RevokeWebToken.mockRejectedValue({ code: 'E_TOKEN_NOT_FOUND', message: '令牌不存在或已被删除，请刷新列表' })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '撤销').trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('令牌不存在或已被删除，请刷新列表')
+  })
+
+  it('复制一次性明文到剪贴板', async () => {
+    const { CreateWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    CreateWebToken.mockResolvedValue({ plainText: 'd'.repeat(64), record: rec() })
+    wrapper = await createWrapper()
+    await openNetworkTab()
+    await wrapper.find('input.token-name-input').setValue('Mac')
+    await wrapper.findAll('button').find(b => b.text() === '新建令牌').trigger('click')
+    await flushPromises()
+    await wrapper.find('.token-plain-row button').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('d'.repeat(64))
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('妥善保存'))
+  })
+
+  it('令牌列表拉取失败静默保留空态，不阻塞设置页', async () => {
+    const { ListWebTokens } = await import('../../../wailsjs/go/main/App')
+    ListWebTokens.mockRejectedValue(new Error('list fail'))
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, null)
+    await openNetworkTab()
+    expect(wrapper.text()).toContain('暂无令牌记录')
   })
 })

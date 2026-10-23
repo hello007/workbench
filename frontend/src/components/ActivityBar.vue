@@ -31,6 +31,21 @@
     </el-tooltip>
     <!-- 终端图标（底部） -->
     <div class="activity-bar-spacer"></div>
+    <!-- 多设备连接指示（PR3 多设备语义明示，D1 决策：架构零改动只提示）：仅存在
+         其他设备接入（连接数 >1）时显示，info 级克制提示，tooltip 说明共享语义。
+         浏览器 serve 模式由 WSHub ws-connections:changed 事件驱动；桌面模式后端
+         不产生该事件，composable 恒 1，指示不显示（空安全）。深色容器图标用内联
+         SVG fill=currentColor（视觉规范），计数角标走 primary 语义色 -->
+    <el-tooltip v-if="multiDevice" :content="deviceHint" placement="right" :show-after="300">
+      <div class="activity-bar-item activity-bar-devices">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="4" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+          <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6" fill="var(--sidebar-bg)"/>
+          <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+        <span class="devices-badge">{{ deviceCount }}</span>
+      </div>
+    </el-tooltip>
     <el-tooltip content="终端" placement="right" :show-after="300">
       <div
         class="activity-bar-item"
@@ -46,14 +61,22 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
 import { useUiStore } from '../store'
+import { useDeviceConnections } from '../composables/useDeviceConnections'
 
 const uiStore = useUiStore()
 
 defineEmits(['toggleTerminal', 'openSettings'])
+
+// 多设备连接感知（PR3 语义明示）：连接数 >1 时底部显示设备指示项
+const { deviceCount, multiDevice } = useDeviceConnections()
+const deviceHint = computed(() =>
+  `${deviceCount.value} 个设备已连接：多端共享同一后端状态，后操作覆盖先操作`
+)
 
 const panels = [
   { id: 'directory', icon: Folder, label: '工作目录' },
@@ -119,5 +142,25 @@ const panels = [
   height: 20px;
   border-radius: 0 2px 2px 0;
   background: var(--primary-light);
+}
+
+/* 多设备连接指示：计数角标缀于图标右下（primary 语义色，克制不抢眼） */
+.activity-bar-devices .devices-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: var(--bg-secondary);
+  border: 1px solid var(--primary-color);
+  border-radius: 999px;
 }
 </style>

@@ -93,6 +93,16 @@ type AppServices struct {
 	// 复用 assetsSvc 缩略图同一 STA worker 单队列（PptxPdfConverter 注入，避免
 	// 双 COM 队列进程互杀）；不发生前端事件，web_serve.go applySink 无需同步。
 	pptxPreviewSvc *service.PptxPreviewService
+	// 认证审计日志器（浏览器访问通道：认证成功/失败 + token 生命周期事件，
+	// JSONL append-only data/web_audit.log，5MB 轮转 .1；append 语义独立实现，
+	// util.SaveJSON 原子写不适用 append-only 日志）。server 认证回调（OnAuth）
+	// 与 webTokenSvc 生命周期事件都经它落盘。
+	webAuditSvc *service.AuditLogger
+	// 浏览器访问通道多 token 管理服务（GitHub PAT 式：哈希落盘/命名/撤销/可选
+	// 过期，data/web_tokens.json util.SaveJSON 原子写；存量 data/web_token 首载
+	// 迁移为首条记录）。Verify 作为 serve 认证链校验函数注入 server.WebOptions
+	// 与 WSHub（无状态快照，新建/撤销/过期即时生效，无需热轮换通知）。
+	webTokenSvc *service.WebTokenService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -211,6 +221,15 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// PPTX 预览转换编排服务（文件树 pptx/ppsx 内嵌预览，data/pptx_preview_pdf/
 	// 缓存目录；COM 执行器 = assets 缩略图同一 STA worker 单队列导出器）
 	s.pptxPreviewSvc = service.NewPptxPreviewService(filepath.Join(dataDir, "pptx_preview_pdf"), s.assetsSvc.PptxPdfConverter())
+
+	// 认证审计日志器 + 多 token 管理服务（浏览器访问通道）。EnsureLoaded 即时
+	// 完成存量迁移/初始引导：data/web_token 明文兼容文件在启动期就绪——serve
+	// 控制台提示与设置页「查看令牌」链路依赖该文件，不能等首个认证请求懒加载
+	//（首请求 401 后才生成的令牌用户无从得知）。
+	s.webAuditSvc = service.NewAuditLogger(filepath.Join(dataDir, "web_audit.log"))
+	s.webTokenSvc = service.NewWebTokenService(filepath.Join(dataDir, "web_tokens.json"), filepath.Join(dataDir, "web_token"))
+	s.webTokenSvc.SetAudit(s.webAuditSvc)
+	s.webTokenSvc.EnsureLoaded()
 
 	return s
 }

@@ -23,7 +23,7 @@ import (
 func TestServeRPC_GetAppVersionSmoke(t *testing.T) {
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets:    nil, // 冒烟不涉及静态资产
-		Token:     "smoke-token",
+		Verify:    server.StaticVerifier("smoke-token"),
 		RPCTarget: NewApp(),
 	})
 
@@ -77,7 +77,7 @@ func TestServeRPC_GetAppVersionSmoke(t *testing.T) {
 func TestServeRPC_DialogMethodsRejectedInServeMode(t *testing.T) {
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets:    nil,
-		Token:     "smoke-token",
+		Verify:    server.StaticVerifier("smoke-token"),
 		RPCTarget: NewApp(), // ctx 为 nil，模拟 serve 模式无 Wails startup
 	})
 
@@ -117,7 +117,7 @@ func TestServeWS_EventBroadcastSmoke(t *testing.T) {
 	}
 	app.AppServices = NewAppServices(context.Background(), dataDir, false)
 	// serve 模式 sink 切换（与 runServe 装配行同构）
-	hub := server.NewWSHub(token)
+	hub := server.NewWSHub(server.StaticVerifier(token), nil)
 	app.terminalSvc.SetEventSink(hub)
 	app.updateSvc.SetEventSink(hub)
 	app.aiFuncSvc.SetEventSink(hub)
@@ -125,7 +125,7 @@ func TestServeWS_EventBroadcastSmoke(t *testing.T) {
 
 	srv := httptest.NewServer(server.NewWebHandler(server.WebOptions{
 		Assets:    nil, // 冒烟不涉及静态资产
-		Token:     token,
+		Verify:    server.StaticVerifier(token),
 		RPCTarget: app,
 		WSHub:     hub,
 	}))
@@ -189,6 +189,10 @@ func TestServeWS_EventBroadcastSmoke(t *testing.T) {
 		}
 		if err := json.Unmarshal(payload, &frame); err != nil {
 			t.Fatalf("事件帧不是合法 JSON: %v, payload=%q", err, payload)
+		}
+		if frame.Event == "ws-connections:changed" {
+			// 连接建立期广播的连接数事件帧：非本用例断言目标，跳过
+			continue
 		}
 		seen[frame.Event] = true
 	}

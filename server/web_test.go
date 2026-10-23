@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 )
@@ -23,7 +24,7 @@ func testAssets() fs.FS {
 }
 
 func newTestHandler() http.Handler {
-	return NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken})
+	return NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken)})
 }
 
 // get 以指定 header 请求 handler 并返回响应。
@@ -125,7 +126,7 @@ func TestWebHandler_DirectoryPath_NoListing(t *testing.T) {
 
 // TestWebHandler_EmptyTokenDeniesAll 令牌未配置（空串）时除健康检查外全部拒绝（fail closed）。
 func TestWebHandler_EmptyTokenDeniesAll(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: ""})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier("")})
 	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer whatever"}); rec.Code != http.StatusUnauthorized {
 		t.Errorf("空令牌配置应拒绝携带任意令牌的请求, got %d", rec.Code)
 	}
@@ -152,7 +153,7 @@ func TestWebHandler_MethodNotAllowed(t *testing.T) {
 func TestWebHandler_IndexMissing_SPAFallback404(t *testing.T) {
 	h := NewWebHandler(WebOptions{
 		Assets: fstest.MapFS{"assets/app.js": &fstest.MapFile{Data: []byte("x")}},
-		Token:  testToken,
+		Verify: StaticVerifier(testToken),
 	})
 	rec := get(t, h, "/missing-route", map[string]string{"Authorization": "Bearer " + testToken})
 	if rec.Code != http.StatusNotFound {
@@ -162,33 +163,146 @@ func TestWebHandler_IndexMissing_SPAFallback404(t *testing.T) {
 
 // TestWebHandler_NilAssets 静态资产未加载时返回 404 不 panic。
 func TestWebHandler_NilAssets(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: nil, Token: testToken})
+	h := NewWebHandler(WebOptions{Assets: nil, Verify: StaticVerifier(testToken)})
 	rec := get(t, h, "/", map[string]string{"Authorization": "Bearer " + testToken})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("资产未加载应 404, got %d", rec.Code)
 	}
 }
 
-// TestWebHandler_SetTokenRotation 令牌热轮换：轮换后旧令牌立即 401、新令牌 200
-// （桌面设置页「重新生成令牌」运行期生效语义，经 RotateToken → SetToken 到达）。
-func TestWebHandler_SetTokenRotation(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+// swapVerifier verify 可热替换的包装（测试用）：模拟多 token 生命周期下校验
+// 基准变化（撤销/轮换/过期经替换 verify 背后的状态实现）。生产实现为 verify
+// 闭包直读 WebTokenService 状态，天然即时生效，本层无 SetToken 写路径。
+type swapVerifier struct {
+	mu sync.Mutex
+	fn TokenVerifier
+}
 
-	// 轮换前旧令牌可用
+func (s *swapVerifier) verify(candidate string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fn == nil {
+		return "", false
+	}
+	return s.fn(candidate)
+}
+
+func (s *swapVerifier) set(fn TokenVerifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fn = fn
+}
+
+// TestWebHandler_VerifierSwapRotation 校验基准热更替：替换 verify 后旧令牌立即
+// 401、新令牌 200（多 token 语义下对应 RegenerateWebToken 撤旧建新——服务层
+// 状态变化经 verify 闭包即时生效，与原单 token SetToken 轮换语义等价）。
+func TestWebHandler_VerifierSwapRotation(t *testing.T) {
+	sv := &swapVerifier{}
+	sv.set(StaticVerifier("old-token"))
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: sv.verify})
+
+	// 更替前旧令牌可用
 	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer old-token"}); rec.Code != http.StatusOK {
-		t.Fatalf("轮换前旧令牌应 200, got %d", rec.Code)
+		t.Fatalf("更替前旧令牌应 200, got %d", rec.Code)
 	}
 
-	h.SetToken("new-token")
+	sv.set(StaticVerifier("new-token"))
 
 	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer old-token"}); rec.Code != http.StatusUnauthorized {
-		t.Errorf("轮换后旧令牌应 401, got %d", rec.Code)
+		t.Errorf("更替后旧令牌应 401, got %d", rec.Code)
 	}
 	if rec := get(t, h, "/?token=old-token", nil); rec.Code != http.StatusUnauthorized {
-		t.Errorf("轮换后旧令牌查询参数通道应 401, got %d", rec.Code)
+		t.Errorf("更替后旧令牌查询参数通道应 401, got %d", rec.Code)
 	}
 	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer new-token"}); rec.Code != http.StatusOK {
-		t.Errorf("轮换后新令牌应 200, got %d", rec.Code)
+		t.Errorf("更替后新令牌应 200, got %d", rec.Code)
+	}
+}
+
+// TestWebHandler_MultiTokenVerify 多 token 语义：多个有效令牌任一命中即通过，
+// 认证事件分别归因到各自 tokenID（审计按 token 定位来源设备的前提）。
+func TestWebHandler_MultiTokenVerify(t *testing.T) {
+	var mu sync.Mutex
+	var tokenIDs []string
+	verify := func(candidate string) (string, bool) {
+		switch candidate {
+		case "tok-a":
+			return "id-a", true
+		case "tok-b":
+			return "id-b", true
+		}
+		return "", false
+	}
+	h := NewWebHandler(WebOptions{
+		Assets: testAssets(),
+		Verify: verify,
+		OnAuth: func(ev AuthEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			tokenIDs = append(tokenIDs, ev.TokenID)
+		},
+	})
+
+	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer tok-a"}); rec.Code != http.StatusOK {
+		t.Errorf("tok-a 应认证通过, got %d", rec.Code)
+	}
+	if rec := get(t, h, "/", map[string]string{"X-Auth-Token": "tok-b"}); rec.Code != http.StatusOK {
+		t.Errorf("tok-b 应认证通过, got %d", rec.Code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(tokenIDs) != 2 || tokenIDs[0] != "id-a" || tokenIDs[1] != "id-b" {
+		t.Errorf("认证事件应分别归因到各 token 记录, got %v", tokenIDs)
+	}
+}
+
+// TestWebHandler_OnAuthEvents 认证事件回调：成功/失败各触发一次，事件字段
+// （Event/TokenID/RemoteAddr/UserAgent/At）完整；OnAuth 未注入（nil）时认证
+// 链路正常不 panic。
+func TestWebHandler_OnAuthEvents(t *testing.T) {
+	var mu sync.Mutex
+	var events []AuthEvent
+	h := NewWebHandler(WebOptions{
+		Assets: testAssets(),
+		Verify: StaticVerifier(testToken),
+		OnAuth: func(ev AuthEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, ev)
+		},
+	})
+
+	get(t, h, "/", map[string]string{"Authorization": "Bearer " + testToken})
+	get(t, h, "/?token=wrong", nil)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 {
+		t.Fatalf("应触发恰好两次认证事件, got %d", len(events))
+	}
+	if events[0].Event != AuthEventSuccess || events[0].TokenID != "static" {
+		t.Errorf("成功事件不符: %+v", events[0])
+	}
+	if events[1].Event != AuthEventFailure || events[1].TokenID != "" {
+		t.Errorf("失败事件不符: %+v", events[1])
+	}
+	for _, ev := range events {
+		// httptest.NewRequest 默认不带 User-Agent（UA 可为空，不作为完整性断言）
+		if ev.RemoteAddr == "" || ev.At.IsZero() {
+			t.Errorf("事件字段不完整: %+v", ev)
+		}
+	}
+}
+
+// TestWebHandler_NilVerifyFailClosed 未注入 verify（nil）时除健康检查外全部
+// 拒绝（fail closed），OnAuth 缺省不 panic。
+func TestWebHandler_NilVerifyFailClosed(t *testing.T) {
+	h := NewWebHandler(WebOptions{Assets: testAssets()})
+	if rec := get(t, h, "/", map[string]string{"Authorization": "Bearer " + testToken}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("verify 缺省应拒绝, got %d", rec.Code)
+	}
+	if rec := get(t, h, healthPath, nil); rec.Code != http.StatusOK {
+		t.Errorf("健康检查应保持豁免, got %d", rec.Code)
 	}
 }
 
@@ -280,8 +394,10 @@ func TestWebHandler_CookieAuthMatrix(t *testing.T) {
 // 旧 cookie 不得遮蔽 query 新令牌——重验证须 200 并把会话 cookie 原地换新，
 // 否则轮换后用户在旧 cookie 过期前（30 天）无法经 URL 重新进入。
 func TestWebHandler_RotationRecoveryViaQueryToken(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
-	h.SetToken("new-token")
+	sv := &swapVerifier{}
+	sv.set(StaticVerifier("old-token"))
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: sv.verify})
+	sv.set(StaticVerifier("new-token"))
 
 	req := httptest.NewRequest(http.MethodGet, "/?token=new-token", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
@@ -379,8 +495,10 @@ func TestWebHandler_CookieHitNoReset(t *testing.T) {
 // TestWebHandler_CookieStaleResetWithHeaderAuth cookie 与当前令牌不一致时，
 // header 认证成功即重种新会话 cookie（令牌轮换后旧 cookie 原地换新）。
 func TestWebHandler_CookieStaleResetWithHeaderAuth(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
-	h.SetToken("new-token")
+	sv := &swapVerifier{}
+	sv.set(StaticVerifier("old-token"))
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: sv.verify})
+	sv.set(StaticVerifier("new-token"))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
@@ -446,7 +564,9 @@ func TestWebHandler_CookieSessionCascade(t *testing.T) {
 // TestWebHandler_TokenRotationInvalidatesCookie 令牌轮换后旧 cookie 失效 401，
 // 新令牌 query 认证种新会话。
 func TestWebHandler_TokenRotationInvalidatesCookie(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: "old-token"})
+	sv := &swapVerifier{}
+	sv.set(StaticVerifier("old-token"))
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: sv.verify})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})
@@ -456,7 +576,7 @@ func TestWebHandler_TokenRotationInvalidatesCookie(t *testing.T) {
 		t.Fatalf("轮换前旧 cookie 应 200, got %d", rec.Code)
 	}
 
-	h.SetToken("new-token")
+	sv.set(StaticVerifier("new-token"))
 
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "old-token"})

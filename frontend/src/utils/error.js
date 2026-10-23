@@ -45,6 +45,13 @@ export const ErrorCode = Object.freeze({
   AssetsFolderNotEmpty: 'E_ASSETS_FOLDER_NOT_EMPTY', // 非空目录 force=false 删除被拒（warning，确认型拒绝非真失败——删除未发生，前端二次确认后以 force=true 重调）
   // 素材购物栏域错误码（素材管理·购物栏），取值与 model/app_error.go 购物栏域段一致。
   CartExportInProgress: 'E_CART_EXPORT_IN_PROGRESS', // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
+  // 浏览器访问通道 token 管理域错误码（多 token 管理），取值与 model/app_error.go
+  // token 管理域段一致，均为预期拒绝/用户操作错误（warning）。
+  TokenNotFound: 'E_TOKEN_NOT_FOUND', // 目标令牌记录不存在或已被删除（列表过期，引导刷新）
+  TokenNameRequired: 'E_TOKEN_NAME_REQUIRED', // 令牌名称（设备/用途标识）为空
+  TokenExpiryInvalid: 'E_TOKEN_EXPIRY_INVALID', // 有效期早于当前时间（自定义过期档位校验拒绝）
+  // 浏览器访问通道 TLS 域错误码（内置 TLS），取值与 model/app_error.go TLS 域段一致。
+  TLSCertInvalid: 'E_TLS_CERT_INVALID', // TLS 证书加载/生成失败：路径无效、文件损坏、过期或证书私钥不配对（error，修正配置或删除自签文件后重试）
   // PPTX 预览转换域错误码（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer），
   // 取值与 model/app_error.go PPTX 预览转换域段一致。
   PptxPreviewUnavailable: 'E_PPTX_PREVIEW_UNAVAILABLE', // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
@@ -85,7 +92,10 @@ const WARNING_CODES = new Set([
   ErrorCode.AssetsPrefixNoMatch,
   ErrorCode.AssetsDeleteBackupFailed,
   ErrorCode.AssetsFolderNotEmpty,
-  ErrorCode.CartExportInProgress
+  ErrorCode.CartExportInProgress,
+  ErrorCode.TokenNotFound,
+  ErrorCode.TokenNameRequired,
+  ErrorCode.TokenExpiryInvalid
 ])
 
 /**

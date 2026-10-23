@@ -121,6 +121,15 @@ const (
 	ErrCodePptxPreviewUnavailable = "E_PPTX_PREVIEW_UNAVAILABLE" // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
 	ErrCodePptxPreviewFailed      = "E_PPTX_PREVIEW_FAILED"      // 转换失败：文件损坏/COM 调用失败/超时（重试 1 次后仍失败）（error，前端降级提示 + 用默认程序打开）
 
+	// 浏览器访问通道 token 管理域（多 token 管理，2026-10 三期 PR1）：
+	// 均为预期拒绝/用户操作错误（warning），前端 error.js WARNING_CODES 同步分流。
+	ErrCodeTokenNotFound      = "E_TOKEN_NOT_FOUND"      // 目标 token 记录不存在或已被删除（列表过期，引导刷新）
+	ErrCodeTokenNameRequired  = "E_TOKEN_NAME_REQUIRED"  // token 名称（设备/用途标识）为空
+	ErrCodeTokenExpiryInvalid = "E_TOKEN_EXPIRY_INVALID" // 有效期早于当前时间（自定义过期档位校验拒绝）
+
+	// 浏览器访问通道 TLS 域（内置 TLS，2026-10 三期 PR2）：
+	ErrCodeTLSCertInvalid = "E_TLS_CERT_INVALID" // TLS 证书加载/生成失败：路径无效、文件损坏、过期或证书私钥不配对（error，用户修正配置或删除自签文件后重试）
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

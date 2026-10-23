@@ -33,7 +33,7 @@ func TestServeCookie_AssetCascadeSmoke(t *testing.T) {
 
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets:    distFS,
-		Token:     "smoke-token",
+		Verify:    server.StaticVerifier("smoke-token"),
 		RPCTarget: NewApp(),
 	})
 

@@ -236,7 +236,7 @@ func TestRPCHandler_NilTarget(t *testing.T) {
 
 // TestWebHandler_RPCRequiresToken 经 NewWebHandler 装配后 /api/rpc 未携带令牌返回 401。
 func TestWebHandler_RPCRequiresToken(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken, RPCTarget: rpcTestTarget{}})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken), RPCTarget: rpcTestTarget{}})
 	rec := postRPC(t, h, `{"method":"GetVersion","args":[]}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("未认证 RPC 应 401, got %d", rec.Code)
@@ -245,7 +245,7 @@ func TestWebHandler_RPCRequiresToken(t *testing.T) {
 
 // TestWebHandler_RPCWithToken 带令牌的 RPC 请求走通并返回业务结果。
 func TestWebHandler_RPCWithToken(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken, RPCTarget: rpcTestTarget{}})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken), RPCTarget: rpcTestTarget{}})
 	req := httptest.NewRequest(http.MethodPost, rpcPath, strings.NewReader(`{"method":"Add","args":[20,22]}`))
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
@@ -262,7 +262,7 @@ func TestWebHandler_RPCWithToken(t *testing.T) {
 // 请求落入静态路径分支——未带令牌先被认证中间件 401 拒绝，带令牌后被
 // 静态分支 405 拒绝（仅支持 GET/HEAD），均不可达 RPC 能力。
 func TestWebHandler_RPCNotMounted(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken)})
 
 	rec := postRPC(t, h, `{"method":"GetVersion","args":[]}`)
 	if rec.Code != http.StatusUnauthorized {
@@ -283,7 +283,7 @@ func TestWebHandler_RPCNotMounted(t *testing.T) {
 // 同源校验矩阵详见 TestWebHandler_PreviewSecFetchSiteMatrix）：路由命中以「同源
 // 请求未带令牌仍进入 preview 业务校验（400 缺参数）」而非 401/403/SPA fallback 为准。
 func TestWebHandler_PreviewRoutesMountedNoAuth(t *testing.T) {
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken, RPCTarget: rpcTestTarget{}})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken), RPCTarget: rpcTestTarget{}})
 	sameOrigin := map[string]string{"Sec-Fetch-Site": "same-origin"}
 
 	rec := get(t, h, "/preview-pdf", sameOrigin)
@@ -304,7 +304,7 @@ func TestWebHandler_PreviewRoutesMountedNoAuth(t *testing.T) {
 // /preview-pdf 完整链路（同源关 + path 参数校验 + ServeFile 返回内容）。
 func TestWebHandler_PreviewPDFSmoke(t *testing.T) {
 	pdfPath := newPreviewTestFile(t, "doc.pdf", "%PDF-smoke")
-	h := NewWebHandler(WebOptions{Assets: testAssets(), Token: testToken})
+	h := NewWebHandler(WebOptions{Assets: testAssets(), Verify: StaticVerifier(testToken)})
 
 	rec := get(t, h, "/preview-pdf?path="+pdfPath, map[string]string{"Sec-Fetch-Site": "same-origin"})
 	if rec.Code != http.StatusOK {

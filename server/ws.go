@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -56,6 +55,13 @@ const (
 	wsSyncedEvent = "ws-synced"
 )
 
+// wsConnectionsEvent 连接数变化事件（多设备语义明示，D1 决策：架构零改动只提示）。
+// 每次客户端 register/unregister 成功路径广播一条，data[0] 为事件后的连接总数。
+// 事件经常规 Emit 进环形缓冲占用 seq——resume 补发面包含该事件，计数为幂等
+// 快照（最后到达值即当前态），重放/乱序对消费方无碍，续传契约不变。
+// 桌面 Wails 出口不产生该事件（仅 hub 广播），前端监听空安全。
+const wsConnectionsEvent = "ws-connections:changed"
+
 // wsFrame 服务端推送的事件帧。
 //
 // Data 为变参数组，与前端 Wails `EventsOn(name, callback)` 的回调 ...data
@@ -64,7 +70,7 @@ const (
 //
 // Seq 为 hub 级单调递增事件序号（自 1 起，仅成功广播的事件占号），浏览器端
 // 记录已收最大序号，重连握手据此请求缺口补发；omitempty 使无序号的控制帧
-//（ws-gap / ws-synced）不携带该字段，向后兼容仅识别 {event,data} 的消费方。
+// （ws-gap / ws-synced）不携带该字段，向后兼容仅识别 {event,data} 的消费方。
 type wsFrame struct {
 	Event string `json:"event"`
 	Data  []any  `json:"data"`
@@ -84,15 +90,17 @@ type wsRingEntry struct {
 // 广播语义：一条事件推给全部已连接客户端（个人单用户多标签页场景，各标签
 // 共享同一后端状态）。单用户工具不做订阅过滤/单播，保持实现最小面。
 type WSHub struct {
-	token    string
+	verify   TokenVerifier   // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
+	onAuth   func(AuthEvent) // 认证事件出口（可 nil）
 	upgrader websocket.Upgrader
-	mu       sync.RWMutex // 保护 clients；send channel 的 close 仅发生在持写锁的 unregister
+	mu       sync.RWMutex // 保护 clients 与 closing；send channel 的 close 仅发生在持写锁的 unregister
 	clients  map[*wsClient]struct{}
+	closing  bool // hub 已进入关停（Close 调用后置位）：register/unregister 不再广播连接数事件
 
 	// 续传序号与环形缓冲（seqMu 保护）。锁序恒为 seqMu → mu：Emit 在 seqMu
 	// 临界区内完成「占号-入环-广播」，resume 补发在同一临界区取补发集，保证
 	// 序号单调、缓冲与序号一致、补发集与实时广播不重不漏；mu 的写侧路径
-	//（register/unregister/SetToken）均不获取 seqMu，无反向嵌套死锁面。
+	//（register/unregister）均不获取 seqMu，无反向嵌套死锁面。
 	seqMu     sync.Mutex
 	seq       uint64        // 已分配的最大事件序号（自 0 起，广播前自增）
 	ring      []wsRingEntry // 环形缓冲：未满时尾追、满后覆写最旧（ringHead 指向最旧条目）
@@ -113,23 +121,27 @@ type wsClient struct {
 	send chan []byte
 }
 
-// NewWSHub 构造 WebSocket hub。token 为访问令牌（main.runServe 传入
-// LoadOrCreateToken 结果），空串视为未配置，所有升级请求 fail closed 拒绝。
-func NewWSHub(token string) *WSHub {
-	return newWSHubTuned(token, defaultWriteWait, defaultPongWait, wsResumeBuffer)
+// NewWSHub 构造 WebSocket hub。verify 为握手令牌校验函数（main 装配传入
+// WebTokenService.Verify 闭包，多 token 哈希集合校验由服务层持有，新建/撤销/
+// 过期即时生效——单 token 时代的 SetToken 热轮换已随 verify 化删除）；onAuth
+// 为认证事件出口（可 nil）。verify 为 nil 时所有升级请求 fail closed 拒绝。
+func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent)) *WSHub {
+	return newWSHubTuned(verify, onAuth, defaultWriteWait, defaultPongWait, wsResumeBuffer)
 }
 
 // newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
-func newWSHubTuned(token string, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
+func newWSHubTuned(verify TokenVerifier, onAuth func(AuthEvent), writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
 	if resumeBuffer < 0 {
 		resumeBuffer = 0
 	}
 	return &WSHub{
-		token: token,
+		verify: verify,
+		onAuth: onAuth,
 		upgrader: websocket.Upgrader{
-			// 客户端以 Sec-WebSocket-Protocol 子协议携带 token 时，升级响应须
-			// 回显选中的子协议，否则浏览器判定握手失败主动关闭连接
-			Subprotocols: []string{token},
+			// Subprotocols 保持 nil：多 token 语义下回显值 = 命中的子协议候选
+			//（固定列表无法枚举动态 token 集合），ServeHTTP 在子协议通道命中时
+			// 经 Upgrade 的 responseHeader 传入（gorilla 在 Subprotocols 为 nil
+			// 时取 responseHeader 的 Sec-Websocket-Protocol 作为选中子协议回显）
 			// CheckOrigin 保留 gorilla 默认同源校验：serve 模式前端与 WS 同源
 			// （同一 HTTP 服务），默认拒绝跨源握手可防跨站 WebSocket 劫持
 			//（对齐 Jupyter 的 Origin 校验约定）；非浏览器客户端无 Origin 头不受影响。
@@ -265,22 +277,12 @@ func (h *WSHub) ClientCount() int {
 func (h *WSHub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// 置位关停标记：此后 readPump defer 触发的逐连接 unregister 不再广播
+	// 连接数事件（收口期无意义，见 notifyConnectionCount 注释）
+	h.closing = true
 	for c := range h.clients {
 		_ = c.conn.Close()
 	}
-}
-
-// SetToken 热轮换访问令牌：更新握手校验基准与升级子协议回显列表。
-//
-// 语义：已建立的连接不在数据面校验令牌，轮换后保持有效至断开重连（重连须用
-// 新令牌）。upgrader 结构体在锁下复制快照后再用于 Upgrade（Upgrade 为阻塞
-// 操作不持锁），与本方法写 Subprotocols 互斥，消除并发读写竞态；SetToken
-// 每次替换全新 slice（不改旧 slice 元素），快照持有的旧 slice 恒定不可变。
-func (h *WSHub) SetToken(token string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.token = token
-	h.upgrader.Subprotocols = []string{token}
 }
 
 // ServeHTTP 处理 GET /ws 升级请求。
@@ -289,23 +291,35 @@ func (h *WSHub) SetToken(token string) {
 // WebSocket 上下文，拿不到明确 HTTP 状态码，错误语义劣化）。浏览器 WebSocket
 // API 无法携带自定义 Authorization 头，支持三种令牌通道：
 //   - Sec-WebSocket-Protocol 子协议（浏览器 shim 主通道）：new WebSocket(url,
-//     [token]) 以子协议名携带，升级响应回显（upgrader.Subprotocols）；
+//     [token]) 以子协议名携带，升级响应回显（多 token 下回显命中的候选值）；
 //   - wb_token cookie（浏览器会话通道）：首访 HTTP 请求种下的会话 cookie 随
 //     同源 WS 握手自动携带，支撑前端无 localStorage 令牌时的裸连形态；
 //   - ?token= 查询参数（非浏览器客户端与手工验证便利；风险与 PR1 HTTP 通道
-//     的查询参数形态一致——可能进访问日志，恒定时间比较后即弃，不落日志）。
+//     的查询参数形态一致——可能进访问日志，校验后即弃，不落日志）。
+//
+// 成功/失败各触发一次 onAuth 认证事件（装配层注入审计落盘）。已建立的连接
+// 不在数据面校验令牌，保持有效至断开重连（重连须用有效令牌）。
 func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.authorized(r) {
+	matched, tokenID, ok := h.authorized(r)
+	if !ok {
+		emitAuthEvent(h.onAuth, AuthEventFailure, "", r)
 		// 只记来源不记完整 URL：?token= 查询参数形式的令牌不得进日志
 		slog.Warn("unauthorized websocket request", "remote", r.RemoteAddr)
 		writePreviewError(w, http.StatusUnauthorized, "未授权访问：请携带访问令牌")
 		return
 	}
-	// 锁下取 upgrader 快照（见 SetToken 注释），Upgrade 在锁外执行
-	h.mu.RLock()
-	upgrader := h.upgrader
-	h.mu.RUnlock()
-	conn, err := upgrader.Upgrade(w, r, nil)
+	emitAuthEvent(h.onAuth, AuthEventSuccess, tokenID, r)
+	// 子协议通道命中的凭据须回显该子协议（浏览器 shim 依赖回显判定握手成功；
+	// 缺失时浏览器主动关闭连接）。多 token 下回显值 = 命中的 candidate 而非
+	// 固定令牌，经 responseHeader 传递（见 NewWSHub 的 Subprotocols=nil 注释）
+	var respHeader http.Header
+	for _, p := range websocket.Subprotocols(r) {
+		if p == matched {
+			respHeader = http.Header{"Sec-Websocket-Protocol": []string{matched}}
+			break
+		}
+	}
+	conn, err := h.upgrader.Upgrade(w, r, respHeader)
 	if err != nil {
 		// Upgrade 失败（非 WebSocket 握手/Origin 校验拒绝等）时已自行写出
 		// HTTP 错误响应，此处仅记日志
@@ -321,47 +335,79 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // authorized 校验升级请求令牌：三种通道任一命中即通过——Sec-WebSocket-Protocol
 // 子协议（浏览器 shim 主通道，显式凭据）> wb_token cookie（浏览器会话，裸连
 // WebSocket 无 protocols 参数时依赖）> ?token= 查询参数（手工验证便利）；
-// 恒定时间比较防时序侧信道；服务端令牌未配置时一律拒绝（fail closed）。
-func (h *WSHub) authorized(r *http.Request) bool {
-	h.mu.RLock()
-	token := h.token
-	h.mu.RUnlock()
-	if token == "" {
-		return false
+// 逐候选调用 verify（哈希比对恒定时间由实现方保证）；verify 未配置（nil）时
+// 一律拒绝（fail closed）。
+//
+// 返回 matched 为命中的明文凭据候选（子协议回显与调试日志不落完整 URL 均以
+// 候选值为准），tokenID 为命中记录 ID（审计归因键）。
+func (h *WSHub) authorized(r *http.Request) (matched, tokenID string, ok bool) {
+	if h.verify == nil {
+		return "", "", false
 	}
 	for _, p := range websocket.Subprotocols(r) {
-		if subtle.ConstantTimeCompare([]byte(p), []byte(token)) == 1 {
-			return true
+		if p == "" {
+			continue
+		}
+		if id, valid := h.verify(p); valid {
+			return p, id, true
 		}
 	}
-	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" &&
-		subtle.ConstantTimeCompare([]byte(c.Value), []byte(token)) == 1 {
-		return true
+	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
+		if id, valid := h.verify(c.Value); valid {
+			return c.Value, id, true
+		}
 	}
-	if t := r.URL.Query().Get("token"); t != "" &&
-		subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
-		return true
+	if t := r.URL.Query().Get("token"); t != "" {
+		if id, valid := h.verify(t); valid {
+			return t, id, true
+		}
 	}
-	return false
+	return "", "", false
 }
 
 // register 登记新客户端。写锁与 unregister 互斥保证：广播方（读锁）视角内
 // map 中客户端的 send channel 均未 close。
 func (h *WSHub) register(c *wsClient) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.clients[c] = struct{}{}
+	count := len(h.clients)
+	notify := !h.closing
+	h.mu.Unlock()
+	h.notifyConnectionCount(count, notify)
 }
 
 // unregister 注销客户端并关闭其发送队列。close 仅在此处（写锁下、且仅当
 // 客户端仍在册时）执行一次，杜绝向已 close channel 发送与双重 close。
 func (h *WSHub) unregister(c *wsClient) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if _, ok := h.clients[c]; ok {
 		delete(h.clients, c)
 		close(c.send)
 	}
+	count := len(h.clients)
+	notify := !h.closing
+	h.mu.Unlock()
+	h.notifyConnectionCount(count, notify)
+}
+
+// notifyConnectionCount 广播一条连接数变化事件（多设备语义明示，多端共享同一
+// 后端状态的前端可见性提示，data[0] 为事件后的连接总数）。
+//
+// **锁序红线**：调用方必须在释放 mu 写锁之后调用——Emit 内部按 seqMu → mu.RLock
+// 加锁，若在 mu 写锁临界区内调用会形成同 goroutine 重入 RLock 死锁（RWMutex
+// 写锁持有方再取读锁不被允许）。计数在写锁临界区内快照出局部变量，出锁后发射。
+//
+// 事件经常规 Emit 进环形缓冲占用 seq：resume 补发面包含该事件，计数为幂等
+// 快照（最后到达值即当前态），重放无碍，续传契约不变。并发连接/断开场景下
+// 两条 changed 事件的发送顺序可能与计数变化顺序不一致（各自独立加 seqMu），
+// 事件仅信息提示用途可接受。两个抑制态：count=0（最后一个连接断开）无接收者，
+// 仅徒增环形缓冲噪声，不广播；hub 关停（closing）后不广播——Close 收口期逐
+// 连接 unregister 的递减序列对前端无意义（连接即将随服务停机断开）。
+func (h *WSHub) notifyConnectionCount(count int, notify bool) {
+	if !notify || count == 0 {
+		return
+	}
+	h.Emit(wsConnectionsEvent, count)
 }
 
 // readPump 读泵：在升级请求的 goroutine 内运行，消费协议层 pong 做保活判定，

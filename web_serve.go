@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,12 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"workbench/model"
 	"workbench/server"
 	"workbench/service"
+	"workbench/util"
 )
 
+// webServeDataDir 自签 TLS 证书的落盘目录（data/tls_cert.pem + data/tls_key.pem）。
+// 包级变量供测试重定向到临时目录（对齐 serveTokenFile 先例），生产恒为相对 data/。
+var webServeDataDir = "data"
+
 // webServeManager 浏览器访问通道管理器：桌面模式同开 HTTP 服务与 --serve 无头
-// 模式共用的启动/停机/令牌热轮换入口。
+// 模式共用的启动/停机入口。
 //
 // 生命周期：
 //   - 桌面模式：startup 按设置创建并 Start（默认开启，失败仅告警降级——浏览器
@@ -22,21 +29,40 @@ import (
 //   - --serve 无头模式：runServe 创建并 Start，Wait 按代际阻塞至服务真正退出
 //     （浏览器侧经 SetWebServeConfig 重启/停机不终止进程）。
 //
-// 运行期变更（桌面设置页）：SetWebServeConfig 改地址/开关经 Start/Stop 平滑
-// 重启；RegenerateWebToken 经 RotateToken 热轮换（不断监听、不断在途连接）。
+// 运行期变更（桌面设置页）：SetWebServeConfig 改地址/开关/TLS 配置经 Start/Stop
+// 平滑重启；RegenerateWebToken 在 WebTokenService 层撤旧建新（verify 闭包直读
+// 服务状态，无需任何热轮换通知）。
 type webServeManager struct {
 	app *App
 	mu  sync.Mutex
 	srv *http.Server
-	ln  net.Listener
-	// hub / handler 当前生效的事件广播 hub 与 HTTP handler（RotateToken 目标）
+	// ln 当前生效的原始 TCP listener（TLS 模式下传给 Serve 的是 tls.NewListener
+	// 包装体，其 Addr() 委托内层与 ln 一致；本字段恒存原始 listener，
+	// listenAddr 语义与纯 HTTP 时代完全一致）
+	ln      net.Listener
+	// hub / handler 当前生效的事件广播 hub 与 HTTP handler（Stop 关闭目标）
 	hub     *server.WSHub
 	handler *server.WebHandler
 	listen  string
+	// tls 当前生效的 TLS 配置（幂等键组成部分，与 listen 联合比较；零值 =
+	// 纯 HTTP）
+	tls WebServeTLSConfig
 	// done 每次 Start 重建，承载 Serve goroutine 的退出错误（Wait 按代际消费）
 	done chan error
 	// cond 联动 mu，供 Wait 在 done 为 nil（服务未运行）时阻塞等待下一次 Start
 	cond *sync.Cond
+}
+
+// WebServeTLSConfig 浏览器访问通道 TLS 配置（Start 幂等键组成部分）。
+//
+// Enabled=false（含 nil 入参）为纯 HTTP；Enabled=true 时证书供给双形态：
+// CertPath/KeyPath 双空走自签引导（EnsureSelfSignedCert，首次生成后持久化
+// data/ 复用），双非空加载用户证书（tls.LoadX509KeyPair）。仅填其一为无效
+// 配置（E_TLS_CERT_INVALID）。
+type WebServeTLSConfig struct {
+	Enabled  bool
+	CertPath string
+	KeyPath  string
 }
 
 // newWebServeManager 构造管理器。app 供装配（RPC target 与事件出口切换）使用。
@@ -46,27 +72,84 @@ func newWebServeManager(app *App) *webServeManager {
 	return m
 }
 
-// Start 启动（或按新地址重启）浏览器访问通道 HTTP 服务。
+// Start 启动（或按新地址/新 TLS 配置重启）浏览器访问通道 HTTP 服务。
 //
-// 幂等语义：已在运行且地址未变时为 no-op；地址变化时先停旧实例（立即断开，
-// 见 stopLocked）再以新地址重启（hub/handler 全部重建，令牌重新从 data/web_token
-// 读取——令牌轮换后经重启或 RotateToken 均能取到最新值）。监听失败（端口占用
-// 等）同步返回错误，由调用方决定降级（桌面告警）或上抛（--serve fatal）。
-func (m *webServeManager) Start(listen string) error {
+// 幂等语义：已在运行且「地址 + TLS 配置」均未变化时为 no-op（同地址开/关 TLS
+// 或换证书路径都会触发真实重启——幂等键刻意扩为 listen + TLS 配置联合比较，
+// 否则 TLS 开关在设置页表现为「保存了但不生效」）；任一变化时先停旧实例（立即
+// 断开，见 stopLocked）再重启（hub/handler 全部重建——校验基准经 verify 闭包
+// 直读 WebTokenService，重启前后天然一致）。监听失败（端口占用等）同步返回
+// 错误，由调用方决定降级（桌面告警）或上抛（--serve fatal）。
+//
+// 无半死态保证：TLS 证书加载/生成发生在停旧实例与任何字段赋值之前——证书
+// 配置无效（路径错、文件损坏、过期）时正在运行的旧实例不受影响，Start 同步
+// 返回 E_TLS_CERT_INVALID。这是把证书加载放在 Start（而非 startLocked）的
+// 原因：改地址/配置路径下 stopLocked 先于 startLocked 执行，加载放在
+// startLocked 内已无法满足「失败在停旧之前」。
+//
+// tlsCfg 为 nil 等价于 Enabled=false（纯 HTTP，测试与既有调用方便捷形态）。
+func (m *webServeManager) Start(listen string, tlsCfg *WebServeTLSConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	cfg := WebServeTLSConfig{}
+	if tlsCfg != nil {
+		cfg = *tlsCfg
+	}
 	if m.srv != nil {
-		if m.listen == listen {
+		if m.listen == listen && m.tls == cfg {
 			return nil
 		}
-		// 地址变化：优雅停旧实例后重启（停机错误不阻塞重启，服务即将被替换）
+	}
+	// 证书加载/生成在任何停旧动作之前：失败时旧实例原样存活（无半死态）
+	tlsConf, err := buildWebServeTLSConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if m.srv != nil {
+		// 地址或 TLS 配置变化：优雅停旧实例后重启（停机错误不阻塞重启，服务即将被替换）
 		_ = m.stopLocked()
 	}
-	return m.startLocked(listen)
+	return m.startLocked(listen, tlsConf, cfg)
 }
 
-// startLocked 以指定地址启动服务（调用方须持 mu）。
-func (m *webServeManager) startLocked(listen string) error {
+// buildWebServeTLSConfig 按 TLS 配置构造 *tls.Config；Enabled=false 返回
+// (nil, nil) 表示纯 HTTP。证书加载/生成失败统一包装为 E_TLS_CERT_INVALID
+// AppError（前端经 ErrorFormatter 拿到 {code,message} 分流 error 提示）。
+func buildWebServeTLSConfig(cfg WebServeTLSConfig) (*tls.Config, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	certPath, keyPath := cfg.CertPath, cfg.KeyPath
+	if (certPath == "") != (keyPath == "") {
+		return nil, model.NewAppError(model.ErrCodeTLSCertInvalid,
+			"TLS 证书与私钥路径须同时配置（两者都留空则使用自签证书）")
+	}
+	if certPath == "" {
+		// 双空：自签引导（已有证书对复用，缺失生成并持久化 data/）
+		var err error
+		if certPath, keyPath, err = server.EnsureSelfSignedCert(webServeDataDir); err != nil {
+			return nil, model.WrapAppError(model.ErrCodeTLSCertInvalid, "生成自签 TLS 证书失败", err)
+		}
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, model.WrapAppError(model.ErrCodeTLSCertInvalid,
+			fmt.Sprintf("加载 TLS 证书失败（%s / %s），请检查证书与私钥路径", certPath, keyPath), err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		// 钉死 ALPN 为 http/1.1：gorilla/websocket 仅支持 HTTP/1.1 升级，
+		// ServeTLS 默认协商 h2 会把 WebSocket 引入「浏览器回退行为」分叉面
+		//（Go bundled h2 默认禁 extended CONNECT，但该回退属浏览器实现细节），
+		// 自建 tls.Config + tls.NewListener 路径下 ALPN 完全由本配置决定。
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"http/1.1"},
+	}, nil
+}
+
+// startLocked 以指定地址与 TLS 配置启动服务（调用方须持 mu）。
+// tlsConf 非 nil 时监听走 TLS（tls.NewListener 包装，Serve 收包装体）。
+func (m *webServeManager) startLocked(listen string, tlsConf *tls.Config, cfg WebServeTLSConfig) error {
 	hub, handler, err := assembleWebServe(m.app)
 	if err != nil {
 		return err
@@ -75,14 +158,24 @@ func (m *webServeManager) startLocked(listen string) error {
 	if err != nil {
 		return fmt.Errorf("监听 %s 失败（端口可能被占用）: %w", listen, err)
 	}
+	// m.ln 恒存原始 TCP listener（listenAddr 语义不变）；TLS 模式下传给 Serve
+	// 的是 tls.NewListener 包装体（其 Addr() 委托内层，两者一致）
+	serveLn := net.Listener(ln)
+	if tlsConf != nil {
+		serveLn = tls.NewListener(ln, tlsConf)
+	}
 	// 事件出口切换为复合 sink：Wails 桌面出口（窗口内事件）+ WS hub 广播（浏览器）。
 	// Wails 出口对非 Wails 上下文（--serve 无头）静默跳过，等效仅 hub 广播。
 	m.applySink(hub)
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		// TLS 握手超时：Go 1.26 起 http.Server 无独立 TLSHandshakeTimeout 字段，
+		// 握手期限取 min(ReadHeaderTimeout, ReadTimeout, WriteTimeout)——上方
+		// ReadHeaderTimeout=10s 已同时覆盖握手期慢连接（slowloris）防护，
+		// 无需额外字段（研究清单「显式设 TLSHandshakeTimeout」按新语义已达成）
 	}
-	m.srv, m.ln, m.hub, m.handler, m.listen = srv, ln, hub, handler, listen
+	m.srv, m.ln, m.hub, m.handler, m.listen, m.tls = srv, ln, hub, handler, listen, cfg
 	m.done = make(chan error, 1)
 	// 唤醒 Wait 中因服务未运行（done 为 nil）而阻塞等待的 goroutine（--serve 模式
 	// 浏览器经 SetWebServeConfig 停机后重新开启的路径）
@@ -91,7 +184,7 @@ func (m *webServeManager) startLocked(listen string) error {
 	// 直接读字段构成数据竞态（-race 实测），局部捕获后 goroutine 不再触碰 manager 字段
 	done := m.done
 	go func() {
-		done <- srv.Serve(ln)
+		done <- srv.Serve(serveLn)
 	}()
 	return nil
 }
@@ -128,6 +221,7 @@ func (m *webServeManager) stopLocked() error {
 	// 出口恢复为纯 Wails（hub 随服务停用，避免事件投递到僵尸 hub）
 	m.applySink(nil)
 	m.srv, m.ln, m.hub, m.handler, m.listen, m.done = nil, nil, nil, nil, "", nil
+	m.tls = WebServeTLSConfig{}
 	// 唤醒 Wait：其消费的旧代际 done 即将收到退出错误，须感知代际已更替
 	m.cond.Broadcast()
 	return err
@@ -164,18 +258,9 @@ func (m *webServeManager) Wait() error {
 	}
 }
 
-// RotateToken 令牌热轮换：更新 HTTP 认证与 WS 握手的校验基准，立即生效且不断开
-// 监听。已建立的 WS 连接不在数据面校验令牌，保持有效至断开重连（重连须用新令牌）。
-func (m *webServeManager) RotateToken(token string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.hub != nil {
-		m.hub.SetToken(token)
-	}
-	if m.handler != nil {
-		m.handler.SetToken(token)
-	}
-}
+// RotateToken 令牌热轮换（已随多 token 改造删除）：校验基准经 verify 闭包直读
+// WebTokenService，RegenerateWebToken 的撤旧建新在服务层即时生效，本方法失去
+// 存在意义，不再保留。
 
 // Running 返回 HTTP 服务当前是否运行中。
 func (m *webServeManager) Running() bool {
@@ -253,8 +338,13 @@ func (a *App) startWebServe() {
 		listen = cfg.WebServe.BindAddress
 	}
 	a.webServe = newWebServeManager(a)
-	if err := a.webServe.Start(listen); err != nil {
-		slog.Warn("浏览器访问服务启动失败，桌面功能不受影响（可检查端口是否被占用或修改设置中的绑定地址）", "addr", listen, "err", err)
+	tlsCfg := &WebServeTLSConfig{
+		Enabled:  cfg.WebServe.TLS,
+		CertPath: cfg.WebServe.TLSCertPath,
+		KeyPath:  cfg.WebServe.TLSKeyPath,
+	}
+	if err := a.webServe.Start(listen, tlsCfg); err != nil {
+		slog.Warn("浏览器访问服务启动失败，桌面功能不受影响（可检查端口是否被占用、TLS 证书配置或修改设置中的绑定地址）", "addr", listen, "err", err)
 		return
 	}
 	slog.Info("web serve listening", "addr", listen)
@@ -275,49 +365,24 @@ func isLoopbackBind(addr string) bool {
 }
 
 // webAccessUrls 计算候选访问地址：回环地址 + 本机全部非回环 IPv4（提示同网段
-// 设备可达）。地址解析失败（缺端口）时返回 nil。
-func webAccessUrls(bindAddress string) []string {
+// 设备可达）。tlsEnabled 时 scheme 输出 https://（提示地址与证书 SAN 同源覆盖，
+// 枚举复用 util.LocalIPv4Addresses 单点）。地址解析失败（缺端口）时返回 nil。
+func webAccessUrls(bindAddress string, tlsEnabled bool) []string {
 	_, port, err := net.SplitHostPort(bindAddress)
 	if err != nil || port == "" {
 		return nil
 	}
-	urls := []string{"http://127.0.0.1:" + port}
-	ips, err := localIPv4Addresses()
+	scheme := "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
+	urls := []string{scheme + "://127.0.0.1:" + port}
+	ips, err := util.LocalIPv4Addresses()
 	if err != nil {
 		return urls
 	}
 	for _, ip := range ips {
-		urls = append(urls, "http://"+ip+":"+port)
+		urls = append(urls, scheme+"://"+ip+":"+port)
 	}
 	return urls
-}
-
-// localIPv4Addresses 枚举本机全部启用的非回环接口的 IPv4 地址。
-// 枚举失败返回错误（调用方降级为仅回环地址）；无可用地址返回空切片。
-func localIPv4Addresses() ([]string, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	var ips []string
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipNet.IP.To4()
-			if ip != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
-				ips = append(ips, ip.String())
-			}
-		}
-	}
-	return ips, nil
 }

@@ -56,6 +56,19 @@ func readFrame(t *testing.T, conn *websocket.Conn) wsFrame {
 	return frame
 }
 
+// readBusinessFrame 读下一帧业务事件帧（自动跳过连接数事件帧）：连接/断开
+// 产生的 ws-connections:changed 计数快照对业务断言无意义；每次连接/断开至多
+// 各产生一条，帧数有界不会死循环。
+func readBusinessFrame(t *testing.T, conn *websocket.Conn) wsFrame {
+	t.Helper()
+	for {
+		frame := readFrame(t, conn)
+		if frame.Event != wsConnectionsEvent {
+			return frame
+		}
+	}
+}
+
 // waitClientCount 轮询等待客户端数达到期望值（连接注册与断连注销均为异步）。
 func waitClientCount(t *testing.T, h *WSHub, want int) {
 	t.Helper()
@@ -74,7 +87,7 @@ func waitClientCount(t *testing.T, h *WSHub, want int) {
 // 调用方以 defer 顺序保证：先 defer srv.Close()，连接关闭交由 Cleanup。
 func newTestWSHub(t *testing.T, token string) (*WSHub, *httptest.Server) {
 	t.Helper()
-	hub := NewWSHub(token)
+	hub := NewWSHub(StaticVerifier(token), nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 	return hub, srv
@@ -135,7 +148,7 @@ func TestWSHub_AuthorizedQueryToken(t *testing.T) {
 	waitClientCount(t, hub, 1)
 
 	hub.Emit("hello", "payload-1", 2)
-	frame := readFrame(t, conn)
+	frame := readBusinessFrame(t, conn)
 	if frame.Event != "hello" {
 		t.Errorf("事件名不符: got %q", frame.Event)
 	}
@@ -160,7 +173,7 @@ func TestWSHub_AuthorizedSubprotocol(t *testing.T) {
 	waitClientCount(t, hub, 1)
 
 	hub.Emit("push", true)
-	frame := readFrame(t, conn)
+	frame := readBusinessFrame(t, conn)
 	if frame.Event != "push" || frame.Data[0] != true {
 		t.Errorf("事件帧不符: got %#v", frame)
 	}
@@ -184,7 +197,7 @@ func TestWSHub_CookieAuthChannel(t *testing.T) {
 	waitClientCount(t, hub, 1)
 
 	hub.Emit("push", "via-cookie")
-	frame := readFrame(t, conn)
+	frame := readBusinessFrame(t, conn)
 	if frame.Event != "push" || frame.Data[0] != "via-cookie" {
 		t.Errorf("事件帧不符: got %#v", frame)
 	}
@@ -213,14 +226,14 @@ func TestWSHub_FrameFormat(t *testing.T) {
 	waitClientCount(t, hub, 1)
 
 	hub.Emit("terminal-output", "term-1", "out")
-	frame := readFrame(t, conn)
+	frame := readBusinessFrame(t, conn)
 	if frame.Event != "terminal-output" || frame.Data[0] != "term-1" || frame.Data[1] != "out" {
 		t.Errorf("帧字段不符: got %#v", frame)
 	}
 
 	// 零载荷事件 data 序列化为空数组（非 null），shim 展开为空变参
 	hub.Emit("no-payload")
-	frame = readFrame(t, conn)
+	frame = readBusinessFrame(t, conn)
 	raw, _ := json.Marshal(frame)
 	if !strings.Contains(string(raw), `"data":[]`) {
 		t.Errorf("零载荷 data 应为空数组: %s", raw)
@@ -238,7 +251,7 @@ func TestWSHub_BroadcastToAllClients(t *testing.T) {
 
 	hub.Emit("event-1", "payload-1", 2)
 	for i, conn := range conns {
-		frame := readFrame(t, conn)
+		frame := readBusinessFrame(t, conn)
 		if frame.Event != "event-1" || frame.Data[0] != "payload-1" {
 			t.Errorf("客户端 %d 收到的帧不符: %#v", i, frame)
 		}
@@ -304,17 +317,23 @@ func TestWSHub_ConcurrentEmitAndDisconnectRace(t *testing.T) {
 	waitClientCount(t, hub, 0)
 }
 
-// TestWSHub_SetTokenRotation 令牌热轮换：轮换后旧令牌两通道均 401、新令牌均
-// 升级成功；轮换前建立的在途连接不在数据面校验令牌，保持有效并继续收到广播
-// （RegenerateWebToken 的热生效语义：不断监听、不断在途连接）。
-func TestWSHub_SetTokenRotation(t *testing.T) {
-	hub, srv := newTestWSHub(t, "old-token")
+// TestWSHub_VerifierSwapRotation 校验基准热更替：替换 verify（对应多 token
+// 语义下 RegenerateWebToken 撤旧建新，服务层状态经 verify 闭包即时生效）后，
+// 旧令牌两通道均 401、新令牌均升级成功且子协议正确回显（多 token 下回显命中
+// 的候选值）；更替前建立的在途连接不在数据面校验令牌，保持有效并继续收到广播
+// （热生效语义：不断监听、不断在途连接）。
+func TestWSHub_VerifierSwapRotation(t *testing.T) {
+	sv := &swapVerifier{}
+	sv.set(StaticVerifier("old-token"))
+	hub := NewWSHub(sv.verify, nil)
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
 
-	// 轮换前建立在途连接（旧令牌时期）
+	// 更替前建立在途连接（旧令牌时期）
 	existing := mustDialWS(t, srv, "?token=old-token")
 	waitClientCount(t, hub, 1)
 
-	hub.SetToken("new-token")
+	sv.set(StaticVerifier("new-token"))
 
 	// 旧令牌两通道均拒绝
 	if conn, resp := dialWS(t, srv, "?token=old-token", nil); conn != nil {
@@ -340,9 +359,49 @@ func TestWSHub_SetTokenRotation(t *testing.T) {
 
 	// 在途连接（旧令牌时期建立）保持有效并收到广播
 	hub.Emit("after-rotate", "x")
-	frame := readFrame(t, existing)
+	frame := readBusinessFrame(t, existing)
 	if frame.Event != "after-rotate" {
 		t.Errorf("在途连接应继续收到广播, got %q", frame.Event)
+	}
+}
+
+// TestWSHub_OnAuthEvents 握手认证事件回调：成功/失败各触发一次，事件字段完整
+// （Event/TokenID/RemoteAddr/UserAgent/At）；OnAuth 未注入（nil）时认证链路
+// 正常不 panic。
+func TestWSHub_OnAuthEvents(t *testing.T) {
+	var mu sync.Mutex
+	var events []AuthEvent
+	hub := NewWSHub(StaticVerifier("right-token"), func(ev AuthEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, ev)
+	})
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+
+	mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	if conn, resp := dialWS(t, srv, "?token=wrong-token", nil); conn != nil {
+		t.Fatal("错令牌升级应失败")
+	} else if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("错令牌应 401, got %v", resp)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 {
+		t.Fatalf("应触发恰好两次认证事件, got %d", len(events))
+	}
+	if events[0].Event != AuthEventSuccess || events[0].TokenID != "static" {
+		t.Errorf("成功事件不符: %+v", events[0])
+	}
+	if events[1].Event != AuthEventFailure || events[1].TokenID != "" {
+		t.Errorf("失败事件不符: %+v", events[1])
+	}
+	for _, ev := range events {
+		if ev.RemoteAddr == "" || ev.At.IsZero() {
+			t.Errorf("事件字段不完整: %+v", ev)
+		}
 	}
 }
 
@@ -360,11 +419,14 @@ func TestWSHub_CloseDisconnectsAllClients(t *testing.T) {
 
 	hub.Close()
 
-	// 各客户端读侧感知服务端关闭（连接被断，读到错误而非事件帧）
-	for i, conn := range conns {
+	// 各客户端读侧感知服务端关闭：先排空 Close 前已入队的帧（连接建立期的
+	// 计数事件），随后必读到错误（send 队列 close → Close 帧/连接断开）
+	for _, conn := range conns {
 		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		if _, _, err := conn.ReadMessage(); err == nil {
-			t.Errorf("客户端 %d 在 hub Close 后应读到连接关闭错误", i)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				break
+			}
 		}
 	}
 	// readPump 感知断连后 unregister，clients 清空（goroutine 收尾完成）
@@ -381,7 +443,7 @@ func TestWSHub_CloseDisconnectsAllClients(t *testing.T) {
 // 与 TCP 缓冲塞满后写超时触发断连，慢消费者被踢出（不拖垮广播方与其余客户端）。
 func TestWSHub_SlowConsumerDropped(t *testing.T) {
 	// 收紧写超时加速断连判定（hub 实例字段，构造后只读，无跨 goroutine 竞态）
-	hub := newWSHubTuned("right-token", 200*time.Millisecond, defaultPongWait, wsResumeBuffer)
+	hub := newWSHubTuned(StaticVerifier("right-token"), nil, 200*time.Millisecond, defaultPongWait, wsResumeBuffer)
 	srv := httptest.NewServer(hub)
 	defer srv.Close()
 
@@ -434,12 +496,17 @@ func TestWSHub_EmitSeqMonotonicShared(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		hub.Emit("e", i)
 	}
-	want := []uint64{1, 2, 3}
+	// 基线 = 首条业务帧序号（各连接的 register 计数帧已先占号，业务帧自基线
+	// 起连续推进；两客户端共享同一序列化帧，序号应一致）
+	base := uint64(0)
 	for i, conn := range conns {
 		for j := 0; j < 3; j++ {
-			frame := readFrame(t, conn)
-			if frame.Event != "e" || frame.Seq != want[j] {
-				t.Errorf("客户端 %d 第 %d 帧不符: event=%q seq=%d, want seq=%d", i, j, frame.Event, frame.Seq, want[j])
+			frame := readBusinessFrame(t, conn)
+			if base == 0 {
+				base = frame.Seq
+			}
+			if frame.Event != "e" || frame.Seq != base+uint64(j) {
+				t.Errorf("客户端 %d 第 %d 帧不符: event=%q seq=%d, want seq=%d", i, j, frame.Event, frame.Seq, base+uint64(j))
 			}
 		}
 	}
@@ -451,43 +518,50 @@ func TestWSHub_ResumeFillExact(t *testing.T) {
 	hub, srv := newTestWSHub(t, "right-token")
 
 	// 第一段连接收 seq1..3 后断线
+	// 第一段连接收 3 条业务帧后断线（各连接的 register 计数帧先占号，
+	// 业务帧序号自基线 base 起连续推进，下同）
 	conn1 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
+	base := uint64(0)
 	for i := 1; i <= 3; i++ {
 		hub.Emit("e", i)
-		frame := readFrame(t, conn1)
-		if frame.Seq != uint64(i) {
-			t.Fatalf("第 %d 帧序号不符: %d", i, frame.Seq)
+		frame := readBusinessFrame(t, conn1)
+		if base == 0 {
+			base = frame.Seq - 1
+		}
+		if frame.Seq != base+uint64(i) {
+			t.Fatalf("第 %d 帧序号不符: %d (base=%d)", i, frame.Seq, base)
 		}
 	}
 	_ = conn1.Close()
 	waitClientCount(t, hub, 0)
 
-	// 断线期间产生 seq4..5 缺口
+	// 断线期间产生 2 帧缺口
 	hub.Emit("e", 4)
 	hub.Emit("e", 5)
 
-	// 重连握手 resume=3：补发 seq4..5 + ws-synced 标记
+	// 重连握手 resume=base+3：补发 2 帧缺口 + ws-synced 标记
 	conn2 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
-	sendResume(t, conn2, 3)
+	sendResume(t, conn2, base+3)
 	for i := 4; i <= 5; i++ {
-		frame := readFrame(t, conn2)
-		if frame.Event != "e" || frame.Seq != uint64(i) {
-			t.Errorf("补发帧应为 e/seq%d, got event=%q seq=%d", i, frame.Event, frame.Seq)
+		frame := readBusinessFrame(t, conn2)
+		if frame.Event != "e" || frame.Seq != base+uint64(i) {
+			t.Errorf("补发帧应为 e/seq%d, got event=%q seq=%d", base+uint64(i), frame.Event, frame.Seq)
 		}
 	}
-	synced := readFrame(t, conn2)
+	synced := readBusinessFrame(t, conn2)
 	if synced.Event != wsSyncedEvent {
 		t.Fatalf("补发后应收到同步完成标记, got %q", synced.Event)
 	}
-	if len(synced.Data) != 1 || synced.Data[0] != float64(5) {
-		t.Errorf("ws-synced data[0] 应为服务端当前序号 5, got %#v", synced.Data)
+	if len(synced.Data) != 1 || synced.Data[0] != float64(base+6) {
+		// 当前序号含 conn2 register 计数帧（在补发计算前占号）
+		t.Errorf("ws-synced data[0] 应为服务端当前序号 %d, got %#v", base+6, synced.Data)
 	}
-	// 补发不影响后续实时广播
+	// 补发不影响后续实时广播（conn2 的 register 计数帧占 synced 与实时帧间的序号）
 	hub.Emit("e", 6)
-	if frame := readFrame(t, conn2); frame.Seq != 6 {
-		t.Errorf("补发后实时帧 seq 应为 6, got %d", frame.Seq)
+	if frame := readBusinessFrame(t, conn2); frame.Event != "e" || frame.Seq != base+7 {
+		t.Errorf("补发后实时帧 seq 应为 %d, got event=%q seq=%d", base+7, frame.Event, frame.Seq)
 	}
 }
 
@@ -499,12 +573,12 @@ func TestWSHub_ResumeCaughtUp(t *testing.T) {
 	waitClientCount(t, hub, 1)
 
 	hub.Emit("e", 1)
-	readFrame(t, conn)
-	sendResume(t, conn, 1)
+	lastSeq := readBusinessFrame(t, conn).Seq
+	sendResume(t, conn, lastSeq)
 
-	synced := readFrame(t, conn)
-	if synced.Event != wsSyncedEvent || len(synced.Data) != 1 || synced.Data[0] != float64(1) {
-		t.Fatalf("追平形态应仅收到 ws-synced[1], got %#v", synced)
+	synced := readBusinessFrame(t, conn)
+	if synced.Event != wsSyncedEvent || len(synced.Data) != 1 || synced.Data[0] != float64(lastSeq) {
+		t.Fatalf("追平形态应仅收到 ws-synced[%d], got %#v", lastSeq, synced)
 	}
 }
 
@@ -518,46 +592,48 @@ func TestWSHub_FreshConnectionNoReplay(t *testing.T) {
 	conn := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
 	hub.Emit("live", 3)
-	frame := readFrame(t, conn)
-	if frame.Event != "live" || frame.Seq != 3 {
-		t.Errorf("新连接首帧应为 live/seq3, got event=%q seq=%d", frame.Event, frame.Seq)
+	frame := readBusinessFrame(t, conn)
+	// 序号 4：连接前两条历史帧占 seq1..2，本连接 register 计数帧占 seq3
+	if frame.Event != "live" || frame.Seq != 4 {
+		t.Errorf("新连接首帧应为 live/seq4（不重放历史）, got event=%q seq=%d", frame.Event, frame.Seq)
 	}
 }
 
 // TestWSHub_ResumeGapOnOverflow 缓冲溢出断层：续传缓冲容量收紧为 4，客户端
 // 断线期间产生超量事件致缺口帧被覆写，重连握手返回 ws-gap 断层标记帧
-//（data[0] 为服务端当前序号），此后广播从当前序号正常继续。
+// （data[0] 为服务端当前序号），此后广播从当前序号正常继续。
 func TestWSHub_ResumeGapOnOverflow(t *testing.T) {
-	hub := newWSHubTuned("right-token", defaultWriteWait, defaultPongWait, 4)
+	hub := newWSHubTuned(StaticVerifier("right-token"), nil, defaultWriteWait, defaultPongWait, 4)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
 	conn1 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
 	hub.Emit("e", 1)
-	readFrame(t, conn1)
+	base := readBusinessFrame(t, conn1).Seq - 1 // 基线：register 计数帧占 seq base+1
 	_ = conn1.Close()
 	waitClientCount(t, hub, 0)
 
-	// 断线期间 10 条事件（seq2..11），容量 4 的环形缓冲仅保留 seq8..11
+	// 断线期间 10 条事件（seq base+2..base+11），容量 4 的环形缓冲仅保留末 4 帧
 	for i := 2; i <= 11; i++ {
 		hub.Emit("e", i)
 	}
 
 	conn2 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
-	sendResume(t, conn2, 1)
-	gap := readFrame(t, conn2)
+	sendResume(t, conn2, base+1)
+	gap := readBusinessFrame(t, conn2)
 	if gap.Event != wsGapEvent {
 		t.Fatalf("溢出应返回断层标记帧, got %q", gap.Event)
 	}
-	if len(gap.Data) != 1 || gap.Data[0] != float64(11) {
-		t.Errorf("ws-gap data[0] 应为服务端当前序号 11, got %#v", gap.Data)
+	if len(gap.Data) != 1 || gap.Data[0] != float64(base+12) {
+		// 当前序号含 conn2 register 计数帧（在补发计算前占号）
+		t.Errorf("ws-gap data[0] 应为服务端当前序号 %d, got %#v", base+12, gap.Data)
 	}
-	// 断层后广播从当前序号正常继续
+	// 断层后广播从当前序号正常继续（conn2 的 register 计数帧占 gap 后首个序号）
 	hub.Emit("e", 12)
-	if frame := readFrame(t, conn2); frame.Event != "e" || frame.Seq != 12 {
-		t.Errorf("断层后实时帧应为 e/seq12, got event=%q seq=%d", frame.Event, frame.Seq)
+	if frame := readBusinessFrame(t, conn2); frame.Event != "e" || frame.Seq != base+13 {
+		t.Errorf("断层后实时帧应为 e/seq%d, got event=%q seq=%d", base+13, frame.Event, frame.Seq)
 	}
 }
 
@@ -570,7 +646,7 @@ func TestWSHub_ResumeGapOnHubRestart(t *testing.T) {
 	waitClientCount(t, hub1, 1)
 	for i := 1; i <= 3; i++ {
 		hub1.Emit("e", i)
-		readFrame(t, conn1)
+		readBusinessFrame(t, conn1)
 	}
 	_ = conn1.Close()
 	waitClientCount(t, hub1, 0)
@@ -584,16 +660,18 @@ func TestWSHub_ResumeGapOnHubRestart(t *testing.T) {
 	conn2 := mustDialWS(t, srv2, "?token=right-token")
 	waitClientCount(t, hub2, 1)
 	sendResume(t, conn2, 3)
-	gap := readFrame(t, conn2)
+	gap := readBusinessFrame(t, conn2)
 	if gap.Event != wsGapEvent {
 		t.Fatalf("跨代际重连应返回断层标记帧, got %q", gap.Event)
 	}
-	if len(gap.Data) != 1 || gap.Data[0] != float64(1) {
-		t.Errorf("ws-gap data[0] 应为新 hub 当前序号 1, got %#v", gap.Data)
+	if len(gap.Data) != 1 || gap.Data[0] != float64(2) {
+		// 当前序号含 conn2 register 计数帧（hub2 首条事件占 seq1，计数帧占 seq2）
+		t.Errorf("ws-gap data[0] 应为新 hub 当前序号 2, got %#v", gap.Data)
 	}
 	hub2.Emit("e", "after-gap")
-	if frame := readFrame(t, conn2); frame.Event != "e" || frame.Seq != 2 {
-		t.Errorf("断层后实时帧应为 e/seq2, got event=%q seq=%d", frame.Event, frame.Seq)
+	// 断层标记后：gap data[0]=1，conn2 的 register 计数帧占 seq2，实时帧 seq3
+	if frame := readBusinessFrame(t, conn2); frame.Event != "e" || frame.Seq != 3 {
+		t.Errorf("断层后实时帧应为 e/seq3, got event=%q seq=%d", frame.Event, frame.Seq)
 	}
 }
 
@@ -611,7 +689,7 @@ func TestWSHub_ClientFrameGarbageIgnored(t *testing.T) {
 		}
 	}
 	hub.Emit("still-alive", "x")
-	if frame := readFrame(t, conn); frame.Event != "still-alive" {
+	if frame := readBusinessFrame(t, conn); frame.Event != "still-alive" {
 		t.Errorf("异常上行帧后连接应存活且广播可达, got %q", frame.Event)
 	}
 }
@@ -668,4 +746,83 @@ func TestWSHub_ResumeConcurrentWithEmitRace(t *testing.T) {
 	}
 	close(stop)
 	emitWG.Wait()
+}
+
+// frameDataCount 提取连接数事件 data[0] 的计数值（JSON 反序列化后为 float64，
+// 转回 int 比较；非数值形态返回 ok=false）。
+func frameDataCount(frame wsFrame) (int, bool) {
+	if len(frame.Data) != 1 {
+		return 0, false
+	}
+	n, ok := frame.Data[0].(float64)
+	return int(n), ok
+}
+
+// TestWSHub_ConnectionCountEvents 连接数变化事件（多设备语义明示）：每次
+// register/unregister 成功路径向全部客户端广播 ws-connections:changed，
+// data[0] 为事件后的连接总数；事件经常规 Emit 进环形缓冲占用 seq（续传
+// 契约不变）。
+func TestWSHub_ConnectionCountEvents(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	// 首个连接：自身收到 count=1
+	connA := mustDialWS(t, srv, "?token=right-token")
+	frame := readFrame(t, connA)
+	if frame.Event != wsConnectionsEvent {
+		t.Fatalf("首个连接应广播连接数事件, got %q", frame.Event)
+	}
+	if n, ok := frameDataCount(frame); !ok || n != 1 {
+		t.Fatalf("data[0] 应为事件后连接总数 1, got %v", frame.Data)
+	}
+	if frame.Seq == 0 {
+		t.Fatal("连接数事件应占用序号（进环形缓冲，resume 补发面包含该事件）")
+	}
+
+	// 第二个连接：两个客户端均收到 count=2
+	connB := mustDialWS(t, srv, "?token=right-token")
+	for label, conn := range map[string]*websocket.Conn{"A": connA, "B": connB} {
+		frame := readFrame(t, conn)
+		if n, ok := frameDataCount(frame); !ok || frame.Event != wsConnectionsEvent || n != 2 {
+			t.Fatalf("客户端 %s 应收到 count=2 事件, got event=%q data=%v", label, frame.Event, frame.Data)
+		}
+	}
+
+	// A 断开：B 收到 count=1（异步注销，先等计数再读帧）
+	_ = connA.Close()
+	waitClientCount(t, hub, 1)
+	frame = readFrame(t, connB)
+	if n, ok := frameDataCount(frame); !ok || frame.Event != wsConnectionsEvent || n != 1 {
+		t.Fatalf("断开后应广播 count=1 事件, got event=%q data=%v", frame.Event, frame.Data)
+	}
+}
+
+// TestWSHub_CloseSuppressesConnectionEvents hub.Close 收口期不再广播连接数
+// 事件：逐连接 unregister 的递减序列对前端无意义（连接即将随服务停机断开）。
+func TestWSHub_CloseSuppressesConnectionEvents(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+
+	conn := mustDialWS(t, srv, "?token=right-token")
+	frame := readFrame(t, conn)
+	if n, ok := frameDataCount(frame); !ok || frame.Event != wsConnectionsEvent || n != 1 {
+		t.Fatalf("前置：应先收到 count=1 事件, got event=%q data=%v", frame.Event, frame.Data)
+	}
+
+	hub.Close()
+	// 收口期连接被关闭：读循环读到错误（或 Close 帧）为止，期间不得再出现
+	// 任何连接数事件帧
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		var f wsFrame
+		if json.Unmarshal(payload, &f) != nil {
+			continue
+		}
+		if f.Event == wsConnectionsEvent {
+			t.Fatalf("Close 收口期不应广播连接数事件, got data=%v", f.Data)
+		}
+	}
+	waitClientCount(t, hub, 0)
 }

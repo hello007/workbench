@@ -124,20 +124,31 @@ func runServe(listenOverride string) error {
 	app.ctx = context.Background()
 	app.AppServices = NewAppServices(context.Background(), "data", version == "dev")
 
+	// 设置读取不再仅在 listen 未指定时执行：TLS 配置（开关 + 证书路径）恒取自
+	// settings.json webServe 段（无命令行覆盖面，单一来源），须无条件读出
+	settings, _ := app.settingsSvc.Load()
 	listen := listenOverride
 	if listen == "" {
 		// Load 已补 webServe 段默认值（回环 127.0.0.1:36115，与历史 --serve
 		// 无参默认行为一致）
-		settings, _ := app.settingsSvc.Load()
 		listen = settings.WebServe.BindAddress
 	}
 
 	app.webServe = newWebServeManager(app)
-	if err := app.webServe.Start(listen); err != nil {
+	tlsCfg := &WebServeTLSConfig{
+		Enabled:  settings.WebServe.TLS,
+		CertPath: settings.WebServe.TLSCertPath,
+		KeyPath:  settings.WebServe.TLSKeyPath,
+	}
+	if err := app.webServe.Start(listen, tlsCfg); err != nil {
 		return err
 	}
 
-	consolePrint(fmt.Sprintf("WorkBench serve 模式运行中: http://%s （访问令牌见 %s）\n", listen, serveTokenFile))
+	scheme := "http"
+	if settings.WebServe.TLS {
+		scheme = "https"
+	}
+	consolePrint(fmt.Sprintf("WorkBench serve 模式运行中: %s://%s （访问令牌见 %s）\n", scheme, listen, serveTokenFile))
 	slog.Info("serve mode listening", "addr", listen)
 
 	// 按代际阻塞至服务真正退出：浏览器经 SetWebServeConfig 触发的重启/停机由
@@ -150,10 +161,15 @@ func runServe(listenOverride string) error {
 	return nil
 }
 
-// assembleWebServe 装配浏览器访问通道全套组件（静态资产源 / 访问令牌 / WS hub /
+// assembleWebServe 装配浏览器访问通道全套组件（静态资产源 / 令牌校验 / WS hub /
 // WebHandler），桌面同开与 --serve 无头共用，避免两份装配漂移。
 //
-// 首次调用生成随机访问令牌并持久化到 data/web_token（权限 0600），后续启动读取。
+// 令牌校验经 verify 闭包直读 WebTokenService（无状态快照）：新建/撤销/过期在
+// 服务层即时生效，HTTP 与 WS 握手校验无需任何热轮换通知（多 token 语义下单
+// token 时代 RotateToken 的「更新校验基准」职责由此消解）。存量迁移与初始
+// 引导已在 NewAppServices 的 EnsureLoaded 完成启动期就绪。服务未装配（测试
+// 零值构造等）时 verify 恒拒绝（fail closed）。认证事件经 OnAuth 回调落审计
+// 日志（webAuditSvc 未装配时静默跳过）。
 // 事件出口切换策略由调用方决定（webServeManager.applySink 统一为复合 sink：
 // Wails 出口 + WS hub 广播）。
 func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
@@ -161,14 +177,22 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("定位前端静态资产失败: %w", err)
 	}
-	token, err := server.LoadOrCreateToken(serveTokenFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("准备访问令牌失败: %w", err)
+	verify := func(candidate string) (string, bool) {
+		if app.webTokenSvc == nil {
+			return "", false
+		}
+		return app.webTokenSvc.Verify(candidate)
 	}
-	hub := server.NewWSHub(token)
+	onAuth := func(ev server.AuthEvent) {
+		if app.webAuditSvc != nil {
+			app.webAuditSvc.Log(ev.Event, ev.TokenID, "", ev.RemoteAddr, ev.UserAgent)
+		}
+	}
+	hub := server.NewWSHub(verify, onAuth)
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets:    distFS,
-		Token:     token,
+		Verify:    verify,
+		OnAuth:    onAuth,
 		RPCTarget: app,
 		WSHub:     hub,
 	})

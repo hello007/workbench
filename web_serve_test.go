@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,26 +22,23 @@ import (
 	"workbench/service"
 )
 
-// withTempTokenFile 将访问令牌文件重指向临时目录（隔离 data/web_token 工作区
-// 真实文件），测试结束恢复。
-func withTempTokenFile(t *testing.T) {
-	t.Helper()
-	old := serveTokenFile
-	serveTokenFile = filepath.Join(t.TempDir(), "web_token")
-	t.Cleanup(func() { serveTokenFile = old })
-}
-
 // newWebServeTestApp 构造浏览器访问域测试用 App：完整 AppServices 装配（applySink
 // 需 terminal/update/aiFunc/git/chat/pptxSplit 六服务非 nil）+ 令牌文件隔离 + 管理器就绪。
 // 不用 t.TempDir：NewAppServices 内 util.InitLogger 的 lumberjack 句柄持有
 // app.log，Windows 上 RemoveAll 清理失败（对齐 serve_rpc_smoke_test.go）。
+//
+// serveTokenFile 重指向 dataDir 内（先于 NewAppServices）：多 token 服务的
+// legacyPath（存量迁移源 + 明文兼容文件）以 dataDir/web_token 构造，令牌文件
+// 必须与其一致，否则引导产物与「查看令牌」读取路径脱节。
 func newWebServeTestApp(t *testing.T) *App {
 	t.Helper()
-	withTempTokenFile(t)
 	dataDir, err := os.MkdirTemp("", "workbench-websrv")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)
 	}
+	old := serveTokenFile
+	serveTokenFile = filepath.Join(dataDir, "web_token")
+	t.Cleanup(func() { serveTokenFile = old })
 	app := NewApp()
 	app.ctx = context.Background()
 	app.AppServices = NewAppServices(context.Background(), dataDir, false)
@@ -95,7 +94,7 @@ func TestWebServeManager_StartServeAndStop(t *testing.T) {
 	if m.Running() {
 		t.Fatal("初始状态不应为运行中")
 	}
-	if err := m.Start("127.0.0.1:0"); err != nil {
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if !m.Running() {
@@ -132,11 +131,11 @@ func TestWebServeManager_StartSameAddressIdempotent(t *testing.T) {
 
 	// 幂等判断走配置地址字符串比较，:0 同串即可覆盖「同地址不重启」语义，
 	// 且内核分配端口无探测 TOCTOU 窗口
-	if err := m.Start("127.0.0.1:0"); err != nil {
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("首次 Start: %v", err)
 	}
 	firstAddr := m.listenAddr()
-	if err := m.Start("127.0.0.1:0"); err != nil {
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("同地址二次 Start: %v", err)
 	}
 	if got := m.listenAddr(); got != firstAddr {
@@ -157,7 +156,7 @@ func TestWebServeManager_PortConflict(t *testing.T) {
 	defer blocker.Close()
 	port := blocker.Addr().(*net.TCPAddr).Port
 
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", port), nil); err == nil {
 		t.Fatal("端口被占用时 Start 应返回错误")
 	}
 	if m.Running() {
@@ -172,12 +171,12 @@ func TestWebServeManager_AddressSwitch(t *testing.T) {
 	m := app.webServe
 
 	portA, portB := freePort(t), freePort(t)
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", portA)); err != nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", portA), nil); err != nil {
 		t.Fatalf("Start A: %v", err)
 	}
 	urlA := "http://" + m.listenAddr() + "/healthz"
 
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", portB)); err != nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", portB), nil); err != nil {
 		t.Fatalf("Start B: %v", err)
 	}
 	urlB := "http://" + m.listenAddr() + "/healthz"
@@ -265,7 +264,7 @@ func TestApp_SetWebServeConfig_NoManager(t *testing.T) {
 // 新令牌 200，新令牌持久化落盘（真实 HTTP 链路验证 RotateToken → hub/handler）。
 func TestApp_RegenerateWebToken_HotRotate(t *testing.T) {
 	app := newWebServeTestApp(t)
-	if err := app.webServe.Start("127.0.0.1:0"); err != nil {
+	if err := app.webServe.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -340,7 +339,7 @@ func TestApp_GetWebServeConfig(t *testing.T) {
 	}
 
 	// 启动后 Running=true
-	if err := app.webServe.Start("127.0.0.1:0"); err != nil {
+	if err := app.webServe.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if cfg := app.GetWebServeConfig(); !cfg.Running {
@@ -372,7 +371,7 @@ func TestApp_GetWebServeToken_CreatesOnDemand(t *testing.T) {
 // TestWebAccessUrls 候选访问地址生成：回环恒在首位、端口取自绑定地址、
 // 非法地址返回 nil。
 func TestWebAccessUrls(t *testing.T) {
-	urls := webAccessUrls("127.0.0.1:36115")
+	urls := webAccessUrls("127.0.0.1:36115", false)
 	if len(urls) < 1 || urls[0] != "http://127.0.0.1:36115" {
 		t.Fatalf("回环 URL 应在首位: %v", urls)
 	}
@@ -385,7 +384,7 @@ func TestWebAccessUrls(t *testing.T) {
 		}
 	}
 
-	if got := webAccessUrls("no-port"); got != nil {
+	if got := webAccessUrls("no-port", false); got != nil {
 		t.Errorf("非法绑定地址应返回 nil, got %v", got)
 	}
 }
@@ -520,7 +519,7 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 
 	// 用具体端口构造地址变化：127.0.0.1:0 字符串相同会命中 Start 幂等 no-op，
 	// 触发不了真实重启路径
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t)), nil); err != nil {
 		t.Fatalf("Start A: %v", err)
 	}
 	errCh := make(chan error, 1)
@@ -528,7 +527,7 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 	assertWaitBlocked(t, errCh, 200*time.Millisecond)
 
 	// 改绑定地址重启：旧代际 Serve 退出被代际核对消化，Wait 继续等新代际
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t)), nil); err != nil {
 		t.Fatalf("Start B（重启）: %v", err)
 	}
 	assertWaitBlocked(t, errCh, 200*time.Millisecond)
@@ -540,7 +539,7 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 	assertWaitBlocked(t, errCh, 200*time.Millisecond)
 
 	// 重新开启：Wait 被唤醒继续监视新代际
-	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t))); err != nil {
+	if err := m.Start(fmt.Sprintf("127.0.0.1:%d", freePort(t)), nil); err != nil {
 		t.Fatalf("Start C（重新开启）: %v", err)
 	}
 	assertWaitBlocked(t, errCh, 200*time.Millisecond)
@@ -571,7 +570,7 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 func TestWebServeManager_StopClosesWSClients(t *testing.T) {
 	app := newWebServeTestApp(t)
 	m := app.webServe
-	if err := m.Start("127.0.0.1:0"); err != nil {
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -649,7 +648,7 @@ func TestApp_SetWebServeConfig_ServeWaitSurvives(t *testing.T) {
 // 协议升级成功，其余并发产生的令牌对 RPC 一律 401。
 func TestApp_RegenerateWebToken_ConcurrentConsistency(t *testing.T) {
 	app := newWebServeTestApp(t)
-	if err := app.webServe.Start("127.0.0.1:0"); err != nil {
+	if err := app.webServe.Start("127.0.0.1:0", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -733,4 +732,256 @@ func TestApp_RegenerateWebToken_ConcurrentConsistency(t *testing.T) {
 		t.Fatalf("磁盘令牌应通过 WS 子协议升级, err=%v status=%v", err, wsResp)
 	}
 	_ = wsConn.Close()
+}
+
+// ===== TLS（浏览器通道内置 TLS，三期 PR2）=====
+
+// redirectTLSDataDir 将自签证书落盘目录重定向到临时目录（对齐 serveTokenFile
+// 先例的包级变量重定向），返回目录路径。
+func redirectTLSDataDir(t *testing.T) string {
+	t.Helper()
+	old := webServeDataDir
+	webServeDataDir = t.TempDir()
+	t.Cleanup(func() { webServeDataDir = old })
+	return webServeDataDir
+}
+
+// tlsHTTPClient 构造信任自签证书的 HTTP 客户端（仅测试内使用；
+// InsecureSkipVerify 不下放生产配置）。
+func tlsHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // 自签证书测试信任，仅测试内
+		},
+	}
+}
+
+// httpGetStatus 向 url 发 GET 返回状态码；传输层错误返回 -1。
+func httpGetStatus(t *testing.T, client *http.Client, url string) int {
+	t.Helper()
+	resp, err := client.Get(url)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode
+}
+
+// TestWebServeManager_TLSHttpsServe TLS 启用后 https 可达、明文 HTTP 请求不再
+// 得到正常 200（健康检查在 TLS 链路上同语义）。
+func TestWebServeManager_TLSHttpsServe(t *testing.T) {
+	app := newWebServeTestApp(t)
+	tlsDir := redirectTLSDataDir(t)
+	m := app.webServe
+
+	if err := m.Start("127.0.0.1:0", &WebServeTLSConfig{Enabled: true}); err != nil {
+		t.Fatalf("Start（自签引导）: %v", err)
+	}
+	// 自签证书应已生成并持久化（下次启动复用同一信任）
+	if _, err := os.Stat(filepath.Join(tlsDir, server.DefaultTLSCertFile)); err != nil {
+		t.Fatalf("自签证书应已落盘: %v", err)
+	}
+
+	url := "https://" + m.listenAddr() + "/healthz"
+	if code := httpGetStatus(t, tlsHTTPClient(), url); code != http.StatusOK {
+		t.Errorf("TLS 启用后 https 健康检查应 200, got %d", code)
+	}
+	// 明文 HTTP 客户端访问 TLS 端口：Go 内置兜底响应 400（非 200 即可证明走了 TLS）
+	if code := httpGetStatus(t, http.DefaultClient, "http://"+m.listenAddr()+"/healthz"); code == http.StatusOK {
+		t.Error("明文 HTTP 客户端访问 TLS 端口不应得到 200")
+	}
+}
+
+// TestWebServeManager_TLSSameAddressToggleRestarts 同地址开/关 TLS 必须触发真实
+// 重启（幂等键 = listen + TLS 配置联合比较；漏扩则 TLS 开关「保存了但不生效」）：
+//   - 同地址同 TLS 配置重复 Start → no-op（hub 不重建）；
+//   - 同地址开 TLS → 重启（hub 重建）且 https 生效；
+//   - 同地址关 TLS → 重启且恢复纯 HTTP。
+func TestWebServeManager_TLSSameAddressToggleRestarts(t *testing.T) {
+	app := newWebServeTestApp(t)
+	redirectTLSDataDir(t)
+	m := app.webServe
+
+	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t)) // 同串地址 + :0 同串幂等语义依赖具体端口
+	if err := m.Start(addr, nil); err != nil {
+		t.Fatalf("Start HTTP: %v", err)
+	}
+	m.mu.Lock()
+	hub1 := m.hub
+	m.mu.Unlock()
+
+	// 同地址同配置（nil 与零值等价）：no-op
+	if err := m.Start(addr, nil); err != nil {
+		t.Fatalf("Start HTTP 重复: %v", err)
+	}
+	m.mu.Lock()
+	hub2 := m.hub
+	m.mu.Unlock()
+	if hub1 != hub2 {
+		t.Error("同地址同 TLS 配置重复 Start 应为 no-op（hub 不重建）")
+	}
+
+	// 同地址开 TLS：真实重启，https 生效
+	if err := m.Start(addr, &WebServeTLSConfig{Enabled: true}); err != nil {
+		t.Fatalf("Start TLS（同地址）: %v", err)
+	}
+	m.mu.Lock()
+	hub3 := m.hub
+	m.mu.Unlock()
+	if hub3 == hub2 {
+		t.Fatal("同地址开启 TLS 应触发真实重启（幂等键须含 TLS 配置）")
+	}
+	if code := httpGetStatus(t, tlsHTTPClient(), "https://"+m.listenAddr()+"/healthz"); code != http.StatusOK {
+		t.Errorf("开启 TLS 后 https 应可达, got %d", code)
+	}
+
+	// 同地址重复同 TLS 配置：no-op
+	if err := m.Start(addr, &WebServeTLSConfig{Enabled: true}); err != nil {
+		t.Fatalf("Start TLS 重复: %v", err)
+	}
+	m.mu.Lock()
+	hub4 := m.hub
+	m.mu.Unlock()
+	if hub4 != hub3 {
+		t.Error("同地址同 TLS 配置重复 Start 应为 no-op")
+	}
+
+	// 同地址关 TLS：恢复纯 HTTP
+	if err := m.Start(addr, nil); err != nil {
+		t.Fatalf("Start HTTP（关 TLS）: %v", err)
+	}
+	if code := httpGetStatus(t, http.DefaultClient, "http://"+m.listenAddr()+"/healthz"); code != http.StatusOK {
+		t.Errorf("关闭 TLS 后纯 http 应恢复可达, got %d", code)
+	}
+}
+
+// TestWebServeManager_TLSCertInvalidOldInstanceSurvives 半死态防护（核心回归）：
+// 运行中旧实例上以无效证书配置 Start（同地址改 TLS 配置 → 幂等不命中）须同步
+// 返回 E_TLS_CERT_INVALID，且证书加载失败发生在停旧实例之前——旧实例原样存活、
+// 服务不受影响。仅填证书/私钥其一同样拒绝。
+func TestWebServeManager_TLSCertInvalidOldInstanceSurvives(t *testing.T) {
+	app := newWebServeTestApp(t)
+	m := app.webServe
+
+	addr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	if err := m.Start(addr, nil); err != nil {
+		t.Fatalf("Start HTTP: %v", err)
+	}
+	url := "http://" + m.listenAddr() + "/healthz"
+
+	// 双路径均不存在：加载失败，旧实例不受影响
+	err := m.Start(addr, &WebServeTLSConfig{
+		Enabled:  true,
+		CertPath: filepath.Join(t.TempDir(), "missing-cert.pem"),
+		KeyPath:  filepath.Join(t.TempDir(), "missing-key.pem"),
+	})
+	if err == nil {
+		t.Fatal("用户证书路径无效时 Start 应返回错误")
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeTLSCertInvalid {
+		t.Errorf("错误应为 E_TLS_CERT_INVALID AppError, got %v", err)
+	}
+	if !m.Running() {
+		t.Fatal("证书加载失败后旧实例应仍运行（无半死态）")
+	}
+	if code := httpGetStatus(t, http.DefaultClient, url); code != http.StatusOK {
+		t.Errorf("证书加载失败后旧实例应继续服务, got %d", code)
+	}
+
+	// 仅填证书路径其一：配置校验拒绝，旧实例不受影响
+	err = m.Start(addr, &WebServeTLSConfig{Enabled: true, CertPath: "cert-only.pem"})
+	if err == nil {
+		t.Fatal("仅填证书路径应返回错误")
+	}
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeTLSCertInvalid {
+		t.Errorf("单边路径错误应为 E_TLS_CERT_INVALID AppError, got %v", err)
+	}
+	if !m.Running() {
+		t.Fatal("配置校验失败后旧实例应仍运行")
+	}
+}
+
+// TestWebServeManager_TLSUserCertPaths 用户自带证书形态：cert/key PEM 路径
+// 非空时跳过自签，按路径加载并生效。
+func TestWebServeManager_TLSUserCertPaths(t *testing.T) {
+	app := newWebServeTestApp(t)
+	m := app.webServe
+
+	// 以前置生成的证书对模拟用户证书（EnsureSelfSignedCert 产物即合法 PEM 对）
+	certDir := t.TempDir()
+	certPath, keyPath, err := server.EnsureSelfSignedCert(certDir)
+	if err != nil {
+		t.Fatalf("构造用户证书 fixture: %v", err)
+	}
+
+	if err := m.Start("127.0.0.1:0", &WebServeTLSConfig{
+		Enabled:  true,
+		CertPath: certPath,
+		KeyPath:  keyPath,
+	}); err != nil {
+		t.Fatalf("Start（用户证书）: %v", err)
+	}
+	if code := httpGetStatus(t, tlsHTTPClient(), "https://"+m.listenAddr()+"/healthz"); code != http.StatusOK {
+		t.Errorf("用户证书路径下 https 应可达, got %d", code)
+	}
+	// 用户证书目录不应生成自签文件（双非空跳过自签引导）
+	if _, err := os.Stat(filepath.Join(webServeDataDir, server.DefaultTLSCertFile)); !os.IsNotExist(err) {
+		t.Error("用户证书路径生效时不应触发自签引导落盘")
+	}
+}
+
+// TestWebServeManager_TLSWSSOverTLS wss 客户端经 TLS 链路升级收发帧：gorilla
+// 升级对 tls.Conn 透明（Hijack 交接底层连接），hub 广播帧经 wss 到达。
+func TestWebServeManager_TLSWSSOverTLS(t *testing.T) {
+	app := newWebServeTestApp(t)
+	redirectTLSDataDir(t)
+	m := app.webServe
+
+	if err := m.Start("127.0.0.1:0", &WebServeTLSConfig{Enabled: true}); err != nil {
+		t.Fatalf("Start TLS: %v", err)
+	}
+	token, err := server.LoadOrCreateToken(serveTokenFile)
+	if err != nil {
+		t.Fatalf("读访问令牌: %v", err)
+	}
+	conn, resp, err := (&websocket.Dialer{
+		Subprotocols:     []string{token},
+		HandshakeTimeout: 5 * time.Second,
+		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // 自签证书测试信任
+	}).Dial("wss://"+m.listenAddr()+"/ws", nil)
+	if err != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		t.Fatalf("wss 升级失败: %v", err)
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for m.hub.ClientCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("等待 WS 客户端注册超时")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	m.hub.Emit("tls-ws-test", "payload-1")
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// 连接建立期广播的连接数事件帧先到达（跳过），读到目标帧为止
+	var msg []byte
+	for {
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("wss 收帧失败: %v", err)
+		}
+		if !strings.Contains(string(payload), "ws-connections:changed") {
+			msg = payload
+			break
+		}
+	}
+	if !strings.Contains(string(msg), "tls-ws-test") || !strings.Contains(string(msg), "payload-1") {
+		t.Errorf("wss 帧内容不符: %s", msg)
+	}
 }

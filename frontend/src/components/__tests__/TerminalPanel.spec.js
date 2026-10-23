@@ -39,6 +39,18 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SaveSettings: vi.fn()
 }))
 
+// Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动提示显隐断言用
+const eventHandlers = {}
+
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn((name, cb) => {
+    eventHandlers[name] = cb
+    return () => {
+      delete eventHandlers[name]
+    }
+  })
+}))
+
 vi.mock('@element-plus/icons-vue', () => ({
   Folder: { template: '<i class="i-folder" />' },
   RefreshRight: { template: '<i class="i-refresh" />' },
@@ -111,6 +123,58 @@ describe('TerminalPanel.vue', () => {
       wrapper.unmount()
       wrapper = null
     }
+  })
+
+  it('卸载时经 EventsOn 返回闭包精准注销连接数监听器', async () => {
+    wrapper = await createWrapper()
+    expect(eventHandlers['ws-connections:changed']).toBeTypeOf('function')
+    wrapper.unmount()
+    wrapper = null
+    expect(eventHandlers['ws-connections:changed']).toBeUndefined()
+  })
+})
+
+describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedInstances.length = 0
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('连接数 >1 时显示多设备写入提示行，<=1 时不显示', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper)
+    // 初始连接数 1（桌面模式无事件恒此形态）：提示不显示
+    expect(wrapper.find('.terminal-multi-device-hint').exists()).toBe(false)
+    // 第二设备接入（连接数 2）：工具栏下显示提示行
+    eventHandlers['ws-connections:changed'](2)
+    await nextTick()
+    expect(wrapper.find('.terminal-multi-device-hint').exists()).toBe(true)
+    expect(wrapper.text()).toContain('多设备已连接，多端同时操作终端时后输入覆盖先输入')
+    // 回落 1：提示消失
+    eventHandlers['ws-connections:changed'](1)
+    await nextTick()
+    expect(wrapper.find('.terminal-multi-device-hint').exists()).toBe(false)
+  })
+
+  it('非法连接数载荷忽略，提示显隐不误翻', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper)
+    eventHandlers['ws-connections:changed'](2)
+    await nextTick()
+    eventHandlers['ws-connections:changed'](0)
+    eventHandlers['ws-connections:changed'](-3)
+    await nextTick()
+    // 非法值保持上次有效值 2，提示仍显示
+    expect(wrapper.find('.terminal-multi-device-hint').exists()).toBe(true)
   })
 
   it('挂载时加载 Shell 配置（displayName 映射数据源）', async () => {

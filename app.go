@@ -82,6 +82,11 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(context.Context) {
+	// lastUsedAt debounce 落盘收口：正常退出即刷待写变更，减少重启丢弃的
+	// 最近数秒认证命中时间精度（异常退出丢弃可接受，非正确性数据）
+	if a.webTokenSvc != nil {
+		a.webTokenSvc.FlushNow()
+	}
 	if a.webServe != nil {
 		if err := a.webServe.Stop(); err != nil {
 			slog.Warn("web serve shutdown failed", "err", err)
