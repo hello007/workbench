@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "验收红线核对：隐私红线（浏览器通道载荷恒 count、WS 帧无管控字段）、锁序红线（DisconnectClient 不得锁内调 notify/Emit）、stopLocked 补发空数组语义不被破坏、浏览器 RPC 反射面同构暴露不特判的决策一致性"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步完整（App.js/App.d.ts/models.ts）+ models.ts 生成规则（WebTokenStatus 包装 struct 自动生成、无具名 string 类型别名坑）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对新增错误码三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）与 handleError 分流正确性"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新增测试无隐式环境依赖（固定端口/外部状态）——hub 踢出测试与 manager 停机测试的构造方式"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对 wails-mock-defaults.js 单一数据源更新与 E2E 回归面（settings-token.spec.js）"}

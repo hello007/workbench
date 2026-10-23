@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核心契约：§2.3 桌面连接明细双通道（SetOnConnectionsChange 回调、notifyConnectionDetails 锁序红线「mu 写锁内构快照、出锁后发射」、stopLocked 补发空数组、隐私红线浏览器载荷恒 count）、§2.6 webServeManager 生命周期（hub 引用只在 manager 内，KickConnection 落点）、停机语义 hub.Close 模式（DisconnectClient 蓝本）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "Wails 绑定三处同步规则（App.js/App.d.ts/models.ts）；新绑定方法 KickConnection 与 ListWebTokens 返回类型变化（WebTokenStatus 包装 struct）须同步 models.ts；EventsOn 返回闭包精准注销（前端踢出确认交互不新增监听但改动 ActivityBar 须维持既有注销链）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "AppError 错误码三处同步规则（model/app_error.go 常量表 + frontend/src/utils/error.js ErrorCode/WARNING_CODES）——webServe 停止后踢出的新错误码须走此链；handleError 按 code 分流"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox.confirm 单次确认形态（踢出确认走此形态）；EP 2.14 关闭后实例驻留 DOM 的选择器约束"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "明细行内踢出按钮样式规范（语义色 danger、深色容器内联 SVG 图标 fill=currentColor 禁固定色、四档间距/圆角、行内元素就近归并）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "wails-mock-defaults.js 单一数据源（须补 KickConnection 默认值与 ListWebTokens 新形状 WebTokenStatus）；E2E 从 fixtures.js import {test,expect}；mock 返回值形状必须对齐后端 model 真实形状"}
