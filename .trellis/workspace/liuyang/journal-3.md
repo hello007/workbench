@@ -1349,3 +1349,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 151: 桌面端多设备连接指示：webserve-connections:changed 桌面事件出口
+
+**Date**: 2026-10-23
+**Task**: 桌面端多设备连接指示：webserve-connections:changed 桌面事件出口
+**Branch**: `master`
+
+### Summary
+
+浏览器连接数补到桌面 UI（任务 10-23-desktop-device-connection-indicator）：hub 加 SetOnCountChange 纯回调 func(int)（server 包不知 Wails，register/unregister 出 mu 写锁后 !closing 触发且 count=0 透传，WS 广播侧抑制态逐字节不变）；manager startLocked 注入闭包经 Wails 出口发桌面事件 webserve-connections:changed，stopLocked 在 applySink(nil) 后显式补发 count=0 归零；前端 useDeviceConnections 双通道消费（isDesktopChannel 分流桌面 >=1/浏览器 >1，桌面接受 0），ActivityBar/TerminalPanel 零改动，Wails 绑定零新增。ADR：桌面专用事件名与浏览器通道同义不同名刻意分叉（同名致桌面 1 浏览器连接 off-by-one + 前端 n>=1 校验吞 0）。测试全绿（go test 全量 + race + server 覆盖率 90.8% / vitest 2075），check 修 2 处 gofmt；spec 沉淀 browser-channel.md §2.3 桌面出口段 + CLAUDE.md 关键规则行。真机冒烟通过（连接/断开/停机三态指示变化），遗留清零。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `226cdac` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
