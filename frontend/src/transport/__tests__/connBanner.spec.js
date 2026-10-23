@@ -101,4 +101,49 @@ describe('连接状态横幅', () => {
     banner.notifyConnected()
     expect(document.querySelector('.wb-conn-banner')).toBeNull()
   })
+
+  it('被踢态横幅：warning 常驻，紧随的断线通知不覆盖被踢文案', async () => {
+    vi.useFakeTimers()
+    const banner = await freshBanner()
+    banner.notifyConnected()
+    banner.notifyKicked()
+    const el = document.querySelector('.wb-conn-banner')
+    expect(el.textContent).toBe('连接已被主机断开，正在自动重连…')
+    expect(el.className).toContain('wb-conn-banner--warning')
+    // 紧随其后的 onclose 断线通知不覆盖被踢文案（防「与后端连接已断开」顶掉解释）
+    banner.notifyDisconnected()
+    expect(document.querySelector('.wb-conn-banner').textContent).toBe('连接已被主机断开，正在自动重连…')
+    // 被踢横幅与断连横幅同语义：常驻直至重连成功，不自动消失
+    vi.advanceTimersByTime(60000)
+    expect(document.querySelector('.wb-conn-banner')).toBeTruthy()
+  })
+
+  it('重连成功消费被踢态一次：恢复提示后断线恢复普通断连文案', async () => {
+    vi.useFakeTimers()
+    const banner = await freshBanner()
+    banner.notifyConnected()
+    banner.notifyKicked()
+    banner.notifyDisconnected()
+    // 首次重连成功：走既有「连接已恢复」+ 消费被踢态
+    banner.notifyConnected()
+    let el = document.querySelector('.wb-conn-banner')
+    expect(el.textContent).toBe('连接已恢复')
+    expect(el.className).toContain('wb-conn-banner--success')
+    // 恢复提示 3s 自动消失后再次断线：普通断连文案（被踢态已消费，不复活）
+    vi.advanceTimersByTime(3000)
+    banner.notifyDisconnected()
+    el = document.querySelector('.wb-conn-banner')
+    expect(el.textContent).toBe('与后端连接已断开，正在自动重连…')
+    expect(el.className).toContain('wb-conn-banner--warning')
+  })
+
+  it('被踢后服务不可达：notifyUnreachable 覆盖被踢文案（终结态优先）', async () => {
+    vi.useFakeTimers()
+    const banner = await freshBanner()
+    banner.notifyConnected()
+    banner.notifyKicked()
+    banner.notifyUnreachable()
+    const el = document.querySelector('.wb-conn-banner')
+    expect(el.textContent).toBe('服务不可达，请确认 WorkBench 正在运行')
+  })
 })

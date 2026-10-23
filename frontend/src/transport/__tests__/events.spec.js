@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createEventBridge } from '../events'
 import { requestToken } from '../tokenGate'
-import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap } from '../connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap, notifyKicked } from '../connBanner'
 
 // 隔离 token 门与横幅的真实实现（DOM/持久化副作用），仅验证事件桥对它们的调用契约
 vi.mock('../tokenGate', () => ({
@@ -11,7 +11,8 @@ vi.mock('../connBanner', () => ({
   notifyConnected: vi.fn(),
   notifyDisconnected: vi.fn(),
   notifyUnreachable: vi.fn(),
-  notifyGap: vi.fn()
+  notifyGap: vi.fn(),
+  notifyKicked: vi.fn()
 }))
 
 // 服务端签发令牌为 32 字节 hex（64 字符），建连前按该形态校验（见 events.js TOKEN_PATTERN）
@@ -624,5 +625,43 @@ describe('事件桥（window.runtime shim）', () => {
     s2.receive({ event: 'ws-synced', data: [4] })
     // 断线前 s1 已实时落地 m4；同步窗口内的 stale 帧丢弃、缓冲落地为空
     expect(calls).toEqual(['m4'])
+  })
+
+  it('ws-kicked 被踢单播帧分发层拦截：置被踢态、不进业务监听器、不推进序号基准', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    // 控制帧不分发业务监听器（即使注册了同名监听器）
+    const business = vi.fn()
+    bridge.EventsOn('ws-kicked', business)
+    const cb = vi.fn()
+    bridge.EventsOn('e', cb)
+    const socket = lastSocket()
+    socket.open()
+    socket.receive({ event: 'ws-kicked', data: [] })
+    expect(notifyKicked).toHaveBeenCalledTimes(1)
+    expect(business).not.toHaveBeenCalled()
+    // 无 seq 控制帧不推进序号基准：其后带 seq 帧正常落地，重连握手基准不受影响
+    socket.receive({ event: 'e', data: ['after-kick'], seq: 7 })
+    expect(cb).toHaveBeenCalledWith('after-kick')
+    socket.close()
+    vi.advanceTimersByTime(1000)
+    lastSocket().open()
+    expect(JSON.parse(lastSocket().sent[0])).toEqual({ resume: 7 })
+  })
+
+  it('被踢帧后断线走既有静默重连链路：notifyKicked 与 notifyDisconnected 均触发', () => {
+    vi.useFakeTimers()
+    const bridge = createEventBridge({ wsUrl: 'ws://test/ws' })
+    bridge.EventsOn('e', () => {})
+    const s1 = lastSocket()
+    s1.open()
+    s1.receive({ event: 'ws-kicked', data: [] })
+    expect(notifyKicked).toHaveBeenCalledTimes(1)
+    s1.close()
+    // 断线通知照常触发（文案分流由 connBanner 被踢态保证，见 connBanner.spec）
+    expect(notifyDisconnected).toHaveBeenCalled()
+    // 踢出非封禁：静默自动重连照旧（1s 退避后重建连接）
+    vi.advanceTimersByTime(1000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
   })
 })

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,14 @@ import (
 // 必须与其一致，否则引导产物与「查看令牌」读取路径脱节。
 func newWebServeTestApp(t *testing.T) *App {
 	t.Helper()
+	app, _ := newWebServeTestAppDir(t)
+	return app
+}
+
+// newWebServeTestAppDir 同 newWebServeTestApp，另返回 dataDir（审计日志等落盘
+// 产物断言用：web_audit.log 路径在 NewAppServices 构造期固定为 dataDir 内）。
+func newWebServeTestAppDir(t *testing.T) (*App, string) {
+	t.Helper()
 	dataDir, err := os.MkdirTemp("", "workbench-websrv")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)
@@ -49,7 +58,7 @@ func newWebServeTestApp(t *testing.T) *App {
 			_ = app.webServe.Stop()
 		}
 	})
-	return app
+	return app, dataDir
 }
 
 // freePort 探测一个空闲 TCP 端口，专供「必须预知具体端口」的用例（地址切换、
@@ -1140,6 +1149,129 @@ func TestApp_KickConnection_EndToEnd(t *testing.T) {
 	}
 	// 明细缓存自动收敛清零（unregister 收尾触发回调写入空快照）
 	waitConnCacheCount(t, app, 0)
+}
+
+// TestApp_KickConnection_AuditTrail 踢出审计（连接管控二期）：踢出生效（hub 命中）
+// 后写 conn_kick 审计行——字段齐（event/tokenId/name/remoteAddr/connId/ts）、无明文
+// token；miss（连接不存在）与停机不写；webAuditSvc 未装配不崩（审计为旁路观测面）。
+func TestApp_KickConnection_AuditTrail(t *testing.T) {
+	app, dataDir := newWebServeTestAppDir(t)
+	auditPath := filepath.Join(dataDir, "web_audit.log")
+	m := app.webServe
+	if err := m.Start("127.0.0.1:0", nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// 前置 miss：不存在的连接踢出返错且不写审计
+	if err := app.KickConnection(424242); err == nil {
+		t.Fatal("前置：不存在连接踢出应返错")
+	}
+	for _, rec := range readAuditRecords(t, auditPath) {
+		if rec.Event == service.AuditEventConnKick {
+			t.Fatalf("miss 不应写踢出审计, got %+v", rec)
+		}
+	}
+
+	// 真实 WS 客户端接入后按明细缓存踢出
+	token, err := server.LoadOrCreateToken(serveTokenFile)
+	if err != nil {
+		t.Fatalf("读访问令牌: %v", err)
+	}
+	conn, _, err := (&websocket.Dialer{
+		Subprotocols:     []string{token},
+		HandshakeTimeout: 5 * time.Second,
+	}).Dial("ws://"+m.listenAddr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("WS 升级失败: %v", err)
+	}
+	defer conn.Close()
+	details := waitConnCacheCount(t, app, 1)
+	connID := details[0].ID
+	wantTokenID := details[0].TokenID
+	if err := app.KickConnection(connID); err != nil {
+		t.Fatalf("踢出在册连接: %v", err)
+	}
+
+	// 审计行断言：恰好一条 conn_kick，字段齐（tokenId 命中记录 ID、name 为名册
+	// 令牌名、remoteAddr 非空、connId 为被踢连接 ID、ts 就绪）
+	var kicks []service.AuditRecord
+	for _, rec := range readAuditRecords(t, auditPath) {
+		if rec.Event == service.AuditEventConnKick {
+			kicks = append(kicks, rec)
+		}
+	}
+	if len(kicks) != 1 {
+		t.Fatalf("踢出生效应恰好写一条 conn_kick 审计, got %d", len(kicks))
+	}
+	kick := kicks[0]
+	if kick.TokenID != wantTokenID {
+		t.Errorf("tokenId 应为被踢连接的令牌记录 ID %q, got %q", wantTokenID, kick.TokenID)
+	}
+	if kick.Name != service.DefaultWebTokenName {
+		t.Errorf("name 应为名册令牌名 %q, got %q", service.DefaultWebTokenName, kick.Name)
+	}
+	if kick.RemoteAddr == "" {
+		t.Error("remoteAddr 应非空（来源地址留痕）")
+	}
+	if kick.ConnID != connID {
+		t.Errorf("connId 应为被踢连接 ID %d, got %d", connID, kick.ConnID)
+	}
+	if kick.Ts == 0 {
+		t.Error("ts 应就绪")
+	}
+	// 无敏感信息：审计文件不含明文 token
+	raw, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("读审计日志: %v", err)
+	}
+	if strings.Contains(string(raw), token) {
+		t.Error("审计日志不得包含明文 token")
+	}
+
+	// webAuditSvc 未装配（旁路构造）：踢出主链路不崩、不写
+	app.webAuditSvc = nil
+	conn2, _, err := (&websocket.Dialer{
+		Subprotocols:     []string{token},
+		HandshakeTimeout: 5 * time.Second,
+	}).Dial("ws://"+m.listenAddr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("第二次 WS 升级失败: %v", err)
+	}
+	defer conn2.Close()
+	details2 := waitConnCacheCount(t, app, 1)
+	if err := app.KickConnection(details2[0].ID); err != nil {
+		t.Fatalf("webAuditSvc 未装配时踢出不应报错: %v", err)
+	}
+	for _, rec := range readAuditRecords(t, auditPath) {
+		if rec.Event == service.AuditEventConnKick && rec.ConnID == details2[0].ID {
+			t.Fatalf("webAuditSvc 未装配不应写审计, got %+v", rec)
+		}
+	}
+}
+
+// readAuditRecords 读入审计日志全部行并解析为 AuditRecord（损坏行跳过，读侧
+// 容错语义与生产一致；文件尚不存在返回空——前置无审计断言用）。
+func readAuditRecords(t *testing.T, path string) []service.AuditRecord {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("读审计日志 %s: %v", path, err)
+	}
+	var recs []service.AuditRecord
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec service.AuditRecord
+		if json.Unmarshal([]byte(line), &rec) == nil {
+			recs = append(recs, rec)
+		}
+	}
+	return recs
 }
 
 // TestApp_ListWebTokens_OnlineConns 令牌在线数 join：缓存按 TokenID 聚合与名册

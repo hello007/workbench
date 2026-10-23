@@ -2,7 +2,8 @@
  * 连接状态横幅（浏览器模式下 WS 断连/恢复的最小 UI 提示）。
  *
  * 由 events.js 在 WS onopen/onclose 时调用 notifyConnected/notifyDisconnected，
- * 连续重连失败达阈值或用户取消重连时调用 notifyUnreachable。
+ * 连续重连失败达阈值或用户取消重连时调用 notifyUnreachable，收到服务端单播
+ * 踢出控制帧（ws-kicked，连接管控）时调用 notifyKicked。
  * 仅在「曾成功连接过」后才提示断连：首访令牌门之前的连不上属正常初始化路径，
  * 由 token 输入门负责引导，不弹断连横幅造成双重打扰。
  *
@@ -18,13 +19,19 @@ const GAP_HINT_MS = 8000
 let bannerEl = null
 let everConnected = false
 let hideTimer = null
+// 被踢态未消费标记：收到 ws-kicked 单播帧置位（确定性——帧到达即被踢，零启发式）。
+// 首次重连成功消费一次（其后断线恢复普通断连文案），供 notifyDisconnected 保持
+// 被踢文案不被通用断连提示覆盖。
+let kickedPending = false
 
 /**
- * WS 连接成功（含重连成功）时调用。
+ * WS 连接成功（含重连成功）时调用。重连成功同时消费一次被踢态（首次重连周期
+ * 内有效）：其后断线恢复普通断连文案。
  */
 export function notifyConnected() {
   const wasDisconnected = everConnected && bannerEl !== null
   everConnected = true
+  kickedPending = false
   if (wasDisconnected) {
     show('连接已恢复', 'success')
     scheduleHide()
@@ -34,11 +41,23 @@ export function notifyConnected() {
 }
 
 /**
- * WS 连接断开时调用。首次成功连接前的断开不提示（初始化路径由 token 门覆盖）。
+ * WS 连接断开时调用。首次成功连接前的断开不提示（初始化路径由 token 门覆盖）；
+ * 被踢态置位期间不覆盖文案——横幅保持「已被主机断开」的解释。
  */
 export function notifyDisconnected() {
   if (!everConnected) return
+  if (kickedPending) return
   show('与后端连接已断开，正在自动重连…', 'warning')
+}
+
+/**
+ * 收到服务端单播踢出帧（ws-kicked）时调用：本连接已被主机主动断开（确定性——
+ * 收到帧即被踢，没收到即网络抖动），展示被踢态文案；随后的断线与既有静默自动
+ * 重连链路照旧（踢出非封禁，重连须用有效令牌）。
+ */
+export function notifyKicked() {
+  kickedPending = true
+  show('连接已被主机断开，正在自动重连…', 'warning')
 }
 
 /**

@@ -19,6 +19,7 @@ const (
 	AuditEventTokenRevoke  = "token_revoke"  // 撤销 token（含轮换编排的逐条撤旧）
 	AuditEventTokenRotate  = "token_rotate"  // 轮换编排（新建 + 撤旧）完成（App 层编排事件）
 	AuditEventTokenMigrate = "token_migrate" // 存量单 token 迁移为多 token 首条记录 / 初始引导
+	AuditEventConnKick     = "conn_kick"     // 踢出在途 WS 连接（连接管控动作，App 层 hub 命中后落盘）
 )
 
 // webAuditMaxBytes 审计日志单文件大小上限：超过即轮转为 <path>.1（覆盖旧 .1），
@@ -35,6 +36,7 @@ type AuditRecord struct {
 	Name       string `json:"name,omitempty"`       // token 名称（token 生命周期事件携带）
 	RemoteAddr string `json:"remoteAddr,omitempty"` // 来源地址（r.RemoteAddr；直连形态不做 XFF 信任，PRD R2）
 	UserAgent  string `json:"userAgent,omitempty"`  // 客户端 User-Agent
+	ConnID     uint64 `json:"connId,omitempty"`     // 被踢连接 ID（conn_kick 事件携带；认证/生命周期事件为空不落字段）
 }
 
 // AuditLogger 认证与 token 生命周期审计日志（JSONL append-only，data/web_audit.log）。
@@ -60,18 +62,38 @@ func NewAuditLogger(path string) *AuditLogger {
 
 // Log 追加一条审计事件（单写锁串行，并发安全）。
 func (a *AuditLogger) Log(event, tokenID, name, remoteAddr, userAgent string) {
-	rec := AuditRecord{
+	a.write(AuditRecord{
 		Ts:         time.Now().Unix(),
 		Event:      event,
 		TokenID:    tokenID,
 		Name:       name,
 		RemoteAddr: remoteAddr,
 		UserAgent:  userAgent,
-	}
+	})
+}
+
+// LogConnKick 追加一条踢出连接审计事件（conn_kick，连接管控二期新增）：记录被踢
+// 目标的令牌 ID/名称/来源地址/连接 ID。可见性口径与 Log 一致——无明文 token、
+// 无 URL；remoteAddr 取连接明细快照的来源 IP（对端可重连，IP 足以对号入座）。
+// 写入时序对齐既有审计纪律：仅动作生效（hub 命中）后由调用方落盘，miss 不写。
+func (a *AuditLogger) LogConnKick(tokenID, name, remoteAddr string, connID uint64) {
+	a.write(AuditRecord{
+		Ts:         time.Now().Unix(),
+		Event:      AuditEventConnKick,
+		TokenID:    tokenID,
+		Name:       name,
+		RemoteAddr: remoteAddr,
+		ConnID:     connID,
+	})
+}
+
+// write 序列化并追加一条审计记录（全部 Log* 出口的单点收口：行构造、轮转、
+// 建目录、追加写均在此处，避免多出口实现漂移）。
+func (a *AuditLogger) write(rec AuditRecord) {
 	line, err := json.Marshal(rec)
 	if err != nil {
 		// 全为基本类型字段不会失败，防御保留
-		slog.Error("marshal audit record failed", "event", event, "err", err)
+		slog.Error("marshal audit record failed", "event", rec.Event, "err", err)
 		return
 	}
 	line = append(line, '\n')

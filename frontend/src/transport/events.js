@@ -31,6 +31,9 @@
  *   - ws-gap 断层标记帧（补发判定为缺口：服务端缓冲溢出或重启后序号归零）：
  *     放弃补发窗口，以服务端当前序号为新基准继续接收，经 connBanner 提示
  *     「部分更新已跳过」，由各面板既有冷启动/状态查询链路或手动刷新补齐状态；
+ *   - ws-kicked 被踢单播控制帧（连接管控，服务端仅送达被踢连接、无 seq 不进
+ *     续传缓冲）：分发层拦截转 connBanner 被踢态提示（「连接已被主机断开」），
+ *     不进业务监听器、不推进序号基准；紧随的断线走既有静默自动重连链路；
  *   - 无 seq 字段的帧（老服务端兼容形态）直接分发，不推进序号基准；
  *   - 首次连接（页面生命周期内从未 open 成功）失败视为令牌缺失/失效
  *     （含裸连 cookie 认证 401），弹 token 输入门重试；已成功连接过的断线走
@@ -46,7 +49,7 @@
 
 import { getToken } from './token'
 import { requestToken } from './tokenGate'
-import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap } from './connBanner'
+import { notifyConnected, notifyDisconnected, notifyUnreachable, notifyGap, notifyKicked } from './connBanner'
 
 // 重连退避参数：基础 1s，指数递增，封顶 30s。
 const RECONNECT_BASE_DELAY_MS = 1000
@@ -146,6 +149,13 @@ export function createEventBridge({ wsUrl }) {
       }
       if (frame.event === 'ws-synced') {
         handleSynced()
+        return
+      }
+      // 被主机踢出（连接管控单播控制帧，仅送达被踢连接、无 seq 不进续传缓冲）：
+      // 置被踢态横幅；紧随其后的 onclose 走既有静默重连链路，connBanner 被踢态
+      // 保证通用断连文案不覆盖「已被主机断开」的解释
+      if (frame.event === 'ws-kicked') {
+        notifyKicked()
         return
       }
       if (typeof frame.seq === 'number' && Number.isFinite(frame.seq)) {

@@ -299,20 +299,22 @@ func (m *webServeManager) Wait() error {
 // mu 内取当前 hub 引用后立即释放，断开动作委托 hub.DisconnectClient（其内部
 // 自持锁，锁序无嵌套）；服务停机/未启用（hub nil）返回 E_WEBSERVE_NOT_RUNNING，
 // 连接已断开/不存在（明细列表过期或并发断开竞态）返回 E_CONNECTION_NOT_FOUND。
+// 命中时返回被踢连接的元数据快照（供 App 层审计留痕），miss 时返回零值。
 // 踢出语义 = 断开当前连接（对端同令牌可重连，非封禁；防重连由撤销令牌承担）。
-func (m *webServeManager) KickConnection(connID uint64) error {
+func (m *webServeManager) KickConnection(connID uint64) (server.ConnDetail, error) {
 	m.mu.Lock()
 	hub := m.hub
 	m.mu.Unlock()
 	if hub == nil {
-		return model.NewAppError(model.ErrCodeWebServeNotRunning,
+		return server.ConnDetail{}, model.NewAppError(model.ErrCodeWebServeNotRunning,
 			"浏览器访问服务未运行，无法踢出连接")
 	}
-	if !hub.DisconnectClient(connID) {
-		return model.NewAppError(model.ErrCodeConnNotFound,
+	detail, ok := hub.DisconnectClient(connID)
+	if !ok {
+		return server.ConnDetail{}, model.NewAppError(model.ErrCodeConnNotFound,
 			"连接不存在或已断开（列表已过期，请刷新后重试）")
 	}
-	return nil
+	return detail, nil
 }
 
 // Running 返回 HTTP 服务当前是否运行中。

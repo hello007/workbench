@@ -56,6 +56,12 @@ const (
 	// 补发帧与重连注册窗口内的实时广播共用同一 send 队列（FIFO 交错到达），
 	// 客户端以该标记为界将缓冲帧按序号去重落地，保证业务事件有序且不重不漏。
 	wsSyncedEvent = "ws-synced"
+	// wsKickedEvent 被踢单播控制帧（连接管控二期）：仅送达被踢连接（hub 首个
+	// 非广播投递面），无 seq、不进环形缓冲——resume 补发面不含该帧，防重连后
+	// 幻影回放「被踢」。前端 transport 分发层拦截（ws-gap/ws-synced 同位）转
+	// connBanner 被踢态提示；帧送达失败（队列满/写失败）静默退化为普通断开，
+	// 踢出断开本身恒生效（best-effort 口径，见 DisconnectClient）。
+	wsKickedEvent = "ws-kicked"
 )
 
 // wsConnectionsEvent 连接数变化事件（多设备语义明示，D1 决策：架构零改动只提示）。
@@ -145,6 +151,10 @@ type wsClient struct {
 	conn   *websocket.Conn
 	send   chan []byte
 	detail ConnDetail // 连接元数据（ServeHTTP 升级成功时构造，此后不可变）
+	// kicked 踢出流程已启动（hub.mu 保护）：DisconnectClient 入队踢出帧后置位，
+	// 防重复踢出在 writePump 自关路径上二次入队垃圾帧；置位后重复调用幂等返回
+	// 命中（detail 照常返回），不再重复入队。
+	kicked bool
 }
 
 // NewWSHub 构造 WebSocket hub。verify 为握手令牌校验函数（main 装配传入
@@ -325,20 +335,36 @@ func (h *WSHub) Close() {
 }
 
 // DisconnectClient 按连接 ID 踢出单个在途客户端（桌面明细面板处置入口，main 层
-// webServeManager.KickConnection 委托）。mu 写锁内遍历 clients 定位目标，命中关
-// 闭底层 conn——net 层非阻塞锁内安全，完全对齐 Close 的「只关 conn 不 close(send)」
-// 模式：readPump 的 ReadMessage 感知断连后走既有 defer unregister（写锁下
-// delete + close(send)，仅当客户端仍在册）自然收尾，并经 notifyConnectionDetails
-// 触发明细快照双出口（桌面事件 + 浏览器 count 广播），**零新增事件**。
+// webServeManager.KickConnection 委托）。mu 写锁内遍历 clients 定位目标，命中后
+// 不再直接 conn.Close：向该连接的 send 队列非阻塞入队（1）ws-kicked 单播控制帧
+// （无 seq，不进环形缓冲）与（2）nil 哨兵——writePump（单写者）按 FIFO 先写出
+// 踢出帧，见哨兵即发 RFC Close 帧后退出（defer conn.Close() 收尾），被踢端因此
+// 先收到「被主机断开」提示帧再感知连接关闭；readPump 的 ReadMessage 感知断连后
+// 走既有 defer unregister（写锁下 delete + close(send)，仅当客户端仍在册）自然
+// 收尾，并经 notifyConnectionDetails 触发明细快照双出口（桌面事件 + 浏览器
+// count 广播），**零新增广播事件**。
 //
-// 幂等：已注销连接不在 clients，重复踢出天然 miss 返 false。本方法自身不在锁内
-// 调 notify/Emit（锁序红线：Emit 内部按 seqMu → mu.RLock 加锁，mu 写锁临界区内
-// 直调会形成同 goroutine 重入 RLock 死锁）——断连收尾的 notify 由 readPump 自己
-// 的 goroutine 出锁后触发，与本调用无并发锁窗口。
+// 降级（best-effort 口径）：入队失败（队列满——慢消费者形态）回退直接
+// conn.Close()，踢出帧丢失退化为普通断开，踢出断开本身恒生效；writePump 写帧
+// 失败同理。nil 哨兵在踢出帧之后单独入队，第二次入队失败（并发 Emit 恰好填满
+// 队列的极窄窗口）同样回退 conn.Close()——此时踢出帧可能已入队但无人写出，conn
+// 关闭使 writePump 在途写失败退出，帧丢弃、断开恒达成。
+//
+// 返回 (detail, ok)：ok=false 为 miss（连接不存在/已断开）；ok=true 时 detail 为
+// 被踢连接的元数据快照（TokenID/IP/接入时间，供调用方审计留痕——审计在调用方
+// 命中后落盘，miss 不写）。
+//
+// 幂等：已注销连接不在 clients，重复踢出天然 miss 返 (零值, false)；哨兵已入队、
+// readPump 尚未收尾的窄窗口内重复踢出命中在册连接，kicked 标记挡住二次入队
+//（防 writePump 自关路径上堆积无人消费的垃圾帧），detail 照常返回、ok=true（与
+// 旧实现「窗口内重复踢出返 true」的语义一致）。本方法自身不在锁内调 notify/Emit
+//（锁序红线：Emit 内部按 seqMu → mu.RLock 加锁，mu 写锁临界区内直调会形成同
+// goroutine 重入 RLock 死锁）——断连收尾的 notify 由 readPump 自己的 goroutine
+// 出锁后触发，与本调用无并发锁窗口。
 //
 // 踢出语义 = 断开当前连接，对端同令牌可重连（重连须用有效令牌），非封禁；防重
 // 连由撤销令牌承担（撤销即时生效于新连接，两手段互补不互替）。
-func (h *WSHub) DisconnectClient(connID uint64) bool {
+func (h *WSHub) DisconnectClient(connID uint64) (ConnDetail, bool) {
 	h.mu.Lock()
 	var target *wsClient
 	for c := range h.clients {
@@ -347,11 +373,50 @@ func (h *WSHub) DisconnectClient(connID uint64) bool {
 			break
 		}
 	}
+	var detail ConnDetail
 	if target != nil {
-		_ = target.conn.Close()
+		detail = target.detail
+		if !target.kicked {
+			target.kicked = true
+			if !h.enqueueKickFrames(target) {
+				// 队列满（慢消费者）或帧序列化失败：回退直关，踢出帧丢失退化为
+				// 普通断开（断开恒生效）；net.Conn.Close 幂等，与读写泵关闭路径
+				// 并发安全
+				_ = target.conn.Close()
+			}
+		}
 	}
 	h.mu.Unlock()
-	return target != nil
+	return detail, target != nil
+}
+
+// enqueueKickFrames 向被踢连接的 send 队列非阻塞入队 ws-kicked 单播帧与 nil 哨兵
+//（调用方须持 mu 写锁，且仅对未 kicked 的连接调用一次）。入队成功返回 true：
+// writePump 按 FIFO 先写出踢出帧、见哨兵后发 Close 帧退出，踢出帧先于连接关闭
+// 送达；任一步失败返回 false，调用方回退直接 conn.Close()。
+//
+// 踢出帧不经 Emit（无 seq、不进环形缓冲——resume 补发面不含该帧，防重连幻影
+// 回放），与 ws-gap/ws-synced 控制帧同款口径；在锁内做非阻塞入队与序列化安全
+//（channel send 非阻塞、marshal 纯内存，且 send 的 close 仅发生在同锁的
+// unregister，无并发窗口）。
+func (h *WSHub) enqueueKickFrames(c *wsClient) bool {
+	frame, err := json.Marshal(wsFrame{Event: wsKickedEvent, Data: []any{}})
+	if err != nil {
+		// 固定字段载荷不会失败，防御保留
+		slog.Error("marshal ws kick frame failed", "connId", c.detail.ID, "err", err)
+		return false
+	}
+	select {
+	case c.send <- frame:
+	default:
+		return false
+	}
+	select {
+	case c.send <- nil:
+		return true
+	default:
+		return false
+	}
 }
 
 // ServeHTTP 处理 GET /ws 升级请求。
@@ -612,7 +677,10 @@ func (h *WSHub) sendControlFrame(c *wsClient, event string, current uint64) {
 }
 
 // writePump 写泵：独占本连接全部写操作（事件帧 + 协议 ping），单连接写
-// 串行化的执行端。send 关闭（已注销）时发送 Close 帧后退出。
+// 串行化的执行端。send 关闭（已注销）时发送 Close 帧后退出；读到 nil 哨兵
+//（DisconnectClient 踢出收口）时同样发送 Close 帧后退出——此刻队列中先于
+// 哨兵的帧（含 ws-kicked 踢出帧）均已按 FIFO 写出，被踢端先收到踢出提示帧
+// 再感知连接关闭（单写者内保序）。
 func (c *wsClient) writePump() {
 	ticker := time.NewTicker(c.hub.pingPeriod)
 	defer func() {
@@ -625,6 +693,12 @@ func (c *wsClient) writePump() {
 			_ = c.conn.SetWriteDeadline(time.Now().Add(c.hub.writeWait))
 			if !ok {
 				// hub 已注销本连接：按 RFC 6455 语义发送 Close 帧后收尾
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if frame == nil {
+				// 踢出收口哨兵（DisconnectClient 入队）：发送 Close 帧后收尾，
+				// 随后 readPump 感知断连走既有 unregister
 				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
 				return
 			}

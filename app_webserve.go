@@ -227,16 +227,35 @@ func (a *App) onlineConnCountsByToken() map[string]int {
 
 // KickConnection 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务新增）。
 // 委托 webServeManager（停机/未启用返回 E_WEBSERVE_NOT_RUNNING，连接不存在返回
-// E_CONNECTION_NOT_FOUND，均 warning 级引导）。踢出语义 = 断开当前连接，对端同
-// 令牌可重连（非封禁）；防重连由 RevokeWebToken 承担（撤销即时生效于新连接，
-// 不影响已建立连接，两手段互补）。浏览器 UI 无此入口（同构暴露面不特判，认证
-// 由外层 token 把关，与停服务/撤令牌同能力面）。
+// E_CONNECTION_NOT_FOUND，均 warning 级引导）。踢出生效（hub 命中）后写审计
+// conn_kick（对齐「动作生效后才写审计」纪律，miss/停机不写——桌面按钮与浏览器
+// RPC 反射面同走本方法，单咽喉全覆盖）。踢出语义 = 断开当前连接，对端同令牌可
+// 重连（非封禁）；防重连由 RevokeWebToken 承担（撤销即时生效于新连接，不影响
+// 已建立连接，两手段互补）。浏览器 UI 无此入口（同构暴露面不特判，认证由外层
+// token 把关，与停服务/撤令牌同能力面）。
 func (a *App) KickConnection(connID uint64) error {
 	if a.webServe == nil {
 		return model.NewAppError(model.ErrCodeWebServeNotRunning,
 			"浏览器访问服务未运行，无法踢出连接")
 	}
-	return a.webServe.KickConnection(connID)
+	detail, err := a.webServe.KickConnection(connID)
+	if err != nil {
+		return err
+	}
+	a.auditConnKick(detail)
+	return nil
+}
+
+// auditConnKick 踢出动作审计（conn_kick 事件行）。令牌名经名册映射补全（hub
+// 明细快照的 TokenName 为 server 层原始形态恒空，webTokenNamedDetails 单点映射，
+// miss 降级空串与明细面板同款语义）；webAuditSvc 未装配（旁路构造的测试 App）
+// 静默跳过——审计为旁路观测面，不阻断踢出主链路。
+func (a *App) auditConnKick(detail server.ConnDetail) {
+	if a.webAuditSvc == nil {
+		return
+	}
+	named := a.webTokenNamedDetails([]server.ConnDetail{detail})
+	a.webAuditSvc.LogConnKick(named[0].TokenID, named[0].TokenName, named[0].IP, named[0].ID)
 }
 
 // webTokenNamedDetails 为连接明细快照补全令牌名（web_serve.go startLocked 桌面

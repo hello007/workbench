@@ -140,3 +140,44 @@ func TestAuditLogger_MissingDir(t *testing.T) {
 		t.Fatalf("父目录缺失时应自动创建并写入, got %d", len(recs))
 	}
 }
+
+// TestAuditLogger_LogConnKick 踢出连接审计行（conn_kick）：LogConnKick 专责出口
+// 字段齐（event/tokenId/name/remoteAddr/connId/ts），既有事件（Log 出口）不携带
+// connId 字段（omitempty 不落键，行形态向后兼容）。
+func TestAuditLogger_LogConnKick(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+
+	a.Log(AuditEventAuthSuccess, "tok-1", "", "127.0.0.1:1234", "ua")
+	a.LogConnKick("tok-k", "手机", "192.168.1.5", 42)
+
+	recs := readAuditLines(t, path)
+	if len(recs) != 2 {
+		t.Fatalf("应有两行审计记录, got %d", len(recs))
+	}
+	if recs[0].ConnID != 0 {
+		t.Errorf("既有事件不应携带 connId, got %d", recs[0].ConnID)
+	}
+	kick := recs[1]
+	if kick.Event != AuditEventConnKick {
+		t.Errorf("事件名应为 conn_kick, got %q", kick.Event)
+	}
+	if kick.TokenID != "tok-k" || kick.Name != "手机" || kick.RemoteAddr != "192.168.1.5" || kick.ConnID != 42 {
+		t.Errorf("踢出审计字段不符: %+v", kick)
+	}
+	if kick.Ts == 0 {
+		t.Error("ts 应就绪")
+	}
+	// 行形态断言：connId 键落行、既有行不含该键（omitempty 口径）
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读审计日志: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if !strings.Contains(lines[1], `"connId":42`) {
+		t.Errorf("踢出行应含 connId 键: %s", lines[1])
+	}
+	if strings.Contains(lines[0], "connId") {
+		t.Errorf("既有事件行不应出现 connId 键: %s", lines[0])
+	}
+}

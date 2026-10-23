@@ -932,9 +932,10 @@ func TestWSHub_OnConnectionsChangeNilSafe(t *testing.T) {
 
 // ===== DisconnectClient（连接管控：按 ID 踢出单个在途连接）=====
 
-// TestWSHub_DisconnectClientHit 踢出命中：目标连接读侧感知断开（conn.Close 使
-// readPump ReadMessage 出错），明细回调自动更新（零新增事件——unregister 既有
-// 收尾路径触发快照双出口），其余连接收到 ws-connections:changed count 回落广播。
+// TestWSHub_DisconnectClientHit 踢出命中：目标连接读侧感知断开（ws-kicked 帧
+// 送达后连接关闭），明细回调自动更新（零新增广播事件——unregister 既有收尾路径
+// 触发快照双出口），其余连接收到 ws-connections:changed count 回落广播；命中返回
+// 被踢连接元数据快照（审计留痕数据源）。
 func TestWSHub_DisconnectClientHit(t *testing.T) {
 	hub, srv := newTestWSHub(t, "right-token")
 	callbacks := make(chan []ConnDetail, 8)
@@ -942,15 +943,21 @@ func TestWSHub_DisconnectClientHit(t *testing.T) {
 
 	connA := mustDialWS(t, srv, "?token=right-token")
 	connB := mustDialWS(t, srv, "?token=right-token")
-	if got := <-callbacks; len(got) != 1 {
-		t.Fatalf("前置：首个连接回调应为 1 条明细, got %d", len(got))
+	first := <-callbacks
+	if len(first) != 1 {
+		t.Fatalf("前置：首个连接回调应为 1 条明细, got %d", len(first))
 	}
 	if got := <-callbacks; len(got) != 2 {
 		t.Fatalf("前置：第二个连接回调应为 2 条明细, got %d", len(got))
 	}
 
-	if !hub.DisconnectClient(1) {
+	detail, ok := hub.DisconnectClient(1)
+	if !ok {
 		t.Fatal("在册连接踢出应命中返 true")
+	}
+	// 返回的被踢连接元数据快照：与明细回调首条一致（审计留痕数据源）
+	if detail != first[0] {
+		t.Errorf("命中应返回被踢连接明细快照, got %+v, want %+v", detail, first[0])
 	}
 
 	// 被踢连接读侧感知断开：conn.Close 前已入队帧（注册窗口 count 广播）可先
@@ -1004,10 +1011,10 @@ func TestWSHub_DisconnectClientMissAndIdempotent(t *testing.T) {
 	<-callbacks
 	<-callbacks
 
-	if hub.DisconnectClient(999) {
+	if _, ok := hub.DisconnectClient(999); ok {
 		t.Error("不存在的连接 ID 应 miss 返 false")
 	}
-	if !hub.DisconnectClient(1) {
+	if _, ok := hub.DisconnectClient(1); !ok {
 		t.Fatal("首连（ID=1）踢出应命中")
 	}
 	waitClientCount(t, hub, 1)
@@ -1015,7 +1022,7 @@ func TestWSHub_DisconnectClientMissAndIdempotent(t *testing.T) {
 		t.Fatalf("踢出后应剩 ID=2, got %v", got)
 	}
 	// 重复踢出同一 ID：幂等 miss，不产生第二次明细回调
-	if hub.DisconnectClient(1) {
+	if _, ok := hub.DisconnectClient(1); ok {
 		t.Error("重复踢出已注销连接应幂等 miss 返 false")
 	}
 	select {
@@ -1094,4 +1101,202 @@ func TestWSHub_DisconnectClientConcurrentRace(t *testing.T) {
 	cliWG.Wait()
 
 	waitClientCount(t, hub, 0)
+}
+
+// TestWSHub_DisconnectClientKickFrameBeforeClose 被踢单播帧时序（连接管控二期）：
+// ws-kicked 帧先于连接关闭送达被踢端（writePump 单写者 FIFO 保序——踢出帧写出后
+// 见 nil 哨兵才发 Close 帧退出）；踢出帧为无 seq 控制帧（不推进序号基准）且 data
+// 为空数组（帧格式与广播事件一致）。
+func TestWSHub_DisconnectClientKickFrameBeforeClose(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conn := mustDialWS(t, srv, "?token=right-token")
+	// 排空注册窗口计数帧，保证下一帧即踢出帧
+	if frame := readFrame(t, conn); frame.Event != wsConnectionsEvent {
+		t.Fatalf("前置：应先收到注册计数帧, got %q", frame.Event)
+	}
+
+	if _, ok := hub.DisconnectClient(1); !ok {
+		t.Fatal("在册连接踢出应命中")
+	}
+	kick := readFrame(t, conn)
+	if kick.Event != wsKickedEvent {
+		t.Fatalf("踢出帧应先于连接关闭送达, got %q", kick.Event)
+	}
+	if kick.Seq != 0 {
+		t.Errorf("踢出帧为控制帧不应携带 seq, got %d", kick.Seq)
+	}
+	if len(kick.Data) != 0 {
+		t.Errorf("踢出帧 data 应为空数组, got %v", kick.Data)
+	}
+
+	// 踢出帧之后连接关闭（writePump 发 Close 帧退出 + readPump unregister 收尾）
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Error("踢出帧送达后连接应关闭（ReadMessage 返回错误）")
+	}
+	waitClientCount(t, hub, 0)
+}
+
+// TestWSHub_DisconnectClientUnicastIsolation 单播隔离：ws-kicked 管控帧仅送达
+// 被踢连接，未被踢的其他连接收不到任何管控帧（只有既有连接数广播），后续广播
+// 照常送达（单播不误伤）。
+func TestWSHub_DisconnectClientUnicastIsolation(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	connA := mustDialWS(t, srv, "?token=right-token")
+	connB := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 2)
+
+	if _, ok := hub.DisconnectClient(1); !ok {
+		t.Fatal("踢出 A 应命中")
+	}
+
+	// A：注册窗口计数帧之后到达踢出帧（逐帧读取直至命中，读超时兜底防永挂）
+	_ = connA.SetReadDeadline(time.Now().Add(5 * time.Second))
+	sawKicked := false
+	for i := 0; i < 16 && !sawKicked; i++ {
+		if readFrame(t, connA).Event == wsKickedEvent {
+			sawKicked = true
+		}
+	}
+	if !sawKicked {
+		t.Fatal("被踢连接应收到 ws-kicked 帧")
+	}
+	if _, _, err := connA.ReadMessage(); err == nil {
+		t.Error("踢出帧后 A 应感知断开")
+	}
+
+	// B（未被踢）：仅收到既有连接数广播（注册窗口 count=2 与踢出后 count=1），
+	// 无任何 ws-kicked 管控帧
+	waitClientCount(t, hub, 1)
+	for i, want := range []int{2, 1} {
+		f := readFrame(t, connB)
+		if f.Event == wsKickedEvent {
+			t.Fatalf("未被踢连接不应收到管控帧, got %v", f)
+		}
+		if n, ok := frameDataCount(f); !ok || f.Event != wsConnectionsEvent || n != want {
+			t.Fatalf("B 第 %d 帧应为 count=%d 连接数广播, got event=%q data=%v", i+1, want, f.Event, f.Data)
+		}
+	}
+	// 未误伤：后续广播照常送达
+	hub.Emit("probe", "x")
+	if f := readBusinessFrame(t, connB); f.Event != "probe" {
+		t.Fatalf("未被踢连接应继续收到广播, got %q", f.Event)
+	}
+	_ = connB.Close()
+}
+
+// TestWSHub_KickFrameNotInResumeReplay 踢出帧不进环形缓冲：被踢连接重连握手
+//（resume 补发）不含 ws-kicked——踢出提示是一次性控制帧，重放会在重连瞬间
+// 误报「被踢」（幻影回放）。
+func TestWSHub_KickFrameNotInResumeReplay(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	conn1 := mustDialWS(t, srv, "?token=right-token")
+	lastSeq := readFrame(t, conn1).Seq // 注册计数帧占号，构成序号基准
+	hub.Emit("e1", "x")
+	lastSeq = readBusinessFrame(t, conn1).Seq
+
+	if _, ok := hub.DisconnectClient(1); !ok {
+		t.Fatal("踢出应命中")
+	}
+	// 排空被踢连接（读至断开），确保 unregister 收尾完成再重连
+	_ = conn1.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		if _, _, err := conn1.ReadMessage(); err != nil {
+			break
+		}
+	}
+	waitClientCount(t, hub, 0)
+
+	// 断线期间产生业务帧（应被补发）
+	hub.Emit("e2", "y")
+
+	conn2 := mustDialWS(t, srv, "?token=right-token")
+	waitClientCount(t, hub, 1)
+	sendResume(t, conn2, lastSeq)
+	sawSynced, sawE2 := false, false
+	for i := 0; i < 64 && !sawSynced; i++ {
+		f := readFrame(t, conn2)
+		switch f.Event {
+		case wsKickedEvent:
+			t.Fatal("resume 补发面不应包含踢出帧（不进环形缓冲）")
+		case "e2":
+			sawE2 = true
+		case wsSyncedEvent:
+			sawSynced = true
+		}
+	}
+	if !sawSynced || !sawE2 {
+		t.Fatalf("补发应含断线期帧并以 ws-synced 收尾, sawE2=%v sawSynced=%v", sawE2, sawSynced)
+	}
+	// 补发完成后实时广播正常
+	hub.Emit("e3", "z")
+	if f := readBusinessFrame(t, conn2); f.Event != "e3" {
+		t.Fatalf("补发后实时帧应正常, got %q", f.Event)
+	}
+	_ = conn2.Close()
+}
+
+// TestWSHub_DisconnectClientQueueFullFallback 队列满降级与 kicked 幂等：send 队列
+// 填满时踢出帧入队失败，回退直接 conn.Close()（帧丢失退化为普通断开，断开恒生效）；
+// kicked 标记挡住窗口内重复踢出的二次入队（writePump 自关路径垃圾帧防御），幂等
+// 返回命中。手工在册客户端确定性构造——不经 ServeHTTP（无 writePump 消费队列，
+// 容量恒满，不依赖慢消费者时序）。
+func TestWSHub_DisconnectClientQueueFullFallback(t *testing.T) {
+	hub := NewWSHub(StaticVerifier("right-token"), nil)
+
+	// 真实升级一条连接，取服务端侧 conn 供手工 wsClient 持有（conn.Close 可在
+	// 拨号侧观察：读到错误）。该连接不注册进 hub，仅作底层承载。
+	up := websocket.Upgrader{}
+	serverConns := make(chan *websocket.Conn, 1)
+	srvDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if sc, err := up.Upgrade(w, r, nil); err == nil {
+			serverConns <- sc
+		}
+		<-srvDone // 挂住直至测试收尾（hijacked 连接请求以 handler 返回为完成）
+	}))
+	defer func() {
+		close(srvDone)
+		srv.Close()
+	}()
+	clientConn, _, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial("ws://"+srv.Listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatalf("底层连接升级失败: %v", err)
+	}
+	t.Cleanup(func() { _ = clientConn.Close() })
+	sconn := <-serverConns
+
+	c := &wsClient{hub: hub, conn: sconn, send: make(chan []byte, wsSendBuffer), detail: ConnDetail{ID: 42, IP: "127.0.0.1", ConnectedAt: time.Now()}}
+	hub.mu.Lock()
+	hub.clients[c] = struct{}{}
+	hub.mu.Unlock()
+	t.Cleanup(func() { hub.Close() })
+
+	// 确定性填满 send 队列（无 writePump 消费，容量恒满）
+	for i := 0; i < wsSendBuffer; i++ {
+		c.send <- []byte("queued")
+	}
+
+	detail, ok := hub.DisconnectClient(42)
+	if !ok || detail.ID != 42 {
+		t.Fatalf("命中应返 (detail.ID=42, true), got (%+v, %v)", detail, ok)
+	}
+	// 踢出帧未入队（队列满回退直关），连接断开恒生效：拨号侧读出错误
+	if len(c.send) != wsSendBuffer {
+		t.Errorf("队列满时踢出帧不应入队, len=%d", len(c.send))
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		if _, _, err := clientConn.ReadMessage(); err != nil {
+			break
+		}
+	}
+
+	// 窗口内重复踢出：kicked 标记挡住二次入队，幂等返回命中
+	if _, ok := hub.DisconnectClient(42); !ok {
+		t.Error("窗口内重复踢出应幂等返回命中")
+	}
+	if len(c.send) != wsSendBuffer {
+		t.Errorf("kicked 标记应挡住二次入队, len=%d", len(c.send))
+	}
 }

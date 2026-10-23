@@ -1,7 +1,7 @@
 # 日志与错误处理规范
 
-> 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制。
-> 最后更新：2026-09-13 · 来源任务：09-12-global-error-logging
+> 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制、web_audit.log 审计事件表。
+> 最后更新：2026-10-24 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice
 
 ---
 
@@ -204,7 +204,20 @@ catch (error) {
 }
 ```
 
-## 8. 相关文档
+## 8. 审计事件表（web_audit.log）
+
+`service.AuditLogger` 落盘 JSONL（`data/web_audit.log`，O_APPEND 5MB 轮转 `.1`，豁免原子写口径；**禁落明文 token 与完整 URL**）。全部写入收敛 `write` 单点，两个出口：`Log`（认证事件经 server OnAuth 回调透传、token 生命周期经 WebTokenService）与 `LogConnKick`（连接管控动作，App 层专用）。**时序纪律：动作生效后才写**——hub 命中才落 conn_kick（miss/停机不写）、token 事件在 SaveJSON 成功后发（落盘失败回滚不留已发审计行）。
+
+| 事件 | 产出点 | 关键字段 |
+|---|---|---|
+| `auth_success` / `auth_failure` | server 认证点（HTTP requireToken / WS 握手） | tokenId（失败为空）/ remoteAddr / userAgent / ts |
+| `token_create` / `token_revoke` / `token_migrate` | WebTokenService 生命周期操作 | tokenId / name / ts |
+| `token_rotate` | App 轮换编排完成（创建/撤旧明细由服务层各自落盘） | tokenId / name / ts |
+| `conn_kick` | App.KickConnection 命中后（连接管控二期） | tokenId / name（名册映射，miss 空串）/ remoteAddr（来源 IP，明细快照剥端口口径）/ connId（`AuditRecord.ConnID`，`json:"connId,omitempty"` 仅本事件携带）/ ts |
+
+新增审计事件的步骤：`service/audit_log.go` 加 `AuditEvent*` 常量 → 经 `write` 单点新增专责出口方法（或复用 `Log`）→ 若新增结构化字段则扩 `AuditRecord`（`omitempty` 保证既有事件行形态不变）→ 本表登记。`AuditLogger` 为旁路观测面：未装配（nil）静默跳过，不阻断主链路。
+
+## 9. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — ErrorFormatter 属 options 非签名变更，Wails 绑定零 diff
 - [app-services-assembly.md](app-services-assembly.md) — logger 在 NewAppServices 注入
