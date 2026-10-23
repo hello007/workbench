@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 152
-- **Last Active**: 2026-10-23
+- **Total Sessions**: 153
+- **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1417 | Active |
+| `journal-3.md` | ~1450 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 153 | 2026-10-24 | 连接管控：踢出连接 + 令牌在线状态标记 | `ce7fe94` | `master` |
 | 152 | 2026-10-23 | 多设备连接明细（连接数升级为设备明细列表） | `d298597` | `master` |
 | 151 | 2026-10-23 | 桌面端多设备连接指示：webserve-connections:changed 桌面事件出口 | `226cdac` | `master` |
 | 150 | 2026-10-23 | 冒烟缺陷修复：chat 草稿会话隔离 + 审批模式显式传参 | `2feb5ee` | `master` |

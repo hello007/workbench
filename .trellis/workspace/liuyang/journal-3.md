@@ -1415,3 +1415,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 153: 连接管控：踢出连接 + 令牌在线状态标记
+
+**Date**: 2026-10-24
+**Task**: 连接管控：踢出连接 + 令牌在线状态标记
+**Branch**: `master`
+
+### Summary
+
+桌面明细面板踢出单个连接（WSHub.DisconnectClient 对齐 Close 只关 conn 模式，零新增事件幂等；KickConnection 绑定停机/miss 两错误码）+ 令牌列表在线连接数（App 层明细缓存回调写入/停机显式清零，ListWebTokens 返 WebTokenStatus）。踢出非封禁与撤令牌互补；浏览器 UI 零改动 RPC 面同构不特判。go test 含 -race 全绿，vitest 2084 例全过，E2E 回归 2/2；spec 沉淀 browser-channel.md §2.3 连接管控段 + CLAUDE.md v2.30。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce7fe94` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
