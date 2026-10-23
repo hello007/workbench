@@ -1448,3 +1448,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 154: 连接管控二期：踢出审计 + 被踢端感知提示
+
+**Date**: 2026-10-24
+**Task**: 连接管控二期：踢出审计 + 被踢端感知提示
+**Branch**: `master`
+
+### Summary
+
+踢出动作审计留痕（conn_kick 事件，App 层单咽喉，DisconnectClient 返回 (ConnDetail,bool)）+ 被踢端感知（hub 首个单播面：ws-kicked 帧 + nil 哨兵经 send 队列 writePump flush 后自关，禁进环形缓冲防 resume 幻影；队列满降级直接 Close，best-effort）+ 前端 connBanner 被踢态（帧到达零启发式判定、消费一次、重连清除）。go test -race 全绿 + vitest 2089 用例全绿；spec 更新 browser-channel.md/logging-and-errors.md §8/README/CLAUDE.md v2.31
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5024ca4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
