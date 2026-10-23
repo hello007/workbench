@@ -567,6 +567,14 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 // 回归）：http.Server.Close 不跟踪 hijacked 连接，stopLocked 须经 hub.Close
 // 显式断开——Stop 后客户端读侧感知连接关闭（无僵尸客户端、pump goroutine 经
 // readPump unregister 收尾）。
+// TestWebServeManager_StopClosesWSClients Stop 后在途 WS 客户端应感知断开。
+// 同时覆盖桌面连接数收口链路（webServeConnectionsEvent）：stopLocked 在
+// hub.Close 后经 Wails 出口显式补发 count=0——测试 app.ctx 为 Background
+//（非 Wails 上下文），wailsEventSink 静默跳过，本用例验证该 emit 分支在
+// --serve 无头形态下执行且不 panic；桌面 emit 的事件名/载荷契约由
+// webServeConnectionsEvent 常量单点与 hub 回调单测（server 包
+// TestWSHub_OnCountChangeCallback）覆盖，manager 级不做载荷断言（伪造 Wails
+// 运行时上下文的基建过重，非必要）。
 func TestWebServeManager_StopClosesWSClients(t *testing.T) {
 	app := newWebServeTestApp(t)
 	m := app.webServe

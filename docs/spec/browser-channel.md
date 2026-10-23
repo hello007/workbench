@@ -57,6 +57,8 @@ func (h *WSHub) Close()   // 停机关闭：写锁遍历 clients 逐个 conn.Clo
 
 **连接数事件（`ws-connections:changed`，2026-10 三期 PR3 多设备语义明示）**：每次客户端 register/unregister 成功路径广播一条 `{"event":"ws-connections:changed","data":[<事件后连接总数>],"seq":<N>}`。三个抑制/抑制态：count=0（最后一个连接断开，无接收者）不广播；hub `Close` 收口期（`closing` 标记）不广播；**锁序红线**——register/unregister 持 mu 写锁，`Emit` 内部按 seqMu → mu.RLock 加锁，必须在**释放 mu 写锁后**调用 `notifyConnectionCount`（计数快照出局部变量出锁后发射，锁内直调 Emit = 同 goroutine 重入 RLock 死锁）。事件经常规 Emit 进环形缓冲占用 seq，resume 补发面包含该事件（计数为幂等快照，最后到达值即当前态，续传契约不变）；并发连接/断开下事件发送顺序可能与计数变化顺序不一致（各自独立加 seqMu），仅信息提示用途可接受。桌面 Wails 出口不产生该事件，前端监听空安全（`useDeviceConnections` composable 单点消费，多组件共听经 EventsOn 闭包精准注销）。
 
+**桌面连接数回调出口（`webserve-connections:changed`，2026-10-23 桌面多设备指示任务）**：hub 计数口径 = 浏览器 WS 客户端数，桌面恰是发起共享的一方，视角与浏览器不同——桌面 = 纯浏览器数（指示条件 `count>=1`，且须接收 `count=0` 熄指示），浏览器含自身连接（`count>1`），故桌面专用事件名与浏览器通道**同义不同名刻意分叉**（同名会造成桌面 1 浏览器连接时指示不显示的 off-by-one + 前端 `n>=1` 校验吞 0）。链路：`WSHub.SetOnCountChange(fn func(count int))`（纯 `func(int)`，server 包不知 Wails，分层红线；须在 ServeHTTP 开始服务前注入，启动后热更不做线程安全承诺）→ register/unregister 出 mu 写锁后、`!closing` 时触发（**count=0 也透传**，与 WS 广播侧 count=0 抑制态相互独立）→ manager 装配层（`startLocked` 在 `applySink(hub)` 后）注入闭包，闭包外构造一次 `service.NewWailsEventSink(m.app.ctx)` 捕获，emit `{webServeConnectionsEvent, count}`（`--serve` 无头对非 Wails ctx 静默跳过，无新分支）。停机收口：`hub.Close` 后回调受 closing 抑制不再触发，`stopLocked` 在 `applySink(nil)` 后经 Wails 出口**显式补发 count=0**（浏览器仍连接时停机桌面须归零）。前端 `useDeviceConnections` 双通道消费：桌面事件到达即锁定通道归属（`isDesktopChannel`），`multiDevice` 分流（桌面 `count>=1` / 浏览器 `count>1`），桌面通道载荷校验 `n>=0` 接受 0，浏览器通道逐字节不变（桌面事件浏览器端永不到达，无需模式探测旗标）。Wails 绑定零新增（纯事件面）。
+
 ### 2.4 断线重连续传（server/ws.go，2026-10 新增）
 
 ```text
@@ -149,7 +151,7 @@ done chan error                                       // 每次 Start 重建、S
 * cookie 会话：认证矩阵（有效 cookie 200/错 cookie 唯一凭据 401/错 cookie + 对 query 重验证重种）、首访 Set-Cookie 属性（HttpOnly/SameSite=Strict/Max-Age/Path、TLS 加 Secure）、cookie 命中不重复 Set-Cookie、旧 cookie 轮换后 401、header 认证重种、轮换后同浏览器 `?token=` 重验证恢复（`TestWebHandler_RotationRecoveryViaQueryToken`）、首访资产级联（`TestWebHandler_CookieSessionCascade`）与真实 embed 资产全链路（`serve_cookie_smoke_test.go`：?token= 拿 Set-Cookie → 带 cookie 资产 200 → 无凭据 401 → cookie RPC 200）
 * WS：认证矩阵（三 token 通道）、帧格式 `data:[]`、断连清理无 goroutine 泄漏、慢消费者踢出、verify 热更替轮换（`TestWSHub_VerifierSwapRotation`）、握手 OnAuth 认证事件（`TestWSHub_OnAuthEvents`）、cookie 通道裸连升级（`TestWSHub_CookieAuthChannel`）、`Close` 断开全部在途客户端 + 幂等（`TestWSHub_CloseDisconnectsAllClients`）+ manager Stop 集成（`TestWebServeManager_StopClosesWSClients`）
 * WS 续传：序号单调与多客户端一致（`TestWSHub_EmitSeqMonotonicShared`）、resume 精确补发/追平/溢出断层/hub 重建断层/新连接不重放（上表四用例）、非协议上行帧忽略（`TestWSHub_ClientFrameGarbageIgnored`）、广播与 resume 补发并发 `-race` + 收帧序号不回退（`TestWSHub_ResumeConcurrentWithEmitRace`）
-* WS 连接数事件：连接/断开计数事件断言、Close 收口期抑制（`TestWSHub_ConnectionCountEvents` / `TestWSHub_CloseSuppressesConnectionEvents`）；前端消费 `useDeviceConnections` composable（事件驱动显隐/非法载荷忽略/卸载闭包注销）+ ActivityBar 指示与 TerminalPanel 提示组件用例 + E2E `settings-token.spec.js` 事件驱动链
+* WS 连接数事件：连接/断开计数事件断言、Close 收口期抑制（`TestWSHub_ConnectionCountEvents` / `TestWSHub_CloseSuppressesConnectionEvents`）；桌面回调出口：计数序列含 count=0 透传、closing 抑制、nil 安全（`TestWSHub_OnCountChangeCallback` / `TestWSHub_CloseSuppressesOnCountChangeCallback` / `TestWSHub_OnCountChangeNilSafe`，manager 级 Stop 收口归零 emit 静默形态由 `TestWebServeManager_StopClosesWSClients` 覆盖）；前端消费 `useDeviceConnections` composable（事件驱动显隐/非法载荷忽略/卸载闭包注销/桌面通道锁定与 0 透传/口径分流）+ ActivityBar 指示与 TerminalPanel 提示组件用例 + E2E `settings-token.spec.js` 事件驱动链
 * 前端续传（`frontend/src/transport/__tests__/events.spec.js`）：lastSeq 记录与 resume 握手发送（首连/无基准不发送）、同步模式缓冲按 seq 升序去重落地、ws-gap 断层处理（提示+基准重置）、同步缓冲超限兜底、无 seq 帧向后兼容、实时模式重复帧丢弃
 * webServe：manager 幂等/改址重启/端口占用三态、RegenerateWebToken 真实 HTTP 链路旧 401 新 200、并发轮换最终态一致（唯一存活令牌==磁盘兼容文件==校验基准）、Wait 代际（重启/停机/重开不返回 + 绕过管理器关 listener 真实退出返回错误）
 * 预览同源：`Sec-Fetch-Site` 矩阵（same-origin 过关入业务校验 / cross-site、none、缺失 403）
@@ -181,7 +183,7 @@ s.emitCurrent("task-progress", progress)
 
 ---
 
-**更新：** 2026-10-23（任务 `.trellis/tasks/10-22-tls-token` PR1：多 token 管理——`TokenVerifier` 校验函数注入（SetToken/RotateToken 删除）、SHA-256 哈希落盘 `data/web_tokens.json` + 存量迁移、轮换编排撤旧建新、认证审计 JSONL `data/web_audit.log`、`OnAuth` 认证事件回调；PR2：内置 TLS——`tls.NewListener` 接入 + ALPN 钉 http/1.1、幂等键扩 listen+TLS、证书加载前置无半死态、自签引导 `server/selfsigned.go`（ECDSA P-256/SAN 必填/fail-fast 禁静默重生成）+ 用户证书双形态、`E_TLS_CERT_INVALID`；PR3：WSHub 连接数事件 `ws-connections:changed` + 前端 `useDeviceConnections` 多设备语义明示）
+**更新：** 2026-10-23（任务 `.trellis/tasks/10-23-desktop-device-connection-indicator`：桌面连接数回调出口——`WSHub.SetOnCountChange` 纯 `func(int)` 回调 + manager 装配经 Wails 出口发桌面事件 `webserve-connections:changed`（count=0 透传/重连/熄指示语义与浏览器通道刻意分叉，见 §2.3 桌面出口段）、`stopLocked` 显式归零、前端 `useDeviceConnections` 双通道消费；任务 `.trellis/tasks/10-22-tls-token` PR1：多 token 管理——`TokenVerifier` 校验函数注入（SetToken/RotateToken 删除）、SHA-256 哈希落盘 `data/web_tokens.json` + 存量迁移、轮换编排撤旧建新、认证审计 JSONL `data/web_audit.log`、`OnAuth` 认证事件回调；PR2：内置 TLS——`tls.NewListener` 接入 + ALPN 钉 http/1.1、幂等键扩 listen+TLS、证书加载前置无半死态、自签引导 `server/selfsigned.go`（ECDSA P-256/SAN 必填/fail-fast 禁静默重生成）+ 用户证书双形态、`E_TLS_CERT_INVALID`；PR3：WSHub 连接数事件 `ws-connections:changed` + 前端 `useDeviceConnections` 多设备语义明示）
 
 **创建：** 2026-09-22（任务 `.trellis/tasks/09-21-agent`）
 **更新：** 2026-09-22（任务 `.trellis/tasks/09-22-browser-audit-fixes`：补 Wait 代际、停机立即断开语义、token 轮换原子性、WSHub.Close、预览同源收敛、emitCurrent 持锁投递契约）

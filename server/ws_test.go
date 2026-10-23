@@ -826,3 +826,71 @@ func TestWSHub_CloseSuppressesConnectionEvents(t *testing.T) {
 	}
 	waitClientCount(t, hub, 0)
 }
+
+// TestWSHub_OnCountChangeCallback 桌面连接数回调（SetOnCountChange）：register/
+// unregister 出 mu 写锁后触发，count 全值透传——含最后一个浏览器断开的 count=0
+// （桌面视角计数为纯浏览器数，须据此熄指示）。回调与 hub 内部 WS 广播是两条独立
+// 出口：WS 广播侧对 count=0 的抑制不影响回调透传。
+//
+// 计数值断言与触发者无关：计数为 hub 级单调快照，两次注册必然先后产生 1、2，
+// 两次断开必然先后产生 1、0（与哪条连接的 readPump 先感知无关），channel 收值
+// 顺序确定，无时序依赖。
+func TestWSHub_OnCountChangeCallback(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	callbacks := make(chan int, 8)
+	hub.SetOnCountChange(func(count int) { callbacks <- count })
+
+	connA := mustDialWS(t, srv, "?token=right-token")
+	if n := <-callbacks; n != 1 {
+		t.Fatalf("首个连接回调应为 1, got %d", n)
+	}
+	connB := mustDialWS(t, srv, "?token=right-token")
+	if n := <-callbacks; n != 2 {
+		t.Fatalf("第二个连接回调应为 2, got %d", n)
+	}
+
+	// A 断开：回调 1；B 断开：回调 0（关键：count=0 须透传给桌面熄指示）
+	_ = connA.Close()
+	if n := <-callbacks; n != 1 {
+		t.Fatalf("第一个断开回调应为 1, got %d", n)
+	}
+	_ = connB.Close()
+	if n := <-callbacks; n != 0 {
+		t.Fatalf("最后一个浏览器断开回调应为 0, got %d", n)
+	}
+	waitClientCount(t, hub, 0)
+}
+
+// TestWSHub_CloseSuppressesOnCountChangeCallback hub.Close 收口期回调与 WS 广播
+// 同受 closing 抑制：逐连接 unregister 不再触发回调。manager 停机路径据契约在
+// hub.Close 后经 Wails 出口显式补发 count=0（web_serve.go stopLocked），hub 侧
+// 不重复发。
+func TestWSHub_CloseSuppressesOnCountChangeCallback(t *testing.T) {
+	hub, srv := newTestWSHub(t, "right-token")
+	callbacks := make(chan int, 8)
+	hub.SetOnCountChange(func(count int) { callbacks <- count })
+
+	conn := mustDialWS(t, srv, "?token=right-token")
+	if n := <-callbacks; n != 1 {
+		t.Fatalf("前置：register 回调应为 1, got %d", n)
+	}
+	hub.Close()
+	waitClientCount(t, hub, 0)
+	select {
+	case n := <-callbacks:
+		t.Fatalf("Close 收口期不应触发连接数回调, got count=%d", n)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_ = conn.Close()
+}
+
+// TestWSHub_OnCountChangeNilSafe 未设置回调（nil）时 register/unregister 正常：
+// 连接数 WS 广播路径零波及（既有用例均未设置回调，此处显式钉住 nil 安全契约）。
+func TestWSHub_OnCountChangeNilSafe(t *testing.T) {
+	_, srv := newTestWSHub(t, "right-token")
+	conn := mustDialWS(t, srv, "?token=right-token")
+	frame := readFrame(t, conn)
+	if n, ok := frameDataCount(frame); !ok || frame.Event != wsConnectionsEvent || n != 1 {
+		t.Fatalf("未设置回调时连接数广播应照常, got event=%q data=%v", frame.Event, frame.Data)
+	}
+}

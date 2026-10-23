@@ -90,12 +90,13 @@ type wsRingEntry struct {
 // 广播语义：一条事件推给全部已连接客户端（个人单用户多标签页场景，各标签
 // 共享同一后端状态）。单用户工具不做订阅过滤/单播，保持实现最小面。
 type WSHub struct {
-	verify   TokenVerifier   // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
-	onAuth   func(AuthEvent) // 认证事件出口（可 nil）
-	upgrader websocket.Upgrader
-	mu       sync.RWMutex // 保护 clients 与 closing；send channel 的 close 仅发生在持写锁的 unregister
-	clients  map[*wsClient]struct{}
-	closing  bool // hub 已进入关停（Close 调用后置位）：register/unregister 不再广播连接数事件
+	verify        TokenVerifier   // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
+	onAuth        func(AuthEvent) // 认证事件出口（可 nil）
+	onCountChange func(count int) // 连接数变化回调（桌面事件出口用，可 nil；见 SetOnCountChange）
+	upgrader      websocket.Upgrader
+	mu            sync.RWMutex // 保护 clients 与 closing；send channel 的 close 仅发生在持写锁的 unregister
+	clients       map[*wsClient]struct{}
+	closing       bool // hub 已进入关停（Close 调用后置位）：register/unregister 不再广播连接数事件
 
 	// 续传序号与环形缓冲（seqMu 保护）。锁序恒为 seqMu → mu：Emit 在 seqMu
 	// 临界区内完成「占号-入环-广播」，resume 补发在同一临界区取补发集，保证
@@ -127,6 +128,16 @@ type wsClient struct {
 // 为认证事件出口（可 nil）。verify 为 nil 时所有升级请求 fail closed 拒绝。
 func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent)) *WSHub {
 	return newWSHubTuned(verify, onAuth, defaultWriteWait, defaultPongWait, wsResumeBuffer)
+}
+
+// SetOnCountChange 设置连接数变化回调（桌面事件出口用，main 装配层在 hub 服务
+// 开始前注入——web_serve.go startLocked 在 applySink 之后调用）。须在 ServeHTTP
+// 开始服务前设置：回调为纯函数指针无内部锁，启动后热更换闭包不做线程安全承诺
+// （生产装配一次即定，无运行期热更路径）。回调与 hub 内部 WS 广播（ws-connections:changed）
+// 是两条独立出口：count=0 也须透传（桌面最后一个浏览器断开要熄指示，WS 广播
+// 侧对 count=0 的抑制不影响回调），closing 收口期统一抑制（见 notifyConnectionCount）。
+func (h *WSHub) SetOnCountChange(fn func(count int)) {
+	h.onCountChange = fn
 }
 
 // newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
@@ -390,21 +401,34 @@ func (h *WSHub) unregister(c *wsClient) {
 	h.notifyConnectionCount(count, notify)
 }
 
-// notifyConnectionCount 广播一条连接数变化事件（多设备语义明示，多端共享同一
-// 后端状态的前端可见性提示，data[0] 为事件后的连接总数）。
+// notifyConnectionCount 连接数变化的双出口分发（多设备语义明示，多端共享同一
+// 后端状态的前端可见性提示）：
+//   - 桌面回调出口（onCountChange）：count 全值透传（含 0——桌面视角计数为纯
+//     浏览器连接数，最后一个浏览器断开须熄指示；桌面事件 webserve-connections:changed
+//     由 main 装配层闭包发射，server 包不知 Wails，分层红线）；
+//   - hub 内部 WS 广播（ws-connections:changed）：仅 count>0 时广播——浏览器
+//     视角计数含自身连接（指示条件 count>1），count=0 时无接收者，仅徒增环形
+//     缓冲噪声。两出口语义分叉刻意不同名不同判定，前端 useDeviceConnections
+//     双通道消费分流。
 //
 // **锁序红线**：调用方必须在释放 mu 写锁之后调用——Emit 内部按 seqMu → mu.RLock
 // 加锁，若在 mu 写锁临界区内调用会形成同 goroutine 重入 RLock 死锁（RWMutex
 // 写锁持有方再取读锁不被允许）。计数在写锁临界区内快照出局部变量，出锁后发射。
 //
-// 事件经常规 Emit 进环形缓冲占用 seq：resume 补发面包含该事件，计数为幂等
-// 快照（最后到达值即当前态），重放无碍，续传契约不变。并发连接/断开场景下
-// 两条 changed 事件的发送顺序可能与计数变化顺序不一致（各自独立加 seqMu），
-// 事件仅信息提示用途可接受。两个抑制态：count=0（最后一个连接断开）无接收者，
-// 仅徒增环形缓冲噪声，不广播；hub 关停（closing）后不广播——Close 收口期逐
-// 连接 unregister 的递减序列对前端无意义（连接即将随服务停机断开）。
+// WS 广播事件经常规 Emit 进环形缓冲占用 seq：resume 补发面包含该事件，计数为
+// 幂等快照（最后到达值即当前态），重放无碍，续传契约不变。并发连接/断开场景
+// 下两条 changed 事件的发送顺序可能与计数变化顺序不一致（各自独立加 seqMu），
+// 事件仅信息提示用途可接受。共同抑制态：hub 关停（closing）后不触发——Close
+// 收口期逐连接 unregister 的递减序列对前端无意义（连接即将随服务停机断开），
+// 桌面归零由 manager 停机路径显式补发（web_serve.go stopLocked）。
 func (h *WSHub) notifyConnectionCount(count int, notify bool) {
-	if !notify || count == 0 {
+	if !notify {
+		return
+	}
+	if fn := h.onCountChange; fn != nil {
+		fn(count)
+	}
+	if count == 0 {
 		return
 	}
 	h.Emit(wsConnectionsEvent, count)
