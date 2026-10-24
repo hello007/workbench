@@ -43,7 +43,7 @@
 | 素材管理 | 43 | `app_assets.go` |
 | 素材购物栏 | 7 | `app_asset_cart.go` |
 
-> 既有缺口（与本表合计 219 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。）
+> 既有缺口（与本表合计 219 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。连接管控域 `KickConnection`/`ListWebTokens`/`CreateWebToken`/`RevokeWebToken` 与审计读侧 `QueryAuditLog`（纯桌面面，浏览器 RPC 通道屏蔽）已随 2026-10 连接管控任务落地，本域表格待另案一并补齐。）
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 

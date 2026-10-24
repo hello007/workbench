@@ -456,9 +456,24 @@
               <div v-if="!webAccessUrls.length" class="webserve-url-empty">暂无可用地址</div>
             </div>
           </div>
+          <!-- 审计历史（连接管控三期）：认证/令牌生命周期/踢出动作全谱留痕查看。
+               纯桌面面（隐私红线：他人 IP/token 明细仅走桌面出口）——浏览器通道
+               入口隐藏（isBrowserChannel 启动期判定），后端 RPC 面 HiddenMethods
+               兜底屏蔽（对浏览器呈现「方法不存在」） -->
+          <div v-if="!browserChannel" class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">审计日志</div>
+              <div class="settings-item-desc">浏览器访问通道安全事件留痕（认证 / 令牌生命周期 / 连接踢出），仅本机可查看</div>
+            </div>
+            <div>
+              <el-button size="small" @click="auditHistoryVisible = true">查看审计日志</el-button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+    <!-- 审计历史弹窗（连接管控三期，纯桌面面）：独立组件，v-model 控制显隐 -->
+    <AuditHistoryDialog v-model="auditHistoryVisible" />
   </el-dialog>
 </template>
 
@@ -469,6 +484,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
+import { isBrowserChannel } from '../transport'
+import AuditHistoryDialog from './AuditHistoryDialog.vue'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 
 const emit = defineEmits(['update-available'])
@@ -484,6 +501,11 @@ const tabs = [
 ]
 
 const activeTab = ref('general')
+// 通道归属（启动期固定，非响应式）：浏览器通道隐藏审计历史入口（隐私红线，
+// 见模板注释）；桌面通道（默认）可见
+const browserChannel = isBrowserChannel()
+// 审计历史弹窗显隐（AuditHistoryDialog v-model）
+const auditHistoryVisible = ref(false)
 const gpuEnabled = ref(true)
 const needsRestart = ref(false)
 const defaultShell = ref(FALLBACK_SHELL)

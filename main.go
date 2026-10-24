@@ -190,11 +190,15 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 	}
 	hub := server.NewWSHub(verify, onAuth)
 	handler := server.NewWebHandler(server.WebOptions{
-		Assets:    distFS,
-		Verify:    verify,
-		OnAuth:    onAuth,
-		RPCTarget: app,
-		WSHub:     hub,
+		Assets: distFS,
+		Verify: verify,
+		OnAuth: onAuth,
+		// 连接管控三期：per-request 装饰 target（RPC 调用者令牌 ID 注入踢出审计
+		// actor 归因）+ 审计读侧对浏览器通道屏蔽（隐私红线，见 WebOptions 注释）
+		RPCTarget:         app,
+		RPCTargetForActor: app.rpcTargetForActor,
+		RPCHiddenMethods:  []string{"QueryAuditLog"},
+		WSHub:             hub,
 	})
 	return hub, handler, nil
 }

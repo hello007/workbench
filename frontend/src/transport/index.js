@@ -16,6 +16,20 @@
 import { createRpcProxy } from './rpc'
 import { createEventBridge } from './events'
 
+// 通道归属旗标（installBrowserTransport 安装期置位）：true = 浏览器（serve）通道。
+// main.js 在 createApp/mount 前调用安装，组件 setup 期读取时序安全。用途：数据
+// 隐私红线下的桌面专用功能入口判定（如审计历史——浏览器通道被 RPC 面屏蔽，入口
+// 直接隐藏而非点击报错）。
+let browserChannelInstalled = false
+
+/**
+ * 当前是否浏览器（serve）通道。
+ * @returns {boolean}
+ */
+export function isBrowserChannel() {
+  return browserChannelInstalled
+}
+
 /**
  * 探测是否处于 Wails 桌面环境（生成绑定已注入 window.go.main.App）。
  * @returns {boolean}
@@ -32,6 +46,7 @@ export function installBrowserTransport() {
   if (hasWailsBindings()) return false
   window.go = { main: { App: createRpcProxy() } }
   window.runtime = createEventBridge({ wsUrl: buildWsUrl(window.location) })
+  browserChannelInstalled = true
   return true
 }
 

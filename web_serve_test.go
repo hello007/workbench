@@ -579,7 +579,7 @@ func TestWebServeManager_WaitGenerationSurvivesRestart(t *testing.T) {
 // TestWebServeManager_StopClosesWSClients Stop 后在途 WS 客户端应感知断开。
 // 同时覆盖桌面连接明细收口链路（webServeConnectionsEvent）：stopLocked 在
 // hub.Close 后经 Wails 出口显式补发空明细快照——测试 app.ctx 为 Background
-//（非 Wails 上下文），wailsEventSink 静默跳过，本用例验证该 emit 分支在
+// （非 Wails 上下文），wailsEventSink 静默跳过，本用例验证该 emit 分支在
 // --serve 无头形态下执行且不 panic；桌面 emit 的事件名/载荷契约由
 // webServeConnectionsEvent 常量单点与 hub 回调单测（server 包
 // TestWSHub_OnConnectionsChangeCallback）覆盖，manager 级不做载荷断言（伪造 Wails
@@ -1218,6 +1218,14 @@ func TestApp_KickConnection_AuditTrail(t *testing.T) {
 	}
 	if kick.Ts == 0 {
 		t.Error("ts 应就绪")
+	}
+	// 桌面路径操作者归因（连接管控三期）：actorSource=desktop、actorTokenId 空
+	// （本地信任模型无令牌上下文）
+	if kick.ActorSource != service.AuditActorDesktop {
+		t.Errorf("桌面踢出 actorSource 应为 desktop, got %q", kick.ActorSource)
+	}
+	if kick.ActorTokenID != "" {
+		t.Errorf("桌面踢出 actorTokenId 应为空, got %q", kick.ActorTokenID)
 	}
 	// 无敏感信息：审计文件不含明文 token
 	raw, err := os.ReadFile(auditPath)

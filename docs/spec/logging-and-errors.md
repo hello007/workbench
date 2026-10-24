@@ -1,7 +1,7 @@
 # 日志与错误处理规范
 
 > 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制、web_audit.log 审计事件表。
-> 最后更新：2026-10-24 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice
+> 最后更新：2026-10-24 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor
 
 ---
 
@@ -213,9 +213,15 @@ catch (error) {
 | `auth_success` / `auth_failure` | server 认证点（HTTP requireToken / WS 握手） | tokenId（失败为空）/ remoteAddr / userAgent / ts |
 | `token_create` / `token_revoke` / `token_migrate` | WebTokenService 生命周期操作 | tokenId / name / ts |
 | `token_rotate` | App 轮换编排完成（创建/撤旧明细由服务层各自落盘） | tokenId / name / ts |
-| `conn_kick` | App.KickConnection 命中后（连接管控二期） | tokenId / name（名册映射，miss 空串）/ remoteAddr（来源 IP，明细快照剥端口口径）/ connId（`AuditRecord.ConnID`，`json:"connId,omitempty"` 仅本事件携带）/ ts |
+| `conn_kick` | App.KickConnection 命中后（连接管控二期；三期补操作者归因） | tokenId / name（名册映射，miss 空串）/ remoteAddr（来源 IP，明细快照剥端口口径）/ connId（`AuditRecord.ConnID`，`json:"connId,omitempty"` 仅本事件携带）/ **actorSource（`desktop`\|`rpc`）+ actorTokenId（RPC 调用者令牌记录 ID，桌面空不落键；与 TokenID 正交——TokenID 恒为被踢目标侧，2026-10-24 三期）** / ts |
 
 新增审计事件的步骤：`service/audit_log.go` 加 `AuditEvent*` 常量 → 经 `write` 单点新增专责出口方法（或复用 `Log`）→ 若新增结构化字段则扩 `AuditRecord`（`omitempty` 保证既有事件行形态不变）→ 本表登记。`AuditLogger` 为旁路观测面：未装配（nil）静默跳过，不阻断主链路。
+
+### 8.1 读侧 API（QueryAuditLog，2026-10-24 连接管控三期）
+
+`AuditLogger.QueryAuditLog(AuditQueryOptions) (AuditQueryResult, error)`：过滤（`Events []string` 白名单 / `From`/`To` unix 秒含边界 0=不限 / `TokenID` 命中 `TokenID` **或** `ActorTokenID` 任一即相关——同一令牌可为事件主体、认证者或踢出操作者）→ 合并读 `<path>.1`（旧）+ 主文件（新）→ 时间倒序分页（`Offset`/`Limit`，缺省 100、上限钳 500，`Records` 恒非 nil，`Total` 为过滤后总数）。**快照语义**：打开-读-关闭不持写锁（与 O_APPEND 单行原子追加并发安全）；读期间轮转 rename 窗口可能重复/漏读边界单行，可接受偏差（观测面非正确性依赖）；坏行（非法 JSON / 缺 event 字段）跳过——读方容错，写侧不保证行完整性。**消费面与隐私红线**：唯一合法消费面为桌面 App 绑定 `QueryAuditLog`（前端设置页「审计日志」弹窗）；浏览器通道经 `server.WebOptions.RPCHiddenMethods` 屏蔽（呈现「方法不存在」，见 browser-channel.md §2.2）——新增纯桌面数据面方法须同步追加该屏蔽列表，漏加 = 全谱 IP/令牌明细经同构 RPC 面外泄。
+
+操作者归因链路（写侧）：桌面路径 `KickConnection` 恒 `kickConnectionAs(connID, "desktop", "")`；浏览器 RPC 路径经 `requireToken` ctx 注入 + `rpcAuditTarget` per-request 装饰 override 捕获调用者令牌 ID（见 browser-channel.md §2.2/§2.3）。
 
 ## 9. 相关文档
 

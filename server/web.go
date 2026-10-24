@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"io"
 	"io/fs"
@@ -60,6 +61,20 @@ type WebOptions struct {
 	// 避免 server 包反向依赖 main 包）。非 nil 时挂载 /api/rpc（经 token 认证）；
 	// nil 时 /api/rpc 不挂载（请求落入静态路径分支被 405 拒绝）。
 	RPCTarget any
+	// RPCTargetForActor 按调用者令牌 ID 构造 per-request RPC target（连接管控
+	// 三期 actor 归因，可选）。非 nil 时 token 中间件将本次请求的 tokenID 注入
+	// 请求上下文（rpcActorKey），翻译层据此构造归因 target（main 包装饰 wrapper
+	// embed 静态 target 类型 override 特定方法透传身份）；nil 或请求无身份时
+	// 回落 RPCTarget（桌面/直连语义，actor 恒 desktop）。
+	RPCTargetForActor func(actorTokenID string) any
+	// RPCHiddenMethods RPC 面屏蔽方法名（连接管控三期隐私红线）：命中返回与
+	// 「方法不存在」同响应，不暴露被屏蔽方法的存在性。背景：桌面绑定面 = RPC
+	// 白名单同构暴露，审计读侧（QueryAuditLog）若同构可达，浏览器通道可直调
+	// 获取全谱 IP/令牌明细，破「他人 IP/token 明细仅走桌面出口」红线。此为对
+	// 二期「同构暴露面不特判」原则的有据偏离——该原则指管控动作面（动作语义
+	// 两端一致），本处为数据隐私面，红线优先。桌面 Wails 绑定不经翻译层，不受
+	// 本屏蔽影响。
+	RPCHiddenMethods []string
 	// WSHub WebSocket 事件广播 hub（serve 模式事件出口）。非 nil 时挂载 /ws
 	// 端点——认证在 hub 内升级前完成（支持 Sec-WebSocket-Protocol 子协议 /
 	// wb_token cookie / ?token= 三种通道，见 ws.go），不套 requireToken（其
@@ -116,7 +131,7 @@ func NewWebHandler(opts WebOptions) *WebHandler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(healthPath, h.serveHealth)
 	if opts.RPCTarget != nil {
-		mux.Handle(rpcPath, h.requireToken(NewRPCHandler(opts.RPCTarget)))
+		mux.Handle(rpcPath, h.requireToken(newRPCHandler(opts.RPCTarget, opts.RPCTargetForActor, opts.RPCHiddenMethods)))
 	}
 	if opts.WSHub != nil {
 		mux.Handle(wsPath, opts.WSHub)
@@ -166,6 +181,12 @@ func requireSameOrigin(next http.Handler) http.Handler {
 	})
 }
 
+// rpcActorKey 请求上下文中调用者令牌 ID 的键类型（私有类型防跨包键冲突）。
+// 值由 requireToken 认证成功后注入，仅 RPC 翻译层消费（actor 归因，连接管控
+// 三期）；静态资产路径无读者，注入无害。只注 tokenID（审计归因键），明文凭据
+// 不进 context。
+type rpcActorKey struct{}
+
 // requireToken token 认证中间件：未授权返回 401 JSON（安全失败关闭）；授权
 // 成功后经 issueSessionCookie 贯通浏览器会话。成功/失败各触发一次 OnAuth
 // 认证事件（装配层注入审计落盘；静态资产每请求都过本中间件，认证事件为
@@ -182,6 +203,10 @@ func (h *WebHandler) requireToken(next http.Handler) http.Handler {
 		}
 		emitAuthEvent(h.onAuth, AuthEventSuccess, tokenID, r)
 		h.issueSessionCookie(w, r, matched)
+		// 调用者身份随请求下行（actor 归因数据源）：仅 RPC 翻译层消费
+		if tokenID != "" {
+			r = r.WithContext(context.WithValue(r.Context(), rpcActorKey{}, tokenID))
+		}
 		next.ServeHTTP(w, r)
 	})
 }

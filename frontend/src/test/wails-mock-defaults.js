@@ -210,6 +210,19 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务）：void 返回 null
   // 安全 no-op（命中即断开对端连接；错误经 {__error__, __code__} 描述符注入）
   KickConnection: null,
+  // 审计历史（连接管控三期，桌面审计历史弹窗）：形状对齐 service.AuditQueryResult
+  // （外层 Total/Records 为 Go 导出字段直序列化大写驼峰；records 内为 json 小写
+  // tag：ts/event/tokenId/name/remoteAddr/userAgent/connId/actorSource/
+  // actorTokenId），时间倒序、恒数组。默认两条代表性记录供渲染断言；参数
+  // （AuditQueryOptions：事件/时间窗过滤 + Offset/Limit 分页）mock 不实现过滤
+  // 分页语义，E2E extra 表可覆盖
+  QueryAuditLog: {
+    Total: 2,
+    Records: [
+      { ts: 1735689700, event: 'conn_kick', tokenId: 'tok-default', name: '默认', remoteAddr: '192.168.1.5', connId: 1, actorSource: 'desktop' },
+      { ts: 1735689600, event: 'auth_success', tokenId: 'tok-default', remoteAddr: '192.168.1.5', userAgent: 'Mozilla/5.0' }
+    ]
+  },
 
   // ---- AI 对话工作台（PR1 ChatService 会话链路 + PR2 目录项 CRUD + PR3 对话闭环）----
   // 会话方法：选中目录后调 ListChatSessions，选中会话后调 GetChatSession；

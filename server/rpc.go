@@ -86,6 +86,17 @@ func newRPCError(code, format string, args ...any) *rpcProtocolError {
 	return &rpcProtocolError{code: code, message: fmt.Sprintf(format, args...)}
 }
 
+// rpcHandler /api/rpc 翻译层 handler 状态（静态 target + 可选 per-request 装饰
+// target + 屏蔽方法集）。
+type rpcHandler struct {
+	target any
+	// targetForActor 按调用者令牌 ID 构造 per-request target（连接管控三期
+	// actor 归因，装配层注入 main 包装饰 wrapper）；nil 时恒用静态 target。
+	targetForActor func(actorTokenID string) any
+	// hiddenMethods 屏蔽方法集（隐私红线，见 WebOptions.RPCHiddenMethods）。
+	hiddenMethods map[string]bool
+}
+
 // NewRPCHandler 构建通用 RPC 翻译层 handler：把 {method, args} 请求经反射路由
 // 到 target 的导出方法并回传 JSON 结果。
 //
@@ -95,16 +106,24 @@ func newRPCError(code, format string, args ...any) *rpcProtocolError {
 // （桌面模式前端本可调用任意绑定方法，无方法级二次鉴权）；本层不做方法过滤，
 // 未授权不可达由外层 token 认证中间件统一把关——信任模型与桌面一致。
 func NewRPCHandler(target any) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleRPC(w, r, target)
-	})
+	return newRPCHandler(target, nil, nil)
+}
+
+// newRPCHandler 全参构造（装配层经 WebOptions 间接使用；NewRPCHandler 为既有
+// 测试/静态形态兼容入口）。
+func newRPCHandler(target any, targetForActor func(actorTokenID string) any, hiddenMethods []string) http.Handler {
+	hidden := make(map[string]bool, len(hiddenMethods))
+	for _, m := range hiddenMethods {
+		hidden[m] = true
+	}
+	return &rpcHandler{target: target, targetForActor: targetForActor, hiddenMethods: hidden}
 }
 
 // handleRPC 处理单次 RPC 调用：解析请求 → 反射调用 → 按统一结构应答。
 //
 // 仅接受 POST + JSON 请求体（静态资产与预览路由各自只读，RPC 是唯一的
 // 写入口，收紧方法可降低误用面）。
-func handleRPC(w http.ResponseWriter, r *http.Request, target any) {
+func (h *rpcHandler) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeRPCError(w, http.StatusMethodNotAllowed, ErrCodeRPCBadRequest, "仅支持 POST 请求")
@@ -128,6 +147,22 @@ func handleRPC(w http.ResponseWriter, r *http.Request, target any) {
 		writeRPCResult(w, rpcFailure(ErrCodeRPCBadRequest, "缺少 method 字段"))
 		return
 	}
+	// 屏蔽方法（连接管控三期隐私红线）：与真不存在同响应——不暴露被屏蔽方法的
+	// 存在性（桌面绑定面=RPC 白名单同构，审计读侧等方法须对浏览器通道隐身）。
+	if h.hiddenMethods[req.Method] {
+		writeRPCResult(w, rpcFailure(ErrCodeRPCMethodNotFound, "方法不存在: "+req.Method))
+		return
+	}
+
+	// per-request 装饰 target：token 中间件已将调用者令牌 ID 注入 ctx（见
+	// web.go requireToken），据此构造归因 target；无身份（直连 handler 的测试
+	// 形态）回落静态 target（桌面语义）。
+	target := h.target
+	if h.targetForActor != nil {
+		if actor, _ := r.Context().Value(rpcActorKey{}).(string); actor != "" {
+			target = h.targetForActor(actor)
+		}
+	}
 
 	data, callErr := invokeRPC(target, req.Method, req.Args)
 	if callErr != nil {
@@ -137,6 +172,11 @@ func handleRPC(w http.ResponseWriter, r *http.Request, target any) {
 		return
 	}
 	writeRPCResult(w, rpcResponse{OK: true, Data: data})
+}
+
+// ServeHTTP 实现 http.Handler。
+func (h *rpcHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.handleRPC(w, r)
 }
 
 // invokeRPC 按方法名反射查找 target 的导出方法，转换参数后调用，返回

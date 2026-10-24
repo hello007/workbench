@@ -229,11 +229,22 @@ func (a *App) onlineConnCountsByToken() map[string]int {
 // 委托 webServeManager（停机/未启用返回 E_WEBSERVE_NOT_RUNNING，连接不存在返回
 // E_CONNECTION_NOT_FOUND，均 warning 级引导）。踢出生效（hub 命中）后写审计
 // conn_kick（对齐「动作生效后才写审计」纪律，miss/停机不写——桌面按钮与浏览器
-// RPC 反射面同走本方法，单咽喉全覆盖）。踢出语义 = 断开当前连接，对端同令牌可
+// RPC 反射面同走本方法族，单咽喉全覆盖）。踢出语义 = 断开当前连接，对端同令牌可
 // 重连（非封禁）；防重连由 RevokeWebToken 承担（撤销即时生效于新连接，不影响
 // 已建立连接，两手段互补）。浏览器 UI 无此入口（同构暴露面不特判，认证由外层
 // token 把关，与停服务/撤令牌同能力面）。
+//
+// 桌面路径 actorSource=desktop（本地信任模型无令牌上下文，操作者即桌面用户）；
+// 浏览器 RPC 路径经 rpcAuditTarget 装饰 override 捕获调用者令牌 ID 后同走
+// kickConnectionAs（连接管控三期 actor 归因）。
 func (a *App) KickConnection(connID uint64) error {
+	return a.kickConnectionAs(connID, service.AuditActorDesktop, "")
+}
+
+// kickConnectionAs 踢出动作统一实现（导出 KickConnection 与 RPC 装饰 override
+// 的共用体，actor 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与
+// RPC 反射面。
+func (a *App) kickConnectionAs(connID uint64, actorSource, actorTokenID string) error {
 	if a.webServe == nil {
 		return model.NewAppError(model.ErrCodeWebServeNotRunning,
 			"浏览器访问服务未运行，无法踢出连接")
@@ -242,7 +253,7 @@ func (a *App) KickConnection(connID uint64) error {
 	if err != nil {
 		return err
 	}
-	a.auditConnKick(detail)
+	a.auditConnKick(actorSource, actorTokenID, detail)
 	return nil
 }
 
@@ -250,12 +261,63 @@ func (a *App) KickConnection(connID uint64) error {
 // 明细快照的 TokenName 为 server 层原始形态恒空，webTokenNamedDetails 单点映射，
 // miss 降级空串与明细面板同款语义）；webAuditSvc 未装配（旁路构造的测试 App）
 // 静默跳过——审计为旁路观测面，不阻断踢出主链路。
-func (a *App) auditConnKick(detail server.ConnDetail) {
+func (a *App) auditConnKick(actorSource, actorTokenID string, detail server.ConnDetail) {
 	if a.webAuditSvc == nil {
 		return
 	}
 	named := a.webTokenNamedDetails([]server.ConnDetail{detail})
-	a.webAuditSvc.LogConnKick(named[0].TokenID, named[0].TokenName, named[0].IP, named[0].ID)
+	a.webAuditSvc.LogConnKick(service.KickAudit{
+		ActorSource:   actorSource,
+		ActorTokenID:  actorTokenID,
+		TargetTokenID: named[0].TokenID,
+		TargetName:    named[0].TokenName,
+		RemoteAddr:    named[0].IP,
+		ConnID:        named[0].ID,
+	})
+}
+
+// rpcAuditTarget 浏览器 RPC 面的 per-request 装饰 target（连接管控三期 actor
+// 归因）：embed *App 提升全部导出方法（RPC 白名单与桌面绑定面形态一致，其余
+// 132 方法零分叉），仅 override KickConnection——闭包捕获本次请求的调用者令牌
+// ID（token 中间件注入 ctx，装配回调按请求构造本值），委托未导出 kickConnectionAs
+// 完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出
+// 字段/方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
+type rpcAuditTarget struct {
+	*App
+	actorTokenID string
+}
+
+func (t rpcAuditTarget) KickConnection(connID uint64) error {
+	return t.kickConnectionAs(connID, service.AuditActorRPC, t.actorTokenID)
+}
+
+// rpcTargetForActor 装配回调（server.WebOptions.RPCTargetForActor 消费形态）：
+// 按调用者令牌 ID 构造 per-request RPC target。
+func (a *App) rpcTargetForActor(actorTokenID string) any {
+	return rpcAuditTarget{App: a, actorTokenID: actorTokenID}
+}
+
+// QueryAuditLog 查询审计历史（连接管控三期，桌面审计历史弹窗数据源）：委托
+// AuditLogger 读侧（过滤 + 时间倒序分页，坏行跳过，快照语义）。
+//
+// **隐私红线——本方法不进浏览器通道**：桌面绑定面与 RPC 白名单同构，读侧若
+// 同构可达，浏览器通道可直调获取全谱 IP/令牌明细，破「他人 IP/token 明细仅走
+// 桌面出口」红线。装配层经 server.WebOptions.RPCHiddenMethods 对翻译层屏蔽
+// （对浏览器呈现「方法不存在」），前端设置页入口在浏览器模式隐藏。桌面 Wails
+// 绑定不经翻译层，不受屏蔽影响。审计服务未装配（旁路构造的测试 App）返回
+// 空结果（审计为旁路观测面，不报错阻断）。
+func (a *App) QueryAuditLog(opts service.AuditQueryOptions) (service.AuditQueryResult, error) {
+	if a.webAuditSvc == nil {
+		return service.AuditQueryResult{Records: []service.AuditRecord{}}, nil
+	}
+	result, err := a.webAuditSvc.QueryAuditLog(opts)
+	if err != nil {
+		return service.AuditQueryResult{}, err
+	}
+	if result.Records == nil {
+		result.Records = []service.AuditRecord{}
+	}
+	return result, nil
 }
 
 // webTokenNamedDetails 为连接明细快照补全令牌名（web_serve.go startLocked 桌面

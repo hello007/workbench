@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsPanel from '../SettingsPanel.vue'
+import AuditHistoryDialog from '../AuditHistoryDialog.vue'
 import { useUiStore, useSettingsStore, DEFAULTS, DIFF_TOOL_PRESETS } from '../../store'
 
 vi.mock('element-plus', async () => {
@@ -28,7 +29,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RegenerateWebToken: vi.fn(),
   ListWebTokens: vi.fn(),
   CreateWebToken: vi.fn(),
-  RevokeWebToken: vi.fn()
+  RevokeWebToken: vi.fn(),
+  QueryAuditLog: vi.fn()
 }))
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -41,6 +43,17 @@ const stubs = {
     template: '<div v-if="modelValue" class="el-dialog"><slot /></div>',
     props: ['modelValue', 'title', 'width', 'closeOnClickModal', 'closeOnPressEscape', 'class', 'append'],
     emits: ['update:modelValue']
+  },
+  // 审计历史弹窗（AuditHistoryDialog）内嵌表格 stub：jsdom 下真实 el-table-column
+  // 渲染期即调用默认插槽且无 row 参数，列模板 { row } 解构直接 TypeError；空 row
+  // 兜底渲染即可满足显隐断言（渲染链细节由 AuditHistoryDialog 专属 spec 覆盖）
+  'el-table': {
+    template: '<div class="el-table-stub"><slot /></div>',
+    props: ['data', 'size']
+  },
+  'el-table-column': {
+    template: '<div class="el-table-col-stub"><slot :row="{}" /></div>',
+    props: ['label', 'width', 'minWidth']
   },
   'el-switch': {
     template: '<input type="checkbox" :checked="modelValue" @change="onChange" />',
@@ -1519,5 +1532,61 @@ describe('SettingsPanel.vue - 令牌管理区', () => {
     wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, null)
     await openNetworkTab()
     expect(wrapper.text()).toContain('暂无令牌记录')
+  })
+})
+
+// ---- 审计历史入口（连接管控三期，纯桌面面：浏览器通道隐藏 + 后端 RPC 面屏蔽） ----
+
+describe('SettingsPanel.vue - 审计历史入口', () => {
+  let wrapper = null
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('桌面通道（默认）渲染入口，点击打开审计历史弹窗', async () => {
+    wrapper = await createWrapper()
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+    const btn = wrapper.findAll('button').find(b => b.text() === '查看审计日志')
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await nextTick()
+    // v-model 透传：子组件 modelValue 置 true（子组件内部加载链由其专属 spec 覆盖）
+    expect(wrapper.findComponent(AuditHistoryDialog).props('modelValue')).toBe(true)
+  })
+
+  it('浏览器通道（isBrowserChannel）隐藏入口（隐私红线）', async () => {
+    // 组件在模块求值期捕获通道归属，须重置模块注册表后以 true 形态重新求值；
+    // doMock 不提升、仅作用于本次动态导入
+    vi.resetModules()
+    vi.doMock('../../transport', () => ({ isBrowserChannel: () => true }))
+    try {
+      const { default: BrowserSettingsPanel } = await import('../SettingsPanel.vue')
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const { GetSettings, GetAppVersion, GetShellConfigs, GetWebServeConfig, GetWebServeToken, ListWebTokens } = await import('../../../wailsjs/go/main/App')
+      GetSettings.mockResolvedValue(baseSettings())
+      GetAppVersion.mockResolvedValue('1.0.0')
+      GetShellConfigs.mockResolvedValue([])
+      GetWebServeConfig.mockResolvedValue(baseWebServeConfig())
+      GetWebServeToken.mockResolvedValue('a'.repeat(64))
+      ListWebTokens.mockResolvedValue([])
+      const uiStore = useUiStore()
+      uiStore.settingsVisible = true
+      wrapper = mount(BrowserSettingsPanel, { global: { stubs, plugins: [pinia] } })
+      await flushPromises()
+      await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+      expect(wrapper.findAll('button').some(b => b.text() === '查看审计日志')).toBe(false)
+    } finally {
+      vi.doUnmock('../../transport')
+      vi.resetModules()
+    }
   })
 })

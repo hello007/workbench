@@ -1,6 +1,8 @@
 package service
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -22,6 +24,15 @@ const (
 	AuditEventConnKick     = "conn_kick"     // 踢出在途 WS 连接（连接管控动作，App 层 hub 命中后落盘）
 )
 
+// 操作者来源（conn_kick 事件的 actorSource 字段取值，连接管控三期新增）：
+// desktop 为本地桌面操作（无令牌上下文，本地信任模型，操作者即桌面用户）；
+// rpc 为浏览器通道 /api/rpc 调用（actorTokenId 携带调用者令牌 ID，多令牌场景
+// 可归因「谁踢的」）。
+const (
+	AuditActorDesktop = "desktop"
+	AuditActorRPC     = "rpc"
+)
+
 // webAuditMaxBytes 审计日志单文件大小上限：超过即轮转为 <path>.1（覆盖旧 .1），
 // 继续向新文件追加。5MB 对认证事件级频度足够（约 3 万行），轮转保留一份对
 // 单用户排查定位足够；更久历史靠外部归档，不做多份轮转链。
@@ -37,6 +48,12 @@ type AuditRecord struct {
 	RemoteAddr string `json:"remoteAddr,omitempty"` // 来源地址（r.RemoteAddr；直连形态不做 XFF 信任，PRD R2）
 	UserAgent  string `json:"userAgent,omitempty"`  // 客户端 User-Agent
 	ConnID     uint64 `json:"connId,omitempty"`     // 被踢连接 ID（conn_kick 事件携带；认证/生命周期事件为空不落字段）
+	// 操作者归因（连接管控三期新增，仅 conn_kick 事件携带）：ActorSource 区分
+	// 桌面/浏览器 RPC 来源，ActorTokenID 为 RPC 调用者令牌 ID（桌面为空——本地
+	// 信任模型无令牌上下文）。与 TokenID（conn_kick 语义为被踢目标的令牌）正交，
+	// 二者不可复用同一字段。
+	ActorSource  string `json:"actorSource,omitempty"`
+	ActorTokenID string `json:"actorTokenId,omitempty"`
 }
 
 // AuditLogger 认证与 token 生命周期审计日志（JSONL append-only，data/web_audit.log）。
@@ -72,18 +89,33 @@ func (a *AuditLogger) Log(event, tokenID, name, remoteAddr, userAgent string) {
 	})
 }
 
+// KickAudit conn_kick 事件载荷（结构化参数，连接管控三期由位置参数收编）：操作者
+// 归因（Actor/ActorTokenID）与被踢目标（TargetTokenID/TargetName/RemoteAddr/
+// ConnID）两组字段，调用方按语义填充，避免多同名 string 位置参数错位。
+type KickAudit struct {
+	ActorSource   string // 操作者来源：AuditActorDesktop | AuditActorRPC
+	ActorTokenID  string // 操作者令牌 ID（RPC 调用者；桌面为空）
+	TargetTokenID string // 被踢连接的令牌 ID
+	TargetName    string // 被踢连接的令牌名
+	RemoteAddr    string // 被踢连接来源 IP（对端可重连，IP 足以对号入座）
+	ConnID        uint64 // 被踢连接 ID
+}
+
 // LogConnKick 追加一条踢出连接审计事件（conn_kick，连接管控二期新增）：记录被踢
-// 目标的令牌 ID/名称/来源地址/连接 ID。可见性口径与 Log 一致——无明文 token、
-// 无 URL；remoteAddr 取连接明细快照的来源 IP（对端可重连，IP 足以对号入座）。
+// 目标的令牌 ID/名称/来源地址/连接 ID 与操作者归因（actorSource/actorTokenId，
+// 连接管控三期新增——多令牌场景可回答「谁踢的」）。可见性口径与 Log 一致——无
+// 明文 token、无 URL；RemoteAddr 取连接明细快照的来源 IP。
 // 写入时序对齐既有审计纪律：仅动作生效（hub 命中）后由调用方落盘，miss 不写。
-func (a *AuditLogger) LogConnKick(tokenID, name, remoteAddr string, connID uint64) {
+func (a *AuditLogger) LogConnKick(k KickAudit) {
 	a.write(AuditRecord{
-		Ts:         time.Now().Unix(),
-		Event:      AuditEventConnKick,
-		TokenID:    tokenID,
-		Name:       name,
-		RemoteAddr: remoteAddr,
-		ConnID:     connID,
+		Ts:           time.Now().Unix(),
+		Event:        AuditEventConnKick,
+		TokenID:      k.TargetTokenID,
+		Name:         k.TargetName,
+		RemoteAddr:   k.RemoteAddr,
+		ConnID:       k.ConnID,
+		ActorSource:  k.ActorSource,
+		ActorTokenID: k.ActorTokenID,
 	})
 }
 
@@ -129,4 +161,121 @@ func (a *AuditLogger) rotateLocked(incoming int64) {
 		// 轮转失败不阻塞本行写入：继续向当前文件追加（超限容忍，下条再试轮转）
 		slog.Warn("rotate audit log failed", "path", a.path, "err", err)
 	}
+}
+
+// webAuditQueryDefaultLimit / webAuditQueryMaxLimit 读侧分页缺省与单次上限：
+// 5MB 文件约 3 万行，全量过桥既浪费也无必要；上限钳制防一次拉全量。
+const (
+	webAuditQueryDefaultLimit = 100
+	webAuditQueryMaxLimit     = 500
+)
+
+// AuditQueryOptions 审计历史查询条件（连接管控三期读侧新增，桌面 UI 消费）。
+// 全部条件为与语义（逐项命中才保留）；零值项表示该维度不过滤。
+type AuditQueryOptions struct {
+	Events  []string // 事件类型白名单（空 = 全部事件）
+	From    int64    // 起始时间（unix 秒，含；0 = 不限）
+	To      int64    // 结束时间（unix 秒，含；0 = 不限）
+	TokenID string   // 令牌 ID（命中 TokenID 或 ActorTokenID 任一即相关：同一令牌
+	//  既可能是事件主体（token_*）、认证者（auth_*）也可能是踢出操作者
+	// （conn_kick 的 actorTokenId），按「与该令牌相关」口径过滤）
+	Offset int // 分页偏移（过滤后、时间倒序序列上的偏移）
+	Limit  int // 页大小（<=0 取缺省，超上限钳制）
+}
+
+// AuditQueryResult 审计历史查询结果。Records 恒非 nil（时间倒序，最新在前），
+// Total 为过滤后总数（分页窗口外的量），前端据此渲染分页器。
+type AuditQueryResult struct {
+	Total   int
+	Records []AuditRecord
+}
+
+// QueryAuditLog 查询审计历史（读侧 API，连接管控三期新增）：合并读轮转文件
+// <path>.1（旧）与主文件（新），过滤后按时间倒序分页返回。
+//
+// 快照语义：打开-读-关闭，不持写锁——与写侧 O_APPEND 单行原子追加并发安全；
+// 读期间发生轮转（rename）窗口时可能重复或漏读边界单行，属可接受偏差（本 API
+// 为排查观测面，非正确性依赖，与写侧旁路降级同款定位）。坏行（非法 JSON 或
+// 缺 event 字段）跳过——写侧不保证行完整性（崩溃截断/外部手改），读方容错。
+func (a *AuditLogger) QueryAuditLog(opts AuditQueryOptions) (AuditQueryResult, error) {
+	all, err := a.readSnapshot()
+	if err != nil {
+		return AuditQueryResult{}, err
+	}
+	eventSet := make(map[string]bool, len(opts.Events))
+	for _, e := range opts.Events {
+		eventSet[e] = true
+	}
+	filtered := make([]AuditRecord, 0, len(all))
+	for _, rec := range all {
+		if len(eventSet) > 0 && !eventSet[rec.Event] {
+			continue
+		}
+		if opts.From > 0 && rec.Ts < opts.From {
+			continue
+		}
+		if opts.To > 0 && rec.Ts > opts.To {
+			continue
+		}
+		if opts.TokenID != "" && rec.TokenID != opts.TokenID && rec.ActorTokenID != opts.TokenID {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+
+	result := AuditQueryResult{Total: len(filtered), Records: []AuditRecord{}}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = webAuditQueryDefaultLimit
+	}
+	if limit > webAuditQueryMaxLimit {
+		limit = webAuditQueryMaxLimit
+	}
+	start := opts.Offset
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(filtered) {
+		return result, nil
+	}
+	end := start + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	// 倒序取窗：filtered 为时间正序（文件读取序），倒序序列上第 j 项即
+	// filtered[len-1-j]；按 start..end-1 顺追加即页内最新在前
+	for j := start; j < end; j++ {
+		result.Records = append(result.Records, filtered[len(filtered)-1-j])
+	}
+	return result, nil
+}
+
+// readSnapshot 依次读轮转文件与主文件（时间正序拼接），逐行解析审计记录。
+// 文件不存在（首次使用/尚未轮转）跳过非"不存在"的打开错误上抛；坏行跳过；
+// 单文件读中断（Scanner 错误）按快照容错截断该文件继续下一文件。
+func (a *AuditLogger) readSnapshot() ([]AuditRecord, error) {
+	var recs []AuditRecord
+	for _, p := range []string{a.path + ".1", a.path} {
+		f, err := os.Open(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := bytes.TrimSpace(sc.Bytes())
+			if len(line) == 0 {
+				continue
+			}
+			var rec AuditRecord
+			if json.Unmarshal(line, &rec) != nil || rec.Event == "" {
+				continue
+			}
+			recs = append(recs, rec)
+		}
+		_ = f.Close()
+	}
+	return recs, nil
 }
