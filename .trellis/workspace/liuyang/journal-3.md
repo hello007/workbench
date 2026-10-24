@@ -1514,3 +1514,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 156: 连接管控四期：临时封禁（踢出防重连 + 封禁管理）
+
+**Date**: 2026-10-24
+**Task**: 连接管控四期：临时封禁（踢出防重连 + 封禁管理）
+**Branch**: `master`
+
+### Summary
+
+补齐连接管控时限性拒连档位：封禁状态机（tokenID 维度，data/web_bans.json 持久化，永久+懒过期双形态，撤销联动清理，幂等对齐 Revoke）+ BanCheck 独立注入面两认证点接入（HTTP requireToken + WS 升级前，verify 契约不动）+ ban/unban 审计 actor 归因（rpcAuditTarget 扩 override）+ 前端共享 BanTokenDialog（SettingsPanel/ActivityBar 两入口）+ tokenBan.js 联动踢出 fail-soft 编排；服务端语义恒仅拒新连（对齐撤销热生效语义）。brainstorm 定稿四决策（D1 在途连接/D2 持久化/D3 条目内嵌宿主/D4 组合判定）。测试：go test -race 三包全绿 + vitest 2121 + E2E 封禁链路；两轮 trellis-check（PR1 零缺陷、PR2 修 1 处文档表述）。spec 沉淀：browser-channel.md §2.2/§2.3/§3/§4/§6 + logging-and-errors.md §4.3/§8 + CLAUDE.md 关键规则 v2.32
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4fab5c8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
