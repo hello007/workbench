@@ -28,6 +28,17 @@ vi.mock('element-plus', () => ({
   ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }
 }))
 
+// 封禁弹窗桩（连接管控四期，明细行封禁入口）：本文件只断言接线（行内按钮打开
+// 弹窗、目标为行 tokenId），弹窗内部表单与提交链由 BanTokenDialog 专属 spec 覆盖
+vi.mock('../BanTokenDialog.vue', () => ({
+  default: {
+    name: 'BanTokenDialog',
+    props: ['modelValue', 'token', 'connections'],
+    emits: ['update:modelValue', 'banned'],
+    template: '<div class="ban-token-dialog-stub" />'
+  }
+}))
+
 describe('ActivityBar', () => {
   // activePanel / terminalActive 已迁 ui store：mount 前在 uiStore 上设初值，
   // 组件内直读 uiStore.activePanel / uiStore.terminalVisible；
@@ -391,4 +402,67 @@ describe('ActivityBar - 明细面板踢出', () => {
     await Promise.resolve()
     await nextTick()
   }
+})
+
+// ---- 明细面板封禁入口（连接管控四期：行内封禁按钮按 tokenID 触发共享弹窗）----
+
+describe('ActivityBar - 明细面板封禁入口', () => {
+  const createWrapper = () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'directory'
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
+        }
+      }
+    })
+  }
+
+  /** 注入桌面通道两条连接明细并返回挂载后的 wrapper（行内各带封禁按钮） */
+  const mountWithConnections = async () => {
+    const wrapper = createWrapper()
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() },
+      { id: 2, ip: '10.0.0.8', tokenId: 't2', tokenName: '', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    return wrapper
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('每行渲染封禁按钮（与踢出并列）；点击打开共享弹窗，目标为行 tokenId（非单连接）', async () => {
+    const wrapper = await mountWithConnections()
+    const bans = wrapper.findAll('.devices-panel-ban')
+    expect(bans.length).toBe(2)
+    await bans[0].trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanTokenDialog' })
+    expect(dialog.props('modelValue')).toBe(true)
+    // 封禁为 tokenID 维度：目标取行 tokenId 与令牌名（非连接 ID）
+    expect(dialog.props('token')).toEqual({ id: 't1', name: '手机' })
+    // 连接明细快照透传（弹窗内勾选联动踢出时按 tokenID 过滤消费）
+    expect(dialog.props('connections')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('令牌名空串（已撤销令牌连接）降级以空名打开弹窗（弹窗内按 ID 展示）', async () => {
+    const wrapper = await mountWithConnections()
+    await wrapper.findAll('.devices-panel-ban')[1].trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanTokenDialog' })
+    expect(dialog.props('token')).toEqual({ id: 't2', name: '' })
+    wrapper.unmount()
+  })
 })

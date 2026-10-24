@@ -178,20 +178,42 @@ func (a *App) RegenerateWebToken() (string, error) {
 // ListWebTokens 列出全部访问令牌记录（按创建时间升序；只含哈希不含明文，
 // 含已撤销/已过期记录供列表展示与审计可见性），每条附带在线连接数（连接管控
 // 任务新增）：由连接明细缓存按 TokenID 聚合 join 而来，列表与计数单调用原子
-// 一致，与桌面明细面板行数口径相同（同一缓存快照）。在线数不落盘——返回的
-// WebTokenStatus 为绑定面包装形态，data/web_tokens.json 落盘仍为纯
-// WebTokenRecord（零污染）。
+// 一致，与桌面明细面板行数口径相同（同一缓存快照）。连接管控四期起附带封禁
+// 状态 join（Banned/BannedUntil/BanReason，数据源 data/web_bans.json 封禁记录，
+// 含已过期记录原样透出——「已过期」态由前端按 BannedUntil 判定展示，拒连判定
+// 以服务层懒过期为准）。在线数与封禁状态不落盘——返回的 WebTokenStatus 为绑定
+// 面包装形态，data/web_tokens.json 落盘仍为纯 WebTokenRecord（零污染）。
 func (a *App) ListWebTokens() []model.WebTokenStatus {
 	if a.webTokenSvc == nil {
 		return []model.WebTokenStatus{}
 	}
 	records := a.webTokenSvc.List()
 	online := a.onlineConnCountsByToken()
+	bans := a.banStateByToken()
 	statuses := make([]model.WebTokenStatus, 0, len(records))
 	for _, rec := range records {
-		statuses = append(statuses, model.WebTokenStatus{Record: rec, OnlineConns: online[rec.ID]})
+		st := model.WebTokenStatus{Record: rec, OnlineConns: online[rec.ID]}
+		if ban, ok := bans[rec.ID]; ok {
+			st.Banned = true
+			st.BannedUntil = ban.ExpiresAt
+			st.BanReason = ban.Reason
+		}
+		statuses = append(statuses, st)
 	}
 	return statuses
+}
+
+// banStateByToken 按令牌 ID 聚合封禁记录（ListWebTokens 封禁状态 join 数据源，
+// 连接管控四期）。封禁列表量级为个人工具小量级，单次调用全量拉取后建 map 即可。
+func (a *App) banStateByToken() map[string]model.WebBanRecord {
+	bans := make(map[string]model.WebBanRecord)
+	if a.webTokenSvc == nil {
+		return bans
+	}
+	for _, ban := range a.webTokenSvc.ListBans() {
+		bans[ban.TokenID] = ban
+	}
+	return bans
 }
 
 // rememberConnDetails 更新连接明细缓存（整体替换语义）。写入点两处：hub
@@ -278,10 +300,11 @@ func (a *App) auditConnKick(actorSource, actorTokenID string, detail server.Conn
 
 // rpcAuditTarget 浏览器 RPC 面的 per-request 装饰 target（连接管控三期 actor
 // 归因）：embed *App 提升全部导出方法（RPC 白名单与桌面绑定面形态一致，其余
-// 132 方法零分叉），仅 override KickConnection——闭包捕获本次请求的调用者令牌
-// ID（token 中间件注入 ctx，装配回调按请求构造本值），委托未导出 kickConnectionAs
-// 完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出
-// 字段/方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
+// 方法零分叉），仅 override 带操作者归因的管控动作方法——KickConnection（三期）
+// 与 BanWebToken/UnbanWebToken（四期）：闭包捕获本次请求的调用者令牌 ID（token
+// 中间件注入 ctx，装配回调按请求构造本值），委托未导出 *As 变体完成 actor=rpc
+// 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出字段/方法不入任何
+// 暴露面，导出面签名零变更（wailsjs 生成面不动）。
 type rpcAuditTarget struct {
 	*App
 	actorTokenID string
@@ -289,6 +312,14 @@ type rpcAuditTarget struct {
 
 func (t rpcAuditTarget) KickConnection(connID uint64) error {
 	return t.kickConnectionAs(connID, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) BanWebToken(id string, expiresAt int64, reason string) error {
+	return t.banWebTokenAs(id, expiresAt, reason, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) UnbanWebToken(id string) error {
+	return t.unbanWebTokenAs(id, service.AuditActorRPC, t.actorTokenID)
 }
 
 // rpcTargetForActor 装配回调（server.WebOptions.RPCTargetForActor 消费形态）：
@@ -362,4 +393,40 @@ func (a *App) RevokeWebToken(id string) error {
 		return fmt.Errorf("令牌服务未装配")
 	}
 	return a.webTokenSvc.Revoke(id)
+}
+
+// BanWebToken 封禁指定令牌（连接管控四期，桌面路径）：tokenID 维度临时拒连
+// ——新连接（HTTP/WS 两认证点）401 携带含解封时间的专用消息，已建立连接不受
+// 影响（仅拒新连，对齐撤销热生效语义）；「同时断开在途连接」联动踢出为前端
+// 编排（按 tokenID 过滤连接明细逐个 KickConnection），后端零额外参数。
+// expiresAt 为到期 unix 秒（0 = 永久封禁须手动解封）；重复封禁 = 刷新封禁参数。
+// 桌面路径 actorSource=desktop（本地信任模型无令牌上下文）；浏览器 RPC 路径经
+// rpcAuditTarget 装饰 override 捕获调用者令牌 ID 后同走 banWebTokenAs（actor
+// 归因，对齐 kickConnectionAs 三期先例）。
+func (a *App) BanWebToken(id string, expiresAt int64, reason string) error {
+	return a.banWebTokenAs(id, expiresAt, reason, service.AuditActorDesktop, "")
+}
+
+// banWebTokenAs 封禁动作统一实现（导出 BanWebToken 与 RPC 装饰 override 的共用
+// 体，actor 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与 RPC
+// 反射面。
+func (a *App) banWebTokenAs(id string, expiresAt int64, reason, actorSource, actorTokenID string) error {
+	if a.webTokenSvc == nil {
+		return fmt.Errorf("令牌服务未装配")
+	}
+	return a.webTokenSvc.Ban(id, expiresAt, reason, actorSource, actorTokenID)
+}
+
+// UnbanWebToken 解封指定令牌（删除封禁记录，新连接立即可达；未封禁 no-op 成功，
+// 不存在返回 E_TOKEN_NOT_FOUND）。桌面路径 actorSource=desktop。
+func (a *App) UnbanWebToken(id string) error {
+	return a.unbanWebTokenAs(id, service.AuditActorDesktop, "")
+}
+
+// unbanWebTokenAs 解封动作统一实现（对齐 banWebTokenAs，未导出不入暴露面）。
+func (a *App) unbanWebTokenAs(id, actorSource, actorTokenID string) error {
+	if a.webTokenSvc == nil {
+		return fmt.Errorf("令牌服务未装配")
+	}
+	return a.webTokenSvc.Unban(id, actorSource, actorTokenID)
 }

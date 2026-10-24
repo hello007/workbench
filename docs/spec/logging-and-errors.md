@@ -1,7 +1,7 @@
 # 日志与错误处理规范
 
 > 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制、web_audit.log 审计事件表。
-> 最后更新：2026-10-24 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor
+> 最后更新：2026-10-24 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor；token_ban/token_unban 审计行与 E_TOKEN_REVOKED：10-24-connection-ban
 
 ---
 
@@ -99,6 +99,7 @@ type AppError struct {
 | `ErrCodeAssetsCancelled` | `E_ASSETS_CANCELLED` | 素材管理 | warning（素材扫描被用户取消，中性提示非 error；2026-10-13 素材管理 MVP 新增，`ErrAssetsCancelled` sentinel 承载，`mapAssetsCancelError` 统一映射，对齐 `E_GIT_CANCELLED` 模式） |
 | `ErrCodeAssetsLibNotFound` | `E_ASSETS_LIB_NOT_FOUND` | 素材管理 | error（素材库不存在或已删除、前端列表过期，引导刷新库列表） |
 | `ErrCodeAssetsScanInProgress` | `E_ASSETS_SCAN_IN_PROGRESS` | 素材管理 | warning（该素材库已有扫描进行中，本次拒绝，可稍后重试；`tryLockScan` TryLock 互斥拒绝时返回，`DeleteLibrary` 复用同锁与在途扫描互斥） |
+| `ErrCodeTokenRevoked` | `E_TOKEN_REVOKED` | 浏览器访问通道连接管控 | warning（封禁已撤销令牌被拒：撤销即凭据失效封禁无拒连对象，引导刷新列表；2026-10-24 连接管控四期新增，`WebTokenService.Ban` 校验分支返回） |
 | `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
 | `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |
 | `ErrCodeRPCMethodUnsupported` | `E_RPC_METHOD_UNSUPPORTED` | RPC 协议层（serve 浏览器模式） | error（签名形态不受支持，如变参） |
@@ -210,9 +211,11 @@ catch (error) {
 
 | 事件 | 产出点 | 关键字段 |
 |---|---|---|
-| `auth_success` / `auth_failure` | server 认证点（HTTP requireToken / WS 握手） | tokenId（失败为空）/ remoteAddr / userAgent / ts |
+| `auth_success` / `auth_failure` | server 认证点（HTTP requireToken / WS 握手） | tokenId（失败为空；**封禁拒连形态非空**——凭据有效但封禁生效中，认证未放行不发 auth_success、不种会话 cookie，连接管控四期） / remoteAddr / userAgent / ts |
 | `token_create` / `token_revoke` / `token_migrate` | WebTokenService 生命周期操作 | tokenId / name / ts |
 | `token_rotate` | App 轮换编排完成（创建/撤旧明细由服务层各自落盘） | tokenId / name / ts |
+| `token_ban` | WebTokenService.Ban 生效（含落盘成功）后（连接管控四期；操作者归因由 App 层 `BanWebToken`/`rpcAuditTarget` 透传） | tokenId / name / **actorSource（`desktop`\|`rpc`）+ actorTokenId（RPC 调用者令牌记录 ID，桌面空不落键）** / reason（`omitempty`，封禁备注未填不落键）/ expiresAt（封禁到期 unix 秒，0=永久）/ ts；落盘失败回滚不生效不写 |
+| `token_unban` | WebTokenService.Unban 生效后（解封删除封禁记录；未封禁 no-op 未改变状态不写） | tokenId / name / actorSource + actorTokenId（同上归因口径）/ ts |
 | `conn_kick` | App.KickConnection 命中后（连接管控二期；三期补操作者归因） | tokenId / name（名册映射，miss 空串）/ remoteAddr（来源 IP，明细快照剥端口口径）/ connId（`AuditRecord.ConnID`，`json:"connId,omitempty"` 仅本事件携带）/ **actorSource（`desktop`\|`rpc`）+ actorTokenId（RPC 调用者令牌记录 ID，桌面空不落键；与 TokenID 正交——TokenID 恒为被踢目标侧，2026-10-24 三期）** / ts |
 
 新增审计事件的步骤：`service/audit_log.go` 加 `AuditEvent*` 常量 → 经 `write` 单点新增专责出口方法（或复用 `Log`）→ 若新增结构化字段则扩 `AuditRecord`（`omitempty` 保证既有事件行形态不变）→ 本表登记。`AuditLogger` 为旁路观测面：未装配（nil）静默跳过，不阻断主链路。

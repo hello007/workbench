@@ -16,12 +16,14 @@ import (
 // 操作直接产生。
 const (
 	AuditEventAuthSuccess  = "auth_success"  // 认证成功（HTTP requireToken / WS 握手认证点）
-	AuditEventAuthFailure  = "auth_failure"  // 认证失败（同上两处认证点）
+	AuditEventAuthFailure  = "auth_failure"  // 认证失败（同上两处认证点；封禁拒连形态 TokenID 非空）
 	AuditEventTokenCreate  = "token_create"  // 新建 token
 	AuditEventTokenRevoke  = "token_revoke"  // 撤销 token（含轮换编排的逐条撤旧）
 	AuditEventTokenRotate  = "token_rotate"  // 轮换编排（新建 + 撤旧）完成（App 层编排事件）
 	AuditEventTokenMigrate = "token_migrate" // 存量单 token 迁移为多 token 首条记录 / 初始引导
 	AuditEventConnKick     = "conn_kick"     // 踢出在途 WS 连接（连接管控动作，App 层 hub 命中后落盘）
+	AuditEventTokenBan     = "token_ban"     // 封禁令牌（连接管控四期：tokenID 维度临时拒连）
+	AuditEventTokenUnban   = "token_unban"   // 解封令牌（删除封禁记录）
 )
 
 // 操作者来源（conn_kick 事件的 actorSource 字段取值，连接管控三期新增）：
@@ -54,6 +56,11 @@ type AuditRecord struct {
 	// 二者不可复用同一字段。
 	ActorSource  string `json:"actorSource,omitempty"`
 	ActorTokenID string `json:"actorTokenId,omitempty"`
+	// 封禁参数（连接管控四期新增，仅 token_ban 事件携带）：Reason 封禁备注、
+	// ExpiresAt 封禁到期 unix 秒（0=永久封禁，omitempty 恒不落键）。均为空/零值
+	// 不落字段，保证既有事件行形态不变。
+	Reason    string `json:"reason,omitempty"`
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
 // AuditLogger 认证与 token 生命周期审计日志（JSONL append-only，data/web_audit.log）。
@@ -116,6 +123,46 @@ func (a *AuditLogger) LogConnKick(k KickAudit) {
 		ConnID:       k.ConnID,
 		ActorSource:  k.ActorSource,
 		ActorTokenID: k.ActorTokenID,
+	})
+}
+
+// BanAudit token_ban/token_unban 事件载荷（结构化参数，对齐 KickAudit 形态防
+// 多同名 string 位置参数错位）：操作者归因与封禁目标两组字段，token_unban 仅
+// 消费归因与目标三字段（解封无备注/到期语义）。
+type BanAudit struct {
+	ActorSource   string // 操作者来源：AuditActorDesktop | AuditActorRPC
+	ActorTokenID  string // 操作者令牌 ID（RPC 调用者；桌面为空）
+	TargetTokenID string // 被封禁/解封的令牌记录 ID
+	TargetName    string // 被封禁/解封的令牌名
+	Reason        string // 封禁备注（token_ban 携带；未填为空串不落键）
+	ExpiresAt     int64  // 封禁到期 unix 秒（0=永久，token_ban 携带）
+}
+
+// LogBan 追加一条封禁令牌审计事件（token_ban，连接管控四期）：记录封禁参数
+// （到期时间/备注）与操作者归因。可见性口径与 Log 一致——无明文 token、无 URL。
+// 写入时序对齐既有审计纪律：仅动作生效（含落盘成功）后由调用方落盘，失败不写。
+func (a *AuditLogger) LogBan(b BanAudit) {
+	a.write(AuditRecord{
+		Ts:           time.Now().Unix(),
+		Event:        AuditEventTokenBan,
+		TokenID:      b.TargetTokenID,
+		Name:         b.TargetName,
+		ActorSource:  b.ActorSource,
+		ActorTokenID: b.ActorTokenID,
+		Reason:       b.Reason,
+		ExpiresAt:    b.ExpiresAt,
+	})
+}
+
+// LogUnban 追加一条解封令牌审计事件（token_unban，连接管控四期）。
+func (a *AuditLogger) LogUnban(b BanAudit) {
+	a.write(AuditRecord{
+		Ts:           time.Now().Unix(),
+		Event:        AuditEventTokenUnban,
+		TokenID:      b.TargetTokenID,
+		Name:         b.TargetName,
+		ActorSource:  b.ActorSource,
+		ActorTokenID: b.ActorTokenID,
 	})
 }
 

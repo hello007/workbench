@@ -183,16 +183,27 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 		}
 		return app.webTokenSvc.Verify(candidate)
 	}
+	// 封禁判定闭包（连接管控四期）：verify 放行后的组合判定，直读服务层
+	// BanRejectMessage（懒过期即时生效）。webTokenSvc 未装配时返回空串放行
+	// ——此时 verify 已先行 fail closed 拒绝一切请求，封禁判定不可达，防御保留。
+	banCheck := func(tokenID string) string {
+		if app.webTokenSvc == nil {
+			return ""
+		}
+		return app.webTokenSvc.BanRejectMessage(tokenID)
+	}
 	onAuth := func(ev server.AuthEvent) {
 		if app.webAuditSvc != nil {
 			app.webAuditSvc.Log(ev.Event, ev.TokenID, "", ev.RemoteAddr, ev.UserAgent)
 		}
 	}
-	hub := server.NewWSHub(verify, onAuth)
+	hub := server.NewWSHub(verify, onAuth, banCheck)
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets: distFS,
 		Verify: verify,
-		OnAuth: onAuth,
+		// 连接管控四期：HTTP 与 WS 两认证点同接封禁判定（漏一即封禁可绕过）
+		BanCheck: banCheck,
+		OnAuth:   onAuth,
 		// 连接管控三期：per-request 装饰 target（RPC 调用者令牌 ID 注入踢出审计
 		// actor 归因）+ 审计读侧对浏览器通道屏蔽（隐私红线，见 WebOptions 注释）
 		RPCTarget:         app,

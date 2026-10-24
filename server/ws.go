@@ -100,6 +100,7 @@ type wsRingEntry struct {
 // 共享同一后端状态）。单用户工具不做订阅过滤/单播，保持实现最小面。
 type WSHub struct {
 	verify              TokenVerifier          // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
+	banCheck            BanCheck               // 握手封禁判定（构造后只读；nil = 未启用，verify 放行后组合判定）
 	onAuth              func(AuthEvent)        // 认证事件出口（可 nil）
 	onConnectionsChange func([]ConnDetail)     // 连接明细快照变化回调（桌面事件出口用，可 nil；见 SetOnConnectionsChange）
 	upgrader            websocket.Upgrader
@@ -160,9 +161,11 @@ type wsClient struct {
 // NewWSHub 构造 WebSocket hub。verify 为握手令牌校验函数（main 装配传入
 // WebTokenService.Verify 闭包，多 token 哈希集合校验由服务层持有，新建/撤销/
 // 过期即时生效——单 token 时代的 SetToken 热轮换已随 verify 化删除）；onAuth
-// 为认证事件出口（可 nil）。verify 为 nil 时所有升级请求 fail closed 拒绝。
-func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent)) *WSHub {
-	return newWSHubTuned(verify, onAuth, defaultWriteWait, defaultPongWait, wsResumeBuffer)
+// 为认证事件出口（可 nil）；banCheck 为封禁判定函数（连接管控四期，可 nil =
+// 未启用；verify 放行后的组合判定，非空消息升级前 401 拒绝，见 BanCheck）。
+// verify 为 nil 时所有升级请求 fail closed 拒绝。
+func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck) *WSHub {
+	return newWSHubTuned(verify, onAuth, banCheck, defaultWriteWait, defaultPongWait, wsResumeBuffer)
 }
 
 // SetOnConnectionsChange 设置连接明细快照变化回调（桌面事件出口用，main 装配层
@@ -179,13 +182,14 @@ func (h *WSHub) SetOnConnectionsChange(fn func(details []ConnDetail)) {
 }
 
 // newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
-func newWSHubTuned(verify TokenVerifier, onAuth func(AuthEvent), writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
+func newWSHubTuned(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
 	if resumeBuffer < 0 {
 		resumeBuffer = 0
 	}
 	return &WSHub{
-		verify: verify,
-		onAuth: onAuth,
+		verify:   verify,
+		banCheck: banCheck,
+		onAuth:   onAuth,
 		upgrader: websocket.Upgrader{
 			// Subprotocols 保持 nil：多 token 语义下回显值 = 命中的子协议候选
 			//（固定列表无法枚举动态 token 集合），ServeHTTP 在子协议通道命中时
@@ -441,6 +445,20 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("unauthorized websocket request", "remote", r.RemoteAddr)
 		writePreviewError(w, http.StatusUnauthorized, "未授权访问：请携带访问令牌")
 		return
+	}
+	// 封禁组合判定（连接管控四期，verify 放行后）：命中生效中的封禁以 HTTP 401
+	// 拒绝升级并透出含解封时间的专用消息（与「请携带访问令牌」可区分）。审计走
+	// auth_failure 且 tokenID 填命中值——封禁形态非空，与普通认证失败（恒空）可
+	// 区分；不发 auth_success（认证未放行）。升级前拒绝语义与认证失败一致
+	//（先升级再踢拿不到明确 HTTP 状态码，错误语义劣化）。
+	if h.banCheck != nil {
+		if msg := h.banCheck(tokenID); msg != "" {
+			emitAuthEvent(h.onAuth, AuthEventFailure, tokenID, r)
+			// 只记来源不记完整 URL：查询参数通道的令牌不得进日志
+			slog.Warn("banned websocket handshake", "remote", r.RemoteAddr)
+			writePreviewError(w, http.StatusUnauthorized, msg)
+			return
+		}
 	}
 	emitAuthEvent(h.onAuth, AuthEventSuccess, tokenID, r)
 	// 子协议通道命中的凭据须回显该子协议（浏览器 shim 依赖回显判定握手成功；

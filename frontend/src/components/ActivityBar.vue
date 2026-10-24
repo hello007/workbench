@@ -62,8 +62,9 @@
                 <span class="devices-panel-ip" :title="c.ip">{{ c.ip }}</span>
                 <span class="devices-panel-token">{{ c.tokenName || '已撤销令牌' }}</span>
                 <span class="devices-panel-time">{{ formatConnTime(c.connectedAt) }}</span>
-                <!-- 踢出（断开该连接，非封禁）：popover 内容区直挂按钮，不在
-                     tooltip/popover reference 链上，无嵌套 forwardRef 约束问题 -->
+                <!-- 踢出（断开该连接，非封禁）与封禁（tokenID 维度临时拒连，
+                     连接管控四期）：popover 内容区直挂按钮，不在 tooltip/popover
+                     reference 链上，无嵌套 forwardRef 约束问题 -->
                 <button
                   class="devices-panel-kick"
                   type="button"
@@ -72,6 +73,17 @@
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  class="devices-panel-ban"
+                  type="button"
+                  title="封禁该令牌"
+                  @click.stop="openBanDialog(c)"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+                    <path d="M5.8 5.8 18.2 18.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                   </svg>
                 </button>
               </div>
@@ -95,11 +107,15 @@
         </el-icon>
       </div>
     </el-tooltip>
+    <!-- 封禁令牌弹窗（连接管控四期，明细行封禁入口，与设置页令牌管理共用组件）：
+         渲染于组件根级（popover persistent=false 不承载弹窗），确认提交与联动
+         踢出在弹窗内完成 -->
+    <BanTokenDialog v-model="banDialogVisible" :token="banTarget" :connections="connections" />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
@@ -108,6 +124,7 @@ import { KickConnection } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
+import BanTokenDialog from './BanTokenDialog.vue'
 
 const uiStore = useUiStore()
 
@@ -119,6 +136,20 @@ const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceCon
 const deviceHint = computed(() =>
   `${deviceCount.value} 个设备已连接：点击查看明细`
 )
+
+// 封禁弹窗（连接管控四期，明细行封禁入口）：目标取行 tokenId（封禁为 tokenID
+// 维度，非单连接）与令牌名（空串降级由弹窗按 tokenId 展示）
+const banDialogVisible = ref(false)
+const banTarget = ref(null)
+
+/**
+ * 打开封禁弹窗（按行 tokenId 封禁该令牌全部连接对应设备；弹窗内含「同时断开
+ * 在途连接」勾选，勾选后按 tokenID 过滤明细逐个踢出）。
+ */
+function openBanDialog(c) {
+  banTarget.value = { id: c.tokenId, name: c.tokenName || '' }
+  banDialogVisible.value = true
+}
 
 /**
  * 踢出单个连接（断开该 WS 连接，非封禁）：单次确认（confirm-dialog 单次确认
@@ -268,7 +299,7 @@ const panels = [
 
 .devices-panel-row {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto auto;
+  grid-template-columns: 120px minmax(0, 1fr) auto auto auto;
   gap: var(--spacing-sm);
   align-items: center;
   padding: var(--spacing-xs) var(--spacing-sm);
@@ -298,6 +329,28 @@ const panels = [
 .devices-panel-kick:hover {
   background: color-mix(in srgb, var(--danger-color) 14%, transparent);
   color: var(--danger-color);
+}
+
+/* 封禁按钮：warning 语义色小图标钮（与踢出 danger 区分——封禁为 tokenID 维度
+ * 时限性拒连，踢出为单连接断开），形态与踢出钮一致 */
+.devices-panel-ban {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.devices-panel-ban:hover {
+  background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+  color: var(--warning-color);
 }
 
 .devices-panel-ip {

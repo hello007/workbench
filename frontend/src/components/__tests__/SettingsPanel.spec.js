@@ -15,6 +15,25 @@ vi.mock('element-plus', async () => {
   }
 })
 
+// 令牌封禁区引入 useDeviceConnections（联动踢出编排数据源）：runtime mock 防止
+// onMounted 调 EventsOn 触达缺失的 window.runtime（jsdom 无 Wails runtime）
+vi.mock('../../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => () => {}),
+  EventsOnMultiple: vi.fn(() => () => {}),
+  EventsOff: vi.fn()
+}))
+
+// 封禁弹窗桩（连接管控四期）：本文件只断言设置面板接线（打开弹窗 / @banned 刷新），
+// 弹窗内部表单与提交链由 BanTokenDialog 专属 spec 覆盖
+vi.mock('../BanTokenDialog.vue', () => ({
+  default: {
+    name: 'BanTokenDialog',
+    props: ['modelValue', 'token', 'connections'],
+    emits: ['update:modelValue', 'banned'],
+    template: '<div class="ban-token-dialog-stub" />'
+  }
+}))
+
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetSettings: vi.fn(),
   SaveSettings: vi.fn(),
@@ -30,6 +49,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ListWebTokens: vi.fn(),
   CreateWebToken: vi.fn(),
   RevokeWebToken: vi.fn(),
+  UnbanWebToken: vi.fn(),
   QueryAuditLog: vi.fn()
 }))
 
@@ -113,8 +133,10 @@ const stubs = {
   },
   'el-icon': { template: '<i><slot /></i>', props: ['size'] },
   'el-tag': {
-    template: '<span class="el-tag"><slot /><span class="tag-close" @click.stop="$emit(\'close\')" /></span>',
-    props: ['closable', 'size'],
+    // type 以 tag-<type> class 暴露（封禁徽标 warning/info 语义断言用；既有用例
+    // 只断言文本与数量，加 class 不影响）
+    template: '<span class="el-tag" :class="type ? \'tag-\' + type : \'\'"><slot /><span class="tag-close" @click.stop="$emit(\'close\')" /></span>',
+    props: ['closable', 'size', 'type'],
     emits: ['close']
   },
   // el-radio-group + el-radio stub：用 provide/inject 传递选中态，
@@ -1588,5 +1610,173 @@ describe('SettingsPanel.vue - 审计历史入口', () => {
       vi.doUnmock('../../transport')
       vi.resetModules()
     }
+  })
+})
+
+// ---- 令牌封禁区（连接管控四期：封禁徽标 / 封禁解封按钮 / 弹窗接线）----
+
+describe('SettingsPanel.vue - 令牌封禁区', () => {
+  let wrapper
+
+  async function openNetworkTab() {
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+  }
+
+  const rec = (over = {}) => ({
+    id: 'tok-1',
+    name: '手机',
+    hash: '1'.repeat(64),
+    createdAt: 1735689600,
+    lastUsedAt: 0,
+    expiresAt: 0,
+    revoked: false,
+    ...over
+  })
+
+  const tok = (over = {}, onlineConns = 0) => ({ record: rec(over), onlineConns })
+
+  // 封禁状态在 WebTokenStatus 顶层（join 形态，非 record 内）——对齐后端 ListWebTokens
+  const withBan = (item, banOver = {}) => ({
+    ...item,
+    banned: true,
+    bannedUntil: 0,
+    banReason: '',
+    ...banOver
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('封禁徽标四态：永久/定时未到期/已过期/未封禁（reason 以 title 展示）', async () => {
+    const futureUntil = Math.floor(Date.now() / 1000) + 3600
+    const pastUntil = Math.floor(Date.now() / 1000) - 100
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      withBan(tok({ id: 'tok-1', name: '永久封禁' }), { banReason: '疑似泄露' }),
+      withBan(tok({ id: 'tok-2', name: '限时封禁' }), { bannedUntil: futureUntil, banReason: '' }),
+      withBan(tok({ id: 'tok-3', name: '过期封禁' }), { bannedUntil: pastUntil }),
+      tok({ id: 'tok-4', name: '正常设备' })
+    ])
+    await openNetworkTab()
+    const rows = wrapper.findAll('.token-list-row')
+    expect(rows.length).toBe(4)
+    // 永久：warning 语义 + reason title
+    const badges = wrapper.findAll('.token-ban-badge')
+    expect(badges.length).toBe(3)
+    expect(badges[0].text()).toBe('已封禁（永久）')
+    expect(badges[0].classes()).toContain('tag-warning')
+    expect(badges[0].attributes('title')).toBe('疑似泄露')
+    // 定时未到期：「已封禁 · 至 <时间>」warning 语义
+    expect(badges[1].text()).toContain('已封禁 · 至 ')
+    expect(badges[1].classes()).toContain('tag-warning')
+    expect(badges[1].attributes('title')).toBe('')
+    // 已过期：info 语义（记录保留、拒连已失效——对齐后端懒过期口径）
+    expect(badges[2].text()).toBe('封禁已过期')
+    expect(badges[2].classes()).toContain('tag-info')
+    // 未封禁条目无徽标
+    expect(rows[3].find('.token-ban-badge').exists()).toBe(false)
+  })
+
+  it('按钮分流：未封禁显示封禁、已封禁显示解封、已撤销两者皆无', async () => {
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      tok({ id: 'tok-1', name: '正常设备' }),
+      withBan(tok({ id: 'tok-2', name: '已封设备' })),
+      tok({ id: 'tok-3', name: '遗失设备', revoked: true })
+    ])
+    await openNetworkTab()
+    const rows = wrapper.findAll('.token-list-row')
+    expect(rows[0].findAll('button').some(b => b.text() === '封禁')).toBe(true)
+    expect(rows[0].findAll('button').some(b => b.text() === '解封')).toBe(false)
+    expect(rows[1].findAll('button').some(b => b.text() === '封禁')).toBe(false)
+    expect(rows[1].findAll('button').some(b => b.text() === '解封')).toBe(true)
+    // 已撤销条目封禁被后端 E_TOKEN_REVOKED 拒绝，前端不渲染两入口
+    expect(rows[2].findAll('button').some(b => b.text() === '封禁')).toBe(false)
+    expect(rows[2].findAll('button').some(b => b.text() === '解封')).toBe(false)
+  })
+
+  it('封禁按钮打开共享弹窗（目标为条目记录，connections 透传）', async () => {
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [tok({ id: 'tok-1', name: '手机' })])
+    await openNetworkTab()
+    expect(wrapper.findComponent({ name: 'BanTokenDialog' }).props('modelValue')).toBe(false)
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '封禁').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanTokenDialog' })
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('token')).toEqual({ id: 'tok-1', name: '手机' })
+    expect(Array.isArray(dialog.props('connections'))).toBe(true)
+  })
+
+  it('弹窗 @banned 刷新令牌列表（封禁状态 join 透出为徽标）', async () => {
+    const { ListWebTokens } = await import('../../../wailsjs/go/main/App')
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [tok({ id: 'tok-1', name: '手机' })])
+    await openNetworkTab()
+    const callsBefore = ListWebTokens.mock.calls.length
+    ListWebTokens.mockResolvedValue([
+      withBan(tok({ id: 'tok-1', name: '手机' }), { banReason: '疑似泄露' })
+    ])
+    wrapper.findComponent({ name: 'BanTokenDialog' }).vm.$emit('banned')
+    await flushPromises()
+    expect(ListWebTokens.mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(wrapper.find('.token-ban-badge').text()).toBe('已封禁（永久）')
+  })
+
+  it('解封：单次确认通过后调 UnbanWebToken 并刷新列表（徽标消失）', async () => {
+    const { UnbanWebToken, ListWebTokens } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    UnbanWebToken.mockResolvedValue()
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      withBan(tok({ id: 'tok-1', name: '手机' }))
+    ])
+    await openNetworkTab()
+    // 解封后刷新列表：mock 重设为未封禁态
+    ListWebTokens.mockResolvedValue([tok({ id: 'tok-1', name: '手机' })])
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '解封').trigger('click')
+    await flushPromises()
+    // 单次确认（confirm-dialog 单次确认形态：confirm 恰一次）
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    const [message, title] = ElMessageBox.confirm.mock.calls[0]
+    expect(title).toBe('解封访问令牌')
+    expect(message).toContain('手机')
+    expect(UnbanWebToken).toHaveBeenCalledTimes(1)
+    expect(UnbanWebToken).toHaveBeenCalledWith('tok-1')
+    // 刷新后徽标消失（恢复可达）
+    expect(wrapper.find('.token-ban-badge').exists()).toBe(false)
+  })
+
+  it('解封确认取消则不调用 UnbanWebToken', async () => {
+    const { UnbanWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      withBan(tok({ id: 'tok-1', name: '手机' }))
+    ])
+    await openNetworkTab()
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '解封').trigger('click')
+    await flushPromises()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(UnbanWebToken).not.toHaveBeenCalled()
+  })
+
+  it('解封失败走 handleError 分流（E_TOKEN_NOT_FOUND 预期拒绝 warning）', async () => {
+    const { UnbanWebToken } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage, ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    UnbanWebToken.mockRejectedValue({ code: 'E_TOKEN_NOT_FOUND', message: '令牌不存在或已被删除，请刷新列表' })
+    wrapper = await createWrapper({}, {}, 'a'.repeat(64), null, [
+      withBan(tok({ id: 'tok-1', name: '手机' }))
+    ])
+    await openNetworkTab()
+    await wrapper.findAll('.token-list-row button').find(b => b.text() === '解封').trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('令牌不存在或已被删除，请刷新列表')
+    expect(ElMessage.error).not.toHaveBeenCalled()
   })
 })

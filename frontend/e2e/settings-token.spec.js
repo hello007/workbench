@@ -9,6 +9,9 @@
  * 2. 多设备语义明示（PR3）：ws-connections:changed 事件驱动活动栏「N 个设备
  *    已连接」指示与终端面板多端写入提示行显隐（emitWailsEvent 派发，桌面 mock
  *    通道与真实 EventsEmit 语义一致）。
+ * 3. 令牌封禁链路（连接管控四期）：封禁徽标（永久 + reason title）渲染
+ *    → 封禁弹窗（共享 BanTokenDialog：永久档默认值 / 联动踢出默认勾选 / 警示文案）
+ *    → BanWebToken 调用断言 → 解封单次确认链 → UnbanWebToken 调用断言。
  */
 import { test, expect, emitWailsEvent } from './fixtures'
 
@@ -26,6 +29,15 @@ const tokenRecord = (over = {}) => ({
 
 /** ListWebTokens 条目形状（对齐 model.WebTokenStatus：record + onlineConns，连接管控任务） */
 const tokenItem = (over = {}, onlineConns = 0) => ({ record: tokenRecord(over), onlineConns })
+
+/** 带封禁状态的 ListWebTokens 条目（封禁三字段在 WebTokenStatus 顶层 join，非 record 内） */
+const bannedTokenItem = (recOver = {}, banOver = {}) => ({
+  ...tokenItem(recOver),
+  banned: true,
+  bannedUntil: 0,
+  banReason: '',
+  ...banOver
+})
 
 /** 打开设置弹窗并切到网络访问页（第 5 个导航项） */
 async function openNetworkTab(page) {
@@ -108,5 +120,59 @@ test.describe('多设备语义明示（PR3）', () => {
     await emitWailsEvent(page, 'ws-connections:changed', 1)
     await expect(page.locator('.activity-bar-devices')).toHaveCount(0)
     await expect(page.locator('.terminal-multi-device-hint')).toHaveCount(0)
+  })
+})
+
+test.describe('令牌封禁（连接管控四期）', () => {
+  test.use({
+    wailsOverrides: {
+      ListWebTokens: [
+        tokenItem({ id: 'tok-1', name: '手机' }),
+        bannedTokenItem({ id: 'tok-2', name: '可疑设备' }, { banReason: '疑似泄露' })
+      ]
+    }
+  })
+
+  test('封禁徽标 → 封禁弹窗提交 → 解封单次确认链', async ({ page }) => {
+    await page.goto('/')
+    const dialog = await openNetworkTab(page)
+
+    // 封禁徽标（永久）+ reason title；按钮分流（未封禁显封禁、已封禁显解封）
+    const rows = dialog.locator('.token-list-row')
+    await expect(rows).toHaveCount(2)
+    const banBadge = rows.nth(1).locator('.token-ban-badge')
+    await expect(banBadge).toHaveText('已封禁（永久）')
+    await expect(banBadge).toHaveAttribute('title', '疑似泄露')
+    await expect(rows.nth(0).locator('button', { hasText: '封禁' })).toBeVisible()
+    await expect(rows.nth(1).locator('button', { hasText: '解封' })).toBeVisible()
+    await expect(rows.nth(1).locator('button', { hasText: '封禁' })).toHaveCount(0)
+
+    // 封禁弹窗（共享 BanTokenDialog，append-to-body）：警示文案 + 永久档默认 +
+    // 联动踢出默认勾选（浏览器通道 connections 恒空，联动天然无操作面）
+    await rows.nth(0).locator('button', { hasText: '封禁' }).click()
+    const banDialog = page.locator('.ban-token-dialog')
+    await expect(banDialog).toBeVisible()
+    await expect(banDialog).toContainText('新连接将被拒绝')
+    await expect(banDialog).toContainText('已建立连接不受影响')
+    await expect(banDialog.locator('.ban-kick-check input')).toBeChecked()
+    await banDialog.locator('.ban-reason-input input').fill('疑似泄露待核实')
+    await banDialog.locator('.ban-confirm-btn').click()
+    await expect(page.evaluate(() => window.__wailsCalls
+      .filter((c) => c.method === 'BanWebToken'))).resolves.toEqual([
+      { method: 'BanWebToken', args: ['tok-1', 0, '疑似泄露待核实'] }
+    ])
+    await expect(banDialog).toBeHidden()
+
+    // 解封：单次确认链（`.el-message-box` 裸选择器安全——本用例唯一 message box）
+    await rows.nth(1).locator('button', { hasText: '解封' }).click()
+    const messageBox = page.locator('.el-message-box')
+    await expect(messageBox).toBeVisible()
+    await expect(messageBox).toContainText('解封后令牌「可疑设备」')
+    await messageBox.locator('button', { hasText: '解封' }).click()
+    await expect(page.evaluate(() => window.__wailsCalls
+      .filter((c) => c.method === 'UnbanWebToken'))).resolves.toEqual([
+      { method: 'UnbanWebToken', args: ['tok-2'] }
+    ])
+    await expect(messageBox).toBeHidden()
   })
 })

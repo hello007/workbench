@@ -405,9 +405,23 @@
                 <span class="token-name">{{ item.record.name }}</span>
                 <el-tag size="small" :type="tokenStatus(item.record).tagType">{{ tokenStatus(item.record).label }}</el-tag>
                 <el-tag v-if="item.onlineConns > 0" size="small" type="success" class="token-online-badge">在线 {{ item.onlineConns }}</el-tag>
+                <!-- 封禁徽标（连接管控四期）：Banned=true 含已过期记录（后端 join
+                     原样透出，「已过期」态由前端按 bannedUntil 判定）；banReason
+                     非空时以原生 title 展示原因 -->
+                <el-tag
+                  v-if="banBadge(item)"
+                  size="small"
+                  :type="banBadge(item).tagType"
+                  class="token-ban-badge"
+                  :title="item.banReason || ''"
+                >{{ banBadge(item).label }}</el-tag>
                 <span class="token-meta">创建 {{ formatUnixTime(item.record.createdAt) }}</span>
                 <span class="token-meta">{{ item.record.lastUsedAt ? '最后使用 ' + formatUnixTime(item.record.lastUsedAt) : '从未使用' }}</span>
                 <span class="token-meta">{{ item.record.expiresAt ? '过期 ' + formatUnixTime(item.record.expiresAt) : '永久有效' }}</span>
+                <!-- 封禁/解封与撤销并列（未撤销条目二选一渲染；已撤销条目封禁被
+                     后端 E_TOKEN_REVOKED 拒绝，前端直接不渲染入口） -->
+                <el-button v-if="!item.record.revoked && !item.banned" size="small" text type="warning" @click="openBanDialog(item.record)">封禁</el-button>
+                <el-button v-if="!item.record.revoked && item.banned" size="small" text type="success" @click="unbanToken(item.record)">解封</el-button>
                 <el-button v-if="!item.record.revoked" size="small" text type="danger" @click="revokeToken(item.record)">撤销</el-button>
               </div>
               <div v-if="!webTokens.length" class="webserve-url-empty">暂无令牌记录</div>
@@ -474,6 +488,9 @@
     </div>
     <!-- 审计历史弹窗（连接管控三期，纯桌面面）：独立组件，v-model 控制显隐 -->
     <AuditHistoryDialog v-model="auditHistoryVisible" />
+    <!-- 封禁令牌弹窗（连接管控四期，令牌管理条目入口）：确认提交与联动踢出在
+         弹窗内完成，@banned 通知本面板刷新令牌列表（封禁状态 join 透出） -->
+    <BanTokenDialog v-model="banDialogVisible" :token="banTarget" :connections="connections" @banned="onBanned" />
   </el-dialog>
 </template>
 
@@ -481,11 +498,13 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
 import { isBrowserChannel } from '../transport'
+import { useDeviceConnections } from '../composables/useDeviceConnections'
 import AuditHistoryDialog from './AuditHistoryDialog.vue'
+import BanTokenDialog from './BanTokenDialog.vue'
 import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 
 const emit = defineEmits(['update-available'])
@@ -742,6 +761,68 @@ async function revokeToken(rec) {
   } catch (e) {
     handleError('撤销令牌失败: ', e)
   }
+}
+
+// ===== 令牌封禁（连接管控四期）=====
+
+// 封禁弹窗显隐与目标（{id, name}，BanTokenDialog v-model + token props）
+const banDialogVisible = ref(false)
+const banTarget = ref(null)
+// 连接明细快照（联动踢出按 tokenID 过滤的编排数据源）：composable 自带 EventsOn
+// 闭包精准注销（onBeforeUnmount），零手工监听管理
+const { connections } = useDeviceConnections()
+
+/**
+ * 封禁徽标分流（对齐后端 ListWebTokens join 口径：Banned=true 含已过期记录，
+ * 「已过期」态由前端按 bannedUntil 判定展示，拒连判定以服务层懒过期为准）：
+ * 永久（bannedUntil=0）warning「已封禁（永久）」；定时未到期 warning「已封禁 ·
+ * 至 <时间>」；已过期（0 < bannedUntil <= 当前时间）info「封禁已过期」（记录
+ * 保留但拒连已失效，可解封清除）。未封禁返回 null（不渲染徽标）。
+ */
+function banBadge(item) {
+  if (!item?.banned) return null
+  if (!item.bannedUntil) return { label: '已封禁（永久）', tagType: 'warning' }
+  if (item.bannedUntil * 1000 <= Date.now()) return { label: '封禁已过期', tagType: 'info' }
+  return { label: `已封禁 · 至 ${formatUnixTime(item.bannedUntil)}`, tagType: 'warning' }
+}
+
+/**
+ * 打开封禁弹窗（未封禁且未撤销条目；重复封禁刷新参数的语义由后端承担，此处
+ * 已封禁条目入口切为「解封」不重复暴露）。
+ */
+function openBanDialog(rec) {
+  banTarget.value = { id: rec.id, name: rec.name }
+  banDialogVisible.value = true
+}
+
+/**
+ * 解封令牌：单次确认（对齐 confirm-dialog 单次确认形态）→ 解封 → 刷新列表。
+ * 未封禁解封为 no-op 成功（后端幂等）；删除封禁记录后该令牌新连接立即可达。
+ */
+async function unbanToken(rec) {
+  try {
+    await ElMessageBox.confirm(
+      `解封后令牌「${rec.name}」立即恢复新连接可达（封禁记录删除）。是否解封？`,
+      '解封访问令牌',
+      { type: 'warning', confirmButtonText: '解封', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await UnbanWebToken(rec.id)
+    ElMessage.success(`令牌「${rec.name}」已解封`)
+    await loadWebTokens()
+  } catch (e) {
+    handleError('解封令牌失败: ', e)
+  }
+}
+
+/**
+ * 封禁弹窗提交成功回调：刷新令牌列表（封禁状态 join 透出为徽标）。
+ */
+async function onBanned() {
+  await loadWebTokens()
 }
 
 /**

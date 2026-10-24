@@ -44,6 +44,17 @@ func emitAuthEvent(onAuth func(AuthEvent), event, tokenID string, r *http.Reques
 	})
 }
 
+// BanCheck 封禁判定函数签名（连接管控四期）：入参为认证命中（verify 放行）的
+// token 记录 ID，返回非空拒绝消息 = 该令牌封禁生效中（消息随 401 透出，含解封
+// 时间或「永久封禁」，与普通 401「请携带访问令牌」可区分）；空串 = 放行。生产
+// 实现为 service.WebTokenService.BanRejectMessage（闭包持服务引用，封禁/解封/
+// 懒过期即时生效）。nil = 未启用封禁判定（全部放行）。
+//
+// 与 verify 刻意分离（verify 内聚合会把封禁吞为普通认证失败、无法返回含解封
+// 时间的专用提示，也无法在审计面区分封禁形态——verify 契约保持凭据有效性单一
+// 语义）。两认证点（HTTP requireToken 与 WS 握手）必须同接，漏一即封禁可绕过。
+type BanCheck func(tokenID string) string
+
 // WebOptions 浏览器访问模式（serve 模式）HTTP 服务配置。
 type WebOptions struct {
 	// Assets 静态资产源（frontend/dist 子文件系统），由调用方（main 包）
@@ -54,6 +65,9 @@ type WebOptions struct {
 	// 新建/撤销/过期在实现方即时生效，无需热轮换通知。nil 时除 /healthz 外
 	// 全部请求拒绝（fail closed）。
 	Verify TokenVerifier
+	// BanCheck 封禁判定函数（见 BanCheck，连接管控四期）：verify 放行后的组合
+	// 判定，非空消息以 401 拒绝并透出专用提示。可 nil（未启用封禁判定）。
+	BanCheck BanCheck
 	// OnAuth 认证事件回调：requireToken 与 /ws 握手两处认证点在成功/失败时各
 	// 回调一次（serve 装配层注入审计落盘）。nil 安全。
 	OnAuth func(AuthEvent)
@@ -102,9 +116,10 @@ const cookieMaxAge = 30 * 24 * time.Hour
 // 直读 WebTokenService 状态即时生效，本层无热轮换写路径，原 SetToken 已随
 // verify 化删除）。
 type WebHandler struct {
-	files  fs.FS
-	verify TokenVerifier   // 令牌校验函数（nil = 一切拒绝 fail closed）
-	onAuth func(AuthEvent) // 认证事件出口（可 nil）
+	files    fs.FS
+	verify   TokenVerifier   // 令牌校验函数（nil = 一切拒绝 fail closed）
+	banCheck BanCheck        // 封禁判定函数（可 nil = 未启用；verify 放行后组合判定）
+	onAuth   func(AuthEvent) // 认证事件出口（可 nil）
 	// mux 实际路由表（各端点挂载），ServeHTTP 委托转发
 	mux http.Handler
 }
@@ -127,7 +142,7 @@ type WebHandler struct {
 //     服务；未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由
 //     可达）。
 func NewWebHandler(opts WebOptions) *WebHandler {
-	h := &WebHandler{files: opts.Assets, verify: opts.Verify, onAuth: opts.OnAuth}
+	h := &WebHandler{files: opts.Assets, verify: opts.Verify, banCheck: opts.BanCheck, onAuth: opts.OnAuth}
 	mux := http.NewServeMux()
 	mux.HandleFunc(healthPath, h.serveHealth)
 	if opts.RPCTarget != nil {
@@ -200,6 +215,20 @@ func (h *WebHandler) requireToken(next http.Handler) http.Handler {
 			slog.Warn("unauthorized request", "path", r.URL.Path, "remote", r.RemoteAddr)
 			writePreviewError(w, http.StatusUnauthorized, "未授权访问：请携带访问令牌")
 			return
+		}
+		// 封禁组合判定（连接管控四期，verify 放行后）：命中生效中的封禁以 401
+		// 拒绝并透出含解封时间的专用消息（与「请携带访问令牌」可区分）。审计走
+		// auth_failure 且 tokenID 填命中值——封禁形态非空，与普通认证失败（恒空）
+		// 在审计面可区分；不发 auth_success（认证未放行）。会话 cookie 不种
+		//（封禁令牌的新会话无意义），actor 身份亦不注入（请求未放行）。
+		if h.banCheck != nil {
+			if msg := h.banCheck(tokenID); msg != "" {
+				emitAuthEvent(h.onAuth, AuthEventFailure, tokenID, r)
+				// 只记路径不记完整 URL：查询参数通道的令牌不得进日志
+				slog.Warn("banned token request", "path", r.URL.Path, "remote", r.RemoteAddr)
+				writePreviewError(w, http.StatusUnauthorized, msg)
+				return
+			}
 		}
 		emitAuthEvent(h.onAuth, AuthEventSuccess, tokenID, r)
 		h.issueSessionCookie(w, r, matched)

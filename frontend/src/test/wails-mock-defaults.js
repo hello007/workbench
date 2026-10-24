@@ -207,6 +207,12 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
     }
   },
   RevokeWebToken: null,
+  // 封禁/解封令牌（连接管控四期，设置页令牌管理区）：void 返回 null 安全
+  // no-op（错误经 {__error__, __code__} 描述符注入）；ListWebTokens 条目的
+  // banned/bannedUntil/banReason 封禁扩字段默认不设（未封禁态，undefined falsy
+  // 与后端 omitempty 序列化形态一致）
+  BanWebToken: null,
+  UnbanWebToken: null,
   // 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务）：void 返回 null
   // 安全 no-op（命中即断开对端连接；错误经 {__error__, __code__} 描述符注入）
   KickConnection: null,

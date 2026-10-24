@@ -134,6 +134,9 @@ const (
 	// 均为预期拒绝/引导类（warning），前端 error.js WARNING_CODES 同步分流。
 	ErrCodeWebServeNotRunning = "E_WEBSERVE_NOT_RUNNING" // 浏览器访问服务未运行，踢出连接不可达（warning；停机/未启用态）
 	ErrCodeConnNotFound       = "E_CONNECTION_NOT_FOUND" // 目标连接不存在或已断开（列表过期，引导刷新后重试；warning）
+	// ErrCodeTokenRevoked 封禁已撤销令牌被拒（连接管控四期，warning）：撤销即
+	// 凭据失效，封禁无对象，引导刷新列表。
+	ErrCodeTokenRevoked = "E_TOKEN_REVOKED"
 
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
