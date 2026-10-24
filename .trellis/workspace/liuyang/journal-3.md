@@ -1481,3 +1481,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 155: 连接管控三期（审计可见性：actor 归因 + 审计历史查看）
+
+**Date**: 2026-10-24
+**Task**: 连接管控三期（审计可见性：actor 归因 + 审计历史查看）
+**Branch**: `master`
+
+### Summary
+
+补全二期两处审计可见性缺口：①actor 归因——requireToken 注入 tokenID 进 ctx + RPCTargetForActor per-request 装饰 target（main 包 rpcAuditTarget embed override KickConnection 委托未导出 kickConnectionAs，导出面/wailsjs/RPC 协议零变更），AuditRecord 加 actorSource（desktop|rpc）+ actorTokenId，LogConnKick 收编 KickAudit 结构化参数；②审计历史——AuditLogger.QueryAuditLog 读侧（过滤/倒序分页/.1+主文件合并/坏行跳过/快照语义）+ App.QueryAuditLog 绑定 + 设置页审计日志弹窗（AuditHistoryDialog）。隐私红线：RPCHiddenMethods 屏蔽（对浏览器呈现「方法不存在」，同构暴露不特判原则首个有据偏离）+ 前端 isBrowserChannel 入口隐藏双防线。check 自修 8 处（含 handleError 双参签名真实缺陷）。验证：go build/vet/-race 全绿、vitest 2098、E2E 114、npm run build 过、写侧契约现有测试零改动通过。spec：browser-channel.md §2.2/§2.3/§6 + logging-and-errors.md §8.1 + CLAUDE.md 关键规则行 + README/功能说明/API参考联动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `555489c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

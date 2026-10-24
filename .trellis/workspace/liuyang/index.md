@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 154
+- **Total Sessions**: 155
 - **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1483 | Active |
+| `journal-3.md` | ~1516 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 155 | 2026-10-24 | 连接管控三期（审计可见性：actor 归因 + 审计历史查看） | `555489c` | `master` |
 | 154 | 2026-10-24 | 连接管控二期：踢出审计 + 被踢端感知提示 | `5024ca4` | `master` |
 | 153 | 2026-10-24 | 连接管控：踢出连接 + 令牌在线状态标记 | `ce7fe94` | `master` |
 | 152 | 2026-10-23 | 多设备连接明细（连接数升级为设备明细列表） | `d298597` | `master` |
