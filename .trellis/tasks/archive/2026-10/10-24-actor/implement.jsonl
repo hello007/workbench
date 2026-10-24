@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "§2.2 RPC 反射面契约（reflect MethodByName 位置参数、E_RPC_* 错误矩阵——HiddenMethods 须嵌入该契约）+ §2.3 连接管控二期段（DisconnectClient 契约、App 层审计单咽喉、actor 未记录为已知限制即本次要消除的项）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "§8 审计事件表全谱 + 「动作生效后才写」纪律 + 禁落明文 token 与完整 URL——AuditRecord 加字段与读侧 API 必须逐字不破坏写侧契约"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 导出方法 QueryAuditLog 须手动同步 frontend/wailsjs/ 三处（App.js/App.d.ts/models.ts）+ type X string 别名 MISSING_EXPORT 检查规则"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "AuditHistoryDialog 弹窗响应式分档（960×620 先例）、完整 flex 约束链、深色容器内联 SVG 图标、行内样式禁用等视觉规范"}
+{"file": "docs/spec/test-stability.md", "reason": "web serve 启动测试随机端口注入、禁 sleep/外部环境依赖——新增 RPC 隐私断言与读侧测试须遵守"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例从 fixtures.js import {test,expect}、wails-mock-defaults.js 单一数据源补 QueryAuditLog、新增 spec 目录须同步 vitest exclude"}

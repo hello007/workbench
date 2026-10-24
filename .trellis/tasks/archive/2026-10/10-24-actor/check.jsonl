@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核查 HiddenMethods 是否破坏 §2.2 RPC 契约逐字不变性（白名单=全部导出方法语义的偏离是否有据且注释清晰）+ §2.3 审计单咽喉是否保持（App 层单点、生效才写）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查写侧契约零变更（O_APPEND/轮转/旁路降级）+ 审计行无明文 token/完整 URL + 新字段 omitempty 不破坏既有行消费"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 三处同步完整 + npm run build 无 MISSING_EXPORT + EventsOn 注销闭包契约（若新组件挂事件监听）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查后端 service ≥76% / 前端 ≥70% 门禁不回退，新增读侧解析与组件用例计入覆盖"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查 wails-mock-defaults.js 已补 QueryAuditLog、E2E 用例 fixture 对齐后端 model 真实形状、无 waitForTimeout"}
