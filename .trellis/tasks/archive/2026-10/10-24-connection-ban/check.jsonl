@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核查两认证点均接入封禁判定（HTTP requireToken + WS ServeHTTP 升级前，遗漏一处=封禁可绕过）+ verify 契约零变更（TokenVerifier 签名不动，BanCheck 独立注入）+ 动作面不进 HiddenMethods（BanWebToken/UnbanWebToken 同构可达）+ QueryAuditLog 屏蔽不回归 + 踢出/封禁两动作服务端语义一致（热生效面均为新连接）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查 ban/unban 审计行在 SaveJSON 成功后才写（失败回滚不留已发审计行）+ 无明文 token/完整 URL + actorSource/actorTokenId 归因字段对齐 conn_kick 三期形态 + 新错误码三处同步完整（app_error.go + error.js ErrorCode/WARNING_CODES）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 三处同步完整 + npm run build 无 MISSING_EXPORT + WebTokenStatus 扩字段 models.ts class 已补（Wails 绑定返回值 1~2 个约束）"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核查 web_bans.json 走 util.SaveJSON 原子写、无新增 os.WriteFile 直写、损坏降级不阻塞启动（对齐 web_tokens.json SessionService 模式）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查后端 service ≥76% / server 覆盖 / 前端 ≥70% 门禁不回退，封禁状态机与两认证点用例计入覆盖 + go test -race 全绿"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查 wails-mock-defaults.js 已补新方法默认值、E2E fixture 对齐 WebTokenStatus 真实形状（含封禁字段）、无 waitForTimeout、EventsOn 注销闭包（若新挂事件监听）"}
