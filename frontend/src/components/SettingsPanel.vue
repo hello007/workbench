@@ -483,6 +483,78 @@
               <el-button size="small" @click="auditHistoryVisible = true">查看审计日志</el-button>
             </div>
           </div>
+          <!-- 自动封禁参数（连接管控六期）：认证失败频次达标自动封禁来源 IP 的
+               四参数（阈值/窗口/基础时长/递增封顶），保存走 SetIPBanConfig 专用
+               单点（保存+即时生效，对齐 SetWebServeConfig 先例）；纯桌面面入口
+               同审计日志（参数非隐私但与通道治理同语境，浏览器通道设置页隐藏） -->
+          <div v-if="!browserChannel" class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">自动封禁</div>
+              <div class="settings-item-desc">滑动窗口内认证失败达到阈值即自动封禁来源 IP；同一 IP 反复触发封禁时长翻倍递增至封顶。改动保存后即时生效，生效中的封禁不追溯调整</div>
+            </div>
+            <div class="ipban-fields">
+              <div class="ipban-field">
+                <span class="ipban-field-label">失败阈值</span>
+                <el-input-number
+                  v-model="ipBanThreshold"
+                  size="small"
+                  :min="IP_BAN_THRESHOLD_MIN"
+                  :max="IP_BAN_THRESHOLD_MAX"
+                  :value-on-clear="IP_BAN_DEFAULTS.threshold"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">次（{{ IP_BAN_THRESHOLD_MIN }}-{{ IP_BAN_THRESHOLD_MAX }}）</span>
+              </div>
+              <div class="ipban-field">
+                <span class="ipban-field-label">统计窗口</span>
+                <el-input-number
+                  v-model="ipBanWindowMinutes"
+                  size="small"
+                  :min="IP_BAN_WINDOW_MIN"
+                  :max="IP_BAN_WINDOW_MAX"
+                  :value-on-clear="IP_BAN_DEFAULTS.windowMinutes"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">分钟（{{ IP_BAN_WINDOW_MIN }}-{{ IP_BAN_WINDOW_MAX }}）</span>
+              </div>
+              <div class="ipban-field">
+                <span class="ipban-field-label">基础封禁时长</span>
+                <el-input-number
+                  v-model="ipBanDurationMinutes"
+                  size="small"
+                  :min="IP_BAN_DURATION_MIN"
+                  :max="IP_BAN_DURATION_MAX"
+                  :value-on-clear="IP_BAN_DEFAULTS.durationMinutes"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">分钟（{{ IP_BAN_DURATION_MIN }}-{{ IP_BAN_DURATION_MAX }}，首次触发）</span>
+              </div>
+              <div class="ipban-field">
+                <span class="ipban-field-label">递增封顶</span>
+                <el-input-number
+                  v-model="ipBanMaxBanDurationMinutes"
+                  size="small"
+                  :min="IP_BAN_MAX_DURATION_MIN"
+                  :max="IP_BAN_MAX_DURATION_MAX"
+                  :value-on-clear="IP_BAN_DEFAULTS.maxBanDurationMinutes"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">分钟（{{ IP_BAN_MAX_DURATION_MIN }}-{{ IP_BAN_MAX_DURATION_MAX }}，不低于基础时长）</span>
+              </div>
+            </div>
+            <div class="ipban-actions">
+              <el-button size="small" text @click="resetIPBanDefaults">恢复默认</el-button>
+              <el-button size="small" type="primary" :loading="savingIPBan" @click="saveIPBanConfig">保存并生效</el-button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -498,14 +570,14 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SetIPBanConfig, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { setToken } from '../transport/token'
 import { isBrowserChannel } from '../transport'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import AuditHistoryDialog from './AuditHistoryDialog.vue'
 import BanTokenDialog from './BanTokenDialog.vue'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -644,6 +716,57 @@ const tokenExpiry = ref('never')
 const customExpiryDate = ref(null)
 const creatingToken = ref(false)
 const createdPlain = ref('')
+
+// 自动封禁参数（连接管控六期）：四参数表单（el-input-number clamp 与后端
+// model clamp 边界一致）+ 保存（SetIPBanConfig「保存+生效」专用单点）+ 恢复
+// 默认；初值经 loadWebServeConfig 的 GetSettings 回填（段缺失走默认）
+const ipBanThreshold = ref(IP_BAN_DEFAULTS.threshold)
+const ipBanWindowMinutes = ref(IP_BAN_DEFAULTS.windowMinutes)
+const ipBanDurationMinutes = ref(IP_BAN_DEFAULTS.durationMinutes)
+const ipBanMaxBanDurationMinutes = ref(IP_BAN_DEFAULTS.maxBanDurationMinutes)
+const savingIPBan = ref(false)
+
+/** 恢复默认：表单回填四项默认值（不落盘，保存动作显式提交） */
+function resetIPBanDefaults() {
+  ipBanThreshold.value = IP_BAN_DEFAULTS.threshold
+  ipBanWindowMinutes.value = IP_BAN_DEFAULTS.windowMinutes
+  ipBanDurationMinutes.value = IP_BAN_DEFAULTS.durationMinutes
+  ipBanMaxBanDurationMinutes.value = IP_BAN_DEFAULTS.maxBanDurationMinutes
+}
+
+/**
+ * 保存自动封禁参数（SetIPBanConfig 专用单点：持久化 + ApplyConfig 即时生效）。
+ * 成功提示即时生效语义；失败经 handleError 分流（后端 clamp 静默收敛，无专属
+ * 错误码，通用失败分支覆盖）。
+ */
+async function saveIPBanConfig() {
+  savingIPBan.value = true
+  try {
+    await SetIPBanConfig(
+      ipBanThreshold.value,
+      ipBanWindowMinutes.value,
+      ipBanDurationMinutes.value,
+      ipBanMaxBanDurationMinutes.value
+    )
+    ElMessage.success('自动封禁参数已保存并即时生效')
+  } catch (e) {
+    handleError('保存自动封禁参数失败: ', e)
+  } finally {
+    savingIPBan.value = false
+  }
+  // 保存后回读归一值（封顶低于基础时长等组合在后端收敛，表单以生效值为准）
+  try {
+    const settings = await GetSettings()
+    if (settings?.ipban) {
+      ipBanThreshold.value = settings.ipban.threshold
+      ipBanWindowMinutes.value = settings.ipban.windowMinutes
+      ipBanDurationMinutes.value = settings.ipban.durationMinutes
+      ipBanMaxBanDurationMinutes.value = settings.ipban.maxBanDurationMinutes
+    }
+  } catch {
+    // 回读失败保持当前值
+  }
+}
 
 /**
  * 令牌记录状态分流：已撤销 > 已过期（惰性失效，按 expiresAt 与当前时间判定，
@@ -949,6 +1072,11 @@ async function loadWebServeConfig() {
     webTlsEnabled.value = !!settings?.webServe?.tls
     webTlsCertPath.value = settings?.webServe?.tlsCertPath || ''
     webTlsKeyPath.value = settings?.webServe?.tlsKeyPath || ''
+    // 自动封禁参数回填（连接管控六期）：段缺失（老配置）时保持默认值
+    ipBanThreshold.value = settings?.ipban?.threshold || IP_BAN_DEFAULTS.threshold
+    ipBanWindowMinutes.value = settings?.ipban?.windowMinutes || IP_BAN_DEFAULTS.windowMinutes
+    ipBanDurationMinutes.value = settings?.ipban?.durationMinutes || IP_BAN_DEFAULTS.durationMinutes
+    ipBanMaxBanDurationMinutes.value = settings?.ipban?.maxBanDurationMinutes || IP_BAN_DEFAULTS.maxBanDurationMinutes
   } catch {
     // 保持当前值
   }
@@ -1529,6 +1657,38 @@ const onThemeChange = async () => {
 .input-w-xl { width: 280px; }
 
 /* ===== 网络访问分区 ===== */
+
+/* 自动封禁参数（连接管控六期）：四字段纵向排布（标签 + 输入 + clamp 提示同行） */
+.ipban-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.ipban-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ipban-field-label {
+  width: 96px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-secondary, var(--el-text-color-secondary));
+}
+.ipban-field :deep(.el-input-number) {
+  width: 120px;
+}
+.ipban-field-hint {
+  font-size: 12px;
+  color: var(--text-tertiary, var(--el-text-color-placeholder));
+}
+.ipban-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
 
 /* 分段切换 + 自定义地址输入横排（窄窗换行防挤压） */
 .webserve-bind-row {

@@ -238,9 +238,14 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 来源 IP 自动封禁服务（连接管控五期，纯内存态无持久化文件）：审计出口与
 	// token 封禁同用 webAuditSvc；生产默认时钟（time.Now），RejectMessage 闭包
-	// 由 assembleWebServe 注入两认证点。
+	// 由 assembleWebServe 注入两认证点。启动初值经 ApplyConfig 注入设置段归一值
+	// （连接管控六期参数化：Load 首调在此完成缓存建立，后续热更走 SetIPBanConfig
+	// 单点，两通道同一 ApplyConfig 收口）。
 	s.ipBanSvc = service.NewIPBanService(nil)
 	s.ipBanSvc.SetAudit(s.webAuditSvc)
+	if cfg, err := s.settingsSvc.Load(); err == nil {
+		s.ipBanSvc.ApplyConfig(model.NormalizeIPBanSettings(cfg.IPBan))
+	}
 
 	return s
 }

@@ -442,6 +442,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
   SaveSettings: null,
 
+  // IP 自动封禁参数保存（连接管控六期「保存+生效」单点，四参 void）：null 安全 no-op
+  SetIPBanConfig: null,
+
   // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----
   // 形状对齐 model.PptxPreviewResult { pdfPath, error, errorCode }（见
   // frontend/wailsjs/go/models.ts）。默认降级态（CI 无 PowerPoint）：

@@ -16,9 +16,12 @@ type IPBanStatus struct {
 	// 时间），过期记录不自动删除（列表保留「已过期」态可见性，禁后台扫描），
 	// 与 WebBanRecord.ExpiresAt 同款约定。
 	ExpiresAt int64 `json:"expiresAt"`
-	// FailCount 触发本次封禁时滑动窗口内的认证失败计数（当前恒为
-	// IPBanThreshold；封禁期间失败不累计，该值冻结至下次触发刷新）。
+	// FailCount 触发本次封禁时滑动窗口内的认证失败计数（当前恒为该 IP 的
+	// threshold 参数值；封禁期间失败不累计，该值冻结至下次触发刷新）。
 	FailCount int `json:"failCount"`
+	// Strike 累计触发封禁的次数（连接管控六期递增封禁：第 N 次触发的封禁时长
+	// 按指数翻倍递增至封顶；解封/轮换联动清零/重启清零后重新从 1 起算）。
+	Strike int `json:"strike"`
 	// Expired 构造时按当前时间算好的过期标记（true = 已到期，仅剩列表可见
 	// 性；拒连判定以服务层懒过期为准）。
 	Expired bool `json:"expired"`

@@ -96,14 +96,17 @@
             <!-- 自动封禁区块（连接管控五期，认证失败达阈值自动封禁来源 IP）：
                  数据源 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods
                  屏蔽，composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 =
-                 IP + 窗口失败计数 + 到期时间（过期态「已过期」info / 生效中 warning）。
-                 解封按钮过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带清理列表
-                 中已过期残留记录 -->
+                 IP + 递增档位徽标 + 窗口失败计数 + 到期时间（过期态「已过期」info /
+                 生效中 warning）。档位徽标（六期）：strike>1 才渲染——首触无递增
+                 语义，渲染「第 1 次」纯噪音；strike undefined（旧载荷）falsy 不渲染
+                 向后兼容。解封按钮过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带
+                 清理列表中已过期残留记录 -->
             <div class="devices-ban-section">
               <div class="devices-panel-subtitle">自动封禁（{{ ipBans.length }}）</div>
               <div v-if="ipBans.length" class="devices-ban-list">
                 <div v-for="b in ipBans" :key="b.ip" class="devices-ban-row">
                   <span class="devices-panel-ip" :title="b.ip">{{ b.ip }}</span>
+                  <span v-if="b.strike > 1" class="devices-ban-strike" :title="`第 ${b.strike} 次触发，封禁时长递增`">第 {{ b.strike }} 次</span>
                   <span class="devices-ban-fails">{{ b.failCount }} 次失败</span>
                   <span class="devices-ban-expiry" :class="{ 'is-expired': b.expired }">
                     {{ b.expired ? '已过期' : `至 ${formatBanExpiry(b.expiresAt)}` }}
@@ -509,6 +512,17 @@ const panels = [
 .devices-ban-fails {
   font-size: 11px;
   color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* 递增档位徽标（六期）：warning 色系小徽标，strike>1 才渲染（首触无递增语义） */
+.devices-ban-strike {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 14%, transparent);
   white-space: nowrap;
 }
 

@@ -653,4 +653,20 @@ describe('ActivityBar - 自动封禁区块', () => {
     expect(hints.some((t) => t.includes('2 个来源 IP 已被自动封禁'))).toBe(true)
     wrapper.unmount()
   })
+
+  it('递增档位徽标（六期）：strike>1 渲染「第 N 次」，首触与旧载荷不渲染', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      banEntry({ ip: '203.0.113.8', strike: 3 }),
+      banEntry({ ip: '203.0.113.9', strike: 1 }),
+      banEntry({ ip: '203.0.113.10' }) // 旧载荷形态（无 strike 字段）向后兼容
+    ])
+    const wrapper = await mountFlushed()
+    const rows = wrapper.findAll('.devices-ban-row')
+    expect(rows[0].find('.devices-ban-strike').exists()).toBe(true)
+    expect(rows[0].find('.devices-ban-strike').text()).toBe('第 3 次')
+    expect(rows[1].find('.devices-ban-strike').exists()).toBe(false)
+    expect(rows[2].find('.devices-ban-strike').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

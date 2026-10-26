@@ -50,6 +50,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   CreateWebToken: vi.fn(),
   RevokeWebToken: vi.fn(),
   UnbanWebToken: vi.fn(),
+  SetIPBanConfig: vi.fn(),
   QueryAuditLog: vi.fn()
 }))
 
@@ -1778,5 +1779,106 @@ describe('SettingsPanel.vue - 令牌封禁区', () => {
     await flushPromises()
     expect(ElMessage.warning).toHaveBeenCalledWith('令牌不存在或已被删除，请刷新列表')
     expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+})
+
+// ---- 自动封禁参数区（连接管控六期：四参数表单 + 保存+生效单点 + 恢复默认） ----
+
+describe('SettingsPanel.vue - 自动封禁参数区', () => {
+  let wrapper = null
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  // el-input-number 全局 stub 渲染为 <input class="el-input-number">（值在
+  // element.value），选择器经 class 命中 stub input 本体
+  function ipbanInputs() {
+    return wrapper.findAll('.ipban-field input.el-input-number')
+  }
+
+  async function openNetwork(settingsOver = undefined) {
+    wrapper = await createWrapper(settingsOver)
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+    await nextTick()
+  }
+
+  it('渲染四参数表单与操作按钮，GetSettings ipban 段回填', async () => {
+    await openNetwork({
+      ipban: { threshold: 20, windowMinutes: 30, durationMinutes: 10, maxBanDurationMinutes: 120 }
+    })
+    expect(wrapper.text()).toContain('自动封禁')
+    const numbers = ipbanInputs()
+    expect(numbers.length).toBe(4)
+    expect(numbers[0].element.value).toBe('20')
+    expect(numbers[1].element.value).toBe('30')
+    expect(numbers[2].element.value).toBe('10')
+    expect(numbers[3].element.value).toBe('120')
+    expect(wrapper.findAll('button').some(b => b.text() === '恢复默认')).toBe(true)
+    expect(wrapper.findAll('button').some(b => b.text() === '保存并生效')).toBe(true)
+  })
+
+  it('段缺失（老配置）回填默认值', async () => {
+    await openNetwork()
+    const numbers = ipbanInputs()
+    expect(numbers[0].element.value).toBe('10')
+    expect(numbers[1].element.value).toBe('10')
+    expect(numbers[2].element.value).toBe('5')
+    expect(numbers[3].element.value).toBe('60')
+  })
+
+  it('保存调用 SetIPBanConfig 四参并提示即时生效，随后回读归一值刷新表单', async () => {
+    const { SetIPBanConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetIPBanConfig.mockResolvedValue()
+    // 首次 GetSettings（挂载回填）返回默认；保存后回读返回封顶被后端收敛的形态
+    GetSettings.mockResolvedValueOnce(baseSettings())
+      .mockResolvedValue(baseSettings({
+        ipban: { threshold: 5, windowMinutes: 10, durationMinutes: 60, maxBanDurationMinutes: 60 }
+      }))
+    await openNetwork()
+    const numbers = ipbanInputs()
+    await numbers[0].setValue('5')
+    await numbers[2].setValue('60')
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(SetIPBanConfig).toHaveBeenCalledTimes(1)
+    expect(SetIPBanConfig).toHaveBeenCalledWith(5, 10, 60, 60)
+    expect(ElMessage.success).toHaveBeenCalledWith('自动封禁参数已保存并即时生效')
+    // 回读归一值刷新表单（封顶=基础时长的收敛形态以生效值为准）
+    expect(ipbanInputs()[3].element.value).toBe('60')
+  })
+
+  it('恢复默认回填四项默认值（不触发保存）', async () => {
+    const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
+    await openNetwork({
+      ipban: { threshold: 50, windowMinutes: 60, durationMinutes: 30, maxBanDurationMinutes: 600 }
+    })
+    await wrapper.findAll('button').find(b => b.text() === '恢复默认').trigger('click')
+    await nextTick()
+    const numbers = ipbanInputs()
+    expect(numbers[0].element.value).toBe('10')
+    expect(numbers[1].element.value).toBe('10')
+    expect(numbers[2].element.value).toBe('5')
+    expect(numbers[3].element.value).toBe('60')
+    expect(SetIPBanConfig).not.toHaveBeenCalled()
+  })
+
+  it('保存失败走 handleError 分流（非预期拒绝 error 提示拼前缀）', async () => {
+    const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetIPBanConfig.mockRejectedValue({ message: '保存设置失败: 磁盘满' })
+    await openNetwork()
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('保存自动封禁参数失败: 保存设置失败: 磁盘满')
+    expect(ElMessage.success).not.toHaveBeenCalled()
   })
 })

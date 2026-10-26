@@ -30,12 +30,13 @@ import { ListIPBans } from '../../../wailsjs/go/main/App'
 import { ElMessage } from 'element-plus'
 
 // 封禁条目 fixture（形状对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/
-// failCount/expired bool）
+// failCount/strike/expired bool）
 const banEntry = (over = {}) => ({
   ip: '203.0.113.7',
   bannedAt: 1735689600,
   expiresAt: 1735689900,
   failCount: 10,
+  strike: 1,
   expired: false,
   ...over
 })
@@ -62,7 +63,7 @@ describe('useIPBanList', () => {
   })
 
   it('挂载即拉取列表并注册事件监听，数据落地 ipBans', async () => {
-    ListIPBans.mockResolvedValue([banEntry()])
+    ListIPBans.mockResolvedValue([banEntry({ strike: 3 })])
     const { wrapper, exposed } = mountWith(() => {
       const { ipBans, reload } = useIPBanList()
       return { snapshot: () => ipBans.value, ipBans, reload }
@@ -72,6 +73,8 @@ describe('useIPBanList', () => {
     expect(eventHandlers[WEBSERVE_IP_BANNED_EVENT]).toBeTypeOf('function')
     expect(exposed.ipBans.value).toHaveLength(1)
     expect(exposed.ipBans.value[0].ip).toBe('203.0.113.7')
+    // 载荷整条透传（连接管控六期 strike 字段透传落地，徽标渲染由 ActivityBar spec 消费断言）
+    expect(exposed.ipBans.value[0].strike).toBe(3)
     wrapper.unmount()
   })
 

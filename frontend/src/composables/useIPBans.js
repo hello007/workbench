@@ -26,8 +26,8 @@ import { ElMessage } from 'element-plus'
 import { isBrowserChannel } from '../transport'
 
 // 桌面端 IP 自动封禁触发事件名（web_serve.go webServeIPBannedEvent，取值须与后端一致）。
-// 载荷为 model.IPBanStatus 快照（{ip, bannedAt, expiresAt, failCount}，json 小写
-// tag，含 expired 字段但触发时刻恒 false——列表过期态以 ListIPBans 懒判定为准）。
+// 载荷为 model.IPBanStatus 快照（{ip, bannedAt, expiresAt, failCount, strike}，json
+// 小写 tag，含 expired 字段但触发时刻恒 false——列表过期态以 ListIPBans 懒判定为准）。
 export const WEBSERVE_IP_BANNED_EVENT = 'webserve-ip-banned'
 
 /**
@@ -57,7 +57,7 @@ export function formatBanExpiry(sec) {
  * 静默空态优于报错噪声。
  *
  * @returns {{
- *   ipBans: import('vue').Ref<Array<{ip:string, bannedAt:number, expiresAt:number, failCount:number, expired:boolean}>>,
+ *   ipBans: import('vue').Ref<Array<{ip:string, bannedAt:number, expiresAt:number, failCount:number, strike:number, expired:boolean}>>,
  *   reload: () => Promise<void>
  * }}
  */

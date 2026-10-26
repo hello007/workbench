@@ -126,6 +126,100 @@ const (
 	MaxTerminalScrollback     = 10000
 )
 
+// IP 封禁参数默认值与取值边界（连接管控六期：自动封禁治理参数化；前端 settings
+// store 的对应常量与此对齐）。阈值为滑动窗口内认证失败次数（下限 3 防偶发误伤，
+// 1~2 次即封对合法用户输错密码场景过激）；窗口/时长/递增封顶均为分钟口径。
+const (
+	DefaultIPBanThreshold       = 10
+	MinIPBanThreshold           = 3
+	MaxIPBanThreshold           = 100
+	DefaultIPBanWindowMinutes   = 10
+	MinIPBanWindowMinutes       = 1
+	MaxIPBanWindowMinutes       = 120
+	DefaultIPBanDurationMinutes = 5
+	MinIPBanDurationMinutes     = 1
+	MaxIPBanDurationMinutes     = 60
+	DefaultIPBanMaxBanMinutes   = 60
+	MinIPBanMaxBanMinutes       = 5
+	MaxIPBanMaxBanMinutes       = 1440
+)
+
+// IPBanSettings IP 认证失败自动封禁参数段（连接管控六期，settings.json 的 ipban
+// 段）。指针形态区分「老配置缺失（→ 默认）」与显式取值（对齐 WebServe/Assets
+// 先例）。MaxBanDurationMinutes 为递增封禁的封顶上限（反复触发封越久，见
+// service.IPBanService 递增公式），normalize 时收敛不低于 DurationMinutes（基础
+// 时长超过封顶的组合无意义）。
+type IPBanSettings struct {
+	Threshold             int `json:"threshold"`             // 滑动窗口内失败达到该次数即自动封禁（默认 10，clamp 3-100）
+	WindowMinutes         int `json:"windowMinutes"`         // 滑动窗口长度分钟（默认 10，clamp 1-120）
+	DurationMinutes       int `json:"durationMinutes"`       // 基础封禁时长分钟（首次触发，默认 5，clamp 1-60）
+	MaxBanDurationMinutes int `json:"maxBanDurationMinutes"` // 递增封禁封顶分钟（默认 60，clamp 5-1440，恒 ≥ DurationMinutes）
+}
+
+// DefaultIPBanSettings IP 封禁参数默认设置（老配置升级与损坏降级统一入口，
+// 数值与五期硬编码常量 service.IPBanThreshold/IPBanWindow/IPBanDuration 对齐）。
+func DefaultIPBanSettings() IPBanSettings {
+	return IPBanSettings{
+		Threshold:             DefaultIPBanThreshold,
+		WindowMinutes:         DefaultIPBanWindowMinutes,
+		DurationMinutes:       DefaultIPBanDurationMinutes,
+		MaxBanDurationMinutes: DefaultIPBanMaxBanMinutes,
+	}
+}
+
+// normalize 零值回退默认，越界 clamp 收敛；封顶下限收敛不低于基础时长（用户
+// 手改配置出「基础 60 / 封顶 5」组合时封顶被抬到 60，保证 escalate 公式单调）。
+func (s *IPBanSettings) normalize() {
+	s.Threshold = clampIPBanInt(s.Threshold, MinIPBanThreshold, MaxIPBanThreshold, DefaultIPBanThreshold)
+	s.WindowMinutes = clampIPBanInt(s.WindowMinutes, MinIPBanWindowMinutes, MaxIPBanWindowMinutes, DefaultIPBanWindowMinutes)
+	s.DurationMinutes = clampIPBanInt(s.DurationMinutes, MinIPBanDurationMinutes, MaxIPBanDurationMinutes, DefaultIPBanDurationMinutes)
+	s.MaxBanDurationMinutes = clampIPBanInt(s.MaxBanDurationMinutes, MinIPBanMaxBanMinutes, MaxIPBanMaxBanMinutes, DefaultIPBanMaxBanMinutes)
+	if s.MaxBanDurationMinutes < s.DurationMinutes {
+		s.MaxBanDurationMinutes = s.DurationMinutes
+	}
+}
+
+// NormalizeIPBanSettings 归一化入口：nil（老配置缺失/降级）→ 默认值；
+// 非 nil → 拷贝 normalize 后返回，不改写入参（调用方可能传入共享的设置缓存
+// 指针，原地改会与并发读者竞态，对齐 NormalizeAssetThumbsSettings 先例）。
+func NormalizeIPBanSettings(s *IPBanSettings) IPBanSettings {
+	if s == nil {
+		return DefaultIPBanSettings()
+	}
+	out := *s
+	out.normalize()
+	return out
+}
+
+// EnsureIPBanDefaults 补全 IP 封禁参数段默认值并收敛越界值：
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 四项全默认；
+//   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长。
+//
+// 在 SettingsService.Load/Save 双链路统一调用，保证 IPBanService 消费方拿到的
+// 段始终完整可用。
+func (s *AppSettings) EnsureIPBanDefaults() {
+	if s.IPBan == nil {
+		def := DefaultIPBanSettings()
+		s.IPBan = &def
+		return
+	}
+	s.IPBan.normalize()
+}
+
+// clampIPBanInt 零值回退默认，越界收敛到 [min, max]。
+func clampIPBanInt(v, min, max, def int) int {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // AppSettings 应用设置
 type AppSettings struct {
 	GpuDisabled            bool     `json:"gpuDisabled"`
@@ -155,6 +249,10 @@ type AppSettings struct {
 	// 「老配置缺失 → 默认」与显式取值（对齐 WebServe 先例），加载后经
 	// EnsureAssetsThumbsDefaults 补全。
 	Assets *AssetThumbsSettings `json:"assets,omitempty"`
+	// IPBan IP 认证失败自动封禁参数段（连接管控六期）。指针形态区分「老配置
+	// 缺失 → 默认」与显式取值（对齐 WebServe/Assets 先例），加载后经
+	// EnsureIPBanDefaults 补全；运行期经 SetIPBanConfig「保存+生效」单点热更。
+	IPBan *IPBanSettings `json:"ipban,omitempty"`
 }
 
 // EnsureWebServeDefaults 补全 webServe 段默认值：

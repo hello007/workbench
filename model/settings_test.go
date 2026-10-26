@@ -301,3 +301,64 @@ func TestNormalizeAssetThumbsSettings(t *testing.T) {
 		t.Fatalf("入参不应被原地修改, got %+v", in)
 	}
 }
+
+// TestAppSettings_EnsureIPBanDefaults 覆盖 IP 封禁参数段默认值与越界收敛（连接
+// 管控六期）：段缺失补四项全默认、零值回默认、越界 clamp、界内保留、封顶不低于
+// 基础时长的组合收敛。
+func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
+	t.Run("段缺失补四项全默认", func(t *testing.T) {
+		s := &AppSettings{}
+		s.EnsureIPBanDefaults()
+		want := DefaultIPBanSettings()
+		if s.IPBan == nil || *s.IPBan != want {
+			t.Fatalf("段缺失应补默认值, got %+v", s.IPBan)
+		}
+	})
+
+	t.Run("零值字段回默认", func(t *testing.T) {
+		s := &AppSettings{IPBan: &IPBanSettings{}}
+		s.EnsureIPBanDefaults()
+		if *s.IPBan != DefaultIPBanSettings() {
+			t.Errorf("零值字段应回默认, got %+v", s.IPBan)
+		}
+	})
+
+	cases := []struct {
+		name string
+		in   IPBanSettings
+		want IPBanSettings
+	}{
+		{name: "越界收敛", in: IPBanSettings{Threshold: 1, WindowMinutes: 500, DurationMinutes: 999, MaxBanDurationMinutes: 1},
+			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes}},
+		{name: "界内取值原样保留", in: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120},
+			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120}},
+		{name: "封顶低于基础时长抬到基础时长", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 5},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &AppSettings{IPBan: &c.in}
+			s.EnsureIPBanDefaults()
+			if *s.IPBan != c.want {
+				t.Errorf("clamp 结果不符, got %+v, want %+v", *s.IPBan, c.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeIPBanSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝
+// normalize 后返回且不改写入参（对齐 NormalizeAssetThumbsSettings 先例）。
+func TestNormalizeIPBanSettings(t *testing.T) {
+	if got := NormalizeIPBanSettings(nil); got != DefaultIPBanSettings() {
+		t.Fatalf("nil 应返回默认值, got %+v", got)
+	}
+	in := &IPBanSettings{Threshold: 1, WindowMinutes: 0, DurationMinutes: 60, MaxBanDurationMinutes: 5}
+	got := NormalizeIPBanSettings(in)
+	if got.Threshold != MinIPBanThreshold || got.WindowMinutes != DefaultIPBanWindowMinutes ||
+		got.DurationMinutes != MaxIPBanDurationMinutes || got.MaxBanDurationMinutes != MaxIPBanDurationMinutes {
+		t.Fatalf("归一化结果不符, got %+v", got)
+	}
+	if in.Threshold != 1 || in.WindowMinutes != 0 {
+		t.Fatalf("入参不应被原地修改, got %+v", in)
+	}
+}

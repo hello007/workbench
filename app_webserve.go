@@ -488,3 +488,49 @@ func (a *App) ListIPBans() []model.IPBanStatus {
 	}
 	return a.ipBanSvc.List()
 }
+
+// SetIPBanConfig 保存 IP 自动封禁参数并即时生效（连接管控六期，设置页「自动封禁」
+// 小节保存入口）：normalize 归一（零值回退默认、越界 clamp、封顶不低于基础时长）
+// → 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」显式单点，对齐
+// SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用 SaveSettings
+// 隐式联动）。
+//
+// 生效语义（六期定稿）：仅面向未来——生效中封禁的到期时刻不追溯调整（改小时长
+// 不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免）；threshold 改小
+// 后存量计数自然满足，下次失败即触发。参数非法无失败分支：clamp 层静默收敛（前端
+// el-input-number 已挡边界，后端 clamp 兜底手改配置形态）。
+//
+// 指针段复制纪律：基底设置的 WebServe/Assets 指针段一律私有拷贝后替换 IPBan 段，
+// 防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态（SetWebServeConfig
+// 先例同款）。
+func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes int) error {
+	normalized := model.NormalizeIPBanSettings(&model.IPBanSettings{
+		Threshold:             threshold,
+		WindowMinutes:         windowMinutes,
+		DurationMinutes:       durationMinutes,
+		MaxBanDurationMinutes: maxBanDurationMinutes,
+	})
+
+	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）
+	base := a.GetSettings()
+	settings := *base
+	if base.WebServe != nil {
+		webServe := *base.WebServe
+		settings.WebServe = &webServe
+	}
+	if base.Assets != nil {
+		assets := *base.Assets
+		settings.Assets = &assets
+	}
+	ipban := normalized
+	settings.IPBan = &ipban
+	if err := a.settingsSvc.Save(&settings); err != nil {
+		return fmt.Errorf("保存设置失败: %w", err)
+	}
+
+	// 运行时生效（ipBanSvc 为 nil 时仅落盘，下次启动按配置初值生效）
+	if a.ipBanSvc != nil {
+		a.ipBanSvc.ApplyConfig(normalized)
+	}
+	return nil
+}

@@ -68,10 +68,11 @@ type AuditRecord struct {
 	// IP 级封禁字段（连接管控五期新增，仅 ip_ban/ip_unban 事件携带）：IP 为
 	// 来源地址（RemoteAddr 剥端口归一后的形态，与 RemoteAddr 字段互不复用——
 	// 该字段语义为认证事件的原始地址含端口）；FailCount 为触发封禁时滑动窗口
-	// 内认证失败计数（ip_unban 无此语义，零值不落键）。均零值不落字段，既有
-	// 事件行形态不变。
+	// 内认证失败计数；Strike 为累计触发次数（连接管控六期递增封禁，仅 ip_ban
+	// 携带——ip_unban 无计数语义）。均零值不落字段，既有事件行形态不变。
 	IP        string `json:"ip,omitempty"`
 	FailCount int    `json:"failCount,omitempty"`
+	Strike    int    `json:"strike,omitempty"`
 }
 
 // AuditLogger 认证与 token 生命周期审计日志（JSONL append-only，data/web_audit.log）。
@@ -184,8 +185,9 @@ func (a *AuditLogger) LogUnban(b BanAudit) {
 type IPBanAudit struct {
 	IP           string // 封禁/解封的来源 IP（已归一形态）
 	FailCount    int    // 触发封禁时滑动窗口内认证失败计数（ip_ban 携带）
+	Strike       int    // 累计触发封禁次数（连接管控六期递增封禁，ip_ban 携带）
 	ExpiresAt    int64  // 封禁到期 unix 秒（ip_ban 携带）
-	Reason       string // 封禁原因文案（ip_ban 携带，含触发计数描述）
+	Reason       string // 封禁原因文案（ip_ban 携带，含触发计数与档位时长描述）
 	ActorSource  string // 操作者来源：AuditActorSystem（自动封禁）| AuditActorDesktop | AuditActorRPC（手动解封）
 	ActorTokenID string // 操作者令牌记录 ID（RPC 解封调用者；桌面/自动触发为空不落键）
 }
@@ -200,6 +202,7 @@ func (a *AuditLogger) LogIPBan(b IPBanAudit) {
 		Event:       AuditEventIPBan,
 		IP:          b.IP,
 		FailCount:   b.FailCount,
+		Strike:      b.Strike,
 		ExpiresAt:   b.ExpiresAt,
 		Reason:      b.Reason,
 		ActorSource: b.ActorSource,

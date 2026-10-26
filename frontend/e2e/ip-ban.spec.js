@@ -5,19 +5,20 @@
  * E2E 浏览器 mock 通道无法真实触发后端封禁（阈值计数发生在真实 HTTP/WS 认证点，
  * 且桌面事件浏览器端永不到达），本 spec 以 mock 数据覆盖前端消费面：
  * 1. 活动栏「自动封禁」区块：无连接但有封禁记录时指示可见（可见条件扩展，角标
- *    warning 分流显封禁数）→ 打开明细面板 → 行渲染（IP/失败计数/到期时间/过期态）
- *    → 解封单次确认链 → UnbanIP 调用断言。
+ *    warning 分流显封禁数）→ 打开明细面板 → 行渲染（IP/递增档位徽标/失败计数/
+ *    到期时间/过期态）→ 解封单次确认链 → UnbanIP 调用断言。
  * 2. 桌面 toast：emitWailsEvent 派发 webserve-ip-banned → 全局 warning 提示
  *    （App 级挂载，面板未开也提示）。
  */
 import { test, expect, emitWailsEvent } from './fixtures'
 
-/** 封禁条目形状（对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/failCount/expired） */
+/** 封禁条目形状（对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/failCount/strike/expired） */
 const banEntry = (over = {}) => ({
   ip: '203.0.113.7',
   bannedAt: Math.floor(Date.now() / 1000) - 60,
   expiresAt: Math.floor(Date.now() / 1000) + 300,
   failCount: 10,
+  strike: 1,
   expired: false,
   ...over
 })
@@ -25,7 +26,7 @@ const banEntry = (over = {}) => ({
 test.describe('IP 自动封禁（连接管控五期）', () => {
   test.use({
     wailsOverrides: {
-      ListIPBans: [banEntry(), banEntry({ ip: '198.51.100.9', expired: true })]
+      ListIPBans: [banEntry({ strike: 3 }), banEntry({ ip: '198.51.100.9', expired: true })]
     }
   })
 
@@ -44,10 +45,13 @@ test.describe('IP 自动封禁（连接管控五期）', () => {
 
     const rows = panel.locator('.devices-ban-row')
     await expect(rows).toHaveCount(2)
-    // 生效中行：IP + 窗口失败计数 + 「至 M-D HH:mm」到期形态（非过期态）
+    // 生效中行：IP + 递增档位徽标（六期 strike>1 渲染）+ 窗口失败计数 + 「至 M-D HH:mm」到期形态（非过期态）
     await expect(rows.nth(0)).toContainText('203.0.113.7')
+    await expect(rows.nth(0).locator('.devices-ban-strike')).toHaveText('第 3 次')
     await expect(rows.nth(0)).toContainText('10 次失败')
     await expect(rows.nth(0).locator('.devices-ban-expiry')).not.toHaveText('已过期')
+    // 首触行（strike=1）无递增语义不渲染徽标
+    await expect(rows.nth(1).locator('.devices-ban-strike')).toHaveCount(0)
     // 过期行：「已过期」标注（info 态），解封按钮保留（UnbanIP 幂等 no-op）
     await expect(rows.nth(1)).toContainText('198.51.100.9')
     await expect(rows.nth(1).locator('.devices-ban-expiry')).toHaveText('已过期')

@@ -57,6 +57,9 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 	// 素材缩略图段默认值补全与越界收敛（段缺失 → 五项全默认），
 	// 保证缩略图链路消费方拿到的配置段始终完整可用
 	settings.EnsureAssetsThumbsDefaults()
+	// IP 封禁参数段默认值补全与越界收敛（段缺失 → 四项全默认，连接管控六期），
+	// 保证 IPBanService 装配与 SetIPBanConfig 消费方拿到的配置段始终完整可用
+	settings.EnsureIPBanDefaults()
 
 	s.mu.Lock()
 	s.cached = settings
@@ -65,13 +68,14 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 }
 
 func (s *SettingsService) Save(settings *model.AppSettings) error {
-	// 保存前补全各段默认值（对齐 Load 链路三处 Ensure）：缓存命中路径不再经过
+	// 保存前补全各段默认值（对齐 Load 链路四处 Ensure）：缓存命中路径不再经过
 	// Load 的补全链路，部分字段的保存入参若直接入缓存会破坏「Load 返回的配置段
 	// 始终完整可用」不变式（如 webServe 段 nil 时 --serve 地址解析直接解引用
 	// settings.WebServe.BindAddress 会 panic）。
 	settings.EnsureWebServeDefaults()
 	settings.EnsureTerminalDefaults()
 	settings.EnsureAssetsThumbsDefaults()
+	settings.EnsureIPBanDefaults()
 	// 锁跨「落盘 + 缓存换新」全程持有：两并发 Save（桌面 + 浏览器通道）若只锁
 	// 缓存赋值，磁盘写入序与缓存换新序可相反（缓存=A 而磁盘=B，脱钩持续到下次
 	// 保存/重启）。写路径低频，全程持锁无性能顾虑。
