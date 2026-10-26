@@ -42,6 +42,7 @@
 |[frontend-dep-upgrade.md](frontend-dep-upgrade.md)|前端依赖分档钳制与升级 SOP（EP caret 漂移治理）：39 顶层依赖四档（exact 仅 element-plus 全家 / tilde 运行时 UI 面锁 minor 放 patch / caret 工具链 / url tarball）；CI 一致性检查 `scripts/check-dep-consistency.mjs`（ci.yml 步骤 2.5，未登记新依赖即失败强制归类，--selftest 注入漂移自证）；升级后必跑面（vitest 全量 + E2E 全量 + 确认弹框哨兵 5 spec + npm audit）；EP 升级 3.4 专项联动 confirm-dialog.md 排查方法论|
 |[mermaid-rendering.md](mermaid-rendering.md)|mermaid 渲染契约（markdown 预览，v12 升级沉淀）：消费面锁定 `import('mermaid')` 包说明符 + initialize 五键（startOnLoad/securityLevel/layout/look/theme）+ `run({nodes, suppressErrors:true})`；v12 视觉保持双键 `layout:'dagre'`+`look:'classic'`（去键即吃 ELK/redux 新观感，ELK 1.46MB chunk 永不触发）；engines node>=22.12（CI 4 处 node 22，不得再降）；E2E mock 坑（PreviewFile 覆盖必含 `kind:'text'`，缺则静默走 CodeMirror 文本分支）；katex 链 audit 清零线与 security-scan.md 联动|
 |[branch-compare.md](branch-compare.md)|分支对比契约（侧边栏「分支对比」，移植 git-branch-compare 算法）：4 只读绑定与方向语义（文件树 diff 为 A→B）；配对在后端（贪心一配一 hash→patch-id→归一化 subject）；patch-id 管道 `log -p \| patch-id --stable` 走 `ExecutePipeline`（专用 2min 超时、失败降级不阻塞）；本服务 git 命令必带 UTF-8 `-c` 前缀（GitCommand 不默认带）；日志解析 %x00/%x01 范式；只读不抢 tryLockRepo、零新增错误码；diff 解析复用抽取后的 utils/diffParse.js|
+|[conflict-resolve-inapp.md](conflict-resolve-inapp.md)|内嵌冲突解决契约（合并/变基/拣选冲突面板第一期）：3 绑定（选边/读内容/按原编码写回）；变更类走 tryLockRepo + 冲突列表成员校验前置；`isSafeRelativePath` 故意从严拒 `..`/冒号；**标记解析行尾 `\r` 必须逐字节保留**（CRLF 往返回归测试锁死）+ 块间 `lead` 上下文行；rebase 冲突 ours/theirs 语义反转 UI 须带提示；GBK 683KB-1MB 读写字限缝隙已知接受；冲突动线三触发点（选仓/单仓拉取/批量更新）切 tab + 红点角标|
 
 ## 新增文档约定
 
