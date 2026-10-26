@@ -153,6 +153,15 @@ type ConflictState struct {
 	Files []string     `json:"files"` // 冲突文件相对仓库根路径
 }
 
+// ConflictFileContent 冲突文件工作区内容快照（内嵌冲突解决器加载用）。
+// Binary/TooLarge 任一为 true 时 Content 为空，前端拦截进解决器（提示走选边或外部工具）。
+type ConflictFileContent struct {
+	Content  string `json:"content"`  // 解码为 UTF-8 后的工作区全文（含冲突标记）
+	Encoding string `json:"encoding"` // 原文件编码（utf-8/gbk），空串等同于 utf-8
+	Binary   bool   `json:"binary"`   // 二进制文件（含 NUL 或非 UTF-8 且 GBK 解码失败）
+	TooLarge bool   `json:"tooLarge"` // 超过 1MB 上限，未读内容
+}
+
 // GitSubmodule 表示 superproject 下的一个 Git submodule。
 // 数据由 `git submodule status`（前导码/SHA/path/describe/init 态）与
 // `git status --porcelain=2`（dirty 标记）双命令融合产出，按 path 关联。

@@ -852,6 +852,32 @@ func (a *App) ResolveConflict(path, file string) error {
 	return a.gitSvc.ResolveConflict(path, file)
 }
 
+// ChooseConflictSide 冲突文件快捷选边（ours=当前分支 / theirs=传入侧），
+// 选边后自动 git add 完成该文件解决（一条链路）。
+func (a *App) ChooseConflictSide(path, file, side string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ChooseConflictSide(path, file, side)
+}
+
+// GetConflictFileContent 读取冲突文件工作区内容（含编码检测/二进制/超大标记），
+// 供内嵌冲突解决器加载。
+func (a *App) GetConflictFileContent(path, file string) (*model.ConflictFileContent, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.GetConflictFileContent(path, file)
+}
+
+// SaveConflictResolution 保存内嵌解决器的合并结果（按原编码写回）并标记已解决。
+func (a *App) SaveConflictResolution(path, file, content, encoding string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.SaveConflictResolution(path, file, content, encoding)
+}
+
 // ContinueMerge 合并冲突解决后提交合并。
 func (a *App) ContinueMerge(path string) (string, error) {
 	if path == "" {
