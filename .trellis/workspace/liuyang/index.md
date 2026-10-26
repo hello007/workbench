@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 156
-- **Last Active**: 2026-10-24
+- **Total Sessions**: 157
+- **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1549 | Active |
+| `journal-3.md` | ~1582 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 157 | 2026-10-26 | 连接管控五期：认证失败自动封禁 | `c257fc2` | `master` |
 | 156 | 2026-10-24 | 连接管控四期：临时封禁（踢出防重连 + 封禁管理） | `4fab5c8` | `master` |
 | 155 | 2026-10-24 | 连接管控三期（审计可见性：actor 归因 + 审计历史查看） | `555489c` | `master` |
 | 154 | 2026-10-24 | 连接管控二期：踢出审计 + 被踢端感知提示 | `5024ca4` | `master` |

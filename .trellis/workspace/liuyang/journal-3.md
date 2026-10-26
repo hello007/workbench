@@ -1547,3 +1547,36 @@ A 组真机冒烟两条缺陷修复（任务 10-23-chat-webserve）：① AI 对
 ### Next Steps
 
 - None - task complete
+
+
+## Session 157: 连接管控五期：认证失败自动封禁
+
+**Date**: 2026-10-26
+**Task**: 连接管控五期：认证失败自动封禁
+**Branch**: `master`
+
+### Summary
+
+IP 认证失败自动封禁落地：service.IPBanService 内存态状态机（滑动窗口 10min≥10 次封 5min 固定、封禁中不累计、期满重计、回环豁免、WS/HTTP 单例合并计数、单调时钟防回拨、重启清零）；server.IPBanCheck 注入 verify 前两认证点同接（命中不 verify/不发认证事件/不计数）；装配层 onAuth 闭包计数驱动 + 轮换/撤销联动 ClearAll；审计 ip_ban(system 归因+failCount)/ip_unban（实际解除才写），App.UnbanIP 归因分叉 desktop/rpc（rpcAuditTarget 装饰器先例补齐 check 缺口）；webserve-ip-banned 桌面专用事件 + ListIPBans 进 RPCHiddenMethods（他人 IP 不进浏览器通道）；前端 ActivityBar 自动封禁区块 + 全局 toast + 审计历史过滤。check 修复：README 缺描述、AssetsPanel flaky 用例改手动解析器、文档载荷描述漂移。spec：browser-channel.md §2.2/§2.3/§3/§4/§6 + logging-and-errors.md §8 + CLAUDE.md 关键规则行 v2.33。验证：go test 三包 -race 全绿、vitest 2144 全绿、build/generate 零 diff、E2E ip-ban 2 例过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c257fc2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
