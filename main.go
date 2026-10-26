@@ -192,24 +192,55 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 		}
 		return app.webTokenSvc.BanRejectMessage(tokenID)
 	}
+	// 来源 IP 封禁判定闭包（连接管控五期）：verify 之前的前置判定，直读服务层
+	// RejectMessage（入参 RemoteAddr 原型串，剥端口归一在服务层单点完成）。
+	// ipBanSvc 未装配时返回空串放行（旁路构造的测试形态）。
+	ipBanCheck := func(ip string) string {
+		if app.ipBanSvc == nil {
+			return ""
+		}
+		return app.ipBanSvc.RejectMessage(ip)
+	}
 	onAuth := func(ev server.AuthEvent) {
 		if app.webAuditSvc != nil {
 			app.webAuditSvc.Log(ev.Event, ev.TokenID, "", ev.RemoteAddr, ev.UserAgent)
 		}
+		// 认证失败自动封禁计数驱动（连接管控五期，与审计同闭包单点分流）：
+		//   - auth_success 清零该来源 IP 的失败计数（WS 与 HTTP 合并计数——
+		//     两认证点共用本回调与同一 IPBanService 实例，单例天然合并）；
+		//   - auth_failure 且 TokenID 为空 = 普通认证失败（凭据无效），计 1；
+		//   - auth_failure 且 TokenID 非空 = 四期封禁拒连形态（凭据有效、被
+		//     tokenID 维度封禁拒绝），非认证失败不计——封禁期间的重复请求不
+		//     累计，对齐「封禁中不累计」语义。
+		// 回环地址（本机访问）由 IPBanService 内部豁免，此处不重复分流。
+		if app.ipBanSvc != nil {
+			switch ev.Event {
+			case server.AuthEventSuccess:
+				app.ipBanSvc.RecordSuccess(ev.RemoteAddr)
+			case server.AuthEventFailure:
+				if ev.TokenID == "" {
+					app.ipBanSvc.RecordFailure(ev.RemoteAddr)
+				}
+			}
+		}
 	}
-	hub := server.NewWSHub(verify, onAuth, banCheck)
+	hub := server.NewWSHub(verify, onAuth, banCheck, ipBanCheck)
 	handler := server.NewWebHandler(server.WebOptions{
 		Assets: distFS,
 		Verify: verify,
-		// 连接管控四期：HTTP 与 WS 两认证点同接封禁判定（漏一即封禁可绕过）
-		BanCheck: banCheck,
-		OnAuth:   onAuth,
+		// 连接管控四期/五期：HTTP 与 WS 两认证点同接两类封禁判定（tokenID 维度
+		// verify 放行后组合判定 + IP 维度 verify 之前前置判定，漏一即绕过）
+		BanCheck:   banCheck,
+		IPBanCheck: ipBanCheck,
+		OnAuth:     onAuth,
 		// 连接管控三期：per-request 装饰 target（RPC 调用者令牌 ID 注入踢出审计
 		// actor 归因）+ 审计读侧对浏览器通道屏蔽（隐私红线，见 WebOptions 注释）
 		RPCTarget:         app,
 		RPCTargetForActor: app.rpcTargetForActor,
-		RPCHiddenMethods:  []string{"QueryAuditLog"},
-		WSHub:             hub,
+		// 隐私红线屏蔽面：QueryAuditLog（审计历史，含全谱 IP/令牌明细）与
+		// ListIPBans（连接管控五期 IP 封禁列表，他人 IP 明细仅走桌面出口）
+		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans"},
+		WSHub:            hub,
 	})
 	return hub, handler, nil
 }

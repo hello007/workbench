@@ -118,7 +118,7 @@ func TestWSHub_BannedHandshakeRejected(t *testing.T) {
 			return "该访问令牌已被封禁，至 2026-10-25 12:00 自动解封"
 		}
 		return ""
-	})
+	}, nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
@@ -162,7 +162,7 @@ func TestWSHub_BannedHandshakeAuthEvent(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, ev)
-	}, banAll("banned"))
+	}, banAll("banned"), nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 

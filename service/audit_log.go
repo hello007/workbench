@@ -24,15 +24,19 @@ const (
 	AuditEventConnKick     = "conn_kick"     // 踢出在途 WS 连接（连接管控动作，App 层 hub 命中后落盘）
 	AuditEventTokenBan     = "token_ban"     // 封禁令牌（连接管控四期：tokenID 维度临时拒连）
 	AuditEventTokenUnban   = "token_unban"   // 解封令牌（删除封禁记录）
+	AuditEventIPBan        = "ip_ban"        // 来源 IP 自动封禁（连接管控五期：认证失败达阈值，actorSource 恒 system）
+	AuditEventIPUnban      = "ip_unban"      // 手动解封来源 IP（实际解除才写，no-op 不写）
 )
 
-// 操作者来源（conn_kick 事件的 actorSource 字段取值，连接管控三期新增）：
+// 操作者来源（actorSource 字段取值，连接管控三期新增；五期扩 system）：
 // desktop 为本地桌面操作（无令牌上下文，本地信任模型，操作者即桌面用户）；
 // rpc 为浏览器通道 /api/rpc 调用（actorTokenId 携带调用者令牌 ID，多令牌场景
-// 可归因「谁踢的」）。
+// 可归因「谁踢的」）；system 为服务端自动触发（IP 认证失败达阈值自动封禁，
+// 无人类操作者，actorTokenId 恒空）。
 const (
 	AuditActorDesktop = "desktop"
 	AuditActorRPC     = "rpc"
+	AuditActorSystem  = "system"
 )
 
 // webAuditMaxBytes 审计日志单文件大小上限：超过即轮转为 <path>.1（覆盖旧 .1），
@@ -61,6 +65,13 @@ type AuditRecord struct {
 	// 不落字段，保证既有事件行形态不变。
 	Reason    string `json:"reason,omitempty"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
+	// IP 级封禁字段（连接管控五期新增，仅 ip_ban/ip_unban 事件携带）：IP 为
+	// 来源地址（RemoteAddr 剥端口归一后的形态，与 RemoteAddr 字段互不复用——
+	// 该字段语义为认证事件的原始地址含端口）；FailCount 为触发封禁时滑动窗口
+	// 内认证失败计数（ip_unban 无此语义，零值不落键）。均零值不落字段，既有
+	// 事件行形态不变。
+	IP        string `json:"ip,omitempty"`
+	FailCount int    `json:"failCount,omitempty"`
 }
 
 // AuditLogger 认证与 token 生命周期审计日志（JSONL append-only，data/web_audit.log）。
@@ -161,6 +172,47 @@ func (a *AuditLogger) LogUnban(b BanAudit) {
 		Event:        AuditEventTokenUnban,
 		TokenID:      b.TargetTokenID,
 		Name:         b.TargetName,
+		ActorSource:  b.ActorSource,
+		ActorTokenID: b.ActorTokenID,
+	})
+}
+
+// IPBanAudit ip_ban/ip_unban 事件载荷（结构化参数，对齐 BanAudit 形态防多同名
+// 位置参数错位）：ip_unban 仅消费 IP 与操作者归因三字段（解封无计数/到期/备注
+// 语义）；ActorTokenID 为 RPC 调用者令牌记录 ID（桌面路径为空不落键，与
+// ActorSource 正交互补——多令牌场景可回答「谁解封的」，对齐四期 token_unban）。
+type IPBanAudit struct {
+	IP           string // 封禁/解封的来源 IP（已归一形态）
+	FailCount    int    // 触发封禁时滑动窗口内认证失败计数（ip_ban 携带）
+	ExpiresAt    int64  // 封禁到期 unix 秒（ip_ban 携带）
+	Reason       string // 封禁原因文案（ip_ban 携带，含触发计数描述）
+	ActorSource  string // 操作者来源：AuditActorSystem（自动封禁）| AuditActorDesktop | AuditActorRPC（手动解封）
+	ActorTokenID string // 操作者令牌记录 ID（RPC 解封调用者；桌面/自动触发为空不落键）
+}
+
+// LogIPBan 追加一条来源 IP 自动封禁审计事件（ip_ban，连接管控五期）：记录触发
+// 计数、到期时间与 system 归因（自动触发无人类操作者，ActorTokenID 恒空）。
+// 可见性口径与 Log 一致——无明文 token、无 URL。写入时序对齐既有审计纪律：
+// 仅动作生效（封禁写入内存）后由调用方落盘。
+func (a *AuditLogger) LogIPBan(b IPBanAudit) {
+	a.write(AuditRecord{
+		Ts:          time.Now().Unix(),
+		Event:       AuditEventIPBan,
+		IP:          b.IP,
+		FailCount:   b.FailCount,
+		ExpiresAt:   b.ExpiresAt,
+		Reason:      b.Reason,
+		ActorSource: b.ActorSource,
+	})
+}
+
+// LogIPUnban 追加一条手动解封来源 IP 审计事件（ip_unban，连接管控五期）：操作者
+// 归因（ActorSource + ActorTokenID，RPC 路径携带调用者令牌记录 ID，桌面为空不落键）。
+func (a *AuditLogger) LogIPUnban(b IPBanAudit) {
+	a.write(AuditRecord{
+		Ts:           time.Now().Unix(),
+		Event:        AuditEventIPUnban,
+		IP:           b.IP,
 		ActorSource:  b.ActorSource,
 		ActorTokenID: b.ActorTokenID,
 	})

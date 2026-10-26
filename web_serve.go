@@ -31,6 +31,13 @@ var webServeDataDir = "data"
 // 通道 ws-connections:changed 载荷恒为 count 数字逐字节不变。
 const webServeConnectionsEvent = "webserve-connections:changed"
 
+// webServeIPBannedEvent 桌面端来源 IP 自动封禁触发事件（连接管控五期，前端 toast
+// 通知数据源）。纯桌面 Wails 事件——不经 WSHub Emit、不进环形缓冲，浏览器通道
+// 收不到（**隐私红线**：他人 IP 明细仅走桌面出口，与连接明细事件同款口径）。
+// data[0] 为 model.IPBanStatus 快照（ip/bannedAt/expiresAt/failCount/expired，
+// json tag 小写形态）。
+const webServeIPBannedEvent = "webserve-ip-banned"
+
 // webServeManager 浏览器访问通道管理器：桌面模式同开 HTTP 服务与 --serve 无头
 // 模式共用的启动/停机入口。
 //
@@ -191,6 +198,17 @@ func (m *webServeManager) startLocked(listen string, tlsConf *tls.Config, cfg We
 		m.app.rememberConnDetails(named)
 		wailsSink.Emit(webServeConnectionsEvent, named)
 	})
+	// IP 自动封禁 toast 通知注入（连接管控五期）：IPBanService 为进程级单例
+	//（计数与封禁状态跨 hub 代际保留，与 hub 生命周期无关），每次 Start 重新注入
+	// 同形态闭包（捕获新 sink，语义等价，幂等无泄漏——回调字段整体替换）。回调在
+	// 服务层 mu 出锁后同步触发，此处仅经 Wails 出口发桌面事件；serve 无头模式对
+	// 非 Wails ctx 静默跳过（既有 sink 行为，无新分支）。停机无收口动作：HTTP
+	// 服务停机后认证点不存在，不会再有新封禁触发。
+	if m.app.ipBanSvc != nil {
+		m.app.ipBanSvc.SetOnBanned(func(status model.IPBanStatus) {
+			wailsSink.Emit(webServeIPBannedEvent, status)
+		})
+	}
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,

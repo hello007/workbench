@@ -171,6 +171,13 @@ func (a *App) RegenerateWebToken() (string, error) {
 	if err := server.SaveToken(serveTokenFile, plain); err != nil {
 		return "", fmt.Errorf("持久化访问令牌失败: %w", err)
 	}
+	// 轮换联动清空 IP 失败计数与封禁记录（连接管控五期）：轮换后浏览器携带的
+	// 旧 cookie 会经历一段全量 401 失败潮（各标签页重新验证前每请求计 1），
+	// 不清零会与正常用户在轮换后的偶发失败叠加误触发自动封禁。预防性动作
+	// 不写审计（ClearAll 既有口径）。
+	if a.ipBanSvc != nil {
+		a.ipBanSvc.ClearAll()
+	}
 	slog.Info("web serve token rotated", "tokenId", rec.ID)
 	return plain, nil
 }
@@ -300,11 +307,11 @@ func (a *App) auditConnKick(actorSource, actorTokenID string, detail server.Conn
 
 // rpcAuditTarget 浏览器 RPC 面的 per-request 装饰 target（连接管控三期 actor
 // 归因）：embed *App 提升全部导出方法（RPC 白名单与桌面绑定面形态一致，其余
-// 方法零分叉），仅 override 带操作者归因的管控动作方法——KickConnection（三期）
-// 与 BanWebToken/UnbanWebToken（四期）：闭包捕获本次请求的调用者令牌 ID（token
-// 中间件注入 ctx，装配回调按请求构造本值），委托未导出 *As 变体完成 actor=rpc
-// 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出字段/方法不入任何
-// 暴露面，导出面签名零变更（wailsjs 生成面不动）。
+// 方法零分叉），仅 override 带操作者归因的管控动作方法——KickConnection（三期）、
+// BanWebToken/UnbanWebToken（四期）与 UnbanIP（五期）：闭包捕获本次请求的调用者
+// 令牌 ID（token 中间件注入 ctx，装配回调按请求构造本值），委托未导出 *As 变体
+// 完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出字段/
+// 方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
 type rpcAuditTarget struct {
 	*App
 	actorTokenID string
@@ -320,6 +327,10 @@ func (t rpcAuditTarget) BanWebToken(id string, expiresAt int64, reason string) e
 
 func (t rpcAuditTarget) UnbanWebToken(id string) error {
 	return t.unbanWebTokenAs(id, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) UnbanIP(ip string) error {
+	return t.unbanIPAs(ip, service.AuditActorRPC, t.actorTokenID)
 }
 
 // rpcTargetForActor 装配回调（server.WebOptions.RPCTargetForActor 消费形态）：
@@ -387,12 +398,20 @@ func (a *App) CreateWebToken(name string, expiresAt int64) (*model.WebTokenCreat
 }
 
 // RevokeWebToken 撤销指定令牌（幂等：重复撤销 no-op 成功；不存在返回
-// E_TOKEN_NOT_FOUND，warning 级引导刷新列表）。
+// E_TOKEN_NOT_FOUND，warning 级引导刷新列表）。撤销成功后联动清空全部 IP
+// 失败计数与封禁记录（连接管控五期，预防性动作不写审计——对齐
+// RegenerateWebToken 的轮换联动口径：撤销引发的重连失败潮防误伤叠加）。
 func (a *App) RevokeWebToken(id string) error {
 	if a.webTokenSvc == nil {
 		return fmt.Errorf("令牌服务未装配")
 	}
-	return a.webTokenSvc.Revoke(id)
+	if err := a.webTokenSvc.Revoke(id); err != nil {
+		return err
+	}
+	if a.ipBanSvc != nil {
+		a.ipBanSvc.ClearAll()
+	}
+	return nil
 }
 
 // BanWebToken 封禁指定令牌（连接管控四期，桌面路径）：tokenID 维度临时拒连
@@ -429,4 +448,43 @@ func (a *App) unbanWebTokenAs(id, actorSource, actorTokenID string) error {
 		return fmt.Errorf("令牌服务未装配")
 	}
 	return a.webTokenSvc.Unban(id, actorSource, actorTokenID)
+}
+
+// UnbanIP 手动解封指定来源 IP 的自动封禁（连接管控五期，桌面明细面板「自动封禁」
+// 区块处置入口）：删除封禁记录并清该 IP 失败计数，新连接（HTTP/WS 两认证点）
+// 立即可达。幂等：重复解封 / 无封禁记录的 IP（含仅有失败计数条目）均 no-op 成功
+// 返 nil，不报错（对齐 UnbanWebToken 的幂等口径；服务层仅实际解除才写 ip_unban
+// 审计行，no-op 不写）。桌面路径 actorSource=desktop（本地信任模型无令牌上下文）；
+// 浏览器 RPC 路径经 rpcAuditTarget 装饰 override 捕获调用者令牌 ID 后同走
+// unbanIPAs（actor 归因，对齐 unbanWebTokenAs 四期先例——本方法为动作面同构可达，
+// 数据面 ListIPBans 仍在 RPCHiddenMethods 屏蔽）。
+func (a *App) UnbanIP(ip string) error {
+	return a.unbanIPAs(ip, service.AuditActorDesktop, "")
+}
+
+// unbanIPAs 解封动作统一实现（导出 UnbanIP 与 RPC 装饰 override 的共用体，actor
+// 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与 RPC 反射面。
+func (a *App) unbanIPAs(ip, actorSource, actorTokenID string) error {
+	if a.ipBanSvc == nil {
+		return fmt.Errorf("IP 封禁服务未装配")
+	}
+	// false = 无封禁记录 no-op（幂等成功），仅实际解除才写审计
+	a.ipBanSvc.UnbanIP(ip, actorSource, actorTokenID)
+	return nil
+}
+
+// ListIPBans 列出全部来源 IP 自动封禁记录（含已到期未清理的，按封禁时间降序；
+// 纯内存态重启清零）。
+//
+// **隐私红线——本方法不进浏览器通道**：桌面绑定面与 RPC 白名单同构，读侧若同构
+// 可达，浏览器通道可直调获取他人 IP 明细（触发时刻/到期时刻/失败计数），破「他人
+// IP 明细仅走桌面出口」红线。装配层经 server.WebOptions.RPCHiddenMethods 对翻译
+// 层屏蔽（对浏览器呈现「方法不存在」，与 QueryAuditLog 三期先例同款）；前端「自动
+// 封禁」区块仅桌面明细面板消费。桌面 Wails 绑定不经翻译层，不受屏蔽影响。服务未
+// 装配（旁路构造的测试 App）返回空切片（非 nil）。
+func (a *App) ListIPBans() []model.IPBanStatus {
+	if a.ipBanSvc == nil {
+		return []model.IPBanStatus{}
+	}
+	return a.ipBanSvc.List()
 }

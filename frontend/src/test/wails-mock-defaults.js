@@ -216,6 +216,14 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务）：void 返回 null
   // 安全 no-op（命中即断开对端连接；错误经 {__error__, __code__} 描述符注入）
   KickConnection: null,
+  // 来源 IP 自动封禁（连接管控五期，桌面明细面板「自动封禁」区块）：形状对齐
+  // model.IPBanStatus（ip/bannedAt/expiresAt unix 秒/failCount/expired bool）。
+  // 默认空列表 = 无封禁记录空态（区块显「暂无自动封禁记录」），用例按需 override；
+  // UnbanIP void 返回 null 安全 no-op（幂等，错误经 {__error__, __code__} 描述符
+  // 注入）。后端对浏览器通道经 RPCHiddenMethods 屏蔽 ListIPBans（他人 IP 明细
+  // 仅走桌面出口，隐私红线），真实浏览器链路加载面由 isBrowserChannel 跳过
+  ListIPBans: [],
+  UnbanIP: null,
   // 审计历史（连接管控三期，桌面审计历史弹窗）：形状对齐 service.AuditQueryResult
   // （外层 Total/Records 为 Go 导出字段直序列化大写驼峰；records 内为 json 小写
   // tag：ts/event/tokenId/name/remoteAddr/userAgent/connId/actorSource/

@@ -9,8 +9,13 @@ import { watch, onMounted } from 'vue'
 import { ElNotification } from 'element-plus'
 import { useSettingsStore } from './store'
 import { GetAndClearLastCrashFlag } from '../wailsjs/go/main/App'
+import { useIPBanToast } from './composables/useIPBans'
 
 const settingsStore = useSettingsStore()
+
+// 自动封禁全局 toast（连接管控五期）：App 根级一次性挂载，面板未开也提示管理员
+// （桌面专用事件 webserve-ip-banned，浏览器通道永不到达，天然静默）
+useIPBanToast()
 
 /**
  * 将实际生效主题应用到 <html>：dark 模式加 .dark class，触发 style.css

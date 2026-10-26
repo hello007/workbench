@@ -101,6 +101,7 @@ type wsRingEntry struct {
 type WSHub struct {
 	verify              TokenVerifier          // 握手令牌校验函数（构造后只读；nil = 一切拒绝 fail closed）
 	banCheck            BanCheck               // 握手封禁判定（构造后只读；nil = 未启用，verify 放行后组合判定）
+	ipBanCheck          IPBanCheck             // 来源 IP 封禁判定（构造后只读；nil = 未启用，verify 之前前置判定）
 	onAuth              func(AuthEvent)        // 认证事件出口（可 nil）
 	onConnectionsChange func([]ConnDetail)     // 连接明细快照变化回调（桌面事件出口用，可 nil；见 SetOnConnectionsChange）
 	upgrader            websocket.Upgrader
@@ -162,10 +163,12 @@ type wsClient struct {
 // WebTokenService.Verify 闭包，多 token 哈希集合校验由服务层持有，新建/撤销/
 // 过期即时生效——单 token 时代的 SetToken 热轮换已随 verify 化删除）；onAuth
 // 为认证事件出口（可 nil）；banCheck 为封禁判定函数（连接管控四期，可 nil =
-// 未启用；verify 放行后的组合判定，非空消息升级前 401 拒绝，见 BanCheck）。
+// 未启用；verify 放行后的组合判定，非空消息升级前 401 拒绝，见 BanCheck）；
+// ipBanCheck 为来源 IP 封禁判定函数（连接管控五期，可 nil = 未启用；verify
+// 之前的前置判定——认证失败自动封禁，命中时不触发认证事件，见 IPBanCheck）。
 // verify 为 nil 时所有升级请求 fail closed 拒绝。
-func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck) *WSHub {
-	return newWSHubTuned(verify, onAuth, banCheck, defaultWriteWait, defaultPongWait, wsResumeBuffer)
+func NewWSHub(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck, ipBanCheck IPBanCheck) *WSHub {
+	return newWSHubTuned(verify, onAuth, banCheck, ipBanCheck, defaultWriteWait, defaultPongWait, wsResumeBuffer)
 }
 
 // SetOnConnectionsChange 设置连接明细快照变化回调（桌面事件出口用，main 装配层
@@ -182,14 +185,15 @@ func (h *WSHub) SetOnConnectionsChange(fn func(details []ConnDetail)) {
 }
 
 // newWSHubTuned 以指定保活超时与续传缓冲容量构造 hub（测试收紧用，非生产入口）。
-func newWSHubTuned(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
+func newWSHubTuned(verify TokenVerifier, onAuth func(AuthEvent), banCheck BanCheck, ipBanCheck IPBanCheck, writeWait, pongWait time.Duration, resumeBuffer int) *WSHub {
 	if resumeBuffer < 0 {
 		resumeBuffer = 0
 	}
 	return &WSHub{
-		verify:   verify,
-		banCheck: banCheck,
-		onAuth:   onAuth,
+		verify:     verify,
+		banCheck:   banCheck,
+		ipBanCheck: ipBanCheck,
+		onAuth:     onAuth,
 		upgrader: websocket.Upgrader{
 			// Subprotocols 保持 nil：多 token 语义下回显值 = 命中的子协议候选
 			//（固定列表无法枚举动态 token 集合），ServeHTTP 在子协议通道命中时
@@ -438,6 +442,19 @@ func (h *WSHub) enqueueKickFrames(c *wsClient) bool {
 // 成功/失败各触发一次 onAuth 认证事件（装配层注入审计落盘）。已建立的连接
 // 不在数据面校验令牌，保持有效至断开重连（重连须用有效令牌）。
 func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 来源 IP 封禁前置判定（连接管控五期，verify 之前）：命中生效中的自动封禁
+	// 以 HTTP 401 拒绝升级并透出含自动恢复时刻的专用消息。判定在任何凭据校验
+	// 之前——不调用 verify、不触发 auth_failure/auth_success 认证事件（凭据未验
+	// 即拒，无认证成败语义，封禁期间失败不累计语义由此保持）。升级前拒绝语义
+	// 与认证失败一致（先升级再踢拿不到明确 HTTP 状态码，错误语义劣化）。
+	if h.ipBanCheck != nil {
+		if msg := h.ipBanCheck(r.RemoteAddr); msg != "" {
+			// 只记来源不记完整 URL：?token= 查询参数形式的令牌不得进日志
+			slog.Warn("ip banned websocket handshake", "remote", r.RemoteAddr)
+			writePreviewError(w, http.StatusUnauthorized, msg)
+			return
+		}
+	}
 	matched, tokenID, ok := h.authorized(r)
 	if !ok {
 		emitAuthEvent(h.onAuth, AuthEventFailure, "", r)

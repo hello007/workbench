@@ -229,3 +229,60 @@ describe('AuditHistoryDialog', () => {
     expect(wrapper.find('.stub-dialog').exists()).toBe(true)
   })
 })
+
+// ---- IP 自动封禁事件展示（连接管控五期：ip_ban/ip_unban 两事件 + system 归因）----
+
+describe('AuditHistoryDialog - IP 自动封禁事件', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    QueryAuditLog.mockResolvedValue({ Total: 2, Records: [
+      {
+        ts: 1735689700,
+        event: 'ip_ban',
+        ip: '203.0.113.7',
+        failCount: 10,
+        expiresAt: 1735689900,
+        reason: '10 分钟内认证失败 10 次，自动临时封禁',
+        actorSource: 'system'
+      },
+      { ts: 1735689800, event: 'ip_unban', ip: '203.0.113.7', actorSource: 'desktop' }
+    ] })
+    ListWebTokens.mockResolvedValue(mockTokens)
+  })
+
+  it('ip_ban/ip_unban 行渲染：事件标签、system 归因来源与操作者、IP 列含失败计数', async () => {
+    const wrapper = await createWrapper()
+
+    const text = wrapper.text()
+    expect(text).toContain('自动封禁IP')
+    expect(text).toContain('解封IP')
+    // 来源/操作者列：system → 系统（自动触发无人类操作者）；解封行 desktop → 桌面/桌面用户
+    expect(colText(wrapper, '来源')).toContain('系统')
+    expect(colText(wrapper, '操作者')).toContain('系统')
+    expect(colText(wrapper, '操作者')).toContain('桌面用户')
+    // 来源 IP 列：ip_ban 带 ip 字段（剥端口归一形态）+ 失败计数；ip_unban 仅 IP
+    const ipCol = colText(wrapper, '来源 IP')
+    expect(ipCol).toContain('203.0.113.7（失败 10 次）')
+    expect(ipCol).toContain('203.0.113.7')
+  })
+
+  it('过滤下拉登记 ip_ban/ip_unban 选项（审计历史可过滤新事件）', async () => {
+    const wrapper = await createWrapper()
+    const values = wrapper.findAllComponents('.stub-option').map((o) => o.props('value'))
+    expect(values).toContain('ip_ban')
+    expect(values).toContain('ip_unban')
+  })
+
+  it('按 ip_ban 过滤：Events 透传新事件值', async () => {
+    const wrapper = await createWrapper()
+    QueryAuditLog.mockClear()
+
+    const eventsSelect = wrapper.findAllComponents('.stub-select')[0]
+    eventsSelect.vm.$emit('update:modelValue', ['ip_ban'])
+    eventsSelect.vm.$emit('change', ['ip_ban'])
+    await flushPromises()
+
+    expect(QueryAuditLog).toHaveBeenCalledTimes(1)
+    expect(QueryAuditLog.mock.calls[0][0].Events).toEqual(['ip_ban'])
+  })
+})

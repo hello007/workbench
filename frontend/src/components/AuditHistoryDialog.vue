@@ -63,7 +63,7 @@
         </el-table-column>
         <el-table-column label="来源 IP" min-width="120">
           <template #default="{ row }">
-            <span class="audit-cell-ellipsis" :title="row.remoteAddr">{{ row.remoteAddr || '—' }}</span>
+            <span class="audit-cell-ellipsis" :title="row.ip || row.remoteAddr">{{ sourceIPLabel(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="连接" :width="CONN_COL_WIDTH">
@@ -108,7 +108,9 @@ const EVENT_METAS = [
   { value: 'token_revoke', label: '撤销令牌', tagType: 'warning' },
   { value: 'token_rotate', label: '轮换令牌', tagType: 'warning' },
   { value: 'token_migrate', label: '令牌迁移', tagType: 'info' },
-  { value: 'conn_kick', label: '踢出连接', tagType: 'danger' }
+  { value: 'conn_kick', label: '踢出连接', tagType: 'danger' },
+  { value: 'ip_ban', label: '自动封禁IP', tagType: 'danger' },
+  { value: 'ip_unban', label: '解封IP', tagType: 'success' }
 ]
 
 // 列宽常量（模板引用；数值列/标签列定宽防抖动，IP 列 min-width 弹性）
@@ -138,16 +140,31 @@ function eventMeta(event) {
 function sourceLabel(source) {
   if (source === 'desktop') return '桌面'
   if (source === 'rpc') return '浏览器'
+  if (source === 'system') return '系统'
   return '—'
 }
 
 // 操作者：actorTokenId 仅 conn_kick 携带（desktop 行为空 → 「桌面用户」；
-// rpc 行经名册补全令牌名，miss（已撤销）降级；其余事件无操作者语义 → 「—」）
+// rpc 行经名册补全令牌名，miss（已撤销）降级；system 为服务端自动触发
+// （ip_ban 自动封禁，无人类操作者）；其余事件无操作者语义 → 「—」）
 function actorLabel(row) {
   if (!row.actorSource) return '—'
   if (row.actorSource === 'desktop') return '桌面用户'
+  if (row.actorSource === 'system') return '系统'
   if (!row.actorTokenId) return '浏览器'
   return tokenNames.value[row.actorTokenId] || '已撤销令牌'
+}
+
+// 来源 IP 列：认证事件走 remoteAddr（原始地址含端口），ip_ban/ip_unban 事件
+// 走 ip 字段（剥端口归一后形态，AuditRecord 五期新增字段）；ip_ban 行尾追加
+// 触发时窗口内失败计数（与审计行 reason 文案对号入座）
+function sourceIPLabel(row) {
+  const ip = row.ip || row.remoteAddr
+  if (!ip) return '—'
+  if (row.event === 'ip_ban' && row.failCount) {
+    return `${ip}（失败 ${row.failCount} 次）`
+  }
+  return ip
 }
 
 // 目标令牌：tokenId 经名册补全名，miss 降级「已撤销令牌」；name 后端已补全

@@ -87,7 +87,7 @@ func waitClientCount(t *testing.T, h *WSHub, want int) {
 // 调用方以 defer 顺序保证：先 defer srv.Close()，连接关闭交由 Cleanup。
 func newTestWSHub(t *testing.T, token string) (*WSHub, *httptest.Server) {
 	t.Helper()
-	hub := NewWSHub(StaticVerifier(token), nil, nil)
+	hub := NewWSHub(StaticVerifier(token), nil, nil, nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 	return hub, srv
@@ -325,7 +325,7 @@ func TestWSHub_ConcurrentEmitAndDisconnectRace(t *testing.T) {
 func TestWSHub_VerifierSwapRotation(t *testing.T) {
 	sv := &swapVerifier{}
 	sv.set(StaticVerifier("old-token"))
-	hub := NewWSHub(sv.verify, nil, nil)
+	hub := NewWSHub(sv.verify, nil, nil, nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
@@ -375,7 +375,7 @@ func TestWSHub_OnAuthEvents(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, ev)
-	}, nil)
+	}, nil, nil)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
@@ -443,7 +443,7 @@ func TestWSHub_CloseDisconnectsAllClients(t *testing.T) {
 // 与 TCP 缓冲塞满后写超时触发断连，慢消费者被踢出（不拖垮广播方与其余客户端）。
 func TestWSHub_SlowConsumerDropped(t *testing.T) {
 	// 收紧写超时加速断连判定（hub 实例字段，构造后只读，无跨 goroutine 竞态）
-	hub := newWSHubTuned(StaticVerifier("right-token"), nil, nil, 200*time.Millisecond, defaultPongWait, wsResumeBuffer)
+	hub := newWSHubTuned(StaticVerifier("right-token"), nil, nil, nil, 200*time.Millisecond, defaultPongWait, wsResumeBuffer)
 	srv := httptest.NewServer(hub)
 	defer srv.Close()
 
@@ -603,7 +603,7 @@ func TestWSHub_FreshConnectionNoReplay(t *testing.T) {
 // 断线期间产生超量事件致缺口帧被覆写，重连握手返回 ws-gap 断层标记帧
 // （data[0] 为服务端当前序号），此后广播从当前序号正常继续。
 func TestWSHub_ResumeGapOnOverflow(t *testing.T) {
-	hub := newWSHubTuned(StaticVerifier("right-token"), nil, nil, defaultWriteWait, defaultPongWait, 4)
+	hub := newWSHubTuned(StaticVerifier("right-token"), nil, nil, nil, defaultWriteWait, defaultPongWait, 4)
 	srv := httptest.NewServer(hub)
 	t.Cleanup(srv.Close)
 
@@ -1242,7 +1242,7 @@ func TestWSHub_KickFrameNotInResumeReplay(t *testing.T) {
 // 返回命中。手工在册客户端确定性构造——不经 ServeHTTP（无 writePump 消费队列，
 // 容量恒满，不依赖慢消费者时序）。
 func TestWSHub_DisconnectClientQueueFullFallback(t *testing.T) {
-	hub := NewWSHub(StaticVerifier("right-token"), nil, nil)
+	hub := NewWSHub(StaticVerifier("right-token"), nil, nil, nil)
 
 	// 真实升级一条连接，取服务端侧 conn 供手工 wsClient 持有（conn.Close 可在
 	// 拨号侧观察：读到错误）。该连接不注册进 hub，仅作底层承载。

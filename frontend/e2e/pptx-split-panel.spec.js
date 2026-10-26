@@ -108,7 +108,9 @@ test.describe('工具箱：PPT 拆分文件夹批量链', () => {
     const okItem = batchItems.filter({ hasText: '季度汇报.pptx' })
     await expect(okItem.locator('.el-tag')).toHaveText('成功')
     await expect(okItem.locator('.ps-batch-item-pages')).toHaveText('48 页')
-    await expect(okItem.locator('.ps-batch-item-path')).toHaveText('输出目录：D:/e2e-demo/ppt-batch/季度汇报')
+    // 定位收窄到路径文本子元素（.ps-batch-item-path 容器内含「打开文件夹」按钮，
+    // 9d701c9 引入后整容器 toHaveText 精确匹配恒失败）
+    await expect(okItem.locator('.ps-batch-item-path-text')).toHaveText('输出目录：D:/e2e-demo/ppt-batch/季度汇报')
     const failedItem = batchItems.filter({ hasText: '加密材料.pptx' })
     await expect(failedItem.locator('.el-tag')).toHaveText('失败')
     await expect(failedItem.locator('.ps-batch-item-error')).toHaveText('失败原因：演示文稿已加密，无法拆分')

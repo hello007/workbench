@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import ActivityBar from '../ActivityBar.vue'
@@ -17,10 +17,13 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
   })
 }))
 
-// 踢出链依赖（连接管控任务）：App 绑定 + ElMessageBox/ElMessage（确认弹窗与
-// handleError 分流断言；文件级工厂，对齐 confirm-dialog vitest mock 形态）
+// 踢出链依赖（连接管控任务）+ IP 自动封禁链（连接管控五期）：App 绑定 +
+// ElMessageBox/ElMessage（确认弹窗与 handleError 分流断言；文件级工厂，对齐
+// confirm-dialog vitest mock 形态）
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  KickConnection: vi.fn()
+  KickConnection: vi.fn(),
+  ListIPBans: vi.fn(),
+  UnbanIP: vi.fn()
 }))
 
 vi.mock('element-plus', () => ({
@@ -463,6 +466,191 @@ describe('ActivityBar - 明细面板封禁入口', () => {
     await nextTick()
     const dialog = wrapper.findComponent({ name: 'BanTokenDialog' })
     expect(dialog.props('token')).toEqual({ id: 't2', name: '' })
+    wrapper.unmount()
+  })
+})
+
+// ---- 自动封禁区块（连接管控五期：认证失败达阈值自动封禁来源 IP，桌面专用
+// 数据源 ListIPBans + webserve-ip-banned 事件驱动刷新 + 解封单次确认链）----
+
+describe('ActivityBar - 自动封禁区块', () => {
+  const createWrapper = () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'directory'
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
+        }
+      }
+    })
+  }
+
+  /** 封禁条目 fixture（形状对齐 model.IPBanStatus，expiresAt 默认 5 分钟后） */
+  const banEntry = (over = {}) => ({
+    ip: '203.0.113.7',
+    bannedAt: Math.floor(Date.now() / 1000) - 60,
+    expiresAt: Math.floor(Date.now() / 1000) + 300,
+    failCount: 10,
+    expired: false,
+    ...over
+  })
+
+  /** 挂载并 flush 挂载期 ListIPBans 异步加载 */
+  const mountFlushed = async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await nextTick()
+    return wrapper
+  }
+
+  /** 等待确认链微任务收敛（confirm resolve/reject 与后续调用的 flush） */
+  const flushConfirm = async () => {
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([])
+  })
+
+  it('挂载即拉取列表，区块渲染行（IP/失败计数/到期时间/解封按钮）', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([banEntry()])
+    const wrapper = await mountFlushed()
+    expect(ListIPBans).toHaveBeenCalled()
+    expect(wrapper.find('.devices-ban-section').exists()).toBe(true)
+    const rows = wrapper.findAll('.devices-ban-row')
+    expect(rows.length).toBe(1)
+    expect(rows[0].find('.devices-panel-ip').text()).toBe('203.0.113.7')
+    expect(rows[0].text()).toContain('10 次失败')
+    expect(rows[0].text()).toMatch(/至 \d{1,2}-\d{1,2} \d{2}:\d{2}/)
+    expect(rows[0].find('.devices-ban-unban').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('面板因连接可见而封禁列表为空时，空态显「暂无自动封禁记录」', async () => {
+    const wrapper = await mountFlushed()
+    // 面板可见条件 = 连接存在或封禁存在；注入一条桌面通道连接使面板可见
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    expect(wrapper.find('.devices-ban-section').exists()).toBe(true)
+    expect(wrapper.findAll('.devices-ban-row').length).toBe(0)
+    expect(wrapper.find('.devices-ban-empty').text()).toBe('暂无自动封禁记录')
+    wrapper.unmount()
+  })
+
+  it('过期态标注「已过期」（info 灰样式），生效中行走 warning 样式', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      banEntry(),
+      banEntry({ ip: '198.51.100.9', expired: true })
+    ])
+    const wrapper = await mountFlushed()
+    const rows = wrapper.findAll('.devices-ban-row')
+    expect(rows[0].find('.devices-ban-expiry').classes()).not.toContain('is-expired')
+    expect(rows[0].text()).not.toContain('已过期')
+    expect(rows[1].find('.devices-ban-expiry').classes()).toContain('is-expired')
+    expect(rows[1].text()).toContain('已过期')
+    // 过期行解封按钮保留（UnbanIP 幂等 no-op，且可顺带清理残留记录）
+    expect(rows[1].find('.devices-ban-unban').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('解封确认链：单次确认（文案含 IP 与再封禁警示）→ UnbanIP(ip) → 成功 toast + 重拉列表', async () => {
+    const { UnbanIP, ListIPBans } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    UnbanIP.mockResolvedValue()
+    ListIPBans.mockResolvedValue([banEntry()])
+    const wrapper = await mountFlushed()
+    await wrapper.find('.devices-ban-unban').trigger('click')
+    await flushConfirm()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    const [message, title] = ElMessageBox.confirm.mock.calls[0]
+    expect(title).toBe('解封 IP')
+    expect(message).toContain('203.0.113.7')
+    expect(message).toContain('再次被自动封禁')
+    expect(UnbanIP).toHaveBeenCalledTimes(1)
+    expect(UnbanIP).toHaveBeenCalledWith('203.0.113.7')
+    expect(ElMessage.success).toHaveBeenCalledWith('已解封 203.0.113.7')
+    // 解封成功后重拉列表（ListIPBans 二次调用 = 挂载 1 次 + reload 1 次）
+    expect(ListIPBans).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('确认取消则不调用 UnbanIP', async () => {
+    const { UnbanIP } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox } = await import('element-plus')
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([banEntry()])
+    ElMessageBox.confirm.mockRejectedValue('cancel')
+    const wrapper = await mountFlushed()
+    await wrapper.find('.devices-ban-unban').trigger('click')
+    await flushConfirm()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(UnbanIP).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('解封失败走 handleError 分流（非预期拒绝码 error 提示拼前缀）', async () => {
+    const { UnbanIP } = await import('../../../wailsjs/go/main/App')
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ListIPBans.mockResolvedValue([banEntry()])
+    ElMessageBox.confirm.mockResolvedValue()
+    UnbanIP.mockRejectedValue({ message: 'IP 封禁服务未装配' })
+    const wrapper = await mountFlushed()
+    await wrapper.find('.devices-ban-unban').trigger('click')
+    await flushConfirm()
+    expect(ElMessage.error).toHaveBeenCalledWith('解封失败: IP 封禁服务未装配')
+    expect(ElMessage.success).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('webserve-ip-banned 事件到达重拉列表（事件驱动刷新）', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    const wrapper = await mountFlushed()
+    expect(ListIPBans).toHaveBeenCalledTimes(1)
+    ListIPBans.mockResolvedValue([banEntry({ ip: '192.0.2.66' })])
+    eventHandlers['webserve-ip-banned']({ ip: '192.0.2.66', failCount: 10 })
+    await flushPromises()
+    await nextTick()
+    expect(ListIPBans).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('192.0.2.66')
+    wrapper.unmount()
+  })
+
+  it('卸载时经 EventsOn 返回闭包精准注销监听器', async () => {
+    const wrapper = await mountFlushed()
+    expect(eventHandlers['webserve-ip-banned']).toBeTypeOf('function')
+    wrapper.unmount()
+    expect(eventHandlers['webserve-ip-banned']).toBeUndefined()
+  })
+
+  it('无连接但有封禁记录时指示显示：角标显封禁数（warning 色）+ 提示文案分流', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([banEntry(), banEntry({ ip: '198.51.100.9' })])
+    const wrapper = await mountFlushed()
+    expect(wrapper.find('.activity-bar-devices').exists()).toBe(true)
+    expect(wrapper.find('.devices-badge').text()).toBe('2')
+    expect(wrapper.find('.devices-badge').classes()).toContain('devices-badge-warn')
+    // tooltip stub 对每个 item 均渲染 .tooltip-content，取 devices 项（some 断言）
+    const hints = wrapper.findAll('.tooltip-content').map((t) => t.text())
+    expect(hints.some((t) => t.includes('2 个来源 IP 已被自动封禁'))).toBe(true)
     wrapper.unmount()
   })
 })

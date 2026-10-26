@@ -42,9 +42,10 @@
          "Runtime directive used on component with non-element root node"）；
          故终态为 tooltip 外层，tooltip 与 popover 之间加 anchor 原生 div 隔离，
          popover #reference 直挂原生 div，点击展开与 hover 提示双链路实测通过 -->
-    <el-tooltip v-if="multiDevice" :content="deviceHint" placement="right" :show-after="300">
+    <el-tooltip v-if="panelVisible" :content="deviceHint" placement="right" :show-after="300">
       <div class="devices-indicator-anchor">
-        <el-popover trigger="click" placement="right" :width="320" :persistent="false">
+        <!-- @show 打开面板时重拉自动封禁列表（五期：面板打开/可见时加载） -->
+        <el-popover trigger="click" placement="right" :width="320" :persistent="false" @show="reloadIPBans">
           <template #reference>
             <div class="activity-bar-item activity-bar-devices">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -52,7 +53,7 @@
                 <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6" fill="var(--sidebar-bg)"/>
                 <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
               </svg>
-              <span class="devices-badge">{{ deviceCount }}</span>
+              <span class="devices-badge" :class="{ 'devices-badge-warn': !multiDevice }">{{ badgeText }}</span>
             </div>
           </template>
           <div class="devices-panel">
@@ -92,6 +93,31 @@
               {{ isDesktopChannel ? '无设备连接' : '明细仅在桌面端显示' }}
             </div>
             <div class="devices-panel-hint">多端共享同一后端状态，后操作覆盖先操作</div>
+            <!-- 自动封禁区块（连接管控五期，认证失败达阈值自动封禁来源 IP）：
+                 数据源 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods
+                 屏蔽，composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 =
+                 IP + 窗口失败计数 + 到期时间（过期态「已过期」info / 生效中 warning）。
+                 解封按钮过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带清理列表
+                 中已过期残留记录 -->
+            <div class="devices-ban-section">
+              <div class="devices-panel-subtitle">自动封禁（{{ ipBans.length }}）</div>
+              <div v-if="ipBans.length" class="devices-ban-list">
+                <div v-for="b in ipBans" :key="b.ip" class="devices-ban-row">
+                  <span class="devices-panel-ip" :title="b.ip">{{ b.ip }}</span>
+                  <span class="devices-ban-fails">{{ b.failCount }} 次失败</span>
+                  <span class="devices-ban-expiry" :class="{ 'is-expired': b.expired }">
+                    {{ b.expired ? '已过期' : `至 ${formatBanExpiry(b.expiresAt)}` }}
+                  </span>
+                  <button
+                    class="devices-ban-unban"
+                    type="button"
+                    title="解封该 IP"
+                    @click.stop="unbanIP(b)"
+                  >解封</button>
+                </div>
+              </div>
+              <div v-else class="devices-ban-empty">暂无自动封禁记录</div>
+            </div>
           </div>
         </el-popover>
       </div>
@@ -117,13 +143,14 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
-import { KickConnection } from '../../wailsjs/go/main/App'
+import { KickConnection, UnbanIP } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
+import { useIPBanList, formatBanExpiry } from '../composables/useIPBans'
 import BanTokenDialog from './BanTokenDialog.vue'
 
 const uiStore = useUiStore()
@@ -133,9 +160,49 @@ defineEmits(['toggleTerminal', 'openSettings'])
 // 多设备连接感知（PR3 语义明示 + 明细面板 D2）：指示项显示条件沿用 composable
 // 分流口径（桌面 len>=1 / 浏览器 count>1），明细列表与通道归属供 popover 消费
 const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceConnections()
-const deviceHint = computed(() =>
-  `${deviceCount.value} 个设备已连接：点击查看明细`
+
+// 自动封禁列表（连接管控五期，桌面专用数据源）：面板「自动封禁」区块渲染与
+// 解封后/面板打开时重拉；webserve-ip-banned 事件到达由 composable 内自动刷新
+const { ipBans, reload: reloadIPBans } = useIPBanList()
+
+// 面板可见条件扩展（五期）：有自动封禁记录时即使无在途连接也显示入口——被封禁
+// IP 的新连接在认证点即被拒（不会产生连接明细），仅凭连接数判定面板将不可达，
+// 管理员将无从解封
+const panelVisible = computed(() => multiDevice.value || ipBans.value.length > 0)
+// 角标内容分流：有设备连接显示连接数；无连接仅封禁记录时显示封禁数（warning
+// 色区分，见 devices-badge-warn 样式）
+const badgeText = computed(() =>
+  multiDevice.value ? String(deviceCount.value) : String(ipBans.value.length)
 )
+const deviceHint = computed(() =>
+  multiDevice.value
+    ? `${deviceCount.value} 个设备已连接：点击查看明细`
+    : `${ipBans.value.length} 个来源 IP 已被自动封禁：点击查看`
+)
+
+/**
+ * 解封来源 IP 的自动封禁（连接管控五期）：单次确认链（confirm-dialog 单次确认
+ * 形态）→ UnbanIP → 成功 toast + 重拉列表。过期行解封同样放行——UnbanIP 幂等
+ * no-op 安全，且可顺带清理列表中的已过期残留记录。
+ */
+async function unbanIP(b) {
+  try {
+    await ElMessageBox.confirm(
+      `解封后来源 ${b.ip} 的新连接立即可达；若其继续高频认证失败，达到阈值会再次被自动封禁。是否解封？`,
+      '解封 IP',
+      { type: 'warning', confirmButtonText: '解封', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await UnbanIP(b.ip)
+    ElMessage.success(`已解封 ${b.ip}`)
+    reloadIPBans()
+  } catch (e) {
+    handleError('解封失败: ', e)
+  }
+}
 
 // 封禁弹窗（连接管控四期，明细行封禁入口）：目标取行 tokenId（封禁为 tokenID
 // 维度，非单连接）与令牌名（空串降级由弹窗按 tokenId 展示）
@@ -393,5 +460,91 @@ const panels = [
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-tertiary);
+}
+
+/* 无连接仅封禁记录时的角标（warning 语义色，与连接数 primary 区分） */
+.devices-badge-warn {
+  color: var(--warning-color);
+  border-color: var(--warning-color);
+}
+
+/* 自动封禁区块（连接管控五期）：子标题 + 行列表 + 空态；行网格与明细行同构
+ * （IP 弹性列 + 计数/到期定宽列 + 解封钮），过期态 info 灰 / 生效中 warning */
+.devices-ban-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
+}
+
+.devices-panel-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.devices-ban-list {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.devices-ban-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: var(--spacing-sm);
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+}
+
+.devices-ban-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.devices-ban-fails {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.devices-ban-expiry {
+  font-size: 11px;
+  color: var(--warning-color);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.devices-ban-expiry.is-expired {
+  color: var(--text-tertiary);
+}
+
+.devices-ban-unban {
+  padding: 1px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.devices-ban-unban:hover {
+  background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+  color: var(--warning-color);
+}
+
+.devices-ban-empty {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
 }
 </style>

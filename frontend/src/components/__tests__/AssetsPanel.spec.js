@@ -5242,7 +5242,13 @@ describe('AssetsPanel', () => {
   it('导出事件仅复位进度（终态 toast 由 Promise 分支统一执行防双弹），取消转发后端', async () => {
     wailsMock.ListAssetCartItems.mockResolvedValue([cartItemOf()])
     wailsMock.SaveFileDialog.mockResolvedValue('D:/out/x.pptx')
-    wailsMock.MergeAssetCartToPptx.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ outputPath: 'D:/out/x.pptx', pages: [], pageCount: 1, skippedItems: [], sldSzMixed: false }), 20)))
+    // 手动解析器控制 Promise 落定时机（对齐本文件 resolveScan/resolveMove 既有
+    // 模式，test-stability 禁真实定时器时序）：「done 事件仅复位进度不断言终态
+    // toast」的前提是事件断言发生在 Promise 落定之前——原 20ms 真实定时器在
+    // 全量套件高负载下会被事件循环饿死提前落定，终态 toast 抢在断言前弹出致
+    // flaky。Promise 保持挂起穿越事件断言，由用例显式放行。
+    let resolveExport
+    wailsMock.MergeAssetCartToPptx.mockImplementation(() => new Promise((resolve) => { resolveExport = () => resolve({ outputPath: 'D:/out/x.pptx', pages: [], pageCount: 1, skippedItems: [], sldSzMixed: false }) }))
     const wrapper = await createWrapper()
     const drawer = wrapper.findComponent({ name: 'AssetCartDrawerStub' })
     drawer.vm.$emit('export')
@@ -5259,8 +5265,8 @@ describe('AssetsPanel', () => {
     await flushPromises()
     expect(drawer.props('exportProgress')).toBe(null)
     expect(ElMessage.success.mock.calls.length).toBe(successCalls)
-    // Promise 落定后终态提示由本分支统一弹出（清空确认）
-    await new Promise((r) => setTimeout(r, 40))
+    // Promise 落定后终态提示由本分支统一弹出（清空确认）——用例显式放行落定
+    resolveExport()
     await flushPromises()
     expect(ElMessage.success.mock.calls.length).toBeGreaterThan(successCalls)
 

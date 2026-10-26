@@ -1,0 +1,76 @@
+/**
+ * IP 自动封禁 E2E（连接管控五期，mock 驱动）。
+ *
+ * 桌面专用链路（webserve-ip-banned 事件 + ListIPBans 列表 + UnbanIP 解封）在
+ * E2E 浏览器 mock 通道无法真实触发后端封禁（阈值计数发生在真实 HTTP/WS 认证点，
+ * 且桌面事件浏览器端永不到达），本 spec 以 mock 数据覆盖前端消费面：
+ * 1. 活动栏「自动封禁」区块：无连接但有封禁记录时指示可见（可见条件扩展，角标
+ *    warning 分流显封禁数）→ 打开明细面板 → 行渲染（IP/失败计数/到期时间/过期态）
+ *    → 解封单次确认链 → UnbanIP 调用断言。
+ * 2. 桌面 toast：emitWailsEvent 派发 webserve-ip-banned → 全局 warning 提示
+ *    （App 级挂载，面板未开也提示）。
+ */
+import { test, expect, emitWailsEvent } from './fixtures'
+
+/** 封禁条目形状（对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/failCount/expired） */
+const banEntry = (over = {}) => ({
+  ip: '203.0.113.7',
+  bannedAt: Math.floor(Date.now() / 1000) - 60,
+  expiresAt: Math.floor(Date.now() / 1000) + 300,
+  failCount: 10,
+  expired: false,
+  ...over
+})
+
+test.describe('IP 自动封禁（连接管控五期）', () => {
+  test.use({
+    wailsOverrides: {
+      ListIPBans: [banEntry(), banEntry({ ip: '198.51.100.9', expired: true })]
+    }
+  })
+
+  test('活动栏自动封禁区块渲染 → 解封单次确认链 → UnbanIP 调用断言', async ({ page }) => {
+    await page.goto('/')
+
+    // 无在途连接但有封禁记录：指示可见（面板可见条件扩展），角标显封禁数
+    const indicator = page.locator('.activity-bar-devices')
+    await expect(indicator).toBeVisible()
+    await expect(indicator.locator('.devices-badge')).toHaveText('2')
+
+    await indicator.click()
+    const panel = page.locator('.devices-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel).toContainText('自动封禁')
+
+    const rows = panel.locator('.devices-ban-row')
+    await expect(rows).toHaveCount(2)
+    // 生效中行：IP + 窗口失败计数 + 「至 M-D HH:mm」到期形态（非过期态）
+    await expect(rows.nth(0)).toContainText('203.0.113.7')
+    await expect(rows.nth(0)).toContainText('10 次失败')
+    await expect(rows.nth(0).locator('.devices-ban-expiry')).not.toHaveText('已过期')
+    // 过期行：「已过期」标注（info 态），解封按钮保留（UnbanIP 幂等 no-op）
+    await expect(rows.nth(1)).toContainText('198.51.100.9')
+    await expect(rows.nth(1).locator('.devices-ban-expiry')).toHaveText('已过期')
+
+    // 解封：单次确认链（`.el-message-box` 裸选择器安全——本用例唯一 message box）
+    await rows.nth(0).locator('button', { hasText: '解封' }).click()
+    const messageBox = page.locator('.el-message-box')
+    await expect(messageBox).toBeVisible()
+    await expect(messageBox).toContainText('203.0.113.7')
+    await messageBox.locator('button', { hasText: '解封' }).click()
+    await expect(page.evaluate(() => window.__wailsCalls
+      .filter((c) => c.method === 'UnbanIP'))).resolves.toEqual([
+      { method: 'UnbanIP', args: ['203.0.113.7'] }
+    ])
+    await expect(messageBox).toBeHidden()
+  })
+
+  test('自动封禁触发 toast 提示（App 级挂载，面板未开也提示）', async ({ page }) => {
+    await page.goto('/')
+    await emitWailsEvent(page, 'webserve-ip-banned', banEntry({ ip: '192.0.2.66' }))
+    const toast = page.locator('.el-message')
+    await expect(toast).toBeVisible()
+    await expect(toast).toContainText('192.0.2.66')
+    await expect(toast).toContainText('临时封禁至')
+  })
+})

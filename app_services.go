@@ -103,6 +103,11 @@ type AppServices struct {
 	// 迁移为首条记录）。Verify 作为 serve 认证链校验函数注入 server.WebOptions
 	// 与 WSHub（无状态快照，新建/撤销/过期即时生效，无需热轮换通知）。
 	webTokenSvc *service.WebTokenService
+	// 来源 IP 自动封禁服务（连接管控五期：认证失败滑动窗口达阈值自动临时封禁，
+	// 纯内存态不落盘，重启清零）。RejectMessage 闭包注入 server.WebOptions 与
+	// WSHub 的 IPBanCheck（两认证点 verify 之前前置判定）；认证计数经 OnAuth
+	// 审计闭包驱动（main.go assembleWebServe）；审计出口与 webAuditSvc 共用。
+	ipBanSvc *service.IPBanService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -230,6 +235,12 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	s.webTokenSvc = service.NewWebTokenService(filepath.Join(dataDir, "web_tokens.json"), filepath.Join(dataDir, "web_token"))
 	s.webTokenSvc.SetAudit(s.webAuditSvc)
 	s.webTokenSvc.EnsureLoaded()
+
+	// 来源 IP 自动封禁服务（连接管控五期，纯内存态无持久化文件）：审计出口与
+	// token 封禁同用 webAuditSvc；生产默认时钟（time.Now），RejectMessage 闭包
+	// 由 assembleWebServe 注入两认证点。
+	s.ipBanSvc = service.NewIPBanService(nil)
+	s.ipBanSvc.SetAudit(s.webAuditSvc)
 
 	return s
 }

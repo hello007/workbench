@@ -55,6 +55,19 @@ func emitAuthEvent(onAuth func(AuthEvent), event, tokenID string, r *http.Reques
 // 语义）。两认证点（HTTP requireToken 与 WS 握手）必须同接，漏一即封禁可绕过。
 type BanCheck func(tokenID string) string
 
+// IPBanCheck 来源 IP 封禁判定函数签名（连接管控五期：认证失败自动封禁）：入参为
+// 请求的 r.RemoteAddr 原型串（如 "1.2.3.4:5678"、"[::1]:8080"），实现方自行剥
+// 端口归一（生产实现为 service.IPBanService.RejectMessage 闭包，归一在服务层
+// 单点完成，本层不复制归一逻辑）；返回非空拒绝消息 = 该来源 IP 封禁生效中（消息
+// 随 401 透出，含自动恢复时刻，与普通 401「请携带访问令牌」可区分）；空串 = 放行。
+// nil = 未启用 IP 封禁判定（全部放行）。
+//
+// 判定位置在 verify 之前（与四期 BanCheck 的 tokenID 维度判定、verify 放行后
+// 组合判定的位置并存两道独立防线）：命中封禁的请求不调用 verify、不触发任何
+// 认证事件（凭据未验即拒，无认证成功/失败语义，也不参与失败计数——封禁期间不
+// 累计）。两认证点（HTTP requireToken 与 WS 握手）必须同接，漏一即封禁可绕过。
+type IPBanCheck func(ip string) string
+
 // WebOptions 浏览器访问模式（serve 模式）HTTP 服务配置。
 type WebOptions struct {
 	// Assets 静态资产源（frontend/dist 子文件系统），由调用方（main 包）
@@ -68,6 +81,10 @@ type WebOptions struct {
 	// BanCheck 封禁判定函数（见 BanCheck，连接管控四期）：verify 放行后的组合
 	// 判定，非空消息以 401 拒绝并透出专用提示。可 nil（未启用封禁判定）。
 	BanCheck BanCheck
+	// IPBanCheck 来源 IP 封禁判定函数（见 IPBanCheck，连接管控五期）：verify
+	// 之前的前置判定（认证失败自动封禁），非空消息以 401 拒绝并透出含自动恢复
+	// 时刻的专用提示，命中时不触发认证事件。可 nil（未启用 IP 封禁判定）。
+	IPBanCheck IPBanCheck
 	// OnAuth 认证事件回调：requireToken 与 /ws 握手两处认证点在成功/失败时各
 	// 回调一次（serve 装配层注入审计落盘）。nil 安全。
 	OnAuth func(AuthEvent)
@@ -116,10 +133,11 @@ const cookieMaxAge = 30 * 24 * time.Hour
 // 直读 WebTokenService 状态即时生效，本层无热轮换写路径，原 SetToken 已随
 // verify 化删除）。
 type WebHandler struct {
-	files    fs.FS
-	verify   TokenVerifier   // 令牌校验函数（nil = 一切拒绝 fail closed）
-	banCheck BanCheck        // 封禁判定函数（可 nil = 未启用；verify 放行后组合判定）
-	onAuth   func(AuthEvent) // 认证事件出口（可 nil）
+	files      fs.FS
+	verify     TokenVerifier   // 令牌校验函数（nil = 一切拒绝 fail closed）
+	banCheck   BanCheck        // 封禁判定函数（可 nil = 未启用；verify 放行后组合判定）
+	ipBanCheck IPBanCheck      // 来源 IP 封禁判定函数（可 nil = 未启用；verify 之前前置判定）
+	onAuth     func(AuthEvent) // 认证事件出口（可 nil）
 	// mux 实际路由表（各端点挂载），ServeHTTP 委托转发
 	mux http.Handler
 }
@@ -142,7 +160,7 @@ type WebHandler struct {
 //     服务；未命中静态文件的路径 SPA fallback 到 index.html（前端 history 路由
 //     可达）。
 func NewWebHandler(opts WebOptions) *WebHandler {
-	h := &WebHandler{files: opts.Assets, verify: opts.Verify, banCheck: opts.BanCheck, onAuth: opts.OnAuth}
+	h := &WebHandler{files: opts.Assets, verify: opts.Verify, banCheck: opts.BanCheck, ipBanCheck: opts.IPBanCheck, onAuth: opts.OnAuth}
 	mux := http.NewServeMux()
 	mux.HandleFunc(healthPath, h.serveHealth)
 	if opts.RPCTarget != nil {
@@ -208,6 +226,19 @@ type rpcActorKey struct{}
 // 每请求粒度，lastUsedAt 的写放大由 WebTokenService 的 debounce 落盘消化）。
 func (h *WebHandler) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 来源 IP 封禁前置判定（连接管控五期，verify 之前）：命中生效中的自动
+		// 封禁以 401 拒绝并透出含自动恢复时刻的专用消息。判定在任何凭据校验
+		// 之前——不调用 verify、不触发 auth_failure/auth_success 认证事件（凭据
+		// 未验即拒，无认证成败语义，也不经 OnAuth 参与失败计数，封禁期间不累计
+		// 语义由此保持）；会话 cookie 不种（被封禁来源的新会话无意义）。
+		if h.ipBanCheck != nil {
+			if msg := h.ipBanCheck(r.RemoteAddr); msg != "" {
+				// 只记路径不记完整 URL：?token= 查询参数形式的令牌不得进日志
+				slog.Warn("ip banned request", "path", r.URL.Path, "remote", r.RemoteAddr)
+				writePreviewError(w, http.StatusUnauthorized, msg)
+				return
+			}
+		}
 		matched, tokenID, ok := h.authorized(r)
 		if !ok {
 			emitAuthEvent(h.onAuth, AuthEventFailure, "", r)

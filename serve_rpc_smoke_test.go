@@ -117,7 +117,7 @@ func TestServeWS_EventBroadcastSmoke(t *testing.T) {
 	}
 	app.AppServices = NewAppServices(context.Background(), dataDir, false)
 	// serve 模式 sink 切换（与 runServe 装配行同构）
-	hub := server.NewWSHub(server.StaticVerifier(token), nil, nil)
+	hub := server.NewWSHub(server.StaticVerifier(token), nil, nil, nil)
 	app.terminalSvc.SetEventSink(hub)
 	app.updateSvc.SetEventSink(hub)
 	app.aiFuncSvc.SetEventSink(hub)

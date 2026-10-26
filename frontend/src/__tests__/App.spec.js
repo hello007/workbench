@@ -14,6 +14,12 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   SaveSettings: vi.fn(() => Promise.resolve(true))
 }))
 
+// 自动封禁全局 toast（useIPBanToast，App 根级挂载）经 EventsOn 订阅桌面事件，
+// 需 mock wails runtime（返回注销闭包对齐真实语义；主题断言不消费事件）
+vi.mock('../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => () => {})
+}))
+
 // router-view 不路由到真实页面，stub 为空 div（主题逻辑不依赖路由内容）
 const stubs = {
   'router-view': { template: '<div class="rv" />' }
