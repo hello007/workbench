@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "BanCheck 注入契约(§2.2)/四期临时封禁状态机与幂等审计语义(§2.3,自动封禁须复用语义)/两认证点必须同接/桌面专用事件同义不同名先例/IP 明细浏览器通道隐私红线(§2.3)/装配层 startLocked 注入 stopLocked 收口先例"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "auth_failure 审计行形态(§8)/token_ban 产出点「动作生效后才写审计」纪律/审计事件表扩展方式/错误码三处同步规则(app_error.go + error.js)"}
+{"file": "docs/spec/test-stability.md", "reason": "nowFn 注入禁 sleep 先例(懒过期判定测试)/固定端口随机化/测试禁隐式依赖环境外部状态——计数器窗口测试必须注入时钟驱动"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 Wails 绑定方法(UnbanIP)须同步 frontend/wailsjs 三处(App.js/App.d.ts/models.ts)/AppServices 装配规则(新 service 须加字段+构造行)"}

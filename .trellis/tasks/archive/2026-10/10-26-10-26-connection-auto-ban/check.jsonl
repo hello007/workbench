@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对:两认证点(IPBanCheck)是否同接(漏一即绕过)/verify 契约是否保持不动(封禁判定不得聚合进 verify)/浏览器通道是否零 IP 明细泄漏/审计是否在动作生效后写/桌面事件 stopLocked 收口"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对:ip_ban/ip_unban 审计行形态(结构化参数防位置错位/system 归因/来源 IP/触发原因)与新事件是否登记 §8 表/无明文 token 无完整 URL 红线"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对:service/server 新增代码覆盖率是否达门禁(≥80%/主包不设门禁)与测试分层"}
+{"file": "docs/spec/test-stability.md", "reason": "核对:窗口/到期测试是否 nowFn 注入驱动(禁 sleep)/无固定端口/无环境外部状态隐式依赖"}
