@@ -63,6 +63,35 @@
           <el-text class="conflict-file" :title="file">{{ file }}</el-text>
           <div class="conflict-row-actions">
             <el-button size="small" text @click="openFile(file)">打开</el-button>
+            <!-- 快捷选边（R1）：git checkout --ours/--theirs + git add 一条链路完成该文件解决；
+                 rebase 中 ours/theirs 语义反转，用 tooltip 提示「当前」指变基目标侧 -->
+            <el-tooltip
+              v-if="conflictState.type === 'rebase'"
+              content="变基冲突中「当前」指变基目标侧（git ours 语义反转），请谨慎选边"
+              placement="top"
+            >
+              <el-button
+                size="small" text
+                :loading="choosingSide === file"
+                @click="chooseSide(file, 'ours')"
+              >以当前为准</el-button>
+            </el-tooltip>
+            <el-button
+              v-else
+              size="small" text
+              :loading="choosingSide === file"
+              @click="chooseSide(file, 'ours')"
+            >以当前为准</el-button>
+            <el-button
+              size="small" text
+              :loading="choosingSide === file"
+              @click="chooseSide(file, 'theirs')"
+            >以传入为准</el-button>
+            <!-- 内嵌解决（R2）：弹窗逐块决策 + 合并预览 + 保存即标记 -->
+            <el-button
+              size="small" text type="primary"
+              @click="openResolver(file)"
+            >内嵌解决</el-button>
             <!-- 三向合并：base/local/remote 临时版本 + merged 工作区原文件交外部工具；
                  未配置工具/模板时后端 AppError(NotConfigured) 经 handleError 引导设置 -->
             <el-button
@@ -99,6 +128,15 @@
         <el-button type="danger" @click="abortOp" :loading="aborting">中止</el-button>
       </div>
     </div>
+
+    <!-- 内嵌解决弹窗（R2）：逐块决策 / 合并预览 / 保存即标记已解决 -->
+    <ConflictResolverDialog
+      v-model:visible="resolverVisible"
+      :repo-path="repoPath"
+      :file="resolverFile"
+      :conflict-type="conflictState.type"
+      @resolved="refreshConflictState"
+    />
   </el-card>
 </template>
 
@@ -107,17 +145,20 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import {
-  Merge, Rebase, CherryPick, GetConflictState, ResolveConflict,
+  Merge, Rebase, CherryPick, GetConflictState, ResolveConflict, ChooseConflictSide,
   ContinueMerge, ContinueRebase, ContinueCherryPick,
   AbortMerge, AbortRebase, AbortCherryPick, SkipRebase,
   OpenInVSCode, OpenInExternalMerge, CancelGitOperation
 } from '../../wailsjs/go/main/App'
+import ConflictResolverDialog from './ConflictResolverDialog.vue'
 import { handleGitError } from '../utils/gitError'
 import { handleError, ErrorCode } from '../utils/error'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
 })
+
+const emit = defineEmits(['conflict-state'])
 
 // 操作类型：merge / rebase / cherry-pick
 const opType = ref('merge')
@@ -137,6 +178,11 @@ const skipping = ref(false)
 const resolvingFile = ref('')
 // 三向合并打开中状态（行级 loading，防重复点击）
 const openingMerge = ref('')
+// 快捷选边进行中状态（行级 loading，防重复点击）
+const choosingSide = ref('')
+// 内嵌解决弹窗显隐 + 当前打开的冲突文件
+const resolverVisible = ref(false)
+const resolverFile = ref('')
 // 最近一次操作输出（git stdout），超长截断展示
 const lastOutput = ref('')
 // 在途操作发起时的仓库路径快照：取消入口读快照而非当前 props.repoPath，
@@ -174,11 +220,37 @@ const refreshConflictState = async () => {
   try {
     const state = await GetConflictState(props.repoPath)
     conflictState.value = state || { type: 'none', files: [] }
+    // 冲突态上行通知（ContentPanel 消费驱动「合并/变基」tab 红点角标，R6c）
+    emit('conflict-state', conflictState.value)
   } catch (error) {
     ElMessage.error('获取冲突状态失败: ' + (error.message || String(error)))
   } finally {
     loadingConflict.value = false
   }
+}
+
+/**
+ * 快捷选边（R1）：一条链路完成该文件解决（git checkout --<side> + git add）。
+ * side 为 'ours' / 'theirs'；错误经 handleError 分流（E_GIT_LOCKED/E_GIT_CANCELLED 等）。
+ */
+const chooseSide = async (file, side) => {
+  if (choosingSide.value) return
+  choosingSide.value = file
+  try {
+    await ChooseConflictSide(props.repoPath, file, side)
+    ElMessage.success(`${file} 已${side === 'ours' ? '以当前为准' : '以传入为准'}解决`)
+    await refreshConflictState()
+  } catch (error) {
+    handleError('选边解决失败: ', error)
+  } finally {
+    choosingSide.value = ''
+  }
+}
+
+// 打开内嵌解决弹窗（R2）
+const openResolver = (file) => {
+  resolverFile.value = file
+  resolverVisible.value = true
 }
 
 const execute = async () => {
@@ -364,6 +436,7 @@ watch(() => props.repoPath, () => {
   target.value = ''
   lastOutput.value = ''
   conflictState.value = { type: 'none', files: [] }
+  emit('conflict-state', conflictState.value)
   refreshConflictState()
 })
 

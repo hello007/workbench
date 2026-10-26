@@ -669,6 +669,13 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
     isDetached: false
   },
   GetConflictState: { type: 'none', files: [] },
+  // ---- 内嵌冲突解决第一期（10-26-conflict-resolve-inapp）----
+  // GetConflictFileContent 形状对齐 model.ConflictFileContent：content 为 UTF-8 解码后的
+  // 工作区文件内容（默认无标记小文本 = R3 全文编辑态安全形态）；encoding 原样回传保存。
+  // ChooseConflictSide / SaveConflictResolution 返回 void，null 安全 no-op
+  GetConflictFileContent: { content: '无冲突标记的文本', encoding: 'UTF-8', binary: false, tooLarge: false },
+  ChooseConflictSide: null,
+  SaveConflictResolution: null,
   HasUpstream: true,
   CommitFiles: true,
   PushRepo: 'To github.com/demo/demo-repo.git\n   main -> main',

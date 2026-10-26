@@ -89,10 +89,19 @@
         <el-tab-pane label="远程仓库" name="remotes" lazy>
           <GitRemotes :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
-        <el-tab-pane label="合并/变基" name="merge" lazy>
+        <el-tab-pane name="merge" lazy>
+          <template #label>
+            <!-- 冲突存在期间红点角标（R6c） -->
+            <el-badge :is-dot="hasConflict" class="merge-tab-badge">
+              <span>合并/变基</span>
+            </el-badge>
+          </template>
           <!-- 独立滚动容器：冲突卡片+表单+输出内容超高时面板内滚动（tab-pane 全局 overflow:hidden 会裁剪） -->
           <div class="merge-pane">
-            <GitMerge :repo-path="workspaceStore.selectedNode.path" />
+            <GitMerge
+              :repo-path="workspaceStore.selectedNode.path"
+              @conflict-state="onConflictStateChanged"
+            />
           </div>
         </el-tab-pane>
         <el-tab-pane label="子模块" name="submodules" lazy>
@@ -469,7 +478,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { SuccessFilled, CircleCloseFilled, RemoveFilled, ArrowLeft, Document, Folder, CopyDocument } from '@element-plus/icons-vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
@@ -487,7 +496,7 @@ import {
   OpenInExplorer, OpenInVSCode, OpenInWarp, OpenInObsidian, OpenObsidianVaultManager,
   CopyObsidianVaultPath, AutoRegisterAndOpen,
   GetBranches, CheckoutBranch,
-  CancelGitOperation, CancelAllGitOperations, ExtractRepoName
+  CancelGitOperation, CancelAllGitOperations, ExtractRepoName, GetConflictState
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
 import obsidianIcon from '../assets/icons/obsidian.png'
@@ -523,6 +532,9 @@ const gitLoading = ref(false)
 // 拉取是否走变基模式（git pull --rebase），默认 false 保持普通 pull 行为
 const pullUseRebase = ref(false)
 const activeGitTab = ref('repo')
+// 冲突存在标志（R6c）：驱动「合并/变基」tab 红点角标。
+// 三处更新：选中 git 节点检测（R6a）、拉取完成后检测（R6b）、GitMerge 上报 conflict-state
+const hasConflict = ref(false)
 const gitInfoRef = ref()
 const commitHistoryRef = ref()
 const localChangesRef = ref()
@@ -704,6 +716,8 @@ const pullRepo = async () => {
     } else {
       ElMessage.success(result || '拉取完成')
     }
+    // 拉取完成检测冲突（R6b，取消不算完成）：以发起时快照路径检测
+    await checkConflictAfterPull(activePullPath.value)
     gitInfoRef.value?.handleRefresh()
     commitHistoryRef.value?.handleRefresh()
   } catch (error) {
@@ -712,6 +726,53 @@ const pullRepo = async () => {
     gitLoading.value = false
   }
 }
+
+// 选中节点变化时检测冲突态（R6a）：冲突则自动落「合并/变基」tab 并亮角标；
+// 非 git 节点清除角标。检测失败静默（不阻塞节点切换主流程）。
+const checkNodeConflict = async () => {
+  const node = workspaceStore.selectedNode
+  if (!node || !node.isGitRepo) {
+    hasConflict.value = false
+    return
+  }
+  try {
+    const state = await GetConflictState(node.path)
+    if (state && state.type !== 'none') {
+      hasConflict.value = true
+      activeGitTab.value = 'merge'
+    } else {
+      hasConflict.value = false
+    }
+  } catch {
+    // 静默：tab 内 GitMerge 面板有独立刷新与错误提示链路
+  }
+}
+
+// GitMerge 冲突态变化上报（R6c）：合并/变基 tab 打开后由其刷新驱动角标更新
+const onConflictStateChanged = (state) => {
+  hasConflict.value = !!(state && state.type !== 'none')
+}
+
+// 拉取完成后冲突检测（R6b）：目标仓有冲突且仍为当前选中节点时，
+// 切到「合并/变基」tab 并提示（拉取中途切走节点不打扰）
+const checkConflictAfterPull = async (repoPath) => {
+  const node = workspaceStore.selectedNode
+  if (!repoPath || !node || !node.isGitRepo || repoPath !== node.path) return
+  try {
+    const state = await GetConflictState(repoPath)
+    if (state && state.type !== 'none') {
+      hasConflict.value = true
+      activeGitTab.value = 'merge'
+      ElMessage.warning('存在冲突，已切换到合并/变基面板')
+    }
+  } catch {
+    // 静默：仅是提示性检测，失败不打断拉取结果展示
+  }
+}
+
+watch(() => workspaceStore.selectedNode, () => {
+  checkNodeConflict()
+}, { immediate: true })
 
 // onCancelSinglePull 取消单仓拉取：后端终止在途 git pull 子进程，PullRepo 返回 "已取消"
 // 经 pullRepo 分支中性提示。用发起时快照路径，防在途切节点取消打错仓库
@@ -1198,6 +1259,8 @@ const setupPullEvents = () => {
       pullRunningInBackground.value = false
       pullDialogVisible.value = true
     }
+    // 批量拉取完成检测冲突（R6b）：对当前选中节点检测
+    checkConflictAfterPull(workspaceStore.selectedNode?.path)
   })
 }
 
@@ -1612,6 +1675,12 @@ defineExpose({
 .git-tabs :deep(.el-tab-pane) {
   height: 100%;
   overflow: hidden;
+}
+
+/* 合并/变基 tab 红点角标：冲突存在期间显示（R6c） */
+.merge-tab-badge {
+  /* 红点会略微上移出基线，下移补偿对齐 tab 文字 */
+  vertical-align: baseline;
 }
 
 /* 合并/变基 tab：内容自然生长（冲突卡片 + 表单 + 输出），超高时自身滚动而非被裁剪 */
