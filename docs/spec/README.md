@@ -56,6 +56,7 @@
 |[linux-platform.md](linux-platform.md)|Linux 支持契约：Wails 桌面构建须 `-tags webkit2_41`（Ubuntu 24.04 移除 webkit2gtk-4.0）；无标签时桌面前端 CGO 不进依赖图；平台抽象选型（编译期双文件 / 运行时 GOOS 分支 / 纯逻辑抽无 tag 文件双侧同测）；自更新 Linux 资产名与 release.yml 打包名严格一致；build/ gitignore 白名单放行；测试平台断言拆 `_windows_test.go`/`_linux_test.go` 禁共享；前端 shell/目录兜底禁 'powershell'、'C:\\' 字面量统一走 settings store|
 |[pptx-preview.md](pptx-preview.md)|pptx 文件树预览契约（COM 转 PDF + pdfjs viewer）：转换任务排进 assets-thumbs 既有 STA worker（禁建第二 COM 队列——双队列进程快照 diff 互杀）；失败/超时路径必须 Discard() 置脏；复用用户已开实例禁 SaveAs（走 ExportAsFixedFormat 发布语义），自启实例 SaveAs(32) 失败回退；缓存 data/pptx_preview_pdf/ 键=srcPath+size+mtime、LRU 512MB；在途防抖 chan 缓冲 1；前端代次守卫 + 卸载复位转换态；dev 模式 Vite SPA fallback 吞 /preview-pdf——vite.config.js 前置中间件提前 404 触发 Wails dev 回退（新增同源路由须同步加前缀判定）；隐藏页不导出/视频海报帧为预期行为|
 |[branch-compare.md](branch-compare.md)|分支对比契约（侧边栏「分支对比」，移植 git-branch-compare 算法）：4 只读绑定与方向语义（文件树 diff 为 A→B）；配对在后端（贪心一配一 hash→patch-id→归一化 subject）；patch-id 管道 `log -p \| patch-id --stable` 走 `ExecutePipeline`（专用 2min 超时、失败降级不阻塞）；本服务 git 命令必带 UTF-8 `-c` 前缀（GitCommand 不默认带）；日志解析 %x00/%x01 范式；只读不抢 tryLockRepo、零新增错误码；diff 解析复用抽取后的 utils/diffParse.js|
+|[conflict-resolve-inapp.md](conflict-resolve-inapp.md)|内嵌冲突解决契约（合并/变基/拣选冲突面板第一期）：3 绑定（选边/读内容/按原编码写回）；变更类走 tryLockRepo + 冲突列表成员校验前置；`isSafeRelativePath` 故意从严拒 `..`/冒号；**标记解析行尾 `\r` 必须逐字节保留**（CRLF 往返回归测试锁死）+ 块间 `lead` 上下文行；rebase 冲突 ours/theirs 语义反转 UI 须带提示；GBK 683KB-1MB 读写字限缝隙已知接受；冲突动线三触发点（选仓/单仓拉取/批量更新）切 tab + 红点角标|
 
 ## 新增文档约定
 
