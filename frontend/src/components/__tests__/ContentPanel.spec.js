@@ -37,7 +37,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenObsidianVaultManager: vi.fn(() => Promise.resolve(true)),
   CopyObsidianVaultPath: vi.fn(() => Promise.resolve('')),
   GetBranches: vi.fn(() => Promise.resolve({ branches: [{ name: 'main', isCurrent: true, isRemote: false }] })),
-  CheckoutBranch: vi.fn(() => Promise.resolve(true))
+  CheckoutBranch: vi.fn(() => Promise.resolve(true)),
+  // ---- 内嵌冲突解决第一期（R6 冲突自动呈现）----
+  GetConflictState: vi.fn(() => Promise.resolve({ type: 'none', files: [] })),
+  GetConflictFileContent: vi.fn(() => Promise.resolve({ content: '', encoding: 'UTF-8', binary: false, tooLarge: false })),
+  ChooseConflictSide: vi.fn(() => Promise.resolve()),
+  SaveConflictResolution: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -60,7 +65,8 @@ const contentPanelStubs = {
   'el-descriptions-item': { template: '<div class="el-descriptions-item"><slot /></div>', props: ['label'] },
   'el-divider': { template: '<hr />' },
   'el-tabs': { template: '<div><slot /></div>', props: ['modelValue'] },
-  'el-tab-pane': { template: '<div><slot /></div>', props: ['label', 'name', 'lazy'] },
+  'el-tab-pane': { template: '<div class="el-tab-pane" :data-name="name"><slot name="label" /><slot /></div>', props: ['label', 'name', 'lazy'] },
+  'el-badge': { template: '<span class="el-badge" :class="{ \'is-dot\': isDot }"><slot /></span>', props: ['isDot', 'hidden'] },
   'el-button': { template: '<button v-bind="$attrs"><slot /></button>', props: ['loading', 'type', 'disabled', 'size'] },
   'el-button-group': { template: '<div><slot /></div>' },
   'el-switch': {
@@ -1186,5 +1192,103 @@ describe('ContentPanel.vue - handler 分支补充', () => {
       expect(CopyObsidianVaultPath).not.toHaveBeenCalled()
       expect(OpenObsidianVaultManager).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ===== 内嵌冲突解决第一期（10-26-conflict-resolve-inapp）：冲突自动呈现（R6）=====
+describe('ContentPanel.vue - 冲突自动呈现', () => {
+  let wrapper
+  const gitNode = { id: 'g1', name: 'repo', path: 'D:\\proj\\repo', type: 'directory', isGitRepo: true }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+    delete window.runtime
+  })
+
+  const mountGit = () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = gitNode
+    wrapper = mount(ContentPanel, { global: { stubs: contentPanelStubs } })
+    return wrapper
+  }
+
+  it('选中 git 节点存在冲突：自动切到合并/变基 tab 且角标亮红点（R6a/R6c）', async () => {
+    const { GetConflictState } = await import('../../../wailsjs/go/main/App')
+    GetConflictState.mockResolvedValueOnce({ type: 'merge', files: ['src/a.txt'] })
+
+    mountGit()
+    await flushPromises()
+
+    expect(GetConflictState).toHaveBeenCalledWith('D:\\proj\\repo')
+    expect(wrapper.vm.$.setupState.activeGitTab).toBe('merge')
+    const badge = wrapper.find('.el-tab-pane[data-name="merge"] .el-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).toContain('is-dot')
+  })
+
+  it('无冲突节点：不切 tab、角标无红点', async () => {
+    mountGit()
+    await flushPromises()
+
+    expect(wrapper.vm.$.setupState.activeGitTab).toBe('repo')
+    expect(wrapper.find('.el-tab-pane[data-name="merge"] .el-badge.is-dot').exists()).toBe(false)
+  })
+
+  it('单仓拉取完成后存在冲突：切 tab 并 warning 提示（R6b）', async () => {
+    const { PullRepo, GetConflictState } = await import('../../../wailsjs/go/main/App')
+    PullRepo.mockResolvedValueOnce('已是最新')
+    // 挂载检测为无冲突，拉取完成后变为冲突
+    GetConflictState.mockResolvedValueOnce({ type: 'none', files: [] })
+    GetConflictState.mockResolvedValueOnce({ type: 'merge', files: ['src/a.txt'] })
+
+    mountGit()
+    await flushPromises()
+    await wrapper.vm.$.setupState.pullRepo()
+    await flushPromises()
+
+    expect(GetConflictState).toHaveBeenLastCalledWith('D:\\proj\\repo')
+    expect(wrapper.vm.$.setupState.activeGitTab).toBe('merge')
+    expect(ElMessage.warning).toHaveBeenCalledWith('存在冲突，已切换到合并/变基面板')
+  })
+
+  it('GitMerge 上报 conflict-state 驱动角标更新（R6c）', async () => {
+    mountGit()
+    await flushPromises()
+
+    // 无冲突 → 有冲突：红点出现
+    wrapper.vm.$.setupState.onConflictStateChanged({ type: 'rebase', files: ['a.txt'] })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.el-tab-pane[data-name="merge"] .el-badge.is-dot').exists()).toBe(true)
+
+    // 冲突全部解决：红点消失
+    wrapper.vm.$.setupState.onConflictStateChanged({ type: 'none', files: [] })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.el-tab-pane[data-name="merge"] .el-badge.is-dot').exists()).toBe(false)
+  })
+
+  it('批量拉取完成（pull-complete）后存在冲突：切 tab 并提示（R6b）', async () => {
+    const { GetConflictState } = await import('../../../wailsjs/go/main/App')
+    const { EventsOn } = await import('../../../wailsjs/runtime/runtime')
+    // 模拟 wails runtime 存在，使 pull-complete 事件注册生效
+    window.runtime = {}
+    GetConflictState.mockResolvedValueOnce({ type: 'none', files: [] })
+    GetConflictState.mockResolvedValueOnce({ type: 'merge', files: ['src/a.txt'] })
+
+    mountGit()
+    await flushPromises()
+
+    // 取出 pull-complete 注册的回调并触发（批量拉取收口）
+    const completeCall = EventsOn.mock.calls.find((c) => c[0] === 'pull-complete')
+    expect(completeCall).toBeTruthy()
+    completeCall[1]({ success: 1, failed: 0, skipped: 0, cancelled: 0 })
+    await flushPromises()
+
+    expect(wrapper.vm.$.setupState.activeGitTab).toBe('merge')
+    expect(ElMessage.warning).toHaveBeenCalledWith('存在冲突，已切换到合并/变基面板')
   })
 })
