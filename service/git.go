@@ -1741,6 +1741,163 @@ func (s *GitService) ResolveConflict(repoPath, file string) error {
 	return nil
 }
 
+// conflictFileMaxSize 内嵌冲突解决器读/写冲突文件的 1MB 上限（与预览口径一致，R4）。
+const conflictFileMaxSize = 1024 * 1024
+
+// isSafeRelativePath 校验冲突文件路径是安全的仓库相对路径：
+// 非空、非绝对路径、不含 ".." 片段、不含卷名冒号、无冗余分隔符（Clean 后不变）。
+// 拒绝逃逸仓库根的路径（防 path traversal），git diff --name-only 输出的
+// 正斜杠相对路径恒通过本校验。
+func isSafeRelativePath(file string) bool {
+	if file == "" || file == "." || strings.HasPrefix(file, "/") || strings.HasPrefix(file, `\`) || filepath.IsAbs(file) {
+		return false
+	}
+	// 任何 ".." 片段（含 "a/../b"、 "..foo" 之外的路径段变体）一律拒绝，宁严勿漏
+	if strings.Contains(file, "..") {
+		return false
+	}
+	// 冒号在 Windows 是卷名分隔符、在 git 路径中无合法场景，直接拒绝
+	if strings.Contains(file, ":") {
+		return false
+	}
+	// Clean 后不变：拒绝 "a//b"、"a/./b"、"尾部/" 等冗余形态
+	return filepath.Clean(filepath.FromSlash(file)) == filepath.FromSlash(file)
+}
+
+// conflictInProgress 检测仓库是否有进行中的 merge/rebase/cherry-pick 冲突态
+// （与 GetConflictState 同一判定口径，仅判定不区分类型）。
+func (s *GitService) conflictInProgress(gitRoot string) bool {
+	return s.gitCmd.IsMergeInProgress(gitRoot) ||
+		s.gitCmd.IsRebaseInProgress(gitRoot) ||
+		s.gitCmd.IsCherryPickInProgress(gitRoot)
+}
+
+// requireConflictFile 校验冲突态进行中且 file 在当前冲突列表内
+// （`git diff --name-only --diff-filter=U`），返回 git 根。
+// R7 防误用：文件不在冲突列表时拒绝操作（已被外部解决或本就不冲突）。
+func (s *GitService) requireConflictFile(repoPath, file string) (string, error) {
+	gitRoot, err := util.FindGitRoot(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("无法定位 Git 仓库根目录: %w", err)
+	}
+	if !s.conflictInProgress(gitRoot) {
+		return "", fmt.Errorf("当前无进行中的合并/变基/拣选冲突")
+	}
+	files, err := s.gitCmd.ListConflictFiles(gitRoot)
+	if err != nil {
+		return "", fmt.Errorf("获取冲突文件列表失败: %w", err)
+	}
+	for _, f := range files {
+		if strings.TrimSpace(f) == file {
+			return gitRoot, nil
+		}
+	}
+	return "", fmt.Errorf("文件 %s 不在当前冲突列表中", file)
+}
+
+// ChooseConflictSide 冲突文件快捷选边（R1）：side 取 "ours"（当前分支）/"theirs"
+// （传入侧），`git checkout --<side> -- <file>` 从 index 的 :2/:3 取内容写工作区，
+// 随即 `git add` 完成该文件解决（一条链路，无中间态）。变更类操作走 tryLockRepo；
+// 前置校验冲突态与文件归属（R7）。注意 rebase 冲突中 ours/theirs 语义反转
+// （ours=变基目标侧），前端按 conflictType 提示，后端按命令原样执行。
+func (s *GitService) ChooseConflictSide(repoPath, file, side string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	if side != "ours" && side != "theirs" {
+		return fmt.Errorf("side 仅支持 ours 或 theirs")
+	}
+	if strings.TrimSpace(file) == "" {
+		return fmt.Errorf("文件路径不能为空")
+	}
+	gitRoot, err := s.requireConflictFile(repoPath, file)
+	if err != nil {
+		return err
+	}
+	// 选边 + 标记解决为一条链路：checkout 成功后才 add，任一步失败报中文错误
+	if _, err := s.gitCmd.Execute(gitRoot, "checkout", "--"+side, "--", file); err != nil {
+		return fmt.Errorf("选择冲突侧失败: %w", err)
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "add", "--", file); err != nil {
+		return fmt.Errorf("标记已解决失败: %w", err)
+	}
+	return nil
+}
+
+// GetConflictFileContent 读取冲突文件的工作区内容（内嵌解决器加载用，R2/R3）。
+// 只读操作不抢 tryLockRepo。编码检测复用预览基建口径（util.DetectTextEncoding：
+// UTF-8/GBK，含 NUL 判二进制）；超过 1MB 标记 TooLarge 不读内容（R4，对齐预览降级）。
+// 返回解码为 UTF-8 的内容与原编码，保存时按原编码写回（R5）。
+func (s *GitService) GetConflictFileContent(repoPath, file string) (*model.ConflictFileContent, error) {
+	if strings.TrimSpace(file) == "" {
+		return nil, fmt.Errorf("文件路径不能为空")
+	}
+	if !isSafeRelativePath(file) {
+		return nil, fmt.Errorf("文件路径非法: %s", file)
+	}
+	gitRoot, err := s.requireConflictFile(repoPath, file)
+	if err != nil {
+		return nil, err
+	}
+	result := &model.ConflictFileContent{}
+	absPath := filepath.Join(gitRoot, filepath.FromSlash(file))
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取冲突文件失败: %w", err)
+	}
+	if info.Size() > conflictFileMaxSize {
+		result.TooLarge = true
+		return result, nil
+	}
+	data, err := util.ReadFileSafe(absPath, conflictFileMaxSize)
+	if err != nil {
+		return nil, fmt.Errorf("读取冲突文件失败: %w", err)
+	}
+	enc, content, ok := util.DetectTextEncoding(data)
+	if !ok {
+		result.Binary = true
+		return result, nil
+	}
+	result.Encoding = enc
+	result.Content = content
+	return result, nil
+}
+
+// SaveConflictResolution 保存内嵌解决器的合并结果并标记已解决（R2）：
+// 按原编码写回工作区文件（复用 SaveFile 的编码写入语义：gbk 按 GBK，其余按
+// UTF-8，原子写，内容原样写入不改行尾），随即 `git add`。变更类操作走
+// tryLockRepo；前置校验冲突态与文件归属（R7）。
+func (s *GitService) SaveConflictResolution(repoPath, file, content, encoding string) error {
+	release, err := s.tryLockRepo(repoPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	if strings.TrimSpace(file) == "" {
+		return fmt.Errorf("文件路径不能为空")
+	}
+	if !isSafeRelativePath(file) {
+		return fmt.Errorf("文件路径非法: %s", file)
+	}
+	gitRoot, err := s.requireConflictFile(repoPath, file)
+	if err != nil {
+		return err
+	}
+	// 按原编码写回工作区：复用 FileOperationService.SaveFile（GBK/UTF-8 转码 + 原子写）
+	absPath := filepath.Join(gitRoot, filepath.FromSlash(file))
+	if err := NewFileOperationService().SaveFile(absPath, content, encoding); err != nil {
+		return fmt.Errorf("写入冲突文件失败: %w", err)
+	}
+	if _, err := s.gitCmd.Execute(gitRoot, "add", "--", file); err != nil {
+		return fmt.Errorf("标记已解决失败: %w", err)
+	}
+	return nil
+}
+
 // requireInProgress 守卫 continue/abort/skip：要求指定操作进行中，否则报错。返回 git 根。
 func (s *GitService) requireInProgress(repoPath string, op model.ConflictType) (string, error) {
 	gitRoot, err := util.FindGitRoot(repoPath)
