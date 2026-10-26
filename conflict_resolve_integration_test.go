@@ -294,3 +294,27 @@ func TestIntegration_SaveConflictResolution_Rejects(t *testing.T) {
 		t.Error("无冲突态仓库应拒绝")
 	}
 }
+
+// TestIntegration_MergeRejectedWhileConflictPending 冲突已标记待提交（git add 完毕、
+// MERGE_HEAD 在途）时误点「执行」发起新合并：precheckMutation 不得报泛化的
+// 「工作区不干净」，须指路冲突面板 continue/abort（真机冒烟发现动线断点）。
+func TestIntegration_MergeRejectedWhileConflictPending(t *testing.T) {
+	itRequireGit(t)
+	repo, app := itConflictRepos(t)
+
+	// 模拟用户解决完冲突：标记已解决（git add）但未点「继续」
+	if err := app.ResolveConflict(repo, "a.txt"); err != nil {
+		t.Fatalf("ResolveConflict: %v", err)
+	}
+
+	_, err := app.Merge(repo, "feature", "ff")
+	if err == nil {
+		t.Fatal("合并进行中再发起新合并应被拒绝")
+	}
+	if !strings.Contains(err.Error(), "仍在进行中") || !strings.Contains(err.Error(), "继续") {
+		t.Fatalf("报错须指路冲突面板 continue/abort，实际: %v", err)
+	}
+	if strings.Contains(err.Error(), "工作区不干净") {
+		t.Fatalf("不得再报泛化「工作区不干净」误导用户: %v", err)
+	}
+}

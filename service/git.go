@@ -1599,6 +1599,11 @@ func (s *GitService) precheckMutation(repoPath string) (string, error) {
 		return "", fmt.Errorf("检查工作区状态失败: %w", err)
 	}
 	if hasChanges {
+		// 冲突解决进行中（文件已 git add 待提交）时工作区必然"不干净"，
+		// 报错须指路到冲突面板的 continue/abort，否则用户会误点「执行」发起新合并
+		if s.conflictInProgress(gitRoot) {
+			return "", fmt.Errorf("上一次合并/变基/拣选仍在进行中（冲突已标记待提交）：请在「合并/变基」面板点「继续」完成或「放弃」中止")
+		}
 		return "", fmt.Errorf("工作区不干净，请先提交或暂存变更")
 	}
 	return gitRoot, nil

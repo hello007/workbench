@@ -41,9 +41,19 @@
         </el-form-item>
       </el-form>
       <div class="execute-actions">
-        <!-- 执行中显示取消入口：终止在途 git merge/rebase/cherry-pick 子进程（后端取消注册表） -->
-        <el-button v-if="executing" :loading="cancellingOp" @click="onCancelCurrentOp">取消</el-button>
-        <el-button type="primary" @click="execute" :loading="executing">执行</el-button>
+        <!-- 冲突解决进行中：禁用「执行」防误发新合并（正确动线是冲突卡片的「继续/放弃」；
+             原生 title 提示，避免与「以当前为准」rebase 语义反转 el-tooltip 的断言面交叉） -->
+        <span
+          v-if="conflictState.type !== 'none' && !executing"
+          title="上一次合并/变基/拣选进行中：请点下方冲突面板的「继续」完成或「放弃」中止"
+        >
+          <el-button type="primary" disabled>执行</el-button>
+        </span>
+        <template v-else>
+          <!-- 执行中显示取消入口：终止在途 git merge/rebase/cherry-pick 子进程（后端取消注册表） -->
+          <el-button v-if="executing" :loading="cancellingOp" @click="onCancelCurrentOp">取消</el-button>
+          <el-button type="primary" @click="execute" :loading="executing">执行</el-button>
+        </template>
       </div>
       <div v-if="lastOutput" class="last-output" :title="lastOutput">{{ lastOutput }}</div>
     </div>
