@@ -1580,3 +1580,36 @@ IP 认证失败自动封禁落地：service.IPBanService 内存态状态机（�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 158: 连接管控六期:自动封禁参数化+递增封禁
+
+**Date**: 2026-10-27
+**Task**: 连接管控六期:自动封禁参数化+递增封禁
+**Branch**: `master`
+
+### Summary
+
+IP 自动封禁治理增强落地:AppSettings 扩 IPBan 四参数段(threshold 3-100/window 1-120/duration 1-60/maxBan 5-1440,段缺失全默认,normalize 收敛封顶≥基础时长,Ensure 双链路现四处);热更走 SetIPBanConfig「保存+生效」显式单点+启动初值同口 ApplyConfig 注入,ApplyConfig 原子换参不动 entries(生效中封禁不追溯/在途计数不清/threshold 改小自然收敛);递增封禁 escalateBanDuration base×2^(n-1) 封顶(循环翻倍禁 Pow),strikes 保留至 UnbanIP/ClearAll/重启、RecordSuccess 不清;AuditRecord/IPBanStatus 扩 strike,ip_ban reason 档位化;SettingsPanel 四参表单(:value-on-clear+回读归一值+恢复默认),ActivityBar strike>1 徽标;go test 全量+race 绿/vitest 2150 绿/build 过/E2E 过,trellis-check 七项全过;spec 更新 browser-channel §2.3 六期段+logging-and-errors §8+CLAUDE.md v2.34(含时钟注入闭包禁内联持锁方法调用死锁教训)
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `542f7a1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
