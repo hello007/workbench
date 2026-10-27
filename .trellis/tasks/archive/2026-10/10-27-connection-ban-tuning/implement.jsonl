@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "五期 IP 自动封禁状态机全契约(§2.3:滑动窗口/期满重计/懒过期/封禁中不累计/回环豁免/ClearAll 联动)/IPBanCheck 注入契约(§2.2)/webserve-ip-banned 桌面事件/SetOnBanned 出锁后触发——六期参数化须保持这些不变式"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "ip_ban/ip_unban 审计行形态(§8,reason 文案/failCount/actorSource=system)——六期扩 strike 字段与档位文案须对齐既有行形态与「动作生效后才写」纪律"}
+{"file": "docs/spec/test-stability.md", "reason": "nowFn 注入禁 sleep 先例(窗口/到期/递增档位测试必须注入时钟驱动)/固定端口随机化"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 Wails 绑定方法(SetIPBanConfig)须同步 frontend/wailsjs 三处(App.js/App.d.ts/models.ts);model 新 struct IPBanSettings 生成 models.ts;SettingsPanel/ActivityBar 视觉规范"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "SettingsPanel 表单先例(el-input-number :value-on-clear 防清空写 null)/ActivityBar 明细面板行结构与徽标样式对齐"}

@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对:五期不变式是否保持(期满重计剪枝/封禁中不累计/懒过期/回环豁免/ClearAll 联动)/参数热更是否即时生效且不动在途封禁/strikes 递增记忆语义(成功不清/解封与 ClearAll 清/重启清零)/两认证点同接不受影响"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对:ip_ban 审计行 strike 字段与档位 reason 文案形态/无明文 token 无完整 URL/动作生效后才写审计"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对:service 新增代码覆盖率门禁(≥76%)与主包测试分层"}
+{"file": "docs/spec/test-stability.md", "reason": "核对:递增档位/到期/热更测试是否 nowFn 注入驱动(禁 sleep)/无环境外部状态隐式依赖"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对:wailsjs 三处同步(SetIPBanConfig+IPBanSettings)/前端 clamp 与 :value-on-clear"}
