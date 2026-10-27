@@ -1646,3 +1646,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 160: 连接管控八期：CIDR 网段手动封禁
+
+**Date**: 2026-10-27
+**Task**: 连接管控八期：CIDR 网段手动封禁
+**Branch**: `master`
+
+### Summary
+
+七期 Out of Scope「CIDR 封禁网段」转正：IPBanService.cidrBans 独立列表（禁混 entries map）+ RejectMessage 判定链三级（白名单→精确→网段，RecordFailure 零改动——网段内 IP 照常计数与白名单「信任不计数」刻意分叉）+ BanCIDR/UnbanCIDR 入口（解析复用 parseIPBanWhitelistEntry 单点；白名单相交放行仅完全覆盖拒绝，单条目口径拼片放行为有意取舍）+ 持久化 data/ip_bans.json v2（Kind 字段 v1 零特判兼容）+ IPBanStatus.Kind/CoveredBy（后端计算透传，掩码方向与文案判定刻意相反）+ 两新 warning 错误码 + 前端 BanIPDialog 档位切换/白名单预检三态/全网段应急锁文案 + ActivityBar 徽标与解封分流 + parseIPv6('::') 放宽。双实现 agent 并行 + trellis-check 修 3 处（CoveredBy 掩码方向反/错误码级别误登/注释口径），go test 全量绿 vitest 2206 绿七期零回归，spec 三文档（browser-channel/logging-and-errors/CLAUDE.md v2.36）已沉淀。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19a67cf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
