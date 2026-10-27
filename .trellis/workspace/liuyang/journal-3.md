@@ -1613,3 +1613,36 @@ IP 自动封禁治理增强落地:AppSettings 扩 IPBan 四参数段(threshold 3
 ### Next Steps
 
 - None - task complete
+
+
+## Session 159: 连接管控七期：IP 手动封禁+可信网段豁免
+
+**Date**: 2026-10-27
+**Task**: 连接管控七期：IP 手动封禁+可信网段豁免
+**Branch**: `master`
+
+### Summary
+
+IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入口（同 map 写入即生效 server 零改动、覆盖自动封禁置 source=manual、failures/strikes 不动、expiresAt 0=永久 banActive 单点）；手动条目持久化 data/ip_bans.json（SetBansPath 注入即时载入仅未过期条目、manualVersion 版本复核重写收敛、落盘失败字段级回滚不写审计、ClearAll 不落盘）；IPBanSettings.Whitelist（normalize 剔除非法保留原串恒非 nil）+ isWhitelistedIP 判定单点（回环收编/裸 IP 补 /32 //128 双栈/ApplyConfig 预解析）三处消费（RecordFailure 早退/RejectMessage 追溯放行/Ban 拒绝）；SetIPBanConfig 扩第五参；BanIP 绑定+rpcAuditTarget 归因分叉；审计 ip_ban 单事件复用（LogIPBan 补 ActorTokenID）；两新错误码三处同步；前端 BanIPDialog+ActivityBar「IP 封禁」区块改造+SettingsPanel 白名单编辑器+utils/ipWhitelist.js 前端同口径复刻；测试 service v7 18 用例+App 4 用例+vitest 2182 绿+E2E 手动封禁链路+全量 race 绿；spec browser-channel/logging-and-errors/CLAUDE.md v2.35/功能说明/README 五文档更新。两教训：ipWhitelist IPv6 压缩段 tail 字节取错区间（vitest 暴露）；E2E 桌面事件须晚于组件挂载派发（早于 EventsOn 注册永久丢失）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8434dc0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 158
+- **Total Sessions**: 159
 - **Last Active**: 2026-10-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1615 | Active |
+| `journal-3.md` | ~1648 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 159 | 2026-10-27 | 连接管控七期：IP 手动封禁+可信网段豁免 | `8434dc0` | `master` |
 | 158 | 2026-10-27 | 连接管控六期:自动封禁参数化+递增封禁 | `542f7a1` | `master` |
 | 157 | 2026-10-26 | 连接管控五期：认证失败自动封禁 | `c257fc2` | `master` |
 | 156 | 2026-10-24 | 连接管控四期：临时封禁（踢出防重连 + 封禁管理） | `4fab5c8` | `master` |
