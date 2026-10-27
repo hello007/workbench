@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核对 §2.2/§2.3/§3/§4/§6 更新完整性：手动封禁链路、白名单豁免、SetIPBanConfig 五参、错误矩阵新行、测试节清单"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 §8 审计事件表 ip_ban 行 actorSource 扩 desktop/rpc 形态与 reason 分叉记录"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步（App.js/App.d.ts/models.ts）与 IPBanStatus.source 字段落 models.ts"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对 ip_bans.json 落盘走 util.SaveJSON、损坏降级、崩溃残留 tmp 不清扫口径"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76%/model ≥80% 基线，新增代码须带测试"}
+{"file": ".trellis/tasks/10-27-ip/prd.md", "reason": "验收标准逐条对照"}

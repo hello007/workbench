@@ -42,6 +42,17 @@ vi.mock('../BanTokenDialog.vue', () => ({
   }
 }))
 
+// 手动封禁 IP 弹窗桩（连接管控七期，区块头部入口）：同上只测接线（头部按钮
+// 打开弹窗），弹窗内部表单与提交链由 BanIPDialog 专属 spec 覆盖
+vi.mock('../BanIPDialog.vue', () => ({
+  default: {
+    name: 'BanIPDialog',
+    props: ['modelValue'],
+    emits: ['update:modelValue', 'banned'],
+    template: '<div class="ban-ip-dialog-stub" />'
+  }
+}))
+
 describe('ActivityBar', () => {
   // activePanel / terminalActive 已迁 ui store：mount 前在 uiStore 上设初值，
   // 组件内直读 uiStore.activePanel / uiStore.terminalVisible；
@@ -501,6 +512,7 @@ describe('ActivityBar - 自动封禁区块', () => {
     expiresAt: Math.floor(Date.now() / 1000) + 300,
     failCount: 10,
     expired: false,
+    source: 'auto',
     ...over
   })
 
@@ -540,7 +552,7 @@ describe('ActivityBar - 自动封禁区块', () => {
     wrapper.unmount()
   })
 
-  it('面板因连接可见而封禁列表为空时，空态显「暂无自动封禁记录」', async () => {
+  it('面板因连接可见而封禁列表为空时，空态显「暂无封禁记录」', async () => {
     const wrapper = await mountFlushed()
     // 面板可见条件 = 连接存在或封禁存在；注入一条桌面通道连接使面板可见
     eventHandlers['webserve-connections:changed']([
@@ -549,7 +561,48 @@ describe('ActivityBar - 自动封禁区块', () => {
     await nextTick()
     expect(wrapper.find('.devices-ban-section').exists()).toBe(true)
     expect(wrapper.findAll('.devices-ban-row').length).toBe(0)
-    expect(wrapper.find('.devices-ban-empty').text()).toBe('暂无自动封禁记录')
+    expect(wrapper.find('.devices-ban-empty').text()).toBe('暂无封禁记录')
+    wrapper.unmount()
+  })
+
+  it('来源徽标分流（七期）：手动条目显「手动」徽标隐藏失败计数，永久条目显「永久」；自动条目 strike>1 显递增档位', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      banEntry({ source: 'manual', failCount: 0, expiresAt: 0 }),
+      banEntry({ ip: '198.51.100.8', source: 'auto', strike: 3 }),
+      banEntry({ ip: '198.51.100.9', source: 'auto', strike: 1 })
+    ])
+    const wrapper = await mountFlushed()
+    const rows = wrapper.findAll('.devices-ban-row')
+    // 手动：「手动」徽标 + 无失败计数列 + 永久文案
+    expect(rows[0].find('.devices-ban-source').exists()).toBe(true)
+    expect(rows[0].find('.devices-ban-source').text()).toBe('手动')
+    expect(rows[0].text()).not.toContain('次失败')
+    expect(rows[0].find('.devices-ban-expiry').text()).toBe('永久')
+    // 自动 strike>1：递增档位徽标，无来源徽标
+    expect(rows[1].find('.devices-ban-source').exists()).toBe(false)
+    expect(rows[1].find('.devices-ban-strike').exists()).toBe(true)
+    expect(rows[1].find('.devices-ban-strike').text()).toContain('第 3 次')
+    // 自动首触（strike=1）：无任何徽标（六期向后兼容）
+    expect(rows[2].find('.devices-ban-strike').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('头部「封禁 IP」按钮打开手动封禁弹窗（七期接线）：桌面事件锁通道后渲染，点击置 v-model', async () => {
+    const wrapper = await mountFlushed()
+    // isDesktopChannel 由桌面事件锁定（初始 false = 浏览器通道形态）：浏览器通道
+    // 不渲染入口（ListIPBans 屏蔽面同源）
+    expect(wrapper.find('.devices-ban-add').exists(), '浏览器通道不应渲染入口').toBe(false)
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    expect(wrapper.find('.devices-ban-add').exists(), '桌面通道应渲染入口').toBe(true)
+    await wrapper.find('.devices-ban-add').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanIPDialog' })
+    expect(dialog.exists(), 'BanIPDialog 桩应挂载').toBe(true)
+    expect(dialog.props('modelValue'), '点击后 v-model 置 true').toBe(true)
     wrapper.unmount()
   })
 

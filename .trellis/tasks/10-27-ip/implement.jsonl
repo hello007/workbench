@@ -1,0 +1,8 @@
+{"file": "docs/spec/browser-channel.md", "reason": "§2.2 IPBanCheck verify 前判定/RPCTargetForActor 装饰器/RPCHiddenMethods + §2.3 五期 IPBanService 状态机/六期 SetIPBanConfig 热更单点段 + §3 契约表 + §6 测试节——本期全部先例与注入面所在"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "§8 审计事件表 ip_ban/ip_unban 行形态、actorSource 归因、「动作生效后才写」纪律、错误码三处同步规则"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 绑定三处手动同步规则（BanIP/SetIPBanConfig 扩参/IPBanStatus.source 均触发）+ model 具名 string 类型别名坑"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "手动封禁持久化 data/ip_bans.json 必须走 util.SaveJSON 原子写（禁 os.WriteFile 直写）"}
+{"file": "docs/spec/test-stability.md", "reason": "nowFn 注入禁 sleep、临时目录/端口纪律——持久化载入与到期判定用例约束"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "BanIPDialog 新弹窗尺寸分档/表单规范 + ActivityBar 深色容器图标规范 + 面板 flex 约束链"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox.confirm 三形态与 EP 2.14 驻留坑——封禁/解封确认链用例（.first()/.last() 范式）"}
+{"file": ".trellis/tasks/10-27-ip/prd.md", "reason": "定稿 PRD：8 组决策、分层方案、四 PR 分解"}

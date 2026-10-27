@@ -192,20 +192,23 @@ type IPBanAudit struct {
 	ActorTokenID string // 操作者令牌记录 ID（RPC 解封调用者；桌面/自动触发为空不落键）
 }
 
-// LogIPBan 追加一条来源 IP 自动封禁审计事件（ip_ban，连接管控五期）：记录触发
-// 计数、到期时间与 system 归因（自动触发无人类操作者，ActorTokenID 恒空）。
-// 可见性口径与 Log 一致——无明文 token、无 URL。写入时序对齐既有审计纪律：
-// 仅动作生效（封禁写入内存）后由调用方落盘。
+// LogIPBan 追加一条来源 IP 封禁审计事件（ip_ban，连接管控五期；七期复用单事件
+// 扩手动封禁归因）：记录触发计数、到期时间与操作者归因——自动触发恒 system 且
+// ActorTokenID 恒空（无人类操作者）；手动封禁（七期）actorSource 为 desktop/rpc、
+// ActorTokenID 为 RPC 调用者令牌记录 ID（桌面为空不落键）。可见性口径与 Log
+// 一致——无明文 token、无 URL。写入时序对齐既有审计纪律：仅动作生效（封禁
+// 写入内存，手动封禁另含落盘成功）后由调用方落盘。
 func (a *AuditLogger) LogIPBan(b IPBanAudit) {
 	a.write(AuditRecord{
-		Ts:          time.Now().Unix(),
-		Event:       AuditEventIPBan,
-		IP:          b.IP,
-		FailCount:   b.FailCount,
-		Strike:      b.Strike,
-		ExpiresAt:   b.ExpiresAt,
-		Reason:      b.Reason,
-		ActorSource: b.ActorSource,
+		Ts:           time.Now().Unix(),
+		Event:        AuditEventIPBan,
+		IP:           b.IP,
+		FailCount:    b.FailCount,
+		Strike:       b.Strike,
+		ExpiresAt:    b.ExpiresAt,
+		Reason:       b.Reason,
+		ActorSource:  b.ActorSource,
+		ActorTokenID: b.ActorTokenID,
 	})
 }
 

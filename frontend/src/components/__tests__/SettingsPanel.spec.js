@@ -1834,14 +1834,14 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     expect(numbers[3].element.value).toBe('60')
   })
 
-  it('保存调用 SetIPBanConfig 四参并提示即时生效，随后回读归一值刷新表单', async () => {
+  it('保存调用 SetIPBanConfig 五参（四参 + 白名单）并提示即时生效，随后回读归一值刷新表单', async () => {
     const { SetIPBanConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
     const { ElMessage } = await import('element-plus')
     SetIPBanConfig.mockResolvedValue()
     // 首次 GetSettings（挂载回填）返回默认；保存后回读返回封顶被后端收敛的形态
     GetSettings.mockResolvedValueOnce(baseSettings())
       .mockResolvedValue(baseSettings({
-        ipban: { threshold: 5, windowMinutes: 10, durationMinutes: 60, maxBanDurationMinutes: 60 }
+        ipban: { threshold: 5, windowMinutes: 10, durationMinutes: 60, maxBanDurationMinutes: 60, whitelist: [] }
       }))
     await openNetwork()
     const numbers = ipbanInputs()
@@ -1850,10 +1850,75 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(SetIPBanConfig).toHaveBeenCalledTimes(1)
-    expect(SetIPBanConfig).toHaveBeenCalledWith(5, 10, 60, 60)
+    expect(SetIPBanConfig).toHaveBeenCalledWith(5, 10, 60, 60, [])
     expect(ElMessage.success).toHaveBeenCalledWith('自动封禁参数已保存并即时生效')
     // 回读归一值刷新表单（封顶=基础时长的收敛形态以生效值为准）
     expect(ipbanInputs()[3].element.value).toBe('60')
+  })
+
+  it('白名单编辑器（七期）：GetSettings 回填列表渲染为行，空列表显占位', async () => {
+    await openNetwork({
+      ipban: { threshold: 10, windowMinutes: 10, durationMinutes: 5, maxBanDurationMinutes: 60, whitelist: ['10.0.0.0/8', '192.168.1.20'] }
+    })
+    const rows = wrapper.findAll('.ipban-whitelist-row')
+    expect(rows.length).toBe(2)
+    expect(rows[0].find('input').element.value).toBe('10.0.0.0/8')
+    expect(rows[1].find('input').element.value).toBe('192.168.1.20')
+    // 空列表占位
+    await rows[0].findAll('button').find(b => b.text() === '删除').trigger('click')
+    await rows[0].findAll('button').find(b => b.text() === '删除').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.ipban-whitelist-empty').text()).toContain('无可信网段')
+  })
+
+  it('白名单添加行 + 保存提取字符串列表透传第五参', async () => {
+    const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
+    SetIPBanConfig.mockResolvedValue()
+    await openNetwork()
+    expect(wrapper.find('.ipban-whitelist-empty').exists()).toBe(true)
+    await wrapper.findAll('button').find(b => b.text() === '添加网段').trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === '添加网段').trigger('click')
+    await nextTick()
+    const rows = wrapper.findAll('.ipban-whitelist-row')
+    await rows[0].find('input').setValue('10.0.0.0/8')
+    await rows[1].find('input').setValue('  ')
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    // 空白行静默剔除，非空行透传
+    expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, ['10.0.0.0/8'])
+  })
+
+  it('白名单非法条目行级标红 + 保存前置拦截不透传', async () => {
+    const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetIPBanConfig.mockResolvedValue()
+    await openNetwork()
+    await wrapper.findAll('button').find(b => b.text() === '添加网段').trigger('click')
+    await nextTick()
+    const row = wrapper.findAll('.ipban-whitelist-row')[0]
+    await row.find('input').setValue('not-a-cidr')
+    await nextTick()
+    expect(row.find('.ipban-whitelist-row-error').text()).toContain('格式无效')
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('格式非法'))
+    expect(SetIPBanConfig).not.toHaveBeenCalled()
+  })
+
+  it('保存后回读白名单归一值刷新行列表（非法条目被后端剔除，表单与生效集一致）', async () => {
+    const { SetIPBanConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
+    SetIPBanConfig.mockResolvedValue()
+    await openNetwork()
+    // 覆盖恒定实现（openNetwork 期初次回填已消费 createWrapper 默认 mock），
+    // 保存回读拿归一后白名单（后端剔除非法条目后的生效集）
+    GetSettings.mockResolvedValue(baseSettings({
+      ipban: { threshold: 10, windowMinutes: 10, durationMinutes: 5, maxBanDurationMinutes: 60, whitelist: ['10.0.0.0/8'] }
+    }))
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    const rows = wrapper.findAll('.ipban-whitelist-row')
+    expect(rows.length).toBe(1)
+    expect(rows[0].find('input').element.value).toBe('10.0.0.0/8')
   })
 
   it('恢复默认回填四项默认值（不触发保存）', async () => {

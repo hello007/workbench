@@ -216,14 +216,16 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 踢出指定浏览器连接（桌面明细面板处置入口，连接管控任务）：void 返回 null
   // 安全 no-op（命中即断开对端连接；错误经 {__error__, __code__} 描述符注入）
   KickConnection: null,
-  // 来源 IP 自动封禁（连接管控五期，桌面明细面板「自动封禁」区块）：形状对齐
-  // model.IPBanStatus（ip/bannedAt/expiresAt unix 秒/failCount/expired bool）。
-  // 默认空列表 = 无封禁记录空态（区块显「暂无自动封禁记录」），用例按需 override；
-  // UnbanIP void 返回 null 安全 no-op（幂等，错误经 {__error__, __code__} 描述符
-  // 注入）。后端对浏览器通道经 RPCHiddenMethods 屏蔽 ListIPBans（他人 IP 明细
-  // 仅走桌面出口，隐私红线），真实浏览器链路加载面由 isBrowserChannel 跳过
+  // 来源 IP 封禁（连接管控五期自动 + 七期手动，桌面明细面板「IP 封禁」区块）：
+  // 形状对齐 model.IPBanStatus（ip/bannedAt/expiresAt unix 秒/failCount/strike/
+  // expired bool/source manual|auto）。默认空列表 = 无封禁记录空态（区块显
+  // 「暂无封禁记录」），用例按需 override；UnbanIP/BanIP void 返回 null 安全
+  // no-op（UnbanIP 幂等；BanIP 校验拒绝经 {__error__, __code__} 描述符注入）。
+  // 后端对浏览器通道经 RPCHiddenMethods 屏蔽 ListIPBans（他人 IP 明细仅走桌面
+  // 出口，隐私红线），真实浏览器链路加载面由 isBrowserChannel 跳过
   ListIPBans: [],
   UnbanIP: null,
+  BanIP: null,
   // 审计历史（连接管控三期，桌面审计历史弹窗）：形状对齐 service.AuditQueryResult
   // （外层 Total/Records 为 Go 导出字段直序列化大写驼峰；records 内为 json 小写
   // tag：ts/event/tokenId/name/remoteAddr/userAgent/connId/actorSource/
@@ -442,7 +444,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
   SaveSettings: null,
 
-  // IP 自动封禁参数保存（连接管控六期「保存+生效」单点，四参 void）：null 安全 no-op
+  // IP 封禁参数与白名单保存（连接管控六期「保存+生效」单点；七期扩五参白名单
+  // 列表）：void 返回 null 安全 no-op
   SetIPBanConfig: null,
 
   // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----

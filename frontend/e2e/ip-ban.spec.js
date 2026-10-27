@@ -12,7 +12,7 @@
  */
 import { test, expect, emitWailsEvent } from './fixtures'
 
-/** 封禁条目形状（对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/failCount/strike/expired） */
+/** 封禁条目形状（对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/failCount/strike/expired/source） */
 const banEntry = (over = {}) => ({
   ip: '203.0.113.7',
   bannedAt: Math.floor(Date.now() / 1000) - 60,
@@ -20,6 +20,7 @@ const banEntry = (over = {}) => ({
   failCount: 10,
   strike: 1,
   expired: false,
+  source: 'auto',
   ...over
 })
 
@@ -41,7 +42,7 @@ test.describe('IP 自动封禁（连接管控五期）', () => {
     await indicator.click()
     const panel = page.locator('.devices-panel')
     await expect(panel).toBeVisible()
-    await expect(panel).toContainText('自动封禁')
+    await expect(panel).toContainText('IP 封禁')
 
     const rows = panel.locator('.devices-ban-row')
     await expect(rows).toHaveCount(2)
@@ -76,5 +77,34 @@ test.describe('IP 自动封禁（连接管控五期）', () => {
     await expect(toast).toBeVisible()
     await expect(toast).toContainText('192.0.2.66')
     await expect(toast).toContainText('临时封禁至')
+  })
+
+  // 连接管控七期：手动封禁链路（桌面通道入口 → BanIPDialog 填表 → BanIP 调用）。
+  // isDesktopChannel 由桌面连接事件锁定（浏览器通道入口隐藏），先派发
+  // webserve-connections:changed 再点头部按钮
+  test('手动封禁 IP：头部按钮 → 弹窗永久档提交 → BanIP 调用断言', async ({ page }) => {
+    await page.goto('/')
+    // 先等指示可见（ActivityBar 已挂载、ListIPBans 已加载），再派发桌面连接事件
+    // 锁 isDesktopChannel——事件一次性派发，早于 EventsOn 注册会永久丢失
+    const indicator = page.locator('.activity-bar-devices')
+    await expect(indicator).toBeVisible()
+    await emitWailsEvent(page, 'webserve-connections:changed', [
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await indicator.click()
+    const panel = page.locator('.devices-panel')
+    await expect(panel).toBeVisible()
+
+    await panel.locator('.devices-ban-add').click()
+    const dialog = page.locator('.ban-ip-dialog')
+    await expect(dialog).toBeVisible()
+    // 默认永久档：仅填 IP 即提交（reason 可选留空）；el-input 自定义 class 挂组件
+    // 根 div，原生 input 为其子元素（settings-token.spec 先例同款选择器形态）
+    await dialog.locator('.ban-ip-input input').fill('192.0.2.10')
+    await dialog.locator('button', { hasText: '封禁' }).click()
+    await expect(
+      page.evaluate(() => window.__wailsCalls.filter((c) => c.method === 'BanIP'))
+    ).resolves.toEqual([{ method: 'BanIP', args: ['192.0.2.10', 0, ''] }])
+    await expect(dialog).toBeHidden()
   })
 })

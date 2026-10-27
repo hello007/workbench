@@ -30,10 +30,17 @@ const (
 
 // ipBanEntry 单个来源 IP 的失败计数与封禁状态（map 值，仅 IPBanService.mu 锁内
 // 可变）。failures 为滑动窗口内的失败时间戳队列（头部为最早，剪枝保序）；
-// bannedAt 为最近一次自动封禁时刻（零值 = 从未触发封禁，仅失败计数的条目）；
-// lastFailCount 冻结触发封禁时的窗口计数（封禁期间失败不累计，供审计与列表展示）；
-// strikes 为累计触发封禁次数（六期递增封禁：认证成功清失败计数不清此值，解封/
-// ClearAll/重启归零——递增记忆只在显式重置或进程生命周期内保留）。
+// bannedAt 为最近一次封禁时刻（零值 = 从未触发封禁，仅失败计数的条目）；
+// lastFailCount 冻结触发封禁时的窗口计数（封禁期间失败不累计，供审计与列表
+// 展示；手动封禁清零——无自动触发语境）；strikes 为累计触发自动封禁次数（六期
+// 递增封禁：认证成功清失败计数不清此值，解封/ClearAll/重启归零——递增记忆只在
+// 显式重置或进程生命周期内保留）。
+//
+// 七期手动封禁扩展四字段（自动路径恒零值不写）：source 标记条目来源（manual/
+// auto，决定 List 徽标分流与持久化资格——仅 manual 落盘）；reason/actorSource/
+// actorTokenID 为手动封禁的备注与操作者归因快照（持久化复现与重启载入保真，
+// 自动封禁的同类信息仅随审计行落盘不驻留条目）。手动封禁覆盖条目时四字段整体
+// 刷新（对齐四期「重复封禁 = 刷新参数」），failures/strikes 不动。
 type ipBanEntry struct {
 	ip            string
 	failures      []time.Time
@@ -41,6 +48,24 @@ type ipBanEntry struct {
 	bannedUntil   time.Time
 	lastFailCount int
 	strikes       int
+	source        string
+	reason        string
+	actorSource   string
+	actorTokenID  string
+}
+
+// banActive 封禁是否生效中（判定谓词单点，调用方须持 mu）：bannedAt 非零且
+// 未到期。bannedUntil 零值 = 永久封禁（七期手动封禁 expiresAt=0 形态，无到期
+// 时刻恒生效，仅 UnbanIP 可解除）；自动封禁恒有非零 bannedUntil，零值分支对
+// 其不可达（既有语义零回归）。
+func (e *ipBanEntry) banActive(now time.Time) bool {
+	if e.bannedAt.IsZero() {
+		return false
+	}
+	if e.bannedUntil.IsZero() {
+		return true
+	}
+	return now.Before(e.bannedUntil)
 }
 
 // IPBanService 浏览器访问通道的来源 IP 自动封禁服务（连接管控五期）：认证失败
@@ -67,9 +92,20 @@ type IPBanService struct {
 	window         time.Duration
 	duration       time.Duration
 	maxBanDuration time.Duration
-	nowFn          func() time.Time
-	audit          *AuditLogger            // 审计出口（可 nil：未注入时静默跳过，旁路观测面）
-	onBanned       func(model.IPBanStatus) // 自动封禁触发回调（可 nil：未注入不通知）
+	// whitelistNets 可信网段白名单（七期）：ApplyConfig 锁内对设置段白名单逐条
+	// 预解析为 *net.IPNet 整体替换——判定热路径（每次认证失败的 RecordFailure
+	// 与 RejectMessage）零重复解析。豁免判定单点 isWhitelistedIP（回环收编），
+	// 三处消费：RecordFailure 不计数、RejectMessage 追溯放行、Ban 拒绝封禁。
+	whitelistNets []*net.IPNet
+	// 手动封禁持久化（七期）：bansPath 为 data/ip_bans.json（SetBansPath 注入，
+	// 未注入为纯内存模式——既有构造路径零行为变化）；manualVersion 为手动条目
+	// 变更代际（Ban 写入/UnbanIP 删除/载入/ClearAll 均在 mu 锁内递增），落盘
+	// 「快照-IO-复核」流程以此检测 IO 期间的并发变更（见 persistManualBans）。
+	bansPath      string
+	manualVersion int
+	nowFn         func() time.Time
+	audit         *AuditLogger            // 审计出口（可 nil：未注入时静默跳过，旁路观测面）
+	onBanned      func(model.IPBanStatus) // 自动封禁触发回调（可 nil：未注入不通知）
 }
 
 // NewIPBanService 构造 IP 自动封禁服务。nowFn 为时间源（nil 时默认 time.Now；
@@ -90,13 +126,17 @@ func NewIPBanService(nowFn func() time.Time) *IPBanService {
 	}
 }
 
-// ApplyConfig 热更四参数（连接管控六期：设置保存链「保存+生效」单点的生效步）。
-// 入参为归一后的设置段值（调用方经 NormalizeIPBanSettings 保证；本方法不重复
-// clamp——双口径收敛点在 model 层单点）。mu 锁内整体替换，原子切换：并发判定
-// 要么看到全套旧参数要么全套新参数，无半套中间态。生效语义（六期定稿）：仅
-// 面向未来——生效中封禁的 bannedUntil 不变（已执行动作不追溯，改小时长不提前
-// 释放、改大不延长），在途失败计数不清零（调参不意外赦免攻击者）；threshold
-// 改小后存量计数自然满足，下次失败即触发，无主动扫描。
+// ApplyConfig 热更四参数与白名单（连接管控六期：设置保存链「保存+生效」单点的
+// 生效步；七期扩白名单段）。入参为归一后的设置段值（调用方经 NormalizeIPBanSettings
+// 保证；本方法不重复 clamp——双口径收敛点在 model 层单点）。mu 锁内整体替换，
+// 原子切换：并发判定要么看到全套旧参数要么全套新参数，无半套中间态。白名单
+// 逐条预解析为 *net.IPNet（service/ip_ban_whitelist.go parseIPBanWhitelistEntry，
+// 裸 IP 自动补 /32 //128；非法条目 model 层已剔除，此处再拦一手防御直灌形态），
+// 整体替换后判定热路径零重复解析。生效语义（六期定稿）：仅面向未来——生效中
+// 封禁的 bannedUntil 不变（已执行动作不追溯，改小时长不提前释放、改大不延长），
+// 在途失败计数不清零（调参不意外赦免攻击者）；threshold 改小后存量计数自然满足，
+// 下次失败即触发，无主动扫描。白名单为唯一例外（七期定稿「豁免 = 语义修正」）：
+// 命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即恢复拒连）。
 func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,6 +144,13 @@ func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.window = time.Duration(cfg.WindowMinutes) * time.Minute
 	s.duration = time.Duration(cfg.DurationMinutes) * time.Minute
 	s.maxBanDuration = time.Duration(cfg.MaxBanDurationMinutes) * time.Minute
+	nets := make([]*net.IPNet, 0, len(cfg.Whitelist))
+	for _, item := range cfg.Whitelist {
+		if n, ok := parseIPBanWhitelistEntry(item); ok {
+			nets = append(nets, n)
+		}
+	}
+	s.whitelistNets = nets
 }
 
 // SetAudit 注入审计出口（ip_ban/ip_unban 事件落盘）。
@@ -128,9 +175,11 @@ func (s *IPBanService) SetOnBanned(fn func(model.IPBanStatus)) {
 }
 
 // RecordFailure 登记一次来源 IP 的认证失败：
-//   - 回环地址（127.0.0.1/::1，归一后判定）与空串直接忽略——本机访问不参与
-//     自动封禁（桌面同开场景下本机误配不触发自锁）；
-//   - 封禁生效中（未到期）不累计（封禁期间失败不再计数）；
+//   - 空串直接忽略；回环地址与白名单网段命中（七期豁免判定单点 isWhitelistedIP
+//     收编回环既有口径）完全忽略——不创建条目不进失败队列（NAT 共享出口等可信
+//     来源不参与自动封禁，桌面同开场景下本机误配不触发自锁）；
+//   - 封禁生效中（未到期；永久封禁恒生效，七期 banActive 单点判定）不累计
+//     （封禁期间失败不再计数）；
 //   - 剪枝失效时间戳后追加本次失败；窗口内失败数达到阈值即触发自动封禁
 //     （strikes 递增 + 刷新 bannedAt/bannedUntil/lastFailCount，封禁时长按
 //     递增档位计算，写 ip_ban 审计行 actorSource=system）。
@@ -146,17 +195,23 @@ func (s *IPBanService) SetOnBanned(fn func(model.IPBanStatus)) {
 // 服务内部经 normalizeIP 归一。
 func (s *IPBanService) RecordFailure(ip string) {
 	ip = normalizeIP(ip)
-	if ip == "" || isLoopbackIP(ip) {
+	if ip == "" {
 		return
 	}
 	s.mu.Lock()
+	// 白名单豁免单点（七期）：nets 随 mu 锁内读取，豁免来源不建条目不计数
+	//（对齐回环既有「完全忽略」语义，CIDR 命中网段同口径）
+	if isWhitelistedIP(ip, s.whitelistNets) {
+		s.mu.Unlock()
+		return
+	}
 	now := s.nowFn()
 	entry, ok := s.entries[ip]
 	if !ok {
 		entry = &ipBanEntry{ip: ip}
 		s.entries[ip] = entry
 	}
-	if !entry.bannedAt.IsZero() && now.Before(entry.bannedUntil) {
+	if entry.banActive(now) {
 		s.mu.Unlock()
 		return
 	}
@@ -177,6 +232,7 @@ func (s *IPBanService) RecordFailure(ip string) {
 	var status model.IPBanStatus
 	if len(entry.failures) >= s.threshold {
 		entry.strikes++
+		entry.source = model.IPBanSourceAuto
 		entry.bannedAt = now
 		banDuration := escalateBanDuration(s.duration, s.maxBanDuration, entry.strikes)
 		entry.bannedUntil = now.Add(banDuration)
@@ -238,9 +294,11 @@ func (s *IPBanService) RecordSuccess(ip string) {
 }
 
 // RejectMessage IP 封禁拒绝消息（后续装配层注入两认证点的生产实现原型）：来源
-// IP 命中生效中的自动封禁时返回专用拒绝消息（含自动恢复时刻，与普通 401「请
-// 携带访问令牌」可区分），未封禁/已过期（懒过期放行，记录不删）返回空串。
-// ip 为空串直接放行。
+// IP 命中生效中的封禁时返回专用拒绝消息（含自动恢复时刻或「永久封禁」标识，
+// 与普通 401「请携带访问令牌」可区分），未封禁/已过期（懒过期放行，记录不删）
+// 返回空串。白名单命中（七期，豁免判定单点含回环）恒放行——豁免为语义修正，
+// 追溯作用于生效中封禁（在途记录不删，白名单移除且未过期即恢复拒连）。ip 为
+// 空串直接放行。
 func (s *IPBanService) RejectMessage(ip string) string {
 	ip = normalizeIP(ip)
 	if ip == "" {
@@ -248,9 +306,15 @@ func (s *IPBanService) RejectMessage(ip string) string {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.entries[ip]
-	if !ok || entry.bannedAt.IsZero() || !s.nowFn().Before(entry.bannedUntil) {
+	if isWhitelistedIP(ip, s.whitelistNets) {
 		return ""
+	}
+	entry, ok := s.entries[ip]
+	if !ok || !entry.banActive(s.nowFn()) {
+		return ""
+	}
+	if entry.bannedUntil.IsZero() {
+		return "该来源 IP 已被封禁（永久封禁），请联系管理员解封"
 	}
 	return "该来源 IP 已被临时封禁，至 " + entry.bannedUntil.Format(banExpiryMessageFormat) + " 自动恢复"
 }
@@ -264,31 +328,55 @@ func (s *IPBanService) RejectMessage(ip string) string {
 // 归因透传 actorSource/actorTokenID（桌面路径 desktop/空，浏览器 RPC 路径经
 // rpcAuditTarget 装饰捕获调用者令牌 ID 后 rpc/记录 ID，对齐 WebTokenService.Unban
 // 先例）。
+//
+// 持久化联动（七期）：解封删除手动条目后触发落盘更新（data/ip_bans.json 移除
+// 该记录，防重启后手动封禁复活）；落盘失败回滚内存（重插条目，解封未生效）返回
+// false 且不写审计。自动条目解封同样触发落盘（快照只含手动条目，本次写入即为
+// 重申当前手动集合——无手动条目时写空列表，无害幂等）。未注入 bansPath（纯内存
+// 模式）时落盘 no-op，既有语义零变化。
 func (s *IPBanService) UnbanIP(ip, actorSource, actorTokenID string) bool {
 	ip = normalizeIP(ip)
 	if ip == "" {
 		return false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	entry, ok := s.entries[ip]
 	if !ok {
+		s.mu.Unlock()
 		return false
 	}
 	delete(s.entries, ip)
 	if entry.bannedAt.IsZero() {
+		// 仅有失败计数的条目：清计数不构成解封，不落盘不审计
+		s.mu.Unlock()
 		return false
 	}
-	if s.audit != nil {
-		s.audit.LogIPUnban(IPBanAudit{IP: ip, ActorSource: actorSource, ActorTokenID: actorTokenID})
+	audit := s.audit
+	s.manualVersion++
+	s.mu.Unlock()
+
+	if err := s.persistManualBans(); err != nil {
+		// 落盘失败回滚：重插删除前的条目快照（仅当键仍空缺——并发 Ban 已重建
+		// 同名条目时不覆盖新值）；解封未生效不写审计
+		s.mu.Lock()
+		if _, exists := s.entries[ip]; !exists {
+			s.entries[ip] = entry
+		}
+		s.mu.Unlock()
+		return false
+	}
+	if audit != nil {
+		audit.LogIPUnban(IPBanAudit{IP: ip, ActorSource: actorSource, ActorTokenID: actorTokenID})
 	}
 	return true
 }
 
 // List 返回全部 IP 封禁记录（含已到期未清理的——列表「已过期」态展示数据源，
 // 拒连判定的懒过期语义以 RejectMessage 为准），按封禁时间降序（最新在前）。
-// 仅含曾触发封禁的条目（纯失败计数不进列表）。返回切片为内部数据拷贝，调用方
-// 修改不影响服务状态；空列表返回空切片（非 nil）。
+// 仅含曾触发封禁的条目（纯失败计数不进列表）；Source 字段透出条目来源（七期：
+// manual 管理员手动下发 / auto 认证失败自动触发，前端徽标分流）。永久封禁
+// （七期手动 expiresAt=0 形态）ExpiresAt 透出 0、Expired 恒 false。返回切片为
+// 内部数据拷贝，调用方修改不影响服务状态；空列表返回空切片（非 nil）。
 func (s *IPBanService) List() []model.IPBanStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -298,13 +386,20 @@ func (s *IPBanService) List() []model.IPBanStatus {
 		if e.bannedAt.IsZero() {
 			continue
 		}
+		expiresAt := int64(0)
+		expired := false
+		if !e.bannedUntil.IsZero() {
+			expiresAt = e.bannedUntil.Unix()
+			expired = !now.Before(e.bannedUntil)
+		}
 		out = append(out, model.IPBanStatus{
 			IP:        e.ip,
 			BannedAt:  e.bannedAt.Unix(),
-			ExpiresAt: e.bannedUntil.Unix(),
+			ExpiresAt: expiresAt,
 			FailCount: e.lastFailCount,
 			Strike:    e.strikes,
-			Expired:   !now.Before(e.bannedUntil),
+			Source:    e.source,
+			Expired:   expired,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].BannedAt > out[j].BannedAt })
@@ -314,11 +409,15 @@ func (s *IPBanService) List() []model.IPBanStatus {
 // ClearAll 清空全部来源 IP 的失败计数与封禁记录（含递增档位 strikes，六期——
 // 重建 map 天然全清；令牌轮换/撤销联动调用：轮换产生的旧 cookie 失败潮防误伤
 // 叠加）。不写审计——联动清零为预防性动作非处置，与撤销令牌联动清理封禁记录
-// 的既有口径一致。
+// 的既有口径一致。手动条目一并清除但不触发落盘（七期：仅手动封禁/解封触发
+// 保存的定稿口径——落盘文件保留手动记录，重启后手动封禁恢复生效，与「ClearAll
+// 为防误伤的内存面预防动作」定位一致）；manualVersion 递增使在途落盘的快照
+// 复核失效（防「快照含已清条目」的旧快照覆盖文件——见 persistManualBans）。
 func (s *IPBanService) ClearAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries = make(map[string]*ipBanEntry)
+	s.manualVersion++
 }
 
 // auditIPBanLocked 发 ip_ban 审计行（调用方须持 mu；audit 为 nil 时静默跳过）。

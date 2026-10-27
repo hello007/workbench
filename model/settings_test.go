@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -303,22 +304,26 @@ func TestNormalizeAssetThumbsSettings(t *testing.T) {
 }
 
 // TestAppSettings_EnsureIPBanDefaults 覆盖 IP 封禁参数段默认值与越界收敛（连接
-// 管控六期）：段缺失补四项全默认、零值回默认、越界 clamp、界内保留、封顶不低于
-// 基础时长的组合收敛。
+// 管控六期；七期扩白名单归一）：段缺失补四项全默认 + 白名单空切片、零值回默认、
+// 越界 clamp、界内保留、封顶不低于基础时长的组合收敛、白名单非法条目剔除。
+// 结构含切片字段后不可用 == 比较，统一以 reflect.DeepEqual 断言。
 func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 	t.Run("段缺失补四项全默认", func(t *testing.T) {
 		s := &AppSettings{}
 		s.EnsureIPBanDefaults()
 		want := DefaultIPBanSettings()
-		if s.IPBan == nil || *s.IPBan != want {
+		if s.IPBan == nil || !reflect.DeepEqual(*s.IPBan, want) {
 			t.Fatalf("段缺失应补默认值, got %+v", s.IPBan)
+		}
+		if s.IPBan.Whitelist == nil || len(s.IPBan.Whitelist) != 0 {
+			t.Errorf("白名单默认应为非 nil 空切片, got %#v", s.IPBan.Whitelist)
 		}
 	})
 
 	t.Run("零值字段回默认", func(t *testing.T) {
 		s := &AppSettings{IPBan: &IPBanSettings{}}
 		s.EnsureIPBanDefaults()
-		if *s.IPBan != DefaultIPBanSettings() {
+		if !reflect.DeepEqual(*s.IPBan, DefaultIPBanSettings()) {
 			t.Errorf("零值字段应回默认, got %+v", s.IPBan)
 		}
 	})
@@ -329,17 +334,27 @@ func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 		want IPBanSettings
 	}{
 		{name: "越界收敛", in: IPBanSettings{Threshold: 1, WindowMinutes: 500, DurationMinutes: 999, MaxBanDurationMinutes: 1},
-			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes}},
+			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes, Whitelist: []string{}}},
 		{name: "界内取值原样保留", in: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120},
-			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120}},
+			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120, Whitelist: []string{}}},
 		{name: "封顶低于基础时长抬到基础时长", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 5},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60, Whitelist: []string{}}},
+		{name: "白名单合法条目保留非法剔除", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+			Whitelist: []string{"192.168.1.0/24", " 裸IP不是合法条目 ", "10.0.0.5", "2001:db8::/32", "", "  "}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+				Whitelist: []string{"192.168.1.0/24", "10.0.0.5", "2001:db8::/32"}}},
+		{name: "白名单裸IP保留原字符串", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+			Whitelist: []string{"203.0.113.9", "2001:db8::1"}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+				Whitelist: []string{"203.0.113.9", "2001:db8::1"}}},
+		{name: "白名单nil收敛空切片", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, Whitelist: []string{}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := &AppSettings{IPBan: &c.in}
 			s.EnsureIPBanDefaults()
-			if *s.IPBan != c.want {
+			if !reflect.DeepEqual(*s.IPBan, c.want) {
 				t.Errorf("clamp 结果不符, got %+v, want %+v", *s.IPBan, c.want)
 			}
 		})
@@ -349,16 +364,20 @@ func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 // TestNormalizeIPBanSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝
 // normalize 后返回且不改写入参（对齐 NormalizeAssetThumbsSettings 先例）。
 func TestNormalizeIPBanSettings(t *testing.T) {
-	if got := NormalizeIPBanSettings(nil); got != DefaultIPBanSettings() {
+	if got := NormalizeIPBanSettings(nil); !reflect.DeepEqual(got, DefaultIPBanSettings()) {
 		t.Fatalf("nil 应返回默认值, got %+v", got)
 	}
-	in := &IPBanSettings{Threshold: 1, WindowMinutes: 0, DurationMinutes: 60, MaxBanDurationMinutes: 5}
+	in := &IPBanSettings{Threshold: 1, WindowMinutes: 0, DurationMinutes: 60, MaxBanDurationMinutes: 5,
+		Whitelist: []string{"192.168.1.0/24", "非法条目"}}
 	got := NormalizeIPBanSettings(in)
 	if got.Threshold != MinIPBanThreshold || got.WindowMinutes != DefaultIPBanWindowMinutes ||
 		got.DurationMinutes != MaxIPBanDurationMinutes || got.MaxBanDurationMinutes != MaxIPBanDurationMinutes {
 		t.Fatalf("归一化结果不符, got %+v", got)
 	}
-	if in.Threshold != 1 || in.WindowMinutes != 0 {
+	if len(got.Whitelist) != 1 || got.Whitelist[0] != "192.168.1.0/24" {
+		t.Errorf("白名单应剔除非法条目, got %#v", got.Whitelist)
+	}
+	if in.Threshold != 1 || in.WindowMinutes != 0 || len(in.Whitelist) != 2 {
 		t.Fatalf("入参不应被原地修改, got %+v", in)
 	}
 }

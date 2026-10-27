@@ -308,10 +308,10 @@ func (a *App) auditConnKick(actorSource, actorTokenID string, detail server.Conn
 // rpcAuditTarget 浏览器 RPC 面的 per-request 装饰 target（连接管控三期 actor
 // 归因）：embed *App 提升全部导出方法（RPC 白名单与桌面绑定面形态一致，其余
 // 方法零分叉），仅 override 带操作者归因的管控动作方法——KickConnection（三期）、
-// BanWebToken/UnbanWebToken（四期）与 UnbanIP（五期）：闭包捕获本次请求的调用者
-// 令牌 ID（token 中间件注入 ctx，装配回调按请求构造本值），委托未导出 *As 变体
-// 完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖 main）；未导出字段/
-// 方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
+// BanWebToken/UnbanWebToken（四期）、UnbanIP（五期）与 BanIP（七期）：闭包捕获
+// 本次请求的调用者令牌 ID（token 中间件注入 ctx，装配回调按请求构造本值），委托
+// 未导出 *As 变体完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖
+// main）；未导出字段/方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
 type rpcAuditTarget struct {
 	*App
 	actorTokenID string
@@ -331,6 +331,10 @@ func (t rpcAuditTarget) UnbanWebToken(id string) error {
 
 func (t rpcAuditTarget) UnbanIP(ip string) error {
 	return t.unbanIPAs(ip, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) BanIP(ip string, expiresAt int64, reason string) error {
+	return t.banIPAs(ip, expiresAt, reason, service.AuditActorRPC, t.actorTokenID)
 }
 
 // rpcTargetForActor 装配回调（server.WebOptions.RPCTargetForActor 消费形态）：
@@ -473,6 +477,30 @@ func (a *App) unbanIPAs(ip, actorSource, actorTokenID string) error {
 	return nil
 }
 
+// BanIP 手动封禁指定来源 IP（连接管控七期，桌面路径，对齐 BanWebToken 四期
+// 三参形态）：即时生效——写入与自动封禁同一 entries map，HTTP/WS 两认证点
+// IPBanCheck 判定闭包零改动自动覆盖，新连接 401 携带含解封时刻（或「永久封禁」）
+// 的专用消息。expiresAt 为到期 unix 秒（0 = 永久封禁须手动解封，非 0 须晚于
+// 当前时间）；重复封禁 = 刷新封禁参数（覆盖在途自动封禁，strikes 不变）。
+// 校验拒绝以 AppError 错误码下发：E_IP_BAN_IP_REQUIRED（IP 空）、
+// E_TOKEN_EXPIRY_INVALID（过期时刻不晚于当前）、E_IP_BAN_WHITELISTED（白名单/
+// 回环 IP 禁封，warning 引导先移除白名单条目）。手动封禁落盘 data/ip_bans.json
+// 成功后才写 ip_ban 审计行（actorSource=desktop）；落盘失败内存回滚返回错误。
+// 浏览器 RPC 路径经 rpcAuditTarget 装饰 override 捕获调用者令牌 ID 后同走
+// banIPAs（actor 归因，对齐 banWebTokenAs 四期先例）。
+func (a *App) BanIP(ip string, expiresAt int64, reason string) error {
+	return a.banIPAs(ip, expiresAt, reason, service.AuditActorDesktop, "")
+}
+
+// banIPAs 手动封禁动作统一实现（导出 BanIP 与 RPC 装饰 override 的共用体，actor
+// 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与 RPC 反射面。
+func (a *App) banIPAs(ip string, expiresAt int64, reason, actorSource, actorTokenID string) error {
+	if a.ipBanSvc == nil {
+		return fmt.Errorf("IP 封禁服务未装配")
+	}
+	return a.ipBanSvc.Ban(ip, expiresAt, reason, actorSource, actorTokenID)
+}
+
 // ListIPBans 列出全部来源 IP 自动封禁记录（含已到期未清理的，按封禁时间降序；
 // 纯内存态重启清零）。
 //
@@ -489,26 +517,30 @@ func (a *App) ListIPBans() []model.IPBanStatus {
 	return a.ipBanSvc.List()
 }
 
-// SetIPBanConfig 保存 IP 自动封禁参数并即时生效（连接管控六期，设置页「自动封禁」
-// 小节保存入口）：normalize 归一（零值回退默认、越界 clamp、封顶不低于基础时长）
-// → 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」显式单点，对齐
-// SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用 SaveSettings
-// 隐式联动）。
+// SetIPBanConfig 保存 IP 封禁参数与可信网段白名单并即时生效（连接管控六期，
+// 设置页「自动封禁」小节保存入口；七期扩第五参 whitelist）：normalize 归一
+// （零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法 CIDR/裸 IP 条目
+// 剔除）→ 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」显式单点，
+// 对齐 SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用
+// SaveSettings 隐式联动）。
 //
 // 生效语义（六期定稿）：仅面向未来——生效中封禁的到期时刻不追溯调整（改小时长
 // 不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免）；threshold 改小
-// 后存量计数自然满足，下次失败即触发。参数非法无失败分支：clamp 层静默收敛（前端
-// el-input-number 已挡边界，后端 clamp 兜底手改配置形态）。
+// 后存量计数自然满足，下次失败即触发。白名单为唯一例外（七期定稿「豁免 = 语义
+// 修正」）：命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即
+// 恢复拒连）。参数非法无失败分支：clamp 层静默收敛、白名单非法条目剔除（前端
+// el-input-number 已挡边界、CIDR 行级格式校验已挡格式，后端兜底手改配置形态）。
 //
 // 指针段复制纪律：基底设置的 WebServe/Assets 指针段一律私有拷贝后替换 IPBan 段，
 // 防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态（SetWebServeConfig
 // 先例同款）。
-func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes int) error {
+func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes int, whitelist []string) error {
 	normalized := model.NormalizeIPBanSettings(&model.IPBanSettings{
 		Threshold:             threshold,
 		WindowMinutes:         windowMinutes,
 		DurationMinutes:       durationMinutes,
 		MaxBanDurationMinutes: maxBanDurationMinutes,
+		Whitelist:             whitelist,
 	})
 
 	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）

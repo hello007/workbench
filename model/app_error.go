@@ -138,6 +138,15 @@ const (
 	// 凭据失效，封禁无对象，引导刷新列表。
 	ErrCodeTokenRevoked = "E_TOKEN_REVOKED"
 
+	// 浏览器访问通道 IP 封禁域（连接管控七期手动封禁，warning 均为预期拒绝，
+	// 前端 error.js WARNING_CODES 同步分流）：
+	// ErrCodeIPBanWhitelisted 封禁白名单/回环 IP 被拒：白名单（含回环豁免收编）
+	// 为可信来源语义面，封禁之与豁免矛盾，引导从设置页白名单移除后再封。
+	ErrCodeIPBanWhitelisted = "E_IP_BAN_WHITELISTED"
+	// ErrCodeIPBanIPRequired 手动封禁的来源 IP 为空（必填校验拒绝，对齐
+	// E_TOKEN_NAME_REQUIRED 先例——前端表单已挡，后端防御保留）。
+	ErrCodeIPBanIPRequired = "E_IP_BAN_IP_REQUIRED"
+
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表
 	// 常量，前端 src/transport/rpc.js 按 code 透传、error.js ErrorCode 表按值

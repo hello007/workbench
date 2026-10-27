@@ -483,10 +483,11 @@
               <el-button size="small" @click="auditHistoryVisible = true">查看审计日志</el-button>
             </div>
           </div>
-          <!-- 自动封禁参数（连接管控六期）：认证失败频次达标自动封禁来源 IP 的
-               四参数（阈值/窗口/基础时长/递增封顶），保存走 SetIPBanConfig 专用
-               单点（保存+即时生效，对齐 SetWebServeConfig 先例）；纯桌面面入口
-               同审计日志（参数非隐私但与通道治理同语境，浏览器通道设置页隐藏） -->
+          <!-- 自动封禁参数（连接管控六期）+ 可信网段白名单（七期）：认证失败频次
+               达标自动封禁来源 IP 的四参数（阈值/窗口/基础时长/递增封顶）与 CIDR
+               白名单列表，保存同走 SetIPBanConfig 专用单点五参（保存+即时生效，
+               对齐 SetWebServeConfig 先例）；纯桌面面入口同审计日志（参数非隐私
+               但与通道治理同语境，浏览器通道设置页隐藏） -->
           <div v-if="!browserChannel" class="settings-item settings-item--column">
             <div class="settings-item-info">
               <div class="settings-item-label">自动封禁</div>
@@ -550,6 +551,32 @@
                 <span class="ipban-field-hint">分钟（{{ IP_BAN_MAX_DURATION_MIN }}-{{ IP_BAN_MAX_DURATION_MAX }}，不低于基础时长）</span>
               </div>
             </div>
+            <!-- 可信网段白名单（连接管控七期）：CIDR 串或裸 IP 列表，命中来源认证
+                 失败完全不计数不封禁（NAT 共享出口等可信场景豁免），生效中封禁
+                 追溯放行。动态行增删 + 行级格式校验（非法行标红不阻断其他行）；
+                 保存随下方「保存并生效」同按钮提交（SetIPBanConfig 第五参），后端
+                 normalize 剔除非法条目并回读刷新 -->
+            <div class="ipban-whitelist">
+              <div class="ipban-whitelist-header">
+                <span class="ipban-field-label">可信网段白名单</span>
+                <el-button size="small" text @click="addWhitelistRow">添加网段</el-button>
+              </div>
+              <div class="ipban-whitelist-desc">命中的来源 IP 不参与自动封禁（如 NAT 共享出口）；支持 CIDR（10.0.0.0/8、2001:db8::/32）或裸 IP（自动按单机网段处理）。白名单条目即时豁免，含已生效封禁的追溯放行</div>
+              <div v-if="ipBanWhitelist.length" class="ipban-whitelist-rows">
+                <div v-for="(row, idx) in ipBanWhitelist" :key="idx" class="ipban-whitelist-row">
+                  <el-input
+                    v-model="row.value"
+                    size="small"
+                    placeholder="如 10.0.0.0/8 或 192.168.1.20"
+                    maxlength="50"
+                    :status="rowError(row) ? 'error' : ''"
+                  />
+                  <span v-if="rowError(row)" class="ipban-whitelist-row-error">{{ rowError(row) }}</span>
+                  <el-button size="small" text class="ipban-whitelist-remove" @click="removeWhitelistRow(idx)">删除</el-button>
+                </div>
+              </div>
+              <div v-else class="ipban-whitelist-empty">无可信网段——所有非回环来源均参与自动封禁计数</div>
+            </div>
             <div class="ipban-actions">
               <el-button size="small" text @click="resetIPBanDefaults">恢复默认</el-button>
               <el-button size="small" type="primary" :loading="savingIPBan" @click="saveIPBanConfig">保存并生效</el-button>
@@ -572,6 +599,7 @@ import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SetIPBanConfig, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
+import { validateWhitelistEntry } from '../utils/ipWhitelist'
 import { setToken } from '../transport/token'
 import { isBrowserChannel } from '../transport'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
@@ -719,34 +747,64 @@ const createdPlain = ref('')
 
 // 自动封禁参数（连接管控六期）：四参数表单（el-input-number clamp 与后端
 // model clamp 边界一致）+ 保存（SetIPBanConfig「保存+生效」专用单点）+ 恢复
-// 默认；初值经 loadWebServeConfig 的 GetSettings 回填（段缺失走默认）
+// 默认；初值经 loadWebServeConfig 的 GetSettings 回填（段缺失走默认）。
+// 可信网段白名单（七期）：{ value } 行对象数组（v-model 绑定须可变行内字段），
+// 保存时提取字符串列表提交（SetIPBanConfig 第五参），后端 normalize 剔除非法
+// 条目，保存后回读归一值刷新表单。
 const ipBanThreshold = ref(IP_BAN_DEFAULTS.threshold)
 const ipBanWindowMinutes = ref(IP_BAN_DEFAULTS.windowMinutes)
 const ipBanDurationMinutes = ref(IP_BAN_DEFAULTS.durationMinutes)
 const ipBanMaxBanDurationMinutes = ref(IP_BAN_DEFAULTS.maxBanDurationMinutes)
+const ipBanWhitelist = ref([])
 const savingIPBan = ref(false)
 
-/** 恢复默认：表单回填四项默认值（不落盘，保存动作显式提交） */
+/** 恢复默认：表单回填四项参数默认值并清空白名单（不落盘，保存动作显式提交） */
 function resetIPBanDefaults() {
   ipBanThreshold.value = IP_BAN_DEFAULTS.threshold
   ipBanWindowMinutes.value = IP_BAN_DEFAULTS.windowMinutes
   ipBanDurationMinutes.value = IP_BAN_DEFAULTS.durationMinutes
   ipBanMaxBanDurationMinutes.value = IP_BAN_DEFAULTS.maxBanDurationMinutes
+  ipBanWhitelist.value = []
+}
+
+/** 白名单行级格式校验（utils/ipWhitelist 单点，与后端 normalize 口径一致）；空行不报错（提交时剔除）。 */
+function rowError(row) {
+  const v = (row.value || '').trim()
+  if (!v) return ''
+  return validateWhitelistEntry(v)
+}
+
+function addWhitelistRow() {
+  ipBanWhitelist.value.push({ value: '' })
+}
+
+function removeWhitelistRow(idx) {
+  ipBanWhitelist.value.splice(idx, 1)
 }
 
 /**
- * 保存自动封禁参数（SetIPBanConfig 专用单点：持久化 + ApplyConfig 即时生效）。
- * 成功提示即时生效语义；失败经 handleError 分流（后端 clamp 静默收敛，无专属
- * 错误码，通用失败分支覆盖）。
+ * 保存自动封禁参数与可信网段白名单（SetIPBanConfig 专用单点：持久化 +
+ * ApplyConfig 即时生效）。存在格式非法行（非空且校验失败）时前置拦截——后端
+ * normalize 会静默剔除，前端显式报错优于无声丢弃；空行静默剔除。成功提示即时
+ * 生效语义；失败经 handleError 分流（后端 clamp 静默收敛，无专属错误码，通用
+ * 失败分支覆盖）。
  */
 async function saveIPBanConfig() {
+  if (ipBanWhitelist.value.some((row) => rowError(row))) {
+    ElMessage.warning('白名单存在格式非法的条目，请修正后再保存')
+    return
+  }
+  const whitelist = ipBanWhitelist.value
+    .map((row) => (row.value || '').trim())
+    .filter(Boolean)
   savingIPBan.value = true
   try {
     await SetIPBanConfig(
       ipBanThreshold.value,
       ipBanWindowMinutes.value,
       ipBanDurationMinutes.value,
-      ipBanMaxBanDurationMinutes.value
+      ipBanMaxBanDurationMinutes.value,
+      whitelist
     )
     ElMessage.success('自动封禁参数已保存并即时生效')
   } catch (e) {
@@ -754,7 +812,8 @@ async function saveIPBanConfig() {
   } finally {
     savingIPBan.value = false
   }
-  // 保存后回读归一值（封顶低于基础时长等组合在后端收敛，表单以生效值为准）
+  // 保存后回读归一值（封顶低于基础时长等组合在后端收敛，表单以生效值为准）；
+  // 白名单同样回读（非法条目被后端剔除，表单与生效集一致）
   try {
     const settings = await GetSettings()
     if (settings?.ipban) {
@@ -762,6 +821,8 @@ async function saveIPBanConfig() {
       ipBanWindowMinutes.value = settings.ipban.windowMinutes
       ipBanDurationMinutes.value = settings.ipban.durationMinutes
       ipBanMaxBanDurationMinutes.value = settings.ipban.maxBanDurationMinutes
+      const list = Array.isArray(settings.ipban.whitelist) ? settings.ipban.whitelist : []
+      ipBanWhitelist.value = list.map((item) => ({ value: item }))
     }
   } catch {
     // 回读失败保持当前值
@@ -1072,11 +1133,14 @@ async function loadWebServeConfig() {
     webTlsEnabled.value = !!settings?.webServe?.tls
     webTlsCertPath.value = settings?.webServe?.tlsCertPath || ''
     webTlsKeyPath.value = settings?.webServe?.tlsKeyPath || ''
-    // 自动封禁参数回填（连接管控六期）：段缺失（老配置）时保持默认值
+    // 自动封禁参数回填（连接管控六期）：段缺失（老配置）时保持默认值；
+    // 白名单列表回填（七期，段缺失/字段缺失降级空列表）
     ipBanThreshold.value = settings?.ipban?.threshold || IP_BAN_DEFAULTS.threshold
     ipBanWindowMinutes.value = settings?.ipban?.windowMinutes || IP_BAN_DEFAULTS.windowMinutes
     ipBanDurationMinutes.value = settings?.ipban?.durationMinutes || IP_BAN_DEFAULTS.durationMinutes
     ipBanMaxBanDurationMinutes.value = settings?.ipban?.maxBanDurationMinutes || IP_BAN_DEFAULTS.maxBanDurationMinutes
+    const wl = settings?.ipban?.whitelist
+    ipBanWhitelist.value = (Array.isArray(wl) ? wl : []).map((item) => ({ value: item }))
   } catch {
     // 保持当前值
   }
@@ -1688,6 +1752,63 @@ const onThemeChange = async () => {
   justify-content: flex-end;
   gap: 8px;
   width: 100%;
+}
+
+/* 可信网段白名单（连接管控七期）：头部（标签+添加钮）+ 说明 + 动态行列表 +
+ * 空态占位；行 = 输入（弹性）+ 行级错误（弹性）+ 删除钮，非法行输入框标红
+ * 不阻断其他行编辑 */
+.ipban-whitelist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+.ipban-whitelist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ipban-whitelist-header .ipban-field-label {
+  width: auto;
+}
+.ipban-whitelist-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary, var(--el-text-color-placeholder));
+}
+.ipban-whitelist-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.ipban-whitelist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.ipban-whitelist-row .el-input {
+  max-width: 280px;
+}
+.ipban-whitelist-row-error {
+  font-size: 11px;
+  color: var(--danger-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ipban-whitelist-remove {
+  flex-shrink: 0;
+}
+.ipban-whitelist-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-tertiary, var(--el-text-color-placeholder));
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
 }
 
 /* 分段切换 + 自定义地址输入横排（窄窗换行防挤压） */

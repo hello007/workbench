@@ -1,5 +1,10 @@
 package model
 
+import (
+	"net"
+	"strings"
+)
+
 // DefaultWebServeBindAddress 浏览器访问通道默认绑定地址（回环，仅本机浏览器可达）。
 // 远程访问须显式改绑（设置页确认或 --listen 命令行覆盖），改绑非回环地址会向
 // 局域网暴露整机文件、终端与 AI agent 能力，建议配合隧道使用。
@@ -145,15 +150,20 @@ const (
 )
 
 // IPBanSettings IP 认证失败自动封禁参数段（连接管控六期，settings.json 的 ipban
-// 段）。指针形态区分「老配置缺失（→ 默认）」与显式取值（对齐 WebServe/Assets
-// 先例）。MaxBanDurationMinutes 为递增封禁的封顶上限（反复触发封越久，见
-// service.IPBanService 递增公式），normalize 时收敛不低于 DurationMinutes（基础
-// 时长超过封顶的组合无意义）。
+// 段；七期扩可信网段白名单）。指针形态区分「老配置缺失（→ 默认）」与显式取值
+// （对齐 WebServe/Assets 先例）。MaxBanDurationMinutes 为递增封禁的封顶上限
+// （反复触发封越久，见 service.IPBanService 递增公式），normalize 时收敛不低于
+// DurationMinutes（基础时长超过封顶的组合无意义）。
 type IPBanSettings struct {
 	Threshold             int `json:"threshold"`             // 滑动窗口内失败达到该次数即自动封禁（默认 10，clamp 3-100）
 	WindowMinutes         int `json:"windowMinutes"`         // 滑动窗口长度分钟（默认 10，clamp 1-120）
 	DurationMinutes       int `json:"durationMinutes"`       // 基础封禁时长分钟（首次触发，默认 5，clamp 1-60）
 	MaxBanDurationMinutes int `json:"maxBanDurationMinutes"` // 递增封禁封顶分钟（默认 60，clamp 5-1440，恒 ≥ DurationMinutes）
+	// Whitelist 可信网段白名单（连接管控七期）：CIDR 串列表（裸 IP 合法，消费层
+	// 自动补 /32 //128）。命中来源认证失败完全不计数不封禁（NAT 共享出口等可信
+	// 场景豁免），生效中封禁追溯放行。normalize 剔除非法条目（静默收敛不失败），
+	// 合法条目保留原字符串（不做 CIDR 规范化改写，前端回显与用户输入一致）。
+	Whitelist []string `json:"whitelist"`
 }
 
 // DefaultIPBanSettings IP 封禁参数默认设置（老配置升级与损坏降级统一入口，
@@ -164,11 +174,13 @@ func DefaultIPBanSettings() IPBanSettings {
 		WindowMinutes:         DefaultIPBanWindowMinutes,
 		DurationMinutes:       DefaultIPBanDurationMinutes,
 		MaxBanDurationMinutes: DefaultIPBanMaxBanMinutes,
+		Whitelist:             []string{},
 	}
 }
 
 // normalize 零值回退默认，越界 clamp 收敛；封顶下限收敛不低于基础时长（用户
-// 手改配置出「基础 60 / 封顶 5」组合时封顶被抬到 60，保证 escalate 公式单调）。
+// 手改配置出「基础 60 / 封顶 5」组合时封顶被抬到 60，保证 escalate 公式单调）；
+// 白名单逐条校验剔除非法条目（七期）。
 func (s *IPBanSettings) normalize() {
 	s.Threshold = clampIPBanInt(s.Threshold, MinIPBanThreshold, MaxIPBanThreshold, DefaultIPBanThreshold)
 	s.WindowMinutes = clampIPBanInt(s.WindowMinutes, MinIPBanWindowMinutes, MaxIPBanWindowMinutes, DefaultIPBanWindowMinutes)
@@ -177,6 +189,31 @@ func (s *IPBanSettings) normalize() {
 	if s.MaxBanDurationMinutes < s.DurationMinutes {
 		s.MaxBanDurationMinutes = s.DurationMinutes
 	}
+	s.Whitelist = normalizeIPBanWhitelist(s.Whitelist)
+}
+
+// normalizeIPBanWhitelist 白名单归一（连接管控七期）：逐条去首尾空白后校验
+// （CIDR 串或裸 IP 均合法——裸 IP 由消费层 service.ApplyConfig 解析时自动补
+// /32 //128，此处只验合法性），非法条目剔除（对齐 clamp 收敛哲学：手改
+// settings.json 的脏数据静默剔除不报错，UI 保存后回读归一值刷新表单）；合法
+// 条目保留（去空白后的）原字符串。恒返回非 nil 切片（nil/全非法 → 空切片，
+// 消费方与前端列表恒得稳定形态）。
+func normalizeIPBanWhitelist(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(item); err == nil {
+			out = append(out, item)
+			continue
+		}
+		if ip := net.ParseIP(item); ip != nil {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // NormalizeIPBanSettings 归一化入口：nil（老配置缺失/降级）→ 默认值；
@@ -192,8 +229,8 @@ func NormalizeIPBanSettings(s *IPBanSettings) IPBanSettings {
 }
 
 // EnsureIPBanDefaults 补全 IP 封禁参数段默认值并收敛越界值：
-//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 四项全默认；
-//   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长。
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 四项全默认 + 白名单空切片；
+//   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法条目剔除。
 //
 // 在 SettingsService.Load/Save 双链路统一调用，保证 IPBanService 消费方拿到的
 // 段始终完整可用。

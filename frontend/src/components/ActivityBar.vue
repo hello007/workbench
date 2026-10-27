@@ -93,23 +93,34 @@
               {{ isDesktopChannel ? '无设备连接' : '明细仅在桌面端显示' }}
             </div>
             <div class="devices-panel-hint">多端共享同一后端状态，后操作覆盖先操作</div>
-            <!-- 自动封禁区块（连接管控五期，认证失败达阈值自动封禁来源 IP）：
-                 数据源 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods
-                 屏蔽，composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 =
-                 IP + 递增档位徽标 + 窗口失败计数 + 到期时间（过期态「已过期」info /
-                 生效中 warning）。档位徽标（六期）：strike>1 才渲染——首触无递增
-                 语义，渲染「第 1 次」纯噪音；strike undefined（旧载荷）falsy 不渲染
-                 向后兼容。解封按钮过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带
-                 清理列表中已过期残留记录 -->
+            <!-- IP 封禁区块（连接管控五期自动封禁 + 七期手动封禁）：数据源
+                 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods 屏蔽，
+                 composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 = IP +
+                 来源徽标（手动=「手动」/ 自动递增=「第 N 次」）+ 窗口失败计数 +
+                 到期时间（永久封禁「永久」/ 过期态「已过期」info / 生效中 warning）。
+                 档位徽标（六期）：strike>1 才渲染——首触无递增语义，渲染「第 1 次」
+                 纯噪音；strike undefined（旧载荷）falsy 不渲染向后兼容。解封按钮
+                 过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带清理列表中已过期
+                 残留记录。头部「封禁 IP」按钮（七期手动封禁入口）仅桌面通道渲染 -->
             <div class="devices-ban-section">
-              <div class="devices-panel-subtitle">自动封禁（{{ ipBans.length }}）</div>
+              <div class="devices-ban-header">
+                <div class="devices-panel-subtitle">IP 封禁（{{ ipBans.length }}）</div>
+                <button
+                  v-if="isDesktopChannel"
+                  class="devices-ban-add"
+                  type="button"
+                  title="手动封禁来源 IP"
+                  @click.stop="openBanIPDialog"
+                >封禁 IP</button>
+              </div>
               <div v-if="ipBans.length" class="devices-ban-list">
                 <div v-for="b in ipBans" :key="b.ip" class="devices-ban-row">
                   <span class="devices-panel-ip" :title="b.ip">{{ b.ip }}</span>
-                  <span v-if="b.strike > 1" class="devices-ban-strike" :title="`第 ${b.strike} 次触发，封禁时长递增`">第 {{ b.strike }} 次</span>
-                  <span class="devices-ban-fails">{{ b.failCount }} 次失败</span>
+                  <span v-if="b.source === 'manual'" class="devices-ban-source" title="管理员手动下发">手动</span>
+                  <span v-else-if="b.strike > 1" class="devices-ban-strike" :title="`第 ${b.strike} 次触发，封禁时长递增`">第 {{ b.strike }} 次</span>
+                  <span v-if="b.source !== 'manual'" class="devices-ban-fails">{{ b.failCount }} 次失败</span>
                   <span class="devices-ban-expiry" :class="{ 'is-expired': b.expired }">
-                    {{ b.expired ? '已过期' : `至 ${formatBanExpiry(b.expiresAt)}` }}
+                    {{ b.expired ? '已过期' : b.expiresAt === 0 ? '永久' : `至 ${formatBanExpiry(b.expiresAt)}` }}
                   </span>
                   <button
                     class="devices-ban-unban"
@@ -119,7 +130,7 @@
                   >解封</button>
                 </div>
               </div>
-              <div v-else class="devices-ban-empty">暂无自动封禁记录</div>
+              <div v-else class="devices-ban-empty">暂无封禁记录</div>
             </div>
           </div>
         </el-popover>
@@ -140,6 +151,9 @@
          渲染于组件根级（popover persistent=false 不承载弹窗），确认提交与联动
          踢出在弹窗内完成 -->
     <BanTokenDialog v-model="banDialogVisible" :token="banTarget" :connections="connections" />
+    <!-- 手动封禁 IP 弹窗（连接管控七期，「IP 封禁」区块头部入口）：@banned 重拉
+         封禁列表（手动封禁不触发 webserve-ip-banned 事件，前端经回调刷新） -->
+    <BanIPDialog v-model="banIPDialogVisible" @banned="reloadIPBans" />
   </div>
 </template>
 
@@ -155,6 +169,7 @@ import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import { useIPBanList, formatBanExpiry } from '../composables/useIPBans'
 import BanTokenDialog from './BanTokenDialog.vue'
+import BanIPDialog from './BanIPDialog.vue'
 
 const uiStore = useUiStore()
 
@@ -219,6 +234,14 @@ const banTarget = ref(null)
 function openBanDialog(c) {
   banTarget.value = { id: c.tokenId, name: c.tokenName || '' }
   banDialogVisible.value = true
+}
+
+// 手动封禁 IP 弹窗（连接管控七期，区块头部入口）：成功后 @banned 重拉封禁列表
+//（手动封禁不触发 webserve-ip-banned 事件——该出口为自动封禁专属通知面）
+const banIPDialogVisible = ref(false)
+
+function openBanIPDialog() {
+  banIPDialogVisible.value = true
 }
 
 /**
@@ -524,6 +547,42 @@ const panels = [
   color: var(--warning-color);
   background: color-mix(in srgb, var(--warning-color) 14%, transparent);
   white-space: nowrap;
+}
+
+/* 来源徽标（七期）：手动封禁 primary 色系，与自动递增 warning 徽标形态一致 */
+.devices-ban-source {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+  white-space: nowrap;
+}
+
+/* 区块头部：标题 + 「封禁 IP」入口钮（七期手动封禁，弱化为 text 级小钮不抢
+ * 明细信息，hover warning 提亮与封禁语义一致） */
+.devices-ban-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+}
+
+.devices-ban-add {
+  padding: 1px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.devices-ban-add:hover {
+  background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+  color: var(--warning-color);
 }
 
 .devices-ban-expiry {
