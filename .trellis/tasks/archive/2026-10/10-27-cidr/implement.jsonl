@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "七期 IP 封禁段（§2.2 两认证点/RejectMessage 注入、§2.3 手动封禁状态机与 ActivityBar UI、§3 契约表、§4 错误矩阵）——八期判定链插入点、RPC 动作面不进 RPCHiddenMethods、错误码三处同步规则的权威源"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "§8 审计事件表（ip_ban/ip_unban 字段与 actor 归因）与错误码三处同步纪律（model/app_error.go + frontend error.js ErrorCode/WARNING_CODES）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处同步（App.js/App.d.ts/models.ts）与 models.ts 字段新增规则——IPBanStatus.CoveredBy/kind 新字段必须遵守"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/ip_bans.json 持久化须走 util.SaveJSON 原子写（既有机制沿用，禁新增 os.WriteFile 直写）"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态——IPBanService 测试用 nowFn 注入时钟驱动到期，禁 sleep"}

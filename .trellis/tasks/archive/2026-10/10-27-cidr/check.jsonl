@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "验收判定链优先级（白名单恒最先/精确优先于网段）、两认证点同接、RPC 动作面不进 RPCHiddenMethods 是否合规"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "审计落盘成功后写、落盘失败回滚不留已发审计行、错误码三处同步核查"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处同步完整性核查（BanCIDR/UnbanCIDR 绑定 + IPBanStatus 新字段）"}
+{"file": "docs/spec/test-stability.md", "reason": "测试时钟注入 vs sleep、禁隐式环境依赖核查"}
