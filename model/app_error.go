@@ -146,6 +146,13 @@ const (
 	// ErrCodeIPBanIPRequired 手动封禁的来源 IP 为空（必填校验拒绝，对齐
 	// E_TOKEN_NAME_REQUIRED 先例——前端表单已挡，后端防御保留）。
 	ErrCodeIPBanIPRequired = "E_IP_BAN_IP_REQUIRED"
+	// ErrCodeIPBanCidrInvalid 网段封禁的 CIDR 串非法（解析拒绝，连接管控八期，
+	// warning：对齐 E_IP_BAN_IP_REQUIRED 先例——前端表单已挡，后端防御保留）。
+	ErrCodeIPBanCidrInvalid = "E_IP_BAN_CIDR_INVALID"
+	// ErrCodeIPBanCidrWhitelisted 封禁网段被白名单完全覆盖被拒（连接管控八期，
+	// warning）：网段内全部来源均在可信网段豁免中，封禁无任何拒连效果，引导
+	// 从设置页白名单移除后再封（对齐 E_IP_BAN_WHITELISTED 语义）。
+	ErrCodeIPBanCidrWhitelisted = "E_IP_BAN_CIDR_WHITELISTED"
 
 	// RPC 协议层错误码（serve 浏览器模式 /api/rpc 传输协议错误，非业务域错误，
 	// 不走 AppError 包装）。取值唯一来源为本表；server/rpc.go 以别名引用本表

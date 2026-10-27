@@ -8,6 +8,7 @@ vi.mock('element-plus', () => ({
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   BanIP: vi.fn(),
+  BanCIDR: vi.fn(),
   GetSettings: vi.fn()
 }))
 
@@ -38,6 +39,15 @@ const stubs = {
     template: '<input class="el-date-picker" :value="modelValue || \'\'" :placeholder="placeholder" @change="$emit(\'update:modelValue\', $event.target.value)" />',
     props: ['modelValue', 'type', 'placeholder', 'disabledDate', 'size'],
     emits: ['update:modelValue']
+  },
+  'el-radio-group': {
+    template: '<div class="el-radio-group"><slot /></div>',
+    props: ['modelValue', 'size'],
+    emits: ['update:modelValue', 'change']
+  },
+  'el-radio': {
+    template: '<label class="el-radio"><slot /></label>',
+    props: ['value', 'size']
   },
   'el-button': {
     template: '<button v-bind="$attrs" :disabled="loading || disabled" @click="$emit(\'click\')"><slot /></button>',
@@ -189,5 +199,143 @@ describe('BanIPDialog.vue（手动封禁 IP 弹窗，连接管控七期）', () 
     expect(wrapper.find('input.ban-ip-input').element.value).toBe('192.0.2.99')
     // 白名单快照拉取失败降级：合法 IP 无 warning，提交链路不受阻
     expect(wrapper.find('.ban-ip-field-warn').exists()).toBe(false)
+  })
+})
+
+describe('BanIPDialog.vue 网段档（连接管控八期）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  /** 挂载并切到网段档（el-radio-group stub emit update:modelValue 写 targetKind） */
+  async function createCidrWrapper(settings = {}) {
+    const { GetSettings } = await import('../../../wailsjs/go/main/App')
+    GetSettings.mockResolvedValue(settings)
+    wrapper = mount(BanIPDialog, {
+      props: { modelValue: false },
+      global: { stubs }
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    await wrapper.findComponent(stubs['el-radio-group']).vm.$emit('update:modelValue', 'cidr')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('档位切换：默认单 IP 档（placeholder IP 形态），切网段档后输入框换网段 placeholder', async () => {
+    const { GetSettings } = await import('../../../wailsjs/go/main/App')
+    GetSettings.mockResolvedValue({})
+    wrapper = mount(BanIPDialog, {
+      props: { modelValue: false },
+      global: { stubs }
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    expect(wrapper.find('input.ban-ip-input').attributes('placeholder')).toContain('192.0.2.10')
+    await wrapper.findComponent(stubs['el-radio-group']).vm.$emit('update:modelValue', 'cidr')
+    await flushPromises()
+    expect(wrapper.find('input.ban-ip-input').attributes('placeholder')).toContain('203.0.113.0/24')
+    expect(wrapper.find('.ban-ip-kind-group').exists()).toBe(true)
+  })
+
+  it('网段为空与格式非法：行内错误 + 提交按钮禁用（不发请求）', async () => {
+    const { BanCIDR } = await import('../../../wailsjs/go/main/App')
+    wrapper = await createCidrWrapper()
+    expect(wrapper.find('.ban-ip-field-error').text()).toContain('请填写要封禁的网段')
+    expect(wrapper.find('.ban-ip-confirm-btn').attributes('disabled')).toBeDefined()
+    await wrapper.find('input.ban-ip-input').setValue('not-a-cidr')
+    await flushPromises()
+    expect(wrapper.find('.ban-ip-field-error').text()).toContain('网段格式无效')
+    expect(wrapper.find('.ban-ip-confirm-btn').attributes('disabled')).toBeDefined()
+    // stub button disabled 不派发 click；防御直调也不应触达后端
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).not.toHaveBeenCalled()
+  })
+
+  it('合法网段永久档提交：BanCIDR(cidr, 0, reason) 透传且 BanIP 不调用，成功后关弹窗并 emit banned', async () => {
+    const { BanCIDR, BanIP } = await import('../../../wailsjs/go/main/App')
+    BanCIDR.mockResolvedValue()
+    wrapper = await createCidrWrapper()
+    await wrapper.find('input.ban-ip-input').setValue('203.0.113.0/24')
+    await wrapper.find('input[placeholder^="如：持续"]').setValue('扫描源网段')
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).toHaveBeenCalledTimes(1)
+    expect(BanCIDR).toHaveBeenCalledWith('203.0.113.0/24', 0, '扫描源网段')
+    expect(BanIP).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    expect(wrapper.emitted('banned')).toBeTruthy()
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith('已封禁网段 203.0.113.0/24')
+  })
+
+  it('裸 IP 网段档合法（与后端 /32 //128 口径一致）：原串透传 BanCIDR', async () => {
+    const { BanCIDR } = await import('../../../wailsjs/go/main/App')
+    BanCIDR.mockResolvedValue()
+    wrapper = await createCidrWrapper()
+    await wrapper.find('input.ban-ip-input').setValue('2001:db8::1')
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).toHaveBeenCalledWith('2001:db8::1', 0, '')
+  })
+
+  it('白名单部分交集：警示行显交集条数（非阻断，按钮可用）', async () => {
+    // 10.1.0.0/16 仅是封禁网段 10.0.0.0/8 的子集：相交但非完全覆盖（封禁合法）
+    wrapper = await createCidrWrapper({ ipban: { whitelist: ['10.1.0.0/16', '192.168.0.0/16'] } })
+    await wrapper.find('input.ban-ip-input').setValue('10.0.0.0/8')
+    await flushPromises()
+    expect(wrapper.find('.ban-ip-field-warn').exists()).toBe(true)
+    expect(wrapper.find('.ban-ip-field-warn').text()).toContain('有交集')
+    expect(wrapper.find('.ban-ip-field-warn').text()).toContain('1 条')
+    expect(wrapper.find('.ban-ip-confirm-btn').attributes('disabled')).toBeUndefined()
+  })
+
+  it('白名单完全覆盖（被单条条目完全包含）：提示封禁将被拒绝 + 提交禁用', async () => {
+    const { BanCIDR } = await import('../../../wailsjs/go/main/App')
+    wrapper = await createCidrWrapper({ ipban: { whitelist: ['192.168.0.0/16'] } })
+    await wrapper.find('input.ban-ip-input').setValue('192.168.1.0/24')
+    await flushPromises()
+    expect(wrapper.find('.ban-ip-field-warn').text()).toContain('完全包含')
+    expect(wrapper.find('.ban-ip-confirm-btn').attributes('disabled')).toBeDefined()
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).not.toHaveBeenCalled()
+  })
+
+  it('全网段封禁（0.0.0.0/0）：确认文案升级「拒绝除白名单与本机回环外的全部来源」', async () => {
+    wrapper = await createCidrWrapper()
+    await wrapper.find('input.ban-ip-input').setValue('0.0.0.0/0')
+    await flushPromises()
+    expect(wrapper.find('.ban-ip-warning').text()).toContain('本机回环外的全部来源')
+  })
+
+  it('IPv6 全网段（::/0）确认文案同升级', async () => {
+    wrapper = await createCidrWrapper()
+    await wrapper.find('input.ban-ip-input').setValue('::/0')
+    await flushPromises()
+    expect(wrapper.find('.ban-ip-warning').text()).toContain('本机回环外的全部来源')
+  })
+
+  it('网段档提交失败走 handleError 分流（E_IP_BAN_CIDR_INVALID 预期拒绝码 warning 提示，弹窗不关闭）', async () => {
+    const { BanCIDR } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    BanCIDR.mockRejectedValue({ code: 'E_IP_BAN_CIDR_INVALID', message: '网段格式无效' })
+    wrapper = await createCidrWrapper()
+    await wrapper.find('input.ban-ip-input').setValue('203.0.113.0/24')
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(ElMessage.warning).toHaveBeenCalledWith('网段格式无效')
+    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
+    expect(wrapper.emitted('banned')).toBeFalsy()
   })
 })

@@ -161,6 +161,11 @@ func manualBanDefaultReason(expiresAt int64) string {
 // upsert 语义：覆盖同名条目的封禁字段并整体重置 failures/strikes（重启即显式
 // 重置面，对齐六期「重启清零」递增记忆纪律）；仅 manual 条目进文件，载入恒置
 // source=manual。
+//
+// 条目形态分流（八期）：Kind=IPBanKindCidr 走网段条目载入（IP 字段存 CIDR 串，
+// parseIPBanWhitelistEntry 解析失败 Warn 跳过不入列）；Kind 空/其余值一律走
+// 既有单 IP 路径——v1 文件无 kind 字段反序列化后 Kind 恒为空串，天然落单 IP
+// 分支，v1/v2 双版零特判兼容。
 func (s *IPBanService) loadManualBansLocked() {
 	if s.bansPath == "" {
 		return
@@ -180,6 +185,27 @@ func (s *IPBanService) loadManualBansLocked() {
 		}
 		if rec.ExpiresAt != 0 && !time.Unix(rec.ExpiresAt, 0).After(now) {
 			continue // 已过期：载入时丢弃（懒过期放行，文件有界自洁）
+		}
+		if rec.Kind == model.IPBanKindCidr {
+			parsed, ok := parseIPBanWhitelistEntry(rec.IP)
+			if !ok {
+				Logger().Warn("ip bans file has invalid cidr record, skipping",
+					"path", s.bansPath, "cidr", rec.IP)
+				continue
+			}
+			s.cidrBans = append(s.cidrBans, &ipBanCidrEntry{
+				net:          parsed,
+				cidr:         parsed.String(),
+				bannedAt:     time.Unix(rec.BannedAt, 0),
+				reason:       rec.Reason,
+				actorSource:  rec.ActorSource,
+				actorTokenID: rec.ActorTokenID,
+			})
+			// bannedUntil 恒最后赋值（永久条目保持零值语义）
+			if rec.ExpiresAt != 0 {
+				s.cidrBans[len(s.cidrBans)-1].bannedUntil = time.Unix(rec.ExpiresAt, 0)
+			}
+			continue
 		}
 		entry, ok := s.entries[rec.IP]
 		if !ok {
@@ -205,7 +231,8 @@ func (s *IPBanService) loadManualBansLocked() {
 
 // snapshotManualBansLocked 收集手动条目持久化快照与当前代际（调用方须持 mu）。
 // 仅 source=manual 且有封禁状态的条目进快照（自动封禁/失败计数纯内存，重启
-// 清零语义不变）；永久封禁 ExpiresAt 落 0。
+// 清零语义不变）；永久封禁 ExpiresAt 落 0。八期扩网段条目（Kind=IPBanKindCidr，
+// IP 字段存规范化 CIDR 串——网段条目恒 manual 语义全量进快照）。
 func (s *IPBanService) snapshotManualBansLocked() (model.IPBanList, int) {
 	list := model.IPBanList{Version: model.IPBanListVersion, Bans: []model.IPBanRecord{}}
 	for _, e := range s.entries {
@@ -214,6 +241,20 @@ func (s *IPBanService) snapshotManualBansLocked() (model.IPBanList, int) {
 		}
 		rec := model.IPBanRecord{
 			IP:           e.ip,
+			BannedAt:     e.bannedAt.Unix(),
+			Reason:       e.reason,
+			ActorSource:  e.actorSource,
+			ActorTokenID: e.actorTokenID,
+		}
+		if !e.bannedUntil.IsZero() {
+			rec.ExpiresAt = e.bannedUntil.Unix()
+		}
+		list.Bans = append(list.Bans, rec)
+	}
+	for _, e := range s.cidrBans {
+		rec := model.IPBanRecord{
+			IP:           e.cidr,
+			Kind:         model.IPBanKindCidr,
 			BannedAt:     e.bannedAt.Unix(),
 			Reason:       e.reason,
 			ActorSource:  e.actorSource,

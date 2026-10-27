@@ -112,6 +112,22 @@ describe('error', () => {
     })
   })
 
+  describe('IP 封禁域新增错误码登记（连接管控八期）', () => {
+    it('E_IP_BAN_CIDR_INVALID / E_IP_BAN_CIDR_WHITELISTED 取值与后端一致', () => {
+      expect(ErrorCode.IPBanCidrInvalid).toBe('E_IP_BAN_CIDR_INVALID')
+      expect(ErrorCode.IPBanCidrWhitelisted).toBe('E_IP_BAN_CIDR_WHITELISTED')
+    })
+
+    it('两码均为预期拒绝类（进 WARNING_CODES），handleError 走 warning 分流不拼前缀', () => {
+      handleError('封禁失败: ', { code: ErrorCode.IPBanCidrInvalid, message: '网段格式无效' })
+      handleError('封禁失败: ', { code: ErrorCode.IPBanCidrWhitelisted, message: '网段被白名单完全覆盖' })
+      expect(ElMessage.warning).toHaveBeenCalledTimes(2)
+      expect(ElMessage.warning).toHaveBeenNthCalledWith(1, '网段格式无效')
+      expect(ElMessage.warning).toHaveBeenNthCalledWith(2, '网段被白名单完全覆盖')
+      expect(ElMessage.error).not.toHaveBeenCalled()
+    })
+  })
+
   describe('handleGitError 兼容别名', () => {
     it('与 handleError 行为一致', () => {
       const err = { code: ErrorCode.GitInProgress, message: '操作进行中' }

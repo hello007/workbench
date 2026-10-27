@@ -308,10 +308,11 @@ func (a *App) auditConnKick(actorSource, actorTokenID string, detail server.Conn
 // rpcAuditTarget 浏览器 RPC 面的 per-request 装饰 target（连接管控三期 actor
 // 归因）：embed *App 提升全部导出方法（RPC 白名单与桌面绑定面形态一致，其余
 // 方法零分叉），仅 override 带操作者归因的管控动作方法——KickConnection（三期）、
-// BanWebToken/UnbanWebToken（四期）、UnbanIP（五期）与 BanIP（七期）：闭包捕获
-// 本次请求的调用者令牌 ID（token 中间件注入 ctx，装配回调按请求构造本值），委托
-// 未导出 *As 变体完成 actor=rpc 归因审计。定义在 main 包（server 禁反向依赖
-// main）；未导出字段/方法不入任何暴露面，导出面签名零变更（wailsjs 生成面不动）。
+// BanWebToken/UnbanWebToken（四期）、UnbanIP（五期）、BanIP（七期）与
+// BanCIDR/UnbanCIDR（八期）：闭包捕获本次请求的调用者令牌 ID（token 中间件
+// 注入 ctx，装配回调按请求构造本值），委托未导出 *As 变体完成 actor=rpc 归因
+// 审计。定义在 main 包（server 禁反向依赖 main）；未导出字段/方法不入任何暴露
+// 面，导出面签名零变更（wailsjs 生成面不动）。
 type rpcAuditTarget struct {
 	*App
 	actorTokenID string
@@ -335,6 +336,14 @@ func (t rpcAuditTarget) UnbanIP(ip string) error {
 
 func (t rpcAuditTarget) BanIP(ip string, expiresAt int64, reason string) error {
 	return t.banIPAs(ip, expiresAt, reason, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) BanCIDR(cidr string, expiresAt int64, reason string) error {
+	return t.banCIDRAs(cidr, expiresAt, reason, service.AuditActorRPC, t.actorTokenID)
+}
+
+func (t rpcAuditTarget) UnbanCIDR(cidr string) error {
+	return t.unbanCIDRAs(cidr, service.AuditActorRPC, t.actorTokenID)
 }
 
 // rpcTargetForActor 装配回调（server.WebOptions.RPCTargetForActor 消费形态）：
@@ -499,6 +508,47 @@ func (a *App) banIPAs(ip string, expiresAt int64, reason, actorSource, actorToke
 		return fmt.Errorf("IP 封禁服务未装配")
 	}
 	return a.ipBanSvc.Ban(ip, expiresAt, reason, actorSource, actorTokenID)
+}
+
+// BanCIDR 手动封禁指定网段（连接管控八期，桌面路径，对齐 BanIP 三参形态）：
+// cidr 接受 CIDR 串或裸 IP（自动补 /32 //128），即时生效于 HTTP/WS 两认证点
+// 拒绝判定。校验拒绝以 AppError 错误码下发：E_IP_BAN_CIDR_INVALID（网段格式
+// 非法）、E_TOKEN_EXPIRY_INVALID（过期时刻不晚于当前）、E_IP_BAN_CIDR_WHITELISTED
+// （网段被白名单完全覆盖，封禁无效果）。落盘成功后才写 ip_ban 审计行（IP 字段
+// 存 CIDR 串）；落盘失败内存回滚返回错误。浏览器 RPC 路径经 rpcAuditTarget
+// 装饰 override 捕获调用者令牌 ID 后同走 banCIDRAs（actor 归因，对齐 banIPAs
+// 七期先例）。
+func (a *App) BanCIDR(cidr string, expiresAt int64, reason string) error {
+	return a.banCIDRAs(cidr, expiresAt, reason, service.AuditActorDesktop, "")
+}
+
+// banCIDRAs 网段手动封禁动作统一实现（导出 BanCIDR 与 RPC 装饰 override 的
+// 共用体，actor 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与
+// RPC 反射面。
+func (a *App) banCIDRAs(cidr string, expiresAt int64, reason, actorSource, actorTokenID string) error {
+	if a.ipBanSvc == nil {
+		return fmt.Errorf("IP 封禁服务未装配")
+	}
+	return a.ipBanSvc.BanCIDR(cidr, expiresAt, reason, actorSource, actorTokenID)
+}
+
+// UnbanCIDR 手动解封指定网段（连接管控八期，桌面路径，对齐 UnbanIP 形态）：
+// 规范化后精确匹配摘除，无匹配 no-op 成功（幂等，对齐 UnbanIP 口径）。浏览器
+// RPC 路径经 rpcAuditTarget 装饰 override 同走 unbanCIDRAs（actor 归因）。
+func (a *App) UnbanCIDR(cidr string) error {
+	return a.unbanCIDRAs(cidr, service.AuditActorDesktop, "")
+}
+
+// unbanCIDRAs 网段解封动作统一实现（导出 UnbanCIDR 与 RPC 装饰 override 的
+// 共用体，actor 归因由此透传入审计）。签名保持未导出——不入 Wails 绑定面与
+// RPC 反射面。
+func (a *App) unbanCIDRAs(cidr, actorSource, actorTokenID string) error {
+	if a.ipBanSvc == nil {
+		return fmt.Errorf("IP 封禁服务未装配")
+	}
+	// false = 无匹配条目 no-op（幂等成功），仅实际解除才写审计
+	a.ipBanSvc.UnbanCIDR(cidr, actorSource, actorTokenID)
+	return nil
 }
 
 // ListIPBans 列出全部来源 IP 自动封禁记录（含已到期未清理的，按封禁时间降序；

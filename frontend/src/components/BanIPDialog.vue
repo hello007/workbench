@@ -1,11 +1,12 @@
 <template>
-  <!-- 手动封禁 IP 弹窗（连接管控七期，ActivityBar「IP 封禁」区块头部入口）：
-       弹窗本身即确认面（对齐 BanTokenDialog 四期先例，不叠加 ElMessageBox 二次
-       确认）。三档时长（永久 0 / 天级 N 天 / 自定义日期时间到时分）+ IP 输入 +
-       可选原因 + 白名单命中即时提示。尺寸走中小弹窗档 min(480px, 92vw) -->
+  <!-- 手动封禁弹窗（连接管控七期单 IP，八期扩网段档，ActivityBar「IP 封禁」区块
+       头部入口）：弹窗本身即确认面（对齐 BanTokenDialog 四期先例，不叠加
+       ElMessageBox 二次确认）。封禁对象档位（单 IP / 网段 CIDR）+ 三档时长
+       （永久 0 / 天级 N 天 / 自定义日期时间到时分）+ 可选原因 + 白名单命中/
+       交集即时提示。尺寸走中小弹窗档 min(480px, 92vw) -->
   <el-dialog
     :model-value="modelValue"
-    title="封禁来源 IP"
+    title="封禁来源"
     width="min(480px, 92vw)"
     :close-on-click-modal="false"
     append-to-body
@@ -15,17 +16,24 @@
   >
     <div class="ban-ip-form">
       <div class="ban-ip-field">
-        <div class="ban-ip-field-label">来源 IP</div>
+        <div class="ban-ip-field-label">封禁对象</div>
+        <el-radio-group v-model="targetKind" size="small" class="ban-ip-kind-group">
+          <el-radio value="ip">单 IP</el-radio>
+          <el-radio value="cidr">网段（CIDR）</el-radio>
+        </el-radio-group>
+      </div>
+      <div class="ban-ip-field">
+        <div class="ban-ip-field-label">{{ targetKind === 'cidr' ? '目标网段' : '来源 IP' }}</div>
         <el-input
-          v-model="ip"
+          v-model="targetValue"
           size="small"
           class="ban-ip-input"
-          placeholder="如 192.0.2.10 或 2001:db8::1"
-          maxlength="45"
-          :status="ipError ? 'error' : ''"
+          :placeholder="targetKind === 'cidr' ? '如 203.0.113.0/24 或单 IP（自动按 /32 处理）' : '如 192.0.2.10 或 2001:db8::1'"
+          :maxlength="targetKind === 'cidr' ? 50 : 45"
+          :status="inputError ? 'error' : ''"
         />
-        <div v-if="ipError" class="ban-ip-field-error">{{ ipError }}</div>
-        <div v-else-if="whitelistHit" class="ban-ip-field-warn">{{ whitelistHit }}</div>
+        <div v-if="inputError" class="ban-ip-field-error">{{ inputError }}</div>
+        <div v-else-if="warnHint" class="ban-ip-field-warn">{{ warnHint }}</div>
       </div>
       <div class="ban-ip-field">
         <div class="ban-ip-field-label">封禁时长</div>
@@ -57,9 +65,7 @@
           maxlength="100"
         />
       </div>
-      <div class="ban-ip-warning">
-        封禁后该来源 IP 的新连接将被拒绝（网页访问与实时通道），已建立连接不受影响；若其在可信网段白名单内，封禁将被拒绝。解封后新连接立即可达；手动封禁会覆盖同 IP 的自动封禁（递增档位保留）。
-      </div>
+      <div class="ban-ip-warning">{{ warningText }}</div>
     </div>
     <template #footer>
       <el-button size="small" @click="close">取消</el-button>
@@ -67,7 +73,7 @@
         size="small"
         type="danger"
         :loading="submitting"
-        :disabled="!!ipError || !!whitelistHit"
+        :disabled="submitDisabled"
         class="ban-ip-confirm-btn"
         @click="submit"
       >封禁</el-button>
@@ -78,9 +84,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { BanIP, GetSettings } from '../../wailsjs/go/main/App'
+import { BanIP, BanCIDR, GetSettings } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
-import { ipToBytes, isIPWhitelisted } from '../utils/ipWhitelist'
+import { ipToBytes, isIPWhitelisted, parseCidrInput, cidrOverlapWhitelist } from '../utils/ipWhitelist'
 
 const props = defineProps({
   // 弹窗显隐（v-model）
@@ -91,16 +97,19 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'banned'])
 
-// 表单态：IP / 时长档位（默认永久——手动封禁核心场景为管理员主动处置攻击源）
-// / 自定义解封时刻 / 原因备注 / 当前白名单快照（打开时拉取，即时校验提示面）
+// 表单态：封禁对象档位（'ip' 单 IP / 'cidr' 网段，连接管控八期扩档）+ 两档
+// 输入值 / 时长档位（默认永久——手动封禁核心场景为管理员主动处置攻击源）/
+// 自定义解封时刻 / 原因备注 / 当前白名单快照（打开时拉取，即时校验提示面）
+const targetKind = ref('ip')
 const ip = ref('')
+const cidr = ref('')
 const banExpiry = ref('permanent')
 const customBanDate = ref(null)
 const reason = ref('')
 const whitelist = ref([])
 const submitting = ref(false)
 
-// IP 输入校验（格式必填；空白名单命中为引导性 warning——后端 Ban 权威兜底）
+// 单 IP 档输入校验（格式必填；空白名单命中为引导性 warning——后端 Ban 权威兜底）
 const ipError = computed(() => {
   if (!ip.value.trim()) return '请填写要封禁的来源 IP'
   if (!ipToBytes(ip.value)) return 'IP 格式无效'
@@ -113,6 +122,80 @@ const whitelistHit = computed(() => {
     return '该 IP 在可信网段白名单内（含本机回环地址），封禁将被拒绝；如确需封禁请先在设置中移除对应白名单条目'
   }
   return ''
+})
+
+// 网段档输入校验（连接管控八期）：CIDR 串或裸 IP 均合法（裸 IP 视为 /32 //128
+// 等价形态，与后端 parseIPBanWhitelistEntry 同口径）；解析复用 ipWhitelist 单点
+const cidrError = computed(() => {
+  if (!cidr.value.trim()) return '请填写要封禁的网段'
+  if (!parseCidrInput(cidr.value)) return '网段格式无效：须为 CIDR（如 203.0.113.0/24、2001:db8::/32）或单 IP'
+  return ''
+})
+
+// 网段档白名单预检（后端 BanCIDR 权威兜底，前端仅提示）：
+//  - 完全覆盖（被单条白名单条目完全包含）→ 后端必拒绝（E_IP_BAN_CIDR_WHITELISTED），
+//    阻断提交并引导先移除白名单条目（对齐单 IP 档 whitelistHit 语义）；
+//  - 部分交集（非阻断警示行）→ 交集内来源不受此封禁影响，封禁本身合法。
+const cidrFullyCovered = computed(() => {
+  if (targetKind.value !== 'cidr' || cidrError.value) return false
+  return cidrOverlapWhitelist(cidr.value, whitelist.value).fullyCovered
+})
+
+const cidrWhitelistWarn = computed(() => {
+  if (targetKind.value !== 'cidr' || cidrError.value || cidrFullyCovered.value) return ''
+  const { overlapCount } = cidrOverlapWhitelist(cidr.value, whitelist.value)
+  if (overlapCount > 0) {
+    return `该网段与可信网段白名单有交集（${overlapCount} 条），交集内来源不受此封禁影响`
+  }
+  return ''
+})
+
+// 输入框按档位读写两套输入值（v-model 须为成员表达式，三元不可用，走可写
+// computed 代理分流；切档保留对方输入，关闭弹窗统一 resetForm 清空）
+const targetValue = computed({
+  get: () => (targetKind.value === 'cidr' ? cidr.value : ip.value),
+  set: (v) => {
+    if (targetKind.value === 'cidr') {
+      cidr.value = v
+    } else {
+      ip.value = v
+    }
+  }
+})
+
+// 档位分流聚合（模板行内错误/警示/提交禁用单一出口）。网段档完全覆盖态警示
+// 由 warnHint 单一出口渲染（阻断语义同单 IP 档 whitelistHit：提示 + 禁提交）
+const inputError = computed(() => (targetKind.value === 'ip' ? ipError.value : cidrError.value))
+const warnHint = computed(() => {
+  if (targetKind.value === 'ip') return whitelistHit.value
+  if (cidrFullyCovered.value) {
+    return '该网段已被可信网段白名单完全包含，封禁将被拒绝；如确需封禁请先在设置中移除对应白名单条目'
+  }
+  return cidrWhitelistWarn.value
+})
+const submitDisabled = computed(() => {
+  if (targetKind.value === 'ip') return !!ipError.value || !!whitelistHit.value
+  return !!cidrError.value || cidrFullyCovered.value
+})
+
+// 封禁语义警示文案（弹窗即确认面，文案承担确认语义）：
+//  - 单 IP 档：七期文案不变；
+//  - 网段档：影响面从单 IP 扩至全网段来源；
+//  - 全网段（前缀 0：0.0.0.0/0 或 ::/0）：确认文案升级明示「除白名单与回环外
+//    全部来源被拒」（后端允许该应急锁——回环恒豁免 + 白名单恒优先，本机不死）。
+const wholeInternetCidr = computed(() => {
+  if (targetKind.value !== 'cidr' || cidrError.value) return false
+  return parseCidrInput(cidr.value)?.prefixLen === 0
+})
+
+const warningText = computed(() => {
+  if (targetKind.value === 'ip') {
+    return '封禁后该来源 IP 的新连接将被拒绝（网页访问与实时通道），已建立连接不受影响；若其在可信网段白名单内，封禁将被拒绝。解封后新连接立即可达；手动封禁会覆盖同 IP 的自动封禁（递增档位保留）。'
+  }
+  if (wholeInternetCidr.value) {
+    return '该网段覆盖全部来源：封禁后将拒绝除可信网段白名单与本机回环外的全部来源（含正常用户），解封前外部访问不可达，请确认为应急所需。已建立连接不受影响；白名单内来源不受此封禁影响。'
+  }
+  return '封禁后该网段内全部来源 IP 的新连接将被拒绝（网页访问与实时通道），已建立连接不受影响；白名单内来源不受此封禁影响，本机回环恒豁免。解封后该网段新连接立即可达。'
 })
 
 // 弹窗打开时拉白名单快照 + 预填目标 IP（即时校验的数据源；拉取失败降级空列表
@@ -154,11 +237,14 @@ function computeBanExpiryUnix() {
   return null
 }
 
-/** 提交封禁：BanIP(ip, expiresAt, reason) 成功后关闭弹窗并通知父级刷新列表。 */
+/**
+ * 提交封禁：按档位分流 BanIP(ip, ...) / BanCIDR(cidr, ...)（连接管控八期），
+ * 成功后关闭弹窗并通知父级刷新列表（@banned → ActivityBar reloadIPBans）。
+ */
 async function submit() {
   if (submitting.value) return
-  if (ipError.value) {
-    ElMessage.warning(ipError.value)
+  if (inputError.value) {
+    ElMessage.warning(inputError.value)
     return
   }
   const expiresAt = computeBanExpiryUnix()
@@ -168,8 +254,13 @@ async function submit() {
   }
   submitting.value = true
   try {
-    await BanIP(ip.value.trim(), expiresAt, reason.value.trim())
-    ElMessage.success(`已封禁 ${ip.value.trim()}`)
+    if (targetKind.value === 'cidr') {
+      await BanCIDR(cidr.value.trim(), expiresAt, reason.value.trim())
+      ElMessage.success(`已封禁网段 ${cidr.value.trim()}`)
+    } else {
+      await BanIP(ip.value.trim(), expiresAt, reason.value.trim())
+      ElMessage.success(`已封禁 ${ip.value.trim()}`)
+    }
     close()
     emit('banned')
   } catch (e) {
@@ -189,7 +280,9 @@ function close() {
 
 /** 关闭后重置表单（el-dialog @closed：渐隐动画结束后执行，避免关闭过程中表单值闪变）。 */
 function resetForm() {
+  targetKind.value = 'ip'
   ip.value = ''
+  cidr.value = ''
   banExpiry.value = 'permanent'
   customBanDate.value = null
   reason.value = ''

@@ -57,10 +57,12 @@ export const ErrorCode = Object.freeze({
   WebServeNotRunning: 'E_WEBSERVE_NOT_RUNNING', // 浏览器访问服务未运行，踢出连接不可达（warning；停机/未启用态）
   ConnNotFound: 'E_CONNECTION_NOT_FOUND', // 目标连接不存在或已断开，列表已过期（warning，引导刷新后重试）
   TokenRevoked: 'E_TOKEN_REVOKED', // 封禁已撤销令牌被拒（撤销即凭据失效，无需封禁；warning，引导刷新列表）
-  // 浏览器访问通道 IP 封禁域错误码（连接管控七期手动封禁），取值与 model/app_error.go
-  // IP 封禁域段一致，均为预期拒绝/引导类（warning）。
+  // 浏览器访问通道 IP 封禁域错误码（连接管控七期手动封禁 + 八期网段封禁），
+  // 取值与 model/app_error.go IP 封禁域段一致，均为预期拒绝/引导类（warning）。
   IPBanWhitelisted: 'E_IP_BAN_WHITELISTED', // 封禁白名单/回环 IP 被拒：白名单为可信来源语义面，引导先在设置页移除对应白名单条目
   IPBanIPRequired: 'E_IP_BAN_IP_REQUIRED', // 手动封禁的来源 IP 为空（必填校验拒绝，前端表单已挡，后端防御保留）
+  IPBanCidrInvalid: 'E_IP_BAN_CIDR_INVALID', // 封禁网段格式非法：须为 CIDR 串或裸 IP（前端表单已挡，后端解析兜底拒绝）
+  IPBanCidrWhitelisted: 'E_IP_BAN_CIDR_WHITELISTED', // 封禁网段被可信网段白名单完全覆盖：封了也零效果，引导先移除对应白名单条目
   // PPTX 预览转换域错误码（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer），
   // 取值与 model/app_error.go PPTX 预览转换域段一致。
   PptxPreviewUnavailable: 'E_PPTX_PREVIEW_UNAVAILABLE', // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
@@ -109,7 +111,9 @@ const WARNING_CODES = new Set([
   ErrorCode.ConnNotFound,
   ErrorCode.TokenRevoked,
   ErrorCode.IPBanWhitelisted,
-  ErrorCode.IPBanIPRequired
+  ErrorCode.IPBanIPRequired,
+  ErrorCode.IPBanCidrInvalid,
+  ErrorCode.IPBanCidrWhitelisted
 ])
 
 /**

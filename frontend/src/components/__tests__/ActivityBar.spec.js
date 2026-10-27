@@ -23,7 +23,8 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 vi.mock('../../../wailsjs/go/main/App', () => ({
   KickConnection: vi.fn(),
   ListIPBans: vi.fn(),
-  UnbanIP: vi.fn()
+  UnbanIP: vi.fn(),
+  UnbanCIDR: vi.fn()
 }))
 
 vi.mock('element-plus', () => ({
@@ -720,6 +721,63 @@ describe('ActivityBar - 自动封禁区块', () => {
     expect(rows[0].find('.devices-ban-strike').text()).toBe('第 3 次')
     expect(rows[1].find('.devices-ban-strike').exists()).toBe(false)
     expect(rows[2].find('.devices-ban-strike').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('网段条目类型徽标（八期）：kind=cidr 显「网段」徽标，kind 缺省（旧载荷）不渲染', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      banEntry({ ip: '203.0.113.0/24', kind: 'cidr', source: 'manual', failCount: 0 }),
+      banEntry({ ip: '198.51.100.9' }) // 旧载荷形态（无 kind 字段）
+    ])
+    const wrapper = await mountFlushed()
+    const rows = wrapper.findAll('.devices-ban-row')
+    expect(rows[0].find('.devices-ban-kind').exists()).toBe(true)
+    expect(rows[0].find('.devices-ban-kind').text()).toBe('网段')
+    // 网段条目行仍渲染解封按钮（复用同一交互面）
+    expect(rows[0].find('.devices-ban-unban').exists()).toBe(true)
+    expect(rows[1].find('.devices-ban-kind').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('覆盖提示徽标（八期）：coveredBy 非空渲染「被覆盖」徽标，tooltip 载明覆盖方网段', async () => {
+    const { ListIPBans } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      banEntry({ ip: '203.0.113.7', coveredBy: '203.0.113.0/24' }),
+      banEntry({ ip: '198.51.100.9' })
+    ])
+    const wrapper = await mountFlushed()
+    const rows = wrapper.findAll('.devices-ban-row')
+    expect(rows[0].find('.devices-ban-covered').exists()).toBe(true)
+    expect(rows[0].find('.devices-ban-covered').text()).toBe('被覆盖')
+    // el-tooltip stub 渲染 .tooltip-content：载荷为覆盖方 CIDR 串
+    expect(rows[0].find('.tooltip-content').text()).toContain('203.0.113.0/24')
+    expect(rows[1].find('.devices-ban-covered').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('网段条目解封确认链（八期）：单次确认（文案带网段与影响面）→ UnbanCIDR(cidr)，UnbanIP 不调用', async () => {
+    const { UnbanIP, UnbanCIDR, ListIPBans } = await import('../../../wailsjs/go/main/App')
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    ElMessageBox.confirm.mockResolvedValue()
+    UnbanCIDR.mockResolvedValue()
+    ListIPBans.mockResolvedValue([
+      banEntry({ ip: '203.0.113.0/24', kind: 'cidr', source: 'manual', failCount: 0 })
+    ])
+    const wrapper = await mountFlushed()
+    await wrapper.find('.devices-ban-unban').trigger('click')
+    await flushConfirm()
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    const [message, title] = ElMessageBox.confirm.mock.calls[0]
+    expect(title).toBe('解封网段')
+    expect(message).toContain('203.0.113.0/24')
+    expect(message).toContain('全部来源 IP')
+    expect(UnbanCIDR).toHaveBeenCalledTimes(1)
+    expect(UnbanCIDR).toHaveBeenCalledWith('203.0.113.0/24')
+    expect(UnbanIP).not.toHaveBeenCalled()
+    expect(ElMessage.success).toHaveBeenCalledWith('已解封 203.0.113.0/24')
+    // 解封成功后重拉列表（挂载 1 次 + reload 1 次）
+    expect(ListIPBans).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

@@ -2,9 +2,12 @@
  * IP 封禁可信网段白名单工具（连接管控七期，纯前端校验/提示面）。
  *
  * 后端权威口径在 service 层（isWhitelistedIP 单点 + ApplyConfig 预解析，裸 IP
- * 自动补 /32 //128）；本文件为前端侧同口径复刻，仅两处消费：
+ * 自动补 /32 //128）；本文件为前端侧同口径复刻，三处消费：
  *  - BanIPDialog：封禁目标 IP 的白名单命中即时提示（后端 Ban 仍兜底拒绝，
  *    E_IP_BAN_WHITELISTED——前端提示为引导，非正确性依赖）；
+ *  - BanIPDialog 网段档（连接管控八期）：封禁网段输入解析（parseCidrInput）
+ *    与白名单交集/覆盖预检（cidrOverlapWhitelist，后端 E_IP_BAN_CIDR_INVALID /
+ *    E_IP_BAN_CIDR_WHITELISTED 权威兜底）；
  *  - SettingsPanel：白名单条目行级格式校验（后端 normalize 剔除兜底）。
  * 两口径不一致的表现仅为提示偏差（后端权威判定兜底），但维护上仍须保持同源
  * 语义：CIDR 串或裸 IP 均合法、IPv4/IPv6 双栈。
@@ -60,9 +63,11 @@ function parseIPv6(s) {
     head = splitIPv6Groups(s)
     if (head === null) return null
   }
-  // 每组展开为 2 字节；IPv4 嵌入末段已在 splitIPv6Groups 展开为 2 组
+  // 每组展开为 2 字节；IPv4 嵌入末段已在 splitIPv6Groups 展开为 2 组。
+  // 空 groups（纯 '::'，全零未指定地址）合法——后端 net.ParseIP 同样接受，
+  // 该形态是 ::/0 全网段封禁（连接管控八期）的解析前提
   const groups = [...head, ...tail]
-  if (groups.length < 1 || groups.length > 8) return null
+  if (groups.length > 8) return null
   if (dbl === -1 && groups.length !== 8) return null
   const bytes = []
   for (const g of groups) {
@@ -186,4 +191,78 @@ export function validateWhitelistEntry(entry) {
     return '格式无效：须为 CIDR（如 10.0.0.0/8、2001:db8::/32）或裸 IP'
   }
   return ''
+}
+
+// ---------------------------------------------------------------------------
+// 封禁网段输入与白名单交集预检（连接管控八期，BanIPDialog 网段档消费面）。
+// 性质同上：仅提示面非正确性依赖（后端 BanCIDR 权威校验 + E_IP_BAN_CIDR_INVALID /
+// E_IP_BAN_CIDR_WHITELISTED 兜底拒绝），但口径漂移 = 误导性提示，仍须同源语义。
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析封禁网段输入（连接管控八期）：CIDR 串或裸 IP 均合法，裸 IP 视为
+ * /32 //128 等价形态——与后端 parseIPBanWhitelistEntry 同口径。解析逻辑
+ * 委托 parseWhitelistEntry 单点（禁第二套口径），本导出为封禁域语义别名。
+ * @param {string} input
+ * @returns {{bytes: number[], prefixLen: number}|null} 非法返回 null
+ */
+export function parseCidrInput(input) {
+  return parseWhitelistEntry(input)
+}
+
+/**
+ * 由网段字节与前缀长度构造网络地址（前缀位保留、主机位清零），作为 CIDR
+ * 包含检测的代表点——任意两个 CIDR 网段要么不相交要么一个包含另一个（前缀
+ * 代数性质），故「网段 A 首址落入 B」⇔ A ⊆ B，双向首址包含即可判定相交。
+ * IPv4/IPv6 同构（4/16 字节统一处理，复用七期 isIPWhitelisted 的字节原语，
+ * 非为 IPv6 另造实现）。
+ */
+function networkAddress(bytes, prefixLen) {
+  const out = bytes.slice()
+  const full = Math.floor(prefixLen / 8)
+  const rem = prefixLen % 8
+  if (rem !== 0) {
+    const mask = (0xff << (8 - rem)) & 0xff
+    out[full] = bytes[full] & mask
+  }
+  for (let i = rem !== 0 ? full + 1 : full; i < out.length; i++) {
+    out[i] = 0
+  }
+  return out
+}
+
+/**
+ * 封禁网段与可信网段白名单的相交/覆盖预检（BanIPDialog 网段档提示面用）。
+ *
+ * 口径边界（与后端 BanCIDR 校验同源，注释即契约）：
+ *  - overlapCount：网段与白名单条目相交的条目数，双栈统一字节判定，与后端
+ *    相交语义一致（家族不匹配不命中、非法条目跳过）；
+ *  - fullyCovered：网段被**单条**白名单条目完全包含（前缀不长于网段且网段
+ *    首址落入条目），与后端 cidrFullyCoveredByWhitelist 同为单条目口径——
+ *    多条拼接覆盖（如 /24 被 /25+/25 两半合计覆盖）两端口径一致放行（剩余
+ *    半段仍有封禁效果）；后端 E_IP_BAN_CIDR_WHITELISTED 权威兜底。
+ *
+ * @param {string} cidr 封禁网段输入（CIDR 串或裸 IP）
+ * @param {string[]} whitelist 可信网段白名单条目列表
+ * @returns {{overlapCount: number, fullyCovered: boolean}} 网段非法或空白名单时两值恒零值
+ */
+export function cidrOverlapWhitelist(cidr, whitelist) {
+  const result = { overlapCount: 0, fullyCovered: false }
+  const parsed = parseCidrInput(cidr)
+  if (!parsed || !Array.isArray(whitelist)) return result
+  const firstSelf = networkAddress(parsed.bytes, parsed.prefixLen)
+  for (const entry of whitelist) {
+    const w = parseWhitelistEntry(entry)
+    if (!w || w.bytes.length !== parsed.bytes.length) continue
+    const selfInW = cidrMatch(w.bytes, w.prefixLen, firstSelf)
+    const wInSelf = cidrMatch(parsed.bytes, parsed.prefixLen, networkAddress(w.bytes, w.prefixLen))
+    if (!selfInW && !wInSelf) continue
+    result.overlapCount++
+    // 单条完全覆盖：网段首址在条目内且条目前缀不长于网段（CIDR 两两非交即含，
+    // 两条件合取 ⇔ 网段 ⊆ 该条目）
+    if (selfInW && w.prefixLen <= parsed.prefixLen) {
+      result.fullyCovered = true
+    }
+  }
+  return result
 }

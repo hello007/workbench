@@ -42,7 +42,24 @@ type IPBanStatus struct {
 	// IPBanSourceAuto（认证失败自动触发）。恒透传非 omitempty（对齐既有字段
 	// 风格，前端徽标按来源分流展示）。
 	Source string `json:"source"`
+	// Kind 条目形态（连接管控八期）：IPBanKindCidr（网段封禁，IP 字段为 CIDR
+	// 串）或 IPBanKindIP（单 IP 精确封禁）。恒透传非 omitempty（前端按形态分流
+	// 徽标渲染；七期旧客户端新增字段缺省零值不影响既有消费）。
+	Kind string `json:"kind"`
+	// CoveredBy 被更宏观封禁覆盖的标注（连接管控八期，后端单点计算透传）：
+	// 单 IP 条目命中某网段条目时填该网段串；网段条目被更宽网段（掩码更短且
+	// 包含）覆盖时填覆盖者网段串；多命中取掩码最短（最宏观）者。无覆盖留空
+	// （omitempty 序列化消失），前端只渲染徽标不复刻判定。
+	CoveredBy string `json:"coveredBy,omitempty"`
 }
+
+// IP 封禁条目形态取值（连接管控八期）：Kind 字段的两个合法取值。
+const (
+	// IPBanKindIP 单 IP 精确封禁（entries map 条目，IP 字段为归一 IP）。
+	IPBanKindIP = "ip"
+	// IPBanKindCidr 网段封禁（cidrBans 列表条目，IP 字段为规范化 CIDR 串）。
+	IPBanKindCidr = "cidr"
+)
 
 // IPBanRecord 单条手动封禁记录（连接管控七期）：IPBanService 手动封禁状态机的
 // 持久化形态，存储于 data/ip_bans.json（util.SaveJSON 原子写，对齐 web_bans.json
@@ -50,8 +67,14 @@ type IPBanStatus struct {
 // 载入时丢弃（文件有界自洁，「已过期」态仅运行期内可见）。字段全为基本类型，
 // 不穿越 Wails 绑定签名，无需手动补 models.ts 别名。
 type IPBanRecord struct {
-	// IP 被封禁的来源 IP（已归一形态，条目主键）。
+	// IP 被封禁的来源 IP（已归一形态，条目主键）。Kind=IPBanKindCidr 时该字段
+	// 存规范化 CIDR 串（如 "203.0.113.0/24"）。
 	IP string `json:"ip"`
+	// Kind 条目形态（连接管控八期）：IPBanKindCidr = 网段封禁；空串 = 单 IP
+	// 精确封禁。omitempty 使 v1 文件（无 kind 字段）反序列化后 Kind 恒为空串
+	// ——空串即单 IP 语义，v1/v2 双版载入零特判兼容（服务层仅判 Kind ==
+	// IPBanKindCidr 分流，其余形态一律走既有单 IP 载入路径）。
+	Kind string `json:"kind,omitempty"`
 	// BannedAt 封禁时间（unix 秒；重复封禁刷新为本次时间）。
 	BannedAt int64 `json:"bannedAt"`
 	// ExpiresAt 封禁到期时间（unix 秒；0 = 永久封禁，须手动解封）。懒过期判定
@@ -73,5 +96,8 @@ type IPBanList struct {
 	Bans    []IPBanRecord `json:"bans"`
 }
 
-// IPBanListVersion 当前 data/ip_bans.json 文件格式版本。
-const IPBanListVersion = 1
+// IPBanListVersion 当前 data/ip_bans.json 文件格式版本。2 = 连接管控八期引入
+// Kind 字段（网段封禁条目）；载入侧不做版本硬校验（v1 文件无 kind 字段天然
+// 解析为单 IP 条目，见 IPBanRecord.Kind 注释），版本号仅作格式标记与未来迁移
+// 判定位。
+const IPBanListVersion = 2

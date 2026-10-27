@@ -97,6 +97,12 @@ type IPBanService struct {
 	// 与 RejectMessage）零重复解析。豁免判定单点 isWhitelistedIP（回环收编），
 	// 三处消费：RecordFailure 不计数、RejectMessage 追溯放行、Ban 拒绝封禁。
 	whitelistNets []*net.IPNet
+	// cidrBans 网段手动封禁列表（八期，service/ip_ban_cidr.go）：独立于 entries
+	// 的刻意决策——entries 的 failures/strikes 是单 IP 自动封禁专属语义（五/六期
+	// 状态机），网段条目恒 manual 语义无计数面，混存会污染遍历与快照。判定链
+	// 白名单 → entries 精确查 → 本列表线性扫 Contains（条目量级 = 管理员手动
+	// 操作数，无压力），见 matchCidrBan。
+	cidrBans []*ipBanCidrEntry
 	// 手动封禁持久化（七期）：bansPath 为 data/ip_bans.json（SetBansPath 注入，
 	// 未注入为纯内存模式——既有构造路径零行为变化）；manualVersion 为手动条目
 	// 变更代际（Ban 写入/UnbanIP 删除/载入/ClearAll 均在 mu 锁内递增），落盘
@@ -299,6 +305,11 @@ func (s *IPBanService) RecordSuccess(ip string) {
 // 返回空串。白名单命中（七期，豁免判定单点含回环）恒放行——豁免为语义修正，
 // 追溯作用于生效中封禁（在途记录不删，白名单移除且未过期即恢复拒连）。ip 为
 // 空串直接放行。
+//
+// 判定链（八期扩网段维度）：白名单豁免 → entries 精确查 → cidrBans 线性扫
+// Contains。精确条目命中优先出单 IP 消息（更具体优先——精确条目与网段条目
+// 并存时管理员处置对象以精确为准）；仅命中网段条目出网段专用消息（文案含
+// 网段串与永久/到期标识）。
 func (s *IPBanService) RejectMessage(ip string) string {
 	ip = normalizeIP(ip)
 	if ip == "" {
@@ -309,14 +320,20 @@ func (s *IPBanService) RejectMessage(ip string) string {
 	if isWhitelistedIP(ip, s.whitelistNets) {
 		return ""
 	}
-	entry, ok := s.entries[ip]
-	if !ok || !entry.banActive(s.nowFn()) {
-		return ""
+	now := s.nowFn()
+	if entry, ok := s.entries[ip]; ok && entry.banActive(now) {
+		if entry.bannedUntil.IsZero() {
+			return "该来源 IP 已被封禁（永久封禁），请联系管理员解封"
+		}
+		return "该来源 IP 已被临时封禁，至 " + entry.bannedUntil.Format(banExpiryMessageFormat) + " 自动恢复"
 	}
-	if entry.bannedUntil.IsZero() {
-		return "该来源 IP 已被封禁（永久封禁），请联系管理员解封"
+	if cidr := s.matchCidrBan(ip, now); cidr != nil {
+		if cidr.bannedUntil.IsZero() {
+			return "该来源 IP 已被网段封禁（" + cidr.cidr + "，永久），请联系管理员解封"
+		}
+		return "该来源 IP 已被网段临时封禁，至 " + cidr.bannedUntil.Format(banExpiryMessageFormat) + " 自动恢复"
 	}
-	return "该来源 IP 已被临时封禁，至 " + entry.bannedUntil.Format(banExpiryMessageFormat) + " 自动恢复"
+	return ""
 }
 
 // UnbanIP 手动解封指定来源 IP：删除封禁记录并清失败计数与递增档位（strikes
@@ -372,16 +389,21 @@ func (s *IPBanService) UnbanIP(ip, actorSource, actorTokenID string) bool {
 }
 
 // List 返回全部 IP 封禁记录（含已到期未清理的——列表「已过期」态展示数据源，
-// 拒连判定的懒过期语义以 RejectMessage 为准），按封禁时间降序（最新在前）。
-// 仅含曾触发封禁的条目（纯失败计数不进列表）；Source 字段透出条目来源（七期：
-// manual 管理员手动下发 / auto 认证失败自动触发，前端徽标分流）。永久封禁
-// （七期手动 expiresAt=0 形态）ExpiresAt 透出 0、Expired 恒 false。返回切片为
-// 内部数据拷贝，调用方修改不影响服务状态；空列表返回空切片（非 nil）。
+// 拒连判定的懒过期语义以 RejectMessage 为准）。仅含曾触发封禁的条目（纯失败
+// 计数不进列表）；Source 字段透出条目来源（七期：manual 管理员手动下发 / auto
+// 认证失败自动触发，前端徽标分流）。永久封禁（七期手动 expiresAt=0 形态）
+// ExpiresAt 透出 0、Expired 恒 false。返回切片为内部数据拷贝，调用方修改不影
+// 响服务状态；空列表返回空切片（非 nil）。
+//
+// 八期扩网段条目合并输出（Kind 分流单 IP/网段）与排序两级化：封禁中在前已过期
+// 在后（处置优先级），组内网段条目置前（影响面大优先呈现）再按封禁时间降序。
+// CoveredBy 为后端单点计算的覆盖标注（cidrCoveredBy，口径与 RejectMessage 同源
+// 的 Contains 判定），前端只渲染不复刻判定。
 func (s *IPBanService) List() []model.IPBanStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.nowFn()
-	out := make([]model.IPBanStatus, 0, len(s.entries))
+	out := make([]model.IPBanStatus, 0, len(s.entries)+len(s.cidrBans))
 	for _, e := range s.entries {
 		if e.bannedAt.IsZero() {
 			continue
@@ -392,6 +414,10 @@ func (s *IPBanService) List() []model.IPBanStatus {
 			expiresAt = e.bannedUntil.Unix()
 			expired = !now.Before(e.bannedUntil)
 		}
+		var coveredBy string
+		if parsed := net.ParseIP(e.ip); parsed != nil {
+			coveredBy = s.cidrCoveredBy(parsed, nil, now)
+		}
 		out = append(out, model.IPBanStatus{
 			IP:        e.ip,
 			BannedAt:  e.bannedAt.Unix(),
@@ -400,10 +426,84 @@ func (s *IPBanService) List() []model.IPBanStatus {
 			Strike:    e.strikes,
 			Source:    e.source,
 			Expired:   expired,
+			Kind:      model.IPBanKindIP,
+			CoveredBy: coveredBy,
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].BannedAt > out[j].BannedAt })
+	for _, e := range s.cidrBans {
+		expiresAt := int64(0)
+		expired := false
+		if !e.bannedUntil.IsZero() {
+			expiresAt = e.bannedUntil.Unix()
+			expired = !now.Before(e.bannedUntil)
+		}
+		out = append(out, model.IPBanStatus{
+			IP:        e.cidr,
+			BannedAt:  e.bannedAt.Unix(),
+			ExpiresAt: expiresAt,
+			Source:    model.IPBanSourceManual,
+			Expired:   expired,
+			Kind:      model.IPBanKindCidr,
+			CoveredBy: s.cidrCoveredBy(nil, e.net, now),
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Expired != out[j].Expired {
+			return !out[i].Expired // 封禁中在前，已过期在后
+		}
+		iCidr, jCidr := out[i].Kind == model.IPBanKindCidr, out[j].Kind == model.IPBanKindCidr
+		if iCidr != jCidr {
+			return iCidr // 同组内网段条目置前
+		}
+		return out[i].BannedAt > out[j].BannedAt
+	})
 	return out
+}
+
+// cidrCoveredBy 计算条目被哪个生效中网段条目覆盖（List 的 CoveredBy 数据源，
+// 调用方须持 IPBanService.mu）：subjectIP 非 nil 时按具体 IP 判定 Contains
+// （单 IP 条目命中网段条目）；否则 subjectNet 非 nil 时按「更宽网段」判定
+// （掩码严格更短且包含网段网络地址——同掩码为自身不构成覆盖）。多命中取掩码
+// 最短（最宏观）者——覆盖标注面向管理员展示最大处置范围。仅统计生效中条目
+// （已过期网段不再拒连，不构成覆盖）。未覆盖返回空串（model 层 omitempty
+// 序列化消失）。与 matchCidrBan 共用 cidrBans Contains 判定面（口径同源），
+// 取向刻意不同：拒绝对外文案取最具体（掩码最长），覆盖标注取最宏观（掩码
+// 最短）。
+func (s *IPBanService) cidrCoveredBy(subjectIP net.IP, subjectNet *net.IPNet, now time.Time) string {
+	var best *ipBanCidrEntry
+	bestOnes := 0
+	for _, e := range s.cidrBans {
+		if !e.active(now) {
+			continue
+		}
+		ones, bits := e.net.Mask.Size()
+		// 取最宏观者：已有候选且本条掩码不更短（范围不更大）时不可能更宏观，
+		// 跳过 Contains 探测（同族同掩码非同网段不相交，等掩码不会双双命中）
+		if best != nil && ones >= bestOnes {
+			continue
+		}
+		if subjectIP != nil {
+			if !e.net.Contains(subjectIP) {
+				continue
+			}
+		} else {
+			// 网段被更宽网段覆盖：同族（掩码位数一致）且掩码严格更短（范围
+			// 更大——同掩码即自身，不构成覆盖）且包含目标网段的网络地址
+			subOnes, subBits := subjectNet.Mask.Size()
+			if bits != subBits || ones >= subOnes {
+				continue
+			}
+			if !e.net.Contains(subjectNet.IP) {
+				continue
+			}
+		}
+		best = e
+		bestOnes = ones
+	}
+	if best == nil {
+		return ""
+	}
+	return best.cidr
 }
 
 // ClearAll 清空全部来源 IP 的失败计数与封禁记录（含递增档位 strikes，六期——
@@ -411,12 +511,14 @@ func (s *IPBanService) List() []model.IPBanStatus {
 // 叠加）。不写审计——联动清零为预防性动作非处置，与撤销令牌联动清理封禁记录
 // 的既有口径一致。手动条目一并清除但不触发落盘（七期：仅手动封禁/解封触发
 // 保存的定稿口径——落盘文件保留手动记录，重启后手动封禁恢复生效，与「ClearAll
-// 为防误伤的内存面预防动作」定位一致）；manualVersion 递增使在途落盘的快照
-// 复核失效（防「快照含已清条目」的旧快照覆盖文件——见 persistManualBans）。
+// 为防误伤的内存面预防动作」定位一致；八期网段条目同口径一并清内存）；manualVersion
+// 递增使在途落盘的快照复核失效（防「快照含已清条目」的旧快照覆盖文件——见
+// persistManualBans）。
 func (s *IPBanService) ClearAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries = make(map[string]*ipBanEntry)
+	s.cidrBans = nil
 	s.manualVersion++
 }
 

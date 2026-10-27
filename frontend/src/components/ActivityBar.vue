@@ -93,15 +93,18 @@
               {{ isDesktopChannel ? '无设备连接' : '明细仅在桌面端显示' }}
             </div>
             <div class="devices-panel-hint">多端共享同一后端状态，后操作覆盖先操作</div>
-            <!-- IP 封禁区块（连接管控五期自动封禁 + 七期手动封禁）：数据源
-                 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods 屏蔽，
-                 composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 = IP +
-                 来源徽标（手动=「手动」/ 自动递增=「第 N 次」）+ 窗口失败计数 +
-                 到期时间（永久封禁「永久」/ 过期态「已过期」info / 生效中 warning）。
-                 档位徽标（六期）：strike>1 才渲染——首触无递增语义，渲染「第 1 次」
-                 纯噪音；strike undefined（旧载荷）falsy 不渲染向后兼容。解封按钮
-                 过期行同样保留：UnbanIP 幂等 no-op 安全，且可顺带清理列表中已过期
-                 残留记录。头部「封禁 IP」按钮（七期手动封禁入口）仅桌面通道渲染 -->
+            <!-- IP 封禁区块（连接管控五期自动封禁 + 七期手动封禁 + 八期网段封禁）：
+                 数据源 ListIPBans（仅桌面通道可达——浏览器通道被 RPCHiddenMethods
+                 屏蔽，composable 内 isBrowserChannel 跳过加载，此处恒空态）；行 =
+                 IP/网段串 + 类型徽标（kind=cidr 显「网段」）+ 覆盖提示徽标
+                 （coveredBy 非空，tooltip 展示覆盖方网段——后端算透传，前端禁复刻
+                 Contains 判定）+ 来源徽标（手动=「手动」/ 自动递增=「第 N 次」）+
+                 窗口失败计数 + 到期时间（永久封禁「永久」/ 过期态「已过期」info /
+                 生效中 warning）。档位徽标（六期）：strike>1 才渲染——首触无递增
+                 语义，渲染「第 1 次」纯噪音；strike undefined（旧载荷）falsy 不
+                 渲染向后兼容。解封按钮过期行同样保留：UnbanIP/UnbanCIDR 幂等
+                 no-op 安全，且可顺带清理列表中已过期残留记录。头部「封禁 IP」
+                 按钮（七期手动封禁入口）仅桌面通道渲染 -->
             <div class="devices-ban-section">
               <div class="devices-ban-header">
                 <div class="devices-panel-subtitle">IP 封禁（{{ ipBans.length }}）</div>
@@ -115,7 +118,18 @@
               </div>
               <div v-if="ipBans.length" class="devices-ban-list">
                 <div v-for="b in ipBans" :key="b.ip" class="devices-ban-row">
-                  <span class="devices-panel-ip" :title="b.ip">{{ b.ip }}</span>
+                  <div class="devices-ban-cell-ip">
+                    <span class="devices-panel-ip" :title="b.ip">{{ b.ip }}</span>
+                    <span v-if="b.kind === 'cidr'" class="devices-ban-kind" title="网段封禁：该网段内全部来源 IP 命中">网段</span>
+                    <el-tooltip
+                      v-if="b.coveredBy"
+                      :content="`已被网段 ${b.coveredBy} 覆盖：该条目与更宽网段封禁重叠，网段封禁不因本条解封而失效`"
+                      placement="top"
+                      :show-after="200"
+                    >
+                      <span class="devices-ban-covered">被覆盖</span>
+                    </el-tooltip>
+                  </div>
                   <span v-if="b.source === 'manual'" class="devices-ban-source" title="管理员手动下发">手动</span>
                   <span v-else-if="b.strike > 1" class="devices-ban-strike" :title="`第 ${b.strike} 次触发，封禁时长递增`">第 {{ b.strike }} 次</span>
                   <span v-if="b.source !== 'manual'" class="devices-ban-fails">{{ b.failCount }} 次失败</span>
@@ -125,7 +139,7 @@
                   <button
                     class="devices-ban-unban"
                     type="button"
-                    title="解封该 IP"
+                    :title="b.kind === 'cidr' ? '解封该网段' : '解封该 IP'"
                     @click.stop="unbanIP(b)"
                   >解封</button>
                 </div>
@@ -163,7 +177,7 @@ import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRo
 import { ElMessageBox, ElMessage } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
-import { KickConnection, UnbanIP } from '../../wailsjs/go/main/App'
+import { KickConnection, UnbanIP, UnbanCIDR } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
@@ -199,22 +213,32 @@ const deviceHint = computed(() =>
 )
 
 /**
- * 解封来源 IP 的自动封禁（连接管控五期）：单次确认链（confirm-dialog 单次确认
- * 形态）→ UnbanIP → 成功 toast + 重拉列表。过期行解封同样放行——UnbanIP 幂等
- * no-op 安全，且可顺带清理列表中的已过期残留记录。
+ * 解封来源 IP 的封禁条目（连接管控五期自动封禁 + 八期网段封禁分流）：单次确认链
+ * （confirm-dialog 单次确认形态）→ kind=cidr 走 UnbanCIDR（精确匹配单网段条目），
+ * 否则 UnbanIP → 成功 toast + 重拉列表。过期行解封同样放行——两者均幂等 no-op
+ * 安全，且可顺带清理列表中的已过期残留记录。确认文案带目标与影响面：网段档明示
+ * 「该网段内全部来源 IP 恢复可达」，单 IP 档保留「再犯会再次被自动封禁」警示。
  */
 async function unbanIP(b) {
+  const isCidr = b.kind === 'cidr'
+  const message = isCidr
+    ? `解封后该网段（${b.ip}）内全部来源 IP 的新连接立即可达；网段内单 IP 的自动封禁记录不受影响，再次达到阈值仍会触发自动封禁。是否解封？`
+    : `解封后来源 ${b.ip} 的新连接立即可达；若其继续高频认证失败，达到阈值会再次被自动封禁。是否解封？`
   try {
     await ElMessageBox.confirm(
-      `解封后来源 ${b.ip} 的新连接立即可达；若其继续高频认证失败，达到阈值会再次被自动封禁。是否解封？`,
-      '解封 IP',
+      message,
+      isCidr ? '解封网段' : '解封 IP',
       { type: 'warning', confirmButtonText: '解封', cancelButtonText: '取消' }
     )
   } catch {
     return
   }
   try {
-    await UnbanIP(b.ip)
+    if (isCidr) {
+      await UnbanCIDR(b.ip)
+    } else {
+      await UnbanIP(b.ip)
+    }
     ElMessage.success(`已解封 ${b.ip}`)
     reloadIPBans()
   } catch (e) {
@@ -558,6 +582,45 @@ const panels = [
   color: var(--primary-color);
   background: color-mix(in srgb, var(--primary-color) 14%, transparent);
   white-space: nowrap;
+}
+
+/* IP 单元格（八期）：IP/网段串与类型/覆盖徽标同行收纳为第一列整体，避免逐个
+ * 独立占网格列撑破 4 列布局折行；min-width:0 让 ellipsis 串在 flex 内可收缩 */
+.devices-ban-cell-ip {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.devices-ban-cell-ip .devices-panel-ip {
+  min-width: 0;
+}
+
+/* 类型徽标（八期）：kind=cidr 网段条目标识，info 色系与来源徽标（primary）、
+ * 递增档位徽标（warning）三色区分 */
+.devices-ban-kind {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--info-color);
+  background: color-mix(in srgb, var(--info-color) 14%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 覆盖提示徽标（八期）：coveredBy 非空（后端算透传，前端禁复刻 Contains），
+ * 中性灰弱提示，详情经 tooltip 展示覆盖方网段 */
+.devices-ban-covered {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 区块头部：标题 + 「封禁 IP」入口钮（七期手动封禁，弱化为 text 级小钮不抢
