@@ -1,0 +1,6 @@
+{"file": "docs/spec/browser-channel.md", "reason": "主契约文档：九期段（aggregateIPsToSuggestions 口径纪律、ListIPBanSuggestions 进 RPCHiddenMethods、SetIPBanConfig 六参顺序、useIPBanSuggestions composable 三件套先例、openBanIPDialog 可选参）、IPBanCheck 注入面、隐私红线纪律——十期聚合函数/绑定/前端全部对齐这些先例"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "§8 审计事件表：AuditRecord 字段语义（ip/failCount/strike/actorSource）、ip_ban/ip_unban 写入时序纪律（仅动作生效后落盘）——聚合读侧口径的事实基础"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "EventsOn 返回闭包精准注销契约（三 composable 共听 webserve-ip-banned）、wailsjs 三处同步规则（App.js/App.d.ts/models.ts）与具名 string 类型别名坑"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "service 构造注入纪律：IPBanService 需注入 AuditLogger 引用，改构造须同步 NewAppServices 与 AppServices struct 两处"}
+{"file": "docs/spec/test-stability.md", "reason": "时间相关用例注入 now/时钟闭包驱动，禁 sleep 等待；天桶边界与 earliestTs 测试必须遵循"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "ActivityBar 第四区块视觉规范：面板 nav 结构、徽标形态、区块内列表行样式先例（九期建议小节同容器）"}

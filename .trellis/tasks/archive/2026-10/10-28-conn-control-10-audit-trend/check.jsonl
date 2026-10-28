@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "验收对照：RPCHiddenMethods 命中、SetIPBanConfig 扩参全调用点同步、composable isBrowserChannel 跳过、隐私载荷粒度封顶是否符合九期纪律"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "对照 §8 审计事件表确认聚合口径未曲解 AuditRecord 字段语义；确认无新错误码时 error.js 零改动"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 门禁基线：新增 ip_ban_trend.go 纯函数须带齐单测，覆盖率不掉档"}
+{"file": "docs/spec/test-stability.md", "reason": "检查时间相关测试无真 sleep、时钟注入闭包无内联持锁方法调用（六期死锁教训）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 EventsOn 注销闭包、wailsjs 三处同步完整性与 models.ts class 形态"}
