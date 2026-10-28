@@ -1778,3 +1778,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 164: 连接管控遗留收口：设置段 Ensure 与指针段拷贝收敛双单点
+
+**Date**: 2026-10-28
+**Task**: 连接管控遗留收口：设置段 Ensure 与指针段拷贝收敛双单点
+**Branch**: `master`
+
+### Summary
+
+收口三处设置域遗留（GetSettings 降级分支缺 IPBan/Audit 两段、SetIPBanConfig 漏拷 Audit、盘点新增 SetWebServeConfig 漏拷 IPBan/Audit），抽 AppSettings.EnsureAllDefaults（三消费点）与 AppSettings.PrivateCopy（三写入口）双单点，新增设置段收敛为两单点各加一行；model/主包新增断言含变异验证；spec 落 cross-layer-contracts.md 设置段增删 checklist Scenario；CLAUDE.md v2.40 规则行精简；六~十一期测试零回归
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `402f69a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

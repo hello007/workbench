@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 163
+- **Total Sessions**: 164
 - **Last Active**: 2026-10-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1780 | Active |
+| `journal-3.md` | ~1813 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 164 | 2026-10-28 | 连接管控遗留收口：设置段 Ensure 与指针段拷贝收敛双单点 | `402f69a` | `master` |
 | 163 | 2026-10-28 | 连接管控十一期：审计留存多档轮转链 | `e8e8156` | `master` |
 | 162 | 2026-10-28 | 连接管控十期：攻击源趋势面（审计历史聚合） | `467760d` | `master` |
 | 161 | 2026-10-28 | 连接管控九期：攻击源网段聚合建议 | `47484fc` | `master` |
