@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/10-29-trellis-skill-docs-spec/prd.md", "reason": "任务需求、改动清单、白名单裁定、验收标准——实施唯一依据"}
+{"file": "docs/spec/README.md", "reason": "两级分流规则与分档细则权威细节，改写 skill 引导口径须与此一致"}
+{"file": "CLAUDE.md", "reason": "「规范沉淀规则」节为沉淀口径唯一权威；改后 skill 头部声明须指向此节；核对两档上限表述（普通行 ≤250 / 钩子密集行与合并行 ≤350）"}
