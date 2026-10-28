@@ -1,0 +1,4 @@
+{"file": "docs/spec/browser-channel.md", "reason": "检查面：RPCHiddenMethods 是否同步追加新方法（漏加=浏览器 RPC 直调泄露聚合建议）；SetIPBanConfig 六参签名全仓调用点是否同步；九期段是否已写入 §2.3"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查面：wailsjs 三处（App.js/App.d.ts/models.ts）是否与后端绑定签名一致；npm run build 是否过（MISSING_EXPORT 面在 vitest 不暴露）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查面：无新增错误码的判断是否成立（纯查询面）；slog 纪律遵守（禁 println）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查面：service ≥76% 门禁；新增聚合纯函数与查询面须带测试；八期既有测试零回归"}

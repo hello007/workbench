@@ -1,0 +1,5 @@
+{"file": "docs/spec/browser-channel.md", "reason": "核心 spec：§2.2 RPCHiddenMethods 三期定稿（新查询方法须加入屏蔽列表、命中同「方法不存在」响应）+ §2.3 五~八期全记录（IPBanService entries/cidrBans 状态机、ApplyConfig 注入先例、SetIPBanConfig 五参现状、桌面出口隐私红线）；九期须在此文件追加 §2.3 九期段"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处同步规则（新增 App 绑定方法须同步 App.js/App.d.ts/models.ts，跑 wails generate module）；IPBanAggregateSuggestion 为 struct 自动生成 class 无需手补别名的判断依据"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步纪律（本期无新增错误码，纯只读查询面空态返空切片）+ slog 日志纪律；§8 审计事件表（本期不新增审计行，仅查询面）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "ActivityBar 深色容器内图标/徽标规范 + 面板区块样式先例；聚合建议小节渲染样式对齐既有 devices-ban-list 行形态"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态；本期单测注入 nowFn 固定时钟驱动（对齐五期先例），不依赖真实时钟"}
