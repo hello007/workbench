@@ -282,3 +282,39 @@ onMounted(() => { offDone = EventsOn('ai-task:done', onDone) })
 onBeforeUnmount(() => { offDone && offDone() }) // 仅移除本组件监听器
 watch(repoPath, () => resetAiState()) // 切仓库重置任务态 + 取消在途任务
 ```
+
+---
+
+## Scenario: 新增/修改设置段的跨层同步面（EnsureAllDefaults + PrivateCopy 单点）
+
+### 1. Scope / Trigger
+- Trigger: `model.AppSettings` 新增设置段（指针段如 `XxxSettings`）或新增带默认值的标量字段；修改 Ensure 串联或设置写入口的基底拷贝逻辑。
+- 背景: Ensure 串联与指针段私有拷贝曾手抄多点，历史连续漏配四处（六期加 IPBan 段漏 GetSettings 降级分支、十一期加 Audit 段漏降级分支 + SetIPBanConfig 漏拷 Audit 段、SetWebServeConfig 漏拷 IPBan/Audit 段）——2026-10-28 收口为双 helper 单点（`EnsureAllDefaults` / `PrivateCopy`），新段遗漏从结构性必漏变为单点防漏。
+
+### 2. Signatures
+- `func (s *AppSettings) EnsureAllDefaults()` — 各设置段 Ensure 串联单点（model/settings.go）
+- `func (s *AppSettings) PrivateCopy() AppSettings` — 值拷贝 + 全部指针段逐段私有化单点
+- EnsureAllDefaults 消费点三处：`service.SettingsService.Load` 缓存 miss 分支 / `Save` 入口 / `App.GetSettings` 降级分支
+- PrivateCopy 消费点三处：`SetWebServeConfig` / `SetIPBanConfig` / `SetAuditConfig`（写入口的合并写基底；SetWebServeConfig 拷贝后仍重建 WebServe 段并保留 TLS 三字段）
+
+### 3. Contracts（设置段增删 checklist，逐项过）
+1. model 层：段 struct + `DefaultXxxSettings()` + `normalize()` + `EnsureXxxDefaults`（对齐 IPBan/Audit 先例）
+2. `AppSettings.EnsureAllDefaults` 加一行 Ensure——唯一加行点，Load miss / Save / GetSettings 降级三处消费自动覆盖
+3. `AppSettings.PrivateCopy` 加一段 `seg := *s.X; c.X = &seg`——唯一加行点，三个写入口自动覆盖
+4. 前端 models.ts 核对：struct 类型段 wails 自动生成 class 零手工；具名 string 类型作方法参数/返回值须手动补 `export type X = string` 别名（本文件同名 Scenario）
+5. 写入口 doc comment「指针段复制纪律」段保持指向 PrivateCopy，禁回退手抄拷贝块；并发口径出处 service/settings.go「消费方只读禁改」
+
+### 4. Validation & Error Matrix
+- 新段漏 EnsureAllDefaults 加行 → GetSettings 降级分支 / Save 入参缺段，破坏「Load 返回的配置段始终完整可用」不变式（消费方 nil 解引用 panic 或前端回落默认值）
+- 写入口漏 PrivateCopy 私有化某段 → Save 入口 Ensure 的 normalize 无条件赋值作用于共享缓存指针，与并发读者构成无同步写读 data race（值恒等故现网无实际危害，违反并发纪律）
+- SetWebServeConfig 重建 WebServe 段不带 TLS 三字段 → 用户保存地址即丢 TLS 配置
+
+### 5. Tests Required
+- model 层（model/settings_test.go）：`TestAppSettings_EnsureAllDefaults`（零值 → 五段全非 nil 且默认值正确）、`TestAppSettings_PrivateCopy`（四段指针不同址 + 内容相等 + 写入隔离 + nil 段保持 nil）；新增段在同文件两用例补断言
+- 主包（app_settings_pointer_copy_test.go）：写入口补拷独立性——预置段后调用写入口，Save 换缓存后 GetSettings 的段指针与调用前不同址且内容保留（漏拷形态下两指针相同，可判别）；SetWebServeConfig 另带 TLS 三字段保留回归
+
+### 6. Wrong vs Correct
+#### Wrong
+新增设置段仅在 service.Load/Save 的手抄串联各加一行：GetSettings 降级分支与写入口拷贝块漏补（六期/十一期实际发生形态），降级分支缺段 + 写入口共享缓存指针竞态。
+#### Correct
+`EnsureAllDefaults` / `PrivateCopy` 各加一行，三处消费点与三写入口自动覆盖；新增设置段的同步面收敛为两个单点 + models.ts 核对。

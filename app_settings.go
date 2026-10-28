@@ -12,17 +12,17 @@ import (
 // 才写入缓存，Save 成功换缓存前同样 Ensure——「Load 返回的配置段始终完整可用」
 // 是 SettingsService 的不变式），故正常路径不再对返回对象做 Ensure：EnsureXxx
 // 含无条件字段赋值，作用于缓存命中的共享指针时与并发读者构成 data race（写值
-// 虽等于已发布值，仍是无同步的并发写读）。三处 Ensure 仅保留在 settingsSvc 异常
-// 降级分支（就地构造的私有新对象），覆盖语义不变。
+// 虽等于已发布值，仍是无同步的并发写读）。settingsSvc 异常降级分支（就地构造的
+// 私有新对象）经 EnsureAllDefaults 单点补全全部设置段（webServe 段 / 终端外观
+// 三字段 / 素材缩略图段 / IP 封禁段 / 审计留存段），覆盖语义与 Load 正常路径
+// 一致，新增设置段在该单点加行后本分支自动覆盖。
 func (a *App) GetSettings() *model.AppSettings {
 	settings, err := a.settingsSvc.Load()
 	if err != nil {
 		settings = &model.AppSettings{}
-		// settingsSvc 异常降级分支：私有新对象补全各段默认值，保证前端拿到的
-		// 配置段始终完整（webServe 段 / 终端外观三字段 / 素材缩略图段）
-		settings.EnsureWebServeDefaults()
-		settings.EnsureTerminalDefaults()
-		settings.EnsureAssetsThumbsDefaults()
+		// settingsSvc 异常降级分支：私有新对象补全全部设置段默认值（Ensure
+		// 串联单点，与 Load/Save 同源），保证前端拿到的配置段始终完整
+		settings.EnsureAllDefaults()
 	}
 	return settings
 }

@@ -95,8 +95,8 @@ func NormalizeAssetThumbsSettings(s *AssetThumbsSettings) AssetThumbsSettings {
 //   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 五项全默认；
 //   - 段存在 → 零值回退默认、越界 clamp（Auto 显式 false 尊重用户关闭）。
 //
-// 在 SettingsService.Load 返回前统一调用，保证缩略图链路消费方拿到的段始终
-// 完整可用。
+// 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
+// App.GetSettings 降级分支统一调用，保证缩略图链路消费方拿到的段始终完整可用。
 func (s *AppSettings) EnsureAssetsThumbsDefaults() {
 	if s.Assets == nil {
 		def := DefaultAssetThumbsSettings()
@@ -260,8 +260,8 @@ func NormalizeIPBanSettings(s *IPBanSettings) IPBanSettings {
 //   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法条目剔除
 //     （含九期聚合建议阈值的零值回默认与 clamp）。
 //
-// 在 SettingsService.Load/Save 双链路统一调用，保证 IPBanService 消费方拿到的
-// 段始终完整可用。
+// 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
+// App.GetSettings 降级分支统一调用，保证 IPBanService 消费方拿到的段始终完整可用。
 func (s *AppSettings) EnsureIPBanDefaults() {
 	if s.IPBan == nil {
 		def := DefaultIPBanSettings()
@@ -339,8 +339,9 @@ func NormalizeAuditSettings(s *AuditSettings) AuditSettings {
 //   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 两项全默认；
 //   - 段存在 → 零值回退默认、越界 clamp。
 //
-// 在 SettingsService.Load/Save 双链路统一调用，保证 AuditLogger 装配与
-// SetAuditConfig 消费方拿到的段始终完整可用。
+// 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
+// App.GetSettings 降级分支统一调用，保证 AuditLogger 装配与 SetAuditConfig
+// 消费方拿到的段始终完整可用。
 func (s *AppSettings) EnsureAuditDefaults() {
 	if s.Audit == nil {
 		def := DefaultAuditSettings()
@@ -403,12 +404,57 @@ type AppSettings struct {
 	Audit *AuditSettings `json:"audit,omitempty"`
 }
 
+// EnsureAllDefaults 各设置段默认值补全的 Ensure 串联单点：service.SettingsService
+// Load 缓存 miss 分支、Save 入口与 App.GetSettings 降级分支三处消费。新增设置段
+// （新指针段或新标量默认值组）时仅在此追加一行对应 EnsureXxx，禁止在消费点手抄
+// 串联——手抄串联已连续漏配四处（六期加 IPBan 段漏降级分支、十一期加 Audit 段
+// 漏降级分支 + 写入口漏拷等），单点化后新段天然覆盖全部消费点。
+func (s *AppSettings) EnsureAllDefaults() {
+	s.EnsureWebServeDefaults()
+	s.EnsureTerminalDefaults()
+	s.EnsureAssetsThumbsDefaults()
+	s.EnsureIPBanDefaults()
+	s.EnsureAuditDefaults()
+}
+
+// PrivateCopy 指针段私有拷贝单点：值拷贝后将全部指针段（WebServe/Assets/IPBan/
+// Audit）逐段再拷贝出新地址。三个设置写入口（SetWebServeConfig / SetIPBanConfig /
+// SetAuditConfig）的合并写基底统一经此构造，保证传入 SettingsService.Save 的
+// 对象不与 GetSettings 缓存共享任何指针段——Save 入口 Ensure 的 normalize 含
+// 无条件字段赋值，作用于共享指针时与并发读者构成无同步写读竞态（值恒等故无
+// 实际危害，但违反「消费方只读禁改」纪律，见 service/settings.go 并发口径）。
+// 新增指针段时仅在此追加一段拷贝；TLS 等段内字段随段拷贝自然携带，无需单独处理。
+// 段拷贝为浅拷贝：段内深字段（如 IPBan.Whitelist 切片）仍与原段共享底层数组，
+// 消费方一律以整体替换段收尾、禁原地改段内切片（Whitelist 归一新建切片返回，
+// 不改共享底层数组，现链路无污染）。
+func (s *AppSettings) PrivateCopy() AppSettings {
+	c := *s
+	if s.WebServe != nil {
+		seg := *s.WebServe
+		c.WebServe = &seg
+	}
+	if s.Assets != nil {
+		seg := *s.Assets
+		c.Assets = &seg
+	}
+	if s.IPBan != nil {
+		seg := *s.IPBan
+		c.IPBan = &seg
+	}
+	if s.Audit != nil {
+		seg := *s.Audit
+		c.Audit = &seg
+	}
+	return c
+}
+
 // EnsureWebServeDefaults 补全 webServe 段默认值：
 //   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 默认开启 + 回环默认地址；
 //   - 段存在但地址为空 → 仅补默认地址，enabled 尊重用户显式取值。
 //
-// 在 SettingsService.Load 返回前统一调用，保证所有消费方（桌面 startup、
-// --serve 地址解析、前端 GetSettings）拿到的段始终完整可用。
+// 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
+// App.GetSettings 降级分支统一调用，保证所有消费方（桌面 startup、--serve
+// 地址解析、前端 GetSettings）拿到的段始终完整可用。
 func (s *AppSettings) EnsureWebServeDefaults() {
 	if s.WebServe == nil {
 		s.WebServe = &WebServeSettings{Enabled: true, BindAddress: DefaultWebServeBindAddress}
@@ -427,7 +473,8 @@ func (s *AppSettings) EnsureWebServeDefaults() {
 //     防 xterm 拿到异常配置（字号过小不可读、过大破坏布局，scrollback 超限放大内存）；
 //   - TerminalFontFamily 空串即默认 Cascadia Code 字体栈，不强制填充。
 //
-// 在 SettingsService.Load 返回前统一调用，保证前端 GetSettings 拿到的三字段始终可用。
+// 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
+// App.GetSettings 降级分支统一调用，保证前端 GetSettings 拿到的三字段始终可用。
 func (s *AppSettings) EnsureTerminalDefaults() {
 	s.TerminalFontSize = clampTerminalInt(s.TerminalFontSize, MinTerminalFontSize, MaxTerminalFontSize, DefaultTerminalFontSize)
 	s.TerminalScrollback = clampTerminalInt(s.TerminalScrollback, MinTerminalScrollback, MaxTerminalScrollback, DefaultTerminalScrollback)

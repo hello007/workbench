@@ -239,7 +239,7 @@ catch (error) {
 - 轮转（写侧单点）：`rotateLocked(incoming int64)`——持 `a.mu`，超限时链式下移 `for i := depth-1; i >= 1; i--`（源档 Stat 不存在跳过，`os.Rename` 失败即 Warn **停链 return**）后 `rename(path, path+".1")`。Windows 走 MoveFileEx REPLACE_EXISTING 覆盖已存在目标档。
 - 读侧（单点）：`readSnapshot() ([]AuditRecord, error)`——**锁内快照 depth 后**构造档位列表 `path.N … path.1 + path`（时间正序拼接，最旧档在前）；depth 经热更缩小后残留超深度旧档**不入读也不删除**（静默滞留磁盘，容量口径以新配置为准）。
 - 热更生效点：`(a *AuditLogger) ApplyConfig(maxBytes int64, depth int)`——mu 锁内整体替换两字段；**仅面向未来**（已超限主文件不立即轮转，下次写入达限触发；depth 缩小不追溯清理）。
-- 设置面：`model.AuditSettings{MaxBytesMB int, Depth int}`（`AppSettings.Audit *AuditSettings`，`json:"audit,omitempty"` 段缺失全默认）+ `EnsureAuditDefaults` 挂 Load/Save 双链路（**现五处 Ensure**，新增段须同步两处）+ `App.SetAuditConfig(maxBytesMB, depth int) error`（normalize → GetSettings 基底四指针段私有拷贝合并写 → Save → `webAuditSvc.ApplyConfig(MB→字节换算)`，对齐六期 SetIPBanConfig「保存+生效」显式单点，**禁走通用 SaveSettings 隐式联动**）。
+- 设置面：`model.AuditSettings{MaxBytesMB int, Depth int}`（`AppSettings.Audit *AuditSettings`，`json:"audit,omitempty"` 段缺失全默认）+ `EnsureAuditDefaults` 收编 `AppSettings.EnsureAllDefaults` 串联单点（2026-10-28 单点化：Load miss / Save / GetSettings 降级三处消费一处加行，对齐「现五处 Ensure 手抄」的漏配收口）+ `App.SetAuditConfig(maxBytesMB, depth int) error`（normalize → GetSettings 基底经 `AppSettings.PrivateCopy` 全指针段私有拷贝合并写 → Save → `webAuditSvc.ApplyConfig(MB→字节换算)`，对齐六期 SetIPBanConfig「保存+生效」显式单点，**禁走通用 SaveSettings 隐式联动**）。
 - 装配：`NewAppServices` 构造 `webAuditSvc` 后紧随 `settingsSvc.Load()` 归一值 `ApplyConfig` 注入启动初值（对齐 ipBanSvc 六期形态）。
 
 #### Contracts（参数与 clamp）

@@ -471,3 +471,85 @@ func TestNormalizeAuditSettings(t *testing.T) {
 		t.Fatalf("入参不应被原地修改, got %+v", in)
 	}
 }
+
+// TestAppSettings_EnsureAllDefaults 覆盖 Ensure 串联单点：零值 AppSettings 经
+// EnsureAllDefaults 后全部设置段补全默认值（指针段非 nil + 终端外观标量字段
+// 回默认），与逐段调用各 EnsureXxx 等效——Service 层 Load miss / Save 与
+// App.GetSettings 降级分支三处消费点共用本链路，新增设置段在此处断言面加行。
+func TestAppSettings_EnsureAllDefaults(t *testing.T) {
+	s := &AppSettings{}
+	s.EnsureAllDefaults()
+
+	if s.WebServe == nil || !s.WebServe.Enabled || s.WebServe.BindAddress != DefaultWebServeBindAddress {
+		t.Errorf("webServe 段应补默认开启 + 回环地址, got %+v", s.WebServe)
+	}
+	if s.TerminalFontSize != DefaultTerminalFontSize || s.TerminalScrollback != DefaultTerminalScrollback {
+		t.Errorf("终端外观字段应补默认值, got 字号=%d 回滚=%d", s.TerminalFontSize, s.TerminalScrollback)
+	}
+	wantAssets := DefaultAssetThumbsSettings()
+	if s.Assets == nil || *s.Assets != wantAssets {
+		t.Errorf("素材缩略图段应补五项全默认, got %+v", s.Assets)
+	}
+	if s.IPBan == nil {
+		t.Fatal("IP 封禁段应补全默认, got nil")
+	}
+	if !reflect.DeepEqual(*s.IPBan, DefaultIPBanSettings()) {
+		t.Errorf("IP 封禁段应补参数全默认, got %+v", *s.IPBan)
+	}
+	if s.IPBan.Whitelist == nil || len(s.IPBan.Whitelist) != 0 {
+		t.Errorf("白名单默认应为非 nil 空切片, got %#v", s.IPBan.Whitelist)
+	}
+	wantAudit := DefaultAuditSettings()
+	if s.Audit == nil || *s.Audit != wantAudit {
+		t.Errorf("审计留存段应补两项全默认, got %+v", s.Audit)
+	}
+}
+
+// TestAppSettings_PrivateCopy 覆盖指针段私有拷贝单点：返回值四指针段与原对象
+// 段指针不同址且段内容相等、改拷贝段不影响原对象；nil 段保持 nil（补段是
+// EnsureAllDefaults 职责，拷贝不凭空造段）。
+func TestAppSettings_PrivateCopy(t *testing.T) {
+	orig := &AppSettings{
+		TerminalFontSize: 16,
+		WebServe:         &WebServeSettings{Enabled: true, BindAddress: "127.0.0.1:36115", TLS: true, TLSCertPath: "a.pem", TLSKeyPath: "b.pem"},
+		Assets:           &AssetThumbsSettings{Auto: true, SmallWidth: 480, HDWidth: 2560, SmallQuotaMB: 2048, HDQuotaMB: 4096},
+		IPBan:            &IPBanSettings{Threshold: 20, Whitelist: []string{"192.168.1.0/24"}},
+		Audit:            &AuditSettings{MaxBytesMB: 8, Depth: 4},
+	}
+	copied := orig.PrivateCopy()
+
+	// 四指针段与原对象不同址（浅拷贝形态下段指针值相等，此处必须不等）
+	if copied.WebServe == orig.WebServe || copied.Assets == orig.Assets ||
+		copied.IPBan == orig.IPBan || copied.Audit == orig.Audit {
+		t.Fatal("四指针段应与原对象段指针不同址（私有拷贝）")
+	}
+	// 段内容与原值相等
+	if !reflect.DeepEqual(copied.WebServe, orig.WebServe) ||
+		!reflect.DeepEqual(copied.Assets, orig.Assets) ||
+		!reflect.DeepEqual(copied.IPBan, orig.IPBan) ||
+		!reflect.DeepEqual(copied.Audit, orig.Audit) {
+		t.Fatal("拷贝段内容应与原值相等")
+	}
+	// 非指针标量字段随值拷贝携带
+	if copied.TerminalFontSize != orig.TerminalFontSize {
+		t.Errorf("标量字段应随值拷贝携带, got %d want %d", copied.TerminalFontSize, orig.TerminalFontSize)
+	}
+
+	// 改拷贝段不影响原对象（写入隔离）
+	copied.WebServe.BindAddress = "0.0.0.0:9999"
+	copied.Assets.SmallWidth = 999
+	copied.IPBan.Threshold = 1
+	copied.Audit.Depth = 2
+	if orig.WebServe.BindAddress != "127.0.0.1:36115" ||
+		orig.Assets.SmallWidth != 480 ||
+		orig.IPBan.Threshold != 20 ||
+		orig.Audit.Depth != 4 {
+		t.Fatalf("改拷贝段不应影响原对象, got %+v", orig)
+	}
+
+	// nil 段保持 nil（不凭空补段）
+	empty := (&AppSettings{}).PrivateCopy()
+	if empty.WebServe != nil || empty.Assets != nil || empty.IPBan != nil || empty.Audit != nil {
+		t.Errorf("nil 段应保持 nil, got %+v", empty)
+	}
+}

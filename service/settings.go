@@ -48,21 +48,11 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 			settings = &model.AppSettings{}
 		}
 	}
-	// webServe 段默认值补全（段缺失/地址为空 → 默认开启 + 回环地址），
-	// 保证桌面 startup 与 --serve 地址解析拿到的配置始终完整可用
-	settings.EnsureWebServeDefaults()
-	// 终端外观三字段默认值补全与越界收敛（零值 → 默认，越界 clamp），
-	// 保证前端 GetSettings 拿到的字号/字体/回滚配置始终可用
-	settings.EnsureTerminalDefaults()
-	// 素材缩略图段默认值补全与越界收敛（段缺失 → 五项全默认），
-	// 保证缩略图链路消费方拿到的配置段始终完整可用
-	settings.EnsureAssetsThumbsDefaults()
-	// IP 封禁参数段默认值补全与越界收敛（段缺失 → 四项全默认，连接管控六期），
-	// 保证 IPBanService 装配与 SetIPBanConfig 消费方拿到的配置段始终完整可用
-	settings.EnsureIPBanDefaults()
-	// 审计留存段默认值补全与越界收敛（段缺失 → 两项全默认，连接管控十一期），
-	// 保证 AuditLogger 装配与 SetAuditConfig 消费方拿到的配置段始终完整可用
-	settings.EnsureAuditDefaults()
+	// 各设置段默认值补全与越界收敛（Ensure 串联单点 EnsureAllDefaults，新增设置
+	// 段在 model.AppSettings.EnsureAllDefaults 一处加行），保证「Load 返回的配置段
+	// 始终完整可用」不变式：桌面 startup、--serve 地址解析、前端 GetSettings 与
+	// 各服务装配拿到的配置段始终完整可用
+	settings.EnsureAllDefaults()
 
 	s.mu.Lock()
 	s.cached = settings
@@ -71,15 +61,11 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 }
 
 func (s *SettingsService) Save(settings *model.AppSettings) error {
-	// 保存前补全各段默认值（对齐 Load 链路五处 Ensure）：缓存命中路径不再经过
-	// Load 的补全链路，部分字段的保存入参若直接入缓存会破坏「Load 返回的配置段
-	// 始终完整可用」不变式（如 webServe 段 nil 时 --serve 地址解析直接解引用
-	// settings.WebServe.BindAddress 会 panic）。
-	settings.EnsureWebServeDefaults()
-	settings.EnsureTerminalDefaults()
-	settings.EnsureAssetsThumbsDefaults()
-	settings.EnsureIPBanDefaults()
-	settings.EnsureAuditDefaults()
+	// 保存前补全各段默认值（与 Load 同一 Ensure 串联单点 EnsureAllDefaults）：
+	// 缓存命中路径不再经过 Load 的补全链路，部分字段的保存入参若直接入缓存会
+	// 破坏「Load 返回的配置段始终完整可用」不变式（如 webServe 段 nil 时 --serve
+	// 地址解析直接解引用 settings.WebServe.BindAddress 会 panic）。
+	settings.EnsureAllDefaults()
 	// 锁跨「落盘 + 缓存换新」全程持有：两并发 Save（桌面 + 浏览器通道）若只锁
 	// 缓存赋值，磁盘写入序与缓存换新序可相反（缓存=A 而磁盘=B，脱钩持续到下次
 	// 保存/重启）。写路径低频，全程持锁无性能顾虑。

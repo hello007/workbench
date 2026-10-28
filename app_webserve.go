@@ -62,11 +62,12 @@ func (a *App) SetWebServeConfig(enabled bool, bindAddress string) error {
 		return fmt.Errorf("绑定地址格式无效（须为 host:port，如 127.0.0.1:36115）: %w", err)
 	}
 
-	// 持久化（以磁盘现有设置为基底合并写，避免覆盖其他字段）。GetSettings 经
-	// settingsSvc 缓存命中返回共享指针（service/settings.go 并发口径：消费方
-	// 只读禁改），此处复制后替换 webServe 段，防原地改与并发读者竞态。
+	// 持久化（以磁盘现有设置为基底合并写，避免覆盖其他字段）。基底经
+	// PrivateCopy 值拷贝并私有化全部指针段（GetSettings 经 settingsSvc 缓存命中
+	// 返回共享指针，service/settings.go 并发口径：消费方只读禁改——Save 入口
+	// Ensure 的 normalize 含无条件字段赋值，作用于共享指针会与并发读者竞态）。
 	base := a.GetSettings()
-	settings := *base
+	settings := base.PrivateCopy()
 	webServe := &model.WebServeSettings{Enabled: enabled, BindAddress: addr}
 	// TLS 设置（开关 + 证书路径）保留磁盘现值：本方法入参不表达 TLS，
 	// 重建段时若不带会把它覆成零值（用户保存地址即丢 TLS 配置）
@@ -76,12 +77,6 @@ func (a *App) SetWebServeConfig(enabled bool, bindAddress string) error {
 		webServe.TLSKeyPath = base.WebServe.TLSKeyPath
 	}
 	settings.WebServe = webServe
-	// Assets 段同为指针共享，而 Save 入口会对入参执行 EnsureAssetsThumbsDefaults
-	// （normalize 含无条件字段赋值）——一并复制为私有段，防同值写与并发读者竞态
-	if base.Assets != nil {
-		assets := *base.Assets
-		settings.Assets = &assets
-	}
 	if err := a.settingsSvc.Save(&settings); err != nil {
 		return fmt.Errorf("保存设置失败: %w", err)
 	}
@@ -631,9 +626,10 @@ func (a *App) QueryIPBanTrend() (model.IPBanTrendResult, error) {
 // suggestThreshold/trendWindowDays），whitelist 收尾——与九期「聚合阈值第五位、
 // whitelist 移第六位」同构，新增数值参数插 whitelist 之前，白名单恒末位。
 //
-// 指针段复制纪律：基底设置的 WebServe/Assets 指针段一律私有拷贝后替换 IPBan 段，
-// 防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态（SetWebServeConfig
-// 先例同款）。
+// 指针段复制纪律：基底设置的全部指针段经 model.AppSettings.PrivateCopy 单点
+// 私有拷贝后替换 IPBan 段，防 Save 入口 Ensure 的 normalize 无条件赋值与并发
+// 读者竞态（SetWebServeConfig / SetAuditConfig 先例同款；Audit 段在本方法中曾
+// 漏拷，随 PrivateCopy 单点化收口）。
 func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes, aggregateSuggestThreshold, trendWindowDays int, whitelist []string) error {
 	normalized := model.NormalizeIPBanSettings(&model.IPBanSettings{
 		Threshold:                 threshold,
@@ -647,15 +643,7 @@ func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDu
 
 	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）
 	base := a.GetSettings()
-	settings := *base
-	if base.WebServe != nil {
-		webServe := *base.WebServe
-		settings.WebServe = &webServe
-	}
-	if base.Assets != nil {
-		assets := *base.Assets
-		settings.Assets = &assets
-	}
+	settings := base.PrivateCopy()
 	ipban := normalized
 	settings.IPBan = &ipban
 	if err := a.settingsSvc.Save(&settings); err != nil {
@@ -680,10 +668,10 @@ func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDu
 // service.AuditLogger.readSnapshot）。参数非法无失败分支：clamp 层静默收敛（前端
 // el-input-number 已挡边界，后端兜底手改配置形态），无新错误码。
 //
-// 指针段复制纪律：基底设置的 WebServe/Assets/IPBan 指针段一律私有拷贝、Audit
-// 段整体替换为归一值拷贝（天然私有）——settings 内四指针段均不与 GetSettings
-// 共享缓存指针，防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态
-// （SetIPBanConfig 先例同款）。
+// 指针段复制纪律：基底设置的全部指针段经 model.AppSettings.PrivateCopy 单点
+// 私有拷贝、Audit 段整体替换为归一值拷贝（天然私有）——settings 内四指针段均
+// 不与 GetSettings 共享缓存指针，防 Save 入口 Ensure 的 normalize 无条件赋值与
+// 并发读者竞态（SetWebServeConfig / SetIPBanConfig 先例同款）。
 func (a *App) SetAuditConfig(maxBytesMB, depth int) error {
 	normalized := model.NormalizeAuditSettings(&model.AuditSettings{
 		MaxBytesMB: maxBytesMB,
@@ -692,19 +680,7 @@ func (a *App) SetAuditConfig(maxBytesMB, depth int) error {
 
 	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）
 	base := a.GetSettings()
-	settings := *base
-	if base.WebServe != nil {
-		webServe := *base.WebServe
-		settings.WebServe = &webServe
-	}
-	if base.Assets != nil {
-		assets := *base.Assets
-		settings.Assets = &assets
-	}
-	if base.IPBan != nil {
-		ipban := *base.IPBan
-		settings.IPBan = &ipban
-	}
+	settings := base.PrivateCopy()
 	audit := normalized
 	settings.Audit = &audit
 	if err := a.settingsSvc.Save(&settings); err != nil {
