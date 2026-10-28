@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-28-spec-curation-tiered-hooks-alignment/prd.md", "reason": "任务需求与 Q1-Q5 已定决策（两档口径/覆盖层固化/finish-work 自检/超限当场下沉/静态抽查），含改写文本草案与实施顺序，执行标尺"}
+{"file": ".trellis/tasks/archive/2026-10/10-28-claude-md/prd.md", "reason": "上任务 Q1 ADR 三档原定义（A≤250/B≤200/C≤350）与下沉判据原文，两档口径的推导来源，改写时保证判据表述零漂移"}
+{"file": ".trellis/tasks/archive/2026-10/10-28-claude-md/research/migration-map.md", "reason": "字符度量口径（整行字符数含文档列 ~50 字符链接开销、python len UTF-8 码点），两档上限的计量基础"}
+{"file": "CLAUDE.md", "reason": "改写对象：规范沉淀规则节（43-48 行）第 2 条旧口径「一两句级」→ 两档钩子级；版本号 v2.41 → v2.42；最后更新日期"}
+{"file": "docs/spec/README.md", "reason": "改写对象：两级分流规则表判断标准列「一两句话可完整表达」→ 同口径；新增分档细则小节（两档定义/钩子计数/现存 250-350 区间行归属说明）"}
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "改写对象：Step 3 归档前插入分档自检段（本会话新增表行核两档上限，超限退回 Phase 3.3 当场下沉）"}
+{"file": ".trellis/workflow.md", "reason": "冲突核对：finish-work.md 改动是否触碰 [required · once] 标签块同步规则；Phase 3.3 trellis-update-spec 引用关系确认"}

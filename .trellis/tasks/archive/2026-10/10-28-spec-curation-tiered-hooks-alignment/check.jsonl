@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-28-spec-curation-tiered-hooks-alignment/prd.md", "reason": "验收清单：AC 9 条（口径一致/固化点唯一/finish-work 闭环/超限规则/分档细则/静态抽查/workflow 无冲突/零代码/v2.42），核对标尺"}
+{"file": "CLAUDE.md", "reason": "核对：规范沉淀规则节新口径两档上限与下沉判据表述、与 README 一致性、不再出现「一两句级」旧表述、版本 v2.42"}
+{"file": "docs/spec/README.md", "reason": "核对：两级分流表与 CLAUDE.md 口径一致、分档细则小节完整（钩子 ≥7 承认条款 + 现存行归属）"}
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "核对：归档前自检步骤存在且退回路径指向 Phase 3.3，未触发 workflow.md 标签块同步规则"}
+{"file": ".trellis/workflow.md", "reason": "核对口径与 trellis 流程无冲突（Phase 3.3/3.4/finish-work 三者衔接自洽）"}

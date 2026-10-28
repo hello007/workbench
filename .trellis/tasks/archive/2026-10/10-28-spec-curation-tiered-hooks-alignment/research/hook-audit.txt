@@ -1,0 +1,13 @@
+数据行数: 60
+
+== 分档口径审计（普通 <=250 / 钩子密集>=7 或合并行 <=350）==
+普通行(<=250): 26  密集/合并(251-350): 34  超硬顶350: 0
+
+== 钩子导流静态抽查（钩子最多 5 行）==
+行8 hooks=9 tokens=9 承接=docs/spec/e2e-testing.md -> OK
+行30 hooks=7 tokens=7 承接=docs/spec/logging-and-errors.md -> OK
+行29 hooks=7 tokens=7 承接=docs/spec/logging-and-errors.md -> OK
+行56 hooks=6 tokens=6 承接=docs/spec/mermaid-rendering.md -> OK
+行27 hooks=6 tokens=6 承接=docs/spec/perf-baseline.md -> OK
+
+结论: 全部钩子可定位
