@@ -1712,3 +1712,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 162: 连接管控十期：攻击源趋势面（审计历史聚合）
+
+**Date**: 2026-10-28
+**Task**: 连接管控十期：攻击源趋势面（审计历史聚合）
+**Branch**: `master`
+
+### Summary
+
+落地连接管控十期：基于审计行 ip_ban/ip_unban 的跨重启攻击源时序视图。读侧懒扫 readSnapshot 单点（否决聚合快照第二数据源）；聚合口径写死 doc comment（auto 主计数/manual 分列、单 IP 掩 /24·/64、CIDR 原串独立桶、CoveredBy 不剔除语义分叉、rebounded 桶级观测语义）；TrendWindowDays 扩参默认 7 clamp 1-30（SetIPBanConfig 六扩七参 12 调用点）；QueryIPBanTrend 进 RPCHiddenMethods 载荷桶粒度封顶；前端 useIPBanTrend 三件套 + ActivityBar 第四区块（迷你条形/双徽标/行点击复用九期预填链）。附带修复 StopClosesWSClients 既有 flaky（广播帧滞留缓冲与 Close 竞速，断言改循环读至终态）。service 覆盖率 81.4%、vitest 2238 全绿、E2E 5/5。spec 沉淀 browser-channel.md 十期段 + CLAUDE.md v2.38 + README/功能说明补记。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `467760d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
