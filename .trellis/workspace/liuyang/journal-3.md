@@ -1679,3 +1679,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 161: 连接管控九期：攻击源网段聚合建议
+
+**Date**: 2026-10-28
+**Task**: 连接管控九期：攻击源网段聚合建议
+**Branch**: `master`
+
+### Summary
+
+七决策点 brainstorm 收口（固定粒度 /24 /64 + 独立查询面 + entries 内存态口径 + ActivityBar 建议行 + IPBanSettings 扩阈值 + RPCHiddenMethods 整体隐藏 + initialCidr 预填）。三 PR 实施：后端聚合纯函数+查询面 16 用例、SetIPBanConfig 六参+绑定+SettingsPanel、前端建议小节+BanIPDialog 分流预填 16 用例+E2E。trellis-check 修 6 处（含双非空 initialIP 优先级 + EventsOn mock 多监听器分发）。spec 沉淀 browser-channel.md 九期段 + CLAUDE.md v2.37。全量测试绿（前端 2224 用例 + race + build），八期零回归。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47484fc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
