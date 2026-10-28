@@ -1745,3 +1745,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 163: 连接管控十一期：审计留存多档轮转链
+
+**Date**: 2026-10-28
+**Task**: 连接管控十一期：审计留存多档轮转链
+**Branch**: `master`
+
+### Summary
+
+审计轮转链 5MB×2 扩固定 6 档（默认 35MB，clamp 1-20MB×2-10 档上限 220MB）：rotateLocked 链式 rename 失败停链自愈、readSnapshot 锁内快照 depth 多档合并，QueryIPBanTrend/QueryAuditLog 零改动透明受益；AuditSettings 段 + EnsureAuditDefaults（现五处 Ensure）+ SetAuditConfig 保存即生效 + SettingsPanel 审计段；竞速实测 Windows 读句柄 sharing violation 停链 / Unix 不受阻，断言分侧 _windows/_linux 双文件规避 ubuntu CI 必挂；淘汰静默 earliestTs 自然前移，十期前端零改动。无新错误码。spec 沉淀 logging-and-errors.md §8.2 + CLAUDE.md v2.39 + API参考/功能说明/部署说明。后端三包+前端 2244 全绿。遗留登记：GetSettings 降级分支缺 IPBan/Audit 段补全（六期起遗留）、SetIPBanConfig 漏拷 Audit 段（既有形态）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e8e8156` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
