@@ -1,0 +1,6 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "检查审计域改动与旁路降级口径一致性：轮转失败 Warn 继续追加、无新错误码、doc comment 转正理由落位"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增测试无隐式环境依赖（sleep/mtime/时序竞速/端口）"}
+{"file": "docs/spec/browser-channel.md", "reason": "检查 SetAuditConfig 与六期 SetIPBanConfig 热更链形态对齐（禁走通用 SaveSettings 隐式联动）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 绑定三处同步（SetAuditConfig 新方法 + AuditSettings 模型）与具名类型别名坑"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁复核：service ≥76% 基线不回退"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查 SettingsPanel 新增控件规范（:value-on-clear/clamp 提示/回读刷新）"}

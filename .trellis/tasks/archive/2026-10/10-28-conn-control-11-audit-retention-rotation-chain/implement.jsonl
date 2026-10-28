@@ -1,0 +1,8 @@
+{"file": "docs/spec/logging-and-errors.md", "reason": "审计域归属：AuditLogger 旁路降级口径、审计事件语义、错误码三处同步纪律、轮转既有口径（本任务改 rotateLocked/readSnapshot 须对齐）"}
+{"file": "docs/spec/browser-channel.md", "reason": "六期 SetIPBanConfig 热更链先例（normalize→复制基底换段→Save→生效）与 EnsureIPBanDefaults 四处 Ensure 纪律，SetAuditConfig 同款复刻"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "装配层注入先例：AuditLogger maxBytes/depth 生效点在 AuditLogger 字段，NewAppServices 启动初值注入 + 热更实时更新"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "SetAuditConfig 新增 Wails 绑定方法须同步 frontend/wailsjs/ 三处（App.js/App.d.ts/models.ts）；AuditSettings 新设置段模型跨层契约"}
+{"file": "docs/spec/test-stability.md", "reason": "竞速测试纪律：禁 sleep 等待、注入驱动（小 maxBytes 驱动轮转）、禁 mtime 时序依赖、禁固定端口"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "SettingsPanel 审计段 UI：el-input-number 必带 :value-on-clear、clamp 提示文案、保存后回读归一值刷新表单"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "审计 JSONL 为 O_APPEND 追加+轮转形态，豁免 SaveJSON 原子写口径——确认新增文件操作不误入原子写纪律冲突"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 覆盖率基线，新增分支须带单测"}
