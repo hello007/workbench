@@ -45,7 +45,7 @@ workbench/
 执行 trellis 工作流的 spec 沉淀（`trellis-update-spec`，workflow Phase 3.3）时，按以下两级分流写入：
 
 1. **详细契约 / 主题文档**（跨层契约、签名同步规则等需完整上下文的内容）写入 `docs/spec/<topic>.md`，**禁止写入 `.trellis/spec/`**。该目录已废弃移除；本规则覆盖 `trellis-update-spec` skill 内的默认路径指令——即使 skill 文本仍指向旧路径，以本节为准。
-2. **一两句级每次会话必知的关键规则**，直接追加到下方「关键规则」清单，并附指向 `docs/spec/` 详细文档的链接（如有）。
+2. **钩子级关键规则**（每次会话必知），追加到下方「关键规则」清单：行内 = 规则名 + 单点/禁令钩子 + 新增行指引，附指向 `docs/spec/` 详细文档的链接。**两档上限**（整行字符数，含文档列链接开销）：普通行 ≤250；钩子密集行（钩子 ≥7 个）与分期/合并行 ≤350。**下沉判据**：「下次写代码要照着做的」（禁令、单点函数名、错误码、同步点位）留行内；「为什么/怎么踩的」（机理、日期、事故经过、签名演变史）下沉 `docs/spec/`。**新行超上限须当场把超出细节下沉 `docs/spec/` 再回写钩子，禁先落行后治理**；分档细则与现存行归属见 [docs/spec/README.md](docs/spec/README.md)「两级分流规则」。
 
 ### 关键规则
 
@@ -58,7 +58,7 @@ workbench/
 |测试覆盖率分层门禁：后端 model/server ≥80% + service ≥76% 基线 + util ≥40%（排除 pty_windows.go）+ 主包不设门禁；前端 ≥70% 硬失败（exclude wailsjs）；改阈值须同步本文档 + docs/测试策略.md|[test-coverage-gate.md](docs/spec/test-coverage-gate.md)|
 |新增 service 须在 `app_services.go` 加 `AppServices` 字段 + `NewAppServices` 构造行（2 处）；`AppServices` 必须在 package main；构造纯 new，生命周期副作用留 startup/shutdown|[app-services-assembly.md](docs/spec/app-services-assembly.md)|
 |后端日志用 `log/slog`（禁 `println`）；service 调 `Logger()`，App 层调 `slog.X`；前端分流错误用 `model.AppError` 经 ErrorFormatter → `handleError` 按 code 分流；新增错误码三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）；**wails 升级回归 ErrorFormatter reject 链路**|[logging-and-errors.md](docs/spec/logging-and-errors.md)|
-|E2E 从 `frontend/e2e/fixtures.js` import `{test,expect}`（禁直 import @playwright/test）；mock 单一数据源 `wails-mock-defaults.js`；禁 `waitForTimeout`；`wailsjs/` 不入库 CI 先 `wails generate module`；**新增 spec 目录须同步 vitest `test.exclude`**；挂起解析 `{__deferred__}`+`releaseDeferred`；fixture 必须对齐后端 model 真实形状|[e2e-testing.md](docs/spec/e2e-testing.md)|
+|E2E 从 `frontend/e2e/fixtures.js` import `{ test, expect }`（禁直 import @playwright/test）；mock 单一数据源 `wails-mock-defaults.js`；禁 `waitForTimeout`；`wailsjs/` 不入库 CI 先 `wails generate module`；**新增 spec 目录须同步 vitest `test.exclude`**；挂起解析 `{__deferred__}`+`releaseDeferred`；fixture 必须对齐后端 model 真实形状|[e2e-testing.md](docs/spec/e2e-testing.md)|
 |前端还原 `ReadFileBytes` 返回的 base64 为文本用 `utils/base64.js` 的 `decodeBase64Utf8`，禁裸 `atob`（中文双重编码乱码，单测须用中文数据）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |后端跨包共用测试辅助入 `util/testutil`（RunGit/WriteFile/InitTempRepo 等六个），与前端 `wails-mock-defaults.js` 单一数据源对齐；专用辅助留 `*_test_helper.go` 不导出；**禁各 `_test.go` 重复定义 git 命令/临时仓库辅助**；集成 `it*` helper 不并入 testutil；辅助参数用 `testing.TB`|[perf-baseline.md §17](docs/spec/perf-baseline.md)|
 |依赖安全扫描：Go 用 `govulncheck ./...`，npm 用 `npm audit --registry=https://registry.npmjs.org --audit-level=high`（绕过 npmmirror）；CI security job 不阻塞 PR；标准库漏洞只能升 `go.mod` `toolchain` directive；升级后重跑 govulncheck 清零|[security-scan.md](docs/spec/security-scan.md)|
@@ -159,5 +159,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-10-28
-**文档版本：** v2.41
+**最后更新：** 2026-10-29
+**文档版本：** v2.42

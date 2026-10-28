@@ -44,6 +44,8 @@ Then route:
 
 ## Step 3: Archive task(s)
 
+**归档前分档自检**：若本会话向 `CLAUDE.md`「关键规则」表新增了行，逐行核两档上限（普通行 ≤250 字符；钩子密集行（钩子 ≥7 个）与分期/合并行 ≤350 字符；整行计数含文档列链接开销，口径见 `CLAUDE.md`「规范沉淀规则」第 2 条）。发现超限行时先走沉淀处置：把超出细节下沉到该行链接的 `docs/spec/<topic>.md`、行内回写为钩子、提交修正后回到 Step 1 重新检查；**禁先落行后治理**，不得带超限行归档。
+
 ```bash
 python ./.trellis/scripts/task.py archive <task-name>
 ```

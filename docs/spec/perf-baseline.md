@@ -550,6 +550,7 @@ Go 侧 benchmark：`go test -bench=BenchmarkFileTreeGetChildren_Scale -benchmem 
 **方案**：前端单层节点截断——`loadTreeNode` resolve 前经 `utils/treeTruncate.js`
 `truncateTreeNodes` 截至前 2000 项（`FILE_TREE_NODE_LIMIT` 硬编码常量，settings 化
 经评估收益不抵跨层契约成本），末尾追加哨兵提示节点（`truncation-hint` 类型，
+DOM class 为 `.truncation-hint-node`，NUL 合成 key；
 弱化展示、点击/右键均过滤，文案引导 Ctrl+P 文件搜索定位其余文件）。渲染量与本层
 目录规模解耦，OOM 结构性防死。
 
