@@ -1,0 +1,279 @@
+数据行数: 69
+总字符数: 49191
+
+--- 行1 [9字符] ---
+规则列(前80): 规则
+文档列(末列): 
+
+--- 行2 [357字符] ---
+规则列(前80): go-git 依赖已出清（2026-10-21，v6 仅 beta 不升级），**禁重新引入**；Git 元数据读取（HEAD SHA/分支名/detached
+文档列(末列): 
+
+--- 行3 [172字符] ---
+规则列(前80): 修改 `app.go` App 方法签名或 `model/` 导出 struct 字段时，须手动同步 `frontend/wailsjs/` 绑定（App.js
+文档列(末列): 
+
+--- 行4 [239字符] ---
+规则列(前80): `model/` 下 `type X string` 具名 string 类型作 Wails 绑定方法参数/返回值时，wails generate 不为它在 m
+文档列(末列): 
+
+--- 行5 [168字符] ---
+规则列(前80): 定制 `.trellis/workflow.md` 时只改正文描述；若增删 `[required · once]` 标记或步骤，必须同步修改对应 `[workf
+文档列(末列): 
+
+--- 行6 [200字符] ---
+规则列(前80): 测试覆盖率分层门禁：后端 model/server ≥80% + service ≥76% 基线 + util ≥40%（排除 pty_windows.go）+
+文档列(末列): 
+
+--- 行7 [284字符] ---
+规则列(前80): 新增 service 须在 `app_services.go` 的 `AppServices` struct 加字段 + `NewAppServices` 加构
+文档列(末列): 
+
+--- 行8 [566字符] ---
+规则列(前80): 后端日志用 `log/slog`（禁 `println`，无级别无落盘 GUI 不可见）；service 包内调 `Logger()`（SetLogger 注入
+文档列(末列): 
+
+--- 行9 [1073字符] ---
+规则列(前80): E2E 用例从 `frontend/e2e/fixtures.js` import `{test,expect}`（自动注入 Wails mock，禁直接 im
+文档列(末列): 
+
+--- 行10 [197字符] ---
+规则列(前80): 前端还原 `ReadFileBytes` 返回的 base64 为文本时用 `utils/base64.js` 的 `decodeBase64Utf8`，禁裸 
+文档列(末列): 
+
+--- 行11 [406字符] ---
+规则列(前80): 后端跨包共用测试辅助入 `util/testutil`（`RunGit`/`WriteFile`/`InitTempRepo`/`SetupMasterBran
+文档列(末列): 
+
+--- 行12 [320字符] ---
+规则列(前80): 依赖安全扫描：Go 用 `govulncheck ./...`（调用链分析，非全依赖树），npm 用 `npm audit --registry=https:/
+文档列(末列): 
+
+--- 行13 [346字符] ---
+规则列(前80): 崩溃恢复 UI 状态快照独立持久化 `data/session.json`（`SessionState`：selectedDirectoryId/activeP
+文档列(末列): 
+
+--- 行14 [475字符] ---
+规则列(前80): AI 结构化输出走 `--json-schema`（claude CLI tool use 强制，与自由文本 `result` 解耦，自由文本带 markdow
+文档列(末列): 
+
+--- 行15 [326字符] ---
+规则列(前80): AI 功能项支持纯 prompt 模式（`Command` 空 + `Params.PromptTemplate` 驱动，`Cwd` 空继承父进程目录），`va
+文档列(末列): 
+
+--- 行16 [287字符] ---
+规则列(前80): 新增内置 seed skill 须加入 `mergeMissingSeedSkills`（service/ai_function.go）白名单（现仅 `comm
+文档列(末列): 
+
+--- 行17 [294字符] ---
+规则列(前80): Wails 事件多组件共监听同事件（如 `ai-task:done` 被 AiFunctionPanel/LocalChanges/CommitHistory 
+文档列(末列): 
+
+--- 行18 [371字符] ---
+规则列(前80): 前端设计令牌：改 `--primary-color` 须同步 Element Plus `--el-color-primary` 派生（light-3~9 实色
+文档列(末列): 
+
+--- 行19 [1229字符] ---
+规则列(前80): 前端新增页面/组件视觉风格须守 frontend-visual-conventions（与 design-tokens 互补，本文指南层/契约层）：配色按语义选
+文档列(末列): 
+
+--- 行20 [431字符] ---
+规则列(前80): service 层发前端事件必须走 EventSink（`emitEvent(s.eventSink(), ...)`），禁直调 `runtime.Events
+文档列(末列): 
+
+--- 行21 [509字符] ---
+规则列(前80): 终端多 tab：xterm 实例禁重挂载/搬 DOM（v-show 保 DOM + 激活 refit，隐藏容器 fit 静默失败）；tab 列表 watch 须
+文档列(末列): 
+
+--- 行22 [694字符] ---
+规则列(前80): 新增带事件的 service 须同步 `web_serve.go` `applySink` 补 `SetEventSink` 行（现七服务：terminal/u
+文档列(末列): 
+
+--- 行23 [558字符] ---
+规则列(前80): Linux 支持：Wails 桌面构建须 `-tags webkit2_41`（Ubuntu 24.04 已移除 webkit2gtk-4.0 包）；无标签时桌
+文档列(末列): 
+
+--- 行24 [302字符] ---
+规则列(前80): 测试禁隐式依赖环境外部状态：文件 mtime 时序（NTFS 同 tick 不变）与固定端口（本机常驻 workbench.exe 监听 36115）均致偶发挂
+文档列(末列): 
+
+--- 行25 [230字符] ---
+规则列(前80): 统计类派生聚合缓存（如贡献者行数 numstat 缓存）复用 `commitHistoryCacheKey` 键与 headSHA+TTL 失效判定时，失效为二
+文档列(末列): 
+
+--- 行26 [351字符] ---
+规则列(前80): data/ 目录 JSON 持久化必须走 `util.SaveJSON` 原子写（CreateTemp 同目录 temp → fsync → os.Rename
+文档列(末列): 
+
+--- 行27 [877字符] ---
+规则列(前80): soak/泄漏测试三档轮次（`-soak-rounds` > `-short` 缩减 > 默认档 200/200/40/200 + 主包 30），泄漏断言口径为
+文档列(末列): 
+
+--- 行28 [1086字符] ---
+规则列(前80): 文件树单层超 2000 节点截断（`utils/treeTruncate.js` `truncateTreeNodes`，`FILE_TREE_NODE_LIM
+文档列(末列): 
+
+--- 行29 [452字符] ---
+规则列(前80): FileDiffDialog 关闭释放双时机：行数据清空挂 el-dialog `@closed`（destroy-on-close 渐隐期间 slot 未销毁
+文档列(末列): 
+
+--- 行30 [1853字符] ---
+规则列(前80): Git 操作取消链路：util 层 `ExecuteWithContext`/`ExecuteWithCodesWithContext`/`CloneWithC
+文档列(末列): 
+
+--- 行31 [1335字符] ---
+规则列(前80): 内容搜索超时收口（2026-09-30，非 git 域独立错误码）：`service/content_search.go` `searchWithRipgrep
+文档列(末列): 
+
+--- 行32 [575字符] ---
+规则列(前80): 进程枚举与终止（工具箱「进程管理」）：Windows 优雅停止能否生效**取决于目标进程是否响应，无法按「有无窗口」事前预判**（实测 `ping` 响应退出 
+文档列(末列): 
+
+--- 行33 [1122字符] ---
+规则列(前80): 多超时目录批量重试前端编排（2026-10-08，承接 fc5c733 单目录重试 MVP）：路径 B 前端编排 N 个单目录 `ContentSearchDi
+文档列(末列): 
+
+--- 行34 [841字符] ---
+规则列(前80): PPT 拆分体积 GC（B 档）与素材拆分集成（2026-10-14）：GC = 保留页真实链路（页→版式→母版→主题）rels 图可达性闭包剪除未用母版/版式
+文档列(末列): 
+
+--- 行35 [359字符] ---
+规则列(前80): PPT 按页拆分（工具箱）：纯 Go OOXML 标准库实现（禁 COM/外部 Office 依赖——CI 不可测），最小编辑集与页序三跳映射（slide 文件
+文档列(末列): 
+
+--- 行36 [443字符] ---
+规则列(前80): PPT 文件夹批量拆分（2026-10-19）：`SplitFolder` 递归扫描（WalkDir 字典序）串行逐文件，产物排除复用素材域 `isPptxSp
+文档列(末列): 
+
+--- 行37 [352字符] ---
+规则列(前80): 工具箱全窗口面板化（2026-10-19）：第二个独占一级面板（激活时三栏隐藏，`.main-panes` v-show 仅 directory）；7 工具全部
+文档列(末列): 
+
+--- 行38 [1173字符] ---
+规则列(前80): 素材管理（assets）：SQLite 只用 `modernc.org/sqlite` 纯 Go 零 CGO（禁 mattn 等CGO 驱动，破坏交叉编译）；F
+文档列(末列): 
+
+--- 行39 [2154字符] ---
+规则列(前80): 素材缩略图 COM 队列（assets-thumbs）：全部 COM 调用锁专用 STA goroutine（LockOSThread + CoInitiali
+文档列(末列): 
+
+--- 行40 [808字符] ---
+规则列(前80): 素材缩略图设置与前端消费（assets-thumbs PR3）：设置段 `AppSettings.assets` 五项（auto/smallWidth 320 
+文档列(末列): 
+
+--- 行41 [814字符] ---
+规则列(前80): 幻灯片独立标注（assets v5）：slide_tags/slide_meta 键 **`(file_id, slide_num)` 禁 slides.id*
+文档列(末列): 
+
+--- 行42 [1192字符] ---
+规则列(前80): 批量打标签 + 多级标签树（assets v6）：tags.parent_id 启用零迁移（父标签同表一行，新名自动建根）；级联命中=检索两路径分流前 `exp
+文档列(末列): 
+
+--- 行43 [847字符] ---
+规则列(前80): facet 多维筛选 + 保存检索条件（assets v7，SRS §2.5）：facet 条件构造单点 `assetsFacetFilter`（keyword
+文档列(末列): 
+
+--- 行44 [507字符] ---
+规则列(前80): 检索排序（assets v8）：三路径共用 `sortEntriesByOptions` 单点（相关性档原样返回零行为变化），执行位置=聚合前分页前；排序口径统
+文档列(末列): 
+
+--- 行45 [505字符] ---
+规则列(前80): 批量修改评分（assets v8，SRS §2.6 P0）：`BatchSetAssetRating` 单一入口混合文件/页目标（slideNum 0=文件；与
+文档列(末列): 
+
+--- 行46 [458字符] ---
+规则列(前80): 导出元数据（assets 第九批 §11.1）：长活导出**禁全程单 withStore**（全局 s.mu 分钟级阻塞素材域）——三段式：短会话物化行键（文件
+文档列(末列): 
+
+--- 行47 [604字符] ---
+规则列(前80): lost 状态机与重链（assets 第九批 §11.2/11.3）：扫描消失 DELETE 改 markFileLost（size/mtime/hash 原值
+文档列(末列): 
+
+--- 行48 [626字符] ---
+规则列(前80): 排除规则与 excluded 态（assets 第十批 §12.1/12.2）：ExcludeDirs **单段 glob**（`filepath.Match`
+文档列(末列): 
+
+--- 行49 [746字符] ---
+规则列(前80): 素材库备份与还原（assets 第十批 §12.3/12.4）：`VACUUM INTO` 单语句（**禁包显式 Tx、禁裸拷贝 db**——WAL 未 che
+文档列(末列): 
+
+--- 行50 [729字符] ---
+规则列(前80): 素材购物栏与合并导出（2026-10-19）：条目键 `<libraryId>\
+文档列(末列): 
+
+--- 行51 [429字符] ---
+规则列(前80): 素材域数据变更刷新统一入口（2026-10-20）：素材面板任何数据变更点位刷新（批量打标签/评分/标签管理/维护清理/文件与目录拖拽/保存标注/购物栏溯源前置
+文档列(末列): 
+
+--- 行52 [798字符] ---
+规则列(前80): pptx 文件树预览（COM 转 PDF + pdfjs viewer，2026-10-20）：转换任务排进 assets-thumbs 既有 STA work
+文档列(末列): 
+
+--- 行53 [613字符] ---
+规则列(前80): ElMessageBox.confirm 消费链三形态：递归恒弹（确认型错误码→confirm→重调→再弹组件内闭环，仅素材导出 runExport）/顺序两段
+文档列(末列): 
+
+--- 行54 [483字符] ---
+规则列(前80): 前端依赖分档钳制（2026-10-20）：39 顶层依赖四档登记——exact（element-plus 2.14.5 + @element-plus/icon
+文档列(末列): 
+
+--- 行55 [598字符] ---
+规则列(前80): mermaid 渲染链（2026-10-21 v12 升级）：消费面锁定 `import('mermaid')` 包说明符（禁直指 `dist/mermaid.
+文档列(末列): 
+
+--- 行56 [588字符] ---
+规则列(前80): 前端依赖 major 升级要点（2026-10-21 四 major 出清）：js-yaml v5 无 ESM default export 须 namespa
+文档列(末列): 
+
+--- 行57 [1544字符] ---
+规则列(前80): 浏览器通道安全三期（2026-10-23）：认证链 verify 化——`TokenVerifier` 函数注入替代单 token（`SetToken`/`Ro
+文档列(末列): 
+
+--- 行58 [767字符] ---
+规则列(前80): 连接管控（2026-10-23）：踢出=`WSHub.DisconnectClient(connID)`（mu 写锁内定位，**一期直 `conn.Close`
+文档列(末列): 
+
+--- 行59 [757字符] ---
+规则列(前80): 连接管控二期（2026-10-24，踢出审计 + 被踢端感知）：`DisconnectClient` 返回值扩 `(ConnDetail, bool)`，踢出改
+文档列(末列): 
+
+--- 行60 [916字符] ---
+规则列(前80): 连接管控三期（2026-10-24，审计可见性）：**actor 归因**——`requireToken` 认证成功后将 tokenID 注入 ctx（私有键 
+文档列(末列): 
+
+--- 行61 [1107字符] ---
+规则列(前80): 连接管控四期（2026-10-24，临时封禁）：封禁判定走 `BanCheck func(tokenID) string` 独立注入面（空串=放行、非空=含解封
+文档列(末列): 
+
+--- 行62 [915字符] ---
+规则列(前80): 连接管控五期（2026-10-26，认证失败自动封禁）：`server.IPBanCheck func(ip string) string` 注入面——**ve
+文档列(末列): 
+
+--- 行63 [1220字符] ---
+规则列(前80): 连接管控六期（2026-10-27，自动封禁治理增强：参数化+递增封禁）：`AppSettings.IPBan *IPBanSettings` 四 int 参数
+文档列(末列): 
+
+--- 行64 [1578字符] ---
+规则列(前80): 连接管控七期（2026-10-27，手动封禁+白名单豁免）：`IPBanService.Ban(ip, expiresAt, reason, actorSour
+文档列(末列): 
+
+--- 行65 [1620字符] ---
+规则列(前80): 连接管控八期（2026-10-27，CIDR 网段手动封禁）：`IPBanService.cidrBans []*ipBanCidrEntry` **独立列表*
+文档列(末列): 
+
+--- 行66 [1240字符] ---
+规则列(前80): 连接管控九期（2026-10-28，攻击源网段聚合建议）：聚合口径写死 doc comment——固定粒度 IPv4 /24 + IPv6 /64 **禁动态推
+文档列(末列): 
+
+--- 行67 [1552字符] ---
+规则列(前80): 连接管控十期（2026-10-28，攻击源趋势面：审计历史聚合）：数据面读侧懒扫——`QueryIPBanTrend` 面板打开时扫审计主+`.1` 复用 `r
+文档列(末列): 
+
+--- 行68 [1260字符] ---
+规则列(前80): 连接管控十一期（2026-10-28，审计留存扩展与趋势回看保障）：审计轮转链单文件 5MB 固定深度 N 档（`webAuditMaxRotationDept
+文档列(末列): 
+
+--- 行69 [354字符] ---
+规则列(前80): 设置段增删跨层同步双单点（2026-10-28 遗留收口）：`AppSettings.EnsureAllDefaults()`（Ensure 串联，Load 缓
+文档列(末列): 
+

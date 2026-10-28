@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-28-claude-md/prd.md", "reason": "任务需求与 Q1-Q5 已定决策（分档上限/合并形态/对照表落点/行25承接/行序不变），执行标尺"}
+{"file": ".trellis/tasks/10-28-claude-md/research/table-audit.txt", "reason": "68 行逐行字符数与内容清单，瘦身对照底稿"}
+{"file": "docs/spec/README.md", "reason": "两级分流规则原文 + 文件索引现状（需补 4 缺失条目：ai-chat-service/assets-thumbs-com/linux-platform/pptx-preview）"}
+{"file": "docs/spec/browser-channel.md", "reason": "连接管控一~十期承接主文档；合并总行前须核对其分期导航完整性，缺则先补"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "行8/30/31/68 承接文档；行68 审计留存 §8.2 独立瘦身的承接核对"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "跨层契约多行（3/4/10/13/17/69）承接；内含 2026-10-28 设置段双单点先例（~800字→~230字）为本次瘦身的形态示范"}
+{"file": "docs/spec/perf-baseline.md", "reason": "行27/28/29 既有承接 + 行25（统计类缓存两入口联动）新承接小节的落点文档"}

@@ -1,0 +1,146 @@
+行1 | 路径: NONE
+    探针: []
+    !! 无承接文档
+
+行5 | 路径: ['.trellis/workflow.md']
+    探针: ['.trellis/workflow.md', '[required · once]', '[workflow-state:*]']
+    .trellis/workflow.md: PART hit=2/3 miss=['.trellis/workflow.md']
+
+行8 | 路径: ['docs/spec/logging-and-errors.md']
+    探针: ['log/slog', 'println', 'Logger()', 'slog.X', 'model.AppError{Code,Message}', 'main.go', '{code,message}', 'handleError']
+    docs/spec/logging-and-errors.md: PART hit=4/8 miss=['log/slog', 'slog.X', 'model.AppError{Code,Message}']
+
+行9 | 路径: ['docs/spec/e2e-testing.md']
+    探针: ['frontend/e2e/fixtures.js', '{test,expect}', '@playwright/test', 'src/test/wails-mock-defaults.js', 'waitForTimeout', '//go:build integration', '-tags=integration', 'frontend/wailsjs/']
+    docs/spec/e2e-testing.md: PART hit=6/8 miss=['frontend/e2e/fixtures.js', '{test,expect}']
+
+行11 | 路径: ['docs/spec/perf-baseline.md']
+    探针: ['util/testutil', 'RunGit', 'WriteFile', 'InitTempRepo', 'SetupMasterBranch', 'SetupFFRepo', 'SetupConflictRepo', 'wails-mock-defaults.js']
+    docs/spec/perf-baseline.md: PART hit=3/8 miss=['InitTempRepo', 'SetupMasterBranch', 'SetupFFRepo']
+
+行13 | 路径: ['docs/spec/cross-layer-contracts.md']
+    探针: ['data/session.json', 'SessionState', 'Terminal', 'omitempty', 'TerminalSnapshot', 'model/terminal.go', 'frontend/wailsjs/']
+    docs/spec/cross-layer-contracts.md: PART hit=2/7 miss=['data/session.json', 'SessionState', 'Terminal']
+
+行15 | 路径: ['docs/spec/ai-structured-output.md']
+    探针: ['Command', 'Params.PromptTemplate', 'validateFunctions', 'BuildStagePrompt', '{{key}}']
+    docs/spec/ai-structured-output.md: PART hit=1/5 miss=['Command', 'Params.PromptTemplate', 'BuildStagePrompt']
+
+行18 | 路径: ['docs/spec/design-tokens.md']
+    探针: ['--primary-color', '--el-color-primary', 'rgba(2,6,23,…)', '--terminal-bg', 'useTerminal.js', '--bg-primary']
+    docs/spec/design-tokens.md: PART hit=5/6 miss=['rgba(2,6,23,…)']
+
+行19 | 路径: ['docs/spec/frontend-visual-conventions.md']
+    探针: ['left:0', '--shadow-sm', '--shadow-md', 'letter-spacing:-0.01em', "'Geist','Consolas','Monaco',monospace", '--radius-lg', '--radius-md', 'min(像素,视口比例)']
+    docs/spec/frontend-visual-conventions.md: PART hit=5/8 miss=['letter-spacing:-0.01em', "'Geist','Consolas','Monaco',monospace", 'min(像素,视口比例)']
+
+行20 | 路径: ['docs/spec/browser-channel.md']
+    探针: ['emitEvent(s.eventSink(), ...)', 'runtime.EventsEmit', 'wailsRuntimeUnavailable', 'E_RPC_*', 'Emit', 'seqMu']
+    docs/spec/browser-channel.md: PART hit=5/6 miss=['emitEvent(s.eventSink(), ...)']
+
+行21 | 路径: ['docs/spec/terminal-multi-session.md']
+    探针: ['workDir', 'fullscreen ⇒ visible', 'defaultPrevented', '.el-overlay/.xterm-helper-textarea', 'el-input-number', ':value-on-clear']
+    docs/spec/terminal-multi-session.md: PART hit=5/6 miss=['.el-overlay/.xterm-helper-textarea']
+
+行23 | 路径: ['docs/spec/linux-platform.md']
+    探针: ['-tags webkit2_41', '_windows/_other', 'workbench-linux-amd64.tar.gz', 'build/', '!build/README-linux.md', '_windows_test.go', '_linux_test.go', 'FALLBACK_SHELL']
+    docs/spec/linux-platform.md: PART hit=7/8 miss=['_windows/_other']
+
+行25 | 路径: NONE
+    探针: ['commitHistoryCacheKey', 'InvalidateCommitHistoryCache', 'ClearAllCommitHistoryCache']
+    !! 无承接文档
+
+行28 | 路径: ['docs/spec/perf-baseline.md']
+    探针: ['utils/treeTruncate.js', 'truncateTreeNodes', 'FILE_TREE_NODE_LIMIT', 'loadTreeNode', "type='truncation-hint'", '${parentPath}\\0truncation-hint', 'scripts/frontend-memory-tree.mjs', '.truncation-hint-node']
+    docs/spec/perf-baseline.md: PART hit=5/8 miss=["type='truncation-hint'", '${parentPath}\\0truncation-hint', '.truncation-hint-node']
+
+行29 | 路径: ['docs/spec/perf-baseline.md']
+    探针: ['@closed', 'loadSeq++', 'releaseDiffData', 'getCurrentNode()', 'return currentNode.data', 'scripts/frontend-memory-retention.mjs']
+    docs/spec/perf-baseline.md: PART hit=3/6 miss=['releaseDiffData', 'getCurrentNode()', 'return currentNode.data']
+
+行30 | 路径: ['docs/spec/logging-and-errors.md']
+    探针: ['ExecuteWithContext', 'ExecuteWithCodesWithContext', 'CloneWithContext', 'context.Canceled', 'cancels', 'opLocks', 'opMu', 'normalizeRepoKey']
+    docs/spec/logging-and-errors.md: MISS hit=0/8 miss=['ExecuteWithContext', 'ExecuteWithCodesWithContext', 'CloneWithContext']
+
+行31 | 路径: ['docs/spec/logging-and-errors.md']
+    探针: ['service/content_search.go', 'searchWithRipgrep', 'ctx.Err()', 'E_SEARCH_TIMEOUT', 'nil,nil', 'rg failed', 'ContentSearch', 'searchWithGo']
+    docs/spec/logging-and-errors.md: PART hit=6/8 miss=['service/content_search.go', 'nil,nil']
+
+行33 | 路径: ['docs/spec/logging-and-errors.md']
+    探针: ['ContentSearchDirs', 'ContentSearchDirs(allDirs)', 'retryOneDir(group, version)', 'retryTimedOutGroup', 'retryAllTimedOutGroups', 'searchVersion', 'executeContentSearch', 'open']
+    docs/spec/logging-and-errors.md: PART hit=7/8 miss=['ContentSearchDirs(allDirs)']
+
+行35 | 路径: ['docs/spec/pptx-split.md']
+    探针: ['_rels/', 'pptx-split:*']
+    docs/spec/pptx-split.md: PART hit=1/2 miss=['pptx-split:*']
+
+行38 | 路径: ['docs/spec/assets-management.md']
+    探针: ['modernc.org/sqlite', 'splitFtsText', 'detail=full', 'SetMaxOpenConns(1)', '<源文件名>/<源文件名>-NN.pptx', 'isPptxSplitDerivative', 'derived/', "'delete-all'"]
+    docs/spec/assets-management.md: PART hit=7/8 miss=["'delete-all'"]
+
+行39 | 路径: ['docs/spec/assets-thumbs-com.md']
+    探针: ['jr.Result', '<fileID>-<3位页>.png', 'jumpCh', 'WHERE EXISTS(files)', '"<nil>"', 'data/assets/com_owned_pids.json', 'PutProperty(app,"Visible",msoTrue)']
+    docs/spec/assets-thumbs-com.md: PART hit=5/7 miss=['WHERE EXISTS(files)', 'PutProperty(app,"Visible",msoTrue)']
+
+行42 | 路径: NONE
+    探针: ['expandTagDescendants', 'addTags/removeTags', 'ensureTagsByNames']
+    !! 无承接文档
+
+行53 | 路径: ['docs/spec/confirm-dialog.md']
+    探针: ['.first()', '.last()', ':visible', 'filter(hasText)', '.el-message-box', "vi.mock('element-plus')"]
+    docs/spec/confirm-dialog.md: PART hit=4/6 miss=['filter(hasText)', "vi.mock('element-plus')"]
+
+行54 | 路径: ['docs/spec/frontend-dep-upgrade.md']
+    探针: ['~x.y.0', 'scripts/check-dep-consistency.mjs', '~<原声明值>', '--selftest']
+    docs/spec/frontend-dep-upgrade.md: PART hit=3/4 miss=['~<原声明值>']
+
+行55 | 路径: ['docs/spec/mermaid-rendering.md']
+    探针: ["import('mermaid')", 'dist/mermaid.esm.min.mjs', 'run({nodes, suppressErrors:true})', "layout:'dagre'", "look:'classic'", 'PreviewFile', "kind:'text'"]
+    docs/spec/mermaid-rendering.md: PART hit=3/7 miss=['run({nodes, suppressErrors:true})', "layout:'dagre'", "look:'classic'"]
+
+行59 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['DisconnectClient', '(ConnDetail, bool)', 'enqueueKickFrames', 'ws-kicked', 'conn.Close', 'kicked', 'conn_kick', 'AuditLogger.LogConnKick']
+    docs/spec/browser-channel.md: OK hit=8/8
+    docs/spec/logging-and-errors.md: PART hit=2/8 miss=['DisconnectClient', '(ConnDetail, bool)', 'enqueueKickFrames']
+
+行60 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['requireToken', 'WebOptions.RPCTargetForActor', 'rpcAuditTarget', '*App', 'KickConnection', 'AuditRecord', 'actorSource', 'actorTokenId']
+    docs/spec/browser-channel.md: OK hit=8/8
+    docs/spec/logging-and-errors.md: PART hit=6/8 miss=['WebOptions.RPCTargetForActor', '*App']
+
+行61 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['BanCheck func(tokenID) string', 'requireToken', 'ServeHTTP', 'assembleWebServe', 'WebOptions.BanCheck', 'NewWSHub', 'utils/tokenBan.js', 'data/web_bans.json']
+    docs/spec/browser-channel.md: PART hit=7/8 miss=['utils/tokenBan.js']
+    docs/spec/logging-and-errors.md: PART hit=1/8 miss=['BanCheck func(tokenID) string', 'ServeHTTP', 'assembleWebServe']
+
+行62 | 路径: NONE
+    探针: ['server.IPBanCheck func(ip string) string', 'service.IPBanService', '[::1]:port', 'ClearAll()', 'ip_ban', 'ip_unban', 'App.UnbanIP', 'unbanIPAs']
+    !! 无承接文档
+
+行63 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['AppSettings.IPBan *IPBanSettings', 'EnsureIPBanDefaults', 'EnsureAllDefaults', 'SetIPBanConfig', 'ApplyConfig', 'ApplyConfig', 'ApplyConfig', 'escalateBanDuration']
+    docs/spec/browser-channel.md: OK hit=8/8
+    docs/spec/logging-and-errors.md: PART hit=5/8 miss=['AppSettings.IPBan *IPBanSettings', 'EnsureIPBanDefaults', 'escalateBanDuration']
+
+行64 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['banActive', 'data/ip_bans.json', 'SetBansPath', 'IPBanSettings.Whitelist', 'isWhitelistedIP', 'parseIPBanWhitelistEntry', 'ApplyConfig', '[]*net.IPNet']
+    docs/spec/browser-channel.md: OK hit=8/8
+    docs/spec/logging-and-errors.md: PART hit=2/8 miss=['banActive', 'SetBansPath', 'IPBanSettings.Whitelist']
+
+行65 | 路径: ['docs/spec/browser-channel.md', 'docs/spec/logging-and-errors.md']
+    探针: ['IPBanService.cidrBans []*ipBanCidrEntry', '*net.IPNet', 'RejectMessage', 'isWhitelistedIP', '0.0.0.0/0', 'matchCidrBan', 'RecordFailure', 'parseIPBanWhitelistEntry']
+    docs/spec/browser-channel.md: OK hit=8/8
+    docs/spec/logging-and-errors.md: PART hit=1/8 miss=['IPBanService.cidrBans []*ipBanCidrEntry', '*net.IPNet', 'RejectMessage']
+
+行66 | 路径: ['docs/spec/browser-channel.md']
+    探针: ['source=auto', 'bannedAt', '::ffff:x.x.x.x', 'aggregateIPsToSuggestions', 'sort.SliceStable', 'IPBanSettings.AggregateSuggestThreshold', 'suggestThreshold', 'SetIPBanConfig']
+    docs/spec/browser-channel.md: PART hit=7/8 miss=['::ffff:x.x.x.x']
+
+行68 | 路径: ['docs/spec/logging-and-errors.md']
+    探针: ['webAuditMaxRotationDepth', 'webAuditMaxBytes', 'rotateLocked', '.N-1', 'audit_log_windows_test.go', 'audit_log_linux_test.go', 'readSnapshot', 'QueryIPBanTrend']
+    docs/spec/logging-and-errors.md: PART hit=7/8 miss=['.N-1']
+
+行69 | 路径: ['docs/spec/cross-layer-contracts.md']
+    探针: ['AppSettings.EnsureAllDefaults()', 'AppSettings.PrivateCopy()']
+    docs/spec/cross-layer-contracts.md: MISS hit=0/2 miss=['AppSettings.EnsureAllDefaults()', 'AppSettings.PrivateCopy()']
+

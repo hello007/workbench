@@ -1,0 +1,45 @@
+行11 探针=['Branch', 'Conflict', 'FFRepo', 'InitTempRepo', 'Master', 'RunGit', 'Setup', 'SetupConflictRepo', 'SetupFFRepo', 'SetupMasterBranch', 'Write', 'WriteFile', '_test_helper', 'defaults']
+    docs/spec/perf-baseline.md: PART miss=['Branch', 'Conflict', 'FFRepo', 'InitTempRepo', 'Master', 'Setup', 'SetupConflictRepo', 'SetupFFRepo', 'SetupMasterBranch', '_test_helper', 'defaults']
+
+行13 探针=['Session', 'SessionState', 'Snapshot', 'State', 'Terminal', 'TerminalSnapshot', 'frontend', 'omitempty', 'session', 'terminal', 'wailsjs']
+    docs/spec/cross-layer-contracts.md: PART miss=['Session', 'SessionState', 'Snapshot', 'Terminal', 'TerminalSnapshot', 'session', 'terminal']
+
+行15 探针=['Build', 'BuildStagePrompt', 'Command', 'Params', 'Prompt', 'PromptTemplate', 'Stage', 'Template', 'validateFunctions']
+    docs/spec/ai-structured-output.md: PART miss=['Build', 'BuildStagePrompt', 'Command', 'Prompt', 'PromptTemplate', 'Template']
+
+行28 探针=['0truncation', 'FILE_TREE_NODE_LIMIT', 'frontend', 'loadTreeNode', 'memory', 'onNodeContextMenu', 'parentPath', 'refreshAfterFileOp', 'refreshAfterFilterOp', 'scripts', 'treeTruncate', 'truncateTreeNodes', 'truncation']
+    docs/spec/perf-baseline.md: PART miss=['0truncation']
+
+行29 探针=['closed', 'currentNode', 'frontend', 'getCurrentNode', 'loadSeq', 'memory', 'releaseDiffData', 'retention', 'return', 'scripts']
+    docs/spec/perf-baseline.md: PART miss=['currentNode', 'getCurrentNode', 'releaseDiffData']
+
+行30 探针=['Cancel', 'Canceled', 'Cancelled', 'Clone', 'CloneWithContext', 'Codes', 'Context', 'Deadline', 'DeadlineExceeded', 'E_GIT_LOCKED', 'E_GIT_TIMEOUT', 'ErrOperationCancelled', 'Error', 'Exceeded']
+    docs/spec/logging-and-errors.md: PART miss=['Canceled', 'Clone', 'CloneWithContext', 'Context']
+
+行31 探针=['Content', 'ContentSearch', 'ContentSearchGroup', 'E_SEARCH_TIMEOUT', 'Group', 'Search', 'Timed', 'TimedOut', 'content_search', 'defaults', 'executeContentSearch', 'failed', 'groups', 'handleError']
+    docs/spec/logging-and-errors.md: PART miss=['content_search']
+
+行59 探针=['Audit', 'AuditLogger', 'AuditRecord', 'Client', 'Close', 'ConnDetail', 'ConnID', 'Detail', 'Disconnect', 'DisconnectClient', 'LogConnKick', 'Logger', 'Record', 'conn_kick']
+    docs/spec/browser-channel.md: OK miss=[]
+    docs/spec/logging-and-errors.md: PART miss=['Client', 'Close', 'ConnDetail', 'Detail', 'Disconnect', 'DisconnectClient']
+
+行60 探针=['Audit', 'AuditLogger', 'AuditRecord', 'Connection', 'KickConnection', 'Logger', 'Object', 'Options', 'Query', 'QueryAuditLog', 'RPCHiddenMethods', 'RPCTargetForActor', 'Record', 'WebOptions']
+    docs/spec/browser-channel.md: PART miss=['Object']
+    docs/spec/logging-and-errors.md: PART miss=['RPCTargetForActor']
+
+行61 探针=['BanCheck', 'BanTokenDialog', 'Check', 'Dialog', 'Expires', 'ExpiresAt', 'NewWSHub', 'Options', 'Serve', 'ServeHTTP', 'Token', 'WebOptions', 'assembleWebServe', 'requireToken']
+    docs/spec/browser-channel.md: OK miss=[]
+    docs/spec/logging-and-errors.md: PART miss=['BanCheck', 'BanTokenDialog', 'Check', 'Dialog', 'Expires', 'ExpiresAt', 'NewWSHub', 'Serve', 'ServeHTTP', 'assembleWebServe']
+
+行63 探针=['AppSettings', 'Apply', 'ApplyConfig', 'Audit', 'AuditRecord', 'Config', 'Defaults', 'Ensure', 'EnsureAllDefaults', 'EnsureIPBanDefaults', 'IPBanConfig', 'IPBanDefaults', 'IPBanSettings', 'IPBanStatus']
+    docs/spec/browser-channel.md: OK miss=[]
+    docs/spec/logging-and-errors.md: PART miss=['EnsureIPBanDefaults', 'IPBanDefaults', 'IPBanSettings', 'IPBanStatus']
+
+行64 探针=['Apply', 'ApplyConfig', 'Config', 'E_IP_BAN_IP_REQUIRED', 'E_IP_BAN_WHITELISTED', 'IPBanConfig', 'IPBanService', 'IPBanSettings', 'LogIPBan', 'SetBansPath', 'SetIPBanConfig', 'Whitelist', 'actorSource', 'actorTokenID']
+    docs/spec/browser-channel.md: OK miss=[]
+    docs/spec/logging-and-errors.md: PART miss=['E_IP_BAN_IP_REQUIRED', 'E_IP_BAN_WHITELISTED', 'IPBanSettings', 'SetBansPath', 'Whitelist', 'actorTokenID']
+
+行65 探针=['BanCIDR', 'Covered', 'CoveredBy', 'E_IP_BAN_CIDR_INVALID', 'E_IP_BAN_CIDR_WHITELISTED', 'Failure', 'IPBanRecord', 'IPBanService', 'IPBanStatus', 'Message', 'Record', 'RecordFailure', 'Reject', 'RejectMessage']
+    docs/spec/browser-channel.md: OK miss=[]
+    docs/spec/logging-and-errors.md: PART miss=['Covered', 'CoveredBy', 'E_IP_BAN_CIDR_INVALID', 'E_IP_BAN_CIDR_WHITELISTED', 'IPBanRecord', 'IPBanStatus', 'Reject', 'RejectMessage']
+

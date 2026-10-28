@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-28-claude-md/prd.md", "reason": "验收标准：分档上限/零语义变化定义/README 索引一致/v2.41/journal 度量"}
+{"file": ".trellis/tasks/10-28-claude-md/research/migration-map.md", "reason": "逐行对照表（原行→瘦身后行→承接锚点→下沉清单），零信息丢失核对依据"}
+{"file": ".trellis/tasks/10-28-claude-md/research/table-audit.txt", "reason": "瘦身前 68 行原文清单，逐行核对下沉内容无删除"}
+{"file": "docs/spec/README.md", "reason": "核对索引与文档实际清单一致"}
