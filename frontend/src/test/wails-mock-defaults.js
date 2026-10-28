@@ -472,6 +472,10 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 形参，七参透传天然兼容）
   SetIPBanConfig: null,
 
+  // 审计日志留存参数保存（连接管控十一期「保存+生效」单点，双参 maxBytesMB/depth）：
+  // void 返回 null 安全 no-op（mock 不声明形参，双参透传天然兼容）
+  SetAuditConfig: null,
+
   // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----
   // 形状对齐 model.PptxPreviewResult { pdfPath, error, errorCode }（见
   // frontend/wailsjs/go/models.ts）。默认降级态（CI 无 PowerPoint）：

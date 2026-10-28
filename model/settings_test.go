@@ -409,3 +409,65 @@ func TestNormalizeIPBanSettings(t *testing.T) {
 		t.Errorf("聚合建议阈值越上限应收敛, got %d", up.AggregateSuggestThreshold)
 	}
 }
+
+// TestAppSettings_EnsureAuditDefaults 覆盖审计留存段默认值与越界收敛（连接管控
+// 十一期）：段缺失补两项全默认、零值回默认、越界 clamp、界内保留。
+func TestAppSettings_EnsureAuditDefaults(t *testing.T) {
+	t.Run("段缺失补两项全默认", func(t *testing.T) {
+		s := &AppSettings{}
+		s.EnsureAuditDefaults()
+		want := DefaultAuditSettings()
+		if s.Audit == nil || *s.Audit != want {
+			t.Fatalf("段缺失应补默认值, got %+v", s.Audit)
+		}
+	})
+
+	t.Run("零值字段回默认", func(t *testing.T) {
+		s := &AppSettings{Audit: &AuditSettings{}}
+		s.EnsureAuditDefaults()
+		if !reflect.DeepEqual(*s.Audit, DefaultAuditSettings()) {
+			t.Errorf("零值字段应回默认, got %+v", s.Audit)
+		}
+	})
+
+	cases := []struct {
+		name string
+		in   AuditSettings
+		want AuditSettings
+	}{
+		{name: "越界收敛", in: AuditSettings{MaxBytesMB: 0, Depth: 99},
+			want: AuditSettings{MaxBytesMB: DefaultAuditMaxBytesMB, Depth: MaxAuditDepth}},
+		{name: "低于下限收敛", in: AuditSettings{MaxBytesMB: -3, Depth: 1},
+			want: AuditSettings{MaxBytesMB: MinAuditMaxBytesMB, Depth: MinAuditDepth}},
+		{name: "越上限收敛", in: AuditSettings{MaxBytesMB: 999, Depth: 10},
+			want: AuditSettings{MaxBytesMB: MaxAuditMaxBytesMB, Depth: MaxAuditDepth}},
+		{name: "界内取值原样保留", in: AuditSettings{MaxBytesMB: 8, Depth: 4},
+			want: AuditSettings{MaxBytesMB: 8, Depth: 4}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &AppSettings{Audit: &c.in}
+			s.EnsureAuditDefaults()
+			if !reflect.DeepEqual(*s.Audit, c.want) {
+				t.Errorf("clamp 结果不符, got %+v, want %+v", *s.Audit, c.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeAuditSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝
+// normalize 后返回且不改写入参（对齐 NormalizeIPBanSettings 先例）。
+func TestNormalizeAuditSettings(t *testing.T) {
+	if got := NormalizeAuditSettings(nil); got != DefaultAuditSettings() {
+		t.Fatalf("nil 应返回默认值, got %+v", got)
+	}
+	in := &AuditSettings{MaxBytesMB: 99, Depth: 1}
+	got := NormalizeAuditSettings(in)
+	if got.MaxBytesMB != MaxAuditMaxBytesMB || got.Depth != MinAuditDepth {
+		t.Fatalf("越界值应 clamp, got %+v", got)
+	}
+	// 入参不被修改（共享缓存指针防竞态纪律）
+	if in.MaxBytesMB != 99 || in.Depth != 1 {
+		t.Fatalf("入参不应被原地修改, got %+v", in)
+	}
+}

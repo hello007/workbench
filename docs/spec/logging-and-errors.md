@@ -207,7 +207,7 @@ catch (error) {
 
 ## 8. 审计事件表（web_audit.log）
 
-`service.AuditLogger` 落盘 JSONL（`data/web_audit.log`，O_APPEND 5MB 轮转 `.1`，豁免原子写口径；**禁落明文 token 与完整 URL**）。全部写入收敛 `write` 单点，两个出口：`Log`（认证事件经 server OnAuth 回调透传、token 生命周期经 WebTokenService）与 `LogConnKick`（连接管控动作，App 层专用）。**时序纪律：动作生效后才写**——hub 命中才落 conn_kick（miss/停机不写）、token 事件在 SaveJSON 成功后发（落盘失败回滚不留已发审计行）。
+`service.AuditLogger` 落盘 JSONL（`data/web_audit.log`，O_APPEND 追加，超限轮转入多档链 `.1`…`.N`（连接管控十一期，默认 6 档×5MB，详见 §8.2），豁免原子写口径；**禁落明文 token 与完整 URL**）。全部写入收敛 `write` 单点，两个出口：`Log`（认证事件经 server OnAuth 回调透传、token 生命周期经 WebTokenService）与 `LogConnKick`（连接管控动作，App 层专用）。**时序纪律：动作生效后才写**——hub 命中才落 conn_kick（miss/停机不写）、token 事件在 SaveJSON 成功后发（落盘失败回滚不留已发审计行）。
 
 | 事件 | 产出点 | 关键字段 |
 |---|---|---|
@@ -224,9 +224,61 @@ catch (error) {
 
 ### 8.1 读侧 API（QueryAuditLog，2026-10-24 连接管控三期）
 
-`AuditLogger.QueryAuditLog(AuditQueryOptions) (AuditQueryResult, error)`：过滤（`Events []string` 白名单 / `From`/`To` unix 秒含边界 0=不限 / `TokenID` 命中 `TokenID` **或** `ActorTokenID` 任一即相关——同一令牌可为事件主体、认证者或踢出操作者）→ 合并读 `<path>.1`（旧）+ 主文件（新）→ 时间倒序分页（`Offset`/`Limit`，缺省 100、上限钳 500，`Records` 恒非 nil，`Total` 为过滤后总数）。**快照语义**：打开-读-关闭不持写锁（与 O_APPEND 单行原子追加并发安全）；读期间轮转 rename 窗口可能重复/漏读边界单行，可接受偏差（观测面非正确性依赖）；坏行（非法 JSON / 缺 event 字段）跳过——读方容错，写侧不保证行完整性。**消费面与隐私红线**：唯一合法消费面为桌面 App 绑定 `QueryAuditLog`（前端设置页「审计日志」弹窗）；浏览器通道经 `server.WebOptions.RPCHiddenMethods` 屏蔽（呈现「方法不存在」，见 browser-channel.md §2.2）——新增纯桌面数据面方法须同步追加该屏蔽列表，漏加 = 全谱 IP/令牌明细经同构 RPC 面外泄。
+`AuditLogger.QueryAuditLog(AuditQueryOptions) (AuditQueryResult, error)`：过滤（`Events []string` 白名单 / `From`/`To` unix 秒含边界 0=不限 / `TokenID` 命中 `TokenID` **或** `ActorTokenID` 任一即相关——同一令牌可为事件主体、认证者或踢出操作者）→ 合并读轮转链全部档位（旧，`<path>.N`…`<path>.1`，按当前 depth 构造）+ 主文件（新）→ 时间倒序分页（`Offset`/`Limit`，缺省 100、上限钳 500，`Records` 恒非 nil，`Total` 为过滤后总数）。**快照语义**：打开-读-关闭不持写锁（与 O_APPEND 单行原子追加并发安全）；读写竞速平台分叉（十一期实测，见 §8.2）：Windows 下读打开的档使写侧 rename 失败（写侧停链降级自愈，读侧拿轮转前一致快照），Unix 下 rename 不受阻、读期间轮转窗口可能重复/漏读边界单行——均属可接受偏差（观测面非正确性依赖）；坏行（非法 JSON / 缺 event 字段）跳过——读方容错，写侧不保证行完整性。**消费面与隐私红线**：唯一合法消费面为桌面 App 绑定 `QueryAuditLog`（前端设置页「审计日志」弹窗）；浏览器通道经 `server.WebOptions.RPCHiddenMethods` 屏蔽（呈现「方法不存在」，见 browser-channel.md §2.2）——新增纯桌面数据面方法须同步追加该屏蔽列表，漏加 = 全谱 IP/令牌明细经同构 RPC 面外泄。
 
 操作者归因链路（写侧）：桌面路径 `KickConnection` 恒 `kickConnectionAs(connID, "desktop", "")`；浏览器 RPC 路径经 `requireToken` ctx 注入 + `rpcAuditTarget` per-request 装饰 override 捕获调用者令牌 ID（见 browser-channel.md §2.2/§2.3）。
+
+### 8.2 审计留存多档轮转链（2026-10-28 连接管控十一期）
+
+#### Scope / Trigger
+
+十期趋势面数据源为审计行懒扫，但审计留存 5MB×2（约 6 万行）在认证失败潮下数小时即轮转一轮，`TrendWindowDays` 默认 7 天回看窗口名存实亡。十一期扩轮转链深度：**审计 JSONL 单一数据源不变**，读侧 `readSnapshot` 多档合并，`QueryIPBanTrend` / `QueryAuditLog` 两消费面零改动透明受益。十期 Out of Scope「不做多份轮转链」由本期转正（`webAuditMaxBytes` doc comment 落转正理由）。
+
+#### Signatures
+
+- 轮转（写侧单点）：`rotateLocked(incoming int64)`——持 `a.mu`，超限时链式下移 `for i := depth-1; i >= 1; i--`（源档 Stat 不存在跳过，`os.Rename` 失败即 Warn **停链 return**）后 `rename(path, path+".1")`。Windows 走 MoveFileEx REPLACE_EXISTING 覆盖已存在目标档。
+- 读侧（单点）：`readSnapshot() ([]AuditRecord, error)`——**锁内快照 depth 后**构造档位列表 `path.N … path.1 + path`（时间正序拼接，最旧档在前）；depth 经热更缩小后残留超深度旧档**不入读也不删除**（静默滞留磁盘，容量口径以新配置为准）。
+- 热更生效点：`(a *AuditLogger) ApplyConfig(maxBytes int64, depth int)`——mu 锁内整体替换两字段；**仅面向未来**（已超限主文件不立即轮转，下次写入达限触发；depth 缩小不追溯清理）。
+- 设置面：`model.AuditSettings{MaxBytesMB int, Depth int}`（`AppSettings.Audit *AuditSettings`，`json:"audit,omitempty"` 段缺失全默认）+ `EnsureAuditDefaults` 挂 Load/Save 双链路（**现五处 Ensure**，新增段须同步两处）+ `App.SetAuditConfig(maxBytesMB, depth int) error`（normalize → GetSettings 基底四指针段私有拷贝合并写 → Save → `webAuditSvc.ApplyConfig(MB→字节换算)`，对齐六期 SetIPBanConfig「保存+生效」显式单点，**禁走通用 SaveSettings 隐式联动**）。
+- 装配：`NewAppServices` 构造 `webAuditSvc` 后紧随 `settingsSvc.Load()` 归一值 `ApplyConfig` 注入启动初值（对齐 ipBanSvc 六期形态）。
+
+#### Contracts（参数与 clamp）
+
+| 参数 | clamp | 默认 | 语义 |
+|---|---|---|---|
+| `maxBytesMB` | 1–20 | 5 | 单档字节上限（生产常量 `webAuditMaxBytes` = 5MB 仍为构造缺省） |
+| `depth` | 2–10 | 6 | 链档位深度（生产常量 `webAuditMaxRotationDepth`）；总容量 = (depth+1)×maxBytes，默认 35MB、上限 220MB |
+
+无新错误码：clamp 走 `NormalizeAuditSettings` 静默收敛（零值回退默认、越界收敛边界），无失败分支。
+
+#### Validation & Error Matrix（写侧降级口径）
+
+| 形态 | 行为 |
+|---|---|
+| rename 链任一环失败（含 Windows 读句柄占用 sharing violation） | slog.Warn **停链 return**：后续档保持现状、主→.1 不执行、本行照常追加主文件（超限容忍，下条再试）——链中断只影响该轮可达深度，不丢行不重排 |
+| 读侧持档句柄期间轮转（Windows） | rename 源失败停链（Go os.Open 句柄不透出 DELETE 共享语义）；读侧句柄释放后下一行写入重试成功（**自愈闭环**）；`TestAuditLogger_RotateWhileOpenForRead` 在 `audit_log_windows_test.go`（`//go:build windows`）守护 |
+| 同形态（Unix） | rename 不受阻，轮转成功；已打开句柄为轮转前一致快照；`TestAuditLogger_RotateWhileOpenForRead_UnixRenameUnblocked` 在 `audit_log_linux_test.go` 对偶守护（**平台耦合断言禁共享一份**，linux-platform 纪律——共享文件断言 Windows 语义在 ubuntu CI 必挂） |
+| 链中段缺档（如 `.2` 缺失） | 源档 Stat 不存在跳过该环，其余档各移一位（`.3`→`.4`、`.1`→`.2`），轮转不因空洞中断 |
+| 现网存量 `.1`（十期形态） | 首次轮转 `.1`→`.2` 顺移，零迁移脚本 |
+| depth≤1（ApplyConfig 直调防御形态，设置面 clamp 已保证 ≥2） | 循环不执行，直接单档 rename（等价旧单档形态），不 panic |
+
+#### Good/Base/Bad Cases
+
+- Good：默认配置（5MB×6+主）下正常认证频度撑满 7 天趋势窗口；失败潮下「数据自 X 起（更早历史已轮转）」提示行按十期既有语义诚实前移（十期前端零改动）。
+- Base：段缺失老配置升级 → `EnsureAuditDefaults` 补默认，`SetAuditConfig` 后热更即时生效。
+- Bad：手改 settings.json 越界值 → clamp 收敛（运行期手改本就须重启，见 SettingsService 缓存语义）；`SetAuditConfig` 漏拷其他指针段 → 缓存共享指针竞态（四段全部私有拷贝是硬纪律）。
+
+#### Tests Required
+
+- 轮转链：`TestAuditLogger_RotationChain`（depth=2 淘汰最旧/无超深度档/链内时间正序/读侧仅链内行可见）、`_UpgradeFromDot1`（存量顺移）、`_MiddleGap`（缺档不断链）、`TestAuditLogger_ReadSnapshot_DepthTiers`（多档合并时序）、`TestAuditLogger_DepthShrink_LegacyTierIgnored`（残留档不入读不删除）、竞速双侧（见上表）。
+- 设置面：`TestAppSettings_EnsureAuditDefaults` / `TestNormalizeAuditSettings`（model）、`TestApp_SetAuditConfig_SaveAndHotApply` / `_ClampsInvalidInput` / `_PreservesOtherSections`（App 层，热更行为断言用注入小值驱动真实轮转——AuditLogger 字段未导出，跨包不可锁内直读）、`TestAuditLogger_ApplyConfig`（service 包内锁内断言）。
+- 透明受益：`QueryAuditLog`/`QueryIPBanTrend` 函数体零改动，六~十期测试零回归即过。
+
+#### Wrong vs Correct
+
+**Wrong**：给轮转链加读侧缓存「优化」懒扫——缓存失效必然依赖审计写事件（每行都变文件），与「缓存失效由手动入口驱动不依赖 mtime 时序」test-stability 纪律冲突，且 35MB 毫秒级扫描无必要。
+
+**Correct**：维持懒扫（面板打开时全档合并），容量/性能由 depth×maxBytes clamp 上限兜底（最坏 220MB 毫秒~几十毫秒）。
 
 ## 9. 相关文档
 

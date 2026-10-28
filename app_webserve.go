@@ -668,3 +668,52 @@ func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDu
 	}
 	return nil
 }
+
+// SetAuditConfig 保存审计日志留存参数并即时生效（连接管控十一期，设置页「审计
+// 日志留存」小节保存入口）：normalize 归一（零值回退默认、越界 clamp）→ 持久化
+// 设置段 → ApplyConfig 热更 AuditLogger 轮转参数。「保存+生效」显式单点，对齐
+// SetIPBanConfig 六期先例（SettingsService 无观察者机制，不走通用 SaveSettings
+// 隐式联动）。
+//
+// 生效语义（仅面向未来）：已超限主文件不立即轮转（下次写入达限触发）；depth
+// 缩小后残留超深度旧档不入读不清除（静默滞留磁盘，容量口径以新配置为准，见
+// service.AuditLogger.readSnapshot）。参数非法无失败分支：clamp 层静默收敛（前端
+// el-input-number 已挡边界，后端兜底手改配置形态），无新错误码。
+//
+// 指针段复制纪律：基底设置的 WebServe/Assets/IPBan 指针段一律私有拷贝、Audit
+// 段整体替换为归一值拷贝（天然私有）——settings 内四指针段均不与 GetSettings
+// 共享缓存指针，防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态
+// （SetIPBanConfig 先例同款）。
+func (a *App) SetAuditConfig(maxBytesMB, depth int) error {
+	normalized := model.NormalizeAuditSettings(&model.AuditSettings{
+		MaxBytesMB: maxBytesMB,
+		Depth:      depth,
+	})
+
+	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）
+	base := a.GetSettings()
+	settings := *base
+	if base.WebServe != nil {
+		webServe := *base.WebServe
+		settings.WebServe = &webServe
+	}
+	if base.Assets != nil {
+		assets := *base.Assets
+		settings.Assets = &assets
+	}
+	if base.IPBan != nil {
+		ipban := *base.IPBan
+		settings.IPBan = &ipban
+	}
+	audit := normalized
+	settings.Audit = &audit
+	if err := a.settingsSvc.Save(&settings); err != nil {
+		return fmt.Errorf("保存设置失败: %w", err)
+	}
+
+	// 运行时生效（webAuditSvc 为 nil 时仅落盘，下次启动按配置初值生效）
+	if a.webAuditSvc != nil {
+		a.webAuditSvc.ApplyConfig(int64(normalized.MaxBytesMB)*1024*1024, normalized.Depth)
+	}
+	return nil
+}

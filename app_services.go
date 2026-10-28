@@ -94,7 +94,8 @@ type AppServices struct {
 	// 双 COM 队列进程互杀）；不发生前端事件，web_serve.go applySink 无需同步。
 	pptxPreviewSvc *service.PptxPreviewService
 	// 认证审计日志器（浏览器访问通道：认证成功/失败 + token 生命周期事件，
-	// JSONL append-only data/web_audit.log，5MB 轮转 .1；append 语义独立实现，
+	// JSONL append-only data/web_audit.log，5MB×7 档多档轮转链（主 + .1~.6，
+	// 连接管控十一期参数化，settings audit 段可调）；append 语义独立实现，
 	// util.SaveJSON 原子写不适用 append-only 日志）。server 认证回调（OnAuth）
 	// 与 webTokenSvc 生命周期事件都经它落盘。
 	webAuditSvc *service.AuditLogger
@@ -232,6 +233,11 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 控制台提示与设置页「查看令牌」链路依赖该文件，不能等首个认证请求懒加载
 	//（首请求 401 后才生成的令牌用户无从得知）。
 	s.webAuditSvc = service.NewAuditLogger(filepath.Join(dataDir, "web_audit.log"))
+	// 启动初值经 ApplyConfig 注入设置段归一值（连接管控十一期参数化：Load 首调
+	// 在此完成缓存建立，后续热更走 SetAuditConfig 单点，对齐 ipBanSvc 六期形态）。
+	if cfg, err := s.settingsSvc.Load(); err == nil {
+		s.webAuditSvc.ApplyConfig(int64(cfg.Audit.MaxBytesMB)*1024*1024, cfg.Audit.Depth)
+	}
 	s.webTokenSvc = service.NewWebTokenService(filepath.Join(dataDir, "web_tokens.json"), filepath.Join(dataDir, "web_token"))
 	s.webTokenSvc.SetAudit(s.webAuditSvc)
 	s.webTokenSvc.EnsureLoaded()

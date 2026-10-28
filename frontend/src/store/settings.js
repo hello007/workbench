@@ -183,6 +183,21 @@ export const IP_BAN_AGG_SUGGEST_MAX = 50
 export const IP_BAN_TREND_WINDOW_MIN = 1
 export const IP_BAN_TREND_WINDOW_MAX = 30
 
+/**
+ * 审计日志留存参数默认值与取值边界（连接管控十一期，与后端 model.AppSettings
+ * 常量对齐）：单文件上限 1-20 MB（默认 5，既有现值）、轮转链深度 2-10 档
+ * （默认 6）。历史合计约 (depth+1)×maxBytes MB 封顶（默认档 35MB），上限档
+ * 220MB——十期趋势回看窗口的留存保障。
+ */
+export const AUDIT_DEFAULTS = {
+  maxBytesMB: 5,
+  depth: 6
+}
+export const AUDIT_MAX_BYTES_MIN = 1
+export const AUDIT_MAX_BYTES_MAX = 20
+export const AUDIT_DEPTH_MIN = 2
+export const AUDIT_DEPTH_MAX = 10
+
 /** 终端字体下拉选项（value 空串 = 默认 Cascadia Code 栈，含 Fira Code/Consolas fallback 链） */
 export const TERMINAL_FONT_OPTIONS = [
   { label: '默认（Cascadia Code）', value: '' },

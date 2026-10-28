@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -39,10 +40,23 @@ const (
 	AuditActorSystem  = "system"
 )
 
-// webAuditMaxBytes 审计日志单文件大小上限：超过即轮转为 <path>.1（覆盖旧 .1），
-// 继续向新文件追加。5MB 对认证事件级频度足够（约 3 万行），轮转保留一份对
-// 单用户排查定位足够；更久历史靠外部归档，不做多份轮转链。
+// webAuditMaxBytes 审计日志单文件大小上限：超过即轮转入多档链（档位深度见
+// webAuditMaxRotationDepth），继续向新文件追加。5MB 对认证事件级频度足够（约
+// 3 万行）。
+//
+// 连接管控十一期将十期「不做多份轮转链」转正为固定深度轮转链：5MB×2（约 6 万行）
+// 在认证失败潮下数小时即轮转一轮，趋势面 TrendWindowDays 默认 7 天的回看窗口
+// 名存实亡，故扩链深度以保留更长历史（数据源仍为审计 JSONL 单一来源，读侧
+// readSnapshot 多档合并后 QueryIPBanTrend/QueryAuditLog 透明受益）。
 const webAuditMaxBytes int64 = 5 * 1024 * 1024
+
+// webAuditMaxRotationDepth 审计轮转链档位深度（连接管控十一期）：主文件超限时
+// 链式下移历史档（.N-1→.N … .1→.2）再将主文件 rename 为 <path>.1，淘汰最旧档
+// （静默，设计语义非异常——趋势面 earliestTs 自然前移收敛）。默认 6：历史合计
+// 30MB + 主 5MB = 35MB，正常频度（认证事件每天几十~几百 KB）足以撑满趋势面默认
+// 7 天回看窗口；可经 AuditSettings.depth（clamp 2–10）调整。轮转触发仍为纯大小
+// 触发，不做时间触发与压缩归档（压缩持锁阻塞审计写、读侧解压开销不抵收益）。
+const webAuditMaxRotationDepth = 6
 
 // AuditRecord 审计日志单行（JSONL）。禁落 token 明文与完整 URL（?token= 泄露面，
 // 对齐 server 层「不落完整 URL」既有约定）。
@@ -89,11 +103,28 @@ type AuditLogger struct {
 	mu       sync.Mutex
 	path     string
 	maxBytes int64 // 单文件大小上限（测试注入小值驱动轮转；生产 webAuditMaxBytes）
+	depth    int   // 轮转链档位深度（生产 webAuditMaxRotationDepth；AuditSettings.depth clamp 2–10 热更）
 }
 
 // NewAuditLogger 构造审计日志器（path 如 data/web_audit.log）。
 func NewAuditLogger(path string) *AuditLogger {
-	return &AuditLogger{path: path, maxBytes: webAuditMaxBytes}
+	return &AuditLogger{path: path, maxBytes: webAuditMaxBytes, depth: webAuditMaxRotationDepth}
+}
+
+// ApplyConfig 热更轮转参数（连接管控十一期，App.SetAuditConfig「保存+生效」
+// 生效点）：maxBytes 单文件字节上限、depth 链档位深度，mu 锁内整体替换（写路径
+// rotateLocked 同锁，无撕裂配置）。仅面向未来：已超限主文件不立即轮转（下次写
+// 入达限触发）；depth 缩小后残留超深度旧档不入读不清除（静默滞留，见 readSnapshot）。
+func (a *AuditLogger) ApplyConfig(maxBytes int64, depth int) {
+	a.mu.Lock()
+	a.maxBytes = maxBytes
+	a.depth = depth
+	a.mu.Unlock()
+}
+
+// rotatedPath 第 i 档历史档路径（<path>.i，i≥1）。
+func (a *AuditLogger) rotatedPath(i int) string {
+	return a.path + "." + strconv.Itoa(i)
 }
 
 // Log 追加一条审计事件（单写锁串行，并发安全）。
@@ -254,13 +285,29 @@ func (a *AuditLogger) write(rec AuditRecord) {
 	_ = f.Close()
 }
 
-// rotateLocked 持锁轮转：当前文件追加本行后将超过上限时，rename 为 <path>.1
-// （Go os.Rename 在 Windows 走 MoveFileEx REPLACE_EXISTING，覆盖旧 .1），后续
-// 追加落新文件。损坏行不处理（读侧按行解析，坏行跳过属读方容错）。
+// rotateLocked 持锁轮转（连接管控十一期多档链）：当前文件追加本行后将超过上限时，
+// 链式下移历史档（.N-1→.N … .1→.2，源档不存在跳过——链前端缺失不断链）再将主
+// 文件 rename 为 <path>.1，淘汰最旧档。Go os.Rename 在 Windows 走 MoveFileEx
+// REPLACE_EXISTING（覆盖已存在的目标档）。
+//
+// 任一环失败即告警停链：后续档保持现状、主文件继续追加（超限容忍，下条再试）——
+// 链中断只影响该轮可达深度，不丢行不重排。失败实例之一即读写竞速的 Windows 形态：
+// Go os.Open 句柄不透出 DELETE 共享语义，读侧（readSnapshot/QueryAuditLog 懒扫）
+// 正打开某档时 rename 该档报 sharing violation，本轮停链、读侧关闭后下一行自愈。
+// 损坏行不处理（读侧按行解析，坏行跳过属读方容错）。
 func (a *AuditLogger) rotateLocked(incoming int64) {
 	info, err := os.Stat(a.path)
 	if err != nil || info.Size()+incoming <= a.maxBytes {
 		return
+	}
+	for i := a.depth - 1; i >= 1; i-- {
+		if _, err := os.Stat(a.rotatedPath(i)); err != nil {
+			continue // 源档不存在（链未轮转满/前端缺失），跳过
+		}
+		if err := os.Rename(a.rotatedPath(i), a.rotatedPath(i+1)); err != nil {
+			slog.Warn("rotate audit log failed", "path", a.rotatedPath(i), "err", err)
+			return
+		}
 	}
 	if err := os.Rename(a.path, a.path+".1"); err != nil {
 		// 轮转失败不阻塞本行写入：继续向当前文件追加（超限容忍，下条再试轮转）
@@ -295,13 +342,16 @@ type AuditQueryResult struct {
 	Records []AuditRecord
 }
 
-// QueryAuditLog 查询审计历史（读侧 API，连接管控三期新增）：合并读轮转文件
-// <path>.1（旧）与主文件（新），过滤后按时间倒序分页返回。
+// QueryAuditLog 查询审计历史（读侧 API，连接管控三期新增）：合并读轮转链全部
+// 档位（旧，<path>.N…<path>.1）与主文件（新），过滤后按时间倒序分页返回。
 //
-// 快照语义：打开-读-关闭，不持写锁——与写侧 O_APPEND 单行原子追加并发安全；
-// 读期间发生轮转（rename）窗口时可能重复或漏读边界单行，属可接受偏差（本 API
-// 为排查观测面，非正确性依赖，与写侧旁路降级同款定位）。坏行（非法 JSON 或
-// 缺 event 字段）跳过——写侧不保证行完整性（崩溃截断/外部手改），读方容错。
+// 快照语义：打开-读-关闭，不持写锁——与写侧 O_APPEND 单行原子追加并发安全。
+// 读写竞速的平台分叉（连接管控十一期多档链实测）：Windows 下读打开的档使写侧
+// rename 该档失败（sharing violation，写侧停链降级自愈，见 rotateLocked），读侧
+// 拿到的是轮转前一致快照；Unix 下 rename 不受阻，读期间发生轮转窗口时可能重复
+// 或漏读边界单行。两者均属可接受偏差（本 API 为排查观测面，非正确性依赖，与
+// 写侧旁路降级同款定位）。坏行（非法 JSON 或缺 event 字段）跳过——写侧不保证
+// 行完整性（崩溃截断/外部手改），读方容错。
 func (a *AuditLogger) QueryAuditLog(opts AuditQueryOptions) (AuditQueryResult, error) {
 	all, err := a.readSnapshot()
 	if err != nil {
@@ -355,12 +405,24 @@ func (a *AuditLogger) QueryAuditLog(opts AuditQueryOptions) (AuditQueryResult, e
 	return result, nil
 }
 
-// readSnapshot 依次读轮转文件与主文件（时间正序拼接），逐行解析审计记录。
-// 文件不存在（首次使用/尚未轮转）跳过非"不存在"的打开错误上抛；坏行跳过；
-// 单文件读中断（Scanner 错误）按快照容错截断该文件继续下一文件。
+// readSnapshot 依次读轮转链全部档位与主文件（时间正序拼接，最旧档在前），逐行
+// 解析审计记录。档位列表按当前 depth 构造（path.N … path.1 + 主文件）；depth
+// 经设置热更缩小后，残留的超深度旧档不入列表也不删除（静默滞留磁盘，容量口径
+// 以新配置为准）。depth 在锁内快照后再开文件（读侧不持写锁，与热更竞态下取
+// 新旧任一深度均合法）。文件不存在（首次使用/尚未轮转/链未满）跳过，非"不存在"
+// 的打开错误上抛；坏行跳过；单文件读中断（Scanner 错误）按快照容错截断该文件
+// 继续下一文件。
 func (a *AuditLogger) readSnapshot() ([]AuditRecord, error) {
+	a.mu.Lock()
+	depth := a.depth
+	a.mu.Unlock()
+	paths := make([]string, 0, depth+1)
+	for i := depth; i >= 1; i-- {
+		paths = append(paths, a.rotatedPath(i))
+	}
+	paths = append(paths, a.path)
 	var recs []AuditRecord
-	for _, p := range []string{a.path + ".1", a.path} {
+	for _, p := range paths {
 		f, err := os.Open(p)
 		if err != nil {
 			if os.IsNotExist(err) {

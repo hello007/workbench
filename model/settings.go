@@ -155,8 +155,9 @@ const (
 	MaxIPBanAggregateSuggestThreshold     = 50
 	// 攻击趋势回看窗口天数（连接管控十期）：审计历史聚合的天级时间桶数量（消费面
 	// service.IPBanService.QueryAuditTrend，默认 7 天）。上限 30 跟审计留存现实走
-	// ——web_audit.log 5MB×2 轮转约 6 万行的留存能力下，更久窗口纯虚设（超留存
-	// 部分桶恒空，由 earliestTs 诚实标注而非静默降级）；下限 1 保证窗口语义成立。
+	// ——留存能力由审计轮转链决定（连接管控十一期多档链：默认 5MB×6 档合计 35MB，
+	// 可经 AuditSettings 调至 20MB×10 档合计 220MB），窗口超出留存的部分桶恒空，
+	// 由 earliestTs 诚实标注而非静默降级；下限 1 保证窗口语义成立。
 	DefaultIPBanTrendWindowDays = 7
 	MinIPBanTrendWindowDays     = 1
 	MaxIPBanTrendWindowDays     = 30
@@ -178,7 +179,8 @@ type IPBanSettings struct {
 	AggregateSuggestThreshold int `json:"aggregateSuggestThreshold"`
 	// TrendWindowDays 攻击趋势回看窗口天数（连接管控十期）：审计历史聚合的
 	// 天级时间桶数量（消费面 service.IPBanService.QueryAuditTrend，默认 7，
-	// clamp 1-30——上限跟审计留存现实走，超留存窗口由 earliestTs 诚实标注）。
+	// clamp 1-30——上限跟审计留存现实走，留存由 AuditSettings 轮转链参数化
+	// （连接管控十一期），超留存窗口由 earliestTs 诚实标注）。
 	TrendWindowDays int `json:"trendWindowDays"`
 	// Whitelist 可信网段白名单（连接管控七期）：CIDR 串列表（裸 IP 合法，消费层
 	// 自动补 /32 //128）。命中来源认证失败完全不计数不封禁（NAT 共享出口等可信
@@ -283,6 +285,85 @@ func clampIPBanInt(v, min, max, def int) int {
 	return v
 }
 
+// 审计日志留存默认值与取值边界（连接管控十一期：审计 JSONL 多档轮转链留存参数化；
+// 前端 settings store 的对应常量与此对齐）。maxBytes 为单文件字节上限 MB（默认 5MB
+// 为既有现值）；depth 为轮转链档位深度（默认 6）——默认档总容量 = (depth+1)×maxBytes
+// = 35MB（6 档历史 30MB + 主文件 5MB），足以撑满十期趋势面默认 7 天回看窗口；
+// 深度上限 10 时总容量封顶 220MB。
+const (
+	DefaultAuditMaxBytesMB = 5
+	MinAuditMaxBytesMB     = 1
+	MaxAuditMaxBytesMB     = 20
+	DefaultAuditDepth      = 6
+	MinAuditDepth          = 2
+	MaxAuditDepth          = 10
+)
+
+// AuditSettings 审计日志留存设置段（连接管控十一期，settings.json 的 audit 段）。
+// 语义为审计 JSONL 多档轮转链留存参数，消费面 service.AuditLogger（写侧超限链式
+// rename 轮转、读侧 readSnapshot 按 depth 构造档位列表）。指针形态区分「老配置
+// 缺失（→ 默认）」与显式取值（对齐 IPBan 先例）。
+type AuditSettings struct {
+	MaxBytesMB int `json:"maxBytesMB"` // 审计日志单文件大小上限 MB（默认 5，clamp 1-20）
+	Depth      int `json:"depth"`      // 轮转链档位深度（默认 6，clamp 2-10；总容量 = (depth+1)×maxBytes）
+}
+
+// DefaultAuditSettings 审计留存默认设置（老配置升级与损坏降级统一入口，数值与
+// 既有硬编码常量 service.webAuditMaxBytes / webAuditMaxRotationDepth 对齐）。
+func DefaultAuditSettings() AuditSettings {
+	return AuditSettings{
+		MaxBytesMB: DefaultAuditMaxBytesMB,
+		Depth:      DefaultAuditDepth,
+	}
+}
+
+// normalize 零值回退默认，越界 clamp 收敛（对齐 clampIPBanInt 模式）。
+func (s *AuditSettings) normalize() {
+	s.MaxBytesMB = clampAuditInt(s.MaxBytesMB, MinAuditMaxBytesMB, MaxAuditMaxBytesMB, DefaultAuditMaxBytesMB)
+	s.Depth = clampAuditInt(s.Depth, MinAuditDepth, MaxAuditDepth, DefaultAuditDepth)
+}
+
+// NormalizeAuditSettings 归一化入口：nil（老配置缺失/降级）→ 默认值；
+// 非 nil → 拷贝 normalize 后返回，不改写入参（调用方可能传入共享的设置缓存
+// 指针，原地改会与并发读者竞态，对齐 NormalizeIPBanSettings 先例）。
+func NormalizeAuditSettings(s *AuditSettings) AuditSettings {
+	if s == nil {
+		return DefaultAuditSettings()
+	}
+	out := *s
+	out.normalize()
+	return out
+}
+
+// EnsureAuditDefaults 补全审计留存段默认值并收敛越界值：
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 两项全默认；
+//   - 段存在 → 零值回退默认、越界 clamp。
+//
+// 在 SettingsService.Load/Save 双链路统一调用，保证 AuditLogger 装配与
+// SetAuditConfig 消费方拿到的段始终完整可用。
+func (s *AppSettings) EnsureAuditDefaults() {
+	if s.Audit == nil {
+		def := DefaultAuditSettings()
+		s.Audit = &def
+		return
+	}
+	s.Audit.normalize()
+}
+
+// clampAuditInt 零值回退默认，越界收敛到 [min, max]。
+func clampAuditInt(v, min, max, def int) int {
+	if v == 0 {
+		return def
+	}
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // AppSettings 应用设置
 type AppSettings struct {
 	GpuDisabled            bool     `json:"gpuDisabled"`
@@ -316,6 +397,10 @@ type AppSettings struct {
 	// 缺失 → 默认」与显式取值（对齐 WebServe/Assets 先例），加载后经
 	// EnsureIPBanDefaults 补全；运行期经 SetIPBanConfig「保存+生效」单点热更。
 	IPBan *IPBanSettings `json:"ipban,omitempty"`
+	// Audit 审计日志留存设置段（连接管控十一期）。指针形态区分「老配置
+	// 缺失 → 默认」与显式取值（对齐 IPBan 先例），加载后经
+	// EnsureAuditDefaults 补全；运行期经 SetAuditConfig「保存+生效」单点热更。
+	Audit *AuditSettings `json:"audit,omitempty"`
 }
 
 // EnsureWebServeDefaults 补全 webServe 段默认值：

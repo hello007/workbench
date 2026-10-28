@@ -51,6 +51,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   RevokeWebToken: vi.fn(),
   UnbanWebToken: vi.fn(),
   SetIPBanConfig: vi.fn(),
+  SetAuditConfig: vi.fn(),
   QueryAuditLog: vi.fn()
 }))
 
@@ -1853,7 +1854,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     const numbers = ipbanInputs()
     await numbers[0].setValue('5')
     await numbers[2].setValue('60')
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(SetIPBanConfig).toHaveBeenCalledTimes(1)
     // 七参序：threshold/window/duration/maxBan/聚合建议阈值/趋势窗口/白名单（白名单恒末位）
@@ -1875,7 +1876,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     const numbers = ipbanInputs()
     // 输入越上限（前端 min/max 已挡边界，此处模拟直接改值形态）仍透传，后端 clamp 收敛
     await numbers[4].setValue('99')
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, 99, 7, [])
     // 回读归一值（后端收敛到上限 50）刷新表单
@@ -1892,7 +1893,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     const numbers = ipbanInputs()
     // 输入越上限（前端 min/max 已挡边界，此处模拟直接改值形态）仍透传，后端 clamp 收敛
     await numbers[5].setValue('99')
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, 3, 99, [])
     // 回读归一值（后端收敛到上限 30）刷新表单
@@ -1925,7 +1926,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     const rows = wrapper.findAll('.ipban-whitelist-row')
     await rows[0].find('input').setValue('10.0.0.0/8')
     await rows[1].find('input').setValue('  ')
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     // 空白行静默剔除，非空行透传
     expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, 3, 7, ['10.0.0.0/8'])
@@ -1942,7 +1943,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await row.find('input').setValue('not-a-cidr')
     await nextTick()
     expect(row.find('.ipban-whitelist-row-error').text()).toContain('格式无效')
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('格式非法'))
     expect(SetIPBanConfig).not.toHaveBeenCalled()
@@ -1957,7 +1958,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     GetSettings.mockResolvedValue(baseSettings({
       ipban: { threshold: 10, windowMinutes: 10, durationMinutes: 5, maxBanDurationMinutes: 60, whitelist: ['10.0.0.0/8'] }
     }))
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     const rows = wrapper.findAll('.ipban-whitelist-row')
     expect(rows.length).toBe(1)
@@ -1969,7 +1970,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await openNetwork({
       ipban: { threshold: 50, windowMinutes: 60, durationMinutes: 30, maxBanDurationMinutes: 600, aggregateSuggestThreshold: 25, trendWindowDays: 30 }
     })
-    await wrapper.findAll('button').find(b => b.text() === '恢复默认').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '恢复默认').trigger('click')
     await nextTick()
     const numbers = ipbanInputs()
     expect(numbers[0].element.value).toBe('10')
@@ -1986,9 +1987,114 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     const { ElMessage } = await import('element-plus')
     SetIPBanConfig.mockRejectedValue({ message: '保存设置失败: 磁盘满' })
     await openNetwork()
-    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await wrapper.find('.ipban-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith('保存自动封禁参数失败: 保存设置失败: 磁盘满')
+    expect(ElMessage.success).not.toHaveBeenCalled()
+  })
+})
+
+// ---- 审计日志留存区（连接管控十一期：两参数表单 + 保存+生效单点 + 恢复默认） ----
+
+describe('SettingsPanel.vue - 审计日志留存区', () => {
+  let wrapper = null
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  // el-input-number 全局 stub 渲染为 <input class="el-input-number">（值在
+  // element.value），选择器经 class 命中 stub input 本体
+  function auditInputs() {
+    return wrapper.findAll('.audit-field input.el-input-number')
+  }
+
+  async function openNetwork(settingsOver = undefined) {
+    wrapper = await createWrapper(settingsOver)
+    await wrapper.findAll('.settings-nav-item')[4].trigger('click')
+    await nextTick()
+  }
+
+  it('渲染两参数表单与操作按钮，GetSettings audit 段回填', async () => {
+    await openNetwork({ audit: { maxBytesMB: 8, depth: 4 } })
+    expect(wrapper.text()).toContain('审计日志留存')
+    const numbers = auditInputs()
+    expect(numbers.length).toBe(2)
+    expect(numbers[0].element.value).toBe('8')
+    expect(numbers[1].element.value).toBe('4')
+    expect(wrapper.text()).toContain('单文件上限')
+    expect(wrapper.text()).toContain('轮转链深度')
+    // 按钮查找限定 .audit-actions 容器：网络分区现有多个「保存并生效/恢复默认」
+    // 小节（自动封禁先入模板），findAll 全局扫描会命中他节按钮
+    const actions = wrapper.find('.audit-actions')
+    expect(actions.findAll('button').some(b => b.text() === '恢复默认')).toBe(true)
+    expect(actions.findAll('button').some(b => b.text() === '保存并生效')).toBe(true)
+  })
+
+  it('段缺失（老配置）回填默认值（5MB / 6 档）', async () => {
+    await openNetwork()
+    const numbers = auditInputs()
+    expect(numbers[0].element.value).toBe('5')
+    expect(numbers[1].element.value).toBe('6')
+  })
+
+  it('保存调用 SetAuditConfig 双参并提示即时生效，随后回读归一值刷新表单', async () => {
+    const { SetAuditConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetAuditConfig.mockResolvedValue()
+    // 首次 GetSettings（挂载回填）返回默认；保存后回读返回后端收敛形态
+    GetSettings.mockResolvedValueOnce(baseSettings())
+      .mockResolvedValue(baseSettings({ audit: { maxBytesMB: 20, depth: 10 } }))
+    await openNetwork()
+    const numbers = auditInputs()
+    await numbers[0].setValue('20')
+    await numbers[1].setValue('10')
+    await wrapper.find('.audit-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(SetAuditConfig).toHaveBeenCalledTimes(1)
+    // 双参序：maxBytesMB / depth
+    expect(SetAuditConfig).toHaveBeenCalledWith(20, 10)
+    expect(ElMessage.success).toHaveBeenCalledWith('审计留存参数已保存并即时生效')
+    // 回读归一值刷新表单（以生效值为准）
+    expect(auditInputs()[0].element.value).toBe('20')
+    expect(auditInputs()[1].element.value).toBe('10')
+  })
+
+  it('保存透传表单当前值（含界内自定义值，前端不改动入参）', async () => {
+    const { SetAuditConfig } = await import('../../../wailsjs/go/main/App')
+    SetAuditConfig.mockResolvedValue()
+    await openNetwork({ audit: { maxBytesMB: 3, depth: 4 } })
+    await wrapper.find('.audit-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(SetAuditConfig).toHaveBeenCalledWith(3, 4)
+  })
+
+  it('恢复默认回填两项默认值（不触发保存）', async () => {
+    const { SetAuditConfig } = await import('../../../wailsjs/go/main/App')
+    await openNetwork({ audit: { maxBytesMB: 15, depth: 9 } })
+    await wrapper.find('.audit-actions').findAll('button').find(b => b.text() === '恢复默认').trigger('click')
+    await nextTick()
+    const numbers = auditInputs()
+    expect(numbers[0].element.value).toBe('5')
+    expect(numbers[1].element.value).toBe('6')
+    expect(SetAuditConfig).not.toHaveBeenCalled()
+  })
+
+  it('保存失败走 handleError 分流（非预期拒绝 error 提示拼前缀）', async () => {
+    const { SetAuditConfig } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    SetAuditConfig.mockRejectedValue({ message: '保存设置失败: 磁盘满' })
+    await openNetwork()
+    await wrapper.find('.audit-actions').findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith('保存审计留存参数失败: 保存设置失败: 磁盘满')
     expect(ElMessage.success).not.toHaveBeenCalled()
   })
 })

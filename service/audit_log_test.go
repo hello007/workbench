@@ -5,10 +5,21 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 )
+
+// mustAuditLine 序列化单条审计记录为 JSONL 行（测试手工构造档文件用）。
+func mustAuditLine(t *testing.T, rec AuditRecord) string {
+	t.Helper()
+	line, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("序列化审计记录: %v", err)
+	}
+	return string(line)
+}
 
 // readAuditLines 读入审计日志全部行并解析为 AuditRecord（损坏行跳过——读侧
 // 容错语义与生产一致）。
@@ -77,12 +88,14 @@ func TestAuditLogger_NoPlaintextToken(t *testing.T) {
 }
 
 // TestAuditLogger_Rotation 轮转：注入小 maxBytes 驱动超限，旧内容 rename 为 .1，
-// 新内容继续落主文件；.1 与主文件均可解析（读侧无损坏）。
+// 新内容继续落主文件；.1 与主文件均可解析（读侧无损坏）。depth 钉 1 保持单档
+// 形态（多档链行为见 TestAuditLogger_RotationChain 系列）。
 func TestAuditLogger_Rotation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "web_audit.log")
 	a := NewAuditLogger(path)
 	a.mu.Lock()
 	a.maxBytes = 160 // 驱动多次轮转的极小上限
+	a.depth = 1      // 单档形态（连接管控十一期多档链独立覆盖）
 	a.mu.Unlock()
 
 	for i := 0; i < 6; i++ {
@@ -111,6 +124,217 @@ func TestAuditLogger_Rotation(t *testing.T) {
 	}
 	if res.Total != len(dot1)+len(main) {
 		t.Errorf("读侧应合并两文件全部行, got %d want %d", res.Total, len(dot1)+len(main))
+	}
+}
+
+// TestAuditLogger_RotationChain 深度淘汰（连接管控十一期多档链）：depth=2 下
+// 逐行驱动轮转，链稳态为 .2/.1/主 三档，无超深度档 .3 产生；链内内容时间正序
+// （.2 最旧、主最新）；读侧合并恰好覆盖链内全部行（被淘汰档静默丢弃，对齐
+// 趋势面 earliestTs 自然前移口径）。
+func TestAuditLogger_RotationChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+	a.mu.Lock()
+	a.maxBytes = 160
+	a.depth = 2
+	a.mu.Unlock()
+
+	for i := 0; i < 10; i++ {
+		a.Log(AuditEventAuthSuccess, "tok-"+strconv.Itoa(i), "", "127.0.0.1:1", "ua")
+	}
+
+	for _, p := range []string{path + ".2", path + ".1", path} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("链档应存在: %s", p)
+		}
+	}
+	if _, err := os.Stat(path + ".3"); !os.IsNotExist(err) {
+		t.Fatal("深度淘汰后不应产生超深度档 .3")
+	}
+
+	recs2 := readAuditLines(t, path+".2")
+	recs1 := readAuditLines(t, path+".1")
+	recsM := readAuditLines(t, path)
+	if len(recs2) == 0 || len(recs1) == 0 || len(recsM) == 0 {
+		t.Fatalf("三档均应有内容: %d/%d/%d", len(recs2), len(recs1), len(recsM))
+	}
+	if recs2[0].TokenID != "tok-7" || recs1[0].TokenID != "tok-8" || recsM[0].TokenID != "tok-9" {
+		t.Errorf("链内内容应时间正序（.2 旧 主 新）: %s/%s/%s",
+			recs2[0].TokenID, recs1[0].TokenID, recsM[0].TokenID)
+	}
+
+	res, err := a.QueryAuditLog(AuditQueryOptions{})
+	if err != nil {
+		t.Fatalf("查询: %v", err)
+	}
+	if res.Total != 3 {
+		t.Errorf("读侧应仅合并链内 3 行（淘汰档不可见）, got %d", res.Total)
+	}
+}
+
+// TestAuditLogger_ApplyConfig 热更生效（连接管控十一期，App.SetAuditConfig 生效
+// 点）：锁内整体替换 maxBytes/depth 两字段，对后续写入立即生效——缩到小上限后
+// 下一行即触发轮转（仅面向未来语义的正面形态），depth 新值同驱动链深。
+func TestAuditLogger_ApplyConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+	if a.maxBytes != webAuditMaxBytes || a.depth != webAuditMaxRotationDepth {
+		t.Fatalf("构造初值应为生产常量, got %d/%d", a.maxBytes, a.depth)
+	}
+
+	// 热更到测试小值后断言锁内字段替换
+	a.ApplyConfig(160, 2)
+	a.mu.Lock()
+	gotMax, gotDepth := a.maxBytes, a.depth
+	a.mu.Unlock()
+	if gotMax != 160 || gotDepth != 2 {
+		t.Fatalf("热更后字段应整体替换, got %d/%d", gotMax, gotDepth)
+	}
+
+	// 生效断言：热更前写入不轮转（原上限下未超限），热更后下一行超小限即轮转出 .1/.2
+	a.Log(AuditEventAuthSuccess, "tok-pre", "", "127.0.0.1:1", "ua")
+	if _, err := os.Stat(path + ".1"); !os.IsNotExist(err) {
+		t.Fatal("热更前写入不应触发轮转")
+	}
+	for i := 0; i < 4; i++ {
+		a.Log(AuditEventAuthSuccess, "tok-"+strconv.Itoa(i), "", "127.0.0.1:1", "ua")
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("热更后写入应按新上限轮转出 .1: %v", err)
+	}
+}
+
+// TestAuditLogger_RotationChain_UpgradeFromDot1 存量兼容：现网十期形态已存 .1，
+// 十一期首次轮转 .1→.2 顺移（源存在即移，零迁移脚本），主→.1，链衔接无缝。
+func TestAuditLogger_RotationChain_UpgradeFromDot1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+	a.mu.Lock()
+	a.maxBytes = 160
+	a.depth = 3
+	a.mu.Unlock()
+
+	legacy := mustAuditLine(t, AuditRecord{Ts: 100, Event: AuditEventAuthSuccess, TokenID: "tok-legacy"})
+	if err := os.WriteFile(path+".1", []byte(legacy+"\n"), 0o600); err != nil {
+		t.Fatalf("写存量 .1: %v", err)
+	}
+	a.Log(AuditEventAuthSuccess, "tok-b", "", "127.0.0.1:1", "ua")
+	a.Log(AuditEventAuthSuccess, "tok-c", "", "127.0.0.1:1", "ua") // 触发轮转：.1→.2、主→.1
+
+	if got := readAuditLines(t, path+".2"); len(got) != 1 || got[0].TokenID != "tok-legacy" {
+		t.Errorf("存量 .1 应顺移为 .2: %+v", got)
+	}
+	if got := readAuditLines(t, path+".1"); len(got) != 1 || got[0].TokenID != "tok-b" {
+		t.Errorf("原主文件应轮转为 .1: %+v", got)
+	}
+	if got := readAuditLines(t, path); len(got) != 1 || got[0].TokenID != "tok-c" {
+		t.Errorf("轮转后主文件应继续追加: %+v", got)
+	}
+}
+
+// TestAuditLogger_RotationChain_MiddleGap 链中段缺失不断链：.2 缺失时 .3→.4
+// 与 .1→.2 各档独立移位，轮转不因空洞中断。
+func TestAuditLogger_RotationChain_MiddleGap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+	a.mu.Lock()
+	a.maxBytes = 160
+	a.depth = 4
+	a.mu.Unlock()
+
+	writeLegacy := func(p, tokenID string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(mustAuditLine(t, AuditRecord{
+			Ts: 100, Event: AuditEventAuthSuccess, TokenID: tokenID})+"\n"), 0o600); err != nil {
+			t.Fatalf("写 %s: %v", p, err)
+		}
+	}
+	writeLegacy(path+".3", "tok-x3")
+	writeLegacy(path+".1", "tok-y1")
+	a.Log(AuditEventAuthSuccess, "tok-p", "", "127.0.0.1:1", "ua")
+	a.Log(AuditEventAuthSuccess, "tok-q", "", "127.0.0.1:1", "ua") // 触发轮转
+
+	if got := readAuditLines(t, path+".4"); len(got) != 1 || got[0].TokenID != "tok-x3" {
+		t.Errorf(".3 应顺移为 .4: %+v", got)
+	}
+	if got := readAuditLines(t, path+".2"); len(got) != 1 || got[0].TokenID != "tok-y1" {
+		t.Errorf(".1 应顺移为 .2（.2 缺失跳过不断链）: %+v", got)
+	}
+	if got := readAuditLines(t, path+".1"); len(got) != 1 || got[0].TokenID != "tok-p" {
+		t.Errorf("原主文件应轮转为 .1: %+v", got)
+	}
+	if got := readAuditLines(t, path); len(got) != 1 || got[0].TokenID != "tok-q" {
+		t.Errorf("轮转后主文件应继续追加: %+v", got)
+	}
+}
+
+// TestAuditLogger_ReadSnapshot_DepthTiers 读侧档位列表按 depth 构造：.3/.2/.1/主
+// 全档合并、时间正序拼接（最旧档在前、倒序分页最新在前），缺档（.2）跳过。
+func TestAuditLogger_ReadSnapshot_DepthTiers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+	a.mu.Lock()
+	a.depth = 3
+	a.mu.Unlock()
+
+	writeLegacy := func(p string, ts int64, tokenID string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(mustAuditLine(t, AuditRecord{
+			Ts: ts, Event: AuditEventAuthSuccess, TokenID: tokenID})+"\n"), 0o600); err != nil {
+			t.Fatalf("写 %s: %v", p, err)
+		}
+	}
+	writeLegacy(path+".3", 100, "tok-old3")
+	writeLegacy(path+".1", 200, "tok-old1")
+	writeLegacy(path, 300, "tok-main")
+
+	res, err := a.QueryAuditLog(AuditQueryOptions{})
+	if err != nil {
+		t.Fatalf("查询: %v", err)
+	}
+	if res.Total != 3 {
+		t.Fatalf("三档应合并 3 行, got %d", res.Total)
+	}
+	if res.Records[0].TokenID != "tok-main" || res.Records[2].TokenID != "tok-old3" {
+		t.Errorf("倒序应为主文件最新在前、.3 最旧在后: %+v", res.Records)
+	}
+}
+
+// TestAuditLogger_DepthShrink_LegacyTierIgnored depth 热更缩小：超深度残留旧档
+// 不入读侧列表也不删除（静默滞留磁盘，容量口径以新配置为准——PRD 技术方案取舍）。
+func TestAuditLogger_DepthShrink_LegacyTierIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web_audit.log")
+	a := NewAuditLogger(path)
+
+	writeLegacy := func(p string, ts int64, tokenID string) {
+		t.Helper()
+		if err := os.WriteFile(p, []byte(mustAuditLine(t, AuditRecord{
+			Ts: ts, Event: AuditEventAuthSuccess, TokenID: tokenID})+"\n"), 0o600); err != nil {
+			t.Fatalf("写 %s: %v", p, err)
+		}
+	}
+	writeLegacy(path+".2", 50, "tok-evicted")
+	writeLegacy(path+".1", 100, "tok-keep1")
+	writeLegacy(path, 150, "tok-keepM")
+
+	a.mu.Lock()
+	a.depth = 1 // 模拟热更缩小后的读取口径
+	a.mu.Unlock()
+
+	res, err := a.QueryAuditLog(AuditQueryOptions{})
+	if err != nil {
+		t.Fatalf("查询: %v", err)
+	}
+	if res.Total != 2 {
+		t.Errorf("缩小后应仅读 .1 与主文件 2 行, got %d", res.Total)
+	}
+	for _, rec := range res.Records {
+		if rec.TokenID == "tok-evicted" {
+			t.Errorf("超深度残留档不应入读: %+v", rec)
+		}
+	}
+	if _, err := os.Stat(path + ".2"); err != nil {
+		t.Errorf("残留旧档不应被删除（静默滞留）: %v", err)
 	}
 }
 

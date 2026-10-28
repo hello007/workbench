@@ -483,6 +483,51 @@
               <el-button size="small" @click="auditHistoryVisible = true">查看审计日志</el-button>
             </div>
           </div>
+          <!-- 审计日志留存参数（连接管控十一期）：审计 JSONL 多档轮转链的两参数
+               （单文件上限 MB / 轮转链深度档），历史合计约 (深度+1)×上限 MB 封顶，
+               撑满十期趋势回看窗口的留存保障。保存走 SetAuditConfig 专用单点
+               （保存+即时生效，对齐 SetIPBanConfig 先例）；纯桌面面入口同自动
+               封禁（参数与通道治理同语境，浏览器通道设置页隐藏） -->
+          <div v-if="!browserChannel" class="settings-item settings-item--column">
+            <div class="settings-item-info">
+              <div class="settings-item-label">审计日志留存</div>
+              <div class="settings-item-desc">审计日志按大小轮转并存为多档历史，历史合计约 {{ auditTotalCapacityMB }} MB 封顶。改动保存后即时生效，仅约束后续轮转（已超限文件不立即轮转）</div>
+            </div>
+            <div class="audit-fields">
+              <div class="audit-field">
+                <span class="ipban-field-label">单文件上限</span>
+                <el-input-number
+                  v-model="auditMaxBytesMB"
+                  size="small"
+                  :min="AUDIT_MAX_BYTES_MIN"
+                  :max="AUDIT_MAX_BYTES_MAX"
+                  :value-on-clear="AUDIT_DEFAULTS.maxBytesMB"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">MB（{{ AUDIT_MAX_BYTES_MIN }}-{{ AUDIT_MAX_BYTES_MAX }}）</span>
+              </div>
+              <div class="audit-field">
+                <span class="ipban-field-label">轮转链深度</span>
+                <el-input-number
+                  v-model="auditDepth"
+                  size="small"
+                  :min="AUDIT_DEPTH_MIN"
+                  :max="AUDIT_DEPTH_MAX"
+                  :value-on-clear="AUDIT_DEFAULTS.depth"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">档（{{ AUDIT_DEPTH_MIN }}-{{ AUDIT_DEPTH_MAX }}，保留的历史档数）</span>
+              </div>
+            </div>
+            <div class="audit-actions">
+              <el-button size="small" text @click="resetAuditDefaults">恢复默认</el-button>
+              <el-button size="small" type="primary" :loading="savingAudit" @click="saveAuditConfig">保存并生效</el-button>
+            </div>
+          </div>
           <!-- 自动封禁参数（连接管控六期）+ 可信网段白名单（七期）+ 聚合建议阈值
                （九期）+ 趋势窗口（十期）：认证失败频次达标自动封禁来源 IP 的六参数
                （阈值/窗口/基础时长/递增封顶/聚合建议阈值/趋势窗口）与 CIDR 白名单
@@ -626,7 +671,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { WarningFilled, Key } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SetIPBanConfig, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
+import { GetSettings, SaveSettings, GetAppVersion, CheckForUpdate, GetShellConfigs, GetWebServeConfig, SetWebServeConfig, GetWebServeToken, RegenerateWebToken, ListWebTokens, CreateWebToken, RevokeWebToken, UnbanWebToken, SetIPBanConfig, SetAuditConfig, SaveFileDialog, ExportDiagnostics } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { validateWhitelistEntry } from '../utils/ipWhitelist'
 import { setToken } from '../transport/token'
@@ -634,7 +679,7 @@ import { isBrowserChannel } from '../transport'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import AuditHistoryDialog from './AuditHistoryDialog.vue'
 import BanTokenDialog from './BanTokenDialog.vue'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX, IP_BAN_AGG_SUGGEST_MIN, IP_BAN_AGG_SUGGEST_MAX, IP_BAN_TREND_WINDOW_MIN, IP_BAN_TREND_WINDOW_MAX } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX, IP_BAN_AGG_SUGGEST_MIN, IP_BAN_AGG_SUGGEST_MAX, IP_BAN_TREND_WINDOW_MIN, IP_BAN_TREND_WINDOW_MAX, AUDIT_DEFAULTS, AUDIT_MAX_BYTES_MIN, AUDIT_MAX_BYTES_MAX, AUDIT_DEPTH_MIN, AUDIT_DEPTH_MAX } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -773,6 +818,50 @@ const tokenExpiry = ref('never')
 const customExpiryDate = ref(null)
 const creatingToken = ref(false)
 const createdPlain = ref('')
+
+// 审计日志留存参数（连接管控十一期）：两参数表单（el-input-number clamp 与后端
+// model clamp 边界一致）+ 保存（SetAuditConfig「保存+生效」专用单点，禁走通用
+// SaveSettings 隐式联动）+ 恢复默认；初值经 loadWebServeConfig 的 GetSettings
+// 回填（段缺失走默认）。auditTotalCapacityMB 供说明文案动态展示历史合计容量
+// （(深度+1)×单文件上限，默认档 35MB）。保存后回读归一值刷新表单（越界在后端
+// clamp 收敛，展示与生效值一致，六期纪律）。
+const auditMaxBytesMB = ref(AUDIT_DEFAULTS.maxBytesMB)
+const auditDepth = ref(AUDIT_DEFAULTS.depth)
+const savingAudit = ref(false)
+const auditTotalCapacityMB = computed(() => (auditDepth.value + 1) * auditMaxBytesMB.value)
+
+/** 恢复默认：表单回填两项参数默认值（不落盘，保存动作显式提交） */
+function resetAuditDefaults() {
+  auditMaxBytesMB.value = AUDIT_DEFAULTS.maxBytesMB
+  auditDepth.value = AUDIT_DEFAULTS.depth
+}
+
+/**
+ * 保存审计留存参数（SetAuditConfig 专用单点：持久化 + ApplyConfig 即时生效）。
+ * 两参显式透传（双 int）；后端 clamp 静默收敛无失败分支，成功提示即时生效语义；
+ * 失败经 handleError 分流（通用失败分支覆盖）。保存后回读归一值刷新表单。
+ */
+async function saveAuditConfig() {
+  savingAudit.value = true
+  try {
+    await SetAuditConfig(auditMaxBytesMB.value, auditDepth.value)
+    ElMessage.success('审计留存参数已保存并即时生效')
+  } catch (e) {
+    handleError('保存审计留存参数失败: ', e)
+  } finally {
+    savingAudit.value = false
+  }
+  // 保存后回读归一值刷新表单（防前端展示与生效值漂移，对齐自动封禁保存链）
+  try {
+    const settings = await GetSettings()
+    if (settings?.audit) {
+      auditMaxBytesMB.value = settings.audit.maxBytesMB || AUDIT_DEFAULTS.maxBytesMB
+      auditDepth.value = settings.audit.depth || AUDIT_DEFAULTS.depth
+    }
+  } catch {
+    // 回读失败保持当前值
+  }
+}
 
 // 自动封禁参数（连接管控六期）：六参数表单（el-input-number clamp 与后端
 // model clamp 边界一致；九期扩聚合建议阈值、十期扩趋势窗口）+ 保存
@@ -1182,6 +1271,9 @@ async function loadWebServeConfig() {
     ipBanTrendWindowDays.value = settings?.ipban?.trendWindowDays || IP_BAN_DEFAULTS.trendWindowDays
     const wl = settings?.ipban?.whitelist
     ipBanWhitelist.value = (Array.isArray(wl) ? wl : []).map((item) => ({ value: item }))
+    // 审计留存参数回填（连接管控十一期）：段缺失（老配置）时保持默认值
+    auditMaxBytesMB.value = settings?.audit?.maxBytesMB || AUDIT_DEFAULTS.maxBytesMB
+    auditDepth.value = settings?.audit?.depth || AUDIT_DEFAULTS.depth
   } catch {
     // 保持当前值
   }
@@ -1763,14 +1855,18 @@ const onThemeChange = async () => {
 
 /* ===== 网络访问分区 ===== */
 
-/* 自动封禁参数（连接管控六期）：四字段纵向排布（标签 + 输入 + clamp 提示同行） */
-.ipban-fields {
+/* 自动封禁参数（连接管控六期）：四字段纵向排布（标签 + 输入 + clamp 提示同行）；
+ * 审计日志留存小节（连接管控十一期）复用同款布局（audit-* 并列选择器零重复），
+ * 字段标签直接消费 ipban-field-label（同为 96px 定宽标签位） */
+.ipban-fields,
+.audit-fields {
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
 }
-.ipban-field {
+.ipban-field,
+.audit-field {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1781,14 +1877,16 @@ const onThemeChange = async () => {
   font-size: 13px;
   color: var(--text-secondary, var(--el-text-color-secondary));
 }
-.ipban-field :deep(.el-input-number) {
+.ipban-field :deep(.el-input-number),
+.audit-field :deep(.el-input-number) {
   width: 120px;
 }
 .ipban-field-hint {
   font-size: 12px;
   color: var(--text-tertiary, var(--el-text-color-placeholder));
 }
-.ipban-actions {
+.ipban-actions,
+.audit-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
