@@ -26,7 +26,7 @@ Look for the `<!-- trellis-hook-injected -->` marker in your input above.
 ## Context
 
 Before checking, read:
-- `.trellis/spec/` - Development guidelines
+- CLAUDE.md key-rules list + `docs/spec/` - Development guidelines
 - Pre-commit checklist for quality standards
 
 ## Core Responsibilities
@@ -55,7 +55,7 @@ git diff              # View specific changes
 
 ### Step 2: Check Against Specs
 
-Read relevant specs in `.trellis/spec/` to check code:
+Read relevant specs (CLAUDE.md key-rules list and its linked `docs/spec/` topic docs) to check code:
 
 - Does it follow directory structure conventions
 - Does it follow naming conventions

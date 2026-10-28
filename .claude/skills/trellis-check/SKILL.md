@@ -22,13 +22,13 @@ git status
 python ./.trellis/scripts/get_context.py --mode packages
 ```
 
-For each changed package/layer, read the spec index and follow its **Quality Check** section:
+For each changed area, read the relevant project specs and follow their quality/review guidance:
 
 ```bash
-cat .trellis/spec/<package>/<layer>/index.md
+cat docs/spec/README.md
 ```
 
-Read the specific guideline files referenced — the index is a pointer, not the goal.
+The CLAUDE.md key-rules list (auto-injected) names the must-know rules per area; read the linked `docs/spec/` detail docs relevant to your change — the row is a pointer, not the goal.
 
 ## Step 3: Run Project Checks
 
@@ -52,7 +52,7 @@ Run the project's lint, type-check, and test commands. Fix any failures before p
 
 ### Spec Sync
 
-- [ ] Does `.trellis/spec/` need updates? (new patterns, conventions, lessons learned)
+- [ ] Does `docs/spec/` or the CLAUDE.md key-rules list need updates? (new patterns, conventions, lessons learned)
 
 > "If I fixed a bug or discovered something non-obvious, should I document it so future me won't hit the same issue?" → If YES, update the relevant spec doc.
 

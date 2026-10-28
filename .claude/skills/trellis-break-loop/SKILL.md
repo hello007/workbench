@@ -60,8 +60,8 @@ What broader problems does this bug reveal?
 
 Solidify insights into the system:
 
-- [ ] Update `.trellis/spec/guides/` thinking guides
-- [ ] Update relevant `.trellis/spec/` docs
+- [ ] Update the CLAUDE.md key-rules row (if a must-know rule emerged; within tiered limits)
+- [ ] Update relevant `docs/spec/` topic docs
 - [ ] Create issue record (if applicable)
 - [ ] Create feature ticket for root fix
 - [ ] Update check guidelines if needed
@@ -117,14 +117,11 @@ Three levels of insight:
 
 **IMPORTANT**: After completing the analysis above, you MUST immediately:
 
-1. **Update spec/guides** - Don't just list TODOs, actually update the relevant files:
-   - If it's a cross-platform issue → update `cross-platform-thinking-guide.md`
-   - If it's a cross-layer issue → update `cross-layer-thinking-guide.md`
-   - If it's a code reuse issue → update `code-reuse-thinking-guide.md`
-   - If it's domain-specific → update `backend/*.md` or `frontend/*.md`
+1. **Update specs** - Don't just list TODOs, actually update the relevant files:
+   - If a must-know rule emerged (ban / single-point function / error code / sync point) → add or update the CLAUDE.md key-rules row (within tiered limits: normal ≤250, hook-dense/merge ≤350; row links to its detail doc)
+   - If it's a cross-layer contract issue → update the relevant `docs/spec/<topic>.md` (e.g., `cross-layer-contracts.md`)
+   - If it's domain-specific → update the relevant `docs/spec/<topic>.md` (e.g., `logging-and-errors.md`, `perf-baseline.md`)
 
-2. **Sync templates** - After updating `.trellis/spec/`, sync to `src/templates/markdown/spec/`
-
-3. **Commit the spec updates** - This is the primary output, not just the analysis text
+2. **Commit the spec updates** - This is the primary output, not just the analysis text
 
 > **The analysis is worthless if it stays in chat. The value is in the updated specs.**

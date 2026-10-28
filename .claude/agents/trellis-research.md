@@ -71,7 +71,7 @@ Do NOT paste full research content into the reply. The files are the contract.
 ### Write FORBIDDEN
 
 - Code files (`src/`, `lib/`, …)
-- Spec files (`.trellis/spec/`) — main agent should use `update-spec` skill instead
+- Spec files (`docs/spec/`) — main agent should use `update-spec` skill instead
 - `.trellis/scripts/`, `.trellis/workflow.md`, platform config (`.claude/`, `.cursor/`, etc.)
 - Other task directories
 - Any git operation (commit / push / branch / merge)
@@ -110,7 +110,7 @@ Each `{TASK_DIR}/research/<topic>.md` should follow:
 
 ### Related Specs
 
-- `.trellis/spec/xxx.md` — <description>
+- `docs/spec/xxx.md` — <description>
 
 ## Caveats / Not Found
 

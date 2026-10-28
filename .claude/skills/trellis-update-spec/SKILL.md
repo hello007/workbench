@@ -1,11 +1,13 @@
 ---
 name: trellis-update-spec
-description: "Captures executable contracts and coding conventions into .trellis/spec/ documents. Use when learning something valuable from debugging, implementing, or discussion that should be preserved for future sessions."
+description: "Captures executable contracts and coding conventions into docs/spec/ documents and the CLAUDE.md key-rules list. Use when learning something valuable from debugging, implementing, or discussion that should be preserved for future sessions."
 ---
 
 # Update Code-Spec - Capture Executable Contracts
 
-When you learn something valuable (from debugging, implementing, or discussion), use this to update the relevant code-spec documents.
+When you learn something valuable (from debugging, implementing, or discussion), use this to update the relevant spec documents.
+
+> **项目权威声明（本仓定制覆盖）**：项目特定口径——两级分流规则、钩子级两档上限（普通行 ≤250 / 钩子密集行与合并行 ≤350）、写入路径（`docs/spec/<topic>.md` 与 CLAUDE.md 关键规则清单）——**以 CLAUDE.md「规范沉淀规则」节为唯一权威**。本 skill 只提供通用方法论；两者冲突时以 CLAUDE.md 为准。分档细则见 [docs/spec/README.md](../../docs/spec/README.md)。
 
 **Timing**: After completing a task, fixing a bug, or discovering a new pattern
 
@@ -41,54 +43,38 @@ For triggered tasks, include all sections below:
 
 ---
 
-## When to Update Code-Specs
+## When to Update Specs
 
-| Trigger | Example | Target Spec |
-|---------|---------|-------------|
-| **Implemented a feature** | Added a new integration or module | Relevant spec file |
-| **Made a design decision** | Chose extensibility pattern over simplicity | Relevant spec + "Design Decisions" section |
-| **Fixed a bug** | Found a subtle issue with error handling | Relevant spec (e.g., error-handling docs) |
-| **Discovered a pattern** | Found a better way to structure code | Relevant spec file |
-| **Hit a gotcha** | Learned that X must be done before Y | Relevant spec + "Common Mistakes" section |
-| **Established a convention** | Team agreed on naming pattern | Quality guidelines |
-| **New thinking trigger** | "Don't forget to check X before doing Y" | `guides/*.md` (as a checklist item) |
+| Trigger | Example | Target |
+|---------|---------|--------|
+| **Implemented a feature** | Added a new integration or module | Relevant `docs/spec/<topic>.md` |
+| **Made a design decision** | Chose extensibility pattern over simplicity | Relevant topic doc + "Design Decisions" section |
+| **Fixed a bug** | Found a subtle issue with error handling | Relevant topic doc (e.g., error-handling sections) |
+| **Discovered a pattern** | Found a better way to structure code | Relevant topic doc |
+| **Hit a gotcha** | Learned that X must be done before Y | Topic doc + CLAUDE.md key-rules line (hook-level rule) |
+| **Established a convention** | Team agreed on naming pattern | Relevant topic doc |
+| **New must-know rule for future coding** | A ban, a single-point function name, an error code, a sync point | CLAUDE.md key-rules list (hook-level, per tiered limits) |
 
-**Key Insight**: Code-spec updates are NOT just for problems. Every feature implementation contains design decisions and contracts that future AI/developers need to execute safely.
+**Key Insight**: Spec updates are NOT just for problems. Every feature implementation contains design decisions and contracts that future AI/developers need to execute safely.
 
 ---
 
-## Spec Structure Overview
+## Where to Write: Two-Tier Routing (this repo)
 
-```
-.trellis/spec/
-├── <layer>/           # Per-layer coding standards (e.g., backend/, frontend/, api/)
-│   ├── index.md       # Overview and links
-│   └── *.md           # Topic-specific guidelines
-└── guides/            # Thinking checklists (NOT coding specs!)
-    ├── index.md       # Guide index
-    └── *.md           # Topic-specific guides
-```
+This repo routes captured knowledge into **two tiers** (authoritative source: CLAUDE.md「规范沉淀规则」; details in [docs/spec/README.md](../../docs/spec/README.md)):
 
-### CRITICAL: Code-Spec vs Guide - Know the Difference
+| Tier | Destination | Content |
+|------|-------------|---------|
+| **Detailed contract / topic doc** | `docs/spec/<topic>.md` | Cross-layer contracts, signature-sync rules, anything needing full context |
+| **Hook-level key rule** | CLAUDE.md key-rules list (one table row) | Single-point function names, bans, error codes, sync points; row links to its `docs/spec/` detail doc |
 
-| Type | Location | Purpose | Content Style |
-|------|----------|---------|---------------|
-| **Code-Spec** | `<layer>/*.md` | Tell AI "how to implement safely" | Signatures, contracts, matrices, cases, test points |
-| **Guide** | `guides/*.md` | Help AI "what to think about" | Checklists, questions, pointers to specs |
+**Sinking criterion** (下沉判据):
+- "Next time you write code, follow this" (bans, single-point names, error codes, sync points) → stays inline in the key-rules row
+- "Why it exists / how the bug happened" (mechanism, date, incident history, signature evolution) → sinks into `docs/spec/`
 
-**Decision Rule**: Ask yourself:
+**Tiered row limits** (硬顶): normal rows ≤250 chars; hook-dense rows (≥7 hooks) and phase/merge rows ≤350. A new row exceeding its limit must sink the excess detail into `docs/spec/` on the spot — never land the row first and clean up later.
 
-- "This is **how to write** the code" → Put in a spec layer directory
-- "This is **what to consider** before writing" → Put in `guides/`
-
-**Example**:
-
-| Learning | Wrong Location | Correct Location |
-|----------|----------------|------------------|
-| "Use API X not API Y for this task" | ❌ `guides/` (too specific for a thinking guide) | ✅ Relevant spec file (concrete convention) |
-| "Remember to check X when doing Y" | ❌ Spec file (too abstract for a spec) | ✅ `guides/` (thinking checklist) |
-
-**Guides should be short checklists that point to specs**, not duplicate the detailed rules.
+**No `guides/` tier in this repo**: thinking-checklist content that the upstream framework routes to `guides/*.md` has no separate home here; fold it into the relevant topic doc or the key-rules row instead.
 
 ---
 
@@ -100,30 +86,33 @@ Answer these questions:
 
 1. **What did you learn?** (Be specific)
 2. **Why is it important?** (What problem does it prevent?)
-3. **Where does it belong?** (Which spec file?)
+3. **Where does it belong?** (Which tier — topic doc or key-rules row — and which file?)
 
 ### Step 2: Classify the Update Type
 
 | Type | Description | Action |
 |------|-------------|--------|
-| **Design Decision** | Why we chose approach X over Y | Add to "Design Decisions" section |
+| **Design Decision** | Why we chose approach X over Y | Add to "Design Decisions" section of the topic doc |
 | **Project Convention** | How we do X in this project | Add to relevant section with examples |
 | **New Pattern** | A reusable approach discovered | Add to "Patterns" section |
 | **Forbidden Pattern** | Something that causes problems | Add to "Anti-patterns" or "Don't" section |
 | **Common Mistake** | Easy-to-make error | Add to "Common Mistakes" section |
 | **Convention** | Agreed-upon standard | Add to relevant section |
 | **Gotcha** | Non-obvious behavior | Add warning callout |
+| **Hook-level rule** | Must-know ban / single point / error code / sync point | Add a key-rules row in CLAUDE.md (within tiered limits) |
 
-### Step 3: Read the Target Code-Spec
+### Step 3: Read the Target Spec
 
-Before editing, read the current code-spec to:
+Before editing, read the current spec to:
 - Understand existing structure
 - Avoid duplicating content
 - Find the right section for your update
 
 ```bash
-cat .trellis/spec/<category>/<file>.md
+cat docs/spec/<topic>.md
 ```
+
+When adding a key-rules row to CLAUDE.md, first read the existing rows in the same category and the linked `docs/spec/` detail doc.
 
 ### Step 4: Make the Update
 
@@ -134,10 +123,12 @@ Follow these principles:
 3. **Show Contracts**: Add signatures, payload fields, and error behavior
 4. **Show Code**: Add code snippets for key patterns
 5. **Keep it Short**: One concept per section
+6. **Respect tiered limits**: key-rules rows within 250/350 chars; excess detail sinks to the topic doc
 
-### Step 5: Update the Index (if needed)
+### Step 5: Keep Index and Links Consistent (if needed)
 
-If you added a new section or the code-spec status changed, update the category's `index.md`.
+- New topic doc → register it in the relevant index (e.g., `docs/spec/README.md` or the doc table in CLAUDE.md)
+- New key-rules row → the row must link to its `docs/spec/` detail doc
 
 ---
 
@@ -304,18 +295,19 @@ If you're unsure what to update, answer these prompts:
    - To avoid repeating mistakes → Yes, update spec
    - Purely one-off implementation detail → Maybe skip
 
-4. **Which area does it relate to?**
+4. **Which tier does it belong to?**
+   - [ ] Detailed contract needing full context → `docs/spec/<topic>.md`
+   - [ ] Must-know inline rule (ban / single point / error code / sync point) → CLAUDE.md key-rules list
    - [ ] Backend code
    - [ ] Frontend code
    - [ ] Cross-layer data flow
-   - [ ] Code organization/reuse
    - [ ] Quality/testing
 
 ---
 
 ## Quality Checklist
 
-Before finishing your code-spec update:
+Before finishing your spec update:
 
 - [ ] Is the content specific and actionable?
 - [ ] Did you include a code example?
@@ -324,7 +316,8 @@ Before finishing your code-spec update:
 - [ ] Did you include validation and error matrix?
 - [ ] Did you include Good/Base/Bad cases?
 - [ ] Did you include required tests with assertion points?
-- [ ] Is it in the right code-spec file?
+- [ ] Is it in the right tier (topic doc vs key-rules row)?
+- [ ] Key-rules row within its tiered limit (250/350), excess sunk to the topic doc?
 - [ ] Does it duplicate existing content?
 - [ ] Would a new team member understand it?
 
@@ -342,13 +335,13 @@ Development Flow:
 
 - `/trellis:break-loop` - Analyzes bugs deeply, often reveals spec updates needed
 - `/trellis:update-spec` - Actually makes the updates
-- `/trellis:finish-work` - Reminds you to check if specs need updates
+- `/trellis:finish-work` - Reminds you to check if specs need updates, and runs the tiered row-limit self-check before archiving
 
 ---
 
 ## Core Philosophy
 
-> **Code-specs are living documents. Every debugging session, every "aha moment" is an opportunity to make the implementation contract clearer.**
+> **Specs are living documents. Every debugging session, every "aha moment" is an opportunity to make the implementation contract clearer.**
 
 The goal is **institutional memory**:
 - What one person learns, everyone benefits from

@@ -1,6 +1,6 @@
 ---
 name: trellis-spec-bootstarp
-description: "Bootstrap project-specific Trellis coding specs with a platform-neutral single-agent workflow. Use when creating or refreshing .trellis/spec guidelines, analyzing a codebase with GitNexus, ABCoder, or source inspection, decomposing package/layer spec work, and writing real codebase-backed spec docs without placeholder text."
+description: "[本仓已废弃] 此 skill 面向 .trellis/spec/ 目录引导，本仓已于 2026-09-07 移除该目录，沉淀改走 docs/spec/ 与 CLAUDE.md「规范沉淀规则」——本 skill 在本仓不适用，勿触发。Bootstrap project-specific Trellis coding specs with a platform-neutral single-agent workflow. Use when creating or refreshing .trellis/spec guidelines, analyzing a codebase with GitNexus, ABCoder, or source inspection, decomposing package/layer spec work, and writing real codebase-backed spec docs without placeholder text."
 ---
 
 # Trellis Spec Bootstarp

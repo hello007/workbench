@@ -1,6 +1,6 @@
 ---
 name: trellis-before-dev
-description: "Discovers and injects project-specific coding guidelines from .trellis/spec/ before implementation begins. Reads spec indexes, pre-development checklists, and shared thinking guides for the target package. Use when starting a new coding task, before writing any code, switching to a different package, or needing to refresh project conventions and standards."
+description: "Discovers and injects project-specific coding guidelines before implementation begins. Reads the CLAUDE.md key-rules list and the relevant docs/spec/ topic docs (indexed in docs/spec/README.md) for the target area. Use when starting a new coding task, before writing any code, switching to a different area, or needing to refresh project conventions and standards. Note: project-specific routing rules (two-tier split, tiered row limits) are owned by CLAUDE.md「规范沉淀规则」."
 ---
 
 Read the relevant development guidelines before starting your task.
@@ -16,18 +16,15 @@ Execute these steps:
    - Which package you're modifying (e.g., `cli/`, `docs-site/`)
    - What type of work (backend, frontend, unit-test, docs, etc.)
 
-3. **Read the spec index** for each relevant module:
+3. **Read the spec entry points** for this repo:
    ```bash
-   cat .trellis/spec/<package>/<layer>/index.md
+   cat docs/spec/README.md
    ```
-   Follow the **"Pre-Development Checklist"** section in the index.
+   The CLAUDE.md key-rules list is auto-injected each session — treat it as the pre-development checklist: every row names a rule you must follow, each linking to its `docs/spec/` detail doc.
 
-4. **Read the specific guideline files** listed in the Pre-Development Checklist that are relevant to your task. The index is NOT the goal — it points you to the actual guideline files (e.g., `error-handling.md`, `conventions.md`, `mock-strategies.md`). Read those files to understand the coding standards and patterns.
+4. **Read the specific topic docs** linked from the key-rules rows that are relevant to your task (e.g., `cross-layer-contracts.md`, `logging-and-errors.md`, `perf-baseline.md`). The key-rules row is NOT the full contract — it points you to the actual detail doc. Read those files to understand the coding standards and patterns.
 
-5. **Always read shared guides**:
-   ```bash
-   cat .trellis/spec/guides/index.md
-   ```
+5. **Check for area-specific conventions**: if your task touches an area with a dedicated spec doc (terminal, assets, pptx-split, browser-channel, etc.), read that doc's relevant sections before coding.
 
 6. Understand the coding standards and patterns you need to follow, then proceed with your development plan.
 
