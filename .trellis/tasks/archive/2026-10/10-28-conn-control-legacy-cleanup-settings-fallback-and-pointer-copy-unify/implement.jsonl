@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "设置段指针纪律与跨层同步面的既有契约；本任务 PrivateCopy/EnsureAllDefaults checklist 规则行落点，实施须对齐既有同步规则表述"}
+{"file": "docs/spec/browser-channel.md", "reason": "连接管控六~十一期主 spec：SetIPBanConfig/SetAuditConfig「保存+生效」单点契约、七参签名纪律、指针段拷贝纪律出处；改写消费点不得破坏既载语义"}
+{"file": "docs/spec/test-stability.md", "reason": "新增单测（model 层双 helper、写入口独立性断言）须守测试稳定性纪律（禁隐式依赖外部状态、注入驱动）"}
