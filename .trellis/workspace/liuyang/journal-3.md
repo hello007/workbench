@@ -1906,3 +1906,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 167: trellis 沉淀链 skill 旧路径出清：指向 docs/spec 与覆盖层口径
+
+**Date**: 2026-10-29
+**Task**: trellis 沉淀链 skill 旧路径出清：指向 docs/spec 与覆盖层口径
+**Branch**: `master`
+
+### Summary
+
+出清 .claude/ 下 trellis 系 8 文件的 .trellis/spec 旧路径引用（update-spec 深度改写+权威声明、before-dev/break-loop/check/3 agents 同口径改写、spec-bootstarp 弃用前缀）；白名单豁免 trellis-meta 整体与 session-start.py（prd 登记口径）；动态导流走查闭环 851c4e8 Q5 留尾，结论引导正确；workflow.md/CLAUDE.md/session-start.py 零改动；grep 复核改动面零活引用
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adcb9d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
