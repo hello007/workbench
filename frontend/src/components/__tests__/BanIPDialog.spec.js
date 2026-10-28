@@ -339,3 +339,94 @@ describe('BanIPDialog.vue 网段档（连接管控八期）', () => {
     expect(wrapper.emitted('banned')).toBeFalsy()
   })
 })
+
+describe('BanIPDialog.vue 网段预填（连接管控九期聚合建议入口）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  /** 挂载并打开（props 可带 initialCidr/initialIP，与真实 v-model 打开时序一致） */
+  async function createOpenedWrapper(over = {}, settings = {}) {
+    const { GetSettings } = await import('../../../wailsjs/go/main/App')
+    GetSettings.mockResolvedValue(settings)
+    wrapper = mount(BanIPDialog, {
+      props: { modelValue: false, ...over },
+      global: { stubs }
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('initialCidr 预填：档位自动切网段档（placeholder 换网段形态）+ 网段输入预填', async () => {
+    wrapper = await createOpenedWrapper({ initialCidr: '203.0.113.0/24' })
+    // 档位自动切网段档：输入框 placeholder 换网段形态（含网段示例串）
+    const input = wrapper.find('input.ban-ip-input')
+    expect(input.attributes('placeholder')).toContain('203.0.113.0/24')
+    // 网段输入预填建议网段串
+    expect(input.element.value).toBe('203.0.113.0/24')
+    // 合法网段无行内错误（白名单空快照无警示）
+    expect(wrapper.find('.ban-ip-field-error').exists()).toBe(false)
+  })
+
+  it('initialCidr 预填后直接提交：BanCIDR 以建议网段与永久档/空原因透传且 BanIP 不调用', async () => {
+    const { BanCIDR, BanIP } = await import('../../../wailsjs/go/main/App')
+    BanCIDR.mockResolvedValue()
+    wrapper = await createOpenedWrapper({ initialCidr: '203.0.113.0/24' })
+    // 时长档不预填：维持默认永久档
+    expect(wrapper.find('select.ban-ip-expiry-select').element.value).toBe('permanent')
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).toHaveBeenCalledTimes(1)
+    expect(BanCIDR).toHaveBeenCalledWith('203.0.113.0/24', 0, '')
+    expect(BanIP).not.toHaveBeenCalled()
+    expect(wrapper.emitted('banned')).toBeTruthy()
+  })
+
+  it('initialCidr 网段与白名单完全覆盖时预检拦截（复用网段档现成逻辑零改动）', async () => {
+    const { BanCIDR } = await import('../../../wailsjs/go/main/App')
+    wrapper = await createOpenedWrapper(
+      { initialCidr: '192.168.1.0/24' },
+      { ipban: { whitelist: ['192.168.0.0/16'] } }
+    )
+    expect(wrapper.find('.ban-ip-field-warn').text()).toContain('完全包含')
+    expect(wrapper.find('.ban-ip-confirm-btn').attributes('disabled')).toBeDefined()
+    await wrapper.find('.ban-ip-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(BanCIDR).not.toHaveBeenCalled()
+  })
+
+  it('双空默认 ip 档（两 prop 均空串 = 现状默认路径零回归）', async () => {
+    wrapper = await createOpenedWrapper({ initialCidr: '', initialIP: '' })
+    const input = wrapper.find('input.ban-ip-input')
+    // 单 IP 档 placeholder 形态 + 输入为空
+    expect(input.attributes('placeholder')).toContain('192.0.2.10')
+    expect(input.element.value).toBe('')
+    expect(wrapper.find('.ban-ip-field-error').text()).toContain('来源 IP')
+  })
+
+  it('initialIP 路径零回归：预填不切网段档（placeholder 保持 IP 形态）', async () => {
+    wrapper = await createOpenedWrapper({ initialIP: '192.0.2.99' })
+    const input = wrapper.find('input.ban-ip-input')
+    expect(input.attributes('placeholder')).toContain('192.0.2.10')
+    expect(input.element.value).toBe('192.0.2.99')
+  })
+
+  it('双非空防御形态 initialIP 优先（真实调用面互斥不传双值，防御口径钉死）', async () => {
+    wrapper = await createOpenedWrapper({ initialIP: '192.0.2.99', initialCidr: '203.0.113.0/24' })
+    const input = wrapper.find('input.ban-ip-input')
+    // initialIP 优先：单 IP 档 + IP 预填，网段串不落地
+    expect(input.attributes('placeholder')).toContain('192.0.2.10')
+    expect(input.element.value).toBe('192.0.2.99')
+    expect(wrapper.find('select.ban-ip-expiry-select').element.value).toBe('permanent')
+  })
+})

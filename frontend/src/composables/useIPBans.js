@@ -21,7 +21,7 @@
 
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import { ListIPBans } from '../../wailsjs/go/main/App'
+import { ListIPBans, ListIPBanSuggestions } from '../../wailsjs/go/main/App'
 import { ElMessage } from 'element-plus'
 import { isBrowserChannel } from '../transport'
 
@@ -93,6 +93,61 @@ export function useIPBanList() {
   })
 
   return { ipBans, reload }
+}
+
+/**
+ * 网段聚合封禁建议数据源（连接管控九期，桌面专用消费面）。
+ *
+ * 后端链路：App.ListIPBanSuggestions 对 IPBanService 内存条目按固定粒度聚合
+ * （IPv4 /24、IPv6 /64），同网段自动封禁来源数达阈值时产出建议（{cidr, count}，
+ * 排序后端已做——计数降序 + 网段串字典序次级，前端零排序）。**隐私红线**：该方法
+ * 与 ListIPBans 同进 server RPCHiddenMethods 屏蔽列表（载荷派生自他人 IP 封禁
+ * 明细，浏览器通道呈现「方法不存在」，整体不可达无降级 UI）；本文件加载面经
+ * isBrowserChannel() 启动期判定直接跳过，浏览器端 suggestions 恒空、建议小节
+ * 不渲染。
+ *
+ * 刷新时机对齐 useIPBanList：onMounted 首拉；`webserve-ip-banned` 事件到达自动
+ * reload（新自动封禁可能产出/改变建议）；外部调 reload()（面板打开与封禁动作后，
+ * 由 ActivityBar 统一接线）。
+ *
+ * @returns {{
+ *   suggestions: import('vue').Ref<Array<{cidr:string, count:number}>>,
+ *   reload: () => Promise<void>
+ * }}
+ */
+export function useIPBanSuggestions() {
+  const suggestions = ref([])
+  let offBanned = null
+
+  async function reload() {
+    if (isBrowserChannel()) {
+      return
+    }
+    try {
+      const list = await ListIPBanSuggestions()
+      suggestions.value = Array.isArray(list) ? list : []
+    } catch {
+      // 加载失败保持上次值（首拉即失败为空列表空态），不弹错——建议为增强展示面，
+      // 静默空态优于报错噪声（对齐 useIPBanList 降级口径）
+    }
+  }
+
+  onMounted(() => {
+    offBanned = EventsOn(WEBSERVE_IP_BANNED_EVENT, () => {
+      // 与封禁列表同款整表重拉（建议量级 = 网段桶数，恒小于条目数，免增量合并）
+      reload()
+    })
+    reload()
+  })
+
+  onBeforeUnmount(() => {
+    if (offBanned) {
+      offBanned()
+      offBanned = null
+    }
+  })
+
+  return { suggestions, reload }
 }
 
 /**

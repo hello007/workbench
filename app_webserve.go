@@ -567,16 +567,37 @@ func (a *App) ListIPBans() []model.IPBanStatus {
 	return a.ipBanSvc.List()
 }
 
+// ListIPBanSuggestions 返回网段聚合封禁建议（连接管控九期）：同聚合网段（IPv4
+// /24、IPv6 /64）内自动封禁来源数达到设置阈值时产出「该网段 N 个来源已被封禁，
+// 建议网段封禁」建议条目，供桌面 IP 封禁区块提示与一键预填网段封禁弹窗。聚合
+// 口径与阈值判定见 service.IPBanService.AggregateSuggestions；载荷仅网段串 + 计数，无
+// 具体 IP 明细；纯只读查询面，空态返回空切片（非 nil），无新增错误码。
+//
+// **隐私红线——本方法不进浏览器通道**：聚合建议派生自他人 IP 封禁条目（同
+// ListIPBans 的数据面），对齐「他人 IP 明细仅走桌面出口」红线整体收口——装配层
+// 经 server.WebOptions.RPCHiddenMethods 对翻译层屏蔽（对浏览器呈现「方法不存在」，
+// 与 QueryAuditLog/ListIPBans 先例同款），无 count 降级形态；前端建议小节仅桌面
+// 明细面板消费。桌面 Wails 绑定不经翻译层，不受屏蔽影响。服务未装配（旁路构造
+// 的测试 App）返回空切片（非 nil），webServe 未运行时不影响本只读面（与
+// ListIPBans 同款，无降级分叉）。
+func (a *App) ListIPBanSuggestions() []model.IPBanAggregateSuggestion {
+	if a.ipBanSvc == nil {
+		return []model.IPBanAggregateSuggestion{}
+	}
+	return a.ipBanSvc.AggregateSuggestions()
+}
+
 // SetIPBanConfig 保存 IP 封禁参数与可信网段白名单并即时生效（连接管控六期，
-// 设置页「自动封禁」小节保存入口；七期扩第五参 whitelist）：normalize 归一
-// （零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法 CIDR/裸 IP 条目
-// 剔除）→ 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」显式单点，
-// 对齐 SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用
+// 设置页「自动封禁」小节保存入口；七期扩 whitelist，九期扩聚合建议阈值）：
+// normalize 归一（零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法
+// CIDR/裸 IP 条目剔除）→ 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」
+// 显式单点，对齐 SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用
 // SaveSettings 隐式联动）。
 //
 // 生效语义（六期定稿）：仅面向未来——生效中封禁的到期时刻不追溯调整（改小时长
 // 不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免）；threshold 改小
-// 后存量计数自然满足，下次失败即触发。白名单为唯一例外（七期定稿「豁免 = 语义
+// 后存量计数自然满足，下次失败即触发；聚合建议阈值同口径（九期：改小后存量条目
+// 自然满足，下次查询即产出建议）。白名单为唯一例外（七期定稿「豁免 = 语义
 // 修正」）：命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即
 // 恢复拒连）。参数非法无失败分支：clamp 层静默收敛、白名单非法条目剔除（前端
 // el-input-number 已挡边界、CIDR 行级格式校验已挡格式，后端兜底手改配置形态）。
@@ -584,13 +605,14 @@ func (a *App) ListIPBans() []model.IPBanStatus {
 // 指针段复制纪律：基底设置的 WebServe/Assets 指针段一律私有拷贝后替换 IPBan 段，
 // 防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态（SetWebServeConfig
 // 先例同款）。
-func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes int, whitelist []string) error {
+func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes, aggregateSuggestThreshold int, whitelist []string) error {
 	normalized := model.NormalizeIPBanSettings(&model.IPBanSettings{
-		Threshold:             threshold,
-		WindowMinutes:         windowMinutes,
-		DurationMinutes:       durationMinutes,
-		MaxBanDurationMinutes: maxBanDurationMinutes,
-		Whitelist:             whitelist,
+		Threshold:                 threshold,
+		WindowMinutes:             windowMinutes,
+		DurationMinutes:           durationMinutes,
+		MaxBanDurationMinutes:     maxBanDurationMinutes,
+		Whitelist:                 whitelist,
+		AggregateSuggestThreshold: aggregateSuggestThreshold,
 	})
 
 	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）

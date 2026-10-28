@@ -483,11 +483,12 @@
               <el-button size="small" @click="auditHistoryVisible = true">查看审计日志</el-button>
             </div>
           </div>
-          <!-- 自动封禁参数（连接管控六期）+ 可信网段白名单（七期）：认证失败频次
-               达标自动封禁来源 IP 的四参数（阈值/窗口/基础时长/递增封顶）与 CIDR
-               白名单列表，保存同走 SetIPBanConfig 专用单点五参（保存+即时生效，
-               对齐 SetWebServeConfig 先例）；纯桌面面入口同审计日志（参数非隐私
-               但与通道治理同语境，浏览器通道设置页隐藏） -->
+          <!-- 自动封禁参数（连接管控六期）+ 可信网段白名单（七期）+ 聚合建议阈值
+               （九期）：认证失败频次达标自动封禁来源 IP 的五参数（阈值/窗口/基础
+               时长/递增封顶/聚合建议阈值）与 CIDR 白名单列表，保存同走
+               SetIPBanConfig 专用单点六参（保存+即时生效，对齐 SetWebServeConfig
+               先例）；纯桌面面入口同审计日志（参数非隐私但与通道治理同语境，
+               浏览器通道设置页隐藏） -->
           <div v-if="!browserChannel" class="settings-item settings-item--column">
             <div class="settings-item-info">
               <div class="settings-item-label">自动封禁</div>
@@ -550,11 +551,25 @@
                 />
                 <span class="ipban-field-hint">分钟（{{ IP_BAN_MAX_DURATION_MIN }}-{{ IP_BAN_MAX_DURATION_MAX }}，不低于基础时长）</span>
               </div>
+              <div class="ipban-field">
+                <span class="ipban-field-label">聚合建议阈值</span>
+                <el-input-number
+                  v-model="ipBanAggregateSuggestThreshold"
+                  size="small"
+                  :min="IP_BAN_AGG_SUGGEST_MIN"
+                  :max="IP_BAN_AGG_SUGGEST_MAX"
+                  :value-on-clear="IP_BAN_DEFAULTS.aggregateSuggestThreshold"
+                  :step="1"
+                  step-strictly
+                  controls-position="right"
+                />
+                <span class="ipban-field-hint">个来源（{{ IP_BAN_AGG_SUGGEST_MIN }}-{{ IP_BAN_AGG_SUGGEST_MAX }}，同网段封禁建议）</span>
+              </div>
             </div>
             <!-- 可信网段白名单（连接管控七期）：CIDR 串或裸 IP 列表，命中来源认证
                  失败完全不计数不封禁（NAT 共享出口等可信场景豁免），生效中封禁
                  追溯放行。动态行增删 + 行级格式校验（非法行标红不阻断其他行）；
-                 保存随下方「保存并生效」同按钮提交（SetIPBanConfig 第五参），后端
+                 保存随下方「保存并生效」同按钮提交（SetIPBanConfig 第六参），后端
                  normalize 剔除非法条目并回读刷新 -->
             <div class="ipban-whitelist">
               <div class="ipban-whitelist-header">
@@ -605,7 +620,7 @@ import { isBrowserChannel } from '../transport'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import AuditHistoryDialog from './AuditHistoryDialog.vue'
 import BanTokenDialog from './BanTokenDialog.vue'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX, IP_BAN_AGG_SUGGEST_MIN, IP_BAN_AGG_SUGGEST_MAX } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -745,25 +760,27 @@ const customExpiryDate = ref(null)
 const creatingToken = ref(false)
 const createdPlain = ref('')
 
-// 自动封禁参数（连接管控六期）：四参数表单（el-input-number clamp 与后端
-// model clamp 边界一致）+ 保存（SetIPBanConfig「保存+生效」专用单点）+ 恢复
-// 默认；初值经 loadWebServeConfig 的 GetSettings 回填（段缺失走默认）。
-// 可信网段白名单（七期）：{ value } 行对象数组（v-model 绑定须可变行内字段），
-// 保存时提取字符串列表提交（SetIPBanConfig 第五参），后端 normalize 剔除非法
-// 条目，保存后回读归一值刷新表单。
+// 自动封禁参数（连接管控六期）：五参数表单（el-input-number clamp 与后端
+// model clamp 边界一致；九期扩聚合建议阈值）+ 保存（SetIPBanConfig「保存+生效」
+// 专用单点）+ 恢复默认；初值经 loadWebServeConfig 的 GetSettings 回填（段缺失
+// 走默认）。可信网段白名单（七期）：{ value } 行对象数组（v-model 绑定须可变
+// 行内字段），保存时提取字符串列表提交（SetIPBanConfig 第六参），后端 normalize
+// 剔除非法条目，保存后回读归一值刷新表单。
 const ipBanThreshold = ref(IP_BAN_DEFAULTS.threshold)
 const ipBanWindowMinutes = ref(IP_BAN_DEFAULTS.windowMinutes)
 const ipBanDurationMinutes = ref(IP_BAN_DEFAULTS.durationMinutes)
 const ipBanMaxBanDurationMinutes = ref(IP_BAN_DEFAULTS.maxBanDurationMinutes)
+const ipBanAggregateSuggestThreshold = ref(IP_BAN_DEFAULTS.aggregateSuggestThreshold)
 const ipBanWhitelist = ref([])
 const savingIPBan = ref(false)
 
-/** 恢复默认：表单回填四项参数默认值并清空白名单（不落盘，保存动作显式提交） */
+/** 恢复默认：表单回填五项参数默认值并清空白名单（不落盘，保存动作显式提交） */
 function resetIPBanDefaults() {
   ipBanThreshold.value = IP_BAN_DEFAULTS.threshold
   ipBanWindowMinutes.value = IP_BAN_DEFAULTS.windowMinutes
   ipBanDurationMinutes.value = IP_BAN_DEFAULTS.durationMinutes
   ipBanMaxBanDurationMinutes.value = IP_BAN_DEFAULTS.maxBanDurationMinutes
+  ipBanAggregateSuggestThreshold.value = IP_BAN_DEFAULTS.aggregateSuggestThreshold
   ipBanWhitelist.value = []
 }
 
@@ -804,6 +821,7 @@ async function saveIPBanConfig() {
       ipBanWindowMinutes.value,
       ipBanDurationMinutes.value,
       ipBanMaxBanDurationMinutes.value,
+      ipBanAggregateSuggestThreshold.value,
       whitelist
     )
     ElMessage.success('自动封禁参数已保存并即时生效')
@@ -821,6 +839,7 @@ async function saveIPBanConfig() {
       ipBanWindowMinutes.value = settings.ipban.windowMinutes
       ipBanDurationMinutes.value = settings.ipban.durationMinutes
       ipBanMaxBanDurationMinutes.value = settings.ipban.maxBanDurationMinutes
+      ipBanAggregateSuggestThreshold.value = settings.ipban.aggregateSuggestThreshold || IP_BAN_DEFAULTS.aggregateSuggestThreshold
       const list = Array.isArray(settings.ipban.whitelist) ? settings.ipban.whitelist : []
       ipBanWhitelist.value = list.map((item) => ({ value: item }))
     }
@@ -1134,11 +1153,13 @@ async function loadWebServeConfig() {
     webTlsCertPath.value = settings?.webServe?.tlsCertPath || ''
     webTlsKeyPath.value = settings?.webServe?.tlsKeyPath || ''
     // 自动封禁参数回填（连接管控六期）：段缺失（老配置）时保持默认值；
-    // 白名单列表回填（七期，段缺失/字段缺失降级空列表）
+    // 白名单列表回填（七期，段缺失/字段缺失降级空列表）；聚合建议阈值回填
+    // （九期，老配置字段缺失走默认）
     ipBanThreshold.value = settings?.ipban?.threshold || IP_BAN_DEFAULTS.threshold
     ipBanWindowMinutes.value = settings?.ipban?.windowMinutes || IP_BAN_DEFAULTS.windowMinutes
     ipBanDurationMinutes.value = settings?.ipban?.durationMinutes || IP_BAN_DEFAULTS.durationMinutes
     ipBanMaxBanDurationMinutes.value = settings?.ipban?.maxBanDurationMinutes || IP_BAN_DEFAULTS.maxBanDurationMinutes
+    ipBanAggregateSuggestThreshold.value = settings?.ipban?.aggregateSuggestThreshold || IP_BAN_DEFAULTS.aggregateSuggestThreshold
     const wl = settings?.ipban?.whitelist
     ipBanWhitelist.value = (Array.isArray(wl) ? wl : []).map((item) => ({ value: item }))
   } catch {

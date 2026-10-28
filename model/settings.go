@@ -147,6 +147,12 @@ const (
 	DefaultIPBanMaxBanMinutes   = 60
 	MinIPBanMaxBanMinutes       = 5
 	MaxIPBanMaxBanMinutes       = 1440
+	// 网段聚合建议阈值（连接管控九期）：同聚合网段（IPv4 /24、IPv6 /64）内自动
+	// 封禁条目达到该数即产出网段封禁建议（下限 2 保证建议至少指向「多源」，单条
+	// 自动封禁无网段级洞察价值；上限防误配出无意义的大数）。
+	DefaultIPBanAggregateSuggestThreshold = 3
+	MinIPBanAggregateSuggestThreshold     = 2
+	MaxIPBanAggregateSuggestThreshold     = 50
 )
 
 // IPBanSettings IP 认证失败自动封禁参数段（连接管控六期，settings.json 的 ipban
@@ -159,6 +165,10 @@ type IPBanSettings struct {
 	WindowMinutes         int `json:"windowMinutes"`         // 滑动窗口长度分钟（默认 10，clamp 1-120）
 	DurationMinutes       int `json:"durationMinutes"`       // 基础封禁时长分钟（首次触发，默认 5，clamp 1-60）
 	MaxBanDurationMinutes int `json:"maxBanDurationMinutes"` // 递增封禁封顶分钟（默认 60，clamp 5-1440，恒 ≥ DurationMinutes）
+	// AggregateSuggestThreshold 网段聚合建议触发阈值（连接管控九期）：同聚合网段
+	// 内自动封禁条目达到该数产出网段封禁建议（消费面 service.IPBanService.
+	// AggregateSuggestions，默认 3，clamp 2-50）。
+	AggregateSuggestThreshold int `json:"aggregateSuggestThreshold"`
 	// Whitelist 可信网段白名单（连接管控七期）：CIDR 串列表（裸 IP 合法，消费层
 	// 自动补 /32 //128）。命中来源认证失败完全不计数不封禁（NAT 共享出口等可信
 	// 场景豁免），生效中封禁追溯放行。normalize 剔除非法条目（静默收敛不失败），
@@ -170,11 +180,12 @@ type IPBanSettings struct {
 // 数值与五期硬编码常量 service.IPBanThreshold/IPBanWindow/IPBanDuration 对齐）。
 func DefaultIPBanSettings() IPBanSettings {
 	return IPBanSettings{
-		Threshold:             DefaultIPBanThreshold,
-		WindowMinutes:         DefaultIPBanWindowMinutes,
-		DurationMinutes:       DefaultIPBanDurationMinutes,
-		MaxBanDurationMinutes: DefaultIPBanMaxBanMinutes,
-		Whitelist:             []string{},
+		Threshold:                 DefaultIPBanThreshold,
+		WindowMinutes:             DefaultIPBanWindowMinutes,
+		DurationMinutes:           DefaultIPBanDurationMinutes,
+		MaxBanDurationMinutes:     DefaultIPBanMaxBanMinutes,
+		Whitelist:                 []string{},
+		AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
 	}
 }
 
@@ -189,6 +200,7 @@ func (s *IPBanSettings) normalize() {
 	if s.MaxBanDurationMinutes < s.DurationMinutes {
 		s.MaxBanDurationMinutes = s.DurationMinutes
 	}
+	s.AggregateSuggestThreshold = clampIPBanInt(s.AggregateSuggestThreshold, MinIPBanAggregateSuggestThreshold, MaxIPBanAggregateSuggestThreshold, DefaultIPBanAggregateSuggestThreshold)
 	s.Whitelist = normalizeIPBanWhitelist(s.Whitelist)
 }
 
@@ -229,8 +241,9 @@ func NormalizeIPBanSettings(s *IPBanSettings) IPBanSettings {
 }
 
 // EnsureIPBanDefaults 补全 IP 封禁参数段默认值并收敛越界值：
-//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 四项全默认 + 白名单空切片；
-//   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法条目剔除。
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 参数全默认 + 白名单空切片；
+//   - 段存在 → 零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法条目剔除
+//     （含九期聚合建议阈值的零值回默认与 clamp）。
 //
 // 在 SettingsService.Load/Save 双链路统一调用，保证 IPBanService 消费方拿到的
 // 段始终完整可用。

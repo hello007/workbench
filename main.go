@@ -237,9 +237,11 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 		// actor 归因）+ 审计读侧对浏览器通道屏蔽（隐私红线，见 WebOptions 注释）
 		RPCTarget:         app,
 		RPCTargetForActor: app.rpcTargetForActor,
-		// 隐私红线屏蔽面：QueryAuditLog（审计历史，含全谱 IP/令牌明细）与
-		// ListIPBans（连接管控五期 IP 封禁列表，他人 IP 明细仅走桌面出口）
-		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans"},
+		// 隐私红线屏蔽面：QueryAuditLog（审计历史，含全谱 IP/令牌明细）、
+		// ListIPBans（连接管控五期 IP 封禁列表，他人 IP 明细仅走桌面出口）与
+		// ListIPBanSuggestions（连接管控九期网段聚合建议，派生自他人 IP 封禁
+		// 条目，载荷仅网段串+计数仍整体收口——无 count 降级形态）
+		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans", "ListIPBanSuggestions"},
 		WSHub:            hub,
 	})
 	return hub, handler, nil

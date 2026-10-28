@@ -230,6 +230,13 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   BanIP: null,
   UnbanCIDR: null,
   BanCIDR: null,
+  // 网段聚合封禁建议（连接管控九期，桌面 IP 封禁区块「聚合建议」小节）：形状
+  // 对齐 model.IPBanAggregateSuggestion（cidr 规范化网段串 + count 参与聚合的
+  // 自动封禁条目数；排序后端已做——计数降序 + 字典序次级，前端零排序）。默认
+  // 空列表 = 无建议空态（小节不渲染），用例按需 override。后端对浏览器通道经
+  // RPCHiddenMethods 屏蔽本方法（隐私红线同 ListIPBans——载荷派生自他人 IP
+  // 封禁明细），真实浏览器链路加载面由 isBrowserChannel 跳过
+  ListIPBanSuggestions: [],
   // 审计历史（连接管控三期，桌面审计历史弹窗）：形状对齐 service.AuditQueryResult
   // （外层 Total/Records 为 Go 导出字段直序列化大写驼峰；records 内为 json 小写
   // tag：ts/event/tokenId/name/remoteAddr/userAgent/connId/actorSource/
@@ -448,8 +455,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // no-op；GetSettings 在 E2E 补充表（{}，settings store 按 themeMode 判定安全回退）
   SaveSettings: null,
 
-  // IP 封禁参数与白名单保存（连接管控六期「保存+生效」单点；七期扩五参白名单
-  // 列表）：void 返回 null 安全 no-op
+  // IP 封禁参数与白名单保存（连接管控六期「保存+生效」单点；七期扩第五参白名单
+  // 列表；九期扩第六参聚合建议阈值 aggregateSuggestThreshold）：void 返回 null
+  // 安全 no-op（mock 不声明形参，六参透传天然兼容）
   SetIPBanConfig: null,
 
   // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----

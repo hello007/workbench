@@ -108,3 +108,47 @@ test.describe('IP 自动封禁（连接管控五期）', () => {
     await expect(dialog).toBeHidden()
   })
 })
+
+// 网段聚合建议（连接管控九期）：同网段自动封禁达阈值产出建议行（封禁列表上方
+// 小节），点击行预填 BanIPDialog 网段档（档位自动切换）完成处置闭环。数据源
+// ListIPBanSuggestions 桌面专用（浏览器通道 RPCHiddenMethods 屏蔽，E2E mock
+// 通道直接 override 消费面）；建议行无通道门（数据空即不渲染），无需派发桌面
+// 连接事件锁通道——面板可见由 ListIPBans 覆盖驱动
+test.describe('网段聚合建议（连接管控九期）', () => {
+  test.use({
+    wailsOverrides: {
+      ListIPBans: [banEntry()],
+      ListIPBanSuggestions: [{ cidr: '203.0.113.0/24', count: 3 }]
+    }
+  })
+
+  test('聚合建议行渲染 → 点击预填网段封禁弹窗 → BanCIDR 调用断言', async ({ page }) => {
+    await page.goto('/')
+    const indicator = page.locator('.activity-bar-devices')
+    await expect(indicator).toBeVisible()
+    await indicator.click()
+    const panel = page.locator('.devices-panel')
+    await expect(panel).toBeVisible()
+
+    // 建议小节（封禁列表上方）：标题 + 建议行（网段串 + 计数 + 建议文案）
+    const block = panel.locator('.devices-suggest-block')
+    await expect(block).toContainText('聚合建议')
+    const row = block.locator('.devices-suggest-row')
+    await expect(row).toContainText('203.0.113.0/24')
+    await expect(row).toContainText('该网段 3 个来源已被封禁，建议网段封禁')
+
+    // 点击预填：弹窗档位自动切网段档（placeholder 换网段形态）+ 网段输入预填，
+    // 时长档维持默认永久档；直接提交走 BanCIDR（闭环止于预填，提交即管理员确认）
+    await row.click()
+    const dialog = page.locator('.ban-ip-dialog')
+    await expect(dialog).toBeVisible()
+    const input = dialog.locator('.ban-ip-input input')
+    await expect(input).toHaveValue('203.0.113.0/24')
+    await expect(input).toHaveAttribute('placeholder', /203\.0\.113\.0\/24/)
+    await dialog.locator('button', { hasText: '封禁' }).click()
+    await expect(
+      page.evaluate(() => window.__wailsCalls.filter((c) => c.method === 'BanCIDR'))
+    ).resolves.toEqual([{ method: 'BanCIDR', args: ['203.0.113.0/24', 0, ''] }])
+    await expect(dialog).toBeHidden()
+  })
+})

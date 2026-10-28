@@ -103,6 +103,12 @@ type IPBanService struct {
 	// 白名单 → entries 精确查 → 本列表线性扫 Contains（条目量级 = 管理员手动
 	// 操作数，无压力），见 matchCidrBan。
 	cidrBans []*ipBanCidrEntry
+	// suggestThreshold 网段聚合建议阈值（九期，service/ip_ban_aggregate.go）：
+	// 同聚合网段（IPv4 /24、IPv6 /64）内参与聚合的自动封禁条目数达到该值时，
+	// AggregateSuggestions 产出网段封禁建议。构造以默认值起跑，运行期经
+	// ApplyConfig 注入设置段归一值（IPBanSettings.aggregateSuggestThreshold，
+	// clamp 2-50——对齐六期四参数先例，「原字段换参不动 entries」纪律同款）。
+	suggestThreshold int
 	// 手动封禁持久化（七期）：bansPath 为 data/ip_bans.json（SetBansPath 注入，
 	// 未注入为纯内存模式——既有构造路径零行为变化）；manualVersion 为手动条目
 	// 变更代际（Ban 写入/UnbanIP 删除/载入/ClearAll 均在 mu 锁内递增），落盘
@@ -117,32 +123,36 @@ type IPBanService struct {
 // NewIPBanService 构造 IP 自动封禁服务。nowFn 为时间源（nil 时默认 time.Now；
 // 测试注入固定/可推进时钟驱动窗口滑动与到期，不依赖 sleep 与真实时钟）。四参数
 // 以五期常量初值起跑；装配层在构造后经 ApplyConfig 注入设置段归一值（热更入口
-// 与启动初值同一路径，无第二初始化通道）。
+// 与启动初值同一路径，无第二初始化通道）。聚合建议阈值（九期）以默认值起跑，
+// 运行期同经 ApplyConfig 注入设置段归一值。
 func NewIPBanService(nowFn func() time.Time) *IPBanService {
 	if nowFn == nil {
 		nowFn = time.Now
 	}
 	return &IPBanService{
-		entries:        make(map[string]*ipBanEntry),
-		threshold:      IPBanThreshold,
-		window:         IPBanWindow,
-		duration:       IPBanDuration,
-		maxBanDuration: IPBanMaxBanDuration,
-		nowFn:          nowFn,
+		entries:          make(map[string]*ipBanEntry),
+		threshold:        IPBanThreshold,
+		window:           IPBanWindow,
+		duration:         IPBanDuration,
+		maxBanDuration:   IPBanMaxBanDuration,
+		suggestThreshold: IPBanAggregateSuggestThresholdDefault,
+		nowFn:            nowFn,
 	}
 }
 
 // ApplyConfig 热更四参数与白名单（连接管控六期：设置保存链「保存+生效」单点的
-// 生效步；七期扩白名单段）。入参为归一后的设置段值（调用方经 NormalizeIPBanSettings
-// 保证；本方法不重复 clamp——双口径收敛点在 model 层单点）。mu 锁内整体替换，
-// 原子切换：并发判定要么看到全套旧参数要么全套新参数，无半套中间态。白名单
-// 逐条预解析为 *net.IPNet（service/ip_ban_whitelist.go parseIPBanWhitelistEntry，
-// 裸 IP 自动补 /32 //128；非法条目 model 层已剔除，此处再拦一手防御直灌形态），
-// 整体替换后判定热路径零重复解析。生效语义（六期定稿）：仅面向未来——生效中
-// 封禁的 bannedUntil 不变（已执行动作不追溯，改小时长不提前释放、改大不延长），
-// 在途失败计数不清零（调参不意外赦免攻击者）；threshold 改小后存量计数自然满足，
-// 下次失败即触发，无主动扫描。白名单为唯一例外（七期定稿「豁免 = 语义修正」）：
-// 命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即恢复拒连）。
+// 生效步；七期扩白名单段，九期扩聚合建议阈值）。入参为归一后的设置段值（调用方
+// 经 NormalizeIPBanSettings 保证；本方法不重复 clamp——双口径收敛点在 model 层
+// 单点）。mu 锁内整体替换，原子切换：并发判定要么看到全套旧参数要么全套新参数，
+// 无半套中间态。白名单逐条预解析为 *net.IPNet（service/ip_ban_whitelist.go
+// parseIPBanWhitelistEntry，裸 IP 自动补 /32 //128；非法条目 model 层已剔除，
+// 此处再拦一手防御直灌形态），整体替换后判定热路径零重复解析。生效语义（六期
+// 定稿）：仅面向未来——生效中封禁的 bannedUntil 不变（已执行动作不追溯，改小
+// 时长不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免攻击者）；
+// threshold 改小后存量计数自然满足，下次失败即触发，无主动扫描；聚合建议阈值
+// 同口径（九期：改小后存量条目自然满足，下次 AggregateSuggestions 即产出）。
+// 白名单为唯一例外（七期定稿「豁免 = 语义修正」）：命中生效中封禁的 IP 追溯
+// 放行（在途记录不删，白名单移除且未过期即恢复拒连）。
 func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,6 +160,7 @@ func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.window = time.Duration(cfg.WindowMinutes) * time.Minute
 	s.duration = time.Duration(cfg.DurationMinutes) * time.Minute
 	s.maxBanDuration = time.Duration(cfg.MaxBanDurationMinutes) * time.Minute
+	s.suggestThreshold = cfg.AggregateSuggestThreshold
 	nets := make([]*net.IPNet, 0, len(cfg.Whitelist))
 	for _, item := range cfg.Whitelist {
 		if n, ok := parseIPBanWhitelistEntry(item); ok {

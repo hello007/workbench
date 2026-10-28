@@ -5,14 +5,35 @@ import { createPinia, setActivePinia } from 'pinia'
 import ActivityBar from '../ActivityBar.vue'
 import { useUiStore } from '../../store'
 
-// Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动断言用
+// Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动断言用。
+// 九期起 useIPBanList 与 useIPBanSuggestions 共听 webserve-ip-banned（真实
+// runtime 支持同事件多监听器），mock 升级为按名收集监听器列表 + 分发函数——
+// eventHandlers[name] 恒为「派发一次触达全部监听器」的可调用形态（既有断言
+// 形态兼容），注销闭包按引用精准移除本监听器，最后一个移除时清空注册项
 const eventHandlers = {}
+const eventListeners = {}
 
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn((name, cb) => {
-    eventHandlers[name] = cb
+    if (!eventListeners[name]) {
+      eventListeners[name] = []
+    }
+    eventListeners[name].push(cb)
+    eventHandlers[name] = (...args) => {
+      for (const fn of eventListeners[name] || []) {
+        fn(...args)
+      }
+    }
     return () => {
-      delete eventHandlers[name]
+      const list = eventListeners[name]
+      const idx = list ? list.indexOf(cb) : -1
+      if (idx !== -1) {
+        list.splice(idx, 1)
+      }
+      if (!list || list.length === 0) {
+        delete eventListeners[name]
+        delete eventHandlers[name]
+      }
     }
   })
 }))
@@ -23,6 +44,7 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 vi.mock('../../../wailsjs/go/main/App', () => ({
   KickConnection: vi.fn(),
   ListIPBans: vi.fn(),
+  ListIPBanSuggestions: vi.fn(),
   UnbanIP: vi.fn(),
   UnbanCIDR: vi.fn()
 }))
@@ -31,6 +53,14 @@ vi.mock('element-plus', () => ({
   ElMessageBox: { confirm: vi.fn() },
   ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }
 }))
+
+// 跨用例重置监听器注册表：未显式 unmount 的历史 wrapper 实例不向后续用例泄漏
+// 监听器（真实 runtime 随组件卸载注销，测试侧以注册表重置等价兜底——多监听器
+// 分发下残留监听器会让事件派发触达陈旧实例，放大 mock 调用计数）
+beforeEach(() => {
+  for (const k of Object.keys(eventListeners)) delete eventListeners[k]
+  for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]
+})
 
 // 封禁弹窗桩（连接管控四期，明细行封禁入口）：本文件只断言接线（行内按钮打开
 // 弹窗、目标为行 tokenId），弹窗内部表单与提交链由 BanTokenDialog 专属 spec 覆盖
@@ -43,12 +73,13 @@ vi.mock('../BanTokenDialog.vue', () => ({
   }
 }))
 
-// 手动封禁 IP 弹窗桩（连接管控七期，区块头部入口）：同上只测接线（头部按钮
-// 打开弹窗），弹窗内部表单与提交链由 BanIPDialog 专属 spec 覆盖
+// 手动封禁 IP 弹窗桩（连接管控七期，区块头部入口；九期扩聚合建议行预填入口）：
+// 同上只测接线（头部按钮/建议行打开弹窗、initialCidr 预填透传），弹窗内部表单
+// 与提交链由 BanIPDialog 专属 spec 覆盖
 vi.mock('../BanIPDialog.vue', () => ({
   default: {
     name: 'BanIPDialog',
-    props: ['modelValue'],
+    props: ['modelValue', 'initialCidr'],
     emits: ['update:modelValue', 'banned'],
     template: '<div class="ban-ip-dialog-stub" />'
   }
@@ -778,6 +809,142 @@ describe('ActivityBar - 自动封禁区块', () => {
     expect(ElMessage.success).toHaveBeenCalledWith('已解封 203.0.113.0/24')
     // 解封成功后重拉列表（挂载 1 次 + reload 1 次）
     expect(ListIPBans).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+})
+
+// ---- 聚合建议小节（连接管控九期：同网段自动封禁达阈值产出网段封禁建议，点击
+// 行预填 BanIPDialog 网段档；数据源 ListIPBanSuggestions 桌面专用 + 刷新时机
+// 对齐封禁列表）----
+
+describe('ActivityBar - 聚合建议小节', () => {
+  const createWrapper = () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'directory'
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
+        }
+      }
+    })
+  }
+
+  /** 挂载并 flush 挂载期两数据源（ListIPBans + ListIPBanSuggestions）异步加载 */
+  const mountFlushed = async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await nextTick()
+    return wrapper
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { ListIPBans, ListIPBanSuggestions } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([])
+    ListIPBanSuggestions.mockResolvedValue([])
+  })
+
+  it('空建议小节不渲染（v-if 整体隐藏，IP 封禁区块仅显封禁列表空态）', async () => {
+    const wrapper = await mountFlushed()
+    // 注入一条连接使面板可见（可见条件 = 连接存在或封禁存在，九期不扩条件）
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    expect(wrapper.find('.devices-ban-section').exists()).toBe(true)
+    expect(wrapper.find('.devices-suggest-block').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('有建议渲染小节标题与建议行（网段串 + N 个来源计数 + 建议文案）', async () => {
+    const { ListIPBans, ListIPBanSuggestions } = await import('../../../wailsjs/go/main/App')
+    ListIPBanSuggestions.mockResolvedValue([
+      { cidr: '198.51.100.0/24', count: 4 },
+      { cidr: '203.0.113.0/24', count: 3 }
+    ])
+    ListIPBans.mockResolvedValue([
+      { ip: '203.0.113.7', bannedAt: Math.floor(Date.now() / 1000) - 60, expiresAt: Math.floor(Date.now() / 1000) + 300, failCount: 10, expired: false, source: 'auto' }
+    ])
+    const wrapper = await mountFlushed()
+    const block = wrapper.find('.devices-suggest-block')
+    expect(block.exists()).toBe(true)
+    expect(block.find('.devices-suggest-title').text()).toBe('聚合建议')
+    const rows = wrapper.findAll('.devices-suggest-row')
+    expect(rows.length).toBe(2)
+    // 后端已排序（计数降序），前端零排序原样渲染
+    expect(rows[0].text()).toContain('198.51.100.0/24')
+    expect(rows[0].text()).toContain('该网段 4 个来源已被封禁，建议网段封禁')
+    expect(rows[1].text()).toContain('203.0.113.0/24')
+    expect(rows[1].text()).toContain('该网段 3 个来源已被封禁，建议网段封禁')
+    wrapper.unmount()
+  })
+
+  it('点击建议行打开 BanIPDialog 并透传 initialCidr（预填链路穿透断言）', async () => {
+    const { ListIPBans, ListIPBanSuggestions } = await import('../../../wailsjs/go/main/App')
+    ListIPBanSuggestions.mockResolvedValue([{ cidr: '203.0.113.0/24', count: 3 }])
+    ListIPBans.mockResolvedValue([
+      { ip: '203.0.113.7', bannedAt: Math.floor(Date.now() / 1000) - 60, expiresAt: Math.floor(Date.now() / 1000) + 300, failCount: 10, expired: false, source: 'auto' }
+    ])
+    const wrapper = await mountFlushed()
+    await wrapper.find('.devices-suggest-row').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanIPDialog' })
+    expect(dialog.exists(), 'BanIPDialog 桩应挂载').toBe(true)
+    expect(dialog.props('modelValue'), '点击建议行后 v-model 置 true').toBe(true)
+    expect(dialog.props('initialCidr'), '建议网段串经 initialCidr 透传预填').toBe('203.0.113.0/24')
+    wrapper.unmount()
+  })
+
+  it('头部「封禁 IP」按钮路径 initialCidr 为空串（与建议行入口互斥，默认单 IP 档）', async () => {
+    const wrapper = await mountFlushed()
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    await wrapper.find('.devices-ban-add').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanIPDialog' })
+    expect(dialog.props('modelValue')).toBe(true)
+    expect(dialog.props('initialCidr')).toBe('')
+    wrapper.unmount()
+  })
+
+  it('webserve-ip-banned 事件到达重拉建议（与封禁列表同款事件驱动刷新）', async () => {
+    const { ListIPBans, ListIPBanSuggestions } = await import('../../../wailsjs/go/main/App')
+    // 注入一条封禁使面板可见（可见条件 = 连接存在或封禁存在，九期不扩条件）
+    ListIPBans.mockResolvedValue([
+      { ip: '203.0.113.7', bannedAt: Math.floor(Date.now() / 1000) - 60, expiresAt: Math.floor(Date.now() / 1000) + 300, failCount: 10, expired: false, source: 'auto' }
+    ])
+    const wrapper = await mountFlushed()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(1)
+    ListIPBanSuggestions.mockResolvedValue([{ cidr: '203.0.113.0/24', count: 3 }])
+    eventHandlers['webserve-ip-banned']({ ip: '203.0.113.9', failCount: 10 })
+    await flushPromises()
+    await nextTick()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.devices-suggest-row').text()).toContain('203.0.113.0/24')
+    wrapper.unmount()
+  })
+
+  it('封禁动作后 @banned 重拉建议（面板打开与动作后列表、建议口径同步）', async () => {
+    const { ListIPBans, ListIPBanSuggestions } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      { ip: '203.0.113.7', bannedAt: Math.floor(Date.now() / 1000) - 60, expiresAt: Math.floor(Date.now() / 1000) + 300, failCount: 10, expired: false, source: 'auto' }
+    ])
+    const wrapper = await mountFlushed()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(1)
+    await wrapper.findComponent({ name: 'BanIPDialog' }).vm.$emit('banned')
+    await flushPromises()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

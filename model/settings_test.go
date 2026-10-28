@@ -308,7 +308,7 @@ func TestNormalizeAssetThumbsSettings(t *testing.T) {
 // 越界 clamp、界内保留、封顶不低于基础时长的组合收敛、白名单非法条目剔除。
 // 结构含切片字段后不可用 == 比较，统一以 reflect.DeepEqual 断言。
 func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
-	t.Run("段缺失补四项全默认", func(t *testing.T) {
+	t.Run("段缺失补参数全默认", func(t *testing.T) {
 		s := &AppSettings{}
 		s.EnsureIPBanDefaults()
 		want := DefaultIPBanSettings()
@@ -334,21 +334,27 @@ func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 		want IPBanSettings
 	}{
 		{name: "越界收敛", in: IPBanSettings{Threshold: 1, WindowMinutes: 500, DurationMinutes: 999, MaxBanDurationMinutes: 1},
-			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
 		{name: "界内取值原样保留", in: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120},
-			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
 		{name: "封顶低于基础时长抬到基础时长", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 5},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
 		{name: "白名单合法条目保留非法剔除", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
 			Whitelist: []string{"192.168.1.0/24", " 裸IP不是合法条目 ", "10.0.0.5", "2001:db8::/32", "", "  "}},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
 				Whitelist: []string{"192.168.1.0/24", "10.0.0.5", "2001:db8::/32"}}},
 		{name: "白名单裸IP保留原字符串", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
 			Whitelist: []string{"203.0.113.9", "2001:db8::1"}},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
 				Whitelist: []string{"203.0.113.9", "2001:db8::1"}}},
 		{name: "白名单nil收敛空切片", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+		{name: "聚合建议阈值低于下限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 1},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MinIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+		{name: "聚合建议阈值越上限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 99},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MaxIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+		{name: "聚合建议阈值界内保留", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 25},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 25, Whitelist: []string{}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -362,7 +368,8 @@ func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 }
 
 // TestNormalizeIPBanSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝
-// normalize 后返回且不改写入参（对齐 NormalizeAssetThumbsSettings 先例）。
+// normalize 后返回且不改写入参（对齐 NormalizeAssetThumbsSettings 先例）；
+// 聚合建议阈值（九期）零值回默认与越界 clamp 同口径覆盖。
 func TestNormalizeIPBanSettings(t *testing.T) {
 	if got := NormalizeIPBanSettings(nil); !reflect.DeepEqual(got, DefaultIPBanSettings()) {
 		t.Fatalf("nil 应返回默认值, got %+v", got)
@@ -374,10 +381,19 @@ func TestNormalizeIPBanSettings(t *testing.T) {
 		got.DurationMinutes != MaxIPBanDurationMinutes || got.MaxBanDurationMinutes != MaxIPBanDurationMinutes {
 		t.Fatalf("归一化结果不符, got %+v", got)
 	}
+	// 聚合建议阈值零值回默认（九期）
+	if got.AggregateSuggestThreshold != DefaultIPBanAggregateSuggestThreshold {
+		t.Errorf("聚合建议阈值零值应回默认, got %d", got.AggregateSuggestThreshold)
+	}
 	if len(got.Whitelist) != 1 || got.Whitelist[0] != "192.168.1.0/24" {
 		t.Errorf("白名单应剔除非法条目, got %#v", got.Whitelist)
 	}
 	if in.Threshold != 1 || in.WindowMinutes != 0 || len(in.Whitelist) != 2 {
 		t.Fatalf("入参不应被原地修改, got %+v", in)
+	}
+	// 越界 clamp（拷贝返回不改写入参同口径）
+	up := NormalizeIPBanSettings(&IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 99})
+	if up.AggregateSuggestThreshold != MaxIPBanAggregateSuggestThreshold {
+		t.Errorf("聚合建议阈值越上限应收敛, got %d", up.AggregateSuggestThreshold)
 	}
 }

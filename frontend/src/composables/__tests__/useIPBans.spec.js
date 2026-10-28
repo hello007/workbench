@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h, defineComponent } from 'vue'
-import { useIPBanList, useIPBanToast, formatBanExpiry, WEBSERVE_IP_BANNED_EVENT } from '../useIPBans'
+import { useIPBanList, useIPBanSuggestions, useIPBanToast, formatBanExpiry, WEBSERVE_IP_BANNED_EVENT } from '../useIPBans'
 
 // Wails 事件 handler 注册表（EventsOn mock 捕获）：返回注销闭包记录调用，
 // 供卸载精准注销断言（cross-layer-contracts 闭包注销契约）。
@@ -19,14 +19,15 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
-  ListIPBans: vi.fn()
+  ListIPBans: vi.fn(),
+  ListIPBanSuggestions: vi.fn()
 }))
 
 vi.mock('element-plus', () => ({
   ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }
 }))
 
-import { ListIPBans } from '../../../wailsjs/go/main/App'
+import { ListIPBans, ListIPBanSuggestions } from '../../../wailsjs/go/main/App'
 import { ElMessage } from 'element-plus'
 
 // 封禁条目 fixture（形状对齐 model.IPBanStatus：ip/bannedAt/expiresAt unix 秒/
@@ -121,6 +122,78 @@ describe('useIPBanList', () => {
     const { wrapper } = mountWith(() => {
       const { ipBans } = useIPBanList()
       return { snapshot: () => ipBans.value, ipBans }
+    })
+    expect(eventHandlers[WEBSERVE_IP_BANNED_EVENT]).toBeTypeOf('function')
+    wrapper.unmount()
+    expect(eventHandlers[WEBSERVE_IP_BANNED_EVENT]).toBeUndefined()
+    expect(offSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useIPBanSuggestions（连接管控九期网段聚合建议）', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]
+    offSpy.mockClear()
+    vi.clearAllMocks()
+    ListIPBanSuggestions.mockResolvedValue([])
+  })
+
+  it('挂载即拉取建议并注册事件监听，数据落地 suggestions', async () => {
+    ListIPBanSuggestions.mockResolvedValue([{ cidr: '203.0.113.0/24', count: 3 }])
+    const { wrapper, exposed } = mountWith(() => {
+      const { suggestions, reload } = useIPBanSuggestions()
+      return { snapshot: () => suggestions.value, suggestions, reload }
+    })
+    await flush()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(1)
+    expect(eventHandlers[WEBSERVE_IP_BANNED_EVENT]).toBeTypeOf('function')
+    expect(exposed.suggestions.value).toEqual([{ cidr: '203.0.113.0/24', count: 3 }])
+    wrapper.unmount()
+  })
+
+  it('加载失败静默（保持空列表，不崩不弹错）', async () => {
+    ListIPBanSuggestions.mockRejectedValue(new Error('service not ready'))
+    const { wrapper, exposed } = mountWith(() => {
+      const { suggestions } = useIPBanSuggestions()
+      return { snapshot: () => suggestions.value, suggestions }
+    })
+    await flush()
+    expect(exposed.suggestions.value).toEqual([])
+    expect(ElMessage.error).not.toHaveBeenCalled()
+    expect(ElMessage.warning).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('非数组载荷归一空数组（后端异常形态防御）', async () => {
+    ListIPBanSuggestions.mockResolvedValue(null)
+    const { wrapper, exposed } = mountWith(() => {
+      const { suggestions } = useIPBanSuggestions()
+      return { snapshot: () => suggestions.value, suggestions }
+    })
+    await flush()
+    expect(exposed.suggestions.value).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('webserve-ip-banned 事件到达重拉建议（新自动封禁可能产出/改变建议）', async () => {
+    const { wrapper, exposed } = mountWith(() => {
+      const { suggestions } = useIPBanSuggestions()
+      return { snapshot: () => suggestions.value, suggestions }
+    })
+    await flush()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(1)
+    ListIPBanSuggestions.mockResolvedValue([{ cidr: '198.51.100.0/24', count: 4 }])
+    eventHandlers[WEBSERVE_IP_BANNED_EVENT]({ ip: '198.51.100.9', failCount: 10 })
+    await flush()
+    expect(ListIPBanSuggestions).toHaveBeenCalledTimes(2)
+    expect(exposed.suggestions.value).toEqual([{ cidr: '198.51.100.0/24', count: 4 }])
+    wrapper.unmount()
+  })
+
+  it('卸载时经 EventsOn 返回闭包精准注销监听器', async () => {
+    const { wrapper } = mountWith(() => {
+      const { suggestions } = useIPBanSuggestions()
+      return { snapshot: () => suggestions.value, suggestions }
     })
     expect(eventHandlers[WEBSERVE_IP_BANNED_EVENT]).toBeTypeOf('function')
     wrapper.unmount()

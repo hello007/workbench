@@ -14,13 +14,14 @@ func TestApp_SetIPBanConfig_SaveAndHotApply(t *testing.T) {
 	app, _ := newWebServeTestAppDir(t)
 	ip := testAuthFailIP
 
-	if err := app.SetIPBanConfig(3, 10, 5, 60, nil); err != nil {
+	if err := app.SetIPBanConfig(3, 10, 5, 60, 2, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
-	// 持久化断言：GetSettings（缓存已换新）含归一后段值
+	// 持久化断言：GetSettings（缓存已换新）含归一后段值（含九期聚合建议阈值）
 	got := app.GetSettings().IPBan
 	if got == nil || got.Threshold != 3 || got.WindowMinutes != 10 ||
-		got.DurationMinutes != 5 || got.MaxBanDurationMinutes != 60 {
+		got.DurationMinutes != 5 || got.MaxBanDurationMinutes != 60 ||
+		got.AggregateSuggestThreshold != 2 {
 		t.Fatalf("设置段应持久化为归一值, got %+v", got)
 	}
 	// 热更断言：新阈值 3 下 3 次失败即触发（默认阈值 10 需 10 次）
@@ -35,18 +36,19 @@ func TestApp_SetIPBanConfig_SaveAndHotApply(t *testing.T) {
 
 // TestApp_SetIPBanConfig_ClampsInvalidInput 越界入参 clamp 收敛（前端已挡边界，
 // 后端兜底手改/异常形态）：threshold 1→3、window 999→120、duration 999→60、
-// 封顶 1→5→(低于基础时长抬到)60。
+// 封顶 1→5→(低于基础时长抬到)60、聚合建议阈值 999→50（九期，clamp 上限收敛）。
 func TestApp_SetIPBanConfig_ClampsInvalidInput(t *testing.T) {
 	app, _ := newWebServeTestAppDir(t)
 
-	if err := app.SetIPBanConfig(1, 999, 999, 1, nil); err != nil {
+	if err := app.SetIPBanConfig(1, 999, 999, 1, 999, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	got := app.GetSettings().IPBan
 	if got.Threshold != model.MinIPBanThreshold ||
 		got.WindowMinutes != model.MaxIPBanWindowMinutes ||
 		got.DurationMinutes != model.MaxIPBanDurationMinutes ||
-		got.MaxBanDurationMinutes != model.MaxIPBanDurationMinutes {
+		got.MaxBanDurationMinutes != model.MaxIPBanDurationMinutes ||
+		got.AggregateSuggestThreshold != model.MaxIPBanAggregateSuggestThreshold {
 		t.Errorf("越界入参应 clamp 收敛, got %+v", got)
 	}
 }
@@ -60,7 +62,7 @@ func TestApp_SetIPBanConfig_PreservesOtherSections(t *testing.T) {
 	if err := app.SetWebServeConfig(false, "127.0.0.1:36115"); err != nil {
 		t.Fatalf("SetWebServeConfig: %v", err)
 	}
-	if err := app.SetIPBanConfig(5, 10, 5, 60, nil); err != nil {
+	if err := app.SetIPBanConfig(5, 10, 5, 60, 3, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	cfg := app.GetSettings()

@@ -92,7 +92,11 @@ const props = defineProps({
   // 弹窗显隐（v-model）
   modelValue: { type: Boolean, default: false },
   // 预填目标 IP（明细行入口可带；头部入口为空串）
-  initialIP: { type: String, default: '' }
+  initialIP: { type: String, default: '' },
+  // 预填目标网段（连接管控九期聚合建议行入口可带）。与 initialIP 互斥使用，
+  // 每次打开只传其一：initialCidr 非空时档位自动切网段档并预填网段输入（时长档
+  // 不预填，维持默认永久档），白名单预检三态复用网段档现成逻辑
+  initialCidr: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update:modelValue', 'banned'])
@@ -198,13 +202,27 @@ const warningText = computed(() => {
   return '封禁后该网段内全部来源 IP 的新连接将被拒绝（网页访问与实时通道），已建立连接不受影响；白名单内来源不受此封禁影响，本机回环恒豁免。解封后该网段新连接立即可达。'
 })
 
-// 弹窗打开时拉白名单快照 + 预填目标 IP（即时校验的数据源；拉取失败降级空列表
-// ——提示面缺失仅损失前端预警，后端 E_IP_BAN_WHITELISTED 权威兜底）
+// 弹窗打开时拉白名单快照 + 按入口 prop 分流预填（即时校验的数据源；拉取失败
+// 降级空列表——提示面缺失仅损失前端预警，后端 E_IP_BAN_WHITELISTED 权威兜底）。
+// 两预填 prop 调用方契约互斥（每次打开只传其一），防御双非空形态按 initialIP
+// 优先（单 IP 处置来自管理员主动点行，比建议预填更具体）：
+//  - initialIP 非空（明细行入口）：单 IP 档预填；
+//  - initialCidr 非空（九期聚合建议行入口）：档位自动切网段档 + 网段输入预填；
+//  - 双空（区块头部入口）：单 IP 档默认空表单。
 watch(
   () => props.modelValue,
   (visible) => {
     if (!visible) return
-    ip.value = props.initialIP || ''
+    if (props.initialIP) {
+      targetKind.value = 'ip'
+      ip.value = props.initialIP
+    } else if (props.initialCidr) {
+      targetKind.value = 'cidr'
+      cidr.value = props.initialCidr
+    } else {
+      targetKind.value = 'ip'
+      ip.value = ''
+    }
     GetSettings()
       .then((settings) => {
         const list = settings?.ipban?.whitelist

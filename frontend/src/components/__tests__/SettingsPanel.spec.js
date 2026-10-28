@@ -1810,31 +1810,34 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await nextTick()
   }
 
-  it('渲染四参数表单与操作按钮，GetSettings ipban 段回填', async () => {
+  it('渲染五参数表单与操作按钮，GetSettings ipban 段回填', async () => {
     await openNetwork({
-      ipban: { threshold: 20, windowMinutes: 30, durationMinutes: 10, maxBanDurationMinutes: 120 }
+      ipban: { threshold: 20, windowMinutes: 30, durationMinutes: 10, maxBanDurationMinutes: 120, aggregateSuggestThreshold: 7 }
     })
     expect(wrapper.text()).toContain('自动封禁')
     const numbers = ipbanInputs()
-    expect(numbers.length).toBe(4)
+    expect(numbers.length).toBe(5)
     expect(numbers[0].element.value).toBe('20')
     expect(numbers[1].element.value).toBe('30')
     expect(numbers[2].element.value).toBe('10')
     expect(numbers[3].element.value).toBe('120')
+    expect(numbers[4].element.value).toBe('7')
+    expect(wrapper.text()).toContain('聚合建议阈值')
     expect(wrapper.findAll('button').some(b => b.text() === '恢复默认')).toBe(true)
     expect(wrapper.findAll('button').some(b => b.text() === '保存并生效')).toBe(true)
   })
 
-  it('段缺失（老配置）回填默认值', async () => {
+  it('段缺失（老配置）回填默认值（含九期聚合建议阈值）', async () => {
     await openNetwork()
     const numbers = ipbanInputs()
     expect(numbers[0].element.value).toBe('10')
     expect(numbers[1].element.value).toBe('10')
     expect(numbers[2].element.value).toBe('5')
     expect(numbers[3].element.value).toBe('60')
+    expect(numbers[4].element.value).toBe('3')
   })
 
-  it('保存调用 SetIPBanConfig 五参（四参 + 白名单）并提示即时生效，随后回读归一值刷新表单', async () => {
+  it('保存调用 SetIPBanConfig 六参（五参 + 白名单）并提示即时生效，随后回读归一值刷新表单', async () => {
     const { SetIPBanConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
     const { ElMessage } = await import('element-plus')
     SetIPBanConfig.mockResolvedValue()
@@ -1850,10 +1853,29 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     expect(SetIPBanConfig).toHaveBeenCalledTimes(1)
-    expect(SetIPBanConfig).toHaveBeenCalledWith(5, 10, 60, 60, [])
+    expect(SetIPBanConfig).toHaveBeenCalledWith(5, 10, 60, 60, 3, [])
     expect(ElMessage.success).toHaveBeenCalledWith('自动封禁参数已保存并即时生效')
     // 回读归一值刷新表单（封顶=基础时长的收敛形态以生效值为准）
     expect(ipbanInputs()[3].element.value).toBe('60')
+  })
+
+  it('聚合建议阈值（九期）：保存透传第六参，回读归一值刷新表单（越界后端收敛以生效值为准）', async () => {
+    const { SetIPBanConfig, GetSettings } = await import('../../../wailsjs/go/main/App')
+    SetIPBanConfig.mockResolvedValue()
+    await openNetwork()
+    // 覆盖恒定实现（openNetwork 期初次回填已消费 createWrapper 默认 mock），
+    // 保存回读拿归一后段值（对齐「保存后回读白名单归一值」用例的 mock 时序先例）
+    GetSettings.mockResolvedValue(baseSettings({
+      ipban: { threshold: 10, windowMinutes: 10, durationMinutes: 5, maxBanDurationMinutes: 60, aggregateSuggestThreshold: 50, whitelist: [] }
+    }))
+    const numbers = ipbanInputs()
+    // 输入越上限（前端 min/max 已挡边界，此处模拟直接改值形态）仍透传，后端 clamp 收敛
+    await numbers[4].setValue('99')
+    await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
+    await flushPromises()
+    expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, 99, [])
+    // 回读归一值（后端收敛到上限 50）刷新表单
+    expect(ipbanInputs()[4].element.value).toBe('50')
   })
 
   it('白名单编辑器（七期）：GetSettings 回填列表渲染为行，空列表显占位', async () => {
@@ -1871,7 +1893,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     expect(wrapper.find('.ipban-whitelist-empty').text()).toContain('无可信网段')
   })
 
-  it('白名单添加行 + 保存提取字符串列表透传第五参', async () => {
+  it('白名单添加行 + 保存提取字符串列表透传第六参', async () => {
     const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
     SetIPBanConfig.mockResolvedValue()
     await openNetwork()
@@ -1885,7 +1907,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     await wrapper.findAll('button').find(b => b.text() === '保存并生效').trigger('click')
     await flushPromises()
     // 空白行静默剔除，非空行透传
-    expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, ['10.0.0.0/8'])
+    expect(SetIPBanConfig).toHaveBeenCalledWith(10, 10, 5, 60, 3, ['10.0.0.0/8'])
   })
 
   it('白名单非法条目行级标红 + 保存前置拦截不透传', async () => {
@@ -1921,10 +1943,10 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     expect(rows[0].find('input').element.value).toBe('10.0.0.0/8')
   })
 
-  it('恢复默认回填四项默认值（不触发保存）', async () => {
+  it('恢复默认回填五项默认值（不触发保存）', async () => {
     const { SetIPBanConfig } = await import('../../../wailsjs/go/main/App')
     await openNetwork({
-      ipban: { threshold: 50, windowMinutes: 60, durationMinutes: 30, maxBanDurationMinutes: 600 }
+      ipban: { threshold: 50, windowMinutes: 60, durationMinutes: 30, maxBanDurationMinutes: 600, aggregateSuggestThreshold: 25 }
     })
     await wrapper.findAll('button').find(b => b.text() === '恢复默认').trigger('click')
     await nextTick()
@@ -1933,6 +1955,7 @@ describe('SettingsPanel.vue - 自动封禁参数区', () => {
     expect(numbers[1].element.value).toBe('10')
     expect(numbers[2].element.value).toBe('5')
     expect(numbers[3].element.value).toBe('60')
+    expect(numbers[4].element.value).toBe('3')
     expect(SetIPBanConfig).not.toHaveBeenCalled()
   })
 

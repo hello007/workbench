@@ -44,8 +44,9 @@
          popover #reference 直挂原生 div，点击展开与 hover 提示双链路实测通过 -->
     <el-tooltip v-if="panelVisible" :content="deviceHint" placement="right" :show-after="300">
       <div class="devices-indicator-anchor">
-        <!-- @show 打开面板时重拉自动封禁列表（五期：面板打开/可见时加载） -->
-        <el-popover trigger="click" placement="right" :width="320" :persistent="false" @show="reloadIPBans">
+        <!-- @show 打开面板时重拉封禁列表与聚合建议（五期：面板打开/可见时加载；
+             九期建议数据源刷新时机对齐） -->
+        <el-popover trigger="click" placement="right" :width="320" :persistent="false" @show="reloadBanPanel">
           <template #reference>
             <div class="activity-bar-item activity-bar-devices">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -113,8 +114,29 @@
                   class="devices-ban-add"
                   type="button"
                   title="手动封禁来源 IP"
-                  @click.stop="openBanIPDialog"
+                  @click.stop="openBanIPDialog()"
                 >封禁 IP</button>
+              </div>
+              <!-- 聚合建议小节（连接管控九期）：同网段自动封禁条目达阈值时后端产出
+                   建议（排序已做——计数降序 + 网段串字典序次级，前端零排序）；行点击
+                   预填网段封禁弹窗（闭环止于预填，处置须管理员确认提交）；空建议
+                   小节整体不渲染。载荷仅网段串与计数无具体 IP 明细（隐私红线与
+                   ListIPBans 同源，浏览器通道 composable 跳过加载恒空态） -->
+              <div v-if="suggestions.length" class="devices-suggest-block">
+                <div class="devices-suggest-title">聚合建议</div>
+                <div class="devices-suggest-list">
+                  <button
+                    v-for="s in suggestions"
+                    :key="s.cidr"
+                    type="button"
+                    class="devices-suggest-row"
+                    :title="`点击预填网段封禁弹窗（${s.cidr}）`"
+                    @click.stop="openBanIPDialog(s.cidr)"
+                  >
+                    <span class="devices-panel-ip">{{ s.cidr }}</span>
+                    <span class="devices-suggest-text">该网段 {{ s.count }} 个来源已被封禁，建议网段封禁</span>
+                  </button>
+                </div>
               </div>
               <div v-if="ipBans.length" class="devices-ban-list">
                 <div v-for="b in ipBans" :key="b.ip" class="devices-ban-row">
@@ -165,9 +187,10 @@
          渲染于组件根级（popover persistent=false 不承载弹窗），确认提交与联动
          踢出在弹窗内完成 -->
     <BanTokenDialog v-model="banDialogVisible" :token="banTarget" :connections="connections" />
-    <!-- 手动封禁 IP 弹窗（连接管控七期，「IP 封禁」区块头部入口）：@banned 重拉
-         封禁列表（手动封禁不触发 webserve-ip-banned 事件，前端经回调刷新） -->
-    <BanIPDialog v-model="banIPDialogVisible" @banned="reloadIPBans" />
+    <!-- 手动封禁 IP 弹窗（连接管控七期，「IP 封禁」区块头部入口；九期扩聚合建议
+         行预填入口 initialCidr）：@banned 重拉封禁列表与建议（手动封禁不触发
+         webserve-ip-banned 事件，前端经回调刷新） -->
+    <BanIPDialog v-model="banIPDialogVisible" :initial-cidr="banIPCidr" @banned="reloadBanPanel" />
   </div>
 </template>
 
@@ -181,7 +204,7 @@ import { KickConnection, UnbanIP, UnbanCIDR } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
-import { useIPBanList, formatBanExpiry } from '../composables/useIPBans'
+import { useIPBanList, useIPBanSuggestions, formatBanExpiry } from '../composables/useIPBans'
 import BanTokenDialog from './BanTokenDialog.vue'
 import BanIPDialog from './BanIPDialog.vue'
 
@@ -196,6 +219,18 @@ const { deviceCount, multiDevice, connections, isDesktopChannel } = useDeviceCon
 // 自动封禁列表（连接管控五期，桌面专用数据源）：面板「自动封禁」区块渲染与
 // 解封后/面板打开时重拉；webserve-ip-banned 事件到达由 composable 内自动刷新
 const { ipBans, reload: reloadIPBans } = useIPBanList()
+
+// 网段聚合封禁建议（连接管控九期，桌面专用数据源）：「聚合建议」小节渲染数据，
+// 刷新时机对齐封禁列表（面板打开/封禁动作后 reload；webserve-ip-banned 事件
+// 到达由 composable 内自动刷新）
+const { suggestions, reload: reloadIPSuggestions } = useIPBanSuggestions()
+
+// 两数据源统一刷新出口（面板打开 @show 与封禁动作 @banned 后同调，保证列表与
+// 建议口径同步——新网段封禁会使 CoveredBy 命中条目从建议中剔除）
+function reloadBanPanel() {
+  reloadIPBans()
+  reloadIPSuggestions()
+}
 
 // 面板可见条件扩展（五期）：有自动封禁记录时即使无在途连接也显示入口——被封禁
 // IP 的新连接在认证点即被拒（不会产生连接明细），仅凭连接数判定面板将不可达，
@@ -260,11 +295,16 @@ function openBanDialog(c) {
   banDialogVisible.value = true
 }
 
-// 手动封禁 IP 弹窗（连接管控七期，区块头部入口）：成功后 @banned 重拉封禁列表
-//（手动封禁不触发 webserve-ip-banned 事件——该出口为自动封禁专属通知面）
+// 手动封禁 IP 弹窗（连接管控七期，区块头部入口；九期扩聚合建议行入口）：成功后
+// @banned 重拉封禁列表与建议（手动封禁不触发 webserve-ip-banned 事件——该出口
+// 为自动封禁专属通知面）
 const banIPDialogVisible = ref(false)
+// 建议预填目标网段（九期）：建议行点击带网段串（弹窗档位自动切网段档并预填），
+// 头部入口无参为空串 = 默认单 IP 档
+const banIPCidr = ref('')
 
-function openBanIPDialog() {
+function openBanIPDialog(cidr = '') {
+  banIPCidr.value = cidr || ''
   banIPDialogVisible.value = true
 }
 
@@ -682,5 +722,58 @@ const panels = [
   color: var(--text-tertiary);
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
+}
+
+/* 聚合建议小节（连接管控九期）：小节标题 + 可点击建议行（网段串 + 建议文案）。
+ * 标题走 11px/500 弱层文字与父级子标题（devices-panel-subtitle 12px/600）拉开
+ * 层级；行形态对齐 devices-ban-list（弱层 hover 提亮 + radius-sm + 四档间距），
+ * 整行为按钮承载点击预填，warning 语义色提示待处置（处置面待办的语义色） */
+.devices-suggest-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.devices-suggest-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.devices-suggest-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.devices-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.devices-suggest-row:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--warning-color);
+}
+
+.devices-suggest-row .devices-panel-ip {
+  flex-shrink: 0;
+}
+
+/* 建议文案占行内剩余空间可折行（网段串恒完整可见，长文案折行不溢出 320 宽面板） */
+.devices-suggest-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--warning-color);
 }
 </style>

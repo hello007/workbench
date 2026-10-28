@@ -101,3 +101,28 @@ type IPBanList struct {
 // 解析为单 IP 条目，见 IPBanRecord.Kind 注释），版本号仅作格式标记与未来迁移
 // 判定位。
 const IPBanListVersion = 2
+
+// IPBanAggregateSuggestion 网段聚合封禁建议条目（连接管控九期）：同聚合网段内
+// 自动封禁来源数达到阈值时产出，供处置面（桌面 IP 封禁区块「聚合建议」小节）
+// 提示「该网段 N 个来源已被封禁，建议网段封禁」并一键预填网段封禁弹窗——闭环
+// 止于预填，处置仍须管理员确认提交，不做自动封禁。
+//
+// 聚合粒度写死 IPv4 /24、IPv6 /64（网段级攻击源典型漂移范围，不随白名单/封禁
+// 条目粒度推导）；数据源口径见 service.IPBanService.AggregateSuggestions（仅 auto 且
+// 已触发封禁的内存条目，含已过期，与 List 可见条目同口径；被生效中网段封禁
+// 覆盖的条目剔除防重复建议；不用审计行——含已解封历史与轮转边界漂移，口径糊）。
+//
+// 隐私红线：仅桌面出口（App.ListIPBanSuggestions 已进 server RPCHiddenMethods
+// 屏蔽列表，浏览器通道与「方法不存在」同响应，整体不可达无降级 UI——对齐他人
+// IP 明细仅走桌面出口的既有红线）；载荷仅网段串与计数，无具体 IP 明细。字段全
+// 为基本类型，struct 形态经 wails generate 自动生成 models.ts class（无需手动
+// 补别名，区别于 type X string 具名别名规则）。
+type IPBanAggregateSuggestion struct {
+	// CIDR 建议封禁的聚合网段（规范化形态：网络地址 + 掩码的 ipnet.String()，
+	// 如 "203.0.113.0/24"、IPv6 如 "2001:db8:1:2::/64"），可直接作为网段封禁
+	// 入参复用八期解析口径。
+	CIDR string `json:"cidr"`
+	// Count 该网段内参与聚合的自动封禁条目数（与阈值判定同源——产出建议的
+	// 桶计数恒不小于建议阈值，前端文案「该网段 N 个来源已被封禁」直接消费）。
+	Count int `json:"count"`
+}
