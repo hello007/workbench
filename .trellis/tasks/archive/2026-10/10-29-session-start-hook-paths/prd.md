@@ -94,7 +94,7 @@ CLAUDE.md（每次会话自动加载）关键规则表每行已带 docs/spec 链
 - [ ] first-reply-notice 与 Phase 1.3 文案无 `.trellis/spec` 字样
 - [ ] 纯 hook/trellis 脚本改动，零 workbench 业务代码
 - [ ] workflow.md / CLAUDE.md 零改动
-- [ ] journal 收尾记录，确认 journal-4 轮转行为并记录
+- [x] journal 收尾记录，确认 journal-4 轮转行为并记录（Session 168，33 行追加后 1974/2000 **未触发轮转**，journal-3 余 26 行；轮转机制=add_session.py 自动创建 journal-4 带 Continuation 头，已从代码确认，留待下次会话触发）
 
 ## Definition of Done
 
