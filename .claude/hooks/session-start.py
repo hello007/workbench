@@ -69,7 +69,7 @@ def _normalize_windows_shell_path(path_str: str) -> str:
 
 FIRST_REPLY_NOTICE = """<first-reply-notice>
 On the first visible assistant reply in this session, begin with exactly one short Chinese sentence:
-Trellis SessionStart 已注入：workflow、当前任务状态、开发者身份、git 状态、active tasks、spec 索引已加载。
+Trellis SessionStart 已注入：workflow、当前任务状态、开发者身份、git 状态、active tasks。
 Then continue directly with the user's request. This notice is one-shot: do not repeat it after the first assistant reply in the same session.
 </first-reply-notice>"""
 
@@ -366,10 +366,9 @@ def _get_task_status(trellis_dir: Path, input_data: dict) -> str:
             f"Status: PLANNING (Phase 1.3)\nTask: {task_title}\n"
             f"Source: {active.source}\n"
             "Next-Action: Curate `implement.jsonl` and `check.jsonl` with the spec + research files "
-            "the Phase 2 sub-agents will need. Only spec paths (`.trellis/spec/**/*.md`) and research "
-            "files (`{TASK_DIR}/research/*.md`) — no code paths. Run "
-            "`python ./.trellis/scripts/get_context.py --mode packages` to list available specs, "
-            "then edit the jsonl files or use `python ./.trellis/scripts/task.py add-context`. "
+            "the Phase 2 sub-agents will need. Only spec paths (`docs/spec/**/*.md`, index at "
+            "`docs/spec/README.md`) and research files (`{TASK_DIR}/research/*.md`) — no code paths. "
+            "Then edit the jsonl files or use `python ./.trellis/scripts/task.py add-context`. "
             "See `.trellis/workflow.md` Phase 1.3 for details."
         )
 
@@ -392,155 +391,6 @@ def _get_task_status(trellis_dir: Path, input_data: dict) -> str:
         "\"do it inline\" / \"不用 sub-agent\"), honor it for this turn and edit code directly. "
         "Per-turn only; do NOT invent an override the user did not say."
     )
-
-
-def _load_trellis_config(trellis_dir: Path, input_data: dict) -> tuple:
-    """Load Trellis config for session-start decisions.
-
-    Returns:
-        (is_mono, packages_dict, spec_scope, task_pkg, default_pkg)
-    """
-    scripts_dir = trellis_dir / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-
-    try:
-        from common.config import get_default_package, get_packages, get_spec_scope, is_monorepo  # type: ignore[import-not-found]
-        from common.paths import get_current_task  # type: ignore[import-not-found]
-
-        repo_root = trellis_dir.parent
-        is_mono = is_monorepo(repo_root)
-        packages = get_packages(repo_root) or {}
-        scope = get_spec_scope(repo_root)
-
-        # Get active task's package
-        task_pkg = None
-        current = get_current_task(
-            repo_root,
-            input_data,
-            platform=_detect_platform(input_data),
-        )
-        if current:
-            task_json = repo_root / current / "task.json"
-            if task_json.is_file():
-                try:
-                    data = json.loads(task_json.read_text(encoding="utf-8"))
-                    if isinstance(data, dict):
-                        tp = data.get("package")
-                        if isinstance(tp, str) and tp:
-                            task_pkg = tp
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-        default_pkg = get_default_package(repo_root)
-        return is_mono, packages, scope, task_pkg, default_pkg
-    except Exception:
-        return False, {}, None, None, None
-
-
-def _check_legacy_spec(trellis_dir: Path, is_mono: bool, packages: dict) -> str | None:
-    """Check for legacy spec directory structure in monorepo.
-
-    Returns warning message if legacy structure detected, None otherwise.
-    """
-    if not is_mono or not packages:
-        return None
-
-    spec_dir = trellis_dir / "spec"
-    if not spec_dir.is_dir():
-        return None
-
-    # Check for legacy flat spec dirs (spec/backend/, spec/frontend/ with index.md)
-    has_legacy = False
-    for legacy_name in ("backend", "frontend"):
-        legacy_dir = spec_dir / legacy_name
-        if legacy_dir.is_dir() and (legacy_dir / "index.md").is_file():
-            has_legacy = True
-            break
-
-    if not has_legacy:
-        return None
-
-    # Check which packages are missing spec/<pkg>/ directory
-    missing = [
-        name for name in sorted(packages.keys())
-        if not (spec_dir / name).is_dir()
-    ]
-
-    if not missing:
-        return None  # All packages have spec dirs
-
-    if len(missing) == len(packages):
-        return (
-            f"[!] Legacy spec structure detected: found `spec/backend/` or `spec/frontend/` "
-            f"but no package-scoped `spec/<package>/` directories.\n"
-            f"Monorepo packages: {', '.join(sorted(packages.keys()))}\n"
-            f"Please reorganize: `spec/backend/` -> `spec/<package>/backend/`"
-        )
-    return (
-        f"[!] Partial spec migration detected: packages {', '.join(missing)} "
-        f"still missing `spec/<pkg>/` directory.\n"
-        f"Please complete migration for all packages."
-    )
-
-
-def _resolve_spec_scope(
-    is_mono: bool,
-    packages: dict,
-    scope,
-    task_pkg: str | None,
-    default_pkg: str | None,
-) -> set | None:
-    """Resolve which packages should have their specs injected.
-
-    Returns:
-        Set of package names to include, or None for full scan.
-    """
-    if not is_mono or not packages:
-        return None  # Single-repo: full scan
-
-    if scope is None:
-        return None  # No scope configured: full scan
-
-    if isinstance(scope, str) and scope == "active_task":
-        if task_pkg and task_pkg in packages:
-            return {task_pkg}
-        if default_pkg and default_pkg in packages:
-            return {default_pkg}
-        return None  # Fallback to full scan
-
-    if isinstance(scope, list):
-        valid = set()
-        for entry in scope:
-            if entry in packages:
-                valid.add(entry)
-            else:
-                print(
-                    f"Warning: spec_scope contains unknown package: {entry}, ignoring",
-                    file=sys.stderr,
-                )
-
-        if valid:
-            # Warn if active task is out of scope
-            if task_pkg and task_pkg not in valid:
-                print(
-                    f"Warning: active task package '{task_pkg}' is out of configured spec_scope",
-                    file=sys.stderr,
-                )
-            return valid
-
-        # All entries invalid: fallback chain
-        print(
-            "Warning: all spec_scope entries invalid, falling back to task/default/full",
-            file=sys.stderr,
-        )
-        if task_pkg and task_pkg in packages:
-            return {task_pkg}
-        if default_pkg and default_pkg in packages:
-            return {default_pkg}
-        return None  # Full scan
-
-    return None  # Unknown scope type: full scan
 
 
 def _extract_range(content: str, start_header: str, end_header: str) -> str:
@@ -669,13 +519,6 @@ def main():
     context_key = _resolve_context_key(trellis_dir, hook_input)
     _persist_context_key_for_bash(context_key)
 
-    # Load config for scope filtering and legacy detection
-    is_mono, packages, scope_config, task_pkg, default_pkg = _load_trellis_config(
-        trellis_dir,
-        hook_input,
-    )
-    allowed_pkgs = _resolve_spec_scope(is_mono, packages, scope_config, task_pkg, default_pkg)
-
     output = StringIO()
 
     output.write("""<session-context>
@@ -686,11 +529,6 @@ Read and follow all instructions below carefully.
 """)
     output.write(FIRST_REPLY_NOTICE)
     output.write("\n\n")
-
-    # Legacy migration warning
-    legacy_warning = _check_legacy_spec(trellis_dir, is_mono, packages)
-    if legacy_warning:
-        output.write(f"<migration-warning>\n{legacy_warning}\n</migration-warning>\n\n")
 
     output.write("<current-state>\n")
     context_script = trellis_dir / "scripts" / "get_context.py"
@@ -703,9 +541,6 @@ Read and follow all instructions below carefully.
 
     output.write("<guidelines>\n")
     output.write(
-        "Project spec indexes are listed by path below. Each index contains a "
-        "**Pre-Development Checklist** listing the specific guideline files to "
-        "read before coding.\n\n"
         "- If you're spawning an implement/check sub-agent, context is injected "
         "or loaded by the sub-agent via `{task}/implement.jsonl` / `check.jsonl`. "
         "You do NOT need to read these indexes yourself.\n"
@@ -720,52 +555,6 @@ Read and follow all instructions below carefully.
         "Do NOT spawn another sub-agent of the same kind; implement / check directly.\n\n"
     )
 
-    # guides/ is cross-package thinking — always include inline (small, broadly useful)
-    guides_index = trellis_dir / "spec" / "guides" / "index.md"
-    if guides_index.is_file():
-        output.write("## guides (inlined — cross-package thinking guides)\n")
-        output.write(read_file(guides_index))
-        output.write("\n\n")
-
-    # Other spec indexes — paths only (main agent reads on demand;
-    # sub-agents get their specific specs via jsonl injection)
-    paths: list[str] = []
-    spec_dir = trellis_dir / "spec"
-    if spec_dir.is_dir():
-        for sub in sorted(spec_dir.iterdir()):
-            if not sub.is_dir() or sub.name.startswith("."):
-                continue
-            if sub.name == "guides":
-                continue  # already inlined above
-
-            index_file = sub / "index.md"
-            if index_file.is_file():
-                # Flat spec dir (single-repo layer like spec/backend/)
-                paths.append(f".trellis/spec/{sub.name}/index.md")
-            else:
-                # Nested package dirs (monorepo: spec/<pkg>/<layer>/index.md)
-                # Apply scope filter
-                if allowed_pkgs is not None and sub.name not in allowed_pkgs:
-                    continue
-                for nested in sorted(sub.iterdir()):
-                    if not nested.is_dir():
-                        continue
-                    nested_index = nested / "index.md"
-                    if nested_index.is_file():
-                        paths.append(
-                            f".trellis/spec/{sub.name}/{nested.name}/index.md"
-                        )
-
-    if paths:
-        output.write("## Available spec indexes (read on demand)\n")
-        for p in paths:
-            output.write(f"- {p}\n")
-        output.write("\n")
-
-    output.write(
-        "Discover more via: "
-        "`python ./.trellis/scripts/get_context.py --mode packages`\n"
-    )
     output.write("</guidelines>\n\n")
 
     # Check task status and inject structured tag

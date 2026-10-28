@@ -333,7 +333,7 @@ Examples:
   python task.py create "Add login feature" --slug add-login
   python task.py create "Add login feature" --slug add-login --package cli
   python task.py create "Child task" --slug child --parent .trellis/tasks/01-21-parent
-  python task.py add-context <dir> implement .trellis/spec/cli/backend/auth.md "Auth guidelines"
+  python task.py add-context <dir> implement docs/spec/cross-layer-contracts.md "Cross-layer contracts"
   python task.py set-branch <dir> task/add-login
   python task.py start .trellis/tasks/01-21-add-login
   python task.py current --source

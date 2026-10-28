@@ -26,7 +26,6 @@ from .packages_context import get_packages_section
 from .tasks import iter_active_tasks, load_task, get_all_statuses, children_progress
 from .paths import (
     DIR_SCRIPTS,
-    DIR_SPEC,
     DIR_TASKS,
     DIR_WORKFLOW,
     DIR_WORKSPACE,
@@ -642,7 +641,6 @@ def get_context_text(repo_root: Path | None = None) -> str:
     lines.append("## PATHS")
     lines.append(f"Workspace: {DIR_WORKFLOW}/{DIR_WORKSPACE}/{developer}/")
     lines.append(f"Tasks: {DIR_WORKFLOW}/{DIR_TASKS}/")
-    lines.append(f"Spec: {DIR_WORKFLOW}/{DIR_SPEC}/")
     lines.append("")
 
     lines.append("========================================")

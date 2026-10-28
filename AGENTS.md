@@ -19,3 +19,5 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+> **本仓覆盖层纠偏**（2026-10-29 追加，位于管理块外，`trellis update` 不会覆盖）：块内 `.trellis/spec/` 描述已失效——该目录已于 2026-09-07 废弃移除，规范沉淀实际位于 `docs/spec/`（索引见 docs/spec/README.md）与 CLAUDE.md「关键规则」清单，勿按块内旧路径查找或写入规范。
