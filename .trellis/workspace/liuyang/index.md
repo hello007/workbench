@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 167
+- **Total Sessions**: 168
 - **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1941 | Active |
+| `journal-3.md` | ~1974 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 168 | 2026-10-29 | session-start hook 旧路径死代码出清与 PATHS 文案修正 | `2084d7f` | `master` |
 | 167 | 2026-10-29 | trellis 沉淀链 skill 旧路径出清：指向 docs/spec 与覆盖层口径 | `adcb9d3` | `master` |
 | 166 | 2026-10-29 | 规范沉淀口径对齐：两档钩子级口径固化进沉淀流程 | `851c4e8` | `master` |
 | 165 | 2026-10-28 | CLAUDE.md 关键规则表瘦身：详情下沉与钩子化 | `cd5e7e2` | `master` |

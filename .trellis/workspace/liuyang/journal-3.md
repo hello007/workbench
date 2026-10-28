@@ -1939,3 +1939,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 168: session-start hook 旧路径死代码出清与 PATHS 文案修正
+
+**Date**: 2026-10-29
+**Task**: session-start hook 旧路径死代码出清与 PATHS 文案修正
+**Branch**: `master`
+
+### Summary
+
+出清 .trellis/spec 残留尾：session-start.py 活引导文案（Phase 1.3 改指 docs/spec、first-reply-notice、guidelines 段头）+ 六处死代码（guides 注入/spec 扫描/if paths/Discover more/_check_legacy_spec/_resolve_spec_scope 及延伸 _load_trellis_config，797→586 行）；session_context.py PATHS 段删 Spec: 行；task.py 示例改 docs/spec；AGENTS.md 块外纠偏。上游脚本（packages_context/paths.py/get_context）白名单豁免沿用 fork 物不改策略。验证：hook 实跑基线 diff 仅预期段差异、全仓 grep 零白名单外活引用、py_compile 通过、trellis-check 零缺陷。活化方案证伪出局（CLAUDE.md 已承担索引功能）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2084d7f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
