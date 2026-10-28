@@ -238,10 +238,12 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 		RPCTarget:         app,
 		RPCTargetForActor: app.rpcTargetForActor,
 		// 隐私红线屏蔽面：QueryAuditLog（审计历史，含全谱 IP/令牌明细）、
-		// ListIPBans（连接管控五期 IP 封禁列表，他人 IP 明细仅走桌面出口）与
+		// ListIPBans（连接管控五期 IP 封禁列表，他人 IP 明细仅走桌面出口）、
 		// ListIPBanSuggestions（连接管控九期网段聚合建议，派生自他人 IP 封禁
-		// 条目，载荷仅网段串+计数仍整体收口——无 count 降级形态）
-		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans", "ListIPBanSuggestions"},
+		// 条目，载荷仅网段串+计数仍整体收口——无 count 降级形态）与
+		// QueryIPBanTrend（连接管控十期攻击趋势，派生自他人 IP 封禁审计明细，
+		// 载荷仅桶 key+计数仍整体收口——无单 IP 明细）
+		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans", "ListIPBanSuggestions", "QueryIPBanTrend"},
 		WSHub:            hub,
 	})
 	return hub, handler, nil

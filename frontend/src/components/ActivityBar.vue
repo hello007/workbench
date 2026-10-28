@@ -44,8 +44,8 @@
          popover #reference 直挂原生 div，点击展开与 hover 提示双链路实测通过 -->
     <el-tooltip v-if="panelVisible" :content="deviceHint" placement="right" :show-after="300">
       <div class="devices-indicator-anchor">
-        <!-- @show 打开面板时重拉封禁列表与聚合建议（五期：面板打开/可见时加载；
-             九期建议数据源刷新时机对齐） -->
+        <!-- @show 打开面板时重拉封禁列表、聚合建议与攻击趋势（五期：面板打开/
+             可见时加载；九/十期数据源刷新时机对齐） -->
         <el-popover trigger="click" placement="right" :width="320" :persistent="false" @show="reloadBanPanel">
           <template #reference>
             <div class="activity-bar-item activity-bar-devices">
@@ -167,6 +167,50 @@
                 </div>
               </div>
               <div v-else class="devices-ban-empty">暂无封禁记录</div>
+              <!-- 攻击趋势区块（连接管控十期）：审计历史 ip_ban/ip_unban 行天桶聚合
+                   的时序视图（跨重启长期面，补九期内存态建议「仅窗口内事实」）。
+                   数据源 QueryIPBanTrend（仅桌面通道可达——浏览器通道被
+                   RPCHiddenMethods 屏蔽，composable 内 isBrowserChannel 跳过加载，
+                   此处恒空态）。每行 = 桶：key 网段串 + autoTotal 窗口自动封禁总数
+                   + 天级迷你条形（days 下标 0 = 窗口最旧日、末位 = 今天，高度按桶内
+                   max 归一，零值日基线点）+ 处置徽标（manualCount>0——管理员处置
+                   分列不混主趋势）+ 再犯徽标（rebounded = 解封后该桶又有 auto 封禁，
+                   后端算透传前端零判定）。行点击预填网段封禁弹窗（桶 key 即 CIDR
+                   串，复用九期 openBanIPDialog 入口）。排序后端已做（autoTotal 降序
+                   + key 字典序次级），前端零排序 -->
+              <div class="devices-trend-block">
+                <div class="devices-suggest-title">攻击趋势<template v-if="trend.windowDays > 0">（近 {{ trend.windowDays }} 天）</template></div>
+                <div v-if="trendBuckets.length" class="devices-trend-list">
+                  <button
+                    v-for="b in trendBuckets"
+                    :key="b.key"
+                    type="button"
+                    class="devices-trend-row"
+                    :title="`点击预填网段封禁弹窗（${b.key}）`"
+                    @click.stop="openBanIPDialog(b.key)"
+                  >
+                    <div class="devices-trend-main">
+                      <span class="devices-panel-ip">{{ b.key }}</span>
+                      <span class="devices-trend-count">{{ b.autoTotal }} 次自动封禁</span>
+                    </div>
+                    <div class="devices-trend-meta">
+                      <span class="devices-trend-bars" aria-hidden="true">
+                        <span
+                          v-for="(v, i) in b.days"
+                          :key="i"
+                          class="devices-trend-bar"
+                          :class="{ 'is-empty': !v }"
+                          :style="trendBarStyle(v, b.days)"
+                        />
+                      </span>
+                      <span v-if="b.manualCount > 0" class="devices-trend-manual">处置 {{ b.manualCount }}</span>
+                      <span v-if="b.rebounded" class="devices-trend-rebounded">再犯</span>
+                    </div>
+                  </button>
+                </div>
+                <div v-else class="devices-trend-empty">暂无攻击记录</div>
+                <div v-if="trendEarliestDay" class="devices-trend-earliest">数据自 {{ trendEarliestDay }} 起（更早历史已随审计日志轮转）</div>
+              </div>
             </div>
           </div>
         </el-popover>
@@ -188,8 +232,8 @@
          踢出在弹窗内完成 -->
     <BanTokenDialog v-model="banDialogVisible" :token="banTarget" :connections="connections" />
     <!-- 手动封禁 IP 弹窗（连接管控七期，「IP 封禁」区块头部入口；九期扩聚合建议
-         行预填入口 initialCidr）：@banned 重拉封禁列表与建议（手动封禁不触发
-         webserve-ip-banned 事件，前端经回调刷新） -->
+         行预填入口 initialCidr）：@banned 重拉封禁列表、建议与趋势（手动封禁不
+         触发 webserve-ip-banned 事件，前端经回调刷新） -->
     <BanIPDialog v-model="banIPDialogVisible" :initial-cidr="banIPCidr" @banned="reloadBanPanel" />
   </div>
 </template>
@@ -204,7 +248,7 @@ import { KickConnection, UnbanIP, UnbanCIDR } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
-import { useIPBanList, useIPBanSuggestions, formatBanExpiry } from '../composables/useIPBans'
+import { useIPBanList, useIPBanSuggestions, useIPBanTrend, formatBanExpiry } from '../composables/useIPBans'
 import BanTokenDialog from './BanTokenDialog.vue'
 import BanIPDialog from './BanIPDialog.vue'
 
@@ -225,11 +269,57 @@ const { ipBans, reload: reloadIPBans } = useIPBanList()
 // 到达由 composable 内自动刷新）
 const { suggestions, reload: reloadIPSuggestions } = useIPBanSuggestions()
 
-// 两数据源统一刷新出口（面板打开 @show 与封禁动作 @banned 后同调，保证列表与
-// 建议口径同步——新网段封禁会使 CoveredBy 命中条目从建议中剔除）
+// 攻击趋势（连接管控十期，桌面专用数据源）：「攻击趋势」区块渲染数据；刷新时机
+// 对齐封禁列表与聚合建议（面板打开/封禁动作后 reload；webserve-ip-banned 事件
+// 到达由 composable 内自动刷新——新自动封禁改变趋势计数与 rebounded 观测）
+const { trend, reload: reloadIPTrend } = useIPBanTrend()
+
+// 三数据源统一刷新出口（面板打开 @show 与封禁动作 @banned 后同调，保证列表、
+// 建议与趋势口径同步——新网段封禁会使 CoveredBy 命中条目从建议中剔除，并改变
+// 趋势桶的处置计数与再犯观测）
 function reloadBanPanel() {
   reloadIPBans()
   reloadIPSuggestions()
+  reloadIPTrend()
+}
+
+// 后端已排序（autoTotal 降序 + key 字典序次级，对齐九期建议排序纪律），前端零排序
+const trendBuckets = computed(() => trend.value.buckets)
+
+// earliestTs 提示行文案：数据自 M-D 起（审计轮转丢历史诚实标注，禁静默降级）。
+// 显示条件 = earliestTs 落在窗口起点之后（留存未覆盖整个窗口才提示；earliestTs
+// 为 0 = 快照无 ip_ban 行，不提示）。窗口起点计算与后端天桶实现
+// （service/ip_ban_trend.go）对齐——今天本地时区 0 点起往回 windowDays-1 天，
+// 前端 new Date 本地时区天然同基准，无跨时区换算
+const trendEarliestDay = computed(() => {
+  const t = trend.value
+  if (!t || !t.earliestTs || !t.windowDays || t.windowDays < 1) {
+    return ''
+  }
+  const now = new Date()
+  const windowStartSec =
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000 -
+    (t.windowDays - 1) * 86400
+  if (t.earliestTs <= windowStartSec) {
+    return ''
+  }
+  const d = new Date(t.earliestTs * 1000)
+  return `${d.getMonth() + 1}-${d.getDate()}`
+})
+
+/**
+ * 天级迷你条形高度（纯 div 数据驱动，免图表库——面板 320 宽容纳不了图表轴）。
+ * 非零日高度按桶内最大值归一（下限 12% 保证 1 次与满值档位可辨）；零值日返回
+ * null 交由 is-empty 类固定基线高度（动态比例走 :style 数据绑定，静态布局仍走
+ * 语义类——视觉规范行内 style 禁令针对静态样式，数据驱动尺寸无类可归并）。
+ */
+function trendBarStyle(value, days) {
+  if (!value) {
+    return null
+  }
+  const max = Math.max(...days, 1)
+  const pct = Math.max(Math.round((value / max) * 100), 12)
+  return { height: `${pct}%` }
 }
 
 // 面板可见条件扩展（五期）：有自动封禁记录时即使无在途连接也显示入口——被封禁
@@ -295,12 +385,12 @@ function openBanDialog(c) {
   banDialogVisible.value = true
 }
 
-// 手动封禁 IP 弹窗（连接管控七期，区块头部入口；九期扩聚合建议行入口）：成功后
-// @banned 重拉封禁列表与建议（手动封禁不触发 webserve-ip-banned 事件——该出口
-// 为自动封禁专属通知面）
+// 手动封禁 IP 弹窗（连接管控七期，区块头部入口；九期扩聚合建议行入口、十期扩
+// 攻击趋势行入口）：成功后 @banned 重拉封禁列表、建议与趋势（手动封禁不触发
+// webserve-ip-banned 事件——该出口为自动封禁专属通知面）
 const banIPDialogVisible = ref(false)
-// 建议预填目标网段（九期）：建议行点击带网段串（弹窗档位自动切网段档并预填），
-// 头部入口无参为空串 = 默认单 IP 档
+// 网段预填目标（九期建议行/十期趋势行共用）：行点击带网段串（弹窗档位自动切
+// 网段档并预填），头部入口无参为空串 = 默认单 IP 档
 const banIPCidr = ref('')
 
 function openBanIPDialog(cidr = '') {
@@ -775,5 +865,137 @@ const panels = [
   font-size: 11px;
   line-height: 1.5;
   color: var(--warning-color);
+}
+
+/* 攻击趋势区块（连接管控十期）：小节标题复用 devices-suggest-title（11px/500
+ * 弱层文字）拉开层级；行形态对齐聚合建议行（可点按钮 + 弱层 hover 提亮 +
+ * radius-sm + 四档间距），行内上下两段——上段网段串 + 总计数、下段天级条形 +
+ * 徽标；天级条形为纯 div 数据驱动（高度按桶内 max 归一，见 trendBarStyle），
+ * warning 语义色（趋势=待观测的攻击面，与建议小节待处置语义同色系） */
+.devices-trend-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.devices-trend-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.devices-trend-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.devices-trend-row:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--warning-color);
+}
+
+.devices-trend-main {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.devices-trend-main .devices-panel-ip {
+  flex-shrink: 0;
+}
+
+/* 窗口自动封禁总数：右对齐弱层文字（网段串是主标识，计数次级） */
+.devices-trend-count {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.devices-trend-meta {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+}
+
+/* 天级条形组：固定高容器 + 逐日条形（下标 0 = 最旧日在左、末位 = 今天在右），
+ * 零值日退化为基线点（is-empty）保持日列对齐 */
+.devices-trend-bars {
+  flex: 1;
+  height: 18px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.devices-trend-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  background: var(--warning-color);
+  border-radius: 1px 1px 0 0;
+  opacity: 0.75;
+}
+
+.devices-trend-bar.is-empty {
+  height: 2px;
+  background: var(--border-color);
+  opacity: 1;
+}
+
+/* 处置徽标（十期）：manualCount>0 渲染「处置 N」，primary 色系对齐封禁列表
+ * 「手动」来源徽标（同为管理员处置语义） */
+.devices-trend-manual {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 再犯徽标（十期）：rebounded 后端算透传（解封后该桶又有 auto 封禁），warning
+ * 色系对齐递增档位徽标（攻击持续升级的警示语义） */
+.devices-trend-rebounded {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.devices-trend-empty {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+/* earliestTs 提示行（十期）：留存未覆盖整个窗口时标注「数据自 M-D 起」（轮转
+ * 丢历史诚实标注，禁静默降级），弱层文字不抢桶行 */
+.devices-trend-earliest {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
 }
 </style>

@@ -81,7 +81,7 @@ func TestApp_BanCIDR_ValidationRejects(t *testing.T) {
 	}
 
 	// 白名单完全覆盖：先配置覆盖性白名单，再封同网段
-	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, []string{"203.0.113.0/24"}); err != nil {
+	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, 7, []string{"203.0.113.0/24"}); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	err = app.BanCIDR("203.0.113.0/24", 0, "")

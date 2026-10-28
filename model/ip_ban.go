@@ -126,3 +126,53 @@ type IPBanAggregateSuggestion struct {
 	// 桶计数恒不小于建议阈值，前端文案「该网段 N 个来源已被封禁」直接消费）。
 	Count int `json:"count"`
 }
+
+// IPBanTrendBucket 攻击趋势聚合的单桶条目（连接管控十期）：审计历史 ip_ban 行
+// 按固定粒度桶聚合的天级时序视图条目。桶 key 为网段串（单 IP 掩入 IPv4 /24、
+// IPv6 /64 固定粒度，与九期聚合建议同粒度）或手动网段封禁的规范化 CIDR 原串
+// （ipnet.String()）；聚合口径详见 service.aggregateIPBanTrend doc comment。
+//
+// 隐私粒度封顶：载荷仅桶 key + 天级计数序列 + 计数 + 布尔，无单 IP 明细（单 IP
+// 历史全量明细桌面已有审计弹窗入口，趋势面桶聚合正是差异化价值；对齐九期
+// 「仅网段串+计数无 IP 明细」纪律）。App.QueryIPBanTrend 进 server
+// RPCHiddenMethods 屏蔽列表（整体不进浏览器通道）。字段全为基本类型，struct
+// 形态经 wails generate 自动生成 models.ts class（无需手动补别名）。
+type IPBanTrendBucket struct {
+	// Key 桶标识：单 IP 掩入的固定粒度网段串（"203.0.113.0/24"）或手动网段
+	// 封禁的规范化 CIDR 原串。kind 从 key 形态天然推导（与桶由何种行产生一致），
+	// 无额外字段。
+	Key string `json:"key"`
+	// Days 窗口内天级自动封禁计数序列，长度恒等于窗口天数；下标 0 = 窗口最旧日，
+	// 末下标 = 今天（本地时区日界）。仅 auto（actorSource=system）行计入。
+	Days []int `json:"days"`
+	// AutoTotal 主趋势计数：窗口内该桶 auto（actorSource=system）ip_ban 行总数
+	// （恒等于 sum(Days)），机器观测的攻击频度。
+	AutoTotal int `json:"autoTotal"`
+	// ManualCount 管理员处置计数：窗口内该桶 manual（actorSource=desktop/rpc）
+	// ip_ban 行总数，与主趋势分列不混入（auto=攻击频度、manual=人类决策频度，
+	// 混则口径失真）。
+	ManualCount int `json:"manualCount"`
+	// Rebounded 解封后再犯标记（后端计算透传，前端零判定）：桶内存在解封时间
+	// 之后又有 auto ip_ban 行的攻击事实。
+	Rebounded bool `json:"rebounded"`
+	// LastSeen 桶内最新一条 ip_ban 行（auto/manual 均计）的 ts（unix 秒）。
+	LastSeen int64 `json:"lastSeen"`
+}
+
+// IPBanTrendResult 攻击趋势聚合查询结果（连接管控十期，App.QueryIPBanTrend
+// 返回形态）：基于审计行 ip_ban/ip_unban 的跨重启攻击源时序视图，补九期
+// （内存条目、仅窗口内事实）之外的长期面。
+type IPBanTrendResult struct {
+	// WindowDays 本次查询生效的回看窗口天数（设置段 trendWindowDays 归一值，
+	// 透传给前端对齐 Days 数组长度）。
+	WindowDays int `json:"windowDays"`
+	// EarliestTs 审计快照中最早一条 ip_ban 行的 ts（unix 秒；0 = 快照无任何
+	// ip_ban 行）。含窗口外与桶解析失败行——语义为「数据自何时起」，前端据
+	// earliestTs 是否早于窗口起点判定「留存是否覆盖整个窗口」，不覆盖时提示
+	// 「数据自 M-D 起」（轮转丢历史诚实标注，禁静默降级）。
+	EarliestTs int64 `json:"earliestTs"`
+	// Buckets 聚合桶切片，恒非 nil（空态返回空切片）。排序：AutoTotal 降序
+	// （影响面大优先），同计数按 Key 字典序升序（确定性输出，前端渲染顺序稳定，
+	// 对齐九期建议排序纪律）。
+	Buckets []IPBanTrendBucket `json:"buckets"`
+}

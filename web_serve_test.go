@@ -615,8 +615,17 @@ func TestWebServeManager_StopClosesWSClients(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, _, err := conn.ReadMessage(); err == nil {
-		t.Error("Stop 后在途 WS 客户端应读到连接关闭错误（无僵尸客户端）")
+	// register 即向全体客户端（含新注册者）广播 ws-connections:changed，该数据帧
+	// 与 hub.Close 竞速——帧已滞留客户端 TCP 接收缓冲时首读返回滞留帧（err == nil）
+	// 而非关闭错误，须耗尽缓冲帧后读到终态错误。终态错误为读超时（连接仍存活但
+	// 无数据）= 僵尸客户端，仍判失败；EOF/closed/abnormal closure = 期望的关闭感知。
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				t.Error("Stop 后在途 WS 客户端应读到连接关闭错误（无僵尸客户端）")
+			}
+			break
+		}
 	}
 }
 

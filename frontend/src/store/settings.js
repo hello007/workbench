@@ -159,13 +159,16 @@ export const TERMINAL_SCROLLBACK_MAX = 10000
  * 1-60 分钟（默认 5）、递增封禁封顶 5-1440 分钟（默认 60）。封顶恒不低于基础
  * 时长（后端 normalize 收敛，前端保存后以回读值为准）。聚合建议阈值（连接管控
  * 九期）2-50（默认 3）：同聚合网段内自动封禁条目达到该数产出网段封禁建议。
+ * 趋势窗口（连接管控十期）1-30 天（默认 7）：攻击趋势区块的审计历史回看天数，
+ * 上限跟审计留存现实走（超留存窗口纯虚设）。
  */
 export const IP_BAN_DEFAULTS = {
   threshold: 10,
   windowMinutes: 10,
   durationMinutes: 5,
   maxBanDurationMinutes: 60,
-  aggregateSuggestThreshold: 3
+  aggregateSuggestThreshold: 3,
+  trendWindowDays: 7
 }
 export const IP_BAN_THRESHOLD_MIN = 3
 export const IP_BAN_THRESHOLD_MAX = 100
@@ -177,6 +180,8 @@ export const IP_BAN_MAX_DURATION_MIN = 5
 export const IP_BAN_MAX_DURATION_MAX = 1440
 export const IP_BAN_AGG_SUGGEST_MIN = 2
 export const IP_BAN_AGG_SUGGEST_MAX = 50
+export const IP_BAN_TREND_WINDOW_MIN = 1
+export const IP_BAN_TREND_WINDOW_MAX = 30
 
 /** 终端字体下拉选项（value 空串 = 默认 Cascadia Code 栈，含 Fira Code/Consolas fallback 链） */
 export const TERMINAL_FONT_OPTIONS = [

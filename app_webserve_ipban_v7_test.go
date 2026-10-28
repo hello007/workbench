@@ -103,7 +103,7 @@ func TestApp_BanIP_ValidationAndWhitelistRejects(t *testing.T) {
 	}
 
 	// 白名单 IP 禁封：先配置白名单（SetIPBanConfig 五参），再封命中 IP
-	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, []string{"192.0.2.99"}); err != nil {
+	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, 7, []string{"192.0.2.99"}); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	err = app.BanIP("192.0.2.99", 0, "")
@@ -216,7 +216,7 @@ func TestApp_SetIPBanConfig_Whitelist(t *testing.T) {
 
 	// 白名单含命中 IP（裸 IP 形态）+ 非法条目（剔除）+ 合法 CIDR（保留原串）
 	whitelist := []string{ip, "not-a-cidr", "10.0.0.0/8", "  "}
-	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, whitelist); err != nil {
+	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, 7, whitelist); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestApp_SetIPBanConfig_Whitelist(t *testing.T) {
 	}
 
 	// 移除白名单 → 生效中封禁恢复拒连（未过期）
-	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, []string{"10.0.0.0/8"}); err != nil {
+	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, 7, []string{"10.0.0.0/8"}); err != nil {
 		t.Fatalf("SetIPBanConfig 移除: %v", err)
 	}
 	if msg := app.ipBanSvc.RejectMessage(ip); msg == "" {
@@ -264,7 +264,7 @@ func TestApp_SetIPBanConfig_Whitelist(t *testing.T) {
 	if err := app.SetWebServeConfig(false, "127.0.0.1:36115"); err != nil {
 		t.Fatalf("SetWebServeConfig: %v", err)
 	}
-	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, nil); err != nil {
+	if err := app.SetIPBanConfig(10, 10, 5, 60, 3, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	cfg := app.GetSettings()

@@ -152,3 +152,64 @@ test.describe('网段聚合建议（连接管控九期）', () => {
     await expect(dialog).toBeHidden()
   })
 })
+
+// 攻击趋势（连接管控十期）：审计历史 ip_ban/ip_unban 天桶聚合的时序视图（封禁
+// 列表下方第四区块），行点击复用九期网段封禁弹窗预填链。数据源 QueryIPBanTrend
+// 桌面专用（浏览器通道 RPCHiddenMethods 屏蔽，E2E mock 通道直接 override 消费
+// 面）；earliestTs 取「两天前」注入——恒在 7 天窗口内，确定性触发「数据自 M-D 起」
+// 轮转提示行（禁依赖本地时区计算的具体日期文案）
+test.describe('攻击趋势（连接管控十期）', () => {
+  test.use({
+    wailsOverrides: {
+      ListIPBans: [banEntry()],
+      QueryIPBanTrend: {
+        windowDays: 7,
+        earliestTs: Math.floor(Date.now() / 1000) - 2 * 86400,
+        buckets: [
+          { key: '203.0.113.0/24', days: [0, 1, 0, 3, 0, 2, 5], autoTotal: 11, manualCount: 2, rebounded: true, lastSeen: 1735689900 },
+          { key: '198.51.100.0/24', days: [0, 0, 0, 0, 0, 1, 0], autoTotal: 1, manualCount: 0, rebounded: false, lastSeen: 1735689000 }
+        ]
+      }
+    }
+  })
+
+  test('趋势桶行渲染（计数/天级条形/处置/再犯徽标）→ earliest 提示行 → 行点击预填 BanCIDR', async ({ page }) => {
+    await page.goto('/')
+    const indicator = page.locator('.activity-bar-devices')
+    await expect(indicator).toBeVisible()
+    await indicator.click()
+    const panel = page.locator('.devices-panel')
+    await expect(panel).toBeVisible()
+
+    // 趋势区块：标题带窗口天数 + 桶行（网段串 + 总计数 + 天级条形 + 双徽标），
+    // 后端已排序（autoTotal 降序），前端零排序原样渲染
+    const block = panel.locator('.devices-trend-block')
+    await expect(block).toContainText('攻击趋势（近 7 天）')
+    const rows = block.locator('.devices-trend-row')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.nth(0)).toContainText('203.0.113.0/24')
+    await expect(rows.nth(0)).toContainText('11 次自动封禁')
+    await expect(rows.nth(0).locator('.devices-trend-bar')).toHaveCount(7)
+    await expect(rows.nth(0).locator('.devices-trend-manual')).toHaveText('处置 2')
+    await expect(rows.nth(0).locator('.devices-trend-rebounded')).toHaveText('再犯')
+    // manualCount=0 与 rebounded=false 不渲染徽标
+    await expect(rows.nth(1).locator('.devices-trend-manual')).toHaveCount(0)
+    await expect(rows.nth(1).locator('.devices-trend-rebounded')).toHaveCount(0)
+
+    // earliest 提示行（留存未覆盖整个窗口的诚实标注）
+    await expect(block.locator('.devices-trend-earliest')).toContainText('数据自')
+    await expect(block.locator('.devices-trend-earliest')).toContainText('更早历史已随审计日志轮转')
+
+    // 行点击复用九期预填链：弹窗网段档 + 桶 key 预填，提交走 BanCIDR
+    await rows.nth(0).click()
+    const dialog = page.locator('.ban-ip-dialog')
+    await expect(dialog).toBeVisible()
+    const input = dialog.locator('.ban-ip-input input')
+    await expect(input).toHaveValue('203.0.113.0/24')
+    await dialog.locator('button', { hasText: '封禁' }).click()
+    await expect(
+      page.evaluate(() => window.__wailsCalls.filter((c) => c.method === 'BanCIDR'))
+    ).resolves.toEqual([{ method: 'BanCIDR', args: ['203.0.113.0/24', 0, ''] }])
+    await expect(dialog).toBeHidden()
+  })
+})

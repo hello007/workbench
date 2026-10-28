@@ -587,25 +587,54 @@ func (a *App) ListIPBanSuggestions() []model.IPBanAggregateSuggestion {
 	return a.ipBanSvc.AggregateSuggestions()
 }
 
+// QueryIPBanTrend 查询攻击源趋势（连接管控十期）：基于审计行 ip_ban/ip_unban 的
+// 跨重启天级时序聚合（读侧懒扫审计主+.1 快照，窗口天数取设置段 trendWindowDays
+// 归一值——单一来源，对齐 ListIPBanSuggestions 零参先例），补九期「内存条目、
+// 仅窗口内事实」之外的长期面。聚合口径见 service.aggregateIPBanTrend；载荷仅
+// 桶 key（网段串/CIDR 原串）+ 天级计数序列 + 计数 + 布尔，无单 IP 明细（隐私
+// 粒度封顶，对齐九期纪律）。
+//
+// **隐私红线——本方法不进浏览器通道**：趋势桶派生自他人 IP 封禁审计明细（同
+// ListIPBans/ListIPBanSuggestions 的数据面），装配层经
+// server.WebOptions.RPCHiddenMethods 对翻译层屏蔽（对浏览器呈现「方法不存在」，
+// 三期先例同款），无降级形态；前端趋势区块仅桌面明细面板消费（isBrowserChannel
+// 跳过加载）。桌面 Wails 绑定不经翻译层，不受屏蔽影响。
+//
+// 无新增错误码（审计旁路面既有降级口径）：服务未装配（旁路构造的测试 App）返回
+// 空结果（Buckets 空切片、EarliestTs 0）不报错；审计快照读失败（非「文件不存在」
+// 的打开错误）上抛交既有 error 链，前端吞错静默空态（对齐 useIPBanList 降级
+// 口径）；webServe 未运行不影响本只读面（与 ListIPBans 同款）。
+func (a *App) QueryIPBanTrend() (model.IPBanTrendResult, error) {
+	if a.ipBanSvc == nil {
+		return model.IPBanTrendResult{Buckets: []model.IPBanTrendBucket{}}, nil
+	}
+	return a.ipBanSvc.QueryAuditTrend()
+}
+
 // SetIPBanConfig 保存 IP 封禁参数与可信网段白名单并即时生效（连接管控六期，
-// 设置页「自动封禁」小节保存入口；七期扩 whitelist，九期扩聚合建议阈值）：
-// normalize 归一（零值回退默认、越界 clamp、封顶不低于基础时长、白名单非法
-// CIDR/裸 IP 条目剔除）→ 持久化设置段 → ApplyConfig 热更运行中服务。「保存+生效」
-// 显式单点，对齐 SetWebServeConfig 先例（SettingsService 无观察者机制，不走通用
-// SaveSettings 隐式联动）。
+// 设置页「自动封禁」小节保存入口；七期扩 whitelist，九期扩聚合建议阈值，十期扩
+// 趋势回看窗口天数）：normalize 归一（零值回退默认、越界 clamp、封顶不低于基础
+// 时长、白名单非法 CIDR/裸 IP 条目剔除）→ 持久化设置段 → ApplyConfig 热更运行中
+// 服务。「保存+生效」显式单点，对齐 SetWebServeConfig 先例（SettingsService 无
+// 观察者机制，不走通用 SaveSettings 隐式联动）。
 //
 // 生效语义（六期定稿）：仅面向未来——生效中封禁的到期时刻不追溯调整（改小时长
 // 不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免）；threshold 改小
 // 后存量计数自然满足，下次失败即触发；聚合建议阈值同口径（九期：改小后存量条目
-// 自然满足，下次查询即产出建议）。白名单为唯一例外（七期定稿「豁免 = 语义
+// 自然满足，下次查询即产出建议）；趋势窗口天数同口径（十期：下次 QueryIPBanTrend
+// 即按新窗口聚合）。白名单为唯一例外（七期定稿「豁免 = 语义
 // 修正」）：命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即
 // 恢复拒连）。参数非法无失败分支：clamp 层静默收敛、白名单非法条目剔除（前端
 // el-input-number 已挡边界、CIDR 行级格式校验已挡格式，后端兜底手改配置形态）。
 //
+// 七参签名（十期）：数值参数按语义分组聚齐（threshold/window/duration/maxBan/
+// suggestThreshold/trendWindowDays），whitelist 收尾——与九期「聚合阈值第五位、
+// whitelist 移第六位」同构，新增数值参数插 whitelist 之前，白名单恒末位。
+//
 // 指针段复制纪律：基底设置的 WebServe/Assets 指针段一律私有拷贝后替换 IPBan 段，
 // 防 Save 入口 Ensure 的 normalize 无条件赋值与并发读者竞态（SetWebServeConfig
 // 先例同款）。
-func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes, aggregateSuggestThreshold int, whitelist []string) error {
+func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes, aggregateSuggestThreshold, trendWindowDays int, whitelist []string) error {
 	normalized := model.NormalizeIPBanSettings(&model.IPBanSettings{
 		Threshold:                 threshold,
 		WindowMinutes:             windowMinutes,
@@ -613,6 +642,7 @@ func (a *App) SetIPBanConfig(threshold, windowMinutes, durationMinutes, maxBanDu
 		MaxBanDurationMinutes:     maxBanDurationMinutes,
 		Whitelist:                 whitelist,
 		AggregateSuggestThreshold: aggregateSuggestThreshold,
+		TrendWindowDays:           trendWindowDays,
 	})
 
 	// 持久化（以磁盘现有设置为基底合并写，指针段全部私有拷贝防竞态）

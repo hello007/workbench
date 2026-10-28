@@ -45,6 +45,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   KickConnection: vi.fn(),
   ListIPBans: vi.fn(),
   ListIPBanSuggestions: vi.fn(),
+  QueryIPBanTrend: vi.fn(),
   UnbanIP: vi.fn(),
   UnbanCIDR: vi.fn()
 }))
@@ -945,6 +946,192 @@ describe('ActivityBar - 聚合建议小节', () => {
     await wrapper.findComponent({ name: 'BanIPDialog' }).vm.$emit('banned')
     await flushPromises()
     expect(ListIPBanSuggestions).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+})
+
+// ---- 攻击趋势区块（连接管控十期：审计历史 ip_ban/ip_unban 天桶聚合的时序视图，
+// 数据源 QueryIPBanTrend 桌面专用 + 刷新时机对齐封禁列表/建议 + 行点击复用九期
+// 封禁弹窗预填链）----
+
+describe('ActivityBar - 攻击趋势区块', () => {
+  const createWrapper = () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'directory'
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': { template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>', props: ['content', 'placement'] },
+          'el-popover': {
+            template: '<div class="el-popover-stub"><slot name="reference" /><div class="popover-content"><slot /></div></div>',
+            props: ['placement', 'width', 'trigger', 'persistent']
+          }
+        }
+      }
+    })
+  }
+
+  /** 趋势结果 fixture（形状对齐 model.IPBanTrendResult / IPBanTrendBucket） */
+  const trendResult = (over = {}) => ({
+    windowDays: 7,
+    earliestTs: 0,
+    buckets: [],
+    ...over
+  })
+
+  /** 挂载并 flush 挂载期三数据源（ListIPBans + ListIPBanSuggestions + QueryIPBanTrend）异步加载 */
+  const mountFlushed = async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    await nextTick()
+    return wrapper
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { ListIPBans, QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([])
+    QueryIPBanTrend.mockResolvedValue(trendResult())
+  })
+
+  it('挂载即拉取趋势，空桶显低调空态文案（标题带窗口天数后缀）', async () => {
+    const { QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    const wrapper = await mountFlushed()
+    // 注入一条连接使面板可见（可见条件 = 连接存在或封禁存在）
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    expect(QueryIPBanTrend).toHaveBeenCalled()
+    const block = wrapper.find('.devices-trend-block')
+    expect(block.exists()).toBe(true)
+    // 默认 mock windowDays=7：标题带窗口天数后缀
+    expect(block.find('.devices-suggest-title').text()).toBe('攻击趋势（近 7 天）')
+    expect(block.find('.devices-trend-empty').text()).toBe('暂无攻击记录')
+    expect(block.find('.devices-trend-list').exists()).toBe(false)
+    // 空桶且 earliestTs=0：earliest 提示行不渲染
+    expect(block.find('.devices-trend-earliest').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('桶行渲染：key + 窗口总数文案 + 天级条形（含零值基线）+ 处置/再犯徽标 + 标题带窗口天数', async () => {
+    const { QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    QueryIPBanTrend.mockResolvedValue(trendResult({
+      buckets: [
+        { key: '203.0.113.0/24', days: [0, 1, 0, 3, 0, 2, 5], autoTotal: 11, manualCount: 2, rebounded: true, lastSeen: 1735689900 },
+        { key: '198.51.100.0/24', days: [1], autoTotal: 1, manualCount: 0, rebounded: false, lastSeen: 1735689000 }
+      ]
+    }))
+    const wrapper = await mountFlushed()
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    const block = wrapper.find('.devices-trend-block')
+    expect(block.find('.devices-suggest-title').text()).toBe('攻击趋势（近 7 天）')
+    const rows = wrapper.findAll('.devices-trend-row')
+    expect(rows.length).toBe(2)
+    // 后端已排序（autoTotal 降序），前端零排序原样渲染
+    expect(rows[0].find('.devices-panel-ip').text()).toBe('203.0.113.0/24')
+    expect(rows[0].find('.devices-trend-count').text()).toBe('11 次自动封禁')
+    // 天级条形逐日渲染，零值日带 is-empty 基线类
+    const bars = rows[0].findAll('.devices-trend-bar')
+    expect(bars.length).toBe(7)
+    expect(bars.filter((b) => b.classes().includes('is-empty')).length).toBe(3)
+    // 处置徽标（manualCount>0）与再犯徽标（rebounded）
+    expect(rows[0].find('.devices-trend-manual').text()).toBe('处置 2')
+    expect(rows[0].find('.devices-trend-rebounded').text()).toBe('再犯')
+    // manualCount=0 与 rebounded=false 不渲染徽标
+    expect(rows[1].find('.devices-trend-manual').exists()).toBe(false)
+    expect(rows[1].find('.devices-trend-rebounded').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('行点击打开 BanIPDialog 并透传桶 key（复用九期网段预填链，桶 key 即 CIDR 串）', async () => {
+    const { QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    QueryIPBanTrend.mockResolvedValue(trendResult({
+      buckets: [
+        { key: '203.0.113.0/24', days: [0, 1, 0, 3, 0, 2, 5], autoTotal: 11, manualCount: 0, rebounded: false, lastSeen: 1735689900 }
+      ]
+    }))
+    const wrapper = await mountFlushed()
+    // 注入一条连接使面板可见（可见条件 = 连接存在或封禁存在）
+    eventHandlers['webserve-connections:changed']([
+      { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+    ])
+    await nextTick()
+    await wrapper.find('.devices-trend-row').trigger('click')
+    await nextTick()
+    const dialog = wrapper.findComponent({ name: 'BanIPDialog' })
+    expect(dialog.exists(), 'BanIPDialog 桩应挂载').toBe(true)
+    expect(dialog.props('modelValue'), '点击趋势行后 v-model 置 true').toBe(true)
+    expect(dialog.props('initialCidr'), '桶 key 经 initialCidr 透传预填').toBe('203.0.113.0/24')
+    wrapper.unmount()
+  })
+
+  it('earliestTs 提示行三分支：窗口起点之前不提示 / 窗口内起点显「数据自 M-D 起」/ 无记录不提示', async () => {
+    const { QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    const nowSec = Math.floor(Date.now() / 1000)
+    // 注入一条连接使面板可见（可见条件 = 连接存在或封禁存在）
+    const injectPanelVisible = async () => {
+      eventHandlers['webserve-connections:changed']([
+        { id: 1, ip: '192.168.1.5', tokenId: 't1', tokenName: '手机', connectedAt: new Date().toISOString() }
+      ])
+      await nextTick()
+    }
+    // 留存覆盖整个窗口（earliestTs 早于窗口起点 = 今天本地 0 点往回 6 天）→ 不提示
+    QueryIPBanTrend.mockResolvedValue(trendResult({ earliestTs: nowSec - 9 * 86400 }))
+    let wrapper = await mountFlushed()
+    await injectPanelVisible()
+    expect(wrapper.find('.devices-trend-earliest').exists()).toBe(false)
+    wrapper.unmount()
+    // 留存未覆盖窗口（earliestTs 在窗口内）→ 提示「数据自 M-D 起（更早历史已随审计日志轮转）」
+    QueryIPBanTrend.mockResolvedValue(trendResult({ earliestTs: nowSec - 2 * 86400 }))
+    wrapper = await mountFlushed()
+    await injectPanelVisible()
+    const hint = wrapper.find('.devices-trend-earliest')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toMatch(/^数据自 \d{1,2}-\d{1,2} 起（更早历史已随审计日志轮转）$/)
+    wrapper.unmount()
+    // 快照无 ip_ban 行（earliestTs=0）→ 不提示
+    QueryIPBanTrend.mockResolvedValue(trendResult({ earliestTs: 0 }))
+    wrapper = await mountFlushed()
+    await injectPanelVisible()
+    expect(wrapper.find('.devices-trend-earliest').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('webserve-ip-banned 事件到达重拉趋势（与列表/建议同款事件驱动刷新）', async () => {
+    const { ListIPBans, QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    ListIPBans.mockResolvedValue([
+      { ip: '203.0.113.7', bannedAt: Math.floor(Date.now() / 1000) - 60, expiresAt: Math.floor(Date.now() / 1000) + 300, failCount: 10, expired: false, source: 'auto' }
+    ])
+    const wrapper = await mountFlushed()
+    expect(QueryIPBanTrend).toHaveBeenCalledTimes(1)
+    QueryIPBanTrend.mockResolvedValue(trendResult({
+      buckets: [
+        { key: '192.0.2.0/24', days: [2], autoTotal: 2, manualCount: 0, rebounded: false, lastSeen: 1735689900 }
+      ]
+    }))
+    eventHandlers['webserve-ip-banned']({ ip: '192.0.2.66', failCount: 10 })
+    await flushPromises()
+    await nextTick()
+    expect(QueryIPBanTrend).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.devices-trend-row').text()).toContain('192.0.2.0/24')
+    wrapper.unmount()
+  })
+
+  it('封禁动作后 @banned 重拉趋势（reloadBanPanel 三数据源同步——新网段封禁改变处置计数与再犯观测）', async () => {
+    const { QueryIPBanTrend } = await import('../../../wailsjs/go/main/App')
+    const wrapper = await mountFlushed()
+    expect(QueryIPBanTrend).toHaveBeenCalledTimes(1)
+    await wrapper.findComponent({ name: 'BanIPDialog' }).vm.$emit('banned')
+    await flushPromises()
+    expect(QueryIPBanTrend).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

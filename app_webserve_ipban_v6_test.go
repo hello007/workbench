@@ -14,7 +14,7 @@ func TestApp_SetIPBanConfig_SaveAndHotApply(t *testing.T) {
 	app, _ := newWebServeTestAppDir(t)
 	ip := testAuthFailIP
 
-	if err := app.SetIPBanConfig(3, 10, 5, 60, 2, nil); err != nil {
+	if err := app.SetIPBanConfig(3, 10, 5, 60, 2, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	// 持久化断言：GetSettings（缓存已换新）含归一后段值（含九期聚合建议阈值）
@@ -40,7 +40,7 @@ func TestApp_SetIPBanConfig_SaveAndHotApply(t *testing.T) {
 func TestApp_SetIPBanConfig_ClampsInvalidInput(t *testing.T) {
 	app, _ := newWebServeTestAppDir(t)
 
-	if err := app.SetIPBanConfig(1, 999, 999, 1, 999, nil); err != nil {
+	if err := app.SetIPBanConfig(1, 999, 999, 1, 999, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	got := app.GetSettings().IPBan
@@ -62,7 +62,7 @@ func TestApp_SetIPBanConfig_PreservesOtherSections(t *testing.T) {
 	if err := app.SetWebServeConfig(false, "127.0.0.1:36115"); err != nil {
 		t.Fatalf("SetWebServeConfig: %v", err)
 	}
-	if err := app.SetIPBanConfig(5, 10, 5, 60, 3, nil); err != nil {
+	if err := app.SetIPBanConfig(5, 10, 5, 60, 3, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	cfg := app.GetSettings()

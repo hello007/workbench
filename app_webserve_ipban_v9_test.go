@@ -37,7 +37,7 @@ func TestApp_ListIPBanSuggestions_Delegate(t *testing.T) {
 	}
 
 	// SetIPBanConfig 六参热更聚合阈值 2（「保存+生效」单点）：存量条目下次查询即产出
-	if err := app.SetIPBanConfig(service.IPBanThreshold, 10, 5, 60, 2, nil); err != nil {
+	if err := app.SetIPBanConfig(service.IPBanThreshold, 10, 5, 60, 2, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	got := app.ListIPBanSuggestions()
@@ -119,7 +119,7 @@ func TestServeRPC_ListIPBanSuggestionsHiddenForBrowser(t *testing.T) {
 			app.ipBanSvc.RecordFailure(ip)
 		}
 	}
-	if err := app.SetIPBanConfig(service.IPBanThreshold, 10, 5, 60, 2, nil); err != nil {
+	if err := app.SetIPBanConfig(service.IPBanThreshold, 10, 5, 60, 2, 7, nil); err != nil {
 		t.Fatalf("SetIPBanConfig: %v", err)
 	}
 	if got := app.ListIPBanSuggestions(); len(got) != 1 {

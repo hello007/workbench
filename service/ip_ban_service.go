@@ -109,6 +109,11 @@ type IPBanService struct {
 	// ApplyConfig 注入设置段归一值（IPBanSettings.aggregateSuggestThreshold，
 	// clamp 2-50——对齐六期四参数先例，「原字段换参不动 entries」纪律同款）。
 	suggestThreshold int
+	// trendWindowDays 攻击趋势回看窗口天数（十期，service/ip_ban_trend.go）：
+	// QueryAuditTrend 审计历史聚合的天级时间桶数量。构造以默认值起跑，运行期经
+	// ApplyConfig 注入设置段归一值（IPBanSettings.trendWindowDays，clamp 1-30
+	// ——对齐九期聚合建议阈值先例）。
+	trendWindowDays int
 	// 手动封禁持久化（七期）：bansPath 为 data/ip_bans.json（SetBansPath 注入，
 	// 未注入为纯内存模式——既有构造路径零行为变化）；manualVersion 为手动条目
 	// 变更代际（Ban 写入/UnbanIP 删除/载入/ClearAll 均在 mu 锁内递增），落盘
@@ -136,23 +141,26 @@ func NewIPBanService(nowFn func() time.Time) *IPBanService {
 		duration:         IPBanDuration,
 		maxBanDuration:   IPBanMaxBanDuration,
 		suggestThreshold: IPBanAggregateSuggestThresholdDefault,
+		trendWindowDays:  IPBanTrendWindowDaysDefault,
 		nowFn:            nowFn,
 	}
 }
 
 // ApplyConfig 热更四参数与白名单（连接管控六期：设置保存链「保存+生效」单点的
-// 生效步；七期扩白名单段，九期扩聚合建议阈值）。入参为归一后的设置段值（调用方
-// 经 NormalizeIPBanSettings 保证；本方法不重复 clamp——双口径收敛点在 model 层
-// 单点）。mu 锁内整体替换，原子切换：并发判定要么看到全套旧参数要么全套新参数，
-// 无半套中间态。白名单逐条预解析为 *net.IPNet（service/ip_ban_whitelist.go
-// parseIPBanWhitelistEntry，裸 IP 自动补 /32 //128；非法条目 model 层已剔除，
-// 此处再拦一手防御直灌形态），整体替换后判定热路径零重复解析。生效语义（六期
-// 定稿）：仅面向未来——生效中封禁的 bannedUntil 不变（已执行动作不追溯，改小
-// 时长不提前释放、改大不延长），在途失败计数不清零（调参不意外赦免攻击者）；
-// threshold 改小后存量计数自然满足，下次失败即触发，无主动扫描；聚合建议阈值
-// 同口径（九期：改小后存量条目自然满足，下次 AggregateSuggestions 即产出）。
-// 白名单为唯一例外（七期定稿「豁免 = 语义修正」）：命中生效中封禁的 IP 追溯
-// 放行（在途记录不删，白名单移除且未过期即恢复拒连）。
+// 生效步；七期扩白名单段，九期扩聚合建议阈值，十期扩趋势回看窗口天数）。入参为
+// 归一后的设置段值（调用方经 NormalizeIPBanSettings 保证；本方法不重复 clamp
+// ——双口径收敛点在 model 层单点）。mu 锁内整体替换，原子切换：并发判定要么看
+// 到全套旧参数要么全套新参数，无半套中间态。白名单逐条预解析为 *net.IPNet
+// （service/ip_ban_whitelist.go parseIPBanWhitelistEntry，裸 IP 自动补 /32 //128；
+// 非法条目 model 层已剔除，此处再拦一手防御直灌形态），整体替换后判定热路径零
+// 重复解析。生效语义（六期定稿）：仅面向未来——生效中封禁的 bannedUntil 不变
+// （已执行动作不追溯，改小时长不提前释放、改大不延长），在途失败计数不清零
+// （调参不意外赦免攻击者）；threshold 改小后存量计数自然满足，下次失败即触发，
+// 无主动扫描；聚合建议阈值同口径（九期：改小后存量条目自然满足，下次
+// AggregateSuggestions 即产出）；趋势窗口天数同口径（十期：下次 QueryAuditTrend
+// 即按新窗口聚合，无追溯重算面）。白名单为唯一例外（七期定稿「豁免 = 语义
+// 修正」）：命中生效中封禁的 IP 追溯放行（在途记录不删，白名单移除且未过期即
+// 恢复拒连）。
 func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,6 +169,7 @@ func (s *IPBanService) ApplyConfig(cfg model.IPBanSettings) {
 	s.duration = time.Duration(cfg.DurationMinutes) * time.Minute
 	s.maxBanDuration = time.Duration(cfg.MaxBanDurationMinutes) * time.Minute
 	s.suggestThreshold = cfg.AggregateSuggestThreshold
+	s.trendWindowDays = cfg.TrendWindowDays
 	nets := make([]*net.IPNet, 0, len(cfg.Whitelist))
 	for _, item := range cfg.Whitelist {
 		if n, ok := parseIPBanWhitelistEntry(item); ok {

@@ -237,6 +237,17 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // RPCHiddenMethods 屏蔽本方法（隐私红线同 ListIPBans——载荷派生自他人 IP
   // 封禁明细），真实浏览器链路加载面由 isBrowserChannel 跳过
   ListIPBanSuggestions: [],
+  // 攻击趋势聚合查询（连接管控十期，桌面 IP 封禁区块「攻击趋势」小节）：形状
+  // 对齐 model.IPBanTrendResult（windowDays 窗口天数 + earliestTs 审计最早
+  // ip_ban 行 unix 秒、0 = 无记录 + buckets 桶数组；桶元素对齐
+  // model.IPBanTrendBucket——key 网段串 / days 天级计数序列（下标 0 = 窗口最旧日、
+  // 末位 = 今天）/ autoTotal 窗口自动封禁总数 / manualCount 处置计数 / rebounded
+  // 解封后再犯 / lastSeen；排序后端已做，前端零排序）。默认空桶 = 无攻击记录
+  // 空态（区块显空态文案），用例按需 override。后端对浏览器通道经
+  // RPCHiddenMethods 屏蔽本方法（隐私红线同 ListIPBans——载荷派生自他人 IP 封禁
+  // 审计明细，桶粒度封顶无单 IP 明细），真实浏览器链路加载面由 isBrowserChannel
+  // 跳过
+  QueryIPBanTrend: { windowDays: 7, earliestTs: 0, buckets: [] },
   // 审计历史（连接管控三期，桌面审计历史弹窗）：形状对齐 service.AuditQueryResult
   // （外层 Total/Records 为 Go 导出字段直序列化大写驼峰；records 内为 json 小写
   // tag：ts/event/tokenId/name/remoteAddr/userAgent/connId/actorSource/
@@ -456,8 +467,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   SaveSettings: null,
 
   // IP 封禁参数与白名单保存（连接管控六期「保存+生效」单点；七期扩第五参白名单
-  // 列表；九期扩第六参聚合建议阈值 aggregateSuggestThreshold）：void 返回 null
-  // 安全 no-op（mock 不声明形参，六参透传天然兼容）
+  // 列表；九期扩第六参聚合建议阈值 aggregateSuggestThreshold；十期扩第七参趋势
+  // 窗口 trendWindowDays，白名单恒末位）：void 返回 null 安全 no-op（mock 不声明
+  // 形参，七参透传天然兼容）
   SetIPBanConfig: null,
 
   // ---- PPTX 预览转换（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）----

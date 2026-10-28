@@ -10,9 +10,12 @@
  * ListIPBans 加载面经 isBrowserChannel() 启动期判定直接跳过（隐藏入口而非点击
  * 报错，对齐审计历史入口先例），浏览器端 ipBans 恒空、自动封禁区块只显空态。
  *
- * 消费形态两支（共用同一事件名常量单点）：
+ * 消费形态三支（共用同一事件名常量单点）：
  *  - useIPBanList()：ActivityBar 明细面板「自动封禁」区块数据源（列表 + 事件驱动
  *    刷新 + 手动 reload）；
+ *  - useIPBanSuggestions()：ActivityBar「聚合建议」小节数据源（九期，同款三时机）；
+ *  - useIPBanTrend()：ActivityBar「攻击趋势」区块数据源（十期审计历史聚合，同款
+ *    三时机）；
  *  - useIPBanToast()：App 级一次性挂载的全局 toast（面板未开也提示管理员）。
  *
  * 监听注销遵守 cross-layer-contracts 契约：EventsOn 返回闭包在 onBeforeUnmount
@@ -21,7 +24,7 @@
 
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
-import { ListIPBans, ListIPBanSuggestions } from '../../wailsjs/go/main/App'
+import { ListIPBans, ListIPBanSuggestions, QueryIPBanTrend } from '../../wailsjs/go/main/App'
 import { ElMessage } from 'element-plus'
 import { isBrowserChannel } from '../transport'
 
@@ -148,6 +151,76 @@ export function useIPBanSuggestions() {
   })
 
   return { suggestions, reload }
+}
+
+/**
+ * 攻击趋势聚合数据源（连接管控十期，桌面专用消费面）。
+ *
+ * 后端链路：App.QueryIPBanTrend 读审计主+.1 快照按天桶聚合（窗口天数取设置段
+ * trendWindowDays 归一值，返回 model.IPBanTrendResult：windowDays/earliestTs/buckets，
+ * 桶元素形状对齐 model.IPBanTrendBucket——key 网段串/days 天级计数序列（下标 0 =
+ * 窗口最旧日）/autoTotal/manualCount/rebounded/lastSeen；排序后端已做——autoTotal
+ * 降序 + key 字典序次级，前端零排序）。**隐私红线**：该方法进 server
+ * RPCHiddenMethods 屏蔽列表（载荷派生自他人 IP 封禁审计明细，桶粒度封顶无单 IP
+ * 明细——浏览器通道呈现「方法不存在」，整体不可达无降级 UI）；本文件加载面经
+ * isBrowserChannel() 启动期判定直接跳过，浏览器端 trend 恒空形态、趋势区块只显
+ * 空态。
+ *
+ * 刷新时机对齐 useIPBanList/useIPBanSuggestions 三件套：onMounted 首拉；
+ * `webserve-ip-banned` 事件到达自动 reload（新自动封禁改变趋势计数与 rebounded
+ * 判定）；外部调 reload()（面板打开与封禁动作后，由 ActivityBar 统一接线——
+ * reloadBanPanel 三数据源同步）。
+ *
+ * 失败降级静默：查询为审计旁路面增强展示（非正确性依赖），失败保持上次值
+ * （首拉即失败为空形态）不弹错，对齐 useIPBanList 降级口径。
+ *
+ * @returns {{
+ *   trend: import('vue').Ref<{windowDays:number, earliestTs:number, buckets:Array<object>}>,
+ *   reload: () => Promise<void>
+ * }}
+ */
+export function useIPBanTrend() {
+  // 空形态兜底：windowDays 0 = 未加载（earliestTs 提示行按 windowDays>0 门控）；
+  // buckets 恒数组供模板 v-for 安全遍历
+  const trend = ref({ windowDays: 0, earliestTs: 0, buckets: [] })
+  let offBanned = null
+
+  async function reload() {
+    if (isBrowserChannel()) {
+      return
+    }
+    try {
+      const res = await QueryIPBanTrend()
+      if (!res || typeof res !== 'object') {
+        return
+      }
+      trend.value = {
+        windowDays: Number.isFinite(res.windowDays) ? res.windowDays : 0,
+        earliestTs: Number.isFinite(res.earliestTs) ? res.earliestTs : 0,
+        buckets: Array.isArray(res.buckets) ? res.buckets : []
+      }
+    } catch {
+      // 加载失败保持上次值（首拉即失败为空形态空态），不弹错——趋势为增强展示面，
+      // 静默空态优于报错噪声（对齐 useIPBanList 降级口径）
+    }
+  }
+
+  onMounted(() => {
+    offBanned = EventsOn(WEBSERVE_IP_BANNED_EVENT, () => {
+      // 与封禁列表/建议同款整表重拉（桶数量级 = 网段数，恒小于审计行数，免增量合并）
+      reload()
+    })
+    reload()
+  })
+
+  onBeforeUnmount(() => {
+    if (offBanned) {
+      offBanned()
+      offBanned = null
+    }
+  })
+
+  return { trend, reload }
 }
 
 /**

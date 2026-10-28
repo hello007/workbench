@@ -334,27 +334,35 @@ func TestAppSettings_EnsureIPBanDefaults(t *testing.T) {
 		want IPBanSettings
 	}{
 		{name: "越界收敛", in: IPBanSettings{Threshold: 1, WindowMinutes: 500, DurationMinutes: 999, MaxBanDurationMinutes: 1},
-			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: MinIPBanThreshold, WindowMinutes: MaxIPBanWindowMinutes, DurationMinutes: MaxIPBanDurationMinutes, MaxBanDurationMinutes: MaxIPBanDurationMinutes, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "界内取值原样保留", in: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120},
-			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 20, WindowMinutes: 30, DurationMinutes: 10, MaxBanDurationMinutes: 120, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "封顶低于基础时长抬到基础时长", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 5},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 60, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "白名单合法条目保留非法剔除", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
 			Whitelist: []string{"192.168.1.0/24", " 裸IP不是合法条目 ", "10.0.0.5", "2001:db8::/32", "", "  "}},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays,
 				Whitelist: []string{"192.168.1.0/24", "10.0.0.5", "2001:db8::/32"}}},
 		{name: "白名单裸IP保留原字符串", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60,
 			Whitelist: []string{"203.0.113.9", "2001:db8::1"}},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays,
 				Whitelist: []string{"203.0.113.9", "2001:db8::1"}}},
 		{name: "白名单nil收敛空切片", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "聚合建议阈值低于下限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 1},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MinIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MinIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "聚合建议阈值越上限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 99},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MaxIPBanAggregateSuggestThreshold, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: MaxIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
 		{name: "聚合建议阈值界内保留", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 25},
-			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 25, Whitelist: []string{}}},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: 25, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
+		{name: "趋势窗口天数零值回默认", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: DefaultIPBanTrendWindowDays, Whitelist: []string{}}},
+		{name: "趋势窗口天数低于下限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, TrendWindowDays: -3},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: MinIPBanTrendWindowDays, Whitelist: []string{}}},
+		{name: "趋势窗口天数越上限收敛", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, TrendWindowDays: 99},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: MaxIPBanTrendWindowDays, Whitelist: []string{}}},
+		{name: "趋势窗口天数界内保留", in: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, TrendWindowDays: 14},
+			want: IPBanSettings{Threshold: 10, WindowMinutes: 10, DurationMinutes: 5, MaxBanDurationMinutes: 60, AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold, TrendWindowDays: 14, Whitelist: []string{}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -384,6 +392,10 @@ func TestNormalizeIPBanSettings(t *testing.T) {
 	// 聚合建议阈值零值回默认（九期）
 	if got.AggregateSuggestThreshold != DefaultIPBanAggregateSuggestThreshold {
 		t.Errorf("聚合建议阈值零值应回默认, got %d", got.AggregateSuggestThreshold)
+	}
+	// 趋势窗口天数零值回默认（十期）
+	if got.TrendWindowDays != DefaultIPBanTrendWindowDays {
+		t.Errorf("趋势窗口天数零值应回默认, got %d", got.TrendWindowDays)
 	}
 	if len(got.Whitelist) != 1 || got.Whitelist[0] != "192.168.1.0/24" {
 		t.Errorf("白名单应剔除非法条目, got %#v", got.Whitelist)

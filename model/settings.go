@@ -153,6 +153,13 @@ const (
 	DefaultIPBanAggregateSuggestThreshold = 3
 	MinIPBanAggregateSuggestThreshold     = 2
 	MaxIPBanAggregateSuggestThreshold     = 50
+	// 攻击趋势回看窗口天数（连接管控十期）：审计历史聚合的天级时间桶数量（消费面
+	// service.IPBanService.QueryAuditTrend，默认 7 天）。上限 30 跟审计留存现实走
+	// ——web_audit.log 5MB×2 轮转约 6 万行的留存能力下，更久窗口纯虚设（超留存
+	// 部分桶恒空，由 earliestTs 诚实标注而非静默降级）；下限 1 保证窗口语义成立。
+	DefaultIPBanTrendWindowDays = 7
+	MinIPBanTrendWindowDays     = 1
+	MaxIPBanTrendWindowDays     = 30
 )
 
 // IPBanSettings IP 认证失败自动封禁参数段（连接管控六期，settings.json 的 ipban
@@ -169,6 +176,10 @@ type IPBanSettings struct {
 	// 内自动封禁条目达到该数产出网段封禁建议（消费面 service.IPBanService.
 	// AggregateSuggestions，默认 3，clamp 2-50）。
 	AggregateSuggestThreshold int `json:"aggregateSuggestThreshold"`
+	// TrendWindowDays 攻击趋势回看窗口天数（连接管控十期）：审计历史聚合的
+	// 天级时间桶数量（消费面 service.IPBanService.QueryAuditTrend，默认 7，
+	// clamp 1-30——上限跟审计留存现实走，超留存窗口由 earliestTs 诚实标注）。
+	TrendWindowDays int `json:"trendWindowDays"`
 	// Whitelist 可信网段白名单（连接管控七期）：CIDR 串列表（裸 IP 合法，消费层
 	// 自动补 /32 //128）。命中来源认证失败完全不计数不封禁（NAT 共享出口等可信
 	// 场景豁免），生效中封禁追溯放行。normalize 剔除非法条目（静默收敛不失败），
@@ -186,6 +197,7 @@ func DefaultIPBanSettings() IPBanSettings {
 		MaxBanDurationMinutes:     DefaultIPBanMaxBanMinutes,
 		Whitelist:                 []string{},
 		AggregateSuggestThreshold: DefaultIPBanAggregateSuggestThreshold,
+		TrendWindowDays:           DefaultIPBanTrendWindowDays,
 	}
 }
 
@@ -201,6 +213,7 @@ func (s *IPBanSettings) normalize() {
 		s.MaxBanDurationMinutes = s.DurationMinutes
 	}
 	s.AggregateSuggestThreshold = clampIPBanInt(s.AggregateSuggestThreshold, MinIPBanAggregateSuggestThreshold, MaxIPBanAggregateSuggestThreshold, DefaultIPBanAggregateSuggestThreshold)
+	s.TrendWindowDays = clampIPBanInt(s.TrendWindowDays, MinIPBanTrendWindowDays, MaxIPBanTrendWindowDays, DefaultIPBanTrendWindowDays)
 	s.Whitelist = normalizeIPBanWhitelist(s.Whitelist)
 }
 
