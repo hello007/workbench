@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-3.md`
-- **Total Sessions**: 165
-- **Last Active**: 2026-10-28
+- **Total Sessions**: 166
+- **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-3.md` | ~1875 | Active |
+| `journal-3.md` | ~1908 | Active |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
 <!-- @@@/auto:active-documents -->
@@ -31,6 +31,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 166 | 2026-10-29 | 规范沉淀口径对齐：两档钩子级口径固化进沉淀流程 | `851c4e8` | `master` |
 | 165 | 2026-10-28 | CLAUDE.md 关键规则表瘦身：详情下沉与钩子化 | `cd5e7e2` | `master` |
 | 164 | 2026-10-28 | 连接管控遗留收口：设置段 Ensure 与指针段拷贝收敛双单点 | `402f69a` | `master` |
 | 163 | 2026-10-28 | 连接管控十一期：审计留存多档轮转链 | `e8e8156` | `master` |

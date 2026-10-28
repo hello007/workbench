@@ -1873,3 +1873,36 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+
+## Session 166: 规范沉淀口径对齐：两档钩子级口径固化进沉淀流程
+
+**Date**: 2026-10-29
+**Task**: 规范沉淀口径对齐：两档钩子级口径固化进沉淀流程
+**Branch**: `master`
+
+### Summary
+
+对齐瘦身后两处旧口径自述（CLAUDE.md 规范沉淀规则节 + docs/spec/README 两级分流表）为两档钩子级口径（普通行 ≤250 / 钩子密集行(≥7 钩子)与合并行 ≤350、硬顶 350）；超限当场下沉禁先落行后治理；finish-work Step 3 归档前加分档自检；workflow.md Phase 3.3 第三处旧口径同步指向 CLAUDE.md 唯一权威。静态导流抽查 hook-audit.py：钩子最多 5 行全钩子可定位承接；60 行实测 26 普通+34 密集+0 超顶。附带写法漂移两处对齐（truncation-hint-node class 补入 perf-baseline §15.6、E2E 行 {test,expect} 空格对齐）。CLAUDE.md v2.42
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `851c4e8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
