@@ -318,3 +318,16 @@ watch(repoPath, () => resetAiState()) // 切仓库重置任务态 + 取消在途
 新增设置段仅在 service.Load/Save 的手抄串联各加一行：GetSettings 降级分支与写入口拷贝块漏补（六期/十一期实际发生形态），降级分支缺段 + 写入口共享缓存指针竞态。
 #### Correct
 `EnsureAllDefaults` / `PrivateCopy` 各加一行，三处消费点与三写入口自动覆盖；新增设置段的同步面收敛为两个单点 + models.ts 核对。
+
+## Scenario: 崩溃恢复 UI 状态快照独立持久化（data/session.json）
+
+### 1. Scope / Trigger
+崩溃恢复 UI 状态快照独立持久化 `data/session.json`（`SessionState`：selectedDirectoryId / activePanel / terminal）。
+
+### 2. Signatures
+- 类型名 `TerminalSnapshot`——避让 `model/terminal.go` 运行时会话类型。
+- `Terminal` 字段须用指针避 `omitempty` 空快照失效（nil → 前端判冷启动）。
+
+### 3. Contracts
+- Load 损坏降级空快照不阻塞启动（复用 SettingsService 模式 + slog.Warn）。
+- 字段变更须同步 `frontend/wailsjs/` 绑定三处（App.js / App.d.ts / models.ts）。

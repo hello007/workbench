@@ -120,6 +120,13 @@ func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, boo
 - `service/ai_function_seed_merge_test.go`：6 单测覆盖验证矩阵全 5 行 + 端到端集成（老 4 项配置经 `LoadAiFunctions` → 6 项 + 落盘 + 二次加载稳定）
 - 断言点：合并后 funcs 含白名单 skill、用户自定义项原字段未变、meeting-book 未加回、`changed` 返回值正确
 
+## 纯 prompt 模式（Command 空 + PromptTemplate 驱动）
+
+- AI 功能项支持纯 prompt 模式：`Command` 空 + `Params.PromptTemplate` 驱动，`Cwd` 空继承父进程目录。
+- `validateFunctions` 校验放宽为 Command 与 PromptTemplate **至少一非空**。
+- 斜杠命令 skill（Command 非空）与纯 prompt skill（如 AI 提交信息生成/代码审查）两类并存。
+- 纯 prompt skill 经 `BuildStagePrompt` form 模板 `{{key}}` 占位注入 diff/历史等参数。
+
 ## 约束
 
 - `OutputSchema` 可选（nil 不加 `--json-schema` flag），兼容现有非结构化 skill 零回归

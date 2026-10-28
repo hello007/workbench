@@ -19,14 +19,14 @@
 
 |文档|说明|
 |---|---|
-|[cross-layer-contracts.md](cross-layer-contracts.md)|Wails 绑定同步契约：App 方法签名变更须手动同步 `frontend/wailsjs/` 三处（App.js / App.d.ts / models.ts）；文件预览/保存的编码契约（UTF-8 / GBK）|
+|[cross-layer-contracts.md](cross-layer-contracts.md)|Wails 绑定同步契约：App 方法签名变更须手动同步 `frontend/wailsjs/` 三处（App.js / App.d.ts / models.ts）；文件预览/保存的编码契约（UTF-8 / GBK）；Wails 事件多组件共听闭包注销（禁 EventsOff 全局移除）；崩溃恢复 UI 状态快照 `data/session.json`（TerminalSnapshot 指针字段 / Load 损坏降级）；新增/修改设置段双单点（EnsureAllDefaults + PrivateCopy）checklist|
 |[test-coverage-gate.md](test-coverage-gate.md)|测试覆盖率分层门禁：后端 model/server ≥80% + service ≥76% 基线 + util ≥40% 排除 pty_windows.go + 主包不设门禁；前端 ≥70% 硬失败 exclude wailsjs；CI 脚本 scripts/coverage-check.sh 契约|
 |[test-stability.md](test-stability.md)|测试稳定性规范（Flaky 规避）：依赖文件系统 mtime 时序判失效的测试在 NTFS 上 flaky，改注入陈旧缓存（modTime 明确落后）驱动失效分支，不用 time.Sleep|
 |[data-atomic-write.md](data-atomic-write.md)|data JSON 落盘原子写契约：全部 data JSON 持久化必须走 `util.SaveJSON`（CreateTemp 同目录 temp → fsync → os.Rename 替换，Windows 为 MoveFileEx REPLACE_EXISTING），禁新增 os.WriteFile 直写与自建 temp+rename（saveChatJSON/atomicWriteConfig 已收敛委托）；崩溃残留 `.<目标名>.tmp-*` 点文件无害不自动清扫；原子写不解决整体覆盖丢数据（last-writer-wins），手改 data 文件前仍须关 workbench.exe|
 |[app-services-assembly.md](app-services-assembly.md)|AppServices 装配范式：`NewAppServices` 集中装配 + App 内嵌 `*AppServices` 字段提升保 133 委托方法与 Wails 绑定零 diff；AppServices 须在 package main；构造与生命周期副作用分离；新增 service 改动点 2 处|
-|[logging-and-errors.md](logging-and-errors.md)|日志与错误处理规范：后端 slog + lumberjack 落盘 `data/logs/app.log`（禁 println）；AppError + Wails ErrorFormatter 结构化 error 跨层传递（源码核实 `CallbackMessage.Err any`）；前端 handleError 按 code 分流；新增错误码同步三处|
+|[logging-and-errors.md](logging-and-errors.md)|日志与错误处理规范：后端 slog + lumberjack 落盘 `data/logs/app.log`（禁 println）；AppError + Wails ErrorFormatter 结构化 error 跨层传递（源码核实 `CallbackMessage.Err any`）；前端 handleError 按 code 分流；新增错误码同步三处；Git 操作取消链路（util 层 ctx 变体 API、service 取消注册表模式、覆盖清单、锁残留探测 §9）；审计事件表与留存多档轮转链（§8/§8.1/§8.2）|
 |[e2e-testing.md](e2e-testing.md)|E2E 测试规范（方案 C 混合架构）：前端 Playwright E2E（vite preview web 版 + mock Wails 后端，fixtures 注入）+ 后端 Go 集成测试（`//go:build integration` 标签隔离）；mock 单一数据源 `src/test/wails-mock-defaults.js`；`wailsjs/` 不入库，CI 须先 `wails generate module` 再 build|
-|[perf-baseline.md](perf-baseline.md)|性能基线（v1.4 PR1）：Go benchmark（FileTree/ScanGitRepos/NewAppServices ns/op+B/op+allocs）+ 前端 bundle 体积（chunk 分布）+ MemStats 快照 + GUI 冷启动占位；PR4 优化前后对比的唯一数据依据；benchmark 不纳入覆盖率门禁|
+|[perf-baseline.md](perf-baseline.md)|性能基线（v1.4 PR1）：Go benchmark（FileTree/ScanGitRepos/NewAppServices ns/op+B/op+allocs）+ 前端 bundle 体积（chunk 分布）+ MemStats 快照 + GUI 冷启动占位；PR4 优化前后对比的唯一数据依据；benchmark 不纳入覆盖率门禁；前端内存量化（§15 含文件树 2000 节点截断 §15.6）与驻留面（§16 含 FileDiffDialog 关闭释放双时机 §16.5）；soak/泄漏测试（§13/§14）；测试基建辅助 util/testutil 单一数据源（§17）；统计类派生聚合缓存两入口联动失效（§18）|
 |[security-scan.md](security-scan.md)|安全扫描（v1.4 PR1）：govulncheck（Go 调用链分析）+ npm audit（官方 registry 绕过 npmmirror）；CI security job `continue-on-error` 不阻塞 PR；已知漏洞清单（xlsx 无补丁接受风险、go-git/go-billy/x/net/标准库已修复）；go.mod `toolchain` directive 与标准库漏洞修复|
 |[ai-structured-output.md](ai-structured-output.md)|AI 结构化输出契约（v1.5 AI epic PR1）：claude CLI `--json-schema` tool use 强制结构化，与自由文本 result 解耦；`AiFunction.OutputSchema` → `buildClaudeArgs` → `parseStreamLine` 提取 structured_output → `AiTaskRunResult/AiTaskState.StructuredOutput` 透传前端只渲染不解析；纯 prompt skill 模式（Command 空 + PromptTemplate 驱动，validateFunctions 放宽）|
 |[design-tokens.md](design-tokens.md)|设计令牌体系（v1.6 视觉现代化）：双主题变量分层（:root 亮/html.dark 暗，非颜色变量不重复声明）；主色改须同步 Element Plus `--el-color-primary` 派生（light-3~9 实色阶，暗色 light-9 用 rgba 透明度）否则组件割裂；冷暖灰统一蓝灰 Slate 色相禁混；阴影禁纯黑须带背景色相；`--terminal-bg` 须与 `useTerminal.js` LIGHT/DARK_TERMINAL_THEME.background 严格一致（改背景色不动终端）；Geist 四字重梯度 + font-display:swap + fallback 链|
@@ -41,6 +41,10 @@
 |[go-git-deprecation.md](go-git-deprecation.md)|go-git 依赖出清契约（2026-10-21）：go-git/go-billy/gcfg 依赖链整体移除（v6 仅 beta 不升级）；`util.ResolveHead` 统一 HEAD 元数据解析（unborn 不报错由调用方分流）；`repoHasRemote` 手写 .git/config 解析对齐 go-git v5.19.2 三口径（`[remote "name"]` 子段计数不要求 url、裸 `[remote]` 段不计、**PlainOpen 默认不展开 commondir**——worktree 判 false）；refs 枚举走 `git for-each-ref`；**禁重新引入 go-git**|
 |[frontend-dep-upgrade.md](frontend-dep-upgrade.md)|前端依赖分档钳制与升级 SOP（EP caret 漂移治理）：39 顶层依赖四档（exact 仅 element-plus 全家 / tilde 运行时 UI 面锁 minor 放 patch / caret 工具链 / url tarball）；CI 一致性检查 `scripts/check-dep-consistency.mjs`（ci.yml 步骤 2.5，未登记新依赖即失败强制归类，--selftest 注入漂移自证）；升级后必跑面（vitest 全量 + E2E 全量 + 确认弹框哨兵 5 spec + npm audit）；EP 升级 3.4 专项联动 confirm-dialog.md 排查方法论|
 |[mermaid-rendering.md](mermaid-rendering.md)|mermaid 渲染契约（markdown 预览，v12 升级沉淀）：消费面锁定 `import('mermaid')` 包说明符 + initialize 五键（startOnLoad/securityLevel/layout/look/theme）+ `run({nodes, suppressErrors:true})`；v12 视觉保持双键 `layout:'dagre'`+`look:'classic'`（去键即吃 ELK/redux 新观感，ELK 1.46MB chunk 永不触发）；engines node>=22.12（CI 4 处 node 22，不得再降）；E2E mock 坑（PreviewFile 覆盖必含 `kind:'text'`，缺则静默走 CodeMirror 文本分支）；katex 链 audit 清零线与 security-scan.md 联动|
+|[ai-chat-service.md](ai-chat-service.md)|AI 对话服务契约（ChatService）：chat-task:* 事件流与 ai-task:* 隔离；data/ai_chat/ 存储布局（索引与消息分离 + 损坏降级）；--resume 链路 session_id 回写；同会话串行保护（E_CHAT_IN_PROGRESS）；processFactory 注入点（多 CLI 扩展位）；assistant 回复在 done 事件前落盘；选择题走 chat-question 块契约（headless AskUserQuestion 被 CLI 自动应答须 `--disallowedTools` 禁用 + 首轮声明注入，声明不进落盘消息，前端 fence 渲染分流）；chat spawn `--permission-mode` 恒传（省略参数让 CLI 继承用户全局 settings `permissions.defaultMode`，审批协议被静默绕过，「默认」也显式传 default + 空串归一）|
+|[assets-thumbs-com.md](assets-thumbs-com.md)|素材缩略图 COM 队列契约（assets-thumbs）：STA 专用 goroutine（LockOSThread + CoInitializeEx S_FALSE 放行）；Presentations/Slides 是属性须 GetProperty；超时唯一解=杀自启 COM 服务器进程（进程集合 {powerpnt.exe, wpp.exe}——WPS 接管形态，禁 taskkill /IM 全杀）；`jr.Result` 缓冲 1 恰一次写回；CreateInstance 0x8001010A 重试 5×1s；缓存键 `<fileID>-<3位页>.png`（slides.id 禁用）；跳转零可见双根因（owned PIDs 持久化识别崩溃残留 + WPS 应用级默认不可见须显式 Visible=msoTrue）；Export 瞬态重试与 Discard 重建落定等待；Export 目标路径必须绝对；设置段与前端消费（§9：AppSettings.assets 五项、GetAssetThumb 直拼 data URI、分辨率变更清档链、失败收集双复位、RetryAssetThumb 越界遏制、设置弹窗失败禁保存）|
+|[linux-platform.md](linux-platform.md)|Linux 支持契约：Wails 桌面构建须 `-tags webkit2_41`（Ubuntu 24.04 移除 webkit2gtk-4.0）；无标签时桌面前端 CGO 不进依赖图；平台抽象选型（编译期双文件 / 运行时 GOOS 分支 / 纯逻辑抽无 tag 文件双侧同测）；自更新 Linux 资产名与 release.yml 打包名严格一致；build/ gitignore 白名单放行；测试平台断言拆 `_windows_test.go`/`_linux_test.go` 禁共享；前端 shell/目录兜底禁 'powershell'、'C:\\' 字面量统一走 settings store|
+|[pptx-preview.md](pptx-preview.md)|pptx 文件树预览契约（COM 转 PDF + pdfjs viewer）：转换任务排进 assets-thumbs 既有 STA worker（禁建第二 COM 队列——双队列进程快照 diff 互杀）；失败/超时路径必须 Discard() 置脏；复用用户已开实例禁 SaveAs（走 ExportAsFixedFormat 发布语义），自启实例 SaveAs(32) 失败回退；缓存 data/pptx_preview_pdf/ 键=srcPath+size+mtime、LRU 512MB；在途防抖 chan 缓冲 1；前端代次守卫 + 卸载复位转换态；dev 模式 Vite SPA fallback 吞 /preview-pdf——vite.config.js 前置中间件提前 404 触发 Wails dev 回退（新增同源路由须同步加前缀判定）；隐藏页不导出/视频海报帧为预期行为|
 
 ## 新增文档约定
 
@@ -52,4 +56,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-10-20
+**最后更新：** 2026-10-28

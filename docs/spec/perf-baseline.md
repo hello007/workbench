@@ -651,3 +651,24 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
   其余各面为使用中数据或既有释放机制健全（审计 + 实测双证据）。
 - 三子项全收口：限制文件树节点数量（§15.6 截断实施）+ 大文件分块读取（§15.3
   非瓶颈不动）+ 及时释放对象（本节）→ 父项「内存使用优化」勾选。
+
+### 16.5 FileDiffDialog 关闭释放双时机契约
+
+- 行数据清空挂 el-dialog `@closed`（destroy-on-close 渐隐期间 slot 未销毁，清空挂 watch 会动画闪空）。
+- `loadSeq++` / loading 复位挂关闭即时 watch（防渐隐期间在途响应写回）。
+- 改该组件新增状态字段须同步 `releaseDiffData` 清理，否则重新引入「关闭后驻留」。
+- `getCurrentNode()` 返回的是 data 对象（EP 组件层包装 `return currentNode.data` 非 Node 实例），对其结果判类型须直接判 data 字段。
+- 驻留面测量脚本 `scripts/frontend-memory-retention.mjs`（git 双仓 fixture + GC 三点采样，面二基线须取 dblclick 前防重载驻留混入）可复用于新驻留面量化。
+
+## 17. 测试基建辅助（util/testutil 与单一数据源模式）
+
+- 后端跨包共用测试辅助入 `util/testutil`（`RunGit` / `WriteFile` / `InitTempRepo` / `SetupMasterBranch` / `SetupFFRepo` / `SetupConflictRepo`），与前端 `wails-mock-defaults.js` 单一数据源模式对齐。
+- 包内专用辅助留 `*_test_helper.go` 不导出。
+- **禁各 `_test.go` 重复定义 git 命令执行/临时仓库构造辅助**。
+- 集成测试 `it*` helper 语义更严（autocrlf/gpgsign）不并入 testutil。
+- 辅助函数参数用 `testing.TB`（`*testing.T`/`*testing.B` 共同接口）使 benchmark 可复用 fixture 构造。
+
+## 18. 统计类派生聚合缓存失效契约
+
+- 统计类派生聚合缓存（如贡献者行数 numstat 缓存）复用 `commitHistoryCacheKey` 键与 headSHA+TTL 失效判定时，失效为二态（命中 / 全量重拉，聚合值无增量 prepend 路径）。
+- 须在 `InvalidateCommitHistoryCache`（ClearByGitRoot）与 `ClearAllCommitHistoryCache`（ClearAll）**两入口联动清除**，漏联动则手动刷新后行数与提交数口径漂移。

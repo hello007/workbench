@@ -280,7 +280,36 @@ catch (error) {
 
 **Correct**：维持懒扫（面板打开时全档合并），容量/性能由 depth×maxBytes clamp 上限兜底（最坏 220MB 毫秒~几十毫秒）。
 
-## 9. 相关文档
+## 9. Git 操作取消链路——util 层 ctx 变体、注册表模式与覆盖清单
+
+> 本节承接 CLAUDE.md 关键规则「Git 操作取消链路」行的 util 层 API 面与覆盖清单（超时收口两段已见 §4.3 错误码表与上文 2026-09-29/09-30 收口段，不重复）。
+
+### util 层 ctx 变体 API
+
+- `ExecuteWithContext` / `ExecuteWithCodesWithContext` / `CloneWithContext`——内部 `run` 统一实现，取消错误 `%w` wrap `context.Canceled`；超时语义见 §4.3 `E_GIT_TIMEOUT` 行与上文 2026-09-29 超时收口段。
+
+### service 层取消注册表模式
+
+- 取消注册表 `cancels` 与 `opLocks` 同 `opMu` 保护，键经 `normalizeRepoKey` 与锁一致。
+- 新增长操作接入取消 = 自建 `context.WithCancel` + `registerCancel`/`unregisterCancel` defer LIFO（先注销后释放锁）+ `mapCancelError` 统一映射 `ErrOperationCancelled`（`E_GIT_CANCELLED`，前端 warning 中性提示）。
+
+### 现有覆盖清单
+
+- Pull / Clone / BatchPull（BatchPull 的 ctx 注册在 sem 排队前，覆盖「排队中未启动仓库」取消）。
+- 冲突类 forward 七方法 Merge / Rebase / CherryPick / ContinueMerge / ContinueRebase / ContinueCherryPick / SkipRebase（仅执行步贯穿，precheckMutation/requireInProgress 快命令不注册；util 层对应 7 个 ctx 变体经 conflictExitCodes 保冲突 exit 1 接受语义）。
+- **Abort 三类刻意无 ctx 变体**——abort 是回滚终止手段，中途取消可能留半态。
+
+### 取消单测稳定构造
+
+- ctx 预先 cancel（`exec.CommandContext` 对已取消 ctx 在 Start 前返回，无慢命令依赖）。
+
+### 锁残留探测与锁占用识别（2026-09-29 收口）
+
+- `run`/`clone` 取消与超时分支杀子进程后探测 `<gitroot>/index.lock` 残留仅 slog.Warn **禁自动删**（残留不能断定 stale，同仓可能有用户手动 git 进程合法持锁）。
+- `findIndexLockResidue` 覆盖 .git 目录与 worktree gitdir 文件两形态；clone 目标 resolveUpward=false 禁向上防误报父仓锁；探测失败静默降级。
+- 锁被占用 stderr（`Unable to create '<path>': File exists`）在失败分支识别为 `E_GIT_LOCKED` AppError（`util.parseGitLockError` 单点，桌面 ErrorFormatter 与 serve `rpcFailureFromCall` 双通道零改动自动透传），前端 warning 引导人工确认后删除，非锁残留错误行为逐字不变。
+
+## 10. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — ErrorFormatter 属 options 非签名变更，Wails 绑定零 diff
 - [app-services-assembly.md](app-services-assembly.md) — logger 在 NewAppServices 注入
