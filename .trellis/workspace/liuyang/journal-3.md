@@ -1811,3 +1811,65 @@ IP 手动封禁与 CIDR 白名单豁免落地：IPBanService.Ban 手动封禁入
 ### Next Steps
 
 - None - task complete
+
+---
+
+## 2026-10-28 CLAUDE.md 关键规则表瘦身：详情下沉与钩子化（10-28-claude-md）
+
+### 收益度量（瘦身前后对比）
+
+| 指标 | 瘦身前 | 瘦身后 | 变化 |
+|---|---|---|---|
+| 关键规则表数据行 | 68 | 60 | -8（拆 2 行 + 合并连接管控 11 行为 1） |
+| 关键规则表字符数 | 49,191 | 15,984 | **-67%** |
+| CLAUDE.md 全文件字节 | 87,340 | 29,438 | **-66%** |
+| 超 350 字符行 | 22 行（最长 2154） | 0 | 全表达标 |
+| ≤250 字符行 | 少数 | 26 | 多数行进入目标档 |
+
+### 关键动作
+
+1. 承接核对：逐行提取反引号内特征标识符 grep 目标文档，62 行承接完好（写法差异甄别后），6 处真缺（testutil 全列/session.json 快照/纯 prompt 模式/FileDiffDialog 释放/Git 取消 util API/统计缓存无承接行）先补文档再瘦身
+2. docs 补齐：logging-and-errors.md §9（Git 取消链路 util API 面）、ai-structured-output.md §纯 prompt、cross-layer-contracts.md 快照 Scenario、perf-baseline.md §16.5/§17/§18 三节
+3. 连接管控 t57-t67（安全三期+一~十期 11 行）合并为 1 条 C 档总行（6 个跨期通用钩子 + browser-channel.md 分期锚点）；审计留存十一期独立行
+4. 顺带修复：原表 2 处未转义 `||`（slideNum||0 / multiDevice||ipBans.length>0）致表格多切列
+5. docs/spec/README.md 索引补 4 缺失条目（ai-chat-service/assets-thumbs-com/linux-platform/pptx-preview）+ 更新 3 条摘要
+6. 零信息丢失对照表：`.trellis/tasks/10-28-claude-md/research/migration-map.md`（随任务归档）
+7. CLAUDE.md 版本 v2.40 → v2.41
+
+### 经验
+
+* 瘦身口径执行中细化：行内钩子 = 触发回忆的路标（规则名+单点/禁令+新增指引），非操作手册；函数全名与细节让文档承载。Q1 分档上限按整行字符数执行（含文档列 ~50 字符链接开销），硬顶 350
+* python 替换表格行时索引偏移踩坑一次（数据行 N 对应 lines[N+1]），靠四压版快照恢复
+
+
+## Session 165: CLAUDE.md 关键规则表瘦身：详情下沉与钩子化
+
+**Date**: 2026-10-28
+**Task**: CLAUDE.md 关键规则表瘦身：详情下沉与钩子化
+**Branch**: `master`
+
+### Summary
+
+规则表 68 行 49,191 字符瘦身为 60 行 15,984 字符（-67%），全文件 -66%，版本 v2.41；承接核对 62 行完好 + 6 处真缺先补 docs/spec（logging §9 Git 取消 util API/纯 prompt 模式/快照 Scenario/perf §16.5-18）再瘦身；连接管控 11 行合并总行 + 分期锚点；README 索引补 4 缺失；零信息丢失对照表 migration-map.md 随任务归档
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd5e7e2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
