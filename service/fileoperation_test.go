@@ -15,7 +15,7 @@ func TestOpenInExplorer_Directory(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewFileOperationService()
 
-	err := svc.OpenInExplorer(dir)
+	err := svc.OpenInExplorer(dir, "")
 	if err != nil {
 		t.Fatalf("OpenInExplorer(directory) failed: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestOpenInExplorer_File(t *testing.T) {
 
 	svc := NewFileOperationService()
 
-	err := svc.OpenInExplorer(file)
+	err := svc.OpenInExplorer(file, "")
 	if err != nil {
 		t.Fatalf("OpenInExplorer(file) failed: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestOpenInExplorer_File(t *testing.T) {
 func TestOpenInExplorer_NotFound(t *testing.T) {
 	svc := NewFileOperationService()
 
-	err := svc.OpenInExplorer("C:\\nonexistent\\path\\that\\does\\not\\exist")
+	err := svc.OpenInExplorer("C:\\nonexistent\\path\\that\\does\\not\\exist", "")
 	if err == nil {
 		t.Fatal("Expected error for nonexistent path")
 	}
@@ -47,7 +47,7 @@ func TestOpenInExplorer_NotFound(t *testing.T) {
 func TestOpenInExplorer_EmptyPath(t *testing.T) {
 	svc := NewFileOperationService()
 
-	err := svc.OpenInExplorer("")
+	err := svc.OpenInExplorer("", "")
 	if err == nil {
 		t.Fatal("Expected error for empty path")
 	}

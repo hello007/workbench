@@ -9,10 +9,16 @@ import (
 	"workbench/util"
 )
 
-// openInFileManager 用平台文件管理器打开目录。
-// Linux 无「定位选中文件」的通用等价物（对应 Windows 的 explorer /select,），
-// 文件场景降级为打开其所在父目录。
-func openInFileManager(path string, isDir bool) error {
+// openInFileManager 打开目录或文件：本机可用 tessoa 时优先经 tessoa 打开（目录与
+// 文件均传原路径，文件场景由 tessoa 自行定位所在目录）；tessoa 不可用或启动失败时
+// 降级平台文件管理器。Linux 无「定位选中文件」的通用等价物（对应 Windows 的
+// explorer /select,），降级路径文件场景打开其所在父目录。
+func openInFileManager(path string, isDir bool, tessoaPath string) error {
+	if exe := resolveTessoaExecutable(tessoaPath); exe != "" {
+		if err := exec.Command(exe, path).Start(); err == nil {
+			return nil
+		}
+	}
 	target := path
 	if !isDir {
 		target = filepath.Dir(path)

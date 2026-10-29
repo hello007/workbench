@@ -18,6 +18,7 @@ const baseSettings = {
   defaultShell: 'powershell',
   gpuDisabled: false,
   obsidianPath: '',
+  tessoaPath: '',
   searchExcludeDirs: ['node_modules', 'dist'],
   searchExcludeFiles: ['.log'],
   terminalFontSize: 14,
@@ -52,6 +53,8 @@ test.describe('设置：整体提交链（基底 + 本组覆盖）', () => {
     await expect.poll(async () => (await getWailsCalls(page, 'SaveSettings')).length).toBe(1)
     const payload = (await getWailsCalls(page, 'SaveSettings'))[0].args[0]
     expect(payload.obsidianPath).toBe('D:/tools/Obsidian/Obsidian.exe')
+    // 未配置的 tessoa 路径随整体提交原样保留（不因缺字段静默丢失）
+    expect(payload.tessoaPath).toBe('')
     // 未改段原样保留（整体提交语义下任一缺段 = 静默清空该段设置）
     expect(payload.themeMode).toBe('light')
     expect(payload.searchExcludeDirs).toEqual(['node_modules', 'dist'])

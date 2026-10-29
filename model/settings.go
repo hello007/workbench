@@ -381,6 +381,7 @@ type AppSettings struct {
 	ShortcutRename         string   `json:"shortcutRename"`         // 重命名快捷键，默认 "F2"
 	ShortcutDelete         string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
 	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
+	TessoaPath             string   `json:"tessoaPath"`             // tessoa 可执行文件自定义路径，留空表示未配置（打开资源管理器时优先探测 tessoa）
 	ThemeMode              string   `json:"themeMode"`              // 主题模式：system(跟随系统)/light/dark，空值按 system 处理
 	DiffToolName           string   `json:"diffToolName"`           // 外部 diff 工具预设名：beyondcompare/winmerge/vscode/custom
 	DiffToolPath           string   `json:"diffToolPath"`           // 外部 diff 工具可执行文件路径，留空表示未配置

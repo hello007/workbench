@@ -13,9 +13,15 @@ import (
 
 // ===== 外部工具打开域 =====
 
-// OpenInExplorer 在资源管理器中打开
+// OpenInExplorer 在资源管理器中打开；本机可用 tessoa 时优先用 tessoa
+// （设置 → 通用 → 外部应用 可自定义 tessoa 程序路径，留空探测 PATH，
+// tessoa 不可用或启动失败降级系统资源管理器）。
 func (a *App) OpenInExplorer(path string) bool {
-	err := a.fileOpSvc.OpenInExplorer(path)
+	var tessoaPath string
+	if settings, err := a.settingsSvc.Load(); err == nil {
+		tessoaPath = settings.TessoaPath
+	}
+	err := a.fileOpSvc.OpenInExplorer(path, tessoaPath)
 	if err != nil {
 		slog.Error("open in explorer failed", "path", path, "err", err)
 		return false

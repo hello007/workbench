@@ -212,6 +212,7 @@ const baseSettings = (over = {}) => ({
   terminalFontFamily: '',
   terminalScrollback: 1000,
   obsidianPath: '',
+  tessoaPath: '',
   searchExcludeDirs: ['node_modules'],
   searchExcludeFiles: ['.log'],
   shortcutCommandPalette: DEFAULTS.commandPalette,
@@ -629,6 +630,18 @@ describe('SettingsPanel.vue', () => {
     // 全量覆盖写保留 store 中已配置的 diff 工具字段
     expect(saved.diffToolPath).toBe(store.diffToolPath)
     expect(saved.obsidianPath).toBe('C:\\Obsidian.exe')
+  })
+
+  it('修改其他设置项（tessoa 路径）随全量覆盖写保存', async () => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper()
+    const tessoaInput = wrapper.findAll('input').find(i => i.attributes('placeholder')?.includes('tessoa'))
+    await tessoaInput.setValue('C:\\Tools\\tessoa\\tessoa.exe')
+    await tessoaInput.trigger('change')
+    await flushPromises()
+    const saved = SaveSettings.mock.calls.at(-1)[0]
+    expect(saved.tessoaPath).toBe('C:\\Tools\\tessoa\\tessoa.exe')
   })
 
   it('通用 tab 渲染主题单选（跟随系统/浅色/暗色）', async () => {

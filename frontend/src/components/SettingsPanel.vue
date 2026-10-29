@@ -62,6 +62,13 @@
             </div>
             <el-input v-model="obsidianPath" size="small" class="input-w-xl" :placeholder="obsidianPathPlaceholder" @change="onSettingsChange" />
           </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">tessoa 程序路径</div>
+              <div class="settings-item-desc">「打开资源管理器」优先使用 tessoa 打开；留空则自动探测 PATH 中的 tessoa，均不可用时使用系统资源管理器</div>
+            </div>
+            <el-input v-model="tessoaPath" size="small" class="input-w-xl" :placeholder="tessoaPathPlaceholder" @change="onSettingsChange" />
+          </div>
           <!-- 外部 diff 工具 -->
           <div class="settings-section-title settings-section-title--spaced">外部 diff 工具</div>
           <div class="settings-item">
@@ -714,6 +721,7 @@ const shellConfigs = ref([
 const gitBashPath = ref('C:\\Program Files\\Git\\bin\\bash.exe')
 const wslDistro = ref('')
 const obsidianPath = ref('')
+const tessoaPath = ref('')
 const excludeDirs = ref([])
 const excludeFiles = ref([])
 const newExcludeDir = ref('')
@@ -733,6 +741,11 @@ const obsidianPathPlaceholder = computed(() =>
   settingsStore.isWindowsPlatform
     ? '如 C:\\Users\\me\\AppData\\Local\\Obsidian\\Obsidian.exe'
     : '如 /opt/Obsidian/obsidian'
+)
+const tessoaPathPlaceholder = computed(() =>
+  settingsStore.isWindowsPlatform
+    ? '如 C:\\Tools\\tessoa\\tessoa.exe'
+    : '如 /opt/tessoa/tessoa'
 )
 const diffToolPathPlaceholder = computed(() =>
   settingsStore.isWindowsPlatform
@@ -1557,6 +1570,7 @@ async function loadSettings() {
     gitBashPath.value = settings.gitBashPath || 'C:\\Program Files\\Git\\bin\\bash.exe'
     wslDistro.value = settings.wslDistro || ''
     obsidianPath.value = settings.obsidianPath || ''
+    tessoaPath.value = settings.tessoaPath || ''
     excludeDirs.value = settings.searchExcludeDirs || []
     excludeFiles.value = settings.searchExcludeFiles || []
     await settingsStore.loadShortcuts()
@@ -1648,6 +1662,7 @@ async function saveGeneralSettings(gpuDisabled) {
   settings.gitBashPath = gitBashPath.value
   settings.wslDistro = wslDistro.value
   settings.obsidianPath = obsidianPath.value
+  settings.tessoaPath = tessoaPath.value
   settings.searchExcludeDirs = excludeDirs.value
   settings.searchExcludeFiles = excludeFiles.value
   await SaveSettings(settings)

@@ -240,14 +240,15 @@ func (s *FileOperationService) SaveFile(filePath string, content string, encodin
 	return nil
 }
 
-// OpenInExplorer 在系统文件管理器中打开
-// （Windows: 资源管理器，文件场景定位选中；Linux: xdg-open，文件场景降级打开父目录）
-func (s *FileOperationService) OpenInExplorer(path string) error {
+// OpenInExplorer 在系统文件管理器中打开；本机可用 tessoa 时优先经 tessoa 打开
+// （tessoaPath 为设置中的 tessoa 自定义路径，留空探测 PATH，均不可用降级系统管理器）
+// （Windows 降级: 资源管理器，文件场景定位选中；Linux: xdg-open，文件场景降级打开父目录）
+func (s *FileOperationService) OpenInExplorer(path string, tessoaPath string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	return openInFileManager(path, info.IsDir())
+	return openInFileManager(path, info.IsDir(), tessoaPath)
 }
 
 // OpenInVSCode 用 VSCode 打开文件或文件夹

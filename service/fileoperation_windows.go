@@ -8,9 +8,16 @@ import (
 	"workbench/util"
 )
 
-// openInFileManager 在 Windows 资源管理器中打开目录，或定位选中文件（explorer /select,）。
-// 与原 OpenInExplorer 内联实现逐字节一致（Windows 主路径零回归红线）。
-func openInFileManager(path string, isDir bool) error {
+// openInFileManager 打开目录或文件：本机可用 tessoa 时优先经 tessoa 打开（目录与
+// 文件均传原路径，文件场景由 tessoa 自行定位所在目录）；tessoa 不可用或启动失败时
+// 降级 Windows 资源管理器（目录直接打开，文件定位选中 explorer /select,）。
+// 降级路径与原实现逐字节一致（Windows 主路径零回归红线）。
+func openInFileManager(path string, isDir bool, tessoaPath string) error {
+	if exe := resolveTessoaExecutable(tessoaPath); exe != "" {
+		if err := exec.Command(exe, path).Start(); err == nil {
+			return nil
+		}
+	}
 	if isDir {
 		return exec.Command("explorer", path).Start()
 	}
