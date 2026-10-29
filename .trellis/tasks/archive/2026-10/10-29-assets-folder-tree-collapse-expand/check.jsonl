@@ -1,0 +1,3 @@
+{"file": "docs/spec/assets-management.md", "reason": "核查改动是否破坏文件夹树受控组件契约与展开态保留（PR2）语义"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查头部按钮样式是否符合视觉规范（色阶、令牌、hover 态）"}
+{"file": "docs/测试策略.md", "reason": "前端覆盖率门禁 ≥70%，单测覆盖要求与运行方式"}
