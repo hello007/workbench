@@ -473,6 +473,7 @@
           @rename="onRenameFolder"
           @delete="onDeleteFolder"
           @annotate="onAnnotateFolder"
+          @rebuild="onRebuildFolder"
           @drop-files="onFolderDrop"
           @drop-folder="onFolderDropFolder"
         />
@@ -1214,6 +1215,7 @@ import {
   StartAssetScan,
   CancelAssetScan,
   RebuildAssetLibrary,
+  RebuildAssetFolder,
   ListAssetFiles,
   ListAssetFolders,
   CreateAssetFolder,
@@ -3250,6 +3252,38 @@ const folderTagSelectRef = ref(null)
 // 打开标注弹窗：GetAssetFolderMeta 预填（标签本体 → ID 数组供树形选择回显，
 // ID↔名称映射消费共享标签列表——对齐详情编辑 detailTagIds 适配模式）；库代次
 // 快照守卫防在途切库写回（对齐 onSaveSlideMeta 模式）
+// 子目录重建索引（FolderTree rebuild 事件，PRD：避免全库重建的性能代价）：
+// 单次确认弹窗（影响面说明——清该目录全部索引与缩略图后重扫，标注按路径恢复）
+// → RebuildAssetFolder（后端 tryLockScan 与扫描互斥，并发触发 E_ASSETS_SCAN_
+// IN_PROGRESS 经 handleError 透传）→ toast 统计 → 刷新走统一入口
+// refreshDataAfterMutation（reloadFolders 树徽标重拉 + reloadStats 统计口径，
+// §8.7 矩阵：目录内条目集合已变）。在途防重复用 folderOpsBusy（目录管理操作
+// 同族）。根节点不走此入口（组件 canRebuild 已禁，此处防御性再拦）。
+const onRebuildFolder = async (node) => {
+  if (!hasLibrary.value || folderOpsBusy.value || !node?.path) return
+  try {
+    await ElMessageBox.confirm(
+      `将清空「${node.name}」内的全部索引记录与缩略图缓存并重新扫描（该目录外不受影响，标签/标注将按文件路径恢复）。`,
+      '重建索引确认',
+      { type: 'warning', confirmButtonText: '重建', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // 用户取消：不做任何事
+  }
+  folderOpsBusy.value = true
+  try {
+    const result = await RebuildAssetFolder(currentLibraryId.value, node.path)
+    const parts = [`索引 ${result?.total || 0} 个`]
+    if (result?.failed > 0) parts.push(`失败 ${result.failed}`)
+    ElMessage.success(`已重建「${node.name}」索引（${parts.join('，')}）`)
+    await refreshDataAfterMutation({ reloadFolders: true, reloadStats: true })
+  } catch (error) {
+    handleError('重建索引失败: ', error)
+  } finally {
+    folderOpsBusy.value = false
+  }
+}
+
 const onAnnotateFolder = async (node) => {
   if (!hasLibrary.value || folderOpsBusy.value || !node?.path) return
   folderAnnotatePath.value = node.path

@@ -231,6 +231,15 @@ func (a *App) RebuildAssetLibrary(libraryID string) (model.AssetScanResult, erro
 	return a.assetsSvc.RebuildScan(context.Background(), libraryID)
 }
 
+// RebuildAssetFolder 子目录级重建：只清 folderPath（相对库根，正斜杠）前缀的
+// 文件/幻灯片/检索索引/缩略图记录后只重扫该子目录（避免全库重建的性能代价）。
+// 用户标注按相对路径重绑恢复（同全量重建口径）；库根空串拒绝（走全量重建）；
+// 排除规则命中目录拒绝；进度/终态事件与扫描同通道（assets-scan:*），扫描中
+// 并发触发被拒（E_ASSETS_SCAN_IN_PROGRESS）。
+func (a *App) RebuildAssetFolder(libraryID string, folderPath string) (model.AssetScanResult, error) {
+	return a.assetsSvc.RebuildAssetFolder(context.Background(), libraryID, folderPath)
+}
+
 // AssetThumbsAvailable 探测本机 PowerPoint COM 可用性（前端 D4 降级依据：
 // false 时画廊提示条常驻 + 跳转入口隐藏）。结果由 service 层按进程生命周期缓存。
 func (a *App) AssetThumbsAvailable() bool {

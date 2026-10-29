@@ -93,6 +93,7 @@
                   <el-dropdown-item command="create" :disabled="!canCreateChild(scope.data)" :title="manageDisabledTip(scope.data, 'create')">新增子目录</el-dropdown-item>
                   <el-dropdown-item command="rename" :disabled="!canRename(scope.data)" :title="manageDisabledTip(scope.data, 'rename')">重命名</el-dropdown-item>
                   <el-dropdown-item command="annotate" :disabled="!canAnnotate(scope.data)" :title="manageDisabledTip(scope.data, 'annotate')">标注</el-dropdown-item>
+                  <el-dropdown-item command="rebuild" :disabled="!canRebuild(scope.data)" :title="manageDisabledTip(scope.data, 'rebuild')">重建索引</el-dropdown-item>
                   <el-dropdown-item command="delete" :divided="true" :disabled="!canDelete(scope.data)" :title="manageDisabledTip(scope.data, 'delete')">删除</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -177,7 +178,7 @@ const props = defineProps({
   dropEnabled: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['select', 'create', 'rename', 'delete', 'annotate', 'drop-files', 'drop-folder'])
+const emit = defineEmits(['select', 'create', 'rename', 'delete', 'annotate', 'rebuild', 'drop-files', 'drop-folder'])
 
 const treeRef = ref(null)
 
@@ -238,10 +239,38 @@ const onNodeCollapse = (data) => {
 // 事件，操作完成后必须显式重算 expandedKeys——default-expanded-keys 仅对新建
 // Node 生效，树数据局部 reload 时回放的正是 expandedKeys，漏同步则回放旧展开面
 // （漂移）。三条路径（全展/全收/双击）统一收敛 syncExpandedKeysFromStore 单点
+//
+// 可达展开面过滤（真实 el-tree 双击收起失效 bug 的修复核心，2026-10-29 实证）：
+// EP 2.14.5 真实树 watch(default-expanded-keys) 会随每次 keys 变化回放
+// setDefaultExpandedKeys → 逐 key 调 node.expand(null, autoExpandParent=true)，
+// expand 的 done() 对「祖先链强制 expanded=true」（node.mjs done 的 while 循环）。
+// 直赋收起目录 X 后若其展开中的子孙仍在 keys 中，回放 expand(子孙, true) 会把
+// X 翻回展开态——双击收起永远失效（旧桩测试未实现该回放语义故假绿）。
+// 修复：sync 不再收集全部 expanded=true 的 key，改收集「根到该节点路径上每个
+// 父节点均展开」的可达展开面——X 收起后其子孙因祖先链断被一并剔除，回放无
+// expand 落 X 祖先链，X 保持收起；全收只剩空集、全展全部保留、reload 回放面
+// 正确，三路径同收口本单点。
 const syncExpandedKeysFromStore = () => {
   const nodesMap = treeRef.value?.store?.nodesMap
   if (!nodesMap) return
-  expandedKeys.value = Object.keys(nodesMap).filter((key) => nodesMap[key]?.expanded)
+  // 根「全部素材」expanded 决定一级子目录可见性（根收起 = 仅剩根行）；
+  // expandedKeys 含根 '' 与否对齐既有语义：根展开时含 ''（回放 expand 根幂等），
+  // 根收起时为空数组
+  const keys = []
+  const walk = (nodes, ancestorsExpanded) => {
+    for (const node of nodes || []) {
+      const key = node.path || ''
+      const expanded = !!nodesMap[key]?.expanded
+      if (expanded && ancestorsExpanded) keys.push(key)
+      walk(node.children, ancestorsExpanded && expanded)
+    }
+  }
+  // 根展开时 keys 含 ''（对齐既有契约：全展后 keys 含全部含根；回放 expand 根
+  // 幂等无祖先链副作用）；根收起时为空数组（reload 后仅剩根行）
+  const rootExpanded = !!nodesMap['']?.expanded
+  if (rootExpanded) keys.push('')
+  walk(props.nodes, rootExpanded)
+  expandedKeys.value = keys
 }
 
 const expandAllFolders = () => {
@@ -291,8 +320,14 @@ const canRename = (data) => data.path !== '' && !data.derived
 const canDelete = (data) => data.path !== '' && !data.excluded && !data.derived
 // 标注资格（PRD R8/PR4）：与禁管理同口径——库根/排除命中/派生容器禁标注
 const canAnnotate = (data) => data.path !== '' && !data.excluded && !data.derived
+// 子目录重建索引资格：与标注同口径（库根走既有全量重建入口、排除命中目录
+// 不参与索引、派生容器由拆分链路管理）；后端 RebuildAssetFolder 守卫为第二防线
+const canRebuild = canAnnotate
 const manageDisabledTip = (data, cmd) => {
-  if (data.path === '') return '根节点不可重命名、标注或删除'
+  if (data.path === '') {
+    if (cmd === 'rebuild') return '根节点请使用工具栏「重建索引」入口（全库重建）'
+    return '根节点不可重命名、标注或删除'
+  }
   if (data.derived) return 'PPT 拆分派生产物目录由拆分链路管理，禁用管理操作'
   if (data.excluded) {
     if (cmd === 'rename') return ''
@@ -319,6 +354,11 @@ const onNodeCommand = (cmd, data) => {
   if (cmd === 'annotate') {
     if (!canAnnotate(data)) return
     emit('annotate', data)
+    return
+  }
+  if (cmd === 'rebuild') {
+    if (!canRebuild(data)) return
+    emit('rebuild', data)
     return
   }
   if (cmd === 'delete') {

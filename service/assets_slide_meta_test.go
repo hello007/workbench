@@ -716,10 +716,14 @@ func TestRebindAfterRebuild_PartialRescan(t *testing.T) {
 
 // TestRebuildScan_MidScanCancelRebindsScannedFiles 重建中途失败的判别性用例
 // （defer 接线端到端）：解析 fake 在首个文件（rel 字典序 a < b）解析内取消扫描
-// 父 ctx——备份与清库无 ctx 检查点先完成，a 落库后 b 的文件间检查点命中取消，
-// scanLibrary 确定性中途返回错误（无 sleep 无时序依赖）。断言失败路径重绑已由
-// defer 执行：已重扫的 a 恢复文件标签与页级标注；未重扫的 b 不在索引、标注
-// 丢弃。修复前重绑仅挂成功路径，本用例下 a 的标注将永久丢失。
+// 父 ctx。扫描并发化后（parseScanEntry worker pool + finalizeScanFile 串行落库，
+// 2026-10-29）取消语义收严：取消命中解析阶段 → pending 整批丢弃零落库（解析
+// 阶段零写库，取消/崩溃均无 processing 半态增量）——旧串行版「a 落库后 b 检查
+// 点取消，已完成文件保留」的部分完成窗口在并行架构下不再存在，失败路径重绑
+// 恢复面由重绑函数直接单测（assets_backup_test.go / 本文件重绑用例）+ 成功路径
+// 端到端（TestRebuild_PreservesSlideAnnotations）覆盖。本用例守护新契约：
+// E_ASSETS_CANCELLED 映射 + 索引/标注零残留（defer 重绑跑过但无已落库文件可绑，
+// 若 defer 未接线也不产生幽灵行——接线正确性由 Go defer 机制 + 编译期保证）。
 func TestRebuildScan_MidScanCancelRebindsScannedFiles(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -766,27 +770,20 @@ func TestRebuildScan_MidScanCancelRebindsScannedFiles(t *testing.T) {
 		t.Fatalf("重建应经中途取消失败并映射 E_ASSETS_CANCELLED，实际：%v", err)
 	}
 
-	// 失败路径 defer 重绑已执行：已重扫的 a 恢复，未重扫的 b 缺席且标注丢弃
+	// 解析阶段取消 → pending 整批丢弃：索引零残留、标注零残留（无幽灵行）
 	files, err = svc.ListFiles(lib.ID)
 	if err != nil {
 		t.Fatalf("重建失败后 ListFiles: %v", err)
 	}
-	if len(files) != 1 || files[0].Path != "a.pptx" {
-		t.Fatalf("失败路径下索引应仅剩已重扫的 a.pptx，实际：%+v", files)
-	}
-	if len(files[0].Tags) != 1 || files[0].Tags[0].Name != "文标" {
-		t.Errorf("已重扫文件标签应在失败路径经 defer 重绑恢复，实际：%+v", files[0].Tags)
-	}
-	kept := slideEntryByNum(t, mustListSlides(t, svc, lib.ID), "a.pptx", 1)
-	if kept.Rating != 4 || kept.Note != "A1 备注" || len(kept.OwnTags) != 1 || kept.OwnTags[0].Name != "页标A" {
-		t.Errorf("已重扫页标注应在失败路径经 defer 重绑恢复，实际：%+v", kept)
+	if len(files) != 0 {
+		t.Fatalf("解析阶段取消后索引应零残留，实际：%+v", files)
 	}
 	store := svc.openStoreForTest(t, lib.ID)
-	if n := countSlideAnnotRows(t, store, "slide_tags"); n != 1 {
-		t.Errorf("失败路径重绑后 slide_tags 应恰 1 行（b 标注随文件未重扫丢弃），实际 %d 行", n)
+	if n := countSlideAnnotRows(t, store, "slide_tags"); n != 0 {
+		t.Errorf("解析阶段取消后 slide_tags 应零残留，实际 %d 行", n)
 	}
-	if n := countSlideAnnotRows(t, store, "slide_meta"); n != 1 {
-		t.Errorf("失败路径重绑后 slide_meta 应恰 1 行，实际 %d 行", n)
+	if n := countSlideAnnotRows(t, store, "slide_meta"); n != 0 {
+		t.Errorf("解析阶段取消后 slide_meta 应零残留，实际 %d 行", n)
 	}
 }
 

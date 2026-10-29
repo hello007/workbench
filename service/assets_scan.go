@@ -11,9 +11,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"workbench/model"
@@ -443,7 +445,14 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		}
 	}
 
-	for i, e := range entries {
+	// 阶段 A（主 goroutine 串行）：增量判定 + 快路径就地处理（unchanged 跳过 /
+	// lost·excluded 复活，语义与旧版逐文件循环完全一致）；判定为需重处理的条目
+	// 收进 pending 清单，交给阶段 B 并行解析。done 为完成计数（快路径即时 +1，
+	// 重处理项落库完成后 +1，总和仍 = len(entries)）；进度事件 CurrentFile 在
+	// 并行完成序下可能乱序跳动，前端仅消费 done/total 比例与文件名展示不受影响。
+	done := 0
+	pending := make([]scanReprocessItem, 0, len(entries))
+	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return model.AssetScanResult{}, fmt.Errorf("扫描已取消: %w", err)
 		}
@@ -472,33 +481,24 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 						return model.AssetScanResult{}, fmt.Errorf("复活丢失文件记录失败（%s）: %w", e.rel, err)
 					}
 					result.Revived++
-					s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
+					done++
+					s.emitScanProgress(lib.ID, done, len(entries), e.rel)
 					continue
 				}
-				// 无产物：不 continue，走下方重解析重新分类
+				// 无产物：不 continue，落入 pending 走重解析重新分类
 			} else if rec.status != model.AssetFileStatusProcessing {
 				result.Unchanged++
-				s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
+				done++
+				s.emitScanProgress(lib.ID, done, len(entries), e.rel)
 				continue
 			}
 		}
-		outcome, err := s.processScanFile(store, lib, e, rec, exists)
-		if err != nil {
-			return model.AssetScanResult{}, err
-		}
-		switch outcome {
-		case scanOutcomeNew:
-			result.New++
-		case scanOutcomeUpdated:
-			result.Updated++
-		case scanOutcomeFailed:
-			result.Failed++
-		case scanOutcomeEncrypted:
-			result.Encrypted++
-		case scanOutcomeDenied:
-			result.Denied++
-		}
-		s.emitScanProgress(lib.ID, i+1, len(entries), e.rel)
+		pending = append(pending, scanReprocessItem{e: e, rec: rec, exists: exists})
+	}
+
+	// 阶段 B：pending 并行解析 + 串行落库（pipeline 单点，子目录重建同款复用）
+	if err := s.processPendingScanFiles(ctx, store, lib, pending, len(entries), &done, &result); err != nil {
+		return model.AssetScanResult{}, err
 	}
 
 	// 磁盘已消失的文件记录标记 lost（SRS §2.6.5 D1：替代 lost 引入前的删除
@@ -586,10 +586,253 @@ func (s *AssetLibraryService) emitScanProgress(libraryID string, done, total int
 	})
 }
 
-// processScanFile 单文件处理：占位/标记 processing → 哈希（仅重处理时计算）→
-// 解析 → 终态落库。解析失败按分类降级为 failed/encrypted/denied 状态并返回
-// 对应 outcome（不中断批量）；DB 写失败为系统性错误上抛中断扫描。
-func (s *AssetLibraryService) processScanFile(store *assetsStore, lib model.AssetLibrary, e pptxDiskEntry, rec assetFileRecord, exists bool) (scanOutcome, error) {
+// assetScanParseWorkers 扫描解析并行度：CPU 密集 OOXML 解析 + 流式哈希，取
+// min(GOMAXPROCS, 4) 上限封顶防万文件级小文件场景调度开销反噬。SQLite 单连接
+// 池并发查写不可行（docs/spec/assets-management.md），worker 仅承担磁盘读 +
+// 解析零 DB 面，落库仍主 goroutine 串行单点。
+func assetScanParseWorkers() int {
+	n := runtime.GOMAXPROCS(0)
+	if n > 4 {
+		n = 4
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// parsedScanEntry 单文件解析阶段产物（parse + 哈希，零 DB 面，worker pool 消费）。
+type parsedScanEntry struct {
+	slides   []parsedSlide
+	parseErr error
+	hash     string
+}
+
+// scanReprocessItem 重处理清单条目（增量判定产出/子目录重建全量构造的待解析
+// +落库条目）：rec/exists 供落库阶段区分新增占位与存量重处理。
+type scanReprocessItem struct {
+	e      pptxDiskEntry
+	rec    assetFileRecord
+	exists bool
+}
+
+// processPendingScanFiles 扫描/子目录重建共用的重处理 pipeline（scanLibrary 阶段
+// B 与 rebuildFolder 单点复用）：并行解析（worker pool，纯磁盘读 + OOXML 解析 +
+// 流式哈希，零 DB 面——SQLite 单连接池并发查写不可行）+ 主 goroutine 串行落库。
+// 取消语义：worker 检测 ctx 取消后跳过剩余任务但仍消费 jobs 至关闭（防 send 方
+// 阻塞）；解析全停后落库循环逐条 ctx 检查即返回「扫描已取消」，未落库条目零
+// 残留（解析阶段不写库，崩溃/取消均无 processing 半态增量）。done 为调用方持有
+// 的完成计数（快路径已贡献的部分传入前累加），进度事件 done/total 与 CurrentFile
+// 由本函数统一发射。
+func (s *AssetLibraryService) processPendingScanFiles(ctx context.Context, store *assetsStore, lib model.AssetLibrary, pending []scanReprocessItem, entriesTotal int, done *int, result *model.AssetScanResult) error {
+	if len(pending) == 0 {
+		return nil
+	}
+	parsed := make([]parsedScanEntry, len(pending))
+	workers := assetScanParseWorkers()
+	if workers > len(pending) {
+		workers = len(pending)
+	}
+	jobs := make(chan int, len(pending))
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				if ctx.Err() != nil {
+					continue // 已取消：跳过解析（parsed 留零值），消费 jobs 防阻塞
+				}
+				parsed[idx] = s.parseScanEntry(lib, pending[idx].e)
+			}
+		}()
+	}
+	for i := range pending {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	for idx, item := range pending {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("扫描已取消: %w", err)
+		}
+		outcome, err := s.finalizeScanFile(store, lib, item.e, item.rec, item.exists, parsed[idx])
+		if err != nil {
+			return err
+		}
+		switch outcome {
+		case scanOutcomeNew:
+			result.New++
+		case scanOutcomeUpdated:
+			result.Updated++
+		case scanOutcomeFailed:
+			result.Failed++
+		case scanOutcomeEncrypted:
+			result.Encrypted++
+		case scanOutcomeDenied:
+			result.Denied++
+		}
+		*done++
+		s.emitScanProgress(lib.ID, *done, entriesTotal, item.e.rel)
+	}
+	return nil
+}
+
+// RebuildAssetFolder 子目录级重建（PRD：避免全库重建的性能代价）：只清 folderPath
+// 前缀的 files 及关联行（slides/FTS/标注级联/缩略图记账+PNG）后只重扫该子目录。
+// 用户标注按「文件相对路径」映射经 defer 重绑恢复（同全量重建口径；重绑函数
+// 直命中/哈希兜底两级匹配，范围外绑定随清库前备份一并读入，重绑时路径直命中
+// 已存续行幂等无害）。不做 VACUUM 整库快照（范围小可重跑，见 PRD 决策 3）；
+// 库根拒绝（空串 folderPath 走 RebuildScan 全量重建）。复用 runLibraryScan 的
+// 锁/取消注册/终态事件/缩略图补缺装配；事件面复用 assets-scan:*（前端监听面
+// 零新增）。
+func (s *AssetLibraryService) RebuildAssetFolder(ctx context.Context, libraryID, folderPath string) (model.AssetScanResult, error) {
+	return s.runLibraryScan(ctx, libraryID, "assets folder rebuild", func(scanCtx context.Context, store *assetsStore, lib model.AssetLibrary) (model.AssetScanResult, error) {
+		return s.rebuildFolder(scanCtx, store, lib, folderPath)
+	})
+}
+
+// rebuildFolder 子目录重建主体（扫描锁内执行，锁形态与 rebuildLibrary 一致）。
+func (s *AssetLibraryService) rebuildFolder(ctx context.Context, store *assetsStore, lib model.AssetLibrary, folderPath string) (model.AssetScanResult, error) {
+	// 库根拒绝先于路径归一（空串=全量重建入口语义，须给出指向性提示而非
+	// 「路径非法」）；越界遏制单点 resolveLibraryRelPath 与 MoveAssetFiles 同款清洗
+	trimmed := strings.TrimSpace(folderPath)
+	if trimmed == "" {
+		return model.AssetScanResult{}, errors.New("子目录重建须指定具体文件夹（库根请使用全量重建）")
+	}
+	folderRel, folderAbs, err := resolveLibraryRelPath(lib.RootPath, trimmed)
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("目录路径非法: %w", err)
+	}
+	if folderRel == "" {
+		return model.AssetScanResult{}, errors.New("子目录重建须指定具体文件夹（库根请使用全量重建）")
+	}
+	matcher := newAssetExcludeMatcher(lib.ExcludeDirs, lib.ExcludeExts)
+	if matcher.matchDirPath(folderRel) {
+		return model.AssetScanResult{}, fmt.Errorf("目录「%s」命中索引排除规则，不能重建", folderRel)
+	}
+	info, err := os.Stat(folderAbs)
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("目标目录不存在或无法访问: %w", err)
+	}
+	if !info.IsDir() {
+		return model.AssetScanResult{}, errors.New("目标路径不是目录")
+	}
+
+	// 取消该库在途缩略图批次（同 rebuildLibrary 口径：防清库+删 PNG 后 worker
+	// 继续以旧 fileID 写盘残留）
+	s.CancelAssetThumbs(lib.ID)
+
+	// 备份用户标注（全量读 + 内存前缀过滤——前缀内绑定/标注在清库时随级联删除，
+	// defer 重绑按 path 写回；范围外条目过滤掉缩小重绑面）。备份失败即中止：
+	// 清库未发生，语义等同操作未执行。
+	bindings, err := store.fileTagBindingsByPath()
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("备份文件标签绑定失败: %w", err)
+	}
+	slideAnnots, err := store.slideAnnotationsByPath()
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("备份幻灯片标注失败: %w", err)
+	}
+	prefix := folderRel + "/"
+	folderBindings := make(map[string]assetFileTagBinding, len(bindings))
+	for p, b := range bindings {
+		if p == folderRel || strings.HasPrefix(p, prefix) {
+			folderBindings[p] = b
+		}
+	}
+	folderAnnots := make(map[string]assetFileSlideAnnotations, len(slideAnnots))
+	for p, a := range slideAnnots {
+		if p == folderRel || strings.HasPrefix(p, prefix) {
+			folderAnnots[p] = a
+		}
+	}
+	defer func() {
+		if len(folderBindings) > 0 {
+			if pathHit, hashHit, err := store.rebindFileTagsAfterRebuild(folderBindings); err != nil {
+				Logger().Warn("assets folder rebuild tags rebind failed", "libraryId", lib.ID, "folder", folderRel, "err", err)
+			} else {
+				Logger().Info("assets folder rebuild tags rebound", "libraryId", lib.ID, "folder", folderRel,
+					"byPath", pathHit, "byHash", hashHit)
+			}
+		}
+		if len(folderAnnots) > 0 {
+			if pathHit, hashHit, err := store.rebindSlideAnnotationsAfterRebuild(folderAnnots); err != nil {
+				Logger().Warn("assets folder rebuild slide annotations rebind failed", "libraryId", lib.ID, "folder", folderRel, "err", err)
+			} else {
+				Logger().Info("assets folder rebuild slide annotations rebound", "libraryId", lib.ID, "folder", folderRel,
+					"byPath", pathHit, "byHash", hashHit)
+			}
+		}
+	}()
+
+	// 清该子树索引（范围外零触碰；db 先行、缩略图文件后删——对齐 clearLostFiles
+	// 收口顺序：文件系统操作不可回滚）
+	deletedIDs, err := store.clearFilesForFolderRebuild(folderRel)
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("清空子目录索引失败: %w", err)
+	}
+	thumbsDir := s.assetThumbsDir(lib.ID)
+	for _, id := range deletedIDs {
+		s.thumbLedger.invalidateFile(lib.ID, id)
+		removeThumbFilesForFile(thumbsDir, id)
+	}
+
+	// 只扫子目录：collectPptxEntries 以子目录为根（排除规则/派生副本排除同构
+	// 生效），rel 相对子目录，拼 folderRel 前缀还原库内唯一键。记录已清，全部
+	// 条目走新增解析路径（exists=false），FTS 随写路径双写。
+	diskEntries, err := collectPptxEntries(folderAbs, matcher)
+	if err != nil {
+		return model.AssetScanResult{}, err
+	}
+	result := model.AssetScanResult{Total: len(diskEntries)}
+	pending := make([]scanReprocessItem, 0, len(diskEntries))
+	for _, de := range diskEntries {
+		pending = append(pending, scanReprocessItem{
+			e: pptxDiskEntry{
+				rel:     folderRel + "/" + de.rel,
+				abs:     de.abs,
+				size:    de.size,
+				mtimeNs: de.mtimeNs,
+			},
+		})
+	}
+	done := 0
+	if err := s.processPendingScanFiles(ctx, store, lib, pending, len(diskEntries), &done, &result); err != nil {
+		return model.AssetScanResult{}, err
+	}
+	return result, nil
+}
+
+// parseScanEntry 解析阶段（可并行）：OOXML 解析 + 哈希（仅重处理路径调用，增量
+// 契约：未变文件不重读内容）。解析失败按分类降级由落库阶段终态写处理；文件不可
+// 读（权限不足）时哈希留空。零 DB 访问——并发安全性由「只读磁盘 + 只写本地返回
+// 值」保证，parseFn fake 注入测试同构。
+func (s *AssetLibraryService) parseScanEntry(lib model.AssetLibrary, e pptxDiskEntry) parsedScanEntry {
+	baseName := strings.TrimSuffix(path.Base(e.rel), path.Ext(e.rel))
+	parse := s.parseFn
+	if parse == nil {
+		parse = parsePptxSlides
+	}
+	slides, parseErr := parse(e.abs, baseName)
+
+	hash := ""
+	if parseErr == nil || !isDeniedParseError(parseErr) {
+		if h, err := hashFileSHA256(e.abs); err != nil {
+			Logger().Warn("assets scan hash failed", "libraryId", lib.ID, "file", e.rel, "err", err)
+		} else {
+			hash = h
+		}
+	}
+	return parsedScanEntry{slides: slides, parseErr: parseErr, hash: hash}
+}
+
+// finalizeScanFile 落库阶段（主 goroutine 串行）：占位/标记 processing → 缩略图
+// 失效联动 → 终态写。解析失败按分类降级为 failed/encrypted/denied 状态并返回
+// 对应 outcome（不中断批量）；DB 写失败为系统性错误上抛中断扫描。解析阶段已在
+// 前置并行完成（parsedScanEntry 注入），本函数零解析开销。
+func (s *AssetLibraryService) finalizeScanFile(store *assetsStore, lib model.AssetLibrary, e pptxDiskEntry, rec assetFileRecord, exists bool, parsed parsedScanEntry) (scanOutcome, error) {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	baseName := strings.TrimSuffix(path.Base(e.rel), path.Ext(e.rel))
 
@@ -603,35 +846,18 @@ func (s *AssetLibraryService) processScanFile(store *assetsStore, lib model.Asse
 	} else if err := store.markProcessing(fileID, now); err != nil {
 		return 0, fmt.Errorf("更新文件处理状态失败（%s）: %w", e.rel, err)
 	} else {
-		// 缩略图失效联动（重解析清旧图）：文件内容已变旧图必失效，置于解析
-		// 之前——parse 成败两分支全覆盖（解析失败降级 failed/encrypted 状态的
-		// 文件同样不得残留旧缩略图）。任一步失败仅告警不中断扫描：缓存清理
-		// 幂等可自愈（下次扫描重处理再清）。新文件分支无旧图，不触发。
+		// 缩略图失效联动（重解析清旧图）：文件内容已变旧图必失效，parse 成败
+		// 两分支全覆盖（解析失败降级 failed/encrypted 状态的文件同样不得残留
+		// 旧缩略图）。任一步失败仅告警不中断扫描：缓存清理幂等可自愈（下次
+		// 扫描重处理再清）。新文件分支无旧图，不触发。
 		s.invalidateFileThumbs(lib, store, fileID)
 	}
 
-	parse := s.parseFn
-	if parse == nil {
-		parse = parsePptxSlides
-	}
-	slides, parseErr := parse(e.abs, baseName)
-
-	// 哈希：仅在判定需要重处理（新文件/mtime+size 变动）时计算（增量契约：
-	// 未变文件不重读内容）。文件不可读（权限不足）时哈希留空。
-	hash := ""
-	if parseErr == nil || !isDeniedParseError(parseErr) {
-		if h, err := hashFileSHA256(e.abs); err != nil {
-			Logger().Warn("assets scan hash failed", "libraryId", lib.ID, "file", e.rel, "err", err)
-		} else {
-			hash = h
-		}
-	}
-
-	if parseErr != nil {
+	if parsed.parseErr != nil {
 		status := model.AssetFileStatusFailed
 		outcome := scanOutcomeFailed
 		var pe *assetParseError
-		if errors.As(parseErr, &pe) {
+		if errors.As(parsed.parseErr, &pe) {
 			switch pe.kind {
 			case assetParseEncrypted:
 				status = model.AssetFileStatusEncrypted
@@ -642,20 +868,29 @@ func (s *AssetLibraryService) processScanFile(store *assetsStore, lib model.Asse
 			}
 		}
 		Logger().Warn("assets scan file not indexed", "libraryId", lib.ID, "file", e.rel,
-			"status", status, "err", parseErr)
-		if err := store.setFileOutcome(fileID, e.size, e.mtimeNs, hash, status, now); err != nil {
+			"status", status, "err", parsed.parseErr)
+		if err := store.setFileOutcome(fileID, e.size, e.mtimeNs, parsed.hash, status, now); err != nil {
 			return 0, fmt.Errorf("写入文件状态失败（%s）: %w", e.rel, err)
 		}
 		return outcome, nil
 	}
 
-	if err := store.replaceFileSlides(fileID, e.size, e.mtimeNs, hash, now, slides); err != nil {
+	if err := store.replaceFileSlides(fileID, e.size, e.mtimeNs, parsed.hash, now, parsed.slides); err != nil {
 		return 0, fmt.Errorf("写入文件与幻灯片索引失败（%s）: %w", e.rel, err)
 	}
 	if exists {
 		return scanOutcomeUpdated, nil
 	}
 	return scanOutcomeNew, nil
+}
+
+// processScanFile 单文件处理（parse + 落库串行组合）：RelocateAssetFile /
+// ReplaceAssetPathPrefix 单文件重链路径复用。批量扫描不走本函数——scanLibrary
+// 将两阶段拆开并行解析（parseScanEntry worker pool）+ 串行落库（finalizeScanFile），
+// 见 assets_scan.go scanLibrary 阶段 A/B 注释。
+func (s *AssetLibraryService) processScanFile(store *assetsStore, lib model.AssetLibrary, e pptxDiskEntry, rec assetFileRecord, exists bool) (scanOutcome, error) {
+	parsed := s.parseScanEntry(lib, e)
+	return s.finalizeScanFile(store, lib, e, rec, exists, parsed)
 }
 
 // isDeniedParseError 权限不足分类判定（权限下文件不可读，哈希跳过）。

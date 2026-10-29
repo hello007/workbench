@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h, nextTick, reactive, watch } from 'vue'
+import ElementPlus from 'element-plus'
 import FolderTree from '../FolderTree.vue'
 import { ASSET_FILE_DRAG_MIME, ASSET_FOLDER_DRAG_MIME } from '../../utils/assetFolder'
 
@@ -148,7 +149,7 @@ const stubStore = (wrapper) => wrapper.findComponent({ name: 'ElTreeStub' }).vm.
 const headerButtons = (wrapper) => wrapper.findAll('.folder-tree-actions button')
 
 // 点击节点管理菜单项（经 el-dropdown-item 桩的 command 透传）
-const COMMAND_LABEL = { create: '新增子目录', rename: '重命名', annotate: '标注', delete: '删除' }
+const COMMAND_LABEL = { create: '新增子目录', rename: '重命名', annotate: '标注', rebuild: '重建索引', delete: '删除' }
 const clickMenuItem = async (wrapper, nodeName, command) => {
   const row = findNodeRow(wrapper, nodeName)
   const item = row.findAll('.el-dropdown-item').find(i => i.text().trim() === COMMAND_LABEL[command])
@@ -368,6 +369,25 @@ describe('FolderTree', () => {
     expect(wrapper.emitted('annotate')[0][0].path).toBe('方案A')
   })
 
+  it('菜单「重建索引」项：正常目录 emit rebuild，根/排除/派生禁用（全量重建走工具栏入口）', async () => {
+    const wrapper = mountTree()
+    // 正常目录：emit rebuild 上报节点（确认弹窗与 API 分派在宿主）
+    await clickMenuItem(wrapper, '方案A', 'rebuild')
+    expect(wrapper.emitted('rebuild').length).toBe(1)
+    expect(wrapper.emitted('rebuild')[0][0].path).toBe('方案A')
+    // 禁用面：根（走工具栏全量重建）/排除命中/派生容器
+    const rootRow = findNodeRow(wrapper, '全部素材')
+    const rootItem = rootRow.findAll('.el-dropdown-item').find(i => i.text().trim() === '重建索引')
+    expect(rootItem.classes()).toContain('is-disabled')
+    const excludedRow = findNodeRow(wrapper, 'secret')
+    const excludedItem = excludedRow.findAll('.el-dropdown-item').find(i => i.text().trim() === '重建索引')
+    expect(excludedItem.classes()).toContain('is-disabled')
+    expect(excludedItem.attributes('title')).toContain('排除')
+    const derivedRow = findNodeRow(wrapper, '拆分产物')
+    const derivedItem = derivedRow.findAll('.el-dropdown-item').find(i => i.text().trim() === '重建索引')
+    expect(derivedItem.classes()).toContain('is-disabled')
+  })
+
   // ---- 全部展开/全部收起 + 双击切换（树头部操作区，宿主零改动）----
   // 核心契约：批量/双击经 store Node 实例直赋 expanded，操作后显式重算 expandedKeys
   // （store 直赋不触发 node-expand/node-collapse 事件）；树数据局部 reload 时
@@ -446,5 +466,102 @@ describe('FolderTree', () => {
     expect(wrapper.emitted('select')[0]).toEqual(['归档'])
     expect(stubStore(wrapper).nodesMap['归档'].expanded).toBe(true)
     expect(nodeTexts(wrapper)).toContain('2025')
+  })
+
+  // ---- 真实 el-tree 用例（2026-10-29 bugfix）：旧桩未实现 EP「default-expanded-keys
+  // 变化回放 setDefaultExpandedKeys → 逐 key expand(null, autoExpandParent=true) →
+  // 祖先链强制展开」语义，双击收起被回放翻回的真机 bug 在桩下假绿。本组用例
+  // mount 真实 EP 组件（仅 stub el-dialog/el-input/el-dropdown 等无关件，el-tree
+  // 用真实实现），双击事件须打在 .folder-node 行元素上（真机事件路径——@dblclick
+  // 绑定面），断言窗口跨多个 nextTick 覆盖回放 flush。禁改回桩形态（假绿回归）。
+  describe('真实 el-tree 交互（双击收起/全收全展/reload 防回放翻回）', () => {
+    const mountRealTree = async (props = {}) => {
+      const wrapper = mount(FolderTree, {
+        props: {
+          nodes: makeNodes(),
+          countMap: { '': 4, 方案A: 2, 归档: 1, '归档/2025': 1 },
+          selectedPath: '',
+          loading: false,
+          ...props
+        },
+        global: { plugins: [ElementPlus] }
+      })
+      // 真实树挂载链：treeData computed → store 建节点 → default-expanded-keys
+      // 播种 expand → 组件 watch expanded → nextTick 落视图，多 tick 等稳定
+      for (let i = 0; i < 4; i++) await nextTick()
+      return wrapper
+    }
+    // 真机事件路径：dblclick 绑在 .folder-node 行元素（.el-tree-node__content 的
+    // 子节点），trigger 必须命中该元素而非父容器（冒泡路径不经过子节点）
+    const realRow = (wrapper, name) =>
+      wrapper.findAll('.el-tree-node__content')
+        .find((r) => r.text().includes(name))
+        .find('.folder-node')
+    // 可见行文本集合：jsdom 无布局（offsetParent 恒 null），按「自身到根链上无
+    // display:none」判定——v-show 隐藏直接落在 .el-tree-node__children 容器 style
+    const isVisible = (el) => {
+      let cur = el
+      while (cur) {
+        if (cur.style?.display === 'none') return false
+        cur = cur.parentElement
+      }
+      return true
+    }
+    const visibleTexts = (wrapper) =>
+      wrapper.findAll('.folder-node-name')
+        .filter((n) => isVisible(n.element))
+        .map((n) => n.text())
+    const realStore = (wrapper) => wrapper.vm.treeRef?.store
+
+    it('双击展开中目录收起：子层级隐藏且多 tick 后不翻回（祖先链回放防线）', async () => {
+      const wrapper = await mountRealTree()
+      expect(visibleTexts(wrapper)).toContain('2025')
+      await realRow(wrapper, '归档').trigger('dblclick')
+      // 多 tick：覆盖 setDefaultExpandedKeys 回放 + expand 祖先链写 + nextTick 视图
+      for (let i = 0; i < 6; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+      expect(visibleTexts(wrapper)).not.toContain('2025')
+    })
+
+    it('双击收起中间层目录：其展开中的子孙不回放翻回该目录（可达展开面过滤）', async () => {
+      const wrapper = await mountRealTree()
+      // 「归档」展开且其子「2025」也在展开面——旧实现回放 expand(2025, true) 会
+      // 强制展开祖先「归档」，本用例守护可达过滤剔除子孙后的收起稳定性
+      await realRow(wrapper, '归档').trigger('dblclick')
+      for (let i = 0; i < 8; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+      expect(realStore(wrapper).nodesMap['2025']?.expanded ?? false).toBe(false)
+      // 收起面稳定后再双击展开恢复
+      await realRow(wrapper, '归档').trigger('dblclick')
+      for (let i = 0; i < 6; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(true)
+      expect(visibleTexts(wrapper)).toContain('2025')
+    })
+
+    it('全部收起后仅剩根行可见，全部展开恢复全部层级', async () => {
+      const wrapper = await mountRealTree()
+      await wrapper.findAll('.folder-tree-actions button').find((b) => b.text().includes('全部收起')).trigger('click')
+      for (let i = 0; i < 6; i++) await nextTick()
+      expect(visibleTexts(wrapper)).toEqual(['全部素材'])
+      await wrapper.findAll('.folder-tree-actions button').find((b) => b.text().includes('全部展开')).trigger('click')
+      for (let i = 0; i < 6; i++) await nextTick()
+      const texts = visibleTexts(wrapper)
+      expect(texts).toContain('方案A')
+      expect(texts).toContain('归档')
+      expect(texts).toContain('2025')
+    })
+
+    it('收起后树数据局部 reload（新引用）展开面不漂移（不翻回展开态）', async () => {
+      const wrapper = await mountRealTree()
+      await realRow(wrapper, '归档').trigger('dblclick')
+      for (let i = 0; i < 6; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+      await wrapper.setProps({ nodes: makeNodes() })
+      for (let i = 0; i < 6; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+      expect(visibleTexts(wrapper)).not.toContain('2025')
+      // 兄弟展开面 reload 后保持
+      expect(visibleTexts(wrapper)).toContain('方案A')
+    })
   })
 })

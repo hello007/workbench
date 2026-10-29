@@ -1577,6 +1577,78 @@ func (s *assetsStore) clearIndexForRebuild() error {
 	return tx.Commit()
 }
 
+// clearFilesForFolderRebuild 子目录重建清库（前缀删除版 clearIndexForRebuild）：
+// 单事务删除 path 命中 folderRel/... 前缀的 files 行及关联面——FTS 文件行 +
+// 幻灯片行显式删除（对齐 clearLostFiles 双保险口径，防旧索引残留静默漏检）+
+// thumb_cache 显式删除 + files 行删除（slides/file_tags/slide_tags/slide_meta
+// 随外键级联）。范围外记录零触碰。返回实际删除的 fileID 列表（调用方据此清理
+// 缩略图 PNG 与 ledger dirty——文件系统操作不可回滚，db 先行、文件后删，对齐
+// clearLostFiles 收口顺序）。
+// 收集与事务分离（单连接池 rows 未 Close 再查自锁纪律，对齐 clearLostFiles）；
+// LIKE 模式转义单点：folderRel 段名可含 % _ \（文件名合法字符），不转义会误
+// 命中同前缀其它目录（如「方案A」误伤「方案A备份」）。删除按主键直删无资格
+// 条件——本函数仅由 rebuildFolder 在扫描锁内调用（清库与增量判定并发面由锁
+// 互斥收口），调用面收敛即资格保证。
+func (s *assetsStore) clearFilesForFolderRebuild(folderRel string) ([]int64, error) {
+	pattern := strings.ReplaceAll(folderRel, `\`, `\\`)
+	pattern = strings.ReplaceAll(pattern, "%", `\%`)
+	pattern = strings.ReplaceAll(pattern, "_", `\_`)
+	pattern += "/%"
+	// 先收集前缀命中记录（rows 收齐显式 Close 后再开事务，自锁纪律）
+	rows, err := s.db.Query(
+		"SELECT id, path, size, mtime_ns, status, hash FROM files WHERE path LIKE ? ESCAPE '\\'",
+		pattern,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var records []assetFileRecord
+	for rows.Next() {
+		var rec assetFileRecord
+		if err := rows.Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	deletedIDs := make([]int64, 0, len(records))
+	for _, rec := range records {
+		slideIDs, err := selectSlideIDsTx(tx, rec.id)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range slideIDs {
+			if err := deleteFtsRowTx(tx, -id); err != nil {
+				return nil, err
+			}
+		}
+		if err := deleteFtsRowTx(tx, rec.id); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec("DELETE FROM thumb_cache WHERE file_id = ?", rec.id); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec("DELETE FROM files WHERE id = ?", rec.id); err != nil {
+			return nil, err
+		}
+		deletedIDs = append(deletedIDs, rec.id)
+	}
+	return deletedIDs, tx.Commit()
+}
+
 // rebindFileTagsAfterRebuild 全量重建后的标签重绑（两级匹配，SRS §14.16 哈希恢复）：
 // 先按「文件相对路径 → 标签 ID 列表」写回（重建后 path 相同的文件直接命中，现状
 // 语义不变）；path 已消失（重建后文件改名/移动）且备份带内容 hash 时按 hash 兜底
