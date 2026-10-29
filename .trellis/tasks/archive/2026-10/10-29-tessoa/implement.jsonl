@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "AppSettings 导出 struct 字段变更须同步 frontend/wailsjs models.ts；App.OpenInExplorer 签名不变故 App.js/App.d.ts 无需动"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台抽象约定：tessoa 探测抽无 tag 文件（service/tessoa.go）双平台复用；openInFileManager 双平台文件同构实现；测试平台断言拆双平台文件禁共享"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态：tessoa PATH 探测用 t.Setenv 注入 fake 目录，禁真实依赖本机 PATH 有无 tessoa；GUI 启动测试按现有口径 Skip"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 层 ≥76% 基线门禁，新增 tessoa.go 代码须带足单测防拉低覆盖率"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端日志用 log/slog；App 层读设置失败静默降级照 Obsidian 先例（app_external.go:52 口径）"}

@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 AppSettings 字段变更是否同步 models.ts；确认 App 方法签名未变无需动 App.js/App.d.ts"}
+{"file": "docs/spec/test-stability.md", "reason": "核查新测试无隐式环境依赖：PATH 注入用 t.Setenv、无真实 GUI 启动、无固定端口/mtime 时序"}
+{"file": "docs/spec/linux-platform.md", "reason": "核查平台分叉形态：无 tag 探测文件 + _windows/_other 双文件同构，无共享平台断言"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service 覆盖率 ≥76% 门禁不回退"}
