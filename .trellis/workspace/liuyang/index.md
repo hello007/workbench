@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 170
+- **Total Sessions**: 171
 - **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~74 | Active |
+| `journal-4.md` | ~107 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 171 | 2026-10-29 | 素材管理：文件夹树收起修复+扫描并发提效+子目录重建索引 | `0a5eaa9` | `master` |
 | 170 | 2026-10-29 | 打开资源管理器优先使用 tessoa | `e32cab5` | `master` |
 | 169 | 2026-10-29 | 素材文件夹树全展/全收与双击切换 | `af1f7e0`, `5b2332f` | `master` |
 | 168 | 2026-10-29 | session-start hook 旧路径死代码出清与 PATHS 文案修正 | `2084d7f` | `master` |

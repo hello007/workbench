@@ -72,3 +72,36 @@ openInFileManager 双平台优先 tessoa 打开（AppSettings 新增 TessoaPath 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 171: 素材管理：文件夹树收起修复+扫描并发提效+子目录重建索引
+
+**Date**: 2026-10-29
+**Task**: 素材管理：文件夹树收起修复+扫描并发提效+子目录重建索引
+**Branch**: `master`
+
+### Summary
+
+三合一批：①FolderTree 双击收起失效根因=真实 EP default-expanded-keys watch 回放 expand(null,autoExpandParent=true) 强制展开祖先链翻回收起态（自造桩缺回放语义假绿），修复 syncExpandedKeysFromStore 升级可达展开面过滤+新增 4 个真实 el-tree 用例（docs/spec/el-tree-expand-state.md）；②scanLibrary 拆两阶段 pipeline：processPendingScanFiles 单点（worker pool min(GOMAXPROCS,4) 并行解析零 DB+串行落库），解析段取消=整批丢弃零落库，done 改完成计数；③新增 RebuildAssetFolder 子目录级重建（clearFilesForFolderRebuild LIKE 转义前缀删除+只扫子树+标注 path 重绑，无 VACUUM 备份），FolderTree 菜单+AssetsPanel 确认分派+wailsjs 同步。后端全量绿含 soak、前端 2254 绿、npm build 过；assets-management.md §14+CLAUDE.md 规则 2 行沉淀
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0a5eaa9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
