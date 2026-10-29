@@ -11,83 +11,100 @@
      展开态保留（PR2）：expandedKeys 随节点展开/折叠维护，经 default-expanded-keys
      在树数据刷新（局部 reload）后复原用户展开面；首次加载全展开（对齐 PR1
      default-expand-all 初览语义），库切换清空重建。
+     全部展开/全部收起 + 双击切换：头部操作区两按钮（loading/busy 禁用）+ 双击
+     节点名 toggle 展开（单击选中过滤语义不变）。批量/双击经 store Node 实例直赋
+     expanded（树数据全量内存加载无懒加载，无需先例 FileTreePanel 的 node.expand()
+     回调递归）；store 直赋不触发 node-expand/node-collapse 事件，操作后统一
+     syncExpandedKeysFromStore 显式回收展开面（单一数据源），防树数据局部 reload
+     时 default-expanded-keys 回放旧展开面（漂移）。
      选中节点经 select 事件上报 folderPath（空串 = 根「全部素材」），过滤逻辑在
      宿主（消费 utils/assetFolder 前缀匹配单点）。拖拽移动入口为 PR3/PR4 范围。 -->
 <template>
   <div class="folder-tree">
-    <el-tree
-      ref="treeRef"
-      :data="treeData"
-      node-key="path"
-      :props="treeProps"
-      :expand-on-click-node="false"
-      :default-expanded-keys="expandedKeys"
-      highlight-current
-      :current-node-key="selectedPath"
-      @node-click="onNodeClick"
-      @node-expand="onNodeExpand"
-      @node-collapse="onNodeCollapse"
-    >
-      <!-- scope 守卫：未注册/未桩 el-tree 的测试环境插槽以无参形态渲染，直接解构
-           { data } 会炸渲染链（对齐 AssetTagTreeSelect/AssetTagManagerDialog 先例，
-           docs/spec/assets-management.md §9.4） -->
-      <template #default="scope">
-        <span
-          v-if="scope && scope.data"
-          class="folder-node"
-          :class="{ 'is-root': scope.data.path === '', 'is-excluded': scope.data.excluded, 'is-derived': scope.data.derived, 'is-drop-target': dragOverPath === scope.data.path }"
-          :draggable="canDragFolder(scope.data)"
-          @dragstart="onNodeDragStart(scope.data, $event)"
-          @dragover.prevent="onNodeDragOver(scope.data, $event)"
-          @dragleave="onNodeDragLeave(scope.data)"
-          @drop.prevent="onNodeDrop(scope.data, $event)"
-        >
-          <el-icon class="folder-node-icon"><Folder /></el-icon>
-          <span class="folder-node-name" :title="scope.data.path === '' ? '全部素材' : scope.data.path">{{ scope.data.name }}</span>
-          <span v-if="badgeOf(scope.data) > 0" class="folder-node-badge">{{ badgeOf(scope.data) }}</span>
+    <!-- 树头部操作区：全部展开/全部收起（对齐主面板 FileTreePanel 头部按钮先例），
+         loading/busy 态禁用防与树数据加载/目录操作并发叠加 -->
+    <div class="folder-tree-actions">
+      <el-button size="small" text :disabled="loading || busy" @click="expandAllFolders">全部展开</el-button>
+      <el-button size="small" text :disabled="loading || busy" @click="collapseAllFolders">全部收起</el-button>
+    </div>
+    <div class="folder-tree-scroll">
+      <el-tree
+        ref="treeRef"
+        :data="treeData"
+        node-key="path"
+        :props="treeProps"
+        :expand-on-click-node="false"
+        :default-expanded-keys="expandedKeys"
+        highlight-current
+        :current-node-key="selectedPath"
+        @node-click="onNodeClick"
+        @node-expand="onNodeExpand"
+        @node-collapse="onNodeCollapse"
+      >
+        <!-- scope 守卫：未注册/未桩 el-tree 的测试环境插槽以无参形态渲染，直接解构
+             { data } 会炸渲染链（对齐 AssetTagTreeSelect/AssetTagManagerDialog 先例，
+             docs/spec/assets-management.md §9.4） -->
+        <template #default="scope">
           <span
-            v-if="scope.data.excluded"
-            class="folder-node-excluded"
-            title="命中索引排除规则，该目录下文件不参与检索"
-          >已排除</span>
-          <span
-            v-else-if="scope.data.derived"
-            class="folder-node-excluded"
-            title="PPT 拆分派生产物目录，由拆分链路管理"
-          >派生</span>
-          <!-- 节点管理菜单（PR2）：hover 显现的「⋯」触发下拉；排除/派生/根（除新增）
-               禁管理，禁用项 title 说明原因 -->
-          <el-dropdown
-            trigger="click"
-            placement="bottom-end"
-            @visible-change="(visible) => (menuOpenPath = visible ? scope.data.path : '')"
-            @command="(cmd) => onNodeCommand(cmd, scope.data)"
+            v-if="scope && scope.data"
+            class="folder-node"
+            :class="{ 'is-root': scope.data.path === '', 'is-excluded': scope.data.excluded, 'is-derived': scope.data.derived, 'is-drop-target': dragOverPath === scope.data.path }"
+            :draggable="canDragFolder(scope.data)"
+            @dragstart="onNodeDragStart(scope.data, $event)"
+            @dragover.prevent="onNodeDragOver(scope.data, $event)"
+            @dragleave="onNodeDragLeave(scope.data)"
+            @drop.prevent="onNodeDrop(scope.data, $event)"
+            @dblclick="onNodeDblClick(scope.data)"
           >
-            <button
-              type="button"
-              class="folder-node-more"
-              :class="{ 'is-visible': menuOpenPath === scope.data.path }"
-              :disabled="busy"
-              :aria-label="`${scope.data.name} 管理菜单`"
-              @click.stop
+            <el-icon class="folder-node-icon"><Folder /></el-icon>
+            <span class="folder-node-name" :title="scope.data.path === '' ? '全部素材' : scope.data.path">{{ scope.data.name }}</span>
+            <span v-if="badgeOf(scope.data) > 0" class="folder-node-badge">{{ badgeOf(scope.data) }}</span>
+            <span
+              v-if="scope.data.excluded"
+              class="folder-node-excluded"
+              title="命中索引排除规则，该目录下文件不参与检索"
+            >已排除</span>
+            <span
+              v-else-if="scope.data.derived"
+              class="folder-node-excluded"
+              title="PPT 拆分派生产物目录，由拆分链路管理"
+            >派生</span>
+            <!-- 节点管理菜单（PR2）：hover 显现的「⋯」触发下拉；排除/派生/根（除新增）
+                 禁管理，禁用项 title 说明原因 -->
+            <el-dropdown
+              trigger="click"
+              placement="bottom-end"
+              @visible-change="(visible) => (menuOpenPath = visible ? scope.data.path : '')"
+              @command="(cmd) => onNodeCommand(cmd, scope.data)"
             >
-              <el-icon :size="12"><MoreFilled /></el-icon>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu class="folder-node-menu">
-                <el-dropdown-item command="create" :disabled="!canCreateChild(scope.data)" :title="manageDisabledTip(scope.data, 'create')">新增子目录</el-dropdown-item>
-                <el-dropdown-item command="rename" :disabled="!canRename(scope.data)" :title="manageDisabledTip(scope.data, 'rename')">重命名</el-dropdown-item>
-                <el-dropdown-item command="annotate" :disabled="!canAnnotate(scope.data)" :title="manageDisabledTip(scope.data, 'annotate')">标注</el-dropdown-item>
-                <el-dropdown-item command="delete" :divided="true" :disabled="!canDelete(scope.data)" :title="manageDisabledTip(scope.data, 'delete')">删除</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </span>
-      </template>
-    </el-tree>
-    <!-- 空态：库根目录下暂无子目录（树仅展示根节点）或数据加载中 -->
-    <div v-if="loading" class="folder-tree-hint">加载中…</div>
-    <div v-else-if="nodes.length === 0" class="folder-tree-hint">库根目录下暂无子文件夹</div>
+              <button
+                type="button"
+                class="folder-node-more"
+                :class="{ 'is-visible': menuOpenPath === scope.data.path }"
+                :disabled="busy"
+                :aria-label="`${scope.data.name} 管理菜单`"
+                @click.stop
+                @dblclick.stop
+              >
+                <el-icon :size="12"><MoreFilled /></el-icon>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu class="folder-node-menu">
+                  <el-dropdown-item command="create" :disabled="!canCreateChild(scope.data)" :title="manageDisabledTip(scope.data, 'create')">新增子目录</el-dropdown-item>
+                  <el-dropdown-item command="rename" :disabled="!canRename(scope.data)" :title="manageDisabledTip(scope.data, 'rename')">重命名</el-dropdown-item>
+                  <el-dropdown-item command="annotate" :disabled="!canAnnotate(scope.data)" :title="manageDisabledTip(scope.data, 'annotate')">标注</el-dropdown-item>
+                  <el-dropdown-item command="delete" :divided="true" :disabled="!canDelete(scope.data)" :title="manageDisabledTip(scope.data, 'delete')">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </span>
+        </template>
+      </el-tree>
+      <!-- 空态：库根目录下暂无子目录（树仅展示根节点）或数据加载中（随结构调整
+           保持在树滚动区内，不与头部操作区抢占高度） -->
+      <div v-if="loading" class="folder-tree-hint">加载中…</div>
+      <div v-else-if="nodes.length === 0" class="folder-tree-hint">库根目录下暂无子文件夹</div>
+    </div>
 
     <!-- 新建子目录弹层（PR2 R3）：小弹窗 + 单输入（项目惯例对齐 DirectoryTree
          重命名弹窗 420px 档）；提交分派宿主，弹层即时关闭（错误经宿主 toast 透传） -->
@@ -213,6 +230,48 @@ const onNodeExpand = (data) => {
 }
 const onNodeCollapse = (data) => {
   expandedKeys.value = expandedKeys.value.filter(k => k !== data.path)
+}
+
+// ---- 全部展开/全部收起 + 双击切换：store Node 实例直赋 expanded（树数据全量
+// 内存加载无懒加载，EP 自身 Node.collapse() 即直赋实现，无需先例 FileTreePanel
+// 的 node.expand() 回调递归）。关键纪律：store 直赋不触发 node-expand/node-collapse
+// 事件，操作完成后必须显式重算 expandedKeys——default-expanded-keys 仅对新建
+// Node 生效，树数据局部 reload 时回放的正是 expandedKeys，漏同步则回放旧展开面
+// （漂移）。三条路径（全展/全收/双击）统一收敛 syncExpandedKeysFromStore 单点
+const syncExpandedKeysFromStore = () => {
+  const nodesMap = treeRef.value?.store?.nodesMap
+  if (!nodesMap) return
+  expandedKeys.value = Object.keys(nodesMap).filter((key) => nodesMap[key]?.expanded)
+}
+
+const expandAllFolders = () => {
+  const nodesMap = treeRef.value?.store?.nodesMap
+  if (!nodesMap) return
+  Object.keys(nodesMap).forEach((key) => { nodesMap[key].expanded = true })
+  syncExpandedKeysFromStore()
+}
+
+// 全收含根节点（key=''）：根行自身保留可见，收起的是其子层级（对齐 FileTreePanel
+// 全收语义）；expandedKeys 同步为空数组，reload 后仅剩根行
+const collapseAllFolders = () => {
+  const nodesMap = treeRef.value?.store?.nodesMap
+  if (!nodesMap) return
+  Object.keys(nodesMap).forEach((key) => { nodesMap[key].expanded = false })
+  syncExpandedKeysFromStore()
+}
+
+// 双击节点名 toggle 展开/收起（单击选中过滤语义不变，无双击延迟惩罚——双击的
+// 第一次点击仍触发选中，选中即过滤是幂等操作可接受）。仅叶子判定：无子节点的
+// 目录无展开面，双击不动作；双击文本选中防抖走 .folder-node 行级
+// user-select:none（双击命中面是整行——徽标/标记区域双击同样触发 toggle，选中
+// 禁令同面覆盖；CSS 口径，不破坏既有 title/ellipsis；dblclick 的
+// preventDefault 不能撤销已发生的选区故不用）
+const onNodeDblClick = (data) => {
+  if (!data.children || data.children.length === 0) return
+  const node = treeRef.value?.store?.nodesMap?.[data.path || '']
+  if (!node) return
+  node.expanded = !node.expanded
+  syncExpandedKeysFromStore()
 }
 
 const onNodeClick = (data) => {
@@ -363,7 +422,27 @@ defineExpose({ treeRef })
 </script>
 
 <style scoped>
+/* 根元素完整 flex 约束链（宿主 .folder-tree-pane 为 flex column）：头部操作区
+   固定 + 树滚动区占满剩余高度（原根元素的滚动/内边距职责移交 .folder-tree-scroll） */
 .folder-tree {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 树头部操作区（全部展开/全部收起）：text 型小按钮，loading/busy 禁用 */
+.folder-tree-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.folder-tree-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -383,6 +462,9 @@ defineExpose({ treeRef })
   flex: 1;
   font-size: 13px;
   color: var(--text-primary);
+  /* 双击节点名切换展开/收起：行级禁文本选中（双击命中面是整行，选区高亮与展开
+     切换同时发生观感混乱；树节点文本无选中复制需求） */
+  user-select: none;
 }
 
 .folder-node.is-root .folder-node-name {

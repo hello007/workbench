@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { h, nextTick } from 'vue'
+import { h, nextTick, reactive, watch } from 'vue'
 import FolderTree from '../FolderTree.vue'
 import { ASSET_FILE_DRAG_MIME, ASSET_FOLDER_DRAG_MIME } from '../../utils/assetFolder'
 
@@ -15,7 +15,8 @@ vi.mock('element-plus', async () => {
 
 // 文件夹树受控组件（PRD PR1）：树渲染 / 徽标递归计数 / 排除标记 / 根「全部素材」
 // 固定节点 / 选中 emit（folderPath 语义：根 = 空串）。树数据/计数/选中态均由宿主
-// 持有，本 spec 只验证展示与上报契约。
+// 持有，本 spec 只验证展示与上报契约；全展/全收 + 双击切换为组件内自治交互
+// （经 el-tree store Node 实例操作），reload 后展开面断言守护 expandedKeys 同步。
 
 // 形状对齐 model.AssetFolderNode（models.ts class，plain object 直传）
 const nodeA = { path: '方案A', name: '方案A', children: [], excluded: false, derived: false, fileCount: 2 }
@@ -27,19 +28,48 @@ const nodeExcluded = { path: 'secret', name: 'secret', children: [
 ], excluded: true, derived: false, fileCount: 0 }
 const nodeDerived = { path: '拆分产物', name: '拆分产物', children: [], excluded: false, derived: true, fileCount: 0 }
 
+// 局部 reload 模拟：宿主重新拉取 ListAssetFolders 后 nodes 数组整体替换（全新对象
+// 引用、同内容），驱动 el-tree store 按 default-expanded-keys 回放展开面
+const makeNodes = () => JSON.parse(JSON.stringify([nodeA, nodeB, nodeExcluded, nodeDerived]))
+
 // el-tree 桩：递归渲染 default 插槽并注入 { data } 作用域（对齐真实 el-tree 插槽
 // 契约；组件 slot 守卫依赖 scope.data 形态，桩必须同样注入）。点击叶子节点
-// stopPropagation 防冒泡到祖先节点的 onClick 双触发
+// stopPropagation 防冒泡到祖先节点的 onClick 双触发。
+// 扩展（全展/全收 + 双击切换批）：暴露近似真实 el-tree 的 store.nodesMap
+// （node-key 值 → { expanded }，reactive 驱动重渲染），供组件经 store 直赋操作与
+// 用例断言；子层级按 expanded 渲染（近似真实 el-tree 的 v-show 显隐，收起子树
+// 不出 DOM）。default-expanded-keys 仅在（重）建节点时播种——对齐真实语义
+// 「已挂载 Node 不响应该 prop 变化」：树数据刷新（局部 reload，data 引用变更）
+// 时按当前 defaultExpandedKeys 重建全表，expandedKeys 同步正确性（漂移守护）
+// 经 reload 后断言验证
 const ElTreeStub = {
   name: 'ElTreeStub',
-  props: ['data', 'nodeKey', 'props', 'currentNodeKey', 'expandOnClickNode', 'defaultExpandAll', 'highlightCurrent'],
+  props: ['data', 'nodeKey', 'props', 'currentNodeKey', 'expandOnClickNode', 'defaultExpandAll', 'defaultExpandedKeys', 'highlightCurrent'],
   emits: ['node-click'],
-  setup(stubProps, { slots, emit }) {
+  setup(stubProps, { slots, emit, expose }) {
     const labelKey = stubProps.props?.label || 'label'
     const childrenKey = stubProps.props?.children || 'children'
+    const keyOf = (node) => String(node[stubProps.nodeKey || 'path'])
+    const nodesMap = reactive({})
+    const seedNodesMap = (nodes) => {
+      Object.keys(nodesMap).forEach((key) => delete nodesMap[key])
+      const walk = (list) => {
+        ;(list || []).forEach((node) => {
+          nodesMap[keyOf(node)] = { expanded: (stubProps.defaultExpandedKeys || []).includes(keyOf(node)) }
+          walk(node[childrenKey])
+        })
+      }
+      walk(nodes)
+    }
+    watch(() => [stubProps.data, stubProps.defaultExpandedKeys], () => seedNodesMap(stubProps.data), { immediate: true })
+    // expose：setup 返回渲染函数形态下，模板 ref 只能取到 expose 对象——FolderTree
+    // 经 treeRef.value.store.nodesMap 操作 store 全靠这里（与真实 el-tree 的
+    // ref.store 同构）
+    expose({ store: { nodesMap } })
     const renderNodes = (nodes) =>
-      (nodes || []).map((node) =>
-        h(
+      (nodes || []).map((node) => {
+        const record = nodesMap[keyOf(node)]
+        return h(
           'div',
           {
             class: 'el-tree-node-stub',
@@ -50,10 +80,10 @@ const ElTreeStub = {
           },
           [
             slots.default ? slots.default({ data: node }) : h('span', node[labelKey]),
-            ...renderNodes(node[childrenKey] || [])
+            ...(record?.expanded ? renderNodes(node[childrenKey] || []) : [])
           ]
         )
-      )
+      })
     return () => h('div', { class: 'el-tree-stub' }, renderNodes(stubProps.data))
   }
 }
@@ -110,6 +140,12 @@ const nodeTexts = (wrapper) => wrapper.findAll('.folder-node-name').map(n => n.t
 // 节点行定位（按显示名），供菜单交互用例取节点上下文
 const findNodeRow = (wrapper, name) =>
   wrapper.findAll('.folder-node').find(n => n.text().includes(name))
+
+// 读取桩暴露的 store（expose 形态；组件自身经 treeRef.value.store 同源访问）
+const stubStore = (wrapper) => wrapper.findComponent({ name: 'ElTreeStub' }).vm.$.exposed.store
+
+// 树头部操作区两按钮（[全部展开, 全部收起]）
+const headerButtons = (wrapper) => wrapper.findAll('.folder-tree-actions button')
 
 // 点击节点管理菜单项（经 el-dropdown-item 桩的 command 透传）
 const COMMAND_LABEL = { create: '新增子目录', rename: '重命名', annotate: '标注', delete: '删除' }
@@ -330,5 +366,85 @@ describe('FolderTree', () => {
     await clickMenuItem(wrapper, '方案A', 'annotate')
     expect(wrapper.emitted('annotate').length).toBe(1)
     expect(wrapper.emitted('annotate')[0][0].path).toBe('方案A')
+  })
+
+  // ---- 全部展开/全部收起 + 双击切换（树头部操作区，宿主零改动）----
+  // 核心契约：批量/双击经 store Node 实例直赋 expanded，操作后显式重算 expandedKeys
+  // （store 直赋不触发 node-expand/node-collapse 事件）；树数据局部 reload 时
+  // default-expanded-keys 回放的正是 expandedKeys——reload 后展开面保持 = 同步正确
+
+  it('树头部提供「全部展开」「全部收起」按钮，loading/busy 态禁用', () => {
+    const wrapper = mountTree()
+    const btns = headerButtons(wrapper)
+    expect(btns.map(b => b.text().trim())).toEqual(['全部展开', '全部收起'])
+    expect(btns[0].attributes('disabled')).toBeUndefined()
+    expect(btns[1].attributes('disabled')).toBeUndefined()
+
+    for (const disabledProps of [{ loading: true }, { busy: true }]) {
+      const w = mountTree(disabledProps)
+      headerButtons(w).forEach(b => expect(b.attributes('disabled')).toBeDefined())
+      w.unmount()
+    }
+  })
+
+  it('全部展开：store 全部节点 expanded=true（含根），局部 reload 后展开面不漂移', async () => {
+    const wrapper = mountTree()
+    const [, collapseBtn] = headerButtons(wrapper)
+    await collapseBtn.trigger('click') // 先收起，制造「非全展开」起点
+    expect(nodeTexts(wrapper)).toEqual(['全部素材'])
+    await headerButtons(wrapper)[0].trigger('click')
+    expect(nodeTexts(wrapper)).toContain('2025') // 深层子节点回显
+    const map = stubStore(wrapper).nodesMap
+    expect(Object.keys(map)).toContain('') // 根「全部素材」也在 store 注册表内
+    Object.keys(map).forEach((key) => expect(map[key].expanded).toBe(true))
+    // 局部 reload（同内容新数组引用）：default-expanded-keys 回放操作后展开面
+    await wrapper.setProps({ nodes: makeNodes() })
+    const reloadedMap = stubStore(wrapper).nodesMap
+    Object.keys(reloadedMap).forEach((key) => expect(reloadedMap[key].expanded).toBe(true))
+    expect(nodeTexts(wrapper)).toContain('2025')
+  })
+
+  it('全部收起：含根在内全部 expanded=false（仅剩根行可见），reload 后保持；收起子树内选中保留不报错', async () => {
+    const wrapper = mountTree()
+    // 当前选中节点在收起子树内：选中态与主区过滤由宿主持有，组件侧要求收起不报错
+    await findNodeRow(wrapper, '归档').trigger('click')
+    expect(wrapper.emitted('select')[0]).toEqual(['归档'])
+    await headerButtons(wrapper)[1].trigger('click')
+    expect(nodeTexts(wrapper)).toEqual(['全部素材'])
+    const map = stubStore(wrapper).nodesMap
+    Object.keys(map).forEach((key) => expect(map[key].expanded).toBe(false))
+    // reload 后不回放旧展开面（expandedKeys 已同步为空）
+    await wrapper.setProps({ nodes: makeNodes() })
+    const reloadedMap = stubStore(wrapper).nodesMap
+    Object.keys(reloadedMap).forEach((key) => expect(reloadedMap[key].expanded).toBe(false))
+    expect(nodeTexts(wrapper)).toEqual(['全部素材'])
+    expect(wrapper.emitted('select').length).toBe(1) // 收起不改选中上报
+  })
+
+  it('双击有子节点的目录名切换展开/收起，叶子目录双击不动作', async () => {
+    const wrapper = mountTree()
+    // 双击「归档」：展开 → 收起（子层级 2025 随之隐藏）
+    await findNodeRow(wrapper, '归档').trigger('dblclick')
+    expect(stubStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+    expect(nodeTexts(wrapper)).not.toContain('2025')
+    // reload 后保持收起（expandedKeys 已同步），兄弟展开面不受影响
+    await wrapper.setProps({ nodes: makeNodes() })
+    expect(stubStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+    expect(stubStore(wrapper).nodesMap['方案A'].expanded).toBe(true)
+    // 再双击展开回来
+    await findNodeRow(wrapper, '归档').trigger('dblclick')
+    expect(stubStore(wrapper).nodesMap['归档'].expanded).toBe(true)
+    expect(nodeTexts(wrapper)).toContain('2025')
+    // 叶子（children 为空）双击不动作
+    await findNodeRow(wrapper, '方案A').trigger('dblclick')
+    expect(stubStore(wrapper).nodesMap['方案A'].expanded).toBe(true)
+  })
+
+  it('单击节点仅选中过滤（select 事件行为不变），不切换展开态', async () => {
+    const wrapper = mountTree()
+    await findNodeRow(wrapper, '归档').trigger('click')
+    expect(wrapper.emitted('select')[0]).toEqual(['归档'])
+    expect(stubStore(wrapper).nodesMap['归档'].expanded).toBe(true)
+    expect(nodeTexts(wrapper)).toContain('2025')
   })
 })
