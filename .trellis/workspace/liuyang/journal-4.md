@@ -39,3 +39,36 @@ FolderTree 头部新增全部展开/全部收起按钮（loading/busy 禁用，�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 170: 打开资源管理器优先使用 tessoa
+
+**Date**: 2026-10-29
+**Task**: 打开资源管理器优先使用 tessoa
+**Branch**: `master`
+
+### Summary
+
+openInFileManager 双平台优先 tessoa 打开（AppSettings 新增 TessoaPath 设置项，配置优先 PATH 探测兜底），不可用或启动失败降级系统管理器（Windows /select, 语义保留零回归）；App.OpenInExplorer 签名不变读设置传入，前端绑定零同步仅 models.ts 补字段；测试 t.Setenv 注入 PATH 隔离本机环境、平台断言拆双文件，覆盖率 81.4%；docs 三份 + README 同步
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e32cab5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

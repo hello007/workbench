@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 169
+- **Total Sessions**: 170
 - **Last Active**: 2026-10-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~41 | Active |
+| `journal-4.md` | ~74 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 170 | 2026-10-29 | 打开资源管理器优先使用 tessoa | `e32cab5` | `master` |
 | 169 | 2026-10-29 | 素材文件夹树全展/全收与双击切换 | `af1f7e0`, `5b2332f` | `master` |
 | 168 | 2026-10-29 | session-start hook 旧路径死代码出清与 PATHS 文案修正 | `2084d7f` | `master` |
 | 167 | 2026-10-29 | trellis 沉淀链 skill 旧路径出清：指向 docs/spec 与覆盖层口径 | `adcb9d3` | `master` |
