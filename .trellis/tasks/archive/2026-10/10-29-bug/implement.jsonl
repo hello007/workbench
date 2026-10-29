@@ -1,0 +1,8 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材管理核心契约：SQLite 单连接池并发禁令（rows 未 Close 再查=死锁）决定并发化只能并行解析/哈希、落库串行单点；FTS 五契约（standalone 事务双写）；§11.2/11.3 lost/复活门槛 fileHasSlides；§8.7 refreshDataAfterMutation 刷新统一入口；事件面 assets-scan:* 前缀"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "app_assets.go 新增 RebuildAssetFolder 绑定方法须手动同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；新增导出类型须补 models.ts 别名防 MISSING_EXPORT"}
+{"file": "docs/spec/browser-channel.md", "reason": "新增纯桌面数据面方法 RebuildAssetFolder 须同步 RPCHiddenMethods 现清单，防浏览器通道越权调用"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端日志 log/slog 禁 println；取消链路 ctx 变体 + mapCancelError 口径；错误码复用 E_ASSETS_* 不新增则无三处同步义务"}
+{"file": "docs/spec/perf-baseline.md", "reason": "§13/14 soak/泄漏三档：并发 worker 引入 goroutine，带 goroutine 测试辅助必须 Cleanup 全链，soak 断言 goroutine Δ≤2；§17 测试辅助 util/testutil 复用禁重复定义"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% 基线门禁：并发化重构与新增 RebuildAssetFolder 须带足单测；前端 ≥70%：FolderTree 真实 el-tree 用例计入覆盖率"}
+{"file": "docs/spec/test-stability.md", "reason": "并发测试禁隐式依赖：worker 数/时序断言须确定性；mtime 时序判定用注入陈旧缓存驱动禁 sleep 等待"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "FolderTree 节点菜单新增「重建索引」项对齐既有 dropdown 禁用面（根/排除/派生禁用 + title 说明）；ElMessageBox.confirm 三形态若需确认弹窗"}

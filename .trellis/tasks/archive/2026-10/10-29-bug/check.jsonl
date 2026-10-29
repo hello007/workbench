@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "核查：落库是否保持串行单点（单连接池死锁禁令）；FTS 双写契约；子目录重建范围外记录零影响；lost/excluded 语义不回归；刷新走 refreshDataAfterMutation"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核查 wailsjs 三处同步完整性；npm run build 通过（MISSING_EXPORT 防线）"}
+{"file": "docs/spec/browser-channel.md", "reason": "核查 RPCHiddenMethods 已含 RebuildAssetFolder"}
+{"file": "docs/spec/perf-baseline.md", "reason": "核查并发 worker goroutine 全链 Cleanup、soak 三档跑通、goroutine Δ 断言"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核查 service/前端覆盖率门禁不回退；双击收起用例用真实 el-tree 禁桩假绿"}
+{"file": "docs/spec/test-stability.md", "reason": "核查新测试无固定端口/mtime sleep/环境隐式依赖"}
