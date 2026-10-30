@@ -72,6 +72,13 @@
     <template #footer>
       <!-- 审查中提供取消：杀 claude 进程树释放并发槽位，done(canceled) 收尾 -->
       <el-button v-if="loading" size="small" type="danger" plain @click="$emit('cancel')">取消审查</el-button>
+      <!-- 审查完成后可保存报告到本地 Markdown（有结论或问题时可用） -->
+      <el-button
+        v-if="!loading && (issues.length > 0 || summary)"
+        size="small"
+        :loading="saving"
+        @click="saveReport"
+      >保存到文件</el-button>
       <el-button size="small" @click="$emit('update:modelValue', false)">关闭</el-button>
     </template>
   </el-dialog>
@@ -79,7 +86,9 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
+import { SaveFileDialog, SaveFile } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -105,6 +114,68 @@ watch(() => props.progress, async () => {
     progressRef.value.scrollTop = progressRef.value.scrollHeight
   }
 })
+
+// ===== 审查报告保存（SaveFileDialog 选路径 → SaveFile 落盘，宿主持有对话框绑定）=====
+
+const saving = ref(false)
+
+// pad2 时间戳两位补零（文件名用，如 20261030-152033）
+const pad2 = (n) => String(n).padStart(2, '0')
+
+// buildReportMarkdown 按展示口径组装 Markdown 报告：整体结论 + 按级别分组的问题清单
+// （严重置顶，与弹窗 groupedIssues 同序），每条含 文件:行号/类别/描述/建议
+const buildReportMarkdown = () => {
+  const lines = ['# AI 代码审查报告', '']
+  const now = new Date()
+  lines.push(`- 审查时间：${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`)
+  lines.push(`- 问题总数：${props.issues.length}`)
+  lines.push('')
+  if (props.summary) {
+    lines.push('## 整体结论', '', props.summary, '')
+  }
+  if (props.issues.length > 0) {
+    for (const group of groupedIssues.value) {
+      lines.push(`## ${severityLabel(group.severity)}（${group.items.length} 个问题）`, '')
+      group.items.forEach((issue, idx) => {
+        const loc = issue.file ? `${issue.file}${issue.line ? ':' + issue.line : ''}` : '未定位文件'
+        lines.push(`### ${idx + 1}. ${categoryLabel(issue.category)}｜${loc}`)
+        lines.push('')
+        lines.push(`描述：${issue.description || '（无描述）'}`)
+        if (issue.suggestion) {
+          lines.push('')
+          lines.push(`建议：${issue.suggestion}`)
+        }
+        lines.push('')
+      })
+    }
+  } else {
+    lines.push('本次审查未发现问题。', '')
+  }
+  return lines.join('\n')
+}
+
+// saveReport 弹保存对话框落盘 Markdown：取消（空路径）静默，写入失败 ElMessage 报错
+const saveReport = async () => {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const now = new Date()
+    const stamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
+    let path
+    try {
+      path = await SaveFileDialog(`code-review-${stamp}.md`, [{ DisplayName: 'Markdown 文件', Pattern: '*.md' }])
+    } catch {
+      return // runtime 不可用或对话框异常，静默（对齐导出范式）
+    }
+    if (!path) return // 用户取消
+    await SaveFile(path, buildReportMarkdown(), 'utf-8')
+    ElMessage.success('审查报告已保存: ' + path)
+  } catch (e) {
+    ElMessage.error('保存审查报告失败: ' + (e?.message || String(e)))
+  } finally {
+    saving.value = false
+  }
+}
 
 // 按级别分组（critical 置顶 → warning → info），组内保留模型原始顺序。
 // severity 取值对齐 code-review skill OutputSchema 枚举 critical|warning|info。

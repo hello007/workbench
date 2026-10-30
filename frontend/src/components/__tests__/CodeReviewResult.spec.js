@@ -1,9 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import CodeReviewResult from '../CodeReviewResult.vue'
 
 vi.mock('@element-plus/icons-vue', () => ({
   Loading: { template: '<i class="i-loading" />' }
+}))
+
+// ElMessage mock：断言保存成功/失败提示
+vi.mock('element-plus', () => ({
+  ElMessage: {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn()
+  }
+}))
+
+// 保存对话框/落盘绑定 mock：保存报告测试用
+vi.mock('../../../wailsjs/go/main/App', () => ({
+  SaveFileDialog: vi.fn(),
+  SaveFile: vi.fn()
 }))
 
 const stubs = {
@@ -20,6 +36,7 @@ const stubs = {
     props: ['description', 'imageSize']
   },
   'el-icon': { template: '<i><slot /></i>' },
+  'el-text': { template: '<span><slot /></span>', props: ['type', 'size'] },
   'el-button': {
     template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>',
     props: ['size'],
@@ -132,5 +149,58 @@ describe('CodeReviewResult.vue', () => {
     const events = wrapper.emitted('update:modelValue')
     expect(events).toBeTruthy()
     expect(events[0]).toEqual([false])
+  })
+
+  // ===== 保存报告到本地文件 =====
+
+  it('无结果时（无问题无结论）不渲染保存按钮', () => {
+    wrapper = createWrapper({ issues: [], summary: '', loading: false })
+    const saveBtn = wrapper.findAll('button').find(b => b.text().includes('保存到文件'))
+    expect(saveBtn).toBeUndefined()
+  })
+
+  it('保存到文件：组 Markdown 报告落盘（结论 + 严重置顶条目 + 文件:行号）', async () => {
+    const { SaveFileDialog, SaveFile } = await import('../../../wailsjs/go/main/App')
+    SaveFileDialog.mockResolvedValue('D:/out/report.md')
+    SaveFile.mockResolvedValue(undefined)
+    wrapper = createWrapper({ issues, summary: '共 4 个问题', loading: false })
+    const saveBtn = wrapper.findAll('button').find(b => b.text().includes('保存到文件'))
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(SaveFileDialog).toHaveBeenCalledWith(expect.stringMatching(/^code-review-\d{8}-\d{6}\.md$/), expect.anything())
+    expect(SaveFile).toHaveBeenCalledTimes(1)
+    const [path, content, encoding] = SaveFile.mock.calls[0]
+    expect(path).toBe('D:/out/report.md')
+    expect(encoding).toBe('utf-8')
+    expect(content).toContain('# AI 代码审查报告')
+    expect(content).toContain('共 4 个问题')
+    // 严重组置顶且先于警告组出现
+    expect(content.indexOf('### 1. 缺陷｜src/b.go:20')).toBeLessThan(content.indexOf('### 2. 安全｜src/d.go:40'))
+    expect(content).toContain('描述：N+1 查询')
+    expect(content).toContain('建议：预加载')
+    const { ElMessage } = await import('element-plus')
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('D:/out/report.md'))
+  })
+
+  it('保存到文件：用户取消（空路径）不落盘', async () => {
+    const { SaveFileDialog, SaveFile } = await import('../../../wailsjs/go/main/App')
+    SaveFileDialog.mockResolvedValue('')
+    wrapper = createWrapper({ issues, summary: '', loading: false })
+    const saveBtn = wrapper.findAll('button').find(b => b.text().includes('保存到文件'))
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(SaveFile).not.toHaveBeenCalled()
+  })
+
+  it('保存到文件：写入失败时 ElMessage.error 报错', async () => {
+    const { SaveFileDialog, SaveFile } = await import('../../../wailsjs/go/main/App')
+    SaveFileDialog.mockResolvedValue('D:/out/report.md')
+    SaveFile.mockRejectedValue(new Error('磁盘已满'))
+    const { ElMessage } = await import('element-plus')
+    wrapper = createWrapper({ issues, summary: '', loading: false })
+    const saveBtn = wrapper.findAll('button').find(b => b.text().includes('保存到文件'))
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('磁盘已满'))
   })
 })
