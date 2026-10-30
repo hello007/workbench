@@ -1091,37 +1091,50 @@ type assistantMessage struct {
 }
 
 type messageContentPart struct {
-	Type string `json:"type"` // "text" / "tool_use" / ...
-	Text string `json:"text"`
+	Type     string `json:"type"` // "text" / "thinking" / "tool_use" / ...
+	Text     string `json:"text"`
+	Thinking string `json:"thinking"` // thinking 内容在 thinking 字段（text 字段为空），实测 stream-json 形态
 }
 
-// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件, 会话 id, 计量摘要, 结构化输出, result 错误文本)。
+// parseStreamLine 解析一行 stream-json，返回 (文本增量, 是否为终态 result 事件, 会话 id, 计量摘要, 结构化输出, result 错误文本, 思考增量)。
 // 非 JSON 行（如 stderr 串入的诊断文本）原样作为文本增量返回，不丢输出。
 // metrics 仅在 result 事件且含计量字段时非 nil（旧版或字段缺失时为 nil，前端判空跳过）。
 // structuredOutput 仅在 result 事件且配了 --json-schema 时非空（claude 在 result 事件回 structured_output 字段）。
 // resultError 仅在 result 事件报告失败（is_error=true 或非 success subtype）时非空：
 // 取 result 字段错误文本，缺失时用 subtype 兜底描述；成功事件恒为空串，
 // 调用方（AI 功能任务）忽略该值，行为零变化；对话任务用它透传 claude 侧失败原因。
-func parseStreamLine(line string) (text string, isResult bool, sessionID string, metrics *model.AiTaskMetrics, structuredOutput json.RawMessage, resultError string) {
+// thinking 为模型思考内容增量，与 text 分离返回——对话任务不落消息记录（思考非回复正文），
+// 任务任务经 ai-task:output 事件透传供前端展示审查过程。
+func parseStreamLine(line string) (text string, isResult bool, sessionID string, metrics *model.AiTaskMetrics, structuredOutput json.RawMessage, resultError string, thinking string) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
-		return "", false, "", nil, nil, ""
+		return "", false, "", nil, nil, "", ""
 	}
 	var ev streamEvent
 	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
-		return line + "\n", false, "", nil, nil, ""
+		return line + "\n", false, "", nil, nil, "", ""
 	}
 	if ev.SessionID != "" {
 		sessionID = ev.SessionID
 	}
 	if ev.Type == "assistant" && ev.Message != nil {
 		var sb strings.Builder
+		var tb strings.Builder
 		for _, part := range ev.Message.Content {
 			if part.Type == "text" && part.Text != "" {
 				sb.WriteString(part.Text)
 			}
+			// 思考内容与正文分离：GLM 等思考模型审查长 diff 时输出大头是 thinking，
+			// 丢弃则前端全程无过程可看；thinking 文本在 thinking 字段
+			if part.Type == "thinking" {
+				if part.Thinking != "" {
+					tb.WriteString(part.Thinking)
+				} else if part.Text != "" {
+					tb.WriteString(part.Text)
+				}
+			}
 		}
-		return sb.String(), false, sessionID, nil, nil, ""
+		return sb.String(), false, sessionID, nil, nil, "", tb.String()
 	}
 	if ev.Type == "result" {
 		// result 事件携带计量：duration_ms/num_turns/total_cost_usd 与 usage。
@@ -1147,9 +1160,9 @@ func parseStreamLine(line string) (text string, isResult bool, sessionID string,
 				resultError = fmt.Sprintf("claude 执行失败（%s）", ev.Subtype)
 			}
 		}
-		return "", true, sessionID, metrics, ev.StructuredOutput, resultError
+		return "", true, sessionID, metrics, ev.StructuredOutput, resultError, ""
 	}
-	return "", false, sessionID, nil, nil, ""
+	return "", false, sessionID, nil, nil, "", ""
 }
 
 // extractTable 从输出文本预解析 markdown 表格，供表格视图直接渲染。
@@ -1273,7 +1286,7 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
 	for scanner.Scan() {
-		text, isResult, sessionID, metrics, structuredOutput, _ := parseStreamLine(scanner.Text())
+		text, isResult, sessionID, metrics, structuredOutput, _, thinking := parseStreamLine(scanner.Text())
 		// sessionID/output/metrics 写入须持锁：GetAiTaskState 在锁内读取同字段，
 		// 无锁并发写文件/计数可能数据错乱；emit 放锁外避免拖长持锁时间
 		s.mu.Lock()
@@ -1299,6 +1312,15 @@ func (s *AiFunctionService) pumpOutput(task *aiTaskRuntime, stdout pipeReader) {
 			s.emit("ai-task:output", map[string]any{
 				"taskId": task.id,
 				"text":   text,
+			})
+		}
+		// 思考增量单独透传（thinking 标记供前端区分展示「过程」与「输出」）：
+		// 不写输出文件不进 Output——思考非结果正文，落盘会污染历史归档与预览
+		if thinking != "" {
+			s.emit("ai-task:output", map[string]any{
+				"taskId":   task.id,
+				"text":     thinking,
+				"thinking": true,
 			})
 		}
 		if isResult {

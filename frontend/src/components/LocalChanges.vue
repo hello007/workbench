@@ -194,7 +194,10 @@
       :issues="reviewIssues"
       :summary="reviewSummary"
       :loading="aiReviewing"
+      :elapsed="reviewElapsed"
+      :progress="reviewProgress"
       @locate-file="onReviewLocateFile"
+      @cancel="onReviewCancel"
     />
 
     <!-- 推送结果弹窗：超长 output 完整展示 + 复制 -->
@@ -258,8 +261,9 @@ const aiGenerating = ref(false)
 const candidates = ref([])
 const candidateDialogVisible = ref(false)
 let currentAiTaskId = null
-// EventsOn 返回的注销闭包：onBeforeUnmount 调用，精准移除本组件的 ai-task:done 监听器（不波及 AiFunctionPanel）
+// EventsOn 返回的注销闭包：onBeforeUnmount 调用，精准移除本组件的监听器（不波及 AiFunctionPanel）
 let offAiTaskDone = null
+let offAiTaskOutput = null
 
 // AI 代码审查状态（审未提交变更）
 // 复用 ai-task:done 监听器（onAiTaskDone 内按 currentReviewTaskId 路由到问题清单，与 commit-message 共存）
@@ -268,6 +272,11 @@ const reviewIssues = ref([])
 const reviewSummary = ref('')
 const reviewResultVisible = ref(false)
 let currentReviewTaskId = null
+// 审查过程展示：模型思考/输出增量 + 已用秒数（GLM 等思考模型审查长 diff 静默期可达分钟级，
+// 无过程展示用户只能干等转圈）。progress 只保留末尾 8KB 防长思考撑爆内存与渲染
+const reviewProgress = ref('')
+const reviewElapsed = ref(0)
+let reviewTimerId = null
 
 // 有无暂存文件：changes 列表筛 staged 非空（驱动 AI 生成按钮启用态）
 const hasStagedChanges = computed(() => changes.value.some(c => c.staged))
@@ -422,6 +431,10 @@ const resetAiState = () => {
   candidates.value = []
   reviewIssues.value = []
   reviewSummary.value = ''
+  // 审查过程态一并重置：计时器必须停（否则切仓库后仍在空跑累计）
+  stopReviewProgress()
+  reviewProgress.value = ''
+  reviewElapsed.value = 0
 }
 
 // AI 生成提交信息：取暂存区聚合 diff + 历史 few-shot → RunAiFunction('commit-message')
@@ -447,6 +460,7 @@ const generateCommitMessage = async () => {
 
 // AI 代码审查：取未提交全量聚合 diff → RunAiFunction('code-review')
 // done 事件经 onAiTaskDone（currentReviewTaskId 路由）取 structuredOutput.issues 渲染问题清单。
+// 过程展示：ai-task:output 事件（含 thinking 增量）+ 秒级计时器（startReviewProgress/stopReviewProgress）。
 // 无本地变更返回 AppError{E_GIT_NO_STAGED_CHANGES}，handleGitError 按 code warning 提示 + 关闭弹窗。
 const reviewCode = async () => {
   if (changes.value.length === 0 || aiReviewing.value) return
@@ -454,15 +468,48 @@ const reviewCode = async () => {
   reviewIssues.value = []
   reviewSummary.value = ''
   reviewResultVisible.value = true
+  startReviewProgress()
   try {
     const diffText = await GetUncommittedDiffText(props.repoPath)
     currentReviewTaskId = await RunAiFunction('code-review', { diff: diffText })
   } catch (error) {
+    stopReviewProgress()
     aiReviewing.value = false
     reviewResultVisible.value = false
     currentReviewTaskId = null
     handleGitError('AI 审查失败: ', error)
   }
+}
+
+// startReviewProgress 启动审查过程计时器（1s tick 累计已用秒数）
+const startReviewProgress = () => {
+  reviewElapsed.value = 0
+  reviewProgress.value = ''
+  stopReviewProgress()
+  reviewTimerId = setInterval(() => { reviewElapsed.value += 1 }, 1000)
+}
+
+// stopReviewProgress 停止计时器（审查结束/失败/取消/重置时调用；幂等）
+const stopReviewProgress = () => {
+  if (reviewTimerId) {
+    clearInterval(reviewTimerId)
+    reviewTimerId = null
+  }
+}
+
+// onReviewCancel 取消审查中任务（弹窗取消按钮）：CancelAiTask 杀进程树，
+// done 事件（canceled）路由到 onAiTaskDone 收尾
+const onReviewCancel = () => {
+  if (!currentReviewTaskId) return
+  Promise.resolve(CancelAiTask(currentReviewTaskId)).catch(() => {})
+}
+
+// onAiTaskOutput 审查过程增量：仅消费本组件审查任务的输出，thinking/正文统一
+// 追加到 progress（末尾 8KB 截断，弹窗内滚动展示最新过程）
+const onAiTaskOutput = (payload) => {
+  if (!currentReviewTaskId || payload?.taskId !== currentReviewTaskId || !payload.text) return
+  const next = reviewProgress.value + payload.text
+  reviewProgress.value = next.length > 8192 ? next.slice(-8192) : next
 }
 
 // done 事件处理：按 taskId 路由到 commit-message（候选）/ code-review（问题清单）。
@@ -488,6 +535,7 @@ const onAiTaskDone = (result) => {
   }
   // code-review 路由：取 structuredOutput.issues 渲染问题清单
   if (currentReviewTaskId && result.taskId === currentReviewTaskId) {
+    stopReviewProgress()
     aiReviewing.value = false
     currentReviewTaskId = null
     if (result.error || result.canceled) {
@@ -651,6 +699,7 @@ watch(() => props.repoPath, () => {
 onMounted(() => {
   loadChanges()
   offAiTaskDone = EventsOn('ai-task:done', onAiTaskDone)
+  offAiTaskOutput = EventsOn('ai-task:output', onAiTaskOutput)
 })
 
 onBeforeUnmount(() => {
@@ -660,6 +709,10 @@ onBeforeUnmount(() => {
   if (offAiTaskDone) {
     offAiTaskDone()
     offAiTaskDone = null
+  }
+  if (offAiTaskOutput) {
+    offAiTaskOutput()
+    offAiTaskOutput = null
   }
 })
 

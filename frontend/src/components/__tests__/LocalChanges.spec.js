@@ -99,9 +99,9 @@ const stubs = {
   FileDiffDialog: { name: 'FileDiffDialog', template: '<div class="file-diff-dialog-stub" :data-file="file" />', props: ['modelValue', 'repoPath', 'file'] },
   CodeReviewResult: {
     name: 'CodeReviewResult',
-    template: '<div class="code-review-stub" v-if="modelValue" :data-loading="loading"><span v-for="(i, idx) in issues" :key="idx" class="stub-issue" @click="$emit(\'locate-file\', i.file)">{{ i.file }}</span></div>',
-    props: ['modelValue', 'issues', 'summary', 'loading'],
-    emits: ['update:modelValue', 'locate-file']
+    template: '<div class="code-review-stub" v-if="modelValue" :data-loading="loading" :data-progress="progress"><span v-for="(i, idx) in issues" :key="idx" class="stub-issue" @click="$emit(\'locate-file\', i.file)">{{ i.file }}</span></div>',
+    props: ['modelValue', 'issues', 'summary', 'loading', 'elapsed', 'progress'],
+    emits: ['update:modelValue', 'locate-file', 'cancel']
   }
 }
 const directives = { loading: () => {} }
@@ -747,6 +747,48 @@ describe('LocalChanges.vue', () => {
     expect(stub.props('summary')).toBe('2 个问题')
     // loading 关闭
     expect(stub.props('loading')).toBe(false)
+  })
+
+  it('ai-task:output 增量透传到 CodeReviewResult progress（taskId 过滤 + 末尾 8KB 截断）', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-out')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const outputHandler = aiEventBus.handlers['ai-task:output']
+    expect(outputHandler).toBeTruthy()
+    // 本任务 thinking 增量 → progress 追加
+    outputHandler({ taskId: 'task-review-out', text: '思考片段', thinking: true })
+    await flushPromises()
+    let stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('progress')).toBe('思考片段')
+    // 其它任务的输出不串扰
+    outputHandler({ taskId: 'task-other', text: '别的任务' })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'CodeReviewResult' }).props('progress')).toBe('思考片段')
+    // 超过 8KB 截断保留末尾
+    outputHandler({ taskId: 'task-review-out', text: 'x'.repeat(9000) })
+    await flushPromises()
+    stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('progress').length).toBe(8192)
+    expect(stub.props('progress').endsWith('x'.repeat(10))).toBe(true)
+  })
+
+  it('审查中弹窗取消按钮触发 CancelAiTask', async () => {
+    const { GetLocalChanges, GetUncommittedDiffText, RunAiFunction, CancelAiTask } = await import('../../../wailsjs/go/main/App')
+    GetLocalChanges.mockResolvedValue(mixedChanges)
+    GetUncommittedDiffText.mockResolvedValue('diff')
+    RunAiFunction.mockResolvedValue('task-review-cancel')
+    wrapper = await createWrapper()
+    await wrapper.findAll('button').find(b => b.text().includes('AI 审查')).trigger('click')
+    await flushPromises()
+    const stub = wrapper.findComponent({ name: 'CodeReviewResult' })
+    expect(stub.props('loading')).toBe(true)
+    await stub.vm.$emit('cancel')
+    await flushPromises()
+    expect(CancelAiTask).toHaveBeenCalledWith('task-review-cancel')
   })
 
   it('done 事件 code-review 与 commit-message taskId 共存不串扰', async () => {

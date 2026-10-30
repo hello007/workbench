@@ -8,11 +8,17 @@
     append-to-body
     destroy-on-close
   >
-    <!-- 加载态：生成中 -->
+    <!-- 加载态：生成中 + 过程流（模型思考/输出增量实时滚动，GLM 等思考模型静默期分钟级） -->
     <div v-if="loading" class="review-loading">
       <el-icon class="is-loading"><Loading /></el-icon>
       <span>审查中...</span>
+      <el-text type="info" size="small">已用 {{ Math.floor(elapsed / 60) }} 分 {{ elapsed % 60 }} 秒</el-text>
     </div>
+    <div
+      v-if="loading"
+      ref="progressRef"
+      class="review-progress"
+    >{{ progress || '模型思考中，暂无文本输出…' }}</div>
 
     <template v-else>
       <!-- 整体结论 -->
@@ -64,13 +70,15 @@
     </template>
 
     <template #footer>
+      <!-- 审查中提供取消：杀 claude 进程树释放并发槽位，done(canceled) 收尾 -->
+      <el-button v-if="loading" size="small" type="danger" plain @click="$emit('cancel')">取消审查</el-button>
       <el-button size="small" @click="$emit('update:modelValue', false)">关闭</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -79,11 +87,24 @@ const props = defineProps({
   issues: { type: Array, default: () => [] },
   // structuredOutput.summary 整体审查结论
   summary: { type: String, default: '' },
-  // 生成中加载态：true 显示「审查中...」，false 展示问题清单
-  loading: { type: Boolean, default: false }
+  // 生成中加载态：true 显示「审查中...」+ 过程流，false 展示问题清单
+  loading: { type: Boolean, default: false },
+  // 已用秒数（父组件 1s tick）
+  elapsed: { type: Number, default: 0 },
+  // 审查过程增量文本（含 thinking，父组件截断至末尾 8KB）
+  progress: { type: String, default: '' }
 })
 
-const emit = defineEmits(['update:modelValue', 'locate-file'])
+const emit = defineEmits(['update:modelValue', 'locate-file', 'cancel'])
+
+// 过程流自动滚底：新增量到达时贴最新过程
+const progressRef = ref(null)
+watch(() => props.progress, async () => {
+  await nextTick()
+  if (progressRef.value) {
+    progressRef.value.scrollTop = progressRef.value.scrollHeight
+  }
+})
 
 // 按级别分组（critical 置顶 → warning → info），组内保留模型原始顺序。
 // severity 取值对齐 code-review skill OutputSchema 枚举 critical|warning|info。
@@ -142,9 +163,26 @@ const onLocateFile = (issue) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 24px 0;
+  padding: 16px 0 8px;
   color: var(--text-secondary);
   justify-content: center;
+}
+
+/* 审查过程流：等宽字体滚动区，空态提示模型思考中 */
+.review-progress {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  height: 180px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
 }
 
 .review-summary {
