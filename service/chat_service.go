@@ -57,10 +57,13 @@ func saveChatJSON(filePath string, v interface{}) error {
 // ===== 子进程抽象（测试注入 fake，不真调 claude CLI）=====
 
 // chatProcess 对话子进程抽象：生产包装 exec.Cmd，测试注入 fake 流式输出。
-// 抽象面仅覆盖 pumpChatOutput 实际触达的操作（管道/启动/等待/终止/退出码）。
+// 抽象面仅覆盖 pumpChatOutput 实际触达的操作（管道/启动/等待/终止/退出码）
+// 加 StdinPipe（prompt 经 stdin 传入，不走 argv——Windows 命令行上限 32K）。
 type chatProcess interface {
 	// StdoutPipe 返回子进程标准输出流（stderr 已并入该流）。
 	StdoutPipe() (io.ReadCloser, error)
+	// StdinPipe 返回子进程标准输入写入端（prompt 经此传入，写完须 Close）。
+	StdinPipe() (io.WriteCloser, error)
 	// Start 启动子进程（非阻塞，等待经 Wait）。
 	Start() error
 	// Wait 阻塞等待进程退出并回收资源。
@@ -103,6 +106,11 @@ func (p *execChatProcess) StdoutPipe() (io.ReadCloser, error) {
 		p.cmd.Stderr = p.cmd.Stdout
 	}
 	return rc, err
+}
+
+// StdinPipe 返回子进程标准输入写入端（RunChat 启动后异步写入 prompt 并关闭）。
+func (p *execChatProcess) StdinPipe() (io.WriteCloser, error) {
+	return p.cmd.StdinPipe()
 }
 
 func (p *execChatProcess) Start() error { return p.cmd.Start() }
@@ -664,16 +672,18 @@ const chatQuestionPreamble = `【交互环境说明】你运行在非交互对�
 不需要用户选择时正常对话，不要输出该代码块。`
 
 // buildChatArgs 组装 claude headless 对话命令参数（纯函数，便于单测）。
-// 参数顺序：-p <prompt> [--resume <sid>] --output-format stream-json --verbose
+// 参数顺序：-p [--resume <sid>] --output-format stream-json --verbose
 // [--permission-mode <mode>] [--model <model>] --disallowedTools AskUserQuestion。
+// -p 为裸参数：prompt 经 stdin 管道传入（RunChat 启动后异步写入）——Windows
+// 命令行上限 32K，prompt 走 argv 时长对话/粘贴大段内容会 fork/exec 报错。
 // --resume：会话已有 claude session id 时续上下文（多轮对话）。
 // --permission-mode：仅非 default 非空时追加（default 为 claude 默认行为，不传等价）。
 // --model：仅非空时追加（空 = claude 默认模型）。
 // --disallowedTools AskUserQuestion：恒定禁用该工具——headless -p 模式下它不渲染
 // 界面且被 CLI 自动应答，模型基于「用户未作答」的错误前提继续输出；禁用后配合
 // 首轮 prompt 声明（chatQuestionPreamble）引导模型改用 chat-question 代码块。
-func buildChatArgs(prompt, resumeSessionID, permissionMode, modelName string) []string {
-	args := []string{"-p", prompt}
+func buildChatArgs(resumeSessionID, permissionMode, modelName string) []string {
+	args := []string{"-p"}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
@@ -776,7 +786,7 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	if sess.ClaudeSessionID == "" {
 		claudePrompt = chatQuestionPreamble + "\n\n" + prompt
 	}
-	args := buildChatArgs(claudePrompt, sess.ClaudeSessionID, permissionMode, modelName)
+	args := buildChatArgs(sess.ClaudeSessionID, permissionMode, modelName)
 	proc := s.processFactory(ctx, "claude", args, sess.Cwd)
 
 	stdout, err := proc.StdoutPipe()
@@ -791,6 +801,17 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		<-s.concurrencySem
 		return "", fmt.Errorf("创建输出管道失败: %w", err)
 	}
+	// stdin 管道必须在 Start 前创建（os/exec 限制：Start 后调用报错），写入在 Start 后
+	stdin, serr := proc.StdinPipe()
+	if serr != nil {
+		cancel()
+		s.mu.Lock()
+		task.running = false
+		delete(s.tasks, taskID)
+		s.mu.Unlock()
+		<-s.concurrencySem
+		return "", fmt.Errorf("创建输入管道失败: %w", serr)
+	}
 	if err := proc.Start(); err != nil {
 		cancel()
 		s.mu.Lock()
@@ -800,6 +821,13 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		<-s.concurrencySem
 		return "", fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
 	}
+
+	// prompt 异步写入 stdin 后立即关闭：claude -p 裸参数时从 stdin 读完整 prompt。
+	// 放 goroutine 防 claude 异常早退时 Write 阻塞在无人读的管道上导致死锁
+	go func() {
+		_, _ = io.WriteString(stdin, claudePrompt)
+		_ = stdin.Close()
+	}()
 
 	// 进程启动成功：user 消息即刻入档（排队取消/启动失败的轮次不留痕）
 	userMsg := model.ChatMessage{

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -127,6 +128,7 @@ type fakeChatProcess struct {
 	gotName    string
 	gotArgs    []string
 	gotDir     string
+	stdinBuf   bytes.Buffer // RunChat 经 StdinPipe 写入的 prompt（stdin 传参改造后 argv 不再含 prompt）
 	writer     *io.PipeWriter
 	writeDone  chan struct{}
 	killCh     chan struct{}
@@ -159,6 +161,41 @@ func (f *fakeChatProcess) StdoutPipe() (io.ReadCloser, error) {
 	r, w := io.Pipe()
 	f.writer = w
 	return r, nil
+}
+
+// stdinRecorder 记录型 stdin 写入端：写入内容进 fakeChatProcess.stdinBuf（f.mu 保护）。
+type stdinRecorder struct{ f *fakeChatProcess }
+
+func (s stdinRecorder) Write(p []byte) (int, error) {
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	return s.f.stdinBuf.Write(p)
+}
+
+func (s stdinRecorder) Close() error { return nil }
+
+// StdinPipe 返回记录型写入端，供断言 prompt 经 stdin 传入且 argv 不含 prompt。
+func (f *fakeChatProcess) StdinPipe() (io.WriteCloser, error) {
+	return stdinRecorder{f: f}, nil
+}
+
+// waitStdin 轮询等待 fake 记录到经 stdin 写入的 prompt（写入在 RunChat 的独立
+// goroutine 中，与 done 事件无先后保证，不能直接读 stdinBuf 断言）。
+func waitStdin(t *testing.T, f *fakeChatProcess, wantSub string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.mu.Lock()
+		got := f.stdinBuf.String()
+		f.mu.Unlock()
+		if strings.Contains(got, wantSub) {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stdin 未写入期望 prompt（含 %q）, got %q", wantSub, got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (f *fakeChatProcess) Start() error {
@@ -432,35 +469,35 @@ func TestChatService_IndexCorruptFallback(t *testing.T) {
 // ===== 参数组装 =====
 
 // TestBuildChatArgs 表驱动：resume/permission-mode/model 的追加规则。
+// prompt 不再进 argv（Windows 命令行上限 32K）：-p 为裸参数，prompt 经 stdin 传入。
 func TestBuildChatArgs(t *testing.T) {
 	cases := []struct {
 		name   string
-		prompt string
 		resume string
 		mode   string
 		mdl    string
 		want   []string
 	}{
 		{
-			name: "首轮默认模式", prompt: "hi", resume: "", mode: "default", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion"},
+			name: "首轮默认模式", resume: "", mode: "default", mdl: "",
+			want: []string{"-p", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
-			name: "续会话全参数", prompt: "hi", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
-			want: []string{"-p", "hi", "--resume", "s1", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion"},
+			name: "续会话全参数", resume: "s1", mode: "acceptEdits", mdl: "sonnet",
+			want: []string{"-p", "--resume", "s1", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--model", "sonnet", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
-			name: "权限模式为空不追加", prompt: "hi", resume: "", mode: "", mdl: "opus",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion"},
+			name: "权限模式为空不追加", resume: "", mode: "", mdl: "opus",
+			want: []string{"-p", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools", "AskUserQuestion"},
 		},
 		{
-			name: "plan 模式", prompt: "hi", resume: "", mode: "plan", mdl: "",
-			want: []string{"-p", "hi", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--disallowedTools", "AskUserQuestion"},
+			name: "plan 模式", resume: "", mode: "plan", mdl: "",
+			want: []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "--disallowedTools", "AskUserQuestion"},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildChatArgs(tc.prompt, tc.resume, tc.mode, tc.mdl)
+			got := buildChatArgs(tc.resume, tc.mode, tc.mdl)
 			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 				t.Errorf("buildChatArgs:\n got  %v\n want %v", got, tc.want)
 			}
@@ -530,9 +567,15 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		t.Errorf("工作目录: got %q", dir)
 	}
 	gotArgs := strings.Join(args, " ")
-	// 首轮 prompt = chat-question 环境声明前缀 + 用户原文（仅进 claude prompt）
-	if len(args) < 2 || args[1] != chatQuestionPreamble+"\n\n你好" {
-		t.Errorf("首轮 prompt 应为声明前缀+原文: %v", args)
+	// 首轮 prompt = chat-question 环境声明前缀 + 用户原文，经 stdin 传入（写入是
+	// 异步 goroutine，与 done 事件无先后保证，轮询等待）；argv 不含 prompt——
+	// Windows 命令行上限 32K，prompt 走 argv 会 fork/exec 报「文件名太长」
+	if len(args) < 2 || args[1] != "--output-format" {
+		t.Errorf("-p 应为裸参数（prompt 走 stdin）: %v", args)
+	}
+	stdinGot := waitStdin(t, f, "你好")
+	if !strings.HasPrefix(stdinGot, chatQuestionPreamble) || !strings.Contains(stdinGot, "你好") {
+		t.Errorf("首轮 stdin prompt 应为声明前缀+原文: %q", stdinGot)
 	}
 	if strings.Contains(gotArgs, "--resume") {
 		t.Errorf("首轮不应带 --resume: %v", args)
@@ -601,17 +644,14 @@ func TestChatService_RunChat_ResumeSecondTurn(t *testing.T) {
 	f := (*fakes)[1]
 	f.mu.Lock()
 	args := strings.Join(f.gotArgs, " ")
-	promptArg := ""
-	if len(f.gotArgs) >= 2 {
-		promptArg = f.gotArgs[1]
-	}
 	f.mu.Unlock()
 	if !strings.Contains(args, "--resume claude-s-1") {
 		t.Errorf("第二轮应带 --resume: %v", f.gotArgs)
 	}
-	// 续轮不重复注入环境声明（--resume 上下文已含）
-	if promptArg != "第二问" {
-		t.Errorf("第二轮 prompt 不应含声明前缀: %q", promptArg)
+	// 续轮不重复注入环境声明（--resume 上下文已含）；prompt 经 stdin 传入
+	stdinGot := waitStdin(t, f, "第二问")
+	if strings.Contains(stdinGot, chatQuestionPreamble) {
+		t.Errorf("第二轮 stdin prompt 不应含声明前缀: %q", stdinGot)
 	}
 	if result.ClaudeSessionID != "claude-s-2" {
 		t.Errorf("第二轮 claude 会话 id: got %q", result.ClaudeSessionID)
@@ -1259,7 +1299,7 @@ func TestSaveChatJSON_AtomicSequence(t *testing.T) {
 // TestNewExecChatProcess_CancelKillsTreeWired B7：生产进程须设置 cmd.Cancel
 // （ctx 超时走整树杀而非默认 Kill 根进程留孤儿），且对未启动进程调用安全。
 func TestNewExecChatProcess_CancelKillsTreeWired(t *testing.T) {
-	p := newExecChatProcess(context.Background(), "claude", []string{"-p", "hi"}, ".")
+	p := newExecChatProcess(context.Background(), "claude", []string{"-p"}, ".")
 	ep, ok := p.(*execChatProcess)
 	if !ok {
 		t.Fatalf("生产工厂应返回 *execChatProcess, got %T", p)

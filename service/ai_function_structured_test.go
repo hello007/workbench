@@ -49,7 +49,7 @@ func TestParseStreamLine_NoStructuredOutput(t *testing.T) {
 func TestBuildClaudeArgs_JsonSchema(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","properties":{"candidates":{"type":"array"}}}`)
 	fn := &model.AiFunction{ID: "f1", OutputSchema: schema}
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	found := false
 	for i, a := range args {
 		if a == "--json-schema" && i+1 < len(args) && args[i+1] == string(schema) {
@@ -64,7 +64,7 @@ func TestBuildClaudeArgs_JsonSchema(t *testing.T) {
 // TestBuildClaudeArgs_NoJsonSchema OutputSchema 为空时不加 --json-schema（兼容现有 skill 零回归）。
 func TestBuildClaudeArgs_NoJsonSchema(t *testing.T) {
 	fn := &model.AiFunction{ID: "f1"} // OutputSchema nil
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	for _, a := range args {
 		if a == "--json-schema" {
 			t.Errorf("OutputSchema 为空不应加 --json-schema，got %v", args)
