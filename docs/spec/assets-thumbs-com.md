@@ -186,6 +186,13 @@
 - 批量补缺只负责 small（`batchBacklogTiers`）；hd 由详情侧 `RequestAssetThumb(libraryID, fileID, relPath, slideNum, tierIndex)` 单页单档生成：PNG 已存在直接返回（幂等），同页在途经 `demandPending` 去重，异步入队后前端等该库 `assets-thumbs:done`（`onDemand=true`）重拉。
 - **按需走独立通道 `demandCh`（容量 16）**：不进 `batches` 注册表，因此**不与批量批次互相取消**（`EnqueueAssetThumbs` 同库覆盖式取消只作用于批量）——共用注册表会让「打开详情」取消正在跑的批量、或反之让详情图永不出现。worker 消费顺序：jump → demand → batch（demand 只做非阻塞探测，阻塞 select 中与 batch 同集随机，按需最多等一个批量文件）。
 - 按需批次用任务自带 `Tiers`/`Pages`（单档单页），**不发 progress 事件**（批量进度条不闪），done 载荷带 `onDemand` + 目标 `fileId`/`slideNum` 供前端把失败/取消落到当前详情卡（显示「重试生成」，否则 hd 永久占位无反馈）。
+### hd 单页提效：会话缓存与邻页预取（2026-10-30）
+
+- **文件会话缓存（LRU=1）**：`comWorkerState.cached` 挂单个已打开 Presentation（worker 线程独占，无锁）。命中条件 = `absPath` 相同 **且** 磁盘 size/mtime 未变（免 `findOrOpen`/`Open`、免重查 `Slides.Count`）；同文件连续翻页因此不再重复付出大文件 Open 成本。未命中先 `closeCachedPresentation()` 再开新会话。
+- **清理单点**：非 reused 先 `Close` 后 `Release`（顺序颠倒会对已释放指针调 Close），reused 只 `Release`（**禁 Close 用户文档**）。接线点 = `releaseApp`（含 Discard 脏重建）、`cleanup`（quit/Shutdown）、**`jumpInSession` 开头**（跳转要 `WithWindow=msoTrue`，缓存的无窗口 Presentation 会被 `findOrOpen` 复用导致 GotoSlide 失败）、空闲超时 `thumbSessionIdle`（var 注入，默认 60s，仅在取到任务后执行前判定，urgent 优先级语义不变）。
+- **邻页预取**：`thumbPrefetchPages(slideNum)` 返回 `[目标页, 目标页-1, 目标页+1]`（钳制 ≥1、去重、≤3 页）。**`Pages[0]` 恒为主目标页**——该约定同时是 `done.SlideNum` 回填、去重键、失败判定的基准，接口签名不变。预取页 `Item`/`Export` 失败只 Warn 继续，**仅主目标页失败返回错误**（邻页损坏不得把当前页标失败）。翻到相邻页时 PNG 已在，`GetAssetThumb` 直接命中，前端无需再请求。
+- 排障日志：`缩略图会话缓存命中` / `缩略图会话已缓存` / `缩略图会话缓存失效（文件已变更或不可读，重开会话）` / `缩略图会话缓存切换（异文件）` / `缩略图会话缓存空闲超时关闭`。
+
 - **批量在途的按需插队**：`handleBatch` 每个文件边界调 `drainDemand()` 非阻塞排空按需通道（对齐跳转的页间 preempt）——只在批间消费会让千页级批量（数分钟）挡住按需请求直到排队超时作废。嵌套按需任务不再插队（无递归放大）。
 - **按需任务纳入取消面**：`demandTasks` 登记（不进 `batches`），`CancelAssetThumbs` 取消同库按需任务、`WaitThumbsDone` 取消全部——否则删库/清档的 `RemoveAll` 之后按需任务仍会重建档目录并写入旧分辨率 PNG，关停还要等满按需超时。`handleBatch` 统一 `defer b.Cancel()` 回收超时定时器。
 - **页白名单批次禁走 `pruneBeyond`**：按「本次导出页数」裁剪会把第 1 页之后的既有产物误删（单页导出返回 n=1 时会清空整本后续页）。记账只按白名单页 Stat 成功者写入。

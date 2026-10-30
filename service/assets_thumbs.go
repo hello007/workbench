@@ -109,6 +109,8 @@ type thumbFileSpec struct {
 //   - Tiers 非 nil = 只导出指定档位（详情侧 hd 按需生成只传 hd）。
 //   - Pages 非 nil = 只导出指定页（1-based），此时 handleBatch 跳过 pruneBeyond
 //     ——未导出页的既有产物与记账必须保留，按返回页数裁剪会误删后续页。
+//   - **Pages[0] 恒为主目标页**（按需批次契约）：其余项为预取邻页，导出失败只
+//     记日志不影响主目标页结果；done 载荷的 SlideNum 也取 Pages[0]。
 //
 // OnDemand 标记详情侧单页按需批次：不发 progress 事件（前端批量进度条不闪），
 // done 事件带同名字段供前端过滤。
@@ -408,10 +410,11 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 		OnDemand: b.OnDemand,
 	}
 	// 按需批次回填目标条目：前端据此把失败/取消落到当前详情卡（显示重试入口），
-	// 否则 onDemand 失败后 hd 永为占位且无任何可见反馈。
+	// 否则 onDemand 失败后 hd 永为占位且无任何可见反馈。SlideNum 恒取 Pages[0]
+	// ——按需任务的白名单首位即主目标页，其余为预取邻页（thumbPrefetchPages）。
 	if b.OnDemand && len(b.Files) == 1 {
 		done.FileID = b.Files[0].FileID
-		if len(b.Pages) == 1 {
+		if len(b.Pages) > 0 {
 			done.SlideNum = b.Pages[0]
 		}
 	}
@@ -469,7 +472,7 @@ func thumbPNGPath(thumbsDir, tierKey string, fileID int64, slideNum int) string 
 }
 
 // pageRequested 页白名单判定：pages 为 nil（全书）恒真；非 nil 仅命中页导出。
-// 白名单常见形态为单页（详情侧按需），线性查找足够。
+// 白名单常见形态为单页（详情侧按需）或目标页+前后邻页（预取），线性查找足够。
 func pageRequested(pages []int, slideNum int) bool {
 	if pages == nil {
 		return true
@@ -480,6 +483,22 @@ func pageRequested(pages []int, slideNum int) bool {
 		}
 	}
 	return false
+}
+
+// thumbPrefetchPages 按需单页生成的实际导出页集合（纯函数，可直测）：目标页恒在
+// 首位（Pages[0] = 主目标页契约——done 载荷回填与记账分流都依赖它），后随前后
+// 邻页预取（详情侧连续翻页时下一页多半已就绪，摊薄单文件 Open 成本）。页序钳制
+// 到 ≥1（首页无前邻页）、上限 3 页。单页文件的后邻页导出会失败——由 exportSession
+// 的「非主目标页失败只告警」规则兜底，不影响主目标页结果。
+func thumbPrefetchPages(slideNum int) []int {
+	pages := []int{slideNum}
+	for _, p := range []int{slideNum - 1, slideNum + 1} {
+		if p < 1 || p == slideNum {
+			continue
+		}
+		pages = append(pages, p)
+	}
+	return pages
 }
 
 // EnqueueAssetThumbs 入队一批缩略图生成（扫描/重建完成后由扫描链路调用——PR2
@@ -796,9 +815,10 @@ func (q *thumbQueue) dropDemandTask(b *thumbBatchTask, key string) {
 }
 
 // clearDemandPendingLocked 释放按需去重键（调用方持 q.mu）。按需任务恒为
-// 单文件单页单档（RequestAssetThumb 构造），非该形态的按需任务不产生键。
+// 单文件单档，页白名单首位为主目标页（其余为预取邻页，thumbPrefetchPages），
+// 去重键按 Pages[0] 构造；非该形态的按需任务不产生键。
 func (q *thumbQueue) clearDemandPendingLocked(b *thumbBatchTask) {
-	if len(b.Files) != 1 || len(b.Pages) != 1 || len(b.Tiers) != 1 {
+	if len(b.Files) != 1 || len(b.Pages) == 0 || len(b.Tiers) != 1 {
 		return
 	}
 	delete(q.demandPending, thumbDemandKey(b.LibraryID, b.Files[0].FileID, b.Pages[0], b.Tiers[0].Key))
@@ -808,6 +828,9 @@ func (q *thumbQueue) clearDemandPendingLocked(b *thumbBatchTask) {
 // PRD R2）：目标 PNG 已存在直接返回（幂等）；在途同页请求去重；入队走独立按需
 // 通道（不进库批次注册表，不与批量互相取消）。异步入队，前端等待该库
 // assets-thumbs:done（载荷 onDemand=true）后重拉。
+//
+// 邻页预取（提效）：实际导出页为「主目标页 + 前后邻页」（thumbPrefetchPages），
+// 目标页恒在首位；邻页失败不影响主目标页结果，翻页时命中既有 PNG 免再打开。
 //
 // 校验顺序：库存在（透传）→ 无 PowerPoint（E_ASSETS_THUMBS_UNAVAILABLE）→
 // 档位/页序/文件 ID 非法 → 源文件存在性（越界遏制单点 resolveAssetRelAbsPath）。
@@ -861,10 +884,13 @@ func (s *AssetLibraryService) RequestAssetThumb(libraryID string, fileID int64, 
 		Files:     []thumbFileSpec{{FileID: fileID, Path: relPath, AbsPath: absPath}},
 		ThumbsDir: thumbsDir,
 		Tiers:     []thumbTier{tier},
-		Pages:     []int{slideNum},
-		OnDemand:  true,
-		Ctx:       ctx,
-		Cancel:    cancel,
+		// 页白名单 = 主目标页 + 前后邻页预取（Pages[0] 恒为主目标页）。单文件会话
+		// 已被 COM worker 缓存（assets_thumbs_windows.go），邻页在同一会话内导出，
+		// 翻页时大概率命中既有 PNG——Open 成本被摊薄而非重复支付。
+		Pages:    thumbPrefetchPages(slideNum),
+		OnDemand: true,
+		Ctx:      ctx,
+		Cancel:   cancel,
 	}
 	q.mu.Lock()
 	if q.closed {

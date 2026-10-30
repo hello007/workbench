@@ -97,6 +97,12 @@ var (
 	thumbOwnedExitWait         = 3 * time.Second        // owned 退出等待上限
 )
 
+// thumbSessionIdle 会话缓存空闲关闭阈值（var 注入点：单测注入毫秒级驱动，禁真实
+// 60s 等待——test-stability 契约）。worker 取到新任务后若缓存 Presentation 已空闲
+// 超过该时长，先关闭会话再执行（长空闲保留 Presentation 无收益：占内存并锁源文件，
+// 且下一个任务很可能换了文件）。
+var thumbSessionIdle = 60 * time.Second
+
 // thumbOwnedExitProbe owned 实例存活探针（生产 = officeServerPIDSet 全局枚举；
 // 单测注入 fake PID 集驱动「退出/恒存」分支——勿在测试路径直调全局枚举）。
 var thumbOwnedExitProbe = officeServerPIDSet
@@ -127,12 +133,32 @@ type goOleThumbExporter struct {
 	staleOwnedPIDs   map[int]bool // 盘上残留 PID 集（loadStaleOwnedPIDs 懒加载一次，先于首个 CreateInstance 读保证读到上会话崩溃时的内容）
 }
 
-// comWorkerState STA worker 线程内会话状态（app/ownedPIDs 仅 worker goroutine
-// 访问，无锁；owner 反向引用供 publishOwned 发布镜像）。
+// comWorkerState STA worker 线程内会话状态（app/ownedPIDs/cached 仅 worker
+// goroutine 访问，无锁；owner 反向引用供 publishOwned 发布镜像）。
 type comWorkerState struct {
 	app       *ole.IDispatch
 	ownedPIDs map[int]bool        // 自启实例（CreateInstance 快照 diff 检出；空 = 复用已存活实例）。发布镜像并同步落盘 com_owned_pids.json——上会话崩溃（Shutdown 未跑）后下会话据此识别幽灵残留（D7）
 	owner     *goOleThumbExporter // 反向引用：发布 owned PID 镜像（nil 时 publishOwned 跳过）
+	cached    *cachedPresentation // 已打开的 Presentation 缓存（LRU=1，见类型注释）
+}
+
+// cachedPresentation 单个已打开 Presentation 的会话缓存（LRU=1，同时最多缓存一个
+// 文件）：详情侧连续翻页的每一次按需请求都会走一次 Presentations.Open + Close，
+// 真机实测 Open 是单页 hd 生成 4–5 秒的主因；同一文件连续请求时复用即有收益。
+//
+// 失效判据 = 磁盘 size/mtime 变化（文件被外部修改）、异文件请求、空闲超时、
+// 会话销毁（Discard 重建/releaseApp/cleanup/Shutdown）、跳转冲突（见 jumpInSession）。
+//
+// reused=true 表示缓存的是用户已打开的 Presentation（findOrOpen 命中合集复用）：
+// 清理时只 Release 禁 Close——Close 属归属操作，会关掉用户的文档。
+type cachedPresentation struct {
+	absPath    string         // 绝对路径（命中判定，大小写不敏感）
+	pres       *ole.IDispatch // 已打开 Presentation（本侧持有一个引用）
+	reused     bool           // true = 复用用户已开实例（禁 Close）
+	size       int64          // 打开时的文件字节数（新鲜度判据）
+	mtimeNs    int64          // 打开时的修改时间纳秒（新鲜度判据）
+	slideCount int            // 打开时查得的页数（命中时复用，免重复查 Slides.Count）
+	lastUsed   time.Time      // 最近使用时间（空闲关闭依据）
 }
 
 // newThumbExporter 平台分叉构造点（无 tag 侧调用）。ownedPersistPath 为自启
@@ -187,6 +213,9 @@ func (e *goOleThumbExporter) workerLoop() {
 			w.cleanup()
 			return
 		}
+		// 空闲会话关闭（取到任务后、执行前）：只影响「本任务开始前」的缓存清理，
+		// 不参与任务选取——urgent 通道的严格优先级语义（receiveNextTask）不变。
+		w.closeIdleCache()
 		t(w)
 	}
 }
@@ -411,6 +440,9 @@ func sortedPIDList(pids map[int]bool) []int {
 
 // cleanup 退出自启实例（worker quit 路径）：Quit 温和收口 + 强杀残留兜底。
 func (w *comWorkerState) cleanup() {
+	// 会话缓存先于 Application 释放（Presentation 依赖 Application 会话，
+	// 顺序颠倒会对已断连的应用会话调 Close）。
+	w.closeCachedPresentation()
 	if w.app != nil {
 		if len(w.ownedPIDs) > 0 {
 			_, _ = oleutil.CallMethod(w.app, "Quit")
@@ -607,6 +639,9 @@ func (w *comWorkerState) reclaimResidualInstance(residual map[int]bool) (*ole.ID
 
 // releaseApp 释放会话引用（owned 实例温和 Quit；复用实例不动）。
 func (w *comWorkerState) releaseApp() {
+	// 会话缓存随会话一起收口（Discard 重建路径经本函数进入）：Presentation 必须
+	// 在所属 Application 释放前关闭/释放，否则对新会话残留旧句柄。
+	w.closeCachedPresentation()
 	if w.app == nil {
 		return
 	}
@@ -872,11 +907,16 @@ func isComClassError(err error) bool {
 
 // ---- COM 任务实现（worker STA 线程内执行） ----
 
-// exportSession 单文件导出会话：复用检查 → ReadOnly 无窗口打开 → 逐页 Export
-// （档位由调用方给定；pages 为 nil 导全书，非 nil 只导白名单页；页级瞬态重试 +
-// 页间 preempt 跳转插队）→ Close（复用的不 Close）。
+// exportSession 单文件导出会话：会话缓存优先（同文件连续请求免重复 Open）→ 未命中
+// 时 ReadOnly 无窗口打开 → 逐页 Export（档位由调用方给定；pages 为 nil 导全书，
+// 非 nil 只导白名单页；页级瞬态重试 + 页间 preempt 跳转插队）→ 会话继续留在缓存
+// （生命周期由 closeCachedPresentation 统一收口）。
 // ctx 供页级重试的准入判定与退避等待消费（取消/超时零重试）。返回最后成功导出
 // 的页序（全页路径下 = 页数）。
+//
+// 白名单主目标页契约（Pages[0] 恒为主目标页，详情侧按需生成）：非主目标页（预取
+// 邻页）的取页/导出失败只记 Warn 后继续——邻页损坏不应把当前页标为失败。pages 为
+// nil（批量全书）语义完全不变：任一页失败即整文件失败。
 func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error) {
 	app, err := w.ensureApp()
 	if err != nil {
@@ -889,33 +929,30 @@ func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, 
 			return 0, fmt.Errorf("创建缩略图目录失败（%s）: %w", tier.Key, err)
 		}
 	}
-	pres, reused, err := w.findOrOpen(app, spec.AbsPath, msoTrue, msoFalse)
+	pres, count, err := w.acquireExportPresentation(app, spec)
 	if err != nil {
 		return 0, err
 	}
-	// Release 恒做（复用与否）：findOrOpen 返回的接口指针是本侧自有引用——
-	// 复用路径只是不 Close 用户的 Presentation（Close 属归属操作），Release
-	// 释放的是本侧 COM 代理引用，与归属无关，不释放 = 代理引用泄漏累积
-	// （check P2）。defer LIFO：先注册 Release 后注册 Close → 执行序 Close
-	// （让 PowerPoint 关闭演示文稿）先于 Release（释放本侧 COM 引用）——顺序
-	// 颠倒会对已 Release 的指针调 Close，违反 COM 引用规则（代理断连时表现
-	// 为 RPC_E_DISCONNECTED 等未定义行为）。
-	defer pres.Release()
-	if !reused {
-		defer oleutil.CallMethod(pres, "Close")
+	// pres 引用归会话缓存持有（acquire 已入库），本函数不 Release 不 Close——
+	// 生命周期由 closeCachedPresentation 统一收口（Discard 重建/releaseApp/
+	// cleanup/Shutdown/跳转冲突）。此处冒失 Release 会留下缓存持悬空指针。
+	slides, err := presentationSlides(pres)
+	if err != nil {
+		return 0, err
 	}
+	// slides 句柄在 preempt 跳转关闭同文件会话后需重建（见循环内注释）：defer 按
+	// 变量终值释放，重建前须先把旧句柄置 nil，防二次 Release。
+	defer func() {
+		if slides != nil {
+			slides.Release()
+		}
+	}()
 
-	slidesV, err := oleutil.GetProperty(pres, "Slides")
-	if err != nil {
-		return 0, fmt.Errorf("取 Slides 集合失败: %w", err)
+	mainPage := 0 // 白名单主目标页（Pages[0]）；0 = 全书批量（无主次之分）
+	if len(pages) > 0 {
+		mainPage = pages[0]
 	}
-	slides := slidesV.ToIDispatch()
-	defer slides.Release()
-	countV, err := oleutil.GetProperty(slides, "Count")
-	if err != nil {
-		return 0, fmt.Errorf("取页数失败: %w", err)
-	}
-	count := int(countV.Val)
+	isMainPage := func(page int) bool { return mainPage == 0 || page == mainPage }
 
 	exported := 0
 	for i := 1; i <= count; i++ {
@@ -926,9 +963,14 @@ func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, 
 		}
 		slideV, err := oleutil.CallMethod(slides, "Item", i)
 		if err != nil {
-			return exported, fmt.Errorf("取第 %d 页失败: %w", i, err)
+			if isMainPage(i) {
+				return exported, fmt.Errorf("取第 %d 页失败: %w", i, err)
+			}
+			Logger().Warn("预取邻页取页失败（不影响主目标页）", "page", i, "main", mainPage, "err", err)
+			continue
 		}
 		slide := slideV.ToIDispatch()
+		var exportErr error
 		for _, tier := range tiers {
 			pngPath := thumbPNGPath(thumbsDir, tier.Key, spec.FileID, i)
 			// 页级瞬态重试（WPS 冷启动/大文件页内容未就绪 DISP_E_EXCEPTION 瞬态，
@@ -938,11 +980,18 @@ func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, 
 				_, err := oleutil.CallMethod(slide, "Export", pngPath, "PNG", tier.Width, tier.Height)
 				return err
 			}); err != nil {
-				slide.Release()
-				return exported, err
+				exportErr = err
+				break
 			}
 		}
 		slide.Release()
+		if exportErr != nil {
+			if isMainPage(i) {
+				return exported, exportErr
+			}
+			Logger().Warn("预取邻页导出失败（不影响主目标页）", "page", i, "main", mainPage, "err", exportErr)
+			continue
+		}
 		exported = i
 
 		// 页间跳转插队（PRD D3）：批量在途时用户跳转请求在页边界执行，
@@ -955,10 +1004,145 @@ func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, 
 				if jerr != nil {
 					Logger().Warn("页间插队跳转失败", "path", jr.AbsPath, "slide", jr.SlideNum, "err", jerr)
 				}
+				// 跳转要求窗口打开，jumpInSession 会关闭会话缓存（同文件无窗口
+				// Presentation 被复用会导致 GotoSlide 失败）——本会话句柄随之失效，
+				// 重新获取后继续后续页（命中用户刚打开的窗口化文档时复用不 Close）。
+				if !w.cacheHolds(spec.AbsPath) {
+					slides.Release()
+					slides = nil
+					pres, count, err = w.acquireExportPresentation(app, spec)
+					if err != nil {
+						return exported, err
+					}
+					slides, err = presentationSlides(pres)
+					if err != nil {
+						return exported, err
+					}
+				}
 			}
 		}
 	}
 	return exported, nil
+}
+
+// acquireExportPresentation 获取单文件导出会话（会话缓存优先单点）。
+//
+//   - 缓存命中（同路径 + 磁盘 size/mtime 未变）→ 复用已打开 Presentation 与页数，
+//     跳过 findOrOpen/Open 与 Slides.Count 查询（真机实测 Open 是单页生成的主耗时）；
+//   - 未命中（异文件 / 文件已变 / 无缓存）→ 先关闭旧缓存，再 findOrOpen 打开新
+//     会话并查页数，成功即入库。
+//
+// 返回的 pres 归缓存持有：调用方禁 Release 禁 Close，生命周期由
+// closeCachedPresentation 收口。打开或查页数失败时本侧资源就地释放（自开会 Close），
+// 不留半态缓存。
+func (w *comWorkerState) acquireExportPresentation(app *ole.IDispatch, spec thumbFileSpec) (*ole.IDispatch, int, error) {
+	if c := w.cached; c != nil && strings.EqualFold(c.absPath, spec.AbsPath) {
+		if size, mtimeNs, ok := statFileStamp(spec.AbsPath); ok && size == c.size && mtimeNs == c.mtimeNs {
+			c.lastUsed = time.Now()
+			Logger().Info("缩略图会话缓存命中（复用已打开 Presentation）",
+				"file", filepath.Base(spec.AbsPath), "slides", c.slideCount, "reused", c.reused)
+			return c.pres, c.slideCount, nil
+		}
+		Logger().Info("缩略图会话缓存失效（文件已变更或不可读，重开会话）", "file", filepath.Base(spec.AbsPath))
+	} else if c != nil {
+		Logger().Debug("缩略图会话缓存切换（异文件）", "cached", filepath.Base(c.absPath), "want", filepath.Base(spec.AbsPath))
+	}
+	w.closeCachedPresentation()
+
+	pres, reused, err := w.findOrOpen(app, spec.AbsPath, msoTrue, msoFalse)
+	if err != nil {
+		return nil, 0, err
+	}
+	count, err := presentationSlideCount(pres)
+	if err != nil {
+		// 未入缓存即失败：自开会必须先 Close 再 Release（逆序会对已释放指针调 Close）
+		if !reused {
+			_, _ = oleutil.CallMethod(pres, "Close")
+		}
+		pres.Release()
+		return nil, 0, err
+	}
+	size, mtimeNs, _ := statFileStamp(spec.AbsPath)
+	w.cached = &cachedPresentation{
+		absPath:    spec.AbsPath,
+		pres:       pres,
+		reused:     reused,
+		size:       size,
+		mtimeNs:    mtimeNs,
+		slideCount: count,
+		lastUsed:   time.Now(),
+	}
+	Logger().Info("缩略图会话已缓存", "file", filepath.Base(spec.AbsPath), "slides", count, "reused", reused)
+	return pres, count, nil
+}
+
+// closeCachedPresentation 关闭并释放会话缓存的 Presentation（缓存清理单点）：
+// 非复用（自开）先 Close 再 Release（顺序对调会对已 Release 指针调 Close，违反
+// COM 引用规则）；复用（用户已开实例）只 Release 禁 Close——不关用户文档。
+func (w *comWorkerState) closeCachedPresentation() {
+	c := w.cached
+	if c == nil {
+		return
+	}
+	w.cached = nil
+	if !c.reused {
+		_, _ = oleutil.CallMethod(c.pres, "Close")
+	}
+	c.pres.Release()
+}
+
+// cacheHolds 当前缓存是否即为指定文件（跳转后判定导出会话是否仍有效）。
+func (w *comWorkerState) cacheHolds(absPath string) bool {
+	return w.cached != nil && strings.EqualFold(w.cached.absPath, absPath)
+}
+
+// closeIdleCache 空闲会话关闭：缓存 lastUsed 超 thumbSessionIdle 时先关会话再执行
+// 新任务。由 workerLoop 在取到任务后调用——只做清理，不参与任务选取，urgent
+// 通道严格优先语义不受影响。
+func (w *comWorkerState) closeIdleCache() {
+	c := w.cached
+	if c == nil {
+		return
+	}
+	if idle := time.Since(c.lastUsed); idle >= thumbSessionIdle {
+		Logger().Info("缩略图会话缓存空闲超时关闭", "file", filepath.Base(c.absPath), "idle", idle)
+		w.closeCachedPresentation()
+	}
+}
+
+// statFileStamp 文件尺寸与修改时间戳（纳秒），作会话缓存新鲜度判据。读取失败
+// ok=false（缓存视为失效——宁可重开也不复用可能是旧内容的会话）。
+func statFileStamp(path string) (size int64, mtimeNs int64, ok bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	return info.Size(), info.ModTime().UnixNano(), true
+}
+
+// presentationSlides 取 Presentation 的 Slides 集合（逐页 Item 迭代用；本侧持有
+// 引用，调用方负责 Release）。
+func presentationSlides(pres *ole.IDispatch) (*ole.IDispatch, error) {
+	v, err := oleutil.GetProperty(pres, "Slides")
+	if err != nil {
+		return nil, fmt.Errorf("取 Slides 集合失败: %w", err)
+	}
+	return v.ToIDispatch(), nil
+}
+
+// presentationSlideCount 查 Presentation 页数（注册缓存时用；命中路径直接复用
+// 缓存值不重复查询）。Slides 集合为属性须 GetProperty（CallMethod 报「找不到成员」）。
+func presentationSlideCount(pres *ole.IDispatch) (int, error) {
+	slides, err := presentationSlides(pres)
+	if err != nil {
+		return 0, err
+	}
+	defer slides.Release()
+	countV, err := oleutil.GetProperty(slides, "Count")
+	if err != nil {
+		return 0, fmt.Errorf("取页数失败: %w", err)
+	}
+	return int(countV.Val), nil
 }
 
 // jumpSession 独立跳转会话：复用检查 → WithWindow 打开 → GotoSlide → Activate。
@@ -973,6 +1157,12 @@ func (w *comWorkerState) jumpSession(jr *thumbJumpRequest) error {
 
 // jumpInSession 跳转核心（jumpSession 与 exportSession preempt 共用）。
 func (w *comWorkerState) jumpInSession(app *ole.IDispatch, jr *thumbJumpRequest) error {
+	// 跳转必须窗口打开（WithWindow:=msoTrue）；会话缓存里的 Presentation 恒为
+	// 无窗口只读打开——若 findOrOpen 按 FullName 复用它，GotoSlide 会因无窗口失败
+	// （真机形态）。先关缓存（非复用 Close + Release，复用只 Release），让跳转
+	// 自己开窗口。批量在途的页间插队跳转同样关闭缓存：exportSession 在跳转后经
+	// cacheHolds 检测到会话失效并重新获取，后续页导出不受影响。
+	w.closeCachedPresentation()
 	// 跳转场景 WithWindow:=msoTrue（无窗口无 View 无法跳页——research §2）
 	pres, reused, err := w.findOrOpen(app, jr.AbsPath, msoTrue, msoTrue)
 	if err != nil {

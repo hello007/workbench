@@ -37,6 +37,40 @@ func TestPageRequested(t *testing.T) {
 	}
 }
 
+// TestThumbPrefetchPages 邻页预取页集合纯函数：目标页恒居首位（Pages[0] 主目标页
+// 契约——done 载荷回填与去重键都依赖它），前后邻页钳制到 ≥1（首页无前邻页），
+// 上限 3 页。
+func TestThumbPrefetchPages(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want []int
+	}{
+		{"首页只带后邻页", 1, []int{1, 2}},
+		{"第二页带首页与第三页", 2, []int{2, 1, 3}},
+		{"中间页带前后邻页", 5, []int{5, 4, 6}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := thumbPrefetchPages(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("预取页集合长度不符: got %v want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("预取页集合不符: got %v want %v", got, tc.want)
+				}
+			}
+			if got[0] != tc.in {
+				t.Fatalf("Pages[0] 必须为主目标页 %d, got %d", tc.in, got[0])
+			}
+			if len(got) > 3 {
+				t.Fatalf("预取上限应为 3 页, got %d", len(got))
+			}
+		})
+	}
+}
+
 // ---------- RequestAssetThumb 按需链路 ----------
 
 // newOnDemandTestService 按需链路夹具：Available=true fake + 可控 exportFn +
@@ -90,8 +124,12 @@ func TestRequestAssetThumb_EnqueuesSinglePageTier(t *testing.T) {
 	if len(args.Tiers) != 1 || args.Tiers[0].Key != "hd" {
 		t.Fatalf("按需导出档位应为 hd: %+v", args.Tiers)
 	}
-	if len(args.Pages) != 1 || args.Pages[0] != 2 {
-		t.Fatalf("按需导出页白名单应为 [2]: %+v", args.Pages)
+	// 邻页预取：主目标页恒在首位，前后邻页随行（上限 3 页）
+	if len(args.Pages) != 3 || args.Pages[0] != 2 {
+		t.Fatalf("按需导出页白名单应以目标页 2 为首并含前后邻页预取: %+v", args.Pages)
+	}
+	if res.FileID != fileID || res.SlideNum != 2 {
+		t.Fatalf("按需 done 载荷应回填目标条目（fileId=%d, slideNum=2）, got %+v", fileID, res)
 	}
 	for _, call := range sink.inner.calls {
 		if call.name == "assets-thumbs:progress" {
