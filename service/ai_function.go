@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -456,7 +457,7 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(timeout)*time.Minute)
 
-	args := buildClaudeArgs(fn, prompt, resumeSessionID)
+	args := buildClaudeArgs(fn, resumeSessionID)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = fn.Cwd
 	util.HideCommandWindow(cmd)
@@ -470,6 +471,16 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 		s.mu.Unlock()
 		<-s.concurrencySem // 归还槽位
 		return "", fmt.Errorf("创建输出管道失败: %w", err)
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		s.mu.Lock()
+		task.running = false
+		task.errText = "创建输入管道失败"
+		s.mu.Unlock()
+		<-s.concurrencySem // 归还槽位
+		return "", fmt.Errorf("创建输入管道失败: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout // claude 的诊断信息合并进同一流
 
@@ -502,6 +513,13 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 	} else {
 		task.errText = "创建输出文件失败: " + outErr.Error()
 	}
+
+	// prompt 异步写入 stdin 后立即关闭：claude -p 裸参数时从 stdin 读完整 prompt。
+	// 放 goroutine 防 claude 异常早退时 Write 阻塞在无人读的管道上导致死锁
+	go func() {
+		_, _ = io.WriteString(stdin, prompt)
+		_ = stdin.Close()
+	}()
 
 	go s.pumpOutput(task, stdout)
 	return taskID, nil
@@ -845,10 +863,12 @@ func (s *AiFunctionService) loadFunction(functionID string) (*model.AiFunction, 
 }
 
 // buildClaudeArgs 组装 claude headless 命令参数（纯函数，便于单测）。
-// 参数顺序：-p <prompt> [--resume <sid>] --output-format stream-json --verbose
+// 参数顺序：-p [--resume <sid>] --output-format stream-json --verbose
 // [--permission-mode <mode>] [--add-dir <dir>]... [--mcp-config <json>] [--settings <json>]
-func buildClaudeArgs(fn *model.AiFunction, prompt, resumeSessionID string) []string {
-	args := []string{"-p", prompt}
+// -p 为裸参数：prompt 经 stdin 管道传入（启动函数负责写入）——Windows 命令行
+// 上限 32K，prompt 走 argv 时本地变动 diff 大会 fork/exec 报「文件名或扩展名太长」。
+func buildClaudeArgs(fn *model.AiFunction, resumeSessionID string) []string {
+	args := []string{"-p"}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}

@@ -18,9 +18,9 @@ import (
 
 func TestBuildClaudeArgs_Basic(t *testing.T) {
 	fn := &model.AiFunction{ID: "f1", Command: "/ab-weekly-report", Cwd: `D:\proj`}
-	args := buildClaudeArgs(fn, "/ab-weekly-report", "")
+	args := buildClaudeArgs(fn, "")
 	want := []string{
-		"-p", "/ab-weekly-report",
+		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
@@ -37,7 +37,7 @@ func TestBuildClaudeArgs_Basic(t *testing.T) {
 
 func TestBuildClaudeArgs_Resume(t *testing.T) {
 	fn := &model.AiFunction{ID: "f1"}
-	args := buildClaudeArgs(fn, "确认落盘", "sess-123")
+	args := buildClaudeArgs(fn, "sess-123")
 	found := false
 	for i, a := range args {
 		if a == "--resume" && i+1 < len(args) && args[i+1] == "sess-123" {
@@ -54,7 +54,7 @@ func TestBuildClaudeArgs_AddDirs(t *testing.T) {
 		ID:      "f1",
 		AddDirs: []string{`D:\a`, "", `D:\b`}, // 空 dir 应被跳过
 	}
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	count := 0
 	for i, a := range args {
 		if a == "--add-dir" && i+1 < len(args) {
@@ -76,7 +76,7 @@ func TestBuildClaudeArgs_McpAndSettings(t *testing.T) {
 			},
 		},
 	}
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	var mcpJSON, settingsJSON string
 	for i, a := range args {
 		if a == "--mcp-config" && i+1 < len(args) {
@@ -754,7 +754,7 @@ func TestBuildClaudeArgs_McpStdio(t *testing.T) {
 			},
 		},
 	}
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	var mcpJSON string
 	for i, a := range args {
 		if a == "--mcp-config" && i+1 < len(args) {
@@ -812,7 +812,7 @@ func TestBuildClaudeArgs_McpHttpStdioMixed(t *testing.T) {
 			},
 		},
 	}
-	args := buildClaudeArgs(fn, "p", "")
+	args := buildClaudeArgs(fn, "")
 	var mcpJSON string
 	for i, a := range args {
 		if a == "--mcp-config" && i+1 < len(args) {
