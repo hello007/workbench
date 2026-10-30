@@ -2909,6 +2909,58 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.detail-thumb-failed').exists()).toBe(true)
   })
 
+  it('按需批次失败（onDemand）为页级语义：切到同文件另一页提示消失，切回失败页再次出现', async () => {
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    // 进入幻灯片视图：卡片 0 / 1 为同一文件（id=11）的第 1 / 2 页
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+
+    // 详情打开第 1 页 → 该页 hd 按需生成失败（载荷 fileId/slideNum 指向第 1 页）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    eventHandlers['assets-thumbs:done']({
+      libraryId: 'lib-1', total: 1, generated: 0, skipped: 0, failed: 1, canceled: false,
+      onDemand: true, fileId: 11, slideNum: 1
+    })
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(true)
+
+    // 切到同文件第 2 页：页级键不命中 → 提示消失（缺陷修复点：路径口径会整文件染红）
+    await wrapper.findAll('.asset-card')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(false)
+
+    // 切回失败页：提示再次出现（失败态按页保留，不因切页丢失）
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(true)
+  })
+
+  it('按需批次失败后同一页重新生成成功（onDemand generated）：失败提示立即消失', async () => {
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    eventHandlers['assets-thumbs:done']({
+      libraryId: 'lib-1', total: 1, generated: 0, skipped: 0, failed: 1, canceled: false,
+      onDemand: true, fileId: 11, slideNum: 1
+    })
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(true)
+
+    // 同页重新生成成功：移除页级失败键，提示立即消失（不必等下一批量 done）
+    eventHandlers['assets-thumbs:done']({
+      libraryId: 'lib-1', total: 1, generated: 1, skipped: 0, failed: 0, canceled: false,
+      onDemand: true, fileId: 11, slideNum: 1
+    })
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(false)
+  })
+
   it('打开跳转：幻灯片详情以根路径+相对路径与页码调用 JumpToAssetSlide，BUSY 预期拒绝分流 warning 无 error', async () => {
     wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
     const wrapper = await createWrapper()

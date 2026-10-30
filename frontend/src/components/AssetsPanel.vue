@@ -91,7 +91,9 @@
      缩略图档位（hd 按需，10-30-hd PR3）：small（tier=0）走批次补缺并作详情底图
      常显；hd（tier=1）退离批量补缺，详情大图以 hd 覆盖层按需生成（RequestAssetThumb
      单页单档，幂等在途去重），完成经 onDemand done 只推进 thumbEpoch 重拉——不触碰
-     批量进度与失败集合；详情「重试生成」改走同一按需入口，不再整本重导。
+     批量进度与批量失败集合；按需失败另按页级键（库+文件+页，demandFailedKeys）登记
+     详情失败提示，切页即按新页判定、重新生成成功即移除（不用路径口径防单页失败染
+     到同文件全部页）；详情「重试生成」改走同一按需入口，不再整本重导。
      文件内过滤与卡片尺寸（D6 真机增量）：网格固定卡宽（CSS 变量 --asset-card-w
      驱动 auto-fill，详情栏开合只减列数不改卡宽，消除 minmax+1fr 满铺在详情栏
      挤压画廊时的重排突变）+ 工具条缩放滑块（220-420 步长 20 默认 280，会话态
@@ -702,8 +704,8 @@
         <!-- 大图区：文件与幻灯片两形态共用。small（tier=0）底图常显、打开详情即时
              可见（miss 显示「无预览」占位）；hd（tier=1）覆盖层绝对定位铺满同区域，
              hide-on-miss 保证仅 ready 时渲染、就绪后替换底图显示（不跳版），hd 已退离
-             批量补缺改详情侧按需生成（见脚本 hd 按需 watch）；失败标记按归属文件
-             路径命中批次失败集合显示重试入口 -->
+             批量补缺改详情侧按需生成（见脚本 hd 按需 watch）；失败标记为并集——批量
+             small 档按归属文件路径、hd 按需按「库+文件+页」页级键（切页即按新页判定） -->
         <div class="detail-section detail-thumb-section">
           <div class="detail-thumb-stack">
             <AssetThumb
@@ -1480,6 +1482,10 @@ const thumbsRunning = ref(false)
 const thumbsProgress = ref(null) // assets-thumbs:progress 载荷 {libraryId, done, total, currentFile, failed}
 const thumbEpoch = ref(0) // 失效代次：done 事件自增，触发 miss 缩略图自动补图
 const failedThumbPaths = ref([]) // 批次内失败文件相对路径集合（数组当 Set 用，避免响应式 Set 兼容问题）
+// 详情侧 hd 按需生成失败的页级键集合（数组当 Set 用，键 `<libraryId>\u0000<fileId>\u0000<slideNum>`）：
+// 按需批次是单页单档事件，失败必须按页定位——同文件各页共享路径，用路径口径会把
+// 单页失败染到该文件全部页，且只有批量 done 才整体清空（失败提示长驻不自愈的缺陷根因）
+const demandFailedKeys = ref([])
 let lastThumbsFailedCount = 0 // 上次 progress 的累计失败数（非响应式，仅增量比对）
 // 失败缩略图自动补一轮标记（SRS §2.3 PR3，PRD D4，非响应式）：本库批次已自动
 // 重试过即置位，下轮 done 不再自动触发（恰好一轮；手动重试不受限）；切库 watch
@@ -1573,7 +1579,8 @@ const detailSplitExists = computed(() => {
 // 切库复位缩略图运行态：done/error 事件按 libraryId 过滤，批次运行中切库后旧库
 // 终态事件不会命中新语境——不复位则进度条在新库页面永挂，且「取消生成」打到新库
 // 恒返 false 与可见进度条自相矛盾。失败集合为旧库相对路径口径，一并清空防误归因
-// （切回原库后由下一批 progress/done 重新收集，重试链路可恢复）。
+// （切回原库后由下一批 progress/done 重新收集，重试链路可恢复）；hd 按需页级失败
+// 键含 libraryId，跟清防跨库残影。
 // 拆分任务态同理复位：在途任务不被打断（后台继续跑），仅复位 UI 态——旧库
 // done/error 事件因 libraryId 不匹配被忽略，不复位则进度条永挂。splitSeq 自增
 // 使旧库在途拆分 Promise 的落定写回全部失效（防误清新库任务进度态 + 旧库
@@ -1590,6 +1597,7 @@ watch(currentLibraryId, () => {
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
   failedThumbPaths.value = []
+  demandFailedKeys.value = [] // 页级失败键与批量失败集合同点复位（切库即界面语境全换）
   splitConfirming.value = false
   splitting.value = false
   splitProgress.value = null
@@ -2849,10 +2857,21 @@ const detailThumbPath = computed(
   () => selected.value?.fileEntry?.path ?? selected.value?.slideEntry?.filePath ?? selected.value?.hit?.filePath ?? ''
 )
 
-// 当前详情条目的缩略图是否在本批次生成失败（按归属文件路径命中失败集合）
+// 页级失败键单点构造（库 + 文件 + 页）：登记与查询必须同源，防散列拼接漂移；
+// slideNum 缺省（文件详情/按需载荷未回填）归一为第 1 页封面
+const demandFailedKey = (libraryId, fileId, slideNum) =>
+  `${libraryId || ''}\u0000${fileId}\u0000${slideNum || 1}`
+
+// 当前详情条目的缩略图是否生成失败：两个来源的并集——批量 small 档按归属文件
+// 路径命中失败集合（文件级语义不变）；hd 按需生成按页级键命中（同文件不同页互
+// 不影响，切页即按新页判定）
 const isDetailThumbFailed = computed(() => {
   const path = detailThumbPath.value
-  return !!path && failedThumbPaths.value.includes(path)
+  if (path && failedThumbPaths.value.includes(path)) return true
+  if (!currentLibraryId.value || detailFileId.value < 1) return false
+  return demandFailedKeys.value.includes(
+    demandFailedKey(currentLibraryId.value, detailFileId.value, detailSlideNum.value)
+  )
 })
 
 // hd 档按需生成（PRD R2：hd 已退离批量补缺，详情侧是唯一补齐入口）：打开详情/
@@ -4661,15 +4680,21 @@ const onThumbsProgress = (payload) => {
 const onThumbsDone = (payload) => {
   if (!payload || payload.libraryId !== currentLibraryId.value) return
   // 详情侧按需批次（onDemand，后端不发 progress）：只推进代次触发 miss 缩略图
-  // 重拉，不触碰批量进度态/失败集合，也不触发批量失败自动补（D4 一轮语义仅属
+  // 重拉，不触碰批量进度态/批量失败集合，也不触发批量失败自动补（D4 一轮语义仅属
   // 批量批次）
   if (payload.onDemand) {
-    // 按需生成失败/取消：把当前详情条目计入失败集合，显示失败提示与「重试生成」
-    // 入口——否则 hd 永久占位且无任何可见反馈（后端 done 载荷回填 fileId 供定位）。
-    if ((payload.failed > 0 || payload.canceled) && payload.fileId === detailFileId.value) {
-      const path = detailThumbPath.value
-      if (path && !failedThumbPaths.value.includes(path)) {
-        failedThumbPaths.value = failedThumbPaths.value.concat(path)
+    // 按需批次是单页单档事件：失败/取消按页级键登记失败提示（否则 hd 永久占位且无
+    // 任何可见反馈），成功后移除该键（重新生成成功提示立即消失）。刻意不入批量
+    // 路径失败集合——路径口径会把单页失败染到同文件全部页，且只有批量 done 才整体
+    // 清空，切页无法自愈（本轮缺陷根因）。载荷 fileId 由后端回填供定位，无效即跳过。
+    if (payload.fileId > 0) {
+      const key = demandFailedKey(currentLibraryId.value, payload.fileId, payload.slideNum)
+      if (payload.failed > 0 || payload.canceled) {
+        if (!demandFailedKeys.value.includes(key)) {
+          demandFailedKeys.value = demandFailedKeys.value.concat(key)
+        }
+      } else if (payload.generated > 0) {
+        demandFailedKeys.value = demandFailedKeys.value.filter((item) => item !== key)
       }
     }
     thumbEpoch.value++
@@ -4679,9 +4704,11 @@ const onThumbsDone = (payload) => {
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
   // 失败集合为内存态，批次结束即清（PRD 认可：失败标记只覆盖当前批次语境）；
-  // 自动补在清空前取快照发起
+  // 自动补在清空前取快照发起。hd 按需页级失败键同点复位（与批量失败集合同生命周期，
+  // 批次收尾即整体回到干净态，重试入口按需重新登记）
   const failedSnapshot = failedThumbPaths.value
   failedThumbPaths.value = []
+  demandFailedKeys.value = []
   // 失效代次自增：触发 miss 缩略图卡自动补图
   thumbEpoch.value++
   autoRetryFailedThumbs(failedSnapshot)
