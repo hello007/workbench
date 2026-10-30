@@ -188,14 +188,13 @@ func detectPreviewKind(filename string) string {
 // SaveFile 保存文件内容（原子写入：先写临时文件再 rename）。
 // encoding 指定按原文件编码写入：encoding="gbk" -> GBK 编码后写入；
 // 其余（utf-8/空）-> 直接写入 UTF-8 字节。保留 1MB 限制与原子写。
+// 目标允许不存在（新建）：审查报告/AI 配置导出等场景经 SaveFileDialog 选的是
+// 全新路径，此前强制 os.Stat 存在导致新建落盘报「文件不存在」；存在时仍校验非目录。
 func (s *FileOperationService) SaveFile(filePath string, content string, encoding string) error {
-	// 校验路径存在且为普通文件
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return fmt.Errorf("文件不存在: %w", err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("不能保存目录")
+	if info, err := os.Stat(filePath); err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("不能保存目录")
+		}
 	}
 
 	// 大小限制（与预览一致：1MB）

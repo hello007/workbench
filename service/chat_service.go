@@ -1186,7 +1186,7 @@ func (s *ChatService) spawnSessionProcess(rt *chatSessionRuntime, cwd string) er
 	// 经 claudeCommandResolver 绕开 .cmd shim 的 cmd.exe 转发（JSON 参数引号会被破坏，
 	// 详见 resolveClaudeCommand 注释）
 	name, prefixArgs := claudeCommandResolver()
-	proc := s.processFactory(ctx, name, append(prefixArgs, buildChatArgs(rt.claudeSessionID, rt.permissionMode, rt.modelName)), cwd)
+	proc := s.processFactory(ctx, name, append(prefixArgs, buildChatArgs(rt.claudeSessionID, rt.permissionMode, rt.modelName)...), cwd)
 	stdout, err := proc.StdoutPipe()
 	if err != nil {
 		cancel()

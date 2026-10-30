@@ -246,11 +246,17 @@ func TestSaveFile_TooLarge(t *testing.T) {
 	}
 }
 
-// TestSaveFile_NotExists 文件不存在返回错误。
+// TestSaveFile_NotExists 目标不存在时新建成功（审查报告/导出场景经 SaveFileDialog
+// 选全新路径落盘，此前强制存在导致新建报「文件不存在」）。
 func TestSaveFile_NotExists(t *testing.T) {
 	svc := NewFileOperationService()
-	if err := svc.SaveFile(filepath.Join(t.TempDir(), "missing.txt"), "x", ""); err == nil {
-		t.Error("不存在文件应返回错误")
+	p := filepath.Join(t.TempDir(), "missing.txt")
+	if err := svc.SaveFile(p, "x", ""); err != nil {
+		t.Fatalf("新建文件应成功: %v", err)
+	}
+	data, _ := os.ReadFile(p)
+	if string(data) != "x" {
+		t.Errorf("新建内容不符: %q", data)
 	}
 }
 
@@ -1285,10 +1291,15 @@ func TestSaveFile_OverwriteExisting(t *testing.T) {
 }
 
 func TestSaveFile_FileNotFound(t *testing.T) {
+	// 新语义：不存在即新建（与 TestSaveFile_NotExists 同口径），此处验证内容落盘
 	svc := NewFileOperationService()
-	err := svc.SaveFile(filepath.Join(t.TempDir(), "nonexistent.txt"), "content", "")
-	if err == nil {
-		t.Fatal("Expected error for nonexistent file")
+	p := filepath.Join(t.TempDir(), "nonexistent.txt")
+	if err := svc.SaveFile(p, "content", ""); err != nil {
+		t.Fatalf("Expected new-file creation to succeed: %v", err)
+	}
+	data, _ := os.ReadFile(p)
+	if string(data) != "content" {
+		t.Errorf("Expected 'content', got '%s'", string(data))
 	}
 }
 

@@ -93,7 +93,6 @@ type AppServices struct {
 	// 复用 assetsSvc 缩略图同一 STA worker 单队列（PptxPdfConverter 注入，避免
 	// 双 COM 队列进程互杀）；不发生前端事件，web_serve.go applySink 无需同步。
 	pptxPreviewSvc *service.PptxPreviewService
-<<<<<<< HEAD
 	// 认证审计日志器（浏览器访问通道：认证成功/失败 + token 生命周期事件，
 	// JSONL append-only data/web_audit.log，5MB×7 档多档轮转链（主 + .1~.6，
 	// 连接管控十一期参数化，settings audit 段可调）；append 语义独立实现，
@@ -233,7 +232,6 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 缓存目录；COM 执行器 = assets 缩略图同一 STA worker 单队列导出器）
 	s.pptxPreviewSvc = service.NewPptxPreviewService(filepath.Join(dataDir, "pptx_preview_pdf"), s.assetsSvc.PptxPdfConverter())
 
-<<<<<<< HEAD
 	// 认证审计日志器 + 多 token 管理服务（浏览器访问通道）。EnsureLoaded 即时
 	// 完成存量迁移/初始引导：data/web_token 明文兼容文件在启动期就绪——serve
 	// 控制台提示与设置页「查看令牌」链路依赖该文件，不能等首个认证请求懒加载
