@@ -296,6 +296,11 @@ func wireFakeFactory(svc *ChatService, makeFake func() *fakeChatProcess) *[]*fak
 // newChatSvcForTest 构造指向临时目录、事件捕获注入完成的 ChatService。
 func newChatSvcForTest(t *testing.T) (*ChatService, *capturedSink) {
 	t.Helper()
+	// stub 掉 claude 启动解析：测试环境断言固定用 "claude"，
+	// 真机解析结果随 shim 形态变化（claude.exe/node+js）不进断言
+	orig := claudeCommandResolver
+	claudeCommandResolver = func() (string, []string) { return "claude", nil }
+	t.Cleanup(func() { claudeCommandResolver = orig })
 	svc := NewChatService(context.Background(), filepath.Join(t.TempDir(), "ai_chat"))
 	sink := newCapturedSink()
 	svc.SetEventSink(sink)
