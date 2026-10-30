@@ -5,6 +5,7 @@
 ### Fixed
 
 - AI 功能与 AI 对话的 claude 启动改经 stdin 传 prompt（`-p` 裸参数）：Windows 命令行上限 32K，prompt 走 argv 时「本地变动 AI 审查」等长 diff 场景 fork/exec 报「The filename or extension is too long」；实测 claude CLI 裸 `-p` + 后续 flags 下 stdin prompt 生效，全量单测回归通过
+- 解析 claude `.cmd` shim 真实目标直启（原生 claude.exe / js 入口拼 node）：Go exec 经 cmd.exe `/c` 转发时参数被二次解析，`--json-schema` 的 JSON 引号被破坏致 claude exit 1（报「--json-schema is not valid JSON」）；解析失败回退旧行为，integration 真调回归覆盖
 
 ## [1.12.0] - 2026-10-26
 
