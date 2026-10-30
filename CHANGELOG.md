@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.12.1] - 2026-10-30
+
+### Fixed
+
+- AI 功能与 AI 对话的 claude 启动改经 stdin 传 prompt（`-p` 裸参数）：Windows 命令行上限 32K，prompt 走 argv 时「本地变动 AI 审查」等长 diff 场景 fork/exec 报「The filename or extension is too long」；实测 claude CLI 裸 `-p` + 后续 flags 下 stdin prompt 生效，全量单测回归通过
+
 ## [1.12.0] - 2026-10-26
 
 ### Added
