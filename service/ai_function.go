@@ -458,7 +458,10 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(timeout)*time.Minute)
 
 	args := buildClaudeArgs(fn, resumeSessionID)
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	// 经 claudeCommandResolver 绕开 .cmd shim 的 cmd.exe 转发（JSON 参数引号会被破坏，
+	// 详见 resolveClaudeCommand 注释）
+	name, prefixArgs := claudeCommandResolver()
+	cmd := exec.CommandContext(ctx, name, append(prefixArgs, args...)...)
 	cmd.Dir = fn.Cwd
 	util.HideCommandWindow(cmd)
 

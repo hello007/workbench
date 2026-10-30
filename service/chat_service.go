@@ -787,7 +787,10 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		claudePrompt = chatQuestionPreamble + "\n\n" + prompt
 	}
 	args := buildChatArgs(sess.ClaudeSessionID, permissionMode, modelName)
-	proc := s.processFactory(ctx, "claude", args, sess.Cwd)
+	// 经 claudeCommandResolver 绕开 .cmd shim 的 cmd.exe 转发（JSON 参数引号会被破坏，
+	// 详见 resolveClaudeCommand 注释）
+	name, prefixArgs := claudeCommandResolver()
+	proc := s.processFactory(ctx, name, append(prefixArgs, args...), sess.Cwd)
 
 	stdout, err := proc.StdoutPipe()
 	if err != nil {
