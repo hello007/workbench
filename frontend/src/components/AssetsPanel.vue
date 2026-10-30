@@ -88,6 +88,10 @@
      RetryAssetThumb 自动重新入队，恰好一轮——普通 let 标记防下轮 done 再触发
      （手动重试不受限），切库 watch 复位（新库新批次重新获得资格）；fire-and-forget
      allSettled 收口不弹提示，fileId 从文件底册按路径反查，miss 跳过。
+     缩略图档位（hd 按需，10-30-hd PR3）：small（tier=0）走批次补缺并作详情底图
+     常显；hd（tier=1）退离批量补缺，详情大图以 hd 覆盖层按需生成（RequestAssetThumb
+     单页单档，幂等在途去重），完成经 onDemand done 只推进 thumbEpoch 重拉——不触碰
+     批量进度与失败集合；详情「重试生成」改走同一按需入口，不再整本重导。
      文件内过滤与卡片尺寸（D6 真机增量）：网格固定卡宽（CSS 变量 --asset-card-w
      驱动 auto-fill，详情栏开合只减列数不改卡宽，消除 minmax+1fr 满铺在详情栏
      挤压画廊时的重排突变）+ 工具条缩放滑块（220-420 步长 20 默认 280，会话态
@@ -695,19 +699,31 @@
           <span class="detail-close" @click="closeDetail">&#10005;</span>
         </div>
 
-        <!-- 高清大图：文件与幻灯片两形态共用区块；hd（tier=1）单张按需加载，
-             未生成时整块隐藏（hide-on-miss）不占位；失败标记按归属文件路径命中
-             批次失败集合显示重试入口 -->
+        <!-- 大图区：文件与幻灯片两形态共用。small（tier=0）底图常显、打开详情即时
+             可见（miss 显示「无预览」占位）；hd（tier=1）覆盖层绝对定位铺满同区域，
+             hide-on-miss 保证仅 ready 时渲染、就绪后替换底图显示（不跳版），hd 已退离
+             批量补缺改详情侧按需生成（见脚本 hd 按需 watch）；失败标记按归属文件
+             路径命中批次失败集合显示重试入口 -->
         <div class="detail-section detail-thumb-section">
-          <AssetThumb
-            :library-id="currentLibraryId"
-            :file-id="detailFileId"
-            :slide-num="detailSlideNum || 1"
-            :tier="1"
-            :epoch="thumbEpoch"
-            hide-on-miss
-            class="detail-thumb"
-          />
+          <div class="detail-thumb-stack">
+            <AssetThumb
+              :library-id="currentLibraryId"
+              :file-id="detailFileId"
+              :slide-num="detailSlideNum || 1"
+              :tier="0"
+              :epoch="thumbEpoch"
+              class="detail-thumb detail-thumb-base"
+            />
+            <AssetThumb
+              :library-id="currentLibraryId"
+              :file-id="detailFileId"
+              :slide-num="detailSlideNum || 1"
+              :tier="1"
+              :epoch="thumbEpoch"
+              hide-on-miss
+              class="detail-thumb detail-thumb-hd"
+            />
+          </div>
           <div v-if="isDetailThumbFailed" class="detail-thumb-failed">
             <el-alert type="warning" :closable="false" title="缩略图生成失败（超时/文件被占用/文件损坏）" />
             <el-button size="small" text type="primary" :loading="retrying" @click="onRetryThumb">重试生成</el-button>
@@ -1251,6 +1267,7 @@ import {
   AssetThumbsAvailable,
   JumpToAssetSlide,
   RetryAssetThumb,
+  RequestAssetThumb,
   CancelAssetThumbs,
   SplitAssetFile,
   SplitAssetLibrary,
@@ -2838,6 +2855,24 @@ const isDetailThumbFailed = computed(() => {
   return !!path && failedThumbPaths.value.includes(path)
 })
 
+// hd 档按需生成（PRD R2：hd 已退离批量补缺，详情侧是唯一补齐入口）：打开详情/
+// 切换条目/切换页时请求当前页 hd 缩略图。免疫重复——PNG 已存在或同页在途时后端
+// 直接返回不入队；失败静默（BUSY/UNAVAILABLE 等只影响本次补齐，占位兜底不逐条
+// 弹错），完成经 assets-thumbs:done（onDemand）驱动 thumbEpoch 重拉显示。
+watch(
+  () => [detailFileId.value, detailSlideNum.value, detailThumbPath.value],
+  () => {
+    if (!hasLibrary.value || detailFileId.value < 1 || !detailThumbPath.value) return
+    RequestAssetThumb(
+      currentLibraryId.value,
+      detailFileId.value,
+      detailThumbPath.value,
+      detailSlideNum.value || 1,
+      1
+    ).catch(() => {})
+  }
+)
+
 // 索引状态展示映射与大小格式化已收敛至 utils/assetFormat 共享单点（网格卡与
 // 列表行消费同一映射），此处 import 别名保持模板既有引用名不变
 
@@ -4343,15 +4378,16 @@ const onCancelThumbs = async () => {
   }
 }
 
-// 失败缩略图重新入队（后台重新生成，done 事件经 epoch 自增驱动 miss 卡自动补图）
+// 失败缩略图重新生成（详情侧 hd 单页单档按需请求，不再整本重导；done 事件经
+// onDemand 分支推进 epoch 触发重拉）
 const onRetryThumb = async () => {
   if (!hasLibrary.value || retrying.value) return
   const path = detailThumbPath.value
   if (!detailFileId.value || !path) return
   retrying.value = true
   try {
-    await RetryAssetThumb(currentLibraryId.value, detailFileId.value, path)
-    ElMessage.success('已重新入队生成')
+    await RequestAssetThumb(currentLibraryId.value, detailFileId.value, path, detailSlideNum.value || 1, 1)
+    ElMessage.success('已重新请求生成')
   } catch (error) {
     handleError('重试缩略图生成失败: ', error)
   } finally {
@@ -4624,6 +4660,21 @@ const onThumbsProgress = (payload) => {
 
 const onThumbsDone = (payload) => {
   if (!payload || payload.libraryId !== currentLibraryId.value) return
+  // 详情侧按需批次（onDemand，后端不发 progress）：只推进代次触发 miss 缩略图
+  // 重拉，不触碰批量进度态/失败集合，也不触发批量失败自动补（D4 一轮语义仅属
+  // 批量批次）
+  if (payload.onDemand) {
+    // 按需生成失败/取消：把当前详情条目计入失败集合，显示失败提示与「重试生成」
+    // 入口——否则 hd 永久占位且无任何可见反馈（后端 done 载荷回填 fileId 供定位）。
+    if ((payload.failed > 0 || payload.canceled) && payload.fileId === detailFileId.value) {
+      const path = detailThumbPath.value
+      if (path && !failedThumbPaths.value.includes(path)) {
+        failedThumbPaths.value = failedThumbPaths.value.concat(path)
+      }
+    }
+    thumbEpoch.value++
+    return
+  }
   thumbsRunning.value = false
   thumbsProgress.value = null
   lastThumbsFailedCount = 0
@@ -5473,6 +5524,18 @@ defineExpose({ loadLibraries, refreshAfterScan })
 }
 
 /* ---- 详情缩略图与失败标记 ---- */
+/* 两层大图：small 底图在流内定高（16:9 由 AssetThumb 根元素自带），hd 覆盖层
+   绝对铺满同一区域——就绪后替换显示，尺寸完全一致零跳版 */
+.detail-thumb-stack {
+  position: relative;
+  width: 100%;
+}
+
+.detail-thumb-hd {
+  position: absolute;
+  inset: 0;
+}
+
 .detail-thumb-failed {
   display: flex;
   flex-direction: column;

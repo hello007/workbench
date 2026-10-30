@@ -98,7 +98,7 @@ OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模
 - 串行保护：同库 TryLock 互斥（E_ASSETS_SCAN_IN_PROGRESS）；取消走 registerCancel/unregisterCancel defer LIFO（先注销后释放锁），映射 E_ASSETS_CANCELLED（warning）。
 - 关停收口：`WaitScansDone`（2026-10-14 新增，App.shutdown 先于 `CloseAll` 调用）——逐个触发取消注册表 CancelFunc + `scanWG.Wait()` 等全部在途扫描退出；漏调则 CloseAll 先关连接、在途扫描继续写已关连接报成片 `sql: database is closed` 噪音。单文件解析内部无取消检查点，等待上界 = 单文件解析时长（zip 上限 + 流式解析，秒级）。
 - 建库回滚：CreateLibrary 注册表写失败须回删预建 `<id>.db`（含 -wal/-shm，先关连接再删防 Windows 句柄占用），防孤儿 db 文件残留（2026-10-14 修复）。
-- 重建：备份标签绑定 → 清 files+FTS（standalone 表**不支持 `delete-all'` 命令**，用 `DELETE FROM search_fts`）→ 全量重扫 → 按路径重绑标签（星级/备注属重建语义不保留）。
+- 重建：备份标签绑定 → **快照文件行（保留旧 fileID）** → 清 files+FTS（standalone 表**不支持 `delete-all'` 命令**，用 `DELETE FROM search_fts`）→ 恢复占位行（显式主键 + processing 强制重解析）→ 全量重扫 → 按路径重绑标签（星级/备注属重建语义不保留）。**缩略图目录不再整体清空**：内容指纹（sha256）未变的文件保留既有 PNG 与 fileID，见 [assets-thumbs-com.md §9.2](assets-thumbs-com.md)。
 - 锁内库存在复验：`getLibrary` 校验与加锁之间有窗口，窗口内删库 + sqlite 惰性建库 = 孤儿 db 文件复活。
 
 ### 前端异步写回守卫（2026-10-14）

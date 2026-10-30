@@ -169,8 +169,8 @@ func (s *AssetLibraryService) runLibraryScan(ctx context.Context, libraryID, opN
 
 // enqueueThumbsBacklog 扫描完成后自动补缺入队：按 thumb_cache 记账 + PNG 文件
 // 存在性比对出缺失缩略图的文件清单，整批入队（文件级粒度——COM 打开粒度为
-// 文件，ExportPresentation 无页清单参数，任一页缺失即整文件重导出，已有页
-// 覆盖写幂等）。无 PowerPoint 静默跳过（D1 降级）；补缺收集失败仅告警不上抛
+// 文件，补缺仍按整文件重导，已有页覆盖写幂等；页白名单仅按需单页链路使用）。
+// 判定档位只含 small（hd 改详情侧按需，见 batchBacklogTiers）。无 PowerPoint 静默跳过（D1 降级）；补缺收集失败仅告警不上抛
 // （不阻断扫描成功语义，下次扫描重试）。
 func (s *AssetLibraryService) enqueueThumbsBacklog(store *assetsStore, lib model.AssetLibrary) {
 	// D1 自动生成开关（设置段）：关闭时扫描完成不入队（用户显式操作的单文件
@@ -266,7 +266,13 @@ func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model
 	//   - 记账 miss 而文件在的页不漏记账：读取路径 GetAssetThumb touch 会补
 	//     记账（LRU 口径自愈），补缺判定与 LRU 记账解耦。
 	backlog := make([]thumbFileSpec, 0, len(okFiles))
-	tiers := s.resolvedThumbTiers() // 当前生效档位收集前解析一次（设置注入）
+	// 只按 small 档判定缺失（batchBacklogTiers 单点）：hd 档退出批量补缺，改由
+	// 详情侧按需生成——hd 单张体积大、默认配额装不下全库，参与补缺会因 LRU
+	// 淘汰形成「淘汰 → 整本重导 → 再淘汰」循环（PRD R1）。
+	tiers := batchBacklogTiers(s.resolvedThumbTiers()) // 当前生效档位收集前解析一次（设置注入）
+	if tiers == nil {
+		return nil, nil // 档位集合异常（不含 small）：跳过补缺，避免误清空
+	}
 	for _, f := range okFiles {
 		n := pageByFile[f.id]
 		if n <= 0 {
@@ -275,10 +281,16 @@ func (s *AssetLibraryService) collectThumbsBacklog(store *assetsStore, lib model
 		missing := false
 		for _, tier := range tiers {
 			for page := 1; page <= n; page++ {
-				if _, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, f.id, page)); err != nil {
+				info, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, f.id, page))
+				if err != nil {
 					missing = true
 					break
 				}
+				// 命中页顺手补记账：重建保留 fileID/PNG 时 thumb_cache 行被清表
+				// 级联删除，此处 Stat 已是必做动作，补记账零额外 IO。走 passive
+				// 变体——只补 bytes 不刷新 LRU（每轮扫描都推高新鲜度会抹平淘汰
+				// 区分度，见 thumbCacheLedger.recordPassive）。
+				s.thumbLedger.recordPassive(lib.ID, f.id, tier.Key, page, info.Size())
 			}
 			if missing {
 				break
@@ -362,28 +374,197 @@ func (s *AssetLibraryService) rebuildLibrary(ctx context.Context, store *assetsS
 		Logger().Warn("重建前自动备份失败（继续重建，无本次恢复点）", "libraryId", lib.ID, "err", err)
 	}
 
-	// 2. 清索引数据（files/slides/file_tags + FTS 全表 + 缩略图记账表）
-	if err := store.clearIndexForRebuild(); err != nil {
-		return model.AssetScanResult{}, fmt.Errorf("清空素材索引失败: %w", err)
+	// 2. 快照旧文件行（保留旧主键与内容指纹）：清表会让 files.id 重排，缩略图缓存
+	// 键 `<fileID>-<3位页>.png` 随之全失效 → 必然全库重导。快照后显式恢复旧主键，
+	// 让内容未变的文件直接沿用既有 PNG（PRD R4/R5）。
+	placeholders, err := store.listRebuildPlaceholders()
+	if err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("备份文件索引行失败: %w", err)
 	}
 
-	// 2.1 缩略图整目录清空重来（research §4.2：重建语义下逐条保留无意义——
-	// 重解析后页 id 全变、页数可能变，记账已清，残留 PNG 由补缺链路重导出
-	// 幂等覆盖；目录删除失败仅告警不中断，残留文件无害）
-	if err := os.RemoveAll(s.assetThumbsDir(lib.ID)); err != nil {
-		Logger().Warn("清空缩略图目录失败（重建后残留文件将被覆盖）", "libraryId", lib.ID, "err", err)
+	// 2.1 清索引数据 + 恢复占位行（**单事务**：显式旧 fileID + status=processing
+	// 强制重解析）。重建语义不变（仍全量重解析），只是主键与已生成的缩略图产物可
+	// 复用。缩略图目录**不再**整目录删除——内容未变的文件在 finalizeScanFile 跳过
+	// 失效联动，PNG 继续有效；内容变化（hash 或页数失配）的文件走既有失效联动
+	// 清图重导。单事务保证清表失败/恢复失败整体回滚（否则空索引 + 标注随级联
+	// 删除即不可恢复）。
+	if err := store.resetIndexForRebuild(placeholders); err != nil {
+		return model.AssetScanResult{}, fmt.Errorf("重置素材索引失败（已回滚）: %w", err)
 	}
 	// 2.2 同步清内存 dirty 旧条目：重建后旧 fileID 的 slides 已删除，残留 dirty
 	// flush 时会因外键约束失败整批丢弃（含重建后新记账）并产生告警噪音
 	s.thumbLedger.dropLibrary(lib.ID)
 
-	// 3. 全量扫描（库存记录已空，全部文件走新增解析路径，FTS 随写路径双写）。
+	// 3. 全量扫描（库存记录为占位行，全部文件走重处理路径，FTS 随写路径双写）。
 	// 失败/取消直接返回：重绑已由 1.1 的 defer 执行（部分恢复语义，见函数头注释）
 	result, err := s.scanLibrary(ctx, store, lib)
 	if err != nil {
+		// 中断收尾：删除仍在 processing 的占位行，恢复「取消后索引零残留」语义
+		// （占位行是重建的新增中间态，取消后不应留下半态索引）。
+		ids := make([]int64, 0, len(placeholders))
+		for _, p := range placeholders {
+			ids = append(ids, p.id)
+		}
+		if deleted, delErr := store.deleteRebuildPlaceholders(ids); delErr != nil {
+			Logger().Warn("重建中断清理占位行失败", "libraryId", lib.ID, "err", delErr)
+		} else if len(deleted) > 0 {
+			thumbsDir := s.assetThumbsDir(lib.ID)
+			for _, id := range deleted {
+				s.thumbLedger.invalidateFile(lib.ID, id)
+				removeThumbFilesForFile(thumbsDir, id)
+			}
+		}
+		s.pruneOrphanThumbFiles(store, lib)
 		return model.AssetScanResult{}, err
 	}
+	// 4. 页数漂移对账（R5 页数维度）：占位快照记录旧页数，重建解析后的页数与之一致
+	// 才保留产物。覆盖「字节未变但页数变化」场景（解析器版本升级等），hash 判据
+	// 无法识别——不清理则页数减少时越界旧图永久残留且记账已清无人对账。
+	newPages := s.reconcileRebuildPageCounts(store, lib, placeholders)
+	// 5. 保留产物的记账补回（small + hd 两档，与 Auto 开关 / COM 可用性解耦）：
+	// 清表已级联删除 thumb_cache，不补则保留的 PNG 游离于 LRU 配额统计之外
+	// （淘汰游标看不到它们，目录可无限超出配额）。
+	s.recordRetainedThumbLedger(lib, placeholders, newPages)
+	// 6. 清理占位行中磁盘已消失的记录（重建语义：库内只保留磁盘现存文件）。
+	// 占位恢复让消失文件在常规扫描语义下落 lost，但重建等效旧「清空重来」口径
+	// ——真删除（用户标注已由 1.1 defer 重绑恢复），否则旧路径行会与改名后的
+	// 新行并存（哈希兜底会把它误判为「改名前的记录」）。
+	if deletedIDs, _, delErr := store.clearLostFiles(); delErr != nil {
+		Logger().Warn("重建清理丢失记录失败（残留 lost 行）", "libraryId", lib.ID, "err", delErr)
+	} else if len(deletedIDs) > 0 {
+		thumbsDir := s.assetThumbsDir(lib.ID)
+		for _, id := range deletedIDs {
+			s.thumbLedger.invalidateFile(lib.ID, id)
+			removeThumbFilesForFile(thumbsDir, id)
+		}
+	}
+	// 6. 孤儿缩略图清扫（兜底）：真删除的旧文件 ID 可能在缩略图目录留下无主产物。
+	s.pruneOrphanThumbFiles(store, lib)
 	return result, nil
+}
+
+// reconcileRebuildPageCounts 重建页数漂移对账：旧页数（占位快照）与新解析页数不
+// 一致即清该文件全部缩略图与记账，交补缺链路重导。
+//
+// 旧页数为 0 的文件（重建前无解析产物）无图可清，跳过。查询失败仅告警——按
+// 「hash 相同即保留」的既有口径继续（最坏是多留越界图，不影响展示与检索）。
+func (s *AssetLibraryService) reconcileRebuildPageCounts(store *assetsStore, lib model.AssetLibrary, placeholders []rebuildPlaceholder) map[int64]int {
+	newPages, err := store.maxSlideNums()
+	if err != nil {
+		Logger().Warn("重建页数对账跳过（页数读取失败）", "libraryId", lib.ID, "err", err)
+		return nil
+	}
+	cleared := 0
+	for _, p := range placeholders {
+		if p.pageCount <= 0 {
+			continue
+		}
+		if newPages[p.id] == p.pageCount {
+			continue
+		}
+		s.invalidateFileThumbs(lib, store, p.id)
+		cleared++
+	}
+	if cleared > 0 {
+		Logger().Info("重建页数漂移清理", "libraryId", lib.ID, "files", cleared)
+	}
+	return newPages
+}
+
+// recordRetainedThumbLedger 重建收尾按实际存在的 PNG 补记账（small + hd 两档），
+// 走 passive 变体（只补 bytes，不刷新 LRU 新鲜度）。
+//
+// 与 Auto 开关 / COM 可用性解耦是刻意设计：补缺链路的记账补回受
+// `Auto && Available` 短路，Auto=false（纯文本模式）或未装 PowerPoint 时保留的
+// 产物将无人记账，LRU 配额统计长期失真。
+func (s *AssetLibraryService) recordRetainedThumbLedger(lib model.AssetLibrary, placeholders []rebuildPlaceholder, newPages map[int64]int) {
+	if len(newPages) == 0 {
+		return // 页数读取失败或空库：无产物可记（补缺链路另有机会补）
+	}
+	thumbsDir := s.assetThumbsDir(lib.ID)
+	for _, p := range placeholders {
+		n := newPages[p.id]
+		if n <= 0 {
+			continue
+		}
+		for _, tier := range thumbTiers {
+			for page := 1; page <= n; page++ {
+				if info, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, p.id, page)); err == nil {
+					s.thumbLedger.recordPassive(lib.ID, p.id, tier.Key, page, info.Size())
+				}
+			}
+		}
+	}
+}
+
+// pruneOrphanThumbFiles 删除 fileID 不在 files 表中的缩略图 PNG（重建收尾兜底）。
+// 按缓存键前缀解析 fileID，只删无主产物；fail-safe：索引集合读取失败即整体跳过
+// （宁可留残留也不误删在用产物）。
+func (s *AssetLibraryService) pruneOrphanThumbFiles(store *assetsStore, lib model.AssetLibrary) {
+	rows, err := store.db.Query("SELECT id FROM files")
+	if err != nil {
+		Logger().Warn("孤儿缩略图清扫跳过（索引读取失败）", "libraryId", lib.ID, "err", err)
+		return
+	}
+	live := make(map[int64]bool, 256)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			Logger().Warn("孤儿缩略图清扫跳过（索引扫描失败）", "libraryId", lib.ID, "err", err)
+			return
+		}
+		live[id] = true
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		Logger().Warn("孤儿缩略图清扫跳过（索引遍历失败）", "libraryId", lib.ID, "err", err)
+		return
+	}
+
+	thumbsDir := s.assetThumbsDir(lib.ID)
+	removed := 0
+	for _, tier := range thumbTiers {
+		dir := filepath.Join(thumbsDir, tier.Key)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				Logger().Warn("孤儿缩略图清扫枚举失败", "dir", dir, "err", err)
+			}
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			id, ok := thumbFileIDFromName(e.Name())
+			if !ok || live[id] {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
+				Logger().Warn("删除孤儿缩略图失败", "file", e.Name(), "err", err)
+				continue
+			}
+			removed++
+		}
+	}
+	if removed > 0 {
+		Logger().Info("重建孤儿缩略图已清理", "libraryId", lib.ID, "files", removed)
+	}
+}
+
+// thumbFileIDFromName 从缓存键文件名 `<fileID>-<3位页>.png` 解析 fileID 前缀。
+func thumbFileIDFromName(name string) (int64, bool) {
+	idx := strings.IndexByte(name, '-')
+	if idx <= 0 {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(name[:idx], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // storeForScan 扫描专用连接获取（锁内取缓存连接）。扫描期间连接的关闭保护：
@@ -828,6 +1009,26 @@ func (s *AssetLibraryService) parseScanEntry(lib model.AssetLibrary, e pptxDiskE
 	return parsedScanEntry{slides: slides, parseErr: parseErr, hash: hash}
 }
 
+// scanContentUnchanged 重处理文件的解析结果是否与索引既有状态一致（内容指纹
+// 匹配，PRD R5 保留缩略图的唯一判据）。
+//
+// 判据取「sha256 相同」单条：文件字节完全一致 ⇒ 同一解析器版本下页数与版式必然
+// 一致，缩略图内容仍有效。重建清表已级联删除 slides，常规重解析路径读不到旧页数；
+// 重建场景的页数漂移由 `reconcileRebuildPageCounts` 单独对账（旧页数来自占位快照），
+// 常规扫描的越界页由导出成功后的 pruneBeyond 收口。
+//
+// 保守侧全部判「已变化」：hash 为空（权限跳过/哈希失败）、解析失败——宁可多导
+// 一次也不留陈旧图。新文件（exists=false）不经本判定（无旧图可留）。
+func scanContentUnchanged(rec assetFileRecord, parsed parsedScanEntry) bool {
+	if parsed.parseErr != nil {
+		return false
+	}
+	if rec.hash == "" || parsed.hash == "" {
+		return false
+	}
+	return rec.hash == parsed.hash
+}
+
 // finalizeScanFile 落库阶段（主 goroutine 串行）：占位/标记 processing → 缩略图
 // 失效联动 → 终态写。解析失败按分类降级为 failed/encrypted/denied 状态并返回
 // 对应 outcome（不中断批量）；DB 写失败为系统性错误上抛中断扫描。解析阶段已在
@@ -846,11 +1047,12 @@ func (s *AssetLibraryService) finalizeScanFile(store *assetsStore, lib model.Ass
 	} else if err := store.markProcessing(fileID, now); err != nil {
 		return 0, fmt.Errorf("更新文件处理状态失败（%s）: %w", e.rel, err)
 	} else {
-		// 缩略图失效联动（重解析清旧图）：文件内容已变旧图必失效，parse 成败
-		// 两分支全覆盖（解析失败降级 failed/encrypted 状态的文件同样不得残留
-		// 旧缩略图）。任一步失败仅告警不中断扫描：缓存清理幂等可自愈（下次
-		// 扫描重处理再清）。新文件分支无旧图，不触发。
-		s.invalidateFileThumbs(lib, store, fileID)
+		// 缩略图失效联动（重解析清旧图）：文件内容变化才清。重建保留 fileID 后，
+		// exists=true 也可能只是「重建强制重解析」而内容与页数完全未变——此时旧图
+		// 仍然有效，清了就等于全库重导（PRD R5）。判定 = hash + 页数双匹配。
+		if !scanContentUnchanged(rec, parsed) {
+			s.invalidateFileThumbs(lib, store, fileID)
+		}
 	}
 
 	if parsed.parseErr != nil {

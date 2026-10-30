@@ -11,10 +11,10 @@
 
 | 层 | 签名 | 位置 |
 |---|---|---|
-| 接口 | `ThumbExporter`：`Available() bool` / `ExportPresentation(ctx, spec, thumbsDir, tiers, preempt) (int, error)` / `JumpOnly(jr) error` / `Discard()` / `Shutdown()` | `assets_thumbs.go` |
-| 队列 | `EnqueueAssetThumbs(libraryID, files, thumbsDir)` / `JumpToSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `WaitThumbsDone()` / `ThumbsAvailable() bool` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `AssetLibraryService` |
-| App 绑定 | `AssetThumbsAvailable() bool` / `JumpToAssetSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `app_assets.go` |
-| 事件 | `assets-thumbs:progress`（AssetThumbsProgress）/ `assets-thumbs:done`（AssetThumbsResult）/ `assets-thumbs:error`（{libraryId, message}，当前触发点 = 入队队列满；沿用 assets-scan:error 不弹提示仅复位契约） | EventSink |
+| 接口 | `ThumbExporter`：`Available() bool` / `ExportPresentation(ctx, spec, thumbsDir, tiers, pages, preempt) (int, error)`（pages=nil 导全书，非 nil 为页白名单） / `JumpOnly(jr) error` / `Discard()` / `Shutdown()` | `assets_thumbs.go` |
+| 队列 | `EnqueueAssetThumbs(libraryID, files, thumbsDir)` / `RequestAssetThumb(libraryID, fileID, relPath, slideNum, tierIndex) error`（详情侧单页单档按需生成）/ `JumpToSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `WaitThumbsDone()` / `ThumbsAvailable() bool` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `AssetLibraryService` |
+| App 绑定 | `AssetThumbsAvailable() bool` / `JumpToAssetSlide(absPath, slideNum) error` / `CancelAssetThumbs(libraryID) bool` / `RequestAssetThumb(libraryID, fileID, relPath, slideNum, tierIndex) error` / `GetAssetThumb(libraryID, fileID, slideNum, tierIndex) (string, error)` | `app_assets.go` |
+| 事件 | `assets-thumbs:progress`（AssetThumbsProgress）/ `assets-thumbs:done`（AssetThumbsResult，含 `onDemand` 标记）/ `assets-thumbs:error`（{libraryId, message}，当前触发点 = 入队队列满；沿用 assets-scan:error 不弹提示仅复位契约） | EventSink |
 | 缓存命名 | `thumbPNGPath(thumbsDir, tierKey, fileID, slideNum)` = `<thumbsDir>/<tier>/<fileID>-<3位页>.png` | 单点函数 |
 | 分叉构造 | `newThumbExporter()`（_windows=go-ole / _other=桩）/ `newThumbQueue(exp, sinkFn, ledger)`（第三参 = 记账 ledger，五处构造点全部注入） | 平台分叉点 |
 | 记账 | `thumbCacheLedger`：`record` / `invalidateFile` / `dropLibrary` / `flushLibrary` / `pruneBeyond` / `Shutdown`；`storeForThumbs`（锁内校验+取连接单点） | `assets_thumbs_ledger.go` |
@@ -99,14 +99,16 @@
 |---|---|---|
 | 重解析 | `processScanFile` exists 分支（markProcessing 后、parse 前——成败两分支都覆盖） | `invalidateFileThumbs`：显式 DELETE 记账 + `ledger.invalidateFile` + 前缀删 PNG（`fileID + "-"` 完整形态防 `102`/`1023` 误伤） |
 | 文件删除 | `scanLibrary` 尾部 gone 清理 | `deleteFilesByPaths` 事务内显式 DELETE 记账（返回 fileIDs）→ 事务提交后删 PNG + `invalidateFile` |
-| 重建 | `rebuildLibrary` 步骤 2/2.1/2.2 | 清表（事务内）+ `RemoveAll` 整目录 + **`dropLibrary` 清 dirty**（残留 dirty flush 时 FK 失败整批丢弃）+ 开头 `CancelAssetThumbs`（防在途批次向已清目录写旧 ID PNG——旧 ID 永不复用，残留超配额永久孤儿） |
+| 重建 | `rebuildLibrary` 步骤 2/2.1/2.2 | 保留 fileID（占位行显式主键恢复）+ 按内容指纹保留 PNG（详见 §9.2）；消失文件真删除并清图；收尾孤儿清扫 |
 
 - DeleteLibrary 同构：`CancelAssetThumbs`（**缩小窗口**口径——取消异步不等待，在途单文件仍可能重建空 tier 目录残留少量 PNG，可手动清理）+ RemoveAll + dropLibrary。
 - flush 快照与失效清理的竞态窗口残留幽灵行判定无害（同 key 重导出覆盖 / 读取不查 db / 淘汰删文件 NotExist 忽略），由 WHERE EXISTS 兜底落盘面。
 
 ### 补缺判定（扫描完成自动入队）
 
-- **页命中唯一权威口径 = PNG 文件存在（os.Stat）**；记账表**不参与**补缺判定。原因：记账落盘攒批异步（dirty 未 flush 时 db 查不到），参与判定会把已生成页误判缺失，连续扫描重复入队重导出（真机冒烟抓出的幂等回归）——幂等不得依赖 flush 时序；记账 miss 而文件在的页由读取路径 touch 自愈补记账。反向（记账命中文件缺失）同样判缺失重导。
+- **只判 small 档**（`batchBacklogTiers` 单点，2026-10-30 hd 退出批量）：hd 单张 1-3MB，全库体积远超默认配额（1024MB），参与补缺会因 LRU 淘汰形成「淘汰 → 整本重导 → 再淘汰」的永久循环。hd 改由详情侧 `RequestAssetThumb` 按需生成。
+- **页命中唯一权威口径 = PNG 文件存在（os.Stat）**；记账表**不参与**补缺判定。原因：记账落盘攒批异步（dirty 未 flush 时 db 查不到），参与判定会把已生成页误判缺失，连续扫描重复入队重导出（真机冒烟抓出的幂等回归）——幂等不得依赖 flush 时序；记账 miss 而文件在的页由读取路径 touch 自愈补记账。
+- **Stat 命中顺手补记账**（2026-10-30）：重建保留 PNG 时 `thumb_cache` 行被清表级联删除，而补缺收集的 Stat 是必做动作，命中即 `ledger.record`——零额外成本把记账补回，否则保留产物游离于 LRU 配额统计之外。反向（记账命中文件缺失）同样判缺失重导。
 - 入队位置：`runLibraryScan` 尾部扫描 goroutine 内（结构性保证 `WaitScansDone` join 时批次已注册）——补缺收集的 Stat 开销（千文件 × 20 页 ≈ 4 万次，秒级）为此保证的接受成本，设计目标千级库，禁为省 Stat 移后台 goroutine 破坏该保证。
 - 文件级粒度：任一页缺失 → 整文件重导出（COM 打开粒度 = 文件；已有页覆盖写幂等）。
 
@@ -177,13 +179,36 @@
 - `jumpInSession` 在 findOrOpen 后显式 `PutProperty(app, "Visible", msoTrue)`——WPS 兼容层不随 WithWindow 显示窗口；PowerPoint 已可见时幂等无害；失败仅 Warn。exportSession 的 ReadOnly 无窗口导出路径不经此函数不受影响；preempt 插队跳转共用本函数同获兜底。
 - 成功路径日志 `"缩略图跳转完成"` 带 `file`/`slide`/`reused` 三字段（reused 区分「落在用户已开实例」vs「自启新窗口」——排障要害）。
 
+## 9.2 hd 按需生成与增量重建（2026-10-30）
+
+### hd 档按需生成
+
+- 批量补缺只负责 small（`batchBacklogTiers`）；hd 由详情侧 `RequestAssetThumb(libraryID, fileID, relPath, slideNum, tierIndex)` 单页单档生成：PNG 已存在直接返回（幂等），同页在途经 `demandPending` 去重，异步入队后前端等该库 `assets-thumbs:done`（`onDemand=true`）重拉。
+- **按需走独立通道 `demandCh`（容量 16）**：不进 `batches` 注册表，因此**不与批量批次互相取消**（`EnqueueAssetThumbs` 同库覆盖式取消只作用于批量）——共用注册表会让「打开详情」取消正在跑的批量、或反之让详情图永不出现。worker 消费顺序：jump → demand → batch（demand 只做非阻塞探测，阻塞 select 中与 batch 同集随机，按需最多等一个批量文件）。
+- 按需批次用任务自带 `Tiers`/`Pages`（单档单页），**不发 progress 事件**（批量进度条不闪），done 载荷带 `onDemand` + 目标 `fileId`/`slideNum` 供前端把失败/取消落到当前详情卡（显示「重试生成」，否则 hd 永久占位无反馈）。
+- **批量在途的按需插队**：`handleBatch` 每个文件边界调 `drainDemand()` 非阻塞排空按需通道（对齐跳转的页间 preempt）——只在批间消费会让千页级批量（数分钟）挡住按需请求直到排队超时作废。嵌套按需任务不再插队（无递归放大）。
+- **按需任务纳入取消面**：`demandTasks` 登记（不进 `batches`），`CancelAssetThumbs` 取消同库按需任务、`WaitThumbsDone` 取消全部——否则删库/清档的 `RemoveAll` 之后按需任务仍会重建档目录并写入旧分辨率 PNG，关停还要等满按需超时。`handleBatch` 统一 `defer b.Cancel()` 回收超时定时器。
+- **页白名单批次禁走 `pruneBeyond`**：按「本次导出页数」裁剪会把第 1 页之后的既有产物误删（单页导出返回 n=1 时会清空整本后续页）。记账只按白名单页 Stat 成功者写入。
+- 前端：详情大图区 = small 底图（tier=0 常显）+ hd 覆盖层（tier=1 `hide-on-miss` 绝对定位）。`hideOnMiss` 语义为**仅 ready 渲染**（loading 期不渲染，否则灰底占位会盖住 small 底图）。详情打开/切页触发按需请求；onDemand done 带 `failed/canceled` 且 `fileId` 命中当前详情时，把该条目计入失败集显示「重试生成」。
+
+### 增量重建（保留 fileID 与缩略图）
+
+- 缓存键 `<fileID>-<3位页>.png` 依赖 `files.id` 稳定——重建若换 ID 则旧图全失效必然全库重导。故 `rebuildLibrary` 清表前快照全部文件行（`listRebuildPlaceholders`：id/path/size/mtime/hash/title），清表后 `restoreRebuildPlaceholders` **显式主键恢复占位行**（status=processing 强制重解析，重建语义不变）。
+- **主键复用与 AUTOINCREMENT**：序列不回退，旧 ID 均 ≤ 历史最大值，显式插入不与新分配冲突；新文件仍从历史最大值继续递增。单事务写入，任一失败整体回滚。
+- **缩略图目录不再整目录 `RemoveAll`**：`finalizeScanFile` 的重解析分支改为「内容指纹未变则跳过失效联动」——判据 = `scanContentUnchanged`（sha256 相同且解析成功）。字节相同 ⇒ 同版本解析器页数与版式必然一致。保守侧（hash 空 / 解析失败）一律判变化清图。
+- 页数漂移兜底（解析器升级等）：新页数变多 → 补缺缺页判定触发整本重导；变少 → 越界旧页残留不参与展示，配额由 LRU 收口。
+- 重建收尾四步：① `reconcileRebuildPageCounts` 页数漂移对账（旧页数取占位快照，与新解析页数不等即清该文件全部 PNG 与记账——覆盖「字节未变但解析器版本升级致页数变化」的盲区）；② `recordRetainedThumbLedger` 按实际存在的 PNG 给 small+hd 两档补记账（passive 变体只补 bytes 不刷 LRU；与 Auto 开关 / COM 可用性**解耦**，否则 Auto=false 或未装 PowerPoint 时保留产物游离于配额统计）；③ 占位行中磁盘已消失者真删除（`clearLostFiles`，不落 lost——否则旧路径行与改名后新行并存，哈希兜底误判）+ `pruneOrphanThumbFiles` 删除 fileID 不在索引中的 PNG（fail-safe：索引集合读取失败整体跳过）；④ 扫描中断时 `deleteRebuildPlaceholders` 删除仍 processing 的占位行，恢复「取消后索引零残留」。
+- **清表与占位恢复同事务**（`resetIndexForRebuild`）：分属两事务时恢复失败会留下空索引，级联删除的标注随磁盘 VACUUM 备份（best-effort）之外无恢复手段——单事务保证失败整体回滚到重建前。
+- **批量批次默认只导 small**：`handleBatch` 对 `Tiers == nil` 的任务取 `batchBacklogTiers`（不是全档），`RetryAssetThumb` / 设置变更重入队同获此口径；显式 `Tiers`（按需）不受影响。
+- `CancelAssetThumbs` 仍在重建开头调用（防在途批次与清表竞态）。
+
 ## 4. Validation & Error Matrix
 
 
 | 条件 | 行为 |
 |---|---|
 | 无 PowerPoint（探测不可用） | 入队静默跳过（无事件）；跳转返回 `E_ASSETS_THUMBS_UNAVAILABLE`（error，前端提示条常驻 + 入口隐藏） |
-| 跳转排队超时 / 队列忙 | `E_ASSETS_THUMBS_BUSY`（warning 可重试；**禁复用 UNAVAILABLE**——语义为环境缺失，会误触降级 UI） |
+| 跳转排队超时 / 队列忙 / **按需生成队列满（demandCh 容量 16）** | `E_ASSETS_THUMBS_BUSY`（warning 可重试；**禁复用 UNAVAILABLE**——语义为环境缺失，会误触降级 UI） |
 | 跳转执行失败（文件不存在/损坏/COM 调用失败） | `E_ASSETS_THUMBS_JUMP_FAILED`（error，JumpToSlide 出口包装——nil 与既有 AppError 原样返回，COM 原始错误 `WrapAppError` 包裹保留根因 `errors.Is` 穿透） |
 | 单 PPT 超时（300s） | 杀自启实例（精确 PID + 镜像快照）→ 文件记失败 → 继续后续 |
 | 批次取消 | ctx 传播 → `done.Canceled=true` → 中断剩余文件 |

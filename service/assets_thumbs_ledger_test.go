@@ -670,12 +670,13 @@ func TestThumbsBacklog_MissingLedgerEntry(t *testing.T) {
 }
 
 // TestThumbsBacklog_MissingFileDespiteLedger 记账命中但 PNG 文件缺失（崩溃/手动
-// 清理致记账与文件脱钩）→ 该文件入队重导出。
+// 清理致记账与文件脱钩）→ 该文件入队重导出。判定档位取 small——hd 已退出批量
+// 补缺（详情侧按需生成），见 TestThumbsBacklog_HDMissingNotEnqueued。
 func TestThumbsBacklog_MissingFileDespiteLedger(t *testing.T) {
 	svc, store, lib, thumbsDir := setupBacklogFixture(t)
 	fillThumbsComplete(t, store, lib, thumbsDir)
 	yiID := fileIDByPath(t, store, "乙.pptx")
-	if err := os.Remove(thumbPNGPath(thumbsDir, "hd", yiID, 1)); err != nil {
+	if err := os.Remove(thumbPNGPath(thumbsDir, "small", yiID, 1)); err != nil {
 		t.Fatalf("删 PNG 文件: %v", err)
 	}
 	backlog, err := svc.collectThumbsBacklog(store, lib, thumbsDir)
@@ -683,6 +684,25 @@ func TestThumbsBacklog_MissingFileDespiteLedger(t *testing.T) {
 		t.Fatalf("collectThumbsBacklog: %v", err)
 	}
 	assertBacklogFiles(t, backlog, lib, []string{"乙.pptx"})
+}
+
+// TestThumbsBacklog_HDMissingNotEnqueued hd 档退出批量补缺（PRD R1）：hd PNG 缺失
+// 不触发入队，避免 LRU 淘汰后「淘汰 → 整本重导 → 再淘汰」循环；hd 由详情侧
+// RequestAssetThumb 按需生成。
+func TestThumbsBacklog_HDMissingNotEnqueued(t *testing.T) {
+	svc, store, lib, thumbsDir := setupBacklogFixture(t)
+	fillThumbsComplete(t, store, lib, thumbsDir)
+	yiID := fileIDByPath(t, store, "乙.pptx")
+	for _, page := range []int{1, 2, 3} {
+		if err := os.Remove(thumbPNGPath(thumbsDir, "hd", yiID, page)); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("删 hd PNG: %v", err)
+		}
+	}
+	backlog, err := svc.collectThumbsBacklog(store, lib, thumbsDir)
+	if err != nil {
+		t.Fatalf("collectThumbsBacklog: %v", err)
+	}
+	assertBacklogFiles(t, backlog, lib, nil)
 }
 
 // TestThumbsBacklog_NonOKStatusSkipped 非 ok 状态不入队：failed 文件无可导出语义
@@ -737,7 +757,7 @@ func TestThumbsBacklog_EnqueueAfterScan(t *testing.T) {
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
 	defer release() // 任何失败退出路径都放行 worker（防 cleanup WaitThumbsDone 永挂）
-	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		exportStarted <- struct{}{}
 		<-releaseCh
 		return 1, nil
@@ -859,10 +879,13 @@ func markStaleForRescan(t *testing.T, store *assetsStore, fileID int64) {
 	}
 }
 
-// TestThumbInvalidation_OnRescanUpdated 重解析成功路径：旧记账与旧 PNG 全部清除
-// （文件内容已变旧图必失效——失效发生在解析之前，成败两分支均生效）。
+// TestThumbInvalidation_OnRescanUpdated 重解析成功路径：内容真变化时旧记账与旧
+// PNG 全部清除（失效判据 = hash + 页数，扫描重处理但内容未变则保留产物，见
+// TestThumbInvalidation_OnRebuildUnchangedKeeps 对照）。
 func TestThumbInvalidation_OnRescanUpdated(t *testing.T) {
 	svc, store, lib, fileID, thumbsDir := setupInvalidationFixture(t)
+	// 覆盖写为不同内容（hash 变化）+ mtime 回拨驱动重解析
+	buildAssetsPptx(t, lib.RootPath, "甲.pptx", []assetsSlideSpec{{titlePh: "二", body: []string{"新内容"}}})
 	markStaleForRescan(t, store, fileID)
 
 	result, err := svc.StartScan(context.Background(), lib.ID)
@@ -873,6 +896,22 @@ func TestThumbInvalidation_OnRescanUpdated(t *testing.T) {
 		t.Fatalf("应按变更重处理, got %+v", result)
 	}
 	assertThumbsGone(t, store, thumbsDir, fileID)
+}
+
+// TestThumbInvalidation_OnRescanUnchangedKeeps 重解析但内容未变（仅 mtime 抖动，
+// 例如备份工具改写时间戳）：保留既有缩略图与记账，不把 valid 产物当陈旧图清掉。
+func TestThumbInvalidation_OnRescanUnchangedKeeps(t *testing.T) {
+	svc, store, lib, fileID, thumbsDir := setupInvalidationFixture(t)
+	markStaleForRescan(t, store, fileID)
+
+	result, err := svc.StartScan(context.Background(), lib.ID)
+	if err != nil {
+		t.Fatalf("重扫: %v", err)
+	}
+	if result.Updated != 1 {
+		t.Fatalf("应按 mtime 失配重处理, got %+v", result)
+	}
+	assertThumbsKept(t, store, thumbsDir, fileID)
 }
 
 // TestThumbInvalidation_OnRescanParseFailed 解析失败路径：内容已变旧图必失效，
@@ -924,20 +963,22 @@ func TestThumbInvalidation_OnFileDeleted(t *testing.T) {
 	assertThumbsGone(t, store, thumbsDir, fileID)
 }
 
-// TestThumbInvalidation_OnRebuild 全量重建联动：记账表清空 + thumbs 目录整体
-// 清空（重建语义逐条保留无意义）。
+// TestThumbInvalidation_OnRebuild 全量重建联动：内容未变的文件保留 fileID 与
+// 缩略图产物（PRD R5 核心收益——重建不再全库重导），记账表因清表级联清空后由
+// 补缺收集的 Stat 命中补回（见 collectThumbsBacklog）。
 func TestThumbInvalidation_OnRebuild(t *testing.T) {
-	svc, store, _, _, thumbsDir := setupInvalidationFixture(t)
+	svc, _, _, fileID, thumbsDir := setupInvalidationFixture(t)
 
 	if _, err := svc.RebuildScan(context.Background(), svc.libs0ID()); err != nil {
 		t.Fatalf("RebuildScan: %v", err)
 	}
-	if n := countThumbCacheRows(t, store); n != 0 {
-		t.Fatalf("重建后记账表应清空, got %d 行", n)
-	}
-	if _, err := os.ReadDir(thumbsDir); !os.IsNotExist(err) {
-		entries, _ := os.ReadDir(thumbsDir)
-		t.Fatalf("重建后 thumbs 目录应整体清空, err=%v 残留=%d", err, len(entries))
+	// 产物保留：small/hd 各 3 页 PNG 全在
+	for _, tier := range thumbTiers {
+		for page := 1; page <= 3; page++ {
+			if _, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, fileID, page)); err != nil {
+				t.Fatalf("内容未变重建应保留 %s 档第 %d 页缩略图: %v", tier.Key, page, err)
+			}
+		}
 	}
 }
 
@@ -1047,7 +1088,7 @@ func TestThumbQueue_EnqueueFullEmitsErrorEvent(t *testing.T) {
 	t.Cleanup(func() { s.WaitThumbsDone() })
 
 	block := make(chan struct{})
-	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		<-block
 		return 1, nil
 	}

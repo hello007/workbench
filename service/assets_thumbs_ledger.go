@@ -149,6 +149,40 @@ func (l *thumbCacheLedger) record(libraryID string, fileID int64, tier string, p
 	}
 }
 
+// recordPassive 被动补记账（只补 bytes，不刷新 LRU 新鲜度）：补缺收集的 Stat 命中
+// （重建后记账行被清表级联删除时补回）与任何「顺路发现产物存在」的场景使用。
+//
+// lastAccessNs 写 0，flush 的 UPSERT 取 MAX(旧值, 新值) —— 已有的真实访问时间戳
+// 永不被降级，但也不被本轮扫描批量推高（否则每轮扫描把所有页刷新为「刚访问」，
+// LRU 淘汰退化为随机）。dirty 中已有同键（更近的 touch）时整条跳过。
+func (l *thumbCacheLedger) recordPassive(libraryID string, fileID int64, tier string, page int, bytes int64) {
+	l.start()
+	l.mu.Lock()
+	if l.stopped {
+		l.mu.Unlock()
+		return
+	}
+	byKey, ok := l.dirty[libraryID]
+	if !ok {
+		byKey = make(map[thumbCacheKey]thumbCacheEntry)
+		l.dirty[libraryID] = byKey
+	}
+	key := thumbCacheKey{fileID: fileID, tier: tier, page: page}
+	if _, exists := byKey[key]; exists {
+		l.mu.Unlock()
+		return // 更近的 touch 已在攒批中，不覆盖
+	}
+	byKey[key] = thumbCacheEntry{bytes: bytes}
+	needFlush := len(byKey) >= thumbLedgerFlushThreshold
+	l.mu.Unlock()
+	if needFlush {
+		select {
+		case l.notify <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // invalidateFile 清除内存 dirty 中指定文件的全部记账条目（失效联动：重解析/删除
 // 文件时防 dirty 复活已删行）。flush 快照与清理的竞态窗口可能残留幽灵行，无害：
 // 同 key 会被重导出的 record 覆盖、指向已删文件时读取 API 不查 db、淘汰路径
@@ -457,8 +491,10 @@ func (s *assetsStore) flushThumbEntries(entries map[thumbCacheKey]thumbCacheEntr
 	}
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(
-		"INSERT OR REPLACE INTO thumb_cache(file_id, tier, page, bytes, last_access_ns) " +
-			"SELECT ?, ?, ?, ?, ? WHERE EXISTS(SELECT 1 FROM files WHERE id = ?)")
+		"INSERT INTO thumb_cache(file_id, tier, page, bytes, last_access_ns) " +
+			"SELECT ?, ?, ?, ?, ? WHERE EXISTS(SELECT 1 FROM files WHERE id = ?) " +
+			"ON CONFLICT(file_id, tier, page) DO UPDATE SET bytes = excluded.bytes, " +
+			"last_access_ns = MAX(thumb_cache.last_access_ns, excluded.last_access_ns)")
 	if err != nil {
 		return 0, err
 	}

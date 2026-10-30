@@ -784,13 +784,13 @@ func (e *goOleThumbExporter) markUnavailable() {
 	e.availableSet.Store(true)
 }
 
-// ExportPresentation 打开 pptx（ReadOnly 无窗口）逐页导出双档 PNG。
-// 实现细节见 ThumbExporter 接口注释（assets_thumbs.go）。
-func (e *goOleThumbExporter) ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
+// ExportPresentation 打开 pptx（ReadOnly 无窗口）逐页导出 PNG（pages 为 nil 导全书，
+// 非 nil 只导白名单页）。实现细节见 ThumbExporter 接口注释（assets_thumbs.go）。
+func (e *goOleThumbExporter) ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error) {
 	resCh := make(chan error, 1)
 	pagesCh := make(chan int, 1)
 	task := func(w *comWorkerState) {
-		pages, err := w.exportSession(ctx, spec, thumbsDir, tiers, preempt)
+		pages, err := w.exportSession(ctx, spec, thumbsDir, tiers, pages, preempt)
 		pagesCh <- pages
 		resCh <- err
 	}
@@ -872,10 +872,12 @@ func isComClassError(err error) bool {
 
 // ---- COM 任务实现（worker STA 线程内执行） ----
 
-// exportSession 单文件导出会话：复用检查 → ReadOnly 无窗口打开 → 逐页双档
-// Export（页级瞬态重试 + 页间 preempt 跳转插队）→ Close（复用的不 Close）。
-// ctx 供页级重试的准入判定与退避等待消费（取消/超时零重试）。返回导出页数。
-func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
+// exportSession 单文件导出会话：复用检查 → ReadOnly 无窗口打开 → 逐页 Export
+// （档位由调用方给定；pages 为 nil 导全书，非 nil 只导白名单页；页级瞬态重试 +
+// 页间 preempt 跳转插队）→ Close（复用的不 Close）。
+// ctx 供页级重试的准入判定与退避等待消费（取消/超时零重试）。返回最后成功导出
+// 的页序（全页路径下 = 页数）。
+func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error) {
 	app, err := w.ensureApp()
 	if err != nil {
 		return 0, err
@@ -917,6 +919,11 @@ func (w *comWorkerState) exportSession(ctx context.Context, spec thumbFileSpec, 
 
 	exported := 0
 	for i := 1; i <= count; i++ {
+		// 页白名单过滤（详情侧单页按需生成）：跳过页不导出、不 preempt——白名单
+		// 任务极短，跳转请求在两批之间由队列主循环消费即可。
+		if !pageRequested(pages, i) {
+			continue
+		}
 		slideV, err := oleutil.CallMethod(slides, "Item", i)
 		if err != nil {
 			return exported, fmt.Errorf("取第 %d 页失败: %w", i, err)

@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核对改造是否守住缓存键、补缺权威口径、重建取消时序与关闭顺序"}
+{"file": "docs/spec/assets-management.md", "reason": "核对重建/失效联动/刷新入口未被绕过"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证覆盖率门禁通过"}
+{"file": "docs/spec/perf-baseline.md", "reason": "验证新增测试不含隐式环境依赖与 sleep 竞态"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "详情侧 small 底图 + hd 覆盖层的布局与视觉规范"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证 wailsjs 绑定三处同步完成"}

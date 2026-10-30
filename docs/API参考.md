@@ -510,7 +510,8 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `JumpToAssetSlide` | `(absPath, slideNum) => Promise<void>` | 打开 PPT 并跳到指定页（PowerPoint COM；批量生成在途时经页间插队执行；无 PowerPoint 报 `E_ASSETS_THUMBS_UNAVAILABLE`，排队/执行超时报 `E_ASSETS_THUMBS_BUSY`） | — |
 | `CancelAssetThumbs` | `(libraryID) => Promise<boolean>` | 取消指定库的缩略图批量生成（幂等，无在途批次返回 false） | boolean |
 | `GetAssetThumb` | `(libraryID, fileID, slideNum, tierIndex) => Promise<string>` | 读取单页缩略图 PNG（base64 标准编码裸串；tierIndex 0=small 画廊卡片 1=hd 详情大图；未生成/已淘汰返回空串非错误，前端回退占位卡；消费契约：直接拼 data URL，禁 decodeBase64Utf8 禁裸 atob） | string |
-| `RetryAssetThumb` | `(libraryID, fileID, relPath) => Promise<void>` | 单文件缩略图重试（详情侧边栏「重试」入口；复用 COM 串行队列链路，触发时取消同库在途批量批次（既有取消语义）；源文件不存在报错，无 PowerPoint 返回 `E_ASSETS_THUMBS_UNAVAILABLE`） | — |
+| `RequestAssetThumb` | `(libraryID, fileID, relPath, slideNum, tierIndex) => Promise<void>` | 详情侧单页单档按需生成（hd 退出批量补缺后的唯一补齐入口）：PNG 已存在或同页在途直接返回，异步入队独立按需通道（不与批量批次互相取消），完成后发 `assets-thumbs:done` 且载荷 `onDemand=true`；队列满报 `E_ASSETS_THUMBS_BUSY`，无 PowerPoint 报 `E_ASSETS_THUMBS_UNAVAILABLE` | — |
+| `RetryAssetThumb` | `(libraryID, fileID, relPath) => Promise<void>` | 单文件小图重试（复用 COM 串行队列链路，触发时取消同库在途批量批次（既有取消语义）；批量链路只导 small 档，hd 走 `RequestAssetThumb`；源文件不存在报错，无 PowerPoint 返回 `E_ASSETS_THUMBS_UNAVAILABLE`） | — |
 | `SplitAssetFile` | `(libraryID, relPath, outputToSourceDir) => Promise<AssetSplitResult>` | 单文件 PPT 按页拆分（详情侧边栏「拆分此 PPT」入口；落点二选一：缓存目录 derived 镜像源树（默认）/ 源目录（自动排除索引）；增量命中跳过返回 `skipped=true`；核心失败（损坏/加密/只读）报错，取消复用 `E_ASSETS_CANCELLED`） | AssetSplitResult |
 | `SplitAssetLibrary` | `(libraryID, outputToSourceDir) => Promise<AssetSplitBatchResult>` | 库级批量拆分（「拆分全部 PPT」入口；启动时快照圈定全部 ok 状态文件，单文件失败逐文件记日志跳过不中断批量，返回汇总与逐文件明细；同库并发拆分拒绝 `E_ASSETS_SCAN_IN_PROGRESS`） | AssetSplitBatchResult |
 | `CancelAssetSplit` | `(libraryID) => Promise<boolean>` | 取消指定库在途拆分（幂等，无在途拆分返回 false；取消错误前端按 `E_ASSETS_CANCELLED` warning 中性提示） | boolean |

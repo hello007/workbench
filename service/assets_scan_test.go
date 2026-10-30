@@ -24,6 +24,11 @@ func newTestAssetService(t *testing.T) *AssetLibraryService {
 	svc := NewAssetLibraryService(context.Background(), filepath.Join(t.TempDir(), "assets"))
 	svc.thumbQ = newThumbQueue(&fakeThumbExporter{available: false}, svc.eventSink, svc.thumbLedger, nil)
 	t.Cleanup(svc.CloseAll)
+	// 缩略图链路收口（LIFO：先于 CloseAll 执行）：补缺收集的 Stat 命中会 record
+	// 记账并惰性启动 ledger flusher goroutine，不关停即被 goleak 判泄漏（flusher
+	// 事后 flush 还会惰性开库，连带 connectionOpener 泄漏）。WaitThumbsDone 内
+	// 幂等（closed 先检查），与用例内显式注册重复无害。
+	t.Cleanup(svc.WaitThumbsDone)
 	return svc
 }
 

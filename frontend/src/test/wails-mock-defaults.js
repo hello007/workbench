@@ -412,6 +412,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   JumpToAssetSlide: null,
   // 失败缩略图重新入队：void 返回 null 安全 no-op
   RetryAssetThumb: null,
+  // 详情侧 hd 单页单档按需生成（10-30-hd PR3）：void 返回 null 安全 no-op
+  //（PNG 已存在/同页在途后端直接返回，完成经 assets-thumbs:done onDemand 载荷触发重拉）
+  RequestAssetThumb: null,
   // 默认无可取消在途生成：false = 幂等 no-op（对齐 CancelAssetScan 语义）
   CancelAssetThumbs: false,
 

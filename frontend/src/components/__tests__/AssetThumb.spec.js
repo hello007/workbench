@@ -84,13 +84,14 @@ describe('AssetThumb', () => {
     expect(wrapper.find('img').exists()).toBe(false)
   })
 
-  it('hideOnMiss：miss 时不渲染组件（详情场景未生成不占位）', async () => {
+  it('hideOnMiss：loading/miss 均不渲染组件（详情两层大图由 small 底图透出），ready 才渲染', async () => {
     const wrapper = mountThumb({ hideOnMiss: true })
     await flushPromises()
     expect(wailsMock.GetAssetThumb).toHaveBeenCalledTimes(1) // 详情面板打开即可见：挂载即加载
     expect(wrapper.find('.asset-thumb').exists()).toBe(false)
 
-    // 后台生成完成后（epoch 变化）：miss 重试，loading 起渲染占位防布局跳动
+    // 后台生成完成后（epoch 变化）：miss 重试；加载期仍不渲染（底图保持可见），
+    // ready 后直接渲染大图替换底图
     wailsMock.GetAssetThumb.mockResolvedValue('SEHD')
     await wrapper.setProps({ epoch: 1 })
     await flushPromises()

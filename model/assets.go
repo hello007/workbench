@@ -150,13 +150,19 @@ type AssetThumbsProgress struct {
 
 // AssetThumbsResult 单批缩略图生成结果汇总（assets-thumbs:done 事件载荷）。
 // Generated 为成功生成全部页双档缩略图的文件数；Skipped 为缓存命中/源未变跳过数。
+// OnDemand 标记该批次由详情侧单页按需生成触发（前端据此过滤批量进度提示，
+// 避免打开详情时进度条闪现）；FileID/SlideNum 仅在按需批次填充，供前端把
+// 失败/取消定位到当前详情条目（失败集按文件路径驱动重试入口）。
 type AssetThumbsResult struct {
-	LibraryID string `json:"libraryId"` // 所属库 ID
-	Total     int    `json:"total"`     // 批次文件总数
-	Generated int    `json:"generated"` // 生成成功文件数
-	Skipped   int    `json:"skipped"`   // 跳过文件数（缓存命中）
-	Failed    int    `json:"failed"`    // 生成失败文件数
-	Canceled  bool   `json:"canceled"`  // 是否被用户取消中断
+	LibraryID string `json:"libraryId"`          // 所属库 ID
+	Total     int    `json:"total"`              // 批次文件总数
+	Generated int    `json:"generated"`          // 生成成功文件数
+	Skipped   int    `json:"skipped"`            // 跳过文件数（缓存命中）
+	Failed    int    `json:"failed"`             // 生成失败文件数
+	Canceled  bool   `json:"canceled"`           // 是否被用户取消中断
+	OnDemand  bool   `json:"onDemand,omitempty"` // 是否详情侧单页按需批次
+	FileID    int64  `json:"fileId,omitempty"`   // 按需批次目标文件 ID
+	SlideNum  int    `json:"slideNum,omitempty"` // 按需批次目标页序
 }
 
 // AssetFileMetaUpdate 文件级元数据编辑入参（UpdateAssetFileMeta 整体替换语义：

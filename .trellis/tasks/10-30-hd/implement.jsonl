@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "缩略图 COM 队列核心契约：缓存键、双档导出、补缺判定唯一权威、重建失效联动三路径、关闭收口顺序"}
+{"file": "docs/spec/assets-management.md", "reason": "素材域扫描/重建/刷新统一入口规范，重建语义与失效联动口径"}
+{"file": "docs/spec/perf-baseline.md", "reason": "性能基线与测试稳定性契约（禁隐式环境依赖、注入式参数）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法须同步 wailsjs 三处绑定"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76%、前端 ≥70% 覆盖率门禁"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步与 slog 日志规范"}

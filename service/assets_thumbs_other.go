@@ -25,7 +25,7 @@ func (unavailableThumbExporter) Available() bool {
 	return false
 }
 
-func (unavailableThumbExporter) ExportPresentation(_ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+func (unavailableThumbExporter) ExportPresentation(_ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 	return 0, errThumbsUnavailable
 }
 

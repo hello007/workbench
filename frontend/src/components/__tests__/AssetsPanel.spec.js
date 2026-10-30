@@ -230,6 +230,7 @@ const { wailsMock } = vi.hoisted(() => ({
     CancelAssetThumbs: vi.fn(),
     JumpToAssetSlide: vi.fn(),
     RetryAssetThumb: vi.fn(),
+    RequestAssetThumb: vi.fn(),
     GetAssetThumb: vi.fn(),
     SplitAssetFile: vi.fn(),
     SplitAssetLibrary: vi.fn(),
@@ -583,6 +584,8 @@ describe('AssetsPanel', () => {
     wailsMock.CancelAssetThumbs.mockResolvedValue(false)
     wailsMock.JumpToAssetSlide.mockResolvedValue(null)
     wailsMock.RetryAssetThumb.mockResolvedValue(null)
+    // 详情侧 hd 按需生成（10-30-hd PR3）：void 返回 null 安全 no-op
+    wailsMock.RequestAssetThumb.mockResolvedValue(null)
     // ---- 拆分（SRS §2.2.3/§2.2.5 方式 2）默认值：空结果汇总 + 无拆分记录（方式 2
     // 按钮隐藏），按用例覆盖 ----
     wailsMock.SplitAssetFile.mockResolvedValue({ outputDir: '', files: [], pageCount: 0, skipped: false, skipReason: '' })
@@ -2820,12 +2823,12 @@ describe('AssetsPanel', () => {
     expect(failed.text()).toContain('缩略图生成失败')
     expect(failed.text()).toContain('重试生成')
 
-    // 点重试：以当前库 + 详情文件 ID + 归属路径重新入队
+    // 点重试：按需单页单档重新生成（hd 退离批量补缺后的重试口径，不再整本重导）
     await clickButton(wrapper, '重试生成')
     await flushPromises()
-    expect(wailsMock.RetryAssetThumb).toHaveBeenCalledWith('lib-1', 12, '方案B/损坏文件.pptx')
+    expect(wailsMock.RequestAssetThumb).toHaveBeenCalledWith('lib-1', 12, '方案B/损坏文件.pptx', 1, 1)
     const { ElMessage } = await import('element-plus')
-    expect(ElMessage.success).toHaveBeenCalledWith('已重新入队生成')
+    expect(ElMessage.success).toHaveBeenCalledWith('已重新请求生成')
 
     // done 事件：进度复位 + 失败集合清空（详情告警随之消失）+ 失效代次自增触发补图
     const epochBefore = wrapper.findComponent({ name: 'AssetThumb' })
@@ -2835,6 +2838,75 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.detail-thumb-failed').exists()).toBe(false)
     // epoch 自增：详情大图 AssetThumb 收到新代次（补图入口）
     expect(epochBefore.props('epoch')).not.toBe(0)
+  })
+
+  it('详情按需生成 hd：打开文件详情与幻灯片详情分别以当前条目调用 RequestAssetThumb（单页单档）', async () => {
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    wailsMock.RequestAssetThumb.mockClear()
+
+    // 文件详情：页序归一为第 1 页封面
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wailsMock.RequestAssetThumb).toHaveBeenCalledWith('lib-1', 11, '方案A/城商行方案.pptx', 1, 1)
+
+    // 幻灯片详情：按条目真实页序（第 2 页）
+    wailsMock.RequestAssetThumb.mockClear()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    expect(wailsMock.RequestAssetThumb).not.toHaveBeenCalled() // 视图切换清选中不发请求
+    await wrapper.findAll('.asset-card')[1].trigger('click')
+    await flushPromises()
+    expect(wailsMock.RequestAssetThumb).toHaveBeenCalledWith('lib-1', 11, '方案A/城商行方案.pptx', 2, 1)
+  })
+
+  it('详情按需生成 hd：无底册记录（fileId=0）跳过不请求', async () => {
+    wailsMock.ListAssetSlides.mockResolvedValue({ items: [{ ...mockSlides[0], fileId: 0 }], total: 1 })
+    const wrapper = await createWrapper()
+    const group = wrapper.findComponent(ElRadioGroupStub)
+    await group.vm.$emit('update:modelValue', 'slide')
+    await group.vm.$emit('change', 'slide')
+    await flushPromises()
+    wailsMock.RequestAssetThumb.mockClear()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    expect(wailsMock.RequestAssetThumb).not.toHaveBeenCalled()
+  })
+
+  it('按需批次 done（onDemand）只推进缩略图代次：批量进度态与失败集合不变，不触发失败自动补', async () => {
+    const wrapper = await createWrapper()
+    eventHandlers['assets-thumbs:progress']({ libraryId: 'lib-1', done: 1, total: 2, currentFile: '方案B/损坏文件.pptx', failed: 1 })
+    await flushPromises()
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+    expect(wrapper.vm.thumbsRunning).toBe(true)
+    const epochBefore = wrapper.vm.thumbEpoch
+
+    eventHandlers['assets-thumbs:done']({ libraryId: 'lib-1', total: 1, generated: 1, skipped: 0, failed: 0, canceled: false, onDemand: true })
+    await flushPromises()
+    // 代次推进触发详情 hd 层重拉
+    expect(wrapper.vm.thumbEpoch).toBe(epochBefore + 1)
+    // 批量进度态与失败集合不被按需批次复位
+    expect(wrapper.vm.thumbsRunning).toBe(true)
+    expect(wrapper.find('.thumbs-progress').exists()).toBe(true)
+    expect(wailsMock.RetryAssetThumb).not.toHaveBeenCalled()
+  })
+
+  it('按需批次失败（onDemand + failed）：当前详情条目计入失败集合并显示重试入口', async () => {
+    wailsMock.AssetThumbsAvailable.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(false)
+
+    eventHandlers['assets-thumbs:done']({
+      libraryId: 'lib-1', total: 1, generated: 0, skipped: 0, failed: 1, canceled: false,
+      onDemand: true, fileId: 11, slideNum: 1
+    })
+    await flushPromises()
+    expect(wrapper.find('.detail-thumb-failed').exists()).toBe(true)
   })
 
   it('打开跳转：幻灯片详情以根路径+相对路径与页码调用 JumpToAssetSlide，BUSY 预期拒绝分流 warning 无 error', async () => {

@@ -587,8 +587,10 @@ func TestAssetSearch_RebuildIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RebuildScan: %v", err)
 	}
-	if result.Total != 1 || result.New != 1 {
-		t.Errorf("重建应全量新增（total=1 new=1），实际：%+v", result)
+	// 重建复用旧 fileID（缩略图缓存键稳定，PRD R4），因此同一文件走 exists 分支
+	// 计为更新而非新增；语义不变点 = 全部文件重新解析、FTS 悬挂行被清。
+	if result.Total != 1 || result.Updated != 1 {
+		t.Errorf("重建应全量重解析（total=1 updated=1），实际：%+v", result)
 	}
 	afterFiles, afterSlides, afterFts := snapshot()
 	if afterFiles != beforeFiles || afterSlides != beforeSlides || afterFts != beforeFts {

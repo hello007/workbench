@@ -272,6 +272,13 @@ func (a *App) RetryAssetThumb(libraryID string, fileID int64, relPath string) er
 	return a.assetsSvc.RetryAssetThumb(libraryID, fileID, relPath)
 }
 
+// RequestAssetThumb 详情侧单页单档按需生成（hd 档退离批量补缺后的唯一补齐入口）：
+// 目标 PNG 已存在直接返回；同页在途请求去重；异步入队，前端等该库
+// assets-thumbs:done（载荷 onDemand=true）后重拉缩略图。
+func (a *App) RequestAssetThumb(libraryID string, fileID int64, relPath string, slideNum, tierIndex int) error {
+	return a.assetsSvc.RequestAssetThumb(libraryID, fileID, relPath, slideNum, tierIndex)
+}
+
 // SplitAssetFile 拆分单个素材文件（SRS §2.2.3，画廊卡/详情侧边栏入口）：复用
 // 工具箱拆分核心（纯 Go OOXML），落点二选一——默认素材库缓存目录（derived 镜像
 // 源树，库根之外天然隔离扫描）；outputToSourceDir=true 落源目录（与源同目录，

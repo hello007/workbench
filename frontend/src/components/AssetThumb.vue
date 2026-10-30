@@ -31,7 +31,8 @@ const props = defineProps({
   tier: { type: Number, default: 0 },
   // 外部失效代次：值变化且当前 miss 时重新加载（后台批次完成后的自动补图入口）
   epoch: { type: Number, default: 0 },
-  // 详情场景：未生成时整个组件不渲染（loading 中渲染占位防布局跳动）
+  // 详情/覆盖层场景：仅 ready 时渲染（idle/loading/miss 都不渲染，由底层占位或
+  // small 底图透出——hd 覆盖层加载期漏渲染占位会盖住底图，「略糊可见」不成立）
   hideOnMiss: { type: Boolean, default: false },
   alt: { type: String, default: '' }
 })
@@ -44,10 +45,9 @@ let reqSeq = 0 // 请求序号守卫：props 变更/卸载自增，在途响应�
 let observer = null
 let intersected = false // 可视区触发标记（触发一次即停止观察）
 
-// hideOnMiss 下 idle/miss 前态不渲染（loading 中渲染占位防布局跳动）
-const rendered = computed(
-  () => !props.hideOnMiss || status.value === 'loading' || status.value === 'ready'
-)
+// hideOnMiss 下仅 ready 渲染（idle/loading/miss 整个组件不渲染）：详情两层大图
+// 与全屏预览层的底层占位/small 底图在加载期保持可见，就绪后上层直接替换
+const rendered = computed(() => !props.hideOnMiss || status.value === 'ready')
 
 const load = async () => {
   // 参数不完整（详情条目无底册记录 fileId=0 等）直接 miss，不发无谓请求

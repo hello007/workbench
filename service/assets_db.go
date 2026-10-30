@@ -1553,6 +1553,164 @@ func (s *assetsStore) fileTagBindingsByPath() (map[string]assetFileTagBinding, e
 // 调用方已先经 slideAnnotationsByPath 备份）。FTS 清空用 DELETE FROM（standalone
 // FTS5 表不支持 contentless/external content 专用的 'delete-all' 命令）。标签
 // 本体（tags 表）保留——重建后经路径映射重绑。
+// rebuildPlaceholder 重建前快照的单文件行（保留旧主键与内容指纹）。
+//
+// 重建保留 fileID 的前提：缩略图缓存键为 `<fileID>-<3位页>.png`（files.id 稳定
+// 是命中基础），重建若换 ID 则旧 PNG 全部失效必然全量重导（PRD R4/R5）。
+type rebuildPlaceholder struct {
+	id        int64
+	path      string
+	size      int64
+	mtimeNs   int64
+	hash      string
+	title     string
+	pageCount int // 旧页数（MAX(slide_num)，0 = 无解析产物）
+}
+
+// listRebuildPlaceholders 重建前快照全部文件行（含旧页数，供重建后「内容未变
+// 则保留缩略图」判定）。单条查询：页数经标量子查询取，避免两条 SELECT 在
+// SetMaxOpenConns(1) 下 rows 未关先查自锁。
+func (s *assetsStore) listRebuildPlaceholders() ([]rebuildPlaceholder, error) {
+	rows, err := s.db.Query(`SELECT f.id, f.path, f.size, f.mtime_ns, f.hash, f.title,
+		COALESCE((SELECT MAX(s.slide_num) FROM slides s WHERE s.file_id = f.id), 0)
+		FROM files f`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []rebuildPlaceholder
+	for rows.Next() {
+		var p rebuildPlaceholder
+		if err := rows.Scan(&p.id, &p.path, &p.size, &p.mtimeNs, &p.hash, &p.title, &p.pageCount); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// restoreRebuildPlaceholders 重建清表后恢复占位行：显式主键复用旧 fileID（缩略图
+// 缓存键因此继续有效），status 统一写 processing 强制重解析（重建语义不变——
+// 仍全量重解析，只是主键与已生成的缩略图产物复用）。size/mtime 保留原值仅作
+// 比对基准；重处理由 processing 态驱动，不依赖 mtime 失配。
+//
+// 主键复用与 AUTOINCREMENT 安全性：重建序列（sqlite_sequence）不回退，旧 ID 均
+// 不大于历史最大值，显式插入不会与新分配冲突；清表后新文件仍从历史最大值继续
+// 递增。单事务写入（任一失败整体回滚，避免半态索引）。
+func (s *assetsStore) restoreRebuildPlaceholders(rows []rebuildPlaceholder) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertRebuildPlaceholdersTx(tx, rows, time.Now().Format("2006-01-02 15:04:05")); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// maxSlideNums 全部文件的新索引页数（重建页数漂移对账用，单条 GROUP BY 查询
+// 避免逐文件往返；单连接池下 rows 全量收齐后关闭再返回）。
+func (s *assetsStore) maxSlideNums() (map[int64]int, error) {
+	rows, err := s.db.Query("SELECT file_id, MAX(slide_num) FROM slides GROUP BY file_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]int, 256)
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// resetIndexForRebuild 重建清表 + 恢复占位行的**单事务**版本。
+//
+// 原子性要害：清表与占位恢复若分属两个事务，恢复失败时清表已提交——索引为空、
+// 级联删除的 file_tags/slide_tags/slide_meta 也已丢失，而重建链路的 defer 重绑
+// 面对空索引一个都绑不上（磁盘 VACUUM 备份仅是 best-effort），用户标注不可恢复。
+// 单事务保证失败整体回滚到重建前状态。
+func (s *assetsStore) resetIndexForRebuild(rows []rebuildPlaceholder) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		"DELETE FROM files",
+		"DELETE FROM search_fts",
+		"DELETE FROM thumb_cache",
+		"DELETE FROM slide_tags",
+		"DELETE FROM slide_meta",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	now := time.Now().Format("2006-01-02 15:04:05")
+	if err := insertRebuildPlaceholdersTx(tx, rows, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// insertRebuildPlaceholdersTx 事务内插入重建占位行（resetIndexForRebuild 与
+// restoreRebuildPlaceholders 共用单点）。
+func insertRebuildPlaceholdersTx(tx *sql.Tx, rows []rebuildPlaceholder, now string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare(
+		"INSERT INTO files(id, path, size, mtime_ns, hash, status, title, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, p := range rows {
+		if _, err := stmt.Exec(p.id, p.path, p.size, p.mtimeNs, p.hash,
+			model.AssetFileStatusProcessing, p.title, now, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteRebuildPlaceholders 重建中断收尾：删除仍处于 processing 的占位行（已重
+// 解析完成的行保留），返回实际删除的文件 ID。单事务——中断路径同样不允许半态。
+func (s *assetsStore) deleteRebuildPlaceholders(ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	deleted := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		res, err := tx.Exec("DELETE FROM files WHERE id = ? AND status = ?", id, model.AssetFileStatusProcessing)
+		if err != nil {
+			return deleted, err
+		}
+		if n, err := res.RowsAffected(); err == nil && n > 0 {
+			deleted = append(deleted, id)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return deleted, err
+	}
+	return deleted, nil
+}
+
 func (s *assetsStore) clearIndexForRebuild() error {
 	tx, err := s.db.Begin()
 	if err != nil {

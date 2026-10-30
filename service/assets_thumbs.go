@@ -64,6 +64,21 @@ func thumbTiersFromSettings(cfg model.AssetThumbsSettings) []thumbTier {
 	}
 }
 
+// batchBacklogTiers 批量补缺判定使用的档位（单点，恒 small 档）。
+//
+// hd 档退出批量补缺（PRD R1）：hd 单张 1-3MB，全库体积远超默认配额（1024MB），
+// LRU 淘汰后若参与补缺判定会形成「淘汰 → 整本重导 → 再淘汰」的永久循环。hd 改为
+// 详情侧按需生成（RequestAssetThumb），批量链路只负责画廊 small 档。
+// 返回 nil 表示档位集合异常（不含 small）——调用方据此跳过补缺，不误判。
+func batchBacklogTiers(tiers []thumbTier) []thumbTier {
+	for _, t := range tiers {
+		if t.Key == "small" {
+			return []thumbTier{t}
+		}
+	}
+	return nil
+}
+
 // thumbPerFileTimeout 单文件导出超时（SRS §2.2.2 推荐 300s）。超时路径由
 // exporter 实现处理（杀自启 powerpnt 让阻塞 Invoke 返回），队列层 ctx 传播。
 var thumbPerFileTimeout = 300 * time.Second
@@ -88,10 +103,22 @@ type thumbFileSpec struct {
 
 // thumbBatchTask 一次批量生成任务（粒度 = 库批次：扫描/重建完成后一批）。
 // 文件级超时与失败隔离在批次内逐文件执行。
+//
+// Tiers/Pages 为可选收窄。**Tiers 为 nil 的批量批次恒只导 small**（hd 已退出批量
+// 链路，见 handleBatch 默认档位）——「全档全页」仅指 Pages 语义：
+//   - Tiers 非 nil = 只导出指定档位（详情侧 hd 按需生成只传 hd）。
+//   - Pages 非 nil = 只导出指定页（1-based），此时 handleBatch 跳过 pruneBeyond
+//     ——未导出页的既有产物与记账必须保留，按返回页数裁剪会误删后续页。
+//
+// OnDemand 标记详情侧单页按需批次：不发 progress 事件（前端批量进度条不闪），
+// done 事件带同名字段供前端过滤。
 type thumbBatchTask struct {
 	LibraryID string
 	Files     []thumbFileSpec
 	ThumbsDir string // 缩略图根目录 data/assets/<lib-id>/thumbs
+	Tiers     []thumbTier
+	Pages     []int
+	OnDemand  bool
 	Ctx       context.Context
 	Cancel    context.CancelFunc
 }
@@ -121,12 +148,14 @@ type ThumbExporter interface {
 	// Available 探测本机 PowerPoint COM 可用性（实现内部缓存探测结果；
 	// 注册表预检 + CreateInstance 兜底两阶段）。
 	Available() bool
-	// ExportPresentation 打开 pptx（ReadOnly 无窗口）逐页导出双档 PNG 到
-	// thumbsDir/<tier.Key>/<fileID>-<3位页>.png。返回成功导出的页数。
+	// ExportPresentation 打开 pptx（ReadOnly 无窗口）逐页导出 PNG 到
+	// thumbsDir/<tier.Key>/<fileID>-<3位页>.png。pages 为 nil 表示全书所有页，
+	// 非 nil 为页白名单（1-based；详情侧单页按需生成只导目标页）。返回成功
+	// 导出的页数。
 	// 每页（含双档）导完后调用 preempt：非 nil 返回 = 有跳转请求插队，
 	// 实现须在同一 COM 会话内执行跳转（JumpInSession 语义）并写回 jr.Result，
 	// 之后继续导出下一页（用户窗口与后台导图并存，PRD D3）。
-	ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error)
+	ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error)
 	// JumpOnly 独立跳转（无批量在途时 worker 直调）：打开 + 跳页 + 置前，
 	// 结果写回 jr.Result（成功与失败均恰一次——调用方 handleJump 不得二次写，
 	// Result 缓冲 1 且仅 JumpToSlide 单读者，双写将永久阻塞队列 worker）。
@@ -152,19 +181,32 @@ type thumbQueue struct {
 	ledger   *thumbCacheLedger  // 记账 ledger（生成成功后记账 + 页数缩减对账，assets_thumbs_ledger.go）
 	tiersFn  func() []thumbTier // 当前生效档位读取口（设置注入，nil 回退包级 thumbTiers 默认）
 
-	batchCh chan *thumbBatchTask   // 容量 thumbBatchQueueCap，多库并发入队不阻塞
-	jumpCh  chan *thumbJumpRequest // 无缓冲：交接即被消费（worker 空闲直收 / 批量在途由 preempt 页间摘取），提交阻塞等消费方消除时序竞态
-	quit    chan struct{}
-	wg      sync.WaitGroup // worker 计数（WaitThumbsDone 关停收口）
+	batchCh  chan *thumbBatchTask   // 容量 thumbBatchQueueCap，多库并发入队不阻塞
+	demandCh chan *thumbBatchTask   // 详情侧单页按需生成（容量 thumbOnDemandQueueCap）：不进 batches 注册表、不与批量互相取消，消费优先级高于批量
+	jumpCh   chan *thumbJumpRequest // 无缓冲：交接即被消费（worker 空闲直收 / 批量在途由 preempt 页间摘取），提交阻塞等消费方消除时序竞态
+	quit     chan struct{}
+	wg       sync.WaitGroup // worker 计数（WaitThumbsDone 关停收口）
 
 	mu      sync.Mutex
 	batches map[string]*thumbBatchTask // libraryID -> 最新批次（pending/active，取消入口）
-	started bool
-	closed  bool // WaitThumbsDone 后置位，入队直接拒绝
+	// demandPending 按需单页请求去重集（键 libraryID|fileID|slideNum|tierKey）：
+	// 详情侧连续切换条目可能对同一页重复请求，PNG 未落盘前两次入队会重复导出。
+	// 仅内存态（进程退出即失效，幂等重入无害）。
+	demandPending map[string]bool
+	// demandTasks 在途/待执行按需任务（取消面）：按需任务不进 batches 注册表
+	// （不与批量互相覆盖取消），但关停与「删库/清档」必须能取消它们——漏了则
+	// 关停要等满按需超时，清档 RemoveAll 后按需任务还会以旧分辨率重建目录写图。
+	demandTasks map[*thumbBatchTask]bool
+	started     bool
+	closed      bool // WaitThumbsDone 后置位，入队直接拒绝
 }
 
 // thumbBatchQueueCap 并发库数量级上限（超出视为异常，入队拒绝）。
 const thumbBatchQueueCap = 8
+
+// thumbOnDemandQueueCap 按需生成队列容量：详情侧打开瞬时可能连点多个条目，
+// 单页任务耗时秒级，积压 16 个即视为异常（超出直接拒绝并记日志，不阻塞前端）。
+const thumbOnDemandQueueCap = 16
 
 // newThumbQueue 构造队列（exporter 由 newThumbExporter 平台分叉注入，sinkFn
 // 取宿主 AssetLibraryService.eventSink，ledger 为记账出口，tiersFn 为设置注入
@@ -176,9 +218,13 @@ func newThumbQueue(exp ThumbExporter, sinkFn func() EventSink, ledger *thumbCach
 		ledger:   ledger,
 		tiersFn:  tiersFn,
 		batchCh:  make(chan *thumbBatchTask, thumbBatchQueueCap),
+		demandCh: make(chan *thumbBatchTask, thumbOnDemandQueueCap),
 		jumpCh:   make(chan *thumbJumpRequest),
 		quit:     make(chan struct{}),
 		batches:  make(map[string]*thumbBatchTask),
+
+		demandPending: make(map[string]bool),
+		demandTasks:   make(map[*thumbBatchTask]bool),
 	}
 }
 
@@ -204,14 +250,22 @@ func (q *thumbQueue) start() {
 	go q.run()
 }
 
-// run worker 主循环：每轮先非阻塞摘跳转（严格优先），再阻塞等批次/跳转/退出。
-// 批量在途期间的跳转由 handleBatch 内 preempt 回调承接（页间插队）。
+// run worker 主循环：每轮先非阻塞摘跳转（严格优先），再非阻塞摘按需单页任务
+// （用户可感知，优先于批量），最后阻塞等批次/跳转/退出。
+// 批量在途期间的跳转由 handleBatch 内 preempt 回调承接（页间插队）；按需任务
+// 在两批之间被消费（批量文件级粒度，最多等一个文件的导出时间）。
 func (q *thumbQueue) run() {
 	defer q.wg.Done()
 	for {
 		select {
 		case jr := <-q.jumpCh:
 			q.handleJump(jr)
+			continue
+		default:
+		}
+		select {
+		case b := <-q.demandCh:
+			q.handleBatch(b)
 			continue
 		default:
 		}
@@ -224,6 +278,8 @@ func (q *thumbQueue) run() {
 			// first select 保留非阻塞摘取：批量在途时提前一轮摘走维持「跳转
 			// 优先于批次」，空闲期跳转经任一分支到达均零额外延迟。
 			q.handleJump(jr)
+		case b := <-q.demandCh:
+			q.handleBatch(b)
 		case b := <-q.batchCh:
 			q.handleBatch(b)
 		case <-q.quit:
@@ -247,12 +303,19 @@ func (q *thumbQueue) handleJump(jr *thumbJumpRequest) {
 
 // handleBatch 执行一批缩略图生成：逐文件（单文件超时 + 失败隔离），逐文件发
 // progress 事件，批次终态发 done 事件。取消路径 done.Canceled=true 且中断剩余。
+// 按需批次（OnDemand）不发 progress，只发终态 done（前端据此过滤批量进度条）。
 func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
+	defer b.Cancel() // 释放按需任务的超时定时器（成功路径同样回收）
 	defer func() {
 		q.mu.Lock()
-		// 仅清理仍指向本批次的注册项（期间同库新批次已覆盖时不误删）
+		// 仅清理仍指向本批次的注册项（期间同库新批次已覆盖时不误删）。按需批次
+		// 不进注册表，此处恒不命中——与批量共用同一收尾逻辑无副作用。
 		if cur, ok := q.batches[b.LibraryID]; ok && cur == b {
 			delete(q.batches, b.LibraryID)
+		}
+		if b.OnDemand {
+			q.clearDemandPendingLocked(b) // 去重集释放：后续 miss 可再次请求
+			delete(q.demandTasks, b)      // 取消面注销
 		}
 		q.mu.Unlock()
 	}()
@@ -261,6 +324,7 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 		// 入队后 PowerPoint 变为不可用（卸载/COM 损坏）：整批跳过，事件终态
 		emitEvent(q.sinkFn(), "assets-thumbs:done", model.AssetThumbsResult{
 			LibraryID: b.LibraryID, Total: len(b.Files), Skipped: len(b.Files),
+			OnDemand: b.OnDemand,
 		})
 		return
 	}
@@ -275,8 +339,16 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 	}
 
 	// 当前生效档位每批解析一次（设置注入，分辨率变更经 ApplyThumbsSettingsChange
-	// 清档后重入队，批内恒一致）
-	tiers := q.tiers()
+	// 清档后重入队，批内恒一致）。批量的默认档位恒为 small（batchBacklogTiers
+	// 单点）：hd 已退出批量链路改详情侧按需生成，批量仍导 hd 会白耗 COM 时间并
+	// 挤占 hd 配额（淘汰后又按需重生成）。显式档位任务（按需单页）用任务自带值。
+	tiers := b.Tiers
+	if tiers == nil {
+		tiers = batchBacklogTiers(q.tiers())
+		if tiers == nil {
+			tiers = q.tiers() // 档位集合异常（不含 small）：回退全档，保持既有行为
+		}
+	}
 
 	generated, failed, skipped := 0, 0, 0
 	canceled := false
@@ -286,7 +358,7 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 			break
 		}
 		fctx, cancel := context.WithTimeout(b.Ctx, thumbPerFileTimeout)
-		n, err := q.exporter.ExportPresentation(fctx, f, b.ThumbsDir, tiers, preempt)
+		n, err := q.exporter.ExportPresentation(fctx, f, b.ThumbsDir, tiers, b.Pages, preempt)
 		cancel()
 		switch {
 		case err == nil:
@@ -295,16 +367,7 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 			// 已由扫描失效联动处理）。记账粒度：逐档逐页 Stat 成功才记账（PNG
 			// 缺失的页留给下次补缺链路重导出）。
 			if q.ledger != nil {
-				for _, tier := range tiers {
-					for page := 1; page <= n; page++ {
-						if info, statErr := os.Stat(thumbPNGPath(b.ThumbsDir, tier.Key, f.FileID, page)); statErr == nil {
-							q.ledger.record(b.LibraryID, f.FileID, tier.Key, page, info.Size())
-						}
-					}
-					// 页数缩减对账（20 页 → 15 页清越界记账与旧图；文件级导出
-					// 全量覆盖写幂等，越界页不覆盖须显式清）
-					q.ledger.pruneBeyond(b.LibraryID, b.ThumbsDir, f.FileID, tier.Key, n)
-				}
+				q.recordExportedPages(b, f, tiers, n)
 			}
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			// 批次取消（用户/关停）：中断剩余文件；单文件超时（DeadlineExceeded
@@ -321,21 +384,81 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 			q.exporter.Discard() // 失败隔离：丢会话重启实例继续后续（SRS §2.2.2）
 			Logger().Warn("缩略图生成失败", "path", f.Path, "slides", n, "err", err)
 		}
-		emitEvent(q.sinkFn(), "assets-thumbs:progress", model.AssetThumbsProgress{
-			LibraryID: b.LibraryID, Done: i + 1, Total: len(b.Files),
-			CurrentFile: f.Path, Failed: failed,
-		})
+		if !b.OnDemand {
+			emitEvent(q.sinkFn(), "assets-thumbs:progress", model.AssetThumbsProgress{
+				LibraryID: b.LibraryID, Done: i + 1, Total: len(b.Files),
+				CurrentFile: f.Path, Failed: failed,
+			})
+			// 批量在途时的按需插队点（与 jump 的页间 preempt 同层）：不在此消费，
+			// 按需任务只能等整批结束（千页级数分钟），叠加排队超时必然作废——详情
+			// 大图永不出现。嵌套 handleBatch 为单片任务，内部不再插队（无递归放大）。
+			q.drainDemand()
+		}
 		if canceled {
 			break
 		}
 	}
 
 	Logger().Info("缩略图批次完成", "libraryId", b.LibraryID, "total", len(b.Files),
-		"generated", generated, "failed", failed, "skipped", skipped, "canceled", canceled)
-	emitEvent(q.sinkFn(), "assets-thumbs:done", model.AssetThumbsResult{
+		"generated", generated, "failed", failed, "skipped", skipped, "canceled", canceled,
+		"onDemand", b.OnDemand)
+	done := model.AssetThumbsResult{
 		LibraryID: b.LibraryID, Total: len(b.Files),
 		Generated: generated, Skipped: skipped, Failed: failed, Canceled: canceled,
-	})
+		OnDemand: b.OnDemand,
+	}
+	// 按需批次回填目标条目：前端据此把失败/取消落到当前详情卡（显示重试入口），
+	// 否则 onDemand 失败后 hd 永为占位且无任何可见反馈。
+	if b.OnDemand && len(b.Files) == 1 {
+		done.FileID = b.Files[0].FileID
+		if len(b.Pages) == 1 {
+			done.SlideNum = b.Pages[0]
+		}
+	}
+	emitEvent(q.sinkFn(), "assets-thumbs:done", done)
+}
+
+// drainDemand 非阻塞排空按需通道（批量每个文件边界调用一次）：详情侧单页任务
+// 优先于后续批量文件执行，避免整批等待把按需请求拖到超时。
+func (q *thumbQueue) drainDemand() {
+	for {
+		select {
+		case d := <-q.demandCh:
+			q.handleBatch(d)
+		default:
+			return
+		}
+	}
+}
+
+// recordExportedPages 导出成功后的记账与页数缩减对账。
+//
+// 全档全页批次（b.Pages == nil）：按返回页数 1..n 逐档逐页记账，并 pruneBeyond
+// 清越界记账与旧图（页数缩减对账，20 页 → 15 页时越界页不覆盖须显式清）。
+//
+// 页白名单批次（b.Pages != nil，详情侧单页按需）：只对白名单页记账，且**跳过
+// pruneBeyond**——未导出页的既有产物与记账必须保留，按「本次导出页数」裁剪会
+// 把第 1 页之后的所有产物误删（按需单页导出返回 n=1 时将清空整本后续页）。
+func (q *thumbQueue) recordExportedPages(b *thumbBatchTask, f thumbFileSpec, tiers []thumbTier, exported int) {
+	if b.Pages == nil {
+		for _, tier := range tiers {
+			for page := 1; page <= exported; page++ {
+				if info, statErr := os.Stat(thumbPNGPath(b.ThumbsDir, tier.Key, f.FileID, page)); statErr == nil {
+					q.ledger.record(b.LibraryID, f.FileID, tier.Key, page, info.Size())
+				}
+			}
+			q.ledger.pruneBeyond(b.LibraryID, b.ThumbsDir, f.FileID, tier.Key, exported)
+		}
+		return
+	}
+	// 白名单页：只有实际落盘的页入记账（导出失败页不被记账，留给补缺/按需重试）
+	for _, tier := range tiers {
+		for _, page := range b.Pages {
+			if info, statErr := os.Stat(thumbPNGPath(b.ThumbsDir, tier.Key, f.FileID, page)); statErr == nil {
+				q.ledger.record(b.LibraryID, f.FileID, tier.Key, page, info.Size())
+			}
+		}
+	}
 }
 
 // thumbPNGPath 缩略图缓存路径单点（契约：thumbsDir/<tier>/<fileID>-<3位页>.png；
@@ -343,6 +466,20 @@ func (q *thumbQueue) handleBatch(b *thumbBatchTask) {
 // PR2 记账表以同规则反查。
 func thumbPNGPath(thumbsDir, tierKey string, fileID int64, slideNum int) string {
 	return filepath.Join(thumbsDir, tierKey, fmt.Sprintf("%d-%03d.png", fileID, slideNum))
+}
+
+// pageRequested 页白名单判定：pages 为 nil（全书）恒真；非 nil 仅命中页导出。
+// 白名单常见形态为单页（详情侧按需），线性查找足够。
+func pageRequested(pages []int, slideNum int) bool {
+	if pages == nil {
+		return true
+	}
+	for _, p := range pages {
+		if p == slideNum {
+			return true
+		}
+	}
+	return false
 }
 
 // EnqueueAssetThumbs 入队一批缩略图生成（扫描/重建完成后由扫描链路调用——PR2
@@ -442,6 +579,9 @@ func (s *AssetLibraryService) JumpToSlide(absPath string, slideNum int) error {
 
 // CancelAssetThumbs 取消指定库的缩略图批次（在途批次经 ctx 传播中断——COM 阻塞
 // 调用由 exporter 杀自启进程收口）。返回是否存在可取消批次。
+//
+// 取消面含在途/待执行的按需任务（detail 侧单页生成）：删库与清档链路依赖它，
+// 漏取消会让按需任务在 RemoveAll 之后重建档目录并写入旧分辨率 PNG。
 func (s *AssetLibraryService) CancelAssetThumbs(libraryID string) bool {
 	q := s.thumbQ
 	q.mu.Lock()
@@ -449,12 +589,21 @@ func (s *AssetLibraryService) CancelAssetThumbs(libraryID string) bool {
 	if ok {
 		delete(q.batches, libraryID)
 	}
-	q.mu.Unlock()
-	if !ok {
-		return false
+	demands := make([]*thumbBatchTask, 0, 2)
+	for t := range q.demandTasks {
+		if t.LibraryID == libraryID {
+			demands = append(demands, t)
+			delete(q.demandTasks, t)
+		}
 	}
-	b.Cancel()
-	return true
+	q.mu.Unlock()
+	if ok {
+		b.Cancel()
+	}
+	for _, t := range demands {
+		t.Cancel()
+	}
+	return ok || len(demands) > 0
 }
 
 // WaitThumbsDone 关停收口（App.shutdown 内 WaitScansDone 之后调用）：取消全部
@@ -474,6 +623,12 @@ func (s *AssetLibraryService) WaitThumbsDone() {
 		batches = append(batches, b)
 	}
 	q.batches = make(map[string]*thumbBatchTask)
+	// 按需任务同样取消（不进注册表，须单独收口）：否则关停要在 q.wg.Wait 前
+	// 等满按需超时（最长 120s），与「取消全部批次后 worker 退出」契约不符。
+	for t := range q.demandTasks {
+		batches = append(batches, t)
+		delete(q.demandTasks, t)
+	}
 	q.mu.Unlock()
 
 	for _, b := range batches {
@@ -583,23 +738,9 @@ func (s *AssetLibraryService) RetryAssetThumb(libraryID string, fileID int64, re
 	if fileID < 1 {
 		return fmt.Errorf("文件 ID 非法（fileId=%d）", fileID)
 	}
-	if relPath == "" {
-		return fmt.Errorf("文件相对路径不能为空")
-	}
-	// 越界遏制：relPath 来自前端（浏览器通道可达本方法），`..` 或绝对路径可逃逸
-	// 库根——让 PowerPoint 渲染库外任意可打开文件并把 PNG 落入本库缩略图目录，
-	// 经 GetAssetThumb 回读内容。校验 Join 后仍在库根内（Rel 无 `..` 前缀）才放行。
-	rel := filepath.FromSlash(relPath)
-	if filepath.IsAbs(rel) {
-		return fmt.Errorf("文件路径非法（须为素材根目录内的相对路径）")
-	}
-	absPath := filepath.Join(lib.RootPath, rel)
-	if back, relErr := filepath.Rel(lib.RootPath, absPath); relErr != nil ||
-		back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("文件路径越界（须位于素材根目录内）")
-	}
-	if _, err := os.Stat(absPath); err != nil {
-		return fmt.Errorf("源文件不存在或无法访问: %w", err)
+	absPath, err := resolveAssetRelAbsPath(lib, relPath)
+	if err != nil {
+		return err
 	}
 	s.EnqueueAssetThumbs(libraryID, []thumbFileSpec{{
 		FileID:  fileID,
@@ -607,6 +748,152 @@ func (s *AssetLibraryService) RetryAssetThumb(libraryID string, fileID int64, re
 		AbsPath: absPath,
 	}}, s.assetThumbsDir(libraryID))
 	return nil
+}
+
+// resolveAssetRelAbsPath 相对路径 → 库内绝对路径单点校验（RetryAssetThumb 与
+// RequestAssetThumb 共用）。
+//
+// 越界遏制：relPath 来自前端（浏览器通道可达本方法），`..` 或绝对路径可逃逸
+// 库根——让 PowerPoint 渲染库外任意可打开文件并把 PNG 落入本库缩略图目录，
+// 经 GetAssetThumb 回读内容。校验 Join 后仍在库根内（Rel 无 `..` 前缀）才放行；
+// 同时校验源文件存在（缩略图生成前提，缺失直接报错不浪费 COM 打开）。
+func resolveAssetRelAbsPath(lib model.AssetLibrary, relPath string) (string, error) {
+	if relPath == "" {
+		return "", fmt.Errorf("文件相对路径不能为空")
+	}
+	rel := filepath.FromSlash(relPath)
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("文件路径非法（须为素材根目录内的相对路径）")
+	}
+	absPath := filepath.Join(lib.RootPath, rel)
+	if back, relErr := filepath.Rel(lib.RootPath, absPath); relErr != nil ||
+		back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("文件路径越界（须位于素材根目录内）")
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return "", fmt.Errorf("源文件不存在或无法访问: %w", err)
+	}
+	return absPath, nil
+}
+
+// thumbOnDemandTimeout 按需单页生成的整任务超时（排队 + Open + 单页导出）。
+// 队列繁忙时可能排在批量文件之后，故留足余量；超时由 exporter 侧杀自启实例
+// 收口，与批量单文件超时同构。
+const thumbOnDemandTimeout = 120 * time.Second
+
+// thumbDemandKey 按需请求去重键（堆内内存态，见 thumbQueue.demandPending）。
+func thumbDemandKey(libraryID string, fileID int64, slideNum int, tierKey string) string {
+	return fmt.Sprintf("%s|%d|%d|%s", libraryID, fileID, slideNum, tierKey)
+}
+
+// dropDemandTask 按需任务提交失败回滚（去重键 + 取消面登记 + 超时定时器）。
+func (q *thumbQueue) dropDemandTask(b *thumbBatchTask, key string) {
+	b.Cancel()
+	q.mu.Lock()
+	delete(q.demandPending, key)
+	delete(q.demandTasks, b)
+	q.mu.Unlock()
+}
+
+// clearDemandPendingLocked 释放按需去重键（调用方持 q.mu）。按需任务恒为
+// 单文件单页单档（RequestAssetThumb 构造），非该形态的按需任务不产生键。
+func (q *thumbQueue) clearDemandPendingLocked(b *thumbBatchTask) {
+	if len(b.Files) != 1 || len(b.Pages) != 1 || len(b.Tiers) != 1 {
+		return
+	}
+	delete(q.demandPending, thumbDemandKey(b.LibraryID, b.Files[0].FileID, b.Pages[0], b.Tiers[0].Key))
+}
+
+// RequestAssetThumb 详情侧单页单档按需生成（hd 档退离批量补缺后的唯一补齐入口，
+// PRD R2）：目标 PNG 已存在直接返回（幂等）；在途同页请求去重；入队走独立按需
+// 通道（不进库批次注册表，不与批量互相取消）。异步入队，前端等待该库
+// assets-thumbs:done（载荷 onDemand=true）后重拉。
+//
+// 校验顺序：库存在（透传）→ 无 PowerPoint（E_ASSETS_THUMBS_UNAVAILABLE）→
+// 档位/页序/文件 ID 非法 → 源文件存在性（越界遏制单点 resolveAssetRelAbsPath）。
+func (s *AssetLibraryService) RequestAssetThumb(libraryID string, fileID int64, relPath string, slideNum, tierIndex int) error {
+	lib, err := s.getLibrary(libraryID)
+	if err != nil {
+		return err
+	}
+	q := s.thumbQ
+	if !q.exporter.Available() {
+		return errThumbsUnavailable
+	}
+	tiers := s.resolvedThumbTiers()
+	if tierIndex < 0 || tierIndex >= len(tiers) {
+		return fmt.Errorf("缩略图档位非法（tierIndex=%d，取值 0-%d）", tierIndex, len(tiers)-1)
+	}
+	if slideNum < 1 {
+		return fmt.Errorf("页序非法（slideNum=%d，从 1 计）", slideNum)
+	}
+	if fileID < 1 {
+		return fmt.Errorf("文件 ID 非法（fileId=%d）", fileID)
+	}
+	absPath, err := resolveAssetRelAbsPath(lib, relPath)
+	if err != nil {
+		return err
+	}
+	// fileID 与路径一致性校验：两侧均来自前端（浏览器通道可达），不校验则调用方
+	// 可把 A 文件的页面写进 B 的缓存键（之后 GetAssetThumb(B) 返回 A 的内容，且
+	// 孤儿清扫会按索引 ID 判定行为不确定）。查无记录（已删除/未索引）同样拒绝。
+	store, err := s.storeForThumbs(libraryID)
+	if err != nil {
+		return err
+	}
+	ownerID, err := store.fileIDForPath(relPath)
+	if err != nil {
+		return fmt.Errorf("查询文件记录失败: %w", err)
+	}
+	if ownerID != fileID {
+		return fmt.Errorf("文件记录不匹配（fileId=%d 与该路径的索引记录不一致）", fileID)
+	}
+	thumbsDir := s.assetThumbsDir(libraryID)
+	tier := tiers[tierIndex]
+	if _, err := os.Stat(thumbPNGPath(thumbsDir, tier.Key, fileID, slideNum)); err == nil {
+		return nil // 已存在：幂等返回，不重复入队
+	}
+
+	key := thumbDemandKey(libraryID, fileID, slideNum, tier.Key)
+	ctx, cancel := context.WithTimeout(context.Background(), thumbOnDemandTimeout)
+	b := &thumbBatchTask{
+		LibraryID: libraryID,
+		Files:     []thumbFileSpec{{FileID: fileID, Path: relPath, AbsPath: absPath}},
+		ThumbsDir: thumbsDir,
+		Tiers:     []thumbTier{tier},
+		Pages:     []int{slideNum},
+		OnDemand:  true,
+		Ctx:       ctx,
+		Cancel:    cancel,
+	}
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		cancel()
+		return nil // 关停期静默：无队列可消费，前端按 miss 占位兜底
+	}
+	if q.demandPending[key] {
+		q.mu.Unlock()
+		cancel()
+		return nil // 同页请求在途，去重
+	}
+	q.demandPending[key] = true
+	q.demandTasks[b] = true // 取消面登记（CancelAssetThumbs / WaitThumbsDone 可中断）
+	q.mu.Unlock()
+
+	q.start()
+	select {
+	case q.demandCh <- b:
+		return nil
+	case <-q.quit:
+		q.dropDemandTask(b, key)
+		return nil
+	default:
+		q.dropDemandTask(b, key)
+		Logger().Warn("缩略图按需生成队列已满，请求被拒", "libraryId", libraryID,
+			"fileId", fileID, "slide", slideNum, "tier", tier.Key)
+		return model.NewAppError(model.ErrCodeAssetsThumbsBusy, "缩略图生成繁忙，请稍后重试")
+	}
 }
 
 // ApplyThumbsSettingsChange 缩略图设置变更应用（App.SaveSettings 保存成功后调用）：

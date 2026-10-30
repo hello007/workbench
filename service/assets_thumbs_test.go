@@ -21,13 +21,20 @@ import (
 type fakeThumbExporter struct {
 	mu        sync.Mutex
 	available bool
-	exportFn  func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error)
+	exportFn  func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error)
 	jumpFn    func(e *fakeThumbExporter, jr *thumbJumpRequest) error
 
 	exportCalls []thumbFileSpec
+	exportArgs  []thumbExportArgs // 每次 ExportPresentation 的档位/页参数快照（按需链路断言用）
 	jumpCalls   []*thumbJumpRequest
 	discards    int
 	shutdowns   int
+}
+
+// thumbExportArgs ExportPresentation 入参快照（记录调用时的档位与页白名单）。
+type thumbExportArgs struct {
+	Tiers []thumbTier
+	Pages []int
 }
 
 func (f *fakeThumbExporter) Available() bool {
@@ -36,15 +43,16 @@ func (f *fakeThumbExporter) Available() bool {
 	return f.available
 }
 
-func (f *fakeThumbExporter) ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
+func (f *fakeThumbExporter) ExportPresentation(ctx context.Context, spec thumbFileSpec, thumbsDir string, tiers []thumbTier, pages []int, preempt func() *thumbJumpRequest) (int, error) {
 	f.mu.Lock()
 	f.exportCalls = append(f.exportCalls, spec)
+	f.exportArgs = append(f.exportArgs, thumbExportArgs{Tiers: tiers, Pages: pages})
 	fn := f.exportFn
 	f.mu.Unlock()
 	if fn == nil {
 		return 3, nil
 	}
-	return fn(f, ctx, spec, thumbsDir, tiers, preempt)
+	return fn(f, ctx, spec, thumbsDir, tiers, pages, preempt)
 }
 
 func (f *fakeThumbExporter) JumpOnly(jr *thumbJumpRequest) error {
@@ -180,7 +188,7 @@ func TestThumbQueue_BatchSerialAndEvents(t *testing.T) {
 func TestThumbQueue_FailIsolation(t *testing.T) {
 	fake := &fakeThumbExporter{available: true}
 	s, sink := newThumbTestService(t, fake)
-	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		if spec.FileID == 2 { // 第 2 个文件失败（损坏/占用模拟）
 			return 0, errors.New("COM 打开失败")
 		}
@@ -212,7 +220,7 @@ func TestThumbQueue_JumpDuringBatch(t *testing.T) {
 
 	// 批次在途：exportFn 逐页等待放行（chan 交接 = 确定性同步），页边界调 preempt
 	release := make(chan struct{})
-	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, spec thumbFileSpec, _ string, _ []thumbTier, preempt func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ []int, preempt func() *thumbJumpRequest) (int, error) {
 		for page := 1; page <= 10; page++ {
 			<-release
 			runtime.Gosched() // 给 JumpToSlide goroutine 提交机会（页边界会合点）
@@ -362,7 +370,7 @@ func TestThumbQueue_CancelBatch(t *testing.T) {
 	s, sink := newThumbTestService(t, fake)
 
 	fileStarted := make(chan string, 8)
-	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		fileStarted <- spec.Path
 		<-ctx.Done() // 模拟长导出，直到批次取消传播
 		return 0, ctx.Err()
@@ -416,7 +424,7 @@ func TestThumbQueue_OverwriteBatch(t *testing.T) {
 
 	block := make(chan struct{})
 	oldBatchStarted := make(chan struct{})
-	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		if spec.FileID == 1 { // 旧批次首文件：挂起直到被新批次覆盖取消
 			close(oldBatchStarted)
 			<-ctx.Done()
@@ -452,7 +460,7 @@ func TestThumbQueue_WaitThumbsDone(t *testing.T) {
 	fake := &fakeThumbExporter{available: true}
 	s, _ := newThumbTestService(t, fake)
 
-	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, ctx context.Context, spec thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		<-ctx.Done()
 		return 0, ctx.Err()
 	}
@@ -583,7 +591,7 @@ func newThumbsSettingsTestService(t *testing.T) (*AssetLibraryService, *fakeThum
 	releaseCh := make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
-	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ func() *thumbJumpRequest) (int, error) {
+	fake.exportFn = func(e *fakeThumbExporter, _ context.Context, _ thumbFileSpec, _ string, _ []thumbTier, _ []int, _ func() *thumbJumpRequest) (int, error) {
 		<-releaseCh
 		return 1, nil
 	}
