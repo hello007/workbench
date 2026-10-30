@@ -189,7 +189,7 @@
 - **批量在途的按需插队**：`handleBatch` 每个文件边界调 `drainDemand()` 非阻塞排空按需通道（对齐跳转的页间 preempt）——只在批间消费会让千页级批量（数分钟）挡住按需请求直到排队超时作废。嵌套按需任务不再插队（无递归放大）。
 - **按需任务纳入取消面**：`demandTasks` 登记（不进 `batches`），`CancelAssetThumbs` 取消同库按需任务、`WaitThumbsDone` 取消全部——否则删库/清档的 `RemoveAll` 之后按需任务仍会重建档目录并写入旧分辨率 PNG，关停还要等满按需超时。`handleBatch` 统一 `defer b.Cancel()` 回收超时定时器。
 - **页白名单批次禁走 `pruneBeyond`**：按「本次导出页数」裁剪会把第 1 页之后的既有产物误删（单页导出返回 n=1 时会清空整本后续页）。记账只按白名单页 Stat 成功者写入。
-- 前端：详情大图区 = small 底图（tier=0 常显）+ hd 覆盖层（tier=1 `hide-on-miss` 绝对定位）。`hideOnMiss` 语义为**仅 ready 渲染**（loading 期不渲染，否则灰底占位会盖住 small 底图）。详情打开/切页触发按需请求；onDemand done 带 `failed/canceled` 且 `fileId` 命中当前详情时，把该条目计入失败集显示「重试生成」。
+- 前端：详情大图区与全屏预览层均为 small 底图（tier=0 常显）+ hd 覆盖层（tier=1 `hide-on-miss` 绝对定位）；预览层按需请求由详情侧 watch 驱动，本层禁另发。`hideOnMiss` 语义为**仅 ready 渲染**（loading 期不渲染，否则灰底占位会盖住 small 底图）。详情打开/切页触发按需请求；onDemand done 带 `failed/canceled` 且 `fileId` 命中当前详情时，把该条目计入失败集显示「重试生成」。
 
 ### 增量重建（保留 fileID 与缩略图）
 

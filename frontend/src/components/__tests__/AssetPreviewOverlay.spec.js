@@ -70,23 +70,34 @@ afterEach(() => {
 })
 
 describe('AssetPreviewOverlay', () => {
-  it('渲染大图（AssetThumb tier=1 + hide-on-miss + epoch 透传）与页码指示、信息行', () => {
+  it('渲染两层大图（small 底图 tier=0 + hd 覆盖层 tier=1，hd 带 hide-on-miss）与页码、信息行', () => {
     wrapper = mountOverlay()
-    const thumb = wrapper.find('.asset-thumb-stub')
-    expect(thumb.attributes('data-file-id')).toBe('11')
-    expect(thumb.attributes('data-slide-num')).toBe('1')
-    expect(thumb.attributes('data-tier')).toBe('1')
-    expect(thumb.attributes('data-hide-on-miss')).toBe('1')
-    expect(thumb.attributes('data-epoch')).toBe('7')
+    const thumbs = wrapper.findAll('.asset-thumb-stub')
+    expect(thumbs).toHaveLength(2)
+    const [base, hd] = thumbs
+    // 底层：small 档底图，不带 hide-on-miss（miss 时显示「无预览」占位兜底）
+    expect(base.classes()).toContain('preview-thumb-base')
+    expect(base.attributes('data-file-id')).toBe('11')
+    expect(base.attributes('data-slide-num')).toBe('1')
+    expect(base.attributes('data-tier')).toBe('0')
+    expect(base.attributes('data-hide-on-miss')).toBe('0')
+    expect(base.attributes('data-epoch')).toBe('7')
+    // 上层：hd 档覆盖层，hide-on-miss 仅 ready 时渲染
+    expect(hd.classes()).toContain('preview-thumb-hd')
+    expect(hd.attributes('data-file-id')).toBe('11')
+    expect(hd.attributes('data-slide-num')).toBe('1')
+    expect(hd.attributes('data-tier')).toBe('1')
+    expect(hd.attributes('data-hide-on-miss')).toBe('1')
+    expect(hd.attributes('data-epoch')).toBe('7')
     expect(wrapper.find('.preview-counter').text()).toBe('1 / 3')
     expect(wrapper.find('.preview-title').text()).toBe('封面页')
     expect(wrapper.find('.preview-path').text()).toBe('方案A/城商行方案.pptx')
   })
 
-  it('miss 弱化占位常驻底层（AssetThumb hide-on-miss 不渲染时透出，非空白）', () => {
+  it('不再渲染「暂无高清图」占位（由 small 底图与组件自带占位兜底）', () => {
     wrapper = mountOverlay()
-    // 占位元素恒在 DOM（被上层大图覆盖不可见），文案为「暂无高清图」
-    expect(wrapper.find('.preview-miss-hint').text()).toBe('暂无高清图')
+    expect(wrapper.find('.preview-miss-hint').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('暂无高清图')
   })
 
   it('按钮翻页：→/← 上报 update:index（受控，本层不改自身状态）', async () => {

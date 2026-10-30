@@ -203,6 +203,7 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 ### 8.3 全屏预览层
 
 - **层级选型**：预览层 z-index **10、浮动操作条 5——面板内局部值**，定位语境 `.assets-view-wrap`（画廊列自身 relative，**非** `.assets-body`——以 body 为 containing block 会连详情侧栏一并覆盖，违反「预览态详情可编辑」）；不触碰全局右键菜单 2000 / EP 弹窗 2001+ 惯例档。预览层内 `.preview-nav` 须显式 `z-index:2` 压过 `.preview-thumb` 的 `z-index:1`（hd 图 ready 后铺满 stage，漏设则按钮被绘制层盖死——jsdom 无布局引擎测不出，真机冒烟项）。
+- **大图两层结构（2026-10-30，hd 按需生成）**：`.preview-stage`（有 padding）内建 `.preview-thumb-stack`（无 padding、`position:relative`）承载小图底图（`AssetThumb tier=0`，不带 `hide-on-miss`，miss 显示「无预览」）+ hd 覆盖层（`tier=1` + `hide-on-miss`，`absolute inset:0`）。**禁直接把两层放 stage 内**——stage 的 padding 会让绝对定位层四边各溢出 16px，hd 就绪瞬间跳版。原常驻「暂无高清图」占位已删除（底图兜底，语义更准）。hd 按需请求仍由详情侧 watch 驱动（预览翻页写回 previewIndex → 选中同步 → detail 三元 watch），**本层禁另发 `RequestAssetThumb`**。
 - **翻页序列** = `displayCards.filter(kind==='slide')`（浏览清单已加载段滚动续拉 / 检索命中序列；聚合展开子项不在序列，从子项详情打开按归属文件路径回退定位）。零后端改动；「单文件内翻全部页」需 `ListAssetFileSlides` 类只读绑定，留后续批独立增量。
 - **键盘守卫**：document keydown 过滤 `event.defaultPrevented`、目标 `.el-overlay`/`.xterm-helper-textarea`（终端全屏 ESC 惯例）+ **方向键追加可编辑元素聚焦跳过**（INPUT/TEXTAREA/SELECT/contenteditable——预览态侧栏标注编辑时方向键是光标移动语义，翻页会打断编辑）；`onBeforeUnmount` 注销监听。
 - **序列收缩兜底**：`watch(previewSlides.length)` 越界即关预览——浏览态保存标注触发 `loadSlidesPage(true)` 复位首页后序列可能短于当前下标，漏兜底则 overlay 进入「非空 index 但不渲染」的不可见卡死态。

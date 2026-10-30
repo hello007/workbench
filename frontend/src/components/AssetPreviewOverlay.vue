@@ -8,9 +8,11 @@
      与详情装配都在宿主。
      层级取舍：z-index 取面板内局部值 10（盖过画廊卡与列表 sticky 表头 z-index:1，
      不触碰全局右键菜单 2000 / EP 弹窗 2001+ 层级表，真机确认后 spec 沉淀定稿）。
-     大图消费纪律：AssetThumb 恒 tier=1（hd 档）+ hide-on-miss，禁改组件——miss 时
-     组件不渲染，底层常驻「暂无高清图」弱化占位透出（非空白），生成可用后随页切换
-     自动补图（epoch 代次透传）。
+     大图消费纪律：两层与详情侧同构——small（tier=0）底图常显兜底（miss 时显示
+     组件自带「无预览」占位），hd（tier=1）+ hide-on-miss 覆盖层仅 ready 时渲染、
+     就绪后替换底图（两层尺寸完全重合零跳版）；hd 按需生成由详情侧 watch 驱动
+     （预览打开/翻页写回 previewIndex，宿主 watch 同步选中详情页后触发
+     RequestAssetThumb），本层禁另发该调用；epoch 代次透传使生成完成后自动补图。
      键盘守卫对齐终端全屏 ESC 惯例（terminal-multi-session 契约）：过滤
      defaultPrevented（他组件已消费）与目标位于 .el-overlay（EP 弹层）/
      .xterm-helper-textarea（终端辅助区）的事件；监听随组件卸载注销（受控组件
@@ -36,18 +38,30 @@
       </div>
     </div>
     <div class="preview-stage">
-      <!-- miss 兜底占位：常驻底层，AssetThumb（hide-on-miss）loading/ready 时覆盖其上 -->
-      <div class="preview-miss-hint">暂无高清图</div>
-      <AssetThumb
-        :library-id="libraryId"
-        :file-id="current.fileId"
-        :slide-num="current.slideNum"
-        :tier="1"
-        :epoch="thumbEpoch"
-        hide-on-miss
-        :alt="current.title"
-        class="preview-thumb"
-      />
+      <!-- 两层同构详情侧（.detail-thumb-stack / .detail-thumb-hd）：
+           底层 small 底图常显（打开即见，miss 显示组件自带「无预览」占位）；
+           上层 hd 覆盖层 hide-on-miss 仅 ready 时渲染，就绪后替换底图 -->
+      <div class="preview-thumb-stack">
+        <AssetThumb
+          :library-id="libraryId"
+          :file-id="current.fileId"
+          :slide-num="current.slideNum"
+          :tier="0"
+          :epoch="thumbEpoch"
+          :alt="current.title"
+          class="preview-thumb preview-thumb-base"
+        />
+        <AssetThumb
+          :library-id="libraryId"
+          :file-id="current.fileId"
+          :slide-num="current.slideNum"
+          :tier="1"
+          :epoch="thumbEpoch"
+          hide-on-miss
+          :alt="current.title"
+          class="preview-thumb preview-thumb-hd"
+        />
+      </div>
     </div>
     <div class="preview-info">
       <span class="preview-title" :title="current.title">{{ current.title }}</span>
@@ -239,25 +253,30 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* miss 兜底占位（弱化非空白）：常驻底层，AssetThumb 渲染时被上层大图覆盖 */
-.preview-miss-hint {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: var(--text-placeholder);
+/* 两层堆叠容器（与详情侧 .detail-thumb-stack 同构）：底图在流内定尺寸，hd 覆盖层
+   绝对铺满同一区域——尺寸完全一致零跳版 */
+.preview-thumb-stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
-/* 大图占满 stage：AssetThumb 根元素仅有宽度 + 16:9 aspect-ratio，此处补显式高度
+/* 大图占满容器：AssetThumb 根元素仅有宽度 + 16:9 aspect-ratio，此处补显式高度
      （双维约束下 aspect-ratio 自然失效），img 自带 object-fit: contain 保比例；
-     z-index 压过 miss 占位 */
+     z-index 压过同级底图并低于翻页按钮 */
 .preview-thumb {
   position: relative;
   z-index: 1;
   width: 100%;
   height: 100%;
+}
+
+/* hd 覆盖层：绝对铺满底图区域（仅 ready 时渲染，见 hide-on-miss） */
+.preview-thumb-hd {
+  position: absolute;
+  inset: 0;
 }
 
 .preview-info {
