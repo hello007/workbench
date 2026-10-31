@@ -339,3 +339,36 @@ SplitAssetLibrary 取消改为返回已完成部分 + canceled=true + nil error�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 179: 批量取消明细审核修复
+
+**Date**: 2026-11-01
+**Task**: 批量取消明细审核修复
+**Branch**: `master`
+
+### Summary
+
+审核 9 项：晚到取消注销窗口、切库明细窗复位、死计数清理、pptx-split 与章节编号契约修正；补系统性错误/replace 取消/非取消 reject 用例
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7cc8927` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
