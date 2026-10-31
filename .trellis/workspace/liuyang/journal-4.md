@@ -105,3 +105,39 @@ openInFileManager 双平台优先 tessoa 打开（AppSettings 新增 TessoaPath 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 172: 素材缩略图 hd 按需生成 + 增量重建 + 会话缓存
+
+**Date**: 2026-10-31
+**Task**: 素材缩略图 hd 按需生成 + 增量重建 + 会话缓存
+**Branch**: `master`
+
+### Summary
+
+hd 档退出批量补缺改详情侧按需生成（独立 demandCh、批量文件边界插队、库级取消面、页级失败标记）；重建保留 fileID 与内容未变文件缩略图（占位行显式主键、清表与恢复单事务、页数漂移对账、passive 补记账、孤儿清扫）；全屏预览层补 small 底图；hd 提效加文件会话缓存 LRU=1 与邻页预取。后端 go test ./... 全绿（含 goleak），前端 2261 用例全绿，覆盖率 81.5%/85.9%。真机验证通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af7a904` | (see git log) |
+| `f663942` | (see git log) |
+| `e88addf` | (see git log) |
+| `25a97b1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
