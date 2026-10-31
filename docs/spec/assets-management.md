@@ -453,7 +453,7 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - 产物写盘并逐页 `Stat` 通过后，逐页复用 `processScanFile` 单文件重链建索引（解析、`files`/`slides`/FTS），随后回读取得产物 `fileID`——`newFileID` 只有索引行存在才可得，这是标注迁移的前置。`processScanFile` **不写 `thumb_cache`**，产物缩略图由后续扫描补缺或详情按需生成。
 - 建索引前用库排除规则 `matchPath` 判定产物相对路径；命中则回滚拒绝，不写随即被扫描转 excluded 的行。
 - 因此 replace 落点须与扫描互斥：先 `tryLockScan` 再 `tryLockSplit`，锁序 scan → split（与 `DeleteLibrary` 一致），`cache/source` 不变。
-- 索引规模：一次 replace 后该源的条目数 = 页数（1208 页源库全量替换即 1208 条素材）。单页文件解析与缩略图成本低（1 页/文件），但 `ListAssetFiles` 全量清单、`ListAssetSlides` 分页、统计与关键词检索规模随之上升，**已在 [perf-baseline.md §19](perf-baseline.md) 登记该放大面并实测（1208 页档：`ListFiles` 3.35 ms、检索 1.0–1.3 ms、统计 0.59 ms，详见 §19.1）**。
+- 索引规模：一次 replace 后该源的条目数 = 页数（1208 页源库全量替换即 1208 条素材）。单页文件解析与缩略图成本低（1 页/文件），但 `ListAssetFiles` 全量清单、`ListAssetSlides` 分页、统计与关键词检索规模随之上升，**已在 [perf-baseline.md §19](perf-baseline.md) 登记该放大面并实测（1208 页档：`ListFiles` 1.72 ms、检索 0.54–0.69 ms 基本持平、统计 0.30 ms，详见 §19.1）**。
 
 ### 15.3 标注迁移口径（单事务）
 

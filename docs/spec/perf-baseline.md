@@ -682,30 +682,40 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
 - **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；实测数据见 §19.1，示例页数不得当作基线。
 - **约束**：该放大是「每页独立素材」产品语义的预期结果，禁额外裁剪或虚拟条目；若后续分页/统计退化，先按本文件既有压测与内存口径复测再优化。
 
-### 19.1 实测数据（2026-10-31，Windows 11 测量环境同第 2 节）
+### 19.1 实测数据（2026-10-31，Windows 11 + go1.26.10，其余环境同第 2 节）
 
-- **语料**：程序化直插索引（绕过 pptx 解析），FTS 文本经 `splitFtsText` 同源切分；命中语料注入规则与检索基准一致（约 2% 页正文植入「城商行」、约 5% 页标题植入「获客」），两档命中页数相同。
-- **两档形态**：before = 53 文件 / 1208 页（用户真实库规模，来源 10-30-hd 任务基线）；after = 1208 文件 / 1208 页（全量 replace 后每页一个单页 pptx）。
-- **取数**：`TestAssetReplaceScale_Report` 单次输出 3 轮中位，重复 5 次取中位（首轮进程冷启为离群值，弃用）。
+- **语料**：程序化直插索引（绕过 pptx 解析），FTS 文本经 `splitFtsText` 同源切分；页正文/页标题注入规则沿用检索基准（约 2% 页正文植入「城商行」、约 5% 页标题植入「获客」），两档按同一页序注入，**平铺口径命中页数完全相同（24 / 60）**；未复制检索基准的文件名注入（文件名命中走 files 行，与本次索引规模面正交）。
+- **两档形态**：同一批 53 个源、1208 页。before = 源文件本身（53 条 files 行）；after = 全量 replace 产物（53 个源目录、`<3 位页序>-<源主干>.pptx` 单页文件共 1208 条 files 行，命名与 `replaceArtifactName` 一致）。
+- **取数**：`TestAssetReplaceScale_Report` 单次输出该档 3 轮中位，每档**独立进程**执行、重复 5 次取中位。同进程串跑两档时后测档会被整体放慢约 2 倍（连裸 SQL 查询也复现，与 GC 无关），故禁止同进程测得跨档倍数。
 
 |形态|files 行|slides 行|FTS 行|ListFiles|检索（正文词「城商行」）|检索（标题词「获客」）|GetLibraryStats|
 |---|---|---|---|---|---|---|---|
-|before（53 文件 / 1208 页）|53|1208|1261|117 µs|563 µs|691 µs|39 µs|
-|after（1208 文件 / 1208 页）|1208|1208|2416|3.35 ms|1.03 ms|1.33 ms|0.59 ms|
-|放大倍数|22.8×|1.0×|1.9×|28.6×|1.8×|1.9×|15.1×|
+|before（53 文件 / 1208 页）|53|1208|1261|108 µs|526 µs|650 µs|37 µs|
+|after（1208 文件 / 1208 页）|1208|1208|2416|1.72 ms|541 µs|693 µs|0.30 ms|
+|放大倍数|22.8×|1.0×|1.9×|16.0×|1.03×|1.07×|8.1×|
 
 **结论**：
 
-- `files` / FTS 文件行随页数线性放大，`slides` 行不变（页总数不变）。
-- `ListFiles` 全量拉取与 `GetLibraryStats` 耗时随 `files` 行数近似线性增长，1208 页全量替换后仍为毫秒级（3.35 ms / 0.59 ms），不构成卡顿来源。
-- `SearchAssets` 典型词耗时约 1.8–1.9 倍：总命中页数相同，放大来自 FTS 文件行翻倍与聚合分组数（文件数 ×22.8）上升，仍为毫秒级。
-- 噪声：跨进程重复测量波动约 ±15%，上表为中位数；Windows 逐次计时会被时钟粒度量化成 1 ms 台阶，报告测试按 10 ms 窗口批量平均。
+- `files` 行与文件级 FTS 行随页数线性放大（22.8×），FTS 总行 1261→2416（1.9×），`slides` 行不变（页总数不变）。
+- **DB 读取层**在 1208 页全量替换后仍为毫秒级：`ListFiles` 1.72 ms、检索 0.54–0.69 ms、统计 0.30 ms。该结论只覆盖 service 层 SQLite 查询，**未覆盖** Wails JSON 序列化、前端 1208 条目渲染，也未覆盖带标签/标注的库（本语料标签表为空，真实库的标签全表扫描会额外增长）。
+- 检索耗时**基本持平**（1.03–1.07×）：两档命中页数相同（24 / 60），FTS MATCH 的候选集不随文件级行增长而变大，文件数放大不传导到关键词检索。
+- `ListFiles`（16×）与 `GetLibraryStats`（8.1×）随 `files` 行数增长但仍为亚毫秒到毫秒级；`ListFiles` 单次返回 1208 条目的内存分配约 1 MB，前端渲染成本不在本表覆盖范围内。
+- 噪声：跨次测量同档波动约 ±15%（个别档 ±50%，如 before 的 ListFiles 5 次为 99–166 µs），上表为中位数。Windows 逐次计时易被时钟粒度量化（出现 0s / 999 µs 台阶），报告测试按 10 ms 窗口批量平均取值。
 
 **复现**：
 
 ```bash
-go test ./service/ -run TestAssetReplaceScale_Report -v -count=1                                  # 3 轮中位对照表
-go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^$' ./service/               # 回归基准
+# 每档独立进程，各跑 5 次取中位（单次即含 3 轮中位）
+for i in 1 2 3 4 5; do
+  ASSET_REPLACE_SCALE_STATE=before go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1 | grep 'files_'
+done
+for i in 1 2 3 4 5; do
+  ASSET_REPLACE_SCALE_STATE=after go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1 | grep 'files_'
+done
+
+# 语料同源性校验（两档命中页数一致）与回归基准
+go test ./service/ -run '^TestAssetReplaceScale_HitParity$' -v
+go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^$'
 ```
 
 测试定义于 `service/assets_replace_scale_bench_test.go`；`-short` 跳过报告测试（快速档不含性能守护）。

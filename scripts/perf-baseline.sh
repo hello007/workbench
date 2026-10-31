@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # WorkBench 性能基线采集脚本（v1.4 PR1 子项 3）
 #
-# 采集 4 维度性能数据，写入控制台日志，供 docs/spec/perf-baseline.md 记录与 PR4 优化对比。
+# 采集 6 个维度性能数据，写入控制台日志，供 docs/spec/perf-baseline.md 记录与 PR4 优化对比。
 # 本脚本只测量不改生产代码；benchmark 与 MemStats 测试定义于：
 #   service/perf_bench_test.go  - BenchmarkFileTreeGetTree_1000Files / _Cached / BenchmarkScanGitRepos_10Repos
 #   perf_bench_test.go          - BenchmarkNewAppServices / TestPerfMemStats
@@ -54,8 +54,9 @@ echo "  node scripts/frontend-memory-preview.mjs --runs 3                       
 echo
 
 echo "--- 维度 6: 素材拆分 replace 索引规模（见 docs/spec/perf-baseline.md §19）---"
-echo "  go test ./service/ -run TestAssetReplaceScale_Report -v -count=1     # 3 轮中位对照表（5 次取中位，单次约 5s，-short 跳过）"
-echo "  go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^\$' ./service/   # 回归基准（before/after 两档）"
+echo "  ASSET_REPLACE_SCALE_STATE=before go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1   # 单档 3 轮中位；每档独立进程、重复 5 次取中位"
+echo "  ASSET_REPLACE_SCALE_STATE=after  go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1   # 禁同进程连测两档（后测档被放慢约 2 倍）"
+echo "  go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^\$'   # 回归基准（before/after 两档）"
 echo
 
 echo "=== 采集结束 ==="

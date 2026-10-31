@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -15,52 +16,65 @@ import (
 // 素材拆分 replace 落点的索引规模基线（perf-baseline §19 复测口径）。
 //
 // 测量对象：一次全量 replace 前后同一库的索引形态差异——
-//   - before：53 文件 / 1208 页（用户真实素材库规模，来源 10-30-hd 任务基线）；
-//   - after：1208 文件 / 1208 页（每页一条 files 行 + 一条 slides 行 + FTS 行）。
+//   - before：53 源文件 / 1208 页（用户真实素材库规模，来源 10-30-hd 任务基线）；
+//   - after：1208 个单页产物 / 1208 页（每页一条 files 行 + 一条 slides 行 + FTS 行）。
 //
 // 三项指标按 §19 登记口径：files 行数、ListFiles（前端 ListAssetFiles 全量
 // 拉取）耗时、SearchAssets 典型词耗时；附带统计 GetLibraryStats 耗时。
 //
 // 语料构造绕过 pptx 解析直接批量写主表 + FTS 双写（1208 页解析量级不可接受），
-// FTS 文本经 splitFtsText 切分——与生产写路径同源；命中语料注入规则与
-// assets_search_bench_test.go 一致（约 2% 页正文植入「城商行」、约 5% 页标题
-// 植入「获客」），两档命中页数相同，保证检索结果可比。
+// FTS 文本经 splitFtsText 切分——与生产写路径同源。命中注入规则沿用
+// assets_search_bench_test.go 的页正文/页标题两条（约 2% 页正文植入「城商行」、
+// 约 5% 页标题植入「获客」），两档按同一页序注入，命中页数完全相同；**未复制
+// 该基准的文件名注入**（真实库里文件名命中走 files 行，与本次测量的索引规模面
+// 正交，故不引入）。
+//
+// after 形态贴合生产落点：产物目录 = 源所在目录下以源主干命名的子目录，文件名
+// 为 `<3 位页序>-<源主干>.pptx`（见 assets_split.go 的 replaceArtifactName），
+// 即 53 个源目录 / 1208 个单页文件，而非 1208 个独立源。
 
-// replaceScaleState 一档索引形态：名称 + 每文件页数分布。
+// replaceScaleState 一档索引形态：名称 + 每源页数分布 + 是否已全量替换。
 type replaceScaleState struct {
-	name     string
-	pagesPer []int // 每个文件的页数（长度 = files 行数）
+	name    string
+	sources []int // 每个源文件的页数（长度 = 源文件数）
+	replace bool  // true = 已全量 replace（每页一个单页产物，files 行 = 页数）
 }
 
-// replaceScaleStates 两档形态：before 为真实库分布（1208 页摊到 53 文件），
-// after 为全量 replace 后（每页一个单页文件）。
+// fileCount 本形态的 files 行数：未替换 = 源文件数；已替换 = 页总数。
+func (s replaceScaleState) fileCount() int {
+	if !s.replace {
+		return len(s.sources)
+	}
+	total := 0
+	for _, pages := range s.sources {
+		total += pages
+	}
+	return total
+}
+
+// replaceScaleStates 两档形态：同一批 53 个源、1208 页，before 为源文件本身，
+// after 为全量 replace 后的单页产物。
 func replaceScaleStates() []replaceScaleState {
 	const totalPages = 1208
-	const beforeFiles = 53
+	const sources = 53
 
-	pages := make([]int, beforeFiles)
+	pages := make([]int, sources)
 	remaining := totalPages
 	for i := range pages {
-		// 余量摊到前置文件，整体合计严格等于 totalPages
-		filesLeft := beforeFiles - i
-		pages[i] = remaining / filesLeft
+		// 余量摊到前置源，整体合计严格等于 totalPages
+		sourcesLeft := sources - i
+		pages[i] = remaining / sourcesLeft
 		remaining -= pages[i]
 	}
 
-	afterPages := make([]int, totalPages)
-	for i := range afterPages {
-		afterPages[i] = 1
-	}
-
 	return []replaceScaleState{
-		{name: "before_53files_1208slides", pagesPer: pages},
-		{name: "after_1208files_1slide", pagesPer: afterPages},
+		{name: "before_53files_1208slides", sources: pages, replace: false},
+		{name: "after_1208files_1slide", sources: pages, replace: true},
 	}
 }
 
 // buildReplaceScaleCorpus 程序化构造一档索引形态（单事务批量写）。
-// 路径形态贴合实际：before 为源文件本身，after 为 replace 产物目录下的单页文件
-// （<源主干>/<源主干>-NNN.pptx）。
+// 页序跨源连续递增，两档同一源同一页拿到同一注入结果，命中集合完全一致。
 func buildReplaceScaleCorpus(tb testing.TB, store *assetsStore, state replaceScaleState) {
 	tb.Helper()
 	tx, err := store.db.Begin()
@@ -96,18 +110,9 @@ func buildReplaceScaleCorpus(tb testing.TB, store *assetsStore, state replaceSca
 	}
 	defer insFtsSlide.Close()
 
-	rng := rand.New(rand.NewSource(42)) // 确定性语料（与检索基准同源）
-	seq := 0
-	for f, pages := range state.pagesPer {
-		// 路径：before 摊成单层源文件；after 每源目录下放单页产物
-		var relPath, fileName string
-		if pages == 1 {
-			relPath = fmt.Sprintf("素材源/源%04d/源%04d-001.pptx", f, f)
-			fileName = fmt.Sprintf("源%04d-001", f)
-		} else {
-			relPath = fmt.Sprintf("素材源/源%03d.pptx", f)
-			fileName = fmt.Sprintf("源%03d", f)
-		}
+	// insertFile 写一条 files 行 + 对应文件级 FTS 行。
+	insertFile := func(relPath, fileName string) int64 {
+		tb.Helper()
 		res, err := insFile.Exec(relPath, model.AssetFileStatusOK, fileName)
 		if err != nil {
 			tb.Fatalf("写语料文件: %v", err)
@@ -119,33 +124,67 @@ func buildReplaceScaleCorpus(tb testing.TB, store *assetsStore, state replaceSca
 		if _, err := insFtsFile.Exec(fileID, fileID, fileID, splitFtsText(fileName)); err != nil {
 			tb.Fatalf("写语料文件 FTS: %v", err)
 		}
+		return fileID
+	}
+	// insertSlide 写一条 slides 行 + 对应幻灯片级 FTS 行（rowid 取 -slideID，
+	// 与生产写路径同一约定）。
+	insertSlide := func(fileID int64, slideNum int, title, text string) {
+		tb.Helper()
+		res, err := insSlide.Exec(fileID, slideNum, title, text)
+		if err != nil {
+			tb.Fatalf("写语料幻灯片: %v", err)
+		}
+		slideID, err := res.LastInsertId()
+		if err != nil {
+			tb.Fatalf("取幻灯片 ID: %v", err)
+		}
+		if _, err := insFtsSlide.Exec(-slideID, slideID, fileID,
+			splitFtsText(title), splitFtsText(text)); err != nil {
+			tb.Fatalf("写语料幻灯片 FTS: %v", err)
+		}
+	}
+
+	rng := rand.New(rand.NewSource(42)) // 确定性语料（与检索基准同源）
+	seq := 0
+	for src, pages := range state.sources {
+		base := fmt.Sprintf("源%03d", src)
+		if !state.replace {
+			fileID := insertFile(fmt.Sprintf("素材源/%s.pptx", base), base)
+			for p := 1; p <= pages; p++ {
+				seq++
+				insertSlide(fileID, p, replaceScaleTitle(base, p, seq), replaceScaleText(rng, seq))
+			}
+			continue
+		}
 		for p := 1; p <= pages; p++ {
 			seq++
-			text := benchRandomText(rng, 120)
-			if seq%50 == 0 {
-				text = text[:60] + "城商行" + text[60:]
-			}
-			title := fmt.Sprintf("%s 第%03d页", fileName, p)
-			if seq%20 == 0 {
-				title = "获客" + title
-			}
-			res, err := insSlide.Exec(fileID, p, title, text)
-			if err != nil {
-				tb.Fatalf("写语料幻灯片: %v", err)
-			}
-			slideID, err := res.LastInsertId()
-			if err != nil {
-				tb.Fatalf("取幻灯片 ID: %v", err)
-			}
-			if _, err := insFtsSlide.Exec(-slideID, slideID, fileID,
-				splitFtsText(title), splitFtsText(text)); err != nil {
-				tb.Fatalf("写语料幻灯片 FTS: %v", err)
-			}
+			// 生产命名：<3 位页序>-<源主干>.pptx，位于以源主干命名的子目录
+			artifact := fmt.Sprintf("%03d-%s", p, base)
+			fileID := insertFile(fmt.Sprintf("素材源/%s/%s.pptx", base, artifact), artifact)
+			insertSlide(fileID, 1, replaceScaleTitle(base, p, seq), replaceScaleText(rng, seq))
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		tb.Fatalf("提交语料事务: %v", err)
 	}
+}
+
+// replaceScaleText 页正文：120 随机汉字，约 2% 页植入「城商行」。
+func replaceScaleText(rng *rand.Rand, seq int) string {
+	text := benchRandomText(rng, 120)
+	if seq%50 == 0 {
+		text = text[:60] + "城商行" + text[60:]
+	}
+	return text
+}
+
+// replaceScaleTitle 页标题：模板 + 约 5% 页植入「获客」。
+func replaceScaleTitle(base string, page, seq int) string {
+	title := fmt.Sprintf("%s 第%03d页", base, page)
+	if seq%20 == 0 {
+		title = "获客" + title
+	}
+	return title
 }
 
 // newReplaceScaleService 构造一档形态的素材库服务（库走真实建库迁移链路，
@@ -191,8 +230,8 @@ func BenchmarkAssetReplaceScale(b *testing.B) {
 				if err != nil {
 					b.Fatalf("ListFiles: %v", err)
 				}
-				if len(entries) != len(state.pagesPer) {
-					b.Fatalf("ListFiles 条目数 %d，期望 %d", len(entries), len(state.pagesPer))
+				if len(entries) != state.fileCount() {
+					b.Fatalf("ListFiles 条目数 %d，期望 %d", len(entries), state.fileCount())
 				}
 			}
 		})
@@ -227,8 +266,8 @@ func BenchmarkAssetReplaceScale(b *testing.B) {
 				if err != nil {
 					b.Fatalf("GetLibraryStats: %v", err)
 				}
-				if stats.FileCount != len(state.pagesPer) {
-					b.Fatalf("统计文件数 %d，期望 %d", stats.FileCount, len(state.pagesPer))
+				if stats.FileCount != state.fileCount() {
+					b.Fatalf("统计文件数 %d，期望 %d", stats.FileCount, state.fileCount())
 				}
 			}
 		})
@@ -274,80 +313,119 @@ func measureReplaceScaleRounds(op func() error) (time.Duration, error) {
 	return medianDuration(rounds), nil
 }
 
-// TestAssetReplaceScale_Report 输出 §19 复测三项指标的两档对照表（3 轮中位）。
-// 慢档构造约秒级到十秒级，-short 跳过；数字回填 docs/spec/perf-baseline.md §19。
+// replaceScaleStateEnv 指定本次测量哪一档（before|after）。
+// replaceScaleStateEnv 指定本次测量哪一档（before|after）。必须分进程执行：
+// 同一进程连续测量两档时，后测档的同类查询会整体放慢约 2 倍（连裸 SQL 也会，
+// 与 GC 无关），跨档同进程串跑得到的倍数不可信。
+const replaceScaleStateEnv = "ASSET_REPLACE_SCALE_STATE"
+
+// replaceScaleStateByName 按环境变量取档；未设置时跳过（常规 `go test` 不受
+// 影响），取值非法则报错。
+func replaceScaleStateByName(tb testing.TB) (replaceScaleState, bool) {
+	tb.Helper()
+	states := replaceScaleStates()
+	switch os.Getenv(replaceScaleStateEnv) {
+	case "before":
+		return states[0], true
+	case "after":
+		return states[1], true
+	case "":
+		return replaceScaleState{}, false
+	default:
+		tb.Fatalf("%s 取值非法：需 before|after", replaceScaleStateEnv)
+		return replaceScaleState{}, false
+	}
+}
+
+// TestAssetReplaceScale_Report 输出单档的 §19 复测口径数据（3 轮中位），按
+// `ASSET_REPLACE_SCALE_STATE=before|after` 分两次进程执行，数字回填
+// docs/spec/perf-baseline.md §19.1。-short 跳过（快速档不含性能测量）。
 func TestAssetReplaceScale_Report(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short 跳过 replace 索引规模基线报告（由 BenchmarkAssetReplaceScale 手动采集）")
 	}
-	type reportRow struct {
-		state  string
-		files  int
-		slides int
-		fts    int
-		list   time.Duration
-		body   time.Duration
-		title  time.Duration
-		stats  time.Duration
+	state, ok := replaceScaleStateByName(t)
+	if !ok {
+		t.Skipf("未设置 %s（before|after），跳过；两档须分进程执行，同进程连测会互相放慢", replaceScaleStateEnv)
 	}
-	rows := make([]reportRow, 0, 2)
+	svc, libID, store := newReplaceScaleService(t, state)
+	files, slides, fts := replaceScaleCounts(t, store)
 
+	// 预热一次（排除首次查询的惰性初始化：连接池/页缓存）
+	if _, err := svc.ListFiles(libID); err != nil {
+		t.Fatalf("%s ListFiles 预热: %v", state.name, err)
+	}
+	if _, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: false, Limit: 50}); err != nil {
+		t.Fatalf("%s SearchAssets 预热: %v", state.name, err)
+	}
+	// 命中页数取平铺口径（折叠口径的条目数随文件分布变化，属 replace 语义本身
+	// 的结果，不能用来判断语料同源）
+	hitBody, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("%s SearchAssets 平铺(正文词): %v", state.name, err)
+	}
+	hitTitle, err := svc.SearchAssets(libID, "获客", model.AssetSearchOptions{Flatten: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("%s SearchAssets 平铺(标题词): %v", state.name, err)
+	}
+	if hitBody.Total == 0 || hitTitle.Total == 0 {
+		t.Fatalf("%s 命中为零（语料注入异常）", state.name)
+	}
+
+	listDur, err := measureReplaceScaleRounds(func() error {
+		_, err := svc.ListFiles(libID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s ListFiles: %v", state.name, err)
+	}
+	bodyDur, err := measureReplaceScaleRounds(func() error {
+		_, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: false, Limit: 50})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s SearchAssets(正文词): %v", state.name, err)
+	}
+	titleDur, err := measureReplaceScaleRounds(func() error {
+		_, err := svc.SearchAssets(libID, "获客", model.AssetSearchOptions{Flatten: false, Limit: 50})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s SearchAssets(标题词): %v", state.name, err)
+	}
+	statsDur, err := measureReplaceScaleRounds(func() error {
+		_, err := svc.GetLibraryStats(libID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s GetLibraryStats: %v", state.name, err)
+	}
+
+	t.Logf("%s | %d | %d | %d | %v | %v | %v | %v | %d/%d",
+		state.name, files, slides, fts, listDur, bodyDur, titleDur, statsDur, hitBody.Total, hitTitle.Total)
+}
+
+// TestAssetReplaceScale_HitParity 两档命中页数必须一致（同源语料的可比性前提）：
+// 不同则耗时不可比。本用例只比计数不测耗时，可同进程跑，-short 跳过。
+func TestAssetReplaceScale_HitParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short 跳过 replace 索引规模命中一致性校验")
+	}
+	hits := make([]string, 0, 2)
 	for _, state := range replaceScaleStates() {
-		svc, libID, store := newReplaceScaleService(t, state)
-		files, slides, fts := replaceScaleCounts(t, store)
-
-		// 预热一次（排除首次查询的惰性初始化：连接池/页缓存）
-		if _, err := svc.ListFiles(libID); err != nil {
-			t.Fatalf("%s ListFiles 预热: %v", state.name, err)
-		}
-		if _, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: false, Limit: 50}); err != nil {
-			t.Fatalf("%s SearchAssets 预热: %v", state.name, err)
-		}
-
-		listDur, err := measureReplaceScaleRounds(func() error {
-			_, err := svc.ListFiles(libID)
-			return err
-		})
-		if err != nil {
-			t.Fatalf("%s ListFiles: %v", state.name, err)
-		}
-		bodyDur, err := measureReplaceScaleRounds(func() error {
-			page, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: false, Limit: 50})
-			if err == nil && page.Total == 0 {
-				return fmt.Errorf("零命中")
-			}
-			return err
-		})
+		svc, libID, _ := newReplaceScaleService(t, state)
+		body, err := svc.SearchAssets(libID, "城商行", model.AssetSearchOptions{Flatten: true, Limit: 50})
 		if err != nil {
 			t.Fatalf("%s SearchAssets(正文词): %v", state.name, err)
 		}
-		titleDur, err := measureReplaceScaleRounds(func() error {
-			page, err := svc.SearchAssets(libID, "获客", model.AssetSearchOptions{Flatten: false, Limit: 50})
-			if err == nil && page.Total == 0 {
-				return fmt.Errorf("零命中")
-			}
-			return err
-		})
+		title, err := svc.SearchAssets(libID, "获客", model.AssetSearchOptions{Flatten: true, Limit: 50})
 		if err != nil {
 			t.Fatalf("%s SearchAssets(标题词): %v", state.name, err)
 		}
-		statsDur, err := measureReplaceScaleRounds(func() error {
-			_, err := svc.GetLibraryStats(libID)
-			return err
-		})
-		if err != nil {
-			t.Fatalf("%s GetLibraryStats: %v", state.name, err)
-		}
-
-		rows = append(rows, reportRow{
-			state: state.name, files: files, slides: slides, fts: fts,
-			list: listDur, body: bodyDur, title: titleDur, stats: statsDur,
-		})
+		hits = append(hits, fmt.Sprintf("%d/%d", body.Total, title.Total))
 	}
-
-	t.Log("replace 索引规模基线（3 轮中位）：形态 | files | slides | FTS | ListFiles | 检索(正文词) | 检索(标题词) | 统计")
-	for _, r := range rows {
-		t.Logf("%s | %d | %d | %d | %v | %v | %v | %v",
-			r.state, r.files, r.slides, r.fts, r.list, r.body, r.title, r.stats)
+	if hits[0] != hits[1] {
+		t.Fatalf("两档命中页数不一致（正文/标题）：%s vs %s，语料注入不同源，耗时不可比", hits[0], hits[1])
 	}
+	t.Logf("两档命中页数一致：%s", hits[0])
 }
