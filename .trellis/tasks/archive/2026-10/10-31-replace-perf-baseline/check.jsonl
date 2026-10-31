@@ -1,0 +1,2 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "实测表格、复现命令与结论是否与 §19 口径一致"}
+{"file": "docs/spec/test-stability.md", "reason": "测量不得隐式依赖外部状态（端口/时序/真实 Office）"}
