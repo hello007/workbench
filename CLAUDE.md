@@ -115,7 +115,7 @@ workbench/
 |el-tree 展开面维护：FolderTree `syncExpandedKeysFromStore` 单点=可达展开面过滤（收起须连带剔除其展开中子孙，防 EP default-expanded-keys 回放祖先链翻回）；展开/收起行为断言禁自造 el-tree 桩（假绿），须真实 EP mount|[el-tree-expand-state.md](docs/spec/el-tree-expand-state.md)|
 |素材扫描 pipeline：scanLibrary 两阶段（串行判定+快路径 / `processPendingScanFiles` 并行解析零 DB+串行落库，worker=`min(GOMAXPROCS,4)`）；解析段取消=整批丢弃零落库；进度 done=完成计数；子目录重建 `RebuildAssetFolder`（LIKE 转义单点、无 VACUUM 备份、范围外零触碰）；`processScanFile` 组合仅供单文件重链|[assets-management.md §14](docs/spec/assets-management.md)|
 |素材缩略图 hd 按需与增量重建：hd 退出批量补缺（`batchBacklogTiers` 只取 small），按需走 `demandCh` 独立通道（**不与批量互相取消**）；页白名单批次**禁 pruneBeyond**（会误删后续页产物）；重建保留 fileID（占位行显式主键、序列不回退）+ hash 相同保留 PNG + 收尾清消失行与孤儿 PNG|[assets-thumbs-com.md §9.2](docs/spec/assets-thumbs-com.md)|
-|素材拆分 replace 落点：产物名 `<3位页序>-<源主干>.pptx` 刻意不命中 isPptxSplitDerivative（纯数字主干加 `-p`，改判定函数必回归）；全页 Stat+索引+标注单事务过才移源入回收站；失败/取消回滚产物与索引行；`split_records` v8 target/source_removed|[pptx-split.md](docs/spec/pptx-split.md)|
+|素材拆分 replace 落点：产物名 `<3位页序>-<名字主干>.pptx` 刻意不命中 isPptxSplitDerivative（源主干≥3位纯数字加 `-p`，改判定函数必回归）；全页 Stat+索引+标注单事务过才移源入回收站（禁 FOF_NOCONFIRMATION）；失败/取消回滚产物与索引行；`split_records` v8 target/source_removed|[pptx-split.md](docs/spec/pptx-split.md)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

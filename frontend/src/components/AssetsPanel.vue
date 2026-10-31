@@ -983,6 +983,9 @@
         <el-checkbox v-model="splitReplaceConfirmed" :disabled="splitConfirming">
           我已了解原始文件将被删除，且此操作不可撤销
         </el-checkbox>
+        <div class="split-replace-note">
+          请勿把产物重命名为「{{ splitReplaceArtifactHint }}」形态，否则会被识别为拆分派生副本，下次扫描退出素材库索引。
+        </div>
       </div>
       <div v-else class="split-cache-hint">
         产物存入素材库缓存目录（按源目录结构镜像存放），与原始文件隔离，不会被重复索引。
@@ -1516,7 +1519,7 @@ const retrying = ref(false)
 const splitting = ref(false)
 const splitProgress = ref(null) // assets-split:progress 载荷 {libraryId, done, total, currentFile, pageDone, pageTotal}
 const splitDialogVisible = ref(false)
-const splitDialogCtx = ref({ scope: 'library', relPath: '', fileName: '' }) // 确认弹窗语境（scope: 'file'|'library'）
+const splitDialogCtx = ref({ scope: 'library', relPath: '', fileName: '', fileStem: '' }) // 确认弹窗语境（scope: 'file'|'library'；fileStem = 源路径主干，落点回显用）
 const splitTarget = ref('cache') // 落点：'cache'=素材库缓存目录（默认）| 'source'=源文件所在目录 | 'replace'=就地替换（删源）
 const splitReplaceConfirmed = ref(false) // 就地替换强确认勾选（未勾选时提交按钮禁用）
 const splitConfirming = ref(false) // 确认提交中（防重复提交）
@@ -1582,12 +1585,21 @@ const splitPageText = computed(() => {
   return `第 ${p.pageDone}/${p.pageTotal} 页`
 })
 
-// 就地替换弹窗文案中的产物目录名回显：单文件入口取源文件名主干（后端产物目录
-// = <源名主干>），库级批量无单一源名，按通用描述展示
+// 就地替换弹窗文案中的产物目录名回显：单文件入口取源路径 basename 去扩展名
+//（与后端 splitSourceBaseName 同口径，禁依赖可能展示化的 title）；库级批量
+// 无单一源名，按通用描述展示
 const splitReplaceFolder = computed(() => {
-  if (splitDialogCtx.value.scope !== 'file') return '源文件同名'
-  const stem = (splitDialogCtx.value.fileName || '').replace(/\.pptx$/i, '')
-  return stem || '源文件同名'
+  if (splitDialogCtx.value.scope !== 'file') return '各源文件同名目录'
+  const stem = splitDialogCtx.value.fileStem || ''
+  return stem || '源文件同名目录'
+})
+
+// 产物禁用命名回显：<源名主干>-001.pptx（批量用占位主干）
+const splitReplaceArtifactHint = computed(() => {
+  const stem = splitDialogCtx.value.scope === 'file'
+    ? (splitDialogCtx.value.fileStem || '<源名主干>')
+    : '<源名主干>'
+  return `${stem}-001.pptx`
 })
 
 // 离开就地替换落点时清除强确认勾选：每次选择不可逆落点都须重新确认
@@ -4475,9 +4487,12 @@ const openSplitDialog = (scope) => {
   if (scope === 'file') {
     const entry = selected.value?.fileEntry
     if (!entry) return
-    splitDialogCtx.value = { scope, relPath: entry.path, fileName: entry.title || entry.path }
+    // 主干取路径 basename（与后端 splitSourceBaseName 同口径），title 仅用于展示
+    const baseName = (entry.path || '').split(/[\\/]/).pop() || ''
+    const fileStem = baseName.replace(/\.pptx$/i, '')
+    splitDialogCtx.value = { scope, relPath: entry.path, fileName: entry.title || entry.path, fileStem }
   } else {
-    splitDialogCtx.value = { scope, relPath: '', fileName: '' }
+    splitDialogCtx.value = { scope, relPath: '', fileName: '', fileStem: '' }
   }
   splitDialogVisible.value = true
 }
@@ -4529,17 +4544,18 @@ const onConfirmSplit = async () => {
         }
       }
     }
-    // replace 落点改动索引面（新增单页素材 + 删除源记录）：清单、目录树与统计须
-    // 重拉；cache/source 产物不进索引，无需刷新
-    if (seq === splitSeq && target === 'replace') {
-      await refreshDataAfterMutation({ reloadStats: true, reloadFolders: true })
-    }
+    // replace 落点改动索引面（新增单页素材 + 删除源记录）：刷新统一放 finally，
+    // 覆盖成功、删源失败（产物与索引已保留）与批量取消/系统性错误（前序文件已落定）；
+    // cache/source 产物不进索引，无需刷新
     if (seq !== splitSeq) return
     splitDialogVisible.value = false
   } catch (error) {
     if (seq !== splitSeq) return // 旧语境失败静默丢弃（handleError 不弹旧库 toast）
     handleError('拆分失败: ', error)
   } finally {
+    if (seq === splitSeq && target === 'replace') {
+      await refreshDataAfterMutation({ reloadStats: true, reloadFolders: true })
+    }
     // splitConfirming 归属本次提交点击，恒复位（旧 Promise 延迟落定不得把
     // 「提交中」残留阻塞后续提交）；splitting/splitProgress 属拆分任务运行态，
     // 代次已变时不复位（切库 watch 已复位过，且新库在途任务进度态不可被清除）
@@ -5749,6 +5765,11 @@ defineExpose({ loadLibraries, refreshAfterScan })
 
 .split-replace-text {
   color: var(--text-secondary);
+}
+
+/* 产物禁用命名提示（次级信息，避免与不可逆警示抢注意力） */
+.split-replace-note {
+  color: var(--text-tertiary);
 }
 
 .split-cache-hint {

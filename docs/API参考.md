@@ -515,7 +515,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `SplitAssetFile` | `(libraryID, relPath, target) => Promise<AssetSplitResult>` | 单文件 PPT 按页拆分（详情侧边栏「拆分此 PPT」入口；落点三选一：`cache` 缓存目录 derived 镜像源树（默认）/ `source` 源目录（自动排除索引）/ `replace` 就地替换（页序前缀命名进索引，全页成功 + 逐页校验 + 标注迁移后把源移入系统回收站；删源失败报 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED` 且产物保留））；增量命中跳过返回 `skipped=true`；核心失败（损坏/加密/只读）报错，取消复用 `E_ASSETS_CANCELLED` | AssetSplitResult |
 | `SplitAssetLibrary` | `(libraryID, target) => Promise<AssetSplitBatchResult>` | 库级批量拆分（「拆分全部 PPT」入口；落点三态同 `SplitAssetFile`，`replace` 需与扫描互斥）；启动时快照圈定全部 ok 状态文件，单文件失败逐文件记日志跳过不中断批量，返回汇总与逐文件明细（明细含 `target`/`sourceRemoved`/`rolledBack`/`code`；删源失败只在 `item.code` 透出、不整体失败）；同库并发拆分拒绝 `E_ASSETS_SCAN_IN_PROGRESS` | AssetSplitBatchResult |
 | `CancelAssetSplit` | `(libraryID) => Promise<boolean>` | 取消指定库在途拆分（幂等，无在途拆分返回 false；取消错误前端按 `E_ASSETS_CANCELLED` warning 中性提示） | boolean |
-| `GetAssetSplitRecord` | `(libraryID, relPath) => Promise<AssetSplitRecordView>` | 查询文件拆分记录（跳转方式 2 判定面：`exists` 决定「打开拆分单页」按钮显隐，`upToDate` 指示源未变化，`target` 决定产物命名口径与重拆禁用） | AssetSplitRecordView |
+| `GetAssetSplitRecord` | `(libraryID, relPath) => Promise<AssetSplitRecordView>` | 查询文件拆分记录（跳转方式 2 判定面：`exists` 决定「打开拆分单页」按钮显隐，`upToDate` 指示源未变化，`target`/`sourceRemoved` 供展示与诊断；重拆不被前端禁用，源从回收站还原后由后端四验放行） | AssetSplitRecordView |
 | `OpenAssetSplitPage` | `(libraryID, relPath, slideNum) => Promise<void>` | 打开拆分单页产物（SRS §2.2.5 方式 2，无 PowerPoint 依赖，系统默认关联程序；页序越界或产物缺失报错） | — |
 | `ExportAssetMetadata` | `(libraryID, opts: AssetExportOptions) => Promise<AssetExportResult>` | 元数据导出（SRS §2.6.4）：CSV（UTF-8 BOM）与 Markdown+YAML（Obsidian 每页一卡）可同选；范围选中条目 > 检索条件重放 > 全库；路径口径库相对（默认）/绝对；目标已存在报 `E_ASSETS_EXPORT_TARGET_EXISTS`（warning 确认后 overwrite 重调） | AssetExportResult |
 | `CancelAssetExport` | `(libraryID) => Promise<boolean>` | 取消指定库在途导出（幂等；半成品 CSV 由后端 abort 清理） | boolean |
@@ -815,7 +815,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **AssetSplitBatchResult** — 批量拆分汇总（`total`（快照圈定文件总数）/ `split` / `skipped` / `failed` / `items`: AssetSplitFileOutcome[]；单文件入口同形状 Total=1，done 事件载荷复用）
 
-**AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致）/ `target`（记录落点，决定产物命名与重拆禁用）/ `sourceRemoved`（源已移入回收站，前端据此禁用「重拆」））
+**AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致）/ `target`（记录落点，后端选产物命名规则；前端仅展示）/ `sourceRemoved`（源已移入回收站；前端不禁用重拆，还原后由后端放行））
 
 **AssetSplitProgress** — 拆分进度事件载荷（`libraryId` / `done` / `total`（文件级计数）/ `currentFile` / `pageDone` / `pageTotal`（当前文件页级透传））
 

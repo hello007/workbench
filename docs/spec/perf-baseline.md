@@ -676,8 +676,8 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
 
 ## 19. 素材拆分 replace 落点的索引规模放大（2026-10-31 登记）
 
-- **形态**：replace 落点每页产物 = 一条 `files` 行 + 一条 `slides` 行 + FTS 行 + 缩略图记账。一次替换后条目数 = 已拆页数（示例：1208 页库全量替换即 1208 条素材、1208 个单页 pptx）。
-- **受影响面**：`ListAssetFiles` 分页基数、`GetAssetLibraryStats` 计数、关键词检索候选集与聚合折叠、导出物化行数；均为线性放大，无额外复杂度。
+- **形态**：replace 落点每页产物 = 一条 `files` 行 + 一条 `slides` 行 + FTS 行；缩略图由后续扫描补缺或按需生成，不在拆分步落账。一次替换后条目数 = 已拆页数（示例：1208 页库全量替换即 1208 条素材、1208 个单页 pptx）。
+- **受影响面**：`ListAssetFiles` 全量清单规模、`ListAssetSlides` 分页基数、`GetAssetLibraryStats` 计数、关键词检索候选集与聚合折叠、导出物化行数；均为线性放大，无额外复杂度。
 - **成本不放大面**：单页文件解析仅 1 页；按需 hd 预取对 1 页文件自然退化为单页；购物栏与合并导出按普通素材处理，零改动。
-- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 首页耗时、`SearchAssets` 典型词耗时三项；**未实测前不写死数值**，示例页数不得当作基线。
+- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；**未实测前不写死数值**，示例页数不得当作基线。
 - **约束**：该放大是「每页独立素材」产品语义的预期结果，禁额外裁剪或虚拟条目；若后续分页/统计退化，先按本文件既有压测与内存口径复测再优化。

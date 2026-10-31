@@ -1,0 +1,7 @@
+{"file": "docs/spec/pptx-split.md", "reason": "拆分落点、命名、删源时序与回滚契约"}
+{"file": "docs/spec/assets-management.md", "reason": "索引、标注迁移、排除规则与单连接池纪律"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码、取消链路与 warning 分流"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁外部状态依赖与平台分侧断言"}
+{"file": "docs/spec/linux-platform.md", "reason": "recycle 双平台实现与测试拆分规则"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E mock 单一数据源与选择器契约"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "强确认形态与 E2E 断言"}

@@ -443,28 +443,36 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 
 // splitOneFileReplace 就地替换落点完整链路（严格按序，每步失败口径见 PRD D4）：
 //
-//  1. 源哈希与落点（<源目录>/<源名主干>，与源目录落点同布局）；
-//  2. 增量判定（记录落点/哈希/删源标记/首页产物存在四验，对称保留）；
-//  3. 清旧产物（核心中间态 <base>-NNN.pptx + 已改名 <NNN>-stem.pptx，后者在索引
-//     中的行一并删除，防重复素材）；
+//  1. 源哈希、Stat 基线与落点（<源目录>/<源名主干>，与源目录落点同布局）；
+//  2. 增量判定（记录落点/哈希/未删源标记/首页产物存在四验，源还原后重拆）；
+//  3. 清旧产物（核心中间态 <base>-NNN.pptx + 已改名 <NNN>-stem.pptx，后者只删
+//     已索引路径并删索引行，防重复素材且不误删用户文件）；
 //  4. 调拆分核心（产物落 outDir，仍为核心原生命名 <base>-NNN.pptx）；
 //  5. 逐页 rename 为可索引命名 <NNN>-stem.pptx + Stat 校验（存在且非空）；
 //  6. 逐页建索引（复用扫描单文件重链 processScanFile，取产物 fileID）；
-//  7. 标注迁移（源文件级 → 每个产物；源第 k 页 → 第 k 个产物第 1 页）；
-//  8. 源文件移入系统回收站（失败不回滚产物：已成功拆分，仅删源失败，可重试）；
-//  9. 删源索引行（清缩略图记账 + 事务删行；失败仅告警，下次扫描会标记 lost）；
+//  7. 标注预迁移（源文件级 → 每个产物；源第 k 页 → 第 k 个产物第 1 页）；
+//  8. 取消检查点 + 源 Stat 复核（被修改则回滚）→ 源文件移入系统回收站
+//     （移入失败不回滚产物：已成功拆分，仅删源失败，可重试）；
+//  9. 删源收尾单事务（重迁移晚到标注 + 删源索引行；失败仅告警，下次扫描标 lost）；
 //  10. 写拆分记录（target=replace, source_removed=1）；
 //  11. 成功结果。
 //
-// 3-7 任一失败 → 回滚删除全部产物文件、索引行与缩略图，源文件与源行原样保留。
+// 3-7 任一失败 → 回滚删除本次产物、索引行与缩略图，源文件与源行原样保留。
 func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *assetsStore, lib model.AssetLibrary, rel, absPath, snapshotHash string, fileDone, fileTotal int) (splitOutcome, error) {
 	failed := func(format string, args ...any) (splitOutcome, error) {
 		return splitOutcome{rel: rel, status: model.AssetSplitStatusFailed,
 			message: fmt.Sprintf(format, args...)}, nil
 	}
+	base := splitSourceBaseName(rel)
+	// 产物落点 = 源文件所在目录下与源同名的文件夹（与 source 落点同布局）。
+	// 核心原生输出恰为该目录下的 <base>-NNN.pptx，故直接传源路径拆。
+	outDir := filepath.Join(filepath.Dir(absPath), base)
+	// knownArtifacts 核心调用前的目录快照：回滚只删本次新增产物，目录内既有
+	// 用户文件（即使名字恰好匹配产物形态）不动（PRD R9）。
+	var knownArtifacts map[string]struct{}
 	// rollbackFailed 回滚产物后返回失败结果（失败页/校验类，批量隔离继续）
-	rollbackFailed := func(outDir, base, format string, args ...any) (splitOutcome, error) {
-		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base)
+	rollbackFailed := func(format string, args ...any) (splitOutcome, error) {
+		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base, knownArtifacts)
 		Logger().Warn("就地替换拆分回滚产物", "libraryId", lib.ID, "file", rel, "removed", len(removed))
 		out := splitOutcome{rel: rel, status: model.AssetSplitStatusFailed, rolledBack: true,
 			message: fmt.Sprintf(format, args...)}
@@ -480,15 +488,11 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		}
 		hash = h
 	}
-	base := splitSourceBaseName(rel)
-	// 产物落点 = 源文件所在目录下与源同名的文件夹（与 source 落点同布局）。
-	// 核心原生输出恰为该目录下的 <base>-NNN.pptx，故直接传源路径拆。
-	outDir := filepath.Join(filepath.Dir(absPath), base)
 	// cancelRollback 取消收口：回滚已产出页/索引行后返回带 context.Canceled 链的
 	// 错误。核心取消与「核心已返回、取消检查点命中」两处共用——删源前必须经检查点
 	// 确认未取消，保证 PRD 验收「取消 → 源保留、已产出页回滚」。
 	cancelRollback := func(err error) (splitOutcome, error) {
-		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base)
+		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base, knownArtifacts)
 		Logger().Warn("就地替换拆分取消回滚产物", "libraryId", lib.ID, "file", rel, "removed", len(removed))
 		return splitOutcome{rel: rel, rolledBack: true}, fmt.Errorf("拆分已取消: %w", err)
 	}
@@ -500,25 +504,34 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		return splitOutcome{rel: rel}, fmt.Errorf("读取拆分记录失败: %w", err)
 	}
 	if record != nil && record.target == model.AssetSplitTargetReplace &&
-		record.sourceHash == hash && record.sourceRemoved &&
+		record.sourceHash == hash && !record.sourceRemoved &&
 		fileExists(replaceFirstPagePath(outDir, base)) {
 		return splitOutcome{
 			rel: rel, status: model.AssetSplitStatusSkipped, message: splitSkipReasonUpToDate,
 			result: model.AssetSplitResult{
 				OutputDir: outDir, PageCount: record.pageCount,
 				Skipped: true, SkipReason: splitSkipReasonUpToDate,
-				Target: model.AssetSplitTargetReplace, SourceRemoved: true,
+				Target: model.AssetSplitTargetReplace, SourceRemoved: record.sourceRemoved,
 			},
 			pageDone: record.pageCount, pageTotal: record.pageCount,
 		}, nil
 	}
 
-	// 3. 清旧产物：核心中间态命名 + 已改名命名。改名形态若仍在索引中会与本次新
-	//    产物重复（同一路径重拆时其行为同一行，无需删；页数减少的越界页必须删行）
-	removeSplitArtifacts(outDir, base)
-	stale := removeReplaceArtifacts(outDir, base)
+	// 3. 清旧产物：只删「已在 files 索引中登记」的已改名形态（成功拆分的旧页必已
+	//    索引），目录内用户自建文件与未索引的崩溃残留不动——核心中间态命名本就
+	//    命中派生排除，残留不参与索引（PRD R9）
+	stale := s.removeReplaceArtifacts(store, lib, outDir, base)
 	if len(stale) > 0 {
 		s.deleteIndexRowsForReplacePaths(store, lib, stale)
+	}
+
+	// 核心调用前快照目录内既有产物名：回滚只删本次新增（PRD R9）
+	knownArtifacts = snapshotReplaceArtifactNames(outDir, base)
+	// 源文件拆分期基线（size + mtime）：核心读取到移入回收站之间若被修改，
+	// 产物与回收站内容将不一致，删源前复核并回滚（PRD R2）
+	srcBefore, statErr := os.Stat(absPath)
+	if statErr != nil {
+		return failed("读取源文件状态失败: %v", statErr)
 	}
 
 	// 4. 调拆分核心（页级进度透传；产物落 outDir，仍为核心原生命名）
@@ -534,7 +547,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 			// 取消：先回滚已产出页（否则会进索引与仍在的源形成重复素材），再上抛
 			return cancelRollback(err)
 		}
-		return rollbackFailed(outDir, base, "%s", appErrMessage(err))
+		return rollbackFailed("%s", appErrMessage(err))
 	}
 
 	// 取消检查点（核心返回后、改名/建索引前）：取消落在核心最后一页之后时核心
@@ -553,14 +566,14 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		}
 		dst := filepath.Join(outDir, replaceArtifactName(page, base))
 		if err := os.Rename(src, dst); err != nil {
-			return rollbackFailed(outDir, base, "第 %d 页产物重命名失败: %v", page, err)
+			return rollbackFailed("第 %d 页产物重命名失败: %v", page, err)
 		}
 		info, statErr := os.Stat(dst)
 		if statErr != nil {
-			return rollbackFailed(outDir, base, "第 %d 页产物校验失败: %v", page, statErr)
+			return rollbackFailed("第 %d 页产物校验失败: %v", page, statErr)
 		}
 		if info.Size() <= 0 {
-			return rollbackFailed(outDir, base, "第 %d 页产物校验失败: 文件为空", page)
+			return rollbackFailed("第 %d 页产物校验失败: 文件为空", page)
 		}
 		renamed = append(renamed, dst)
 		pages = append(pages, page)
@@ -570,42 +583,48 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	//    写入后回读取得（newFileID 只有索引行存在才可得，见 PRD D3）
 	srcRec, srcExists, err := store.fileRecordByPath(rel)
 	if err != nil {
-		return rollbackFailed(outDir, base, "读取源文件索引失败: %v", err)
+		return rollbackFailed("读取源文件索引失败: %v", err)
 	}
 	if !srcExists {
-		return rollbackFailed(outDir, base, "源文件索引记录不存在（%s）", rel)
+		return rollbackFailed("源文件索引记录不存在（%s）", rel)
 	}
 	targets := make([]splitAnnotationTarget, 0, len(renamed))
+	// replace 产物要进索引，须与扫描主循环用同一排除规则判定：命中时拒绝并回滚，
+	// 禁先写行、下次扫描又转 excluded（PRD R6）
+	matcher := newAssetExcludeMatcher(lib.ExcludeDirs, lib.ExcludeExts)
 	for idx, abs := range renamed {
 		page := pages[idx]
 		info, statErr := os.Stat(abs)
 		if statErr != nil {
-			return rollbackFailed(outDir, base, "第 %d 页产物校验失败: %v", page, statErr)
+			return rollbackFailed("第 %d 页产物校验失败: %v", page, statErr)
 		}
 		prodRel, relErr := filepath.Rel(lib.RootPath, abs)
 		if relErr != nil {
-			return rollbackFailed(outDir, base, "计算产物相对路径失败（%s）: %v", abs, relErr)
+			return rollbackFailed("计算产物相对路径失败（%s）: %v", abs, relErr)
 		}
 		prodRelSlash := filepath.ToSlash(prodRel)
+		if matcher.matchPath(prodRelSlash) {
+			return rollbackFailed("第 %d 页产物命中素材库排除规则（%s），请调整落点或排除规则后重试", page, prodRelSlash)
+		}
 		rec, exists, recErr := store.fileRecordByPath(prodRelSlash)
 		if recErr != nil {
-			return rollbackFailed(outDir, base, "读取产物索引失败（%s）: %v", prodRelSlash, recErr)
+			return rollbackFailed("读取产物索引失败（%s）: %v", prodRelSlash, recErr)
 		}
 		outcome, scanErr := s.processScanFile(store, lib, pptxDiskEntry{
 			rel: prodRelSlash, abs: abs, size: info.Size(), mtimeNs: info.ModTime().UnixNano(),
 		}, rec, exists)
 		if scanErr != nil {
 			// 系统性错误（db 写失败）：产物与已写索引行回滚后上抛
-			removed := s.rollbackReplaceArtifacts(store, lib, outDir, base)
+			removed := s.rollbackReplaceArtifacts(store, lib, outDir, base, knownArtifacts)
 			Logger().Warn("就地替换拆分索引失败回滚产物", "libraryId", lib.ID, "file", rel, "removed", len(removed))
 			return splitOutcome{rel: rel, rolledBack: true}, fmt.Errorf("单页产物索引失败（%s）: %w", prodRelSlash, scanErr)
 		}
 		if outcome == scanOutcomeFailed || outcome == scanOutcomeEncrypted || outcome == scanOutcomeDenied {
-			return rollbackFailed(outDir, base, "第 %d 页产物索引失败（%s）：解析结果不可用", page, prodRelSlash)
+			return rollbackFailed("第 %d 页产物索引失败（%s）：解析结果不可用", page, prodRelSlash)
 		}
 		rec, exists, recErr = store.fileRecordByPath(prodRelSlash)
 		if recErr != nil || !exists {
-			return rollbackFailed(outDir, base, "第 %d 页产物索引行回读失败（%s）", page, prodRelSlash)
+			return rollbackFailed("第 %d 页产物索引行回读失败（%s）", page, prodRelSlash)
 		}
 		targets = append(targets, splitAnnotationTarget{pageNum: page, fileID: rec.id})
 	}
@@ -613,7 +632,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 7. 标注迁移（单事务；失败则整文件不删源，回滚已产出页与索引行再上抛——
 	//    迁移失败通常是事务级 db 错误，属系统性错误，批量应中止而非继续）
 	if err := store.migrateSplitAnnotations(srcRec.id, targets); err != nil {
-		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base)
+		removed := s.rollbackReplaceArtifacts(store, lib, outDir, base, knownArtifacts)
 		Logger().Warn("就地替换拆分标注迁移失败回滚产物", "libraryId", lib.ID, "file", rel, "removed", len(removed))
 		return splitOutcome{rel: rel, rolledBack: true},
 			fmt.Errorf("标注迁移失败（%s）: %w", rel, err)
@@ -625,6 +644,15 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 否则会把源移入回收站（源保留验收被破坏）。
 	if err := ctx.Err(); err != nil {
 		return cancelRollback(err)
+	}
+	// 源文件 TOCTOU 复核：核心读取到此处之间若被外部保存/替换，回收站内容与
+	// 产物将不一致；回滚产物与索引行，源保留让用户重试（PRD R2）
+	srcNow, statErr := os.Stat(absPath)
+	if statErr != nil {
+		return rollbackFailed("读取源文件状态失败（可能已被移动或删除）: %v", statErr)
+	}
+	if srcNow.Size() != srcBefore.Size() || !srcNow.ModTime().Equal(srcBefore.ModTime()) {
+		return rollbackFailed("源文件在拆分期间被修改，为避免产物与源不一致已回滚，请重新拆分")
 	}
 	move := s.moveToRecycleBinFn
 	if move == nil {
@@ -642,15 +670,16 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		}, nil
 	}
 
-	// 9. 删源索引行（先清缩略图记账 + PNG，再事务删行；删行失败仅告警——下次扫描
-	//    会把无文件行标记 lost，可手动清理，不影响「已成功拆分并删源」语义）
+	// 9. 删源收尾（单事务）：重读源标注幂等迁移到产物 + 删源索引行，封死
+	//    「迁移后删行前」的晚到标注写入丢失窗口（PRD R3）。先清缩略图记账与 PNG；
+	//    收尾失败仅告警——源物理已在回收站，残留行下次扫描标 lost 可手动清理。
 	s.invalidateFileThumbs(lib, store, srcRec.id)
-	if err := store.deleteFileRecord(srcRec.id); err != nil {
-		Logger().Warn("就地替换删源索引行失败（下次扫描会标记丢失，可手动清理）",
+	if err := store.finalizeReplaceSource(srcRec.id, targets); err != nil {
+		Logger().Warn("就地替换删源收尾失败（下次扫描会标记丢失，可手动清理）",
 			"libraryId", lib.ID, "file", rel, "fileId", srcRec.id, "err", err)
 	}
 
-	// 10. 写拆分记录（target=replace、source_removed=1；R6：该记录供「重拆」禁用）
+	// 10. 写拆分记录（target=replace、source_removed=1；落点与删源标记回显）
 	// 此步位于删源之后：源已进回收站、产物已索引，记录仅剩留痕职责，写失败降级为
 	// 告警而非整体失败（否则批量会因「已完成的工作」报错，且重试入口因源行缺失
 	// 不可用）。
@@ -696,17 +725,21 @@ func (s *AssetLibraryService) deleteIndexRowsForReplacePaths(store *assetsStore,
 	}
 }
 
-// rollbackReplaceArtifacts 回滚就地替换已产出产物：删除 outDir 下两种命名形态
-// （核心中间态 <base>-NNN.pptx 与已改名 <NNN>-stem.pptx）、清理其索引行与缩略图，
-// 目录因此变空时尝试删除目录（非空/失败忽略——用户自建内容不动）。返回删除的
-// 文件清单供日志与批量明细的「已回滚」计数。
-func (s *AssetLibraryService) rollbackReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, outDir, base string) []string {
+// rollbackReplaceArtifacts 回滚就地替换本次产出的产物：删除 outDir 下两种命名
+// 形态（核心中间态 <base>-NNN.pptx 与已改名 <NNN>-stem.pptx）中**不在 keep 快照
+// 内**的文件、清理其索引行与缩略图，目录因此变空时尝试删除目录（非空/失败忽略
+// ——用户自建内容不动）。keep 为拆分核心调用前的目录快照，防用户自建的同形文件
+// 被误删（PRD R9）。返回删除的文件清单供日志与批量明细的「已回滚」计数。
+func (s *AssetLibraryService) rollbackReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, outDir, base string, keep map[string]struct{}) []string {
 	removed := make([]string, 0, 4)
 	entries, err := os.ReadDir(outDir)
 	if err == nil {
 		for _, e := range entries {
 			if e.IsDir() || !isReplaceArtifactName(e.Name(), base) {
 				continue
+			}
+			if _, existed := keep[e.Name()]; existed {
+				continue // 拆分前已存在：用户文件或历史残留，回滚不动
 			}
 			p := filepath.Join(outDir, e.Name())
 			if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -725,6 +758,23 @@ func (s *AssetLibraryService) rollbackReplaceArtifacts(store *assetsStore, lib m
 		}
 	}
 	return removed
+}
+
+// snapshotReplaceArtifactNames 记录目录内当前匹配产物命名形态的文件名集合。
+// 目录不存在或不可读返回空集合（此时本次产物全为新文件，回滚可全删）。
+func snapshotReplaceArtifactNames(dir, base string) map[string]struct{} {
+	set := make(map[string]struct{})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return set
+	}
+	for _, e := range entries {
+		if e.IsDir() || !isReplaceArtifactName(e.Name(), base) {
+			continue
+		}
+		set[e.Name()] = struct{}{}
+	}
+	return set
 }
 
 // GetAssetSplitRecord 查询文件拆分记录（跳转方式 2 判定面：前端据 Exists 展示
@@ -995,10 +1045,11 @@ func isReplaceArtifactName(name, base string) bool {
 }
 
 // removeReplaceArtifacts 就地替换落点重拆前的旧产物清理：仅删除已改名形态
-// `<纯数字>-<名字主干>.pptx`（核心中间态由 removeSplitArtifacts 清理），页序段
-// 纯数字不限位数（越界页一并收敛）；目录不存在或不可读时静默返回。返回被删除
-// 的文件绝对路径，供调用方联动清理索引行。
-func removeReplaceArtifacts(dir, base string) []string {
+// `<纯数字>-<名字主干>.pptx` 且**已存在于 files 索引**的路径（核心中间态命中
+// 派生排除，残留不参与索引，无需清理）。目录内用户自建文件与未索引残留一律
+// 不动（PRD R9）。目录不存在或不可读时静默返回；返回被删除的文件绝对路径，
+// 供调用方联动清理索引行。
+func (s *AssetLibraryService) removeReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, dir, base string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -1018,6 +1069,19 @@ func removeReplaceArtifacts(dir, base string) []string {
 			continue
 		}
 		p := filepath.Join(dir, name)
+		rel, relErr := filepath.Rel(lib.RootPath, p)
+		if relErr != nil {
+			Logger().Warn("计算旧就地替换产物相对路径失败（保留）", "path", p, "err", relErr)
+			continue
+		}
+		_, indexed, recErr := store.fileRecordByPath(filepath.ToSlash(rel))
+		if recErr != nil {
+			Logger().Warn("读取旧就地替换产物索引失败（保留）", "path", p, "err", recErr)
+			continue
+		}
+		if !indexed {
+			continue // 未索引：用户自建文件或崩溃残留，禁删
+		}
 		if err := os.Remove(p); err != nil {
 			Logger().Warn("删除旧就地替换产物失败（重拆覆盖继续）", "dir", dir, "file", name, "err", err)
 			continue

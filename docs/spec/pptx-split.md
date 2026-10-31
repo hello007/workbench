@@ -97,8 +97,9 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 |---|---|---|---|
 | `cache`（默认） | `data/assets/<libId>/derived/<镜像源目录>/<源主干>/<源主干>-NNN.pptx` | 否（派生排除） | 保留 |
 | `source` | `<源目录>/<源主干>/<源主干>-NNN.pptx` | 否（派生排除） | 保留 |
-| `replace` | `<源目录>/<源主干>/<NNN>-<源主干>.pptx` | 是（每页一条 `files` 行） | 全页成功后移入系统回收站 |
+| `replace` | `<源目录>/<源主干>/<NNN>-<名字主干>.pptx` | 是（每页一条 `files` 行） | 全页成功后移入系统回收站 |
 
+- 「名字主干」= `replaceArtifactBase(源主干)`：源主干为 ≥3 位纯数字时追加 `-p`（`123` → `123-p`），见 9.2。
 - 落点参数归一单点 `normalizeSplitTarget`：空串兼容旧调用等价 `cache`；非法值明确拒绝，禁静默落到意外落点。
 - `cache` 根目录文件恰为 `derived/<源主干>/`，子目录文件多一层镜像目录（同库不同目录同名 pptx 不撞目录）。
 
@@ -108,7 +109,7 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 - **中间态**：核心仍按本文件 §3 输出 `<base>-NNN.pptx`，编排层逐页 `os.Rename` 为 `<NNN>-<stem>.pptx`，随后 `os.Stat` 校验（存在且 `Size > 0`）；页序取核心产物文件名尾段（`pageSeqFromArtifactName`），解析失败回退结果切片序号 + 1。
 - **纯数字主干规避**：`replaceArtifactBase` 对「≥3 位纯数字」主干追加 `-p`（`123` → `123-p`）。原因是 `isPptxSplitDerivative` 判定「父目录名 + `-` + 纯数字」，而 replace 产物父目录恰为 `base`、页序段 `%03d` 最小宽度 3 位（≥1000 页不补零）——`base=123` 第 123 页会产出 `123-123.pptx` 被扫描静默排除。1~2 位数字不可能与 ≥3 位页序段等长，无需后缀。
 - **隐式耦合（改判定函数必读）**：`isPptxSplitDerivative` 零改动，三态区分完全依赖命名形态。后续若放宽为「任意父目录 + `-` + 数字」等更宽规则，会误伤 replace 产物使其退出索引。修改该判定函数须同步本节与回归用例。
-- **用户侧边界**：把产物重命名为 `<源主干>-001.pptx` 会重新命中排除规则，下次扫描退出索引；界面提示「不要改成与原文件同名」。
+- **用户侧边界**：把产物重命名为 `<源主干>-001.pptx` 会重新命中排除规则，下次扫描退出索引；就地替换弹窗的强确认区已显示该禁用命名提示（单文件回显实际主干，批量用 `<源名主干>` 占位）。
 
 ### 9.3 删源安全时序（`splitOneFileReplace`）
 
@@ -116,36 +117,37 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 
 | 步 | 动作 | 失败处置 |
 |---|---|---|
-| 1 | 源哈希（快照为空时现算） | 可读性失败 → 单文件失败 |
-| 2 | 增量四验：记录落点 = replace + 哈希一致 + `source_removed` + 首页产物存在 | 命中则 `skipped`，不重拆 |
-| 3 | 清旧产物：核心中间态 `<base>-NNN.pptx` + 已改名 `<NNN>-stem.pptx`，同步删旧索引行 | 删除失败告警继续 |
+| 1 | 源哈希（快照为空时现算）+ 源 `Stat` 基线（size + mtime） | 可读性失败 → 单文件失败 |
+| 2 | 增量四验：记录落点 = replace + 哈希一致 + **未删源**（`!source_removed`）+ 首页产物存在 | 命中则 `skipped`，不重拆；源从回收站还原后不放行跳过 |
+| 3 | 清旧产物：只删**已索引**的已改名 `<NNN>-stem.pptx` 并删索引行（核心中间态命中派生排除，残留不索引） | 删除失败告警继续 |
 | 4 | 调拆分核心（产物落 `outDir`，仍为核心原生命名） | 取消/失败 → 回滚产物 |
 | 5 | 逐页 rename 为可索引命名 + 逐页 `Stat`（存在且非空） | 回滚全部产物 |
-| 6 | 逐页 `processScanFile` 建索引，回读产物 `fileID` | 回滚产物与已写索引行 |
-| 7 | `migrateSplitAnnotations` 单事务迁移标注 | 回滚产物与索引行，源不删 |
-| 8 | 取消检查点 → `util.MoveToRecycleBin(源)` | 不回滚，返回删源失败码 |
-| 9 | 删源 `files` 行（先清缩略图记账） | 仅告警，下次扫描标 lost |
+| 6 | 逐页 `processScanFile` 建索引，回读产物 `fileID`；产物路径命中库排除规则则拒绝 | 回滚产物与已写索引行 |
+| 7 | `migrateSplitAnnotations` 单事务预迁移标注 | 回滚产物与索引行，源不删 |
+| 8a | 删源前取消检查点 + 源 `Stat` 复核（size/mtime 与基线一致） | 取消或源被修改 → 回滚产物与索引行，源不删 |
+| 8b | `util.MoveToRecycleBin(源)` | 不回滚，返回删源失败码（产物与源均保留） |
+| 9 | `finalizeReplaceSource` 单事务：重迁移晚到标注 + 删源索引行 | 仅告警，下次扫描标 lost |
 | 10 | `upsertSplitRecord(target=replace, source_removed=1)` | 仅告警（留痕职责） |
 | 11 | 返回 `sourceRemoved=true` 成功结果 | — |
 
-- **3-7 任一失败**：`rollbackReplaceArtifacts` 删除两种命名形态产物、索引行与缩略图（目录变空才删目录，用户自建内容不动），源文件与源行原样保留，明细 `rolledBack=true`。
+- **3-7 任一失败**：`rollbackReplaceArtifacts` 只删本次新增（核心调用前目录快照之外）的产物、索引行与缩略图，源文件与源行原样保留，明细 `rolledBack=true`；拆分前已存在的同形用户文件不动。
 - **取消三检查点**：核心返回取消错误、核心返回后、删源前。取消同样回滚后返回，`mapAssetSplitCancelError` 映射 `E_ASSETS_CANCELLED`（复用码，不新增）。
-- **8 失败**：产物、索引行、标注副本均保留，源与源行亦保留，返回 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning）；用户关闭占用程序后可重试，重拆覆盖产物。
-- 单文件入口把 `failed` 升格为错误返回并发 `assets-split:error`；批量入口填入 `Item{status:failed, code, rolledBack}`，不中断整批。
+- **8b 失败**：产物、索引行、标注副本均保留，源与源行亦保留，返回 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning）；用户关闭占用程序后可重试，重拆覆盖产物。
+- **批量入口失败分两类**：重命名/Stat/产物解析不可用等业务失败逐项填入 `Item{status:failed, code, rolledBack}` 继续后续文件；数据库写错误、标注事务错误与取消属系统性错误，整体中止且不追加 Item（前序已完成文件保持结果）。
 
 ### 9.4 回收站语义（`util.MoveToRecycleBin`）
 
 - 公共前置校验：非空、绝对路径、`Lstat` 存在；失败即源文件原位不动。
-- Windows：`SHFileOperationW` + `FOF_ALLOWUNDO`（静默、不确认、允许撤销）；Linux：freedesktop Trash（`$XDG_DATA_HOME/Trash`，`.trashinfo` 先写后移动，失败清理信息文件，跨设备复制路线回滚目标副本）。
-- 语义 = 可恢复删除，不是永久删除；这是删源不可逆提示以外用户唯一的恢复手段。
+- Windows：`SHFileOperationW` + `FOF_ALLOWUNDO | FOF_WANTNUKEWARNING | FOF_NOERRORUI`（`recycleFlags` 单点）。**禁 `FOF_NOCONFIRMATION` / `FOF_SILENT`**：回收站关闭、超配额或网络盘时 Shell 会退化为永久删除，静默标志会让该退化无提示且返回 0；`FOF_WANTNUKEWARNING` 使永久删除前弹警告，用户取消 → `fAnyOperationsAborted != 0` → 返回错误、源保留。Linux：freedesktop Trash（`$XDG_DATA_HOME/Trash`，`.trashinfo` 先写后移动，失败清理信息文件，跨设备复制路线回滚目标副本）。
+- 语义 = 可恢复删除，不是永久删除；这是删源不可逆提示以外用户唯一的恢复手段。Windows 两场景（回收站关闭 / 超配额）须实机验证。
 
 ### 9.5 拆分记录（schema v8）与重拆
 
-- `split_records` 增两列：`target TEXT NOT NULL DEFAULT 'cache'`、`source_removed INTEGER NOT NULL DEFAULT 0`；存量记录默认值语义正确（旧落点从不删源）。
-- replace 增量判定为四验（见 9.3 步 2），任一不满足即重拆。
-- 重拆清旧 = `removeSplitArtifacts`（核心中间态）+ `removeReplaceArtifacts`（已改名形态），后者返回路径联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图，防页数减少残留僵尸素材。
-- `OpenAssetSplitPage` 按 `record.target` 选命名：replace 用 `<NNN>-<主干>.pptx`，其余用 `<主干>-<NNN>.pptx`。
-- 前端据 `GetAssetSplitRecord.sourceRemoved` 禁用「重拆」入口（源已不在）。
+- `split_records` 增两列：`target TEXT NOT NULL DEFAULT 'cache'`、`source_removed INTEGER NOT NULL DEFAULT 0`；存量记录默认值语义正确（旧落点从不删源）。v8 迁移经 `migrateSchemaV8` 列存在性预判 + 单事务，半迁移库可重开。
+- replace 增量判定为四验（见 9.3 步 2），任一不满足即重拆；`source_removed=1` 但源文件已从回收站还原时同样重拆。
+- 重拆清旧只删已索引的已改名形态并联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图，防页数减少残留僵尸素材；未索引残留与用户自建文件不动。
+- `OpenAssetSplitPage` 按 `record.target` 选命名：replace 用 `<NNN>-<名字主干>.pptx`，其余用 `<主干>-<NNN>.pptx`。
+- `GetAssetSplitRecord` 回显 `target`/`sourceRemoved` 供展示与诊断；前端当前仅用 `exists` 决定「打开拆分单页」入口显隐，不据此禁用重拆（源还原后允许重拆）。
 
 ### 9.6 与扫描的互斥（锁序 scan → split）
 
@@ -158,6 +160,7 @@ replace 要为产物写 `files/slides` 索引（复用 `processScanFile` 单文�
 - 删源失败：`E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`，产物与源均保留。
 - 命名边界：纯数字主干 `123` / `1234` 加 `-p`；`isPptxSplitDerivative` 对 replace 产物返回 false。
 - 标注迁移：文件级与页级两组断言；回收站实现双平台分别单测。
+- 安全回归：源拆分期间被修改 → 回滚；源还原后重拆不跳过；排除规则命中 → 拒绝；v8 半迁移库可重开；回收站标志不含 `FOF_NOCONFIRMATION`/`FOF_SILENT`。
 
 
 

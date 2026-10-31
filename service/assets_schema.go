@@ -243,6 +243,8 @@ CREATE TABLE IF NOT EXISTS folder_tags (
 //   - source_removed = 1 表示该记录的源文件已移入回收站（仅 replace 成功路径写入），
 //     供「重拆」入口禁用判定与结果回显；
 //   - 无 Go 层回填（存量行默认值即正确语义），新库直建时逐级执行 v4→v8 后列已齐备。
+//   - 实际执行走 assets_db.go 的 migrateSchemaV8（列存在性预判 + 单事务）；本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
 const assetsSchemaV8SQL = `
 ALTER TABLE split_records ADD COLUMN target TEXT NOT NULL DEFAULT 'cache';
 ALTER TABLE split_records ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0;

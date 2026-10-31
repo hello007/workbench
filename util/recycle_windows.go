@@ -14,10 +14,9 @@ import (
 const (
 	foDelete = 3 // FO_DELETE：删除（配合 FOF_ALLOWUNDO 即移入回收站）
 
-	fofSilent         = 0x0004 // 不显示进度对话框
-	fofNoConfirmation = 0x0010 // 不弹确认框
-	fofAllowUndo      = 0x0040 // 保留撤销信息 = 移入回收站而非永久删除
-	fofNoErrorUI      = 0x0400 // 不弹错误对话框（错误码经返回值交给调用方）
+	fofAllowUndo       = 0x0040 // 保留撤销信息 = 移入回收站而非永久删除
+	fofNoErrorUI       = 0x0400 // 不弹错误对话框（错误码经返回值交给调用方）
+	fofWantNukeWarning = 0x4000 // 将被永久删除时警告（部分覆盖 FOF_NOCONFIRMATION）
 
 	// COINIT_APARTMENTTHREADED STA 初始化，以及「此线程已按其他模式初始化」的
 	// HRESULT（RPC_E_CHANGED_MODE）。后者不视为失败：回收站操作不强制 STA，
@@ -57,6 +56,17 @@ var (
 )
 
 // moveToRecycleBinPlatform Windows 实现：SHFileOperationW + FOF_ALLOWUNDO。
+// recycleFlags SHFileOperationW 的删除标志单点。
+//
+// 关键取舍：**禁止 FOF_NOCONFIRMATION / FOF_SILENT**。回收站关闭、文件超过
+// 回收站配额或目标在网络盘时，Shell 会退化为永久删除；带 FOF_NOCONFIRMATION
+// 时该退化静默发生且返回 0，调用方会误判为「已移入回收站」。改为
+// FOF_WANTNUKEWARNING 后，永久删除前 Shell 弹警告，用户取消即
+// fAnyOperationsAborted != 0，源文件保留并返回错误（PRD R1）。
+func recycleFlags() uint16 {
+	return fofAllowUndo | fofWantNukeWarning | fofNoErrorUI
+}
+
 func moveToRecycleBinPlatform(path string) error {
 	// Shell API 对线程公寓模型敏感：锁定线程并在当前线程尽力初始化 STA，
 	// 结束后配对反初始化（与 SHFileOperation 的文档建议一致）
@@ -85,7 +95,7 @@ func moveToRecycleBinPlatform(path string) error {
 	op := shFileOpStructW{
 		wFunc:  foDelete,
 		pFrom:  &from[0],
-		fFlags: fofAllowUndo | fofNoConfirmation | fofSilent | fofNoErrorUI,
+		fFlags: recycleFlags(),
 	}
 	ret, _, _ := procSHFileOperation.Call(uintptr(unsafe.Pointer(&op)))
 	if op.fAnyOperationsAborted != 0 {

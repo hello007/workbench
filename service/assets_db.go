@@ -122,6 +122,14 @@ func (s *assetsStore) migrate() error {
 		return fmt.Errorf("素材索引库版本过新（v%d > v%d），请升级 WorkBench 后再打开", version, assetsSchemaVersion)
 	}
 	for v := version + 1; v <= assetsSchemaVersion; v++ {
+		if v == 8 {
+			// v8 为两条 ADD COLUMN：走 Go 层幂等迁移 + 单事务，防「第一条成功、
+			// 第二条失败/进程中断」后重跑报 duplicate column name（库永久打不开）。
+			if err := s.migrateSchemaV8(); err != nil {
+				return fmt.Errorf("素材索引库迁移到 v8 失败: %w", err)
+			}
+			continue
+		}
 		migration, ok := assetsMigrations[v]
 		if !ok {
 			continue // 版本空洞（理论不可达）：缺迁移定义时保持版本号连续性由后续版本处理
@@ -141,6 +149,43 @@ func (s *assetsStore) migrate() error {
 		}
 	}
 	return nil
+}
+
+// migrateSchemaV8 split_records 落点/删源标记两列迁移：列存在性预判使半迁移库
+// 可重入，全部 DDL 与 user_version 同事务提交（SQLite DDL 可回滚）。迁移 SQL
+// 仍保留在 assetsSchemaV8SQL 供文档与新库语义对照，实际执行走本方法。
+func (s *assetsStore) migrateSchemaV8() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{"target", "ALTER TABLE split_records ADD COLUMN target TEXT NOT NULL DEFAULT 'cache'"},
+		{"source_removed", "ALTER TABLE split_records ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, c := range columns {
+		var n int
+		if err := tx.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = ?", c.name,
+		).Scan(&n); err != nil {
+			return fmt.Errorf("读取 split_records.%s 列信息失败: %w", c.name, err)
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := tx.Exec(c.ddl); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 8"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // assetFileRecord 扫描增量判定与重链所需的文件记录最小视图（hash 供重链哈希
@@ -2269,6 +2314,16 @@ func (s *assetsStore) deleteFileRecord(fileID int64) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := deleteFileRecordTx(tx, fileID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deleteFileRecordTx 删文件索引行事务体（调用方负责事务边界）：显式清 FTS 行
+// （需旧 slides ID 定位，先于主表删除）与 thumb_cache，再删 files 行由外键级联
+// 清 slides/file_tags/slide_tags/slide_meta。
+func deleteFileRecordTx(tx *sql.Tx, fileID int64) error {
 	// FTS 行删除需旧 slides ID 定位（rowid = -slides.id），先于主表删除
 	slideIDs, err := selectSlideIDsTx(tx, fileID)
 	if err != nil {
@@ -2288,7 +2343,7 @@ func (s *assetsStore) deleteFileRecord(fileID int64) error {
 	if _, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // splitAnnotationTarget 标注迁移目标：第 pageNum 页（源文件页序，从 1 计）对应
@@ -2319,11 +2374,24 @@ func (s *assetsStore) migrateSplitAnnotations(srcFileID int64, targets []splitAn
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := migrateSplitAnnotationsTx(tx, srcFileID, targets); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateSplitAnnotationsTx 标注迁移事务体（调用方负责事务边界）：供拆分链路
+// 的预迁移（删源失败时产物仍有标注）与 finalizeReplaceSource 的收尾迁移复用，
+// 禁两套 SQL 口径。
+func migrateSplitAnnotationsTx(tx *sql.Tx, srcFileID int64, targets []splitAnnotationTarget) error {
+	if len(targets) == 0 {
+		return nil
+	}
 
 	// 1. 源文件级星级/备注
 	var rating int
 	var note string
-	err = tx.QueryRow("SELECT rating, note FROM files WHERE id = ?", srcFileID).Scan(&rating, &note)
+	err := tx.QueryRow("SELECT rating, note FROM files WHERE id = ?", srcFileID).Scan(&rating, &note)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("标注迁移源文件记录不存在（fileId=%d）", srcFileID)
 	}
@@ -2445,6 +2513,29 @@ func (s *assetsStore) migrateSplitAnnotations(srcFileID int64, targets []splitAn
 		if err := syncFtsFileRowTx(tx, tgt.fileID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// finalizeReplaceSource 就地替换删源收尾（单事务）：重读源标注并幂等迁移到产物，
+// 再删源 files 行（显式清 FTS/thumb_cache + 外键级联清 slides/标注）。
+//
+// 为什么迁移两次：删源物理动作（回收站）与删索引行之间无全局锁，期间
+// BatchSetRating/BatchUpdateFileTags 可能更新源标注；收尾事务内重迁移保证这些
+// 晚到写入随删行前最后一次复制进入产物，而不是静默丢失（PRD R3）。
+func (s *assetsStore) finalizeReplaceSource(srcFileID int64, targets []splitAnnotationTarget) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if len(targets) > 0 {
+		if err := migrateSplitAnnotationsTx(tx, srcFileID, targets); err != nil {
+			return err
+		}
+	}
+	if err := deleteFileRecordTx(tx, srcFileID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

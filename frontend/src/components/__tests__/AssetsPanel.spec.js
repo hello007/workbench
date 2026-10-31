@@ -3321,6 +3321,55 @@ describe('AssetsPanel', () => {
     expect(outcomeDialog.text()).toContain('源文件无法移入回收站')
   })
 
+  it('就地替换强确认：切走落点后勾选清除，回到 replace 需重新确认', async () => {
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    const dialogGroup = wrapper.findAllComponents(ElRadioGroupStub).at(-1)
+    const dialog = wrapper.find('.stub-dialog')
+    const findSubmit = () => wrapper.findAll('button').find((b) => b.text().trim() === '开始拆分')
+
+    await dialogGroup.vm.$emit('update:modelValue', 'replace')
+    await flushPromises()
+    // 批量入口目录回显为通用描述，不把字面量当目录名
+    expect(dialog.find('.split-replace-warning').text()).toContain('各源文件同名目录')
+    await dialog.find('input[type=checkbox]').trigger('change')
+    await flushPromises()
+    expect(findSubmit().attributes('disabled')).toBeUndefined()
+
+    await dialogGroup.vm.$emit('update:modelValue', 'cache')
+    await flushPromises()
+    await dialogGroup.vm.$emit('update:modelValue', 'replace')
+    await flushPromises()
+    expect(dialog.find('input[type=checkbox]').element.checked).toBe(false)
+    expect(findSubmit().attributes('disabled')).toBeDefined()
+  })
+
+  it('就地替换单文件删源失败：产物已保留，catch 路径仍刷新素材清单', async () => {
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    await clickButton(wrapper, '拆分此 PPT')
+    await flushPromises()
+
+    const dialogGroup = wrapper.findAllComponents(ElRadioGroupStub).at(-1)
+    await dialogGroup.vm.$emit('update:modelValue', 'replace')
+    await flushPromises()
+    const dialog = wrapper.find('.stub-dialog')
+    await dialog.find('input[type=checkbox]').trigger('change')
+    await flushPromises()
+
+    const failure = new Error('源文件无法移入回收站')
+    failure.code = 'E_ASSETS_SPLIT_SOURCE_DELETE_FAILED'
+    wailsMock.SplitAssetFile.mockRejectedValue(failure)
+    const listCallsBefore = wailsMock.ListAssetFiles.mock.calls.length
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    // 删源失败时后端保留产物与索引行，前端必须重拉清单（刷新放 finally）
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBeGreaterThan(listCallsBefore)
+  })
+
   it('库级拆分失败明细：failed>0 时汇总提示并自动弹出逐文件明细（异常隔离原因可见）', async () => {
     wailsMock.SplitAssetLibrary.mockResolvedValue({
       total: 3,

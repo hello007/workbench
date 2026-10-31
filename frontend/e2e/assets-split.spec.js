@@ -9,34 +9,34 @@
  */
 import { test, expect, getWailsCalls } from './fixtures'
 
-test.describe('素材管理 PPT 拆分', () => {
-  // 素材面板基础数据：单库 + 两个 ok 状态 pptx 文件（画廊可渲染、拆分入口可用）；
-  // AssetThumbsAvailable=false 走降级路径（E2E 环境无 PowerPoint，缩略图面不参与）
-  // （test.use 须在 describe 层声明，test 函数体内调用非法）
-  const assetsOverrides = {
-    ListAssetLibraries: [
-      { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-14 10:00:00', updatedAt: '2026-10-14 10:00:00' }
-    ],
-    GetAssetLibraryStats: { libraryId: 'lib-e2e', fileCount: 2, slideCount: 4, failedCount: 0, encryptedCount: 0 },
-    ListAssetFiles: [
-      { id: 11, path: '方案A/城商行方案.pptx', size: 1024 * 1024, modTime: '2026-10-13 10:00:00', status: 'ok', title: '城商行方案', note: '', rating: 0, tags: [], createdAt: '2026-10-13 10:00:00', updatedAt: '2026-10-13 10:00:00' },
-      { id: 12, path: '方案B/获客方案.pptx', size: 2 * 1024 * 1024, modTime: '2026-10-13 11:00:00', status: 'ok', title: '获客方案', note: '', rating: 0, tags: [], createdAt: '2026-10-13 11:00:00', updatedAt: '2026-10-13 11:00:00' }
-    ],
-    AssetThumbsAvailable: false,
-    // 形状对齐 model.AssetSplitBatchResult：两个文件全部拆分成功（无失败明细弹窗）
-    SplitAssetLibrary: {
-      total: 2,
-      split: 2,
-      skipped: 0,
-      failed: 0,
-      items: [
-        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' },
-        { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' }
-      ]
-    }
+// 素材面板基础数据：单库 + 两个 ok 状态 pptx 文件（画廊可渲染、拆分入口可用）；
+// AssetThumbsAvailable=false 走降级路径（E2E 环境无 PowerPoint，缩略图面不参与）。
+// 各 describe 用 test.use 注入（须在 describe 层声明，test 函数体内调用非法）。
+const baseAssetsOverrides = {
+  ListAssetLibraries: [
+    { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-14 10:00:00', updatedAt: '2026-10-14 10:00:00' }
+  ],
+  GetAssetLibraryStats: { libraryId: 'lib-e2e', fileCount: 2, slideCount: 4, failedCount: 0, encryptedCount: 0 },
+  ListAssetFiles: [
+    { id: 11, path: '方案A/城商行方案.pptx', size: 1024 * 1024, modTime: '2026-10-13 10:00:00', status: 'ok', title: '城商行方案', note: '', rating: 0, tags: [], createdAt: '2026-10-13 10:00:00', updatedAt: '2026-10-13 10:00:00' },
+    { id: 12, path: '方案B/获客方案.pptx', size: 2 * 1024 * 1024, modTime: '2026-10-13 11:00:00', status: 'ok', title: '获客方案', note: '', rating: 0, tags: [], createdAt: '2026-10-13 11:00:00', updatedAt: '2026-10-13 11:00:00' }
+  ],
+  AssetThumbsAvailable: false,
+  // 形状对齐 model.AssetSplitBatchResult：两个文件全部拆分成功（无失败明细弹窗）
+  SplitAssetLibrary: {
+    total: 2,
+    split: 2,
+    skipped: 0,
+    failed: 0,
+    items: [
+      { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' },
+      { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' }
+    ]
   }
+}
 
-  test.use({ wailsOverrides: assetsOverrides })
+test.describe('素材管理 PPT 拆分', () => {
+  test.use({ wailsOverrides: baseAssetsOverrides })
 
   test('库级拆分主链路：入口→落点确认弹窗→mock 拆分完成→汇总提示', async ({ page }) => {
     await page.goto('/')
@@ -78,6 +78,25 @@ test.describe('素材管理 PPT 拆分', () => {
     expect(calls.length).toBe(1)
     expect(calls[0].args).toEqual(['lib-e2e', 'cache'])
   })
+})
+
+test.describe('素材管理 PPT 拆分·就地替换', () => {
+  // replace 专用 mock：items 必须回显 target=replace / sourceRemoved=true，否则
+  // 「已删除源」汇总与刷新链分支不会被执行（cache 形状会对任何成功路径都成立）
+  const replaceOverrides = {
+    ...baseAssetsOverrides,
+    SplitAssetLibrary: {
+      total: 2,
+      split: 2,
+      skipped: 0,
+      failed: 0,
+      items: [
+        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'replace', sourceRemoved: true, rolledBack: false, code: '' },
+        { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'replace', sourceRemoved: true, rolledBack: false, code: '' }
+      ]
+    }
+  }
+  test.use({ wailsOverrides: replaceOverrides })
 
   test('就地替换落点：不可逆强确认未勾选时提交禁用，勾选后以 target=replace 调用', async ({ page }) => {
     await page.goto('/')
@@ -95,6 +114,9 @@ test.describe('素材管理 PPT 拆分', () => {
     const warning = dialog.locator('.split-replace-warning')
     await expect(warning).toContainText('原始文件将被移入系统回收站')
     await expect(warning).toContainText('不可撤销')
+    // 批量入口目录回显为通用描述 + 禁用命名提示（非 ElMessageBox，无需 first/last）
+    await expect(warning).toContainText('各源文件同名目录')
+    await expect(warning).toContainText('源名主干')
     await expect(dialog.locator('.split-cache-hint')).toHaveCount(0)
 
     // 未勾选强确认：提交按钮禁用
@@ -103,9 +125,13 @@ test.describe('素材管理 PPT 拆分', () => {
     await dialog.locator('.el-checkbox').click()
     await expect(submit).toBeEnabled()
 
+    const listCallsBefore = (await getWailsCalls(page, 'ListAssetFiles')).length
     await submit.click()
-    await expect(page.locator('.el-message').filter({ hasText: '拆分完成' })).toBeVisible()
+
+    // 汇总按 replace 三类收尾口径（已删除源 2），并触发清单重拉
+    await expect(page.locator('.el-message').filter({ hasText: '已删除源 2' })).toBeVisible()
     await expect(dialog).not.toBeVisible()
+    expect((await getWailsCalls(page, 'ListAssetFiles')).length).toBeGreaterThan(listCallsBefore)
 
     const calls = await getWailsCalls(page, 'SplitAssetLibrary')
     expect(calls.length).toBe(1)

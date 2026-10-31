@@ -446,13 +446,14 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 |---|---|---|
 | `cache`（默认） | 不可见 | 产物在 `data/assets/<libId>/derived` 库根之外，扫描不覆盖 |
 | `source` | 不可见 | `<源主干>-NNN.pptx` 命中 `isPptxSplitDerivative` 派生排除 |
-| `replace` | **可见**（每页一条 `files` 行） | `<NNN>-<源主干>.pptx` 不命中排除，逐页建索引 |
+| `replace` | **可见**（每页一条 `files` 行） | `<NNN>-<名字主干>.pptx` 不命中排除，逐页建索引（名字主干在源主干为 ≥3 位纯数字时加 `-p`） |
 
 ### 15.2 replace 产物建索引
 
-- 产物写盘并逐页 `Stat` 通过后，逐页复用 `processScanFile` 单文件重链建索引（解析、`files`/`slides`/FTS/缩略图记账），随后回读取得产物 `fileID`——`newFileID` 只有索引行存在才可得，这是标注迁移的前置。
+- 产物写盘并逐页 `Stat` 通过后，逐页复用 `processScanFile` 单文件重链建索引（解析、`files`/`slides`/FTS），随后回读取得产物 `fileID`——`newFileID` 只有索引行存在才可得，这是标注迁移的前置。`processScanFile` **不写 `thumb_cache`**，产物缩略图由后续扫描补缺或详情按需生成。
+- 建索引前用库排除规则 `matchPath` 判定产物相对路径；命中则回滚拒绝，不写随即被扫描转 excluded 的行。
 - 因此 replace 落点须与扫描互斥：先 `tryLockScan` 再 `tryLockSplit`，锁序 scan → split（与 `DeleteLibrary` 一致），`cache/source` 不变。
-- 索引规模：一次 replace 后该源的条目数 = 页数（1208 页源库全量替换即 1208 条素材）。单页文件解析与缩略图成本低（1 页/文件），但 `ListAssetFiles` 分页、统计与关键词检索规模随之上升，**已在 [perf-baseline.md §19](perf-baseline.md) 登记该放大面**。
+- 索引规模：一次 replace 后该源的条目数 = 页数（1208 页源库全量替换即 1208 条素材）。单页文件解析与缩略图成本低（1 页/文件），但 `ListAssetFiles` 全量清单、`ListAssetSlides` 分页、统计与关键词检索规模随之上升，**已在 [perf-baseline.md §19](perf-baseline.md) 登记该放大面**。
 
 ### 15.3 标注迁移口径（单事务）
 
@@ -462,12 +463,13 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - 备注变化后经 `syncFtsFileRowTx` 同步产物文件 FTS 行（备注参与关键词检索，`title` 不变）。
 - **自锁纪律**：先把源侧 rating/note、file_tags、slide_tags、slide_meta 全部读入内存并显式 `Close` rows，再逐目标写入；单连接池下 rows 未关再查会死锁。`INSERT OR IGNORE/REPLACE` 兼容上次失败残留，重试幂等。
 - 事务提交成功才允许进入删源；任一写入失败整事务回滚，源与源标注原样保留，已产出产物由回滚链路删除。
+- **删源收尾单事务**：回收站移入成功后调用 `finalizeReplaceSource(srcFileID, targets)`——重读源标注幂等迁移（覆盖预迁移后、删行前到达的评分/标签/备注），再显式清 FTS/`thumb_cache` 并删源 `files` 行，同事务提交，封死晚到写入丢失窗口。
 
 ### 15.4 源记录直接删除（不做 lost）
 
-- 标注迁移成功后：`invalidateFileThumbs` 清缩略图记账与 PNG → `deleteFileRecord(srcFileID)` 事务删 `files` 行（级联清 slides、slide_tags、slide_meta、file_tags、FTS 文件行）。
+- 收尾事务中的 `deleteFileRecordTx`：**显式清 FTS 行与 `thumb_cache`**，再删 `files` 行由外键级联清 `slides`、`file_tags`、`slide_tags`、`slide_meta`；`invalidateFileThumbs` 另行清理缩略图 PNG。
 - **决策**：不走 `markFileLost`。标注已完整迁移到产物，lost 行对用户只是无法自然清理的僵尸条目；删源留痕由 `split_records`（`target='replace'`、`source_removed=1`）承担。
-- 删行失败仅告警不改变结果：下次扫描会发现文件不存在并标 lost，可手动清理；「已成功拆分并删源」语义不受影响。
+- 收尾失败仅告警不改变结果：源物理已在回收站，残留行下次扫描标 lost 可手动清理；「已成功拆分并删源」语义不受影响。
 
 ### 15.5 取消、失败回滚与批量明细
 
@@ -477,8 +479,8 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 
 ### 15.6 重拆清理与索引行收敛
 
-- 重拆前删两种命名形态：核心中间态 `<base>-NNN.pptx` 与已改名 `<NNN>-stem.pptx`；后者返回路径联动 `deleteIndexRowsForReplacePaths`，逐条清缩略图记账后删 `files` 行。
-- 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；目录内用户自建文件一律不动，目录变空才尝试删除。
+- 重拆前只删**已在 `files` 索引中登记**的已改名 `<NNN>-stem.pptx`（成功拆分的旧页必已索引），并联动 `deleteIndexRowsForReplacePaths` 逐条清缩略图记账后删 `files` 行；核心中间态 `<base>-NNN.pptx` 命中派生排除，残留不索引，无需清理。
+- 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；目录内用户自建文件与未索引崩溃残留一律不动，目录变空才尝试删除。
 
 ---
 

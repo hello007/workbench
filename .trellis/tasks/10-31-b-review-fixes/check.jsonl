@@ -1,0 +1,5 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对文档修正与实现一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对索引/标注口径修正"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码与三分类文案"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E mock 与断言"}

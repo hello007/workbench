@@ -422,7 +422,8 @@ type AssetSplitFileOutcome struct {
 	// RolledBack 产物是否已回滚删除（replace 落点失败/取消）
 	RolledBack bool `json:"rolledBack"`
 	// Code 失败项错误码（如 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED；成功为空）。
-	// 批量入口不整体失败，前端按该码区分「已回滚」与「产物保留可重试」两类失败。
+	// 批量入口不整体失败，供诊断与错误码追溯；前端三分类由 Status/Target/
+	// SourceRemoved/RolledBack 判定，不依赖本字段。
 	Code string `json:"code"`
 }
 
@@ -446,11 +447,12 @@ type AssetSplitRecordView struct {
 	PageCount int    `json:"pageCount"` // 已拆分页数
 	SplitAt   string `json:"splitAt"`   // 最近拆分时间（"2006-01-02 15:04:05"）
 	UpToDate  bool   `json:"upToDate"`  // 记录哈希与当前源哈希一致（源未变化）
-	// Target 记录落点（AssetSplitTarget* 取值）：前端据此选用产物命名规则打开
-	// 单页（replace 为 <页序>-<源名主干>.pptx，其余为 <源名主干>-<页序>.pptx），
-	// 并在 replace 记录下禁用「重拆」（源已移入回收站，见 SourceRemoved）
+	// Target 记录落点（AssetSplitTarget* 取值）：后端 OpenAssetSplitPage 据此
+	// 选择产物命名（replace 为 <页序>-<名字主干>.pptx，其余为 <源名主干>-<页序>.pptx）；
+	// 前端仅作展示/诊断，不据此禁用重拆（源从回收站还原后允许重拆）
 	Target string `json:"target"`
-	// SourceRemoved 记录对应的源文件是否已被移入回收站（replace 成功删源为 true）
+	// SourceRemoved 记录对应的源文件是否已被移入回收站（replace 成功删源为 true）；
+	// 还原后重拆由 replace 增量四验的 !sourceRemoved 条件放行
 	SourceRemoved bool `json:"sourceRemoved"`
 }
 
