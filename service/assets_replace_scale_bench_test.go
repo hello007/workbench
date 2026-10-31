@@ -74,7 +74,7 @@ func replaceScaleStates() []replaceScaleState {
 }
 
 // buildReplaceScaleCorpus 程序化构造一档索引形态（单事务批量写）。
-// 页序跨源连续递增，两档同一源同一页拿到同一注入结果，命中集合完全一致。
+// 页序跨源连续递增，两档同一源同一页拿到同一注入结果，命中页数与命中页序完全一致。
 func buildReplaceScaleCorpus(tb testing.TB, store *assetsStore, state replaceScaleState) {
 	tb.Helper()
 	tx, err := store.db.Begin()
@@ -159,7 +159,7 @@ func buildReplaceScaleCorpus(tb testing.TB, store *assetsStore, state replaceSca
 		for p := 1; p <= pages; p++ {
 			seq++
 			// 生产命名：<3 位页序>-<源主干>.pptx，位于以源主干命名的子目录
-			artifact := fmt.Sprintf("%03d-%s", p, base)
+			artifact := replaceArtifactName(p, base) // 与生产落点命名同源
 			fileID := insertFile(fmt.Sprintf("素材源/%s/%s.pptx", base, artifact), artifact)
 			insertSlide(fileID, 1, replaceScaleTitle(base, p, seq), replaceScaleText(rng, seq))
 		}
@@ -220,6 +220,8 @@ func replaceScaleCounts(tb testing.TB, store *assetsStore) (files, slides, fts i
 
 // BenchmarkAssetReplaceScale replace 前后两档形态的读取链路基准（files 行数由
 // TestAssetReplaceScale_Report 输出；本基准只测耗时不测计数）。
+// **仅用于同档跨版本回归**：两档在同一进程内串跑，跨档比倍数会受同进程放慢
+// 效应污染（见 replaceScaleStateEnv 注释），跨档倍数一律以分进程报告为准。
 func BenchmarkAssetReplaceScale(b *testing.B) {
 	for _, state := range replaceScaleStates() {
 		svc, libID, _ := newReplaceScaleService(b, state)
@@ -282,7 +284,8 @@ const replaceScaleSamples = 20
 // 取平均单次耗时。
 const replaceScaleSampleWindow = 10 * time.Millisecond
 
-// medianDuration 取样本中位耗时。
+// medianDuration 取样本中位耗时（偶数样本取上中位，不取两值平均——样本本身
+// 已是窗口平均值，差异可忽略）。
 func medianDuration(durations []time.Duration) time.Duration {
 	sorted := make([]time.Duration, len(durations))
 	copy(sorted, durations)
@@ -313,7 +316,6 @@ func measureReplaceScaleRounds(op func() error) (time.Duration, error) {
 	return medianDuration(rounds), nil
 }
 
-// replaceScaleStateEnv 指定本次测量哪一档（before|after）。
 // replaceScaleStateEnv 指定本次测量哪一档（before|after）。必须分进程执行：
 // 同一进程连续测量两档时，后测档的同类查询会整体放慢约 2 倍（连裸 SQL 也会，
 // 与 GC 无关），跨档同进程串跑得到的倍数不可信。
@@ -421,6 +423,10 @@ func TestAssetReplaceScale_HitParity(t *testing.T) {
 		title, err := svc.SearchAssets(libID, "获客", model.AssetSearchOptions{Flatten: true, Limit: 50})
 		if err != nil {
 			t.Fatalf("%s SearchAssets(标题词): %v", state.name, err)
+		}
+		// 非零断言：FTS 写入整体失效时两档同为 0，只比相等会「空过」这道守卫
+		if body.Total == 0 || title.Total == 0 {
+			t.Fatalf("%s 命中为零（正文 %d / 标题 %d），语料或 FTS 索引异常", state.name, body.Total, title.Total)
 		}
 		hits = append(hits, fmt.Sprintf("%d/%d", body.Total, title.Total))
 	}

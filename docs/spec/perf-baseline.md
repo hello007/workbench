@@ -694,6 +694,8 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
 |after（1208 文件 / 1208 页）|1208|1208|2416|1.72 ms|541 µs|693 µs|0.30 ms|
 |放大倍数|22.8×|1.0×|1.9×|16.0×|1.03×|1.07×|8.1×|
 
+> 放大倍数按未舍入中位计算（ListFiles 1.724 ms / 107.6 µs）；按表内显示值相除为 15.9×，属舍入差异。
+
 **结论**：
 
 - `files` 行与文件级 FTS 行随页数线性放大（22.8×），FTS 总行 1261→2416（1.9×），`slides` 行不变（页总数不变）。
@@ -718,4 +720,6 @@ go test ./service/ -run '^TestAssetReplaceScale_HitParity$' -v
 go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^$'
 ```
 
-测试定义于 `service/assets_replace_scale_bench_test.go`；`-short` 跳过报告测试（快速档不含性能守护）。
+> 命令需在 bash / Git Bash 下执行（PowerShell 用 `$env:ASSET_REPLACE_SCALE_STATE='before'`）。回归基准两档同进程串跑，**只能用于同档跨版本比较**，跨档倍数一律以上述分进程报告为准。
+
+测试定义于 `service/assets_replace_scale_bench_test.go`；`-short` 跳过报告测试与命中一致性校验（快速档不含性能测量），未设环境变量时报告测试自动跳过，常规 `go test ./...` 不受影响。
