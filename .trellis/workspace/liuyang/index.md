@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 172
+- **Total Sessions**: 173
 - **Last Active**: 2026-10-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~143 | Active |
+| `journal-4.md` | ~176 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 173 | 2026-10-31 | B方案PR1后端：就地替换落点+删源+标注迁移 | `5708beb` | `master` |
 | 172 | 2026-10-31 | 素材缩略图 hd 按需生成 + 增量重建 + 会话缓存 | `af7a904`, `f663942`, `e88addf`, `25a97b1` | `master` |
 | 171 | 2026-10-29 | 素材管理：文件夹树收起修复+扫描并发提效+子目录重建索引 | `0a5eaa9` | `master` |
 | 170 | 2026-10-29 | 打开资源管理器优先使用 tessoa | `e32cab5` | `master` |

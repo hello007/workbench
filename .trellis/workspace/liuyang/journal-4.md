@@ -141,3 +141,36 @@ hd 档退出批量补缺改详情侧按需生成（独立 demandCh、批量文�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 173: B方案PR1后端：就地替换落点+删源+标注迁移
+
+**Date**: 2026-10-31
+**Task**: B方案PR1后端：就地替换落点+删源+标注迁移
+**Branch**: `master`
+
+### Summary
+
+实现拆分第三落点 replace：产物 <页序>-<源主干>.pptx 进索引、全页成功+Stat校验+标注迁移后才移入回收站、失败回滚产物与索引行、新增 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED、schema v8 记录 target/source_removed；审查修复 4 位数字主干命名碰撞与取消窗口；go test ./... 与前端 2261 用例全绿
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5708beb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
