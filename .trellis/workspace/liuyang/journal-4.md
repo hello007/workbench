@@ -273,3 +273,36 @@ pptx-split.md 新增 §9 三落点/命名契约/删源时序与回滚；assets-m
 ### Next Steps
 
 - None - task complete
+
+
+## Session 177: 素材拆分 replace 索引规模基线实测
+
+**Date**: 2026-10-31
+**Task**: 素材拆分 replace 索引规模基线实测
+**Branch**: `master`
+
+### Summary
+
+新增 service/assets_replace_scale_bench_test.go：程序化索引语料基准（before 53 文件/1208 页，after 1208 文件/1208 页），TestAssetReplaceScale_Report 输出 3 轮中位对照表，BenchmarkAssetReplaceScale 供回归。实测回填 perf-baseline §19.1：files 行 22.8 倍、ListFiles 117µs→3.35ms、检索 1.8–1.9 倍、统计 39µs→0.59ms；asssets-management §15.2 同步引用；perf-baseline.sh 增加维度 6 采集命令。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b79b767` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
