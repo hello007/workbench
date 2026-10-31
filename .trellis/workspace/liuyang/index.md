@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 177
+- **Total Sessions**: 178
 - **Last Active**: 2026-10-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~308 | Active |
+| `journal-4.md` | ~341 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 178 | 2026-10-31 | 素材拆分批量取消保留已完成明细 | `b1fc79d` | `master` |
 | 177 | 2026-10-31 | 素材拆分 replace 索引规模基线实测 | `b79b767` | `master` |
 | 176 | 2026-10-31 | B方案审核缺陷修复 | `7995a5e` | `master` |
 | 175 | 2026-10-31 | B方案PR3：拆分就地替换规范沉淀 | `d89d0dd` | `master` |

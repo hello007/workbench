@@ -306,3 +306,36 @@ pptx-split.md 新增 §9 三落点/命名契约/删源时序与回滚；assets-m
 ### Next Steps
 
 - None - task complete
+
+
+## Session 178: 素材拆分批量取消保留已完成明细
+
+**Date**: 2026-10-31
+**Task**: 素材拆分批量取消保留已完成明细
+**Branch**: `master`
+
+### Summary
+
+SplitAssetLibrary 取消改为返回已完成部分 + canceled=true + nil error（done 事件），前端 warning 展示已完成计数与失败明细；同步 wailsjs/文档/CLAUDE 规则，补取消、关停与竞态用例
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1fc79d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
