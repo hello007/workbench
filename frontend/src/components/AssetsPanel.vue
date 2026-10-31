@@ -1648,6 +1648,12 @@ watch(currentLibraryId, () => {
   splitting.value = false
   splitProgress.value = null
   splitRecord.value = null
+  // 明细窗属旧库语境：切库一并关闭并清空，防取消/失败明细串到新库（与上方
+  // 拆分运行态同口径，禁只复位一半）
+  splitOutcomeVisible.value = false
+  splitOutcomeItems.value = []
+  splitOutcomeCanceled.value = false
+  splitOutcomeTotal.value = 0
 })
 
 // ---- 标签共享列表（第六批起独立数据源，PRD D1：ListAssetTags 独立标签 API）----
@@ -4674,9 +4680,9 @@ const SPLIT_OUTCOME_META = Object.freeze({
 const splitOutcomeLabel = (item) => SPLIT_OUTCOME_META[splitOutcomeKind(item)]?.label || '失败'
 const splitOutcomeTagType = (item) => SPLIT_OUTCOME_META[splitOutcomeKind(item)]?.tag || 'danger'
 
-// 批量结果收尾计数（replace 落点专用口径为主；split/failed 供取消摘要复用）
+// 批量结果收尾计数（replace 落点专用口径为主；failed 供取消摘要复用）
 const countSplitOutcomeKinds = (items) => {
-  const counts = { replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0, split: 0, failed: 0 }
+  const counts = { replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0, failed: 0 }
   for (const item of items || []) {
     const kind = splitOutcomeKind(item)
     if (kind in counts) counts[kind] += 1

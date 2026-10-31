@@ -3485,12 +3485,58 @@ describe('AssetsPanel', () => {
       '拆分已取消：已完成 3/4 个文件（拆分 1，跳过 1，失败 1）'
     )
     expect(ElMessage.success).not.toHaveBeenCalled()
-    // 失败 > 0：明细窗打开，顶部汇总带已取消上下文（已完成 3/4）
+    // 失败 > 0：明细窗打开，顶部汇总完整命中断言（非 replace 分支带「失败 1」）
     const dialog = wrapper.find('.stub-dialog')
     expect(dialog.exists()).toBe(true)
-    expect(dialog.text()).toContain('已取消：已完成 3/4 个文件')
+    expect(dialog.text()).toContain('已取消：已完成 3/4 个文件，失败 1')
     expect(dialog.text()).toContain('方案C/损坏文件.pptx')
     expect(wrapper.find('.split-progress').exists()).toBe(false)
+  })
+
+  it('拆分批量取消·就地替换：汇总用三类收尾计数，明细窗顶部带已取消上下文', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.SplitAssetLibrary.mockResolvedValue({
+      total: 3,
+      split: 1,
+      skipped: 0,
+      failed: 1,
+      canceled: true,
+      items: [
+        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'replace', sourceRemoved: true, rolledBack: false, code: '' },
+        { relPath: '方案B/旧方案.pptx', status: 'failed', message: '删源失败', target: 'replace', sourceRemoved: false, rolledBack: false, code: 'E_ASSETS_SPLIT_SOURCE_DELETE_FAILED' }
+      ]
+    })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    await wrapper.findAllComponents(ElRadioGroupStub).at(-1).vm.$emit('update:modelValue', 'replace')
+    await flushPromises()
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalledWith(
+      '拆分已取消：已完成 2/3 个文件（已删除源 1，已回滚 0，源保留 1）'
+    )
+    const dialog = wrapper.find('.stub-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('已取消：已完成 2/3 个文件：已删除源 1，已回滚 0，源保留 1')
+  })
+
+  it('拆分批量真失败：Promise reject 非取消错误经 handleError 提示，不弹完成汇总与明细窗', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.SplitAssetLibrary.mockRejectedValue({ code: 'E_ASSETS_SCAN_IN_PROGRESS', message: '该素材库正在拆分中' })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('该素材库正在拆分中')
+    expect(ElMessage.success).not.toHaveBeenCalled()
+    // 确认弹窗保持打开（catch 不关窗，用户可修正后重试），但明细列表不出现
+    expect(wrapper.find('.split-outcome-list').exists()).toBe(false)
   })
 
   it('拆分批量取消且尚无文件完成：Items 为空，warning 独立文案且不开明细窗', async () => {

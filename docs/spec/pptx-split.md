@@ -131,9 +131,9 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 | 11 | 返回 `sourceRemoved=true` 成功结果 | — |
 
 - **3-7 任一失败**：`rollbackReplaceArtifacts` 只删本次新增（核心调用前目录快照之外）的产物、索引行与缩略图，源文件与源行原样保留，明细 `rolledBack=true`；拆分前已存在的同形用户文件不动。
-- **取消三检查点**：核心返回取消错误、核心返回后、删源前。取消同样回滚后返回，`mapAssetSplitCancelError` 映射 `E_ASSETS_CANCELLED`（复用码，不新增）。
+- **取消三检查点**：核心返回取消错误、核心返回后、删源前。取消同样回滚后返回：单文件入口 `mapAssetSplitCancelError` 映射 `E_ASSETS_CANCELLED`（复用码，不新增）；批量入口改走正常收尾（见下条）。
 - **8b 失败**：产物、索引行、标注副本均保留，源与源行亦保留，返回 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning）；用户关闭占用程序后可重试，重拆覆盖产物。
-- **批量入口失败分两类**：重命名/Stat/产物解析不可用等业务失败逐项填入 `Item{status:failed, code, rolledBack}` 继续后续文件；数据库写错误、标注事务错误与取消属系统性错误，整体中止且不追加 Item（前序已完成文件保持结果）。
+- **批量入口失败分两类**：重命名/Stat/产物解析不可用等业务失败逐项填入 `Item{status:failed, code, rolledBack}` 继续后续文件；数据库写错误、标注事务错误属系统性错误，整体中止返回 error + `assets-split:error`。**取消不属系统性错误**：批量以已完成 `Items` + `Canceled=true` + nil error 收尾，终态发 `assets-split:done`，进行中的文件不追加 Item（前序已完成文件保持结果），详见 [assets-management.md §15.7](assets-management.md)。
 
 ### 9.4 回收站语义（`util.MoveToRecycleBin`）
 

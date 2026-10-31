@@ -325,6 +325,10 @@ func (s *AssetLibraryService) SplitAssetLibrary(ctx context.Context, libraryID s
 	if !batch.Canceled && splitCtx.Err() != nil {
 		batch.Canceled = true
 	}
+	// 收尾定态后立即注销可取消入口（注销按条目指针比对，defer 重复调用无害）：
+	// 此刻至返回之间到达的 CancelAssetSplit 必须返回 false——否则前端提示
+	// 「已请求取消拆分」而批次随后报完成，正是本次要消除的错位
+	s.unregisterSplitCancel(libraryID, entry)
 
 	Logger().Info("assets split batch done", "libraryId", libraryID, "target", tgt, "total", batch.Total,
 		"split", batch.Split, "skipped", batch.Skipped, "failed", batch.Failed, "canceled", batch.Canceled)

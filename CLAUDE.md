@@ -83,7 +83,7 @@ workbench/
 |内容搜索超时收口：`searchWithRipgrep` 失败分支**先判 `ctx.Err()`** 返 `E_SEARCH_TIMEOUT` 再走 exit 1 无匹配；rg 超时**禁回退** `searchWithGo`；部分超时 `TimedOut` 标志 append 独立 `timedOutGroups`，`mergeTimeoutGroups` 三态直测；前端标志组组级 warning（弃 ElMessage）；测试用 rg stub 与预取消 ctx|[logging-and-errors.md](docs/spec/logging-and-errors.md)|
 |进程终止（工具箱）：Windows 优雅停止能否生效取决于目标进程是否响应无法预判，统一「发请求→5s 轮询存活→未退强杀」，**禁 taskkill SUCCESS 当已退出**；自我保护判据只用 PID+父进程链；`IsSelf`/`IsSystem` 后端填充前端只消费；终止命令必带超时且拼 `ExitError.Stderr`；端口占用一览零后端新增（防重按 PID）|[process-management.md](docs/spec/process-management.md)|
 |多超时目录批量重试：前端编排 N 个单目录调用+信号量 3（每目录独立 60s ctx）；`retryOneDir(group, version)` 单目录/批量共用；`searchVersion` ref 守卫（写回比对丢弃、worker 开头提前 return、finally 不更新重试态）；批量预占 `retryingRepoPaths`；banner 条件 `batchRetrying \|\| timedOutCount >= 2`；service 零改动|[logging-and-errors.md](docs/spec/logging-and-errors.md)|
-|PPT 拆分 GC 与素材拆分：GC=保留页链路（页→版式→母版→主题）rels 闭包剪除，**联动四处**（母版 lst 剪枝+rels 悬挂清理+母版 rels 删关系+**母版本体 sldLayoutIdLst 删条目**——漏四处=修复弹窗）；任一跳不可解析整段降级；页序号 %03d；素材拆分增量判定=记录+哈希+产物三重；**源副本代拆**；重拆**禁 RemoveAll 整目录**；事件 assets-split:* 独立前缀；取消复用 E_ASSETS_CANCELLED|[pptx-split.md](docs/spec/pptx-split.md)|
+|PPT 拆分 GC 与素材拆分：GC=保留页链路（页→版式→母版→主题）rels 闭包剪除，**联动四处**（母版 lst 剪枝+rels 悬挂清理+母版 rels 删关系+**母版本体 sldLayoutIdLst 删条目**——漏四处=修复弹窗）；任一跳不可解析整段降级；页序号 %03d；素材拆分增量判定=记录+哈希+产物三重；**源副本代拆**；重拆**禁 RemoveAll 整目录**；事件 assets-split:* 独立前缀；单文件取消复用 E_ASSETS_CANCELLED|[pptx-split.md](docs/spec/pptx-split.md)|
 |PPT 按页拆分：纯 Go OOXML（**禁 COM/外部 Office**）；页序三跳映射（slide 文件名≠页序，sldIdLst→rId→rels→part 名）；XML「解析定位+字节删除」禁 Encoder 重序列化；OPC Target 相对关系源 part 目录；取消复用 E_GIT_CANCELLED；事件 `pptx-split:*` 仅内嵌面板监听；fixture 程序化构造|[pptx-split.md](docs/spec/pptx-split.md)|
 |PPT 文件夹批量拆分：`SplitFolder` 递归串行；产物排除复用 `isPptxSplitDerivative`（rel 先 ToSlash）；整批一个可取消 ctx 双检查点，Items 仅含已完成；**批量不逐文件发事件**（Item.Error 是失败唯一通道）；整批取消丢弃返回值（勿承诺保留部分结果）|[pptx-split.md](docs/spec/pptx-split.md)|
 |工具箱面板化：第二个独占一级面板；7 工具 Dialog→Panel 去壳内嵌（el-dialog→div、初始化迁 onMounted、事件监听闭包注销）；**新工具禁走 el-dialog**，一律 XxxPanel.vue 经 `<component :is>` 切换；根元素完整 flex 约束链|[frontend-visual-conventions.md](docs/spec/frontend-visual-conventions.md)|
@@ -116,7 +116,7 @@ workbench/
 |素材扫描 pipeline：scanLibrary 两阶段（串行判定+快路径 / `processPendingScanFiles` 并行解析零 DB+串行落库，worker=`min(GOMAXPROCS,4)`）；解析段取消=整批丢弃零落库；进度 done=完成计数；子目录重建 `RebuildAssetFolder`（LIKE 转义单点、无 VACUUM 备份、范围外零触碰）；`processScanFile` 组合仅供单文件重链|[assets-management.md §14](docs/spec/assets-management.md)|
 |素材缩略图 hd 按需与增量重建：hd 退出批量补缺（`batchBacklogTiers` 只取 small），按需走 `demandCh` 独立通道（**不与批量互相取消**）；页白名单批次**禁 pruneBeyond**（会误删后续页产物）；重建保留 fileID（占位行显式主键、序列不回退）+ hash 相同保留 PNG + 收尾清消失行与孤儿 PNG|[assets-thumbs-com.md §9.2](docs/spec/assets-thumbs-com.md)|
 |素材拆分 replace 落点：产物名 `<3位页序>-<名字主干>.pptx` 刻意不命中 isPptxSplitDerivative（源主干≥3位纯数字加 `-p`，改判定函数必回归）；全页 Stat+索引+标注单事务过才移源入回收站（禁 FOF_NOCONFIRMATION）；失败/取消回滚产物与索引行；`split_records` v8 target/source_removed|[pptx-split.md](docs/spec/pptx-split.md)|
-|素材拆分批量取消保留已完成：返回 Items+`Canceled=true`+**nil error**、终态 `assets-split:done`（单文件仍 E_ASSETS_CANCELLED）；Items 仅已完成、Total 仍快照总数；循环后补判 ctx 竞态|[assets-management.md §15.6](docs/spec/assets-management.md)|
+|素材拆分批量取消保留已完成：返回 Items+`Canceled=true`+**nil error**、终态 `assets-split:done`（单文件仍 E_ASSETS_CANCELLED）；Items 仅已完成、Total 仍快照总数；循环后补判 ctx 竞态|[assets-management.md §15.7](docs/spec/assets-management.md)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

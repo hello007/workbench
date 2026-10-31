@@ -660,6 +660,9 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 	if batch.Total != 3 || batch.Split != 2 || batch.Skipped != 0 || batch.Failed != 1 {
 		t.Fatalf("批量汇总不符（total=3 split=2 failed=1）：%+v", batch)
 	}
+	if batch.Canceled {
+		t.Error("正常完成不应标记 canceled")
+	}
 	byPath := make(map[string]model.AssetSplitFileOutcome, len(batch.Items))
 	for _, item := range batch.Items {
 		byPath[item.RelPath] = item
@@ -695,6 +698,48 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 	}
 	if emptyBatch.Total != 0 {
 		t.Errorf("空库批量 total 应为 0：%+v", emptyBatch)
+	}
+}
+
+// TestAssetSplit_BatchSystemicError 非取消的系统性错误（db 读写失败）仍整体
+// 失败：error 返回 + assets-split:error 事件，且结果不带 canceled 标记——
+// 防「一切错误都被当作取消」的误判。
+func TestAssetSplit_BatchSystemicError(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "系统性错误库", dir)
+	buildAssetsPptx(t, dir, "内容.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	mustScanLibrary(t, svc, lib.ID)
+	sink := &fakeEventSink{}
+	svc.SetEventSink(sink)
+
+	// 破坏拆分记录表：逐文件链路读记录失败 → 系统性错误（非取消）
+	store, err := svc.storeForScan(lib.ID)
+	if err != nil {
+		t.Fatalf("storeForScan: %v", err)
+	}
+	if _, err := store.db.Exec("DROP TABLE split_records"); err != nil {
+		t.Fatalf("破坏 split_records: %v", err)
+	}
+
+	batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
+	if err == nil {
+		t.Fatal("db 系统性错误应整体失败返回 error")
+	}
+	if batch.Canceled {
+		t.Error("系统性错误不应标记 canceled")
+	}
+	found := false
+	for _, call := range sink.calls {
+		if call.name == "assets-split:error" {
+			found = true
+		}
+		if call.name == "assets-split:done" {
+			t.Errorf("系统性错误不应发 done 事件，实际：%#v", call)
+		}
+	}
+	if !found {
+		t.Error("系统性错误应发 assets-split:error 事件")
 	}
 }
 
