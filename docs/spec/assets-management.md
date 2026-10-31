@@ -89,6 +89,7 @@ OpenDirectoryDialog(title) (string, error)   // app_preview.go，serve 无头模
 
 - 判定 `isPptxSplitDerivative`：按 `pptx_split.go` **真实输出布局**——`<源文件名>/<源文件名>-NN.pptx`（同名文件夹 + 三位页序后缀），禁凭空发明目录名（初版曾用不存在的 `derived/` 目录，拆分副本被重复索引，质量检查修复）。
 - 根目录直置的 `xxx-001.pptx`、同名异构文件不误伤；**`parentBase == "."` 提前 return false**（拆分产物恒落同名真实子目录，根目录形态不可能是派生；不提前排除时 `.-01.pptx` 这类「.」主干文件名恰与「.」前缀匹配被误判漏索引，2026-10-14 修复）。
+- **replace 落点产物刻意不命中**（2026-10-31，B 方案 PR1）：`<3 位页序>-<源主干>.pptx` 首段为页序、主干在后，不满足「父目录名 + `-` + 纯数字」；纯数字主干经 `-p` 后缀规避撞形（`123` → `123-p`）。判定函数零改动，改它须同步 [pptx-split.md §9.2](pptx-split.md)。
 - zip 解压字节上限（2026-10-14）：素材解析侧经 `readZipPackageWithLimits`（单条目 256MB / 全包 1GB，超限按「文件损坏」降级不中断批量），防 zip 炸弹类畸形包批量解析 OOM；**共用函数 `readZipPackage` 不设限透传，拆分链路行为逐字不变**（硬约束）。
 
 ### 扫描语义
@@ -434,6 +435,50 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - **单文件组合保留**：`processScanFile` = parse + finalize 串行组合，仅供 `RelocateAssetFile` / `ReplaceAssetPathPrefix` 单文件重链路径复用；批量扫描禁走该组合。
 - **子目录级重建（RebuildAssetFolder → rebuildFolder）**：runLibraryScan 装配复用（锁/取消/事件/补缺），事件面复用 `assets-scan:*`。范围收敛 = `clearFilesForFolderRebuild(folderRel)`（前缀删除版 clearIndexForRebuild：FTS 文件行+幻灯片行显式删 + thumb_cache 显式删 + files 行级联删，**LIKE 转义单点**——段名可含 `% _ \`，不转义误伤同前缀目录如「方案A」vs「方案A备份」）+ `collectPptxEntries(folderAbs)` 只扫子树（rel 拼前缀还原库内键）。标注全量备份 + 内存前缀过滤 + defer 重绑（范围外绑定重绑时路径直命中存续行幂等无害）。**不做 VACUUM 整库备份**（范围小可重跑）；消失记录直清不转 lost。守卫面：根空串拒绝（指向全量重建入口）、越界 resolveLibraryRelPath 单点、排除命中 matchDirPath 拒绝、目录存在性校验——错误在清库前返回索引零影响。
 - **前端接线**：FolderTree 菜单「重建索引」（canRebuild = canAnnotate 同口径：根/排除/派生禁用，根 title 指向工具栏全量入口）；宿主 onRebuildFolder 单次 ElMessageBox.confirm 确认 → RebuildAssetFolder → toast → `refreshDataAfterMutation({ reloadFolders, reloadStats })`；在途防重复用 folderOpsBusy。wailsjs 同步两处（App.js/App.d.ts；复用 AssetScanResult 无 models.ts 新增）。
+
+## 15. 素材拆分就地替换与标注迁移（B 方案 PR1，2026-10-31）
+
+> 命名、删源时序与回收站语义见 [pptx-split.md §9](pptx-split.md)；本节只记素材域索引与标注口径。
+
+### 15.1 落点与索引可见性
+
+| 落点 | 索引可见性 | 原因 |
+|---|---|---|
+| `cache`（默认） | 不可见 | 产物在 `data/assets/<libId>/derived` 库根之外，扫描不覆盖 |
+| `source` | 不可见 | `<源主干>-NNN.pptx` 命中 `isPptxSplitDerivative` 派生排除 |
+| `replace` | **可见**（每页一条 `files` 行） | `<NNN>-<源主干>.pptx` 不命中排除，逐页建索引 |
+
+### 15.2 replace 产物建索引
+
+- 产物写盘并逐页 `Stat` 通过后，逐页复用 `processScanFile` 单文件重链建索引（解析、`files`/`slides`/FTS/缩略图记账），随后回读取得产物 `fileID`——`newFileID` 只有索引行存在才可得，这是标注迁移的前置。
+- 因此 replace 落点须与扫描互斥：先 `tryLockScan` 再 `tryLockSplit`，锁序 scan → split（与 `DeleteLibrary` 一致），`cache/source` 不变。
+- 索引规模：一次 replace 后该源的条目数 = 页数（1208 页源库全量替换即 1208 条素材）。单页文件解析与缩略图成本低（1 页/文件），但 `ListAssetFiles` 分页、统计与关键词检索规模随之上升，**已在 [perf-baseline.md §19](perf-baseline.md) 登记该放大面**。
+
+### 15.3 标注迁移口径（单事务）
+
+- 入口 `migrateSplitAnnotations(srcFileID, targets)`，`targets` 每项 = `(源页序 k, 产物 fileID)`。
+- **文件级**：源 `files.rating` / `files.note` 复制到每个产物行；`file_tags` 逐标签 `INSERT OR IGNORE` 复制到每个产物（每页都带源文件标签与评分）。
+- **页级**：源 `slide_tags (src, k)` → 第 k 个产物 `(newID, 1)`；源 `slide_meta (src, k)` → 第 k 个产物 `(newID, 1)`，`INSERT OR REPLACE`。源第 k 页只进第 k 个产物，不跨页复制。
+- 备注变化后经 `syncFtsFileRowTx` 同步产物文件 FTS 行（备注参与关键词检索，`title` 不变）。
+- **自锁纪律**：先把源侧 rating/note、file_tags、slide_tags、slide_meta 全部读入内存并显式 `Close` rows，再逐目标写入；单连接池下 rows 未关再查会死锁。`INSERT OR IGNORE/REPLACE` 兼容上次失败残留，重试幂等。
+- 事务提交成功才允许进入删源；任一写入失败整事务回滚，源与源标注原样保留，已产出产物由回滚链路删除。
+
+### 15.4 源记录直接删除（不做 lost）
+
+- 标注迁移成功后：`invalidateFileThumbs` 清缩略图记账与 PNG → `deleteFileRecord(srcFileID)` 事务删 `files` 行（级联清 slides、slide_tags、slide_meta、file_tags、FTS 文件行）。
+- **决策**：不走 `markFileLost`。标注已完整迁移到产物，lost 行对用户只是无法自然清理的僵尸条目；删源留痕由 `split_records`（`target='replace'`、`source_removed=1`）承担。
+- 删行失败仅告警不改变结果：下次扫描会发现文件不存在并标 lost，可手动清理；「已成功拆分并删源」语义不受影响。
+
+### 15.5 取消、失败回滚与批量明细
+
+- replace 取消或 3-7 步失败：回滚已产出产物、索引行与缩略图（详见 [pptx-split.md §9.3](pptx-split.md)）；`cache/source` 保持既有语义（取消保留已产出，幂等重拆覆盖）。
+- 批量明细 `AssetSplitFileOutcome` 新增字段：`target`（落点）、`sourceRemoved`（已删源）、`rolledBack`（产物已回滚）、`code`（失败错误码）。
+- 前端据此分三类收尾：已删除源（`split` + `sourceRemoved`）/ 已回滚（`failed` + `rolledBack`）/ 源保留（`failed` + replace 未回滚）。
+
+### 15.6 重拆清理与索引行收敛
+
+- 重拆前删两种命名形态：核心中间态 `<base>-NNN.pptx` 与已改名 `<NNN>-stem.pptx`；后者返回路径联动 `deleteIndexRowsForReplacePaths`，逐条清缩略图记账后删 `files` 行。
+- 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；目录内用户自建文件一律不动，目录变空才尝试删除。
 
 ---
 

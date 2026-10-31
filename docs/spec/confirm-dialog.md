@@ -28,6 +28,15 @@
 
 判别方法：读组件代码，看 confirm 之后的动作路径是否存在「再到达 confirm 调用点」的可能（递归重调 or 顺序第二段）。**不能凭「在 catch 里」判定为递归形态**——实测多处理由是状态驱动确认或探测失败豁免分支，confirm 本身不在错误路径上（如 LocalChanges 推送无上游确认）。
 
+### 2.1 非 ElMessageBox 强确认形态（2026-10-31 登记）
+
+素材拆分「就地替换」落点采用 `el-dialog` 内 `el-checkbox` 勾选式强确认（未勾选时提交按钮 `disabled`，提交处再兜底拦截），**不是 `ElMessageBox.confirm` 消费点**，上述三形态分类不适用：
+
+- 无 MessageBox 实例，EP 2.14 起的实例驻留问题不存在。
+- E2E 选择器无需 `.first()`/`.last()`，按弹窗内复选框与按钮定位即可。
+- 断言点：未勾选时提交按钮禁用；切换离开 `replace` 时勾选态自动清除；勾选后调用参数为 `replace`。
+- 同类「弹窗内确认」组件（未来新增）沿用本形态，不并入三形态表；若改为 `ElMessageBox` 则须按 §2 重新定形态。
+
 ## 3. vitest mock 面
 
 - **ElMessageBox mock 是各 spec 文件级 `vi.mock('element-plus', ...)` 工厂**，`src/test/setup.js` 只全局 mock Wails 绑定、**不 mock element-plus**。

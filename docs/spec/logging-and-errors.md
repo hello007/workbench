@@ -310,6 +310,13 @@ catch (error) {
 - `findIndexLockResidue` 覆盖 .git 目录与 worktree gitdir 文件两形态；clone 目标 resolveUpward=false 禁向上防误报父仓锁；探测失败静默降级。
 - 锁被占用 stderr（`Unable to create '<path>': File exists`）在失败分支识别为 `E_GIT_LOCKED` AppError（`util.parseGitLockError` 单点，桌面 ErrorFormatter 与 serve `rpcFailureFromCall` 双通道零改动自动透传），前端 warning 引导人工确认后删除，非锁残留错误行为逐字不变。
 
+### 素材拆分取消与删源失败提示口径（2026-10-31，B 方案 PR1）
+
+- **取消**：replace 落点三检查点（核心返回取消错误 / 核心返回后 / 删源前）先回滚已产出产物、索引行与缩略图，再返回 `E_ASSETS_CANCELLED`（复用扫描取消码，消息「拆分已取消」）；前端 warning 中性提示，取消按钮自身只提示「已请求取消拆分」，任务终态不弹 error toast。`cache/source` 保持取消保留已产出。
+- **删源失败**：`E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning，见 §4.3 表）。单文件入口升格 `AppError` 经 ErrorFormatter 透传 code；批量入口只填 `Item.Code`，不整体失败；文案固定说明「产物已保留，可关闭占用程序后重新拆分」。
+- **批量三分类禁按文本匹配**：已删除源 / 已回滚 / 源保留由 `Item.Status + Target + SourceRemoved + RolledBack + Code` 组合判定（前端 `splitOutcomeKind` 单点），message 仅展示。
+- **日志级别**：单文件失败 `Logger().Error`；回滚与删源失败 `Warn`；批量内单文件失败 `Warn`（异常隔离继续）。
+
 ## 10. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — ErrorFormatter 属 options 非签名变更，Wails 绑定零 diff

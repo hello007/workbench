@@ -809,13 +809,13 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `smallQuotaMB` | number | 小图缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
 | `hdQuotaMB` | number | 高清缓存上限 MB（默认 1024，clamp 64-8192；变更触发惰性 LRU 淘汰最久未使用的缩略图） |
 
-**AssetSplitResult** — 单文件拆分结果（`outputDir`（产物目录绝对路径）/ `files`: string[]（本次生成的单页文件路径，按页序）/ `pageCount`（拆出页数）/ `skipped`（增量命中被跳过）/ `skipReason`（跳过原因，用户可读））
+**AssetSplitResult** — 单文件拆分结果（`outputDir`（产物目录绝对路径）/ `files`: string[]（本次生成的单页文件路径，按页序）/ `pageCount`（拆出页数）/ `skipped`（增量命中被跳过）/ `skipReason`（跳过原因，用户可读）/ `target`（本次落点 `cache`/`source`/`replace`）/ `sourceRemoved`（源文件是否已移入回收站，仅 replace 成功删源为 true））
 
-**AssetSplitFileOutcome** — 批量拆分逐文件处理结果（`relPath`（相对库根路径）/ `status`（`split`/`skipped`/`failed`）/ `message`（跳过/失败原因，成功为空））
+**AssetSplitFileOutcome** — 批量拆分逐文件处理结果（`relPath`（相对库根路径）/ `status`（`split`/`skipped`/`failed`）/ `message`（跳过/失败原因，成功为空）/ `target`（该文件落点）/ `sourceRemoved`（源已移入回收站）/ `rolledBack`（replace 失败/取消时产物与索引行已回滚）/ `code`（失败错误码，如 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`；成功为空））
 
 **AssetSplitBatchResult** — 批量拆分汇总（`total`（快照圈定文件总数）/ `split` / `skipped` / `failed` / `items`: AssetSplitFileOutcome[]；单文件入口同形状 Total=1，done 事件载荷复用）
 
-**AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致））
+**AssetSplitRecordView** — 拆分记录查询视图（`exists`（是否已有拆分记录，方式 2 按钮显隐判定）/ `outputDir` / `pageCount` / `splitAt`（最近拆分时间）/ `upToDate`（记录哈希与当前源哈希一致）/ `target`（记录落点，决定产物命名与重拆禁用）/ `sourceRemoved`（源已移入回收站，前端据此禁用「重拆」））
 
 **AssetSplitProgress** — 拆分进度事件载荷（`libraryId` / `done` / `total`（文件级计数）/ `currentFile` / `pageDone` / `pageTotal`（当前文件页级透传））
 
