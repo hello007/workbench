@@ -1,1 +1,1 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核对探针结论是否与既有 COM 契约冲突：单 STA 契约、归属判定、Export 瞬态口径"}
