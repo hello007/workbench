@@ -428,7 +428,7 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   SplitAssetLibrary: { total: 0, split: 0, skipped: 0, failed: 0, items: [] },
   // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelAssetScan 语义）
   CancelAssetSplit: false,
-  GetAssetSplitRecord: { exists: false, outputDir: '', pageCount: 0, splitAt: '', upToDate: false },
+  GetAssetSplitRecord: { exists: false, outputDir: '', pageCount: 0, splitAt: '', upToDate: false, target: '', sourceRemoved: false },
   OpenAssetSplitPage: null,
 
   // ---- 素材元数据导出（第九批 SRS §2.6.4：CSV / Markdown+YAML，工具行「导出」入口）----

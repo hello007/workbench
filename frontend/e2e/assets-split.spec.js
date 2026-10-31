@@ -52,7 +52,7 @@ test.describe('素材管理 PPT 拆分', () => {
     const dialog = page.locator('.el-dialog').filter({ hasText: '拆分 PPT' })
     await expect(dialog).toBeVisible()
     const radios = dialog.locator('.el-radio')
-    await expect(radios).toHaveCount(2)
+    await expect(radios).toHaveCount(3)
     await expect(dialog.locator('.el-radio.is-checked')).toContainText('素材库缓存目录')
     // 默认落点为缓存目录说明（非源目录警示）
     await expect(dialog.locator('.split-cache-hint')).toBeVisible()
@@ -77,5 +77,38 @@ test.describe('素材管理 PPT 拆分', () => {
     const calls = await getWailsCalls(page, 'SplitAssetLibrary')
     expect(calls.length).toBe(1)
     expect(calls[0].args).toEqual(['lib-e2e', 'cache'])
+  })
+
+  test('就地替换落点：不可逆强确认未勾选时提交禁用，勾选后以 target=replace 调用', async ({ page }) => {
+    await page.goto('/')
+
+    await page.locator('.activity-bar-item').nth(4).click()
+    const panel = page.locator('.assets-panel')
+    await expect(panel).toBeVisible()
+
+    await panel.getByRole('button', { name: '拆分全部 PPT' }).click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '拆分 PPT' })
+    await expect(dialog).toBeVisible()
+
+    // 切「就地替换」：删源警示 + 强确认勾选出现，另两落点提示隐藏
+    await dialog.locator('.el-radio').filter({ hasText: '就地替换' }).click()
+    const warning = dialog.locator('.split-replace-warning')
+    await expect(warning).toContainText('原始文件将被移入系统回收站')
+    await expect(warning).toContainText('不可撤销')
+    await expect(dialog.locator('.split-cache-hint')).toHaveCount(0)
+
+    // 未勾选强确认：提交按钮禁用
+    const submit = dialog.getByRole('button', { name: '开始拆分' })
+    await expect(submit).toBeDisabled()
+    await dialog.locator('.el-checkbox').click()
+    await expect(submit).toBeEnabled()
+
+    await submit.click()
+    await expect(page.locator('.el-message').filter({ hasText: '拆分完成' })).toBeVisible()
+    await expect(dialog).not.toBeVisible()
+
+    const calls = await getWailsCalls(page, 'SplitAssetLibrary')
+    expect(calls.length).toBe(1)
+    expect(calls[0].args).toEqual(['lib-e2e', 'replace'])
   })
 })
