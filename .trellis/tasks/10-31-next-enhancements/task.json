@@ -1,0 +1,30 @@
+{
+  "id": "next-enhancements",
+  "name": "next-enhancements",
+  "title": "WorkBench 后续增强与验证",
+  "description": "父任务：素材拆分基线实测、批量取消明细、PowerPoint COM 探针续做三项后续工作",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-10-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-31-replace-perf-baseline",
+    "10-31-split-cancel-partial",
+    "10-30-powerpoint-com"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
