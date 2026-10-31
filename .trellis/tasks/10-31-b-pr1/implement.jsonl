@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "拆分核心、落点编排、重拆清旧页、取消语义"}
+{"file": "docs/spec/assets-management.md", "reason": "标注表结构 (file_id, slide_num) 与重绑先例"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增错误码三处同步与 slog 规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁"}

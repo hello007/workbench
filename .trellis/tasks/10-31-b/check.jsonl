@@ -1,0 +1,3 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对三落点与命名契约未被绕过"}
+{"file": "docs/spec/assets-management.md", "reason": "核对标注迁移与刷新链一致"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步完成"}

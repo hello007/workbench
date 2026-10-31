@@ -1,0 +1,2 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对文档与实现一致"}
+{"file": "CLAUDE.md", "reason": "核对新增规则行长度上限（普通 ≤250 字符）"}

@@ -1,0 +1,4 @@
+{"file": "docs/spec/confirm-dialog.md", "reason": "确认弹窗三形态与强确认写法"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处同步与 mock 单一数据源"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "弹窗视觉与设计令牌"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E mock 默认值需同步新绑定参数"}

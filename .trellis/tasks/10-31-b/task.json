@@ -1,0 +1,30 @@
+{
+  "id": "b",
+  "name": "b",
+  "title": "素材拆分B方案：就地替换+单页产物进索引",
+  "description": "拆分到同名文件夹后删除源文件，单页产物以可索引命名进入素材库，使每页可单独删除/移动/重命名/排序/标注。含 PR1 后端、PR2 前端、PR3 文档三个子任务。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-10-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-31-b-pr1",
+    "10-31-b-pr2",
+    "10-31-b-pr3"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

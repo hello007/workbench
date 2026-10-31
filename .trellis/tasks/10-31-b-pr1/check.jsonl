@@ -1,0 +1,3 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对前两落点零变化与删源时序"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码三处同步"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对门禁"}

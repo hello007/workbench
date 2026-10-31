@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "拆分方法论、产物布局、GC 与命名契约（B 方案在此扩展）"}
+{"file": "docs/spec/assets-management.md", "reason": "标注重映射、lost 状态机、刷新链、索引规模口径"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 绑定签名变更须同步 wailsjs 三处"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76%、前端 ≥70% 覆盖率门禁"}
