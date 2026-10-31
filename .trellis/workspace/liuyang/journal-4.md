@@ -240,3 +240,36 @@ pptx-split.md 新增 §9 三落点/命名契约/删源时序与回滚；assets-m
 ### Next Steps
 
 - None - task complete
+
+
+## Session 176: B方案审核缺陷修复
+
+**Date**: 2026-10-31
+**Task**: B方案审核缺陷修复
+**Branch**: `master`
+
+### Summary
+
+修复 1 项回收站静默永久删除与 6 项后端/4 项前端中风险缺陷：TOCTOU 复核、排除规则、还原源重拆、v8 半迁移、删源收尾单事务、回滚边界、刷新链 finally、E2E mock；同步校正 README/功能说明/API与 spec 口径。后端全量测试+覆盖率门禁、前端 2266 用例+覆盖率、拆分 E2E 全绿；Windows 回收站两场景待实机验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7995a5e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
