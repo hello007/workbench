@@ -280,21 +280,30 @@ func (a *App) RequestAssetThumb(libraryID string, fileID int64, relPath string, 
 }
 
 // SplitAssetFile 拆分单个素材文件（SRS §2.2.3，画廊卡/详情侧边栏入口）：复用
-// 工具箱拆分核心（纯 Go OOXML），落点二选一——默认素材库缓存目录（derived 镜像
-// 源树，库根之外天然隔离扫描）；outputToSourceDir=true 落源目录（与源同目录，
-// isPptxSplitDerivative 已自动排除索引）。增量命中跳过返回 Skipped=true（前端
-// 提示「已最新」），核心失败（损坏/加密/只读等）返回错误。进度/终态经
-// assets-split:* 事件推送（素材面板独听），在途任务可经 CancelAssetSplit 取消。
-func (a *App) SplitAssetFile(libraryID, relPath string, outputToSourceDir bool) (model.AssetSplitResult, error) {
-	return a.assetsSvc.SplitAssetFile(context.Background(), libraryID, relPath, outputToSourceDir)
+// 工具箱拆分核心（纯 Go OOXML），落点三选一（target 取 model.AssetSplitTarget*
+// 常量，空串等价 cache）：
+//   - cache：落素材库缓存目录（derived 镜像源树，库根之外天然隔离扫描）；
+//   - source：落源目录（与源同目录，isPptxSplitDerivative 已自动排除索引）；
+//   - replace：落源目录同名文件夹并以「页序前缀」命名（产物进索引成为独立素材），
+//     全页成功 + 逐页校验 + 标注迁移通过后**把源文件移入系统回收站**（不可逆
+//     语义，前端须强确认）；删源失败返回 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED
+//     （产物与索引保留，可重试）。
+//
+// 增量命中跳过返回 Skipped=true（前端提示「已最新」），核心失败（损坏/加密/
+// 只读等）返回错误。进度/终态经 assets-split:* 事件推送（素材面板独听），在途
+// 任务可经 CancelAssetSplit 取消。
+func (a *App) SplitAssetFile(libraryID, relPath string, target string) (model.AssetSplitResult, error) {
+	return a.assetsSvc.SplitAssetFile(context.Background(), libraryID, relPath, target)
 }
 
 // SplitAssetLibrary 库级批量拆分（SRS §2.2.3「批量目录拆分」，库面板「拆分全部
 // PPT」入口）：启动时快照圈定全部 ok 状态文件逐个处理；单文件失败逐文件记日志
-// 跳过，批量不中断，返回汇总（total/split/skipped/failed + 逐文件明细）。同库
-// 并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经 CancelAssetSplit 取消。
-func (a *App) SplitAssetLibrary(libraryID string, outputToSourceDir bool) (model.AssetSplitBatchResult, error) {
-	return a.assetsSvc.SplitAssetLibrary(context.Background(), libraryID, outputToSourceDir)
+// 跳过，批量不中断，返回汇总（total/split/skipped/failed + 逐文件明细，明细含
+// 落点、是否已删源、是否已回滚、失败错误码）。target 落点语义同 SplitAssetFile。
+// 同库并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经 CancelAssetSplit
+// 取消。
+func (a *App) SplitAssetLibrary(libraryID string, target string) (model.AssetSplitBatchResult, error) {
+	return a.assetsSvc.SplitAssetLibrary(context.Background(), libraryID, target)
 }
 
 // CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义，取消

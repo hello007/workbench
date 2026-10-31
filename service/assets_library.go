@@ -29,9 +29,10 @@ import (
 //     对齐 GitService.tryLockRepo 模式）；DeleteLibrary 以同把锁 TryLock 与在途
 //     扫描互斥（扫描中禁删库，防连接被关闭）；
 //   - 拆分串行保护：同库同时仅允许一个拆分任务（tryLockSplit，独立 splitLocks
-//     map——拆分与扫描语义可并发：拆分不写 files/slides 索引表，仅读写
-//     split_records，单连接池串行化；仅拆分自身互斥）；DeleteLibrary 以同把锁
-//     TryLock 与在途拆分互斥（拆分中禁删库）；
+//     map——cache/source 落点仅读写 split_records、不写 files/slides 索引表，故
+//     与扫描可并发；replace 落点需为用户产物写索引行，由调用方额外取扫描锁，
+//     锁序固定 scan → split，与 DeleteLibrary 同序不成环）；DeleteLibrary 以同
+//     把锁 TryLock 与在途拆分互斥（拆分中禁删库）；
 //   - 取消注册表（cancels/splitCancels/exportCancels + opMu）：键 =
 //     normalizeRepoKey(libraryID)，键空间独立——CancelScan 不得误杀拆分/导出、
 //     CancelAssetSplit 亦不影响扫描；defer LIFO 先注销后释放锁
@@ -67,6 +68,11 @@ type AssetLibraryService struct {
 	// 真实系统调用）
 	splitCoreFn     assetsSplitCore
 	openSplitPageFn func(path string) error
+
+	// moveToRecycleBinFn 移入系统回收站注入点（nil = 生产实现 util.MoveToRecycleBin；
+	// 单测注入 fake 避免真实移动文件，并就「源文件被占用导致删源失败」分支做确定性
+	// 断言——真实回收站调用不可在 CI 复现）
+	moveToRecycleBinFn func(path string) error
 
 	thumbQ      *thumbQueue       // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）
 	thumbLedger *thumbCacheLedger // 缩略图记账 ledger（assets_thumbs_ledger.go，LRU 记账 + 失效 + 配额淘汰）
@@ -707,9 +713,11 @@ func (s *AssetLibraryService) lockLibraryBackups(libraryID string) func() {
 }
 
 // tryLockSplit 尝试获取目标库的拆分互斥锁（TryLock 语义，对齐 tryLockScan 模式；
-// 独立 splitLocks map——拆分与扫描语义可并发，仅拆分自身互斥）。DeleteLibrary
-// 复用本锁与在途拆分互斥（拆分中禁删库）。错误码复用 E_ASSETS_SCAN_IN_PROGRESS
-// （素材域「操作进行中」既有一类，前端 warning 分流同款），消息按拆分措辞区分。
+// 独立 splitLocks map——cache/source 落点与扫描可并发（不写索引表），replace
+// 落点由调用方先取扫描锁再取本锁（锁序 scan → split）；仅拆分自身互斥）。
+// DeleteLibrary 复用本锁与在途拆分互斥（拆分中禁删库）。错误码复用
+// E_ASSETS_SCAN_IN_PROGRESS（素材域「操作进行中」既有一类，前端 warning 分流
+// 同款），消息按拆分措辞区分。
 func (s *AssetLibraryService) tryLockSplit(libraryID string) (release func(), err error) {
 	key := normalizeRepoKey(libraryID)
 

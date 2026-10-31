@@ -623,7 +623,7 @@ func TestAssetExport_ThumbAndSplitProbe(t *testing.T) {
 	if err := os.WriteFile(product1, []byte("pptx"), 0o644); err != nil {
 		t.Fatalf("预置拆分产物: %v", err)
 	}
-	if err := store.upsertSplitRecord(rel, "hash-x", derivedOut, 2, "2026-10-16 10:00:00"); err != nil {
+	if err := store.upsertSplitRecord(rel, "hash-x", derivedOut, 2, "2026-10-16 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 
@@ -657,7 +657,7 @@ func TestAssetExport_ThumbAndSplitProbe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inRootOut, "方案甲-001.pptx"), []byte("p"), 0o644); err != nil {
 		t.Fatalf("预置库内产物: %v", err)
 	}
-	if err := store.upsertSplitRecord(rel, "hash-y", inRootOut, 1, "2026-10-16 10:00:00"); err != nil {
+	if err := store.upsertSplitRecord(rel, "hash-y", inRootOut, 1, "2026-10-16 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("覆盖拆分记录: %v", err)
 	}
 	csvPath2 := filepath.Join(t.TempDir(), "probe-rel.csv")

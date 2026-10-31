@@ -30,8 +30,8 @@ test.describe('素材管理 PPT 拆分', () => {
       skipped: 0,
       failed: 0,
       items: [
-        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '' },
-        { relPath: '方案B/获客方案.pptx', status: 'split', message: '' }
+        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' },
+        { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' }
       ]
     }
   }
@@ -72,9 +72,10 @@ test.describe('素材管理 PPT 拆分', () => {
     await expect(page.locator('.el-message').filter({ hasText: '拆分完成' })).toBeVisible()
     await expect(dialog).not.toBeVisible()
 
-    // 调用参数断言：库级批量 + 缓存目录落点（outputToSourceDir=false）
+    // 调用参数断言：库级批量 + 缓存目录落点（target='cache'，B 方案 PR1 起落点
+    // 由 boolean 改为字符串三态 cache/source/replace）
     const calls = await getWailsCalls(page, 'SplitAssetLibrary')
     expect(calls.length).toBe(1)
-    expect(calls[0].args).toEqual(['lib-e2e', false])
+    expect(calls[0].args).toEqual(['lib-e2e', 'cache'])
   })
 })

@@ -150,7 +150,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 	if err != nil || rec != nil {
 		t.Fatalf("未拆分应返回 (nil, nil)，实际 (%v, %v)", rec, err)
 	}
-	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00"); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsert 插入: %v", err)
 	}
 	rec, err = store.getSplitRecord("a.pptx")
@@ -158,15 +158,17 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 		t.Fatalf("插入后应可读回: %v", err)
 	}
 	if rec.sourceRelPath != "a.pptx" || rec.sourceHash != "hash1" || rec.outputDir != "dir1" ||
-		rec.pageCount != 3 || rec.splitAt != "2026-01-01 00:00:00" {
+		rec.pageCount != 3 || rec.splitAt != "2026-01-01 00:00:00" ||
+		rec.target != model.AssetSplitTargetCache || rec.sourceRemoved {
 		t.Errorf("记录字段不符：%+v", rec)
 	}
 	// 覆盖写（重拆语义）
-	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00"); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, false); err != nil {
 		t.Fatalf("upsert 覆盖: %v", err)
 	}
 	rec, _ = store.getSplitRecord("a.pptx")
-	if rec == nil || rec.sourceHash != "hash2" || rec.outputDir != "dir2" || rec.pageCount != 5 {
+	if rec == nil || rec.sourceHash != "hash2" || rec.outputDir != "dir2" || rec.pageCount != 5 ||
+		rec.target != model.AssetSplitTargetSource {
 		t.Errorf("覆盖写应生效：%+v", rec)
 	}
 	if err := store.deleteSplitRecord("a.pptx"); err != nil {
@@ -210,7 +212,7 @@ func TestAssetSplit_SingleFileDerivedLayout(t *testing.T) {
 	sink := &fakeEventSink{}
 	svc.SetEventSink(sink)
 
-	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "材料.pptx", false)
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "材料.pptx", "cache")
 	if err != nil {
 		t.Fatalf("SplitAssetFile: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestAssetSplit_SingleFileDerivedLayout(t *testing.T) {
 		assertValidZip(t, want)
 	}
 	// 子目录文件：镜像源树多一层目录，同名 pptx 撞目录结构性消除
-	res2, err := svc.SplitAssetFile(context.Background(), lib.ID, "子目录/汇报.pptx", false)
+	res2, err := svc.SplitAssetFile(context.Background(), lib.ID, "子目录/汇报.pptx", "cache")
 	if err != nil {
 		t.Fatalf("子目录文件拆分: %v", err)
 	}
@@ -324,7 +326,7 @@ func TestAssetSplit_SingleFileDerivedLayout(t *testing.T) {
 	}
 }
 
-// TestAssetSplit_SourceDirLayout 源目录落点（outputToSourceDir=true）：产物落
+// TestAssetSplit_SourceDirLayout 源目录落点（target=source）：产物落
 // <源所在目录>/<源名>/（工具箱既有布局），源文件字节不变。
 func TestAssetSplit_SourceDirLayout(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -341,7 +343,7 @@ func TestAssetSplit_SourceDirLayout(t *testing.T) {
 	}
 	mustScanLibrary(t, svc, lib.ID)
 
-	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "演讲.pptx", true)
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "演讲.pptx", "source")
 	if err != nil {
 		t.Fatalf("SplitAssetFile: %v", err)
 	}
@@ -387,11 +389,11 @@ func TestAssetSplit_SameNameDiffDirsNoCollision(t *testing.T) {
 	})
 	mustScanLibrary(t, svc, lib.ID)
 
-	resA, err := svc.SplitAssetFile(context.Background(), lib.ID, "a/同名.pptx", false)
+	resA, err := svc.SplitAssetFile(context.Background(), lib.ID, "a/同名.pptx", "cache")
 	if err != nil {
 		t.Fatalf("拆分 a/同名.pptx: %v", err)
 	}
-	resB, err := svc.SplitAssetFile(context.Background(), lib.ID, "b/同名.pptx", false)
+	resB, err := svc.SplitAssetFile(context.Background(), lib.ID, "b/同名.pptx", "cache")
 	if err != nil {
 		t.Fatalf("拆分 b/同名.pptx: %v", err)
 	}
@@ -430,7 +432,7 @@ func TestAssetSplit_IncrementalSkip(t *testing.T) {
 	})
 	mustScanLibrary(t, svc, lib.ID)
 
-	first, err := svc.SplitAssetFile(context.Background(), lib.ID, "已拆.pptx", false)
+	first, err := svc.SplitAssetFile(context.Background(), lib.ID, "已拆.pptx", "cache")
 	if err != nil {
 		t.Fatalf("首次拆分: %v", err)
 	}
@@ -443,7 +445,7 @@ func TestAssetSplit_IncrementalSkip(t *testing.T) {
 		t.Error("增量命中不应调用拆分核心")
 		return model.PptxSplitResult{}, errors.New("不应重拆")
 	}
-	second, err := svc.SplitAssetFile(context.Background(), lib.ID, "已拆.pptx", false)
+	second, err := svc.SplitAssetFile(context.Background(), lib.ID, "已拆.pptx", "cache")
 	if err != nil {
 		t.Fatalf("二次拆分: %v", err)
 	}
@@ -470,7 +472,7 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	})
 	mustScanLibrary(t, svc, lib.ID)
 
-	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", false); err != nil {
+	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", "cache"); err != nil {
 		t.Fatalf("首次拆分: %v", err)
 	}
 	// 手工放置旧命名/越界产物（模拟 %02d 时代残留与越界页）
@@ -495,7 +497,7 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 		t.Fatalf("更新库存哈希: %v", err)
 	}
 
-	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", false)
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", "cache")
 	if err != nil {
 		t.Fatalf("重拆: %v", err)
 	}
@@ -549,7 +551,7 @@ func TestAssetSplit_SourceDirResplitKeepsForeignFiles(t *testing.T) {
 	})
 	mustScanLibrary(t, svc, lib.ID)
 
-	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", true); err != nil {
+	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", "source"); err != nil {
 		t.Fatalf("首次拆分: %v", err)
 	}
 	outDir := filepath.Join(dir, "讲义")
@@ -577,7 +579,7 @@ func TestAssetSplit_SourceDirResplitKeepsForeignFiles(t *testing.T) {
 		t.Fatalf("更新库存哈希: %v", err)
 	}
 
-	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", true)
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "讲义.pptx", "source")
 	if err != nil {
 		t.Fatalf("源目录落点重拆: %v", err)
 	}
@@ -631,7 +633,7 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 		t.Fatalf("损坏样本: %v", err)
 	}
 
-	batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
+	batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
 	if err != nil {
 		t.Fatalf("批量拆分不应整体失败: %v", err)
 	}
@@ -657,7 +659,7 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 	}
 
 	// 二次批量：已拆 2 文件增量跳过，坏损仍失败
-	batch2, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
+	batch2, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
 	if err != nil {
 		t.Fatalf("二次批量: %v", err)
 	}
@@ -667,7 +669,7 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 
 	// 空库批量：零文件零失败，仅 done 终态
 	emptyLib := mustCreateLibrary(t, svc, "空批量库", t.TempDir())
-	emptyBatch, err := svc.SplitAssetLibrary(context.Background(), emptyLib.ID, false)
+	emptyBatch, err := svc.SplitAssetLibrary(context.Background(), emptyLib.ID, "cache")
 	if err != nil {
 		t.Fatalf("空库批量: %v", err)
 	}
@@ -691,12 +693,12 @@ func TestAssetSplit_CancelPreCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := svc.SplitAssetLibrary(ctx, lib.ID, false)
+	_, err := svc.SplitAssetLibrary(ctx, lib.ID, "cache")
 	var appErr *model.AppError
 	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
 		t.Fatalf("批量取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
 	}
-	_, err = svc.SplitAssetFile(ctx, lib.ID, "内容.pptx", false)
+	_, err = svc.SplitAssetFile(ctx, lib.ID, "内容.pptx", "cache")
 	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
 		t.Fatalf("单文件取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
 	}
@@ -737,13 +739,13 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 
 	batchDone := make(chan error, 1)
 	go func() {
-		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
+		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
 		batchDone <- err
 	}()
 	<-blocker.started
 
 	// 在途期间同库单文件拆分被拒（拆分互斥，独立于扫描锁）
-	_, err := svc.SplitAssetFile(context.Background(), lib.ID, "甲.pptx", false)
+	_, err := svc.SplitAssetFile(context.Background(), lib.ID, "甲.pptx", "cache")
 	var appErr *model.AppError
 	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsScanInProgress {
 		t.Fatalf("同库并发拆分应被拒，实际：%v", err)
@@ -821,7 +823,7 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 
 	batchDone := make(chan error, 1)
 	go func() {
-		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, false)
+		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
 		batchDone <- err
 	}()
 	<-blocker.started
@@ -886,13 +888,13 @@ func TestAssetSplit_RelPathEscapeRejected(t *testing.T) {
 	mustScanLibrary(t, svc, lib.ID)
 
 	ctx := context.Background()
-	if _, err := svc.SplitAssetFile(ctx, lib.ID, "../外部.pptx", false); err == nil {
+	if _, err := svc.SplitAssetFile(ctx, lib.ID, "../外部.pptx", "cache"); err == nil {
 		t.Error("`..` 逃逸拆分应被拒绝")
 	}
-	if _, err := svc.SplitAssetFile(ctx, lib.ID, filepath.Join(dir, "材料.pptx"), false); err == nil {
+	if _, err := svc.SplitAssetFile(ctx, lib.ID, filepath.Join(dir, "材料.pptx"), "cache"); err == nil {
 		t.Error("绝对路径拆分应被拒绝")
 	}
-	if _, err := svc.SplitAssetFile(ctx, lib.ID, "", false); err == nil {
+	if _, err := svc.SplitAssetFile(ctx, lib.ID, "", "cache"); err == nil {
 		t.Error("空相对路径应被拒绝")
 	}
 	if _, err := svc.GetAssetSplitRecord(lib.ID, "../x.pptx"); err == nil {
@@ -929,7 +931,7 @@ func TestAssetSplit_OpenPage(t *testing.T) {
 	}
 
 	// 正常路径：先拆分再打开
-	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "双页.pptx", false)
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "双页.pptx", "cache")
 	if err != nil {
 		t.Fatalf("拆分: %v", err)
 	}
@@ -972,7 +974,7 @@ func TestAssetLibrary_DeleteLibraryRemovesDerivedDir(t *testing.T) {
 		{titlePh: "一", body: []string{"内容"}},
 	})
 	mustScanLibrary(t, svc, lib.ID)
-	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "材料.pptx", false); err != nil {
+	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "材料.pptx", "cache"); err != nil {
 		t.Fatalf("拆分: %v", err)
 	}
 	derivedDir := filepath.Join(svc.assetsDir, lib.ID, "derived")

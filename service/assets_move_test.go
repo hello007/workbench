@@ -238,7 +238,7 @@ func TestAssetMoveFiles_SplitRecordRewritten(t *testing.T) {
 		}
 	}
 	// 预置拆分记录（源在旧路径）
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash-a", "D:/derived/media/a", 3, "2026-10-20 10:00:00"); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash-a", "D:/derived/media/a", 3, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 

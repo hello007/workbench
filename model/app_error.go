@@ -108,6 +108,11 @@ const (
 	// 交互模式）。备份生成失败的具体原因经消息透出。
 	ErrCodeAssetsDeleteBackupFailed = "E_ASSETS_DELETE_BACKUP_FAILED"
 
+	// 就地替换拆分删源失败（B 方案 PR1，warning）：源文件被 PowerPoint/WPS 占用、
+	// 只读或权限不足导致无法移入系统回收站。此时产物、索引行与标注副本均已保留，
+	// 源文件与源记录也未删除——用户关闭占用程序后可重试拆分（重拆覆盖产物）。
+	ErrCodeAssetsSplitSourceDeleteFailed = "E_ASSETS_SPLIT_SOURCE_DELETE_FAILED"
+
 	// 文件夹管理域（PRD「素材管理：文件夹树与拖拽整理」PR2；warning，确认型拒绝）：
 	// 非空目录 force=false 删除被拒（删除未发生，目录未受损），前端弹二次确认
 	//（文案含目录内条目数）后以 force=true 重调（对齐 E_ASSETS_RELINK_MISMATCH

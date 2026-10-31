@@ -4470,7 +4470,7 @@ const onConfirmSplit = async () => {
   splitProgress.value = null
   try {
     if (ctx.scope === 'file') {
-      const result = await SplitAssetFile(currentLibraryId.value, ctx.relPath, toSource)
+      const result = await SplitAssetFile(currentLibraryId.value, ctx.relPath, toSource ? 'source' : 'cache')
       if (seq !== splitSeq) return
       if (result?.skipped) {
         ElMessage.info(result.skipReason || '该文件已拆分且未变化，无需重复拆分')
@@ -4478,7 +4478,7 @@ const onConfirmSplit = async () => {
         ElMessage.success(`拆分完成：共 ${result?.pageCount ?? 0} 页`)
       }
     } else {
-      const batch = await SplitAssetLibrary(currentLibraryId.value, toSource)
+      const batch = await SplitAssetLibrary(currentLibraryId.value, toSource ? 'source' : 'cache')
       if (seq !== splitSeq) return
       if (!batch || !batch.total) {
         ElMessage.info('当前库没有可拆分的 PPT 文件')

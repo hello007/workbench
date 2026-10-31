@@ -2143,13 +2143,15 @@ func (s *assetsStore) rebindSlideAnnotationsAfterRebuild(annotations map[string]
 // ---------- 拆分记录（split_records 表，assets_split.go 编排的数据源） ----------
 
 // assetSplitRecord 拆分记录行（split_records 表最小视图，列语义见
-// assets_schema.go assetsSchemaV4SQL 注释）。
+// assets_schema.go assetsSchemaV4SQL / assetsSchemaV8SQL 注释）。
 type assetSplitRecord struct {
 	sourceRelPath string
 	sourceHash    string
 	outputDir     string
 	pageCount     int
 	splitAt       string
+	target        string // 落点（model.AssetSplitTarget* 取值）
+	sourceRemoved bool   // 源文件是否已移入回收站（仅 replace 成功路径为 true）
 }
 
 // getSplitRecord 按相对路径读单条拆分记录。未命中返回 (nil, nil)——调用方以
@@ -2158,9 +2160,10 @@ type assetSplitRecord struct {
 func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) {
 	var r assetSplitRecord
 	err := s.db.QueryRow(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at FROM split_records WHERE source_rel_path = ?",
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, source_removed "+
+			"FROM split_records WHERE source_rel_path = ?",
 		relPath,
-	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt)
+	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.sourceRemoved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2172,13 +2175,24 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 
 // upsertSplitRecord 写入/覆盖拆分记录（重拆覆盖语义，主键 upsert 单语句，
 // SQLite 自动提交保证原子性——多语句写才走显式事务，对齐 markProcessing 口径）。
-func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt string) error {
+// target/sourceRemoved 为落点三态与删源标记（v8 增列，见 assetsSchemaV8SQL）。
+func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target string, sourceRemoved bool) error {
 	_, err := s.db.Exec(
-		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at) VALUES(?, ?, ?, ?, ?) "+
+		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, source_removed) "+
+			"VALUES(?, ?, ?, ?, ?, ?, ?) "+
 			"ON CONFLICT(source_rel_path) DO UPDATE SET source_hash = excluded.source_hash, output_dir = excluded.output_dir, "+
-			"page_count = excluded.page_count, split_at = excluded.split_at",
-		relPath, sourceHash, outputDir, pageCount, splitAt)
+			"page_count = excluded.page_count, split_at = excluded.split_at, target = excluded.target, "+
+			"source_removed = excluded.source_removed",
+		relPath, sourceHash, outputDir, pageCount, splitAt, target, boolToInt(sourceRemoved))
 	return err
+}
+
+// boolToInt SQLite 无布尔类型，以 0/1 整数落库（source_removed 列口径）。
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // deleteSplitRecord 删除拆分记录（预留清理口：当前无删除链路消费——拆分记录
@@ -2222,6 +2236,217 @@ func (s *assetsStore) deleteSplitRecordsByPathPrefix(relDir string) (int64, erro
 func (s *assetsStore) fileHashStatusByPath(relPath string) (hash, status string, err error) {
 	err = s.db.QueryRow("SELECT hash, status FROM files WHERE path = ?", relPath).Scan(&hash, &status)
 	return hash, status, err
+}
+
+// fileRecordByPath 按相对路径取文件记录（就地替换拆分链路用：产物逐页索引写
+// 入前读取既有行以区分新增/重处理，写入后再读回主键）。未命中返回
+// (零值, false, nil)——与 getSplitRecord 同口径，不让 sql.ErrNoRows 上抛。
+func (s *assetsStore) fileRecordByPath(relPath string) (assetFileRecord, bool, error) {
+	var rec assetFileRecord
+	err := s.db.QueryRow(
+		"SELECT id, path, size, mtime_ns, status, hash FROM files WHERE path = ?", relPath,
+	).Scan(&rec.id, &rec.path, &rec.size, &rec.mtimeNs, &rec.status, &rec.hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return assetFileRecord{}, false, nil
+	}
+	if err != nil {
+		return assetFileRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
+// deleteFileRecord 删除文件索引行及其关联数据（单事务）：显式清 FTS 文件行与
+// 全部页行、缩略图记账，最后删 files 行；slides/file_tags/slide_tags/slide_meta
+// 由外键 ON DELETE CASCADE 清除。
+//
+// 为什么显式清 FTS/thumb_cache：单连接池 + WAL 下外键级联的触发时机不受连接池
+// 调度控制（与 setFileOutcome/invalidateFileThumbs 的既有口径一致），显式删除
+// 保证索引与缓存记账在同一事务内确定性收口，不依赖级联时序。缩略图 PNG 文件由
+// 调用方（invalidateFileThumbs）在删行前清理。
+func (s *assetsStore) deleteFileRecord(fileID int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// FTS 行删除需旧 slides ID 定位（rowid = -slides.id），先于主表删除
+	slideIDs, err := selectSlideIDsTx(tx, fileID)
+	if err != nil {
+		return err
+	}
+	for _, id := range slideIDs {
+		if err := deleteFtsRowTx(tx, -id); err != nil {
+			return err
+		}
+	}
+	if err := deleteFtsRowTx(tx, fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM thumb_cache WHERE file_id = ?", fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM files WHERE id = ?", fileID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// splitAnnotationTarget 标注迁移目标：第 pageNum 页（源文件页序，从 1 计）对应
+// 产物的索引行 ID（产物为单页文件，目标页序恒为 1）。
+type splitAnnotationTarget struct {
+	pageNum int
+	fileID  int64
+}
+
+// migrateSplitAnnotations 把源文件的用户标注迁移到各页产物（单事务，源行本事务
+// 内不删除——删源行在回收站移入成功后由调用方执行，保证「迁移失败不删源」）。
+//
+// 迁移语义（PRD R4）：
+//   - 文件级星级/备注/标签复制到每个产物（每页都带源文件评分与标签）；
+//   - 页级标注 (srcFileID, k) 迁到第 k 页产物的 (targetFileID, 1)；
+//   - 备注变化后经 syncFtsFileRowTx 同步产物文件 FTS 行（备注参与关键词检索）。
+//
+// 产能与自锁纪律：先一次性把源侧数据读入内存并显式 Close rows，再逐 target
+// 写入——单连接池下 rows 未关闭时发起新查询会自锁
+// （docs/spec/assets-management.md Gotcha）。INSERT OR IGNORE / INSERT OR REPLACE
+// 兼容上一次失败尝试留下的残留行，重试幂等。
+func (s *assetsStore) migrateSplitAnnotations(srcFileID int64, targets []splitAnnotationTarget) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1. 源文件级星级/备注
+	var rating int
+	var note string
+	err = tx.QueryRow("SELECT rating, note FROM files WHERE id = ?", srcFileID).Scan(&rating, &note)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("标注迁移源文件记录不存在（fileId=%d）", srcFileID)
+	}
+	if err != nil {
+		return err
+	}
+
+	// 2. 源文件标签集合
+	rows, err := tx.Query("SELECT tag_id FROM file_tags WHERE file_id = ?", srcFileID)
+	if err != nil {
+		return err
+	}
+	fileTagIDs := make([]int64, 0, 8)
+	for rows.Next() {
+		var tagID int64
+		if err := rows.Scan(&tagID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		fileTagIDs = append(fileTagIDs, tagID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	// 3. 源页级标签（按页分组）
+	rows, err = tx.Query("SELECT slide_num, tag_id FROM slide_tags WHERE file_id = ?", srcFileID)
+	if err != nil {
+		return err
+	}
+	pageTagIDs := make(map[int][]int64, len(targets))
+	for rows.Next() {
+		var page int
+		var tagID int64
+		if err := rows.Scan(&page, &tagID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pageTagIDs[page] = append(pageTagIDs[page], tagID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	// 4. 源页级备注/星级（按页）
+	type slideMetaRow struct {
+		note   string
+		rating int
+	}
+	rows, err = tx.Query("SELECT slide_num, note, rating FROM slide_meta WHERE file_id = ?", srcFileID)
+	if err != nil {
+		return err
+	}
+	pageMeta := make(map[int]slideMetaRow, len(targets))
+	for rows.Next() {
+		var page int
+		var m slideMetaRow
+		if err := rows.Scan(&page, &m.note, &m.rating); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pageMeta[page] = m
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	// 5. 逐目标写入（源侧 rows 已全部关闭，事务内不再有游标未释放）
+	now := time.Now().Format("2006-01-02 15:04:05")
+	for _, tgt := range targets {
+		res, err := tx.Exec(
+			"UPDATE files SET rating = ?, note = ?, updated_at = ? WHERE id = ?",
+			rating, note, now, tgt.fileID,
+		)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return fmt.Errorf("标注迁移目标索引行不存在（fileId=%d）", tgt.fileID)
+		}
+		for _, tagID := range fileTagIDs {
+			if _, err := tx.Exec(
+				"INSERT OR IGNORE INTO file_tags(file_id, tag_id) VALUES(?, ?)", tgt.fileID, tagID,
+			); err != nil {
+				return err
+			}
+		}
+		for _, tagID := range pageTagIDs[tgt.pageNum] {
+			if _, err := tx.Exec(
+				"INSERT OR IGNORE INTO slide_tags(file_id, slide_num, tag_id) VALUES(?, 1, ?)",
+				tgt.fileID, tagID,
+			); err != nil {
+				return err
+			}
+		}
+		if m, ok := pageMeta[tgt.pageNum]; ok {
+			if _, err := tx.Exec(
+				"INSERT OR REPLACE INTO slide_meta(file_id, slide_num, note, rating) VALUES(?, 1, ?, ?)",
+				tgt.fileID, m.note, m.rating,
+			); err != nil {
+				return err
+			}
+		}
+		// 备注已变：同步产物文件 FTS 行（备注参与关键词检索，title 不变）
+		if err := syncFtsFileRowTx(tx, tgt.fileID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // assetSplitSource 拆分批量快照条目：相对路径 + 扫描链路维护的内容哈希。

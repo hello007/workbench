@@ -99,6 +99,7 @@ type AppError struct {
 | `ErrCodeAssetsCancelled` | `E_ASSETS_CANCELLED` | 素材管理 | warning（素材扫描被用户取消，中性提示非 error；2026-10-13 素材管理 MVP 新增，`ErrAssetsCancelled` sentinel 承载，`mapAssetsCancelError` 统一映射，对齐 `E_GIT_CANCELLED` 模式） |
 | `ErrCodeAssetsLibNotFound` | `E_ASSETS_LIB_NOT_FOUND` | 素材管理 | error（素材库不存在或已删除、前端列表过期，引导刷新库列表） |
 | `ErrCodeAssetsScanInProgress` | `E_ASSETS_SCAN_IN_PROGRESS` | 素材管理 | warning（该素材库已有扫描进行中，本次拒绝，可稍后重试；`tryLockScan` TryLock 互斥拒绝时返回，`DeleteLibrary` 复用同锁与在途扫描互斥） |
+| `ErrCodeAssetsSplitSourceDeleteFailed` | `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED` | 素材管理 | warning（就地替换拆分成功但源文件无法移入回收站：被 PowerPoint/WPS 占用、只读或权限不足。产物、索引行与标注副本均保留、源文件与源行亦保留，用户关闭占用程序后可重试拆分覆盖产物；2026-10-31 素材拆分 B 方案 PR1 新增，`splitOneFileReplace` 回收站移入失败分支返回，单文件入口升格 AppError、批量入口经 `Item.Code` 透出不整体失败） |
 | `ErrCodeTokenRevoked` | `E_TOKEN_REVOKED` | 浏览器访问通道连接管控 | warning（封禁已撤销令牌被拒：撤销即凭据失效封禁无拒连对象，引导刷新列表；2026-10-24 连接管控四期新增，`WebTokenService.Ban` 校验分支返回） |
 | `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
 | `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |

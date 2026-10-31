@@ -3170,7 +3170,7 @@ describe('AssetsPanel', () => {
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
 
-    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', false)
+    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', 'cache')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('拆分完成：共 2 个文件'))
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('跳过 1'))
@@ -3195,7 +3195,7 @@ describe('AssetsPanel', () => {
 
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
-    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', true)
+    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', 'source')
   })
 
   it('库级拆分失败明细：failed>0 时汇总提示并自动弹出逐文件明细（异常隔离原因可见）', async () => {
@@ -3318,7 +3318,7 @@ describe('AssetsPanel', () => {
     wailsMock.SplitAssetFile.mockResolvedValue({ outputDir: 'D:/data/derived/x', files: ['a-001.pptx'], pageCount: 3, skipped: false, skipReason: '' })
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
-    expect(wailsMock.SplitAssetFile).toHaveBeenCalledWith('lib-1', '方案A/城商行方案.pptx', false)
+    expect(wailsMock.SplitAssetFile).toHaveBeenCalledWith('lib-1', '方案A/城商行方案.pptx', 'cache')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith('拆分完成：共 3 页')
     expect(wrapper.find('.stub-dialog').exists()).toBe(false)
@@ -3446,7 +3446,7 @@ describe('AssetsPanel', () => {
     await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
-    expect(wailsMock.SplitAssetLibrary).toHaveBeenLastCalledWith('lib-2', false)
+    expect(wailsMock.SplitAssetLibrary).toHaveBeenLastCalledWith('lib-2', 'cache')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledTimes(1)
     expect(wrapper.find('.split-progress').exists()).toBe(false)

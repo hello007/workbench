@@ -380,6 +380,21 @@ const (
 	AssetSplitStatusFailed  = "failed"  // 拆分失败（损坏/加密/只读等，批量异常隔离计数）
 )
 
+// 素材拆分落点取值（SplitAssetFile / SplitAssetLibrary 的 target 参数，普通
+// string 常量非具名类型，不经 Wails 绑定层别名机制）。
+//
+// 三态布局与索引可见性：
+//   - cache：data/assets/<libId>/derived/...（默认，产物被 isPptxSplitDerivative
+//     排除，不进索引）；
+//   - source：<源目录>/<源名主干>/<源名主干>-NNN.pptx（同样被排除，不进索引）；
+//   - replace：<源目录>/<源名主干>/<NNN>-<源名主干>.pptx（页序前缀命名，扫描后
+//     作为独立素材进索引），全页成功且校验通过后把源文件移入系统回收站。
+const (
+	AssetSplitTargetCache   = "cache"   // 缓存目录落点（默认）
+	AssetSplitTargetSource  = "source"  // 源目录落点（保持源文件）
+	AssetSplitTargetReplace = "replace" // 就地替换落点（拆完删源，产物进索引）
+)
+
 // AssetSplitResult 单文件拆分结果（SplitAssetFile 返回）。增量命中跳过时
 // Skipped=true 且 Files 为空（产物未重写），PageCount 取已拆分记录的页数。
 type AssetSplitResult struct {
@@ -388,6 +403,10 @@ type AssetSplitResult struct {
 	PageCount  int      `json:"pageCount"`  // 拆出页数（跳过时为记录页数）
 	Skipped    bool     `json:"skipped"`    // 是否命中增量判定被跳过（已拆分且源未变化）
 	SkipReason string   `json:"skipReason"` // 跳过原因（用户可读；Skipped=false 时为空）
+	// Target 本次拆分落点回显（AssetSplitTarget* 取值；前端据此区分结果文案）
+	Target string `json:"target"`
+	// SourceRemoved 源文件是否已被移入回收站（仅 replace 落点全页成功且删源成功为 true）
+	SourceRemoved bool `json:"sourceRemoved"`
 }
 
 // AssetSplitFileOutcome 批量拆分单文件处理结果条目（异常隔离明细）。
@@ -395,6 +414,16 @@ type AssetSplitFileOutcome struct {
 	RelPath string `json:"relPath"` // 文件相对库根目录路径（正斜杠）
 	Status  string `json:"status"`  // 处理结果（AssetSplitStatus* 取值）
 	Message string `json:"message"` // 补充说明（跳过原因/失败原因；成功为空）
+	// Target 该文件所用落点（AssetSplitTarget* 取值；批量入口三态同参）
+	Target string `json:"target"`
+	// SourceRemoved 源文件是否已被移入回收站（仅 replace 成功删源为 true；
+	// 删源失败时源与产物均保留，见 Code）
+	SourceRemoved bool `json:"sourceRemoved"`
+	// RolledBack 产物是否已回滚删除（replace 落点失败/取消）
+	RolledBack bool `json:"rolledBack"`
+	// Code 失败项错误码（如 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED；成功为空）。
+	// 批量入口不整体失败，前端按该码区分「已回滚」与「产物保留可重试」两类失败。
+	Code string `json:"code"`
 }
 
 // AssetSplitBatchResult 批量拆分结果汇总（SplitAssetLibrary 返回 +
@@ -417,6 +446,12 @@ type AssetSplitRecordView struct {
 	PageCount int    `json:"pageCount"` // 已拆分页数
 	SplitAt   string `json:"splitAt"`   // 最近拆分时间（"2006-01-02 15:04:05"）
 	UpToDate  bool   `json:"upToDate"`  // 记录哈希与当前源哈希一致（源未变化）
+	// Target 记录落点（AssetSplitTarget* 取值）：前端据此选用产物命名规则打开
+	// 单页（replace 为 <页序>-<源名主干>.pptx，其余为 <源名主干>-<页序>.pptx），
+	// 并在 replace 记录下禁用「重拆」（源已移入回收站，见 SourceRemoved）
+	Target string `json:"target"`
+	// SourceRemoved 记录对应的源文件是否已被移入回收站（replace 成功删源为 true）
+	SourceRemoved bool `json:"sourceRemoved"`
 }
 
 // AssetSplitProgress 拆分进度事件载荷（assets-split:progress 事件，EventSink
@@ -587,7 +622,7 @@ type AssetFolderNode struct {
 	Excluded bool `json:"excluded"`
 	// Derived PPT 拆分派生容器标记：该目录直属文件中存在拆分派生副本
 	//（isPptxSplitDerivative 命中的「<源名主干>/<源名主干>-NNN.pptx」同名文件夹
-	// 布局，outputToSourceDir 落源目录的拆分产物）。派生产物由拆分链路管理，
+	// 布局，source 落点（落源目录）的拆分产物）。派生产物由拆分链路管理，
 	// 禁文件夹管理操作（删除/重命名会破坏拆分记录溯源，前后端双防线）。
 	Derived bool `json:"derived"`
 	// FileCount 该目录直属 PPT 文件数（不含子目录；磁盘口径：.pptx 后缀大小写

@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 7
+const assetsSchemaVersion = 8
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -233,6 +233,21 @@ CREATE TABLE IF NOT EXISTS folder_tags (
 );
 `
 
+// assetsSchemaV8SQL v8 迁移：拆分记录补充落点与删源标记（素材拆分 B 方案 PR1
+// 就地替换落点——split_records 由两态扩为三态，见 model.AssetSplitTarget*）。
+//
+// 设计要点：
+//   - target 列语义 = 记录对应拆分落点（cache / source / replace）；存量记录默认
+//     'cache' 语义正确——旧落点从不删源，source_removed 默认 0 同样成立，因此
+//     无需 Go 层回填，纯 SQL 迁移一次性收敛；
+//   - source_removed = 1 表示该记录的源文件已移入回收站（仅 replace 成功路径写入），
+//     供「重拆」入口禁用判定与结果回显；
+//   - 无 Go 层回填（存量行默认值即正确语义），新库直建时逐级执行 v4→v8 后列已齐备。
+const assetsSchemaV8SQL = `
+ALTER TABLE split_records ADD COLUMN target TEXT NOT NULL DEFAULT 'cache';
+ALTER TABLE split_records ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0;
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -245,6 +260,7 @@ var assetsMigrations = map[int]string{
 	5: assetsSchemaV5SQL,
 	6: assetsSchemaV6SQL,
 	7: assetsSchemaV7SQL,
+	8: assetsSchemaV8SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

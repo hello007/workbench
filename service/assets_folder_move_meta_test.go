@@ -100,7 +100,7 @@ func TestAssetFolderMove_Refusals(t *testing.T) {
 		t.Errorf("源为派生容器应拒绝")
 	}
 	// 源含拆分记录拒绝（与 PR2 重命名同口径）
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", "D:/derived/media/a", 2, "2026-10-20 10:00:00"); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", "D:/derived/media/a", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 	if _, err := svc.MoveAssetFolder(lib.ID, "media", ""); err == nil {

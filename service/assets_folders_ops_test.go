@@ -207,10 +207,10 @@ func TestAssetFolderDelete_SplitRecordsCollapsed(t *testing.T) {
 	mustScan(t, svc, lib.ID)
 
 	// 直写拆分记录（media/a.pptx 命中前缀、other/c.pptx 不命中）
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash-a", "D:/derived/a", 3, "2026-10-20 10:00:00"); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash-a", "D:/derived/a", 3, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("other/c.pptx", "hash-c", "D:/derived/c", 2, "2026-10-20 10:00:00"); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("other/c.pptx", "hash-c", "D:/derived/c", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 
@@ -356,7 +356,7 @@ func TestAssetFolderRename_Refusals(t *testing.T) {
 	lib := mustCreateLibrary(t, svc, "重命名拒绝库", root)
 
 	// 拆分记录守卫（宁严勿错）：子树内存在拆分记录拒绝重命名
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("withsplit/a.pptx", "hash", "D:/derived/withsplit/a", 2, "2026-10-20 10:00:00"); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("withsplit/a.pptx", "hash", "D:/derived/withsplit/a", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 	if _, err := svc.RenameAssetFolder(lib.ID, "withsplit", "改名"); err == nil {

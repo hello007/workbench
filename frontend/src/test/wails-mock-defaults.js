@@ -424,7 +424,7 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // （见 frontend/wailsjs/go/models.ts）。拆分仅在用户操作时调用，零结果/零页为
   // 安全 no-op；GetAssetSplitRecord 默认无记录（exists=false = 方式 2 按钮隐藏），
   // 用例按需 override；OpenAssetSplitPage void 返回 null 安全 no-op
-  SplitAssetFile: { outputDir: '', files: [], pageCount: 0, skipped: false, skipReason: '' },
+  SplitAssetFile: { outputDir: '', files: [], pageCount: 0, skipped: false, skipReason: '', target: 'cache', sourceRemoved: false },
   SplitAssetLibrary: { total: 0, split: 0, skipped: 0, failed: 0, items: [] },
   // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelAssetScan 语义）
   CancelAssetSplit: false,
