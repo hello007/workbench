@@ -372,3 +372,36 @@ SplitAssetLibrary 取消改为返回已完成部分 + canceled=true + nil error�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 180: PowerPoint COM 多实例与整本导出探针
+
+**Date**: 2026-11-01
+**Task**: PowerPoint COM 多实例与整本导出探针
+**Branch**: `master`
+
+### Summary
+
+新增探针 P9-P13（多实例行为、并发耗时、单页分档、Go 后处理、整本导出），WPS 实测：单实例复用无并行收益、整本导出无耗时优势；结论落 research，生产代码零改动
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65f7ccb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
