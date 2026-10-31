@@ -174,3 +174,36 @@ hd 档退出批量补缺改详情侧按需生成（独立 demandCh、批量文�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 174: B 方案 PR2：三落点确认弹窗与结果明细
+
+**Date**: 2026-10-31
+**Task**: B 方案 PR2：三落点确认弹窗与结果明细
+**Branch**: `master`
+
+### Summary
+
+前端拆分确认弹窗扩为三落点（缓存/源目录/就地替换），replace 附不可逆强确认勾选与提交禁用；结果明细按已删除源/已回滚/源保留三收尾归类并加批量三类计数与顶部汇总；replace 完成后接 refreshDataAfterMutation 重拉清单/目录树/统计；wails-mock 与 E2E 同步，新增 3 个 vitest 用例与 1 个 E2E 链路；前端全量 2264 用例通过、覆盖率 85.93%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `037a154` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
