@@ -429,14 +429,20 @@ type AssetSplitFileOutcome struct {
 
 // AssetSplitBatchResult 批量拆分结果汇总（SplitAssetLibrary 返回 +
 // assets-split:done 事件载荷；单文件入口同形状：Total=1）。批量中单文件失败
-// 隔离计数不入 Items 的不算错误——整体失败（取消/库不存在/db 系统性错误）走
+// 隔离计数不入 Items 的不算错误——整体失败（库不存在/db 系统性错误）走
 // assets-split:error 事件与 error 返回。
+//
+// Canceled=true 表示本次批量被 ctx 取消（用户 CancelAssetSplit 或关停收口）
+// 中止：Items 仅含已完成文件（取消发生时正在处理的那份不追加，cache/source
+// 保留其已产出、replace 已回滚本文件），error 为 nil、终态走 done 事件——
+// 对齐 AssetThumbsResult.Canceled 先例，取消属「带标记的正常收尾」而非错误。
 type AssetSplitBatchResult struct {
-	Total   int                     `json:"total"`   // 启动时快照圈定的文件总数
-	Split   int                     `json:"split"`   // 成功拆分文件数
-	Skipped int                     `json:"skipped"` // 增量命中跳过数
-	Failed  int                     `json:"failed"`  // 失败文件数（逐文件记日志跳过，批量不中断）
-	Items   []AssetSplitFileOutcome `json:"items"`   // 逐文件明细（顺序同处理序）
+	Total    int                     `json:"total"`    // 启动时快照圈定的文件总数（取消时含未处理）
+	Split    int                     `json:"split"`    // 成功拆分文件数
+	Skipped  int                     `json:"skipped"`  // 增量命中跳过数
+	Failed   int                     `json:"failed"`   // 失败文件数（逐文件记日志跳过，批量不中断）
+	Canceled bool                    `json:"canceled"` // 是否被取消中断（已完成数 = len(Items)）
+	Items    []AssetSplitFileOutcome `json:"items"`    // 逐文件明细（顺序同处理序，仅含已完成）
 }
 
 // AssetSplitRecordView 拆分记录查询视图（GetAssetSplitRecord 返回，前端判定

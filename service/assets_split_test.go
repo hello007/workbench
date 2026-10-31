@@ -75,6 +75,26 @@ func (f *blockingSplitCore) callCount() int {
 	return len(f.calls)
 }
 
+// successAfterReleaseSplitCore 阻塞后无条件成功返回的拆分核心 fake：用于驱动
+// 「最后一份文件处理期间收到取消信号」竞态——取消先落定、核心仍正常返回成功，
+// 批量须以 canceled=true 收尾且该文件 Item 保留。
+type successAfterReleaseSplitCore struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *successAfterReleaseSplitCore) split(ctx context.Context, srcPath string, onProgress func(done, total int)) (model.PptxSplitResult, error) {
+	select {
+	case <-f.started:
+	default:
+		close(f.started)
+	}
+	<-f.release
+	return model.PptxSplitResult{
+		OutputDir: filepath.Dir(srcPath), Files: []string{srcPath}, PageCount: 1,
+	}, nil
+}
+
 // ---------- schema v4 迁移与 store 方法 ----------
 
 // TestAssetsStore_MigrateV4 迁移链：旧 v3 库升级后 split_records 建表且存量数据
@@ -678,8 +698,9 @@ func TestAssetSplit_BatchIsolation(t *testing.T) {
 	}
 }
 
-// TestAssetSplit_CancelPreCancelled 预取消 ctx：批量与单文件均立即返回
-// E_ASSETS_CANCELLED 并发 error 事件；defer 注销后注册表无残留。
+// TestAssetSplit_CancelPreCancelled 预取消 ctx：批量为「带标记的正常收尾」
+// （Canceled=true、Items 空、error 为 nil、done 事件），单文件仍走 E_ASSETS_CANCELLED
+// error 事件；defer 注销后注册表无残留。
 func TestAssetSplit_CancelPreCancelled(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -693,27 +714,41 @@ func TestAssetSplit_CancelPreCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := svc.SplitAssetLibrary(ctx, lib.ID, "cache")
-	var appErr *model.AppError
-	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
-		t.Fatalf("批量取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
+	batch, err := svc.SplitAssetLibrary(ctx, lib.ID, "cache")
+	if err != nil {
+		t.Fatalf("批量取消应正常返回（canceled 标记，非 error），实际：%v", err)
+	}
+	if !batch.Canceled {
+		t.Error("批量取消结果应标记 canceled=true")
+	}
+	if batch.Total != 1 || len(batch.Items) != 0 {
+		t.Errorf("首个文件前取消：Total 保持快照总数 1、Items 应为空，实际：%+v", batch)
 	}
 	_, err = svc.SplitAssetFile(ctx, lib.ID, "内容.pptx", "cache")
+	var appErr *model.AppError
 	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
 		t.Fatalf("单文件取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
 	}
-	// 2 条 error 事件（批量 + 单文件各一条），message 为用户可读取消文案
+	// 批量 done（canceled 结果）+ 单文件 error，共 2 条事件
 	if len(sink.calls) != 2 {
-		t.Fatalf("应收到 2 条 error 事件，实际：%#v", sink.calls)
+		t.Fatalf("应收到 2 条事件（批量 done + 单文件 error），实际：%#v", sink.calls)
 	}
-	for i, call := range sink.calls {
-		if call.name != "assets-split:error" {
-			t.Fatalf("第 %d 条事件应为 assets-split:error，实际 %q", i, call.name)
-		}
-		payload, ok := call.data[0].(map[string]any)
-		if !ok || payload["libraryId"] != lib.ID || payload["message"] != "拆分已取消" {
-			t.Errorf("error 事件载荷应为用户可读消息，实际：%#v", call.data)
-		}
+	if sink.calls[0].name != "assets-split:done" {
+		t.Errorf("第 0 条事件应为 assets-split:done，实际 %q", sink.calls[0].name)
+	}
+	batchPayload, ok := sink.calls[0].data[0].(map[string]any)
+	if !ok || batchPayload["libraryId"] != lib.ID {
+		t.Errorf("done 事件载荷应含 libraryId，实际：%#v", sink.calls[0].data)
+	}
+	if result, ok := batchPayload["result"].(model.AssetSplitBatchResult); !ok || !result.Canceled {
+		t.Errorf("done 事件载荷 result 应标记 canceled，实际：%#v", batchPayload["result"])
+	}
+	if sink.calls[1].name != "assets-split:error" {
+		t.Fatalf("第 1 条事件应为 assets-split:error，实际 %q", sink.calls[1].name)
+	}
+	payload, ok := sink.calls[1].data[0].(map[string]any)
+	if !ok || payload["libraryId"] != lib.ID || payload["message"] != "拆分已取消" {
+		t.Errorf("error 事件载荷应为用户可读消息，实际：%#v", sink.calls[1].data)
 	}
 	if svc.CancelAssetSplit(lib.ID) {
 		t.Error("拆分返回后注册表应无残留")
@@ -722,7 +757,8 @@ func TestAssetSplit_CancelPreCancelled(t *testing.T) {
 
 // TestAssetSplit_InFlightMutexAndCancel 在途拆分互斥与取消：阻塞型核心 fake 保持
 // 批量在途 → 单文件拆分同库被拒（互斥）→ CancelAssetSplit 命中 → 批量在检查点
-// 返回取消错误，剩余文件不再处理，注册表无残留。
+// 以 canceled=true 收尾（当前文件不追加 Item、剩余文件不再处理、无 error 事件），
+// 注册表无残留。
 func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -737,10 +773,14 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 	blocker := &blockingSplitCore{started: make(chan struct{}), release: make(chan struct{})}
 	svc.splitCoreFn = blocker.split
 
-	batchDone := make(chan error, 1)
+	type batchOutcome struct {
+		batch model.AssetSplitBatchResult
+		err   error
+	}
+	batchDone := make(chan batchOutcome, 1)
 	go func() {
-		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
-		batchDone <- err
+		batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
+		batchDone <- batchOutcome{batch: batch, err: err}
 	}()
 	<-blocker.started
 
@@ -760,9 +800,15 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 	}
 	close(blocker.release)
 	select {
-	case err := <-batchDone:
-		if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
-			t.Fatalf("取消错误应映射为 E_ASSETS_CANCELLED，实际：%v", err)
+	case out := <-batchDone:
+		if out.err != nil {
+			t.Fatalf("取消应返回 canceled 结果而非 error，实际：%v", out.err)
+		}
+		if !out.batch.Canceled {
+			t.Error("批量取消结果应标记 canceled=true")
+		}
+		if out.batch.Total != 2 || len(out.batch.Items) != 0 {
+			t.Errorf("进行中的文件不追加 Item：Total=2、Items 空，实际：%+v", out.batch)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("取消后批量未返回")
@@ -773,15 +819,57 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 	if svc.CancelAssetSplit(lib.ID) {
 		t.Error("批量返回后注册表应无残留")
 	}
-	// 取消错误应发 error 事件（整体失败口径）
-	found := false
+	// 取消走 done 事件（带 canceled 结果），不发 error 事件
 	for _, call := range sink.calls {
 		if call.name == "assets-split:error" {
-			found = true
+			t.Errorf("取消不应发 assets-split:error 事件，实际：%#v", call)
 		}
 	}
-	if !found {
-		t.Error("取消应发 assets-split:error 事件")
+	if len(sink.calls) != 1 || sink.calls[0].name != "assets-split:done" {
+		t.Fatalf("取消应仅发 1 条 assets-split:done，实际：%#v", sink.calls)
+	}
+}
+
+// TestAssetSplit_CancelDuringLastFileRace 竞态：取消信号在最后一份文件处理期间
+// 到达、核心仍成功返回——该文件 Item 保留，批量以 canceled=true 收尾。
+func TestAssetSplit_CancelDuringLastFileRace(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "竞态取消库", dir)
+	buildAssetsPptx(t, dir, "唯一.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	mustScanLibrary(t, svc, lib.ID)
+
+	core := &successAfterReleaseSplitCore{started: make(chan struct{}), release: make(chan struct{})}
+	svc.splitCoreFn = core.split
+
+	type batchOutcome struct {
+		batch model.AssetSplitBatchResult
+		err   error
+	}
+	batchDone := make(chan batchOutcome, 1)
+	go func() {
+		batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
+		batchDone <- batchOutcome{batch: batch, err: err}
+	}()
+	<-core.started
+	// 取消先落定，再放行核心成功返回：批量循环结束后补判 ctx，仍应标记取消
+	if !svc.CancelAssetSplit(lib.ID) {
+		t.Fatal("在途拆分应可取消")
+	}
+	close(core.release)
+	select {
+	case out := <-batchDone:
+		if out.err != nil {
+			t.Fatalf("竞态取消不应返回 error，实际：%v", out.err)
+		}
+		if !out.batch.Canceled {
+			t.Error("最后文件处理期间收到取消，应标记 canceled=true")
+		}
+		if out.batch.Split != 1 || len(out.batch.Items) != 1 || out.batch.Items[0].RelPath != "唯一.pptx" {
+			t.Errorf("已完成文件须保留 Item（split=1、1 条明细），实际：%+v", out.batch)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("竞态取消后批量未返回")
 	}
 }
 
@@ -793,8 +881,8 @@ func TestAssetSplit_InFlightMutexAndCancel(t *testing.T) {
 // 批量函数完全返回（batchDone 可收）与 Wait 返回之间无生产顺序保证——Done 之后
 // 测试 goroutine 尚余 defer 收尾与记录多步，与 Wait 侧无同步，调度差异可翻转
 // （Windows 稳定 batch 先、Linux 曾 wait 先），不构成断言面。拆分返回
-// E_ASSETS_CANCELLED、注册表无残留；无在途拆分时 WaitSplitsDone 立即返回。
-// chan 交接驱动，禁 sleep 时序。
+// canceled=true（关停与用户取消同按 ctx 取消收口）、注册表无残留；无在途拆分
+// 时 WaitSplitsDone 立即返回。chan 交接驱动，禁 sleep 时序。
 func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -821,10 +909,14 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 		return result, err
 	}
 
-	batchDone := make(chan error, 1)
+	type batchOutcome struct {
+		batch model.AssetSplitBatchResult
+		err   error
+	}
+	batchDone := make(chan batchOutcome, 1)
 	go func() {
-		_, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
-		batchDone <- err
+		batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, "cache")
+		batchDone <- batchOutcome{batch: batch, err: err}
 	}()
 	<-blocker.started
 
@@ -839,11 +931,13 @@ func TestAssetLibrary_ShutdownCancelsInFlightSplit(t *testing.T) {
 	// 放行阻塞：核心在 ctx 取消后返回取消错误 → 批量中止退出 → splitWG 归零 →
 	// WaitSplitsDone 返回。返回顺序必须 core-exit 先于 wait（等待真实 join 在途拆分）
 	close(blocker.release)
-	var appErr *model.AppError
 	select {
-	case err := <-batchDone:
-		if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsCancelled {
-			t.Fatalf("关停取消应映射为 E_ASSETS_CANCELLED，实际：%v", err)
+	case out := <-batchDone:
+		if out.err != nil {
+			t.Fatalf("关停取消应返回 canceled 结果而非 error，实际：%v", out.err)
+		}
+		if !out.batch.Canceled {
+			t.Error("关停取消应标记 canceled=true")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("关停取消后批量未返回")

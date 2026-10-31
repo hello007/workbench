@@ -425,7 +425,7 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 安全 no-op；GetAssetSplitRecord 默认无记录（exists=false = 方式 2 按钮隐藏），
   // 用例按需 override；OpenAssetSplitPage void 返回 null 安全 no-op
   SplitAssetFile: { outputDir: '', files: [], pageCount: 0, skipped: false, skipReason: '', target: 'cache', sourceRemoved: false },
-  SplitAssetLibrary: { total: 0, split: 0, skipped: 0, failed: 0, items: [] },
+  SplitAssetLibrary: { total: 0, split: 0, skipped: 0, failed: 0, canceled: false, items: [] },
   // 默认无可取消在途拆分：false = 幂等 no-op（对齐 CancelAssetScan 语义）
   CancelAssetSplit: false,
   GetAssetSplitRecord: { exists: false, outputDir: '', pageCount: 0, splitAt: '', upToDate: false, target: '', sourceRemoved: false },

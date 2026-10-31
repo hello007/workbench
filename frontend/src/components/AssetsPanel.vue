@@ -1005,7 +1005,7 @@
          展示：路径 + 处理结果 + 跳过/失败原因），仅展示可关闭 -->
     <el-dialog
       v-model="splitOutcomeVisible"
-      title="拆分结果明细"
+      :title="splitOutcomeTitle"
       width="min(600px, 90vw)"
       append-to-body
     >
@@ -1525,6 +1525,8 @@ const splitReplaceConfirmed = ref(false) // 就地替换强确认勾选（未勾
 const splitConfirming = ref(false) // 确认提交中（防重复提交）
 const splitOutcomeVisible = ref(false)
 const splitOutcomeItems = ref([]) // 批量拆分逐文件明细（failed>0 时弹窗展示）
+const splitOutcomeCanceled = ref(false) // 明细窗是否来自取消收尾（标题与汇总带取消上下文）
+const splitOutcomeTotal = ref(0) // 明细窗对应批次的快照总数（取消时展示已完成 X/Y）
 const splitRecord = ref(null) // 详情文件的拆分记录（GetAssetSplitRecord 结果，exists 决定方式 2 按钮显隐）
 const openingSplitPage = ref(false)
 // 拆分代次：拆分启动 / 切库复位时自增；在途 Promise 落定写回前比对，代次已变
@@ -4505,7 +4507,8 @@ const onSplitDialogClosed = () => {
 
 // 确认拆分：调对应绑定（单文件 SplitAssetFile / 库级 SplitAssetLibrary），汇总
 // 提示由本 Promise 分支统一弹出（done 事件仅复位进度，防双提示）；进行中态防
-// 重复提交。取消（E_ASSETS_CANCELLED）与真失败经 handleError 自动分流。
+// 重复提交。库级批量取消走正常返回（canceled=true 已完成部分），按 warning 展示
+// 计数；单文件取消与真失败仍经 handleError（E_ASSETS_CANCELLED）自动分流。
 // 请求序号守卫：启动时捕获拆分代次，await 落定写回（任务态/提示/弹窗）前比对
 // ——切库自增 splitSeq 后旧库 Promise 落定全部丢弃（防旧库 toast 误弹、误清
 // 新库在途任务进度态）
@@ -4531,15 +4534,32 @@ const onConfirmSplit = async () => {
         ElMessage.success(`拆分完成：共 ${result?.pageCount ?? 0} 页`)
       }
     } else {
+      // 取消不再走 reject 通道（后端返回 canceled=true + 已完成部分）：已完成
+      // 成果须可见，提示用 warning 与真失败区分，明细窗沿用「有失败才弹」规则
       const batch = await SplitAssetLibrary(currentLibraryId.value, target)
       if (seq !== splitSeq) return
-      if (!batch || !batch.total) {
+      const items = Array.isArray(batch?.items) ? batch.items : []
+      if (batch?.canceled) {
+        if (!items.length) {
+          ElMessage.warning('拆分已取消：尚无文件完成')
+        } else {
+          ElMessage.warning(splitBatchSummaryText(batch, target))
+          if ((batch.failed ?? 0) > 0) {
+            splitOutcomeCanceled.value = true
+            splitOutcomeTotal.value = batch.total ?? items.length
+            splitOutcomeItems.value = items
+            splitOutcomeVisible.value = true
+          }
+        }
+      } else if (!batch || !batch.total) {
         ElMessage.info('当前库没有可拆分的 PPT 文件')
       } else {
         ElMessage.success(splitBatchSummaryText(batch, target))
         // 失败明细 >0：弹出逐文件明细（异常隔离原因：损坏/加密/占用等）
-        if ((batch.failed ?? 0) > 0 && Array.isArray(batch.items) && batch.items.length > 0) {
-          splitOutcomeItems.value = batch.items
+        if ((batch.failed ?? 0) > 0 && items.length > 0) {
+          splitOutcomeCanceled.value = false
+          splitOutcomeTotal.value = batch.total ?? items.length
+          splitOutcomeItems.value = items
           splitOutcomeVisible.value = true
         }
       }
@@ -4654,9 +4674,9 @@ const SPLIT_OUTCOME_META = Object.freeze({
 const splitOutcomeLabel = (item) => SPLIT_OUTCOME_META[splitOutcomeKind(item)]?.label || '失败'
 const splitOutcomeTagType = (item) => SPLIT_OUTCOME_META[splitOutcomeKind(item)]?.tag || 'danger'
 
-// 批量结果三类收尾计数（replace 落点专用口径）
+// 批量结果收尾计数（replace 落点专用口径为主；split/failed 供取消摘要复用）
 const countSplitOutcomeKinds = (items) => {
-  const counts = { replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0 }
+  const counts = { replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0, split: 0, failed: 0 }
   for (const item of items || []) {
     const kind = splitOutcomeKind(item)
     if (kind in counts) counts[kind] += 1
@@ -4664,24 +4684,47 @@ const countSplitOutcomeKinds = (items) => {
   return counts
 }
 
-// 批量汇总文案：replace 落点按「已删除源 / 已回滚 / 源保留」三类计数（对齐结果
-// 明细收尾语义），其余落点沿用拆分/跳过/失败口径
-const splitBatchSummaryText = (batch, target) => {
-  const base = `拆分完成：共 ${batch.total} 个文件`
+// 批量计数括注单点：replace 按「已删除源 / 已回滚 / 源保留（+已跳过）」三类收尾
+// 语义，其余落点沿用拆分/跳过/失败口径
+const splitBatchCountsText = (batch, target) => {
   if (target !== 'replace') {
-    return `${base}（拆分 ${batch.split ?? 0}，跳过 ${batch.skipped ?? 0}，失败 ${batch.failed ?? 0}）`
+    return `拆分 ${batch.split ?? 0}，跳过 ${batch.skipped ?? 0}，失败 ${batch.failed ?? 0}`
   }
   const c = countSplitOutcomeKinds(batch.items)
   const skipped = c.skipped > 0 ? `，已跳过 ${c.skipped}` : ''
-  return `${base}（已删除源 ${c.replaced}，已回滚 ${c.rolledBack}，源保留 ${c.sourceKept}${skipped}）`
+  return `已删除源 ${c.replaced}，已回滚 ${c.rolledBack}，源保留 ${c.sourceKept}${skipped}`
 }
 
-// 明细弹窗顶部汇总（仅 replace 落点展示：三类收尾计数一次性可见）
+// 批量汇总文案：完成与取消共用计数口径，取消时以「已完成 done/total」表达未处理
+// 剩余（Total 为启动快照总数，取消不缩小）
+const splitBatchSummaryText = (batch, target) => {
+  if (batch?.canceled) {
+    const done = Array.isArray(batch.items) ? batch.items.length : 0
+    return `拆分已取消：已完成 ${done}/${batch.total ?? 0} 个文件（${splitBatchCountsText(batch, target)}）`
+  }
+  return `拆分完成：共 ${batch.total} 个文件（${splitBatchCountsText(batch, target)}）`
+}
+
+// 明细窗标题：取消收尾带标记，与成功路径区分
+const splitOutcomeTitle = computed(() =>
+  splitOutcomeCanceled.value ? '拆分结果明细（已取消）' : '拆分结果明细'
+)
+
+// 明细弹窗顶部汇总（replace 三类收尾计数一次性可见；取消时补齐已取消上下文）
 const splitOutcomeSummary = computed(() => {
   const items = splitOutcomeItems.value
-  if (!items.length || !items.some((item) => item.target === 'replace')) return ''
+  if (!items.length) return ''
   const c = countSplitOutcomeKinds(items)
-  return `共 ${items.length} 个文件：已删除源 ${c.replaced}，已回滚 ${c.rolledBack}，源保留 ${c.sourceKept}`
+  if (items.some((item) => item.target === 'replace')) {
+    const head = splitOutcomeCanceled.value
+      ? `已取消：已完成 ${items.length}/${splitOutcomeTotal.value} 个文件`
+      : `共 ${items.length} 个文件`
+    return `${head}：已删除源 ${c.replaced}，已回滚 ${c.rolledBack}，源保留 ${c.sourceKept}`
+  }
+  if (splitOutcomeCanceled.value) {
+    return `已取消：已完成 ${items.length}/${splitOutcomeTotal.value} 个文件，失败 ${c.failed}`
+  }
+  return ''
 })
 
 // 打开设置弹窗：先以默认值填充草稿（防上一次脏值闪烁），再异步拉取当前设置回填。

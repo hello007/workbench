@@ -222,11 +222,17 @@ func (s *AssetLibraryService) SplitAssetFile(ctx context.Context, libraryID, rel
 // 全部 ok 状态文件逐个处理（对齐 SRS「批量目录拆分」；快照后文件变更/删除不
 // 影响本批圈定，重拆判定按当批快照哈希）。单文件失败（损坏/加密/只读/磁盘等）
 // 逐文件记日志跳过，批量不中断（异常隔离）；取消在文件间检查点生效，中断剩余
-// 并整体失败返回（E_ASSETS_CANCELLED，注册表 defer 注销无残留）。落点三态同
+// 并以 canceled=true 收尾（注册表 defer 注销无残留）。落点三态同
 // SplitAssetFile；replace 需与扫描互斥（锁序 scan → split）。
 //
+// 取消语义：返回已完成部分（Items 顺序同处理序）+ Canceled=true + nil error，
+// 终态发 assets-split:done（不发 error）——取消属「带标记的正常收尾」，用户可
+// 核对已完成成果（对齐缩略图批次 Canceled 先例）。取消发生时正在处理的那份
+// 不追加 Item：cache/source 保留其已产出、replace 已回滚本文件产物与索引行。
+// 真系统性错误（db 读写失败等）仍走 abortAssetSplit（error 事件 + error 返回）。
+//
 // replace 批量注意：前序文件成功拆分后源行已删除，后续文件的产物索引不会与
-// 已删源冲突；快照圈定发生在任何删除之前，故 Items 仍覆盖全部源文件。
+// 已删源冲突；快照圈定发生在任何删除之前，故 Total 仍覆盖全部源文件。
 func (s *AssetLibraryService) SplitAssetLibrary(ctx context.Context, libraryID string, target string) (model.AssetSplitBatchResult, error) {
 	tgt, err := normalizeSplitTarget(target)
 	if err != nil {
@@ -278,13 +284,20 @@ func (s *AssetLibraryService) SplitAssetLibrary(ctx context.Context, libraryID s
 		Items: make([]model.AssetSplitFileOutcome, 0, len(sources))}
 	for i, src := range sources {
 		// 文件间取消检查点（对齐扫描链路：单文件拆分内不中断）
-		if err := splitCtx.Err(); err != nil {
-			return s.abortAssetSplit(libraryID, src.rel, fmt.Errorf("拆分已取消: %w", err))
+		if splitCtx.Err() != nil {
+			batch.Canceled = true
+			break
 		}
 		absPath := filepath.Join(lib.RootPath, filepath.FromSlash(src.rel))
 		outcome, err := s.splitOneFileWithHash(splitCtx, store, lib, src.rel, absPath, src.hash, tgt, i+1, len(sources))
 		if err != nil {
-			// 系统性错误（取消/db 读写失败）：整体失败，批量中止
+			// 取消：中断剩余（当前文件已由单文件链路自行收口，不追加 Item）
+			if errors.Is(err, context.Canceled) {
+				Logger().Info("assets split batch canceled mid-file", "libraryId", libraryID, "file", src.rel)
+				batch.Canceled = true
+				break
+			}
+			// 系统性错误（db 读写失败等）：整体失败，批量中止
 			return s.abortAssetSplit(libraryID, src.rel, err)
 		}
 		batch.Items = append(batch.Items, model.AssetSplitFileOutcome{
@@ -307,8 +320,14 @@ func (s *AssetLibraryService) SplitAssetLibrary(ctx context.Context, libraryID s
 		s.emitSplitProgress(lib.ID, i+1, len(sources), src.rel, outcome.pageDone, outcome.pageTotal)
 	}
 
+	// 竞态补判：取消信号在最后一个文件的处理期间（检查点之后）到达——循环已
+	// 自然结束，但用户确实点了取消，仍按取消收尾（否则前端显示「拆分完成」）
+	if !batch.Canceled && splitCtx.Err() != nil {
+		batch.Canceled = true
+	}
+
 	Logger().Info("assets split batch done", "libraryId", libraryID, "target", tgt, "total", batch.Total,
-		"split", batch.Split, "skipped", batch.Skipped, "failed", batch.Failed)
+		"split", batch.Split, "skipped", batch.Skipped, "failed", batch.Failed, "canceled", batch.Canceled)
 	s.emitCurrent("assets-split:done", map[string]any{"libraryId": libraryID, "result": batch})
 	return batch, nil
 }

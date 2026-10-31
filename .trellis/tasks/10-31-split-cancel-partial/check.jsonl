@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/pptx-split.md", "reason": "校验实现与改写后的取消契约一致：取消返回 partial + canceled、Items 仅含已完成、replace 中进行中文件回滚"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "校验取消路径不再发 assets-split:error、E_ASSETS_CANCELLED 仅保留单文件入口，错误码三处同步无遗漏"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 wailsjs 绑定同步（models.ts 增加 canceled）与 App.js/App.d.ts 无漂移"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验新增/改写用例覆盖取消分支、竞态与空 Items，覆盖率门禁通过"}

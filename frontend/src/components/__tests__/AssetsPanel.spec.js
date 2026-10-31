@@ -3147,6 +3147,7 @@ describe('AssetsPanel', () => {
     split: 1,
     skipped: 1,
     failed: 0,
+    canceled: false,
     items: [
       { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' },
       { relPath: '方案B/损坏文件.pptx', status: 'skipped', message: '已拆分且源未变化', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' }
@@ -3460,18 +3461,51 @@ describe('AssetsPanel', () => {
     expect(ElMessage.error).not.toHaveBeenCalled()
   })
 
-  it('拆分取消错误：Promise reject E_ASSETS_CANCELLED 经 handleError 分流 warning 中性提示', async () => {
+  it('拆分批量取消：返回 canceled=true 已完成部分，warning 展示已完成/总数与计数，失败明细窗带取消上下文', async () => {
     const { ElMessage } = await import('element-plus')
-    wailsMock.SplitAssetLibrary.mockRejectedValue({ code: 'E_ASSETS_CANCELLED', message: '拆分已取消' })
+    wailsMock.SplitAssetLibrary.mockResolvedValue({
+      total: 4,
+      split: 1,
+      skipped: 1,
+      failed: 1,
+      canceled: true,
+      items: [
+        { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache' },
+        { relPath: '方案B/旧方案.pptx', status: 'skipped', message: '已拆分且源未变化', target: 'cache' },
+        { relPath: '方案C/损坏文件.pptx', status: 'failed', message: 'zip: not a valid zip file', target: 'cache' }
+      ]
+    })
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
 
-    expect(ElMessage.warning).toHaveBeenCalledWith('拆分已取消')
-    expect(ElMessage.error).not.toHaveBeenCalled()
+    expect(ElMessage.warning).toHaveBeenCalledWith(
+      '拆分已取消：已完成 3/4 个文件（拆分 1，跳过 1，失败 1）'
+    )
+    expect(ElMessage.success).not.toHaveBeenCalled()
+    // 失败 > 0：明细窗打开，顶部汇总带已取消上下文（已完成 3/4）
+    const dialog = wrapper.find('.stub-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('已取消：已完成 3/4 个文件')
+    expect(dialog.text()).toContain('方案C/损坏文件.pptx')
     expect(wrapper.find('.split-progress').exists()).toBe(false)
+  })
+
+  it('拆分批量取消且尚无文件完成：Items 为空，warning 独立文案且不开明细窗', async () => {
+    const { ElMessage } = await import('element-plus')
+    wailsMock.SplitAssetLibrary.mockResolvedValue({
+      total: 5, split: 0, skipped: 0, failed: 0, canceled: true, items: []
+    })
+    const wrapper = await createWrapper()
+    await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    await clickButton(wrapper, '开始拆分')
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('拆分已取消：尚无文件完成')
+    expect(wrapper.find('.stub-dialog').exists()).toBe(false)
   })
 
   it('单文件拆分入口：文件详情「拆分此 PPT」打开共用弹窗，确认调 SplitAssetFile 并提示页数；增量命中提示已最新', async () => {

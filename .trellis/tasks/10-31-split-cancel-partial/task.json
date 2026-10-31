@@ -3,7 +3,7 @@
   "name": "split-cancel-partial",
   "title": "素材拆分批量取消保留已完成明细",
   "description": "SplitAssetLibrary 取消时保留已完成 Items，前端展示三类收尾计数与明细；补用例与文档",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

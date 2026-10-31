@@ -28,6 +28,7 @@ const baseAssetsOverrides = {
     split: 2,
     skipped: 0,
     failed: 0,
+    canceled: false,
     items: [
       { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' },
       { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'cache', sourceRemoved: false, rolledBack: false, code: '' }
@@ -90,6 +91,7 @@ test.describe('素材管理 PPT 拆分·就地替换', () => {
       split: 2,
       skipped: 0,
       failed: 0,
+      canceled: false,
       items: [
         { relPath: '方案A/城商行方案.pptx', status: 'split', message: '', target: 'replace', sourceRemoved: true, rolledBack: false, code: '' },
         { relPath: '方案B/获客方案.pptx', status: 'split', message: '', target: 'replace', sourceRemoved: true, rolledBack: false, code: '' }

@@ -477,6 +477,15 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - 批量明细 `AssetSplitFileOutcome` 新增字段：`target`（落点）、`sourceRemoved`（已删源）、`rolledBack`（产物已回滚）、`code`（失败错误码）。
 - 前端据此分三类收尾：已删除源（`split` + `sourceRemoved`）/ 已回滚（`failed` + `rolledBack`）/ 源保留（`failed` + replace 未回滚）。
 
+### 15.6 批量取消保留已完成明细（2026-10-31）
+
+- **取消语义**：`SplitAssetLibrary` 因 ctx 取消中止时返回已完成部分（`Items` 顺序同处理序）+ `Canceled=true` + **nil error**，终态发 `assets-split:done`，**不发 `assets-split:error`**——取消属「带标记的正常收尾」，对齐 `AssetThumbsResult.Canceled` 先例。真系统性错误（db 读写失败等）仍走 error 事件与 error 返回。
+- **取消来源不区分**：用户取消（`CancelAssetSplit`）与关停收口（`CancelAllSplits`）同按 `context.Canceled` 判定，均 `Canceled=true`。`E_ASSETS_CANCELLED` 仅保留给单文件入口 `SplitAssetFile`；批量入口不再使用。
+- **Items 口径**：仅含已处理文件（`split` / `skipped` / `failed` 三态），不引入 `pending`。`Total` 保持启动快照总数，已完成数 = `len(Items)`，剩余 = `Total - len(Items)`。取消发生时正在处理的那份不追加 Item：`cache/source` 保留其已产出、`replace` 已回滚本文件产物与索引行。
+- **竞态补判**：主循环结束后补查 `ctx.Err()`——取消信号在最后一份文件处理期间（检查点之后）到达、核心仍成功返回时同样 `Canceled=true`，否则前端会误显示「拆分完成」。
+- **前端**：`canceled` 分支弹 `ElMessage.warning`「拆分已取消：已完成 X/Y（拆分 a，跳过 b，失败 c）」（replace 沿用已删除源/已回滚/源保留计数）；`Items` 为空提示「拆分已取消：尚无文件完成」且不开明细窗；明细窗沿用 `failed > 0` 才弹，标题与顶部汇总带「已取消」上下文。
+- **不做「继续拆分剩余」**：重开「拆分全部 PPT」即新快照，已完成文件由增量判定 skipped。
+
 ### 15.6 重拆清理与索引行收敛
 
 - 重拆前只删**已在 `files` 索引中登记**的已改名 `<NNN>-stem.pptx`（成功拆分的旧页必已索引），并联动 `deleteIndexRowsForReplacePaths` 逐条清缩略图记账后删 `files` 行；核心中间态 `<base>-NNN.pptx` 命中派生排除，残留不索引，无需清理。

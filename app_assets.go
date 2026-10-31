@@ -11,8 +11,9 @@ import (
 // 委托 AssetLibraryService：素材库 CRUD + 目录扫描（增量索引）+ 文件/幻灯片
 // 列表 + 文件级元数据编辑 + PPT 按页拆分（单文件/库级批量 + 增量判定 + 跳转
 // 方式 2）。扫描进度/终态经 assets-scan:* 事件推送（可经 CancelAssetScan 取消），
-// 拆分进度/终态经 assets-split:* 事件推送（可经 CancelAssetSplit 取消；取消属
-// 预期拒绝，前端按 warning 中性提示）。跨层契约见 docs/spec/cross-layer-contracts.md：
+// 拆分进度/终态经 assets-split:* 事件推送（可经 CancelAssetSplit 取消；批量取消
+// 返回已完成部分 + canceled 标记，单文件取消仍按 E_ASSETS_CANCELLED warning）。
+// 跨层契约见 docs/spec/cross-layer-contracts.md：
 // 新增 App 方法与 model 导出 struct 须经 wails generate module 同步 frontend/wailsjs/
 // 三处（App.js / App.d.ts / models.ts）。
 
@@ -298,16 +299,19 @@ func (a *App) SplitAssetFile(libraryID, relPath string, target string) (model.As
 
 // SplitAssetLibrary 库级批量拆分（SRS §2.2.3「批量目录拆分」，库面板「拆分全部
 // PPT」入口）：启动时快照圈定全部 ok 状态文件逐个处理；单文件失败逐文件记日志
-// 跳过，批量不中断，返回汇总（total/split/skipped/failed + 逐文件明细，明细含
-// 落点、是否已删源、是否已回滚、失败错误码）。target 落点语义同 SplitAssetFile。
-// 同库并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经 CancelAssetSplit
-// 取消。
+// 跳过，批量不中断，返回汇总（total/split/skipped/failed/canceled + 逐文件明细，
+// 明细含落点、是否已删源、是否已回滚、失败错误码）。target 落点语义同
+// SplitAssetFile。同库并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经
+// CancelAssetSplit 取消：取消时返回已完成部分 + Canceled=true（nil error，终态走
+// done 事件），前端按 warning 展示已完成计数与明细。
 func (a *App) SplitAssetLibrary(libraryID string, target string) (model.AssetSplitBatchResult, error) {
 	return a.assetsSvc.SplitAssetLibrary(context.Background(), libraryID, target)
 }
 
-// CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义，取消
-// 错误前端按 E_ASSETS_CANCELLED warning 中性提示）。返回是否存在可取消的在途拆分。
+// CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义）：批量
+// 取消后 SplitAssetLibrary 正常返回 canceled=true 的已完成结果（前端 warning
+// 展示计数），单文件取消仍按 E_ASSETS_CANCELLED warning 中性提示。
+// 返回是否存在可取消的在途拆分。
 func (a *App) CancelAssetSplit(libraryID string) bool {
 	return a.assetsSvc.CancelAssetSplit(libraryID)
 }
