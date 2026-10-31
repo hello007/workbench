@@ -207,3 +207,36 @@ hd 档退出批量补缺改详情侧按需生成（独立 demandCh、批量文�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 175: B方案PR3：拆分就地替换规范沉淀
+
+**Date**: 2026-10-31
+**Task**: B方案PR3：拆分就地替换规范沉淀
+**Branch**: `master`
+
+### Summary
+
+pptx-split.md 新增 §9 三落点/命名契约/删源时序与回滚；assets-management.md 新增 §15 索引与标注迁移口径；补 perf-baseline §19、logging-and-errors 取消与删源失败口径、confirm-dialog 强确认边界、功能说明/README/API参考模型字段与 CLAUDE.md 规则行（212 字符）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d89d0dd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

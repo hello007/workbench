@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 174
+- **Total Sessions**: 175
 - **Last Active**: 2026-10-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~209 | Active |
+| `journal-4.md` | ~242 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 175 | 2026-10-31 | B方案PR3：拆分就地替换规范沉淀 | `d89d0dd` | `master` |
 | 174 | 2026-10-31 | B 方案 PR2：三落点确认弹窗与结果明细 | `037a154` | `master` |
 | 173 | 2026-10-31 | B方案PR1后端：就地替换落点+删源+标注迁移 | `5708beb` | `master` |
 | 172 | 2026-10-31 | 素材缩略图 hd 按需生成 + 增量重建 + 会话缓存 | `af7a904`, `f663942`, `e88addf`, `25a97b1` | `master` |
