@@ -53,5 +53,10 @@ echo "  node scripts/frontend-memory-tree.mjs --runs 3                          
 echo "  node scripts/frontend-memory-preview.mjs --runs 3                                                 # 大文件预览传输-JSHeap（data 隔离临时目录）"
 echo
 
+echo "--- 维度 6: 素材拆分 replace 索引规模（见 docs/spec/perf-baseline.md §19）---"
+echo "  go test ./service/ -run TestAssetReplaceScale_Report -v -count=1     # 3 轮中位对照表（5 次取中位，单次约 5s，-short 跳过）"
+echo "  go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^\$' ./service/   # 回归基准（before/after 两档）"
+echo
+
 echo "=== 采集结束 ==="
 echo "将上述数据填入 docs/spec/perf-baseline.md 对应基线表。"

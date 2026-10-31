@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-10-21 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）/ 10-21-goleak-gate（§14 goleak 硬门禁收口）
+> 最后更新：2026-10-31 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）/ 10-21-goleak-gate（§14 goleak 硬门禁收口）/ 10-31-replace-perf-baseline（§19.1 replace 索引规模实测）
 
 ## 1. 适用范围
 
@@ -679,5 +679,33 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
 - **形态**：replace 落点每页产物 = 一条 `files` 行 + 一条 `slides` 行 + FTS 行；缩略图由后续扫描补缺或按需生成，不在拆分步落账。一次替换后条目数 = 已拆页数（示例：1208 页库全量替换即 1208 条素材、1208 个单页 pptx）。
 - **受影响面**：`ListAssetFiles` 全量清单规模、`ListAssetSlides` 分页基数、`GetAssetLibraryStats` 计数、关键词检索候选集与聚合折叠、导出物化行数；均为线性放大，无额外复杂度。
 - **成本不放大面**：单页文件解析仅 1 页；按需 hd 预取对 1 页文件自然退化为单页；购物栏与合并导出按普通素材处理，零改动。
-- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；**未实测前不写死数值**，示例页数不得当作基线。
+- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；实测数据见 §19.1，示例页数不得当作基线。
 - **约束**：该放大是「每页独立素材」产品语义的预期结果，禁额外裁剪或虚拟条目；若后续分页/统计退化，先按本文件既有压测与内存口径复测再优化。
+
+### 19.1 实测数据（2026-10-31，Windows 11 测量环境同第 2 节）
+
+- **语料**：程序化直插索引（绕过 pptx 解析），FTS 文本经 `splitFtsText` 同源切分；命中语料注入规则与检索基准一致（约 2% 页正文植入「城商行」、约 5% 页标题植入「获客」），两档命中页数相同。
+- **两档形态**：before = 53 文件 / 1208 页（用户真实库规模，来源 10-30-hd 任务基线）；after = 1208 文件 / 1208 页（全量 replace 后每页一个单页 pptx）。
+- **取数**：`TestAssetReplaceScale_Report` 单次输出 3 轮中位，重复 5 次取中位（首轮进程冷启为离群值，弃用）。
+
+|形态|files 行|slides 行|FTS 行|ListFiles|检索（正文词「城商行」）|检索（标题词「获客」）|GetLibraryStats|
+|---|---|---|---|---|---|---|---|
+|before（53 文件 / 1208 页）|53|1208|1261|117 µs|563 µs|691 µs|39 µs|
+|after（1208 文件 / 1208 页）|1208|1208|2416|3.35 ms|1.03 ms|1.33 ms|0.59 ms|
+|放大倍数|22.8×|1.0×|1.9×|28.6×|1.8×|1.9×|15.1×|
+
+**结论**：
+
+- `files` / FTS 文件行随页数线性放大，`slides` 行不变（页总数不变）。
+- `ListFiles` 全量拉取与 `GetLibraryStats` 耗时随 `files` 行数近似线性增长，1208 页全量替换后仍为毫秒级（3.35 ms / 0.59 ms），不构成卡顿来源。
+- `SearchAssets` 典型词耗时约 1.8–1.9 倍：总命中页数相同，放大来自 FTS 文件行翻倍与聚合分组数（文件数 ×22.8）上升，仍为毫秒级。
+- 噪声：跨进程重复测量波动约 ±15%，上表为中位数；Windows 逐次计时会被时钟粒度量化成 1 ms 台阶，报告测试按 10 ms 窗口批量平均。
+
+**复现**：
+
+```bash
+go test ./service/ -run TestAssetReplaceScale_Report -v -count=1                                  # 3 轮中位对照表
+go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^$' ./service/               # 回归基准
+```
+
+测试定义于 `service/assets_replace_scale_bench_test.go`；`-short` 跳过报告测试（快速档不含性能守护）。
