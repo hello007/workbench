@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "§9.5 拆分记录与重拆：改名重链旧产物清理契约、replace 落点语义、命名形态与延迟清理规则，本任务修改其判定面"}
+{"file": "docs/spec/assets-management.md", "reason": "§11.3 手动重链与 split_records 键迁移口径（output_dir 冻结、键改写），§8.7 刷新与索引行同步背景"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁（service ≥76%），新增分支须补单测，验收要求门禁不降"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "不可判定场景须 Warn 日志（log/slog，禁 println），日志字段口径"}

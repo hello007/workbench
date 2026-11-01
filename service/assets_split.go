@@ -469,8 +469,9 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	}
 
 	// 5.1 旧产物目录收尾清理（改名重链场景）：记录 output_dir 冻结在旧产物目录、
-	//     产物主干仍是旧源名，按当前主干清理对新目录是空操作，旧页只能按记录页数
-	//     在旧目录内逐页反查清理（复用 findSplitArtifactByPage 单点）。刻意放在
+	//     产物主干仍是旧源名，按当前主干清理对新目录是空操作，旧页只能在旧目录内
+	//     按主干分组 + 页覆盖证据判定产物组后清理（cleanupSplitArtifactsInDirByPage
+	//     单点，判定面见其头注释）。刻意放在
 	//     核心成功之后——核心失败/取消时上一次拆分成果原样保留，对齐 replace 落点
 	//     的延迟清理契约（「先删后拆」在失败时会连带丢掉上一次成果）。
 	if outputToSourceDir && record != nil && !samePathFold(record.outputDir, outDir) {
@@ -756,7 +757,8 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 失败保留文件与索引（下次重拆收敛），不阻断删源。
 	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
 	// 改名重链后旧产物目录（记录 output_dir）与新落点不同：旧页文件与索引行按
-	// 记录页数逐页反查清理。刻意挂在成功收尾（删源前）——失败/取消路径不得删
+	// 记录页数在旧目录内按产物组判定清理（不删用户自建同页序文件）。刻意挂在
+	// 成功收尾（删源前）——失败/取消路径不得删
 	// 旧产物，与 oldArtifacts 延迟清理契约一致。不限定记录 target：output_dir 恒为
 	// 本源文件上次产物的独占目录，落点切换（如 source→replace）同样须收敛旧产物。
 	if record != nil && !samePathFold(record.outputDir, outDir) {
@@ -1109,41 +1111,127 @@ func splitArtifactPathForStem(record *assetSplitRecord, stem string, slideNum in
 	return filepath.Join(record.outputDir, fmt.Sprintf("%s-%03d.pptx", stem, slideNum))
 }
 
+// parseSplitArtifactName 解析产物文件名：命名主干 + 页序（页序 ≥1）。
+// 形态随落点：replace 为 <纯数字页序>-<主干>.pptx（主干须非空）；其余为
+// <主干>-<纯数字页序>.pptx（主干可为空，兼容历史 `-001.pptx`）。与
+// findSplitArtifactByPage 的形态判定同源，禁另写一套。
+func parseSplitArtifactName(name, target string) (stem string, page int, ok bool) {
+	if !strings.HasSuffix(name, ".pptx") {
+		return "", 0, false
+	}
+	if target == model.AssetSplitTargetReplace {
+		// replace 形态：<纯数字页序>-<主干>.pptx（页序段位数不限，v8 前后兼容）
+		idx := strings.IndexByte(name, '-')
+		if idx <= 0 || idx >= len(name)-len("-")-len(".pptx") || !isAllDigits(name[:idx]) {
+			return "", 0, false
+		}
+		n, convErr := strconv.Atoi(name[:idx])
+		if convErr != nil || n <= 0 {
+			return "", 0, false
+		}
+		return strings.TrimSuffix(name[idx+1:], ".pptx"), n, true
+	}
+	// source/cache 形态：<主干>-<纯数字页序>.pptx（主干允许为空）
+	n := pageSeqFromArtifactName(name)
+	if n <= 0 {
+		return "", 0, false
+	}
+	base := strings.TrimSuffix(name, ".pptx")
+	idx := strings.LastIndexByte(base, '-')
+	if idx < 0 {
+		// 不可达：pageSeqFromArtifactName 已保证末尾存在 "-<纯数字>" 段
+		return "", 0, false
+	}
+	return base[:idx], n, true
+}
+
 // findSplitArtifactByPage output_dir 内按页序反查唯一产物（改名重链回退路径）。
 // 目录不存在/不可读一律视为未命中；同页序候选多于一个视为不可判定（用户在该
 // 目录手工放入同页序文件时不猜），返回 false。
 func findSplitArtifactByPage(outputDir, target string, slideNum int) (string, bool) {
+	if slideNum <= 0 {
+		return "", false
+	}
 	entries, err := os.ReadDir(outputDir)
 	if err != nil {
 		return "", false
 	}
 	var hit string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pptx") {
+		if e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		matched := false
-		if target == model.AssetSplitTargetReplace {
-			// replace 形态：<纯数字页序>-<主干>.pptx（页序段位数不限，v8 前后兼容）
-			if idx := strings.IndexByte(name, '-'); idx > 0 && idx < len(name)-len("-")-len(".pptx") &&
-				isAllDigits(name[:idx]) {
-				if n, convErr := strconv.Atoi(name[:idx]); convErr == nil && n == slideNum {
-					matched = true
-				}
-			}
-		} else if pageSeqFromArtifactName(name) == slideNum {
-			matched = true
-		}
-		if !matched {
+		if _, page, ok := parseSplitArtifactName(e.Name(), target); !ok || page != slideNum {
 			continue
 		}
 		if hit != "" {
 			return "", false // 多候选不可判定
 		}
-		hit = filepath.Join(outputDir, name)
+		hit = filepath.Join(outputDir, e.Name())
 	}
 	return hit, hit != ""
+}
+
+// splitArtifactCandidate 旧产物目录内的形态匹配候选（清理判定用）。
+type splitArtifactCandidate struct {
+	path string
+	stem string
+}
+
+// collectSplitArtifactsByPage 一次读目录，收集 1..pageCount 范围内形态匹配候选，
+// 返回 page→候选切片 与 stem→该主干命中的页序集合（覆盖页数用）。目录不可读
+// 错误原样上抛（调用方区分「无旧产物可清」的正常路径，禁统一按不可判定告警）。
+func collectSplitArtifactsByPage(dir, target string, pageCount int) (map[int][]splitArtifactCandidate, map[string]map[int]bool, error) {
+	byPage := make(map[int][]splitArtifactCandidate)
+	byStem := make(map[string]map[int]bool)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return byPage, byStem, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		stem, page, ok := parseSplitArtifactName(e.Name(), target)
+		if !ok || page > pageCount {
+			continue
+		}
+		byPage[page] = append(byPage[page], splitArtifactCandidate{
+			path: filepath.Join(dir, e.Name()), stem: stem,
+		})
+		pages := byStem[stem]
+		if pages == nil {
+			pages = make(map[int]bool)
+			byStem[stem] = pages
+		}
+		pages[page] = true
+	}
+	return byPage, byStem, nil
+}
+
+// dominantSplitArtifactStem 选定产物主干：去重页序覆盖数最多的一组；须满足
+// 覆盖 ≥2 页或记录只有 1 页（单文件证据不足）；无候选/平票返回 ok=false。
+func dominantSplitArtifactStem(byStem map[string]map[int]bool, pageCount int) (string, bool) {
+	best := ""
+	bestCover := 0
+	tie := false
+	for stem, pages := range byStem {
+		cover := len(pages)
+		if cover > bestCover {
+			best, bestCover, tie = stem, cover, false
+		} else if cover == bestCover && cover > 0 {
+			tie = true
+		}
+	}
+	if bestCover == 0 || tie {
+		return "", false
+	}
+	// 覆盖不足两页时，目录内只剩单个同形文件：无法区分旧产物与用户自建文件
+	// （记录只有一页时该文件即全部产物，证据充分）。
+	if bestCover < 2 && pageCount != 1 {
+		return "", false
+	}
+	return best, true
 }
 
 // removeSplitArtifacts 源目录落点的重拆清旧页：仅删除匹配产物命名形态
@@ -1172,15 +1260,22 @@ func removeSplitArtifacts(dir, baseName string) {
 	}
 }
 
-// cleanupSplitArtifactsInDirByPage 按记录页数逐页反查并清理旧产物目录中的页产物
-// （含其索引行与缩略图）。用于源文件改名重链后的重拆清旧：记录键已迁到新路径，
-// 但 output_dir 冻结在旧产物目录、产物命名主干仍是旧源名，按当前主干清理必然漏删
-// 旧页并留下 files 索引行（旧页还能再次进入批量拆分源）。
+// cleanupSplitArtifactsInDirByPage 清理旧产物目录中的页产物（含其索引行与缩略图）。
+// 用于源文件改名重链后的重拆清旧：记录键已迁到新路径，但 output_dir 冻结在旧产物
+// 目录、产物命名主干仍是旧源名，按当前主干清理必然漏删旧页并留下 files 索引行
+// （旧页还能再次进入批量拆分源）。
 //
-// 为什么按页序反查而不按主干推导：旧主干需要从记录反向还原（含 replace 的 -p
-// 后缀与历史 %02d 形态），判定面大且极易误删；目录由该记录独占，按页序在
-// output_dir 内反查唯一候选即可精确定位（复用 findSplitArtifactByPage 单点）。
-// 同页序出现多个候选时视为不可判定——跳过该页（安全侧失败），不牵连其余页。
+// 为什么不再按「同页序唯一候选」判定：目录内用户自建文件可能恰好也是
+// `<主干>-<NNN>.pptx` 形态（如 `笔记-001.pptx`），原产物该页一旦缺失，单文件
+// 唯一性会把用户文件误认成旧产物删除且不可恢复。改为目录级证据：先按主干分组、
+// 取覆盖页数最多的一组作为产物组（覆盖 ≥2 页，或记录只有 1 页时才成立），仅删除
+// 主干与产物组一致且同页序唯一的候选；多候选跳过该页，不牵连其余页。
+//
+// 不可判定（平票/覆盖不足）按安全侧失败：整目录零删除并 Warn，残留交人工清理。
+// 目录不存在/不可读或目录内无任何形态匹配候选属正常路径（首次重拆无旧产物、用户
+// 已自行清理），静默返回不告警——只有「有候选但无法认定为产物组」才值得告警。
+// 旧主干本身不参与判定——记录未存产物主干（不改表结构），改由目录内多数页的共同
+// 主干反推。
 //
 // 调用点均在拆分成功之后（源落点核心返回成功后、replace 删源前），失败与取消
 // 路径不触达，上一次拆分成果原样保留。
@@ -1191,12 +1286,33 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 	if record == nil || dir == "" || record.pageCount <= 0 {
 		return
 	}
+	byPage, byStem, readErr := collectSplitArtifactsByPage(dir, record.target, record.pageCount)
+	if readErr != nil {
+		// 目录不存在/不可读：无旧产物可清，静默返回。
+		return
+	}
+	if len(byStem) == 0 {
+		// 目录内没有形态匹配候选：无旧产物可清，静默返回；顺手收敛空目录
+		// （与原「删空才删目录」语义一致，空壳残留不影响后续拆分）。
+		if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
+			_ = os.Remove(dir)
+		}
+		return
+	}
+	productStem, ok := dominantSplitArtifactStem(byStem, record.pageCount)
+	if !ok {
+		Logger().Warn("旧拆分产物目录主干不可判定，跳过清理（保留全部文件）",
+			"libraryId", lib.ID, "dir", dir, "pageCount", record.pageCount, "stemGroups", len(byStem))
+		return
+	}
 	removed := make([]string, 0, record.pageCount)
 	for page := 1; page <= record.pageCount; page++ {
-		p, ok := findSplitArtifactByPage(dir, record.target, page)
-		if !ok {
+		cands := byPage[page]
+		// 同页序多候选不可判定；主干不符说明不是产物组（用户自建文件），一律保留。
+		if len(cands) != 1 || cands[0].stem != productStem {
 			continue
 		}
+		p := cands[0].path
 		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
 			Logger().Warn("删除改名重链前的旧拆分产物失败（下次重拆收敛）",
 				"libraryId", lib.ID, "path", p, "err", rmErr)

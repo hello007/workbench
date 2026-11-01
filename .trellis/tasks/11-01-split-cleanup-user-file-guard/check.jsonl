@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对清理判定面实现与 §9.5 新描述一致，命名形态（source/cache vs replace）无回退"}
+{"file": "docs/spec/assets-management.md", "reason": "核对索引行/缩略图删除走 deleteIndexRowsForPaths，未引入新路径口径"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增分支单测覆盖四类场景与主干分组平票，覆盖率门禁不降"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对不可判定路径 Warn 日志字段与 slog 用法，无 println"}

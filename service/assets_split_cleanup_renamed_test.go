@@ -12,10 +12,11 @@ import (
 )
 
 // 重拆清旧页兼容改名重链（11-01-split-cleanup-renamed）单测：
-//   - 源落点：改名重链后记录键迁到新路径、output_dir 冻结旧目录，重拆按记录页数
-//     在旧目录内逐页反查清理旧主干产物，用户自建同名异构文件不动；
+//   - 源落点：改名重链后记录键迁到新路径、output_dir 冻结旧目录，重拆按主干分组 +
+//     页覆盖证据判定产物组并清理旧主干产物，用户自建同名异构 / 同页序文件不动；
 //   - replace 落点：改名重链后重拆在成功收尾阶段清理旧产物目录与索引行；
-//   - 同页序多候选视为不可判定，该页保留（安全侧失败）；
+//   - 同页序多候选、主干平票、页覆盖不足均按安全侧失败保留（不猜）；
+//   - 目录不存在/不可读或目录内无形态候选属正常路径，静默无操作；
 //   - 失败路径（核心失败 / replace 回滚）不删旧产物（延迟清理契约）。
 
 // mustNotExist 断言路径不存在（已被清理）。
@@ -151,7 +152,8 @@ func TestAssetSplit_SourceResplitCleansRenamedOldArtifacts(t *testing.T) {
 }
 
 // TestAssetSplit_SourceResplitTriggeredByMissingPage 旧产物首页缺失触发重拆
-// （源落点）：增量判定因产物不存在落空后重拆，剩余旧主干产物同样按页序清理。
+// （源落点）：增量判定因产物不存在落空后重拆，剩余旧主干产物（页 2..N，覆盖
+// ≥2 页构成产物组证据）同样按页序清理；首页缺失本身无文件可删。
 func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -159,6 +161,7 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	buildAssetsPptx(t, dir, "缺页旧名.pptx", []assetsSlideSpec{
 		{titlePh: "一", body: []string{"内容"}},
 		{titlePh: "二", body: []string{"内容"}},
+		{titlePh: "三", body: []string{"内容"}},
 	})
 	mustScanLibrary(t, svc, lib.ID)
 	store := svc.openStoreForTest(t, lib.ID)
@@ -170,14 +173,18 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 
 	oldDir := filepath.Join(dir, "缺页旧名")
 	oldPage2 := filepath.Join(oldDir, "缺页旧名-002.pptx")
+	oldPage3 := filepath.Join(oldDir, "缺页旧名-003.pptx")
 	testutil.WriteFile(t, oldPage2, "old-2")
-	if err := store.upsertSplitRecord("缺页旧名.pptx", hash, oldDir, 2,
+	testutil.WriteFile(t, oldPage3, "old-3")
+	if err := store.upsertSplitRecord("缺页旧名.pptx", hash, oldDir, 3,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9302, "缺页旧名/缺页旧名-002.pptx")
-	// 首页产物缺失（模拟用户手工删除部分产物）：增量判定落空 → 必须重拆
-	// 旧页产物文件缺失，故其索引行不在本用例断言面（按页序反查无从定位缺失文件）
+	insertIndexRowForTest(t, svc, lib.ID, 9303, "缺页旧名/缺页旧名-003.pptx")
+	// 首页产物缺失（模拟用户手工删除部分产物）：增量判定落空 → 必须重拆。
+	// 剩余页 2..3 仍构成产物组（覆盖 ≥2 页），照常清理；缺失的首页无文件可删，
+	// 故其索引行不在本用例断言面（目录内无从定位缺失文件）。
 
 	newDir := filepath.Join(dir, "缺页新目录")
 	if err := os.MkdirAll(newDir, 0755); err != nil {
@@ -196,15 +203,18 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("重拆: %v", err)
 	}
-	if res.Skipped || res.PageCount != 2 {
-		t.Fatalf("首页产物缺失应触发 2 页重拆：%+v", res)
+	if res.Skipped || res.PageCount != 3 {
+		t.Fatalf("首页产物缺失应触发 3 页重拆：%+v", res)
 	}
 	mustNotExist(t, oldPage2)
-	if n := countIndexRowsByPath(t, svc, lib.ID, "缺页旧名/缺页旧名-002.pptx"); n != 0 {
-		t.Errorf("旧产物索引行应被清理，实际 %d 行", n)
+	mustNotExist(t, oldPage3)
+	for _, rel := range []string{"缺页旧名/缺页旧名-002.pptx", "缺页旧名/缺页旧名-003.pptx"} {
+		if n := countIndexRowsByPath(t, svc, lib.ID, rel); n != 0 {
+			t.Errorf("旧产物索引行应被清理（%s），实际 %d 行", rel, n)
+		}
 	}
 	newOut := filepath.Join(newDir, "缺页新名")
-	for _, name := range []string{"缺页新名-001.pptx", "缺页新名-002.pptx"} {
+	for _, name := range []string{"缺页新名-001.pptx", "缺页新名-002.pptx", "缺页新名-003.pptx"} {
 		mustExist(t, filepath.Join(newOut, name))
 	}
 }
@@ -579,4 +589,206 @@ func TestCleanupSplitArtifactsInDirByPage_EmptyRecordNoop(t *testing.T) {
 	svc.cleanupSplitArtifactsInDirByPage(store, lib, nil, outDir)
 	svc.cleanupSplitArtifactsInDirByPage(store, lib, &assetSplitRecord{outputDir: outDir, pageCount: 0}, outDir)
 	mustExist(t, page1)
+}
+
+// TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept 页 1 旧产物缺失时，目录内
+// 用户自建的同页序文件（笔记-001.pptx）不得被当作旧产物删除：产物组按主干 + 页
+// 覆盖证据判定，主干不符的用户文件与其索引行原样保留，其余旧页照常清理。
+func TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "用户同页序文件库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "旧名")
+	page2 := filepath.Join(outDir, "旧名-002.pptx")
+	page3 := filepath.Join(outDir, "旧名-003.pptx")
+	userFile := filepath.Join(outDir, "笔记-001.pptx")
+	testutil.WriteFile(t, page2, "p2")
+	testutil.WriteFile(t, page3, "p3")
+	testutil.WriteFile(t, userFile, "user")
+	insertIndexRowForTest(t, svc, lib.ID, 9501, "旧名/旧名-002.pptx")
+	insertIndexRowForTest(t, svc, lib.ID, 9502, "旧名/旧名-003.pptx")
+	insertIndexRowForTest(t, svc, lib.ID, 9503, "旧名/笔记-001.pptx")
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     3,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustExist(t, userFile)
+	mustExist(t, outDir) // 用户文件仍在，目录不删
+	mustNotExist(t, page2)
+	mustNotExist(t, page3)
+	if n := countIndexRowsByPath(t, svc, lib.ID, "旧名/笔记-001.pptx"); n != 1 {
+		t.Errorf("用户文件索引行应保留，实际 %d 行", n)
+	}
+	for _, rel := range []string{"旧名/旧名-002.pptx", "旧名/旧名-003.pptx"} {
+		if n := countIndexRowsByPath(t, svc, lib.ID, rel); n != 0 {
+			t.Errorf("旧产物索引行应被清理（%s），实际 %d 行", rel, n)
+		}
+	}
+}
+
+// TestCleanupSplitArtifactsInDirByPage_SingleCandidateInsufficientEvidence 目录内只剩
+// 单个形态匹配文件、记录页数 ≥2：覆盖不足无法认定为产物组，整目录零删除（安全
+// 侧失败），文件与目录均保留。
+func TestCleanupSplitArtifactsInDirByPage_SingleCandidateInsufficientEvidence(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "证据不足保留库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "证据不足")
+	userFile := filepath.Join(outDir, "笔记-001.pptx")
+	testutil.WriteFile(t, userFile, "user")
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     2,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustExist(t, userFile)
+	mustExist(t, outDir)
+}
+
+// TestCleanupSplitArtifactsInDirByPage_StemTieKept 两个主干各覆盖 1 页（平票）：
+// 无法判定哪组是产物，全部保留。
+func TestCleanupSplitArtifactsInDirByPage_StemTieKept(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "主干平票库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "平票")
+	fileA := filepath.Join(outDir, "甲-001.pptx")
+	fileB := filepath.Join(outDir, "乙-002.pptx")
+	testutil.WriteFile(t, fileA, "a")
+	testutil.WriteFile(t, fileB, "b")
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     2,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustExist(t, fileA)
+	mustExist(t, fileB)
+	mustExist(t, outDir)
+}
+
+// TestCleanupSplitArtifactsInDirByPage_SinglePageRecordRemoves 记录只有 1 页时单文件
+// 即全部产物（证据充分）：照常删除，目录删空后一并移除。
+func TestCleanupSplitArtifactsInDirByPage_SinglePageRecordRemoves(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "单页记录库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "单页")
+	page1 := filepath.Join(outDir, "旧名-001.pptx")
+	testutil.WriteFile(t, page1, "p1")
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     1,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustNotExist(t, page1)
+	mustNotExist(t, outDir)
+}
+
+// TestCleanupSplitArtifactsInDirByPage_ReplaceKeepsUserFile replace 形态下用户自建
+// `<主干>-<NNN>.pptx` 天然不是候选（首段非纯数字）；产物组按 `<页序>-<主干>` 判定
+// 后照常清理，用户文件与其索引行保留。
+func TestCleanupSplitArtifactsInDirByPage_ReplaceKeepsUserFile(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "替换形态用户文件库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "旧名替换")
+	page1 := filepath.Join(outDir, replaceArtifactName(1, "旧名"))
+	page2 := filepath.Join(outDir, replaceArtifactName(2, "旧名"))
+	userFile := filepath.Join(outDir, "笔记-001.pptx")
+	testutil.WriteFile(t, page1, "p1")
+	testutil.WriteFile(t, page2, "p2")
+	testutil.WriteFile(t, userFile, "user")
+	insertIndexRowForTest(t, svc, lib.ID, 9601, "旧名替换/"+filepath.Base(userFile))
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名替换.pptx",
+		outputDir:     outDir,
+		pageCount:     2,
+		target:        model.AssetSplitTargetReplace,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustNotExist(t, page1)
+	mustNotExist(t, page2)
+	mustExist(t, userFile)
+	mustExist(t, outDir)
+	if n := countIndexRowsByPath(t, svc, lib.ID, "旧名替换/"+filepath.Base(userFile)); n != 1 {
+		t.Errorf("用户文件索引行应保留，实际 %d 行", n)
+	}
+}
+
+// TestCleanupSplitArtifactsInDirByPage_MissingDirNoop 旧产物目录不存在（首次重拆
+// 尚无产物、或用户已自行清理）：属正常路径，静默无操作——不 panic、不重建目录、
+// 不误报「主干不可判定」告警。
+func TestCleanupSplitArtifactsInDirByPage_MissingDirNoop(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "目录不存在库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "不存在")
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     3,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustNotExist(t, outDir)
+}
+
+// TestCollectSplitArtifactsByPage_ReadError 目录不可读时 os.ReadDir 错误上抛
+// （调用方据错误静默返回，与「有候选但无法判定」的告警路径区分）。
+func TestCollectSplitArtifactsByPage_ReadError(t *testing.T) {
+	_, _, err := collectSplitArtifactsByPage(
+		filepath.Join(t.TempDir(), "缺失目录"), model.AssetSplitTargetSource, 3)
+	if err == nil {
+		t.Fatal("目录不存在应返回错误")
+	}
+}
+
+// TestCleanupSplitArtifactsInDirByPage_ExistingEmptyDirRemoved 目录存在但为空（用户
+// 已手工清理全部旧产物）：无候选可清，静默返回并顺手收敛空目录，不留空壳。
+func TestCleanupSplitArtifactsInDirByPage_ExistingEmptyDirRemoved(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "空目录无候选库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "空壳")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("建空目录: %v", err)
+	}
+
+	record := &assetSplitRecord{
+		sourceRelPath: "新名.pptx",
+		outputDir:     outDir,
+		pageCount:     3,
+		target:        model.AssetSplitTargetSource,
+	}
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+
+	mustNotExist(t, outDir)
 }
