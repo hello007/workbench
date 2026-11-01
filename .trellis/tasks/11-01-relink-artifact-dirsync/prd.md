@@ -29,10 +29,22 @@
 - [ ] 事务回滚保护（记录写失败时 `files.path` 与 `output_dir` 均不变）。
 - [ ] `go test ./...` 全通过；覆盖率门禁不降。
 
-## Technical Approach（初稿，brainstorm 时确认）
+## Technical Approach
 
-- 探测复用产物形态判定单点（`isReplaceArtifactName` / `pageSeqFromArtifactName` / `splitArtifactPath` 家族），禁新写文件名解析。
-- 与 `split_records` 键迁移同事务：`relocateFileOK` / `relocateFileProcessing` 现有事务内追加落点更新。
+- **语义采用方案 A**：重链时若探测到产物目录已随源搬迁，只把记录 `output_dir` 改指新位置，不做物理移动。
+- 候选目录 = `<newAbs 父目录>/<新源名主干>`（与 `splitOutputDir` 同布局）；仅 `target ∈ {source, replace}` 参与（cache 产物位于应用数据目录，用户不会搬动，纳入判定只会放大误判面）。
+- 命中判定：候选目录存在、为目录，且 `findSplitArtifactByPage(候选目录, record.target, 1)` 命中（复用产物形态单点，与「增量判定首页存在」同口径）；否则保持原 `output_dir`（现有行为不变）。
+- 候选目录与原 `output_dir` 等价（`samePathFold`）时不产生变更。
+- 落库复用 `rewriteSplitRecordKeyTx` 的 `newOutDir` 形参：`relocateFileOK` / `relocateFileProcessing` 增加入参并透传，`files.path` 与 `output_dir` 同一事务；`dropSplitRecord` 分支（force 内容已变）不涉及落点。
+- 拆分记录读取失败按系统性错误返回（与既有 db 错误口径一致），不静默降级。
+
+## Decision (ADR-lite)
+
+**Context**：`RelocateAssetFile` 只改索引指针、`output_dir` 冻结原绝对路径——该决策对「源单独搬走」正确，但用户把源与其同名产物目录一起搬走时旧落点失效，打开单页报错、再次 replace 拆分被「同形文件」拒绝，形成死路。
+
+**Decision**：选择方案 A（迁移记录落点）。用户已在资源管理器完成搬运，方案 B 的「走目录移动入口」无法补救既成事实，只会把用户堵在死路。
+
+**Consequences**：重链后打开单页/导出/增量判定自动恢复；只改写记录，磁盘零操作，幂等（重复重链再次探测到等价落点即无变更）。风险面：新位置恰好存在同名且含同页序产物的目录时会误迁移——以「仅 source/replace」+「页序反查唯一命中」双重收敛；搬走产物目录但未搬走首页产物的场景不迁移（安全侧失败，用户可重新拆分）。
 
 ## Out of Scope
 

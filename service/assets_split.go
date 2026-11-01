@@ -524,12 +524,12 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	base := splitSourceBaseName(rel)
 	// 空主干（文件名恰为 .pptx / ..pptx）会让落点退化为源目录本身，产物将直接
 	// 写进源目录并可能覆盖同名文件；明确拒绝而不是落到意外落点（审核修复）。
-	if base == "" || base == "." || base == ".." {
+	if !splitStemUsable(base) {
 		return failed("源文件名主干为空，无法确定拆分产物目录，请先重命名文件后重试")
 	}
 	// 产物落点 = 源文件所在目录下与源同名的文件夹（与 source 落点同布局）。
 	// 核心原生输出恰为该目录下的 <base>-NNN.pptx，故直接传源路径拆。
-	outDir := filepath.Join(filepath.Dir(absPath), base)
+	outDir := splitSourceOutputDir(absPath, rel)
 
 	// 上次就地替换生成的单页产物禁止再次 replace 拆分（批量入口已剔除，此处是
 	// 单文件入口的兜底）：嵌套拆分把「页」再拆成「页的页」，并使源与产物失去
@@ -1068,6 +1068,21 @@ func splitSourceBaseName(rel string) string {
 	return strings.TrimSuffix(name, path.Ext(name))
 }
 
+// splitStemUsable 源名主干可用于推导落点：空主干（文件名恰为 `.pptx`）与清理后
+// 退化为 `.` / `..` 的形态（`..pptx` / `...pptx`）都会让「源所在目录 + 主干」
+// 退化成源所在目录本身，产物将写进源目录；拆分入口与重链搬迁探测共用本判定。
+func splitStemUsable(base string) bool {
+	return base != "" && base != "." && base != ".."
+}
+
+// splitSourceOutputDir 源同目录落点推导：`<源所在目录>/<源名主干>`。source 落点、
+// replace 落点（`splitOneFileReplace` 同布局）与重链搬迁探测（
+// resolveRelocatedSplitOutDir）共用本单点，禁各处手拼 Join(Dir(...), stem)
+// ——布局一旦分叉，探测到的候选目录就不再是拆分实际写出的目录。
+func splitSourceOutputDir(absPath, rel string) string {
+	return filepath.Join(filepath.Dir(absPath), splitSourceBaseName(rel))
+}
+
 // splitArtifactPath 拆分单页产物路径解析单点（打开单页 / 导出 / 增量判定共用）：
 // 先按记录键推导源名主干直拼（产物随源同名的常规场景）；直拼不存在时在
 // record.outputDir 内按页序反查——源文件经 RelocateAssetFile 改名重链后，记录键
@@ -1446,14 +1461,14 @@ func samePathFold(a, b string) bool {
 
 // splitOutputDir cache/source 两态落点解析（PRD Q4 落点契约，见文件头注释布局
 // 说明）；replace 落点与 source 同布局但命名不同，在 splitOneFileReplace 内自行
-// 计算（不走本函数）：
+// 计算（不走本函数，布局经 splitSourceOutputDir 单点复用）：
 //   - 缓存目录（后端空串归一 cache；前端弹窗默认 replace）：derived 镜像源树，
 //     目录段经 FromSlash 转平台分隔符；
 //   - 源目录（outputToSourceDir=true）：<源所在目录>/<源名主干>/。
 func (s *AssetLibraryService) splitOutputDir(lib model.AssetLibrary, rel, absPath string, outputToSourceDir bool) string {
 	name := splitSourceBaseName(rel)
 	if outputToSourceDir {
-		return filepath.Join(filepath.Dir(absPath), name)
+		return splitSourceOutputDir(absPath, rel)
 	}
 	if dirPart := path.Dir(rel); dirPart != "." && dirPart != "/" && dirPart != "" {
 		return filepath.Join(s.assetDerivedDir(lib.ID), filepath.FromSlash(dirPart), name)

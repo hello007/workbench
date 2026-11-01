@@ -3,7 +3,7 @@
   "name": "relink-artifact-dirsync",
   "title": "重链时识别产物目录已随源搬迁",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

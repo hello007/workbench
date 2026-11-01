@@ -528,14 +528,19 @@ func (s *assetsStore) fileHasSlides(fileID int64) (bool, error) {
 // 重链存在并发窗口）：UPDATE 空命中零操作，静默返回会按名册虚报重链成功——以
 // sql.ErrNoRows 上抛（对齐 fileRecordByID 无行语义），调用方转可读错误。
 //
-// 拆分记录源键（split_records.source_rel_path）在同一事务内改写为新路径，落点
-// output_dir 保持原绝对路径（文件级重链只改索引指针，产物目录物理未随源文件
-// 移动；按新路径重算会让「打开拆分单页」指向不存在目录），见
-// rewriteSplitRecordKeyTx。
-func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size, mtimeNs int64, now string) error {
+// 拆分记录源键（split_records.source_rel_path）在同一事务内改写为新路径，见
+// rewriteSplitRecordKeyTx。落点 output_dir 由 newOutDir 决定：空串 = 保持原值
+// （产物目录未随源文件移动的常规情形）；非空 = 调用方探测到产物容器目录已随源
+// 一起搬到新位置，落点改指新目录（只改记录，磁盘零操作）。
+//
+// 返回值 outDirMigrated = 本次是否真的把 output_dir 改写到了 newOutDir（供调用
+// 方决定是否记「落点已迁移」日志）：记录不存在 / 目标键冲突保留既有记录（旧记录
+// 被删）/ newOutDir 为空时均为 false——这些场景落点并未改动，按落点是否迁移记
+// 日志会误导排查。
+func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size, mtimeNs int64, now, newOutDir string) (outDirMigrated bool, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.Exec(
@@ -543,20 +548,24 @@ func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size
 		newPath, size, mtimeNs, model.AssetFileStatusOK, now, fileID,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return err
+		return false, err
 	} else if n == 0 {
-		return sql.ErrNoRows
+		return false, sql.ErrNoRows
 	}
-	// 拆分记录源键同事务迁移（与 files.path 同一事务：分裂则中途失败留「路径已改、
-	// 记录仍指旧键」的半态）。落点传空串 = 保持原 output_dir——重链只改索引指针，
-	// 产物目录物理未随源文件移动，重算会让「打开拆分单页」指向不存在目录。
-	if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
-		return fmt.Errorf("迁移拆分记录失败: %w", err)
+	// 拆分记录源键与落点同事务迁移（与 files.path 同一事务：分裂则中途失败留
+	// 「路径已改、记录仍指旧键/旧落点」的半态）。newOutDir 空串 = 保持原
+	// output_dir（产物目录未随源移动）；非空 = 已探测到迁到新位置的产物容器目录。
+	changed, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, newOutDir)
+	if err != nil {
+		return false, fmt.Errorf("迁移拆分记录失败: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return changed && newOutDir != "", nil
 }
 
 // relocateFileProcessing 哈希不等（force 确认）或记录无哈希的重链落库第一步：
@@ -565,10 +574,14 @@ func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size
 // 同口径）。FTS/slides/缩略图由随后的单文件重解析链路处理。零命中 = 行已被
 // 并发「清理丢失记录」删除（并发窗口同 relocateFileOK）：sql.ErrNoRows 上抛，
 // 调用方转可读错误（且不再进入随后的重解析探测段）。
-func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath string, now string, dropSplitRecord bool) error {
+//
+// 返回值 outDirMigrated 语义同 relocateFileOK：仅记录真的按 newOutDir 改写落点时
+// 为 true（dropSplitRecord=true 删除记录、目标键冲突保留既有记录、newOutDir 为空
+// 时均为 false）。
+func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath, now, newOutDir string, dropSplitRecord bool) (outDirMigrated bool, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.Exec(
@@ -576,24 +589,34 @@ func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath stri
 		newPath, model.AssetFileStatusProcessing, now, fileID,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return err
+		return false, err
 	} else if n == 0 {
-		return sql.ErrNoRows
+		return false, sql.ErrNoRows
 	}
 	// 拆分记录同事务处理：dropSplitRecord=true（内容已变的 force 重链）删除旧键
 	// 记录——旧产物与当前源不再对应，保留会展示必然过期/错误的「打开拆分单页」
-	// 入口，用户重新拆分后重建；false 则键迁移、落点保持（口径同 relocateFileOK）
+	// 入口，用户重新拆分后重建（删除分支不涉及落点，newOutDir 忽略）；false 则
+	// 键迁移 + 落点按 newOutDir 改写（口径同 relocateFileOK）
 	if dropSplitRecord {
 		if _, err := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", oldPath); err != nil {
-			return fmt.Errorf("清理失效拆分记录失败: %w", err)
+			return false, fmt.Errorf("清理失效拆分记录失败: %w", err)
 		}
-	} else if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
-		return fmt.Errorf("迁移拆分记录失败: %w", err)
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
-	return tx.Commit()
+	changed, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, newOutDir)
+	if err != nil {
+		return false, fmt.Errorf("迁移拆分记录失败: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return changed && newOutDir != "", nil
 }
 
 // listFilesByPathPrefix 旧前缀命中的文件记录（目录边界语义单点：path 恰等于

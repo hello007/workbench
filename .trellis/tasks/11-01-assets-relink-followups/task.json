@@ -25,6 +25,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-11-01 子任务 1 split-cleanup-renamed 完成（提交 29c77c2）：重拆清旧页按记录页数逐页 findSplitArtifactByPage 反查清理，去掉主干反推；source/replace 两链路挂拆分成功后，失败/取消不删旧产物。下一步：子任务 2 relink-artifact-dirsync（依赖 1 已合并）。",
+  "notes": "2026-11-01 子任务 1 split-cleanup-renamed 完成（提交 29c77c2）：重拆清旧页按记录页数逐页 findSplitArtifactByPage 反查清理，去掉主干反推；source/replace 两链路挂拆分成功后，失败/取消不删旧产物。子任务 2 relink-artifact-dirsync 完成（方案 A：resolveRelocatedSplitOutDir 探测候选目录并同事务改 output_dir）。下一步：子任务 3 move-split-key-conflict。",
   "meta": {}
 }
