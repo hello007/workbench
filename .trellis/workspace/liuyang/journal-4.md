@@ -570,3 +570,36 @@ RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 186: 重拆清旧页兼容改名重链
+
+**Date**: 2026-11-01
+**Task**: 重拆清旧页兼容改名重链
+**Branch**: `master`
+
+### Summary
+
+新增 cleanupSplitArtifactsInDirByPage：按 record.pageCount 逐页 findSplitArtifactByPage 反查清理改名重链前的旧产物（不反推主干，多候选跳过），source 挂核心成功后、replace 挂删源前，失败/取消不删；索引行统一 deleteIndexRowsForPaths；同步 pptx-split §9.5、assets-management §15.6 与 CLAUDE.md 关键规则行
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `29c77c2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
