@@ -117,7 +117,7 @@ test.describe('素材管理 PPT 拆分·就地替换', () => {
     await expect(warning).toContainText('原始文件将被移入系统回收站')
     await expect(warning).toContainText('不可撤销')
     // 批量入口目录回显为通用描述 + 禁用命名提示（非 ElMessageBox，无需 first/last）
-    await expect(warning).toContainText('各源文件同名目录')
+    await expect(warning).toContainText('各源文件同名的独立目录')
     await expect(warning).toContainText('源名主干')
     await expect(dialog.locator('.split-cache-hint')).toHaveCount(0)
 
@@ -130,13 +130,48 @@ test.describe('素材管理 PPT 拆分·就地替换', () => {
     const listCallsBefore = (await getWailsCalls(page, 'ListAssetFiles')).length
     await submit.click()
 
-    // 汇总按 replace 三类收尾口径（已删除源 2），并触发清单重拉
+    // 汇总按 replace 三类收尾口径（已删除源 2），并触发清单重拉（异步刷新链，
+    // 用 expect.poll 轮询而非同步断言，避免调用计数竞态）
     await expect(page.locator('.el-message').filter({ hasText: '已删除源 2' })).toBeVisible()
     await expect(dialog).not.toBeVisible()
-    expect((await getWailsCalls(page, 'ListAssetFiles')).length).toBeGreaterThan(listCallsBefore)
+    await expect.poll(async () => (await getWailsCalls(page, 'ListAssetFiles')).length)
+      .toBeGreaterThan(listCallsBefore)
 
     const calls = await getWailsCalls(page, 'SplitAssetLibrary')
     expect(calls.length).toBe(1)
     expect(calls[0].args).toEqual(['lib-e2e', 'replace'])
+  })
+
+  test('勾选强确认后取消不发起拆分；重开弹窗恢复默认落点且未勾选', async ({ page }) => {
+    await page.goto('/')
+
+    await page.locator('.activity-bar-item').nth(4).click()
+    const panel = page.locator('.assets-panel')
+    await expect(panel).toBeVisible()
+
+    await panel.getByRole('button', { name: '拆分全部 PPT' }).click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '拆分 PPT' })
+    await expect(dialog).toBeVisible()
+
+    // 首次打开默认缓存落点；切就地替换并勾选强确认后提交按钮可用
+    await expect(dialog.locator('.el-radio.is-checked')).toContainText('素材库缓存目录')
+    await dialog.locator('.el-radio').filter({ hasText: '就地替换' }).click()
+    await dialog.locator('.el-checkbox').click()
+    const submit = dialog.getByRole('button', { name: '开始拆分' })
+    await expect(submit).toBeEnabled()
+
+    // 取消：关闭弹窗且不发起任何拆分调用
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect(dialog).not.toBeVisible()
+    expect(await getWailsCalls(page, 'SplitAssetLibrary')).toHaveLength(0)
+
+    // 重开：恢复缓存目录默认落点；再切就地替换时强确认未勾选、提交禁用
+    await panel.getByRole('button', { name: '拆分全部 PPT' }).click()
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.el-radio.is-checked')).toContainText('素材库缓存目录')
+    await expect(dialog.locator('.split-replace-warning')).toHaveCount(0)
+    await dialog.locator('.el-radio').filter({ hasText: '就地替换' }).click()
+    await expect(dialog.locator('.el-checkbox input')).not.toBeChecked()
+    await expect(submit).toBeDisabled()
   })
 })

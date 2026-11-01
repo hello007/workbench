@@ -117,22 +117,26 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 
 | 步 | 动作 | 失败处置 |
 |---|---|---|
-| 1 | 源哈希（快照为空时现算）+ 源 `Stat` 基线（size + mtime） | 可读性失败 → 单文件失败 |
-| 2 | 增量四验：记录落点 = replace + 哈希一致 + **未删源**（`!source_removed`）+ 首页产物存在 | 命中则 `skipped`，不重拆；源从回收站还原后不放行跳过 |
-| 3 | 清旧产物：只删**已索引**的已改名 `<NNN>-stem.pptx` 并删索引行（核心中间态命中派生排除，残留不索引） | 删除失败告警继续 |
+| 1 | **重算**源哈希（快照非空且与重算不一致即拒绝）+ 源 `Stat` 基线（size + mtime）+ 空主干/二次拆分校验 | 任一失败 → 单文件失败（不产生产物） |
+| 2 | 读取既有记录（步骤 3 落点归属判定用）：replace **不做增量跳过**——源 `files` 行仍在（成功替换后已删）只对应「源从回收站还原」或「上次删源失败」两种须完整重拆的状态 | 重拆；旧产物保留到步骤 8b 前 |
+| 3 | 旧产物登记（延迟清理）：目录确属本文件 `target=replace` 记录时收集同形文件名集合 `oldArtifacts`，**不删除**；记录缺失/落点不符而目录已有同形文件则拒绝 | 拒绝即失败，目录内文件与源均不动 |
 | 4 | 调拆分核心（产物落 `outDir`，仍为核心原生命名） | 取消/失败 → 回滚产物 |
-| 5 | 逐页 rename 为可索引命名 + 逐页 `Stat`（存在且非空） | 回滚全部产物 |
+| 5 | 逐页 rename 为可索引命名 + 逐页 `Stat`（存在且非空）；目标命中 `oldArtifacts` 时先备份旧文件，其余既有文件拒绝覆盖 | 回滚全部产物并还原备份 |
 | 6 | 逐页 `processScanFile` 建索引，回读产物 `fileID`；产物路径命中库排除规则则拒绝 | 回滚产物与已写索引行 |
 | 7 | `migrateSplitAnnotations` 单事务预迁移标注 | 回滚产物与索引行，源不删 |
-| 8a | 删源前取消检查点 + 源 `Stat` 复核（size/mtime 与基线一致） | 取消或源被修改 → 回滚产物与索引行，源不删 |
-| 8b | `util.MoveToRecycleBin(源)` | 不回滚，返回删源失败码（产物与源均保留） |
+| 8a | 删源前取消检查点 + **取消标志复查**（注册条目已被 `CancelAssetSplit` 摘除即命中）+ 源 `Stat` 复核（size/mtime 与基线一致） | 取消或源被修改 → 回滚产物与索引行并还原备份，源不删 |
+| 8b | 历史旧页收尾（删 `oldArtifacts` 中不属于本次新页的文件与索引行）→ `util.MoveToRecycleBin(源)`；移入失败补写 `target=replace, source_removed=0` 记录 | 删除旧页失败仅告警；移入失败不回滚，返回删源失败码（产物与源均保留），记录作产物归属证据供重试/批量剔除 |
 | 9 | `finalizeReplaceSource` 单事务：重迁移晚到标注 + 删源索引行 | 仅告警，下次扫描标 lost |
 | 10 | `upsertSplitRecord(target=replace, source_removed=1)` | 仅告警（留痕职责） |
 | 11 | 返回 `sourceRemoved=true` 成功结果 | — |
 
-- **3-7 任一失败**：`rollbackReplaceArtifacts` 只删本次新增（核心调用前目录快照之外）的产物、索引行与缩略图，源文件与源行原样保留，明细 `rolledBack=true`；拆分前已存在的同形用户文件不动。
-- **取消三检查点**：核心返回取消错误、核心返回后、删源前。取消同样回滚后返回：单文件入口 `mapAssetSplitCancelError` 映射 `E_ASSETS_CANCELLED`（复用码，不新增）；批量入口改走正常收尾（见下条）。
-- **8b 失败**：产物、索引行、标注副本均保留，源与源行亦保留，返回 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning）；用户关闭占用程序后可重试，重拆覆盖产物。
+- **3-7 任一失败**：`rollbackReplaceArtifacts` 只删本次新增（核心调用前目录快照之外）的产物、索引行与缩略图；被本次覆盖的历史产物由 `restoreReplaceArtifactBackups` 从 `.replace-bak` 备份换回原位并尽力重解析刷新索引行。源文件与源行原样保留，明细 `rolledBack=true`。**旧产物不再在拆分前删除**——此前「先删后拆」在拆分失败时会连带丢掉上一次成果（审核修复）。
+- **目标占用拒绝**：rename 前目标名已存在且不在 `oldArtifacts`（目录形态、并发新增等非历史产物）时中止并回滚，禁覆盖用户数据。
+- **备份残留**：`.replace-bak` 仅存在于「备份让位」到「删源前收尾/回滚还原」之间；成功路径删源前清理、回滚路径换回原位。进程崩溃留下的 `.replace-bak` 不匹配 `.pptx`/产物形态，不参与扫描索引、批量剔除与下次重拆清旧，属无害残留（不自动清扫，可人工删除）。
+- **二次拆分拒绝**：批量源清单剔除位于 replace 记录 `output_dir` 下且匹配产物形态的文件（`filterReplaceArtifactSources`，Go 侧按记录集合比较，禁 SQL 拼路径）；单文件 `replace` 入口对同形产物直接拒绝，防「页的页」嵌套派生。
+- **源哈希重算**：快照哈希与当前重算不一致 → 「源文件内容已变化，请先重新扫描素材库后再拆分」，不产生产物（陈旧哈希会误判跳过并写失真 `source_hash`）。空主干（文件名恰为 `.pptx`）会让落点退化为源目录，入口明确拒绝。
+- **取消判定点**：核心返回取消错误、核心返回后、删源前 `ctx`、删源前注册表复查（`splitCancelledAfterCheckpoint`，覆盖 `CancelAssetSplit`「先摘条目再 cancel」的窗口）。取消同样回滚后返回：单文件入口 `mapAssetSplitCancelError` 映射 `E_ASSETS_CANCELLED`（复用码，不新增）；批量入口改走正常收尾（见下条）。**残余窗口**：复查之后紧接到达的取消仍可能把源移入回收站（可恢复删除兜底），该窗口无法原子消除，仅缩小并在此记明。
+- **8b 失败**：产物、索引行、标注副本均保留，源与源行亦保留，返回 `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning）；同时补写 `target=replace, source_removed=0` 记录，使目录内同形文件保有产物归属（批量剔除与重试重拆都依赖该记录）。用户关闭占用程序后可重试，重拆覆盖产物。
 - **批量入口失败分两类**：重命名/Stat/产物解析不可用等业务失败逐项填入 `Item{status:failed, code, rolledBack}` 继续后续文件；数据库写错误、标注事务错误属系统性错误，整体中止返回 error + `assets-split:error`。**取消不属系统性错误**：批量以已完成 `Items` + `Canceled=true` + nil error 收尾，终态发 `assets-split:done`，进行中的文件不追加 Item（前序已完成文件保持结果），详见 [assets-management.md §15.7](assets-management.md)。
 
 ### 9.4 回收站语义（`util.MoveToRecycleBin`）
@@ -144,8 +148,8 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 ### 9.5 拆分记录（schema v8）与重拆
 
 - `split_records` 增两列：`target TEXT NOT NULL DEFAULT 'cache'`、`source_removed INTEGER NOT NULL DEFAULT 0`；存量记录默认值语义正确（旧落点从不删源）。v8 迁移经 `migrateSchemaV8` 列存在性预判 + 单事务，半迁移库可重开。
-- replace 增量判定为四验（见 9.3 步 2），任一不满足即重拆；`source_removed=1` 但源文件已从回收站还原时同样重拆。
-- 重拆清旧只删已索引的已改名形态并联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图，防页数减少残留僵尸素材；未索引残留与用户自建文件不动。
+- replace **不做增量跳过**（见 9.3 步 2）：源行存在只对应「源从回收站还原」（`source_removed=1`）或「上次删源失败、产物完整」（`source_removed=0`）两种状态，均须完整重拆——跳过会留下源与产物并存或产物失去归属。
+- 重拆清旧改为**延迟清理**：拆分前只登记 `oldArtifacts` 不删除；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图——防页数减少残留僵尸素材，同时保证失败/取消时旧产物（含被覆盖页）原样保留。
 - `OpenAssetSplitPage` 按 `record.target` 选命名：replace 用 `<NNN>-<名字主干>.pptx`，其余用 `<主干>-<NNN>.pptx`。
 - `GetAssetSplitRecord` 回显 `target`/`sourceRemoved` 供展示与诊断；前端当前仅用 `exists` 决定「打开拆分单页」入口显隐，不据此禁用重拆（源还原后允许重拆）。
 

@@ -235,7 +235,7 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 - **保存检索条件快照不含 folderPath**（登记边界）：树选中属会话态导航语境而非检索条件，调取后树选中保留现状；导出「检索命中」范围**含 folderPath**（`exportSearchActive` 将 folderPath 计入激活判定——仅目录选中也构成缩窄语境，后端按文件夹前缀重放文件清单，全库导出不得忽略目录过滤）。
 - **聚合展开子项查询（toggleAgg）刻意不带 folderPath**：目录过滤为文件维度判定，聚合父卡能出现即归属文件已过目录筛选，同文件全部页继承同一判定（与 facet 省略同款 no-op 语义）。
 - **文件拖拽移动（PR3 R4）为数据变更点位非语境变更**：移动成功刷新文件底册与树徽标，**不清 folderPath / 不清树选中**（对齐批量打标签「数据变更不清选中」同性质），被移出当前目录的条目随清单刷新自然消失；拖拽多选集（与勾选集共用 selectedKeys 键空间）在移动完成后清空（拖拽操作收口，协调项拍板）。dragstart 载荷 MIME/序列化单点 `utils/assetFolder`（`ASSET_FILE_DRAG_MIME`/`buildAssetDragPayload`/`parseAssetDragPayload`），禁消费点手拼；拖拽卡在选中集内 = 整个选中集的文件卡批量移动，否则仅该卡。
-- **目录级移动（PR4 R5/D）与重命名统一核心**：`moveAssetFolderCore` 单点（RenameAssetFolder 委托同父形态 / MoveAssetFolder 传目标目录），磁盘 rename 先行 → 索引前缀同步（assetPathRenamesForPrefix + replaceFilePaths）→ 排除规则双向翻转 → 自动增量扫描收敛（锁段收拢闭包，扫描在锁释放后自取锁）。**目标不得位于源目录自身子树内**（rename 进后代语义未定义，前后端双防线——前端软拦截 drop、后端核心硬拒绝）；排除命中源刻意放行（移出排除名是恢复索引可见的唯一目录级出口，与重命名同口径）；源含拆分记录维持拒绝（宁严勿错）。
+- **目录级移动（PR4 R5/D）与重命名统一核心**：`moveAssetFolderCore` 单点（RenameAssetFolder 委托同父形态 / MoveAssetFolder 传目标目录），磁盘 rename 先行 → 索引前缀同步（assetPathRenamesForPrefix + replaceFilePaths）→ 排除规则双向翻转 → 自动增量扫描收敛（锁段收拢闭包，扫描在锁释放后自取锁）。**目标不得位于源目录自身子树内**（rename 进后代语义未定义，前后端双防线——前端软拦截 drop、后端核心硬拒绝）；排除命中源刻意放行（移出排除名是恢复索引可见的唯一目录级出口，与重命名同口径）；源含**源仍存在**的拆分记录（`source_removed=0`，含 cache/source 与 replace 失败/中断记录）维持拒绝（宁严勿错），`source_removed=1` 的替换留痕记录不阻断（源已进回收站，移动不会断开溯源，否则目录被历史记录永久锁死）。**残余限制**：留痕记录的 `source_rel_path`/`output_dir` 不随目录重命名或前缀替换迁移，`filterReplaceArtifactSources` 在该窗口按记录路径失配、产物可被再次批量拆分（仅派生件冗余，不触碰源与标注本体），后续以拆分记录路径同步收口。
 - **移动后自动扫描失败降级（P2 收口）**：目录重定位（runFolderRelocate）与文件批量移动（MoveAssetFiles）的尾部自动增量扫描失败（含 `E_ASSETS_SCAN_IN_PROGRESS` 被并发扫描抢占）**不随调用上抛**——操作（磁盘 + 索引）已提交，slog.Warn（带 libraryId 与 err）后照常返回成功结果，前端成功分支刷新链保持、失败提示自然消失；最终一致由在途扫描（用户手动或后续操作触发）的 done 事件兜底。no-op 文件移动（移入文件当前所在目录）单独识别计入 failed 明细（文案「文件已在该目录中，无需移动」，与目标内重名区分）。
 - **folder_meta 键级联契约（PR4 R8）**：文件夹标注 = `folder_meta`（folder_path 主键，note）+ `folder_tags`（(folder_path, tag_id)，FK tags CASCADE——与 file_tags/slide_tags 同构，禁 folder_meta 内嵌 JSON（标签删除留悬挂 ID））；**键 = folder_path 随目录重命名/移动在同事务级联改键**（replaceFilePaths 扩参 folderKeyOld/New，与 files.path 更新同一事务保证原子，分裂则中途失败留标注孤儿键；ReplaceAssetPathPrefix 前缀替换同样联动改键）；删除目录级联删标注（deleteFolderMetaByPathPrefix 前缀边界语义）；标签删除经 deleteTagTree 级联解绑（folder_tags 纳入三绑定表清单）。标注纯标注层不入 FTS（对齐页级口径）；库根/排除命中目录/派生容器禁标注（refuseFolderAnnotation 单点）。schema v7 迁移，无 Go 层回填（空表即正确初态）。
 - **folder 键级联的两个实测坑（trellis-check P0/P1）**：① `replaceFilePaths` 的 substr 偏移必须按 **SQLite 字符口径**（`substr(folder_path, length(?) + 1)`）而非 Go `len()` 字节数——旧目录名含中文时字节偏移截断错位（`素材/a.pptx` 按字节截出 `ptx`），folder_meta/folder_tags 键迁移后内容损坏，回归用例 `TestAssetFolderMove_NonASCIIKeyCascade`（中文目录名，修复前必失败）守护；② renames 清单为空（空目录/仅非 PPT 文件的目录，均可合法标注）**不得提前 return 跳过键级联**——replaceFilePaths 对空 renames 仅做文件夹键更新，跳过则重命名后标注留旧路径孤儿键，回归用例 `TestAssetFolderMove_EmptyFolderKeyCascade` 守护。
@@ -473,14 +473,15 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 
 ### 15.5 取消、失败回滚与批量明细
 
-- replace 取消或 3-7 步失败：回滚已产出产物、索引行与缩略图（详见 [pptx-split.md §9.3](pptx-split.md)）；`cache/source` 保持既有语义（取消保留已产出，幂等重拆覆盖）。
+- replace 取消或 3-7 步失败：回滚已产出产物、索引行与缩略图，并把被本次覆盖的历史页从备份还原（详见 [pptx-split.md §9.3](pptx-split.md)）；旧产物不在拆分前删除，失败/取消后仍原样可用。`cache/source` 保持既有语义（取消保留已产出，幂等重拆覆盖）。
 - 批量明细 `AssetSplitFileOutcome` 新增字段：`target`（落点）、`sourceRemoved`（已删源）、`rolledBack`（产物已回滚）、`code`（失败错误码）。
 - 前端据此分三类收尾：已删除源（`split` + `sourceRemoved`）/ 已回滚（`failed` + `rolledBack`）/ 源保留（`failed` + replace 未回滚）。
 
 ### 15.6 重拆清理与索引行收敛
 
-- 重拆前只删**已在 `files` 索引中登记**的已改名 `<NNN>-stem.pptx`（成功拆分的旧页必已索引），并联动 `deleteIndexRowsForReplacePaths` 逐条清缩略图记账后删 `files` 行；核心中间态 `<base>-NNN.pptx` 命中派生排除，残留不索引，无需清理。
-- 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；目录内用户自建文件与未索引崩溃残留一律不动，目录变空才尝试删除。
+- 重拆清旧改为**延迟清理**：拆分前只登记目录内同形产物名集合（`oldArtifacts`，仅当目录确属本文件 `target=replace` 记录时成立），不删文件；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForReplacePaths` 逐条清缩略图记账后删 `files` 行。
+- 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；失败/取消时旧页（含被覆盖页，经 `.replace-bak` 备份还原）原样保留。无 replace 记录而目录已有同形文件时直接拒绝拆分，不覆盖用户自建内容。
+- 批量源清单剔除上次 replace 生成的单页产物（`filterReplaceArtifactSources`，Go 侧按记录集合比较 `output_dir`），单文件入口对产物二次 replace 拆分拒绝——否则会生成「页的页」嵌套素材。删源失败（8b）补写 `target=replace, source_removed=0` 记录，产物归属不丢：重试不被同形文件拒绝、批量剔除继续生效（`replace` 不做增量跳过，见 pptx-split §9.3）。
 
 ### 15.7 批量取消保留已完成明细（2026-10-31）
 

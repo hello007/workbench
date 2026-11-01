@@ -310,14 +310,16 @@ catch (error) {
 - `findIndexLockResidue` 覆盖 .git 目录与 worktree gitdir 文件两形态；clone 目标 resolveUpward=false 禁向上防误报父仓锁；探测失败静默降级。
 - 锁被占用 stderr（`Unable to create '<path>': File exists`）在失败分支识别为 `E_GIT_LOCKED` AppError（`util.parseGitLockError` 单点，桌面 ErrorFormatter 与 serve `rpcFailureFromCall` 双通道零改动自动透传），前端 warning 引导人工确认后删除，非锁残留错误行为逐字不变。
 
-### 素材拆分取消与删源失败提示口径（2026-10-31，B 方案 PR1）
+## 10. 素材拆分取消与删源失败提示口径（2026-10-31，B 方案 PR1）
 
-- **取消**：replace 落点三检查点（核心返回取消错误 / 核心返回后 / 删源前）先回滚已产出产物、索引行与缩略图。单文件入口 `SplitAssetFile` 仍返回 `E_ASSETS_CANCELLED`（复用扫描取消码，消息「拆分已取消」），前端 warning 中性提示；**库级批量 `SplitAssetLibrary` 取消改走正常返回**：已完成 `Items` + `Canceled=true` + nil error + `assets-split:done`（不发 error 事件），前端按 warning 展示「已完成 X/Y + 三类计数」，详见 [assets-management.md §15.7](assets-management.md)。`cache/source` 保持取消保留已产出。取消按钮自身只提示「已请求取消拆分」。
+> 素材域（pptx 按页拆分）的取消与删源失败提示口径，与 §9 Git 取消链路并列但领域独立；落点三态与回滚时序见 [pptx-split.md §9.3](pptx-split.md)。
+
+- **取消**：replace 落点四个判定点（核心返回取消错误 / 核心返回后 `ctx` / 删源前 `ctx` / 删源前取消注册表复查 `splitCancelledAfterCheckpoint`——覆盖 `CancelAssetSplit`「先摘条目再 cancel」的窗口）先回滚已产出产物、索引行与缩略图并还原历史产物备份。单文件入口 `SplitAssetFile` 仍返回 `E_ASSETS_CANCELLED`（复用扫描取消码，消息「拆分已取消」），前端 warning 中性提示；**库级批量 `SplitAssetLibrary` 取消改走正常返回**：已完成 `Items` + `Canceled=true` + nil error + `assets-split:done`（不发 error 事件），前端按 warning 展示「已完成 X/Y + 三类计数」，详见 [assets-management.md §15.7](assets-management.md)。`cache/source` 保持取消保留已产出。取消按钮自身只提示「已请求取消拆分」。
 - **删源失败**：`E_ASSETS_SPLIT_SOURCE_DELETE_FAILED`（warning，见 §4.3 表）。单文件入口升格 `AppError` 经 ErrorFormatter 透传 code；批量入口只填 `Item.Code`，不整体失败；文案固定说明「产物已保留，可关闭占用程序后重新拆分」。
 - **批量三分类禁按文本匹配**：已删除源 / 已回滚 / 源保留由 `Item.Status + Target + SourceRemoved + RolledBack` 组合判定（前端 `splitOutcomeKind` 单点），message 仅展示；`Item.Code` 供诊断与错误码追溯，不参与分类。
 - **日志级别**：单文件失败 `Logger().Error`；回滚与删源失败 `Warn`；批量内单文件失败 `Warn`（异常隔离继续）。
 
-## 10. 相关文档
+## 11. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — ErrorFormatter 属 options 非签名变更，Wails 绑定零 diff
 - [app-services-assembly.md](app-services-assembly.md) — logger 在 NewAppServices 注入

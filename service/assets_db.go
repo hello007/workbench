@@ -2248,13 +2248,20 @@ func (s *assetsStore) deleteSplitRecord(relPath string) error {
 	return err
 }
 
-// splitRecordExistsByPathPrefix 目录前缀下是否存在拆分记录（文件夹重命名守卫
-// 判定用，PRD PR2 宁严勿错）：source_rel_path 恰等于前缀或以「前缀 + /」开头，
-// 目录边界语义与 listFilesByPathPrefix 同构（LIKE 转义单点 escapeLikePattern）。
+// splitRecordExistsByPathPrefix 目录前缀下是否存在**源仍存在**的拆分记录
+// （文件夹重命名守卫判定用，PRD PR2 宁严勿错）：source_rel_path 恰等于前缀或以
+// 「前缀 + /」开头，目录边界语义与 listFilesByPathPrefix 同构（LIKE 转义单点
+// escapeLikePattern）。
+//
+// 只统计 source_removed = 0：replace 成功后的记录是「源已进回收站」的留痕，
+// 源文件已不存在，移动目录不会断开任何在途溯源；若一并阻断，目录将被历史
+// 记录永久锁死（审核修复）。source_removed = 0 的 cache/source 记录与
+// replace 失败/中断记录（源仍在）继续阻断。
 func (s *assetsStore) splitRecordExistsByPathPrefix(relDir string) (bool, error) {
 	var n int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM split_records WHERE source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\'",
+		"SELECT COUNT(*) FROM split_records WHERE (source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\') "+
+			"AND source_removed = 0",
 		relDir, escapeLikePattern(relDir)+"/%",
 	).Scan(&n)
 	return n > 0, err
@@ -2546,10 +2553,47 @@ type assetSplitSource struct {
 	hash string
 }
 
+// replaceSplitOutput 一条 target=replace 拆分记录的落点快照（批量源清单排除
+// 上次替换产物用）：output_dir 为写入时的绝对路径（由 filepath.Join(源目录,
+// 源主干) 生成），source_rel_path 用于推导产物命名主干。
+type replaceSplitOutput struct {
+	outputDir string
+	sourceRel string
+}
+
+// listReplaceSplitOutputs 全部 target=replace 拆分记录的落点快照。路径比较在
+// 调用方 Go 侧完成（output_dir 存绝对路径，SQL 内拼分隔符/前缀极易误判，见
+// filterReplaceArtifactSources）。rows 收齐后显式 Close（单连接池自锁纪律）。
+func (s *assetsStore) listReplaceSplitOutputs() ([]replaceSplitOutput, error) {
+	rows, err := s.db.Query(
+		"SELECT source_rel_path, output_dir FROM split_records WHERE target = ?",
+		model.AssetSplitTargetReplace,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	outputs := make([]replaceSplitOutput, 0, 8)
+	for rows.Next() {
+		var o replaceSplitOutput
+		if err := rows.Scan(&o.sourceRel, &o.outputDir); err != nil {
+			return nil, err
+		}
+		if o.outputDir == "" {
+			continue
+		}
+		outputs = append(outputs, o)
+	}
+	return outputs, rows.Err()
+}
+
 // listOKFileSplitSources 拆分批量快照：全部 ok 状态文件的（相对路径, 哈希）
 // 清单，按路径序（进度与结果顺序确定，对齐 collectPptxEntries 排序口径）。
 // 哈希列为拆分增量判定基准（为空时调用方经 hashFileSHA256 现算）。rows 收齐
 // 后显式 Close（单连接池自锁纪律）。
+//
+// 上次 replace 生成的单页产物同样满足 status=ok：调用方须再经
+// filterReplaceArtifactSources 剔除，否则二次批量会把「页」再拆成「页的页」。
 func (s *assetsStore) listOKFileSplitSources() ([]assetSplitSource, error) {
 	rows, err := s.db.Query("SELECT path, hash FROM files WHERE status = ? ORDER BY path", model.AssetFileStatusOK)
 	if err != nil {

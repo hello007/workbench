@@ -408,7 +408,7 @@ func TestAssetSplitReplace_CancelRollsBack(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "取消.pptx", src, hash, "replace", 1, 1)
+	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "取消.pptx", src, hash, "replace", 1, 1, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("取消错误应保留 context.Canceled 链，实际：%v", err)
 	}
@@ -466,7 +466,7 @@ func TestAssetSplitReplace_CancelAfterCoreRollsBack(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "窗口.pptx", src, hash, "replace", 1, 1)
+	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "窗口.pptx", src, hash, "replace", 1, 1, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("核心后取消应保留 context.Canceled 链，实际：%v", err)
 	}
@@ -561,8 +561,11 @@ func TestAssetSplitReplace_RecycleFailureKeepsArtifacts(t *testing.T) {
 	if count != 2 {
 		t.Errorf("删源失败应保留 2 条产物索引行，实际 %d", count)
 	}
-	if record, _ := store.getSplitRecord("占用.pptx"); record != nil {
-		t.Errorf("删源失败不应写成功拆分记录（重拆走完整判定）：%+v", record)
+	// 删源失败写 target=replace/source_removed=0 的产物归属记录：产物已完整进索引，
+	// 记录是其唯一归属证据（重试归属判定与批量剔除依赖它），如实标记源仍在
+	if record, _ := store.getSplitRecord("占用.pptx"); record == nil ||
+		record.target != model.AssetSplitTargetReplace || record.sourceRemoved {
+		t.Errorf("删源失败应写 target=replace/source_removed=0 归属记录，实际：%+v", record)
 	}
 }
 

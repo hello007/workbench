@@ -978,7 +978,7 @@
       </div>
       <div v-else-if="splitTarget === 'replace'" class="split-replace-warning">
         <div class="split-replace-text">
-          原始文件将被移入系统回收站，单页文件保存于「{{ splitReplaceFolder }}」目录，并会作为独立素材进入素材库。
+          原始文件将被移入系统回收站，单页文件{{ splitReplaceFolderPhrase }}，并会作为独立素材进入素材库。
         </div>
         <el-checkbox v-model="splitReplaceConfirmed" :disabled="splitConfirming">
           我已了解原始文件将被删除，且此操作不可撤销
@@ -1008,6 +1008,7 @@
       :title="splitOutcomeTitle"
       width="min(600px, 90vw)"
       append-to-body
+      @closed="resetSplitOutcome"
     >
       <div v-if="splitOutcomeSummary" class="split-outcome-summary">{{ splitOutcomeSummary }}</div>
       <div class="split-outcome-list">
@@ -1533,6 +1534,24 @@ const openingSplitPage = ref(false)
 // 即丢弃（旧库任务态/提示不得污染新库语境，模式对齐本文件 librarySeq）
 let splitSeq = 0
 
+// 拆分确认弹窗复位单点：关闭弹窗并回默认语境（库级批量、缓存目录落点、未勾选
+// 强确认）。打开新语境与切库复位共用，避免各调用点手抄默认值。
+const resetSplitDialog = () => {
+  splitDialogVisible.value = false
+  splitTarget.value = 'cache'
+  splitReplaceConfirmed.value = false
+  splitDialogCtx.value = { scope: 'library', relPath: '', fileName: '', fileStem: '' }
+}
+
+// 拆分结果明细复位单点：关闭弹窗并清空逐文件明细（切库与弹窗关闭共用，防旧库
+// 明细/取消上下文驻留）。
+const resetSplitOutcome = () => {
+  splitOutcomeVisible.value = false
+  splitOutcomeItems.value = []
+  splitOutcomeCanceled.value = false
+  splitOutcomeTotal.value = 0
+}
+
 // ---- 缩略图设置弹窗 ----
 const thumbSettingsVisible = ref(false)
 const thumbSettingsSaving = ref(false)
@@ -1587,13 +1606,14 @@ const splitPageText = computed(() => {
   return `第 ${p.pageDone}/${p.pageTotal} 页`
 })
 
-// 就地替换弹窗文案中的产物目录名回显：单文件入口取源路径 basename 去扩展名
-//（与后端 splitSourceBaseName 同口径，禁依赖可能展示化的 title）；库级批量
-// 无单一源名，按通用描述展示
-const splitReplaceFolder = computed(() => {
-  if (splitDialogCtx.value.scope !== 'file') return '各源文件同名目录'
+// 就地替换弹窗文案中的产物目录描述（含动词短语，供两入口共用同一句子拼接）：
+// 单文件入口取源路径 basename 去扩展名（与后端 splitSourceBaseName 同口径，禁
+// 依赖可能展示化的 title）；库级批量无单一源名，按「分别保存于各源文件同名目录」
+// 表述，避免「保存于「各源文件同名目录」目录」的重复目录字样
+const splitReplaceFolderPhrase = computed(() => {
+  if (splitDialogCtx.value.scope !== 'file') return '分别保存于各源文件同名的独立目录'
   const stem = splitDialogCtx.value.fileStem || ''
-  return stem || '源文件同名目录'
+  return `保存于「${stem || '源文件同名目录'}」目录`
 })
 
 // 产物禁用命名回显：<源名主干>-001.pptx（批量用占位主干）
@@ -1648,12 +1668,11 @@ watch(currentLibraryId, () => {
   splitting.value = false
   splitProgress.value = null
   splitRecord.value = null
-  // 明细窗属旧库语境：切库一并关闭并清空，防取消/失败明细串到新库（与上方
-  // 拆分运行态同口径，禁只复位一半）
-  splitOutcomeVisible.value = false
-  splitOutcomeItems.value = []
-  splitOutcomeCanceled.value = false
-  splitOutcomeTotal.value = 0
+  // 确认弹窗与明细窗属旧库语境：切库一并关闭并按默认值复位，防弹窗残留旧库
+  // 语境（向新库提交旧 relPath，replace 落点可能误删新库同路径文件）与明细
+  // 串库（与上方拆分运行态同口径，禁只复位一半）
+  resetSplitDialog()
+  resetSplitOutcome()
 })
 
 // ---- 标签共享列表（第六批起独立数据源，PRD D1：ListAssetTags 独立标签 API）----
@@ -1898,6 +1917,20 @@ const refreshDataAfterMutation = async ({ reloadStats = false, reloadTagTrees = 
     }
     handleError('刷新数据失败: ', error)
   }
+}
+
+// 刷新后选中一致性校验单点（数据变更点位）：变更可能删除条目（就地替换把源
+// 文件移入回收站即典型），驻留详情会形成幽灵条目——详情仍展示已删文件，后续
+// 保存或再拆分向后端提交已不存在的记录。以最新文件底册比对详情归属文件路径，
+// 缺失即关详情并清空选中（勾选集里的同文件卡键一并清理）。仅做校验，不重复
+// 编排刷新——调用方先经 refreshDataAfterMutation 完成清单重拉。
+const reconcileSelectionAfterMutation = () => {
+  if (!selected.value) return
+  const path = detailThumbPath.value
+  if (!path) return
+  if (fileEntries.value.some((entry) => entry.path === path)) return
+  closeDetail()
+  clearSelection()
 }
 
 // 批量完成刷新链（弹窗 completed 事件，全部成功/部分成功均触发——每条目一事务
@@ -4486,12 +4519,11 @@ const onJumpToSlide = async () => {
 
 // ================= PPT 拆分（SRS §2.2.3 / §2.2.5 方式 2）=================
 
-// 打开拆分确认弹窗（单文件 / 库级两入口共用）：重置落点为默认缓存目录并清除
+// 打开拆分确认弹窗（单文件 / 库级两入口共用）：先按复位单点回默认落点并清除
 // 就地替换强确认勾选（上一次的勾选不得沿用到新语境）
 const openSplitDialog = (scope) => {
   if (splitting.value) return
-  splitTarget.value = 'cache'
-  splitReplaceConfirmed.value = false
+  resetSplitDialog()
   if (scope === 'file') {
     const entry = selected.value?.fileEntry
     if (!entry) return
@@ -4580,7 +4612,10 @@ const onConfirmSplit = async () => {
     handleError('拆分失败: ', error)
   } finally {
     if (seq === splitSeq && target === 'replace') {
+      // 删源后详情若驻留被删文件即幽灵条目：清单重拉完成后走选中一致性校验
+      // 单点（刷新编排仍由 refreshDataAfterMutation 唯一负责）
       await refreshDataAfterMutation({ reloadStats: true, reloadFolders: true })
+      if (seq === splitSeq) reconcileSelectionAfterMutation()
     }
     // splitConfirming 归属本次提交点击，恒复位（旧 Promise 延迟落定不得把
     // 「提交中」残留阻塞后续提交）；splitting/splitProgress 属拆分任务运行态，
@@ -4682,7 +4717,7 @@ const splitOutcomeTagType = (item) => SPLIT_OUTCOME_META[splitOutcomeKind(item)]
 
 // 批量结果收尾计数（replace 落点专用口径为主；failed 供取消摘要复用）
 const countSplitOutcomeKinds = (items) => {
-  const counts = { replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0, failed: 0 }
+  const counts = { split: 0, replaced: 0, rolledBack: 0, sourceKept: 0, skipped: 0, failed: 0 }
   for (const item of items || []) {
     const kind = splitOutcomeKind(item)
     if (kind in counts) counts[kind] += 1
@@ -4716,21 +4751,18 @@ const splitOutcomeTitle = computed(() =>
   splitOutcomeCanceled.value ? '拆分结果明细（已取消）' : '拆分结果明细'
 )
 
-// 明细弹窗顶部汇总（replace 三类收尾计数一次性可见；取消时补齐已取消上下文）
+// 明细弹窗顶部汇总：与 toast 共用 splitBatchCountsText 计数口径（含已跳过，
+// 防明细与提示合计对不上）；取消时补齐已完成 X/Y 上下文
 const splitOutcomeSummary = computed(() => {
   const items = splitOutcomeItems.value
   if (!items.length) return ''
   const c = countSplitOutcomeKinds(items)
-  if (items.some((item) => item.target === 'replace')) {
-    const head = splitOutcomeCanceled.value
-      ? `已取消：已完成 ${items.length}/${splitOutcomeTotal.value} 个文件`
-      : `共 ${items.length} 个文件`
-    return `${head}：已删除源 ${c.replaced}，已回滚 ${c.rolledBack}，源保留 ${c.sourceKept}`
-  }
-  if (splitOutcomeCanceled.value) {
-    return `已取消：已完成 ${items.length}/${splitOutcomeTotal.value} 个文件，失败 ${c.failed}`
-  }
-  return ''
+  const head = splitOutcomeCanceled.value
+    ? `已取消：已完成 ${items.length}/${splitOutcomeTotal.value} 个文件`
+    : `共 ${items.length} 个文件`
+  const target = items.some((item) => item.target === 'replace') ? 'replace' : ''
+  const batch = { split: c.split, skipped: c.skipped, failed: c.failed, items }
+  return `${head}：${splitBatchCountsText(batch, target)}`
 })
 
 // 打开设置弹窗：先以默认值填充草稿（防上一次脏值闪烁），再异步拉取当前设置回填。
