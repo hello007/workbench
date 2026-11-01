@@ -636,3 +636,36 @@ RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 188: 素材拆分与重链链路后续收口（父任务三项）
+
+**Date**: 2026-11-01
+**Task**: 素材拆分与重链链路后续收口（父任务三项）
+**Branch**: `master`
+
+### Summary
+
+三项缺口全部收口：①重拆清旧页按记录页数逐页 findSplitArtifactByPage 清理改名重链前旧产物（禁反推主干，失败/取消不删）②重链探测产物目录随源搬迁（resolveRelocatedSplitOutDir + 同事务改 output_dir，仅 source/replace 且首页命中）③单文件移动拆分键改走 rewriteSplitRecordKeyTx（禁裸 UPDATE，冲突保留 source_removed=1）。go test ./... 全通过，覆盖率 service 81.1%/model 98.2%/server 90.5%/util 62.2%
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b73fd9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
