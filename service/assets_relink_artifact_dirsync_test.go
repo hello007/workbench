@@ -67,7 +67,7 @@ func setupDirSyncFixture(t *testing.T, target string) *dirSyncFixture {
 	}
 
 	store := svc.openStoreForTest(t, lib.ID)
-	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, false); err != nil {
+	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, "方案", false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	for page := 1; page <= 2; page++ {
@@ -272,6 +272,47 @@ func TestResolveRelocatedSplitOutDir_EmptyStemRejected(t *testing.T) {
 	}
 }
 
+// TestResolveRelocatedSplitOutDir_StemOwnership 搬迁探测的产物归属校验（M2）：
+// 候选目录首页产物主干必须属于记录主干（artifact_stem；空值回落记录 output_dir
+// 基名），否则该目录属于其他同名源文件，不得采纳（防后续清理误删他人产物）。
+func TestResolveRelocatedSplitOutDir_StemOwnership(t *testing.T) {
+	root := t.TempDir()
+	writeSplitArtifactForTest(t, filepath.Join(root, "方案", "方案-001.pptx"))
+	newAbs := filepath.Join(root, "方案.pptx")
+	const newRel = "方案.pptx"
+
+	// 记录主干与候选产物主干不符 → 不采纳
+	if got := resolveRelocatedSplitOutDir(&assetSplitRecord{
+		target:       model.AssetSplitTargetSource,
+		outputDir:    filepath.Join(root, "别的落点"),
+		artifactStem: "别的主干",
+	}, newAbs, newRel); got != "" {
+		t.Errorf("候选产物主干与记录主干不符时不得采纳，实际返回 %q", got)
+	}
+	// 记录主干一致 → 采纳
+	if got := resolveRelocatedSplitOutDir(&assetSplitRecord{
+		target:       model.AssetSplitTargetSource,
+		outputDir:    filepath.Join(root, "别的落点"),
+		artifactStem: "方案",
+	}, newAbs, newRel); !samePathFold(got, filepath.Join(root, "方案")) {
+		t.Errorf("记录主干一致时应采纳候选目录，实际返回 %q", got)
+	}
+	// 空主干（v9 前旧记录）回落记录 output_dir 基名
+	if got := resolveRelocatedSplitOutDir(&assetSplitRecord{
+		target:    model.AssetSplitTargetSource,
+		outputDir: filepath.Join(root, "x", "方案"),
+	}, newAbs, newRel); !samePathFold(got, filepath.Join(root, "方案")) {
+		t.Errorf("空主干应按记录 output_dir 基名回落采纳，实际返回 %q", got)
+	}
+	// 空主干且基名不符 → 不采纳
+	if got := resolveRelocatedSplitOutDir(&assetSplitRecord{
+		target:    model.AssetSplitTargetSource,
+		outputDir: filepath.Join(root, "x", "别的"),
+	}, newAbs, newRel); got != "" {
+		t.Errorf("空主干且基名不符时不得采纳，实际返回 %q", got)
+	}
+}
+
 // TestResolveRelocatedSplitOutDir_DegenerateInputs 搬迁探测纯函数边界：每类退化输入
 // 都必须落在安全侧（返回空串 = 保持原落点），不得误迁移。
 func TestResolveRelocatedSplitOutDir_DegenerateInputs(t *testing.T) {
@@ -325,12 +366,12 @@ func TestResolveRelocatedSplitOutDir_DegenerateInputs(t *testing.T) {
 		}, false},
 		{"源落点首页命中", func(t *testing.T, root string) (*assetSplitRecord, string, string) {
 			writeSplitArtifactForTest(t, filepath.Join(root, "方案", "方案-001.pptx"))
-			return &assetSplitRecord{target: model.AssetSplitTargetSource, outputDir: filepath.Join(root, "别的落点")},
+			return &assetSplitRecord{target: model.AssetSplitTargetSource, outputDir: filepath.Join(root, "别的落点"), artifactStem: "方案"},
 				filepath.Join(root, "方案.pptx"), "方案.pptx"
 		}, true},
 		{"替换落点首页命中", func(t *testing.T, root string) (*assetSplitRecord, string, string) {
 			writeSplitArtifactForTest(t, filepath.Join(root, "方案", replaceArtifactName(1, "方案")))
-			return &assetSplitRecord{target: model.AssetSplitTargetReplace, outputDir: filepath.Join(root, "别的落点")},
+			return &assetSplitRecord{target: model.AssetSplitTargetReplace, outputDir: filepath.Join(root, "别的落点"), artifactStem: "方案"},
 				filepath.Join(root, "方案.pptx"), "方案.pptx"
 		}, true},
 	}

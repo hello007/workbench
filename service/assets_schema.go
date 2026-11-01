@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 8
+const assetsSchemaVersion = 9
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -250,6 +250,22 @@ ALTER TABLE split_records ADD COLUMN target TEXT NOT NULL DEFAULT 'cache';
 ALTER TABLE split_records ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0;
 `
 
+// assetsSchemaV9SQL v9 迁移：拆分记录持久化产物命名主干（清理误删/漏清总收口，
+// 2026-11-02）。
+//
+// 设计要点：
+//   - artifact_stem = 本次拆分实际产物文件名主干（source/cache 为
+//     splitSourceBaseName(rel)；replace 为 replaceArtifactBase(base)）。此前清理
+//     与重链探测只能靠「产物目录基名」反推归属，replace 纯数字主干经 -p 后缀后
+//     与目录名合法不一致，必然漏清；持久化主干使归属判定成为记录权威事实；
+//   - 存量记录默认空串（v9 前无该列），读取侧回落目录启发式
+//     {filepath.Base(outputDir), replaceArtifactBase(...)} 保持兼容；
+//   - 实际执行走 assets_db.go 的 migrateSchemaV9（列存在性预判 + 单事务），本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
+const assetsSchemaV9SQL = `
+ALTER TABLE split_records ADD COLUMN artifact_stem TEXT NOT NULL DEFAULT '';
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -263,6 +279,7 @@ var assetsMigrations = map[int]string{
 	6: assetsSchemaV6SQL,
 	7: assetsSchemaV7SQL,
 	8: assetsSchemaV8SQL,
+	9: assetsSchemaV9SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

@@ -100,7 +100,7 @@ func TestAssetFolderMove_Refusals(t *testing.T) {
 		t.Errorf("源为派生容器应拒绝")
 	}
 	// 源含拆分记录不再拒绝（B 方案 PR2）：记录随目录同一事务迁移到新路径
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", filepath.Join(root, "media", "a"), 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", filepath.Join(root, "media", "a"), 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, "", false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "dest"), 0o755); err != nil {

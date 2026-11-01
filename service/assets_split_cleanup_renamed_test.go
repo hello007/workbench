@@ -14,13 +14,18 @@ import (
 	"workbench/util/testutil"
 )
 
-// 重拆清旧页兼容改名重链（11-01-split-cleanup-renamed）单测：
-//   - 源落点：改名重链后记录键迁到新路径、output_dir 冻结旧目录，重拆按**目录基名
-//     锚定**判定产物组（`filepath.Base(outputDir)` == 拆分时源主干 == 产物命名
-//     主干）并清理旧主干产物，用户自建同名异构 / 同页序文件不动；
-//   - replace 落点：改名重链后重拆在成功收尾阶段清理旧产物目录与索引行；
-//   - 同页序多候选、目录基名与所有主干均不匹配均按安全侧失败保留（不猜；
-//     页数覆盖不再参与选组）；
+// 重拆清旧页与改名重链（11-01-split-cleanup-renamed、11-02-split-artifact-stem-column）
+// 单测：
+//   - 源落点：改名重链后记录键迁到新路径、output_dir 冻结旧目录，重拆按
+//     `split_records.artifact_stem`（v9 权威）锚定产物组并清理旧主干产物；空值为
+//     v9 前旧记录，回落 {目录基名, replace 数字主干变体}；用户自建同名异构 / 同
+//     页序文件不动；
+//   - replace 落点：改名重链后重拆在成功收尾阶段清理旧产物目录与索引行；纯数字
+//     主干（`123` → `123-p`）的旧产物靠记录主干清理（不再必然漏清）；
+//   - 同目录改主干（M1，搬迁后 output_dir == 新落点）：旧主干清理、本次新主干保留；
+//   - 跨落点切换（M4，cache↔source）同样收敛旧落点产物与索引行；
+//   - 同页序多候选（同主干）与记录主干/目录基名均不匹配按安全侧失败保留（不猜；
+//     页数覆盖不参与选组），多候选输出 Warn；
 //   - 目录不存在/目录内无形态候选属正常路径，静默无操作；非不存在的读错误 Warn；
 //   - 失败路径（核心失败 / replace 回滚）不删旧产物（延迟清理契约）。
 
@@ -91,7 +96,8 @@ func TestAssetSplit_SourceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	draft := filepath.Join(oldDir, "旧名-草稿.pptx")
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9001, "旧名/旧名-001.pptx")
@@ -157,8 +163,8 @@ func TestAssetSplit_SourceResplitCleansRenamedOldArtifacts(t *testing.T) {
 }
 
 // TestAssetSplit_SourceResplitTriggeredByMissingPage 旧产物首页缺失触发重拆
-// （源落点）：增量判定因产物不存在落空后重拆，剩余旧主干产物（页 2..N，覆盖
-// ≥2 页构成产物组证据）同样按页序清理；首页缺失本身无文件可删。
+// （源落点）：增量判定因产物不存在落空后重拆，剩余旧主干产物（页 2..N，记录
+// artifact_stem 锚定即产物组）同样按页序清理；首页缺失本身无文件可删。
 func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -182,13 +188,14 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	testutil.WriteFile(t, oldPage2, "old-2")
 	testutil.WriteFile(t, oldPage3, "old-3")
 	if err := store.upsertSplitRecord("缺页旧名.pptx", hash, oldDir, 3,
-		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9302, "缺页旧名/缺页旧名-002.pptx")
 	insertIndexRowForTest(t, svc, lib.ID, 9303, "缺页旧名/缺页旧名-003.pptx")
 	// 首页产物缺失（模拟用户手工删除部分产物）：增量判定落空 → 必须重拆。
-	// 剩余页 2..3 仍构成产物组（覆盖 ≥2 页），照常清理；缺失的首页无文件可删，
+	// 剩余页 2..3 仍属记录主干产物组，照常清理；缺失的首页无文件可删，
 	// 故其索引行不在本用例断言面（目录内无从定位缺失文件）。
 
 	newDir := filepath.Join(dir, "缺页新目录")
@@ -225,8 +232,7 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 }
 
 // TestAssetSplit_SourceResplitMissingFirstPageCleaned 2 页源缺首页（旧产物仅剩页 2）
-// 触发重拆：按基名锚定，页 2 与目录基名一致即产物组，照常清理（与旧「覆盖 ≥2 页
-// 才算产物组」的 PRD 文本不同——新规则下基名匹配即产物组，覆盖不足不再保留）。
+// 触发重拆：记录 artifact_stem 锚定命中即产物组，页 2 照常清理（覆盖不足不再保留）。
 func TestAssetSplit_SourceResplitMissingFirstPageCleaned(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -247,12 +253,13 @@ func TestAssetSplit_SourceResplitMissingFirstPageCleaned(t *testing.T) {
 	oldPage2 := filepath.Join(oldDir, "缺二旧名-002.pptx")
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("缺二旧名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9322, "缺二旧名/缺二旧名-002.pptx")
 	// 首页产物缺失（模拟用户手工删除）：增量判定落空 → 必须重拆。
-	// 旧 PRD「覆盖 ≥2 页才算产物组」会保留页 2；新基名锚定规则下页 2 属产物组，清理。
+	// v9 前「覆盖 ≥2 页才算产物组」的旧规则会保留页 2；记录主干锚定下页 2 属产物组，清理。
 
 	newDir := filepath.Join(dir, "缺二新目录")
 	if err := os.MkdirAll(newDir, 0755); err != nil {
@@ -309,7 +316,8 @@ func TestAssetSplit_SourceResplitCoreFailureKeepsRenamedOldArtifacts(t *testing.
 	testutil.WriteFile(t, oldPage1, "old-1")
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("失败前旧名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9401, "失败前旧名/失败前旧名-001.pptx")
@@ -394,7 +402,8 @@ func TestAssetSplit_ReplaceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	draft := filepath.Join(oldDir, "旧替换-草稿.pptx")
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧替换.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9101, "旧替换/"+filepath.Base(oldPage1))
@@ -478,7 +487,8 @@ func TestAssetSplit_ReplaceResplitCleansOtherTargetOldArtifacts(t *testing.T) {
 	testutil.WriteFile(t, oldPage1, "old-1")
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("切换旧名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 
@@ -536,7 +546,8 @@ func TestAssetSplit_ReplaceRecycleFailureKeepsCleanedOldArtifacts(t *testing.T) 
 	testutil.WriteFile(t, oldPage1, "old-1")
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("旧替换名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9251, "旧替换名/"+filepath.Base(oldPage1))
@@ -604,7 +615,8 @@ func TestAssetSplit_ReplaceFailureKeepsRenamedOldArtifacts(t *testing.T) {
 	testutil.WriteFile(t, oldPage1, "old-1")
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("失败旧名.pptx", hash, oldDir, 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
+		false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9201, "失败旧名/"+filepath.Base(oldPage1))
@@ -653,7 +665,7 @@ func TestAssetSplit_ReplaceFailureKeepsRenamedOldArtifacts(t *testing.T) {
 }
 
 // TestCleanupSplitArtifactsInDirByPage_DifferentStemSamePageKeepsOnlyProduct 同页序
-// 存在另一主干的用户文件不影响产物删除：基名锚定已确定产物组主干，页 2 的
+// 存在另一主干的用户文件不影响产物删除：记录主干锚定已确定产物组主干，页 2 的
 // `另一份-002` 是用户文件，产物页 1/2 照常清理。
 func TestCleanupSplitArtifactsInDirByPage_DifferentStemSamePageKeepsOnlyProduct(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -676,7 +688,7 @@ func TestCleanupSplitArtifactsInDirByPage_DifferentStemSamePageKeepsOnlyProduct(
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, page1)
 	mustNotExist(t, page2)
@@ -704,7 +716,7 @@ func TestCleanupSplitArtifactsInDirByPage_RemovesEmptyDir(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, page1)
 	mustNotExist(t, page2)
@@ -722,14 +734,14 @@ func TestCleanupSplitArtifactsInDirByPage_EmptyRecordNoop(t *testing.T) {
 	page1 := filepath.Join(outDir, "空记录-001.pptx")
 	testutil.WriteFile(t, page1, "p1")
 
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, nil, outDir)
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, &assetSplitRecord{outputDir: outDir, pageCount: 0}, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, nil, outDir, "")
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, &assetSplitRecord{outputDir: outDir, pageCount: 0}, outDir, "")
 	mustExist(t, page1)
 }
 
 // TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept 页 1 旧产物缺失时，目录内
-// 用户自建的同页序文件（笔记-001.pptx）不得被当作旧产物删除：产物组按主干 + 页
-// 覆盖证据判定，主干不符的用户文件与其索引行原样保留，其余旧页照常清理。
+// 用户自建的同页序文件（笔记-001.pptx）不得被当作旧产物删除：产物组按记录主干
+// 锚定，主干不符的用户文件与其索引行原样保留，其余旧页照常清理。
 func TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -752,7 +764,7 @@ func TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept(t *testing.T) {
 		pageCount:     3,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, userFile)
 	mustExist(t, outDir) // 用户文件仍在，目录不删
@@ -769,7 +781,7 @@ func TestCleanupSplitArtifactsInDirByPage_UserFileSamePageKept(t *testing.T) {
 }
 
 // TestCleanupSplitArtifactsInDirByPage_StemNotAnchorKept 目录内仅有形态匹配但主干
-// 不等于目录基名的文件（用户自建）：基名锚定失配即不可判定，整目录零删除（安全
+// 不等于记录主干（此处为空，回落目录基名）的文件（用户自建）：锚点失配即不可判定，整目录零删除（安全
 // 侧失败），文件与目录均保留。
 func TestCleanupSplitArtifactsInDirByPage_StemNotAnchorKept(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -786,7 +798,7 @@ func TestCleanupSplitArtifactsInDirByPage_StemNotAnchorKept(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, userFile)
 	mustExist(t, outDir)
@@ -811,7 +823,7 @@ func TestCleanupSplitArtifactsInDirByPage_NoAnchorMatchKept(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, fileA)
 	mustExist(t, fileB)
@@ -837,7 +849,7 @@ func TestCleanupSplitArtifactsInDirByPage_SinglePageUserFileKept(t *testing.T) {
 		pageCount:     1,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, userFile)
 	mustExist(t, outDir) // 用户文件仍在，目录不删
@@ -847,7 +859,7 @@ func TestCleanupSplitArtifactsInDirByPage_SinglePageUserFileKept(t *testing.T) {
 }
 
 // TestCleanupSplitArtifactsInDirByPage_SinglePageProductRemoved 单页记录的目录基名
-// 与产物主干一致（`旧名/旧名-001.pptx`）：基名锚定命中，照常删除，目录删空后
+// 与产物主干一致（`旧名/旧名-001.pptx`）：记录/目录基名锚定命中，照常删除，目录删空后
 // 一并移除。
 func TestCleanupSplitArtifactsInDirByPage_SinglePageProductRemoved(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -865,7 +877,7 @@ func TestCleanupSplitArtifactsInDirByPage_SinglePageProductRemoved(t *testing.T)
 		pageCount:     1,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, page1)
 	mustNotExist(t, outDir)
@@ -876,7 +888,7 @@ func TestCleanupSplitArtifactsInDirByPage_SinglePageProductRemoved(t *testing.T)
 
 // TestCleanupSplitArtifactsInDirByPage_UserStemMajorityKept 用户在同一目录放多份
 // 同主干文件反超产物组（审核发现的误删路径 ②）：记录 3 页、产物只剩
-// `旧名-001`，用户 `笔记-002`/`笔记-003` 共 2 页。基名锚定只认目录基名 `旧名`，
+// `旧名-001`，用户 `笔记-002`/`笔记-003` 共 2 页。记录主干为空时回落目录基名，只认 `旧名`，
 // 产物照常删除、用户文件与其索引行/缩略图保留。
 func TestCleanupSplitArtifactsInDirByPage_UserStemMajorityKept(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -906,7 +918,7 @@ func TestCleanupSplitArtifactsInDirByPage_UserStemMajorityKept(t *testing.T) {
 		pageCount:     3,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, product)
 	mustExist(t, user2)
@@ -958,7 +970,7 @@ func TestCleanupSplitArtifactsInDirByPage_PartialProductRemoved(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, page2)
 	mustNotExist(t, outDir)
@@ -968,7 +980,7 @@ func TestCleanupSplitArtifactsInDirByPage_PartialProductRemoved(t *testing.T) {
 }
 
 // TestCleanupSplitArtifactsInDirByPage_DirRenamedKeepsAll 目录被改名（`归档` 与产物
-// 主干 `旧名` 不符）：基名锚定失配即不可判定，零删除并 Warn。
+// 主干 `旧名` 不符）：锚点失配即不可判定，零删除并 Warn。
 func TestCleanupSplitArtifactsInDirByPage_DirRenamedKeepsAll(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -991,7 +1003,7 @@ func TestCleanupSplitArtifactsInDirByPage_DirRenamedKeepsAll(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, page1)
 	mustExist(t, page2)
@@ -1023,7 +1035,7 @@ func TestCleanupSplitArtifactsInDirByPage_SkipsSubdirNamedLikeArtifact(t *testin
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustExist(t, subdir) // 子目录不是常规文件，不得删除
 	mustNotExist(t, page2)
@@ -1053,7 +1065,7 @@ func TestCleanupSplitArtifactsInDirByPage_ReplaceKeepsUserFile(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetReplace,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, page1)
 	mustNotExist(t, page2)
@@ -1085,7 +1097,7 @@ func TestCleanupSplitArtifactsInDirByPage_ReadErrorWarns(t *testing.T) {
 		pageCount:     2,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, badPath)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, badPath, "")
 
 	if !strings.Contains(logBuf.String(), "读取旧拆分产物目录失败") {
 		t.Errorf("非不存在读错误应 Warn「读取旧拆分产物目录失败」，实际日志：%s", logBuf.String())
@@ -1113,7 +1125,7 @@ func TestCleanupSplitArtifactsInDirByPage_MissingDirNoop(t *testing.T) {
 		pageCount:     3,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, outDir)
 	if log := logBuf.String(); strings.Contains(log, "读取旧拆分产物目录失败") ||
@@ -1150,7 +1162,7 @@ func TestCleanupSplitArtifactsInDirByPage_ExistingEmptyDirRemoved(t *testing.T) 
 		pageCount:     3,
 		target:        model.AssetSplitTargetSource,
 	}
-	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir)
+	svc.cleanupSplitArtifactsInDirByPage(store, lib, record, outDir, "")
 
 	mustNotExist(t, outDir)
 }
@@ -1165,7 +1177,7 @@ func TestDominantSplitArtifactStem_ExactPreferredOverCaseVariant(t *testing.T) {
 		"old": {1: true, 2: true},
 	}
 	for i := 0; i < 32; i++ { // 多轮覆盖 map 随机遍历序
-		stem, ok := dominantSplitArtifactStem(byStem, dir)
+		stem, ok := dominantSplitArtifactStem(byStem, []string{filepath.Base(dir)})
 		if !ok || stem != "Old" {
 			t.Fatalf("精确匹配应优先返回 Old，实际 (%q, %v)", stem, ok)
 		}
@@ -1181,7 +1193,7 @@ func TestDominantSplitArtifactStem_AmbiguousFoldNoExact(t *testing.T) {
 		"old": {1: true},
 	}
 	for i := 0; i < 32; i++ {
-		if stem, ok := dominantSplitArtifactStem(byStem, dir); ok {
+		if stem, ok := dominantSplitArtifactStem(byStem, []string{filepath.Base(dir)}); ok {
 			t.Fatalf("折叠命中多于一个且无精确匹配应不可判定，实际返回 %q", stem)
 		}
 	}
@@ -1192,7 +1204,7 @@ func TestDominantSplitArtifactStem_AmbiguousFoldNoExact(t *testing.T) {
 func TestDominantSplitArtifactStem_SingleFoldHit(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "old")
 	byStem := map[string]map[int]bool{"Old": {1: true}}
-	stem, ok := dominantSplitArtifactStem(byStem, dir)
+	stem, ok := dominantSplitArtifactStem(byStem, []string{filepath.Base(dir)})
 	if !ok || stem != "Old" {
 		t.Fatalf("唯一折叠命中应返回 Old，实际 (%q, %v)", stem, ok)
 	}

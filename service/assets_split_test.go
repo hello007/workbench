@@ -170,7 +170,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 	if err != nil || rec != nil {
 		t.Fatalf("未拆分应返回 (nil, nil)，实际 (%v, %v)", rec, err)
 	}
-	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, false); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, "", false); err != nil {
 		t.Fatalf("upsert 插入: %v", err)
 	}
 	rec, err = store.getSplitRecord("a.pptx")
@@ -183,7 +183,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 		t.Errorf("记录字段不符：%+v", rec)
 	}
 	// 覆盖写（重拆语义）
-	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, false); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, "", false); err != nil {
 		t.Fatalf("upsert 覆盖: %v", err)
 	}
 	rec, _ = store.getSplitRecord("a.pptx")
@@ -198,6 +198,102 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 	if err != nil || rec != nil {
 		t.Errorf("删除后应未命中，实际 (%v, %v)", rec, err)
 	}
+}
+
+// TestAssetsStore_MigrateV9 迁移链：v8 库升级后 split_records 补 artifact_stem 列
+// （存量记录默认空串，回落目录启发式）；半迁移库（列已加、版本仍为 8）重开不撞
+// duplicate column；新库直建即 v9。
+func TestAssetsStore_MigrateV9(t *testing.T) {
+	buildV8DB := func(t *testing.T, halfMigrated bool) string {
+		t.Helper()
+		dbPath := filepath.Join(t.TempDir(), "v8.db")
+		db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+		if err != nil {
+			t.Fatalf("打开原始库: %v", err)
+		}
+		for v := 1; v <= 8; v++ {
+			if _, err := db.Exec(assetsMigrations[v]); err != nil {
+				t.Fatalf("手工执行 v%d 迁移: %v", v, err)
+			}
+		}
+		if _, err := db.Exec(
+			"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, source_removed) " +
+				"VALUES('存量.pptx', 'h', 'd', 2, '2026-01-01 00:00:00', 'source', 0)",
+		); err != nil {
+			t.Fatalf("插入存量拆分记录: %v", err)
+		}
+		if halfMigrated {
+			// 模拟 v9 ALTER 成功后中断（列已存在、版本未落）
+			if _, err := db.Exec("ALTER TABLE split_records ADD COLUMN artifact_stem TEXT NOT NULL DEFAULT ''"); err != nil {
+				t.Fatalf("模拟半迁移: %v", err)
+			}
+		}
+		if _, err := db.Exec("PRAGMA user_version = 8"); err != nil {
+			t.Fatalf("钉版本: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("关闭原始库: %v", err)
+		}
+		return dbPath
+	}
+
+	for _, tc := range []struct {
+		name         string
+		halfMigrated bool
+	}{
+		{"旧库 v8 升级", false},
+		{"半迁移库可重开", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := openAssetsStore(buildV8DB(t, tc.halfMigrated))
+			if err != nil {
+				t.Fatalf("升级打开: %v", err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+
+			var n int
+			if err := store.db.QueryRow(
+				"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = 'artifact_stem'",
+			).Scan(&n); err != nil {
+				t.Fatalf("查 artifact_stem 列: %v", err)
+			}
+			if n != 1 {
+				t.Errorf("artifact_stem 列应存在且唯一，实际 %d", n)
+			}
+			rec, err := store.getSplitRecord("存量.pptx")
+			if err != nil || rec == nil {
+				t.Fatalf("存量记录应可读回：%v", err)
+			}
+			if rec.artifactStem != "" {
+				t.Errorf("存量记录 artifact_stem 应默认空串，实际 %q", rec.artifactStem)
+			}
+			var version int
+			if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != assetsSchemaVersion {
+				t.Errorf("版本应钉到 v%d，实际 v%d（err=%v）", assetsSchemaVersion, version, err)
+			}
+		})
+	}
+
+	t.Run("新库直建 v9", func(t *testing.T) {
+		store, err := openAssetsStore(filepath.Join(t.TempDir(), "fresh.db"))
+		if err != nil {
+			t.Fatalf("新库打开: %v", err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		var n int
+		if err := store.db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = 'artifact_stem'",
+		).Scan(&n); err != nil {
+			t.Fatalf("查 artifact_stem 列: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("新库应含 artifact_stem 列，实际 %d", n)
+		}
+		var version int
+		if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != assetsSchemaVersion {
+			t.Errorf("新库版本应为 v%d，实际 v%d（err=%v）", assetsSchemaVersion, version, err)
+		}
+	})
 }
 
 // ---------- 单文件拆分 ----------

@@ -469,19 +469,31 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		return failed("%s", appErrMessage(err))
 	}
 
-	// 5.1 旧产物目录收尾清理（改名重链场景）：记录 output_dir 冻结在旧产物目录、
-	//     产物主干仍是旧源名，按当前主干清理对新目录是空操作，旧页只能在旧目录内
-	//     按基名锚定判定产物组后清理（cleanupSplitArtifactsInDirByPage 单点，判定
-	//     面见其头注释）。刻意放在核心成功之后——核心失败/取消时上一次拆分成果
-	//     原样保留，对齐 replace 落点的延迟清理契约（「先删后拆」在失败时会连带
-	//     丢掉上一次成果）。
-	if outputToSourceDir && record != nil && !samePathFold(record.outputDir, outDir) {
-		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
+	// 5.1 旧产物目录收尾清理（改名重链 / 跨落点切换 / 同目录改主干三种形态）：
+	//     - 异目录（record.output_dir != 本次落点）：旧落点产物按记录持久化主干
+	//       （artifact_stem）清理。不按 target 分流——落点三态切换（cache↔source
+	//       等）同样须收敛旧产物与索引行（M4）；
+	//     - 同目录但记录主干 != 本次新主干（改名重链后 output_dir 已随源搬迁到
+	//       新目录、产物仍是旧主干）：清理旧主干产物，并以 excludeStem 排除本次
+	//       新主干候选，防误删刚生成的新产物（M1）；
+	//     - 同目录同主干（普通重拆）不调用：旧页由上方 removeSplitArtifacts /
+	//       RemoveAll 既有链路处理。
+	//     刻意放在核心成功之后——核心失败/取消时上一次拆分成果原样保留，对齐
+	//     replace 落点的延迟清理契约（「先删后拆」在失败时会连带丢掉上一次成果）。
+	curStem := baseName
+	if record != nil {
+		if !samePathFold(record.outputDir, outDir) {
+			s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir, "")
+		} else if record.artifactStem != "" && record.artifactStem != curStem {
+			s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir, curStem)
+		}
 	}
 
-	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）
+	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）。产物主干
+	//    持久化（v9）——source/cache 落点核心原生命名恒为 <baseName>-NNN.pptx。
 	if err := store.upsertSplitRecord(rel, hash, result.OutputDir, result.PageCount,
-		time.Now().Format("2006-01-02 15:04:05"), target, false); err != nil {
+		time.Now().Format("2006-01-02 15:04:05"), target, baseName,
+		false); err != nil {
 		return splitOutcome{rel: rel}, fmt.Errorf("写入拆分记录失败（%s）: %w", rel, err)
 	}
 	return splitOutcome{
@@ -757,13 +769,19 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
 	// 失败保留文件与索引（下次重拆收敛），不阻断删源。
 	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
-	// 改名重链后旧产物目录（记录 output_dir）与新落点不同：旧页文件与索引行在
-	// 旧目录内按基名锚定判定产物组清理（不删用户自建同页序文件）。刻意挂在成功
-	// 收尾（删源前）——失败/取消路径不得删旧产物，与 oldArtifacts 延迟清理契约
-	// 一致。不限定记录 target：output_dir 恒为本源文件上次产物的独占目录，落点
-	// 切换（如 source→replace）同样须收敛旧产物。
-	if record != nil && !samePathFold(record.outputDir, outDir) {
-		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
+	// 旧产物目录收尾（M1/M4 与 source 路径同口径）：异目录清理旧落点；同目录但
+	// 记录主干 != 本次新主干时清理旧主干并以 excludeStem 排除本次新产物；同目录
+	// 同主干（普通重拆）不调用，旧页由上方 cleanupStaleReplaceArtifacts 处理。
+	// 刻意挂在成功收尾（删源前）——失败/取消路径不得删旧产物，与 oldArtifacts
+	// 延迟清理契约一致。不限定记录 target：output_dir 恒为本源文件上次产物的
+	// 独占目录，落点切换（如 source→replace）同样须收敛旧产物。
+	if record != nil {
+		curStem := replaceArtifactBase(base)
+		if !samePathFold(record.outputDir, outDir) {
+			s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir, "")
+		} else if record.artifactStem != "" && record.artifactStem != curStem {
+			s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir, curStem)
+		}
 	}
 	// 备份到此已无还原场景（后续唯一动作是移入回收站，失败也不回滚），先删除，
 	// 避免成功路径残留备份文件；删除失败仅告警（备份不匹配产物形态、不参与索引）。
@@ -779,7 +797,8 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		// 它）。source_removed 如实记 0（源仍在）；不记录会让重试被「同形文件」拒绝、
 		// 批量把产物当新源再拆成「页的页」。写失败仅告警（与步骤 10 同口径）。
 		if recErr := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
-			time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace, false); recErr != nil {
+			time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
+			replaceArtifactBase(base), false); recErr != nil {
 			Logger().Warn("就地替换删源失败后写拆分记录失败（产物归属缺失，重试与剔除可能失效）",
 				"libraryId", lib.ID, "file", rel, "err", recErr)
 		}
@@ -807,7 +826,8 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 告警而非整体失败（否则批量会因「已完成的工作」报错，且重试入口因源行缺失
 	// 不可用）。
 	if err := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
-		time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace, true); err != nil {
+		time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
+		replaceArtifactBase(base), true); err != nil {
 		Logger().Warn("就地替换写拆分记录失败（不影响已完成结果）",
 			"libraryId", lib.ID, "file", rel, "err", err)
 	}
@@ -1089,9 +1109,10 @@ func splitSourceOutputDir(absPath, rel string) string {
 // splitArtifactPath 拆分单页产物路径解析单点（打开单页 / 导出 / 增量判定共用）：
 // 先按记录键推导源名主干直拼（产物随源同名的常规场景）；直拼不存在时在
 // record.outputDir 内按页序反查——源文件经 RelocateAssetFile 改名重链后，记录键
-// 的主干（新名）与产物命名主干（旧名）不一致，而 split_records 未存主干列
-// （不改表结构），只能以目录内命名形态回推。目录由该记录独占，且要求候选唯一
-// （多候选视为不可判定，返回直拼路径供报错指向）。返回 (路径, 是否存在)。
+// 的主干（新名）与产物命名主干（旧名）不一致。记录虽已持久化 artifact_stem（v9），
+// 但此处保留「当前主干直拼 + 页序反查」的宽容形态：直拼命中即最新产物，反查兜住
+// 改名重链与历史记录，语义单点不变。目录由该记录独占，且要求候选唯一（多候选
+// 视为不可判定，返回直拼路径供报错指向）。返回 (路径, 是否存在)。
 func splitArtifactPath(record *assetSplitRecord, relPath string, slideNum int) (string, bool) {
 	direct := splitArtifactPathForStem(record, splitSourceBaseName(relPath), slideNum)
 	if fileExists(direct) {
@@ -1213,32 +1234,71 @@ func collectSplitArtifactsByPage(dir, target string, pageCount int) (map[int][]s
 	return byPage, byStem, nil
 }
 
-// dominantSplitArtifactStem 选定产物主干：以旧产物目录基名（filepath.Base(dir)）
-// 为锚点，与目录内形态匹配候选的主干相等者即产物组。
-//
-// 锚点依据来自落点布局单点 splitSourceOutputDir——产物目录名恒为拆分时源的命名
-// 主干，产物命名主干同源；改名重链后记录键已换新名，但 output_dir 与产物主干都
-// 仍是旧名，故基名是唯一可靠的归属证据，不再需要页覆盖数比较（比较会被用户在同
-// 目录放多份同主干文件反超）。目录被用户改名或落点搬迁后基名失配即不可判定，
-// 由调用方按安全侧零删除处理。
-//
-// 匹配顺序：精确相等优先；无精确命中时才接受 EqualFold 唯一命中（Windows 文件
-// 系统大小写不敏感，目录名的大小写变体仍认作同一组）。折叠命中多于一个（大小写
-// 敏感文件系统上 `Old` 与 `old` 并存）视为不可判定——禁按 map 遍历顺序取首个，
-// 否则同一目录状态会随机选中用户文件组并误删。
-func dominantSplitArtifactStem(byStem map[string]map[int]bool, dir string) (string, bool) {
+// splitArtifactStemCandidates 产物主干锚点候选：记录持久化的 artifact_stem 为
+// 唯一权威（v9 起，清理与重链探测共用）。空串 = v9 前旧记录，回落目录启发式
+// {基名, replace 数字主干变体} 保持兼容——replace 纯数字主干经 -p 后缀后与目录
+// 基名合法不一致（`123` 目录 ↔ `123-p` 产物），双候选覆盖两形态。
+func splitArtifactStemCandidates(record *assetSplitRecord, dir string) []string {
+	if record != nil && record.artifactStem != "" {
+		return []string{record.artifactStem}
+	}
 	anchor := filepath.Base(dir)
+	cands := []string{anchor}
+	if alt := replaceArtifactBase(anchor); alt != anchor {
+		cands = append(cands, alt)
+	}
+	return cands
+}
+
+// splitStemInCandidates 主干是否命中候选集合（精确或大小写折叠）——重链探测归属
+// 校验用（M2）：候选目录首页产物主干必须属于记录主干，否则该目录属于其他源文件。
+func splitStemInCandidates(stem string, candidates []string) bool {
+	for _, cand := range candidates {
+		if stem == cand || strings.EqualFold(stem, cand) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitStemGroupPresent 目录内是否存在与锚点候选精确或大小写折叠匹配的候选组。
+// 用于区分清理的两种 !ok 结局：候选组不存在 = 无旧产物可清的正常路径（静默，
+// 如上次重拆已清理、用户手动清理、M1 同目录重拆时目录内只剩本次新主干产物）；
+// 存在候选组但折叠多命中 = 不可判定（告警并零删除）。
+func splitStemGroupPresent(byStem map[string]map[int]bool, candidates []string) bool {
+	for stem, pages := range byStem {
+		if len(pages) == 0 {
+			continue
+		}
+		if splitStemInCandidates(stem, candidates) {
+			return true
+		}
+	}
+	return false
+}
+
+// dominantSplitArtifactStem 从目录内候选主干中选定产物组主干：按锚点候选集合
+// 精确匹配优先；无精确命中时才接受 EqualFold 唯一命中（Windows 文件系统大小写
+// 不敏感，主干大小写变体仍认作同一组）。折叠命中多于一个（大小写敏感文件系统上
+// `Old` 与 `old` 并存）视为不可判定——禁按 map 遍历顺序取首个，否则同一目录状态
+// 会随机选中用户文件组并误删。
+func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []string) (string, bool) {
+	for _, anchor := range candidates {
+		if len(byStem[anchor]) > 0 {
+			return anchor, true
+		}
+	}
 	foldStem := ""
 	foldHits := 0
 	for stem, pages := range byStem {
 		if len(pages) == 0 {
 			continue
 		}
-		if stem == anchor {
-			return stem, true
-		}
-		if strings.EqualFold(stem, anchor) {
-			foldStem, foldHits = stem, foldHits+1
+		for _, anchor := range candidates {
+			if strings.EqualFold(stem, anchor) {
+				foldStem, foldHits = stem, foldHits+1
+				break
+			}
 		}
 	}
 	if foldHits == 1 {
@@ -1274,29 +1334,31 @@ func removeSplitArtifacts(dir, baseName string) {
 }
 
 // cleanupSplitArtifactsInDirByPage 清理旧产物目录中的页产物（含其索引行与缩略图）。
-// 用于源文件改名重链后的重拆清旧：记录键已迁到新路径，但 output_dir 冻结在旧产物
-// 目录、产物命名主干仍是旧源名，按当前主干清理必然漏删旧页并留下 files 索引行
-// （旧页还能再次进入批量拆分源）。
+// 用于源文件改名重链 / 跨落点切换 / 同目录改主干等重拆清旧场景：记录键可能已迁到
+// 新路径，但 output_dir 与产物命名主干仍是上次拆分的旧值，按当前主干清理必然漏删
+// 旧页并留下 files 索引行（旧页还能再次进入批量拆分源）。
 //
-// 产物组判定 = 目录基名锚定：`filepath.Base(dir)` 恒为拆分时源的命名主干（落点
-// 布局单点 splitSourceOutputDir 保证，source/replace 同布局），改名重链后记录键
-// 变了但目录与产物主干仍是旧名；故仅「候选主干 EqualFold 目录基名」的组才是旧
-// 产物组，命中后只删该组内同页序唯一的候选。这同时消除两类历史误删：①单页记录
-// 下任意唯一同形候选即被判产物（用户 `笔记-001.pptx`）；②用户在同目录放多份同主干
-// 文件，按覆盖页数选组时反超真实产物组。页数证据不再参与选组——基名匹配即产物组，
-// 覆盖不足（如旧产物仅剩页 2）同样清理。
+// 产物组判定 = `split_records.artifact_stem` 锚定（v9 唯一权威）：记录持久化了本次
+// 实际产物主干，命中即产物组，只删该组内同页序唯一的常规文件；空值（v9 前旧记录）
+// 回落目录启发式 {filepath.Base(dir), replaceArtifactBase(基名)}，覆盖 replace 纯
+// 数字主干加 -p 后与目录名合法不一致的形态。excludeStem 非空时跳过该主干候选——
+// 同目录重拆（M1）保护本次刚生成的新主干产物。页数覆盖不参与选组（覆盖不足如旧
+// 产物仅剩页 2 同样清理）。
 //
-// 不可判定（目录基名与所有组主干均不匹配）按安全侧失败：整目录零删除并 Warn，
-// 残留交人工清理（目录被改名/搬迁后的典型形态）。目录不存在或目录内无任何形态
-// 匹配候选属正常路径（首次重拆无旧产物、用户已自行清理），静默返回；权限拒绝等
-// 非不存在读错误会 Warn（防静默失败）。
+// 不可判定（大小写折叠多命中，或回落启发式时目录基名与所有组主干均不匹配）按安全
+// 侧失败：整目录零删除并 Warn，残留交人工清理。记录主干非空但目录内已无该主干组
+// （上次重拆已清理 / M1 同目录重拆只剩本次新主干产物）属正常路径静默——无旧产物
+// 可清，告警只会成为每次改名重链后重拆的噪音。同主干同页序存在多个候选（如
+// `<主干>-1.pptx` 与 `<主干>-001.pptx`）时该页跳过并 Warn（不再静默）。目录不存在
+// 或目录内无任何形态匹配候选属正常路径（首次重拆无旧产物、用户已自行清理），静默
+// 返回；权限拒绝等非不存在读错误会 Warn（防静默失败）。
 //
 // 调用点均在拆分成功之后（源落点核心返回成功后、replace 删源前），失败与取消
 // 路径不触达，上一次拆分成果原样保留。
 //
 // 删除成功才收集路径并批量删索引行；删除失败仅告警继续（残留由下次重拆收敛）。
 // 目录删空后尝试删除（不存在/非空静默——目录内用户自建内容一律不动）。
-func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir string) {
+func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, excludeStem string) {
 	if record == nil || dir == "" || record.pageCount <= 0 {
 		return
 	}
@@ -1320,10 +1382,19 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 		}
 		return
 	}
-	productStem, ok := dominantSplitArtifactStem(byStem, dir)
+	candidates := splitArtifactStemCandidates(record, dir)
+	productStem, ok := dominantSplitArtifactStem(byStem, candidates)
 	if !ok {
+		if record.artifactStem != "" && !splitStemGroupPresent(byStem, candidates) {
+			// 记录主干权威模式下目录内已无该主干组：旧产物已被前次重拆/用户清理，
+			// 无旧产物可清。M1 同目录重拆时目录内恰只剩本次新主干产物（被
+			// excludeStem 保护），同属正常路径——禁告警，否则每次改名重链后重拆
+			// 都刷一条「主干不匹配」噪音。
+			return
+		}
 		Logger().Warn("旧产物目录基名与产物主干不匹配（或多候选择一不可判定），跳过清理（保留全部文件）",
-			"libraryId", lib.ID, "dir", dir, "pageCount", record.pageCount, "stemGroups", len(byStem))
+			"libraryId", lib.ID, "dir", dir, "artifactStem", record.artifactStem,
+			"pageCount", record.pageCount, "stemGroups", len(byStem))
 		return
 	}
 	removed := make([]string, 0, record.pageCount)
@@ -1335,7 +1406,10 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 		hit := ""
 		ambiguous := false
 		for _, cand := range cands {
-			if cand.stem != productStem {
+			// 仅同主干候选参与判定；excludeStem 为本次新主干，跳过防误删本次产物
+			// （同目录重拆 M1）。大小写折叠比较——Windows 大小写变体属同一组，
+			// 精确比较在大小写差异下会漏保护。
+			if cand.stem != productStem || (excludeStem != "" && strings.EqualFold(cand.stem, excludeStem)) {
 				continue
 			}
 			if hit != "" {
@@ -1344,7 +1418,12 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 			}
 			hit = cand.path
 		}
-		if ambiguous || hit == "" {
+		if ambiguous {
+			Logger().Warn("旧产物同页序多候选，跳过该页", "libraryId", lib.ID, "dir", dir,
+				"page", page, "stem", productStem)
+			continue
+		}
+		if hit == "" {
 			continue
 		}
 		if rmErr := os.Remove(hit); rmErr != nil && !os.IsNotExist(rmErr) {

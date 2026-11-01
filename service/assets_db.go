@@ -131,6 +131,14 @@ func (s *assetsStore) migrate() error {
 			}
 			continue
 		}
+		if v == 9 {
+			// v9 为 artifact_stem 单列 ADD COLUMN：同样走列存在性预判 + 单事务，
+			// 半迁移库（列已加、版本未落）重开不撞 duplicate column。
+			if err := s.migrateSchemaV9(); err != nil {
+				return fmt.Errorf("素材索引库迁移到 v9 失败: %w", err)
+			}
+			continue
+		}
 		migration, ok := assetsMigrations[v]
 		if !ok {
 			continue // 版本空洞（理论不可达）：缺迁移定义时保持版本号连续性由后续版本处理
@@ -184,6 +192,33 @@ func (s *assetsStore) migrateSchemaV8() error {
 		}
 	}
 	if _, err := tx.Exec("PRAGMA user_version = 8"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateSchemaV9 split_records 产物命名主干列迁移：列存在性预判使半迁移库可
+// 重入，DDL 与 user_version 同事务提交（SQLite DDL 可回滚）。迁移 SQL 保留在
+// assetsSchemaV9SQL 供文档与新库语义对照，实际执行走本方法。
+func (s *assetsStore) migrateSchemaV9() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var n int
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = 'artifact_stem'",
+	).Scan(&n); err != nil {
+		return fmt.Errorf("读取 split_records.artifact_stem 列信息失败: %w", err)
+	}
+	if n == 0 {
+		if _, err := tx.Exec("ALTER TABLE split_records ADD COLUMN artifact_stem TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 9"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2302,6 +2337,7 @@ type assetSplitRecord struct {
 	pageCount     int
 	splitAt       string
 	target        string // 落点（model.AssetSplitTarget* 取值）
+	artifactStem  string // 产物命名主干（v9；空串 = v9 前旧记录，读取侧回落目录启发式）
 	sourceRemoved bool   // 源文件是否已移入回收站（仅 replace 成功路径为 true）
 }
 
@@ -2311,10 +2347,10 @@ type assetSplitRecord struct {
 func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) {
 	var r assetSplitRecord
 	err := s.db.QueryRow(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, source_removed "+
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed "+
 			"FROM split_records WHERE source_rel_path = ?",
 		relPath,
-	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.sourceRemoved)
+	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2326,15 +2362,17 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 
 // upsertSplitRecord 写入/覆盖拆分记录（重拆覆盖语义，主键 upsert 单语句，
 // SQLite 自动提交保证原子性——多语句写才走显式事务，对齐 markProcessing 口径）。
-// target/sourceRemoved 为落点三态与删源标记（v8 增列，见 assetsSchemaV8SQL）。
-func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target string, sourceRemoved bool) error {
+// target/sourceRemoved 为落点三态与删源标记（v8 增列，见 assetsSchemaV8SQL）；
+// artifactStem 为本次实际产物命名主干（v9 增列，见 assetsSchemaV9SQL），是清理
+// 与重链探测的唯一权威依据——调用方必须传实际主干，禁传目录名反推值。
+func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target, artifactStem string, sourceRemoved bool) error {
 	_, err := s.db.Exec(
-		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, source_removed) "+
-			"VALUES(?, ?, ?, ?, ?, ?, ?) "+
+		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed) "+
+			"VALUES(?, ?, ?, ?, ?, ?, ?, ?) "+
 			"ON CONFLICT(source_rel_path) DO UPDATE SET source_hash = excluded.source_hash, output_dir = excluded.output_dir, "+
 			"page_count = excluded.page_count, split_at = excluded.split_at, target = excluded.target, "+
-			"source_removed = excluded.source_removed",
-		relPath, sourceHash, outputDir, pageCount, splitAt, target, boolToInt(sourceRemoved))
+			"artifact_stem = excluded.artifact_stem, source_removed = excluded.source_removed",
+		relPath, sourceHash, outputDir, pageCount, splitAt, target, artifactStem, boolToInt(sourceRemoved))
 	return err
 }
 

@@ -49,7 +49,7 @@ func TestRelocateAssetFile_RenameKeepsSplitArtifactReachable(t *testing.T) {
 		t.Fatalf("查文件记录: %v", err)
 	}
 	outDir := filepath.Join(dir, "旧名")
-	if err := store.upsertSplitRecord("旧名.pptx", hash, outDir, 2, "2026-10-30 10:00:00", model.AssetSplitTargetSource, false); err != nil {
+	if err := store.upsertSplitRecord("旧名.pptx", hash, outDir, 2, "2026-10-30 10:00:00", model.AssetSplitTargetSource, "", false); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	writeSplitArtifactForTest(t, filepath.Join(outDir, "旧名-001.pptx"))
@@ -144,7 +144,7 @@ func TestMigrateSplitRecords_KeepsFrozenOutDirAfterRelink(t *testing.T) {
 	); err != nil {
 		t.Fatalf("插入文件记录: %v", err)
 	}
-	if err := store.upsertSplitRecord("新目录/新名.pptx", "h", frozenOut, 2, now, model.AssetSplitTargetSource, false); err != nil {
+	if err := store.upsertSplitRecord("新目录/新名.pptx", "h", frozenOut, 2, now, model.AssetSplitTargetSource, "", false); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestMigrateSplitRecords_RecalcWhenOutDirUnderPrefix(t *testing.T) {
 	); err != nil {
 		t.Fatalf("插入文件记录: %v", err)
 	}
-	if err := store.upsertSplitRecord("常规/方案.pptx", "h", oldOut, 2, now, model.AssetSplitTargetSource, false); err != nil {
+	if err := store.upsertSplitRecord("常规/方案.pptx", "h", oldOut, 2, now, model.AssetSplitTargetSource, "", false); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 
@@ -208,7 +208,8 @@ func TestClearLostAssetFiles_DropsSplitRecords(t *testing.T) {
 	}
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord("待清.pptx", "h", filepath.Join(dir, "待清"), 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetCache, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetCache, "",
+		false); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	// 模拟源消失后的 lost 态
@@ -245,7 +246,8 @@ func TestRelocateAssetFile_ForceDropsSplitRecord(t *testing.T) {
 		t.Fatalf("查文件记录: %v", err)
 	}
 	if err := store.upsertSplitRecord("原.pptx", "h", filepath.Join(dir, "原"), 2,
-		"2026-10-30 10:00:00", model.AssetSplitTargetCache, false); err != nil {
+		"2026-10-30 10:00:00", model.AssetSplitTargetCache, "",
+		false); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	// 未入库的不同内容文件（新目标）

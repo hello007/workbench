@@ -252,14 +252,18 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 // （data/assets/<库>/derived），用户搬动源文件时不会连带搬动，纳入判定只放大
 // 误判面（新源目录恰好有同名目录即被误认）。
 //
-// 命中判定 = 候选存在、为目录，且 findSplitArtifactByPage(候选, target, 1) 命中。
-// 只看首页即可：容器目录由该记录独占，合法产物首页存在即证明它是搬迁来的产物
-// 目录，逐页全检不增加判别力却要多读目录；首页缺失按安全侧不迁移（用户可重新
-// 拆分恢复），与「增量判定首页存在」同口径（复用产物形态判定单点）。
+// 命中判定 = 候选存在、为目录，findSplitArtifactByPage(候选, target, 1) 命中，
+// 且首页产物的解析主干属于记录主干（artifact_stem，v9 权威；空值回落记录
+// output_dir 基名与 replace 数字主干变体）。归属校验不可省：`<新源目录>/<新源
+// 主干>` 目录可能属于其他同名源文件（用户在同目录放了另一份同名 pptx 的产物
+// 容器），仅凭「首页有产物形态」会把落点改指到他人目录，后续清理会误删别人的
+// 产物。只看首页即可：目录由该记录独占，主干归属命中即证明是搬迁来的产物目录，
+// 逐页全检不增加判别力却要多读目录；首页缺失/主干不符按安全侧不迁移（用户可
+// 重新拆分恢复），与「增量判定首页存在」同口径（复用形态判定单点）。
 //
 // 返回空串 = 保持原 output_dir（无拆分记录 / 非 source·replace / 主干不可用 /
-// 候选不存在 / 候选与原落点等价 / 产物形态不匹配）；否则返回候选绝对路径，作为
-// rewriteSplitRecordKeyTx 的 newOutDir 形参随 files.path 同事务落库。
+// 候选不存在 / 候选与原落点等价 / 产物形态不匹配 / 主干归属不符）；否则返回候选
+// 绝对路径，作为 rewriteSplitRecordKeyTx 的 newOutDir 形参随 files.path 同事务落库。
 func resolveRelocatedSplitOutDir(record *assetSplitRecord, newAbs, newRel string) string {
 	if record == nil {
 		return ""
@@ -281,7 +285,15 @@ func resolveRelocatedSplitOutDir(record *assetSplitRecord, newAbs, newRel string
 	if err != nil || !info.IsDir() {
 		return ""
 	}
-	if _, ok := findSplitArtifactByPage(candidate, record.target, 1); !ok {
+	hit, ok := findSplitArtifactByPage(candidate, record.target, 1)
+	if !ok {
+		return ""
+	}
+	stem, _, parsed := parseSplitArtifactName(filepath.Base(hit), record.target)
+	if !parsed {
+		return ""
+	}
+	if !splitStemInCandidates(stem, splitArtifactStemCandidates(record, record.outputDir)) {
 		return ""
 	}
 	return candidate
