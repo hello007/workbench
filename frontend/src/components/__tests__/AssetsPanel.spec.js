@@ -3161,7 +3161,7 @@ describe('AssetsPanel', () => {
     ]
   }
 
-  it('库级拆分主链路：「拆分全部 PPT」打开确认弹窗（落点默认缓存目录），确认调 SplitAssetLibrary 并汇总提示', async () => {
+  it('库级拆分主链路：「拆分全部 PPT」打开确认弹窗（落点默认就地替换），勾选强确认后调 SplitAssetLibrary 并汇总提示', async () => {
     wailsMock.SplitAssetLibrary.mockResolvedValue(mockSplitBatch)
     const wrapper = await createWrapper()
 
@@ -3171,23 +3171,29 @@ describe('AssetsPanel', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('全部正常状态的 PPT')
 
-    // 落点 radio 默认「素材库缓存目录」（弹窗内 radio-group 的 v-model 初值；stub 的
+    // 落点 radio 默认「就地替换」（弹窗内 radio-group 的 v-model 初值；stub 的
     // group/radio 无 provide 透传，选中态经 group 组件 props 断言），三个选项文本渲染
     const dialogGroup = wrapper.findAllComponents(ElRadioGroupStub).at(-1)
-    expect(dialogGroup.props('modelValue')).toBe('cache')
+    expect(dialogGroup.props('modelValue')).toBe('replace')
     const radios = dialog.findAll('input[type=radio]')
     expect(radios.length).toBe(3)
-    expect(dialog.text()).toContain('素材库缓存目录（推荐）')
+    expect(dialog.text()).toContain('素材库缓存目录')
     expect(dialog.text()).toContain('源文件所在目录')
-    expect(dialog.text()).toContain('就地替换（删除源文件）')
-    // 默认提示为缓存目录说明（非源目录警示）
+    expect(dialog.text()).toContain('就地替换（删除源文件，推荐）')
+    // 默认展示就地替换警示（非缓存目录说明）
     expect(dialog.find('.split-source-warning').exists()).toBe(false)
-    expect(dialog.find('.split-cache-hint').exists()).toBe(true)
+    expect(dialog.find('.split-cache-hint').exists()).toBe(false)
+    expect(dialog.find('.split-replace-warning').exists()).toBe(true)
+    // 未勾选强确认时提交禁用
+    const submit = wrapper.findAll('button').find((b) => b.text().trim() === '开始拆分')
+    expect(submit.attributes('disabled')).toBeDefined()
 
+    await dialog.find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
 
-    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', 'cache')
+    expect(wailsMock.SplitAssetLibrary).toHaveBeenCalledWith('lib-1', 'replace')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('拆分完成：共 2 个文件'))
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('跳过 1'))
@@ -3342,12 +3348,12 @@ describe('AssetsPanel', () => {
     await flushPromises()
     expect(wrapper.find('.stub-dialog').exists()).toBe(false)
 
-    // 重开为新库库级默认语境：批量文案 + 缓存落点 + 强确认未勾选（提交禁用）
+    // 重开为新库库级默认语境：批量文案 + 就地替换落点 + 强确认未勾选（提交禁用）
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
     const dialog = wrapper.find('.stub-dialog')
     expect(dialog.text()).toContain('全部正常状态的 PPT')
-    expect(wrapper.findAllComponents(ElRadioGroupStub).at(-1).props('modelValue')).toBe('cache')
+    expect(wrapper.findAllComponents(ElRadioGroupStub).at(-1).props('modelValue')).toBe('replace')
     await wrapper.findAllComponents(ElRadioGroupStub).at(-1).vm.$emit('update:modelValue', 'replace')
     await flushPromises()
     expect(dialog.find('input[type=checkbox]').element.checked).toBe(false)
@@ -3442,6 +3448,9 @@ describe('AssetsPanel', () => {
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
+    // 默认落点就地替换：勾选强确认后方可提交
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
     expect(wrapper.find('.split-outcome-list').exists()).toBe(true)
@@ -3521,6 +3530,9 @@ describe('AssetsPanel', () => {
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
+    // 本用例校验通用落点汇总口径：显式切回缓存目录落点
+    await wrapper.findAllComponents(ElRadioGroupStub).at(-1).vm.$emit('update:modelValue', 'cache')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
 
@@ -3577,6 +3589,9 @@ describe('AssetsPanel', () => {
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
+    // 默认落点就地替换：勾选强确认后方可提交
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
     expect(wrapper.find('.split-progress').exists()).toBe(true)
@@ -3612,6 +3627,9 @@ describe('AssetsPanel', () => {
     })
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    // 本用例校验通用落点汇总口径：显式切回缓存目录落点
+    await wrapper.findAllComponents(ElRadioGroupStub).at(-1).vm.$emit('update:modelValue', 'cache')
     await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
@@ -3665,6 +3683,9 @@ describe('AssetsPanel', () => {
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
+    // 默认落点就地替换：勾选强确认后方可提交
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
 
@@ -3681,6 +3702,9 @@ describe('AssetsPanel', () => {
     })
     const wrapper = await createWrapper()
     await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    // 默认落点就地替换：勾选强确认后方可提交
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
     await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
@@ -3701,11 +3725,13 @@ describe('AssetsPanel', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.text()).toContain('城商行方案')
 
-    // 成功：拆出页数提示
+    // 成功：拆出页数提示（默认落点就地替换，须先勾选强确认）
     wailsMock.SplitAssetFile.mockResolvedValue({ outputDir: 'D:/data/derived/x', files: ['a-001.pptx'], pageCount: 3, skipped: false, skipReason: '' })
+    await dialog.find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
-    expect(wailsMock.SplitAssetFile).toHaveBeenCalledWith('lib-1', '方案A/城商行方案.pptx', 'cache')
+    expect(wailsMock.SplitAssetFile).toHaveBeenCalledWith('lib-1', '方案A/城商行方案.pptx', 'replace')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith('拆分完成：共 3 页')
     expect(wrapper.find('.stub-dialog').exists()).toBe(false)
@@ -3714,6 +3740,9 @@ describe('AssetsPanel', () => {
     await clickButton(wrapper, '拆分此 PPT')
     await flushPromises()
     wailsMock.SplitAssetFile.mockResolvedValue({ outputDir: '', files: [], pageCount: 3, skipped: true, skipReason: '已拆分且源未变化' })
+    // 默认落点就地替换：重开弹窗须重新勾选强确认才可提交
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
     expect(ElMessage.info).toHaveBeenCalledWith('已拆分且源未变化')
@@ -3815,8 +3844,10 @@ describe('AssetsPanel', () => {
     })
     const wrapper = await createWrapper()
 
-    // lib-1 拆分在途（Promise 挂起，进度条展示）
+    // lib-1 拆分在途（Promise 挂起，进度条展示）；默认落点就地替换须先勾选强确认
     await clickButton(wrapper, '拆分全部 PPT')
+    await flushPromises()
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
     await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
@@ -3831,9 +3862,11 @@ describe('AssetsPanel', () => {
 
     await clickButton(wrapper, '拆分全部 PPT')
     await flushPromises()
+    await wrapper.find('.stub-dialog').find('input[type=checkbox]').trigger('change')
+    await flushPromises()
     await clickButton(wrapper, '开始拆分')
     await flushPromises()
-    expect(wailsMock.SplitAssetLibrary).toHaveBeenLastCalledWith('lib-2', 'cache')
+    expect(wailsMock.SplitAssetLibrary).toHaveBeenLastCalledWith('lib-2', 'replace')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledTimes(1)
     expect(wrapper.find('.split-progress').exists()).toBe(false)

@@ -967,9 +967,9 @@
       <el-form label-width="88px">
         <el-form-item label="产物位置">
           <el-radio-group v-model="splitTarget" :disabled="splitConfirming">
-            <el-radio value="cache">素材库缓存目录（推荐）</el-radio>
+            <el-radio value="cache">素材库缓存目录</el-radio>
             <el-radio value="source">源文件所在目录</el-radio>
-            <el-radio value="replace">就地替换（删除源文件）</el-radio>
+            <el-radio value="replace">就地替换（删除源文件，推荐）</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -1521,7 +1521,7 @@ const splitting = ref(false)
 const splitProgress = ref(null) // assets-split:progress 载荷 {libraryId, done, total, currentFile, pageDone, pageTotal}
 const splitDialogVisible = ref(false)
 const splitDialogCtx = ref({ scope: 'library', relPath: '', fileName: '', fileStem: '' }) // 确认弹窗语境（scope: 'file'|'library'；fileStem = 源路径主干，落点回显用）
-const splitTarget = ref('cache') // 落点：'cache'=素材库缓存目录（默认）| 'source'=源文件所在目录 | 'replace'=就地替换（删源）
+const splitTarget = ref('replace') // 落点：'replace'=就地替换（默认，删源需强确认）| 'cache'=素材库缓存目录 | 'source'=源文件所在目录
 const splitReplaceConfirmed = ref(false) // 就地替换强确认勾选（未勾选时提交按钮禁用）
 const splitConfirming = ref(false) // 确认提交中（防重复提交）
 const splitOutcomeVisible = ref(false)
@@ -1534,11 +1534,11 @@ const openingSplitPage = ref(false)
 // 即丢弃（旧库任务态/提示不得污染新库语境，模式对齐本文件 librarySeq）
 let splitSeq = 0
 
-// 拆分确认弹窗复位单点：关闭弹窗并回默认语境（库级批量、缓存目录落点、未勾选
+// 拆分确认弹窗复位单点：关闭弹窗并回默认语境（库级批量、就地替换落点、未勾选
 // 强确认）。打开新语境与切库复位共用，避免各调用点手抄默认值。
 const resetSplitDialog = () => {
   splitDialogVisible.value = false
-  splitTarget.value = 'cache'
+  splitTarget.value = 'replace'
   splitReplaceConfirmed.value = false
   splitDialogCtx.value = { scope: 'library', relPath: '', fileName: '', fileStem: '' }
 }

@@ -349,9 +349,10 @@ func TestAssetSplitReplace_BatchSkipsReplaceArtifacts(t *testing.T) {
 	}
 }
 
-// TestSplitRecordGuard_IgnoresSourceRemovedRecords 目录守卫只统计源仍存在的记录：
-// replace 成功（source_removed=1）的记录是留痕，不得永久阻断目录重命名。
-func TestSplitRecordGuard_IgnoresSourceRemovedRecords(t *testing.T) {
+// TestSplitRecordMigrate_RemovesDirectoryGuard 目录守卫已解除（B 方案 PR2）：
+// source_removed=0 的记录同样不再阻断目录重命名，且随同一事务迁移到新路径；
+// target=cache 记录的 output_dir 保持原绝对路径（derived 物理目录不随迁移）。
+func TestSplitRecordMigrate_RemovesDirectoryGuard(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
 	lib := mustCreateLibrary(t, svc, "目录守卫库", dir)
@@ -363,7 +364,7 @@ func TestSplitRecordGuard_IgnoresSourceRemovedRecords(t *testing.T) {
 	})
 	mustScanLibrary(t, svc, lib.ID)
 	store := svc.openStoreForTest(t, lib.ID)
-	// 源已删的 replace 记录：不阻断
+	// 源已删的 replace 记录：不阻断且 output_dir 按库根重算
 	if err := store.upsertSplitRecord("media/a.pptx", "hash", filepath.Join(dir, "media", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetReplace, true); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
@@ -371,13 +372,27 @@ func TestSplitRecordGuard_IgnoresSourceRemovedRecords(t *testing.T) {
 	if _, err := svc.RenameAssetFolder(lib.ID, "media", "media2"); err != nil {
 		t.Fatalf("source_removed=1 的记录不应阻断目录重命名：%v", err)
 	}
-	// 源仍存在的记录（source_removed=0）继续阻断
+	rec, err := store.getSplitRecord("media2/a.pptx")
+	if err != nil || rec == nil {
+		t.Fatalf("拆分记录应随重命名迁移到新路径：%v", err)
+	}
+	if want := filepath.Join(dir, "media2", "a"); rec.outputDir != want {
+		t.Errorf("replace 记录 output_dir 应按库根重算为 %q，实际 %q", want, rec.outputDir)
+	}
+	// 源仍存在的 cache 记录（source_removed=0）同样不阻断，output_dir 保持原值
 	if err := store.upsertSplitRecord("media2/a.pptx", "hash", filepath.Join(dir, "media2", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
-	if _, err := svc.RenameAssetFolder(lib.ID, "media2", "media3"); err == nil {
-		t.Fatal("source_removed=0 的记录仍应阻断目录重命名")
+	if _, err := svc.RenameAssetFolder(lib.ID, "media2", "media3"); err != nil {
+		t.Fatalf("source_removed=0 的记录不应再阻断目录重命名：%v", err)
+	}
+	rec, err = store.getSplitRecord("media3/a.pptx")
+	if err != nil || rec == nil {
+		t.Fatalf("cache 拆分记录应随重命名迁移到新路径：%v", err)
+	}
+	if want := filepath.Join(dir, "media2", "a"); rec.outputDir != want {
+		t.Errorf("cache 记录 output_dir 应保持原绝对路径 %q，实际 %q", want, rec.outputDir)
 	}
 }
 

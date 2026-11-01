@@ -273,12 +273,14 @@ func (s *AssetLibraryService) PreviewAssetPathPrefixReplace(libraryID, oldPrefix
 // （ReplaceAssetPathPrefix 与 RenameAssetFolder 共用单点，禁复制第二份）：
 // records = 旧前缀命中记录集，allPaths = 全量文件记录。后缀（含前导 /）原样
 // 保留：old/a.pptx → new/a.pptx；恰等于前缀的行（目录行形态，理论不出现）后缀
-// 为空串。冲突预检排除替换集自身记录——其旧路径在本事务内全部腾空；嵌套前缀
-// 形态（新前缀位于旧前缀子树内，如旧目录 → 旧目录/归档）中本集记录的新路径可能
-// 撞上另一条本集记录的旧路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突
-// = 撞未替换记录的路径，仍拒）。返回按旧路径长度降序的 rename 清单（嵌套链式
-// 腾位安全序：碰撞链中占位方旧路径恒长于被占位方新路径，长度降序即事务内无
-// 瞬态 UNIQUE 撞击）。冲突返回可读错误（调用方整体拒绝零半态）。
+// 为空串。前缀剥离经 stripDirPathPrefix 单点（大小写不敏感，ASCII 大小写差异
+// 下 strings.TrimPrefix 失配会把整条旧路径当后缀重复拼接）。冲突预检排除替换
+// 集自身记录——其旧路径在本事务内全部腾空；嵌套前缀形态（新前缀位于旧前缀子树
+// 内，如旧目录 → 旧目录/归档）中本集记录的新路径可能撞上另一条本集记录的旧
+// 路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突 = 撞未替换记录的
+// 路径，仍拒）。返回按旧路径长度降序的 rename 清单（嵌套链式腾位安全序：碰撞
+// 链中占位方旧路径恒长于被占位方新路径，长度降序即事务内无瞬态 UNIQUE 撞击）。
+// 冲突返回可读错误（调用方整体拒绝零半态）。
 func assetPathRenamesForPrefix(records, allPaths []assetFileRecord, oldPrefix, newPrefix string) ([]assetPathRename, error) {
 	matched := make(map[int64]bool, len(records))
 	for _, rec := range records {
@@ -293,11 +295,11 @@ func assetPathRenamesForPrefix(records, allPaths []assetFileRecord, oldPrefix, n
 	}
 	renames := make([]assetPathRename, 0, len(records))
 	for _, rec := range records {
-		suffix := strings.TrimPrefix(strings.TrimPrefix(rec.path, oldPrefix), "/")
-		newRel := newPrefix
-		if suffix != "" {
-			newRel = newPrefix + "/" + suffix
+		suffix, ok := stripDirPathPrefix(rec.path, oldPrefix)
+		if !ok {
+			return nil, fmt.Errorf("索引路径「%s」不在旧前缀「%s」下", rec.path, oldPrefix)
 		}
+		newRel := newPrefix + suffix
 		if _, ok := existingPaths[newRel]; ok {
 			return nil, fmt.Errorf("新路径「%s」与现有索引记录冲突，请调整新前缀后重试", newRel)
 		}
@@ -392,9 +394,11 @@ func (s *AssetLibraryService) ReplaceAssetPathPrefix(libraryID, oldPrefix, newPr
 
 		// 单事务批量改路径（预检后写入，任一失败整体回滚）
 		now := time.Now().Format("2006-01-02 15:04:05")
-		// 文件夹标注键同事务级联改键（PR4 R8：前缀替换即目录级重组，folder_meta/
-		// folder_tags 键随前缀替换迁移，与 files.path 更新同一事务保证原子）
-		if err := store.replaceFilePaths(renames, now, oldNorm, newNorm); err != nil {
+		// 文件夹标注键与拆分记录同事务级联迁移（PR4 R8 + B 方案 PR2：folder_meta/
+		// folder_tags 以 folder_path 为键，split_records 以 source_rel_path 为键；
+		// 前缀替换即目录级重组，两表与 files.path 同一事务保证原子）
+		if err := store.replaceFilePaths(renames, now, oldNorm, newNorm,
+			splitRecordMigration{libraryRoot: lib.RootPath, oldPrefix: oldNorm, newPrefix: newNorm}); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// 并发窗口：命中集行在收集与事务之间被「清理丢失记录」删除
 				//（ClearLostAssetFiles 不持扫描锁）——事务已整体回滚，如实报错

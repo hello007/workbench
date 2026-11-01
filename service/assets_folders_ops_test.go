@@ -355,12 +355,16 @@ func TestAssetFolderRename_Refusals(t *testing.T) {
 	}
 	lib := mustCreateLibrary(t, svc, "重命名拒绝库", root)
 
-	// 拆分记录守卫（宁严勿错）：子树内存在拆分记录拒绝重命名
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("withsplit/a.pptx", "hash", "D:/derived/withsplit/a", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
+	// 拆分记录不再阻断重命名（B 方案 PR2）：记录随同一事务迁移到新路径
+	store := svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord("withsplit/a.pptx", "hash", "D:/derived/withsplit/a", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
-	if _, err := svc.RenameAssetFolder(lib.ID, "withsplit", "改名"); err == nil {
-		t.Errorf("子树含拆分记录的重命名应拒绝")
+	if _, err := svc.RenameAssetFolder(lib.ID, "withsplit", "改名"); err != nil {
+		t.Errorf("子树含拆分记录不应再阻断重命名：%v", err)
+	}
+	if rec, _ := store.getSplitRecord("改名/a.pptx"); rec == nil {
+		t.Errorf("拆分记录应随目录重命名迁移到新路径")
 	}
 
 	// 拆分派生容器拒绝

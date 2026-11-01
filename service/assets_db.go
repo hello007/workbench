@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -615,7 +616,17 @@ type assetPathRename struct {
 	newRel  string
 }
 
-func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string, folderKeyOld, folderKeyNew string) error {
+// splitRecordMigration 目录级迁移时拆分记录路径同步载荷（B 方案 PR2）：
+// split_records 以 source_rel_path 为唯一键，output_dir 存绝对路径——目录
+// 重命名/移动/前缀替换后两者不同步会断「打开拆分单页」溯源与批量产物剔除。
+// oldPrefix 为空串 = 调用方无迁移语义（防御预留），零行为变化。
+type splitRecordMigration struct {
+	libraryRoot string // 库根绝对路径（output_dir 重算基准）
+	oldPrefix   string // 旧目录相对路径（斜杠）
+	newPrefix   string // 新目录相对路径
+}
+
+func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string, folderKeyOld, folderKeyNew string, splitMig splitRecordMigration) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -664,7 +675,30 @@ func (s *assetsStore) replaceFilePaths(renames []assetPathRename, now string, fo
 			return err
 		}
 	}
+	// 拆分记录路径同事务迁移（split_records 以源相对路径为键，与 files.path /
+	// 文件夹标注键同一事务保证原子；空旧前缀 = 无迁移语义直接跳过）。
+	if _, err := s.migrateSplitRecordsTx(tx, splitMig); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// stripDirPathPrefix 路径前缀剥离单点（目录边界语义）：恰等于前缀（大小写
+// 不敏感，EqualFold）返回空后缀；以「前缀 + /」开头返回**含前导 / 的后缀**
+// （调用方直接拼 newPrefix + suffix）。不命中返回 ok=false。
+//
+// 刻意不用 strings.TrimPrefix：ASCII 大小写差异（SQL LIKE 默认 ASCII 大小写
+// 不敏感会命中，如旧前缀 a/ 命中 A/x.pptx）下 TrimPrefix 失配会把整条旧路径
+// 当后缀，新路径重复拼接（assetPathRenamesForPrefix 与拆分记录迁移共用本单点，
+// 禁第二套路径比较口径）。
+func stripDirPathPrefix(rel, prefix string) (suffix string, ok bool) {
+	if strings.EqualFold(rel, prefix) {
+		return "", true
+	}
+	if len(rel) > len(prefix) && rel[len(prefix)] == '/' && strings.EqualFold(rel[:len(prefix)], prefix) {
+		return rel[len(prefix):], true
+	}
+	return "", false
 }
 
 // clearLostFiles 删除全部 lost 状态文件记录（「清理丢失记录」入口，等效 lost
@@ -2248,29 +2282,131 @@ func (s *assetsStore) deleteSplitRecord(relPath string) error {
 	return err
 }
 
-// splitRecordExistsByPathPrefix 目录前缀下是否存在**源仍存在**的拆分记录
-// （文件夹重命名守卫判定用，PRD PR2 宁严勿错）：source_rel_path 恰等于前缀或以
-// 「前缀 + /」开头，目录边界语义与 listFilesByPathPrefix 同构（LIKE 转义单点
-// escapeLikePattern）。
+// migrateSplitRecordsTx 目录级迁移的拆分记录路径同步（files.path / 文件夹标注
+// 键同一事务内执行，任一步失败整体回滚）。source_rel_path 命中口径 = 恰等旧
+// 前缀或以「旧前缀 + /」开头（LIKE 转义单点 escapeLikePattern）。
 //
-// 只统计 source_removed = 0：replace 成功后的记录是「源已进回收站」的留痕，
-// 源文件已不存在，移动目录不会断开任何在途溯源；若一并阻断，目录将被历史
-// 记录永久锁死（审核修复）。source_removed = 0 的 cache/source 记录与
-// replace 失败/中断记录（源仍在）继续阻断。
-func (s *assetsStore) splitRecordExistsByPathPrefix(relDir string) (bool, error) {
-	var n int
-	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM split_records WHERE (source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\') "+
-			"AND source_removed = 0",
-		relDir, escapeLikePattern(relDir)+"/%",
-	).Scan(&n)
-	return n > 0, err
+// output_dir 迁移分落点（target 显式分流，禁字符串盲替换）：
+//   - target=source / replace：产物位于库根内（<源目录>/<源主干>/），按迁移后
+//     相对路径重算为 Join(库根, 新源目录, 新源主干)；
+//   - target=cache（及历代默认）：产物位于 data/assets/<库>/derived，物理目录
+//     不随用户目录迁移，保留原绝对路径（仍可打开当前产物）——下次重拆会在新
+//     derived 路径再生成一份，属已登记限制。
+//
+// 冲突策略：迁移后目标键已被别的记录占用时保留 source_removed=1 的一条（两条
+// 同类保留既有行），落败行删除并 Warn，迁移不因冲突中断（门禁不堵死目录操作）。
+// 幂等：新旧路径相同（含大小写变体改写后相等）跳过，零变更。
+//
+// 单连接池纪律：事务内先收齐查询结果并显式 Close 再发写语句（rows 未关就写会
+// 永久自锁，见 libraryStats 注释）。返回实际迁移行数。
+func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) (int, error) {
+	if m.oldPrefix == "" {
+		return 0, nil
+	}
+	escaped := escapeLikePattern(m.oldPrefix)
+	rows, err := tx.Query(
+		"SELECT source_rel_path, output_dir, target, source_removed FROM split_records "+
+			"WHERE source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\'",
+		m.oldPrefix, escaped+"/%",
+	)
+	if err != nil {
+		return 0, err
+	}
+	type splitMigRow struct {
+		rel, outDir, target string
+		sourceRemoved       bool
+	}
+	migRows := make([]splitMigRow, 0, 8)
+	for rows.Next() {
+		var r splitMigRow
+		if err := rows.Scan(&r.rel, &r.outDir, &r.target, &r.sourceRemoved); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		migRows = append(migRows, r)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	// 嵌套前缀链式腾位安全序（对齐 assetPathRenamesForPrefix 的既有推理）：新前缀
+	// 位于旧前缀子树内时（如「d」→「d/sub」），某条较短记录的新键可能恰是另一条
+	// 更长记录的旧键。按旧路径长度降序处理——占位的长记录先腾位，短记录落位时新键
+	// 已空，避免被误判为目标键冲突而删除（禁按查询序处理，否则记录静默丢失）。
+	sort.SliceStable(migRows, func(i, j int) bool {
+		return len(migRows[i].rel) > len(migRows[j].rel)
+	})
+
+	migrated := 0
+	for _, r := range migRows {
+		suffix, ok := stripDirPathPrefix(r.rel, m.oldPrefix)
+		if !ok {
+			// 结构性不可达（SQL 命中集恒满足前缀语义），防御未来查询口径变更时
+			// 把整条旧路径误当后缀重复拼接
+			return migrated, fmt.Errorf("拆分记录路径「%s」不在旧前缀「%s」下", r.rel, m.oldPrefix)
+		}
+		newRel := m.newPrefix + suffix
+		if m.newPrefix == "" {
+			// 防御：新前缀为库根时 suffix 的前导 / 会导致绝对路径形态
+			newRel = strings.TrimPrefix(suffix, "/")
+		}
+		if newRel == r.rel {
+			continue // 幂等：改写结果与原值相同（含大小写变体归一后相等的形态）
+		}
+		newOutDir := r.outDir
+		if r.target == model.AssetSplitTargetSource || r.target == model.AssetSplitTargetReplace {
+			// 库根内绝对路径重算：<库根>/<新源目录>/<新源主干>（path.Dir 对根级
+			// 文件返回 "."，Join 归一即库根自身）
+			newOutDir = filepath.Join(m.libraryRoot, filepath.FromSlash(path.Dir(newRel)), splitSourceBaseName(newRel))
+		}
+		// 冲突预检（迁移后目标键已被别的记录占用）：保留 source_removed=1 的一条，
+		// 两条同类保留既有行；落败行删除，迁移继续
+		var existingRemoved bool
+		err := tx.QueryRow(
+			"SELECT source_removed FROM split_records WHERE source_rel_path = ?", newRel,
+		).Scan(&existingRemoved)
+		switch {
+		case err == nil:
+			if existingRemoved || !r.sourceRemoved {
+				// 既有行胜出（既有为留痕 或 两条同类）：删除待迁移行
+				if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", r.rel); delErr != nil {
+					return migrated, delErr
+				}
+				Logger().Warn("拆分记录迁移遇目标键冲突，保留既有记录",
+					"oldPath", r.rel, "newPath", newRel, "existingSourceRemoved", existingRemoved)
+				continue
+			}
+			// 待迁移行为留痕（source_removed=1）、既有行为源仍在：留痕胜出，
+			// 删除既有行后由下方 UPDATE 落位
+			if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", newRel); delErr != nil {
+				return migrated, delErr
+			}
+			Logger().Warn("拆分记录迁移遇目标键冲突，保留已删源留痕记录",
+				"oldPath", r.rel, "newPath", newRel)
+		case errors.Is(err, sql.ErrNoRows):
+			// 无冲突，正常落位
+		default:
+			return migrated, err
+		}
+		if _, err := tx.Exec(
+			"UPDATE split_records SET source_rel_path = ?, output_dir = ? WHERE source_rel_path = ?",
+			newRel, newOutDir, r.rel,
+		); err != nil {
+			return migrated, err
+		}
+		migrated++
+	}
+	return migrated, nil
 }
 
 // deleteSplitRecordsByPathPrefix 删除目录前缀下全部拆分记录并返回删除行数
 // （文件夹删除后的索引收口：源文件物理已删，记录保留会以陈旧哈希误判复拆增量
 // 跳过；派生缓存目录产物成孤儿无害，随库删除统一收口）。目录边界语义与
-// splitRecordExistsByPathPrefix 同构（同一 WHERE 构造，禁两套口径）。
+// listFilesByPathPrefix 同构（同一 WHERE 构造，禁两套口径）。
 func (s *assetsStore) deleteSplitRecordsByPathPrefix(relDir string) (int64, error) {
 	res, err := s.db.Exec(
 		"DELETE FROM split_records WHERE source_rel_path = ? OR source_rel_path LIKE ? ESCAPE '\\'",
@@ -2720,7 +2856,7 @@ func (s *assetsStore) updateFolderMeta(folderPath, note string, tagNames []strin
 
 // deleteFolderMetaByPathPrefix 删除目录前缀下的文件夹标注（meta + 标签绑定，
 // DeleteAssetFolder 级联收口：目录物理已删，标注保留成孤儿键）。目录边界语义
-// 与 splitRecordExistsByPathPrefix 同构（恰等 + LIKE 前缀/%）。
+// 与 listFilesByPathPrefix 同构（恰等 + LIKE 前缀/%）。
 func (s *assetsStore) deleteFolderMetaByPathPrefix(relDir string) error {
 	for _, table := range []string{"folder_meta", "folder_tags"} {
 		if _, err := s.db.Exec(

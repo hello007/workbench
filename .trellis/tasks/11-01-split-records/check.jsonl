@@ -1,0 +1,5 @@
+{"file": "docs/spec/assets-management.md", "reason": "核对迁移是否覆盖三入口、目录边界、cache/source/replace 落点与文档同步口径"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对 split_records 三态语义与派生产物判定未被破坏"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新增用例无外部状态依赖、单连接池自锁纪律合规"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁不降"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对冲突告警日志与错误处理口径"}

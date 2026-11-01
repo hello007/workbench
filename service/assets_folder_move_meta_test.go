@@ -99,12 +99,18 @@ func TestAssetFolderMove_Refusals(t *testing.T) {
 	if _, err := svc.MoveAssetFolder(lib.ID, "stem", "media"); err == nil {
 		t.Errorf("源为派生容器应拒绝")
 	}
-	// 源含拆分记录拒绝（与 PR2 重命名同口径）
-	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", "D:/derived/media/a", 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
+	// 源含拆分记录不再拒绝（B 方案 PR2）：记录随目录同一事务迁移到新路径
+	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord("media/a.pptx", "hash", filepath.Join(root, "media", "a"), 2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, false); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
-	if _, err := svc.MoveAssetFolder(lib.ID, "media", ""); err == nil {
-		t.Errorf("源含拆分记录应拒绝")
+	if err := os.MkdirAll(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(dest): %v", err)
+	}
+	if _, err := svc.MoveAssetFolder(lib.ID, "media", "dest"); err != nil {
+		t.Errorf("源含拆分记录不应再阻断目录移动：%v", err)
+	}
+	if rec, _ := svc.openStoreForTest(t, lib.ID).getSplitRecord("dest/media/a.pptx"); rec == nil {
+		t.Errorf("拆分记录应随目录移动到新路径")
 	}
 	// 库根拒绝
 	if _, err := svc.MoveAssetFolder(lib.ID, "", "media"); err == nil {

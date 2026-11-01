@@ -299,9 +299,12 @@ func (s *AssetLibraryService) DeleteAssetFolder(libraryID, relPath string, force
 // 新名解除经 fileHasSlides 资格门槛 + reviveLostFile（单事务含 syncFtsFileRowTx
 // 重建，§12.2 契约）；无产物行不翻转，交由随后自动扫描重解析重分类。
 //
-// 拆分记录守卫（宁严勿错）：子树内存在拆分记录时拒绝重命名——split_records 以
-// 源文件相对路径为键且无重链机制，重命名会断「打开拆分单页」溯源与增量复拆
-// 判定（PRD 拍板：无重链机制则拒绝，不做部分迁移）。
+// 拆分记录随同一事务迁移（B 方案 PR2）：split_records 的 source_rel_path 与
+// output_dir 经 replaceFilePaths 内 migrateSplitRecordsTx 与 files.path 同事务
+// 改写——非派生记录（cache/source/replace，含源仍在的 source_removed=0）一律
+// 迁移，不再以历史记录阻断目录操作（原「宁严勿错拒绝」口径已解除：界面无删除
+// 拆分记录入口，拒绝会形成死路）。target=source/replace 的 output_dir 按库根
+// 重算，target=cache 保持原绝对路径（derived 物理目录不随用户目录迁移）。
 //
 // 失败恢复姿态：磁盘 rename 成功后的索引写失败不回滚磁盘（rename 不可逆），错误
 // 上抛由前端刷新 + 下次扫描增量三态自愈（旧路径消失标 lost、新路径新入库）。
@@ -333,13 +336,13 @@ func (s *AssetLibraryService) RenameAssetFolder(libraryID, relPath, newName stri
 // MoveAssetFolder 目录级移动（PRD R5/D，文件夹树 PR4）：把目录整体移动到目标
 // 目录下（targetFolder 空串 = 库根），保持自身名称。与 RenameAssetFolder 共用
 // moveAssetFolderCore 统一核心（磁盘 rename 先行 + 前缀替换单点 + 排除双向翻转
-// + folder_meta/folder_tags 键同事务级联 + 自动增量扫描收敛）。
+// + folder_meta/folder_tags 键与 split_records 路径同事务迁移 + 自动增量扫描收敛）。
 //
 // 目标校验（入口整体执行，对全部受影响文件生效）：目标目录存在且为目录、非排除
 // 命中、非拆分派生容器；**目标不得位于源目录自身子树内**（rename 进后代会把
 // 目录挂到自己下面，文件系统行为未定义且索引前缀替换语义崩坏，明确拒绝）；目
-// 标内重名（磁盘面，核心内与重命名同口径预检）。源含拆分记录维持 PR2 拒绝口径
-// （宁严勿错，目录级迁移的镜像树失效面不做部分迁移）。
+// 标内重名（磁盘面，核心内与重命名同口径预检）。拆分子树随目录整体迁移（B
+// 方案 PR2），不再因历史拆分记录拒绝。
 func (s *AssetLibraryService) MoveAssetFolder(libraryID, folderRelPath, targetFolder string) (model.AssetFolderRenameResult, error) {
 	lib, err := s.getLibrary(libraryID)
 	if err != nil {
@@ -516,9 +519,9 @@ func (s *AssetLibraryService) runFolderRelocate(libraryID, rel, abs, newParentRe
 // PR4 抽取——RenameAssetFolder 委托 newParentRel=源自身父目录、MoveAssetFolder
 // 传目标目录）：目标重名与子树包含预检 → 磁盘 rename 先行（同盘原子；失败时索
 // 引未动零半态）→ 索引前缀同步（assetPathRenamesForPrefix 单点 + replaceFilePaths
-// 单事务批量 UPDATE，folder_meta/folder_tags 键同事务级联改键）→ 排除规则双向
-// 翻转。索引写失败不回滚磁盘（rename 不可逆），错误上抛由前端刷新 + 下次扫描
-// 增量三态自愈（旧路径消失标 lost、新路径新入库）。
+// 单事务批量 UPDATE，folder_meta/folder_tags 键与 split_records 路径同事务迁移）
+// → 排除规则双向翻转。索引写失败不回滚磁盘（rename 不可逆），错误上抛由前端
+// 刷新 + 下次扫描增量三态自愈（旧路径消失标 lost、新路径新入库）。
 func (s *AssetLibraryService) moveAssetFolderCore(lib model.AssetLibrary, store *assetsStore, matcher *assetExcludeMatcher, rel, abs, newParentRel, newName, opName string, result *model.AssetFolderRenameResult) error {
 	libraryID := lib.ID
 	// 新路径（newParentRel/新名；父为库根时新路径即新名）
@@ -539,15 +542,6 @@ func (s *AssetLibraryService) moveAssetFolderCore(lib model.AssetLibrary, store 
 		return fmt.Errorf("同名目录或文件「%s」已存在", newRel)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("检查目标路径失败: %w", err)
-	}
-	// 拆分记录守卫（宁严勿错，见 RenameAssetFolder 函数头注释）
-	hasSplit, err := store.splitRecordExistsByPathPrefix(rel)
-	if err != nil {
-		return fmt.Errorf("检查拆分记录失败: %w", err)
-	}
-	if hasSplit {
-		return fmt.Errorf(
-			"目录「%s」内存在已拆分文件（含拆分记录），%s会断开拆分产物溯源，请先删除对应拆分记录后再操作", rel, opName)
 	}
 	// 磁盘重定位先行（同盘原子；失败时索引未动零半态）
 	if err := os.Rename(abs, newAbs); err != nil {
@@ -576,9 +570,11 @@ func (s *AssetLibraryService) moveAssetFolderCore(lib model.AssetLibrary, store 
 	// records 为空（无 pptx 索引面）不得提前 return：空目录/仅非 PPT 文件的目录
 	// 同样可能带 folder_meta/folder_tags 标注，replaceFilePaths 对空 renames 仅
 	// 执行文件夹标注键级联改键，跳过则标注成旧路径孤儿键（标注静默丢失）。
-	// 文件夹标注键同事务级联改键（PR4 R8：folder_meta/folder_tags 以 folder_path
-	// 为键，目录重命名/移动时随路径前缀替换——与 files.path 更新同一事务保证原子）
-	if err := store.replaceFilePaths(renames, now, rel, newRel); err != nil {
+	// 文件夹标注键与拆分记录路径同事务级联迁移（PR4 R8 + B 方案 PR2：folder_meta/
+	// folder_tags 以 folder_path 为键、split_records 以 source_rel_path 为键，均随
+	// 路径前缀替换——与 files.path 更新同一事务保证原子）
+	if err := store.replaceFilePaths(renames, now, rel, newRel,
+		splitRecordMigration{libraryRoot: lib.RootPath, oldPrefix: rel, newPrefix: newRel}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// 并发窗口：命中行被「清理丢失记录」删除（ClearLostAssetFiles 不持
 			// 扫描锁）——事务已整体回滚，如实报错防 Replaced 虚报
