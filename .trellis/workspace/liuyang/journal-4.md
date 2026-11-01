@@ -702,3 +702,36 @@ cleanupSplitArtifactsInDirByPage 由「同页序唯一候选即删」改为「�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 190: 旧产物清理改目录基名锚定（审核收口）
+
+**Date**: 2026-11-01
+**Task**: 旧产物清理改目录基名锚定（审核收口）
+**Branch**: `master`
+
+### Summary
+
+针对两路子代理审核在 739d85c 发现的两处误删（单页记录豁免、用户同主干多文件覆盖反超）改为目录基名锚定：dominantSplitArtifactStem 以 filepath.Base(outputDir) 为锚（精确优先/折叠唯一/折叠多命中不可判定），页覆盖不再参与；删除仅在同主干候选内要求同页序唯一；候选只取 IsRegular；读错误非 ENOENT 告警；目录删除失败经 isBenignDirRemoveErr 统一。补 10+ 用例含单页用户文件、主干反超、部分缺失、目录改名、子目录同名、读错误、幻灯片级联与删源失败时序；spec §9.5 与 CLAUDE.md 同步（344 字符）。go test ./... 全绿，覆盖率 service 81.1%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `887a1a6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
