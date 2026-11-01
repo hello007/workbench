@@ -118,7 +118,7 @@ workbench/
 |素材拆分 replace 落点：产物名 `<3位页序>-<名字主干>.pptx` 不命中 isPptxSplitDerivative（数字主干加 `-p`，改判定回归）；全页 Stat+索引+标注三单事务过才移源（禁 FOF_NOCONFIRMATION）；旧产物延迟清理（失败/取消经 `.replace-bak` 还原）；源哈希必须重算；空主干/二次拆分拒绝（批量按记录剔除）；不增量跳过；3-7 失败/取消回滚，删源失败不回滚且补写记录（source_removed=0）；`split_records` v8 target/source_removed|[pptx-split.md](docs/spec/pptx-split.md)|
 |素材拆分批量取消保留已完成：返回 Items+`Canceled=true`+**nil error**、终态 `assets-split:done`（单文件仍 E_ASSETS_CANCELLED）；Items 仅已完成、Total 仍快照总数；循环后补判 ctx 竞态|[assets-management.md §15.7](docs/spec/assets-management.md)|
 |目录级路径迁移：拆分记录随目录重命名/移动/前缀替换同事务迁移（`migrateSplitRecordsTx`，与 files.path/folder 键同事务）；source_removed=0 守卫已解除；source/replace 的 output_dir 按库根重算（容器目录被移动时按旧前缀剥离迁移，cache 保持）；前缀剥离 `stripDirPathPrefix` 用 EqualFold 禁 TrimPrefix；嵌套前缀按旧路径长度降序防误删；冲突保留 source_removed=1；单页产物禁单独移动|[assets-management.md §8.7](docs/spec/assets-management.md)|
-|文件级重链同步迁移拆分记录：`RelocateAssetFile` 落库须在 files.path 同事务内改写 `split_records.source_rel_path` 键，**output_dir 恒保持原绝对路径**（产物未随源移动，重算致打开单页失效）；冲突消解与目录迁移共用 `rewriteSplitRecordKeyTx` 单点，禁各写一套|[assets-management.md §11.3](docs/spec/assets-management.md)|
+|文件级重链拆分记录口径：RelocateAssetFile 须与 files.path 同事务迁移 split_records 源键，output_dir 恒保原绝对路径（重算致单页失效）；产物定位一律走 splitArtifactPath（直拼+目录反查，覆盖改名重链）；目录迁移重算落点前须判 output_dir 在旧前缀下；force 重链与清理丢失同事务删记录|[assets-management.md §11.3](docs/spec/assets-management.md)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

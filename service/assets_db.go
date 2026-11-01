@@ -565,7 +565,7 @@ func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size
 // 同口径）。FTS/slides/缩略图由随后的单文件重解析链路处理。零命中 = 行已被
 // 并发「清理丢失记录」删除（并发窗口同 relocateFileOK）：sql.ErrNoRows 上抛，
 // 调用方转可读错误（且不再进入随后的重解析探测段）。
-func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath string, now string) error {
+func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath string, now string, dropSplitRecord bool) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -583,9 +583,14 @@ func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath stri
 	} else if n == 0 {
 		return sql.ErrNoRows
 	}
-	// 拆分记录源键同事务迁移（口径同 relocateFileOK：只改键，output_dir 保持原
-	// 绝对路径；随后的重解析链路不写 split_records，记录内容不受影响）
-	if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
+	// 拆分记录同事务处理：dropSplitRecord=true（内容已变的 force 重链）删除旧键
+	// 记录——旧产物与当前源不再对应，保留会展示必然过期/错误的「打开拆分单页」
+	// 入口，用户重新拆分后重建；false 则键迁移、落点保持（口径同 relocateFileOK）
+	if dropSplitRecord {
+		if _, err := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", oldPath); err != nil {
+			return fmt.Errorf("清理失效拆分记录失败: %w", err)
+		}
+	} else if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
 		return fmt.Errorf("迁移拆分记录失败: %w", err)
 	}
 	return tx.Commit()
@@ -805,6 +810,13 @@ func (s *assetsStore) clearLostFiles() ([]int64, int64, error) {
 		}
 		if n == 0 {
 			continue // 防御：资格复验已过仍零命中（理论不达），不计入
+		}
+		// 拆分记录同事务清理：记录键为源相对路径，files 行删除后记录即成孤儿
+		// （重链迁移过键的记录会挂在被清理文件的新路径上，后续同名文件拆分时
+		// 误命中他文件的记录）。产物目录保留在磁盘（与既有「旧产物残留」限制
+		// 一致），仅删记录。
+		if _, err := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", rec.path); err != nil {
+			return nil, 0, err
 		}
 		deletedIDs = append(deletedIDs, rec.id)
 		removed += n
@@ -2404,6 +2416,32 @@ func (s *assetsStore) rewriteSplitRecordKeyTx(tx *sql.Tx, oldRel, newRel, newOut
 	return true, nil
 }
 
+// splitOutDirUnderPrefix 产物目录是否位于被迁移目录前缀下（与后缀剥离结果，
+// 目录边界语义复用 stripDirPathPrefix 单点）。库根外或无法相对化一律 false =
+// 不参与落点迁移（cache 落点在库根外、文件级重链冻结在别处的落点）。
+func splitOutDirUnderPrefix(libraryRoot, outDir, oldPrefix string) bool {
+	_, ok := splitOutDirRelUnderPrefix(libraryRoot, outDir, oldPrefix)
+	return ok
+}
+
+// splitOutDirRelUnderPrefix output_dir 相对库根的路径经旧前缀剥离的目录边界
+// 判定单点（源键重算前提校验与 output_dir-only 迁移两路共用）。返回剥离后缀
+// （含前导 `/`），ok=false = 库根外 / 不可相对化 / 不在前缀下。
+func splitOutDirRelUnderPrefix(libraryRoot, outDir, oldPrefix string) (string, bool) {
+	if libraryRoot == "" || outDir == "" || oldPrefix == "" {
+		return "", false
+	}
+	outRel, err := filepath.Rel(libraryRoot, outDir)
+	if err != nil {
+		return "", false
+	}
+	outRelSlash := filepath.ToSlash(outRel)
+	if outRelSlash == ".." || strings.HasPrefix(outRelSlash, "../") {
+		return "", false // 库根外（cache 落点等）不迁移
+	}
+	return stripDirPathPrefix(outRelSlash, oldPrefix)
+}
+
 // migrateSplitRecordsTx 目录级迁移的拆分记录路径同步（files.path / 文件夹标注
 // 键同一事务内执行，任一步失败整体回滚）。迁移面两路，同一记录两路命中只落
 // 一次 UPDATE：
@@ -2473,12 +2511,15 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		if sourceHit {
 			newRel := migratedRelPath(m.newPrefix, suffix)
 			newOutDir := r.outDir
-			if r.target == model.AssetSplitTargetSource || r.target == model.AssetSplitTargetReplace {
+			if (r.target == model.AssetSplitTargetSource || r.target == model.AssetSplitTargetReplace) &&
+				splitOutDirUnderPrefix(m.libraryRoot, r.outDir, m.oldPrefix) {
 				// 库根内绝对路径重算：<库根>/<新源目录>/<新源主干>（path.Dir 对根级
-				// 文件返回 "."，Join 归一即库根自身）
+				// 文件返回 "."，Join 归一即库根自身）。前提校验：产物目录须确实位于
+				// 被移动目录前缀下（常规拆分落点或目录整体搬迁）——文件级重链刻意
+				// 冻结在别处的落点（产物未随源移动）不得重算，否则「打开拆分单页」
+				// 指向不存在目录
 				newOutDir = filepath.Join(m.libraryRoot, filepath.FromSlash(path.Dir(newRel)), splitSourceBaseName(newRel))
-			}
-			// 单条改写 + 冲突消解委托共用单点 rewriteSplitRecordKeyTx（与文件级重链
+			} // 单条改写 + 冲突消解委托共用单点 rewriteSplitRecordKeyTx（与文件级重链
 			// 同口径，禁各写一套）
 			changed, err := s.rewriteSplitRecordKeyTx(tx, r.rel, newRel, newOutDir)
 			if err != nil {
@@ -2498,15 +2539,7 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		if r.target != model.AssetSplitTargetSource && r.target != model.AssetSplitTargetReplace {
 			continue
 		}
-		outRel, relErr := filepath.Rel(m.libraryRoot, r.outDir)
-		if relErr != nil {
-			continue // 不同卷/无法相对化 = 库外
-		}
-		outRelSlash := filepath.ToSlash(outRel)
-		if outRelSlash == ".." || strings.HasPrefix(outRelSlash, "../") {
-			continue // 库根外（cache 落点等）不迁移
-		}
-		outSuffix, outHit := stripDirPathPrefix(outRelSlash, m.oldPrefix)
+		outSuffix, outHit := splitOutDirRelUnderPrefix(m.libraryRoot, r.outDir, m.oldPrefix)
 		if !outHit {
 			continue
 		}

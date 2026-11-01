@@ -400,22 +400,25 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	outDir := s.splitOutputDir(lib, rel, absPath, outputToSourceDir)
 
 	// 3. 增量判定：记录命中 + 哈希一致 + 产物首页存在（双验，对齐缩略图补缺
-	//    「PNG 存在唯一权威」先例——手删产物误判已拆被文件存在检查兜住）
+	//    「PNG 存在唯一权威」先例——手删产物误判已拆被文件存在检查兜住）。产物
+	//    存在性经 splitArtifactPath 判定（直拼 + 改名重链回退反查）：源文件被
+	//    改名重链后旧产物仍能识别为「已拆未变」，避免重复拆分与孤儿产物。
 	record, err := store.getSplitRecord(rel)
 	if err != nil {
 		return splitOutcome{rel: rel}, fmt.Errorf("读取拆分记录失败: %w", err)
 	}
-	if record != nil && record.sourceHash == hash &&
-		fileExists(splitFirstPagePath(record.outputDir, baseName)) {
-		return splitOutcome{
-			rel: rel, status: model.AssetSplitStatusSkipped, message: splitSkipReasonUpToDate,
-			result: model.AssetSplitResult{
-				OutputDir: record.outputDir, PageCount: record.pageCount,
-				Skipped: true, SkipReason: splitSkipReasonUpToDate,
-				Target: target, SourceRemoved: record.sourceRemoved,
-			},
-			pageDone: record.pageCount, pageTotal: record.pageCount,
-		}, nil
+	if record != nil && record.sourceHash == hash {
+		if _, artifactOK := splitArtifactPath(record, rel, 1); artifactOK {
+			return splitOutcome{
+				rel: rel, status: model.AssetSplitStatusSkipped, message: splitSkipReasonUpToDate,
+				result: model.AssetSplitResult{
+					OutputDir: record.outputDir, PageCount: record.pageCount,
+					Skipped: true, SkipReason: splitSkipReasonUpToDate,
+					Target: target, SourceRemoved: record.sourceRemoved,
+				},
+				pageDone: record.pageCount, pageTotal: record.pageCount,
+			}, nil
+		}
 	}
 
 	// 4. 重拆清旧页（PRD：防页数减少残留 + 旧 %02d 产物收敛）。derived 落点是
@@ -958,13 +961,9 @@ func (s *AssetLibraryService) OpenAssetSplitPage(libraryID, relPath string, slid
 			return fmt.Errorf("页序超出已拆分页数（slideNum=%d，已拆分 %d 页）", slideNum, record.pageCount)
 		}
 		// 产物命名随落点不同：replace 为 <页序>-<源名主干>.pptx（可索引命名），
-		// 其余落点为 <源名主干>-<页序>.pptx（核心原生命名）
-		if record.target == model.AssetSplitTargetReplace {
-			pagePath = filepath.Join(record.outputDir, replaceArtifactName(slideNum, splitSourceBaseName(rel)))
-		} else {
-			pagePath = filepath.Join(record.outputDir,
-				fmt.Sprintf("%s-%03d.pptx", splitSourceBaseName(rel), slideNum))
-		}
+		// 其余落点为 <源名主干>-<页序>.pptx（核心原生命名）；主干经
+		// splitArtifactPath 解析（改名重链后回退为 output_dir 内按页序反查旧产物）
+		pagePath, _ = splitArtifactPath(record, rel, slideNum)
 		return nil
 	})
 	if err != nil {
@@ -1053,10 +1052,67 @@ func splitSourceBaseName(rel string) string {
 	return strings.TrimSuffix(name, path.Ext(name))
 }
 
-// splitFirstPagePath 产物首页路径（增量判定的产物存在双验锚点：核心拆分从页 1
-// 顺序写盘，001 恒存在；手删产物目录时「记录命中」误判已拆被本检查兜住）。
-func splitFirstPagePath(outputDir, baseName string) string {
-	return filepath.Join(outputDir, fmt.Sprintf("%s-%03d.pptx", baseName, 1))
+// splitArtifactPath 拆分单页产物路径解析单点（打开单页 / 导出 / 增量判定共用）：
+// 先按记录键推导源名主干直拼（产物随源同名的常规场景）；直拼不存在时在
+// record.outputDir 内按页序反查——源文件经 RelocateAssetFile 改名重链后，记录键
+// 的主干（新名）与产物命名主干（旧名）不一致，而 split_records 未存主干列
+// （不改表结构），只能以目录内命名形态回推。目录由该记录独占，且要求候选唯一
+// （多候选视为不可判定，返回直拼路径供报错指向）。返回 (路径, 是否存在)。
+func splitArtifactPath(record *assetSplitRecord, relPath string, slideNum int) (string, bool) {
+	direct := splitArtifactPathForStem(record, splitSourceBaseName(relPath), slideNum)
+	if fileExists(direct) {
+		return direct, true
+	}
+	if alt, ok := findSplitArtifactByPage(record.outputDir, record.target, slideNum); ok {
+		return alt, true
+	}
+	return direct, false
+}
+
+// splitArtifactPathForStem 按指定主干拼产物路径（命名形态随落点：replace 为
+// <3位页序>-<主干>.pptx，其余为 <主干>-<3位页序>.pptx）。
+func splitArtifactPathForStem(record *assetSplitRecord, stem string, slideNum int) string {
+	if record.target == model.AssetSplitTargetReplace {
+		return filepath.Join(record.outputDir, replaceArtifactName(slideNum, stem))
+	}
+	return filepath.Join(record.outputDir, fmt.Sprintf("%s-%03d.pptx", stem, slideNum))
+}
+
+// findSplitArtifactByPage output_dir 内按页序反查唯一产物（改名重链回退路径）。
+// 目录不存在/不可读一律视为未命中；同页序候选多于一个视为不可判定（用户在该
+// 目录手工放入同页序文件时不猜），返回 false。
+func findSplitArtifactByPage(outputDir, target string, slideNum int) (string, bool) {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		return "", false
+	}
+	var hit string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pptx") {
+			continue
+		}
+		name := e.Name()
+		matched := false
+		if target == model.AssetSplitTargetReplace {
+			// replace 形态：<纯数字页序>-<主干>.pptx（页序段位数不限，v8 前后兼容）
+			if idx := strings.IndexByte(name, '-'); idx > 0 && idx < len(name)-len("-")-len(".pptx") &&
+				isAllDigits(name[:idx]) {
+				if n, convErr := strconv.Atoi(name[:idx]); convErr == nil && n == slideNum {
+					matched = true
+				}
+			}
+		} else if pageSeqFromArtifactName(name) == slideNum {
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+		if hit != "" {
+			return "", false // 多候选不可判定
+		}
+		hit = filepath.Join(outputDir, name)
+	}
+	return hit, hit != ""
 }
 
 // removeSplitArtifacts 源目录落点的重拆清旧页：仅删除匹配产物命名形态
@@ -1283,17 +1339,39 @@ func filterReplaceArtifactSources(lib model.AssetLibrary, sources []assetSplitSo
 
 // isReplaceArtifactOutput 绝对路径是否为上次就地替换的产物：父目录等于某条
 // target=replace 记录的 output_dir，且文件名匹配该记录的产物命名形态（主干由
-// 记录的源相对路径推导，与 splitSourceBaseName 同口径）。
+// 记录的源相对路径推导，与 splitSourceBaseName 同口径）。源文件经改名重链后
+// 记录键主干（新名）与产物命名主干（旧名）不一致，追加目录独占前提下的宽松
+// 形态判定 `<纯数字页序>-<任意主干>.pptx`——否则旧产物不再被剔除，批量二次拆分
+// 会把「页」再拆成「页的页」。
 func isReplaceArtifactOutput(absPath string, outputs []replaceSplitOutput) bool {
 	clean := filepath.Clean(absPath)
 	dir := filepath.Dir(clean)
 	name := filepath.Base(clean)
 	for _, o := range outputs {
-		if samePathFold(o.outputDir, dir) && isReplaceArtifactName(name, splitSourceBaseName(o.sourceRel)) {
+		if !samePathFold(o.outputDir, dir) {
+			continue
+		}
+		if isReplaceArtifactName(name, splitSourceBaseName(o.sourceRel)) || isReplaceArtifactNameAnyStem(name) {
 			return true
 		}
 	}
 	return false
+}
+
+// isReplaceArtifactNameAnyStem 已改名形态判定：`<纯数字页序>-<非空主干>.pptx`。
+// 仅用于「目录由 replace 记录独占」的调用点（output_dir = <源目录>/<主干>，
+// 用户自建文件混入概率低）；核心中间态 `<主干>-<数字>.pptx` 不在此列（需主干
+// 精确匹配，防误把 `<文件名>-草稿.pptx` 当产物）。
+func isReplaceArtifactNameAnyStem(name string) bool {
+	stem, ok := strings.CutSuffix(name, ".pptx")
+	if !ok {
+		return false
+	}
+	idx := strings.IndexByte(stem, '-')
+	if idx <= 0 || idx >= len(stem)-1 {
+		return false
+	}
+	return isAllDigits(stem[:idx])
 }
 
 // samePathFold 绝对路径等价判定：Clean 后等值即相同；Windows 文件系统大小写

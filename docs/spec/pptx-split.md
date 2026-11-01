@@ -149,6 +149,7 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 
 - `split_records` 增两列：`target TEXT NOT NULL DEFAULT 'cache'`、`source_removed INTEGER NOT NULL DEFAULT 0`；存量记录默认值语义正确（旧落点从不删源）。v8 迁移经 `migrateSchemaV8` 列存在性预判 + 单事务，半迁移库可重开。
 - **容器目录迁移与单页产物移动约束**（2026-11-01）：replace 产物容器目录（`output_dir`）随所在目录重命名/移动/前缀替换在同一事务迁移（`migrateSplitRecordsTx` 对 `target=source/replace` 且库根内相对路径命中旧目录前缀的记录改写 `output_dir`；源键同时命中时按「库根 + 新源目录 + 新源主干」重算，cache 保留原值，详见 [assets-management.md §8.7](assets-management.md)）。`MoveAssetFiles` 对 replace 单页产物（`isReplaceArtifactOutput` 命中）拒绝单独移动，提示整体移动其所在产物容器目录——产物位置只能由记录的 `output_dir` 表达，单独移出会使批量剔除与溯源同时失据。
+- **文件级重链后的产物定位与落点判定**（2026-11-01）：`RelocateAssetFile` 在 files.path 同事务迁移 `split_records` 源键并保持 `output_dir` 原绝对路径（重链只改索引指针，产物目录物理未动）；产物命名主干仍是拆分时点的旧源名，故打开单页 / 导出 `single_pptx_path` / 增量判定首页存在性统一走 `splitArtifactPath`（当前主干直拼，失败则 `output_dir` 内按页序反查唯一候选，多候选不猜）；`isReplaceArtifactOutput` 在目录独占前提下补宽松形态 `<页序>-<任意主干>.pptx`，防改名后旧产物脱离剔除。目录级迁移重算 `output_dir` 前经 `splitOutDirUnderPrefix` 确认现落点位于被迁移前缀下（重链冻结在别处的不重算）。force 重链（哈希不等且确认，内容已变）与 `clearLostFiles` 均在同一事务删除对应拆分记录。
 - replace **不做增量跳过**（见 9.3 步 2）：源行存在只对应「源从回收站还原」（`source_removed=1`）或「上次删源失败、产物完整」（`source_removed=0`）两种状态，均须完整重拆——跳过会留下源与产物并存或产物失去归属。
 - 重拆清旧改为**延迟清理**：拆分前只登记 `oldArtifacts` 不删除；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图——防页数减少残留僵尸素材，同时保证失败/取消时旧产物（含被覆盖页）原样保留。
 - `OpenAssetSplitPage` 按 `record.target` 选命名：replace 用 `<NNN>-<名字主干>.pptx`，其余用 `<主干>-<NNN>.pptx`。

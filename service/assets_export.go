@@ -92,6 +92,7 @@ type assetExportRow struct {
 	hasSplitRecord bool
 	splitOutputDir string
 	splitPageCount int
+	splitTarget    string // 落点（产物命名形态随落点：replace 为 <页序>-<主干>.pptx）
 }
 
 // assetExportCtx 导出写出口径上下文（rootPath 拼接与缩略图目录定位基准）。
@@ -160,14 +161,15 @@ func (r *assetExportRow) thumbnailPath(ectx *assetExportCtx) string {
 // split_records.output_dir 为权威（与 OpenAssetSplitPage 同链，覆盖 derived 缓存
 // 与源目录两种落点），页序超出已拆分页数或产物文件不存在均导空。库内产物（源目录
 // 拆分落点）按 pathMode 相对化（relative = 相对 root_path 正斜杠）；库外 derived
-// 缓存产物无库相对语义，恒绝对。
+// 缓存产物无库相对语义，恒绝对。产物主干经 splitArtifactPath 解析（含改名重链
+// 的目录反查回退，与打开单页同口径）。
 func (r *assetExportRow) singlePptxPath(ectx *assetExportCtx) string {
 	if r.slideNum < 1 || !r.hasSplitRecord || r.slideNum > r.splitPageCount {
 		return ""
 	}
-	abs := filepath.Join(r.splitOutputDir,
-		fmt.Sprintf("%s-%03d.pptx", splitSourceBaseName(r.relPath), r.slideNum))
-	if !fileExists(abs) {
+	record := &assetSplitRecord{outputDir: r.splitOutputDir, target: r.splitTarget}
+	abs, ok := splitArtifactPath(record, r.relPath, r.slideNum)
+	if !ok {
 		return ""
 	}
 	if ectx.pathMode == model.AssetExportPathModeRelative && assetExportUnderRoot(ectx.lib.RootPath, abs) {
@@ -824,6 +826,7 @@ func hydrateAssetExportBatchRows(store *assetsStore, keys []assetExportRowKey) (
 			row.hasSplitRecord = true
 			row.splitOutputDir = hd.split.outputDir
 			row.splitPageCount = hd.split.pageCount
+			row.splitTarget = hd.split.target
 		}
 		rowsOut = append(rowsOut, row)
 	}

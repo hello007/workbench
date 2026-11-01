@@ -197,8 +197,11 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 	}
 
 	// 哈希不等（force 确认）或记录无哈希：改 path + 标记 processing + 单文件
-	// 重解析（复用扫描链路：失效缩略图、哈希现算、按解析分类落终态）
-	if err := store.relocateFileProcessing(fileID, rec.path, newRel, now); err != nil {
+	// 重解析（复用扫描链路：失效缩略图、哈希现算、按解析分类落终态）。
+	// dropSplitRecord：仅「哈希不等且 force 确认」（源内容已变）时删旧拆分记录
+	// ——旧产物与当前源不再对应；无哈希记录内容未知，按原口径迁移键保留记录。
+	dropSplitRecord := rec.hash != "" && !result.HashMatched
+	if err := store.relocateFileProcessing(fileID, rec.path, newRel, now, dropSplitRecord); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// 并发窗口：记录已被「清理丢失记录」删除——如实报错防成功虚报，
 			// 且不再进入随后的单文件重解析（幽灵行落 slides 外键违例）
