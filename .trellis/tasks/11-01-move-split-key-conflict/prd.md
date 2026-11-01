@@ -24,10 +24,21 @@
 - [ ] 事务回滚用例：记录写失败时 files.path 与 split_records 均不变。
 - [ ] `go test ./...` 全通过；覆盖率门禁不降。
 
-## Technical Approach（初稿，brainstorm 时确认）
+## Technical Approach
 
-- 定位 `service/assets_folders.go` 中 `moveOneAssetFile` / `moveFilePath` 的拆分键 UPDATE 段，替换为单点调用（注意单连接池：全程用 `tx`）。
-- 磁盘 rename 与索引事务的先后关系保持现状，不调整执行顺序。
+- `moveFilePath`（service/assets_folders.go:882）内 `UPDATE split_records ...` 裸语句替换为 `s.rewriteSplitRecordKeyTx(tx, r.oldRel, r.newRel, "")`：
+  - `newOutDir` 传空串 = 保持原 `output_dir`（单文件移动只改源键，产物目录不随动，与既有口径一致；产物目录随源搬迁由 `RelocateAssetFile` 的 `resolveRelocatedSplitOutDir` 负责，不在本任务范围）。
+  - 复用单点的同键零变更、目标键冲突四态（`source_removed=1` 优先保留既有行并 Warn、落败行删除）与旧键不存在零操作。
+- 事务边界不变（仍每条目一事务）；磁盘 `os.Rename` 与事务先后关系不变。
+- 返回值 `changed` 无需上抛（移动语义不区分是否产生记录变更）。
+
+## Decision (ADR-lite)
+
+**Context**：裸 UPDATE 撞主键时事务回滚，但磁盘 rename 已发生，索引指向旧路径、磁盘已是新路径，只能靠后续扫描收敛；重链与目录迁移都会产生新键占用，放大该缺口。
+
+**Decision**：直接复用 `rewriteSplitRecordKeyTx`（唯一键改写/冲突消解单点），不新写预检或第二套冲突逻辑。
+
+**Consequences**：冲突不再让移动事务回滚，按既有口径收敛并留 Warn；非冲突路径行为与幂等语义不变。代价：冲突时可能删除旧键记录（既有约定的知情取舍，用户重新拆分可重建）。
 
 ## Out of Scope
 

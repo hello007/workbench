@@ -3,7 +3,7 @@
   "name": "move-split-key-conflict",
   "title": "moveFilePath 拆分键冲突消解收口",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

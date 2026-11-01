@@ -839,7 +839,8 @@ func (s *AssetLibraryService) moveOneAssetFile(store *assetsStore, lib model.Ass
 	}
 
 	// 事务内：files.path 更新（RowsAffected 零命中 = 并发清理窗口）+ split_records
-	// 源路径同事务重写（无拆分记录零行更新，非错误）
+	// 源路径同事务重写（rewriteSplitRecordKeyTx 单点：旧键不存在零操作、同键幂等、
+	// 目标键冲突保留 source_removed=1 的一条并 Warn，不回滚移动事务）
 	if err := store.moveFilePath(relPathRename{fileID: fileID, newRel: newRel, oldRel: rec.path}, now); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fail(item.Label, "记录已被清理，请刷新后重试")
@@ -879,6 +880,18 @@ type relPathRename struct {
 // moveFilePath 单文件移动的事务落库（每条目一事务）：files.path 更新 + 该源的
 // split_records 源路径同事务重写。FTS 说明见 MoveAssetFiles 函数头（检索列不含
 // 路径，纯路径移动零重建；状态翻转经调用方既有单点，禁在本事务裸翻状态）。
+//
+// 拆分记录键改写委托 rewriteSplitRecordKeyTx 单点（与文件级重链、目录级迁移同源，
+// 禁在本函数裸 UPDATE）：
+//   - 旧键不存在零操作不报错（从未拆分 / 记录已被清理）；
+//   - 同一 (old→new) 重复执行结果相同，幂等零变更；
+//   - 目标键已被别的记录占用时按既有口径收敛——保留 source_removed=1 的一条
+//     （两条同类保留既有行），落败行删除并 Warn，不为主键冲突回滚事务。裸 UPDATE
+//     撞键会整体回滚，而磁盘 rename 已先行完成，回滚即留下「索引指旧路径、磁盘
+//     已是新路径」的不一致，只能靠后续扫描兜底收敛。
+//
+// newOutDir 传空串 = 保持原 output_dir：单文件移动只改源键，产物目录物理不随源
+// 文件移动（产物容器随源一起搬迁由 RelocateAssetFile 的落点探测负责，不在本链路）。
 func (s *assetsStore) moveFilePath(r relPathRename, now string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -898,10 +911,10 @@ func (s *assetsStore) moveFilePath(r relPathRename, now string) error {
 	} else if n == 0 {
 		return sql.ErrNoRows
 	}
-	if _, err := tx.Exec(
-		"UPDATE split_records SET source_rel_path = ? WHERE source_rel_path = ?", r.newRel, r.oldRel,
-	); err != nil {
-		return err
+	// 拆分记录源键与 files.path 同一事务改写（分裂则中途失败留「路径已改、记录仍
+	// 指旧键」半态）；键不存在 / 同键幂等 / 目标键冲突消解均由单点内部处理
+	if _, err := s.rewriteSplitRecordKeyTx(tx, r.oldRel, r.newRel, ""); err != nil {
+		return fmt.Errorf("迁移拆分记录失败: %w", err)
 	}
 	return tx.Commit()
 }
