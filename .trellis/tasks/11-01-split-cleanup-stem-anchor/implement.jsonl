@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "§9.5 改名重链旧产物清理判定面与命名形态契约，本任务改基名锚定规则并同步该节"}
+{"file": "docs/spec/assets-management.md", "reason": "§11.3 手动重链与 split_records 键迁移口径（output_dir 冻结/重算、目录搬迁），基名锚定失配场景依据"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "不可判定与权限错误须 Warn（log/slog），本任务新增 readErr 告警分支"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁 service ≥76%，新增分支须补单测"}

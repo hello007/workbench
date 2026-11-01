@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"workbench/model"
@@ -470,10 +471,10 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 
 	// 5.1 旧产物目录收尾清理（改名重链场景）：记录 output_dir 冻结在旧产物目录、
 	//     产物主干仍是旧源名，按当前主干清理对新目录是空操作，旧页只能在旧目录内
-	//     按主干分组 + 页覆盖证据判定产物组后清理（cleanupSplitArtifactsInDirByPage
-	//     单点，判定面见其头注释）。刻意放在
-	//     核心成功之后——核心失败/取消时上一次拆分成果原样保留，对齐 replace 落点
-	//     的延迟清理契约（「先删后拆」在失败时会连带丢掉上一次成果）。
+	//     按基名锚定判定产物组后清理（cleanupSplitArtifactsInDirByPage 单点，判定
+	//     面见其头注释）。刻意放在核心成功之后——核心失败/取消时上一次拆分成果
+	//     原样保留，对齐 replace 落点的延迟清理契约（「先删后拆」在失败时会连带
+	//     丢掉上一次成果）。
 	if outputToSourceDir && record != nil && !samePathFold(record.outputDir, outDir) {
 		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
 	}
@@ -756,11 +757,11 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
 	// 失败保留文件与索引（下次重拆收敛），不阻断删源。
 	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
-	// 改名重链后旧产物目录（记录 output_dir）与新落点不同：旧页文件与索引行按
-	// 记录页数在旧目录内按产物组判定清理（不删用户自建同页序文件）。刻意挂在
-	// 成功收尾（删源前）——失败/取消路径不得删
-	// 旧产物，与 oldArtifacts 延迟清理契约一致。不限定记录 target：output_dir 恒为
-	// 本源文件上次产物的独占目录，落点切换（如 source→replace）同样须收敛旧产物。
+	// 改名重链后旧产物目录（记录 output_dir）与新落点不同：旧页文件与索引行在
+	// 旧目录内按基名锚定判定产物组清理（不删用户自建同页序文件）。刻意挂在成功
+	// 收尾（删源前）——失败/取消路径不得删旧产物，与 oldArtifacts 延迟清理契约
+	// 一致。不限定记录 target：output_dir 恒为本源文件上次产物的独占目录，落点
+	// 切换（如 source→replace）同样须收敛旧产物。
 	if record != nil && !samePathFold(record.outputDir, outDir) {
 		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
 	}
@@ -1179,8 +1180,11 @@ type splitArtifactCandidate struct {
 }
 
 // collectSplitArtifactsByPage 一次读目录，收集 1..pageCount 范围内形态匹配候选，
-// 返回 page→候选切片 与 stem→该主干命中的页序集合（覆盖页数用）。目录不可读
+// 返回 page→候选切片 与 stem→该主干命中的页序集合（基名锚定判定用）。目录不可读
 // 错误原样上抛（调用方区分「无旧产物可清」的正常路径，禁统一按不可判定告警）。
+//
+// 候选只取常规文件：符号链接/junction/设备等非常规条目即使名字形态匹配也不参与
+// 清理（删除链接目标或特殊文件的风险远大于「漏清一个产物」，同样一律跳过子目录）。
 func collectSplitArtifactsByPage(dir, target string, pageCount int) (map[int][]splitArtifactCandidate, map[string]map[int]bool, error) {
 	byPage := make(map[int][]splitArtifactCandidate)
 	byStem := make(map[string]map[int]bool)
@@ -1189,7 +1193,7 @@ func collectSplitArtifactsByPage(dir, target string, pageCount int) (map[int][]s
 		return byPage, byStem, err
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		if !e.Type().IsRegular() {
 			continue
 		}
 		stem, page, ok := parseSplitArtifactName(e.Name(), target)
@@ -1209,29 +1213,38 @@ func collectSplitArtifactsByPage(dir, target string, pageCount int) (map[int][]s
 	return byPage, byStem, nil
 }
 
-// dominantSplitArtifactStem 选定产物主干：去重页序覆盖数最多的一组；须满足
-// 覆盖 ≥2 页或记录只有 1 页（单文件证据不足）；无候选/平票返回 ok=false。
-func dominantSplitArtifactStem(byStem map[string]map[int]bool, pageCount int) (string, bool) {
-	best := ""
-	bestCover := 0
-	tie := false
+// dominantSplitArtifactStem 选定产物主干：以旧产物目录基名（filepath.Base(dir)）
+// 为锚点，与目录内形态匹配候选的主干相等者即产物组。
+//
+// 锚点依据来自落点布局单点 splitSourceOutputDir——产物目录名恒为拆分时源的命名
+// 主干，产物命名主干同源；改名重链后记录键已换新名，但 output_dir 与产物主干都
+// 仍是旧名，故基名是唯一可靠的归属证据，不再需要页覆盖数比较（比较会被用户在同
+// 目录放多份同主干文件反超）。目录被用户改名或落点搬迁后基名失配即不可判定，
+// 由调用方按安全侧零删除处理。
+//
+// 匹配顺序：精确相等优先；无精确命中时才接受 EqualFold 唯一命中（Windows 文件
+// 系统大小写不敏感，目录名的大小写变体仍认作同一组）。折叠命中多于一个（大小写
+// 敏感文件系统上 `Old` 与 `old` 并存）视为不可判定——禁按 map 遍历顺序取首个，
+// 否则同一目录状态会随机选中用户文件组并误删。
+func dominantSplitArtifactStem(byStem map[string]map[int]bool, dir string) (string, bool) {
+	anchor := filepath.Base(dir)
+	foldStem := ""
+	foldHits := 0
 	for stem, pages := range byStem {
-		cover := len(pages)
-		if cover > bestCover {
-			best, bestCover, tie = stem, cover, false
-		} else if cover == bestCover && cover > 0 {
-			tie = true
+		if len(pages) == 0 {
+			continue
+		}
+		if stem == anchor {
+			return stem, true
+		}
+		if strings.EqualFold(stem, anchor) {
+			foldStem, foldHits = stem, foldHits+1
 		}
 	}
-	if bestCover == 0 || tie {
-		return "", false
+	if foldHits == 1 {
+		return foldStem, true
 	}
-	// 覆盖不足两页时，目录内只剩单个同形文件：无法区分旧产物与用户自建文件
-	// （记录只有一页时该文件即全部产物，证据充分）。
-	if bestCover < 2 && pageCount != 1 {
-		return "", false
-	}
-	return best, true
+	return "", false
 }
 
 // removeSplitArtifacts 源目录落点的重拆清旧页：仅删除匹配产物命名形态
@@ -1265,70 +1278,106 @@ func removeSplitArtifacts(dir, baseName string) {
 // 目录、产物命名主干仍是旧源名，按当前主干清理必然漏删旧页并留下 files 索引行
 // （旧页还能再次进入批量拆分源）。
 //
-// 为什么不再按「同页序唯一候选」判定：目录内用户自建文件可能恰好也是
-// `<主干>-<NNN>.pptx` 形态（如 `笔记-001.pptx`），原产物该页一旦缺失，单文件
-// 唯一性会把用户文件误认成旧产物删除且不可恢复。改为目录级证据：先按主干分组、
-// 取覆盖页数最多的一组作为产物组（覆盖 ≥2 页，或记录只有 1 页时才成立），仅删除
-// 主干与产物组一致且同页序唯一的候选；多候选跳过该页，不牵连其余页。
+// 产物组判定 = 目录基名锚定：`filepath.Base(dir)` 恒为拆分时源的命名主干（落点
+// 布局单点 splitSourceOutputDir 保证，source/replace 同布局），改名重链后记录键
+// 变了但目录与产物主干仍是旧名；故仅「候选主干 EqualFold 目录基名」的组才是旧
+// 产物组，命中后只删该组内同页序唯一的候选。这同时消除两类历史误删：①单页记录
+// 下任意唯一同形候选即被判产物（用户 `笔记-001.pptx`）；②用户在同目录放多份同主干
+// 文件，按覆盖页数选组时反超真实产物组。页数证据不再参与选组——基名匹配即产物组，
+// 覆盖不足（如旧产物仅剩页 2）同样清理。
 //
-// 不可判定（平票/覆盖不足）按安全侧失败：整目录零删除并 Warn，残留交人工清理。
-// 目录不存在/不可读或目录内无任何形态匹配候选属正常路径（首次重拆无旧产物、用户
-// 已自行清理），静默返回不告警——只有「有候选但无法认定为产物组」才值得告警。
-// 旧主干本身不参与判定——记录未存产物主干（不改表结构），改由目录内多数页的共同
-// 主干反推。
+// 不可判定（目录基名与所有组主干均不匹配）按安全侧失败：整目录零删除并 Warn，
+// 残留交人工清理（目录被改名/搬迁后的典型形态）。目录不存在或目录内无任何形态
+// 匹配候选属正常路径（首次重拆无旧产物、用户已自行清理），静默返回；权限拒绝等
+// 非不存在读错误会 Warn（防静默失败）。
 //
 // 调用点均在拆分成功之后（源落点核心返回成功后、replace 删源前），失败与取消
 // 路径不触达，上一次拆分成果原样保留。
 //
 // 删除成功才收集路径并批量删索引行；删除失败仅告警继续（残留由下次重拆收敛）。
-// 目录删空后尝试删除（非空/失败忽略——目录内用户自建内容一律不动）。
+// 目录删空后尝试删除（不存在/非空静默——目录内用户自建内容一律不动）。
 func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir string) {
 	if record == nil || dir == "" || record.pageCount <= 0 {
 		return
 	}
 	byPage, byStem, readErr := collectSplitArtifactsByPage(dir, record.target, record.pageCount)
 	if readErr != nil {
-		// 目录不存在/不可读：无旧产物可清，静默返回。
+		if os.IsNotExist(readErr) {
+			// 目录不存在：首次重拆无旧产物、或用户已自行清理，属正常路径。
+			return
+		}
+		Logger().Warn("读取旧拆分产物目录失败（跳过清理）",
+			"libraryId", lib.ID, "dir", dir, "err", readErr)
 		return
 	}
 	if len(byStem) == 0 {
 		// 目录内没有形态匹配候选：无旧产物可清，静默返回；顺手收敛空目录
 		// （与原「删空才删目录」语义一致，空壳残留不影响后续拆分）。
 		if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
-			_ = os.Remove(dir)
+			if rmErr := os.Remove(dir); !isBenignDirRemoveErr(rmErr) {
+				Logger().Warn("删除空旧产物目录失败（保留）", "libraryId", lib.ID, "dir", dir, "err", rmErr)
+			}
 		}
 		return
 	}
-	productStem, ok := dominantSplitArtifactStem(byStem, record.pageCount)
+	productStem, ok := dominantSplitArtifactStem(byStem, dir)
 	if !ok {
-		Logger().Warn("旧拆分产物目录主干不可判定，跳过清理（保留全部文件）",
+		Logger().Warn("旧产物目录基名与产物主干不匹配（或多候选择一不可判定），跳过清理（保留全部文件）",
 			"libraryId", lib.ID, "dir", dir, "pageCount", record.pageCount, "stemGroups", len(byStem))
 		return
 	}
 	removed := make([]string, 0, record.pageCount)
 	for page := 1; page <= record.pageCount; page++ {
+		// 锚定已确定产物组主干：仅在**同主干**候选内要求同页序唯一；同页序其他
+		// 主干（如 replace 形态用户自建的 `001-笔记.pptx`）是用户文件，不参与
+		// 判定也不影响产物删除（否则用户文件会遮蔽同页产物，形成新的漏清路径）。
 		cands := byPage[page]
-		// 同页序多候选不可判定；主干不符说明不是产物组（用户自建文件），一律保留。
-		if len(cands) != 1 || cands[0].stem != productStem {
+		hit := ""
+		ambiguous := false
+		for _, cand := range cands {
+			if cand.stem != productStem {
+				continue
+			}
+			if hit != "" {
+				ambiguous = true // 同主干同页序多候选（如 <主干>-1.pptx 与 <主干>-001.pptx）：不可判定
+				break
+			}
+			hit = cand.path
+		}
+		if ambiguous || hit == "" {
 			continue
 		}
-		p := cands[0].path
-		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+		if rmErr := os.Remove(hit); rmErr != nil && !os.IsNotExist(rmErr) {
 			Logger().Warn("删除改名重链前的旧拆分产物失败（下次重拆收敛）",
-				"libraryId", lib.ID, "path", p, "err", rmErr)
+				"libraryId", lib.ID, "path", hit, "err", rmErr)
 			continue
 		}
-		removed = append(removed, p)
+		removed = append(removed, hit)
 	}
 	if len(removed) > 0 {
 		s.deleteIndexRowsForPaths(store, lib, removed)
 	}
 	// 仅当目录已空才删除：非空 = 用户自建内容，保留且不算异常（不产生告警噪音）。
 	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) == 0 {
-		if rmErr := os.Remove(dir); rmErr != nil && !os.IsNotExist(rmErr) {
+		if rmErr := os.Remove(dir); !isBenignDirRemoveErr(rmErr) {
 			Logger().Warn("删除改名重链前的旧产物目录失败（保留）", "libraryId", lib.ID, "dir", dir, "err", rmErr)
 		}
 	}
+}
+
+// isBenignDirRemoveErr 目录删除的可静默错误：不存在（已被并发/用户删除）与非空
+// （目录内仍有用户保留内容）都不算异常，保留目录即可，不产生告警噪音。
+// 非空错误码跨平台不同：Linux/macOS 为 ENOTEMPTY，Windows 为 ERROR_DIR_NOT_EMPTY
+// (145)；后者无跨平台常量导出，按 GOOS 分支判断以免破坏非 Windows 构建。
+func isBenignDirRemoveErr(err error) bool {
+	if err == nil || os.IsNotExist(err) || errors.Is(err, syscall.ENOTEMPTY) {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		const errDirNotEmpty syscall.Errno = 145 // ERROR_DIR_NOT_EMPTY
+		return errors.Is(err, errDirNotEmpty)
+	}
+	return false
 }
 
 // isAllDigits 非空纯数字串判定（重拆清旧页的页序段口径）。
