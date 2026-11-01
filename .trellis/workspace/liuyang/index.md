@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 188
+- **Total Sessions**: 189
 - **Last Active**: 2026-11-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~671 | Active |
+| `journal-4.md` | ~704 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 189 | 2026-11-01 | 重拆清理误删收口：旧目录唯一同页序用户文件 | `739d85c` | `master` |
 | 188 | 2026-11-01 | 素材拆分与重链链路后续收口（父任务三项） | `6b73fd9` | `master` |
 | 187 | 2026-11-01 | 重链识别产物目录随源搬迁 | `b595161` | `master` |
 | 186 | 2026-11-01 | 重拆清旧页兼容改名重链 | `29c77c2` | `master` |

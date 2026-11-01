@@ -669,3 +669,36 @@ RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 189: 重拆清理误删收口：旧目录唯一同页序用户文件
+
+**Date**: 2026-11-01
+**Task**: 重拆清理误删收口：旧目录唯一同页序用户文件
+**Branch**: `master`
+
+### Summary
+
+cleanupSplitArtifactsInDirByPage 由「同页序唯一候选即删」改为「主产干分组 + 页覆盖证据」选产物组：新增 parseSplitArtifactName / collectSplitArtifactsByPage / dominantSplitArtifactStem；仅删产物组主干且同页序唯一候选，用户自建同页序文件与多候选页保留；无候选静默、平票/覆盖不足零删除 + Warn；补 8 条单测，spec §9.5 与 CLAUDE.md 关键规则同步；go test ./... 全绿，覆盖率 service 81.1%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `739d85c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
