@@ -30,9 +30,9 @@
 
 ## 验收（整体）
 
-- [ ] 三个子任务全部归档。
-- [ ] `go test ./...` 全通过；覆盖率门禁不降。
-- [ ] `docs/spec/assets-management.md`、`docs/spec/pptx-split.md`、`CLAUDE.md` 相关规则行同步。
+- [x] 三个子任务全部归档（split-cleanup-renamed / relink-artifact-dirsync / move-split-key-conflict）。
+- [x] `go test ./...` 全通过；覆盖率门禁不降（service 81.1%，model 98.2%，server 90.5%，util 62.2%）。
+- [x] `docs/spec/assets-management.md`、`docs/spec/pptx-split.md`、`CLAUDE.md` 相关规则行同步。
 
 ## Out of Scope
 
