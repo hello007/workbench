@@ -438,3 +438,36 @@ SplitAssetLibrary 取消改为返回已完成部分 + canceled=true + nil error�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 182: 拆分记录随目录迁移
+
+**Date**: 2026-11-01
+**Task**: 拆分记录随目录迁移
+**Branch**: `master`
+
+### Summary
+
+split_records 的 source_rel_path/output_dir 随目录重命名、移动、前缀替换在同一事务迁移；解除 source_removed=0 目录守卫；嵌套前缀按旧路径长度降序防链式腾位误删；拆分默认落点改 replace；补齐回归用例与 spec/文档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `798fc2f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
