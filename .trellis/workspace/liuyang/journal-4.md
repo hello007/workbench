@@ -405,3 +405,36 @@ SplitAssetLibrary 取消改为返回已完成部分 + canceled=true + nil error�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 181: 素材拆分三 PR 复审与修复
+
+**Date**: 2026-11-01
+**Task**: 素材拆分三 PR 复审与修复
+**Branch**: `master`
+
+### Summary
+
+对 B 方案 PR1/PR2/PR3 独立复审：后端修复旧产物延迟清理、源哈希重算、二次拆分拒绝、目录守卫、取消复查与删源失败归属记录；前端修复幽灵选中、切库弹窗复位、明细口径与 E2E 竞态；文档同步契约与规则行；新增回归用例并通过全量测试与覆盖率门禁
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1e2391` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
