@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 182
+- **Total Sessions**: 183
 - **Last Active**: 2026-11-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~473 | Active |
+| `journal-4.md` | ~506 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 183 | 2026-11-01 | replace 产物容器移动收口 | `9e74263` | `master` |
 | 182 | 2026-11-01 | 拆分记录随目录迁移 | `798fc2f` | `master` |
 | 181 | 2026-11-01 | 素材拆分三 PR 复审与修复 | `b1e2391` | `master` |
 | 180 | 2026-11-01 | PowerPoint COM 多实例与整本导出探针 | `65f7ccb` | `master` |

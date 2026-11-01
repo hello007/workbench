@@ -471,3 +471,36 @@ split_records 的 source_rel_path/output_dir 随目录重命名、移动、前�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 183: replace 产物容器移动收口
+
+**Date**: 2026-11-01
+**Task**: replace 产物容器移动收口
+**Branch**: `master`
+
+### Summary
+
+split_records.output_dir 随目录重命名/移动/前缀替换同事务迁移（source/replace，cache 保持）；单页产物禁止单独移动；清扫默认落点与旧守卫文案；补齐容器迁移、边界负例、LIKE 元字符、嵌套前缀、回滚 folder_tags 用例。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e74263` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
