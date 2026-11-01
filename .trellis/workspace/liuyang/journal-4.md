@@ -504,3 +504,36 @@ split_records.output_dir 随目录重命名/移动/前缀替换同事务迁移�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 184: 文件级重链同步迁移拆分记录
+
+**Date**: 2026-11-01
+**Task**: 文件级重链同步迁移拆分记录
+**Branch**: `master`
+
+### Summary
+
+RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_records.source_rel_path 原子提交；output_dir 保持原绝对路径；冲突消解抽 rewriteSplitRecordKeyTx 单点与目录级迁移共用；新增四类守护用例，go test ./... 与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7bdf29f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
