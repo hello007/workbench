@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 184
+- **Total Sessions**: 185
 - **Last Active**: 2026-11-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~539 | Active |
+| `journal-4.md` | ~572 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 185 | 2026-11-01 | 重链拆分记录口径修复 | `7715ff4` | `master` |
 | 184 | 2026-11-01 | 文件级重链同步迁移拆分记录 | `7bdf29f` | `master` |
 | 183 | 2026-11-01 | replace 产物容器移动收口 | `9e74263` | `master` |
 | 182 | 2026-11-01 | 拆分记录随目录迁移 | `798fc2f` | `master` |

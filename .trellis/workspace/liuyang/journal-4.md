@@ -537,3 +537,36 @@ RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 185: 重链拆分记录口径修复
+
+**Date**: 2026-11-01
+**Task**: 重链拆分记录口径修复
+**Branch**: `master`
+
+### Summary
+
+改名重链后产物定位收口 splitArtifactPath 单点（直拼+目录反查），打开单页/导出/增量判定/replace 产物识别统一口径；目录迁移重算 output_dir 前加前缀前提校验；clearLostFiles 与 force 重链同事务删拆分记录；新增六个用例，go test ./... 与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7715ff4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
