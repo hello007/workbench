@@ -735,3 +735,36 @@ cleanupSplitArtifactsInDirByPage 由「同页序唯一候选即删」改为「�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 191: split_records 持久化产物主干（清理误删/漏清总收口）
+
+**Date**: 2026-11-02
+**Task**: split_records 持久化产物主干（清理误删/漏清总收口）
+**Branch**: `master`
+
+### Summary
+
+schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName、replace 记 replaceArtifactBase；清理锚定记录主干并支持 excludeStem（M1 同目录改名）、去 source 门控统一异落点清理（M4）；重链探测校验首页产物主干归属（M2）；修复 replace 纯数字主干 123-p 基名失配 blocker；ambiguous 同页多候选改 Warn；存量记录空主干回落双候选；补 v9 三路径迁移与 blocker/M1/M2/M4 用例，全量测试与覆盖率 service 81.1% 通过，spec 与 CLAUDE 行同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7f5d58` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
