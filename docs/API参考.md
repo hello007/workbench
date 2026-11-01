@@ -519,7 +519,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `OpenAssetSplitPage` | `(libraryID, relPath, slideNum) => Promise<void>` | 打开拆分单页产物（SRS §2.2.5 方式 2，无 PowerPoint 依赖，系统默认关联程序；页序越界或产物缺失报错） | — |
 | `ExportAssetMetadata` | `(libraryID, opts: AssetExportOptions) => Promise<AssetExportResult>` | 元数据导出（SRS §2.6.4）：CSV（UTF-8 BOM）与 Markdown+YAML（Obsidian 每页一卡）可同选；范围选中条目 > 检索条件重放 > 全库；路径口径库相对（默认）/绝对；目标已存在报 `E_ASSETS_EXPORT_TARGET_EXISTS`（warning 确认后 overwrite 重调） | AssetExportResult |
 | `CancelAssetExport` | `(libraryID) => Promise<boolean>` | 取消指定库在途导出（幂等；半成品 CSV 由后端 abort 清理） | boolean |
-| `RelocateAssetFile` | `(libraryID, fileID, newAbsPath, force) => Promise<AssetRelocateResult>` | lost 文件手动重链（SRS §2.6.5）：哈希相等直复活全元数据；不等报 `E_ASSETS_RELINK_MISMATCH`（force=true 强制重链并重解析）；库外目标报 `E_ASSETS_RELINK_OUT_OF_LIB` | AssetRelocateResult |
+| `RelocateAssetFile` | `(libraryID, fileID, newAbsPath, force) => Promise<AssetRelocateResult>` | lost 文件手动重链（SRS §2.6.5）：哈希相等直复活全元数据；不等报 `E_ASSETS_RELINK_MISMATCH`（force=true 强制重链并重解析）；库外目标报 `E_ASSETS_RELINK_OUT_OF_LIB`；拆分记录源键同事务迁移（`output_dir` 保持原绝对路径） | AssetRelocateResult |
 | `ClearLostAssetFiles` | `(libraryID) => Promise<number>` | 清理全部丢失记录（等效删除语义：级联标注/标签 + FTS/缩略图记账/PNG 收口；返回实际删除数） | number |
 | `PreviewAssetPathPrefixReplace` | `(libraryID, oldPrefix, newPrefix) => Promise<number>` | 路径前缀替换预览（目录边界语义命中数；零命中报 `E_ASSETS_PREFIX_REPLACE_NO_MATCH`） | number |
 | `ReplaceAssetPathPrefix` | `(libraryID, oldPrefix, newPrefix) => Promise<AssetPrefixReplaceResult>` | 执行前缀替换（库内子目录重组修复：单事务批量改 path + 三态收敛（匹配复活/重解析/保持 lost）+ 自动增量扫描；越界任一整体拒绝 `E_ASSETS_RELINK_OUT_OF_LIB`） | AssetPrefixReplaceResult |

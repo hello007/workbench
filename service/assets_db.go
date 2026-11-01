@@ -527,8 +527,18 @@ func (s *assetsStore) fileHasSlides(fileID int64) (bool, error) {
 // 零命中 = 行已被并发「清理丢失记录」删除（ClearLostAssetFiles 不持扫描锁，与
 // 重链存在并发窗口）：UPDATE 空命中零操作，静默返回会按名册虚报重链成功——以
 // sql.ErrNoRows 上抛（对齐 fileRecordByID 无行语义），调用方转可读错误。
-func (s *assetsStore) relocateFileOK(fileID int64, newPath string, size, mtimeNs int64, now string) error {
-	res, err := s.db.Exec(
+//
+// 拆分记录源键（split_records.source_rel_path）在同一事务内改写为新路径，落点
+// output_dir 保持原绝对路径（文件级重链只改索引指针，产物目录物理未随源文件
+// 移动；按新路径重算会让「打开拆分单页」指向不存在目录），见
+// rewriteSplitRecordKeyTx。
+func (s *assetsStore) relocateFileOK(fileID int64, oldPath, newPath string, size, mtimeNs int64, now string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(
 		"UPDATE files SET path = ?, size = ?, mtime_ns = ?, status = ?, updated_at = ? WHERE id = ?",
 		newPath, size, mtimeNs, model.AssetFileStatusOK, now, fileID,
 	)
@@ -540,7 +550,13 @@ func (s *assetsStore) relocateFileOK(fileID int64, newPath string, size, mtimeNs
 	} else if n == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	// 拆分记录源键同事务迁移（与 files.path 同一事务：分裂则中途失败留「路径已改、
+	// 记录仍指旧键」的半态）。落点传空串 = 保持原 output_dir——重链只改索引指针，
+	// 产物目录物理未随源文件移动，重算会让「打开拆分单页」指向不存在目录。
+	if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
+		return fmt.Errorf("迁移拆分记录失败: %w", err)
+	}
+	return tx.Commit()
 }
 
 // relocateFileProcessing 哈希不等（force 确认）或记录无哈希的重链落库第一步：
@@ -549,8 +565,13 @@ func (s *assetsStore) relocateFileOK(fileID int64, newPath string, size, mtimeNs
 // 同口径）。FTS/slides/缩略图由随后的单文件重解析链路处理。零命中 = 行已被
 // 并发「清理丢失记录」删除（并发窗口同 relocateFileOK）：sql.ErrNoRows 上抛，
 // 调用方转可读错误（且不再进入随后的重解析探测段）。
-func (s *assetsStore) relocateFileProcessing(fileID int64, newPath string, now string) error {
-	res, err := s.db.Exec(
+func (s *assetsStore) relocateFileProcessing(fileID int64, oldPath, newPath string, now string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(
 		"UPDATE files SET path = ?, status = ?, updated_at = ? WHERE id = ?",
 		newPath, model.AssetFileStatusProcessing, now, fileID,
 	)
@@ -562,7 +583,12 @@ func (s *assetsStore) relocateFileProcessing(fileID int64, newPath string, now s
 	} else if n == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	// 拆分记录源键同事务迁移（口径同 relocateFileOK：只改键，output_dir 保持原
+	// 绝对路径；随后的重解析链路不写 split_records，记录内容不受影响）
+	if _, err := s.rewriteSplitRecordKeyTx(tx, oldPath, newPath, ""); err != nil {
+		return fmt.Errorf("迁移拆分记录失败: %w", err)
+	}
+	return tx.Commit()
 }
 
 // listFilesByPathPrefix 旧前缀命中的文件记录（目录边界语义单点：path 恰等于
@@ -2293,6 +2319,91 @@ func (s *assetsStore) deleteSplitRecord(relPath string) error {
 	return err
 }
 
+// splitRecordKeyStateTx 事务内读取单条拆分记录的现状（source_rel_path 唯一键
+// 单行查询）。found=false = 旧键不存在，调用方按零操作处理（不报错）。单连接池
+// 纪律：必须用 tx 而非 s.db（事务持有唯一连接，混用会自锁）。
+func splitRecordKeyStateTx(tx *sql.Tx, rel string) (outDir string, sourceRemoved, found bool, err error) {
+	err = tx.QueryRow(
+		"SELECT output_dir, source_removed FROM split_records WHERE source_rel_path = ?", rel,
+	).Scan(&outDir, &sourceRemoved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, false, nil
+	}
+	if err != nil {
+		return "", false, false, err
+	}
+	return outDir, sourceRemoved, true, nil
+}
+
+// rewriteSplitRecordKeyTx 拆分记录源键改写 + 唯一键冲突消解单点（目录级前缀迁移
+// 与文件级重链共用，禁各写一套）。oldRel 键不存在返回 false（零操作不报错，幂等）；
+// newRel 与 oldRel 相同只可能修正落点；newOutDir 为空串 = 保持原 output_dir 不变
+// （文件级重链口径：产物目录物理未随源文件移动）。
+//
+// 冲突策略沿用既有口径：迁移后目标键已被别的记录占用时保留 source_removed=1 的
+// 一条（两条同类保留既有行），落败行删除并 Warn，迁移不因冲突中断。返回是否产生
+// 实际变更（冲突落败删除不计变更）。
+func (s *assetsStore) rewriteSplitRecordKeyTx(tx *sql.Tx, oldRel, newRel, newOutDir string) (bool, error) {
+	oldOutDir, oldRemoved, found, err := splitRecordKeyStateTx(tx, oldRel)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	if newOutDir == "" {
+		newOutDir = oldOutDir
+	}
+	if newRel == oldRel {
+		// 键改写结果与原值相同：仅落点可能需修正（如手工改库后的陈旧绝对路径）
+		// ——按键直改落点，禁走冲突预检（自身即目标键会被误判冲突删除）
+		if newOutDir == oldOutDir {
+			return false, nil
+		}
+		if _, err := tx.Exec(
+			"UPDATE split_records SET output_dir = ? WHERE source_rel_path = ?", newOutDir, oldRel,
+		); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	// 冲突预检（迁移后目标键已被别的记录占用）：保留 source_removed=1 的一条，
+	// 两条同类保留既有行；落败行删除，迁移继续
+	var existingRemoved bool
+	err = tx.QueryRow(
+		"SELECT source_removed FROM split_records WHERE source_rel_path = ?", newRel,
+	).Scan(&existingRemoved)
+	switch {
+	case err == nil:
+		if existingRemoved || !oldRemoved {
+			if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", oldRel); delErr != nil {
+				return false, delErr
+			}
+			Logger().Warn("拆分记录迁移遇目标键冲突，保留既有记录",
+				"oldPath", oldRel, "newPath", newRel, "existingSourceRemoved", existingRemoved)
+			return false, nil
+		}
+		// 待迁移行为留痕（source_removed=1）、既有行为源仍在：留痕胜出，删除
+		// 既有行后由下方 UPDATE 落位
+		if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", newRel); delErr != nil {
+			return false, delErr
+		}
+		Logger().Warn("拆分记录迁移遇目标键冲突，保留已删源留痕记录",
+			"oldPath", oldRel, "newPath", newRel)
+	case errors.Is(err, sql.ErrNoRows):
+		// 无冲突，正常落位
+	default:
+		return false, err
+	}
+	if _, err := tx.Exec(
+		"UPDATE split_records SET source_rel_path = ?, output_dir = ? WHERE source_rel_path = ?",
+		newRel, newOutDir, oldRel,
+	); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // migrateSplitRecordsTx 目录级迁移的拆分记录路径同步（files.path / 文件夹标注
 // 键同一事务内执行，任一步失败整体回滚）。迁移面两路，同一记录两路命中只落
 // 一次 UPDATE：
@@ -2323,19 +2434,18 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		return 0, nil
 	}
 	rows, err := tx.Query(
-		"SELECT source_rel_path, output_dir, target, source_removed FROM split_records",
+		"SELECT source_rel_path, output_dir, target FROM split_records",
 	)
 	if err != nil {
 		return 0, err
 	}
 	type splitMigRow struct {
 		rel, outDir, target string
-		sourceRemoved       bool
 	}
 	migRows := make([]splitMigRow, 0, 8)
 	for rows.Next() {
 		var r splitMigRow
-		if err := rows.Scan(&r.rel, &r.outDir, &r.target, &r.sourceRemoved); err != nil {
+		if err := rows.Scan(&r.rel, &r.outDir, &r.target); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
@@ -2368,58 +2478,15 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 				// 文件返回 "."，Join 归一即库根自身）
 				newOutDir = filepath.Join(m.libraryRoot, filepath.FromSlash(path.Dir(newRel)), splitSourceBaseName(newRel))
 			}
-			if newRel == r.rel {
-				// 键改写结果与原值相同（含大小写变体归一后相等的形态）：仅落点可能
-				// 需要修正（如手工改库后的陈旧绝对路径）——按键直改落点，禁走下方
-				// 冲突预检（自身即目标键会被误判冲突删除）
-				if newOutDir == r.outDir {
-					continue // 幂等：两路均未变，零变更
-				}
-				if _, err := tx.Exec(
-					"UPDATE split_records SET output_dir = ? WHERE source_rel_path = ?",
-					newOutDir, r.rel,
-				); err != nil {
-					return migrated, err
-				}
+			// 单条改写 + 冲突消解委托共用单点 rewriteSplitRecordKeyTx（与文件级重链
+			// 同口径，禁各写一套）
+			changed, err := s.rewriteSplitRecordKeyTx(tx, r.rel, newRel, newOutDir)
+			if err != nil {
+				return migrated, err
+			}
+			if changed {
 				migrated++
-				continue
 			}
-			// 冲突预检（迁移后目标键已被别的记录占用）：保留 source_removed=1 的一条，
-			// 两条同类保留既有行；落败行删除，迁移继续
-			var existingRemoved bool
-			err := tx.QueryRow(
-				"SELECT source_removed FROM split_records WHERE source_rel_path = ?", newRel,
-			).Scan(&existingRemoved)
-			switch {
-			case err == nil:
-				if existingRemoved || !r.sourceRemoved {
-					// 既有行胜出（既有为留痕 或 两条同类）：删除待迁移行
-					if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", r.rel); delErr != nil {
-						return migrated, delErr
-					}
-					Logger().Warn("拆分记录迁移遇目标键冲突，保留既有记录",
-						"oldPath", r.rel, "newPath", newRel, "existingSourceRemoved", existingRemoved)
-					continue
-				}
-				// 待迁移行为留痕（source_removed=1）、既有行为源仍在：留痕胜出，
-				// 删除既有行后由下方 UPDATE 落位
-				if _, delErr := tx.Exec("DELETE FROM split_records WHERE source_rel_path = ?", newRel); delErr != nil {
-					return migrated, delErr
-				}
-				Logger().Warn("拆分记录迁移遇目标键冲突，保留已删源留痕记录",
-					"oldPath", r.rel, "newPath", newRel)
-			case errors.Is(err, sql.ErrNoRows):
-				// 无冲突，正常落位
-			default:
-				return migrated, err
-			}
-			if _, err := tx.Exec(
-				"UPDATE split_records SET source_rel_path = ?, output_dir = ? WHERE source_rel_path = ?",
-				newRel, newOutDir, r.rel,
-			); err != nil {
-				return migrated, err
-			}
-			migrated++
 			continue
 		}
 

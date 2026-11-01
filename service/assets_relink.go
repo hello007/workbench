@@ -82,6 +82,11 @@ func (s *AssetLibraryService) ClearLostAssetFiles(libraryID string) (int64, erro
 //     按分类落终态，标注按位置语义保留）；
 //   - 记录 hash 为空（加密/权限跳过文件无哈希）：跳过校验直接重链 + 重解析，
 //     返回值 SkippedHashCheck=true 供前端提示「未校验内容」。
+//   - 拆分记录同事务迁移：该文件的 split_records 行源键从旧路径改写为新路径
+//     （output_dir 保持原绝对路径——重链只改索引指针，产物目录物理未随源文件
+//     移动），「打开拆分单页」在重链后仍可查；新键冲突沿用目录级迁移的消解
+//     口径（保留 source_removed=1 的一条并 Warn）。旧键不存在零操作、重复重链
+//     幂等。
 //
 // 串行保护：tryLockScan 与扫描互斥（重链写 files 表且可能重解析，防与扫描差分
 // 写面交错半态）；锁内复验库存在（getLibrary 与拿锁的窗口内删库防孤儿 db，对齐
@@ -178,7 +183,7 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 		// 增量判定同口径）：上次解析中断的半态行即使内容同旧（哈希相等）也不得
 		// 直翻 ok——slides/FTS 可能只落了半份数据，直复活后增量扫描 unchanged
 		// 跳过永不纠正，落下方重解析补齐
-		if err := store.relocateFileOK(fileID, newRel, info.Size(), info.ModTime().UnixNano(), now); err != nil {
+		if err := store.relocateFileOK(fileID, rec.path, newRel, info.Size(), info.ModTime().UnixNano(), now); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// 并发窗口：记录已被「清理丢失记录」删除（ClearLostAssetFiles 不持
 				// 扫描锁）——UPDATE 空命中零操作，如实报错防成功虚报
@@ -193,7 +198,7 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 
 	// 哈希不等（force 确认）或记录无哈希：改 path + 标记 processing + 单文件
 	// 重解析（复用扫描链路：失效缩略图、哈希现算、按解析分类落终态）
-	if err := store.relocateFileProcessing(fileID, newRel, now); err != nil {
+	if err := store.relocateFileProcessing(fileID, rec.path, newRel, now); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// 并发窗口：记录已被「清理丢失记录」删除——如实报错防成功虚报，
 			// 且不再进入随后的单文件重解析（幽灵行落 slides 外键违例）
