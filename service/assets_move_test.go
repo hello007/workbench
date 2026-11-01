@@ -478,7 +478,7 @@ func TestAssetMoveFiles_CrossVolumeRefused(t *testing.T) {
 		t.Skip("无法构造与库根不同卷的目标路径")
 	}
 	targetAbs := filepath.Join(otherVolume, "外部目标")
-	item := svc.moveOneAssetFile(store, lib, matcher, fileID, "", targetAbs, "2026-10-20 10:00:00")
+	item := svc.moveOneAssetFile(store, lib, matcher, fileID, "", targetAbs, "2026-10-20 10:00:00", nil)
 	if item.Status != model.AssetBatchTagStatusFailed {
 		t.Fatalf("跨盘移动应记 failed 明细，实际 %+v", item)
 	}

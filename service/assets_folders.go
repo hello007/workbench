@@ -644,9 +644,12 @@ func (s *AssetLibraryService) moveAssetFolderCore(lib model.AssetLibrary, store 
 //     下）；目标目录校验在入口整体执行（存在/是目录/非排除命中/非派生容器）；
 //   - os.Rename（同盘原子）→ 事务内 files.path 更新（RowsAffected 零命中 =
 //     并发清理窗口，sql.ErrNoRows）+ split_records 源路径同事务重写（单表主键
-//     重写，output_dir 为绝对路径不受影响、文件基名不变 → 「打开拆分单页」溯源
-//     保持有效；PR2 目录重命名的拒绝口径源于**目录级**迁移的镜像树失效面，单
-//     文件移动无此复杂度，故走重写不拒绝）；
+//     重写，普通源文件基名不变 → 「打开拆分单页」溯源保持有效）；
+//   - **replace 单页产物禁止单独移动**（磁盘 rename 前经 `isReplaceArtifactOutput`
+//     拦截，落点快照由入口 `listReplaceSplitOutputs` 一次取齐）：产物位置由拆分
+//     记录 output_dir 唯一表达，单独移出容器后记录无法表达新位置，批量产物剔除
+//     与溯源同时失据；整体移动容器目录走目录级入口（output_dir 随迁移同事务
+//     改写）。命中计入 failed 明细，批量不中断；
 //   - FTS：检索列不含路径（file_name 为标题基名派生，见 syncFtsFileRowTx），
 //     纯路径移动零重建（rowid = files.id/slides.id 稳定）；排除翻转经既有单点
 //     （新路径命中 markFileExcluded——FTS 无损保留；原 excluded 解除经
@@ -721,8 +724,15 @@ func (s *AssetLibraryService) MoveAssetFiles(libraryID string, fileIDs []int64, 
 			return err
 		}
 		now := time.Now().Format("2006-01-02 15:04:05")
+		// replace 产物落点快照一次取齐（批量内不变）：单页产物禁止被单独移动——产物
+		// 位置由拆分记录 output_dir 表达，单独移出容器后记录无法表达新位置（每页
+		// 各一次查询会放大锁内 IO，故入口统一取一次传入条目函数）。
+		replaceOutputs, err := store.listReplaceSplitOutputs()
+		if err != nil {
+			return fmt.Errorf("读取拆分记录失败: %w", err)
+		}
 		for _, fileID := range uniqueIDs {
-			item := s.moveOneAssetFile(store, lib, matcher, fileID, targetRel, targetAbs, now)
+			item := s.moveOneAssetFile(store, lib, matcher, fileID, targetRel, targetAbs, now, replaceOutputs)
 			result.Items = append(result.Items, item)
 			if item.Status == model.AssetBatchTagStatusOK {
 				result.Succeeded++
@@ -762,11 +772,11 @@ func (s *AssetLibraryService) autoScan(ctx context.Context, libraryID string) (m
 }
 
 // moveOneAssetFile 单文件移动（每条目一事务 + 明细，批量评分 applyRatingTarget
-// 同构）：磁盘 rename 先行（同盘原子，失败时索引未动零半态）→ 事务内 files.path
-// 更新 + split_records 源路径重写 → 排除翻转经既有单点（事务外单语句，与
-// RenameAssetFolder 同形态）。永不返回 error——失败以 failed 明细隔离（批量
-// 不中断），符合「部分失败不中断」契约。
-func (s *AssetLibraryService) moveOneAssetFile(store *assetsStore, lib model.AssetLibrary, matcher *assetExcludeMatcher, fileID int64, targetRel, targetAbs string, now string) model.AssetBatchMoveItem {
+// 同构）：replace 单页产物先拒（磁盘 rename 前拦截）→ 磁盘 rename 先行（同盘
+// 原子，失败时索引未动零半态）→ 事务内 files.path 更新 + split_records 源路径
+// 重写 → 排除翻转经既有单点（事务外单语句，与 RenameAssetFolder 同形态）。永不
+// 返回 error——失败以 failed 明细隔离（批量不中断），符合「部分失败不中断」契约。
+func (s *AssetLibraryService) moveOneAssetFile(store *assetsStore, lib model.AssetLibrary, matcher *assetExcludeMatcher, fileID int64, targetRel, targetAbs string, now string, replaceOutputs []replaceSplitOutput) model.AssetBatchMoveItem {
 	item := model.AssetBatchMoveItem{FileID: fileID, Status: model.AssetBatchTagStatusOK}
 	fail := func(label, format string, args ...any) model.AssetBatchMoveItem {
 		return model.AssetBatchMoveItem{FileID: fileID, Status: model.AssetBatchTagStatusFailed,
@@ -788,6 +798,13 @@ func (s *AssetLibraryService) moveOneAssetFile(store *assetsStore, lib model.Ass
 	}
 
 	oldAbs := filepath.Join(lib.RootPath, filepath.FromSlash(rec.path))
+	// replace 单页产物禁止单独移动（磁盘 rename 前拦截，文件与记录均不动）：产物
+	// 位置由拆分记录 output_dir 唯一表达，单独移出容器后记录无法表达新位置，批量
+	// 产物剔除与「打开拆分单页」溯源同时失据。整体移动容器目录走目录级入口（其
+	// output_dir 随迁移同事务改写）。命中计入 failed 明细，批量不中断。
+	if isReplaceArtifactOutput(oldAbs, replaceOutputs) {
+		return fail(item.Label, "该文件是就地替换生成的单页产物，请整体移动其所在产物目录")
+	}
 	base := path.Base(rec.path)
 	newRel := base
 	if targetRel != "" {

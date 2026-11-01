@@ -1,0 +1,5 @@
+{"file": "docs/spec/assets-management.md", "reason": "核对 output_dir 迁移契约、cache 保持、目录边界与文档一致"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对 replace 容器与单页产物移动约束未破坏拆分语义"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新增用例无外部状态依赖、单连接池纪律合规"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁不降"}
+{"file": ".trellis/tasks/11-01-replace/research/audit-798fc2f.md", "reason": "逐条核对审核问题是否收口"}

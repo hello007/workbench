@@ -95,12 +95,12 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 
 | 落点 | 产物路径 | 是否进索引 | 源文件 |
 |---|---|---|---|
-| `cache`（默认） | `data/assets/<libId>/derived/<镜像源目录>/<源主干>/<源主干>-NNN.pptx` | 否（派生排除） | 保留 |
+| `cache`（后端空串归一；素材面板前端弹窗默认 `replace`） | `data/assets/<libId>/derived/<镜像源目录>/<源主干>/<源主干>-NNN.pptx` | 否（派生排除） | 保留 |
 | `source` | `<源目录>/<源主干>/<源主干>-NNN.pptx` | 否（派生排除） | 保留 |
 | `replace` | `<源目录>/<源主干>/<NNN>-<名字主干>.pptx` | 是（每页一条 `files` 行） | 全页成功后移入系统回收站 |
 
 - 「名字主干」= `replaceArtifactBase(源主干)`：源主干为 ≥3 位纯数字时追加 `-p`（`123` → `123-p`），见 9.2。
-- 落点参数归一单点 `normalizeSplitTarget`：空串兼容旧调用等价 `cache`；非法值明确拒绝，禁静默落到意外落点。
+- 落点参数归一单点 `normalizeSplitTarget`：空串兼容旧调用等价 `cache`（后端口径；素材面板前端弹窗默认传 `replace`）；非法值明确拒绝，禁静默落到意外落点。
 - `cache` 根目录文件恰为 `derived/<源主干>/`，子目录文件多一层镜像目录（同库不同目录同名 pptx 不撞目录）。
 
 ### 9.2 可索引命名契约与隐式解耦
@@ -148,6 +148,7 @@ base := filepath.Dir(strings.TrimSuffix(relsPath, "/_rels/presentation.xml.rels"
 ### 9.5 拆分记录（schema v8）与重拆
 
 - `split_records` 增两列：`target TEXT NOT NULL DEFAULT 'cache'`、`source_removed INTEGER NOT NULL DEFAULT 0`；存量记录默认值语义正确（旧落点从不删源）。v8 迁移经 `migrateSchemaV8` 列存在性预判 + 单事务，半迁移库可重开。
+- **容器目录迁移与单页产物移动约束**（2026-11-01）：replace 产物容器目录（`output_dir`）随所在目录重命名/移动/前缀替换在同一事务迁移（`migrateSplitRecordsTx` 对 `target=source/replace` 且库根内相对路径命中旧目录前缀的记录改写 `output_dir`；源键同时命中时按「库根 + 新源目录 + 新源主干」重算，cache 保留原值，详见 [assets-management.md §8.7](assets-management.md)）。`MoveAssetFiles` 对 replace 单页产物（`isReplaceArtifactOutput` 命中）拒绝单独移动，提示整体移动其所在产物容器目录——产物位置只能由记录的 `output_dir` 表达，单独移出会使批量剔除与溯源同时失据。
 - replace **不做增量跳过**（见 9.3 步 2）：源行存在只对应「源从回收站还原」（`source_removed=1`）或「上次删源失败、产物完整」（`source_removed=0`）两种状态，均须完整重拆——跳过会留下源与产物并存或产物失去归属。
 - 重拆清旧改为**延迟清理**：拆分前只登记 `oldArtifacts` 不删除；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForReplacePaths` 删索引行与缩略图——防页数减少残留僵尸素材，同时保证失败/取消时旧产物（含被覆盖页）原样保留。
 - `OpenAssetSplitPage` 按 `record.target` 选命名：replace 用 `<NNN>-<名字主干>.pptx`，其余用 `<主干>-<NNN>.pptx`。

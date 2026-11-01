@@ -99,14 +99,16 @@ func (a *App) DeleteAssetFolder(libraryID, relPath string, force bool) (int64, e
 // RenameAssetFolder 同父重命名（PR2 目录管理，目录级移动）：磁盘 rename + 索引
 // 路径前缀批量更新（复用前缀替换单点机制）+ 受影响文件重过排除规则双向翻转
 // （新名命中翻 excluded / 原排除解除经 reviveLostFile 复活，FTS 同事务重建）+
-// 自动增量扫描收敛。重名拒绝；子树内存在拆分记录拒绝（拆分溯源宁严勿错）。
+// 自动增量扫描收敛。重名拒绝；拆分记录随同一事务迁移（source_rel_path 与
+// output_dir 一并改写，不再因历史拆分记录拒绝目录操作）。
 func (a *App) RenameAssetFolder(libraryID, relPath, newName string) (model.AssetFolderRenameResult, error) {
 	return a.assetsSvc.RenameAssetFolder(libraryID, relPath, newName)
 }
 
 // MoveAssetFiles 文件批量移动（PR3 拖拽移动，R4/R6/R9）：把文件（fileIDs 去重）
 // 及其磁盘文件移动到目标目录（targetFolder 空串 = 库根）。目标目录存在/非排除
-// 命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中拒绝。每条目一事务
+// 命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中/replace 单页产物拒绝
+// （产物须随其容器目录整体移动）。每条目一事务
 // 逐条目提交（files.path 更新 + split_records 源路径同事务重写），部分失败不
 // 中断，逐条目明细返回（终态仅经返回值汇总，无逐文件事件）；FTS 零重建（检索
 // 列不含路径）+ 排除规则双向翻转经既有单点。
@@ -117,8 +119,8 @@ func (a *App) MoveAssetFiles(libraryID string, fileIDs []int64, targetFolder str
 // MoveAssetFolder 目录级移动（PRD R5/D，PR4）：把目录整体移动到目标目录下
 // （targetFolder 空串 = 库根），保持自身名称。与 RenameAssetFolder 共用统一核心
 // （磁盘 rename + 前缀替换单点 + 排除双向翻转 + folder_meta/folder_tags 键同事务
-// 级联 + 自动增量扫描收敛）；目标不得位于源目录自身子树内，目标校验与源含拆分
-// 记录拒绝口径同 PR2。
+// 级联 + 拆分记录 source_rel_path/output_dir 同事务迁移 + 自动增量扫描收敛）；
+// 目标不得位于源目录自身子树内，目标校验与拆分记录迁移口径同 RenameAssetFolder。
 func (a *App) MoveAssetFolder(libraryID, folderRelPath, targetFolder string) (model.AssetFolderRenameResult, error) {
 	return a.assetsSvc.MoveAssetFolder(libraryID, folderRelPath, targetFolder)
 }
@@ -282,7 +284,7 @@ func (a *App) RequestAssetThumb(libraryID string, fileID int64, relPath string, 
 
 // SplitAssetFile 拆分单个素材文件（SRS §2.2.3，画廊卡/详情侧边栏入口）：复用
 // 工具箱拆分核心（纯 Go OOXML），落点三选一（target 取 model.AssetSplitTarget*
-// 常量，空串等价 cache）：
+// 常量，空串归一等价 cache；素材面板前端弹窗默认传 replace）：
 //   - cache：落素材库缓存目录（derived 镜像源树，库根之外天然隔离扫描）；
 //   - source：落源目录（与源同目录，isPptxSplitDerivative 已自动排除索引）；
 //   - replace：落源目录同名文件夹并以「页序前缀」命名（产物进索引成为独立素材），

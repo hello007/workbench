@@ -14,7 +14,7 @@ import (
 // ---------- 就地替换审核修复第二轮（10-31-b-review-fixes-2） ----------
 //
 // 覆盖：旧产物延迟清理与备份还原、目标同名拒绝、源哈希重算、空主干拒绝、
-// 上次 replace 产物剔除/拒拆、目录守卫只看未删源记录、删源前取消标志复查。
+// 上次 replace 产物剔除/拒拆、目录守卫已解除（记录随事务迁移）、删源前取消标志复查。
 
 // assertNoReplaceBackup 断言目录内无回滚备份残留（.replace-bak 形态）。
 func assertNoReplaceBackup(t *testing.T, dir string) {

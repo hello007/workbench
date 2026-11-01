@@ -25,7 +25,8 @@ import (
 // 重拆清旧页、就地替换的删源与标注迁移、批量异常隔离、取消注册与事件。
 //
 // 落点三态（B 方案 PR1，落点解析单点 normalizeSplitTarget）：
-//   - 缓存目录（默认 cache）：data/assets/<library-id>/derived/<源相对目录>/<源名主干>/
+//   - 缓存目录（后端空串归一 cache；素材面板前端弹窗默认 replace）：
+//     data/assets/<library-id>/derived/<源相对目录>/<源名主干>/
 //     <源名>-NNN.pptx（镜像源树：根目录文件恰为 SRS 字面 derived/{源文件名}/ 布局；
 //     子目录文件多一层镜像目录，同库不同目录同名 pptx 撞目录结构性消除）。落点在
 //     库根之外，扫描天然不重复索引。
@@ -90,7 +91,8 @@ type splitOutcome struct {
 }
 
 // normalizeSplitTarget 落点参数归一与校验单点（App 层传入的原样字符串）：
-// 空串兼容旧调用（等价 cache）；非法值明确拒绝，避免静默落到意外的落点。
+// 空串兼容旧调用（后端归一 cache；素材面板前端弹窗默认传 replace）；非法值明确
+// 拒绝，避免静默落到意外的落点。
 func normalizeSplitTarget(target string) (string, error) {
 	switch strings.TrimSpace(target) {
 	case "", model.AssetSplitTargetCache:
@@ -1308,7 +1310,8 @@ func samePathFold(a, b string) bool {
 // splitOutputDir cache/source 两态落点解析（PRD Q4 落点契约，见文件头注释布局
 // 说明）；replace 落点与 source 同布局但命名不同，在 splitOneFileReplace 内自行
 // 计算（不走本函数）：
-//   - 缓存目录（默认）：derived 镜像源树，目录段经 FromSlash 转平台分隔符；
+//   - 缓存目录（后端空串归一 cache；前端弹窗默认 replace）：derived 镜像源树，
+//     目录段经 FromSlash 转平台分隔符；
 //   - 源目录（outputToSourceDir=true）：<源所在目录>/<源名主干>/。
 func (s *AssetLibraryService) splitOutputDir(lib model.AssetLibrary, rel, absPath string, outputToSourceDir bool) string {
 	name := splitSourceBaseName(rel)

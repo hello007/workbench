@@ -389,7 +389,7 @@ func TestSplitRecordMigrate_RollbackOnFailure(t *testing.T) {
 	if err := store.db.QueryRow("SELECT id FROM files WHERE path = ?", "旧/a.pptx").Scan(&fileID); err != nil {
 		t.Fatalf("查文件记录: %v", err)
 	}
-	if err := store.updateFolderMeta("旧", "目录备注", nil, splitMigrateNow); err != nil {
+	if err := store.updateFolderMeta("旧", "目录备注", []string{"回滚标签"}, splitMigrateNow); err != nil {
 		t.Fatalf("写文件夹标注: %v", err)
 	}
 	if err := store.upsertSplitRecord("旧/a.pptx", "h", "oldOut", 2, splitMigrateNow, model.AssetSplitTargetCache, false); err != nil {
@@ -419,6 +419,14 @@ func TestSplitRecordMigrate_RollbackOnFailure(t *testing.T) {
 	}
 	if note, _, _, _ := store.getFolderMeta("新"); note != "" {
 		t.Errorf("folder_meta 新键不应出现，实际 %q", note)
+	}
+	// folder_tags 回滚：旧键绑定保留、新键无绑定
+	_, _, oldTags, err := store.getFolderMeta("旧")
+	if err != nil || len(oldTags) != 1 || oldTags[0].Name != "回滚标签" {
+		t.Errorf("folder_tags 旧键绑定应保留，实际 %+v（err=%v）", oldTags, err)
+	}
+	if _, _, newTags, err := store.getFolderMeta("新"); err != nil || len(newTags) != 0 {
+		t.Errorf("folder_tags 新键不应出现绑定，实际 %+v（err=%v）", newTags, err)
 	}
 	// split_records 回滚
 	rec, err := store.getSplitRecord("旧/a.pptx")

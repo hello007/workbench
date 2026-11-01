@@ -384,13 +384,13 @@ const (
 // string 常量非具名类型，不经 Wails 绑定层别名机制）。
 //
 // 三态布局与索引可见性：
-//   - cache：data/assets/<libId>/derived/...（默认，产物被 isPptxSplitDerivative
-//     排除，不进索引）；
+//   - cache：data/assets/<libId>/derived/...（后端空串归一，产物被 isPptxSplitDerivative
+//     排除，不进索引；素材面板前端弹窗默认落点已是 replace）；
 //   - source：<源目录>/<源名主干>/<源名主干>-NNN.pptx（同样被排除，不进索引）；
 //   - replace：<源目录>/<源名主干>/<NNN>-<源名主干>.pptx（页序前缀命名，扫描后
 //     作为独立素材进索引），全页成功且校验通过后把源文件移入系统回收站。
 const (
-	AssetSplitTargetCache   = "cache"   // 缓存目录落点（默认）
+	AssetSplitTargetCache   = "cache"   // 后端空串归一落点（前端弹窗默认 replace）
 	AssetSplitTargetSource  = "source"  // 源目录落点（保持源文件）
 	AssetSplitTargetReplace = "replace" // 就地替换落点（拆完删源，产物进索引）
 )
