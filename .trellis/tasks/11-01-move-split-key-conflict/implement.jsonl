@@ -1,0 +1,2 @@
+{"file": "docs/spec/assets-management.md", "reason": "拆分记录键迁移与冲突消解既有口径（migrateSplitRecordsTx / rewriteSplitRecordKeyTx）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增用例须守住覆盖率分层门禁"}

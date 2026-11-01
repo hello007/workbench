@@ -468,6 +468,15 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		return failed("%s", appErrMessage(err))
 	}
 
+	// 5.1 旧产物目录收尾清理（改名重链场景）：记录 output_dir 冻结在旧产物目录、
+	//     产物主干仍是旧源名，按当前主干清理对新目录是空操作，旧页只能按记录页数
+	//     在旧目录内逐页反查清理（复用 findSplitArtifactByPage 单点）。刻意放在
+	//     核心成功之后——核心失败/取消时上一次拆分成果原样保留，对齐 replace 落点
+	//     的延迟清理契约（「先删后拆」在失败时会连带丢掉上一次成果）。
+	if outputToSourceDir && record != nil && !samePathFold(record.outputDir, outDir) {
+		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
+	}
+
 	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）
 	if err := store.upsertSplitRecord(rel, hash, result.OutputDir, result.PageCount,
 		time.Now().Format("2006-01-02 15:04:05"), target, false); err != nil {
@@ -746,6 +755,13 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
 	// 失败保留文件与索引（下次重拆收敛），不阻断删源。
 	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
+	// 改名重链后旧产物目录（记录 output_dir）与新落点不同：旧页文件与索引行按
+	// 记录页数逐页反查清理。刻意挂在成功收尾（删源前）——失败/取消路径不得删
+	// 旧产物，与 oldArtifacts 延迟清理契约一致。不限定记录 target：output_dir 恒为
+	// 本源文件上次产物的独占目录，落点切换（如 source→replace）同样须收敛旧产物。
+	if record != nil && !samePathFold(record.outputDir, outDir) {
+		s.cleanupSplitArtifactsInDirByPage(store, lib, record, record.outputDir)
+	}
 	// 备份到此已无还原场景（后续唯一动作是移入回收站，失败也不回滚），先删除，
 	// 避免成功路径残留备份文件；删除失败仅告警（备份不匹配产物形态、不参与索引）。
 	s.removeReplaceArtifactBackups(backups)
@@ -804,10 +820,10 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	}, nil
 }
 
-// deleteIndexRowsForReplacePaths 删除就地替换旧产物在索引中的行（含缩略图记账与
-// PNG 文件）：页数减少/重拆时越界旧页必须从索引消失，否则成为指向已删文件的
-// 僵尸素材。路径按库根换算为相对路径查询；不存在行（未索引/已被删）静默跳过。
-func (s *AssetLibraryService) deleteIndexRowsForReplacePaths(store *assetsStore, lib model.AssetLibrary, paths []string) {
+// deleteIndexRowsForPaths 删除已清理产物在索引中的行（含缩略图记账与 PNG 文件）：
+// 页数减少/重拆时越界旧页必须从索引消失，否则成为指向已删文件的僵尸素材。
+// 路径按库根换算为相对路径查询；不存在行（未索引/已被删）静默跳过。
+func (s *AssetLibraryService) deleteIndexRowsForPaths(store *assetsStore, lib model.AssetLibrary, paths []string) {
 	for _, p := range paths {
 		rel, err := filepath.Rel(lib.RootPath, p)
 		if err != nil {
@@ -853,7 +869,7 @@ func (s *AssetLibraryService) rollbackReplaceArtifacts(store *assetsStore, lib m
 			removed = append(removed, p)
 		}
 	}
-	s.deleteIndexRowsForReplacePaths(store, lib, removed)
+	s.deleteIndexRowsForPaths(store, lib, removed)
 	// 仅当目录已空才删除：先 ReadDir 判空（非空 = 用户自建内容，保留且不算异常，
 	// 不产生告警噪音）；判空与 Remove 之间的并发写入由 Remove 自身失败兜底。
 	if entries, readErr := os.ReadDir(outDir); readErr == nil && len(entries) == 0 {
@@ -1141,6 +1157,49 @@ func removeSplitArtifacts(dir, baseName string) {
 	}
 }
 
+// cleanupSplitArtifactsInDirByPage 按记录页数逐页反查并清理旧产物目录中的页产物
+// （含其索引行与缩略图）。用于源文件改名重链后的重拆清旧：记录键已迁到新路径，
+// 但 output_dir 冻结在旧产物目录、产物命名主干仍是旧源名，按当前主干清理必然漏删
+// 旧页并留下 files 索引行（旧页还能再次进入批量拆分源）。
+//
+// 为什么按页序反查而不按主干推导：旧主干需要从记录反向还原（含 replace 的 -p
+// 后缀与历史 %02d 形态），判定面大且极易误删；目录由该记录独占，按页序在
+// output_dir 内反查唯一候选即可精确定位（复用 findSplitArtifactByPage 单点）。
+// 同页序出现多个候选时视为不可判定——跳过该页（安全侧失败），不牵连其余页。
+//
+// 调用点均在拆分成功之后（源落点核心返回成功后、replace 删源前），失败与取消
+// 路径不触达，上一次拆分成果原样保留。
+//
+// 删除成功才收集路径并批量删索引行；删除失败仅告警继续（残留由下次重拆收敛）。
+// 目录删空后尝试删除（非空/失败忽略——目录内用户自建内容一律不动）。
+func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir string) {
+	if record == nil || dir == "" || record.pageCount <= 0 {
+		return
+	}
+	removed := make([]string, 0, record.pageCount)
+	for page := 1; page <= record.pageCount; page++ {
+		p, ok := findSplitArtifactByPage(dir, record.target, page)
+		if !ok {
+			continue
+		}
+		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+			Logger().Warn("删除改名重链前的旧拆分产物失败（下次重拆收敛）",
+				"libraryId", lib.ID, "path", p, "err", rmErr)
+			continue
+		}
+		removed = append(removed, p)
+	}
+	if len(removed) > 0 {
+		s.deleteIndexRowsForPaths(store, lib, removed)
+	}
+	// 仅当目录已空才删除：非空 = 用户自建内容，保留且不算异常（不产生告警噪音）。
+	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) == 0 {
+		if rmErr := os.Remove(dir); rmErr != nil && !os.IsNotExist(rmErr) {
+			Logger().Warn("删除改名重链前的旧产物目录失败（保留）", "libraryId", lib.ID, "dir", dir, "err", rmErr)
+		}
+	}
+}
+
 // isAllDigits 非空纯数字串判定（重拆清旧页的页序段口径）。
 func isAllDigits(s string) bool {
 	for i := 0; i < len(s); i++ {
@@ -1270,7 +1329,7 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 		stale = append(stale, p)
 	}
 	if len(stale) > 0 {
-		s.deleteIndexRowsForReplacePaths(store, lib, stale)
+		s.deleteIndexRowsForPaths(store, lib, stale)
 	}
 }
 

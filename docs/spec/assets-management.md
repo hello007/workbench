@@ -481,7 +481,7 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 
 ### 15.6 重拆清理与索引行收敛
 
-- 重拆清旧改为**延迟清理**：拆分前只登记目录内同形产物名集合（`oldArtifacts`，仅当目录确属本文件 `target=replace` 记录时成立），不删文件；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForReplacePaths` 逐条清缩略图记账后删 `files` 行。
+- 重拆清旧改为**延迟清理**：拆分前只登记目录内同形产物名集合（`oldArtifacts`，仅当目录确属本文件 `target=replace` 记录时成立），不删文件；全部页 rename+Stat+索引+标注迁移通过、删源前才删除本次新页之外的历史页，并联动 `deleteIndexRowsForPaths` 逐条清缩略图记账后删 `files` 行。
 - 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；失败/取消时旧页（含被覆盖页，经 `.replace-bak` 备份还原）原样保留。无 replace 记录而目录已有同形文件时直接拒绝拆分，不覆盖用户自建内容。
 - 批量源清单剔除上次 replace 生成的单页产物（`filterReplaceArtifactSources`，Go 侧按记录集合比较 `output_dir`），单文件入口对产物二次 replace 拆分拒绝——否则会生成「页的页」嵌套素材。删源失败（8b）补写 `target=replace, source_removed=0` 记录，产物归属不丢：重试不被同形文件拒绝、批量剔除继续生效（`replace` 不做增量跳过，见 pptx-split §9.3）。
 

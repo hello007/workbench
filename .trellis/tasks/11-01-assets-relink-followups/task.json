@@ -1,0 +1,30 @@
+{
+  "id": "assets-relink-followups",
+  "name": "assets-relink-followups",
+  "title": "素材拆分与重链链路后续收口（父）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-11-01",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-01-split-cleanup-renamed",
+    "11-01-relink-artifact-dirsync",
+    "11-01-move-split-key-conflict"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
