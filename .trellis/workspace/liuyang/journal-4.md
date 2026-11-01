@@ -603,3 +603,36 @@ RelocateAssetFile 落库改为显式事务，UPDATE files.path 与改写 split_r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 187: 重链识别产物目录随源搬迁
+
+**Date**: 2026-11-01
+**Task**: 重链识别产物目录随源搬迁
+**Branch**: `master`
+
+### Summary
+
+新增 resolveRelocatedSplitOutDir：候选 <新源目录>/<新主干> 经 splitSourceOutputDir 单点推导，仅 source/replace 且首页产物命中才改 output_dir，经 newOutDir 与 files.path 同事务落库（rewriteSplitRecordKeyTx 单点）；等价/形态不符/cache 保持旧值，重复重链幂等；同步 assets-management §11.3、pptx-split §9.5、CLAUDE.md 规则行
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b595161` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
