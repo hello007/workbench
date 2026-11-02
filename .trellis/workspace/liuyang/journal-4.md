@@ -1006,3 +1006,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 199: 拆分产物页级指纹（schema v10）
+
+**Date**: 2026-11-02
+**Task**: 拆分产物页级指纹（schema v10）
+**Branch**: `master`
+
+### Summary
+
+方案 a 落地：split_records.artifact_fingerprints 存 page/name/size/sha256；三处清理改指纹 allow-list，缺失/损坏回落 mtime；v10 迁移列存在性预判+单事务、禁自动回填；重链/目录迁移/备份还原不重写指纹；补迁移、用户同形文件保护、三处路径与字节确定性测试，spec 与 CLAUDE.md 同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a46d1e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
