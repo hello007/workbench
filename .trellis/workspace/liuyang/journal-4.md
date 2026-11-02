@@ -873,3 +873,37 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 195: 交付前回归验证与 E2E 断言修复
+
+**Date**: 2026-11-02
+**Task**: 交付前回归验证与 E2E 断言修复
+**Branch**: `master`
+
+### Summary
+
+五项回归验证：后端全量/覆盖率/前端单测/wails build 全通过，E2E 暴露 assets-split 两例默认落点断言过期（798fc2f 起默认改 replace）。修复 E2E 断言并保留 cache 主链覆盖，全量 E2E 124 通过、单测 2275 通过；两个子任务归档，父任务余 chat-template-flaky 与 artifact-page-fingerprint。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4354fee` | (see git log) |
+| `df19183` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
