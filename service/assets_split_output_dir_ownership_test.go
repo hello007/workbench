@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -307,6 +308,81 @@ func TestSplitRecordByOutputDir(t *testing.T) {
 	if err != nil || got != nil {
 		t.Fatalf("落点不同不应命中，实际 (%+v,%v)", got, err)
 	}
+}
+
+// TestSplitRecordByOutputDir_SameSourceCaseFold 同源大小写折叠排除分支：SQL
+// `source_rel_path <> ?` 大小写敏感，Windows 上 `A.pptx` / `a.pptx` 是同一物理
+// 文件，Go 侧 samePathFold 必须把它排除（否则正常重拆被误判为「他源占用」）；
+// Linux/macOS 大小写敏感，两键是不同源，应正常命中。
+func TestSplitRecordByOutputDir_SameSourceCaseFold(t *testing.T) {
+	svc := newTestAssetService(t)
+	root := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "同源折叠排除库", root)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(root, "A")
+
+	for _, rec := range []struct {
+		rel  string
+		hash string
+	}{{"A.pptx", "hash-A"}, {"a.pptx", "hash-a"}} {
+		if err := store.upsertSplitRecord(rec.rel, rec.hash, outDir, 1,
+			"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false); err != nil {
+			t.Fatalf("写入记录 %s: %v", rec.rel, err)
+		}
+	}
+
+	got, err := store.splitRecordByOutputDir(outDir, "A.pptx")
+	if err != nil {
+		t.Fatalf("归属查询: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if got != nil {
+			t.Errorf("Windows 上仅大小写不同的同源记录应被折叠排除，实际命中 %+v", got)
+		}
+		return
+	}
+	if got == nil || got.sourceRelPath != "a.pptx" {
+		t.Errorf("非 Windows 大小写不同视为不同源，应命中 a.pptx，实际 %+v", got)
+	}
+}
+
+// TestAssetSplitLibrary_ItemCodeOutputDirConflict 批量入口：落点归属冲突按单文件
+// 失败隔离（批量不整体失败），明细 Item.Code 必须透出 E_ASSETS_SPLIT_OUTPUT_CONFLICT，
+// 供前端分类与提示；冲突文件零产出、源保留。
+func TestAssetSplitLibrary_ItemCodeOutputDirConflict(t *testing.T) {
+	svc := newTestAssetService(t)
+	root := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "批量落点冲突库", root)
+	buildAssetsPptx(t, root, "A.pptx", []assetsSlideSpec{
+		{titlePh: "一", body: []string{"内容"}},
+	})
+	mustScanLibrary(t, svc, lib.ID)
+
+	// B 的拆分记录冻结在 A 目录（改名重链后落点不随源移动的形态）。
+	outDir := filepath.Join(root, "A")
+	store := svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord("B.pptx", "hash-b", outDir, 1,
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false); err != nil {
+		t.Fatalf("写入 B 的拆分记录: %v", err)
+	}
+
+	batch, err := svc.SplitAssetLibrary(context.Background(), lib.ID, model.AssetSplitTargetSource)
+	if err != nil {
+		t.Fatalf("单文件归属冲突不应使批量整体失败: %v", err)
+	}
+	if batch.Total != 1 || batch.Failed != 1 || batch.Split != 0 || batch.Skipped != 0 {
+		t.Fatalf("批量汇总不符（total=1 failed=1）：%+v", batch)
+	}
+	if len(batch.Items) != 1 {
+		t.Fatalf("明细应仅含 1 项，实际 %d 项：%+v", len(batch.Items), batch.Items)
+	}
+	item := batch.Items[0]
+	if item.RelPath != "A.pptx" || item.Status != model.AssetSplitStatusFailed ||
+		item.Code != model.ErrCodeAssetsSplitOutputConflict {
+		t.Errorf("冲突项应为 failed + %s，实际 %+v", model.ErrCodeAssetsSplitOutputConflict, item)
+	}
+	mustNotExist(t, filepath.Join(outDir, "A-001.pptx"))
+	mustExist(t, filepath.Join(root, "A.pptx"))
 }
 
 // TestAssetExport_SinglePptxPathUsesRecordStem 产物目录随源改名搬迁后目录基名与

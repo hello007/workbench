@@ -823,7 +823,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	}
 	// 历史产物收尾清理延迟到此刻：此前任何失败/取消都能保住旧页（见步骤 3/5）。
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
-	// 失败保留文件与索引（下次重拆收敛），不阻断删源。
+	// 失败保留文件与索引（不再承诺下次重拆收敛），不阻断删源。
 	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
 	// 旧产物目录收尾（与 source 路径同一决策单点 splitArtifactCleanupPlan）：异目录
 	// 清理旧落点；同目录跨 target 清理旧形态产物；同目录同 target 但记录主干 !=
@@ -1829,8 +1829,9 @@ func replaceArtifactBackupPath(dir, name string) string {
 }
 
 // cleanupStaleReplaceArtifacts 本次新页之外的旧页收尾清理（删源前调用）：删除
-// 文件成功才删索引行（删除失败保留文件与索引，下次重拆收敛）。调用时机在全部
-// 校验与标注迁移之后，失败/取消路径不会走到这里，旧页在此之前始终保留。
+// 文件成功才删索引行（删除失败先经 removeSplitArtifactFile 重试一次，仍失败保留
+// 文件与索引，仅告警、不承诺下次重拆自动收敛）。调用时机在全部校验与标注迁移
+// 之后，失败/取消路径不会走到这里，旧页在此之前始终保留。
 func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, outDir string, oldArtifacts map[string]struct{}, newFiles []string) {
 	if len(oldArtifacts) == 0 {
 		return
@@ -1855,8 +1856,10 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 			continue
 		}
 		p := filepath.Join(outDir, name)
-		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
-			Logger().Warn("删除历史拆分产物失败（保留文件与索引，下次重拆收敛）",
+		// 与 removeSplitArtifactsBeyond / cleanupSplitArtifactsInDirByPage 同口径：
+		// 瞬时句柄占用经一次重试覆盖，仍失败保留文件与索引（不再承诺下次重拆收敛）。
+		if rmErr := removeSplitArtifactFile(p); rmErr != nil {
+			Logger().Warn("删除历史拆分产物失败（重试一次后仍失败，保留文件与索引，残留需人工清理）",
 				"libraryId", lib.ID, "path", p, "err", rmErr)
 			continue
 		}

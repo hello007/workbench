@@ -590,6 +590,22 @@ func TestAssetSplitReplace_CaseOnlyRenameResplits(t *testing.T) {
 	}
 }
 
+// TestRemoveSplitArtifactFile 旧产物删除单点：文件存在时删除成功，已不存在
+// （并发清理/用户已删）按成功处理——三处旧页清理链路（removeSplitArtifactsBeyond /
+// cleanupSplitArtifactsInDirByPage / cleanupStaleReplaceArtifacts）共用该重试语义。
+func TestRemoveSplitArtifactFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "演变-001.pptx")
+	testutil.WriteFile(t, p, "x")
+	if err := removeSplitArtifactFile(p); err != nil {
+		t.Fatalf("删除既有产物: %v", err)
+	}
+	mustNotExist(t, p)
+	if err := removeSplitArtifactFile(p); err != nil {
+		t.Errorf("已不存在的产物应按成功处理，实际：%v", err)
+	}
+}
+
 // 注：删除失败重试分支难以在不依赖平台权限语义的前提下稳定构造（chmod 在 Windows
 // 无效），由 removeSplitArtifactFile 的实现单点覆盖：首次失败 50ms 后重试一次，
 // 仍失败返回错误、调用方告警明确「残留需人工清理，本次重拆不再自动收敛」。

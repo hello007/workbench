@@ -292,6 +292,10 @@ func (a *App) RequestAssetThumb(libraryID string, fileID int64, relPath string, 
 //     语义，前端须强确认）；删源失败返回 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED
 //     （产物与索引保留，可重试）。
 //
+// 落点目录已被另一源文件的拆分记录占用时返回 E_ASSETS_SPLIT_OUTPUT_CONFLICT
+// （warning，典型为改名重链后旧记录冻结目录、同名新源再拆分；在任何删除/覆盖
+// 动作之前拒绝，目录零改动）。
+//
 // 增量命中跳过返回 Skipped=true（前端提示「已最新」），核心失败（损坏/加密/
 // 只读等）返回错误。进度/终态经 assets-split:* 事件推送（素材面板独听），在途
 // 任务可经 CancelAssetSplit 取消。

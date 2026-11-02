@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,6 +58,66 @@ func TestDeleteIndexRowsForPaths_OutsideRootSilent(t *testing.T) {
 	if got := logBuf.String(); strings.Contains(got, "level=WARN") {
 		t.Errorf("库外旧落点跳过应零告警，实际日志：%s", got)
 	}
+}
+
+// TestDeleteIndexRowsForPaths_CrossVolumeSilent 跨卷分支守护：库根与候选产物位于
+// 不同卷时 filepath.Rel 直接出错（区别于同卷的 `..` 前缀），同属库外静默跳过——
+// 零 Warn 且有 Debug 留痕。Windows 用第二可用盘符构造（无第二盘则 skip）；非
+// Windows 用「相对库根 + 绝对路径」触发 Rel 错误，覆盖同一分支。
+func TestDeleteIndexRowsForPaths_CrossVolumeSilent(t *testing.T) {
+	svc := newTestAssetService(t)
+	root := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "跨卷清理静默库", root)
+	store := svc.openStoreForTest(t, lib.ID)
+
+	// 干扰行：与跨卷文件同基名的库内索引行，库外路径若退化为基名匹配会误删。
+	decoyRel := "跨卷-001.pptx"
+	insertIndexRowForTest(t, svc, lib.ID, 9711, decoyRel)
+
+	var outsideAbs string
+	if runtime.GOOS == "windows" {
+		outsideAbs = crossVolumePathForTest(t, root, decoyRel)
+	} else {
+		lib.RootPath = filepath.Join("relative", "root")
+		outsideAbs = filepath.Join(root, "derived", decoyRel)
+	}
+
+	var logBuf bytes.Buffer
+	prevLogger := Logger()
+	SetLogger(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { SetLogger(prevLogger) })
+
+	svc.deleteIndexRowsForPaths(store, lib, []string{outsideAbs})
+
+	if n := countIndexRowsByPath(t, svc, lib.ID, decoyRel); n != 1 {
+		t.Errorf("跨卷路径不得删除库内同基名索引行，实际剩余 %d 行（应为 1）", n)
+	}
+	got := logBuf.String()
+	if strings.Contains(got, "level=WARN") {
+		t.Errorf("跨卷库外跳过应零告警，实际日志：%s", got)
+	}
+	if !strings.Contains(got, "旧产物位于库根之外") {
+		t.Errorf("跨卷分支应有 Debug 留痕，实际日志：%s", got)
+	}
+}
+
+// crossVolumePathForTest 返回位于另一可用盘符的绝对路径（Windows 专用，用于
+// 触发 filepath.Rel 跨卷错误）；无第二可用盘符时 skip 并说明原因。
+func crossVolumePathForTest(t *testing.T, root, rel string) string {
+	t.Helper()
+	cur := filepath.VolumeName(root)
+	for c := 'A'; c <= 'Z'; c++ {
+		drive := string(c) + ":"
+		if strings.EqualFold(drive, cur) {
+			continue
+		}
+		if _, err := os.Stat(drive + string(filepath.Separator)); err != nil {
+			continue
+		}
+		return filepath.Join(drive+string(filepath.Separator), "workbench-cross-volume", rel)
+	}
+	t.Skip("本机无第二可用盘符，跳过 Windows 跨卷分支")
+	return ""
 }
 
 // TestRelPathWithinRoot 库内判定单点：库内路径返回正斜杠相对路径；`..` 逃逸与
