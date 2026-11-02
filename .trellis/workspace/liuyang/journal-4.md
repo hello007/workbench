@@ -1105,3 +1105,36 @@ splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 202: replace 指纹校验审核整改
+
+**Date**: 2026-11-03
+**Task**: replace 指纹校验审核整改
+**Branch**: `master`
+
+### Summary
+
+整改 d69e832 审核发现 R1-R7：schema v11 retained_fingerprints 承载清理失败归属（后续增页重拆可识别、消费自愈）；归属查询收敛 ownershipFingerprintForName 单点；备份 rename 后复验指纹收口 TOCTOU；失败文案按「内容不符/无归属」分流；核心调用前拦截中间态同名文件（整名折叠含扩展名）；测试等长异内容钉住 SHA-256、平台用例拆 _windows/_other、折叠多命中端到端、索引自愈、retained 迁移/往返/自愈、删除失败注入点；同步三处文档与关键规则行。go test ./...、覆盖率门禁、gofmt、vet、Linux 交叉 vet 全通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `143ed8a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
