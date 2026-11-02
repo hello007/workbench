@@ -1039,3 +1039,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 200: 归档父任务：交付前回归与遗留收口
+
+**Date**: 2026-11-02
+**Task**: 归档父任务：交付前回归与遗留收口
+**Branch**: `master`
+
+### Summary
+
+父任务 11-02-release-regression-and-leftovers 4/4 子任务已完成（回归验证、chat 模板偶发、产物页级指纹、E2E 默认落点），归档收口。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a46d1e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
