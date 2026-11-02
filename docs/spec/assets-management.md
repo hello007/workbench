@@ -488,6 +488,7 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - 页数减少时越界旧页必须删行，否则成为指向已删文件的僵尸素材；失败/取消时旧页（含被覆盖页，经 `.replace-bak` 备份还原）原样保留。无 replace 记录而目录已有同形文件时直接拒绝拆分，不覆盖用户自建内容。
 - 批量源清单剔除上次 replace 生成的单页产物（`filterReplaceArtifactSources`，Go 侧按记录集合比较 `output_dir`），单文件入口对产物二次 replace 拆分拒绝——否则会生成「页的页」嵌套素材。删源失败（8b）补写 `target=replace, source_removed=0` 记录，产物归属不丢：重试不被同形文件拒绝、批量剔除继续生效（`replace` 不做增量跳过，见 pptx-split §9.3）。
 - **清理归属改指纹 allow-list（schema v10）**：`cleanupStaleReplaceArtifacts` 在旧记录指纹可用时，`oldArtifacts` 中的名字只有能在指纹按名命中（`sameNameFold`）且 `size + SHA-256` 全等才删；不在指纹中的名字视为用户文件保留（任意 mtime）。`removeSplitArtifactsBeyond` 同口径只遍历指纹条目。指纹缺失/损坏回落原「形态 + mtime」逻辑；指纹非空但缺页保留，不回落。详见 [pptx-split.md §9.5](pptx-split.md)。
+- **replace 备份让位同口径（schema v10）**：`splitOneFileReplace` 命中 `oldArtifacts` 后、备份 rename 前先校验指纹（`fingerprintForName` + `fingerprintMatch`，按磁盘实际名、仅 Windows 折叠大小写）；不符/无条目按「目标已存在且不属于历史拆分产物」拒绝覆盖并回滚，禁把用户修改过的同名产物备份后删除；指纹缺失保持现行按名认定。详见 [pptx-split.md §9.3](pptx-split.md)。
 
 ### 15.7 批量取消保留已完成明细（2026-10-31）
 

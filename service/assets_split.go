@@ -721,6 +721,19 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 			// 001-Abc.pptx）：按实际名搬迁备份，回滚还原也回到原大小写，索引行
 			// 路径不漂移（2026-11-02）。
 			oldPath := filepath.Join(outDir, oldName)
+			// 指纹归属校验（v10）：oldArtifacts 只按命名形态收集，命中不代表该文件
+			// 仍是历史产物——用户可能把某页产物替换成自有内容（同名）。记录指纹可用
+			// 时以内容（size + SHA-256）作为归属事实：按磁盘实际名查该页指纹（仅
+			// Windows 折叠大小写），内容全等才允许备份让位；否则不符/无条目一律视为
+			// 用户文件拒绝覆盖。校验点在备份 rename 之前，故拒绝路径不产生
+			// .replace-bak 残留（前序页已备份由回滚还原）。记录缺失或指纹不可用时
+			// 保持现行按名认定行为（兼容 v10 前记录与指纹损坏）。
+			if fingerprintsUsable(record) {
+				fp, ok := fingerprintForName(record, oldName)
+				if !ok || !fingerprintMatch(oldPath, fp) {
+					return rollbackFailed("第 %d 页目标文件「%s」已存在且不属于历史拆分产物，请先移走或重命名后重试", page, dstName)
+				}
+			}
 			bak := replaceArtifactBackupPath(outDir, oldName)
 			if bakErr := os.Rename(oldPath, bak); bakErr != nil {
 				return rollbackFailed("第 %d 页产物重命名失败（备份历史产物）: %v", page, bakErr)
