@@ -444,16 +444,13 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		}
 	}
 
-	// 4. 重拆清旧页（PRD：防页数减少残留 + 旧 %02d 产物收敛）。derived 落点是
-	//    应用自属目录（data/assets/<id>/derived），整目录清空安全；源目录落点与
-	//    用户自建目录共享，按产物命名形态逐文件删除（其余内容一律不动）。删除
-	//    失败仅告警继续拆（同名单文件覆盖写幂等，残留由下次重拆收敛）
-	if outputToSourceDir {
-		removeSplitArtifacts(outDir, baseName)
-	} else if err := os.RemoveAll(outDir); err != nil {
-		Logger().Warn("清空拆分产物目录失败（覆盖写继续，残留由下次重拆收敛）",
-			"libraryId", lib.ID, "dir", outDir, "err", err)
-	}
+	// 4. 重拆清旧改为延迟清理（2026-11-02）：核心调用前不再删除任何旧页，也不再
+	//    对 derived 落点整目录 RemoveAll。核心失败/取消时上一次拆分成果不再被
+	//    前置删除（「先删后拆」在失败时会连带丢掉上一次成果，与 replace 落点的
+	//    延迟清理契约一致）。**已知限制**：核心直接写落点目录，失败前已同名覆盖
+	//    写的旧页内容无法回滚（彻底解决需核心写临时目录再原子移动，见任务
+	//    Out of Scope）。核心成功后按本次 result.PageCount 删除超界旧页（见
+	//    5.1），页序 ≤ PageCount 的旧页由核心同名覆盖写更新。
 
 	// 5. 调拆分核心（页级进度透传：文件级 done = 已完成文件数，当前文件进行中；
 	//    文件收尾进度由调用方在完成后补发）。
@@ -491,7 +488,13 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		return failed("%s", appErrMessage(err))
 	}
 
-	// 5.1 旧产物目录收尾清理（改名重链 / 跨落点切换 / 同目录改主干等形态）：
+	// 5.1 超界旧页收敛（延迟清理）：source/cache 落点的产物命名恒为
+	//     `<源名主干>-NNN.pptx`，页数减少时删除页序 > 本次 PageCount 的旧产物
+	//     （旧 %02d 产物与越界页一并收敛）。只删产物命名形态，同目录用户自建内容
+	//     一律不动；删除失败仅告警继续，不阻断收尾。
+	removeSplitArtifactsBeyond(outDir, baseName, result.PageCount)
+
+	// 5.2 旧产物目录收尾清理（改名重链 / 跨落点切换 / 同目录改主干等形态）：
 	//     决策统一走 splitArtifactCleanupPlan 单点（与 replace 链路同源，防口径
 	//     分叉）。刻意放在核心成功之后——核心失败/取消时上一次拆分成果原样保留，
 	//     对齐 replace 落点的延迟清理契约（「先删后拆」在失败时会连带丢掉上一次
@@ -660,6 +663,14 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		return cancelRollback(err)
 	}
 
+	// 落点目录大小写归一（2026-11-02）：Windows NTFS 大小写不敏感但保留原始大小写，
+	// 源仅改大小写（abc.pptx → Abc.pptx）后重拆时 outDir 由当前文件名推导（…/Abc），
+	// 磁盘上既有产物目录仍是旧形态（…/abc）。索引相对路径若按新形态写入，下次扫描
+	// 按磁盘实际名（WalkDir 返回 abc）匹配不上，会把刚建的行标 lost 并另插新行
+	// （幽灵行 + 标注挂在不可见行）。按 parent 目录实际条目名归一，索引、记录与磁盘
+	// 一致；读取失败或多命中（大小写敏感目录开启）按原值继续。
+	outDir = resolveExistingDirCase(outDir)
+
 	// 5. 逐页 rename + Stat 校验（页序以核心产物文件名尾段为准，解析失败回退序号）
 	renamed := make([]string, 0, len(result.Files))
 	pages := make([]int, 0, len(result.Files))
@@ -670,15 +681,19 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		}
 		dst := filepath.Join(outDir, replaceArtifactName(page, base))
 		dstName := filepath.Base(dst)
-		if _, isOld := oldArtifacts[dstName]; isOld {
+		if oldName, isOld := foldNameInSet(oldArtifacts, dstName); isOld {
 			// 历史产物：先挪到备份名再让新页占位。若直接覆盖，随后的失败回滚
 			// 只能保住文件名却保不住旧内容（rename 不可逆）；备份使「失败/取消
 			// 时旧产物原样保留」真正成立。
-			bak := replaceArtifactBackupPath(outDir, dstName)
-			if bakErr := os.Rename(dst, bak); bakErr != nil {
+			// 大小写折叠命中时 oldName 为磁盘实际名（如 001-abc.pptx vs 本次
+			// 001-Abc.pptx）：按实际名搬迁备份，回滚还原也回到原大小写，索引行
+			// 路径不漂移（2026-11-02）。
+			oldPath := filepath.Join(outDir, oldName)
+			bak := replaceArtifactBackupPath(outDir, oldName)
+			if bakErr := os.Rename(oldPath, bak); bakErr != nil {
 				return rollbackFailed("第 %d 页产物重命名失败（备份历史产物）: %v", page, bakErr)
 			}
-			backups[dst] = bak
+			backups[oldPath] = bak
 		} else if fileExists(dst) {
 			// 非历史产物（用户自建或未索引残留）：禁覆盖，中止并回滚本次新增
 			return rollbackFailed("第 %d 页目标文件「%s」已存在且不属于历史拆分产物，请先移走或重命名后重试", page, dstName)
@@ -1320,12 +1335,20 @@ func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []stri
 	return "", false
 }
 
-// removeSplitArtifacts 源目录落点的重拆清旧页：仅删除匹配产物命名形态
-// `<源名主干>-<纯数字>.pptx` 的文件（页序段纯数字、不限位数——旧 %02d 产物与
-// 越界页一并收敛，口径与 isPptxSplitDerivative 的数字判定一致），目录内其余
-// 内容（用户自建文件、`<源名>-草稿.pptx` 等同名异构文件、子目录）一律不动。
-// 目录不存在（首次拆分）或不可读时静默返回——无旧页可清，覆盖写继续。
-func removeSplitArtifacts(dir, baseName string) {
+// removeSplitArtifactsBeyond 源目录/derived 落点重拆后的超界旧页清理：仅删除
+// 匹配产物命名形态 `<源名主干>-<纯数字>.pptx` 且页序 > keepPage 的文件（页序段
+// 纯数字、不限位数——旧 %02d 产物与越界页一并收敛，口径与 isPptxSplitDerivative
+// 的数字判定一致），目录内其余内容（用户自建文件、`<源名>-草稿.pptx` 等同名异构
+// 文件、子目录）一律不动。
+//
+// 刻意在拆分核心成功之后调用（keepPage = 本次 result.PageCount）：核心失败/取消
+// 时上一次拆分成果不再被前置删除，与 replace 落点的延迟清理契约一致（核心已同名
+// 覆盖写的页除外，属已知限制，见 splitOneFileWithHash 步骤 4）。页序 ≤ keepPage
+// 的旧页由核心同名覆盖写更新，无需删除；keepPage=0 即全量清理产物形态。
+//
+// 目录不存在（首次拆分）或不可读时静默返回——无旧页可清。删除失败仅告警继续，
+// 残留文件保留（可能因占用或权限失败，不再声称「下次重拆自动收敛」）。
+func removeSplitArtifactsBeyond(dir, baseName string, keepPage int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -1340,10 +1363,29 @@ func removeSplitArtifacts(dir, baseName string) {
 		if seq == "" || !isAllDigits(seq) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			Logger().Warn("删除旧拆分产物失败（覆盖写继续）", "dir", dir, "file", name, "err", err)
+		n, convErr := strconv.Atoi(seq)
+		if convErr != nil || n <= keepPage {
+			continue
+		}
+		if err := removeSplitArtifactFile(filepath.Join(dir, name)); err != nil {
+			Logger().Warn("删除超界旧拆分产物失败（残留文件需人工清理）", "dir", dir, "file", name, "err", err)
 		}
 	}
+}
+
+// removeSplitArtifactFile 删除单个旧产物文件，首次失败后间隔 50ms 重试一次——
+// Windows 上杀毒/索引服务的短时句柄占用常见，一次重试覆盖瞬时冲突；仍失败返回
+// 错误由调用方告警。文件已不存在（并发/用户清理）按成功处理。
+func removeSplitArtifactFile(path string) error {
+	err := os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	time.Sleep(50 * time.Millisecond)
+	if retryErr := os.Remove(path); retryErr != nil && !os.IsNotExist(retryErr) {
+		return retryErr
+	}
+	return nil
 }
 
 // splitArtifactCleanupPlan 重拆成功后的旧产物清理决策单点（source/cache 与 replace
@@ -1357,8 +1399,8 @@ func removeSplitArtifacts(dir, baseName string) {
 //  3. 同目录同 target 但记录主干 != 本次新主干（改名重链 / 搬迁后）：清理旧主干，
 //     以本次新主干 exclude 防误删刚生成的新产物（M1）；仅大小写差异折叠相等视为
 //     同一主干不进入——本次产物覆盖同名物理文件，旧页由既有链路处理；
-//  4. 同目录同 target 同主干（普通重拆）：不清理，旧页由 removeSplitArtifacts /
-//     RemoveAll / cleanupStaleReplaceArtifacts 既有链路处理。
+//  4. 同目录同 target 同主干（普通重拆）：不清理，旧页由 removeSplitArtifactsBeyond /
+//     cleanupStaleReplaceArtifacts 既有链路处理。
 func splitArtifactCleanupPlan(record *assetSplitRecord, currentTarget, currentStem, currentOutDir string) (dir, excludeStem string, ok bool) {
 	if record == nil {
 		return "", "", false
@@ -1426,7 +1468,9 @@ func isSplitArtifactAfterSplitAt(path, splitAt string) bool {
 // 调用点均在拆分成功之后（源落点核心返回成功后、replace 删源前），失败与取消
 // 路径不触达，上一次拆分成果原样保留。
 //
-// 删除成功才收集路径并批量删索引行；删除失败仅告警继续（残留由下次重拆收敛）。
+// 删除失败先重试一次（50ms 间隔，removeSplitArtifactFile），仍失败仅告警继续并
+// 明确残留需人工清理——本次重拆后记录主干/落点已被新值覆盖，残留页不再被任何
+// 记录引用，下次重拆不会自动收敛（勿误称「下次重拆收敛」）。
 // 目录删空后尝试删除（不存在/非空静默——目录内用户自建内容一律不动）。
 func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, excludeStem string) {
 	if record == nil || dir == "" || record.pageCount <= 0 {
@@ -1504,8 +1548,8 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 				"libraryId", lib.ID, "path", hit, "splitAt", record.splitAt)
 			continue
 		}
-		if rmErr := os.Remove(hit); rmErr != nil && !os.IsNotExist(rmErr) {
-			Logger().Warn("删除改名重链前的旧拆分产物失败（下次重拆收敛）",
+		if rmErr := removeSplitArtifactFile(hit); rmErr != nil {
+			Logger().Warn("删除旧拆分产物失败（残留需人工清理，本次重拆不再自动收敛）",
 				"libraryId", lib.ID, "path", hit, "err", rmErr)
 			continue
 		}
@@ -1593,22 +1637,45 @@ func pageSeqFromArtifactName(name string) int {
 //   - 核心中间态：<源名主干>-<纯数字>.pptx（核心原生命名，rename 前）；
 //   - 已改名：<纯数字>-<名字主干>.pptx（replaceArtifactName 产物）。
 //
+// 前缀/后缀判定**大小写不敏感**：Windows NTFS 保留大小写但不敏感，用户把源文件
+// 仅改大小写（abc.pptx → Abc.pptx）后重拆，上次产物 `001-abc.pptx` 与本次目标
+// `001-Abc.pptx` 是同一物理文件——按敏感比较会把它判为「非历史产物」并因
+// fileExists 为真而永久回滚失败（2026-11-02 修复）。切片仍按原始串长度取页序段，
+// 返回值语义不变；snapshotReplaceArtifactNames / firstReplaceArtifactName 随之受益。
+//
 // 回滚与重拆清旧页共用本判定；目录内其余内容（用户自建文件、草稿等）不动。
 func isReplaceArtifactName(name, base string) bool {
-	if strings.HasPrefix(name, base+"-") && strings.HasSuffix(name, ".pptx") {
-		// 核心中间态：中间段为纯数字
-		seq := strings.TrimSuffix(strings.TrimPrefix(name, base+"-"), ".pptx")
+	const ext = ".pptx"
+	// 核心中间态：<源名主干>-<纯数字>.pptx（至少一位页序）
+	if len(name) > len(base)+len(ext)+1 &&
+		strings.EqualFold(name[:len(base)], base) && name[len(base)] == '-' &&
+		strings.EqualFold(name[len(name)-len(ext):], ext) {
+		seq := name[len(base)+1 : len(name)-len(ext)]
 		if isAllDigits(seq) {
 			return true
 		}
 	}
 	// 已改名形态：<纯数字>-<名字主干>.pptx
-	suffix := "-" + replaceArtifactBase(base) + ".pptx"
-	if strings.HasSuffix(name, suffix) {
-		seq := strings.TrimSuffix(name, suffix)
+	suffix := "-" + replaceArtifactBase(base) + ext
+	if len(name) > len(suffix) && strings.EqualFold(name[len(name)-len(suffix):], suffix) {
+		seq := name[:len(name)-len(suffix)]
 		return isAllDigits(seq)
 	}
 	return false
+}
+
+// foldNameInSet 大小写不敏感集合成员判定，返回命中的实际键。Windows 上仅大小写
+// 差异的文件名指同一物理文件，按实际名（而非查询名）构造路径才能定位到磁盘对象。
+func foldNameInSet(set map[string]struct{}, name string) (string, bool) {
+	if _, ok := set[name]; ok {
+		return name, true
+	}
+	for k := range set {
+		if strings.EqualFold(k, name) {
+			return k, true
+		}
+	}
+	return "", false
 }
 
 // firstReplaceArtifactName 目录内第一个匹配产物命名形态的文件名（无则空串）。
@@ -1654,7 +1721,17 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 	}
 	stale := make([]string, 0, len(oldArtifacts))
 	for name := range oldArtifacts {
-		if _, keep := newNames[name]; keep {
+		// 大小写不敏感比对：Windows 上旧产物 `001-abc.pptx` 与本次新页
+		// `001-Abc.pptx` 是同一物理文件，精确比对会把它当陈旧页删除（删掉的
+		// 正是刚生成的新页）。
+		if kept, keep := foldNameInSet(newNames, name); keep {
+			if kept != name {
+				// 仅大小写差异：物理文件已由本次新页覆盖（旧文件先备份再让位），
+				// 旧索引行（路径大小写与磁盘实际名不同）须一并删除——保留它下次
+				// 扫描按磁盘实际名匹配不上，会标成幽灵 lost 行且标注挂在不可见行
+				// 上（2026-11-02）。只删行不删文件：Windows 上旧路径仍解析到新页。
+				stale = append(stale, filepath.Join(outDir, name))
+			}
 			continue
 		}
 		p := filepath.Join(outDir, name)
@@ -1768,6 +1845,36 @@ func isReplaceArtifactNameAnyStem(name string) bool {
 		return false
 	}
 	return isAllDigits(stem[:idx])
+}
+
+// resolveExistingDirCase 把目录路径归一为磁盘上的实际条目名大小写：父目录下与
+// 路径基名大小写不敏感相等且唯一的目录条目即目标（Windows NTFS 保留创建时的大小写，
+// 后续按不同大小写访问不会改写磁盘名）。用于重拆落点：源文件仅改大小写后由当前
+// 文件名推导的落点大小写与磁盘既有目录不一致，索引相对路径会随之漂移。
+//
+// 读取失败、无命中或多命中（大小写敏感目录标志开启时 abc 与 Abc 可并存）一律返回
+// 原值——不可判定时不冒险改选目录。
+func resolveExistingDirCase(dir string) string {
+	parent := filepath.Dir(dir)
+	want := filepath.Base(dir)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return dir
+	}
+	hit := ""
+	for _, e := range entries {
+		if !e.IsDir() || !strings.EqualFold(e.Name(), want) {
+			continue
+		}
+		if hit != "" {
+			return dir
+		}
+		hit = e.Name()
+	}
+	if hit == "" || hit == want {
+		return dir
+	}
+	return filepath.Join(parent, hit)
 }
 
 // samePathFold 绝对路径等价判定：Clean 后等值即相同；Windows 文件系统大小写
