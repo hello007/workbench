@@ -1,0 +1,3 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对豁免与碰撞说明已写入且无自相矛盾"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对测试变更不降低覆盖率门禁"}
+{"file": "CLAUDE.md", "reason": "核对新增规则行 ≤250 字符且范围准确"}

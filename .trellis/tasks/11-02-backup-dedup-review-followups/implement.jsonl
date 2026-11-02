@@ -1,0 +1,4 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "损坏留底命名契约与原子写豁免口径的落地位置"}
+{"file": "docs/spec/test-stability.md", "reason": "备份命名断言禁时间依赖的既有口径"}
+{"file": "util/backup.go", "reason": "被守护实现的摘要长度与命名格式"}
+{"file": "CLAUDE.md", "reason": "关键规则行两档上限与适用范围表述"}

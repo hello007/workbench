@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,14 @@ func TestBackupCorruptFile_SameContentSingleBackup(t *testing.T) {
 	}
 	if !strings.HasPrefix(matches[0], src+".bak.") {
 		t.Errorf("备份文件命名异常: %q", matches[0])
+	}
+	// 摘要格式守护：文件名必须以下 12 位小写 hex 内容摘要结尾，防止实现
+	// 退化回时间戳命名或其他非摘要后缀而测试仍通过。
+	digestSuffix := regexp.MustCompile(`\.bak\.[0-9a-f]{12}$`)
+	for _, p := range []string{first, matches[0]} {
+		if !digestSuffix.MatchString(p) {
+			t.Errorf("备份名应以 12 位小写 hex 内容摘要结尾: %q", p)
+		}
 	}
 
 	got, err := os.ReadFile(matches[0])
@@ -76,13 +85,19 @@ func TestBackupCorruptFile_DifferentContentTwice(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("不同内容应各留一份备份, got %v", matches)
 	}
-	for _, p := range matches {
+	// 按路径映射断言：pathA 必须等于 rawA、pathB 必须等于 rawB。
+	// 若只断言「内容与任一原文一致」，实现把 A/B 内容互换也能通过，判别力不足。
+	wantByPath := map[string][]byte{
+		pathA: rawA,
+		pathB: rawB,
+	}
+	for p, want := range wantByPath {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatalf("read %q: %v", p, err)
 		}
-		if !bytes.Equal(data, rawA) && !bytes.Equal(data, rawB) {
-			t.Errorf("备份 %q 内容与任一原文都不一致: %q", p, data)
+		if !bytes.Equal(data, want) {
+			t.Errorf("备份 %q 内容与对应原文不一致: got %q want %q", p, data, want)
 		}
 	}
 }
@@ -102,6 +117,11 @@ func TestBackupCorruptFile_EmptyRaw(t *testing.T) {
 	}
 	if info.Size() != 0 {
 		t.Errorf("空内容备份大小应为 0, got %d", info.Size())
+	}
+	// 空内容对应 SHA-256 空串固定摘要 e3b0c44298fc（前 12 位），把 spec 的
+	// 固定摘要口径落成测试守护。
+	if !strings.HasSuffix(p, ".bak.e3b0c44298fc") {
+		t.Errorf("空内容备份名应以固定摘要结尾, got %q", p)
 	}
 }
 
