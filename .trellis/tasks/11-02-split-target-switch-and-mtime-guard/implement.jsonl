@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "§9.5 旧产物清理判定面与三落点语义、§9.7 测试要求，本任务改落点一致性与 mtime 守卫"}
+{"file": "docs/spec/assets-management.md", "reason": "§11.3 split_records 键迁移与目录搬迁；落点切换清理不得与既有迁移口径冲突"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁 service ≥76%，新增分支须补测"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增守卫与跳过的日志级别口径（不产生噪音）"}

@@ -424,6 +424,10 @@ func TestAssetSplitReplace_SourceDeleteFailureRecordsOwnershipAndRetries(t *test
 	if recErr != nil || rec == nil || rec.target != model.AssetSplitTargetReplace || rec.sourceRemoved {
 		t.Fatalf("删源失败应补写 target=replace/source_removed=0 记录，实际 rec=%+v err=%v", rec, recErr)
 	}
+	if rec.artifactStem != replaceArtifactBase("删源") {
+		t.Errorf("删源失败补写记录同样须持久化产物主干 %q，实际 %q",
+			replaceArtifactBase("删源"), rec.artifactStem)
+	}
 	for _, name := range []string{"001-删源.pptx", "002-删源.pptx"} {
 		if _, statErr := os.Stat(filepath.Join(dir, "删源", name)); statErr != nil {
 			t.Fatalf("删源失败产物应保留：%s（%v）", name, statErr)

@@ -193,6 +193,10 @@ func TestAssetSplitReplace_Success(t *testing.T) {
 		record.pageCount != 3 || record.outputDir != wantDir {
 		t.Errorf("拆分记录不符：%+v", record)
 	}
+	// 记录持久化产物主干（v9 权威）：replace 落点 = replaceArtifactBase(源主干)。
+	if record.artifactStem != replaceArtifactBase("方案") {
+		t.Errorf("replace 记录产物主干应为 %q，实际 %q", replaceArtifactBase("方案"), record.artifactStem)
+	}
 }
 
 // TestAssetSplitReplace_MigratesAnnotations 标注迁移：源文件级星级/备注/标签
@@ -629,6 +633,11 @@ func TestAssetSplitReplace_NumericBaseNameAvoidsDerivativeExclusion(t *testing.T
 		if isPptxSplitDerivative(filepath.ToSlash(rel)) {
 			t.Errorf("产物 %s 不得命中拆分派生排除规则", name)
 		}
+	}
+	// 纯数字主干经 -p 后缀写入记录：缺失 -p 会让清理/重链探测锚点与产物不符
+	// （变异去掉 -p 时本断言变红）。
+	if rec := splitRecordRowForTest(t, svc, lib.ID, "123.pptx"); rec == nil || rec.artifactStem != "123-p" {
+		t.Errorf("replace 数字主干记录应持久化「123-p」，实际 %+v", rec)
 	}
 }
 

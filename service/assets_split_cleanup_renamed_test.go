@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"workbench/model"
 	"workbench/util/testutil"
@@ -28,6 +29,22 @@ import (
 //     页数覆盖不参与选组），多候选输出 Warn；
 //   - 目录不存在/目录内无形态候选属正常路径，静默无操作；非不存在的读错误 Warn；
 //   - 失败路径（核心失败 / replace 回滚）不删旧产物（延迟清理契约）。
+
+// writeSplitArtifactAt 写入旧拆分产物并把 mtime 回拨到 splitAt 之前（产物在拆分
+// 成功后写入记录，mtime 恒早于 split_at）：清理侧 mtime 守卫据此判定「产物组」。
+// splitAt 解析失败时回拨 1 小时（仍早于当前时间，守卫按用户文件处理的风险可控）。
+// 期望被保留的用户文件继续用 testutil.WriteFile（mtime = now，晚于 split_at）。
+func writeSplitArtifactAt(t *testing.T, path, content, splitAt string) {
+	t.Helper()
+	testutil.WriteFile(t, path, content)
+	mtime := time.Now().Add(-time.Hour)
+	if ts, err := time.ParseInLocation("2006-01-02 15:04:05", splitAt, time.Local); err == nil {
+		mtime = ts.Add(-time.Minute)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("设置产物 mtime（%s）: %v", path, err)
+	}
+}
 
 // mustNotExist 断言路径不存在（已被清理）。
 func mustNotExist(t *testing.T, path string) {
@@ -91,8 +108,8 @@ func TestAssetSplit_SourceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	oldDir := filepath.Join(dir, "旧名")
 	oldPage1 := filepath.Join(oldDir, "旧名-001.pptx")
 	oldPage2 := filepath.Join(oldDir, "旧名-002.pptx")
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-10-30 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	draft := filepath.Join(oldDir, "旧名-草稿.pptx")
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧名.pptx", hash, oldDir, 2,
@@ -185,8 +202,8 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	oldDir := filepath.Join(dir, "缺页旧名")
 	oldPage2 := filepath.Join(oldDir, "缺页旧名-002.pptx")
 	oldPage3 := filepath.Join(oldDir, "缺页旧名-003.pptx")
-	testutil.WriteFile(t, oldPage2, "old-2")
-	testutil.WriteFile(t, oldPage3, "old-3")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
+	writeSplitArtifactAt(t, oldPage3, "old-3", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("缺页旧名.pptx", hash, oldDir, 3,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
 		false); err != nil {
@@ -251,7 +268,7 @@ func TestAssetSplit_SourceResplitMissingFirstPageCleaned(t *testing.T) {
 
 	oldDir := filepath.Join(dir, "缺二旧名")
 	oldPage2 := filepath.Join(oldDir, "缺二旧名-002.pptx")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("缺二旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
 		false); err != nil {
@@ -397,8 +414,8 @@ func TestAssetSplit_ReplaceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	oldDir := filepath.Join(dir, "旧替换")
 	oldPage1 := filepath.Join(oldDir, replaceArtifactName(1, "旧替换"))
 	oldPage2 := filepath.Join(oldDir, replaceArtifactName(2, "旧替换"))
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-10-30 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	draft := filepath.Join(oldDir, "旧替换-草稿.pptx")
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧替换.pptx", hash, oldDir, 2,
@@ -484,8 +501,8 @@ func TestAssetSplit_ReplaceResplitCleansOtherTargetOldArtifacts(t *testing.T) {
 	oldDir := filepath.Join(dir, "切换旧名")
 	oldPage1 := filepath.Join(oldDir, "切换旧名-001.pptx")
 	oldPage2 := filepath.Join(oldDir, "切换旧名-002.pptx")
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-10-30 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("切换旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
 		false); err != nil {
@@ -543,8 +560,8 @@ func TestAssetSplit_ReplaceRecycleFailureKeepsCleanedOldArtifacts(t *testing.T) 
 	oldDir := filepath.Join(dir, "旧替换名")
 	oldPage1 := filepath.Join(oldDir, replaceArtifactName(1, "旧替换名"))
 	oldPage2 := filepath.Join(oldDir, replaceArtifactName(2, "旧替换名"))
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-10-30 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("旧替换名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
 		false); err != nil {

@@ -28,7 +28,9 @@ func mustSplitSkipped(t *testing.T, res model.AssetSplitResult, err error) {
 
 // TestRelocateAssetFile_RenameKeepsSplitArtifactReachable 改名 + 移动重链后：
 // 记录键迁移、产物仍按旧主干定位——打开单页、导出 single_pptx_path、增量判定
-// 三条消费面全部有效（修复前产品名按新主干拼接，三者同时失效）。
+// 三条消费面全部有效（修复前产品名按新主干拼接，三者同时失效）。增量判定只比
+// target（不比较 output_dir）：重链后记录落点冻结旧目录、产物仍可经
+// splitArtifactPath 定位，故重拆入口应命中「已最新」跳过，不触发全量重拆。
 func TestRelocateAssetFile_RenameKeepsSplitArtifactReachable(t *testing.T) {
 	svc := newTestAssetService(t)
 	var opened []string
@@ -94,6 +96,9 @@ func TestRelocateAssetFile_RenameKeepsSplitArtifactReachable(t *testing.T) {
 
 	res, err := svc.SplitAssetFile(context.Background(), lib.ID, newRel, model.AssetSplitTargetSource)
 	mustSplitSkipped(t, res, err)
+	// 跳过不触发重拆与清理：旧产物仍在原目录，打开入口持续有效。
+	mustExist(t, wantArtifact)
+	mustExist(t, filepath.Join(outDir, "旧名-002.pptx"))
 }
 
 // TestRelocateAssetFile_RenameReplaceArtifactStillFiltered replace 记录改名重链后，

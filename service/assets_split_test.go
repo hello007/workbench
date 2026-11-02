@@ -381,6 +381,11 @@ func TestAssetSplit_SingleFileDerivedLayout(t *testing.T) {
 	if !view.Exists || view.PageCount != 2 || view.OutputDir != wantDir || view.SplitAt == "" || !view.UpToDate {
 		t.Errorf("拆分记录视图不符：%+v", view)
 	}
+	// 记录持久化产物主干（v9 权威）：cache 落点 = 源文件名主干，禁为空（变异为空
+	// 会让清理侧回落目录启发式，失去产物组锚定）。
+	if rec := splitRecordRowForTest(t, svc, lib.ID, "材料.pptx"); rec == nil || rec.artifactStem != "材料" {
+		t.Errorf("cache 落点记录应持久化产物主干「材料」，实际 %+v", rec)
+	}
 	// 未拆分文件：Exists=false 零值（relPath 相对形态清洗后按「不存在.pptx」查询）
 	empty, err := svc.GetAssetSplitRecord(lib.ID, "子目录/../不存在.pptx")
 	if err != nil {
@@ -481,6 +486,10 @@ func TestAssetSplit_SourceDirLayout(t *testing.T) {
 	// 落点在库根内：产物布局为拆分派生形态，扫描排除判定必须命中（防重复索引）
 	if !isPptxSplitDerivative("演讲/演讲-001.pptx") {
 		t.Error("源目录落点产物应被 isPptxSplitDerivative 排除")
+	}
+	// 记录持久化产物主干（v9 权威）：source 落点 = 源文件名主干。
+	if rec := splitRecordRowForTest(t, svc, lib.ID, "演讲.pptx"); rec == nil || rec.artifactStem != "演讲" {
+		t.Errorf("source 落点记录应持久化产物主干「演讲」，实际 %+v", rec)
 	}
 }
 

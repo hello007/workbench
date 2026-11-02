@@ -50,8 +50,8 @@ func TestAssetSplit_ReplaceNumericStemCleanedAfterRename(t *testing.T) {
 	if filepath.Base(oldPage1) != "001-123-p.pptx" {
 		t.Fatalf("前置：数字主干产物应为 001-123-p.pptx，实际 %s", filepath.Base(oldPage1))
 	}
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-11-02 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	// 记录持久化实际产物主干 "123-p"（不是目录基名 123）
 	if err := store.upsertSplitRecord("123.pptx", "stale-hash", oldDir, 2,
 		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "123-p", false); err != nil {
@@ -121,8 +121,8 @@ func TestAssetSplit_SourceResplitSameDirCleansOldStemKeepsNew(t *testing.T) {
 	outDir := filepath.Join(dir, "新名")
 	oldPage1 := filepath.Join(outDir, "旧名-001.pptx")
 	oldPage2 := filepath.Join(outDir, "旧名-002.pptx")
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-11-02 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	// 记录落点已指新目录（搬迁后态），主干仍是旧名；哈希置陈旧驱动重拆
 	if err := store.upsertSplitRecord("新名.pptx", "stale-hash", outDir, 2,
 		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "旧名", false); err != nil {
@@ -162,8 +162,8 @@ func TestAssetSplit_TargetSwitchCleansOldSourceArtifacts(t *testing.T) {
 	oldDir := filepath.Join(dir, "跨落点")
 	oldPage1 := filepath.Join(oldDir, "跨落点-001.pptx")
 	oldPage2 := filepath.Join(oldDir, "跨落点-002.pptx")
-	testutil.WriteFile(t, oldPage1, "old-1")
-	testutil.WriteFile(t, oldPage2, "old-2")
+	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-11-02 10:00:00")
+	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	if err := store.upsertSplitRecord("跨落点.pptx", "stale-hash", oldDir, 2,
 		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "跨落点", false); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
