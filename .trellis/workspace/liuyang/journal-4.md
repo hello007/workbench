@@ -801,3 +801,39 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 193: 审核剩余项总收口（4 子任务）
+
+**Date**: 2026-11-02
+**Task**: 审核剩余项总收口（4 子任务）
+**Branch**: `master`
+
+### Summary
+
+四个子任务独立实施：①还原前 schema 版本预检（verifySQLiteVersion，版本过新拒绝，防原库与备份双失）；②拆分落点目录归属校验（splitRecordByOutputDir + E_ASSETS_SPLIT_OUTPUT_CONFLICT 三处同步；splitArtifactPath 反查主干归属；导出记录补 artifact_stem）；③失败语义（source/cache 延迟清理旧页、replace 产物名大小写折叠 + 目录实际名归一 + 旧同形索引行清理、删除失败重试并如实提示）；④库外旧落点跳过索引行清理（relPathWithinRegion 单点，消除跨卷 Warn 噪音）。各子任务 trellis implement+check 后独立提交，全量测试与覆盖率 service 81.2% 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed3f1b1` | (see git log) |
+| `518ef7f` | (see git log) |
+| `2446ca7` | (see git log) |
+| `aaa2212` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
