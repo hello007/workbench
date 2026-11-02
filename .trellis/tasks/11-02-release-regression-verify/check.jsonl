@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对拆分/清理/指纹实现与规范一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 schema 迁移与备份还原契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与覆盖率门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无时间/环境外部状态依赖"}
