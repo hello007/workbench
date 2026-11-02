@@ -973,3 +973,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 198: 落实备份去重二次审核打磨
+
+**Date**: 2026-11-02
+**Task**: 落实备份去重二次审核打磨
+**Branch**: `master`
+
+### Summary
+
+同内容用例按 raw 计算摘要强绑定备份路径；异内容用例 map 改切片；spec 豁免仅限 BackupCorruptFile 并排除写前保险；碰撞面收窄到同一源文件。全量测试与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5940737` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
