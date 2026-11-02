@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 191
+- **Total Sessions**: 192
 - **Last Active**: 2026-11-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~770 | Active |
+| `journal-4.md` | ~803 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 192 | 2026-11-02 | 落点切换强制重拆与清理 mtime 守卫（审核剩余两点） | `87860af` | `master` |
 | 191 | 2026-11-02 | split_records 持久化产物主干（清理误删/漏清总收口） | `c7f5d58` | `master` |
 | 190 | 2026-11-01 | 旧产物清理改目录基名锚定（审核收口） | `887a1a6` | `master` |
 | 189 | 2026-11-01 | 重拆清理误删收口：旧目录唯一同页序用户文件 | `739d85c` | `master` |

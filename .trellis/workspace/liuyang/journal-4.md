@@ -768,3 +768,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 192: 落点切换强制重拆与清理 mtime 守卫（审核剩余两点）
+
+**Date**: 2026-11-02
+**Task**: 落点切换强制重拆与清理 mtime 守卫（审核剩余两点）
+**Branch**: `master`
+
+### Summary
+
+增量跳过判定加 target 一致性（仅比 target 不比 output_dir，改名重链仍跳过）；清理门控收敛 splitArtifactCleanupPlan 四分支（异目录/同目录跨 target/同目录改主干/普通重拆），excludeStem 精确匹配；删除候选加 mtime 守卫（晚于 split_at+2s 保留，Stat 失败保留）；三落点 artifact_stem 写值断言；新增落点切换双向、同目录 replace→source、mtime 守卫、决策单点、大小写改名用例；spec §9.5/§9.7 与 CLAUDE 行同步，全量测试与覆盖率 service 81.1% 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `87860af` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
