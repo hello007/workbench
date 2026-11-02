@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-02-replace/prd.md", "reason": "本任务需求、判定顺序、AC 与技术方案；实现须严格按步骤 5 插入点与失败语义执行。"}
+{"file": "docs/spec/pptx-split.md", "reason": "§9.3 就地替换删源安全时序（步骤 5 备份让位、回滚与备份残留契约）与 §9.5 schema v10 指纹归属判定口径。"}
+{"file": "docs/spec/assets-management.md", "reason": "§15.6 重拆清理与索引行收敛：v10 指纹 allow-list 与 replace 延迟清理语义，改动后需同步。"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖外部状态（mtime 时序/固定端口），新增用例须用临时目录与注入 fake。"}
