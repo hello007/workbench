@@ -163,6 +163,90 @@ func TestAssetSplit_OutputDirOwnershipSameSourceAllowed(t *testing.T) {
 	}
 }
 
+// TestAssetSplitReplace_OutputDirOwnershipConflict replace 落点归属复核（P2）：目录
+// 被另一源文件的 replace 记录占用（典型为改名重链后记录 output_dir 冻结旧目录，
+// 且该目录内产物已缺失）时，同目录新源的就地替换必须被拒绝——旧实现仅凭
+// ownsOutDir（本记录拥有目录）与 firstReplaceArtifactName（同形文件）判断，二者
+// 都不成立即放行，会覆盖/删除另一记录的产物。要求：拒绝且目录、源文件、索引行与
+// 记录集合零改动，核心拆分不被调用。
+func TestAssetSplitReplace_OutputDirOwnershipConflict(t *testing.T) {
+	svc := newTestAssetService(t)
+	root := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "replace 落点归属冲突库", root)
+
+	// B.pptx 的 replace 记录指向 A 目录（改名重链后落点冻结的形态），目录内仅有
+	// 用户自建内容（产物已缺失——正是旧检查无法发现归属的形态）。
+	buildAssetsPptx(t, root, "B.pptx", []assetsSlideSpec{{titlePh: "一", body: []string{"B 内容"}}})
+	mustScanLibrary(t, svc, lib.ID)
+	outDir := filepath.Join(root, "A")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("建占位目录: %v", err)
+	}
+	keep := filepath.Join(outDir, "keep.txt")
+	if err := os.WriteFile(keep, []byte("B-product"), 0644); err != nil {
+		t.Fatalf("写占位文件: %v", err)
+	}
+	store := svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord("B.pptx", "hash-b", outDir, 1,
+		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "B", true); err != nil {
+		t.Fatalf("写入 B 的 replace 记录: %v", err)
+	}
+
+	// 新的同名源 A.pptx（无自身记录），其 replace 落点恰为同一 A 目录
+	buildAssetsPptx(t, root, "A.pptx", []assetsSlideSpec{{titlePh: "新", body: []string{"新内容"}}})
+	mustScanLibrary(t, svc, lib.ID)
+	aID, aSize, aMtime, aStatus, aHash := filesRowForTest(t, svc, lib.ID, "A.pptx")
+
+	coreCalled := false
+	svc.splitCoreFn = func(ctx context.Context, srcPath string, onProgress func(done, total int)) (model.PptxSplitResult, error) {
+		coreCalled = true
+		return model.PptxSplitResult{}, errors.New("冲突时不应进入拆分核心")
+	}
+	svc.moveToRecycleBinFn = func(path string) error {
+		t.Errorf("冲突时不应移动源文件: %s", path)
+		return nil
+	}
+
+	_, err := svc.SplitAssetFile(context.Background(), lib.ID, "A.pptx", model.AssetSplitTargetReplace)
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeAssetsSplitOutputConflict {
+		t.Fatalf("落点被另一源文件占用应返回 %s，实际：%v", model.ErrCodeAssetsSplitOutputConflict, err)
+	}
+	if !strings.Contains(appErr.Message, "B.pptx") || !strings.Contains(appErr.Message, "占用") {
+		t.Errorf("错误文案应指明占用源文件与处理方式，实际：%s", appErr.Message)
+	}
+	if coreCalled {
+		t.Error("归属复核必须先于拆分核心（任何写入/覆盖动作之前）")
+	}
+
+	// 目录零改动：占位文件内容不变、无新增条目
+	if data, readErr := os.ReadFile(keep); readErr != nil || string(data) != "B-product" {
+		t.Errorf("占位文件应原样保留，实际 data=%q err=%v", data, readErr)
+	}
+	entries, readErr := os.ReadDir(outDir)
+	if readErr != nil || len(entries) != 1 {
+		t.Errorf("目录不应新增/删除任何文件，实际 %d 项（err=%v）", len(entries), readErr)
+	}
+
+	// 源文件与索引行零改动，A 未写记录，B 记录原样保留
+	if _, statErr := os.Stat(filepath.Join(root, "A.pptx")); statErr != nil {
+		t.Errorf("源文件应原样保留: %v", statErr)
+	}
+	id, size, mtimeNs, status, hash := filesRowForTest(t, svc, lib.ID, "A.pptx")
+	if id != aID || size != aSize || mtimeNs != aMtime || status != aStatus || hash != aHash {
+		t.Errorf("冲突后 A.pptx 索引行被改动：before(id=%d size=%d mtime=%d status=%s hash=%s) after(id=%d size=%d mtime=%d status=%s hash=%s)",
+			aID, aSize, aMtime, aStatus, aHash, id, size, mtimeNs, status, hash)
+	}
+	if aRec := splitRecordRowForTest(t, svc, lib.ID, "A.pptx"); aRec != nil {
+		t.Errorf("拒绝后不应写入 A 的拆分记录，实际 %+v", aRec)
+	}
+	rec := splitRecordRowForTest(t, svc, lib.ID, "B.pptx")
+	if rec == nil || !samePathFold(rec.outputDir, outDir) || rec.pageCount != 1 ||
+		rec.target != model.AssetSplitTargetReplace || rec.artifactStem != "B" {
+		t.Errorf("冲突后 B 的拆分记录应原样保留，实际 %+v", rec)
+	}
+}
+
 // TestSplitArtifactPath_StemMismatchNotAdopted 页序反查命中但主干不属于记录候选
 // （目录内只有另一源文件的 `笔记-001.pptx`）：不采纳反查结果，返回直拼路径且
 // 判定不存在——增量判定不会把他人的首页产物误当成本记录产物而跳过拆分。

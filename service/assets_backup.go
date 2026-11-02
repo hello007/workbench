@@ -300,10 +300,12 @@ func (s *AssetLibraryService) RestoreAssetLibrary(libraryID, backupFile string) 
 	if err := verifySQLiteIntegrity(absBackup); err != nil {
 		return fmt.Errorf("备份文件完整性校验未通过，当前索引未做改动: %w", err)
 	}
-	// 覆盖前预检备份库 schema 版本（零半态）：版本过新的备份若放行，os.Rename
-	// 消费备份文件后 withStore→migrate 才报「版本过新」，备份与原库双失且不可逆。
-	// 必须与完整性预检同阶段（rename 之前），任一失败当前索引与备份文件均保持原样。
-	if err := verifySQLiteVersion(absBackup); err != nil {
+	// 覆盖前预检备份库 schema（版本 + 核心表，零半态）：版本过新的备份若放行，
+	// os.Rename 消费备份文件后 withStore→migrate 才报「版本过新」，备份与原库双失
+	// 且不可逆；任意合法空 SQLite 版本号可能合法、无核心表，放行则还原后索引被
+	// 清空为 0 文件。必须与完整性预检同阶段（rename 之前），任一失败当前索引与
+	// 备份文件均保持原样。
+	if err := verifyBackupDatabase(absBackup); err != nil {
 		return err
 	}
 
@@ -412,11 +414,22 @@ func (s *AssetLibraryService) RestoreAssetLibrary(libraryID, backupFile string) 
 	return nil
 }
 
+// sqliteReadOnlyDSN 构造只读 SQLite 连接 URI（备份文件不属于任何在管连接，预检
+// 只读不写库：mode=ro 仅在 file: URI 下生效）。路径中的 %、?、# 在 file: URI 中
+// 会被当作转义前缀与查询分隔符——直接拼接时可能打开/校验到另一个文件（预检
+// 形同虚设），必须百分号编码。替换用 strings.NewReplacer 单趟完成，不会对新增
+// 的 %25 二次编码；先编码 % 的语义同样成立（%25 中的 % 不会被后续规则命中）。
+func sqliteReadOnlyDSN(path string) string {
+	escaped := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").
+		Replace(filepath.ToSlash(path))
+	return "file:" + escaped + "?mode=ro&_pragma=busy_timeout(5000)"
+}
+
 // verifySQLiteIntegrity 独立打开 SQLite 文件做 integrity_check（备份文件校验用，
 // 文件不属于任何在管连接）。校验完即关；损坏文件在首条查询上报错或返回非 ok 行。
+// DSN 走 sqliteReadOnlyDSN 单点（特殊字符路径编码与只读语义统一）。
 func verifySQLiteIntegrity(path string) error {
-	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
 	if err != nil {
 		return fmt.Errorf("打开备份文件失败: %w", err)
 	}
@@ -424,26 +437,45 @@ func verifySQLiteIntegrity(path string) error {
 	return (&assetsStore{db: db}).integrityCheck()
 }
 
-// verifySQLiteVersion 只读打开备份库读取 PRAGMA user_version（不触发迁移——pure
-// 读取，open 本身也不写库：mode=ro URI 参数须 DSN 以 "file:" 前缀才会被 SQLite
-// 识别）。版本高于当前支持时拒绝还原：调用方在 rename 覆盖前调用，命中错误时
-// 当前索引与备份文件均保持原样；放行则 rename 消费备份后 migrate 才报错，备份
-// 与原库双失不可逆（审核实测复现）。打开/查询失败按「无法校验」拒绝（安全侧）；
-// 版本过旧（< 当前）不拒绝，migrate 逐级升级属既有语义。
-func verifySQLiteVersion(path string) error {
-	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+// verifyBackupDatabase 备份库预检（还原覆盖前调用，零半态）：schema 版本 + 核心表
+// 存在性。只校验 user_version 不够——实测任意合法空 SQLite（user_version=0、无
+// 核心表）都能通过完整性与版本检查，放行后 rename 消费备份、还原把索引清空为 0
+// 文件（数据不可逆）。
+//
+// 校验项：
+//   - 打开/查询失败按「无法校验」拒绝（安全侧，不猜测放行）；
+//   - 版本高于当前支持时拒绝：调用方在 rename 覆盖前调用，命中错误时当前索引与
+//     备份文件均保持原样；放行则 rename 消费备份后 migrate 才报错，备份与原库双失
+//     不可逆（审核实测复现）。版本过旧（< 当前）不拒绝，migrate 逐级升级属既有语义；
+//   - 核心表（files / split_records）须同时存在，缺失说明不是素材库备份。
+func verifyBackupDatabase(path string) error {
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
 	if err != nil {
-		return fmt.Errorf("无法校验备份库版本: %w", err)
+		return fmt.Errorf("无法校验备份库: %w", err)
 	}
 	defer db.Close()
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("无法校验备份库版本: %w", err)
+		return fmt.Errorf("无法校验备份库: %w", err)
 	}
 	if version > assetsSchemaVersion {
 		return fmt.Errorf("备份库版本 v%d 高于当前支持的 v%d，请升级 WorkBench 后再还原（当前索引未改动）",
 			version, assetsSchemaVersion)
+	}
+	// 核心表存在性：sqlite_master 中 files 与 split_records 必须同时存在。空库或
+	// 其他应用的 SQLite 版本号可能合法，仅靠版本无法与素材库备份区分。
+	//
+	// 不误拒历史备份：split_records 自 schema v4 起（2026-10-14）就存在，而备份
+	// 功能自 v6 才随程序发布（2026-10-18）——程序产出的任何备份其 user_version
+	// 恒 ≥ v6，必含两张核心表。比 v2 更早的手工库文件不经备份入口，不属本预检面。
+	var coreTables int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'split_records')",
+	).Scan(&coreTables); err != nil {
+		return fmt.Errorf("无法校验备份库: %w", err)
+	}
+	if coreTables != 2 {
+		return fmt.Errorf("备份文件不是有效的素材库备份（缺少核心表），当前索引未做改动")
 	}
 	return nil
 }

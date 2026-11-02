@@ -91,6 +91,17 @@ type splitOutcome struct {
 	rolledBack bool
 }
 
+// outputDirConflictOutcome 落点目录被另一源文件的拆分记录占用时的统一失败结果
+// （source/cache 与 replace 两条链路共用单点，防错误码与文案漂移）。返回 failed
+// 状态而非 error：批量入口只填 Item.Code 并继续后续文件，单文件入口升格为
+// AppError 供前端按 warning 分流。调用方须保证在任何删除/写入动作之前命中。
+func outputDirConflictOutcome(rel string, occupied *assetSplitRecord) splitOutcome {
+	return splitOutcome{
+		rel: rel, status: model.AssetSplitStatusFailed, code: model.ErrCodeAssetsSplitOutputConflict,
+		message: fmt.Sprintf("该源文件的拆分产物目录已被另一源文件占用（%s），请先改名或移动后再拆分", occupied.sourceRelPath),
+	}
+}
+
 // normalizeSplitTarget 落点参数归一与校验单点（App 层传入的原样字符串）：
 // 空串兼容旧调用（后端归一 cache；素材面板前端弹窗默认传 replace）；非法值明确
 // 拒绝，避免静默落到意外的落点。
@@ -410,12 +421,7 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	if occupied, ownErr := store.splitRecordByOutputDir(outDir, rel); ownErr != nil {
 		return splitOutcome{rel: rel}, fmt.Errorf("读取拆分记录失败: %w", ownErr)
 	} else if occupied != nil {
-		// 失败结果 + code（而非 error）保持批量异常隔离：单文件入口升格为
-		// AppError 供前端按 warning 分流，批量入口只填 Item.Code 继续后续文件
-		return splitOutcome{
-			rel: rel, status: model.AssetSplitStatusFailed, code: model.ErrCodeAssetsSplitOutputConflict,
-			message: fmt.Sprintf("该源文件的拆分产物目录已被另一源文件占用（%s），请先改名或移动后再拆分", occupied.sourceRelPath),
-		}, nil
+		return outputDirConflictOutcome(rel, occupied), nil
 	}
 
 	// 3. 增量判定：记录命中 + 哈希一致 + 落点 target 一致 + 产物首页存在（四验）。
@@ -577,6 +583,21 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	}
 	if isReplaceArtifactOutput(absPath, replaceOutputs) {
 		return failed("该文件是上一次就地替换生成的单页拆分产物，不能再次拆分")
+	}
+
+	// 落点目录归属复核（P2 数据正确性，与 source/cache 链路共用 splitRecordByOutputDir
+	// 单点）：ownsOutDir 只证明「本记录 target=replace 且落点即为该目录」，无法发现
+	// 「旧记录指向该目录但产物已缺失」的形态——此时目录内是另一条记录（同目录新同名
+	// 源或改名重链后的记录）的产物，旧记录再次就地替换会按旧 pageCount 删掉它们
+	// （「无文件可覆盖、无数据丢失」的结论不完整）。文件名启发式
+	// firstReplaceArtifactName 同样只能看出「有同形文件」，看不出归属。故在任何
+	// 写入/覆盖动作之前以记录集为权威判定：命中其他源记录即拒绝，目录零改动；
+	// 同源记录由查询排除，ownsOutDir 分支语义不变（本记录拥有目录且无其他记录
+	// 同时占用时正常重拆放行；两条记录同指一目录属历史冲突数据，按拒绝处理）。
+	if occupied, ownErr := store.splitRecordByOutputDir(outDir, rel); ownErr != nil {
+		return splitOutcome{rel: rel}, fmt.Errorf("读取拆分记录失败: %w", ownErr)
+	} else if occupied != nil {
+		return outputDirConflictOutcome(rel, occupied), nil
 	}
 
 	// knownArtifacts 核心调用前的目录快照：回滚只删本次新增产物，目录内既有
