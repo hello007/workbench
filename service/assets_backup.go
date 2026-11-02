@@ -43,8 +43,9 @@ import (
 // 内注释）→ 关连接 → 删 -wal/-shm 残留 → os.Rename 覆盖 <id>.db（Windows 走
 // MoveFileEx REPLACE_EXISTING 直接覆盖，无需先 Remove——util/json.go
 // TestSaveJSON_OverwriteExisting 锚定语义）→ 惰性重开 + integrity_check 复验。
-// 备份文件本身在覆盖前预检完整性（零半态：损坏备份不动当前库），落库后复验一次
-// （覆盖前预检与落库之间理论无写窗口，复验为防呆闭环）。
+// 备份文件本身在覆盖前预检完整性 + schema 版本（零半态：损坏备份与版本过新备份
+// 均不动当前库），落库后复验一次（覆盖前预检与落库之间理论无写窗口，复验为防呆
+// 闭环；复验只报完整性——版本问题已在预检阶段拦下）。
 
 // assetBackupRetention 每库备份保留份数（超出淘汰最旧；默认值硬编码，配置化后批）。
 const assetBackupRetention = 5
@@ -299,6 +300,12 @@ func (s *AssetLibraryService) RestoreAssetLibrary(libraryID, backupFile string) 
 	if err := verifySQLiteIntegrity(absBackup); err != nil {
 		return fmt.Errorf("备份文件完整性校验未通过，当前索引未做改动: %w", err)
 	}
+	// 覆盖前预检备份库 schema 版本（零半态）：版本过新的备份若放行，os.Rename
+	// 消费备份文件后 withStore→migrate 才报「版本过新」，备份与原库双失且不可逆。
+	// 必须与完整性预检同阶段（rename 之前），任一失败当前索引与备份文件均保持原样。
+	if err := verifySQLiteVersion(absBackup); err != nil {
+		return err
+	}
 
 	// 取消在途扫描（幂等）→ 阻塞等待扫描锁：取消信号在扫描文件间检查点生效，
 	// TryLock 会立即拒绝未退出的在途扫描，故走阻塞 Lock 等真正退出（还原窗口期
@@ -399,7 +406,7 @@ func (s *AssetLibraryService) RestoreAssetLibrary(libraryID, backupFile string) 
 	if err := s.withStore(libraryID, func(store *assetsStore) error {
 		return store.integrityCheck()
 	}); err != nil {
-		return fmt.Errorf("还原后完整性复验未通过，请尝试其他备份: %w", err)
+		return fmt.Errorf("还原后索引完整性复验未通过（版本问题已在预检阶段拦截），请尝试其他备份: %w", err)
 	}
 	Logger().Info("素材库还原完成", "libraryId", libraryID, "backup", filepath.Base(absBackup))
 	return nil
@@ -415,4 +422,28 @@ func verifySQLiteIntegrity(path string) error {
 	}
 	defer db.Close()
 	return (&assetsStore{db: db}).integrityCheck()
+}
+
+// verifySQLiteVersion 只读打开备份库读取 PRAGMA user_version（不触发迁移——pure
+// 读取，open 本身也不写库：mode=ro URI 参数须 DSN 以 "file:" 前缀才会被 SQLite
+// 识别）。版本高于当前支持时拒绝还原：调用方在 rename 覆盖前调用，命中错误时
+// 当前索引与备份文件均保持原样；放行则 rename 消费备份后 migrate 才报错，备份
+// 与原库双失不可逆（审核实测复现）。打开/查询失败按「无法校验」拒绝（安全侧）；
+// 版本过旧（< 当前）不拒绝，migrate 逐级升级属既有语义。
+func verifySQLiteVersion(path string) error {
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("无法校验备份库版本: %w", err)
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("无法校验备份库版本: %w", err)
+	}
+	if version > assetsSchemaVersion {
+		return fmt.Errorf("备份库版本 v%d 高于当前支持的 v%d，请升级 WorkBench 后再还原（当前索引未改动）",
+			version, assetsSchemaVersion)
+	}
+	return nil
 }

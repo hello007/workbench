@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "备份还原与 split_records 语义（§12.3/§12.4、§11.3），本子任务修改对应契约"}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分落点、清理判定与失败/取消契约（§9.3/§9.4/§9.5），本子任务改动点依据"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁 service ≥76%，新增分支须补测"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步与 slog 日志口径"}

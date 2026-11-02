@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "核对备份还原/拆分记录契约与实现一致"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对拆分落点与清理语义描述无漂移"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与覆盖率门禁"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码同步与告警级别"}

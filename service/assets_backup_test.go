@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -535,6 +537,134 @@ func TestRestoreAssetLibrary_Guards(t *testing.T) {
 
 	if err := svc.RestoreAssetLibrary("nonexistent", backup.Path); !errors.Is(err, errAssetLibraryNotFound) {
 		t.Errorf("库不存在应报 E_ASSETS_LIB_NOT_FOUND，实际：%v", err)
+	}
+}
+
+// TestRestoreAssetLibrary_RejectsNewerBackup 版本预检（P0 数据安全）：备份库
+// user_version 高于当前支持时拒绝还原，且当前索引与备份文件均保持原样。缺预检
+// 时 rename 先消费备份、withStore→migrate 才报「版本过新」，备份与原库双失不可逆。
+func TestRestoreAssetLibrary_RejectsNewerBackup(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "版本预检库", dir)
+	buildAssetsPptx(t, dir, "内容.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	mustScanIndex(t, svc, lib)
+
+	backup, err := svc.BackupAssetLibrary(lib.ID)
+	if err != nil {
+		t.Fatalf("备份: %v", err)
+	}
+
+	// 构造版本过新备份：直接把备份库 user_version 提到当前 +1（模拟高版本应用产出）
+	newer := assetsSchemaVersion + 1
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(backup.Path))
+	if err != nil {
+		t.Fatalf("打开备份库: %v", err)
+	}
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", newer)); err != nil {
+		_ = db.Close()
+		t.Fatalf("写入备份库版本: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭备份库: %v", err)
+	}
+
+	restoreErr := svc.RestoreAssetLibrary(lib.ID, backup.Path)
+	if restoreErr == nil {
+		t.Fatal("版本过新的备份应被拒绝还原")
+	}
+	if msg := restoreErr.Error(); !strings.Contains(msg, fmt.Sprintf("v%d", newer)) ||
+		!strings.Contains(msg, "升级 WorkBench") || !strings.Contains(msg, "当前索引未改动") {
+		t.Errorf("版本预检错误文案应含版本号与升级引导，实际：%v", restoreErr)
+	}
+
+	// 备份文件与当前索引均保持原样（版本预检须发生在 rename 之前）
+	if _, statErr := os.Stat(backup.Path); statErr != nil {
+		t.Errorf("备份文件应仍存在（未被 rename 消费）: %v", statErr)
+	}
+	if _, statErr := os.Stat(svc.libraryDBPath(lib.ID)); statErr != nil {
+		t.Errorf("当前索引文件应仍存在: %v", statErr)
+	}
+	files, err := svc.ListFiles(lib.ID)
+	if err != nil || len(files) != 1 || files[0].Path != "内容.pptx" {
+		t.Errorf("拒绝后当前索引记录应仍可读，实际：%+v（err=%v）", files, err)
+	}
+}
+
+// TestRestoreAssetLibrary_PreservesArtifactStem 正常版本备份还原成功且 v9 新列
+// artifact_stem 随备份原样回退（备份为整库 db 快照，新列不因还原丢失）。
+func TestRestoreAssetLibrary_PreservesArtifactStem(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "还原新列库", dir)
+	buildAssetsPptx(t, dir, "内容.pptx", []assetsSlideSpec{{titlePh: "标题", body: []string{"正文"}}})
+	mustScanIndex(t, svc, lib)
+
+	const rel = "内容.pptx"
+	outDir := filepath.Join(svc.assetsDir, "derived", "内容")
+	store := svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord(rel, "hash-a", outDir, 2,
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "内容", false); err != nil {
+		t.Fatalf("写入备份时点拆分记录: %v", err)
+	}
+
+	backup, err := svc.BackupAssetLibrary(lib.ID)
+	if err != nil {
+		t.Fatalf("备份: %v", err)
+	}
+
+	// 备份后改写记录（主干/落点均变化），还原应回退到备份时点
+	store = svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord(rel, "hash-b", outDir+"-changed", 9,
+		"2026-11-02 11:00:00", model.AssetSplitTargetReplace, "改后主干", true); err != nil {
+		t.Fatalf("备份后改写拆分记录: %v", err)
+	}
+
+	if err := svc.RestoreAssetLibrary(lib.ID, backup.Path); err != nil {
+		t.Fatalf("正常版本备份还原应成功: %v", err)
+	}
+
+	store = svc.openStoreForTest(t, lib.ID)
+	record, err := store.getSplitRecord(rel)
+	if err != nil || record == nil {
+		t.Fatalf("还原后拆分记录应存在: record=%+v err=%v", record, err)
+	}
+	if record.artifactStem != "内容" || record.pageCount != 2 ||
+		record.target != model.AssetSplitTargetSource || record.sourceRemoved {
+		t.Errorf("v9 新列与落点字段应随备份回退，实际：%+v", record)
+	}
+}
+
+// TestVerifySQLiteVersion 版本预检单元边界：等于当前版本与过旧版本放行（migrate
+// 逐级升级属既有语义），非 SQLite 文件按「无法校验」拒绝（安全侧，不猜测放行）。
+func TestVerifySQLiteVersion(t *testing.T) {
+	dir := t.TempDir()
+
+	// 非 SQLite 文件：读取失败拒绝（安全侧）
+	bogus := filepath.Join(dir, "bogus.db")
+	if err := os.WriteFile(bogus, []byte("not a sqlite database"), 0o600); err != nil {
+		t.Fatalf("写入伪库文件: %v", err)
+	}
+	if err := verifySQLiteVersion(bogus); err == nil || !strings.Contains(err.Error(), "无法校验备份库版本") {
+		t.Errorf("非 SQLite 文件应按无法校验拒绝，实际：%v", err)
+	}
+
+	for _, version := range []int{assetsSchemaVersion - 1, assetsSchemaVersion} {
+		path := filepath.Join(dir, fmt.Sprintf("v%d.db", version))
+		db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+		if err != nil {
+			t.Fatalf("建库 v%d: %v", version, err)
+		}
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+			_ = db.Close()
+			t.Fatalf("写 user_version v%d: %v", version, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("关闭 v%d 库: %v", version, err)
+		}
+		if err := verifySQLiteVersion(path); err != nil {
+			t.Errorf("v%d（<= 当前 v%d）应放行，实际：%v", version, assetsSchemaVersion, err)
+		}
 	}
 }
 
