@@ -857,6 +857,7 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 
 | Hash | Message |
 |------|---------|
+| `747b045` | fix(assets): 文件名大小写折叠统一加 Windows 平台守卫 |
 | `95eb3d4` | (see git log) |
 | `1613408` | (see git log) |
 | `f847cc9` | (see git log) |
