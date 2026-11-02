@@ -1072,3 +1072,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 201: replace 备份让位前的产物指纹校验
+
+**Date**: 2026-11-02
+**Task**: replace 备份让位前的产物指纹校验
+**Branch**: `master`
+
+### Summary
+
+splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增加 v10 指纹归属校验（fingerprintForName + fingerprintMatch，按磁盘实际名、仅 Windows 折叠）；不符/无条目按「目标已存在且不属于历史拆分产物」拒绝并回滚，指纹缺失回落现行按名认定。新增 7 个用例覆盖用户同名改内容、旧产物未变、指纹缺失、缺页/多命中不可判定、平台大小写与回滚无 .replace-bak 残留；同步 pptx-split.md §9.3/§9.5/§9.7、assets-management.md §15.6 与 CLAUDE.md 关键规则。go test ./... 与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d69e832` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

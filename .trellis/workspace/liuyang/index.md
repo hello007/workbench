@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 200
+- **Total Sessions**: 201
 - **Last Active**: 2026-11-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1074 | Active |
+| `journal-4.md` | ~1107 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 201 | 2026-11-02 | replace 备份让位前的产物指纹校验 | `d69e832` | `master` |
 | 200 | 2026-11-02 | 归档父任务：交付前回归与遗留收口 | `9a46d1e` | `master` |
 | 199 | 2026-11-02 | 拆分产物页级指纹（schema v10） | `9a46d1e` | `master` |
 | 198 | 2026-11-02 | 落实备份去重二次审核打磨 | `5940737` | `master` |
