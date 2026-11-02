@@ -76,6 +76,7 @@ workbench/
 |测试禁隐式依赖环境外部状态：mtime 时序与固定端口（本机常驻 workbench.exe 监听 36115）均致偶发挂；web serve 启动测试注入随机端口（`:0`），能直绑 :0 禁新增 freePort 探测；mtime 判定用注入陈旧缓存驱动，禁 sleep 等待|[test-stability.md](docs/spec/test-stability.md)|
 |统计类聚合缓存复用 `commitHistoryCacheKey` 键与 headSHA+TTL 判定，失效为二态；须在 `InvalidateCommitHistoryCache` 与 `ClearAllCommitHistoryCache` **两入口联动清除**，漏联动则行数与提交数口径漂移|[perf-baseline.md §18](docs/spec/perf-baseline.md)|
 |data/ 目录 JSON 持久化必须走 `util.SaveJSON` 原子写，**禁新增 os.WriteFile 直写与自建 temp+rename**（已收敛委托）；崩溃残留 `.tmp-*` 点文件无害不自动清扫；原子写不解决整体覆盖丢数据，手改 data 文件前须关 workbench.exe|[data-atomic-write.md](docs/spec/data-atomic-write.md)|
+|损坏文件留底备份统一走 `util.BackupCorruptFile`（`<路径>.bak.<SHA-256 前 12 位>`）：同内容恒一份、异内容各一份；**禁时间戳命名**（跨秒重复读取致备份无上限），测试可断言「恰好 1 份」|[data-atomic-write.md](docs/spec/data-atomic-write.md)|
 |soak/泄漏三档轮次（`-soak-rounds` > `-short` > 默认档）；泄漏断言=双 `runtime.GC()` 后 heap 增量（service 8MB/主包 16MB）+ goroutine Δ≤2，辅助收敛 `util/testutil/soak.go`；goleak 仅 service 两档（Short 跳过/其余 VerifyTestMain 硬门禁）；带 goroutine 测试辅助必须 Cleanup 全链；两包同名 flag 分开传|[perf-baseline.md 第 13/14 节](docs/spec/perf-baseline.md)|
 |文件树单层超 2000 截断（`utils/treeTruncate.js`）：截前 2000+哨兵节点（`truncation-hint`，NUL 合成 key）；**哨兵过滤面**：不选中/不弹右键/快捷键过滤/expandAll 兼容；覆盖层右键复用 `onNodeContextMenu`，rename/delete 走 `refreshAfterFilterOp`；paste/create/copyTo 经 `refreshAfterFileOp` 出口分流；渲染脚本依赖 `.truncation-hint-node` class|[perf-baseline.md §15.6](docs/spec/perf-baseline.md)|
 |FileDiffDialog 关闭释放双时机：清空挂 `@closed`（渐隐期挂 watch 闪空）+ `loadSeq++` 复位挂关闭即时 watch；新增状态字段同步 `releaseDiffData` 清理；`getCurrentNode()` 返回 data 对象非 Node 实例|[perf-baseline.md §16.5](docs/spec/perf-baseline.md)|
@@ -172,5 +173,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-10-29
-**文档版本：** v2.42
+**最后更新：** 2026-11-02
+**文档版本：** v2.43

@@ -55,9 +55,9 @@ func (s *ChatService) loadTemplatesIndex() (*chatTemplateIndex, error) {
 	if err == nil {
 		return idx, nil
 	}
-	bakPath := s.templatesPath() + ".bak." + time.Now().Format("20060102-150405")
 	if raw != nil {
-		_ = os.WriteFile(bakPath, raw, 0o644)
+		// 按内容摘要留底：同一份损坏内容反复读取只保留一份备份
+		_, _ = util.BackupCorruptFile(s.templatesPath(), raw)
 	}
 	Logger().Warn("chat template index corrupt, fallback to empty index",
 		"path", s.templatesPath(), "err", err)

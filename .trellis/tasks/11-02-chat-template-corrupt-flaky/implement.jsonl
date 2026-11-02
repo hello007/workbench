@@ -1,5 +1,4 @@
-{"file": "docs/spec/pptx-split.md", "reason": "拆分产物、清理判定与指纹一致的规范依据"}
-{"file": "docs/spec/assets-management.md", "reason": "split_records schema 迁移、备份还原与目录迁移契约"}
-{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁与测试要求"}
-{"file": "docs/spec/logging-and-errors.md", "reason": "日志/错误码与测试时序相关口径"}
-{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖外部状态（时间/端口），偶发用例修复依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖时间戳时序，本次修复根因与断言收紧依据"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/ JSON 写入与 .bak 备份边界约定"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "损坏降级须 slog.Warn 记录根因的口径"}
+{"file": ".trellis/tasks/11-02-chat-template-corrupt-flaky/research/backup-naming.md", "reason": "缺陷证据、方案对比与实施口径"}

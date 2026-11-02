@@ -1,4 +1,4 @@
-{"file": "docs/spec/pptx-split.md", "reason": "核对拆分/清理/指纹实现与规范一致"}
-{"file": "docs/spec/assets-management.md", "reason": "核对 schema 迁移与备份还原契约"}
-{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与覆盖率门禁"}
-{"file": "docs/spec/test-stability.md", "reason": "核对测试无时间/环境外部状态依赖"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无时间依赖且断言仍有回归捕获力"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 util/service 覆盖率门禁"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对备份写入未破坏原子写主数据契约"}
+{"file": ".trellis/tasks/11-02-chat-template-corrupt-flaky/research/backup-naming.md", "reason": "核对实现与调研结论一致"}

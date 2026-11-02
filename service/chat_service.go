@@ -58,7 +58,8 @@ func newChatTaskID() string {
 // saveChatJSON 原子写 ChatService 域 JSON 文件：把现有旧文件复制为 <目标>.bak
 // （保留上一好版本，替换后新文件若损坏仍有回退），原子核心（同目录 temp → fsync →
 // rename 原子替换）委托 util.SaveJSON——temp+rename 管道已全仓统一，此处不再自建。
-// .bak 为写侧保险，无加载方按精确路径消费（loadIndex 损坏时回空索引并另留时间戳留底）。
+// .bak 为写侧保险，无加载方按精确路径消费（loadIndex 损坏时回空索引并另留
+// 按内容摘要命名的损坏留底 <目标>.bak.<摘要>，见 util.BackupCorruptFile）。
 func saveChatJSON(filePath string, v interface{}) error {
 	// 覆写前备份上一好版本（当前文件不存在时跳过）
 	if old, rerr := os.ReadFile(filePath); rerr == nil {
@@ -296,9 +297,9 @@ func (s *ChatService) loadIndex() (*chatSessionIndex, error) {
 		return idx, nil
 	}
 	// 损坏：备份留底后回空索引（读错误与解析错误统一走此分支）
-	bakPath := s.indexPath() + ".bak." + time.Now().Format("20060102-150405")
 	if raw != nil {
-		_ = os.WriteFile(bakPath, raw, 0o644)
+		// 按内容摘要留底：同一份损坏内容反复读取只保留一份备份
+		_, _ = util.BackupCorruptFile(s.indexPath(), raw)
 	}
 	Logger().Warn("chat session index corrupt, fallback to empty index",
 		"path", s.indexPath(), "err", err)
@@ -496,9 +497,9 @@ func (s *ChatService) loadDirectoriesIndex() (*chatDirectoryIndex, error) {
 	if err == nil {
 		return idx, nil
 	}
-	bakPath := s.directoriesPath() + ".bak." + time.Now().Format("20060102-150405")
 	if raw != nil {
-		_ = os.WriteFile(bakPath, raw, 0o644)
+		// 按内容摘要留底：同一份损坏内容反复读取只保留一份备份
+		_, _ = util.BackupCorruptFile(s.directoriesPath(), raw)
 	}
 	Logger().Warn("chat directory index corrupt, fallback to empty index",
 		"path", s.directoriesPath(), "err", err)
@@ -698,7 +699,8 @@ func (s *ChatService) readMessages(sessionID string) ([]model.ChatMessage, error
 		// 消息损坏：备份留底后按空数组降级（对话历史不可恢复但功能可用）
 		Logger().Warn("chat messages file corrupt, fallback to empty",
 			"path", path, "err", err)
-		_ = os.WriteFile(path+".bak."+time.Now().Format("20060102-150405"), raw, 0o644)
+		// 按内容摘要留底：同一份损坏内容反复读取只保留一份备份
+		_, _ = util.BackupCorruptFile(path, raw)
 		return []model.ChatMessage{}, nil
 	}
 	if msgs == nil {

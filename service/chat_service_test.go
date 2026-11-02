@@ -491,14 +491,19 @@ func TestChatService_IndexCorruptFallback(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatalf("损坏索引应降级为空列表, got %v, %v", list, err)
 	}
+	assertBakFileCount(t, filepath.Join(dataDir, "sessions.json.bak.*"), 1, "首次读取损坏索引后")
+
+	// 同一份损坏内容重复读取按内容哈希复用同一备份，不会新增第二份
+	if _, err := svc.ListChatSessions(""); err != nil {
+		t.Fatalf("再次列出会话失败: %v", err)
+	}
+	assertBakFileCount(t, filepath.Join(dataDir, "sessions.json.bak.*"), 1, "同内容重复读取后")
+
 	// 降级后仍可正常创建（备份文件已生成）
 	if _, err := svc.CreateChatSession("d", "t", "c"); err != nil {
 		t.Fatalf("降级后创建会话失败: %v", err)
 	}
-	matches, _ := filepath.Glob(filepath.Join(dataDir, "sessions.json.bak.*"))
-	if len(matches) != 1 {
-		t.Errorf("损坏索引应留备份文件, got %v", matches)
-	}
+	assertBakFileCount(t, filepath.Join(dataDir, "sessions.json.bak.*"), 1, "降级后创建会话并落盘")
 }
 
 // ===== 参数组装 =====

@@ -374,10 +374,10 @@ func validateFunctions(funcs []*model.AiFunction) (valid []*model.AiFunction, in
 	return valid, invalidIDs
 }
 
-// backupConfig 将原配置备份为 ai_functions.json.bak.<timestamp>（校验失败留底，best effort）。
+// backupConfig 将原配置留底到 ai_functions.json.bak.<内容 SHA-256 前 12 位>
+// （校验失败留存现场，best effort）。同一份配置反复校验失败只保留一份备份。
 func (s *AiFunctionService) backupConfig(raw []byte) {
-	bakPath := s.configPath + ".bak." + time.Now().Format("20060102-150405")
-	if err := os.WriteFile(bakPath, raw, 0o644); err != nil {
+	if _, err := util.BackupCorruptFile(s.configPath, raw); err != nil {
 		fmt.Printf("配置备份失败（不阻断回种）: %v\n", err)
 	}
 }
