@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1216,14 +1217,21 @@ func TestDominantSplitArtifactStem_AmbiguousFoldNoExact(t *testing.T) {
 	}
 }
 
-// TestDominantSplitArtifactStem_SingleFoldHit 唯一折叠命中（Windows 大小写不敏感
-// 语义：目录名大小写变体与产物主干视为同一组）仍判为产物组。
+// TestDominantSplitArtifactStem_SingleFoldHit 唯一折叠命中：仅 Windows 下（文件
+// 系统大小写不敏感，目录名大小写变体与产物主干视为同一组）判为产物组；Linux/macOS
+// 大小写敏感，大小写变体是不同文件，折叠禁用不得误选用户组。
 func TestDominantSplitArtifactStem_SingleFoldHit(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "old")
 	byStem := map[string]map[int]bool{"Old": {1: true}}
 	stem, ok := dominantSplitArtifactStem(byStem, []string{filepath.Base(dir)})
-	if !ok || stem != "Old" {
-		t.Fatalf("唯一折叠命中应返回 Old，实际 (%q, %v)", stem, ok)
+	if runtime.GOOS == "windows" {
+		if !ok || stem != "Old" {
+			t.Fatalf("唯一折叠命中应返回 Old，实际 (%q, %v)", stem, ok)
+		}
+		return
+	}
+	if ok {
+		t.Fatalf("非 Windows 大小写敏感，折叠不应命中，实际返回 %q", stem)
 	}
 }
 

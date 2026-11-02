@@ -108,17 +108,22 @@ func TestAssetSplit_CacheCoreFailureKeepsOldArtifacts(t *testing.T) {
 	}
 }
 
-// TestResolveExistingDirCase 落点目录大小写归一：磁盘实际条目名唯一命中时返回
-// 实际形态；目录不存在返回原值；多命中（大小写敏感目录标志开启，仅非 Windows
-// 可构造）不可判定返回原值。
+// TestResolveExistingDirCase 落点目录大小写归一：仅 Windows 下磁盘实际条目名
+// 唯一折叠命中时返回实际形态；Linux/macOS 大小写敏感，大小写变体是不同目录，
+// 必须原样返回不读父目录。目录不存在恒原样返回。
 func TestResolveExistingDirCase(t *testing.T) {
 	root := t.TempDir()
 	actual := filepath.Join(root, "abc")
 	if err := os.MkdirAll(actual, 0755); err != nil {
 		t.Fatalf("建目录: %v", err)
 	}
-	if got := resolveExistingDirCase(filepath.Join(root, "Abc")); !samePathFold(got, actual) || got != actual {
-		t.Errorf("应归一为磁盘实际名 %q，实际 %q", actual, got)
+	variant := filepath.Join(root, "Abc")
+	if runtime.GOOS == "windows" {
+		if got := resolveExistingDirCase(variant); got != actual {
+			t.Errorf("Windows 应归一为磁盘实际名 %q，实际 %q", actual, got)
+		}
+	} else if got := resolveExistingDirCase(variant); got != variant {
+		t.Errorf("非 Windows 应原样返回 %q，实际 %q", variant, got)
 	}
 	if got := resolveExistingDirCase(actual); got != actual {
 		t.Errorf("大小写已一致时应原样返回，实际 %q", got)
@@ -127,14 +132,64 @@ func TestResolveExistingDirCase(t *testing.T) {
 	if got := resolveExistingDirCase(missing); got != missing {
 		t.Errorf("目录不存在时应原样返回，实际 %q", got)
 	}
-	if runtime.GOOS != "windows" {
-		// 大小写敏感文件系统上 abc 与 Abc 可并存，折叠命中 >1 视为不可判定
-		if err := os.MkdirAll(filepath.Join(root, "Abc"), 0755); err != nil {
-			t.Fatalf("建大小写变体目录: %v", err)
-		}
-		want := filepath.Join(root, "ABc")
-		if got := resolveExistingDirCase(want); got != want {
-			t.Errorf("折叠多命中时应原样返回 %q，实际 %q", want, got)
+}
+
+// TestResolveExistingDirCase_NonWindowsReturnsAsIs 非 Windows（大小写敏感）：
+// resolveExistingDirCase 直接返回原值，不把大小写变体目录折叠成磁盘实际名。
+func TestResolveExistingDirCase_NonWindowsReturnsAsIs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("仅非 Windows 大小写敏感文件系统覆盖")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "abc"), 0755); err != nil {
+		t.Fatalf("建目录: %v", err)
+	}
+	want := filepath.Join(root, "Abc")
+	if got := resolveExistingDirCase(want); got != want {
+		t.Errorf("非 Windows 应原样返回 %q，实际 %q", want, got)
+	}
+}
+
+// TestSameNameFold 文件名/目录名等价判定三态：精确相等恒真；不同名称恒假；仅
+// 大小写差异仅在 Windows 下折叠为真（Linux/macOS 是两个不同文件）。
+func TestSameNameFold(t *testing.T) {
+	if !sameNameFold("abc.pptx", "abc.pptx") {
+		t.Error("精确相等应为真")
+	}
+	if sameNameFold("abc.pptx", "other.pptx") {
+		t.Error("不同名称应为假")
+	}
+	wantFold := runtime.GOOS == "windows"
+	if got := sameNameFold("001-Abc.pptx", "001-abc.pptx"); got != wantFold {
+		t.Errorf("大小写变体 sameNameFold = %v, want %v（GOOS=%s）", got, wantFold, runtime.GOOS)
+	}
+}
+
+// TestFoldNameInSet 集合成员判定（表驱动）：精确命中恒真（返回原键）；不存在
+// 名称恒假；仅大小写差异仅在 Windows 下折叠命中，且返回集合中的实际键（供调用
+// 方按磁盘真实名定位）；Linux/macOS 大小写敏感不得命中。
+func TestFoldNameInSet(t *testing.T) {
+	set := map[string]struct{}{"001-abc.pptx": {}, "其它.txt": {}}
+	foldOK := runtime.GOOS == "windows"
+	foldKey := ""
+	if foldOK {
+		foldKey = "001-abc.pptx"
+	}
+	cases := []struct {
+		name    string
+		query   string
+		wantOK  bool
+		wantKey string
+	}{
+		{"精确命中返回原键", "001-abc.pptx", true, "001-abc.pptx"},
+		{"不存在名称不命中", "missing.pptx", false, ""},
+		{"大小写变体按平台折叠", "001-ABC.PPTX", foldOK, foldKey},
+	}
+	for _, tc := range cases {
+		got, ok := foldNameInSet(set, tc.query)
+		if ok != tc.wantOK || got != tc.wantKey {
+			t.Errorf("%s：foldNameInSet(%q) = (%q, %v), want (%q, %v)（GOOS=%s）",
+				tc.name, tc.query, got, ok, tc.wantKey, tc.wantOK, runtime.GOOS)
 		}
 	}
 }
@@ -232,45 +287,60 @@ func TestAssetSplit_ResplitPageIncreaseKeepsAll(t *testing.T) {
 	}
 }
 
-// TestIsReplaceArtifactName_CaseFold 前缀/后缀判定大小写不敏感：仅大小写差异的
-// 历史产物（001-Abc.pptx vs 主干 abc）与核心中间态（Abc-001.pptx）都须识别。
-func TestIsReplaceArtifactName_CaseFold(t *testing.T) {
-	cases := []struct {
-		name string
-		base string
-		want bool
-	}{
-		{"001-abc.pptx", "abc", true},
-		{"001-Abc.pptx", "abc", true},
-		{"001-abc.pptx", "Abc", true},
-		{"001-ABC.pptx", "abc", true},
-		{"Abc-001.pptx", "abc", true},
-		{"abc-001.pptx", "Abc", true},
-		{"001-abc.PPTX", "abc", true},
-		{"001-123-p.pptx", "123", true},
-		{"123-001.pptx", "123", true},
-		{"001-abc-extra.pptx", "abc", false},
-		{"abc-草稿.pptx", "abc", false},
-		{"说明.txt", "abc", false},
-		{"001-abc.pptx", "other", false},
+// TestIsReplaceArtifactName_PlatformFold 产物命名形态判定：精确形态全平台命中；
+// 仅大小写差异的变体（001-ABC.pptx vs 主干 abc、扩展名 .PPTX 等）仅 Windows
+// 折叠命中，Linux/macOS 是不同文件必须为假（否则误删用户文件）。
+func TestIsReplaceArtifactName_PlatformFold(t *testing.T) {
+	exact := []struct{ name, base string }{
+		{"001-abc.pptx", "abc"},
+		{"abc-001.pptx", "abc"},
+		{"001-123-p.pptx", "123"},
+		{"123-001.pptx", "123"},
 		// 多字节主干：切片按字节长度取，须与 rune 边界对齐不截半
-		{"001-讲义.pptx", "讲义", true},
-		{"讲义-001.pptx", "讲义", true},
-		{"讲义-001.PPTX", "讲义", true},
-		{"001-讲义-extra.pptx", "讲义", false},
-		{"讲义-草稿.pptx", "讲义", false},
-		{"讲义-001.pptx", "讲义A", false},
-		{"讲义A-001.pptx", "讲义", false},
+		{"001-讲义.pptx", "讲义"},
+		{"讲义-001.pptx", "讲义"},
 	}
-	for _, tc := range cases {
-		if got := isReplaceArtifactName(tc.name, tc.base); got != tc.want {
-			t.Errorf("isReplaceArtifactName(%q, %q) = %v, want %v", tc.name, tc.base, got, tc.want)
+	for _, tc := range exact {
+		if !isReplaceArtifactName(tc.name, tc.base) {
+			t.Errorf("精确形态 isReplaceArtifactName(%q, %q) 应命中", tc.name, tc.base)
+		}
+	}
+	wantFold := runtime.GOOS == "windows"
+	fold := []struct{ name, base string }{
+		{"001-ABC.pptx", "abc"},
+		{"001-Abc.pptx", "abc"},
+		{"001-abc.pptx", "Abc"},
+		{"Abc-001.pptx", "abc"},
+		{"abc-001.pptx", "Abc"},
+		{"001-abc.PPTX", "abc"},
+		{"讲义-001.PPTX", "讲义"},
+	}
+	for _, tc := range fold {
+		if got := isReplaceArtifactName(tc.name, tc.base); got != wantFold {
+			t.Errorf("折叠形态 isReplaceArtifactName(%q, %q) = %v, want %v（GOOS=%s）",
+				tc.name, tc.base, got, wantFold, runtime.GOOS)
+		}
+	}
+	negatives := []struct{ name, base string }{
+		{"001-abc-extra.pptx", "abc"},
+		{"abc-草稿.pptx", "abc"},
+		{"说明.txt", "abc"},
+		{"001-abc.pptx", "other"},
+		{"001-讲义-extra.pptx", "讲义"},
+		{"讲义-草稿.pptx", "讲义"},
+		{"讲义-001.pptx", "讲义A"},
+		{"讲义A-001.pptx", "讲义"},
+	}
+	for _, tc := range negatives {
+		if isReplaceArtifactName(tc.name, tc.base) {
+			t.Errorf("非产物形态 isReplaceArtifactName(%q, %q) 不应命中", tc.name, tc.base)
 		}
 	}
 }
 
-// TestSnapshotReplaceArtifactNames_CaseFold 目录快照随之大小写折叠：主干 Abc 时
-// 磁盘上的 001-abc.pptx / Abc-001.pptx 都计入历史产物，用户文件不计入。
+// TestSnapshotReplaceArtifactNames_CaseFold 目录快照：精确主干恒计入；仅大小写
+// 差异的旧产物仅 Windows 计入（折叠），Linux/macOS 是用户文件不计入；用户文件
+// 始终不计入。
 func TestSnapshotReplaceArtifactNames_CaseFold(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"001-abc.pptx", "Abc-002.pptx", "002-Abc.pptx", "说明.txt"} {
@@ -279,16 +349,22 @@ func TestSnapshotReplaceArtifactNames_CaseFold(t *testing.T) {
 		}
 	}
 	got := snapshotReplaceArtifactNames(dir, "Abc")
-	for _, n := range []string{"001-abc.pptx", "Abc-002.pptx", "002-Abc.pptx"} {
+	// 精确命中（主干 Abc）恒计入
+	for _, n := range []string{"Abc-002.pptx", "002-Abc.pptx"} {
 		if _, ok := got[n]; !ok {
-			t.Errorf("快照应折叠命中 %q，实际 %v", n, got)
+			t.Errorf("快照应精确命中 %q，实际 %v", n, got)
 		}
+	}
+	// 仅大小写差异（主干 abc vs Abc）：Windows 折叠计入，其余平台不计入
+	_, foldHit := got["001-abc.pptx"]
+	if want := runtime.GOOS == "windows"; foldHit != want {
+		t.Errorf("大小写变体快照命中 = %v, want %v（GOOS=%s）", foldHit, want, runtime.GOOS)
 	}
 	if _, ok := got["说明.txt"]; ok {
 		t.Errorf("用户文件不应计入历史产物：%v", got)
 	}
-	if _, hit := foldNameInSet(got, "001-ABC.PPTX"); !hit {
-		t.Error("foldNameInSet 应大小写不敏感命中")
+	if _, hit := foldNameInSet(got, "001-ABC.PPTX"); hit != (runtime.GOOS == "windows") {
+		t.Errorf("foldNameInSet 大小写变体命中 = %v（GOOS=%s）", hit, runtime.GOOS)
 	}
 }
 

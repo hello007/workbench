@@ -273,8 +273,9 @@ func TestIsSplitArtifactAfterSplitAt(t *testing.T) {
 }
 
 // TestSplitArtifactCleanupPlan 清理门控决策单点：异目录与同目录跨 target 均清理
-// （excludeStem 空）；同目录同 target 改主干（M1）以本次新主干排除；仅大小写
-// 差异视为同一主干不进入清理（新产物不被误删）；普通重拆与 nil 记录不清理。
+// （excludeStem 空）；同目录同 target 改主干（M1）以本次新主干排除；Windows 下
+// 仅大小写差异折叠视为同一主干不进入清理（新产物覆盖同名物理文件），非 Windows
+// 大小写敏感按不同主干清理旧组；普通重拆与 nil 记录不清理。
 func TestSplitArtifactCleanupPlan(t *testing.T) {
 	const outDir = `C:\lib\方案`
 	cases := []struct {
@@ -318,12 +319,6 @@ func TestSplitArtifactCleanupPlan(t *testing.T) {
 			wantExcl: "方案",
 		},
 		{
-			name:   "仅大小写差异视为同一主干不清理",
-			record: &assetSplitRecord{outputDir: outDir, target: model.AssetSplitTargetSource, artifactStem: "Abc"},
-			target: model.AssetSplitTargetSource,
-			stem:   "ABC",
-		},
-		{
 			name:   "同目录同 target 同主干不清理",
 			record: &assetSplitRecord{outputDir: outDir, target: model.AssetSplitTargetCache, artifactStem: "方案"},
 			target: model.AssetSplitTargetCache,
@@ -341,6 +336,20 @@ func TestSplitArtifactCleanupPlan(t *testing.T) {
 		if gotOK != tc.wantOK || gotDir != tc.wantDir || gotExcl != tc.wantExcl {
 			t.Errorf("%s：want (%q, %q, %v), got (%q, %q, %v)",
 				tc.name, tc.wantDir, tc.wantExcl, tc.wantOK, gotDir, gotExcl, gotOK)
+		}
+	}
+	// 仅大小写差异（Abc vs ABC）：折叠守卫按平台分流
+	rec := &assetSplitRecord{outputDir: outDir, target: model.AssetSplitTargetSource, artifactStem: "Abc"}
+	gotDir, gotExcl, gotOK := splitArtifactCleanupPlan(rec, model.AssetSplitTargetSource, "ABC", outDir)
+	if runtime.GOOS == "windows" {
+		// Windows：折叠相等视为同一主干，不清理（本次产物覆盖同名物理文件）
+		if gotOK {
+			t.Errorf("Windows 下仅大小写差异应视为同一主干不清理，got (%q, %q, %v)", gotDir, gotExcl, gotOK)
+		}
+	} else {
+		// Linux/macOS：大小写敏感，Abc 与 ABC 是不同主干，清理旧组并排除新主干
+		if !gotOK || gotDir != outDir || gotExcl != "ABC" {
+			t.Errorf("非 Windows 下大小写变体应按改主干清理，got (%q, %q, %v)", gotDir, gotExcl, gotOK)
 		}
 	}
 }

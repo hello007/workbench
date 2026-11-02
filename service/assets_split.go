@@ -1295,6 +1295,10 @@ func splitArtifactStemCandidates(record *assetSplitRecord, dir string) []string 
 
 // splitStemInCandidates 主干是否命中候选集合（精确或大小写折叠）——重链探测归属
 // 校验用（M2）：候选目录首页产物主干必须属于记录主干，否则该目录属于其他源文件。
+//
+// 折叠刻意不接 sameNameFold 平台守卫（本任务 Out of Scope）：输入 stem 均由
+// parseSplitArtifactName 从产物命名形态解析，属产物主干归属判定而非用户文件名
+// 身份判定；若后续发现用户可达的误采纳面，另立任务收口。
 func splitStemInCandidates(stem string, candidates []string) bool {
 	for _, cand := range candidates {
 		if stem == cand || strings.EqualFold(stem, cand) {
@@ -1321,10 +1325,11 @@ func splitStemGroupPresent(byStem map[string]map[int]bool, candidates []string) 
 }
 
 // dominantSplitArtifactStem 从目录内候选主干中选定产物组主干：按锚点候选集合
-// 精确匹配优先；无精确命中时才接受 EqualFold 唯一命中（Windows 文件系统大小写
-// 不敏感，主干大小写变体仍认作同一组）。折叠命中多于一个（大小写敏感文件系统上
-// `Old` 与 `old` 并存）视为不可判定——禁按 map 遍历顺序取首个，否则同一目录状态
-// 会随机选中用户文件组并误删。
+// 精确匹配优先；无精确命中时才接受 sameNameFold 唯一命中（仅 Windows 生效：
+// 文件系统大小写不敏感，主干大小写变体仍认作同一组；Linux/macOS 大小写敏感，
+// 折叠会把用户文件组误选为产物组并删除）。折叠命中多于一个（大小写敏感文件系统
+// 上 `Old` 与 `old` 并存）视为不可判定——禁按 map 遍历顺序取首个，否则同一目录
+// 状态会随机选中用户文件组并误删。
 func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []string) (string, bool) {
 	for _, anchor := range candidates {
 		if len(byStem[anchor]) > 0 {
@@ -1338,7 +1343,7 @@ func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []stri
 			continue
 		}
 		for _, anchor := range candidates {
-			if strings.EqualFold(stem, anchor) {
+			if sameNameFold(stem, anchor) {
 				foldStem, foldHits = stem, foldHits+1
 				break
 			}
@@ -1412,8 +1417,9 @@ func removeSplitArtifactFile(path string) error {
 //     replace `<页序>-<主干>` 与 source `<主干>-<页序>` 不同），新产物形态不会被
 //     收集，无需 excludeStem；
 //  3. 同目录同 target 但记录主干 != 本次新主干（改名重链 / 搬迁后）：清理旧主干，
-//     以本次新主干 exclude 防误删刚生成的新产物（M1）；仅大小写差异折叠相等视为
-//     同一主干不进入——本次产物覆盖同名物理文件，旧页由既有链路处理；
+//     以本次新主干 exclude 防误删刚生成的新产物（M1）；仅 Windows 下大小写差异
+//     折叠相等视为同一主干不进入——本次产物覆盖同名物理文件，旧页由既有链路处理；
+//     Linux/macOS 大小写敏感，大小写变体是不同文件，按改主干清理旧组；
 //  4. 同目录同 target 同主干（普通重拆）：不清理，旧页由 removeSplitArtifactsBeyond /
 //     cleanupStaleReplaceArtifacts 既有链路处理。
 func splitArtifactCleanupPlan(record *assetSplitRecord, currentTarget, currentStem, currentOutDir string) (dir, excludeStem string, ok bool) {
@@ -1426,7 +1432,7 @@ func splitArtifactCleanupPlan(record *assetSplitRecord, currentTarget, currentSt
 	case record.target != currentTarget:
 		return record.outputDir, "", true
 	case record.artifactStem != "" && record.artifactStem != currentStem &&
-		!strings.EqualFold(record.artifactStem, currentStem):
+		!sameNameFold(record.artifactStem, currentStem):
 		return record.outputDir, currentStem, true
 	default:
 		return "", "", false
@@ -1652,19 +1658,35 @@ func pageSeqFromArtifactName(name string) int {
 //   - 核心中间态：<源名主干>-<纯数字>.pptx（核心原生命名，rename 前）；
 //   - 已改名：<纯数字>-<名字主干>.pptx（replaceArtifactName 产物）。
 //
-// 前缀/后缀判定**大小写不敏感**：Windows NTFS 保留大小写但不敏感，用户把源文件
-// 仅改大小写（abc.pptx → Abc.pptx）后重拆，上次产物 `001-abc.pptx` 与本次目标
-// `001-Abc.pptx` 是同一物理文件——按敏感比较会把它判为「非历史产物」并因
-// fileExists 为真而永久回滚失败（2026-11-02 修复）。切片仍按原始串长度取页序段，
-// 返回值语义不变；snapshotReplaceArtifactNames / firstReplaceArtifactName 随之受益。
+// 判定精确保守，**仅 Windows 下追加一次大小写折叠**：Windows NTFS 保留大小写但
+// 不敏感，用户把源文件仅改大小写（abc.pptx → Abc.pptx）后重拆，上次产物
+// `001-abc.pptx` 与本次目标 `001-Abc.pptx` 是同一物理文件——按敏感比较会判为
+// 「非历史产物」并因 fileExists 为真而永久回滚失败。Linux/macOS 大小写敏感，
+// `001-ABC.pptx` 与 `001-abc.pptx` 是不同文件，折叠会把它收入历史产物并在成功后
+// 删备份，造成用户文件内容丢失（P1）。因此折叠经 sameNameFold/ToLower 平台守卫。
 //
 // 回滚与重拆清旧页共用本判定；目录内其余内容（用户自建文件、草稿等）不动。
 func isReplaceArtifactName(name, base string) bool {
+	if isReplaceArtifactNameExact(name, base) {
+		return true
+	}
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	// 折叠匹配复用精确逻辑：双侧同源 ToLower 后按**折叠串长度**切片（页序段为
+	// ASCII 数字、纯数字主干的 -p 后缀不受大小写影响）。Unicode 大小写映射可能
+	// 改变字节长度（如 İ→i̇ 由 2 字节变 3 字节），但 name 与 base 走同一变换，
+	// 边界始终落在同一折叠串上，不会截半或越界。
+	return isReplaceArtifactNameExact(strings.ToLower(name), strings.ToLower(base))
+}
+
+// isReplaceArtifactNameExact 大小写敏感的产物命名形态判定（精确匹配）。
+func isReplaceArtifactNameExact(name, base string) bool {
 	const ext = ".pptx"
 	// 核心中间态：<源名主干>-<纯数字>.pptx（至少一位页序）
 	if len(name) > len(base)+len(ext)+1 &&
-		strings.EqualFold(name[:len(base)], base) && name[len(base)] == '-' &&
-		strings.EqualFold(name[len(name)-len(ext):], ext) {
+		name[:len(base)] == base && name[len(base)] == '-' &&
+		name[len(name)-len(ext):] == ext {
 		seq := name[len(base)+1 : len(name)-len(ext)]
 		if isAllDigits(seq) {
 			return true
@@ -1672,21 +1694,27 @@ func isReplaceArtifactName(name, base string) bool {
 	}
 	// 已改名形态：<纯数字>-<名字主干>.pptx
 	suffix := "-" + replaceArtifactBase(base) + ext
-	if len(name) > len(suffix) && strings.EqualFold(name[len(name)-len(suffix):], suffix) {
+	if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
 		seq := name[:len(name)-len(suffix)]
 		return isAllDigits(seq)
 	}
 	return false
 }
 
-// foldNameInSet 大小写不敏感集合成员判定，返回命中的实际键。Windows 上仅大小写
-// 差异的文件名指同一物理文件，按实际名（而非查询名）构造路径才能定位到磁盘对象。
+// foldNameInSet 集合成员判定，返回命中的实际键。大小写折叠经 sameNameFold（仅
+// Windows 生效）：仅大小写差异的文件名在 Windows 上指同一物理文件，按实际名
+// （而非查询名）构造路径才能定位到磁盘对象，并保证回滚还原后索引行路径不漂移；
+// Linux/macOS 大小写敏感，折叠会把不同文件误判为集合成员（用户文件被当作历史
+// 产物删除）。精确命中优先；正常 Windows 目录（大小写不敏感）下折叠命中至多
+// 一个（大小写变体指向同一物理条目）。若目录启用了大小写敏感标志导致多命中，
+// 结果为遍历顺序取首个——该形态不在本契约内（Windows 上大小写变体按同一物理
+// 文件处理，多命中已属异常目录），调用方按取得的实际键操作即可。
 func foldNameInSet(set map[string]struct{}, name string) (string, bool) {
 	if _, ok := set[name]; ok {
 		return name, true
 	}
 	for k := range set {
-		if strings.EqualFold(k, name) {
+		if sameNameFold(k, name) {
 			return k, true
 		}
 	}
@@ -1869,7 +1897,13 @@ func isReplaceArtifactNameAnyStem(name string) bool {
 //
 // 读取失败、无命中或多命中（大小写敏感目录标志开启时 abc 与 Abc 可并存）一律返回
 // 原值——不可判定时不冒险改选目录。
+//
+// 仅 Windows 有意义：Linux/macOS 大小写敏感，父目录下 `abc` 与 `Abc` 是两个不同
+// 目录，折叠归一必定误选（P1）。非 Windows 直接原样返回，不读父目录。
 func resolveExistingDirCase(dir string) string {
+	if runtime.GOOS != "windows" {
+		return dir
+	}
 	parent := filepath.Dir(dir)
 	want := filepath.Base(dir)
 	entries, err := os.ReadDir(parent)
@@ -1878,7 +1912,7 @@ func resolveExistingDirCase(dir string) string {
 	}
 	hit := ""
 	for _, e := range entries {
-		if !e.IsDir() || !strings.EqualFold(e.Name(), want) {
+		if !e.IsDir() || !sameNameFold(e.Name(), want) {
 			continue
 		}
 		if hit != "" {
@@ -1892,15 +1926,23 @@ func resolveExistingDirCase(dir string) string {
 	return filepath.Join(parent, hit)
 }
 
-// samePathFold 绝对路径等价判定：Clean 后等值即相同；Windows 文件系统大小写
-// 不敏感，追加 EqualFold 兜底（进入本判定的两侧均来自同一条库根路径，其余平台
-// 保持大小写敏感，避免 Linux 上误判同名不同目录）。
-func samePathFold(a, b string) bool {
-	a, b = filepath.Clean(a), filepath.Clean(b)
+// sameNameFold 文件名/目录名等价判定：精确相等，或（仅 Windows）大小写折叠相等。
+// Windows 文件系统（NTFS）保留大小写但不敏感，两个大小写变体指向同一物理文件；
+// Linux/macOS 默认大小写敏感，折叠会把不同文件误判为同一个（历史产物识别会因此
+// 删除用户文件，P1 数据丢失）。与 samePathFold 同口径，文件名/路径判定禁裸用
+// strings.EqualFold。
+func sameNameFold(a, b string) bool {
 	if a == b {
 		return true
 	}
 	return runtime.GOOS == "windows" && strings.EqualFold(a, b)
+}
+
+// samePathFold 绝对路径等价判定：Clean 后走 sameNameFold（仅 Windows 折叠大小写）。
+// 进入本判定的两侧均来自同一条库根路径；其余平台保持大小写敏感，避免 Linux 上
+// 误判同名不同目录。
+func samePathFold(a, b string) bool {
+	return sameNameFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 // splitOutputDir cache/source 两态落点解析（PRD Q4 落点契约，见文件头注释布局

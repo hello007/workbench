@@ -1,0 +1,31 @@
+{
+  "id": "split-hardening-leftovers",
+  "name": "split-hardening-leftovers",
+  "title": "split hardening leftovers",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-11-02",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-02-fold-platform-guard",
+    "11-02-split-cleanup-convergence",
+    "11-02-relink-backup-hardening",
+    "11-02-review-test-doc-anchors"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
