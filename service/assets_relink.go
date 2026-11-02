@@ -307,12 +307,12 @@ func assetRelPathWithinRoot(root, absPath string) (string, error) {
 		return "", model.NewAppError(model.ErrCodeAssetsRelinkOutsideLib,
 			"目标路径须为绝对路径且位于素材根目录内")
 	}
-	rel, err := filepath.Rel(root, absPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, inRoot := relPathWithinRoot(root, absPath)
+	if !inRoot {
 		return "", model.NewAppError(model.ErrCodeAssetsRelinkOutsideLib,
 			"目标文件位于素材根目录之外，请在库内选择")
 	}
-	return filepath.ToSlash(rel), nil
+	return rel, nil
 }
 
 // normalizeAssetPathPrefix 前缀归一（前缀替换单点）：修剪空白与首尾斜杠、统一

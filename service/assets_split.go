@@ -864,17 +864,32 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	}, nil
 }
 
+// relPathWithinRoot 库内相对路径判定单点：abs 位于 root 内（含 root 自身）时返回
+// 正斜杠相对路径与 true；库外（Rel 出错或 `..` 前缀）返回 "" 与 false。与
+// assetRelPathWithinRoot 的区别是不返回错误——供「库外即静默跳过」的分支复用。
+func relPathWithinRoot(root, abs string) (string, bool) {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
 // deleteIndexRowsForPaths 删除已清理产物在索引中的行（含缩略图记账与 PNG 文件）：
 // 页数减少/重拆时越界旧页必须从索引消失，否则成为指向已删文件的僵尸素材。
 // 路径按库根换算为相对路径查询；不存在行（未索引/已被删）静默跳过。
+//
+// 库外旧落点（derived 目录位于库根之外，其产物本就不入索引）不做索引行清理：
+// 同卷时 Rel 返回 `..` 前缀、跨卷时 Rel 直接出错，两者均视为库外静默跳过，
+// 不再逐文件告警（跨卷场景曾被误报为噪音，PRD 11-02-derived-cross-volume-warn-noise）。
 func (s *AssetLibraryService) deleteIndexRowsForPaths(store *assetsStore, lib model.AssetLibrary, paths []string) {
 	for _, p := range paths {
-		rel, err := filepath.Rel(lib.RootPath, p)
-		if err != nil {
-			Logger().Warn("计算旧产物相对路径失败（跳过索引行清理）", "libraryId", lib.ID, "path", p, "err", err)
+		rel, inRoot := relPathWithinRoot(lib.RootPath, p)
+		if !inRoot {
+			Logger().Debug("旧产物位于库根之外，跳过索引行清理", "libraryId", lib.ID, "path", p)
 			continue
 		}
-		rec, exists, err := store.fileRecordByPath(filepath.ToSlash(rel))
+		rec, exists, err := store.fileRecordByPath(rel)
 		if err != nil {
 			Logger().Warn("读取旧产物索引失败（跳过索引行清理）", "libraryId", lib.ID, "path", p, "err", err)
 			continue
