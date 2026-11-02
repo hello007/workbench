@@ -170,7 +170,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 	if err != nil || rec != nil {
 		t.Fatalf("未拆分应返回 (nil, nil)，实际 (%v, %v)", rec, err)
 	}
-	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, "", false, nil, nil); err != nil {
 		t.Fatalf("upsert 插入: %v", err)
 	}
 	rec, err = store.getSplitRecord("a.pptx")
@@ -183,7 +183,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 		t.Errorf("记录字段不符：%+v", rec)
 	}
 	// 覆盖写（重拆语义）
-	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, "", false, nil, nil); err != nil {
 		t.Fatalf("upsert 覆盖: %v", err)
 	}
 	rec, _ = store.getSplitRecord("a.pptx")

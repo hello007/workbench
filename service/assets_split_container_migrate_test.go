@@ -30,7 +30,7 @@ func TestSplitRecordMigrate_ContainerOutputDirOnly(t *testing.T) {
 	oldOut := filepath.Join(root, "容器")
 	if err := store.upsertSplitRecord("其他/x.pptx", "h-container", oldOut, 2,
 		splitMigrateNow, model.AssetSplitTargetReplace, "",
-		true, nil); err != nil {
+		true, nil, nil); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
 
@@ -119,20 +119,20 @@ func TestSplitRecordMigrate_NestedContainerMove(t *testing.T) {
 	// 记录 1：源键命中（replace），落点随源路径重算
 	if err := store.upsertSplitRecord("外部/方案/x.pptx", "h-in", filepath.Join(root, "外部", "方案", "x"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert 源键记录: %v", err)
 	}
 	// 记录 2：源键不命中、仅落点命中（source）
 	if err := store.upsertSplitRecord("其他/y.pptx", "h-out", filepath.Join(root, "外部", "方案", "y"),
 		2, splitMigrateNow, model.AssetSplitTargetSource, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert 落点记录: %v", err)
 	}
 	// 记录 3：cache 落点即使在移动目录下也保持原值（target 显式分流）
 	cacheOut := filepath.Join(root, "外部", "方案", "z")
 	if err := store.upsertSplitRecord("其他/z.pptx", "h-cache", cacheOut,
 		2, splitMigrateNow, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert cache 记录: %v", err)
 	}
 
@@ -179,13 +179,13 @@ func TestSplitRecordMigrate_PrefixReplaceContainerOutput(t *testing.T) {
 
 	if err := store.upsertSplitRecord("其他/x.pptx", "h-prefix", filepath.Join(root, "外部", "方案", "x"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert replace: %v", err)
 	}
 	cacheOut := filepath.Join(root, "外部", "方案", "z")
 	if err := store.upsertSplitRecord("其他/z.pptx", "h-prefix-cache", cacheOut,
 		2, splitMigrateNow, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert cache: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestSplitRecordMigrate_PrefixBoundary(t *testing.T) {
 		{"其他/z.pptx", "h-z", filepath.Join(root, "a", "z"), model.AssetSplitTargetCache},
 	}
 	for _, s := range seed {
-		if err := store.upsertSplitRecord(s.rel, s.hash, s.out, 2, splitMigrateNow, s.target, "", false, nil); err != nil {
+		if err := store.upsertSplitRecord(s.rel, s.hash, s.out, 2, splitMigrateNow, s.target, "", false, nil, nil); err != nil {
 			t.Fatalf("upsert %s: %v", s.rel, err)
 		}
 	}
@@ -288,13 +288,13 @@ func TestSplitRecordMigrate_LikeMetaDirRename(t *testing.T) {
 
 	if err := store.upsertSplitRecord("50%off/x.pptx", "h-like", filepath.Join(root, "50%off", "x"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	// 仅落点命中同一元字符目录（输出目录前缀迁移面，修复前不会改写）
 	if err := store.upsertSplitRecord("其他/y.pptx", "h-like-out", filepath.Join(root, "50%off", "y"),
 		2, splitMigrateNow, model.AssetSplitTargetSource, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert 落点记录: %v", err)
 	}
 
@@ -335,18 +335,18 @@ func TestSplitRecordMigrate_NestedPrefixEndToEnd(t *testing.T) {
 
 	if err := store.upsertSplitRecord("d/a.pptx", "h-short", filepath.Join(root, "d", "a"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert short: %v", err)
 	}
 	if err := store.upsertSplitRecord("d/sub/a.pptx", "h-long", filepath.Join(root, "d", "sub", "a"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert long: %v", err)
 	}
 	// 仅落点命中嵌套旧前缀（输出目录前缀迁移面，修复前不会改写）
 	if err := store.upsertSplitRecord("其他/n.pptx", "h-out-only", filepath.Join(root, "d", "sub", "n"),
 		2, splitMigrateNow, model.AssetSplitTargetSource, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsert output-only: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestAssetMoveFiles_RejectsReplaceArtifact(t *testing.T) {
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord("其他/x.pptx", "h-move", filepath.Join(root, "容器"),
 		2, splitMigrateNow, model.AssetSplitTargetReplace, "",
-		true, nil); err != nil {
+		true, nil, nil); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 	entries, err := svc.ListFiles(lib.ID)

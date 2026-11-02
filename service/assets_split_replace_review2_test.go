@@ -367,7 +367,7 @@ func TestSplitRecordMigrate_RemovesDirectoryGuard(t *testing.T) {
 	// 源已删的 replace 记录：不阻断且 output_dir 按库根重算
 	if err := store.upsertSplitRecord("media/a.pptx", "hash", filepath.Join(dir, "media", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetReplace, "",
-		true, nil); err != nil {
+		true, nil, nil); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
 	if _, err := svc.RenameAssetFolder(lib.ID, "media", "media2"); err != nil {
@@ -383,7 +383,7 @@ func TestSplitRecordMigrate_RemovesDirectoryGuard(t *testing.T) {
 	// 源仍存在的 cache 记录（source_removed=0）同样不阻断，output_dir 保持原值
 	if err := store.upsertSplitRecord("media2/a.pptx", "hash", filepath.Join(dir, "media2", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
 	if _, err := svc.RenameAssetFolder(lib.ID, "media2", "media3"); err != nil {

@@ -147,6 +147,14 @@ func (s *assetsStore) migrate() error {
 			}
 			continue
 		}
+		if v == 11 {
+			// v11 为 retained_fingerprints 单列 ADD COLUMN：同 v8/v9/v10 形态走列
+			// 存在性预判 + 单事务，半迁移库（列已加、版本未落）重开不撞 duplicate column。
+			if err := s.migrateSchemaV11(); err != nil {
+				return fmt.Errorf("素材索引库迁移到 v11 失败: %w", err)
+			}
+			continue
+		}
 		migration, ok := assetsMigrations[v]
 		if !ok {
 			continue // 版本空洞（理论不可达）：缺迁移定义时保持版本号连续性由后续版本处理
@@ -254,6 +262,33 @@ func (s *assetsStore) migrateSchemaV10() error {
 		}
 	}
 	if _, err := tx.Exec("PRAGMA user_version = 10"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateSchemaV11 split_records 保留指纹列迁移：列存在性预判使半迁移库可重入，
+// DDL 与 user_version 同事务提交（SQLite DDL 可回滚）。迁移 SQL 保留在
+// assetsSchemaV11SQL 供文档与新库语义对照，实际执行走本方法。
+func (s *assetsStore) migrateSchemaV11() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var n int
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = 'retained_fingerprints'",
+	).Scan(&n); err != nil {
+		return fmt.Errorf("读取 split_records.retained_fingerprints 列信息失败: %w", err)
+	}
+	if n == 0 {
+		if _, err := tx.Exec("ALTER TABLE split_records ADD COLUMN retained_fingerprints TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 11"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2377,6 +2412,10 @@ type assetSplitRecord struct {
 	// fingerprints 页级产物指纹（v10；空 = v10 前旧记录或解析失败，清理侧回落
 	// mtime 守卫）。随记录行同步，重链/目录迁移/备份还原不需要额外同步。
 	fingerprints []splitArtifactFingerprint
+	// retained 清理失败未能删除、但仍属本记录历史产物的归属凭证（v11；元素结构
+	// 与 fingerprints 一致）。仅供 replace 旧页清理失败时写入，由后续重拆的备份
+	// 让位 / 旧页清理消费；非空不代表是本次 page_count 覆盖的产物页。
+	retained []splitArtifactFingerprint
 }
 
 // getSplitRecord 按相对路径读单条拆分记录。未命中返回 (nil, nil)——调用方以
@@ -2384,12 +2423,12 @@ type assetSplitRecord struct {
 // 池下自动排空结果集，见 libraryStats 注释）。
 func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) {
 	var r assetSplitRecord
-	var fingerprintsRaw string
+	var fingerprintsRaw, retainedRaw string
 	err := s.db.QueryRow(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints "+
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints, retained_fingerprints "+
 			"FROM split_records WHERE source_rel_path = ?",
 		relPath,
-	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw)
+	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw, &retainedRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2397,6 +2436,7 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 		return nil, err
 	}
 	r.fingerprints = parseSplitFingerprintsJSON(fingerprintsRaw, r.sourceRelPath)
+	r.retained = parseSplitFingerprintsJSON(retainedRaw, r.sourceRelPath)
 	return &r, nil
 }
 
@@ -2410,7 +2450,7 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 // 无命中返回 (nil, nil)，与 getSplitRecord 的未命中口径一致。
 func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*assetSplitRecord, error) {
 	rows, err := s.db.Query(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints "+
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints, retained_fingerprints "+
 			"FROM split_records WHERE source_rel_path <> ?",
 		exceptRel,
 	)
@@ -2420,11 +2460,12 @@ func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*asse
 	defer rows.Close()
 	for rows.Next() {
 		var r assetSplitRecord
-		var fingerprintsRaw string
-		if err := rows.Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw); err != nil {
+		var fingerprintsRaw, retainedRaw string
+		if err := rows.Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw, &retainedRaw); err != nil {
 			return nil, err
 		}
 		r.fingerprints = parseSplitFingerprintsJSON(fingerprintsRaw, r.sourceRelPath)
+		r.retained = parseSplitFingerprintsJSON(retainedRaw, r.sourceRelPath)
 		// 同源折叠排除：SQL 的 <> 是大小写敏感比较，Windows 上仅大小写不同的
 		// 源键（如 A.pptx / a.pptx）实为同一物理文件，若不折叠会被误判为「另一
 		// 源文件占用」而拒绝正常重拆。Linux 大小写敏感语义由 samePathFold 保证。
@@ -2449,16 +2490,19 @@ func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*asse
 // fingerprints 为本次落盘产物的页级指纹（v10 增列，见 assetsSchemaV10SQL）：
 // 清理侧以「页 + 文件名 + 字节数 + 全文 SHA-256」全等判定归属，nil/空表示无指纹
 // （失败/取消路径不写记录，旧指纹随旧记录保留）。序列化失败降级空串 + Warn。
-func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target, artifactStem string, sourceRemoved bool, fingerprints []splitArtifactFingerprint) error {
+// retained 为清理失败未能删除、但仍属本记录的历史产物凭证（v11 增列，见
+// assetsSchemaV11SQL）：仅 replace 收尾清理失败时由调用方传入，其余落点传 nil；
+// 下次重拆成功消费后由调用方传空（自愈）。
+func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target, artifactStem string, sourceRemoved bool, fingerprints, retained []splitArtifactFingerprint) error {
 	_, err := s.db.Exec(
-		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints) "+
-			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "+
+		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints, retained_fingerprints) "+
+			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "+
 			"ON CONFLICT(source_rel_path) DO UPDATE SET source_hash = excluded.source_hash, output_dir = excluded.output_dir, "+
 			"page_count = excluded.page_count, split_at = excluded.split_at, target = excluded.target, "+
 			"artifact_stem = excluded.artifact_stem, source_removed = excluded.source_removed, "+
-			"artifact_fingerprints = excluded.artifact_fingerprints",
+			"artifact_fingerprints = excluded.artifact_fingerprints, retained_fingerprints = excluded.retained_fingerprints",
 		relPath, sourceHash, outputDir, pageCount, splitAt, target, artifactStem, boolToInt(sourceRemoved),
-		encodeSplitFingerprints(fingerprints))
+		encodeSplitFingerprints(fingerprints), encodeSplitFingerprints(retained))
 	return err
 }
 

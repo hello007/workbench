@@ -525,7 +525,7 @@ func TestAssetSplitReplace_CaseOnlyRenameResplits(t *testing.T) {
 		insertIndexRowForTest(t, svc, lib.ID, int64(9801+i), "abc/"+n)
 	}
 	if err := store.upsertSplitRecord("Abc.pptx", hash, outDir, 3,
-		splitAt, model.AssetSplitTargetReplace, "abc", false, nil); err != nil {
+		splitAt, model.AssetSplitTargetReplace, "abc", false, nil, nil); err != nil {
 		t.Fatalf("写入上次 replace 记录: %v", err)
 	}
 

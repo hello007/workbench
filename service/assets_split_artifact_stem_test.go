@@ -54,7 +54,7 @@ func TestAssetSplit_ReplaceNumericStemCleanedAfterRename(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	// 记录持久化实际产物主干 "123-p"（不是目录基名 123）
 	if err := store.upsertSplitRecord("123.pptx", "stale-hash", oldDir, 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "123-p", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "123-p", false, nil, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9901, "123/"+filepath.Base(oldPage1))
@@ -125,7 +125,7 @@ func TestAssetSplit_SourceResplitSameDirCleansOldStemKeepsNew(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	// 记录落点已指新目录（搬迁后态），主干仍是旧名；哈希置陈旧驱动重拆
 	if err := store.upsertSplitRecord("新名.pptx", "stale-hash", outDir, 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "旧名", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "旧名", false, nil, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestAssetSplit_TargetSwitchCleansOldSourceArtifacts(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage1, "old-1", "2026-11-02 10:00:00")
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-11-02 10:00:00")
 	if err := store.upsertSplitRecord("跨落点.pptx", "stale-hash", oldDir, 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "跨落点", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "跨落点", false, nil, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9911, "跨落点/跨落点-001.pptx")

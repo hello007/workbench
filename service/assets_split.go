@@ -525,7 +525,7 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	fingerprints := s.splitArtifactFingerprints(lib, rel, result.Files, nil)
 	if err := store.upsertSplitRecord(rel, hash, result.OutputDir, result.PageCount,
 		time.Now().Format("2006-01-02 15:04:05"), target, baseName,
-		false, fingerprints); err != nil {
+		false, fingerprints, nil); err != nil {
 		return splitOutcome{rel: rel}, fmt.Errorf("写入拆分记录失败（%s）: %w", rel, err)
 	}
 	return splitOutcome{
@@ -660,6 +660,14 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	var oldArtifacts map[string]struct{}
 	if ownsOutDir {
 		oldArtifacts = snapshotReplaceArtifactNames(outDir, base)
+		// 核心中间态同名文件保护（R5）：核心按 `<base>-NNN.pptx` 原生命名落盘，目录内
+		// 若已存在同形文件（上次核心中断残留、用户自建同名文件等），核心会直接同名
+		// 覆盖写——用户内容不可恢复。守卫放在核心调用之前（早于任何写入），命中即
+		// 拒绝，核心不调用、目录零改动。仅 ownsOutDir 分支需要：其余分支下方
+		// firstReplaceArtifactName 已按「同形文件即拒绝」处理。
+		if coreName := firstReplaceCoreArtifactName(outDir, base); coreName != "" {
+			return failed("目录中已存在与拆分核心产物同名的文件（%s），请先移走或重命名后重试", coreName)
+		}
 	} else if stray := firstReplaceArtifactName(outDir, base); stray != "" {
 		return failed("目录中已存在与拆分产物同名的文件（%s），请先移走或重命名后重试", stray)
 	}
@@ -721,24 +729,38 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 			// 001-Abc.pptx）：按实际名搬迁备份，回滚还原也回到原大小写，索引行
 			// 路径不漂移（2026-11-02）。
 			oldPath := filepath.Join(outDir, oldName)
-			// 指纹归属校验（v10）：oldArtifacts 只按命名形态收集，命中不代表该文件
-			// 仍是历史产物——用户可能把某页产物替换成自有内容（同名）。记录指纹可用
-			// 时以内容（size + SHA-256）作为归属事实：按磁盘实际名查该页指纹（仅
-			// Windows 折叠大小写），内容全等才允许备份让位；否则不符/无条目一律视为
-			// 用户文件拒绝覆盖。校验点在备份 rename 之前，故拒绝路径不产生
-			// .replace-bak 残留（前序页已备份由回滚还原）。记录缺失或指纹不可用时
-			// 保持现行按名认定行为（兼容 v10 前记录与指纹损坏）。
-			if fingerprintsUsable(record) {
-				fp, ok := fingerprintForName(record, oldName)
-				if !ok || !fingerprintMatch(oldPath, fp) {
-					return rollbackFailed("第 %d 页目标文件「%s」已存在且不属于历史拆分产物，请先移走或重命名后重试", page, dstName)
+			// 归属校验（v10/v11）：oldArtifacts 只按命名形态收集，命中不代表该文件
+			// 仍是历史产物——用户可能把某页产物替换成自有内容（同名）。归属凭证经
+			// ownershipFingerprintForName 单点查询（先本次指纹、再清理失败保留凭证），
+			// 内容（size + SHA-256）全等才允许备份让位。
+			//   - 有归属条目但内容不符：用户已修改该历史产物 → R4 内容不一致文案；
+			//   - 无任何归属条目且指纹可用（allow-list 语义）：不是本记录产物 → 用户
+			//     同名文件文案；
+			//   - 指纹不可用且无 retained（v10 前旧记录 / 指纹损坏）：保持按名认定
+			//     行为兼容。
+			fp, owns := ownershipFingerprintForName(record, oldName)
+			switch {
+			case owns && !fingerprintMatch(oldPath, fp):
+				return rollbackFailed("第 %d 页目标文件「%s」内容与拆分记录不一致（可能已被修改），请确认后移走或还原", page, dstName)
+			case !owns && fingerprintsUsable(record):
+				return rollbackFailed("第 %d 页目标文件「%s」已存在且不属于历史拆分产物，请先移走或重命名后重试", page, dstName)
+			case owns:
+				// 备份让位 + 复验（R3 TOCTOU 收口：校验与 rename 之间文件可能被改）。
+				bak, bakErr := s.backupReplaceArtifactForSurrender(oldPath, outDir, oldName, fp)
+				if bakErr != nil {
+					if errors.Is(bakErr, errSplitArtifactContentMismatch) {
+						return rollbackFailed("第 %d 页目标文件「%s」内容与拆分记录不一致（可能已被修改），请确认后移走或还原", page, dstName)
+					}
+					return rollbackFailed("第 %d 页产物重命名失败（备份历史产物）: %v", page, bakErr)
 				}
+				backups[oldPath] = bak
+			default:
+				bak := replaceArtifactBackupPath(outDir, oldName)
+				if bakErr := os.Rename(oldPath, bak); bakErr != nil {
+					return rollbackFailed("第 %d 页产物重命名失败（备份历史产物）: %v", page, bakErr)
+				}
+				backups[oldPath] = bak
 			}
-			bak := replaceArtifactBackupPath(outDir, oldName)
-			if bakErr := os.Rename(oldPath, bak); bakErr != nil {
-				return rollbackFailed("第 %d 页产物重命名失败（备份历史产物）: %v", page, bakErr)
-			}
-			backups[oldPath] = bak
 		} else if fileExists(dst) {
 			// 非历史产物（用户自建或未索引残留）：禁覆盖，中止并回滚本次新增
 			return rollbackFailed("第 %d 页目标文件「%s」已存在且不属于历史拆分产物，请先移走或重命名后重试", page, dstName)
@@ -844,8 +866,10 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	}
 	// 历史产物收尾清理延迟到此刻：此前任何失败/取消都能保住旧页（见步骤 3/5）。
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
-	// 失败保留文件与索引（不再承诺下次重拆收敛），不阻断删源。
-	s.cleanupStaleReplaceArtifacts(store, lib, record, outDir, oldArtifacts, renamed)
+	// 失败保留文件与索引，不阻断删源——失败页的归属凭证（指纹或旧 retained）随
+	// 记录写入 retained_fingerprints（v11），使后续增页重拆仍能识别其为历史产物，
+	// 不再因「同形文件」被永久拒绝。
+	retained := s.cleanupStaleReplaceArtifacts(store, lib, record, outDir, oldArtifacts, renamed)
 	// 旧产物目录收尾（与 source 路径同一决策单点 splitArtifactCleanupPlan）：异目录
 	// 清理旧落点；同目录跨 target 清理旧形态产物；同目录同 target 但记录主干 !=
 	// 本次新主干时清理旧主干并以 excludeStem 排除本次新产物；同目录同主干（普通
@@ -869,7 +893,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		// 批量把产物当新源再拆成「页的页」。写失败仅告警（与步骤 10 同口径）。
 		if recErr := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
 			time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
-			replaceArtifactBase(base), false, fingerprints); recErr != nil {
+			replaceArtifactBase(base), false, fingerprints, retained); recErr != nil {
 			Logger().Warn("就地替换删源失败后写拆分记录失败（产物归属缺失，重试与剔除可能失效）",
 				"libraryId", lib.ID, "file", rel, "err", recErr)
 		}
@@ -898,7 +922,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 不可用）。
 	if err := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
 		time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
-		replaceArtifactBase(base), true, fingerprints); err != nil {
+		replaceArtifactBase(base), true, fingerprints, retained); err != nil {
 		Logger().Warn("就地替换写拆分记录失败（不影响已完成结果）",
 			"libraryId", lib.ID, "file", rel, "err", err)
 	}
@@ -1978,7 +2002,65 @@ func firstReplaceArtifactName(dir, base string) string {
 	return ""
 }
 
+// firstReplaceCoreArtifactName 目录内第一个匹配**核心中间态**命名
+// `<base>-<纯数字>.pptx` 的文件名（无则空串）。大小写折叠与 isReplaceArtifactName
+// 同口径（精确优先，仅 Windows 追加一次整名折叠，含扩展名）：核心同名覆盖写会丢失
+// 用户内容，故 replace 核心调用前据此守卫。
+func firstReplaceCoreArtifactName(dir, base string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if isReplaceCoreArtifactName(e.Name(), base) {
+			return e.Name()
+		}
+	}
+	return ""
+}
+
+// isReplaceCoreArtifactName 核心中间态命名判定：`<base>-<纯数字>.pptx`。页序段
+// 取最后一个 `-` 之后的纯数字（主干自身含 `-`/数字不受影响）。
+//
+// 精确匹配优先，**仅 Windows 下追加一次整名大小写折叠**（复用 isReplaceArtifactName
+// 的折叠形态）：NTFS 保留大小写但不敏感，`守卫-009.PPTX` 与核心将要写出的
+// `守卫-009.pptx` 是同一物理文件——按敏感比较会漏判并让核心静默覆盖用户内容。
+// Linux/macOS 大小写敏感，折叠会把不同文件误判为同名（失效方向为误拒正常重拆），
+// 故平台守卫不可移除。
+func isReplaceCoreArtifactName(name, base string) bool {
+	if isReplaceCoreArtifactNameExact(name, base) {
+		return true
+	}
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return isReplaceCoreArtifactNameExact(strings.ToLower(name), strings.ToLower(base))
+}
+
+// isReplaceCoreArtifactNameExact 大小写敏感的核心中间态形态判定（精确匹配）。
+func isReplaceCoreArtifactNameExact(name, base string) bool {
+	stem, ok := strings.CutSuffix(name, ".pptx")
+	if !ok {
+		return false
+	}
+	idx := strings.LastIndexByte(stem, '-')
+	if idx <= 0 || idx >= len(stem)-1 {
+		return false
+	}
+	if !isAllDigits(stem[idx+1:]) {
+		return false
+	}
+	return stem[:idx] == base
+}
+
 const replaceArtifactBackupSuffix = ".replace-bak"
+
+// errSplitArtifactContentMismatch 备份让位复验不符（R3 TOCTOU 收口）：rename 后
+// 备份文件内容与归属指纹不一致，调用方按 R4「内容与拆分记录不一致」文案拒绝覆盖。
+var errSplitArtifactContentMismatch = errors.New("拆分产物内容与拆分记录不一致")
 
 // replaceArtifactBackupPath 历史产物让位备份的落点：同目录、原名加
 // `.replace-bak` 后缀（不匹配 .pptx 产物形态，不会被回滚扫描或扫描索引认出）。
@@ -1991,23 +2073,51 @@ func replaceArtifactBackupPath(dir, name string) string {
 	return p
 }
 
+// backupReplaceArtifactForSurrender 历史产物「备份让位」单点（R3）：把旧产物挪到
+// 备份名后**对备份文件复验归属指纹**，收口「校验与 rename 之间文件被外部修改」的
+// TOCTOU 窗口。复验相符返回备份路径（调用方登记、回滚可还原、成功前清理）；
+// 不符则尝试换回原路径并返回 errSplitArtifactContentMismatch（调用方按 R4 文案
+// 拒绝覆盖）。换回失败保留备份并 Warn（与还原失败同口径，供人工恢复）。
+func (s *AssetLibraryService) backupReplaceArtifactForSurrender(oldPath, outDir, oldName string, fp splitArtifactFingerprint) (string, error) {
+	bak := replaceArtifactBackupPath(outDir, oldName)
+	if err := os.Rename(oldPath, bak); err != nil {
+		return "", err
+	}
+	if fingerprintMatch(bak, fp) {
+		return bak, nil
+	}
+	if rbErr := os.Rename(bak, oldPath); rbErr != nil {
+		Logger().Warn("备份复验不符且换回原路径失败（备份保留待人工恢复）",
+			"path", oldPath, "backup", bak, "err", rbErr)
+	}
+	return "", errSplitArtifactContentMismatch
+}
+
 // cleanupStaleReplaceArtifacts 本次新页之外的旧页收尾清理（删源前调用）：删除
-// 文件成功才删索引行（删除失败先经 removeSplitArtifactFile 重试一次，仍失败保留
-// 文件与索引，仅告警、不承诺下次重拆自动收敛）。调用时机在全部校验与标注迁移
-// 之后，失败/取消路径不会走到这里，旧页在此之前始终保留。
+// 文件成功才删索引行（删除失败先经注入点 s.removeArtifactFn / 生产实现
+// removeSplitArtifactFile 重试一次，仍失败保留文件与索引）。返回「清理失败仍属本
+// 记录历史产物」的凭证列表（v11 retained）：调用方写入本次 upsert，使后续增页
+// 重拆仍能识别该文件归属（否则残留文件脱离 allow-list，被永久当作用户同名文件
+// 拒绝）。成功删除或文件已不存在不保留（下标清理由 stale 列表联动完成）。
 //
-// 归属判定（v10）：旧记录指纹可用时，oldArtifacts 中的名字只有在指纹中存在
-// （经 sameNameFold）且 `size + sha256` 全等时才删；不在指纹中的名字视为用户文件
-// 保留（任意 mtime）。指纹缺失/损坏时保持既有按名字删除行为（兼容 v10 前记录）。
-func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, outDir string, oldArtifacts map[string]struct{}, newFiles []string) {
+// 归属判定（v10/v11）：经 ownershipFingerprintForName 单点（先本次指纹、再旧
+// retained）按名（sameNameFold）取唯一命中，`size + sha256` 全等才删；无归属条目
+// （用户同形文件）或内容不符一律保留，任意 mtime 均不删。指纹与 retained 均不可
+// 用时保持既有按名字删除行为（兼容 v10 前记录）。
+func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, outDir string, oldArtifacts map[string]struct{}, newFiles []string) []splitArtifactFingerprint {
+	retainedOut := make([]splitArtifactFingerprint, 0)
 	if len(oldArtifacts) == 0 {
-		return
+		return retainedOut
 	}
 	newNames := make(map[string]struct{}, len(newFiles))
 	for _, p := range newFiles {
 		newNames[filepath.Base(p)] = struct{}{}
 	}
-	byFingerprint := fingerprintsUsable(record)
+	usable := fingerprintsUsable(record)
+	remove := s.removeArtifactFn
+	if remove == nil {
+		remove = removeSplitArtifactFile
+	}
 	stale := make([]string, 0, len(oldArtifacts))
 	for name := range oldArtifacts {
 		// 大小写不敏感比对：Windows 上旧产物 `001-abc.pptx` 与本次新页
@@ -2024,20 +2134,23 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 			continue
 		}
 		p := filepath.Join(outDir, name)
-		if byFingerprint {
-			fp, ok := fingerprintForName(record, name)
-			if !ok {
-				continue // 不在指纹中：用户文件，保留
-			}
-			if !fingerprintMatch(p, fp) {
+		ownership, owns := ownershipFingerprintForName(record, name)
+		switch {
+		case owns:
+			if !fingerprintMatch(p, ownership) {
 				continue // 内容/大小不符：用户文件，保留
 			}
+		case usable:
+			continue // 指纹 allow-list 语义：不在清单中 = 用户文件，保留
 		}
 		// 与 removeSplitArtifactsBeyond / cleanupSplitArtifactsInDirByPage 同口径：
 		// 瞬时句柄占用经一次重试覆盖，仍失败保留文件与索引（不再承诺下次重拆收敛）。
-		if rmErr := removeSplitArtifactFile(p); rmErr != nil {
-			Logger().Warn("删除历史拆分产物失败（重试一次后仍失败，保留文件与索引，残留需人工清理）",
+		if rmErr := remove(p); rmErr != nil {
+			Logger().Warn("删除历史拆分产物失败（重试一次后仍失败，保留文件与索引，归属凭证写入记录供后续重拆消费）",
 				"libraryId", lib.ID, "path", p, "err", rmErr)
+			if owns {
+				retainedOut = append(retainedOut, ownership)
+			}
 			continue
 		}
 		stale = append(stale, p)
@@ -2045,6 +2158,7 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 	if len(stale) > 0 {
 		s.deleteIndexRowsForPaths(store, lib, stale)
 	}
+	return retainedOut
 }
 
 // removeReplaceArtifactBackups 删除历史产物备份（删源前调用，此后已无回滚场景；

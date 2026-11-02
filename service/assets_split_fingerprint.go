@@ -156,9 +156,25 @@ func fingerprintForName(record *assetSplitRecord, name string) (splitArtifactFin
 	if record == nil {
 		return splitArtifactFingerprint{}, false
 	}
+	return lookupFingerprintByName(record.fingerprints, name)
+}
+
+// retainedFingerprintForName 按文件名查 retained（v11 清理失败保留凭证），口径与
+// fingerprintForName 相同（sameNameFold，要求唯一命中）。
+func retainedFingerprintForName(record *assetSplitRecord, name string) (splitArtifactFingerprint, bool) {
+	if record == nil {
+		return splitArtifactFingerprint{}, false
+	}
+	return lookupFingerprintByName(record.retained, name)
+}
+
+// lookupFingerprintByName 按文件名在指纹清单中定位唯一命中（sameNameFold：仅
+// Windows 折叠大小写）。无命中或多命中视为不可判定返回 false——调用方按用户文件
+// 保留，失效方向为漏清而非误删。
+func lookupFingerprintByName(fps []splitArtifactFingerprint, name string) (splitArtifactFingerprint, bool) {
 	var hit splitArtifactFingerprint
 	hits := 0
-	for _, fp := range record.fingerprints {
+	for _, fp := range fps {
 		if !sameNameFold(fp.Name, name) {
 			continue
 		}
@@ -169,4 +185,16 @@ func fingerprintForName(record *assetSplitRecord, name string) (splitArtifactFin
 		return splitArtifactFingerprint{}, false
 	}
 	return hit, true
+}
+
+// ownershipFingerprintForName 归属凭证查询单点（v11）：先查本次拆分页级指纹
+// （artifact_fingerprints），未获得唯一命中再查清理失败保留凭证
+// （retained_fingerprints）。每个清单各自要求按名唯一命中，某清单多命中视为该
+// 清单不可判定并继续查下一清单；两清单均无唯一命中才返回 false。备份让位校验与
+// cleanupStaleReplaceArtifacts 必须共用本单点，禁各调用点自行拼接查询顺序。
+func ownershipFingerprintForName(record *assetSplitRecord, name string) (splitArtifactFingerprint, bool) {
+	if fp, ok := fingerprintForName(record, name); ok {
+		return fp, true
+	}
+	return retainedFingerprintForName(record, name)
 }

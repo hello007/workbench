@@ -48,7 +48,7 @@ func TestAssetMoveFiles_SplitRecordNoConflict(t *testing.T) {
 	fileID := moveSplitKeyTestFileID(t, svc, lib.ID, "media/a.pptx")
 	if err := svc.openStoreForTest(t, lib.ID).upsertSplitRecord(
 		"media/a.pptx", "hash-a", "D:/derived/media/a", 3, moveSplitKeyTestAt, model.AssetSplitTargetCache, "a",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 
@@ -96,13 +96,13 @@ func TestAssetMoveFiles_SplitRecordKeyConflict_RemovedExistingWins(t *testing.T)
 	fileID := moveSplitKeyTestFileID(t, svc, lib.ID, "media/a.pptx")
 	if err := store.upsertSplitRecord(
 		"media/a.pptx", "hash-a", "旧产物目录", 3, moveSplitKeyTestAt, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("写入待迁移记录: %v", err)
 	}
 	// 目标键既有留痕记录（files 表无该路径，不触发磁盘重名与占用预检）
 	if err := store.upsertSplitRecord(
 		"归档/a.pptx", "hash-exist", "既有产物目录", 2, moveSplitKeyTestAt, model.AssetSplitTargetReplace, "",
-		true, nil); err != nil {
+		true, nil, nil); err != nil {
 		t.Fatalf("写入目标键记录: %v", err)
 	}
 
@@ -156,12 +156,12 @@ func TestAssetMoveFiles_SplitRecordKeyConflict_BothSourceExists(t *testing.T) {
 	fileID := moveSplitKeyTestFileID(t, svc, lib.ID, "media/a.pptx")
 	if err := store.upsertSplitRecord(
 		"media/a.pptx", "hash-a", "旧产物目录", 3, moveSplitKeyTestAt, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("写入待迁移记录: %v", err)
 	}
 	if err := store.upsertSplitRecord(
 		"归档/a.pptx", "hash-exist", "既有产物目录", 2, moveSplitKeyTestAt, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("写入目标键记录: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func TestAssetMoveFilePath_SplitRecordIdempotent(t *testing.T) {
 	fileID := moveSplitKeyTestFileID(t, svc, lib.ID, "media/a.pptx")
 	if err := store.upsertSplitRecord(
 		"media/a.pptx", "hash-a", "D:/derived/media/a", 3, moveSplitKeyTestAt, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestAssetMoveFiles_SplitRecordTxRollback(t *testing.T) {
 	fileID := moveSplitKeyTestFileID(t, svc, lib.ID, "media/a.pptx")
 	if err := store.upsertSplitRecord(
 		"media/a.pptx", "hash-a", "D:/derived/media/a", 3, moveSplitKeyTestAt, model.AssetSplitTargetCache, "",
-		false, nil); err != nil {
+		false, nil, nil); err != nil {
 		t.Fatalf("upsertSplitRecord: %v", err)
 	}
 	// 触发器注入写失败：split_records 任一 UPDATE 中止事务

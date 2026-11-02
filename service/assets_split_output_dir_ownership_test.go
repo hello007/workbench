@@ -189,7 +189,7 @@ func TestAssetSplitReplace_OutputDirOwnershipConflict(t *testing.T) {
 	}
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord("B.pptx", "hash-b", outDir, 1,
-		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "B", true, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetReplace, "B", true, nil, nil); err != nil {
 		t.Fatalf("写入 B 的 replace 记录: %v", err)
 	}
 
@@ -288,7 +288,7 @@ func TestSplitRecordByOutputDir(t *testing.T) {
 	}
 
 	if err := store.upsertSplitRecord("B.pptx", "hash-b", outDir, 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil, nil); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	got, err = store.splitRecordByOutputDir(outDir, "A.pptx")
@@ -326,7 +326,7 @@ func TestSplitRecordByOutputDir_SameSourceCaseFold(t *testing.T) {
 		hash string
 	}{{"A.pptx", "hash-A"}, {"a.pptx", "hash-a"}} {
 		if err := store.upsertSplitRecord(rec.rel, rec.hash, outDir, 1,
-			"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil); err != nil {
+			"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil, nil); err != nil {
 			t.Fatalf("写入记录 %s: %v", rec.rel, err)
 		}
 	}
@@ -362,7 +362,7 @@ func TestAssetSplitLibrary_ItemCodeOutputDirConflict(t *testing.T) {
 	outDir := filepath.Join(root, "A")
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord("B.pptx", "hash-b", outDir, 1,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "A", false, nil, nil); err != nil {
 		t.Fatalf("写入 B 的拆分记录: %v", err)
 	}
 

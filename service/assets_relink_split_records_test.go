@@ -86,13 +86,13 @@ func TestRelocateAssetFile_MigratesSplitRecords(t *testing.T) {
 	cacheOut := filepath.Join(svc.assetDerivedDir(lib.ID), "缓存")
 	sourceOut := filepath.Join(dir, "源落点")
 	replaceOut := filepath.Join(dir, "替换落点")
-	if err := store.upsertSplitRecord("缓存.pptx", "h-cache", cacheOut, 2, splitAt, model.AssetSplitTargetCache, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("缓存.pptx", "h-cache", cacheOut, 2, splitAt, model.AssetSplitTargetCache, "", false, nil, nil); err != nil {
 		t.Fatalf("写入缓存记录: %v", err)
 	}
-	if err := store.upsertSplitRecord("源落点.pptx", "h-source", sourceOut, 2, splitAt, model.AssetSplitTargetSource, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("源落点.pptx", "h-source", sourceOut, 2, splitAt, model.AssetSplitTargetSource, "", false, nil, nil); err != nil {
 		t.Fatalf("写入源落点记录: %v", err)
 	}
-	if err := store.upsertSplitRecord("替换落点.pptx", "h-replace", replaceOut, 2, splitAt, model.AssetSplitTargetReplace, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("替换落点.pptx", "h-replace", replaceOut, 2, splitAt, model.AssetSplitTargetReplace, "", false, nil, nil); err != nil {
 		t.Fatalf("写入替换落点记录: %v", err)
 	}
 	// 三类产物（迁移后 output_dir 不变，打开单页仍应命中）
@@ -227,11 +227,11 @@ func TestRelocateAssetFile_SplitRecordKeyConflict(t *testing.T) {
 			oldOut := "旧产物目录"
 			newRel := "新目录/" + name
 			existOut := "既有产物目录"
-			if err := store.upsertSplitRecord(name, "h-old", oldOut, 2, splitAt, model.AssetSplitTargetCache, "", tc.oldRemoved, nil); err != nil {
+			if err := store.upsertSplitRecord(name, "h-old", oldOut, 2, splitAt, model.AssetSplitTargetCache, "", tc.oldRemoved, nil, nil); err != nil {
 				t.Fatalf("写入旧记录: %v", err)
 			}
 			// 目标键记录只存在于 split_records（files 表无该路径，重链不被占用预检拦下）
-			if err := store.upsertSplitRecord(newRel, "h-exist", existOut, 3, splitAt, model.AssetSplitTargetCache, "", tc.existRemoved, nil); err != nil {
+			if err := store.upsertSplitRecord(newRel, "h-exist", existOut, 3, splitAt, model.AssetSplitTargetCache, "", tc.existRemoved, nil, nil); err != nil {
 				t.Fatalf("写入目标键记录: %v", err)
 			}
 
@@ -296,7 +296,7 @@ func TestRelocateAssetFile_SplitRecordIdempotent(t *testing.T) {
 		t.Fatalf("关闭行: %v", err)
 	}
 	const splitAt = "2026-10-30 10:00:00"
-	if err := store.upsertSplitRecord("幂等.pptx", "h-idem", "D:/derived/幂等", 2, splitAt, model.AssetSplitTargetCache, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("幂等.pptx", "h-idem", "D:/derived/幂等", 2, splitAt, model.AssetSplitTargetCache, "", false, nil, nil); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 
@@ -356,7 +356,7 @@ func TestRelocateAssetFile_SplitRecordTxRollback(t *testing.T) {
 		t.Fatalf("查文件记录: %v", err)
 	}
 	const splitAt = "2026-10-30 10:00:00"
-	if err := store.upsertSplitRecord("回滚.pptx", "h-rollback", "D:/derived/回滚", 2, splitAt, model.AssetSplitTargetCache, "", false, nil); err != nil {
+	if err := store.upsertSplitRecord("回滚.pptx", "h-rollback", "D:/derived/回滚", 2, splitAt, model.AssetSplitTargetCache, "", false, nil, nil); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	// 触发器注入写失败：split_records 任一 UPDATE 中止事务

@@ -67,7 +67,7 @@ func setupDirSyncFixture(t *testing.T, target string) *dirSyncFixture {
 	}
 
 	store := svc.openStoreForTest(t, lib.ID)
-	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, "方案", false, nil); err != nil {
+	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, "方案", false, nil, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	for page := 1; page <= 2; page++ {

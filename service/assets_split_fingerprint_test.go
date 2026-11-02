@@ -51,7 +51,7 @@ func TestSplitFingerprints_RoundTrip(t *testing.T) {
 		{Page: 2, Name: "讲义-002.pptx", Size: 22, SHA256: "bbbb"},
 	}
 	if err := store.upsertSplitRecord("讲义.pptx", "h1", filepath.Join(dir, "讲义"), 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "讲义", false, fps); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "讲义", false, fps, nil); err != nil {
 		t.Fatalf("写入带指纹记录: %v", err)
 	}
 	rec, err := store.getSplitRecord("讲义.pptx")
@@ -64,7 +64,7 @@ func TestSplitFingerprints_RoundTrip(t *testing.T) {
 
 	// 覆盖为空指纹
 	if err := store.upsertSplitRecord("讲义.pptx", "h2", filepath.Join(dir, "讲义"), 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "讲义", false, nil); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "讲义", false, nil, nil); err != nil {
 		t.Fatalf("覆盖空指纹: %v", err)
 	}
 	rec, err = store.getSplitRecord("讲义.pptx")
@@ -344,12 +344,12 @@ func TestSplitFingerprints_SurviveKeyRewriteAndFolderMigrate(t *testing.T) {
 		{Page: 1, Name: "迁移-001.pptx", Size: 7, SHA256: "cc"},
 	}
 	if err := store.upsertSplitRecord("旧目录/迁移.pptx", "h", filepath.Join(root, "旧目录", "迁移"), 1,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "迁移", false, fps); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "迁移", false, fps, nil); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	// 目录级迁移独立记录：源键与落点都位于被迁移前缀下
 	if err := store.upsertSplitRecord("待迁/文件.pptx", "h2", filepath.Join(root, "待迁", "文件"), 1,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "文件", false, fps); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "文件", false, fps, nil); err != nil {
 		t.Fatalf("写入迁移记录: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func TestSplitFingerprints_SurviveBackupSnapshot(t *testing.T) {
 		{Page: 1, Name: "备份-001.pptx", Size: 3, SHA256: "dd"},
 	}
 	if err := store.upsertSplitRecord("备份.pptx", "h", filepath.Join(dir, "备份"), 1,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "备份", false, fps); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "备份", false, fps, nil); err != nil {
 		t.Fatalf("写入记录: %v", err)
 	}
 	backupPath := filepath.Join(t.TempDir(), "snapshot.db")
