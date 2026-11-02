@@ -600,12 +600,18 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", "cache"); err != nil {
 		t.Fatalf("首次拆分: %v", err)
 	}
-	// 手工放置旧命名/越界产物（模拟 %02d 时代残留与越界页）
+	// 手工放置旧命名/越界产物（模拟 %02d 时代残留与越界页）：页序 ≤ keepPage 的
+	// 两位形态（01/02）与越界页（042/99）都应收敛。mtime 回拨到首次拆分记录时间
+	// 之前——mtime 守卫把「晚于 splitAt + 2s」的文件当作用户后放入保留，不回拨会
+	// 让本用例依赖拆分耗时是否落在 2 秒容差内（不稳定）。
 	outDir := filepath.Join(svc.assetsDir, lib.ID, "derived", "演变")
-	for _, junk := range []string{"演变-042.pptx", "演变-99.pptx"} {
-		if err := os.WriteFile(filepath.Join(outDir, junk), []byte("junk"), 0644); err != nil {
-			t.Fatalf("放置残留产物: %v", err)
-		}
+	store := svc.openStoreForTest(t, lib.ID)
+	rec, err := store.getSplitRecord("演变.pptx")
+	if err != nil || rec == nil {
+		t.Fatalf("读首次拆分记录: rec=%+v err=%v", rec, err)
+	}
+	for _, junk := range []string{"演变-01.pptx", "演变-02.pptx", "演变-042.pptx", "演变-99.pptx"} {
+		writeSplitArtifactAt(t, filepath.Join(outDir, junk), "junk", rec.splitAt)
 	}
 
 	// 源文件变为 2 页 + 库存 hash 同步更新（确定性驱动哈希失配）
@@ -617,7 +623,6 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("算新哈希: %v", err)
 	}
-	store := svc.openStoreForTest(t, lib.ID)
 	if _, err := store.db.Exec("UPDATE files SET hash = ? WHERE path = ?", newHash, "演变.pptx"); err != nil {
 		t.Fatalf("更新库存哈希: %v", err)
 	}

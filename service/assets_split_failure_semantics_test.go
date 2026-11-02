@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"workbench/model"
+	"workbench/util/testutil"
 )
 
 // ---------- 拆分失败语义与清理可收敛性（11-02-split-failure-semantics） ----------
@@ -21,13 +22,19 @@ import (
 //     因误判「非历史产物」永久回滚失败）；
 //   - 单页删除失败先重试一次，仍失败告警明确「残留需人工清理，不再自动收敛」。
 
-// TestRemoveSplitArtifactsBeyond 超界旧页清理：仅删 `<主干>-<纯数字>.pptx` 且页序
-// > keepPage 的文件，用户自建同名异构文件与普通文件不动；keepPage=0 等价全量清理。
+// TestRemoveSplitArtifactsBeyond 旧页清理：删页序 > keepPage 的产物，以及页序
+// ≤ keepPage 但为历史 `%02d` 形态（非当前 `%03d`）的文件；当前形态正常页、用户
+// 自建同名异构文件与普通文件不动；keepPage=0 等价全量清理产物形态。
 func TestRemoveSplitArtifactsBeyond(t *testing.T) {
+	svc := newTestAssetService(t)
 	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "超界清理库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
 	names := []string{
 		"讲义-001.pptx", "讲义-002.pptx", "讲义-003.pptx",
 		"讲义-004.pptx", "讲义-010.pptx",
+		// 历史 %02d 形态（页序 1..3 在 keepPage 范围内但非当前 3 位形态）
+		"讲义-01.pptx", "讲义-02.pptx", "讲义-03.pptx",
 		"讲义-草稿.pptx", "说明.txt",
 	}
 	for _, n := range names {
@@ -35,23 +42,133 @@ func TestRemoveSplitArtifactsBeyond(t *testing.T) {
 			t.Fatalf("放置文件（%s）: %v", n, err)
 		}
 	}
+	insertIndexRowForTest(t, svc, lib.ID, 9901, "讲义-004.pptx")
 
-	removeSplitArtifactsBeyond(dir, "讲义", 3)
+	svc.removeSplitArtifactsBeyond(store, lib, dir, "讲义", 3, "")
 
 	for _, n := range []string{"讲义-001.pptx", "讲义-002.pptx", "讲义-003.pptx", "讲义-草稿.pptx", "说明.txt"} {
 		mustExist(t, filepath.Join(dir, n))
 	}
-	for _, n := range []string{"讲义-004.pptx", "讲义-010.pptx"} {
+	for _, n := range []string{"讲义-004.pptx", "讲义-010.pptx", "讲义-01.pptx", "讲义-02.pptx", "讲义-03.pptx"} {
 		mustNotExist(t, filepath.Join(dir, n))
 	}
+	// 删除的越界旧页联动清理索引行
+	if n := countIndexRowsByPath(t, svc, lib.ID, "讲义-004.pptx"); n != 0 {
+		t.Errorf("越界旧页索引行应被清理，实际 %d 行", n)
+	}
 
-	// keepPage=0：全部产物形态（含页序 1..3）清理
-	removeSplitArtifactsBeyond(dir, "讲义", 0)
+	// keepPage=0：全部产物形态（含页序 1..3 当前形态）清理，用户文件保留
+	svc.removeSplitArtifactsBeyond(store, lib, dir, "讲义", 0, "")
 	for _, n := range []string{"讲义-001.pptx", "讲义-002.pptx", "讲义-003.pptx"} {
 		mustNotExist(t, filepath.Join(dir, n))
 	}
 	mustExist(t, filepath.Join(dir, "讲义-草稿.pptx"))
 	mustExist(t, filepath.Join(dir, "说明.txt"))
+}
+
+// TestRemoveSplitArtifactsBeyond_LegacyTwoDigitConverged 历史 %02d 产物与当前
+// %03d 产物并存：页序相同（如 01 与 001）时当前形态保留、两位形态删除——此前
+// 只放 42/99 等越界页的 fixture 形成假阳性覆盖（旧两位形态在 keepPage 内漏清）。
+func TestRemoveSplitArtifactsBeyond_LegacyTwoDigitConverged(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "两位页序收敛库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	for _, n := range []string{"演变-001.pptx", "演变-002.pptx", "演变-003.pptx", "演变-01.pptx", "演变-02.pptx"} {
+		testutil.WriteFile(t, filepath.Join(dir, n), n)
+	}
+
+	svc.removeSplitArtifactsBeyond(store, lib, dir, "演变", 3, "")
+
+	for _, n := range []string{"演变-001.pptx", "演变-002.pptx", "演变-003.pptx"} {
+		mustExist(t, filepath.Join(dir, n))
+	}
+	for _, n := range []string{"演变-01.pptx", "演变-02.pptx"} {
+		mustNotExist(t, filepath.Join(dir, n))
+	}
+}
+
+// TestRemoveSplitArtifactsBeyond_CaseFoldBase Windows 仅大小写改名：base 为
+// `abc`、目录内是改名前的 `Abc-NNN.pptx`。仅 Windows 识别为产物（sameNameFold
+// 折叠），越界页 003 删除、当前形态 001/002 保留；非 Windows 大小写敏感，三个
+// 文件均视为用户文件不识别、零删除。
+func TestRemoveSplitArtifactsBeyond_CaseFoldBase(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "大小写折叠收敛库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	for _, n := range []string{"Abc-001.pptx", "Abc-002.pptx", "Abc-003.pptx"} {
+		testutil.WriteFile(t, filepath.Join(dir, n), n)
+	}
+
+	svc.removeSplitArtifactsBeyond(store, lib, dir, "abc", 2, "")
+
+	mustExist(t, filepath.Join(dir, "Abc-001.pptx"))
+	mustExist(t, filepath.Join(dir, "Abc-002.pptx"))
+	if runtime.GOOS == "windows" {
+		mustNotExist(t, filepath.Join(dir, "Abc-003.pptx"))
+		return
+	}
+	mustExist(t, filepath.Join(dir, "Abc-003.pptx")) // 非 Windows：主干不符，不识别
+}
+
+// TestRemoveSplitArtifactsBeyond_UserFileAfterSplitAtKept mtime 守卫：候选文件
+// mtime 晚于 splitAt + splitArtifactUserFileGrace 视为用户后放入的同名文件保留
+// （越界页与历史 %02d 两种形态都受守卫）；早于 splitAt 的产物照常删除。
+func TestRemoveSplitArtifactsBeyond_UserFileAfterSplitAtKept(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "mtime 守卫库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	const splitAt = "2026-10-30 10:00:00"
+	// 产物：mtime 回拨到 splitAt 之前 → 删除
+	writeSplitArtifactAt(t, filepath.Join(dir, "守卫-004.pptx"), "product", splitAt)
+	writeSplitArtifactAt(t, filepath.Join(dir, "守卫-01.pptx"), "legacy", splitAt)
+	// 用户后放入：mtime = now（远晚于 splitAt + 2s）→ 保留
+	testutil.WriteFile(t, filepath.Join(dir, "守卫-005.pptx"), "user")
+	testutil.WriteFile(t, filepath.Join(dir, "守卫-02.pptx"), "user-legacy")
+
+	svc.removeSplitArtifactsBeyond(store, lib, dir, "守卫", 3, splitAt)
+
+	mustNotExist(t, filepath.Join(dir, "守卫-004.pptx"))
+	mustNotExist(t, filepath.Join(dir, "守卫-01.pptx"))
+	mustExist(t, filepath.Join(dir, "守卫-005.pptx"))
+	mustExist(t, filepath.Join(dir, "守卫-02.pptx"))
+}
+
+// TestSplitArtifactPageSeq 产物名页序解析单点：从每个 '-' 位置尝试以主干前缀
+// 切分，主干自身含 '-' 或纯数字（`a-b-001.pptx`、`123-001.pptx`）仍可正确取到
+// 页序段；页序段必须为纯数字、扩展名必须是 .pptx、主干必须逐字匹配（大小写折叠
+// 由 sameNameFold 承担，见 _CaseFoldBase），否则视为用户文件不识别——`讲义-草稿`、
+// `讲义-2026-01` 这类误判会把用户自建内容卷入重拆清理。
+func TestSplitArtifactPageSeq(t *testing.T) {
+	for _, tc := range []struct {
+		desc     string
+		name     string
+		baseName string
+		wantSeq  string
+		wantOK   bool
+	}{
+		{"普通主干三位页序", "讲义-001.pptx", "讲义", "001", true},
+		{"历史两位页序", "讲义-01.pptx", "讲义", "01", true},
+		{"主干含连字符", "a-b-001.pptx", "a-b", "001", true},
+		{"主干取更短前缀时页序段非纯数字", "a-b-001.pptx", "a", "", false},
+		{"纯数字主干", "123-001.pptx", "123", "001", true},
+		{"主干含连字符与数字", "方案-2026-007.pptx", "方案-2026", "007", true},
+		{"页序段混字母（用户草稿）", "讲义-草稿.pptx", "讲义", "", false},
+		{"多段连字符的年份用户文件", "讲义-2026-01.pptx", "讲义", "", false},
+		{"扩展名不符", "讲义-001.txt", "讲义", "", false},
+		{"无连字符分隔", "讲义001.pptx", "讲义", "", false},
+		// 空主干是退化形态（源文件名恰为 .pptx）：其产物恒为 `-NNN.pptx`，
+		// 与旧实现 HasPrefix("-") 口径一致。
+		{"空主干退化形态", "-001.pptx", "", "001", true},
+	} {
+		gotSeq, gotOK := splitArtifactPageSeq(tc.name, tc.baseName)
+		if gotOK != tc.wantOK || gotSeq != tc.wantSeq {
+			t.Errorf("%s：splitArtifactPageSeq(%q, %q) = (%q, %v), want (%q, %v)",
+				tc.desc, tc.name, tc.baseName, gotSeq, gotOK, tc.wantSeq, tc.wantOK)
+		}
+	}
 }
 
 // TestAssetSplit_CacheCoreFailureKeepsOldArtifacts cache 落点重拆核心失败：上一次

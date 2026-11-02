@@ -489,10 +489,18 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	}
 
 	// 5.1 超界旧页收敛（延迟清理）：source/cache 落点的产物命名恒为
-	//     `<源名主干>-NNN.pptx`，页数减少时删除页序 > 本次 PageCount 的旧产物
-	//     （旧 %02d 产物与越界页一并收敛）。只删产物命名形态，同目录用户自建内容
-	//     一律不动；删除失败仅告警继续，不阻断收尾。
-	removeSplitArtifactsBeyond(outDir, baseName, result.PageCount)
+	//     `<源名主干>-NNN.pptx`，页数减少时删除页序 > 本次 PageCount 的旧产物；
+	//     页序 ≤ PageCount 但文件名不是当前 `%03d` 形态的（历史 `%02d` 产物）同样
+	//     收敛。只删产物命名形态，同目录用户自建内容一律不动；成功删除的路径联动
+	//     清理索引行（source 落点在库内，否则留指向已删文件的僵尸素材）；删除失败
+	//     仅告警继续，不阻断收尾。mtime 守卫以**上一次**记录的分拆时间为基准（用户
+	//     在两次拆分之间放入的同名文件保留）；record 为 nil（首次拆分）时传空串，
+	//     守卫不生效，保持旧行为。
+	splitAt := ""
+	if record != nil {
+		splitAt = record.splitAt
+	}
+	s.removeSplitArtifactsBeyond(store, lib, outDir, baseName, result.PageCount, splitAt)
 
 	// 5.2 旧产物目录收尾清理（改名重链 / 跨落点切换 / 同目录改主干等形态）：
 	//     决策统一走 splitArtifactCleanupPlan 单点（与 replace 链路同源，防口径
@@ -1355,42 +1363,90 @@ func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []stri
 	return "", false
 }
 
-// removeSplitArtifactsBeyond 源目录/derived 落点重拆后的超界旧页清理：仅删除
-// 匹配产物命名形态 `<源名主干>-<纯数字>.pptx` 且页序 > keepPage 的文件（页序段
-// 纯数字、不限位数——旧 %02d 产物与越界页一并收敛，口径与 isPptxSplitDerivative
-// 的数字判定一致），目录内其余内容（用户自建文件、`<源名>-草稿.pptx` 等同名异构
-// 文件、子目录）一律不动。
+// removeSplitArtifactsBeyond 源目录/derived 落点重拆后的旧页收敛（延迟清理）：
+// 只删除匹配产物命名形态 `<源名主干>-<纯数字>.pptx` 的文件，删除条件二选一——
+//   - 页序 > keepPage（页数减少的越界旧页）；
+//   - 页序 ≤ keepPage 但文件名不是当前形态 `fmt.Sprintf("%s-%03d.pptx", baseName, seq)`
+//     （历史 %02d 产物，如 `演变-01.pptx` 与新 `演变-001.pptx` 并存）。
+//
+// 页序段纯数字、不限位数；主干段按 sameNameFold 比较（仅 Windows 折叠大小写，
+// Windows 仅改大小写改名后 `Abc-003.pptx` 仍识别为产物；Linux/macOS 大小写敏感，
+// 大小写变体是用户文件不识别）。目录内其余内容（用户自建文件、`<源名>-草稿.pptx`
+// 等同名异构文件、子目录、非 .pptx）一律不动。
 //
 // 刻意在拆分核心成功之后调用（keepPage = 本次 result.PageCount）：核心失败/取消
 // 时上一次拆分成果不再被前置删除，与 replace 落点的延迟清理契约一致（核心已同名
 // 覆盖写的页除外，属已知限制，见 splitOneFileWithHash 步骤 4）。页序 ≤ keepPage
-// 的旧页由核心同名覆盖写更新，无需删除；keepPage=0 即全量清理产物形态。
+// 且为当前形态的产物由核心同名覆盖写更新，无需删除；keepPage=0 即全量清理产物形态。
 //
-// 目录不存在（首次拆分）或不可读时静默返回——无旧页可清。删除失败仅告警继续，
-// 残留文件保留（可能因占用或权限失败，不再声称「下次重拆自动收敛」）。
-func removeSplitArtifactsBeyond(dir, baseName string, keepPage int) {
+// mtime 守卫（splitAt = 上一次拆分记录的分拆时间）：候选文件 mtime 晚于
+// splitAt + splitArtifactUserFileGrace 视为用户后放入的同名文件保留（产物无内容
+// 指纹，mtime 是归属的最低成本判据；失效方向为漏清而非误删）。splitAt 为空串或
+// 解析失败时守卫不生效（首次拆分 record 为 nil，保持旧行为）。
+//
+// 成功删除的路径批量交 deleteIndexRowsForPaths 清理索引行与缩略图（源落点在库内
+// 时旧页有 files 行，漏清即留下指向已删文件的僵尸素材；derived 落点库外自动静默
+// 跳过）。目录不存在或不可读时静默返回——无旧页可清。删除失败仅告警继续，残留
+// 文件保留（可能因占用或权限失败，不再声称「下次重拆自动收敛」）。
+func (s *AssetLibraryService) removeSplitArtifactsBeyond(store *assetsStore, lib model.AssetLibrary, dir, baseName string, keepPage int, splitAt string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	prefix := baseName + "-"
+	removed := make([]string, 0, 4)
 	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".pptx") {
+		if e.IsDir() {
 			continue
 		}
-		seq := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".pptx")
-		if seq == "" || !isAllDigits(seq) {
+		name := e.Name()
+		seq, ok := splitArtifactPageSeq(name, baseName)
+		if !ok {
 			continue
 		}
 		n, convErr := strconv.Atoi(seq)
-		if convErr != nil || n <= keepPage {
+		if convErr != nil {
 			continue
 		}
-		if err := removeSplitArtifactFile(filepath.Join(dir, name)); err != nil {
-			Logger().Warn("删除超界旧拆分产物失败（残留文件需人工清理）", "dir", dir, "file", name, "err", err)
+		if n <= keepPage && sameNameFold(name, fmt.Sprintf("%s-%03d.pptx", baseName, n)) {
+			continue // 当前形态的正常页，核心已同名覆盖写
+		}
+		path := filepath.Join(dir, name)
+		if isSplitArtifactAfterSplitAt(path, splitAt) {
+			Logger().Debug("旧页候选 mtime 晚于拆分时间，按用户文件保留",
+				"libraryId", lib.ID, "path", path, "splitAt", splitAt)
+			continue
+		}
+		if rmErr := removeSplitArtifactFile(path); rmErr != nil {
+			Logger().Warn("删除超界旧拆分产物失败（残留文件需人工清理）",
+				"libraryId", lib.ID, "dir", dir, "file", name, "err", rmErr)
+			continue
+		}
+		removed = append(removed, path)
+	}
+	if len(removed) > 0 {
+		s.deleteIndexRowsForPaths(store, lib, removed)
+	}
+}
+
+// splitArtifactPageSeq 解析源目录/derived 落点产物文件名 `%s-%s.pptx` 的页序段：
+// 返回纯数字页序串与是否命中。主干段按 sameNameFold 比较（仅 Windows 折叠大小写）；
+// 从每个 '-' 处切分逐一尝试，兼容主干本身含 '-' 或数字（如 `方案-A`、`2026`）。
+// 非产物形态（非 .pptx、后缀/主干不符、页序非纯数字）返回 false。
+func splitArtifactPageSeq(name, baseName string) (string, bool) {
+	const ext = ".pptx"
+	if !strings.HasSuffix(name, ext) {
+		return "", false
+	}
+	stem := strings.TrimSuffix(name, ext)
+	for i := 0; i < len(stem); i++ {
+		if stem[i] != '-' || !sameNameFold(stem[:i], baseName) {
+			continue
+		}
+		if seq := stem[i+1:]; isAllDigits(seq) {
+			return seq, true
 		}
 	}
+	return "", false
 }
 
 // removeSplitArtifactFile 删除单个旧产物文件，首次失败后间隔 50ms 重试一次——
