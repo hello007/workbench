@@ -837,3 +837,38 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 194: 四提交审核剩余项收口（4 子任务）
+
+**Date**: 2026-11-02
+**Task**: 四提交审核剩余项收口（4 子任务）
+**Branch**: `master`
+
+### Summary
+
+四子任务：①大小写折叠统一 sameNameFold 平台守卫（仅 Windows），修复 Linux 误删用户大小写变体文件；②removeSplitArtifactsBeyond 收敛历史 %02d 页序、联动 deleteIndexRowsForPaths、Windows 主干折叠、mtime 守卫；③replace 接入落点归属复核（E_ASSETS_SPLIT_OUTPUT_CONFLICT）、备份预检校验核心表、sqliteReadOnlyDSN 转义；④跨卷静默/同源折叠/批量 Item.Code 用例锚定，cleanupStaleReplaceArtifacts 删除重试，CLAUDE 行 123→249、124→315 字符合规。全量测试与覆盖率 service 81.2% 通过，前端 2275 用例全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `95eb3d4` | (see git log) |
+| `1613408` | (see git log) |
+| `f847cc9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
