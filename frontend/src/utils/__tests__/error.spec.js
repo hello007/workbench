@@ -128,6 +128,18 @@ describe('error', () => {
     })
   })
 
+  describe('素材拆分落点归属冲突错误码（落点归属校验）', () => {
+    it('E_ASSETS_SPLIT_OUTPUT_CONFLICT 取值与后端一致', () => {
+      expect(ErrorCode.AssetsSplitOutputConflict).toBe('E_ASSETS_SPLIT_OUTPUT_CONFLICT')
+    })
+
+    it('预期拒绝类（进 WARNING_CODES），handleError 走 warning 分流不拼前缀', () => {
+      handleError('拆分失败: ', { code: ErrorCode.AssetsSplitOutputConflict, message: '该源文件的拆分产物目录已被另一源文件占用（B.pptx），请先改名或移动后再拆分' })
+      expect(ElMessage.warning).toHaveBeenCalledWith('该源文件的拆分产物目录已被另一源文件占用（B.pptx），请先改名或移动后再拆分')
+      expect(ElMessage.error).not.toHaveBeenCalled()
+    })
+  })
+
   describe('handleGitError 兼容别名', () => {
     it('与 handleError 行为一致', () => {
       const err = { code: ErrorCode.GitInProgress, message: '操作进行中' }

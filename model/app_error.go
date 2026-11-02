@@ -113,6 +113,12 @@ const (
 	// 源文件与源记录也未删除——用户关闭占用程序后可重试拆分（重拆覆盖产物）。
 	ErrCodeAssetsSplitSourceDeleteFailed = "E_ASSETS_SPLIT_SOURCE_DELETE_FAILED"
 
+	// 拆分产物目录归属冲突（P0 数据正确性，warning）：本次 source/cache 落点已被
+	// split_records 中另一源文件的记录占用（典型：A 拆分后改名重链为 B，记录
+	// output_dir 冻结在 A 目录，随后新建 A.pptx 再拆分将直接清空并覆盖 B 的产物）。
+	// 拒绝拆分且不删除任何文件，用户把源文件改名/移动后即可重试。
+	ErrCodeAssetsSplitOutputConflict = "E_ASSETS_SPLIT_OUTPUT_CONFLICT"
+
 	// 文件夹管理域（PRD「素材管理：文件夹树与拖拽整理」PR2；warning，确认型拒绝）：
 	// 非空目录 force=false 删除被拒（删除未发生，目录未受损），前端弹二次确认
 	//（文案含目录内条目数）后以 force=true 重调（对齐 E_ASSETS_RELINK_MISMATCH

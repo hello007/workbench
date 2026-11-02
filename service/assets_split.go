@@ -366,7 +366,9 @@ func (s *AssetLibraryService) abortAssetSplit(libraryID, file string, err error)
 // 错误语义（批量异常隔离的关键分叉）：
 //   - 系统性错误（取消/db 读写失败）→ error 返回，批量中止；
 //   - 核心拆分失败（损坏/加密/只读/磁盘等）→ status=failed 结果返回（批量计
-//     Failed++ 继续后续文件；单文件入口由调用方升格为错误）。
+//     Failed++ 继续后续文件；单文件入口由调用方升格为错误）；
+//   - 落点目录归属冲突 → status=failed + code=E_ASSETS_SPLIT_OUTPUT_CONFLICT
+//     结果返回（同上隔离口径，不删除任何文件）。
 //
 // snapshotHash 为调用方提供的源内容哈希（单文件入口查 files.hash 列，批量入口
 // 快照带出）；为空（权限跳过/旧版本扫描）时现算——无哈希无法做增量判定。
@@ -399,6 +401,22 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	// 2. 落点解析与源名主干（产物命名 `<源名主干>-NNN.pptx`，与核心同口径）
 	baseName := splitSourceBaseName(rel)
 	outDir := s.splitOutputDir(lib, rel, absPath, outputToSourceDir)
+
+	// 2.1 落点目录归属校验（P0 数据正确性）：source/cache 落点由当前文件名直接
+	//     推导，可能已被另一源文件的拆分记录占用——典型：A 拆分后改名重链为 B
+	//     （记录键变 B、output_dir 冻结在 A 目录），用户再放入新的 A.pptx 拆分，
+	//     第 4 步的清除会直接删掉并覆盖 B 的产物。此处必须早于任何删除动作拒绝；
+	//     同源记录由查询排除，正常重拆（含改名重链后重拆）不受影响。
+	if occupied, ownErr := store.splitRecordByOutputDir(outDir, rel); ownErr != nil {
+		return splitOutcome{rel: rel}, fmt.Errorf("读取拆分记录失败: %w", ownErr)
+	} else if occupied != nil {
+		// 失败结果 + code（而非 error）保持批量异常隔离：单文件入口升格为
+		// AppError 供前端按 warning 分流，批量入口只填 Item.Code 继续后续文件
+		return splitOutcome{
+			rel: rel, status: model.AssetSplitStatusFailed, code: model.ErrCodeAssetsSplitOutputConflict,
+			message: fmt.Sprintf("该源文件的拆分产物目录已被另一源文件占用（%s），请先改名或移动后再拆分", occupied.sourceRelPath),
+		}, nil
+	}
 
 	// 3. 增量判定：记录命中 + 哈希一致 + 落点 target 一致 + 产物首页存在（四验）。
 	//    落点切换（source↔cache 等）必须真正换落点重拆——仅比哈希会把「已拆分」
@@ -1101,13 +1119,20 @@ func splitSourceOutputDir(absPath, rel string) string {
 // 但此处保留「当前主干直拼 + 页序反查」的宽容形态：直拼命中即最新产物，反查兜住
 // 改名重链与历史记录，语义单点不变。目录由该记录独占，且要求候选唯一（多候选
 // 视为不可判定，返回直拼路径供报错指向）。返回 (路径, 是否存在)。
+//
+// 反查候选还须校验主干归属：页序匹配是唯一定位口径，但目录内可能混入其他源文件
+// 的同页序产物（落点归属冲突的历史数据），主干不属于记录候选集合即不采纳——否则
+// 增量判定会把他人产物误判为「本记录首页存在」而跳过拆分，打开单页也指向错误文件。
 func splitArtifactPath(record *assetSplitRecord, relPath string, slideNum int) (string, bool) {
 	direct := splitArtifactPathForStem(record, splitSourceBaseName(relPath), slideNum)
 	if fileExists(direct) {
 		return direct, true
 	}
 	if alt, ok := findSplitArtifactByPage(record.outputDir, record.target, slideNum); ok {
-		return alt, true
+		stem, _, parsed := parseSplitArtifactName(filepath.Base(alt), record.target)
+		if parsed && splitStemInCandidates(stem, splitArtifactStemCandidates(record, record.outputDir)) {
+			return alt, true
+		}
 	}
 	return direct, false
 }

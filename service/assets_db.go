@@ -2360,6 +2360,45 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 	return &r, nil
 }
 
+// splitRecordByOutputDir 按落点目录反查其他源文件的拆分记录（落点归属校验用，
+// 供拆分入口与后续任务复用）。exceptRel 为当前源相对路径（同源记录排除，正常
+// 重拆不受影响；SQL 侧排除精确同键，Go 侧再按 samePathFold 折叠大小写变体——
+// Windows 上 A.pptx / a.pptx 是同一物理文件）。
+//
+// output_dir 存绝对路径，SQL 无法跨平台大小写折叠（Windows 大小写不敏感、
+// Linux 敏感），故先取全表候选再在 Go 侧逐行 samePathFold，命中首个即返回；
+// 无命中返回 (nil, nil)，与 getSplitRecord 的未命中口径一致。
+func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*assetSplitRecord, error) {
+	rows, err := s.db.Query(
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed "+
+			"FROM split_records WHERE source_rel_path <> ?",
+		exceptRel,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r assetSplitRecord
+		if err := rows.Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved); err != nil {
+			return nil, err
+		}
+		// 同源折叠排除：SQL 的 <> 是大小写敏感比较，Windows 上仅大小写不同的
+		// 源键（如 A.pptx / a.pptx）实为同一物理文件，若不折叠会被误判为「另一
+		// 源文件占用」而拒绝正常重拆。Linux 大小写敏感语义由 samePathFold 保证。
+		if samePathFold(r.sourceRelPath, exceptRel) {
+			continue
+		}
+		if samePathFold(r.outputDir, outputDir) {
+			return &r, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 // upsertSplitRecord 写入/覆盖拆分记录（重拆覆盖语义，主键 upsert 单语句，
 // SQLite 自动提交保证原子性——多语句写才走显式事务，对齐 markProcessing 口径）。
 // target/sourceRemoved 为落点三态与删源标记（v8 增列，见 assetsSchemaV8SQL）；

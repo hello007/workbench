@@ -93,6 +93,10 @@ type assetExportRow struct {
 	splitOutputDir string
 	splitPageCount int
 	splitTarget    string // 落点（产物命名形态随落点：replace 为 <页序>-<主干>.pptx）
+	// splitArtifactStem 记录持久化的产物命名主干（v9）：改名重链后落点目录内产物
+	// 主干与目录基名不再一致（产物目录随源改名搬迁），页序反查的归属校验必须
+	// 用记录主干而非目录启发式，否则导出的 single_pptx_path 会误判为空。
+	splitArtifactStem string
 }
 
 // assetExportCtx 导出写出口径上下文（rootPath 拼接与缩略图目录定位基准）。
@@ -167,7 +171,7 @@ func (r *assetExportRow) singlePptxPath(ectx *assetExportCtx) string {
 	if r.slideNum < 1 || !r.hasSplitRecord || r.slideNum > r.splitPageCount {
 		return ""
 	}
-	record := &assetSplitRecord{outputDir: r.splitOutputDir, target: r.splitTarget}
+	record := &assetSplitRecord{outputDir: r.splitOutputDir, target: r.splitTarget, artifactStem: r.splitArtifactStem}
 	abs, ok := splitArtifactPath(record, r.relPath, r.slideNum)
 	if !ok {
 		return ""
@@ -827,6 +831,7 @@ func hydrateAssetExportBatchRows(store *assetsStore, keys []assetExportRowKey) (
 			row.splitOutputDir = hd.split.outputDir
 			row.splitPageCount = hd.split.pageCount
 			row.splitTarget = hd.split.target
+			row.splitArtifactStem = hd.split.artifactStem
 		}
 		rowsOut = append(rowsOut, row)
 	}

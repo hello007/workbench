@@ -122,6 +122,7 @@ workbench/
 |文件级重链拆分记录口径：RelocateAssetFile 须与 files.path 同事务迁移 split_records 源键，output_dir 恒保原绝对路径（重算致单页失效）；产物定位一律走 splitArtifactPath（直拼+目录反查，覆盖改名重链）；目录迁移重算落点前须判 output_dir 在旧前缀下；force 重链与清理丢失同事务删记录|[assets-management.md §11.3](docs/spec/assets-management.md)|
 |重拆清旧页锚定 `split_records.artifact_stem`（v9 权威，空值回落）：只删记录主干同页唯一常规文件，`excludeStem` 精确兜 M1；`output_dir`≠本次落点或同目录跨 target 即清（M4）；跳过只比 target（改名重链仍跳过，切落点才重拆）；mtime>split_at+2s 保留；重链探测主干须属记录候选否则不采纳（M2）；无候选/ENOENT/组缺失静默，折叠多命中或回落失配零删+Warn；挂拆分成功后删空才 `os.Remove`；cache 前置 `RemoveAll`；索引行 `deleteIndexRowsForPaths`|[pptx-split.md §9.5](docs/spec/pptx-split.md)|
 |重链落点随源搬迁：`resolveRelocatedSplitOutDir` 探测 `<新源目录>/<新主干>`，仅 source/replace 且 `findSplitArtifactByPage(候选,target,1)` 命中才改 `output_dir`（`newOutDir` 经 `rewriteSplitRecordKeyTx` 同事务），等价/形态不符/cache 保持旧值；落点布局统一 `splitSourceOutputDir`|[assets-management.md §11.3](docs/spec/assets-management.md)|
+|拆分落点归属：source/cache 算出 outDir 后先查 `splitRecordByOutputDir(outDir, rel)`（同源排除 + `samePathFold`），命中他人记录返回 `E_ASSETS_SPLIT_OUTPUT_CONFLICT`（warning）禁删覆盖；`splitArtifactPath` 反查主干不符不采纳|[pptx-split.md §9.5](docs/spec/pptx-split.md)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

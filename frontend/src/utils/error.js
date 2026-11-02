@@ -44,6 +44,7 @@ export const ErrorCode = Object.freeze({
   AssetsDeleteBackupFailed: 'E_ASSETS_DELETE_BACKUP_FAILED', // 删库前自动备份失败（warning，确认型拒绝非真失败——删除未发生，用户确认「删除后无恢复点」后以 allowNoBackup=true 重调）
   AssetsFolderNotEmpty: 'E_ASSETS_FOLDER_NOT_EMPTY', // 非空目录 force=false 删除被拒（warning，确认型拒绝非真失败——删除未发生，前端二次确认后以 force=true 重调）
   AssetsSplitSourceDeleteFailed: 'E_ASSETS_SPLIT_SOURCE_DELETE_FAILED', // 就地替换拆分删源失败：源文件被占用/只读无法移入回收站，产物与标注已保留（warning，关闭占用程序后可重试）
+  AssetsSplitOutputConflict: 'E_ASSETS_SPLIT_OUTPUT_CONFLICT', // 拆分落点目录已被另一源文件的拆分记录占用，本次拒绝且不删除任何文件（warning，源改名/移动后可重试）
   // 素材购物栏域错误码（素材管理·购物栏），取值与 model/app_error.go 购物栏域段一致。
   CartExportInProgress: 'E_CART_EXPORT_IN_PROGRESS', // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
   // 浏览器访问通道 token 管理域错误码（多 token 管理），取值与 model/app_error.go
@@ -105,6 +106,7 @@ const WARNING_CODES = new Set([
   ErrorCode.AssetsDeleteBackupFailed,
   ErrorCode.AssetsFolderNotEmpty,
   ErrorCode.AssetsSplitSourceDeleteFailed,
+  ErrorCode.AssetsSplitOutputConflict,
   ErrorCode.CartExportInProgress,
   ErrorCode.TokenNotFound,
   ErrorCode.TokenNameRequired,
