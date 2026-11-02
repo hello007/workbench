@@ -2,6 +2,8 @@ package util
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,6 +52,17 @@ func TestBackupCorruptFile_SameContentSingleBackup(t *testing.T) {
 		}
 	}
 
+	// 摘要强绑定：直接按 raw 计算 SHA-256 前 12 位 hex 作为期望摘要，断言返回
+	// 路径与 glob 结果都精确等于该路径。仅靠上面的 12 位 hex 正则不足以发现
+	// 「格式合法但摘要错误」的退化——纯数字的 12 位时间戳同样能通过正则检查。
+	sum := sha256.Sum256(raw)
+	wantPath := src + ".bak." + hex.EncodeToString(sum[:])[:12]
+	for _, p := range []string{first, matches[0]} {
+		if p != wantPath {
+			t.Errorf("备份路径应等于期望摘要路径 %q, got %q", wantPath, p)
+		}
+	}
+
 	got, err := os.ReadFile(matches[0])
 	if err != nil {
 		t.Fatalf("read backup: %v", err)
@@ -85,19 +98,24 @@ func TestBackupCorruptFile_DifferentContentTwice(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("不同内容应各留一份备份, got %v", matches)
 	}
-	// 按路径映射断言：pathA 必须等于 rawA、pathB 必须等于 rawB。
+	// 按路径逐一断言：pathA 必须对应 rawA、pathB 必须对应 rawB。
 	// 若只断言「内容与任一原文一致」，实现把 A/B 内容互换也能通过，判别力不足。
-	wantByPath := map[string][]byte{
-		pathA: rawA,
-		pathB: rawB,
+	// 用切片而非以路径为键的 map：map 键天然去重，会静默合并重复路径，从而掩盖
+	// 「两条记录路径相同」的异常（上面 pathA == pathB 的断言一旦被移除就失去兜底）。
+	cases := []struct {
+		path string
+		want []byte
+	}{
+		{pathA, rawA},
+		{pathB, rawB},
 	}
-	for p, want := range wantByPath {
-		data, err := os.ReadFile(p)
+	for _, c := range cases {
+		data, err := os.ReadFile(c.path)
 		if err != nil {
-			t.Fatalf("read %q: %v", p, err)
+			t.Fatalf("read %q: %v", c.path, err)
 		}
-		if !bytes.Equal(data, want) {
-			t.Errorf("备份 %q 内容与对应原文不一致: got %q want %q", p, data, want)
+		if !bytes.Equal(data, c.want) {
+			t.Errorf("备份 %q 内容与对应原文不一致: got %q want %q", c.path, data, c.want)
 		}
 	}
 }
