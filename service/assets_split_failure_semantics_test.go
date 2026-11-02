@@ -44,7 +44,7 @@ func TestRemoveSplitArtifactsBeyond(t *testing.T) {
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9901, "讲义-004.pptx")
 
-	svc.removeSplitArtifactsBeyond(store, lib, dir, "讲义", 3, "")
+	svc.removeSplitArtifactsBeyond(store, lib, nil, dir, "讲义", 3, "")
 
 	for _, n := range []string{"讲义-001.pptx", "讲义-002.pptx", "讲义-003.pptx", "讲义-草稿.pptx", "说明.txt"} {
 		mustExist(t, filepath.Join(dir, n))
@@ -58,7 +58,7 @@ func TestRemoveSplitArtifactsBeyond(t *testing.T) {
 	}
 
 	// keepPage=0：全部产物形态（含页序 1..3 当前形态）清理，用户文件保留
-	svc.removeSplitArtifactsBeyond(store, lib, dir, "讲义", 0, "")
+	svc.removeSplitArtifactsBeyond(store, lib, nil, dir, "讲义", 0, "")
 	for _, n := range []string{"讲义-001.pptx", "讲义-002.pptx", "讲义-003.pptx"} {
 		mustNotExist(t, filepath.Join(dir, n))
 	}
@@ -78,7 +78,7 @@ func TestRemoveSplitArtifactsBeyond_LegacyTwoDigitConverged(t *testing.T) {
 		testutil.WriteFile(t, filepath.Join(dir, n), n)
 	}
 
-	svc.removeSplitArtifactsBeyond(store, lib, dir, "演变", 3, "")
+	svc.removeSplitArtifactsBeyond(store, lib, nil, dir, "演变", 3, "")
 
 	for _, n := range []string{"演变-001.pptx", "演变-002.pptx", "演变-003.pptx"} {
 		mustExist(t, filepath.Join(dir, n))
@@ -101,7 +101,7 @@ func TestRemoveSplitArtifactsBeyond_CaseFoldBase(t *testing.T) {
 		testutil.WriteFile(t, filepath.Join(dir, n), n)
 	}
 
-	svc.removeSplitArtifactsBeyond(store, lib, dir, "abc", 2, "")
+	svc.removeSplitArtifactsBeyond(store, lib, nil, dir, "abc", 2, "")
 
 	mustExist(t, filepath.Join(dir, "Abc-001.pptx"))
 	mustExist(t, filepath.Join(dir, "Abc-002.pptx"))
@@ -128,7 +128,7 @@ func TestRemoveSplitArtifactsBeyond_UserFileAfterSplitAtKept(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(dir, "守卫-005.pptx"), "user")
 	testutil.WriteFile(t, filepath.Join(dir, "守卫-02.pptx"), "user-legacy")
 
-	svc.removeSplitArtifactsBeyond(store, lib, dir, "守卫", 3, splitAt)
+	svc.removeSplitArtifactsBeyond(store, lib, nil, dir, "守卫", 3, splitAt)
 
 	mustNotExist(t, filepath.Join(dir, "守卫-004.pptx"))
 	mustNotExist(t, filepath.Join(dir, "守卫-01.pptx"))
@@ -525,7 +525,7 @@ func TestAssetSplitReplace_CaseOnlyRenameResplits(t *testing.T) {
 		insertIndexRowForTest(t, svc, lib.ID, int64(9801+i), "abc/"+n)
 	}
 	if err := store.upsertSplitRecord("Abc.pptx", hash, outDir, 3,
-		splitAt, model.AssetSplitTargetReplace, "abc", false); err != nil {
+		splitAt, model.AssetSplitTargetReplace, "abc", false, nil); err != nil {
 		t.Fatalf("写入上次 replace 记录: %v", err)
 	}
 

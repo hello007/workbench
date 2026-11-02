@@ -115,7 +115,7 @@ func TestAssetSplit_SourceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9001, "旧名/旧名-001.pptx")
@@ -207,7 +207,7 @@ func TestAssetSplit_SourceResplitTriggeredByMissingPage(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage3, "old-3", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("缺页旧名.pptx", hash, oldDir, 3,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9302, "缺页旧名/缺页旧名-002.pptx")
@@ -272,7 +272,7 @@ func TestAssetSplit_SourceResplitMissingFirstPageCleaned(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("缺二旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9322, "缺二旧名/缺二旧名-002.pptx")
@@ -335,7 +335,7 @@ func TestAssetSplit_SourceResplitCoreFailureKeepsRenamedOldArtifacts(t *testing.
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("失败前旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9401, "失败前旧名/失败前旧名-001.pptx")
@@ -421,7 +421,7 @@ func TestAssetSplit_ReplaceResplitCleansRenamedOldArtifacts(t *testing.T) {
 	testutil.WriteFile(t, draft, "draft")
 	if err := store.upsertSplitRecord("旧替换.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9101, "旧替换/"+filepath.Base(oldPage1))
@@ -506,7 +506,7 @@ func TestAssetSplit_ReplaceResplitCleansOtherTargetOldArtifacts(t *testing.T) {
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("切换旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetSource, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 
@@ -565,7 +565,7 @@ func TestAssetSplit_ReplaceRecycleFailureKeepsCleanedOldArtifacts(t *testing.T) 
 	writeSplitArtifactAt(t, oldPage2, "old-2", "2026-10-30 10:00:00")
 	if err := store.upsertSplitRecord("旧替换名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9251, "旧替换名/"+filepath.Base(oldPage1))
@@ -634,7 +634,7 @@ func TestAssetSplit_ReplaceFailureKeepsRenamedOldArtifacts(t *testing.T) {
 	testutil.WriteFile(t, oldPage2, "old-2")
 	if err := store.upsertSplitRecord("失败旧名.pptx", hash, oldDir, 2,
 		"2026-10-30 10:00:00", model.AssetSplitTargetReplace, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	insertIndexRowForTest(t, svc, lib.ID, 9201, "失败旧名/"+filepath.Base(oldPage1))

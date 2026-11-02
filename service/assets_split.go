@@ -506,7 +506,7 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	if record != nil {
 		splitAt = record.splitAt
 	}
-	s.removeSplitArtifactsBeyond(store, lib, outDir, baseName, result.PageCount, splitAt)
+	s.removeSplitArtifactsBeyond(store, lib, record, outDir, baseName, result.PageCount, splitAt)
 
 	// 5.2 旧产物目录收尾清理（改名重链 / 跨落点切换 / 同目录改主干等形态）：
 	//     决策统一走 splitArtifactCleanupPlan 单点（与 replace 链路同源，防口径
@@ -520,9 +520,12 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 
 	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）。产物主干
 	//    持久化（v9）——source/cache 落点核心原生命名恒为 <baseName>-NNN.pptx。
+	//    页级指纹（v10）在旧产物清理完成后按本次落盘字节计算：任一页哈希失败降级为
+	//    空指纹（回落 mtime 守卫）并 Warn，不回滚已成功的拆分与产物。
+	fingerprints := s.splitArtifactFingerprints(lib, rel, result.Files, nil)
 	if err := store.upsertSplitRecord(rel, hash, result.OutputDir, result.PageCount,
 		time.Now().Format("2006-01-02 15:04:05"), target, baseName,
-		false); err != nil {
+		false, fingerprints); err != nil {
 		return splitOutcome{rel: rel}, fmt.Errorf("写入拆分记录失败（%s）: %w", rel, err)
 	}
 	return splitOutcome{
@@ -741,6 +744,11 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		pages = append(pages, page)
 	}
 
+	// 页级指纹（v10）：逐页 rename + Stat 通过后按最终文件名与页序计算；删源失败
+	// 补写记录与成功记录两处共用同一份。计算失败降级为空指纹（回落 mtime 守卫）
+	// 并 Warn，不回滚已成功的拆分与产物（产物可能已落盘甚至已删源）。
+	fingerprints := s.splitArtifactFingerprints(lib, rel, renamed, pages)
+
 	// 6. 逐页建索引（复用扫描单文件重链）：源 fileID 供标注迁移，产物 fileID 由
 	//    写入后回读取得（newFileID 只有索引行存在才可得，见 PRD D3）
 	srcRec, srcExists, err := store.fileRecordByPath(rel)
@@ -824,7 +832,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 历史产物收尾清理延迟到此刻：此前任何失败/取消都能保住旧页（见步骤 3/5）。
 	// 本次新页之外的旧页（页数减少/页序变化）连同索引行删除，防僵尸素材；删除
 	// 失败保留文件与索引（不再承诺下次重拆收敛），不阻断删源。
-	s.cleanupStaleReplaceArtifacts(store, lib, outDir, oldArtifacts, renamed)
+	s.cleanupStaleReplaceArtifacts(store, lib, record, outDir, oldArtifacts, renamed)
 	// 旧产物目录收尾（与 source 路径同一决策单点 splitArtifactCleanupPlan）：异目录
 	// 清理旧落点；同目录跨 target 清理旧形态产物；同目录同 target 但记录主干 !=
 	// 本次新主干时清理旧主干并以 excludeStem 排除本次新产物；同目录同主干（普通
@@ -848,7 +856,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 		// 批量把产物当新源再拆成「页的页」。写失败仅告警（与步骤 10 同口径）。
 		if recErr := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
 			time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
-			replaceArtifactBase(base), false); recErr != nil {
+			replaceArtifactBase(base), false, fingerprints); recErr != nil {
 			Logger().Warn("就地替换删源失败后写拆分记录失败（产物归属缺失，重试与剔除可能失效）",
 				"libraryId", lib.ID, "file", rel, "err", recErr)
 		}
@@ -877,7 +885,7 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 不可用）。
 	if err := store.upsertSplitRecord(rel, hash, outDir, len(renamed),
 		time.Now().Format("2006-01-02 15:04:05"), model.AssetSplitTargetReplace,
-		replaceArtifactBase(base), true); err != nil {
+		replaceArtifactBase(base), true, fingerprints); err != nil {
 		Logger().Warn("就地替换写拆分记录失败（不影响已完成结果）",
 			"libraryId", lib.ID, "file", rel, "err", err)
 	}
@@ -1384,6 +1392,33 @@ func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []stri
 	return "", false
 }
 
+// splitArtifactFingerprints 拆分成功后计算产物页级指纹（v10）。pages 为 nil 时按
+// 产物文件名解析页序（解析失败回退下标 + 1）；构建失败降级为空指纹并 Warn——产物
+// 已成功落盘（replace 甚至可能已删源），指纹记账失败不应回滚成果，失效方向为
+// 「回落 mtime 守卫」而非误删。
+func (s *AssetLibraryService) splitArtifactFingerprints(lib model.AssetLibrary, rel string, paths []string, pages []int) []splitArtifactFingerprint {
+	if len(paths) == 0 {
+		return nil
+	}
+	if pages == nil {
+		pages = make([]int, len(paths))
+		for i, p := range paths {
+			page := pageSeqFromArtifactName(filepath.Base(p))
+			if page <= 0 {
+				page = i + 1
+			}
+			pages[i] = page
+		}
+	}
+	fps, err := buildSplitFingerprints(paths, pages)
+	if err != nil {
+		Logger().Warn("计算拆分产物页级指纹失败，本次记录降级为无指纹（旧产物清理回落 mtime 守卫）",
+			"libraryId", lib.ID, "file", rel, "err", err)
+		return nil
+	}
+	return fps
+}
+
 // removeSplitArtifactsBeyond 源目录/derived 落点重拆后的旧页收敛（延迟清理）：
 // 只删除匹配产物命名形态 `<源名主干>-<纯数字>.pptx` 的文件，删除条件二选一——
 //   - 页序 > keepPage（页数减少的越界旧页）；
@@ -1400,16 +1435,21 @@ func dominantSplitArtifactStem(byStem map[string]map[int]bool, candidates []stri
 // 覆盖写的页除外，属已知限制，见 splitOneFileWithHash 步骤 4）。页序 ≤ keepPage
 // 且为当前形态的产物由核心同名覆盖写更新，无需删除；keepPage=0 即全量清理产物形态。
 //
-// mtime 守卫（splitAt = 上一次拆分记录的分拆时间）：候选文件 mtime 晚于
-// splitAt + splitArtifactUserFileGrace 视为用户后放入的同名文件保留（产物无内容
-// 指纹，mtime 是归属的最低成本判据；失效方向为漏清而非误删）。splitAt 为空串或
-// 解析失败时守卫不生效（首次拆分 record 为 nil，保持旧行为）。
+// 归属判定（v10）：旧记录指纹可用时以指纹为 allow-list——只删指纹条目（页序 >
+// keepPage，或页序 ≤ keepPage 但指纹名不是当前形态）且 `size + sha256` 全等的
+// 文件；不在指纹中的候选（用户同形文件，任意 mtime）一律保留。指纹缺失/损坏时
+// 回落既有 mtime 守卫（splitAt = 上一次拆分记录的分拆时间，候选 mtime 晚于
+// splitAt + splitArtifactUserFileGrace 视为用户后放入的同名文件保留）。
 //
 // 成功删除的路径批量交 deleteIndexRowsForPaths 清理索引行与缩略图（源落点在库内
 // 时旧页有 files 行，漏清即留下指向已删文件的僵尸素材；derived 落点库外自动静默
 // 跳过）。目录不存在或不可读时静默返回——无旧页可清。删除失败仅告警继续，残留
 // 文件保留（可能因占用或权限失败，不再声称「下次重拆自动收敛」）。
-func (s *AssetLibraryService) removeSplitArtifactsBeyond(store *assetsStore, lib model.AssetLibrary, dir, baseName string, keepPage int, splitAt string) {
+func (s *AssetLibraryService) removeSplitArtifactsBeyond(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, baseName string, keepPage int, splitAt string) {
+	if fingerprintsUsable(record) {
+		s.removeSplitArtifactsBeyondByFingerprint(store, lib, record, dir, baseName, keepPage)
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -1440,6 +1480,37 @@ func (s *AssetLibraryService) removeSplitArtifactsBeyond(store *assetsStore, lib
 		if rmErr := removeSplitArtifactFile(path); rmErr != nil {
 			Logger().Warn("删除超界旧拆分产物失败（残留文件需人工清理）",
 				"libraryId", lib.ID, "dir", dir, "file", name, "err", rmErr)
+			continue
+		}
+		removed = append(removed, path)
+	}
+	if len(removed) > 0 {
+		s.deleteIndexRowsForPaths(store, lib, removed)
+	}
+}
+
+// removeSplitArtifactsBeyondByFingerprint v10 指纹分支：只删指纹条目描述的页产物，
+// 不扫描目录删其他文件——用户同形文件不在指纹中即保留（任意 mtime）。
+func (s *AssetLibraryService) removeSplitArtifactsBeyondByFingerprint(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, baseName string, keepPage int) {
+	removed := make([]string, 0, 4)
+	for _, fp := range record.fingerprints {
+		// 页序 ≤ keepPage 且已是当前形态的正常页由核心同名覆盖写更新，不删除；
+		// 历史 %02d 形态（指纹名与当前形态不同）仍需收敛。
+		if fp.Page <= keepPage && sameNameFold(fp.Name, fmt.Sprintf("%s-%03d.pptx", baseName, fp.Page)) {
+			continue
+		}
+		if !splitFingerprintNameValid(fp.Name) {
+			Logger().Warn("拆分记录指纹文件名非法（疑似路径穿越），跳过",
+				"libraryId", lib.ID, "dir", dir, "name", fp.Name)
+			continue
+		}
+		path := filepath.Join(dir, fp.Name)
+		if !fingerprintMatch(path, fp) {
+			continue // 不存在或内容/大小不符：按用户文件保留
+		}
+		if rmErr := removeSplitArtifactFile(path); rmErr != nil {
+			Logger().Warn("删除超界旧拆分产物失败（残留文件需人工清理）",
+				"libraryId", lib.ID, "dir", dir, "file", fp.Name, "err", rmErr)
 			continue
 		}
 		removed = append(removed, path)
@@ -1550,10 +1621,12 @@ func isSplitArtifactAfterSplitAt(path, splitAt string) bool {
 // 由门控（splitArtifactCleanupPlan）挡在调用之外，此处折叠比较会让旧页整组漏清。
 // 页数覆盖不参与选组（覆盖不足如旧产物仅剩页 2 同样清理）。
 //
-// mtime 守卫（2026-11-02）：删除候选前判 isSplitArtifactAfterSplitAt——候选 mtime
-// 晚于记录 split_at + splitArtifactUserFileGrace 视为用户后放入的同名文件保留
-// （产物无内容指纹，mtime 是归属的最低成本判据；失效方向为漏清而非误删）；split_at
-// 解析失败时守卫不生效（保持旧行为），Stat 失败按不可判定保留。
+// mtime 守卫（2026-11-02；仅指纹不可用的回落路径）：删除候选前判
+// isSplitArtifactAfterSplitAt——候选 mtime 晚于记录 split_at +
+// splitArtifactUserFileGrace 视为用户后放入的同名文件保留（v10 前旧记录无内容
+// 指纹，mtime 是归属的最低成本判据；失效方向为漏清而非误删）；split_at 解析
+// 失败时守卫不生效（保持旧行为），Stat 失败按不可判定保留。指纹可用时改走
+// cleanupSplitArtifactsByFingerprint（size + SHA-256 校验，不看 mtime）。
 //
 // 不可判定（大小写折叠多命中，或回落启发式时目录基名与所有组主干均不匹配）按安全
 // 侧失败：整目录零删除并 Warn，残留交人工清理。记录主干非空但目录内已无该主干组
@@ -1572,6 +1645,13 @@ func isSplitArtifactAfterSplitAt(path, splitAt string) bool {
 // 目录删空后尝试删除（不存在/非空静默——目录内用户自建内容一律不动）。
 func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, excludeStem string) {
 	if record == nil || dir == "" || record.pageCount <= 0 {
+		return
+	}
+	// v10 指纹可用：指纹即 allow-list，逐页校验删除（不再走目录主干启发式——
+	// 天然覆盖 source/replace 两种命名形态，也消除「目录基名不匹配」「同页多候选」
+	// 不可判定分支）。
+	if fingerprintsUsable(record) {
+		s.cleanupSplitArtifactsByFingerprint(store, lib, record, dir, excludeStem)
 		return
 	}
 	byPage, byStem, readErr := collectSplitArtifactsByPage(dir, record.target, record.pageCount)
@@ -1638,9 +1718,9 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 		if hit == "" {
 			continue
 		}
-		// mtime 守卫：产物无内容指纹，mtime 是归属的最低成本判据——晚于记录拆分
-		// 时间的同名文件视为用户后放入，保留不删（失效方向为漏清而非误删）。正常
-		// 路径可高频命中，不告警（Debug 留痕）。
+		// mtime 守卫（v10 指纹不可用时的回落）：mtime 是归属的最低成本判据——晚于
+		// 记录拆分时间的同名文件视为用户后放入，保留不删（失效方向为漏清而非误删）。
+		// 正常路径可高频命中，不告警（Debug 留痕）。
 		if isSplitArtifactAfterSplitAt(hit, record.splitAt) {
 			Logger().Debug("旧产物候选 mtime 晚于拆分时间，按用户文件保留",
 				"libraryId", lib.ID, "path", hit, "splitAt", record.splitAt)
@@ -1652,6 +1732,76 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 			continue
 		}
 		removed = append(removed, hit)
+	}
+	if len(removed) > 0 {
+		s.deleteIndexRowsForPaths(store, lib, removed)
+	}
+	// 仅当目录已空才删除：非空 = 用户自建内容，保留且不算异常（不产生告警噪音）。
+	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) == 0 {
+		if rmErr := os.Remove(dir); !isBenignDirRemoveErr(rmErr) {
+			Logger().Warn("删除改名重链前的旧产物目录失败（保留）", "libraryId", lib.ID, "dir", dir, "err", rmErr)
+		}
+	}
+}
+
+// cleanupSplitArtifactsByFingerprint v10 指纹分支的旧产物清理（ADR §8.1）：
+// 逐页取指纹，按 `dir/<name>` Lstat —— 不存在跳过；非常规文件（符号链接/目录/
+// 设备）跳过并 Warn；`size` 或重算 `sha256` 不符按用户文件保留（Debug 留痕）；
+// 四条件（页 + 名 + size + sha256）全等才删除。指纹名必须是纯 basename，防脏
+// 数据路径穿越。某页无指纹条目 = 不是本记录产物，保留且**不回落 mtime**（避免
+// 把用户文件按旧启发式删掉）。
+//
+// excludeStem 为本次新主干（同目录改主干 M1 保护）：命中同主干候选跳过。正常情况
+// 下旧指纹名是旧主干，不会与本次新主干相同；该判定为防御性兜底。
+func (s *AssetLibraryService) cleanupSplitArtifactsByFingerprint(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, excludeStem string) {
+	removed := make([]string, 0, record.pageCount)
+	for page := 1; page <= record.pageCount; page++ {
+		fp, ok := fingerprintForPage(record, page)
+		if !ok {
+			continue // 该页无指纹条目：不是本记录产物，保留
+		}
+		if !splitFingerprintNameValid(fp.Name) {
+			Logger().Warn("拆分记录指纹文件名非法（疑似路径穿越），跳过",
+				"libraryId", lib.ID, "dir", dir, "page", page, "name", fp.Name)
+			continue
+		}
+		if excludeStem != "" {
+			if stem, _, parsed := parseSplitArtifactName(fp.Name, record.target); parsed && stem == excludeStem {
+				continue // 本次新产物（M1 同目录改主干），禁删
+			}
+		}
+		path := filepath.Join(dir, fp.Name)
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			continue // 不存在（已清理/用户移走）属正常路径
+		}
+		if !info.Mode().IsRegular() {
+			Logger().Warn("旧产物指纹命中非常规文件（符号链接/目录/设备），跳过",
+				"libraryId", lib.ID, "path", path)
+			continue
+		}
+		if info.Size() != fp.Size {
+			Logger().Debug("旧产物指纹大小不符，按用户文件保留",
+				"libraryId", lib.ID, "path", path, "want", fp.Size, "got", info.Size())
+			continue
+		}
+		sum, hashErr := hashFileSHA256(path)
+		if hashErr != nil {
+			Logger().Debug("旧产物指纹重算哈希失败，按用户文件保留",
+				"libraryId", lib.ID, "path", path, "err", hashErr)
+			continue
+		}
+		if !strings.EqualFold(sum, fp.SHA256) {
+			Logger().Debug("旧产物指纹内容不符，按用户文件保留",
+				"libraryId", lib.ID, "path", path)
+			continue
+		}
+		if rmErr := removeSplitArtifactFile(path); rmErr != nil {
+			Logger().Warn("删除旧拆分产物失败（残留需人工清理，本次重拆不再自动收敛）",
+				"libraryId", lib.ID, "path", path, "err", rmErr)
+			continue
+		}
+		removed = append(removed, path)
 	}
 	if len(removed) > 0 {
 		s.deleteIndexRowsForPaths(store, lib, removed)
@@ -1832,7 +1982,11 @@ func replaceArtifactBackupPath(dir, name string) string {
 // 文件成功才删索引行（删除失败先经 removeSplitArtifactFile 重试一次，仍失败保留
 // 文件与索引，仅告警、不承诺下次重拆自动收敛）。调用时机在全部校验与标注迁移
 // 之后，失败/取消路径不会走到这里，旧页在此之前始终保留。
-func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, outDir string, oldArtifacts map[string]struct{}, newFiles []string) {
+//
+// 归属判定（v10）：旧记录指纹可用时，oldArtifacts 中的名字只有在指纹中存在
+// （经 sameNameFold）且 `size + sha256` 全等时才删；不在指纹中的名字视为用户文件
+// 保留（任意 mtime）。指纹缺失/损坏时保持既有按名字删除行为（兼容 v10 前记录）。
+func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, outDir string, oldArtifacts map[string]struct{}, newFiles []string) {
 	if len(oldArtifacts) == 0 {
 		return
 	}
@@ -1840,6 +1994,7 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 	for _, p := range newFiles {
 		newNames[filepath.Base(p)] = struct{}{}
 	}
+	byFingerprint := fingerprintsUsable(record)
 	stale := make([]string, 0, len(oldArtifacts))
 	for name := range oldArtifacts {
 		// 大小写不敏感比对：Windows 上旧产物 `001-abc.pptx` 与本次新页
@@ -1856,6 +2011,15 @@ func (s *AssetLibraryService) cleanupStaleReplaceArtifacts(store *assetsStore, l
 			continue
 		}
 		p := filepath.Join(outDir, name)
+		if byFingerprint {
+			fp, ok := fingerprintForName(record, name)
+			if !ok {
+				continue // 不在指纹中：用户文件，保留
+			}
+			if !fingerprintMatch(p, fp) {
+				continue // 内容/大小不符：用户文件，保留
+			}
+		}
 		// 与 removeSplitArtifactsBeyond / cleanupSplitArtifactsInDirByPage 同口径：
 		// 瞬时句柄占用经一次重试覆盖，仍失败保留文件与索引（不再承诺下次重拆收敛）。
 		if rmErr := removeSplitArtifactFile(p); rmErr != nil {

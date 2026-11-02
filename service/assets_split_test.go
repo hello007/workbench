@@ -170,7 +170,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 	if err != nil || rec != nil {
 		t.Fatalf("未拆分应返回 (nil, nil)，实际 (%v, %v)", rec, err)
 	}
-	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, "", false); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash1", "dir1", 3, "2026-01-01 00:00:00", model.AssetSplitTargetCache, "", false, nil); err != nil {
 		t.Fatalf("upsert 插入: %v", err)
 	}
 	rec, err = store.getSplitRecord("a.pptx")
@@ -183,7 +183,7 @@ func TestAssetsStore_SplitRecordRoundTrip(t *testing.T) {
 		t.Errorf("记录字段不符：%+v", rec)
 	}
 	// 覆盖写（重拆语义）
-	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, "", false); err != nil {
+	if err := store.upsertSplitRecord("a.pptx", "hash2", "dir2", 5, "2026-01-02 00:00:00", model.AssetSplitTargetSource, "", false, nil); err != nil {
 		t.Fatalf("upsert 覆盖: %v", err)
 	}
 	rec, _ = store.getSplitRecord("a.pptx")
@@ -582,10 +582,11 @@ func TestAssetSplit_IncrementalSkip(t *testing.T) {
 	}
 }
 
-// TestAssetSplit_HashChangedResplitsCleansOld 哈希变 → 重拆且旧产物目录清空：
-// 页数减少场景无残留 + 手工放置的旧命名产物（%02d/越界页）一并收敛。哈希变更
-// 经「源文件重写 + 库存 hash 同步更新」驱动（对齐重扫后的状态，不依赖 mtime
-// 时序，docs/spec/test-stability.md）。
+// TestAssetSplit_HashChangedResplitsCleansOld 哈希变 → 重拆且旧产物收敛：
+// 页数减少时记录指纹命中的越界旧页被删除；同形但不在指纹中的用户文件（模拟
+// 复制/解压保留旧 mtime 的自建文件）一律保留（v10 验收核心）。哈希变更经
+// 「源文件重写 + 库存 hash 同步更新」驱动（对齐重扫后的状态，不依赖 mtime 时序，
+// docs/spec/test-stability.md）。
 func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -600,18 +601,16 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "演变.pptx", "cache"); err != nil {
 		t.Fatalf("首次拆分: %v", err)
 	}
-	// 手工放置旧命名/越界产物（模拟 %02d 时代残留与越界页）：页序 ≤ keepPage 的
-	// 两位形态（01/02）与越界页（042/99）都应收敛。mtime 回拨到首次拆分记录时间
-	// 之前——mtime 守卫把「晚于 splitAt + 2s」的文件当作用户后放入保留，不回拨会
-	// 让本用例依赖拆分耗时是否落在 2 秒容差内（不稳定）。
+	// 用户自建同形文件：与产物同主干、页序不越界或越界，但不在记录指纹中——
+	// v10 指纹为 allow-list，任意 mtime 都保留（不再按 mtime 启发式误删）。
 	outDir := filepath.Join(svc.assetsDir, lib.ID, "derived", "演变")
 	store := svc.openStoreForTest(t, lib.ID)
 	rec, err := store.getSplitRecord("演变.pptx")
 	if err != nil || rec == nil {
 		t.Fatalf("读首次拆分记录: rec=%+v err=%v", rec, err)
 	}
-	for _, junk := range []string{"演变-01.pptx", "演变-02.pptx", "演变-042.pptx", "演变-99.pptx"} {
-		writeSplitArtifactAt(t, filepath.Join(outDir, junk), "junk", rec.splitAt)
+	for _, userFile := range []string{"演变-01.pptx", "演变-042.pptx"} {
+		writeSplitArtifactAt(t, filepath.Join(outDir, userFile), "user-copy", rec.splitAt)
 	}
 
 	// 源文件变为 2 页 + 库存 hash 同步更新（确定性驱动哈希失配）
@@ -637,25 +636,10 @@ func TestAssetSplit_HashChangedResplitsCleansOld(t *testing.T) {
 	if res.PageCount != 2 || len(res.Files) != 2 {
 		t.Fatalf("重拆应产出 2 页：%+v", res)
 	}
-	// 旧产物（3 页产物 + 手工残留）全部收敛，目录内恰为 2 个新产物
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("读产物目录: %v", err)
-	}
-	got := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		got[e.Name()] = true
-	}
-	want := map[string]bool{"演变-001.pptx": true, "演变-002.pptx": true}
-	for name := range got {
-		if !want[name] {
-			t.Errorf("重拆后应无残留产物：%q", name)
-		}
-	}
-	for name := range want {
-		if !got[name] {
-			t.Errorf("重拆产物缺失：%q", name)
-		}
+	// 指纹命中的第 3 页旧产物删除，新产物齐全；用户同形文件保留
+	mustNotExist(t, filepath.Join(outDir, "演变-003.pptx"))
+	for _, name := range []string{"演变-001.pptx", "演变-002.pptx", "演变-01.pptx", "演变-042.pptx"} {
+		mustExist(t, filepath.Join(outDir, name))
 	}
 	// 记录更新为新页数且 UpToDate
 	view, err := svc.GetAssetSplitRecord(lib.ID, "演变.pptx")

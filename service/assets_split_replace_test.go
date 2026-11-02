@@ -197,6 +197,21 @@ func TestAssetSplitReplace_Success(t *testing.T) {
 	if record.artifactStem != replaceArtifactBase("方案") {
 		t.Errorf("replace 记录产物主干应为 %q，实际 %q", replaceArtifactBase("方案"), record.artifactStem)
 	}
+	// 写入时机（v10）：replace 成功路径按最终产物文件名与页序写页级指纹，逐页须与
+	// 落盘字节全等（变异为 nil / 页序错位须变红）。
+	if len(record.fingerprints) != 3 {
+		t.Fatalf("replace 记录应有 3 条页级指纹，实际 %+v", record.fingerprints)
+	}
+	for page := 1; page <= 3; page++ {
+		want := fmt.Sprintf("%03d-方案.pptx", page)
+		fp := record.fingerprints[page-1]
+		if fp.Page != page || fp.Name != want {
+			t.Errorf("第 %d 页指纹应为页序 %d / 名 %q，实际 %+v", page, page, want, fp)
+		}
+		if !fingerprintMatch(filepath.Join(wantDir, want), fp) {
+			t.Errorf("第 %d 页指纹应与落盘产物字节一致：%+v", page, fp)
+		}
+	}
 }
 
 // TestAssetSplitReplace_MigratesAnnotations 标注迁移：源文件级星级/备注/标签

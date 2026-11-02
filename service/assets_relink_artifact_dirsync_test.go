@@ -67,7 +67,7 @@ func setupDirSyncFixture(t *testing.T, target string) *dirSyncFixture {
 	}
 
 	store := svc.openStoreForTest(t, lib.ID)
-	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, "方案", false); err != nil {
+	if err := store.upsertSplitRecord(oldRel, "h-dirsync", oldOut, 2, dirSyncSplitAt, target, "方案", false, nil); err != nil {
 		t.Fatalf("写入拆分记录: %v", err)
 	}
 	for page := 1; page <= 2; page++ {
@@ -184,7 +184,7 @@ func TestRelocateAssetFile_ArtifactDirMovedWithSource(t *testing.T) {
 			before := *splitRecordRowForTest(t, f.svc, f.lib.ID, f.newRel)
 			relocateForDirSync(t, f)
 			after := splitRecordRowForTest(t, f.svc, f.lib.ID, f.newRel)
-			if after == nil || *after != before {
+			if !splitRecordEqualForTest(after, &before) {
 				t.Errorf("重复重链应幂等零变更，实际 %+v → %+v", before, after)
 			}
 			if n := countSplitRecordsForTest(t, f.svc, f.lib.ID); n != 1 {

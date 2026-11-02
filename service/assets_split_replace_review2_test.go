@@ -367,7 +367,7 @@ func TestSplitRecordMigrate_RemovesDirectoryGuard(t *testing.T) {
 	// 源已删的 replace 记录：不阻断且 output_dir 按库根重算
 	if err := store.upsertSplitRecord("media/a.pptx", "hash", filepath.Join(dir, "media", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetReplace, "",
-		true); err != nil {
+		true, nil); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
 	if _, err := svc.RenameAssetFolder(lib.ID, "media", "media2"); err != nil {
@@ -383,7 +383,7 @@ func TestSplitRecordMigrate_RemovesDirectoryGuard(t *testing.T) {
 	// 源仍存在的 cache 记录（source_removed=0）同样不阻断，output_dir 保持原值
 	if err := store.upsertSplitRecord("media2/a.pptx", "hash", filepath.Join(dir, "media2", "a"),
 		2, "2026-10-20 10:00:00", model.AssetSplitTargetCache, "",
-		false); err != nil {
+		false, nil); err != nil {
 		t.Fatalf("写拆分记录: %v", err)
 	}
 	if _, err := svc.RenameAssetFolder(lib.ID, "media2", "media3"); err != nil {
@@ -427,6 +427,20 @@ func TestAssetSplitReplace_SourceDeleteFailureRecordsOwnershipAndRetries(t *test
 	if rec.artifactStem != replaceArtifactBase("删源") {
 		t.Errorf("删源失败补写记录同样须持久化产物主干 %q，实际 %q",
 			replaceArtifactBase("删源"), rec.artifactStem)
+	}
+	// 写入时机（v10）：删源失败补写分支同样按最终产物名/页序写页级指纹——产物归属
+	// 不失据（变异为 nil 须变红）。
+	if len(rec.fingerprints) != 2 {
+		t.Fatalf("删源失败补写记录应有 2 条页级指纹，实际 %+v", rec.fingerprints)
+	}
+	for i, want := range []string{"001-删源.pptx", "002-删源.pptx"} {
+		fp := rec.fingerprints[i]
+		if fp.Page != i+1 || fp.Name != want {
+			t.Errorf("第 %d 页指纹应为页序 %d / 名 %q，实际 %+v", i+1, i+1, want, fp)
+		}
+		if !fingerprintMatch(filepath.Join(dir, "删源", want), fp) {
+			t.Errorf("第 %d 页指纹应与落盘产物字节一致：%+v", i+1, fp)
+		}
 	}
 	for _, name := range []string{"001-删源.pptx", "002-删源.pptx"} {
 		if _, statErr := os.Stat(filepath.Join(dir, "删源", name)); statErr != nil {

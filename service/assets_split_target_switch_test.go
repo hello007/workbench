@@ -154,7 +154,7 @@ func TestAssetSplit_SameDirReplaceToSourceCleansOldForm(t *testing.T) {
 	insertIndexRowForTest(t, svc, lib.ID, 9961, "方案/"+filepath.Base(oldPage1))
 	insertIndexRowForTest(t, svc, lib.ID, 9962, "方案/"+filepath.Base(oldPage2))
 	if err := store.upsertSplitRecord("方案.pptx", hash, outDir, 2,
-		splitAt, model.AssetSplitTargetReplace, "方案", false); err != nil {
+		splitAt, model.AssetSplitTargetReplace, "方案", false, nil); err != nil {
 		t.Fatalf("写入上次 replace 记录: %v", err)
 	}
 

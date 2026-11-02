@@ -139,6 +139,14 @@ func (s *assetsStore) migrate() error {
 			}
 			continue
 		}
+		if v == 10 {
+			// v10 为 artifact_fingerprints 单列 ADD COLUMN：同 v8/v9 形态走列存在性
+			// 预判 + 单事务，半迁移库（列已加、版本未落）重开不撞 duplicate column。
+			if err := s.migrateSchemaV10(); err != nil {
+				return fmt.Errorf("素材索引库迁移到 v10 失败: %w", err)
+			}
+			continue
+		}
 		migration, ok := assetsMigrations[v]
 		if !ok {
 			continue // 版本空洞（理论不可达）：缺迁移定义时保持版本号连续性由后续版本处理
@@ -219,6 +227,33 @@ func (s *assetsStore) migrateSchemaV9() error {
 		}
 	}
 	if _, err := tx.Exec("PRAGMA user_version = 9"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateSchemaV10 split_records 页级产物指纹列迁移：列存在性预判使半迁移库可
+// 重入，DDL 与 user_version 同事务提交（SQLite DDL 可回滚）。迁移 SQL 保留在
+// assetsSchemaV10SQL 供文档与新库语义对照，实际执行走本方法。
+func (s *assetsStore) migrateSchemaV10() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var n int
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('split_records') WHERE name = 'artifact_fingerprints'",
+	).Scan(&n); err != nil {
+		return fmt.Errorf("读取 split_records.artifact_fingerprints 列信息失败: %w", err)
+	}
+	if n == 0 {
+		if _, err := tx.Exec("ALTER TABLE split_records ADD COLUMN artifact_fingerprints TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 10"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2339,6 +2374,9 @@ type assetSplitRecord struct {
 	target        string // 落点（model.AssetSplitTarget* 取值）
 	artifactStem  string // 产物命名主干（v9；空串 = v9 前旧记录，读取侧回落目录启发式）
 	sourceRemoved bool   // 源文件是否已移入回收站（仅 replace 成功路径为 true）
+	// fingerprints 页级产物指纹（v10；空 = v10 前旧记录或解析失败，清理侧回落
+	// mtime 守卫）。随记录行同步，重链/目录迁移/备份还原不需要额外同步。
+	fingerprints []splitArtifactFingerprint
 }
 
 // getSplitRecord 按相对路径读单条拆分记录。未命中返回 (nil, nil)——调用方以
@@ -2346,17 +2384,19 @@ type assetSplitRecord struct {
 // 池下自动排空结果集，见 libraryStats 注释）。
 func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) {
 	var r assetSplitRecord
+	var fingerprintsRaw string
 	err := s.db.QueryRow(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed "+
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints "+
 			"FROM split_records WHERE source_rel_path = ?",
 		relPath,
-	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved)
+	).Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	r.fingerprints = parseSplitFingerprintsJSON(fingerprintsRaw, r.sourceRelPath)
 	return &r, nil
 }
 
@@ -2370,7 +2410,7 @@ func (s *assetsStore) getSplitRecord(relPath string) (*assetSplitRecord, error) 
 // 无命中返回 (nil, nil)，与 getSplitRecord 的未命中口径一致。
 func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*assetSplitRecord, error) {
 	rows, err := s.db.Query(
-		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed "+
+		"SELECT source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints "+
 			"FROM split_records WHERE source_rel_path <> ?",
 		exceptRel,
 	)
@@ -2380,9 +2420,11 @@ func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*asse
 	defer rows.Close()
 	for rows.Next() {
 		var r assetSplitRecord
-		if err := rows.Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved); err != nil {
+		var fingerprintsRaw string
+		if err := rows.Scan(&r.sourceRelPath, &r.sourceHash, &r.outputDir, &r.pageCount, &r.splitAt, &r.target, &r.artifactStem, &r.sourceRemoved, &fingerprintsRaw); err != nil {
 			return nil, err
 		}
+		r.fingerprints = parseSplitFingerprintsJSON(fingerprintsRaw, r.sourceRelPath)
 		// 同源折叠排除：SQL 的 <> 是大小写敏感比较，Windows 上仅大小写不同的
 		// 源键（如 A.pptx / a.pptx）实为同一物理文件，若不折叠会被误判为「另一
 		// 源文件占用」而拒绝正常重拆。Linux 大小写敏感语义由 samePathFold 保证。
@@ -2404,14 +2446,19 @@ func (s *assetsStore) splitRecordByOutputDir(outputDir, exceptRel string) (*asse
 // target/sourceRemoved 为落点三态与删源标记（v8 增列，见 assetsSchemaV8SQL）；
 // artifactStem 为本次实际产物命名主干（v9 增列，见 assetsSchemaV9SQL），是清理
 // 与重链探测的唯一权威依据——调用方必须传实际主干，禁传目录名反推值。
-func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target, artifactStem string, sourceRemoved bool) error {
+// fingerprints 为本次落盘产物的页级指纹（v10 增列，见 assetsSchemaV10SQL）：
+// 清理侧以「页 + 文件名 + 字节数 + 全文 SHA-256」全等判定归属，nil/空表示无指纹
+// （失败/取消路径不写记录，旧指纹随旧记录保留）。序列化失败降级空串 + Warn。
+func (s *assetsStore) upsertSplitRecord(relPath, sourceHash, outputDir string, pageCount int, splitAt, target, artifactStem string, sourceRemoved bool, fingerprints []splitArtifactFingerprint) error {
 	_, err := s.db.Exec(
-		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed) "+
-			"VALUES(?, ?, ?, ?, ?, ?, ?, ?) "+
+		"INSERT INTO split_records(source_rel_path, source_hash, output_dir, page_count, split_at, target, artifact_stem, source_removed, artifact_fingerprints) "+
+			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "+
 			"ON CONFLICT(source_rel_path) DO UPDATE SET source_hash = excluded.source_hash, output_dir = excluded.output_dir, "+
 			"page_count = excluded.page_count, split_at = excluded.split_at, target = excluded.target, "+
-			"artifact_stem = excluded.artifact_stem, source_removed = excluded.source_removed",
-		relPath, sourceHash, outputDir, pageCount, splitAt, target, artifactStem, boolToInt(sourceRemoved))
+			"artifact_stem = excluded.artifact_stem, source_removed = excluded.source_removed, "+
+			"artifact_fingerprints = excluded.artifact_fingerprints",
+		relPath, sourceHash, outputDir, pageCount, splitAt, target, artifactStem, boolToInt(sourceRemoved),
+		encodeSplitFingerprints(fingerprints))
 	return err
 }
 

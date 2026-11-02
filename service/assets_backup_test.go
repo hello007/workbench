@@ -604,7 +604,7 @@ func TestRestoreAssetLibrary_PreservesArtifactStem(t *testing.T) {
 	outDir := filepath.Join(svc.assetsDir, "derived", "内容")
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord(rel, "hash-a", outDir, 2,
-		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "内容", false); err != nil {
+		"2026-11-02 10:00:00", model.AssetSplitTargetSource, "内容", false, nil); err != nil {
 		t.Fatalf("写入备份时点拆分记录: %v", err)
 	}
 
@@ -616,7 +616,7 @@ func TestRestoreAssetLibrary_PreservesArtifactStem(t *testing.T) {
 	// 备份后改写记录（主干/落点均变化），还原应回退到备份时点
 	store = svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord(rel, "hash-b", outDir+"-changed", 9,
-		"2026-11-02 11:00:00", model.AssetSplitTargetReplace, "改后主干", true); err != nil {
+		"2026-11-02 11:00:00", model.AssetSplitTargetReplace, "改后主干", true, nil); err != nil {
 		t.Fatalf("备份后改写拆分记录: %v", err)
 	}
 

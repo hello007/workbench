@@ -1,4 +1,5 @@
-{"file": "docs/spec/pptx-split.md", "reason": "核对拆分/清理/指纹实现与规范一致"}
-{"file": "docs/spec/assets-management.md", "reason": "核对 schema 迁移与备份还原契约"}
-{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与覆盖率门禁"}
-{"file": "docs/spec/test-stability.md", "reason": "核对测试无时间/环境外部状态依赖"}
+{"file": ".trellis/tasks/11-02-artifact-page-fingerprint/prd.md", "reason": "验收标准：任意 mtime 用户文件不删、正常旧产物不漏清、四类指纹测试与文档同步"}
+{"file": "docs/spec/pptx-split.md", "reason": "核对三处清理路径、指纹缺失回落与现有大小写/命名契约一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 v10 迁移、半迁移可重入、备份还原与重链/目录迁移一致性"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例是否满足覆盖率门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试无时间/外部状态依赖"}
