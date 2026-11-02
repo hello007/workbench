@@ -940,3 +940,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 197: 落实备份去重审核建议
+
+**Date**: 2026-11-02
+**Task**: 落实备份去重审核建议
+**Branch**: `master`
+
+### Summary
+
+补强 util 留底备份单测：异内容按路径映射、摘要格式与空内容固定摘要守护；spec 明确原始字节留底豁免 SaveJSON 原子写并补碰撞后果；CLAUDE 规则限定损坏留底范围。全量测试与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46e26d7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
