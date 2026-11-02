@@ -907,3 +907,36 @@ schema v9 增 artifact_stem 作为产物归属权威：source/cache 记 baseName
 ### Next Steps
 
 - None - task complete
+
+
+## Session 196: 修复聊天模板损坏备份偶发失败
+
+**Date**: 2026-11-02
+**Task**: 修复聊天模板损坏备份偶发失败
+**Branch**: `master`
+
+### Summary
+
+确认损坏留底按时间戳命名致跨秒重复读取备份无上限，新增 util.BackupCorruptFile 内容摘要去重并替换 5 处留底点；模板/会话用例收紧为恰好 1 份；-count=20、全量测试、覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f86ae31` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
