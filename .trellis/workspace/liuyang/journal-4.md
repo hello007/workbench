@@ -1303,3 +1303,36 @@ lockfile 内升级 undici 7.29.1 -> 7.30.1，npm audit high 清零；8 个 dev-o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 208: 远程统一 GitHub HTTPS 与 rebase 提交规范
+
+**Date**: 2026-11-03
+**Task**: 远程统一 GitHub HTTPS 与 rebase 提交规范
+**Branch**: `master`
+
+### Summary
+
+origin 改为 GitHub HTTPS 并移除 mirror；Git 提交规范强制 fetch + rebase origin/master（禁 merge/force）；同步贡献指南/README/快速入门/release 脚本与 CLAUDE 规则行。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3058d16` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
