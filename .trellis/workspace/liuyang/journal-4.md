@@ -1436,3 +1436,36 @@ DirectoryTree 目录项删除 @mousedown，收敛为 @click 单入口，消除�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 212: ActivityBar 单测语义化
+
+**Date**: 2026-11-03
+**Task**: ActivityBar 单测语义化
+**Branch**: `master`
+
+### Summary
+
+ActivityBar.spec 高亮/点击用例去渲染下标，改 data-panel-id/data-action 语义定位；活跃面板断言收敛为 ID 数组相等；spec 补 §5.2 与 CLAUDE 钩子行；前端全量 2432 passed，覆盖率无回归
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9425ae6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

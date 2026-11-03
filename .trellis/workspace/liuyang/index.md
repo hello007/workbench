@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 211
+- **Total Sessions**: 212
 - **Last Active**: 2026-11-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1438 | Active |
+| `journal-4.md` | ~1471 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 212 | 2026-11-03 | ActivityBar 单测语义化 | `9425ae6` | `master` |
 | 211 | 2026-11-03 | 修复目录选择双触发 | `9e47a3e` | `master` |
 | 210 | 2026-11-03 | origin 切换 GitHub SSH | `63f27ac`, `08a86cd` | `master` |
 | 209 | 2026-11-03 | E2E 失败修复（活动栏语义选择器） | `c3c1582` | `master` |
