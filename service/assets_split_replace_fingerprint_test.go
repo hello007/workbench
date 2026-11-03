@@ -664,3 +664,57 @@ func TestAssetSplitReplace_CoreGuardNotTriggeredByFinalArtifacts(t *testing.T) {
 		t.Errorf("重拆成功应把源移入回收站一次，实际 %v", got)
 	}
 }
+
+// TestAssetSplitReplace_SingleDigitUserFileKeptOnLegacyRecord R1 高危回归：1 位
+// 页序用户文件（`方案-9.pptx`）不得进入 oldArtifacts。指纹不可用的 v10 前旧记录
+// 在重拆成功时会按名删除 oldArtifacts 中的文件——若产物形态判定接受任意位数，
+// 用户文件即被误删且不可恢复。口径与 isReplaceCoreArtifactName 统一为 ≥2 位后，
+// 该文件既不被守卫拒绝、也不进历史产物集合。
+//
+// 变异验证：把 isReplaceArtifactNameExact 的页序长度条件改回「任意位数」，本条
+// 断言「用户文件保留」变红（文件被按名删除）。
+func TestAssetSplitReplace_SingleDigitUserFileKeptOnLegacyRecord(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "单位页序用户文件库", dir)
+	resplitFixture(t, svc, lib, dir, "方案.pptx", 2)
+	store := svc.openStoreForTest(t, lib.ID)
+	// 模拟 v10 前旧记录：产物指纹不可用 → cleanupStaleReplaceArtifacts 回落按名删除
+	if _, err := store.db.Exec(
+		"UPDATE split_records SET artifact_fingerprints = '', retained_fingerprints = '' WHERE source_rel_path = ?",
+		"方案.pptx"); err != nil {
+		t.Fatalf("清空旧记录指纹: %v", err)
+	}
+	outDir := filepath.Join(dir, "方案")
+	userPage := filepath.Join(outDir, "方案-9.pptx")
+	if err := os.WriteFile(userPage, []byte("user-bytes"), 0644); err != nil {
+		t.Fatalf("写用户 1 位页序文件: %v", err)
+	}
+
+	svc.splitCoreFn = (&fakeReplaceCore{pages: 2, payload: []byte("new-bytes")}).split
+	move, recycleCalls := fakeRecycleBin(t)
+	svc.moveToRecycleBinFn = move
+
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "方案.pptx", "replace")
+	if err != nil {
+		t.Fatalf("1 位页序用户文件不得被守卫拒绝：%v", err)
+	}
+	if res.Skipped || !res.SourceRemoved || res.PageCount != 2 {
+		t.Fatalf("应完成 2 页重拆并删源：%+v", res)
+	}
+	if got, readErr := os.ReadFile(userPage); readErr != nil || string(got) != "user-bytes" {
+		t.Errorf("1 位页序用户文件不得进入历史产物集合（err=%v content=%q）", readErr, got)
+	}
+	if n := countIndexRowsByPath(t, svc, lib.ID, "方案/方案-9.pptx"); n != 0 {
+		t.Errorf("用户文件不应被索引，实际 %d 行", n)
+	}
+	for _, name := range []string{"001-方案.pptx", "002-方案.pptx"} {
+		if got, readErr := os.ReadFile(filepath.Join(outDir, name)); readErr != nil || string(got) != "new-bytes" {
+			t.Errorf("新产物应按新内容占位（%s, err=%v, content=%q）", name, readErr, got)
+		}
+	}
+	assertNoReplaceBackup(t, outDir)
+	if got := recycleCalls(); len(got) != 1 {
+		t.Errorf("重拆成功应把源移入回收站一次，实际 %v", got)
+	}
+}

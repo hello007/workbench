@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -737,5 +738,147 @@ func TestAssetSplitRetained_SourceTargetNewProductNotConsumedAsRetained(t *testi
 	}
 	if len(rec.fingerprints) != 3 {
 		t.Errorf("本次 3 页指纹应完整（删新页会使哈希失败降级）：%+v", rec.fingerprints)
+	}
+}
+
+// seedReplaceRecordWithCoreFormRetained 构造「记录 target=replace、落点 A、retained
+// 携带 **source 形态**残留凭证 `<stem>-003.pptx`、源仍在」的落库状态：A 内已有上次
+// replace 的两页产物（`001-<stem>` / `002-<stem>`）与第 3 页 source 形态残留
+// （`<stem>-003`，内容 old-bytes）。该状态等价于「source→replace 同目录切换时第 3 页
+// 旧页删除失败」——真实链路由 cleanupStaleReplaceArtifacts 把该页凭证写入 retained。
+//
+// 直接落库而非驱动两次失败尝试：删除失败注入只覆盖 cleanupStaleReplaceArtifacts，
+// 随后 cleanupSplitArtifactsInDirByPage 走生产删除函数，测试无法在不依赖外部状态
+// （真实句柄占用）的前提下稳定模拟两次连续失败（见 docs/spec/test-stability.md）。
+// 返回源路径、残留页路径与落点目录。
+func seedReplaceRecordWithCoreFormRetained(t *testing.T, svc *AssetLibraryService, lib model.AssetLibrary, dir, name string) (src, stalePage, outDir string) {
+	t.Helper()
+	src = buildAssetsPptx(t, dir, name, []assetsSlideSpec{
+		{titlePh: "一", body: []string{"内容"}},
+		{titlePh: "二", body: []string{"内容"}},
+	})
+	mustScanLibrary(t, svc, lib.ID)
+	stem := splitSourceBaseName(name)
+	outDir = filepath.Join(dir, stem)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("建落点目录: %v", err)
+	}
+	// 上次 replace 的两页产物（replace 形态），构成记录指纹
+	fps := make([]splitArtifactFingerprint, 0, 2)
+	for i := 1; i <= 2; i++ {
+		p := filepath.Join(outDir, replaceArtifactName(i, stem))
+		if err := os.WriteFile(p, []byte("two-bytes"), 0644); err != nil {
+			t.Fatalf("写旧产物页 %d: %v", i, err)
+		}
+		fps = append(fps, splitFingerprintOfTest(t, p, i))
+	}
+	// source 形态残留页（核心中间态命名），凭证写入 retained
+	stalePage = filepath.Join(outDir, fmt.Sprintf("%s-003.pptx", stem))
+	if err := os.WriteFile(stalePage, []byte("old-bytes"), 0644); err != nil {
+		t.Fatalf("写 source 形态残留页: %v", err)
+	}
+	retained := splitFingerprintOfTest(t, stalePage, 3)
+	store := svc.openStoreForTest(t, lib.ID)
+	if err := store.upsertSplitRecord(name, "", outDir, 2,
+		"2026-11-03 10:00:00", model.AssetSplitTargetReplace, replaceArtifactBase(stem),
+		false, fps, []splitArtifactFingerprint{retained}); err != nil {
+		t.Fatalf("写入带 retained 的 replace 记录: %v", err)
+	}
+	return src, stalePage, outDir
+}
+
+// TestAssetSplitRetained_CacheCrossDirConsumesOldDirResidual R2 端到端：replace
+// 记录 output_dir=A 携带 retained（source 形态 `<stem>-003.pptx`），切 target=cache
+// 后新落点 B 的第 3 页与凭证**同名**。旧实现按 basename 过滤 retained，会把 A 中
+// 的真实残留误判为「本次新页同名」而丢掉，残留成永久孤儿；限定同目录后（A ≠ B）
+// 不再过滤，A 残留被消费、B 中新页保留。
+//
+// 变异验证：去掉调用侧 samePathFold 条件（恢复无条件 recordWithoutRetainedNames），
+// 本条「A 残留被删除 / retained 清空」断言变红。
+func TestAssetSplitRetained_CacheCrossDirConsumesOldDirResidual(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "异目录消费库", dir)
+	src, stalePage, oldOutDir := seedReplaceRecordWithCoreFormRetained(t, svc, lib, dir, "异地.pptx")
+
+	// 解除删除失败，切 target=cache（新落点 B 在 derived 目录，与 A 不同）
+	svc.splitCoreFn = (&fakeReplaceCore{pages: 3, payload: []byte("cache-bytes")}).split
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "异地.pptx", "cache")
+	if err != nil {
+		t.Fatalf("切 target=cache 应成功：%v", err)
+	}
+	if res.Skipped || res.Target != model.AssetSplitTargetCache {
+		t.Fatalf("落点切换不得跳过：%+v", res)
+	}
+	rec := splitRecordRowForTest(t, svc, lib.ID, "异地.pptx")
+	if rec == nil || rec.target != model.AssetSplitTargetCache {
+		t.Fatalf("记录应切到 cache：%+v", rec)
+	}
+	if samePathFold(rec.outputDir, oldOutDir) {
+		t.Fatalf("前置：cache 新落点应与旧 replace 落点不同（%s vs %s）", rec.outputDir, oldOutDir)
+	}
+	// A 中残留页被消费删除；retained 不再携带
+	if _, statErr := os.Stat(stalePage); !os.IsNotExist(statErr) {
+		t.Errorf("异目录切换后旧落点残留应被消费删除（%s），stat err=%v", stalePage, statErr)
+	}
+	if len(rec.retained) != 0 {
+		t.Errorf("消费后 retained 应清空：%+v", rec.retained)
+	}
+	// B 中与新残留同名的第 3 页必须保留（不得被 retained 消费误删）
+	cachePage := filepath.Join(rec.outputDir, "异地-003.pptx")
+	if got, readErr := os.ReadFile(cachePage); readErr != nil || string(got) != "cache-bytes" {
+		t.Errorf("新落点第 3 页应保留本次产物内容（err=%v content=%q）", readErr, got)
+	}
+	if _, statErr := os.Stat(src); statErr != nil {
+		t.Errorf("cache 落点应保留源文件：%v", statErr)
+	}
+}
+
+// TestAssetSplitRetained_OwnsOutDirCoreNameRetryAfterUnlock R3：source→replace 同
+// 目录切换后，旧 source 残留以 `<stem>-NNN.pptx` 形式留在 retained；记录已是
+// target=replace 且落点相同（ownsOutDir 为真），旧守卫 firstReplaceCoreArtifactName
+// 无条件拒绝核心同名文件 → 占用解除后重试永久失败。守卫改走
+// firstUnownedReplaceCoreArtifactName 后，凭 retained 归属放行，重试成功并消费残留。
+//
+// 变异验证：把 ownsOutDir 分支守卫改回无条件 firstReplaceCoreArtifactName（或任何
+// 不认凭证的判定），本条「重试成功」断言变红（被拒 + 残留仍在）。
+func TestAssetSplitRetained_OwnsOutDirCoreNameRetryAfterUnlock(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "owns 守卫重试库", dir)
+	src, stalePage, _ := seedReplaceRecordWithCoreFormRetained(t, svc, lib, dir, "守卫.pptx")
+	rec := splitRecordRowForTest(t, svc, lib.ID, "守卫.pptx")
+	if rec == nil || rec.target != model.AssetSplitTargetReplace || len(rec.retained) != 1 {
+		t.Fatalf("前置：记录应为 target=replace 且携带 retained：%+v", rec)
+	}
+
+	// 占用解除后重试 replace
+	svc.parseFn = oneSlideParse()
+	svc.splitCoreFn = (&fakeReplaceCore{pages: 2, payload: []byte("retry-bytes")}).split
+	move, recycleCalls := fakeRecycleBin(t)
+	svc.moveToRecycleBinFn = move
+	res, err := svc.SplitAssetFile(context.Background(), lib.ID, "守卫.pptx", "replace")
+	if err != nil {
+		t.Fatalf("占用解除后重试不得被核心同名守卫永久拒绝：%v", err)
+	}
+	if res.Skipped || !res.SourceRemoved || res.PageCount != 2 {
+		t.Fatalf("重试应成功删源：%+v", res)
+	}
+	if _, statErr := os.Stat(stalePage); !os.IsNotExist(statErr) {
+		t.Errorf("retained 覆盖的核心形态残留应被消费删除（%s），stat err=%v", stalePage, statErr)
+	}
+	rec = splitRecordRowForTest(t, svc, lib.ID, "守卫.pptx")
+	if rec == nil || rec.target != model.AssetSplitTargetReplace || len(rec.retained) != 0 {
+		t.Fatalf("重试成功后记录应为 replace 且 retained 清空：%+v", rec)
+	}
+	outDir := filepath.Join(dir, "守卫")
+	for _, name := range []string{"001-守卫.pptx", "002-守卫.pptx"} {
+		if got, readErr := os.ReadFile(filepath.Join(outDir, name)); readErr != nil || string(got) != "retry-bytes" {
+			t.Errorf("新产物应按新内容占位（%s, err=%v, content=%q）", name, readErr, got)
+		}
+	}
+	assertNoReplaceBackup(t, outDir)
+	if got := recycleCalls(); len(got) != 1 || got[0] != src {
+		t.Errorf("成功应把源移入回收站一次，实际 %v", got)
 	}
 }

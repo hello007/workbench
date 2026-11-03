@@ -455,6 +455,42 @@ func TestIsReplaceArtifactName_PlatformFold(t *testing.T) {
 	}
 }
 
+// TestReplaceArtifactName_PageSeqDigits 页序位数口径表驱动（R1）：两形态均要求
+// **至少 2 位**纯数字（历史 %02d / 当前 %03d），1 位页序一律不是产物；同时交叉
+// 断言两判定函数互不误判——核心中间态 `方案-001.pptx` 只命中 isReplaceArtifactName
+// 与 isReplaceCoreArtifactName，已改名形态 `001-方案.pptx` 只命中 isReplaceArtifactName。
+func TestReplaceArtifactName_PageSeqDigits(t *testing.T) {
+	cases := []struct {
+		name, base         string
+		artifact, coreName bool
+		desc               string
+	}{
+		{"方案-9.pptx", "方案", false, false, "1 位页序核心形态：两函数均 false"},
+		{"方案-2.pptx", "方案", false, false, "1 位页序核心形态（另一实例）"},
+		{"9-方案.pptx", "方案", false, false, "1 位页序已改名形态：两函数均 false"},
+		{"方案-09.pptx", "方案", true, true, "历史 %02d 核心形态：两函数均 true"},
+		{"方案-009.pptx", "方案", true, true, "当前 %03d 核心形态：两函数均 true"},
+		{"09-方案.pptx", "方案", true, false, "历史 %02d 已改名形态：仅产物形态命中"},
+		{"009-方案.pptx", "方案", true, false, "当前 %03d 已改名形态：仅产物形态命中"},
+		{"001-方案.pptx", "方案", true, false, "最终产物名（已改名形态）不误判为核心中间态"},
+		{"方案-001.pptx", "方案", true, true, "核心中间态同时属产物形态"},
+		{"001-123-p.pptx", "123", true, false, "纯数字主干的已改名形态（-p 后缀）"},
+		{"123-001.pptx", "123", true, true, "纯数字主干的核心中间态（核心不加 -p）"},
+		{"123-p-001.pptx", "123-p", true, true, "主干为 123-p 的核心中间态"},
+		{"方案-草稿.pptx", "方案", false, false, "非纯数字页序段"},
+	}
+	for _, tc := range cases {
+		if got := isReplaceArtifactName(tc.name, tc.base); got != tc.artifact {
+			t.Errorf("isReplaceArtifactName(%q, %q) = %v, want %v（%s）",
+				tc.name, tc.base, got, tc.artifact, tc.desc)
+		}
+		if got := isReplaceCoreArtifactName(tc.name, tc.base); got != tc.coreName {
+			t.Errorf("isReplaceCoreArtifactName(%q, %q) = %v, want %v（%s）",
+				tc.name, tc.base, got, tc.coreName, tc.desc)
+		}
+	}
+}
+
 // TestSnapshotReplaceArtifactNames_CaseFold 目录快照：精确主干恒计入；仅大小写
 // 差异的旧产物仅 Windows 计入（折叠），Linux/macOS 是用户文件不计入；用户文件
 // 始终不计入。

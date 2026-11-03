@@ -521,14 +521,20 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 	// 5.3 retained 归属凭证消费（v11 跨 target / 同落点收敛）：旧页清理之后再把
 	//     「上次清理失败未能删除」的残留页尝试删一次。返回值（仍删不掉的条目）写入
 	//     本次记录继续携带，不再静默清空（R1）。dir 取记录的 output_dir——凭证名
-	//     相对该目录，跨目录不消费（函数内 samePathFold 守卫）。先按本次新产物名
-	//     过滤同名条目：旧凭证若与本次新页同名且内容全等（拆分字节确定性），直接
-	//     消费会误删刚生成的产物（与 replace 链路 recordWithoutRetainedNames 同口径）。
+	//     相对该目录，跨目录不消费（函数内 samePathFold 守卫）。**新页同名过滤仅
+	//     同目录生效（R2）**：本次落点与凭证目录相同时，旧凭证若与本次新页同名且
+	//     内容全等（拆分字节确定性），直接消费会误删刚生成的产物；异目录（如
+	//     replace→cache，新落点在 B、凭证在 A）时 basename 相同不代表同一物理文件，
+	//     按名过滤会误丢 A 中的真实残留，故不过滤，全部条目交消费单点处理。
 	retainedDir := ""
+	filterRecord := record
 	if record != nil {
 		retainedDir = record.outputDir
+		if samePathFold(record.outputDir, result.OutputDir) {
+			filterRecord = recordWithoutRetainedNames(record, result.Files)
+		}
 	}
-	retained := s.cleanupRetainedSplitArtifacts(store, lib, recordWithoutRetainedNames(record, result.Files), retainedDir, "")
+	retained := s.cleanupRetainedSplitArtifacts(store, lib, filterRecord, retainedDir, "")
 
 	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）。产物主干
 	//    持久化（v9）——source/cache 落点核心原生命名恒为 <baseName>-NNN.pptx。
@@ -672,13 +678,15 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	var oldArtifacts map[string]struct{}
 	if ownsOutDir {
 		oldArtifacts = snapshotReplaceArtifactNames(outDir, base)
-		// 核心中间态同名文件保护（R5）：核心按 `<base>-NNN.pptx` 原生命名落盘，目录内
-		// 若已存在同形文件（上次核心中断残留、用户自建同名文件等），核心会直接同名
-		// 覆盖写——用户内容不可恢复。守卫放在核心调用之前（早于任何写入），命中即
-		// 拒绝，核心不调用、目录零改动。仅 ownsOutDir 分支需要：非 owns 分支的 stray
-		// 由下方 replaceOutDirOwnedByRecord 放宽判定（凭证内容全等才继续），其余用户
-		// 同名文件仍由步骤 5 逐页拒绝。
-		if coreName := firstReplaceCoreArtifactName(outDir, base); coreName != "" {
+		// 核心中间态同名文件保护（R5/R3）：核心按 `<base>-NNN.pptx` 原生命名落盘，
+		// 目录内若已存在同形文件（上次核心中断残留、用户自建同名文件等），核心会直接
+		// 同名覆盖写——用户内容不可恢复。守卫放在核心调用之前（早于任何写入），命中即
+		// 拒绝，核心不调用、目录零改动。守卫认归属凭证（与放宽分支同口径，
+		// firstUnownedReplaceCoreArtifactName）：凭证（本次指纹或 v11 retained）按名
+		// 命中且内容全等的历史产物不拦截（source→replace 切换后旧 source 残留以
+		// `<stem>-NNN.pptx` 形态留在 retained 时，占用解除后重试必须成功）；无凭证/内容
+		// 不符的中间态同名文件仍拒绝。
+		if coreName := s.firstUnownedReplaceCoreArtifactName(record, outDir, base); coreName != "" {
 			return failed("目录中已存在与拆分核心产物同名的文件（%s），请先移走或重命名后重试", coreName)
 		}
 	} else if stray := firstReplaceArtifactName(outDir, base); stray != "" {
@@ -899,13 +907,18 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 	// 不再因「同形文件」被永久拒绝。
 	retained := s.cleanupStaleReplaceArtifacts(store, lib, record, outDir, oldArtifacts, renamed)
 	// retained 归属凭证消费（R1）：cleanupStaleReplaceArtifacts 只按本次指纹判定，
-	// retained 由独立单点消费。先按本次新页名过滤——同名条目此刻描述的是刚生成的
-	// 新页，若内容恰与凭证全等（拆分字节确定性）直接消费会误删新页，且该名字已是
-	// 本次产物，旧凭证不应再携带。dir 取记录的 output_dir（凭证名相对该目录）。
-	consumedRecord := recordWithoutRetainedNames(record, renamed)
+	// retained 由独立单点消费。**新页同名过滤仅同目录生效（R2）**：同目录时同名条目
+	// 此刻描述的是刚生成的新页，若内容恰与凭证全等（拆分字节确定性）直接消费会误删
+	// 新页，且该名字已是本次产物，旧凭证不应再携带；异目录时（如 replace→cache，新
+	// 落点在 B、凭证在 A）basename 相同不代表同一物理文件，按名过滤会误丢 A 的真实
+	// 残留，故不过滤。dir 取记录的 output_dir（凭证名相对该目录）。
+	consumedRecord := record
 	retainedDir := ""
 	if record != nil {
 		retainedDir = record.outputDir
+		if samePathFold(record.outputDir, outDir) {
+			consumedRecord = recordWithoutRetainedNames(record, renamed)
+		}
 	}
 	retained = mergeSplitFingerprintsByName(retained,
 		s.cleanupRetainedSplitArtifacts(store, lib, consumedRecord, retainedDir, ""))
@@ -1961,6 +1974,9 @@ func pageSeqFromArtifactName(name string) int {
 //   - 核心中间态：<源名主干>-<纯数字>.pptx（核心原生命名，rename 前）；
 //   - 已改名：<纯数字>-<名字主干>.pptx（replaceArtifactName 产物）。
 //
+// 两形态的页序段均要求**至少 2 位**纯数字（与 isReplaceCoreArtifactName 同口径，
+// R1）：1 位页序用户文件（`方案-9.pptx` / `9-方案.pptx`）不进入历史产物集合。
+//
 // 判定精确保守，**仅 Windows 下追加一次大小写折叠**：Windows NTFS 保留大小写但
 // 不敏感，用户把源文件仅改大小写（abc.pptx → Abc.pptx）后重拆，上次产物
 // `001-abc.pptx` 与本次目标 `001-Abc.pptx` 是同一物理文件——按敏感比较会判为
@@ -1984,22 +2000,27 @@ func isReplaceArtifactName(name, base string) bool {
 }
 
 // isReplaceArtifactNameExact 大小写敏感的产物命名形态判定（精确匹配）。
+//
+// 页序段要求**至少 2 位**纯数字（历史 `%02d`、当前 `%03d` 均满足）：核心与编排
+// 永不写 1 位页序，`方案-9.pptx` / `9-方案.pptx` 这类用户文件不得被视为历史产物。
+// 该口径与 isReplaceCoreArtifactNameExact 完全一致——守卫与产物形态判定是同一
+// 事实的两处表达，只改一处会让文件从「拒绝」滑向「按名删除」（R1）。
 func isReplaceArtifactNameExact(name, base string) bool {
 	const ext = ".pptx"
-	// 核心中间态：<源名主干>-<纯数字>.pptx（至少一位页序）
+	// 核心中间态：<源名主干>-<纯数字>.pptx（页序至少 2 位）
 	if len(name) > len(base)+len(ext)+1 &&
 		name[:len(base)] == base && name[len(base)] == '-' &&
 		name[len(name)-len(ext):] == ext {
 		seq := name[len(base)+1 : len(name)-len(ext)]
-		if isAllDigits(seq) {
+		if len(seq) >= 2 && isAllDigits(seq) {
 			return true
 		}
 	}
-	// 已改名形态：<纯数字>-<名字主干>.pptx
+	// 已改名形态：<纯数字>-<名字主干>.pptx（页序至少 2 位）
 	suffix := "-" + replaceArtifactBase(base) + ext
 	if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
 		seq := name[:len(name)-len(suffix)]
-		return isAllDigits(seq)
+		return len(seq) >= 2 && isAllDigits(seq)
 	}
 	return false
 }
@@ -2073,9 +2094,11 @@ func (s *AssetLibraryService) replaceOutDirOwnedByRecord(record *assetSplitRecor
 }
 
 // firstUnownedReplaceCoreArtifactName 目录内第一个「核心中间态命名但无归属凭证
-// （或凭证内容不符）」的文件名（无则空串）。落点归属放宽（replaceOutDirOwnedByRecord）
-// 只放行凭证覆盖的历史产物；核心随后仍会按 `<base>-NNN.pptx` 同名覆盖写，无凭证
-// 的核心同名文件是用户内容，必须早于核心拒绝（R5 守卫在放宽分支同样生效）。
+// （或凭证内容不符）」的文件名（无则空串）。**ownsOutDir 分支与落点归属放宽分支
+// 共用**（R3 统一口径）：核心随后仍会按 `<base>-NNN.pptx` 同名覆盖写，无凭证的
+// 核心同名文件是用户内容，必须早于核心拒绝；凭证（本次指纹或 v11 retained）按名
+// 命中且内容（size + SHA-256）全等的历史产物放行，使 source→replace 切换后旧
+// source 残留（`<stem>-NNN.pptx` 形态留在 retained）在占用解除后重试可成功。
 func (s *AssetLibraryService) firstUnownedReplaceCoreArtifactName(record *assetSplitRecord, dir, base string) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -2090,26 +2113,6 @@ func (s *AssetLibraryService) firstUnownedReplaceCoreArtifactName(record *assetS
 			continue
 		}
 		return e.Name()
-	}
-	return ""
-}
-
-// firstReplaceCoreArtifactName 目录内第一个匹配**核心中间态**命名
-// `<base>-<纯数字>.pptx` 的文件名（无则空串）。大小写折叠与 isReplaceArtifactName
-// 同口径（精确优先，仅 Windows 追加一次整名折叠，含扩展名）：核心同名覆盖写会丢失
-// 用户内容，故 replace 核心调用前据此守卫。
-func firstReplaceCoreArtifactName(dir, base string) string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if isReplaceCoreArtifactName(e.Name(), base) {
-			return e.Name()
-		}
 	}
 	return ""
 }
