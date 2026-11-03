@@ -128,7 +128,7 @@ git push origin v1.0.8
 2. 执行 `wails build`（自动注入版本号和构建时间；Linux 侧叠加 `webkit2_41` 标签）
 3. 创建 GitHub Release 并上传 `workbench.exe`（Windows）与 `workbench-linux-amd64.tar.gz`（Linux，扁平布局：`workbench` 二进制 + `README-linux.md` 依赖说明，解压即用）
 
-> **CI 机制**：远程 `origin` 为 GitHub 主仓库（`https://github.com/hello007/workbench.git`），推送 commit 或 `v*` tag 即直接触发 GitHub Actions（`ci.yml` / `release.yml`），无镜像中转，无需配置额外 remote 或手动同步。
+> **CI 机制**：远程 `origin` 为 GitHub 主仓库（SSH：`git@github.com:hello007/workbench.git`，需已配置 GitHub SSH key），推送 commit 或 `v*` tag 即直接触发 GitHub Actions（`ci.yml` / `release.yml`），无镜像中转，无需配置额外 remote 或手动同步。
 
 ### 测试
 

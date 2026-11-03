@@ -129,7 +129,7 @@ workbench/
 |新增解析提交日志/中文名文件的 git 调用须自带 UTF-8 `-c` 前缀（`-c i18n.logOutputEncoding=UTF-8 -c i18n.commitEncoding=UTF-8 -c core.quotepath=off`，`GitCommand` 不默认带）+ `%x00` 记录 `%x01` 字段分隔（禁 `|` 等可出现在正文中的分隔符）；双进程管道（如 `log -p | patch-id`）走 `util.GitCommand.ExecutePipeline`（git 参数切片不含程序名），错误归一化镜像 run()，失败可降级不阻塞|[branch-compare.md](docs/spec/branch-compare.md)|
 |冲突文件标记解析（utils/conflictMarkers.js）行尾 `\r` 必须逐字节保留（按 `\n` 切分、分隔行正则容忍 `\r?`，CRLF 往返回归测试锁死），块间上下文经每块 `lead` 行保序；rebase 冲突 ours/theirs 语义反转（以当前为准=变基目标侧），改冲突 UI 不得丢该提示；冲突类新方法须前置冲突态 + `--diff-filter=U` 成员校验，变更类走 tryLockRepo|[conflict-resolve-inapp.md](docs/spec/conflict-resolve-inapp.md)|
 |终端联动（chatMarkdown 代码块「在终端执行」）写入 PTY 的命令结尾**禁带换行**（=自动回车）且经 `pre code` textContent 取值（禁 data 属性存命令）；fence 渲染形态改动须同步 renderMsgMarkdown 的 replaceAll 锚点与 chatMarkdown.spec 整串断言；uiStore 信箱 seq 单调递增、消费即清空，TerminalPanel 消费直调 WriteTerminalInput（不经 useTerminal.onData）|[terminal-chat-link.md](docs/spec/terminal-chat-link.md)|
-|提交前强制同步：`git fetch origin` → `git rebase origin/master`（未提交改动先 stash/提交），冲突 `git add` + `git rebase --continue`；禁 merge 提交、禁对共享 master `--force`；推送被拒重跑 fetch+rebase；origin=GitHub HTTPS|[开发规范.md §Git 提交规范](docs/开发规范.md#git-提交规范)|
+|提交前强制同步：`git fetch origin` → `git rebase origin/master`（未提交改动先 stash/提交），冲突 `git add` + `git rebase --continue`；禁 merge 提交、禁对共享 master `--force`；推送被拒重跑 fetch+rebase；origin=GitHub SSH|[开发规范.md §Git 提交规范](docs/开发规范.md#git-提交规范)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

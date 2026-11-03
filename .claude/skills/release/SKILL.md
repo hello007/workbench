@@ -11,7 +11,7 @@ description: WorkBench 发版流程。当用户说"发版/发布版本/打 tag/�
 
 - **版本号唯一来源**：`wails.json` 的 `info.productVersion`。
 - **严禁修改** `wails.json` 顶层 `"version": "2"`（那是 wails schema 版本）。
-- **远程约定**（见 README）：远程 `origin` 为 GitHub 主仓库（`https://github.com/hello007/workbench.git`），是唯一远端。推送即直接触发运行在 GitHub Actions 上的 `release.yml`（监听 GitHub 上的 `v*` tag）自动构建并发布。脚本遍历所有已配置 remote 推送 commit 与 tag（当前仅有 `origin`），**无镜像中转，无需配置额外 remote，也无需手动同步 tag**。
+- **远程约定**（见 README）：远程 `origin` 为 GitHub 主仓库（SSH：`git@github.com:hello007/workbench.git`，需已配置 GitHub SSH key），是唯一远端。推送即直接触发运行在 GitHub Actions 上的 `release.yml`（监听 GitHub 上的 `v*` tag）自动构建并发布。脚本遍历所有已配置 remote 推送 commit 与 tag（当前仅有 `origin`），**无镜像中转，无需配置额外 remote，也无需手动同步 tag**。
 - **push 不可逆**，执行前必须向用户确认版本号。
 
 ## 流程
@@ -77,7 +77,7 @@ fi
 
 - 新版本号与 tag
 - 各 remote 的 push 结果（成功/失败）
-- CI 提示：已推送至 `origin`（GitHub，`https://github.com/hello007/workbench.git`），`.github/workflows/release.yml` 据此自动构建并发布 Release，可在 GitHub 仓库的 Actions 页面观察进度；无镜像中转，无需手动同步 tag。
+- CI 提示：已推送至 `origin`（GitHub，SSH：`git@github.com:hello007/workbench.git`），`.github/workflows/release.yml` 据此自动构建并发布 Release，可在 GitHub 仓库的 Actions 页面观察进度；无镜像中转，无需手动同步 tag。
 
 ## 注意事项
 
