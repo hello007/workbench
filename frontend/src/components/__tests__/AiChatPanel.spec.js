@@ -3,7 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AiChatPanel from '../AiChatPanel.vue'
-import { useAiChatStore } from '../../store'
+import { useAiChatStore, useUiStore } from '../../store'
+import { CMD_RUN_BTN_TITLE_NO_CWD } from '../../utils/chatMarkdown'
 import {
   ListChatDirectories,
   AddChatDirectory,
@@ -1149,6 +1150,79 @@ describe('AiChatPanel.vue', () => {
       await selectFirstDirectory(wrapper)
 
       expect(wrapper.find('.tpl-menu').text()).toContain('暂无模板')
+    })
+  })
+
+  describe('代码块「在终端执行」（终端联动一期）', () => {
+    it('assistant 代码块渲染 cmd-run 操作条按钮，命令原文可经 pre>code textContent 还原', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const btn = wrapper.find('.chat-msg-md .cmd-run-btn')
+      expect(btn.exists()).toBe(true)
+      expect(btn.attributes('data-cmd-run')).toBe('true')
+      // hljs 高亮 span 不破坏 textContent（点击委托按此取命令原文）；
+      // 围栏固定带结尾换行，handler 侧剥除（防 PTY 自动回车）
+      const code = wrapper.find('.chat-msg-md .cmd-run-wrap pre code')
+      expect(code.element.textContent).toBe('fmt.Println("hi")\n')
+    })
+
+    it('点击按钮：打开底部终端、terminalDir 定位会话 cwd、pending 信箱写入命令原文', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const uiStore = useUiStore()
+      expect(uiStore.terminalVisible).toBe(false)
+      await wrapper.find('.chat-msg-md .cmd-run-btn').trigger('click')
+
+      expect(uiStore.terminalVisible).toBe(true)
+      expect(uiStore.terminalDir).toBe('D:\\p')
+      expect(uiStore.terminalPendingCmd).toMatchObject({ dir: 'D:\\p', cmd: 'fmt.Println("hi")' })
+      expect(uiStore.terminalPendingCmd.seq).toBeTypeOf('number')
+    })
+
+    it('会话无 cwd：按钮置灰（is-disabled）且点击不写通道', async () => {
+      GetChatSession.mockResolvedValueOnce({
+        id: 'chatsession-new', directoryId: 'chatdir-1', title: '无 cwd 会话', cwd: '',
+        createdAt: 1, updatedAt: 100,
+        messages: [
+          { role: 'assistant', content: '```bash\ngit status\n```', timestamp: 2 }
+        ]
+      })
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const btn = wrapper.find('.chat-msg-md .cmd-run-btn')
+      expect(btn.exists()).toBe(true)
+      expect(btn.classes()).toContain('is-disabled')
+      // 置灰态 tooltip 同步替换为「当前会话无工作目录」说明（PRD R3）
+      expect(btn.attributes('title')).toBe(CMD_RUN_BTN_TITLE_NO_CWD)
+
+      const uiStore = useUiStore()
+      await btn.trigger('click')
+      expect(uiStore.terminalPendingCmd).toBeNull()
+      expect(uiStore.terminalVisible).toBe(false)
+    })
+
+    it('chat-question 卡片消息不注入 cmd-run 按钮（卡片渲染不回归）', async () => {
+      GetChatSession.mockResolvedValueOnce({
+        id: 'chatsession-new', directoryId: 'chatdir-1', title: '最近会话', cwd: 'D:\\p',
+        createdAt: 1, updatedAt: 100,
+        messages: [
+          { role: 'assistant', content: '```chat-question\n' + JSON.stringify({
+            questions: [{ question: '选择环境', options: [{ label: '测试' }, { label: '生产' }] }]
+          }) + '\n```', timestamp: 2 }
+        ]
+      })
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      expect(wrapper.find('.chat-question').exists()).toBe(true)
+      expect(wrapper.find('.cmd-run-btn').exists()).toBe(false)
     })
   })
 

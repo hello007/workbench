@@ -139,16 +139,41 @@ function renderChatQuestionCard(questions) {
 }
 
 // fence 渲染分流：info 为 chat-question 且 JSON 合法渲染交互卡片；
-// 非法 JSON / 其他语言走默认代码块渲染（未闭合围栏在流式期间同样按普通代码块容错显示）
+// 非法 JSON / 其他语言走默认代码块渲染并注入「在终端执行」操作条
+// （未闭合围栏在流式期间同样按普通代码块容错显示，按钮随之出现，无碍）
+
+// 「在终端执行」操作条注入：普通代码块（非 chat-question）的 <pre> 外包一层
+// .cmd-run-wrap 容器 + 头部操作条，按钮以 data-cmd-run 标记供事件委托定位。
+// 命令原文不落 data 属性（多行/引号/长度受限），点击时经容器定位 pre>code 取
+// textContent（天然还原 HTML 转义与高亮 span）。输出形态固定：AiChatPanel 的
+// renderMsgMarkdown 字符串替换逻辑只命中 class="chat-question"/"cmd-run-btn"，
+// 两者互不影响。
+// 「在终端执行」按钮 tooltip 文案常量（导出共用：AiChatPanel 的无 cwd 置灰态
+// 需把 tooltip 替换为「当前会话无工作目录」说明（PRD R3），常量共用防两处文案漂移）
+export const CMD_RUN_BTN_TITLE = '写入全局底部终端（不自动回车，回车执行）'
+export const CMD_RUN_BTN_TITLE_NO_CWD = '当前会话无工作目录，无法送入终端执行'
+
+function wrapCmdRun(preHtml) {
+  return (
+    '<div class="cmd-run-wrap">' +
+    '<div class="cmd-run-bar">' +
+    '<button type="button" class="cmd-run-btn" data-cmd-run="true" ' +
+    `title="${CMD_RUN_BTN_TITLE}">在终端执行</button>` +
+    '</div>' +
+    preHtml +
+    '</div>'
+  )
+}
+
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   const token = tokens[idx]
   const lang = (token.info || '').trim().split(/\s+/)[0]
   if (lang !== 'chat-question') {
-    return defaultFence(tokens, idx, options, env, self)
+    return wrapCmdRun(defaultFence(tokens, idx, options, env, self))
   }
   const questions = parseChatQuestion(token.content)
   if (!questions) {
-    return defaultFence(tokens, idx, options, env, self)
+    return wrapCmdRun(defaultFence(tokens, idx, options, env, self))
   }
   return renderChatQuestionCard(questions)
 }

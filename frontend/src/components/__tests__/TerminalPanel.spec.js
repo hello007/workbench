@@ -25,6 +25,8 @@ vi.mock('../../composables/useTerminal', async () => {
         isActive: ref(false),
         isExited: ref(false),
         currentDir: ref(''),
+        // sessionID 与真实实例对齐（ref）：consumePendingCmd 经它取写入目标
+        sessionID: ref(''),
         ...terminalMock
       }
       capturedInstances.push(inst)
@@ -36,7 +38,8 @@ vi.mock('../../composables/useTerminal', async () => {
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetShellConfigs: vi.fn(),
   GetSettings: vi.fn(),
-  SaveSettings: vi.fn()
+  SaveSettings: vi.fn(),
+  WriteTerminalInput: vi.fn()
 }))
 
 // Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动提示显隐断言用
@@ -945,6 +948,166 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       capturedInstances[0].isExited.value = true // tab-1 非活动（活动为 tab-2）
       await nextTick()
       expect(wrapper.find('.terminal-exit-overlay').exists()).toBe(false)
+    })
+  })
+
+  describe('AI 对话命令消费（terminalPendingCmd 一期联动）', () => {
+    /** 取 WriteTerminalInput mock 本体（断言写入参数与次数） */
+    async function writeMock() {
+      const { WriteTerminalInput } = await import('../../../wailsjs/go/main/App')
+      return WriteTerminalInput
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+      capturedInstances.length = 0
+    })
+
+    afterEach(() => {
+      if (wrapper) {
+        wrapper.unmount()
+        wrapper = null
+      }
+    })
+
+    it('dir 有对应 tab：激活并直调 WriteTerminalInput（不带换行不自动回车），消费后清空信箱', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      capturedInstances[0].sessionID.value = 'sid-1'
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\proj', 'git status')
+      await flushPromises()
+
+      const WriteTerminalInput = await writeMock()
+      expect(WriteTerminalInput).toHaveBeenCalledTimes(1)
+      expect(WriteTerminalInput).toHaveBeenCalledWith('sid-1', 'git status')
+      // 命令原文写入，结尾不带 \r/\n（回车执行权在用户）
+      const written = WriteTerminalInput.mock.calls[0][1]
+      expect(written.endsWith('\r')).toBe(false)
+      expect(written.endsWith('\n')).toBe(false)
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('同命令两次点击（seq 递增）不被 watch 依赖比较去重丢失', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      capturedInstances[0].sessionID.value = 'sid-1'
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\proj', 'git status')
+      await flushPromises()
+      uiStore.pushTerminalPendingCmd('D:\\proj', 'git status')
+      await flushPromises()
+
+      const WriteTerminalInput = await writeMock()
+      expect(WriteTerminalInput).toHaveBeenCalledTimes(2)
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('dir 无对应 tab：新建 tab（目录为新 dir）激活并写入，消费后清空', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\first')
+      // mock initTerminal 不回填 sessionID（真实实现在 CreateTerminal 后回填），
+      // 此处模拟新建 tab 实例的回填供写入断言
+      terminalMock.initTerminal.mockImplementationOnce(async () => {
+        capturedInstances[capturedInstances.length - 1].sessionID.value = 'sid-new'
+      })
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\other', 'npm test')
+      await flushPromises()
+
+      // 新 tab 以 pending.dir 创建并激活（惰性 init 立即完成）
+      expect(terminalMock.initTerminal).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        'D:\\other',
+        'powershell'
+      )
+      expect(wrapper.vm.$.setupState.tabs).toHaveLength(2)
+      expect(wrapper.vm.$.setupState.activeId).toBe('tab-2')
+      const WriteTerminalInput = await writeMock()
+      expect(WriteTerminalInput).toHaveBeenCalledWith('sid-new', 'npm test')
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('写入报错（会话已退出）走既有 restartTerminal 重启并重试一次，仍清空信箱', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\proj')
+      capturedInstances[0].sessionID.value = 'sid-1'
+      const WriteTerminalInput = await writeMock()
+      WriteTerminalInput.mockRejectedValueOnce(new Error('session exited'))
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\proj', 'echo hi')
+      await flushPromises()
+
+      expect(terminalMock.restartTerminal).toHaveBeenCalledWith(
+        expect.any(Object),
+        'D:\\proj',
+        'powershell'
+      )
+      expect(WriteTerminalInput).toHaveBeenCalledTimes(2)
+      expect(WriteTerminalInput).toHaveBeenLastCalledWith('sid-1', 'echo hi')
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('面板未就绪（从未展开）时 pending 不消费不清空，展开后补偿消费', async () => {
+      wrapper = await createWrapper()
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\late', 'pwd')
+      await flushPromises()
+
+      const WriteTerminalInput = await writeMock()
+      // 未就绪门控：不抢先建 tab、不消费（seq watch immediate 首轮让路）
+      expect(WriteTerminalInput).not.toHaveBeenCalled()
+      expect(uiStore.terminalPendingCmd).toEqual({ dir: 'D:\\late', cmd: 'pwd', seq: 1 })
+      expect(wrapper.vm.$.setupState.tabs).toHaveLength(0)
+
+      // 展开：首个 tab 以 pending.dir 创建（terminalDir 同源），就绪后补偿消费
+      terminalMock.initTerminal.mockImplementationOnce(async () => {
+        capturedInstances[0].sessionID.value = 'sid-late'
+      })
+      uiStore.terminalDir = 'D:\\late'
+      uiStore.terminalVisible = true
+      await nextTick()
+      await flushPromises()
+
+      expect(WriteTerminalInput).toHaveBeenCalledWith('sid-late', 'pwd')
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('挂载时已有遗留 pending（晚挂载时序）：immediate 首轮让路，就绪后补偿消费', async () => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const { GetShellConfigs, GetSettings } = await import('../../../wailsjs/go/main/App')
+      GetShellConfigs.mockResolvedValue([{ type: 'powershell', displayName: 'PowerShell' }])
+      GetSettings.mockResolvedValue({ defaultShell: 'powershell' })
+      const uiStore = useUiStore()
+      uiStore.terminalDir = 'D:\\boot'
+      uiStore.terminalVisible = true
+      uiStore.pushTerminalPendingCmd('D:\\boot', 'echo boot')
+      terminalMock.initTerminal.mockImplementationOnce(async () => {
+        capturedInstances[0].sessionID.value = 'sid-boot'
+      })
+      wrapper = mount(TerminalPanel, { global: { stubs, plugins: [pinia] } })
+      await flushPromises()
+
+      const WriteTerminalInput = await writeMock()
+      expect(WriteTerminalInput).toHaveBeenCalledWith('sid-boot', 'echo boot')
+      expect(uiStore.terminalPendingCmd).toBeNull()
+    })
+
+    it('达 tab 上限且 dir 无对应 tab：清空信箱放弃消费（不报错不阻塞）', async () => {
+      wrapper = await createWrapper()
+      await openPanel(wrapper, 'D:\\a')
+      for (let i = 0; i < 7; i++) {
+        await addTab(wrapper)
+      }
+      expect(wrapper.vm.$.setupState.tabs).toHaveLength(8)
+      const uiStore = useUiStore()
+      uiStore.pushTerminalPendingCmd('D:\\beyond', 'echo x')
+      await flushPromises()
+
+      const WriteTerminalInput = await writeMock()
+      expect(WriteTerminalInput).not.toHaveBeenCalled()
+      expect(uiStore.terminalPendingCmd).toBeNull()
     })
   })
 })

@@ -372,7 +372,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { useAiChatStore, useUiStore } from '../store'
 import { handleError } from '../utils/error'
 import { shortenPath } from '../utils/pathFormat'
-import { renderChatMarkdown } from '../utils/chatMarkdown'
+import { renderChatMarkdown, CMD_RUN_BTN_TITLE, CMD_RUN_BTN_TITLE_NO_CWD } from '../utils/chatMarkdown'
 import { debug } from '../utils/debug'
 import { RespondChatApproval } from '../../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
@@ -625,6 +625,14 @@ const isExternalHref = (href) => /^(https?:|file:|mailto:|tel:|ftp:|data:)/i.tes
 
 const onChatMarkdownClick = (event) => {
   if (onChatQuestionClick(event)) return
+  // 「在终端执行」按钮分流（置于链接拦截前命中返回）：命令原文取自容器内
+  // pre>code 的 textContent（勿用 data 属性存命令——多行/引号/长度受限，
+  // textContent 天然还原 HTML 转义与高亮 span）
+  const cmdBtn = event.target.closest('[data-cmd-run]')
+  if (cmdBtn) {
+    onCmdRunClick(cmdBtn)
+    return
+  }
   const a = event.target.closest('a')
   if (!a) return
   const href = (a.getAttribute('href') || '').trim()
@@ -636,19 +644,44 @@ const onChatMarkdownClick = (event) => {
   }
 }
 
+// 代码块「在终端执行」（AI 对话 × 终端联动一期）：打开全局底部终端并定位到
+// 会话 cwd，命令经 uiStore pending 信箱通道送 TerminalPanel 写入 PTY 输入行
+// （不带换行不自动回车，回车执行权在用户；不落会话消息记录）。
+// 无选中会话 / 会话无 cwd 时静默返回（按钮置灰在渲染层，此处为运行时兜底）
+const onCmdRunClick = (btn) => {
+  const cwd = aiChatStore.selectedChatSession?.cwd
+  if (!cwd) return
+  const code = btn.closest('.cmd-run-wrap')?.querySelector('pre code')
+  // markdown 围栏内容固定带结尾换行（textContent 会带上），原样写入 PTY 等于
+  // 自动回车执行——剥掉结尾换行落实「不自动回车」；多行命令中间换行保留原样
+  const cmd = code ? code.textContent.replace(/\n+$/, '') : ''
+  if (!cmd.trim()) return
+  uiStore.terminalVisible = true
+  uiStore.terminalDir = cwd
+  uiStore.pushTerminalPendingCmd(cwd, cmd)
+}
+
 // ===== chat-question 选择题卡片交互（事件委托：v-html 内无法绑 Vue 事件） =====
 
 // 已答消息渲染：卡片追加 chat-question-answered 置灰类（renderer 输出该 class 属性
 // 固定形态，字符串替换即精准定位；重载历史与提交后重渲染均走此路径保持一致）
 const renderMsgMarkdown = (msg) => {
   const html = renderChatMarkdown(msg.content)
+  let out = html
   if (
     msg.taskId &&
     aiChatStore.isChatQuestionAnswered(aiChatStore.selectedChatSessionId, msg.taskId)
   ) {
-    return html.replace(/class="chat-question"/g, 'class="chat-question chat-question-answered"')
+    out = out.replace(/class="chat-question"/g, 'class="chat-question chat-question-answered"')
   }
-  return html
+  // 无 cwd 会话：代码块「在终端执行」按钮置灰 + tooltip 改为「当前会话无工作目录」
+  // 说明（PRD R3；注入形态固定，字符串替换即精准定位；点击 handler 内仍有 cwd
+  // 兜底拦截，双保险）
+  if (!aiChatStore.selectedChatSession?.cwd) {
+    out = out.replace(/class="cmd-run-btn"/g, 'class="cmd-run-btn is-disabled"')
+    out = out.replaceAll(`title="${CMD_RUN_BTN_TITLE}"`, `title="${CMD_RUN_BTN_TITLE_NO_CWD}"`)
+  }
+  return out
 }
 
 // 卡片内点击分流：处理选项点选与提交，返回 true 表示命中卡片（外层链接拦截逻辑跳过）。
@@ -1424,6 +1457,49 @@ watch(() => uiStore.activePanel, (panel) => {
   background: transparent;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 代码块「在终端执行」操作条：普通代码块外包容器 + 头部次要操作行，
+   边框/圆角上移到容器（pre 原有 margin/border 在容器内置零防双边框），
+   按钮形态对齐 chat-question-option（描边小按钮，hover 主色） */
+.chat-msg-md :deep(.cmd-run-wrap) {
+  margin: 0.5em 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+.chat-msg-md :deep(.cmd-run-wrap pre.hljs) {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+.chat-msg-md :deep(.cmd-run-bar) {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+.chat-msg-md :deep(.cmd-run-btn) {
+  padding: 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.chat-msg-md :deep(.cmd-run-btn:hover) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+/* 无 cwd 会话置灰态（渲染层注入 is-disabled；点击 handler 内另有兜底拦截） */
+.chat-msg-md :deep(.cmd-run-btn.is-disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .chat-msg-md :deep(blockquote) {
   margin: 0.5em 0;

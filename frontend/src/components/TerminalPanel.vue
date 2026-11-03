@@ -127,7 +127,7 @@ import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
-import { GetShellConfigs, GetSettings } from '../../wailsjs/go/main/App'
+import { GetShellConfigs, GetSettings, WriteTerminalInput } from '../../wailsjs/go/main/App'
 
 const uiStore = useUiStore()
 const settingsStore = useSettingsStore()
@@ -311,6 +311,9 @@ watch(
         }
       }
       await ensureActiveTabReady()
+      // 首个 tab 就绪后补偿消费 pending 命令（面板晚于 pending 写入挂载 /
+      // 未就绪时 seq watch 首轮 immediate 已让路的场景，见 consumePendingCmd）
+      await consumePendingCmd()
     }
   },
   { flush: 'post' }
@@ -398,6 +401,71 @@ async function onRestart() {
   if (!tab || !inst || !container) return
   await inst.restartTerminal(container, tab.dir, tab.shellType)
 }
+
+// ── AI 对话代码块「在终端执行」命令消费（一期联动）──
+// uiStore.terminalPendingCmd 为一次性信箱：{ dir, cmd, seq }，消费即清空（置 null）。
+// seq 单调递增作 watch 依赖，防同命令两次点击（对象内容相同）被依赖比较去重丢失。
+// dir 定位 tab（无则新建，机制同 terminalDir 首建），命令直调 WriteTerminalInput
+// 写入 PTY 输入行——不含 \r\n、不自动回车（回车执行权在用户），且不经 useTerminal
+// 的 onData 键盘路径（用户键盘与程序注入路径分离，语义更清晰）。
+async function consumePendingCmd() {
+  const pending = uiStore.terminalPendingCmd
+  if (!pending || !pending.dir || !pending.cmd) return
+  // 面板未就绪门控（晚于 pending 挂载 / 从未展开过）：让路给首个可见 watch
+  // 建好基础 tab 后的补偿调用，避免在 shell 配置未加载时抢先建 tab
+  if (!settingsReady.value || tabs.value.length === 0) return
+  let tab = tabs.value.find(t => t.dir === pending.dir)
+  if (!tab) {
+    tab = createTab({
+      dir: pending.dir,
+      shellType: defaultShell.value,
+      title: shellDisplayName(defaultShell.value)
+    })
+    if (!tab) {
+      // 达 tab 上限无法定位目录：清空信箱放弃（静默，不阻塞后续点击）
+      uiStore.terminalPendingCmd = null
+      return
+    }
+    createInstanceForTab(tab)
+  }
+  activateTab(tab.id)
+  await ensureActiveTabReady()
+  const inst = instances.get(tab.id)
+  const sid = inst?.sessionID?.value
+  if (!sid) {
+    // 实例未就绪（initTerminal 失败等）：清空信箱，不重试旧命令
+    uiStore.terminalPendingCmd = null
+    return
+  }
+  try {
+    await WriteTerminalInput(sid, pending.cmd)
+  } catch {
+    // 目标会话已退出（R6）：走既有 restartTerminal 重建会话后重试一次；
+    // 重启会经 isExited 同步 watch 回流 tab 状态，仍失败由退出提示条接管
+    const container = tabContainers.get(tab.id)
+    if (container) {
+      try {
+        await inst.restartTerminal(container, tab.dir, tab.shellType)
+        await WriteTerminalInput(inst.sessionID.value, pending.cmd)
+      } catch {
+        // 重启或重写仍失败：静默，终端区退出提示条已呈现状态
+      }
+    }
+  } finally {
+    uiStore.terminalPendingCmd = null
+  }
+}
+
+// seq 变化触发消费；immediate 兜底 TerminalPanel 晚于 pending 写入挂载的时序
+// （挂载前遗留的 pending 在首轮即尝试消费，未就绪则由首个可见 watch 补偿消费）。
+// 消费清空（seq getter 变 undefined）再次触发时信箱为 null，函数头部安全返回
+watch(
+  () => uiStore.terminalPendingCmd?.seq,
+  () => {
+    consumePendingCmd()
+  },
+  { immediate: true }
+)
 
 // 字号快捷步进（A-/A+）：与设置页共享 store 字段（双向同步）；
 // 越界（边界外步进）由 store clamp 拦截（返回 false 不变不存），此处无需重复判断

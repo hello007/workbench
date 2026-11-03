@@ -134,3 +134,60 @@ describe('renderChatMarkdown - chat-question 卡片', () => {
     expect(html).toContain('<pre')
   })
 })
+
+// ===== 「在终端执行」操作条注入（AI 对话 × 终端联动一期）=====
+// 普通代码块（非 chat-question）的 <pre> 外包 .cmd-run-wrap 容器 + 头部操作条，
+// 按钮以 data-cmd-run 标记供 AiChatPanel 事件委托定位；命令原文不落 data 属性，
+// 点击时经容器定位 pre>code 取 textContent（天然还原转义与高亮 span）。
+
+describe('renderChatMarkdown - 「在终端执行」操作条注入', () => {
+  it('普通代码块注入操作条：容器 + data-cmd-run 按钮 + pre 依序嵌套（形态稳定，AiChatPanel 字符串替换依赖该形态）', () => {
+    const html = renderChatMarkdown('```\ngit status\n```')
+    // 整体形态精确断言（renderMsgMarkdown 的 is-disabled 替换命中 class="cmd-run-btn" 精确串）。
+    // 围栏内容保留结尾换行、pre 后有 markdown-it 追加的换行，均为 markdown-it 既有形态
+    expect(html).toBe(
+      '<div class="cmd-run-wrap"><div class="cmd-run-bar">' +
+      '<button type="button" class="cmd-run-btn" data-cmd-run="true" ' +
+      'title="写入全局底部终端（不自动回车，回车执行）">在终端执行</button>' +
+      '</div><pre class="hljs"><code>git status\n</code></pre>\n</div>'
+    )
+  })
+
+  it('同消息多个代码块各自注入操作条', () => {
+    const html = renderChatMarkdown('```\na\n```\n\ntext\n\n```\nb\n```')
+    expect(html.match(/<div class="cmd-run-wrap">/g)).toHaveLength(2)
+    expect(html.match(/data-cmd-run="true"/g)).toHaveLength(2)
+  })
+
+  it('命令原文可从容器内 pre>code 的 textContent 还原（HTML 转义/引号/多行/高亮 span 均不破坏）', () => {
+    const cmd = 'echo "<b>&raw</b>" && grep -n "a|b" file\nsecond line'
+    const html = renderChatMarkdown('```bash\n' + cmd + '\n```')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const code = doc.querySelector('.cmd-run-wrap pre code')
+    expect(code).toBeTruthy()
+    // markdown 围栏内容固定带结尾换行；点击 handler 侧剥除（防 PTY 自动回车），
+    // 此处验证还原结果 = 原文 + 固定结尾换行
+    expect(code.textContent).toBe(cmd + '\n')
+  })
+
+  it('已知语言走 hljs 高亮（code 内含 span），textContent 仍还原命令原文', () => {
+    const cmd = 'fmt.Println("hi")'
+    const html = renderChatMarkdown('```go\n' + cmd + '\n```')
+    expect(html).toContain('<span')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    expect(doc.querySelector('.cmd-run-wrap pre code').textContent).toBe(cmd + '\n')
+  })
+
+  it('未闭合围栏（流式中）按普通代码块容错并注入操作条（按钮流式期间即出现）', () => {
+    const html = renderChatMarkdown('```bash\ngit sta')
+    expect(html).toContain('data-cmd-run="true"')
+    expect(html).toContain('<pre')
+  })
+
+  it('chat-question 卡片渲染不受影响（无 cmd-run 注入，不回归）', () => {
+    const html = fenceOf(validCard)
+    expect(html).toContain('class="chat-question"')
+    expect(html).toContain('chat-question-submit')
+    expect(html).not.toContain('cmd-run')
+  })
+})

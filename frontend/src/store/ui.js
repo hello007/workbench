@@ -32,6 +32,23 @@ export const useUiStore = defineStore('ui', () => {
   const terminalTabsSnapshot = ref([])
   const terminalActiveIndex = ref(0)
 
+  // 终端命令送入通道（AI 对话 × 终端联动一期）：AiChatPanel 代码块「在终端执行」
+  // 按钮写入，TerminalPanel watch seq 消费。一次性信箱语义——消费即清空（置 null），
+  // 不持久化、不入会话消息记录。seq 单调递增作 watch 依赖：同命令两次点击
+  // （对象内容相同）靠 seq 变化保证不被 watch 的依赖比较去重丢失。
+  const terminalPendingCmd = ref(null) // { dir: 'D:/xxx', cmd: 'git status', seq: 1 }
+  let terminalCmdSeq = 0
+
+  /**
+   * 写入待送入终端的命令（AiChatPanel「在终端执行」唯一写入入口）
+   * @param {string} dir 目标终端工作目录（会话 cwd）
+   * @param {string} cmd 命令原文（原样写入 PTY 输入行，不带换行不自动回车）
+   */
+  function pushTerminalPendingCmd(dir, cmd) {
+    terminalCmdSeq += 1
+    terminalPendingCmd.value = { dir, cmd, seq: terminalCmdSeq }
+  }
+
   // 弹窗 visible×6：设置 / 更新提示 / 命令面板 / 仓库筛选 + 内容搜索初始串 + 仓库筛选初始目录 id
   const settingsVisible = ref(false)
   const updateDialogVisible = ref(false)
@@ -89,6 +106,8 @@ export const useUiStore = defineStore('ui', () => {
     terminalFullscreen,
     terminalTabsSnapshot,
     terminalActiveIndex,
+    terminalPendingCmd,
+    pushTerminalPendingCmd,
     settingsVisible,
     updateDialogVisible,
     updateInfo,

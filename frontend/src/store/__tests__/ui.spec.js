@@ -119,4 +119,44 @@ describe('ui store', () => {
       expect(store.repoFilterVisible).toBe(true)
     })
   })
+
+  describe('terminalPendingCmd 命令送入通道（AI 对话 × 终端联动一期）', () => {
+    it('初始为 null（一次性信箱，消费即清空）', () => {
+      const store = useUiStore()
+      expect(store.terminalPendingCmd).toBeNull()
+    })
+
+    it('pushTerminalPendingCmd 写入 { dir, cmd, seq }，seq 从 1 起单调递增', () => {
+      const store = useUiStore()
+      store.pushTerminalPendingCmd('D:\\a', 'git status')
+      expect(store.terminalPendingCmd).toEqual({ dir: 'D:\\a', cmd: 'git status', seq: 1 })
+      store.pushTerminalPendingCmd('D:\\b', 'npm test')
+      expect(store.terminalPendingCmd).toEqual({ dir: 'D:\\b', cmd: 'npm test', seq: 2 })
+    })
+
+    it('同命令重复写入 seq 仍递增（防 watch 依赖比较去重丢失第二次点击）', () => {
+      const store = useUiStore()
+      store.pushTerminalPendingCmd('D:\\a', 'git status')
+      store.pushTerminalPendingCmd('D:\\a', 'git status')
+      expect(store.terminalPendingCmd.seq).toBe(2)
+      expect(store.terminalPendingCmd.cmd).toBe('git status')
+    })
+
+    it('消费即清空：置 null 后再写入 seq 不回退（跨消费单调）', () => {
+      const store = useUiStore()
+      store.pushTerminalPendingCmd('D:\\a', 'cmd1')
+      // TerminalPanel 消费路径直接置 null 清空信箱
+      store.terminalPendingCmd = null
+      expect(store.terminalPendingCmd).toBeNull()
+      store.pushTerminalPendingCmd('D:\\a', 'cmd2')
+      expect(store.terminalPendingCmd).toEqual({ dir: 'D:\\a', cmd: 'cmd2', seq: 2 })
+    })
+
+    it('命令原文原样写入不做转义加工（多语言/引号按原文送入，PRD R4）', () => {
+      const store = useUiStore()
+      const cmd = 'echo "你好" && grep -n "a|b" file'
+      store.pushTerminalPendingCmd('D:\\a', cmd)
+      expect(store.terminalPendingCmd.cmd).toBe(cmd)
+    })
+  })
 })
