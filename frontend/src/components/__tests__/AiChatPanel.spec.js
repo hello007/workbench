@@ -83,7 +83,7 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
     id, directoryId: 'chatdir-1', title: id === 'chatsession-new' ? '最近会话' : '旧会话', cwd: 'D:\\p', createdAt: 1, updatedAt: 100,
     messages: [
       { role: 'user', content: '第一问', timestamp: 1, taskId: 't1' },
-      { role: 'assistant', content: '# 结论\n\n**要点一**\n\n```go\nfmt.Println("hi")\n```', timestamp: 2, taskId: 't1' }
+      { role: 'assistant', content: '# 结论\n\n**要点一**\n\n```bash\nfmt.Println("hi")\n```', timestamp: 2, taskId: 't1' }
     ]
   })),
   DeleteChatSession: vi.fn(() => Promise.resolve()),

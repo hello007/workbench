@@ -170,9 +170,9 @@ describe('renderChatMarkdown - 「在终端执行」操作条注入', () => {
     expect(code.textContent).toBe(cmd + '\n')
   })
 
-  it('已知语言走 hljs 高亮（code 内含 span），textContent 仍还原命令原文', () => {
-    const cmd = 'fmt.Println("hi")'
-    const html = renderChatMarkdown('```go\n' + cmd + '\n```')
+  it('已知 shell 语言走 hljs 高亮（code 内含 span），textContent 仍还原命令原文', () => {
+    const cmd = 'grep -n "a|b" file'
+    const html = renderChatMarkdown('```bash\n' + cmd + '\n```')
     expect(html).toContain('<span')
     const doc = new DOMParser().parseFromString(html, 'text/html')
     expect(doc.querySelector('.cmd-run-wrap pre code').textContent).toBe(cmd + '\n')
@@ -182,6 +182,34 @@ describe('renderChatMarkdown - 「在终端执行」操作条注入', () => {
     const html = renderChatMarkdown('```bash\ngit sta')
     expect(html).toContain('data-cmd-run="true"')
     expect(html).toContain('<pre')
+  })
+
+  // ===== 语言过滤（2026-11-03 真机反馈：目录结构被当命令出按钮）=====
+
+  it('目录树（无语言多行围栏）不注入操作条', () => {
+    const tree = '```\nworkbench/\n├── service/\n│   └── chat_service.go\n└── main.go\n```'
+    const html = renderChatMarkdown(tree)
+    expect(html).not.toContain('cmd-run')
+    expect(html).toContain('<pre')
+  })
+
+  it('非 shell 语言（text/json/python/go）不注入操作条', () => {
+    for (const lang of ['text', 'json', 'python', 'go', 'plaintext']) {
+      const html = renderChatMarkdown('```' + lang + '\ncontent here\n```')
+      expect(html, lang).not.toContain('cmd-run')
+    }
+  })
+
+  it('shell 族语言（大小写不敏感）注入操作条', () => {
+    for (const lang of ['bash', 'Bash', 'shell', 'sh', 'powershell', 'cmd', 'zsh', 'console']) {
+      const html = renderChatMarkdown('```' + lang + '\ngit status\n```')
+      expect(html, lang).toContain('data-cmd-run="true"')
+    }
+  })
+
+  it('无语言单行围栏注入（大概率是命令），无语言多行不注入', () => {
+    expect(renderChatMarkdown('```\nnpm run dev\n```')).toContain('data-cmd-run="true"')
+    expect(renderChatMarkdown('```\nline1\nline2\n```')).not.toContain('cmd-run')
   })
 
   it('chat-question 卡片渲染不受影响（无 cmd-run 注入，不回归）', () => {

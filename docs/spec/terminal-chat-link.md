@@ -10,7 +10,7 @@ AiChatPanel（发起）→ uiStore.terminalPendingCmd（内存信箱）→ Termi
 
 | 环节 | 职责 | 关键约束 |
 |---|---|---|
-| `utils/chatMarkdown.js` fence 渲染 | 非 chat-question 围栏外包 `.cmd-run-wrap` + 操作条按钮（`data-cmd-run` + `CMD_RUN_BTN_TITLE*` 常量） | HTML 形态稳定（renderMsgMarkdown 字符串替换依赖锚点）；按钮静态字符串零插值（XSS 面） |
+| `utils/chatMarkdown.js` fence 渲染 | 非 chat-question 围栏按 `shouldWrapCmdRun` 判定后外包 `.cmd-run-wrap` + 操作条按钮（`data-cmd-run` + `CMD_RUN_BTN_TITLE*` 常量） | **语言过滤**：shell 族白名单（CMD_RUN_LANGS）才注入；无语言围栏仅单行（剥尾换行后判定，markdown-it 围栏固定带结尾 `\n`）注入——目录树/JSON/源码块不出按钮（2026-11-03 真机反馈）；HTML 形态稳定（renderMsgMarkdown 字符串替换依赖锚点）；按钮静态字符串零插值（XSS 面） |
 | `AiChatPanel.vue` 事件委托 | `onChatMarkdownClick` 分流顺序：chat-question → cmd-run → 链接拦截 | 命令取 `.cmd-run-wrap` 内 `pre code` 的 **textContent**（还原转义/多行），**勿存 data 属性**；剥除围栏结尾 `\n`（否则=自动回车，违背「不自动回车」） |
 | `store/ui.js` 信箱 | `terminalPendingCmd = { dir, cmd, seq }` + `pushTerminalPendingCmd(dir, cmd)` | seq 单调递增（store 内计数，同命令两次点击不被 watch 依赖去重吞掉）；消费即置 null，不持久化 |
 | `TerminalPanel.vue` 消费 | watch `seq`（immediate）→ 按 dir 找/建 tab → 激活 → 直调 `WriteTerminalInput(tabId, cmd)`（**不含 `\r\n`**） | 直调绑定不经 useTerminal.onData（键盘路径与程序注入路径分离）；try/finally 保证信箱不残留 |

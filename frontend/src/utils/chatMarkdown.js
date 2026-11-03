@@ -139,8 +139,9 @@ function renderChatQuestionCard(questions) {
 }
 
 // fence 渲染分流：info 为 chat-question 且 JSON 合法渲染交互卡片；
-// 非法 JSON / 其他语言走默认代码块渲染并注入「在终端执行」操作条
-// （未闭合围栏在流式期间同样按普通代码块容错显示，按钮随之出现，无碍）
+// 其他围栏走默认代码块渲染，仅 shell 族语言（或无语言的单行内容）注入
+// 「在终端执行」操作条（shouldWrapCmdRun），目录树/JSON/源码块不出按钮
+// （未闭合围栏在流式期间同样按普通代码块容错显示，注入判定照常）
 
 // 「在终端执行」操作条注入：普通代码块（非 chat-question）的 <pre> 外包一层
 // .cmd-run-wrap 容器 + 头部操作条，按钮以 data-cmd-run 标记供事件委托定位。
@@ -165,15 +166,38 @@ function wrapCmdRun(preHtml) {
   )
 }
 
+// 值得注入「在终端执行」的围栏语言白名单（shell 族）。目录树/JSON/文本/各语言
+// 源码块不是命令，一律不注入（2026-11-03 真机反馈：目录结构被当命令出按钮）
+const CMD_RUN_LANGS = new Set([
+  'bash', 'sh', 'shell', 'zsh', 'fish',
+  'powershell', 'pwsh', 'ps1',
+  'cmd', 'batch', 'bat',
+  'console', 'shell-session', 'terminal'
+])
+
+// shouldWrapCmdRun 判断围栏是否注入「在终端执行」操作条：
+//   - 有语言标注：命中 shell 族白名单才注入（js/python/json/text/plaintext 等一律不注入）；
+//   - 无语言标注：仅单行内容注入（单行裸围栏大概率是命令；目录树/结构化输出
+//     都是多行，天然排除）；多行不注入。
+function shouldWrapCmdRun(token) {
+  const lang = (token.info || '').trim().split(/\s+/)[0].toLowerCase()
+  if (lang) return CMD_RUN_LANGS.has(lang)
+  // markdown-it 围栏内容固定带结尾换行，判定「单行」须先剥尾换行
+  const content = (token.content || '').replace(/\n+$/, '')
+  return content.trim().length > 0 && !content.includes('\n')
+}
+
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   const token = tokens[idx]
   const lang = (token.info || '').trim().split(/\s+/)[0]
   if (lang !== 'chat-question') {
-    return wrapCmdRun(defaultFence(tokens, idx, options, env, self))
+    const preHtml = defaultFence(tokens, idx, options, env, self)
+    return shouldWrapCmdRun(token) ? wrapCmdRun(preHtml) : preHtml
   }
   const questions = parseChatQuestion(token.content)
   if (!questions) {
-    return wrapCmdRun(defaultFence(tokens, idx, options, env, self))
+    const preHtml = defaultFence(tokens, idx, options, env, self)
+    return shouldWrapCmdRun(token) ? wrapCmdRun(preHtml) : preHtml
   }
   return renderChatQuestionCard(questions)
 }
