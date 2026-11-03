@@ -109,10 +109,13 @@ describe('ActivityBar', () => {
     })
   }
 
+  const panel = (wrapper, id) => wrapper.find(`[data-panel-id="${id}"]`)
+  const activePanelIds = (wrapper) =>
+    wrapper.findAll('[data-panel-id].is-active').map((w) => w.attributes('data-panel-id'))
+
   it('应该渲染十个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、分支对比、设置、终端）', () => {
     const wrapper = createWrapper()
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items.length).toBe(10)
+    expect(wrapper.findAll('.activity-bar-item').length).toBe(10)
   })
 
   it('每个入口带稳定语义属性（data-panel-id / data-action），供 E2E 语义定位', () => {
@@ -128,147 +131,95 @@ describe('ActivityBar', () => {
 
   it('默认选中工作目录', () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).toContain('is-active')
-    expect(items[1].classes()).not.toContain('is-active')
-    expect(items[2].classes()).not.toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['directory'])
   })
 
   it('选中状态看板时高亮对应图标', () => {
     const wrapper = createWrapper('dashboard')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    // dashboard 是第6个图标（index=5）
-    expect(items[5].classes()).toContain('is-active')
-    expect(items[1].classes()).not.toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['dashboard'])
   })
 
   it('选中 AI 功能时高亮对应图标', () => {
     const wrapper = createWrapper('ai')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    expect(items[3].classes()).not.toContain('is-active')
-    // ai 是第2个图标（index=1）
-    expect(items[1].classes()).toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['ai'])
   })
 
   it('选中 AI 对话时高亮对应图标', () => {
     const wrapper = createWrapper('ai-chat')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    expect(items[1].classes()).not.toContain('is-active')
-    expect(items[3].classes()).not.toContain('is-active')
-    // ai-chat 是第3个图标（index=2）
-    expect(items[2].classes()).toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['ai-chat'])
   })
 
   it('选中素材管理时高亮对应图标', () => {
     const wrapper = createWrapper('assets')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    // assets 是第5个图标（index=4，工具箱之后）
-    expect(items[4].classes()).toContain('is-active')
-    expect(items[3].classes()).not.toContain('is-active')
-    expect(items[5].classes()).not.toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['assets'])
   })
 
   it('选中仓库统计时高亮对应图标', () => {
     const wrapper = createWrapper('stats')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[1].classes()).not.toContain('is-active')
-    // stats 是第7个图标（index=6）
-    expect(items[6].classes()).toContain('is-active')
-    expect(items[2].classes()).not.toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['stats'])
   })
 
   it('选中工具箱时高亮对应图标', () => {
     const wrapper = createWrapper('toolbox')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    expect(items[1].classes()).not.toContain('is-active')
-    expect(items[4].classes()).not.toContain('is-active')
-    expect(items[5].classes()).not.toContain('is-active')
-    // toolbox 是第4个图标（index=3）
-    expect(items[3].classes()).toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['toolbox'])
   })
 
   it('点击工作目录图标应将 activePanel 置为 directory', async () => {
     const wrapper = createWrapper('toolbox')
-    const items = wrapper.findAll('.activity-bar-item')
-    await items[0].trigger('click')
+    await panel(wrapper, 'directory').trigger('click')
     expect(useUiStore().activePanel).toBe('directory')
   })
 
   it('点击素材管理图标应将 activePanel 置为 assets', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // assets 是第5个图标（index=4）
-    await items[4].trigger('click')
+    await panel(wrapper, 'assets').trigger('click')
     expect(useUiStore().activePanel).toBe('assets')
   })
 
   it('点击状态看板图标应将 activePanel 置为 dashboard', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // dashboard 是第6个图标（index=5）
-    await items[5].trigger('click')
+    await panel(wrapper, 'dashboard').trigger('click')
     expect(useUiStore().activePanel).toBe('dashboard')
   })
 
   it('点击 AI 功能图标应将 activePanel 置为 ai', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // ai 是第2个图标（index=1）
-    await items[1].trigger('click')
+    await panel(wrapper, 'ai').trigger('click')
     expect(useUiStore().activePanel).toBe('ai')
   })
 
   it('点击 AI 对话图标应将 activePanel 置为 ai-chat', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // ai-chat 是第3个图标（index=2）
-    await items[2].trigger('click')
+    await panel(wrapper, 'ai-chat').trigger('click')
     expect(useUiStore().activePanel).toBe('ai-chat')
   })
 
   it('点击仓库统计图标应将 activePanel 置为 stats', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // stats 是第7个图标（index=6）
-    await items[6].trigger('click')
+    await panel(wrapper, 'stats').trigger('click')
     expect(useUiStore().activePanel).toBe('stats')
   })
 
   it('点击工具箱图标应将 activePanel 置为 toolbox', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // toolbox 是第4个图标（index=3）
-    await items[3].trigger('click')
+    await panel(wrapper, 'toolbox').trigger('click')
     expect(useUiStore().activePanel).toBe('toolbox')
   })
 
   it('选中分支对比时高亮对应图标', () => {
     const wrapper = createWrapper('branchcompare')
-    const items = wrapper.findAll('.activity-bar-item')
-    expect(items[0].classes()).not.toContain('is-active')
-    // branchcompare 是第8个图标（index=7）
-    expect(items[7].classes()).toContain('is-active')
-    expect(items[2].classes()).not.toContain('is-active')
+    expect(activePanelIds(wrapper)).toEqual(['branchcompare'])
   })
 
   it('点击分支对比图标应将 activePanel 置为 branchcompare', async () => {
     const wrapper = createWrapper('directory')
-    const items = wrapper.findAll('.activity-bar-item')
-    // branchcompare 是第8个图标（index=7）
-    await items[7].trigger('click')
+    await panel(wrapper, 'branchcompare').trigger('click')
     expect(useUiStore().activePanel).toBe('branchcompare')
   })
 
   it('点击设置图标应触发 openSettings 事件', async () => {
     const wrapper = createWrapper()
-    const items = wrapper.findAll('.activity-bar-item')
-    // settings 是第9个图标（index=8，branchcompare 之后）
-    await items[8].trigger('click')
+    await wrapper.find('[data-action="settings"]').trigger('click')
     expect(wrapper.emitted('openSettings')).toBeTruthy()
   })
 })

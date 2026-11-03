@@ -63,6 +63,16 @@
 
 **动机**：面板增删会让索引整体漂移（先例：新增「分支对比」panel 后 settings/terminal 由 7/8 顺移到 8/9，12 例用例点错入口）。语义定位后新增面板只需按 id 定位，既有用例零改动；组件侧须保持 `data-*` 属性稳定，重命名面板 id 视同破坏性变更。
 
+### 5.2 组件单测沿用语义定位（2026-11-03）
+
+`ActivityBar.spec.js` 的高亮与点击用例同样**禁按渲染下标定位**（`findAll('.activity-bar-item')[n]`），改用同一套 `data-panel-id` / `data-action` 语义锚：
+
+- 高亮断言收敛为「活跃面板 ID 数组等于目标值」（`[data-panel-id].is-active`），不再逐个断言其他下标非活跃；
+- 点击用例直接 `find('[data-panel-id="<id>"]').trigger('click')`，设置入口走 `[data-action="settings"]`；
+- 入口总数断言（10 = 8 面板 + 设置 + 终端）表达数量语义，可保留。
+
+新增面板时只需扩展语义属性总览用例的 ID 数组，高亮/点击用例零改动。
+
 ## 6. per-test 覆盖（wailsOverrides）
 
 - 默认所有用例从 `./fixtures` import `{ test, expect }`（非 `@playwright/test`），自动注入 mock
