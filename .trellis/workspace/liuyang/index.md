@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 213
+- **Total Sessions**: 214
 - **Last Active**: 2026-11-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1504 | Active |
+| `journal-4.md` | ~1537 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 214 | 2026-11-03 | dev-only moderate 依赖出清 | `1d655df` | `master` |
 | 213 | 2026-11-03 | retained 目录锚改造 | `2cc43bc` | `master` |
 | 212 | 2026-11-03 | ActivityBar 单测语义化 | `9425ae6` | `master` |
 | 211 | 2026-11-03 | 修复目录选择双触发 | `9e47a3e` | `master` |

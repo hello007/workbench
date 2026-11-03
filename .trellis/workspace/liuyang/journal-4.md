@@ -1502,3 +1502,36 @@ retained_fingerprints 条目增加绝对目录锚 dir：消费按条目目录删
 ### Next Steps
 
 - None - task complete
+
+
+## Session 214: dev-only moderate 依赖出清
+
+**Date**: 2026-11-03
+**Task**: dev-only moderate 依赖出清
+**Branch**: `master`
+
+### Summary
+
+vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overrides glob ^14.0.3 + minimatch ^11.0.4 越过 js-beautify/editorconfig 旧声明；npm audit moderate 归零；npm ci 复现、2432 单测、build、126 Web E2E、3 桌面 E2E 全通过；顺带修正 merge E2E 的 click 单入口计数；同步 security-scan §5.6 与升级 SOP §3.7
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d655df` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
