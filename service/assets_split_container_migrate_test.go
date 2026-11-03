@@ -113,6 +113,7 @@ func TestSplitRecordMigrate_RetainedDirAnchorFollowsContainer(t *testing.T) {
 	root := t.TempDir()
 	mustWritePptxFile(t, filepath.Join(root, "容器", "a.pptx"))
 	mustWritePptxFile(t, filepath.Join(root, "其他", "x.pptx"))
+	mustWritePptxFile(t, filepath.Join(root, "其他", "y.pptx"))
 	lib := mustCreateLibrary(t, svc, "retained 锚迁移库", root)
 	mustScan(t, svc, lib.ID)
 	store := svc.openStoreForTest(t, lib.ID)
@@ -130,6 +131,14 @@ func TestSplitRecordMigrate_RetainedDirAnchorFollowsContainer(t *testing.T) {
 		splitMigrateNow, model.AssetSplitTargetReplace, "", true, nil,
 		[]splitArtifactFingerprint{retainedX}); err != nil {
 		t.Fatalf("写仅落点命中记录: %v", err)
+	}
+	// 落点不在被移动前缀下、但 retained 锚在旧前缀下（跨落点残留）：锚仍须迁移。
+	outsideOut := filepath.Join(root, "缓存", "y")
+	oldAnchor := filepath.Join(root, "容器", "y")
+	if err := store.upsertSplitRecord("其他/y.pptx", "h-y", outsideOut, 2,
+		splitMigrateNow, model.AssetSplitTargetSource, "y", false, nil,
+		[]splitArtifactFingerprint{{Page: 3, Name: "y-003.pptx", Size: 1, SHA256: "y3", Dir: oldAnchor}}); err != nil {
+		t.Fatalf("写跨落点锚记录: %v", err)
 	}
 
 	if _, err := svc.RenameAssetFolder(lib.ID, "容器", "新容器"); err != nil {
@@ -158,6 +167,60 @@ func TestSplitRecordMigrate_RetainedDirAnchorFollowsContainer(t *testing.T) {
 	}
 	if len(recX.retained) != 1 || recX.retained[0].Dir != wantX {
 		t.Errorf("仅落点命中记录 retained 锚应随 output_dir 迁移：%+v（want dir %s）", recX.retained, wantX)
+	}
+
+	recY, err := store.getSplitRecord("其他/y.pptx")
+	if err != nil || recY == nil {
+		t.Fatalf("跨落点锚记录应保留：rec=%v err=%v", recY, err)
+	}
+	if recY.outputDir != outsideOut {
+		t.Errorf("落点不在旧前缀下时不得改写 output_dir：got %s want %s", recY.outputDir, outsideOut)
+	}
+	wantYAnchor := filepath.Join(root, "新容器", "y")
+	if len(recY.retained) != 1 || recY.retained[0].Dir != wantYAnchor {
+		t.Errorf("output_dir 不在前缀下时 retained 锚仍须迁移：%+v（want dir %s）", recY.retained, wantYAnchor)
+	}
+}
+
+// TestSplitRecordMigrate_CacheRecordRetainedAnchor cache 记录（产物落点在库根外，
+// output_dir 不随用户目录迁移）同样可携带库内 retained 锚——跨落点切换后旧 replace
+// 残留按目录锚继续携带。目录重命名时该锚仍须迁移，否则残留文件永久失去归属。
+//
+// 变异验证：把 migrateRetainedAnchorDirsTx 调用放回 target 判定之后，本用例
+// retained[0].Dir 断言变红。
+func TestSplitRecordMigrate_CacheRecordRetainedAnchor(t *testing.T) {
+	svc := newTestAssetService(t)
+	svc.parseFn = okParseForAll
+	root := t.TempDir()
+	mustWritePptxFile(t, filepath.Join(root, "其他", "c.pptx"))
+	mustWritePptxFile(t, filepath.Join(root, "容器", "keep.pptx"))
+	lib := mustCreateLibrary(t, svc, "cache 锚迁移库", root)
+	mustScan(t, svc, lib.ID)
+	store := svc.openStoreForTest(t, lib.ID)
+
+	// cache 落点在库根外（data/assets/<lib>/derived 同形态），不参与 output_dir 迁移。
+	cacheOut := filepath.Join(t.TempDir(), "derived", "c")
+	oldAnchor := filepath.Join(root, "容器", "c")
+	if err := store.upsertSplitRecord("其他/c.pptx", "h-c", cacheOut, 1,
+		splitMigrateNow, model.AssetSplitTargetCache, "c", false, nil,
+		[]splitArtifactFingerprint{{Page: 1, Name: "001-c.pptx", Size: 1, SHA256: "c1", Dir: oldAnchor}}); err != nil {
+		t.Fatalf("写 cache 记录: %v", err)
+	}
+
+	if _, err := svc.RenameAssetFolder(lib.ID, "容器", "新容器"); err != nil {
+		t.Fatalf("RenameAssetFolder: %v", err)
+	}
+
+	rec, err := store.getSplitRecord("其他/c.pptx")
+	if err != nil || rec == nil {
+		t.Fatalf("cache 记录应保留：rec=%v err=%v", rec, err)
+	}
+	if !samePathFold(rec.outputDir, cacheOut) {
+		t.Errorf("cache 落点（库根外）不得改写：got %s want %s", rec.outputDir, cacheOut)
+	}
+	wantAnchor := filepath.Join(root, "新容器", "c")
+	if len(rec.retained) != 1 || !samePathFold(rec.retained[0].Dir, wantAnchor) {
+		t.Errorf("cache 记录的库内 retained 锚应随目录迁移：%+v（want dir %s）", rec.retained, wantAnchor)
 	}
 }
 

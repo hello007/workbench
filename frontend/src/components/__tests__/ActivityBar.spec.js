@@ -93,11 +93,12 @@ describe('ActivityBar', () => {
   // 点击面板项直写 store（不再 emit update:modelValue），设置/终端仍 emit 由 Home 处理。
   // 图标顺序：directory(0) / ai(1) / ai-chat(2) / toolbox(3) / assets(4) / dashboard(5)
   //           / stats(6) / branchcompare(7) / 设置(8) / 终端(9)
-  const createWrapper = (activePanel = 'directory') => {
+  const createWrapper = (activePanel = 'directory', terminalVisible = false) => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const uiStore = useUiStore()
     uiStore.activePanel = activePanel
+    uiStore.terminalVisible = terminalVisible
     return mount(ActivityBar, {
       global: {
         plugins: [pinia],
@@ -110,20 +111,27 @@ describe('ActivityBar', () => {
   }
 
   const panel = (wrapper, id) => wrapper.find(`[data-panel-id="${id}"]`)
-  const activePanelIds = (wrapper) =>
-    wrapper.findAll('[data-panel-id].is-active').map((w) => w.attributes('data-panel-id'))
+  // 活跃项含面板（data-panel-id）与直连动作（data-action，如终端）；仅扫
+  // data-panel-id 会漏掉终端活跃态，无法验证「活跃入口唯一」契约。
+  const activeEntryIds = (wrapper) =>
+    wrapper
+      .findAll('.activity-bar-item.is-active')
+      .map((w) => w.attributes('data-panel-id') || w.attributes('data-action'))
 
   it('应该渲染十个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、分支对比、设置、终端）', () => {
     const wrapper = createWrapper()
+    // 设备指示隐藏时：8 面板 + 设置 + 终端；指示项出现时不占位（独立 class）。
     expect(wrapper.findAll('.activity-bar-item').length).toBe(10)
   })
 
   it('每个入口带稳定语义属性（data-panel-id / data-action），供 E2E 语义定位', () => {
     const wrapper = createWrapper()
     // 面板入口按渲染序输出 data-panel-id（E2E 禁类名 nth 索引，见 e2e-testing.md）
-    expect(wrapper.findAll('[data-panel-id]').map((w) => w.attributes('data-panel-id'))).toEqual([
+    const panelIds = wrapper.findAll('[data-panel-id]').map((w) => w.attributes('data-panel-id'))
+    expect(panelIds).toEqual([
       'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare'
     ])
+    expect(new Set(panelIds).size).toBe(panelIds.length) // 语义锚唯一，禁重复 id
     // 设置/终端为直连动作入口（不切换面板），走 data-action
     expect(wrapper.find('[data-action="settings"]').exists()).toBe(true)
     expect(wrapper.find('[data-action="terminal"]').exists()).toBe(true)
@@ -131,37 +139,42 @@ describe('ActivityBar', () => {
 
   it('默认选中工作目录', () => {
     const wrapper = createWrapper('directory')
-    expect(activePanelIds(wrapper)).toEqual(['directory'])
+    expect(activeEntryIds(wrapper)).toEqual(['directory'])
+  })
+
+  it('终端可见时活跃项包含终端入口（data-action 项同样计入活跃态）', () => {
+    const wrapper = createWrapper('directory', true)
+    expect(activeEntryIds(wrapper)).toEqual(['directory', 'terminal'])
   })
 
   it('选中状态看板时高亮对应图标', () => {
     const wrapper = createWrapper('dashboard')
-    expect(activePanelIds(wrapper)).toEqual(['dashboard'])
+    expect(activeEntryIds(wrapper)).toEqual(['dashboard'])
   })
 
   it('选中 AI 功能时高亮对应图标', () => {
     const wrapper = createWrapper('ai')
-    expect(activePanelIds(wrapper)).toEqual(['ai'])
+    expect(activeEntryIds(wrapper)).toEqual(['ai'])
   })
 
   it('选中 AI 对话时高亮对应图标', () => {
     const wrapper = createWrapper('ai-chat')
-    expect(activePanelIds(wrapper)).toEqual(['ai-chat'])
+    expect(activeEntryIds(wrapper)).toEqual(['ai-chat'])
   })
 
   it('选中素材管理时高亮对应图标', () => {
     const wrapper = createWrapper('assets')
-    expect(activePanelIds(wrapper)).toEqual(['assets'])
+    expect(activeEntryIds(wrapper)).toEqual(['assets'])
   })
 
   it('选中仓库统计时高亮对应图标', () => {
     const wrapper = createWrapper('stats')
-    expect(activePanelIds(wrapper)).toEqual(['stats'])
+    expect(activeEntryIds(wrapper)).toEqual(['stats'])
   })
 
   it('选中工具箱时高亮对应图标', () => {
     const wrapper = createWrapper('toolbox')
-    expect(activePanelIds(wrapper)).toEqual(['toolbox'])
+    expect(activeEntryIds(wrapper)).toEqual(['toolbox'])
   })
 
   it('点击工作目录图标应将 activePanel 置为 directory', async () => {
@@ -208,7 +221,7 @@ describe('ActivityBar', () => {
 
   it('选中分支对比时高亮对应图标', () => {
     const wrapper = createWrapper('branchcompare')
-    expect(activePanelIds(wrapper)).toEqual(['branchcompare'])
+    expect(activeEntryIds(wrapper)).toEqual(['branchcompare'])
   })
 
   it('点击分支对比图标应将 activePanel 置为 branchcompare', async () => {
@@ -251,7 +264,7 @@ describe('ActivityBar - 多设备连接指示', () => {
   it('连接数 <=1 时指示不显示（桌面模式无事件恒此形态，空安全）', () => {
     const wrapper = createWrapper()
     expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
-    // 图标数仍为 10（8 面板 + 设置 + 终端；指示项不占位）
+    // 设备指示隐藏时图标数为 10（8 面板 + 设置 + 终端；指示项不占位）
     expect(wrapper.findAll('.activity-bar-item').length).toBe(10)
     wrapper.unmount()
   })

@@ -126,10 +126,30 @@ func splitFingerprintNameValid(name string) bool {
 // splitArtifactDirWithinLibrary retained 目录锚合法性：须为绝对路径且位于素材库
 // 根目录内（库根自身允许）。空串 / 相对路径 / 库外路径一律 false——目录锚来自
 // 记录 JSON，手工改库可注入任意路径，删除前必须遏制越界。
+//
+// 词法校验后再经 EvalSymlinks 双侧解析复核：库内符号链接/junction 可指向库外，
+// 仅 Rel 词法判断会放行。目录不存在时返回 true 交后续 Lstat 自愈（不误删），
+// 存在但无法解析（权限/悬空链接）按不可判定拒绝。
 func splitArtifactDirWithinLibrary(root, dir string) bool {
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(dir) == "" || !filepath.IsAbs(dir) {
 		return false
 	}
+	if !pathWithinRoot(root, dir) {
+		return false
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		return os.IsNotExist(statErr)
+	}
+	resolvedRoot, rootErr := filepath.EvalSymlinks(root)
+	resolvedDir, dirErr := filepath.EvalSymlinks(dir)
+	if rootErr != nil || dirErr != nil {
+		return false
+	}
+	return pathWithinRoot(resolvedRoot, resolvedDir)
+}
+
+// pathWithinRoot 词法包含判定：dir 相对 root 不得逃逸（`..` 前缀）或为另一卷。
+func pathWithinRoot(root, dir string) bool {
 	rel, err := filepath.Rel(root, dir)
 	if err != nil {
 		return false

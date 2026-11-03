@@ -2333,7 +2333,15 @@ func (s *AssetLibraryService) cleanupRetainedSplitArtifacts(store *assetsStore, 
 		}
 		path := filepath.Join(dir, fp.Name)
 		if _, statErr := os.Lstat(path); statErr != nil {
-			continue // 文件已不存在：条目丢弃（自愈）
+			if os.IsNotExist(statErr) {
+				continue // 文件已不存在：条目丢弃（自愈）
+			}
+			// 权限/句柄占用等瞬态错误不等于文件不存在：丢弃条目会永久丢失归属，
+			// 保留条目待后续重拆重试。
+			Logger().Warn("读取保留归属的历史拆分产物状态失败（条目继续随记录携带）",
+				"libraryId", lib.ID, "path", path, "err", statErr)
+			retainedOut = append(retainedOut, fp)
+			continue
 		}
 		if !fingerprintMatch(path, fp) {
 			continue // 内容不符：文件已被替换/移走，条目丢弃

@@ -628,6 +628,124 @@ func TestCleanupRetainedSplitArtifacts_LegacyEntryWithoutDir(t *testing.T) {
 	mustNotExist(t, stale)
 }
 
+// TestCleanupRetainedSplitArtifacts_LstatNonENOENTRetainsEntry Lstat 的「非不存在」
+// 错误（权限/句柄占用/文件名超长等瞬态）不得丢弃条目——丢弃等于永久失去归属，
+// 残留文件下次重拆会被当作用户同名文件。用超过 NAME_MAX 的纯 basename 稳定触发
+// ENAMETOOLONG（非 ENOENT），跨平台可复现且无需特殊权限。
+func TestCleanupRetainedSplitArtifacts_LstatNonENOENTRetainsEntry(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "Lstat 瞬态错误库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "瞬态")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("建目录: %v", err)
+	}
+	longName := strings.Repeat("a", 300) + ".pptx" // 超过常见 NAME_MAX(255)
+	record := &assetSplitRecord{
+		outputDir: outDir, pageCount: 1, target: model.AssetSplitTargetReplace,
+		retained: []splitArtifactFingerprint{
+			{Page: 1, Name: longName, Size: 1, SHA256: "x", Dir: outDir},
+		},
+	}
+	got := svc.cleanupRetainedSplitArtifacts(store, lib, record, "")
+	if len(got) != 1 || got[0].Name != longName || !samePathFold(got[0].Dir, outDir) {
+		t.Fatalf("Lstat 非 ENOENT 错误应保留条目（含目录锚）：%+v", got)
+	}
+}
+
+// TestMergeSplitFingerprintsByName_DirAware 合并按（目录, 名称）去重：同名异目录
+// 条目描述不同落点的物理文件，必须各自保留；同目录同名只保留 base。
+func TestMergeSplitFingerprintsByName_DirAware(t *testing.T) {
+	base := []splitArtifactFingerprint{
+		{Page: 1, Name: "same.pptx", Dir: "/a"},
+		{Page: 2, Name: "only-base.pptx", Dir: "/a"},
+	}
+	extra := []splitArtifactFingerprint{
+		{Page: 1, Name: "same.pptx", Dir: "/b"},
+		{Page: 2, Name: "only-base.pptx", Dir: "/a"},
+	}
+	got := mergeSplitFingerprintsByName(base, extra)
+	if len(got) != 3 {
+		t.Fatalf("同名异目录应保留两条、同目录同名去重，实际 %+v", got)
+	}
+	for _, fp := range got {
+		if fp.Name == "same.pptx" && fp.Dir != "/a" && fp.Dir != "/b" {
+			t.Errorf("同名条目目录异常：%+v", fp)
+		}
+	}
+	if got := mergeSplitFingerprintsByName(nil, nil); got != nil {
+		t.Errorf("空输入应返回 nil：%+v", got)
+	}
+}
+
+// TestSplitArtifactDirWithinLibrary 目录锚越界遏制：库内路径放行；相对路径、
+// `..` 逃逸、库外绝对路径、指向库外的符号链接（可创建时）拒绝。
+func TestSplitArtifactDirWithinLibrary(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "x")
+	if err := os.MkdirAll(inside, 0755); err != nil {
+		t.Fatalf("建库内目录: %v", err)
+	}
+	if !splitArtifactDirWithinLibrary(root, inside) {
+		t.Error("库内目录应放行")
+	}
+	if !splitArtifactDirWithinLibrary(root, root) {
+		t.Error("库根本身应放行")
+	}
+	for _, dir := range []string{"relative/x", filepath.Join(root, "..", "out"), filepath.Join(inside, "..", "..")} {
+		if splitArtifactDirWithinLibrary(root, dir) {
+			t.Errorf("越界目录应拒绝：%s", dir)
+		}
+	}
+	outside := filepath.Dir(root)
+	link := filepath.Join(root, "escape-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Logf("跳过符号链接用例（当前环境无法创建：%v）", err)
+	} else {
+		defer os.Remove(link)
+		if splitArtifactDirWithinLibrary(root, link) {
+			t.Error("指向库外的符号链接应拒绝")
+		}
+	}
+	// 目录不存在：返回 true 交后续 Lstat 自愈（不误删）
+	if !splitArtifactDirWithinLibrary(root, filepath.Join(root, "missing")) {
+		t.Error("不存在的库内目录应放行（由消费侧按文件不存在自愈）")
+	}
+}
+
+// TestRetainedAnchorsRewrittenTx_ExplicitAndLegacy 迁移改锚：显式锚匹配 oldDir
+// 时改写为 newDir；旧格式空锚（动态回落 output_dir）保持原样。
+func TestRetainedAnchorsRewrittenTx_ExplicitAndLegacy(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "改锚单点库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	oldDir := filepath.Join(dir, "旧")
+	newDir := filepath.Join(dir, "新")
+	if err := store.upsertSplitRecord("改锚.pptx", "h", oldDir, 2,
+		"2026-11-03 10:00:00", model.AssetSplitTargetReplace, "改锚", false, nil,
+		[]splitArtifactFingerprint{
+			{Page: 3, Name: "a-003.pptx", Size: 1, SHA256: "a", Dir: oldDir},
+			{Page: 4, Name: "b-004.pptx", Size: 1, SHA256: "b"},
+		}); err != nil {
+		t.Fatalf("写记录: %v", err)
+	}
+	tx, err := store.db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	raw, changed, err := retainedAnchorsRewrittenTx(tx, "改锚.pptx", oldDir, newDir)
+	if err != nil || !changed {
+		t.Fatalf("应发生改锚：changed=%v err=%v", changed, err)
+	}
+	fps := parseSplitFingerprintsJSON(raw, "改锚.pptx")
+	if len(fps) != 2 || fps[0].Dir != newDir || fps[1].Dir != "" {
+		t.Errorf("显式锚应改新目录、空锚保持空：%+v", fps)
+	}
+}
+
 // TestReplaceArtifactMismatchMessage 备份让位归属不符文案两态映射（R3）：换回成功
 // 不含备份路径；换回失败（备份保留）文案含备份绝对路径。
 func TestReplaceArtifactMismatchMessage(t *testing.T) {

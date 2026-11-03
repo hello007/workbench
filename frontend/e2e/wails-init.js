@@ -21,7 +21,8 @@
  *   {code, message}（对齐 Wails ErrorFormatter 的 AppError 形态），否则 reject Error
  * - { __sequence__: [v1, v2, ...] }：按序返回，序列耗尽后恒返回最后一个值
  * - { __rules__: [{ after: 'Method', value }, ...], __default__: v }：跨方法状态机——
- *   按声明序评估，命中「after 方法此前已被调用过」的第一条取其 value，否则 __default__。
+ *   按声明序评估，命中「after 方法此前已被调用过」的规则依次覆盖（后命中覆盖前
+ *   命中），全不命中回 __default__。
  *   适合「状态随其他方法调用而切换」的场景（如合并冲突：Merge 后进冲突、
  *   AbortMerge 后回干净），与轮询次数无关
  * - { __value__: v, __events__: [{ event, payload, delayMs? }], __preEvents__?: [...] }：
@@ -102,7 +103,8 @@ export function injectWailsMocks(returnValues) {
         }
         if (Array.isArray(value.__rules__)) {
           // 跨方法状态机：按声明序评估规则，命中「after 方法此前已被调用过」的
-          // 第一条即取其 value；全不命中回 __default__（缺省 null）。
+          // 规则依次覆盖 —— **后命中覆盖前命中**（把更晚发生的状态声明在后）；
+          // 全不命中回 __default__（缺省 null）。
           // 用于「状态随其他方法调用而切换」的场景（如合并冲突：Merge 调用后
           // 进入冲突态、AbortMerge 后回到干净态）——GetConflictState 会被多个
           // 触发点（挂载/选仓/开 tab/执行后/中止后）各查一次，用次数序列描述

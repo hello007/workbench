@@ -2794,6 +2794,13 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		if m.libraryRoot == "" {
 			continue
 		}
+		// 目录锚先于 target/命中判定迁移：retained 是跨 target 的归属凭证（cache
+		// 记录也可携带 replace 形态的库内锚），只要锚在旧前缀下就须改锚，否则目录
+		// 重命名后锚指向不存在路径、残留产物永久失去归属。output_dir 不在旧前缀下
+		// （cache 库外落点 / 文件级重链冻结落点）同样走此步。
+		if err := s.migrateRetainedAnchorDirsTx(tx, r.rel, m.libraryRoot, m.oldPrefix, m.newPrefix); err != nil {
+			return migrated, err
+		}
 		if r.target != model.AssetSplitTargetSource && r.target != model.AssetSplitTargetReplace {
 			continue
 		}
@@ -2805,9 +2812,6 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		newOutDirAbs := filepath.Join(m.libraryRoot, filepath.FromSlash(newOutDir))
 		if newOutDirAbs == r.outDir {
 			continue // 幂等：改写结果与原值相同
-		}
-		if err := s.migrateRetainedAnchorDirsTx(tx, r.rel, m.libraryRoot, m.oldPrefix, m.newPrefix); err != nil {
-			return migrated, err
 		}
 		if _, err := tx.Exec(
 			"UPDATE split_records SET output_dir = ? WHERE source_rel_path = ?",

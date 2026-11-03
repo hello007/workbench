@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "retained 目录锚消费/迁移契约"}
+{"file": "docs/spec/security-scan.md", "reason": "overrides 与 audit 出清口径"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "升级必跑面与回退命令"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E __rules__ 用法与语义定位约定"}

@@ -313,7 +313,8 @@ EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` �
 ```
 
 - 历史成因：2026-05 提交 `cddcedd` 为「修复点击事件」追加 `@mousedown` 时保留了原有 `@click`，双触发潜伏至 2026-11 才定位
-- 拖拽容器（VueDraggable/SortableJS）内同样适用：拖拽结束时的 click 由 SortableJS 抑制，无需用 `mousedown` 补偿；同构先例 `AiChatPanel.vue` 常用目录列表即纯 `@click`
+- 拖拽容器（VueDraggable/SortableJS）内同样适用：原生 HTML5 drag 结束时浏览器抑制 click，SortableJS 的捕获监听仅在 fallback/touch 拖拽路径抑制，均无需用 `mousedown` 补偿；同构先例 `AiChatPanel.vue` 常用目录列表即纯 `@click`
+- 该决策的交互后果：右键与拖拽**不改变当前选中项**，Home 的 F2/Del 快捷键仍作用于上一次 click 选中的目录/文件（`lastInteractedTree` 在右键时已切到对应树，但选中 ID 不变）；若需「右键即选中」，应在 `onContextMenu` 显式调用同一 `handleSelect`，禁恢复 mousedown 双绑
 - 单测须断言事件次数（`emitted('select')` 长度为 1）且单独 `trigger('mousedown')` 不产生事件，仅断言「事件存在」无法捕获双触发
 
 ## 正反示例

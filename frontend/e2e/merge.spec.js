@@ -5,7 +5,7 @@
  * 1. 快进合并：Merge(path, target, 'ff') 参数正确、输出展示、成功提示、目标输入清空
  * 2. 变基：切操作类型后 Rebase(path, target) 参数正确
  * 3. 合并冲突：Merge 正常返回但 GetConflictState 报冲突 -> 冲突面板出现；
- *    中止 -> AbortMerge(path) 后面板收起（经 __sequence__ 驱动冲突态三段变化）
+ *    中止 -> AbortMerge(path) 后面板收起（经 __rules__ 状态机驱动冲突态切换）
  * 4. 异常路径：Merge 失败 -> 错误提示出现且无输出展示
  *
  * 冲突态语义对齐真实后端：合并冲突时 git 以 exit 1 结束但后端已吸收为正常返回，
@@ -14,14 +14,13 @@
 import { test, expect, getWailsCalls } from './fixtures'
 import { openGitRepoPage, E2E_REPO_PATH, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
-// 冲突态四段序列：选中工作目录（2026-11-03 起 click 单入口，选中一次 → 无冲突）->
-// 面板挂载(2) 无冲突 -> 执行后查询(3) 合并冲突 -> 中止后查询(4) 无冲突。
+// 冲突态规则式序列（不依赖查询次数）：Merge 调用后进入冲突态，AbortMerge 调用后
+// 回到干净态；其余时刻（选目录/挂载）默认干净。触发点增减不会再使断言漂移。
 const CONFLICT_THEN_CLEAN = {
-  __sequence__: [
-    { type: 'none', files: [] },
-    { type: 'none', files: [] },
-    { type: 'merge', files: ['src/app.js'] },
-    { type: 'none', files: [] }
+  __default__: { type: 'none', files: [] },
+  __rules__: [
+    { after: 'Merge', value: { type: 'merge', files: ['src/app.js'] } },
+    { after: 'AbortMerge', value: { type: 'none', files: [] } }
   ]
 }
 
@@ -51,8 +50,7 @@ test.describe('Git 合并/变基流程', () => {
       expect(mergeCalls).toEqual([
         { method: 'Merge', args: [E2E_REPO_PATH, 'feature/login', 'ff'] }
       ])
-      // 冲突态查询：选中目录一次（2026-11-03 起 click 单入口）+ 面板挂载 + 执行后各一次
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(3)
+      // 冲突态查询次数随触发点演进，不在此断言；行为正确性由上面输入清空/输出展示覆盖。
     })
   })
 
@@ -111,8 +109,6 @@ test.describe('Git 合并/变基流程', () => {
 
       const abortCalls = await getWailsCalls(page, 'AbortMerge')
       expect(abortCalls).toEqual([{ method: 'AbortMerge', args: [E2E_REPO_PATH] }])
-      // 冲突态查询：选中目录一次 + 挂载 + 执行后 + 中止后，共 4 次
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(4)
     })
   })
 

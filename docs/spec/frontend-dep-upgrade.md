@@ -90,13 +90,13 @@ element-plus 升级除 3.3 常规面外，按 confirm-dialog.md §1 排查方法
 
 ### 3.7 传递依赖 overrides 口径（2026-11-03）
 
-仅用于**安全修复且上游声明范围未放宽**的传递依赖：根级 `overrides` 强制修复版，不得用于功能升级或跨 major 尝鲜。
+仅用于**安全修复且上游声明范围未放宽**的传递依赖：按作用域嵌套 `overrides`（`<上游包>.<依赖包>`）强制修复版，禁根级全局强制（未来新依赖会被静默升级）；不得用于功能升级或跨 major 尝鲜。
 
-- 前置：确认上游最新版仍声明旧范围（`npm view <pkg>@latest dependencies`），且修复版 API 被实际消费点覆盖（源码/导出核对）；
-- 必跑面：§3.3 全部（一致性检查、vitest 全量、build、E2E web/desktop、audit）；
+- 前置：确认上游最新版仍声明旧范围（`npm view <pkg>@latest dependencies`），且修复版 API 被实际消费点覆盖（源码/导出核对）；同步核对 `engines`（minimatch 11 要求 `20 || >=22`，glob 14 要求 `18 || 20 || >=22`）；
+- 必跑面：§3.3 全部（一致性检查、vitest 全量、build、E2E web/desktop），安全扫描显式用 `npm audit --registry=https://registry.npmjs.org --audit-level=moderate`（§3.3 的 `--audit-level=high` 无法验证 moderate 清零）；
 - 记录：`security-scan.md` §5.6 写明 advisory、override 版本、回归结果、移除条件；
 - 移除：上游放宽声明后删除 `overrides` 条目并重装，复跑 §3.3；
-- 回退：`git checkout frontend/package.json frontend/package-lock.json && npm ci`。
+- 回退：`git checkout HEAD^ -- frontend/package.json frontend/package-lock.json && npm ci`（提交入 HEAD 后 `git checkout --` 恢复的是当前态，不是回退态；或直接 `git revert <commit>`）。
 
 ## 4. 关联
 

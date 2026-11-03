@@ -58,7 +58,11 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "overrides": {
-    "glob": "^14.0.3",
-    "minimatch": "^11.0.4"
+    "js-beautify": {
+      "glob": "^14.0.3"
+    },
+    "editorconfig": {
+      "minimatch": "^11.0.4"
+    }
   }
 }

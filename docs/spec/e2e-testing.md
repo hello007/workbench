@@ -67,17 +67,17 @@
 
 `ActivityBar.spec.js` 的高亮与点击用例同样**禁按渲染下标定位**（`findAll('.activity-bar-item')[n]`），改用同一套 `data-panel-id` / `data-action` 语义锚：
 
-- 高亮断言收敛为「活跃面板 ID 数组等于目标值」（`[data-panel-id].is-active`），不再逐个断言其他下标非活跃；
+- 高亮断言收敛为「活跃入口 ID 数组等于目标值」（扫 `.activity-bar-item.is-active`，映射 `data-panel-id || data-action`，终端活跃态同样覆盖；面板项不再逐个断言其他下标非活跃）；
 - 点击用例直接 `find('[data-panel-id="<id>"]').trigger('click')`，设置入口走 `[data-action="settings"]`；
-- 入口总数断言（10 = 8 面板 + 设置 + 终端）表达数量语义，可保留。
+- 入口总数断言（设备指示隐藏时 10 = 8 面板 + 设置 + 终端）表达数量语义，可保留。
 
-新增面板时只需扩展语义属性总览用例的 ID 数组，高亮/点击用例零改动。
+新增面板时需扩展语义属性总览用例的 ID 数组，并**新增对应的高亮/点击用例**（既有用例零改动，但新面板无现成用例可复用）。
 
 ## 6. per-test 覆盖（wailsOverrides）
 
 - 默认所有用例从 `./fixtures` import `{ test, expect }`（非 `@playwright/test`），自动注入 mock
 - 用例 / describe 级动态行为经 `test.use({ wailsOverrides: { 方法名: 值 | 描述符 } })` 覆盖默认表
-- value 描述符：纯值恒 resolve；`{__error__, __code__?}` reject（带 `__code__` 时对齐 Wails ErrorFormatter 的 `{code, message}` AppError 形态）；`{__sequence__: [...]}` 按序返回、耗尽后 hold last；`{__value__, __events__: [{event, payload, delayMs?}]}` resolve `__value__`（缺省 null）并按序经 `setTimeout` 派发 Wails 事件（`delayMs` 缺省 0；每次调用完整派发，无状态消费）
+- value 描述符：纯值恒 resolve；`{__error__, __code__?}` reject（带 `__code__` 时对齐 Wails ErrorFormatter 的 `{code, message}` AppError 形态）；`{__sequence__: [...]}` 按序返回、耗尽后 hold last；`{__rules__: [{after: 'Method', value}, ...], __default__}` 跨方法状态机（按声明序评估「`after` 方法此前已被调用过」的全部命中规则，**后命中覆盖前命中**，全不命中回 `__default__`；用于「状态随后续方法调用切换」且查询次数会漂移的场景，如合并冲突 `Merge` 后进冲突、`AbortMerge` 后回干净，见 `merge.spec.js`）；`{__value__, __events__: [{event, payload, delayMs?}]}` resolve `__value__`（缺省 null）并按序经 `setTimeout` 派发 Wails 事件（`delayMs` 缺省 0；每次调用完整派发，无状态消费）
 - `__events__` 派发机制：`wails-init.js` 的 `runtime.EventsOn/EventsOnMultiple/EventsOnce` 将回调登记到页面全局 `window.__wailsEventHandlers`（按事件名分组），描述符派发时逐一调用；`EventsOff` 移除该事件全部回调。用于模拟 AI 任务（`ai-task:queued/started/output/done`）等异步事件流——真实链路由后端 `runtime.EventsEmit` 推送，E2E 侧无需真实子进程
 - **挂起解析器 `{ __deferred__: 'key' }`（2026-10-21 批量重试批次新增）**：调用即挂起（返回永不自行 settle 的 Promise），`{resolve, reject}` 按 FIFO 存入页面全局 `window.__wailsDeferred[key]`；用例先断言「在途中间态」（行级 loading / 信号量在途数 / 进度条），再经 `fixtures.js` 的 `releaseDeferred(page, key, value)` 手动放行、`pendingDeferredCount(page, key)` 读在途数。适用两类链路：批量重试编排（信号量 3 限流的第 4 个调用排队中间态，`command-palette-retry.spec.js`）与「resolve 时机需用例控制」的长操作（进程终止等待期行级防重、素材购物栏合并导出）。vitest 侧同形态先例为 `mockImplementation` + 捕获 resolver（logging-and-errors.md 批量重试节），E2E 描述符为其通用化
 - **`emitWailsEvent(page, event, payload)`（同批新增）**：页面上下文调 mock 的 `runtime.EventsEmit`，驱动「事件先于 bound method resolve」的进度中间态——`__events__` 描述符的派发在 resolve 之后（setTimeout），不能表达真实后端合并/导出期间推送进度、promise 末步 resolve 的时序（`assets-cart.spec.js` 导出进度先事件后放行结果）

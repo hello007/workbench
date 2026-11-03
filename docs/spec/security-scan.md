@@ -48,7 +48,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 - 修复 high 用 `npm update <pkg>` 在 lockfile 内升级，保持 npmmirror resolved 风格，不改 `package.json` 顶层声明与四档登记。
 - **禁 `npm audit fix` / `npm audit fix --force`**：前者会连带升级 vitest 等工具链，后者可跨 major，均触发未评估的回归面；升级按 [frontend-dep-upgrade.md](frontend-dep-upgrade.md) SOP 独立进行。
-- moderate dev-only 漏洞：上游已发布修复版但声明范围未放宽时，经根级 `overrides` 强制修复版，并按 §5.6 的必跑面全量回归；上游放宽依赖后移除 override。
+- moderate dev-only 漏洞：上游已发布修复版但声明范围未放宽时，按作用域嵌套 `overrides`（`<上游包>.<依赖包>`，禁根级全局强制，防未来新依赖被静默升级）强制修复版，并按 §5.6 的必跑面全量回归；上游放宽依赖后移除 override。
 
 ## 4. CI 集成
 
@@ -133,7 +133,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 ### 5.5 已修复（2026-11-03 npm audit 治理轮）
 
-**npm（1 high → 0；moderate 保持 8，见 §5.6）**：
+**npm（1 high → 0；moderate 8 已于同日 overrides 轮出清，见 §5.6）**：
 
 | 漏洞 ID | 包 | 修复方式 |
 |---|---|---|
@@ -149,14 +149,18 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 |---|---|---|
 | GHSA-qxg6-89mg-rqv8（vitest mock 注册代码注入） | @vitest/mocker 4.1.11 | vitest / @vitest/coverage-v8 升至 4.1.12（patch，`@vitest/mocker` 随同） |
 | GHSA-xp26-3454-mjgp（Windows 反斜杠穿越绕过） | @vitest/mocker 4.1.11 | 同上 |
-| GHSA-3g3m-2fjr-6pw4（glob AbortSignal 取消绕过） | glob 13.0.6（js-beautify 传递） | 根级 override `glob ^14.0.3` |
-| GHSA-g3hv-75wg-m249（minimatch globparts 放大 DoS） | minimatch 10.2.6（editorconfig / glob 传递） | 根级 override `minimatch ^11.0.4` |
+| GHSA-3g3m-2fjr-6pw4（glob AbortSignal 取消绕过） | glob 13.0.6（js-beautify 传递） | 嵌套 override `js-beautify.glob ^14.0.3` |
+| GHSA-g3hv-75wg-m249（minimatch globparts 放大 DoS） | minimatch 10.2.6（editorconfig / glob 传递） | 嵌套 override `editorconfig.minimatch ^11.0.4` |
 
-**overrides 依据**：上游最新 js-beautify 2.0.3 仍声明 `glob ^13.0.6`、editorconfig 3.0.2 仍声明 `minimatch ~10.2.4`，无上游放宽版本。兼容性取证：js-beautify 仅 CLI 使用 `globSync`（glob 14 保留）；editorconfig 使用 `Minimatch` 构造器与 `minimatch.escape`（minimatch 11 保留）。
+**overrides 依据**：上游最新 js-beautify 2.0.3 仍声明 `glob ^13.0.6`、editorconfig 3.0.2 仍声明 `minimatch ~10.2.4`，无上游放宽版本。兼容性取证：js-beautify 仅 CLI 使用 `globSync`（glob 14 保留）；editorconfig 使用 `Minimatch` 构造器与 `minimatch.escape`（minimatch 11 保留）。嵌套写法限定作用域，防未来新依赖被全局静默强制升级。
 
-**回归面（本轮实测）**：一致性检查 11 用例、vitest 2432 用例、`npm run build`、Web E2E 126 用例、桌面 E2E 3 用例全部通过；`npm ls glob minimatch` 均指向 14.0.3 / 11.0.4 单一去重实例。
+**连带升级**：vitest 4.1.12 链带起 chai 6.2.2→6.3.0、std-env 4.2.0→4.3.0、tinyrainbow 3.1.1→3.2.0；glob 14 带起 path-scurry 2.0.2→3.0.0（major，仅 glob 内部使用）。**engines 收窄**：glob 14 要求 `18 || 20 || >=22`，minimatch 11 要求 `20 || >=22`；本仓 CI Node ≥22.12、本机 Node 24 满足，未在 package.json 声明 engines。
+
+**回归面（本轮实测）**：一致性检查 11 用例、vitest 2433 用例、`npm run build`、Web E2E 126 用例、桌面 E2E 3 用例全部通过；`npm ls glob minimatch` 均指向 14.0.3 / 11.0.4 单一去重实例。
 
 **移除条件**：js-beautify 或 editorconfig 上游发布声明 `glob ^14` / `minimatch ^11` 的版本后，删除 `frontend/package.json` 的 `overrides` 并 `npm install`，复跑上述回归面。
+
+**历史接受清单**：出清前的 8 条明细与接受理由保留在 `git show 1d655df^:docs/spec/security-scan.md` §5.6，回退时按该版本恢复。
 
 **复评触发条件（满足任一即重评）**：
 
