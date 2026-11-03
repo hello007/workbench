@@ -243,8 +243,9 @@ else
 fi
 
 echo "5/5 推送到所有 remote"
-# 本仓库约定（见 README）：远程 origin 为 Gitee，为唯一主仓库。Gitee 收到推送后会
-# 自动镜像到 GitHub，从而触发运行在 GitHub Actions 上的 release.yml 监听 v* tag。
+# 本仓库约定（见 README）：远程 origin 为 GitHub 主仓库（https://github.com/hello007/workbench.git），
+# 是唯一远端，推送即直接触发运行在 GitHub Actions 上的 release.yml（监听 v* tag）。
+# 发版前应已按提交规范执行 fetch + rebase，保持与 origin/master 同步。
 # 这里遍历所有已配置 remote 依次推送 commit 与 tags（当前仅有 origin，未来加 remote
 # 也兼容），任一失败给出明确回滚指引。
 PUSH_FAILED_REMOTES=""
@@ -272,6 +273,6 @@ echo "  新版本: $TARGET_VERSION"
 echo "  tag   : v$TARGET_VERSION"
 echo "  远程  : $(git remote | tr '\n' ' ')"
 echo ""
-# CI 提示：Gitee 会自动镜像到 GitHub，release.yml 据此自动构建发布，无需额外操作。
-echo "CI 提示: 已推送至 origin（Gitee），Gitee 会自动镜像到 GitHub"
-echo "         .github/workflows/release.yml 据此自动构建并发布 Release"
+# CI 提示：origin 为 GitHub 主仓库，release.yml 直接由推送触发，无需额外操作。
+echo "CI 提示: 已推送至 origin（GitHub，https://github.com/hello007/workbench.git）"
+echo "         .github/workflows/release.yml 据此自动构建并发布 Release（无镜像中转）"

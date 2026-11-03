@@ -84,7 +84,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 **Go（代码可达 11 → 0，全部清零；Module/Package 级 4 → 1，残留见 §5.3）**：
 
-> 漏洞来源：GitHub 镜像仓（hello007/workbench）CI run#13 security job「Go 漏洞扫描」红点 + 本地 `govulncheck ./...` 复现；逐 ID 清单以该 run 的 security job 输出为准。
+> 漏洞来源：GitHub 仓库（hello007/workbench）CI run#13 security job「Go 漏洞扫描」红点 + 本地 `govulncheck ./...` 复现；逐 ID 清单以该 run 的 security job 输出为准。
 
 | 漏洞 ID | 模块 / 包 | 修复方式 |
 |---|---|---|

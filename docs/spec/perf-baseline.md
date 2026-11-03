@@ -428,7 +428,7 @@ service 包 TestMain（全仓首个）两档（2026-10-21 收口，原三档的�
 
 两步走策略第二步落地。**收口依据（Windows/Linux 双侧证据链）**：
 
-- 观察期 26 天事后定性为「未观察」：镜像仓 CI 的观察模式不改退出码且日志无人看——Linux 侧存在 thumbQueue 8 实例真泄漏而零告警（WSL Ubuntu 复现全套证据见任务 10-21-goleak-gate research/ci-linux-repro.md），「观察期无新告警」的前提在 Linux 不成立。
+- 观察期 26 天事后定性为「未观察」：GitHub CI 的观察模式不改退出码且日志无人看——Linux 侧存在 thumbQueue 8 实例真泄漏而零告警（WSL Ubuntu 复现全套证据见任务 10-21-goleak-gate research/ci-linux-repro.md），「观察期无新告警」的前提在 Linux 不成立。
 - 收紧前置修复（修完白名单为空）：
   - **thumbQueue 8 实例泄漏**：`newThumbTestService`（assets_thumbs_test.go）只 Cleanup 了 ledger flusher，未收口惰性启动的 queue worker（`EnqueueAssetThumbs`/`JumpToSlide` 触发 `q.start()`）；9 个 available=true 的队列测试中 8 个漏收口。单点修复 = Cleanup 改走 `WaitThumbsDone` 全链收口（worker 退出 → exporter.Shutdown → ledger.Shutdown，幂等）。
   - **terminal watchProcess 驻留**（观察期曾捕获一次的同一形态，本次硬门禁生效后确定性复现）：`TestTerminalService_CreateTerminal_InvalidShellFallback` 在套件尾部创建真实 conpty，`PtyProcess.Close()` 只断 ConPTY 句柄不杀交互 shell 进程，watchProcess 仅依赖 `IsProcessRunning` 翻转自证退出 → 套件结束时仍驻留。生产修复 = 会话级停止/确认双 chan（`watchDones` + `watchExits` per-session map）+ `CloseTerminal`/`CloseAll` 锁内摘除会话条目后锁外 close(done) 并 `<-exit` 等待（关闭返回时该会话监视 goroutine 已收口；per-session chan 避免服务级共享计数——共享 WaitGroup 形态下双 tab 关其一的等待会被在册会话的 watch 永久阻塞，审查后改定，对齐 `WaitThumbsDone` 形态）。
