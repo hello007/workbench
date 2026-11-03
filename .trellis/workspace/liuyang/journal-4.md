@@ -1535,3 +1535,36 @@ vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 215: 四项子任务审核整改
+
+**Date**: 2026-11-04
+**Task**: 四项子任务审核整改
+**Branch**: `master`
+
+### Summary
+
+修复四路审核全部 P2/P3：retained 改锚前置/cache 记录覆盖、EvalSymlinks 越界遏制、Lstat 非 ENOENT 保留、五组直测；ActivityBar 覆盖终端活跃态；overrides 嵌套化与文档口径修正；merge E2E 改 __rules__；目录右键/拖拽语义文档化。service 全量+覆盖率、前端 2433、Web E2E 126、merge 4、audit 0 全通过
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d2e749e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
