@@ -19,7 +19,7 @@
         </el-icon>
       </div>
     </el-tooltip>
-    <!-- 设置图标（不切换面板，直接开弹窗）。data-activity 为 E2E 稳定定位锚：
+    <!-- 设置图标（不切换面板，直接开弹窗）。data-action 为 E2E 稳定定位锚：
          面板数量会持续增长，按 nth 索引定位底部图标会随插入漂移（2026-11-03） -->
     <el-tooltip content="设置" placement="right" :show-after="300">
       <div
@@ -224,7 +224,6 @@
         class="activity-bar-item"
         data-action="terminal"
         :class="{ 'is-active': uiStore.terminalVisible }"
-        data-activity="terminal"
         @click="$emit('toggleTerminal')"
       >
         <el-icon :size="20">
