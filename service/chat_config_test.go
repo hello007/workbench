@@ -191,28 +191,28 @@ func TestChatService_Settings_DefaultAndSave(t *testing.T) {
 		t.Errorf("默认设置异常: %+v", got)
 	}
 
-	// 保存后回读
-	if err := svc.SaveChatSettings(model.ChatPermissionModeBypassPermission, " opus "); err != nil {
+	// 保存后回读（launcher 随保存链路持久化）
+	if err := svc.SaveChatSettings(model.ChatPermissionModeBypassPermission, " opus ", " mycli "); err != nil {
 		t.Fatalf("SaveChatSettings: %v", err)
 	}
 	got = svc.GetChatSettings()
-	if got.PermissionMode != model.ChatPermissionModeBypassPermission || got.ModelName != "opus" {
+	if got.PermissionMode != model.ChatPermissionModeBypassPermission || got.ModelName != "opus" || got.Launcher != "mycli" {
 		t.Errorf("保存后回读异常: %+v", got)
 	}
 
 	// 无效 permissionMode 拒绝保存且不破坏已有配置
-	if err := svc.SaveChatSettings("invalid", "m"); err == nil {
+	if err := svc.SaveChatSettings("invalid", "m", ""); err == nil {
 		t.Error("无效权限模式应报错")
 	}
 	if got = svc.GetChatSettings(); got.PermissionMode != model.ChatPermissionModeBypassPermission {
 		t.Errorf("保存失败不应破坏已有配置: %+v", got)
 	}
 
-	// modelName 空串合法（claude 默认模型语义）
-	if err := svc.SaveChatSettings(model.ChatPermissionModePlan, ""); err != nil {
+	// modelName 空串合法（claude 默认模型语义）；launcher 空串 = 默认启动命令
+	if err := svc.SaveChatSettings(model.ChatPermissionModePlan, "", ""); err != nil {
 		t.Fatalf("空 modelName 应合法: %v", err)
 	}
-	if got = svc.GetChatSettings(); got.PermissionMode != model.ChatPermissionModePlan || got.ModelName != "" {
+	if got = svc.GetChatSettings(); got.PermissionMode != model.ChatPermissionModePlan || got.ModelName != "" || got.Launcher != "" {
 		t.Errorf("空 model 保存回读异常: %+v", got)
 	}
 }

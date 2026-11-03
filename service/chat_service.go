@@ -165,6 +165,7 @@ type chatSessionRuntime struct {
 	chatSessionID   string
 	permissionMode  string // spawn 参数快照
 	modelName       string // spawn 参数快照
+	launcher        string // spawn 参数快照（启动命令配置；空 = 默认 claude）
 	proc            chatProcess
 	stdin           io.WriteCloser
 	ctx             context.Context
@@ -212,15 +213,15 @@ type chatApproval struct {
 //   - data/ai_chat/messages/<sessionId>.json 每会话消息数组
 //   - data/ai_chat/directories.json        侧栏常用目录项（AI 对话入口列表）
 type ChatService struct {
-	ctx        context.Context
-	sinkHolder        // 事件出口持有器（chat-task:*/chat-approval:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换
-	dataDir    string // 存储根目录 data/ai_chat/
-	mu         sync.Mutex
-	sessions   map[string]*chatSessionRuntime // 常驻进程注册表（chatSessionID → 运行时）
-	turns      map[string]*chatTurnRuntime    // 在途轮次注册表（taskID → 轮；终态/失败即摘除）
-	approvals  map[string]*chatApproval       // 待应答审批（requestID → 审批）
-	procSem    chan struct{}                  // 进程槽位（缓冲 = chatMaxConcurrent），spawn 时非阻塞获取、进程退出归还
-	processFactory chatProcessFactory         // 子进程工厂（测试注入 fake）
+	ctx            context.Context
+	sinkHolder            // 事件出口持有器（chat-task:*/chat-approval:* 事件推送），构造注入 + serve 模式经 SetEventSink 切换
+	dataDir        string // 存储根目录 data/ai_chat/
+	mu             sync.Mutex
+	sessions       map[string]*chatSessionRuntime // 常驻进程注册表（chatSessionID → 运行时）
+	turns          map[string]*chatTurnRuntime    // 在途轮次注册表（taskID → 轮；终态/失败即摘除）
+	approvals      map[string]*chatApproval       // 待应答审批（requestID → 审批）
+	procSem        chan struct{}                  // 进程槽位（缓冲 = chatMaxConcurrent），spawn 时非阻塞获取、进程退出归还
+	processFactory chatProcessFactory             // 子进程工厂（测试注入 fake）
 
 	// 生命周期参数（构造时从全局默认取值快照；测试注入短时限改实例字段，
 	// 不改全局 var——watchdog goroutine 与测试 defer 恢复全局变量存在竞态窗口）
@@ -858,12 +859,15 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 	if err != nil {
 		return "", err
 	}
+	// 启动命令配置取持久化设置（切换即保存，此处读最新值；GetChatSettings
+	// 内部持锁，须在下方 s.mu.Lock 前调用）
+	launcher := strings.TrimSpace(s.GetChatSettings().Launcher)
 
 	s.mu.Lock()
 	rt := s.sessions[chatSessionID]
-	if rt != nil && (rt.permissionMode != permissionMode || rt.modelName != modelName) && rt.executing == nil && len(rt.queue) == 0 {
-		// 权限模式/模型变更且进程空闲：优雅重启（spawn 参数为启动快照，运行中
-		// 无法变更）；忙时（执行轮/排队轮存在）沿用旧参数继续，不中断在途对话。
+	if rt != nil && (rt.permissionMode != permissionMode || rt.modelName != modelName || rt.launcher != launcher) && rt.executing == nil && len(rt.queue) == 0 {
+		// 权限模式/模型/启动命令变更且进程空闲：优雅重启（spawn 参数为启动快照，
+		// 运行中无法变更）；忙时（执行轮/排队轮存在）沿用旧参数继续，不中断在途对话。
 		s.mu.Unlock()
 		s.restartSessionIdle(rt)
 		s.mu.Lock()
@@ -883,6 +887,7 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 			chatSessionID:   chatSessionID,
 			permissionMode:  permissionMode,
 			modelName:       modelName,
+			launcher:        launcher,
 			claudeSessionID: sess.ClaudeSessionID, // 预载会话元数据：respawn 自动 --resume；空 = claude 会话首条消息
 			lastActive:      time.Now(),
 		}
@@ -900,7 +905,15 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 
 	s.mu.Lock()
 	if rt.proc == nil {
-		if err := s.spawnSessionProcess(rt, sess.Cwd); err != nil {
+		// 启动命令解析（launcher 空 = 默认 claude 现行为）：解析为纯文件系统
+		// 操作持锁安全；解析失败与 spawn 失败同路清理（下方），错误原样透出
+		//（ResolveChatCommand 已含配置值中文说明，不再叠「启动 claude 失败」包装）
+		launchName, launchPrefix, resolveErr := chatCommandResolver(rt.launcher)
+		var spawnErr error
+		if resolveErr == nil {
+			spawnErr = s.spawnSessionProcess(rt, sess.Cwd, launchName, launchPrefix)
+		}
+		if resolveErr != nil || spawnErr != nil {
 			// 启动失败：摘注册表、归还槽位；调用方本轮同步报错（不发 done，
 			// 与既有启动失败契约一致），同进程其他排队轮次发 done 收尾
 			if cur := s.sessions[chatSessionID]; cur == rt {
@@ -913,16 +926,19 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 			}
 			rt.semRelease.Do(func() { <-s.procSem })
 			s.mu.Unlock()
-			wrapped := fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
+			failErr := resolveErr
+			if failErr == nil {
+				failErr = fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", spawnErr)
+			}
 			for _, t := range queued {
 				if t.id == turn.id {
 					continue
 				}
 				s.emitCurrent("chat-task:done", model.ChatTaskRunResult{
-					TaskID: t.id, ChatSessionID: t.chatSessionID, Error: wrapped.Error(),
+					TaskID: t.id, ChatSessionID: t.chatSessionID, Error: failErr.Error(),
 				})
 			}
-			return "", wrapped
+			return "", failErr
 		}
 	}
 	s.mu.Unlock()
@@ -1110,12 +1126,12 @@ func (s *ChatService) CloseAll() {
 type chatStreamKind int
 
 const (
-	chatStreamOther      chatStreamKind = iota // 其余事件（user 回传/tool_result/hook 等，忽略）
-	chatStreamText                             // assistant 文本增量
-	chatStreamInit                             // system/init（流式模式下每轮可能重复出现，勿按一次性事件建模）
-	chatStreamResult                           // result 终态（每轮一个）
-	chatStreamApproval                         // control_request/can_use_tool 工具授权请求
-	chatStreamControlResp                      // control_response（本方 interrupt 等控制请求的回执，忽略）
+	chatStreamOther       chatStreamKind = iota // 其余事件（user 回传/tool_result/hook 等，忽略）
+	chatStreamText                              // assistant 文本增量
+	chatStreamInit                              // system/init（流式模式下每轮可能重复出现，勿按一次性事件建模）
+	chatStreamResult                            // result 终态（每轮一个）
+	chatStreamApproval                          // control_request/can_use_tool 工具授权请求
+	chatStreamControlResp                       // control_response（本方 interrupt 等控制请求的回执，忽略）
 )
 
 // chatControlRequest claude control_request 事件（权限审批下发）所需字段子集。
@@ -1134,14 +1150,16 @@ type chatControlRequest struct {
 // control_request/init 等对话专属事件类型，且 result 的 subtype 与 is_error
 // 须组合判断（存在 subtype=success 且 is_error=true 的失败形态）。
 // 非 JSON 行（stderr 串入的诊断文本）原样作为文本增量返回，不丢输出。
-func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID string, approval *chatControlRequest, resultError string) {
+// thinking 为模型思考内容增量（assistant content part type=thinking，文本在
+// thinking 字段——与 parseStreamLine 同形态），仅流式透传展示，不进回复正文。
+func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID string, approval *chatControlRequest, resultError string, thinking string) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return
 	}
 	var ev streamEvent
 	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil {
-		return chatStreamText, line + "\n", "", nil, ""
+		return chatStreamText, line + "\n", "", nil, "", ""
 	}
 	if ev.SessionID != "" {
 		sessionID = ev.SessionID
@@ -1149,12 +1167,22 @@ func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID stri
 	switch {
 	case ev.Type == "assistant" && ev.Message != nil:
 		var sb strings.Builder
+		var tb strings.Builder
 		for _, part := range ev.Message.Content {
 			if part.Type == "text" && part.Text != "" {
 				sb.WriteString(part.Text)
 			}
+			// 思考内容与正文分离：文本在 thinking 字段（text 字段为空，实测
+			// stream-json 形态；个别形态回退取 text）
+			if part.Type == "thinking" {
+				if part.Thinking != "" {
+					tb.WriteString(part.Thinking)
+				} else if part.Text != "" {
+					tb.WriteString(part.Text)
+				}
+			}
 		}
-		return chatStreamText, sb.String(), sessionID, nil, ""
+		return chatStreamText, sb.String(), sessionID, nil, "", tb.String()
 	case ev.Type == "result":
 		if ev.IsError || (ev.Subtype != "" && ev.Subtype != "success") {
 			resultError = strings.TrimSpace(ev.Result)
@@ -1162,17 +1190,17 @@ func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID stri
 				resultError = fmt.Sprintf("claude 执行失败（%s）", ev.Subtype)
 			}
 		}
-		return chatStreamResult, "", sessionID, nil, resultError
+		return chatStreamResult, "", sessionID, nil, resultError, ""
 	case ev.Type == "system" && ev.Subtype == "init":
-		return chatStreamInit, "", sessionID, nil, ""
+		return chatStreamInit, "", sessionID, nil, "", ""
 	case ev.Type == "control_request":
 		var cr chatControlRequest
 		if uerr := json.Unmarshal([]byte(trimmed), &cr); uerr != nil || cr.Request.Subtype != "can_use_tool" {
-			return chatStreamOther, "", sessionID, nil, ""
+			return chatStreamOther, "", sessionID, nil, "", ""
 		}
-		return chatStreamApproval, "", sessionID, &cr, ""
+		return chatStreamApproval, "", sessionID, &cr, "", ""
 	case ev.Type == "control_response":
-		return chatStreamControlResp, "", sessionID, nil, ""
+		return chatStreamControlResp, "", sessionID, nil, "", ""
 	}
 	return
 }
@@ -1180,13 +1208,13 @@ func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID stri
 // spawnSessionProcess 为会话启动常驻 claude 进程（调用方须持 s.mu）。
 // 进程 ctx 为 s.ctx 派生（无单轮超时——生命周期由空闲回收/轮次超时/关停链管理，
 // ctx 取消（CloseAll）经 cmd.Cancel 整树杀）；spawn 参数取运行时快照。
+// 启动命令（launchName/launchPrefixArgs）由调用方经 chatCommandResolver 按
+// launcher 配置解析后传入（绕开 .cmd shim 的 cmd.exe 转发——JSON 参数引号会被
+// 破坏，详见 resolveClaudeCommand 注释）。
 // 启动成功后拉起 stdout 泵与会话 watchdog。
-func (s *ChatService) spawnSessionProcess(rt *chatSessionRuntime, cwd string) error {
+func (s *ChatService) spawnSessionProcess(rt *chatSessionRuntime, cwd, launchName string, launchPrefixArgs []string) error {
 	ctx, cancel := context.WithCancel(s.ctx)
-	// 经 claudeCommandResolver 绕开 .cmd shim 的 cmd.exe 转发（JSON 参数引号会被破坏，
-	// 详见 resolveClaudeCommand 注释）
-	name, prefixArgs := claudeCommandResolver()
-	proc := s.processFactory(ctx, name, append(prefixArgs, buildChatArgs(rt.claudeSessionID, rt.permissionMode, rt.modelName)...), cwd)
+	proc := s.processFactory(ctx, launchName, append(launchPrefixArgs, buildChatArgs(rt.claudeSessionID, rt.permissionMode, rt.modelName)...), cwd)
 	stdout, err := proc.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -1274,7 +1302,7 @@ func (s *ChatService) pumpSession(rt *chatSessionRuntime, stdout io.ReadCloser) 
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
 
 	for scanner.Scan() {
-		kind, text, sessionID, approval, resultErr := parseChatStreamLine(scanner.Text())
+		kind, text, sessionID, approval, resultErr, thinking := parseChatStreamLine(scanner.Text())
 		switch kind {
 		case chatStreamInit, chatStreamResult:
 			// claude session id 刷新（init 每轮重复出现；result 也携带）——
@@ -1291,6 +1319,7 @@ func (s *ChatService) pumpSession(rt *chatSessionRuntime, stdout io.ReadCloser) 
 			}
 		case chatStreamText:
 			s.handleTurnText(rt, text)
+			s.handleTurnThinking(rt, thinking)
 		case chatStreamApproval:
 			s.registerApproval(rt, approval)
 		}
@@ -1322,6 +1351,30 @@ func (s *ChatService) handleTurnText(rt *chatSessionRuntime, text string) {
 		"taskId":        taskID,
 		"chatSessionId": chatSessionID,
 		"text":          text,
+	})
+}
+
+// handleTurnThinking 推送模型思考增量到当前执行轮（chat-task:output 带
+// thinking:true 标记，前端按标记分流展示「思考中」块）。仅流式展示：不进
+// turn.reply、不落消息文件，done 后随在途任务对象一并丢弃（零持久化）。
+// 无执行轮归属的思考增量（轮间串入）丢弃不推送。
+func (s *ChatService) handleTurnThinking(rt *chatSessionRuntime, text string) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	turn := rt.executing
+	if turn == nil {
+		s.mu.Unlock()
+		return
+	}
+	taskID, chatSessionID := turn.id, turn.chatSessionID
+	s.mu.Unlock()
+	s.emitCurrent("chat-task:output", map[string]any{
+		"taskId":        taskID,
+		"chatSessionId": chatSessionID,
+		"text":          text,
+		"thinking":      true,
 	})
 }
 
@@ -1630,4 +1683,3 @@ func (s *ChatService) watchSessionOnce(rt *chatSessionRuntime) {
 		s.killSession(rt, "空闲超时回收")
 	}
 }
-

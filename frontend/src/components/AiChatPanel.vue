@@ -68,7 +68,8 @@
           description="从左侧选择目录开始对话"
         />
         <template v-else>
-          <!-- 会话工具条：会话下拉（类 /resume）+ 新建 + 权限模式 + 模型 -->
+          <!-- 会话工具条：会话下拉（类 /resume）+ 新建 + 启动命令 + 模型
+               （权限模式已迁至输入区发送按钮同排左侧） -->
           <div class="chat-toolbar">
             <el-dropdown trigger="click" @command="onSessionCommand">
               <el-button size="small" class="session-btn" :title="currentSessionTitle">
@@ -107,22 +108,38 @@
 
             <span class="chat-toolbar-spacer"></span>
 
-            <!-- 权限模式：中文标签下拉，说明见 tooltip；bypassPermissions 选中时警告提示 -->
-            <el-tooltip :content="permissionModeTip" placement="top">
-              <el-select
-                v-model="aiChatStore.chatSettings.permissionMode"
-                size="small"
-                class="chat-config-select"
-                @change="onPermissionModeChange"
-              >
-                <el-option
-                  v-for="m in PERMISSION_MODES"
-                  :key="m.value"
-                  :value="m.value"
-                  :label="m.label"
-                />
-              </el-select>
-            </el-tooltip>
+            <!-- 启动命令：默认 claude·自动 + PATH 扫描候选（name + path）+ 指定路径…；
+                 切换即持久化；协议口径说明见 tooltip -->
+            <el-dropdown trigger="click" @command="onLauncherCommand">
+              <el-button size="small" class="launcher-btn" :title="launcherTip">
+                <el-icon class="panel-btn-icon"><Setting /></el-icon>
+                <span class="launcher-btn-label">{{ launcherButtonLabel }}</span>
+                <el-icon class="session-btn-arrow"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu class="launcher-menu">
+                  <el-dropdown-item
+                    command="__launcher_default__"
+                    :class="{ 'is-current': !aiChatStore.chatSettings.launcher }"
+                  >
+                    <span class="launcher-menu-name">claude·自动</span>
+                    <span class="launcher-menu-path">PATH 解析（默认）</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="c in aiChatStore.chatCliCandidates"
+                    :key="c.path"
+                    :command="c.path"
+                    :class="{ 'is-current': aiChatStore.chatSettings.launcher === c.path }"
+                  >
+                    <span class="launcher-menu-name">{{ c.name }}</span>
+                    <span class="launcher-menu-path" :title="c.path">{{ c.path }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item divided command="__launcher_pick__">
+                    指定路径…
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <!-- 模型：常用选项 + allow-create 自定义输入；空值 = claude 默认模型 -->
             <el-select
               v-model="aiChatStore.chatSettings.modelName"
@@ -164,7 +181,17 @@
               :class="msg.role"
             >
               <div class="chat-msg-bubble" :class="{ 'is-streaming': msg.streaming }">
-                <!-- assistant：markdown 渲染（html:false 防 XSS；点击拦截防 webview 导航） -->
+                <!-- 思考块：仅流式在途任务携带（done 即丢弃，历史消息无此块）。
+                     灰色折叠样式：流式中默认展开，点标题手动收起/展开（组件本地态）；
+                     无思考输出时不渲染，气泡形态与现状一致 -->
+                <div v-if="msg.thinking" class="chat-thinking">
+                  <div class="chat-thinking-head" title="点击收起/展开思考过程" @click="toggleThinking(msg.taskId)">
+                    <span class="chat-thinking-spinner"></span>
+                    <span class="chat-thinking-title">思考中…</span>
+                    <el-icon class="chat-thinking-arrow" :class="{ 'is-collapsed': isThinkingCollapsed(msg.taskId) }"><ArrowDown /></el-icon>
+                  </div>
+                  <div v-show="!isThinkingCollapsed(msg.taskId)" class="chat-thinking-body">{{ msg.thinking }}</div>
+                </div>
                 <!-- assistant：markdown 渲染（html:false 防 XSS；点击拦截防 webview 导航；
                      data-task-id 供选择题卡片提交回填已答标记） -->
                 <div
@@ -231,6 +258,25 @@
                 @keydown.enter="onInputEnter"
               />
               <div class="chat-input-actions">
+                <!-- 权限模式：自会话工具条迁入输入区常驻（发送按钮同排左侧）；
+                     中文标签与 tooltip 说明不变，bypassPermissions 选中时警告提示；
+                     非默认档警示色描边强调，默认档弱化显示 -->
+                <el-tooltip :content="permissionModeTip" placement="top">
+                  <el-select
+                    v-model="aiChatStore.chatSettings.permissionMode"
+                    size="small"
+                    class="chat-config-select chat-perm-select"
+                    :class="{ 'is-elevated': aiChatStore.chatSettings.permissionMode !== 'default' }"
+                    @change="onPermissionModeChange"
+                  >
+                    <el-option
+                      v-for="m in PERMISSION_MODES"
+                      :key="m.value"
+                      :value="m.value"
+                      :label="m.label"
+                    />
+                  </el-select>
+                </el-tooltip>
                 <!-- 持续会话模型：运行中发送 = 排队注入（插话），发送按钮恒可用；
                      有在途轮次时并列展示停止按钮（中断当前轮 + 摘除排队轮） -->
                 <el-button type="primary" class="chat-send-btn" @click="handleSend">
@@ -374,7 +420,7 @@ import { handleError } from '../utils/error'
 import { shortenPath } from '../utils/pathFormat'
 import { renderChatMarkdown, CMD_RUN_BTN_TITLE, CMD_RUN_BTN_TITLE_NO_CWD } from '../utils/chatMarkdown'
 import { debug } from '../utils/debug'
-import { RespondChatApproval } from '../../wailsjs/go/main/App'
+import { RespondChatApproval, OpenFileDialog } from '../../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
 const aiChatStore = useAiChatStore()
@@ -401,6 +447,22 @@ const MODEL_OPTIONS = [
   { value: 'opus', label: 'Opus' },
   { value: 'haiku', label: 'Haiku' }
 ]
+
+// 启动命令下拉命令分派常量（与 el-dropdown-item command 对号）
+const LAUNCHER_CMD_DEFAULT = '__launcher_default__'
+const LAUNCHER_CMD_PICK = '__launcher_pick__'
+// 协议口径提示（R5）：启动项需兼容 claude CLI headless 协议，第三方 CLI 不保证可用
+const launcherTip = '启动命令：候选为 PATH 扫描结果；启动项需兼容 claude CLI headless 协议（-p stream-json），第三方 CLI 不保证可用'
+
+// 启动命令按钮标签：默认项 / 命中候选名 / 自定义绝对路径显示文件名
+const launcherButtonLabel = computed(() => {
+  const launcher = aiChatStore.chatSettings.launcher
+  if (!launcher) return 'claude·自动'
+  const cand = aiChatStore.chatCliCandidates.find(c => c.path === launcher || c.name === launcher)
+  if (cand) return cand.name
+  const base = launcher.split(/[\\/]/).pop() || launcher
+  return `自定义：${base}`
+})
 
 // --- 本地目录列表（可变，用于拖拽） ---
 // localDirs 为 VueDraggable v-model 的可变副本（参照 DirectoryTree 模式）：
@@ -605,16 +667,32 @@ const handleDeleteSession = async () => {
 // ===== 消息渲染与流式 =====
 
 // 展示消息 = 持久化消息 + 在途轮次的流式 assistant 气泡（仅当前会话视图追加，
-// 多条在途轮次各一气泡，插入序 = 提交先后）
+// 多条在途轮次各一气泡，插入序 = 提交先后；thinking 随任务对象带给思考块，
+// done 后任务摘除即丢弃——历史消息无思考块）
 const displayMessages = computed(() => {
   const base = aiChatStore.chatMessages
   const tasks = aiChatStore.currentSessionChatTasks
   if (!tasks.length) return base
   return [
     ...base,
-    ...tasks.map(t => ({ role: 'assistant', content: t.reply, streaming: true, taskId: t.taskId }))
+    ...tasks.map(t => ({ role: 'assistant', content: t.reply, thinking: t.thinking || '', streaming: true, taskId: t.taskId }))
   ]
 })
+
+// ===== 思考块收起状态（组件本地瞬时态，不进 store/不持久化）=====
+// 流式中默认展开；点标题手动收起/展开；按 taskId 记录（多在途轮次各一思考块）
+const collapsedThinkingTasks = ref(new Set())
+const isThinkingCollapsed = (taskId) => collapsedThinkingTasks.value.has(taskId || '')
+const toggleThinking = (taskId) => {
+  const key = taskId || ''
+  const next = new Set(collapsedThinkingTasks.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  collapsedThinkingTasks.value = next
+}
 
 const messagesEl = ref(null)
 
@@ -775,9 +853,14 @@ const scrollToBottom = (force = false) => {
     }
   })
 }
-// 消息条数变化 / 任一在途轮次流式内容增长时近底部才跟随；会话切换强制滚到底部
+// 消息条数变化 / 任一在途轮次流式内容（正文或思考）增长时近底部才跟随；
+// 会话切换强制滚到底部
 watch(
-  () => [aiChatStore.chatMessages.length, aiChatStore.currentSessionChatTasks.map(t => t.reply).join('\u0000')],
+  () => [
+    aiChatStore.chatMessages.length,
+    aiChatStore.currentSessionChatTasks.map(t => t.reply).join('\u0000'),
+    aiChatStore.currentSessionChatTasks.map(t => t.thinking).join('\u0000')
+  ],
   () => scrollToBottom()
 )
 watch(() => aiChatStore.selectedChatSessionId, () => scrollToBottom(true))
@@ -938,17 +1021,54 @@ const handleRemoveTemplate = async (t) => {
   }
 }
 
-// ===== 权限模式 / 模型配置 =====
+// ===== 权限模式 / 模型 / 启动命令配置 =====
 
 const persistChatSettings = async () => {
   try {
     await aiChatStore.saveChatSettings(
       aiChatStore.chatSettings.permissionMode,
-      aiChatStore.chatSettings.modelName
+      aiChatStore.chatSettings.modelName,
+      aiChatStore.chatSettings.launcher
     )
   } catch (error) {
     handleError('保存对话设置失败: ', error)
   }
+}
+
+// 启动命令切换持久化（与权限模式/模型共用保存链路）
+const setLauncher = async (launcher) => {
+  try {
+    await aiChatStore.saveChatSettings(
+      aiChatStore.chatSettings.permissionMode,
+      aiChatStore.chatSettings.modelName,
+      launcher
+    )
+  } catch (error) {
+    handleError('保存对话设置失败: ', error)
+  }
+}
+
+// 启动命令下拉命令分派：默认项清空配置回默认 claude；候选项回填 PATH；
+// 「指定路径…」经文件对话框选 exe 回填绝对路径（取消则保持现状）
+const onLauncherCommand = async (cmd) => {
+  if (cmd === LAUNCHER_CMD_DEFAULT) {
+    await setLauncher('')
+    return
+  }
+  if (cmd === LAUNCHER_CMD_PICK) {
+    try {
+      const picked = await OpenFileDialog('选择 AI 启动程序', [
+        { DisplayName: '可执行文件', Pattern: '*.exe;*.cmd;*.bat' }
+      ])
+      if (!picked) return
+      await setLauncher(picked)
+    } catch (error) {
+      // 对话框层错误（含取消）：静默降级，保留当前配置
+      debug.log('选择启动程序失败:', error)
+    }
+    return
+  }
+  await setLauncher(cmd)
 }
 
 const onPermissionModeChange = async () => {
@@ -1051,6 +1171,8 @@ onMounted(() => {
   ;(async () => {
     await aiChatStore.loadChatDirectories()
     aiChatStore.loadChatSettings()
+    // 启动命令候选：面板挂载扫描一次即可（纯只读，失败静默空列表）
+    aiChatStore.loadChatCliCandidates()
     if (aiChatStore.selectedChatDirectoryId) {
       await aiChatStore.loadChatSessions()
       aiChatStore.loadChatTemplates()
@@ -1337,6 +1459,47 @@ watch(() => uiStore.activePanel, (panel) => {
   width: 140px;
 }
 
+/* 启动命令下拉（会话工具条）：按钮标签限宽省略，菜单项 name + path 两列 */
+.launcher-btn {
+  max-width: 220px;
+}
+.launcher-btn-label {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launcher-menu .launcher-menu-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+  font-weight: 500;
+}
+.launcher-menu .launcher-menu-path {
+  margin-left: 10px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+  font-size: 11px;
+  font-family: Consolas, 'Courier New', monospace;
+  color: var(--text-placeholder);
+}
+.launcher-menu .is-current .launcher-menu-name {
+  color: var(--primary-color);
+}
+
+/* 权限模式（输入区常驻）：非默认档警示色描边强调，默认档弱化显示。
+   EP select 边框走 wrapper 的 box-shadow，描边同通道覆盖 */
+.chat-perm-select.is-elevated :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px var(--warning-color) inset;
+}
+
 /* 会话下拉项：标题 + 更新时间两列 */
 .session-menu .session-menu-title {
   max-width: 220px;
@@ -1411,6 +1574,60 @@ watch(() => uiStore.activePanel, (panel) => {
 @keyframes chatCursor {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+/* 思考块（仅流式在途任务，done 即丢弃）：正文上方灰色折叠块，
+   内容等宽小字灰字 pre-wrap；头部转圈 + 「思考中…」+ 收起箭头 */
+.chat-thinking {
+  margin-bottom: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.chat-thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--spacing-sm);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.chat-thinking-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-color);
+  border-top-color: var(--text-secondary);
+  animation: chatThinkingSpin 1s linear infinite;
+}
+@keyframes chatThinkingSpin {
+  to { transform: rotate(360deg); }
+}
+.chat-thinking-title {
+  font-weight: 500;
+}
+.chat-thinking-arrow {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  transition: transform var(--transition-fast);
+}
+.chat-thinking-arrow.is-collapsed {
+  transform: rotate(-90deg);
+}
+.chat-thinking-body {
+  margin: 0 var(--spacing-sm) var(--spacing-sm);
+  padding-top: var(--spacing-xs);
+  border-top: 1px dashed var(--border-color);
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: Consolas, 'Monaco', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* assistant markdown 排版：标题/列表/代码块/表格/引用 */
@@ -1761,7 +1978,8 @@ watch(() => uiStore.activePanel, (panel) => {
 /* 动画可访问性：用户系统偏好减少动效时禁用装饰动画 */
 @media (prefers-reduced-motion: reduce) {
   .chat-msg-bubble.is-streaming .chat-msg-md > *:last-child::after,
-  .chat-input-status-dot {
+  .chat-input-status-dot,
+  .chat-thinking-spinner {
     animation: none !important;
   }
 }

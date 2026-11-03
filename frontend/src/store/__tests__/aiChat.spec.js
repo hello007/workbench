@@ -22,7 +22,8 @@ import {
   UpdateChatTemplate,
   RemoveChatTemplate,
   GetChatSettings,
-  SaveChatSettings
+  SaveChatSettings,
+  DiscoverChatClis
 } from '../../../wailsjs/go/main/App'
 
 // AI 对话全域绑定 mock（形状对齐 model.ChatDirectory / ChatSession / ChatTemplate
@@ -70,8 +71,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   })),
   UpdateChatTemplate: vi.fn(() => Promise.resolve()),
   RemoveChatTemplate: vi.fn(() => Promise.resolve()),
-  GetChatSettings: vi.fn(() => Promise.resolve({ permissionMode: 'default', modelName: '' })),
-  SaveChatSettings: vi.fn(() => Promise.resolve())
+  GetChatSettings: vi.fn(() => Promise.resolve({ permissionMode: 'default', modelName: '', launcher: '' })),
+  SaveChatSettings: vi.fn(() => Promise.resolve()),
+  DiscoverChatClis: vi.fn(() => Promise.resolve([
+    { name: 'claude', path: 'C:\\tools\\claude.cmd' }
+  ]))
 }))
 
 vi.mock('../../../utils/debug', () => ({
@@ -312,7 +316,7 @@ describe('aiChat store', () => {
 
   it('runChat 以当前配置发送并乐观登记轮次与 user 气泡', async () => {
     const store = await setupWithDirectory()
-    await store.saveChatSettings('acceptEdits', 'opus')
+    await store.saveChatSettings('acceptEdits', 'opus', '')
 
     const taskId = await store.runChat('帮我看看这个项目')
     expect(RunChat).toHaveBeenCalledWith('chatsession-new', '帮我看看这个项目', 'acceptEdits', 'opus')
@@ -425,6 +429,35 @@ describe('aiChat store', () => {
     store.onChatTaskOutput({ taskId: 'chattask-1', text: '好' })
     store.onChatTaskOutput({ taskId: 'other', text: '忽略' })
     expect(store.chatTasks['chattask-1'].reply).toBe('你好')
+  })
+
+  it('onChatTaskOutput thinking 增量分流累积：进 thinking 不进 reply', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('难题')
+
+    store.onChatTaskOutput({ taskId: 'chattask-1', text: '让我想想', thinking: true })
+    store.onChatTaskOutput({ taskId: 'chattask-1', text: '再想想', thinking: true })
+    store.onChatTaskOutput({ taskId: 'chattask-1', text: '正文增量' })
+
+    expect(store.chatTasks['chattask-1'].thinking).toBe('让我想想再想想')
+    expect(store.chatTasks['chattask-1'].reply).toBe('正文增量')
+  })
+
+  it('done 后任务摘除即丢弃 thinking（零持久化：重载消息不含思考）', async () => {
+    const store = await setupWithDirectory()
+    await store.runChat('难题')
+    store.onChatTaskOutput({ taskId: 'chattask-1', text: '思考内容', thinking: true })
+    expect(store.chatTasks['chattask-1'].thinking).toBe('思考内容')
+
+    await store.handleChatTaskDone({
+      taskId: 'chattask-1', chatSessionId: 'chatsession-new', reply: '全文回复'
+    })
+    // 任务对象已摘除：思考内容随对象整体丢弃
+    expect(store.chatTasks['chattask-1']).toBeUndefined()
+    // 重载的消息（mock 基准 2 条）不含任何思考字段
+    for (const m of store.chatMessages) {
+      expect(m.thinking).toBeUndefined()
+    }
   })
 
   it('排队轮 started 推进后转 running（插话轮正常对号）', async () => {
@@ -593,35 +626,53 @@ describe('aiChat store', () => {
 
   // ===== 配置域（PR3）=====
 
-  it('loadChatSettings 读取后端配置', async () => {
+  it('loadChatSettings 读取后端配置（含 launcher）', async () => {
     const store = useAiChatStore()
     await store.loadChatSettings()
-    expect(store.chatSettings).toEqual({ permissionMode: 'default', modelName: '' })
+    expect(store.chatSettings).toEqual({ permissionMode: 'default', modelName: '', launcher: '' })
 
-    GetChatSettings.mockResolvedValueOnce({ permissionMode: 'plan', modelName: 'opus' })
+    GetChatSettings.mockResolvedValueOnce({ permissionMode: 'plan', modelName: 'opus', launcher: 'C:\\tools\\mycli.cmd' })
     await store.loadChatSettings()
-    expect(store.chatSettings).toEqual({ permissionMode: 'plan', modelName: 'opus' })
+    expect(store.chatSettings).toEqual({ permissionMode: 'plan', modelName: 'opus', launcher: 'C:\\tools\\mycli.cmd' })
   })
 
   it('loadChatSettings 加载失败保留本地默认', async () => {
     GetChatSettings.mockRejectedValueOnce(new Error('boom'))
     const store = useAiChatStore()
     await store.loadChatSettings()
-    expect(store.chatSettings).toEqual({ permissionMode: 'default', modelName: '' })
+    expect(store.chatSettings).toEqual({ permissionMode: 'default', modelName: '', launcher: '' })
   })
 
-  it('saveChatSettings 乐观更新本地并持久化', async () => {
+  it('saveChatSettings 乐观更新本地并持久化（launcher 随三参保存）', async () => {
     const store = useAiChatStore()
-    await store.saveChatSettings('bypassPermissions', 'sonnet')
-    expect(store.chatSettings).toEqual({ permissionMode: 'bypassPermissions', modelName: 'sonnet' })
-    expect(SaveChatSettings).toHaveBeenCalledWith('bypassPermissions', 'sonnet')
+    await store.saveChatSettings('bypassPermissions', 'sonnet', 'C:\\tools\\mycli.cmd')
+    expect(store.chatSettings).toEqual({ permissionMode: 'bypassPermissions', modelName: 'sonnet', launcher: 'C:\\tools\\mycli.cmd' })
+    expect(SaveChatSettings).toHaveBeenCalledWith('bypassPermissions', 'sonnet', 'C:\\tools\\mycli.cmd')
   })
 
   it('saveChatSettings 后端报错向上冒泡（本地保留乐观态）', async () => {
     SaveChatSettings.mockRejectedValueOnce({ message: '权限模式无效: x' })
     const store = useAiChatStore()
-    await expect(store.saveChatSettings('bad', '')).rejects.toEqual({ message: '权限模式无效: x' })
+    await expect(store.saveChatSettings('bad', '', '')).rejects.toEqual({ message: '权限模式无效: x' })
     expect(store.chatSettings.permissionMode).toBe('bad')
+  })
+
+  it('loadChatCliCandidates 加载 PATH 扫描候选', async () => {
+    const store = useAiChatStore()
+    await store.loadChatCliCandidates()
+    expect(store.chatCliCandidates.length).toBe(1)
+    expect(store.chatCliCandidates[0]).toEqual({ name: 'claude', path: 'C:\\tools\\claude.cmd' })
+
+    DiscoverChatClis.mockResolvedValueOnce(null)
+    await store.loadChatCliCandidates()
+    expect(store.chatCliCandidates).toEqual([])
+  })
+
+  it('loadChatCliCandidates 失败静默降级空列表', async () => {
+    DiscoverChatClis.mockRejectedValueOnce(new Error('boom'))
+    const store = useAiChatStore()
+    await store.loadChatCliCandidates()
+    expect(store.chatCliCandidates).toEqual([])
   })
 })
 

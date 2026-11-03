@@ -20,7 +20,8 @@ import {
   UpdateChatTemplate,
   RemoveChatTemplate,
   GetChatSettings,
-  SaveChatSettings
+  SaveChatSettings,
+  DiscoverChatClis
 } from '../../wailsjs/go/main/App'
 import { normalizePath } from '../utils/pathMatch'
 import { debug } from '../utils/debug'
@@ -233,9 +234,10 @@ export const useAiChatStore = defineStore('aiChat', () => {
   }
 
   // ===== 任务域 =====
-  // 在途对话轮次注册表：taskId → { taskId, chatSessionId, status: 'queued'|'running', reply, prompt }。
+  // 在途对话轮次注册表：taskId → { taskId, chatSessionId, status: 'queued'|'running', reply, thinking, prompt }。
   // 持续会话进程模型：同会话可有多条在途轮次（运行中插话 = 排队注入，前序轮
   // result 后依序执行），事件与轮次按 taskId 对号；终态（done）从表摘除。
+  // thinking 为模型思考流式累积（仅流式展示，不进 reply；done 摘除即丢弃，零持久化）。
   const chatTasks = ref({})
 
   /** 当前选中会话的在途轮次列表（插入序 = 提交先后）。 */
@@ -270,6 +272,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
         chatSessionId: sessionId,
         status: sessionBusy ? 'queued' : 'running',
         reply: '',
+        thinking: '',
         prompt
       }
     }
@@ -322,6 +325,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
         chatSessionId: st.chatSessionId,
         status: st.running ? 'running' : 'queued',
         reply: st.reply || '',
+        thinking: '',
         prompt: ''
       }
     }
@@ -353,10 +357,19 @@ export const useAiChatStore = defineStore('aiChat', () => {
     if (task) task.status = 'running'
   }
 
-  /** chat-task:output：流式增量追加到本轮回复累积。 */
+  /**
+   * chat-task:output：流式增量按 thinking 标记分流累积——思考增量进 thinking
+   * （不进 reply，正文与思考分区渲染不依赖交错顺序）；done 摘除任务对象即整体
+   * 丢弃思考内容（零持久化）。
+   */
   function onChatTaskOutput(ev) {
     const task = chatTasks.value[ev?.taskId]
-    if (task) task.reply += ev.text || ''
+    if (!task) return
+    if (ev.thinking) {
+      task.thinking = (task.thinking || '') + (ev.text || '')
+    } else {
+      task.reply += ev.text || ''
+    }
   }
 
   /**
@@ -438,8 +451,8 @@ export const useAiChatStore = defineStore('aiChat', () => {
   }
 
   // ===== 配置域（PR3）=====
-  // 执行配置（权限模式 + 模型），持久化于后端 settings.json
-  const chatSettings = ref({ permissionMode: 'default', modelName: '' })
+  // 执行配置（权限模式 + 模型 + 启动命令），持久化于后端 settings.json
+  const chatSettings = ref({ permissionMode: 'default', modelName: '', launcher: '' })
 
   /** 加载执行配置（后端缺失/损坏已回默认，前端不再兜底）。 */
   async function loadChatSettings() {
@@ -448,7 +461,8 @@ export const useAiChatStore = defineStore('aiChat', () => {
       if (settings) {
         chatSettings.value = {
           permissionMode: settings.permissionMode || 'default',
-          modelName: settings.modelName || ''
+          modelName: settings.modelName || '',
+          launcher: settings.launcher || ''
         }
       }
     } catch (error) {
@@ -460,9 +474,24 @@ export const useAiChatStore = defineStore('aiChat', () => {
    * 保存执行配置：乐观更新本地 + 持久化。错误向上冒泡（调用方提示，
    * 本地值保留乐观态供本轮对话使用）。
    */
-  async function saveChatSettings(permissionMode, modelName) {
-    chatSettings.value = { permissionMode, modelName }
-    await SaveChatSettings(permissionMode, modelName)
+  async function saveChatSettings(permissionMode, modelName, launcher) {
+    chatSettings.value = { permissionMode, modelName, launcher }
+    await SaveChatSettings(permissionMode, modelName, launcher)
+  }
+
+  // ===== 启动命令候选域（PATH 发现扫描）=====
+  // DiscoverChatClis 扫描结果（{name, path} 列表），启动命令下拉候选数据源。
+  // 纯只读快照：面板挂载时拉一次即可，失败静默空列表（下拉仍有默认项兜底）。
+  const chatCliCandidates = ref([])
+
+  /** 加载 PATH 上的已知 AI CLI 候选（失败静默降级空列表）。 */
+  async function loadChatCliCandidates() {
+    try {
+      chatCliCandidates.value = (await DiscoverChatClis()) || []
+    } catch (error) {
+      debug.log('扫描 AI 启动命令候选失败:', error)
+      chatCliCandidates.value = []
+    }
   }
 
   return {
@@ -509,6 +538,8 @@ export const useAiChatStore = defineStore('aiChat', () => {
     chatSettings,
     loadChatSettings,
     saveChatSettings,
+    chatCliCandidates,
+    loadChatCliCandidates,
     // 选择题卡片域
     isChatQuestionAnswered,
     markChatQuestionAnswered

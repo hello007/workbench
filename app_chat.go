@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"workbench/model"
+	"workbench/service"
 )
 
 // ===== AI 对话工作台（多会话持续式对话）=====
@@ -186,8 +187,8 @@ func (a *App) RemoveChatTemplate(id string) error {
 	return a.chatSvc.RemoveChatTemplate(id)
 }
 
-// GetChatSettings 读对话执行配置（权限模式 + 模型）。
-// 文件缺失/损坏回默认值（default + claude 默认模型），不报错。
+// GetChatSettings 读对话执行配置（权限模式 + 模型 + 启动命令）。
+// 文件缺失/损坏回默认值（default + claude 默认模型 + 默认启动命令），不报错。
 func (a *App) GetChatSettings() *model.ChatSettings {
 	if a.chatSvc == nil {
 		return &model.ChatSettings{PermissionMode: model.ChatPermissionModeDefault}
@@ -195,10 +196,18 @@ func (a *App) GetChatSettings() *model.ChatSettings {
 	return a.chatSvc.GetChatSettings()
 }
 
-// SaveChatSettings 持久化对话执行配置（permissionMode 须在可选集内）。
-func (a *App) SaveChatSettings(permissionMode, modelName string) error {
+// SaveChatSettings 持久化对话执行配置（permissionMode 须在可选集内；
+// launcher 空串 = 默认 PATH 解析 claude，命令名或绝对路径无枚举约束）。
+func (a *App) SaveChatSettings(permissionMode, modelName, launcher string) error {
 	if a.chatSvc == nil {
 		return errors.New("AI 对话服务未初始化")
 	}
-	return a.chatSvc.SaveChatSettings(permissionMode, modelName)
+	return a.chatSvc.SaveChatSettings(permissionMode, modelName, launcher)
+}
+
+// DiscoverChatClis 扫描 PATH 上的已知 AI CLI 候选（启动命令下拉数据源，
+// 每项 {name, path}）。纯只读扫描：找不到返回空列表不报错。
+func (a *App) DiscoverChatClis() []model.ChatCliInfo {
+	// 薄委托：发现扫描为纯只读操作，不依赖 ChatService 状态
+	return service.DiscoverChatClis()
 }

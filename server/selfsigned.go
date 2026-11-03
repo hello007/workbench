@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
@@ -136,9 +137,14 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
 		}
 	}
-	// 主机名一并覆盖（本机经 hostname 访问的形态）
-	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+	// 主机名一并覆盖（本机经 hostname 访问的形态）。
+	// DNSNames 是 IA5String（ASCII）——中文计算机名（如「少年的PC」）直接追加会让
+	// CreateCertificate 报「cannot be encoded as an IA5String」整体失败，
+	// 跳过非 ASCII 主机名（该形态本就无法经 hostname 直访，localhost 覆盖不受影响）
+	if hostname, err := os.Hostname(); err == nil && hostname != "" && isIA5StringSafe(hostname) {
 		tmpl.DNSNames = append(tmpl.DNSNames, hostname)
+	} else if hostname != "" {
+		slog.Warn("跳过非 ASCII 主机名（无法编码进证书 SAN）", "hostname", hostname)
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -162,4 +168,16 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		return fmt.Errorf("持久化 TLS 证书失败（%s）: %w", certPath, err)
 	}
 	return nil
+}
+
+// isIA5StringSafe 判断字符串能否编码为 IA5String（x509 DNSNames/EmailAddresses
+// 等 SAN 字段的约束：仅 ASCII 0-127）。中文计算机名等非 ASCII 输入须跳过，
+// 否则 CreateCertificate 整体失败。
+func isIA5StringSafe(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return false
+		}
+	}
+	return true
 }

@@ -23,7 +23,9 @@ import {
   AddChatTemplate,
   UpdateChatTemplate,
   RemoveChatTemplate,
-  SaveChatSettings
+  SaveChatSettings,
+  DiscoverChatClis,
+  OpenFileDialog
 } from '../../../wailsjs/go/main/App'
 // 断言监听器注销行为需引用 mock 本体
 import { EventsOn, EventsOff, BrowserOpenURL } from '../../../wailsjs/runtime/runtime'
@@ -98,8 +100,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddChatTemplate: vi.fn(() => Promise.resolve({ id: 'tpl-new', scope: 'directory', directoryId: 'chatdir-1', name: 'n', content: 'c' })),
   UpdateChatTemplate: vi.fn(() => Promise.resolve()),
   RemoveChatTemplate: vi.fn(() => Promise.resolve()),
-  GetChatSettings: vi.fn(() => Promise.resolve({ permissionMode: 'default', modelName: '' })),
-  SaveChatSettings: vi.fn(() => Promise.resolve())
+  GetChatSettings: vi.fn(() => Promise.resolve({ permissionMode: 'default', modelName: '', launcher: '' })),
+  SaveChatSettings: vi.fn(() => Promise.resolve()),
+  DiscoverChatClis: vi.fn(() => Promise.resolve([
+    { name: 'claude', path: 'C:\\tools\\claude.cmd' },
+    { name: 'myai', path: 'C:\\tools\\myai.cmd' }
+  ])),
+  OpenFileDialog: vi.fn(() => Promise.resolve(''))
 }))
 
 vi.mock('../../../utils/debug', () => ({
@@ -643,7 +650,7 @@ describe('AiChatPanel.vue', () => {
       await selectFirstDirectory(wrapper)
 
       const store = useAiChatStore()
-      await store.saveChatSettings('acceptEdits', 'opus')
+      await store.saveChatSettings('acceptEdits', 'opus', '')
       wrapper.vm.$.setupState.inputText = 'hi'
       await wrapper.vm.$.setupState.handleSend()
       await flushPromises()
@@ -1227,17 +1234,18 @@ describe('AiChatPanel.vue', () => {
   })
 
   describe('权限与模型配置', () => {
-    it('权限模式下拉切换持久化并调 SaveChatSettings', async () => {
+    it('权限模式下拉常驻输入区：切换持久化并调 SaveChatSettings（launcher 一并透传）', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
+      // DOM 序：工具条只剩模型下拉（select[0]），权限模式迁入输入区（select[1]）
       const selects = wrapper.findAll('select')
       expect(selects.length).toBe(2)
-      await selects[0].setValue('plan')
+      await selects[1].setValue('plan')
       await flushPromises()
 
-      expect(SaveChatSettings).toHaveBeenCalledWith('plan', '')
+      expect(SaveChatSettings).toHaveBeenCalledWith('plan', '', '')
       expect(useAiChatStore().chatSettings.permissionMode).toBe('plan')
     })
 
@@ -1247,13 +1255,26 @@ describe('AiChatPanel.vue', () => {
       await selectFirstDirectory(wrapper)
 
       const selects = wrapper.findAll('select')
-      await selects[0].setValue('bypassPermissions')
+      await selects[1].setValue('bypassPermissions')
       await flushPromises()
 
       expect(ElMessage.warning).toHaveBeenCalledWith(
         expect.stringContaining('跳过确认')
       )
-      expect(SaveChatSettings).toHaveBeenCalledWith('bypassPermissions', '')
+      expect(SaveChatSettings).toHaveBeenCalledWith('bypassPermissions', '', '')
+    })
+
+    it('权限模式非默认档下拉按钮带警示强调类（is-elevated），默认档弱化', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const permSelect = wrapper.find('.chat-perm-select')
+      expect(permSelect.classes()).not.toContain('is-elevated')
+      const selects = wrapper.findAll('select')
+      await selects[1].setValue('acceptEdits')
+      await flushPromises()
+      expect(wrapper.find('.chat-perm-select').classes()).toContain('is-elevated')
     })
 
     it('模型下拉切换持久化（allow-create 自定义值同样生效）', async () => {
@@ -1262,10 +1283,175 @@ describe('AiChatPanel.vue', () => {
       await selectFirstDirectory(wrapper)
 
       const selects = wrapper.findAll('select')
-      await selects[1].setValue('sonnet')
+      await selects[0].setValue('sonnet')
       await flushPromises()
 
-      expect(SaveChatSettings).toHaveBeenCalledWith('default', 'sonnet')
+      expect(SaveChatSettings).toHaveBeenCalledWith('default', 'sonnet', '')
+    })
+  })
+
+  describe('启动命令下拉（AI 启动配置）', () => {
+    it('挂载即扫描 PATH 候选并渲染下拉（默认项 + 候选 name/path + 指定路径）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      expect(DiscoverChatClis).toHaveBeenCalled()
+      const menu = wrapper.find('.launcher-menu')
+      expect(menu.exists()).toBe(true)
+      expect(menu.text()).toContain('claude·自动')
+      expect(menu.text()).toContain('myai')
+      expect(menu.text()).toContain('指定路径…')
+      // 按钮默认显示 claude·自动
+      expect(wrapper.find('.launcher-btn-label').text()).toBe('claude·自动')
+    })
+
+    it('点击候选切换 launcher 并持久化（透传候选 path）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      const item = wrapper.findAll('.launcher-menu .el-dropdown-item')
+        .find(w => w.text().includes('myai'))
+      await item.trigger('click')
+      await flushPromises()
+
+      expect(SaveChatSettings).toHaveBeenCalledWith('default', '', 'C:\\tools\\myai.cmd')
+      expect(useAiChatStore().chatSettings.launcher).toBe('C:\\tools\\myai.cmd')
+    })
+
+    it('默认项清空 launcher 回默认 claude（按钮标签还原）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+      // 预置非默认 launcher（须用面板挂载的同实例 store：createWrapper 内部
+      // 另建 pinia，mount 前取到的 store 不驱动组件视图）
+      const store = useAiChatStore()
+      await store.saveChatSettings('default', '', 'C:\\tools\\myai.cmd')
+      await flushPromises()
+      expect(wrapper.find('.launcher-btn-label').text()).toContain('myai')
+
+      await wrapper.vm.$.setupState.onLauncherCommand('__launcher_default__')
+      await flushPromises()
+      expect(SaveChatSettings).toHaveBeenCalledWith('default', '', '')
+      expect(wrapper.find('.launcher-btn-label').text()).toBe('claude·自动')
+    })
+
+    it('指定路径：OpenFileDialog 选中 exe 回填绝对路径，按钮显示自定义文件名', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      OpenFileDialog.mockResolvedValueOnce('D:\\apps\\qwen-cli.exe')
+      await wrapper.vm.$.setupState.onLauncherCommand('__launcher_pick__')
+      await flushPromises()
+
+      expect(OpenFileDialog).toHaveBeenCalledWith('选择 AI 启动程序', [
+        { DisplayName: '可执行文件', Pattern: '*.exe;*.cmd;*.bat' }
+      ])
+      expect(SaveChatSettings).toHaveBeenCalledWith('default', '', 'D:\\apps\\qwen-cli.exe')
+      expect(wrapper.find('.launcher-btn-label').text()).toBe('自定义：qwen-cli.exe')
+    })
+
+    it('指定路径：对话框取消（空串）不改动配置', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      OpenFileDialog.mockResolvedValueOnce('')
+      await wrapper.vm.$.setupState.onLauncherCommand('__launcher_pick__')
+      await flushPromises()
+
+      expect(SaveChatSettings).not.toHaveBeenCalled()
+    })
+
+    it('扫描失败静默降级：下拉仅剩默认项可用', async () => {
+      DiscoverChatClis.mockRejectedValueOnce(new Error('boom'))
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      expect(useAiChatStore().chatCliCandidates).toEqual([])
+      const menu = wrapper.find('.launcher-menu')
+      expect(menu.text()).toContain('claude·自动')
+      expect(menu.text()).not.toContain('myai')
+    })
+  })
+
+  describe('思考过程流式展示（仅流式，零持久化）', () => {
+    it('chat-task:output thinking 增量渲染灰色思考块（正文上方），不进正文', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = '难题'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+
+      eventHandlers['chat-task:output']({ taskId: 'chattask-1', text: '让我想想', thinking: true })
+      await flushPromises()
+
+      const bubble = wrapper.find('.chat-msg-bubble.is-streaming')
+      const thinking = bubble.find('.chat-thinking')
+      expect(thinking.exists()).toBe(true)
+      expect(thinking.find('.chat-thinking-title').text()).toBe('思考中…')
+      // 默认展开，思考文本在内容区
+      expect(thinking.find('.chat-thinking-body').text()).toBe('让我想想')
+      // 思考不进正文 markdown 区
+      expect(bubble.find('.chat-msg-md').text()).not.toContain('让我想想')
+
+      // 正文增量正常进正文区
+      eventHandlers['chat-task:output']({ taskId: 'chattask-1', text: '最终答案' })
+      await flushPromises()
+      expect(wrapper.find('.chat-msg-bubble.is-streaming .chat-msg-md').text()).toContain('最终答案')
+    })
+
+    it('思考块点标题可收起/展开（组件本地态），done 后整体丢弃不留空块', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = '难题'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+      eventHandlers['chat-task:output']({ taskId: 'chattask-1', text: '思考内容', thinking: true })
+      await flushPromises()
+
+      // 默认展开 → 点标题收起 → 再点展开
+      // jsdom 计算样式对未挂载树不可靠：用内联 style（v-show 直写）与箭头
+      // 折叠类断言展开/收起态
+      const body = () => wrapper.find('.chat-thinking-body')
+      const arrow = () => wrapper.find('.chat-thinking-arrow')
+      expect(arrow().classes()).not.toContain('is-collapsed')
+      expect(body().attributes('style') || '').not.toContain('display: none')
+      await wrapper.find('.chat-thinking-head').trigger('click')
+      expect(arrow().classes()).toContain('is-collapsed')
+      expect(body().attributes('style')).toContain('display: none')
+      await wrapper.find('.chat-thinking-head').trigger('click')
+      expect(arrow().classes()).not.toContain('is-collapsed')
+      expect(body().attributes('style') || '').not.toContain('display: none')
+
+      // done：任务摘除即丢弃，气泡定型后无思考块（历史消息无此块）
+      await eventHandlers['chat-task:done']({
+        taskId: 'chattask-1', chatSessionId: 'chatsession-new', reply: '全文回复'
+      })
+      await flushPromises()
+      expect(wrapper.find('.chat-thinking').exists()).toBe(false)
+      expect(wrapper.find('.chat-msg-bubble.is-streaming').exists()).toBe(false)
+    })
+
+    it('无思考输出的模型气泡形态与现状一致（不留空块）', async () => {
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      wrapper.vm.$.setupState.inputText = '普通问题'
+      await wrapper.vm.$.setupState.handleSend()
+      await flushPromises()
+      eventHandlers['chat-task:output']({ taskId: 'chattask-1', text: '普通回复' })
+      await flushPromises()
+
+      expect(wrapper.find('.chat-msg-bubble.is-streaming .chat-thinking').exists()).toBe(false)
     })
   })
 })

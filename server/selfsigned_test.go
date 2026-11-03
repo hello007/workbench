@@ -245,3 +245,23 @@ func TestEnsureSelfSignedCert_PartialPairFailFast(t *testing.T) {
 		t.Fatal("仅私钥存在时应返回错误（文件对不完整）")
 	}
 }
+
+// TestIsIA5StringSafe IA5String（SAN 字段）ASCII 约束判定：中文计算机名必须被拒，
+// 否则 CreateCertificate 整体失败（真机缺陷：中文主机名机器浏览器模式 TLS 不可用）。
+func TestIsIA5StringSafe(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"localhost", true},
+		{"DESKTOP-ABC123", true},
+		{"少年的PC", false},
+		{"WorkBenché", false}, // 拉丁扩展非 ASCII 同拒
+		{"", true},                 // 空串无害（调用方已另行判空）
+	}
+	for _, tc := range cases {
+		if got := isIA5StringSafe(tc.in); got != tc.want {
+			t.Errorf("isIA5StringSafe(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

@@ -122,21 +122,21 @@ func (c *capturedSink) waitDone(t *testing.T) model.ChatTaskRunResult {
 // 并捕获写入 stdin 的协议行（user 消息/control_response/interrupt 断言用）。
 // lineCh 由调用方构造（正常流：带缓冲且已关闭；阻塞流：不关闭，靠 Kill 退出）。
 type fakeChatProcess struct {
-	lineCh     <-chan string
-	startErr   error
-	waitErr    error
-	pipeErr    error // 非 nil 时输出流末尾以该错误关闭（scanner.Err 透传路径）
-	mu         sync.Mutex
-	started    bool
-	killCalled bool
-	exitCode   int
-	gotName    string
-	gotArgs    []string
-	gotDir     string
-	writer     *io.PipeWriter
-	writeDone  chan struct{}
-	killCh     chan struct{}
-	killOnce   sync.Once
+	lineCh          <-chan string
+	startErr        error
+	waitErr         error
+	pipeErr         error // 非 nil 时输出流末尾以该错误关闭（scanner.Err 透传路径）
+	mu              sync.Mutex
+	started         bool
+	killCalled      bool
+	exitCode        int
+	gotName         string
+	gotArgs         []string
+	gotDir          string
+	writer          *io.PipeWriter
+	writeDone       chan struct{}
+	killCh          chan struct{}
+	killOnce        sync.Once
 	stdinLines      []string      // 写入 stdin 的协议行（advanceSession/审批应答/中断断言用）
 	stdinReadCloser io.ReadCloser // stdin 捕获管道读端（Kill 时关闭防捕获 goroutine 泄漏）
 }
@@ -296,11 +296,11 @@ func wireFakeFactory(svc *ChatService, makeFake func() *fakeChatProcess) *[]*fak
 // newChatSvcForTest 构造指向临时目录、事件捕获注入完成的 ChatService。
 func newChatSvcForTest(t *testing.T) (*ChatService, *capturedSink) {
 	t.Helper()
-	// stub 掉 claude 启动解析：测试环境断言固定用 "claude"，
+	// stub 掉 AI 对话启动解析：测试环境断言固定用 "claude"，
 	// 真机解析结果随 shim 形态变化（claude.exe/node+js）不进断言
-	orig := claudeCommandResolver
-	claudeCommandResolver = func() (string, []string) { return "claude", nil }
-	t.Cleanup(func() { claudeCommandResolver = orig })
+	orig := chatCommandResolver
+	chatCommandResolver = func(launcher string) (string, []string, error) { return "claude", nil, nil }
+	t.Cleanup(func() { chatCommandResolver = orig })
 	svc := NewChatService(context.Background(), filepath.Join(t.TempDir(), "ai_chat"))
 	sink := newCapturedSink()
 	svc.SetEventSink(sink)
@@ -1634,7 +1634,7 @@ func TestChatService_SettingsConcurrentAccess(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_ = svc.SaveChatSettings(model.ChatPermissionModePlan, "sonnet")
+			_ = svc.SaveChatSettings(model.ChatPermissionModePlan, "sonnet", "")
 		}()
 		go func() {
 			defer wg.Done()
@@ -1768,5 +1768,220 @@ func TestNewExecChatProcess_CancelKillsTreeWired(t *testing.T) {
 	// Cancel 闭包对未启动进程（Process 为 nil）调用须安全无错
 	if err := ep.cmd.Cancel(); err != nil {
 		t.Errorf("未启动进程的 Cancel 调用应安全: %v", err)
+	}
+}
+
+// ===== 思考流式（仅流式展示，零持久化）=====
+
+// TestParseChatStreamLine_Thinking assistant 事件 thinking content part 的
+// 增量提取：文本在 thinking 字段（text 字段为空的形态），与正文 text 分离返回；
+// 两者可在同一事件共存；无 thinking 的事件返回空串。
+func TestParseChatStreamLine_Thinking(t *testing.T) {
+	cases := []struct {
+		name      string
+		line      string
+		wantText  string
+		wantThink string
+	}{
+		{
+			name:      "thinking 与 text 共存",
+			line:      `{"type":"assistant","session_id":"s1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先想一下"},{"type":"text","text":"答案"}]}}`,
+			wantText:  "答案",
+			wantThink: "先想一下",
+		},
+		{
+			name:      "thinking 回退取 text 字段",
+			line:      `{"type":"assistant","session_id":"s1","message":{"role":"assistant","content":[{"type":"thinking","text":"思考文本"}]}}`,
+			wantText:  "",
+			wantThink: "思考文本",
+		},
+		{
+			name:      "无 thinking 部件返回空串",
+			line:      assistantLine("s1", "纯文本回复"),
+			wantText:  "纯文本回复",
+			wantThink: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, text, _, _, _, thinking := parseChatStreamLine(tc.line)
+			if kind != chatStreamText {
+				t.Errorf("kind: got %v want chatStreamText", kind)
+			}
+			if text != tc.wantText {
+				t.Errorf("text: got %q want %q", text, tc.wantText)
+			}
+			if thinking != tc.wantThink {
+				t.Errorf("thinking: got %q want %q", thinking, tc.wantThink)
+			}
+		})
+	}
+}
+
+// TestChatService_RunChat_ThinkingStream 思考增量事件链路：thinking 行推送
+// chat-task:output 带 thinking:true 标记、不进回复正文（done.Reply 不含思考、
+// 消息入档不含思考），done 后无任何思考残留。
+func TestChatService_RunChat_ThinkingStream(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "思考流", "C:/proj")
+
+	fake, sender := newFakeBlocking("")
+	wireFakeFactory(svc, func() *fakeChatProcess { return fake })
+
+	taskID, err := svc.RunChat(sess.ID, "难题", "default", "")
+	if err != nil {
+		t.Fatalf("RunChat: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		st := svc.GetChatTaskState(taskID)
+		return st != nil && st.Running
+	})
+
+	thinkingLine := `{"type":"assistant","session_id":"claude-s-1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"让我想想"}]}}`
+	sender <- thinkingLine
+	// thinking 事件先于正文到达
+	waitFor(t, 5*time.Second, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for _, e := range sink.events {
+			if e.name != "chat-task:output" {
+				continue
+			}
+			p := e.data[0].(map[string]any)
+			if p["thinking"] == true && p["text"] == "让我想想" && p["taskId"] == taskID {
+				return true
+			}
+		}
+		return false
+	})
+
+	sender <- assistantLine("claude-s-1", "最终答案")
+	sender <- resultLine("claude-s-1")
+	result := sink.waitDone(t)
+	if result.Reply != "最终答案" {
+		t.Errorf("回复不应含思考内容: %q", result.Reply)
+	}
+	// 落盘消息不含思考（正文一行 + 正文一条 assistant）
+	got, _ := svc.GetChatSession(sess.ID)
+	for _, m := range got.Messages {
+		if strings.Contains(m.Content, "让我想想") {
+			t.Errorf("思考内容不应落盘: %+v", m)
+		}
+	}
+	svc.CloseAll()
+	waitFor(t, 5*time.Second, func() bool {
+		return svc.GetChatTaskState(taskID) == nil
+	})
+}
+
+// ===== 启动配置（launcher）=====
+
+// TestChatService_RunChat_LauncherResolution RunChat 按持久化设置的 launcher
+// 解析启动命令：解析结果（name+前缀参数）传入进程工厂；命令变更且空闲时
+// 优雅重启生效；解析失败中文报错且不留残留。
+func TestChatService_RunChat_LauncherResolution(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "启动配置", "C:/proj")
+
+	turn := 0
+	var gotLaunchers []string
+	fakes := wireFakeFactory(svc, func() *fakeChatProcess {
+		turn++
+		return newFakeLines([]string{
+			assistantLine(fmt.Sprintf("claude-s-%d", turn), fmt.Sprintf("答%d", turn)),
+			resultLine(fmt.Sprintf("claude-s-%d", turn)),
+		})
+	})
+
+	// stub 解析器：记录 launcher 入参并回传可断言的启动命令（前缀参数验证透传）
+	orig := chatCommandResolver
+	chatCommandResolver = func(launcher string) (string, []string, error) {
+		gotLaunchers = append(gotLaunchers, launcher)
+		if launcher == "" {
+			return "claude", nil, nil
+		}
+		return "custom-ai-cli", []string{"--custom"}, nil
+	}
+	t.Cleanup(func() { chatCommandResolver = orig })
+
+	// 默认配置（launcher 空）：走默认 claude
+	if _, err := svc.RunChat(sess.ID, "第一问", "default", ""); err != nil {
+		t.Fatalf("默认 launcher RunChat: %v", err)
+	}
+	sink.waitDone(t)
+	waitFor(t, 5*time.Second, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return len(svc.sessions) == 0
+	})
+	if gotLaunchers[0] != "" {
+		t.Errorf("首轮 launcher 入参应为空配置, got %q", gotLaunchers[0])
+	}
+	(*fakes)[0].mu.Lock()
+	firstName := (*fakes)[0].gotName
+	(*fakes)[0].mu.Unlock()
+	if firstName != "claude" {
+		t.Errorf("默认 launcher 进程名: got %q", firstName)
+	}
+
+	// 配置自定义启动命令且进程空闲：重启进程，新命令与前缀参数生效
+	if err := svc.SaveChatSettings("default", "", "D:/tools/custom-ai.cmd"); err != nil {
+		t.Fatalf("SaveChatSettings: %v", err)
+	}
+	if _, err := svc.RunChat(sess.ID, "第二问", "default", ""); err != nil {
+		t.Fatalf("自定义 launcher RunChat: %v", err)
+	}
+	sink.waitDone(t)
+	waitFor(t, 5*time.Second, func() bool { return len(*fakes) >= 2 })
+	if gotLaunchers[len(gotLaunchers)-1] != "D:/tools/custom-ai.cmd" {
+		t.Errorf("解析器应收到配置的 launcher 值, got %q", gotLaunchers[len(gotLaunchers)-1])
+	}
+	(*fakes)[1].mu.Lock()
+	secondName, secondArgs := (*fakes)[1].gotName, append([]string(nil), (*fakes)[1].gotArgs...)
+	(*fakes)[1].mu.Unlock()
+	if secondName != "custom-ai-cli" {
+		t.Errorf("自定义 launcher 进程名: got %q", secondName)
+	}
+	if len(secondArgs) == 0 || secondArgs[0] != "--custom" {
+		t.Errorf("前缀参数应置于 chat 参数前: %v", secondArgs)
+	}
+}
+
+// TestChatService_RunChat_LauncherResolveError launcher 解析失败：同步报错
+// 含配置值中文说明、不留 user 消息、无在途残留。
+func TestChatService_RunChat_LauncherResolveError(t *testing.T) {
+	svc, sink := newChatSvcForTest(t)
+	sess, _ := svc.CreateChatSession("dir-1", "解析失败", "C:/proj")
+
+	orig := chatCommandResolver
+	chatCommandResolver = func(launcher string) (string, []string, error) {
+		return "", nil, errors.New("未在 PATH 中找到 AI 启动命令「badcli」，请确认已安装或改填完整路径")
+	}
+	t.Cleanup(func() { chatCommandResolver = orig })
+
+	if err := svc.SaveChatSettings("default", "", "badcli"); err != nil {
+		t.Fatalf("SaveChatSettings: %v", err)
+	}
+	_, err := svc.RunChat(sess.ID, "hi", "default", "")
+	if err == nil {
+		t.Fatal("解析失败应同步报错")
+	}
+	if !strings.Contains(err.Error(), "badcli") {
+		t.Errorf("错误应含 launcher 配置值: %v", err)
+	}
+
+	// 失败轮次不残留（与 spawn 失败同路清理）
+	svc.mu.Lock()
+	residueTurns, residueSessions := len(svc.turns), len(svc.sessions)
+	svc.mu.Unlock()
+	if residueTurns != 0 || residueSessions != 0 {
+		t.Errorf("解析失败后应无残留, turns=%d sessions=%d", residueTurns, residueSessions)
+	}
+	if n := sink.countEvents("chat-task:done"); n != 0 {
+		t.Errorf("解析失败轮不应发 done, got %d", n)
+	}
+	got, _ := svc.GetChatSession(sess.ID)
+	if len(got.Messages) != 0 {
+		t.Errorf("解析失败轮不应落盘消息: %+v", got.Messages)
 	}
 }

@@ -15,7 +15,7 @@ import (
 // 本文件承载 ChatService 的对话配置域：输入框模板 CRUD 与执行配置
 // （权限模式/模型）读写。与会话/消息持久化同住 data/ai_chat/ 目录：
 //   - data/ai_chat/templates.json  模板列表（global + directory 两域）
-//   - data/ai_chat/settings.json   执行配置（permissionMode + modelName）
+//   - data/ai_chat/settings.json   执行配置（permissionMode + modelName + launcher）
 
 // chatTemplateSchemaVersion templates.json 当前 schema 版本（迁移预留）。
 const chatTemplateSchemaVersion = 1
@@ -222,8 +222,8 @@ func (s *ChatService) RemoveChatTemplate(id string) error {
 // ===== 执行配置（权限模式 / 模型）=====
 
 // GetChatSettings 读执行配置。文件不存在或损坏时返回默认值
-// （permissionMode=default、modelName 空 = claude 默认模型），不报错——
-// 配置缺失/损坏均不影响对话功能可用。
+// （permissionMode=default、modelName 空 = claude 默认模型、launcher 空 =
+// 默认 PATH 解析 claude），不报错——配置缺失/损坏均不影响对话功能可用。
 func (s *ChatService) GetChatSettings() *model.ChatSettings {
 	// 与 ChatService 其余读写一致持 s.mu：并发读写同文件时防撕裂读静默回退默认
 	s.mu.Lock()
@@ -231,6 +231,7 @@ func (s *ChatService) GetChatSettings() *model.ChatSettings {
 	defaults := &model.ChatSettings{
 		PermissionMode: model.ChatPermissionModeDefault,
 		ModelName:      "",
+		Launcher:       "",
 	}
 	if !util.FileExists(s.settingsPath()) {
 		return defaults
@@ -248,9 +249,10 @@ func (s *ChatService) GetChatSettings() *model.ChatSettings {
 		return &model.ChatSettings{
 			PermissionMode: model.ChatPermissionModeDefault,
 			ModelName:      "",
+			Launcher:       "",
 		}
 	}
-	// 越界收敛：permissionMode 不在可选集回默认；modelName 空值即默认模型语义
+	// 越界收敛：permissionMode 不在可选集回默认；modelName/launcher 空值即默认语义
 	switch defaults.PermissionMode {
 	case model.ChatPermissionModeDefault,
 		model.ChatPermissionModeAcceptEdits,
@@ -260,12 +262,14 @@ func (s *ChatService) GetChatSettings() *model.ChatSettings {
 		defaults.PermissionMode = model.ChatPermissionModeDefault
 	}
 	defaults.ModelName = strings.TrimSpace(defaults.ModelName)
+	defaults.Launcher = strings.TrimSpace(defaults.Launcher)
 	return defaults
 }
 
 // SaveChatSettings 持久化执行配置。permissionMode 须在可选集内
-// （modelName 空串合法 = 使用 claude 默认模型）。
-func (s *ChatService) SaveChatSettings(permissionMode, modelName string) error {
+// （modelName 空串合法 = 使用 claude 默认模型；launcher 空串 = 默认 PATH 解析
+// claude，命令名或绝对路径由 ResolveChatCommand 消费，无枚举约束）。
+func (s *ChatService) SaveChatSettings(permissionMode, modelName, launcher string) error {
 	switch permissionMode {
 	case model.ChatPermissionModeDefault,
 		model.ChatPermissionModeAcceptEdits,
@@ -277,6 +281,7 @@ func (s *ChatService) SaveChatSettings(permissionMode, modelName string) error {
 	settings := &model.ChatSettings{
 		PermissionMode: permissionMode,
 		ModelName:      strings.TrimSpace(modelName),
+		Launcher:       strings.TrimSpace(launcher),
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

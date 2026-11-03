@@ -115,10 +115,18 @@ type ChatTemplate struct {
 	UpdatedAt   int64  `json:"updatedAt"`             // 最近修改时间 unix 毫秒
 }
 
-// ChatSettings AI 对话执行配置（权限模式 + 模型），对话页顶部下拉选择后
+// ChatSettings AI 对话执行配置（权限模式 + 模型 + 启动命令），对话页选择后
 // 持久化记忆，重启恢复。持久化于 data/ai_chat/settings.json。
 // ModelName 为空表示使用 claude CLI 默认模型。
 type ChatSettings struct {
-	PermissionMode string `json:"permissionMode"` // default/acceptEdits/plan/bypassPermissions（ChatPermissionMode* 常量）
-	ModelName      string `json:"modelName"`      // claude 模型名（如 sonnet/opus/具体版本号），空 = claude 默认
+	PermissionMode string `json:"permissionMode"`     // default/acceptEdits/plan/bypassPermissions（ChatPermissionMode* 常量）
+	ModelName      string `json:"modelName"`          // claude 模型名（如 sonnet/opus/具体版本号），空 = claude 默认
+	Launcher       string `json:"launcher,omitempty"` // 启动命令配置：空 = 默认（PATH 解析 claude）；命令名或绝对 exe 路径
+}
+
+// ChatCliInfo PATH 扫描发现的 AI CLI 候选项（DiscoverChatClis 返回项，
+// 启动命令下拉数据源）。
+type ChatCliInfo struct {
+	Name string `json:"name"` // 命令名（已知集合内命名）
+	Path string `json:"path"` // LookPath 解析出的完整路径
 }
