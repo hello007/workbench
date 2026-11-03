@@ -1369,3 +1369,37 @@ origin 改为 GitHub HTTPS 并移除 mirror；Git 提交规范强制 fetch + reb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 210: origin 切换 GitHub SSH
+
+**Date**: 2026-11-03
+**Task**: origin 切换 GitHub SSH
+**Branch**: `master`
+
+### Summary
+
+origin 改为 git@github.com:hello007/workbench.git；同步 7 份文档的 SSH 口径与克隆/凭据说明；清理 rebase 残留 data-activity；rebase 本地 E2E 修复到远端 3290c92 之上，E2E 126 passed。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `63f27ac` | (see git log) |
+| `08a86cd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
