@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/security-scan.md", "reason": "npm audit 口径与已知接受风险登记格式"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "依赖四档钳制与升级 SOP"}
