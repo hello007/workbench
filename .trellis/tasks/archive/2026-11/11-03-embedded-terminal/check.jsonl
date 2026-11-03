@@ -1,0 +1,7 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "spec：前端视觉规范（按钮/空态/样式惯例）"}
+{"file": "docs/spec/design-tokens.md", "reason": "spec：设计令牌"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "spec：跨层契约（若动 App 签名须三处同步）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "spec：覆盖率门槛"}
+{"file": "docs/spec/test-stability.md", "reason": "spec：测试稳定性"}
+{"file": "docs/spec/ai-chat-service.md", "reason": "spec：AI 对话服务契约（事件隔离与消息写入口径）"}
+{"file": ".trellis/tasks/11-03-embedded-terminal/research/terminal-integration.md", "reason": "终端基建盘点与联动通道设计（落点/委托范式/风险口径）"}
