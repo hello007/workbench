@@ -118,6 +118,7 @@ workbench/
 |素材拆分 replace 落点：产物名 `<3位页序>-<名字主干>.pptx` 刻意不命中 isPptxSplitDerivative（源主干≥3位纯数字加 `-p`，改判定函数必回归）；全页 Stat+索引+标注单事务过才移源入回收站（禁 FOF_NOCONFIRMATION）；失败/取消回滚产物与索引行；`split_records` v8 target/source_removed|[pptx-split.md](docs/spec/pptx-split.md)|
 |新增解析提交日志/中文名文件的 git 调用须自带 UTF-8 `-c` 前缀（`-c i18n.logOutputEncoding=UTF-8 -c i18n.commitEncoding=UTF-8 -c core.quotepath=off`，`GitCommand` 不默认带）+ `%x00` 记录 `%x01` 字段分隔（禁 `|` 等可出现在正文中的分隔符）；双进程管道（如 `log -p | patch-id`）走 `util.GitCommand.ExecutePipeline`（git 参数切片不含程序名），错误归一化镜像 run()，失败可降级不阻塞|[branch-compare.md](docs/spec/branch-compare.md)|
 |冲突文件标记解析（utils/conflictMarkers.js）行尾 `\r` 必须逐字节保留（按 `\n` 切分、分隔行正则容忍 `\r?`，CRLF 往返回归测试锁死），块间上下文经每块 `lead` 行保序；rebase 冲突 ours/theirs 语义反转（以当前为准=变基目标侧），改冲突 UI 不得丢该提示；冲突类新方法须前置冲突态 + `--diff-filter=U` 成员校验，变更类走 tryLockRepo|[conflict-resolve-inapp.md](docs/spec/conflict-resolve-inapp.md)|
+|终端联动（chatMarkdown 代码块「在终端执行」）写入 PTY 的命令结尾**禁带换行**（=自动回车）且经 `pre code` textContent 取值（禁 data 属性存命令）；fence 渲染形态改动须同步 renderMsgMarkdown 的 replaceAll 锚点与 chatMarkdown.spec 整串断言；uiStore 信箱 seq 单调递增、消费即清空，TerminalPanel 消费直调 WriteTerminalInput（不经 useTerminal.onData）|[terminal-chat-link.md](docs/spec/terminal-chat-link.md)|
 ## 项目记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。
