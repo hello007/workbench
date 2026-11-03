@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对实现与拆分/清理规范逐条一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对备份还原与拆分记录契约无漂移"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与覆盖率门禁"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码/日志口径"}

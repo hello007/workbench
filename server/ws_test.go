@@ -70,6 +70,19 @@ func readBusinessFrame(t *testing.T, conn *websocket.Conn) wsFrame {
 }
 
 // waitClientCount 轮询等待客户端数达到期望值（连接注册与断连注销均为异步）。
+// waitConnectionsFrame 消费连接数事件帧直至其落地：waitClientCount 只保证
+// clients 已登记，register 内计数帧的 Emit（占号）与测试后续 Emit 存在调度
+// 竞争，若测试先占号会使基于该帧推算的序号基线整体偏移一位（全量套件高负载
+// 下偶发）。需要确定性序号基线的用例先调用本函数，再产生业务事件。
+func waitConnectionsFrame(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	for {
+		if readFrame(t, conn).Event == wsConnectionsEvent {
+			return
+		}
+	}
+}
+
 func waitClientCount(t *testing.T, h *WSHub, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -492,6 +505,10 @@ func TestWSHub_EmitSeqMonotonicShared(t *testing.T) {
 		mustDialWS(t, srv, "?token=right-token"),
 	}
 	waitClientCount(t, hub, 2)
+	// 两条连接各自的 register 计数帧先落地，业务帧序号基线才确定
+	for _, conn := range conns {
+		waitConnectionsFrame(t, conn)
+	}
 
 	for i := 0; i < 3; i++ {
 		hub.Emit("e", i)
@@ -522,6 +539,7 @@ func TestWSHub_ResumeFillExact(t *testing.T) {
 	// 业务帧序号自基线 base 起连续推进，下同）
 	conn1 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
+	waitConnectionsFrame(t, conn1) // 先消费 register 计数帧，固定后续序号基线
 	base := uint64(0)
 	for i := 1; i <= 3; i++ {
 		hub.Emit("e", i)
@@ -609,6 +627,7 @@ func TestWSHub_ResumeGapOnOverflow(t *testing.T) {
 
 	conn1 := mustDialWS(t, srv, "?token=right-token")
 	waitClientCount(t, hub, 1)
+	waitConnectionsFrame(t, conn1) // 先消费 register 计数帧，固定后续序号基线
 	hub.Emit("e", 1)
 	base := readBusinessFrame(t, conn1).Seq - 1 // 基线：register 计数帧占 seq base+1
 	_ = conn1.Close()
@@ -1186,7 +1205,7 @@ func TestWSHub_DisconnectClientUnicastIsolation(t *testing.T) {
 }
 
 // TestWSHub_KickFrameNotInResumeReplay 踢出帧不进环形缓冲：被踢连接重连握手
-//（resume 补发）不含 ws-kicked——踢出提示是一次性控制帧，重放会在重连瞬间
+// （resume 补发）不含 ws-kicked——踢出提示是一次性控制帧，重放会在重连瞬间
 // 误报「被踢」（幻影回放）。
 func TestWSHub_KickFrameNotInResumeReplay(t *testing.T) {
 	hub, srv := newTestWSHub(t, "right-token")

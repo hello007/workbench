@@ -1,0 +1,2 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对豁免范围与碰撞面表述无泛化"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对测试变更不降低门禁"}

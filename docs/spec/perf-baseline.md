@@ -2,7 +2,7 @@
 
 > 本文档记录 WorkBench v1.4 平台加固前的性能基线数据，供 PR4 性能优化前后对比。
 > 严格遵循「先测后优」：每项优化须有 before/after 量化支撑（09-20 提交历史优化见第 12 节）。
-> 最后更新：2026-10-21 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）/ 10-21-goleak-gate（§14 goleak 硬门禁收口）
+> 最后更新：2026-10-31 · 来源任务：09-14-v1-4 PR1 子项 3 / PR4 子项 4 / 09-20-commit-history-perf / 09-25-perf-soak-leak-detect / 09-27 冷启动量化（§6）/ 09-27 前端内存维度量化（§15）/ 09-27 前端内存驻留面量化（§16）/ 10-21-goleak-gate（§14 goleak 硬门禁收口）/ 10-31-replace-perf-baseline（§19.1 replace 索引规模实测）
 
 ## 1. 适用范围
 
@@ -442,7 +442,7 @@ service 包 TestMain（全仓首个）两档（2026-10-21 收口，原三档的�
 | treeCache 增长 | 已覆盖：条目有界断言（≤32，理论 11）随 TestSoakFileTreeGetTree |
 | commitHistoryCache 增长 | 已覆盖：TestSoakCommitHistoryCacheGrowth（单键覆盖写 + 深拷贝隔离抽查）+ 主包全链路 |
 | 事件订阅 | 核实无泄漏面：`sinkHolder` 为单出口持有器（`SetEventSink` 换引用，非累积订阅者注册表），不构成泄漏路径，不专项测试 |
-| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、CI 为 Linux runner、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 硬门禁兜底（观察期与收紧后两次捕获 watchProcess 残留，2026-10-21 已修：watchProcess 挂会话级停止信号，CloseTerminal/CloseAll 等待其退出，见 14.3） |
+| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 硬门禁兜底（观察期与收紧后两次捕获 watchProcess 残留，2026-10-21 已修：watchProcess 挂会话级停止信号，CloseTerminal/CloseAll 等待其退出，见 14.3） |
 
 ### 14.5 运行方式速查
 
@@ -679,5 +679,47 @@ Home.vue 其余 refreshNode 调用点（F5/onRefreshNode/onDeleteFromContent 等
 - **形态**：replace 落点每页产物 = 一条 `files` 行 + 一条 `slides` 行 + FTS 行；缩略图由后续扫描补缺或按需生成，不在拆分步落账。一次替换后条目数 = 已拆页数（示例：1208 页库全量替换即 1208 条素材、1208 个单页 pptx）。
 - **受影响面**：`ListAssetFiles` 全量清单规模、`ListAssetSlides` 分页基数、`GetAssetLibraryStats` 计数、关键词检索候选集与聚合折叠、导出物化行数；均为线性放大，无额外复杂度。
 - **成本不放大面**：单页文件解析仅 1 页；按需 hd 预取对 1 页文件自然退化为单页；购物栏与合并导出按普通素材处理，零改动。
-- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；**未实测前不写死数值**，示例页数不得当作基线。
+- **复测口径**：replace 前后对比 `files` 行数、`ListAssetFiles` 全量拉取耗时、`SearchAssets` 典型词耗时三项；实测数据见 §19.1，示例页数不得当作基线。
 - **约束**：该放大是「每页独立素材」产品语义的预期结果，禁额外裁剪或虚拟条目；若后续分页/统计退化，先按本文件既有压测与内存口径复测再优化。
+
+### 19.1 实测数据（2026-10-31，Windows 11 + go1.26.10，其余环境同第 2 节）
+
+- **语料**：程序化直插索引（绕过 pptx 解析），FTS 文本经 `splitFtsText` 同源切分；页正文/页标题注入规则沿用检索基准（约 2% 页正文植入「城商行」、约 5% 页标题植入「获客」），两档按同一页序注入，**平铺口径命中页数完全相同（24 / 60）**；未复制检索基准的文件名注入（文件名命中走 files 行，与本次索引规模面正交）。
+- **两档形态**：同一批 53 个源、1208 页。before = 源文件本身（53 条 files 行）；after = 全量 replace 产物（53 个源目录、`<3 位页序>-<源主干>.pptx` 单页文件共 1208 条 files 行，命名与 `replaceArtifactName` 一致）。
+- **取数**：`TestAssetReplaceScale_Report` 单次输出该档 3 轮中位，每档**独立进程**执行、重复 5 次取中位。同进程串跑两档时后测档会被整体放慢约 2 倍（连裸 SQL 查询也复现，与 GC 无关），故禁止同进程测得跨档倍数。
+
+|形态|files 行|slides 行|FTS 行|ListFiles|检索（正文词「城商行」）|检索（标题词「获客」）|GetLibraryStats|
+|---|---|---|---|---|---|---|---|
+|before（53 文件 / 1208 页）|53|1208|1261|108 µs|526 µs|650 µs|37 µs|
+|after（1208 文件 / 1208 页）|1208|1208|2416|1.72 ms|541 µs|693 µs|0.30 ms|
+|放大倍数|22.8×|1.0×|1.9×|16.0×|1.03×|1.07×|8.1×|
+
+> 放大倍数按未舍入中位计算（ListFiles 1.724 ms / 107.6 µs）；按表内显示值相除为 15.9×，属舍入差异。
+
+**结论**：
+
+- `files` 行与文件级 FTS 行随页数线性放大（22.8×），FTS 总行 1261→2416（1.9×），`slides` 行不变（页总数不变）。
+- **DB 读取层**在 1208 页全量替换后仍为毫秒级：`ListFiles` 1.72 ms、检索 0.54–0.69 ms、统计 0.30 ms。该结论只覆盖 service 层 SQLite 查询，**未覆盖** Wails JSON 序列化、前端 1208 条目渲染，也未覆盖带标签/标注的库（本语料标签表为空，真实库的标签全表扫描会额外增长）。
+- 检索耗时**基本持平**（1.03–1.07×）：两档命中页数相同（24 / 60），FTS MATCH 的候选集不随文件级行增长而变大，文件数放大不传导到关键词检索。
+- `ListFiles`（16×）与 `GetLibraryStats`（8.1×）随 `files` 行数增长但仍为亚毫秒到毫秒级；`ListFiles` 单次返回 1208 条目的内存分配约 1 MB，前端渲染成本不在本表覆盖范围内。
+- 噪声：跨次测量同档波动约 ±15%（个别档 ±50%，如 before 的 ListFiles 5 次为 99–166 µs），上表为中位数。Windows 逐次计时易被时钟粒度量化（出现 0s / 999 µs 台阶），报告测试按 10 ms 窗口批量平均取值。
+
+**复现**：
+
+```bash
+# 每档独立进程，各跑 5 次取中位（单次即含 3 轮中位）
+for i in 1 2 3 4 5; do
+  ASSET_REPLACE_SCALE_STATE=before go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1 | grep 'files_'
+done
+for i in 1 2 3 4 5; do
+  ASSET_REPLACE_SCALE_STATE=after go test ./service/ -run '^TestAssetReplaceScale_Report$' -v -count=1 | grep 'files_'
+done
+
+# 语料同源性校验（两档命中页数一致）与回归基准
+go test ./service/ -run '^TestAssetReplaceScale_HitParity$' -v
+go test ./service/ -bench=BenchmarkAssetReplaceScale -benchmem -run='^$'
+```
+
+> 命令需在 bash / Git Bash 下执行（PowerShell 用 `$env:ASSET_REPLACE_SCALE_STATE='before'`）。回归基准两档同进程串跑，**只能用于同档跨版本比较**，跨档倍数一律以上述分进程报告为准。
+
+测试定义于 `service/assets_replace_scale_bench_test.go`；`-short` 跳过报告测试与命中一致性校验（快速档不含性能测量），未设环境变量时报告测试自动跳过，常规 `go test ./...` 不受影响。

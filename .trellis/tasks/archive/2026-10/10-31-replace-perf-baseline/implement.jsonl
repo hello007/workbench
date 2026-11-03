@@ -1,0 +1,3 @@
+{"file": "docs/spec/perf-baseline.md", "reason": "§19 复测口径与 §19.1 实测数据回填位置"}
+{"file": "service/assets_search_bench_test.go", "reason": "程序化索引语料构造与命中注入规则的同源参考"}
+{"file": "docs/spec/assets-management.md", "reason": "§15.2 replace 产物建索引的规模放大登记"}

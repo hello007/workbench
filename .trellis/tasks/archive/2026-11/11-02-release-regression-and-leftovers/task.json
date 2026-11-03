@@ -1,0 +1,31 @@
+{
+  "id": "release-regression-and-leftovers",
+  "name": "release-regression-and-leftovers",
+  "title": "release regression and leftovers",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-11-02",
+  "completedAt": "2026-11-02",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-02-release-regression-verify",
+    "11-02-chat-template-corrupt-flaky",
+    "11-02-artifact-page-fingerprint",
+    "11-02-assets-split-e2e-default-target"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

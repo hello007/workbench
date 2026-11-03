@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "拆分落点/清理/失败语义与本任务改动点所在规范"}
+{"file": "docs/spec/assets-management.md", "reason": "备份还原与 split_records 契约（relink-backup-hardening 相关）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁 service ≥76%，新增分支须补测"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步与日志分级口径"}

@@ -1083,17 +1083,17 @@ func TestRelinkWrites_ZeroRowsAffectedOnClearedRecord(t *testing.T) {
 	}
 
 	// relocateFileOK / relocateFileProcessing：零命中 → sql.ErrNoRows
-	if err := store.relocateFileOK(ghostID, "新位置.pptx", 1, 1, "now"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := store.relocateFileOK(ghostID, "旧位置.pptx", "新位置.pptx", 1, 1, "now", ""); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("relocateFileOK 零命中应返回 sql.ErrNoRows，实际：%v", err)
 	}
-	if err := store.relocateFileProcessing(ghostID, "新位置.pptx", "now"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := store.relocateFileProcessing(ghostID, "旧位置.pptx", "新位置.pptx", "now", "", false); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("relocateFileProcessing 零命中应返回 sql.ErrNoRows，实际：%v", err)
 	}
 	// replaceFilePaths：混入幽灵行 → sql.ErrNoRows 且事务整体回滚（旁观行不动）
 	err := store.replaceFilePaths([]assetPathRename{
 		{fileID: keepID, oldPath: "旁观.pptx", newRel: "新目录/旁观.pptx"},
 		{fileID: ghostID, oldPath: "被清理.pptx", newRel: "新目录/被清理.pptx"},
-	}, "now", "", "")
+	}, "now", "", "", splitRecordMigration{})
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("replaceFilePaths 零命中应返回 sql.ErrNoRows，实际：%v", err)
 	}

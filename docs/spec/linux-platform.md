@@ -61,7 +61,7 @@ go build -tags "desktop,production,webkit2_41" ./...
 
 ## 7. 构建与分发
 
-- CI（ci.yml）：ubuntu-latest 跑全部门禁；`frontend/dist` 被 gitignore 但 `main.go` 有 `go:embed all:frontend/dist` —— CI 需预置占位 `index.html` + `assets/app.js`（冒烟测试 `fs.Glob(distFS, "assets/*.js")` 需真实文件名），vite build 会 `emptyOutDir` 重建真实产物。
+- CI（ci.yml）：ubuntu-latest 跑全部门禁，`test-windows` job 并行跑后端静态检查与全量单测覆盖 Windows 平台分支；`frontend/dist` 被 gitignore 但 `main.go` 有 `go:embed all:frontend/dist` —— CI 需预置占位 `index.html` + `assets/app.js`（冒烟测试 `fs.Glob(distFS, "assets/*.js")` 需真实文件名），vite build 会 `emptyOutDir` 重建真实产物。
 - Release（release.yml）：`release-linux` job 经 `needs: release-windows` 串行（消除两 job 并发创建 Release 的首建竞态，Windows 成功 Linux 失败可单独 Re-run failed jobs 补传资产）；glibc 基线经 `container: ubuntu:22.04`（2.35，产物兼容老发行版）与 runner 镜像解耦（runner 用 ubuntu-latest，规避 22.04 runner 镜像 EOL 退役；容器内 root 无 sudo、镜像无 git 须 checkout 前显式安装）。产物 `workbench-linux-amd64.tar.gz` 扁平布局（二进制 + `build/README-linux.md`）。**`build/` 在 gitignore 中，白名单 `!build/README-linux.md`——新增需分发文件须同步白名单，否则发版必挂**。
 
 ## 8. 测试平台拆分模式

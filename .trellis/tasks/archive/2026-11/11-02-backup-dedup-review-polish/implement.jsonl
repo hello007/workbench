@@ -1,0 +1,3 @@
+{"file": "docs/spec/data-atomic-write.md", "reason": "豁免范围与碰撞表述的修改位置"}
+{"file": "util/backup.go", "reason": "摘要计算口径，测试期望值需与实现一致"}
+{"file": "util/backup_test.go", "reason": "断言收紧与结构替换的落点"}

@@ -96,6 +96,12 @@ if len(nodes2) != 2 {  // NTFS 同 tick 时 mtime 未变 → 命中缓存返回 
 - 是 → 改用注入明确不等的时间值（`curMtime.Add(-time.Hour)`）直接驱动判定分支，不依赖真实 FS 时序
 - 必须端到端验证 mtime 触发路径时 → 用 `os.Chtimes` 显式设置，不用 `time.Sleep` 等待
 
+### 6.1 留底备份文件名同样禁含时间戳
+
+「损坏文件留底备份恰好 N 份」类断言，若生产代码按 `time.Now().Format("20060102-150405")` 命名备份，同一份损坏内容跨秒重复读取就产生多份，属同一类时间依赖 flaky（`TestChatService_TemplatesCorruptFallback` 曾因此偶发失败）。
+
+口径：留底文件名按内容摘要生成（`util.BackupCorruptFile` → `<路径>.bak.<SHA-256 前 12 位>`，见 [data-atomic-write.md「损坏留底备份命名」](data-atomic-write.md)），断言可确定性地写「恰好 1 份」；**禁**以 `time.Sleep` 等跨秒、也禁放宽为 `>= 1` 掩盖「备份随读取次数无上限增涨」的实现缺陷。
+
 ## 7. 端口 / 环境依赖
 
 测试隐式依赖「本机某固定端口空闲」同样属于环境敏感 flaky：开发者本机常驻

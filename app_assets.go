@@ -11,8 +11,9 @@ import (
 // 委托 AssetLibraryService：素材库 CRUD + 目录扫描（增量索引）+ 文件/幻灯片
 // 列表 + 文件级元数据编辑 + PPT 按页拆分（单文件/库级批量 + 增量判定 + 跳转
 // 方式 2）。扫描进度/终态经 assets-scan:* 事件推送（可经 CancelAssetScan 取消），
-// 拆分进度/终态经 assets-split:* 事件推送（可经 CancelAssetSplit 取消；取消属
-// 预期拒绝，前端按 warning 中性提示）。跨层契约见 docs/spec/cross-layer-contracts.md：
+// 拆分进度/终态经 assets-split:* 事件推送（可经 CancelAssetSplit 取消；批量取消
+// 返回已完成部分 + canceled 标记，单文件取消仍按 E_ASSETS_CANCELLED warning）。
+// 跨层契约见 docs/spec/cross-layer-contracts.md：
 // 新增 App 方法与 model 导出 struct 须经 wails generate module 同步 frontend/wailsjs/
 // 三处（App.js / App.d.ts / models.ts）。
 
@@ -98,14 +99,16 @@ func (a *App) DeleteAssetFolder(libraryID, relPath string, force bool) (int64, e
 // RenameAssetFolder 同父重命名（PR2 目录管理，目录级移动）：磁盘 rename + 索引
 // 路径前缀批量更新（复用前缀替换单点机制）+ 受影响文件重过排除规则双向翻转
 // （新名命中翻 excluded / 原排除解除经 reviveLostFile 复活，FTS 同事务重建）+
-// 自动增量扫描收敛。重名拒绝；子树内存在拆分记录拒绝（拆分溯源宁严勿错）。
+// 自动增量扫描收敛。重名拒绝；拆分记录随同一事务迁移（source_rel_path 与
+// output_dir 一并改写，不再因历史拆分记录拒绝目录操作）。
 func (a *App) RenameAssetFolder(libraryID, relPath, newName string) (model.AssetFolderRenameResult, error) {
 	return a.assetsSvc.RenameAssetFolder(libraryID, relPath, newName)
 }
 
 // MoveAssetFiles 文件批量移动（PR3 拖拽移动，R4/R6/R9）：把文件（fileIDs 去重）
 // 及其磁盘文件移动到目标目录（targetFolder 空串 = 库根）。目标目录存在/非排除
-// 命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中拒绝。每条目一事务
+// 命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中/replace 单页产物拒绝
+// （产物须随其容器目录整体移动）。每条目一事务
 // 逐条目提交（files.path 更新 + split_records 源路径同事务重写），部分失败不
 // 中断，逐条目明细返回（终态仅经返回值汇总，无逐文件事件）；FTS 零重建（检索
 // 列不含路径）+ 排除规则双向翻转经既有单点。
@@ -116,8 +119,8 @@ func (a *App) MoveAssetFiles(libraryID string, fileIDs []int64, targetFolder str
 // MoveAssetFolder 目录级移动（PRD R5/D，PR4）：把目录整体移动到目标目录下
 // （targetFolder 空串 = 库根），保持自身名称。与 RenameAssetFolder 共用统一核心
 // （磁盘 rename + 前缀替换单点 + 排除双向翻转 + folder_meta/folder_tags 键同事务
-// 级联 + 自动增量扫描收敛）；目标不得位于源目录自身子树内，目标校验与源含拆分
-// 记录拒绝口径同 PR2。
+// 级联 + 拆分记录 source_rel_path/output_dir 同事务迁移 + 自动增量扫描收敛）；
+// 目标不得位于源目录自身子树内，目标校验与拆分记录迁移口径同 RenameAssetFolder。
 func (a *App) MoveAssetFolder(libraryID, folderRelPath, targetFolder string) (model.AssetFolderRenameResult, error) {
 	return a.assetsSvc.MoveAssetFolder(libraryID, folderRelPath, targetFolder)
 }
@@ -281,13 +284,17 @@ func (a *App) RequestAssetThumb(libraryID string, fileID int64, relPath string, 
 
 // SplitAssetFile 拆分单个素材文件（SRS §2.2.3，画廊卡/详情侧边栏入口）：复用
 // 工具箱拆分核心（纯 Go OOXML），落点三选一（target 取 model.AssetSplitTarget*
-// 常量，空串等价 cache）：
+// 常量，空串归一等价 cache；素材面板前端弹窗默认传 replace）：
 //   - cache：落素材库缓存目录（derived 镜像源树，库根之外天然隔离扫描）；
 //   - source：落源目录（与源同目录，isPptxSplitDerivative 已自动排除索引）；
 //   - replace：落源目录同名文件夹并以「页序前缀」命名（产物进索引成为独立素材），
 //     全页成功 + 逐页校验 + 标注迁移通过后**把源文件移入系统回收站**（不可逆
 //     语义，前端须强确认）；删源失败返回 E_ASSETS_SPLIT_SOURCE_DELETE_FAILED
 //     （产物与索引保留，可重试）。
+//
+// 落点目录已被另一源文件的拆分记录占用时返回 E_ASSETS_SPLIT_OUTPUT_CONFLICT
+// （warning，典型为改名重链后旧记录冻结目录、同名新源再拆分；在任何删除/覆盖
+// 动作之前拒绝，目录零改动）。
 //
 // 增量命中跳过返回 Skipped=true（前端提示「已最新」），核心失败（损坏/加密/
 // 只读等）返回错误。进度/终态经 assets-split:* 事件推送（素材面板独听），在途
@@ -298,16 +305,19 @@ func (a *App) SplitAssetFile(libraryID, relPath string, target string) (model.As
 
 // SplitAssetLibrary 库级批量拆分（SRS §2.2.3「批量目录拆分」，库面板「拆分全部
 // PPT」入口）：启动时快照圈定全部 ok 状态文件逐个处理；单文件失败逐文件记日志
-// 跳过，批量不中断，返回汇总（total/split/skipped/failed + 逐文件明细，明细含
-// 落点、是否已删源、是否已回滚、失败错误码）。target 落点语义同 SplitAssetFile。
-// 同库并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经 CancelAssetSplit
-// 取消。
+// 跳过，批量不中断，返回汇总（total/split/skipped/failed/canceled + 逐文件明细，
+// 明细含落点、是否已删源、是否已回滚、失败错误码）。target 落点语义同
+// SplitAssetFile。同库并发拆分被拒（E_ASSETS_SCAN_IN_PROGRESS），在途任务可经
+// CancelAssetSplit 取消：取消时返回已完成部分 + Canceled=true（nil error，终态走
+// done 事件），前端按 warning 展示已完成计数与明细。
 func (a *App) SplitAssetLibrary(libraryID string, target string) (model.AssetSplitBatchResult, error) {
 	return a.assetsSvc.SplitAssetLibrary(context.Background(), libraryID, target)
 }
 
-// CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义，取消
-// 错误前端按 E_ASSETS_CANCELLED warning 中性提示）。返回是否存在可取消的在途拆分。
+// CancelAssetSplit 取消指定库的在途拆分（对齐 CancelAssetScan 交互语义）：批量
+// 取消后 SplitAssetLibrary 正常返回 canceled=true 的已完成结果（前端 warning
+// 展示计数），单文件取消仍按 E_ASSETS_CANCELLED warning 中性提示。
+// 返回是否存在可取消的在途拆分。
 func (a *App) CancelAssetSplit(libraryID string) bool {
 	return a.assetsSvc.CancelAssetSplit(libraryID)
 }

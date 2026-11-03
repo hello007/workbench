@@ -82,6 +82,14 @@ func (s *AssetLibraryService) ClearLostAssetFiles(libraryID string) (int64, erro
 //     按分类落终态，标注按位置语义保留）；
 //   - 记录 hash 为空（加密/权限跳过文件无哈希）：跳过校验直接重链 + 重解析，
 //     返回值 SkippedHashCheck=true 供前端提示「未校验内容」。
+//   - 拆分记录同事务迁移：该文件的 split_records 行源键从旧路径改写为新路径，
+//     「打开拆分单页」在重链后仍可查；新键冲突沿用目录级迁移的消解口径（保留
+//     source_removed=1 的一条并 Warn）。旧键不存在零操作、重复重链幂等。
+//   - 落点探测（产物目录随源一起搬迁）：source / replace 落点的产物容器目录与源
+//     同目录同名（`<源目录>/<源主干>/`），用户可能把两者一起搬到新位置；此时旧
+//     output_dir 失效（打开单页报不存在、再次就地替换被同形文件拒绝）。探测经
+//     resolveRelocatedSplitOutDir，命中则经 newOutDir 形参把落点改指新位置，与
+//     files.path 同一事务落库（只改记录，磁盘零操作）。
 //
 // 串行保护：tryLockScan 与扫描互斥（重链写 files 表且可能重解析，防与扫描差分
 // 写面交错半态）；锁内复验库存在（getLibrary 与拿锁的窗口内删库防孤儿 db，对齐
@@ -152,6 +160,20 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 	result := model.AssetRelocateResult{FileID: fileID, OldPath: rec.path, NewPath: newRel}
 	now := time.Now().Format("2006-01-02 15:04:05")
 
+	// 拆分记录读取（落点探测的数据源）：读失败按系统性错误上抛，不静默降级——
+	// 静默会让「产物目录已随源搬迁」的场景退化为旧落点，打开单页继续失效且无提示
+	splitRec, err := store.getSplitRecord(rec.path)
+	if err != nil {
+		return result, fmt.Errorf("读取拆分记录失败: %w", err)
+	}
+	newOutDir := resolveRelocatedSplitOutDir(splitRec, newAbs, newRel)
+	// 落点迁移日志（仅实际命中时输出 old/new 落点，便于用户侧核对搬运结果）
+	logOutDirMigrated := func() {
+		Logger().Info("重链识别到拆分产物目录已随源搬迁，落点改指新位置",
+			"libraryId", libraryID, "fileId", fileID,
+			"oldOutDir", splitRec.outputDir, "newOutDir", newOutDir)
+	}
+
 	if rec.hash != "" {
 		newHash, err := hashFileSHA256(newAbs)
 		if err != nil {
@@ -178,7 +200,8 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 		// 增量判定同口径）：上次解析中断的半态行即使内容同旧（哈希相等）也不得
 		// 直翻 ok——slides/FTS 可能只落了半份数据，直复活后增量扫描 unchanged
 		// 跳过永不纠正，落下方重解析补齐
-		if err := store.relocateFileOK(fileID, newRel, info.Size(), info.ModTime().UnixNano(), now); err != nil {
+		outDirMigrated, err := store.relocateFileOK(fileID, rec.path, newRel, info.Size(), info.ModTime().UnixNano(), now, newOutDir)
+		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// 并发窗口：记录已被「清理丢失记录」删除（ClearLostAssetFiles 不持
 				// 扫描锁）——UPDATE 空命中零操作，如实报错防成功虚报
@@ -186,20 +209,30 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 			}
 			return result, fmt.Errorf("更新文件记录失败: %w", err)
 		}
+		if outDirMigrated {
+			logOutDirMigrated()
+		}
 		Logger().Info("素材文件重链完成（哈希匹配）", "libraryId", libraryID,
 			"fileId", fileID, "oldPath", rec.path, "newPath", newRel)
 		return result, nil
 	}
 
 	// 哈希不等（force 确认）或记录无哈希：改 path + 标记 processing + 单文件
-	// 重解析（复用扫描链路：失效缩略图、哈希现算、按解析分类落终态）
-	if err := store.relocateFileProcessing(fileID, newRel, now); err != nil {
+	// 重解析（复用扫描链路：失效缩略图、哈希现算、按解析分类落终态）。
+	// dropSplitRecord：仅「哈希不等且 force 确认」（源内容已变）时删旧拆分记录
+	// ——旧产物与当前源不再对应；无哈希记录内容未知，按原口径迁移键保留记录。
+	dropSplitRecord := rec.hash != "" && !result.HashMatched
+	outDirMigrated, err := store.relocateFileProcessing(fileID, rec.path, newRel, now, newOutDir, dropSplitRecord)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// 并发窗口：记录已被「清理丢失记录」删除——如实报错防成功虚报，
 			// 且不再进入随后的单文件重解析（幽灵行落 slides 外键违例）
 			return result, errors.New("记录已被清理，请刷新后重试")
 		}
 		return result, fmt.Errorf("更新文件记录失败: %w", err)
+	}
+	if outDirMigrated {
+		logOutDirMigrated()
 	}
 	e := pptxDiskEntry{rel: newRel, abs: newAbs, size: info.Size(), mtimeNs: info.ModTime().UnixNano()}
 	if _, err := s.processScanFile(store, lib, e, rec, true); err != nil {
@@ -211,6 +244,61 @@ func (s *AssetLibraryService) RelocateAssetFile(libraryID string, fileID int64, 
 	return result, nil
 }
 
+// resolveRelocatedSplitOutDir 重链时探测拆分产物容器目录是否随源一起搬迁（只改
+// 记录落点，磁盘零操作）。候选目录经 splitSourceOutputDir 单点推导 =
+// `<新源父目录>/<新源主干>`，与 source / replace 落点的实际布局同源。
+//
+// 仅 source / replace 两类落点参与判定：cache 落点在应用数据目录
+// （data/assets/<库>/derived），用户搬动源文件时不会连带搬动，纳入判定只放大
+// 误判面（新源目录恰好有同名目录即被误认）。
+//
+// 命中判定 = 候选存在、为目录，findSplitArtifactByPage(候选, target, 1) 命中，
+// 且首页产物的解析主干属于记录主干（artifact_stem，v9 权威；空值回落记录
+// output_dir 基名与 replace 数字主干变体）。归属校验不可省：`<新源目录>/<新源
+// 主干>` 目录可能属于其他同名源文件（用户在同目录放了另一份同名 pptx 的产物
+// 容器），仅凭「首页有产物形态」会把落点改指到他人目录，后续清理会误删别人的
+// 产物。只看首页即可：目录由该记录独占，主干归属命中即证明是搬迁来的产物目录，
+// 逐页全检不增加判别力却要多读目录；首页缺失/主干不符按安全侧不迁移（用户可
+// 重新拆分恢复），与「增量判定首页存在」同口径（复用形态判定单点）。
+//
+// 返回空串 = 保持原 output_dir（无拆分记录 / 非 source·replace / 主干不可用 /
+// 候选不存在 / 候选与原落点等价 / 产物形态不匹配 / 主干归属不符）；否则返回候选
+// 绝对路径，作为 rewriteSplitRecordKeyTx 的 newOutDir 形参随 files.path 同事务落库。
+func resolveRelocatedSplitOutDir(record *assetSplitRecord, newAbs, newRel string) string {
+	if record == nil {
+		return ""
+	}
+	if record.target != model.AssetSplitTargetSource && record.target != model.AssetSplitTargetReplace {
+		return ""
+	}
+	// 主干不可用（`.pptx` / `..pptx` 等）会让候选退化为源所在目录本身，目录内任何
+	// 页序产物都会被误认成搬迁来的容器目录；与拆分入口的空主干拒绝同口径
+	if !splitStemUsable(splitSourceBaseName(newRel)) {
+		return ""
+	}
+	candidate := splitSourceOutputDir(newAbs, newRel)
+	// 候选与原落点等价（源文件仅改名未移动目录、或重复重链）时零变更
+	if samePathFold(candidate, record.outputDir) {
+		return ""
+	}
+	info, err := os.Stat(candidate)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	hit, ok := findSplitArtifactByPage(candidate, record.target, 1)
+	if !ok {
+		return ""
+	}
+	stem, _, parsed := parseSplitArtifactName(filepath.Base(hit), record.target)
+	if !parsed {
+		return ""
+	}
+	if !splitStemInCandidates(stem, splitArtifactStemCandidates(record, record.outputDir)) {
+		return ""
+	}
+	return candidate
+}
+
 // assetRelPathWithinRoot 越界遏制单点（重链与前缀替换共用）：absPath 必须为
 // 绝对路径且位于 root 内，返回库内相对路径（正斜杠口径，与 files.path 一致）。
 // 越界返回 E_ASSETS_RELINK_OUT_OF_LIB（warning，前端引导在库内重新选择）。
@@ -219,12 +307,12 @@ func assetRelPathWithinRoot(root, absPath string) (string, error) {
 		return "", model.NewAppError(model.ErrCodeAssetsRelinkOutsideLib,
 			"目标路径须为绝对路径且位于素材根目录内")
 	}
-	rel, err := filepath.Rel(root, absPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, inRoot := relPathWithinRoot(root, absPath)
+	if !inRoot {
 		return "", model.NewAppError(model.ErrCodeAssetsRelinkOutsideLib,
 			"目标文件位于素材根目录之外，请在库内选择")
 	}
-	return filepath.ToSlash(rel), nil
+	return rel, nil
 }
 
 // normalizeAssetPathPrefix 前缀归一（前缀替换单点）：修剪空白与首尾斜杠、统一
@@ -273,12 +361,14 @@ func (s *AssetLibraryService) PreviewAssetPathPrefixReplace(libraryID, oldPrefix
 // （ReplaceAssetPathPrefix 与 RenameAssetFolder 共用单点，禁复制第二份）：
 // records = 旧前缀命中记录集，allPaths = 全量文件记录。后缀（含前导 /）原样
 // 保留：old/a.pptx → new/a.pptx；恰等于前缀的行（目录行形态，理论不出现）后缀
-// 为空串。冲突预检排除替换集自身记录——其旧路径在本事务内全部腾空；嵌套前缀
-// 形态（新前缀位于旧前缀子树内，如旧目录 → 旧目录/归档）中本集记录的新路径可能
-// 撞上另一条本集记录的旧路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突
-// = 撞未替换记录的路径，仍拒）。返回按旧路径长度降序的 rename 清单（嵌套链式
-// 腾位安全序：碰撞链中占位方旧路径恒长于被占位方新路径，长度降序即事务内无
-// 瞬态 UNIQUE 撞击）。冲突返回可读错误（调用方整体拒绝零半态）。
+// 为空串。前缀剥离经 stripDirPathPrefix 单点（大小写不敏感，ASCII 大小写差异
+// 下 strings.TrimPrefix 失配会把整条旧路径当后缀重复拼接）。冲突预检排除替换
+// 集自身记录——其旧路径在本事务内全部腾空；嵌套前缀形态（新前缀位于旧前缀子树
+// 内，如旧目录 → 旧目录/归档）中本集记录的新路径可能撞上另一条本集记录的旧
+// 路径，该路径由对方让出，属合法链式腾位非真冲突（真冲突 = 撞未替换记录的
+// 路径，仍拒）。返回按旧路径长度降序的 rename 清单（嵌套链式腾位安全序：碰撞
+// 链中占位方旧路径恒长于被占位方新路径，长度降序即事务内无瞬态 UNIQUE 撞击）。
+// 冲突返回可读错误（调用方整体拒绝零半态）。
 func assetPathRenamesForPrefix(records, allPaths []assetFileRecord, oldPrefix, newPrefix string) ([]assetPathRename, error) {
 	matched := make(map[int64]bool, len(records))
 	for _, rec := range records {
@@ -293,11 +383,11 @@ func assetPathRenamesForPrefix(records, allPaths []assetFileRecord, oldPrefix, n
 	}
 	renames := make([]assetPathRename, 0, len(records))
 	for _, rec := range records {
-		suffix := strings.TrimPrefix(strings.TrimPrefix(rec.path, oldPrefix), "/")
-		newRel := newPrefix
-		if suffix != "" {
-			newRel = newPrefix + "/" + suffix
+		suffix, ok := stripDirPathPrefix(rec.path, oldPrefix)
+		if !ok {
+			return nil, fmt.Errorf("索引路径「%s」不在旧前缀「%s」下", rec.path, oldPrefix)
 		}
+		newRel := newPrefix + suffix
 		if _, ok := existingPaths[newRel]; ok {
 			return nil, fmt.Errorf("新路径「%s」与现有索引记录冲突，请调整新前缀后重试", newRel)
 		}
@@ -392,9 +482,11 @@ func (s *AssetLibraryService) ReplaceAssetPathPrefix(libraryID, oldPrefix, newPr
 
 		// 单事务批量改路径（预检后写入，任一失败整体回滚）
 		now := time.Now().Format("2006-01-02 15:04:05")
-		// 文件夹标注键同事务级联改键（PR4 R8：前缀替换即目录级重组，folder_meta/
-		// folder_tags 键随前缀替换迁移，与 files.path 更新同一事务保证原子）
-		if err := store.replaceFilePaths(renames, now, oldNorm, newNorm); err != nil {
+		// 文件夹标注键与拆分记录同事务级联迁移（PR4 R8 + B 方案 PR2：folder_meta/
+		// folder_tags 以 folder_path 为键，split_records 以 source_rel_path 为键；
+		// 前缀替换即目录级重组，两表与 files.path 同一事务保证原子）
+		if err := store.replaceFilePaths(renames, now, oldNorm, newNorm,
+			splitRecordMigration{libraryRoot: lib.RootPath, oldPrefix: oldNorm, newPrefix: newNorm}); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// 并发窗口：命中集行在收集与事务之间被「清理丢失记录」删除
 				//（ClearLostAssetFiles 不持扫描锁）——事务已整体回滚，如实报错

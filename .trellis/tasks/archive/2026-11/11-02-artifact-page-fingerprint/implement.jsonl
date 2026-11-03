@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/11-02-artifact-page-fingerprint/prd.md", "reason": "本任务 ADR-lite：方案 a、schema v10、写入时机、三处清理判定顺序与缺失回落"}
+{"file": ".trellis/tasks/11-02-artifact-page-fingerprint/research/page-fingerprint.md", "reason": "四方案调研、代码事实基线、实现草案与测试/性能要点"}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分产物清理、重链、覆盖与 mtime 守卫的现行契约（§9.3/§9.5）"}
+{"file": "docs/spec/assets-management.md", "reason": "split_records schema 迁移、目录迁移、备份还原与标注事务契约"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service 覆盖率基线 76% 与新增分支测试要求"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "日志口径、错误码与降级告警语义"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖 mtime 时序等外部状态，指纹用例须自驱动"}

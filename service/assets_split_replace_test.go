@@ -193,6 +193,25 @@ func TestAssetSplitReplace_Success(t *testing.T) {
 		record.pageCount != 3 || record.outputDir != wantDir {
 		t.Errorf("拆分记录不符：%+v", record)
 	}
+	// 记录持久化产物主干（v9 权威）：replace 落点 = replaceArtifactBase(源主干)。
+	if record.artifactStem != replaceArtifactBase("方案") {
+		t.Errorf("replace 记录产物主干应为 %q，实际 %q", replaceArtifactBase("方案"), record.artifactStem)
+	}
+	// 写入时机（v10）：replace 成功路径按最终产物文件名与页序写页级指纹，逐页须与
+	// 落盘字节全等（变异为 nil / 页序错位须变红）。
+	if len(record.fingerprints) != 3 {
+		t.Fatalf("replace 记录应有 3 条页级指纹，实际 %+v", record.fingerprints)
+	}
+	for page := 1; page <= 3; page++ {
+		want := fmt.Sprintf("%03d-方案.pptx", page)
+		fp := record.fingerprints[page-1]
+		if fp.Page != page || fp.Name != want {
+			t.Errorf("第 %d 页指纹应为页序 %d / 名 %q，实际 %+v", page, page, want, fp)
+		}
+		if !fingerprintMatch(filepath.Join(wantDir, want), fp) {
+			t.Errorf("第 %d 页指纹应与落盘产物字节一致：%+v", page, fp)
+		}
+	}
 }
 
 // TestAssetSplitReplace_MigratesAnnotations 标注迁移：源文件级星级/备注/标签
@@ -408,7 +427,7 @@ func TestAssetSplitReplace_CancelRollsBack(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "取消.pptx", src, hash, "replace", 1, 1)
+	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "取消.pptx", src, hash, "replace", 1, 1, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("取消错误应保留 context.Canceled 链，实际：%v", err)
 	}
@@ -466,7 +485,7 @@ func TestAssetSplitReplace_CancelAfterCoreRollsBack(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "窗口.pptx", src, hash, "replace", 1, 1)
+	outcome, err := svc.splitOneFileWithHash(ctx, store, lib, "窗口.pptx", src, hash, "replace", 1, 1, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("核心后取消应保留 context.Canceled 链，实际：%v", err)
 	}
@@ -561,8 +580,11 @@ func TestAssetSplitReplace_RecycleFailureKeepsArtifacts(t *testing.T) {
 	if count != 2 {
 		t.Errorf("删源失败应保留 2 条产物索引行，实际 %d", count)
 	}
-	if record, _ := store.getSplitRecord("占用.pptx"); record != nil {
-		t.Errorf("删源失败不应写成功拆分记录（重拆走完整判定）：%+v", record)
+	// 删源失败写 target=replace/source_removed=0 的产物归属记录：产物已完整进索引，
+	// 记录是其唯一归属证据（重试归属判定与批量剔除依赖它），如实标记源仍在
+	if record, _ := store.getSplitRecord("占用.pptx"); record == nil ||
+		record.target != model.AssetSplitTargetReplace || record.sourceRemoved {
+		t.Errorf("删源失败应写 target=replace/source_removed=0 归属记录，实际：%+v", record)
 	}
 }
 
@@ -626,6 +648,11 @@ func TestAssetSplitReplace_NumericBaseNameAvoidsDerivativeExclusion(t *testing.T
 		if isPptxSplitDerivative(filepath.ToSlash(rel)) {
 			t.Errorf("产物 %s 不得命中拆分派生排除规则", name)
 		}
+	}
+	// 纯数字主干经 -p 后缀写入记录：缺失 -p 会让清理/重链探测锚点与产物不符
+	// （变异去掉 -p 时本断言变红）。
+	if rec := splitRecordRowForTest(t, svc, lib.ID, "123.pptx"); rec == nil || rec.artifactStem != "123-p" {
+		t.Errorf("replace 数字主干记录应持久化「123-p」，实际 %+v", rec)
 	}
 }
 

@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对 §9.5 描述与基名锚定实现逐条一致（单页语义、失配零删除、多次读目录措辞、cache 限定）"}
+{"file": "docs/spec/assets-management.md", "reason": "核对目录搬迁/改名后 output_dir 基名失配时的安全侧行为未与 §11.3 冲突"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对新增 readErr/目录删除失败告警字段与 syslog 用法，无静默权限失败"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例覆盖 PRD 列出的缺口分支，覆盖率不降"}

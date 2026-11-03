@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/pptx-split.md", "reason": "Windows 折叠分支与 split 契约、已知覆盖缺口表述"}
+{"file": "docs/spec/test-stability.md", "reason": "Windows runner 测试稳定性约束"}

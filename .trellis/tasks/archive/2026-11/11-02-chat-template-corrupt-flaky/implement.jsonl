@@ -1,0 +1,4 @@
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖时间戳时序，本次修复根因与断言收紧依据"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/ JSON 写入与 .bak 备份边界约定"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "损坏降级须 slog.Warn 记录根因的口径"}
+{"file": ".trellis/tasks/11-02-chat-template-corrupt-flaky/research/backup-naming.md", "reason": "缺陷证据、方案对比与实施口径"}

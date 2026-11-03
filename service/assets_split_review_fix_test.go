@@ -95,43 +95,9 @@ func TestAssetSplitReplace_RestoredSourceResplits(t *testing.T) {
 	}
 }
 
-// TestAssetSplitReplace_RollbackKeepsPreexistingUserFile 回滚只删本次新增产物，
-// 目录内拆分前已存在的同形用户文件保留。
-func TestAssetSplitReplace_RollbackKeepsPreexistingUserFile(t *testing.T) {
-	svc := newTestAssetService(t)
-	dir := t.TempDir()
-	lib := mustCreateLibrary(t, svc, "替换库", dir)
-	src := buildAssetsPptx(t, dir, "方案.pptx", []assetsSlideSpec{
-		{titlePh: "一", body: []string{"内容"}},
-		{titlePh: "二", body: []string{"内容"}},
-	})
-	mustScanLibrary(t, svc, lib.ID)
-	outDir := filepath.Join(dir, "方案")
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		t.Fatalf("建产物目录: %v", err)
-	}
-	userFile := filepath.Join(outDir, "009-方案.pptx")
-	if err := os.WriteFile(userFile, []byte("user-created"), 0644); err != nil {
-		t.Fatalf("写用户文件: %v", err)
-	}
-	svc.parseFn = oneSlideParse()
-	svc.splitCoreFn = (&fakeReplaceCore{pages: 2, payload: []byte("page-bytes"), dropFile: true}).split
-	move, _ := fakeRecycleBin(t)
-	svc.moveToRecycleBinFn = move
-
-	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "方案.pptx", "replace"); err == nil {
-		t.Fatal("产物缺失应回滚并返回失败")
-	}
-	if _, err := os.Stat(userFile); err != nil {
-		t.Errorf("拆分前已存在的用户文件不得被回滚删除：%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "方案-001.pptx")); !os.IsNotExist(err) {
-		t.Errorf("本次核心中间态产物应被回滚删除，stat err=%v", err)
-	}
-	if _, err := os.Stat(src); err != nil {
-		t.Errorf("源文件应保留：%v", err)
-	}
-}
+// 注：「目录内拆分前已存在的同形用户文件」场景已由
+// assets_split_replace_review2_test.go 的 TestAssetSplitReplace_StrayArtifactBlocksSplit
+// 覆盖（延迟清理设计改为「无本目录 replace 记录即拒绝拆分」，不再进入回滚路径）。
 
 // TestAssetSplitReplace_ExcludeRuleRejectsProduct replace 产物命中库排除规则时
 // 拒绝并回滚，不写入随即会被扫描转 excluded 的索引行。

@@ -1,0 +1,5 @@
+{"file": "docs/spec/pptx-split.md", "reason": "§9.5 拆分记录 schema、三落点命名（replaceArtifactBase -p）、旧产物清理判定面，本任务改判定权威为记录列"}
+{"file": "docs/spec/assets-management.md", "reason": "§11.3 手动重链与 split_records 键迁移、目录搬迁探测；§8.7 目录迁移重算 output_dir，本任务增列与探测校验须与之一致"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁 service ≥76%，schema 迁移与新增分支须补测"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增 ambiguous Warn 与既有告警口径一致"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "SQLite 由 modernc 驱动；迁移与写入须遵守单事务/单连接池口径（参考 assets-management §14 与既有 migrateSchemaV8 先例）"}

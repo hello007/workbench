@@ -31,9 +31,9 @@ import (
 // PPT 拆分派生副本排除（PRD：派生产物不入索引，防与源文件重复入库）。拆分输出
 // 布局见 service/pptx_split.go SplitPptxPerPage：源 <dir>/<name>.pptx 的产物落
 // <dir>/<name>/<name>-<页序号>.pptx（同名文件夹 + 同名-页序命名，页序 %03d 固定
-// 三位，本判定只验数字不限位数，两位/三位通吃）。仅排除严格符合该布局的文件；
-// 用户自组织的「同名目录/同名-数字.pptx」与拆分产物同构不可区分，同样被排除
-// （防重优先的取舍）。
+// 三位，历史 %02d 两位；本判定要求页序段**至少 2 位**，1 位页序的用户文件
+// `<父目录>/<主干>-9.pptx` 不排除）。仅排除严格符合该布局的文件；用户自组织的
+// 「同名目录/同名-数字.pptx」与拆分产物同构不可区分，同样被排除（防重优先的取舍）。
 func isPptxSplitDerivative(rel string) bool {
 	parentBase := path.Base(path.Dir(rel))
 	if parentBase == "." {
@@ -48,8 +48,10 @@ func isPptxSplitDerivative(rel string) bool {
 		return false // 非 .pptx 后缀
 	}
 	sep := len(parentBase)
-	if len(stem) < sep+2 || stem[:sep] != parentBase || stem[sep] != '-' {
-		return false // 前缀非父目录名或无「-页序」段
+	// 页序段要求**至少 2 位**纯数字（历史 `%02d`、当前 `%03d`、≥1000 页的 4 位）：
+	// 核心与编排永不写 1 位页序，`<父目录>/<主干>-9.pptx` 是用户文件，不得被排除。
+	if len(stem) < sep+3 || stem[:sep] != parentBase || stem[sep] != '-' {
+		return false // 前缀非父目录名或无「-页序」段（页序不足 2 位）
 	}
 	for i := sep + 1; i < len(stem); i++ {
 		if stem[i] < '0' || stem[i] > '9' {

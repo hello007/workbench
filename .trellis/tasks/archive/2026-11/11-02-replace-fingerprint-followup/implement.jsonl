@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/11-02-replace-fingerprint-followup/prd.md", "reason": "整改需求 R1–R7、验收标准与技术方案；实现须严格按此执行。"}
+{"file": "docs/spec/pptx-split.md", "reason": "§9.3 步骤 5/备份残留语义、§9.5 schema 版本与指纹归属、§9.7 测试要求，改动后需同步。"}
+{"file": "docs/spec/assets-management.md", "reason": "§15.6 重拆清理与指纹 allow-list 口径需补 v11 retained 与文案修正。"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖外部状态；删除失败须经注入点模拟，禁用真实文件占用/时序竞速。"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台断言拆双平台文件约定（_windows/_other），Windows 折叠逻辑与测试分流须守此规范。"}

@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 8
+const assetsSchemaVersion = 11
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -250,19 +250,82 @@ ALTER TABLE split_records ADD COLUMN target TEXT NOT NULL DEFAULT 'cache';
 ALTER TABLE split_records ADD COLUMN source_removed INTEGER NOT NULL DEFAULT 0;
 `
 
+// assetsSchemaV9SQL v9 迁移：拆分记录持久化产物命名主干（清理误删/漏清总收口，
+// 2026-11-02）。
+//
+// 设计要点：
+//   - artifact_stem = 本次拆分实际产物文件名主干（source/cache 为
+//     splitSourceBaseName(rel)；replace 为 replaceArtifactBase(base)）。此前清理
+//     与重链探测只能靠「产物目录基名」反推归属，replace 纯数字主干经 -p 后缀后
+//     与目录名合法不一致，必然漏清；持久化主干使归属判定成为记录权威事实；
+//   - 存量记录默认空串（v9 前无该列），读取侧回落目录启发式
+//     {filepath.Base(outputDir), replaceArtifactBase(...)} 保持兼容；
+//   - 实际执行走 assets_db.go 的 migrateSchemaV9（列存在性预判 + 单事务），本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
+const assetsSchemaV9SQL = `
+ALTER TABLE split_records ADD COLUMN artifact_stem TEXT NOT NULL DEFAULT '';
+`
+
+// assetsSchemaV10SQL v10 迁移：拆分记录页级产物指纹（清理误删/漏清总收口，2026-11-02，
+// 任务 11-02-artifact-page-fingerprint）。
+//
+// 设计要点：
+//   - artifact_fingerprints = JSON 数组，按页序升序，每项
+//     {"page":1,"name":"讲义-001.pptx","size":7340032,"sha256":"<64 位小写 hex>"}；
+//     清理侧以「页 + 文件名（Windows 折叠）+ 字节数 + 全文 SHA-256」全等作为
+//     归属判定，取代「文件名形态 + mtime」的启发式（用户复制/解压保留旧 mtime
+//     的同形文件不再被误删）；
+//   - name 只存文件名（basename，不含目录），目录由 output_dir 提供；重链/目录
+//     迁移不重写指纹（产物文件名不变）；
+//   - 存量记录默认空串 = 无指纹，清理侧回落既有 mtime 守卫。**禁止自动回填**：
+//     现有目录内容可能已被用户替换，回填会把用户文件认证为产物，后续清理即误删。
+//     指纹只能由成功拆分写入；
+//   - 实际执行走 assets_db.go 的 migrateSchemaV10（列存在性预判 + 单事务），本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
+const assetsSchemaV10SQL = `
+ALTER TABLE split_records ADD COLUMN artifact_fingerprints TEXT NOT NULL DEFAULT '';
+`
+
+// assetsSchemaV11SQL v11 迁移：拆分记录保留指纹（replace 旧页清理失败后的归属凭证，
+// 2026-11-02，任务 11-02-replace-fingerprint-followup）。
+//
+// 设计要点：
+//   - retained_fingerprints = JSON 数组，元素结构与 artifact_fingerprints 完全一致
+//     （{"page","name","size","sha256"}）。语义 = **清理失败未能删除、但仍属本记录
+//     历史产物的凭证**：replace 同目录旧页收尾删除失败时写入，供后续重拆的备份
+//     让位与旧页清理作为归属依据（否则残留文件脱离指纹 allow-list，后续增页重拆会
+//     被永久当作「用户同名文件」拒绝）。
+//   - 与 artifact_fingerprints 分离：指纹列契约恒为「条目数 = page_count」，把清理
+//     失败页混入会把损坏判定与保留凭证混为一谈（fingerprintsUsable 语义被破坏）。
+//   - 归属查询：备份让位与落点归属放宽（replaceOutDirOwnedByRecord）走
+//     ownershipFingerprintForName（先 artifact_fingerprints 再 retained_fingerprints）；
+//     清理侧 retained 由 cleanupRetainedSplitArtifacts 独立单点消费（任意 target 同
+//     output_dir，2026-11-03），cleanupStaleReplaceArtifacts 只认本次指纹。
+//   - 仅由 cleanupStaleReplaceArtifacts 删除失败产出，**禁止自动回填、禁止从目录
+//     内容反推**；下次重拆成功消费后不再携带该条目（自愈）。
+//   - 存量记录默认空串（v11 前无该列），不清空也不回填。
+//   - 实际执行走 assets_db.go 的 migrateSchemaV11（列存在性预判 + 单事务），本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
+const assetsSchemaV11SQL = `
+ALTER TABLE split_records ADD COLUMN retained_fingerprints TEXT NOT NULL DEFAULT '';
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
 // 经 Go 函数，纯 SQL 无法完成同源切分）。
 var assetsMigrations = map[int]string{
-	1: assetsSchemaSQL,
-	2: assetsSchemaV2SQL,
-	3: assetsSchemaV3SQL,
-	4: assetsSchemaV4SQL,
-	5: assetsSchemaV5SQL,
-	6: assetsSchemaV6SQL,
-	7: assetsSchemaV7SQL,
-	8: assetsSchemaV8SQL,
+	1:  assetsSchemaSQL,
+	2:  assetsSchemaV2SQL,
+	3:  assetsSchemaV3SQL,
+	4:  assetsSchemaV4SQL,
+	5:  assetsSchemaV5SQL,
+	6:  assetsSchemaV6SQL,
+	7:  assetsSchemaV7SQL,
+	8:  assetsSchemaV8SQL,
+	9:  assetsSchemaV9SQL,
+	10: assetsSchemaV10SQL,
+	11: assetsSchemaV11SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

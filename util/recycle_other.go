@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// trashInfoWrite 写入 .trashinfo 的注入点（默认 os.WriteFile）：仅用于单测驱动
+// 「元数据写入失败 → 源文件零风险」分支，生产路径恒走标准库实现。
+var trashInfoWrite = os.WriteFile
+
 // moveToRecycleBinPlatform freedesktop Trash 规范实现（Linux 等非 Windows 平台）：
 // 把文件移到 $XDG_DATA_HOME/Trash/files/<名字>，并在 Trash/info/<名字>.trashinfo
 // 写入原始位置与删除时间（桌面环境据此展示「还原」入口）。
@@ -49,7 +53,7 @@ func moveToRecycleBinPlatform(path string) error {
 	// info 先行：rename 成功后 info 写入失败会让回收站里出现无主条目（无法从
 	// 桌面还原），先写 info 则失败可在移动前清理，源文件零风险
 	infoPath := filepath.Join(infoDir, name+".trashinfo")
-	if err := os.WriteFile(infoPath, []byte(trashInfoContent(path)), 0644); err != nil {
+	if err := trashInfoWrite(infoPath, []byte(trashInfoContent(path)), 0644); err != nil {
 		return fmt.Errorf("无法移入回收站：写入回收站元数据失败: %w", err)
 	}
 

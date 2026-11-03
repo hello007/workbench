@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/11-03-replace-retained-cross-target/prd.md", "reason": "整改需求 R1–R5、验收标准与技术方案；实现严格按此执行。"}
+{"file": "docs/spec/pptx-split.md", "reason": "§9.3 步骤 3/5、§9.5 指纹与 retained 契约、§9.7 测试要求，改动后同步。"}
+{"file": "docs/spec/assets-management.md", "reason": "§15.6 重拆清理口径需与 retained 跨落点消费一致。"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖外部状态；删除失败经注入点模拟，不用真实占用/时序竞速。"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台断言拆双平台文件、折叠语义边界。"}

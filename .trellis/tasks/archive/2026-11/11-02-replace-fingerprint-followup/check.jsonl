@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-02-replace-fingerprint-followup/prd.md", "reason": "逐条核对 R1–R7 与 AC：等长异内容、retained 自愈、迁移 v11、TOCTOU、中间态守卫、文案、平台拆分、文档。"}
+{"file": "docs/spec/pptx-split.md", "reason": "核验文档与实现一致（步骤 5、retained 契约、残留限定语）。"}
+{"file": "docs/spec/assets-management.md", "reason": "核验 §15.6 口径同步。"}
+{"file": "docs/spec/test-stability.md", "reason": "核验测试无外部状态依赖、变异验证可复现。"}

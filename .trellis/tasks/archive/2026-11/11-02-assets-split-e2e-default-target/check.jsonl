@@ -1,0 +1,2 @@
+{"file": "frontend/e2e/assets-split.spec.js", "reason": "核对断言与 replace 默认落点一致、缓存主链覆盖未丢失"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对用例写法符合 E2E 规范"}

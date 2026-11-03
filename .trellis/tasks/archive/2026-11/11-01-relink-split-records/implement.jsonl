@@ -1,0 +1,3 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域数据面契约：split_records 键/落点语义、目录级迁移口径（§11/§8.7），本任务在其上补文件级重链"}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分记录 target 三态与产物定位权威（output_dir），决定重链时落点保持策略"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增用例须守住覆盖率分层门禁（service ≥76%）"}

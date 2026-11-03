@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-03-replace-retained-cross-target/prd.md", "reason": "逐条核对 R1–R5：跨 target 消费、归属放宽、守卫位数、R3 文案、文档与测试。"}
+{"file": "docs/spec/pptx-split.md", "reason": "核验文档与实现一致（retained 存续范围、mtime 口径、位数、备份文案）。"}
+{"file": "docs/spec/assets-management.md", "reason": "核验 §15.6 同步。"}
+{"file": "docs/spec/test-stability.md", "reason": "核验测试无外部状态依赖、变异验证可复现。"}

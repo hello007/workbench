@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-02-replace/prd.md", "reason": "对照 AC 逐条核验：六类场景、回滚无备份残留、指纹缺失回落现行行为。"}
+{"file": "docs/spec/pptx-split.md", "reason": "核验步骤 5 描述与 §9.5 指纹口径是否与实际实现一致，并确认文档同步。"}
+{"file": "docs/spec/assets-management.md", "reason": "核验 §15.6 清理归属描述与新行为是否一致。"}
+{"file": "docs/spec/test-stability.md", "reason": "核验新增测试无外部状态依赖（平台断言分侧、无 sleep/mtime 竞速）。"}

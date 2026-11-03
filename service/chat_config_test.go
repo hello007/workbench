@@ -161,6 +161,7 @@ func TestChatService_TemplatesPersistenceReload(t *testing.T) {
 }
 
 // TestChatService_TemplatesCorruptFallback 模板索引损坏：备份原文件后降级空索引。
+// 备份名按内容摘要生成，重复读取同一份损坏内容仍只有一份备份（不随读取次数增涨）。
 func TestChatService_TemplatesCorruptFallback(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "ai_chat")
 	testutil.WriteFile(t, filepath.Join(dataDir, "templates.json"), "{not-valid-json")
@@ -170,12 +171,31 @@ func TestChatService_TemplatesCorruptFallback(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatalf("损坏模板索引应降级为空列表, got %v, %v", list, err)
 	}
+	assertBakFileCount(t, filepath.Join(dataDir, "templates.json.bak.*"), 1, "首次读取损坏索引后")
+
+	// 同一份损坏内容重复读取按内容哈希复用同一备份，不会新增第二份
+	// （时间戳命名下两次读取跨秒即产生两份，备份随读取次数无上限增涨）
+	if _, err := svc.ListChatTemplates(""); err != nil {
+		t.Fatalf("再次列出模板失败: %v", err)
+	}
+	assertBakFileCount(t, filepath.Join(dataDir, "templates.json.bak.*"), 1, "同内容重复读取后")
+
 	if _, err := svc.AddChatTemplate(model.ChatTemplateScopeGlobal, "", "t", "c"); err != nil {
 		t.Fatalf("降级后新增模板失败: %v", err)
 	}
-	matches, _ := filepath.Glob(filepath.Join(dataDir, "templates.json.bak.*"))
-	if len(matches) != 1 {
-		t.Errorf("损坏模板索引应留备份文件, got %v", matches)
+	assertBakFileCount(t, filepath.Join(dataDir, "templates.json.bak.*"), 1, "降级后新增模板并落盘")
+}
+
+// assertBakFileCount 断言指定 glob 模式命中的损坏留底备份文件数量。
+// data 域损坏留底按内容摘要命名，同一份损坏内容多次读取恒只有一份备份。
+func assertBakFileCount(t *testing.T, pattern string, want int, stage string) {
+	t.Helper()
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("%s glob 备份文件失败: %v", stage, err)
+	}
+	if len(matches) != want {
+		t.Errorf("%s应留 %d 份备份, got %v", stage, want, matches)
 	}
 }
 

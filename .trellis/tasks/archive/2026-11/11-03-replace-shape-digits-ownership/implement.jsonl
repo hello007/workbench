@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/11-03-replace-shape-digits-ownership/prd.md", "reason": "整改需求 R1–R5 与验收标准；实现严格按此执行。"}
+{"file": "docs/spec/pptx-split.md", "reason": "§9.3 步骤 3/5、§9.5 形态与 retained 契约、§9.7 测试要求。"}
+{"file": "docs/spec/assets-management.md", "reason": "§15.6 清理 allow-list、mtime 回退与 retained 消费目录口径。"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁依赖外部状态；删除失败经注入点模拟。"}
+{"file": "docs/spec/linux-platform.md", "reason": "平台折叠语义与测试分侧约定。"}

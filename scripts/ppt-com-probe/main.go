@@ -12,7 +12,12 @@
 //	go run ./scripts/ppt-com-probe -only 3,5    # 只跑指定项
 //	go run ./scripts/ppt-com-probe -with-p6     # 含 P6（运行中会暂停等你手动开一个空 PowerPoint）
 //
-// 运行前确认：关闭所有已打开的 PowerPoint 窗口（P2/P7 归属判定依赖干净环境）。
+// 第二阶段（P9-P13，任务 10-30-powerpoint-com）：
+//
+//	go run ./scripts/ppt-com-probe -only 9,10,11,12,13 -file "D:\素材库\...\xxx.pptx" -json out.json
+//
+// 运行前确认：关闭所有已打开的 PowerPoint 窗口（P2/P7 归属判定依赖干净环境；
+// P9-P13 启动即检测残留进程，命中直接 SKIP）。
 package main
 
 import (
@@ -53,12 +58,37 @@ var probeItems = []probeItem{
 	{6, "用户实例复用（先手动开一个空 PowerPoint 再跑，进程数应不变）", true, probe6UserInstanceReuse},
 	{7, "强杀自启实例后阻塞 Invoke 返回时序（预期 0x800706BA，秒级返回）", false, probe7KillTiming},
 	{8, "同文件二次打开行为 + Presentations 集合 FullName 复用检查", false, probe8ReuseOpened},
+	// 第二阶段（任务 10-30-powerpoint-com）：多实例并行与整本导出可行性。
+	{9, "多实例 CreateObject 行为（同线程连续创建 / 并发 STA / 强制新建路径）", false, probe9MultiInstance},
+	{10, "两实例并发导出总耗时（同文件 / 不同文件，对比串行）", false, probe10ConcurrentExport},
+	{11, "单页导出耗时分档（small / hd / BMP，含 Open 与 Close 成本）", false, probe11TierTiming},
+	{12, "Go 侧 hd 解码+缩放+编码耗时", false, probe12GoPostProcess},
+	{13, "Presentation.Export 整本导出（命名/页序/隐藏页/耗时）", false, probe13WholeDeckExport},
 }
 
 func main() {
 	only := flag.String("only", "", "逗号分隔只跑指定探针项（如 3,5）")
 	withP6 := flag.Bool("with-p6", false, "含需人工配合的 P6（运行中暂停等你手动打开空 PowerPoint）")
+	file := flag.String("file", "", "P10-P13 使用的真实业务 pptx（空则用 COM 自产 fixture，耗时会偏乐观）")
+	jsonPath := flag.String("json", "", "结构化结果落盘路径（JSON）")
+	reps := flag.Int("reps", 3, "每档重复采样次数")
+	pages := flag.Int("pages", 12, "P10 参与计时的页数上限")
 	flag.Parse()
+
+	probeSampleFile = *file
+	probeJSONPath = *jsonPath
+	probeReps = *reps
+	probePageLimit = *pages
+	if probeReps < 1 {
+		probeReps = 1
+	}
+	if probePageLimit < 2 {
+		probePageLimit = 2
+	}
+
+	env := detectOfficeEnv()
+	fmt.Printf("引擎探测: MS PowerPoint=%v WPS=%v\n", env["msOfficeInstalled"], env["wpsInstalled"])
+	fmt.Printf("样例文件: %q（空=合成 fixture）\n", probeSampleFile)
 
 	var runSet map[int]bool // nil = 全跑（-only 未传）
 	if *only != "" {
@@ -94,6 +124,12 @@ func main() {
 			return item.run(dir)
 		}()
 		fmt.Printf("   [%s] %s（耗时 %s）\n\n", statusOf(conclusion), conclusion, time.Since(start).Round(time.Millisecond))
+	}
+
+	if probeJSONPath != "" {
+		if err := writeProbeJSON(probeJSONPath); err != nil {
+			fmt.Fprintf(os.Stderr, "写 JSON 失败: %v\n", err)
+		}
 	}
 }
 

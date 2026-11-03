@@ -1,4 +1,6 @@
 # CI：push(master) / pull_request 触发，Linux runner 跑后端编译验证/静态检查/单测/集成测试 + 前端构建/单测 + Playwright E2E。
+# 另设 windows-latest job（test-windows）与 Linux test/security 并行跑后端静态检查与全量单测，覆盖
+# runtime.GOOS == "windows" 平台分支（大小写折叠、pty、路径、文件操作等），不带 GTK/WebKit/Node 依赖。
 # 与 release.yml（tag v* 触发、windows-latest + ubuntu-22.04 容器（webkit2_41 构建，glibc 2.35 基线）
 # 双 job 发版，产出 workbench.exe 与 workbench-linux-amd64.tar.gz）互不冲突：tag push 不匹配 branches 过滤器。
 # 前置事实（Linux 平台相关，改动步骤前先读）：
@@ -154,6 +156,40 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+
+  # Windows 后端测试 job：与 Linux test/security 并行，覆盖 runtime.GOOS == "windows" 平台分支
+  # （split 产物大小写折叠、pty、路径与文件操作等，Linux runner 无法执行）。
+  # 只跑静态检查 + 全量单测：不装 Node/Playwright/Wails CLI、不带 desktop/production 标签，
+  # 故无 GTK/WebKit 依赖；集成测试暂不纳入，避免范围扩大。
+  test-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # frontend/dist/ 不入库：//go:embed all:frontend/dist 要求目录存在，占位即可。
+      # Windows runner 默认 shell 为 pwsh，这里显式指定 bash（Git Bash，windows-latest 预装）
+      # 复用 test/security job 相同的 POSIX 命令块，避免 pwsh 与 POSIX 命令差异。
+      - name: 预置前端 dist 占位
+        shell: bash
+        run: |
+          mkdir -p frontend/dist/assets
+          echo '<!doctype html><title>ci placeholder</title>' > frontend/dist/index.html
+          echo '/* ci placeholder */' > frontend/dist/assets/app.js
+
+      # setup-go 默认缓存 go module/build
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # 无标签依赖图与单元测试一致，不含 cgo 桌面前端
+      - name: 后端静态检查
+        run: go vet ./...
+
+      - name: 后端单元测试
+        run: go test ./...
 
   # 安全扫描 job：与 test job 并行，govulncheck + npm audit 采集漏洞。
   # continue-on-error：发现 high 漏洞时标记 job 失败但不阻塞 PR 合并（信息性扫描）。

@@ -1,0 +1,5 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域权威契约：split_records 三态落点、目录重命名/移动守卫与 folder_meta/folder_tags 同事务级联先例、§8.7 残余限制与刷新链；迁移契约必须与本文档同步"}
+{"file": "docs/spec/pptx-split.md", "reason": "PPT 拆分落点与产物命名契约（cache/source/replace、source_removed 语义、派生判定），迁移不得改变这些语义"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 日志规范与错误码三处同步要求；冲突告警与失败口径按本文档"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖外部状态、SQLite 单连接池纪律与临时仓库辅助规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁，新增测试须守住 service 基线不降"}

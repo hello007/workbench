@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域权威契约：split_records 三态落点、目录迁移、filterReplaceArtifactSources 消费面与文档同步口径"}
+{"file": "docs/spec/pptx-split.md", "reason": "替换落点产物命名、容器目录与 source_removed 语义；本轮只改路径迁移与移动约束，不得改变拆分语义"}
+{"file": "docs/spec/test-stability.md", "reason": "新增用例禁外部状态依赖、单连接池纪律与临时仓库辅助规范"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁，新增测试须守住 service 基线"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "失败明细文案、冲突告警与错误处理口径"}
+{"file": ".trellis/tasks/11-01-replace/research/audit-798fc2f.md", "reason": "审核发现清单与已确认无问题项，本轮修复依据"}

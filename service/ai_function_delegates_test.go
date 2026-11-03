@@ -194,15 +194,17 @@ func TestEnsureOutputDir_CreatesDir(t *testing.T) {
 	}
 }
 
-// TestBackupConfig_WritesFile 备份原配置内容到 .bak 时间戳文件。
+// TestBackupConfig_WritesFile 备份原配置内容到 .bak 内容摘要文件。
+// 同一份配置重复留底仍只有一份备份（按内容哈希去重，不随时间累积）。
 func TestBackupConfig_WritesFile(t *testing.T) {
 	svc := newAiSvcForTest(t)
 	raw := []byte("原配置内容")
 	svc.backupConfig(raw)
+	svc.backupConfig(raw)
 
 	matches, err := filepath.Glob(svc.configPath + ".bak.*")
-	if err != nil || len(matches) == 0 {
-		t.Fatalf("应生成备份文件, matches=%v err=%v", matches, err)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("同一内容应只生成 1 个备份文件, matches=%v err=%v", matches, err)
 	}
 	data, err := os.ReadFile(matches[0])
 	if err != nil {

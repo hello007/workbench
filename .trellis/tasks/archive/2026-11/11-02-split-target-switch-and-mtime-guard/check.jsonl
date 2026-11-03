@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对 §9.5/§9.7 落点一致性、mtime 守卫、同目录跨落点分支与实现一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 §11.3 无冲突（键迁移/落点搬运语义不变）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增用例与回退实验，覆盖率不降"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对守卫跳过不产生告警噪音"}

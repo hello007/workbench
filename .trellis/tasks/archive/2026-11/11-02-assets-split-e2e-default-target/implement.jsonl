@@ -1,0 +1,4 @@
+{"file": "frontend/e2e/assets-split.spec.js", "reason": "待修复用例所在文件，含两处过期默认落点断言"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 写法约束：fixtures 引入、禁 waitForTimeout、断言口径"}
+{"file": "docs/spec/pptx-split.md", "reason": "落点语义与前端默认 replace 的规范依据"}
+{"file": "frontend/src/components/AssetsPanel.vue", "reason": "默认落点与提示块实现（只读参考，不改）"}

@@ -1,0 +1,4 @@
+{"file": "docs/spec/pptx-split.md", "reason": "核对 §9.5 记录列、清理锚定与排除本次主干、残余风险如实表述与代码一致"}
+{"file": "docs/spec/assets-management.md", "reason": "核对 §11.3 探测归属校验、键迁移不丢新列、跨落点清理语义与实现一致"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 v9 迁移三路径与新增用例，覆盖率门禁不降"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对 ambiguous/失配 Warn 字段与 slog 用法"}
