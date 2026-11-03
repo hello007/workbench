@@ -89,9 +89,11 @@ headless 流式模式下 claude 的 AskUserQuestion 工具不渲染 UI 且被 CL
 
 ## 7. 权限与模型
 
-- permissionMode：default / acceptEdits / plan / bypassPermissions（claude 原生 `--permission-mode` 取值），默认 default；前端 bypassPermissions 选中即 ElMessage.warning。**spawn 快照语义**：变更且进程空闲时优雅重启生效；进程忙（有执行/排队轮）时本批轮次沿用旧参数，下一批 spawn 生效。
+- permissionMode：default / acceptEdits / plan / bypassPermissions（claude 原生 `--permission-mode` 取值），默认 default；前端 bypassPermissions 选中即 ElMessage.warning。**spawn 快照语义**：变更且进程空闲时优雅重启生效；进程忙（有执行/排队轮）时本批轮次沿用旧参数，下一批 spawn 生效。前端下拉常驻输入区发送按钮旁（非 default 档警示描边），不再放会话工具条。
 - model：空串 = claude 默认模型（不加 --model 参数）；前端 el-select allow-create 支持自定义模型 ID；快照语义同 permissionMode。
+- launcher（启动命令，2026-11-03）：空 = 默认 PATH 解析 claude；非空 = 命令名或绝对 exe 路径。**解析单点 `service.ResolveChatCommand(launcher)`**（claude_launcher.go）：绝对路径存在性校验 + shim 解析（.cmd/.bat 读目标，js 入口拼 node），命令名走 LookPath；解析失败中文报错含配置值。快照语义同 permissionMode（变更空闲即优雅重启，--resume 续上下文不丢）。发现扫描 `DiscoverChatClis()`：已知名白名单（claude/claude-code-router/ccr/qwen/iflow/crush/opencode）LookPath 命中 + 按解析目标（prefix+target 拼接键，js 入口不可丢 js 参数）去重。**协议口径**：启动器只决定可执行文件，参数恒按 claude headless 协议组装，非兼容 CLI 启动失败由用户自行切回。
 - 审批链路与 permissionMode 正交：bypassPermissions 下 CLI 不下发 can_use_tool（审批弹窗自然不出现）；default/acceptEdits/plan 下未命中放行规则的敏感工具均走审批弹窗。
+- thinking（思考过程，2026-11-03）：**仅流式、零持久化**——`parseChatStreamLine` 第 6 返回 thinking 增量（content part type=thinking，文本在 thinking 字段；与 ai_function.go 的 parseStreamLine 分域勿合并），经 `chat-task:output` payload `thinking: true` 推送；前端在途任务独立累积、气泡灰色折叠块展示，done 摘除任务即丢弃；**禁写 ChatMessage/消息文件**（schema 零改动）。
 
 ## 8. App 绑定（对话执行域）
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0] - 2026-11-03
+
+### Added
+
+- AI 对话启动命令可配：会话工具条「启动命令」下拉——PATH 扫描候选（claude 及常见兼容 CLI 白名单，按解析目标去重）+ 指定 exe 路径（文件选择器）；解析单点 `ResolveChatCommand`（空=默认 claude、绝对路径/命令名均走 shim 解析），配置持久化进 settings.json，变更空闲时优雅重启（--resume 续上下文不丢）；tooltip 明示需兼容 claude headless 协议
+- AI 对话思考过程流式展示：模型思考增量（chat-task:output 带 thinking 标记）在气泡内灰色折叠块实时呈现（流式中默认展开可收起）；仅流式零持久化，done 后丢弃，消息 schema 零改动
+- 权限模式下拉提显到输入框发送按钮旁常驻（非 default 档警示描边），会话工具条去重
+
+### Fixed
+
+- 自签 TLS 证书对中文计算机名机器生成失败（os.Hostname 追加 SAN 违反 IA5String ASCII 约束，报「cannot be encoded as an IA5String」）：非 ASCII 主机名跳过并 Warn，localhost/回环/局域网 IP 覆盖不受影响
+
 ## [1.13.0] - 2026-11-03
 
 ### Added
