@@ -442,7 +442,7 @@ service 包 TestMain（全仓首个）两档（2026-10-21 收口，原三档的�
 | treeCache 增长 | 已覆盖：条目有界断言（≤32，理论 11）随 TestSoakFileTreeGetTree |
 | commitHistoryCache 增长 | 已覆盖：TestSoakCommitHistoryCacheGrowth（单键覆盖写 + 深拷贝隔离抽查）+ 主包全链路 |
 | 事件订阅 | 核实无泄漏面：`sinkHolder` 为单出口持有器（`SetEventSink` 换引用，非累积订阅者注册表），不构成泄漏路径，不专项测试 |
-| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、CI 为 Linux runner、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 硬门禁兜底（观察期与收紧后两次捕获 watchProcess 残留，2026-10-21 已修：watchProcess 挂会话级停止信号，CloseTerminal/CloseAll 等待其退出，见 14.3） |
+| 终端会话 | 不进自动长跑：须 fork 真实 pty/conpty 进程（conpty 为 Windows-only 依赖、进程 fork 成本高且会污染计数断言）；goroutine 驻留风险由 goleak 硬门禁兜底（观察期与收紧后两次捕获 watchProcess 残留，2026-10-21 已修：watchProcess 挂会话级停止信号，CloseTerminal/CloseAll 等待其退出，见 14.3） |
 
 ### 14.5 运行方式速查
 

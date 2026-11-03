@@ -15,7 +15,7 @@ import (
 // 折叠命中，fingerprintMatch 按磁盘实际路径（002-Plan.pptx）的 size+哈希判定，
 // 不误判用户文件 → 正常备份让位并删源。
 //
-// 该分支仅 Windows 本机可执行（CI 仅 ubuntu），属已知覆盖缺口，见
+// 该分支仅 Windows 可执行，由 CI windows-latest job 覆盖，见
 // docs/spec/pptx-split.md §9.7。
 func TestAssetSplitReplace_FingerprintNameCaseFoldWindows(t *testing.T) {
 	svc, lib, src, outDir, recycleCalls := prepareReplaceFingerprintCaseFoldFixture(t)
@@ -45,7 +45,7 @@ func TestAssetSplitReplace_FingerprintNameCaseFoldWindows(t *testing.T) {
 // 判定须折叠主干段与扩展名（`守卫-009.PPTX` 与核心将写出的 `守卫-009.pptx` 是
 // 同一物理文件，漏判会让核心静默覆盖用户内容）。
 //
-// 该分支仅 Windows 本机可执行（CI 仅 ubuntu），属已知覆盖缺口，见
+// 该分支仅 Windows 可执行，由 CI windows-latest job 覆盖，见
 // docs/spec/pptx-split.md §9.7。
 func TestIsReplaceCoreArtifactName_WindowsFold(t *testing.T) {
 	cases := []struct {
