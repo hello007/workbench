@@ -69,7 +69,7 @@
         />
         <template v-else>
           <!-- 会话工具条：会话下拉（类 /resume）+ 新建 + 启动命令 + 模型
-               （权限模式已迁至输入区发送按钮同排左侧） -->
+               （权限模式已迁至输入盒底栏的分段式按钮组） -->
           <div class="chat-toolbar">
             <el-dropdown trigger="click" @command="onSessionCommand">
               <el-button size="small" class="session-btn" :title="currentSessionTitle">
@@ -206,46 +206,10 @@
             </div>
           </div>
 
-          <!-- 输入区：模板下拉 + textarea（Enter 发送 / Shift+Enter 换行）+ 发送/停止 -->
+          <!-- 输入区：带内嵌底栏的输入盒（claude.ai 同款布局）——textarea 主体 +
+               盒内下沿操作条：模板 / 权限模式分段组靠左，停止+发送靠右 -->
           <div class="chat-input-area">
-            <div class="chat-input-row">
-              <el-dropdown trigger="click" @command="applyTemplate">
-                <el-button size="small" text bg class="tpl-btn" title="插入模板">
-                  <el-icon><Document /></el-icon>模板
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu class="tpl-menu">
-                    <el-dropdown-item v-if="!aiChatStore.chatTemplates.length" disabled>
-                      暂无模板
-                    </el-dropdown-item>
-                    <template v-if="aiChatStore.chatTemplateGroups.directory.length">
-                      <el-dropdown-item disabled class="tpl-group-title">本目录模板</el-dropdown-item>
-                      <el-dropdown-item
-                        v-for="t in aiChatStore.chatTemplateGroups.directory"
-                        :key="t.id"
-                        :command="t.id"
-                        :title="t.content"
-                      >
-                        {{ t.name }}
-                      </el-dropdown-item>
-                    </template>
-                    <template v-if="aiChatStore.chatTemplateGroups.global.length">
-                      <el-dropdown-item divided disabled class="tpl-group-title">全局模板</el-dropdown-item>
-                      <el-dropdown-item
-                        v-for="t in aiChatStore.chatTemplateGroups.global"
-                        :key="t.id"
-                        :command="t.id"
-                        :title="t.content"
-                      >
-                        {{ t.name }}
-                      </el-dropdown-item>
-                    </template>
-                    <el-dropdown-item divided command="__manage_templates__" class="tpl-manage-item">
-                      <el-icon><Setting /></el-icon>管理模板
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+            <div class="chat-input-box">
               <!-- 输入框：固定 rows 默认 6 行 + 原生纵向拖拽调高（CSS 限幅）。
                    不用 autosize：其 JS 接管高度会覆盖拖拽结果，与原生 resize 冲突 -->
               <el-input
@@ -257,39 +221,76 @@
                 placeholder="输入需求，Enter 发送 / Shift+Enter 换行"
                 @keydown.enter="onInputEnter"
               />
-              <div class="chat-input-actions">
-                <!-- 权限模式：自会话工具条迁入输入区常驻（发送按钮同排左侧）；
-                     中文标签与 tooltip 说明不变，bypassPermissions 选中时警告提示；
-                     非默认档警示色描边强调，默认档弱化显示 -->
+              <div class="chat-input-box-footer">
+                <el-dropdown trigger="click" @command="applyTemplate">
+                  <el-button size="small" text bg class="tpl-btn" title="插入模板">
+                    <el-icon><Document /></el-icon>模板
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu class="tpl-menu">
+                      <el-dropdown-item v-if="!aiChatStore.chatTemplates.length" disabled>
+                        暂无模板
+                      </el-dropdown-item>
+                      <template v-if="aiChatStore.chatTemplateGroups.directory.length">
+                        <el-dropdown-item disabled class="tpl-group-title">本目录模板</el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="t in aiChatStore.chatTemplateGroups.directory"
+                          :key="t.id"
+                          :command="t.id"
+                          :title="t.content"
+                        >
+                          {{ t.name }}
+                        </el-dropdown-item>
+                      </template>
+                      <template v-if="aiChatStore.chatTemplateGroups.global.length">
+                        <el-dropdown-item divided disabled class="tpl-group-title">全局模板</el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="t in aiChatStore.chatTemplateGroups.global"
+                          :key="t.id"
+                          :command="t.id"
+                          :title="t.content"
+                        >
+                          {{ t.name }}
+                        </el-dropdown-item>
+                      </template>
+                      <el-dropdown-item divided command="__manage_templates__" class="tpl-manage-item">
+                        <el-icon><Setting /></el-icon>管理模板
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <!-- 权限模式：分段式按钮组（四档同排平铺，当前档高亮），悬停出说明；
+                     bypassPermissions 选中仍警告提示；非默认档警示色强调（is-elevated） -->
                 <el-tooltip :content="permissionModeTip" placement="top">
-                  <el-select
+                  <el-radio-group
                     v-model="aiChatStore.chatSettings.permissionMode"
                     size="small"
-                    class="chat-config-select chat-perm-select"
+                    class="chat-perm-seg"
                     :class="{ 'is-elevated': aiChatStore.chatSettings.permissionMode !== 'default' }"
                     @change="onPermissionModeChange"
                   >
-                    <el-option
+                    <el-radio-button
                       v-for="m in PERMISSION_MODES"
                       :key="m.value"
                       :value="m.value"
-                      :label="m.label"
-                    />
-                  </el-select>
+                    >{{ m.short }}</el-radio-button>
+                  </el-radio-group>
                 </el-tooltip>
+                <div class="chat-input-spacer"></div>
                 <!-- 持续会话模型：运行中发送 = 排队注入（插话），发送按钮恒可用；
                      有在途轮次时并列展示停止按钮（中断当前轮 + 摘除排队轮） -->
-                <el-button type="primary" class="chat-send-btn" @click="handleSend">
-                  <el-icon><Position /></el-icon>发送
-                </el-button>
                 <el-button
                   v-if="aiChatStore.chatInFlight"
                   type="danger"
                   plain
+                  size="small"
                   class="chat-stop-btn"
                   @click="handleStop"
                 >
                   <el-icon><VideoPause /></el-icon>停止
+                </el-button>
+                <el-button type="primary" size="small" class="chat-send-btn" @click="handleSend">
+                  <el-icon><Position /></el-icon>发送
                 </el-button>
               </div>
             </div>
@@ -429,11 +430,13 @@ const uiStore = useUiStore()
 // ===== 常量选项 =====
 
 // 权限模式可选集（值与 model.ChatPermissionMode* 常量对齐）
+// PERMISSION_MODES：分段式按钮组档位（short 为组内短标签，label/tip 保留完整语义；
+// 悬停整组出当前档 tip 说明，bypassPermissions 选中另有警告提示）
 const PERMISSION_MODES = [
-  { value: 'default', label: '默认权限', tip: 'claude 默认权限行为，敏感操作需逐次确认' },
-  { value: 'acceptEdits', label: '自动接受编辑', tip: '自动接受文件编辑，其余操作仍需确认' },
-  { value: 'plan', label: '规划模式', tip: '仅分析与规划方案，不执行修改' },
-  { value: 'bypassPermissions', label: '跳过确认', tip: '跳过全部权限确认，AI 可直接修改代码与执行命令（高危）' }
+  { value: 'default', short: '默认', label: '默认权限', tip: 'claude 默认权限行为，敏感操作需逐次确认' },
+  { value: 'acceptEdits', short: '接受编辑', label: '自动接受编辑', tip: '自动接受文件编辑，其余操作仍需确认' },
+  { value: 'plan', short: '规划', label: '规划模式', tip: '仅分析与规划方案，不执行修改' },
+  { value: 'bypassPermissions', short: '跳过确认', label: '跳过确认（高危）', tip: '跳过全部权限确认，AI 可直接修改代码与执行命令（高危）' }
 ]
 const permissionModeTip = computed(() => {
   const cur = PERMISSION_MODES.find(m => m.value === aiChatStore.chatSettings.permissionMode)
@@ -1494,10 +1497,17 @@ watch(() => uiStore.activePanel, (panel) => {
   color: var(--primary-color);
 }
 
-/* 权限模式（输入区常驻）：非默认档警示色描边强调，默认档弱化显示。
-   EP select 边框走 wrapper 的 box-shadow，描边同通道覆盖 */
-.chat-perm-select.is-elevated :deep(.el-select__wrapper) {
-  box-shadow: 0 0 0 1px var(--warning-color) inset;
+/* 权限模式（分段式按钮组）：非默认档警示色强调——选中项底色换 warning，
+   默认档保持主色（弱化显示）。EP checked 态走 is-active */
+.chat-perm-seg.is-elevated :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  background: var(--warning-color);
+  border-color: var(--warning-color);
+  box-shadow: -1px 0 0 0 var(--warning-color);
+}
+/* 分段组紧凑化：小字号 + 收窄内边距，防四档撑满底栏 */
+.chat-perm-seg :deep(.el-radio-button__inner) {
+  font-size: 12px;
+  padding: 5px 10px;
 }
 
 /* 会话下拉项：标题 + 更新时间两列 */
@@ -1829,29 +1839,47 @@ watch(() => uiStore.activePanel, (panel) => {
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
-.chat-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--spacing-sm);
+/* 输入盒：textarea 主体 + 盒内下沿操作条（模板/权限分段/停止发送），
+   聚焦时边框转主色（claude.ai 同款容器语义） */
+.chat-input-box {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  transition: border-color var(--transition-fast);
+}
+.chat-input-box:focus-within {
+  border-color: var(--primary-color);
 }
 .tpl-btn {
   flex-shrink: 0;
 }
 .chat-input {
-  flex: 1;
   min-width: 0;
 }
 /* 输入框高度：默认 6 行（rows），允许原生纵向拖拽调高。
    下限约 2 行防拖得过扁，上限 40vh 防拖到占满会话区；
    拖拽高度为会话内临时态，不持久化、不入会话快照。
+   盒内无边框化：外层 .chat-input-box 承担边框与聚焦态，inner 透明融入
    EP 非 autosize 挂载时会写内联 min-height:31px，!important 压过运行时内联值 */
 .chat-input :deep(.el-textarea__inner) {
   resize: vertical;
   min-height: 52px !important;
   max-height: 40vh;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
-.chat-input-actions {
-  flex-shrink: 0;
+/* 盒内底栏：模板 + 权限分段组靠左，停止/发送靠右 */
+.chat-input-box-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+.chat-input-spacer {
+  flex: 1;
 }
 /* 进行中状态行：呼吸圆点 + 文案 */
 .chat-input-status {

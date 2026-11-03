@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElRadioGroup, ElRadioButton } from 'element-plus'
 import AiChatPanel from '../AiChatPanel.vue'
 import { useAiChatStore, useUiStore } from '../../store'
 import { CMD_RUN_BTN_TITLE_NO_CWD } from '../../utils/chatMarkdown'
@@ -180,7 +180,10 @@ const defaultStubs = {
   'el-option': { template: '<option :value="value">{{ label }}</option>', props: ['value', 'label'] },
   'el-tooltip': { template: '<div><slot /></div>', props: ['content', 'placement'] },
   'el-tag': { template: '<span class="el-tag"><slot /></span>', props: ['size', 'type'] },
-  'el-radio-group': { template: '<div><slot /></div>', props: ['modelValue', 'disabled'] },
+  // el-radio-group 不 stub：权限模式分段组走真 EP 组件（createWrapper 已全局注册
+  // ElRadioGroup/ElRadioButton，group 的 v-model 事件链路 stub 无法模拟；stub 会
+  // 截断 provide 上下文致真 radio-button 改值失效）。el-radio（模板弹窗 scope 选择）
+  // 无交互断言，保留 stub 简化渲染
   'el-radio': { template: '<label><slot /></label>', props: ['value', 'disabled'] },
   Folder: { template: '<span>folder</span>' },
   Delete: { template: '<span>del</span>' },
@@ -200,7 +203,13 @@ function createWrapper() {
   const pinia = createPinia()
   setActivePinia(pinia)
   const wrapper = mount(AiChatPanel, {
-    global: { plugins: [pinia], stubs: defaultStubs }
+    // 权限模式分段组用真 EP 组件（radio-button 的 group v-model 链路 stub 难以模拟，
+    // 真组件点击即改 modelValue）；其余组件仍走 defaultStubs 简化渲染
+    global: {
+      plugins: [pinia],
+      stubs: defaultStubs,
+      components: { ElRadioGroup, ElRadioButton }
+    }
   })
   return wrapper
 }
@@ -1234,16 +1243,26 @@ describe('AiChatPanel.vue', () => {
   })
 
   describe('权限与模型配置', () => {
-    it('权限模式下拉常驻输入区：切换持久化并调 SaveChatSettings（launcher 一并透传）', async () => {
+    // 分段式按钮组交互辅助：点第 idx 个档位（PERMISSION_MODES 顺序：默认/接受编辑/规划/跳过确认）。
+    // jsdom 对 label 合成点击不做 input 激活转发，须直接对内部 radio input 触发
+    const clickPermSeg = async (wrapper, idx) => {
+      const inputs = wrapper.findAll('.chat-perm-seg input[type="radio"]')
+      await inputs[idx].setValue(true)
+      await flushPromises()
+    }
+
+    it('权限模式分段组常驻输入盒底栏：切换持久化并调 SaveChatSettings（launcher 一并透传）', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      // DOM 序：工具条只剩模型下拉（select[0]），权限模式迁入输入区（select[1]）
+      // DOM 序：工具条只剩模型下拉（select 仅 1 个），权限模式为输入盒内分段组
       const selects = wrapper.findAll('select')
-      expect(selects.length).toBe(2)
-      await selects[1].setValue('plan')
-      await flushPromises()
+      expect(selects.length).toBe(1)
+      const seg = wrapper.find('.chat-perm-seg')
+      expect(seg.exists()).toBe(true)
+      expect(seg.findAll('.el-radio-button').length).toBe(4)
+      await clickPermSeg(wrapper, 2) // 规划
 
       expect(SaveChatSettings).toHaveBeenCalledWith('plan', '', '')
       expect(useAiChatStore().chatSettings.permissionMode).toBe('plan')
@@ -1254,9 +1273,7 @@ describe('AiChatPanel.vue', () => {
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      const selects = wrapper.findAll('select')
-      await selects[1].setValue('bypassPermissions')
-      await flushPromises()
+      await clickPermSeg(wrapper, 3) // 跳过确认
 
       expect(ElMessage.warning).toHaveBeenCalledWith(
         expect.stringContaining('跳过确认')
@@ -1264,17 +1281,14 @@ describe('AiChatPanel.vue', () => {
       expect(SaveChatSettings).toHaveBeenCalledWith('bypassPermissions', '', '')
     })
 
-    it('权限模式非默认档下拉按钮带警示强调类（is-elevated），默认档弱化', async () => {
+    it('权限模式非默认档分段组带警示强调类（is-elevated），默认档弱化', async () => {
       wrapper = createWrapper()
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      const permSelect = wrapper.find('.chat-perm-select')
-      expect(permSelect.classes()).not.toContain('is-elevated')
-      const selects = wrapper.findAll('select')
-      await selects[1].setValue('acceptEdits')
-      await flushPromises()
-      expect(wrapper.find('.chat-perm-select').classes()).toContain('is-elevated')
+      expect(wrapper.find('.chat-perm-seg').classes()).not.toContain('is-elevated')
+      await clickPermSeg(wrapper, 1) // 接受编辑
+      expect(wrapper.find('.chat-perm-seg').classes()).toContain('is-elevated')
     })
 
     it('模型下拉切换持久化（allow-create 自定义值同样生效）', async () => {
