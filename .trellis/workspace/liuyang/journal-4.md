@@ -1171,3 +1171,36 @@ splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 204: replace 产物形态位数与归属口径修正
+
+**Date**: 2026-11-03
+**Task**: replace 产物形态位数与归属口径修正
+**Branch**: `master`
+
+### Summary
+
+第三轮审核整改：isReplaceArtifactNameExact 两形态页序段收紧 ≥2 位，堵住 1 位页序用户文件在指纹不可用旧记录下被按名删除的数据丢失面；retained 新页同名过滤限定同目录，异目录条目交旧落点消费，修复 replace→cache 残留孤儿；ownsOutDir 分支核心守卫改用 firstUnownedReplaceCoreArtifactName，凭证覆盖残留解除占用后可重试；同步三处文档。新增 4 用例，三处变异均变红；go test ./... 两轮、-count=3、覆盖率门禁、gofmt、vet、Linux 交叉 vet 全通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0eb330b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
