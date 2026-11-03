@@ -44,11 +44,11 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 `--audit-level=high`：仅 high 以上漏洞才使命令失败，避免 low/moderate 噪声阻塞。
 
-执行口径（2026-11-03 基线）：high 0、moderate 8（全部为 dev 测试工具链，清单与接受理由见 §5.6）。
+执行口径（2026-11-03 overrides 治理后基线）：high 0、moderate 0（原 8 条 dev 测试工具链漏洞已出清，见 §5.6）。
 
 - 修复 high 用 `npm update <pkg>` 在 lockfile 内升级，保持 npmmirror resolved 风格，不改 `package.json` 顶层声明与四档登记。
-- **禁 `npm audit fix` / `npm audit fix --force`**：前者会连带升级 vitest 等工具链（本轮实测可把 vitest 4.1.11 拉到 4.1.12），后者可跨 major，均触发未评估的回归面；升级按 [frontend-dep-upgrade.md](frontend-dep-upgrade.md) SOP 独立进行。
-- moderate 不自动修复，按 §5.6 接受并跟踪复评触发条件。
+- **禁 `npm audit fix` / `npm audit fix --force`**：前者会连带升级 vitest 等工具链，后者可跨 major，均触发未评估的回归面；升级按 [frontend-dep-upgrade.md](frontend-dep-upgrade.md) SOP 独立进行。
+- moderate dev-only 漏洞：上游已发布修复版但声明范围未放宽时，经根级 `overrides` 强制修复版，并按 §5.6 的必跑面全量回归；上游放宽依赖后移除 override。
 
 ## 4. CI 集成
 
@@ -141,30 +141,28 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 验证：`npm audit --registry=https://registry.npmjs.org --audit-level=high` 退出码 0；`npm ci` 可复现；前端单测（103 文件 / 2275 用例）与生产构建通过；`node scripts/check-dep-consistency.mjs` 通过。
 
-### 5.6 当前接受风险：npm dev-only moderate（2026-11-03）
+### 5.6 dev-only moderate 出清（2026-11-03）
 
-**结论：8 个 moderate 全部位于 devDependencies（vitest 测试框架、@vue/test-utils 测试工具链），不进入生产构建产物；`--audit-level=high` 刻意忽略，CI security job 不再因它们失败。**
+**结论：8 个 moderate 已全部出清，`npm audit --audit-level=moderate` 为 0。**
 
-根因 advisory（其余 audit 条目为依赖链衍生提示）：
+| 原 advisory | 原受影响包 | 出清方式 |
+|---|---|---|
+| GHSA-qxg6-89mg-rqv8（vitest mock 注册代码注入） | @vitest/mocker 4.1.11 | vitest / @vitest/coverage-v8 升至 4.1.12（patch，`@vitest/mocker` 随同） |
+| GHSA-xp26-3454-mjgp（Windows 反斜杠穿越绕过） | @vitest/mocker 4.1.11 | 同上 |
+| GHSA-3g3m-2fjr-6pw4（glob AbortSignal 取消绕过） | glob 13.0.6（js-beautify 传递） | 根级 override `glob ^14.0.3` |
+| GHSA-g3hv-75wg-m249（minimatch globparts 放大 DoS） | minimatch 10.2.6（editorconfig / glob 传递） | 根级 override `minimatch ^11.0.4` |
 
-| GHSA | 受影响包（当前版本） | advisory 范围 | 出清所需版本 | 阻塞原因 |
-|---|---|---|---|---|
-| GHSA-qxg6-89mg-rqv8（Code injection via unauthenticated manual mock registration） | @vitest/mocker 4.1.11 | >=2.1.0-beta.7 <4.1.12 | vitest / @vitest/mocker / @vitest/coverage-v8 4.1.12（patch） | 本轮范围收敛于 high；`^4.1.5` 已覆盖 4.1.12，lockfile 内 `npm update` 即可出清，但仍须全量单测回归，按 frontend-dep-upgrade.md SOP 独立升级轮处理 |
-| GHSA-xp26-3454-mjgp（Windows backslash traversal bypasses @vitest/mocker redirect allowlist fix） | @vitest/mocker 4.1.11 | >=4.1.11 <4.1.12 | 同上 4.1.12 | 同上 |
-| GHSA-3g3m-2fjr-6pw4（Glob AbortSignal cancellation bypass allows post-timeout filesystem traversal） | glob 13.0.6 | >=9.0.0 <=14.0.1 | glob 14.0.2+ | js-beautify 2.0.3（npm 最新）声明 `glob: ^13.0.6`，修复版 14.0.2 超出声明范围；须上游放宽依赖或强制 overrides |
-| GHSA-g3hv-75wg-m249（minimatch DoS via globparts amplification） | minimatch 10.2.6 | <11.0.1 | minimatch 11.0.1+ | editorconfig 3.0.2 声明 `minimatch: ~10.2.4`、glob 13.0.6 声明 `minimatch: ^10.2.2`，修复版 11.x 超出声明范围 |
+**overrides 依据**：上游最新 js-beautify 2.0.3 仍声明 `glob ^13.0.6`、editorconfig 3.0.2 仍声明 `minimatch ~10.2.4`，无上游放宽版本。兼容性取证：js-beautify 仅 CLI 使用 `globSync`（glob 14 保留）；editorconfig 使用 `Minimatch` 构造器与 `minimatch.escape`（minimatch 11 保留）。
 
-链路与衍生条目：
+**回归面（本轮实测）**：一致性检查 11 用例、vitest 2432 用例、`npm run build`、Web E2E 126 用例、桌面 E2E 3 用例全部通过；`npm ls glob minimatch` 均指向 14.0.3 / 11.0.4 单一去重实例。
 
-- vitest 链：`vitest 4.1.11 → @vitest/mocker 4.1.11`，audit 另报 `vitest`、`@vitest/coverage-v8`（依赖 vulnerable 版本）。
-- js-beautify 链：`@vue/test-utils 2.5.0 → js-beautify 2.0.3 → editorconfig 3.0.2（minimatch ~10.2.4）+ glob 13.0.6（minimatch ^10.2.2）`，audit 另报 `js-beautify`、`editorconfig`、`@vue/test-utils`（依赖 vulnerable 版本）。
+**移除条件**：js-beautify 或 editorconfig 上游发布声明 `glob ^14` / `minimatch ^11` 的版本后，删除 `frontend/package.json` 的 `overrides` 并 `npm install`，复跑上述回归面。
 
-复评触发条件（满足任一即重评）：
+**复评触发条件（满足任一即重评）**：
 
-1. js-beautify 或 @vue/test-utils 上游发布依赖 `glob ^14` / `minimatch ^11` 的版本；
-2. 前端依赖升级轮（frontend-dep-upgrade.md §3.3 必跑面）顺带处理 vitest 4.1.12 patch 升级；
-3. npm audit 策略改为 moderate 阻塞（调整 CI `--audit-level` 或失败语义）时启动专项；
-4. 季度复核（§7）发现根因包发布修复版，或任一 advisory 升级为 high。
+1. 升级 js-beautify / editorconfig / @vue/test-utils 时复核 overrides 是否仍需保留；
+2. npm audit 重新出现 moderate（新 advisory）时按本节流程评估；
+3. 季度复核（§7）全量扫描。
 
 ## 6. Go 工具链与标准库漏洞
 

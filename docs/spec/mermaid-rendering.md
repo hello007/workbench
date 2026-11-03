@@ -45,7 +45,7 @@ markdown-it fence 定制：`lang === 'mermaid'` 输出 `<pre class="mermaid">${e
 | 版本声明 | tilde 档 `~12.2.0`（lock 落点同 minor，`check-dep-consistency.mjs` 三维一致） |
 | engines | mermaid 12 要求 `node >=22.12`；CI（ci.yml/release.yml 共 4 处）已升 node 22，**后续 CI node 版本不得低于 22** |
 | 浏览器目标 | ES2024 / Safari 17.4+；WebView2（Chromium evergreen）满足；Linux 桌面 WebKitGTK 2.44+（Ubuntu 24.04）满足，更低版本发行版列为观察项 |
-| audit | npm audit（官方 registry）当前 **high 0、moderate 8**（均为 dev-only 测试工具链，清单与接受理由见 [security-scan.md](security-scan.md) §5.6） |
+| audit | npm audit（官方 registry）当前 **high 0、moderate 0**（原 dev-only 测试工具链 8 项已于 2026-11-03 出清，见 [security-scan.md](security-scan.md) §5.6） |
 | import 形态 | 必须 `import('mermaid')` 包说明符（核心构建）；禁直指 `dist/mermaid.esm.min.mjs`（v12 该文件含 es-module-lexer 拒绝的语法） |
 
 ## 5. 测试面
@@ -79,4 +79,4 @@ PreviewFile: { content: MD, error: '', kind: 'text' }
 1. `node scripts/check-dep-consistency.mjs`（tilde 三维一致）
 2. vitest 全量（stub 面零回归）
 3. `npx playwright test e2e/markdown-mermaid.spec.js`（真实渲染冒烟）
-4. mermaid 版本变更时：npm audit high 漏洞清零核对（moderate 接受清单见 security-scan.md §5.6）+ breaking changelog 核对（对照任务存档 research 文档模板）
+4. mermaid 版本变更时：npm audit high/moderate 漏洞清零核对（清单见 security-scan.md §5.6）+ breaking changelog 核对（对照任务存档 research 文档模板）

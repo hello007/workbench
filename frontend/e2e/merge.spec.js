@@ -14,13 +14,10 @@
 import { test, expect, getWailsCalls } from './fixtures'
 import { openGitRepoPage, E2E_REPO_PATH, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
-// 冲突态五段序列：选中工作目录(mousedown+click 各一次 → 2 次均无冲突) ->
-// 面板挂载(3) 无冲突 -> 执行后查询(4) 合并冲突 -> 中止后查询(5) 无冲突。
-// 目录项同时绑定 mousedown 与 click（选中提前于拖拽），ContentPanel 的
-// selectedNode watch 因此触发两次，GetConflictState 每次选中各发一次。
+// 冲突态四段序列：选中工作目录（2026-11-03 起 click 单入口，选中一次 → 无冲突）->
+// 面板挂载(2) 无冲突 -> 执行后查询(3) 合并冲突 -> 中止后查询(4) 无冲突。
 const CONFLICT_THEN_CLEAN = {
   __sequence__: [
-    { type: 'none', files: [] },
     { type: 'none', files: [] },
     { type: 'none', files: [] },
     { type: 'merge', files: ['src/app.js'] },
@@ -54,8 +51,8 @@ test.describe('Git 合并/变基流程', () => {
       expect(mergeCalls).toEqual([
         { method: 'Merge', args: [E2E_REPO_PATH, 'feature/login', 'ff'] }
       ])
-      // 冲突态查询：选中目录两次（mousedown + click）+ 面板挂载 + 执行后各一次
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(4)
+      // 冲突态查询：选中目录一次（2026-11-03 起 click 单入口）+ 面板挂载 + 执行后各一次
+      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(3)
     })
   })
 
@@ -114,8 +111,8 @@ test.describe('Git 合并/变基流程', () => {
 
       const abortCalls = await getWailsCalls(page, 'AbortMerge')
       expect(abortCalls).toEqual([{ method: 'AbortMerge', args: [E2E_REPO_PATH] }])
-      // 冲突态查询：选中目录两次 + 挂载 + 执行后 + 中止后，共 5 次
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(5)
+      // 冲突态查询：选中目录一次 + 挂载 + 执行后 + 中止后，共 4 次
+      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(4)
     })
   })
 

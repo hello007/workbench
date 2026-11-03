@@ -88,6 +88,16 @@ element-plus 升级除 3.3 常规面外，按 confirm-dialog.md §1 排查方法
 
 **兜底冒烟（静态分析无法确证项）**：docx 真机打开多页/表格/页眉页脚文件目检（0.4.0 release 自述「edge cases」无具体清单）；`wails dev` 启动冒烟（vue-router 依赖树变化）。
 
+### 3.7 传递依赖 overrides 口径（2026-11-03）
+
+仅用于**安全修复且上游声明范围未放宽**的传递依赖：根级 `overrides` 强制修复版，不得用于功能升级或跨 major 尝鲜。
+
+- 前置：确认上游最新版仍声明旧范围（`npm view <pkg>@latest dependencies`），且修复版 API 被实际消费点覆盖（源码/导出核对）；
+- 必跑面：§3.3 全部（一致性检查、vitest 全量、build、E2E web/desktop、audit）；
+- 记录：`security-scan.md` §5.6 写明 advisory、override 版本、回归结果、移除条件；
+- 移除：上游放宽声明后删除 `overrides` 条目并重装，复跑 §3.3；
+- 回退：`git checkout frontend/package.json frontend/package-lock.json && npm ci`。
+
 ## 4. 关联
 
 - 确认弹框消费契约与 EP 回归排查方法论：[confirm-dialog.md](confirm-dialog.md)
