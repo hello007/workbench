@@ -1270,3 +1270,36 @@ CI 新增 windows-latest test-windows job（dist 占位 + go vet + go test ./...
 ### Next Steps
 
 - None - task complete
+
+
+## Session 207: npm audit high 治理（undici 7.30.1）
+
+**Date**: 2026-11-03
+**Task**: npm audit high 治理（undici 7.30.1）
+**Branch**: `master`
+
+### Summary
+
+lockfile 内升级 undici 7.29.1 -> 7.30.1，npm audit high 清零；8 个 dev-only moderate 登记到 security-scan §5.6；CLAUDE 规则补 lock 内 npm update、禁 audit fix。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d78364b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
