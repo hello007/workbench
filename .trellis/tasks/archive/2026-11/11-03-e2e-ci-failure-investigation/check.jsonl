@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对语义选择器与 mock 规则"}
+{"file": "docs/spec/test-stability.md", "reason": "核对无 flaky 引入"}
