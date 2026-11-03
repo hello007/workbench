@@ -1469,3 +1469,36 @@ ActivityBar.spec 高亮/点击用例去渲染下标，改 data-panel-id/data-act
 ### Next Steps
 
 - None - task complete
+
+
+## Session 213: retained 目录锚改造
+
+**Date**: 2026-11-03
+**Task**: retained 目录锚改造
+**Branch**: `master`
+
+### Summary
+
+retained_fingerprints 条目增加绝对目录锚 dir：消费按条目目录删除、归属查询校验目录一致、新页过滤与合并按(目录,名称)、删除异目录丢弃分支、目录迁移同事务改锚；新增跨目录续携/消费、旧格式兼容、迁移改锚、非法锚丢弃用例；service 全量通过，覆盖率门禁通过
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2cc43bc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
