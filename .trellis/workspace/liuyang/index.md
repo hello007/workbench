@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 208
+- **Total Sessions**: 209
 - **Last Active**: 2026-11-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1338 | Active |
+| `journal-4.md` | ~1371 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 209 | 2026-11-03 | E2E 失败修复（活动栏语义选择器） | `c3c1582` | `master` |
 | 208 | 2026-11-03 | 远程统一 GitHub HTTPS 与 rebase 提交规范 | `3058d16` | `master` |
 | 207 | 2026-11-03 | npm audit high 治理（undici 7.30.1） | `d78364b` | `master` |
 | 206 | 2026-11-03 | Windows CI 覆盖 split 折叠分支 | `3c5a561` | `master` |

@@ -1336,3 +1336,36 @@ origin 改为 GitHub HTTPS 并移除 mirror；Git 提交规范强制 fetch + reb
 ### Next Steps
 
 - None - task complete
+
+
+## Session 209: E2E 失败修复（活动栏语义选择器）
+
+**Date**: 2026-11-03
+**Task**: E2E 失败修复（活动栏语义选择器）
+**Branch**: `master`
+
+### Summary
+
+上游 merge 新增分支对比面板与冲突弹窗导致 E2E 失效；ActivityBar 加 data-* 语义属性，26 spec 去硬编码 nth；merge/assets-filter-sort 断言按新 UI 更新；本地 E2E 126 passed。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3c1582` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
