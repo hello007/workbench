@@ -1,7 +1,7 @@
 # 安全扫描
 
 > 本文档规定 WorkBench 的依赖安全扫描方案：工具选型、本地命令、CI 集成、已知漏洞处置策略。
-> 最后更新：2026-09-14 · 来源任务：09-14-v1-4 PR1 子项4+5
+> 最后更新：2026-11-03 · 来源任务：11-03-npm-audit-remediation（npm undici high 治理）
 
 ## 1. 适用范围
 
@@ -43,6 +43,12 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 ```
 
 `--audit-level=high`：仅 high 以上漏洞才使命令失败，避免 low/moderate 噪声阻塞。
+
+执行口径（2026-11-03 基线）：high 0、moderate 8（全部为 dev 测试工具链，清单与接受理由见 §5.6）。
+
+- 修复 high 用 `npm update <pkg>` 在 lockfile 内升级，保持 npmmirror resolved 风格，不改 `package.json` 顶层声明与四档登记。
+- **禁 `npm audit fix` / `npm audit fix --force`**：前者会连带升级 vitest 等工具链（本轮实测可把 vitest 4.1.11 拉到 4.1.12），后者可跨 major，均触发未评估的回归面；升级按 [frontend-dep-upgrade.md](frontend-dep-upgrade.md) SOP 独立进行。
+- moderate 不自动修复，按 §5.6 接受并跟踪复评触发条件。
 
 ## 4. CI 集成
 
@@ -94,7 +100,7 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 | 漏洞 ID | 包 | 修复方式 |
 |---|---|---|
-| GHSA-238p-pmpm-9mq7 Prototype Pollution | katex 0.16.47 → 0.18.11（mermaid 传递链，indirect） | mermaid 11.17.2 → 12.2.0 major 升级（2026-10-21）；实测 `npm audit` 0 vulnerabilities |
+| GHSA-238p-pmpm-9mq7 Prototype Pollution | katex 0.16.47 → 0.18.11（mermaid 传递链，indirect） | mermaid 11.17.2 → 12.2.0 major 升级（2026-10-21）；实测 high 0（moderate 见 §5.6） |
 
 ### 5.3 历史接受风险（已处置清零）
 
@@ -110,12 +116,12 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 
 **注意事项**：
 - CDN tarball URL 依赖 cdn.sheetjs.com 可达，CI（GitHub Actions Linux runner）与本地安装均需网络访问该域名。
-- `npm audit` 按 lock 文件实际版本号（0.20.3）匹配 advisory 范围，实测报 0 vulnerabilities。
+- `npm audit` 按 lock 文件实际版本号（0.20.3）匹配 advisory 范围，实测 high 0（moderate 见 §5.6）。
 - 若未来需再升级，先探测 CDN 版本存在性（0.20.4+ 并不存在，当前最新即 0.20.3），勿凭版本号臆测。
 
 ### 5.4 major 版本待评（本轮跳过）
 
-前端遗留四 major 已于 2026-10-21 全部出清（vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1，breaking 评估与适配记录见 frontend-dep-upgrade.md §3.6），升级后 `npm audit` 保持 0 vulnerabilities。
+前端遗留四 major 已于 2026-10-21 全部出清（vue-router ~5.4.0 / js-yaml ~5.5.0 / markdown-it ~15.0.3 / docx-preview ~0.4.1，breaking 评估与适配记录见 frontend-dep-upgrade.md §3.6），升级后 `npm audit` high 0（moderate 见 §5.6）。
 
 **go-git 已于 2026-10-21 出清**：未升 v6（正式版未发布，最新 v6.0.0-beta.1 为 prerelease，生产不可依赖），而是评估后**整体移除 go-git 依赖**——消费面 5 处活跃点（HEAD SHA/分支名/ref 枚举/remote 列表四类元数据读取 + object 死代码删除）全部改为 CLI/纯 Go 等价实现（`util.ResolveHead` helper + `git for-each-ref` + 手写 .git/config `[remote "x"]` 子段解析，语义对齐 v5.19.2 `PlainOpen`/`Remotes()` 行为，含 `EnableDotGitCommonDir=false` 与「裸 `[remote]` 段不计」两处口径），go-git/go-billy/gcfg 依赖链全部出清，`govulncheck ./...` 清零。详见 `.trellis/tasks/10-21-go-git-v6-upgrade/research/`（消费面盘点 + v6 breaking 核对）。
 
@@ -124,6 +130,41 @@ cd frontend && npm audit --registry=https://registry.npmjs.org --audit-level=hig
 | 包 | 当前版本 | 可用 major | 说明 |
 |---|---|---|---|
 | wails | v2.16.0 | v3 | v3 仍在 beta，跟踪官方稳定版发布后再评 |
+
+### 5.5 已修复（2026-11-03 npm audit 治理轮）
+
+**npm（1 high → 0；moderate 保持 8，见 §5.6）**：
+
+| 漏洞 ID | 包 | 修复方式 |
+|---|---|---|
+| GHSA-4qv8-2p9j-2685、GHSA-f72v-6w45-q472、GHSA-xjj6-f33q-929c、GHSA-4w7w-5xrc-9h26、GHSA-2m5v-pch6-74hx、GHSA-qrxm-fqhp-jwvm、GHSA-9fm3-97px-rjf6、GHSA-55wc-3pg8-jfw6（undici 聚合条目下的 8 个 advisory：4 high + 4 moderate，影响版本 <7.30.1） | undici 7.29.1 → 7.30.1（`vitest → jsdom` 传递链，dev-only，indirect） | `npm update undici`（jsdom 声明 `^7.25.0` 范围内）；lockfile 仅 version/resolved/integrity 三行变化，`package.json` 顶层声明未动 |
+
+验证：`npm audit --registry=https://registry.npmjs.org --audit-level=high` 退出码 0；`npm ci` 可复现；前端单测（103 文件 / 2275 用例）与生产构建通过；`node scripts/check-dep-consistency.mjs` 通过。
+
+### 5.6 当前接受风险：npm dev-only moderate（2026-11-03）
+
+**结论：8 个 moderate 全部位于 devDependencies（vitest 测试框架、@vue/test-utils 测试工具链），不进入生产构建产物；`--audit-level=high` 刻意忽略，CI security job 不再因它们失败。**
+
+根因 advisory（其余 audit 条目为依赖链衍生提示）：
+
+| GHSA | 受影响包（当前版本） | advisory 范围 | 出清所需版本 | 阻塞原因 |
+|---|---|---|---|---|
+| GHSA-qxg6-89mg-rqv8（Code injection via unauthenticated manual mock registration） | @vitest/mocker 4.1.11 | >=2.1.0-beta.7 <4.1.12 | vitest / @vitest/mocker / @vitest/coverage-v8 4.1.12（patch） | 本轮范围收敛于 high；`^4.1.5` 已覆盖 4.1.12，lockfile 内 `npm update` 即可出清，但仍须全量单测回归，按 frontend-dep-upgrade.md SOP 独立升级轮处理 |
+| GHSA-xp26-3454-mjgp（Windows backslash traversal bypasses @vitest/mocker redirect allowlist fix） | @vitest/mocker 4.1.11 | >=4.1.11 <4.1.12 | 同上 4.1.12 | 同上 |
+| GHSA-3g3m-2fjr-6pw4（Glob AbortSignal cancellation bypass allows post-timeout filesystem traversal） | glob 13.0.6 | >=9.0.0 <=14.0.1 | glob 14.0.2+ | js-beautify 2.0.3（npm 最新）声明 `glob: ^13.0.6`，修复版 14.0.2 超出声明范围；须上游放宽依赖或强制 overrides |
+| GHSA-g3hv-75wg-m249（minimatch DoS via globparts amplification） | minimatch 10.2.6 | <11.0.1 | minimatch 11.0.1+ | editorconfig 3.0.2 声明 `minimatch: ~10.2.4`、glob 13.0.6 声明 `minimatch: ^10.2.2`，修复版 11.x 超出声明范围 |
+
+链路与衍生条目：
+
+- vitest 链：`vitest 4.1.11 → @vitest/mocker 4.1.11`，audit 另报 `vitest`、`@vitest/coverage-v8`（依赖 vulnerable 版本）。
+- js-beautify 链：`@vue/test-utils 2.5.0 → js-beautify 2.0.3 → editorconfig 3.0.2（minimatch ~10.2.4）+ glob 13.0.6（minimatch ^10.2.2）`，audit 另报 `js-beautify`、`editorconfig`、`@vue/test-utils`（依赖 vulnerable 版本）。
+
+复评触发条件（满足任一即重评）：
+
+1. js-beautify 或 @vue/test-utils 上游发布依赖 `glob ^14` / `minimatch ^11` 的版本；
+2. 前端依赖升级轮（frontend-dep-upgrade.md §3.3 必跑面）顺带处理 vitest 4.1.12 patch 升级；
+3. npm audit 策略改为 moderate 阻塞（调整 CI `--audit-level` 或失败语义）时启动专项；
+4. 季度复核（§7）发现根因包发布修复版，或任一 advisory 升级为 high。
 
 ## 6. Go 工具链与标准库漏洞
 
@@ -139,7 +180,7 @@ govulncheck 报告的标准库漏洞（`net/url`、`crypto/tls` 等）**只能�
 - 新增 Go 依赖：提交前跑 `govulncheck ./...` 确认无新增代码受影响漏洞
 - 新增 npm 依赖：提交前跑 `npm audit --registry=https://registry.npmjs.org --audit-level=high` 确认无 high 漏洞
 - Go 工具链升级：`toolchain` directive 须对齐 govulncheck 报告的最高标准库修复版本
-- 季度复核：每季度跑一次全量扫描，更新本文档 §5 漏洞清单
+- 季度复核：每季度跑一次全量扫描，更新本文档 §5 漏洞清单（含 §5.6 dev-only moderate 清单）
 - 新增无补丁漏洞：按 §5.3 格式记录漏洞 ID、包、严重级、接受理由、长期方案
 
 ## 8. 相关文档
