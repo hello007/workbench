@@ -86,4 +86,40 @@ async function emitWailsEvent(page, event, payload) {
   await page.evaluate(([name, pl]) => window.runtime.EventsEmit(name, pl), [event, payload])
 }
 
-export { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, emitWailsEvent }
+/**
+ * 活动栏面板入口定位（语义属性 data-panel-id，由 ActivityBar.vue 稳定输出）。
+ * E2E 一律经 activityPanel / activityAction / openPanel 定位活动栏，禁按类名
+ * 硬编码 nth 索引——面板增删会使索引整体漂移（先例：新增「分支对比」面板后
+ * settings/terminal 顺移，硬编码用例集体点错入口）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} panelId 面板 id（directory / ai / ai-chat / toolbox / assets /
+ *   dashboard / stats / branchcompare）
+ */
+function activityPanel(page, panelId) {
+  return page.locator(`[data-panel-id="${panelId}"]`)
+}
+
+/**
+ * 活动栏动作入口定位（不切换面板的直连动作，data-action 属性）。
+ * @param {import('@playwright/test').Page} page
+ * @param {'settings'|'terminal'|'devices'} action
+ */
+function activityAction(page, action) {
+  return page.locator(`[data-action="${action}"]`)
+}
+
+/**
+ * 点击活动栏面板入口并返回入口定位器（供 active 态断言复用）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} panelId 面板 id
+ */
+async function openPanel(page, panelId) {
+  const entry = activityPanel(page, panelId)
+  await entry.click()
+  return entry
+}
+
+export {
+  test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, emitWailsEvent,
+  activityPanel, activityAction, openPanel
+}

@@ -12,16 +12,17 @@
  *    收 {sortBy:'mtime', sortDir:'desc'}，触发按钮标注降序方向。
  *
  * 弹层韧性交互：EP popper 在多 worker 负载下偶发「弹层可解析但内容不可见」的
- * 中间态（重试点击 30s 不恢复），统一以「Escape 收拢全部弹层 → 重开筛选弹层 →
- * 短超时操作」为原子段经 toPass 整段重试——facet 档位快照宿主持有，重开不丢
- * 状态；星级勾选带 is-selected 幂等守卫（重试不反选）。断言统一轮询「末次
- * SearchAssets 调用状态」（幂等交互产生的重复调用不破坏状态收敛判定），替代
- * 按调用序号的绝对下标断言。
+ * 中间态，统一以「点检索框中性收拢弹层与下拉 → 确认不可见 → 重开筛选弹层 →
+ * 短超时操作」为原子段经 toPass 整段重试（不用 Escape：EP select 只吃 Escape
+ * 关下拉，trigger=click 的 popover 不吃 Escape）——facet 档位快照宿主持有，
+ * 重开不丢状态；星级勾选带 is-selected 幂等守卫（重试不反选）。断言统一轮询
+ * 「末次 SearchAssets 调用状态」（幂等交互产生的重复调用不破坏状态收敛判定），
+ * 替代按调用序号的绝对下标断言。
  * mock 数据源为 wails-mock-defaults.js E2E 合并表（SearchAssets 缺省空结果页，
  * facet/排序字段经调用参数断言消费不校验值）+ 本文件零 override。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 // 大小档换算常量（对齐 AssetFilterPopover resolveSizeRangeBytes 的 MB_BYTES）
 const MB_BYTES = 1024 * 1024
@@ -49,7 +50,7 @@ const baseOverrides = {
 /** 打开素材面板并进入检索模式（关键词触发 runSearch，后续 facet/排序在检索语境变更） */
 async function openSearchMode(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   const panel = page.locator('.assets-panel')
@@ -86,36 +87,43 @@ test.describe('素材检索 facet 筛选参数换算', () => {
 
     // 筛选弹层韧性交互原子段（EP popper 在多 worker 负载下的三种病态：打开缓慢、
     // 关闭动画期可解析、内容不可见幽灵态）：
-    // 1. Escape 收拢全部弹层，并确认真闭合（闭合等待超时容忍幽灵态残留继续）；
-    // 2. 仅在确认不可见后才点「筛选」——弹层尚可见时点击会把它关掉（开关抖动
-    //    livelock 是此前 20s 耗尽的根因）；
+    // 1. 点检索框（中性位置）收拢弹层与下拉——不用 Escape：EP select 只吃 Escape
+    //    关下拉，trigger=click 的 popover 不吃 Escape，且下拉关闭动画期弹层可能
+    //    仍可见；中性点击天然关闭弹层且不会误触「筛选」的 toggle；
+    // 2. 确认弹层不可见后才点「筛选」——弹层尚可见时点击会把它关掉（开关抖动
+    //    livelock 是此前 30s 耗尽的根因：原实现先 Escape 再按瞬时可见性决定是否
+    //    点击，关闭动画窗口内点击反把刚打开的弹层关掉）；
     // 3. 以 8s 窗口等弹层出现（负载下打开可显著慢于常态）；
-    // 4. 整段 toPass 重试，操作函数自身需幂等（星级 is-selected 守卫/fill 覆盖写）。
+    // 4. 整段 toPass 重试（45s 覆盖满负载重试），操作函数自身需幂等
+    //    （星级 is-selected 守卫/fill 覆盖写）。
     const withFilterPopper = async (fn) => {
       await expect(async () => {
-        await page.keyboard.press('Escape')
         const popper = page.locator('.asset-filter-popper')
-        try {
-          await expect(popper).toBeHidden({ timeout: 2_000 })
-        } catch {
-          // 幽灵态容忍：闭合确认超时继续，由下方可见性判定与操作重试兜底
+        if (await popper.isVisible()) {
+          await panel.locator('.keyword-input input').click()
         }
-        if (!(await popper.isVisible())) {
-          await panel.getByRole('button', { name: '筛选', exact: true }).click()
-        }
+        await expect(popper).toBeHidden({ timeout: 5_000 })
+        await panel.getByRole('button', { name: '筛选', exact: true }).click()
         await expect(popper).toBeVisible({ timeout: 8_000 })
         await fn(popper)
-      }).toPass({ timeout: 30_000 })
+      }).toPass({ timeout: 45_000 })
     }
 
-    // 维度一：星级多选 4 星 + 5 星（is-selected 幂等守卫：toPass 重试不反选；
-    // multiple 下拉保持展开，收口交由下一段的 Escape）
+    // 维度一：星级多选 4 星 + 5 星（is-selected 幂等守卫：toPass 重试不反选）。
+    // 多选下拉在逐档选中后的重渲染/关合窗口内可能收起（负载下实测：选中 4 星后
+    // 下拉不可见，后续 option click 无界等待吃满 toPass）——逐档选前补可见性检查，
+    // 下拉收起则重开；所有 click 带短超时，失败交由 toPass 整段重试（重开弹层后
+    // facet 快照仍在宿主，不丢已选档）。
     await withFilterPopper(async (popper) => {
-      await popper.locator('.facet-rating-select .el-select__wrapper').click()
+      const selectWrapper = popper.locator('.facet-rating-select .el-select__wrapper')
       for (const label of ['4 星', '5 星']) {
         const option = page.locator('.el-select-dropdown__item:visible').filter({ hasText: label })
+        if (!(await option.isVisible())) {
+          await selectWrapper.click({ timeout: 5_000 })
+          await expect(option).toBeVisible({ timeout: 5_000 })
+        }
         const selected = await option.evaluate((el) => el.classList.contains('is-selected'))
-        if (!selected) await option.click()
+        if (!selected) await option.click({ timeout: 5_000 })
       }
     })
     await waitForSearchState(

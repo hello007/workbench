@@ -21,7 +21,7 @@
  * id 9 = 当前库不存在的幽灵标签）。本 spec 位于既有 e2e/ 通道目录，
  * vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const MB_BYTES = 1024 * 1024
 
@@ -66,7 +66,7 @@ const baseOverrides = {
 /** 打开素材面板并进入检索语境：关键词「获客」+ 标签筛选勾选「重点客户」 */
 async function openSearchContext(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   const panel = page.locator('.assets-panel')

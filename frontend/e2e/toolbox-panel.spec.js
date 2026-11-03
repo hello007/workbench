@@ -24,12 +24,12 @@
  * 挂起解析器驱动「等待期」中间态，失败分流用 {__error__, __code__} 描述符驱动
  * 结构化 reject（对齐 Wails ErrorFormatter 的 {code, message} AppError 形态）。
  */
-import { test, expect, getWailsCalls, releaseDeferred } from './fixtures'
+import { test, expect, getWailsCalls, releaseDeferred, activityPanel, openPanel } from './fixtures'
 
-/** 打开工具箱面板（活动栏第 4 项 nth(3)），移开鼠标防 tooltip 遮挡 */
+/** 打开工具箱面板（data-panel-id="toolbox" 语义定位），移开鼠标防 tooltip 遮挡 */
 async function openToolbox(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(3).click()
+  await openPanel(page, 'toolbox')
   await page.mouse.move(400, 400)
   const panel = page.locator('.toolbox-panel')
   await expect(panel).toBeVisible()
@@ -43,7 +43,7 @@ test.describe('工具箱：全窗口面板切换互斥', () => {
     // 面板化互斥不变式：激活时三栏区隐藏（v-show 仅 directory 可见）
     await expect(page.locator('.main-panes')).toBeHidden()
     // 活动栏 active 态跟随
-    await expect(page.locator('.activity-bar-item').nth(3)).toHaveClass(/is-active/)
+    await expect(activityPanel(page, 'toolbox')).toHaveClass(/is-active/)
     // 左侧功能清单 7 工具，默认选中首个「拷贝到」
     const nav = panel.locator('.toolbox-nav-item')
     await expect(nav).toHaveCount(7)
@@ -53,7 +53,7 @@ test.describe('工具箱：全窗口面板切换互斥', () => {
     await panel.locator('.toolbox-close').click()
     await expect(panel).toBeHidden()
     await expect(page.locator('.main-panes')).toBeVisible()
-    await expect(page.locator('.activity-bar-item').nth(0)).toHaveClass(/is-active/)
+    await expect(activityPanel(page, 'directory')).toHaveClass(/is-active/)
   })
 })
 

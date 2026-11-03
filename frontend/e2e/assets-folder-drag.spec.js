@@ -28,7 +28,7 @@
  * AssetFolderMoveResult）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 // 素材面板基础数据：单库 + 两个 ok 状态 pptx 文件（分居 方案A/方案B）+ 三节点
 // 文件夹树（普通落点 归档 + 禁落点 已排除目录）；ListAssetFiles 用 __sequence__
@@ -68,13 +68,13 @@ const baseOverrides = {
 }
 
 /**
- * 打开素材面板（活动栏第 5 项）。切面板后鼠标移离活动栏：el-tooltip 因点击后
+ * 打开素材面板（data-panel-id="assets" 语义定位）。切面板后鼠标移离活动栏：el-tooltip 因点击后
  * 鼠标驻留会弹出「素材管理」提示并 teleport 到 body，遮挡画廊首卡交互（详见
  * assets-batch-tag.spec.js 同款注释），先移开并断言 tooltip 收起。
  */
 async function openAssetsPanel(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   const panel = page.locator('.assets-panel')

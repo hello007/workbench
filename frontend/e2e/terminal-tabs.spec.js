@@ -22,7 +22,7 @@
  * mock 前置：终端 5 方法缺省已入 wails-mock-defaults.js 基础表（单一数据源）；
  * 本 spec 用 __sequence__ 让 CreateTerminal 按调用序分配可区分的 sessionId。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, activityAction } from './fixtures'
 
 const shellOverrides = {
   // 平台 Shell 列表（Windows 形态）：默认 Shell 解析收敛首项 powershell，
@@ -38,8 +38,8 @@ const shellOverrides = {
 /** 展开终端面板并等待首个 tab 会话建立 */
 async function openTerminal(page) {
   await page.goto('/')
-  // 活动栏终端开关（data-activity=terminal 稳定定位，不随面板数量漂移）
-  await page.locator('[data-activity="terminal"]').click()
+  // 活动栏终端开关（data-action="terminal" 语义定位）
+  await activityAction(page, 'terminal').click()
   const panel = page.locator('.terminal-panel')
   await expect(panel).toBeVisible()
   await expect.poll(async () => (await getWailsCalls(page, 'CreateTerminal')).length).toBe(1)
@@ -131,9 +131,9 @@ test.describe('终端多 tab：关闭生命周期与冷启动', () => {
 
     // 收起再展开面板：tabs.length 非空短路冷启动分支，快照恢复 0 个 →
     // 不重复建会话（CreateTerminal 仍 2 次，无历史 tab 复原）
-    await page.locator('[data-activity="terminal"]').click()
+    await activityAction(page, 'terminal').click()
     await expect(panel).toBeHidden()
-    await page.locator('[data-activity="terminal"]').click()
+    await activityAction(page, 'terminal').click()
     await expect(panel.locator('.shell-badge')).toBeVisible()
     await expect(panel.locator('.tab-strip')).toHaveCount(0)
     expect((await getWailsCalls(page, 'CreateTerminal')).length).toBe(2)

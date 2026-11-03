@@ -10,14 +10,15 @@
  * 3. 事件过滤（EP 多选下拉）→ 重查携带 Events 参数并回第 1 页；
  * 4. 翻页 → Offset/Limit 透传。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, activityAction } from './fixtures'
 
-/** 打开设置弹窗（活动栏设置图标，data-activity=settings 稳定定位）并切到网络访问 tab */
+/** 打开设置弹窗（活动栏 data-action="settings" 语义定位）并切到网络访问 tab */
 async function openNetworkTab(page) {
-  await page.locator('[data-activity="settings"]').click()
+  await activityAction(page, 'settings').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.settings-nav-item').nth(4).click()
+  // 按标签文本定位导航项（禁位置索引：设置分组增删会让 nth 漂移）
+  await dialog.locator('.settings-nav-item', { hasText: '网络访问' }).click()
   return dialog
 }
 

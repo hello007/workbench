@@ -11,7 +11,7 @@
       <div
         class="activity-bar-item"
         :class="{ 'is-active': uiStore.activePanel === item.id }"
-        :data-activity="item.id"
+        :data-panel-id="item.id"
         @click="uiStore.activePanel = item.id"
       >
         <el-icon :size="20">
@@ -24,7 +24,7 @@
     <el-tooltip content="设置" placement="right" :show-after="300">
       <div
         class="activity-bar-item"
-        data-activity="settings"
+        data-action="settings"
         @click="$emit('openSettings')"
       >
         <el-icon :size="20">
@@ -51,7 +51,7 @@
              可见时加载；九/十期数据源刷新时机对齐） -->
         <el-popover trigger="click" placement="right" :width="320" :persistent="false" @show="reloadBanPanel">
           <template #reference>
-            <div class="activity-bar-item activity-bar-devices">
+            <div class="activity-bar-item activity-bar-devices" data-action="devices">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                 <rect x="2" y="4" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6"/>
                 <rect x="9" y="10" width="13" height="10" rx="1.5" stroke="currentColor" stroke-width="1.6" fill="var(--sidebar-bg)"/>
@@ -222,6 +222,7 @@
     <el-tooltip content="终端" placement="right" :show-after="300">
       <div
         class="activity-bar-item"
+        data-action="terminal"
         :class="{ 'is-active': uiStore.terminalVisible }"
         data-activity="terminal"
         @click="$emit('toggleTerminal')"

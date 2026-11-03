@@ -10,7 +10,7 @@
  *    终端字号变更（设置页与终端工具栏共享 store 字段 → 已开终端热更 + ResizeTerminal
  *    通知 PTY）
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, activityAction } from './fixtures'
 
 /** 磁盘基底设置（形状对齐 model.AppSettings，前端消费字段子集） */
 const baseSettings = {
@@ -29,9 +29,9 @@ const baseSettings = {
   diffToolArgs: '{left} {right}'
 }
 
-/** 打开设置弹窗（活动栏设置图标，data-activity=settings 稳定定位） */
+/** 打开设置弹窗（活动栏 data-action="settings" 语义定位） */
 async function openSettings(page) {
-  await page.locator('[data-activity="settings"]').click()
+  await activityAction(page, 'settings').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
   return dialog
@@ -98,7 +98,7 @@ test.describe('设置：保存后热更生效', () => {
     await page.goto('/')
 
     // 终端面板先展开（字号热更的消费端在线，首个 tab 会话建立）
-    await page.locator('[data-activity="terminal"]').click()
+    await activityAction(page, 'terminal').click()
     const terminal = page.locator('.terminal-panel')
     await expect(terminal.locator('.shell-badge')).toBeVisible()
     await expect(terminal.locator('.font-size-value')).toHaveText('14')

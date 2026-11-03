@@ -17,7 +17,7 @@
  *
  * mock 形状对齐 model.PptxBatchResult / PptxBatchItem / PptxSplitProgress（model/pptx.go）。
  */
-import { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, emitWailsEvent } from './fixtures'
+import { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, emitWailsEvent, openPanel } from './fixtures'
 
 const BATCH_DIR = 'D:/e2e-demo/ppt-batch'
 const CURRENT_FILE = 'D:/e2e-demo/ppt-batch/季度汇报.pptx'
@@ -33,10 +33,10 @@ const BATCH_RESULT = {
   ]
 }
 
-/** 打开工具箱并切入 PPT 拆分面板（活动栏第 4 项 nth(3)，移开鼠标防 tooltip 遮挡） */
+/** 打开工具箱并切入 PPT 拆分面板（data-panel-id="toolbox" 语义定位，移开鼠标防 tooltip 遮挡） */
 async function openPptSplitPanel(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(3).click()
+  await openPanel(page, 'toolbox')
   await page.mouse.move(400, 400)
   const toolbox = page.locator('.toolbox-panel')
   await expect(toolbox).toBeVisible()

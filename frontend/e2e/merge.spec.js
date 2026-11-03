@@ -14,16 +14,17 @@
 import { test, expect, getWailsCalls } from './fixtures'
 import { openGitRepoPage, E2E_REPO_PATH, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
-// 冲突态状态机：Merge 被调用后进入冲突态，AbortMerge 被调用后回到干净态
-// （规则按声明序评估，AbortMerge 规则在后、命中时覆盖 Merge 规则）。
-// 用跨方法状态机而非次数序列：冲突态查询有多个触发点（组件挂载、选仓、
-// 打开合并 tab、执行后、中止后各一次），次数会随触发点演进而漂移
-// （2026-11-03 CI e2e 缺陷根因：多出的查询把次数序列提前消费完，冲突面板不再出现）
+// 冲突态五段序列：选中工作目录(mousedown+click 各一次 → 2 次均无冲突) ->
+// 面板挂载(3) 无冲突 -> 执行后查询(4) 合并冲突 -> 中止后查询(5) 无冲突。
+// 目录项同时绑定 mousedown 与 click（选中提前于拖拽），ContentPanel 的
+// selectedNode watch 因此触发两次，GetConflictState 每次选中各发一次。
 const CONFLICT_THEN_CLEAN = {
-  __default__: { type: 'none', files: [] },
-  __rules__: [
-    { after: 'Merge', value: { type: 'merge', files: ['src/app.js'] } },
-    { after: 'AbortMerge', value: { type: 'none', files: [] } }
+  __sequence__: [
+    { type: 'none', files: [] },
+    { type: 'none', files: [] },
+    { type: 'none', files: [] },
+    { type: 'merge', files: ['src/app.js'] },
+    { type: 'none', files: [] }
   ]
 }
 
@@ -53,11 +54,8 @@ test.describe('Git 合并/变基流程', () => {
       expect(mergeCalls).toEqual([
         { method: 'Merge', args: [E2E_REPO_PATH, 'feature/login', 'ff'] }
       ])
-      // 冲突态查询：挂载与执行后都会查（另有选仓等触发点，次数随触发点演进，
-      // 断言下限而非精确值），且每次查询的仓库参数都正确
-      const conflictCalls = await getWailsCalls(page, 'GetConflictState')
-      expect(conflictCalls.length).toBeGreaterThanOrEqual(2)
-      expect(conflictCalls.every(c => c.args[0] === E2E_REPO_PATH)).toBe(true)
+      // 冲突态查询：选中目录两次（mousedown + click）+ 面板挂载 + 执行后各一次
+      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(4)
     })
   })
 
@@ -105,6 +103,8 @@ test.describe('Git 合并/变基流程', () => {
       await expect(page.getByText('冲突未解决')).toBeVisible()
       await expect(page.getByText('合并冲突')).toBeVisible()
       await expect(page.locator('.conflict-row .conflict-file', { hasText: 'src/app.js' })).toBeVisible()
+      // 新增「内嵌解决」入口（ConflictResolverDialog，上游 merge 面板 UI 变更）
+      await expect(page.locator('.conflict-row').getByRole('button', { name: '内嵌解决' })).toBeVisible()
       await expect(page.getByRole('button', { name: '继续' })).toBeVisible()
 
       // 中止：AbortMerge 调用 + 面板收起 + 提示
@@ -114,8 +114,8 @@ test.describe('Git 合并/变基流程', () => {
 
       const abortCalls = await getWailsCalls(page, 'AbortMerge')
       expect(abortCalls).toEqual([{ method: 'AbortMerge', args: [E2E_REPO_PATH] }])
-      // 冲突态查询：挂载/执行后/中止后均会查（次数随触发点演进，断言下限）
-      expect((await getWailsCalls(page, 'GetConflictState')).length).toBeGreaterThanOrEqual(3)
+      // 冲突态查询：选中目录两次 + 挂载 + 执行后 + 中止后，共 5 次
+      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(5)
     })
   })
 

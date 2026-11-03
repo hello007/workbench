@@ -9,7 +9,7 @@
  * model.AssetLibrary / AssetFileEntry / AssetBatchTagResult / AssetTagListItem）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 test.describe('素材管理批量打标签', () => {
   // 素材面板基础数据：单库 + 两个 ok 状态 pptx 文件；ListAssetFiles 用 __sequence__
@@ -58,8 +58,8 @@ test.describe('素材管理批量打标签', () => {
   test('批量打标签主链路：勾选 2 项→弹窗选标签→提交成功→条目渲染标签且选中保留', async ({ page }) => {
     await page.goto('/')
 
-    // 活动栏第 5 项（nth(4)）切换到素材管理面板
-    await page.locator('.activity-bar-item').nth(4).click()
+    // data-panel-id="assets" 语义定位素材管理面板
+    await openPanel(page, 'assets')
     // 切面板后鼠标移离活动栏：el-tooltip（show-after 300ms）因点击后鼠标驻留会
     // 弹出「素材管理」提示并 teleport 到 body——其位置恰覆盖画廊首卡复选框，
     // 而 Playwright 在移动鼠标前做遮挡检查、tooltip 要等鼠标移开才隐藏，双方互

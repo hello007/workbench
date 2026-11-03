@@ -115,6 +115,17 @@ describe('ActivityBar', () => {
     expect(items.length).toBe(10)
   })
 
+  it('每个入口带稳定语义属性（data-panel-id / data-action），供 E2E 语义定位', () => {
+    const wrapper = createWrapper()
+    // 面板入口按渲染序输出 data-panel-id（E2E 禁类名 nth 索引，见 e2e-testing.md）
+    expect(wrapper.findAll('[data-panel-id]').map((w) => w.attributes('data-panel-id'))).toEqual([
+      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare'
+    ])
+    // 设置/终端为直连动作入口（不切换面板），走 data-action
+    expect(wrapper.find('[data-action="settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-action="terminal"]').exists()).toBe(true)
+  })
+
   it('默认选中工作目录', () => {
     const wrapper = createWrapper('directory')
     const items = wrapper.findAll('.activity-bar-item')
@@ -289,7 +300,7 @@ describe('ActivityBar - 多设备连接指示', () => {
   it('连接数 <=1 时指示不显示（桌面模式无事件恒此形态，空安全）', () => {
     const wrapper = createWrapper()
     expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
-    // 图标数仍为 10（指示项不占位）：8 个面板（含分支对比）+ 设置 + 终端
+    // 图标数仍为 10（8 面板 + 设置 + 终端；指示项不占位）
     expect(wrapper.findAll('.activity-bar-item').length).toBe(10)
     wrapper.unmount()
   })

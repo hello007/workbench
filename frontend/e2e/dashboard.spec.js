@@ -15,7 +15,7 @@
  * mock 前置：GetRepoFilterList 基础表缺省 []（DashboardView.vue:218 消费链
  * Proxy null 会 TypeError），本 spec override 具体清单。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 // 形状对齐 model.Directory（与 e2e/git-fixtures.js GIT_REPO_DIRECTORY 同构）
 const dashboardDirs = [
@@ -73,8 +73,8 @@ test.describe('全局状态看板：渲染与钉选互锁', () => {
 
   test('状态渲染 + 手动刷新 + 钉选 Add/IsPinned 翻转/Remove + 扫描参数断言', async ({ page }) => {
     await page.goto('/')
-    // 状态看板（活动栏第 6 项 nth(5)）
-    await page.locator('.activity-bar-item').nth(5).click()
+    // 状态看板（活动栏 data-panel-id="dashboard" 语义定位）
+    await openPanel(page, 'dashboard')
     const view = page.locator('.dashboard-view')
     await expect(view).toBeVisible()
 

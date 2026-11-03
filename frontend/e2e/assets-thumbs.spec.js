@@ -13,7 +13,7 @@
  * 缺省空串 = 未生成「无预览」占位、RetryAssetThumb null 安全 no-op）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls, emitWailsEvent } from './fixtures'
+import { test, expect, getWailsCalls, emitWailsEvent, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-21 10:00:00', updatedAt: '2026-10-21 10:00:00' }
 const makeFile = (id, dir, title) => ({
@@ -45,7 +45,7 @@ test.describe('素材缩略图懒加载与失败自动补', () => {
 
   test('画廊逐卡懒加载 tier=0，失败卡经 done 事件自动重试恰一轮', async ({ page }) => {
     await page.goto('/')
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
     const panel = page.locator('.assets-panel')

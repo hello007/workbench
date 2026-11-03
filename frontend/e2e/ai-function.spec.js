@@ -13,14 +13,14 @@
  * 事件 payload 形状对齐 service/ai_function.go emit 数据与 model.AiTaskRunResult
  * （taskId/text/output/exitCode/error/canceled 等字段）。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 /** AI 功能面板公共前置：打开首页并切到 AI 功能面板，等待功能卡渲染 */
 async function openAiPanelPage(page) {
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto('/')
-  // 活动画板第 2 项为 AI 功能入口（panels 顺序：工作目录/AI 功能/仓库统计/工具箱）
-  await page.locator('.activity-bar-item').nth(1).click()
+  // 活动画板第 2 项为 AI 功能入口（data-panel-id 语义定位，禁硬编码 nth）
+  await openPanel(page, 'ai')
   await expect(page.locator('.ai-function-panel')).toBeVisible()
   // 功能卡渲染（来自 wails-mock-defaults.js 的 GetAiFunctions 默认值）
   await expect(page.locator('.ai-card', { hasText: '代码评审' })).toBeVisible()

@@ -13,7 +13,7 @@
  * model.AssetSlideEntry / AssetSlidePage：ownTags/note/rating 三标注字段齐全）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-21 10:00:00', updatedAt: '2026-10-21 10:00:00' }
 
@@ -66,7 +66,7 @@ test.describe('幻灯片标注保存双代次守卫', () => {
 
   test('保存标注后刷新 miss：表单不回退旧值、以提交值回填引用、清单刷新至新代次', async ({ page }) => {
     await page.goto('/')
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
     const panel = page.locator('.assets-panel')

@@ -15,7 +15,7 @@
  * __deferred__ 挂起解析器 + emitWailsEvent（进度事件先于 promise resolve，对齐
  * 真实后端合并期间推送事件的时序）。
  */
-import { test, expect, getWailsCalls, releaseDeferred, emitWailsEvent } from './fixtures'
+import { test, expect, getWailsCalls, releaseDeferred, emitWailsEvent, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-19 10:00:00', updatedAt: '2026-10-19 10:00:00' }
 
@@ -62,9 +62,9 @@ const baseOverrides = {
 /** 打开素材管理面板并切到幻灯片视图（卡片含「加入购物栏」悬浮按钮的唯一视图） */
 async function openSlideView(page) {
   await page.goto('/')
-  // 活动栏第 5 项（nth(4)）切换到素材管理面板；鼠标移离防 tooltip 遮挡画廊
+  // data-panel-id="assets" 语义定位素材管理面板；鼠标移离防 tooltip 遮挡画廊
   //（时序坑先例见 assets-batch-tag.spec）
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   const panel = page.locator('.assets-panel')
@@ -190,7 +190,7 @@ test.describe('素材购物栏：合并导出主链（SkippedItems 报告 + 保�
 
   test('导出进度事件驱动中间态，完成确认框含跳过报告，保留不清空购物栏', async ({ page }) => {
     await page.goto('/')
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
     const panel = page.locator('.assets-panel')

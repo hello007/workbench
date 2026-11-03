@@ -14,7 +14,7 @@
  * 手动放行），对齐 logging-and-errors.md 批量重试节的 pending resolver 构造。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount } from './fixtures'
+import { test, expect, getWailsCalls, releaseDeferred, pendingDeferredCount, activityPanel } from './fixtures'
 
 const timedOutGroup = (name) => ({
   repoName: name,
@@ -28,7 +28,7 @@ async function searchKeyword(page, keyword) {
   await page.goto('/')
   // 全局 keydown 监听在 Home onMounted 注册：goto 返回（load 事件）早于应用挂载，
   // 立即按键会被丢弃——等待活动栏渲染确认挂载后，按键+断言整体 toPass 重试吸收残余竞态
-  await expect(page.locator('.activity-bar').locator('.activity-bar-item').first()).toBeVisible()
+  await expect(activityPanel(page, 'directory')).toBeVisible()
   const dialog = page.locator('.command-palette-dialog')
   await expect(async () => {
     await page.keyboard.press('Control+p')

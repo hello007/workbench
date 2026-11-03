@@ -44,6 +44,25 @@
 - 用例经 `e2e/fixtures.js` 的 `getWailsCalls(page, method?)` 读取，断言「用户操作触发了正确的 bound method 与参数」
 - 断言优先级：先断言用户可见 UI 结果（Element Plus 提示 / 列表 / 对话框状态），调用链断言（`getWailsCalls`）作补充，不断言组件内部实现细节
 
+### 5.1 活动栏语义选择器（2026-11-03）
+
+`ActivityBar.vue` 每个入口输出稳定数据属性，E2E 一律语义定位，**禁按类名 `.activity-bar-item` 硬编码 nth 索引**（含负数 nth）：
+
+| 入口 | 属性 |
+|---|---|
+| 面板项（panels 循环） | `data-panel-id="<item.id>"`（directory / ai / ai-chat / toolbox / assets / dashboard / stats / branchcompare） |
+| 设置（直连弹窗） | `data-action="settings"` |
+| 终端（展开/收起） | `data-action="terminal"` |
+| 多设备连接指示（条件渲染） | `data-action="devices"` |
+
+用例经 `e2e/fixtures.js` 导出的辅助函数定位：
+
+- `activityPanel(page, id)` → 面板入口 locator（也用于 active 态断言）
+- `activityAction(page, action)` → 设置/终端/设备指示入口 locator
+- `openPanel(page, id)` → 点击面板入口并返回 locator
+
+**动机**：面板增删会让索引整体漂移（先例：新增「分支对比」panel 后 settings/terminal 由 7/8 顺移到 8/9，12 例用例点错入口）。语义定位后新增面板只需按 id 定位，既有用例零改动；组件侧须保持 `data-*` 属性稳定，重命名面板 id 视同破坏性变更。
+
 ## 6. per-test 覆盖（wailsOverrides）
 
 - 默认所有用例从 `./fixtures` import `{ test, expect }`（非 `@playwright/test`），自动注入 mock

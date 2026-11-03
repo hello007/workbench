@@ -9,7 +9,7 @@
  * mock 数据源为 wails-mock-defaults.js E2E 合并表 + 本文件 overrides（形状对齐
  * model.AssetLibrary / AssetFileEntry / AssetSplitBatchResult）。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 // 素材面板基础数据：单库 + 两个 ok 状态 pptx 文件（画廊可渲染、拆分入口可用）；
 // AssetThumbsAvailable=false 走降级路径（E2E 环境无 PowerPoint，缩略图面不参与）。
@@ -44,8 +44,8 @@ test.describe('素材管理 PPT 拆分', () => {
   test('库级拆分主链路：入口→落点确认弹窗→mock 拆分完成→汇总提示', async ({ page }) => {
     await page.goto('/')
 
-    // 活动栏第 5 项（nth(4)）切换到素材管理面板
-    await page.locator('.activity-bar-item').nth(4).click()
+    // data-panel-id="assets" 语义定位素材管理面板
+    await openPanel(page, 'assets')
     const panel = page.locator('.assets-panel')
     await expect(panel).toBeVisible()
     await expect(panel.locator('.asset-card')).toHaveCount(2)
@@ -110,7 +110,7 @@ test.describe('素材管理 PPT 拆分·就地替换', () => {
   test('就地替换落点：不可逆强确认未勾选时提交禁用，勾选后以 target=replace 调用', async ({ page }) => {
     await page.goto('/')
 
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     const panel = page.locator('.assets-panel')
     await expect(panel).toBeVisible()
 
@@ -152,7 +152,7 @@ test.describe('素材管理 PPT 拆分·就地替换', () => {
   test('勾选强确认后取消不发起拆分；重开弹窗回落就地替换默认且未勾选', async ({ page }) => {
     await page.goto('/')
 
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     const panel = page.locator('.assets-panel')
     await expect(panel).toBeVisible()
 

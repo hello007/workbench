@@ -13,7 +13,7 @@
  * AssetBatchRatingResult，item 含后端拼装 label 字段）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 // 素材面板基础数据：单库 + 三个 ok 状态 pptx 文件；ListAssetFiles 用 __sequence__
 // 描述符两帧驱动——首帧（挂载加载）无评分、第二帧（批量 completed 刷新链重拉）
@@ -64,9 +64,9 @@ test.describe('素材管理批量评分', () => {
   test('批量评分主链路：勾选 3 项→设 4 星→提交→混合明细失败行染 + completed 刷新 + 选中保留', async ({ page }) => {
     await page.goto('/')
 
-    // 活动栏第 5 项（nth(4)）切换到素材管理面板；切面板后鼠标移离防 tooltip
+    // data-panel-id="assets" 语义定位素材管理面板；切面板后鼠标移离防 tooltip
     // 遮挡画廊首卡（时序坑先例见 assets-batch-tag.spec.js 同款注释）
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
     const panel = page.locator('.assets-panel')

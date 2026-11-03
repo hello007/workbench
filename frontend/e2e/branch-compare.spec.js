@@ -11,7 +11,7 @@
  * matched-patch-id / a-only / b-only 四种行形态 + 六种文件状态 + 一段最小 diff），
  * 仓库上下文经 git-fixtures.js 的 GIT_FLOW_OVERRIDES 注入。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 import { E2E_REPO_PATH, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
 // GetGitInfo 基础表默认 {}（isRepo 缺省 = 非 git 仓库空态），面板用例覆盖为 git 仓库
@@ -26,8 +26,8 @@ async function openBranchComparePage(page) {
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto('/')
   await expect(page).toHaveURL(/#\/$/)
-  // 活动栏分支对比图标（data-activity=branchcompare 稳定定位）
-  await page.locator('[data-activity="branchcompare"]').click()
+  // 活动栏「分支对比」入口（data-panel-id 语义定位，禁硬编码 nth）
+  await openPanel(page, 'branchcompare')
   await expect(page.locator('.bc-view')).toBeVisible()
 }
 

@@ -11,7 +11,7 @@
  * AssetPrefixReplaceResult）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-17 10:00:00', updatedAt: '2026-10-17 10:00:00' }
 const makeFile = (id, title, status = 'ok') => ({
@@ -36,8 +36,8 @@ const baseOverrides = {
 
 const openLostDetail = async (page) => {
   await page.goto('/')
-  // 活动栏第 5 项（nth(4)）切换到素材管理面板；鼠标移离防 tooltip 遮挡画廊
-  await page.locator('.activity-bar-item').nth(4).click()
+  // data-panel-id="assets" 语义定位素材管理面板；鼠标移离防 tooltip 遮挡画廊
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   await expect(page.locator('.assets-panel')).toBeVisible()
@@ -123,7 +123,7 @@ test.describe('素材文件丢失与重链：前缀替换与清理丢失', () =>
 
   test('前缀替换：预览命中数 + 二次确认 + 执行调用参数 + 结果 toast', async ({ page }) => {
     await page.goto('/')
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.assets-panel')).toBeVisible()
 
@@ -160,7 +160,7 @@ test.describe('素材文件丢失与重链：前缀替换与清理丢失', () =>
 
   test('清理丢失：确认弹窗列出记录数 → Clear 调用 + 结果 toast', async ({ page }) => {
     await page.goto('/')
-    await page.locator('.activity-bar-item').nth(4).click()
+    await openPanel(page, 'assets')
     await page.mouse.move(400, 400)
     await expect(page.locator('.assets-panel')).toBeVisible()
 

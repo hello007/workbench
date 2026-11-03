@@ -13,7 +13,7 @@
  *    → 封禁弹窗（共享 BanTokenDialog：永久档默认值 / 联动踢出默认勾选 / 警示文案）
  *    → BanWebToken 调用断言 → 解封单次确认链 → UnbanWebToken 调用断言。
  */
-import { test, expect, emitWailsEvent } from './fixtures'
+import { test, expect, emitWailsEvent, activityAction } from './fixtures'
 
 /** 令牌记录形状（对齐 model.WebTokenRecord，unix 秒；0 = 永不过期/未使用） */
 const tokenRecord = (over = {}) => ({
@@ -39,12 +39,13 @@ const bannedTokenItem = (recOver = {}, banOver = {}) => ({
   ...banOver
 })
 
-/** 打开设置弹窗并切到网络访问页（第 5 个导航项） */
+/** 打开设置弹窗（活动栏 data-action="settings" 语义定位）并切到网络访问页 */
 async function openNetworkTab(page) {
-  await page.locator('[data-activity="settings"]').click()
+  await activityAction(page, 'settings').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.settings-nav-item').nth(4).click()
+  // 按标签文本定位导航项（禁位置索引：设置分组增删会让 nth 漂移）
+  await dialog.locator('.settings-nav-item', { hasText: '网络访问' }).click()
   return dialog
 }
 
@@ -105,7 +106,7 @@ test.describe('多设备语义明示（PR3）', () => {
     await expect(page.locator('.activity-bar-devices')).toHaveCount(0)
 
     // 终端面板先展开（多端写入提示的消费端在线）
-    await page.locator('[data-activity="terminal"]').click()
+    await activityAction(page, 'terminal').click()
     await expect(page.locator('.terminal-panel')).toBeVisible()
     await expect(page.locator('.terminal-multi-device-hint')).toHaveCount(0)
 

@@ -14,7 +14,7 @@
  * done 事件 delayMs 延后派发，为「流式中」断言留出确定性观察窗口
  * （模式同 ai-function.spec.js 取消链路的 done 延迟派发）。
  */
-import { test, expect, getWailsCalls, emitWailsEvent } from './fixtures'
+import { test, expect, getWailsCalls, emitWailsEvent, openPanel } from './fixtures'
 
 const PROMPT = '帮我梳理这个项目的目录结构'
 const REPLY = '这是 AI 的回复：**加粗要点**。\n'
@@ -81,12 +81,12 @@ const RUN_CHAT_WITH_STREAM_WINDOW = {
   ]
 }
 
-/** AI 对话面板公共前置：打开首页并切到 AI 对话面板（活动栏第 3 项） */
+/** AI 对话面板公共前置：打开首页并切到 AI 对话面板（data-panel-id="ai-chat" 语义定位） */
 async function openAiChatPage(page) {
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto('/')
-  // 活动画板第 3 项为 AI 对话入口（panels 顺序：工作目录/AI 功能/AI 对话/工具箱/状态看板/仓库统计）
-  await page.locator('.activity-bar-item').nth(2).click()
+  // 活动画板第 3 项为 AI 对话入口（data-panel-id 语义定位，禁硬编码 nth）
+  await openPanel(page, 'ai-chat')
   await expect(page.locator('.ai-chat-panel')).toBeVisible()
 }
 

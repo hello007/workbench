@@ -9,7 +9,7 @@
  * model.AssetLibrary / AssetLibraryStats / AssetFileEntry / AssetExportResult）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-16 10:00:00', updatedAt: '2026-10-16 10:00:00' }
 const makeFile = (id, title) => ({
@@ -32,11 +32,11 @@ const baseOverrides = {
   AssetThumbsAvailable: false
 }
 
-const openPanel = async (page) => {
+const gotoAssetsPanel = async (page) => {
   await page.goto('/')
-  // 活动栏第 5 项（nth(4)）切换到素材管理面板；鼠标移离防 tooltip 遮挡画廊
+  // 活动栏 data-panel-id="assets" 语义定位素材管理面板；鼠标移离防 tooltip 遮挡画廊
   //（时序坑见 assets-batch-tag.spec 同款注释）
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   await expect(page.locator('.assets-panel')).toBeVisible()
@@ -52,7 +52,7 @@ test.describe('素材管理元数据导出：全库导出主链路', () => {
   })
 
   test('范围预览=库统计合计，提交成功 toast + 关闭 + 调用参数', async ({ page }) => {
-    await openPanel(page)
+    await gotoAssetsPanel(page)
 
     // 工具行「导出」入口（浏览语境无选中无检索：范围 = 全库，预览 = stats 合计 2+4）
     await page.locator('.assets-panel').getByRole('button', { name: '导出' }).click()
@@ -101,7 +101,7 @@ test.describe('素材管理元数据导出：目标已存在确认链路', () =>
   })
 
   test('确认框覆盖写入重调 overwrite=true，恒拒下再次弹确认框且导出弹窗保持', async ({ page }) => {
-    await openPanel(page)
+    await gotoAssetsPanel(page)
 
     await page.locator('.assets-panel').getByRole('button', { name: '导出' }).click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '导出元数据' })

@@ -10,7 +10,7 @@
  * diff 数据来自 E2E 合并表 GetLocalChanges 默认值（src/app.js 等）；
  * 已配置态经 test.use({ wailsOverrides }) 覆盖 GetSettings 注入 diffToolPath。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, activityAction } from './fixtures'
 import { openGitRepoPage, visibleDialog, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
 /** 已配置外部 diff 工具的 GetSettings 覆盖（形状对齐 model.AppSettings 的 diffTool 字段） */
@@ -27,8 +27,8 @@ test.describe('外部 diff 工具集成', () => {
       await page.goto('/')
       await expect(page).toHaveURL(/#\/$/)
 
-      // ActivityBar 倒数第二个图标为设置（最后一个为终端切换）
-      await page.locator('[data-activity="settings"]').click()
+      // ActivityBar 设置入口（data-action 语义定位，禁硬编码倒数索引）
+      await activityAction(page, 'settings').click()
       const settingsDialog = visibleDialog(page, '设置')
       await expect(settingsDialog).toBeVisible()
 
@@ -42,7 +42,7 @@ test.describe('外部 diff 工具集成', () => {
     test('修改路径后 blur：经合并写 SaveSettings 持久化三个 diffTool 字段', async ({ page }) => {
       await page.setViewportSize({ width: 1920, height: 1080 })
       await page.goto('/')
-      await page.locator('[data-activity="settings"]').click()
+      await activityAction(page, 'settings').click()
 
       const pathInput = visibleDialog(page, '设置').locator('input[placeholder*="WinMergeU.exe"]')
       await pathInput.fill('C:\\tools\\WinMergeU.exe')

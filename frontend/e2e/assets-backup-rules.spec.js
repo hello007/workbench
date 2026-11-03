@@ -9,7 +9,7 @@
  * model.AssetLibrary / AssetBackupEntry / AssetScanResult）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const libFixture = {
   id: 'lib-e2e',
@@ -51,7 +51,7 @@ const baseOverrides = {
 // 打开素材管理面板并等待就绪
 const openAssetsPanel = async (page) => {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.assets-panel')).toBeVisible()
   await expect(page.locator('.assets-stats-line')).toBeVisible()

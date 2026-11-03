@@ -19,7 +19,7 @@
  * override {__error__}）。
  * 本 spec 位于既有 e2e/ 通道目录，vitest.config.js test.exclude 的 'e2e/**' 已覆盖。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
 const libFixture = { id: 'lib-e2e', name: 'E2E 素材库', rootPath: 'D:/e2e-assets', createdAt: '2026-10-21 10:00:00', updatedAt: '2026-10-21 10:00:00' }
 
@@ -60,7 +60,7 @@ async function dragTagNode(page, dragKey, dropKey, position = 'inner') {
 /** 打开素材面板并进入标签管理弹窗，返回弹窗定位器（树默认全展开） */
 async function openTagManager(page) {
   await page.goto('/')
-  await page.locator('.activity-bar-item').nth(4).click()
+  await openPanel(page, 'assets')
   await page.mouse.move(400, 400)
   await expect(page.locator('.el-popper').filter({ hasText: '素材管理' })).toBeHidden()
   const panel = page.locator('.assets-panel')
