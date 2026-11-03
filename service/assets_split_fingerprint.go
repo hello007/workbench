@@ -24,11 +24,16 @@ import (
 //   - 指纹只由成功拆分写入，禁止自动回填（现有目录内容可能已被用户替换）。
 
 // splitArtifactFingerprint 单页产物指纹（JSON 列 artifact_fingerprints 的元素）。
+//
+// Dir 仅用于 retained_fingerprints（v11 目录锚）：绝对目录，表示该条目描述的文件
+// 所在目录。artifact_fingerprints 恒为空（目录由 record.output_dir 提供），
+// JSON omitempty 保证旧结构不变。
 type splitArtifactFingerprint struct {
 	Page   int    `json:"page"`
-	Name   string `json:"name"`   // 拆分时产物文件名（basename）；重链/目录迁移不重写
-	Size   int64  `json:"size"`   // 字节数，快速预筛
-	SHA256 string `json:"sha256"` // 全文小写 hex
+	Name   string `json:"name"`          // 拆分时产物文件名（basename）；重链/目录迁移不重写
+	Size   int64  `json:"size"`          // 字节数，快速预筛
+	SHA256 string `json:"sha256"`        // 全文小写 hex
+	Dir    string `json:"dir,omitempty"` // 仅 retained：条目所在绝对目录；空 = 旧数据，回落 output_dir
 }
 
 // encodeSplitFingerprints 指纹清单序列化为 JSON 列值（空清单写空串 = 无指纹）。
@@ -118,6 +123,20 @@ func splitFingerprintNameValid(name string) bool {
 	return filepath.Base(name) == name
 }
 
+// splitArtifactDirWithinLibrary retained 目录锚合法性：须为绝对路径且位于素材库
+// 根目录内（库根自身允许）。空串 / 相对路径 / 库外路径一律 false——目录锚来自
+// 记录 JSON，手工改库可注入任意路径，删除前必须遏制越界。
+func splitArtifactDirWithinLibrary(root, dir string) bool {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(dir) == "" || !filepath.IsAbs(dir) {
+		return false
+	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
 // fingerprintMatch 候选文件是否与指纹一致（size + 全文 SHA-256）：要求常规文件
 // （符号链接/目录/设备一律不命中）。name 由调用方定位时保证，不在此重复比较。
 func fingerprintMatch(path string, fp splitArtifactFingerprint) bool {
@@ -159,13 +178,41 @@ func fingerprintForName(record *assetSplitRecord, name string) (splitArtifactFin
 	return lookupFingerprintByName(record.fingerprints, name)
 }
 
-// retainedFingerprintForName 按文件名查 retained（v11 清理失败保留凭证），口径与
-// fingerprintForName 相同（sameNameFold，要求唯一命中）。
-func retainedFingerprintForName(record *assetSplitRecord, name string) (splitArtifactFingerprint, bool) {
+// retainedArtifactDir retained 条目的锚目录：显式 Dir 优先；空值来自 v11 早期
+// 数据（条目恒锚定当时的 output_dir），回落 record.outputDir 保持兼容。
+func retainedArtifactDir(record *assetSplitRecord, fp splitArtifactFingerprint) string {
+	if strings.TrimSpace(fp.Dir) != "" {
+		return fp.Dir
+	}
+	if record == nil {
+		return ""
+	}
+	return record.outputDir
+}
+
+// retainedFingerprintForName 按目录 + 文件名查 retained（v11 清理失败保留凭证）：
+// 目录经 samePathFold 折叠相等、名称唯一命中才返回。目录不匹配的条目描述的是
+// 其他落点的同形文件，不得作为当前目录的归属依据。
+func retainedFingerprintForName(record *assetSplitRecord, dir, name string) (splitArtifactFingerprint, bool) {
 	if record == nil {
 		return splitArtifactFingerprint{}, false
 	}
-	return lookupFingerprintByName(record.retained, name)
+	var hit splitArtifactFingerprint
+	hits := 0
+	for _, fp := range record.retained {
+		if !samePathFold(retainedArtifactDir(record, fp), dir) {
+			continue
+		}
+		if !sameNameFold(fp.Name, name) {
+			continue
+		}
+		hit = fp
+		hits++
+	}
+	if hits != 1 {
+		return splitArtifactFingerprint{}, false
+	}
+	return hit, true
 }
 
 // lookupFingerprintByName 按文件名在指纹清单中定位唯一命中（sameNameFold：仅
@@ -188,23 +235,25 @@ func lookupFingerprintByName(fps []splitArtifactFingerprint, name string) (split
 }
 
 // ownershipFingerprintForName 归属凭证查询单点（v11）：先查本次拆分页级指纹
-// （artifact_fingerprints），未获得唯一命中再查清理失败保留凭证
-// （retained_fingerprints）。每个清单各自要求按名唯一命中，某清单多命中视为该
-// 清单不可判定并继续查下一清单；两清单均无唯一命中才返回 false。备份让位校验与
-// 落点归属放宽（replaceOutDirOwnedByRecord）必须共用本单点，禁各调用点自行拼接
-// 查询顺序。清理侧不消费本单点：cleanupStaleReplaceArtifacts 只查指纹，
-// retained 由 cleanupRetainedSplitArtifacts 独立处理（R1）。
-func ownershipFingerprintForName(record *assetSplitRecord, name string) (splitArtifactFingerprint, bool) {
+// （artifact_fingerprints，目录由 record.output_dir 提供），未获得唯一命中再查
+// 清理失败保留凭证（retained_fingerprints，须与 dir 折叠相等）。每个清单各自要求
+// 按名唯一命中，某清单多命中视为该清单不可判定并继续查下一清单；两清单均无唯一
+// 命中才返回 false。备份让位校验与落点归属放宽（replaceOutDirOwnedByRecord）必须
+// 共用本单点，禁各调用点自行拼接查询顺序。清理侧不消费本单点：
+// cleanupStaleReplaceArtifacts 只查指纹，retained 由 cleanupRetainedSplitArtifacts
+// 独立处理（R1）。
+func ownershipFingerprintForName(record *assetSplitRecord, dir, name string) (splitArtifactFingerprint, bool) {
 	if fp, ok := fingerprintForName(record, name); ok {
 		return fp, true
 	}
-	return retainedFingerprintForName(record, name)
+	return retainedFingerprintForName(record, dir, name)
 }
 
-// mergeSplitFingerprintsByName 按文件名去重合并归属凭证清单（sameNameFold：仅
-// Windows 折叠大小写；禁裸 EqualFold）。base 在前、extra 在后，同名保留 base 的
-// 条目。用于 replace 链路「cleanupStaleReplaceArtifacts 失败条目」与「retained
-// 消费失败条目」合并写入 retained_fingerprints，避免同一文件重复登记。
+// mergeSplitFingerprintsByName 按（目录, 文件名）去重合并归属凭证清单
+// （samePathFold + sameNameFold：目录仅 Windows 折叠大小写，名称仅 Windows 折叠）。
+// base 在前、extra 在后，同目录同名保留 base 的条目。用于 replace 链路
+// 「cleanupStaleReplaceArtifacts 失败条目」与「retained 消费失败条目」合并写入
+// retained_fingerprints：同名异目录条目描述不同落点的物理文件，必须各自保留。
 func mergeSplitFingerprintsByName(base, extra []splitArtifactFingerprint) []splitArtifactFingerprint {
 	if len(extra) == 0 {
 		if len(base) == 0 {
@@ -217,7 +266,7 @@ func mergeSplitFingerprintsByName(base, extra []splitArtifactFingerprint) []spli
 	for _, fp := range extra {
 		dup := false
 		for _, existing := range out {
-			if sameNameFold(existing.Name, fp.Name) {
+			if samePathFold(existing.Dir, fp.Dir) && sameNameFold(existing.Name, fp.Name) {
 				dup = true
 				break
 			}
@@ -229,12 +278,12 @@ func mergeSplitFingerprintsByName(base, extra []splitArtifactFingerprint) []spli
 	return out
 }
 
-// recordWithoutRetainedNames 返回剔除「本次新产物同名」retained 条目的记录副本
-// （sameNameFold 视为同名）。用于 replace 链路消费 retained 前的过滤：同名条目此刻
-// 描述的是刚生成的新页，若内容恰好全等（拆分字节确定性）直接消费会误删新页；且该
-// 名字已是本次产物，旧凭证不应再携带。record 为 nil 或无需剔除时原样返回。
-func recordWithoutRetainedNames(record *assetSplitRecord, newFiles []string) *assetSplitRecord {
-	if record == nil || len(record.retained) == 0 || len(newFiles) == 0 {
+// recordWithoutRetainedNames 返回剔除「本次新产物同目录同名」retained 条目的记录
+// 副本（samePathFold + sameNameFold）。newDir 为本次落点目录：仅同目录同名条目
+// 才是刚生成的新页（拆分字节确定性下内容可能全等），异目录同名条目描述的是其他
+// 落点的真实残留，必须保留。record 为 nil 或无需剔除时原样返回。
+func recordWithoutRetainedNames(record *assetSplitRecord, newFiles []string, newDir string) *assetSplitRecord {
+	if record == nil || len(record.retained) == 0 || len(newFiles) == 0 || newDir == "" {
 		return record
 	}
 	newNames := make(map[string]struct{}, len(newFiles))
@@ -243,8 +292,10 @@ func recordWithoutRetainedNames(record *assetSplitRecord, newFiles []string) *as
 	}
 	kept := make([]splitArtifactFingerprint, 0, len(record.retained))
 	for _, fp := range record.retained {
-		if _, isNew := foldNameInSet(newNames, fp.Name); isNew {
-			continue
+		if samePathFold(retainedArtifactDir(record, fp), newDir) {
+			if _, isNew := foldNameInSet(newNames, fp.Name); isNew {
+				continue
+			}
 		}
 		kept = append(kept, fp)
 	}

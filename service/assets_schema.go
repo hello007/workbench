@@ -290,20 +290,24 @@ ALTER TABLE split_records ADD COLUMN artifact_fingerprints TEXT NOT NULL DEFAULT
 // 2026-11-02，任务 11-02-replace-fingerprint-followup）。
 //
 // 设计要点：
-//   - retained_fingerprints = JSON 数组，元素结构与 artifact_fingerprints 完全一致
-//     （{"page","name","size","sha256"}）。语义 = **清理失败未能删除、但仍属本记录
+//   - retained_fingerprints = JSON 数组，元素结构在 artifact_fingerprints 基础上
+//     增加可选绝对目录锚 dir（{"page","name","size","sha256","dir"}）。dir 为空
+//     = 早期数据，按记录 output_dir 解释。语义 = **清理失败未能删除、但仍属本记录
 //     历史产物的凭证**：replace 同目录旧页收尾删除失败时写入，供后续重拆的备份
 //     让位与旧页清理作为归属依据（否则残留文件脱离指纹 allow-list，后续增页重拆会
 //     被永久当作「用户同名文件」拒绝）。
 //   - 与 artifact_fingerprints 分离：指纹列契约恒为「条目数 = page_count」，把清理
 //     失败页混入会把损坏判定与保留凭证混为一谈（fingerprintsUsable 语义被破坏）。
 //   - 归属查询：备份让位与落点归属放宽（replaceOutDirOwnedByRecord）走
-//     ownershipFingerprintForName（先 artifact_fingerprints 再 retained_fingerprints）；
-//     清理侧 retained 由 cleanupRetainedSplitArtifacts 独立单点消费（任意 target 同
-//     output_dir，2026-11-03），cleanupStaleReplaceArtifacts 只认本次指纹。
+//     ownershipFingerprintForName（先 artifact_fingerprints 再 retained_fingerprints，
+//     retained 须目录锚与查询目录折叠一致）；清理侧 retained 由
+//     cleanupRetainedSplitArtifacts 独立单点消费（按条目自身目录锚，任意 target /
+//     任意落点，2026-11-03），cleanupStaleReplaceArtifacts 只认本次指纹。
 //   - 仅由 cleanupStaleReplaceArtifacts 删除失败产出，**禁止自动回填、禁止从目录
 //     内容反推**；下次重拆成功消费后不再携带该条目（自愈）。
-//   - 存量记录默认空串（v11 前无该列），不清空也不回填。
+//   - 存量记录默认空串（v11 前无该列），不清空也不回填；目录移动/重命名时条目
+//     目录锚随 output_dir 在同一事务内迁移（rewriteSplitRecordKeyTx /
+//     migrateRetainedAnchorDirsTx）。
 //   - 实际执行走 assets_db.go 的 migrateSchemaV11（列存在性预判 + 单事务），本
 //     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
 const assetsSchemaV11SQL = `

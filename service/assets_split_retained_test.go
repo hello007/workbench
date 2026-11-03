@@ -74,22 +74,27 @@ func TestSplitRetained_RoundTrip(t *testing.T) {
 }
 
 // TestOwnershipFingerprintForName 归属查询单点：先查本次指纹、未命中再查 retained；
-// 两清单均要求按名唯一命中，多命中不可判定（不猜）。
+// 两清单均要求按名唯一命中，多命中不可判定（不猜）；retained 还须目录锚一致。
 func TestOwnershipFingerprintForName(t *testing.T) {
+	const libDir = "/lib"
 	record := &assetSplitRecord{
+		outputDir:    libDir,
 		fingerprints: []splitArtifactFingerprint{{Page: 1, Name: "a.pptx", Size: 1, SHA256: "fp-a"}},
-		retained:     []splitArtifactFingerprint{{Page: 3, Name: "c.pptx", Size: 3, SHA256: "retained-c"}},
+		retained:     []splitArtifactFingerprint{{Page: 3, Name: "c.pptx", Size: 3, SHA256: "retained-c", Dir: libDir}},
 	}
-	if fp, ok := ownershipFingerprintForName(record, "a.pptx"); !ok || fp.SHA256 != "fp-a" {
+	if fp, ok := ownershipFingerprintForName(record, libDir, "a.pptx"); !ok || fp.SHA256 != "fp-a" {
 		t.Errorf("指纹命中优先：fp=%+v ok=%v", fp, ok)
 	}
-	if fp, ok := ownershipFingerprintForName(record, "c.pptx"); !ok || fp.SHA256 != "retained-c" {
+	if fp, ok := ownershipFingerprintForName(record, libDir, "c.pptx"); !ok || fp.SHA256 != "retained-c" {
 		t.Errorf("指纹未命中应回落 retained：fp=%+v ok=%v", fp, ok)
 	}
-	if _, ok := ownershipFingerprintForName(record, "b.pptx"); ok {
+	if _, ok := ownershipFingerprintForName(record, libDir, "b.pptx"); ok {
 		t.Error("两清单均无条目应为不可判定")
 	}
-	if _, ok := ownershipFingerprintForName(nil, "a.pptx"); ok {
+	if _, ok := ownershipFingerprintForName(record, "/lib/other", "c.pptx"); ok {
+		t.Error("retained 目录锚不匹配时应为不可判定（同形文件属其他落点）")
+	}
+	if _, ok := ownershipFingerprintForName(nil, libDir, "a.pptx"); ok {
 		t.Error("record 为 nil 应为不可判定")
 	}
 
@@ -99,16 +104,16 @@ func TestOwnershipFingerprintForName(t *testing.T) {
 			{Page: 2, Name: "x.pptx", Size: 1, SHA256: "2"},
 		},
 	}
-	if _, ok := ownershipFingerprintForName(multi, "x.pptx"); ok {
+	if _, ok := ownershipFingerprintForName(multi, libDir, "x.pptx"); ok {
 		t.Error("指纹同名多命中应为不可判定（不猜）")
 	}
 
 	// 指纹多命中 → 视为未命中，回落 retained 唯一命中（契约：先指纹后 retained）
 	mixed := &assetSplitRecord{
 		fingerprints: multi.fingerprints,
-		retained:     []splitArtifactFingerprint{{Page: 3, Name: "x.pptx", Size: 9, SHA256: "r"}},
+		retained:     []splitArtifactFingerprint{{Page: 3, Name: "x.pptx", Size: 9, SHA256: "r", Dir: libDir}},
 	}
-	if fp, ok := ownershipFingerprintForName(mixed, "x.pptx"); !ok || fp.SHA256 != "r" {
+	if fp, ok := ownershipFingerprintForName(mixed, libDir, "x.pptx"); !ok || fp.SHA256 != "r" {
 		t.Errorf("指纹多命中应回落 retained 唯一命中：fp=%+v ok=%v", fp, ok)
 	}
 }
@@ -536,7 +541,8 @@ func TestSplitRetained_SurviveKeyRewriteFolderMigrateAndBackup(t *testing.T) {
 	}
 }
 
-// TestCleanupRetainedSplitArtifacts_States 消费单点四态直测：目录不符原样返回；
+// TestCleanupRetainedSplitArtifacts_States 消费单点状态直测：条目按自身目录锚
+// 消费（record.outputDir 已改也不影响）；
 // 内容全等删除并清索引行；内容不符/文件不存在/名字非法丢弃条目；删除失败保留。
 func TestCleanupRetainedSplitArtifacts_States(t *testing.T) {
 	svc := newTestAssetService(t)
@@ -552,37 +558,39 @@ func TestCleanupRetainedSplitArtifacts_States(t *testing.T) {
 		t.Fatalf("写残留页: %v", err)
 	}
 	matchFP := splitFingerprintOfTest(t, matchPath, 3)
+	matchFP.Dir = outDir
 	mismatchPath := filepath.Join(outDir, "004-单点.pptx")
 	if err := os.WriteFile(mismatchPath, []byte("userbytes"), 0644); err != nil {
 		t.Fatalf("写用户文件: %v", err)
 	}
 	mismatchFP := splitFingerprintOfTest(t, mismatchPath, 4)
 	mismatchFP.SHA256 = strings.Repeat("0", 64) // 等长不同哈希
+	mismatchFP.Dir = outDir
 	insertIndexRowForTest(t, svc, lib.ID, 9903, "单点/003-单点.pptx")
 
 	record := &assetSplitRecord{
 		sourceRelPath: "单点.pptx", outputDir: outDir, pageCount: 2,
-		target:   model.AssetSplitTargetReplace,
-		retained: []splitArtifactFingerprint{matchFP, mismatchFP, {Page: 5, Name: "../逃逸.pptx", Size: 1, SHA256: "x"}},
+		target: model.AssetSplitTargetReplace,
+		retained: []splitArtifactFingerprint{
+			matchFP, mismatchFP,
+			{Page: 5, Name: "../逃逸.pptx", Size: 1, SHA256: "x", Dir: outDir},
+			{Page: 6, Name: "006-库外.pptx", Size: 1, SHA256: "x", Dir: filepath.Join(dir, "..", "库外")},
+		},
 	}
-	// 目录不符：原样返回且不删除
+	// 目录锚优先于 record.outputDir：记录落点改到别处后，条目仍按自身目录消费。
 	other := &assetSplitRecord{outputDir: filepath.Join(dir, "别处"), retained: record.retained}
-	if got := svc.cleanupRetainedSplitArtifacts(store, lib, other, outDir, ""); !reflect.DeepEqual(got, record.retained) {
-		t.Errorf("目录不符应原样返回：got %+v want %+v", got, record.retained)
-	}
-	mustExist(t, matchPath)
 
 	// 删除失败：保留该条目（只保留内容全等且删除失败的）
 	svc.removeArtifactFn = func(string) error { return errors.New("占用中") }
-	got := svc.cleanupRetainedSplitArtifacts(store, lib, record, outDir, "")
-	if len(got) != 1 || got[0].Name != matchFP.Name {
-		t.Errorf("删除失败应仅保留内容全等条目：%+v", got)
+	got := svc.cleanupRetainedSplitArtifacts(store, lib, other, "")
+	if len(got) != 1 || got[0].Name != matchFP.Name || !samePathFold(got[0].Dir, outDir) {
+		t.Errorf("删除失败应仅保留内容全等条目且目录锚不变：%+v", got)
 	}
 	mustExist(t, matchPath)
 
-	// 解除失败：删除成功、条目丢弃并清索引行；内容不符与非法名丢弃
+	// 解除失败：删除成功、条目丢弃并清索引行；内容不符与非法名/非法目录丢弃
 	svc.removeArtifactFn = nil
-	got = svc.cleanupRetainedSplitArtifacts(store, lib, record, outDir, "")
+	got = svc.cleanupRetainedSplitArtifacts(store, lib, other, "")
 	if len(got) != 0 {
 		t.Errorf("全部消费后不应保留条目：%+v", got)
 	}
@@ -591,6 +599,33 @@ func TestCleanupRetainedSplitArtifacts_States(t *testing.T) {
 	if n := countIndexRowsByPath(t, svc, lib.ID, "单点/003-单点.pptx"); n != 0 {
 		t.Errorf("消费删除后索引行应清理，实际 %d 行", n)
 	}
+}
+
+// TestCleanupRetainedSplitArtifacts_LegacyEntryWithoutDir 旧数据兼容：v11 早期
+// retained 条目无目录锚（Dir 为空），消费时回落 record.output_dir，行为与改造前
+// 一致（同目录内容全等则删除）。
+func TestCleanupRetainedSplitArtifacts_LegacyEntryWithoutDir(t *testing.T) {
+	svc := newTestAssetService(t)
+	dir := t.TempDir()
+	lib := mustCreateLibrary(t, svc, "旧格式 retained 库", dir)
+	store := svc.openStoreForTest(t, lib.ID)
+	outDir := filepath.Join(dir, "旧格式")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("建目录: %v", err)
+	}
+	stale := filepath.Join(outDir, "旧格式-003.pptx")
+	if err := os.WriteFile(stale, []byte("legacy-bytes"), 0644); err != nil {
+		t.Fatalf("写残留页: %v", err)
+	}
+	fp := splitFingerprintOfTest(t, stale, 3) // Dir 留空 = v11 旧格式
+	record := &assetSplitRecord{
+		outputDir: outDir, pageCount: 2, target: model.AssetSplitTargetReplace,
+		retained: []splitArtifactFingerprint{fp},
+	}
+	if got := svc.cleanupRetainedSplitArtifacts(store, lib, record, ""); len(got) != 0 {
+		t.Errorf("旧格式条目应按 output_dir 消费清空：%+v", got)
+	}
+	mustNotExist(t, stale)
 }
 
 // TestReplaceArtifactMismatchMessage 备份让位归属不符文案两态映射（R3）：换回成功
@@ -784,6 +819,7 @@ func seedReplaceRecordWithCoreFormRetained(t *testing.T, svc *AssetLibraryServic
 		t.Fatalf("写 source 形态残留页: %v", err)
 	}
 	retained := splitFingerprintOfTest(t, stalePage, 3)
+	retained.Dir = outDir
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord(name, "", outDir, 2,
 		"2026-11-03 10:00:00", model.AssetSplitTargetReplace, replaceArtifactBase(stem),

@@ -101,6 +101,66 @@ func TestSplitRecordMigrate_ContainerOutputDirOnly(t *testing.T) {
 	}
 }
 
+// TestSplitRecordMigrate_RetainedDirAnchorFollowsContainer 目录重命名时 retained
+// 目录锚随 output_dir 同步迁移：源键命中（前缀重写）与仅落点命中两条路径都要
+// 改锚，否则残留页凭证指向旧目录，迁移后无法消费。
+//
+// 变异验证：去掉 migrateRetainedAnchorDirsTx 或 rewriteSplitRecordKeyTx 的锚改写，
+// 对应记录的 retained[0].Dir 断言变红。
+func TestSplitRecordMigrate_RetainedDirAnchorFollowsContainer(t *testing.T) {
+	svc := newTestAssetService(t)
+	svc.parseFn = okParseForAll
+	root := t.TempDir()
+	mustWritePptxFile(t, filepath.Join(root, "容器", "a.pptx"))
+	mustWritePptxFile(t, filepath.Join(root, "其他", "x.pptx"))
+	lib := mustCreateLibrary(t, svc, "retained 锚迁移库", root)
+	mustScan(t, svc, lib.ID)
+	store := svc.openStoreForTest(t, lib.ID)
+
+	oldSourceOut := filepath.Join(root, "容器", "a")
+	oldContainerOut := filepath.Join(root, "容器", "x")
+	retainedA := splitArtifactFingerprint{Page: 3, Name: "a-003.pptx", Size: 1, SHA256: "a3", Dir: oldSourceOut}
+	retainedX := splitArtifactFingerprint{Page: 3, Name: "x-003.pptx", Size: 1, SHA256: "x3", Dir: oldContainerOut}
+	if err := store.upsertSplitRecord("容器/a.pptx", "h-a", oldSourceOut, 2,
+		splitMigrateNow, model.AssetSplitTargetSource, "a", false, nil,
+		[]splitArtifactFingerprint{retainedA}); err != nil {
+		t.Fatalf("写源键命中记录: %v", err)
+	}
+	if err := store.upsertSplitRecord("其他/x.pptx", "h-x", oldContainerOut, 2,
+		splitMigrateNow, model.AssetSplitTargetReplace, "", true, nil,
+		[]splitArtifactFingerprint{retainedX}); err != nil {
+		t.Fatalf("写仅落点命中记录: %v", err)
+	}
+
+	if _, err := svc.RenameAssetFolder(lib.ID, "容器", "新容器"); err != nil {
+		t.Fatalf("RenameAssetFolder: %v", err)
+	}
+
+	recA, err := store.getSplitRecord("新容器/a.pptx")
+	if err != nil || recA == nil {
+		t.Fatalf("源键应随目录迁移：rec=%v err=%v", recA, err)
+	}
+	wantA := filepath.Join(root, "新容器", "a")
+	if recA.outputDir != wantA {
+		t.Fatalf("源键命中记录 output_dir 应迁移为 %q，实际 %q", wantA, recA.outputDir)
+	}
+	if len(recA.retained) != 1 || recA.retained[0].Dir != wantA {
+		t.Errorf("源键命中记录 retained 锚应随 output_dir 迁移：%+v（want dir %s）", recA.retained, wantA)
+	}
+
+	recX, err := store.getSplitRecord("其他/x.pptx")
+	if err != nil || recX == nil {
+		t.Fatalf("仅落点命中记录应保留：rec=%v err=%v", recX, err)
+	}
+	wantX := filepath.Join(root, "新容器", "x")
+	if recX.outputDir != wantX {
+		t.Fatalf("仅落点命中记录 output_dir 应迁移为 %q，实际 %q", wantX, recX.outputDir)
+	}
+	if len(recX.retained) != 1 || recX.retained[0].Dir != wantX {
+		t.Errorf("仅落点命中记录 retained 锚应随 output_dir 迁移：%+v（want dir %s）", recX.retained, wantX)
+	}
+}
+
 // TestSplitRecordMigrate_NestedContainerMove 多级嵌套容器随上级目录整体移动：
 // 源键命中的记录按新源路径重算落点，仅落点命中的记录按旧前缀剥离迁移，cache
 // 记录落点保持原值。

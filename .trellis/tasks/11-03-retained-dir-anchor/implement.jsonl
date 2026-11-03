@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/pptx-split.md", "reason": "拆分记录 retained/or 产物清理、落点切换与迁移的既有契约（§9.5/§9.7）"}
+{"file": "docs/spec/assets-management.md", "reason": "目录级路径迁移与拆分记录键改写口径（§8.7、§15）"}

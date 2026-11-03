@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -2413,8 +2414,9 @@ type assetSplitRecord struct {
 	// mtime 守卫）。随记录行同步，重链/目录迁移/备份还原不需要额外同步。
 	fingerprints []splitArtifactFingerprint
 	// retained 清理失败未能删除、但仍属本记录历史产物的归属凭证（v11；元素结构
-	// 与 fingerprints 一致）。仅供 replace 旧页清理失败时写入，由后续重拆的备份
-	// 让位 / 旧页清理消费；非空不代表是本次 page_count 覆盖的产物页。
+	// 同 fingerprints，另带绝对目录锚 dir，旧数据空锚回落记录 output_dir）。仅由
+	// 旧页清理失败写入，由后续重拆按条目锚目录消费；非空不代表是本次 page_count
+	// 覆盖的产物页。
 	retained []splitArtifactFingerprint
 }
 
@@ -2563,6 +2565,19 @@ func (s *assetsStore) rewriteSplitRecordKeyTx(tx *sql.Tx, oldRel, newRel, newOut
 		if newOutDir == oldOutDir {
 			return false, nil
 		}
+		retainedRaw, retainedChanged, err := retainedAnchorsRewrittenTx(tx, oldRel, oldOutDir, newOutDir)
+		if err != nil {
+			return false, err
+		}
+		if retainedChanged {
+			if _, err := tx.Exec(
+				"UPDATE split_records SET output_dir = ?, retained_fingerprints = ? WHERE source_rel_path = ?",
+				newOutDir, retainedRaw, oldRel,
+			); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
 		if _, err := tx.Exec(
 			"UPDATE split_records SET output_dir = ? WHERE source_rel_path = ?", newOutDir, oldRel,
 		); err != nil {
@@ -2598,6 +2613,19 @@ func (s *assetsStore) rewriteSplitRecordKeyTx(tx *sql.Tx, oldRel, newRel, newOut
 	default:
 		return false, err
 	}
+	retainedRaw, retainedChanged, err := retainedAnchorsRewrittenTx(tx, oldRel, oldOutDir, newOutDir)
+	if err != nil {
+		return false, err
+	}
+	if retainedChanged {
+		if _, err := tx.Exec(
+			"UPDATE split_records SET source_rel_path = ?, output_dir = ?, retained_fingerprints = ? WHERE source_rel_path = ?",
+			newRel, newOutDir, retainedRaw, oldRel,
+		); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	if _, err := tx.Exec(
 		"UPDATE split_records SET source_rel_path = ?, output_dir = ? WHERE source_rel_path = ?",
 		newRel, newOutDir, oldRel,
@@ -2605,6 +2633,41 @@ func (s *assetsStore) rewriteSplitRecordKeyTx(tx *sql.Tx, oldRel, newRel, newOut
 		return false, err
 	}
 	return true, nil
+}
+
+// retainedAnchorsRewrittenTx 读取记录 retained_fingerprints 中锚定 oldDir 的条目，
+// 把目录锚改为 newDir，返回改写后的列值与是否变更。空列返回原值不变；JSON 损坏
+// 同样原样返回（读侧已有宽容语义，写侧不得因坏数据中断迁移）。
+func retainedAnchorsRewrittenTx(tx *sql.Tx, rel, oldDir, newDir string) (string, bool, error) {
+	var raw string
+	err := tx.QueryRow(
+		"SELECT retained_fingerprints FROM split_records WHERE source_rel_path = ?", rel,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return raw, false, nil
+	}
+	var fps []splitArtifactFingerprint
+	if err := json.Unmarshal([]byte(raw), &fps); err != nil {
+		return raw, false, nil
+	}
+	changed := false
+	for i := range fps {
+		if fps[i].Dir == "" || !samePathFold(fps[i].Dir, oldDir) {
+			continue
+		}
+		fps[i].Dir = newDir
+		changed = true
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	return encodeSplitFingerprints(fps), true, nil
 }
 
 // splitOutDirUnderPrefix 产物目录是否位于被迁移目录前缀下（与后缀剥离结果，
@@ -2711,7 +2774,11 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 				// 指向不存在目录
 				newOutDir = filepath.Join(m.libraryRoot, filepath.FromSlash(path.Dir(newRel)), splitSourceBaseName(newRel))
 			} // 单条改写 + 冲突消解委托共用单点 rewriteSplitRecordKeyTx（与文件级重链
-			// 同口径，禁各写一套）
+			// 同口径，禁各写一套）。目录锚先按前缀迁移：rewriteSplitRecordKeyTx 只认
+			// 旧/新 output_dir 相等锚，其他位于被移动前缀下的锚目录由本步收口。
+			if err := s.migrateRetainedAnchorDirsTx(tx, r.rel, m.libraryRoot, m.oldPrefix, m.newPrefix); err != nil {
+				return migrated, err
+			}
 			changed, err := s.rewriteSplitRecordKeyTx(tx, r.rel, newRel, newOutDir)
 			if err != nil {
 				return migrated, err
@@ -2739,6 +2806,9 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		if newOutDirAbs == r.outDir {
 			continue // 幂等：改写结果与原值相同
 		}
+		if err := s.migrateRetainedAnchorDirsTx(tx, r.rel, m.libraryRoot, m.oldPrefix, m.newPrefix); err != nil {
+			return migrated, err
+		}
 		if _, err := tx.Exec(
 			"UPDATE split_records SET output_dir = ? WHERE source_rel_path = ?",
 			newOutDirAbs, r.rel,
@@ -2748,6 +2818,57 @@ func (s *assetsStore) migrateSplitRecordsTx(tx *sql.Tx, m splitRecordMigration) 
 		migrated++
 	}
 	return migrated, nil
+}
+
+// migrateRetainedAnchorDirsTx 目录级前缀迁移时同步 retained 目录锚：逐条把位于
+// 旧前缀下的锚目录按「库根 + 新前缀 + 剥离后缀」重算。库根外 / 不可相对化 /
+// 不在旧前缀下保持原值（与 output_dir 迁移同一判定单点）。空锚（v11 旧数据回落
+// output_dir）不写入——它随记录 output_dir 动态解析，无需改锚。JSON 损坏原样保留。
+func (s *assetsStore) migrateRetainedAnchorDirsTx(tx *sql.Tx, rel, libraryRoot, oldPrefix, newPrefix string) error {
+	if libraryRoot == "" || oldPrefix == "" {
+		return nil
+	}
+	var raw string
+	err := tx.QueryRow(
+		"SELECT retained_fingerprints FROM split_records WHERE source_rel_path = ?", rel,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var fps []splitArtifactFingerprint
+	if err := json.Unmarshal([]byte(raw), &fps); err != nil {
+		return nil
+	}
+	changed := false
+	for i := range fps {
+		if fps[i].Dir == "" {
+			continue
+		}
+		suffix, hit := splitOutDirRelUnderPrefix(libraryRoot, fps[i].Dir, oldPrefix)
+		if !hit {
+			continue
+		}
+		newDir := filepath.Join(libraryRoot, filepath.FromSlash(migratedRelPath(newPrefix, suffix)))
+		if samePathFold(newDir, fps[i].Dir) {
+			continue
+		}
+		fps[i].Dir = newDir
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	_, err = tx.Exec(
+		"UPDATE split_records SET retained_fingerprints = ? WHERE source_rel_path = ?",
+		encodeSplitFingerprints(fps), rel,
+	)
+	return err
 }
 
 // deleteSplitRecordsByPathPrefix 删除目录前缀下全部拆分记录并返回删除行数

@@ -1,11 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,28 +13,22 @@ import (
 )
 
 // 本文件覆盖 0eb330b 审核发现（11-03-split-review-fixes）的修复用例：
-//   - P1-1：异目录 retained 删除失败条目丢弃 + Warn（source/cache 与 replace 两链路）；
+//   - P1-1：异目录 retained 删除失败条目携带目录锚续携，后续成功拆分按锚消费
+//     （source/cache 与 replace 两链路）；
 //   - P2-2：「凭证存在但内容不符」在 ownsOutDir 与落点归属放宽两分支的 E2E；
 //   - P2-2：cache→replace 跨 target 端到端收敛。
 
-// TestAssetSplitRetained_SourceCrossDirFailureDiscardedWithWarn P1-1（source/cache
-// 链路）：本次落点与凭证目录不同时，旧落点残留页删除失败不得把凭证写入新记录
-// （凭证名相对旧 output_dir 解析，写入后即错锚到新落点、旧残留成永久孤儿）。
-// 失败条目一律丢弃并 Warn；同目录场景的续携由
-// TestAssetSplitRetained_CacheCrossDirConsumesOldDirResidual 等既有用例守护。
+// TestAssetSplitRetained_SourceCrossDirFailureCarriedWithAnchor 目录锚（source/cache
+// 链路）：本次落点与凭证目录不同时，旧落点残留页删除失败不再丢弃——条目携带旧
+// 落点目录锚写入新记录，后续任意一次成功拆分按锚目录重试删除，残留自动收敛。
 //
-// 变异验证：去掉调用侧 crossDir 丢弃分支（恢复无条件续携）时，本条「retained
-// 清空」与「日志含跨落点告警」断言变红。
-func TestAssetSplitRetained_SourceCrossDirFailureDiscardedWithWarn(t *testing.T) {
+// 变异验证：恢复「异目录丢弃」时，本条「retained 保留旧锚条目 / 后续消费删除」
+// 断言变红；去掉目录锚则条目错锚到新落点、旧残留无法消费。
+func TestAssetSplitRetained_SourceCrossDirFailureCarriedWithAnchor(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
-	lib := mustCreateLibrary(t, svc, "异目录丢弃库", dir)
+	lib := mustCreateLibrary(t, svc, "异目录续携库", dir)
 	_, stalePage, oldOutDir := seedReplaceRecordWithCoreFormRetained(t, svc, lib, dir, "异地.pptx")
-
-	var logBuf bytes.Buffer
-	prevLogger := Logger()
-	SetLogger(slog.New(slog.NewTextHandler(&logBuf, nil)))
-	t.Cleanup(func() { SetLogger(prevLogger) })
 
 	svc.removeArtifactFn = func(string) error { return errors.New("locked") }
 	svc.splitCoreFn = (&fakeReplaceCore{pages: 3, payload: []byte("cache-bytes")}).split
@@ -54,32 +46,54 @@ func TestAssetSplitRetained_SourceCrossDirFailureDiscardedWithWarn(t *testing.T)
 	if samePathFold(rec.outputDir, oldOutDir) {
 		t.Fatalf("前置：cache 新落点应与旧 replace 落点不同")
 	}
-	if len(rec.retained) != 0 {
-		t.Errorf("跨落点删除失败的旧落点条目不得写入新记录：%+v", rec.retained)
+	if len(rec.retained) != 1 {
+		t.Fatalf("跨落点删除失败条目应随记录携带：%+v", rec.retained)
+	}
+	if !samePathFold(rec.retained[0].Dir, oldOutDir) || rec.retained[0].Name != filepath.Base(stalePage) {
+		t.Errorf("retained 条目应锚定旧落点目录：%+v（旧落点 %s）", rec.retained[0], oldOutDir)
 	}
 	if _, statErr := os.Stat(stalePage); statErr != nil {
 		t.Errorf("删除失败的旧落点残留应保留在磁盘（%s），stat err=%v", stalePage, statErr)
 	}
-	// 新落点与新残留同名的第 3 页必须保留本次产物（R3：跨目录同名不互相吞并）
-	cachePage := filepath.Join(rec.outputDir, "异地-003.pptx")
-	if got, readErr := os.ReadFile(cachePage); readErr != nil || string(got) != "cache-bytes" {
-		t.Errorf("新落点第 3 页应保留本次产物内容（err=%v content=%q）", readErr, got)
+
+	// 解除占用后改源内容（哈希变化触发真实重拆，仍落 cache B）：携带的跨目录
+	// 条目按锚目录 A 消费删除，B 中新页不受影响。
+	svc.removeArtifactFn = nil
+	src := filepath.Join(dir, "异地.pptx")
+	f, openErr := os.OpenFile(src, os.O_APPEND|os.O_WRONLY, 0644)
+	if openErr != nil {
+		t.Fatalf("打开源文件: %v", openErr)
 	}
-	if !strings.Contains(logBuf.String(), "跨落点") {
-		t.Errorf("跨落点丢弃应给出明确告警，实际日志：%s", logBuf.String())
+	if _, writeErr := f.Write([]byte("changed")); writeErr != nil {
+		_ = f.Close()
+		t.Fatalf("改源触发重拆: %v", writeErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatalf("关闭源文件: %v", closeErr)
+	}
+	mustScanLibrary(t, svc, lib.ID) // 刷新 files.hash，使增量判定看到内容变化
+	svc.splitCoreFn = (&fakeReplaceCore{pages: 3, payload: []byte("cache-2-bytes")}).split
+	if _, err := svc.SplitAssetFile(context.Background(), lib.ID, "异地.pptx", "cache"); err != nil {
+		t.Fatalf("再次切 target=cache 应成功：%v", err)
+	}
+	if _, statErr := os.Stat(stalePage); !os.IsNotExist(statErr) {
+		t.Errorf("后续成功拆分应按目录锚消费旧残留（%s），stat err=%v", stalePage, statErr)
+	}
+	rec = splitRecordRowForTest(t, svc, lib.ID, "异地.pptx")
+	if rec == nil || len(rec.retained) != 0 {
+		t.Errorf("消费后 retained 应清空：%+v", rec)
 	}
 }
 
-// TestAssetSplitReplace_CrossDirRetainedFailureDiscardedWithWarn P1-1（replace
-// 链路）：记录 output_dir 与本次算出 outDir 不同时（记录落点已迁移/改名重链等），
-// cleanupRetainedSplitArtifacts 在旧落点删除失败的条目同样丢弃并 Warn；而
-// cleanupStaleReplaceArtifacts 产出的本次落点失败条目不受影响（不被误丢）。
+// TestAssetSplitReplace_CrossDirRetainedFailureCarriedWithAnchor 目录锚（replace
+// 链路）：记录 output_dir 与本次算出 outDir 不同时，旧落点删除失败条目携带自身
+// 目录继续随记录；本次落点产出的失败条目同样保留。
 //
-// 变异验证：去掉 crossDir 丢弃分支时，本条「新记录 retained 为空」断言变红。
-func TestAssetSplitReplace_CrossDirRetainedFailureDiscardedWithWarn(t *testing.T) {
+// 变异验证：恢复异目录丢弃分支时，本条「旧锚条目保留」断言变红。
+func TestAssetSplitReplace_CrossDirRetainedFailureCarriedWithAnchor(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
-	lib := mustCreateLibrary(t, svc, "replace异目录丢弃库", dir)
+	lib := mustCreateLibrary(t, svc, "replace异目录续携库", dir)
 	_, stalePage, _ := seedReplaceRecordWithCoreFormRetained(t, svc, lib, dir, "跨地.pptx")
 
 	// 构造记录落点 != 本次 outDir：残留副本放到另一个目录，记录 output_dir 指向它
@@ -95,21 +109,24 @@ func TestAssetSplitReplace_CrossDirRetainedFailureDiscardedWithWarn(t *testing.T
 	if err := os.WriteFile(oldStale, content, 0644); err != nil {
 		t.Fatalf("写旧落点残留页: %v", err)
 	}
+	// 原落点 A 中的同名残留移除：本次记录已改指 otherDir，A 内存在无归属的同名
+	// 核心中间态文件会被 R5 守卫正确拒绝（该拒绝由专门用例覆盖）。
+	if err := os.Remove(stalePage); err != nil {
+		t.Fatalf("移除原落点残留副本: %v", err)
+	}
 	seedRec := splitRecordRowForTest(t, svc, lib.ID, "跨地.pptx")
 	if seedRec == nil || len(seedRec.retained) != 1 {
 		t.Fatalf("前置：记录应携带 retained：%+v", seedRec)
 	}
+	// 旧落点残留按副本内容重新计算指纹并改锚到 otherDir
+	anchored := splitFingerprintOfTest(t, oldStale, seedRec.retained[0].Page)
 	store := svc.openStoreForTest(t, lib.ID)
 	if err := store.upsertSplitRecord("跨地.pptx", "", otherDir, 2,
 		"2026-11-03 10:00:00", model.AssetSplitTargetReplace,
-		replaceArtifactBase("跨地"), false, seedRec.fingerprints, seedRec.retained); err != nil {
+		replaceArtifactBase("跨地"), false, seedRec.fingerprints,
+		[]splitArtifactFingerprint{anchored}); err != nil {
 		t.Fatalf("改记录落点: %v", err)
 	}
-
-	var logBuf bytes.Buffer
-	prevLogger := Logger()
-	SetLogger(slog.New(slog.NewTextHandler(&logBuf, nil)))
-	t.Cleanup(func() { SetLogger(prevLogger) })
 
 	svc.removeArtifactFn = func(string) error { return errors.New("locked") }
 	svc.parseFn = oneSlideParse()
@@ -128,14 +145,11 @@ func TestAssetSplitReplace_CrossDirRetainedFailureDiscardedWithWarn(t *testing.T
 	if rec == nil || rec.target != model.AssetSplitTargetReplace {
 		t.Fatalf("记录应保持 replace：%+v", rec)
 	}
-	if len(rec.retained) != 0 {
-		t.Errorf("跨落点删除失败的旧落点条目不得写入新记录：%+v", rec.retained)
+	if len(rec.retained) != 1 || !samePathFold(rec.retained[0].Dir, otherDir) {
+		t.Errorf("旧落点删除失败条目应按自身目录锚续携：%+v", rec.retained)
 	}
 	if _, statErr := os.Stat(oldStale); statErr != nil {
 		t.Errorf("删除失败的旧落点残留应保留在磁盘（%s），stat err=%v", oldStale, statErr)
-	}
-	if !strings.Contains(logBuf.String(), "跨落点") {
-		t.Errorf("跨落点丢弃应给出明确告警，实际日志：%s", logBuf.String())
 	}
 }
 
