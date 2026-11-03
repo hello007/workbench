@@ -257,7 +257,10 @@ func (s *ChatService) GetChatSettings() *model.ChatSettings {
 	case model.ChatPermissionModeDefault,
 		model.ChatPermissionModeAcceptEdits,
 		model.ChatPermissionModePlan,
-		model.ChatPermissionModeBypassPermission:
+		model.ChatPermissionModeBypassPermission,
+		model.ChatPermissionModeAuto,
+		model.ChatPermissionModeManual,
+		model.ChatPermissionModeDontAsk:
 	default:
 		defaults.PermissionMode = model.ChatPermissionModeDefault
 	}
@@ -274,7 +277,10 @@ func (s *ChatService) SaveChatSettings(permissionMode, modelName, launcher strin
 	case model.ChatPermissionModeDefault,
 		model.ChatPermissionModeAcceptEdits,
 		model.ChatPermissionModePlan,
-		model.ChatPermissionModeBypassPermission:
+		model.ChatPermissionModeBypassPermission,
+		model.ChatPermissionModeAuto,
+		model.ChatPermissionModeManual,
+		model.ChatPermissionModeDontAsk:
 	default:
 		return fmt.Errorf("权限模式无效: %s", permissionMode)
 	}

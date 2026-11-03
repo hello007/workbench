@@ -1261,7 +1261,7 @@ describe('AiChatPanel.vue', () => {
       expect(selects.length).toBe(1)
       const seg = wrapper.find('.chat-perm-seg')
       expect(seg.exists()).toBe(true)
-      expect(seg.findAll('.el-radio-button').length).toBe(4)
+      expect(seg.findAll('.el-radio-button').length).toBe(6)
       await clickPermSeg(wrapper, 2) // 规划
 
       expect(SaveChatSettings).toHaveBeenCalledWith('plan', '', '')
@@ -1273,7 +1273,7 @@ describe('AiChatPanel.vue', () => {
       await flushPromises()
       await selectFirstDirectory(wrapper)
 
-      await clickPermSeg(wrapper, 3) // 跳过确认
+      await clickPermSeg(wrapper, 5) // 跳过确认（六档末位）
 
       expect(ElMessage.warning).toHaveBeenCalledWith(
         expect.stringContaining('跳过确认')

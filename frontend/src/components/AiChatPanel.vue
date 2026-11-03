@@ -431,11 +431,16 @@ const uiStore = useUiStore()
 
 // 权限模式可选集（值与 model.ChatPermissionMode* 常量对齐）
 // PERMISSION_MODES：分段式按钮组档位（short 为组内短标签，label/tip 保留完整语义；
-// 悬停整组出当前档 tip 说明，bypassPermissions 选中另有警告提示）
+// 悬停整组出当前档 tip 说明，bypassPermissions 选中另有警告提示）。
+// 六档对齐 claude CLI --permission-mode 枚举（2026-11-03）：
+// acceptEdits/auto/bypassPermissions/manual/dontAsk/plan（default 即 CLI 的 Manual，
+// 仍被 CLI 接受且作归一默认值，排首位）
 const PERMISSION_MODES = [
-  { value: 'default', short: '默认', label: '默认权限', tip: 'claude 默认权限行为，敏感操作需逐次确认' },
+  { value: 'default', short: '手动', label: '手动确认', tip: '逐次确认：每个敏感操作都需手动批准（CLI 的 Manual/default 档）' },
   { value: 'acceptEdits', short: '接受编辑', label: '自动接受编辑', tip: '自动接受文件编辑，其余操作仍需确认' },
   { value: 'plan', short: '规划', label: '规划模式', tip: '仅分析与规划方案，不执行修改' },
+  { value: 'auto', short: '自动', label: '自动模式', tip: 'CLI 智能判断：低风险操作自动放行，敏感操作仍走审批' },
+  { value: 'dontAsk', short: '不询问', label: '不询问', tip: '需确认的操作自动拒绝（无人值守只读场景，AI 不会执行敏感操作）' },
   { value: 'bypassPermissions', short: '跳过确认', label: '跳过确认（高危）', tip: '跳过全部权限确认，AI 可直接修改代码与执行命令（高危）' }
 ]
 const permissionModeTip = computed(() => {

@@ -215,6 +215,16 @@ func TestChatService_Settings_DefaultAndSave(t *testing.T) {
 	if got = svc.GetChatSettings(); got.PermissionMode != model.ChatPermissionModePlan || got.ModelName != "" || got.Launcher != "" {
 		t.Errorf("空 model 保存回读异常: %+v", got)
 	}
+
+	// 对齐 claude CLI 枚举的新档位（auto/manual/dontAsk）保存回读合法
+	for _, mode := range []string{model.ChatPermissionModeAuto, model.ChatPermissionModeManual, model.ChatPermissionModeDontAsk} {
+		if err := svc.SaveChatSettings(mode, "", ""); err != nil {
+			t.Fatalf("新档位 %s 应合法: %v", mode, err)
+		}
+		if got = svc.GetChatSettings(); got.PermissionMode != mode {
+			t.Errorf("新档位 %s 回读异常: %+v", mode, got)
+		}
+	}
 }
 
 // TestChatService_Settings_CorruptFallback 配置损坏回默认值不报错。

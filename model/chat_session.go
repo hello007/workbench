@@ -16,12 +16,17 @@ const (
 	ChatTemplateScopeDirectory = "directory" // 目录模板：归属 AI 对话侧栏某目录项
 )
 
-// claude 权限模式取值（对话执行配置下拉可选集）。
+// claude 权限模式取值（对话执行配置分段组可选集）。
+// 2026-11-03 对齐本机 claude CLI 枚举（--permission-mode choices：
+// acceptEdits/auto/bypassPermissions/manual/dontAsk/plan，default 仍被接受）。
 const (
-	ChatPermissionModeDefault          = "default"           // claude 默认行为（buildChatArgs 显式传 --permission-mode default，防继承用户全局 settings defaultMode 绕过审批协议；空串归一为该值）
+	ChatPermissionModeDefault          = "default"           // 手动确认（CLI 内部名 Manual；buildChatArgs 显式传 --permission-mode default，防继承用户全局 settings defaultMode 绕过审批协议；空串归一为该值）
 	ChatPermissionModeAcceptEdits      = "acceptEdits"       // 自动接受文件编辑
 	ChatPermissionModePlan             = "plan"              // 仅规划不执行变更
 	ChatPermissionModeBypassPermission = "bypassPermissions" // 跳过全部权限确认（高危）
+	ChatPermissionModeAuto             = "auto"              // 自动模式：CLI 智能判断放行/审批（低风险直放，敏感操作仍走审批）
+	ChatPermissionModeManual           = "manual"            // 手动模式：与 default 同为逐次确认（CLI 新枚举名）
+	ChatPermissionModeDontAsk          = "dontAsk"           // 不询问：需确认的操作自动拒绝（无人值守只读场景）
 )
 
 // ChatMessage 对话会话中的单条消息。
@@ -119,7 +124,7 @@ type ChatTemplate struct {
 // 持久化记忆，重启恢复。持久化于 data/ai_chat/settings.json。
 // ModelName 为空表示使用 claude CLI 默认模型。
 type ChatSettings struct {
-	PermissionMode string `json:"permissionMode"`     // default/acceptEdits/plan/bypassPermissions（ChatPermissionMode* 常量）
+	PermissionMode string `json:"permissionMode"`     // default/acceptEdits/plan/bypassPermissions/auto/manual/dontAsk（ChatPermissionMode* 常量）
 	ModelName      string `json:"modelName"`          // claude 模型名（如 sonnet/opus/具体版本号），空 = claude 默认
 	Launcher       string `json:"launcher,omitempty"` // 启动命令配置：空 = 默认（PATH 解析 claude）；命令名或绝对 exe 路径
 }
