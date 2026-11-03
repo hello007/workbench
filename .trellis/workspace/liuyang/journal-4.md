@@ -1403,3 +1403,36 @@ origin 改为 git@github.com:hello007/workbench.git；同步 7 份文档的 SSH 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 211: 修复目录选择双触发
+
+**Date**: 2026-11-03
+**Task**: 修复目录选择双触发
+**Branch**: `master`
+
+### Summary
+
+DirectoryTree 目录项删除 @mousedown，收敛为 @click 单入口，消除单击两次 emit select 与右键误选中；单测断言事件次数；spec 记录禁令并补 CLAUDE.md 钩子行。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e47a3e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
