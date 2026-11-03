@@ -1237,3 +1237,36 @@ splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 206: Windows CI 覆盖 split 折叠分支
+
+**Date**: 2026-11-03
+**Task**: Windows CI 覆盖 split 折叠分支
+**Branch**: `master`
+
+### Summary
+
+CI 新增 windows-latest test-windows job（dist 占位 + go vet + go test ./...）；清除 CI 仅 ubuntu 覆盖缺口表述，同步测试策略/贡献指南/linux-platform/路线图/perf-baseline。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3c5a561` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
