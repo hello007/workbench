@@ -26,8 +26,8 @@ async function openBranchComparePage(page) {
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto('/')
   await expect(page).toHaveURL(/#\/$/)
-  // 活动栏第 8 个图标（index=7）为分支对比
-  await page.locator('.activity-bar-item').nth(7).click()
+  // 活动栏分支对比图标（data-activity=branchcompare 稳定定位）
+  await page.locator('[data-activity="branchcompare"]').click()
   await expect(page.locator('.bc-view')).toBeVisible()
 }
 

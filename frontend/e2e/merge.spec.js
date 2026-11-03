@@ -14,12 +14,16 @@
 import { test, expect, getWailsCalls } from './fixtures'
 import { openGitRepoPage, E2E_REPO_PATH, GIT_FLOW_OVERRIDES } from './git-fixtures'
 
-// 冲突态三段序列：面板挂载(1) 无冲突 -> 执行后查询(2) 合并冲突 -> 中止后查询(3) 无冲突
+// 冲突态状态机：Merge 被调用后进入冲突态，AbortMerge 被调用后回到干净态
+// （规则按声明序评估，AbortMerge 规则在后、命中时覆盖 Merge 规则）。
+// 用跨方法状态机而非次数序列：冲突态查询有多个触发点（组件挂载、选仓、
+// 打开合并 tab、执行后、中止后各一次），次数会随触发点演进而漂移
+// （2026-11-03 CI e2e 缺陷根因：多出的查询把次数序列提前消费完，冲突面板不再出现）
 const CONFLICT_THEN_CLEAN = {
-  __sequence__: [
-    { type: 'none', files: [] },
-    { type: 'merge', files: ['src/app.js'] },
-    { type: 'none', files: [] }
+  __default__: { type: 'none', files: [] },
+  __rules__: [
+    { after: 'Merge', value: { type: 'merge', files: ['src/app.js'] } },
+    { after: 'AbortMerge', value: { type: 'none', files: [] } }
   ]
 }
 
@@ -49,8 +53,11 @@ test.describe('Git 合并/变基流程', () => {
       expect(mergeCalls).toEqual([
         { method: 'Merge', args: [E2E_REPO_PATH, 'feature/login', 'ff'] }
       ])
-      // 冲突态查询：面板挂载 + 执行后各一次，均为无冲突
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(2)
+      // 冲突态查询：挂载与执行后都会查（另有选仓等触发点，次数随触发点演进，
+      // 断言下限而非精确值），且每次查询的仓库参数都正确
+      const conflictCalls = await getWailsCalls(page, 'GetConflictState')
+      expect(conflictCalls.length).toBeGreaterThanOrEqual(2)
+      expect(conflictCalls.every(c => c.args[0] === E2E_REPO_PATH)).toBe(true)
     })
   })
 
@@ -107,8 +114,8 @@ test.describe('Git 合并/变基流程', () => {
 
       const abortCalls = await getWailsCalls(page, 'AbortMerge')
       expect(abortCalls).toEqual([{ method: 'AbortMerge', args: [E2E_REPO_PATH] }])
-      // 冲突态查询：挂载 + 执行后 + 中止后各一次
-      expect(await getWailsCalls(page, 'GetConflictState')).toHaveLength(3)
+      // 冲突态查询：挂载/执行后/中止后均会查（次数随触发点演进，断言下限）
+      expect((await getWailsCalls(page, 'GetConflictState')).length).toBeGreaterThanOrEqual(3)
     })
   })
 

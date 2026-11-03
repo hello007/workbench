@@ -12,9 +12,9 @@
  */
 import { test, expect, getWailsCalls } from './fixtures'
 
-/** 打开设置弹窗（活动栏设置图标，nth(7)）并切到网络访问 tab */
+/** 打开设置弹窗（活动栏设置图标，data-activity=settings 稳定定位）并切到网络访问 tab */
 async function openNetworkTab(page) {
-  await page.locator('.activity-bar-item').nth(7).click()
+  await page.locator('[data-activity="settings"]').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
   await dialog.locator('.settings-nav-item').nth(4).click()

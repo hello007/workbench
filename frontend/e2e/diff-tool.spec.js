@@ -28,7 +28,7 @@ test.describe('外部 diff 工具集成', () => {
       await expect(page).toHaveURL(/#\/$/)
 
       // ActivityBar 倒数第二个图标为设置（最后一个为终端切换）
-      await page.locator('.activity-bar-item').nth(-2).click()
+      await page.locator('[data-activity="settings"]').click()
       const settingsDialog = visibleDialog(page, '设置')
       await expect(settingsDialog).toBeVisible()
 
@@ -42,7 +42,7 @@ test.describe('外部 diff 工具集成', () => {
     test('修改路径后 blur：经合并写 SaveSettings 持久化三个 diffTool 字段', async ({ page }) => {
       await page.setViewportSize({ width: 1920, height: 1080 })
       await page.goto('/')
-      await page.locator('.activity-bar-item').nth(-2).click()
+      await page.locator('[data-activity="settings"]').click()
 
       const pathInput = visibleDialog(page, '设置').locator('input[placeholder*="WinMergeU.exe"]')
       await pathInput.fill('C:\\tools\\WinMergeU.exe')

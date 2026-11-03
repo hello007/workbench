@@ -41,7 +41,7 @@ const bannedTokenItem = (recOver = {}, banOver = {}) => ({
 
 /** 打开设置弹窗并切到网络访问页（第 5 个导航项） */
 async function openNetworkTab(page) {
-  await page.locator('.activity-bar-item').nth(7).click()
+  await page.locator('[data-activity="settings"]').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
   await dialog.locator('.settings-nav-item').nth(4).click()
@@ -105,7 +105,7 @@ test.describe('多设备语义明示（PR3）', () => {
     await expect(page.locator('.activity-bar-devices')).toHaveCount(0)
 
     // 终端面板先展开（多端写入提示的消费端在线）
-    await page.locator('.activity-bar-item').nth(8).click()
+    await page.locator('[data-activity="terminal"]').click()
     await expect(page.locator('.terminal-panel')).toBeVisible()
     await expect(page.locator('.terminal-multi-device-hint')).toHaveCount(0)
 

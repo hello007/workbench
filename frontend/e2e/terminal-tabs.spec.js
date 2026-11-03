@@ -38,8 +38,8 @@ const shellOverrides = {
 /** 展开终端面板并等待首个 tab 会话建立 */
 async function openTerminal(page) {
   await page.goto('/')
-  // 活动栏最后一项（nth(8)）为终端开关
-  await page.locator('.activity-bar-item').nth(8).click()
+  // 活动栏终端开关（data-activity=terminal 稳定定位，不随面板数量漂移）
+  await page.locator('[data-activity="terminal"]').click()
   const panel = page.locator('.terminal-panel')
   await expect(panel).toBeVisible()
   await expect.poll(async () => (await getWailsCalls(page, 'CreateTerminal')).length).toBe(1)
@@ -131,9 +131,9 @@ test.describe('终端多 tab：关闭生命周期与冷启动', () => {
 
     // 收起再展开面板：tabs.length 非空短路冷启动分支，快照恢复 0 个 →
     // 不重复建会话（CreateTerminal 仍 2 次，无历史 tab 复原）
-    await page.locator('.activity-bar-item').nth(8).click()
+    await page.locator('[data-activity="terminal"]').click()
     await expect(panel).toBeHidden()
-    await page.locator('.activity-bar-item').nth(8).click()
+    await page.locator('[data-activity="terminal"]').click()
     await expect(panel.locator('.shell-badge')).toBeVisible()
     await expect(panel.locator('.tab-strip')).toHaveCount(0)
     expect((await getWailsCalls(page, 'CreateTerminal')).length).toBe(2)

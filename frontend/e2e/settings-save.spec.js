@@ -29,9 +29,9 @@ const baseSettings = {
   diffToolArgs: '{left} {right}'
 }
 
-/** 打开设置弹窗（活动栏设置图标，nth(7)） */
+/** 打开设置弹窗（活动栏设置图标，data-activity=settings 稳定定位） */
 async function openSettings(page) {
-  await page.locator('.activity-bar-item').nth(7).click()
+  await page.locator('[data-activity="settings"]').click()
   const dialog = page.locator('.settings-dialog')
   await expect(dialog).toBeVisible()
   return dialog
@@ -98,7 +98,7 @@ test.describe('设置：保存后热更生效', () => {
     await page.goto('/')
 
     // 终端面板先展开（字号热更的消费端在线，首个 tab 会话建立）
-    await page.locator('.activity-bar-item').nth(8).click()
+    await page.locator('[data-activity="terminal"]').click()
     const terminal = page.locator('.terminal-panel')
     await expect(terminal.locator('.shell-badge')).toBeVisible()
     await expect(terminal.locator('.font-size-value')).toHaveText('14')

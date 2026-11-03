@@ -289,8 +289,8 @@ describe('ActivityBar - 多设备连接指示', () => {
   it('连接数 <=1 时指示不显示（桌面模式无事件恒此形态，空安全）', () => {
     const wrapper = createWrapper()
     expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
-    // 图标数仍为 9（指示项不占位）
-    expect(wrapper.findAll('.activity-bar-item').length).toBe(9)
+    // 图标数仍为 10（指示项不占位）：8 个面板（含分支对比）+ 设置 + 终端
+    expect(wrapper.findAll('.activity-bar-item').length).toBe(10)
     wrapper.unmount()
   })
 
