@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端交互与组件约定，目录列表属既有组件，修改需守约定"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增/调整单测须满足前端 70% 覆盖率硬门禁"}

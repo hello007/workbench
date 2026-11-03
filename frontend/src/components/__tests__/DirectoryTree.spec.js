@@ -322,6 +322,16 @@ describe('DirectoryTree.vue', () => {
       expect(wrapper.emitted('select')).toBeTruthy()
       expect(wrapper.emitted('select')[0][0]).toBe('dir-2')
     })
+
+    it('单击目录项只 emit 一次 select（mousedown 不重复触发）', async () => {
+      wrapper = createWrapper()
+      const items = wrapper.findAll('.dir-item')
+      await items[1].trigger('mousedown')
+      expect(wrapper.emitted('select')).toBeFalsy()
+      await items[1].trigger('click')
+      expect(wrapper.emitted('select')).toHaveLength(1)
+      expect(wrapper.emitted('select')[0]).toEqual(['dir-2'])
+    })
   })
 
   describe('事件监听清理', () => {

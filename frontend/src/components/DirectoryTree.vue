@@ -24,7 +24,6 @@
           :key="dir.id"
           class="dir-item"
           :class="{ 'dir-item--active': dir.id === directoryStore.selectedDirectoryId }"
-          @mousedown="handleSelect(dir.id)"
           @click="handleSelect(dir.id)"
           @contextmenu="onContextMenu($event, dir)"
         >

@@ -300,6 +300,22 @@ EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` �
 
 自绘 `.context-menu`（全局样式在 `style.css`，非 Element Plus）扩展二级子菜单时：`.context-menu-item` 默认 `overflow: hidden`（为 `::before` 指示条服务），子菜单作为 li 子元素会被裁剪——父项加 `has-submenu` 类覆写 `overflow: visible`；子菜单纯 CSS hover 展开（`has-submenu:hover > .context-submenu { display: block }`，子菜单是 li 子元素故悬停不脱离 `:hover` 范围，无需 JS 态），定位 `left: 100%` 贴父项右侧，视觉令牌（`--menu-bg`/`--menu-border`/`--menu-shadow`/`--radius-md`）与主菜单严格一致。已知边界：主菜单位置校正逻辑只测主菜单自身尺寸，菜单贴近屏幕右缘时子菜单可能溢出视口。先例：FileTreePanel「复制路径」二级菜单（绝对/相对/@引用/文件名）。
 
+#### 同一元素禁将 mousedown 与 click 双绑同一 handler
+
+一次鼠标单击天然产生 `mousedown` → `mouseup` → `click` 序列，若同一元素同时绑定 `@mousedown="h(...)"` 与 `@click="h(...)"`，单次点击会执行 handler 两次。对「选中即切换」的列表项，父级切换链（保存树状态、清空预览、`await nextTick` 后恢复）会重复执行，产生重复 IO 与异步竞态，且右键按下也会先触发一次选中。
+
+```vue
+<!-- 错误：单击执行两次，右键按下亦触发选中 -->
+<div class="dir-item" @mousedown="handleSelect(dir.id)" @click="handleSelect(dir.id)">
+
+<!-- 正确：只用 click 作为唯一选中入口 -->
+<div class="dir-item" @click="handleSelect(dir.id)">
+```
+
+- 历史成因：2026-05 提交 `cddcedd` 为「修复点击事件」追加 `@mousedown` 时保留了原有 `@click`，双触发潜伏至 2026-11 才定位
+- 拖拽容器（VueDraggable/SortableJS）内同样适用：拖拽结束时的 click 由 SortableJS 抑制，无需用 `mousedown` 补偿；同构先例 `AiChatPanel.vue` 常用目录列表即纯 `@click`
+- 单测须断言事件次数（`emitted('select')` 长度为 1）且单独 `trigger('mousedown')` 不产生事件，仅断言「事件存在」无法捕获双触发
+
 ## 正反示例
 
 ### 正确：nav active 指示条 left:0
