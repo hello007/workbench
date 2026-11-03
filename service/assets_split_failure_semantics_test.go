@@ -472,6 +472,8 @@ func TestReplaceArtifactName_PageSeqDigits(t *testing.T) {
 		{"方案-009.pptx", "方案", true, true, "当前 %03d 核心形态：两函数均 true"},
 		{"09-方案.pptx", "方案", true, false, "历史 %02d 已改名形态：仅产物形态命中"},
 		{"009-方案.pptx", "方案", true, false, "当前 %03d 已改名形态：仅产物形态命中"},
+		{"1234-方案.pptx", "方案", true, false, "≥1000 页 4 位页序已改名形态"},
+		{"方案-1234.pptx", "方案", true, true, "≥1000 页 4 位页序核心形态"},
 		{"001-方案.pptx", "方案", true, false, "最终产物名（已改名形态）不误判为核心中间态"},
 		{"方案-001.pptx", "方案", true, true, "核心中间态同时属产物形态"},
 		{"001-123-p.pptx", "123", true, false, "纯数字主干的已改名形态（-p 后缀）"},

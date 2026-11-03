@@ -535,6 +535,17 @@ func (s *AssetLibraryService) splitOneFileWithHash(ctx context.Context, store *a
 		}
 	}
 	retained := s.cleanupRetainedSplitArtifacts(store, lib, filterRecord, retainedDir, "")
+	// 跨落点（R1，P1-1）：本次落点与凭证目录不同时，旧落点残留若删不掉，其凭证名
+	// 相对 record.outputDir 解析——写入以新 output_dir 为准的记录后会错锚到本次
+	// 落点，旧残留反而失去归属（永久孤儿）。故异目录下的失败条目一律丢弃并逐条
+	// 告警，交人工清理；同目录失败条目继续随记录携带（下次重拆可再消费）。
+	if record != nil && !samePathFold(record.outputDir, result.OutputDir) {
+		for _, fp := range retained {
+			Logger().Warn("拆分跨落点切换：旧落点残留页删除失败，归属凭证不再随记录携带（需人工清理）",
+				"libraryId", lib.ID, "dir", retainedDir, "name", fp.Name)
+		}
+		retained = nil
+	}
 
 	// 6. 落拆分记录（成功才记；失败/取消不记，下次触发重走完整判定）。产物主干
 	//    持久化（v9）——source/cache 落点核心原生命名恒为 <baseName>-NNN.pptx。
@@ -920,8 +931,19 @@ func (s *AssetLibraryService) splitOneFileReplace(ctx context.Context, store *as
 			consumedRecord = recordWithoutRetainedNames(record, renamed)
 		}
 	}
-	retained = mergeSplitFingerprintsByName(retained,
-		s.cleanupRetainedSplitArtifacts(store, lib, consumedRecord, retainedDir, ""))
+	oldRetained := s.cleanupRetainedSplitArtifacts(store, lib, consumedRecord, retainedDir, "")
+	// 跨落点（R1，P1-1）：本次落点与凭证目录不同（如 records 由 replace 切到
+	// source/cache 的同源目录、或旧记录落点已迁移）时，旧落点删不掉的残留凭证名
+	// 相对 record.outputDir 解析，写入新记录会错锚到本次落点。一律丢弃并逐条告警；
+	// cleanupStaleReplaceArtifacts 产出的 `retained` 描述本次落点，不受影响照常保留。
+	if record != nil && !samePathFold(record.outputDir, outDir) {
+		for _, fp := range oldRetained {
+			Logger().Warn("拆分跨落点切换：旧落点残留页删除失败，归属凭证不再随记录携带（需人工清理）",
+				"libraryId", lib.ID, "dir", retainedDir, "name", fp.Name)
+		}
+		oldRetained = nil
+	}
+	retained = mergeSplitFingerprintsByName(retained, oldRetained)
 	// 旧产物目录收尾（与 source 路径同一决策单点 splitArtifactCleanupPlan）：异目录
 	// 清理旧落点；同目录跨 target 清理旧形态产物；同目录同 target 但记录主干 !=
 	// 本次新主干时清理旧主干并以 excludeStem 排除本次新产物；同目录同主干（普通
@@ -1302,7 +1324,7 @@ func splitArtifactPathForStem(record *assetSplitRecord, stem string, slideNum in
 	return filepath.Join(record.outputDir, fmt.Sprintf("%s-%03d.pptx", stem, slideNum))
 }
 
-// parseSplitArtifactName 解析产物文件名：命名主干 + 页序（页序 ≥1）。
+// parseSplitArtifactName 解析产物文件名：命名主干 + 页序（页序 **≥2 位**）。
 // 形态随落点：replace 为 <纯数字页序>-<主干>.pptx（主干须非空）；其余为
 // <主干>-<纯数字页序>.pptx（主干可为空，兼容历史 `-001.pptx`）。与
 // findSplitArtifactByPage 的形态判定同源，禁另写一套。
@@ -1311,9 +1333,11 @@ func parseSplitArtifactName(name, target string) (stem string, page int, ok bool
 		return "", 0, false
 	}
 	if target == model.AssetSplitTargetReplace {
-		// replace 形态：<纯数字页序>-<主干>.pptx（页序段位数不限，v8 前后兼容）
+		// replace 形态：<纯数字页序>-<主干>.pptx。页序段要求**至少 2 位**（与
+		// isArtifactPageSeq 同口径）：1 位页序的用户文件（`9-方案.pptx`）不是产物，
+		// 不得被清理/定位路径误认。
 		idx := strings.IndexByte(name, '-')
-		if idx <= 0 || idx >= len(name)-len("-")-len(".pptx") || !isAllDigits(name[:idx]) {
+		if idx <= 0 || idx >= len(name)-len("-")-len(".pptx") || !isArtifactPageSeq(name[:idx]) {
 			return "", 0, false
 		}
 		n, convErr := strconv.Atoi(name[:idx])
@@ -1514,8 +1538,9 @@ func (s *AssetLibraryService) splitArtifactFingerprints(lib model.AssetLibrary, 
 //   - 页序 ≤ keepPage 但文件名不是当前形态 `fmt.Sprintf("%s-%03d.pptx", baseName, seq)`
 //     （历史 %02d 产物，如 `演变-01.pptx` 与新 `演变-001.pptx` 并存）。
 //
-// 页序段纯数字、不限位数；主干段按 sameNameFold 比较（仅 Windows 折叠大小写，
-// Windows 仅改大小写改名后 `Abc-003.pptx` 仍识别为产物；Linux/macOS 大小写敏感，
+// 页序段为**≥2 位**纯数字（isArtifactPageSeq：历史 %02d、当前 %03d、≥1000 页
+// 四位通吃；1 位页序用户文件不识别为产物）；主干段按 sameNameFold 比较（仅
+// Windows 折叠大小写，Windows 仅改大小写改名后 `Abc-003.pptx` 仍识别为产物；Linux/macOS 大小写敏感，
 // 大小写变体是用户文件不识别）。目录内其余内容（用户自建文件、`<源名>-草稿.pptx`
 // 等同名异构文件、子目录、非 .pptx）一律不动。
 //
@@ -1610,9 +1635,10 @@ func (s *AssetLibraryService) removeSplitArtifactsBeyondByFingerprint(store *ass
 }
 
 // splitArtifactPageSeq 解析源目录/derived 落点产物文件名 `%s-%s.pptx` 的页序段：
-// 返回纯数字页序串与是否命中。主干段按 sameNameFold 比较（仅 Windows 折叠大小写）；
-// 从每个 '-' 处切分逐一尝试，兼容主干本身含 '-' 或数字（如 `方案-A`、`2026`）。
-// 非产物形态（非 .pptx、后缀/主干不符、页序非纯数字）返回 false。
+// 返回纯数字页序串与是否命中。页序段要求**至少 2 位**（isArtifactPageSeq）；
+// 主干段按 sameNameFold 比较（仅 Windows 折叠大小写）。从每个 '-' 处切分逐一尝试，
+// 兼容主干本身含 '-' 或数字（如 `方案-A`、`2026`）。非产物形态（非 .pptx、
+// 后缀/主干不符、页序非纯数字或仅 1 位）返回 false。
 func splitArtifactPageSeq(name, baseName string) (string, bool) {
 	const ext = ".pptx"
 	if !strings.HasSuffix(name, ext) {
@@ -1623,7 +1649,7 @@ func splitArtifactPageSeq(name, baseName string) (string, bool) {
 		if stem[i] != '-' || !sameNameFold(stem[:i], baseName) {
 			continue
 		}
-		if seq := stem[i+1:]; isAllDigits(seq) {
+		if seq := stem[i+1:]; isArtifactPageSeq(seq) {
 			return seq, true
 		}
 	}
@@ -1842,6 +1868,12 @@ func (s *AssetLibraryService) cleanupSplitArtifactsInDirByPage(store *assetsStor
 //
 // excludeStem 为本次新主干（同目录改主干 M1 保护）：命中同主干候选跳过。正常情况
 // 下旧指纹名是旧主干，不会与本次新主干相同；该判定为防御性兜底。
+//
+// **删除失败不登记 retained**：本函数清理的是旧落点/旧主干产物，此时本次记录已被
+// 新值覆盖（output_dir / artifact_stem 即将指向新落点），残留页不再被任何记录引用；
+// retained 的消费单点以 record.outputDir 为锚，登记只会造成错锚。故失败仅告警、残留
+// 交人工清理，与 replace 同目录重拆（cleanupStaleReplaceArtifacts 登记 retained）口径
+// 刻意区分（见 docs/spec/pptx-split.md §9.5）。
 func (s *AssetLibraryService) cleanupSplitArtifactsByFingerprint(store *assetsStore, lib model.AssetLibrary, record *assetSplitRecord, dir, excludeStem string) {
 	removed := make([]string, 0, record.pageCount)
 	for page := 1; page <= record.pageCount; page++ {
@@ -1886,7 +1918,13 @@ func (s *AssetLibraryService) cleanupSplitArtifactsByFingerprint(store *assetsSt
 			continue
 		}
 		if rmErr := removeSplitArtifactFile(path); rmErr != nil {
-			Logger().Warn("删除旧拆分产物失败（残留需人工清理，本次重拆不再自动收敛）",
+			// 该路径（v10 指纹分支）不登记 retained：此处用于清理**旧落点/旧主干**
+			// 产物，调用时本次记录的 output_dir 与 artifact_stem 即将被新值覆盖，
+			// 残留页已不再被任何记录引用；retained 的消费单点以 record.outputDir
+			// 为锚，此时若错误地收下这些条目只会产生错锚，故明确只告警、残留交人工
+			// 清理（replace 同目录普通重拆的旧页清理走 cleanupStaleReplaceArtifacts，
+			// 那条链路才登记 retained）。
+			Logger().Warn("删除旧拆分产物失败（残留需人工清理，不随记录携带）",
 				"libraryId", lib.ID, "path", path, "err", rmErr)
 			continue
 		}
@@ -1928,6 +1966,15 @@ func isAllDigits(s string) bool {
 	return len(s) > 0
 }
 
+// isArtifactPageSeq 产物页序段判定单点：**至少 2 位**纯数字（历史 `%02d`、当前
+// `%03d`、≥1000 页的 4 位）。核心与编排永不写 1 位页序，故 `方案-9.pptx` /
+// `9-方案.pptx` 这类用户文件在任何形态判定中都不得进入产物集合。所有解析点在
+// 切片出页序段后统一调用本函数，禁各处自拼 `len(seq) >= 2 && isAllDigits(seq)`
+// ——口径分叉会让同一文件在「拒绝」与「按名删除」之间滑移（R1/R2）。
+func isArtifactPageSeq(seq string) bool {
+	return len(seq) >= 2 && isAllDigits(seq)
+}
+
 // replaceArtifactBase 就地替换产物的名字主干：源名主干为「≥3 位纯数字」时追加
 // 「-p」后缀。
 //
@@ -1960,7 +2007,7 @@ func pageSeqFromArtifactName(name string) int {
 		return 0
 	}
 	seq := stem[idx+1:]
-	if !isAllDigits(seq) {
+	if !isArtifactPageSeq(seq) {
 		return 0
 	}
 	n, err := strconv.Atoi(seq)
@@ -1994,8 +2041,9 @@ func isReplaceArtifactName(name, base string) bool {
 	}
 	// 折叠匹配复用精确逻辑：双侧同源 ToLower 后按**折叠串长度**切片（页序段为
 	// ASCII 数字、纯数字主干的 -p 后缀不受大小写影响）。Unicode 大小写映射可能
-	// 改变字节长度（如 İ→i̇ 由 2 字节变 3 字节），但 name 与 base 走同一变换，
-	// 边界始终落在同一折叠串上，不会截半或越界。
+	// 改变字节长度（如 İ 在 Go strings.ToLower 中走 simple mapping，由 2 字节变
+	// 1 字节），但 name 与 base 走同一变换，边界始终落在同一折叠串上，不会截半
+	// 或越界。
 	return isReplaceArtifactNameExact(strings.ToLower(name), strings.ToLower(base))
 }
 
@@ -2012,7 +2060,7 @@ func isReplaceArtifactNameExact(name, base string) bool {
 		name[:len(base)] == base && name[len(base)] == '-' &&
 		name[len(name)-len(ext):] == ext {
 		seq := name[len(base)+1 : len(name)-len(ext)]
-		if len(seq) >= 2 && isAllDigits(seq) {
+		if isArtifactPageSeq(seq) {
 			return true
 		}
 	}
@@ -2020,7 +2068,7 @@ func isReplaceArtifactNameExact(name, base string) bool {
 	suffix := "-" + replaceArtifactBase(base) + ext
 	if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
 		seq := name[:len(name)-len(suffix)]
-		return len(seq) >= 2 && isAllDigits(seq)
+		return isArtifactPageSeq(seq)
 	}
 	return false
 }
@@ -2149,7 +2197,7 @@ func isReplaceCoreArtifactNameExact(name, base string) bool {
 		return false
 	}
 	seq := stem[idx+1:]
-	if len(seq) < 2 || !isAllDigits(seq) {
+	if !isArtifactPageSeq(seq) {
 		return false
 	}
 	return stem[:idx] == base
@@ -2428,6 +2476,10 @@ func isReplaceArtifactOutput(absPath string, outputs []replaceSplitOutput) bool 
 // 仅用于「目录由 replace 记录独占」的调用点（output_dir = <源目录>/<主干>，
 // 用户自建文件混入概率低）；核心中间态 `<主干>-<数字>.pptx` 不在此列（需主干
 // 精确匹配，防误把 `<文件名>-草稿.pptx` 当产物）。
+//
+// 页序段与两形态判定同口径要求**至少 2 位**（isArtifactPageSeq）：1 位页序的
+// 用户文件（`9-方案.pptx`）不构成产物，不得被移动拦截 / 批量剔除 / 二次拆分
+// 拒绝路径误认（R2/P2-3）。
 func isReplaceArtifactNameAnyStem(name string) bool {
 	stem, ok := strings.CutSuffix(name, ".pptx")
 	if !ok {
@@ -2437,7 +2489,7 @@ func isReplaceArtifactNameAnyStem(name string) bool {
 	if idx <= 0 || idx >= len(stem)-1 {
 		return false
 	}
-	return isAllDigits(stem[:idx])
+	return isArtifactPageSeq(stem[:idx])
 }
 
 // resolveExistingDirCase 把目录路径归一为磁盘上的实际条目名大小写：父目录下与

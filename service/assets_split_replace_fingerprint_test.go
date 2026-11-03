@@ -706,7 +706,7 @@ func TestAssetSplitReplace_SingleDigitUserFileKeptOnLegacyRecord(t *testing.T) {
 		t.Errorf("1 位页序用户文件不得进入历史产物集合（err=%v content=%q）", readErr, got)
 	}
 	if n := countIndexRowsByPath(t, svc, lib.ID, "方案/方案-9.pptx"); n != 0 {
-		t.Errorf("用户文件不应被索引，实际 %d 行", n)
+		t.Errorf("拆分流程不得为用户文件建索引行，实际 %d 行", n)
 	}
 	for _, name := range []string{"001-方案.pptx", "002-方案.pptx"} {
 		if got, readErr := os.ReadFile(filepath.Join(outDir, name)); readErr != nil || string(got) != "new-bytes" {

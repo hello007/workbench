@@ -247,7 +247,9 @@ func TestCleanupSplitArtifactsInDirByPage_RecordStemAbsentSilent(t *testing.T) {
 }
 
 // TestCleanupSplitArtifactsInDirByPage_AmbiguousSamePageWarns 同主干同页序多候选
-// （`旧名-001.pptx` 与 `旧名-1.pptx`）不可判定：两文件均保留并 Warn，不再静默。
+// （`旧名-001.pptx` 与 `旧名-0001.pptx`，页序都 ≥2 位且解析为第 1 页）不可判定：
+// 两文件均保留并 Warn，不再静默。1 位页序（`旧名-1.pptx`）自 R1 起不算产物，
+// 无法再与 `旧名-001.pptx` 构成歧义，故用 4 位形态验证同一判定分支。
 func TestCleanupSplitArtifactsInDirByPage_AmbiguousSamePageWarns(t *testing.T) {
 	svc := newTestAssetService(t)
 	dir := t.TempDir()
@@ -255,7 +257,7 @@ func TestCleanupSplitArtifactsInDirByPage_AmbiguousSamePageWarns(t *testing.T) {
 	store := svc.openStoreForTest(t, lib.ID)
 	outDir := filepath.Join(dir, "旧名")
 	a := filepath.Join(outDir, "旧名-001.pptx")
-	b := filepath.Join(outDir, "旧名-1.pptx")
+	b := filepath.Join(outDir, "旧名-0001.pptx")
 	testutil.WriteFile(t, a, "a")
 	testutil.WriteFile(t, b, "b")
 

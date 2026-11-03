@@ -743,9 +743,14 @@ func TestAssetSplitRetained_SourceTargetNewProductNotConsumedAsRetained(t *testi
 
 // seedReplaceRecordWithCoreFormRetained 构造「记录 target=replace、落点 A、retained
 // 携带 **source 形态**残留凭证 `<stem>-003.pptx`、源仍在」的落库状态：A 内已有上次
-// replace 的两页产物（`001-<stem>` / `002-<stem>`）与第 3 页 source 形态残留
-// （`<stem>-003`，内容 old-bytes）。该状态等价于「source→replace 同目录切换时第 3 页
-// 旧页删除失败」——真实链路由 cleanupStaleReplaceArtifacts 把该页凭证写入 retained。
+// replace 的两页产物（`001-<stem>` / `002-<stem>`，含 files 索引行）与第 3 页 source
+// 形态残留（`<stem>-003`，内容 old-bytes）。
+//
+// 记录以 source_removed=0 落库，对应真实链路删除第 3 页旧产物失败（凭证写入 retained）
+// 且删源失败（补写 source_removed=0 记录）的双失败态；成功路径不会写 source_removed=0
+// 的 replace 记录，故该状态只可能来自这两类失败叠加。真实链路分别由
+// cleanupStaleReplaceArtifacts 写 retained、删源失败分支补写记录，二者独立发生，
+// 测试直接落库即等价（不再精确复现两次失败时序）。
 //
 // 直接落库而非驱动两次失败尝试：删除失败注入只覆盖 cleanupStaleReplaceArtifacts，
 // 随后 cleanupSplitArtifactsInDirByPage 走生产删除函数，测试无法在不依赖外部状态
@@ -763,7 +768,7 @@ func seedReplaceRecordWithCoreFormRetained(t *testing.T, svc *AssetLibraryServic
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		t.Fatalf("建落点目录: %v", err)
 	}
-	// 上次 replace 的两页产物（replace 形态），构成记录指纹
+	// 上次 replace 的两页产物（replace 形态），构成记录指纹，并按真实链路写入索引行
 	fps := make([]splitArtifactFingerprint, 0, 2)
 	for i := 1; i <= 2; i++ {
 		p := filepath.Join(outDir, replaceArtifactName(i, stem))
@@ -771,6 +776,7 @@ func seedReplaceRecordWithCoreFormRetained(t *testing.T, svc *AssetLibraryServic
 			t.Fatalf("写旧产物页 %d: %v", i, err)
 		}
 		fps = append(fps, splitFingerprintOfTest(t, p, i))
+		insertIndexRowForTest(t, svc, lib.ID, int64(9700+i), stem+"/"+filepath.Base(p))
 	}
 	// source 形态残留页（核心中间态命名），凭证写入 retained
 	stalePage = filepath.Join(outDir, fmt.Sprintf("%s-003.pptx", stem))
