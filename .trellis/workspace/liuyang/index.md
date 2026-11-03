@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 202
+- **Total Sessions**: 203
 - **Last Active**: 2026-11-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1140 | Active |
+| `journal-4.md` | ~1173 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 203 | 2026-11-03 | replace 指纹保留归属跨落点收敛 | `5cf2f4f` | `master` |
 | 202 | 2026-11-03 | replace 指纹校验审核整改 | `143ed8a` | `master` |
 | 201 | 2026-11-02 | replace 备份让位前的产物指纹校验 | `d69e832` | `master` |
 | 200 | 2026-11-02 | 归档父任务：交付前回归与遗留收口 | `9a46d1e` | `master` |

@@ -1138,3 +1138,36 @@ splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 203: replace 指纹保留归属跨落点收敛
+
+**Date**: 2026-11-03
+**Task**: replace 指纹保留归属跨落点收敛
+**Branch**: `master`
+
+### Summary
+
+第二轮审核整改：retained 消费收敛 cleanupRetainedSplitArtifacts 单点，source/cache 与 replace 成功路径均消费并写回，切换 target 后残留页不再孤儿或永久拒绝；cleanupStaleReplaceArtifacts 回退为只按本次指纹；replaceOutDirOwnedByRecord 凭证内容全等时放宽落点，放宽分支核心前拦截无归属中间态同名文件；守卫页序收紧至 ≥2 位；R3 换回失败文案含备份路径；三处文档同步。新增跨 target/四态/文案/存续用例，变异验证三处均变红；go test ./... 与覆盖率门禁通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5cf2f4f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
