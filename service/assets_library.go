@@ -75,8 +75,8 @@ type AssetLibraryService struct {
 	moveToRecycleBinFn func(path string) error
 
 	// removeArtifactFn 拆分产物删除注入点（nil = 生产实现 removeSplitArtifactFile；
-	// 仅 cleanupStaleReplaceArtifacts 使用，单测注入失败驱动「清理失败留存归属」分支，
-	// 注入模式对齐 splitCoreFn/parseFn 先例）
+	// cleanupStaleReplaceArtifacts 与 cleanupRetainedSplitArtifacts 共用，单测注入失败
+	// 驱动「清理失败留存归属」分支，注入模式对齐 splitCoreFn/parseFn 先例）
 	removeArtifactFn func(path string) error
 
 	thumbQ      *thumbQueue       // 缩略图串行队列（assets_thumbs.go，扫描完成后批量入队 + 打开跳页）

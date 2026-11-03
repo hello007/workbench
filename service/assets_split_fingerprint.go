@@ -191,10 +191,67 @@ func lookupFingerprintByName(fps []splitArtifactFingerprint, name string) (split
 // （artifact_fingerprints），未获得唯一命中再查清理失败保留凭证
 // （retained_fingerprints）。每个清单各自要求按名唯一命中，某清单多命中视为该
 // 清单不可判定并继续查下一清单；两清单均无唯一命中才返回 false。备份让位校验与
-// cleanupStaleReplaceArtifacts 必须共用本单点，禁各调用点自行拼接查询顺序。
+// 落点归属放宽（replaceOutDirOwnedByRecord）必须共用本单点，禁各调用点自行拼接
+// 查询顺序。清理侧不消费本单点：cleanupStaleReplaceArtifacts 只查指纹，
+// retained 由 cleanupRetainedSplitArtifacts 独立处理（R1）。
 func ownershipFingerprintForName(record *assetSplitRecord, name string) (splitArtifactFingerprint, bool) {
 	if fp, ok := fingerprintForName(record, name); ok {
 		return fp, true
 	}
 	return retainedFingerprintForName(record, name)
+}
+
+// mergeSplitFingerprintsByName 按文件名去重合并归属凭证清单（sameNameFold：仅
+// Windows 折叠大小写；禁裸 EqualFold）。base 在前、extra 在后，同名保留 base 的
+// 条目。用于 replace 链路「cleanupStaleReplaceArtifacts 失败条目」与「retained
+// 消费失败条目」合并写入 retained_fingerprints，避免同一文件重复登记。
+func mergeSplitFingerprintsByName(base, extra []splitArtifactFingerprint) []splitArtifactFingerprint {
+	if len(extra) == 0 {
+		if len(base) == 0 {
+			return nil
+		}
+		return append([]splitArtifactFingerprint(nil), base...)
+	}
+	out := make([]splitArtifactFingerprint, 0, len(base)+len(extra))
+	out = append(out, base...)
+	for _, fp := range extra {
+		dup := false
+		for _, existing := range out {
+			if sameNameFold(existing.Name, fp.Name) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, fp)
+		}
+	}
+	return out
+}
+
+// recordWithoutRetainedNames 返回剔除「本次新产物同名」retained 条目的记录副本
+// （sameNameFold 视为同名）。用于 replace 链路消费 retained 前的过滤：同名条目此刻
+// 描述的是刚生成的新页，若内容恰好全等（拆分字节确定性）直接消费会误删新页；且该
+// 名字已是本次产物，旧凭证不应再携带。record 为 nil 或无需剔除时原样返回。
+func recordWithoutRetainedNames(record *assetSplitRecord, newFiles []string) *assetSplitRecord {
+	if record == nil || len(record.retained) == 0 || len(newFiles) == 0 {
+		return record
+	}
+	newNames := make(map[string]struct{}, len(newFiles))
+	for _, p := range newFiles {
+		newNames[filepath.Base(p)] = struct{}{}
+	}
+	kept := make([]splitArtifactFingerprint, 0, len(record.retained))
+	for _, fp := range record.retained {
+		if _, isNew := foldNameInSet(newNames, fp.Name); isNew {
+			continue
+		}
+		kept = append(kept, fp)
+	}
+	if len(kept) == len(record.retained) {
+		return record
+	}
+	cp := *record
+	cp.retained = kept
+	return &cp
 }

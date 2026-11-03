@@ -297,8 +297,10 @@ ALTER TABLE split_records ADD COLUMN artifact_fingerprints TEXT NOT NULL DEFAULT
 //     被永久当作「用户同名文件」拒绝）。
 //   - 与 artifact_fingerprints 分离：指纹列契约恒为「条目数 = page_count」，把清理
 //     失败页混入会把损坏判定与保留凭证混为一谈（fingerprintsUsable 语义被破坏）。
-//   - 归属查询统一走 ownershipFingerprintForName（先 artifact_fingerprints 再
-//     retained_fingerprints），备份让位与 cleanupStaleReplaceArtifacts 共用。
+//   - 归属查询：备份让位与落点归属放宽（replaceOutDirOwnedByRecord）走
+//     ownershipFingerprintForName（先 artifact_fingerprints 再 retained_fingerprints）；
+//     清理侧 retained 由 cleanupRetainedSplitArtifacts 独立单点消费（任意 target 同
+//     output_dir，2026-11-03），cleanupStaleReplaceArtifacts 只认本次指纹。
 //   - 仅由 cleanupStaleReplaceArtifacts 删除失败产出，**禁止自动回填、禁止从目录
 //     内容反推**；下次重拆成功消费后不再携带该条目（自愈）。
 //   - 存量记录默认空串（v11 前无该列），不清空也不回填。

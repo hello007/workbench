@@ -497,8 +497,10 @@ func TestAssetSplitReplace_BackupReverifyMismatchRejects(t *testing.T) {
 		Page: 1, Name: "001-复验.pptx", Size: int64(len("old-bytes")),
 		SHA256: strings.Repeat("0", 64),
 	}
-	if _, err := svc.backupReplaceArtifactForSurrender(oldPath, dir, "001-复验.pptx", mismatch); !errors.Is(err, errSplitArtifactContentMismatch) {
+	if _, kept, err := svc.backupReplaceArtifactForSurrender(oldPath, dir, "001-复验.pptx", mismatch); !errors.Is(err, errSplitArtifactContentMismatch) {
 		t.Fatalf("复验不符应返回内容不一致错误，实际：%v", err)
+	} else if kept != "" {
+		t.Errorf("换回成功时不应返回保留备份路径，实际 %q", kept)
 	}
 	if got, readErr := os.ReadFile(oldPath); readErr != nil || string(got) != "old-bytes" {
 		t.Errorf("复验不符应换回原路径（err=%v, content=%q）", readErr, got)
@@ -507,9 +509,12 @@ func TestAssetSplitReplace_BackupReverifyMismatchRejects(t *testing.T) {
 
 	// 正向对照：指纹相符 → 备份路径存在、原路径消失
 	match := splitFingerprintOfTest(t, oldPath, 1)
-	bak, err := svc.backupReplaceArtifactForSurrender(oldPath, dir, "001-复验.pptx", match)
+	bak, kept, err := svc.backupReplaceArtifactForSurrender(oldPath, dir, "001-复验.pptx", match)
 	if err != nil {
 		t.Fatalf("复验相符应允许备份让位：%v", err)
+	}
+	if kept != "" {
+		t.Errorf("复验相符不应返回保留备份路径，实际 %q", kept)
 	}
 	if _, statErr := os.Stat(bak); statErr != nil {
 		t.Errorf("备份文件应存在：%v", statErr)
@@ -600,7 +605,12 @@ func TestIsReplaceCoreArtifactNameExactForms(t *testing.T) {
 		want       bool
 	}{
 		{"守卫-009.pptx", "守卫", true},
-		{"守卫-9.pptx", "守卫", true},         // 页序位数不限（历史 %02d 与 %03d 均识别）
+		{"守卫-09.pptx", "守卫", true},        // 历史 %02d 形态：2 位页序仍拦截
+		{"守卫-9.pptx", "守卫", false},        // 1 位页序：核心永不写，用户文件不得误拦（R2）
+		{"方案-9.pptx", "方案", false},        // R2 显式场景：1 位页序不拦
+		{"方案-09.pptx", "方案", true},        // R2 显式场景：2 位页序拦
+		{"方案-009.pptx", "方案", true},       // 当前 %03d 形态拦
+		{"方案-2.pptx", "方案", false},        // 1 位页序（用户文件/非核心形态）不拦
 		{"守卫-abc.pptx", "守卫", false},      // 页序段非纯数字
 		{"守卫-009-.pptx", "守卫", false},     // 页序段为空
 		{"-009.pptx", "守卫", false},        // 主干段为空
