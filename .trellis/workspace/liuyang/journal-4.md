@@ -1204,3 +1204,36 @@ splitOneFileReplace 步骤 5 在命中 oldArtifacts 后、备份 rename 前增�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 205: 0eb330b 审核发现全量修复
+
+**Date**: 2026-11-03
+**Task**: 0eb330b 审核发现全量修复
+**Branch**: `master`
+
+### Summary
+
+修复跨落点 retained 错锚（异目录失败条目丢弃+Warn）；页序解析点统一 >=2 位（isArtifactPageSeq）；补守卫内容不符与 cache 到 replace E2E；同步 spec 口径、4 位页序用例与 İ 注释。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a647d47` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
