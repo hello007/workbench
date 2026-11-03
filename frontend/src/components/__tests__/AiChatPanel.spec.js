@@ -61,6 +61,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListChatDirectories: vi.fn(() => Promise.resolve([
     { id: 'chatdir-1', path: 'D:\\workspace\\very-long-projects\\demo-projects\\alpha', displayName: '项目管理', sortOrder: 0, createdAt: 1000 },
     { id: 'chatdir-2', path: 'C:\\work\\server', displayName: 'server', sortOrder: 1, createdAt: 2000 }
@@ -1301,6 +1302,25 @@ describe('AiChatPanel.vue', () => {
       await flushPromises()
 
       expect(SaveChatSettings).toHaveBeenCalledWith('default', 'sonnet', '')
+    })
+
+    it('模型下拉首选项回显 claude 设置解析的默认模型，未解析到回退通用文案', async () => {
+      const { GetClaudeDefaultModel } = await import('../../../wailsjs/go/main/App')
+      GetClaudeDefaultModel.mockResolvedValue('glm-5.3-flash')
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+
+      // el-select stub 渲染原生 select，首 option 文本 = modelOptions[0].label
+      const modelSelect = wrapper.findAll('select')[0]
+      expect(modelSelect.element.options[0].text).toBe('默认（claude 设置：glm-5.3-flash）')
+
+      // 空串（设置文件缺失/无配置）回退「默认模型」
+      GetClaudeDefaultModel.mockResolvedValue('')
+      wrapper = createWrapper()
+      await flushPromises()
+      await selectFirstDirectory(wrapper)
+      expect(wrapper.findAll('select')[0].element.options[0].text).toBe('默认模型')
     })
   })
 

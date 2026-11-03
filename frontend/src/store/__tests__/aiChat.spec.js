@@ -23,13 +23,15 @@ import {
   RemoveChatTemplate,
   GetChatSettings,
   SaveChatSettings,
-  DiscoverChatClis
+  DiscoverChatClis,
+  GetClaudeDefaultModel
 } from '../../../wailsjs/go/main/App'
 
 // AI 对话全域绑定 mock（形状对齐 model.ChatDirectory / ChatSession / ChatTemplate
 // / ChatSettings 与 App.d.ts 签名）。vi.mock 提升到文件顶部，上方静态 import
 // 拿到的即这里的 mock。
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListChatDirectories: vi.fn(() => Promise.resolve([
     { id: 'chatdir-1', path: 'C:\\projects\\app', displayName: '项目管理', sortOrder: 0, createdAt: 1000 },
     { id: 'chatdir-2', path: 'C:\\work\\server', displayName: 'server', sortOrder: 1, createdAt: 2000 }
@@ -673,6 +675,24 @@ describe('aiChat store', () => {
     const store = useAiChatStore()
     await store.loadChatCliCandidates()
     expect(store.chatCliCandidates).toEqual([])
+  })
+
+  it('loadClaudeDefaultModel 加载 claude 设置解析的默认模型', async () => {
+    const store = useAiChatStore()
+    GetClaudeDefaultModel.mockResolvedValueOnce('glm-5.3-flash')
+    await store.loadClaudeDefaultModel()
+    expect(store.claudeDefaultModel).toBe('glm-5.3-flash')
+
+    GetClaudeDefaultModel.mockResolvedValueOnce('')
+    await store.loadClaudeDefaultModel()
+    expect(store.claudeDefaultModel).toBe('')
+  })
+
+  it('loadClaudeDefaultModel 失败静默降级空串', async () => {
+    GetClaudeDefaultModel.mockRejectedValueOnce(new Error('boom'))
+    const store = useAiChatStore()
+    await store.loadClaudeDefaultModel()
+    expect(store.claudeDefaultModel).toBe('')
   })
 })
 

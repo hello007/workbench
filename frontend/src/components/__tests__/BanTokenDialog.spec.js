@@ -7,6 +7,7 @@ vi.mock('element-plus', () => ({
 }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   BanWebToken: vi.fn(),
   KickConnection: vi.fn()
 }))

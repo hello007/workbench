@@ -81,6 +81,7 @@ const getAiFunctionsMock = vi.fn(() =>
 )
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetAiFunctions: (...args) => getAiFunctionsMock(...args),
   GetAiTaskHistory: (...args) => getAiTaskHistoryMock(...args),
   GetAiTaskHistoryStats: (...args) => getAiTaskHistoryStatsMock(...args),

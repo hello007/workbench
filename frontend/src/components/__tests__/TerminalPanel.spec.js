@@ -36,6 +36,7 @@ vi.mock('../../composables/useTerminal', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetShellConfigs: vi.fn(),
   GetSettings: vi.fn(),
   SaveSettings: vi.fn(),

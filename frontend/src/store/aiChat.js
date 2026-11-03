@@ -21,7 +21,8 @@ import {
   RemoveChatTemplate,
   GetChatSettings,
   SaveChatSettings,
-  DiscoverChatClis
+  DiscoverChatClis,
+  GetClaudeDefaultModel
 } from '../../wailsjs/go/main/App'
 import { normalizePath } from '../utils/pathMatch'
 import { debug } from '../utils/debug'
@@ -494,6 +495,21 @@ export const useAiChatStore = defineStore('aiChat', () => {
     }
   }
 
+  // claude 设置文件解析出的 CLI 默认模型（GetClaudeDefaultModel）：
+  // 模型下拉「默认」选项回显真实默认值（如 env.ANTHROPIC_MODEL 的 glm-5.3-flash）。
+  // 空串 = 设置文件缺失/无配置，前端回退通用文案。面板挂载时拉一次，失败静默。
+  const claudeDefaultModel = ref('')
+
+  /** 加载 claude 设置解析的默认模型（失败静默降级空串）。 */
+  async function loadClaudeDefaultModel() {
+    try {
+      claudeDefaultModel.value = (await GetClaudeDefaultModel()) || ''
+    } catch (error) {
+      debug.log('读取 claude 默认模型失败:', error)
+      claudeDefaultModel.value = ''
+    }
+  }
+
   return {
     // 目录域
     chatDirectories,
@@ -540,6 +556,8 @@ export const useAiChatStore = defineStore('aiChat', () => {
     saveChatSettings,
     chatCliCandidates,
     loadChatCliCandidates,
+    claudeDefaultModel,
+    loadClaudeDefaultModel,
     // 选择题卡片域
     isChatQuestionAnswered,
     markChatQuestionAnswered

@@ -15,6 +15,7 @@ const listProcessesMock = vi.fn()
 const stopProcessMock = vi.fn()
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListProcesses: (...args) => listProcessesMock(...args),
   StopProcess: (...args) => stopProcessMock(...args)
 }))

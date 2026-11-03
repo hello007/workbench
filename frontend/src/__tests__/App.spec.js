@@ -10,6 +10,7 @@ import { useSettingsStore } from '../store'
 
 // App.vue onMounted 调用 settingsStore.loadTheme() → GetSettings，需 mock
 vi.mock('../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetSettings: vi.fn(() => Promise.resolve({})),
   SaveSettings: vi.fn(() => Promise.resolve(true))
 }))

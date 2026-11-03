@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useFavoritesStore } from '..'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetFavorites: vi.fn(() => Promise.resolve([
     { path: 'C:\\projects\\app', alias: 'My App', group: '默认', createdAt: 1000 }
   ])),

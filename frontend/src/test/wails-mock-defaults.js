@@ -285,6 +285,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   RemoveChatTemplate: true,
   GetChatSettings: { permissionMode: 'default', modelName: '' },
   SaveChatSettings: true,
+  // claude 设置文件解析的默认模型（模型下拉「默认」选项回显）：默认空 = 未配置，
+  // 首选项回退「默认模型」文案
+  GetClaudeDefaultModel: '',
   AddChatDirectory: null,
   ListChatDirectories: [],
   UpdateChatDirectory: true,

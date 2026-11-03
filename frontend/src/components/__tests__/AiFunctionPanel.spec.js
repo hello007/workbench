@@ -21,6 +21,7 @@ const openInExplorerMock = vi.fn(() => Promise.resolve())
 const getAiTaskOutputMock = vi.fn(() => Promise.resolve('完整输出全文\n含多行'))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetAiFunctions: vi.fn(() =>
     Promise.resolve([
       {

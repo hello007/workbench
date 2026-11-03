@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetDirectories: vi.fn(() => Promise.resolve([])),
   RefreshDirectoriesGitFlag: vi.fn(() => Promise.resolve([]))
 }))

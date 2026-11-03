@@ -12,6 +12,7 @@ vi.mock('element-plus', async () => {
 
 // 七个内容面板均被 stub（各自交互面由自身 spec 覆盖），仅需补齐 import 链所需导出
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   CopyTo: vi.fn(),
   ListProcesses: vi.fn(() => Promise.resolve([])),
   StopProcess: vi.fn(() => Promise.resolve({ stopped: true, method: 'forced' })),

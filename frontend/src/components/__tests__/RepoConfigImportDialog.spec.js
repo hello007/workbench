@@ -35,6 +35,7 @@ const previewMock = vi.fn(() => Promise.resolve(previewPayload))
 const applyMock = vi.fn(() => Promise.resolve({ added: 2, overwritten: 0, skipped: 2, failed: 1, failedReasons: ['收藏 D:/x：收藏夹已满（最多 100 条）'] }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   OpenFileDialog: (...args) => openDialogMock(...args),
   ReadFileBytes: (...args) => readFileBytesMock(...args),
   PreviewRepoConfigImport: (...args) => previewMock(...args),

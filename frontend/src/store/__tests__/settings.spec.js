@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetSettings: vi.fn(() => Promise.resolve({})),
   SaveSettings: vi.fn(() => Promise.resolve(true)),
   GetShellConfigs: vi.fn(() => Promise.resolve([]))

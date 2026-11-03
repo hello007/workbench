@@ -211,3 +211,11 @@ func (a *App) DiscoverChatClis() []model.ChatCliInfo {
 	// 薄委托：发现扫描为纯只读操作，不依赖 ChatService 状态
 	return service.DiscoverChatClis()
 }
+
+// GetClaudeDefaultModel 读本机 claude 设置文件解析 CLI 默认模型
+// （env.ANTHROPIC_MODEL 优先、settings model 字段兜底），模型下拉「默认」
+// 选项回显用；文件缺失/损坏返回空串（前端回退通用文案）。
+func (a *App) GetClaudeDefaultModel() string {
+	// 薄委托：纯只读，不依赖 ChatService 状态
+	return service.GetClaudeDefaultModel()
+}

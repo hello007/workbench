@@ -39,6 +39,7 @@ vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: vi.fn(function () { return {} })
 }))
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   CreateTerminal: vi.fn(() => Promise.resolve('sid-1')),
   WriteTerminalInput: vi.fn(() => Promise.resolve()),
   ChangeTerminalDir: vi.fn(() => Promise.resolve()),

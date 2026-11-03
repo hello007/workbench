@@ -3,6 +3,7 @@ import { useCommandPalette } from '../useCommandPalette'
 
 // wailsjs 在 frontend/wailsjs，从 src/composables/__tests__/ 解析为 ../../../wailsjs
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   SearchFiles: vi.fn(() => Promise.resolve([{ name: 'a.go', path: 'src/a.go', type: 'file' }])),
   ContentSearch: vi.fn(() => Promise.resolve([{ repo: 'r', results: [] }])),
   ContentSearchDirs: vi.fn(() => Promise.resolve([]))

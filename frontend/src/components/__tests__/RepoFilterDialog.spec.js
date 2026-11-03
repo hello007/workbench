@@ -49,6 +49,7 @@ const mockDirs = [
 ]
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   // 返回深拷贝，避免 doSave 回写 repo.tags 污染模块级 mockRepos 影响后续测试
   GetRepoFilterList: vi.fn(() => Promise.resolve(mockRepos.map(r => ({ ...r, tags: [...(r.tags || [])] })))),
   RefreshRepoFilterList: vi.fn(() => Promise.resolve(mockRepos.map(r => ({ ...r, tags: [...(r.tags || [])] })))),

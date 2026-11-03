@@ -13,6 +13,7 @@ vi.mock('element-plus', async () => {
 const getHostsMock = vi.fn()
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetHosts: (...args) => getHostsMock(...args)
 }))
 

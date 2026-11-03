@@ -12,6 +12,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   SplitPptxPerPage: vi.fn(() =>
     Promise.resolve({ outputDir: 'D:/docs/汇报', files: ['D:/docs/汇报/汇报-01.pptx'], pageCount: 1 })
   ),

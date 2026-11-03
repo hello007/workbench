@@ -108,6 +108,7 @@ const discoveredSkills = [
 const refreshDiscoveredMock = vi.fn(() => Promise.resolve(discoveredSkills))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetAiFunctions: vi.fn(() => Promise.resolve(seedData)),
   SaveAiFunctions: (...args) => saveAiFunctionsMock(...args),
   ExportAiFunctions: () => exportAiFunctionsMock(),

@@ -7,6 +7,7 @@ import { useUiStore, useDirectoryStore } from '../../store'
 
 // Mock wailsjs bindings used by composables (composables use ../../wailsjs relative to themselves)
 vi.mock('../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   SearchFiles: vi.fn(() => Promise.resolve([
     { name: 'main.go', path: 'src/main.go', type: 'file' }
   ])),

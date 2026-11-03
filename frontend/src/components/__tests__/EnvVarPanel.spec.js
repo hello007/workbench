@@ -13,6 +13,7 @@ vi.mock('element-plus', async () => {
 const listEnvVarsMock = vi.fn()
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListEnvVars: (...args) => listEnvVarsMock(...args)
 }))
 

@@ -35,6 +35,7 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 // PPTX 预览转换绑定（.pptx/.ppsx → COM 转 PDF → pdf viewer 链路）：
 // 用例内按需配置 mockReturnValue（成功 / 失败 / 不可用 / 挂起）
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ConvertPptxForPreview: vi.fn()
 }))
 vi.mock('xlsx', () => ({

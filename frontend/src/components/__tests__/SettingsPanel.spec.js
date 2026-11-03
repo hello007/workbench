@@ -35,6 +35,7 @@ vi.mock('../BanTokenDialog.vue', () => ({
 }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetSettings: vi.fn(),
   SaveSettings: vi.fn(),
   GetAppVersion: vi.fn(),

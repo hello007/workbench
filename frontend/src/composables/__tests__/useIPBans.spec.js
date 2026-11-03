@@ -40,6 +40,7 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListIPBans: vi.fn(),
   ListIPBanSuggestions: vi.fn(),
   QueryIPBanTrend: vi.fn()

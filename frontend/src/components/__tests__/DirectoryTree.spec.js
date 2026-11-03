@@ -23,6 +23,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   AddDirectory: vi.fn(() => Promise.resolve({ id: 'dir-1', name: '测试', path: '/test', isDefault: false })),
   UpdateDirectory: vi.fn(() => Promise.resolve({ id: 'dir-1', name: '测试', path: '/test', isDefault: false })),
   DeleteDirectory: vi.fn(() => Promise.resolve(true)),

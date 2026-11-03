@@ -22,6 +22,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetFileTree: vi.fn(() => Promise.resolve([])),
   InvalidateFileTreeCache: vi.fn(() => Promise.resolve()),
   ClearAllFileTreeCache: vi.fn(() => Promise.resolve()),

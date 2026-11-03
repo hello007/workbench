@@ -16,6 +16,7 @@ vi.mock('element-plus', async () => {
 const aiEventBus = vi.hoisted(() => ({ handlers: {} }))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetLocalChanges: vi.fn(),
   DiscardChanges: vi.fn(),
   CommitFiles: vi.fn(),

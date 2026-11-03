@@ -12,6 +12,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetBranchSyncInfo: vi.fn(),
   HasUpstream: vi.fn(),
   PushRepo: vi.fn(),

@@ -12,6 +12,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetRemotes: vi.fn(),
   AddRemote: vi.fn(),
   RemoveRemote: vi.fn(),

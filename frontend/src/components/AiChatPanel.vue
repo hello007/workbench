@@ -140,7 +140,8 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <!-- 模型：常用选项 + allow-create 自定义输入；空值 = claude 默认模型 -->
+            <!-- 模型：常用选项 + allow-create 自定义输入；空值 = claude 默认模型
+                 （首选项 label 动态回显 claude 设置解析的真实默认值） -->
             <el-select
               v-model="aiChatStore.chatSettings.modelName"
               size="small"
@@ -152,7 +153,7 @@
               @change="persistChatSettings"
             >
               <el-option
-                v-for="m in MODEL_OPTIONS"
+                v-for="m in modelOptions"
                 :key="m.value"
                 :value="m.value"
                 :label="m.label"
@@ -448,13 +449,23 @@ const permissionModeTip = computed(() => {
   return cur ? cur.tip : PERMISSION_MODES[0].tip
 })
 
-// 模型下拉常用项（MVP 仅 claude 系；allow-create 支持自定义输入，空值 = claude 默认模型）
+// 模型下拉常用项（MVP 仅 claude 系；allow-create 支持自定义输入，空值 = claude 默认模型）。
+// 首选项 label 动态：claude 设置文件解析出默认模型时回显真实值
+// （「默认（claude 设置：glm-5.3-flash）」），未解析到回退「默认模型」
 const MODEL_OPTIONS = [
   { value: '', label: '默认模型' },
   { value: 'sonnet', label: 'Sonnet' },
   { value: 'opus', label: 'Opus' },
   { value: 'haiku', label: 'Haiku' }
 ]
+
+const modelOptions = computed(() => {
+  const def = aiChatStore.claudeDefaultModel
+  const fallbackLabel = def ? `默认（claude 设置：${def}）` : '默认模型'
+  return MODEL_OPTIONS.map(m =>
+    m.value === '' ? { ...m, label: fallbackLabel } : m
+  )
+})
 
 // 启动命令下拉命令分派常量（与 el-dropdown-item command 对号）
 const LAUNCHER_CMD_DEFAULT = '__launcher_default__'
@@ -1181,6 +1192,8 @@ onMounted(() => {
     aiChatStore.loadChatSettings()
     // 启动命令候选：面板挂载扫描一次即可（纯只读，失败静默空列表）
     aiChatStore.loadChatCliCandidates()
+    // claude 设置默认模型：模型下拉「默认」选项回显（纯只读，失败静默空串）
+    aiChatStore.loadClaudeDefaultModel()
     if (aiChatStore.selectedChatDirectoryId) {
       await aiChatStore.loadChatSessions()
       aiChatStore.loadChatTemplates()

@@ -42,6 +42,7 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 // ElMessageBox/ElMessage（确认弹窗与 handleError 分流断言；文件级工厂，对齐
 // confirm-dialog vitest mock 形态）
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   KickConnection: vi.fn(),
   ListIPBans: vi.fn(),
   ListIPBanSuggestions: vi.fn(),

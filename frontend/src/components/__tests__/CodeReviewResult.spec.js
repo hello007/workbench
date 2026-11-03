@@ -18,6 +18,7 @@ vi.mock('element-plus', () => ({
 
 // 保存对话框/落盘绑定 mock：保存报告测试用
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   SaveFileDialog: vi.fn(),
   SaveFile: vi.fn()
 }))

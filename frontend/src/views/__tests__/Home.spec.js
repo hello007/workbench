@@ -47,6 +47,7 @@ vi.mock('../utils/debug', () => ({
 
 // Mock Wails Go bindings
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetDirectories: vi.fn(() => Promise.resolve([])),
   GetAppVersion: vi.fn(() => Promise.resolve('1.0.0')),
   ScanAndPullRepos: vi.fn(() => Promise.resolve('')),

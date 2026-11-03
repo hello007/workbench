@@ -22,6 +22,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   PreviewFile: vi.fn(() => Promise.resolve({ content: '', error: '' })),
   ReadFileBytes: vi.fn(() => Promise.resolve({ base64: '', error: '' })),
   SaveFile: vi.fn(() => Promise.resolve(undefined)),

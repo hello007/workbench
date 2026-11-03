@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { nextTick } from 'vue'
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   GetGitInfo: vi.fn(),
   GetBranches: vi.fn(),
   OpenDirectoryDialog: vi.fn(),
