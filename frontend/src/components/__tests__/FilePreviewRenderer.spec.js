@@ -6,7 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
+import { EditorView } from '@codemirror/view'
 import FilePreviewRenderer from '../FilePreviewRenderer.vue'
+import { useSettingsStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -737,5 +739,34 @@ describe('FilePreviewRenderer.vue - PPTX 预览转换（COM 转 PDF + pdf viewer
 
     expect(convert).toHaveBeenCalledWith('D:/repo/show.ppsx')
     expect(wrapper.find('.preview-pdf-frame-wrap iframe.pdf-frame').exists()).toBe(true)
+  })
+})
+
+describe('FilePreviewRenderer.vue - 深色模式语法高亮', () => {
+  let wrapper
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+    // 断言失败时也会执行，避免 EditorView.prototype.dispatch 的 spy 泄漏到后续用例
+    vi.restoreAllMocks()
+  })
+
+  it('主题切到 dark → 重配语法高亮且不重建编辑器', async () => {
+    const dispatchSpy = vi.spyOn(EditorView.prototype, 'dispatch')
+    wrapper = mountRenderer({ kind: 'text', fileName: 'main.ts', content: 'const a = 1' })
+    await flushPromises()
+
+    const host = wrapper.find('.cm-host').element
+    const editorEl = host.querySelector('.cm-editor')
+    expect(editorEl).not.toBeNull()
+    expect(dispatchSpy).not.toHaveBeenCalled()
+
+    const settingsStore = useSettingsStore()
+    settingsStore.themeMode = 'dark'
+    await flushPromises()
+
+    expect(dispatchSpy).toHaveBeenCalledTimes(1)
+    // 同一 EditorView 实例（DOM 节点不变，未重建），滚动位置与折叠状态得以保留
+    expect(host.querySelector('.cm-editor')).toBe(editorEl)
   })
 })

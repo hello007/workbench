@@ -41,6 +41,7 @@ const TILDE = new Set([
   '@codemirror/language',
   '@codemirror/state',
   '@codemirror/view',
+  '@lezer/highlight',
   'codemirror',
   'dayjs',
   'docx-preview',

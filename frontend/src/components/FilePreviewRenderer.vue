@@ -299,9 +299,10 @@ hljs.registerLanguage('plaintext', plaintext)
 
 // CodeMirror 6 按需引入
 import { EditorView, lineNumbers, highlightActiveLine, keymap } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { defaultKeymap, historyKeymap, selectAll } from '@codemirror/commands'
-import { syntaxHighlighting, defaultHighlightStyle, foldGutter, bracketMatching } from '@codemirror/language'
+import { syntaxHighlighting, foldGutter, bracketMatching } from '@codemirror/language'
+import { codeHighlightStyleFor } from '../utils/codemirrorHighlight'
 import { json as cmJson } from '@codemirror/lang-json'
 import { sql as cmSql } from '@codemirror/lang-sql'
 import { markdown as cmMarkdown } from '@codemirror/lang-markdown'
@@ -741,6 +742,24 @@ const resetZoom = () => { imageScale.value = 1 }
 // ---------- CodeMirror 只读文本 ----------
 const cmHostRef = ref(null)
 let cmView = null
+// 语法高亮扩展独占一个 Compartment：主题切换只重配这一项，不重建编辑器
+const cmHighlightCompartment = new Compartment()
+
+/**
+ * 当前主题对应的高亮扩展。浅色沿用 CodeMirror 内置 defaultHighlightStyle（保留改动前的
+ * fallback:true 行为，此时无主高亮器，靠 fallback 生效）；深色用自定义暗色样式并注册为主
+ * 高亮器。未覆盖的 tag 不产生样式类，继承 .cm-editor 正文色，不会回落到浅色色板。
+ */
+const buildHighlightExtension = () => {
+  const isDark = settingsStore.resolvedTheme === 'dark'
+  return syntaxHighlighting(codeHighlightStyleFor(isDark ? 'dark' : 'light'), { fallback: !isDark })
+}
+
+// 主题切换 → 重配语法高亮（不重建编辑器，滚动位置与折叠状态保留）
+watch(() => settingsStore.resolvedTheme, () => {
+  if (!cmView) return
+  cmView.dispatch({ effects: cmHighlightCompartment.reconfigure(buildHighlightExtension()) })
+})
 
 const buildDoc = () => {
   const ext = getExt(props.fileName)
@@ -767,7 +786,8 @@ const setupCodeMirror = () => {
     foldGutter(),
     bracketMatching(),
     highlightActiveLine(),
-    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    // 语法高亮样式随主题切换，放入 Compartment 以便重配时保留滚动位置与折叠状态
+    cmHighlightCompartment.of(buildHighlightExtension()),
     EditorState.readOnly.of(true),
     keymap.of([...defaultKeymap, ...historyKeymap]),
     codeMirrorLangByExt(ext)
@@ -1561,6 +1581,28 @@ onBeforeUnmount(() => {
   height: 100%;
   font-size: 13px;
   font-family: Consolas, 'Courier New', monospace;
+  /* 未命中语法高亮的 token 继承主题正文色，暗色下不落回浏览器默认黑字 */
+  color: var(--text-primary);
+}
+
+/* 暗色：未覆盖 tag 的正文色与 hljs 暗色主题保持同一取值 */
+html.dark .cm-host :deep(.cm-editor) {
+  color: #d4d4d4;
+}
+
+/* 暗色：CodeMirror 内置选中行底色基于浅色设计，暗底上观感割裂 */
+html.dark .cm-host :deep(.cm-activeLine) {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+/* 暗色：选区底色改为半透明蓝，保证选中文字仍具备可读对比度 */
+html.dark .cm-host :deep(.cm-selectionBackground),
+html.dark .cm-host :deep(.cm-content ::selection) {
+  background: rgba(86, 156, 214, 0.35) !important;
+}
+
+html.dark .cm-host :deep(.cm-gutters) {
+  color: var(--text-secondary);
 }
 
 .cm-host :deep(.cm-scroller) {
