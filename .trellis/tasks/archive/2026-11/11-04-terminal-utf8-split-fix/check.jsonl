@@ -1,0 +1,4 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "检查改动是否破坏多 tab 输出隔离、事件注销与 refit 约束"}
+{"file": "docs/spec/browser-channel.md", "reason": "检查桌面模式与浏览器通道是否均收到正确字符串载荷"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增解码器与输出泵测试是否满足覆盖率门禁"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "核对修复是否覆盖报告列出的乱码场景与验收指标"}

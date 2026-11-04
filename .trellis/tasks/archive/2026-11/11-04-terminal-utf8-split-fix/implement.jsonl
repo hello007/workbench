@@ -1,0 +1,5 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端多会话事件流、xterm 实例与 tab 生命周期约束，输出泵改动不得破坏现有会话模型"}
+{"file": "docs/spec/browser-channel.md", "reason": "terminal-output 事件同时经 Wails 与浏览器 WSHub 转发，需确认双通道载荷一致"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 包覆盖率门禁与测试基线要求"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E mock 必须对齐后端事件真实形状，事件载荷不变可避免 mock 回归"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "现状基线与 UTF-8 分片截断机理、修复方向"}
