@@ -1,0 +1,6 @@
+{"file": "docs/spec/process-management.md", "reason": "进程终止必须验证存活而非依赖命令成功返回；Job Object 回收需符合既有进程树语义"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端会话创建/关闭生命周期与事件约束，Close 幂等不得破坏会话注销链"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "util 层使用 log/slog 记录 Job 绑定失败降级"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "util 包覆盖率基线（≥40%，排除 pty_windows.go 现有口径需核对）"}
+{"file": "docs/spec/test-stability.md", "reason": "Windows 专项测试涉及真实进程，须避免时序/环境隐式依赖与残留"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "风险基线与 Job Object 回收方案依据"}

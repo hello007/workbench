@@ -1,0 +1,6 @@
+{"file": "docs/spec/process-management.md", "reason": "核对关闭后整树回收与存活验证口径，禁止以 Close 成功代替进程已退出"}
+{"file": "docs/spec/terminal-multi-session.md", "reason": "核对 Close 幂等、会话注销与事件顺序无回归"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对降级日志级别与字段"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增 Windows 测试是否满足 util 覆盖率门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "核对真实进程测试的超时、清理与并发稳定性"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "核对回收方案与调研结论一致"}
