@@ -1,0 +1,2 @@
+{"file": "docs/测试策略.md", "reason": "前端单测覆盖率门禁与 Vitest 运行方式"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 硬门禁，改动须补单测"}
