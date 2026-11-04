@@ -311,26 +311,60 @@ func (s *TerminalService) startOutputPump(sessionID string, r io.Reader) {
 			if tail := decoder.Flush(); tail != "" {
 				s.emitCurrent("terminal-output", sessionID, tail)
 			}
-			s.mu.Lock()
-			session, exists := s.sessions[sessionID]
-			s.mu.Unlock()
-			if exists {
-				session.SetRunning(false)
-				s.emitCurrent("terminal-exit", sessionID)
-			}
+			s.emitExitIfRunning(sessionID)
 			return
 		}
 	}
 }
 
+// emitExitIfRunning 仅在会话仍在册、且运行状态发生「运行中 → 已退出」跃迁时发送
+// terminal-exit。
+//
+// 输出泵 EOF 与进程等待（Windows 事件通道 / Unix-降级轮询）双通道都会判定退出，
+// 两通道可同时命中；MarkExited 的原子跃迁保证事件只发一次。会话已被关闭入口
+// 移除时不发：关闭语义由前端自身发起，无需退出事件。
+//
+// 在册检查与状态跃迁必须在同一把 s.mu 临界区内完成：若解锁后再 MarkExited，
+// CloseTerminal 可在「读取 map」与「跃迁」之间移除会话（其 SetRunning(false) 在
+// 释放 s.mu 之后才执行），退出事件就会在关闭路径上误发。锁序恒为 s.mu → 会话
+// 内部锁（CloseTerminal 只在释放 s.mu 后才触碰会话锁），无环。
+func (s *TerminalService) emitExitIfRunning(sessionID string) {
+	s.mu.Lock()
+	session, exists := s.sessions[sessionID]
+	marked := false
+	if exists && session != nil {
+		marked = session.MarkExited()
+	}
+	s.mu.Unlock()
+	if marked {
+		s.emitCurrent("terminal-exit", sessionID)
+	}
+}
+
 // watchProcess 监控进程退出。退出条件双通道：进程退出（生产主路径，仍在册会话
 // 发 terminal-exit）或关闭信号（CloseTerminal/CloseAll close done 立即触发，静默
-// 退出——terminal-exit 由关闭入口自身语义决定不发）。进程回收语义按平台分叉：
-// Unix 侧 PTY Close 仅向 shell 发 SIGTERM，Windows 侧由会话级 Job Object 在 Close
-// 时整树回收，但 Job 绑定失败降级时子进程仍可能残留。无论回收是否彻底，watch 都
-// 不得依赖 IsProcessRunning 翻转自证退出（goleak 硬门禁实测抓出的驻留面）；
-// done 信号让关闭路径零轮询周期等待，会话存在性检查兜底 close 前的窗口。
+// 退出——terminal-exit 由关闭入口自身语义决定不发）。
+//
+// Windows 侧 PtyProcess 提供事件通道（独立 SYNCHRONIZE 句柄 + 停止事件），进程退出
+// 即关闭，退出提示零轮询延迟；Unix 侧与 Windows 等待链路创建失败降级时 ExitCh
+// 返回 nil，回退 500ms 轮询。进程回收语义按平台分叉：Unix 侧 PTY Close 仅向 shell
+// 发 SIGTERM，Windows 侧由会话级 Job Object 在 Close 时整树回收，但 Job 绑定失败
+// 降级时子进程仍可能残留。无论回收是否彻底，watch 都不得依赖 IsProcessRunning
+// 翻转自证退出（goleak 硬门禁实测抓出的驻留面）；done 信号让关闭路径零轮询周期
+// 等待，会话存在性检查兜底 close 前的窗口。
 func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProcess, done <-chan struct{}) {
+	if exitCh := ptyProc.ExitCh(); exitCh != nil {
+		// 事件驱动：进程退出或 Close 触发停止事件均会关闭 exitCh，任一即收口。
+		// Close 路径下会话已被移除，emitExitIfRunning 静默跳过，不会误发退出事件。
+		select {
+		case <-done:
+			return
+		case <-exitCh:
+		}
+		s.emitExitIfRunning(sessionID)
+		return
+	}
+
 	for {
 		select {
 		case <-done:
@@ -344,16 +378,9 @@ func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProces
 			return
 		}
 		if !ptyProc.IsProcessRunning() {
-			// emit 前持锁复验存在性：上方读 map 到此处 emit 的窗口内会话可能已被
-			// CloseTerminal/CloseAll 移除（关闭入口自身不发 terminal-exit，前端
-			// 已收到关闭语义），复验收紧误发窗口
-			s.mu.Lock()
-			_, stillExists := s.sessions[sessionID]
-			s.mu.Unlock()
-			if stillExists {
-				session.SetRunning(false)
-				s.emitCurrent("terminal-exit", sessionID)
-			}
+			// emitExitIfRunning 内会复验存在性并经 MarkExited 去重：与输出泵 EOF
+			// 通道并发判定时退出事件只发一次
+			s.emitExitIfRunning(sessionID)
 			return
 		}
 	}

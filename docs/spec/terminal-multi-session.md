@@ -187,3 +187,44 @@ if p.job != 0 {
 ```
 
 **回归必查**：会话内启动 `ping -t` 后 `Close()`，子进程 5 秒内退出；仅关 Job 句柄（保持伪控制台打开）也须终止子进程，证明回收归因于 Job 而非控制台关闭事件；重复 `Close()` 不 panic；Job 绑定失败时终端可用且日志含 pid/err。
+
+## 10. 退出检测契约（Windows 事件驱动 / Unix 轮询兜底 / 单次 emit）
+
+**背景**：`watchProcess` 原按 500ms 轮询 `IsProcessRunning`，用户 `exit` 后退出提示最坏延迟半秒；同时输出泵 `Read` 结束分支也会判定退出并发送 `terminal-exit`，两通道只判会话在册、不判运行状态，存在重复发送窗口。
+
+| 项 | 约定 |
+|---|---|
+| Windows 等待原语 | `util.PtyProcess.startExitWaiter`（`util/pty_windows.go`）：`OpenProcess(SYNCHRONIZE)` 独立进程句柄 + 手动重置停止事件 `CreateEvent`，goroutine 调 `WaitForMultipleObjects(进程句柄, 停止事件)`，任一触发即 `close(exitCh)` |
+| 通道暴露 | `PtyProcess.ExitCh() <-chan struct{}`；nil 表示事件链路不可用（Unix 或句柄/事件创建失败），调用方回退轮询 |
+| 失败降级 | `OpenProcess`/`CreateEvent` 失败只 `slog.Warn`（带 pid、err）并关闭已建句柄，`exitCh` 保持 nil，终端照常创建 |
+| Close 顺序 | 断 ConPTY → 关 Job → `SetEvent(stopEvent)` 唤醒等待（Job 降级时进程可能未退出，无停止事件则 goroutine 与两个句柄永久泄漏）→ `<-waitDone` 等 goroutine 收尾 → 关闭 `waitHandle`/`stopEvent` 并置零；全程受 `sync.Once` 保护，**禁止与等待 goroutine 并发关句柄** |
+| watch 分叉 | `watchProcess` 先取 `ExitCh()`：非 nil 则 `select { <-done; <-exitCh }` 后收口；nil 保留 500ms 轮询。`done` 仍保证关闭路径零轮询周期返回 |
+| 单次 emit | `model.TerminalSession.MarkExited() bool` 持 `s.mu` 做「运行中 → 已退出」原子跃迁，仅返回 true 才发送 `terminal-exit`；`service.emitExitIfRunning` 为唯一发送点，**在册检查与 `MarkExited` 必须同持服务 `s.mu`**（先解锁再跃迁会与 `CloseTerminal` 的删除+`SetRunning(false)` 形成误发窗口），输出泵 EOF 与 watch 均只调它 |
+| 关闭静默 | `CloseTerminal`/`CloseAll` 先从会话表移除再 Close PTY，事件通道触发时 `emitExitIfRunning` 因不在册跳过，不误发退出事件 |
+| Unix 差异 | `ExitCh()` 恒返回 nil：`Close` 仅发 SIGTERM 可能不退出，引入 `cmd.Wait` goroutine 有僵尸/泄漏风险，事件化另立项 |
+
+**Wrong**：
+
+```go
+// 两通道各自无条件发送 + 关闭轮询周期，重复事件与延迟同时存在
+if exists {
+    session.SetRunning(false)
+    s.emitCurrent("terminal-exit", sessionID)
+}
+```
+
+**Correct**：
+
+```go
+if exitCh := ptyProc.ExitCh(); exitCh != nil {
+    select {
+    case <-done:
+        return
+    case <-exitCh:
+    }
+}
+// 唯一发送点：在册检查 + 原子跃迁去重
+s.emitExitIfRunning(sessionID)
+```
+
+**回归必查**：进程自然退出后 `ExitCh` 关闭且 shell 已退出；长睡眠进程 `Close` 在 3 秒内返回、`ExitCh` 关闭、两个句柄置零；零值 `PtyProcess.ExitCh()` 为 nil 且 `watchProcess` 轮询兜底不 panic；`emitExitIfRunning`（含输出泵与 watch 竞态）只产出一条 `terminal-exit`；重复 `Close` 幂等。

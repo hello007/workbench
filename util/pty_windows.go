@@ -27,6 +27,17 @@ type PtyProcess struct {
 	pid    int
 	job    windows.Handle // 0 表示 Job 绑定失败（降级：关闭时不再保证回收子进程）
 
+	// 退出等待链路（事件驱动，取代 500ms 轮询）：
+	// waitHandle 为独立打开的 SYNCHRONIZE 进程句柄，进程退出时由内核置为已信令；
+	// stopEvent 为手动重置事件，仅用于唤醒等待 goroutine——Close 时进程可能因 Job
+	// 绑定失败降级而不退出，若没有停止事件，等待 goroutine 会永久驻留并泄漏两个句柄；
+	// exitCh 在进程退出或停止事件触发时关闭，nil 表示等待链路不可用（调用方回退轮询）；
+	// waitDone 供 Close 等待等待 goroutine 收尾后再关闭句柄，避免并发关闭句柄。
+	waitHandle windows.Handle
+	stopEvent  windows.Handle
+	exitCh     chan struct{}
+	waitDone   chan struct{}
+
 	// Close 幂等：关闭动作（断 ConPTY + 关 Job 句柄）只执行一次，重复调用返回
 	// 首次结果，避免二次关闭句柄触发 ERROR_INVALID_HANDLE 或重复投递关闭事件
 	closeOnce sync.Once
@@ -68,7 +79,66 @@ func NewPtyProcess(cmd string, args []string, dir string, cols, rows uint16) (*P
 	// 属已知可接受取舍）
 	bindJobOrWarn(proc, createKillOnCloseJob)
 
+	// 启动退出等待：紧随 Job 绑定之后，同样为缩小「进程已退出但等待未建立」的窗口
+	proc.startExitWaiter()
+
 	return proc, nil
+}
+
+// startExitWaiter 打开独立等待句柄与停止事件，并起 goroutine 等待进程退出。
+//
+// 任一步失败都只记录 Warn 并降级为「事件通道不可用」（exitCh 保持 nil，调用方
+// 回退 500ms 轮询），不阻断终端创建；已创建的句柄在失败路径上关闭，避免泄漏。
+func (p *PtyProcess) startExitWaiter() {
+	if p.pid <= 0 {
+		return
+	}
+
+	// 独立句柄（而非复用 Job 相关句柄）：只要求 SYNCHRONIZE，进程退出时该句柄
+	// 变为已信令，等待语义与进程存活判定解耦
+	hProc, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(p.pid))
+	if err != nil {
+		slog.Warn("终端会话等待句柄打开失败，退出检测降级为轮询",
+			"pid", p.pid, "err", err)
+		return
+	}
+
+	// 手动重置事件（manualReset=1）：SetEvent 后保持已信令，Close 侧无需关心
+	// 等待 goroutine 是否已进入 WaitForMultipleObjects 的时序窗口
+	stopEvent, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		windows.CloseHandle(hProc)
+		slog.Warn("终端会话等待停止事件创建失败，退出检测降级为轮询",
+			"pid", p.pid, "err", err)
+		return
+	}
+
+	p.waitHandle = hProc
+	p.stopEvent = stopEvent
+	p.exitCh = make(chan struct{})
+	p.waitDone = make(chan struct{})
+	go p.waitExit()
+}
+
+// waitExit 等待进程退出或停止事件触发，随后关闭 exitCh 并确认 goroutine 收尾。
+// 两个句柄在 waitDone 关闭前不会被 Close 侧关闭，无并发关闭窗口。
+func (p *PtyProcess) waitExit() {
+	defer close(p.waitDone)
+	defer close(p.exitCh)
+	// 返回任一信号即结束：进程自然退出，或 Close 已发停止事件
+	if _, err := windows.WaitForMultipleObjects(
+		[]windows.Handle{p.waitHandle, p.stopEvent}, false, windows.INFINITE); err != nil {
+		// 等待原语失败（如句柄异常）时按已退出收口：通道关闭会让 watchProcess
+		// 发退出事件，属误判面，记 Warn 保留诊断线索（正常路径不可达）
+		slog.Warn("终端退出等待失败，按已退出处理", "pid", p.pid, "err", err)
+	}
+}
+
+// ExitCh 返回进程退出通知通道：进程自然退出或 Close 关闭会话时关闭。
+// 返回 nil 表示事件等待链路不可用（非 Windows 平台，或句柄/事件创建失败），
+// 调用方应回退轮询检测。
+func (p *PtyProcess) ExitCh() <-chan struct{} {
+	return p.exitCh
 }
 
 // bindJobOrWarn 为会话绑定 Job Object，失败时降级为「不绑定」并记录 Warn。
@@ -195,6 +265,28 @@ func (p *PtyProcess) close() error {
 		}
 		// 置零仅为状态自省（重复调用已被 closeOnce 拦住），不参与关闭判定
 		p.job = 0
+	}
+
+	// 唤醒退出等待 goroutine：进程可能因 Job 绑定失败降级而不退出，停止事件
+	// 保证 goroutine 不永久驻留（否则进程句柄与事件句柄双双泄漏）。
+	// 手动重置事件在 SetEvent 后保持已信令，无「信号丢失」时序窗口。
+	if p.stopEvent != 0 {
+		if err := windows.SetEvent(p.stopEvent); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("唤醒终端退出等待失败: %w", err)
+		}
+	}
+	// 等等待 goroutine 收尾后再关闭句柄：waitExit 正在使用这两个句柄，
+	// 关闭须严格在其退出之后，避免句柄并发关闭
+	if p.waitDone != nil {
+		<-p.waitDone
+	}
+	if p.waitHandle != 0 {
+		windows.CloseHandle(p.waitHandle)
+		p.waitHandle = 0
+	}
+	if p.stopEvent != 0 {
+		windows.CloseHandle(p.stopEvent)
+		p.stopEvent = 0
 	}
 
 	return firstErr

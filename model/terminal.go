@@ -32,6 +32,22 @@ func (s *TerminalSession) IsRunning() bool {
 	return s.Running
 }
 
+// MarkExited 标记会话已退出，返回本次调用是否完成了「运行中 → 已退出」的状态跃迁。
+//
+// 输出泵（Read 结束）与进程等待（事件通道/轮询）双通道都可能判定退出，且存在
+// 同时判定的竞态窗口。调用方仅在返回 true 时发送 terminal-exit，保证同一会话
+// 的退出事件只发一次：先到者跃迁成功并发事件，后到者看到 Running 已为 false
+// 返回 false 静默退出。
+func (s *TerminalSession) MarkExited() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.Running {
+		return false
+	}
+	s.Running = false
+	return true
+}
+
 // ShellConfig Shell 配置
 type ShellConfig struct {
 	Type        string   `json:"type"`

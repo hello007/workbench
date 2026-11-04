@@ -65,6 +65,15 @@ func (p *PtyProcess) Close() error {
 	return nil
 }
 
+// ExitCh 返回进程退出通知通道。
+//
+// Unix 侧本次保留 500ms 轮询兜底（恒返回 nil）：Close 只向 shell 发送 SIGTERM，
+// 进程可能不退出，贸然引入 cmd.Wait goroutine 会带来僵尸进程与 goroutine 泄漏
+// 风险，事件化退出检测另立项处理。
+func (p *PtyProcess) ExitCh() <-chan struct{} {
+	return nil
+}
+
 // GetCmd 获取底层 exec.Cmd
 func (p *PtyProcess) GetCmd() *exec.Cmd {
 	return p.cmd

@@ -35,6 +35,59 @@ func TestTerminalSession_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+// TestTerminalSession_MarkExited_OnlyFirstTransition 去重语义：首次调用完成
+// 「运行中 → 已退出」跃迁返回 true，后续调用返回 false。
+func TestTerminalSession_MarkExited_OnlyFirstTransition(t *testing.T) {
+	s := &TerminalSession{Running: true}
+	if !s.MarkExited() {
+		t.Fatal("首次 MarkExited 应返回 true（运行中 → 已退出）")
+	}
+	if s.IsRunning() {
+		t.Error("MarkExited 后 Running 应为 false")
+	}
+	if s.MarkExited() {
+		t.Error("重复 MarkExited 应返回 false（状态未跃迁）")
+	}
+}
+
+// TestTerminalSession_MarkExited_InitialNotRunning 初始未运行时不构成跃迁。
+func TestTerminalSession_MarkExited_InitialNotRunning(t *testing.T) {
+	s := &TerminalSession{}
+	if s.MarkExited() {
+		t.Error("初始未运行时 MarkExited 应返回 false")
+	}
+}
+
+// TestTerminalSession_MarkExited_ConcurrentOnlyOneWinner 并发竞争下恰好一次跃迁
+// 成功——输出泵与进程等待双通道可同时判定退出，这是「只发一次 terminal-exit」的
+// 底层保证。
+func TestTerminalSession_MarkExited_ConcurrentOnlyOneWinner(t *testing.T) {
+	s := &TerminalSession{Running: true}
+	const goroutines = 50
+
+	var wg sync.WaitGroup
+	results := make(chan bool, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- s.MarkExited()
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	winners := 0
+	for won := range results {
+		if won {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Errorf("并发 MarkExited 应恰好一次成功, 实际=%d", winners)
+	}
+}
+
 // TestGetShellConfigs_Count 各平台 Shell 配置均为 4 项（Windows 与 Linux 列表等宽）。
 func TestGetShellConfigs_Count(t *testing.T) {
 	configs := GetShellConfigs()

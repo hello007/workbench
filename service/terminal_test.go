@@ -4,8 +4,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"workbench/model"
+	"workbench/util"
 )
 
 // TestResolveShellConfig_KnownType 解析当前平台默认 Shell（列表首项），
@@ -343,6 +345,119 @@ func TestPtyStore_StoreAndGet(t *testing.T) {
 	proc := getPtyProcess(session)
 	if proc != nil {
 		t.Error("未存储的会话应返回 nil PtyProcess")
+	}
+}
+
+// === 退出检测去重与轮询兜底 ===
+
+// countEvents 统计指定名称的事件条数。
+func countEvents(events []recordedEvent, name string) int {
+	count := 0
+	for _, ev := range events {
+		if ev.name == name {
+			count++
+		}
+	}
+	return count
+}
+
+// TestEmitExitIfRunning_EmitsOnce 双通道去重单点：连续两次判定退出只产生一条
+// terminal-exit，会话运行状态跃迁为 false。
+func TestEmitExitIfRunning_EmitsOnce(t *testing.T) {
+	sink := &recordingSink{}
+	svc := NewTerminalService(nil)
+	svc.SetEventSink(sink)
+
+	session := &model.TerminalSession{ID: "term-dedup", Running: true}
+	svc.mu.Lock()
+	svc.sessions[session.ID] = session
+	svc.mu.Unlock()
+
+	svc.emitExitIfRunning(session.ID)
+	svc.emitExitIfRunning(session.ID)
+
+	if got := countEvents(sink.events, "terminal-exit"); got != 1 {
+		t.Fatalf("terminal-exit 应恰好一条, 实际 %d 条（事件序 %v）", got, eventNames(sink.events))
+	}
+	if session.IsRunning() {
+		t.Error("判定退出后会话应标记为未运行")
+	}
+}
+
+// TestEmitExitIfRunning_SkipsUnregistered 会话已被关闭入口移除时不得补发退出事件
+// （关闭语义由前端自身发起）。
+func TestEmitExitIfRunning_SkipsUnregistered(t *testing.T) {
+	sink := &recordingSink{}
+	svc := NewTerminalService(nil)
+	svc.SetEventSink(sink)
+
+	svc.emitExitIfRunning("nonexistent-session")
+
+	if len(sink.events) != 0 {
+		t.Fatalf("不在册会话不应产生事件, 实际事件序 %v", eventNames(sink.events))
+	}
+}
+
+// TestTerminalExit_DedupBetweenPumpAndWatch 输出泵 EOF 与进程等待通道同时判定退出
+// 时只发送一次 terminal-exit：先由等待通道跃迁，再由输出泵收尾。
+func TestTerminalExit_DedupBetweenPumpAndWatch(t *testing.T) {
+	sink := &recordingSink{}
+	svc := NewTerminalService(nil)
+	svc.SetEventSink(sink)
+
+	session := &model.TerminalSession{ID: "term-dedup-pump", Running: true}
+	svc.mu.Lock()
+	svc.sessions[session.ID] = session
+	svc.mu.Unlock()
+
+	// 进程等待通道先判定退出
+	svc.emitExitIfRunning(session.ID)
+	// 输出泵随后在 Read 结束分支判定退出（chunkedReader 无块直接 EOF）
+	svc.startOutputPump(session.ID, &chunkedReader{})
+
+	if got := countEvents(sink.events, "terminal-exit"); got != 1 {
+		t.Fatalf("输出泵与等待通道竞态时 terminal-exit 应恰好一条, 实际 %d 条（事件序 %v）",
+			got, eventNames(sink.events))
+	}
+}
+
+// TestWatchProcess_PollingFallbackWhenExitChNil ExitCh 不可用时回退 500ms 轮询：
+// 零值 PtyProcess 的 ExitCh 为 nil 且 IsProcessRunning 恒 false（pid=0），
+// watchProcess 应在首个轮询周期后判定退出并发送 terminal-exit。
+func TestWatchProcess_PollingFallbackWhenExitChNil(t *testing.T) {
+	sink := &recordingSink{}
+	svc := NewTerminalService(nil)
+	svc.SetEventSink(sink)
+
+	ptyProc := &util.PtyProcess{}
+	if ptyProc.ExitCh() != nil {
+		t.Fatal("零值 PtyProcess 的 ExitCh 应为 nil（等待链路未建立）")
+	}
+
+	session := &model.TerminalSession{ID: "term-poll", Running: true}
+	svc.mu.Lock()
+	svc.sessions[session.ID] = session
+	svc.mu.Unlock()
+
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		svc.watchProcess(session.ID, ptyProc, done)
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ExitCh 为 nil 时 watchProcess 未在轮询周期内收口")
+	}
+
+	if got := countEvents(sink.events, "terminal-exit"); got != 1 {
+		t.Fatalf("轮询兜底应恰好发送一条 terminal-exit, 实际 %d 条（事件序 %v）",
+			got, eventNames(sink.events))
+	}
+	if session.IsRunning() {
+		t.Error("轮询判定退出后会话应标记为未运行")
 	}
 }
 
