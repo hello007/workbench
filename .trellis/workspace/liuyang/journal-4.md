@@ -1635,3 +1635,38 @@ vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 218: 终端 UTF-8 分片修复与终端方案调研
+
+**Date**: 2026-11-04
+**Task**: 终端 UTF-8 分片修复与终端方案调研
+**Branch**: `master`
+
+### Summary
+
+完成终端内核开源方案调研报告；修复 terminal-output 4096 字节切片导致的 UTF-8 截断，新增增量解码器与残片/顺序断言，事件契约不变。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a66010` | (see git log) |
+| `9974300` | (see git log) |
+| `e4f26b0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
