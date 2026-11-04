@@ -1601,3 +1601,37 @@ vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 217: 深色模式代码预览语法高亮配色修复
+
+**Date**: 2026-11-04
+**Task**: 深色模式代码预览语法高亮配色修复
+**Branch**: `master`
+
+### Summary
+
+文件预览 CodeMirror 固定使用浅色 defaultHighlightStyle，暗底 #1e293b 上属性名/变量名不可辨认。新增 utils/codemirrorHighlight.js 深色色板（对齐 .hljs-*），经 Compartment 按 resolvedTheme 重配不重建编辑器；@lezer/highlight 登记为顶层依赖；补对比度与配色单测。子 agent 审核修复 7 处（规范文档标题误删、typeName/className 色板缺口、注释归因错误、单测 spy 泄漏与弱断言）。全量 2440 用例、覆盖率门禁、依赖分档校验通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `517b178` | (see git log) |
+| `7eba99f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

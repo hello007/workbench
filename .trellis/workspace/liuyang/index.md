@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 216
+- **Total Sessions**: 217
 - **Last Active**: 2026-11-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1603 | Active |
+| `journal-4.md` | ~1637 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 217 | 2026-11-04 | 深色模式代码预览语法高亮配色修复 | `517b178`, `7eba99f` | `master` |
 | 216 | 2026-11-04 | 岛仔 Dz 项目调研与借鉴清单 | `376c912` | `master` |
 | 215 | 2026-11-04 | 四项子任务审核整改 | `d2e749e` | `master` |
 | 214 | 2026-11-03 | dev-only moderate 依赖出清 | `1d655df` | `master` |
