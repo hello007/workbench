@@ -150,3 +150,40 @@ if n > 0 {
 ```
 
 **回归必查**：同一中文/emoji 串按 1 字节切分逐片喂入，拼接结果与原文一致；4096 边界切汉字无替换字符；EOF 残片只产出一个 `U+FFFD` 并随后发 `terminal-exit`；非法字节不 panic/不阻塞。
+
+## 9. 会话级进程树回收契约（Windows）
+
+**背景**：`ClosePseudoConsole` 只断开 ConPTY 管道并投递控制台关闭事件，不保证 shell 退出，更不回收 shell 派生的长任务（`ping -t`、`npm run dev`）。仅靠 `Close()` 关句柄会留下孤儿进程。
+
+**契约**：
+
+| 项 | 约定 |
+|---|---|
+| 绑定时机 | `conpty.Start` 成功后立即绑定，缩小「已派生子进程但未入 Job」窗口 |
+| Job 配置 | 每会话独立 Job Object，`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`；仅使用 `golang.org/x/sys/windows` |
+| 单点函数 | 创建绑定 `createKillOnCloseJob`；降级包装 `bindJobOrWarn`（`util/pty_windows.go`） |
+| 失败降级 | `OpenProcess` / `AssignProcessToJobObject` 失败只 `slog.Warn`（带 pid、err），终端照常创建，关闭时不再保证回收 |
+| 关闭顺序 | 先 `conpty.Close()` 让 shell 感知关闭，再 `CloseHandle(job)` 由内核终止整树；顺序不得颠倒 |
+| 幂等 | `Close()` 由 `sync.Once` 保护，重复调用返回首次结果，禁重复关句柄 |
+| Unix 差异 | Unix 侧仍只向 shell PID 发 `SIGTERM`，不杀进程组；跨平台语义不对称，排查残留时先确认平台 |
+
+**Wrong**：
+
+```go
+// 只断 ConPTY，派生任务孤儿化
+_ = p.conPty.Close()
+```
+
+**Correct**：
+
+```go
+// 先断 ConPTY，再关 Job 句柄（关闭即杀整树）
+if p.conPty != nil {
+    firstErr = p.conPty.Close()
+}
+if p.job != 0 {
+    windows.CloseHandle(p.job)
+}
+```
+
+**回归必查**：会话内启动 `ping -t` 后 `Close()`，子进程 5 秒内退出；仅关 Job 句柄（保持伪控制台打开）也须终止子进程，证明回收归因于 Job 而非控制台关闭事件；重复 `Close()` 不 panic；Job 绑定失败时终端可用且日志含 pid/err。

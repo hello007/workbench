@@ -24,8 +24,9 @@ type TerminalService struct {
 	// watchProcess 立即退出（不等 500ms 轮询周期），watch goroutine defer
 	// close(watchExit) 反向确认，关闭入口 <-watchExit 等待且仅等待本会话 watch
 	// 退出——per-session chan 无服务级共享计数（共享 WaitGroup 会让双 tab 关其一
-	// 的等待被在册会话的 watch 计数永久阻塞），PTY Close 只断 ConPTY 句柄不杀
-	// 子进程，watch 不得依赖进程退出自证退出（goleak 硬门禁实测抓出的驻留面）
+	// 的等待被在册会话的 watch 计数永久阻塞），进程回收语义按平台分叉：Unix 侧
+	// PTY Close 仅向 shell 发 SIGTERM，Windows 侧 Job 绑定失败降级时子进程仍可能
+	// 残留，watch 不得依赖进程退出自证退出（goleak 硬门禁实测抓出的驻留面）
 	watchDones map[string]chan struct{}
 	watchExits map[string]chan struct{}
 }
@@ -324,10 +325,11 @@ func (s *TerminalService) startOutputPump(sessionID string, r io.Reader) {
 
 // watchProcess 监控进程退出。退出条件双通道：进程退出（生产主路径，仍在册会话
 // 发 terminal-exit）或关闭信号（CloseTerminal/CloseAll close done 立即触发，静默
-// 退出——terminal-exit 由关闭入口自身语义决定不发）。PTY Close 只断 ConPTY 句柄
-// 不杀子进程，交互 shell 可在句柄断开后驻留，watch 不得依赖 IsProcessRunning
-// 翻转自证退出（goleak 硬门禁实测抓出的驻留面）；done 信号让关闭路径零轮询周期
-// 等待，会话存在性检查兜底 close 前的窗口。
+// 退出——terminal-exit 由关闭入口自身语义决定不发）。进程回收语义按平台分叉：
+// Unix 侧 PTY Close 仅向 shell 发 SIGTERM，Windows 侧由会话级 Job Object 在 Close
+// 时整树回收，但 Job 绑定失败降级时子进程仍可能残留。无论回收是否彻底，watch 都
+// 不得依赖 IsProcessRunning 翻转自证退出（goleak 硬门禁实测抓出的驻留面）；
+// done 信号让关闭路径零轮询周期等待，会话存在性检查兜底 close 前的窗口。
 func (s *TerminalService) watchProcess(sessionID string, ptyProc *util.PtyProcess, done <-chan struct{}) {
 	for {
 		select {
