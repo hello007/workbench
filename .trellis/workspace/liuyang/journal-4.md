@@ -1670,3 +1670,36 @@ vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 219: ConPTY 子进程树回收
+
+**Date**: 2026-11-04
+**Task**: ConPTY 子进程树回收
+**Branch**: `master`
+
+### Summary
+
+Windows 终端会话绑定 KILL_ON_JOB_CLOSE Job Object，Close 时先断 ConPTY 再关 Job 句柄回收整树；绑定失败 Warn 降级；Close 幂等；补归因与降级测试、规范契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e50a613` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
