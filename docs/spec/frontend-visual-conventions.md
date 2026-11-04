@@ -296,6 +296,16 @@ EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` �
 
 - 新建按需注册块时同步 `hljs.registerLanguage('plaintext', plaintext)`；先例：`chatMarkdown.js` 与 `FilePreviewRenderer.vue`（两处同款回退逻辑）
 
+#### CodeMirror 语法高亮样式必须按主题切换
+
+CodeMirror 6 的内置 `defaultHighlightStyle`（`@codemirror/language`）是**浅色背景专用**色板（深蓝 `#00c`、暗紫 `#708`、暗橙 `#940`、暗绿 `#404740`）。文件预览的代码分支容器底色取 `--bg-secondary`，暗色下为 `#1e293b`，这些 token 与背景亮度接近，属性名/变量名等关键字段实际不可辨认（用户只能靠选中文字辨认）。
+
+- 深色样式统一放 `frontend/src/utils/codemirrorHighlight.js`，色值与该文件预览 markdown 代码块的 `.hljs-*` 暗色主题严格对齐（注释 `#6a9955`、关键字 `#569cd6`、字符串/类型 `#ce9178`、数字/函数 `#dcdcaa`、变量/属性 `#9cdcfe`、删除 `#f44747`）
+- 深色样式未覆盖的 tag 不产生样式类，统一继承 `.cm-editor` 的 `#d4d4d4` 正文色，不会回落到浅色色板；浅色仍用内置 `defaultHighlightStyle`（`fallback: true` 行为不变）
+- 高亮扩展放独立 `Compartment`，主题切换经 `cmHighlightCompartment.reconfigure()` 重配，**不重建 EditorView**（重建会丢滚动位置与折叠状态）
+- 新增 token 配色须通过单测断言：色值与本文件所述深色底 `#1e293b` 的 WCAG 对比度 ≥ 3:1（先例 `src/utils/__tests__/codemirrorHighlight.spec.js`）
+- `tags` 从 `@lezer/highlight` 导入（`@codemirror/language` 不转导出），该包已登记为顶层依赖并纳入 `scripts/check-dep-consistency.mjs` 的 tilde 档
+
 #### 自绘右键菜单二级飞出子菜单
 
 自绘 `.context-menu`（全局样式在 `style.css`，非 Element Plus）扩展二级子菜单时：`.context-menu-item` 默认 `overflow: hidden`（为 `::before` 指示条服务），子菜单作为 li 子元素会被裁剪——父项加 `has-submenu` 类覆写 `overflow: visible`；子菜单纯 CSS hover 展开（`has-submenu:hover > .context-submenu { display: block }`，子菜单是 li 子元素故悬停不脱离 `:hover` 范围，无需 JS 态），定位 `left: 100%` 贴父项右侧，视觉令牌（`--menu-bg`/`--menu-border`/`--menu-shadow`/`--radius-md`）与主菜单严格一致。已知边界：主菜单位置校正逻辑只测主菜单自身尺寸，菜单贴近屏幕右缘时子菜单可能溢出视口。先例：FileTreePanel「复制路径」二级菜单（绝对/相对/@引用/文件名）。
@@ -439,3 +449,5 @@ width="960px"                      <!-- 1024×768 小屏溢出，2560 屏偏小�
 2026-09-17 WorkBench 前端视觉现代化重做（任务 `.trellis/tasks/archive/2026-09/09-16-workbench` 系列三任务）：ActivityBar/DashboardView/SettingsPanel/CommandPalette 视觉模式已确立并稳定，新增页面无统一参照易风格漂移，故将「怎么用变量搭风格」沉淀为指南层规范，与 design-tokens.md 契约层形成双子。
 
 2026-09-23 AI 对话面板布局修复与输入区优化（任务 `.trellis/tasks/09-23-ai`）：新增「Home 一级面板根元素 flex 约束链」（根元素零样式导致半屏塌陷 + 终端被压缩双重症状）与「库运行时行为陷阱」（EP 非 autosize textarea 内联 min-height 下限失守、hljs 按需注册漏 plaintext 回退名）两节。
+
+2026-11-04 深色模式代码预览配色修复（任务 `.trellis/tasks/11-04-dark-code-preview-syntax-color`）：新增「CodeMirror 语法高亮样式必须按主题切换」——内置 `defaultHighlightStyle` 为浅色色板，暗底 `#1e293b` 上属性名/变量名不可辨认；同时补齐 Compartment 重配与对比度单测约定。
