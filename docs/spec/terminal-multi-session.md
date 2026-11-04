@@ -115,3 +115,38 @@ if (e.target.closest('.el-overlay, .xterm-helper-textarea')) return // EP 弹窗
 - `ActiveIndex=0` 序列化无损；空 `Tabs` 无幽灵 tab。
 - 全屏态下弹窗内按 ESC 只关弹窗不退全屏。
 - 老配置（无外观三字段）加载补默认；越界 clamp。
+
+## 8. `terminal-output` 载荷 UTF-8 完整性契约
+
+**背景**：PTY `Read` 边界与 UTF-8 字符边界无关。输出泵若直接 `string(buf[:n])` 发事件，切片可能停在 3 字节汉字或 4 字节 emoji 中间；Wails 事件 JSON 序列化会把非法字节替换为 `U+FFFD`，前端看到永久乱码且不可恢复。
+
+**契约**：
+
+| 项 | 约定 |
+|---|---|
+| 解码位置 | 后端输出泵内 `utf8StreamDecoder`（`service/utf8_decoder.go`），**禁前端补救** |
+| 残片上限 | 每会话 ≤3 字节，仅在字符完整后 emit |
+| EOF 处理 | 先 `Flush()` 输出归一后的残片，再发 `terminal-exit`；**禁静默丢弃** |
+| 非法字节 | `strings.ToValidUTF8` 归一为 `U+FFFD`，不得阻塞后续输出 |
+| 同包 EOF | `Read` 返回 `n>0` 且 `err=io.EOF` 时先消费数据再判错 |
+| 事件契约 | 名称 `terminal-output`、参数 `(sessionID, string)` 不变；载荷恒为合法 UTF-8 |
+
+**Wrong**：
+
+```go
+if n > 0 {
+    s.emitCurrent("terminal-output", sessionID, string(buf[:n]))
+}
+```
+
+**Correct**：
+
+```go
+if n > 0 {
+    if out := decoder.Write(buf[:n]); out != "" {
+        s.emitCurrent("terminal-output", sessionID, out)
+    }
+}
+```
+
+**回归必查**：同一中文/emoji 串按 1 字节切分逐片喂入，拼接结果与原文一致；4096 边界切汉字无替换字符；EOF 残片只产出一个 `U+FFFD` 并随后发 `terminal-exit`；非法字节不 panic/不阻塞。

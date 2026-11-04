@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -289,12 +290,26 @@ func buildPosixCdCommand(dir, shellType string) (string, error) {
 	return "cd -- '" + escaped + "'\r", nil
 }
 
-// startOutputPump 输出泵，持续读取 PTY 输出并经事件出口推送给前端
-func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyProcess) {
+// startOutputPump 输出泵，持续读取 PTY 输出并经事件出口推送给前端。
+// 读取是任意字节切分，不能直接转字符串：utf8StreamDecoder 按会话保留
+// 不完整的多字节字符残片，避免 Wails JSON 序列化把截断字节替换为乱码。
+// r 使用 io.Reader 而非具体 PTY 类型，便于用分片读取器覆盖跨界场景。
+func (s *TerminalService) startOutputPump(sessionID string, r io.Reader) {
 	buf := make([]byte, 4096)
+	decoder := &utf8StreamDecoder{}
 	for {
-		n, err := ptyProc.Read(buf)
+		n, err := r.Read(buf)
+		// 部分 Reader 允许最后一次返回 n>0 且 err=io.EOF，先消费数据再判错
+		if n > 0 {
+			if out := decoder.Write(buf[:n]); out != "" {
+				s.emitCurrent("terminal-output", sessionID, out)
+			}
+		}
 		if err != nil {
+			// 流结束前先吐出残片：不完整序列按替换字符处理，不静默丢弃
+			if tail := decoder.Flush(); tail != "" {
+				s.emitCurrent("terminal-output", sessionID, tail)
+			}
 			s.mu.Lock()
 			session, exists := s.sessions[sessionID]
 			s.mu.Unlock()
@@ -303,9 +318,6 @@ func (s *TerminalService) startOutputPump(sessionID string, ptyProc *util.PtyPro
 				s.emitCurrent("terminal-exit", sessionID)
 			}
 			return
-		}
-		if n > 0 {
-			s.emitCurrent("terminal-output", sessionID, string(buf[:n]))
 		}
 	}
 }
