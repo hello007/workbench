@@ -21,7 +21,13 @@ func TestUTF8StreamDecoder_EverySplit(t *testing.T) {
 			if end > len(payload) {
 				end = len(payload)
 			}
-			got.WriteString(d.Write([]byte(payload[i:end])))
+			out := d.Write([]byte(payload[i:end]))
+			// 残片上限不变量：UTF-8 最长 4 字节，未完整前缀至多 3 字节；
+			// 超出说明解码器没有推进到最后一个完整字符边界
+			if len(d.carry) > 3 {
+				t.Fatalf("split=%d offset=%d: 残片 %d 字节超过上限 3", split, i, len(d.carry))
+			}
+			got.WriteString(out)
 		}
 		got.WriteString(d.Flush())
 		if got.String() != payload {
@@ -113,6 +119,15 @@ func (s *recordingSink) Emit(name string, data ...any) {
 	s.events = append(s.events, recordedEvent{name: name, data: data})
 }
 
+// eventNames 提取 sink 记录的事件名序列，用于顺序断言的失败信息。
+func eventNames(events []recordedEvent) []string {
+	names := make([]string, 0, len(events))
+	for _, ev := range events {
+		names = append(names, ev.name)
+	}
+	return names
+}
+
 // chunkedReader 按预设块逐次返回数据，块耗尽后返回 io.EOF。
 type chunkedReader struct {
 	chunks [][]byte
@@ -175,8 +190,10 @@ func TestStartOutputPump_FlushTailAtEOF(t *testing.T) {
 	svc.startOutputPump("term-test", reader)
 
 	var outputs []string
-	sawExit := false
-	for _, ev := range sink.events {
+	exitCount := 0
+	exitIndex := -1
+	lastOutputIndex := -1
+	for i, ev := range sink.events {
 		switch ev.name {
 		case "terminal-output":
 			text, ok := ev.data[1].(string)
@@ -187,15 +204,21 @@ func TestStartOutputPump_FlushTailAtEOF(t *testing.T) {
 				t.Fatalf("残片载荷不是合法 UTF-8: %q", text)
 			}
 			outputs = append(outputs, text)
+			lastOutputIndex = i
 		case "terminal-exit":
-			sawExit = true
+			exitCount++
+			exitIndex = i
 		}
 	}
 	if len(outputs) != 1 || outputs[0] != "�" {
 		t.Fatalf("EOF 残片应输出单个替换字符, 实际 %q", outputs)
 	}
-	if !sawExit {
-		t.Fatal("流结束后应发送 terminal-exit")
+	// 顺序回归守护：sink 按发射序记录，残片必须先于 terminal-exit 送达
+	if exitCount != 1 {
+		t.Fatalf("terminal-exit 应恰好一条, 实际 %d 条, 事件序 %v", exitCount, eventNames(sink.events))
+	}
+	if lastOutputIndex > exitIndex {
+		t.Fatalf("terminal-output 应先于 terminal-exit, 实际事件序 %v", eventNames(sink.events))
 	}
 }
 
