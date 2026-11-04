@@ -1568,3 +1568,36 @@ vitest/coverage 升 4.1.12 修复 @vitest/mocker 两条 advisory；根级 overri
 ### Next Steps
 
 - None - task complete
+
+
+## Session 216: 岛仔 Dz 项目调研与借鉴清单
+
+**Date**: 2026-11-04
+**Task**: 岛仔 Dz 项目调研与借鉴清单
+**Branch**: `master`
+
+### Summary
+
+调研 GitHub 项目 smallmb/Dz，产出 docs/research 借鉴清单：10 项机制按 P0/P1/P2 分级；核实 Wails v2.16 能力边界（无托盘/多窗口，内置单实例锁与原生通知）；给出灵动岛三条技术路线与还原度上限。无代码改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `376c912` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
