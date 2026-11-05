@@ -28,7 +28,7 @@ For each changed area, read the relevant project specs and follow their quality/
 cat docs/spec/README.md
 ```
 
-The CLAUDE.md key-rules list (auto-injected) names the must-know rules per area; read the linked `docs/spec/` detail docs relevant to your change — the row is a pointer, not the goal.
+The AGENTS.md key-rules list (auto-injected) names the must-know rules per area; read the linked `docs/spec/` detail docs relevant to your change — the row is a pointer, not the goal.
 
 ## Step 3: Run Project Checks
 
@@ -52,7 +52,7 @@ Run the project's lint, type-check, and test commands. Fix any failures before p
 
 ### Spec Sync
 
-- [ ] Does `docs/spec/` or the CLAUDE.md key-rules list need updates? (new patterns, conventions, lessons learned)
+- [ ] Does `docs/spec/` or the AGENTS.md key-rules list need updates? (new patterns, conventions, lessons learned)
 
 > "If I fixed a bug or discovered something non-obvious, should I document it so future me won't hit the same issue?" → If YES, update the relevant spec doc.
 

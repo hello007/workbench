@@ -17,8 +17,8 @@ description: 文档编写、补全与修订工作流
 
 ## 文档体系
 
-- **`docs/`** — 正式文档库（全中文，快速入门/功能说明/开发工作流/测试策略/部署说明/开发规范/架构设计/API参考/贡献指南/常见问题/路线图），入口索引在仓根 `CLAUDE.md`「文档索引」表
-- **`docs/spec/`** — 跨层契约与深度规范沉淀（索引 `docs/spec/README.md`，两级分流规则见仓根 CLAUDE.md「规范沉淀规则」）
+- **`docs/`** — 正式文档库（全中文，快速入门/功能说明/开发工作流/测试策略/部署说明/开发规范/架构设计/API参考/贡献指南/常见问题/路线图），入口清单见 `docs/agent-resources/reference/docs-management.md`
+- **`docs/spec/`** — 跨层契约与深度规范沉淀（索引 `docs/spec/README.md`，两级分流规则见仓根 AGENTS.md「关键规则与规范沉淀」）
 - **`docs/memory/`** — 项目长期记忆（索引 `docs/memory/MEMORY.md`，SessionStart hook 自动加载）
 - **`docs/agent-resources/`** — 本目录，agent 内部参考文档
 - **`workbench/DEVELOPMENT.md`、`BUILD_SUMMARY.md`** — 开发运维与构建摘要
@@ -39,12 +39,12 @@ description: 文档编写、补全与修订工作流
 | 批量检查文档健康度 | 全局扫描 |
 | 文档被替代，要废弃 | 归档废弃 |
 | 旧文档按当前规范重写 | 迁移重写 |
-| 功能完成后 README.md 是否需更新 | 按仓根 CLAUDE.md 首部要求确认 |
+| 功能完成后 README.md 是否需更新 | 按仓根 AGENTS.md 文档语言约定确认 |
 
 ### 第二步：确定文档归属
 
 - 面向使用者的功能/安装/FAQ → `docs/` 对应篇目
-- 跨层契约、签名同步规则、踩坑机理 → `docs/spec/<topic>.md`（钩子级关键规则再上浮 CLAUDE.md 关键规则行）
+- 跨层契约、签名同步规则、踩坑机理 → `docs/spec/<topic>.md`（钩子级关键规则再上浮 AGENTS.md 关键规则行）
 - 跨会话项目事实 → `docs/memory/`
 - agent 工程规范 → `docs/agent-resources/` 对应目录
 
@@ -69,7 +69,7 @@ description: 文档编写、补全与修订工作流
 ### 第五步：更新索引
 
 新增或废弃文档后：
-1. 更新仓根 `CLAUDE.md`「文档索引」表对应行
+1. 更新 `docs/agent-resources/reference/docs-management.md` 入口清单对应行
 2. 更新 `docs/spec/README.md` / `docs/memory/MEMORY.md` 等对应索引
 3. 确认链接路径正确、标题一致，无重复或失效链接
 

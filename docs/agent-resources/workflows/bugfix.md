@@ -70,6 +70,6 @@ cd frontend && npm run build && npm test   # 前端改动
 
 提醒用户：
 - 如果影响对外行为 → 同步正式文档
-- 该类 Bug 若有普遍性，考虑按「规范沉淀规则」沉淀到 `docs/spec/` 或 CLAUDE.md 关键规则
+- 该类 Bug 若有普遍性，考虑按「规范沉淀规则」沉淀到 `docs/spec/` 或 AGENTS.md 关键规则
 
 **agent 不做**：不跑完整门禁、不 git add/commit/push。

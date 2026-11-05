@@ -25,7 +25,7 @@
 |------|-----------|------|
 | `.github/workflows/ci.yml` | push(master)/PR 触发 | Linux + Windows 双 job；依赖分档检查 → 预置 dist 占位 → Go 验证 → 前端构建/单测 → E2E |
 | `.github/workflows/release.yml` | tag `v*` 触发 | Windows + ubuntu（webkit2_41，glibc 2.35 基线）双 job 发版 |
-| `scripts/coverage-check.sh` | 覆盖率门禁 | model/server ≥80%、service ≥76%、util ≥40%（主包不设），阈值以仓根 CLAUDE.md 关键规则为准 |
+| `scripts/coverage-check.sh` | 覆盖率门禁 | model/server ≥80%、service ≥76%、util ≥40%（主包不设），阈值以仓根 AGENTS.md 关键规则为准 |
 
 ## 4. 运行时数据目录
 
@@ -38,5 +38,5 @@
 
 - 改 Go 版本 → `go.mod`（toolchain directive），改后重跑 `govulncheck ./...`
 - 加前端依赖 → 先登记 `check-dep-consistency.mjs` 四清单 → 再改 `frontend/package.json` → `npm update <pkg>` 落 lock
-- 改覆盖率阈值 → `scripts/coverage-check.sh` + 仓根 CLAUDE.md 关键规则行 + `docs/测试策略.md` 三处同步
+- 改覆盖率阈值 → `scripts/coverage-check.sh` + 仓根 AGENTS.md 关键规则行 + `docs/测试策略.md` 三处同步
 - 改 CI 门禁 → `.github/workflows/ci.yml`（改动前先读文件头前置事实注释）

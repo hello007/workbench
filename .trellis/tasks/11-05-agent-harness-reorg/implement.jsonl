@@ -1,0 +1,5 @@
+{"file": "docs/agent-resources/reference/docs-management.md", "reason": "文档治理规范：索引收口目标文件，含归属判定与目录结构节（须与其合并索引表）"}
+{"file": "docs/agent-resources/conventions/process-convention-files.md", "reason": "约定文件编写与变更同步规范：迁移涉及 conventions 文件（docs-management/testing-strategy/config-variables）修改，须遵循其变更同步规则"}
+{"file": "docs/spec/README.md", "reason": "两级分流规则权威登记：关键规则表迁移后其引用行（3处）须同步，且分流设计不得被破坏"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "权威声明节（第9行）引用「仓根 CLAUDE.md 关键规则」，迁移后须同步为 AGENTS.md"}
+{"file": "docs/agent-resources/reference/config-variables.md", "reason": "第41行引用「仓根 CLAUDE.md 关键规则行」，迁移后须同步"}

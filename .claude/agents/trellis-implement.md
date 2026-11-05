@@ -27,13 +27,13 @@ Look for the `<!-- trellis-hook-injected -->` marker in your input above.
 
 Before implementing, read:
 - `.trellis/workflow.md` - Project workflow
-- CLAUDE.md key-rules list + `docs/spec/` - Development guidelines
+- AGENTS.md key-rules list + `docs/spec/` - Development guidelines
 - Task `prd.md` - Requirements document
 - Task `info.md` - Technical design (if exists)
 
 ## Core Responsibilities
 
-1. **Understand specs** - Read relevant spec docs (CLAUDE.md key-rules list + linked `docs/spec/` topic docs)
+1. **Understand specs** - Read relevant spec docs (AGENTS.md key-rules list + linked `docs/spec/` topic docs)
 2. **Understand requirements** - Read prd.md and info.md
 3. **Implement features** - Write code following specs and design
 4. **Self-check** - Ensure code quality
@@ -56,7 +56,7 @@ Before implementing, read:
 Read relevant specs based on task type:
 
 - Project specs: `docs/spec/<topic>.md` (indexed in `docs/spec/README.md`)
-- Must-know rules: CLAUDE.md key-rules list (two-tier routing per CLAUDE.md「规范沉淀规则」)
+- Must-know rules: AGENTS.md key-rules list (two-tier routing per AGENTS.md「关键规则与规范沉淀」)
 
 ### 2. Understand Requirements
 

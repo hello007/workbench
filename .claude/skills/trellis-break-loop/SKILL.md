@@ -60,7 +60,7 @@ What broader problems does this bug reveal?
 
 Solidify insights into the system:
 
-- [ ] Update the CLAUDE.md key-rules row (if a must-know rule emerged; within tiered limits)
+- [ ] Update the AGENTS.md key-rules row (if a must-know rule emerged; within tiered limits)
 - [ ] Update relevant `docs/spec/` topic docs
 - [ ] Create issue record (if applicable)
 - [ ] Create feature ticket for root fix
@@ -118,7 +118,7 @@ Three levels of insight:
 **IMPORTANT**: After completing the analysis above, you MUST immediately:
 
 1. **Update specs** - Don't just list TODOs, actually update the relevant files:
-   - If a must-know rule emerged (ban / single-point function / error code / sync point) → add or update the CLAUDE.md key-rules row (within tiered limits: normal ≤250, hook-dense/merge ≤350; row links to its detail doc)
+   - If a must-know rule emerged (ban / single-point function / error code / sync point) → add or update the AGENTS.md key-rules row (within tiered limits: normal ≤250, hook-dense/merge ≤350; row links to its detail doc)
    - If it's a cross-layer contract issue → update the relevant `docs/spec/<topic>.md` (e.g., `cross-layer-contracts.md`)
    - If it's domain-specific → update the relevant `docs/spec/<topic>.md` (e.g., `logging-and-errors.md`, `perf-baseline.md`)
 

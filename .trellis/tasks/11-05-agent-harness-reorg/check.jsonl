@@ -1,0 +1,3 @@
+{"file": "docs/agent-resources/reference/docs-management.md", "reason": "验证索引收口后无死链、AGENTS.md §7 指向成立、归属判定表引用已同步"}
+{"file": "docs/spec/README.md", "reason": "验证两级分流表与权威口径引用已同步且分流设计未被破坏"}
+{"file": "docs/agent-resources/conventions/process-convention-files.md", "reason": "验证 conventions 文件修改符合变更同步规范"}

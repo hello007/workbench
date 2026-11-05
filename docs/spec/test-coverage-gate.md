@@ -140,4 +140,4 @@ func TestPtyRead(t *testing.T) {
 - 新增 service 系统调用核心方法（pty / 子进程 / 网络下载 / 外部进程）：不强行补测，service 阈值保持 76%，但须在 PR 说明未测原因
 - 新增前端组件：须补 spec 到整体 ≥70%，否则 thresholds 硬失败阻断
 - util 新增系统调用文件：脚本按文件名排除规则可扩展（`exclude` 判断逻辑）
-- 阈值调整须同步更新本文档 + `docs/测试策略.md` 基线 + `CLAUDE.md` 关键规则
+- 阈值调整须同步更新本文档 + `docs/测试策略.md` 基线 + `AGENTS.md` 关键规则

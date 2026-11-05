@@ -14,7 +14,7 @@ targets: [package.json, config, go]
 |------|------|----------|
 | 前端依赖分档一致性 | `node scripts/check-dep-consistency.mjs`（配 `--selftest`） | `frontend/package.json` + lock 三维一致 |
 | Go 静态检查 | `go vet ./...` | 全部 Go 包 |
-| Go 单元测试 | `go test ./...` | 全部 Go 包（含覆盖率门禁：model/server ≥80%、service ≥76%、util ≥40%，阈值见仓根 CLAUDE.md） |
+| Go 单元测试 | `go test ./...` | 全部 Go 包（含覆盖率门禁：model/server ≥80%、service ≥76%、util ≥40%，阈值见仓根 AGENTS.md） |
 | Go 集成测试 | `go test -tags=integration ./...` | 带 integration 标签的测试 |
 | 前端构建 | `npm run build`（frontend/ 下） | vite 构建成功 |
 | 前端单测 | `npm test`（frontend/ 下） | vitest 全量 |

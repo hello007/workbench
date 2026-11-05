@@ -6,7 +6,7 @@ targets: [vue, store, composable, transport, go, util]
 
 # 工程分层架构与模块边界（Go + Vue 双栈）
 
-> **权威声明**：本文件是 `docs/agent-resources/` 体系内「模块边界 / 依赖方向」主题的权威；本仓深度契约与踩坑例外以 `docs/spec/` 与仓根 CLAUDE.md「关键规则」为准。
+> **权威声明**：本文件是 `docs/agent-resources/` 体系内「模块边界 / 依赖方向」主题的权威；本仓深度契约与踩坑例外以 `docs/spec/` 与仓根 AGENTS.md「关键规则」为准。
 
 ## 1. 目录分层架构
 
@@ -47,5 +47,5 @@ targets: [vue, store, composable, transport, go, util]
 ## 3. 层特有约束
 
 - `model/` 是 Wails 绑定契约真相源——字段变更必须核对前端消费面（见 `coding-api-contracts.md`）。
-- `service/` 新增服务须在 `app_services.go` 装配（本仓关键规则，细节见仓根 CLAUDE.md）。
+- `service/` 新增服务须在 `app_services.go` 装配（本仓关键规则，细节见仓根 AGENTS.md）。
 - `frontend/wailsjs/` 为生成产物不入库，任何层禁止手改。

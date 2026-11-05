@@ -1,6 +1,6 @@
 ---
 name: trellis-before-dev
-description: "Discovers and injects project-specific coding guidelines before implementation begins. Reads the CLAUDE.md key-rules list and the relevant docs/spec/ topic docs (indexed in docs/spec/README.md) for the target area. Use when starting a new coding task, before writing any code, switching to a different area, or needing to refresh project conventions and standards. Note: project-specific routing rules (two-tier split, tiered row limits) are owned by CLAUDE.md「规范沉淀规则」."
+description: "Discovers and injects project-specific coding guidelines before implementation begins. Reads the AGENTS.md key-rules list and the relevant docs/spec/ topic docs (indexed in docs/spec/README.md) for the target area. Use when starting a new coding task, before writing any code, switching to a different area, or needing to refresh project conventions and standards. Note: project-specific routing rules (two-tier split, tiered row limits) are owned by AGENTS.md「关键规则与规范沉淀」."
 ---
 
 Read the relevant development guidelines before starting your task.
@@ -20,7 +20,7 @@ Execute these steps:
    ```bash
    cat docs/spec/README.md
    ```
-   The CLAUDE.md key-rules list is auto-injected each session — treat it as the pre-development checklist: every row names a rule you must follow, each linking to its `docs/spec/` detail doc.
+   The AGENTS.md key-rules list is auto-injected each session — treat it as the pre-development checklist: every row names a rule you must follow, each linking to its `docs/spec/` detail doc.
 
 4. **Read the specific topic docs** linked from the key-rules rows that are relevant to your task (e.g., `cross-layer-contracts.md`, `logging-and-errors.md`, `perf-baseline.md`). The key-rules row is NOT the full contract — it points you to the actual detail doc. Read those files to understand the coding standards and patterns.
 

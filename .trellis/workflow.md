@@ -31,7 +31,7 @@ Project spec documents live in `docs/spec/` (cross-layer contracts and other det
 - `docs/spec/README.md` — index of spec documents + two-tier routing rules.
 - `docs/spec/<topic>.md` — one detailed contract / topic document per file (e.g. `cross-layer-contracts.md` for Wails binding sync).
 
-**When to update spec**: new pattern/convention found · bug-fix prevention to codify · new technical decision. Route per the CLAUDE.md「规范沉淀规则」two-tier rule: detailed contract docs go to `docs/spec/<topic>.md`; one-or-two-sentence must-know rules go to the CLAUDE.md「关键规则」list. Never write to `.trellis/spec/`.
+**When to update spec**: new pattern/convention found · bug-fix prevention to codify · new technical decision. Route per the AGENTS.md「关键规则与规范沉淀」two-tier rule: detailed contract docs go to `docs/spec/<topic>.md`; one-or-two-sentence must-know rules go to the AGENTS.md「关键规则」list. Never write to `.trellis/spec/`.
 
 ### Task System
 
@@ -563,13 +563,13 @@ Load the `trellis-update-spec` skill and review whether this task produced new k
 - Pitfalls you hit
 - New technical decisions
 
-**沉淀目标（本项目覆盖；`.trellis/spec/` 已废弃移除，禁止写入）——按 CLAUDE.md「规范沉淀规则」两级分流**：
+**沉淀目标（本项目覆盖；`.trellis/spec/` 已废弃移除，禁止写入）——按 AGENTS.md「关键规则与规范沉淀」两级分流**：
 - 详细契约 / 主题文档（跨层签名同步、接口约定等需完整上下文的内容）-> `docs/spec/<topic>.md`，并同步更新 `docs/spec/README.md` 索引
 - 坑 / 问题 / 非显而易见的行为 -> `docs/常见问题.md`（Q&A 格式：症状 / 原因 / 解决方案 / 相关文件）
 - 规范 / 约定 / 正确做法 -> `docs/开发规范.md`（✅正确 / ❌错误 代码示例 + 原因）
-- 钩子级每个 session 必知的关键规则 -> `CLAUDE.md`「规范沉淀规则 → 关键规则」清单（行内形态、两档长度上限与下沉判据以 `CLAUDE.md`「规范沉淀规则」第 2 条为唯一权威），且**起草拟改片段后须用户确认再写入**
+- 钩子级每个 session 必知的关键规则 -> `AGENTS.md`「规范沉淀规则 → 关键规则」清单（行内形态、两档长度上限与下沉判据以 `AGENTS.md`「规范沉淀规则」第 2 条为唯一权威），且**起草拟改片段后须用户确认再写入**
 
-**写入策略**：`docs/` 直接写入；`CLAUDE.md` 先列拟改片段、用户确认后再写。即使结论是"本次无内容可沉淀"，也要走一遍判断并说明。
+**写入策略**：`docs/` 直接写入；`AGENTS.md` 先列拟改片段、用户确认后再写。即使结论是"本次无内容可沉淀"，也要走一遍判断并说明。
 
 #### 3.4 Commit changes `[required · once]`
 
