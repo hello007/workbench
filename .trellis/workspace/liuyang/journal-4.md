@@ -1737,3 +1737,37 @@ Windows 终端会话以 SYNCHRONIZE 句柄+停止事件事件驱动退出检测�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 221: 终端基础体验补强：xterm addons 与交互
+
+**Date**: 2026-11-05
+**Task**: 终端基础体验补强：xterm addons 与交互
+**Branch**: `master`
+
+### Summary
+
+引入四官方 addon（webgl/search/unicode11/serialize，tilde 档登记）；Ctrl+F 搜索条（状态经 props 下发防重挂载错位）；OSC 9/777/99 通知转 ElNotification（9;4 放行、500 字符截断、开关默认关）；Ctrl+Click URL/文件路径（全角标点正则补齐）；RO 100ms 防抖；scrollback 默认 5000；多行粘贴确认（xterm 6 无 onTextPaste 走容器捕获 DOM paste）；serialize tab 重启回放（replayText 先于缓冲消费）。两轮子代理验证 + 独立审核 9 项全修；沉淀 terminal-multi-session.md §11 与 CLAUDE.md 关键规则行（v2.44）
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5f36648` | (see git log) |
+| `e14e98e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

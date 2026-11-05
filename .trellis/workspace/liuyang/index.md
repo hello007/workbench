@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 220
+- **Total Sessions**: 221
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1739 | Active |
+| `journal-4.md` | ~1773 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 221 | 2026-11-05 | 终端基础体验补强：xterm addons 与交互 | `5f36648`, `e14e98e` | `master` |
 | 220 | 2026-11-05 | 终端退出检测事件化与去重 | `379ef65`, `6401c46` | `master` |
 | 219 | 2026-11-04 | ConPTY 子进程树回收 | `e50a613` | `master` |
 | 218 | 2026-11-04 | 终端 UTF-8 分片修复与终端方案调研 | `1a66010`, `9974300`, `e4f26b0` | `master` |
