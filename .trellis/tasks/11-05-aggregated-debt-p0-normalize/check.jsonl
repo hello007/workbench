@@ -1,0 +1,2 @@
+{"file": "docs/spec/aggregated-workspace.md", "reason": "核对路径归一后节点 key 与收藏路径一致性、空白串/卷根展示名是否与契约一致"}
+{"file": "docs/spec/perf-baseline.md", "reason": "核对缓存失效改动未破坏 mtime + TTL 三层兜底，联动清理范围正确"}

@@ -74,7 +74,8 @@ func (s *RepoConfigService) Export() (string, error) {
 // PreviewImport 解析导入文件并生成预览（不落盘）。
 // 全局校验（JSON 结构 / manifestVersion）失败返回 AppError 整体拒绝；
 // 逐项校验（字段缺失 / 路径在本机不存在）失败列入 Invalid，不阻断合法项。
-// 冲突判定键为 path：工作目录按规范化绝对路径，收藏夹按原 path。
+// 冲突判定键为 path：工作目录按规范化绝对路径，收藏夹按归一后的路径
+// （同 normalizeFavoritePath 口径，尾分隔符差异不构成新收藏）；决策表 key 仍取原始 path。
 func (s *RepoConfigService) PreviewImport(jsonText string) (*model.RepoConfigImportPreview, error) {
 	parsed, err := s.parseManifest(jsonText)
 	if err != nil {
@@ -111,7 +112,7 @@ func (s *RepoConfigService) PreviewImport(jsonText string) (*model.RepoConfigImp
 			continue
 		}
 		item := &model.RepoConfigFavoritePreview{Path: f.Path, Alias: f.Alias, Group: f.Group, CreatedAt: f.CreatedAt}
-		if _, ok := localFavByPath[f.Path]; ok {
+		if _, ok := localFavByPath[normalizeFavoritePath(f.Path)]; ok {
 			preview.ConflictFavorites = append(preview.ConflictFavorites, item)
 		} else {
 			preview.NewFavorites = append(preview.NewFavorites, item)
@@ -255,7 +256,7 @@ func (s *RepoConfigService) mergeDirectories(local []*model.Directory, imported 
 func (s *RepoConfigService) mergeFavorites(local []*model.Favorite, imported []*model.RepoConfigFavorite, decisions map[string]string, result *model.RepoConfigImportResult) []*model.Favorite {
 	byPath := make(map[string]*model.Favorite, len(local))
 	for _, f := range local {
-		byPath[f.Path] = f
+		byPath[normalizeFavoritePath(f.Path)] = f
 	}
 
 	for _, f := range imported {
@@ -264,8 +265,11 @@ func (s *RepoConfigService) mergeFavorites(local []*model.Favorite, imported []*
 			result.FailedReasons = append(result.FailedReasons, fmt.Sprintf("收藏 %s：%s", f.Path, reason))
 			continue
 		}
+		// 决策表 key 取 manifest 原始 path（前端契约）；冲突判定与落盘路径按归一后的写法，
+		// 尾分隔符差异视为同一收藏，避免导入后出现两条归一后同路径的重复收藏
 		decision := decisions[f.Path]
-		existing, conflict := byPath[f.Path]
+		favPath := normalizeFavoritePath(f.Path)
+		existing, conflict := byPath[favPath]
 		switch {
 		case !conflict:
 			if len(local) >= favoriteLimit {
@@ -278,8 +282,8 @@ func (s *RepoConfigService) mergeFavorites(local []*model.Favorite, imported []*
 			if group == "" {
 				group = "默认"
 			}
-			local = append(local, &model.Favorite{Path: f.Path, Alias: f.Alias, Group: group, CreatedAt: f.CreatedAt})
-			byPath[f.Path] = local[len(local)-1]
+			local = append(local, &model.Favorite{Path: favPath, Alias: f.Alias, Group: group, CreatedAt: f.CreatedAt})
+			byPath[favPath] = local[len(local)-1]
 			result.Added++
 		case decision == model.ImportDecisionOverwrite:
 			existing.Alias = f.Alias
@@ -300,7 +304,7 @@ func (s *RepoConfigService) mergeFavorites(local []*model.Favorite, imported []*
 			if group == "" {
 				group = "默认"
 			}
-			local = append(local, &model.Favorite{Path: f.Path, Alias: f.Alias, Group: group, CreatedAt: f.CreatedAt})
+			local = append(local, &model.Favorite{Path: favPath, Alias: f.Alias, Group: group, CreatedAt: f.CreatedAt})
 			result.Added++
 		default:
 			result.Skipped++
@@ -362,11 +366,12 @@ func dirPathSet(directories []*model.Directory) map[string]bool {
 	return set
 }
 
-// favPathSet 本机收藏 path 集合。
+// favPathSet 本机收藏 path 集合（归一后，与 FavoritesService.Load 的归一口径一致，
+// 供导入预览与 manifest 原始 path 归一后比对冲突）。
 func favPathSet(favorites []*model.Favorite) map[string]struct{} {
 	set := make(map[string]struct{}, len(favorites))
 	for _, f := range favorites {
-		set[f.Path] = struct{}{}
+		set[normalizeFavoritePath(f.Path)] = struct{}{}
 	}
 	return set
 }

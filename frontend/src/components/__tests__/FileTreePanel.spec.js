@@ -2093,6 +2093,23 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       await flushPromises()
       expect(ElMessage.success).toHaveBeenCalledWith('已取消收藏')
     })
+
+    it('isFavorited：收藏路径带尾分隔符时与节点路径按归一比较命中', async () => {
+      await flushPromises()
+      // 收藏路径 D:\repo\ 与节点路径 D:\repo 属同一目录：右键须显示「取消收藏」
+      useFavoritesStore().favorites = [{ path: 'D:\\repo\\', alias: '', group: '默认' }]
+      const state = wrapper.vm.$.setupState
+
+      state.contextMenu.data = { path: 'D:\\repo', name: 'repo', type: 'directory' }
+      expect(state.isFavorited).toBe(true)
+
+      // 分隔符与大小写差异同样归一
+      state.contextMenu.data = { path: 'd:/repo', name: 'repo', type: 'directory' }
+      expect(state.isFavorited).toBe(true)
+
+      state.contextMenu.data = { path: 'D:\\other', name: 'other', type: 'directory' }
+      expect(state.isFavorited).toBe(false)
+    })
   })
 
   describe('toggleDashboardPin 状态看板关注', () => {

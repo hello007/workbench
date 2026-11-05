@@ -126,6 +126,8 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 // GetRootNodesForPaths 为聚合视图构造根节点列表（虚拟工作区：收藏目录平铺浏览）。
 //
 // 对每个入参 path：
+//   - 空白串（含纯空白）-> 跳过，不产占位节点
+//   - 入参先经 filepath.Clean 归一：尾分隔符（D:\repo\ 与 D:\repo）落到同一节点 key
 //   - Stat 成功且为目录 -> 正常节点（复用 isGitRepoDir/hasRemote 缓存填 git 徽标）
 //   - Stat 成功但非目录 -> 跳过（收藏可含文件，文件类收藏不进聚合树）
 //   - Stat 失败（被删/移动/无权限）-> Missing 占位节点，前端标灰提示并可右键移除收藏；
@@ -136,11 +138,26 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 // 或逐个 GetGitInfo 均劣）。
 func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTreeNode {
 	nodes := make([]*model.FileTreeNode, 0, len(paths))
-	for _, p := range paths {
-		if p == "" {
+	for _, raw := range paths {
+		// 空白路径（含纯空白串）跳过：Stat 失败会产出不可读的 Missing 占位，
+		// 与「收藏目录已失效」的兜底语义混淆
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		name := filepath.Base(filepath.Clean(p))
+		// 路径归一到干净写法：D:\repo\ 与 D:\repo 必须落到同一节点 key
+		// （前端 el-tree node-key=path，差异写法会重复注册 nodesMap、重复缓存）
+		// 后续 Stat、filepath.Base、git 徽标缓存键与返回节点的 Path/ID 全部使用清洗后的路径
+		p := filepath.Clean(raw)
+		name := filepath.Base(p)
+		// 卷根（C:\、/）的 Base 结果是分隔符本身，回退 VolumeName 给出可读展示名；
+		// 非 Windows 卷或以分隔符为名的路径再回退清洗后的路径串，保证不产出空名
+		if name == "." || name == string(os.PathSeparator) || name == "/" || name == "\\" {
+			if vol := filepath.VolumeName(p); vol != "" {
+				name = vol
+			} else {
+				name = p
+			}
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			node := model.NewFileTreeNode(name, p, "directory")
@@ -175,11 +192,47 @@ func (s *FileTreeService) InvalidateCache(dirPath string) {
 		abs = dirPath
 	}
 	s.treeCache.clearPath(abs)
+	// git 徽标缓存联动失效：目录本身 + 直接子目录。
+	// 手动刷新父目录时子目录徽标同样要更新（git init / git remote add 后立即可见）；
+	// 孙级由各自的 InvalidateCache 驱动，不在此级联（避免刷新父目录清空整棵子树缓存）。
+	s.invalidateGitBadgeCache(abs)
+	// GetChildren 以调用方传入的路径拼子节点键，相对路径场景下缓存键未必是 abs，两种写法都清
+	if dirPath != abs {
+		s.invalidateGitBadgeCache(dirPath)
+	}
+}
+
+// invalidateGitBadgeCache 清除指定路径及其直接子目录的 git 徽标缓存（是否仓库 / 是否有远程）。
+// 不引入 TTL：徽标只随手动刷新失效，避免刷新后仍显示陈旧结论。
+func (s *FileTreeService) invalidateGitBadgeCache(dirPath string) {
+	// 前缀拼接前归一：带尾分隔符的入参会拼出双分隔符，导致直接子目录匹配落空
+	dirPath = filepath.Clean(dirPath)
+	s.gitRepoCache.Delete(dirPath)
+	s.gitRemoteCache.Delete(dirPath)
+
+	prefix := dirPath + string(os.PathSeparator)
+	deleteDirectChildren := func(cache *sync.Map) {
+		cache.Range(func(key, _ any) bool {
+			k, ok := key.(string)
+			if !ok || !strings.HasPrefix(k, prefix) {
+				return true
+			}
+			// 仅直接子目录：前缀之后的剩余部分不含分隔符
+			if !strings.Contains(k[len(prefix):], string(os.PathSeparator)) {
+				cache.Delete(k)
+			}
+			return true
+		})
+	}
+	deleteDirectChildren(&s.gitRepoCache)
+	deleteDirectChildren(&s.gitRemoteCache)
 }
 
 // ClearAllCache 清除全部文件树缓存，供工具栏"刷新"按钮（el-tree 整体重建）前置调用。
 func (s *FileTreeService) ClearAllCache() {
 	s.treeCache.clearAll()
+	s.gitRepoCache.Clear()
+	s.gitRemoteCache.Clear()
 }
 
 // GetTree 递归获取完整树

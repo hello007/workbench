@@ -276,11 +276,11 @@ const onAddWorkDir = async (data) => {
 }
 
 // ---- 设为工作目录（聚合视图右键收藏目录，FileTreePanel set-as-work-dir 事件）----
-// 四步编排，复用既有链路：
+// 三步编排，复用既有链路：
 //   1. 目标目录已在工作目录列表（路径归一比较）则复用；否则 AddDirectory 添加后刷新列表
 //   2. 退出聚合模式（跳过旧树恢复——旧目录普通树状态已在进入聚合时保存）
 //   3. onDirectorySelect 切换：跳过保存（同上，防重建后的空树覆盖展开记忆）→ 改选中 → 恢复目标目录树状态
-//   4. locateNode 定位到该目录（聚合模式下收藏根是树一级节点可直接定位）
+// 不再调 locateNode：普通树的工作目录根不在树节点中，relative 为空恒早退，属无效调用。
 // 路径比较按 Windows 语义归一：分隔符统一、去尾分隔符、大小写不敏感；
 // 后端 AddDirectory 用 filepath.Abs 归一后精确去重，尾分隔符差异会被判重返回 nil，
 // 因此前端须先按同口径命中，避免「目录已存在却报添加失败」
@@ -309,8 +309,6 @@ const onSetAsWorkDir = async (data) => {
     await fileTreePanelRef.value?.exitAggregatedMode?.({ restoreState: false })
     // 旧目录普通树状态在进入聚合模式时已保存；此处跳过保存，防重建后的空树覆盖展开记忆
     await onDirectorySelect(target.id, { skipSave: true })
-    await nextTick()
-    await fileTreePanelRef.value?.locateNode(data.path)
     ElMessage.success('已设为工作目录')
   } catch (error) {
     ElMessage.error('设为工作目录失败: ' + (error.message || String(error)))

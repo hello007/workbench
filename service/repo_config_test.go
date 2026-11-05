@@ -495,6 +495,74 @@ func TestApplyImport_SaveAsNewNormalizesStorePath(t *testing.T) {
 	}
 }
 
+// TestApplyImport_FavoritePathNormalized 守护收藏导入的路径归一口径：
+// manifest 中的尾分隔符写法（D:\repo\）与本机收藏（D:\repo）视为同一项——
+// 预览判冲突、覆盖决策命中、落盘路径清洗；新增项同样清洗，不产生重复收藏。
+func TestApplyImport_FavoritePathNormalized(t *testing.T) {
+	svc, base := createRepoConfigTestService(t)
+	localPath := mustExistingPath(t, base, "fav-normalize")
+	if err := svc.favoritesSvc.Add(localPath, "本机别名", "默认"); err != nil {
+		t.Fatalf("seed favorite: %v", err)
+	}
+	// 决策表 key 取 manifest 原始 path（带尾分隔符），与本机存入路径写法不同
+	trailingPath := localPath + string(os.PathSeparator)
+	text := manifestJSON(t, &model.RepoConfigManifest{
+		ManifestVersion: model.RepoConfigManifestVersion,
+		Favorites:       []*model.RepoConfigFavorite{{Path: trailingPath, Alias: "导入别名", Group: "导入分组"}},
+	})
+
+	preview, err := svc.PreviewImport(text)
+	if err != nil {
+		t.Fatalf("PreviewImport: %v", err)
+	}
+	if len(preview.ConflictFavorites) != 1 || len(preview.NewFavorites) != 0 {
+		t.Fatalf("trailing separator should be previewed as conflict: %+v", preview)
+	}
+
+	result, err := svc.ApplyImport(text, &model.RepoConfigImportDecisions{
+		Favorites: map[string]string{trailingPath: model.ImportDecisionOverwrite},
+	})
+	if err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+	if result.Overwritten != 1 || result.Added != 0 {
+		t.Errorf("result: %+v, want overwritten=1 added=0", result)
+	}
+	favs, _ := svc.favoritesSvc.Load()
+	if len(favs) != 1 {
+		t.Fatalf("favorites count: got %d, want 1 (duplicate favorite imported)", len(favs))
+	}
+	if favs[0].Path != localPath {
+		t.Errorf("stored path should stay cleaned %q, got %q", localPath, favs[0].Path)
+	}
+	if favs[0].Alias != "导入别名" || favs[0].Group != "导入分组" {
+		t.Errorf("overwrite fields: alias=%q group=%q", favs[0].Alias, favs[0].Group)
+	}
+
+	// 新增项落盘同样清洗尾分隔符
+	newPath := mustExistingPath(t, base, "fav-new-normalize")
+	text = manifestJSON(t, &model.RepoConfigManifest{
+		ManifestVersion: model.RepoConfigManifestVersion,
+		Favorites:       []*model.RepoConfigFavorite{{Path: newPath + string(os.PathSeparator)}},
+	})
+	if _, err := svc.ApplyImport(text, nil); err != nil {
+		t.Fatalf("ApplyImport new favorite: %v", err)
+	}
+	favs, _ = svc.favoritesSvc.Load()
+	if len(favs) != 2 {
+		t.Fatalf("favorites count after add: got %d, want 2", len(favs))
+	}
+	var imported *model.Favorite
+	for _, f := range favs {
+		if f.Path != localPath {
+			imported = f
+		}
+	}
+	if imported == nil || imported.Path != newPath {
+		t.Errorf("new favorite should be stored cleaned as %q, got %+v", newPath, imported)
+	}
+}
+
 func TestApplyImport_InvalidJSONRejectedBeforeWrite(t *testing.T) {
 	svc, _ := createRepoConfigTestService(t)
 	_, err := svc.ApplyImport("}", nil)

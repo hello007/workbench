@@ -1,0 +1,30 @@
+{
+  "id": "aggregated-debt-cleanup",
+  "name": "aggregated-debt-cleanup",
+  "title": "聚合视图欠账清理总纲（12 条）",
+  "description": "聚合视图 12 条遗留欠账的父任务：按风险分 P0 路径与缓存归一批、P1 交互与并发批、P2 契约与产品决策批，逐批实施并按 TEMP-MEM 清单销账",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "liuyang",
+  "assignee": "liuyang",
+  "createdAt": "2026-11-05",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-05-aggregated-debt-p0-normalize",
+    "11-05-aggregated-debt-p1-interaction",
+    "11-05-aggregated-debt-p2-contract"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

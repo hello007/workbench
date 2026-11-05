@@ -622,11 +622,17 @@ const contextMenu = reactive({
   targetPinned: false
 })
 
+// 路径比较归一：分隔符统一为反斜杠、去尾部分隔符、大小写不敏感（Windows 路径语义）。
+// 去尾分隔符保证 D:\repo\ 与 D:\repo 视为同一路径，收藏判重与聚合子树归属共用同一口径。
+const normalizeComparablePath = (p) => (p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+
 const isFavorited = computed(() => {
   const favList = favoritesStore.favorites
   const path = contextMenu.data?.path
   if (!path) return false
-  return favList.some(f => f.path === path)
+  // 收藏路径可能带尾分隔符（D:\repo\），节点路径不带：按归一后比较，否则误显示「添加到收藏」
+  const key = normalizeComparablePath(path)
+  return favList.some(f => normalizeComparablePath(f.path) === key)
 })
 
 // 空白区右键时判断当前工作目录是否 git 仓库（空白区 data 无 isGitRepo 字段，回查工作目录）
@@ -890,9 +896,7 @@ const loadTreeNode = async (node, resolve) => {
 // 把全部收藏路径交给后端聚合绑定一次判定：目录 -> 正常节点（含 git 徽标）、
 // 不存在 -> Missing 占位（前端标灰 + 右键移除收藏）、文件类 -> 后端跳过不进聚合树。
 // 收藏 alias 覆盖节点显示名（后端仅知路径，取路径末段兜底）。
-// 路径比较归一：分隔符统一为反斜杠、去尾部分隔符、大小写不敏感（Windows 路径语义）。
-// 去尾分隔符保证 D:\repo\ 与 D:\repo 视为同一根，避免收藏数据尾部斜杠导致子树归属失配。
-const normalizeComparablePath = (p) => (p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+// 路径比较归一走 normalizeComparablePath（定义在右键菜单区），避免收藏数据尾部斜杠导致子树归属失配。
 
 // 聚合根集合：祖先已被收藏的项不再作为独立根（与收藏顺序无关，同路径只保留首个）。
 // el-tree node-key=path，同一路径在根层与子层同时注册会互相覆盖 nodesMap

@@ -12,9 +12,7 @@
 - **[待决事项标题]**：[简要描述在何种场景下存在分歧或需要人工确认，待人决策]。
 -->
 
-- **git 徽标缓存失效通道**：`service/filetree.go` 的 `isGitRepoDir`/`hasRemote` 为进程级永久 `sync.Map` 缓存，`InvalidateCache`/`ClearAllCache` 仅清文件树缓存；用户 `git init`、`git remote add` 或删除 `.git` 后徽标不更新，重启才恢复，聚合视图放大该暴露面。需决定收口方式：清缓存入口联动清理 vs 加 TTL vs 维持现状（既有 `GetChildren` 同样受影响，改动面超出聚合视图功能）。
 - **Stat 错误归因与提示口径**：`GetRootNodesForPaths` 把不存在、权限拒绝、网络盘不可达统一置 `Missing`，前端统一提示「目录不存在或已移动，可右键移除收藏」；网络盘临时断开或 ACL 变更时会误导用户移除仍有效的收藏，且该路径无任何日志。需决定是否区分 `os.IsNotExist`、是否增加错误原因字段/文案，以及是否补 Warn 日志。
-- **脏收藏路径展示名**：纯空白串（如 `"  "`）与卷根（`C:\`、`/`）经 `filepath.Base` 后节点名不可读（空白或分隔符）；空串被跳过而空白串产出占位节点，脏数据治理口径不一致。需决定统一跳过、回退卷名，还是产出带兜底名的占位节点。
 - **聚合视图下切换工作目录的语义**：当前聚合模式点击左侧工作目录只改变选中目录与内容面板，文件树仍是聚合树（聚合 `treeKey` 不随目录变化），命令面板「工作目录」跳转同样不退出聚合；需决定「选工作目录即自动退出聚合」还是「维持聚合、目录选择仅影响内容面板」，并在 `docs/spec/aggregated-workspace.md` 写死。
 - **已删除的文件收藏以 Missing 目录占位**：现存文件收藏按契约不进聚合树，但同一路径被删除/移动后会产出 `type="directory"` 的 Missing 占位（名为文件名），用户可能误判为目录失效；`model.Favorite` 当前无类型字段，需决定补类型字段、接受该行为，还是在前端按收藏原类型过滤。
 
@@ -28,9 +26,6 @@
 - **聚合视图菜单项沿用工作目录语义**：聚合视图下「复制相对路径」「在此目录中搜索」以当前工作目录为基准，空白区右键新建文件/文件夹作用于工作目录而非虚拟根。建议按 `findAggregatedRootFor` 取所属收藏根作为基准，并收敛聚合模式空白区菜单项。
 - **收藏外部入口变更不刷新聚合根**：命令面板取消收藏、配置导入后 `loadFavorites`、收藏别名修改均不触发 `refreshAggregatedRoot`，聚合视图保持旧快照。建议聚合模式下 `watch` favorites 变化（带代次/去抖守卫）。
 - **首次聚合加载串行 git remote 探测**：每个 git 收藏在缓存未命中时同步执行一次 `git remote -v`，收藏上限 100 时首次进入可能产生明显延迟。建议有界并发（信号量 3-4）或复用批量 remote 读取能力。
-- **isFavorited 精确比较**：`FileTreePanel.isFavorited` 按原始 path 精确比较，收藏路径大小写/分隔符与节点 path 不一致时显示「添加到收藏」，与新增的路径归一口径不一致。建议统一走 `normalizeComparablePath` 判定同路径。
-- **onSetAsWorkDir 第 4 步空操作**：`Home.onSetAsWorkDir` 退出聚合后调用 `locateNode(目标目录)`，普通树下 relative 为空恒 return，调用无效且注释与行为不符。建议删除该调用或改为定位子路径。
-- **收藏路径尾分隔符未全链路统一**：前端 `normalizeComparablePath` 已去尾分隔符，但后端 `GetRootNodesForPaths` 与 git 徽标缓存键仍用原始路径，`D:\repo\` 形态会重复缓存并影响节点 key 一致性。建议收藏写入侧规范化，或后端统一 `filepath.Clean`。
 - **批量存在性探测无并发上限与整体超时**：`GetRootNodesForPaths` 对每个收藏串行 `os.Stat`，git 收藏再串行 `git remote -v`；网络盘/UNC 收藏 Stat 可能长时间阻塞且 Wails 调用无 ctx/取消，聚合视图首帧需等全部完成。建议与「串行 git remote 探测」合并处理：有界并发（信号量 3-4）+ 整体超时。
 
 ## 更新时机

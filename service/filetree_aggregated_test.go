@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,16 +136,191 @@ func TestGetRootNodesForPaths_EmptyAndBlankInputs(t *testing.T) {
 		t.Errorf("nil input should return empty non-nil slice, got %v", nodes)
 	}
 
-	// 切到空临时目录执行：空白串是相对路径，避免进程 cwd 下恰好存在同名目录导致分流失效
-	t.Chdir(t.TempDir())
-	// 空串路径跳过不产出节点（防御收藏数据脏值）
-	nodes = svc.GetRootNodesForPaths([]string{"", "  "})
-	// "  " 为非法路径 Stat 失败 -> Missing 占位（不静默丢弃，前端可见可移除）
-	if len(nodes) != 1 {
-		t.Fatalf("blank path should produce missing placeholder, got %d nodes", len(nodes))
+	// 空串与纯空白串统一跳过，不产出 Missing 占位：
+	// 否则空白脏值与「收藏目录已失效」的兜底语义混淆，用户看到无法移除的空白节点
+	nodes = svc.GetRootNodesForPaths([]string{"", "  ", "\t"})
+	if len(nodes) != 0 {
+		t.Errorf("blank inputs should produce no nodes, got %d", len(nodes))
 	}
-	if !nodes[0].Missing {
-		t.Error("blank path placeholder should be marked missing")
+}
+
+// TestGetRootNodesForPaths_TrailingSeparatorNormalized 守护尾分隔符归一：
+// D:\repo\ 与 D:\repo 必须产出同一 Path/ID（前端 el-tree node-key=path），
+// 且 git 徽标缓存落在同一个清洗后的键上，不重复缓存。
+func TestGetRootNodesForPaths_TrailingSeparatorNormalized(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	mustMkdir(t, repo)
+	withTrailing := repo + string(os.PathSeparator)
+
+	svc := NewFileTreeService()
+	nodes := svc.GetRootNodesForPaths([]string{withTrailing, repo})
+	if len(nodes) != 2 {
+		t.Fatalf("want 2 nodes, got %d", len(nodes))
+	}
+	for i, n := range nodes {
+		if n.Path != repo {
+			t.Errorf("node[%d].Path should be cleaned to %q, got %q", i, repo, n.Path)
+		}
+		if n.ID != repo {
+			t.Errorf("node[%d].ID should equal cleaned path %q, got %q", i, repo, n.ID)
+		}
+		if n.Name != "repo" {
+			t.Errorf("node[%d].Name should be path base, got %q", i, n.Name)
+		}
+	}
+
+	// 缓存键同源：清洗后路径有项，带尾分隔符的原始写法不得留下缓存项
+	if _, ok := svc.gitRepoCache.Load(repo); !ok {
+		t.Error("git 徽标缓存应落在清洗后的路径键上")
+	}
+	if _, ok := svc.gitRepoCache.Load(withTrailing); ok {
+		t.Error("带尾分隔符的原始写法不应产生独立缓存键")
+	}
+}
+
+// TestGetRootNodesForPaths_VolumeRootDisplayName 守护卷根展示名：
+// C:\ / / 的 filepath.Base 结果是分隔符本身，须回退 VolumeName（非 Windows 卷
+// 再回退清洗路径），不得产出空名或 "."，且节点可展开。
+func TestGetRootNodesForPaths_VolumeRootDisplayName(t *testing.T) {
+	// 用临时目录所在卷构造卷根，避免硬编码盘符
+	base := t.TempDir()
+	vol := filepath.VolumeName(base)
+	root := vol + string(os.PathSeparator)
+
+	svc := NewFileTreeService()
+	nodes := svc.GetRootNodesForPaths([]string{root})
+	if len(nodes) != 1 {
+		t.Fatalf("want 1 volume root node, got %d", len(nodes))
+	}
+	n := nodes[0]
+	if n.Name == "" || n.Name == "." {
+		t.Errorf("volume root should have readable display name, got %q", n.Name)
+	}
+	// 有卷名的平台（Windows C:\）不得把裸分隔符当名称：去掉回退逻辑后
+	// filepath.Base("C:\\") 返回 "\\"，仅靠非空判定无法识别，故显式断言不含分隔符。
+	// Linux 根 "/" 的 VolumeName 为空，展示名回退为路径自身 "/"，不参与该断言。
+	if filepath.VolumeName(root) != "" && strings.ContainsAny(n.Name, `\/`) {
+		t.Errorf("volume root display name should be readable, got %q", n.Name)
+	}
+	if n.Path != filepath.Clean(root) {
+		t.Errorf("volume root path should be cleaned to %q, got %q", filepath.Clean(root), n.Path)
+	}
+	if n.Missing {
+		t.Error("volume root should exist and not be marked missing")
+	}
+	if n.IsLeaf || !n.HasChildren {
+		t.Errorf("volume root should be expandable, got isLeaf=%v hasChildren=%v", n.IsLeaf, n.HasChildren)
+	}
+}
+
+// TestInvalidateCache_RefreshesGitBadge 守护 git 徽标缓存失效通道：
+// 首次探测把仓库缓存为 false 后，git init / git remote add 再经 InvalidateCache，
+// 手动刷新须立即看到新徽标（否则用户刷新后仍是旧结论）。
+func TestInvalidateCache_RefreshesGitBadge(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	mustMkdir(t, repo)
+
+	svc := NewFileTreeService()
+	// 预热：仓库尚未初始化，缓存 IsGitRepo=false
+	before := svc.GetRootNodesForPaths([]string{repo})
+	if len(before) != 1 || before[0].IsGitRepo {
+		t.Fatalf("前置验证失败：未初始化前应为非 git 仓库: %+v", before)
+	}
+
+	testutil.RunGit(t, repo, "init")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+	svc.InvalidateCache(repo)
+
+	after := svc.GetRootNodesForPaths([]string{repo})
+	if len(after) != 1 {
+		t.Fatalf("want 1 node, got %d", len(after))
+	}
+	if !after[0].IsGitRepo {
+		t.Error("InvalidateCache 后 git init 应立即反映为 IsGitRepo=true")
+	}
+	if !after[0].HasRemote {
+		t.Error("InvalidateCache 后 git remote add 应立即反映为 HasRemote=true")
+	}
+}
+
+// TestInvalidateCache_ClearsDirectChildGitBadge 守护前缀匹配范围：
+// 刷新父目录时直接子目录徽标同步失效（git init 后刷新父目录即可见），
+// 孙级不级联清空（避免刷新父目录清空整棵子树的 git 探测缓存），
+// 同前缀兄弟目录（parent 与 parent-other）不被误删。
+func TestInvalidateCache_ClearsDirectChildGitBadge(t *testing.T) {
+	base := t.TempDir()
+	parent := filepath.Join(base, "parent")
+	child := filepath.Join(parent, "child")
+	grand := filepath.Join(child, "grand")
+	// 与 parent 共享前缀串的兄弟目录：前缀判定必须带分隔符，否则会误删其缓存
+	sibling := filepath.Join(base, "parent-other")
+	mustMkdir(t, parent)
+	mustMkdir(t, child)
+	mustMkdir(t, grand)
+	mustMkdir(t, sibling)
+
+	svc := NewFileTreeService()
+	// 预热：GetChildren(parent) 探测直接子目录 child，GetChildren(child) 探测孙级 grand，
+	// GetRootNodesForPaths(sibling) 探测同前缀兄弟目录
+	if _, err := svc.GetChildren(parent); err != nil {
+		t.Fatalf("预热 GetChildren(parent): %v", err)
+	}
+	if _, err := svc.GetChildren(child); err != nil {
+		t.Fatalf("预热 GetChildren(child): %v", err)
+	}
+	if _, ok := svc.gitRepoCache.Load(child); !ok {
+		t.Fatal("前置验证失败：child 应已缓存 git 徽标")
+	}
+	if _, ok := svc.gitRepoCache.Load(grand); !ok {
+		t.Fatal("前置验证失败：grand 应已缓存 git 徽标")
+	}
+	svc.GetRootNodesForPaths([]string{sibling})
+	if _, ok := svc.gitRepoCache.Load(sibling); !ok {
+		t.Fatal("前置验证失败：sibling 应已缓存 git 徽标")
+	}
+
+	testutil.RunGit(t, child, "init")
+	testutil.RunGit(t, grand, "init")
+	svc.InvalidateCache(parent)
+
+	if nodes := svc.GetRootNodesForPaths([]string{child}); !nodes[0].IsGitRepo {
+		t.Error("刷新父目录后直接子目录徽标应失效重探（child 应变为 git 仓库）")
+	}
+	// 孙级保持旧缓存：只清直接子目录，不级联
+	if nodes := svc.GetRootNodesForPaths([]string{grand}); nodes[0].IsGitRepo {
+		t.Error("孙级 git 徽标不应被父目录刷新级联清空")
+	}
+	// 同前缀兄弟目录保持缓存：C:\a\parent 的前缀不得命中 C:\a\parent-other
+	if _, ok := svc.gitRepoCache.Load(sibling); !ok {
+		t.Error("同前缀兄弟目录的 git 徽标缓存不应被误删")
+	}
+}
+
+// TestClearAllCache_RefreshesGitBadge 守护全量刷新的 git 徽标通道：
+// ClearAllCache 须逐键清空 gitRepoCache / gitRemoteCache。
+func TestClearAllCache_RefreshesGitBadge(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	mustMkdir(t, repo)
+
+	svc := NewFileTreeService()
+	before := svc.GetRootNodesForPaths([]string{repo})
+	if len(before) != 1 || before[0].IsGitRepo {
+		t.Fatalf("前置验证失败：未初始化前应为非 git 仓库: %+v", before)
+	}
+
+	testutil.RunGit(t, repo, "init")
+	testutil.RunGit(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+	svc.ClearAllCache()
+
+	after := svc.GetRootNodesForPaths([]string{repo})
+	if len(after) != 1 {
+		t.Fatalf("want 1 node, got %d", len(after))
+	}
+	if !after[0].IsGitRepo || !after[0].HasRemote {
+		t.Errorf("ClearAllCache 后徽标应重新探测: IsGitRepo=%v HasRemote=%v", after[0].IsGitRepo, after[0].HasRemote)
 	}
 }
 

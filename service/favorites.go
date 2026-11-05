@@ -2,11 +2,22 @@ package service
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"workbench/model"
 	"workbench/util"
 )
+
+// normalizeFavoritePath 收藏路径归一：filepath.Clean 去掉尾分隔符与冗余分隔符，
+// 使 D:\repo\ 与 D:\repo 视为同一路径（判重、删除、更新别名/分组同口径）。
+// 空串保持空串（Clean("") 返回 "." 会误指向进程工作目录）。
+func normalizeFavoritePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	return filepath.Clean(p)
+}
 
 // FavoritesService 收藏夹服务
 type FavoritesService struct {
@@ -24,6 +35,9 @@ func NewFavoritesService(configPath string) *FavoritesService {
 }
 
 // Load 加载所有收藏
+//
+// 返回前对每条路径做内存归一（旧数据可能带尾分隔符），不强制落盘迁移：
+// 归一结果在后续任一写操作（Add/Remove/UpdateAlias/UpdateGroup）落盘时自然持久化。
 func (s *FavoritesService) Load() ([]*model.Favorite, error) {
 	if !util.FileExists(s.configPath) {
 		return []*model.Favorite{}, nil
@@ -32,6 +46,11 @@ func (s *FavoritesService) Load() ([]*model.Favorite, error) {
 	err := util.LoadJSON(s.configPath, &config)
 	if err != nil {
 		return nil, err
+	}
+	for _, f := range config.Favorites {
+		if f != nil {
+			f.Path = normalizeFavoritePath(f.Path)
+		}
 	}
 	return config.Favorites, nil
 }
@@ -44,6 +63,8 @@ func (s *FavoritesService) save(favorites []*model.Favorite) error {
 
 // Add 添加收藏（重复路径或超出上限时返回错误）
 func (s *FavoritesService) Add(path, alias, group string) error {
+	path = normalizeFavoritePath(path)
+
 	favorites, err := s.Load()
 	if err != nil {
 		return err
@@ -74,6 +95,8 @@ func (s *FavoritesService) Add(path, alias, group string) error {
 
 // Remove 删除指定路径的收藏
 func (s *FavoritesService) Remove(path string) error {
+	path = normalizeFavoritePath(path)
+
 	favorites, err := s.Load()
 	if err != nil {
 		return err
@@ -90,6 +113,8 @@ func (s *FavoritesService) Remove(path string) error {
 
 // UpdateAlias 更新收藏别名
 func (s *FavoritesService) UpdateAlias(path, alias string) error {
+	path = normalizeFavoritePath(path)
+
 	favorites, err := s.Load()
 	if err != nil {
 		return err
@@ -106,6 +131,8 @@ func (s *FavoritesService) UpdateAlias(path, alias string) error {
 
 // UpdateGroup 更新收藏分组
 func (s *FavoritesService) UpdateGroup(path, group string) error {
+	path = normalizeFavoritePath(path)
+
 	favorites, err := s.Load()
 	if err != nil {
 		return err

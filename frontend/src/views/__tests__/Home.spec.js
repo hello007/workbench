@@ -1113,7 +1113,7 @@ describe('Home.vue - handler 分支补充', () => {
   })
 
   // ---- onSetAsWorkDir（聚合视图「设为工作目录」）----
-  it('onSetAsWorkDir：目标已是工作目录时复用，跳过旧状态保存并退出聚合后定位', async () => {
+  it('onSetAsWorkDir：目标已是工作目录时复用，跳过旧状态保存并退出聚合后切换', async () => {
     const { ElMessage } = await import('element-plus')
     const { AddDirectory } = await import('../../../wailsjs/go/main/App')
     const directoryStore = useDirectoryStore()
@@ -1133,7 +1133,8 @@ describe('Home.vue - handler 分支补充', () => {
     expect(fileTreeSpies.saveCurrentState).not.toHaveBeenCalled()
     expect(fileTreeSpies.restoreTreeState).toHaveBeenCalledWith('D:\\proj\\a')
     expect(directoryStore.selectedDirectoryId).toBe('dir-1')
-    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('d:/proj/a')
+    // 普通树工作目录根不在节点中，locateNode 恒早退：不得残留无效调用
+    expect(fileTreeSpies.locateNode).not.toHaveBeenCalled()
     expect(ElMessage.success).toHaveBeenCalledWith('已设为工作目录')
   })
 
@@ -1152,7 +1153,7 @@ describe('Home.vue - handler 分支补充', () => {
 
     expect(AddDirectory).toHaveBeenCalledWith('新目录', 'D:\\new', false)
     expect(directoryStore.selectedDirectoryId).toBe('dir-new')
-    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('D:\\new')
+    expect(fileTreeSpies.locateNode).not.toHaveBeenCalled()
   })
 
   // ---- onDeleteFromFileTree / onDeleteFromContent ----
