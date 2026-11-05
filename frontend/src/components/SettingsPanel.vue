@@ -195,7 +195,7 @@
           <div class="settings-item">
             <div class="settings-item-info">
               <div class="settings-item-label">回滚行数</div>
-              <div class="settings-item-desc">可回看的历史输出行数（1000-10000），新建终端生效</div>
+              <div class="settings-item-desc">可回看的历史输出行数（默认 5000，范围 1000-10000），新建终端生效</div>
             </div>
             <el-input-number
               v-model="settingsStore.terminalScrollback"
@@ -206,6 +206,20 @@
               :value-on-clear="TERMINAL_APPEARANCE_DEFAULTS.scrollback"
               step-strictly
               size="small"
+              @change="onTerminalAppearanceChange"
+            />
+          </div>
+          <!-- OSC 9/777/99 通知总开关（R3）：默认关闭零打扰，开启后终端程序输出的
+               通知类转义序列转应用内 ElNotification（已开终端即时生效，handler 内
+               实时判定）；同 tab 同内容 5 秒节流防刷屏 -->
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">终端 OSC 通知</div>
+              <div class="settings-item-desc">终端程序经 OSC 9/777/99 发出的通知转为应用内提示（默认关闭；同内容 5 秒内只提示一次）</div>
+            </div>
+            <el-switch
+              v-model="settingsStore.terminalOscNotifyEnabled"
+              data-action="terminal-osc-notify"
               @change="onTerminalAppearanceChange"
             />
           </div>

@@ -76,6 +76,7 @@ workbench/
 |终端多 tab：xterm 禁重挂载/搬 DOM（v-show+激活 refit）；tab watch 须 getter 投影；快照 v2 消费旧 `workDir` 后置空；全屏 z-index 1500 守 `fullscreen ⇒ visible`，ESC 过滤 defaultPrevented；外观热更后 refit；`el-input-number` 必带 `:value-on-clear`|[terminal-multi-session.md](docs/spec/terminal-multi-session.md)|
 |终端关闭回收整树：Windows 每会话绑定 `KILL_ON_JOB_CLOSE` Job（`createKillOnCloseJob`/`bindJobOrWarn`，失败仅 Warn 降级）；`Close` 幂等且先断 ConPTY 后关 Job；Unix 仅 SIGTERM shell，语义不对称|[terminal-multi-session.md](docs/spec/terminal-multi-session.md)|
 |终端退出检测：`terminal-exit` 唯一出口 `emitExitIfRunning`+`MarkExited`（在册检查与跃迁同持 `s.mu`，禁另发）；Windows 走 `ExitCh` 事件通道（Close 须 SetEvent→等 waitDone→关句柄），Unix/nil 回退 500ms 轮询；新平台 `PtyProcess` 须实现 `ExitCh`|[terminal-multi-session.md](docs/spec/terminal-multi-session.md)|
+|终端 addon 面（xterm 6）：WebGL 先探测后挂载（渲染器构造在 open 首帧事件内，loadAddon catch 接不住）；无 onTextPaste，多行粘贴确认走容器捕获 DOM paste；serialize 在旧实例 dispose 前取文本；OSC `9;4` 恒放行、开关 handler 内实时判定；搜索条 Esc `.stop.prevent`；升 xterm major 四 addon 同批升级|[terminal-multi-session.md §11](docs/spec/terminal-multi-session.md)|
 |新增带事件的 service 须同步 `web_serve.go` `applySink` 补 `SetEventSink` 行（漏加=浏览器通道静默收不到全部事件）；ChatService：chat-task:* 事件流隔离、同会话串行保护、assistant 回复 done 前落盘、选择题 chat-question 块（`--disallowedTools` 禁自动应答）、**spawn `--permission-mode` 恒传**（省略则绕过审批协议）|[ai-chat-service.md](docs/spec/ai-chat-service.md)|
 |Linux 支持：Wails 桌面构建须 `-tags webkit2_41`；平台抽象——编译期字段独有走 `_windows/_other` 双文件、短分叉走运行时 GOOS 分支、纯逻辑抽无 tag 文件双侧同测；自更新 Linux 资产名与 release.yml 严格一致；`build/` 分发文件白名单放行；测试平台断言拆双平台文件禁共享；前端兜底禁 'powershell'/'C:\\' 字面量|[linux-platform.md](docs/spec/linux-platform.md)|
 |测试禁隐式依赖环境外部状态：mtime 时序与固定端口（本机常驻 workbench.exe 监听 36115）均致偶发挂；web serve 启动测试注入随机端口（`:0`），能直绑 :0 禁新增 freePort 探测；mtime 判定用注入陈旧缓存驱动，禁 sleep 等待|[test-stability.md](docs/spec/test-stability.md)|
@@ -183,5 +184,5 @@ workbench/
 
 ---
 
-**最后更新：** 2026-11-02
-**文档版本：** v2.43
+**最后更新：** 2026-11-05
+**文档版本：** v2.44

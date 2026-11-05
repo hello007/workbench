@@ -116,6 +116,17 @@
           </el-button>
         </div>
       </transition>
+      <!-- 搜索条（Ctrl+F 呼出）：叠加终端区右上角，仅活动 tab 生效（tab 切换自动收起） -->
+      <TerminalSearchBar
+        v-if="searchVisible"
+        :result-index="searchResultIndex"
+        :result-count="searchResultCount"
+        @query="onSearchQuery"
+        @case="onSearchCase"
+        @next="onSearchNext"
+        @prev="onSearchPrev"
+        @close="closeSearch()"
+      />
     </div>
   </div>
 </template>
@@ -126,6 +137,8 @@ import { Folder, RefreshRight, FullScreen, ScaleToOriginal, WarningFilled } from
 import { useTerminal } from '../composables/useTerminal'
 import { useTerminalTabs, MAX_TERMINAL_TABS } from '../composables/useTerminalTabs'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
+import TerminalSearchBar from './TerminalSearchBar.vue'
+import { debounce } from '../utils/debounce'
 import { useSettingsStore, useUiStore, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, FALLBACK_SHELL, resolveDefaultShell } from '../store'
 import { GetShellConfigs, GetSettings, WriteTerminalInput } from '../../wailsjs/go/main/App'
 
@@ -231,9 +244,11 @@ function onTabStripWheel(e) {
 
 // 为 tab 创建 xterm 实例，并登记 isExited → tab 状态的同步 watch
 // （会话退出/重启恢复双向回流至 tab 标记；停止函数入表，关闭/卸载时精准注销）
+// 同时注入 Ctrl+F 呼出回调与 tab 标题提供者（搜索条 UI 与 OSC 通知 title 消费）
 function createInstanceForTab(tab) {
   const inst = useTerminal()
   instances.set(tab.id, inst)
+  inst.setSearchShortcutHandler(() => onSearchShortcut(tab.id))
   const stop = watch(inst.isExited, (exited) => {
     if (exited) {
       markExited(tab.id)
@@ -243,6 +258,114 @@ function createInstanceForTab(tab) {
   })
   stopExitedWatchers.set(tab.id, stop)
   return inst
+}
+
+// ── 终端搜索条（Ctrl+F 呼出）──
+// 呼出链路：xterm attachCustomKeyEventHandler（仅终端焦点）→ setSearchShortcutHandler
+// 注入的回调 → openSearch 惰性挂载活动实例的 SearchAddon；关闭（Esc/按钮/tab 切换）
+// 时 disposeSearchAddon 释放（「关闭释放」契约，无搜索期间零开销）
+const searchVisible = ref(false)
+const searchQuery = ref('')
+const searchCaseSensitive = ref(false)
+const searchResultIndex = ref(-1)
+const searchResultCount = ref(0)
+// 当前持有搜索 addon 的 tab id（关闭时按它定位实例 dispose，tab 切换路径下
+// activeId 已变化，不能按 activeId 查）
+let searchInstId = null
+// 活动实例 SearchAddon 的 onDidChangeResults 注销闭包（关闭时精准注销）
+let searchResultsUnsub = null
+
+function searchFindOptions() {
+  return { caseSensitive: searchCaseSensitive.value }
+}
+
+function onSearchShortcut(tabId) {
+  // 仅活动 tab 响应（Ctrl+F 拦截发生在该实例聚焦时，防御性校验并行 tab 场景）
+  if (tabId !== activeId.value) return
+  openSearch()
+}
+
+function subscribeSearchResults(addon) {
+  unsubscribeSearchResults()
+  if (addon && typeof addon.onDidChangeResults === 'function') {
+    // 回调载荷 { resultIndex, resultCount }：resultIndex -1 = 无当前命中
+    searchResultsUnsub = addon.onDidChangeResults((r) => {
+      searchResultIndex.value = r?.resultIndex ?? -1
+      searchResultCount.value = r?.resultCount ?? 0
+    })
+  }
+}
+
+function unsubscribeSearchResults() {
+  if (typeof searchResultsUnsub === 'function') {
+    searchResultsUnsub()
+    searchResultsUnsub = null
+  }
+}
+
+async function openSearch() {
+  const tabId = activeId.value
+  const inst = instances.get(tabId)
+  if (!inst || !initedTabs.has(tabId)) return
+  const addon = inst.openSearchAddon()
+  if (!addon) return
+  searchInstId = tabId
+  searchVisible.value = true
+  subscribeSearchResults(addon)
+  // 呼出即重搜当前关键词（保留上次输入与大小写开关，对齐 VSCode 行为）
+  if (searchQuery.value) {
+    await inst.searchFindNext(searchQuery.value, searchFindOptions())
+  }
+}
+
+function closeSearch(refocus = true) {
+  searchVisible.value = false
+  unsubscribeSearchResults()
+  searchResultIndex.value = -1
+  searchResultCount.value = 0
+  const inst = searchInstId !== null ? instances.get(searchInstId) : null
+  searchInstId = null
+  if (inst) {
+    inst.disposeSearchAddon()
+    // 关闭后焦点还给终端（Esc 关闭时续输不受打断）；tab 切换路径下目标实例
+    // 已由 ensureActiveTabReady 聚焦，不重复抢焦点
+    if (refocus) inst.focus()
+  }
+}
+
+// tab 切换自动收起（搜索 addon 实例归属单 tab，跨 tab 复用会搜错缓冲）
+watch(activeId, () => {
+  if (searchVisible.value) closeSearch(false)
+})
+
+function onSearchQuery(q) {
+  searchQuery.value = q
+  const inst = instances.get(activeId.value)
+  if (inst && q) {
+    inst.searchFindNext(q, searchFindOptions())
+  }
+}
+
+function onSearchCase(v) {
+  searchCaseSensitive.value = v
+  const inst = instances.get(activeId.value)
+  if (inst && searchQuery.value) {
+    inst.searchFindNext(searchQuery.value, searchFindOptions())
+  }
+}
+
+function onSearchNext() {
+  const inst = instances.get(activeId.value)
+  if (inst && searchQuery.value) {
+    inst.searchFindNext(searchQuery.value, searchFindOptions())
+  }
+}
+
+function onSearchPrev() {
+  const inst = instances.get(activeId.value)
+  if (inst && searchQuery.value) {
+    inst.searchFindPrevious(searchQuery.value, searchFindOptions())
+  }
 }
 
 // ── 崩溃恢复快照钩子（保存侧）──
@@ -331,7 +454,9 @@ async function initTab(tab) {
     initedTabs.delete(tab.id)
     return
   }
-  await inst.initTerminal(container, tab.dir || fallbackTerminalDir(), tab.shellType)
+  await inst.initTerminal(container, tab.dir || fallbackTerminalDir(), tab.shellType, {
+    getTabTitle: () => tab.title
+  })
   inst.focus()
 }
 
@@ -399,7 +524,9 @@ async function onRestart() {
   const inst = tab ? instances.get(tab.id) : null
   const container = tab ? tabContainers.get(tab.id) : null
   if (!tab || !inst || !container) return
-  await inst.restartTerminal(container, tab.dir, tab.shellType)
+  await inst.restartTerminal(container, tab.dir, tab.shellType, {
+    getTabTitle: () => tab.title
+  })
 }
 
 // ── AI 对话代码块「在终端执行」命令消费（一期联动）──
@@ -445,7 +572,9 @@ async function consumePendingCmd() {
     const container = tabContainers.get(tab.id)
     if (container) {
       try {
-        await inst.restartTerminal(container, tab.dir, tab.shellType)
+        await inst.restartTerminal(container, tab.dir, tab.shellType, {
+          getTabTitle: () => tab.title
+        })
         await WriteTerminalInput(inst.sessionID.value, pending.cmd)
       } catch {
         // 重启或重写仍失败：静默，终端区退出提示条已呈现状态
@@ -511,18 +640,23 @@ watch(
   { immediate: true }
 )
 
-// 窗口 resize 监听：观察终端区域，尺寸变化时 refit 活动 tab 实例
+// 窗口 resize 监听：观察终端区域，尺寸变化时 refit 活动 tab 实例。
+// RO 回调 100ms 防抖（R5）：拖拽分隔条/全屏切换的跳变帧会连环触发 RO 回调，
+// 防抖尾部收口为一次 refit + ResizeTerminal IPC，防 IPC 风暴；tab 切换
+// （ensureActiveTabReady）与字号热更的显式 resize 不走此路径、不受防抖影响
+function resizeActiveInstance() {
+  if (!uiStore.terminalVisible || !activeTab.value || !initedTabs.has(activeTab.value.id)) return
+  const inst = instances.get(activeTab.value.id)
+  if (inst) {
+    inst.resize()
+  }
+}
+const debouncedResizeActiveInstance = debounce(resizeActiveInstance, 100)
+
 let resizeObserver = null
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(() => {
-    if (uiStore.terminalVisible && activeTab.value && initedTabs.has(activeTab.value.id)) {
-      const inst = instances.get(activeTab.value.id)
-      if (inst) {
-        inst.resize()
-      }
-    }
-  })
+  resizeObserver = new ResizeObserver(() => debouncedResizeActiveInstance())
   // 观察终端区域容器，检测拖拽调整高度等尺寸变化（隐藏 tab 于激活时 refit）
   if (terminalArea.value) {
     resizeObserver.observe(terminalArea.value)
@@ -530,11 +664,13 @@ onMounted(() => {
 })
 
 // 卸载：销毁全部 tab 实例（循环 destroyTerminal），停掉全部同步 watcher；
-// 防御性移除 ESC 监听（全屏态卸载时不泄漏全局 keydown）
+// 防御性移除 ESC 监听（全屏态卸载时不泄漏全局 keydown）+ 取消挂起的防抖回调
+// （防卸载后驱动已销毁实例 resize）
 onBeforeUnmount(async () => {
   if (resizeObserver) {
     resizeObserver.disconnect()
   }
+  debouncedResizeActiveInstance.cancel()
   window.removeEventListener('keydown', onFullscreenKeydown)
   stopExitedWatchers.forEach(stop => stop())
   stopExitedWatchers.clear()

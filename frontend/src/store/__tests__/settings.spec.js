@@ -569,13 +569,14 @@ describe('settings store - 终端外观 (terminalFontSize/fontFamily/scrollback)
     SaveSettings.mockResolvedValue(true)
   })
 
-  it('默认值：字号 14 / 字体空串（Cascadia Code 栈）/ 回滚 1000，与后端常量对齐', () => {
+  it('默认值：字号 14 / 字体空串（Cascadia Code 栈）/ 回滚 5000，与后端常量对齐', () => {
     const store = useSettingsStore()
     expect(store.terminalFontSize).toBe(TERMINAL_APPEARANCE_DEFAULTS.fontSize)
     expect(store.terminalFontSize).toBe(14)
     expect(store.terminalFontFamily).toBe('')
     expect(store.terminalScrollback).toBe(TERMINAL_APPEARANCE_DEFAULTS.scrollback)
-    expect(store.terminalScrollback).toBe(1000)
+    expect(store.terminalScrollback).toBe(5000)
+    expect(store.terminalOscNotifyEnabled).toBe(false)
     expect(TERMINAL_FONT_SIZE_MIN).toBe(10)
     expect(TERMINAL_FONT_SIZE_MAX).toBe(24)
     expect(TERMINAL_SCROLLBACK_MIN).toBe(1000)
@@ -597,12 +598,24 @@ describe('settings store - 终端外观 (terminalFontSize/fontFamily/scrollback)
     expect(store.terminalFontFamily).toBe('Consolas')
     expect(store.terminalScrollback).toBe(5000)
 
-    // 后端零值（老配置兜底缺失场景）回退默认
+    // 后端零值（老配置兜底缺失场景）回退默认（回滚默认 5000）
     GetSettings.mockResolvedValue({ terminalFontSize: 0, terminalFontFamily: '', terminalScrollback: 0 })
     await store.loadTerminalAppearance()
     expect(store.terminalFontSize).toBe(14)
     expect(store.terminalFontFamily).toBe('')
+    expect(store.terminalScrollback).toBe(5000)
+  })
+
+  it('已持久化 1000 不被默认值迁移覆盖（仅零值补默认路径生效 5000）', async () => {
+    // 存量用户显式配置的合法值保持原样，不做静默改写
+    GetSettings.mockResolvedValue({ terminalFontSize: 14, terminalFontFamily: '', terminalScrollback: 1000 })
+    const store = useSettingsStore()
+    await store.loadTerminalAppearance()
     expect(store.terminalScrollback).toBe(1000)
+    // 新装/缺失字段（undefined → NaN → 回退默认）才落 5000
+    GetSettings.mockResolvedValue({})
+    await store.loadTerminalAppearance()
+    expect(store.terminalScrollback).toBe(5000)
   })
 
   it('loadTerminalAppearance 越界值 clamp 到 [10,24] / [1000,10000]', async () => {
@@ -626,19 +639,36 @@ describe('settings store - 终端外观 (terminalFontSize/fontFamily/scrollback)
     expect(store.terminalFontSize).toBe(20)
   })
 
-  it('saveTerminalAppearance 合并写三字段并保留其他字段', async () => {
+  it('saveTerminalAppearance 合并写外观三字段与 OSC 通知开关并保留其他字段', async () => {
     GetSettings.mockResolvedValue({ otherField: 'keep' })
     const store = useSettingsStore()
     store.terminalFontSize = 20
     store.terminalFontFamily = 'Courier New'
     store.terminalScrollback = 8000
+    store.terminalOscNotifyEnabled = true
     await store.saveTerminalAppearance()
     expect(SaveSettings).toHaveBeenCalledTimes(1)
     const saved = SaveSettings.mock.calls[0][0]
     expect(saved.terminalFontSize).toBe(20)
     expect(saved.terminalFontFamily).toBe('Courier New')
     expect(saved.terminalScrollback).toBe(8000)
+    expect(saved.terminalOscNotifyEnabled).toBe(true)
     expect(saved.otherField).toBe('keep')
+  })
+
+  it('loadTerminalAppearance 加载 OSC 通知开关（缺省 false，显式 true 生效）', async () => {
+    GetSettings.mockResolvedValue({ terminalOscNotifyEnabled: true })
+    const store = useSettingsStore()
+    await store.loadTerminalAppearance()
+    expect(store.terminalOscNotifyEnabled).toBe(true)
+    // 缺省字段回退 false（老配置无该字段）
+    GetSettings.mockResolvedValue({})
+    await store.loadTerminalAppearance()
+    expect(store.terminalOscNotifyEnabled).toBe(false)
+    // 非布尔值（脏数据）收敛 false
+    GetSettings.mockResolvedValue({ terminalOscNotifyEnabled: 'yes' })
+    await store.loadTerminalAppearance()
+    expect(store.terminalOscNotifyEnabled).toBe(false)
   })
 
   it('stepTerminalFontSize 步进 ±1 并持久化', async () => {

@@ -58,7 +58,11 @@ const TILDE = new Set([
   'vue-router',
   '@vueuse/core',
   '@xterm/addon-fit',
+  '@xterm/addon-search',
+  '@xterm/addon-serialize',
+  '@xterm/addon-unicode11',
   '@xterm/addon-web-links',
+  '@xterm/addon-webgl',
   '@xterm/xterm',
 ]);
 

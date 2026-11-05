@@ -140,13 +140,14 @@ export function diffToolPresetsFor(isWindows) {
 
 /**
  * 终端外观默认值与取值边界（与后端 model.AppSettings 常量对齐）：
- * 字号 10-24（默认 14）、回滚行数 1000-10000（默认 1000）。
+ * 字号 10-24（默认 14）、回滚行数 1000-10000（默认 5000，大输出场景可回看更多
+ * 历史；已持久化的老配置值不被覆盖——仅零值补默认路径生效）。
  * fontFamily 空串 = 默认 Cascadia Code 字体栈（useTerminal buildTerminalFontFamily 消费）。
  */
 export const TERMINAL_APPEARANCE_DEFAULTS = {
   fontSize: 14,
   fontFamily: '',
-  scrollback: 1000
+  scrollback: 5000
 }
 export const TERMINAL_FONT_SIZE_MIN = 10
 export const TERMINAL_FONT_SIZE_MAX = 24
@@ -305,6 +306,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const terminalFontFamily = ref(TERMINAL_APPEARANCE_DEFAULTS.fontFamily)
   const terminalScrollback = ref(TERMINAL_APPEARANCE_DEFAULTS.scrollback)
 
+  // 终端 OSC 9/777/99 通知总开关（默认 false 关闭零打扰）：useTerminal 的 OSC
+  // handler 实时读取，开启后已开终端即时生效、关闭立即静默，无需重建终端
+  const terminalOscNotifyEnabled = ref(false)
+
   // 默认 Shell 类型：settings.json defaultShell（用户设置）优先；未设置时取平台默认
   // （GetShellConfigs 首项：Windows=powershell、Linux=bash）；后端均不可用回退 FALLBACK_SHELL。
   // App 启动时经 loadDefaultShell 预加载，useTerminal 以此兜底空 shellType 参数，
@@ -352,8 +357,8 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 从后端加载终端外观三字段（后端 Load 已补默认值，此处仍 clamp 兜底
-   * 手改配置文件越界值与 GetSettings 异常返回的 0 值）
+   * 从后端加载终端外观三字段与 OSC 通知开关（后端 Load 已补默认值，此处仍
+   * clamp 兜底手改配置文件越界值与 GetSettings 异常返回的 0 值）
    */
   async function loadTerminalAppearance() {
     try {
@@ -361,19 +366,21 @@ export const useSettingsStore = defineStore('settings', () => {
       terminalFontSize.value = clampTerminalFontSize(settings.terminalFontSize)
       terminalFontFamily.value = settings.terminalFontFamily || ''
       terminalScrollback.value = clampTerminalScrollback(settings.terminalScrollback)
+      terminalOscNotifyEnabled.value = settings.terminalOscNotifyEnabled === true
     } catch {
       // 读取失败保持当前值（默认或上次加载值），不阻塞设置页
     }
   }
 
   /**
-   * 保存终端外观三字段到后端（合并写，避免覆盖其他字段）
+   * 保存终端外观三字段与 OSC 通知开关到后端（合并写，避免覆盖其他字段）
    */
   async function saveTerminalAppearance() {
     const settings = await GetSettings()
     settings.terminalFontSize = terminalFontSize.value
     settings.terminalFontFamily = terminalFontFamily.value
     settings.terminalScrollback = terminalScrollback.value
+    settings.terminalOscNotifyEnabled = terminalOscNotifyEnabled.value
     await SaveSettings(settings)
   }
 
@@ -537,6 +544,7 @@ export const useSettingsStore = defineStore('settings', () => {
     terminalFontSize,
     terminalFontFamily,
     terminalScrollback,
+    terminalOscNotifyEnabled,
     defaultShell,
     shellConfigsCache,
     isWindowsPlatform,

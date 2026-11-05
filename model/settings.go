@@ -121,12 +121,14 @@ func clampAssetThumbInt(v, min, max, def int) int {
 }
 
 // 终端外观默认值与取值边界（设置页控件与工具栏 A-/A+ 快捷调节共用同一边界；
-// 前端 settings store 的 TERMINAL_APPEARANCE_DEFAULTS 等常量与此对齐）
+// 前端 settings store 的 TERMINAL_APPEARANCE_DEFAULTS 等常量与此对齐）。
+// 回滚行数默认 5000（大输出场景可回看更多历史；仅改默认值常量，已持久化的
+// 老配置值不被覆盖——零值补默认路径才生效），范围边界 MIN=1000/MAX=10000 不变。
 const (
 	DefaultTerminalFontSize   = 14
 	MinTerminalFontSize       = 10
 	MaxTerminalFontSize       = 24
-	DefaultTerminalScrollback = 1000
+	DefaultTerminalScrollback = 5000
 	MinTerminalScrollback     = 1000
 	MaxTerminalScrollback     = 10000
 )
@@ -373,7 +375,13 @@ type AppSettings struct {
 	WslDistro              string   `json:"wslDistro"`              // WSL 发行版名称
 	TerminalFontSize       int      `json:"terminalFontSize"`       // 终端字号（pt），默认 14，范围 10-24
 	TerminalFontFamily     string   `json:"terminalFontFamily"`     // 终端字体族，空值走默认 Cascadia Code 字体栈
-	TerminalScrollback     int      `json:"terminalScrollback"`     // 终端回滚行数，默认 1000，范围 1000-10000
+	TerminalScrollback     int      `json:"terminalScrollback"`     // 终端回滚行数，默认 5000，范围 1000-10000
+	// TerminalOscNotifyEnabled 终端 OSC 9/777/99 通知转应用内提示的总开关
+	// （默认 false 关闭：终端程序输出的通知类转义序列默认不弹提示，零打扰）。
+	// bool 零值即默认值，与 GpuDisabled 等现有标量 bool 字段同款语义，
+	// 不进 EnsureTerminalDefaults 补默认；标量字段随 AppSettings 值拷贝自然携带，
+	// 无需 PrivateCopy 单独处理。
+	TerminalOscNotifyEnabled bool `json:"terminalOscNotifyEnabled"`
 	SearchExcludeDirs      []string `json:"searchExcludeDirs"`      // 搜索排除目录
 	SearchExcludeFiles     []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
 	ShortcutCommandPalette string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
@@ -469,10 +477,11 @@ func (s *AppSettings) EnsureWebServeDefaults() {
 }
 
 // EnsureTerminalDefaults 补全终端外观默认值并收敛越界值：
-//   - 字号/回滚行数零值（老配置升级、字段缺失、损坏降级）→ 补默认（14 / 1000）；
+//   - 字号/回滚行数零值（老配置升级、字段缺失、损坏降级）→ 补默认（14 / 5000）；
 //   - 手改配置文件越界值 → clamp 收敛到合法区间（字号 10-24、回滚 1000-10000），
 //     防 xterm 拿到异常配置（字号过小不可读、过大破坏布局，scrollback 超限放大内存）；
-//   - TerminalFontFamily 空串即默认 Cascadia Code 字体栈，不强制填充。
+//   - TerminalFontFamily 空串即默认 Cascadia Code 字体栈，不强制填充；
+//   - TerminalOscNotifyEnabled bool 零值即默认（false 关闭），无需补默认。
 //
 // 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
 // App.GetSettings 降级分支统一调用，保证前端 GetSettings 拿到的三字段始终可用。

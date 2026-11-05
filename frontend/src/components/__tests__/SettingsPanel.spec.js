@@ -589,7 +589,7 @@ describe('SettingsPanel.vue', () => {
     const scrollbackInput = wrapper.find('.terminal-scrollback-input')
     await scrollbackInput.setValue('')
     await scrollbackInput.trigger('change')
-    expect(store.terminalScrollback).toBe(1000)
+    expect(store.terminalScrollback).toBe(5000)
   })
 
   it('终端外观保存失败时 error 提示', async () => {

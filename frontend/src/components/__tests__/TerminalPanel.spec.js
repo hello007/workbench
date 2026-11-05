@@ -8,15 +8,23 @@ import { useUiStore } from '../../store'
 // Mock useTerminal（pty 终端本质依赖后端运行时，mock 为可控函数）。
 // 每次 useTerminal() 返回全新实例对象（对齐多 tab 多实例），共享同一组 mock 函数；
 // capturedInstances 捕获实例引用，供用例驱动 isExited 回流与实例数断言。
+// 搜索条（Ctrl+F）契约面：setSearchShortcutHandler 捕获面板注入的呼出回调，
+// 搜索开关三方法供搜索条交互用例断言「打开挂载 / 关闭释放」链路。
 const terminalMock = {
   initTerminal: vi.fn(() => Promise.resolve()),
   changeDir: vi.fn(),
   resize: vi.fn(),
   focus: vi.fn(),
   destroyTerminal: vi.fn(() => Promise.resolve()),
-  restartTerminal: vi.fn(() => Promise.resolve())
+  restartTerminal: vi.fn(() => Promise.resolve()),
+  setSearchShortcutHandler: vi.fn(),
+  openSearchAddon: vi.fn(() => ({ onDidChangeResults: vi.fn() })),
+  disposeSearchAddon: vi.fn(),
+  searchFindNext: vi.fn(() => Promise.resolve()),
+  searchFindPrevious: vi.fn(() => Promise.resolve())
 }
 const capturedInstances = []
+const searchShortcutHandlers = []
 vi.mock('../../composables/useTerminal', async () => {
   const { ref } = await import('vue')
   return {
@@ -27,7 +35,10 @@ vi.mock('../../composables/useTerminal', async () => {
         currentDir: ref(''),
         // sessionID 与真实实例对齐（ref）：consumePendingCmd 经它取写入目标
         sessionID: ref(''),
-        ...terminalMock
+        ...terminalMock,
+        setSearchShortcutHandler: vi.fn((fn) => {
+          searchShortcutHandlers.push(fn)
+        })
       }
       capturedInstances.push(inst)
       return inst
@@ -60,7 +71,8 @@ vi.mock('@element-plus/icons-vue', () => ({
   RefreshRight: { template: '<i class="i-refresh" />' },
   FullScreen: { template: '<i class="i-fullscreen" />' },
   ScaleToOriginal: { template: '<i class="i-scale-to-original" />' },
-  WarningFilled: { template: '<i class="i-warning" />' }
+  WarningFilled: { template: '<i class="i-warning" />' },
+  Search: { template: '<i class="i-search" />' }
 }))
 
 const stubs = {
@@ -120,6 +132,7 @@ describe('TerminalPanel.vue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     capturedInstances.length = 0
+    searchShortcutHandlers.length = 0
   })
 
   afterEach(() => {
@@ -144,6 +157,7 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
   beforeEach(() => {
     vi.clearAllMocks()
     capturedInstances.length = 0
+    searchShortcutHandlers.length = 0
   })
 
   afterEach(() => {
@@ -234,7 +248,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
       'D:\\proj',
-      'powershell'
+      'powershell',
+      expect.any(Object)
     )
     expect(terminalMock.focus).toHaveBeenCalled()
     // D1：单 tab 隐藏 tab 栏，+ 按钮可用
@@ -270,7 +285,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenLastCalledWith(
       expect.any(Object),
       'D:\\work\\second',
-      'powershell'
+      'powershell',
+      expect.any(Object)
     )
   })
 
@@ -284,7 +300,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenLastCalledWith(
       expect.any(Object),
       expect.any(String),
-      'cmd'
+      'cmd',
+      expect.any(Object)
     )
   })
 
@@ -395,7 +412,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.restartTerminal).toHaveBeenCalledWith(
       expect.any(Object),
       'D:\\proj',
-      'powershell'
+      'powershell',
+      expect.any(Object)
     )
   })
 
@@ -453,7 +471,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
       'C:\\',
-      'powershell'
+      'powershell',
+      expect.any(Object)
     )
   })
 
@@ -468,7 +487,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
       '/',
-      'bash'
+      'bash',
+      expect.any(Object)
     )
   })
 
@@ -484,7 +504,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
     expect(terminalMock.initTerminal).toHaveBeenCalledWith(
       expect.any(Object),
       'C:\\',
-      'powershell'
+      'powershell',
+      expect.any(Object)
     )
   })
 
@@ -562,7 +583,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\a',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
       // 活动下标还原 + 镜像消费后被保存钩子回写为当前 tab 投影（原快照不再残留）
       expect(uiStore.terminalActiveIndex).toBe(0)
@@ -588,7 +610,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\b',
-        'cmd'
+        'cmd',
+        expect.any(Object)
       )
     })
 
@@ -622,7 +645,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\legacy',
-        'powershell' // GetSettings mock 默认 defaultShell
+        'powershell', // GetSettings mock 默认 defaultShell
+        expect.any(Object)
       )
     })
 
@@ -634,7 +658,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\fresh',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
     })
 
@@ -791,7 +816,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\fs',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
     })
 
@@ -926,7 +952,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.restartTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\proj',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
     })
 
@@ -1020,7 +1047,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.initTerminal).toHaveBeenLastCalledWith(
         expect.any(Object),
         'D:\\other',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
       expect(wrapper.vm.$.setupState.tabs).toHaveLength(2)
       expect(wrapper.vm.$.setupState.activeId).toBe('tab-2')
@@ -1042,7 +1070,8 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(terminalMock.restartTerminal).toHaveBeenCalledWith(
         expect.any(Object),
         'D:\\proj',
-        'powershell'
+        'powershell',
+        expect.any(Object)
       )
       expect(WriteTerminalInput).toHaveBeenCalledTimes(2)
       expect(WriteTerminalInput).toHaveBeenLastCalledWith('sid-1', 'echo hi')
@@ -1110,5 +1139,166 @@ describe('TerminalPanel.vue - 多设备写入提示（PR3 语义明示）', () =
       expect(WriteTerminalInput).not.toHaveBeenCalled()
       expect(uiStore.terminalPendingCmd).toBeNull()
     })
+  })
+})
+
+describe('TerminalPanel.vue - 终端搜索条（Ctrl+F 呼出）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedInstances.length = 0
+    searchShortcutHandlers.length = 0
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('实例创建时注入 Ctrl+F 呼出回调（setSearchShortcutHandler）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper)
+    expect(searchShortcutHandlers.length).toBeGreaterThanOrEqual(1)
+    expect(searchShortcutHandlers[0]).toBeTypeOf('function')
+  })
+
+  it('Ctrl+F 呼出回调触发搜索条显示并挂载活动实例搜索 addon', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    // 模拟 xterm attachCustomKeyEventHandler 拦截 Ctrl+F 后的回调（tab-1 活动）
+    searchShortcutHandlers[0]()
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
+    expect(terminalMock.openSearchAddon).toHaveBeenCalledTimes(1)
+  })
+
+  it('关闭按钮关闭搜索条并释放实例搜索 addon（关闭释放契约）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    await wrapper.find('[data-action="close"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    expect(terminalMock.disposeSearchAddon).toHaveBeenCalledTimes(1)
+    expect(terminalMock.focus).toHaveBeenCalled()
+  })
+
+  it('搜索条输入触发活动实例 searchFindNext（关键词 + 大小写选项）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    const input = wrapper.find('[data-search-bar] input')
+    await input.setValue('error')
+    await input.trigger('input')
+    await flushPromises()
+    expect(terminalMock.searchFindNext).toHaveBeenCalledWith('error', { caseSensitive: false })
+  })
+
+  it('Aa toggle 切换大小写后以新选项重搜当前关键词', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    const input = wrapper.find('[data-search-bar] input')
+    await input.setValue('Error')
+    await input.trigger('input')
+    await wrapper.find('[data-action="toggle-case"]').trigger('click')
+    await flushPromises()
+    expect(terminalMock.searchFindNext).toHaveBeenLastCalledWith('Error', { caseSensitive: true })
+  })
+
+  it('Enter=下一处 / Shift+Enter=上一处 分流 findNext/findPrevious', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    await wrapper.find('[data-search-bar] input').setValue('err')
+    const input = wrapper.find('[data-search-bar] input')
+    await input.trigger('keydown.enter')
+    await input.trigger('keydown.enter', { shiftKey: true })
+    await flushPromises()
+    expect(terminalMock.searchFindNext).toHaveBeenCalledTimes(2) // 输入 1 次 + Enter 1 次
+    expect(terminalMock.searchFindPrevious).toHaveBeenCalledTimes(1)
+  })
+
+  it('切换 tab 自动收起搜索条（addon 实例归属单 tab，不跨 tab 复用）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\a')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
+    await addTab(wrapper) // 新 tab 自动激活 → 收起
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    expect(terminalMock.disposeSearchAddon).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('TerminalPanel.vue - ResizeObserver 100ms 防抖', () => {
+  let wrapper
+  let ROCapture
+  let originalRO
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedInstances.length = 0
+    searchShortcutHandlers.length = 0
+    vi.useFakeTimers()
+    originalRO = globalThis.ResizeObserver
+    // 局部捕获型 RO 桩：观察回调由用例手动触发（jsdom 无真实尺寸变化）
+    ROCapture = class {
+      constructor(cb) {
+        this.cb = cb
+        ROCapture.instances.push(this)
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    ROCapture.instances = []
+    globalThis.ResizeObserver = ROCapture
+  })
+
+  afterEach(() => {
+    globalThis.ResizeObserver = originalRO
+    vi.useRealTimers()
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('RO 连环触发收口为尾部一次 resize（防 IPC 风暴）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    // 面板展开经 ensureActiveTabReady 的显式 resize 属既有路径，先清掉
+    terminalMock.resize.mockClear()
+
+    const ro = ROCapture.instances[0]
+    ro.cb()
+    ro.cb()
+    ro.cb()
+    // 防抖窗口内：零调用
+    expect(terminalMock.resize).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(100)
+    // 尾部收口：一次
+    expect(terminalMock.resize).toHaveBeenCalledTimes(1)
+  })
+
+  it('卸载时取消挂起的防抖回调（cancel，不驱动已销毁实例）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    terminalMock.resize.mockClear()
+    ROCapture.instances[0].cb()
+    wrapper.unmount()
+    wrapper = null
+    vi.advanceTimersByTime(500)
+    expect(terminalMock.resize).not.toHaveBeenCalled()
   })
 })

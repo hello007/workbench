@@ -100,7 +100,8 @@ if (e.target.closest('.el-overlay, .xterm-helper-textarea')) return // EP 弹窗
 |---|---|---|---|
 | 字号 | `terminalFontSize` | 10-24 / 14 | `term.options.fontSize` 热更 + `resize()`（fit + `ResizeTerminal` IPC 通知 PTY） |
 | 字体 | `terminalFontFamily` | 空串=Cascadia Code 栈；Consolas / Courier New 可选 | `term.options.fontFamily` 热更 + refit |
-| 回滚 | `terminalScrollback` | 1000-10000 / 1000 | **不热更，新建终端生效**（设置页描述须与之一致） |
+| 回滚 | `terminalScrollback` | 1000-10000 / **5000**（2026-11-05 起，零值补默认才生效；**已持久化老值不迁移**） | **不热更，新建终端生效**（设置页描述须与之一致） |
+| OSC 通知开关 | `terminalOscNotifyEnabled` | bool / false（关闭零打扰） | **开关热生效**（OSC handler 内实时读 store，切换无需重建终端） |
 
 - 后端 `EnsureTerminalDefaults()`（service `Load` + App `GetSettings` 异常分支**双兜底**）：零值补默认 + 越界 clamp。
 - store 合并写模式（saveTheme/saveDiffTool/saveTerminalAppearance 同款）：`GetSettings` 读盘 → 仅覆盖本组字段 → `SaveSettings`。**注意**：该模式有读盘-写回交错竞态窗口，属既有模式固有，新增保存分组须沿用而非另起炉灶。
@@ -115,6 +116,7 @@ if (e.target.closest('.el-overlay, .xterm-helper-textarea')) return // EP 弹窗
 - `ActiveIndex=0` 序列化无损；空 `Tabs` 无幽灵 tab。
 - 全屏态下弹窗内按 ESC 只关弹窗不退全屏。
 - 老配置（无外观三字段）加载补默认；越界 clamp。
+- 搜索条开关（Ctrl+F 呼出/关闭 dispose/Enter 与 Shift+Enter 方向）；OSC 通知开关三态（关→放行、开→提示、9;4 恒放行）；RO 100ms 防抖（fake timers）；WebGL 探测不过/构造抛错均回退且终端创建成功；多行粘贴（单行直通/确认写入/取消不写）；serialize 回放（dispose 前取文本、新实例收到旧缓冲）；scrollback 默认 5000 + 已持久化 1000 不覆盖。
 
 ## 8. `terminal-output` 载荷 UTF-8 完整性契约
 
@@ -228,3 +230,50 @@ s.emitExitIfRunning(sessionID)
 ```
 
 **回归必查**：进程自然退出后 `ExitCh` 关闭且 shell 已退出；长睡眠进程 `Close` 在 3 秒内返回、`ExitCh` 关闭、两个句柄置零；零值 `PtyProcess.ExitCh()` 为 nil 且 `watchProcess` 轮询兜底不 panic；`emitExitIfRunning`（含输出泵与 watch 竞态）只产出一条 `terminal-exit`；重复 `Close` 幂等。
+
+## 11. xterm addon 面与终端交互补强契约（2026-11-05 任务）
+
+**背景**：引入官方四 addon（webgl/search/unicode11/serialize）与搜索条、OSC 通知、Ctrl+Click、多行粘贴确认。版本与 `@xterm/xterm` 6.0.0 同批配套（webgl 0.19 / search 0.16 / unicode11 0.9 / serialize 0.14），tilde 档登记；**升 xterm major 时四 addon 必须同批升级**（同源配套，登记进依赖升级要点）。
+
+### 11.1 addon 挂载与降级（useTerminal.initTerminal）
+
+| 项 | 约定 |
+|---|---|
+| 统一降级 | addon 构造+load 全程 try/catch（`safeLoadAddon` 单点），失败仅 `console.warn`，**绝不阻塞终端创建** |
+| WebGL 双闸 | ①先探测后挂载：`canvas.getContext('webgl2' \|\| 'webgl')` 支持性探测（`isWebglSupported`）——**渲染器构造发生在 `terminal.open()` 首帧渲染事件内，loadAddon 同步 try/catch 接不住**（不支持环境成未捕获异常中断首帧渲染，jsdom 实证）②挂载成功后 `onContextLoss` 回调 `addon.dispose()` 回退 DOM 渲染，终端不重建 |
+| unicode11 | 挂载即生效（emoji/CJK 宽度表），无交互面 |
+| serialize | 仅 `restartTerminal` 消费（见 11.4），无 UI、不落盘、不入 session.json |
+| 搜索 | SearchAddon **惰性挂载**（Ctrl+F 呼出时创建），关闭时 `disposeSearchAddon()` 释放，无搜索期间零开销 |
+
+### 11.2 Ctrl+F 搜索条
+
+- 拦截点：`attachCustomKeyEventHandler`（**仅终端焦点路径**；搜索条输入框等 DOM 焦点不经 xterm）；仅 keydown 拦截、Ctrl/Cmd+F 无 Alt/Shift；**无 UI 消费方（面板未注入回调）时放行**，不劫持浏览器默认查找；返回 false 防字符写入。
+- 呼出回调由面板经 `setSearchShortcutHandler` 注入（实例级）；搜索条（`TerminalSearchBar.vue`）叠加终端区右上角，tab 切换自动收起（addon 实例归属单 tab，**禁跨 tab 复用**——收起按持有方 tabId 定位 dispose，不能按 activeId 查）。
+- **搜索条输入框 Esc 必须带 `.stop.prevent`**（stopPropagation 防冒泡触发整窗全屏退出，§5 契约）；Enter=下一处、Shift+Enter=上一处、Aa=大小写 toggle。
+- 匹配计数经 `onDidChangeResults` 订阅展示；关闭时闭包注销订阅 + dispose addon + 焦点还给终端。
+
+### 11.3 OSC 9/777/99 通知（composables/terminalOscNotify.js）
+
+| 项 | 约定 |
+|---|---|
+| 消费形态 | OSC 9（`9;<message>`）、OSC 777（`777;notify;<title>;<body>`）、OSC 99（kitty，首段含 `=` 判元数据段非标题） |
+| 放行形态 | **OSC `9;4` 进度条子类型必须放行**（返回 false，xterm 内部处理）；777 非 notify 子类型放行 |
+| 总开关 | `AppSettings.terminalOscNotifyEnabled`（bool 零值即默认 false 关闭）；**handler 内实时读 store**——关闭放行、开启即时生效，切换无需重建终端（不注册式门控做不到已开终端热生效） |
+| 节流 | 同实例同「标题+正文」5s 窗口只提示一次；节流表超 200 键先清理过期键防无界增长；`dispose()` 清表（实例销毁隔离） |
+| 出口 | `ElNotification`（type info，duration 5000），title 用 tab 标题（`getTabTitle` 注入）→ 载荷 title → 「终端通知」回退链 |
+
+### 11.4 Ctrl+Click 链接与多行粘贴
+
+- **URL/路径统一 Ctrl（macOS Cmd）+Click**：WebLinksAddon 构造器**首参即点击 handler**（覆盖默认单击打开，未按修饰键静默返回）；文件路径走 `registerLinkProvider`（`utils/terminalLinkProvider.js`，**web-links 先注册者优先**——URL 形态压过路径形态）；`OpenWithDefaultApp` 返回 false / Promise 异常均静默（不预检存在性，PRD Q3：零新增 RPC）。
+- 路径正则三形态（Windows 绝对 / Unix 绝对+`~/` / `./ ../` 相对）+ 负向 lookbehind 排 URL（`(?<![A-Za-z0-9:/])`）+ 尾随标点修剪；坐标换算逐 cell 走 `getChars()/getWidth()`（**宽字符行文本索引≠buffer x，必须映射表**）。
+- **多行粘贴确认：xterm 6 无 `onTextPaste` 公开事件**（粘贴链直达 `triggerDataEvent`，d.ts 与产物均无）——拦截点=**容器捕获阶段 DOM paste 事件**（先于 xterm 的 textarea/element 监听）；含 `\r\n` 时 `preventDefault + stopPropagation` 拦下默认写入 → `ElMessageBox.confirm`（单次确认形态）→ 确认后 `terminal.paste(text)` 原生链路（保留 `\n→\r` 归一与 bracketed paste 语义）、取消丢弃；单行直通。监听器随 `destroyTerminal` 摘除（restart 重建重挂）。
+
+### 11.5 serialize 回放与 RO 防抖
+
+| 项 | 约定 |
+|---|---|
+| 回放时序 | `restartTerminal` 在旧实例 **dispose 之前** `SerializeAddon.serialize()` 取文本（dispose 后缓冲即销毁）；无参 serialize 默认按终端 scrollback 上限全量序列化；新会话 `CreateTerminal` 返回后 `write` 回放 |
+| 失败降级 | 序列化/回放抛错静默跳过，新会话照常创建；回放为纯文本 ANSI 序列，不恢复光标位与 OSC 暂态 |
+| RO 防抖 | ResizeObserver 回调 **100ms debounce**（`utils/debounce.js` 手写最小面，禁引入未登记依赖）尾部一次 refit + `ResizeTerminal` IPC；tab 切换 `ensureActiveTabReady` 与字号热更的**显式 resize 不走 RO 不受防抖**；卸载 `cancel()` 取消防悬挂回调 |
+
+**回归必查**：WebGL 探测不过/构造抛错均终端创建成功、上下文丢失回调 dispose 回退；Ctrl+F 无消费方时放行不劫持；OSC 关→放行、开→提示、`9;4` 恒放行、同内容节流一条；单行粘贴直通不弹窗、确认写入/取消不写、销毁后监听摘除；restart 后新实例收到旧缓冲文本且 serialize 挂载先于旧实例 dispose；RO 连环触发收口一次、卸载取消挂起回调。
