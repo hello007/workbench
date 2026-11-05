@@ -260,23 +260,25 @@
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-                <!-- 权限模式：分段式按钮组（四档同排平铺，当前档高亮），悬停出说明；
+                <!-- 权限模式：分段式按钮组（四档同排平铺，当前档高亮），悬停各档
+                     在该档位置出各自说明（tooltip 包在每个按钮上，非整组居中）；
                      bypassPermissions 选中仍警告提示；非默认档警示色强调（is-elevated） -->
-                <el-tooltip :content="permissionModeTip" placement="top">
-                  <el-radio-group
-                    v-model="aiChatStore.chatSettings.permissionMode"
-                    size="small"
-                    class="chat-perm-seg"
-                    :class="{ 'is-elevated': aiChatStore.chatSettings.permissionMode !== 'default' }"
-                    @change="onPermissionModeChange"
+                <el-radio-group
+                  v-model="aiChatStore.chatSettings.permissionMode"
+                  size="small"
+                  class="chat-perm-seg"
+                  :class="{ 'is-elevated': aiChatStore.chatSettings.permissionMode !== 'default' }"
+                  @change="onPermissionModeChange"
+                >
+                  <el-tooltip
+                    v-for="m in PERMISSION_MODES"
+                    :key="m.value"
+                    :content="m.tip"
+                    placement="top"
                   >
-                    <el-radio-button
-                      v-for="m in PERMISSION_MODES"
-                      :key="m.value"
-                      :value="m.value"
-                    >{{ m.short }}</el-radio-button>
-                  </el-radio-group>
-                </el-tooltip>
+                    <el-radio-button :value="m.value">{{ m.short }}</el-radio-button>
+                  </el-tooltip>
+                </el-radio-group>
                 <div class="chat-input-spacer"></div>
                 <!-- 持续会话模型：运行中发送 = 排队注入（插话），发送按钮恒可用；
                      有在途轮次时并列展示停止按钮（中断当前轮 + 摘除排队轮） -->
@@ -431,8 +433,8 @@ const uiStore = useUiStore()
 // ===== 常量选项 =====
 
 // 权限模式可选集（值与 model.ChatPermissionMode* 常量对齐）
-// PERMISSION_MODES：分段式按钮组档位（short 为组内短标签，label/tip 保留完整语义；
-// 悬停整组出当前档 tip 说明，bypassPermissions 选中另有警告提示）。
+// PERMISSION_MODES：分段式按钮组档位（short 为组内短标签，tip 悬停在该档位置弹出；
+// bypassPermissions 选中另有警告提示）。
 // 六档对齐 claude CLI --permission-mode 枚举（2026-11-03）：
 // acceptEdits/auto/bypassPermissions/manual/dontAsk/plan（default 即 CLI 的 Manual，
 // 仍被 CLI 接受且作归一默认值，排首位）
@@ -444,10 +446,6 @@ const PERMISSION_MODES = [
   { value: 'dontAsk', short: '不询问', label: '不询问', tip: '需确认的操作自动拒绝（无人值守只读场景，AI 不会执行敏感操作）' },
   { value: 'bypassPermissions', short: '跳过确认', label: '跳过确认（高危）', tip: '跳过全部权限确认，AI 可直接修改代码与执行命令（高危）' }
 ]
-const permissionModeTip = computed(() => {
-  const cur = PERMISSION_MODES.find(m => m.value === aiChatStore.chatSettings.permissionMode)
-  return cur ? cur.tip : PERMISSION_MODES[0].tip
-})
 
 // 模型下拉常用项（MVP 仅 claude 系；allow-create 支持自定义输入，空值 = claude 默认模型）。
 // 首选项 label 动态：claude 设置文件解析出默认模型时回显真实值
