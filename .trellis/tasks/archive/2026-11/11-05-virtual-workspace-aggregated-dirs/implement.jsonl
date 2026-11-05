@@ -1,0 +1,7 @@
+{"file": "docs/spec/el-tree-expand-state.md", "reason": "聚合树展开状态与普通树状态隔离、findExpandedAncestor 回溯适配直接涉及 el-tree 展开面维护;含禁自造 el-tree 桩的测试断言守则"}
+{"file": "docs/spec/perf-baseline.md", "reason": "§15.4/§15.6 文件树懒加载与截断哨兵链路——聚合树复用 truncateTreeNodes,哨兵过滤面(不选中/不弹右键/expandAll 兼容)必须保持"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "树面板交互规范:列表项选中单一入口禁 mousedown+click 双绑、右键菜单复用 onNodeContextMenu、面板 flex 约束链"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "收藏上限/重复收藏/失效移除的用户提示走 model.AppError → ErrorFormatter → handleError 按 code 分流链路"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "若实现中新增 App 方法(如轻量 Stat 存在性检查)或 model 字段,须同步 frontend/wailsjs 三处与 RPCHiddenMethods 清单"}
+{"file": "docs/spec/test-stability.md", "reason": "新增单测禁隐式依赖环境外部状态(mtime 时序、固定端口),聚合树虚拟根构造测试需遵循"}
+{"file": "docs/spec/e2e-testing.md", "reason": "PR3 E2E spec 编写约定:fixtures.js 单一数据源、语义锚禁 findAll[n]、新增 spec 目录同步 vitest test.exclude"}

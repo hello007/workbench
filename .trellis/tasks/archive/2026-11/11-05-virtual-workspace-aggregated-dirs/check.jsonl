@@ -1,0 +1,6 @@
+{"file": "docs/spec/el-tree-expand-state.md", "reason": "检查展开状态隔离是否用真实 EP mount 断言(禁自造 el-tree 桩假绿),展开/收起行为与 syncExpandedKeysFromStore 单点口径"}
+{"file": "docs/spec/perf-baseline.md", "reason": "检查聚合树截断哨兵过滤面完整(不选中/不弹右键/快捷键过滤/expandAll 兼容),2000 截断链路未被破坏"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查新增交互是否符合选中单一入口、右键菜单复用先例、面板布局约束"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E fixture 对齐后端 model 真实形状、语义锚使用、vitest test.exclude 同步"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查是否有新增 App 方法/model 字段而未同步 wailsjs 三处或 RPCHiddenMethods"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新测试是否引入环境隐式依赖(mtime 时序/sleep 等待/固定端口)"}
