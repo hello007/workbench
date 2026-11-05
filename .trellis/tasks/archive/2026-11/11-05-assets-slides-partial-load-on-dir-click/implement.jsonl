@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-management.md", "reason": "§8.7 素材域刷新与过滤语境续拉兜底契约（ensureFilteredSlidesLoaded 先例与 loadSlidesPage 复位链锚点所在），修改 ensureFolderSlidesLoaded 须对齐该节口径并回写"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计与编码规范（computed/watch/异步编排约定）"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾规范（loadSlidesPage 失败分支与 handleError 分流）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% 覆盖率门禁与测试分层约定，新增组件单测须达标"}
