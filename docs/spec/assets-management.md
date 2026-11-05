@@ -230,6 +230,7 @@ rows, err := db.Query(`SELECT ... FROM search_fts WHERE search_fts MATCH ?`, que
 ### 8.7 文件夹树维度（folderPath，PRD「素材管理：文件夹树与拖拽整理」PR2 沉淀）
 
 - **维度定性**：folderPath（左侧文件夹树选中目录，'' = 根「全部素材」）为独立过滤维度——检索语境经 `SearchAssets opts.folderPath` 与关键词/标签/facet AND 叠加（后端三路径共用 `assetsFolderFilter` 单点，目录边界语义 = path 恰等于前缀或以「前缀/」开头，禁同头缀误伤）；浏览语境客户端前缀过滤（文件视图滤 `fileEntries` 全量清单；幻灯片视图滤分页已加载段 + `ensureFolderSlidesLoaded` 续拉兜底，单文件过滤 `fileFilterPath` 同款先例）。
+- **续拉兜底终止语义两路不同构（2026-11-05 修复沉淀，禁互相照搬）**：单文件路 `ensureFilteredSlidesLoaded` =「出现即停」成立（同文件各页在 `ORDER BY f.path` BINARY 字典序中连续，文件出现即其全部页均已加载段内）；目录路 `ensureFolderSlidesLoaded` **禁改回出现即停**——目录条目跨多个分页批次（真机案例：61 页目录首页恰含 7 页命中即停，仅显 7 页），目录前缀匹配条目在同一字典序下构成连续区间，故终止条件 =「已见命中 + 本批零新增（越界）」或「全局拉完（canLoadMoreSlides 收敛）」。两路循环均带**零增长守卫**（`length === before` 即 break）：加载失败时 offset 不变重试同批恒零增长，无守卫即死循环（目录无命中 + 持续失败 / 单文件目标不在库 + 持续失败两场景）。
 - **清空点位矩阵（§8.2 同构登记）**：切库（`watch(currentLibraryId)`→`resetAndReloadView`）清（树数据与选中属库语境）；扫描刷新（`resetAndReloadView`）清（底册重解析路径集合已变）；**溯源跳转**（`traceToSourceFile` 直赋路径）清——直赋不经 onFolderSelect，须单独补清（对齐 facet 直赋同坑），目录过滤会掩盖溯源目标。**其余点位保留**：检索条件变更（applySearch/onFacetChange/clearAllFilters/排序变更）、viewMode 切换（文件/幻灯片两视图同按归属文件前缀过滤，维度通约）、平铺/仅自身标签开关、保存条件调取（走 applySearch 同路径）均不清 folderPath（AND 组合维度语义，对齐 facet 跨检索保留先例）。
 - **选中目录即语境变更**（`onFolderSelect`）：复位面对齐 onFacetChange 同类点位——清详情/预览/选中/文件过滤/聚合展开缓存 + searchSeq 自增；检索语境重跑检索（folderPath 并入 opts），浏览幻灯片视图接目录续拉兜底。
 - **保存检索条件快照不含 folderPath**（登记边界）：树选中属会话态导航语境而非检索条件，调取后树选中保留现状；导出「检索命中」范围**含 folderPath**（`exportSearchActive` 将 folderPath 计入激活判定——仅目录选中也构成缩窄语境，后端按文件夹前缀重放文件清单，全库导出不得忽略目录过滤）。

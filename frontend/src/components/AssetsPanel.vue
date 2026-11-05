@@ -3274,21 +3274,33 @@ const onDeleteFolder = async (node) => {
 }
 
 // 目录过滤的幻灯片续拉兜底（对齐 ensureFilteredSlidesLoaded 单文件过滤先例）：
-// 目录过滤在分页流上做客户端收敛，目标页可能不在已加载段——持续追加直到目录内
-// 页出现或全局拉完。folderPath 为空（全库）直接返回；await 期间清过滤/切库/在途
-// 防重由循环条件自然退出
+// 目录过滤在分页流上做客户端收敛，且目录条目会跨多个分页批次（后端 ORDER BY
+// f.path BINARY 字典序下目录条目构成连续区间，「出现」≠「拉齐」，同文件先例的
+// 出现即停语义对目录不成立）——持续追加直到目录段越界或全局拉完。folderPath 为
+// 空（全库）直接返回；await 期间清过滤/切库/在途防重由循环条件自然退出
 const ensureFolderSlidesLoaded = async () => {
   const target = folderPath.value
   if (!target) return
+  // 已加载段中的目录命中数（调用点可能已有部分命中，如首页恰好含目录前几页）：
+  // seen>0 且本批零新增即目录段已越界——分页按路径无缝推进，段尾尚未越过当前
+  // 批起点时后续批必含命中（区间连续性），逆否即零新增可安全停止
+  let seen = slideEntries.value.filter(s => folderPrefixMatch(s.filePath, target)).length
   while (
     folderPath.value === target &&
     !searchMode.value &&
     viewMode.value === 'slide' &&
-    !slideEntries.value.some(s => folderPrefixMatch(s.filePath, target)) &&
     canLoadMoreSlides.value &&
     !loadingMore.value
   ) {
+    const before = slideEntries.value.length
     await loadSlidesPage(false)
+    // 零增长 = 加载失败（正常批次必追加条目，offset 不变重试同批恒空）：退出防死循环
+    if (slideEntries.value.length === before) break
+    const added = slideEntries.value
+      .slice(before)
+      .filter(s => folderPrefixMatch(s.filePath, target)).length
+    if (seen > 0 && added === 0) break
+    seen += added
   }
 }
 
@@ -4049,7 +4061,12 @@ const ensureFilteredSlidesLoaded = async () => {
     canLoadMoreSlides.value &&
     !loadingMore.value
   ) {
+    const before = slideEntries.value.length
     await loadSlidesPage(false)
+    // 零增长 = 加载失败（正常批次必追加条目）：退出防死循环——目标文件不在库
+    // 时本循环依赖拉完全局的 canLoadMoreSlides 收敛，失败场景 offset 不变恒零
+    // 增长，无此守卫会无限重试同一批
+    if (slideEntries.value.length === before) break
   }
 }
 

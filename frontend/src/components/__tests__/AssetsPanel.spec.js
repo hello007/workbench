@@ -530,6 +530,33 @@ const emitFacetChange = async (wrapper, state) => {
   await flushPromises()
 }
 
+// 幻灯片分页夹具（目录续拉兜底用例族）：slideEntry 构造排序序列条目（形状对齐
+// model.AssetSlideEntry），slideBatch 按后端分页契约切批（limit/offset/total）
+const slideEntry = (id, filePath, slideNum) => ({
+  id,
+  fileId: Math.floor(id / 1000),
+  filePath,
+  slideNum,
+  title: `页${slideNum}`,
+  text: '',
+  speakerNotes: '',
+  tags: [],
+  ownTags: [],
+  note: '',
+  rating: 0
+})
+const slideBatch = (all, offset, limit = 50) => ({
+  items: all.slice(offset, offset + limit),
+  total: all.length
+})
+// 切换到幻灯片视图（ElRadioGroupStub 双事件同步，对齐真实 EP 单选联动）
+const switchToSlideView = async (wrapper) => {
+  const group = wrapper.findComponent(ElRadioGroupStub)
+  await group.vm.$emit('update:modelValue', 'slide')
+  await group.vm.$emit('change', 'slide')
+  await flushPromises()
+}
+
 describe('AssetsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -807,6 +834,105 @@ describe('AssetsPanel', () => {
     expect(wailsMock.DeleteAssetFolder).toHaveBeenNthCalledWith(1, 'lib-1', '空目录', false)
     // 命中确认型拒绝：二次确认后 force=true 重调
     expect(wailsMock.DeleteAssetFolder).toHaveBeenNthCalledWith(2, 'lib-1', '空目录', true)
+  })
+
+  // ---- 目录过滤幻灯片续拉兜底（出现 ≠ 拉齐：目录条目跨分页批次，后端 ORDER BY
+  // f.path BINARY 字典序下目录条目为连续区间，续拉以「越界」或「全局拉完」收敛）----
+
+  it('目录过滤续拉兜底：目录条目跨分页批次时选中目录自动拉齐全部页（真机 61 页只显 7 页缺陷回归）', async () => {
+    // 排序后全局序列（对齐后端字节字典序）：43 条其他目录在前，武汉农商 61 页占
+    // 位置 43-103，剩余 16 条其他目录收尾——首页 50 条恰含目录前 7 页（真机复现
+    // 形态：出现即停语义下只显示 7 页）
+    const all = [
+      ...Array.from({ length: 43 }, (_, i) => slideEntry(i + 1, '方案B/前置方案.pptx', i + 1)),
+      ...Array.from({ length: 61 }, (_, i) => slideEntry(1000 + i + 1, '武汉农商/营销方案.pptx', i + 1)),
+      ...Array.from({ length: 16 }, (_, i) => slideEntry(2000 + i + 1, '方案C/收尾方案.pptx', i + 1))
+    ]
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) =>
+      Promise.resolve(slideBatch(all, offset))
+    )
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+
+    await wrapper.findComponent({ name: 'FolderTreeStub' }).vm.$emit('select', '武汉农商')
+    await flushPromises()
+
+    // 首页之外自动续拉 offset 50 与 100 两批，直到全局拉完（total=120）
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1', 50, 50)
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledWith('lib-1', 50, 100)
+    expect(wrapper.findAll('.asset-card')).toHaveLength(61)
+  })
+
+  it('目录过滤续拉兜底：目录段越界即提前停止（不为小目录拉全库）', async () => {
+    // 目录段仅 5 页且结束于首页内，其后 185 条全为其他目录——已见命中 + 探测批
+    // 零新增即越界退出，不得继续拉 offset 100 之后的批次
+    const all = [
+      ...Array.from({ length: 10 }, (_, i) => slideEntry(i + 1, '方案B/前置方案.pptx', i + 1)),
+      ...Array.from({ length: 5 }, (_, i) => slideEntry(1000 + i + 1, '武汉农商/营销方案.pptx', i + 1)),
+      ...Array.from({ length: 185 }, (_, i) => slideEntry(2000 + i + 1, '方案C/收尾方案.pptx', i + 1))
+    ]
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) =>
+      Promise.resolve(slideBatch(all, offset))
+    )
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+
+    await wrapper.findComponent({ name: 'FolderTreeStub' }).vm.$emit('select', '武汉农商')
+    await flushPromises()
+
+    // 首页 + 一次越界探测批（offset 50 零命中即停），共 2 次调用
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(2)
+    expect(wailsMock.ListAssetSlides).toHaveBeenLastCalledWith('lib-1', 50, 50)
+    expect(wrapper.findAll('.asset-card')).toHaveLength(5)
+  })
+
+  it('目录过滤续拉兜底：目录无命中时拉完全局收敛（不死循环）', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => slideEntry(i + 1, `方案B/文件${i + 1}.pptx`, 1))
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) =>
+      Promise.resolve(slideBatch(all, offset))
+    )
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+
+    await wrapper.findComponent({ name: 'FolderTreeStub' }).vm.$emit('select', '不存在的目录')
+    await flushPromises()
+
+    // 120 条 = 首页 + 2 续拉批（offset 50/100），拉完全局后 canLoadMoreSlides 收敛
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(3)
+    expect(wrapper.findAll('.asset-card')).toHaveLength(0)
+  })
+
+  it('目录过滤续拉兜底：续拉加载失败零增长退出循环（防死循环）', async () => {
+    const all = Array.from({ length: 120 }, (_, i) => slideEntry(i + 1, `方案B/文件${i + 1}.pptx`, 1))
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve(slideBatch(all, offset))
+      return Promise.reject({ code: ErrorCode.RpcInternal, message: '库查询失败' })
+    })
+    const wrapper = await createWrapper()
+    await switchToSlideView(wrapper)
+
+    await wrapper.findComponent({ name: 'FolderTreeStub' }).vm.$emit('select', '武汉农商')
+    await flushPromises()
+
+    // 首页 + 1 次失败续拉即停（无守卫时零增长恒续拉同批死循环）
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(2)
+  })
+
+  it('单文件过滤续拉兜底：续拉加载失败零增长退出循环（防死循环，与目录兜底同族守卫）', async () => {
+    // 首页无目标文件段：双击文件卡进单文件过滤语境触发 ensureFilteredSlidesLoaded，
+    // 续拉恒失败 → 零增长守卫退出（原实现会无限重试同批）
+    const otherOnly = [slideEntry(3001, '方案B/其他方案.pptx', 1)]
+    wailsMock.ListAssetSlides.mockImplementation((libId, limit, offset) => {
+      if (offset === 0) return Promise.resolve({ items: otherOnly, total: 3 })
+      return Promise.reject({ code: ErrorCode.RpcInternal, message: '库查询失败' })
+    })
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('dblclick')
+    await flushPromises()
+
+    expect(wrapper.find('.file-filter-banner').exists()).toBe(true)
+    // 过滤复位首页（offset 0）+ 1 次失败续拉即停
+    expect(wailsMock.ListAssetSlides).toHaveBeenCalledTimes(2)
   })
 
   it('目录选中矩阵复位面：清详情/预览/选中/文件过滤/聚合展开缓存（§8.7 登记点位）', async () => {
