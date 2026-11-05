@@ -292,6 +292,130 @@ func TestBindJobOrWarn_SuccessAssignsJob(t *testing.T) {
 	}
 }
 
+// TestPtyProcess_ExitCh_NilWhenWaiterUnavailable 等待链路未建立（零值结构，
+// 对应 OpenProcess/CreateEvent 失败降级）时 ExitCh 返回 nil，调用方据此回退轮询。
+func TestPtyProcess_ExitCh_NilWhenWaiterUnavailable(t *testing.T) {
+	if ch := (&PtyProcess{}).ExitCh(); ch != nil {
+		t.Errorf("等待链路未建立时 ExitCh 应为 nil, 实际=%v", ch)
+	}
+}
+
+// TestPtyProcess_ExitCh_ClosesOnNaturalExit 进程自然退出后事件通道关闭。
+// 等待走阻塞式 WaitForMultipleObjects（事件驱动），不依赖 500ms 轮询。
+func TestPtyProcess_ExitCh_ClosesOnNaturalExit(t *testing.T) {
+	requirePowershell(t)
+
+	proc, err := NewPtyProcess(
+		"powershell.exe",
+		[]string{"-NoProfile", "-Command", "Start-Sleep -Milliseconds 200"},
+		"", 80, 24,
+	)
+	if err != nil {
+		t.Fatalf("创建 PTY 进程失败: %v", err)
+	}
+	t.Cleanup(func() { _ = proc.Close() })
+
+	ch := proc.ExitCh()
+	if ch == nil {
+		t.Fatal("ExitCh 应可用（等待链路建立成功）")
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("进程自然退出后 ExitCh 未在 5 秒内关闭")
+	}
+	// 通道语义为 close 而非单次 send：再次读取应立即通过
+	select {
+	case <-ch:
+	default:
+		t.Error("ExitCh 应保持关闭（close 语义），实际读到后再次读取即阻塞")
+	}
+	if !waitPIDExit(proc.pid, 5*time.Second) {
+		t.Errorf("ExitCh 关闭后 shell 进程 %d 应已退出", proc.pid)
+	}
+}
+
+// TestPtyProcess_Close_WakesExitWaiter 进程仍处长睡眠时 Close 必须有界返回
+// （≤3 秒）、ExitCh 关闭且两个句柄释放。注意本用例不能归因唤醒来源：Close 的
+// Job 回收本身也会终止进程，等待句柄随之信令——停止事件作为独立唤醒源的语义
+// 由 TestPtyProcess_StopEvent_WakesWaiterWithoutProcessExit 单独覆盖。
+func TestPtyProcess_Close_WakesExitWaiter(t *testing.T) {
+	requirePowershell(t)
+
+	proc, err := NewPtyProcess(
+		"powershell.exe",
+		[]string{"-NoProfile", "-Command", "Start-Sleep -Seconds 60"},
+		"", 80, 24,
+	)
+	if err != nil {
+		t.Fatalf("创建 PTY 进程失败: %v", err)
+	}
+	t.Cleanup(func() { _ = proc.Close() })
+
+	ch := proc.ExitCh()
+	if ch == nil {
+		t.Fatal("ExitCh 应可用（等待链路建立成功）")
+	}
+	if proc.waitHandle == 0 || proc.stopEvent == 0 {
+		t.Fatalf("等待句柄与停止事件应已创建, waitHandle=%v stopEvent=%v",
+			proc.waitHandle, proc.stopEvent)
+	}
+
+	start := time.Now()
+	if err := proc.Close(); err != nil {
+		t.Fatalf("Close 失败: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("Close 应在 3 秒内返回, 实际=%v", elapsed)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close 后 ExitCh 未关闭（等待 goroutine 未收口）")
+	}
+	if proc.waitHandle != 0 || proc.stopEvent != 0 {
+		t.Errorf("Close 后等待句柄与停止事件应关闭置零, waitHandle=%v stopEvent=%v",
+			proc.waitHandle, proc.stopEvent)
+	}
+}
+
+// TestPtyProcess_StopEvent_WakesWaiterWithoutProcessExit 停止事件必须能独立唤醒
+// 等待 goroutine：Close 同时会关 Job 终止进程，仅凭 Close 用例无法区分唤醒来自
+// 「进程退出」还是「停止事件」。此处直击 SetEvent 且不触碰 ConPTY/Job——进程仍
+// 存活时 ExitCh 即须关闭，证明 Job 绑定失败降级时 goroutine 与句柄不会永久驻留。
+func TestPtyProcess_StopEvent_WakesWaiterWithoutProcessExit(t *testing.T) {
+	requirePowershell(t)
+
+	proc, err := NewPtyProcess(
+		"powershell.exe",
+		[]string{"-NoProfile", "-Command", "Start-Sleep -Seconds 60"},
+		"", 80, 24,
+	)
+	if err != nil {
+		t.Fatalf("创建 PTY 进程失败: %v", err)
+	}
+	t.Cleanup(func() { _ = proc.Close() })
+
+	if proc.stopEvent == 0 {
+		t.Fatal("停止事件应已创建")
+	}
+	if err := windows.SetEvent(proc.stopEvent); err != nil {
+		t.Fatalf("触发停止事件失败: %v", err)
+	}
+
+	select {
+	case <-proc.ExitCh():
+	case <-time.After(3 * time.Second):
+		t.Fatal("停止事件触发后 ExitCh 未关闭（等待 goroutine 未被停止事件唤醒）")
+	}
+	// 未关 ConPTY/Job，进程应仍存活：证明唤醒归因于停止事件而非进程退出
+	if !proc.IsProcessRunning() {
+		t.Error("停止事件唤醒后进程应仍存活，实际已退出（用例无法归因）")
+	}
+}
+
 // requirePowershell 真机回归的前置依赖，缺失时跳过而非失败。
 func requirePowershell(t *testing.T) {
 	t.Helper()
