@@ -1904,3 +1904,37 @@ CLAUDE.md 缩为 @AGENTS.md 一行，通用内容迁入 AGENTS.md（关键规则
 ### Next Steps
 
 - None - task complete
+
+
+## Session 226: P0 聚合视图路径与缓存口径归一
+
+**Date**: 2026-11-06
+**Task**: P0 聚合视图路径与缓存口径归一
+**Branch**: `master`
+
+### Summary
+
+落地 5 条欠账（isFavorited 归一、onSetAsWorkDir 空操作、尾分隔符全链路归一、脏收藏展示名、git 徽标缓存失效联动）；独立审核发现并修复卷根缓存前缀缺陷与收藏导入链路归一缺口；同步 aggregated-workspace.md 契约；归档 P0，父任务与 P1/P2 保持 planning
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `73d4235` | (see git log) |
+| `3f4a093` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
