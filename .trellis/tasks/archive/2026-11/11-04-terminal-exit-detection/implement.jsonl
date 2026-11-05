@@ -1,0 +1,5 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端会话生命周期、Close 幂等与 terminal-exit 事件契约"}
+{"file": "docs/spec/test-stability.md", "reason": "退出等待测试涉及真实进程与超时，须避免固定 sleep 与 goroutine/handle 泄漏"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "等待链路降级使用 slog.Warn"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "model/util/service 覆盖率门禁与新增测试要求"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "退出检测风险基线与事件驱动方向"}

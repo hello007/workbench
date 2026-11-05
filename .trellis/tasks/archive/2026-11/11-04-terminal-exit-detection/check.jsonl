@@ -1,0 +1,5 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "核对退出事件单次发送、Close 唤醒与句柄释放契约"}
+{"file": "docs/spec/test-stability.md", "reason": "核对真实进程测试未使用固定 sleep、清理完整、无 goroutine 泄漏"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对降级日志级别与字段"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 model/service 新增分支覆盖率"}
+{"file": "docs/research/2026-11-04-终端内核开源方案调研与借鉴清单.md", "reason": "核对方案与调研结论一致"}
