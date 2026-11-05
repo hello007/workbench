@@ -29,6 +29,13 @@
 - **不做整体超时**：Wails 绑定签名无 `ctx`，且网络盘 `os.Stat` 为不可中断的阻塞系统调用；强行超时只能靠独立 goroutine 丢弃结果，存在泄漏风险。本任务仅通过并发化降低总时长。
 - 验收：100 个收藏时首帧耗时明显低于串行实现；输出顺序与入参一致。
 
+### ⑬（审核补充）聚合视图刷新收藏根时自身徽标不更新
+
+- 现象：聚合视图右键刷新收藏根只重载其子节点，根节点自身的 `isGitRepo` / `hasRemote` 仍为根层加载时的旧快照；在收藏根上 `git init` / `git remote add` 后刷新看不到徽标变化。
+- 方案：`refreshNode` 在 `aggregatedMode` 且刷新目标为收藏根（`isAggregatedRoot` / `findAggregatedRootFor` 同源判定）时改走 `refreshAggregatedRoot()`，整层重建以重新探测根节点徽标。
+- 补单测：断言聚合模式下对收藏根执行刷新后，根行 `isGitRepo` / `hasRemote` 徽标随重新查询结果更新。
+- 验收：收藏根执行 `git init` 后右键刷新，根行即时出现 git 徽标。
+
 ## Acceptance Criteria
 
 - [ ] 后端新增并发测试：100 路径顺序保持、结果正确

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"workbench/model"
@@ -296,6 +297,47 @@ func TestInvalidateCache_ClearsDirectChildGitBadge(t *testing.T) {
 	if _, ok := svc.gitRepoCache.Load(sibling); !ok {
 		t.Error("同前缀兄弟目录的 git 徽标缓存不应被误删")
 	}
+}
+
+// TestInvalidateCache_ClearsDirectChildGitBadgeAtVolumeRoot 守护卷根的前缀匹配：
+// filepath.Clean("C:\\") 仍带尾分隔符，直接拼接会得到「C:\\」，HasPrefix 对
+// 「C:\Windows」恒为 false，卷根下一级子目录的 git 徽标永不失效。直接操作私有
+// 缓存 map，不依赖磁盘真实目录（只验证缓存键的匹配范围）。
+func TestInvalidateCache_ClearsDirectChildGitBadgeAtVolumeRoot(t *testing.T) {
+	vol := filepath.VolumeName(t.TempDir())
+	root := vol + string(os.PathSeparator) // Windows: C:\；Unix 卷名为空: /
+	if vol == "" {
+		root = string(os.PathSeparator)
+	}
+
+	child := filepath.Join(root, "workbench-child-dir")
+	grand := filepath.Join(child, "grand")
+	// 根之外的深层键：Unix 下所有绝对路径都以「/」开头，故取两层以上深度，
+	// 确保其不在卷根的直接子目录范围内。
+	outside := filepath.Join(t.TempDir(), "outside", "nested")
+
+	svc := NewFileTreeService()
+	for _, cache := range []*sync.Map{&svc.gitRepoCache, &svc.gitRemoteCache} {
+		cache.Store(child, true)
+		cache.Store(grand, true)
+		cache.Store(outside, true)
+	}
+
+	svc.InvalidateCache(root)
+
+	checkCache := func(name string, cache *sync.Map) {
+		if _, ok := cache.Load(child); ok {
+			t.Errorf("%s: 卷根的直接子目录缓存应被清除", name)
+		}
+		if _, ok := cache.Load(grand); !ok {
+			t.Errorf("%s: 孙级缓存不应被级联清除", name)
+		}
+		if _, ok := cache.Load(outside); !ok {
+			t.Errorf("%s: 卷根之外的键不应被误删", name)
+		}
+	}
+	checkCache("gitRepoCache", &svc.gitRepoCache)
+	checkCache("gitRemoteCache", &svc.gitRemoteCache)
 }
 
 // TestClearAllCache_RefreshesGitBadge 守护全量刷新的 git 徽标通道：

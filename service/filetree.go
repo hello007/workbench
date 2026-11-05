@@ -210,7 +210,10 @@ func (s *FileTreeService) invalidateGitBadgeCache(dirPath string) {
 	s.gitRepoCache.Delete(dirPath)
 	s.gitRemoteCache.Delete(dirPath)
 
-	prefix := dirPath + string(os.PathSeparator)
+	// 拼接前去掉尾分隔符：卷根（C:\）经 Clean 后仍带尾分隔符，直接拼接会得到
+	// 「C:\\」使 HasPrefix 对「C:\Windows」恒为 false，卷根下一级子目录徽标永不失效。
+	// Unix 根「/」TrimRight 后为空串，补回单个「/」，前缀语义保持一致。
+	prefix := strings.TrimRight(dirPath, string(os.PathSeparator)) + string(os.PathSeparator)
 	deleteDirectChildren := func(cache *sync.Map) {
 		cache.Range(func(key, _ any) bool {
 			k, ok := key.(string)
