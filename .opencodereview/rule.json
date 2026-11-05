@@ -1,0 +1,84 @@
+{
+  "rules": [
+    {
+      "path": "frontend/src/**/*.vue",
+      "rule": "Vue 组件代码审查规则：\n1. SFC 排布：必须按 <script setup> → <template> → <style scoped> 排布；组件文件名 PascalCase，基础组件用 Base/App 前缀，单例组件用 The 前缀\n2. 禁止使用 Options API，必须使用 <script setup> 组合式写法\n3. Props 必须通过 defineProps 完整声明类型与默认值，禁止裸用未声明 props；defineEmits 必须显式声明事件名\n4. 第三方实例（ECharts、CodeMirror、xterm 等）必须用 shallowRef/markRaw，严禁深度代理\n5. 严禁直接解构 reactive 或 props（丢失响应性），必须用 toRefs/toRef\n6. computed 必须是无副作用只读纯函数，严禁内部修改状态或发起异步请求\n7. 主题样式必须引用全局 CSS 变量，禁止硬编码主题色值；覆盖 Element Plus 样式统一用 :deep() 语法\n8. 严禁空 catch 块；关键业务操作必须 try-catch 局部降级",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/store/**/*.js",
+      "rule": "Pinia Store 代码审查规则：\n1. 统一使用 Setup Store 函数签名（defineStore + 组合式 API）\n2. 必须按业务域拆分 Store，禁止创建上帝 Store\n3. 敏感凭证（Token、密码）不得明文持久化到 localStorage\n4. 严禁空 catch 块，异常必须提示或结构化记录",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/composables/**/*.js",
+      "rule": "Composables 代码审查规则：\n1. 跨组件共享逻辑优先封装为组合式函数或 provide/inject，禁止在组件间复制粘贴逻辑\n2. 严禁直接解构 reactive 或 props，必须用 toRefs/toRef 保持响应性\n3. computed 必须是无副作用只读纯函数\n4. 严禁空 catch 块",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/transport/**/*.js",
+      "rule": "transport 通道层代码审查规则：\n1. 所有后端调用必须经 transport 统一收口，严禁绕过 transport 直连通道实现\n2. 模式判定与 polyfill 安装顺序不得调整：通道安装必须在 createApp/mount 前；静态 import 的模块严禁在模块求值期触碰 window.go/window.runtime\n3. 横切能力（错误桥、令牌门控、连接横幅）只在 transport 层实现，业务层只消费，禁止在组件内重复实现通道探测\n4. 错误必须在通道包装层解析结构化错误（错误码+消息）并转友好中文提示，严禁原始 Error 对象透传到 UI；Wails 运行时压平结构化错误时必须恢复结构化语义\n5. 事件监听相关封装必须支持持有 EventsOn 返回的注销闭包精准注销，严禁 EventsOff 全局移除\n6. 前端消费字段名必须与后端 JSON 序列化真实形状一致，禁止凭记忆臆造字段；消费前必须判空\n7. base64 二进制含 UTF-8 多字节字符时禁止裸 atob，必须走约定解码并标注编码方式",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/router/**/*.js",
+      "rule": "路由配置代码审查规则：\n1. 页面路由组件必须动态导入懒加载（component: () => import(...)），严禁路由表静态全量导入视图\n2. 路由元信息统一通过 meta 字段声明\n3. 全局前置守卫逻辑保持简明，严禁复杂异步等待导致白屏",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/main.js",
+      "rule": "应用入口代码审查规则：\n1. installBrowserTransport() 必须在 createApp/mount 前调用，注入顺序不得调整\n2. 全局 errorHandler 与 unhandledrejection 兜底必须存在，不得移除\n3. 错误码分流必须有未知码兜底分支，禁止只处理已知码",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/**/*.spec.js",
+      "rule": "前端单元测试代码审查规则：\n1. 测试文件与被测文件同名加 .spec.js 后缀，放在同级 __tests__/ 目录\n2. mock 数据必须以 wails-mock-defaults.js 为单一数据源，禁止在各测试文件复制粘贴大块 mock JSON\n3. mock 数据形状必须对齐后端 model 真实序列化形状（字段名、嵌套结构），禁止凭前端想象构造\n4. 外部副作用（网络请求、剪贴板、时间）必须通过 vi.mock 或注入隔离，禁止触碰真实环境\n5. 中文编码往返逻辑的单测必须使用中文测试数据\n6. 组件测试断言事件派发须核验 emit 次数",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/e2e/**/*.js",
+      "rule": "E2E 测试代码审查规则：\n1. 必须从 frontend/e2e/fixtures.js 导入 { test, expect }，禁止直接 import @playwright/test\n2. 禁止使用 waitForTimeout 等待\n3. mock 必须对齐 wails-mock-defaults.js 单一数据源与后端 model 真实形状\n4. 新增 spec 目录必须同步 vitest.config.js 的 test.exclude",
+      "merge_system_rule": true
+    },
+    {
+      "path": "app_*.go",
+      "rule": "Go 桥接层（App 方法）代码审查规则：\n1. App 方法签名与 model/ struct 是前后端契约真相源，变更必须核对前端消费面的参数与返回值结构一致性\n2. 依赖方向单向向下：桥接层 → service → model/util，桥接层不得被 service 反向 import\n3. 公共 API、配置 key、错误码变更必须保持向后兼容\n4. 禁止为通过测试而删除校验逻辑、跳过安全检查或吞没异常",
+      "merge_system_rule": true
+    },
+    {
+      "path": "model/**/*.go",
+      "rule": "数据模型代码审查规则：\n1. model/ 是 Wails 绑定契约真相源：字段变更必须同步核对前端消费点\n2. 导出 struct 字段与 JSON 序列化形状是前端消费依据，字段命名必须稳定\n3. 新增字段对前端是增量兼容；删除字段或改类型属于破坏性变更，须谨慎评估",
+      "merge_system_rule": true
+    },
+    {
+      "path": "service/**/*.go",
+      "rule": "service 业务层代码审查规则：\n1. service 严禁反向 import 主包桥接符号，依赖方向必须单向\n2. service 向前端发事件必须经 EventSink 注入接口，严禁直依赖 Wails runtime\n3. 新增 service 须在 app_services.go 装配（AppServices 字段 + NewAppServices 构造行）\n4. 公共 API、错误码变更必须保持向后兼容；禁止为通过测试而删除校验逻辑或吞没异常",
+      "merge_system_rule": true
+    },
+    {
+      "path": "util/**/*.go",
+      "rule": "util 工具层代码审查规则：\n1. util 层严禁依赖上层（service、主包桥接）\n2. 跨包共用测试辅助入 util/testutil，禁止各 _test.go 重复定义 git 命令/临时仓库辅助\n3. 运行时 JSON 持久化必须走 util.SaveJSON 原子写，禁止新增 os.WriteFile 直写\n4. 禁止为通过测试而删除校验逻辑、跳过安全检查或吞没异常",
+      "merge_system_rule": true
+    },
+    {
+      "path": "go.mod",
+      "rule": "Go 依赖清单审查规则：\n1. 新增依赖必须在清单显式声明，禁止依赖传递提升的隐式可用包\n2. 标准库漏洞修复只能升 toolchain directive，升级后重跑 govulncheck 清零\n3. 禁止重新引入 go-git 依赖",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/package.json",
+      "rule": "前端依赖清单审查规则：\n1. 新增依赖必须先在 scripts/check-dep-consistency.mjs 四清单登记分档，再改 package.json，否则 CI 分档一致性检查失败\n2. 依赖版本必须符合四档格式（exact / tilde / caret / url）\n3. 传递依赖升级用 npm update <pkg> 在 lock 内完成，禁止 npm audit fix / --force",
+      "merge_system_rule": true
+    },
+    {
+      "path": ".github/workflows/*.yml",
+      "rule": "CI 工作流审查规则：\n1. 改动步骤前必须先读文件头前置事实注释（wailsjs/dist 前置链、平台标签依赖）\n2. 严禁删除「预置 frontend/dist 占位」步骤——//go:embed 依赖 dist 存在\n3. 严禁删除前端依赖分档一致性检查步骤",
+      "merge_system_rule": true
+    },
+    {
+      "path": "docs/agent-resources/conventions/*.md",
+      "rule": "约定文件审查规则：\n1. convention 文件必须带三字段 frontmatter（title/scope/targets），targets 填错会导致规则挂错文件\n2. 文件名必须 kebab-case + 域前缀（coding-/process-/project-/testing-）\n3. 正文一级标题必须与 title 一致；规则用祈使句书写、能判定违规、不含操作步骤\n4. 新增/修改/删除约定文件后必须同步 .claude/rules/ 与 .opencodereview/rule.json 派生物，并更新对应索引",
+      "merge_system_rule": true
+    }
+  ]
+}
