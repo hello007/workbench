@@ -85,10 +85,17 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   })),
   GetChatSession: vi.fn((id) => Promise.resolve({
     id, directoryId: 'chatdir-1', title: id === 'chatsession-new' ? '最近会话' : '旧会话', cwd: 'D:\\p', createdAt: 1, updatedAt: 100,
+    contextTokens: 46000,
     messages: [
       { role: 'user', content: '第一问', timestamp: 1, taskId: 't1' },
       { role: 'assistant', content: '# 结论\n\n**要点一**\n\n```bash\nfmt.Println("hi")\n```', timestamp: 2, taskId: 't1' }
     ]
+  })),
+  // 单仓库状态快照（GetRepoStatus）：当前无前端消费方（对话状态栏精简版已移除
+  // 分支段），保留 mock 防组件回归引入时缺 mock
+  GetRepoStatus: vi.fn(() => Promise.resolve({
+    path: 'D:\\p', name: 'p', branch: 'feature/ctx', dirty: true, ahead: 1, behind: 0,
+    hasUpstream: true, detached: false, isRepo: true
   })),
   DeleteChatSession: vi.fn(() => Promise.resolve()),
   UpdateChatSessionTitle: vi.fn(() => Promise.resolve()),
@@ -1755,5 +1762,81 @@ describe('AiChatPanel.vue skill 斜杠补全弹层', () => {
     const cmds = wrapper.findAll('.skill-popup-cmd').map(n => n.text())
     expect(cmds).toContain('/drawio2')
     expect(cmds).not.toContain('/drawio')
+  })
+})
+
+// ===== 对话状态栏 =====
+// 精简版两段：模型 │ 上下文渐变进度条（分支/目录/时间段已按需求移除）。
+// 数据源：chatSettings/claudeDefaultModel、会话元数据 contextTokens（后端每轮
+// result 采集回写）
+describe('AiChatPanel.vue 对话状态栏', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]
+    offClosures.length = 0
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('选中会话后渲染两段：模型 + 上下文条（无分支/目录/时间）', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    await flushPromises()
+
+    const bar = wrapper.find('.chat-statusline')
+    expect(bar.exists()).toBe(true)
+    // 模型段：无配置时回退 claude 设置默认模型（mock 空串 → 'claude'）
+    expect(wrapper.find('.chat-statusline-model').text()).toBe('claude')
+    // 上下文段：46000/200k = 23%，bar 填充宽度与 token 文本
+    expect(wrapper.find('.chat-statusline-ctx-text').text()).toBe('46.0k/200k')
+    const fill = wrapper.find('.chat-statusline-bar-fill')
+    expect(fill.attributes('style')).toContain('width: 23%')
+    // 23% 处于渐变前半段（青→黄），颜色含 rgb()
+    expect(fill.attributes('style')).toContain('rgb(')
+    // 精简版不再渲染分支/目录/时间段
+    expect(wrapper.find('.chat-statusline-branch').exists()).toBe(false)
+    expect(wrapper.find('.chat-statusline-dir').exists()).toBe(false)
+    expect(wrapper.find('.chat-statusline-time').exists()).toBe(false)
+  })
+
+  it('glm-5 系模型上下文窗口按 1M 计', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    // createWrapper 内部新建 pinia，须挂载后再写执行配置（乐观更新不走后端）
+    const store = useAiChatStore()
+    await store.saveChatSettings('default', 'glm-5.3-flash', '')
+    await flushPromises()
+
+    // 46000 / 1M = 4.6% → 文本 46.0k/1M
+    expect(wrapper.find('.chat-statusline-ctx-text').text()).toBe('46.0k/1M')
+  })
+
+  it('无 contextTokens 时进度条空态（0%）', async () => {
+    GetChatSession.mockImplementation((id) => Promise.resolve({
+      id, directoryId: 'chatdir-1', title: 't', cwd: 'D:\\p', createdAt: 1, updatedAt: 100,
+      messages: []
+    }))
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find('.chat-statusline-ctx-text').text()).toBe('0/200k')
+    expect(wrapper.find('.chat-statusline-bar-fill').attributes('style')).toContain('width: 0%')
+  })
+
+  it('未选会话不渲染状态栏', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.find('.chat-statusline').exists()).toBe(false)
   })
 })

@@ -207,6 +207,19 @@
             </div>
           </div>
 
+          <!-- 对话状态栏：模型 │ 上下文渐变进度条（精简版：仅保留两段，
+               分支/目录/时间段已按需求移除）。上下文 token 由后端每轮 result
+               采集回写会话元数据（contextTokens），渐变条 0% 青 → 50% 黄 → 100% 红 -->
+          <div v-if="aiChatStore.selectedChatSession" class="chat-statusline">
+            <span class="chat-statusline-model">{{ statuslineModel }}</span>
+            <span class="chat-statusline-ctx">
+              <span class="chat-statusline-bar">
+                <span class="chat-statusline-bar-fill" :style="statuslineBarStyle"></span>
+              </span>
+              <span class="chat-statusline-ctx-text" :style="{ color: statuslineCtxColor }">{{ statuslineCtxText }}</span>
+            </span>
+          </div>
+
           <!-- 输入区：带内嵌底栏的输入盒（claude.ai 同款布局）——textarea 主体 +
                盒内下沿操作条：模板 / 权限模式分段组靠左，停止+发送靠右 -->
           <div class="chat-input-area">
@@ -912,6 +925,58 @@ watch(
   () => scrollToBottom()
 )
 watch(() => aiChatStore.selectedChatSessionId, () => scrollToBottom(true))
+
+// ===== 对话状态栏（精简版：仅模型 + 上下文占用两段）=====
+
+// 模型段：会话执行配置优先，回退 claude 设置文件解析的默认模型
+const statuslineModel = computed(() =>
+  aiChatStore.chatSettings.modelName || aiChatStore.claudeDefaultModel || 'claude'
+)
+
+// 上下文段：窗口大小 glm-5 系 1M / 其余 200k（对齐 statusline 脚本口径），
+// 占用取会话元数据的最近一轮 contextTokens（0 = 尚无数据，进度条空态）
+const statuslineCtxLimit = computed(() => {
+  const m = String(statuslineModel.value).toLowerCase()
+  return m.includes('glm-5') ? 1000000 : 200000
+})
+const statuslineCtxUsed = computed(() => aiChatStore.selectedChatSession?.contextTokens || 0)
+const statuslineCtxPct = computed(() =>
+  Math.max(0, Math.min(100, (statuslineCtxUsed.value / statuslineCtxLimit.value) * 100))
+)
+
+// 渐变色：0% 青 (0,255,200) → 50% 黄 (255,220,0) → 100% 红 (255,60,60)，
+// 插值公式与 statusline 脚本 gradientColor 一致
+const ctxGradientColor = (pct) => {
+  const p = Math.max(0, Math.min(100, pct))
+  let r, g, b
+  if (p < 50) {
+    const t = p / 50
+    r = Math.round(255 * t)
+    g = Math.round(255 - 35 * t)
+    b = Math.round(200 - 200 * t)
+  } else {
+    const t = (p - 50) / 50
+    r = 255
+    g = Math.round(220 - 160 * t)
+    b = Math.round(60 * t)
+  }
+  return `rgb(${r}, ${g}, ${b})`
+}
+const statuslineBarStyle = computed(() => ({
+  width: statuslineCtxPct.value + '%',
+  background: ctxGradientColor(statuslineCtxPct.value)
+}))
+const statuslineCtxColor = computed(() => ctxGradientColor(statuslineCtxPct.value))
+
+// token 格式化：30.2k / 200k / 1M（对齐 statusline 脚本 fmtTokens）
+const fmtCtxTokens = (n) => {
+  if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k'
+  return String(n)
+}
+const statuslineCtxText = computed(() =>
+  `${fmtCtxTokens(statuslineCtxUsed.value)}/${fmtCtxTokens(statuslineCtxLimit.value)}`
+)
 
 // ===== 输入与发送 =====
 
@@ -2017,6 +2082,45 @@ watch(() => uiStore.activePanel, (panel) => {
 }
 /* 输入盒：textarea 主体 + 盒内下沿操作条（模板/权限分段/停止发送），
    聚焦时边框转主色（claude.ai 同款容器语义） */
+/* 对话状态栏：模型 │ 上下文渐变条（单行紧凑，精简版仅两段） */
+.chat-statusline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.chat-statusline-model {
+  flex-shrink: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-statusline-ctx {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.chat-statusline-bar {
+  width: 90px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+.chat-statusline-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.chat-statusline-ctx-text {
+  font-variant-numeric: tabular-nums;
+}
 .chat-input-box {
   position: relative; /* skill 补全弹层绝对定位锚点（bottom:100% 向上展开） */
   border: 1px solid var(--border-color);

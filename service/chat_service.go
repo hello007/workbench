@@ -164,6 +164,7 @@ type chatTurnRuntime struct {
 // spawn 参数（权限模式/模型）为启动快照：变更且空闲时优雅重启，忙时沿用旧值。
 type chatSessionRuntime struct {
 	chatSessionID   string
+	cwd             string // 会话工作目录快照（transcript 定位等启动后消费）
 	permissionMode  string // spawn 参数快照
 	modelName       string // spawn 参数快照
 	launcher        string // spawn 参数快照（启动命令配置；空 = 默认 claude）
@@ -887,6 +888,7 @@ func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName s
 		}
 		rt = &chatSessionRuntime{
 			chatSessionID:   chatSessionID,
+			cwd:             sess.Cwd,
 			permissionMode:  permissionMode,
 			modelName:       modelName,
 			launcher:        launcher,
@@ -1154,6 +1156,8 @@ type chatControlRequest struct {
 // 非 JSON 行（stderr 串入的诊断文本）原样作为文本增量返回，不丢输出。
 // thinking 为模型思考内容增量（assistant content part type=thinking，文本在
 // thinking 字段——与 parseStreamLine 同形态），仅流式透传展示，不进回复正文。
+// 注意：不采集流内 usage——result 事件 usage 是会话累计值、assistant 事件 usage
+// 在 GLM 通道为全 0 占位，均非上下文大小；上下文口径见 transcriptContextTokens。
 func parseChatStreamLine(line string) (kind chatStreamKind, text, sessionID string, approval *chatControlRequest, resultError string, thinking string) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -1334,6 +1338,82 @@ func (s *ChatService) pumpSession(rt *chatSessionRuntime, stdout io.ReadCloser) 
 	s.finishExecutingTurn(rt, "", "", waitErr, scanErr)
 }
 
+// usageContextTokens 换算上下文 token 总量：input + cache_read + cache_creation
+// （对齐 statusline 脚本的上下文占用口径；output_tokens 不占上下文窗口）。
+func usageContextTokens(u *streamUsage) int {
+	if u == nil {
+		return 0
+	}
+	return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+}
+
+// transcriptContextTokens 从 claude 会话 transcript JSONL 读「末条含 usage 的
+// 消息」换算上下文 token 总量（input + cache_read + cache_creation）。
+//
+// 为什么不用流内 usage：result 事件的 usage 是**会话累计值**（历史各次请求的
+// input 逐次求和，随轮次复利膨胀，实测远超窗口大小，3.1M/1M 缺陷根因）；
+// assistant 事件 usage 在 GLM 通道恒为全 0 占位。transcript 末条 usage 才是
+// 「最后一次 API 请求的上下文快照」——与 statusline 脚本读 transcript 的口径
+// 完全一致。
+//
+// transcript 位于 ~/.claude/projects/<编码 cwd>/<claudeSessionID>.jsonl，会话
+// id 全局唯一，直接按 id 跨项目目录 glob 定位（规避 cwd 编码规则细节）。读取
+// 失败/无 usage 记录返回 0（调用方 0 不落盘，前端保持旧值展示）。
+func (s *ChatService) transcriptContextTokens(claudeSessionID string) int {
+	if claudeSessionID == "" {
+		return 0
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return 0
+	}
+	matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", claudeSessionID+".jsonl"))
+	if len(matches) == 0 {
+		return 0
+	}
+	path := matches[0]
+	if len(matches) > 1 {
+		// 同 id 多命中（理论不该发生）取 mtime 最新兜底
+		latest := path
+		var latestTime time.Time
+		if fi, statErr := os.Stat(path); statErr == nil {
+			latestTime = fi.ModTime()
+		}
+		for _, m := range matches[1:] {
+			if fi, statErr := os.Stat(m); statErr == nil && fi.ModTime().After(latestTime) {
+				latest = m
+				latestTime = fi.ModTime()
+			}
+		}
+		path = latest
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	// 逐行流式扫描取「末条含 usage 的消息」（与 statusline 脚本 readFileSync
+	// 全量解析同语义；流式避免大会话整文件驻留内存）
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	var lastUsage *streamUsage
+	var entry struct {
+		Message *struct {
+			Usage *streamUsage `json:"usage"`
+		} `json:"message"`
+	}
+	for scanner.Scan() {
+		entry.Message = nil
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil || entry.Message == nil {
+			continue
+		}
+		if entry.Message.Usage != nil && entry.Message.Usage.InputTokens > 0 {
+			lastUsage = entry.Message.Usage
+		}
+	}
+	return usageContextTokens(lastUsage)
+}
+
 // handleTurnText 追加 assistant 文本增量到当前执行轮并推送 output 事件。
 // 无执行轮归属的文本（stderr 诊断/进程横幅在轮间串入）丢弃不推送。
 func (s *ChatService) handleTurnText(rt *chatSessionRuntime, text string) {
@@ -1433,11 +1513,16 @@ func (s *ChatService) finishExecutingTurn(rt *chatSessionRuntime, sessionID, cla
 	claudeSessionID, chatSessionID := turn.claudeSessionID, rt.chatSessionID
 	s.mu.Unlock()
 
+	// 上下文用量：锁外读 transcript 末条 usage（慢 IO，不持 s.mu；
+	// result 时 transcript 已含本轮全部消息）
+	contextTokens := s.transcriptContextTokens(claudeSessionID)
+
 	result := model.ChatTaskRunResult{
 		TaskID:          turnID,
 		ChatSessionID:   chatSessionID,
 		ClaudeSessionID: claudeSessionID,
 		Reply:           reply,
+		ContextTokens:   contextTokens,
 	}
 	switch {
 	case canceled:
@@ -1464,7 +1549,7 @@ func (s *ChatService) finishExecutingTurn(rt *chatSessionRuntime, sessionID, cla
 			result.Error += "输出流读取中断: " + scanErr.Error()
 		}
 	}
-	s.persistTurnResult(chatSessionID, claudeSessionID, turnID, reply)
+	s.persistTurnResult(chatSessionID, claudeSessionID, turnID, reply, contextTokens)
 
 	s.mu.Lock()
 	delete(s.turns, turnID)
@@ -1502,9 +1587,10 @@ func (s *ChatService) finishAbnormalTurn(rt *chatSessionRuntime, turn *chatTurnR
 
 // persistTurnResult 落盘本轮结果（锁外：appendMessages/updateSessionMeta 内部
 // 各自加锁）。assistant 回复非空才入档（失败轮无回复不留空消息；取消轮保留
-// 部分回复）；claude session id 更新回会话元数据（下一轮 spawn --resume 续
-// 上下文），会话在途被删除时更新报 SessionNotFound 属预期降级（Warn 记录）。
-func (s *ChatService) persistTurnResult(chatSessionID, claudeSessionID, taskID, reply string) {
+// 部分回复）；claude session id 与本轮上下文 token 用量更新回会话元数据
+// （前者为下一轮 spawn --resume 续上下文依据，后者为对话状态栏进度条数据源），
+// 会话在途被删除时更新报 SessionNotFound 属预期降级（Warn 记录）。
+func (s *ChatService) persistTurnResult(chatSessionID, claudeSessionID, taskID, reply string, contextTokens int) {
 	if reply != "" {
 		assistantMsg := model.ChatMessage{
 			Role:      model.ChatRoleAssistant,
@@ -1517,9 +1603,14 @@ func (s *ChatService) persistTurnResult(chatSessionID, claudeSessionID, taskID, 
 				"session", chatSessionID, "task", taskID, "err", err)
 		}
 	}
-	if claudeSessionID != "" {
+	if claudeSessionID != "" || contextTokens > 0 {
 		if err := s.updateSessionMeta(chatSessionID, func(sess *model.ChatSession) {
-			sess.ClaudeSessionID = claudeSessionID
+			if claudeSessionID != "" {
+				sess.ClaudeSessionID = claudeSessionID
+			}
+			if contextTokens > 0 {
+				sess.ContextTokens = contextTokens
+			}
 		}); err != nil {
 			var ae *model.AppError
 			if errors.As(err, &ae) && ae.Code == model.ErrCodeChatSessionNotFound {

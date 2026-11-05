@@ -39,3 +39,10 @@ func (a *App) GetDashboardStatuses() []model.RepoStatus {
 func (a *App) RefreshDashboardStatuses() []model.RepoStatus {
 	return a.dashboardSvc.GetStatuses()
 }
+
+// GetRepoStatus 计算单个仓库路径的状态快照（分支/脏标/ahead-behind/detached），
+// 供 AI 对话状态栏等单仓库场景按需查询（ComputeRepoStatus 纯查询不走仓级锁；
+// 非仓库/失效路径 IsRepo=false 降级，前端按空分支段隐藏）。
+func (a *App) GetRepoStatus(path string) model.RepoStatus {
+	return a.dashboardSvc.ComputeRepoStatus(path)
+}

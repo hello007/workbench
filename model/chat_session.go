@@ -49,6 +49,7 @@ type ChatSession struct {
 	Title           string        `json:"title"`                     // 会话标题（用户可改，默认「新会话」）
 	Cwd             string        `json:"cwd"`                       // claude 子进程工作目录（侧栏目录项对应路径）
 	ClaudeSessionID string        `json:"claudeSessionId,omitempty"` // claude CLI 会话 id，空表示尚未产生（首轮对话）
+	ContextTokens   int           `json:"contextTokens,omitempty"`   // 最近一轮的上下文 token 总量（input+cache_read+cache_creation，对话状态栏进度条数据源；0=未知）
 	CreatedAt       int64         `json:"createdAt"`                 // 创建时间 unix 毫秒
 	UpdatedAt       int64         `json:"updatedAt"`                 // 最近活跃时间 unix 毫秒（新消息/改标题时刷新，列表按此降序）
 	Messages        []ChatMessage `json:"messages,omitempty"`        // 会话消息（索引文件不落此字段，GetChatSession 单独加载填充）
@@ -75,6 +76,7 @@ type ChatTaskRunResult struct {
 	ChatSessionID   string `json:"chatSessionId"`   // 所属 WorkBench 会话 id
 	ClaudeSessionID string `json:"claudeSessionId"` // claude 会话 id，供下一轮 --resume
 	Reply           string `json:"reply"`           // assistant 回复全文（markdown）
+	ContextTokens   int    `json:"contextTokens"`   // 本轮上下文 token 总量（对话状态栏进度条实时更新源；0=未知）
 	ExitCode        int    `json:"exitCode"`
 	Error           string `json:"error"`
 	Canceled        bool   `json:"canceled"`

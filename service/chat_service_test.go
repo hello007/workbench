@@ -693,10 +693,75 @@ func TestChatService_RunChat_FullFlow(t *testing.T) {
 		t.Errorf("会话 ClaudeSessionID 未回写: %q", got.ClaudeSessionID)
 	}
 
+	// 上下文 token：测试环境无 transcript 文件，读取降级 0（不落盘不改旧值）
+	if result.ContextTokens != 0 {
+		t.Errorf("done ContextTokens: got %d, want 0（无 transcript）", result.ContextTokens)
+	}
+	if got.ContextTokens != 0 {
+		t.Errorf("会话 ContextTokens 应保持 0: %d", got.ContextTokens)
+	}
+
 	// 终态轮次已从在途表摘除：GetChatTaskState 返回 nil（前端
 	// restoreChatTaskState 对「查无此任务」按终态清态处理，恢复链路不破坏）
 	if st := svc.GetChatTaskState(taskID); st != nil {
 		t.Errorf("终态轮次应已摘除, got %+v", st)
+	}
+}
+
+// TestChatService_RunChat_TranscriptContextTokens 上下文 token 从 transcript
+// JSONL 末条 usage 采集（对齐 statusline 脚本口径）：input + cache_read +
+// cache_creation。result 事件 usage 是会话累计值（随轮次复利膨胀，实测远超
+// 窗口），assistant 事件 usage 在 GLM 通道为全 0 占位，均不可作上下文大小。
+func TestChatService_RunChat_TranscriptContextTokens(t *testing.T) {
+	// 隔离 HOME：transcript 定位读 ~/.claude/projects/*/<sessionId>.jsonl
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home) // Windows os.UserHomeDir() 读 USERPROFILE
+	t.Setenv("HOME", home)        // Linux/Mac（CI）读 HOME
+
+	sid := "11111111-2222-3333-4444-555555555555"
+	projDir := filepath.Join(home, ".claude", "projects", "D--proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("mkdir projects: %v", err)
+	}
+	transcript := fmt.Sprintf(
+		`{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`+"\n"+
+			`{"type":"summary","summary":"无 usage 行不干扰"}`+"\n"+
+			`{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":2,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}}}`+"\n",
+	)
+	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	svc, sink := newChatSvcForTest(t)
+	sess, err := svc.CreateChatSession("dir-1", "用量", "C:/proj/t")
+	if err != nil {
+		t.Fatalf("CreateChatSession: %v", err)
+	}
+	lines := []string{
+		fmt.Sprintf(`{"type":"system","subtype":"init","session_id":%q}`, sid),
+		assistantLine(sid, "回复"),
+		// result 聚合 usage（input 10）不应被采用——上下文只认 transcript 末条
+		resultLine(sid),
+	}
+	wireFakeFactory(svc, func() *fakeChatProcess { return newFakeLines(lines) })
+
+	if _, err := svc.RunChat(sess.ID, "问", "default", ""); err != nil {
+		t.Fatalf("RunChat: %v", err)
+	}
+	result := sink.waitDone(t)
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	// 末条 usage：100 + 200 + 50 = 350（首条 10 被覆盖，无 usage 行跳过）
+	if result.ContextTokens != 350 {
+		t.Errorf("done ContextTokens: got %d, want 350", result.ContextTokens)
+	}
+	got, err := svc.GetChatSession(sess.ID)
+	if err != nil {
+		t.Fatalf("GetChatSession: %v", err)
+	}
+	if got.ContextTokens != 350 {
+		t.Errorf("会话 ContextTokens: got %d, want 350", got.ContextTokens)
 	}
 }
 
