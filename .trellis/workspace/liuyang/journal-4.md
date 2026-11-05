@@ -1804,3 +1804,36 @@ Windows 终端会话以 SYNCHRONIZE 句柄+停止事件事件驱动退出检测�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 223: CLAUDE.md 收敛至 AGENTS.md 单一入口
+
+**Date**: 2026-11-05
+**Task**: CLAUDE.md 收敛至 AGENTS.md 单一入口
+**Branch**: `master`
+
+### Summary
+
+CLAUDE.md 缩为 @AGENTS.md 一行，通用内容迁入 AGENTS.md（关键规则表 86 行零 diff、新增关键规则与规范沉淀/项目记忆节、技术栈命令合并去重）；文档索引收口 docs-management.md（删 project-context 死链、修正 workbench/ 前缀死链、15 链接验证通过）；12 文件约 30 处仓根 CLAUDE.md 引用同步为 AGENTS.md；浏览器模式-二期扩展.md 归档 docs/archive/。待验证：重启会话确认 @import 注入。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b705c5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
