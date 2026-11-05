@@ -110,6 +110,7 @@ func deepCopyNode(n *model.FileTreeNode) *model.FileTreeNode {
 		Type:        n.Type,
 		IsGitRepo:   n.IsGitRepo,
 		HasRemote:   n.HasRemote,
+		Missing:     n.Missing,
 		HasChildren: n.HasChildren,
 		IsLeaf:      n.IsLeaf,
 	}

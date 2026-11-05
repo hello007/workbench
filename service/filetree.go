@@ -123,6 +123,48 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 	return nodes, nil
 }
 
+// GetRootNodesForPaths 为聚合视图构造根节点列表（虚拟工作区：收藏目录平铺浏览）。
+//
+// 对每个入参 path：
+//   - Stat 成功且为目录 -> 正常节点（复用 isGitRepoDir/hasRemote 缓存填 git 徽标）
+//   - Stat 成功但非目录 -> 跳过（收藏可含文件，文件类收藏不进聚合树）
+//   - Stat 失败（被删/移动/无权限）-> Missing 占位节点，前端标灰提示并可右键移除收藏；
+//     静默丢弃会让用户误以为收藏丢失，显式占位才能形成失效兜底闭环
+//
+// 顺序恒与入参一致（收藏列表顺序），不排序不去重；一次批量调用同时收口存在性判定
+// 与 git 徽标，避免前端逐目录 IPC（前端无轻量存在性检查绑定，借道 GetFileTree 全扫
+// 或逐个 GetGitInfo 均劣）。
+func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTreeNode {
+	nodes := make([]*model.FileTreeNode, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		name := filepath.Base(filepath.Clean(p))
+		info, err := os.Stat(p)
+		if err != nil {
+			node := model.NewFileTreeNode(name, p, "directory")
+			node.Missing = true
+			// 失效目录磁盘上已无子节点：显式置叶子，避免节点自相矛盾
+			// （directory 类型默认 HasChildren=true/IsLeaf=false，会诱导消费面展开一个不存在的目录）
+			node.HasChildren = false
+			node.IsLeaf = true
+			nodes = append(nodes, node)
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		node := model.NewFileTreeNode(name, p, "directory")
+		node.IsGitRepo = s.isGitRepoDir(p)
+		if node.IsGitRepo {
+			node.HasRemote = s.hasRemote(p)
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 // InvalidateCache 清除指定路径的缓存（纯失效，不重扫不返回数据）。
 // 供手动刷新（右键/F5/文件操作后）绕过缓存，后续 GetChildren miss 后实扫回写最新数据。
 // 数据流等价于原 RefreshChildren，但消除无用序列化：前端 refreshNode 调本方法清缓存后，

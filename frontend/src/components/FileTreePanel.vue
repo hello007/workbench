@@ -6,6 +6,17 @@
           <el-button size="small" @click="refreshAll">刷新</el-button>
           <el-button size="small" @click="expandAll" :loading="expanding">全部展开</el-button>
           <el-button size="small" @click="collapseAll">全部收起</el-button>
+          <!-- 聚合视图切换（双模式共用一个面板）：激活态用 primary 填充标识当前模式。
+               浏览器通道隐藏入口：GetAggregatedRootNodes 已列入 RPCHiddenMethods，
+               点击必失败；与 SettingsPanel/useIPBans 隐私入口「启动期隐藏而非点击报错」先例一致 -->
+          <el-button
+            v-if="!browserChannel"
+            size="small"
+            :type="aggregatedMode ? 'primary' : 'default'"
+            data-action="toggle-aggregated-view"
+            :title="aggregatedMode ? '当前为聚合视图，点击切回目录树' : '聚合视图：统一浏览全部收藏目录'"
+            @click="toggleAggregatedMode"
+          >{{ aggregatedMode ? '聚合视图' : '目录树' }}</el-button>
         </el-button-group>
         <!-- 工具栏扩展位：仓库筛选器等外部按钮通过具名 slot 注入 -->
         <slot name="toolbar-extra" />
@@ -26,11 +37,13 @@
     <div class="tree-content" @contextmenu.prevent="onBlankAreaContextMenu">
       <!-- 目录内按名筛选覆盖层（perf-baseline §15.6 截断配套）：激活时遮盖树视图。
            树用 v-show 保持挂载（v-if 卸载会丢展开态 + 重挂载后 locateNode 必 miss），
-           覆盖层条件含 selectedDirectoryId 防无目录空态被顶替；
+           覆盖层条件含 selectedDirectoryId 防无目录空态被顶替（聚合视图不依赖工作目录，同放行）；
            v-for 命中列表复用 truncateTreeNodes 限渲染上限 -->
-      <div v-if="filterModeActive && directoryStore.selectedDirectoryId" class="tree-filter-overlay">
+      <div v-if="filterModeActive && (aggregatedMode || directoryStore.selectedDirectoryId)" class="tree-filter-overlay">
         <div class="tree-filter-summary">
-          在「{{ treeFilterScopeName }}」中命中 {{ filteredNodes.length }} 项
+          <!-- 聚合视图未点击目录时无作用域：不回退工作目录，显式引导避免误读为「工作目录内 0 命中」 -->
+          <template v-if="aggregatedMode && !treeFilterScope">请先点击一个收藏目录，再按名筛选</template>
+          <template v-else>在「{{ treeFilterScopeName }}」中命中 {{ filteredNodes.length }} 项</template>
         </div>
         <template v-if="filteredDisplayNodes.length > 0">
           <div
@@ -72,10 +85,11 @@
             >{{ item.name }}</span>
           </div>
         </template>
-        <el-empty v-else description="无匹配项" :image-size="60" />
+        <!-- 聚合视图未点击目录时无作用域：summary 已给出引导，不再叠加「无匹配项」矛盾文案 -->
+        <el-empty v-else-if="treeFilterScope || !aggregatedMode" description="无匹配项" :image-size="60" />
       </div>
       <el-tree
-        v-show="!filterModeActive && !!directoryStore.selectedDirectoryId"
+        v-show="(!filterModeActive || (aggregatedMode && !treeFilterScope)) && (aggregatedMode || !!directoryStore.selectedDirectoryId) && !(aggregatedMode && !aggregatedRootLoading && !aggregatedRootError && aggregatedRootCount === 0)"
         :key="treeKey"
         ref="fileTreeRef"
         :props="treeProps"
@@ -91,7 +105,11 @@
         class="file-tree"
       >
         <template #default="{ node, data }">
-          <span class="custom-tree-node" :class="{ 'truncation-hint-node': isTruncationHint(data) }">
+          <span
+            class="custom-tree-node"
+            :class="{ 'truncation-hint-node': isTruncationHint(data), 'missing-node': data.missing }"
+            :title="data.missing ? '目录不存在或已移动（收藏失效），可右键移除收藏' : undefined"
+          >
             <el-icon
               v-if="isTruncationHint(data)"
               color="#909399"
@@ -101,7 +119,7 @@
             </el-icon>
             <el-icon
               v-else-if="data.type === 'directory'"
-              :color="node.expanded ? '#409EFF' : '#909399'"
+              :color="data.missing ? '#c0c4cc' : (node.expanded ? '#409EFF' : '#909399')"
               style="margin-right: 5px;"
             >
               <component :is="node.expanded ? FolderOpened : Folder" />
@@ -120,10 +138,13 @@
             <span :style="{
               color: isTruncationHint(data)
                 ? '#909399'
-                : data.type === 'directory'
-                  ? (node.expanded ? '#409EFF' : '#909399')
-                  : '#606266',
-              fontStyle: isTruncationHint(data) ? 'italic' : 'normal'
+                : data.missing
+                  ? '#c0c4cc'
+                  : data.type === 'directory'
+                    ? (node.expanded ? '#409EFF' : '#909399')
+                    : '#606266',
+              fontStyle: isTruncationHint(data) ? 'italic' : 'normal',
+              textDecoration: data.missing ? 'line-through' : 'none'
             }">
               {{ node.label }}
             </span>
@@ -137,7 +158,11 @@
           </span>
         </template>
       </el-tree>
-      <el-empty v-if="!directoryStore.selectedDirectoryId" description="请先选择工作目录" :image-size="100" />
+      <el-empty v-if="!directoryStore.selectedDirectoryId && !aggregatedMode" description="请先选择工作目录" :image-size="100" />
+      <!-- 聚合根层三态空态：加载中 / 加载失败 / 无目录收藏，避免加载瞬间与失败态误显示「暂无目录收藏」 -->
+      <el-empty v-if="aggregatedMode && !filterModeActive && aggregatedRootLoading" description="正在加载收藏目录…" :image-size="100" />
+      <el-empty v-else-if="aggregatedMode && !filterModeActive && aggregatedRootError" :description="aggregatedRootError" :image-size="100" />
+      <el-empty v-else-if="aggregatedMode && !filterModeActive && aggregatedRootCount === 0" description="暂无目录收藏：在目录树上右键文件夹「添加到收藏」后，即可在此统一浏览" :image-size="100" />
     </div>
 
     <!-- 新建文件夹/文件对话框 -->
@@ -286,6 +311,15 @@
           <el-icon><DataBoard /></el-icon>{{ contextMenu.targetPinned ? '取消关注状态看板' : '加入状态看板' }}
         </li>
       </template>
+      <!-- 聚合视图失效收藏节点：仅保留移除收藏与复制路径（其余文件操作对不存在路径无意义） -->
+      <template v-else-if="contextMenu.data?.missing">
+        <li class="context-menu-item" @click="onMenuCommand('removeFavorite')">
+          <el-icon><StarFilled /></el-icon>移除收藏
+        </li>
+        <li class="context-menu-item" @click="onMenuCommand('copyPath')">
+          <el-icon><CopyDocument /></el-icon>复制路径
+        </li>
+      </template>
       <template v-else-if="contextMenu.data?.type === 'directory'">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
           <el-icon><DocumentAdd /></el-icon>新建文件
@@ -359,7 +393,10 @@
         <li v-else class="context-menu-item" @click="onMenuCommand('addFavorite')">
           <el-icon><Star /></el-icon>添加到收藏
         </li>
-        <li class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
+        <li v-if="aggregatedMode" class="context-menu-item" @click="onMenuCommand('setAsWorkDir')">
+          <el-icon><FolderAdd /></el-icon>设为工作目录
+        </li>
+        <li v-else class="context-menu-item" @click="onMenuCommand('addAsWorkDir')">
           <el-icon><FolderAdd /></el-icon>添加为工作目录
         </li>
         <li class="context-menu-item" @click="onMenuCommand('addToAiChat')">
@@ -476,8 +513,10 @@ import { toRelativePath, toFileRefPath } from '../utils/relativePath'
 import { useTreeState } from '../composables/useTreeState'
 import { useFavoritesStore, useSettingsStore, useDirectoryStore, useWorkspaceStore, useUiStore, useAiChatStore } from '../store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { isBrowserChannel } from '../transport'
 import {
   GetFileTree,
+  GetAggregatedRootNodes,
   InvalidateFileTreeCache,
   ClearAllFileTreeCache,
   CreateDirectory, CreateFile, RenameFile, DeleteFile,
@@ -506,7 +545,7 @@ import gitGrayIcon from '../assets/icons/git-gray.png'
 // ---- Props & Emits ----
 // clipboard prop 已删（workspace 域批次6 迁 store，本组件零消费）。
 // directories / selectedDirId 已迁 directory store，子组件直读。
-const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'open-content-search', 'open-repo-filter'])
+const emit = defineEmits(['select', 'batchPull', 'copy', 'cut', 'paste', 'copyTo', 'contextmenu', 'delete', 'add-work-dir', 'set-as-work-dir', 'open-content-search', 'open-repo-filter'])
 
 const { saveState, restoreState } = useTreeState()
 const favoritesStore = useFavoritesStore()
@@ -520,13 +559,47 @@ const aiChatStore = useAiChatStore()
 const currentSelectedPath = ref('')
 const fileTreeRef = ref()
 const refreshCounter = ref(0)
-const treeKey = computed(() => `${directoryStore.selectedDirectoryId}_${refreshCounter.value}`)
+
+// ---- 聚合视图模式（虚拟工作区：收藏目录平铺浏览）----
+// 聚合模式下树根为虚拟节点（不落盘不持久化，仅 loadTreeNode level 0 分流时前端分流），
+// 其子节点 = 收藏目录列表（后端 GetAggregatedRootNodes 一次返回存在性判定 + git 徽标），
+// 后续展开/预览/编辑/文件操作全部复用既有绝对路径链路。
+// 双下划线前缀保留命名空间：与真实目录路径天然不冲突，普通/聚合两模式树状态互不污染。
+const AGGREGATED_TREE_STATE_KEY = '__aggregated__'
+// el-tree 的 key 命名空间：聚合树与工作目录无关，不绑定 selectedDirectoryId，
+// 避免切换工作目录时整棵聚合树重建重拉（展开态先丢后恢复）
+const AGGREGATED_TREE_KEY = '__agg__'
+const aggregatedMode = ref(false)
+// 聚合根层节点数：驱动「无目录收藏」空态显示；树每次重建时重置
+const aggregatedRootCount = ref(0)
+// 聚合根层加载三态：加载中/失败不显示「暂无目录收藏」，避免误判收藏数据丢失
+const aggregatedRootLoading = ref(false)
+const aggregatedRootError = ref('')
+
+// 浏览器通道（启动期固定，非响应式）：聚合根查询在后端 RPC 面屏蔽，
+// 入口隐藏而非点击报错（与 SettingsPanel / useIPBans 隐私入口先例一致）
+const browserChannel = isBrowserChannel()
+
+const treeKey = computed(() =>
+  `${aggregatedMode.value ? AGGREGATED_TREE_KEY : directoryStore.selectedDirectoryId}_${refreshCounter.value}`
+)
 
 let treeReadyResolve = null
 let treeReadyPromise = new Promise(r => { treeReadyResolve = r })
 
 function resetTreeReady() {
   treeReadyPromise = new Promise(r => { treeReadyResolve = r })
+}
+
+// 等待树根就绪：树已有根节点直接通过；否则由 loadTreeNode 完成信号驱动
+// （普通树根层/聚合根层加载结束时 resolve），超时兜底防懒加载异常导致流程永久挂起。
+// 空收藏时聚合根层立即完成，不再空等数秒。
+const waitTreeReady = async (timeout = 3000) => {
+  if (fileTreeRef.value?.store?.root?.childNodes?.length > 0) return
+  await Promise.race([
+    treeReadyPromise,
+    new Promise(resolve => setTimeout(resolve, timeout))
+  ])
 }
 
 const treeProps = {
@@ -658,13 +731,18 @@ const treeFilterScopeName = computed(() =>
   treeFilterScope.value?.name || currentWorkDir.value?.name || ''
 )
 
-const treeFilterPlaceholder = computed(() =>
-  treeFilterScope.value ? `在「${treeFilterScope.value.name}」内按名筛选` : '在当前目录按名筛选'
-)
+const treeFilterPlaceholder = computed(() => {
+  if (treeFilterScope.value) return `在「${treeFilterScope.value.name}」内按名筛选`
+  // 聚合视图无「当前工作目录」可回退：未点击目录前引导先点击
+  if (aggregatedMode.value) return '点击目录后可按名筛选'
+  return '在当前目录按名筛选'
+})
 
 // 命中列表渲染上限：复用 truncateTreeNodes（2000 + 末尾哨兵），防命中过多渲染劣化
 const filteredDisplayNodes = computed(() => {
-  const scopePath = treeFilterScope.value?.path || currentWorkDir.value?.path || ''
+  const scopePath = treeFilterScope.value?.path
+    || (aggregatedMode.value ? '' : currentWorkDir.value?.path)
+    || ''
   return truncateTreeNodes(filteredNodes.value, scopePath).nodes
 })
 
@@ -681,7 +759,11 @@ const onFilterInput = () => {
 const runFilter = async () => {
   const kw = treeFilterKeyword.value.trim()
   if (!kw) return
-  const scopePath = treeFilterScope.value?.path || currentWorkDir.value?.path
+  // 聚合视图作用域恒为点击的目录节点（无工作目录回退）——收藏目录间无公共祖先，
+  // 未点击就筛选无从确定作用域，直接不拉取（placeholder 已引导先点击目录）
+  const scopePath = aggregatedMode.value
+    ? treeFilterScope.value?.path
+    : (treeFilterScope.value?.path || currentWorkDir.value?.path)
   if (!scopePath) return
   const seq = ++filterSeq
   try {
@@ -746,12 +828,24 @@ const loadTreeNode = async (node, resolve) => {
   debug.log('node.level:', node?.level)
   debug.log('node.data:', node?.data)
 
+  // 捕获本次加载对应的就绪信号：加载期间若树被重建（resetTreeReady），
+  // 旧加载只释放旧 promise，不会提前唤醒新一代的等待
+  const readyResolve = treeReadyResolve
+
   let path
   if (!node || node.level === 0 || !node.data) {
+    // 聚合视图：level 0 返回收藏目录节点列表（虚拟根不落盘，不进 GetFileTree 链路）
+    if (aggregatedMode.value) {
+      await loadAggregatedRootNodes(resolve)
+      return
+    }
     const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
     if (!dir) {
       debug.log('No directory found for ID:', directoryStore.selectedDirectoryId)
       resolve([])
+      // 无目录分支也须释放就绪信号：否则 waitTreeReady 等满超时，
+      // 模式切换在途标志迟迟不复位
+      nextTick(() => readyResolve?.())
       return
     }
     path = dir.path
@@ -779,12 +873,78 @@ const loadTreeNode = async (node, resolve) => {
     resolve(truncated.nodes)
 
     if (!node || node.level === 0 || !node.data) {
-      nextTick(() => treeReadyResolve?.())
+      nextTick(() => readyResolve?.())
     }
   } catch (error) {
     console.error('Error in loadTreeNode:', error)
     ElMessage.error('加载节点失败: ' + (error.message || error))
     resolve([])
+    // 根层加载失败同样释放就绪信号，防 waitTreeReady 空等超时
+    if (!node || node.level === 0 || !node.data) {
+      nextTick(() => readyResolve?.())
+    }
+  }
+}
+
+// ---- 聚合视图根层加载 ----
+// 把全部收藏路径交给后端聚合绑定一次判定：目录 -> 正常节点（含 git 徽标）、
+// 不存在 -> Missing 占位（前端标灰 + 右键移除收藏）、文件类 -> 后端跳过不进聚合树。
+// 收藏 alias 覆盖节点显示名（后端仅知路径，取路径末段兜底）。
+// 路径比较归一：分隔符统一为反斜杠、去尾部分隔符、大小写不敏感（Windows 路径语义）。
+// 去尾分隔符保证 D:\repo\ 与 D:\repo 视为同一根，避免收藏数据尾部斜杠导致子树归属失配。
+const normalizeComparablePath = (p) => (p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+
+// 聚合根集合：祖先已被收藏的项不再作为独立根（与收藏顺序无关，同路径只保留首个）。
+// el-tree node-key=path，同一路径在根层与子层同时注册会互相覆盖 nodesMap
+// （展开态/定位/刷新错位）；父收藏展开后仍可浏览到该目录，聚合语义不损失。
+// 该集合同时是 findAggregatedRootFor 的匹配面——二者必须同源，否则被剔除的子收藏
+// 仍会被最长前缀命中，定位/刷新落到树上不存在的一级节点。
+const aggregatedFavoriteRoots = () => {
+  const unique = []
+  const seen = new Set()
+  for (const f of favoritesStore.favorites) {
+    const key = normalizeComparablePath(f.path)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push({ fav: f, key })
+  }
+  return unique
+    .filter(x => !unique.some(y => y.key !== x.key && x.key.startsWith(y.key + '\\')))
+    .map(x => x.fav)
+}
+
+const loadAggregatedRootNodes = async (resolve) => {
+  // 同 loadTreeNode：捕获本次加载对应的就绪信号，防旧加载唤醒新一代等待
+  const readyResolve = treeReadyResolve
+  aggregatedRootLoading.value = true
+  aggregatedRootError.value = ''
+  try {
+    const keptFavs = aggregatedFavoriteRoots()
+    const nodes = await GetAggregatedRootNodes(keptFavs.map(f => f.path))
+    const aliasByPath = new Map(keptFavs.map(f => [f.path, f.alias]))
+    const processedNodes = (nodes || []).map(n => {
+      const alias = aliasByPath.get(n.path)
+      return {
+        ...n,
+        name: alias && alias.trim() ? alias : n.name,
+        // 失效占位节点不可展开（磁盘上无子节点可加载），按叶子处理防展开请求打空
+        isLeaf: n.type === 'file' || !!n.missing || !n.hasChildren
+      }
+    })
+    // 收藏上限 100 理论不触发截断，统一走截断链路保持行为一致（哨兵 key 用聚合命名空间）
+    const truncated = truncateTreeNodes(processedNodes, AGGREGATED_TREE_STATE_KEY)
+    aggregatedRootCount.value = processedNodes.length
+    resolve(truncated.nodes)
+  } catch (error) {
+    console.error('Error in loadAggregatedRootNodes:', error)
+    // 失败态与「无收藏」区分：空态由 aggregatedRootError 分支接管，避免误判收藏丢失
+    aggregatedRootError.value = '加载收藏目录失败，请点击工具栏「刷新」重试'
+    ElMessage.error('加载收藏目录失败: ' + (error.message || error))
+    aggregatedRootCount.value = 0
+    resolve([])
+  } finally {
+    aggregatedRootLoading.value = false
+    nextTick(() => readyResolve?.())
   }
 }
 
@@ -799,6 +959,12 @@ const onNodeClick = (data, node) => {
     // 清高亮保持「哨兵不选中」不变式（视觉 + F2/Delete 读取的 getCurrentNode 双保险）
     fileTreeRef.value?.setCurrentKey?.(null)
     focusTreeFilter()
+    return
+  }
+  // 失效收藏节点：路径在磁盘上已不存在，预览/展开均无意义，提示后引导右键移除
+  if (data.missing) {
+    fileTreeRef.value?.setCurrentKey?.(null)
+    ElMessage.info('该目录不存在或已移动（收藏失效），可右键移除收藏')
     return
   }
   const clickedPath = data.path.replace(/\\/g, '/')
@@ -829,12 +995,37 @@ const onNodeClick = (data, node) => {
   }
 }
 
-// ---- 沿父路径向上回溯，找到第一个已展开的祖先节点 ----
-const findExpandedAncestor = (nodePath, store) => {
-  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
-  if (!dir) return null
+// ---- 聚合视图：定位目标路径所属的收藏根（最长前缀，兼容 \ / 分隔符与大小写差异）----
+// 目标可能位于任一收藏根子树下，也可能即收藏根本身（返回该根自身）。
+// 无命中返回空串（目标不在任何收藏范围内）。
+const findAggregatedRootFor = (nodePath) => {
+  const target = normalizeComparablePath(nodePath)
+  let best = ''
+  // 只在「去重后的根集合」内匹配：被剔除的嵌套收藏在树中不是一级节点
+  for (const f of aggregatedFavoriteRoots()) {
+    const root = normalizeComparablePath(f.path)
+    // 仅子树前缀命中（含根自身），排除仅共享前缀串的兄弟目录（/a/b vs /a/bc）
+    if (root && (target === root || target.startsWith(root + '\\')) && root.length > best.length) {
+      best = f.path
+    }
+  }
+  return best
+}
 
-  const rootPath = dir.path
+// ---- 沿父路径向上回溯，找到第一个已展开的祖先节点 ----
+// 聚合视图按收藏根回溯（收藏根是树一级节点、在 nodesMap 中存在，可本身作为回溯终点）；
+// 普通树按工作目录回溯（根不在 nodesMap，回溯到根返回 null 由 store.root 兜底）。
+const findExpandedAncestor = (nodePath, store) => {
+  let rootPath
+  if (aggregatedMode.value) {
+    rootPath = findAggregatedRootFor(nodePath)
+    if (!rootPath) return null
+  } else {
+    const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
+    if (!dir) return null
+    rootPath = dir.path
+  }
+
   const sep = rootPath.includes('\\') ? '\\' : '/'
   const normalizedRoot = sep === '\\' ? rootPath.replace(/\//g, '\\') : rootPath.replace(/\\/g, '/')
   const normalizedTarget = sep === '\\' ? nodePath.replace(/\//g, '\\') : nodePath.replace(/\\/g, '/')
@@ -848,7 +1039,11 @@ const findExpandedAncestor = (nodePath, store) => {
     if (parentPath.length < normalizedRoot.length) return null
     const parent = store.nodesMap[parentPath]
     if (parent && parent.expanded === true) return parent
-    if (parentPath === normalizedRoot) return null
+    // 回溯到收藏根：无论展开与否都可作为刷新目标（expand 会展开并加载最新子节点）；
+    // 普通树工作目录根不在 nodesMap（树中无该节点），维持返回 null
+    if (parentPath === normalizedRoot) {
+      return aggregatedMode.value ? (store.nodesMap[parentPath] || null) : null
+    }
   }
   return null
 }
@@ -875,11 +1070,14 @@ const refreshNode = async (nodePath, options = {}) => {
   const store = fileTreeRef.value.store
   const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
 
-  // 规范化路径分隔符（对齐工作目录根的分隔符，避免 \ / 混用导致 nodesMap 查询失败）
-  const sep = dir && dir.path.includes('\\') ? '\\' : '/'
+  // 规范化路径分隔符（对齐工作目录根的分隔符，避免 \ / 混用导致 nodesMap 查询失败）；
+  // 聚合视图无工作目录根语义，分隔符取目标所属收藏根（无命中则取目标自身）
+  const sepRef = aggregatedMode.value ? (findAggregatedRootFor(nodePath) || nodePath) : (dir && dir.path)
+  const sep = sepRef && sepRef.includes('\\') ? '\\' : '/'
   const normalize = (p) => sep === '\\' ? (p || '').replace(/\//g, '\\') : (p || '').replace(/\\/g, '/')
   const normalizedPath = normalize(nodePath)
-  const normalizedRoot = dir ? normalize(dir.path) : ''
+  // 工作目录根 store.root 兜底仅普通树有意义（聚合树根为虚拟节点，收藏根本身在 nodesMap 可直接命中）
+  const normalizedRoot = !aggregatedMode.value && dir ? normalize(dir.path) : ''
 
   // 定位目标节点：nodesMap 命中 -> 工作目录根(store.root) -> 已展开祖先兜底
   let target = store.nodesMap[normalizedPath]
@@ -959,6 +1157,12 @@ const refreshAfterFileOp = (parentPath) => {
   if (filterModeActive.value) {
     return refreshAfterFilterOp(parentPath)
   }
+  // 聚合视图下父目录不属于任何收藏根 = 操作对象是收藏根本身（重命名/删除）：
+  // 收藏根没有可定位的树内祖先，refreshNode 会静默早退，改为整层重建
+  // （收藏记录仍指向旧路径，重建后按失效占位兜底，提示用户移除）
+  if (aggregatedMode.value && !findAggregatedRootFor(parentPath)) {
+    return refreshAggregatedRoot()
+  }
   return refreshNode(parentPath)
 }
 
@@ -973,6 +1177,70 @@ const refreshAll = async () => {
   }
   refreshCounter.value++
   ElMessage.success('文件树已刷新')
+}
+
+// ---- 双模式切换编排（目录树 ⇄ 聚合视图）----
+// 三步时序，顺序敏感：
+//   1. 翻转前保存当前模式树状态（显式传入旧模式，避免 await 期间模式已翻转导致 key 串写）
+//   2. 翻转 aggregatedMode -> treeKey 变化 -> el-tree 整体重建（懒加载重拉对应模式根节点）
+//   3. 等新树根节点就绪后恢复目标模式树状态（key 同样显式固化）
+// restoreState=false 跳过第 3 步：「设为工作目录」链路退出聚合模式后马上要切换工作目录，
+// 恢复旧树状态属浪费（onDirectorySelect 会保存/恢复目标目录状态）。
+// 代次守卫：在途切换期间再点切换（树尚未重建完成）时跳过保存并让上一次切换流程早退，
+// 防止把未完成的树状态写入目标模式 key。
+let modeSwitchSeq = 0
+let modeSwitchInFlight = false
+
+const switchTreeMode = async (targetMode, options = {}) => {
+  if (aggregatedMode.value === targetMode) return
+  const seq = ++modeSwitchSeq
+  if (!modeSwitchInFlight) {
+    saveCurrentState(directoryStore.currentDirPath, aggregatedMode.value)
+  }
+  modeSwitchInFlight = true
+  aggregatedMode.value = targetMode
+  aggregatedRootCount.value = 0
+  aggregatedRootError.value = ''
+  // treeKey 变化的 watch 也会退筛选/清作用域，此处显式执行不依赖 watch 时序
+  exitFilterMode()
+  lastClickedNodeData.value = null
+  try {
+    await nextTick()
+    if (seq !== modeSwitchSeq) return
+    await waitTreeReady()
+    if (seq !== modeSwitchSeq) return
+  } finally {
+    // 异常同样复位在途标志：否则后续切换永久跳过保存
+    if (seq === modeSwitchSeq) modeSwitchInFlight = false
+  }
+  if (options.restoreState !== false) {
+    await restoreTreeState(directoryStore.currentDirPath, targetMode)
+  }
+}
+
+const toggleAggregatedMode = () => switchTreeMode(!aggregatedMode.value)
+
+// 退出聚合视图（供 Home.vue「设为工作目录」链路前置调用，defineExpose 暴露）
+const exitAggregatedMode = (options) => switchTreeMode(false, options)
+
+// ---- 聚合视图内收藏增删后重建根层 ----
+// 聚合根层 = 收藏列表快照，收藏变化后旧节点不会自行消失/出现（refreshNode 只刷新
+// 节点子层），须整体重建根层；保存/恢复展开态，避免已展开目录因重建收起。
+const refreshAggregatedRoot = async () => {
+  if (!aggregatedMode.value) return
+  // 模式切换在途时树状态不可信：放弃本次重建，最终状态由切换流程负责
+  if (modeSwitchInFlight) return
+  const seq = ++modeSwitchSeq
+  saveCurrentState(directoryStore.currentDirPath, true)
+  // 重建期间先清根层态，避免「空树 + 上一次空态文案/旧计数」同帧并存
+  aggregatedRootCount.value = 0
+  aggregatedRootError.value = ''
+  refreshCounter.value++
+  await nextTick()
+  await waitTreeReady()
+  // 期间用户切回目录树或触发新一轮重建：放弃恢复，防聚合展开态落到普通树
+  if (seq !== modeSwitchSeq || !aggregatedMode.value) return
+  await restoreTreeState(directoryStore.currentDirPath, true)
 }
 
 // ---- 全部展开 ----
@@ -1233,6 +1501,9 @@ const onMenuCommand = (command) => {
       break
     case 'addAsWorkDir':
       handleAddAsWorkDir(data)
+      break
+    case 'setAsWorkDir':
+      handleSetAsWorkDir(data)
       break
     case 'addToAiChat':
       handleAddToAiChat(data)
@@ -1597,6 +1868,8 @@ const handleAddFavorite = async (node) => {
     ElMessage.warning(err)
   } else {
     ElMessage.success('已添加到收藏')
+    // 聚合视图内右键新增收藏：收藏列表已变，重建聚合根层让新目录出现
+    await refreshAggregatedRoot()
   }
 }
 
@@ -1607,7 +1880,16 @@ const handleRemoveFavorite = async (node) => {
     ElMessage.warning(err)
   } else {
     ElMessage.success('已取消收藏')
+    // 聚合视图内（含失效占位节点）移除收藏：重建聚合根层让节点消失
+    await refreshAggregatedRoot()
   }
+}
+
+// ---- 设为工作目录（聚合视图右键收藏目录）----
+// 仅 emit 事件，编排交 Home.vue：添加（若缺失）+ 切换工作目录 + 退出聚合模式 + 定位，
+// 复用 onDirectorySelect 的既有保存/恢复链；本组件暴露 exitAggregatedMode/locateNode。
+const handleSetAsWorkDir = (node) => {
+  emit('set-as-work-dir', { path: node.path, name: node.name })
 }
 
 // ---- 添加为工作目录 ----
@@ -1692,23 +1974,33 @@ async function restoreExpandedPaths(paths) {
   }
 }
 
-function saveCurrentState(dirPath) {
+// 树状态持久化 key 按模式分流：聚合视图树与工作目录无关，固定写虚拟 key
+// （AGGREGATED_TREE_STATE_KEY），普通树沿用目录路径 key，两模式展开状态互不污染。
+// mode 可选：模式切换/重建链路显式传入「当前实际树模式」，避免 await 期间模式翻转
+// 导致 key 串写；Home.vue 的切目录调用点不传，按当前模式分流。
+function currentStateKey(dirPath, mode = aggregatedMode.value) {
+  return mode ? AGGREGATED_TREE_STATE_KEY : dirPath
+}
+
+function saveCurrentState(dirPath, mode) {
   const treeEl = document.querySelector('.tree-content')
-  saveState(dirPath, {
+  saveState(currentStateKey(dirPath, mode), {
     expandedPaths: getExpandedPaths(),
     scrollTop: treeEl ? treeEl.scrollTop : 0,
     selectedPath: null
   })
 }
 
-async function restoreTreeState(dirPath) {
-  const state = restoreState(dirPath)
+async function restoreTreeState(dirPath, mode) {
+  const state = restoreState(currentStateKey(dirPath, mode))
   if (state.expandedPaths.length === 0) return
 
   const tree = fileTreeRef.value
   if (!tree) return
 
-  await waitUntil(() => tree.store.root.childNodes.length > 0, 3000)
+  // 根层可能确定为空（空收藏/无工作目录）：就绪后直接返回，不再空等轮询超时
+  await waitTreeReady()
+  if (!tree.store.root || tree.store.root.childNodes.length === 0) return
 
   const depthGroups = new Map()
   for (const path of state.expandedPaths) {
@@ -1775,10 +2067,20 @@ async function locateNode(targetPath) {
   const tree = fileTreeRef.value
   if (!tree) return
 
-  const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
-  if (!dir) return
+  // 聚合视图：目标按最长前缀收藏根回溯（收藏根是树一级节点）；普通树按工作目录回溯
+  let rootPath
+  if (aggregatedMode.value) {
+    rootPath = findAggregatedRootFor(targetPath)
+    if (!rootPath) {
+      ElMessage.info('该路径不在任何收藏目录范围内（聚合视图仅展示收藏目录）')
+      return
+    }
+  } else {
+    const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
+    if (!dir) return
+    rootPath = dir.path
+  }
 
-  const rootPath = dir.path
   const sep = rootPath.includes('\\') ? '\\' : '/'
   const normalizedTarget = sep === '\\' ? targetPath.replace(/\//g, '\\') : targetPath.replace(/\\/g, '/')
   const normalizedRoot = sep === '\\' ? rootPath.replace(/\//g, '\\') : rootPath.replace(/\\/g, '/')
@@ -1786,7 +2088,31 @@ async function locateNode(targetPath) {
   if (!normalizedTarget.startsWith(normalizedRoot)) return
 
   const relative = normalizedTarget.slice(normalizedRoot.length).replace(/^[\\/]/, '')
-  if (!relative) return
+  if (!relative) {
+    // 目标即根路径：普通树的工作目录根不在树中（维持静默返回）；聚合视图的收藏根
+    // 是树一级节点，可直接选中并滚动定位
+    if (aggregatedMode.value) {
+      const rootNode = tree.getNode(normalizedTarget) || tree.getNode(targetPath)
+      if (rootNode) {
+        // 失效收藏不可选中：否则快捷键（F2/Delete）会作用于不存在的路径
+        if (rootNode.data?.missing) {
+          ElMessage.info('该目录不存在或已移动（收藏失效），可右键移除收藏')
+          return
+        }
+        tree.setCurrentKey(rootNode.data.path)
+        await new Promise(r => setTimeout(r, 50))
+        const treeContainer = document.querySelector('.tree-content')
+        const nodeEl = treeContainer?.querySelector('.el-tree-node.is-current')
+        if (nodeEl && treeContainer) {
+          const containerRect = treeContainer.getBoundingClientRect()
+          const nodeRect = nodeEl.getBoundingClientRect()
+          const offset = nodeRect.top - containerRect.top - containerRect.height / 2
+          treeContainer.scrollBy({ top: offset, behavior: 'smooth' })
+        }
+      }
+    }
+    return
+  }
 
   const segments = relative.split(/[\\/]/)
   let currentPath = normalizedRoot
@@ -1830,14 +2156,17 @@ async function locateNode(targetPath) {
 // setCurrentNode，F2/Delete 经 getCurrentNode 可能拿到哨兵（合成 path 无文件语义），
 // 须在此拦截防对哨兵弹重命名/删除对话框。getCurrentNode 返回的是 data 对象
 // （组件层包装 return currentNode.data，非内部 Node），isTruncationHint 直接收它
+// 不可操作节点：截断哨兵与聚合视图失效收藏占位（路径在磁盘上不存在）
+const isUnusableNode = (node) => isTruncationHint(node) || !!node?.data?.missing
+
 const triggerRenameCurrent = () => {
   const node = fileTreeRef.value?.getCurrentNode()
-  if (node && !isTruncationHint(node)) showRenameAt(node)
+  if (node && !isUnusableNode(node)) showRenameAt(node)
 }
 
 const triggerDeleteCurrent = () => {
   const node = fileTreeRef.value?.getCurrentNode()
-  if (node && !isTruncationHint(node)) handleDeleteAt(node)
+  if (node && !isUnusableNode(node)) handleDeleteAt(node)
 }
 
 // ---- 暴露方法 ----
@@ -1857,7 +2186,8 @@ defineExpose({
   closeMenu: () => { contextMenu.visible = false },
   saveCurrentState,
   restoreTreeState,
-  locateNode
+  locateNode,
+  exitAggregatedMode
 })
 
 // ---- 生命周期 ----

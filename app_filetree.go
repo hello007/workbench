@@ -28,6 +28,15 @@ func (a *App) GetFileTreeRecursive(path string, maxDepth int) []*model.FileTreeN
 	return nodes
 }
 
+// GetAggregatedRootNodes 为聚合视图（收藏目录平铺浏览）构造根节点列表。
+// 对每个入参路径做存在性判定（失效收藏产出 Missing 占位节点）并复用缓存填 git 徽标，
+// 前端一次 IPC 拿到全部聚合根，无需逐目录探测。
+// 纯桌面数据面方法：载荷含任意路径的存在性信息，浏览器通道经 main.go 装配的
+// RPCHiddenMethods 屏蔽（呈现「方法不存在」），防浏览器侧探测磁盘路径。
+func (a *App) GetAggregatedRootNodes(paths []string) []*model.FileTreeNode {
+	return a.fileTreeSvc.GetRootNodesForPaths(paths)
+}
+
 // InvalidateFileTreeCache 清除指定路径的文件树缓存（纯失效，不返回数据）。
 // 供前端 refreshNode（右键刷新/F5/文件操作后）绕过缓存，后续 expand 触发 GetFileTree 实扫回写。
 func (a *App) InvalidateFileTreeCache(path string) {

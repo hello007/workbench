@@ -496,4 +496,109 @@ test.describe('目录内按名筛选', () => {
       })
     })
   })
+
+})
+
+// 聚合视图（虚拟工作区）：根层来自后端 GetAggregatedRootNodes（收藏目录平铺 +
+// 失效占位），后续展开/预览/编辑复用绝对路径链路
+test.describe('聚合视图（虚拟工作区）', () => {
+  const AGG_DIR_A = 'D:/e2e-demo/项目A'
+  const AGG_DIR_GONE = 'D:/e2e-demo/已删除目录'
+
+  // 收藏条目形状对齐 model.Favorite：目录类收藏进聚合树，失效收藏产出 Missing 占位
+  const AGG_FAVORITES = [
+    { path: AGG_DIR_A, alias: '常用项目A', group: '默认' },
+    { path: AGG_DIR_GONE, alias: '', group: '默认' }
+  ]
+
+  const AGG_ROOT_NODES = [
+    {
+      id: AGG_DIR_A,
+      name: '项目A',
+      path: AGG_DIR_A,
+      type: 'directory',
+      isGitRepo: false,
+      hasRemote: false,
+      hasChildren: true,
+      isLeaf: false,
+      missing: false
+    },
+    {
+      id: AGG_DIR_GONE,
+      name: '已删除目录',
+      path: AGG_DIR_GONE,
+      type: 'directory',
+      isGitRepo: false,
+      hasRemote: false,
+      hasChildren: false,
+      isLeaf: false,
+      missing: true
+    }
+  ]
+
+  test.use({
+    wailsOverrides: {
+      ...GIT_FLOW_OVERRIDES,
+      GetFavorites: AGG_FAVORITES,
+      GetAggregatedRootNodes: AGG_ROOT_NODES
+    }
+  })
+
+  /** 打开普通文件树后切换聚合视图，等待收藏根层渲染 */
+  async function openAggregatedView(page) {
+    await openFileTreePage(page)
+    await page.locator('[data-action="toggle-aggregated-view"]').click()
+    await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toBeVisible()
+  }
+
+  test('切换聚合视图：根层走 GetAggregatedRootNodes，别名覆盖显示名且路径顺序保持', async ({ page }) => {
+    await openAggregatedView(page)
+
+    // 收藏 alias 覆盖后端路径末段（后端只知路径）
+    await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toBeVisible()
+    // 正常目录不标灰
+    await expect(
+      page.locator('.el-tree-node', { hasText: '常用项目A' }).locator('.custom-tree-node.missing-node')
+    ).toHaveCount(0)
+
+    // 只断言首次加载的入参顺序（渲染顺序由上方节点可见性断言覆盖）：
+    // 未来若新增收藏变化触发的重载，恰好一次调用的强断言会假失败
+    const aggCalls = await getWailsCalls(page, 'GetAggregatedRootNodes')
+    expect(aggCalls).toHaveLength(1)
+    expect(aggCalls[0].args[0]).toEqual([AGG_DIR_A, AGG_DIR_GONE])
+  })
+
+  test('失效收藏：节点标灰 + tooltip 提示，右键菜单仅保留移除收藏与复制路径', async ({ page }) => {
+    await openAggregatedView(page)
+
+    const missingNode = page.locator('.el-tree-node', { hasText: '已删除目录' })
+    await expect(missingNode).toBeVisible()
+    await expect(missingNode.locator('.custom-tree-node.missing-node')).toBeVisible()
+
+    await missingNode.click({ button: 'right' })
+    const menu = page.locator('.context-menu')
+    await expect(menu).toBeVisible()
+    // 失效节点的文件操作对不存在路径无意义，仅移除收藏/复制路径两项
+    await expect(menu.locator('.context-menu-item')).toHaveCount(2)
+    await expect(menu.getByText('移除收藏')).toBeVisible()
+    await expect(menu.getByText('复制路径')).toBeVisible()
+  })
+
+  test('切回目录树：恢复工作目录根节点（两模式树状态互不串扰）', async ({ page }) => {
+    await openAggregatedView(page)
+    const toggle = page.locator('[data-action="toggle-aggregated-view"]')
+
+    await toggle.click()
+    await expect(page.locator('.el-tree-node', { hasText: 'README.md' })).toBeVisible()
+    await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toHaveCount(0)
+  })
+
+  test('展开收藏目录：按该目录绝对路径懒加载子节点（复用既有 GetFileTree 链路）', async ({ page }) => {
+    await openAggregatedView(page)
+
+    await page.locator('.el-tree-node', { hasText: '常用项目A' }).click()
+
+    const treeCalls = await getWailsCalls(page, 'GetFileTree')
+    expect(treeCalls).toContainEqual({ method: 'GetFileTree', args: [AGG_DIR_A] })
+  })
 })

@@ -896,6 +896,7 @@ describe('Home.vue - handler 分支补充', () => {
   const mountHome = () => {
     fileTreeSpies = {
       saveCurrentState: vi.fn(), restoreTreeState: vi.fn(), locateNode: vi.fn().mockResolvedValue(),
+      exitAggregatedMode: vi.fn().mockResolvedValue(),
       refreshNode: vi.fn(), refreshAfterFileOp: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn(),
       showRenameAt: vi.fn(), showCreateAt: vi.fn(), showCopyToDialog: vi.fn(),
       closeCopyToDialog: vi.fn(), setCopyToLoading: vi.fn(), closeMenu: vi.fn()
@@ -1109,6 +1110,49 @@ describe('Home.vue - handler 分支补充', () => {
     await wrapper.vm.onAddWorkDir({ name: 'x', path: 'D:\\x' })
     await flushPromises()
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('dup'))
+  })
+
+  // ---- onSetAsWorkDir（聚合视图「设为工作目录」）----
+  it('onSetAsWorkDir：目标已是工作目录时复用，跳过旧状态保存并退出聚合后定位', async () => {
+    const { ElMessage } = await import('element-plus')
+    const { AddDirectory } = await import('../../../wailsjs/go/main/App')
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: '/path/b', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-2'
+
+    await wrapper.vm.onSetAsWorkDir({ path: 'd:/proj/a', name: '项目A' })
+    await flushPromises()
+
+    // 分隔符/大小写归一后命中已有目录：不新增
+    expect(AddDirectory).not.toHaveBeenCalled()
+    expect(fileTreeSpies.exitAggregatedMode).toHaveBeenCalledWith({ restoreState: false })
+    // 旧目录普通树状态在进入聚合模式时已保存：切目录不得再用重建后的空树覆盖
+    expect(fileTreeSpies.saveCurrentState).not.toHaveBeenCalled()
+    expect(fileTreeSpies.restoreTreeState).toHaveBeenCalledWith('D:\\proj\\a')
+    expect(directoryStore.selectedDirectoryId).toBe('dir-1')
+    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('d:/proj/a')
+    expect(ElMessage.success).toHaveBeenCalledWith('已设为工作目录')
+  })
+
+  it('onSetAsWorkDir：目标不在工作目录列表时 AddDirectory 添加后切换', async () => {
+    const { AddDirectory, GetDirectories } = await import('../../../wailsjs/go/main/App')
+    AddDirectory.mockResolvedValueOnce({ id: 'dir-new', name: '新目录', path: 'D:\\new' })
+    GetDirectories.mockResolvedValueOnce([
+      { id: 'dir-new', name: '新目录', path: 'D:\\new', isDefault: false }
+    ])
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = []
+    directoryStore.selectedDirectoryId = ''
+
+    await wrapper.vm.onSetAsWorkDir({ path: 'D:\\new', name: '新目录' })
+    await flushPromises()
+
+    expect(AddDirectory).toHaveBeenCalledWith('新目录', 'D:\\new', false)
+    expect(directoryStore.selectedDirectoryId).toBe('dir-new')
+    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('D:\\new')
   })
 
   // ---- onDeleteFromFileTree / onDeleteFromContent ----

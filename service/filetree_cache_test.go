@@ -355,6 +355,7 @@ func TestDeepCopyNode_CoversAllFields(t *testing.T) {
 		Type:        "directory",
 		IsGitRepo:   true,
 		HasRemote:   true,
+		Missing:     true,
 		HasChildren: true,
 		IsLeaf:      true,
 		Children: []*model.FileTreeNode{

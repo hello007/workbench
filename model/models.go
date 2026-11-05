@@ -51,7 +51,11 @@ type FileTreeNode struct {
 	IsGitRepo bool   `json:"isGitRepo"`
 	// HasRemote 表示该 git 仓库节点是否配置了远程仓库（仅 IsGitRepo=true 时有意义），
 	// 用于前端灰色图标区分无远程仓库。
-	HasRemote   bool            `json:"hasRemote"`
+	HasRemote bool `json:"hasRemote"`
+	// Missing 表示聚合视图根节点指向的目录在磁盘上不存在或不可访问（收藏条目失效）。
+	// 仅 GetAggregatedRootNodes 为失效收藏产出占位节点时置 true，前端据此标灰并提示
+	// 右键移除收藏；普通树节点恒为零值 false，旧数据无此字段反序列化天然兼容。
+	Missing     bool            `json:"missing"`
 	HasChildren bool            `json:"hasChildren"`
 	Children    []*FileTreeNode `json:"children,omitempty"`
 	IsLeaf      bool            `json:"isLeaf"`

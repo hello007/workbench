@@ -43,6 +43,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   OpenInExternalDiff: true,
   CopyTo: '',
   GetFavorites: [],
+  // 聚合视图根节点（收藏目录平铺）：默认空数组 = 无收藏空态。元素形状对齐
+  // model.FileTreeNode（含聚合失效占位 missing 字段），E2E 按收藏条目 override
+  GetAggregatedRootNodes: [],
   AddFavorite: '',
   RemoveFavorite: '',
   UpdateFavoriteAlias: '',

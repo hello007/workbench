@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import FileTreePanel from '../FileTreePanel.vue'
-import { useDirectoryStore, useWorkspaceStore, useUiStore } from '../../store'
+import { useDirectoryStore, useWorkspaceStore, useUiStore, useFavoritesStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -42,6 +42,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   CopyObsidianVaultPath: vi.fn(() => Promise.resolve('')),
   ScanAndPullRepos: vi.fn(() => Promise.resolve({ total: 0 })),
   GetFavorites: vi.fn(() => Promise.resolve([])),
+  // 聚合视图根节点（后端一次判定存在性 + git 徽标）：默认空数组 = 无目录收藏空态
+  GetAggregatedRootNodes: vi.fn(() => Promise.resolve([])),
   AddFavorite: vi.fn(() => Promise.resolve(true)),
   RemoveFavorite: vi.fn(() => Promise.resolve(true)),
   UpdateFavoriteAlias: vi.fn(() => Promise.resolve(true)),
@@ -85,7 +87,8 @@ const defaultStubs = {
     // 提供 store mock：refreshNode 命中 nodesMap/root 兜底时 target=null 提前返回，不抛 nodesMap
     data: () => ({ store: { nodesMap: {}, root: null } })
   },
-  'el-empty': { template: '<div class="el-empty" />', props: ['description', 'imageSize'] },
+  // 渲染 description 文本：空态文案（工作目录未选/聚合视图无收藏）须可断言
+  'el-empty': { template: '<div class="el-empty">{{ description }}</div>', props: ['description', 'imageSize'] },
   'el-icon': { template: '<i><slot /></i>' },
   'el-dialog': {
     template: '<div v-if="modelValue"><slot /><slot name="footer" /></div>',
@@ -134,10 +137,12 @@ function setupDirectoryStore(directories = mockDirectories, selectedDirId = 'dir
 }
 
 function createWrapper(props = {}) {
-  const { directories = mockDirectories, selectedDirId = 'dir-1' } = props
+  // stubs 覆盖位：聚合视图用例需给 el-tree 桩补 store.root（getExpandedPaths/
+  // waitUntil 依赖 root.childNodes），默认桩保持 root: null 不影响既有用例
+  const { directories = mockDirectories, selectedDirId = 'dir-1', stubs } = props
   const pinia = setupDirectoryStore(directories, selectedDirId)
   return mount(FileTreePanel, {
-    global: { plugins: [pinia], stubs: defaultStubs }
+    global: { plugins: [pinia], stubs: stubs ? { ...defaultStubs, ...stubs } : defaultStubs }
   })
 }
 
@@ -2303,5 +2308,378 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       expect(CopyObsidianVaultPath).not.toHaveBeenCalled()
       expect(OpenObsidianVaultManager).not.toHaveBeenCalled()
     })
+  })
+})
+
+// 聚合视图（虚拟工作区）：收藏目录平铺浏览——虚拟根构造、模式切换、状态隔离、
+// 筛选作用域、展开回溯与失效兜底
+describe('聚合视图（虚拟工作区）', () => {
+  let wrapper
+
+  // el-tree 桩补 store.root：saveCurrentState 遍历 root 收集展开路径、
+  // waitTreeReady 判定 root.childNodes 非空（默认桩 root: null 会在遍历时抛错）
+  const aggregatedTreeStub = {
+    ...defaultStubs['el-tree'],
+    data: () => ({ store: { nodesMap: {}, root: { expanded: false, childNodes: [{}] } } })
+  }
+
+  // 收藏 store 在 onMounted loadFavorites 落地后再注入，避免被空列表覆盖
+  async function createAggWrapper(favorites = []) {
+    // 同一用例内重复创建时先卸载，防 document 事件监听与实例泄漏
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+    wrapper = createWrapper({ stubs: { 'el-tree': aggregatedTreeStub } })
+    await flushPromises()
+    useFavoritesStore().favorites = favorites
+    return wrapper.vm.$.setupState
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+  })
+
+  it('工具栏切换按钮：点击进入聚合视图，treeKey 带模式后缀且文案切为激活态', async () => {
+    const state = await createAggWrapper()
+    const btn = wrapper.find('[data-action="toggle-aggregated-view"]')
+    expect(btn.text()).toBe('目录树')
+
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(state.aggregatedMode).toBe(true)
+    expect(state.treeKey).toContain('_agg')
+    expect(wrapper.find('[data-action="toggle-aggregated-view"]').text()).toBe('聚合视图')
+  })
+
+  it('再次切换回目录树：treeKey 恢复工作目录模式', async () => {
+    const state = await createAggWrapper()
+    await state.switchTreeMode(true, { restoreState: false })
+    expect(state.treeKey).toContain('_agg')
+
+    await state.switchTreeMode(false, { restoreState: false })
+    expect(state.aggregatedMode).toBe(false)
+    expect(state.treeKey).not.toContain('_agg')
+  })
+
+  it('聚合模式 level 0 调 GetAggregatedRootNodes（不调 GetFileTree），别名覆盖且失效节点按叶子', async () => {
+    const { GetAggregatedRootNodes, GetFileTree } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockResolvedValueOnce([
+      { id: '/repo/a', name: 'a', path: '/repo/a', type: 'directory', isGitRepo: true, hasRemote: true, hasChildren: true, isLeaf: false, missing: false },
+      { id: '/repo/gone', name: 'gone', path: '/repo/gone', type: 'directory', hasChildren: false, isLeaf: false, missing: true }
+    ])
+    const state = await createAggWrapper([
+      { path: '/repo/a', alias: '常用项目', group: '默认' },
+      { path: '/repo/gone', alias: '', group: '默认' }
+    ])
+    state.aggregatedMode = true
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+
+    expect(GetAggregatedRootNodes).toHaveBeenCalledWith(['/repo/a', '/repo/gone'])
+    expect(GetFileTree).not.toHaveBeenCalled()
+    const nodes = resolve.mock.calls[0][0]
+    expect(nodes).toHaveLength(2)
+    // 收藏 alias 覆盖后端路径末段显示名；空 alias 回落后端 name
+    expect(nodes[0].name).toBe('常用项目')
+    expect(nodes[1].name).toBe('gone')
+    // 失效占位不可展开：isLeaf=true 防展开请求打空磁盘
+    expect(nodes[0].isLeaf).toBe(false)
+    expect(nodes[1].isLeaf).toBe(true)
+    expect(nodes[1].missing).toBe(true)
+    expect(state.aggregatedRootCount).toBe(2)
+  })
+
+  it('聚合绑定失败：提示错误并 resolve 空数组（不阻断树初始化）', async () => {
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockRejectedValueOnce(new Error('IPC 异常'))
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('加载收藏目录失败'))
+    expect(resolve).toHaveBeenCalledWith([])
+    expect(state.aggregatedRootCount).toBe(0)
+    // 失败态与空收藏区分：不得显示「暂无目录收藏」误导用户以为收藏丢失
+    await wrapper.vm.$nextTick()
+    expect(state.aggregatedRootError).toContain('加载收藏目录失败')
+    expect(wrapper.find('.el-empty').text()).toContain('加载收藏目录失败')
+    expect(wrapper.find('.el-empty').text()).not.toContain('暂无目录收藏')
+  })
+
+  it('无目录收藏：聚合根层返回空数组后显示空态引导（走真实加载链路）', async () => {
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockResolvedValueOnce([])
+    const state = await createAggWrapper([])
+    state.aggregatedMode = true
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(resolve).toHaveBeenCalledWith([])
+    expect(state.aggregatedRootLoading).toBe(false)
+    expect(state.aggregatedRootError).toBe('')
+    expect(state.aggregatedRootCount).toBe(0)
+    expect(wrapper.find('.el-empty').text()).toContain('暂无目录收藏')
+  })
+
+  it('失效收藏节点点击：提示失效且不选中/不 emit select', async () => {
+    const state = await createAggWrapper()
+    state.onNodeClick(
+      { path: '/repo/gone', name: 'gone', type: 'directory', missing: true },
+      { expanded: false }
+    )
+
+    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏失效'))
+    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(state.currentSelectedPath).toBe('')
+  })
+
+  it('失效收藏节点右键菜单：仅保留移除收藏与复制路径（其余文件操作无意义）', async () => {
+    const state = await createAggWrapper()
+    state.aggregatedMode = true
+    Object.assign(state.contextMenu, {
+      visible: true,
+      x: 0,
+      y: 0,
+      isBlankArea: false,
+      data: { path: '/repo/gone', name: 'gone', type: 'directory', missing: true }
+    })
+    await wrapper.vm.$nextTick()
+
+    const menuText = wrapper.find('.context-menu').text()
+    expect(menuText).toContain('移除收藏')
+    expect(menuText).toContain('复制路径')
+    expect(menuText).not.toContain('新建文件')
+    expect(menuText).not.toContain('设为工作目录')
+  })
+
+  it('目录右键菜单按模式分流：聚合视图「设为工作目录」，普通树「添加为工作目录」', async () => {
+    const state = await createAggWrapper()
+    Object.assign(state.contextMenu, {
+      visible: true,
+      x: 0,
+      y: 0,
+      isBlankArea: false,
+      data: { path: '/repo/a', name: '常用项目', type: 'directory' }
+    })
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.context-menu').text()).toContain('设为工作目录')
+    expect(wrapper.find('.context-menu').text()).not.toContain('添加为工作目录')
+
+    state.aggregatedMode = false
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.context-menu').text()).toContain('添加为工作目录')
+    expect(wrapper.find('.context-menu').text()).not.toContain('设为工作目录')
+  })
+
+  it('树状态持久化 key 隔离：聚合模式写虚拟 key，普通模式写目录路径 key', async () => {
+    const state = await createAggWrapper()
+    state.aggregatedMode = true
+    state.saveCurrentState('/path/a')
+    expect(localStorage.getItem('treeState:__aggregated__')).toBeTruthy()
+    expect(localStorage.getItem('treeState:/path/a')).toBeNull()
+
+    state.aggregatedMode = false
+    state.saveCurrentState('/path/a')
+    expect(localStorage.getItem('treeState:/path/a')).toBeTruthy()
+    // 普通树写入不覆盖聚合视图已保存状态（两模式互不污染）
+    expect(localStorage.getItem('treeState:__aggregated__')).toBeTruthy()
+  })
+
+  it('聚合筛选作用域：未点击目录不拉取，点击目录后作用于该目录', async () => {
+    const { GetFileTree } = await import('../../../wailsjs/go/main/App')
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    // 模式切换触发 treeKey watch（exitFilterMode 清空关键词），先等 watch 落地再输入
+    await wrapper.vm.$nextTick()
+    state.treeFilterKeyword = 'index'
+    await wrapper.vm.$nextTick()
+    // 无作用域时覆盖层给出引导，不显示「工作目录内 0 命中」误导文案
+    expect(wrapper.find('.tree-filter-summary').text()).toContain('请先点击一个收藏目录')
+
+    // 收藏目录间无公共祖先：未点击就无作用域可回退，直接不拉取
+    await state.runFilter()
+    expect(GetFileTree).not.toHaveBeenCalled()
+
+    GetFileTree.mockResolvedValueOnce([
+      { name: 'index.js', path: '/repo/a/index.js', type: 'file' }
+    ])
+    state.lastClickedNodeData = { path: '/repo/a', name: 'a', type: 'directory' }
+    state.treeFilterKeyword = 'index'
+    await state.runFilter()
+    expect(GetFileTree).toHaveBeenCalledWith('/repo/a')
+    expect(state.filteredNodes).toHaveLength(1)
+  })
+
+  it('findExpandedAncestor：聚合模式回溯到收藏根，收藏范围外返回 null', async () => {
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    const rootNode = { expanded: false }
+    const store = { nodesMap: { '/repo/a': rootNode } }
+
+    // 收藏根在 nodesMap 中：即使未展开也作为刷新目标（expand 会加载最新子节点）
+    expect(state.findExpandedAncestor('/repo/a/src/deep', store)).toBe(rootNode)
+    // 目标不在任何收藏范围内：无法确定回溯根
+    expect(state.findExpandedAncestor('/other/x', store)).toBeNull()
+  })
+
+  it('聚合视图目录右键「设为工作目录」：emit set-as-work-dir 携路径与显示名', async () => {
+    const state = await createAggWrapper()
+    state.aggregatedMode = true
+    state.contextMenu.data = { path: '/repo/a', name: '常用项目', type: 'directory' }
+
+    state.onMenuCommand('setAsWorkDir')
+
+    expect(wrapper.emitted('set-as-work-dir')).toEqual([[{ path: '/repo/a', name: '常用项目' }]])
+    expect(wrapper.emitted('add-work-dir')).toBeUndefined()
+  })
+
+  it('嵌套收藏去重（父先子后）：祖先已是收藏时不重复列为根', async () => {
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockResolvedValueOnce([
+      { id: '/repo/a', name: 'a', path: '/repo/a', type: 'directory', hasChildren: true, isLeaf: false, missing: false }
+    ])
+    const state = await createAggWrapper([
+      { path: '/repo/a', alias: '', group: '默认' },
+      { path: '/repo/a/sub', alias: '', group: '默认' },
+      // 分隔符/大小写差异也应识别为同一祖先子树
+      { path: '/REPO/A/other', alias: '', group: '默认' }
+    ])
+    state.aggregatedMode = true
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+
+    expect(GetAggregatedRootNodes).toHaveBeenCalledWith(['/repo/a'])
+  })
+
+  it('嵌套收藏去重（子先父后）：去重与收藏顺序无关', async () => {
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockResolvedValueOnce([
+      { id: '/repo/a', name: 'a', path: '/repo/a', type: 'directory', hasChildren: true, isLeaf: false, missing: false }
+    ])
+    const state = await createAggWrapper([
+      { path: '/repo/a/sub', alias: '', group: '默认' },
+      { path: '/repo/a', alias: '', group: '默认' }
+    ])
+    state.aggregatedMode = true
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+
+    // 单遍扫描会漏掉「先子后父」，此处锁定顺序无关语义
+    expect(GetAggregatedRootNodes).toHaveBeenCalledWith(['/repo/a'])
+  })
+
+  it('refreshAfterFileOp：聚合视图根级收藏重命名/删除后改为整层重建', async () => {
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    const before = state.refreshCounter
+
+    // 父目录 /repo 不属于任何收藏根 = 被操作节点是收藏根自身
+    await state.refreshAfterFileOp('/repo')
+    await flushPromises()
+
+    expect(state.refreshCounter).toBe(before + 1)
+  })
+
+  it('locateNode 命中失效收藏根：提示失效且不选中（防快捷键误操作）', async () => {
+    const state = await createAggWrapper([{ path: '/repo/gone', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    // 等 treeKey watch 重置就绪信号后再加载，保证 locateNode 等的是本次加载的 promise
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, vi.fn())
+    await flushPromises()
+
+    const setCurrentKey = vi.fn()
+    state.fileTreeRef = {
+      getNode: vi.fn(() => ({ data: { path: '/repo/gone', missing: true } })),
+      setCurrentKey
+    }
+    await state.locateNode('/repo/gone')
+
+    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏失效'))
+    expect(setCurrentKey).not.toHaveBeenCalled()
+  })
+
+  it('快捷键重命名/删除：当前节点为失效收藏时不弹对话框', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    const state = await createAggWrapper()
+    state.fileTreeRef = {
+      getCurrentNode: () => ({ data: { path: '/repo/gone', name: 'gone', type: 'directory', missing: true } })
+    }
+
+    state.triggerRenameCurrent()
+    state.triggerDeleteCurrent()
+
+    expect(state.renameDialogVisible).toBe(false)
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+  })
+
+  it('聚合视图无作用域时树保持可见：引导可执行，筛选不成死路', async () => {
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    GetAggregatedRootNodes.mockResolvedValueOnce([
+      { id: '/repo/a', name: 'a', path: '/repo/a', type: 'directory', hasChildren: true, isLeaf: false, missing: false }
+    ])
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    // 先让根层加载完成（count=1），否则树因「无收藏空态」隐藏，与本用例验证点无关
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, vi.fn())
+    await flushPromises()
+    state.treeFilterKeyword = 'index'
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.tree-filter-summary').text()).toContain('请先点击一个收藏目录')
+    expect(wrapper.find('.el-tree').attributes('style') || '').not.toContain('display: none')
+  })
+
+  it('聚合模式 treeKey 不绑定工作目录：切换目录不重建聚合树', async () => {
+    const state = await createAggWrapper()
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    const keyBefore = state.treeKey
+
+    useDirectoryStore().selectedDirectoryId = 'dir-2'
+    await wrapper.vm.$nextTick()
+
+    expect(state.treeKey).toBe(keyBefore)
+  })
+})
+
+// 浏览器通道入口隐藏：聚合根查询在 RPC 面被 RPCHiddenMethods 屏蔽，
+// 入口按 SettingsPanel/useIPBans 隐私先例「启动期隐藏而非点击报错」
+describe('FileTreePanel.vue - 浏览器通道入口隐藏', () => {
+  it('isBrowserChannel() 为 true 时不渲染聚合视图切换按钮', async () => {
+    vi.resetModules()
+    vi.doMock('../../transport', () => ({ isBrowserChannel: () => true }))
+    let wrapperLocal = null
+    try {
+      const { default: BrowserFileTreePanel } = await import('../FileTreePanel.vue')
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      wrapperLocal = mount(BrowserFileTreePanel, {
+        global: { plugins: [pinia], stubs: defaultStubs }
+      })
+      await flushPromises()
+
+      expect(wrapperLocal.find('[data-action="toggle-aggregated-view"]').exists()).toBe(false)
+      expect(wrapperLocal.find('.tree-toolbar').exists()).toBe(true)
+    } finally {
+      // 断言失败时同样卸载，避免实例与监听残留
+      if (wrapperLocal) wrapperLocal.unmount()
+      vi.doUnmock('../../transport')
+      vi.resetModules()
+    }
   })
 })
