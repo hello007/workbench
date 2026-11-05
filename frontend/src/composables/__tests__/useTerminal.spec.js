@@ -3,10 +3,10 @@
  * 覆盖：主题切换、多实例事件治理、外观热更、addon 生命周期（WebGL 回退 /
  * 搜索开关 / serialize 回放）、Ctrl+F 拦截、OSC 通知开关与节流、多行粘贴确认
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { h, isVNode, nextTick } from 'vue'
 
 // 用 vi.hoisted 声明捕获变量，确保 vi.mock 工厂可安全引用（hoistable）
 const captures = vi.hoisted(() => ({
@@ -22,7 +22,8 @@ const captures = vi.hoisted(() => ({
   linkProvider: null,
   searchShortcutCb: null,
   lastOutputCb: null,
-  webglContextLossCb: null
+  webglContextLossCb: null,
+  lastWebLinksHandler: null
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -62,7 +63,11 @@ vi.mock('@xterm/addon-fit', () => ({
   })
 }))
 vi.mock('@xterm/addon-web-links', () => ({
-  WebLinksAddon: vi.fn(function () { return {} })
+  // 首参即点击 handler（event, uri）：捕获供 URL 打开出口用例驱动
+  WebLinksAddon: vi.fn(function (handler) {
+    captures.lastWebLinksHandler = handler
+    return {}
+  })
 }))
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: vi.fn(function () {
@@ -119,7 +124,9 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
     if (name === 'terminal-output') captures.lastOutputCb = cb
     return off
   }),
-  EventsOff: vi.fn()
+  EventsOff: vi.fn(),
+  // URL 打开出口（R1）：终端 Ctrl+Click http(s) 链接走 BrowserOpenURL 系统默认浏览器
+  BrowserOpenURL: vi.fn()
 }))
 
 import { useTerminal, resetWebglProbeCacheForTests, getTerminalTheme, LIGHT_TERMINAL_THEME, DARK_TERMINAL_THEME } from '../useTerminal'
@@ -676,6 +683,11 @@ describe('useTerminal - 多行粘贴确认（R6，容器捕获阶段拦截 DOM p
     return ev
   }
 
+  /** 渲染 ElMessageBox message VNode 为纯文本（弹层真实 DOM 由 EP 挂 body，mock 下经 test-utils 还原内容） */
+  function renderVNodeText(vnode) {
+    return mount({ render: () => vnode }).text()
+  }
+
   beforeEach(async () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -697,7 +709,7 @@ describe('useTerminal - 多行粘贴确认（R6，容器捕获阶段拦截 DOM p
     expect(captures.lastTerminal.paste).not.toHaveBeenCalled()
   })
 
-  it('含换行粘贴拦截：preventDefault + 弹单次确认框（风险文案 + 粘贴按钮）', async () => {
+  it('含换行粘贴拦截：preventDefault + 弹单次确认框（VNode message 含风险文案与预览内容）', async () => {
     const container = document.createElement('div')
     const t = useTerminal()
     await t.initTerminal(container, 'C:\\', 'powershell')
@@ -707,11 +719,36 @@ describe('useTerminal - 多行粘贴确认（R6，容器捕获阶段拦截 DOM p
     expect(ev.defaultPrevented).toBe(true)
     expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
     const [message, title, opts] = ElMessageBox.confirm.mock.calls[0]
-    expect(message).toContain('多行')
     expect(title).toBe('粘贴多行内容')
     expect(opts.confirmButtonText).toBe('粘贴')
     expect(opts.cancelButtonText).toBe('取消')
+    // message 为 VNode：渲染后断言风险文案与预览内容（两行均在预览块内）
+    expect(isVNode(message)).toBe(true)
+    const text = renderVNodeText(message)
+    expect(text).toContain('多行文本')
+    expect(text).toContain('git status')
+    expect(text).toContain('npm test')
+    // 未超限（2 行）不出现省略摘要行
+    expect(text).not.toContain('共')
     expect(captures.lastTerminal.paste).not.toHaveBeenCalled()
+  })
+
+  it('预览超 5 行截断：确认框含省略摘要「共 N 行」，确认仍写入完整原文', async () => {
+    const container = document.createElement('div')
+    const t = useTerminal()
+    await t.initTerminal(container, 'C:\\', 'powershell')
+    await flushPromises()
+    const fullText = 'l1\nl2\nl3\nl4\nl5\nl6\nl7'
+    container.dispatchEvent(makePasteEvent(fullText))
+    const [message] = ElMessageBox.confirm.mock.calls[0]
+    const text = renderVNodeText(message)
+    // 预览只含前 5 行 + 摘要行，第 6 行起不出现
+    expect(text).toContain('l5')
+    expect(text).not.toContain('l6')
+    expect(text).toContain('共 7 行')
+    await flushPromises()
+    // 预览截断不影响实际粘贴：确认后写入完整原文
+    expect(captures.lastTerminal.paste).toHaveBeenCalledWith(fullText)
   })
 
   it('确认后经 terminal.paste 原生链路写入（保留 \n→\\r 归一与 bracketed paste 语义）', async () => {
@@ -746,5 +783,61 @@ describe('useTerminal - 多行粘贴确认（R6，容器捕获阶段拦截 DOM p
     // 监听已摘除：事件未被拦截
     expect(ev.defaultPrevented).toBe(false)
     expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+  })
+})
+
+describe('useTerminal - URL 打开出口（R1：BrowserOpenURL 单点）', () => {
+  let BrowserOpenURL
+  let openSpy
+
+  /** 初始化终端并返回捕获的 WebLinks 点击 handler（event, uri） */
+  async function initAndGetHandler() {
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    expect(captures.lastWebLinksHandler).toBeTypeOf('function')
+    return captures.lastWebLinksHandler
+  }
+
+  beforeEach(async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    captures.lastTerminal = null
+    captures.lastWebLinksHandler = null
+    BrowserOpenURL = (await import('../../../wailsjs/runtime/runtime')).BrowserOpenURL
+    // jsdom window.open 为 Not implemented 桩：spy + 空返回，断言旧出口不再被触达
+    openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('Ctrl+Click http(s) URL → BrowserOpenURL（系统默认浏览器），window.open 不再使用', async () => {
+    const handler = await initAndGetHandler()
+    handler({ ctrlKey: true, metaKey: false }, 'https://example.com/docs?q=1')
+    expect(BrowserOpenURL).toHaveBeenCalledWith('https://example.com/docs?q=1')
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('macOS Cmd+Click 同样走 BrowserOpenURL', async () => {
+    const handler = await initAndGetHandler()
+    handler({ ctrlKey: false, metaKey: true }, 'http://localhost:3000/status')
+    expect(BrowserOpenURL).toHaveBeenCalledWith('http://localhost:3000/status')
+  })
+
+  it('非 http(s) URI 不打开（协议前置校验：file:/vscode:/javascript: 等拦截）', async () => {
+    const handler = await initAndGetHandler()
+    handler({ ctrlKey: true, metaKey: false }, 'file:///C:/Windows/System32')
+    handler({ ctrlKey: true, metaKey: false }, 'vscode://file/D:/repo/app.js:10')
+    handler({ ctrlKey: true, metaKey: false }, 'javascript:alert(1)')
+    expect(BrowserOpenURL).not.toHaveBeenCalled()
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('未按 Ctrl/Cmd 修饰键静默返回（addon 默认单击打开被覆盖，不弹浏览器）', async () => {
+    const handler = await initAndGetHandler()
+    handler({ ctrlKey: false, metaKey: false }, 'https://example.com')
+    expect(BrowserOpenURL).not.toHaveBeenCalled()
   })
 })

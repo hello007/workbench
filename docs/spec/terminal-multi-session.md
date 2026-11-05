@@ -276,4 +276,9 @@ s.emitExitIfRunning(sessionID)
 | 失败降级 | 序列化/回放抛错静默跳过，新会话照常创建；回放为纯文本 ANSI 序列，不恢复光标位与 OSC 暂态 |
 | RO 防抖 | ResizeObserver 回调 **100ms debounce**（`utils/debounce.js` 手写最小面，禁引入未登记依赖）尾部一次 refit + `ResizeTerminal` IPC；tab 切换 `ensureActiveTabReady` 与字号热更的**显式 resize 不走 RO 不受防抖**；卸载 `cancel()` 取消防悬挂回调 |
 
-**回归必查**：WebGL 探测不过/构造抛错均终端创建成功、上下文丢失回调 dispose 回退；Ctrl+F 无消费方时放行不劫持；OSC 关→放行、开→提示、`9;4` 恒放行、同内容节流一条；单行粘贴直通不弹窗、确认写入/取消不写、销毁后监听摘除；restart 后新实例收到旧缓冲文本且 serialize 挂载先于旧实例 dispose；RO 连环触发收口一次、卸载取消挂起回调。
+### 11.6 URL 打开出口与多行粘贴预览（2026-11-05 任务）
+
+- **URL 打开唯一出口** `runtime.BrowserOpenURL`：出口函数 `openUrlInBrowser` 内置 http(s) 前置校验（`/^https?:\/\//i`），**禁 `window.open`/`location.href`**——Wails WebView2 下内嵌导航不经系统 shell，机理与仓内先例见 [url-opening.md](url-opening.md)。
+- **多行粘贴预览**：确认框 message 为 VNode（弹层 teleport 到 body，样式全 inline + 设计令牌变量）；预览规则单点 `buildPastePreview`（`utils/pastePreview.js`）= 前 5 行 / 单行 120 字符 / 总 400 字符，超限尾部摘要「…（共 N 行）」；预览仅展示，确认仍 `terminal.paste` 完整原文。
+
+**回归必查**：WebGL 探测不过/构造抛错均终端创建成功、上下文丢失回调 dispose 回退；Ctrl+F 无消费方时放行不劫持；OSC 关→放行、开→提示、`9;4` 恒放行、同内容节流一条；单行粘贴直通不弹窗、确认写入/取消不写、销毁后监听摘除；restart 后新实例收到旧缓冲文本且 serialize 挂载先于旧实例 dispose；RO 连环触发收口一次、卸载取消挂起回调；URL 非 http(s) 不触发 `BrowserOpenURL` 且 `window.open` 零触达；预览超限含摘要行且确认写完整原文。

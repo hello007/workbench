@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { h, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -16,10 +16,11 @@ import {
   CloseTerminal,
   OpenWithDefaultApp
 } from '../../wailsjs/go/main/App'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { useSettingsStore, FALLBACK_SHELL } from '../store'
 import { createOscNotifier } from './terminalOscNotify'
 import { createFilePathLinkProvider } from '../utils/terminalLinkProvider'
+import { buildPastePreview } from '../utils/pastePreview'
 
 /**
  * 终端浅色主题：白底深字，光标主色
@@ -174,17 +175,49 @@ function tryLoadWebgl(terminal) {
   }, 'WebGL 渲染')
 }
 
-// WebLinks 点击 handler：统一 Ctrl（macOS Cmd）+Click 才打开——单击打开是
-// addon 默认行为，与本终端面板「Ctrl+Click 语义统一」目标冲突（文件路径
-// 链接同为 Ctrl+Click）；未按修饰键时静默返回（不弹浏览器）
+// URL 打开唯一出口（docs/spec/url-opening.md）：http(s) 前置校验后交系统默认
+// 浏览器（runtime.BrowserOpenURL）。禁 window.open——Wails WebView2 下它是
+// 内嵌导航/新 webview，不经系统 shell 分发；web-links addon 本身只识别 URL
+// 形态，协议校验为纵深防御（防 file:/javascript: 等任意协议直通）
 function openUrlInBrowser(uri) {
-  window.open(uri, '_blank', 'noopener,noreferrer')
+  if (!/^https?:\/\//i.test(uri)) return
+  BrowserOpenURL(uri)
 }
 
 // 文件路径打开：路径可能不存在（形态匹配不代表存在），OpenWithDefaultApp
 // 返回 false 静默、Promise 异常亦静默，不打断终端焦点（无存在性预检，PRD Q3）
 function openFilePathSilently(path) {
   Promise.resolve(OpenWithDefaultApp(path)).catch(() => {})
+}
+
+/**
+ * 多行粘贴确认框 message VNode：风险文案 + 待粘贴内容预览块。
+ * MessageBox 弹层 teleport 到 document.body，scoped 样式不可达，样式全 inline
+ * 写入（设计令牌 CSS 变量挂在 :root，弹层内可解析）；预览仅截断展示，确认后
+ * 仍写入完整原文（截断不影响实际粘贴内容）。
+ * @param {{ previewText: string, truncated: boolean, totalLines: number }} preview - buildPastePreview 结果
+ */
+function buildPasteConfirmMessage(preview) {
+  return h('div', null, [
+    h('p', { style: { margin: '0' } }, '粘贴内容包含多行文本，shell 将立即逐行执行，可能触发不可逆操作。'),
+    h('pre', {
+      style: {
+        margin: 'var(--spacing-sm) 0 0',
+        padding: 'var(--spacing-sm)',
+        maxHeight: '180px',
+        overflowY: 'auto',
+        background: 'var(--bg-tertiary)',
+        border: '1px solid var(--border-color)',
+        borderRadius: 'var(--radius-sm)',
+        color: 'var(--text-secondary)',
+        // 与终端字体栈单点一致（buildTerminalFontFamily('') = 默认 Cascadia Code 栈）
+        fontFamily: buildTerminalFontFamily(''),
+        fontSize: '12px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all'
+      }
+    }, preview.previewText)
+  ])
 }
 
 /**
@@ -286,8 +319,9 @@ export function useTerminal() {
       if (!text || !/[\r\n]/.test(text)) return
       e.preventDefault()
       e.stopPropagation()
+      // 预览仅截断展示（前 5 行/单行 120 字符/总 400 字符），确认写入完整原文
       ElMessageBox.confirm(
-        '粘贴内容包含多行文本，shell 将立即逐行执行，可能触发不可逆操作。',
+        buildPasteConfirmMessage(buildPastePreview(text)),
         '粘贴多行内容',
         { confirmButtonText: '粘贴', cancelButtonText: '取消', type: 'warning' }
       )
