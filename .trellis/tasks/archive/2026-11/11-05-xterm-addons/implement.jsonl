@@ -1,0 +1,8 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "xterm 多实例硬契约——禁重挂载/激活 refit/EventsOn 闭包注销/ESC 过滤（§5，搜索条 Esc 须 stopPropagation 防冒泡退全屏）/外观设置契约（§6 scrollback 不热更新建生效）/terminal-output UTF-8 载荷契约（§8，OSC handler 消费不得破坏）；§7 回归必查清单"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "搜索条 UI 遵循语义选色+蓝灰色阶、列表项选中单入口禁双绑、深色容器图标内联 SVG fill=currentColor、EP textarea 下限；新增面板化组件禁 el-dialog"}
+{"file": "docs/spec/design-tokens.md", "reason": "搜索条/通知配色走设计令牌（--primary-color 派生、冷暖灰 Slate 统一、--terminal-bg 与 useTerminal 主题严格一致禁改主题色板）"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "新增四依赖须先在 check-dep-consistency.mjs TILDE 清单登记再改 package.json（先登记后装包）；tilde 声明 ~x.y.0 与 lock 落点一致；0.x 包 tilde 全锁语义"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "AppSettings 新增字段走 EnsureAllDefaults()+PrivateCopy() 双单点各加一行，禁消费点手抄串联；设置段跨层同步规则；wailsjs 三处同步触发条件（本任务 int 标量通常不触发，仍须检查）"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "多行粘贴确认走 ElMessageBox.confirm 单次确认形态；EP 2.14 关闭后实例驻留 DOM，单次链裸选择器安全；mock 是文件级 vi.mock('element-plus')"}
+{"file": "docs/spec/e2e-testing.md", "reason": "组件单测语义锚规则（§5.2）：TerminalPanel 改动涉及活动 tab 高亮/点击断言禁 findAll()[n]，用 data-panel-id/data-action；新增 E2E spec 目录须同步 vitest test.exclude（本任务预计不新增，仍须遵守）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬门禁（exclude wailsjs）；新增 useTerminal/TerminalPanel/新 composable 代码须带单测达门禁"}

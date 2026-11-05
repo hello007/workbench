@@ -1,0 +1,7 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "检查 xterm 多实例契约未被破坏：禁重挂载、EventsOn 闭包注销、ESC 过滤（§5 全屏退出不误触）、外观热更链路（§6）、§7 回归必查清单逐项过"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "验证前端 vitest ≥70% 门禁与新增单测覆盖点（搜索开关/通知开关/debounce/WebGL 回退）真实命中且非自造桩假绿"}
+{"file": "docs/spec/frontend-dep-upgrade.md", "reason": "验证四依赖 TILDE 登记在 package.json 声明之前完成、声明格式 ~x.y.0 与 lock 落点一致、check-dep-consistency.mjs --selftest 与正式检查全绿"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "验证 AppSettings 新字段双单点（EnsureAllDefaults/PrivateCopy）已落、消费点无手抄串联、后端 EnsureTerminalDefaults 默认值变更断言同步"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "搜索条/通知视觉走查：语义色选色、无 mousedown+click 双绑、图标内联 SVG、暗色可读性对比度"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "验证多行粘贴确认框为单次确认形态、测试 mock 方式符合 vi.mock('element-plus') 文件级规范"}
+{"file": "docs/spec/design-tokens.md", "reason": "验证终端区新增 UI 未硬编码颜色、--terminal-bg 契约未破坏、主题切换联动正常"}
