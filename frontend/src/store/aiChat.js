@@ -22,9 +22,12 @@ import {
   GetChatSettings,
   SaveChatSettings,
   DiscoverChatClis,
-  GetClaudeDefaultModel
+  GetClaudeDefaultModel,
+  GetDiscoveredSkills,
+  RefreshDiscoveredSkills
 } from '../../wailsjs/go/main/App'
 import { normalizePath } from '../utils/pathMatch'
+import { CLAUDE_BUILTIN_COMMANDS } from '../constants/claudeCommands'
 import { debug } from '../utils/debug'
 
 /**
@@ -35,6 +38,7 @@ import { debug } from '../utils/debug'
  * - 会话域：当前目录会话列表 + 选中会话消息（PR3）
  * - 任务域：在途对话任务态（queued/running + 流式回复累积），chat-task:* 事件驱动（PR3）
  * - 模板域：输入框模板（目录 + 全局合并，scope 标记）（PR3）
+ * - 已装 skill 域：输入框 / 斜杠补全数据源（懒加载 + 会话 cwd 过滤）
  * - 配置域：权限模式 + 模型（持久化记忆）（PR3）
  *
  * 错误约定：load 静默降级（debug 日志 + 保留空列表，面板仍可用）；
@@ -434,6 +438,68 @@ export const useAiChatStore = defineStore('aiChat', () => {
     global: chatTemplates.value.filter(t => t.scope === 'global')
   }))
 
+  // ===== 已装 skill 域（输入框 / 斜杠补全数据源）=====
+  // 后端 SkillDiscoveryService 全量发现结果（用户级/对话目录/工作目录/插件四源）。
+  // 懒加载：首次输入行首 / 触发拉取（带 fingerprint 缓存），不挂载即拉；
+  // SKILL.md 内容修改不触发目录 mtime，由弹层「刷新」按钮调 Refresh 兜底。
+  const discoveredSkills = ref([])
+  const skillsLoaded = ref(false)
+  const skillsLoading = ref(false)
+
+  /**
+   * 加载已发现 skill 列表。
+   * @param {boolean} force true 走 RefreshDiscoveredSkills 强制重扫（刷新按钮），
+   *   false 走 GetDiscoveredSkills（fingerprint 缓存，未变即命中）。失败静默降级空列表。
+   */
+  async function loadDiscoveredSkills(force = false) {
+    if (skillsLoading.value) return
+    if (!force && skillsLoaded.value) return
+    skillsLoading.value = true
+    try {
+      const list = force ? await RefreshDiscoveredSkills() : await GetDiscoveredSkills()
+      discoveredSkills.value = list || []
+      skillsLoaded.value = true
+    } catch (error) {
+      debug.log('加载已装 skill 列表失败:', error)
+    } finally {
+      skillsLoading.value = false
+    }
+  }
+
+  /** 强制重扫已装 skill（弹层「刷新」按钮）。 */
+  async function refreshDiscoveredSkills() {
+    await loadDiscoveredSkills(true)
+  }
+
+  /**
+   * 会话级可用 skill：按当前选中会话 cwd 过滤来源——
+   * user 恒可用；plugin cwd 空（用户级安装）恒可用、非空须匹配会话 cwd；
+   * project 须匹配会话 cwd（真实 claude 以该 cwd 启动才可见）。无会话仅 user/plugin(user scope)。
+   * 尾部追加 claude CLI 内置命令（CLAUDE_BUILTIN_COMMANDS，静态清单）：
+   * 内置命令不参与 cwd 过滤且排在已装 skill 之后；按 command 全局保序去重
+   * （后端 Windows 路径变体漏网时前端兜底，skill 与内置命令同名时 skill 优先）。
+   */
+  const availableDiscoveredSkills = computed(() => {
+    const cwd = normalizePath(selectedChatSession.value?.cwd || '')
+    const seen = new Set()
+    const out = []
+    const push = (item) => {
+      if (seen.has(item.command)) return
+      seen.add(item.command)
+      out.push(item)
+    }
+    for (const s of discoveredSkills.value) {
+      if (s.source === 'project' || (s.source === 'plugin' && s.cwd)) {
+        if (!cwd || normalizePath(s.cwd || '') !== cwd) continue
+      }
+      push(s)
+    }
+    for (const c of CLAUDE_BUILTIN_COMMANDS) {
+      push({ ...c, cwd: '', source: 'builtin', sourceDir: '', plugin: '' })
+    }
+    return out
+  })
+
   // ===== 选择题卡片域 =====
   // 已提交的 chat-question 卡片：key = `${chatSessionId}:${taskId}`。
   // 仅内存态（PRD B8 决策）：切换会话往返保留置灰，应用重启后恢复为未答可再点。
@@ -558,6 +624,13 @@ export const useAiChatStore = defineStore('aiChat', () => {
     loadChatCliCandidates,
     claudeDefaultModel,
     loadClaudeDefaultModel,
+    // 已装 skill 域
+    discoveredSkills,
+    skillsLoaded,
+    skillsLoading,
+    loadDiscoveredSkills,
+    refreshDiscoveredSkills,
+    availableDiscoveredSkills,
     // 选择题卡片域
     isChatQuestionAnswered,
     markChatQuestionAnswered

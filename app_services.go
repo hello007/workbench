@@ -194,6 +194,23 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 独立 data/ai_chat/ 目录不与其他 service 数据交叉）
 	s.chatSvc = service.NewChatService(ctx, filepath.Join(dataDir, "ai_chat"))
 
+	// skillDiscoverySvc 注入对话目录清单：AI 对话面板 / 补全需要发现对话目录下的
+	// .claude/skills（真实 claude 以该 cwd 启动可见）。setter 注入规避构造顺序——
+	// chatSvc 在 skillDiscoverySvc 之后构造，无法走构造参数
+	s.skillDiscoverySvc.SetChatDirsProvider(func() []string {
+		dirs, err := s.chatSvc.ListChatDirectories()
+		if err != nil {
+			return nil
+		}
+		paths := make([]string, 0, len(dirs))
+		for _, d := range dirs {
+			if d != nil && d.Path != "" {
+				paths = append(paths, d.Path)
+			}
+		}
+		return paths
+	})
+
 	// 进程管理服务（工具箱「进程管理」，无持久化数据）
 	s.processSvc = service.NewProcessService()
 

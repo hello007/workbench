@@ -1,5 +1,5 @@
 <template>
-  <div class="ai-chat-panel">
+  <div ref="panelEl" class="ai-chat-panel">
     <!-- 顶部标题栏：风格对齐 AiFunctionPanel 的 panel-header（渐变背景 + 主色标题图标） -->
     <div class="panel-header">
       <div class="panel-heading">
@@ -210,7 +210,32 @@
           <!-- 输入区：带内嵌底栏的输入盒（claude.ai 同款布局）——textarea 主体 +
                盒内下沿操作条：模板 / 权限模式分段组靠左，停止+发送靠右 -->
           <div class="chat-input-area">
-            <div class="chat-input-box">
+            <div ref="inputBoxEl" class="chat-input-box">
+              <!-- skill 斜杠补全弹层：行首 / 触发（对齐 claude CLI），向上展开。
+                   列表项四列：命令 / 名称 / 描述 / 来源标签；点击（mousedown.prevent
+                   防抢 textarea 焦点）与 Enter/Tab 补全，↑↓ 移动高亮，Esc 关闭。
+                   弹层同时承担「查看已装 skill」入口职责，刷新按钮强制重扫 -->
+              <div v-if="skillPopupVisible" class="skill-popup" :style="{ maxHeight: skillPopupMaxHeight + 'px' }">
+                <div class="skill-popup-head">
+                  <span class="skill-popup-title">已安装 Skill</span>
+                  <el-button size="small" text bg class="skill-popup-refresh" @click="onSkillRefresh">
+                    <el-icon><Refresh /></el-icon>刷新
+                  </el-button>
+                </div>
+                <ul class="skill-popup-list">
+                  <li
+                    v-for="(s, i) in filteredSkillItems"
+                    :key="s.command"
+                    :class="{ 'is-active': i === skillActiveIndex }"
+                    @mousedown.prevent="confirmSkillCompletion(s)"
+                  >
+                    <span class="skill-popup-cmd">{{ s.command }}</span>
+                    <span class="skill-popup-name">{{ s.name }}</span>
+                    <span class="skill-popup-desc" :title="s.description">{{ s.description }}</span>
+                    <span class="skill-popup-source">{{ skillSourceLabel(s.source) }}</span>
+                  </li>
+                </ul>
+              </div>
               <!-- 输入框：固定 rows 默认 6 行 + 原生纵向拖拽调高（CSS 限幅）。
                    不用 autosize：其 JS 接管高度会覆盖拖拽结果，与原生 resize 冲突 -->
               <el-input
@@ -220,7 +245,12 @@
                 class="chat-input"
                 :rows="6"
                 placeholder="输入需求，Enter 发送 / Shift+Enter 换行"
+                @input="onChatInput"
                 @keydown.enter="onInputEnter"
+                @keydown.up="onSkillArrow(-1, $event)"
+                @keydown.down="onSkillArrow(1, $event)"
+                @keydown.tab="onSkillTab"
+                @keydown.esc="onSkillEsc"
               />
               <div class="chat-input-box-footer">
                 <el-dropdown trigger="click" @command="applyTemplate">
@@ -416,13 +446,14 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ChatDotRound, Plus, Folder, Delete, Edit,
-  ArrowDown, ChatLineRound, Document, Setting, Position, VideoPause
+  ArrowDown, ChatLineRound, Document, Setting, Position, VideoPause, Refresh
 } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useAiChatStore, useUiStore } from '../store'
 import { handleError } from '../utils/error'
 import { shortenPath } from '../utils/pathFormat'
 import { renderChatMarkdown, CMD_RUN_BTN_TITLE, CMD_RUN_BTN_TITLE_NO_CWD } from '../utils/chatMarkdown'
+import { extractSlashToken, applyCompletion, filterSkills } from '../utils/skillComplete'
 import { debug } from '../utils/debug'
 import { RespondChatApproval, OpenFileDialog } from '../../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
@@ -902,9 +933,138 @@ watch(
 )
 const inputRef = ref()
 
+// ===== skill 斜杠补全 =====
+
+// 弹层高亮下标与「Esc 已驳回的 token 指纹」是仅有的本地态：可见性由
+//「行首 / token 仍活跃 + 非 Esc 驳回 + 有匹配项」纯推导（computed），
+// token 失活（输入空白/删除 /）弹层自动消失，无需手动开关状态机
+const skillActiveIndex = ref(0)
+// Esc 驳回标记：token 指纹（start:query）。Esc 关闭后同一 token 不再弹，
+// 任何新输入事件清空标记（继续打字重新出现，对齐 CLI）
+const skillEscDismissed = ref('')
+// 最近一次输入事件的光标位置（extractSlashToken 需要 caret 判断 token 活跃性）
+const lastCaret = ref(0)
+
+// 当前活跃的斜杠 token（行首 / 且光标在 token 内）
+const skillToken = computed(() => extractSlashToken(inputText.value, lastCaret.value))
+// token 过滤后的候选列表（弹层关闭时为空数组，避免无谓遍历）
+const filteredSkillItems = computed(() => {
+  if (!skillToken.value.active) return []
+  return filterSkills(aiChatStore.availableDiscoveredSkills, skillToken.value.query)
+})
+// 弹层可见：token 活跃、非 Esc 驳回、有匹配项（无 skill / 无匹配不弹层）
+const skillPopupVisible = computed(() =>
+  skillToken.value.active &&
+  filteredSkillItems.value.length > 0 &&
+  skillEscDismissed.value !== `${skillToken.value.start}:${skillToken.value.query}`
+)
+
+// 弹层动态限高：向上展开空间不足（输入框距面板顶很近 / textarea 拖高）时，
+// 固定 max-height 会被面板 overflow:hidden 裁掉顶部——而列表内部滚动的正是
+// 被裁区域，表现为「只能看到靠下几条且滚不动」。按「输入盒顶沿到面板顶沿的
+// 可用距离」实测限高（留 12px 呼吸位），上限 280、下限 120 保证可用
+const panelEl = ref(null)
+const inputBoxEl = ref(null)
+const skillPopupMaxHeight = ref(280)
+const measureSkillPopupHeight = () => {
+  const box = inputBoxEl.value
+  const panel = panelEl.value
+  if (!box || !panel) return
+  const available = box.getBoundingClientRect().top - panel.getBoundingClientRect().top - 12
+  skillPopupMaxHeight.value = Math.max(120, Math.min(280, Math.round(available)))
+}
+// 弹层打开时测量（flush: post = 渲染后测量，改 maxHeight 触发二次收敛）；
+// 输入事件中同步重测，覆盖弹层开着拖高 textarea 的场景
+watch(skillPopupVisible, (v) => {
+  if (v) measureSkillPopupHeight()
+}, { flush: 'post' })
+// 高亮越界守卫：候选收缩（继续输入过滤）时高亮夹回末项
+watch(filteredSkillItems, (list) => {
+  if (skillActiveIndex.value >= list.length) skillActiveIndex.value = Math.max(0, list.length - 1)
+})
+
+// skill 来源标签（对齐 AiFunctionConfigDialog 的 source 语义；builtin = claude 内置命令）
+const skillSourceLabel = (source) =>
+  ({ user: '用户级', project: '项目级', plugin: '插件', builtin: '内置' }[source] || source)
+
+// 输入事件：记录 caret 供 token 解析并解除 Esc 驳回；重测弹层可用高度
+// （textarea 拖高/面板布局变化后弹层开着时的空间补偿）。
+// 懒加载不在此处触发——v-model 的 update:modelValue 晚于本 handler 执行，
+// 此刻 inputText 还是旧值、token 解析失真；改由下方 token 活跃性 watch 驱动
+const onChatInput = (e) => {
+  lastCaret.value = e?.target?.selectionStart ?? 0
+  skillEscDismissed.value = ''
+  measureSkillPopupHeight()
+}
+
+// token 变活跃（行首敲入 /）即懒加载 skill 列表（store 内 skillsLoaded 防重入，
+// 不挂载即拉）；已加载后重复触发为空操作
+watch(() => skillToken.value.active, (active) => {
+  if (active) aiChatStore.loadDiscoveredSkills()
+})
+
+// 补全：token 片段整体替换为 <command> + 尾随空格（空格使 token 结束、弹层随之关闭），
+// 光标落位到空格之后，焦点收回输入框
+const confirmSkillCompletion = (skill) => {
+  if (!skill || !skillToken.value.active) return
+  const { text, caret } = applyCompletion(inputText.value, skillToken.value, skill.command)
+  inputText.value = text
+  // caret 同步到新落位：token 因尾随空格结束、extractSlashToken 失活，弹层随之关闭
+  lastCaret.value = caret
+  skillActiveIndex.value = 0
+  // 真实 EP ElInput 暴露 textarea ref，测试 stub 暴露原生 input——双通道尽力恢复 caret
+  nextTick(() => {
+    const ta = inputRef.value?.textarea ?? inputRef.value?.input
+    ta?.setSelectionRange?.(caret, caret)
+    ta?.focus?.()
+  })
+}
+
+// ↑↓：弹层打开时移动高亮（拦默认防 textarea 光标移动）；关闭时零副作用
+const onSkillArrow = (delta, e) => {
+  if (!skillPopupVisible.value || e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  const len = filteredSkillItems.value.length
+  skillActiveIndex.value = (skillActiveIndex.value + delta + len) % len
+}
+
+// Tab：弹层打开时补全（拦默认焦点跳转）；关闭时不拦
+const onSkillTab = (e) => {
+  if (!skillPopupVisible.value || e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  confirmSkillCompletion(filteredSkillItems.value[skillActiveIndex.value])
+}
+
+// Esc：弹层打开时记 token 驳回指纹关闭（继续打字/新输入可再弹，对齐 CLI）；
+// 关闭时零副作用，不干扰上层对话框等 Esc 链路
+const onSkillEsc = (e) => {
+  if (!skillPopupVisible.value) return
+  e.preventDefault()
+  skillActiveIndex.value = 0
+  skillEscDismissed.value = `${skillToken.value.start}:${skillToken.value.query}`
+}
+
+// 弹层「刷新」：强制重扫（SKILL.md 内容修改不触发目录 mtime，缓存可能陈旧）。
+// 错误分流提示；弹层可见性是纯推导，刷新后候选变化自动反映
+const onSkillRefresh = async () => {
+  try {
+    await aiChatStore.refreshDiscoveredSkills()
+  } catch (error) {
+    handleError('刷新 skill 列表失败: ', error)
+  }
+}
+
 // Enter 发送 / Shift+Enter 换行（textarea 内组合键交给默认行为）。
-// 中文 IME 选词确认的 Enter（isComposing / keyCode 229）不发送，防把拼音串直发
+// 中文 IME 选词确认的 Enter（isComposing / keyCode 229）不发送，防把拼音串直发。
+// 弹层打开时 Enter 改为补全（不发送）：先判弹层再判 IME——IME 组合中 Enter
+// 连补全也跳过（保持默认选词行为），弹层关闭路径一行未动
 const onInputEnter = (e) => {
+  if (skillPopupVisible.value) {
+    if (e.isComposing || e.keyCode === 229) return
+    e.preventDefault()
+    confirmSkillCompletion(filteredSkillItems.value[skillActiveIndex.value])
+    return
+  }
   if (e.isComposing || e.keyCode === 229) return
   if (e.shiftKey) return
   e.preventDefault()
@@ -1858,6 +2018,7 @@ watch(() => uiStore.activePanel, (panel) => {
 /* 输入盒：textarea 主体 + 盒内下沿操作条（模板/权限分段/停止发送），
    聚焦时边框转主色（claude.ai 同款容器语义） */
 .chat-input-box {
+  position: relative; /* skill 补全弹层绝对定位锚点（bottom:100% 向上展开） */
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
@@ -1865,6 +2026,93 @@ watch(() => uiStore.activePanel, (panel) => {
 }
 .chat-input-box:focus-within {
   border-color: var(--primary-color);
+}
+/* skill 斜杠补全弹层：贴输入盒上沿向上展开，浮于消息区之上。
+   max-height + 内部滚动兜底超长列表；视觉对齐模板下拉（同底色/边框/圆角） */
+.skill-popup {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.12));
+  z-index: 30;
+  overflow: hidden;
+}
+.skill-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.skill-popup-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.skill-popup-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+/* 显式滚动条：超长列表内部滚动可见可滚（对齐消息区滚动条形态） */
+.skill-popup-list::-webkit-scrollbar {
+  width: 8px;
+}
+.skill-popup-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+.skill-popup-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+.skill-popup-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.skill-popup-list li:hover,
+.skill-popup-list li.is-active {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+.skill-popup-cmd {
+  color: var(--primary-color);
+  font-weight: 600;
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+}
+.skill-popup-name {
+  flex-shrink: 0;
+  color: var(--text-primary);
+}
+.skill-popup-desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-popup-source {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 18px;
 }
 .tpl-btn {
   flex-shrink: 0;

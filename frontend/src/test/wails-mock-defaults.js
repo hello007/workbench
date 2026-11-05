@@ -288,6 +288,14 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // claude 设置文件解析的默认模型（模型下拉「默认」选项回显）：默认空 = 未配置，
   // 首选项回退「默认模型」文案
   GetClaudeDefaultModel: '',
+  // 已装 skill 发现（AI 对话输入框 / 斜杠补全弹层数据源）：默认一条用户级样例，
+  // 形状对齐 model.SkillDescriptor（小驼峰 json tag）
+  GetDiscoveredSkills: [
+    { name: 'drawio', description: '画图工具', command: '/drawio', cwd: '', source: 'user', sourceDir: '/h/.claude/skills/drawio', plugin: '' }
+  ],
+  RefreshDiscoveredSkills: [
+    { name: 'drawio', description: '画图工具', command: '/drawio', cwd: '', source: 'user', sourceDir: '/h/.claude/skills/drawio', plugin: '' }
+  ],
   AddChatDirectory: null,
   ListChatDirectories: [],
   UpdateChatDirectory: true,

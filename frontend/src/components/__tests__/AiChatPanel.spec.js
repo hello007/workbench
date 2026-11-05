@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox, ElRadioGroup, ElRadioButton } from 'element-pl
 import AiChatPanel from '../AiChatPanel.vue'
 import { useAiChatStore, useUiStore } from '../../store'
 import { CMD_RUN_BTN_TITLE_NO_CWD } from '../../utils/chatMarkdown'
+import { CLAUDE_BUILTIN_COMMANDS } from '../../constants/claudeCommands'
 import {
   ListChatDirectories,
   AddChatDirectory,
@@ -25,6 +26,8 @@ import {
   RemoveChatTemplate,
   SaveChatSettings,
   DiscoverChatClis,
+  GetDiscoveredSkills,
+  RefreshDiscoveredSkills,
   OpenFileDialog
 } from '../../../wailsjs/go/main/App'
 // 断言监听器注销行为需引用 mock 本体
@@ -106,6 +109,19 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   DiscoverChatClis: vi.fn(() => Promise.resolve([
     { name: 'claude', path: 'C:\\tools\\claude.cmd' },
     { name: 'myai', path: 'C:\\tools\\myai.cmd' }
+  ])),
+  // 已装 skill 发现（/ 斜杠补全弹层数据源）：五条混合 fixture——user 恒可用、
+  // project 匹配会话 cwd（D:\p）/不匹配各一条、plugin 空 cwd（用户级安装）恒可用 /
+  // 绑定会话 cwd 各一条，覆盖 availableDiscoveredSkills 的会话级过滤
+  GetDiscoveredSkills: vi.fn(() => Promise.resolve([
+    { name: 'drawio', description: '画图工具', command: '/drawio', cwd: '', source: 'user', sourceDir: 'C:/h/.claude/skills/drawio', plugin: '' },
+    { name: 'release', description: '发版流程', command: '/release', cwd: 'D:\\p', source: 'project', sourceDir: 'D:/p/.claude/skills/release', plugin: '' },
+    { name: 'other', description: '别处项目级', command: '/other', cwd: 'C:\\other', source: 'project', sourceDir: 'C:/other/.claude/skills/other', plugin: '' },
+    { name: 'agree-slides', description: '幻灯片', command: '/ab-office:agree-slides', cwd: '', source: 'plugin', sourceDir: 'C:/cache/ab-office/skills/agree-slides', plugin: 'ab-office' },
+    { name: 'bound', description: '绑定目录插件', command: '/pplug:bound', cwd: 'D:\\p', source: 'plugin', sourceDir: 'C:/cache/pplug/skills/bound', plugin: 'pplug' }
+  ])),
+  RefreshDiscoveredSkills: vi.fn(() => Promise.resolve([
+    { name: 'drawio2', description: '画图工具2', command: '/drawio2', cwd: '', source: 'user', sourceDir: 'C:/h/.claude/skills/drawio2', plugin: '' }
   ])),
   OpenFileDialog: vi.fn(() => Promise.resolve(''))
 }))
@@ -1487,5 +1503,257 @@ describe('AiChatPanel.vue', () => {
 
       expect(wrapper.find('.chat-msg-bubble.is-streaming .chat-thinking').exists()).toBe(false)
     })
+  })
+})
+
+
+// ===== skill 斜杠补全弹层 =====
+// 行首 / 触发（对齐 claude CLI）：列表项 = 命令/名称/描述/来源标签，
+// ↑↓ 移动高亮、Enter/Tab 补全（不发送）、Esc 关闭；数据源懒加载（首次 / 才拉）。
+// 输入区仅在选中目录后渲染，用例统一 selectFirstDirectory 前置
+describe('AiChatPanel.vue skill 斜杠补全弹层', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]
+    offClosures.length = 0
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  // 模拟输入到指定文本（setValue 触发 input 事件，caret = 文本末尾，
+  // 经 el-input stub 的 $attrs 落入 onChatInput）
+  const typeText = async (text) => {
+    const ta = wrapper.find('textarea.chat-input')
+    await ta.setValue(text)
+    return ta
+  }
+
+  // 原生派发 keydown（可断言 defaultPrevented，规避 VTU 修饰符映射差异）
+  const nativeKeydown = (ta, key, extra = {}) => {
+    const evt = new Event('keydown', { bubbles: true, cancelable: true })
+    evt.key = key
+    Object.assign(evt, extra)
+    ta.element.dispatchEvent(evt)
+    return evt
+  }
+
+  // 复位会话选中（目录仍在，模拟「无选中会话」空态）：pinia setup store
+  // 直接写 ref，触发 availableDiscoveredSkills 的 cwd 过滤回退分支
+  const deselectSession = async () => {
+    const store = useAiChatStore()
+    store.selectedChatSessionId = ''
+    store.selectedChatSession = null
+    await flushPromises()
+  }
+
+  it('行首 / 弹层出现且懒加载只调一次：列表项命令/名称/描述/来源齐备', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    await typeText('/')
+    await flushPromises()
+
+    const popup = wrapper.find('.skill-popup')
+    expect(popup.exists()).toBe(true)
+    // 已装 skill（cwd 过滤后）在前，claude 内置命令追加在后
+    const cmds = wrapper.findAll('.skill-popup-cmd').map(n => n.text())
+    expect(cmds).toEqual([
+      '/drawio', '/release', '/ab-office:agree-slides', '/pplug:bound',
+      ...CLAUDE_BUILTIN_COMMANDS.map(c => c.command)
+    ])
+    // 首项命令与名称、来源标签渲染
+    expect(wrapper.find('.skill-popup-name').text()).toBe('drawio')
+    expect(wrapper.find('.skill-popup-source').text()).toBe('用户级')
+    // 懒加载：首次触发拉取一次；清空再敲不重复调用（skillsLoaded 标记）
+    expect(GetDiscoveredSkills).toHaveBeenCalledTimes(1)
+    await typeText('')
+    await flushPromises()
+    await typeText('/')
+    await flushPromises()
+    expect(GetDiscoveredSkills).toHaveBeenCalledTimes(1)
+  })
+
+  it('会话 cwd 过滤：project/plugin 绑定目录项按 cwd 放行；无会话仅 user + 空 cwd 插件；内置命令恒可用', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const cmds = () => wrapper.findAll('.skill-popup-cmd').map(n => n.text())
+    const builtinCmds = CLAUDE_BUILTIN_COMMANDS.map(c => c.command)
+
+    await typeText('/')
+    await flushPromises()
+    // release（project cwd=D:\p）与 pplug:bound（plugin cwd=D:\p）放行；
+    // other（project cwd=C:\other）滤掉；user 与空 cwd 插件恒可用；内置命令恒可用
+    expect(cmds()).toEqual([
+      '/drawio', '/release', '/ab-office:agree-slides', '/pplug:bound', ...builtinCmds
+    ])
+
+    await deselectSession()
+    await typeText('/')
+    await flushPromises()
+    // 无会话 cwd：project 与绑定目录 plugin 全部滤掉，内置命令不受影响
+    expect(cmds()).toEqual(['/drawio', '/ab-office:agree-slides', ...builtinCmds])
+  })
+
+  it('继续输入过滤：/dr 只剩 drawio，/zzz 无匹配弹层消失', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    await typeText('/dr')
+    await flushPromises()
+    expect(wrapper.findAll('.skill-popup-cmd').map(n => n.text())).toEqual(['/drawio'])
+
+    await typeText('/zzz')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(false)
+  })
+
+  it('↑↓ 移动高亮且循环不越界', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const ta = await typeText('/')
+    await flushPromises()
+    const items = () => wrapper.findAll('.skill-popup-list li')
+    // 4 条已装 skill + 全部内置命令
+    const total = 4 + CLAUDE_BUILTIN_COMMANDS.length
+    expect(items().length).toBe(total)
+    expect(items()[0].classes()).toContain('is-active')
+
+    await ta.trigger('keydown', { key: 'ArrowDown' })
+    expect(items()[1].classes()).toContain('is-active')
+    for (let i = 0; i < total - 2; i++) {
+      await ta.trigger('keydown', { key: 'ArrowDown' }) // 走到末项（高亮下标 total-1）
+    }
+    await ta.trigger('keydown', { key: 'ArrowDown' }) // 末项再下 = 回绕首项
+    expect(items()[0].classes()).toContain('is-active')
+    await ta.trigger('keydown', { key: 'ArrowUp' }) // 首项再上 = 回绕末项
+    expect(items()[total - 1].classes()).toContain('is-active')
+  })
+
+  it('弹层打开时 Enter 补全不发送：值替换为命令+尾随空格，弹层关闭', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const ta = await typeText('/dr')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+
+    await ta.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    // 补全而非发送
+    expect(RunChat).not.toHaveBeenCalled()
+    expect(wrapper.vm.$.setupState.inputText).toBe('/drawio ')
+    // token 因尾随空格结束，弹层关闭
+    expect(wrapper.find('.skill-popup').exists()).toBe(false)
+  })
+
+  it('Tab 补全：拦默认焦点跳转 + 值替换', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const ta = await typeText('/dr')
+    await flushPromises()
+
+    const evt = nativeKeydown(ta, 'Tab')
+    expect(evt.defaultPrevented).toBe(true)
+    expect(wrapper.vm.$.setupState.inputText).toBe('/drawio ')
+    // 原生派发不经过 VTU 的 await 链路，等 DOM 刷新后再断言弹层关闭
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(false)
+  })
+
+  it('Esc 关闭：拦默认、弹层消失，其后 Enter 恢复发送', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const ta = await typeText('/')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+
+    const evt = nativeKeydown(ta, 'Escape')
+    expect(evt.defaultPrevented).toBe(true)
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(false)
+
+    // Esc 后 Enter 走发送链路（prompt = '/'）
+    await ta.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(RunChat).toHaveBeenCalledTimes(1)
+    expect(RunChat.mock.calls[0][1]).toBe('/')
+  })
+
+  it('IME 组合中弹层打开的 Enter：不补全不发送', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    const ta = await typeText('/')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+
+    const evt = nativeKeydown(ta, 'Enter', { isComposing: true })
+    expect(evt.defaultPrevented).toBe(false)
+    expect(RunChat).not.toHaveBeenCalled()
+    expect(wrapper.vm.$.setupState.inputText).toBe('/')
+    // 弹层保持打开（未消费）
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+  })
+
+  it('补全整段替换：token 后正文保留', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    // 光标须落在 token 内（首个空白后 token 已失活）：手设 value + selectionStart
+    // 再派发 input，模拟「/dr 后补字回到 token 中部」
+    const ta = wrapper.find('textarea.chat-input')
+    ta.element.value = '/dr 画一张图'
+    ta.element.setSelectionRange(2, 2)
+    await ta.trigger('input')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+
+    await ta.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    // applyCompletion 吸收 token 终点空格，正文保留
+    expect(wrapper.vm.$.setupState.inputText).toBe('/drawio 画一张图')
+  })
+
+  it('无已装 skill 时弹层只显示内置命令', async () => {
+    GetDiscoveredSkills.mockResolvedValueOnce([])
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    await typeText('/')
+    await flushPromises()
+    // 内置命令恒可用，弹层不空
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+    expect(wrapper.findAll('.skill-popup-cmd').map(n => n.text()))
+      .toEqual(CLAUDE_BUILTIN_COMMANDS.map(c => c.command))
+  })
+
+  it('刷新按钮调 RefreshDiscoveredSkills 且列表更新', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+    await typeText('/')
+    await flushPromises()
+    expect(wrapper.find('.skill-popup').exists()).toBe(true)
+
+    await wrapper.find('.skill-popup-refresh').trigger('click')
+    await flushPromises()
+    expect(RefreshDiscoveredSkills).toHaveBeenCalledTimes(1)
+    const cmds = wrapper.findAll('.skill-popup-cmd').map(n => n.text())
+    expect(cmds).toContain('/drawio2')
+    expect(cmds).not.toContain('/drawio')
   })
 })

@@ -44,16 +44,22 @@ type pluginInstall struct {
 // 缓存：按各源目录 mtime 摘要 fingerprint 比对，一致返回缓存，不一致重扫；不落盘
 // （skill 发现只读无副作用，重启重扫成本可接受）。前端「刷新」按钮调 Refresh 强制重扫。
 type SkillDiscoveryService struct {
-	directorySvc *DirectoryService
-	mu           sync.Mutex
-	cache        []*model.SkillDescriptor
-	fingerprint  string
+	directorySvc     *DirectoryService
+	chatDirsProvider func() []string // AI 对话目录路径清单提供器（setter 注入，nil=未注入不扫）
+	mu               sync.Mutex
+	cache            []*model.SkillDescriptor
+	fingerprint      string
 }
 
 // NewSkillDiscoveryService 创建 skill 发现服务，复用 DirectoryService 获取工作目录列表。
 func NewSkillDiscoveryService(directorySvc *DirectoryService) *SkillDiscoveryService {
 	return &SkillDiscoveryService{directorySvc: directorySvc}
 }
+
+// SetChatDirsProvider 注入对话目录路径清单提供器（app_services.go 装配期闭包注入
+// chatSvc.ListChatDirectories 的路径投影）。nil 安全：未注入时跳过对话目录扫描。
+// setter 注入规避构造顺序问题：chatSvc 构造晚于本服务，无法走构造参数。
+func (s *SkillDiscoveryService) SetChatDirsProvider(p func() []string) { s.chatDirsProvider = p }
 
 // GetCached 返回已发现的 skill 列表（带 fingerprint 缓存）。
 // fingerprint 一致则返回缓存，不一致则重扫并更新缓存。空结果也缓存（避免反复重扫）。
@@ -78,7 +84,7 @@ func (s *SkillDiscoveryService) Refresh() []*model.SkillDescriptor {
 	return s.GetCached()
 }
 
-// discover 执行全量扫描：用户级 + 工作目录项目级 + 已安装插件。
+// discover 执行全量扫描：用户级 + 工作目录项目级 + 对话目录项目级 + 已安装插件。
 // 去重键 source + ":" + sourceDir，同路径不重复；同名不同来源都保留（source 不同）。
 func (s *SkillDiscoveryService) discover() []*model.SkillDescriptor {
 	seen := make(map[string]*model.SkillDescriptor)
@@ -93,11 +99,32 @@ func (s *SkillDiscoveryService) discover() []*model.SkillDescriptor {
 
 	// 2. 工作目录 <dir>/.claude/skills/<name>/SKILL.md，cwd=工作目录
 	dirs, _ := s.directorySvc.Load()
+	// 记录已扫项目根（规范化键），供第 2.5 步对话目录去重——同一路径既是工作目录
+	// 又是对话目录时只扫一次（seen 键是精确串匹配，需规范化兜底 Windows 大小写/分隔符差异）
+	scannedRoots := make(map[string]bool)
 	for _, d := range dirs {
 		if d.Path == "" {
 			continue
 		}
+		scannedRoots[normalizeDirKey(d.Path)] = true
 		scanSkillsDir(filepath.Join(d.Path, ".claude", "skills"), "project", d.Path, seen, &result)
+	}
+
+	// 2.5 对话目录 <dir>/.claude/skills：真实 claude CLI 以对话目录为 cwd 启动时
+	// 按项目级语义发现这些 skill，故此处同样扫为 source=project（cwd=对话目录）。
+	// 与工作目录列表重合的路径跳过；provider 未注入（nil）跳过整段
+	if s.chatDirsProvider != nil {
+		for _, p := range s.chatDirsProvider() {
+			if p == "" {
+				continue
+			}
+			key := normalizeDirKey(p)
+			if scannedRoots[key] {
+				continue
+			}
+			scannedRoots[key] = true
+			scanSkillsDir(filepath.Join(p, ".claude", "skills"), "project", p, seen, &result)
+		}
 	}
 
 	// 3. 插件：读 installed_plugins.json，聚合每个 installPath 的 plugin 名与建议 cwd，扫描其 skills
@@ -258,7 +285,41 @@ func (s *SkillDiscoveryService) computeFingerprint() string {
 		sb.WriteString(modTimeStr(filepath.Join(d.Path, ".claude", "skills")))
 		sb.WriteString(";")
 	}
+	// 对话目录段（~ 分隔区别于工作目录的 ; 段，避免两集合变化互相抵消的假命中）：
+	// 规范化键去重 + 排序保证同集合不同排列产出一致指纹；与工作目录重合的路径不重复计入
+	if s.chatDirsProvider != nil {
+		chatPaths := make([]string, 0)
+		seenKeys := make(map[string]bool)
+		for _, p := range s.chatDirsProvider() {
+			if p == "" {
+				continue
+			}
+			key := normalizeDirKey(p)
+			if seenKeys[key] {
+				continue
+			}
+			seenKeys[key] = true
+			chatPaths = append(chatPaths, p)
+		}
+		sort.Strings(chatPaths)
+		for _, p := range chatPaths {
+			sb.WriteString(normalizeDirKey(p))
+			sb.WriteString("~")
+			sb.WriteString(modTimeStr(filepath.Join(p, ".claude", "skills")))
+			sb.WriteString(";")
+		}
+	}
 	return sb.String()
+}
+
+// normalizeDirKey 目录路径规范化键：绝对化 + 小写 + 统一 / 分隔，用于跨来源
+// （工作目录列表 vs 对话目录列表）的路径去重比对，兜底 Windows 大小写与 \\ / 分隔符差异。
+func normalizeDirKey(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	return strings.ToLower(filepath.ToSlash(abs))
 }
 
 // modTimeStr 返回路径 mtime 的格式化字符串，路径不存在返回 "0"。

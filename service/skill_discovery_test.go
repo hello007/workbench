@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"workbench/model"
@@ -244,6 +245,105 @@ func TestSkillDiscovery_CacheAndRefresh(t *testing.T) {
 	third := svc.Refresh()
 	if len(third) != 1 || third[0].Command != "/alpha" {
 		t.Fatalf("Refresh 结果异常: %+v", third)
+	}
+}
+
+// TestSkillDiscovery_ChatDirsScanned 对话目录（不在工作目录列表）的 .claude/skills
+// 被发现：source=project、cwd=对话目录、command=/<name>；provider 经 setter 注入。
+func TestSkillDiscovery_ChatDirsScanned(t *testing.T) {
+	tmp := t.TempDir()
+	userHome := filepath.Join(tmp, "home")
+	t.Setenv("USERPROFILE", userHome) // Windows
+	t.Setenv("HOME", userHome)        // Linux/Mac（CI）
+	writeSkill(t, filepath.Join(userHome, ".claude", "skills", "user-skill"),
+		"---\nname: user-skill\ndescription: \"u\"\n---\n")
+
+	// 对话目录（不在工作目录列表）带一个项目级 skill
+	chatDir := filepath.Join(tmp, "chat-proj")
+	writeSkill(t, filepath.Join(chatDir, ".claude", "skills", "chat-skill"),
+		"---\nname: chat-skill\ndescription: \"c\"\n---\n")
+
+	dirSvc := NewDirectoryService(filepath.Join(tmp, "directories.json"))
+	svc := NewSkillDiscoveryService(dirSvc)
+	svc.SetChatDirsProvider(func() []string { return []string{chatDir} })
+
+	byCmd := map[string]*model.SkillDescriptor{}
+	for _, s := range svc.discover() {
+		byCmd[s.Command] = s
+	}
+	s, ok := byCmd["/chat-skill"]
+	if !ok {
+		t.Fatalf("未发现 /chat-skill（对话目录应被扫描）: %+v", byCmd)
+	}
+	if s.Source != "project" || s.Cwd != chatDir {
+		t.Fatalf("chat-skill 字段不符: source=%q cwd=%q, want project/%s", s.Source, s.Cwd, chatDir)
+	}
+	if _, ok := byCmd["/user-skill"]; !ok {
+		t.Fatal("用户级 skill 不应受影响")
+	}
+}
+
+// TestSkillDiscovery_ChatDirDedupWithWorkDir 同一路径既是工作目录又是对话目录只扫一次；
+// Windows 大小写 / \\ vs / 分隔符变体也只一条（normalizeDirKey 规范化兜底）。
+func TestSkillDiscovery_ChatDirDedupWithWorkDir(t *testing.T) {
+	tmp := t.TempDir()
+	userHome := filepath.Join(tmp, "home")
+	t.Setenv("USERPROFILE", userHome)
+	t.Setenv("HOME", userHome)
+
+	workDir := filepath.Join(tmp, "both")
+	writeSkill(t, filepath.Join(workDir, ".claude", "skills", "rel"),
+		"---\nname: rel\ndescription: \"r\"\n---\n")
+
+	dirSvc := NewDirectoryService(filepath.Join(tmp, "directories.json"))
+	dirSvc.Save([]*model.Directory{{ID: "d1", Name: "both", Path: workDir}})
+
+	svc := NewSkillDiscoveryService(dirSvc)
+	// 变体：小写盘符 + 正斜杠（Windows 路径比较大小写不敏感）
+	variant := strings.ToLower(filepath.ToSlash(workDir))
+	svc.SetChatDirsProvider(func() []string { return []string{variant} })
+
+	count := 0
+	for _, s := range svc.discover() {
+		if s.Command == "/rel" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("/rel 出现 %d 次, want 1（重合路径应去重）", count)
+	}
+}
+
+// TestSkillDiscovery_ChatDirsFingerprint 对话目录纳入指纹：新增带 skill 的对话目录后
+// GetCached 触发重扫发现新 skill；provider 返回 nil/空列表时不扫、不出错。
+func TestSkillDiscovery_ChatDirsFingerprint(t *testing.T) {
+	tmp := t.TempDir()
+	userHome := filepath.Join(tmp, "home")
+	t.Setenv("USERPROFILE", userHome)
+	t.Setenv("HOME", userHome)
+
+	dirSvc := NewDirectoryService(filepath.Join(tmp, "directories.json"))
+	chatDir := filepath.Join(tmp, "chat")
+	chatPaths := []string{} // 可变清单，模拟对话目录动态增减
+	svc := NewSkillDiscoveryService(dirSvc)
+	svc.SetChatDirsProvider(func() []string { return chatPaths })
+
+	// 空清单 + 目录下尚无 skill：空结果
+	if got := svc.GetCached(); len(got) != 0 {
+		t.Fatalf("空清单应返回空列表, got %+v", got)
+	}
+	// 新增对话目录及其 skill（目录 mtime 变化触发指纹更新）
+	writeSkill(t, filepath.Join(chatDir, ".claude", "skills", "later"),
+		"---\nname: later\ndescription: \"l\"\n---\n")
+	chatPaths = append(chatPaths, chatDir)
+	got := svc.GetCached()
+	if len(got) != 1 || got[0].Command != "/later" {
+		t.Fatalf("新增对话目录后应重扫发现 /later, got %+v", got)
+	}
+	// provider 返回 nil：不扫、不出错，回退为仅用户级（此处为空）
+	svc.SetChatDirsProvider(nil)
+	if got := svc.GetCached(); len(got) != 0 {
+		t.Fatalf("nil provider 应跳过对话目录, got %+v", got)
 	}
 }
 
