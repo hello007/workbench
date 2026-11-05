@@ -1,0 +1,3 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "检查 URL 打开出口单点收敛、paste 拦截链路与 §11 契约一致；事件契约零改动"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查预览块样式全部设计令牌、深浅主题可读、无硬编码色值"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "检查 MessageBox VNode 用法与既有单次确认形态兼容、测试 mock 方式符合规范"}

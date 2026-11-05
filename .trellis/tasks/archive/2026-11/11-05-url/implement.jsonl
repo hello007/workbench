@@ -1,0 +1,4 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "§11 addon 面契约——URL 打开出口改造（openUrlInBrowser 单点）与粘贴确认链路（容器捕获 DOM paste）的实现锚点；改动不得破坏既有 §5 ESC 过滤与 §6 外观契约"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "粘贴预览块样式：设计令牌选色（--bg-tertiary/--border-color/--text-secondary）、禁硬编码色值、等宽字体栈与终端一致"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox 单次确认形态扩展 VNode message；EP 2.14 弹层实例驻留 DOM 特性；mock 是文件级 vi.mock('element-plus')"}
+{"file": "docs/spec/e2e-testing.md", "reason": "组件/composable 单测规范：wailsjs runtime stub 模式（BrowserOpenURL: vi.fn() 既有先例）、断言真实行为非 mock 自证"}
