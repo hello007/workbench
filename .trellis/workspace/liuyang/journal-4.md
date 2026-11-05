@@ -1771,3 +1771,36 @@ Windows 终端会话以 SYNCHRONIZE 句柄+停止事件事件驱动退出检测�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 222: 终端交互修复：URL 默认浏览器与多行粘贴预览
+
+**Date**: 2026-11-05
+**Task**: 终端交互修复：URL 默认浏览器与多行粘贴预览
+**Branch**: `master`
+
+### Summary
+
+真机验收反馈两点修复：URL 打开改 runtime.BrowserOpenURL 唯一出口（window.open 在 WebView2 内嵌打开，http(s) 校验收拢出口单点）；多行粘贴确认框加 VNode 预览块（buildPastePreview 纯函数：前 5 行/单行 120 字/总 400 字 + 共 N 行摘要）。规范沉淀 docs/spec/url-opening.md ADR（外链打开禁 window.open）+ CLAUDE.md 关键规则行 v2.45。check 复核补修预览块字体栈复用 buildTerminalFontFamily 单点；vitest 2555 全过
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `143d875` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
