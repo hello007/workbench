@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-4.md`
-- **Total Sessions**: 223
+- **Total Sessions**: 224
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1839 | Active |
+| `journal-4.md` | ~1872 | Active |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +32,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 224 | 2026-11-05 | 素材管理目录过滤续拉兜底拉齐修复 | `d79ee46` | `master` |
 | 223 | 2026-11-05 | CLAUDE.md 收敛至 AGENTS.md 单一入口 | `3b705c5` | `master` |
 | 222 | 2026-11-05 | 终端交互修复：URL 默认浏览器与多行粘贴预览 | `143d875` | `master` |
 | 221 | 2026-11-05 | 终端基础体验补强：xterm addons 与交互 | `5f36648`, `e14e98e` | `master` |

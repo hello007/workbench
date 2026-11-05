@@ -1837,3 +1837,36 @@ CLAUDE.md 缩为 @AGENTS.md 一行，通用内容迁入 AGENTS.md（关键规则
 ### Next Steps
 
 - None - task complete
+
+
+## Session 224: 素材管理目录过滤续拉兜底拉齐修复
+
+**Date**: 2026-11-05
+**Task**: 素材管理目录过滤续拉兜底拉齐修复
+**Branch**: `master`
+
+### Summary
+
+修复素材管理幻灯片视图点击子目录偶发只显示部分页（61页仅显7页）：ensureFolderSlidesLoaded 照搬单文件先例的出现即停语义，目录条目跨分页批次（ORDER BY f.path 字典序连续区间）出现≠拉齐。终止条件改为目录段越界（已见命中+本批零新增）或全局拉完；两路续拉循环补零增长守卫防加载失败死循环（单文件先例顺带修）。新增5组件用例，docs/spec/assets-management.md §8.7 沉淀两路终止语义禁互相照搬契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d79ee46` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
