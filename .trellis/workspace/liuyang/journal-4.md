@@ -1870,3 +1870,37 @@ CLAUDE.md 缩为 @AGENTS.md 一行，通用内容迁入 AGENTS.md（关键规则
 ### Next Steps
 
 - None - task complete
+
+
+## Session 225: 清理聚合视图欠账与提交聚合视图功能
+
+**Date**: 2026-11-05
+**Task**: 清理聚合视图欠账与提交聚合视图功能
+**Branch**: `master`
+
+### Summary
+
+提交聚合视图虚拟工作区功能本体与配套测试；补齐 HasRemote 徽标与 GetAggregatedRootNodes RPC 屏蔽两条回归测试（均实证判别力）；归档两个任务；欠账清单清理 2 条后剩 11 条
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9c378dd` | (see git log) |
+| `067ba99` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
