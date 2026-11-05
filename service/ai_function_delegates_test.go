@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -417,6 +418,28 @@ func TestRunStage_EmptyPrompt(t *testing.T) {
 	}
 	if _, err := svc.RunStage(defaults[0].ID, "   ", ""); err == nil {
 		t.Error("空 prompt 应返回错误")
+	}
+}
+
+// TestRunStage_CwdMissing 功能项 cwd 指向不存在的目录时启动前拦截，返回可读
+// 修复提示（cwd 失效时 CreateProcess 报 "The directory name is invalid"，错误
+// 文本误导指向 claude exe，故预检给出真实原因）。须走完整排队链路（nil ctx 会
+// panic），故自建 context.Background() 版服务而非 newAiSvcForTest。
+func TestRunStage_CwdMissing(t *testing.T) {
+	svc := NewAiFunctionService(context.Background(), filepath.Join(t.TempDir(), "ai_functions.json"))
+	missingDir := filepath.Join(t.TempDir(), "not-exist-dir")
+	funcs := []*model.AiFunction{
+		{ID: "fn-cwd", Name: "目录失效功能", Command: "/some-skill", Cwd: missingDir},
+	}
+	if err := svc.SaveAiFunctions(funcs); err != nil {
+		t.Fatalf("SaveAiFunctions: %v", err)
+	}
+	_, err := svc.RunStage("fn-cwd", "prompt", "")
+	if err == nil {
+		t.Fatal("cwd 不存在应返回错误")
+	}
+	if !strings.Contains(err.Error(), "工作目录不存在") || !strings.Contains(err.Error(), missingDir) {
+		t.Errorf("错误应含可读提示与目录路径, got: %v", err)
 	}
 }
 

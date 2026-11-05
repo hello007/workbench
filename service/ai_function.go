@@ -458,6 +458,20 @@ func (s *AiFunctionService) RunStage(functionID, prompt, resumeSessionID string)
 	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(timeout)*time.Minute)
 
 	args := buildClaudeArgs(fn, resumeSessionID)
+	// 工作目录预检：cwd 失效（目录被移动/删除）时 CreateProcess 报
+	// "The directory name is invalid"，错误文本指向 claude exe 纯属误导——
+	// 提前校验给出可读修复提示（skill 发现也依赖该 cwd，目录失效功能必然不可用）
+	if fn.Cwd != "" {
+		if st, statErr := os.Stat(fn.Cwd); statErr != nil || !st.IsDir() {
+			cancel()
+			s.mu.Lock()
+			task.running = false
+			task.errText = "工作目录不存在"
+			s.mu.Unlock()
+			<-s.concurrencySem // 归还槽位
+			return "", fmt.Errorf("功能项配置的工作目录不存在: %s（可能已被移动或删除，请在 AI 功能配置中修正）", fn.Cwd)
+		}
+	}
 	// 经 claudeCommandResolver 绕开 .cmd shim 的 cmd.exe 转发（JSON 参数引号会被破坏，
 	// 详见 resolveClaudeCommand 注释）
 	name, prefixArgs := claudeCommandResolver()
