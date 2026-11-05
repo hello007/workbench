@@ -1703,3 +1703,37 @@ Windows 终端会话绑定 KILL_ON_JOB_CLOSE Job Object，Close 时先断 ConPTY
 ### Next Steps
 
 - None - task complete
+
+
+## Session 220: 终端退出检测事件化与去重
+
+**Date**: 2026-11-05
+**Task**: 终端退出检测事件化与去重
+**Branch**: `master`
+
+### Summary
+
+Windows 终端会话以 SYNCHRONIZE 句柄+停止事件事件驱动退出检测，去掉 500ms 轮询；Unix 保留轮询兜底；terminal-exit 经 MarkExited 原子跃迁去重，唯一出口 emitExitIfRunning；补 Windows 专项与去重测试。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `379ef65` | (see git log) |
+| `6401c46` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
