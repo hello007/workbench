@@ -23,6 +23,54 @@ func TestAppSettings_DefaultValues(t *testing.T) {
 	if s.ThemeMode != "" {
 		t.Error("ThemeMode 默认应为空（空值视为 system）")
 	}
+	if s.TerminalOscNotifyEnabled != false {
+		t.Error("TerminalOscNotifyEnabled 默认应为 false（OSC 通知总开关默认关闭零打扰）")
+	}
+}
+
+// TestAppSettings_TerminalScrollbackDefault 锚定回滚行数默认值为 5000：
+// 该值是「新装/零值补默认」路径的唯一取值来源（EnsureTerminalDefaults 零值回默认），
+// 已持久化的老配置合法值（如 1000）不被覆盖；常量被误改回旧值时由本用例拦截。
+func TestAppSettings_TerminalScrollbackDefault(t *testing.T) {
+	if DefaultTerminalScrollback != 5000 {
+		t.Errorf("DefaultTerminalScrollback 期望 5000, 实际=%d", DefaultTerminalScrollback)
+	}
+	// 零值补默认路径：老配置无该字段时落到新默认 5000
+	s := &AppSettings{}
+	s.EnsureTerminalDefaults()
+	if s.TerminalScrollback != 5000 {
+		t.Errorf("零值补默认: 期望 5000, 实际=%d", s.TerminalScrollback)
+	}
+	// 已持久化合法值不覆盖：存量用户显式 1000 保持原值
+	existing := &AppSettings{TerminalScrollback: 1000}
+	existing.EnsureTerminalDefaults()
+	if existing.TerminalScrollback != 1000 {
+		t.Errorf("已持久化 1000 应保持不变, 实际=%d", existing.TerminalScrollback)
+	}
+}
+
+// TestAppSettings_OscNotifyEnabledRoundTrip 覆盖 OSC 通知开关的 JSON 往返：
+// 显式 true 序列化保留；缺失字段反序列化为零值 false（与默认关闭语义一致）。
+func TestAppSettings_OscNotifyEnabledRoundTrip(t *testing.T) {
+	s := &AppSettings{TerminalOscNotifyEnabled: true}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+	var decoded AppSettings
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+	if !decoded.TerminalOscNotifyEnabled {
+		t.Error("TerminalOscNotifyEnabled 往返丢失: 期望 true")
+	}
+	var missing AppSettings
+	if err := json.Unmarshal([]byte(`{"defaultShell":"powershell"}`), &missing); err != nil {
+		t.Fatalf("部分字段反序列化失败: %v", err)
+	}
+	if missing.TerminalOscNotifyEnabled {
+		t.Error("TerminalOscNotifyEnabled 缺失时应为零值 false")
+	}
 }
 
 func TestAppSettings_JSONSerialization(t *testing.T) {

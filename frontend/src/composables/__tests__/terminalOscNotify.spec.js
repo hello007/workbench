@@ -1,10 +1,10 @@
 /**
  * terminalOscNotify 纯函数与节流测试
  * 覆盖：OSC 9/777/99 载荷解析（含 9;4 进度条放行与 kitty 元数据段）、
- * 总开关实时判定、同内容节流窗口、过期键清理防 Map 无界增长
+ * 超长载荷截断、总开关实时判定、同内容节流窗口、过期键清理防 Map 无界增长
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { parseOscNotify, createOscNotifier, OSC_NOTIFY_THROTTLE_MS } from '../terminalOscNotify'
+import { parseOscNotify, createOscNotifier, OSC_NOTIFY_THROTTLE_MS, OSC_NOTIFY_TEXT_MAX } from '../terminalOscNotify'
 
 describe('parseOscNotify - 载荷解析', () => {
   it('OSC 9 通知形态：整段为 message，title 为空', () => {
@@ -80,6 +80,33 @@ describe('createOscNotifier - 开关与节流', () => {
     const n = createOscNotifier({ isEnabled: () => true, notify })
     expect(n.handle(9, '   ')).toBe(false)
     expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('超长载荷截断：body 超上限时保留前 N 字符 + 省略号（防撑爆通知 UI）', () => {
+    const n = createOscNotifier({ isEnabled: () => true, notify })
+    const huge = 'x'.repeat(5000)
+    expect(n.handle(9, huge)).toBe(true)
+    expect(notify).toHaveBeenCalledTimes(1)
+    const opts = notify.mock.calls[0][0]
+    expect(opts.message).toBe('x'.repeat(OSC_NOTIFY_TEXT_MAX) + '…')
+    expect(opts.message.length).toBe(OSC_NOTIFY_TEXT_MAX + 1)
+  })
+
+  it('超长载荷截断作用于节流键：同超长内容窗口内仍只提示一次', () => {
+    vi.useFakeTimers()
+    const n = createOscNotifier({ isEnabled: () => true, notify })
+    const huge = 'y'.repeat(3000)
+    n.handle(9, huge)
+    n.handle(9, huge)
+    expect(notify).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('长度恰在上限内不截断（边界无损）', () => {
+    const n = createOscNotifier({ isEnabled: () => true, notify })
+    const exact = 'z'.repeat(OSC_NOTIFY_TEXT_MAX)
+    n.handle(9, exact)
+    expect(notify.mock.calls[0][0].message).toBe(exact)
   })
 
   it('同实例同内容节流窗口内只提示一次（默认 5s）', () => {

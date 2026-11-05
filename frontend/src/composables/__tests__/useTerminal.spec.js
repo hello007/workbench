@@ -20,7 +20,9 @@ const captures = vi.hoisted(() => ({
   serializedText: '',
   oscHandlers: {},
   linkProvider: null,
-  searchShortcutCb: null
+  searchShortcutCb: null,
+  lastOutputCb: null,
+  webglContextLossCb: null
 }))
 
 vi.mock('@xterm/xterm', () => ({
@@ -109,16 +111,18 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenWithDefaultApp: vi.fn(() => Promise.resolve(true))
 }))
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
-  // 与真实 Wails runtime 一致：EventsOn 返回本监听器的注销闭包
-  EventsOn: vi.fn(() => {
+  // 与真实 Wails runtime 一致：EventsOn 返回本监听器的注销闭包；
+  // terminal-output 回调另存 captures.lastOutputCb（回放顺序用例驱动暂存缓冲）
+  EventsOn: vi.fn((name, cb) => {
     const off = vi.fn()
     captures.offFns.push(off)
+    if (name === 'terminal-output') captures.lastOutputCb = cb
     return off
   }),
   EventsOff: vi.fn()
 }))
 
-import { useTerminal, getTerminalTheme, LIGHT_TERMINAL_THEME, DARK_TERMINAL_THEME } from '../useTerminal'
+import { useTerminal, resetWebglProbeCacheForTests, getTerminalTheme, LIGHT_TERMINAL_THEME, DARK_TERMINAL_THEME } from '../useTerminal'
 import { useSettingsStore } from '../../store'
 
 describe('useTerminal - 主题切换', () => {
@@ -342,10 +346,14 @@ describe('useTerminal - addon 生命周期（WebGL 回退 / 搜索开关 / seria
     captures.lastFit = null
     captures.offFns = []
     captures.lastWebgl = null
+    captures.webglContextLossCb = null
     captures.lastSearch = null
     captures.lastSerialize = null
     captures.serializedText = ''
     captures.linkProvider = null
+    captures.lastOutputCb = null
+    // WebGL 探测结果为模块级单例缓存：复位后本用例组 stub 的探测结果生效
+    resetWebglProbeCacheForTests()
     // WebGL 支持性探测门控：stub canvas 返回真值上下文（jsdom 无 canvas 包恒 null）
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({})
     settingsStore = useSettingsStore()
@@ -374,6 +382,20 @@ describe('useTerminal - addon 生命周期（WebGL 回退 / 搜索开关 / seria
     expect(WebglAddon).not.toHaveBeenCalled()
     expect(t.term.value).not.toBeNull()
     expect(t.isActive.value).toBe(true)
+  })
+
+  it('WebGL 探测结果模块级缓存：二次 init 不再创建探测 canvas（GL 上下文泄漏防御）', async () => {
+    const canvasSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+    const t1 = useTerminal()
+    await t1.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    await t1.destroyTerminal()
+    const countAfterFirst = canvasSpy.mock.calls.length
+    const t2 = useTerminal()
+    await t2.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    // 缓存生效：第二次 init 不再建探测 canvas（浏览器 GL 上下文有 ~16 活跃上限）
+    expect(canvasSpy.mock.calls.length).toBe(countAfterFirst)
   })
 
   it('WebGL 挂载成功后注册上下文丢失回调，触发时 dispose addon 回退 DOM 渲染', async () => {
@@ -481,6 +503,28 @@ describe('useTerminal - addon 生命周期（WebGL 回退 / 搜索开关 / seria
     expect(serializerOrder).toBeLessThan(oldTerminal.dispose.mock.invocationCallOrder[0])
     // 新实例 write 收到旧缓冲文本（scrollback 内存回放）
     expect(newTerminal.write).toHaveBeenCalledWith('old-buffer-lines')
+  })
+
+  it('回放文本先于暂存新输出写入（新 shell banner 不得排在旧缓冲之前）', async () => {
+    captures.serializedText = 'old-buffer-lines'
+    const { CreateTerminal } = await import('../../../wailsjs/go/main/App')
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    // 挂起 restart 内的 CreateTerminal：模拟 PTY 创建窗口期，期间新 shell 输出先到（进暂存缓冲）
+    let resolveCreate
+    CreateTerminal.mockImplementationOnce(() => new Promise((res) => { resolveCreate = res }))
+    const restartPromise = t.restartTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    // 新会话首条输出先于 CreateTerminal 返回到达（sessionID 未设 → 暂存缓冲）
+    captures.lastOutputCb('sid-2', 'new-shell-banner')
+    resolveCreate('sid-2')
+    await restartPromise
+    await flushPromises()
+    // 回放文本必须先于暂存缓冲刷新（旧缓冲在上、新输出在下，顺序不错乱）
+    const writes = captures.lastTerminal.write.mock.calls.map(c => c[0])
+    expect(writes.indexOf('old-buffer-lines')).toBeGreaterThanOrEqual(0)
+    expect(writes.indexOf('old-buffer-lines')).toBeLessThan(writes.indexOf('new-shell-banner'))
   })
 
   it('序列化抛错时回放静默跳过，新会话照常创建不阻塞', async () => {
@@ -602,6 +646,23 @@ describe('useTerminal - OSC 通知（R3）', () => {
     // 不同内容不受节流影响
     captures.oscHandlers[9]('other msg')
     expect(notifyMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('destroyTerminal 置空通知器后缓冲 OSC 触发 handler 放行不抛错（销毁竞态空守卫）', async () => {
+    settingsStore.terminalOscNotifyEnabled = true
+    const t = useTerminal()
+    await t.initTerminal(document.createElement('div'), 'C:\\', 'powershell')
+    await flushPromises()
+    const handlers = captures.oscHandlers
+    // destroyTerminal 不等完成：同步段（置空 oscNotifier）先于首个 await
+    // CloseTerminal 执行，此刻缓冲未 flush 的 OSC 到达触发 handler
+    const destroyPromise = t.destroyTerminal()
+    for (const ident of [9, 777, 99]) {
+      // 空守卫放行（返回 false 不消费），不抛 TypeError 打穿 parser 写链
+      expect(handlers[ident]('late msg')).toBe(false)
+    }
+    expect(notifyMock).not.toHaveBeenCalled()
+    await destroyPromise
   })
 })
 

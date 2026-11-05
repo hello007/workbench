@@ -22,6 +22,22 @@ import { ElNotification } from 'element-plus'
 /** 同 tab 同内容通知节流窗口（毫秒） */
 export const OSC_NOTIFY_THROTTLE_MS = 5000
 
+/**
+ * 通知标题/正文单字段长度上限：超出截断并追加省略号——OSC 载荷无长度约束
+ * （极端场景单条可达数 MB，如程序误把整段日志塞进 OSC 9），整段进
+ * ElNotification 会撑爆通知 UI；节流键同用截断后文本，保证判定一致
+ */
+export const OSC_NOTIFY_TEXT_MAX = 500
+
+// 截断省略号
+const ELLIPSIS = '…'
+
+/** 超长文本截断：保留前 OSC_NOTIFY_TEXT_MAX 字符 + 省略号 */
+function truncateNotifyText(text) {
+  if (text.length <= OSC_NOTIFY_TEXT_MAX) return text
+  return text.slice(0, OSC_NOTIFY_TEXT_MAX) + ELLIPSIS
+}
+
 // 节流表上限：超过即先清理过期键值（极端刷屏场景防内存无界增长）
 const THROTTLE_MAP_MAX = 200
 
@@ -86,9 +102,11 @@ export function createOscNotifier({ isEnabled, getTitle, throttleMs = OSC_NOTIFY
     if (!isEnabled || !isEnabled()) return false
     const payload = parseOscNotify(ident, data)
     if (!payload) return false
-    const body = payload.body.trim()
+    // 超长载荷截断（500 字符 + 省略号）：防超大 OSC 载荷整段撑爆通知 UI；
+    // 节流键同用截断后文本，同内容判定与展示口径一致
+    const body = truncateNotifyText(payload.body.trim())
     if (!body) return false
-    const title = (getTitle ? getTitle() : '') || payload.title || '终端通知'
+    const title = truncateNotifyText((getTitle ? getTitle() : '') || payload.title || '终端通知')
     // 节流：同实例同「标题|正文」窗口内只提示一次
     const key = `${title}|${body}`
     const last = lastNotifiedAt.get(key)

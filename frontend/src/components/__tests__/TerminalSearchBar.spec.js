@@ -32,6 +32,24 @@ describe('TerminalSearchBar.vue', () => {
     wrapper.unmount()
   })
 
+  it('挂载时从 initialQuery/initialCaseSensitive 初始化（v-if 重挂载不丢上次输入）', async () => {
+    // Panel 保留关键词重开搜索条：本地 ref 以 props 初始值起底，
+    // UI 显示与实际搜索状态恒一致（不再出现「输入框空但按旧词搜索」）
+    const wrapper = mountBar({ initialQuery: 'error', initialCaseSensitive: true })
+    expect(wrapper.find('input').element.value).toBe('error')
+    expect(wrapper.find('[data-action="toggle-case"]').classes()).toContain('is-active')
+    // 计数位按「有关键词无命中」口径展示（初始 resultCount 0 + 非空关键词）
+    expect(wrapper.find('[data-search-count]').text()).toBe('无结果')
+    wrapper.unmount()
+  })
+
+  it('缺省 initial props 时保持空关键词/不区分大小写（新建会话首次呼出）', () => {
+    const wrapper = mountBar()
+    expect(wrapper.find('input').element.value).toBe('')
+    expect(wrapper.find('[data-action="toggle-case"]').classes()).not.toContain('is-active')
+    wrapper.unmount()
+  })
+
   it('输入触发 query 事件携带关键词', async () => {
     const wrapper = mountBar()
     const input = wrapper.find('input')

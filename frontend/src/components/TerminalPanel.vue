@@ -116,11 +116,14 @@
           </el-button>
         </div>
       </transition>
-      <!-- 搜索条（Ctrl+F 呼出）：叠加终端区右上角，仅活动 tab 生效（tab 切换自动收起） -->
+      <!-- 搜索条（Ctrl+F 呼出）：叠加终端区右上角，仅活动 tab 生效（tab 切换自动收起）；
+           持有状态经 initial props 下发（v-if 重挂载不丢上次输入，UI 与实际搜索状态一致） -->
       <TerminalSearchBar
         v-if="searchVisible"
         :result-index="searchResultIndex"
         :result-count="searchResultCount"
+        :initial-query="searchQuery"
+        :initial-case-sensitive="searchCaseSensitive"
         @query="onSearchQuery"
         @case="onSearchCase"
         @next="onSearchNext"
@@ -312,7 +315,8 @@ async function openSearch() {
   searchInstId = tabId
   searchVisible.value = true
   subscribeSearchResults(addon)
-  // 呼出即重搜当前关键词（保留上次输入与大小写开关，对齐 VSCode 行为）
+  // 呼出即重搜当前关键词（保留上次输入与大小写开关，对齐 VSCode 行为；
+  // 搜索条经 initial props 显示同值——UI 展示与实际搜索状态恒一致）
   if (searchQuery.value) {
     await inst.searchFindNext(searchQuery.value, searchFindOptions())
   }
@@ -338,11 +342,26 @@ watch(activeId, () => {
   if (searchVisible.value) closeSearch(false)
 })
 
+// 重启会话前收起该 tab 的搜索条：restartTerminal → destroyTerminal 已 dispose
+// composable 侧 searchAddon，面板若不收起（searchVisible 仍 true），结果订阅
+// 闭包悬在已销毁 addon 上，且重启后新 addon 惰性挂载不会重新订阅 → 匹配计数
+// 永久失效；先 closeSearch 整体收起（不抢焦点），重开后挂载/订阅链路重建
+function closeSearchBeforeRestart(tabId) {
+  if (searchVisible.value && searchInstId === tabId) {
+    closeSearch(false)
+  }
+}
+
 function onSearchQuery(q) {
   searchQuery.value = q
   const inst = instances.get(activeId.value)
-  if (inst && q) {
+  if (!inst) return
+  if (q) {
     inst.searchFindNext(q, searchFindOptions())
+  } else {
+    // 清空关键词：显式清除旧高亮装饰（SearchAddon 不因空词自动清装饰），
+    // 结果计数经 onDidChangeResults 回流归零
+    inst.searchClearDecorations()
   }
 }
 
@@ -524,6 +543,7 @@ async function onRestart() {
   const inst = tab ? instances.get(tab.id) : null
   const container = tab ? tabContainers.get(tab.id) : null
   if (!tab || !inst || !container) return
+  closeSearchBeforeRestart(tab.id)
   await inst.restartTerminal(container, tab.dir, tab.shellType, {
     getTabTitle: () => tab.title
   })
@@ -572,6 +592,7 @@ async function consumePendingCmd() {
     const container = tabContainers.get(tab.id)
     if (container) {
       try {
+        closeSearchBeforeRestart(tab.id)
         await inst.restartTerminal(container, tab.dir, tab.shellType, {
           getTabTitle: () => tab.title
         })

@@ -50,14 +50,21 @@ const props = defineProps({
   // 匹配计数：resultCount > 0 时展示「当前/总数」（resultIndex 0 基），
   // 无匹配且有关键词时展示「无结果」
   resultIndex: { type: Number, default: -1 },
-  resultCount: { type: Number, default: 0 }
+  resultCount: { type: Number, default: 0 },
+  // 初始关键词/大小写态（Panel 持有的搜索状态经 props 下发）：搜索条 v-if
+  // 重挂载会重置本地 ref，挂载时从 Panel 初始化才能保证 UI 显示与实际搜索
+  // 状态恒一致——openSearch 保留上次输入并按其立即重搜（对齐 VSCode），
+  // 若 UI 显示空框则与实际搜索行为相反；此后两者仅随用户输入同步变化
+  initialQuery: { type: String, default: '' },
+  initialCaseSensitive: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['query', 'case', 'next', 'prev', 'close'])
 
 const inputRef = ref(null)
-const queryText = ref('')
-const caseSensitive = ref(false)
+// 本地状态以 props 初始值起底（v-if 重挂载不丢上次输入，与 Panel 保留重搜一致）
+const queryText = ref(props.initialQuery)
+const caseSensitive = ref(props.initialCaseSensitive)
 
 const countText = computed(() => {
   if (props.resultCount > 0 && props.resultIndex >= 0) {

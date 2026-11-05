@@ -120,18 +120,34 @@ function safeLoadAddon(terminal, factory, label) {
 }
 
 /**
- * WebGL2 支持性探测：WebglAddon 的渲染器构造发生在 terminal.open 的首帧渲染
- * 事件内（loadAddon 同步段不抛错），不支持环境（jsdom、远程桌面无 GPU 等）
- * 会变成 open 链路的未捕获异常并中断首帧渲染——先探测后挂载，不支持则直接
- * 回退 DOM 渲染，终端照常创建。
+ * WebGL2 支持性探测（模块级单例缓存）：WebglAddon 的渲染器构造发生在
+ * terminal.open 的首帧渲染事件内（loadAddon 同步段不抛错），不支持环境
+ * （jsdom、远程桌面无 GPU 等）会变成 open 链路的未捕获异常并中断首帧渲染
+ * ——先探测后挂载，不支持则直接回退 DOM 渲染，终端照常创建。
+ *
+ * 探测结果缓存于模块级单例：探测需创建 webgl context，而浏览器对同页活跃
+ * GL 上下文数量有上限（约 16 个），反复新建 tab 每次重建探测 canvas 会泄漏
+ * 上下文挤占配额；GPU 支持性运行期不变，首次探测后恒用缓存，后续调用不再
+ * 创建 canvas。测试经 resetWebglProbeCacheForTests 复位。
  */
+let webglProbeCache = null
+
+/** 仅供测试：重置 WebGL 探测缓存（用例间 stub 不同探测结果时复位单例） */
+export function resetWebglProbeCacheForTests() {
+  webglProbeCache = null
+}
+
 function isWebglSupported() {
+  if (webglProbeCache !== null) {
+    return webglProbeCache
+  }
   try {
     const canvas = document.createElement('canvas')
-    return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'))
+    webglProbeCache = !!(canvas.getContext('webgl2') || canvas.getContext('webgl'))
   } catch {
-    return false
+    webglProbeCache = false
   }
+  return webglProbeCache
 }
 
 /**
@@ -295,7 +311,11 @@ export function useTerminal() {
       getTitle: () => (typeof options.getTabTitle === 'function' ? options.getTabTitle() : '')
     })
     for (const ident of [9, 777, 99]) {
-      terminal.parser.registerOscHandler(ident, (data) => oscNotifier.handle(ident, data))
+      // 闭包空守卫：destroyTerminal 置空 oscNotifier 后、term.dispose 之前
+      // （中间隔 await CloseTerminal IPC），缓冲中未 flush 的 OSC 数据仍会
+      // 触发 handler——此时放行（返回 false 不消费），防 TypeError 打穿
+      // xterm parser 写链
+      terminal.parser.registerOscHandler(ident, (data) => (oscNotifier ? oscNotifier.handle(ident, data) : false))
     }
 
     terminal.open(container)
@@ -342,6 +362,18 @@ export function useTerminal() {
       sessionID.value = sid
       isActive.value = true
       isExited.value = false
+
+      // 旧缓冲回放（restartTerminal 经 options.replayText 注入）：必须在暂存
+      // 缓冲刷新之前写入——output 监听已注册，新 shell 的 banner/prompt 从
+      // CreateTerminal 返回起经事件直写终端，回放若晚于缓冲消费（如放在
+      // initTerminal 返回之后）会排在新输出之后，重启后历史与现场顺序错乱
+      if (options.replayText && term.value) {
+        try {
+          term.value.write(options.replayText)
+        } catch (err) {
+          console.warn('终端缓冲回放失败（不影响新会话）:', err)
+        }
+      }
 
       // 刷新缓冲区：将 CreateTerminal 返回前暂存的输出写入终端
       for (const item of outputBuffer) {
@@ -396,6 +428,18 @@ export function useTerminal() {
         console.warn('搜索 addon 释放失败:', err)
       }
       searchAddon = null
+    }
+  }
+
+  // 清空搜索高亮装饰（面板侧关键词被清空时调用）：SearchAddon 不因空词自动
+  // 清除已绘制的匹配高亮，须显式 clearDecorations；addon 未挂载（从未搜索过）
+  // 时静默跳过，不为此挂载新实例
+  function searchClearDecorations() {
+    if (!searchAddon) return
+    try {
+      searchAddon.clearDecorations()
+    } catch (err) {
+      console.warn('清除搜索高亮失败:', err)
     }
   }
 
@@ -502,14 +546,9 @@ export function useTerminal() {
       }
     }
     await destroyTerminal()
-    await initTerminal(container, dir, shellType, options)
-    if (replayText && term.value) {
-      try {
-        term.value.write(replayText)
-      } catch (err) {
-        console.warn('终端缓冲回放失败（不影响新会话）:', err)
-      }
-    }
+    // 回放文本经 options 注入 initTerminal：在 CreateTerminal 返回后、暂存
+    // 缓冲刷新前的同一点位写入，保证回放先于任何新 shell 输出渲染
+    await initTerminal(container, dir, shellType, { ...options, replayText })
   }
 
   // 主题切换：终端已初始化时实时切换 xterm 主题（背景/文字/光标色）
@@ -549,6 +588,7 @@ export function useTerminal() {
     restartTerminal,
     openSearchAddon,
     disposeSearchAddon,
+    searchClearDecorations,
     searchFindNext,
     searchFindPrevious,
     setSearchShortcutHandler

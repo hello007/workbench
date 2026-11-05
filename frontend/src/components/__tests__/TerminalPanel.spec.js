@@ -20,6 +20,7 @@ const terminalMock = {
   setSearchShortcutHandler: vi.fn(),
   openSearchAddon: vi.fn(() => ({ onDidChangeResults: vi.fn() })),
   disposeSearchAddon: vi.fn(),
+  searchClearDecorations: vi.fn(),
   searchFindNext: vi.fn(() => Promise.resolve()),
   searchFindPrevious: vi.fn(() => Promise.resolve())
 }
@@ -1235,6 +1236,80 @@ describe('TerminalPanel.vue - 终端搜索条（Ctrl+F 呼出）', () => {
     await nextTick()
     expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
     await addTab(wrapper) // 新 tab 自动激活 → 收起
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    expect(terminalMock.disposeSearchAddon).toHaveBeenCalledTimes(1)
+  })
+
+  it('重开搜索条时上次关键词经 initial props 下发（UI 显示与实际搜索状态一致）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    await wrapper.find('[data-search-bar] input').setValue('error')
+    await wrapper.find('[data-action="close"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    // 再呼出：Panel 保留关键词并按其重搜，搜索条 v-if 重挂载后 UI 须显示同值
+    // （本地 ref 重置为空而 Panel 按旧词搜索的「UI 空但实际搜旧词」形态不再出现）
+    searchShortcutHandlers[0]()
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.find('[data-search-bar] input').element.value).toBe('error')
+    expect(terminalMock.searchFindNext).toHaveBeenLastCalledWith('error', { caseSensitive: false })
+  })
+
+  it('清空关键词时清除旧高亮装饰（searchClearDecorations）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    const input = wrapper.find('[data-search-bar] input')
+    // setValue 自带一次 input 事件（不再显式 trigger，防双发）
+    await input.setValue('err')
+    expect(terminalMock.searchClearDecorations).not.toHaveBeenCalled()
+    // 清空：旧高亮装饰残留 → 显式 clearDecorations
+    await input.setValue('')
+    await flushPromises()
+    expect(terminalMock.searchClearDecorations).toHaveBeenCalledTimes(1)
+    expect(terminalMock.searchFindNext).toHaveBeenCalledTimes(1) // 清空不触发重搜
+  })
+
+  it('开着搜索条重启 tab：搜索条先收起释放，重开后挂载/订阅链路重建（计数恢复）', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
+    expect(terminalMock.openSearchAddon).toHaveBeenCalledTimes(1)
+    // 驱动退出态 → 点重新启动
+    capturedInstances[0].isExited.value = true
+    await nextTick()
+    await wrapper.find('.exit-restart-btn').trigger('click')
+    await flushPromises()
+    // restartTerminal 内 destroyTerminal 已 dispose composable 侧 addon，
+    // 面板须先整体收起（注销订阅 + dispose），不留悬空引用
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
+    expect(terminalMock.disposeSearchAddon).toHaveBeenCalledTimes(1)
+    // 重开后链路整体重建：新 addon 挂载 + 重新订阅（匹配计数恢复）
+    searchShortcutHandlers[0]()
+    await nextTick()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
+    expect(terminalMock.openSearchAddon).toHaveBeenCalledTimes(2)
+  })
+
+  it('consumePendingCmd 的重启分支同样先收起搜索条', async () => {
+    wrapper = await createWrapper()
+    await openPanel(wrapper, 'D:\\proj')
+    searchShortcutHandlers[0]()
+    await nextTick()
+    expect(wrapper.find('[data-search-bar]').exists()).toBe(true)
+    capturedInstances[0].sessionID.value = 'sid-1'
+    const { WriteTerminalInput } = await import('../../../wailsjs/go/main/App')
+    WriteTerminalInput.mockRejectedValueOnce(new Error('session exited'))
+    const uiStore = useUiStore()
+    uiStore.pushTerminalPendingCmd('D:\\proj', 'echo hi')
+    await flushPromises()
+    expect(terminalMock.restartTerminal).toHaveBeenCalled()
     expect(wrapper.find('[data-search-bar]').exists()).toBe(false)
     expect(terminalMock.disposeSearchAddon).toHaveBeenCalledTimes(1)
   })

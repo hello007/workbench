@@ -72,6 +72,38 @@ describe('findFilePathMatches - 路径形态识别', () => {
     ])
   })
 
+  it('中文行文全角括号包裹：匹配区间不含全角符号', () => {
+    // 「（见 /tmp/build.log。）」：全角（ 终止匹配左界、全角句号。终止右界
+    expect(findFilePathMatches('（见 /tmp/build.log。）')).toEqual([
+      { text: '/tmp/build.log', start: 3, end: 17 }
+    ])
+    expect(findFilePathMatches('详见（D:\\work\\a.txt）')).toEqual([
+      { text: 'D:\\work\\a.txt', start: 3, end: 16 }
+    ])
+  })
+
+  it('中文行文全角句读收尾不吞后文：句号后直接跟汉字不再并入路径', () => {
+    // 全角句读若不入终止字符类，句号后的汉字会被继续吞进匹配（中文行文核心缺陷）
+    expect(findFilePathMatches('日志 /var/log/app.log。然后退出')).toEqual([
+      { text: '/var/log/app.log', start: 3, end: 19 }
+    ])
+    expect(findFilePathMatches('输出至 D:\\work\\a.txt，请查收')).toEqual([
+      { text: 'D:\\work\\a.txt', start: 4, end: 17 }
+    ])
+    expect(findFilePathMatches('配置见 ~/work/conf.toml；重启生效')).toEqual([
+      { text: '~/work/conf.toml', start: 4, end: 20 }
+    ])
+  })
+
+  it('中文直角引号/方头括号终止匹配（「」『』【】《》）', () => {
+    expect(findFilePathMatches('见「/tmp/build.log」截图')).toEqual([
+      { text: '/tmp/build.log', start: 2, end: 16 }
+    ])
+    expect(findFilePathMatches('产物【/tmp/out.zip】已上传')).toEqual([
+      { text: '/tmp/out.zip', start: 3, end: 15 }
+    ])
+  })
+
   it('空文本与无匹配安全返回空数组', () => {
     expect(findFilePathMatches('')).toEqual([])
     expect(findFilePathMatches('no path here')).toEqual([])
