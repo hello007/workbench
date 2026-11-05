@@ -1,0 +1,3 @@
+{"file": "docs/spec/aggregated-workspace.md", "reason": "聚合视图契约：GetRootNodesForPaths 的 git 徽标填充与 Missing 占位语义、GetAggregatedRootNodes 登记 RPCHiddenMethods 的既有决策"}
+{"file": "docs/spec/browser-channel.md", "reason": "RPCHiddenMethods 跨期通用钩子与浏览器通道屏蔽语义，屏蔽响应须与真不存在方法同形态"}
+{"file": "docs/spec/perf-baseline.md", "reason": "§17 后端跨包共用测试辅助 util/testutil 的 RunGit 用法与收敛纪律，禁测试内重复定义 git 辅助"}

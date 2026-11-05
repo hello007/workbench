@@ -1,0 +1,2 @@
+{"file": "docs/spec/aggregated-workspace.md", "reason": "核对新增测试是否覆盖 HasRemote 徽标与 RPC 屏蔽两条契约，且未引入业务行为变更"}
+{"file": "docs/spec/browser-channel.md", "reason": "核对 RPC 屏蔽测试的断言形态与既有三期/十期先例一致（错误码、消息形态、非屏蔽方法不受影响、桌面直调正常）"}
