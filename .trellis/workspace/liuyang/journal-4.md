@@ -1938,3 +1938,36 @@ CLAUDE.md 缩为 @AGENTS.md 一行，通用内容迁入 AGENTS.md（关键规则
 ### Next Steps
 
 - None - task complete
+
+
+## Session 227: P1 聚合交互与并发收口（⑥⑦⑧⑫⑬）
+
+**Date**: 2026-11-06
+**Task**: P1 聚合交互与并发收口（⑥⑦⑧⑫⑬）
+**Branch**: `master`
+
+### Summary
+
+聚合视图菜单基准改所属收藏根、空白区菜单收敛为刷新/粘贴；收藏外部变更经 deep watch 100ms 去抖+modeSwitchSeq 代次重建；收藏根刷新先清 git 徽标缓存再整层重建（⑬）；GetRootNodesForPaths 两阶段有界并发（信号量 4，按下标回填保序，不做整体超时）；补单测与 E2E（取消收藏根消失、别名更新且展开态保持）；TEMP-MEM 销账 ⑥⑦⑧⑫，aggregated-workspace 规范升 v2
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fc8e06e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
