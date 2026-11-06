@@ -8,18 +8,17 @@
 
 ## 1. 方法清单总览
 
-共 **230** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 25 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 25 个 service/cache。按 29 个业务域分组：
+共 **278** 个导出方法（以 `App.d.ts` 实时提取为准），分布在 26 个 `app_*.go` 域文件 + `app.go`，委托 `AppServices` 持有的 32 个 service/cache。按 34 个域分组（含 29.1 素材购物栏）：
 
 | 域 | 方法数 | 实现文件 |
 |---|---|---|
 | 应用信息 | 1 | `app.go` |
 | 目录管理 | 8 | `app_directory.go` |
 | 收藏夹 | 5 | `app_favorites.go` |
-| 文件树 | 8 | `app_filetree.go` |
-| 文件预览与对话框 | 6 | `app_preview.go` |
-| PPTX 预览转换 | 1 | `app_pptx_preview.go` |
+| 文件树 | 9 | `app_filetree.go` |
+| 文件预览与对话框 | 7 | `app_preview.go` + `app_pptx_preview.go` |
 | 文件操作与剪贴板 | 6 | `app_clipboard.go` |
-| 搜索 | 2 | `app_search.go` |
+| 搜索 | 3 | `app_search.go` |
 | Git 仓库信息 | 8 | `app_git.go` |
 | 提交历史与统计 | 5 | `app_git.go` |
 | 本地变更与提交 | 7 | `app_git.go` |
@@ -27,23 +26,28 @@
 | 分支 | 7 | `app_git.go` |
 | 标签 | 4 | `app_git.go` |
 | 远程 | 4 | `app_git.go` |
-| 合并/变基/挑拣 | 12 | `app_git.go` |
+| 合并/变基/挑拣 | 15 | `app_git.go` |
 | Submodule | 6 | `app_git.go` |
 | 仓库元数据 | 5 | `app_repometa.go` |
 | 仓库配置导入导出 | 3 | `app_repo_config.go` |
-| 状态看板 | 6 | `app_dashboard.go` |
+| 状态看板 | 7 | `app_dashboard.go` |
 | AI 功能 | 21 | `app_ai.go` |
-| AI 对话 | 19 | `app_chat.go` |
+| AI 对话 | 23 | `app_chat.go` |
 | 会话快照 | 2 | `app_session.go` |
 | 终端 | 6 | `app_terminal.go` |
-| 外部集成 | 9 | `app_external.go` |
+| 外部集成 | 12 | `app_external.go` |
 | 设置 | 2 | `app_settings.go` |
-| 网络访问 | 5 | `app_webserve.go` |
+| 网络访问 | 20 | `app_webserve.go` |
 | 更新 | 4 | `app_update.go` |
-| 素材管理 | 43 | `app_assets.go` |
+| 素材管理 | 54 | `app_assets.go` |
 | 素材购物栏 | 7 | `app_asset_cart.go` |
+| 分支对比 | 4 | `app_branch_compare.go` |
+| 进程管理 | 3 | `app_process.go` |
+| 环境变量 | 1 | `app_env.go` |
+| hosts 文件 | 1 | `app_hosts.go` |
+| PPT 拆分 | 3 | `app_pptx.go` |
 
-> 既有缺口（与本表合计 220 差 11）：进程管理/端口占用（`app_process.go` 3 方法）、环境变量（`app_env.go` 1 方法）、hosts 文件（`app_hosts.go` 1 方法）、PPT 拆分（`app_pptx.go` 2 方法）四个域整域未登记（合计 7），搜索域行内计数差 1（`app_search.go` 实际导出 3）、外部集成行内计数差 3（`app_external.go` 实际导出 12），方法总数以 `App.d.ts` 为准，待另案补齐。（素材购物栏 7 方法已随 2026-10 购物栏功能登记。连接管控域 `KickConnection`/`ListWebTokens`/`CreateWebToken`/`RevokeWebToken` 与审计读侧 `QueryAuditLog`（纯桌面面，浏览器 RPC 通道屏蔽）已随 2026-10 连接管控任务落地；`SetAuditConfig` 审计留存热更已随 2026-10 连接管控十一期落地（`webAuditSvc` 桥接，App.d.ts 为准），本域表格待另案一并补齐。）
+> 方法总数以 `App.d.ts` 为准（可用 `grep -c "^export function" frontend/wailsjs/go/main/App.d.ts` 复核）。新增/删除绑定方法后须同步本表与本文各域明细。
 
 > 签名约定：`arg1/arg2/...` 为位置参数（Wails 绑定不保留参数名），类型取自 `App.d.ts`。返回值均为 `Promise`，错误经 Wails `ErrorFormatter` 转为 `{code, message}` 或 `{message}` 对象（见 [架构设计.md](架构设计.md) 第 6 节）。
 
@@ -98,6 +102,7 @@
 | `GetFileTreeRecursive` | `(path, maxDepth) => Promise<FileTreeNode[]>` | 递归获取文件树（限深度） | FileTreeNode 数组 |
 | `InvalidateFileTreeCache` | `(path) => Promise<void>` | 失效指定路径文件树缓存 | — |
 | `ClearAllFileTreeCache` | `() => Promise<void>` | 清空全部文件树缓存 | — |
+| `GetAggregatedRootNodes` | `(paths) => Promise<FileTreeNode[]>` | 聚合视图根节点：逐路径判存在性（失效产出 `Missing` 占位）并复用缓存填 git 徽标；纯桌面数据面方法，浏览器 RPC 经 `RPCHiddenMethods` 屏蔽 | FileTreeNode 数组 |
 | `CreateDirectory` | `(parentPath, name) => Promise<boolean>` | 创建文件夹 | 是否成功 |
 | `CreateFile` | `(parentPath, name, content) => Promise<boolean>` | 创建文件（含初始内容） | 是否成功 |
 | `RenameFile` | `(oldPath, newName) => Promise<boolean>` | 重命名文件/文件夹 | 是否成功 |
@@ -262,6 +267,9 @@
 | `AbortRebase` | `(path) => Promise<void>` | 中止变基 | — |
 | `AbortCherryPick` | `(path) => Promise<void>` | 中止挑拣 | — |
 | `SkipRebase` | `(path) => Promise<string>` | 跳过当前变基提交 | 操作结果消息 |
+| `ChooseConflictSide` | `(path, file, side) => Promise<void>` | 冲突文件快捷选边（`ours`=当前分支 / `theirs`=传入侧），选边后自动 `git add` 完成该文件解决 | — |
+| `GetConflictFileContent` | `(path, file) => Promise<ConflictFileContent>` | 读取冲突文件工作区内容（含编码检测 / 二进制 / 超大标记），供内嵌冲突解决器加载 | ConflictFileContent |
+| `SaveConflictResolution` | `(path, file, content, encoding) => Promise<void>` | 保存内嵌解决器的合并结果（按原编码写回）并标记已解决 | — |
 
 ---
 
@@ -318,6 +326,7 @@
 | `IsDashboardPinned` | `(path) => Promise<boolean>` | 查询仓库是否已 pin | 是否已 pin |
 | `GetDashboardStatuses` | `() => Promise<RepoStatus[]>` | 计算 pin 仓库状态（分支/工作区/ahead/behind/上游） | RepoStatus 数组 |
 | `RefreshDashboardStatuses` | `() => Promise<RepoStatus[]>` | 强制刷新 pin 仓库状态 | RepoStatus 数组 |
+| `GetRepoStatus` | `(path) => Promise<RepoStatus>` | 单仓库状态快照（分支 / 脏标 / ahead-behind / detached），供 AI 对话状态栏等单仓场景按需查询；非仓库或失效路径降级 `isRepo=false` | RepoStatus |
 
 ---
 
@@ -400,6 +409,8 @@ AI 对话工作台（活动栏「AI 对话」面板）：**持续会话进程式
 |---|---|---|---|
 | `GetChatSettings` | `() => Promise<ChatSettings>` | 读对话执行配置（文件缺失/损坏回默认值，不报错） | ChatSettings |
 | `SaveChatSettings` | `(permissionMode, modelName) => Promise<void>` | 持久化对话执行配置（permissionMode 须在可选集内） | — |
+| `DiscoverChatClis` | `() => Promise<ChatCliInfo[]>` | 扫描 PATH 上已知 AI CLI 候选（启动命令下拉数据源），每项 `{name, path}`；找不到返回空数组不报错 | ChatCliInfo 数组 |
+| `GetClaudeDefaultModel` | `() => Promise<string>` | 读本机 claude 设置文件解析 CLI 默认模型（`env.ANTHROPIC_MODEL` 优先、`model` 字段兜底），供模型下拉「默认」回显；文件缺失/损坏返回空串 | 模型名或空串 |
 
 ---
 
@@ -444,6 +455,9 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `AutoRegisterAndOpen` | `(path) => Promise<string>` | 自动注册 Obsidian 仓库并打开 | 操作结果消息 |
 | `OpenWithDefaultApp` | `(path) => Promise<boolean>` | 用系统默认应用打开 | 是否成功 |
 | `OpenInExternalDiff` | `(path, mode, file, sha, baseSha, headSha) => Promise<void>` | 启动外部 diff 工具 | — |
+| `OpenInExternalMerge` | `(path, file) => Promise<void>` | 用外部三向合并工具打开冲突文件（base/local/remote 由 index stage 提取，merged 为工作区原文件；预设工具内置模板，custom 读 `diffToolMergeArgs`） | — |
+| `ExportDiagnostics` | `(zipPath) => Promise<void>` | 导出诊断信息 zip（`diagnostics.txt` + `logs/` 全部日志含轮转备份 + `session.json`），路径由前端保存对话框选定 | — |
+| `GetAndClearLastCrashFlag` | `() => Promise<boolean>` | 查询并清除「上次会话异常退出」标记（读后即清，前端启动调用一次防重复提示） | 是否上次异常退出 |
 
 ---
 
@@ -467,7 +481,23 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `GetWebServeConfig` | `() => Promise<WebServeConfig>` | 获取浏览器访问通道配置与运行状态（含候选访问地址） | WebServeConfig |
 | `SetWebServeConfig` | `(enabled, bindAddress) => Promise<void>` | 保存配置并应用（关闭停机 / 改址平滑重启 / 改绑非回环须前端先风险确认） | — |
 | `GetWebServeToken` | `() => Promise<string>` | 读取当前访问令牌（设置页遮蔽展示） | 令牌字符串 |
-| `RegenerateWebToken` | `() => Promise<string>` | 重新生成令牌并热轮换（旧令牌立即失效，不断监听与在途连接） | 新令牌字符串 |
+| `RegenerateWebToken` | `() => Promise<string>` | 重新生成默认令牌并热轮换（旧令牌立即失效，不断监听与在途连接） | 新令牌字符串 |
+| `ListWebTokens` | `() => Promise<WebTokenStatus[]>` | 全部令牌列表（名称 / 状态 / 有效期 / 最近使用 / 在线连接数 / 封禁状态） | WebTokenStatus 数组 |
+| `CreateWebToken` | `(name, expiresAt) => Promise<WebTokenCreated>` | 新建令牌（明文一次性回显不落盘，记录只存 SHA-256 哈希；`expiresAt` 0=永久） | WebTokenCreated |
+| `RevokeWebToken` | `(id) => Promise<void>` | 撤销指定令牌（幂等；不存在返回 `E_TOKEN_NOT_FOUND`；联动清零 IP 失败计数与封禁记录） | — |
+| `BanWebToken` | `(id, expiresAt, reason) => Promise<void>` | 封禁令牌（`expiresAt` 0=永久；重复封禁=刷新参数；仅拒新连接） | — |
+| `UnbanWebToken` | `(id) => Promise<void>` | 解封令牌（未封禁 no-op 成功，幂等） | — |
+| `KickConnection` | `(connID) => Promise<void>` | 踢出指定浏览器连接（桌面与 RPC 路径均记操作者归因） | — |
+| `QueryAuditLog` | `(opts) => Promise<AuditQueryResult>` | 查询审计历史（事件类型 / 时间窗 / 分页）；**仅桌面端**，浏览器 RPC 经 `RPCHiddenMethods` 屏蔽 | AuditQueryResult |
+| `BanIP` | `(ip, expiresAt, reason) => Promise<void>` | 手动封禁来源 IP（落 `data/ip_bans.json`；白名单/回环拒绝） | — |
+| `UnbanIP` | `(ip) => Promise<void>` | 手动解封 IP（无匹配 no-op 成功） | — |
+| `BanCIDR` | `(cidr, expiresAt, reason) => Promise<void>` | 手动封禁网段（网段被白名单完全覆盖时拒绝） | — |
+| `UnbanCIDR` | `(cidr) => Promise<void>` | 手动解封网段（幂等） | — |
+| `ListIPBans` | `() => Promise<IPBanStatus[]>` | IP / 网段封禁清单（来源手动/自动、到期时间、失败计数）；**仅桌面端** | IPBanStatus 数组 |
+| `ListIPBanSuggestions` | `() => Promise<IPBanAggregateSuggestion[]>` | 同网段多来源被封禁时的网段封禁建议；**仅桌面端** | 建议数组 |
+| `QueryIPBanTrend` | `() => Promise<IPBanTrendResult>` | 基于审计历史聚合近 N 天各网段自动封禁趋势与处置次数；**仅桌面端** | IPBanTrendResult |
+| `SetIPBanConfig` | `(threshold, windowMinutes, durationMinutes, maxBanDurationMinutes, aggregateSuggestThreshold, trendWindowDays, whitelist) => Promise<void>` | 自动封禁参数与 CIDR 白名单「保存+生效」热更 | — |
+| `SetAuditConfig` | `(maxBytesMB, depth) => Promise<void>` | 审计日志留存（单档大小 / 轮转档数）「保存+生效」热更 | — |
 
 ---
 
@@ -534,6 +564,20 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `MoveAssetFiles` | `(libraryID, fileIDs: number[], targetFolder) => Promise<AssetBatchMoveResult>` | 文件批量移动（fileIDs 去重；目标目录存在/非排除命中/非派生容器整体校验；单文件跨盘/重名/源缺失/解析中/replace 单页产物（提示整体移动产物容器目录）拒绝；每条目一事务逐条目提交（files.path 更新 + split_records 源路径同事务重写），部分失败不中断逐条目明细返回；FTS 零重建（检索列不含路径）+ 排除规则双向翻转） | AssetBatchMoveResult |
 | `GetAssetFolderMeta` | `(libraryID, folderPath) => Promise<AssetFolderMeta>` | 读文件夹标注（业务备注 + 标签集，标签 ID 口径与文件/页标签同源 tags 表；未标注目录返回零值形态；库根/排除命中目录/派生容器禁标注） | AssetFolderMeta |
 | `UpdateAssetFolderMeta` | `(libraryID, folderPath, meta: AssetFolderMetaUpdate) => Promise<void>` | 文件夹标注编辑（整体替换：备注 + 标签集（不存在的标签自动创建）；纯标注层不入 FTS、不触发重解析与缩略图失效；守卫与读取同口径） | — |
+| `DeleteAssetFile` | `(libraryID, fileID) => Promise<void>` | 删除单个素材文件：磁盘删除 + 索引行 `markFileLost` 收口（标注/评分/缩略图记账无损保留）；解析中、拆分派生产物、记录不存在/路径越界拒绝 | — |
+| `UpdateAssetSlideMeta` | `(libraryID, fileID, slideNum, meta: AssetSlideMetaUpdate) => Promise<void>` | 幻灯片页级标注整体替换（业务备注 / 星级 / 页自有标签，与文件标签存储独立）；纯标注层，不触发重解析与缩略图失效，业务备注不入 FTS | — |
+| `ListAssetTags` | `(libraryID) => Promise<AssetTagListItem[]>` | 全量标签树数据源（含未使用标签）：父级 ID（0=根）、组内 `sort_order`、直接绑定计数（文件 + 页自有绑定） | AssetTagListItem[] |
+| `CreateAssetTag` | `(libraryID, name, parentID, color) => Promise<AssetTag>` | 新建标签（重名拒绝；`parentID≠0` 须为已存在标签；`color` 空则按名称确定性分配默认色） | AssetTag |
+| `UpdateAssetTag` | `(libraryID, tagID, name, parentID, color) => Promise<void>` | 标签编辑（重命名 / 改色 / 移动父级整体提交；重名与成环拒绝） | — |
+| `DeleteAssetTag` | `(libraryID, tagID) => Promise<number>` | 删除标签：级联删自身与全部后代并解除全部绑定（单事务，不删素材），返回解除绑定行数 | number |
+| `MoveAssetTag` | `(libraryID, tagID, newParentID, index) => Promise<void>` | 标签拖拽排序 / 移动父级（`newParentID=0` 移到根级，`index` 为目标组内最终序号）；事务内防环 + 新旧组序号连续化 | — |
+| `BatchUpdateAssetFileTags` | `(libraryID, fileIDs, op: AssetBatchTagOp) => Promise<AssetBatchTagResult>` | 文件批量打标签（相对语义「现标签集 − removeTags ∪ addTags」，非整体替换）；每条目一事务，部分失败不中断，逐条明细返回 | AssetBatchTagResult |
+| `BatchUpdateAssetSlideTags` | `(libraryID, targets: AssetSlideTarget[], op: AssetBatchTagOp) => Promise<AssetBatchTagResult>` | 页自有标签批量打标签（目标键 `(fileId, slideNum)`）；纯标注层，明细与校验口径同文件批量 | AssetBatchTagResult |
+| `BatchSetAssetRating` | `(libraryID, targets: AssetRatingTarget[], rating) => Promise<AssetBatchRatingResult>` | 批量评分：单一入口混合文件条目（`slideNum=0`）与页条目（`slideNum≥1`，业务备注保留）；`rating` 0-5，0=清除；每条目一事务 | AssetBatchRatingResult |
+| `RebuildAssetFolder` | `(libraryID, folderPath) => Promise<AssetScanResult>` | 子目录级重建：只清该前缀的文件/幻灯片/检索索引/缩略图记录后重扫该子目录；标注按相对路径重绑；库根空串与排除命中目录拒绝；扫描中报 `E_ASSETS_SCAN_IN_PROGRESS` | AssetScanResult |
+| `ListAssetSavedSearches` | `() => Promise<AssetSavedSearch[]>` | 全部保存的检索条件（全局存储，条目带 `libraryId` 与 `tagNames` 快照，异库调取时前端按名称重映射） | AssetSavedSearch[] |
+| `SaveAssetSavedSearch` | `(search) => Promise<AssetSavedSearch>` | 保存检索条件（upsert：ID 0=新增并回传 ID/createdAt，非 0=覆盖且保留原 createdAt；名称全局唯一） | AssetSavedSearch |
+| `DeleteAssetSavedSearch` | `(id) => Promise<void>` | 删除指定保存条件（不存在报错，前端列表过期时刷新重试） | — |
 
 ### 29.1 素材购物栏（跨库页级收集与合并导出）
 
@@ -547,15 +591,72 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `ClearAssetCart` | `() => Promise<void>` | 清空购物栏 | — |
 | `ReorderAssetCart` | `(orderedKeys: string[]) => Promise<void>` | 拖拽排序回写（须为当前栏内键的完整排列，缺失/多余报错防丢条目） | — |
 | `MergeAssetCartToPptx` | `(outPath) => Promise<PptxMergeResult>` | 按购物栏顺序合并导出新 PPT（基底=清单第一项源文件 GC 后，其余源整链注入；失效条目跳过计入 SkippedItems，基底缺失整体失败；导出中重复触发报 `E_CART_EXPORT_IN_PROGRESS`；可取消，取消无半态产物） | PptxMergeResult |
-| `CancelAssetCartExport` | `() => boolean` | 取消在途导出（幂等，无在途返回 false） | boolean |
+| `CancelAssetCartExport` | `() => Promise<boolean>` | 取消在途导出（幂等，无在途返回 false） | boolean |
 
 ---
 
-## 30. 数据模型
+## 30. 分支对比
+
+活动栏「分支对比」只读第一期：A/B 分支提交对齐、差异文件树与文件 diff。本域只读查询不抢仓级锁；patch-id 批量管道内置 2 分钟专用超时，失败降级为仅 hash/subject 匹配。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `GetBranchCompareAlignment` | `(repoPath, branchA, branchB) => Promise<BranchCompareAlignment>` | 两分支提交对齐（merge-base + 双侧区间日志各限 2000 条 + patch-id 批量管道 + 贪心三级配对 hash→patch-id→subject） | BranchCompareAlignment |
+| `GetBranchCompareFileTree` | `(repoPath, branchA, branchB) => Promise<BranchDiffFile[]>` | 分支差异文件树（两侧 `ls-tree` 并集，含 unchanged、rename 新旧双路径与单趟 numstat 行数） | BranchDiffFile[] |
+| `GetBranchCompareFileDiff` | `(repoPath, base, target, filePath) => Promise<string>` | 指定文件在 base→target 间的 unified diff 原文（二进制返回空串，前端占位提示） | diff 文本 |
+| `GetCommitChangedFiles` | `(repoPath, sha) => Promise<FileChange[]>` | 指定提交的变更文件列表（对齐表提交行详情弹层；`staged` 恒 false） | FileChange[] |
+
+---
+
+## 31. 进程管理
+
+工具箱「进程管理」与「端口占用」共用枚举底座：按端口号或进程名检索本机进程，停止采用「先请求优雅退出 → 5 秒轮询存活 → 未退转强杀」。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `ListProcesses` | `(keyword, mode) => Promise<ProcessInfo[]>` | 检索本机进程；`keyword` 空列出全部监听进程，`mode` 取 `auto`/`port`/`name`（空串按 auto） | ProcessInfo[] |
+| `StopProcess` | `(pid, killTree) => Promise<ProcessStopResult>` | 两级停止：先发优雅停止请求，5 秒内未退出自动强杀；返回值 `method` 如实反映最终生效手段（graceful/forced） | ProcessStopResult |
+| `KillProcess` | `(pid, killTree) => Promise<void>` | 强制终止进程（跳过优雅阶段）；`killTree=true` 连带子进程 | — |
+
+---
+
+## 32. 环境变量
+
+工具箱「环境变量」只读查看器：Windows 分系统/用户/进程三级，Linux 仅进程级；敏感命名打码由前端展示层处理，`value` 恒为真实值。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `ListEnvVars` | `() => Promise<EnvVarGroup[]>` | 枚举环境变量并按来源分组；单来源失败不拖垮整体，错误随分组 `error` 字段下发 | EnvVarGroup[] |
+
+---
+
+## 33. hosts 文件
+
+工具箱「hosts 文件」只读查看器：解析 IP / 主机名 / 行内注释，保留空行与未识别行；读取失败经 `HostsView.error` 下发，不整体报错。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `GetHosts` | `() => Promise<HostsView>` | 读取并解析本机 hosts（Windows `drivers/etc/hosts` / Linux `/etc/hosts`） | HostsView |
+
+---
+
+## 34. PPT 拆分
+
+工具箱「PPT 拆分」：纯 Go OOXML 按页拆分，母版/版式/主题/媒体逐字节保留。进度/终态经 `pptx-split:*` 事件推送，取消属预期拒绝（前端 warning 中性提示）。
+
+| 方法 | 签名 | 语义 | 返回值 |
+|---|---|---|---|
+| `SplitPptxPerPage` | `(srcPath) => Promise<PptxSplitResult>` | 单文件按页拆分：产物落源文件同级同名文件夹，返回输出目录与生成文件列表 | PptxSplitResult |
+| `SplitPptxFolder` | `(dirPath) => Promise<PptxBatchResult>` | 文件夹批量拆分：递归扫描并排除历史拆分产物，串行逐个拆分；单文件失败不中断，返回逐文件汇总 | PptxBatchResult |
+| `CancelPptxSplit` | `() => Promise<boolean>` | 取消全部在途拆分（当前文件中止、剩余不再开始、已完成保留）；无在途返回 false | 是否取消了至少一项 |
+
+---
+
+## 35. 数据模型
 
 全部提取自 `frontend/wailsjs/go/models.ts`（`model` namespace；`frontend` namespace 含 `FileFilter`）。字段名按 Go json tag 映射，`omitempty` 对应 TS `?:` 可选。以下列出关键 struct，完整定义见 `models.ts`。
 
-### 30.1 目录与文件
+### 35.1 目录与文件
 
 **Directory** — 工作目录
 
@@ -618,7 +719,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `status` | string | 变更状态：M/A/D/R/? |
 | `staged` | boolean | 是否已暂存 |
 
-### 30.2 Git
+### 35.2 Git
 
 **GitRepoInfo** — 仓库概览
 
@@ -660,7 +761,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **RepoStats** — 仓库统计（`trend`: TimeBucket[]，`contributors`: Contributor[]，`heatmap`: DayCount[]，`totalCommits` / `dateRange` / `granularity` / `sampled`）
 
-### 30.3 会话快照
+### 35.3 会话快照
 
 **SessionState** — 崩溃恢复 UI 状态快照
 
@@ -674,9 +775,9 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **TerminalSnapshot**（`visible` / `height` / `workDir`（旧版单终端兼容读取源，新快照不写入）/ `tabs`（v2 多终端 tab 列表 `TerminalTabSnapshot[]`：`workDir` / `shellType`）/ `activeIndex` / `fullscreen`）
 
-### 30.4 设置与更新
+### 35.4 设置与更新
 
-**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `tessoaPath`（tessoa 自定义路径，「打开资源管理器」优先使用）/ `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `webServe` / `assets`（AssetThumbsSettings 缩略图设置段））。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 1000，字体空串走默认 Cascadia Code 栈）
+**AppSettings** — 应用设置（`gpuDisabled` / `defaultShell` / `gitBashPath` / `wslDistro` / `terminalFontSize` / `terminalFontFamily` / `terminalScrollback` / `terminalOscNotifyEnabled` / `searchExcludeDirs` / `searchExcludeFiles` / `shortcutCommandPalette` / `shortcutToggleTerminal` / `shortcutRename` / `shortcutDelete` / `obsidianPath` / `tessoaPath`（tessoa 自定义路径，「打开资源管理器」优先使用）/ `themeMode` / `diffToolName` / `diffToolPath` / `diffToolArgs` / `diffToolMergeArgs`（custom 三向合并参数模板）/ `webServe`（WebServeSettings 指针段）/ `assets`（AssetThumbsSettings 缩略图设置段）/ `ipban`（IPBanSettings 自动封禁参数段）/ `audit`（AuditSettings 审计留存段））。四个指针段加载时分别经 `EnsureWebServeDefaults` / `EnsureAssetsThumbsDefaults` / `EnsureIPBanDefaults` / `EnsureAuditDefaults` 补默认值。终端外观三字段加载时经 `EnsureTerminalDefaults` 补默认值并收敛越界值（字号 10-24 默认 14、回滚 1000-10000 默认 5000，字体空串走默认 Cascadia Code 栈）
 
 **WebServeSettings** — 浏览器访问通道配置（`AppSettings.webServe` 段；指针形态区分「段缺失」与「显式关闭」，加载时经 `EnsureWebServeDefaults` 补默认值）
 
@@ -696,7 +797,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **UpdateInfo** — 更新信息（`hasUpdate` / `currentVer` / `latestVer` / `downloadUrl` / `releaseNotes` / `publishedAt` / `fileSize`）
 
-### 30.5 AI
+### 35.5 AI
 
 **AiFunction** — AI 功能配置（`id` / `name` / `description` / `icon` / `command` / `cwd` / `addDirs` / `env` / `mcp` / `permissionMode` / `timeoutMinutes` / `completion` / `params` / `followUps` / `tags` / `pinned`）
 
@@ -714,7 +815,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ImportPreview** — AI 功能导入预览（`new` / `conflict`: AiFunction[]，`invalid`: string[]）
 
-### 30.6 AI 对话
+### 35.6 AI 对话
 
 **ChatSession** — 对话会话（元数据入 `data/ai_chat/sessions.json` 索引；消息逐会话存 `data/ai_chat/messages/<sessionId>.json`，`GetChatSession` 加载时填充）
 
@@ -757,7 +858,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 | `name` / `content` | string | 模板名（下拉展示）/ 模板正文（纯文本） |
 | `createdAt` / `updatedAt` | number | 创建 / 修改时间 unix 毫秒 |
 
-**ChatSettings** — 执行配置（持久化 `data/ai_chat/settings.json`；`permissionMode` 取 `default`/`acceptEdits`/`plan`/`bypassPermissions`，`modelName` 空 = claude 默认模型）
+**ChatSettings** — 执行配置（持久化 `data/ai_chat/settings.json`；`permissionMode` 取 `default`（手动确认，CLI 的 Manual）/`acceptEdits`/`plan`/`auto`/`dontAsk`/`bypassPermissions` 六档，`modelName` 空 = claude 默认模型；空串归一为 `default`，spawn 时恒显式传 `--permission-mode`）
 
 **ChatTaskState** — 对话任务当前状态（`GetChatTaskState` 拉取，切页恢复/轮询兜底；`taskId` / `chatSessionId` / `running` / `queued` / `claudeSessionId` / `reply`（本轮回复累积文本）/ `error` / `startedAt`）
 
@@ -765,7 +866,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **ChatApprovalRequest** — 工具授权请求（`chat-approval:request` 事件 payload；`requestId`（claude 侧 UUID，应答匹配键）/ `chatSessionId` / `taskId`（所属在途轮次）/ `toolName` / `input`（工具入参 map，弹窗展示） / `description`）
 
-### 30.7 素材管理
+### 35.7 素材管理
 
 **AssetLibrary** — 素材库注册信息（`id`（随机 hex，同时是库 db 文件名）/ `name` / `rootPath` / `excludeDirs`?: string[]（排除文件夹 glob 规则，单段通配按文件夹名匹配）/ `excludeExts`?: string[]（忽略后缀，带点小写归一）/ `createdAt` / `updatedAt`）
 
@@ -821,7 +922,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **AssetBackupEntry** — 素材库备份条目（SRS §2.7.5：`libraryId` / `fileName`（`<yyyyMMdd-HHmmss>[_序号].db`）/ `path`（备份文件绝对路径，还原时原样回传）/ `sizeBytes` / `createdAt`（由文件名时间戳解析）；备份为整库 SQLite 快照（VACUUM INTO 产物），缩略图 PNG 与拆分产物不在范围）
 
-### 30.8 其他
+### 35.8 其他
 
 **Favorite**（`path` / `alias` / `group` / `createdAt`）
 
@@ -859,7 +960,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **PptxSubsetResult** — 多页子集导出结果（`outputPath` / `pages`: number[]（去重升序）/ `pageCount`；单文件内页集合导出核心，供合并层复用）
 
-### 30.9 具名 string 类型
+### 35.9 具名 string 类型
 
 `model/commit.go` 定义的两个具名 string 类型，作方法参数时 `App.d.ts` 保留 `model.X` 引用：
 
@@ -872,7 +973,7 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-## 31. 深度查询入口
+## 36. 深度查询入口
 
 本清单为静态快照。需要查询方法调用链、service 实现、字段影响面等动态结构信息时，使用项目内置的 CodeGraph 索引（`.codegraph/`，SQLite 知识图谱，全仓库符号/调用边/文件索引，规模以 `codegraph status` 实时查询为准）：
 
@@ -888,4 +989,4 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 ---
 
-**最后更新：** 2026-10-14
+**最后更新：** 2026-11-06

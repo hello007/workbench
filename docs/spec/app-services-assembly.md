@@ -16,7 +16,7 @@
 
 原 `App` struct 在 `app.go` 持 16 个 service/cache 字段，`startup()` 手动 `new`，构造签名五类混杂（无参 / configPath / dataDir 子路径 / ctx / 跨依赖）。新增 service 须手改 startup 且易漏跨依赖。
 
-调研（[research/di-approach.md](.trellis/tasks/09-12-wire-service/research/di-approach.md)）结论：本项目依赖图极扁平（16 个 service/cache、仅 1 条跨依赖边 `SkillDiscovery → Directory`），生命周期重（`os.Exit` / goroutine / `CloseAll`），Wire 图求解价值闲置且引入双生成器复杂度，fx 运行时反射对桌面二进制风险高。采用方案 A 手写聚合。
+调研（[research/di-approach.md](../../.trellis/tasks/archive/2026-09/09-12-wire-service/research/di-approach.md)）结论：本项目依赖图极扁平（16 个 service/cache、仅 1 条跨依赖边 `SkillDiscovery → Directory`），生命周期重（`os.Exit` / goroutine / `CloseAll`），Wire 图求解价值闲置且引入双生成器复杂度，fx 运行时反射对桌面二进制风险高。采用方案 A 手写聚合。
 
 ## 3. 契约
 
@@ -29,13 +29,13 @@
 ### 3.2 内嵌字段提升零 diff
 
 - `App` 内嵌 `*AppServices`（非持字段），借 Go 字段提升使 `a.directorySvc` 等直接可达
-- 138 个 `app_*.go` 委托方法 `a.xxxSvc.Method()` 零改动
+- 277 个 `app_*.go` 委托方法 `a.xxxSvc.Method()` 零改动（加 `app.go` 的 `GetAppVersion` 共 278 个绑定）
 - Wails 绑定（App.js / App.d.ts）由 `wails generate module` 重生成，因导出方法签名零变更，绑定零 diff（已验证）
 
 ### 3.3 包归属关键
 
 - `AppServices` 须定义在 `package main`，**不可放 `package service`**
-- 原因：Go 跨包内嵌时未导出字段不提升。若 `AppServices` 在 service 包且字段小写（`directorySvc`），main 包内 `a.directorySvc` 编译失败；字段大写（`DirectorySvc`）则 138 委托方法全改 `a.DirectorySvc`
+- 原因：Go 跨包内嵌时未导出字段不提升。若 `AppServices` 在 service 包且字段小写（`directorySvc`），main 包内 `a.directorySvc` 编译失败；字段大写（`DirectorySvc`）则 277 委托方法全改 `a.DirectorySvc`
 - 放 main 包字段保持小写，内嵌提升同包可见，零 diff 成立
 
 ### 3.4 构造与生命周期分离
@@ -101,4 +101,4 @@ fx 在桌面单进程场景无明确升级触发条件（运行时反射对分�
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — Wails 绑定契约，本范式保证方法签名零变更从而绑定零 diff
 - [test-coverage-gate.md](test-coverage-gate.md) — service ≥76% 基线，重构不可降
-- [research/di-approach.md](.trellis/tasks/09-12-wire-service/research/di-approach.md) — Wire vs 手写聚合 vs fx 选型调研
+- [research/di-approach.md](../../.trellis/tasks/archive/2026-09/09-12-wire-service/research/di-approach.md) — Wire vs 手写聚合 vs fx 选型调研

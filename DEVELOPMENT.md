@@ -1,5 +1,8 @@
 # WorkBench - 开发运维文档
 
+> **⚠️ 已过时（v1.0 历史文档）**：本文停留在 2026-04 的早期形态（Go 1.21 / Node 16 / Wails v2.5、`println` 日志、`git pull` 工作流等），不代表现状。
+> 现行开发文档请以 [docs/开发工作流.md](docs/开发工作流.md)、[docs/贡献指南.md](docs/贡献指南.md)、[docs/开发规范.md](docs/开发规范.md) 与仓根 [AGENTS.md](AGENTS.md) 为准。
+
 ## 环境要求
 
 ### 必需工具

@@ -60,6 +60,7 @@
 |[terminal-chat-link.md](terminal-chat-link.md)|AI 对话 × 终端联动契约（代码块「在终端执行」）：后端零改动，链路 AiChatPanel→uiStore 信箱（seq 单调递增防去重、消费即清空）→TerminalPanel 直调 WriteTerminalInput；**命令结尾禁带换行**（=自动回车）且取 pre code textContent（勿存 data 属性）；事件委托分流顺序 chat-question→cmd-run→链接；时序三态（未就绪补偿/无 tab 新建/进程死重启重试）；fence 渲染形态锚点与 renderMsgMarkdown 替换、spec 整串断言三方联动|
 |[aggregated-workspace.md](aggregated-workspace.md)|聚合视图（虚拟工作区）契约：收藏目录平铺的虚拟根 + 后端 `GetAggregatedRootNodes` 一次收口存在性判定与 git 徽标；`FileTreeNode.Missing` 失效占位（禁静默丢弃，文件类收藏跳过）；聚合树状态 key `treeState:__aggregated__` 与普通树隔离；筛选作用域聚合模式**不回退工作目录**（未点击目录即不拉取）、展开回溯按最长前缀收藏根；收藏增删后 `refreshAggregatedRoot` 重建根层；「设为工作目录」四步编排（复用/新增目录 → 退出聚合 → 切目录 → 定位）；`RPCHiddenMethods` 与 deepCopyNode 同步义务|
 |[url-opening.md](url-opening.md)|外链打开出口单点 ADR（2026-11-05）：http(s) 外链禁 `window.open`/`location.href`（Wails WebView2 下内嵌导航不经系统 shell），唯一出口 `runtime.BrowserOpenURL` + 出口函数内 http(s) 前置校验；serve 桥 transport/events.js 属出口实现豁免；vscode:// 深链（CommandPalette）为已知待收口例外；仓内四先例（AiChatPanel/GitInfo/FilePreviewRenderer/useTerminal）与单测 stub 范式|
+|[el-tree-expand-state.md](el-tree-expand-state.md)|el-tree 展开面维护契约：`FolderTree.syncExpandedKeysFromStore` 单点为可达展开面过滤（收起须连带剔除其展开中子孙，防 EP `default-expanded-keys` 回放祖先链翻回；收起须 `nextTick`，EP 事件早于落值）；批量展开/收起禁直改 `expandedKeys`，须经 `store.nodesMap` 并统一回写；展开/收起行为断言禁自造 el-tree 桩（假绿），须真实 EP mount|
 
 ## 新增文档约定
 
@@ -71,4 +72,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-11-05
+**最后更新：** 2026-11-06
