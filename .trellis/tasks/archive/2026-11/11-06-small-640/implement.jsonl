@@ -1,0 +1,2 @@
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "缩略图双档分辨率、配额、设置变更清档重建链路与缓存键口径，本任务直接改动 small 档默认值"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "设置段默认值补全与私有拷贝双单点（EnsureAllDefaults / PrivateCopy），迁移逻辑须挂在这条单点链上"}

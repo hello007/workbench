@@ -1,0 +1,4 @@
+{"file": "docs/spec/assets-thumbs-com.md", "reason": "核对默认值、迁移与清档重建语义是否与缩略图域既有契约一致"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对设置段变更是否仍走 EnsureAllDefaults 单点，未在消费点手抄迁移逻辑"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增单测覆盖 model 层 80% 门禁要求"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对设置界面文案与控件改动是否符合前端视觉与交互约定"}
