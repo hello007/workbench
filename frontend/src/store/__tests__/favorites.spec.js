@@ -52,6 +52,23 @@ describe('favorites store', () => {
     expect(result).toBe('')
   })
 
+  it('updates alias and reloads favorites so consumers see the new alias', async () => {
+    const { UpdateFavoriteAlias, GetFavorites } = await import('../../../wailsjs/go/main/App')
+    // 别名保存成功后须重载列表：聚合树与命令面板直接消费 favorites，不重载会持旧别名
+    GetFavorites.mockResolvedValueOnce([
+      { path: 'C:\\projects\\app', alias: '重命名后', group: '默认', createdAt: 1000 }
+    ])
+    const store = useFavoritesStore()
+    const callsBefore = GetFavorites.mock.calls.length
+
+    const result = await store.updateAlias('C:\\projects\\app', '重命名后')
+
+    expect(UpdateFavoriteAlias).toHaveBeenCalledWith('C:\\projects\\app', '重命名后')
+    expect(result).toBe('')
+    expect(GetFavorites.mock.calls.length).toBe(callsBefore + 1)
+    expect(store.favorites[0].alias).toBe('重命名后')
+  })
+
   it('updates group', async () => {
     const { UpdateFavoriteGroup } = await import('../../../wailsjs/go/main/App')
     const store = useFavoritesStore()

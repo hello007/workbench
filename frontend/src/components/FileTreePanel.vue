@@ -293,7 +293,18 @@
       @click.stop
       @mousedown.stop
     >
-      <template v-if="contextMenu.isBlankArea">
+      <!-- 聚合视图空白区：虚拟根不落盘、无明确新建落点，仅保留刷新与粘贴。
+           粘贴目标 = 最后点击的目录节点（contextMenu.data 已由 onBlankAreaContextMenu 绑定）；
+           无有效目标时隐藏粘贴项。工作目录语义的仓库筛选器/统计/看板项一并隐藏。 -->
+      <template v-if="contextMenu.isBlankArea && aggregatedMode">
+        <li class="context-menu-item" data-action="aggregated-blank-refresh" @click="onMenuCommand('refresh')">
+          <el-icon><Refresh /></el-icon>刷新
+        </li>
+        <li v-if="contextMenu.data?.path" class="context-menu-item" data-action="aggregated-blank-paste" @click="onMenuCommand('paste')">
+          <el-icon><DocumentCopy /></el-icon>粘贴
+        </li>
+      </template>
+      <template v-else-if="contextMenu.isBlankArea">
         <li class="context-menu-item" @click="onMenuCommand('createFile')">
           <el-icon><DocumentAdd /></el-icon>新建文件
         </li>
@@ -1016,6 +1027,21 @@ const findAggregatedRootFor = (nodePath) => {
   return best
 }
 
+// 收藏根判定：判定依赖与 findAggregatedRootFor 同源（同一匹配面 + 同一路径归一），
+// 禁另写前缀比较，否则「被剔除的嵌套收藏」或分隔符写法差异会让判定与定位分叉。
+const isAggregatedRoot = (nodePath) => {
+  const root = findAggregatedRootFor(nodePath)
+  return !!root && normalizeComparablePath(root) === normalizeComparablePath(nodePath)
+}
+
+// 相对路径基准：聚合视图以节点所属收藏根为基准（无命中回退节点自身，避免把
+// 收藏范围外路径错切到工作目录下）；普通树沿用当前工作目录，语义不变。
+// 「复制相对路径」与「文件引用路径」共用此基准，避免两者口径分裂。
+const relativePathBase = (nodePath) => {
+  if (aggregatedMode.value) return findAggregatedRootFor(nodePath) || nodePath
+  return directoryStore.currentDirPath
+}
+
 // ---- 沿父路径向上回溯，找到第一个已展开的祖先节点 ----
 // 聚合视图按收藏根回溯（收藏根是树一级节点、在 nodesMap 中存在，可本身作为回溯终点）；
 // 普通树按工作目录回溯（根不在 nodesMap，回溯到根返回 null 由 store.root 兜底）。
@@ -1069,6 +1095,21 @@ const refreshNode = async (nodePath, options = {}) => {
   // 调用维持退筛选现行为
   if (!options.keepFilter) {
     exitFilterMode()
+  }
+
+  // 聚合视图刷新收藏根本身：根行徽标（isGitRepo/hasRemote）来自后端根层加载时的一次
+  // 探测，refreshNode 只重载子层会保留旧徽标快照（在收藏根上 git init / git remote add
+  // 后刷新看不到变化）；改走整层重建以重新查询根节点徽标。收藏根的子目录刷新不受影响。
+  // 必须先清后端 git 徽标缓存，否则整层重建命中的仍是旧 isGitRepo/hasRemote 结论
+  // （GetRootNodesForPaths 复用 isGitRepoDir/hasRemote 缓存，不引入 TTL）。
+  if (aggregatedMode.value && isAggregatedRoot(nodePath)) {
+    try {
+      await InvalidateFileTreeCache(nodePath)
+    } catch (error) {
+      console.error('Error clearing file tree cache:', error)
+    }
+    await refreshAggregatedRoot()
+    return
   }
 
   const store = fileTreeRef.value.store
@@ -1247,6 +1288,45 @@ const refreshAggregatedRoot = async () => {
   await restoreTreeState(directoryStore.currentDirPath, true)
 }
 
+// ---- 聚合视图空白区「刷新」：清全部树/徽标缓存 + 整层重建 ----
+// 与节点右键刷新（refreshNode）刻意区分：节点刷新只失效目标路径或其子层（收藏根分支
+// 走 InvalidateFileTreeCache 定向失效），而空白区刷新语义是「整树刷新」，对齐目录树的
+// refreshAll：先清全部树/徽标缓存再重建根层。否则 GetRootNodesForPaths 复用的
+// isGitRepoDir/hasRemote 缓存无 TTL，根行徽标仍命中原有旧结论（收藏根上
+// git init / git remote add 后点空白区刷新看不到徽标变化）。
+// 清缓存失败只记录错误、不阻断重建（与 refreshAll 同口径）。
+const refreshAggregatedRootWithCache = async () => {
+  try {
+    await ClearAllFileTreeCache()
+  } catch (error) {
+    console.error('Error clearing file tree cache:', error)
+  }
+  await refreshAggregatedRoot()
+}
+
+// ---- 收藏外部变更 → 重建聚合根层 ----
+// 覆盖不经过本组件 handleAdd/handleRemove 的入口：命令面板取消收藏、配置导入后
+// loadFavorites、收藏别名修改（store.updateAlias 成功后重载列表）。本组件显式调用
+// refreshAggregatedRoot 与 watch 可能双触发，重建幂等（整层重拉 + 展开态恢复）。
+// 100ms 去抖合并批量变化（配置导入一次改多条）；代次守卫丢弃「调度后已切换模式 /
+// 已有新一轮重建」的过期调度，与既有 modeSwitchSeq 重建链一致。
+let favoritesWatchTimer = null
+
+watch(
+  () => favoritesStore.favorites,
+  () => {
+    if (!aggregatedMode.value) return
+    const seq = modeSwitchSeq
+    clearTimeout(favoritesWatchTimer)
+    favoritesWatchTimer = setTimeout(() => {
+      favoritesWatchTimer = null
+      if (seq !== modeSwitchSeq || !aggregatedMode.value) return
+      refreshAggregatedRoot()
+    }, 100)
+  },
+  { deep: true }
+)
+
 // ---- 全部展开 ----
 const expanding = ref(false)
 
@@ -1380,7 +1460,8 @@ const onBlankAreaContextMenu = (event) => {
   event.stopPropagation()
 
   const dir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
-  if (!dir) return
+  // 聚合视图无工作目录语义：虚拟根下不依赖当前工作目录，无工作目录时仍可刷新
+  if (!aggregatedMode.value && !dir) return
 
   emit('contextmenu')
 
@@ -1389,14 +1470,28 @@ const onBlankAreaContextMenu = (event) => {
 
   contextMenu.x = x
   contextMenu.y = y
-  contextMenu.data = { path: dir.path, name: dir.name, type: 'directory' }
+  if (aggregatedMode.value) {
+    // 聚合虚拟根不落盘，不伪装成某个工作目录节点：空白区本身没有落点。
+    // 粘贴目标取最后点击的目录节点（缺失收藏/截断哨兵不可作为落点），
+    // 无有效目标时留空 path，模板据此隐藏粘贴项、仅保留刷新。
+    const last = lastClickedNodeData.value
+    const pasteTarget = last && last.type === 'directory' && !last.missing && !isTruncationHint(last)
+      ? last
+      : null
+    contextMenu.data = pasteTarget
+      ? { path: pasteTarget.path, name: pasteTarget.name, type: 'directory' }
+      : { path: '', name: '', type: 'directory' }
+  } else {
+    contextMenu.data = { path: dir.path, name: dir.name, type: 'directory' }
+  }
   contextMenu.isBlankArea = true
   contextMenu.targetPinned = false
   contextMenu.visible = true
 
   // 当前工作目录为 git 仓库才查 pin 状态（用于右键「加入/取消关注状态看板」文案切换）
   // 守卫用 path 而非对象引用：空白区 data 每次新建对象 === 失效
-  if (blankAreaIsGitRepo.value) {
+  // 聚合视图菜单不含仓库统计/看板项，跳过该查询
+  if (!aggregatedMode.value && blankAreaIsGitRepo.value) {
     const targetPath = dir.path
     IsDashboardPinned(targetPath).then(pinned => {
       // 菜单可能已关闭或切换目标，仅当目标仍是当前 data 时生效
@@ -1431,6 +1526,8 @@ const onGlobalContextMenu = () => {
 // ---- 菜单命令分发 ----
 const onMenuCommand = (command) => {
   const data = contextMenu.data
+  // closeContextMenu 会复位 isBlankArea，先固化本次菜单语境供 refresh 分支分流
+  const wasBlankArea = contextMenu.isBlankArea
   closeContextMenu()
   if (!data) return
 
@@ -1466,10 +1563,10 @@ const onMenuCommand = (command) => {
       copyToClipboard(data.path.replaceAll('\\', '/'), '路径')
       break
     case 'copyRelativePath':
-      copyToClipboard(toRelativePath(data.path, directoryStore.currentDirPath), '相对路径')
+      copyToClipboard(toRelativePath(data.path, relativePathBase(data.path)), '相对路径')
       break
     case 'copyRefPath':
-      copyToClipboard(toFileRefPath(data.path, directoryStore.currentDirPath), '文件引用路径')
+      copyToClipboard(toFileRefPath(data.path, relativePathBase(data.path)), '文件引用路径')
       break
     case 'copyName':
       copyToClipboard(data.name, data.type === 'directory' ? '文件夹名' : '文件名')
@@ -1490,6 +1587,13 @@ const onMenuCommand = (command) => {
       handleOpenWithDefaultApp(data.path)
       break
     case 'refresh':
+      // 聚合视图空白区「刷新」= 清全部树/徽标缓存 + 重建整个根层（虚拟根无节点可定位，
+      // refreshNode 会静默早退）；节点右键刷新仍走 refreshNode（收藏根本身由 refreshNode
+      // 内部先定向失效缓存再整层重建，见 ⑬）
+      if (aggregatedMode.value && wasBlankArea) {
+        refreshAggregatedRootWithCache()
+        break
+      }
       // 筛选语境下「刷新」= 退筛选回树并重载该节点（refreshNode 内 exitFilterMode）：
       // 用户要看树的真实状态，与重命名/删除的保语境刷新（refreshAfterFilterOp）语义不同
       refreshNode(data.path)
@@ -1513,6 +1617,10 @@ const onMenuCommand = (command) => {
       handleAddToAiChat(data)
       break
     case 'contentSearch': {
+      // 内容搜索沿用「当前工作目录 + 相对路径」口径，聚合视图刻意不改用收藏根：
+      // 后端 service/content_search.go 以 filepath.Join(workDir, subDir) 解析入参，
+      // 若传收藏根相对路径会被重新拼到工作目录下；跨工作目录的收藏根在当前绑定
+      // （无 ctx、无根参数）下无法限定作用域，属已知限制。
       const currentWorkDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
       if (currentWorkDir && data.path.startsWith(currentWorkDir.path)) {
         const relPath = data.path.slice(currentWorkDir.path.length).replace(/^[\\\/]/, '')
@@ -2206,6 +2314,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('contextmenu', onGlobalContextMenu)
   // 防抖在途时组件卸载后 runFilter 仍会拉取/写 ref/弹错误提示
   clearTimeout(filterDebounceTimer)
+  // 收藏变化去抖在途时同样清理：卸载后不得再触发聚合根重建
+  clearTimeout(favoritesWatchTimer)
 })
 </script>
 

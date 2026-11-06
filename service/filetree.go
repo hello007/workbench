@@ -136,9 +136,29 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 // 顺序恒与入参一致（收藏列表顺序），不排序不去重；一次批量调用同时收口存在性判定
 // 与 git 徽标，避免前端逐目录 IPC（前端无轻量存在性检查绑定，借道 GetFileTree 全扫
 // 或逐个 GetGitInfo 均劣）。
+//
+// 并发化（收藏上限 100，串行 os.Stat + git remote 子进程在首帧总时长可观）：
+//  1. 预处理阶段串行：空白跳过、filepath.Clean 归一、展示名计算（纯 CPU，无 IO）；
+//  2. 阶段一：仅对有效项并发 os.Stat（信号量 4 限流，避免网络盘/大目录抖动放大并发压力）；
+//  3. 阶段二：仅对「Stat 成功且是目录」的项并发探测 git 徽标（信号量 4）；isGitRepoDir 为
+//     纯 Stat，hasRemote 会 fork git 子进程，二者共用同一限流避免子进程风暴；
+//  4. 收尾串行按入参下标组装输出，顺序不依赖并发完成次序。
+//
+// 内存安全：两个阶段的 goroutine 均只写各自入参下标的预分配切片，互不重叠，
+// 故不需要互斥锁，也不使用共享可变切片 append。
+//
+// 刻意不做整体超时：Wails 绑定签名没有 ctx，且网络盘的 os.Stat 是不可中断的阻塞
+// 系统调用；强行超时只能靠独立 goroutine 丢弃结果，存在 goroutine 泄漏风险。
+// 本批仅通过并发化降低总时长，不承诺最坏耗时有上界。
 func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTreeNode {
-	nodes := make([]*model.FileTreeNode, 0, len(paths))
-	for _, raw := range paths {
+	// ---- 预处理：串行归一（纯 CPU） ----
+	type pathEntry struct {
+		path string
+		name string
+	}
+	entries := make([]pathEntry, len(paths))
+	valid := make([]bool, len(paths))
+	for i, raw := range paths {
 		// 空白路径（含纯空白串）跳过：Stat 失败会产出不可读的 Missing 占位，
 		// 与「收藏目录已失效」的兜底语义混淆
 		if strings.TrimSpace(raw) == "" {
@@ -158,9 +178,68 @@ func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTree
 				name = p
 			}
 		}
-		info, err := os.Stat(p)
-		if err != nil {
-			node := model.NewFileTreeNode(name, p, "directory")
+		entries[i] = pathEntry{path: p, name: name}
+		valid[i] = true
+	}
+
+	// 并发限流：可缓冲信号量（容量即并发上限），goroutine 进出槽位成对
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+
+	// ---- 阶段一：并发存在性判定 ----
+	type statResult struct {
+		exists bool
+		isDir  bool
+	}
+	stats := make([]statResult, len(paths))
+	for i := range entries {
+		if !valid[i] {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			info, err := os.Stat(entries[idx].path)
+			if err != nil {
+				stats[idx].exists = false
+				return
+			}
+			stats[idx].exists = true
+			stats[idx].isDir = info.IsDir()
+		}(i)
+	}
+	wg.Wait()
+
+	// ---- 阶段二：仅对有效目录并发探测 git 徽标 ----
+	isRepo := make([]bool, len(paths))
+	hasRemote := make([]bool, len(paths))
+	for i := range entries {
+		if !valid[i] || !stats[i].exists || !stats[i].isDir {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			isRepo[idx] = s.isGitRepoDir(entries[idx].path)
+			if isRepo[idx] {
+				hasRemote[idx] = s.hasRemote(entries[idx].path)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// ---- 收尾：按入参下标组装，保持入参顺序 ----
+	nodes := make([]*model.FileTreeNode, 0, len(paths))
+	for i := range entries {
+		if !valid[i] {
+			continue
+		}
+		if !stats[i].exists {
+			node := model.NewFileTreeNode(entries[i].name, entries[i].path, "directory")
 			node.Missing = true
 			// 失效目录磁盘上已无子节点：显式置叶子，避免节点自相矛盾
 			// （directory 类型默认 HasChildren=true/IsLeaf=false，会诱导消费面展开一个不存在的目录）
@@ -169,13 +248,13 @@ func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTree
 			nodes = append(nodes, node)
 			continue
 		}
-		if !info.IsDir() {
+		if !stats[i].isDir {
 			continue
 		}
-		node := model.NewFileTreeNode(name, p, "directory")
-		node.IsGitRepo = s.isGitRepoDir(p)
+		node := model.NewFileTreeNode(entries[i].name, entries[i].path, "directory")
+		node.IsGitRepo = isRepo[i]
 		if node.IsGitRepo {
-			node.HasRemote = s.hasRemote(p)
+			node.HasRemote = hasRemote[i]
 		}
 		nodes = append(nodes, node)
 	}

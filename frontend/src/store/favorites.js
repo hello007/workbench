@@ -32,7 +32,13 @@ export const useFavoritesStore = defineStore('favorites', () => {
   }
 
   async function updateAlias(path, alias) {
-    return await UpdateFavoriteAlias(path, alias)
+    const err = await UpdateFavoriteAlias(path, alias)
+    // 与 add/remove 保持一致：成功后重载列表，否则聚合树与命令面板仍持旧别名
+    // （调用方仍按返回 err 判错，失败时列表保持原样）
+    if (!err) {
+      await loadFavorites()
+    }
+    return err
   }
 
   async function updateGroup(path, group) {

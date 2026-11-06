@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -406,6 +407,104 @@ func TestGetRootNodesForPaths_HasRemoteBadge(t *testing.T) {
 	}
 	if nodes[1].HasRemote {
 		t.Error("未配置 remote 的仓库应 HasRemote=false")
+	}
+}
+
+// TestGetRootNodesForPaths_ConcurrentHundredPreservesOrder 守护批量并发化：
+// 100 个混合入参（正常目录 / 不存在路径 / 文件 / git 仓库）经两阶段并发探测后，
+// 输出顺序必须严格等于「入参过滤后的顺序」，不得随 goroutine 完成次序漂移；
+// 缺失项产 Missing 占位、文件项被跳过、git/remote 徽标按各自目录正确回填。
+// 每个目录的入参位置与其创建序号错开（倒序 + 定点覆盖），保证顺序断言有判别力。
+func TestGetRootNodesForPaths_ConcurrentHundredPreservesOrder(t *testing.T) {
+	const total = 100
+	base := t.TempDir()
+
+	dirs := make([]string, total)
+	wantRepo := make([]bool, total)
+	wantRemote := make([]bool, total)
+	for i := 0; i < total; i++ {
+		d := filepath.Join(base, fmt.Sprintf("dir-%03d", i))
+		mustMkdir(t, d)
+		dirs[i] = d
+		// 每 10 个一个 git 仓库，每 20 个再加一个 origin 远程
+		if i%10 == 0 {
+			testutil.RunGit(t, d, "init")
+			wantRepo[i] = true
+			if i%20 == 0 {
+				testutil.RunGit(t, d, "remote", "add", "origin", "https://example.com/repo.git")
+				wantRemote[i] = true
+			}
+		}
+	}
+	filePath := filepath.Join(base, "notes.md")
+	mustWriteFile(t, filePath, []byte("content"))
+
+	// 入参倒序排列，再在固定下标覆盖缺失项与文件项：
+	// 若实现按并发完成顺序 append，倒序输入的输出会被打乱并被下方逐位断言捕获
+	inputs := make([]string, total)
+	for i := 0; i < total; i++ {
+		inputs[i] = dirs[total-1-i]
+	}
+	const (
+		missingAtA = 0
+		fileAt     = 10
+		missingAtB = 50
+		missingAtC = 99
+	)
+	missingA := filepath.Join(base, "missing-a")
+	missingB := filepath.Join(base, "missing-b")
+	missingC := filepath.Join(base, "missing-c")
+	inputs[missingAtA] = missingA
+	inputs[fileAt] = filePath
+	inputs[missingAtB] = missingB
+	inputs[missingAtC] = missingC
+
+	svc := NewFileTreeService()
+	nodes := svc.GetRootNodesForPaths(inputs)
+
+	// 100 项中 1 个文件项被跳过，其余（含 3 个缺失占位）全部产出
+	if len(nodes) != total-1 {
+		t.Fatalf("want %d nodes (file entry skipped), got %d", total-1, len(nodes))
+	}
+
+	out := 0
+	for i := 0; i < total; i++ {
+		if i == fileAt {
+			// 文件项不产节点；若被误当节点输出，后续逐位路径断言会整体错位失败
+			continue
+		}
+		n := nodes[out]
+		out++
+		if n.Path != inputs[i] {
+			t.Fatalf("node[%d].Path = %q, want %q（输出顺序须与入参一致）", out-1, n.Path, inputs[i])
+		}
+		if n.ID != inputs[i] {
+			t.Errorf("node[%d].ID should equal path %q, got %q", out-1, inputs[i], n.ID)
+		}
+
+		if i == missingAtA || i == missingAtB || i == missingAtC {
+			if !n.Missing {
+				t.Errorf("missing input %q should produce placeholder with Missing=true", inputs[i])
+			}
+			if n.HasChildren || !n.IsLeaf {
+				t.Errorf("missing placeholder %q should be leaf, got hasChildren=%v isLeaf=%v", inputs[i], n.HasChildren, n.IsLeaf)
+			}
+			continue
+		}
+
+		if n.Missing {
+			t.Errorf("existing directory %q should not be marked missing", inputs[i])
+		}
+		src := total - 1 - i
+		if n.IsGitRepo != wantRepo[src] {
+			t.Errorf("dir %q IsGitRepo = %v, want %v", inputs[i], n.IsGitRepo, wantRepo[src])
+		}
+		if n.HasRemote != wantRemote[src] {
+			t.Errorf("dir %q HasRemote = %v, want %v", inputs[i], n.HasRemote, wantRemote[src])
+		}
+	}
+	if out != len(nodes) {
+		t.Errorf("consumed %d nodes but got %d（存在多余或缺失节点）", out, len(nodes))
 	}
 }
 

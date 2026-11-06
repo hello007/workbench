@@ -1663,11 +1663,14 @@ describe('FileTreePanel.vue - 菜单分发与 handler 补充', () => {
       expect(uiStore.activePanel).toBe('stats')
     })
 
-    it('refresh 命令关闭菜单', () => {
+    it('refresh 命令关闭菜单，且非聚合刷新不清全部树缓存', async () => {
+      const { ClearAllFileTreeCache } = await import('../../../wailsjs/go/main/App')
       wrapper.vm.$.setupState.contextMenu.visible = true
       setMenuDataAndCommand('refresh')
       // onMenuCommand 先 closeContextMenu
       expect(wrapper.vm.$.setupState.contextMenu.visible).toBe(false)
+      // 回归：普通树刷新维持 refreshNode 定向刷新语义，不触发整树缓存清理
+      expect(ClearAllFileTreeCache).not.toHaveBeenCalled()
     })
 
     it('contentSearch：路径在当前工作目录内 emit 相对子目录', () => {
@@ -2357,6 +2360,9 @@ describe('聚合视图（虚拟工作区）', () => {
 
   afterEach(() => {
     if (wrapper) { wrapper.unmount(); wrapper = null }
+    // 防抖用例切过假定时器：统一恢复，避免影响后续 describe
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('工具栏切换按钮：点击进入聚合视图，treeKey 带模式后缀且文案切为激活态', async () => {
@@ -2659,6 +2665,233 @@ describe('聚合视图（虚拟工作区）', () => {
 
     expect(wrapper.find('.tree-filter-summary').text()).toContain('请先点击一个收藏目录')
     expect(wrapper.find('.el-tree').attributes('style') || '').not.toContain('display: none')
+  })
+
+  it('聚合模式「复制相对路径」/「文件引用路径」以所属收藏根为基准（普通树仍以工作目录为基准）', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+
+    // 收藏根子节点：相对路径相对收藏根（非工作目录）
+    state.contextMenu.data = { path: '/repo/a/src/index.js', name: 'index.js', type: 'file' }
+    state.onMenuCommand('copyRelativePath')
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('src/index.js')
+
+    // 文件引用路径与复制相对路径同基准，避免两者口径分裂
+    state.contextMenu.data = { path: '/repo/a/src/index.js', name: 'index.js', type: 'file' }
+    state.onMenuCommand('copyRefPath')
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('@src/index.js')
+
+    // 收藏根本身：相对路径为 '.'
+    state.contextMenu.data = { path: '/repo/a', name: 'a', type: 'directory' }
+    state.onMenuCommand('copyRelativePath')
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('.')
+
+    // 回归：普通树保持原语义（相对当前工作目录 /path/a）
+    state.aggregatedMode = false
+    state.contextMenu.data = { path: '/path/a/src/index.js', name: 'index.js', type: 'file' }
+    state.onMenuCommand('copyRelativePath')
+    await flushPromises()
+    expect(writeText).toHaveBeenLastCalledWith('src/index.js')
+  })
+
+  it('聚合模式空白区右键：隐藏新建/仓库筛选等项，保留刷新；粘贴随最后点击目录出现', async () => {
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    // 聚合空白区不依赖工作目录：清空选中目录后仍应弹出菜单
+    useDirectoryStore().selectedDirectoryId = null
+    state.lastClickedNodeData = null
+    await wrapper.vm.$nextTick()
+
+    const event = { stopPropagation: vi.fn(), clientX: 10, clientY: 10 }
+    state.onBlankAreaContextMenu(event)
+    await wrapper.vm.$nextTick()
+
+    const menuText = wrapper.find('.context-menu').text()
+    expect(menuText).toContain('刷新')
+    expect(menuText).not.toContain('新建文件')
+    expect(menuText).not.toContain('新建文件夹')
+    expect(menuText).not.toContain('仓库筛选器')
+    expect(menuText).not.toContain('跳转仓库统计')
+    // 无最后点击目录 = 无粘贴落点，不显示粘贴项
+    expect(menuText).not.toContain('粘贴')
+    expect(wrapper.find('[data-action="aggregated-blank-refresh"]').exists()).toBe(true)
+
+    // 最后点击目录节点后粘贴项出现，且菜单 data 指向该目录（非工作目录伪装的节点）
+    state.lastClickedNodeData = { path: '/repo/a', name: 'a', type: 'directory' }
+    state.onBlankAreaContextMenu(event)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.context-menu').text()).toContain('粘贴')
+    expect(state.contextMenu.data).toEqual({ path: '/repo/a', name: 'a', type: 'directory' })
+
+    // 点击刷新 = 重建根层（虚拟根无节点可定位，refreshNode 会早退）
+    const before = state.refreshCounter
+    await wrapper.find('[data-action="aggregated-blank-refresh"]').trigger('click')
+    await flushPromises()
+    expect(state.refreshCounter).toBe(before + 1)
+  })
+
+  it('聚合空白区「刷新」：先清全部树/徽标缓存，再整层重建并重新查询根层', async () => {
+    const { ClearAllFileTreeCache, GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+
+    // 先完成一次根层加载，确立基线调用次数（桩不自动懒加载，需手动模拟）
+    const initialResolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, initialResolve)
+    await flushPromises()
+    const rootsBefore = GetAggregatedRootNodes.mock.calls.length
+    const clearBefore = ClearAllFileTreeCache.mock.calls.length
+    const counterBefore = state.refreshCounter
+
+    state.lastClickedNodeData = null
+    state.onBlankAreaContextMenu({ stopPropagation: vi.fn(), clientX: 10, clientY: 10 })
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-action="aggregated-blank-refresh"]').trigger('click')
+    await flushPromises()
+
+    // 空白区刷新 = 整树刷新：清全部缓存（含根行 git 徽标缓存），再推进代次重建
+    expect(ClearAllFileTreeCache.mock.calls.length).toBe(clearBefore + 1)
+    expect(state.refreshCounter).toBe(counterBefore + 1)
+
+    // 重建后的 el-tree 重新懒加载根层：后端重新探测 isGitRepo/hasRemote
+    const freshResolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, freshResolve)
+    await flushPromises()
+    expect(GetAggregatedRootNodes.mock.calls.length).toBe(rootsBefore + 1)
+    expect(freshResolve).toHaveBeenCalled()
+  })
+
+  it('收藏变化（外部入口）去抖后重建聚合根层；非聚合模式不触发', async () => {
+    vi.useFakeTimers()
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+
+    // 非聚合模式：收藏变化直接忽略
+    state.aggregatedMode = false
+    const beforeAgg = state.refreshCounter
+    useFavoritesStore().favorites = [{ path: '/repo/a', alias: '别名-A', group: '默认' }]
+    await wrapper.vm.$nextTick()
+    vi.advanceTimersByTime(200)
+    await flushPromises()
+    expect(state.refreshCounter).toBe(beforeAgg)
+
+    // 聚合模式：100ms 去抖后重建（配置导入/命令面板取消收藏等外部入口）
+    state.aggregatedMode = true
+    const before = state.refreshCounter
+    useFavoritesStore().favorites = [
+      { path: '/repo/a', alias: '别名-A', group: '默认' },
+      { path: '/repo/b', alias: '', group: '默认' }
+    ]
+    await wrapper.vm.$nextTick()
+    vi.advanceTimersByTime(99)
+    expect(state.refreshCounter).toBe(before)
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(state.refreshCounter).toBe(before + 1)
+  })
+
+  it('收藏变化去抖期间的代次守卫：调度后切换模式则丢弃本次重建', async () => {
+    vi.useFakeTimers()
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    const before = state.refreshCounter
+
+    useFavoritesStore().favorites = [{ path: '/repo/a', alias: '新别名', group: '默认' }]
+    await wrapper.vm.$nextTick()
+    // 模式切换推进 modeSwitchSeq：此前调度的重建代次过期
+    await state.switchTreeMode(false, { restoreState: false })
+    vi.advanceTimersByTime(200)
+    await flushPromises()
+
+    expect(state.refreshCounter).toBe(before)
+  })
+
+  it('刷新收藏根本身：先清徽标缓存再整层重建，根行徽标随重新探测更新；子目录刷新不重建', async () => {
+    const { GetAggregatedRootNodes, InvalidateFileTreeCache } = await import('../../../wailsjs/go/main/App')
+    // 两次根层查询：刷新前旧快照（非仓库）、刷新后重新探测（模拟 git init + git remote add）
+    const rootNode = (isGitRepo, hasRemote) => ({
+      id: '/repo/a',
+      name: 'a',
+      path: '/repo/a',
+      type: 'directory',
+      isGitRepo,
+      hasRemote,
+      hasChildren: true,
+      isLeaf: false,
+      missing: false
+    })
+    GetAggregatedRootNodes
+      .mockResolvedValueOnce([rootNode(false, false)])
+      .mockResolvedValueOnce([rootNode(true, true)])
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+    // 刷新前根层快照：徽标为旧结论
+    const staleResolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, staleResolve)
+    await flushPromises()
+    expect(staleResolve.mock.calls[0][0][0]).toMatchObject({ isGitRepo: false, hasRemote: false })
+
+    const before = state.refreshCounter
+    const invalidateBefore = InvalidateFileTreeCache.mock.calls.length
+
+    await state.refreshNode('/repo/a')
+    await flushPromises()
+    // 必须清后端 git 徽标缓存，否则整层重建仍命中原有的 isGitRepo/hasRemote 旧结论
+    expect(InvalidateFileTreeCache.mock.calls.length).toBe(invalidateBefore + 1)
+    expect(InvalidateFileTreeCache).toHaveBeenLastCalledWith('/repo/a')
+    // 收藏根走整层重建：树 key 变化触发根层重新加载
+    expect(state.refreshCounter).toBe(before + 1)
+
+    // 重建后的根层查询返回新结论：根行徽标即时更新（⑬ 验收）
+    const freshResolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, freshResolve)
+    await flushPromises()
+    expect(freshResolve.mock.calls[0][0][0]).toMatchObject({ isGitRepo: true, hasRemote: true })
+
+    const callsAfterRoot = GetAggregatedRootNodes.mock.calls.length
+    const invalidateAfterRoot = InvalidateFileTreeCache.mock.calls.length
+    await state.refreshNode('/repo/a/src')
+    await flushPromises()
+    // 子目录刷新走既有子层链路（桩下 nodesMap 未命中静默早退），不触发整层重建
+    expect(state.refreshCounter).toBe(before + 1)
+    expect(GetAggregatedRootNodes.mock.calls.length).toBe(callsAfterRoot)
+    expect(InvalidateFileTreeCache.mock.calls.length).toBe(invalidateAfterRoot)
+  })
+
+  it('收藏别名修改后重建根层：显示名取新别名', async () => {
+    vi.useFakeTimers()
+    const { GetAggregatedRootNodes } = await import('../../../wailsjs/go/main/App')
+    // Once 而非 mockResolvedValue：本用例只手动触发一次根层加载，回退后保留模块 mock 的
+    // 默认实现（[]），避免 mockReset 把后续用例的根层查询打成 undefined
+    GetAggregatedRootNodes.mockResolvedValueOnce([
+      { id: '/repo/a', name: 'a', path: '/repo/a', type: 'directory', hasChildren: true, isLeaf: false, missing: false }
+    ])
+    const state = await createAggWrapper([{ path: '/repo/a', alias: '旧别名', group: '默认' }])
+    state.aggregatedMode = true
+    await wrapper.vm.$nextTick()
+
+    // store.updateAlias 成功后会 loadFavorites，列表别名变化触发去抖重建
+    const before = state.refreshCounter
+    useFavoritesStore().favorites = [{ path: '/repo/a', alias: '新别名', group: '默认' }]
+    await wrapper.vm.$nextTick()
+    vi.advanceTimersByTime(100)
+    await flushPromises()
+    // toBe +1 而非仅断言显示名：否则手工 loadTreeNode 也能拿到新别名，watch 失效时用例假绿
+    expect(state.refreshCounter).toBe(before + 1)
+
+    const resolve = vi.fn()
+    await wrapper.vm.loadTreeNode({ level: 0, data: null }, resolve)
+    await flushPromises()
+    expect(resolve.mock.calls[0][0][0].name).toBe('新别名')
   })
 
   it('聚合模式 treeKey 不绑定工作目录：切换目录不重建聚合树', async () => {

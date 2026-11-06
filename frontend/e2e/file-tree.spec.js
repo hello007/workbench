@@ -12,7 +12,7 @@
  * 文件树数据来自 wails-mock-defaults.js E2E 合并表的 GetFileTree 默认值
  * （demo-repo 根下 src 目录 + README.md 文件）。
  */
-import { test, expect, getWailsCalls } from './fixtures'
+import { test, expect, getWailsCalls, activityPanel } from './fixtures'
 import { E2E_REPO_PATH, GIT_REPO_DIRECTORY, GIT_FLOW_OVERRIDES, visibleDialog } from './git-fixtures'
 import { makeLargeDirNodes } from '../src/test/wails-mock-defaults'
 
@@ -600,5 +600,111 @@ test.describe('聚合视图（虚拟工作区）', () => {
 
     const treeCalls = await getWailsCalls(page, 'GetFileTree')
     expect(treeCalls).toContainEqual({ method: 'GetFileTree', args: [AGG_DIR_A] })
+  })
+
+  // ---- 收藏外部变更联动（⑦）----
+  // 两个用例需要不同的 GetFavorites 动态行为（RemoveFavorite 后收缩 / 打开命令面板后改别名），
+  // 且 test.use 仅 describe 级合法，故各自子 describe 注入完整 override 集。
+
+  test.describe('取消收藏后聚合根消失', () => {
+    test.use({
+      wailsOverrides: {
+        ...GIT_FLOW_OVERRIDES,
+        // RemoveFavorite 之后收藏列表与聚合根层都只保留未取消的一项（__rules__ 按
+        // 「方法此前是否被调用」切换，不受重建触发次数影响）
+        GetFavorites: {
+          __rules__: [{ after: 'RemoveFavorite', value: [AGG_FAVORITES[1]] }],
+          __default__: AGG_FAVORITES
+        },
+        GetAggregatedRootNodes: {
+          __rules__: [{ after: 'RemoveFavorite', value: [AGG_ROOT_NODES[1]] }],
+          __default__: AGG_ROOT_NODES
+        }
+      }
+    })
+
+    test('右键取消收藏：该根节点自动消失，其余根保留', async ({ page }) => {
+      await openAggregatedView(page)
+
+      await page.locator('.el-tree-node', { hasText: '常用项目A' }).click({ button: 'right' })
+      const menu = page.locator('.context-menu')
+      await expect(menu).toBeVisible()
+      await menu.getByText('取消收藏').click()
+
+      // 收藏列表变化后聚合根层自动重建：取消项消失，另一项仍在
+      await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toHaveCount(0)
+      await expect(page.locator('.el-tree-node', { hasText: '已删除目录' })).toBeVisible()
+
+      const removeCalls = await getWailsCalls(page, 'RemoveFavorite')
+      expect(removeCalls).toEqual([{ method: 'RemoveFavorite', args: [AGG_DIR_A] }])
+    })
+
+    test('命令面板取消收藏（外部入口）：仅靠收藏 watch 重建根层，节点自动消失', async ({ page }) => {
+      await openAggregatedView(page)
+
+      // 命令面板的取消收藏不经 FileTreePanel.handleRemoveFavorite 的显式刷新，
+      // 只能由 favorites deep watch 触发重建——这是 ⑦ 的核心回归面。
+      const palette = page.locator('.command-palette-dialog')
+      await expect(async () => {
+        await page.keyboard.press('Control+p')
+        await expect(palette).toBeVisible()
+      }).toPass({ timeout: 5000 })
+      // '@' 前缀进入收藏模式，空查询列出全部收藏（含别名）
+      await palette.getByPlaceholder(/搜索文件、目录/).fill('@')
+      const favRow = palette.locator('.result-item', { hasText: '常用项目A' })
+      await expect(favRow).toBeVisible()
+      await favRow.locator('.remove-fav-btn').click()
+      await page.keyboard.press('Escape')
+
+      // 去抖窗口后聚合根层重建：取消项消失，另一项仍在
+      await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toHaveCount(0)
+      await expect(page.locator('.el-tree-node', { hasText: '已删除目录' })).toBeVisible()
+
+      const removeCalls = await getWailsCalls(page, 'RemoveFavorite')
+      expect(removeCalls).toEqual([{ method: 'RemoveFavorite', args: [AGG_DIR_A] }])
+    })
+  })
+
+  test.describe('收藏别名修改后显示名更新', () => {
+    test.use({
+      wailsOverrides: {
+        ...GIT_FLOW_OVERRIDES,
+        // 首次调用（FileTreePanel 挂载）返回原别名；命令面板打开后再次 loadFavorites
+        // 返回改过别名的列表（模拟外部入口修改别名）
+        GetFavorites: {
+          __sequence__: [
+            AGG_FAVORITES,
+            [{ ...AGG_FAVORITES[0], alias: '项目A-新名' }, AGG_FAVORITES[1]]
+          ]
+        },
+        GetAggregatedRootNodes: AGG_ROOT_NODES
+      }
+    })
+
+    test('别名变化触发聚合根重建：显示名更新且展开态保持', async ({ page }) => {
+      await openAggregatedView(page)
+
+      // 展开收藏根：子节点就绪后作为「展开态保持」的锚点。
+      // 子节点用 .el-tree-node__content 定位：.el-tree-node 的 hasText 会命中包含
+      // 子孙文本的祖先节点，strict mode 下会解析出多个元素。
+      await page.locator('.el-tree-node', { hasText: '常用项目A' }).click()
+      await expect(page.locator('.el-tree-node__content', { hasText: 'README.md' })).toBeVisible()
+
+      // 命令面板 visible watch 会 loadFavorites（收藏列表外部刷新的既有入口）；
+      // 挂载竞态按 e2e-testing §6.1 范式：按键 + 面板可见整体重试
+      await expect(activityPanel(page, 'directory')).toBeVisible()
+      await expect(async () => {
+        await page.keyboard.press('Control+p')
+        await expect(page.locator('.command-palette-dialog')).toBeVisible()
+      }).toPass({ timeout: 5000 })
+      await page.keyboard.press('Escape')
+
+      // 去抖后根层重建：显示名取新别名，且已展开的子节点随展开态恢复仍在
+      await expect(page.locator('.el-tree-node__content', { hasText: '项目A-新名' })).toBeVisible()
+      await expect(page.locator('.el-tree-node__content', { hasText: 'README.md' })).toBeVisible()
+
+      const favCalls = await getWailsCalls(page, 'GetFavorites')
+      expect(favCalls.length).toBeGreaterThanOrEqual(2)
+    })
   })
 })

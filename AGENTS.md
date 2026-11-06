@@ -213,7 +213,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |终端联动（chatMarkdown 代码块「在终端执行」）写入 PTY 的命令结尾**禁带换行**（=自动回车）且经 `pre code` textContent 取值（禁 data 属性存命令）；fence 渲染形态改动须同步 renderMsgMarkdown 的 replaceAll 锚点与 chatMarkdown.spec 整串断言；uiStore 信箱 seq 单调递增、消费即清空，TerminalPanel 消费直调 WriteTerminalInput（不经 useTerminal.onData）|[terminal-chat-link.md](docs/spec/terminal-chat-link.md)|
 |http(s) 外链打开唯一出口 runtime.BrowserOpenURL（出口内前置校验非 http(s) 不打开），禁 window.open/location.href（Wails WebView2 下内嵌导航不经系统 shell）；serve 桥属出口实现豁免；先例 AiChatPanel/GitInfo/FilePreviewRenderer/useTerminal|[url-opening.md](docs/spec/url-opening.md)|
 |提交前强制同步：`git fetch origin` → `git rebase origin/master`（未提交改动先 stash/提交），冲突 `git add` + `git rebase --continue`；禁 merge 提交、禁对共享 master `--force`；推送被拒重跑 fetch+rebase；origin=GitHub SSH|[开发规范.md §Git 提交规范](docs/开发规范.md#git-提交规范)|
-|聚合视图（虚拟工作区）：根层恒走 `GetAggregatedRootNodes`（已登记 `RPCHiddenMethods`，浏览器侧入口隐藏）；文件类收藏后端跳过、失效收藏产 `FileTreeNode.Missing` 占位（hasChildren=false/isLeaf=true，禁静默丢弃，新增字段同步 `deepCopyNode`）；聚合树状态 key `treeState:__aggregated__`；筛选作用域**无工作目录回退**、回溯按最长前缀收藏根；收藏增删与根节点重命名删除走 `refreshAggregatedRoot`|[aggregated-workspace.md](docs/spec/aggregated-workspace.md)|
+|聚合视图（虚拟工作区）：根层恒走 `GetAggregatedRootNodes`（登记 `RPCHiddenMethods`）；文件类收藏跳过、失效收藏产 `FileTreeNode.Missing` 占位（isLeaf=true，新字段同步 `deepCopyNode`）；状态 key `treeState:__aggregated__`；筛选无工作目录回退、回溯按最长前缀；复制相对/引用路径基准=所属收藏根（`relativePathBase` 单点）；空白区仅刷新/粘贴；外部收藏变更 deep watch 去抖+代次重建；收藏根刷新先清徽标缓存再整层重建|[aggregated-workspace.md](docs/spec/aggregated-workspace.md)|
 ## 5. 项目长期记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。
