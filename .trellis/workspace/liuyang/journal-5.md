@@ -72,3 +72,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 230: 素材小图缩略图分辨率提升至 640
+
+**Date**: 2026-11-06
+**Task**: 素材小图缩略图分辨率提升至 640
+**Branch**: `master`
+
+### Summary
+
+诊断：画廊卡宽上限 420px 大于 small 档 320px，放大 1.26 倍导致发糊，用户被迫点高清；经实测否决合档为高清单档（hd 按需 COM 生成会把首次几秒等待搬到画廊）。落地：small 默认 320→640，存量配置一次性迁移（仅命中旧默认 320），Load 迁移后写回 settings.json，桌面 startup 与 --serve 各消费一次性标记走 ApplyThumbsSettingsChange 清档重建旧缓存。同步包级档位基准、前端默认值与设置 tooltip、单测与 assets-thumbs-com.md。验证：go build/vet/test 全通过，前端 vitest 2643 项全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `96980d1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
