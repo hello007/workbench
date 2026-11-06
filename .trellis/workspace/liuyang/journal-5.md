@@ -105,3 +105,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 231: README 美化与内容校正
+
+**Date**: 2026-11-06
+**Task**: README 美化与内容校正
+**Branch**: `master`
+
+### Summary
+
+重写 README：新增目录与简介，功能清单按域拆分为 10 个小节，长条目改为要点+子项；按 package.json/go.mod 校正技术栈版本，更新项目结构树、运行模式（--serve/--listen/--version）、文档索引与贡献说明；移除 API 方法数等易腐数字。顺带发现 docs/API参考.md 方法数与实际不一致（230 vs 278）、功能说明缺失部分新模块章节、仓库无 LICENSE 文件。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8b629c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
