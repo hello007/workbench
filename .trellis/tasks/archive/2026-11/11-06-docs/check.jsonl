@@ -1,0 +1,3 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验覆盖率阈值文档与 scripts/coverage-check.sh 一致"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 Wails 绑定同步契约描述与 App.d.ts 一致"}
+{"file": "AGENTS.md", "reason": "校验关键规则引用与文档描述不冲突"}

@@ -1,0 +1,3 @@
+{"file": "AGENTS.md", "reason": "项目唯一约定入口：关键规则清单、真相源、文档语言约定与硬性约束"}
+{"file": "docs/spec/README.md", "reason": "规范沉淀索引与两级分流规则，校验索引完整性的事实依据"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率阈值的规范口径"}
