@@ -138,3 +138,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 232: docs 全量校验与修正
+
+**Date**: 2026-11-06
+**Task**: docs 全量校验与修正
+**Branch**: `master`
+
+### Summary
+
+对 docs/ 与 README 做事实、链接、结构与时效性校验：API 参考补登至 278 方法，架构/功能/快速入门等按真相源校正版本与口径，修复全部失效链接（366 条 0 失效），spec 与 agent-resources 索引补全，历史快照加过时横幅。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22221c5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

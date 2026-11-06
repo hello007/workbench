@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 231
+- **Total Sessions**: 232
 - **Last Active**: 2026-11-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~140 | Active |
+| `journal-5.md` | ~173 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 232 | 2026-11-06 | docs 全量校验与修正 | `22221c5` | `master` |
 | 231 | 2026-11-06 | README 美化与内容校正 | `a8b629c` | `master` |
 | 230 | 2026-11-06 | 素材小图缩略图分辨率提升至 640 | `96980d1` | `master` |
 | 229 | 2026-11-06 | 素材侧边栏体验与索引可用性修复 | `ddd0807`, `3125cbe` | `master` |
