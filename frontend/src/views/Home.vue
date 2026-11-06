@@ -183,26 +183,30 @@ const onFileTreeContextMenu = () => {
 }
 
 // ---- 切换工作目录 ----
-// skipSave：调用方已完成旧目录状态保存（如从聚合视图退出后切目录）时跳过，
-// 否则会把刚重建、全部收起的普通树空状态覆盖到旧目录的历史展开记忆上
-const onDirectorySelect = async (dirId, options = {}) => {
-  // 1. 保存当前工作目录的树状态
-  if (!options.skipSave && directoryStore.selectedDirectoryId) {
-    const currentDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
-    if (currentDir) {
-      fileTreePanelRef.value?.saveCurrentState(currentDir.path)
-    }
-  }
+// 选择工作目录 = 退出聚合视图并切到该目录（聚合模式仅由工具栏切换按钮进入）。
+// 该判定落在本统一入口，目录树点击、命令面板「工作目录」跳转、收藏跳转等调用方
+// 自动获得同一语义，无需各自补退出逻辑。
+// 三件常驻约束：
+//   1) skipSave：调用方已完成旧目录状态保存（如从聚合视图退出后切目录）时跳过，
+//      否则会把刚重建、全部收起的普通树空状态覆盖到旧目录的历史展开记忆上；
+//   2) dirSelectSeq 请求序号：每个 await 之后校验代次，过期请求直接 return
+//      （不改选中、不恢复状态），防「退出聚合期间连点目录」时先发请求在过渡态回写；
+//   3) dirSelectInFlight 在途标志：在途期间的并发调用不执行 saveCurrentState——
+//      此刻树处于「旧树已拆、新树未就绪」的过渡态，保存必然写错；仅最新代次复位该标志。
+// 选中写入刻意提前到退出聚合的 await 之前：聚合树 treeKey 与 selectedDirectoryId
+// 无关、不会提前重建，普通树切换本就同步写入；使「退出聚合重建」与「切目录重建」
+// 合并为同一次 el-tree 重建，也消除选中被推迟到旧树根加载完成的问题。
+// saveCurrentState 仍只允许在入口同步阶段执行（不能在 await 之后）；
+// 聚合态进入时的树状态由 switchTreeMode 负责保存，本入口跳过。
+let dirSelectSeq = 0
+let dirSelectInFlight = false
 
-  // 2. 先查目标目录（directories 列表已就绪，不依赖 nextTick）
-  const newDir = directoryStore.directories.find(d => d.id === dirId)
-
-  // 3. 直接切到目标 selectedNode，避免 null 中间态导致 content-inner 卸载再挂载（双刷新）
-  //    ContentPanel 模板 v-if="workspaceStore.selectedNode" 在 null 时会卸载整个面板，
-  //    若先置 null 再设 git 节点，会触发"先卸载后挂载"两次刷新。
-  //    这里按 newDir.isGitRepo 一次性算出目标值，使 gitA→gitB 切换时面板始终挂载，
-  //    仅 GitInfo.repoPath 变化触发 watch 单次 loadGitInfo（与文件树切换一致）。
-  directoryStore.selectedDirectoryId = dirId
+// 内容面板状态随选中目录同步：按 newDir.isGitRepo 一次性算出目标值，避免 null 中间态
+// 导致 content-inner 卸载再挂载（双刷新）。ContentPanel 模板 v-if="workspaceStore.selectedNode"
+// 在 null 时会卸载整个面板，若先置 null 再设 git 节点，会触发"先卸载后挂载"两次刷新。
+// 一次性算目标值使 gitA→gitB 切换时面板始终挂载，仅 GitInfo.repoPath 变化触发
+// watch 单次 loadGitInfo（与文件树切换一致）。
+const applyDirectorySelection = (newDir) => {
   workspaceStore.latestCommit = null
   contentPanelRef.value?.clearPreview()
   workspaceStore.selectedNode = newDir?.isGitRepo
@@ -214,11 +218,57 @@ const onDirectorySelect = async (dirId, options = {}) => {
         isGitRepo: true
       }
     : null
+}
 
-  // 4. 等文件树按新 selectedDirectoryId 重渲染后恢复树状态
-  await nextTick()
-  if (newDir) {
-    fileTreePanelRef.value?.restoreTreeState(newDir.path)
+const onDirectorySelect = async (dirId, options = {}) => {
+  const seq = ++dirSelectSeq
+  // 聚合状态必须在本轮首个 await 前读取：switchTreeMode 会在其第一个 await 前
+  // 同步翻转 aggregatedMode，await 后再读只能得到翻转后的值
+  const wasAggregated = fileTreePanelRef.value?.isAggregatedMode?.() === true
+
+  // 1. 保存当前工作目录的树状态：仅入口同步阶段、非在途并发调用、且非聚合态
+  //    （聚合态树状态已在进入时由 switchTreeMode 保存；退出后重建的是空树，保存会覆盖记忆）
+  if (!dirSelectInFlight && !options.skipSave && !wasAggregated && directoryStore.selectedDirectoryId) {
+    const currentDir = directoryStore.directories.find(d => d.id === directoryStore.selectedDirectoryId)
+    if (currentDir) {
+      fileTreePanelRef.value?.saveCurrentState(currentDir.path)
+    }
+  }
+
+  // 2. 先查目标目录（directories 列表已就绪，不依赖 nextTick）
+  const newDir = directoryStore.directories.find(d => d.id === dirId)
+  const prevDirId = directoryStore.selectedDirectoryId
+
+  // 3. 提前写选中（见上方合并重建说明）：普通树无 await 中断，内容面板状态同步更新；
+  //    聚合态则等退出完成后再写，避免用户随即切回聚合时还要回滚内容面板状态
+  directoryStore.selectedDirectoryId = dirId
+  if (!wasAggregated) applyDirectorySelection(newDir)
+
+  dirSelectInFlight = true
+  try {
+    if (wasAggregated) {
+      // 4. 聚合模式下先退出（不恢复旧树状态：聚合态树状态已在 switchTreeMode 内保存）
+      await fileTreePanelRef.value?.exitAggregatedMode?.({ restoreState: false })
+      if (seq !== dirSelectSeq) return
+      // 退出期间用户又点工具栏切回聚合：switchTreeMode 代次守卫让本次 exit 提前返回，
+      // 此时「选择工作目录 = 退出聚合」的语义已作废——放弃本次选目录并回滚提前写入的
+      // 选中（聚合树 treeKey 与目录无关，回滚不触发重建）
+      if (fileTreePanelRef.value?.isAggregatedMode?.() === true) {
+        directoryStore.selectedDirectoryId = prevDirId
+        return
+      }
+      applyDirectorySelection(newDir)
+    }
+
+    // 5. 等文件树按新 selectedDirectoryId 重渲染后恢复树状态
+    await nextTick()
+    if (seq !== dirSelectSeq) return
+    if (newDir) {
+      fileTreePanelRef.value?.restoreTreeState(newDir.path)
+    }
+  } finally {
+    // 仅最新代次复位：过期请求不得清掉仍在途请求的标志
+    if (seq === dirSelectSeq) dirSelectInFlight = false
   }
 }
 
@@ -276,10 +326,10 @@ const onAddWorkDir = async (data) => {
 }
 
 // ---- 设为工作目录（聚合视图右键收藏目录，FileTreePanel set-as-work-dir 事件）----
-// 三步编排，复用既有链路：
+// 两步编排，复用既有链路：
 //   1. 目标目录已在工作目录列表（路径归一比较）则复用；否则 AddDirectory 添加后刷新列表
-//   2. 退出聚合模式（跳过旧树恢复——旧目录普通树状态已在进入聚合时保存）
-//   3. onDirectorySelect 切换：跳过保存（同上，防重建后的空树覆盖展开记忆）→ 改选中 → 恢复目标目录树状态
+//   2. onDirectorySelect 切换：该统一入口在聚合模式下自动退出聚合（不恢复旧树状态），
+//      本次跳过旧目录状态保存（旧目录普通树状态已在进入聚合时保存）、改选中、恢复目标目录树状态
 // 不再调 locateNode：普通树的工作目录根不在树节点中，relative 为空恒早退，属无效调用。
 // 路径比较按 Windows 语义归一：分隔符统一、去尾分隔符、大小写不敏感；
 // 后端 AddDirectory 用 filepath.Abs 归一后精确去重，尾分隔符差异会被判重返回 nil，
@@ -306,8 +356,7 @@ const onSetAsWorkDir = async (data) => {
       ElMessage.error('未找到目标工作目录')
       return
     }
-    await fileTreePanelRef.value?.exitAggregatedMode?.({ restoreState: false })
-    // 旧目录普通树状态在进入聚合模式时已保存；此处跳过保存，防重建后的空树覆盖展开记忆
+    // 退出聚合与跳过旧状态保存由 onDirectorySelect 统一入口处理（见其入口注释）
     await onDirectorySelect(target.id, { skipSave: true })
     ElMessage.success('已设为工作目录')
   } catch (error) {
@@ -367,28 +416,32 @@ const onDeleteFromContent = async (node) => {
 }
 
 // ---- Command Palette 事件处理 ----
-function onPaletteSelectFile(item) {
+// 跨目录跳转必须 await onDirectorySelect 完成后再 locateNode：
+// 聚合态下该入口先 await 退出聚合（选中虽已提前写入，但新树重建与状态恢复在 await 之后），
+// 旧实现只 nextTick 会在旧工作目录/聚合树上下文中定位，跨目录目标前缀判定失败而静默返回。
+// 同目录分支（无需切换）保持原有同步 locateNode 行为不变。
+async function onPaletteSelectFile(item) {
   recordAccess({ path: item.path, type: item.type, workDir: directoryStore.currentDirPath })
   if (item.path.startsWith(directoryStore.currentDirPath)) {
     fileTreePanelRef.value?.locateNode(item.path)
   } else {
     const targetDir = directoryStore.directories.find(d => item.path.startsWith(d.path))
     if (targetDir) {
-      onDirectorySelect(targetDir.id)
-      nextTick(() => fileTreePanelRef.value?.locateNode(item.path))
+      await onDirectorySelect(targetDir.id)
+      fileTreePanelRef.value?.locateNode(item.path)
     }
   }
 }
 
-function onPaletteSelectFavorite(fav) {
+async function onPaletteSelectFavorite(fav) {
   recordAccess({ path: fav.path, type: 'dir', workDir: directoryStore.currentDirPath })
   if (fav.path.startsWith(directoryStore.currentDirPath)) {
     fileTreePanelRef.value?.locateNode(fav.path)
   } else {
     const targetDir = directoryStore.directories.find(d => fav.path.startsWith(d.path))
     if (targetDir) {
-      onDirectorySelect(targetDir.id)
-      nextTick(() => fileTreePanelRef.value?.locateNode(fav.path))
+      await onDirectorySelect(targetDir.id)
+      fileTreePanelRef.value?.locateNode(fav.path)
     }
   }
 }

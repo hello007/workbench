@@ -9,7 +9,7 @@
 ### ② Stat 错误归因与提示口径（不改契约）
 
 - `service/filetree.go` `GetRootNodesForPaths` 的 `os.Stat` 失败分支补 `slog.Warn`，记录路径与原始 error（当前无任何日志）。
-- **不加 `MissingReason` 字段**：前端统一提示改为「目录不存在或不可访问，可右键移除收藏」，避免「一定是不存在」的误导。
+- **不加 `MissingReason` 字段**：前端统一提示改为「收藏项已失效或不可访问，可右键移除收藏」（与 ⑤ 合并口径，见决策记录），避免「一定是不存在」的误导。
 - 不做 `os.IsNotExist` 分流的原因：区分原因必须新增 model 字段并同步 wailsjs 三处，收益仅文案精度，暂不值得扩契约；待后续确实需要按原因做不同操作时再补。
 - 验收：网络盘断开时提示不再断言「已移动」；日志可见原始错误。
 
@@ -23,17 +23,27 @@
 ### ⑤ 已删除的文件收藏以 Missing 目录占位（不改 Favorite 模型）
 
 - **不给 `model.Favorite` 加 Type 字段**：加字段需改 `Add` 签名并同步 wailsjs 三处，且旧数据无法判定原类型，收益有限。
-- 前端把 Missing 占位的提示文案由「目录不存在或已移动」改为「收藏项已失效」，图标与右键菜单保持「移除收藏」，不再暗示这是目录。
+- 前端把 Missing 占位的提示文案由「目录不存在或已移动」改为「收藏项已失效或不可访问，可右键移除收藏」，图标与右键菜单保持「移除收藏」，不再暗示这是目录。
 - 保留占位而非静默丢弃——用户需要入口清理失效收藏。
 - 验收：删除一个文件收藏指向的文件后，聚合树显示「收藏项已失效」占位，可右键移除。
 
 ## Acceptance Criteria
 
-- [ ] 后端新增单测：Stat 失败产出占位且写 Warn 日志
-- [ ] 前端新增单测：选目录自动退出聚合、失效占位文案
-- [ ] `docs/spec/aggregated-workspace.md` 更新两处语义（工作目录切换、失效占位）
-- [ ] `go vet ./...`、`go test ./service/ .`、`npm test`、`npm run build` 通过
-- [ ] 完成后删除清单中这 3 条，并在 prd 记录「不做」的决策与原因
+- [x] 后端新增单测：Stat 失败产出占位且写 Warn 日志
+- [x] 前端新增单测：选目录自动退出聚合、失效占位文案
+- [x] `docs/spec/aggregated-workspace.md` 更新两处语义（工作目录切换、失效占位）
+- [x] `go vet ./...`、`go test ./service/ .`、`npm test`、`npm run build` 通过
+- [x] 完成后删除清单中这 3 条，并在 prd 记录「不做」的决策与原因
+
+## 决策记录（2026-11-06 落地）
+
+| 条目 | 最终决策 | 「不做」的项与原因 |
+|---|---|---|
+| ② Stat 错误归因 | Stat 失败分支补 `Logger().Warn("aggregated root stat failed", "path", …, "err", …)`；前端统一提示「收藏项已失效或不可访问，可右键移除收藏」 | 不做 `os.IsNotExist` 分流、不加 `MissingReason` 字段：区分原因需扩 `model.FileTreeNode` 契约并同步 wailsjs 三处，收益仅文案精度，当前唯一消费是提示文案；待确实需要按原因执行不同操作时再补 |
+| ④ 聚合下切换工作目录 | 判定落在 `Home.vue` `onDirectorySelect` 统一入口：聚合态先 `exitAggregatedMode({ restoreState: false })`，并强制跳过旧目录状态保存；`onSetAsWorkDir` 简化为直接调该入口 | 不在各调用点分别补退出逻辑：目录树点击、命令面板跳转、收藏跳转均走同一入口，分散补会漏 |
+| ⑤ 已删除文件收藏占位 | 保留 `Missing` 占位（用户需要入口清理失效收藏），提示文案改为「收藏项已失效或不可访问，可右键移除收藏」，tooltip / 点击提示 / `locateNode` 三处同源 | 不给 `model.Favorite` 加 `Type` 字段：需改 `Add` 签名并同步 wailsjs 三处，且旧数据无法判定原类型，收益有限 |
+
+**未扩契约**：`model/` 导出 struct 与 App 方法签名零变更，`frontend/wailsjs/` 无 diff。
 
 ## Definition of Done
 

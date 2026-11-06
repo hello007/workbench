@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/aggregated-workspace.md", "reason": "聚合视图当前真相源（v3）：根层 Stat 失败占位语义、模式切换与状态隔离、「设为工作目录」退出链路、失效兜底提示口径均以本文为准，本任务需按此实现并回写两处语义"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端日志规范：service 层经 Logger() 写 slog、错误码与前端分流约定；②Stat 失败告警日志须符合该口径"}
+{"file": "docs/spec/e2e-testing.md", "reason": "前端测试与 E2E 约定：语义锚、mock 单一数据源 wails-mock-defaults.js、禁 waitForTimeout；④⑤涉及前端单测须遵循"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉与交互约定：失效节点灰显/提示文案、列表项点击单一入口等，⑤文案调整与④切换交互须不破坏既有约定"}

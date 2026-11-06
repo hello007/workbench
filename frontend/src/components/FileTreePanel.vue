@@ -108,7 +108,7 @@
           <span
             class="custom-tree-node"
             :class="{ 'truncation-hint-node': isTruncationHint(data), 'missing-node': data.missing }"
-            :title="data.missing ? '目录不存在或已移动（收藏失效），可右键移除收藏' : undefined"
+            :title="data.missing ? MISSING_FAVORITE_HINT : undefined"
           >
             <el-icon
               v-if="isTruncationHint(data)"
@@ -580,6 +580,10 @@ const AGGREGATED_TREE_STATE_KEY = '__aggregated__'
 // el-tree 的 key 命名空间：聚合树与工作目录无关，不绑定 selectedDirectoryId，
 // 避免切换工作目录时整棵聚合树重建重拉（展开态先丢后恢复）
 const AGGREGATED_TREE_KEY = '__agg__'
+// 失效收藏占位提示口径（tooltip / 点击提示 / locateNode 同源）：
+// 不区分「已删除 / 无权限 / 网络盘不可达」——前端不掌握原因，断言「已移动」会把
+// 临时断开的收藏误导为需要移除；也不暗示这是目录——文件类型收藏被删后同样是 Missing 占位
+const MISSING_FAVORITE_HINT = '收藏项已失效或不可访问，可右键移除收藏'
 const aggregatedMode = ref(false)
 // 聚合根层节点数：驱动「无目录收藏」空态显示；树每次重建时重置
 const aggregatedRootCount = ref(0)
@@ -976,10 +980,11 @@ const onNodeClick = (data, node) => {
     focusTreeFilter()
     return
   }
-  // 失效收藏节点：路径在磁盘上已不存在，预览/展开均无意义，提示后引导右键移除
+  // 失效收藏节点：磁盘上不可访问（不存在/无权限/网络盘断开），预览/展开均无意义，
+  // 前端不区分原因，统一提示后引导右键移除
   if (data.missing) {
     fileTreeRef.value?.setCurrentKey?.(null)
-    ElMessage.info('该目录不存在或已移动（收藏失效），可右键移除收藏')
+    ElMessage.info(`该${MISSING_FAVORITE_HINT}`)
     return
   }
   const clickedPath = data.path.replace(/\\/g, '/')
@@ -1265,7 +1270,7 @@ const switchTreeMode = async (targetMode, options = {}) => {
 
 const toggleAggregatedMode = () => switchTreeMode(!aggregatedMode.value)
 
-// 退出聚合视图（供 Home.vue「设为工作目录」链路前置调用，defineExpose 暴露）
+// 退出聚合视图（供 Home.vue 选择工作目录统一入口前置调用，defineExpose 暴露）
 const exitAggregatedMode = (options) => switchTreeMode(false, options)
 
 // ---- 聚合视图内收藏增删后重建根层 ----
@@ -2208,7 +2213,7 @@ async function locateNode(targetPath) {
       if (rootNode) {
         // 失效收藏不可选中：否则快捷键（F2/Delete）会作用于不存在的路径
         if (rootNode.data?.missing) {
-          ElMessage.info('该目录不存在或已移动（收藏失效），可右键移除收藏')
+          ElMessage.info(`该${MISSING_FAVORITE_HINT}`)
           return
         }
         tree.setCurrentKey(rootNode.data.path)
@@ -2299,7 +2304,9 @@ defineExpose({
   saveCurrentState,
   restoreTreeState,
   locateNode,
-  exitAggregatedMode
+  exitAggregatedMode,
+  // 供 Home.vue「选择工作目录 = 退出聚合」判定：函数形态与 exitAggregatedMode 同口径
+  isAggregatedMode: () => aggregatedMode.value
 })
 
 // ---- 生命周期 ----

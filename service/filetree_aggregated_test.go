@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +107,44 @@ func TestGetRootNodesForPaths_MissingPathPlaceholder(t *testing.T) {
 	}
 	if !missing.IsLeaf {
 		t.Error("placeholder node should have IsLeaf=true")
+	}
+}
+
+// Stat 失败统一产 Missing 占位，同时写 Warn 日志留存原始错误：
+// 前端对「不存在/无权限/网络盘不可达」共用同一提示口径，不区分原因，
+// 因此排障只能依赖后端日志，缺日志会让失效占位无从解释。
+func TestGetRootNodesForPaths_StatFailureLogsWarn(t *testing.T) {
+	base := t.TempDir()
+	gone := filepath.Join(base, "gone-dir")
+
+	// 捕获告警日志（SetLogger 全局注入；本包串行用例，Cleanup 还原）
+	var logBuf bytes.Buffer
+	prevLogger := Logger()
+	SetLogger(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { SetLogger(prevLogger) })
+
+	svc := NewFileTreeService()
+	nodes := svc.GetRootNodesForPaths([]string{gone})
+
+	if len(nodes) != 1 {
+		t.Fatalf("stat 失败仍须产出占位节点，实际 %d 个", len(nodes))
+	}
+	if !nodes[0].Missing {
+		t.Errorf("stat 失败产出的节点应带 Missing=true，实际 %+v", nodes[0])
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "level=WARN") {
+		t.Errorf("Stat 失败须以 Warn 级别记录，实际日志：%s", logged)
+	}
+	if !strings.Contains(logged, "aggregated root stat failed") {
+		t.Errorf("Warn 日志缺少事件标识，实际日志：%s", logged)
+	}
+	if !strings.Contains(logged, "gone-dir") {
+		t.Errorf("Warn 日志须带路径字段，实际日志：%s", logged)
+	}
+	if !strings.Contains(logged, "err=") {
+		t.Errorf("Warn 日志须带原始 error 字段，实际日志：%s", logged)
 	}
 }
 

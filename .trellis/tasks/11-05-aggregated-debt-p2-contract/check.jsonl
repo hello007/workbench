@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/aggregated-workspace.md", "reason": "核查实现是否与 v3 契约一致：Missing 占位仍禁静默丢弃、模式切换代次守卫不被破坏、工作目录切换新语义已写死"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核查 slog.Warn 写法与错误处理口径（字段、级别、不吞异常）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核查新增前端单测是否使用语义锚、mock 是否走 wails-mock-defaults.js、断言是否无时序等待"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核查失效占位文案与图标/右键菜单保持、未引入交互回归"}

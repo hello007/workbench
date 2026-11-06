@@ -897,6 +897,8 @@ describe('Home.vue - handler 分支补充', () => {
     fileTreeSpies = {
       saveCurrentState: vi.fn(), restoreTreeState: vi.fn(), locateNode: vi.fn().mockResolvedValue(),
       exitAggregatedMode: vi.fn().mockResolvedValue(),
+      // 默认普通树；聚合用例按需 mockReturnValue(true)
+      isAggregatedMode: vi.fn(() => false),
       refreshNode: vi.fn(), refreshAfterFileOp: vi.fn(), triggerRenameCurrent: vi.fn(), triggerDeleteCurrent: vi.fn(),
       showRenameAt: vi.fn(), showCreateAt: vi.fn(), showCopyToDialog: vi.fn(),
       closeCopyToDialog: vi.fn(), setCopyToLoading: vi.fn(), closeMenu: vi.fn()
@@ -1112,6 +1114,133 @@ describe('Home.vue - handler 分支补充', () => {
     expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('dup'))
   })
 
+  // ---- onDirectorySelect：聚合模式下选择工作目录 = 退出聚合并切目录 ----
+  it('onDirectorySelect：聚合模式下先退出聚合并跳过旧状态保存，再切到目标目录', async () => {
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: 'D:\\proj\\b', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-1'
+    // 仅首次读取为聚合态；exitAggregatedMode 完成后复查须回落普通态
+    fileTreeSpies.isAggregatedMode.mockReturnValueOnce(true)
+
+    await wrapper.vm.onDirectorySelect('dir-2')
+    await flushPromises()
+
+    // 聚合模式仅由工具栏切换按钮进入：选工作目录必须先退出聚合
+    expect(fileTreeSpies.exitAggregatedMode).toHaveBeenCalledWith({ restoreState: false })
+    // 退出后重建的是全部收起的普通树空树，保存会覆盖旧目录展开记忆
+    expect(fileTreeSpies.saveCurrentState).not.toHaveBeenCalled()
+    expect(directoryStore.selectedDirectoryId).toBe('dir-2')
+    expect(fileTreeSpies.restoreTreeState).toHaveBeenCalledWith('D:\\proj\\b')
+  })
+
+  it('onDirectorySelect：普通模式不触发聚合退出，原保存/恢复链路不变', async () => {
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: 'D:\\proj\\b', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-1'
+
+    await wrapper.vm.onDirectorySelect('dir-2')
+    await flushPromises()
+
+    expect(fileTreeSpies.isAggregatedMode).toHaveBeenCalled()
+    expect(fileTreeSpies.exitAggregatedMode).not.toHaveBeenCalled()
+    expect(fileTreeSpies.saveCurrentState).toHaveBeenCalledWith('D:\\proj\\a')
+    expect(directoryStore.selectedDirectoryId).toBe('dir-2')
+    expect(fileTreeSpies.restoreTreeState).toHaveBeenCalledWith('D:\\proj\\b')
+  })
+
+  it('onDirectorySelect：聚合模式连点目录时过期请求不改选中，且不保存在途树状态', async () => {
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: 'D:\\proj\\b', isDefault: false },
+      { id: 'dir-3', name: '项目C', path: 'D:\\proj\\c', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-1'
+    fileTreeSpies.isAggregatedMode.mockReturnValueOnce(true)
+    // 模拟真实 switchTreeMode：首个 await 前同步翻转 aggregatedMode，退出完成后才 resolve
+    let releaseExit
+    fileTreeSpies.exitAggregatedMode.mockImplementationOnce(() => {
+      fileTreeSpies.isAggregatedMode.mockReturnValue(false)
+      return new Promise(resolve => { releaseExit = resolve })
+    })
+
+    // 第一次点击 dir-2：在 await 退出聚合处挂起
+    const first = wrapper.vm.onDirectorySelect('dir-2')
+    await flushPromises()
+    // 退出期间快速点 dir-3（此时模式已同步翻为普通树，第二次调用不得保存树状态）
+    const second = wrapper.vm.onDirectorySelect('dir-3')
+    await flushPromises()
+    // 在途过渡态（旧树已拆、新树未就绪）保存必然写错，必须跳过
+    expect(fileTreeSpies.saveCurrentState).not.toHaveBeenCalled()
+    expect(directoryStore.selectedDirectoryId).toBe('dir-3')
+
+    releaseExit()
+    await first
+    await second
+    await flushPromises()
+
+    // 最终归属最后一次点击；过期请求不得回写 dir-2
+    expect(directoryStore.selectedDirectoryId).toBe('dir-3')
+    expect(fileTreeSpies.restoreTreeState).toHaveBeenCalledWith('D:\\proj\\c')
+    expect(fileTreeSpies.restoreTreeState).not.toHaveBeenCalledWith('D:\\proj\\b')
+  })
+
+  it('onDirectorySelect：退出聚合期间用户又切回聚合时放弃本次选目录（选中回滚）', async () => {
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: 'D:\\proj\\b', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-1'
+    fileTreeSpies.isAggregatedMode.mockReturnValue(true)
+    let releaseExit
+    fileTreeSpies.exitAggregatedMode.mockImplementationOnce(() => new Promise(resolve => { releaseExit = resolve }))
+
+    const pending = wrapper.vm.onDirectorySelect('dir-2')
+    await flushPromises()
+
+    // 用户在等待期间点工具栏切回聚合：exit 因代次守卫提前返回，模式仍为聚合
+    releaseExit()
+    await pending
+    await flushPromises()
+
+    // 「选择工作目录 = 退出聚合」语义作废：选中回滚、不恢复目标目录树状态
+    expect(directoryStore.selectedDirectoryId).toBe('dir-1')
+    expect(fileTreeSpies.restoreTreeState).not.toHaveBeenCalled()
+  })
+
+  it('聚合视图下命令面板跨目录跳转：onDirectorySelect 完成后才 locateNode', async () => {
+    const directoryStore = useDirectoryStore()
+    directoryStore.directories = [
+      { id: 'dir-1', name: '项目A', path: 'D:\\proj\\a', isDefault: false },
+      { id: 'dir-2', name: '项目B', path: 'D:\\proj\\b', isDefault: false }
+    ]
+    directoryStore.selectedDirectoryId = 'dir-1'
+    fileTreeSpies.isAggregatedMode.mockReturnValueOnce(true)
+    let releaseExit
+    fileTreeSpies.exitAggregatedMode.mockImplementationOnce(() => {
+      fileTreeSpies.isAggregatedMode.mockReturnValue(false)
+      return new Promise(resolve => { releaseExit = resolve })
+    })
+
+    const pending = wrapper.vm.onPaletteSelectFile({ path: 'D:\\proj\\b\\a.go', type: 'file' })
+    await flushPromises()
+    // 退出聚合未完成时不得 locateNode：否则仍在旧/聚合树上下文，跨目录前缀判定失败
+    expect(fileTreeSpies.locateNode).not.toHaveBeenCalled()
+
+    releaseExit()
+    await pending
+    await flushPromises()
+    expect(fileTreeSpies.locateNode).toHaveBeenCalledWith('D:\\proj\\b\\a.go')
+    expect(directoryStore.selectedDirectoryId).toBe('dir-2')
+  })
+
   // ---- onSetAsWorkDir（聚合视图「设为工作目录」）----
   it('onSetAsWorkDir：目标已是工作目录时复用，跳过旧状态保存并退出聚合后切换', async () => {
     const { ElMessage } = await import('element-plus')
@@ -1122,6 +1251,8 @@ describe('Home.vue - handler 分支补充', () => {
       { id: 'dir-2', name: '项目B', path: '/path/b', isDefault: false }
     ]
     directoryStore.selectedDirectoryId = 'dir-2'
+    // 仅首次读取为聚合态；exitAggregatedMode 完成后复查须回落普通态
+    fileTreeSpies.isAggregatedMode.mockReturnValueOnce(true)
 
     await wrapper.vm.onSetAsWorkDir({ path: 'd:/proj/a', name: '项目A' })
     await flushPromises()

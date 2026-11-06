@@ -130,8 +130,9 @@ func (s *FileTreeService) GetChildren(dirPath string) ([]*model.FileTreeNode, er
 //   - 入参先经 filepath.Clean 归一：尾分隔符（D:\repo\ 与 D:\repo）落到同一节点 key
 //   - Stat 成功且为目录 -> 正常节点（复用 isGitRepoDir/hasRemote 缓存填 git 徽标）
 //   - Stat 成功但非目录 -> 跳过（收藏可含文件，文件类收藏不进聚合树）
-//   - Stat 失败（被删/移动/无权限）-> Missing 占位节点，前端标灰提示并可右键移除收藏；
-//     静默丢弃会让用户误以为收藏丢失，显式占位才能形成失效兜底闭环
+//   - Stat 失败（被删/移动/无权限/网络盘不可达）-> Missing 占位节点，前端标灰提示并可
+//     右键移除收藏；静默丢弃会让用户误以为收藏丢失，显式占位才能形成失效兜底闭环。
+//     原始错误只记录 Warn 日志（前端不区分原因），排障依赖该日志
 //
 // 顺序恒与入参一致（收藏列表顺序），不排序不去重；一次批量调用同时收口存在性判定
 // 与 git 徽标，避免前端逐目录 IPC（前端无轻量存在性检查绑定，借道 GetFileTree 全扫
@@ -190,6 +191,7 @@ func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTree
 	type statResult struct {
 		exists bool
 		isDir  bool
+		err    error
 	}
 	stats := make([]statResult, len(paths))
 	for i := range entries {
@@ -203,7 +205,9 @@ func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTree
 			defer func() { <-sem }()
 			info, err := os.Stat(entries[idx].path)
 			if err != nil {
-				stats[idx].exists = false
+				// 临界区内只记失败，不在持槽期间做日志 IO（文件 IO 会挤占并发槽位，
+				// 并发上限 4 时直接延长其他路径的等待）；Warn 在 wg.Wait 之后补写
+				stats[idx].err = err
 				return
 			}
 			stats[idx].exists = true
@@ -211,6 +215,16 @@ func (s *FileTreeService) GetRootNodesForPaths(paths []string) []*model.FileTree
 		}(i)
 	}
 	wg.Wait()
+
+	// 日志在信号量临界区外逐条补写：占位节点对前端是同一形态（不区分不存在/无权限/
+	// 网络盘不可达），原始错误是失效占位的唯一排障依据。刻意不做同轮去重/汇总——
+	// 每条失效路径都要带原始 error（100 条失效即 100 行 Warn，属已知取舍，
+	// 规模由收藏上限 100 兜底）。
+	for i := range entries {
+		if stats[i].err != nil {
+			Logger().Warn("aggregated root stat failed", "path", entries[i].path, "err", stats[i].err)
+		}
+	}
 
 	// ---- 阶段二：仅对有效目录并发探测 git 徽标 ----
 	isRepo := make([]bool, len(paths))

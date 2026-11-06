@@ -2388,6 +2388,18 @@ describe('聚合视图（虚拟工作区）', () => {
     expect(state.treeKey).not.toContain('_agg')
   })
 
+  it('isAggregatedMode / exitAggregatedMode 暴露：返回值随模式切换', async () => {
+    const state = await createAggWrapper()
+    // Home.vue 统一入口读取该返回值判定「选工作目录 = 退出聚合」
+    expect(wrapper.vm.isAggregatedMode()).toBe(false)
+
+    await state.switchTreeMode(true, { restoreState: false })
+    expect(wrapper.vm.isAggregatedMode()).toBe(true)
+
+    await wrapper.vm.exitAggregatedMode({ restoreState: false })
+    expect(wrapper.vm.isAggregatedMode()).toBe(false)
+  })
+
   it('聚合模式 level 0 调 GetAggregatedRootNodes（不调 GetFileTree），别名覆盖且失效节点按叶子', async () => {
     const { GetAggregatedRootNodes, GetFileTree } = await import('../../../wailsjs/go/main/App')
     GetAggregatedRootNodes.mockResolvedValueOnce([
@@ -2460,9 +2472,27 @@ describe('聚合视图（虚拟工作区）', () => {
       { expanded: false }
     )
 
-    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏失效'))
+    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏项已失效或不可访问，可右键移除收藏'))
     expect(wrapper.emitted('select')).toBeUndefined()
     expect(state.currentSelectedPath).toBe('')
+  })
+
+  it('失效收藏节点 tooltip：统一为「收藏项已失效或不可访问」，不断言已移动也不暗示目录', async () => {
+    // 用渲染 default slot 的 el-tree 桩直接验证节点模板绑定（不涉及展开行为）
+    const missingNodeTreeStub = {
+      template: `<div class="el-tree">
+        <slot :node="{ expanded: false }"
+              :data="{ path: '/repo/gone', name: 'gone', type: 'directory', missing: true }" />
+      </div>`,
+      data: () => ({ store: { nodesMap: {}, root: { expanded: false, childNodes: [{}] } } })
+    }
+    wrapper = createWrapper({ stubs: { 'el-tree': missingNodeTreeStub } })
+    await flushPromises()
+
+    const title = wrapper.find('.custom-tree-node').attributes('title')
+    expect(title).toBe('收藏项已失效或不可访问，可右键移除收藏')
+    expect(title).not.toContain('已移动')
+    expect(title).not.toContain('目录')
   })
 
   it('失效收藏节点右键菜单：仅保留移除收藏与复制路径（其余文件操作无意义）', async () => {
@@ -2631,7 +2661,7 @@ describe('聚合视图（虚拟工作区）', () => {
     }
     await state.locateNode('/repo/gone')
 
-    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏失效'))
+    expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('收藏项已失效或不可访问，可右键移除收藏'))
     expect(setCurrentKey).not.toHaveBeenCalled()
   })
 

@@ -1,6 +1,6 @@
 # 聚合视图（虚拟工作区）契约
 
-> 版本：v2（2026-11-06）｜关联实现：任务 `11-05-virtual-workspace-aggregated-dirs`、`11-05-aggregated-debt-p0-normalize`、`11-05-aggregated-debt-p1-interaction`
+> 版本：v3（2026-11-06）｜关联实现：任务 `11-05-virtual-workspace-aggregated-dirs`、`11-05-aggregated-debt-p0-normalize`、`11-05-aggregated-debt-p1-interaction`、`11-05-aggregated-debt-p2-contract`
 
 ## 1. 定位与边界
 
@@ -26,7 +26,7 @@
   - 空串与纯空白串 **跳过**，不产 `Missing` 占位（脏值与「收藏目录已失效」语义不同，空白占位会让用户无法移除）；
   - 两阶段有界并发（信号量 4）：① 仅对有效入参并发 `os.Stat`；② 仅对「Stat 成功且为目录」的项并发探测 git 徽标（先 `isGitRepoDir`，为真才 `hasRemote`）。goroutine 只写各自入参下标的预分配切片，按下标回填、收尾串行组装，**不加锁、不共享可变切片 append**，输出顺序恒与入参一致；
   - 文件 → **跳过**（收藏夹允许文件收藏，文件类收藏不进聚合树）；
-  - Stat 失败 → `Missing=true` 占位节点（`type` 仍为 `directory`，`name` 取路径末段），**禁静默丢弃**；
+  - Stat 失败 → `Missing=true` 占位节点（`type` 仍为 `directory`，`name` 取路径末段），**禁静默丢弃**；失败分支写 `Logger().Warn("aggregated root stat failed", "path", ..., "err", ...)` 留存原始错误。**不做** `os.IsNotExist` 分流、**不新增** `MissingReason` 字段：前端对所有失效形态共用同一提示口径，区分原因需扩 `model.FileTreeNode` 契约并同步 wailsjs 三处，收益仅文案精度；待确实需要按原因执行不同操作时再补；
   - 卷根（`C:\`、`/`）的 `filepath.Base` 结果是分隔符本身，展示名回退 `filepath.VolumeName`；无卷名（Unix `/`）再回退清洗后的路径串，不产出空名。
   - **不做整体超时**：Wails 绑定签名无 `ctx`，网络盘 `os.Stat` 为不可中断的阻塞系统调用，丢弃式超时只会增加 goroutine 泄漏面；并发化只降低典型总时长，不承诺最坏耗时有上界。
 - 顺序恒与入参一致（收藏列表顺序），不排序、不去重。
@@ -69,7 +69,8 @@
 | 收藏外部变更 | 组件内 `watch(() => favoritesStore.favorites, { deep: true })`：聚合模式下 100ms 去抖后 `refreshAggregatedRoot`；调度时快照 `modeSwitchSeq`，触发时校验代次与 `aggregatedMode`，卸载清定时器。覆盖命令面板取消收藏、配置导入后 `loadFavorites`、`updateAlias` 成功后重载（store 内与 add/remove 同口径） |
 | 状态持久化 | 聚合模式固定 key `treeState:__aggregated__`，普通树沿用 `treeState:<dirPath>`；分流收口在 `currentStateKey()`，`useTreeState` 本体零改动 |
 | 切换时序 | `switchTreeMode`：保存旧模式状态 → 翻转 `aggregatedMode` → `exitFilterMode()` + 清空 `lastClickedNodeData` → 等新树根就绪 → 恢复新模式状态 |
-| 「设为工作目录」退出 | `exitAggregatedMode({ restoreState: false })` 跳过新树状态恢复（`onDirectorySelect` 即将保存/恢复目标目录状态） |
+| 「设为工作目录」退出 | 由 `onDirectorySelect` 统一入口触发 `exitAggregatedMode({ restoreState: false })`（跳过新树状态恢复），本次跳过旧目录状态保存；`onSetAsWorkDir` 不再显式前置退出 |
+| **选择工作目录** | **选择工作目录 = 退出聚合视图并切到该目录；聚合模式仅由工具栏切换按钮进入**。判定落在 `Home.vue` `onDirectorySelect` 统一入口（经 `fileTreePanelRef.isAggregatedMode()` 读取），目录树点击 / 命令面板「工作目录」跳转 / 收藏跳转等调用方自动继承，禁在单个调用点补退出逻辑。退出固定传 `restoreState: false`（聚合态树状态已在 `switchTreeMode` 内保存），且本次**跳过旧目录状态保存**——退出后重建的是全部收起的普通树空树，保存会覆盖旧目录展开记忆。并发收口：入口 `dirSelectSeq` 请求序号 + `dirSelectInFlight` 在途标志，每个 await 后校验代次（过期请求不改选中不恢复），在途期间不保存树状态；选中写入提前到退出 await 之前，使「退出重建」与「切目录重建」合并为一次；退出后复查 `isAggregatedMode()`，用户已在等待期切回聚合则放弃本次选目录 |
 
 ## 4. 筛选作用域与展开回溯
 
@@ -81,12 +82,13 @@
   - 聚合视图按**最长前缀收藏根**回溯（`findAggregatedRootFor`，兼容 `\`/`/` 与大小写），收藏根在 `nodesMap` 中可本身作为刷新目标（未展开也可，`expand` 会加载最新子节点）；目标不在任何收藏范围内返回 `null`。
   - 路径前缀判定必须为 `target === root || target.startsWith(root + sep)`，排除仅共享前缀串的兄弟目录（`/a/b` 与 `/a/bc`）。
 - 刷新分隔符基准：聚合视图取目标所属收藏根（无命中取目标自身），普通树取工作目录根。
-- **右键菜单基准**：聚合视图「复制相对路径」「文件引用路径」以目标所属收藏根（`findAggregatedRootFor`）为基准，无命中回退目标自身；普通树仍以当前工作目录为基准，语义不变。
+- **右键菜单基准**：聚合视图「复制相对路径」「文件引用路径」以目标所属收藏根（`findAggregatedRootFor`）为基准，无命中回退目标自身；普通树仍以当前工作目录为基准，语义不变。基准计算单点 `FileTreePanel.vue` 的 `relativePathBase`。
 - **「在此目录中搜索」的已知限制**：命令面板内容搜索的 `subDir` 由后端 `service/content_search.go` 以 `filepath.Join(workDir, subDir)` 解析，聚合视图沿用「当前工作目录 + 相对路径」口径；收藏根不在当前工作目录下时无法用现绑定限定作用域（退化为搜索整个工作目录）。修复需扩展搜索绑定的作用域参数，属 P2 契约项候选。
 
 ## 5. 失效兜底与「设为工作目录」
 
-- 失效节点：树行灰色 + 删除线 + `title` 提示（「目录不存在或已移动（收藏失效），可右键移除收藏」）；点击仅提示、不选中、不 emit `select`；`locateNode` 不选中失效根；快捷键 `triggerRenameCurrent`/`triggerDeleteCurrent` 经 `isUnusableNode`（截断哨兵或 `data.missing`）拦截，防对不存在路径发起重命名/删除。
+- 失效节点：树行灰色 + 删除线 + `title` 提示；点击仅提示、不选中、不 emit `select`；`locateNode` 不选中失效根；快捷键 `triggerRenameCurrent`/`triggerDeleteCurrent` 经 `isUnusableNode`（截断哨兵或 `data.missing`）拦截，防对不存在路径发起重命名/删除。
+- 失效提示文案**单一来源** `MISSING_FAVORITE_HINT`（`FileTreePanel.vue`）：**「收藏项已失效或不可访问，可右键移除收藏」**，tooltip / 节点点击 `ElMessage`（前加「该」）/ `locateNode` 三处一致。口径同时守住两点：① 不断言「已移动 / 一定不存在」——前端不掌握原因（删除、无权限、网络盘临时断开共用 Missing 形态），断言会误导用户移除仍有效的收藏；② 不暗示这是目录——文件类型收藏被删后同样是 Missing 占位。**保留占位不静默丢弃**（用户需要入口清理失效收藏）；**不给 `model.Favorite` 加 `Type` 字段**：需改 `Add` 签名并同步 wailsjs 三处，且旧数据无法判定原类型，收益有限。
 - 失效节点右键菜单：**仅**「移除收藏」「复制路径」（其余文件操作对不存在路径无意义）。
 - 收藏增删后（`handleAddFavorite` / `handleRemoveFavorite` 成功分支）调 `refreshAggregatedRoot()`：保存展开态 → `refreshCounter++` 重建根层 → 恢复展开态（根层是收藏列表快照，`refreshNode` 只刷新子层，无法感知根层增删）。
 - 收藏根自身的重命名/删除：`refreshAfterFileOp(parentPath)` 判定父目录不属于任何收藏根时改调 `refreshAggregatedRoot()`（`refreshNode` 对收藏范围外路径会静默早退）；收藏记录仍指向旧路径，重建后按 `Missing` 占位兜底提示用户移除。
@@ -94,13 +96,12 @@
 - 聚合模式空白区右键：**隐藏「新建文件」「新建文件夹」**（虚拟根不落盘、无明确落点）与依赖工作目录语义的「仓库筛选器」「跳转仓库统计」「加入/取消关注状态看板」；保留「刷新」（先 `ClearAllFileTreeCache` 清树与 git 徽标缓存，再重建根层并恢复展开态——与 ⑬ 节点刷新的定向失效口径区分：节点刷新只失效该根，空白区刷新即整树刷新）与「粘贴」（目标为最后点击的目录节点，无有效目标或目标为失效占位/截断哨兵时隐藏该项）。普通树空白区菜单与行为不变。
 - 「设为工作目录」（`handleSetAsWorkDir` → `Home.vue` `onSetAsWorkDir`）：
   1. 工作目录列表已有同路径（`isSameDirPath`：分隔符归一 + 去尾分隔符 + 小写比较，Windows 语义）则复用，否则 `AddDirectory` + `loadDirectories`；后端判重返回 nil 时回查列表再判定（防「目录已存在却报添加失败」）；
-  2. 退出聚合模式（`exitAggregatedMode({ restoreState: false })`，跳过旧树状态恢复——旧目录普通树状态已在进入聚合时保存）；
-  3. `onDirectorySelect` 切换工作目录（`skipSave: true`），由既有保存/恢复链恢复目标目录树状态。
+  2. 直接调 `onDirectorySelect(target.id, { skipSave: true })`：统一入口内部先 `exitAggregatedMode({ restoreState: false })`（聚合态树状态已在 `switchTreeMode` 内保存），并因本次处于聚合态强制跳过旧目录状态保存；随后由既有保存/恢复链恢复目标目录树状态。**禁再显式前置 `exitAggregatedMode`**，否则与统一入口重复退出/重复清理状态。
   - **不再调用 `locateNode` 定位子路径**：普通树的工作目录根不在树节点中，relative 为空恒早退，属无效操作。
   - `locateNode` 本身仍保留（文件定位链路使用）：聚合模式下目标即收藏根可直接选中并滚动居中；普通树工作目录根不在树中，维持静默返回。
 
 ## 6. 测试要求
 
-- 后端单测：`service/filetree_aggregated_test.go` 覆盖目录/文件/失效三类入参分流、git 徽标、顺序保持、空入参与空串防御；本批补充尾分隔符归一（`D:\repo\` 与 `D:\repo` 同节点 key、缓存同源）、空白串跳过、卷根展示名回退、git 徽标缓存失效（本路径、直接子目录、孙级不级联、同前缀兄弟不误删、卷根直接子目录）；`service/favorites_test.go` 覆盖收藏写入口（Add/Remove/UpdateAlias/UpdateGroup/Load）尾分隔符归一；`service/repo_config_test.go` 覆盖导入链路收藏路径归一。P1 补充 100 路径混合入参并发保序用例（倒序入参 + 定点混入缺失/文件项，断言过滤后顺序、Missing 占位形态与 git/remote 徽标）。
-- 前端单测：`FileTreePanel.spec.js`「聚合视图（虚拟工作区）」覆盖模式切换与 `treeKey`、虚拟根构造与别名/`isLeaf`、聚合绑定失败降级、空态引导、失效节点点击与右键菜单、状态 key 隔离、筛选作用域、展开回溯、`set-as-work-dir` emit，以及 `isFavorited` 的尾分隔符归一比较。展开/收起行为断言须用真实 EP `mount`（禁自造 el-tree 桩假绿）；本组状态隔离用例仅断言持久化 key 与回溯函数，可用桩。P1 补充复制相对路径/文件引用路径的收藏根基准（含普通树回归）、聚合空白区菜单（隐藏新建、保留刷新/粘贴）、收藏变化去抖重建与代次守卫、收藏根刷新整层重建且根行 `isGitRepo`/`hasRemote` 随重新查询更新。
+- 后端单测：`service/filetree_aggregated_test.go` 覆盖目录/文件/失效三类入参分流、git 徽标、顺序保持、空入参与空串防御；本批补充尾分隔符归一（`D:\repo\` 与 `D:\repo` 同节点 key、缓存同源）、空白串跳过、卷根展示名回退、git 徽标缓存失效（本路径、直接子目录、孙级不级联、同前缀兄弟不误删、卷根直接子目录）；`service/favorites_test.go` 覆盖收藏写入口（Add/Remove/UpdateAlias/UpdateGroup/Load）尾分隔符归一；`service/repo_config_test.go` 覆盖导入链路收藏路径归一。P1 补充 100 路径混合入参并发保序用例（倒序入参 + 定点混入缺失/文件项，断言过滤后顺序、Missing 占位形态与 git/remote 徽标）。P2 补充 Stat 失败用例（`TestGetRootNodesForPaths_StatFailureLogsWarn`）：仍产 `Missing=true` 占位，同时捕获 service 日志断言 Warn 级别且含事件标识、路径与原始 error。
+- 前端单测：`FileTreePanel.spec.js`「聚合视图（虚拟工作区）」覆盖模式切换与 `treeKey`、虚拟根构造与别名/`isLeaf`、聚合绑定失败降级、空态引导、失效节点点击与右键菜单、状态 key 隔离、筛选作用域、展开回溯、`set-as-work-dir` emit，以及 `isFavorited` 的尾分隔符归一比较。展开/收起行为断言须用真实 EP `mount`（禁自造 el-tree 桩假绿）；本组状态隔离用例仅断言持久化 key 与回溯函数，可用桩。P1 补充复制相对路径/文件引用路径的收藏根基准（含普通树回归）、聚合空白区菜单（隐藏新建、保留刷新/粘贴）、收藏变化去抖重建与代次守卫、收藏根刷新整层重建且根行 `isGitRepo`/`hasRemote` 随重新查询更新。P2 补充失效提示新口径断言（tooltip 渲染文案、点击 `ElMessage` 文案）与 `Home.spec.js` 选目录自动退出聚合（聚合态断言先退出且跳过旧状态保存 / 普通态断言不触发退出、原保存链不变）、连点序号守卫（过期请求不改选中且不保存在途状态）、退出期间用户切回聚合则放弃本次选目录、命令面板跨目录跳转在 `onDirectorySelect` 完成后才 `locateNode`。
 - E2E：`e2e/file-tree.spec.js` 顶层 `聚合视图（虚拟工作区）` 覆盖切换、别名与失效标灰、失效右键菜单、切回目录树；mock 数据经 `wailsOverrides` 注入，默认值登记于 `src/test/wails-mock-defaults.js`（`GetAggregatedRootNodes: []`）。P1 补充取消收藏后根节点消失（`__rules__` 在 `RemoveFavorite` 后收缩列表）、别名修改后显示名更新且展开态保持（`__sequence__` 二次返回值 + 命令面板打开触发 `loadFavorites`）。
