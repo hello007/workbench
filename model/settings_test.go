@@ -312,8 +312,8 @@ func TestAppSettings_EnsureAssetsThumbsDefaults(t *testing.T) {
 		{name: "宽度越界收敛", smallWidth: 50, hdWidth: 9999, smallQuotaMB: 1024, hdQuotaMB: 1024,
 			wantSmallWidth: MinAssetThumbSmallWidth, wantHDWidth: MaxAssetThumbHDWidth,
 			wantSmallQuotaMB: 1024, wantHDQuotaMB: 1024},
-		{name: "配额越界收敛", smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1, hdQuotaMB: 99999,
-			wantSmallWidth: 320, wantHDWidth: 1600,
+		{name: "配额越界收敛", smallWidth: 400, hdWidth: 1600, smallQuotaMB: 1, hdQuotaMB: 99999,
+			wantSmallWidth: 400, wantHDWidth: 1600,
 			wantSmallQuotaMB: MinAssetThumbQuotaMB, wantHDQuotaMB: MaxAssetThumbQuotaMB},
 		{name: "界内取值原样保留", smallWidth: 480, hdWidth: 2560, smallQuotaMB: 2048, hdQuotaMB: 4096,
 			wantSmallWidth: 480, wantHDWidth: 2560, wantSmallQuotaMB: 2048, wantHDQuotaMB: 4096},
@@ -331,6 +331,39 @@ func TestAppSettings_EnsureAssetsThumbsDefaults(t *testing.T) {
 			}
 		})
 	}
+
+	// 存量默认值一次性迁移（small 档 320 → 640）：仅命中旧默认值，其他显式值保留；
+	// 迁移幂等，重复调用不再变化。
+	t.Run("存量旧默认宽度迁移为新默认", func(t *testing.T) {
+		s := &AppSettings{Assets: &AssetThumbsSettings{SmallWidth: 320, HDWidth: 1600}}
+		s.EnsureAssetsThumbsDefaults()
+		if s.Assets.SmallWidth != DefaultAssetThumbSmallWidth {
+			t.Fatalf("旧默认 320 应迁移为 %d, got %d", DefaultAssetThumbSmallWidth, s.Assets.SmallWidth)
+		}
+		// 幂等：再次调用保持迁移结果
+		s.EnsureAssetsThumbsDefaults()
+		if s.Assets.SmallWidth != DefaultAssetThumbSmallWidth {
+			t.Fatalf("迁移应幂等, got %d", s.Assets.SmallWidth)
+		}
+	})
+
+	t.Run("非旧默认的显式宽度不迁移", func(t *testing.T) {
+		for _, w := range []int{360, 480, 720, 800} {
+			s := &AppSettings{Assets: &AssetThumbsSettings{SmallWidth: w}}
+			s.EnsureAssetsThumbsDefaults()
+			if s.Assets.SmallWidth != w {
+				t.Errorf("显式值 %d 不应被迁移, got %d", w, s.Assets.SmallWidth)
+			}
+		}
+	})
+
+	t.Run("零值宽度回退新默认而非迁移", func(t *testing.T) {
+		s := &AppSettings{Assets: &AssetThumbsSettings{SmallWidth: 0}}
+		s.EnsureAssetsThumbsDefaults()
+		if s.Assets.SmallWidth != DefaultAssetThumbSmallWidth {
+			t.Fatalf("零值应回退默认 %d, got %d", DefaultAssetThumbSmallWidth, s.Assets.SmallWidth)
+		}
+	})
 }
 
 // TestNormalizeAssetThumbsSettings 归一化入口契约：nil → 默认值；非 nil → 拷贝

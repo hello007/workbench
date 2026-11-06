@@ -127,6 +127,15 @@ func runServe(listenOverride string) error {
 	// 设置读取不再仅在 listen 未指定时执行：TLS 配置（开关 + 证书路径）恒取自
 	// settings.json webServe 段（无命令行覆盖面，单一来源），须无条件读出
 	settings, _ := app.settingsSvc.Load()
+
+	// 存量 small 档默认宽度迁移（320 → 640）后的旧缓存重建：serve 模式无 Wails
+	// startup，需在此消费同一一次性标记（与桌面 startup 同款清档链）。
+	if app.settingsSvc.ConsumeAssetsThumbMigration() && settings.Assets != nil {
+		legacy := *settings.Assets
+		legacy.SmallWidth = model.LegacyAssetThumbSmallWidth
+		app.assetsSvc.ApplyThumbsSettingsChange(legacy, *settings.Assets)
+	}
+
 	listen := listenOverride
 	if listen == "" {
 		// Load 已补 webServe 段默认值（回环 127.0.0.1:36115，与历史 --serve

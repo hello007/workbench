@@ -37,7 +37,14 @@ type WebServeConfig struct {
 // store 的对应常量与此对齐）。宽度为 Export 目标像素（高按 16:9 自算，不在设置
 // 面板暴露）；配额 MB 为单档位 PNG 缓存上限（LRU 淘汰依据）。
 const (
-	DefaultAssetThumbSmallWidth   = 320
+	// LegacyAssetThumbSmallWidth 旧版 small 档默认宽度（2026-11 由 320 提升至 640）。
+	// 仅用于存量配置一次性迁移判定：显式值恰等于旧默认值时视为「未自定义」并升级
+	// 为新默认，其余值（含用户主动选择的其他宽度）原样保留。service 层据此判定
+	// 本次加载是否发生迁移，进而触发旧分辨率缓存重建。
+	// 未来再次调整 DefaultAssetThumbSmallWidth 时须同步推进本常量，避免对上一版本
+	// 默认值重复迁移。
+	LegacyAssetThumbSmallWidth    = 320
+	DefaultAssetThumbSmallWidth   = 640
 	MinAssetThumbSmallWidth       = 120
 	MaxAssetThumbSmallWidth       = 800
 	DefaultAssetThumbHDWidth      = 1600
@@ -53,7 +60,7 @@ const (
 // 段指针形态区分「老配置缺失（→ 默认）」与显式取值（对齐 WebServe 先例）。
 type AssetThumbsSettings struct {
 	Auto         bool `json:"auto"`         // 扫描完成后自动生成缩略图（默认 true）
-	SmallWidth   int  `json:"smallWidth"`   // 画廊小图宽度 px（默认 320，clamp 120-800；高按 16:9 自算）
+	SmallWidth   int  `json:"smallWidth"`   // 画廊小图宽度 px（默认 640，clamp 120-800；高按 16:9 自算）
 	HDWidth      int  `json:"hdWidth"`      // 详情高清宽度 px（默认 1600，clamp 480-3840）
 	SmallQuotaMB int  `json:"smallQuotaMB"` // 小图缓存上限 MB（默认 1024，clamp 64-8192）
 	HDQuotaMB    int  `json:"hdQuotaMB"`    // 高清缓存上限 MB（默认 1024，clamp 64-8192）
@@ -93,7 +100,7 @@ func NormalizeAssetThumbsSettings(s *AssetThumbsSettings) AssetThumbsSettings {
 
 // EnsureAssetsThumbsDefaults 补全素材缩略图段默认值并收敛越界值：
 //   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 五项全默认；
-//   - 段存在 → 零值回退默认、越界 clamp（Auto 显式 false 尊重用户关闭）。
+//   - 段存在 → 存量默认值迁移、零值回退默认、越界 clamp（Auto 显式 false 尊重用户关闭）。
 //
 // 经 AppSettings.EnsureAllDefaults 在 SettingsService.Load/Save 与
 // App.GetSettings 降级分支统一调用，保证缩略图链路消费方拿到的段始终完整可用。
@@ -102,6 +109,13 @@ func (s *AppSettings) EnsureAssetsThumbsDefaults() {
 		def := DefaultAssetThumbsSettings()
 		s.Assets = &def
 		return
+	}
+	// 存量默认值一次性迁移：显式值恰为旧默认（320）时升级为当前默认（640）。
+	// 置于 normalize 之前——normalize 只做零值回退与越界收敛，不会改写 320。
+	// 幂等：迁移后值不再等于旧默认，重复调用无副作用；用户在设置面板显式改回
+	// 320 时，下次加载仍会再次迁移（320 已不再是受支持的「未自定义」语义）。
+	if s.Assets.SmallWidth == LegacyAssetThumbSmallWidth {
+		s.Assets.SmallWidth = DefaultAssetThumbSmallWidth
 	}
 	s.Assets.normalize()
 }

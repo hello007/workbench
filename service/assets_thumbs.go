@@ -43,7 +43,7 @@ type thumbTier struct {
 // thumbTiers 双档分辨率默认值（PRD D2 设置链路落地后保留作默认值来源：队列
 // tiersFn 未注入时的回退 + thumbTiersFromSettings 默认一致性校验基准）。
 var thumbTiers = []thumbTier{
-	{Key: "small", Width: 320, Height: 180},
+	{Key: "small", Width: 640, Height: 360},
 	{Key: "hd", Width: 1600, Height: 900},
 }
 

@@ -324,3 +324,60 @@ func TestSettingsSave_FailureKeepsCache(t *testing.T) {
 		t.Fatalf("Save 失败缓存应保持旧值, got DefaultShell=%q", got.DefaultShell)
 	}
 }
+
+// TestSettingsLoad_AssetsThumbSmallWidthMigration 存量 small 档默认宽度迁移
+// （320 → 640）：Load 迁移并写回磁盘，迁移标记一次性；显式非旧默认值不迁移。
+func TestSettingsLoad_AssetsThumbSmallWidthMigration(t *testing.T) {
+	t.Run("旧默认值迁移并写回", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "settings.json")
+		raw := `{"assets":{"auto":true,"smallWidth":320,"hdWidth":1600,"smallQuotaMB":1024,"hdQuotaMB":1024}}`
+		if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+			t.Fatalf("写入前置配置: %v", err)
+		}
+		svc := NewSettingsService(path)
+		got, err := svc.Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.Assets == nil || got.Assets.SmallWidth != model.DefaultAssetThumbSmallWidth {
+			t.Fatalf("旧默认应迁移为 %d, got %+v", model.DefaultAssetThumbSmallWidth, got.Assets)
+		}
+		if !svc.ConsumeAssetsThumbMigration() {
+			t.Fatal("首次 Load 应置迁移标记")
+		}
+		if svc.ConsumeAssetsThumbMigration() {
+			t.Fatal("迁移标记应一次性消费")
+		}
+		// 写回磁盘：新实例读到已迁移值，且不再判定迁移（否则每次启动都清档重建）
+		svc2 := NewSettingsService(path)
+		got2, err := svc2.Load()
+		if err != nil {
+			t.Fatalf("二次 Load: %v", err)
+		}
+		if got2.Assets.SmallWidth != model.DefaultAssetThumbSmallWidth {
+			t.Fatalf("磁盘应已写回迁移值, got %d", got2.Assets.SmallWidth)
+		}
+		if svc2.ConsumeAssetsThumbMigration() {
+			t.Fatal("写回后再次加载不应判定迁移")
+		}
+	})
+
+	t.Run("显式非旧默认值不迁移", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "settings.json")
+		raw := `{"assets":{"smallWidth":480}}`
+		if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+			t.Fatalf("写入前置配置: %v", err)
+		}
+		svc := NewSettingsService(path)
+		got, err := svc.Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.Assets.SmallWidth != 480 {
+			t.Fatalf("显式值 480 不应迁移, got %d", got.Assets.SmallWidth)
+		}
+		if svc.ConsumeAssetsThumbMigration() {
+			t.Fatal("未迁移不应置标记")
+		}
+	})
+}

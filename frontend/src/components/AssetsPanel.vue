@@ -1061,17 +1061,27 @@
         <el-form-item label="自动生成">
           <el-switch v-model="thumbSettingsDraft.auto" />
         </el-form-item>
-        <el-form-item label="小图分辨率">
+        <el-form-item>
+          <template #label>
+            <el-tooltip content="画廊卡片展示用；640 px 可覆盖最大卡宽 420 px，避免放大发糊" placement="top">
+              <span>小图分辨率</span>
+            </el-tooltip>
+          </template>
           <el-input-number
             v-model="thumbSettingsDraft.smallWidth"
             :min="120"
             :max="800"
             :step="40"
-            :value-on-clear="320"
+            :value-on-clear="640"
           />
           <span class="settings-unit">px</span>
         </el-form-item>
-        <el-form-item label="高清分辨率">
+        <el-form-item>
+          <template #label>
+            <el-tooltip content="详情与全屏预览用；按需生成，不参与批量补缺" placement="top">
+              <span>高清分辨率</span>
+            </el-tooltip>
+          </template>
           <el-input-number
             v-model="thumbSettingsDraft.hdWidth"
             :min="480"
@@ -1435,7 +1445,7 @@ const PAGE_SIZE = 50
 // 段缺失/字段零值时逐字段回退，防 el-input-number 绑到 undefined/null 脏值）----
 const THUMB_SETTINGS_DEFAULTS = {
   auto: true,
-  smallWidth: 320,
+  smallWidth: 640,
   hdWidth: 1600,
   smallQuotaMB: 1024,
   hdQuotaMB: 1024

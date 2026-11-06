@@ -26,6 +26,11 @@ type SettingsService struct {
 
 	mu     sync.Mutex
 	cached *model.AppSettings // 内存缓存：Load 命中直接返回，Save 成功后更新
+	// assetsThumbMigrated 本次首次 Load 是否发生 small 档默认宽度迁移
+	// （320 → 640，2026-11）：迁移只改内存配置，磁盘上的旧分辨率 PNG 仍然存在，
+	// 须由启动装配消费本标记触发一次清档重建，否则 GetAssetThumb 继续返回旧图。
+	// 消费即清零（一次性）。
+	assetsThumbMigrated bool
 }
 
 func NewSettingsService(configPath string) *SettingsService {
@@ -48,16 +53,46 @@ func (s *SettingsService) Load() (*model.AppSettings, error) {
 			settings = &model.AppSettings{}
 		}
 	}
+	// 迁移前原始 small 档宽度（Ensure 前快照）：用于判定本次加载是否命中存量
+	// 默认值迁移（320 → 640），供启动装配触发旧分辨率缓存重建
+	rawSmallWidth := 0
+	if settings.Assets != nil {
+		rawSmallWidth = settings.Assets.SmallWidth
+	}
 	// 各设置段默认值补全与越界收敛（Ensure 串联单点 EnsureAllDefaults，新增设置
 	// 段在 model.AppSettings.EnsureAllDefaults 一处加行），保证「Load 返回的配置段
 	// 始终完整可用」不变式：桌面 startup、--serve 地址解析、前端 GetSettings 与
 	// 各服务装配拿到的配置段始终完整可用
 	settings.EnsureAllDefaults()
 
+	// 存量 small 档默认宽度迁移结果写回磁盘：Ensure 已把旧默认 320 升级为 640，
+	// 若不写回，每次启动都会重新判定迁移并触发一次全量清档重建。写回失败仅告警：
+	// 本次仍内存生效；下次启动再迁移一遍，重复一次重导（幂等可自愈）。
+	migrated := rawSmallWidth == model.LegacyAssetThumbSmallWidth &&
+		settings.Assets != nil && settings.Assets.SmallWidth == model.DefaultAssetThumbSmallWidth
+	if migrated {
+		if err := util.SaveJSON(s.configPath, settings); err != nil {
+			Logger().Warn("设置迁移写回失败", "path", s.configPath, "err", err)
+		}
+	}
+
 	s.mu.Lock()
 	s.cached = settings
+	s.assetsThumbMigrated = migrated
 	s.mu.Unlock()
 	return settings, nil
+}
+
+// ConsumeAssetsThumbMigration 一次性消费 small 档默认宽度迁移标记：返回本次首次
+// Load 是否发生 320 → 640 迁移，消费后清零。启动装配据此调用
+// ApplyThumbsSettingsChange（prev/cur 宽度差异触发清档重导），保证旧 320 PNG
+// 被新分辨率产物替换。
+func (s *SettingsService) ConsumeAssetsThumbMigration() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	migrated := s.assetsThumbMigrated
+	s.assetsThumbMigrated = false
+	return migrated
 }
 
 func (s *SettingsService) Save(settings *model.AppSettings) error {

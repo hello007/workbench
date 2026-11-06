@@ -127,7 +127,8 @@
 
 ### 设置段 AssetThumbsSettings（model.AppSettings.assets，指针段）
 
-- 五项：`auto`（扫描后自动生成，默认 true）/ `smallWidth`（320，clamp 120-800）/ `hdWidth`（1600，clamp 480-3840）/ `smallQuotaMB`（1024，clamp 64-8192）/ `hdQuotaMB`（1024，clamp 64-8192）。段指针形态区分「老配置缺失（→ 全默认）」与显式取值（WebServe 先例）；`NormalizeAssetThumbsSettings` 单点归一（nil → 默认 + 零值回退 + clamp），高按 16:9 自算（320×9/16=180、1600×9/16=900 与既有默认严格一致）。
+- 五项：`auto`（扫描后自动生成，默认 true）/ `smallWidth`（640，clamp 120-800）/ `hdWidth`（1600，clamp 480-3840）/ `smallQuotaMB`（1024，clamp 64-8192）/ `hdQuotaMB`（1024，clamp 64-8192）。段指针形态区分「老配置缺失（→ 全默认）」与显式取值（WebServe 先例）；`NormalizeAssetThumbsSettings` 单点归一（nil → 默认 + 零值回退 + clamp），高按 16:9 自算（640×9/16=360、1600×9/16=900）。
+- **small 档默认宽度迁移（2026-11）**：320 → 640，覆盖画廊卡片最大宽度 420 px，避免小图被放大发糊。`EnsureAssetsThumbsDefaults` 在 normalize 前做一次性迁移——显式值恰等于旧默认 320（`model.LegacyAssetThumbSmallWidth`）时升级为 640，其余显式值（360/480/720 等）原样保留。`SettingsService.Load` 在迁移命中时**写回 settings.json**（否则每次启动重复迁移），并置一次性标记 `assetsThumbMigrated`；桌面 `App.startup` 与 `--serve` `runServe` 各自经 `ConsumeAssetsThumbMigration()` 命中后调用 `ApplyThumbsSettingsChange`（prev=320 / cur=640）走既有清档链重建，保证旧 320 PNG 被替换——**迁移只改配置不清档会导致 `GetAssetThumb` 继续返回旧图**。迁移幂等，故 320 不再作为可持久化的用户选择（主动设回 320 下次加载仍会迁移）。
 - **SettingsService 缓存语义**（PR3 起）：Load 首读后缓存，缩略图读路径（画廊逐卡片）高频消费不能每次读盘。不变式：**Load 返回对象恒已 Ensure**（缓存 miss 分支 Ensure 后才入缓存；Save 落盘成功换缓存前同样 Ensure）；**Load 返回共享指针，消费方只读禁改**（原地改与并发读者竞态——需改先复制，app_webserve.go SetWebServeConfig 先例）；Save 锁跨「落盘+缓存换新」全程持有（两通道并发 Save 磁盘序与缓存序不可相反）；**运行期手改 settings.json 不再即时生效**（须重启）。Load 吞错降级无错误信号——SaveSettings 的 prev 对比在「缓存 miss + 盘损坏」窗口退化为默认值，存量非默认宽度会被误判清档重导（概率极窄、后果仅一次自愈重导，已登记接受）。
 
 ### 设置生效链路（SaveSettings → ApplyThumbsSettingsChange）

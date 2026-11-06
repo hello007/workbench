@@ -521,13 +521,13 @@ func TestThumbTiersFromSettings(t *testing.T) {
 		{
 			name:      "默认值与包级基准严格一致",
 			cfg:       model.DefaultAssetThumbsSettings(),
-			wantSmall: thumbTier{Key: "small", Width: 320, Height: 180},
+			wantSmall: thumbTier{Key: "small", Width: 640, Height: 360},
 			wantHD:    thumbTier{Key: "hd", Width: 1600, Height: 900},
 		},
 		{
 			name:      "零值设置经 normalize 与默认档位等价",
 			cfg:       model.AssetThumbsSettings{},
-			wantSmall: thumbTier{Key: "small", Width: 320, Height: 180},
+			wantSmall: thumbTier{Key: "small", Width: 640, Height: 360},
 			wantHD:    thumbTier{Key: "hd", Width: 1600, Height: 900},
 		},
 		{
@@ -653,7 +653,7 @@ func TestApplyThumbsSettingsChange_WidthClearsTierAndReenqueues(t *testing.T) {
 
 	prev := model.DefaultAssetThumbsSettings()
 	cur := model.DefaultAssetThumbsSettings()
-	cur.SmallWidth = 640
+	cur.SmallWidth = prev.SmallWidth + 160
 	cur.HDWidth = 1920
 
 	svc.applyThumbsSettingsChangeSync(prev, cur)
@@ -699,7 +699,7 @@ func TestApplyThumbsSettingsChange_AutoDisabledSkipsReenqueue(t *testing.T) {
 
 	prev := model.DefaultAssetThumbsSettings()
 	cur := model.DefaultAssetThumbsSettings()
-	cur.SmallWidth = 640
+	cur.SmallWidth = prev.SmallWidth + 160
 	cur.Auto = false
 
 	svc.applyThumbsSettingsChangeSync(prev, cur)

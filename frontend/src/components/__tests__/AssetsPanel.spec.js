@@ -138,7 +138,7 @@ const mockSettings = {
   diffToolArgs: '',
   diffToolMergeArgs: '',
   webServe: { enabled: false, bindAddress: '127.0.0.1:36115' },
-  assets: { auto: true, smallWidth: 320, hdWidth: 1600, smallQuotaMB: 1024, hdQuotaMB: 1024 }
+  assets: { auto: true, smallWidth: 640, hdWidth: 1600, smallQuotaMB: 1024, hdQuotaMB: 1024 }
 }
 
 // 保存的检索条件条目工厂（形状对齐 model.AssetSavedSearch 十六字段）：本库条目
@@ -3155,12 +3155,12 @@ describe('AssetsPanel', () => {
     expect(wrapper.find('.stub-dialog').exists()).toBe(true)
     const inputNumbers = wrapper.findAllComponents(ElInputNumberStub)
     expect(inputNumbers.length).toBe(4)
-    expect(inputNumbers[0].props('modelValue')).toBe(320) // 小图分辨率
+    expect(inputNumbers[0].props('modelValue')).toBe(640) // 小图分辨率
     expect(inputNumbers[1].props('modelValue')).toBe(1600) // 高清分辨率
     expect(inputNumbers[2].props('modelValue')).toBe(1024) // 小图缓存上限
     expect(inputNumbers[3].props('modelValue')).toBe(1024) // 高清缓存上限
     // 防清空写 null 脏值契约：value-on-clear 必带
-    expect(inputNumbers[0].props('valueOnClear')).toBe(320)
+    expect(inputNumbers[0].props('valueOnClear')).toBe(640)
     expect(inputNumbers[1].props('valueOnClear')).toBe(1600)
     expect(inputNumbers[2].props('valueOnClear')).toBe(1024)
     expect(inputNumbers[3].props('valueOnClear')).toBe(1024)
@@ -3172,7 +3172,7 @@ describe('AssetsPanel', () => {
 
     expect(wailsMock.SaveSettings).toHaveBeenCalledTimes(1)
     const saved = wailsMock.SaveSettings.mock.calls[0][0]
-    expect(saved.assets).toEqual({ auto: true, smallWidth: 320, hdWidth: 1920, smallQuotaMB: 1024, hdQuotaMB: 1024 })
+    expect(saved.assets).toEqual({ auto: true, smallWidth: 640, hdWidth: 1920, smallQuotaMB: 1024, hdQuotaMB: 1024 })
     expect(saved.themeMode).toBe('system')
     const { ElMessage } = await import('element-plus')
     expect(ElMessage.success).toHaveBeenCalledWith('缩略图设置已保存，分辨率变更将自动重新生成')
