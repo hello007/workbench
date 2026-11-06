@@ -56,17 +56,18 @@ const (
 
 // AssetFileEntry 素材文件索引条目（画廊文件视图卡片 + 详情侧边栏元数据编辑载体）。
 type AssetFileEntry struct {
-	ID        int64      `json:"id"`        // 文件记录自增主键
-	Path      string     `json:"path"`      // 相对库根目录路径（正斜杠分隔，库内唯一）
-	Size      int64      `json:"size"`      // 文件字节数
-	ModTime   string     `json:"modTime"`   // 最近修改时间（展示格式）
-	Status    string     `json:"status"`    // 索引状态（AssetFileStatus* 取值）
-	Title     string     `json:"title"`     // 文件展示标题（源文件名去扩展名）
-	Note      string     `json:"note"`      // 用户备注
-	Rating    int        `json:"rating"`    // 用户星级 0-5（0 = 未评分）
-	Tags      []AssetTag `json:"tags"`      // 文件标签（幻灯片视图经归属文件继承）
-	CreatedAt string     `json:"createdAt"` // 入库时间
-	UpdatedAt string     `json:"updatedAt"` // 最近索引时间
+	ID         int64      `json:"id"`         // 文件记录自增主键
+	Path       string     `json:"path"`       // 相对库根目录路径（正斜杠分隔，库内唯一）
+	Size       int64      `json:"size"`       // 文件字节数
+	ModTime    string     `json:"modTime"`    // 最近修改时间（展示格式）
+	Status     string     `json:"status"`     // 索引状态（AssetFileStatus* 取值）
+	ParseError string     `json:"parseError"` // 解析失败原因（failed/encrypted/denied 有值；v12 前历史失败行为空串，前端降级提示；成功恒空）
+	Title      string     `json:"title"`      // 文件展示标题（源文件名去扩展名）
+	Note       string     `json:"note"`       // 用户备注
+	Rating     int        `json:"rating"`     // 用户星级 0-5（0 = 未评分）
+	Tags       []AssetTag `json:"tags"`       // 文件标签（幻灯片视图经归属文件继承）
+	CreatedAt  string     `json:"createdAt"`  // 入库时间
+	UpdatedAt  string     `json:"updatedAt"`  // 最近索引时间
 }
 
 // AssetSlideEntry 幻灯片单页索引条目（画廊幻灯片视图卡片 + 检索命中单元）。
@@ -135,6 +136,9 @@ type AssetScanResult struct {
 	// Removed 兼容保留字段：lost 态引入前扫描直接删除消失记录的计数；现恒 0
 	//（删除语义由 lost 标记 + ClearLostAssetFiles 手动清理承接）
 	Removed int `json:"removed"`
+	// LockFilesRemoved 本次扫描清除的 Office 临时锁文件（`~$` 前缀）索引行数：
+	// 内置排除规则的存量收敛，此前这类文件被收入索引且稳定解析失败
+	LockFilesRemoved int `json:"lockFilesRemoved"`
 }
 
 // AssetThumbsProgress 缩略图批量生成进度事件载荷（assets-thumbs:progress 事件，

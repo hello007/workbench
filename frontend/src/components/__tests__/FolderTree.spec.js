@@ -563,5 +563,55 @@ describe('FolderTree', () => {
       // 兄弟展开面 reload 后保持
       expect(visibleTexts(wrapper)).toContain('方案A')
     })
+
+    it('点击折叠箭头收起含已展开子孙的目录：收起后不回弹（箭头路径接入可达面过滤）', async () => {
+      const wrapper = await mountRealTree()
+      // 「归档」与其子「2025」同时在展开面：旧实现 onNodeCollapse 只从 expandedKeys
+      // 剔除自身 key，回放 expand(2025, autoExpandParent=true) 会把「归档」祖先链
+      // 翻回展开——箭头点击路径必须与双击/全展全收同收口
+      const row = wrapper.findAll('.el-tree-node__content')
+        .find((r) => r.find('.folder-node-name').exists() && r.find('.folder-node-name').text() === '归档')
+      // 原生 click 而非 VTU trigger：EP 展开图标上的 @click.stop 在合成事件下
+      // 不回调（实测），element.click() 才走真机事件路径
+      row.find('.el-tree-node__expand-icon').element.click()
+      for (let i = 0; i < 8; i++) await nextTick()
+      expect(realStore(wrapper).nodesMap['归档'].expanded).toBe(false)
+      expect(visibleTexts(wrapper)).not.toContain('2025')
+    })
+  })
+
+  // ---- 节点右键菜单（命令集与 ⋯ 下拉同源）----
+
+  it('节点右键弹出菜单，命令项与同节点 ⋯ 下拉完全一致', async () => {
+    const wrapper = mountTree()
+    const row = findNodeRow(wrapper, '方案A')
+    await row.trigger('contextmenu', { clientX: 120, clientY: 80 })
+    const menu = wrapper.find('.context-menu')
+    expect(menu.exists()).toBe(true)
+    const contextItems = menu.findAll('.context-menu-item').map((i) => i.text())
+    const dropdownItems = row.findAll('.el-dropdown-item').map((i) => i.text())
+    expect(contextItems.length).toBeGreaterThan(0)
+    expect(contextItems).toEqual(dropdownItems)
+  })
+
+  it('右键菜单「在资源管理器中打开」上报 open-explorer（根节点同样可用）并关闭菜单', async () => {
+    const wrapper = mountTree()
+    await findNodeRow(wrapper, '全部素材').trigger('contextmenu')
+    const item = wrapper.findAll('.context-menu-item').find((i) => i.text() === '在资源管理器中打开')
+    expect(item.classes()).not.toContain('is-disabled')
+    await item.trigger('click')
+    const events = wrapper.emitted('open-explorer')
+    expect(events).toBeTruthy()
+    expect(events[0][0].path).toBe('')
+    expect(wrapper.find('.context-menu').exists()).toBe(false)
+  })
+
+  it('右键菜单禁用项不可触发（排除命中目录的删除项）', async () => {
+    const wrapper = mountTree()
+    await findNodeRow(wrapper, 'secret').trigger('contextmenu')
+    const del = wrapper.findAll('.context-menu-item').find((i) => i.text() === '删除')
+    expect(del.classes()).toContain('is-disabled')
+    await del.trigger('click')
+    expect(wrapper.emitted('delete')).toBeFalsy()
   })
 })

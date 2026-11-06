@@ -177,6 +177,8 @@ const { wailsMock } = vi.hoisted(() => ({
     ListAssetFolders: vi.fn(),
     CreateAssetFolder: vi.fn(),
     DeleteAssetFolder: vi.fn(),
+    DeleteAssetFile: vi.fn(),
+    OpenInExplorer: vi.fn(),
     RenameAssetFolder: vi.fn(),
     // 文件批量移动（PR3 拖拽移动，R4/R6/R9）：宿主 drop 分派单点
     MoveAssetFiles: vi.fn(),
@@ -5945,6 +5947,114 @@ describe('AssetsPanel', () => {
     await drawer2.vm.$emit('cancel-export')
     await flushPromises()
     expect(wailsMock.CancelAssetCartExport).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  // ---- 解析失败清单（失败原因可查，v12 起 parse_error 随索引落库）----
+
+  it('统计行「解析失败」可点开清单：展示路径与原因，空原因给降级文案，可复制全部', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    // jsdom 无 navigator.clipboard：只补该属性，禁整对象替换（替换会丢原型上的
+    // userAgent 等属性，EP/框架内部读取时报错致渲染中断）
+    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true })
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, failedCount: 2 })
+    wailsMock.ListAssetFiles.mockResolvedValue([
+      mockFiles[0],
+      { ...mockFiles[1], parseError: '文件已损坏（不是有效的演示文稿包）' },
+      // v12 之前失败的历史行：parse_error 为空串，需给降级文案而非留白
+      { ...mockFiles[1], id: 13, path: '方案C/旧失败.pptx', title: '旧失败', parseError: '' }
+    ])
+
+    const wrapper = await createWrapper()
+    const trigger = wrapper.findAll('.stats-link').find((b) => b.text().includes('解析失败'))
+    expect(trigger).toBeTruthy()
+    await trigger.trigger('click')
+    await flushPromises()
+
+    // el-dialog 桩不渲染 title，以弹窗内容区（.failed-files-list）作为定位锚
+    const list = wrapper.find('.failed-files-list')
+    expect(list.exists()).toBe(true)
+    expect(list.text()).toContain('共 2 个文件')
+    expect(list.text()).toContain('方案B/损坏文件.pptx')
+    expect(list.text()).toContain('文件已损坏')
+    expect(list.text()).toContain('方案C/旧失败.pptx')
+    expect(list.text()).toContain('原因未记录')
+
+    const copyBtn = wrapper.findAll('button').find((b) => b.text().trim() === '复制全部')
+    await copyBtn.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const payload = writeText.mock.calls[0][0]
+    expect(payload).toContain('方案B/损坏文件.pptx\t文件已损坏')
+    expect(payload).toContain('方案C/旧失败.pptx\t原因未记录')
+
+    delete window.navigator.clipboard
+    wrapper.unmount()
+  })
+
+  // ---- 文件夹树「在资源管理器中打开」（FolderTree open-explorer 事件）----
+
+  it('树节点请求打开资源管理器：以库根 + 节点相对路径拼绝对路径调用 OpenInExplorer', async () => {
+    wailsMock.OpenInExplorer.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    const tree = wrapper.findComponent({ name: 'FolderTreeStub' })
+    await tree.vm.$emit('open-explorer', { path: '方案A', name: '方案A' })
+    await flushPromises()
+    expect(wailsMock.OpenInExplorer).toHaveBeenCalledWith('D:/assets/方案A')
+    wrapper.unmount()
+  })
+
+  it('树根节点请求打开资源管理器：路径为库根目录本身', async () => {
+    wailsMock.OpenInExplorer.mockResolvedValue(true)
+    const wrapper = await createWrapper()
+    await wrapper.findComponent({ name: 'FolderTreeStub' }).vm.$emit('open-explorer', { path: '', name: '全部素材' })
+    await flushPromises()
+    expect(wailsMock.OpenInExplorer).toHaveBeenCalledWith('D:/assets')
+    wrapper.unmount()
+  })
+
+  // ---- 单文件删除（详情侧边栏「删除文件」入口）----
+
+  it('详情「删除文件」：确认后调用 DeleteAssetFile、刷新清单并关闭详情', async () => {
+    const { ElMessageBox, ElMessage } = await import('element-plus')
+    wailsMock.DeleteAssetFile.mockResolvedValue(null)
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.assets-detail').exists()).toBe(true)
+    const callsBefore = wailsMock.ListAssetFiles.mock.calls.length
+
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '删除文件')
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(wailsMock.DeleteAssetFile).toHaveBeenCalledWith('lib-1', mockFiles[0].id)
+    // 刷新走统一入口：文件底册重拉（reloadFolders 另拉树徽标）
+    expect(wailsMock.ListAssetFiles.mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(wrapper.find('.assets-detail').exists()).toBe(false)
+    expect(ElMessage.success).toHaveBeenCalledWith('文件已删除')
+    wrapper.unmount()
+  })
+
+  it('详情「删除文件」：取消确认不调用后端', async () => {
+    const { ElMessageBox } = await import('element-plus')
+    ElMessageBox.confirm.mockRejectedValueOnce(new Error('cancel'))
+    const wrapper = await createWrapper()
+    await wrapper.findAll('.asset-card')[0].trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().trim() === '删除文件').trigger('click')
+    await flushPromises()
+    expect(wailsMock.DeleteAssetFile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('解析失败计数为零时不渲染清单入口', async () => {
+    wailsMock.GetAssetLibraryStats.mockResolvedValue({ ...mockStats, failedCount: 0 })
+    const wrapper = await createWrapper()
+    expect(wrapper.findAll('.stats-link').length).toBe(0)
     wrapper.unmount()
   })
 })

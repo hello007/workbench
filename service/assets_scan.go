@@ -61,6 +61,18 @@ func isPptxSplitDerivative(rel string) bool {
 	return true
 }
 
+// isOfficeLockFileName 判定 Office 系列软件打开文档时产生的临时锁文件（
+// `~$<原文件名>`，PowerPoint/Word/Excel 同规则，如 `~$客户端架构-v1.1.pptx`）。
+//
+// 判定只取基名前缀 `~$`：锁文件后缀沿用原文档（.pptx 同样命中 .pptx 后缀白名单），
+// 内容为约百字节的 OLE 指针结构而非 OOXML 包，若不排除会被收进索引并稳定判
+// corrupted（解析失败计数长期非零的常见来源）。该前缀为 Office 运行时保留，
+// 不存在「需要索引」的合法场景，故为内置硬编码规则，不进用户可配置排除规则
+// （用户规则只能按目录段 glob 与文件后缀匹配，无法表达文件名前缀）。
+func isOfficeLockFileName(name string) bool {
+	return strings.HasPrefix(name, "~$")
+}
+
 // pptxDiskEntry 磁盘上单个待索引 pptx 的最小视图。
 type pptxDiskEntry struct {
 	rel     string // 相对库根目录路径（正斜杠分隔，作库内唯一键）
@@ -598,6 +610,23 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 	if err != nil {
 		return model.AssetScanResult{}, fmt.Errorf("读取文件索引失败: %w", err)
 	}
+	// 内置锁文件排除的存量收敛（先于增量判定与 lost 对账）：已入库的 `~$` 行
+	// 直接删除，并从本轮 records 中剔除——否则这些行会被下方「磁盘消失 → lost」
+	// 段捕获，标成丢失记录留在库里（用户需手动清理才消失）
+	lockRemoved, err := s.removeLockFileRecords(ctx, store, lib, records)
+	if err != nil {
+		return model.AssetScanResult{}, err
+	}
+	if lockRemoved > 0 {
+		kept := make([]assetFileRecord, 0, len(records)-lockRemoved)
+		for _, rec := range records {
+			if isOfficeLockFileName(path.Base(rec.path)) {
+				continue
+			}
+			kept = append(kept, rec)
+		}
+		records = kept
+	}
 	recordByID := make(map[string]assetFileRecord, len(records))
 	for _, rec := range records {
 		recordByID[rec.path] = rec
@@ -608,7 +637,7 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 	// 已过滤）：任意现存态命中即标 excluded（幂等：已 excluded 行跳过不重复
 	// 计数）；标注/评分/备注/缩略图/FTS 全保留（markFileExcluded 仅翻状态，
 	// 无损保留语义对齐 markFileLost）。
-	result := model.AssetScanResult{Total: len(entries)}
+	result := model.AssetScanResult{Total: len(entries), LockFilesRemoved: lockRemoved}
 	if matcher.active() {
 		now := time.Now().Format("2006-01-02 15:04:05")
 		for _, rec := range records {
@@ -719,6 +748,33 @@ func (s *AssetLibraryService) scanLibrary(ctx context.Context, store *assetsStor
 		}
 	}
 	return result, nil
+}
+
+// removeLockFileRecords 清除存量索引中的 Office 临时锁文件行（内置排除规则的
+// 存量收敛，见 isOfficeLockFileName）。删除索引行而非标 excluded：excluded 面向
+// 用户排除规则，会在库统计「已排除 N」与文件夹树节点标记上呈现，锁文件混入会
+// 造成误导；且锁文件不可能承载有效标注/评分（内容非演示文稿），删除无用户资产
+// 损失。磁盘文件保持原样，Office 关闭后由 Office 自身删除。单行删除失败仅告警
+// 不中断扫描（幂等：下次扫描重试）。
+func (s *AssetLibraryService) removeLockFileRecords(ctx context.Context, store *assetsStore, lib model.AssetLibrary, records []assetFileRecord) (int, error) {
+	removed := 0
+	for _, rec := range records {
+		if !isOfficeLockFileName(path.Base(rec.path)) {
+			continue
+		}
+		// 逐行取消检查点：万文件级存量循环，无检查点时取消要等整轮结束才生效
+		if err := ctx.Err(); err != nil {
+			return removed, fmt.Errorf("扫描已取消: %w", err)
+		}
+		s.invalidateFileThumbs(lib, store, rec.id)
+		if err := store.deleteFileRecord(rec.id); err != nil {
+			Logger().Warn("删除 Office 临时锁文件索引行失败", "libraryId", lib.ID,
+				"path", rec.path, "fileId", rec.id, "err", err)
+			continue
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // invalidateFileThumbs 缩略图失效联动（文件重解析前调用，parse 成败两分支均生效）：
@@ -1073,7 +1129,7 @@ func (s *AssetLibraryService) finalizeScanFile(store *assetsStore, lib model.Ass
 		}
 		Logger().Warn("assets scan file not indexed", "libraryId", lib.ID, "file", e.rel,
 			"status", status, "err", parsed.parseErr)
-		if err := store.setFileOutcome(fileID, e.size, e.mtimeNs, parsed.hash, status, now); err != nil {
+		if err := store.setFileOutcome(fileID, e.size, e.mtimeNs, parsed.hash, status, parseErrorText(parsed.parseErr), now); err != nil {
 			return 0, fmt.Errorf("写入文件状态失败（%s）: %w", e.rel, err)
 		}
 		return outcome, nil
@@ -1146,6 +1202,11 @@ func collectPptxEntries(root string, matcher *assetExcludeMatcher) ([]pptxDiskEn
 			if p != root && matcher.matchDir(d.Name()) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Office 临时锁文件（`~$` 前缀）内置排除，先于后缀判定：锁文件后缀沿用
+		// 原文档（.pptx 能进白名单），内容非 OOXML 包，收录只会稳定产出 failed
+		if isOfficeLockFileName(d.Name()) {
 			return nil
 		}
 		if !strings.EqualFold(path.Ext(p), ".pptx") {

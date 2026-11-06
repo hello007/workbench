@@ -980,3 +980,63 @@ func normalizeAssetFolderName(raw string) (string, error) {
 	}
 	return name, nil
 }
+
+// DeleteAssetFile 删除单个素材文件（文件视图删除入口）：磁盘删除 + 索引行
+// markFileLost 收口——与 DeleteAssetFolder 完全同构（物理删除先行，索引无损
+// 收口：标签/页级标注/评分/缩略图记账保留，等待文件回归复活或「清理丢失记录」
+// 手动收尾）。不直接删索引行：单文件删除不应连带丢掉用户标注数据。
+//
+// 拒绝面（第一防线在服务层，前端二次确认只是交互）：解析中（processing 行，
+// 扫描写库在途）拒绝；拆分派生产物（isPptxSplitDerivative 同判定）拒绝——产物
+// 由拆分链路管理，单独删会破坏拆分记录；路径越界（resolveLibraryRelPath 校验）
+// 拒绝。磁盘删除失败即整体拒绝（索引未动，零半态）；索引收口失败仅告警并报错
+// （物理事实已发生，下次扫描按「磁盘消失」自愈标 lost）。
+func (s *AssetLibraryService) DeleteAssetFile(libraryID string, fileID int64) error {
+	// 串行保护：删除写 files 表，与扫描互斥（锁内复验库存在，对齐 DeleteAssetFolder）
+	release, err := s.tryLockScan(libraryID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	lib, err := s.getLibrary(libraryID)
+	if err != nil {
+		return err
+	}
+	store, err := s.storeForScan(libraryID)
+	if err != nil {
+		return err
+	}
+	rec, err := store.fileRecordByID(fileID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("文件索引记录不存在，请重新扫描后再操作")
+		}
+		return fmt.Errorf("读取文件索引记录失败: %w", err)
+	}
+	// 派生判定先于 processing：产物由拆分链路管理是更根本的拒绝理由，且产物入库
+	// 后常处于 processing 态，先判 processing 会把它误报成「稍后再试」
+	if isPptxSplitDerivative(rec.path) {
+		return errors.New("该文件是 PPT 拆分派生产物，由拆分链路管理，不能单独删除")
+	}
+	if rec.status == model.AssetFileStatusProcessing {
+		return errors.New("文件正在解析中，请稍后再删除")
+	}
+	_, abs, err := resolveLibraryRelPath(lib.RootPath, rec.path)
+	if err != nil {
+		return fmt.Errorf("文件路径非法: %w", err)
+	}
+	if err := os.Remove(abs); err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("文件已不在磁盘上，可重新扫描后再操作")
+		}
+		return fmt.Errorf("删除文件失败: %w", err)
+	}
+	now := time.Now().Format("2006-01-02 15:04:05")
+	if _, err := store.markFileLost(rec.id, now); err != nil {
+		Logger().Warn("标记文件丢失失败（下次扫描自愈）", "libraryId", libraryID,
+			"path", rec.path, "fileId", rec.id, "err", err)
+		return fmt.Errorf("文件已删除，但索引状态更新失败: %w", err)
+	}
+	Logger().Info("素材文件已删除", "libraryId", libraryID, "path", rec.path, "fileId", rec.id)
+	return nil
+}

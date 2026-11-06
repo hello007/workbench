@@ -463,6 +463,13 @@ CREATE TABLE split_records (
 				t.Fatalf("预建指纹列: %v", err)
 			}
 		}
+		// files 表补建：本测试最小库只关心 split_records 列迁移，但升级到当前版本
+		// 会依次跑 v12（files.parse_error ADD COLUMN），缺表则迁移失败。最小结构
+		// 即可满足 ALTER TABLE 前置条件，不参与本测试断言。
+		if _, err := db.Exec("CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE)"); err != nil {
+			_ = db.Close()
+			t.Fatalf("建 files 最小表: %v", err)
+		}
 		if _, err := db.Exec("PRAGMA user_version = 9"); err != nil {
 			_ = db.Close()
 			t.Fatalf("钉版本 9: %v", err)

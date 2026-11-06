@@ -584,6 +584,10 @@ const handleGlobalKeydown = (e) => {
     e.preventDefault()
     handleCut(workspaceStore.selectedNode)
   } else if (e.key === 'v') {
+    // 素材管理面板内无粘贴语义：全局 Ctrl+V 只服务工作目录文件树，素材面板激活
+    // 时不阻止默认也不向工作区树投递——否则用户在素材树选中的目录会被忽略，
+    // 粘贴落到用户没在看的「工作目录」树选中节点（串台）
+    if (uiStore.activePanel === 'assets') return
     e.preventDefault()
     handlePaste(workspaceStore.selectedNode)
   }

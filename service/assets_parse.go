@@ -54,6 +54,23 @@ type assetParseError struct {
 func (e *assetParseError) Error() string { return e.err.Error() }
 func (e *assetParseError) Unwrap() error { return e.err }
 
+// parseErrorText 解析失败原因的入库文案（files.parse_error 列）：取错误链顶层
+// 文案（assetParseError.Error 转发根因，已含「文件已损坏/文件已加密/无读取权限」
+// 等分类语义），按**字符**（非字节）截断防 UTF-8 多字节字符被切断产生乱码；
+// 完整错误链仍由调用点写入 log/slog。nil 安全（成功分支返回空串）。
+func parseErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxRunes = 500
+	msg := err.Error()
+	runes := []rune(msg)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return msg
+}
+
 // parsedSlide 单页解析产物（Num 为展示页序，从 1 计）。
 type parsedSlide struct {
 	Num   int

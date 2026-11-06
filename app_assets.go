@@ -96,6 +96,13 @@ func (a *App) DeleteAssetFolder(libraryID, relPath string, force bool) (int64, e
 	return a.assetsSvc.DeleteAssetFolder(libraryID, relPath, force)
 }
 
+// DeleteAssetFile 删除单个素材文件（文件视图删除入口）：磁盘删除 + 索引行
+// markFileLost 收口，与 DeleteAssetFolder 同构（标注/评分/缩略图记账无损保留）。
+// 解析中文件、拆分派生产物、记录不存在/路径越界拒绝。
+func (a *App) DeleteAssetFile(libraryID string, fileID int64) error {
+	return a.assetsSvc.DeleteAssetFile(libraryID, fileID)
+}
+
 // RenameAssetFolder 同父重命名（PR2 目录管理，目录级移动）：磁盘 rename + 索引
 // 路径前缀批量更新（复用前缀替换单点机制）+ 受影响文件重过排除规则双向翻转
 // （新名命中翻 excluded / 原排除解除经 reviveLostFile 复活，FTS 同事务重建）+

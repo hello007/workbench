@@ -156,6 +156,14 @@ func (s *assetsStore) migrate() error {
 			}
 			continue
 		}
+		if v == 12 {
+			// v12 为 files.parse_error 单列 ADD COLUMN：同 v8~v11 形态走列存在性
+			// 预判 + 单事务，半迁移库（列已加、版本未落）重开不撞 duplicate column。
+			if err := s.migrateSchemaV12(); err != nil {
+				return fmt.Errorf("素材索引库迁移到 v12 失败: %w", err)
+			}
+			continue
+		}
 		migration, ok := assetsMigrations[v]
 		if !ok {
 			continue // 版本空洞（理论不可达）：缺迁移定义时保持版本号连续性由后续版本处理
@@ -295,6 +303,33 @@ func (s *assetsStore) migrateSchemaV11() error {
 	return tx.Commit()
 }
 
+// migrateSchemaV12 files.parse_error 单列迁移（解析失败原因可查）：列存在性预判
+// 使半迁移库可重入，DDL 与 user_version 同事务提交。历史 failed 行不回填（根因
+// 仅能由重新解析获得），保持空串由前端据 status 呈现降级文案。
+func (s *assetsStore) migrateSchemaV12() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var n int
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'parse_error'",
+	).Scan(&n); err != nil {
+		return fmt.Errorf("读取 files.parse_error 列信息失败: %w", err)
+	}
+	if n == 0 {
+		if _, err := tx.Exec("ALTER TABLE files ADD COLUMN parse_error TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version = 12"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // assetFileRecord 扫描增量判定与重链所需的文件记录最小视图（hash 供重链哈希
 // 校验基准，扫描差分不消费）。
 type assetFileRecord struct {
@@ -418,15 +453,15 @@ func (s *assetsStore) markProcessing(fileID int64, now string) error {
 // file_tags 在文件行存续期间保留的语义一致——文件修复重解析成功后，replaceFileSlides
 // 的失配清理仅剔除新页序中不存在的标注，现存页序的标注按位置语义复活（PRD 定案
 // Q2：标注跟随页码不跟随内容）。文件记录被删除时两表经 files 外键 CASCADE 清除。
-func (s *assetsStore) setFileOutcome(fileID int64, size, mtimeNs int64, hash, status, now string) error {
+func (s *assetsStore) setFileOutcome(fileID int64, size, mtimeNs int64, hash, status, parseErr, now string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(
-		"UPDATE files SET size = ?, mtime_ns = ?, hash = ?, status = ?, updated_at = ? WHERE id = ?",
-		size, mtimeNs, hash, status, now, fileID,
+		"UPDATE files SET size = ?, mtime_ns = ?, hash = ?, status = ?, parse_error = ?, updated_at = ? WHERE id = ?",
+		size, mtimeNs, hash, status, parseErr, now, fileID,
 	); err != nil {
 		return err
 	}
@@ -459,7 +494,9 @@ func (s *assetsStore) replaceFileSlides(fileID int64, size, mtimeNs int64, hash,
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(
-		"UPDATE files SET size = ?, mtime_ns = ?, hash = ?, status = ?, updated_at = ? WHERE id = ?",
+		// parse_error 显式清空：成功解析必须归零，否则「先失败后成功」的重解析
+		// 会残留陈旧原因（status=ok 但 parse_error 非空，用户看到自相矛盾的详情）
+		"UPDATE files SET size = ?, mtime_ns = ?, hash = ?, status = ?, parse_error = '', updated_at = ? WHERE id = ?",
 		size, mtimeNs, hash, model.AssetFileStatusOK, now, fileID,
 	); err != nil {
 		return err
@@ -997,7 +1034,7 @@ func (s *assetsStore) libraryStats() (fileCount, slideCount, failedCount, encryp
 // rows 在标签查询前显式关闭：单连接池下未关先查会自锁（见 libraryStats 注释）。
 func (s *assetsStore) listFileEntries() ([]model.AssetFileEntry, error) {
 	rows, err := s.db.Query(
-		"SELECT id, path, size, mtime_ns, status, title, note, rating, created_at, updated_at FROM files ORDER BY path",
+		"SELECT id, path, size, mtime_ns, status, parse_error, title, note, rating, created_at, updated_at FROM files ORDER BY path",
 	)
 	if err != nil {
 		return nil, err
@@ -1008,7 +1045,7 @@ func (s *assetsStore) listFileEntries() ([]model.AssetFileEntry, error) {
 	for rows.Next() {
 		var e model.AssetFileEntry
 		var mtimeNs int64
-		if err := rows.Scan(&e.ID, &e.Path, &e.Size, &mtimeNs, &e.Status, &e.Title, &e.Note, &e.Rating, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Path, &e.Size, &mtimeNs, &e.Status, &e.ParseError, &e.Title, &e.Note, &e.Rating, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -1416,7 +1453,7 @@ func (s *assetsStore) fileMetaByIDs(ids []int64) (map[int64]model.AssetFileEntry
 			args = append(args, id)
 		}
 		rows, err := s.db.Query(
-			"SELECT id, path, size, mtime_ns, status, title, note, rating, created_at, updated_at FROM files "+
+			"SELECT id, path, size, mtime_ns, status, parse_error, title, note, rating, created_at, updated_at FROM files "+
 				"WHERE id IN ("+placeholders+")", args...)
 		if err != nil {
 			return nil, err
@@ -1426,7 +1463,7 @@ func (s *assetsStore) fileMetaByIDs(ids []int64) (map[int64]model.AssetFileEntry
 			for rows.Next() {
 				var e model.AssetFileEntry
 				var mtimeNs int64
-				if err := rows.Scan(&e.ID, &e.Path, &e.Size, &mtimeNs, &e.Status, &e.Title, &e.Note, &e.Rating, &e.CreatedAt, &e.UpdatedAt); err != nil {
+				if err := rows.Scan(&e.ID, &e.Path, &e.Size, &mtimeNs, &e.Status, &e.ParseError, &e.Title, &e.Note, &e.Rating, &e.CreatedAt, &e.UpdatedAt); err != nil {
 					return err
 				}
 				e.ModTime = formatAssetsTime(mtimeNs)

@@ -501,6 +501,38 @@ for _, rn := range renames { // 按 renames（腾位安全序）迭代
 - **前端**：`canceled` 分支弹 `ElMessage.warning`「拆分已取消：已完成 X/Y（拆分 a，跳过 b，失败 c）」（replace 沿用已删除源/已回滚/源保留计数）；`Items` 为空提示「拆分已取消：尚无文件完成」且不开明细窗；明细窗沿用 `failed > 0` 才弹，标题与顶部汇总带「已取消」上下文。
 - **不做「继续拆分剩余」**：重开「拆分全部 PPT」即新快照，已完成文件由增量判定 skipped。
 
+## 16. 侧边栏体验与索引可用性修复（2026-11-06）
+
+### 16.1 内置 Office 锁文件排除（`~$` 前缀）
+
+- **判定单点** `isOfficeLockFileName(name)`（service/assets_scan.go，紧邻 `isPptxSplitDerivative`）：仅匹配基名前缀 `~$`（PowerPoint/Word/Excel 同规则）。该类文件后缀沿用原文档（`.pptx` 能进后缀白名单），内容是约百字节 OLE 指针而非 OOXML 包，收录后稳定判 `corrupted`——「解析失败 N」长期非零的常见来源。
+- **不走用户排除规则**：既有规则只能按目录段 glob 与文件后缀匹配，无法表达文件名前缀；锁文件也不存在「需要索引」的合法场景，故内置硬编码。
+- **收集层**：`collectPptxEntries` 在 `.pptx` 后缀判定之前短路跳过；磁盘文件保持原样，Office 关闭时由 Office 自身删除。
+- **存量收敛**：`removeLockFileRecords` 在扫描开始时删除已入库的 `~$` 行（`invalidateFileThumbs` + `deleteFileRecord`，含 FTS 与缩略图记账），并从本轮 `records` 剔除——**不能只删不剔**：留在 records 里的行会落入下方「磁盘消失 → lost」段，变成需手动清理的丢失记录。计数经 `AssetScanResult.LockFilesRemoved` 回传，扫描完成提示「清理锁文件 N」。
+- **不标 excluded**：`excluded` 面向用户规则，会进入「已排除 N」统计与树节点标记，混入锁文件造成误导；锁文件不可能承载有效标注/评分，删行无用户资产损失。
+
+### 16.2 解析失败原因落库可查（schema v12）
+
+- `files.parse_error TEXT NOT NULL DEFAULT ''`（v12 迁移 `migrateSchemaV12`：列存在性预判 + 单事务；基线 `CREATE TABLE files` 同步含该列）。
+- **写入**：failed / encrypted / denied 三态经 `setFileOutcome` 写入 `parseErrorText(err)`——取错误链顶层文案（已含「文件已损坏 / 文件已加密 / 无读取权限」分类语义），按**字符**（非字节）截断 500 并追加省略号（防 UTF-8 多字节被切半产生乱码）；完整错误链仍进 `log/slog`。
+- **清空**：`replaceFileSlides` 显式置 `parse_error = ''`——成功重解析必须归零，否则「先失败后成功」会残留原因，详情出现「状态=正常 但原因=损坏」的自相矛盾。
+- **历史行为空串**：v12 前失败的行不回填（根因只能靠重新解析获得），前端按 status 呈现降级文案「原因未记录（…重新扫描可重新解析获取）」。
+- **消费面**：`model.AssetFileEntry.ParseError` 经 `ListFiles` 下发（查询不过滤 status，失败行本就在文件视图可见）；统计行「解析失败 N」为可点入口，弹窗列出路径 + 原因 + 「复制全部」（TSV），数据源是宿主已持有的文件底册（零新增接口）；文件详情「索引状态」下同步展示原因行。
+
+### 16.3 单文件删除（`DeleteAssetFile`）
+
+- **语义与目录删除同构**：磁盘 `os.Remove` + 索引行 `markFileLost`（标签/评分/页标注/缩略图记账全保留，可经重链或文件回归复活）。**不直删索引行**——单文件删除不应连带丢失用户标注。
+- **拒绝面**（服务层为第一防线）：拆分派生产物（`isPptxSplitDerivative` 同判定，且**先于** processing 判——产物入库后常处于 processing 态，先判 processing 会误报「稍后再试」）、`processing` 解析中、记录不存在（`sql.ErrNoRows` 转可读文案）、路径越界（`resolveLibraryRelPath`）。
+- **失败姿态**：磁盘删除失败即整体拒绝（索引未动，零半态）；索引收口失败告警并上抛（物理事实已发生，下次扫描按磁盘消失自愈）。
+- **前端**：文件详情操作区「删除文件」（danger plain），`ElMessageBox.confirm` 单次确认 → `DeleteAssetFile` → toast → `closeDetail` + `clearSelection` → `refreshDataAfterMutation({reloadStats, reloadFolders})`。**必须显式关详情**：删除后行转 lost 仍在底册，`reconcileSelectionAfterMutation` 的路径比对不会关。
+
+### 16.4 文件夹树交互补全（打开目录 / 右键 / 收起 / 粘贴分流）
+
+- **「在资源管理器中打开」**：节点菜单项（`⋯` 与右键同源），宿主以 `joinAssetPath(库根, 节点相对路径)` 调 `OpenInExplorer`；只读操作，对根/排除/派生节点一律放行（不受管理资格约束）。
+- **右键菜单**：节点 `@contextmenu.prevent` 记录坐标与节点数据，渲染**复用全局 `.context-menu` 样式**（style.css，与工作目录文件树同款）的 fixed 菜单；命令项来自 `nodeMenuItems(data)` 单点，与 `⋯` 下拉 `v-for` 同源（禁用资格与 tooltip 同出 `can*` / `manageDisabledTip`）。关闭时机：窗口 click / 滚动 / 再次右键（window contextmenu 捕获阶段）/ Esc。
+- **点击箭头收起不回弹**：EP 2.14.5 的 `node-collapse` 事件在 `node.expanded` 落值**之前**触发，此刻同步采集展开面会原样写回本节点子树，而 ref 赋新数组又触发 `default-expanded-keys` 回放 → 收起即弹回。修复：`onNodeCollapse` 改为 `nextTick(syncExpandedKeysFromStore)`，与「全部展开 / 全部收起 / 双击」同收口（详见 [el-tree-expand-state.md](el-tree-expand-state.md)）。
+- **Ctrl+V 分流**：全局快捷键只服务工作目录文件树；`uiStore.activePanel === 'assets'` 时直接返回（不 `preventDefault`、不投递），避免素材面板内粘贴落到用户没在看的「工作目录」树选中节点。素材域不实现粘贴语义（真实文件粘贴属独立功能）。
+
 ---
 
-**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）；任务 10-16-srs-2-5-3-srs-2-6-p0（2026-10-16，第八批 §10：三路径排序单点 sortEntriesByOptions/次级键含 sortNum 防 refID 隐式依赖/并发删除窗口 props 缺键剔除/快照补排序字段零值兼容/批量评分单方法每条目一事务整行回写备注/collectSelectionTargets 与刷新链共享化）；任务 10-16-srs-2-6-4-srs-2-6-5（2026-10-17，第九批 §11：导出三段式锁解耦/文件行独立 UNION ALL 路/批间禁 OFFSET 续读/O_EXCL 覆盖收口/真中止 exportCancels 走 opMu/弹窗放弃语义含成功竞态收口；lost 状态机标记保留 hash 基准/复活资格门槛 fileHasSlides/processing 永不直复活/清理事务内资格复验 RowsAffected；重链哈希校验 force/嵌套腾位长度降序 + 探测配对禁下标 zip（P0 串写教训）/写面 RowsAffected 零命中上抛/前端 toast 先判 reparsed）；任务 10-18-srs-2-7-3（2026-10-18，第十批 §12：排除规则单段 glob 大小写不敏感 root 豁免/收集层与存量判定共用 matcher/坏规则保存拒绝 + 编译期剔除双防线；excluded 先排除后存在性/markFileExcluded 仅翻状态/复活共用 fileHasSlides 门槛/规则优先不转 lost/关键词路径 excludedFileIDSet 批量剔除而标签与 facets-only 恒 status=ok 天然排除/导出照导；备份 VACUUM INTO 禁 Tx 与裸拷贝/integrity_check Query 非 Exec/_N 深序分隔符字典序=时间序/还原步骤序含阻塞等扫描退出与删 wal-shm 后 Rename 覆盖/删库前失败 E_ASSETS_DELETE_BACKUP_FAILED 升级确认 allowNoBackup 重调/备份目录不随删库清理；重建备份条目扩 hash 维度两级匹配多命中取首个告警）；任务 10-19-assets-cart-page-collect-merge-export（2026-10-19，§13 购物栏 + 合并导出：跨库条目键与三处同构键形态/stale 探测态不自动移除/导出跳过口径单点在合并核心/装配两字段与 applySink 补 pptxMergeSvc/导出互斥 E_CART_EXPORT_IN_PROGRESS/事件仅复位进度防双弹；合并核心契约见 docs/spec/pptx-merge.md）。
+**沉淀来源**：任务 10-13-dam-ppt（2026-10-13，素材管理 MVP 三批实施 + 质量检查修复）；任务 10-14-fts-14（2026-10-14，审核修复 14 项：FTS 纯标点词防御跳过与实测结论、多词摘要逐词定位、zip 解压上限、ListAssetSlides 分页、建库孤儿 db 回滚、WaitScansDone 关停收口、`.-01.pptx` 误判回归、前端双代次写回守卫 / 视图切换兜底 / 扫描单刷新 / 聚合在途守卫 / LIB_NOT_FOUND 自愈）；任务 10-14-srs-2-2-4（2026-10-15，幻灯片独立标注体系：v5 两表键 (file_id, slide_num)、继承合并筛选 SlideTagOnlyOwn、重建 path+slide_num 重绑、保存刷新 miss 回填权威源修复）；任务 10-15-srs-2-3（2026-10-15，视图与选中体系 §8：选中键契约/清空点位矩阵/预览层局部 z-index/失败自动补恰一轮，纯前端批零 service 改动）；任务 10-15-srs-2-4（2026-10-16，批量打标签 + 多级标签树 §9：tags.parent_id 启用/级联命中两路径同源/每条目一事务明细/删除级联双保险/TreeSelect 单组件 ID 口径/双刷新链守卫，两轮独立审核零实质缺陷）；同任务 D8 真机冒烟增量（2026-10-16，§9.5：sort_order v6 迁移名称序回填/组尾追加与连续化重排/拖拽换算单点 resolveTagMoveDrop/flatten 默认平铺）；任务 10-16-facet-srs-2-5（2026-10-16，检索面 §2.5 第七批：PR2 facet 三维双语境接入与清空点位矩阵登记 + PR3 保存检索条件 UI §8.6——快照全维/区间反推可逆锚点止日末毫秒/跨库按名重映射降级/覆盖仅本库边界）；任务 10-16-srs-2-5-3-srs-2-6-p0（2026-10-16，第八批 §10：三路径排序单点 sortEntriesByOptions/次级键含 sortNum 防 refID 隐式依赖/并发删除窗口 props 缺键剔除/快照补排序字段零值兼容/批量评分单方法每条目一事务整行回写备注/collectSelectionTargets 与刷新链共享化）；任务 10-16-srs-2-6-4-srs-2-6-5（2026-10-17，第九批 §11：导出三段式锁解耦/文件行独立 UNION ALL 路/批间禁 OFFSET 续读/O_EXCL 覆盖收口/真中止 exportCancels 走 opMu/弹窗放弃语义含成功竞态收口；lost 状态机标记保留 hash 基准/复活资格门槛 fileHasSlides/processing 永不直复活/清理事务内资格复验 RowsAffected；重链哈希校验 force/嵌套腾位长度降序 + 探测配对禁下标 zip（P0 串写教训）/写面 RowsAffected 零命中上抛/前端 toast 先判 reparsed）；任务 10-18-srs-2-7-3（2026-10-18，第十批 §12：排除规则单段 glob 大小写不敏感 root 豁免/收集层与存量判定共用 matcher/坏规则保存拒绝 + 编译期剔除双防线；excluded 先排除后存在性/markFileExcluded 仅翻状态/复活共用 fileHasSlides 门槛/规则优先不转 lost/关键词路径 excludedFileIDSet 批量剔除而标签与 facets-only 恒 status=ok 天然排除/导出照导；备份 VACUUM INTO 禁 Tx 与裸拷贝/integrity_check Query 非 Exec/_N 深序分隔符字典序=时间序/还原步骤序含阻塞等扫描退出与删 wal-shm 后 Rename 覆盖/删库前失败 E_ASSETS_DELETE_BACKUP_FAILED 升级确认 allowNoBackup 重调/备份目录不随删库清理；重建备份条目扩 hash 维度两级匹配多命中取首个告警）；任务 10-19-assets-cart-page-collect-merge-export（2026-10-19，§13 购物栏 + 合并导出：跨库条目键与三处同构键形态/stale 探测态不自动移除/导出跳过口径单点在合并核心/装配两字段与 applySink 补 pptxMergeSvc/导出互斥 E_CART_EXPORT_IN_PROGRESS/事件仅复位进度防双弹；合并核心契约见 docs/spec/pptx-merge.md）；任务 11-06-assets-sidebar-fix（2026-11-06，§16 侧边栏体验与索引可用性修复：内置 `~$` 锁文件排除与存量收敛、解析失败原因 v12 落库与统计行弹窗、单文件删除 DeleteAssetFile、文件夹树打开目录/右键菜单/箭头收起时序修复/Ctrl+V 面板分流）。

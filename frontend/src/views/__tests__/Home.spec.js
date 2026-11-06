@@ -1461,4 +1461,35 @@ describe('Home.vue - handler 分支补充', () => {
     expect(ws.clipboard.sourcePath).toBe('')
     getSelectionSpy.mockRestore()
   })
+
+  // ---- Ctrl+V 面板分流（素材管理面板无粘贴语义，禁落到工作目录树选中节点）----
+
+  it('素材面板激活时 Ctrl+V 不向工作目录树投递粘贴', async () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { type: 'directory', path: 'D:\\workspace' }
+    useUiStore().activePanel = 'assets'
+    const { ReadFromSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockClear()
+
+    const event = keyEvent({ key: 'v', ctrlKey: true, preventDefault: vi.fn() })
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(ReadFromSystemClipboard).not.toHaveBeenCalled()
+    // 不拦截浏览器默认行为（素材面板内无自定义粘贴语义）
+    expect(event.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('工作目录面板激活时 Ctrl+V 仍走既有粘贴链路', async () => {
+    const ws = useWorkspaceStore()
+    ws.selectedNode = { type: 'directory', path: 'D:\\workspace' }
+    useUiStore().activePanel = 'directory'
+    const { ReadFromSystemClipboard } = await import('../../../wailsjs/go/main/App')
+    ReadFromSystemClipboard.mockClear()
+
+    const event = keyEvent({ key: 'v', ctrlKey: true, preventDefault: vi.fn() })
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(ReadFromSystemClipboard).toHaveBeenCalled()
+  })
 })

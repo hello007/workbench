@@ -404,7 +404,7 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 扫描默认零结果汇总（total/new/updated/unchanged/failed/encrypted/denied/
   // excluded/lost/revived/removed——lost/revived 为第九批 SRS §2.6.5 lost 态、
   // excluded 为第十批 SRS §2.7.3 排除态新增计数，旧数据 undefined falsy 向后兼容）
-  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 },
+  StartAssetScan: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0, lockFilesRemoved: 0 },
   RebuildAssetLibrary: { total: 0, new: 0, updated: 0, unchanged: 0, failed: 0, encrypted: 0, denied: 0, excluded: 0, lost: 0, revived: 0, removed: 0 },
   // 默认无可取消在途扫描：false = 幂等 no-op（对齐 CancelGitOperation 语义）
   CancelAssetScan: false,
@@ -417,6 +417,8 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // 删除 0 条 lost、重命名零同步），用例按需 override
   CreateAssetFolder: { path: '', name: '', children: [], excluded: false, derived: false, fileCount: 0 },
   DeleteAssetFolder: 0,
+  // 单文件删除（2026-11-06）：磁盘删除 + 索引标丢失，无返回值（null no-op）
+  DeleteAssetFile: null,
   RenameAssetFolder: { oldPath: '', newPath: '', replaced: 0, excluded: 0, revived: 0 },
   // 文件批量移动（PRD PR3 拖拽移动）：默认空汇总（形状对齐 model.AssetBatchMoveResult，
   // Item 含 fileId/status/message/label），用例按需 override

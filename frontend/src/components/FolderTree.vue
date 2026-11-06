@@ -55,6 +55,7 @@
             @dragleave="onNodeDragLeave(scope.data)"
             @drop.prevent="onNodeDrop(scope.data, $event)"
             @dblclick="onNodeDblClick(scope.data)"
+            @contextmenu.prevent="onNodeContextMenu(scope.data, $event)"
           >
             <el-icon class="folder-node-icon"><Folder /></el-icon>
             <span class="folder-node-name" :title="scope.data.path === '' ? '全部素材' : scope.data.path">{{ scope.data.name }}</span>
@@ -88,13 +89,18 @@
               >
                 <el-icon :size="12"><MoreFilled /></el-icon>
               </button>
+              <!-- 菜单项与右键菜单同源（nodeMenuItems 单点）：命令集/禁用资格/tooltip
+                   说明只维护一处 -->
               <template #dropdown>
                 <el-dropdown-menu class="folder-node-menu">
-                  <el-dropdown-item command="create" :disabled="!canCreateChild(scope.data)" :title="manageDisabledTip(scope.data, 'create')">新增子目录</el-dropdown-item>
-                  <el-dropdown-item command="rename" :disabled="!canRename(scope.data)" :title="manageDisabledTip(scope.data, 'rename')">重命名</el-dropdown-item>
-                  <el-dropdown-item command="annotate" :disabled="!canAnnotate(scope.data)" :title="manageDisabledTip(scope.data, 'annotate')">标注</el-dropdown-item>
-                  <el-dropdown-item command="rebuild" :disabled="!canRebuild(scope.data)" :title="manageDisabledTip(scope.data, 'rebuild')">重建索引</el-dropdown-item>
-                  <el-dropdown-item command="delete" :divided="true" :disabled="!canDelete(scope.data)" :title="manageDisabledTip(scope.data, 'delete')">删除</el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="item in nodeMenuItems(scope.data)"
+                    :key="item.command"
+                    :command="item.command"
+                    :disabled="item.disabled"
+                    :title="item.tip"
+                    :divided="item.divided"
+                  >{{ item.label }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -151,11 +157,33 @@
         <el-button size="small" type="primary" :disabled="busy || !renameDialogName.trim()" @click="confirmRename">重命名</el-button>
       </template>
     </el-dialog>
+
+    <!-- 节点右键菜单：复用全局 .context-menu 视觉（style.css，与工作目录文件树
+         右键菜单同款），fixed 定位取 contextmenu 事件坐标；命令项与 ⋯ 下拉同源。
+         click.stop 阻断冒泡到 window 关闭监听（避免「打开即关闭」） -->
+    <ul
+      v-if="contextMenu.visible"
+      class="context-menu"
+      role="menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @click.stop
+      @contextmenu.prevent.stop
+    >
+      <li
+        v-for="item in contextMenuItems"
+        :key="item.command"
+        role="menuitem"
+        class="context-menu-item"
+        :class="{ 'is-divided': item.divided, 'is-disabled': item.disabled }"
+        :title="item.tip"
+        @click="!item.disabled && onContextCommand(item.command)"
+      >{{ item.label }}</li>
+    </ul>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Folder, MoreFilled } from '@element-plus/icons-vue'
 // 拖拽数据载荷单点（dragstart/drop 两端唯一实现，MIME 与解析禁第二处手拼）
@@ -178,7 +206,7 @@ const props = defineProps({
   dropEnabled: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['select', 'create', 'rename', 'delete', 'annotate', 'rebuild', 'drop-files', 'drop-folder'])
+const emit = defineEmits(['select', 'create', 'rename', 'delete', 'annotate', 'rebuild', 'open-explorer', 'drop-files', 'drop-folder'])
 
 const treeRef = ref(null)
 
@@ -229,8 +257,18 @@ const onNodeExpand = (data) => {
     expandedKeys.value = expandedKeys.value.concat(data.path)
   }
 }
-const onNodeCollapse = (data) => {
-  expandedKeys.value = expandedKeys.value.filter(k => k !== data.path)
+// 点击折叠箭头收起：与「全部展开/全部收起/双击」同收口 syncExpandedKeysFromStore。
+// 不能只从 expandedKeys 剔除自身 key——该节点的已展开子孙仍在 keys 中，EP 2.14.5
+// 的 default-expanded-keys 回放会逐 key 调 expand(子孙, autoExpandParent=true)，
+// 把祖先链（含刚收起的本节点）强制展开，表现为「点箭头收起后立即弹回」。
+// 可达面过滤会把断链子孙一并剔除，回放无 expand 落到本节点祖先链上。
+const onNodeCollapse = () => {
+  // 必须延到下一个 tick：EP 2.14.5 的 node-collapse 事件在 node.expanded 落值
+  // **之前**派发（实测：事件回调里读 nodesMap 仍是 true），此刻同步收集会把本
+  // 节点及其子孙原样写回 expandedKeys，而 ref 赋新数组又会触发
+  // default-expanded-keys 回放，把刚收起的节点重新展开。nextTick 后 store 已落值，
+  // 可达面过滤收集的 keys 不含本节点子树，回放即不再翻回。
+  nextTick(syncExpandedKeysFromStore)
 }
 
 // ---- 全部展开/全部收起 + 双击切换：store Node 实例直赋 expanded（树数据全量
@@ -310,6 +348,41 @@ const onNodeClick = (data) => {
 // 菜单展开中的节点路径（触发按钮保持显现，防 hover 离开即消失）
 const menuOpenPath = ref('')
 
+// ---- 节点右键菜单（与 ⋯ 下拉共用 nodeMenuItems 命令集）----
+// 自建 fixed 定位菜单而非复用 el-dropdown：EP dropdown 需绑定触发元素、不支持在
+// 任意坐标弹出。关闭时机：窗口点击（菜单内 click.stop 已拦截）/滚动/再次右键/Esc；
+// window contextmenu 用捕获阶段——右键另一节点时先收起旧菜单，再由节点自身
+// 处理器打开新菜单，不会残留。
+const contextMenu = ref({ visible: false, x: 0, y: 0, data: null })
+const contextMenuItems = computed(() => (contextMenu.value.data ? nodeMenuItems(contextMenu.value.data) : []))
+const closeContextMenu = () => {
+  if (contextMenu.value.visible) contextMenu.value = { visible: false, x: 0, y: 0, data: null }
+}
+const onNodeContextMenu = (data, event) => {
+  if (props.busy) return // 管理操作在途：与 ⋯ 禁用口径一致，不弹可点菜单
+  contextMenu.value = { visible: true, x: event.clientX, y: event.clientY, data }
+}
+const onContextCommand = (command) => {
+  const data = contextMenu.value.data
+  closeContextMenu()
+  if (data) onNodeCommand(command, data)
+}
+const onContextKeydown = (event) => {
+  if (event.key === 'Escape') closeContextMenu()
+}
+onMounted(() => {
+  window.addEventListener('click', closeContextMenu)
+  window.addEventListener('contextmenu', closeContextMenu, true)
+  window.addEventListener('scroll', closeContextMenu, true)
+  window.addEventListener('keydown', onContextKeydown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeContextMenu)
+  window.removeEventListener('contextmenu', closeContextMenu, true)
+  window.removeEventListener('scroll', closeContextMenu, true)
+  window.removeEventListener('keydown', onContextKeydown)
+})
+
 // ---- 节点管理菜单（PR2）----
 // 管理资格单点（分操作）：根节点（path=''）仅新增可用；排除命中目录禁新增/删除
 // ——重命名刻意放行（重命名出排除名是 excluded 文件恢复索引可见的唯一目录级
@@ -336,7 +409,24 @@ const manageDisabledTip = (data, cmd) => {
   return ''
 }
 
+// 节点命令项单点（⋯ 下拉与右键菜单共用同一数组，禁两套口径）：禁用资格与
+// tooltip 说明均出自 can*/manageDisabledTip 单点，新增命令只改本函数。
+// 「在资源管理器中打开」是唯一对任意节点（含库根、排除/派生目录）恒可用的
+// 只读操作——它不改变库内容，不受管理资格约束。
+const nodeMenuItems = (data) => [
+  { command: 'open-explorer', label: '在资源管理器中打开', disabled: false, tip: '打开该文件夹所在磁盘目录' },
+  { command: 'create', label: '新增子目录', disabled: !canCreateChild(data), tip: manageDisabledTip(data, 'create'), divided: true },
+  { command: 'rename', label: '重命名', disabled: !canRename(data), tip: manageDisabledTip(data, 'rename') },
+  { command: 'annotate', label: '标注', disabled: !canAnnotate(data), tip: manageDisabledTip(data, 'annotate') },
+  { command: 'rebuild', label: '重建索引', disabled: !canRebuild(data), tip: manageDisabledTip(data, 'rebuild') },
+  { command: 'delete', label: '删除', disabled: !canDelete(data), tip: manageDisabledTip(data, 'delete'), divided: true }
+]
+
 const onNodeCommand = (cmd, data) => {
+  if (cmd === 'open-explorer') {
+    emit('open-explorer', data)
+    return
+  }
   if (cmd === 'create') {
     if (!canCreateChild(data)) return
     createDialogPath.value = data.path || ''
@@ -589,5 +679,31 @@ defineExpose({ treeRef })
   font-size: 12px;
   color: var(--text-placeholder);
   text-align: center;
+}
+
+/* 右键菜单项形态补充（容器与项的基础视觉复用全局 .context-menu /
+   .context-menu-item，见 style.css，禁自造第二套菜单观感）：
+   - is-disabled：压制全局 hover 的位移与主色指示条，保留 title 悬浮说明；
+   - is-divided：命令分组分隔线（等价 EP dropdown-item 的 divided） */
+.context-menu-item.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.context-menu-item.is-disabled:hover {
+  background: transparent;
+  color: var(--menu-text);
+  transform: none;
+}
+
+.context-menu-item.is-disabled:hover::before {
+  opacity: 0;
+}
+
+.context-menu-item.is-divided {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--menu-border);
+  border-radius: 0;
 }
 </style>

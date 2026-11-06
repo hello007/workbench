@@ -18,7 +18,7 @@ import (
 
 // assetsSchemaVersion 当前 schema 版本。表结构变更时递增，并在
 // assetsMigrations 中补充对应版本的迁移 SQL（旧库按版本逐级执行）。
-const assetsSchemaVersion = 11
+const assetsSchemaVersion = 12
 
 // assetsSchemaSQL v1 基线 schema（全部 CREATE IF NOT EXISTS，重复执行幂等）。
 //
@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS files (
 	note       TEXT    NOT NULL DEFAULT '',
 	rating     INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT    NOT NULL DEFAULT '',
-	updated_at TEXT    NOT NULL DEFAULT ''
+	updated_at TEXT    NOT NULL DEFAULT '',
+	parse_error TEXT   NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS slides (
@@ -314,6 +315,22 @@ const assetsSchemaV11SQL = `
 ALTER TABLE split_records ADD COLUMN retained_fingerprints TEXT NOT NULL DEFAULT '';
 `
 
+// assetsSchemaV12SQL files 表解析失败原因列。
+//
+// 设计要点：
+//   - 值域：解析失败分支的根因文案（assetParseError 的 Error()，含分类语义：
+//     损坏 / 加密 / 权限不足），成功解析时恒为空串（replaceFileSlides 显式清空，
+//     防「先失败后成功」重解析残留陈旧原因）；
+//   - 空串的双重含义：v12 前失败的历史行（原因未记录）与成功行。前端据 status
+//     区分——仅 status=failed/encrypted/denied 且列值空串时提示「原因未记录，
+//     重新扫描可获取」，不做回填（根因只能靠重新解析获得）；
+//   - 与 logs 的关系：列值是用户可见/可复制的短文案，完整错误链仍进 log/slog；
+//   - 实际执行走 assets_db.go 的 migrateSchemaV12（列存在性预判 + 单事务），本
+//     SQL 保留作语义对照，禁直接从迁移循环执行（半迁移库会报 duplicate column）。
+const assetsSchemaV12SQL = `
+ALTER TABLE files ADD COLUMN parse_error TEXT NOT NULL DEFAULT '';
+`
+
 // assetsMigrations 版本递增迁移表：键为目标版本，值为从上一版本升到该版本的
 // 迁移 SQL。v1 为基线 schema（幂等建表），历史库缺失表时同样可安全补齐。
 // v2 建 FTS 表后由 Go 层对存量数据一次性回填（backfillFtsOnUpgradeV2：切分须
@@ -330,6 +347,7 @@ var assetsMigrations = map[int]string{
 	9:  assetsSchemaV9SQL,
 	10: assetsSchemaV10SQL,
 	11: assetsSchemaV11SQL,
+	12: assetsSchemaV12SQL,
 }
 
 // backfillFtsOnUpgradeV2 v1→v2 迁移的存量数据一次性回填：全部幻灯片行 + ok 状态

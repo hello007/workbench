@@ -73,3 +73,28 @@ expand(callback, expandParent) {
   expandedKeys」纪律不变（防 reload 回放旧展开面漂移），本主题是其修正升级。
 - `default-expanded-keys` 含根 `''` 与否：根展开时含（回放 expand 根幂等），
   根收起时为空数组（reload 后仅剩根行）。
+
+## 5. 事件时序坑：node-collapse 早于 expanded 落值（2026-11-06）
+
+`el-tree` 的 `node-collapse` / `node-expand` 事件在 `node.expanded` **开始变
+更之前**派发（EP 2.14.5 实测：事件回调里读 `store.nodesMap[key].expanded` 仍是
+变更前的值）。因此**不能在事件回调里同步采集展开面**：
+
+- 收起时读到本节点仍 `expanded=true` → 可达面过滤会把它与其子孙原样写回
+  `expandedKeys`；
+- 而 `expandedKeys.value = keys` 即使内容相同也会以新数组引用触发 `default-
+  expanded-keys` 的 watch → 逐 key `expand(…, autoExpandParent=true)` 回放 →
+  刚收起的节点被祖先链强制展开，表现为「点折叠箭头收起后立即弹回」。
+
+**正确写法**：收起路径延到下一个 tick 再回收展开面
+
+```js
+const onNodeCollapse = () => {
+  nextTick(syncExpandedKeysFromStore)   // 此刻 store 已落值，过滤才准确
+}
+```
+
+展开路径不受影响（只往 keys 追加，不依赖 store 读值）。守护用例：真实 EP mount
+下对「含已展开子孙」的节点点击 `.el-tree-node__expand-icon`，断言多 tick 后
+`nodesMap[key].expanded === false` 且子孙不可见；注意 EP 展开图标的 `@click.stop`
+在 VTU 合成事件下不回调，须用 `element.click()` 走真机事件路径。

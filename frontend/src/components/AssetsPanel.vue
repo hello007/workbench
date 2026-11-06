@@ -432,7 +432,14 @@
     <div v-if="stats" class="assets-stats-line">
       <span>文件 {{ stats.fileCount }}</span>
       <span>幻灯片 {{ stats.slideCount }}</span>
-      <span v-if="stats.failedCount > 0" class="stats-warn">解析失败 {{ stats.failedCount }}</span>
+      <!-- 解析失败计数：可点开失败清单（路径 + 原因 + 复制），供用户自证问题并反馈 -->
+      <button
+        v-if="stats.failedCount > 0"
+        type="button"
+        class="stats-warn stats-link"
+        title="查看解析失败的文件与原因"
+        @click="failedFilesVisible = true"
+      >解析失败 {{ stats.failedCount }}</button>
       <span v-if="stats.encryptedCount > 0" class="stats-warn">已加密 {{ stats.encryptedCount }}</span>
       <span v-if="lostFileCount > 0" class="stats-warn">丢失 {{ lostFileCount }}</span>
       <!-- 排除计数（第十批 SRS §2.7.3）：排除规则命中的已入库文件（检索不可见），
@@ -482,6 +489,7 @@
           @delete="onDeleteFolder"
           @annotate="onAnnotateFolder"
           @rebuild="onRebuildFolder"
+          @open-explorer="onOpenFolderInExplorer"
           @drop-files="onFolderDrop"
           @drop-folder="onFolderDropFolder"
         />
@@ -758,6 +766,12 @@
                   <el-tag size="small" :type="statusTagType(selected.fileEntry.status)">{{ statusLabel(selected.fileEntry.status) }}</el-tag>
                 </span>
               </div>
+              <!-- 解析失败原因（v12 起随索引落库）：失败文件排障的第一现场，与
+                   统计行「解析失败」弹窗同源数据；成功/历史无原因行不渲染 -->
+              <div v-if="selected.fileEntry.parseError" class="detail-row">
+                <span class="detail-label">失败原因</span>
+                <span class="detail-value detail-parse-error">{{ selected.fileEntry.parseError }}</span>
+              </div>
             </div>
             <div class="detail-section">
               <div class="detail-label">星级</div>
@@ -814,6 +828,14 @@
                 :loading="relocating"
                 @click="onRelocateDetail"
               >重新定位</el-button>
+              <!-- 单文件删除（对齐目录删除语义：磁盘删 + 索引标丢失，标注保留） -->
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :loading="deletingFile"
+                @click="onDeleteDetailFile"
+              >删除文件</el-button>
             </div>
           </template>
           <el-alert v-else type="warning" :closable="false" title="文件索引记录不存在，请重新扫描后操作" />
@@ -1243,6 +1265,36 @@
         <el-button type="primary" :loading="folderAnnotateSaving" @click="onSaveFolderAnnotation">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 解析失败清单弹窗：统计行「解析失败 N」入口，逐条展示相对路径与失败原因，
+         支持复制全部用于问题反馈。数据源为宿主已持有的文件清单底册（files 表现
+         含 parse_error，无需新增接口）；失败原因列上线前失败的历史行为空串，以
+         降级文案提示「重新扫描可重新解析获取」，不猜原因。 -->
+    <el-dialog
+      v-model="failedFilesVisible"
+      title="解析失败的文件"
+      width="min(760px, 88vw)"
+      append-to-body
+    >
+      <div v-if="failedFileEntries.length === 0" class="failed-files-empty">
+        当前没有解析失败的文件
+      </div>
+      <div v-else class="failed-files-list">
+        <div class="failed-files-summary">共 {{ failedFileEntries.length }} 个文件</div>
+        <div v-for="item in failedFileEntries" :key="item.id" class="failed-file-item">
+          <div class="failed-file-path" :title="item.path">{{ item.path }}</div>
+          <div class="failed-file-reason">{{ failedReasonOf(item) }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="failedFilesVisible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :disabled="failedFileEntries.length === 0"
+          @click="copyFailedFiles"
+        >复制全部</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1262,6 +1314,7 @@ import {
   ListAssetFolders,
   CreateAssetFolder,
   DeleteAssetFolder,
+  DeleteAssetFile,
   RenameAssetFolder,
   MoveAssetFiles,
   MoveAssetFolder,
@@ -1308,6 +1361,8 @@ import {
   ReorderAssetCart,
   MergeAssetCartToPptx,
   CancelAssetCartExport,
+  // 在系统文件管理器中打开（文件夹树节点入口；与工作目录文件树同用该绑定）
+  OpenInExplorer,
   GetSettings,
   SaveSettings
 } from '../../wailsjs/go/main/App'
@@ -1460,6 +1515,29 @@ const sortTriggerLabel = computed(() => {
 
 // ---- 数据 ----
 const fileEntries = ref([]) // 文件清单底册（文件视图数据源 + 标签聚合 + 溯源定位）
+// ---- 解析失败清单（统计行入口）----
+// 失败原因自 v12 起随索引落库（files.parse_error），清单直接取底册过滤，零新增
+// 后端接口：failed 行本就出现在 ListFiles 结果中（查询不过滤 status），弹窗只做呈现。
+const failedFilesVisible = ref(false)
+const failedFileEntries = computed(() => fileEntries.value.filter((f) => f.status === 'failed'))
+// 原因文案单点：空串 = v12 之前失败的历史行（原因当时未落库），给降级提示而非
+// 留白——回填只能靠重新解析，不在此猜测原因。
+const failedReasonOf = (item) => {
+  const reason = (item.parseError || '').trim()
+  return reason || '原因未记录（该文件在失败原因可查功能上线前解析失败，重新扫描可重新解析获取）'
+}
+// 复制全部：路径 + 原因按 TSV 一行一条，便于直接粘贴到问题反馈中
+const copyFailedFiles = async () => {
+  const text = failedFileEntries.value
+    .map((f) => `${f.path}\t${failedReasonOf(f)}`)
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制失败清单')
+  } catch (error) {
+    handleError('复制失败清单失败: ', error)
+  }
+}
 const slideEntries = ref([]) // 幻灯片清单累计条目（幻灯片视图数据源，分页懒加载追加）
 const slideTotal = ref(0) // 幻灯片清单总条目数（分页懒加载判定，对齐后端 ListAssetSlides total）
 // 幻灯片清单陈旧标记（数据变更统一刷新入口收敛批，方案 B 惰性重拉）：数据变更刷新
@@ -2531,6 +2609,39 @@ const refreshAfterRestore = () => {
   return refreshAfterMaintain()
 }
 
+// ---- 单文件删除（详情侧边栏「删除文件」）----
+// 语义与目录删除同构：磁盘物理删除 + 索引行标记丢失（标签/评分/标注保留，可由
+// 重链或重新放入文件复活）。二次确认为单次确认形态（docs/spec/confirm-dialog.md
+// 三形态之单次档）；成功后关闭详情并清选中——文件已不在视图交互面（仍以 lost
+// 行存在，reconcileSelectionAfterMutation 的路径比对不会关详情，故此处显式关）。
+const deletingFile = ref(false)
+
+const onDeleteDetailFile = async () => {
+  const fileEntry = selected.value?.fileEntry
+  if (!fileEntry || deletingFile.value) return
+  try {
+    await ElMessageBox.confirm(
+      `将从磁盘删除「${fileEntry.path}」，并把索引记录标记为丢失（标签、评分与页标注保留，文件不再出现在素材视图）。此操作不可撤销。`,
+      '删除文件确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // 用户取消
+  }
+  deletingFile.value = true
+  try {
+    await DeleteAssetFile(currentLibraryId.value, fileEntry.id)
+    ElMessage.success('文件已删除')
+    closeDetail()
+    clearSelection()
+    await refreshDataAfterMutation({ reloadStats: true, reloadFolders: true })
+  } catch (error) {
+    handleError('删除文件失败: ', error)
+  } finally {
+    deletingFile.value = false
+  }
+}
+
 // ---- 手动重链（详情侧边栏「重新定位」，仅丢失文件提供）----
 
 const relocating = ref(false)
@@ -3401,6 +3512,21 @@ const folderAnnotateNote = ref('')
 const folderAnnotateTagIds = ref([])
 const folderAnnotateSaving = ref(false)
 const folderTagSelectRef = ref(null)
+
+// 在系统文件管理器中打开节点对应目录（FolderTree open-explorer 事件）：库根节点
+// （path=''）打开素材库根目录。只读操作、不改变库内容，故对排除命中/拆分派生目录
+// 同样放行（与重命名放行同理——看磁盘内容不需要管理资格）。后端 OpenInExplorer
+// 内部按目录/文件形态自适应（目录直接打开、文件定位选中）。
+const onOpenFolderInExplorer = async (data) => {
+  const abs = joinAssetPath(currentLibrary.value?.rootPath, data?.path || '')
+  if (!abs) return
+  try {
+    const opened = await OpenInExplorer(abs)
+    if (!opened) ElMessage.error('打开资源管理器失败')
+  } catch (error) {
+    ElMessage.error('打开资源管理器失败: ' + (error?.message || String(error)))
+  }
+}
 
 // 打开标注弹窗：GetAssetFolderMeta 预填（标签本体 → ID 数组供树形选择回显，
 // ID↔名称映射消费共享标签列表——对齐详情编辑 detailTagIds 适配模式）；库代次
@@ -4470,6 +4596,8 @@ const scanResultSummary = (prefix, result) => {
   if (result.lost) parts.push(`标记丢失 ${result.lost}`)
   if (result.revived) parts.push(`复活 ${result.revived}`)
   if (result.removed) parts.push(`清理 ${result.removed}`)
+  // 内置锁文件清理（`~$` 前缀）：历史版本误入库的记录在本轮扫描被清除
+  if (result.lockFilesRemoved) parts.push(`清理锁文件 ${result.lockFilesRemoved}`)
   return `${prefix}：共 ${result.total ?? 0} 个文件（${parts.join('，')}）`
 }
 
@@ -5242,6 +5370,64 @@ defineExpose({ loadLibraries, refreshAfterScan })
   color: var(--warning-color);
 }
 
+/* 统计行可点计数（解析失败清单入口）：重置按钮默认外观为行内文本，hover 加下划线
+   提示可点；键盘聚焦沿用按钮默认焦点环（不额外改） */
+.stats-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.stats-link:hover {
+  text-decoration: underline;
+}
+
+/* ---- 解析失败清单弹窗 ---- */
+.failed-files-empty {
+  padding: var(--spacing-md) 0;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.failed-files-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.failed-files-summary {
+  margin-bottom: var(--spacing-sm);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.failed-file-item {
+  padding: var(--spacing-xs) 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.failed-file-item:last-child {
+  border-bottom: none;
+}
+
+.failed-file-path {
+  overflow: hidden;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.failed-file-reason {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--warning-color);
+  word-break: break-all;
+}
+
 .stats-hit {
   color: var(--primary-color);
   font-weight: 500;
@@ -5684,6 +5870,12 @@ defineExpose({ loadLibraries, refreshAfterScan })
   flex-direction: column;
   gap: var(--spacing-xs);
   border-bottom: 1px solid var(--border-color);
+}
+
+/* 解析失败原因值：警示色 + 允许长错误文本换行（路径/zip 报错可能较长） */
+.detail-parse-error {
+  color: var(--warning-color);
+  word-break: break-all;
 }
 
 .detail-row {
