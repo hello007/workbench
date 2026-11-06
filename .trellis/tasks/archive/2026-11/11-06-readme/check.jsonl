@@ -1,0 +1,2 @@
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "构建与质量门禁约定，核对 README 命令章节是否与项目现行流程一致"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁真相源，核对 README 中阈值数字是否与规范一致"}

@@ -1,0 +1,5 @@
+{"file": "docs/功能说明.md", "reason": "功能描述细节的来源，校正 README 功能章节时对照，避免丢失唯一记录的行为细节"}
+{"file": "docs/API参考.md", "reason": "导出方法清单与数据模型口径，校正 README 文档索引表中的方法数量描述"}
+{"file": "docs/测试策略.md", "reason": "覆盖率门禁阈值口径，校正 README 测试章节"}
+{"file": "docs/部署说明.md", "reason": "构建产物、Linux 依赖与分发方式口径，校正 README 构建章节"}
+{"file": "docs/agent-resources/reference/docs-management.md", "reason": "文档目录结构与入口清单，校正 README 文档索引表"}
