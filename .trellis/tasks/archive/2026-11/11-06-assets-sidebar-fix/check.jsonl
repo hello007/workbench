@@ -1,0 +1,6 @@
+{"file": "docs/spec/assets-management.md", "reason": "校验扫描 pipeline、lost 收口、排除 matcher 单点与刷新统一入口是否被正确复用而非另起口径"}
+{"file": "docs/spec/el-tree-expand-state.md", "reason": "校验展开面维护是否走 syncExpandedKeysFromStore 单点、断言是否使用真实 el-tree 而非自造桩"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 App 方法签名与 model 字段变更后 wailsjs 三处是否同步、npm run build 无 MISSING_EXPORT"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "校验删除确认链形态与测试选择器是否符合三形态约束"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验新增代码覆盖率是否达基线门禁"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "校验 Vue 组件受控契约、props/emit 设计是否符合规范"}

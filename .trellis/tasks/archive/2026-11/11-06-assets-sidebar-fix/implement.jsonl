@@ -1,0 +1,10 @@
+{"file": "docs/spec/assets-management.md", "reason": "素材域总体契约：§8.7 刷新统一入口 refreshDataAfterMutation、§11.2 lost 状态机与复活门槛 fileHasSlides、§12 排除规则 matcher 单点、§14 扫描 pipeline，PR1/PR3 直接遵循"}
+{"file": "docs/spec/el-tree-expand-state.md", "reason": "el-tree 展开面维护单点 syncExpandedKeysFromStore 与可达展开面过滤语义，问题 4 修复与右键菜单改动必须遵循，禁自造 el-tree 桩"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "App 方法签名与 model 导出字段变更须同步 frontend/wailsjs 三处；PR3 新增 DeleteAssetFile、PR1 新增 AssetFileEntry.ParseError 均命中"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox.confirm 三形态与 E2E 选择器约束，PR3 单文件删除为单次确认链"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "service 日志用 log/slog、错误码新增三处同步、E_ASSETS_* 既有错误码口径，PR1 失败原因与 PR3 删除守卫均涉及"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "前端视觉与交互惯例：深色容器图标内联 SVG、面板根元素 flex 约束链、列表项单一入口，PR2 右键菜单与 PR1 弹窗须遵循"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁与 CI 判定，新增后端逻辑须补单测达基线"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "若涉及 data/ 持久化与备份留底口径（失败原因落 SQLite 不走该链路，但删除操作的持久化纪律需参照）"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计与编码规范，FolderTree/AssetsPanel 改动必须遵循"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾规范，新增删除/打开目录调用的错误分流须遵循"}
