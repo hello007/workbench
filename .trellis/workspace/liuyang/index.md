@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-4.md`
-- **Total Sessions**: 227
+- **Active File**: `journal-5.md`
+- **Total Sessions**: 228
 - **Last Active**: 2026-11-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-4.md` | ~1973 | Active |
+| `journal-5.md` | ~40 | Active |
+| `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
 | `journal-1.md` | ~1989 | Archived |
@@ -32,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 228 | 2026-11-06 | P2 聚合视图契约与产品决策落地 | `2c1f27d` | `master` |
 | 227 | 2026-11-06 | P1 聚合交互与并发收口（⑥⑦⑧⑫⑬） | `fc8e06e` | `master` |
 | 226 | 2026-11-06 | P0 聚合视图路径与缓存口径归一 | `73d4235`, `3f4a093` | `master` |
 | 225 | 2026-11-05 | 清理聚合视图欠账与提交聚合视图功能 | `9c378dd`, `067ba99` | `master` |
