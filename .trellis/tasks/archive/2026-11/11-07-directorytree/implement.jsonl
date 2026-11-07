@@ -1,0 +1,5 @@
+{"file": "docs/spec/aggregated-workspace.md", "reason": "聚合视图契约（__aggregated__ 树 key、选工作目录=退出聚合显式入口收口、onDirectorySelect 序号守卫）：本修复直接作用于该领域，改动不得破坏入口收口语义"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue3/Pinia 编码规范：store/directory.js 单点改动须遵循（注释风格、store 组织）"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端测试策略：directory.spec.js 新增用例与 E2E 用例的分层与写法遵循"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 规范：fixtures.js import { test, expect }、mock 单一数据源 wails-mock-defaults.js、禁 waitForTimeout、聚合语境用例写入既有 file-tree.spec.js 的注意事项"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox.confirm 三形态：删除工作目录的确认弹窗为单次确认形态，E2E 用例须按其交互规范处理（EP 2.14 关闭后实例驻留 DOM）"}

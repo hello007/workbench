@@ -1,0 +1,4 @@
+{"file": "docs/spec/aggregated-workspace.md", "reason": "检查修复是否守住聚合视图契约：onDirectorySelect 显式入口未改、无新增隐式 watch、__aggregated__ 树 key 语义未受影响"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "检查新增单测/E2E 用例是否符合测试策略（断言写法、分层覆盖）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 用例合规：fixtures import、mock 对齐后端 model 真实形状、无 waitForTimeout、无绝对基线断言"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "检查 E2E 删除确认弹窗交互是否符合三形态规范（单次确认裸选择器安全）"}
