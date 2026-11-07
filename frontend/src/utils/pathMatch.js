@@ -48,3 +48,19 @@ export function findOwningDirectory(repoPath, directories) {
     cur.path.length > best.path.length ? cur : best
   )
 }
+
+/**
+ * 仓库根绝对路径 + 仓库相对路径 拼接为文件绝对路径（保留原大小写，不转小写）。
+ * 供提交历史/文件 diff 的追溯入口换算 FileHistoryDialog / blame 所需的 fileAbsPath：
+ * repoPath 来自工作目录节点（Windows 下可能 \ 分隔、可能带尾分隔符），relPath 来自
+ * git 输出（恒 / 分隔）。任一入参为空返回另一参原值（防御空拼接出非法路径）。
+ * @param {string} repoPath 仓库根绝对路径
+ * @param {string} relPath 仓库相对路径（/ 分隔）
+ * @returns {string} 文件绝对路径
+ */
+export function joinRepoPath(repoPath, relPath) {
+  if (!repoPath) return relPath || ''
+  if (!relPath) return repoPath
+  const base = repoPath.replace(/[\\/]+$/, '')
+  return `${base}/${relPath.replace(/^[\\/]+/, '')}`
+}

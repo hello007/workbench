@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePath, belongsToDir, findOwningDirectory } from '../pathMatch'
+import { normalizePath, belongsToDir, findOwningDirectory, joinRepoPath } from '../pathMatch'
 
 describe('normalizePath', () => {
   it('反斜杠转正斜杠 + 转小写', () => {
@@ -90,5 +90,36 @@ describe('findOwningDirectory', () => {
   it('同前缀串不误选外层', () => {
     const owned = findOwningDirectory('D:\\Projects-other\\repo', dirs)
     expect(owned).toBeNull()
+  })
+})
+
+describe('joinRepoPath', () => {
+  it('仓库根反斜杠 + 相对路径拼接为绝对路径', () => {
+    expect(joinRepoPath('D:\\Projects\\repo', 'src/main.go')).toBe('D:\\Projects\\repo/src/main.go')
+  })
+
+  it('仓库根尾分隔符去重（斜杠/反斜杠均收敛）', () => {
+    expect(joinRepoPath('D:\\Projects\\repo\\', 'a.txt')).toBe('D:\\Projects\\repo/a.txt')
+    expect(joinRepoPath('D:/Projects/repo/', 'a.txt')).toBe('D:/Projects/repo/a.txt')
+  })
+
+  it('相对路径前导分隔符收敛', () => {
+    expect(joinRepoPath('D:\\Projects\\repo', '/src/a.txt')).toBe('D:\\Projects\\repo/src/a.txt')
+  })
+
+  it('保留原大小写不转小写（展示路径非比较语义）', () => {
+    expect(joinRepoPath('D:\\Projects\\Repo', 'SRC/Main.go')).toBe('D:\\Projects\\Repo/SRC/Main.go')
+  })
+
+  it('repoPath 为空回退相对路径', () => {
+    expect(joinRepoPath('', 'src/a.txt')).toBe('src/a.txt')
+  })
+
+  it('relPath 为空回退仓库根', () => {
+    expect(joinRepoPath('D:\\Projects\\repo', '')).toBe('D:\\Projects\\repo')
+  })
+
+  it('双空返回空串', () => {
+    expect(joinRepoPath('', '')).toBe('')
   })
 })

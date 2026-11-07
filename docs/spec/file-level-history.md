@@ -1,6 +1,7 @@
 # 文件级提交历史契约（文件树右键「查看历史」）
 
 > 来源：11-07-file-level-history 任务（2026-11-07）。域入口 `service/git_file_history.go`（GitService 方法），App 绑定 `GetFileCommitHistory`（app_git.go），前端 `FileHistoryDialog.vue`（FileTreePanel 文件节点右键挂载）。与仓库级 CommitHistory（commit_history_cli.go + CommitHistoryCache）形成追溯闭环，但不共享缓存与组件。
+> 11-07-commit-history-file-trace-entry 任务（2026-11-07）增补：提交历史/文件 diff 反向入口（§7）。
 
 ## 1. 绑定与模型契约
 
@@ -66,3 +67,40 @@ git -c i18n.logOutputEncoding=UTF-8 -c i18n.commitEncoding=UTF-8 -c core.quotepa
 - 分页窗口：两页 SHA 交集为空的正向断言（禁 `A.SHA != B.SHA && A.msg == B.msg` 型恒假组合——check 阶段发现的假绿）
 - 组件测试：el-dialog stub 须 `watch modelValue → emit('closed')` 驱动 releaseState（stub 不发 closed 则关闭清态逻辑从未执行，属假绿）；tooltip 断言精确文案非存在性
 - 倒序语义：rename 提交下标随提交数变化，断言前先想清倒序（最新在前）再定位
+
+## 7. 提交历史反向入口（11-07-commit-history-file-trace-entry，2026-11-07）
+
+### 7.1 入口与路径口径
+
+三处右键入口（`TraceFileContextMenu.vue` 公共菜单组件，`data-action="trace-file-history"` / `"trace-file-blame"` 语义锚），点击语义均不变（tag/文件名点击仍开 diff）：
+
+| 入口 | fileAbsPath 换算 | initialSha |
+|---|---|---|
+| CommitHistory 变更文件 tag | `joinRepoPath(repoPath, file)` | 右键所在 commit.sha |
+| FileDiffDialog commit 头部标题 | 同上 | props.sha |
+| FileDiffDialog range 分组头文件名 | 同上 | props.headSha（区间终点） |
+
+- **`commit.files` 天然 pathAtCommit 语义**：后端 `--name-only`（commit_history_cli.go，无 `-M` 但 Git ≥2.9 默认 rename 检测开启）对 rename 提交只列新路径 → 拼接仓库根即正确，**无 rename 特判**。`diff.renames=false` 边缘下列旧路径：--follow 对旧路径仍可追溯、blame 走存在性降级，逻辑自洽
+- **`joinRepoPath`**（utils/pathMatch.js）：仓库根（`\` 或 `/` 分隔、可带尾分隔符）+ 相对路径拼接，保留原大小写（展示路径非比较语义，与 `normalizePath` 的小写比较语义区分）
+- FileHistoryDialog 各挂载点均 `repoPath == fileAbsPath` 同传绝对路径（对齐 FileTreePanel 先例）
+
+### 7.2 FileDiffDialog ↔ FileHistoryDialog 环形引用（必知坑位）
+
+FileDiffDialog 自挂 FileHistoryDialog（右键追溯）+ FileHistoryDialog 自挂 FileDiffDialog（内嵌 commit diff）→ **组件引用成环**。真实运行时双方 visible=false 不渲染无碍；但测试环境 `el-dialog` stub 若恒渲染 slot（`template: '<div><slot/></div>'` 形态），环内组件无限递归 `Maximum call stack size exceeded`。**两处均须 v-if 外控**（`v-if="traceHistoryVisible"` / `v-if="diffVisible"`，关闭即卸载切断静态环）；新增互相嵌套的弹窗组件同样必须在挂载点加 v-if，禁裸 v-model 直挂。
+
+### 7.3「行归属」入口分流（单点 `composables/useTraceBlame.js`）
+
+`requestTraceBlame(absPath, fileName, fallbackOpenHistory)` 三分支：
+
+1. `CheckFileExists(absPath)`（新增 App 绑定，os.Stat 语义；**绑定异常按不存在处理** fail-safe 转历史，入口恒可达）→ false：toast「文件已不在工作树，已转入文件历史追溯」+ `fallbackOpenHistory()`（自带 initialSha，追溯不断链）
+2. `blameCapableExt(fileName)` false（json/jsonc/json5/md/markdown/html/htm，与 FilePreviewRenderer.blameAvailable 同源条件；md/html 联动打开必为渲染视图——previewFile 恒重置 htmlViewMode='render'）→ toast「该文件类型不支持行归属」+ 转历史
+3. 可用 → `uiStore.pushTraceBlameRequest(absPath)` 追溯信箱（`{ absPath, seq }`，seq 单调递增防同文件重复点击被 watch 依赖比较去重丢失，消费即置 null）
+
+信箱消费方 Home.vue：构造最小文件节点 `{ type:'file', path, name }` 走 `onNodeSelect(node, { autoBlame: true })` 全链路（selectedNode 切换/latestCommit 清零/recordAccess 与文件树点击一致）；普通树点击保持两参调用 previewFile（不透传空 opts，既有断言兼容）。
+
+### 7.4 测试要点
+
+- 菜单项点击断言用 `data-action` 语义锚定位（禁 `findAll(...)[n]` 下标）；菜单项总数断言可保留
+- initialSha 口径三态（commit=sha / range=headSha / workspace=空）逐一锁死传参
+- 信箱消费用例**须独立 pinia**（`setActivePinia(createPinia())`）：Home.spec 的 beforeEach 已 mount 外层 wrapper，共享 pinia 时外层实例的同款 watch 抢先消费信箱致断言落空
+- 环形引用回归哨兵：Home.spec「loadDirectories 默认选中逻辑」等真实渲染 ContentPanel 链的用例即哨兵（v-if 缺失即栈溢出）

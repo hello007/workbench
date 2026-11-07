@@ -49,6 +49,22 @@ export const useUiStore = defineStore('ui', () => {
     terminalPendingCmd.value = { dir, cmd, seq: terminalCmdSeq }
   }
 
+  // 文件行归属预览请求信箱（提交历史/文件 diff 追溯联动）：CommitHistory 与
+  // FileDiffDialog 的「行归属」右键命令写入，Home watch seq 消费（切选中节点到目标
+  // 文件 + 打开预览 + 自动开启行归属标注）。一次性信箱语义——消费即清空（置 null），
+  // 不持久化。seq 单调递增：同文件两次点击靠 seq 变化保证不被 watch 依赖比较去重丢失。
+  const traceBlameRequest = ref(null) // { absPath: 'D:/xxx/repo/file.go', seq: 1 }
+  let traceBlameSeq = 0
+
+  /**
+   * 写入待预览并开启行归属的文件请求（唯一写入入口 useTraceBlame composable）
+   * @param {string} absPath 文件绝对路径（仓库根 + 仓库相对路径已拼接）
+   */
+  function pushTraceBlameRequest(absPath) {
+    traceBlameSeq += 1
+    traceBlameRequest.value = { absPath, seq: traceBlameSeq }
+  }
+
   // 弹窗 visible×6：设置 / 更新提示 / 命令面板 / 仓库筛选 + 内容搜索初始串 + 仓库筛选初始目录 id
   const settingsVisible = ref(false)
   const updateDialogVisible = ref(false)
@@ -108,6 +124,8 @@ export const useUiStore = defineStore('ui', () => {
     terminalActiveIndex,
     terminalPendingCmd,
     pushTerminalPendingCmd,
+    traceBlameRequest,
+    pushTraceBlameRequest,
     settingsVisible,
     updateDialogVisible,
     updateInfo,

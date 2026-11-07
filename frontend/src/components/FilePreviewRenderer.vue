@@ -353,10 +353,14 @@ const props = defineProps({
   htmlMode: { type: String, default: 'render' },
   // 文本编码来源（utf-8/gbk），用于在文本区提示用户当前文件编码，
   // 保存时按此编码回写。仅非 utf-8（如 gbk）时显示标识，避免默认场景噪声。
-  encoding: { type: String, default: '' }
+  encoding: { type: String, default: '' },
+  // 自动开启行归属请求序号（提交历史「行归属」联动预览）：ContentPanel 每次
+  // 带 blame 的 previewFile 递增，普通预览归零。watch 数字变化必触发（同文件
+  // 内容未变时也消费），消费一次即失效并 emit auto-blame-consumed
+  autoBlameSeq: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['openExternal', 'openLink', 'closeToc'])
+const emit = defineEmits(['openExternal', 'openLink', 'closeToc', 'autoBlameConsumed'])
 
 // 主题 store：mermaid 主题随 resolvedTheme 切换（dark/light），避免暗色下亮色残留
 const settingsStore = useSettingsStore()
@@ -999,6 +1003,9 @@ watch(() => [props.kind, props.fileName, props.base64, props.content, props.html
     // HTML render 模式走 iframe srcdoc 分支，无需 CodeMirror
     await nextTick()
     setupCodeMirror()
+    // 联动自动开 blame：nextTick 延后消费，保证 blame 复位 watch（同次 props
+    // 变化的后注册 watcher）先执行完，刚置位的 blameOn 不被清掉
+    if (pendingAutoBlameSeq.value) nextTick(consumeAutoBlameIfReady)
   } else if (props.kind === 'image') {
     imageScale.value = 1
   } else if (props.kind === 'office') {
@@ -1016,6 +1023,8 @@ onMounted(async () => {
     } else if (!isHtmlRenderView.value) {
       // HTML 渲染态走 iframe 分支，无 CodeMirror；源码态才初始化
       setupCodeMirror()
+      // 联动首挂载消费点：提交历史「行归属」联动时预览区从隐藏态全新挂载走此分支
+      if (pendingAutoBlameSeq.value) nextTick(consumeAutoBlameIfReady)
     }
   } else if (props.kind === 'office') {
     await renderOfficeBySubType()
@@ -1369,6 +1378,32 @@ const toggleBlame = () => {
   }
   loadBlame()
 }
+
+// ---------- 自动开启行归属（提交历史「行归属」联动预览） ----------
+// 消费语义：一次请求只消费一次（无论是否成功开启），消费即清零并 emit 让父组件
+// 复位；cmView 未就绪（新挂载/内容切换中）或类型不支持（blameAvailable=false，
+// 入口虽已预判，此处兜底）时静默忽略——入口侧已 toast 降级，不重复提示。
+const pendingAutoBlameSeq = ref(0)
+
+const consumeAutoBlameIfReady = () => {
+  if (!pendingAutoBlameSeq.value) return
+  pendingAutoBlameSeq.value = 0
+  emit('autoBlameConsumed')
+  if (!cmView || !blameAvailable.value) return
+  if (blameOn.value) return // 已开启（用户先前手动开过）幂等跳过
+  blameOn.value = true
+  loadBlame()
+}
+
+watch(() => props.autoBlameSeq, (seq) => {
+  if (!seq) return
+  pendingAutoBlameSeq.value = seq
+  // cmView 未就绪（首挂载/内容切换中）不在此消费，交主内容 watch / onMounted
+  // 消费点接管；cmView 就绪（同文件内容未变的重联动）也统一 nextTick 延后——
+  // 同批次 props 变化（切文件联动）时消费须排在 blame 复位 watch（同批后注册
+  // watcher）之后，否则刚置位的 blameOn 会被复位清掉
+  if (cmView) nextTick(consumeAutoBlameIfReady)
+}, { immediate: true }) // 首挂载即带请求（联动预览全新挂载）：immediate 记下 seq，交 onMounted 消费点处理
 
 // blame 标注点击（document 委托）：带 sha 跳转文件历史并定位；未提交行无 sha
 // 不跳转。弹窗已开时先关后开（nextTick）走完整重挂载链路，确保新 sha 触发定位扫描

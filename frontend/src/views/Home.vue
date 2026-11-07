@@ -273,7 +273,8 @@ const onDirectorySelect = async (dirId, options = {}) => {
 }
 
 // ---- 选中文件树节点 ----
-const onNodeSelect = (data) => {
+// opts.autoBlame：追溯联动场景（提交历史「行归属」）透传 previewFile，预览完成后自动开启行归属
+const onNodeSelect = (data, opts = {}) => {
   workspaceStore.selectedNode = data
   // 切换文件树节点时清零 latestCommit，避免上一个仓库（经"提交历史"tab emit）
   // 的提交残留到新选中仓库的 GitInfo 面板（与 GitInfo.watch(repoPath) 协同）。
@@ -288,12 +289,31 @@ const onNodeSelect = (data) => {
   //   若用无参 previewFile()，其内部 `targetPath = overridePath || workspaceStore.selectedNode?.path`
   //   读到的仍是【旧节点】路径 → 预览到上一个文件。传 data.path 直接绕开更新时机。
   if (data.type === 'file') {
-    contentPanelRef.value?.previewFile(data.path, data.name)
+    // opts 仅追溯联动场景携带 autoBlame；普通树点击保持两参调用（不透传空 opts）
+    if (opts.autoBlame) {
+      contentPanelRef.value?.previewFile(data.path, data.name, opts)
+    } else {
+      contentPanelRef.value?.previewFile(data.path, data.name)
+    }
   } else {
     contentPanelRef.value?.clearPreview()
   }
   recordAccess({ path: data.path, type: data.type, workDir: directoryStore.currentDirPath })
 }
+
+// ---- 追溯联动信箱消费（提交历史/文件 diff 的「行归属」→ 预览自动开 blame） ----
+// 一次性信箱：消费即清空（置 null）。构造最小文件节点形状走 onNodeSelect 全链路
+// （selectedNode 切换/latestCommit 清零/previewFile/recordAccess 与文件树点击一致）。
+watch(() => uiStore.traceBlameRequest, (req) => {
+  if (!req || !req.absPath) return
+  uiStore.traceBlameRequest = null
+  const lastSep = Math.max(req.absPath.lastIndexOf('/'), req.absPath.lastIndexOf('\\'))
+  onNodeSelect({
+    type: 'file',
+    path: req.absPath,
+    name: lastSep >= 0 ? req.absPath.slice(lastSep + 1) : req.absPath
+  }, { autoBlame: true })
+})
 
 // ---- 刷新文件树节点 ----
 const onRefreshNode = (path) => {

@@ -274,9 +274,11 @@
               :encoding="filePreview.encoding"
               :show-toc="showToc"
               :html-mode="htmlViewMode"
+              :auto-blame-seq="pendingAutoBlameSeq"
               @open-external="handleOpenWithDefaultApp"
               @open-link="onPreviewLink"
               @close-toc="showToc = false"
+              @auto-blame-consumed="pendingAutoBlameSeq = 0"
             />
           </div>
         </div>
@@ -975,12 +977,20 @@ const handleUpdateRepos = () => {
   emit('batchPull', workspaceStore.selectedNode)
 }
 
-const previewFile = async (overridePath, overrideName) => {
+// 自动开启行归属请求序号（提交历史「行归属」联动）：带 blame 的预览请求递增，
+// 普通预览归零（残留请求不得串入后续普通预览误开 blame）。
+// FilePreviewRenderer 消费后 emit 复位归零。
+const pendingAutoBlameSeq = ref(0)
+
+const previewFile = async (overridePath, overrideName, opts = {}) => {
   // 支持 markdown 相对链接在应用内打开：overridePath 非空时按指定路径预览，
   // 不依赖 selectedNode（文件树选中态保持不变）。
   const targetPath = overridePath || workspaceStore.selectedNode?.path
   if (!targetPath) return
   const targetName = overrideName || workspaceStore.selectedNode?.name || ''
+  // 普通预览归零，防旧联动请求串入后续预览误开 blame；带 blame 的预览在预览数据
+  // 就绪后递增（见下方 filePreview 赋值后），保证与内容同批到达渲染器
+  if (!opts?.autoBlame) pendingAutoBlameSeq.value = 0
 
   // 「未保存修改」检查覆盖所有切换入口（文件树点击 / 链接跳转 / 回退），
   // 必须在 isEditing 置 false 之前执行，否则会丢失「编辑中」的判定条件。
@@ -1022,6 +1032,14 @@ const previewFile = async (overridePath, overrideName) => {
       pdfPath: preview.kind === 'pdf' ? (preview.path || targetPath) : '',
       // 文本编码来源（utf-8/gbk），供保存时按原编码回写，不改变原文件编码
       encoding: preview.encoding || ''
+    }
+
+    // 带 blame 的预览请求在预览数据就绪后递增序号：与 fileName/content/filePath
+    // 同一渲染批次到达 FilePreviewRenderer。入口即递增会在内容切换批次之前被
+    // 「旧编辑器仍挂载」的消费点提前消费，随后的 blame 复位 watch 清掉 blameOn
+    // 并作废在途响应，联动静默失效（且用户取消切换时误开当前文件 blame）。
+    if (opts?.autoBlame && !preview.error && !preview.tooLarge) {
+      pendingAutoBlameSeq.value += 1
     }
 
     if (preview.error) {

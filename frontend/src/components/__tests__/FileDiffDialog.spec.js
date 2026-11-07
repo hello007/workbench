@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import FileDiffDialog from '../FileDiffDialog.vue'
 import { useSettingsStore } from '../../store/settings'
@@ -20,7 +21,16 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetRangeDiff: vi.fn(),
   OpenInExternalDiff: vi.fn(),
   GetSettings: vi.fn(),
-  SaveSettings: vi.fn()
+  SaveSettings: vi.fn(),
+  CheckFileExists: vi.fn()
+}))
+
+// FileHistoryDialog stub（追溯历史弹窗）：捕获绝对路径与 initialSha 定位传参
+vi.mock('../FileHistoryDialog.vue', () => ({
+  default: {
+    template: '<div class="file-history-dialog-stub" v-if="modelValue" :data-abs-path="fileAbsPath" :data-initial-sha="initialSha" />',
+    props: ['modelValue', 'repoPath', 'fileAbsPath', 'initialSha']
+  }
 }))
 
 // v-loading 指令 stub（jsdom 无 element-plus 指令注册）
@@ -416,5 +426,93 @@ describe('FileDiffDialog.vue', () => {
     resolveFirst('Binary files a/x b/x differ')
     await flushPromises()
     expect(btn.attributes('disabled')).toBeUndefined()
+  })
+
+  // ---- diff 文件追溯（右键「查看文件历史 / 行归属」） ----
+
+  it('commit 模式头部标题右键 → 菜单「查看文件历史」打开历史弹窗（initialSha=所在提交）', async () => {
+    const { GetCommitFileDiff } = await import('../../../wailsjs/go/main/App')
+    GetCommitFileDiff.mockResolvedValue('@@ -1,1 +1,2 @@\n ctx\n+new')
+    wrapper = await createWrapper({ mode: 'commit', sha: 'abcdef1234', file: 'src/a.go' })
+
+    await wrapper.find('.diff-dialog-title').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+    // 菜单项总数断言 + 点击走 data-action 语义锚（禁 findAll 下标）
+    const items = wrapper.findAll('.trace-context-menu .context-menu-item')
+    expect(items).toHaveLength(2)
+
+    await wrapper.find('[data-action="trace-file-history"]').trigger('click')
+    await nextTick()
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-abs-path')).toBe('/repo/A/src/a.go')
+    expect(dialog.attributes('data-initial-sha')).toBe('abcdef1234')
+  })
+
+  it('range 模式分组名右键 → 「查看文件历史」initialSha=区间终点 headSha', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    const diff = [
+      'diff --git a/src/a.go b/src/a.go',
+      'index 111..222 100644',
+      '--- a/src/a.go',
+      '+++ b/src/a.go',
+      '@@ -1,1 +1,2 @@',
+      ' ctx',
+      '+new'
+    ].join('\n')
+    GetRangeDiff.mockResolvedValue(diff)
+    wrapper = await createWrapper({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+
+    await wrapper.findAll('.range-file-name')[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+    await wrapper.find('[data-action="trace-file-history"]').trigger('click')
+    await nextTick()
+
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-abs-path')).toBe('/repo/A/src/a.go')
+    expect(dialog.attributes('data-initial-sha')).toBe('head5678')
+  })
+
+  it('range 模式头部标题（区间描述非文件名）右键不弹追溯菜单', async () => {
+    const { GetRangeDiff } = await import('../../../wailsjs/go/main/App')
+    GetRangeDiff.mockResolvedValue('@@ -1,1 +1,2 @@\n ctx\n+new')
+    wrapper = await createWrapper({ mode: 'range', baseSha: 'base1234', headSha: 'head5678', file: '' })
+
+    await wrapper.find('.diff-dialog-title').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+    expect(wrapper.find('.trace-context-menu').exists()).toBe(false)
+  })
+
+  it('workspace 模式头部右键「查看文件历史」不定位提交（initialSha 空）', async () => {
+    const { GetFileDiff } = await import('../../../wailsjs/go/main/App')
+    GetFileDiff.mockResolvedValue('@@ -1,1 +1,1 @@\n ctx')
+    wrapper = await createWrapper()
+
+    await wrapper.find('.diff-dialog-title').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+    await wrapper.find('[data-action="trace-file-history"]').trigger('click')
+    await nextTick()
+
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-initial-sha')).toBe('')
+  })
+
+  it('菜单「行归属」文件在工作树存在 → 写追溯信箱（absPath = 仓库根 + 相对路径）', async () => {
+    const { GetFileDiff, CheckFileExists } = await import('../../../wailsjs/go/main/App')
+    GetFileDiff.mockResolvedValue('@@ -1,1 +1,1 @@\n ctx')
+    CheckFileExists.mockResolvedValue(true)
+    wrapper = await createWrapper()
+
+    await wrapper.find('.diff-dialog-title').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+    await wrapper.find('[data-action="trace-file-blame"]').trigger('click')
+    await flushPromises()
+
+    expect(CheckFileExists).toHaveBeenCalledWith('/repo/A/src/main.go')
+    const { useUiStore } = await import('../../store/ui')
+    const ui = useUiStore()
+    expect(ui.traceBlameRequest).toEqual({ absPath: '/repo/A/src/main.go', seq: 1 })
   })
 })

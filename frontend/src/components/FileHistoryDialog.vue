@@ -57,8 +57,11 @@
     </div>
   </el-dialog>
 
-  <!-- 单提交单文件 diff：file 用该提交时刻路径（pathAtCommit），--follow 旧段才能取到变更 -->
+  <!-- 单提交单文件 diff：file 用该提交时刻路径（pathAtCommit），--follow 旧段才能取到变更。
+       v-if 外控：FileDiffDialog 内也自挂 FileHistoryDialog（其 diff 文件右键追溯），
+       二者互相引用成环——静态渲染下（如测试 stub 恒渲染 slot）会无限递归，关闭即卸载切断。 -->
   <FileDiffDialog
+    v-if="diffVisible"
     v-model="diffVisible"
     mode="commit"
     :repo-path="repoPath"

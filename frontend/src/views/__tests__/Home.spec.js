@@ -727,6 +727,62 @@ describe('Home.vue - Bug修复验证', () => {
       expect(previewFileMock).not.toHaveBeenCalled()
       w.unmount()
     })
+
+    // ---- 追溯联动信箱消费（提交历史/文件 diff「行归属」→ 预览自动开 blame） ----
+
+    it('信箱写入 → 切选中文件节点 + previewFile(autoBlame) + 消费即清空', async () => {
+      // 独立 pinia：beforeEach 已 mount 的外层 wrapper 与本用例 mount 的 w 共享
+      // activePinia 时，外层实例的同一 watch 会抢先消费信箱致断言落空
+      setActivePinia(createPinia())
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+      const ui = useUiStore()
+      const ws = useWorkspaceStore()
+
+      ui.pushTraceBlameRequest('D:/repo/src/main.go')
+      await flushPromises()
+
+      // 走 onNodeSelect 全链路：selectedNode 切换为最小文件节点形状
+      expect(ws.selectedNode).toEqual({ type: 'file', path: 'D:/repo/src/main.go', name: 'main.go' })
+      // previewFile 显式传 path/name 绕开 store 更新时机，透传 autoBlame
+      expect(previewFileMock).toHaveBeenCalledWith('D:/repo/src/main.go', 'main.go', { autoBlame: true })
+      // 一次性信箱：消费即清空（同请求不重复消费）
+      expect(ui.traceBlameRequest).toBeNull()
+      w.unmount()
+    })
+
+    it('普通树点击 onNodeSelect 保持两参调用 previewFile（不透传空 opts）', async () => {
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+
+      w.vm.onNodeSelect({ name: 'a.md', path: '/dir/a.md', type: 'file' })
+      await flushPromises()
+
+      expect(previewFileMock.mock.calls[0]).toEqual(['/dir/a.md', 'a.md'])
+      w.unmount()
+    })
+
+    it('信箱请求为空/无 absPath 时不消费不切节点', async () => {
+      // 独立 pinia：隔离外层 wrapper 的同款 watch（见上一用例注释）
+      setActivePinia(createPinia())
+      const previewFileMock = vi.fn()
+      const w = mountWithStub(previewFileMock)
+      await flushPromises()
+      const ui = useUiStore()
+      const ws = useWorkspaceStore()
+      ws.selectedNode = null
+
+      ui.traceBlameRequest = { absPath: '', seq: 99 }
+      await flushPromises()
+
+      expect(ws.selectedNode).toBeNull()
+      expect(previewFileMock).not.toHaveBeenCalled()
+      // 无效请求不消费不清空（直接返回，状态保持原值）
+      expect(ui.traceBlameRequest).toEqual({ absPath: '', seq: 99 })
+      w.unmount()
+    })
   })
 
   describe('onRepoLocate 跨工作目录跳转衔接', () => {

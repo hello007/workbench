@@ -2,11 +2,26 @@ package main
 
 import (
 	"log/slog"
+	"os"
+	"strings"
 
 	"workbench/model"
 )
 
 // ===== 文件树与文件操作域 =====
+
+// CheckFileExists 判定本地路径（文件或目录）是否存在于文件系统。
+// 供前端提交历史/文件 diff 的「行归属」入口做工作树存在性预判（blame 为工作树
+// 语义，文件已被后续提交删除时降级转文件历史），路径来源为提交记录拼接的绝对路径。
+// 纯桌面数据面方法：载荷为任意路径的存在性信息，浏览器通道经 main.go 装配的
+// RPCHiddenMethods 屏蔽（呈现「方法不存在」），防浏览器侧探测磁盘路径。
+func (a *App) CheckFileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // GetFileTree 获取文件树
 func (a *App) GetFileTree(path string) []*model.FileTreeNode {

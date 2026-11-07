@@ -156,7 +156,9 @@
                   :key="index"
                   size="small"
                   class="file-tag"
+                  title="点击查看差异，右键追溯文件历史/行归属"
                   @click.stop="openCommitFileDiff(commit.sha, file)"
+                  @contextmenu.prevent.stop="openTraceMenu($event, commit.sha, file)"
                 >
                   {{ file }}
                 </el-tag>
@@ -224,6 +226,18 @@
       :loading="aiReviewing"
       @locate-file="onReviewLocateFile"
     />
+
+    <!-- 变更文件追溯右键菜单：查看文件历史 / 行归属（行归属经 uiStore 信箱联动预览） -->
+    <TraceFileContextMenu ref="traceMenuRef" @command="onTraceCommand" />
+
+    <!-- 文件提交历史弹窗（右键「查看文件历史」）：repoPath=fileAbsPath 同传绝对路径
+         （对齐 FileTreePanel 先例），initialSha 定位到右键所在提交保持追溯连续性 -->
+    <FileHistoryDialog
+      v-model="traceHistoryVisible"
+      :repo-path="traceHistoryAbsPath"
+      :file-abs-path="traceHistoryAbsPath"
+      :initial-sha="traceHistorySha"
+    />
   </el-card>
 </template>
 
@@ -241,7 +255,11 @@ import { EventsOn } from '../../wailsjs/runtime/runtime'
 import FileDiffDialog from './FileDiffDialog.vue'
 import CodeReviewResult from './CodeReviewResult.vue'
 import BranchSyncBar from './BranchSyncBar.vue'
+import TraceFileContextMenu from './TraceFileContextMenu.vue'
+import FileHistoryDialog from './FileHistoryDialog.vue'
 import { handleGitError } from '../utils/error'
+import { joinRepoPath } from '../utils/pathMatch'
+import { requestTraceBlame, blameCapableExt } from '../composables/useTraceBlame'
 
 const props = defineProps({
   repoPath: { type: String, required: true }
@@ -412,6 +430,41 @@ const openCommitFileDiff = (sha, file) => {
   commitDiffSha.value = sha
   commitDiffFile.value = file
   commitDiffVisible.value = true
+}
+
+// ---------- 变更文件追溯（右键「查看文件历史 / 行归属」） ----------
+// commit.files 是 --name-only 口径（rename 提交列新路径）= pathAtCommit 语义，
+// 拼接仓库根即为该提交之后的绝对路径，FileHistoryDialog --follow 可完整追溯。
+const traceMenuRef = ref(null)
+// 右键上下文：菜单 command 发出时事件对象已不可得，open 时快照 file/sha 供分流
+const traceMenuCtx = ref({ sha: '', file: '' })
+
+// 追溯历史弹窗状态（自挂 FileHistoryDialog，repoPath=fileAbsPath 对齐 FileTreePanel 先例）
+const traceHistoryVisible = ref(false)
+const traceHistoryAbsPath = ref('')
+const traceHistorySha = ref('')
+
+const openTraceMenu = (event, sha, file) => {
+  traceMenuCtx.value = { sha, file }
+  traceMenuRef.value?.open(event, { blameAvailable: blameCapableExt(file) })
+}
+
+const openTraceHistory = (sha, file) => {
+  traceHistorySha.value = sha
+  traceHistoryAbsPath.value = joinRepoPath(props.repoPath, file)
+  traceHistoryVisible.value = true
+}
+
+const onTraceCommand = (command) => {
+  const { sha, file } = traceMenuCtx.value
+  if (command === 'history') {
+    openTraceHistory(sha, file)
+    return
+  }
+  if (command === 'blame') {
+    // 降级闭包复用同一弹窗：带 initialSha 定位到右键所在提交，追溯不断链
+    requestTraceBlame(joinRepoPath(props.repoPath, file), file, () => openTraceHistory(sha, file))
+  }
 }
 
 // 切换仓库或卸载时重置 AI 审查态：在途任务的 done 事件不再匹配本组件 taskId（路由失配被忽略），

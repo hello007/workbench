@@ -9,7 +9,11 @@
   >
     <template #header>
       <div class="diff-dialog-header">
-        <span class="diff-dialog-title">{{ dialogTitle }}</span>
+        <span
+          class="diff-dialog-title"
+          :title="traceableFile ? '右键：文件历史 / 行归属' : ''"
+          @contextmenu.prevent.stop="onHeaderContextMenu($event)"
+        >{{ dialogTitle }}</span>
         <el-tooltip :content="externalDiffTooltip" placement="top">
           <span>
             <el-button
@@ -35,7 +39,11 @@
       <div v-else-if="mode === 'range' && fileGroups.length > 0" class="range-groups">
         <div v-for="(group, gi) in fileGroups" :key="'g' + gi" class="range-file-group">
           <div class="range-file-header">
-            <span class="range-file-name">{{ group.file }}</span>
+            <span
+              class="range-file-name"
+              title="右键：文件历史 / 行归属"
+              @contextmenu.prevent.stop="openTraceMenu($event, group.file)"
+            >{{ group.file }}</span>
             <el-tooltip :content="externalDiffTooltip" placement="top">
               <span>
                 <el-button
@@ -106,6 +114,21 @@
       <el-button type="primary" @click="$emit('update:modelValue', false)">关闭</el-button>
     </template>
   </el-dialog>
+
+  <!-- diff 文件追溯右键菜单：查看文件历史 / 行归属（行归属经 uiStore 信箱联动预览） -->
+  <TraceFileContextMenu ref="traceMenuRef" @command="onTraceCommand" />
+
+  <!-- 文件提交历史弹窗（右键「查看文件历史」）：repoPath=fileAbsPath 同传绝对路径
+       （对齐 FileTreePanel 先例），initialSha 按 mode 取所在/区间终点提交定位。
+       v-if 外控：FileHistoryDialog 内也自挂 FileDiffDialog，二者互相引用成环——
+       静态渲染下（如测试 stub 恒渲染 slot）会无限递归，关闭即卸载切断。 -->
+  <FileHistoryDialog
+    v-if="traceHistoryVisible"
+    v-model="traceHistoryVisible"
+    :repo-path="traceHistoryAbsPath"
+    :file-abs-path="traceHistoryAbsPath"
+    :initial-sha="traceHistorySha"
+  />
 </template>
 
 <script setup>
@@ -116,6 +139,10 @@ import { useSettingsStore } from '../store'
 import { handleError } from '../utils/error'
 // unified diff 解析共享 util（原内嵌实现原样抽出，分支对比 BranchCompareDiffViewer 同用一份）
 import { parseDiff, parseRangeDiff } from '../utils/diffParse'
+import TraceFileContextMenu from './TraceFileContextMenu.vue'
+import FileHistoryDialog from './FileHistoryDialog.vue'
+import { joinRepoPath } from '../utils/pathMatch'
+import { requestTraceBlame, blameCapableExt } from '../composables/useTraceBlame'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -186,6 +213,57 @@ const dialogTitle = computed(() => {
   const name = props.file ? props.file.split(/[\\/]/).pop() : ''
   return name ? `文件差异 - ${name}` : '文件差异'
 })
+
+// ---------- diff 文件追溯（右键「查看文件历史 / 行归属」） ----------
+// 单文件模式（workspace/commit）头部标题可右键；range 模式各文件分组名可右键。
+// commit 文件路径是该提交之后的 pathAtCommit（GetCommitFileDiff 同口径），拼接
+// 仓库根即为正确绝对路径；range 分组路径取 head 提交口径。
+const traceableFile = computed(() => props.mode !== 'range' && !!props.file)
+
+const traceMenuRef = ref(null)
+// 右键上下文：菜单 command 发出时事件对象已不可得，open 时快照 file 供分流
+const traceMenuCtx = ref({ file: '' })
+
+// 追溯历史弹窗状态（自挂 FileHistoryDialog，repoPath=fileAbsPath 对齐 FileTreePanel 先例）
+const traceHistoryVisible = ref(false)
+const traceHistoryAbsPath = ref('')
+const traceHistorySha = ref('')
+
+// initialSha 按 diff 来源模式取定位提交：commit=所在提交；range=区间终点（head）；
+// workspace 无单提交语义不定位
+const traceShaForMode = () => {
+  if (props.mode === 'commit') return props.sha
+  if (props.mode === 'range') return props.headSha
+  return ''
+}
+
+const openTraceMenu = (event, file) => {
+  traceMenuCtx.value = { file }
+  traceMenuRef.value?.open(event, { blameAvailable: blameCapableExt(file) })
+}
+
+const openTraceHistory = (file) => {
+  traceHistorySha.value = traceShaForMode()
+  traceHistoryAbsPath.value = joinRepoPath(props.repoPath, file)
+  traceHistoryVisible.value = true
+}
+
+const onTraceCommand = (command) => {
+  const { file } = traceMenuCtx.value
+  if (command === 'history') {
+    openTraceHistory(file)
+    return
+  }
+  if (command === 'blame') {
+    // 降级闭包复用同一弹窗：带 initialSha 定位（commit/range 口径），追溯不断链
+    requestTraceBlame(joinRepoPath(props.repoPath, file), file, () => openTraceHistory(file))
+  }
+}
+
+const onHeaderContextMenu = (event) => {
+  if (!traceableFile.value || !props.file) return
+  openTraceMenu(event, props.file)
+}
 
 // 双栏标题按 diff 来源模式区分：
 //   workspace：旧=HEAD/工作区前，新=工作区

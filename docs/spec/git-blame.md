@@ -1,6 +1,7 @@
 # 行级归属追溯契约（git blame）
 
 > 来源：11-07-git-blame 任务（2026-11-07）。域入口 `service/git_blame.go`（GitService 方法 `GetFileBlame`），App 绑定 `GetFileBlame`（app_git.go），前端 `FilePreviewRenderer.vue`（右键「行归属」开关 + CodeMirror 行尾标注）→ `FileHistoryDialog.vue`（`initialSha` 定位跳转）。与文件级历史（git_file_history.go）同构：fileAbsPath 自包含 + FindGitRoot + utf8Prefix，形成「仓库 → 文件 → 行」追溯闭环，但不共享缓存与解析。
+> 11-07-commit-history-file-trace-entry 任务（2026-11-07）增补：提交历史反向入口与 autoBlame 联动（§8）。
 
 ## 1. 绑定与模型契约
 
@@ -65,3 +66,24 @@ porcelain 输出按行状态机解析（`blameSHAHeaderRe`：40 位 hex + orig/f
 - **时区矩阵**：+0800 / -0530 / +0000 / 非法 tz 回退 UTC（`blameDateTime` 纯函数直测）
 - **前端**：入口条件（json/markdown 隐藏）、块首行标注收敛、零 SHA 禁跳转、点击带 sha 打开 stub 并传 initialSha、行数守卫 warning、切换文件复位
 - **前端挂载教训（假绿陷阱）**：mount 未 `attachTo` 时组件渲染在**游离 DOM**（isConnected=false），事件冒泡到不了 document——document 级委托监听（blame 标注点击）永远收不到事件。点击委托类交互的用例必须 `attachTo: document.body`
+
+## 8. 提交历史反向入口与 autoBlame（11-07-commit-history-file-trace-entry，2026-11-07）
+
+### 8.1 入口预判（单点 composables/useTraceBlame.js）
+
+提交历史/文件 diff 的「行归属」入口（详见 [file-level-history.md §7](file-level-history.md)）经 `blameCapableExt`（json/jsonc/json5/md/markdown/html/htm 不可用，**与 §4 blameAvailable 同源**——md/html 联动打开必为渲染视图）与 `CheckFileExists`（App 绑定，os.Stat 语义，纯桌面数据面已入 RPCHiddenMethods）双预判；入口侧降级 toast + 转文件历史，`blameAvailable=false` 场景到达 renderer 时**静默忽略不重复 toast**。
+
+### 8.2 autoBlame 联动契约（FilePreviewRenderer）
+
+- **prop `autoBlameSeq: Number`**（非 boolean）：ContentPanel 每次带 blame 的 previewFile 请求**递增**（普通预览归零防旧请求串入后续预览误开 blame）；watch 数字变化必触发（同文件内容未变的重联动场景 props 全不变，boolean 语义会漏）。消费一次即失效：`pendingAutoBlameSeq` 清零 + `emit('autoBlameConsumed')`（父复位归零）
+- **消费点三处**：`autoBlameSeq` watch（cmView 已就绪场景）/ 主内容 watch 的 `setupCodeMirror()` 后 / `onMounted` 的 `setupCodeMirror()` 后（联动预览从隐藏态全新挂载走此分支——watch 须 `{ immediate: true }` 记下首挂载 seq）
+- **消费时序竞态（check 阶段 P0，实测修复）**：`pendingAutoBlameSeq` 的赋值必须与 `filePreview` 赋值**同批**（ContentPanel 在 `await PreviewFile` 成功后、`filePreview.value = {...}` 之后设置）；若在 previewFile 入口提前设置，seq 批次与内容批次分离——seq 被旧编辑器消费点提前消费（对旧文件发起 blame）→ 内容批次到达时 blame 复位 watch 清 `blameOn` 并作废在途响应 → 消费机会耗尽，新文件标注不渲染且无提示。连带：用户在「未保存修改」弹窗取消切换时当前文件被误开 blame
+- **消费须延后于 blame 复位 watch**：同一次 props 变化触发多个 watcher 按注册顺序 flush，主内容 watch（982 行注册）先于 blame 复位 watch（1405 行注册）——消费点 `nextTick(consumeAutoBlameIfReady)` 保证复位先行，否则刚置位的 blameOn 被清掉。`autoBlameSeq` watch 的同步消费分支同样 nextTick 延后（纵深防御，不依赖 watcher 注册顺序假设）
+- **消费条件兜底**：`cmView` 未就绪或 `blameAvailable=false` 时静默忽略（消费即失效原则：一次请求只消费一次，无论成败）
+
+### 8.3 测试要点
+
+- autoBlameSeq>0 首挂载自动开启（GetFileBlame 调用 + 标注渲染 + autoBlameConsumed emit 一次）；=0 不开启
+- json 文件静默忽略（GetFileBlame 零调用但 emit consumed）
+- 运行中递增 seq（同文件内容不变重联动）→ watch 直接消费
+- **切文件联动回归**（seq 与内容同批变化 → blame 对新文件开启、旧文件零请求）——红测验证有效：回退 ContentPanel 同批契约时该用例 annots=0

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import CommitHistory from '../CommitHistory.vue'
 
 vi.mock('element-plus', async () => {
@@ -19,7 +20,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   GetBranchSyncInfo: vi.fn(),
   InvalidateCommitHistoryCache: vi.fn(),
   RunAiFunction: vi.fn(),
-  CancelAiTask: vi.fn()
+  CancelAiTask: vi.fn(),
+  CheckFileExists: vi.fn()
 }))
 
 // ai-task:done 事件总线：EventsOn 记录 handler 供测试手动触发（vi.hoisted 避免工厂函数 TDZ）
@@ -45,7 +47,9 @@ vi.mock('@element-plus/icons-vue', () => ({
   ArrowDown: { template: '<i class="i-down" />' },
   User: { template: '<i class="i-user" />' },
   Search: { template: '<i class="i-search" />' },
-  View: { template: '<i class="i-view" />' }
+  View: { template: '<i class="i-view" />' },
+  Clock: { template: '<i class="i-clock" />' },
+  Location: { template: '<i class="i-location" />' }
 }))
 
 const stubs = {
@@ -90,6 +94,12 @@ const stubs = {
     template: '<div class="file-diff-stub" />',
     props: ['modelValue', 'repoPath', 'file', 'sha', 'baseSha', 'headSha', 'mode']
   },
+  // FileHistoryDialog stub（追溯历史弹窗）：捕获绝对路径与 initialSha 定位传参
+  FileHistoryDialog: {
+    name: 'FileHistoryDialog',
+    template: '<div class="file-history-dialog-stub" v-if="modelValue" :data-abs-path="fileAbsPath" :data-initial-sha="initialSha" />',
+    props: ['modelValue', 'repoPath', 'fileAbsPath', 'initialSha']
+  },
   // CodeReviewResult stub：捕获 issues/summary/loading props，emit locate-file 供测试
   CodeReviewResult: {
     name: 'CodeReviewResult',
@@ -129,7 +139,11 @@ const commit = (over = {}) => ({
 function createWrapper(props = {}) {
   return mount(CommitHistory, {
     props: { repoPath: '/repo/A', ...props },
-    global: { stubs, directives }
+    global: {
+      plugins: [createPinia()],
+      stubs,
+      directives
+    }
   })
 }
 
@@ -825,5 +839,82 @@ describe('CommitHistory.vue', () => {
     await wrapper.setProps({ repoPath: '/repo/B' })
     await flushPromises()
     expect(wrapper.findAll('.ref-badge').length).toBe(0)
+  })
+
+  // ---------- 变更文件追溯（右键「查看文件历史 / 行归属」） ----------
+  const openTraceMenu = async () => {
+    // 展开提交详情露出变更文件 tag，右键第一个 tag
+    await wrapper.find('.commit-card').trigger('click')
+    await wrapper.findAll('.file-tag')[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await nextTick()
+  }
+
+  it('变更文件 tag 右键弹出追溯菜单（查看文件历史 + 行归属两项）', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await openTraceMenu()
+
+    const items = wrapper.findAll('.trace-context-menu .context-menu-item')
+    expect(items).toHaveLength(2)
+    // 点击/文案定位走 data-action 语义锚（禁 findAll 下标），总数断言保留
+    expect(wrapper.find('[data-action="trace-file-history"]').text()).toContain('查看文件历史')
+    expect(wrapper.find('[data-action="trace-file-blame"]').text()).toContain('行归属')
+  })
+
+  it('菜单「查看文件历史」→ 打开 FileHistoryDialog（绝对路径拼接 + initialSha 定位所在提交）', async () => {
+    const { GetCommitHistory } = await import('../../../wailsjs/go/main/App')
+    const c = commit({ sha: 'cafecafe1234567890abcdef1234567890abcdef12' })
+    GetCommitHistory.mockResolvedValue([c])
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await openTraceMenu()
+    await wrapper.find('[data-action="trace-file-history"]').trigger('click')
+    await nextTick()
+
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    // commit.files 是仓库相对路径，换算为仓库根 + 相对路径的绝对路径
+    expect(dialog.attributes('data-abs-path')).toBe('/repo/A/src/a.go')
+    expect(dialog.attributes('data-initial-sha')).toBe(c.sha)
+  })
+
+  it('菜单「行归属」文件在工作树存在 → 写追溯信箱（Home 消费联动预览）', async () => {
+    const { GetCommitHistory, CheckFileExists } = await import('../../../wailsjs/go/main/App')
+    GetCommitHistory.mockResolvedValue([commit()])
+    CheckFileExists.mockResolvedValue(true)
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await openTraceMenu()
+    await wrapper.find('[data-action="trace-file-blame"]').trigger('click')
+    await flushPromises()
+
+    expect(CheckFileExists).toHaveBeenCalledWith('/repo/A/src/a.go')
+    const { useUiStore } = await import('../../store/ui')
+    const ui = useUiStore()
+    expect(ui.traceBlameRequest).toEqual({ absPath: '/repo/A/src/a.go', seq: 1 })
+  })
+
+  it('菜单「行归属」文件已不在工作树 → 降级 toast + 转文件历史（带 initialSha 不断链）', async () => {
+    const { GetCommitHistory, CheckFileExists } = await import('../../../wailsjs/go/main/App')
+    const { ElMessage } = await import('element-plus')
+    const c = commit({ sha: 'deadbeef1234567890abcdef1234567890abcdef12' })
+    GetCommitHistory.mockResolvedValue([c])
+    CheckFileExists.mockResolvedValue(false)
+    wrapper = createWrapper()
+    await flushPromises()
+
+    await openTraceMenu()
+    await wrapper.find('[data-action="trace-file-blame"]').trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.info).toHaveBeenCalledWith('文件已不在工作树，已转入文件历史追溯')
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-initial-sha')).toBe(c.sha)
   })
 })

@@ -975,4 +975,77 @@ describe('FilePreviewRenderer.vue - 行归属（git blame）', () => {
     expect(blameMenuItem().text()).toContain('行归属')
     expect(blameMenuItem().text()).not.toContain('关闭')
   })
+
+  // ---------- 自动开启行归属（提交历史「行归属」联动预览） ----------
+  it('autoBlameSeq>0 首挂载自动开启归属（联动预览全新挂载走 onMounted 消费点）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三', autoBlameSeq: 1 })
+    await flushPromises()
+
+    // 未右键菜单即自动拉取归属并渲染标注
+    expect(GetFileBlame).toHaveBeenCalledWith('D:/repo/a.js')
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(2)
+    // 消费一次即失效并通知父组件复位
+    expect(wrapper.emitted('autoBlameConsumed')).toHaveLength(1)
+  })
+
+  it('autoBlameSeq=0（默认）不自动开启归属', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    expect(GetFileBlame).not.toHaveBeenCalled()
+    expect(wrapper.emitted('autoBlameConsumed')).toBeFalsy()
+  })
+
+  it('autoBlameSeq 对 json 文件静默忽略（入口已 toast 降级，不重复提示）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'data.json', filePath: 'D:/repo/data.json', content: '{"a":1}', autoBlameSeq: 1 })
+    await flushPromises()
+
+    expect(GetFileBlame).not.toHaveBeenCalled()
+    expect(wrapper.emitted('autoBlameConsumed')).toHaveLength(1)
+  })
+
+  it('运行中递增 autoBlameSeq（同文件内容未变的重联动）→ watch 直接消费', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+    expect(GetFileBlame).not.toHaveBeenCalled()
+
+    // props 内容未变，仅 seq 递增（用户从提交历史再次点同一文件行归属）
+    await wrapper.setProps({ autoBlameSeq: 3 })
+    await flushPromises()
+
+    expect(GetFileBlame).toHaveBeenCalledWith('D:/repo/a.js')
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(2)
+    expect(wrapper.emitted('autoBlameConsumed')).toHaveLength(1)
+  })
+
+  it('切文件联动（seq 与内容同批变化）→ blame 对新文件开启（消费排在复位 watch 之后）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+    expect(GetFileBlame).not.toHaveBeenCalled()
+
+    // 模拟 ContentPanel 契约：预览数据就绪后 seq 与 fileName/content/filePath 同一
+    // 渲染批次到达（入口即递增的旧形态会在内容批次前被旧编辑器同步消费，随后的
+    // blame 复位 watch 清掉 blameOn 并作废在途响应 → 新文件静默无标注）
+    await wrapper.setProps({
+      autoBlameSeq: 2,
+      fileName: 'b.js',
+      filePath: 'D:/repo/b.js',
+      content: '新一行\n新二行\n新三行'
+    })
+    await flushPromises()
+
+    // blame 仅对新文件发起一次（旧文件零请求），标注在新编辑器上渲染
+    expect(GetFileBlame).toHaveBeenCalledTimes(1)
+    expect(GetFileBlame).toHaveBeenCalledWith('D:/repo/b.js')
+    expect(wrapper.emitted('autoBlameConsumed')).toHaveLength(1)
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(2)
+  })
 })
