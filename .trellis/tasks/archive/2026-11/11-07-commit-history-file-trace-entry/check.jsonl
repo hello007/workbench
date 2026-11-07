@@ -1,0 +1,5 @@
+{"file": "docs/spec/file-level-history.md", "reason": "检查 FileHistoryDialog 接入是否符合契约（绝对路径口径、关闭双时机、测试须真实 el-dialog stub 驱动 releaseState）"}
+{"file": "docs/spec/git-blame.md", "reason": "检查 autoBlame 是否遵守入口条件 §4（json/md/html 不自动开）、点击委托 attachTo 要求 §6、initialSha 联动语义 §5"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 CheckFileExists 绑定 wailsjs 两处同步完整性与 RPCHiddenMethods 清单（browser-channel 钩子①）"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "检查新增/修改组件是否符合 Vue 编码规范"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "检查降级分支 toast 分流是否符合异常捕获规范"}

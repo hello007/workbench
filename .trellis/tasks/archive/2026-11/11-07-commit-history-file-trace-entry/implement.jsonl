@@ -1,0 +1,6 @@
+{"file": "docs/spec/file-level-history.md", "reason": "FileHistoryDialog 契约与路径口径 §1（fileAbsPath 绝对路径、pathAtCommit 语义）；自挂先例与组件测试假绿陷阱 §6"}
+{"file": "docs/spec/git-blame.md", "reason": "blame 工作树语义 §2、入口条件 §4（json/md/html 不开 blame）、initialSha 定位联动 §5、FilePreviewRenderer 自挂 FileHistoryDialog 先例与 attachTo 假绿陷阱 §6"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 CheckFileExists 绑定的 wailsjs 同步规则（App.js/App.d.ts，bool 返回无 models.ts）；契约真相源单向"}
+{"file": "docs/spec/browser-channel.md", "reason": "CheckFileExists 为纯桌面数据面方法，须同步 RPCHiddenMethods 清单（跨期通用钩子①）"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计与编码规范（hook 强制：编写 Vue 代码前必读）"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾规范（hook 强制：降级 toast 分流须遵循）"}
