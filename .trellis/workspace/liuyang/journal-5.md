@@ -237,3 +237,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 235: 修复聚合视图工作目录刷新隐式重置选中
+
+**Date**: 2026-11-07
+**Task**: 修复聚合视图工作目录刷新隐式重置选中
+**Branch**: `master`
+
+### Summary
+
+loadDirectories 单点收口：当前选中仍存在时保留不动，不存在才回落默认→首个→清空（含目录删光清脏选中）。消除增删/重命名/设默认工作目录后刷新的隐式跳变——聚合视图下选中态与聚合模式错配（高亮跳变/clipboard 被清/快照污染），普通树下 treeKey 变化重建 el-tree。冷启动语义不变；「设为工作目录」显式退出聚合设计维持（决策 A，经用户确认）。测试：store 单测新增 5 条（3 条复现）、E2E 聚合语境用例含回滚防假绿验证，全量 2676 条单测与 file-tree 24 条 E2E 通过。temp-memory 欠账条目已出口。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6d84723` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
