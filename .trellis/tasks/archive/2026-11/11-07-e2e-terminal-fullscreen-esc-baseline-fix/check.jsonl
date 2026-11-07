@@ -1,0 +1,3 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "验证全屏 ESC 用例契约面未被破坏：过滤规则、z-index、监听随态挂载卸载断言语义"}
+{"file": "docs/spec/e2e-testing.md", "reason": "验收用例改动符合 E2E 规范（语义锚、相对基线注释、无 waitForTimeout）"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "验收新增单测分层正确（jsdom 可测的注册/注销生命周期不推给 E2E）"}

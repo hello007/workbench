@@ -1,0 +1,5 @@
+{"file": "docs/spec/terminal-multi-session.md", "reason": "终端全屏 ESC 过滤链契约（用例验证对象）；全屏 z-index 1500、监听随态挂载卸载语义，注释更新须对齐"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 契约：语义锚定位、toPass 重试、mock 单一数据源；改 terminal-tabs.spec.js 须遵循"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "FolderTree.vue 监听生命周期改造遵循 Vue 组件编码规范"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端单测（FolderTree.spec.js）与 E2E 分层策略，新增监听生命周期用例须对齐"}
+{"file": "docs/spec/assets-management.md", "reason": "FolderTree 属素材管理域组件，右键菜单契约参考（本任务不改菜单命令面，仅改监听挂载时机）"}
