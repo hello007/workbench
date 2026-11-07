@@ -1,0 +1,6 @@
+{"file": "docs/spec/branch-compare.md", "reason": "检查 git 调用是否带 UTF-8 -c 前缀与 %x00/%x01 分隔符，中文文件名无乱码"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs 三处（App.js/App.d.ts/models.ts）是否与 Go 侧签名同步，npm run build 无 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查前后端测试覆盖是否达分层门禁基线"}
+{"file": "docs/spec/perf-baseline.md", "reason": "检查 FileDiffDialog 关闭释放双时机与弹窗状态复位是否遵循 §16.5 契约"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "检查前端错误分流（AppError → ErrorFormatter → handleError）与降级展示"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "检查新组件 Vue 3 设计规范（事件监听闭包注销、卸载复位加载态）"}

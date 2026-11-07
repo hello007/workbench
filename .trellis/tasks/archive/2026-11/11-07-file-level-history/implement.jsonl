@@ -1,0 +1,9 @@
+{"file": "docs/spec/branch-compare.md", "reason": "git log --follow 中文文件名/提交信息调用须自带 UTF-8 -c 前缀与 %x00/%x01 分隔符规范（GitCommand 不默认带）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法 GetFileCommitHistory 与 model 导出 struct 须手动同步 wailsjs 三处（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/perf-baseline.md", "reason": "FileDiffDialog 复用的关闭释放双时机契约（§16.5）与列表分页性能约束"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端 slog 日志规范与错误码三处同步（app_error.go + error.js）；AppError 经 ErrorFormatter → handleError 分流"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "若新增 service 层文件须核对 AppServices 装配规则（字段 + 构造行两处）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前后端测试覆盖率分层门禁基线（service ≥76%、前端 ≥70% 硬失败）"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "FileHistoryDialog.vue 新组件的 Vue 3 组件设计与编码规范"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端历史加载失败与 diff 打开失败的异常捕获与降级展示"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "Go 分层（app_git.go 桥接 → service → model）与依赖方向约束"}
