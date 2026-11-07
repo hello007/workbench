@@ -80,6 +80,9 @@
             @committed="onLocalChangesCommitted"
           />
         </el-tab-pane>
+        <el-tab-pane label="Stash" name="stash" lazy>
+          <GitStash :repo-path="workspaceStore.selectedNode.path" />
+        </el-tab-pane>
         <el-tab-pane label="分支" name="branches" lazy>
           <GitBranches :repo-path="workspaceStore.selectedNode.path" />
         </el-tab-pane>
@@ -486,6 +489,7 @@ import GitInfo from './GitInfo.vue'
 import CommitHistory from './CommitHistory.vue'
 import LocalChanges from './LocalChanges.vue'
 import GitBranches from './GitBranches.vue'
+import GitStash from './GitStash.vue'
 import GitTags from './GitTags.vue'
 import GitRemotes from './GitRemotes.vue'
 import GitMerge from './GitMerge.vue'

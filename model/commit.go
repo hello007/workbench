@@ -193,3 +193,30 @@ const (
 	// SubmoduleUpdateRemote 远程升级：忽略 index SHA，拉 .gitmodules 的 branch 远程最新（后须 superproject commit 指针）。
 	SubmoduleUpdateRemote SubmoduleUpdateMode = "remote"
 )
+
+// StashEntry 表示一个 stash 暂存条目（git stash list 单行解析产物）。
+type StashEntry struct {
+	// Index stash 序号（stash@{n} 的 n，0 = 最新）。
+	Index int `json:"index"`
+	// Description 条目描述：自定义 -m 描述或 git 默认文案（"WIP on ..."）。
+	Description string `json:"description"`
+	// Branch 创建条目时所在分支（自 reflog 主题解析，解析失败为空）。
+	Branch string `json:"branch"`
+	// ShortSha 基点提交短 SHA（reflog 主题冒号后段，解析失败为空）。
+	ShortSha string `json:"shortSha"`
+	// DateTime 创建时间展示串（本地时区 "2006-01-02 15:04"，解析失败为空）。
+	DateTime string `json:"dateTime"`
+	// Timestamp 创建时间 Unix 秒（解析失败为 0）。
+	Timestamp int64 `json:"timestamp"`
+}
+
+// StashApplyResult stash pop/apply 操作结果。
+// ConflictFiles 非空 = 冲突发生：git 默认保留 stash 条目（pop 亦不 drop），
+// 工作区留下未合并文件，冲突解决走「合并/变基」tab 既有链路；
+// ConflictFiles 为空 = 正常完成。
+type StashApplyResult struct {
+	// Output git 命令完整输出（stdout + stderr 合并），供前端超长展示。
+	Output string `json:"output"`
+	// ConflictFiles 冲突文件相对路径列表（porcelain 未合并态，权威判定）。
+	ConflictFiles []string `json:"conflictFiles"`
+}

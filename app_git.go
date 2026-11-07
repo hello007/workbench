@@ -985,3 +985,45 @@ func (a *App) CheckoutSubmoduleBranch(path, subPath, branch string) (string, err
 	}
 	return a.gitSvc.CheckoutSubmoduleBranch(path, subPath, branch)
 }
+
+// ListStashes 获取仓库 stash 列表（stash@{0} 最新在前；无条目返回空切片）
+func (a *App) ListStashes(path string) ([]model.StashEntry, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.ListStashes(path)
+}
+
+// StashPush 暂存工作现场到 stash（message 为空时用 git 默认文案；
+// includeUntracked 追加 -u 一并暂存未跟踪文件）
+func (a *App) StashPush(path, message string, includeUntracked bool) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.StashPush(path, message, includeUntracked)
+}
+
+// StashPop 恢复指定 stash 条目并从列表删除（冲突时 git 默认保留条目，
+// 返回 ConflictFiles 非空的结果，冲突解决走「合并/变基」tab）
+func (a *App) StashPop(path string, index int) (*model.StashApplyResult, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.StashPop(path, index)
+}
+
+// StashApply 恢复指定 stash 条目但保留在列表中（冲突语义同 StashPop）
+func (a *App) StashApply(path string, index int) (*model.StashApplyResult, error) {
+	if path == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.StashApply(path, index)
+}
+
+// StashDrop 删除指定 stash 条目
+func (a *App) StashDrop(path string, index int) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	return a.gitSvc.StashDrop(path, index)
+}

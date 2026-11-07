@@ -32,15 +32,25 @@ func NewGitCommandWithTimeout(timeout time.Duration) *GitCommand {
 	}
 }
 
-// run Git 命令统一执行实现：ctx 的超时/取消语义由调用方给定（WithTimeout 包在外层），
+// run Git 命令统一执行实现的薄壳：复用 runFull 并丢弃 stderr（绝大多数调用方
+// 只消费 stdout，注释与语义详见 runFull）。
+func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
+	stdout, _, err := g.runFull(ctx, workDir, acceptedExitCodes, args...)
+	return stdout, err
+}
+
+// runFull Git 命令统一执行实现：ctx 的超时/取消语义由调用方给定（WithTimeout 包在外层），
 // acceptedExitCodes 非 nil 时命中退出码视为正常返回。
+// 返回 stdout 与 stderr 双流：白名单命中时 stderr 仍可能携带进度/冲突详情
+// （如 git stash pop 冲突的 CONFLICT 行走 stderr），仅返回 stdout 会丢——需要
+// stderr 明细的调用方（stash 域）经 ExecuteWithCodesAndStderr 取完整形态。
 // 外部取消（ctx.Err() == context.Canceled）时错误以 %w 包装 context.Canceled，
 // 供上层 errors.Is 识别并映射为「操作已取消」；超时（DeadlineExceeded）返回
 // E_GIT_TIMEOUT 引导级 AppError（%w 包装 DeadlineExceeded 保留 errors.Is 穿透），
 // 与取消分支对称提前返回：超时被杀 exit 1 曾被退出码白名单吞为「冲突正常返回」
 // 致冲突面板假态，且被杀子进程 stderr 半截不可信，不参与锁识别（2026-09-29 收口，
 // 既有裸错误格式 `git [args] failed: <stderr>` 有意推翻，详见 docs/spec/logging-and-errors.md）。
-func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, error) {
+func (g *GitCommand) runFull(ctx context.Context, workDir string, acceptedExitCodes map[int]bool, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workDir
 	HideCommandWindow(cmd)
@@ -58,7 +68,7 @@ func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes 
 		// commit），探测仅告警不自动删（残留不能断定 stale），探测失败静默降级不影响取消返回
 		if ctx.Err() == context.Canceled {
 			warnIndexLockResidue(findIndexLockResidue(workDir, true))
-			return "", fmt.Errorf("git %v failed: %w", args, ctx.Err())
+			return "", "", fmt.Errorf("git %v failed: %w", args, ctx.Err())
 		}
 		// 超时同样 TerminateProcess 杀子进程，对称探测锁残留（置于白名单分支前：
 		// 超时被杀 exit 1 可能命中 conflictExitCodes，曾被白名单吞为「冲突正常返回」）；
@@ -66,20 +76,20 @@ func (g *GitCommand) run(ctx context.Context, workDir string, acceptedExitCodes 
 		// 也不得因被杀进程 stderr 半截内容误判为锁错误
 		if ctx.Err() == context.DeadlineExceeded {
 			warnIndexLockResidue(findIndexLockResidue(workDir, true))
-			return "", model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
+			return "", "", model.WrapAppError(model.ErrCodeGitTimeout, "Git 操作超时已终止，请重试", ctx.Err())
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok && acceptedExitCodes[exitErr.ExitCode()] {
-			return stdout.String(), nil
+			return stdout.String(), stderr.String(), nil
 		}
 		// 锁被占用错误识别为 AppError（E_GIT_LOCKED）透传前端 warning 引导，
 		// 未命中走既有裸错误路径（非锁残留错误行为逐字不变）
 		if lockErr := parseGitLockError(stderr.String()); lockErr != nil {
-			return "", lockErr
+			return "", "", lockErr
 		}
-		return "", fmt.Errorf("git %v failed: %s", args, stderr.String())
+		return "", "", fmt.Errorf("git %v failed: %s", args, stderr.String())
 	}
 
-	return stdout.String(), nil
+	return stdout.String(), stderr.String(), nil
 }
 
 // Execute 执行Git命令
@@ -113,6 +123,16 @@ func (g *GitCommand) ExecuteWithCodesWithContext(ctx context.Context, workDir st
 	ctx, cancel := context.WithTimeout(ctx, g.timeout)
 	defer cancel()
 	return g.run(ctx, workDir, acceptedExitCodes, args...)
+}
+
+// ExecuteWithCodesAndStderr 同 ExecuteWithCodes（退出码白名单语义），额外返回 stderr
+// 明细：白名单命中时 stderr 仍可能携带进度/冲突详情（如 git stash pop 冲突的
+// CONFLICT 行走 stderr），仅返回 stdout 会丢。调用方按需消费，普通执行方用
+// ExecuteWithCodes 丢弃 stderr。
+func (g *GitCommand) ExecuteWithCodesAndStderr(workDir string, acceptedExitCodes map[int]bool, args ...string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.timeout)
+	defer cancel()
+	return g.runFull(ctx, workDir, acceptedExitCodes, args...)
 }
 
 // ExecutePipeline 执行两进程 git 管道（无 shell）：first 的 stdout 经 OS 管道直连
