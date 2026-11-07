@@ -270,3 +270,36 @@ loadDirectories 单点收口：当前选中仍存在时保留不动，不存在�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 236: 看板补全工作树状态列
+
+**Date**: 2026-11-07
+**Task**: 看板补全工作树状态列
+**Branch**: `master`
+
+### Summary
+
+DashboardView 看板补全工作树状态：工作区列升级改动计数（复用 status --porcelain 同源零增量 fork）、新增最后提交时间列（相对时间，formatTime.js 新 util）、新增 stash 数列（git stash list 只读计数，stash-management 数据口径先行统一）。RepoStatus 扩 3 字段同步 wailsjs models.ts；降级矩阵覆盖 unborn/detached/Missing/单项失败。复核修复 3 处：%ct 解析失败降级缺口、E2E td.nth 假绿（改 columnIndexOf 表头解析+正向断言，沉淀 e2e-testing.md §5.3+AGENTS.md 关键规则行）、README 同步。覆盖率 service 81%/前端全指标≥80%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f843a72` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

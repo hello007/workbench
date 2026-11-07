@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 235
+- **Total Sessions**: 236
 - **Last Active**: 2026-11-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~272 | Active |
+| `journal-5.md` | ~305 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 236 | 2026-11-07 | 看板补全工作树状态列 | `f843a72` | `master` |
 | 235 | 2026-11-07 | 修复聚合视图工作目录刷新隐式重置选中 | `6d84723` | `master` |
 | 234 | 2026-11-07 | 终端全屏 ESC E2E 基线修复与 FolderTree 监听随态挂载 | `3f93162` | `master` |
 | 233 | 2026-11-07 | 活动栏 Alt+数字快捷切换与顺序自定义 | `0205ec6` | `master` |
