@@ -5,6 +5,9 @@ import "time"
 // RepoStatus 单个仓库的状态快照，供全局状态看板展示。
 // 字段语义：
 //   - Dirty：工作区有未提交改动（含未暂存/已暂存/未跟踪，git status --porcelain 非空）
+//   - DirtyCount：工作区改动条目数（同命令非空行数，untracked 目录折叠计 1；与 Dirty 同源，DirtyCount>0 等价 Dirty=true）
+//   - LastCommitUnix：最后一次提交的 committer 时间 Unix 秒（git log -1 --format=%ct）；空仓库（unborn）或查询失败置 0
+//   - StashCount：stash 条目数（git stash list 非空行数）；查询失败置 0
 //   - Ahead：本地领先上游的提交数（git rev-list --left-right --count @{u}...HEAD 右值）
 //   - Behind：本地落后上游的提交数（同命令左值）
 //   - HasUpstream：当前分支是否配置跟踪上游；false 时 Ahead/Behind 无意义置 0
@@ -21,6 +24,8 @@ type RepoStatus struct {
 	Branch string `json:"branch"`
 	// Dirty 工作区是否有未提交改动。
 	Dirty bool `json:"dirty"`
+	// DirtyCount 工作区改动条目数（git status --porcelain 非空行数，untracked 目录折叠计 1）。
+	DirtyCount int `json:"dirtyCount"`
 	// Ahead 本地领先上游的提交数。
 	Ahead int `json:"ahead"`
 	// Behind 本地落后上游的提交数。
@@ -29,6 +34,11 @@ type RepoStatus struct {
 	HasUpstream bool `json:"hasUpstream"`
 	// Detached HEAD 是否处于 detached 状态。
 	Detached bool `json:"detached"`
+	// LastCommitUnix 最后一次提交的 committer 时间 Unix 秒（git log -1 --format=%ct）；
+	// 空仓库（unborn）或查询失败置 0，前端显示「-」降级。
+	LastCommitUnix int64 `json:"lastCommitUnix"`
+	// StashCount stash 条目数（git stash list 非空行数，只读计数）；查询失败置 0。
+	StashCount int `json:"stashCount"`
 	// IsRepo 路径是否为有效 Git 仓库（false 时其余字段无意义，用于失效仓库降级展示）。
 	IsRepo bool `json:"isRepo"`
 	// Missing 路径已失效（pin 后目录被删除），前端灰显 + 失效标记，不阻塞看板。

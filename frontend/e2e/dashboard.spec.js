@@ -2,8 +2,9 @@
  * 全局状态看板 E2E（DashboardView 渲染 + 钉选互锁链，mock 驱动）。
  *
  * 覆盖四条链路：
- * 1. 状态列表渲染：GetDashboardStatuses fixture（形状对齐 model.RepoStatus）映射
- *    分支 / 工作区（dirty）/ 未推送（ahead）/ 未拉取（behind）标签列
+ * 1. 状态列表渲染：GetDashboardStatuses fixture（形状对齐 model.RepoStatus，含
+ *    dirtyCount/lastCommitUnix/stashCount 工作树三字段）映射分支 / 工作区（N 处改动）/
+ *    最后提交（相对时间）/ Stash（计数）/ 未推送（ahead）/ 未拉取（behind）标签列
  * 2. 手动刷新：圆形刷新按钮触发 GetDashboardStatuses 重拉（RefreshDashboardStatuses
  *    无前端消费方，手动刷新走 loadStatuses → GetDashboardStatuses）
  * 3. 钉选互锁：添加弹窗打开即按选中工作目录扫描（GetRepoFilterList 参数断言），
@@ -23,17 +24,21 @@ const dashboardDirs = [
   { id: 'dir-alt', name: '备用工作区', path: 'E:/repos', isDefault: false, isGitRepo: false, hasRemote: false }
 ]
 
-// 形状对齐 model.RepoStatus：两行覆盖 有改动/干净 与 ahead/behind 非零标签面
+// 形状对齐 model.RepoStatus：两行覆盖 有改动/干净 与 ahead/behind 非零标签面，
+// 含工作树三字段（dirtyCount / lastCommitUnix / stashCount）
 const dashboardStatuses = [
   {
     path: 'D:/e2e-demo/demo-repo',
     name: 'demo-repo',
     branch: 'main',
     dirty: true,
+    dirtyCount: 3,
     ahead: 2,
     behind: 0,
     hasUpstream: true,
     detached: false,
+    lastCommitUnix: Math.floor(Date.now() / 1000) - 3000, // 50 分钟前 → 相对时间
+    stashCount: 5,
     isRepo: true,
     missing: false,
     error: ''
@@ -43,10 +48,13 @@ const dashboardStatuses = [
     name: 'legacy',
     branch: 'dev',
     dirty: false,
+    dirtyCount: 0,
     ahead: 0,
     behind: 3,
     hasUpstream: true,
     detached: false,
+    lastCommitUnix: Math.floor(Date.now() / 1000) - 86400 * 40, // 40 天前 → 转 zh-CN 日期
+    stashCount: 0,
     isRepo: true,
     missing: false,
     error: ''
@@ -58,6 +66,19 @@ const repoFilterItems = [
   { name: 'demo-repo', path: 'D:/e2e-demo/demo-repo', hasRemote: true, isGitRepo: true },
   { name: 'tools', path: 'D:/e2e-demo/tools', hasRemote: false, isGitRepo: true }
 ]
+
+// 按表头文本解析数据列下标（thead th 与 tbody td 同序）：列插入/调序时断言自动跟随表头，
+// 避免 td.nth 硬编码下标错位漂移（如错命中「未推送」列的 dim 0 造成假绿）
+async function columnIndexOf(table, headerText) {
+  const headers = table.locator('thead th')
+  const count = await headers.count()
+  for (let i = 0; i < count; i++) {
+    if ((await headers.nth(i).innerText()).trim() === headerText) {
+      return i
+    }
+  }
+  throw new Error(`状态表未找到表头列: ${headerText}`)
+}
 
 test.describe('全局状态看板：渲染与钉选互锁', () => {
   // IsDashboardPinned 按扫描序翻转：三次扫描（打开 / 切目录 / 加入后重开）× 2 候选 =
@@ -78,15 +99,23 @@ test.describe('全局状态看板：渲染与钉选互锁', () => {
     const view = page.locator('.dashboard-view')
     await expect(view).toBeVisible()
 
-    // 1. 状态列表渲染：两行 fixture → 分支 / 工作区 / 未推送 / 未拉取标签
+    // 1. 状态列表渲染：两行 fixture → 分支 / 工作区 / 最后提交 / Stash / 未推送 / 未拉取
     await expect(view.locator('.status-table .el-table__row')).toHaveCount(2)
+    const table = view.locator('.status-table')
+    const stashCol = await columnIndexOf(table, 'Stash')
+    const commitCol = await columnIndexOf(table, '最后提交')
     const repoRow = view.locator('.status-table .el-table__row').filter({ hasText: 'demo-repo' })
     await expect(repoRow).toContainText('main')
-    await expect(repoRow).toContainText('有改动')
+    await expect(repoRow).toContainText('3 处改动') // dirtyCount 3 → warning 工作区
+    await expect(repoRow).toContainText('50 分钟前') // lastCommitUnix 50 分钟前 → 相对时间
     await expect(repoRow).toContainText('2') // ahead 2 → danger 未推送
+    await expect(repoRow.locator('td').nth(stashCol)).toContainText('5') // Stash 列计数
     const legacyRow = view.locator('.status-table .el-table__row').filter({ hasText: 'legacy' })
     await expect(legacyRow).toContainText('干净')
     await expect(legacyRow).toContainText('3') // behind 3 → warning 未拉取
+    // 40 天前 → 转 zh-CN 日期（YYYY/M/D 含 / 分隔；相对时间「N 天前」不含 /，正断言即排除）
+    await expect(legacyRow.locator('td').nth(commitCol)).toContainText('/')
+    await expect(legacyRow.locator('td').nth(stashCol)).toContainText('0') // Stash 零值 dim 0
     await expect.poll(async () => (await getWailsCalls(page, 'GetDashboardStatuses')).length).toBe(1)
 
     // 2. 手动刷新（圆形按钮）→ GetDashboardStatuses 重拉

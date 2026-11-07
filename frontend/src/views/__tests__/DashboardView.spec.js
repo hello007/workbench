@@ -13,11 +13,13 @@ vi.mock('element-plus', async () => {
   }
 })
 
+// 形状对齐 model.RepoStatus（含工作树三字段 dirtyCount/lastCommitUnix/stashCount）
+const nowSec = Math.floor(Date.now() / 1000)
 const mockStatuses = [
-  { path: '/work/repo-a', name: 'repo-a', branch: 'master', dirty: false, ahead: 2, behind: 0, hasUpstream: true, detached: false, isRepo: true, missing: false },
-  { path: '/work/repo-b', name: 'repo-b', branch: 'feature', dirty: true, ahead: 0, behind: 1, hasUpstream: true, detached: false, isRepo: true, missing: false },
-  { path: '/work/repo-c', name: 'repo-c', branch: '', dirty: false, ahead: 0, behind: 0, hasUpstream: false, detached: true, isRepo: true, missing: false },
-  { path: '/work/repo-d', name: 'repo-d', branch: 'master', dirty: false, ahead: 0, behind: 0, hasUpstream: false, detached: false, isRepo: false, missing: true }
+  { path: '/work/repo-a', name: 'repo-a', branch: 'master', dirty: false, dirtyCount: 0, ahead: 2, behind: 0, hasUpstream: true, detached: false, isRepo: true, missing: false, lastCommitUnix: nowSec - 3000, stashCount: 0 },
+  { path: '/work/repo-b', name: 'repo-b', branch: 'feature', dirty: true, dirtyCount: 3, ahead: 0, behind: 1, hasUpstream: true, detached: false, isRepo: true, missing: false, lastCommitUnix: nowSec - 86400 * 40, stashCount: 2 },
+  { path: '/work/repo-c', name: 'repo-c', branch: '', dirty: false, dirtyCount: 0, ahead: 0, behind: 0, hasUpstream: false, detached: true, isRepo: true, missing: false, lastCommitUnix: nowSec - 7200, stashCount: 0 },
+  { path: '/work/repo-d', name: 'repo-d', branch: 'master', dirty: false, dirtyCount: 0, ahead: 0, behind: 0, hasUpstream: false, detached: false, isRepo: false, missing: true, lastCommitUnix: 0, stashCount: 0 }
 ]
 
 const mockRepos = [
@@ -67,13 +69,21 @@ const defaultStubs = {
   'el-empty': { template: '<div class="el-empty" />', props: ['description'] },
   'el-alert': { template: '<div class="el-alert"><slot /></div>', props: ['type', 'title', 'closable'] },
   'el-table': {
-    template: '<table class="el-table" :data-count="data.length" />',
+    template: '<div class="el-table" :data-count="data.length"><slot /></div>',
     props: ['data'],
-    emits: ['row-click']
+    emits: ['row-click'],
+    // 经 getter 注入行数据：statuses 为 mount 后异步加载（provide 初值空数组），
+    // getter 闭包保证列渲染读到最新 prop 值
+    provide() {
+      return { stubTableRows: () => this.data }
+    }
   },
   'el-table-column': {
-    template: '<td />',
-    props: ['label', 'width', 'minWidth', 'align']
+    // 按列渲染各行单元格（列内插槽带 row 作用域），供新列渲染断言
+    template:
+      '<span v-for="(row, i) in stubTableRows()" :key="i" class="el-table__cell" :data-col="label"><slot :row="row" /></span>',
+    props: ['label', 'width', 'minWidth', 'align'],
+    inject: { stubTableRows: { default: () => () => [] } }
   },
   'el-checkbox': {
     template: '<label class="el-checkbox"><input type="checkbox" :checked="modelValue" :disabled="disabled" @change="$emit(\'change\', $event.target.checked)" /><slot /></label>',
@@ -200,5 +210,48 @@ describe('DashboardView.vue', () => {
     const enriched = wrapper.vm.$.setupState.enrichedStatuses
     expect(enriched[0].missing).toBe(true)
     expect(enriched[0].orphaned).toBe(false)
+  })
+
+  it('工作区列：N 处改动 warning / 干净 success / 失效仓库降级「-」', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const cells = wrapper.findAll('.el-table__cell[data-col="工作区"]')
+    expect(cells).toHaveLength(4)
+    expect(cells[0].text()).toBe('干净')
+    expect(cells[0].find('.el-tag').attributes('data-type')).toBe('success')
+    // repo-b dirtyCount 3 → 「3 处改动」warning tag
+    expect(cells[1].text()).toBe('3 处改动')
+    expect(cells[1].find('.el-tag').attributes('data-type')).toBe('warning')
+    // repo-d missing → 三列均降级「-」
+    expect(cells[3].text()).toBe('-')
+  })
+
+  it('最后提交列：相对时间 / 超 30 天转日期 / 零值降级「-」+ hover 完整时间', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const cells = wrapper.findAll('.el-table__cell[data-col="最后提交"]')
+    expect(cells).toHaveLength(4)
+    // repo-a 50 分钟前（nowSec-3000）
+    expect(cells[0].text()).toBe('50 分钟前')
+    // hover title 显完整本地时间
+    expect(cells[0].find('.commit-time').attributes('title')).toMatch(/^\d{4}\/\d{1,2}\/\d{1,2}/)
+    // repo-b 40 天前 → 转 zh-CN 日期展示
+    expect(cells[1].text()).toMatch(/^\d{4}\/\d{1,2}\/\d{1,2}$/)
+    // repo-c 2 小时前
+    expect(cells[2].text()).toBe('2 小时前')
+    // repo-d lastCommitUnix=0（missing/unborn 形态）→ 「-」
+    expect(cells[3].text()).toBe('-')
+  })
+
+  it('Stash 列：计数 warning tag / 零值 0 / 失效仓库「-」', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const cells = wrapper.findAll('.el-table__cell[data-col="Stash"]')
+    expect(cells).toHaveLength(4)
+    expect(cells[0].text()).toBe('0')
+    // repo-b stashCount 2 → warning tag 计数
+    expect(cells[1].text()).toBe('2')
+    expect(cells[1].find('.el-tag').attributes('data-type')).toBe('warning')
+    expect(cells[3].text()).toBe('-')
   })
 })

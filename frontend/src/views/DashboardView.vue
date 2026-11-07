@@ -34,10 +34,28 @@
             <span v-else class="dim">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="工作区" width="90" align="center">
+        <el-table-column label="工作区" width="110" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.dirty" size="small" type="warning">有改动</el-tag>
-            <el-tag v-else size="small" type="success">干净</el-tag>
+            <el-tag v-if="row.isRepo && row.dirty" size="small" type="warning">{{ row.dirtyCount }} 处改动</el-tag>
+            <el-tag v-else-if="row.isRepo" size="small" type="success">干净</el-tag>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最后提交" width="110" align="center">
+          <template #default="{ row }">
+            <span
+              v-if="row.lastCommitUnix > 0"
+              class="commit-time"
+              :title="formatFullTime(row.lastCommitUnix)"
+            >{{ formatRelativeTime(row.lastCommitUnix) }}</span>
+            <span v-else class="dim">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Stash" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.isRepo && row.stashCount > 0" size="small" type="warning">{{ row.stashCount }}</el-tag>
+            <span v-else-if="row.isRepo" class="dim">0</span>
+            <span v-else class="dim">-</span>
           </template>
         </el-table-column>
         <el-table-column label="未推送" width="90" align="center">
@@ -126,6 +144,7 @@ import {
 import { useDirectoryStore } from '../store'
 import { handleError } from '../utils/error'
 import { belongsToDir } from '../utils/pathMatch'
+import { formatRelativeTime, formatFullTime } from '../utils/formatTime'
 
 const emit = defineEmits(['locate'])
 
@@ -345,6 +364,12 @@ defineExpose({ loadStatuses })
 
 .dim {
   color: var(--text-placeholder);
+}
+
+.commit-time {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: default;
 }
 
 /* 异常提示卡片化 — 替代默认 el-alert 平铺 */

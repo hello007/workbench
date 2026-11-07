@@ -73,6 +73,17 @@
 
 新增面板时需扩展语义属性总览用例的 ID 数组，并**新增对应的高亮/点击用例**（既有用例零改动，但新面板无现成用例可复用）。
 
+### 5.3 表格列断言按表头解析列下标（2026-11-07）
+
+el-table 类表格断言**禁硬编码 `td.nth(n)` 列下标**，先例辅助：`frontend/e2e/dashboard.spec.js` 的 `columnIndexOf(table, headerText)`——读表头行文本数组按 `indexOf(headerText)` 解析列下标，再用 `row.locator('td').nth(idx)` 取单元格；列增删自动跟随，既有用例零改动。
+
+**假绿机理**（看板先例，2026-11-07 复核发现）：看板表格新增「最后提交」列后，原 `td.nth(4)` 静默漂移命中「未推送」列——该列对 legacy 行渲染 dim `0`（ahead=0），与目标列零值形态恰好同文本，内容断言恒过；叠加弱负断言（`not.toContainText('天前')`）错位后同样恒过，双重掩盖。即：**列下标漂移 + 零值形态文本撞车 + 负断言无守卫力**，三者叠加构成成片假绿。
+
+**守卫契约**：
+
+- 列断言一律经表头文本解析下标（`columnIndexOf` 单点），禁散写 `td.nth(n)`；
+- 弱负断言（`not.toContainText(...)`）不具守卫力，定位类断言须用正向内容断言（先例：日期列断 `toContainText('/')`——zh-CN 日期含分隔符而相对时间不含）。
+
 ## 6. per-test 覆盖（wailsOverrides）
 
 - 默认所有用例从 `./fixtures` import `{ test, expect }`（非 `@playwright/test`），自动注入 mock

@@ -169,6 +169,9 @@ func (s *DashboardService) GetStatuses() []model.RepoStatus {
 // 失效路径标 Missing + IsRepo=false；非仓库标 IsRepo=false；detached HEAD 标 Detached。
 // ahead/behind 用 git rev-list --left-right --count @{u}...HEAD 基于本地远程引用计算，
 // 无上游时 HasUpstream=false 且 Ahead/Behind 置 0（不报错降级）。
+// 工作树三项指标：DirtyCount 与 Dirty 同源（同一 git status --porcelain 调用按行计数）；
+// LastCommitUnix 取 git log -1 --format=%ct，空仓库（unborn）属正常状态置 0 不记错；
+// StashCount 取 git stash list 行数。单项失败置零值 + Error 记录（非致命降级，不阻塞整行）。
 func (s *DashboardService) ComputeRepoStatus(repoPath string) model.RepoStatus {
 	name := filepath.Base(repoPath)
 	status := model.RepoStatus{
@@ -223,17 +226,63 @@ func (s *DashboardService) ComputeRepoStatus(repoPath string) model.RepoStatus {
 		// 无上游时 HasUpstream=false（默认零值），Ahead/Behind 保持 0
 	}
 
-	// dirty 检测：git status --porcelain 非空即 dirty（比 GetLocalChanges 轻，不解析文件列表）
+	// dirty 检测 + 改动计数：git status --porcelain 非空即 dirty（比 GetLocalChanges 轻，
+	// 不解析文件列表），同一次调用按非空行计数（untracked 目录折叠计 1 条），零增量 fork；
+	// DirtyCount>0 与 Dirty=true 语义等价
 	output, err := s.gitCmd.Execute(gitRoot, "status", "--porcelain")
 	if err != nil {
 		if status.Error == "" {
 			status.Error = fmt.Sprintf("检测工作区状态失败: %v", err)
 		}
 	} else {
-		status.Dirty = strings.TrimSpace(output) != ""
+		status.DirtyCount = countNonEmptyLines(output)
+		status.Dirty = status.DirtyCount > 0
+	}
+
+	// 最后提交时间：git log -1 --format=%ct（committer 时间 Unix 秒）。
+	// 空仓库（unborn，无任何 commit）该命令必然失败，属正常状态：置 0 不记错误；
+	// 其余失败非致命降级置 0 + Error 记录（不阻塞整行）。unborn 判定走 util.ResolveHead
+	// 单点（go-git 出清契约），仅在 log 失败分支追加一次调用，正常路径零增量
+	if out, logErr := s.gitCmd.Execute(gitRoot, "log", "-1", "--format=%ct"); logErr != nil {
+		if head, herr := util.ResolveHead(gitRoot); herr != nil || !head.Unborn {
+			if status.Error == "" {
+				status.Error = fmt.Sprintf("获取最后提交时间失败: %v", logErr)
+			}
+		}
+	} else {
+		sec, perr := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+		if perr != nil {
+			// 输出解析失败同样是「最后提交时间项失败」：置零值 + Error 记录，与其他单项降级同口径
+			if status.Error == "" {
+				status.Error = fmt.Sprintf("解析最后提交时间失败: %v", perr)
+			}
+		} else {
+			status.LastCommitUnix = sec
+		}
+	}
+
+	// stash 计数：git stash list 非空行数（只读计数，不解析条目）；失败非致命降级置 0 + Error 记录
+	if out, stashErr := s.gitCmd.Execute(gitRoot, "stash", "list"); stashErr != nil {
+		if status.Error == "" {
+			status.Error = fmt.Sprintf("查询 stash 列表失败: %v", stashErr)
+		}
+	} else {
+		status.StashCount = countNonEmptyLines(out)
 	}
 
 	return status
+}
+
+// countNonEmptyLines 统计 git 命令输出中 TrimSpace 后非空的行数（行计数口径单点，
+// dirty 计数与 stash 计数共用，尾部换行/空行不计）。
+func countNonEmptyLines(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 // ComputeAheadBehind 计算当前分支相对上游跟踪分支的 ahead/behind（含上游探测）。
