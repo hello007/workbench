@@ -1,0 +1,5 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "RepoStatus 新增导出字段须手动同步 frontend/wailsjs/go/models.ts，契约同步规则真相源"}
+{"file": "docs/spec/go-git-deprecation.md", "reason": "新增 git log/stash list 只读调用的实现规范，禁 go-git"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "单项 git 调用失败的降级 Warn 模式与 Error 字段语义"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "DashboardView 列渲染扩展的 Vue 3 组件规范"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "前后端接口契约规范（model struct 扩字段流程）"}

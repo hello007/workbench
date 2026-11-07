@@ -1,0 +1,3 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs models.ts 三处同步无遗漏、无 MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 service ≥76% 与前端 ≥70% 覆盖率门禁"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "核对前端 handleError 分流与降级展示"}
