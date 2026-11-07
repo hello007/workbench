@@ -303,3 +303,36 @@ DashboardView 看板补全工作树状态：工作区列升级改动计数（复
 ### Next Steps
 
 - None - task complete
+
+
+## Session 237: Stash 管理（repo-management-ux 子任务 2/3）
+
+**Date**: 2026-11-07
+**Task**: Stash 管理（repo-management-ux 子任务 2/3）
+**Branch**: `master`
+
+### Summary
+
+Git 签页新增 Stash tab：service/git_stash.go（list/push/pop/apply/drop，变更类同 Commit 先例 tryLockRepo 不注册取消）；util 新增 ExecuteWithCodesAndStderr（run 抽 runFull 收口，exit 1 白名单 + stderr 双流）；pop/apply 冲突判定走 porcelain 未合并八态、冲突态正常返回 ConflictFiles 零新增错误码；前端 GitStash.vue（GitBranches 模式）+ ContentPanel tab；service 19 用例 + 组件测试 15 用例全绿，branch E2E 6/6；spec 沉淀 stash-management.md + AGENTS.md 规则行（249 字符）；check 修复 unmergedFiles 缺 UTF-8 前缀（中文名冲突清单会坏）。遗留：父任务还剩 11-07-file-level-history（planning）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c0247ab` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
