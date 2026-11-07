@@ -216,6 +216,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |http(s) 外链打开唯一出口 runtime.BrowserOpenURL（出口内前置校验非 http(s) 不打开），禁 window.open/location.href（Wails WebView2 下内嵌导航不经系统 shell）；serve 桥属出口实现豁免；先例 AiChatPanel/GitInfo/FilePreviewRenderer/useTerminal|[url-opening.md](docs/spec/url-opening.md)|
 |提交前强制同步：`git fetch origin` → `git rebase origin/master`（未提交改动先 stash/提交），冲突 `git add` + `git rebase --continue`；禁 merge 提交、禁对共享 master `--force`；推送被拒重跑 fetch+rebase；origin=GitHub SSH|[开发规范.md §Git 提交规范](docs/开发规范.md#git-提交规范)|
 |聚合视图：根层 `GetAggregatedRootNodes`（`RPCHiddenMethods`）；文件收藏跳过；失效 Missing（`isLeaf=true`+同步`deepCopyNode`）；状态 key `treeState:__aggregated__`；筛选无目录回退、回溯最长前缀；相对/引用基准单点 `relativePathBase`=所属收藏根；空白区仅刷新/粘贴；收藏变更 watch 去抖代次；根刷新清徽标重建；选工作目录=退出聚合(`onDirectorySelect`)+序号守卫；失效提示 `MISSING_FAVORITE_HINT`|[aggregated-workspace.md](docs/spec/aggregated-workspace.md)|
+|文件级历史（--follow）：git 调用须 `:(literal)` pathspec（文件名可含 glob 元字符）+ utf8Prefix + %x00/%x01；diff 查看 file 恒取 `pathAtCommit`（旧段路径漂移）；入口仅文件节点（目录禁入，聚合恒显示后端兜底）；弹窗关闭双时机 @closed + loadSeq 守卫|[file-level-history.md](docs/spec/file-level-history.md)|
 ## 5. 项目长期记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

@@ -1,0 +1,237 @@
+<template>
+  <el-dialog
+    :model-value="modelValue"
+    :title="dialogTitle"
+    width="720px"
+    destroy-on-close
+    @update:model-value="onVisibleChange"
+    @closed="releaseState"
+  >
+    <div v-loading="loading" class="file-history-body">
+      <div v-if="commits.length > 0" class="history-list">
+        <div
+          v-for="commit in commits"
+          :key="commit.sha"
+          class="history-row"
+          data-action="file-history-row"
+          @click="openDiff(commit)"
+        >
+          <div class="history-main">
+            <div class="history-message" :title="commit.message">{{ firstLine(commit.message) }}</div>
+            <div class="history-meta">
+              <el-text size="small" class="history-sha">{{ commit.shortSha }}</el-text>
+              <el-text size="small" type="info">{{ commit.author }}</el-text>
+              <el-text size="small" type="info">{{ commit.dateTime }}</el-text>
+              <!-- 重命名检出标记：tooltip 展示 old → new（--follow 历史中该提交改了文件名） -->
+              <el-tooltip
+                v-if="commit.renameFrom"
+                :content="`重命名：${commit.renameFrom} → ${commit.renameTo}`"
+                placement="top"
+              >
+                <el-tag size="small" type="warning" class="history-rename-tag">R</el-tag>
+              </el-tooltip>
+            </div>
+          </div>
+          <el-icon class="history-arrow"><ArrowRight /></el-icon>
+        </div>
+
+        <div v-if="hasMore" class="history-more">
+          <el-button
+            size="small"
+            text
+            type="primary"
+            data-action="file-history-load-more"
+            :loading="loadingMore"
+            @click="loadHistory(false)"
+          >加载更多</el-button>
+        </div>
+      </div>
+
+      <el-empty
+        v-else-if="!loading"
+        description="该文件暂无提交历史"
+        :image-size="64"
+      />
+    </div>
+  </el-dialog>
+
+  <!-- 单提交单文件 diff：file 用该提交时刻路径（pathAtCommit），--follow 旧段才能取到变更 -->
+  <FileDiffDialog
+    v-model="diffVisible"
+    mode="commit"
+    :repo-path="repoPath"
+    :sha="diffSha"
+    :file="diffFile"
+  />
+</template>
+
+<script setup>
+import { ref, computed, watch } from 'vue'
+import { ArrowRight } from '@element-plus/icons-vue'
+import { GetFileCommitHistory } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
+import FileDiffDialog from './FileDiffDialog.vue'
+
+const props = defineProps({
+  modelValue: { type: Boolean, default: false },
+  // 工作目录绝对路径（定位仓库根，供内嵌 diff 弹窗复用）
+  repoPath: { type: String, required: true },
+  // 目标文件绝对路径（后端定位仓库根并换算仓库相对路径）
+  fileAbsPath: { type: String, default: '' }
+})
+
+const PAGE_SIZE = 20
+
+const emits = defineEmits(['update:modelValue'])
+
+const commits = ref([])
+const loading = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(false)
+
+// 内嵌单提交 diff 弹窗状态
+const diffVisible = ref(false)
+const diffSha = ref('')
+const diffFile = ref('')
+
+const dialogTitle = computed(() => {
+  const name = props.fileAbsPath ? props.fileAbsPath.split(/[\\/]/).pop() : ''
+  return name ? `文件历史 — ${name}` : '文件历史'
+})
+
+const firstLine = (message) => (message || '').split('\n')[0]
+
+// 在途响应代次守卫（perf-baseline.md §16.5 第二时机）：关闭即时失效在途响应，
+// 防渐隐期 loadMore 响应写回已清空的列表 / 干扰重开弹窗的加载态
+let loadSeq = 0
+
+const loadHistory = async (reset = true) => {
+  if (!props.fileAbsPath) return
+  const seq = ++loadSeq
+  if (reset) {
+    loading.value = true
+  } else {
+    loadingMore.value = true
+  }
+
+  try {
+    const offset = reset ? 0 : commits.value.length
+    const page = await GetFileCommitHistory(props.fileAbsPath, PAGE_SIZE, offset)
+    if (seq !== loadSeq) return // 关闭/重开后已过期，丢弃写回
+    if (reset) {
+      commits.value = page || []
+    } else {
+      commits.value.push(...(page || []))
+    }
+    // 与仓库级 CommitHistory 同语义：返回满页即视为还有下一页
+    hasMore.value = !!page && page.length === PAGE_SIZE
+  } catch (error) {
+    if (seq !== loadSeq) return // 过期响应的失败不再提示
+    handleError('加载文件历史失败', error)
+  } finally {
+    if (seq === loadSeq) {
+      loading.value = false
+      loadingMore.value = false
+    }
+  }
+}
+
+// 弹窗打开即拉取首页（watch 驱动，父组件仅切 visible 不触碰数据面）；
+// immediate 覆盖「以 visible=true 初始挂载」的形态（重挂载残留开启态也正常拉取）；
+// 关闭分支即时失效在途响应（@closed 渐隐结束才清数据，在途写回必须更早丢弃）
+watch(
+  () => props.modelValue,
+  (visible) => {
+    if (visible) loadHistory(true)
+    else loadSeq++
+  },
+  { immediate: true }
+)
+
+const openDiff = (commit) => {
+  diffSha.value = commit.sha
+  diffFile.value = commit.pathAtCommit
+  diffVisible.value = true
+}
+
+const onVisibleChange = (visible) => emits('update:modelValue', visible)
+
+// 关闭收尾（@closed 渐隐结束后）：清列表与加载态，防上次文件的历史滞留到下次打开
+const releaseState = () => {
+  commits.value = []
+  hasMore.value = false
+  loading.value = false
+  loadingMore.value = false
+  diffVisible.value = false
+  diffSha.value = ''
+  diffFile.value = ''
+}
+</script>
+
+<style scoped>
+.file-history-body {
+  min-height: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.history-row:hover {
+  background-color: var(--el-fill-color-light);
+}
+
+.history-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-message {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.history-sha {
+  font-family: monospace;
+  color: var(--el-color-primary);
+}
+
+.history-rename-tag {
+  cursor: default;
+}
+
+.history-arrow {
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.history-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+</style>

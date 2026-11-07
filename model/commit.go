@@ -12,6 +12,27 @@ type Commit struct {
 	Files     []string `json:"files"`     // 变更的文件路径列表
 }
 
+// FileCommit 文件级提交记录（git log --follow 单文件演进史）。与仓库级 Commit
+// 独立成契约：文件级历史无 Files 列表（恒为同一文件），新增重命名检出与该提交
+// 时刻路径两个字段，供前端 rename 标记与 diff 查看定位。
+type FileCommit struct {
+	SHA       string `json:"sha"`       // 完整的 40 位 SHA
+	ShortSHA  string `json:"shortSha"`  // 前 8 位 SHA，用于显示
+	Message   string `json:"message"`   // 提交消息
+	Author    string `json:"author"`    // 作者名称
+	Email     string `json:"email"`     // 作者邮箱
+	Timestamp int64  `json:"timestamp"` // Unix 时间戳
+	DateTime  string `json:"dateTime"`  // 格式化的时间字符串
+	// PathAtCommit 该提交之后文件的仓库相对路径（--follow 历史中随重命名逐段变化；
+	// rename 提交取新路径）。供 diff 查看的 pathspec（GetCommitFileDiff 以相对
+	// gitRoot 路径过滤，绝对路径或旧路径会取不到 rename 提交与旧段提交的变更）。
+	PathAtCommit string `json:"pathAtCommit"`
+	// RenameFrom 非空表示该提交重命名/复制了目标文件（--name-status R/C 行），
+	// 值为变更前路径；RenameTo 为变更后路径。
+	RenameFrom string `json:"renameFrom,omitempty"`
+	RenameTo   string `json:"renameTo,omitempty"`
+}
+
 // CommitFilter 提交历史服务端过滤条件，各字段组合语义为 AND，空字段表示该维度不参与过滤。
 type CommitFilter struct {
 	Author   string `json:"author,omitempty"`   // 作者 Name+Email 子串匹配（大小写不敏感）

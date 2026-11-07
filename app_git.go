@@ -1027,3 +1027,13 @@ func (a *App) StashDrop(path string, index int) error {
 	}
 	return a.gitSvc.StashDrop(path, index)
 }
+
+// GetFileCommitHistory 获取单文件提交历史（git log --follow 跨重命名追溯，倒序）。
+// fileAbsPath 为文件绝对路径（文件树右键直传节点路径，内部定位仓库根并换算
+// 仓库相对路径）；返回分页窗口，rename 提交带 RenameFrom/RenameTo 检出。
+func (a *App) GetFileCommitHistory(fileAbsPath string, limit, offset int) ([]model.FileCommit, error) {
+	if fileAbsPath == "" {
+		return nil, fmt.Errorf("文件路径不能为空")
+	}
+	return a.gitSvc.GetFileCommitHistory(fileAbsPath, limit, offset)
+}

@@ -474,6 +474,14 @@
         <li v-if="isPptxFile(contextMenu.data)" class="context-menu-item" @click="onMenuCommand('splitPptx')">
           <el-icon><Files /></el-icon>按页拆分
         </li>
+        <!-- 查看历史（git 域）：--follow 追溯单文件演进史含重命名。仅文件节点
+             （PRD 决策：目录入口不做，--follow 仅支持单一路径）；普通模式按工作目录
+             判定仓库归属；聚合模式收藏根多为仓库且无廉价单文件归属判定，恒显示，
+             非 git 目录点击后由后端 FindGitRoot 失败提示兜底 -->
+        <li v-if="fileHistoryAvailable" class="context-menu-item" data-action="file-history" @click="onMenuCommand('fileHistory')">
+          <el-icon><Clock /></el-icon>查看历史
+        </li>
+        <li class="context-menu-divider" />
         <li class="context-menu-item" @click="onMenuCommand('refresh')">
           <el-icon><Refresh /></el-icon>刷新
           <span class="context-menu-shortcut">F5</span>
@@ -487,6 +495,13 @@
         </li>
       </template>
     </ul>
+
+    <!-- 文件历史弹窗（文件右键「查看历史」）：--follow 追溯单文件演进史含重命名 -->
+    <FileHistoryDialog
+      v-model="fileHistoryVisible"
+      :repo-path="fileHistoryPath"
+      :file-abs-path="fileHistoryPath"
+    />
   </div>
 </template>
 
@@ -514,7 +529,8 @@ import {
   DataBoard,
   ChatDotRound,
   MoreFilled,
-  Files
+  Files,
+  Clock
 } from '@element-plus/icons-vue'
 import { debug } from '../utils/debug'
 import { getIconForFile } from '../utils/fileIconMap'
@@ -546,6 +562,7 @@ import {
   SplitPptxPerPage
 } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
+import FileHistoryDialog from './FileHistoryDialog.vue'
 import obsidianIcon from '../assets/icons/obsidian.png'
 import explorerIcon from '../assets/icons/explorer.png'
 import vscodeIcon from '../assets/icons/vscode.ico'
@@ -1644,8 +1661,31 @@ const onMenuCommand = (command) => {
     case 'splitPptx':
       handleSplitPptx(data)
       break
+    case 'fileHistory':
+      openFileHistory(data)
+      break
   }
 }
+
+// ---- 文件历史弹窗 ----
+// fileAbsPath 传节点绝对路径：后端 GetFileCommitHistory 以其定位仓库根并换算
+// 仓库相对路径，repoPath 同值透传（内嵌 diff 弹窗经 FindGitRoot 消化，容忍文件路径）
+const fileHistoryVisible = ref(false)
+const fileHistoryPath = ref('')
+
+const openFileHistory = (data) => {
+  fileHistoryPath.value = data.path
+  fileHistoryVisible.value = true
+}
+
+// 文件分支「查看历史」显示条件：仅文件节点（目录入口不做，--follow 仅支持单一路径）；
+// git 归属为近似判定：普通模式按当前工作目录 isGitRepo（复用 blankAreaIsGitRepo）；
+// 聚合模式恒显示（见菜单项处注释）
+const fileHistoryAvailable = computed(() => {
+  if (contextMenu.data?.type !== 'file') return false
+  if (aggregatedMode.value) return true
+  return blankAreaIsGitRepo.value
+})
 
 // 跳转仓库统计：设选中节点为右键目录并切统计面板，
 // StatsView 读 selectedNode.path 加载统计（先设节点后切面板触发 watch 链）。
