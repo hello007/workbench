@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "model.StashEntry 新增导出 struct 与 App 方法须手动同步 wailsjs 三处（App.js/App.d.ts/models.ts），具名类型须补 models.ts 别名"}
+{"file": "docs/spec/branch-compare.md", "reason": "stash list/stash push 描述含中文，git 调用须自带 UTF-8 -c 前缀与 %x00/%x01 分隔符规范"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "Push/Pop/Apply/Drop 取消链路（ExecuteWithContext ctx 变体 + registerCancel LIFO + mapCancelError → E_GIT_CANCELLED）与 slog 日志规范"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 StashService 须在 app_services.go 加字段 + 构造行两处装配"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "pop/drop 破坏性操作 ElMessageBox.confirm 形态规范"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "GitStash.vue 新组件的 Vue 3 组件设计与编码规范"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端 stash 操作错误分流与降级展示（AppError 经 ErrorFormatter → handleError）"}

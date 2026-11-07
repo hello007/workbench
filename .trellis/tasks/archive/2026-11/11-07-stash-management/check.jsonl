@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步无遗漏、model.StashEntry 别名无 MISSING_EXPORT"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对取消链路（ctx 变体 + E_GIT_CANCELLED）与 pop 冲突 stash 保留语义的错误呈现"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "核对 pop/drop confirm 形态与 EP 实例驻留相关测试写法"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 service ≥76% 与前端 ≥70% 覆盖率门禁"}
