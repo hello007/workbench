@@ -171,3 +171,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 233: 活动栏 Alt+数字快捷切换与顺序自定义
+
+**Date**: 2026-11-07
+**Task**: 活动栏 Alt+数字快捷切换与顺序自定义
+**Branch**: `master`
+
+### Summary
+
+活动栏 8 面板支持 Alt+1..8 按当前顺序切换（终端/输入框/对话框焦点防护，超 8 放行）；面板 tooltip 带编号提示；设置「快捷键」分区新增侧边栏顺序调整（上移/下移/恢复默认，即时生效）。AppSettings 增 SidebarOrder 标量切片（纯存储，前端 normalizeSidebarOrder 归一化：滤未知/补缺失/去重/空值回退默认）；store 增 SIDEBAR_PANELS 真相源 + orderedPanels computed，ActivityBar/Home/SettingsPanel 三处消费同一顺序。单测 +17 例（settings/ActivityBar/Home/SettingsPanel 四 spec），E2E 新增 sidebar-shortcuts.spec 5 例（含键盘挂载竞态 §6.1 处理与磁盘顺序恢复链路），wailsjs models.ts 已重新生成，README 已更新。已知既有失败：terminal-tabs.spec.js:153 全屏 ESC 用例 master 上即失败（stash 对照实验确认，与本任务无关），待另开任务排查。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0205ec6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
