@@ -402,3 +402,36 @@ Git 追溯闭环补全：文件树右键「查看历史」→ git log --follow �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 240: 提交历史→文件级追溯入口衔接
+
+**Date**: 2026-11-07
+**Task**: 提交历史→文件级追溯入口衔接
+**Branch**: `master`
+
+### Summary
+
+CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组头）右键新增「查看文件历史/行归属」入口：useTraceBlame 单点分流（CheckFileExists 存在性+类型预判，降级恒转 FileHistoryDialog 带 initialSha 不断链）；uiStore 追溯信箱→Home onNodeSelect→previewFile→FilePreviewRenderer autoBlameSeq 自动开启 blame。check 阶段修复 P0 竞态（autoBlameSeq 须与 filePreview 赋值同批）与 FileDiffDialog↔FileHistoryDialog 环形引用栈溢出（互嵌挂载点 v-if 外控）；新增 CheckFileExists 绑定（RPCHiddenMethods 同步）。前端 2754 用例/go 全量/build 三端绿；spec 沉淀 file-level-history §7、git-blame §8、browser-channel §2.2、AGENTS.md 关键规则行 v2.49
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `01736d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

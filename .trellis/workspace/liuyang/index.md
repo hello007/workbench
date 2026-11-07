@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 239
+- **Total Sessions**: 240
 - **Last Active**: 2026-11-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~404 | Active |
+| `journal-5.md` | ~437 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 240 | 2026-11-07 | 提交历史→文件级追溯入口衔接 | `01736d3` | `master` |
 | 239 | 2026-11-07 | 行级归属追溯（git blame） | `e9d4c21` | `master` |
 | 238 | 2026-11-07 | 文件级提交历史（--follow 跨重命名追溯） | `b88d0be` | `master` |
 | 237 | 2026-11-07 | Stash 管理（repo-management-ux 子任务 2/3） | `c0247ab` | `master` |
