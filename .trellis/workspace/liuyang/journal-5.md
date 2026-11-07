@@ -204,3 +204,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 234: 终端全屏 ESC E2E 基线修复与 FolderTree 监听随态挂载
+
+**Date**: 2026-11-07
+**Task**: 终端全屏 ESC E2E 基线修复与 FolderTree 监听随态挂载
+**Branch**: `master`
+
+### Summary
+
+排查 terminal-tabs.spec.js:153 既有失败：根因为 ddd0807 给 FolderTree 引入 window 级菜单监听（AssetsPanel v-show 常驻挂载，页面加载期即注册）致绝对基线断言 toBe(0) 过时——非 hook 误计数、非组件缺陷。修复 A+B：用例删除绝对断言改相对增量基线；FolderTree 右键菜单 4 个 window 监听改为菜单打开期注册/关闭注销+卸载兜底。补 5 条监听生命周期单测，顺带修复测试基建两 gotcha（enableAutoUnmount 实例泄漏、attachTo 游离 DOM 传播盲区）。沉淀 e2e-testing.md §12 + AGENTS.md 关键规则行（v2.47）。验证：terminal-tabs 4/4、npm test 2671/2671、e2e 138/138
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f93162` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

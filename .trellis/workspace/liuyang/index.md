@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 233
+- **Total Sessions**: 234
 - **Last Active**: 2026-11-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~206 | Active |
+| `journal-5.md` | ~239 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 234 | 2026-11-07 | 终端全屏 ESC E2E 基线修复与 FolderTree 监听随态挂载 | `3f93162` | `master` |
 | 233 | 2026-11-07 | 活动栏 Alt+数字快捷切换与顺序自定义 | `0205ec6` | `master` |
 | 232 | 2026-11-06 | docs 全量校验与修正 | `22221c5` | `master` |
 | 231 | 2026-11-06 | README 美化与内容校正 | `a8b629c` | `master` |
