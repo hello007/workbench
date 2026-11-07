@@ -369,3 +369,36 @@ Git 追溯闭环补全：文件树右键「查看历史」→ git log --follow �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 239: 行级归属追溯（git blame）
+
+**Date**: 2026-11-07
+**Task**: 行级归属追溯（git blame）
+**Branch**: `master`
+
+### Summary
+
+代码预览行级归属：后端 GetFileBlame（git blame --porcelain 工作树 blame，状态机解析 fail-fast/fail-soft 分层，>10000 行 E_BLAME_FILE_TOO_LARGE 降级）；前端右键行归属开关 + CodeMirror 行尾标注（Compartment 重配不重建编辑器）+ 零 SHA 未提交禁跳转 + 行数守卫；FileHistoryDialog 新增 initialSha 定位扫描（上限 500 条）。实现期证伪三假设：blame 路径为字面路径禁 :(literal)（与 log 域相反）、author-time/author-tz 分行、未跟踪文件 fatal 走错误矩阵。trellis-check 修复 6 处含双实例 document 委托互串真实 bug（RepoFilterDialog 同挂 renderer）。service 覆盖率 81.2%、前端 2721 用例全绿；契约沉淀 docs/spec/git-blame.md
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e9d4c21` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
