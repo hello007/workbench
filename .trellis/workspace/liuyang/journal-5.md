@@ -336,3 +336,36 @@ Git 签页新增 Stash tab：service/git_stash.go（list/push/pop/apply/drop，�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 238: 文件级提交历史（--follow 跨重命名追溯）
+
+**Date**: 2026-11-07
+**Task**: 文件级提交历史（--follow 跨重命名追溯）
+**Branch**: `master`
+
+### Summary
+
+Git 追溯闭环补全：文件树右键「查看历史」→ git log --follow 单文件演进史。后端 GetFileCommitHistory 绝对路径单参数自包含（FindGitRoot+Rel 换算），:(literal) pathspec 防 glob 元字符、utf8Prefix+%x00/%x01 解析 fail-soft；FileCommit.pathAtCommit 为 diff 查看 pathspec 关键（旧段路径漂移）；前端 FileHistoryDialog（watch immediate、关闭双时机 @closed+loadSeq、R 标记 tooltip、内嵌 FileDiffDialog）；service 8 + 组件 8 用例全绿；spec 沉淀 file-level-history.md + AGENTS.md 规则行 236 字符；trellis-check 修复 5 处（目录入口 PRD 违背/代次守卫缺口/3 假绿断言）。父任务 11-07-repo-management-ux 三子任务全部完成
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b88d0be` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

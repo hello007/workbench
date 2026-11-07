@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 237
+- **Total Sessions**: 238
 - **Last Active**: 2026-11-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~338 | Active |
+| `journal-5.md` | ~371 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 238 | 2026-11-07 | 文件级提交历史（--follow 跨重命名追溯） | `b88d0be` | `master` |
 | 237 | 2026-11-07 | Stash 管理（repo-management-ux 子任务 2/3） | `c0247ab` | `master` |
 | 236 | 2026-11-07 | 看板补全工作树状态列 | `f843a72` | `master` |
 | 235 | 2026-11-07 | 修复聚合视图工作目录刷新隐式重置选中 | `6d84723` | `master` |
