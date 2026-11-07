@@ -1,0 +1,12 @@
+{"file": "docs/spec/file-level-history.md", "reason": "跳转联动目标：FileHistoryDialog 契约（props/分页/关闭双时机/loadSeq 守卫）、fileAbsPath 自包含范式、:(literal) pathspec 先例、错误矩阵与测试深度参照"}
+{"file": "docs/spec/branch-compare.md", "reason": "git blame 调用须遵循 utf8Prefix + %x00/%x01 分隔范式（中文作者/消息/文件名往返）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "契约同步三处（App.js/App.d.ts/models.ts）、具名 string 类型 models.ts 别名缺失坑、组件卸载复位规则"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "slog 日志规范、新增错误码三处同步（app_error.go + error.js）、handleError 分流"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率门禁：service ≥76% / model ≥80% / 前端 ≥70%"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "行尾标注样式规范（深色容器配色语义、选中单一入口 @click 禁双绑）"}
+{"file": "docs/spec/design-tokens.md", "reason": "标注颜色须走设计令牌（蓝灰 Slate 色阶、暗色对比度）"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计与编码规范（新 UI 逻辑加入 FilePreviewRenderer 须遵循）"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾规范（blame 请求失败分流）"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "分层边界：transport 双通道收口、依赖方向单向向下"}
+{"file": "docs/spec/perf-baseline.md", "reason": "§17 跨包测试辅助 util/testutil（RunGit/WriteFile/InitTempRepo），禁各 _test.go 重复定义 git 命令/临时仓库辅助"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态（临时仓库驱动、禁固定端口/ sleep 等待）"}

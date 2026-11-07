@@ -1,0 +1,7 @@
+{"file": "docs/spec/file-level-history.md", "reason": "核对跳转联动契约：FileHistoryDialog 定位 prop、fileAbsPath 传参、关闭双时机清态"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步完整性（App.js/App.d.ts/models.ts）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对错误码三处同步与 handleError 分流、slog 无 println"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁达标（service ≥76% / model ≥80% / 前端 ≥70%）"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新测试无环境外部状态依赖（mtime/固定端口/sleep）"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "核对分层依赖方向与 transport 收口"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对标注样式：深色容器配色语义、事件绑定单一入口"}
