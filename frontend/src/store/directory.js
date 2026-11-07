@@ -23,7 +23,11 @@ export const useDirectoryStore = defineStore('directory', () => {
   })
 
   /**
-   * 加载目录列表并自动选中默认目录（或首个）
+   * 加载目录列表并选中。
+   * 当前选中仍存在时保留不动：增删/重命名/设默认/排序后的刷新（emit('change') 链）
+   * 不得隐式改写仍有效的选中——隐式跳变会造成选中态与聚合模式错配（高亮跳变、
+   * clipboard 被清、会话快照污染），普通树则触发 treeKey 变化重建 el-tree。
+   * 当前选中不存在（冷启动空串、选中目录被删、目录删光）才回落：默认目录 → 首个 → 清空。
    * GetDirectories 启动时直接返回 directories.json 持久化值（秒回）。
    */
   async function loadDirectories() {
@@ -31,12 +35,15 @@ export const useDirectoryStore = defineStore('directory', () => {
       const dirs = await GetDirectories()
       directories.value = dirs || []
 
-      // 自动选择默认目录
-      const defaultDir = dirs.find(d => d.isDefault)
+      if ((dirs || []).some(d => d.id === selectedDirectoryId.value)) return
+
+      const defaultDir = (dirs || []).find(d => d.isDefault)
       if (defaultDir) {
         selectedDirectoryId.value = defaultDir.id
       } else if (dirs.length > 0) {
         selectedDirectoryId.value = dirs[0].id
+      } else {
+        selectedDirectoryId.value = ''
       }
     } catch (error) {
       debug.log('加载目录失败:', error)

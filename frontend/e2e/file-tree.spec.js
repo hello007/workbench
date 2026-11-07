@@ -593,6 +593,60 @@ test.describe('聚合视图（虚拟工作区）', () => {
     await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toHaveCount(0)
   })
 
+  // 增删工作目录后的刷新（emit('change') → loadDirectories）不得隐式改写仍有效的
+  // 选中：修复前无条件跳默认/首个，聚合下造成选中态与聚合模式错配（高亮跳变、
+  // clipboard 被清、快照污染），普通树则触发 treeKey 变化重建 el-tree。
+  // test.use 仅 describe 级合法：注入「选中目录非首位且无默认标记」的列表，
+  // 使修复前的隐式跳变（跳到列表首个）能被高亮断言捕获。
+  test.describe('增删工作目录后聚合保持', () => {
+    // 排在首位、无默认标记：修复前 loadDirectories 刷新后会选中它（隐式跳变）
+    const SECOND_DIRECTORY = {
+      id: 'dir-e2e-second',
+      name: 'second-dir',
+      path: 'D:/e2e-demo/second-dir',
+      isDefault: false,
+      isGitRepo: false,
+      hasRemote: false
+    }
+
+    test.use({
+      wailsOverrides: {
+        ...GIT_FLOW_OVERRIDES,
+        GetDirectories: [SECOND_DIRECTORY, GIT_REPO_DIRECTORY],
+        GetFavorites: AGG_FAVORITES,
+        GetAggregatedRootNodes: AGG_ROOT_NODES
+      }
+    })
+
+    test('删除工作目录刷新列表：聚合不退出、高亮保持原选中', async ({ page }) => {
+      await openAggregatedView(page)
+
+      // 左侧 DirectoryTree 右键非选中目录 → 删除 → 单次确认弹窗（confirm-dialog
+      // 单次确认链，裸选择器安全）。mock 的 GetDirectories 为静态值：删除后刷新
+      // 返回的列表仍含两项目——选中保持判定只依赖「选中 id 是否仍在列表」，与
+      // 列表是否收缩正交，静态列表恰好隔离了列表内容因素
+      await page.locator('.dir-item', { hasText: 'second-dir' }).click({ button: 'right' })
+      const menu = page.locator('.context-menu')
+      await expect(menu).toBeVisible()
+      await menu.locator('.context-menu-item', { hasText: '删除' }).click()
+      const msgbox = page.locator('.el-message-box')
+      await expect(msgbox).toBeVisible()
+      await msgbox.getByRole('button', { name: '确定' }).click()
+
+      // 刷新确实发生（启动加载之外至少一次 emit('change') → loadDirectories）
+      const dirCalls = await getWailsCalls(page, 'GetDirectories')
+      expect(dirCalls.length).toBeGreaterThanOrEqual(2)
+
+      // 聚合未退出：收藏根层仍在、toggle 按钮文案未翻回「目录树」
+      await expect(page.locator('.el-tree-node', { hasText: '常用项目A' })).toBeVisible()
+      await expect(page.locator('[data-action="toggle-aggregated-view"]')).toHaveText('聚合视图')
+
+      // 选中未跳变：高亮仍在 demo-repo，未落到列表首位的 second-dir
+      await expect(page.locator('.dir-item--active', { hasText: 'demo-repo' })).toBeVisible()
+      await expect(page.locator('.dir-item--active', { hasText: 'second-dir' })).toHaveCount(0)
+    })
+  })
+
   test('展开收藏目录：按该目录绝对路径懒加载子节点（复用既有 GetFileTree 链路）', async ({ page }) => {
     await openAggregatedView(page)
 

@@ -82,6 +82,64 @@ describe('directory store', () => {
     })
   })
 
+  describe('loadDirectories 选中保留与回落', () => {
+    // 聚合视图下经 DirectoryTree 增删/重命名/设默认工作目录后刷新列表（emit('change')
+    // → Home.vue @change → loadDirectories），刷新不得隐式改写仍有效的选中：
+    // 隐式跳变会造成选中态与聚合模式错配（高亮跳变、clipboard 被清、快照污染），
+    // 普通树则触发 treeKey 变化重建 el-tree。重命名不改 id，与「仍存在」同构覆盖。
+    it('当前选中仍存在时保留选中（不被默认目录抢占）', async () => {
+      GetDirectories.mockResolvedValue([
+        { id: '1', isDefault: true, path: 'C:\\a' },
+        { id: '2', path: 'C:\\b' }
+      ])
+      const store = useDirectoryStore()
+      store.selectedDirectoryId = '2'
+      await store.loadDirectories()
+      expect(store.selectedDirectoryId).toBe('2')
+    })
+
+    it('列表重排后保留选中（拖拽排序保存失败重试的刷新）', async () => {
+      GetDirectories.mockResolvedValue([
+        { id: 'y', path: 'C:\\y' },
+        { id: 'x', path: 'C:\\x' }
+      ])
+      const store = useDirectoryStore()
+      store.selectedDirectoryId = 'x'
+      await store.loadDirectories()
+      expect(store.selectedDirectoryId).toBe('x')
+    })
+
+    it('当前选中不存在时回落默认目录（如选中目录被删除）', async () => {
+      GetDirectories.mockResolvedValue([
+        { id: '1', isDefault: true, path: 'C:\\a' },
+        { id: '2', path: 'C:\\b' }
+      ])
+      const store = useDirectoryStore()
+      store.selectedDirectoryId = 'gone'
+      await store.loadDirectories()
+      expect(store.selectedDirectoryId).toBe('1')
+    })
+
+    it('当前选中不存在且无默认时回落首个', async () => {
+      GetDirectories.mockResolvedValue([
+        { id: 'x', path: 'C:\\x' },
+        { id: 'y', path: 'C:\\y' }
+      ])
+      const store = useDirectoryStore()
+      store.selectedDirectoryId = 'gone'
+      await store.loadDirectories()
+      expect(store.selectedDirectoryId).toBe('x')
+    })
+
+    it('目录删光后清空脏选中（现状残留指向已删除目录的脏值）', async () => {
+      GetDirectories.mockResolvedValue([])
+      const store = useDirectoryStore()
+      store.selectedDirectoryId = 'gone'
+      await store.loadDirectories()
+      expect(store.selectedDirectoryId).toBe('')
+    })
+  })
+
   describe('refreshGitFlags', () => {
     it('返回非空新列表时替换 directories', async () => {
       const store = useDirectoryStore()
