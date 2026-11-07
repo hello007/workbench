@@ -183,7 +183,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Folder, MoreFilled } from '@element-plus/icons-vue'
 // 拖拽数据载荷单点（dragstart/drop 两端唯一实现，MIME 与解析禁第二处手拼）
@@ -356,11 +356,15 @@ const menuOpenPath = ref('')
 const contextMenu = ref({ visible: false, x: 0, y: 0, data: null })
 const contextMenuItems = computed(() => (contextMenu.value.data ? nodeMenuItems(contextMenu.value.data) : []))
 const closeContextMenu = () => {
-  if (contextMenu.value.visible) contextMenu.value = { visible: false, x: 0, y: 0, data: null }
+  if (contextMenu.value.visible) {
+    contextMenu.value = { visible: false, x: 0, y: 0, data: null }
+    removeContextListeners()
+  }
 }
 const onNodeContextMenu = (data, event) => {
   if (props.busy) return // 管理操作在途：与 ⋯ 禁用口径一致，不弹可点菜单
   contextMenu.value = { visible: true, x: event.clientX, y: event.clientY, data }
+  addContextListeners()
 }
 const onContextCommand = (command) => {
   const data = contextMenu.value.data
@@ -370,18 +374,24 @@ const onContextCommand = (command) => {
 const onContextKeydown = (event) => {
   if (event.key === 'Escape') closeContextMenu()
 }
-onMounted(() => {
-  window.addEventListener('click', closeContextMenu)
-  window.addEventListener('contextmenu', closeContextMenu, true)
-  window.addEventListener('scroll', closeContextMenu, true)
-  window.addEventListener('keydown', onContextKeydown)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('click', closeContextMenu)
-  window.removeEventListener('contextmenu', closeContextMenu, true)
-  window.removeEventListener('scroll', closeContextMenu, true)
-  window.removeEventListener('keydown', onContextKeydown)
-})
+// window 级监听随菜单态挂载：四关闭时机的监听只在菜单打开期注册、关闭即注销，
+// 非菜单期 window 零监听（素材面板常驻 v-show 挂载，常驻注册会污染全局监听面，
+// 如 terminal-tabs E2E 的 window keydown 计数基线）。同一函数引用 + DOM 同
+// type+callback+capture 去重使重复 add/remove 幂等；卸载期兜底注销防菜单开着时
+// 组件被卸载泄漏监听
+const contextListeners = [
+  ['click', closeContextMenu],
+  ['contextmenu', closeContextMenu, true],
+  ['scroll', closeContextMenu, true],
+  ['keydown', onContextKeydown]
+]
+const addContextListeners = () => {
+  contextListeners.forEach(([type, fn, capture]) => window.addEventListener(type, fn, capture))
+}
+const removeContextListeners = () => {
+  contextListeners.forEach(([type, fn, capture]) => window.removeEventListener(type, fn, capture))
+}
+onBeforeUnmount(removeContextListeners)
 
 // ---- 节点管理菜单（PR2）----
 // 管理资格单点（分操作）：根节点（path=''）仅新增可用；排除命中目录禁新增/删除

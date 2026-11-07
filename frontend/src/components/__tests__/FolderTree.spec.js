@@ -1,9 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { h, nextTick, reactive, watch } from 'vue'
 import ElementPlus from 'element-plus'
 import FolderTree from '../FolderTree.vue'
 import { ASSET_FILE_DRAG_MIME, ASSET_FOLDER_DRAG_MIME } from '../../utils/assetFolder'
+
+// afterEach 自动卸载本文件全部 wrapper：右键菜单开着的用例若不显式关闭/卸载，
+// window 级监听残留至后续用例（同文件 ESC 派发会连带触发残留实例的注销路径，
+// 污染监听计数断言）；autoUnmount 走 onBeforeUnmount 兜底注销
+enableAutoUnmount(afterEach)
 
 // ElMessage 桩（drop 拒绝提示断言面）
 vi.mock('element-plus', async () => {
@@ -613,5 +618,92 @@ describe('FolderTree', () => {
     expect(del.classes()).toContain('is-disabled')
     await del.trigger('click')
     expect(wrapper.emitted('delete')).toBeFalsy()
+  })
+
+  // ---- window 级监听随菜单态挂载：非菜单期 window 零监听（组件常驻 v-show 挂载，
+  // 常驻注册会污染全局监听面），打开注册/关闭注销/卸载兜底成对 ----
+  // 独立 describe + afterEach restore：window spy 未恢复会跨用例叠加——后续用例
+  // 再 spyOn 时 bind 到的是上一用例的 spy 自身，mockImplementation 内透传即无限递归
+  describe('window 监听随菜单态挂载', () => {
+    // 计数 window add/removeEventListener（spy 默认透传原实现），仅统计菜单四类监听
+    const CONTEXT_TYPES = ['click', 'contextmenu', 'scroll', 'keydown']
+    const trackContextListeners = () => {
+      const counter = { added: 0, removed: 0 }
+      const origAdd = window.addEventListener.bind(window)
+      const origRemove = window.removeEventListener.bind(window)
+      vi.spyOn(window, 'addEventListener').mockImplementation((...args) => {
+        if (CONTEXT_TYPES.includes(args[0])) counter.added++
+        return origAdd(...args)
+      })
+      vi.spyOn(window, 'removeEventListener').mockImplementation((...args) => {
+        if (CONTEXT_TYPES.includes(args[0])) counter.removed++
+        return origRemove(...args)
+      })
+      return counter
+    }
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('挂载后未开菜单 window 零注册（监听随菜单态挂载）', () => {
+      const counter = trackContextListeners()
+      const wrapper = mountTree()
+      expect(counter.added).toBe(0)
+      wrapper.unmount()
+    })
+
+    it('右键开菜单注册四监听，Esc 关闭注销四监听', async () => {
+      const counter = trackContextListeners()
+      const wrapper = mountTree()
+      await findNodeRow(wrapper, '方案A').trigger('contextmenu', { clientX: 10, clientY: 10 })
+      expect(wrapper.find('.context-menu').exists()).toBe(true)
+      expect(counter.added).toBe(4)
+      expect(counter.removed).toBe(0)
+      // window keydown Escape（真实全局事件路径，非组件内 trigger）；状态同步清、
+      // DOM 异步 flush，断言前等 nextTick
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      expect(wrapper.find('.context-menu').exists()).toBe(false)
+      expect(counter.removed).toBe(4)
+      wrapper.unmount()
+    })
+
+    it('点击菜单项关闭注销（onContextCommand 路径）', async () => {
+      const counter = trackContextListeners()
+      const wrapper = mountTree()
+      await findNodeRow(wrapper, '方案A').trigger('contextmenu')
+      await wrapper.findAll('.context-menu-item').find((i) => i.text() === '在资源管理器中打开').trigger('click')
+      await nextTick()
+      expect(wrapper.find('.context-menu').exists()).toBe(false)
+      expect(counter.removed).toBe(4)
+      wrapper.unmount()
+    })
+
+    it('菜单开着时卸载组件兜底注销（防监听泄漏）', async () => {
+      const counter = trackContextListeners()
+      const wrapper = mountTree()
+      await findNodeRow(wrapper, '方案A').trigger('contextmenu')
+      expect(counter.added).toBe(4)
+      wrapper.unmount()
+      expect(counter.removed).toBe(4)
+      // 卸载后 window Escape 不再触发任何注销路径（监听确已摘除，无残留副作用）
+      expect(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))).not.toThrow()
+    })
+
+    it('右键换节点：捕获收旧菜单注销后再开新菜单注册（计数配对不残留）', async () => {
+      const counter = trackContextListeners()
+      // attachTo 入文档树：游离 DOM 的 trigger 传播链不含 window，验证不到
+      // window 捕获监听（window keydown 直接派发不经传播树，故仅本用例需 attachTo）
+      const wrapper = mountTree({}, { attachTo: document.body })
+      await findNodeRow(wrapper, '方案A').trigger('contextmenu')
+      expect(counter.added).toBe(4)
+      // 右键另一节点：window contextmenu 捕获先收旧菜单（注销），节点 handler 开新菜单（重注册）
+      await findNodeRow(wrapper, '归档').trigger('contextmenu')
+      expect(wrapper.find('.context-menu').exists()).toBe(true)
+      expect(counter.removed).toBe(4)
+      expect(counter.added).toBe(8)
+      wrapper.unmount()
+      expect(counter.removed).toBe(8)
+    })
   })
 })

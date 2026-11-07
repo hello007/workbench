@@ -151,9 +151,11 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
   test.use({ wailsOverrides: shellOverrides })
 
   test('全屏开合 + ESC 退出 + EP 弹窗内 ESC 仅关弹窗 + 监听随态挂载卸载', async ({ page }) => {
-    // window 级 keydown 注册计数（仅 TerminalPanel 全屏 ESC 监听注册在 window；
-    // Home 全局快捷键监听在 document，不混入计数）。计数以 openTerminal 挂载后的
-    // 值为基线取增量，不依赖挂载期 immediate watch 的 no-op remove 行为
+    // window 级 keydown 注册计数（TerminalPanel 全屏 ESC 监听注册在 window；FolderTree
+    // 右键菜单 ESC 监听同为 window 级但随菜单态挂载、页面加载期不注册；Home 全局快捷键
+    // 监听在 document，不混入计数）。基线一律取 openTerminal 挂载后的快照做相对增量
+    // 断言，禁依赖绝对值——任何组件未来合法注册 window keydown 都不得破坏本用例
+    // （2026-11 教训：绝对断言 toBe(0) 曾因 FolderTree 引入菜单监听而误报）
     await page.addInitScript(() => {
       window.__keydownAdded = 0
       window.__keydownRemoved = 0
@@ -172,7 +174,6 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
     const panel = await openTerminal(page)
     const addBase = await page.evaluate(() => window.__keydownAdded)
     const removeBase = await page.evaluate(() => window.__keydownRemoved)
-    expect(addBase).toBe(0)
 
     // 点全屏按钮 → is-fullscreen（fixed 层 z-index 1500：低于 EP 弹窗 2001+ 与
     // 右键菜单 2000，保证全屏态弹窗正常置顶）

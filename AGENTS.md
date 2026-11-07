@@ -135,6 +135,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |新增 service 须在 `app_services.go` 加 `AppServices` 字段 + `NewAppServices` 构造行（2 处）；`AppServices` 必须在 package main；构造纯 new，生命周期副作用留 startup/shutdown|[app-services-assembly.md](docs/spec/app-services-assembly.md)|
 |后端日志用 `log/slog`（禁 `println`）；service 调 `Logger()`，App 层调 `slog.X`；前端分流错误用 `model.AppError` 经 ErrorFormatter → `handleError` 按 code 分流；新增错误码三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）；**wails 升级回归 ErrorFormatter reject 链路**|[logging-and-errors.md](docs/spec/logging-and-errors.md)|
 |E2E 从 `frontend/e2e/fixtures.js` import `{ test, expect }`（禁直 import @playwright/test）；mock 单一数据源 `wails-mock-defaults.js`；禁 `waitForTimeout`；`wailsjs/` 不入库 CI 先 `wails generate module`；**新增 spec 目录须同步 vitest `test.exclude`**；挂起解析 `{__deferred__}`+`releaseDeferred`；fixture 必须对齐后端 model 真实形状|[e2e-testing.md](docs/spec/e2e-testing.md)|
+|E2E window 级监听计数 hook **禁绝对基线断言**（基线取相对增量）；常驻 v-show 面板组件的 window 监听须随使用态挂载（FolderTree 先例）；单测 spy 须 afterEach restore + enableAutoUnmount 防实例泄漏；游离 DOM（未 attachTo）trigger 传播链不含 window|[e2e-testing.md §12](docs/spec/e2e-testing.md)|
 |组件单测与 E2E 同用语义锚：活动栏高亮/点击禁 `findAll(...)[n]`，改用 `data-panel-id`/`data-action`；入口总数断言可保留|[e2e-testing.md §5.2](docs/spec/e2e-testing.md)|
 |前端还原 `ReadFileBytes` 返回的 base64 为文本用 `utils/base64.js` 的 `decodeBase64Utf8`，禁裸 `atob`（中文双重编码乱码，单测须用中文数据）|[cross-layer-contracts.md](docs/spec/cross-layer-contracts.md)|
 |后端跨包共用测试辅助入 `util/testutil`（RunGit/WriteFile/InitTempRepo 等六个），与前端 `wails-mock-defaults.js` 单一数据源对齐；专用辅助留 `*_test_helper.go` 不导出；**禁各 `_test.go` 重复定义 git 命令/临时仓库辅助**；集成 `it*` helper 不并入 testutil；辅助参数用 `testing.TB`|[perf-baseline.md §17](docs/spec/perf-baseline.md)|
@@ -284,5 +285,5 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 
 ---
 
-**最后更新：** 2026-11-05
-**文档版本：** v2.46
+**最后更新：** 2026-11-07
+**文档版本：** v2.47

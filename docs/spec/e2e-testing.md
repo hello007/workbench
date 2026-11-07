@@ -147,7 +147,28 @@ mock 通道盲区的真实进程生命周期链路覆盖：会话状态真实持
 * **已知依赖库隐患**：go-webview2 `errorCallback` 在窗口销毁链中偶发 `os.Exit(1)` 跳过 shutdown 钩子——crash.flag 清除（shutdown 末尾）因此偶发缺失，正常关闭可能被误报「异常退出」；E2E 不对 flag 方向做强断言，隐患待 wails/go-webview2 升级后复查
 * **vitest 收集隔离（常见错误）**：新增 E2E 通道目录（Playwright spec 所在目录）必须同步 `frontend/vitest.config.js` 的 `test.exclude`——Playwright spec 顶层 `test.skip(条件, 说明)` 在 vitest 环境非法，被误收集即报 `test.skip() can only be called inside test` 文件级失败（形态隐蔽：用例 0 失败但 files failed）。先例：`e2e/**` 2026-09-13 已排除；`e2e-desktop/**` 2026-09-23 落地时漏排除，2026-09-24 收口跑 `npm test` 才暴露
 
-## 12. 相关文档
+## 12. window 级监听计数用例与组件监听单测（2026-11-07）
+
+**事故背景**：`terminal-tabs.spec.js:153` 全屏 ESC 用例的 window keydown 注册计数 hook，绝对基线断言 `toBe(0)` 因 `ddd0807`（2026-11-06）给 FolderTree 引入 window 级菜单监听而失败（基线实测 1）。根因不是 hook 误计数、不是组件缺陷，而是**新增合法注册点导致绝对基线断言过时**——时间线：`013032e`（10-13）AssetsPanel 以 v-show 常驻挂载进 Home → `bf5b2f7`（10-21）用例写入 `toBe(0)` 当时恰好成立 → `ddd0807`（11-06）FolderTree onMounted 注册 window keydown，基线自此变 1。
+
+### 12.1 相对基线原则（禁令）
+
+- window 级监听计数 hook 一律以操作后快照为基线取**相对增量**断言，**禁 `toBe(0)` 绝对断言**——任何组件未来合法注册同类型 window 监听都不得破坏用例
+- hook 注释必须列全当前已知的 window 级注册点与排除面（先例：TerminalPanel 全屏监听 / FolderTree 菜单监听注册在 window；Home 全局快捷键在 document 不混入）
+
+### 12.2 常驻面板组件的 window 监听须随使用态挂载
+
+AssetsPanel 以 `v-show` 常驻挂载在 `Home.vue`（非 `v-if`），其子组件 onMounted 里的 window 监听即**页面加载期全局污染源**。常驻挂载组件的 window 级监听须随使用态注册/注销（先例：FolderTree 右键菜单四监听随菜单态挂载——打开注册、关闭注销、`onBeforeUnmount` 兜底；同函数引用 + DOM 同 type+callback+capture 去重保证重复 add/remove 幂等）。
+
+### 12.3 组件单测基建 gotcha（spy / 传播 / 实例泄漏）
+
+| Gotcha | 症状 | 解法 |
+|---|---|---|
+| window spy 跨用例泄漏 | 后续用例再 `spyOn` 时 bind 到上一用例的 spy 自身，mockImplementation 透传即无限递归（计数爆炸 + `Maximum call stack size exceeded`） | spy 用例组独立 `describe` + `afterEach(() => vi.restoreAllMocks())` |
+| 游离 DOM 传播盲区 | 未 `attachTo` 的 wrapper 不在文档树内，`trigger` 事件传播链**不含 window**——window 级捕获监听（如 contextmenu 收旧菜单）在单测中不可触达 | 该用例 `attachTo: document.body`；`window.dispatchEvent` 直派不经传播树不受影响 |
+| 实例泄漏污染计数 | 前序用例 wrapper 未卸载且开着菜单，残留 window 监听被同文件后续用例的全局事件派发连带触发（多实例 × 监听数的注销计数） | 文件级 `enableAutoUnmount(afterEach)` 兜底卸载（触发 onBeforeUnmount 注销） |
+
+## 13. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — mock 返回值形状契约依据（App.d.ts / models.ts 签名同步）
 - [test-stability.md](test-stability.md) — 文件系统时序 flaky 规避
