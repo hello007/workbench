@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "检查 wailsjs models.ts 是否同步 sidebarOrder 字段（漏同步=构建/运行期契约断裂）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查新增 E2E spec 是否走 fixtures 语义锚、mock 单一数据源、无 waitForTimeout"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "检查前端覆盖率门禁是否仍达标"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "检查 Vue 组件改动是否符合编码规范（组合式 API、事件注销等）"}

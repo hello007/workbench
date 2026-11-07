@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "AppSettings 加 sidebarOrder 字段须同步 wailsjs 绑定（models.ts），本任务是 model/ 导出 struct 变更，契约同步规则必读"}
+{"file": "docs/spec/e2e-testing.md", "reason": "新增 E2E spec 文件（sidebar-shortcuts.spec.js）必须遵守：fixtures.js import test/expect、activityPanel 语义锚、wails-mock-defaults.js 单一数据源、禁 waitForTimeout"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "ActivityBar.vue/SettingsPanel.vue/Home.vue 为 Vue 3 组件改动，编码风格规范必读"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端单测 ≥70% 硬门禁，新增 store/组件测试须知晓门禁口径"}
+{"file": "docs/spec/test-stability.md", "reason": "测试禁隐式依赖环境外部状态（固定端口/mtime 时序），E2E 与单测稳定性约束"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "Go 后端字段与前端消费分层边界，settings.json 读写链路跨层改动需遵守"}
