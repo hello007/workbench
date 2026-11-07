@@ -187,4 +187,75 @@ describe('FileHistoryDialog', () => {
     expect(GetFileCommitHistory).toHaveBeenCalledTimes(2)
     expect(GetFileCommitHistory).toHaveBeenLastCalledWith('/repo/A/docs/设计文档.md', 20, 0)
   })
+
+  it('initialSha 在首页命中：定位高亮该行且不触发跨页扫描', async () => {
+    const target = 'a'.repeat(40)
+    GetFileCommitHistory.mockResolvedValue([commit({ sha: target }), commit({ sha: 'b'.repeat(40) })])
+
+    const wrapper = createWrapper({ initialSha: target })
+    await flushPromises()
+
+    // 首页即命中：仅 1 次拉取
+    expect(GetFileCommitHistory).toHaveBeenCalledTimes(1)
+    const rows = wrapper.findAll('[data-action="file-history-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].classes()).toContain('is-located')
+    expect(rows[0].attributes('data-sha')).toBe(target)
+    expect(rows[1].classes()).not.toContain('is-located')
+  })
+
+  it('initialSha 不在首页：逐页扫描至命中并高亮', async () => {
+    const target = 'd'.repeat(40)
+    const page = Array.from({ length: 20 }, (_, i) =>
+      commit({ sha: String(i).padStart(40, 'c'), shortSha: `c${i}` })
+    )
+    GetFileCommitHistory.mockResolvedValueOnce(page)
+    GetFileCommitHistory.mockResolvedValueOnce([commit({ sha: target })])
+
+    const wrapper = createWrapper({ initialSha: target })
+    await flushPromises()
+
+    // 首页未命中（满页 hasMore）→ 自动续拉第 2 页命中；扫描跨页链用 vi.waitFor
+    // 轮询消化（coverage 插桩/并行负载下单次 flushPromises 可能未跑完整条链）
+    await vi.waitFor(() => {
+      expect(GetFileCommitHistory).toHaveBeenCalledTimes(2)
+    })
+    expect(GetFileCommitHistory).toHaveBeenLastCalledWith('/repo/A/docs/设计文档.md', 20, 20)
+    const rows = wrapper.findAll('[data-action="file-history-row"]')
+    expect(rows).toHaveLength(21)
+    expect(rows[20].classes()).toContain('is-located')
+  })
+
+  it('initialSha 超定位上限未命中：info 提示并不再无限扫描', async () => {
+    const target = 'f'.repeat(40)
+    // 恒返回满页且每页 SHA 唯一（永不命中目标）
+    GetFileCommitHistory.mockImplementation((_path, _limit, offset) => {
+      const page = Array.from({ length: 20 }, (_, i) =>
+        commit({ sha: String(offset * 20 + i + 1).padStart(40, 'e'), shortSha: `e${offset}` })
+      )
+      return Promise.resolve(page)
+    })
+
+    createWrapper({ initialSha: target })
+    await flushPromises()
+
+    // 上限 500 条 = 25 页（20 起步每轮 +20 至 500 止）；终点信号（info 提示）
+    // 用 vi.waitFor 轮询等待，扫描链完成后精确断言调用次数防无限扫描
+    await vi.waitFor(() => {
+      expect(ElMessage.info).toHaveBeenCalledWith('该提交不在最近 500 条提交中')
+    })
+    expect(GetFileCommitHistory).toHaveBeenCalledTimes(25)
+    expect(ElMessage.info.mock.calls[0][0]).not.toContain(target)
+  })
+
+  it('initialSha 不在有限历史内：首页加载完即提示未命中', async () => {
+    GetFileCommitHistory.mockResolvedValue([commit()])
+
+    createWrapper({ initialSha: 'f'.repeat(40) })
+    await flushPromises()
+
+    // 单页且不满页（hasMore=false）：不扫描，直接提示「最近 1 条」
+    expect(GetFileCommitHistory).toHaveBeenCalledTimes(1)
+    expect(ElMessage.info).toHaveBeenCalledWith('该提交不在最近 1 条提交中')
+  })
 })

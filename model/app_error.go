@@ -54,6 +54,7 @@ const (
 	ErrCodeGitCancelled       = "E_GIT_CANCELLED"         // 操作被用户取消（warning，中性提示非 error）
 	ErrCodeGitLocked          = "E_GIT_LOCKED"            // index.lock 被占用或残留，写操作被拒（warning，引导人工确认后删除，禁自动删）
 	ErrCodeGitTimeout         = "E_GIT_TIMEOUT"           // Git 操作超时被终止（warning，用户可重试；超时不得误判为冲突正常返回）
+	ErrCodeBlameFileTooLarge  = "E_BLAME_FILE_TOO_LARGE"  // 行归属追溯：文件行数超上限（warning，预期降级非真失败；入口可隐藏/提示不适用）
 
 	// 内容搜索域
 	ErrCodeSearchTimeout = "E_SEARCH_TIMEOUT" // 内容搜索超时被终止，结果不完整或为空（warning，用户可缩小范围后重试；超时不得误判为无匹配）

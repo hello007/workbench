@@ -38,7 +38,17 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 // 用例内按需配置 mockReturnValue（成功 / 失败 / 不可用 / 挂起）
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
-  ConvertPptxForPreview: vi.fn()
+  ConvertPptxForPreview: vi.fn(),
+  GetFileBlame: vi.fn()
+}))
+
+// FileHistoryDialog 以 stub 隔离（内部依赖 wailsjs 绑定与 FileDiffDialog，
+// blame 测试只断言挂载与 initialSha 传参）
+vi.mock('../FileHistoryDialog.vue', () => ({
+  default: {
+    template: '<div class="file-history-dialog-stub" v-if="modelValue" :data-initial-sha="initialSha" />',
+    props: ['modelValue', 'repoPath', 'fileAbsPath', 'initialSha']
+  }
 }))
 vi.mock('xlsx', () => ({
   read: vi.fn(() => ({ SheetNames: [], Sheets: {} })),
@@ -168,7 +178,7 @@ describe('FilePreviewRenderer.vue - 右键复制菜单', () => {
     await flushPromises()
   }
 
-  it('kind=text 右键显示复制菜单，含"复制"与"全选"', async () => {
+  it('kind=text 右键显示复制菜单，含"复制"与"全选"与"行归属"', async () => {
     wrapper = mountRenderer({ kind: 'text', fileName: 'a.js', content: 'hello world' })
     await flushPromises()
     expect(wrapper.find('.context-menu').exists()).toBe(false)
@@ -178,9 +188,11 @@ describe('FilePreviewRenderer.vue - 右键复制菜单', () => {
     const menu = wrapper.find('.context-menu')
     expect(menu.exists()).toBe(true)
     const items = wrapper.findAll('.context-menu-item')
-    expect(items).toHaveLength(2)
+    // 行归属开关（blameAvailable：源码态非 JSON）随「行归属」功能加入菜单
+    expect(items).toHaveLength(3)
     expect(items[0].text()).toContain('复制')
     expect(items[1].text()).toContain('全选')
+    expect(items[2].text()).toContain('行归属')
   })
 
   it('kind=image 右键不显示复制菜单（保留原生右键）', async () => {
@@ -768,5 +780,199 @@ describe('FilePreviewRenderer.vue - 深色模式语法高亮', () => {
     expect(dispatchSpy).toHaveBeenCalledTimes(1)
     // 同一 EditorView 实例（DOM 节点不变，未重建），滚动位置与折叠状态得以保留
     expect(host.querySelector('.cm-editor')).toBe(editorEl)
+  })
+})
+
+describe('FilePreviewRenderer.vue - 行归属（git blame）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) { wrapper.unmount(); wrapper = null }
+    vi.restoreAllMocks()
+  })
+
+  // blame 标注点击走 document 委托：mount 必须 attachTo（默认游离树事件冒泡
+  // 不到 document，委托监听收不到——游离树调试时 isConnected=false 的教训）
+  const mountBlameRenderer = (props) => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    return mount(FilePreviewRenderer, {
+      props,
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<i><slot /></i>' },
+          'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+          'el-tag': { template: '<span class="el-tag"><slot /></span>' }
+        }
+      }
+    })
+  }
+
+  const openMenu = async () => {
+    await wrapper.find('.file-preview-renderer').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await flushPromises()
+  }
+
+  const blameMenuItem = () =>
+    wrapper.findAll('.context-menu-item').filter((i) => i.text().includes('行归属'))[0]
+
+  // blame 结果工厂：2 提交（1 个已提交中文作者 + 1 个未提交零 SHA）、3 行 2 块
+  const blameResult = () => ({
+    commits: [
+      {
+        sha: 'a'.repeat(40), shortSha: 'aaaaaaaa', message: '首建提交\n',
+        author: '张三', email: 'z@x.com',
+        timestamp: Math.floor(Date.now() / 1000) - 3600, dateTime: '2026-11-07 18:40:00'
+      },
+      {
+        sha: '0'.repeat(40), shortSha: '00000000', message: 'Version of a.js from a.js',
+        author: 'Not Committed Yet', email: '', timestamp: 0, dateTime: ''
+      }
+    ],
+    lines: [0, 0, 1]
+  })
+
+  it('json 文件不显示行归属入口（pretty-print 派生视图无行对齐语义）', async () => {
+    wrapper = mountRenderer({ kind: 'text', fileName: 'data.json', filePath: 'D:/repo/data.json', content: '{"a":1}' })
+    await flushPromises()
+
+    await openMenu()
+
+    const items = wrapper.findAll('.context-menu-item')
+    expect(items.filter((i) => i.text().includes('行归属'))).toHaveLength(0)
+    expect(items.length).toBeGreaterThanOrEqual(2) // 复制/全选仍在
+  })
+
+  it('markdown 预览不显示行归属入口', async () => {
+    wrapper = mountRenderer({ kind: 'text', fileName: 'doc.md', filePath: 'D:/repo/doc.md', content: '# 标题\n\n正文' })
+    await flushPromises()
+
+    await openMenu()
+
+    expect(wrapper.findAll('.context-menu-item').filter((i) => i.text().includes('行归属'))).toHaveLength(0)
+  })
+
+  it('开启后加载归属并渲染连续块首行标注（已提交 + 未提交）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+
+    expect(GetFileBlame).toHaveBeenCalledWith('D:/repo/a.js')
+    const annots = wrapper.findAll('.blame-annot')
+    // 3 行 2 块：块首行 1（张三）、行 3（未提交）各一个标注
+    expect(annots).toHaveLength(2)
+    expect(annots[0].text()).toContain('张三')
+    expect(annots[0].text()).toContain('aaaaaaaa')
+    expect(annots[0].attributes('data-sha')).toBe('a'.repeat(40))
+    expect(annots[1].classes()).toContain('is-uncommitted')
+    expect(annots[1].text()).toContain('未提交')
+    expect(annots[1].attributes('data-sha')).toBeUndefined()
+  })
+
+  it('点击未提交标注不打开文件历史（禁跳转）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.blame-annot.is-uncommitted').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.file-history-dialog-stub').exists()).toBe(false)
+  })
+
+  it('点击归属标注打开文件历史并携带 initialSha', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.blame-annot:not(.is-uncommitted)').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('.file-history-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-initial-sha')).toBe('a'.repeat(40))
+    expect(dialog.attributes('data-initial-sha')).toHaveLength(40)
+  })
+
+  it('双实例并存时点击只打开本实例历史弹窗（document 委托须限定实例域）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    // 实例 A：主预览面，开 blame 并产生标注
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+
+    // 实例 B：并存挂载面（模拟 RepoFilterDialog README 渲染），仅挂载不开 blame；
+    // document 委托对两实例同达，实例域判定（contains）缺失时 closest 会命中
+    // A 的标注导致 B 也弹出历史弹窗
+    const wrapperB = mountBlameRenderer({ kind: 'text', fileName: 'b.js', filePath: 'D:/repo/b.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await wrapper.find('.blame-annot:not(.is-uncommitted)').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.file-history-dialog-stub').exists()).toBe(true)
+    expect(wrapperB.find('.file-history-dialog-stub').exists()).toBe(false)
+    wrapperB.unmount()
+  })
+
+  it('blame 行数与预览行数不一致时 warning 提示且不标注（防外部修改错位）', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    const res = blameResult()
+    res.lines = [0, 0, 1, 1] // 预览 3 行 vs blame 4 行
+    GetFileBlame.mockResolvedValue(res)
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalledWith('文件已变更，行归属数据与预览不一致，请刷新预览后重试')
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(0)
+  })
+
+  it('切换文件后 blame 态复位，菜单文案回到「行归属」', async () => {
+    const { GetFileBlame } = await import('../../../wailsjs/go/main/App')
+    GetFileBlame.mockResolvedValue(blameResult())
+    wrapper = mountBlameRenderer({ kind: 'text', fileName: 'a.js', filePath: 'D:/repo/a.js', content: '行一\n行二\n行三' })
+    await flushPromises()
+
+    await openMenu()
+    await blameMenuItem().trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(2)
+
+    // 内容变化（外部修改/切换文件）→ 整组复位：标注清空 + 开关回初始态
+    await wrapper.setProps({ content: '新内容一\n新内容二', filePath: 'D:/repo/b.js' })
+    await flushPromises()
+    expect(wrapper.findAll('.blame-annot')).toHaveLength(0)
+
+    await openMenu()
+    expect(blameMenuItem().text()).toContain('行归属')
+    expect(blameMenuItem().text()).not.toContain('关闭')
   })
 })

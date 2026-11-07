@@ -13,7 +13,9 @@
           v-for="commit in commits"
           :key="commit.sha"
           class="history-row"
+          :class="{ 'is-located': commit.sha === locatedSha }"
           data-action="file-history-row"
+          :data-sha="commit.sha"
           @click="openDiff(commit)"
         >
           <div class="history-main">
@@ -66,7 +68,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { GetFileCommitHistory } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
@@ -77,10 +80,14 @@ const props = defineProps({
   // 工作目录绝对路径（定位仓库根，供内嵌 diff 弹窗复用）
   repoPath: { type: String, required: true },
   // 目标文件绝对路径（后端定位仓库根并换算仓库相对路径）
-  fileAbsPath: { type: String, default: '' }
+  fileAbsPath: { type: String, default: '' },
+  // 打开后需定位并高亮的提交 SHA（行归属跳转入口，空串不定位）
+  initialSha: { type: String, default: '' }
 })
 
 const PAGE_SIZE = 20
+// 定位扫描条数上限：目标提交在分页历史深处时逐页追加至多到此为止（25 页）
+const locateMaxCommits = 500
 
 const emits = defineEmits(['update:modelValue'])
 
@@ -88,6 +95,8 @@ const commits = ref([])
 const loading = ref(false)
 const loadingMore = ref(false)
 const hasMore = ref(false)
+// 定位命中并高亮的提交 SHA（仅展示态，不参与 diff 打开逻辑）
+const locatedSha = ref('')
 
 // 内嵌单提交 diff 弹窗状态
 const diffVisible = ref(false)
@@ -138,15 +147,48 @@ const loadHistory = async (reset = true) => {
 
 // 弹窗打开即拉取首页（watch 驱动，父组件仅切 visible 不触碰数据面）；
 // immediate 覆盖「以 visible=true 初始挂载」的形态（重挂载残留开启态也正常拉取）；
-// 关闭分支即时失效在途响应（@closed 渐隐结束才清数据，在途写回必须更早丢弃）
+// 关闭分支即时失效在途响应（@closed 渐隐结束才清数据，在途写回必须更早丢弃）；
+// 打开且带 initialSha 时首页加载完成后执行定位扫描
 watch(
   () => props.modelValue,
-  (visible) => {
-    if (visible) loadHistory(true)
-    else loadSeq++
+  async (visible) => {
+    if (visible) {
+      await loadHistory(true)
+      await locateCommit()
+    } else {
+      loadSeq++
+      locatedSha.value = ''
+    }
   },
   { immediate: true }
 )
+
+// 定位扫描：initialSha 指定的提交（行归属跳转入口）不在已加载页时逐页追加，
+// 上限 locateMaxCommits 条；命中滚动至居中并高亮，超限未命中 info 提示。
+// 中止判定用 modelValue（loadHistory 内部自增 loadSeq，外部保存的代次号每轮
+// 失效不能复用）；循环另设「页数不增长即停」兜底，防失败页 hasMore 恒真死循环。
+const locateCommit = async () => {
+  if (!props.initialSha || commits.value.length === 0) return
+  let hit = commits.value.find((c) => c.sha === props.initialSha)
+  let prevLen = commits.value.length
+  while (!hit && hasMore.value && commits.value.length < locateMaxCommits) {
+    await loadHistory(false)
+    if (!props.modelValue) return
+    if (commits.value.length === prevLen) break // 加载失败页数不增长，停止扫描
+    prevLen = commits.value.length
+    hit = commits.value.find((c) => c.sha === props.initialSha)
+  }
+  if (!props.modelValue) return
+  if (hit) {
+    locatedSha.value = hit.sha
+    nextTick(() => {
+      const el = document.querySelector(`.history-row[data-sha="${hit.sha}"]`)
+      if (el) el.scrollIntoView({ block: 'center' })
+    })
+  } else {
+    ElMessage.info(`该提交不在最近 ${commits.value.length} 条提交中`)
+  }
+}
 
 const openDiff = (commit) => {
   diffSha.value = commit.sha
@@ -165,6 +207,7 @@ const releaseState = () => {
   diffVisible.value = false
   diffSha.value = ''
   diffFile.value = ''
+  locatedSha.value = ''
 }
 </script>
 
@@ -193,6 +236,12 @@ const releaseState = () => {
 
 .history-row:hover {
   background-color: var(--el-fill-color-light);
+}
+
+/* 定位命中高亮（行归属跳转入口）：主色左侧条 + 淡主色底，与 hover 态可叠加 */
+.history-row.is-located {
+  background-color: var(--el-color-primary-light-9);
+  box-shadow: inset 2px 0 0 var(--el-color-primary);
 }
 
 .history-main {

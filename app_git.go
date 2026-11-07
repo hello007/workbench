@@ -1037,3 +1037,14 @@ func (a *App) GetFileCommitHistory(fileAbsPath string, limit, offset int) ([]mod
 	}
 	return a.gitSvc.GetFileCommitHistory(fileAbsPath, limit, offset)
 }
+
+// GetFileBlame 获取文件工作树行归属（git blame --porcelain，每行最后修改提交）。
+// fileAbsPath 为文件绝对路径（预览文件直传）；返回提交去重列表 + 每行→提交下标
+// 数组（下标 = 行号-1）。未提交行 SHA 全零由前端判定禁跳转；行数超上限返回
+// E_BLAME_FILE_TOO_LARGE（warning 分流）。
+func (a *App) GetFileBlame(fileAbsPath string) (*model.BlameResult, error) {
+	if fileAbsPath == "" {
+		return nil, fmt.Errorf("文件路径不能为空")
+	}
+	return a.gitSvc.GetFileBlame(fileAbsPath)
+}

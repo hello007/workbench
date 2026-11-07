@@ -1,5 +1,5 @@
 <template>
-  <div class="file-preview-renderer" @contextmenu="onContextMenu">
+  <div ref="previewRootRef" class="file-preview-renderer" @contextmenu="onContextMenu">
     <!-- 图片预览：base64 → dataURL → <img>（读取失败/过大时无 base64，走降级分支） -->
     <div v-if="kind === 'image' && !error && !tooLarge" class="preview-image-wrap">
       <div class="image-toolbar">
@@ -235,14 +235,32 @@
       <li class="context-menu-item" @click="onMenuCommand('selectAll')">
         <el-icon><Select /></el-icon>全选
       </li>
+      <!-- 行归属开关（git blame）：仅源码态（markdown/HTML 渲染视图/JSON 派生视图无行对齐语义，不入） -->
+      <li
+        v-if="blameAvailable"
+        class="context-menu-item"
+        :class="{ 'is-active': blameOn }"
+        @click="onMenuCommand('blame')"
+      >
+        <el-icon><Clock /></el-icon>{{ blameOn ? '关闭行归属' : '行归属' }}
+      </li>
     </ul>
+
+    <!-- 行归属跳转出口：文件提交历史弹窗（repoPath 传参对齐 FileTreePanel 先例，
+         initialSha 驱动打开后定位+高亮指定提交） -->
+    <FileHistoryDialog
+      v-model="blameHistoryVisible"
+      :repo-path="filePath"
+      :file-abs-path="filePath"
+      :initial-sha="blameHistorySha"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Select, Close } from '@element-plus/icons-vue'
+import { CopyDocument, Select, Close, Clock } from '@element-plus/icons-vue'
 // Office 渲染依赖采用静态 import：
 // 历史上曾用 await import('docx-preview') / await import('xlsx') 动态加载，
 // 但 wails dev 下 Vite 会把动态 import 重写为 /node_modules/.vite/deps/xlsx.js
@@ -261,7 +279,9 @@ import MarkdownIt from 'markdown-it'
 import * as jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 // PPTX 预览转换绑定（.pptx/.ppsx → 后端 COM 转 PDF → 复用 pdf viewer 链路）
-import { ConvertPptxForPreview } from '../../wailsjs/go/main/App'
+import { ConvertPptxForPreview, GetFileBlame } from '../../wailsjs/go/main/App'
+import { handleError } from '../utils/error'
+import FileHistoryDialog from './FileHistoryDialog.vue'
 import { buildHtmlPreviewDoc } from '../utils/htmlPreview'
 import { useSettingsStore } from '../store'
 import hljs from 'highlight.js/lib/core'
@@ -298,8 +318,8 @@ hljs.registerLanguage('python', python)
 hljs.registerLanguage('plaintext', plaintext)
 
 // CodeMirror 6 按需引入
-import { EditorView, lineNumbers, highlightActiveLine, keymap } from '@codemirror/view'
-import { Compartment, EditorState } from '@codemirror/state'
+import { EditorView, lineNumbers, highlightActiveLine, keymap, Decoration, WidgetType } from '@codemirror/view'
+import { Compartment, EditorState, RangeSetBuilder } from '@codemirror/state'
 import { defaultKeymap, historyKeymap, selectAll } from '@codemirror/commands'
 import { syntaxHighlighting, foldGutter, bracketMatching } from '@codemirror/language'
 import { codeHighlightStyleFor } from '../utils/codemirrorHighlight'
@@ -741,6 +761,8 @@ const resetZoom = () => { imageScale.value = 1 }
 
 // ---------- CodeMirror 只读文本 ----------
 const cmHostRef = ref(null)
+// 根元素引用：blame 标注 document 级点击委托的实例域判定用（组件存在双挂载面）
+const previewRootRef = ref(null)
 let cmView = null
 // 语法高亮扩展独占一个 Compartment：主题切换只重配这一项，不重建编辑器
 const cmHighlightCompartment = new Compartment()
@@ -788,6 +810,8 @@ const setupCodeMirror = () => {
     highlightActiveLine(),
     // 语法高亮样式随主题切换，放入 Compartment 以便重配时保留滚动位置与折叠状态
     cmHighlightCompartment.of(buildHighlightExtension()),
+    // 行归属标注槽位（blame 开关/数据更新经 reconfigure 注入，不重建编辑器）
+    blameComp.of([]),
     EditorState.readOnly.of(true),
     keymap.of([...defaultKeymap, ...historyKeymap]),
     codeMirrorLangByExt(ext)
@@ -796,6 +820,9 @@ const setupCodeMirror = () => {
     state: EditorState.create({ doc, extensions }),
     parent: cmHostRef.value
   })
+  // blame 开启且数据有效时重放标注（htmlMode render→source 切回场景：编辑器
+  // 重建后装饰随旧实例丢失，数据面未失效可直接重放）
+  if (blameOn.value && blameData) applyBlameDecoration()
 }
 
 // ---------- Office 子类型分发 ----------
@@ -1183,8 +1210,202 @@ const onMenuCommand = (command) => {
     if (contextMenu.canCopy) copySelectedText()
   } else if (command === 'selectAll') {
     selectAllText()
+  } else if (command === 'blame') {
+    toggleBlame()
   }
 }
+
+// ---------- 行归属（git blame，工作树行级归属追溯） ----------
+// 展示形态：每个 blame 连续块首行行尾追加灰色小字「作者 · 相对时间 · 短SHA」
+//（CodeMirror widget decoration，Compartment 重配不重建编辑器）；点击标注跳转
+// 文件提交历史并定位该提交（FileHistoryDialog initialSha），形成「仓库 → 文件 → 行」
+// 追溯闭环。对齐语义：工作树 blame（后端不传 rev）行号与预览恒对齐；未提交行
+// SHA 全零标「未提交」禁跳转；JSON 预览是 pretty-print 派生视图（显示行号与
+// 文件行号无对应），blame 语义不成立，入口隐藏。
+
+const BLAME_JSON_EXTS = new Set(['json', 'jsonc', 'json5'])
+const blameAvailable = computed(() =>
+  props.kind === 'text' &&
+  !isMarkdown.value &&
+  !isHtmlRenderView.value &&
+  !BLAME_JSON_EXTS.has(getExt(props.fileName))
+)
+
+const blameOn = ref(false)
+const blameLoading = ref(false)
+// blame 数据面与文件身份/内容绑定：切换文件或内容变化即整组复位（blameSeq 失效
+// 在途响应），防旧文件归属串入新预览
+let blameData = null
+let blameSeq = 0
+
+// 跳转出口（FileHistoryDialog 内嵌挂载）：repoPath/fileAbsPath 同传文件绝对路径
+//（对齐 FileTreePanel 先例），initialSha 驱动打开后定位+高亮
+const blameHistoryVisible = ref(false)
+const blameHistorySha = ref('')
+
+// blame 标注扩展独占一个 Compartment：开关与数据更新只重配这一项，编辑器不重建
+//（滚动位置/折叠状态保留，与 cmHighlightCompartment 同机制）
+const blameComp = new Compartment()
+
+class BlameWidget extends WidgetType {
+  constructor(mark) {
+    super()
+    this.mark = mark
+  }
+  // 标注不可变（blameData 更新走整组重配），同位置同文案即等价
+  eq(other) {
+    return this.mark.label === other.mark.label && this.mark.sha === other.mark.sha
+  }
+  toDOM() {
+    const span = document.createElement('span')
+    span.className = 'blame-annot'
+    if (this.mark.sha) {
+      span.dataset.sha = this.mark.sha
+    } else {
+      // 未提交行：无 sha，点击委托判空不跳转
+      span.classList.add('is-uncommitted')
+    }
+    span.textContent = this.mark.label
+    span.title = this.mark.tip
+    return span
+  }
+  // false：click 冒泡到容器委托（onBlameAnnotClick），不在 widget 内吞事件
+  ignoreEvent() {
+    return false
+  }
+}
+
+// 行尾标注文案：零 SHA →「未提交」；其余「作者 · 相对时间 · 短SHA」，
+// title 悬浮给全信息（作者/作者时区墙钟时间/消息首行）
+const buildBlameMarks = () => {
+  const marks = []
+  if (!blameData || !cmView) return marks
+  const { commits, lines } = blameData
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && lines[i] === lines[i - 1]) continue // 连续块仅首行标注
+    const c = commits[lines[i]]
+    if (!c) continue
+    const uncommitted = /^0+$/.test(c.sha)
+    const line = cmView.state.doc.line(i + 1)
+    marks.push({
+      from: line.to,
+      sha: uncommitted ? '' : c.sha,
+      label: uncommitted
+        ? '未提交'
+        : `${c.author || '未知'} · ${formatRelativeTime(c.timestamp)} · ${c.shortSha}`,
+      tip: uncommitted
+        ? '该行尚未提交（工作树修改），无对应提交'
+        : `${c.author || '未知'} · ${c.dateTime}\n${(c.message || '').split('\n')[0]}`
+    })
+  }
+  return marks
+}
+
+const buildBlameDecoration = () => {
+  const marks = buildBlameMarks().sort((a, b) => a.from - b.from)
+  if (marks.length === 0) return EditorView.decorations.of([])
+  const builder = new RangeSetBuilder()
+  for (const m of marks) {
+    builder.add(m.from, m.from, Decoration.widget({ widget: new BlameWidget(m), side: 1 }))
+  }
+  return EditorView.decorations.of(builder.finish())
+}
+
+const applyBlameDecoration = () => {
+  if (!cmView) return
+  cmView.dispatch({
+    effects: blameComp.reconfigure(blameOn.value && blameData ? buildBlameDecoration() : [])
+  })
+}
+
+const resetBlameState = () => {
+  blameSeq++
+  blameOn.value = false
+  blameLoading.value = false
+  blameData = null
+}
+
+const loadBlame = async () => {
+  if (!props.filePath) return
+  const seq = ++blameSeq
+  blameLoading.value = true
+  try {
+    const res = await GetFileBlame(props.filePath)
+    if (seq !== blameSeq || !blameOn.value) return // 已切换文件/已关闭，丢弃过期响应
+    if (!res || !Array.isArray(res.lines)) return
+    if (res.lines.length === 0) {
+      // 空文件无行归属可标注（后端空结果非错误）
+      resetBlameState()
+      ElMessage.info('空文件无可标注的行归属')
+      return
+    }
+    // 行数守卫：blame 行数与编辑器文档行数不一致 = 预览读取后文件被外部修改，
+    // 行级映射不可信，整体降级提示刷新（禁静默错位标注）
+    if (cmView && cmView.state.doc.lines !== res.lines.length) {
+      resetBlameState()
+      ElMessage.warning('文件已变更，行归属数据与预览不一致，请刷新预览后重试')
+      return
+    }
+    blameData = res
+    applyBlameDecoration()
+  } catch (error) {
+    if (seq !== blameSeq) return
+    blameOn.value = false
+    handleError('加载行归属失败: ', error)
+  } finally {
+    if (seq === blameSeq) {
+      blameLoading.value = false
+    }
+  }
+}
+
+const toggleBlame = () => {
+  if (!blameAvailable.value || blameLoading.value) return
+  blameOn.value = !blameOn.value
+  if (!blameOn.value) {
+    blameData = null
+    applyBlameDecoration()
+    return
+  }
+  loadBlame()
+}
+
+// blame 标注点击（document 委托）：带 sha 跳转文件历史并定位；未提交行无 sha
+// 不跳转。弹窗已开时先关后开（nextTick）走完整重挂载链路，确保新 sha 触发定位扫描
+const onBlameAnnotClick = (e) => {
+  // 实例域判定：组件存在双挂载面（ContentPanel 主预览 + RepoFilterDialog README
+  // 渲染），两实例都注册 document 委托，而 closest('.blame-annot') 是全局 DOM 查询
+  // 与实例无关——不加限定则点击本实例标注会连带打开他实例的历史弹窗
+  if (!previewRootRef.value || !previewRootRef.value.contains(e.target)) return
+  const target = e.target && e.target.closest ? e.target.closest('.blame-annot') : null
+  if (!target || !target.dataset.sha) return
+  blameHistorySha.value = target.dataset.sha
+  if (blameHistoryVisible.value) {
+    blameHistoryVisible.value = false
+    nextTick(() => { blameHistoryVisible.value = true })
+  } else {
+    blameHistoryVisible.value = true
+  }
+}
+
+// 相对时间：blame 标注空间小用短文案（作者时区墙钟全量时间在悬浮提示）
+const formatRelativeTime = (ts) => {
+  if (!ts) return ''
+  const diff = Date.now() / 1000 - ts
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`
+  if (diff < 86400 * 365) return `${Math.floor(diff / 86400 / 30)} 个月前`
+  return `${Math.floor(diff / 86400 / 365)} 年前`
+}
+
+// 文件身份/内容变化：整组复位（含在途响应失效 + 装饰清空）。htmlMode 切换不在
+// 此列（同文件视图切换数据面有效，切回源码态时 setupCodeMirror 尾部重放标注）
+watch(() => [props.kind, props.fileName, props.content, props.filePath], () => {
+  resetBlameState()
+  applyBlameDecoration()
+})
 
 const onGlobalClick = () => closeContextMenu()
 const onGlobalContextMenu = () => closeContextMenu()
@@ -1197,6 +1418,8 @@ onMounted(() => {
   document.addEventListener('selectionchange', onSelectionChange)
   // 监听 HTML 渲染 iframe 内注入脚本 postMessage 的外链打开请求
   window.addEventListener('message', onHtmlFrameMessage)
+  // 行归属标注点击委托（widget 不自带监听，document 级统一分发）
+  document.addEventListener('click', onBlameAnnotClick)
 })
 
 onBeforeUnmount(() => {
@@ -1204,6 +1427,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('contextmenu', onGlobalContextMenu, true)
   document.removeEventListener('selectionchange', onSelectionChange)
   window.removeEventListener('message', onHtmlFrameMessage)
+  document.removeEventListener('click', onBlameAnnotClick)
 })
 
 onBeforeUnmount(() => {
@@ -1593,6 +1817,36 @@ html.dark .cm-host :deep(.cm-editor) {
 /* 暗色：CodeMirror 内置选中行底色基于浅色设计，暗底上观感割裂 */
 html.dark .cm-host :deep(.cm-activeLine) {
   background: rgba(148, 163, 184, 0.12);
+}
+
+/* 行归属标注（blame widget）：块首行行尾灰色小字；hover 提示可跳转，
+   未提交态斜杠弱化且禁跳转（无对应提交） */
+.cm-host :deep(.blame-annot) {
+  margin-left: 14px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cm-host :deep(.blame-annot:hover) {
+  color: var(--primary-color, var(--el-color-primary));
+}
+
+.cm-host :deep(.blame-annot.is-uncommitted) {
+  cursor: default;
+  font-style: italic;
+  opacity: 0.75;
+}
+
+/* 暗色：标注色提亮保对比度（slate-400 对暗底 ≥3:1），未提交态再降一档仍达标 */
+html.dark .cm-host :deep(.blame-annot) {
+  color: #94a3b8;
+}
+
+html.dark .cm-host :deep(.blame-annot.is-uncommitted) {
+  color: #7e8ba0;
 }
 
 /* 暗色：选区底色改为半透明蓝，保证选中文字仍具备可读对比度 */
