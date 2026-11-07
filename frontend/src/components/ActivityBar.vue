@@ -4,7 +4,7 @@
     <el-tooltip
       v-for="item in panels"
       :key="item.id"
-      :content="item.label"
+      :content="item.label + item.shortcutTip"
       placement="right"
       :show-after="300"
     >
@@ -251,13 +251,14 @@ import AssetsIcon from './icons/AssetsIcon.vue'
 import { KickConnection, UnbanIP, UnbanCIDR } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import BranchCompareIcon from './icons/BranchCompareIcon.vue'
-import { useUiStore } from '../store'
+import { useUiStore, useSettingsStore } from '../store'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import { useIPBanList, useIPBanSuggestions, useIPBanTrend, formatBanExpiry } from '../composables/useIPBans'
 import BanTokenDialog from './BanTokenDialog.vue'
 import BanIPDialog from './BanIPDialog.vue'
 
 const uiStore = useUiStore()
+const settingsStore = useSettingsStore()
 
 defineEmits(['toggleTerminal', 'openSettings'])
 
@@ -440,16 +441,29 @@ const formatConnTime = (iso) => {
   return `${date} ${time}`
 }
 
-const panels = [
-  { id: 'directory', icon: Folder, label: '工作目录' },
-  { id: 'ai', icon: MagicStick, label: 'AI 功能' },
-  { id: 'ai-chat', icon: ChatDotRound, label: 'AI 对话' },
-  { id: 'toolbox', icon: ToolboxIcon, label: '工具箱' },
-  { id: 'assets', icon: AssetsIcon, label: '素材管理' },
-  { id: 'dashboard', icon: DataBoard, label: '状态看板' },
-  { id: 'stats', icon: TrendCharts, label: '仓库统计' },
-  { id: 'branchcompare', icon: BranchCompareIcon, label: '分支对比' }
-]
+// 面板 id → 图标映射（id/label/顺序真相源在 store 的 SIDEBAR_PANELS，本组件只补
+// UI 图标）。displayPanels 按 settingsStore.orderedPanels（用户自定义顺序，归一化
+// 保证全覆盖）映射图标输出；tooltip 拼接 Alt+序号提示（序号与 Home.vue 全局快捷
+// 键同源，Alt+N 切到本列表第 N 项）
+const panelIconMap = {
+  directory: Folder,
+  ai: MagicStick,
+  'ai-chat': ChatDotRound,
+  toolbox: ToolboxIcon,
+  assets: AssetsIcon,
+  dashboard: DataBoard,
+  stats: TrendCharts,
+  branchcompare: BranchCompareIcon
+}
+
+const panels = computed(() =>
+  settingsStore.orderedPanels.map((p, idx) => ({
+    id: p.id,
+    label: p.label,
+    icon: panelIconMap[p.id],
+    shortcutTip: ` (Alt+${idx + 1})`
+  }))
+)
 </script>
 
 <style scoped>

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import ActivityBar from '../ActivityBar.vue'
-import { useUiStore } from '../../store'
+import { useUiStore, useSettingsStore } from '../../store'
 
 // Wails 事件 handler 注册表（EventsOn mock 捕获）：多设备连接数事件驱动断言用。
 // 九期起 useIPBanList 与 useIPBanSuggestions 共听 webserve-ip-banned（真实
@@ -238,6 +238,59 @@ describe('ActivityBar', () => {
 })
 
 // ---- 多设备连接指示（PR3 语义明示）：连接数事件驱动显隐 ----
+
+describe('ActivityBar - 侧边栏顺序与快捷键编号提示', () => {
+  // 本 describe 的 tooltip stub 渲染 content（.tooltip-content），断言编号提示拼接；
+  // 顺序真相源 settingsStore.sidebarOrder（store 内归一化），组件只映射图标输出
+  const createWrapper = (activePanel = 'directory') => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const uiStore = useUiStore()
+    uiStore.activePanel = activePanel
+    return mount(ActivityBar, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          'el-icon': { template: '<span><slot /></span>' },
+          'el-tooltip': {
+            template: '<div><span class="tooltip-content">{{ content }}</span><slot /></div>',
+            props: ['content', 'placement']
+          }
+        }
+      }
+    })
+  }
+
+  const panelIds = (wrapper) =>
+    wrapper.findAll('[data-panel-id]').map((w) => w.attributes('data-panel-id'))
+  const tooltipTexts = (wrapper) =>
+    wrapper.findAll('.tooltip-content').map((t) => t.text())
+
+  it('默认顺序渲染且 tooltip 带编号提示（Alt+1..8 按序拼接）', () => {
+    const wrapper = createWrapper()
+    expect(panelIds(wrapper)).toEqual([
+      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare'
+    ])
+    const hints = tooltipTexts(wrapper)
+    expect(hints[0]).toBe('工作目录 (Alt+1)')
+    expect(hints[7]).toBe('分支对比 (Alt+8)')
+  })
+
+  it('自定义顺序驱动渲染顺序与编号跟随（Alt+1 指向新顺序第一个）', async () => {
+    // 先 mount（createWrapper 内建 pinia）再取同实例 settingsStore 改顺序——
+    // mount 前取 store 会落到上一用例的旧 pinia，改动不进本用例组件
+    const wrapper = createWrapper()
+    const settingsStore = useSettingsStore()
+    const defaultIds = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare']
+    settingsStore.sidebarOrder = ['stats', 'directory', ...defaultIds.filter(id => id !== 'stats' && id !== 'directory')]
+    await nextTick()
+    expect(panelIds(wrapper)[0]).toBe('stats')
+    expect(panelIds(wrapper)[1]).toBe('directory')
+    const hints = tooltipTexts(wrapper)
+    expect(hints[0]).toBe('仓库统计 (Alt+1)')
+    expect(hints[1]).toBe('工作目录 (Alt+2)')
+  })
+})
 
 describe('ActivityBar - 多设备连接指示', () => {
   const createWrapper = (activePanel = 'directory') => {

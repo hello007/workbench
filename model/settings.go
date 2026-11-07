@@ -402,6 +402,12 @@ type AppSettings struct {
 	ShortcutToggleTerminal string   `json:"shortcutToggleTerminal"` // 切换终端快捷键，默认 "Ctrl+`"
 	ShortcutRename         string   `json:"shortcutRename"`         // 重命名快捷键，默认 "F2"
 	ShortcutDelete         string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
+	// SidebarOrder 侧边栏面板顺序（面板 id 列表，如 ["directory","ai",...]）。空值
+	// = 默认顺序（向后兼容：老配置无此字段解析为 nil，前端归一化为默认顺序）。
+	// 纯存储无后端语义：面板 id 合法性、缺失补齐与未知剔除归一化均在前端进行
+	// （后端无面板 id 知识）。标量切片字段，零值即默认，不进 EnsureAllDefaults/
+	// PrivateCopy（对齐 SearchExcludeDirs 先例）。
+	SidebarOrder []string `json:"sidebarOrder"`
 	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
 	TessoaPath             string   `json:"tessoaPath"`             // tessoa 可执行文件自定义路径，留空表示未配置（打开资源管理器时优先探测 tessoa）
 	ThemeMode              string   `json:"themeMode"`              // 主题模式：system(跟随系统)/light/dark，空值按 system 处理

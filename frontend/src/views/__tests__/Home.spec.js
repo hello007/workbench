@@ -11,7 +11,7 @@ import { watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
-import { useUiStore, useDirectoryStore, useWorkspaceStore } from '../../store'
+import { useUiStore, useDirectoryStore, useWorkspaceStore, useSettingsStore } from '../../store'
 
 // Mock Wails runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -1491,5 +1491,67 @@ describe('Home.vue - handler 分支补充', () => {
 
     expect(event.preventDefault).toHaveBeenCalled()
     expect(ReadFromSystemClipboard).toHaveBeenCalled()
+  })
+
+  // ---- Alt+数字侧边栏面板切换（顺序可自定义，编号跟随当前顺序）----
+
+  it('Alt+数字按当前顺序切换面板', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'directory'
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '2', altKey: true }))
+    expect(ui.activePanel).toBe('ai') // 默认顺序第 2 个
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '4', altKey: true }))
+    expect(ui.activePanel).toBe('toolbox') // 默认顺序第 4 个
+  })
+
+  it('顺序自定义后 Alt+1 指向新顺序第一个面板', () => {
+    const ui = useUiStore()
+    const settings = useSettingsStore()
+    const defaultIds = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare']
+    settings.sidebarOrder = ['stats', ...defaultIds.filter(id => id !== 'stats')]
+    ui.activePanel = 'directory'
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '1', altKey: true }))
+    expect(ui.activePanel).toBe('stats')
+  })
+
+  it('命中切换时 preventDefault（不透传浏览器默认行为）', () => {
+    const event = keyEvent({ key: '3', altKey: true, preventDefault: vi.fn() })
+    wrapper.vm.handleGlobalKeydown(event)
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(useUiStore().activePanel).toBe('ai-chat')
+  })
+
+  it('序号超出面板数（8 面板按 Alt+9）不切换不拦截', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'directory'
+    const event = keyEvent({ key: '9', altKey: true, preventDefault: vi.fn() })
+    wrapper.vm.handleGlobalKeydown(event)
+    expect(ui.activePanel).toBe('directory')
+    expect(event.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('输入框聚焦时不触发侧边栏切换（Alt+N 不劫持文本输入）', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'directory'
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '2', altKey: true, target: input }))
+    expect(ui.activePanel).toBe('directory')
+    document.body.removeChild(input)
+  })
+
+  it('终端区域聚焦时不触发侧边栏切换（终端程序 Alt+N 语义保留）', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'directory'
+    const termArea = document.createElement('textarea')
+    termArea.className = 'xterm-helper-textarea'
+    const termHost = document.createElement('div')
+    termHost.className = 'xterm'
+    termHost.appendChild(termArea)
+    document.body.appendChild(termHost)
+    termArea.focus()
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '2', altKey: true, target: termArea }))
+    expect(ui.activePanel).toBe('directory')
+    document.body.removeChild(termHost)
   })
 })

@@ -23,6 +23,58 @@ const ALLOWED_SINGLE_KEYS = new Set([
 ])
 
 /**
+ * 侧边栏面板元数据（id + label 真相源；icon 组件引用留 ActivityBar.vue 按 id 映射）。
+ * 数组顺序即默认顺序。ActivityBar 渲染与 Home 全局快捷键（Alt+数字按序号切换）
+ * 共用 orderedPanels，保证两处消费同一顺序、设置区调整后即时一致。
+ */
+export const SIDEBAR_PANELS = [
+  { id: 'directory', label: '工作目录' },
+  { id: 'ai', label: 'AI 功能' },
+  { id: 'ai-chat', label: 'AI 对话' },
+  { id: 'toolbox', label: '工具箱' },
+  { id: 'assets', label: '素材管理' },
+  { id: 'dashboard', label: '状态看板' },
+  { id: 'stats', label: '仓库统计' },
+  { id: 'branchcompare', label: '分支对比' }
+]
+
+const SIDEBAR_PANEL_IDS = new Set(SIDEBAR_PANELS.map(p => p.id))
+const SIDEBAR_DEFAULT_ORDER = SIDEBAR_PANELS.map(p => p.id)
+
+/**
+ * 归一化侧边栏顺序配置：剔除未知 id（面板已移除的历史残留）、重复 id 保留首次
+ * 出现、缺失面板按默认顺序追加末尾；空/非数组输入回退默认顺序（老配置无
+ * sidebarOrder 字段 = nil = 默认顺序，向后兼容）。
+ * 返回新数组，不改入参（GetSettings 返回值只读纪律）。
+ */
+export function normalizeSidebarOrder(order) {
+  if (!Array.isArray(order)) return [...SIDEBAR_DEFAULT_ORDER]
+  const seen = new Set()
+  const result = []
+  for (const id of order) {
+    if (!SIDEBAR_PANEL_IDS.has(id) || seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+  }
+  for (const id of SIDEBAR_DEFAULT_ORDER) {
+    if (!seen.has(id)) result.push(id)
+  }
+  return result
+}
+
+/**
+ * 判断键盘事件是否为侧边栏面板切换快捷键（Alt+数字，无 Ctrl/Shift/Meta）。
+ * 返回 0-based 面板序号；非该类快捷键返回 -1（调用方据此跳过）。
+ * 序号超出面板数（面板 8 个按 Alt+9）由调用方按 orderedPanels.length 边界放行，
+ * 不 preventDefault（不劫持无语义按键）。
+ */
+export function sidebarShortcutIndex(event) {
+  if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey) return -1
+  if (!/^[1-9]$/.test(event.key)) return -1
+  return Number(event.key) - 1
+}
+
+/**
  * 将快捷键字符串解析为事件匹配对象
  * "Ctrl+P" → { ctrlKey: true, altKey: false, shiftKey: false, key: "p" }
  */
@@ -274,6 +326,16 @@ export const useSettingsStore = defineStore('settings', () => {
   const shortcutRename = ref(DEFAULTS.rename)
   const shortcutDelete = ref(DEFAULTS.delete)
 
+  // 侧边栏面板顺序（面板 id 数组）：初始默认顺序，loadShortcuts 后端加载后归一化
+  // 覆盖（GetSettings 首帧前未完成的窗口期渲染默认顺序，可接受）
+  const sidebarOrder = ref([...SIDEBAR_DEFAULT_ORDER])
+  // 排序后面板列表（id+label）：ActivityBar 渲染、Alt+数字切换、设置区顺序调整
+  // 三处消费同一顺序；元素为 SIDEBAR_PANELS 成员（共享引用，消费方只读）
+  const orderedPanels = computed(() => {
+    const byId = new Map(SIDEBAR_PANELS.map(p => [p.id, p]))
+    return sidebarOrder.value.map(id => byId.get(id))
+  })
+
   // 主题模式：system(跟随系统) / light / dark，默认 system
   const themeMode = ref('system')
 
@@ -491,12 +553,23 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutToggleTerminal.value = settings.shortcutToggleTerminal || DEFAULTS.toggleTerminal
       shortcutRename.value = settings.shortcutRename || DEFAULTS.rename
       shortcutDelete.value = settings.shortcutDelete || DEFAULTS.delete
+      sidebarOrder.value = normalizeSidebarOrder(settings.sidebarOrder)
     } catch {
       shortcutCommandPalette.value = DEFAULTS.commandPalette
       shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
       shortcutRename.value = DEFAULTS.rename
       shortcutDelete.value = DEFAULTS.delete
+      sidebarOrder.value = [...SIDEBAR_DEFAULT_ORDER]
     }
+  }
+
+  /**
+   * 保存侧边栏面板顺序到后端（合并写，避免覆盖其他字段）
+   */
+  async function saveSidebarOrder() {
+    const settings = await GetSettings()
+    settings.sidebarOrder = [...sidebarOrder.value]
+    await SaveSettings(settings)
   }
 
   /**
@@ -533,6 +606,9 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcutToggleTerminal,
     shortcutRename,
     shortcutDelete,
+    sidebarOrder,
+    orderedPanels,
+    saveSidebarOrder,
     themeMode,
     systemPrefersDark,
     resolvedTheme,

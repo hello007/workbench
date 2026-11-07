@@ -142,7 +142,7 @@ import RepoFilterDialog from '../components/RepoFilterDialog.vue'
 import { useRecentAccess } from '../composables/useRecentAccess'
 import { restoreSession, applySessionState, startSessionAutoSave } from '../composables/useSessionState'
 import { findOwningDirectory } from '../utils/pathMatch'
-import { useSettingsStore, useUiStore, useDirectoryStore, useWorkspaceStore, matchShortcut } from '../store'
+import { useSettingsStore, useUiStore, useDirectoryStore, useWorkspaceStore, matchShortcut, sidebarShortcutIndex } from '../store'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import {
@@ -541,6 +541,21 @@ const handleGlobalKeydown = (e) => {
   if (matchShortcut(e, settingsStore.shortcutToggleTerminal)) {
     e.preventDefault()
     uiStore.toggleTerminal()
+    return
+  }
+
+  // 切换侧边栏面板（Alt+数字按当前顺序编号，顺序可在设置中调整）。焦点判定：
+  // 输入框/对话框/终端聚焦时不触发——终端程序（tmux 等）常用 Alt+N 切 tab，
+  // 劫持会破坏终端内快捷键。序号超出面板数（如面板 8 个按 Alt+9）无语义，
+  // 不 preventDefault 直接放行
+  const sidebarIdx = sidebarShortcutIndex(e)
+  if (sidebarIdx >= 0) {
+    const panels = settingsStore.orderedPanels
+    if (sidebarIdx < panels.length) {
+      if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
+      e.preventDefault()
+      uiStore.activePanel = panels[sidebarIdx].id
+    }
     return
   }
 

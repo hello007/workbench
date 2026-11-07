@@ -130,7 +130,7 @@ const stubs = {
     }
   },
   'el-button': {
-    template: '<button v-bind="$attrs" :disabled="loading" @click="$emit(\'click\')"><slot /></button>',
+    template: '<button v-bind="$attrs" :disabled="disabled || loading" @click="$emit(\'click\')"><slot /></button>',
     props: ['type', 'size', 'loading', 'disabled', 'text'],
     emits: ['click']
   },
@@ -348,8 +348,9 @@ describe('SettingsPanel.vue', () => {
     wrapper = await createWrapper()
     const shortcutsTab = wrapper.findAll('.settings-nav-item')[3]
     await shortcutsTab.trigger('click')
-    // 4 可自定义 + 4 固定
-    expect(wrapper.findAll('.shortcut-item').length).toBe(8)
+    // 4 可自定义 + 4 固定（快捷键行不含侧边栏顺序行；后者为独立 sidebar-order-item）
+    expect(wrapper.findAll('.shortcut-item:not(.sidebar-order-item)').length).toBe(8)
+    expect(wrapper.findAll('.sidebar-order-item').length).toBe(8)
   })
 
   it('loadSettings 失败时 gpuEnabled 回退 true', async () => {
@@ -769,6 +770,84 @@ describe('SettingsPanel.vue', () => {
     await wrapper.findAll('button').find(b => b.text().includes('重置所有')).trigger('click')
     expect(settingsStore.shortcutCommandPalette).toBe(DEFAULTS.commandPalette)
     expect(settingsStore.shortcutRename).toBe(DEFAULTS.rename)
+  })
+})
+
+// ---- 侧边栏顺序调整区（快捷键 tab 内；上移/下移相邻交换 + 恢复默认）----
+describe('SettingsPanel.vue - 侧边栏顺序调整区', () => {
+  const DEFAULT_IDS = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare']
+
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  const openShortcutsTab = async (settingsOver = {}) => {
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    SaveSettings.mockResolvedValue(true)
+    wrapper = await createWrapper(settingsOver)
+    await wrapper.findAll('.settings-nav-item')[3].trigger('click')
+    return wrapper.findAll('.sidebar-order-item')
+  }
+
+  it('默认顺序渲染 8 行（编号 + label），首尾行上移/下移按钮 disabled', async () => {
+    const rows = await openShortcutsTab()
+    expect(rows.length).toBe(8)
+    expect(rows[0].text()).toContain('1. 工作目录')
+    expect(rows[7].text()).toContain('8. 分支对比')
+    // 边界禁用：首行无上移、末行无下移
+    expect(rows[0].findAll('button').find(b => b.text().includes('上移')).attributes('disabled')).toBeDefined()
+    expect(rows[7].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeDefined()
+    expect(rows[0].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeUndefined()
+  })
+
+  it('GetSettings 带 sidebarOrder 时列表按自定义顺序渲染（loadShortcuts 归一化生效）', async () => {
+    const rows = await openShortcutsTab({ sidebarOrder: ['stats', 'directory', ...DEFAULT_IDS.filter(id => id !== 'stats' && id !== 'directory')] })
+    expect(rows[0].text()).toContain('1. 仓库统计')
+    expect(rows[1].text()).toContain('2. 工作目录')
+  })
+
+  it('上移：相邻交换 + saveSidebarOrder 持久化 + DOM 即时重排', async () => {
+    const rows = await openShortcutsTab()
+    const settingsStore = useSettingsStore()
+    await rows[1].findAll('button').find(b => b.text().includes('上移')).trigger('click')
+    // store 顺序：ai 与 directory 交换
+    expect(settingsStore.sidebarOrder[0]).toBe('ai')
+    expect(settingsStore.sidebarOrder[1]).toBe('directory')
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    expect(SaveSettings.mock.calls[0][0].sidebarOrder[0]).toBe('ai')
+    // DOM 即时重排（orderedPanels computed 响应式）
+    await nextTick()
+    expect(wrapper.findAll('.sidebar-order-item')[0].text()).toContain('1. AI 功能')
+  })
+
+  it('下移：首行下移与第 2 行交换', async () => {
+    const rows = await openShortcutsTab()
+    const settingsStore = useSettingsStore()
+    await rows[0].findAll('button').find(b => b.text().includes('下移')).trigger('click')
+    expect(settingsStore.sidebarOrder[0]).toBe('ai')
+    expect(settingsStore.sidebarOrder[1]).toBe('directory')
+  })
+
+  it('恢复默认：自定义顺序一键回退默认序并持久化', async () => {
+    const rows = await openShortcutsTab({ sidebarOrder: ['stats', ...DEFAULT_IDS.filter(id => id !== 'stats')] })
+    const settingsStore = useSettingsStore()
+    expect(settingsStore.sidebarOrder[0]).toBe('stats')
+    await wrapper.findAll('button').find(b => b.text().includes('恢复默认')).trigger('click')
+    expect(settingsStore.sidebarOrder).toEqual(DEFAULT_IDS)
+    const { SaveSettings } = await import('../../../wailsjs/go/main/App')
+    expect(SaveSettings).toHaveBeenCalledTimes(1)
+    await nextTick()
+    expect(wrapper.findAll('.sidebar-order-item')[0].text()).toContain('1. 工作目录')
   })
 })
 // ---- 外部 diff 工具配置 ----

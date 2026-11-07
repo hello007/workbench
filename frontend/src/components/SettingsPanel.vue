@@ -318,6 +318,32 @@
                 <kbd v-for="key in s.keys" :key="key">{{ key }}</kbd>
               </div>
             </div>
+
+            <!-- 侧边栏顺序（Alt+数字按此顺序切换面板，编号即列表序号）：
+                 上移/下移相邻交换，恢复默认一键回退；改动即时生效（store 响应式
+                 驱动活动栏重排）并经 saveSidebarOrder 持久化 -->
+            <div class="settings-section-header sidebar-order-header">
+              <div class="settings-section-title">侧边栏顺序</div>
+              <el-button size="small" @click="resetSidebarOrder">恢复默认</el-button>
+            </div>
+            <div class="sidebar-order-list">
+              <div
+                v-for="(p, idx) in settingsStore.orderedPanels"
+                :key="p.id"
+                class="shortcut-item sidebar-order-item"
+              >
+                <div class="shortcut-action">{{ idx + 1 }}. {{ p.label }}</div>
+                <div class="shortcut-actions">
+                  <el-button size="small" text :disabled="idx === 0" @click="moveSidebarPanel(idx, -1)">上移</el-button>
+                  <el-button
+                    size="small"
+                    text
+                    :disabled="idx === settingsStore.orderedPanels.length - 1"
+                    @click="moveSidebarPanel(idx, 1)"
+                  >下移</el-button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <!-- 网络访问页（浏览器访问通道：桌面同开 HTTP，浏览器打开同一套界面） -->
@@ -700,7 +726,7 @@ import { isBrowserChannel } from '../transport'
 import { useDeviceConnections } from '../composables/useDeviceConnections'
 import AuditHistoryDialog from './AuditHistoryDialog.vue'
 import BanTokenDialog from './BanTokenDialog.vue'
-import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX, IP_BAN_AGG_SUGGEST_MIN, IP_BAN_AGG_SUGGEST_MAX, IP_BAN_TREND_WINDOW_MIN, IP_BAN_TREND_WINDOW_MAX, AUDIT_DEFAULTS, AUDIT_MAX_BYTES_MIN, AUDIT_MAX_BYTES_MAX, AUDIT_DEPTH_MIN, AUDIT_DEPTH_MAX } from '../store'
+import { useSettingsStore, useUiStore, formatDisplay, isValidShortcut, shortcutFromEvent, DEFAULTS, SIDEBAR_PANELS, diffToolPresetsFor, TERMINAL_APPEARANCE_DEFAULTS, TERMINAL_FONT_OPTIONS, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX, TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX, FALLBACK_SHELL, resolveDefaultShell, IP_BAN_DEFAULTS, IP_BAN_THRESHOLD_MIN, IP_BAN_THRESHOLD_MAX, IP_BAN_WINDOW_MIN, IP_BAN_WINDOW_MAX, IP_BAN_DURATION_MIN, IP_BAN_DURATION_MAX, IP_BAN_MAX_DURATION_MIN, IP_BAN_MAX_DURATION_MAX, IP_BAN_AGG_SUGGEST_MIN, IP_BAN_AGG_SUGGEST_MAX, IP_BAN_TREND_WINDOW_MIN, IP_BAN_TREND_WINDOW_MAX, AUDIT_DEFAULTS, AUDIT_MAX_BYTES_MIN, AUDIT_MAX_BYTES_MAX, AUDIT_DEPTH_MIN, AUDIT_DEPTH_MAX } from '../store'
 
 const emit = defineEmits(['update-available'])
 
@@ -1505,6 +1531,30 @@ function resetAllShortcuts() {
   settingsStore.saveShortcuts()
 }
 
+/**
+ * 上移/下移侧边栏面板（delta -1 上移 / +1 下移）：在 orderedPanels 当前顺序上
+ * 相邻交换后整体回写 sidebarOrder 并持久化。orderedPanels 为归一化顺序（面板
+ * 全覆盖、无未知 id），交换结果直接作为新顺序，无需再次归一化；赋值后
+ * orderedPanels computed 立即重算，活动栏即时重排（Alt+编号同步跟随）。
+ */
+function moveSidebarPanel(idx, delta) {
+  const order = settingsStore.orderedPanels.map(p => p.id)
+  const target = idx + delta
+  if (target < 0 || target >= order.length) return
+  ;[order[idx], order[target]] = [order[target], order[idx]]
+  settingsStore.sidebarOrder = order
+  settingsStore.saveSidebarOrder()
+}
+
+/**
+ * 恢复默认侧边栏顺序（默认顺序 = SIDEBAR_PANELS 定义序）：回写后持久化，
+ * 活动栏与 Alt+编号即时复位。
+ */
+function resetSidebarOrder() {
+  settingsStore.sidebarOrder = SIDEBAR_PANELS.map(p => p.id)
+  settingsStore.saveSidebarOrder()
+}
+
 function handleRecordingKeydown(e) {
   if (!recordingKey.value) return
 
@@ -2210,6 +2260,17 @@ const onThemeChange = async () => {
   padding: var(--spacing-xs) var(--spacing-sm);
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
+}
+
+/* 侧边栏顺序区：标题行与上方快捷键列表拉开间距，列表复用 shortcut-item 行样式 */
+.sidebar-order-header {
+  margin-top: var(--spacing-lg);
+}
+
+.sidebar-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
 }
 
 .shortcut-keys--editable:hover {

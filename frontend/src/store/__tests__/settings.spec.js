@@ -15,6 +15,9 @@ import {
   matchShortcut,
   formatDisplay,
   shortcutFromEvent,
+  normalizeSidebarOrder,
+  sidebarShortcutIndex,
+  SIDEBAR_PANELS,
   DEFAULTS,
   DIFF_TOOL_PRESETS,
   DIFF_TOOL_PRESETS_LINUX,
@@ -334,6 +337,117 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     expect(saved.shortcutDelete).toBe(DEFAULTS.delete)
     // 非快捷键字段保留
     expect(saved.otherField).toBe('keep')
+  })
+})
+
+describe('settings store - 侧边栏顺序 (normalizeSidebarOrder/sidebarShortcutIndex/orderedPanels/saveSidebarOrder)', () => {
+  const DEFAULT_IDS = SIDEBAR_PANELS.map(p => p.id)
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    GetSettings.mockResolvedValue({})
+    SaveSettings.mockResolvedValue(true)
+  })
+
+  describe('normalizeSidebarOrder 纯函数', () => {
+    it('空/非数组输入回退默认顺序（老配置无 sidebarOrder 字段）', () => {
+      expect(normalizeSidebarOrder(undefined)).toEqual(DEFAULT_IDS)
+      expect(normalizeSidebarOrder(null)).toEqual(DEFAULT_IDS)
+      expect(normalizeSidebarOrder([])).toEqual(DEFAULT_IDS)
+      expect(normalizeSidebarOrder('stats,directory')).toEqual(DEFAULT_IDS)
+      expect(normalizeSidebarOrder(42)).toEqual(DEFAULT_IDS)
+    })
+
+    it('完整合法顺序原样保留且返回新数组（不改入参）', () => {
+      const input = [...DEFAULT_IDS].reverse()
+      const result = normalizeSidebarOrder(input)
+      expect(result).toEqual(input)
+      expect(result).not.toBe(input)
+    })
+
+    it('未知 id 剔除、缺失面板按默认顺序追加末尾', () => {
+      // stats 提前 + unknown 历史残留剔除 + directory 在尾部补齐其余
+      const result = normalizeSidebarOrder(['stats', 'unknown-panel', 'directory'])
+      expect(result[0]).toBe('stats')
+      expect(result[1]).toBe('directory')
+      expect(result).not.toContain('unknown-panel') // 未知 id 已剔除
+      expect(result).toHaveLength(DEFAULT_IDS.length)
+      // 剩余位置为默认序中未出现的面板，相对顺序保持默认序
+      const rest = result.slice(2)
+      const expectedRest = DEFAULT_IDS.filter(id => id !== 'stats' && id !== 'directory')
+      expect(rest).toEqual(expectedRest)
+    })
+
+    it('重复 id 保留首次出现', () => {
+      const result = normalizeSidebarOrder(['ai', 'directory', 'ai'])
+      expect(result.filter(id => id === 'ai')).toHaveLength(1)
+      expect(result[0]).toBe('ai')
+      expect(result).toHaveLength(DEFAULT_IDS.length)
+    })
+  })
+
+  describe('sidebarShortcutIndex 纯函数', () => {
+    const ev = (key, { alt = true, ctrl = false, shift = false, meta = false } = {}) =>
+      ({ key, altKey: alt, ctrlKey: ctrl, shiftKey: shift, metaKey: meta })
+
+    it('Alt+数字返回 0-based 序号', () => {
+      expect(sidebarShortcutIndex(ev('1'))).toBe(0)
+      expect(sidebarShortcutIndex(ev('8'))).toBe(7)
+      expect(sidebarShortcutIndex(ev('9'))).toBe(8)
+    })
+
+    it('缺 Alt 或带 Ctrl/Shift/Meta 修饰时不匹配', () => {
+      expect(sidebarShortcutIndex(ev('1', { alt: false }))).toBe(-1)
+      expect(sidebarShortcutIndex(ev('1', { ctrl: true }))).toBe(-1)
+      expect(sidebarShortcutIndex(ev('1', { shift: true }))).toBe(-1)
+      expect(sidebarShortcutIndex(ev('1', { meta: true }))).toBe(-1)
+    })
+
+    it('非单数字 key 不匹配（字母/多字符功能键/符号）', () => {
+      expect(sidebarShortcutIndex(ev('a'))).toBe(-1)
+      expect(sidebarShortcutIndex(ev('F1'))).toBe(-1)
+      expect(sidebarShortcutIndex(ev('!'))).toBe(-1)
+      expect(sidebarShortcutIndex(ev(''))).toBe(-1)
+    })
+  })
+
+  describe('orderedPanels 加载与保存', () => {
+    it('loadShortcuts 归一化加载：配置顺序在前、缺失面板按默认序补齐', async () => {
+      GetSettings.mockResolvedValue({ sidebarOrder: ['stats', 'directory'] })
+      const store = useSettingsStore()
+      await store.loadShortcuts()
+      expect(store.orderedPanels[0].id).toBe('stats')
+      expect(store.orderedPanels[1].id).toBe('directory')
+      expect(store.orderedPanels).toHaveLength(DEFAULT_IDS.length)
+      // 元素为 SIDEBAR_PANELS 成员（带 label），ActivityBar 直接消费
+      expect(store.orderedPanels[0].label).toBe(SIDEBAR_PANELS.find(p => p.id === 'stats').label)
+    })
+
+    it('loadShortcuts 空配置回默认顺序，失败回退默认顺序', async () => {
+      const store = useSettingsStore()
+      await store.loadShortcuts()
+      expect(store.orderedPanels.map(p => p.id)).toEqual(DEFAULT_IDS)
+
+      GetSettings.mockRejectedValue(new Error('fail'))
+      store.sidebarOrder = ['stats', ...DEFAULT_IDS.filter(id => id !== 'stats')]
+      await store.loadShortcuts()
+      expect(store.orderedPanels.map(p => p.id)).toEqual(DEFAULT_IDS)
+    })
+
+    it('saveSidebarOrder 将顺序写入 settings 对象并保留其他字段', async () => {
+      const existing = { sidebarOrder: DEFAULT_IDS, themeMode: 'dark', otherField: 'keep' }
+      GetSettings.mockResolvedValue(existing)
+      const store = useSettingsStore()
+      store.sidebarOrder = ['stats', 'directory', ...DEFAULT_IDS.filter(id => id !== 'stats' && id !== 'directory')]
+      await store.saveSidebarOrder()
+      expect(SaveSettings).toHaveBeenCalledTimes(1)
+      const saved = SaveSettings.mock.calls[0][0]
+      expect(saved.sidebarOrder[0]).toBe('stats')
+      expect(saved.sidebarOrder).toHaveLength(DEFAULT_IDS.length)
+      expect(saved.themeMode).toBe('dark')
+      expect(saved.otherField).toBe('keep')
+    })
   })
 })
 
