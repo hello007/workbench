@@ -66,6 +66,9 @@ type BranchInfo struct {
 // BranchList 分支列表
 type BranchList struct {
 	Branches []BranchInfo `json:"branches"`
+	// DetachedRef 分离头引用名：checkout 标签/提交后非空（如 v1.0.0 或 SHA），
+	// 正常分支检出时为空。供前端展示分离头状态并禁用当前标签项。
+	DetachedRef string `json:"detachedRef,omitempty"`
 }
 
 // BranchSyncInfo 当前分支与上游跟踪分支的同步状态摘要 + 关键 refs 位置映射，

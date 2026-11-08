@@ -638,6 +638,8 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
       { name: 'origin/main', isRemote: true, isCurrent: false }
     ]
   },
+  // GetTags 形状对齐 model.GitTag（[] = 无标签仓库）；切换分支弹窗并行加载标签分组
+  GetTags: [],
   GetLocalChanges: [
     { path: 'src/app.js', status: 'M', staged: false },
     { path: 'src/utils.js', status: 'A', staged: true }

@@ -49,6 +49,94 @@ func headSha(t *testing.T, repo string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// makeTaggedRepo 创建含一次提交与轻量标签 v1.0 的仓库，返回仓库路径。
+func makeTaggedRepo(t *testing.T) string {
+	t.Helper()
+	repo := testutil.InitTempRepo(t)
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.RunGit(t, repo, "tag", "v1.0")
+	return repo
+}
+
+// ===== CheckoutTag =====
+
+// TestCheckoutTag_Success 检出后 HEAD 命中标签指向提交且无当前分支（detached）。
+func TestCheckoutTag_Success(t *testing.T) {
+	repo := makeTaggedRepo(t)
+	svc := NewGitService()
+
+	if err := svc.CheckoutTag(repo, "v1.0"); err != nil {
+		t.Fatalf("CheckoutTag: %v", err)
+	}
+	if branch, err := svc.gitCmd.GetBranch(repo); err != nil || strings.TrimSpace(branch) != "" {
+		t.Errorf("检出标签后应无当前分支 (detached), got %q err=%v", branch, err)
+	}
+	want, err := exec.Command("git", "-C", repo, "rev-parse", "refs/tags/v1.0").Output()
+	if err != nil {
+		t.Fatalf("rev-parse tag: %v", err)
+	}
+	if sha := headSha(t, repo); sha != strings.TrimSpace(string(want)) {
+		t.Errorf("HEAD expected tag sha %s, got %s", want, sha)
+	}
+}
+
+// TestCheckoutTag_SameNameBranchWinsTag 分支与标签同名时检出标签指向的提交而非
+// 同名分支（refs/tags/ 全路径消歧验证）。
+func TestCheckoutTag_SameNameBranchWinsTag(t *testing.T) {
+	repo := makeTaggedRepo(t)
+	svc := NewGitService()
+	// 标签之后追加一次提交并建同名分支 v1.0（分支指向新提交，标签指向 init）
+	testutil.WriteFile(t, filepath.Join(repo, "b.txt"), "second")
+	testutil.RunGit(t, repo, "add", "b.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "second")
+	testutil.RunGit(t, repo, "branch", "v1.0")
+
+	if err := svc.CheckoutTag(repo, "v1.0"); err != nil {
+		t.Fatalf("CheckoutTag same-name: %v", err)
+	}
+	tagSha, err := exec.Command("git", "-C", repo, "rev-parse", "refs/tags/v1.0").Output()
+	if err != nil {
+		t.Fatalf("rev-parse tag: %v", err)
+	}
+	if sha := headSha(t, repo); sha != strings.TrimSpace(string(tagSha)) {
+		t.Errorf("同名冲突应检出标签指向的提交 %s, got %s", tagSha, sha)
+	}
+}
+
+// TestCheckoutTag_DirtyWorktree 有未提交变更时拒绝切换。
+func TestCheckoutTag_DirtyWorktree(t *testing.T) {
+	repo := makeTaggedRepo(t)
+	svc := NewGitService()
+	testutil.WriteFile(t, filepath.Join(repo, "dirty.txt"), "uncommitted")
+
+	if err := svc.CheckoutTag(repo, "v1.0"); err == nil {
+		t.Error("未提交变更时应拒绝切换标签")
+	}
+}
+
+// TestCheckoutTag_NotExists 不存在的标签返回错误且 HEAD 不变。
+func TestCheckoutTag_NotExists(t *testing.T) {
+	repo := makeTaggedRepo(t)
+	svc := NewGitService()
+	before := headSha(t, repo)
+	if err := svc.CheckoutTag(repo, "nonexistent"); err == nil {
+		t.Error("不存在的标签应返回错误")
+	}
+	if after := headSha(t, repo); after != before {
+		t.Errorf("失败检出不应改变 HEAD: before=%s after=%s", before, after)
+	}
+}
+
+// TestCheckoutTag_NonRepo 非仓库目录返回错误。
+func TestCheckoutTag_NonRepo(t *testing.T) {
+	svc := NewGitService()
+	if err := svc.CheckoutTag(t.TempDir(), "v1.0"); err == nil {
+		t.Error("非仓库应返回错误")
+	}
+}
+
 // ===== ListTags =====
 
 // TestListTags_NonRepo 非仓库目录无法定位根，返回错误。

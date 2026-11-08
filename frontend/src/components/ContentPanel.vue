@@ -296,20 +296,21 @@
       <p class="empty-state-hint">在文件树中点击项目查看详情和操作</p>
     </div>
 
-    <!-- 切换分支对话框 -->
+    <!-- 切换分支对话框（分支 + 标签，标签检出为分离头状态） -->
     <el-dialog
       v-model="branchDialogVisible"
-      title="切换分支"
+      title="切换分支 / 标签"
       width="480px"
       append-to-body
     >
       <div class="branch-info">
-        当前分支：<span class="branch-name">{{ currentBranchName }}</span>
+        <template v-if="detachedRef">当前：<span class="branch-name">分离头（{{ detachedRef }}）</span></template>
+        <template v-else>当前分支：<span class="branch-name">{{ currentBranchName }}</span></template>
       </div>
       <el-select
         ref="branchSelectRef"
         v-model="selectedBranch"
-        placeholder="搜索并选择分支"
+        placeholder="搜索并选择分支或标签"
         filterable
         class="branch-select"
         :disabled="switchingBranch"
@@ -317,19 +318,28 @@
         <el-option-group label="本地分支">
           <el-option
             v-for="b in localBranches"
-            :key="b.name"
+            :key="'branch:' + b.name"
             :label="b.name"
-            :value="b.name"
+            :value="'branch:' + b.name"
             :disabled="b.isCurrent"
           />
         </el-option-group>
         <el-option-group v-if="remoteBranches.length > 0" label="远程分支">
           <el-option
             v-for="b in remoteBranches"
-            :key="b.name"
+            :key="'remote:' + b.name"
             :label="b.name"
-            :value="b.name"
+            :value="'remote:' + b.name"
             :disabled="b.isCurrent"
+          />
+        </el-option-group>
+        <el-option-group v-if="tagList.length > 0" label="标签">
+          <el-option
+            v-for="t in tagList"
+            :key="'tag:' + t.name"
+            :label="t.name"
+            :value="'tag:' + t.name"
+            :disabled="t.name === detachedRef"
           />
         </el-option-group>
       </el-select>
@@ -339,7 +349,7 @@
           type="primary"
           @click="doCheckout"
           :loading="switchingBranch"
-          :disabled="!selectedBranch || selectedBranch === currentBranchName"
+          :disabled="!selectedBranch || selectedBranch === 'branch:' + currentBranchName"
         >
           切换
         </el-button>
@@ -501,7 +511,7 @@ import {
   PreviewFile, ReadFileBytes, SaveFile, PullRepo, CloneRepo, OpenWithDefaultApp,
   OpenInExplorer, OpenInVSCode, OpenInWarp, OpenInObsidian, OpenObsidianVaultManager,
   CopyObsidianVaultPath, AutoRegisterAndOpen,
-  GetBranches, CheckoutBranch,
+  GetBranches, CheckoutBranch, CheckoutTag, GetTags,
   CancelGitOperation, CancelAllGitOperations, ExtractRepoName, GetConflictState
 } from '../../wailsjs/go/main/App'
 import { handleGitError } from '../utils/gitError'
@@ -645,8 +655,11 @@ const branchDialogVisible = ref(false)
 const branchLoading = ref(false)
 const switchingBranch = ref(false)
 const branchList = ref([])
+const tagList = ref([])
 const selectedBranch = ref('')
 const currentBranchName = ref('')
+// 分离头引用名（后端 GetBranches 的 detachedRef）：检出标签/提交后非空
+const detachedRef = ref('')
 const localBranches = computed(() => branchList.value.filter(b => !b.isRemote))
 const remoteBranches = computed(() => branchList.value.filter(b => b.isRemote))
 const branchSelectRef = ref()
@@ -672,8 +685,17 @@ const showBranchDialog = async () => {
   selectedBranch.value = ''
 
   try {
-    const result = await GetBranches(workspaceStore.selectedNode.path)
+    // 标签加载失败降级：仅提示并置空，不影响分支切换主功能
+    const [result, tags] = await Promise.all([
+      GetBranches(workspaceStore.selectedNode.path),
+      GetTags(workspaceStore.selectedNode.path).catch(() => {
+        ElMessage.warning('标签列表获取失败，本次仅支持分支切换')
+        return []
+      })
+    ])
     branchList.value = result.branches || []
+    detachedRef.value = result.detachedRef || ''
+    tagList.value = tags || []
     const current = branchList.value.find(b => b.isCurrent)
     currentBranchName.value = current ? current.name : ''
     nextTick(() => {
@@ -689,18 +711,27 @@ const showBranchDialog = async () => {
 const doCheckout = async () => {
   if (!workspaceStore.selectedNode || !selectedBranch.value) return
 
-  const branch = branchList.value.find(b => b.name === selectedBranch.value)
-  if (!branch) return
+  // 选中值为 kind:name 编码（branch:/remote:/tag:），分支与标签同名时语义仍可辨
+  const sepIndex = selectedBranch.value.indexOf(':')
+  const kind = selectedBranch.value.slice(0, sepIndex)
+  const name = selectedBranch.value.slice(sepIndex + 1)
+  if (!name) return
 
   switchingBranch.value = true
   try {
-    await CheckoutBranch(workspaceStore.selectedNode.path, selectedBranch.value, branch.isRemote)
-    ElMessage.success('已切换到分支: ' + selectedBranch.value)
+    if (kind === 'tag') {
+      await CheckoutTag(workspaceStore.selectedNode.path, name)
+      ElMessage.success('已切换到标签: ' + name + '（分离头指针状态，此状态下的提交不被分支引用，切回分支即可恢复）')
+    } else {
+      const branch = branchList.value.find(b => b.name === name)
+      await CheckoutBranch(workspaceStore.selectedNode.path, name, branch ? branch.isRemote : false)
+      ElMessage.success('已切换到分支: ' + name)
+    }
     branchDialogVisible.value = false
     gitInfoRef.value?.handleRefresh()
     commitHistoryRef.value?.handleRefresh()
   } catch (error) {
-    handleGitError('切换分支失败: ', error)
+    handleGitError((kind === 'tag' ? '切换标签失败: ' : '切换分支失败: '), error)
   } finally {
     switchingBranch.value = false
   }

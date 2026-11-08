@@ -328,6 +328,7 @@ func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 	}
 
 	var branches []model.BranchInfo
+	var detachedRef string
 	lines := strings.Split(output, "\n")
 
 	for _, line := range lines {
@@ -343,8 +344,14 @@ func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "  "))
 		}
 
-		// 过滤 HEAD -> 引用和 detached HEAD
-		if strings.Contains(line, "HEAD ->") || strings.Contains(line, "(HEAD detached") {
+		// 过滤 HEAD -> 引用；分离头行捕获引用名后不计入分支列表（如检出标签后的 detached HEAD）
+		if strings.Contains(line, "HEAD ->") {
+			continue
+		}
+		if strings.Contains(line, "(HEAD detached") {
+			if ref := parseDetachedRef(line); ref != "" {
+				detachedRef = ref
+			}
 			continue
 		}
 
@@ -364,7 +371,19 @@ func (s *GitService) GetBranches(dirPath string) (*model.BranchList, error) {
 		}
 	}
 
-	return &model.BranchList{Branches: branches}, nil
+	return &model.BranchList{Branches: branches, DetachedRef: detachedRef}, nil
+}
+
+// parseDetachedRef 从 `branch -a` 的分离头行提取引用名：at 形态为检出的标签或
+// SHA（`(HEAD detached at v1.0.0)`），from 形态为脱离的引用（rebase 中间态等，
+// `(HEAD detached from <sha>)`）；非分离头行返回空。
+func parseDetachedRef(line string) string {
+	for _, marker := range []string{"detached at ", "detached from "} {
+		if idx := strings.Index(line, marker); idx >= 0 {
+			return strings.TrimSuffix(line[idx+len(marker):], ")")
+		}
+	}
+	return ""
 }
 
 // CheckoutBranch 切换分支
@@ -410,6 +429,32 @@ func (s *GitService) CheckoutBranch(dirPath string, branchName string, isRemote 
 	}
 
 	_, err = s.gitCmd.CheckoutLocal(dirPath, branchName)
+	return err
+}
+
+// CheckoutTag 分离头检出标签（detached HEAD）：与分支切换同约束（未提交变更拒绝）；
+// 检出走 refs/tags/ 全路径 + --detach，消除分支与标签同名的歧义。变更类操作
+// 不注册取消（同 Commit 先例，与 CheckoutBranch 一致）。
+func (s *GitService) CheckoutTag(dirPath, tagName string) error {
+	release, err := s.tryLockRepo(dirPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	if !s.gitCmd.IsGitRepository(dirPath) {
+		return fmt.Errorf("不是Git仓库")
+	}
+
+	hasChanges, err := s.gitCmd.HasLocalChanges(dirPath)
+	if err != nil {
+		return fmt.Errorf("检查工作区状态失败: %w", err)
+	}
+	if hasChanges {
+		return fmt.Errorf("当前有未提交的变更，请先提交或暂存后再切换标签")
+	}
+
+	_, err = s.gitCmd.CheckoutTag(dirPath, tagName)
 	return err
 }
 

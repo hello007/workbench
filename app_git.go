@@ -744,6 +744,17 @@ func (a *App) GetTags(path string) ([]model.GitTag, error) {
 	return a.gitSvc.ListTags(path)
 }
 
+// CheckoutTag 分离头检出标签（detached HEAD），供「切换分支」对话框标签分组切换
+func (a *App) CheckoutTag(path, tagName string) error {
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+	if tagName == "" {
+		return fmt.Errorf("标签名不能为空")
+	}
+	return a.gitSvc.CheckoutTag(path, tagName)
+}
+
 // CreateTag 创建标签（message 为空创建轻量标签，非空创建注释标签），仅钉 HEAD
 func (a *App) CreateTag(path, name, message string) error {
 	if path == "" {

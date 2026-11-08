@@ -39,6 +39,8 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   CopyObsidianVaultPath: vi.fn(() => Promise.resolve('')),
   GetBranches: vi.fn(() => Promise.resolve({ branches: [{ name: 'main', isCurrent: true, isRemote: false }] })),
   CheckoutBranch: vi.fn(() => Promise.resolve(true)),
+  CheckoutTag: vi.fn(() => Promise.resolve(true)),
+  GetTags: vi.fn(() => Promise.resolve([])),
   // ---- 内嵌冲突解决第一期（R6 冲突自动呈现）----
   GetConflictState: vi.fn(() => Promise.resolve({ type: 'none', files: [] })),
   GetConflictFileContent: vi.fn(() => Promise.resolve({ content: '', encoding: 'UTF-8', binary: false, tooLarge: false })),
@@ -941,6 +943,37 @@ describe('ContentPanel.vue - handler 分支补充', () => {
       expect(wrapper.vm.$.setupState.currentBranchName).toBe('main')
     })
 
+    it('showBranchDialog 加载标签列表', async () => {
+      const { GetTags } = await import('../../../wailsjs/go/main/App')
+      GetTags.mockResolvedValueOnce([{ name: 'v1.0', type: 'lightweight', sha: 'x', shortSha: 'abc12345', message: '', tagger: '', date: '' }])
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      expect(GetTags).toHaveBeenCalledWith('D:\\proj')
+      expect(wrapper.vm.$.setupState.tagList).toHaveLength(1)
+      expect(wrapper.vm.$.setupState.detachedRef).toBe('')
+    })
+
+    it('showBranchDialog detached 状态记录分离头引用', async () => {
+      const { GetBranches } = await import('../../../wailsjs/go/main/App')
+      GetBranches.mockResolvedValueOnce({ branches: [{ name: 'main', isCurrent: false, isRemote: false }], detachedRef: 'v1.0' })
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      expect(wrapper.vm.$.setupState.detachedRef).toBe('v1.0')
+    })
+
+    it('showBranchDialog 标签加载失败降级 warning 且分支功能不受影响', async () => {
+      const { GetTags } = await import('../../../wailsjs/go/main/App')
+      GetTags.mockRejectedValueOnce(new Error('tag boom'))
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('标签列表获取失败'))
+      expect(wrapper.vm.$.setupState.tagList).toHaveLength(0)
+      expect(wrapper.vm.$.setupState.currentBranchName).toBe('main')
+    })
+
     it('showBranchDialog 失败时 error', async () => {
       const { GetBranches } = await import('../../../wailsjs/go/main/App')
       mountWith(dirNode)
@@ -955,11 +988,47 @@ describe('ContentPanel.vue - handler 分支补充', () => {
       mountWith(dirNode)
       await wrapper.vm.$.setupState.showBranchDialog()
       await flushPromises()
-      wrapper.vm.$.setupState.selectedBranch = 'main'
+      wrapper.vm.$.setupState.selectedBranch = 'branch:main'
       await wrapper.vm.$.setupState.doCheckout()
       await flushPromises()
       expect(CheckoutBranch).toHaveBeenCalledWith('D:\\proj', 'main', false)
       expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('main'))
+    })
+
+    it('doCheckout 远程分支编码分流传 isRemote=true', async () => {
+      const { GetBranches, CheckoutBranch } = await import('../../../wailsjs/go/main/App')
+      GetBranches.mockResolvedValueOnce({ branches: [{ name: 'main', isCurrent: false, isRemote: false }, { name: 'origin/dev', isCurrent: false, isRemote: true }] })
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      wrapper.vm.$.setupState.selectedBranch = 'remote:origin/dev'
+      await wrapper.vm.$.setupState.doCheckout()
+      await flushPromises()
+      expect(CheckoutBranch).toHaveBeenCalledWith('D:\\proj', 'origin/dev', true)
+    })
+
+    it('doCheckout 选中标签走 CheckoutTag 并提示分离头状态', async () => {
+      const { CheckoutTag } = await import('../../../wailsjs/go/main/App')
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      wrapper.vm.$.setupState.selectedBranch = 'tag:v1.0'
+      await wrapper.vm.$.setupState.doCheckout()
+      await flushPromises()
+      expect(CheckoutTag).toHaveBeenCalledWith('D:\\proj', 'v1.0')
+      expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('分离头'))
+    })
+
+    it('doCheckout 标签切换失败走切换标签错误文案', async () => {
+      const { CheckoutTag } = await import('../../../wailsjs/go/main/App')
+      CheckoutTag.mockRejectedValueOnce(new Error('tag fail'))
+      mountWith(dirNode)
+      await wrapper.vm.$.setupState.showBranchDialog()
+      await flushPromises()
+      wrapper.vm.$.setupState.selectedBranch = 'tag:v1.0'
+      await wrapper.vm.$.setupState.doCheckout()
+      await flushPromises()
+      expect(ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('切换标签失败'))
     })
 
     it('doCheckout 无选中分支时直接返回', async () => {

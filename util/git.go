@@ -416,6 +416,13 @@ func (g *GitCommand) CheckoutRemote(dir, remoteBranch, localBranch string) (stri
 	return g.Execute(dir, "checkout", "-b", localBranch, remoteBranch)
 }
 
+// CheckoutTag 分离头检出标签：--detach 显式声明分离头意图（检出标签本就产生
+// detached HEAD，显式化免依赖 git 的隐式警告语义），refs/tags/ 全路径消除
+// 分支与标签同名时裸名优先检出分支的歧义。
+func (g *GitCommand) CheckoutTag(dir, tag string) (string, error) {
+	return g.Execute(dir, "checkout", "--detach", "refs/tags/"+tag)
+}
+
 // ===== 合并 / 变基 / 拣选 =====
 //
 // 以下操作均可能因冲突以 exit 1 正常结束，统一走 ExecuteWithCodes 接受退出码 1。

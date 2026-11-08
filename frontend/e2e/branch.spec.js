@@ -146,6 +146,43 @@ test.describe('Git 分支管理流程', () => {
     })
   })
 
+  test.describe('切换标签（ContentPanel 弹窗，标签检出为分离头）', () => {
+    // detached 前提：已检出 v1.0.0（GetBranches 回显 detachedRef，无 isCurrent 分支）；
+    // 标签表含当前分离头引用（置灰禁选）与可切换标签 v2.0.0
+    test.use({
+      wailsOverrides: {
+        ...GIT_FLOW_OVERRIDES,
+        GetBranches: { branches: [{ name: 'main', isRemote: false, isCurrent: false }], detachedRef: 'v1.0.0' },
+        GetTags: [
+          { name: 'v1.0.0', type: 'lightweight', sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0', shortSha: 'a1b2c3d4', message: '', tagger: '', date: '' },
+          { name: 'v2.0.0', type: 'annotated', sha: '0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e', shortSha: '0f9e8d7c', message: 'release 2.0', tagger: 'e2e', date: '2 weeks ago' }
+        ]
+      }
+    })
+
+    test('选择标签后切换：CheckoutTag 收到 (path, tag)，弹窗回显分离头', async ({ page }) => {
+      await openGitRepoPage(page)
+
+      await page.locator('.git-actions').getByRole('button', { name: '切换分支' }).click()
+      const dialog = visibleDialog(page, '切换分支 / 标签')
+      await expect(dialog).toBeVisible()
+      // 分离头状态回显（detachedRef 非空走「分离头（引用名）」形态）
+      await expect(dialog.locator('.branch-name')).toHaveText('分离头（v1.0.0）')
+
+      // 标签分组中当前分离头引用 v1.0.0 置灰禁选，选择另一标签
+      await dialog.locator('.branch-select').click()
+      await page.getByRole('option', { name: 'v2.0.0' }).click()
+      await dialog.getByRole('button', { name: '切换' }).click()
+
+      await expect(page.locator('.el-message', { hasText: '已切换到标签: v2.0.0' })).toBeVisible()
+
+      const checkoutCalls = await getWailsCalls(page, 'CheckoutTag')
+      expect(checkoutCalls).toEqual([
+        { method: 'CheckoutTag', args: [E2E_REPO_PATH, 'v2.0.0'] }
+      ])
+    })
+  })
+
   test.describe('新建分支失败链路', () => {
     test.use({
       wailsOverrides: {

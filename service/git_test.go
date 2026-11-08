@@ -140,6 +140,73 @@ func TestCheckoutBranch_NonRepo(t *testing.T) {
 	}
 }
 
+// TestParseDetachedRef 分离头行两形态解析：at=检出的标签/SHA，from=脱离的引用
+// （rebase 中间态等）；非分离头行（含裸 `(HEAD detached)` 无引用形态）返回空。
+func TestParseDetachedRef(t *testing.T) {
+	cases := []struct {
+		line string
+		want string
+	}{
+		{"* (HEAD detached at v1.0.0)", "v1.0.0"},
+		{"  (HEAD detached at abc1234)", "abc1234"},
+		{"* (HEAD detached from origin/master)", "origin/master"},
+		{"* (HEAD detached from 1a2b3c4)", "1a2b3c4"},
+		{"* main", ""},
+		{"remotes/origin/main", ""},
+		{"* (HEAD detached)", ""},
+	}
+	for _, c := range cases {
+		if got := parseDetachedRef(c.line); got != c.want {
+			t.Errorf("parseDetachedRef(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
+// TestGetBranches_DetachedAtTag 检出标签后 DetachedRef 为该标签名，
+// 分支列表不含分离头行且无 isCurrent 项。
+func TestGetBranches_DetachedAtTag(t *testing.T) {
+	repo := testutil.InitTempRepo(t)
+	svc := NewGitService()
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+	testutil.RunGit(t, repo, "tag", "v1.0")
+	testutil.RunGit(t, repo, "checkout", "v1.0")
+
+	list, err := svc.GetBranches(repo)
+	if err != nil {
+		t.Fatalf("GetBranches detached: %v", err)
+	}
+	if list.DetachedRef != "v1.0" {
+		t.Errorf("DetachedRef expected v1.0, got %q", list.DetachedRef)
+	}
+	for _, b := range list.Branches {
+		if b.IsCurrent {
+			t.Errorf("detached 状态不应有 isCurrent 分支: %+v", b)
+		}
+		if strings.Contains(b.Name, "detached") {
+			t.Errorf("分离头行不应计入分支列表: %+v", b)
+		}
+	}
+}
+
+// TestGetBranches_OnBranch 分支检出时 DetachedRef 为空（回归）。
+func TestGetBranches_OnBranch(t *testing.T) {
+	repo := testutil.InitTempRepo(t)
+	svc := NewGitService()
+	testutil.WriteFile(t, filepath.Join(repo, "a.txt"), "init")
+	testutil.RunGit(t, repo, "add", "a.txt")
+	testutil.RunGit(t, repo, "commit", "-m", "init")
+
+	list, err := svc.GetBranches(repo)
+	if err != nil {
+		t.Fatalf("GetBranches: %v", err)
+	}
+	if list.DetachedRef != "" {
+		t.Errorf("分支检出时 DetachedRef 应为空, got %q", list.DetachedRef)
+	}
+}
+
 // TestDiscardChanges_NonRepo 非 git 目录无法定位仓库根，返回错误。
 func TestDiscardChanges_NonRepo(t *testing.T) {
 	svc := NewGitService()
