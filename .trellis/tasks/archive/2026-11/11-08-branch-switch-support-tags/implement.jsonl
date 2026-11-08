@@ -1,0 +1,6 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本任务新增 App.CheckoutTag 绑定 + model.BranchList 加 DetachedRef 字段，须按契约规则手动同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；了解 App 方法签名与 model 导出 struct 是契约真相源"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增 service.CheckoutTag 与 GetBranches detached 解析、前端 ContentPanel 改动须满足覆盖率门禁（service ≥76%、前端 ≥70%）"}
+{"file": "docs/spec/test-stability.md", "reason": "新写 service 单测（detached 解析/检出/未提交变更拒绝）须遵守禁隐式依赖外部状态规则，复用 util/testutil 辅助"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "本次跨四层新增方法（util→service→app→wailsjs 绑定），依赖方向与分层边界按此规范"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "ContentPanel.vue 对话框改动（标签分组/kind 前缀编码/detached 展示/doCheckout 分流）遵循 Vue 3 组件设计规范"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "GetTags 失败的降级提示（warning 不阻塞分支功能）与现有 handleGitError 分流遵循前端异常捕获规范"}

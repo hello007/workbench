@@ -1,0 +1,4 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步是否齐全（App.js 新增 CheckoutTag、App.d.ts 签名、models.ts BranchList.detachedRef 字段），漏同步会致 npm run build MISSING_EXPORT"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对新增代码覆盖率是否达门禁（service ≥76%、前端 ≥70%）"}
+{"file": "docs/spec/test-stability.md", "reason": "核对新增单测是否隐式依赖环境外部状态（固定端口/mtime/本机常驻进程），须用 util/testutil 与临时仓库"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "核对四层改动依赖方向（util 不反向依赖 model 等）与分层边界"}
