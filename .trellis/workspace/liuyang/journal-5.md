@@ -435,3 +435,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 241: 切换分支支持选择 git 标签
+
+**Date**: 2026-11-08
+**Task**: 切换分支支持选择 git 标签
+**Branch**: `master`
+
+### Summary
+
+「切换分支」弹窗支持标签三组搜索选择：git checkout --detach refs/tags/<tag> 分离头检出（全路径消同名分支歧义），BranchList 新增 detachedRef 供弹窗回显分离头并置灰当前标签；wailsjs 三处同步；Go 10 用例 + 前端 5 用例 + E2E 标签切换用例全绿（service 覆盖 81.2%）。ADR 见任务 PRD：方案 A 直接检出（用户确认）、新增 CheckoutTag 独立方法零破坏兼容。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a1057bc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
