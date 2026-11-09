@@ -468,3 +468,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 242: 临时待办工作区（剪贴板快速记录 + 完成归档）
+
+**Date**: 2026-11-09
+**Task**: 临时待办工作区（剪贴板快速记录 + 完成归档）
+**Branch**: `master`
+
+### Summary
+
+新增侧边栏一级面板「临时待办」（Alt+9）：Ctrl+Alt+N 读系统剪贴板直接落条、自由标签、相对时间、一键复制、勾选完成进入已完成区并可回退、逐条删除；数据落 data/temp_todos.json（原子写），已完成保留 30 天且上限 500 条。新增 util.ReadClipboardText 平台分叉实现与 5 个错误码（三处同步），Alt+数字纳入保留快捷键。子 agent 审核后修复：E2E 9 面板断言、Delete 落盘失败回滚、store 快捷键单测、错误码文档表、E2E mock 登记、设计令牌归并。验证：go vet/test 全绿（service 81.3%）、前端 2781 测试全绿（覆盖率 86.9%）、双端构建通过；E2E 未实跑，剪贴板链路因本机剪贴板被占用未实机验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6100a2b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
