@@ -1,0 +1,12 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "本任务新增 App 层委托方法、model.TempTodo 导出 struct、Settings 快捷键字段，须按契约规则手动同步 frontend/wailsjs 三处（App.js/App.d.ts/models.ts）；含 CompletedAt 用指针避 omitempty 失效的同类决策先例"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 service.TodoService 须在 app_services.go 的 AppServices 字段与 NewAppServices 构造行两处注册；AppServices 必须在 package main，构造纯 new"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/temp_todos.json 持久化必须走 util.SaveJSON 原子写，禁新增 os.WriteFile 直写与自建 temp+rename"}
+{"file": "docs/spec/browser-channel.md", "reason": "新后端方法须确认是否加入 RPCHiddenMethods（本方法浏览器模式需要，故不加）；新增带事件的 service 须在 web_serve.go 的 applySink 补 SetEventSink（本服务无事件）"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端日志用 log/slog（service 调 Logger()、App 层用 slog.X）；新增错误码须三处同步（app_error.go + 前端 ErrorCode/WARNING_CODES）；剪贴板空/无文本走 warning 分流"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "新增一级侧边栏面板须遵守三列布局、面板根元素完整 flex 约束链、图标内联 SVG fill=currentColor、字号字重梯度与语义配色"}
+{"file": "docs/spec/design-tokens.md", "reason": "面板颜色/间距/暗色适配须使用既有设计令牌，禁混冷暖灰与自造色值"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "新增 service 与前端面板改动须满足覆盖率门禁（service ≥76%、前端 ≥70% 硬失败）"}
+{"file": "docs/spec/linux-platform.md", "reason": "util.ReadClipboardText 属平台抽象：Windows 读 CF_UNICODETEXT、非 Windows 走既有 clipboard 工具链，须按编译期 _windows/_other 双文件或运行时 GOOS 分支规范实现"}
+{"file": "docs/spec/test-stability.md", "reason": "剪贴板读取不可作为单测隐式外部依赖，须注入可替换的读取函数或 fake；保留期清理测试用注入时间而非 sleep"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "TempTodoPanel.vue 组件结构、组合式 API、props/emits 设计遵循 Vue 3 组件规范"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "本次跨 util→service→app→前端四层新增，依赖方向严格单向向下，util 不反向依赖 model"}

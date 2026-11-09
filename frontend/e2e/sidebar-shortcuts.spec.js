@@ -2,8 +2,8 @@
  * 侧边栏快捷键与顺序自定义 E2E（活动栏 Alt+数字切换 + 设置区顺序调整链路）。
  *
  * 覆盖：
- * 1. 默认顺序下 Alt+1..8 切换对应面板（活动栏 is-active 断言）；序号超出面板数
- *    （Alt+9 > 8 面板）不切换不拦截
+ * 1. 默认顺序下 Alt+1..9 切换对应面板（活动栏 is-active 断言），Alt+9 指向第 9
+ *    个面板「临时待办」
  * 2. 磁盘持久化顺序恢复：GetSettings 带 sidebarOrder 时活动栏 DOM 顺序与
  *    Alt+编号指向同步跟随（重启保留链路）
  * 3. 设置区顺序调整：上移 → SaveSettings payload 收到新顺序 + 活动栏即时重排 +
@@ -34,7 +34,7 @@ const baseSettings = {
   diffToolArgs: '{left} {right}'
 }
 
-const DEFAULT_ORDER = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare']
+const DEFAULT_ORDER = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo']
 
 /** 打开设置弹窗并切到快捷键 tab（导航语义定位 hasText，禁 nth） */
 async function openShortcutsTab(page) {
@@ -48,7 +48,7 @@ async function openShortcutsTab(page) {
 test.describe('侧边栏 Alt+数字快捷键（默认顺序）', () => {
   test.use({ wailsOverrides: { GetSettings: baseSettings } })
 
-  test('Alt+1..8 切换对应面板，Alt+9 超出面板数不切换', async ({ page }) => {
+  test('Alt+1..9 切换对应面板，Alt+9 指向临时待办', async ({ page }) => {
     await page.goto('/')
     // 挂载确认（§6.1：keydown 注册晚于 goto load 事件，先等首项可见再按键）
     await expect(activityPanel(page, 'directory')).toBeVisible()
@@ -69,10 +69,18 @@ test.describe('侧边栏 Alt+数字快捷键（默认顺序）', () => {
       await expect(activityPanel(page, 'branchcompare')).toHaveClass(/is-active/)
     }).toPass()
 
-    // Alt+9（面板仅 8 个）无语义：activePanel 保持 branchcompare 不漂移
-    await page.keyboard.press('Alt+9')
-    await expect(activityPanel(page, 'branchcompare')).toHaveClass(/is-active/)
-    await expect(activityPanel(page, 'directory')).not.toHaveClass(/is-active/)
+    // Alt+9（默认顺序第 9 个）→ 临时待办
+    await expect(async () => {
+      await page.keyboard.press('Alt+9')
+      await expect(activityPanel(page, 'todo')).toHaveClass(/is-active/)
+    }).toPass()
+
+    // 回到 Alt+8 验证双向切换不漂移
+    await expect(async () => {
+      await page.keyboard.press('Alt+8')
+      await expect(activityPanel(page, 'branchcompare')).toHaveClass(/is-active/)
+    }).toPass()
+    await expect(activityPanel(page, 'todo')).not.toHaveClass(/is-active/)
   })
 })
 
@@ -112,7 +120,7 @@ test.describe('侧边栏顺序：设置区上移调整', () => {
     const payload = (await getWailsCalls(page, 'SaveSettings'))[0].args[0]
     expect(payload.sidebarOrder[0]).toBe('ai')
     expect(payload.sidebarOrder[1]).toBe('directory')
-    expect(payload.sidebarOrder).toHaveLength(8)
+    expect(payload.sidebarOrder).toHaveLength(9)
 
     // 活动栏即时重排（store 响应式跨组件）
     await expect(page.locator('[data-panel-id]').first()).toHaveAttribute('data-panel-id', 'ai')

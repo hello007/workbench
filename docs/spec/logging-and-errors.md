@@ -1,7 +1,7 @@
 # 日志与错误处理规范
 
 > 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制、web_audit.log 审计事件表。
-> 最后更新：2026-10-27 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor；token_ban/token_unban 审计行与 E_TOKEN_REVOKED：10-24-connection-ban；ip_ban/ip_unban 审计行（actorSource 扩 system）：10-26-10-26-connection-auto-ban；ip_ban strike 字段与档位 reason（六期）：10-27-connection-ban-tuning；ip_ban 手动封禁归因分叉（七期）：10-27-ip
+> 最后更新：2026-11-09 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor；token_ban/token_unban 审计行与 E_TOKEN_REVOKED：10-24-connection-ban；ip_ban/ip_unban 审计行（actorSource 扩 system）：10-26-10-26-connection-auto-ban；ip_ban strike 字段与档位 reason（六期）：10-27-connection-ban-tuning；ip_ban 手动封禁归因分叉（七期）：10-27-ip；临时待办五码：11-09-temp-todo-workspace
 
 ---
 
@@ -103,6 +103,11 @@ type AppError struct {
 | `ErrCodeAssetsSplitSourceDeleteFailed` | `E_ASSETS_SPLIT_SOURCE_DELETE_FAILED` | 素材管理 | warning（就地替换拆分成功但源文件无法移入回收站：被 PowerPoint/WPS 占用、只读或权限不足。产物、索引行与标注副本均保留、源文件与源行亦保留，用户关闭占用程序后可重试拆分覆盖产物；2026-10-31 素材拆分 B 方案 PR1 新增，`splitOneFileReplace` 回收站移入失败分支返回，单文件入口升格 AppError、批量入口经 `Item.Code` 透出不整体失败） |
 | `ErrCodeAssetsSplitOutputConflict` | `E_ASSETS_SPLIT_OUTPUT_CONFLICT` | 素材管理 | warning（落点目录已被 `split_records` 中另一源文件的记录占用：典型为 A 拆分后改名重链为 B、记录 output_dir 冻结 A 目录，新建 A 再拆分将覆盖 B 产物。2026-11-02 落点归属校验新增，`splitOneFileWithHash` 与 `splitOneFileReplace` 均在算出 outDir 后、任何删除/写入动作之前经 `splitRecordByOutputDir` 判定并返回失败结果 + code，不删除/覆盖任何文件；replace 链路 2026-11-02 加固接入——原仅靠 `ownsOutDir`/`firstReplaceArtifactName` 启发式，「旧记录指向目录但产物已缺失」形态会放行并覆盖另一记录的产物。同源记录排除，用户改名/移动源后重试） |
 | `ErrCodeTokenRevoked` | `E_TOKEN_REVOKED` | 浏览器访问通道连接管控 | warning（封禁已撤销令牌被拒：撤销即凭据失效封禁无拒连对象，引导刷新列表；2026-10-24 连接管控四期新增，`WebTokenService.Ban` 校验分支返回） |
+| `ErrCodeTempTodoClipboardEmpty` | `E_TEMP_TODO_CLIPBOARD_EMPTY` | 临时待办（侧边栏 `todo` 面板） | warning（剪贴板无内容，提示先复制文本再按快捷键；2026-11-09 临时待办工作区新增，`TempTodoService.AddFromClipboard` 将 `util.ErrClipboardEmpty` 翻译为本码，不落条） |
+| `ErrCodeTempTodoClipboardNoText` | `E_TEMP_TODO_CLIPBOARD_NO_TEXT` | 临时待办（侧边栏 `todo` 面板） | warning（剪贴板有内容但无文本格式，如复制的文件；`AddFromClipboard` 将 `util.ErrClipboardNoText` 翻译为本码，与「为空」分开提示，否则用户无法判断是没复制还是复制了文件，不落条） |
+| `ErrCodeTempTodoTextRequired` | `E_TEMP_TODO_TEXT_REQUIRED` | 临时待办（侧边栏 `todo` 面板） | warning（正文为空或全空白；`Add`/`Update` 归一后判空拒绝，前端表单已挡、后端防御保留） |
+| `ErrCodeTempTodoNotFound` | `E_TEMP_TODO_NOT_FOUND` | 临时待办（侧边栏 `todo` 面板） | warning（目标条目不存在或已被删除，列表已过期；`Update`/`SetCompleted`/`Delete` 按 ID 未命中返回，前端重拉列表） |
+| `ErrCodeTempTodoClipboardFailed` | `E_TEMP_TODO_CLIPBOARD_FAILED` | 临时待办（侧边栏 `todo` 面板） | error（剪贴板读取失败：打开失败或剪贴板工具缺失，`WrapAppError` 保留根因；前端 `handleError` 弹 error 并带前缀） |
 | `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
 | `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |
 | `ErrCodeRPCMethodUnsupported` | `E_RPC_METHOD_UNSUPPORTED` | RPC 协议层（serve 浏览器模式） | error（签名形态不受支持，如变参） |

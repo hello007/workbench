@@ -383,38 +383,43 @@ func clampAuditInt(v, min, max, def int) int {
 
 // AppSettings 应用设置
 type AppSettings struct {
-	GpuDisabled            bool     `json:"gpuDisabled"`
-	DefaultShell           string   `json:"defaultShell"`           // 默认 Shell 类型：powershell/cmd/gitbash/wsl
-	GitBashPath            string   `json:"gitBashPath"`            // Git Bash 自定义路径
-	WslDistro              string   `json:"wslDistro"`              // WSL 发行版名称
-	TerminalFontSize       int      `json:"terminalFontSize"`       // 终端字号（pt），默认 14，范围 10-24
-	TerminalFontFamily     string   `json:"terminalFontFamily"`     // 终端字体族，空值走默认 Cascadia Code 字体栈
-	TerminalScrollback     int      `json:"terminalScrollback"`     // 终端回滚行数，默认 5000，范围 1000-10000
+	GpuDisabled        bool   `json:"gpuDisabled"`
+	DefaultShell       string `json:"defaultShell"`       // 默认 Shell 类型：powershell/cmd/gitbash/wsl
+	GitBashPath        string `json:"gitBashPath"`        // Git Bash 自定义路径
+	WslDistro          string `json:"wslDistro"`          // WSL 发行版名称
+	TerminalFontSize   int    `json:"terminalFontSize"`   // 终端字号（pt），默认 14，范围 10-24
+	TerminalFontFamily string `json:"terminalFontFamily"` // 终端字体族，空值走默认 Cascadia Code 字体栈
+	TerminalScrollback int    `json:"terminalScrollback"` // 终端回滚行数，默认 5000，范围 1000-10000
 	// TerminalOscNotifyEnabled 终端 OSC 9/777/99 通知转应用内提示的总开关
 	// （默认 false 关闭：终端程序输出的通知类转义序列默认不弹提示，零打扰）。
 	// bool 零值即默认值，与 GpuDisabled 等现有标量 bool 字段同款语义，
 	// 不进 EnsureTerminalDefaults 补默认；标量字段随 AppSettings 值拷贝自然携带，
 	// 无需 PrivateCopy 单独处理。
-	TerminalOscNotifyEnabled bool `json:"terminalOscNotifyEnabled"`
-	SearchExcludeDirs      []string `json:"searchExcludeDirs"`      // 搜索排除目录
-	SearchExcludeFiles     []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
-	ShortcutCommandPalette string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
-	ShortcutToggleTerminal string   `json:"shortcutToggleTerminal"` // 切换终端快捷键，默认 "Ctrl+`"
-	ShortcutRename         string   `json:"shortcutRename"`         // 重命名快捷键，默认 "F2"
-	ShortcutDelete         string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
+	TerminalOscNotifyEnabled bool     `json:"terminalOscNotifyEnabled"`
+	SearchExcludeDirs        []string `json:"searchExcludeDirs"`      // 搜索排除目录
+	SearchExcludeFiles       []string `json:"searchExcludeFiles"`     // 搜索排除文件模式
+	ShortcutCommandPalette   string   `json:"shortcutCommandPalette"` // 命令面板快捷键，默认 "Ctrl+P"
+	ShortcutToggleTerminal   string   `json:"shortcutToggleTerminal"` // 切换终端快捷键，默认 "Ctrl+`"
+	ShortcutRename           string   `json:"shortcutRename"`         // 重命名快捷键，默认 "F2"
+	ShortcutDelete           string   `json:"shortcutDelete"`         // 删除快捷键，默认 "Delete"
+	// ShortcutQuickTodo 临时待办「从剪贴板快速记录」快捷键，默认 "Ctrl+Alt+N"。
+	// 选 Ctrl+Alt+N 而非 Ctrl+Shift+N：后者在浏览器访问模式下被 Chrome/Edge 吞掉
+	// （打开隐身窗口）。标量字段零值即默认（前端 DEFAULTS 兜底），不进
+	// EnsureAllDefaults / PrivateCopy。
+	ShortcutQuickTodo string `json:"shortcutQuickTodo"`
 	// SidebarOrder 侧边栏面板顺序（面板 id 列表，如 ["directory","ai",...]）。空值
 	// = 默认顺序（向后兼容：老配置无此字段解析为 nil，前端归一化为默认顺序）。
 	// 纯存储无后端语义：面板 id 合法性、缺失补齐与未知剔除归一化均在前端进行
 	// （后端无面板 id 知识）。标量切片字段，零值即默认，不进 EnsureAllDefaults/
 	// PrivateCopy（对齐 SearchExcludeDirs 先例）。
-	SidebarOrder []string `json:"sidebarOrder"`
-	ObsidianPath           string   `json:"obsidianPath"`           // Obsidian 可执行文件自定义路径，留空表示未配置
-	TessoaPath             string   `json:"tessoaPath"`             // tessoa 可执行文件自定义路径，留空表示未配置（打开资源管理器时优先探测 tessoa）
-	ThemeMode              string   `json:"themeMode"`              // 主题模式：system(跟随系统)/light/dark，空值按 system 处理
-	DiffToolName           string   `json:"diffToolName"`           // 外部 diff 工具预设名：beyondcompare/winmerge/vscode/custom
-	DiffToolPath           string   `json:"diffToolPath"`           // 外部 diff 工具可执行文件路径，留空表示未配置
-	DiffToolArgs           string   `json:"diffToolArgs"`           // 外部 diff 工具参数模板，支持 {left} {right} 占位符
-	DiffToolMergeArgs      string   `json:"diffToolMergeArgs"`      // 三向合并参数模板（custom 预设用），支持 {base} {local} {remote} {merged} 占位符；预设名非 custom 时由后端内置模板接管，本字段不消费
+	SidebarOrder      []string `json:"sidebarOrder"`
+	ObsidianPath      string   `json:"obsidianPath"`      // Obsidian 可执行文件自定义路径，留空表示未配置
+	TessoaPath        string   `json:"tessoaPath"`        // tessoa 可执行文件自定义路径，留空表示未配置（打开资源管理器时优先探测 tessoa）
+	ThemeMode         string   `json:"themeMode"`         // 主题模式：system(跟随系统)/light/dark，空值按 system 处理
+	DiffToolName      string   `json:"diffToolName"`      // 外部 diff 工具预设名：beyondcompare/winmerge/vscode/custom
+	DiffToolPath      string   `json:"diffToolPath"`      // 外部 diff 工具可执行文件路径，留空表示未配置
+	DiffToolArgs      string   `json:"diffToolArgs"`      // 外部 diff 工具参数模板，支持 {left} {right} 占位符
+	DiffToolMergeArgs string   `json:"diffToolMergeArgs"` // 三向合并参数模板（custom 预设用），支持 {base} {local} {remote} {merged} 占位符；预设名非 custom 时由后端内置模板接管，本字段不消费
 	// WebServe 浏览器访问通道配置段。指针形态区分「段缺失（老配置升级，视为未
 	// 配置 → 默认开启）」与「显式 enabled:false（用户主动关闭）」——Go bool 零值
 	// 为 false，非指针无法表达「默认 true」语义。加载后经 EnsureWebServeDefaults 补全。

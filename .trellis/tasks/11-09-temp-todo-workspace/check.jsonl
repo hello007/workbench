@@ -1,0 +1,7 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 wailsjs 三处同步是否齐全（App.js 新方法、App.d.ts 签名、models.ts TempTodo 字段），漏同步会致 npm run build MISSING_EXPORT；核对 CompletedAt 指针字段前后端形状一致"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对 temp_todos.json 写入是否统一走 util.SaveJSON，无新增直写路径"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "核对新增错误码三处同步、日志走 slog、剪贴板异常走 warning 而非 error 弹窗"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对面板 flex 约束链完整、图标内联 SVG、选中/悬浮态无 mousedown+click 双绑"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对 service 与前端覆盖率是否达门禁"}
+{"file": "docs/spec/test-stability.md", "reason": "核对测试未隐式依赖真实剪贴板/系统时间，保留期清理用注入时钟"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "核对四层改动依赖方向与分层边界"}

@@ -69,6 +69,13 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   // 会话快照（崩溃恢复）：默认无快照（冷启动），SaveSessionState mock no-op
   GetSessionState: vi.fn(() => Promise.resolve(null)),
   SaveSessionState: vi.fn(() => Promise.resolve(true)),
+  // 临时待办面板（TempTodoPanel v-show 常驻挂载于 Home，挂载即 ListTempTodos）
+  ListTempTodos: vi.fn(() => Promise.resolve([])),
+  AddTempTodo: vi.fn(() => Promise.resolve({})),
+  AddTempTodoFromClipboard: vi.fn(() => Promise.resolve({ text: 'x' })),
+  UpdateTempTodo: vi.fn(() => Promise.resolve()),
+  SetTempTodoCompleted: vi.fn(() => Promise.resolve()),
+  DeleteTempTodo: vi.fn(() => Promise.resolve()),
   // 分支对比面板（BranchCompareView v-show 常驻挂载于 Home）：无目录时面板空态不触发，
   // 但 import 的绑定须存在于 mock 否则 undefined 调用抛 TypeError
   GetGitInfo: vi.fn(() => Promise.resolve({ isRepo: false })),
@@ -1563,7 +1570,7 @@ describe('Home.vue - handler 分支补充', () => {
   it('顺序自定义后 Alt+1 指向新顺序第一个面板', () => {
     const ui = useUiStore()
     const settings = useSettingsStore()
-    const defaultIds = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare']
+    const defaultIds = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo']
     settings.sidebarOrder = ['stats', ...defaultIds.filter(id => id !== 'stats')]
     ui.activePanel = 'directory'
     wrapper.vm.handleGlobalKeydown(keyEvent({ key: '1', altKey: true }))
@@ -1577,13 +1584,40 @@ describe('Home.vue - handler 分支补充', () => {
     expect(useUiStore().activePanel).toBe('ai-chat')
   })
 
-  it('序号超出面板数（8 面板按 Alt+9）不切换不拦截', () => {
+  it('Ctrl+Alt+N 触发临时待办剪贴板快速记录并拦截默认行为', async () => {
+    const { AddTempTodoFromClipboard } = await import('../../../wailsjs/go/main/App')
+    useSettingsStore().shortcutQuickTodo = 'Ctrl+Alt+N'
+    const event = keyEvent({ key: 'n', ctrlKey: true, altKey: true, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+    await flushPromises()
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(AddTempTodoFromClipboard).toHaveBeenCalled()
+  })
+
+  it('输入框聚焦时 Ctrl+Alt+N 放行，不触发记录', async () => {
+    const { AddTempTodoFromClipboard } = await import('../../../wailsjs/go/main/App')
+    useSettingsStore().shortcutQuickTodo = 'Ctrl+Alt+N'
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    const event = keyEvent({ key: 'n', ctrlKey: true, altKey: true, target: input, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+    await flushPromises()
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(AddTempTodoFromClipboard).not.toHaveBeenCalled()
+    input.remove()
+  })
+
+  it('9 个面板时 Alt+9 切到末位临时待办并拦截默认行为', () => {
     const ui = useUiStore()
     ui.activePanel = 'directory'
     const event = keyEvent({ key: '9', altKey: true, preventDefault: vi.fn() })
     wrapper.vm.handleGlobalKeydown(event)
-    expect(ui.activePanel).toBe('directory')
-    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(ui.activePanel).toBe('todo')
+    expect(event.preventDefault).toHaveBeenCalled()
   })
 
   it('输入框聚焦时不触发侧边栏切换（Alt+N 不劫持文本输入）', () => {

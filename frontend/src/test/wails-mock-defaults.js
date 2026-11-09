@@ -565,7 +565,22 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   // frontend/wailsjs/go/models.ts）。默认降级态（CI 无 PowerPoint）：
   // errorCode = E_PPTX_PREVIEW_UNAVAILABLE → 渲染器显示降级提示 + 用默认程序
   // 打开按钮；用例按需 override { pdfPath: 'D:/cache/xxx.pdf' } 验证 viewer 链路
-  ConvertPptxForPreview: { pdfPath: '', error: '未检测到 PowerPoint/WPS，无法内嵌预览 PPT 文件', errorCode: 'E_PPTX_PREVIEW_UNAVAILABLE' }
+  ConvertPptxForPreview: { pdfPath: '', error: '未检测到 PowerPoint/WPS，无法内嵌预览 PPT 文件', errorCode: 'E_PPTX_PREVIEW_UNAVAILABLE' },
+
+  // ---- 临时待办（侧边栏「临时待办」面板：列表 / 新建 / 剪贴板快速记录 / 编辑 /
+  // 完成与删除）----
+  // 形状对齐 model.TempTodo（id/text/tags/createdAt 毫秒/completedAt 毫秒或
+  // null——Go 侧指针字段，null = 未完成，前端按真值判归档态）。ListTempTodos
+  // 默认空列表 = 无待办空态（面板挂载即拉）；新建与剪贴板记录默认返回一条空正文
+  // 样例（快捷记录成功 toast 取 text 首个非空行前 20 字预览，空正文回退通用文案）；
+  // Update/SetCompleted/Delete 为 error 返回（Wails 映射 Promise<void>），null
+  // 安全 no-op（失败经 {__error__, __code__} 描述符注入）
+  ListTempTodos: [],
+  AddTempTodo: { id: 'todo-e2e', text: '', tags: [], createdAt: 1735689600000, completedAt: null },
+  AddTempTodoFromClipboard: { id: 'todo-e2e', text: '', tags: [], createdAt: 1735689600000, completedAt: null },
+  UpdateTempTodo: null,
+  SetTempTodoCompleted: null,
+  DeleteTempTodo: null
 }
 
 /**

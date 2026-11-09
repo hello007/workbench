@@ -9,7 +9,10 @@ const DEFAULTS = {
   commandPalette: 'Ctrl+P',
   toggleTerminal: 'Ctrl+`',
   rename: 'F2',
-  delete: 'Delete'
+  delete: 'Delete',
+  // 临时待办「从剪贴板快速记录」。不用 Ctrl+Shift+N：浏览器访问模式下会被
+  // Chrome/Edge 吞掉（打开隐身窗口）；Ctrl+Alt+N 在 WebView2 与浏览器下均无默认动作。
+  quickTodo: 'Ctrl+Alt+N'
 }
 
 /**
@@ -35,7 +38,8 @@ export const SIDEBAR_PANELS = [
   { id: 'assets', label: '素材管理' },
   { id: 'dashboard', label: '状态看板' },
   { id: 'stats', label: '仓库统计' },
-  { id: 'branchcompare', label: '分支对比' }
+  { id: 'branchcompare', label: '分支对比' },
+  { id: 'todo', label: '临时待办' }
 ]
 
 const SIDEBAR_PANEL_IDS = new Set(SIDEBAR_PANELS.map(p => p.id))
@@ -65,13 +69,23 @@ export function normalizeSidebarOrder(order) {
 /**
  * 判断键盘事件是否为侧边栏面板切换快捷键（Alt+数字，无 Ctrl/Shift/Meta）。
  * 返回 0-based 面板序号；非该类快捷键返回 -1（调用方据此跳过）。
- * 序号超出面板数（面板 8 个按 Alt+9）由调用方按 orderedPanels.length 边界放行，
- * 不 preventDefault（不劫持无语义按键）。
+ * 序号超出面板数（当前 9 个面板，Alt+1..9 均为有效；面板缩减后按 Alt+9 才超出）
+ * 由调用方按 orderedPanels.length 边界放行，不 preventDefault（不劫持无语义按键）。
  */
 export function sidebarShortcutIndex(event) {
   if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey) return -1
   if (!/^[1-9]$/.test(event.key)) return -1
   return Number(event.key) - 1
+}
+
+/**
+ * 侧边栏面板切换（Alt+1..9）是固定快捷键，不允许被自定义快捷键占用：
+ * 用户若把「从剪贴板记为待办」录成 Alt+1，侧边栏导航会静默失效且难以归因。
+ * 录制取值已由 shortcutFromEvent 归一为 "Alt+1" 形态（字母/数字大写）。
+ * 该判定为单一来源，SettingsPanel 的录制链路经 store.checkConflict 消费。
+ */
+export function isReservedSidebarShortcut(shortcutStr) {
+  return /^Alt\+[1-9]$/.test(shortcutStr || '')
 }
 
 /**
@@ -325,6 +339,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const shortcutToggleTerminal = ref(DEFAULTS.toggleTerminal)
   const shortcutRename = ref(DEFAULTS.rename)
   const shortcutDelete = ref(DEFAULTS.delete)
+  const shortcutQuickTodo = ref(DEFAULTS.quickTodo)
 
   // 侧边栏面板顺序（面板 id 数组）：初始默认顺序，loadShortcuts 后端加载后归一化
   // 覆盖（GetSettings 首帧前未完成的窗口期渲染默认顺序，可接受）
@@ -553,12 +568,14 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutToggleTerminal.value = settings.shortcutToggleTerminal || DEFAULTS.toggleTerminal
       shortcutRename.value = settings.shortcutRename || DEFAULTS.rename
       shortcutDelete.value = settings.shortcutDelete || DEFAULTS.delete
+      shortcutQuickTodo.value = settings.shortcutQuickTodo || DEFAULTS.quickTodo
       sidebarOrder.value = normalizeSidebarOrder(settings.sidebarOrder)
     } catch {
       shortcutCommandPalette.value = DEFAULTS.commandPalette
       shortcutToggleTerminal.value = DEFAULTS.toggleTerminal
       shortcutRename.value = DEFAULTS.rename
       shortcutDelete.value = DEFAULTS.delete
+      shortcutQuickTodo.value = DEFAULTS.quickTodo
       sidebarOrder.value = [...SIDEBAR_DEFAULT_ORDER]
     }
   }
@@ -581,18 +598,25 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.shortcutToggleTerminal = shortcutToggleTerminal.value
     settings.shortcutRename = shortcutRename.value
     settings.shortcutDelete = shortcutDelete.value
+    settings.shortcutQuickTodo = shortcutQuickTodo.value
     await SaveSettings(settings)
   }
 
   /**
-   * 检查快捷键是否与其他快捷键冲突
+   * 检查快捷键是否与其他快捷键冲突。
+   * 先判侧边栏固定快捷键（Alt+1..9）：该组按键不属于可自定义项，恒拒绝；命中
+   * 返回保留项标记（key = sidebarShortcut，前端据此展示引导文案）。
    */
   function checkConflict(shortcutStr, excludeKey) {
+    if (isReservedSidebarShortcut(shortcutStr)) {
+      return { key: 'sidebarShortcut', value: shortcutStr, reserved: true }
+    }
     const all = [
       { key: 'commandPalette', value: shortcutCommandPalette.value },
       { key: 'toggleTerminal', value: shortcutToggleTerminal.value },
       { key: 'rename', value: shortcutRename.value },
-      { key: 'delete', value: shortcutDelete.value }
+      { key: 'delete', value: shortcutDelete.value },
+      { key: 'quickTodo', value: shortcutQuickTodo.value }
     ]
     for (const item of all) {
       if (item.key === excludeKey) continue
@@ -606,6 +630,7 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcutToggleTerminal,
     shortcutRename,
     shortcutDelete,
+    shortcutQuickTodo,
     sidebarOrder,
     orderedPanels,
     saveSidebarOrder,

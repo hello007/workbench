@@ -71,6 +71,37 @@ func WriteClipboardFiles(paths []string, isCut bool) error {
 	return nil
 }
 
+// ReadClipboardText 读取系统剪贴板中的文本
+// （X11: xclip -selection clipboard -o；Wayland: wl-paste --no-newline）。
+//
+// 语义与 Windows 版对齐：无文本时返回 ErrClipboardEmpty / ErrClipboardNoText。
+// 剪贴板工具未安装属环境缺失，返回明确错误（不当作空剪贴板静默吞掉）。
+// wl-paste 默认会在输出末尾补换行，--no-newline 排除该副作用，
+// 否则每次快速记录都会多一个尾随空行。
+func ReadClipboardText() (string, error) {
+	_, readTool := clipboardTools()
+	var cmd *exec.Cmd
+	if readTool == "wl-paste" {
+		cmd = exec.Command("wl-paste", "--no-newline")
+	} else {
+		cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", wrapClipboardToolError(readTool, err)
+		}
+		// 剪贴板为空（或只有非文本目标）时 xclip/wl-paste 以非 0 退出：
+		// 命令行环境下无可靠手段区分「真空白」与「文件」，统一按空剪贴板提示
+		return "", ErrClipboardEmpty
+	}
+	text := string(out)
+	if strings.TrimSpace(text) == "" {
+		return "", ErrClipboardEmpty
+	}
+	return text, nil
+}
+
 // ReadClipboardFiles 读取系统剪贴板中的文件路径列表。
 // 剪贴板无 x-special/gnome-copied-files 内容（目标不可读或载荷无效）时
 // 返回 (nil, false, nil)，与 Windows 版「无文件」语义对齐；

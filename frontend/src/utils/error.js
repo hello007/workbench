@@ -48,6 +48,13 @@ export const ErrorCode = Object.freeze({
   AssetsSplitOutputConflict: 'E_ASSETS_SPLIT_OUTPUT_CONFLICT', // 拆分落点目录已被另一源文件的拆分记录占用，本次拒绝且不删除任何文件（warning，源改名/移动后可重试）
   // 素材购物栏域错误码（素材管理·购物栏），取值与 model/app_error.go 购物栏域段一致。
   CartExportInProgress: 'E_CART_EXPORT_IN_PROGRESS', // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
+  // 临时待办域错误码（侧边栏·临时待办），取值与 model/app_error.go 临时待办域段一致。
+  // 剪贴板为空与不含文本分开提示：前者用户以为没复制成功，后者是复制了文件。
+  TempTodoClipboardEmpty: 'E_TEMP_TODO_CLIPBOARD_EMPTY', // 剪贴板无内容（warning）
+  TempTodoClipboardNoText: 'E_TEMP_TODO_CLIPBOARD_NO_TEXT', // 剪贴板有内容但无文本格式，如复制的文件（warning）
+  TempTodoTextRequired: 'E_TEMP_TODO_TEXT_REQUIRED', // 正文为空或全空白（warning）
+  TempTodoNotFound: 'E_TEMP_TODO_NOT_FOUND', // 条目不存在或已被删除，列表已过期（warning）
+  TempTodoClipboardFailed: 'E_TEMP_TODO_CLIPBOARD_FAILED', // 剪贴板读取失败或剪贴板工具缺失（error）
   // 浏览器访问通道 token 管理域错误码（多 token 管理），取值与 model/app_error.go
   // token 管理域段一致，均为预期拒绝/用户操作错误（warning）。
   TokenNotFound: 'E_TOKEN_NOT_FOUND', // 目标令牌记录不存在或已被删除（列表过期，引导刷新）
@@ -119,7 +126,11 @@ const WARNING_CODES = new Set([
   ErrorCode.IPBanWhitelisted,
   ErrorCode.IPBanIPRequired,
   ErrorCode.IPBanCidrInvalid,
-  ErrorCode.IPBanCidrWhitelisted
+  ErrorCode.IPBanCidrWhitelisted,
+  ErrorCode.TempTodoClipboardEmpty,
+  ErrorCode.TempTodoClipboardNoText,
+  ErrorCode.TempTodoTextRequired,
+  ErrorCode.TempTodoNotFound
 ])
 
 /**

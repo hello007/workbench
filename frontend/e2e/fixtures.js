@@ -93,7 +93,7 @@ async function emitWailsEvent(page, event, payload) {
  * settings/terminal 顺移，硬编码用例集体点错入口）。
  * @param {import('@playwright/test').Page} page
  * @param {string} panelId 面板 id（directory / ai / ai-chat / toolbox / assets /
- *   dashboard / stats / branchcompare）
+ *   dashboard / stats / branchcompare / todo）
  */
 function activityPanel(page, panelId) {
   return page.locator(`[data-panel-id="${panelId}"]`)

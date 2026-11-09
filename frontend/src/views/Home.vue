@@ -94,6 +94,10 @@
              v-show 常驻挂载：切走再切回不丢分支选择与对比结果（PRD 非目标：不持久化，
              仅会话内保留）。只读面板：不提供 cherry-pick/merge/rebase 等写操作入口。 -->
         <BranchCompareView v-show="uiStore.activePanel === 'branchcompare'" />
+        <!-- 临时待办：活动栏一级入口，与三栏区互斥占满主窗口上半区。
+             v-show 常驻挂载：切走再切回保留搜索关键字、展开态与草稿。
+             全局快捷键经 ref 调 quickAddFromClipboard，不依赖面板是否可见。 -->
+        <TempTodoPanel ref="tempTodoPanelRef" v-show="uiStore.activePanel === 'todo'" />
         <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
           v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
@@ -131,6 +135,7 @@ import ToolboxPanel from '../components/ToolboxPanel.vue'
 import AiFunctionPanel from '../components/AiFunctionPanel.vue'
 import AiChatPanel from '../components/AiChatPanel.vue'
 import AssetsPanel from '../components/AssetsPanel.vue'
+import TempTodoPanel from '../components/TempTodoPanel.vue'
 import StatsView from './StatsView.vue'
 import DashboardView from './DashboardView.vue'
 import BranchCompareView from './BranchCompareView.vue'
@@ -171,6 +176,7 @@ const uiStore = useUiStore()
 const directoryTreeRef = ref()
 const fileTreePanelRef = ref()
 const contentPanelRef = ref()
+const tempTodoPanelRef = ref()
 
 // 当点击 DirectoryTree 右键菜单时，关闭 FileTreePanel 的菜单
 const onDirectoryContextMenu = () => {
@@ -564,9 +570,19 @@ const handleGlobalKeydown = (e) => {
     return
   }
 
+  // 临时待办：从剪贴板快速记录（快捷键可自定义）。输入框/对话框/终端聚焦时放行——
+  // 既不打断正在进行的输入，也不劫持终端程序自身的组合键。记录不切换面板、不抢焦点，
+  // 用户此刻多半正看着 AI 输出，强制跳转比「看不见结果」更打断。
+  if (matchShortcut(e, settingsStore.shortcutQuickTodo)) {
+    if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
+    e.preventDefault()
+    tempTodoPanelRef.value?.quickAddFromClipboard()
+    return
+  }
+
   // 切换侧边栏面板（Alt+数字按当前顺序编号，顺序可在设置中调整）。焦点判定：
   // 输入框/对话框/终端聚焦时不触发——终端程序（tmux 等）常用 Alt+N 切 tab，
-  // 劫持会破坏终端内快捷键。序号超出面板数（如面板 8 个按 Alt+9）无语义，
+  // 劫持会破坏终端内快捷键。序号超出面板数（如面板缩减后按 Alt+9）无语义，
   // 不 preventDefault 直接放行
   const sidebarIdx = sidebarShortcutIndex(e)
   if (sidebarIdx >= 0) {

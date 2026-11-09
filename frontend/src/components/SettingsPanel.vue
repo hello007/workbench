@@ -1477,21 +1477,27 @@ const fixedShortcuts = [
   { action: '刷新当前节点', keys: ['F5'] },
   { action: '复制选中项', keys: ['Ctrl', 'C'] },
   { action: '剪切选中项', keys: ['Ctrl', 'X'] },
-  { action: '粘贴', keys: ['Ctrl', 'V'] }
+  { action: '粘贴', keys: ['Ctrl', 'V'] },
+  // Alt+1..9 是侧边栏面板切换的固定快捷键（编号跟随侧边栏顺序），录制成自定义
+  // 快捷键会让导航静默失效；冲突拦截在 store.checkConflict 单点（此处仅展示说明）
+  { action: '切换侧边栏面板', keys: ['Alt', '1..9'] }
 ]
 
 const shortcutLabels = {
   commandPalette: '打开命令面板',
   toggleTerminal: '切换终端面板',
   rename: '重命名',
-  delete: '删除'
+  delete: '删除',
+  quickTodo: '从剪贴板记为待办',
+  sidebarShortcut: '切换侧边栏面板（Alt+数字）'
 }
 
 const customizableShortcuts = computed(() => [
   { action: '打开命令面板', key: 'commandPalette', keys: formatDisplay(settingsStore.shortcutCommandPalette), customizable: true },
   { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(settingsStore.shortcutToggleTerminal), customizable: true },
   { action: '重命名', key: 'rename', keys: formatDisplay(settingsStore.shortcutRename), customizable: true },
-  { action: '删除', key: 'delete', keys: formatDisplay(settingsStore.shortcutDelete), customizable: true }
+  { action: '删除', key: 'delete', keys: formatDisplay(settingsStore.shortcutDelete), customizable: true },
+  { action: '从剪贴板记为待办', key: 'quickTodo', keys: formatDisplay(settingsStore.shortcutQuickTodo), customizable: true }
 ])
 
 function startRecording(key) {
@@ -1512,6 +1518,7 @@ function isDefault(key) {
   if (key === 'toggleTerminal') return settingsStore.shortcutToggleTerminal === DEFAULTS.toggleTerminal
   if (key === 'rename') return settingsStore.shortcutRename === DEFAULTS.rename
   if (key === 'delete') return settingsStore.shortcutDelete === DEFAULTS.delete
+  if (key === 'quickTodo') return settingsStore.shortcutQuickTodo === DEFAULTS.quickTodo
   return true
 }
 
@@ -1520,6 +1527,7 @@ function resetShortcut(key) {
   else if (key === 'toggleTerminal') settingsStore.shortcutToggleTerminal = DEFAULTS.toggleTerminal
   else if (key === 'rename') settingsStore.shortcutRename = DEFAULTS.rename
   else if (key === 'delete') settingsStore.shortcutDelete = DEFAULTS.delete
+  else if (key === 'quickTodo') settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
   settingsStore.saveShortcuts()
 }
 
@@ -1528,6 +1536,7 @@ function resetAllShortcuts() {
   settingsStore.shortcutToggleTerminal = DEFAULTS.toggleTerminal
   settingsStore.shortcutRename = DEFAULTS.rename
   settingsStore.shortcutDelete = DEFAULTS.delete
+  settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
   settingsStore.saveShortcuts()
 }
 
@@ -1591,6 +1600,8 @@ function handleRecordingKeydown(e) {
     settingsStore.shortcutRename = shortcut
   } else if (recordingKey.value === 'delete') {
     settingsStore.shortcutDelete = shortcut
+  } else if (recordingKey.value === 'quickTodo') {
+    settingsStore.shortcutQuickTodo = shortcut
   }
 
   recordingKey.value = null

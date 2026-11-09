@@ -17,6 +17,7 @@ import {
   shortcutFromEvent,
   normalizeSidebarOrder,
   sidebarShortcutIndex,
+  isReservedSidebarShortcut,
   SIDEBAR_PANELS,
   DEFAULTS,
   DIFF_TOOL_PRESETS,
@@ -249,6 +250,22 @@ describe('settings store - formatDisplay', () => {
   })
 })
 
+describe('settings store - isReservedSidebarShortcut（Alt+数字为侧边栏固定快捷键）', () => {
+  it('Alt+1..9 命中保留集合', () => {
+    for (let n = 1; n <= 9; n++) {
+      expect(isReservedSidebarShortcut(`Alt+${n}`)).toBe(true)
+    }
+  })
+  it('其他组合与空值不命中', () => {
+    expect(isReservedSidebarShortcut('Alt+0')).toBe(false)
+    expect(isReservedSidebarShortcut('Alt+A')).toBe(false)
+    expect(isReservedSidebarShortcut('Ctrl+Alt+1')).toBe(false)
+    expect(isReservedSidebarShortcut('Alt+10')).toBe(false)
+    expect(isReservedSidebarShortcut('')).toBe(false)
+    expect(isReservedSidebarShortcut(null)).toBe(false)
+  })
+})
+
 describe('settings store - checkConflict（含 rename/delete）', () => {
   beforeEach(() => {
     // 每个 it 独立 pinia 实例，store 默认值为 DEFAULTS
@@ -277,6 +294,14 @@ describe('settings store - checkConflict（含 rename/delete）', () => {
     expect(c).toBeTruthy()
     expect(c.key).toBe('commandPalette')
   })
+  it('与侧边栏固定快捷键 Alt+1..9 冲突（不可被自定义项占用）', () => {
+    const store = useSettingsStore()
+    const c = store.checkConflict('Alt+1', 'delete')
+    expect(c).toBeTruthy()
+    expect(c.key).toBe('sidebarShortcut')
+    // 与 quickTodo 默认值 Ctrl+Alt+N 比较：Alt+N 不是 Alt+数字，不误判
+    expect(store.checkConflict('Ctrl+Alt+N', 'delete').key).toBe('quickTodo')
+  })
 })
 
 describe('settings store - loadShortcuts/saveShortcuts', () => {
@@ -289,17 +314,22 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
   })
 
   it('loadShortcuts 后端值覆盖默认，未提供字段填默认', async () => {
-    GetSettings.mockResolvedValue({ shortcutRename: 'F5', shortcutCommandPalette: 'Ctrl+Shift+P' })
+    GetSettings.mockResolvedValue({
+      shortcutRename: 'F5',
+      shortcutCommandPalette: 'Ctrl+Shift+P',
+      shortcutQuickTodo: 'Ctrl+Alt+T'
+    })
     const store = useSettingsStore()
     await store.loadShortcuts()
     expect(store.shortcutRename).toBe('F5')
     expect(store.shortcutCommandPalette).toBe('Ctrl+Shift+P')
+    expect(store.shortcutQuickTodo).toBe('Ctrl+Alt+T')
     // 未提供的字段回填默认（toggleTerminal/delete）
     expect(store.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
     expect(store.shortcutDelete).toBe(DEFAULTS.delete)
   })
 
-  it('loadShortcuts 空对象全填默认', async () => {
+  it('loadShortcuts 空对象全填默认（含 quickTodo 缺省回退）', async () => {
     GetSettings.mockResolvedValue({})
     const store = useSettingsStore()
     await store.loadShortcuts()
@@ -307,6 +337,8 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     expect(store.shortcutRename).toBe(DEFAULTS.rename)
     expect(store.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
     expect(store.shortcutDelete).toBe(DEFAULTS.delete)
+    expect(store.shortcutQuickTodo).toBe(DEFAULTS.quickTodo)
+    expect(DEFAULTS.quickTodo).toBe('Ctrl+Alt+N')
   })
 
   it('loadShortcuts 失败回退默认（覆盖用户改过的非默认值）', async () => {
@@ -314,22 +346,26 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     const store = useSettingsStore()
     // 先改非默认，验证 catch 分支确实重置
     store.shortcutRename = 'F5'
+    store.shortcutQuickTodo = 'Ctrl+Alt+T'
     expect(store.shortcutRename).toBe('F5')
     await store.loadShortcuts()
     expect(store.shortcutRename).toBe(DEFAULTS.rename)
     expect(store.shortcutCommandPalette).toBe(DEFAULTS.commandPalette)
+    expect(store.shortcutQuickTodo).toBe(DEFAULTS.quickTodo)
   })
 
-  it('saveShortcuts 将 4 个 shortcut 字段写入 settings 对象并保留其他字段', async () => {
+  it('saveShortcuts 将 5 个 shortcut 字段写入 settings 对象并保留其他字段', async () => {
     const existing = { shortcutCommandPalette: 'Ctrl+P', otherField: 'keep' }
     GetSettings.mockResolvedValue(existing)
     const store = useSettingsStore()
     store.shortcutRename = 'F5'
+    store.shortcutQuickTodo = 'Ctrl+Alt+T'
     await store.saveShortcuts()
     expect(SaveSettings).toHaveBeenCalledTimes(1)
     const saved = SaveSettings.mock.calls[0][0]
     // 改后值写入
     expect(saved.shortcutRename).toBe('F5')
+    expect(saved.shortcutQuickTodo).toBe('Ctrl+Alt+T')
     // store 当前值写入（commandPalette 默认 'Ctrl+P'）
     expect(saved.shortcutCommandPalette).toBe('Ctrl+P')
     // 默认值写入

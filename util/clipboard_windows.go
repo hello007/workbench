@@ -5,6 +5,7 @@ package util
 import (
 	"encoding/binary"
 	"errors"
+	"strings"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -229,6 +230,63 @@ func ReadClipboardFiles() (paths []string, isCut bool, err error) {
 	}
 
 	return paths, isCut, nil
+}
+
+// ReadClipboardText 读取系统剪贴板中的文本（CF_UNICODETEXT 格式）。
+//
+// 无文本时不返回空串 + nil，而是返回 ErrClipboardEmpty / ErrClipboardNoText：
+// 前者剪贴板真的没内容，后者有内容但只有文件等非文本格式（CF_HDROP）。
+// 两种语义在提示文案上要分开，否则用户会误以为复制失败。
+//
+// 只在用户显式触发（快捷键）时调用；禁常驻轮询与窗口 focus 自动读——
+// OpenClipboard 是独占资源，高频抢占会让其他应用的复制粘贴偶发失效。
+func ReadClipboardText() (string, error) {
+	if !openClipboardWithRetry() {
+		return "", errors.New("OpenClipboard failed after retries")
+	}
+	defer procCloseClipboard.Call()
+
+	available, _, _ := procIsClipboardFormatAvailable.Call(cfUnicodeText)
+	if available == 0 {
+		// 区分「真空白」与「复制的是文件」：同一次剪贴板会话内再查 CF_HDROP
+		hasFiles, _, _ := procIsClipboardFormatAvailable.Call(cfHDrop)
+		if hasFiles != 0 {
+			return "", ErrClipboardNoText
+		}
+		return "", ErrClipboardEmpty
+	}
+
+	hData, _, _ := procGetClipboardData.Call(cfUnicodeText)
+	if hData == 0 {
+		return "", errors.New("GetClipboardData failed")
+	}
+
+	size, _, _ := procGlobalSize.Call(hData)
+	if size == 0 {
+		return "", ErrClipboardEmpty
+	}
+
+	ptr, _, _ := procGlobalLock.Call(hData)
+	if ptr == 0 {
+		return "", errors.New("GlobalLock failed")
+	}
+	defer procGlobalUnlock.Call(hData)
+
+	buf := readFromHeap(ptr, int(size))
+	// UTF-16LE，遇 0 终止符截断（GlobalSize 可能含分配器补齐的字节）
+	chars := make([]uint16, 0, len(buf)/2)
+	for i := 0; i+1 < len(buf); i += 2 {
+		c := binary.LittleEndian.Uint16(buf[i:])
+		if c == 0 {
+			break
+		}
+		chars = append(chars, c)
+	}
+	text := string(utf16.Decode(chars))
+	if strings.TrimSpace(text) == "" {
+		return "", ErrClipboardEmpty
+	}
+	return text, nil
 }
 
 // WriteClipboardText 将文本写入系统剪贴板（CF_UNICODETEXT 格式）。
