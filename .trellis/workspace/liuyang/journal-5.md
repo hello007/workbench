@@ -534,3 +534,37 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 244: 临时待办三期：从 Markdown 导入待办
+
+**Date**: 2026-11-10
+**Task**: 临时待办三期：从 Markdown 导入待办
+**Branch**: `master`
+
+### Summary
+
+实现面板 Markdown 导入：前端纯函数解析两类待办行（续行拼回、已完成行跳过、标签与时间归属、去空白去重），预览对话框带重复项开关，后端 AddMany 一次落盘失败整批回滚；新增 E_TEMP_TODO_IMPORT_FAILED 并沉淀 docs/spec/temp-todo.md；go test / 前端 2813 单测 / build 全绿，子 agent 审核通过
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6df358b` | (see git log) |
+| `32bc61f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
