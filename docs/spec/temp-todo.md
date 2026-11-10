@@ -107,6 +107,7 @@
 | 解析纯函数 | 两类待办行、跳过矩阵、续行拼接与缩进保留、标签提取、文件名日期与钳制、去空白去重（含文件内第三条）、CRLF、空输入 |
 | service | `AddMany` 归一化/跳过空条目/`CreatedAt<=0` 取当前/未来钳制/一次落盘；落盘失败返回 `E_TEMP_TODO_IMPORT_FAILED` 且内存回滚 |
 | 组件 | 导入入口 `data-action="import"`、浏览器降级提示、预览汇总与开关联动、确认调用参数、空文件提示、全部重复禁用确认 |
+| E2E | `frontend/e2e/temp-todo-import.spec.js`：真实面板链路预览汇总 3/2、开关切到 5、确认后 `AddTempTodos` 入参 3/5 条且字段对齐 `TempTodoDraft`；fixture 文件名取历史日期规避未来时刻钳制 |
 
 ## 6. 前端实现单点
 

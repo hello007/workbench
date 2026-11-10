@@ -1,0 +1,2 @@
+{"file": "docs/spec/temp-todo.md", "reason": "核对预览计数口径（importableCount/duplicateCount）与 AddTempTodos 入参字段是否与契约一致"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对用例是否遵守 fixtures 导入、wailsOverrides、语义锚、无固定 sleep 等硬性约定"}

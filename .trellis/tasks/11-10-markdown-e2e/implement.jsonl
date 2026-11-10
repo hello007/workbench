@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例必须从 fixtures 导入、用 wailsOverrides 覆盖 mock、语义锚定位活动栏、禁 waitForTimeout、fixture 形状对齐真实模型"}
+{"file": "docs/spec/temp-todo.md", "reason": "导入解析行识别矩阵、预览汇总与开关语义、AddTempTodos 入参与 TempTodoDraft 字段"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "TempTodoDraft 为 model 导出 struct，E2E fixture 形状须与前端绑定消费面一致"}
