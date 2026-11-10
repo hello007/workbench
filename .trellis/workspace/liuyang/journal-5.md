@@ -568,3 +568,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 245: 临时待办 Markdown 导入 E2E
+
+**Date**: 2026-11-10
+**Task**: 临时待办 Markdown 导入 E2E
+**Branch**: `master`
+
+### Summary
+
+新增 frontend/e2e/temp-todo-import.spec.js 三条用例：预览汇总 3/2、重复开关切换到 5、确认后 AddTempTodos 入参 3/5 条且字段对齐 model.TempTodoDraft；fixture 文件名取历史日期规避未来时刻钳制。同步 docs/spec/temp-todo.md 测试锚点。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ba7042` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
