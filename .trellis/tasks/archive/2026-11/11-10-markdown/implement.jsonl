@@ -1,0 +1,10 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App.AddTempTodos 与 model.TempTodoDraft 属跨层契约：wailsjs 三处（App.js/App.d.ts/models.ts）同步规则；decodeBase64Utf8 文本还原禁令"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新增 E_TEMP_TODO_IMPORT_FAILED 错误码三处同步（app_error.go + error.js ErrorCode/WARNING_CODES）；service 用 slog Logger()、App 层 slog"}
+{"file": "docs/spec/browser-channel.md", "reason": "RPCHiddenMethods 判定与浏览器模式降级先例；本期纯数据面方法不加入隐藏清单的边界说明"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "批量写入必须走 util.SaveJSON 原子写，禁 os.WriteFile 直写"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "面板工具条样式、data-action 语义锚、el-dialog 与列表项交互约定"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端 ≥70% / service ≥76% 覆盖率门禁，新增解析模块与 AddMany 须自带单测"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "前后端接口契约规范：App 方法签名、model struct 字段、错误返回约定"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计与编码规范：组合式 API、props/emits、组件内状态"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾：handleError 分流、错误提示不吞没"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "分层边界：app_*.go 桥接层 → service 业务层 → model 契约，禁止跨层反向依赖"}

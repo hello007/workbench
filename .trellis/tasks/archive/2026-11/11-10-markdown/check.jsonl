@@ -1,0 +1,9 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "审核 wailsjs 绑定三处是否与 Go 侧真相源一致；TempTodoDraft 是否为导出 struct 已同步 models.ts"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "审核新错误码三处同步、错误级别选择（import 失败应为 error）、日志不走 println"}
+{"file": "docs/spec/browser-channel.md", "reason": "审核浏览器通道边界：是否误加了敏感方法、降级提示是否前置、是否泄漏本地路径"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "审核批量落盘是否单次 SaveJSON、失败是否回滚内存态"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "审核 data-action 语义锚、对话框与工具条样式一致性、禁用态处理"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "审核单测覆盖：解析边界（续行/已完成行/标签/时间钳制）、AddMany 回滚、预览开关联动"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "审核 App 方法签名与返回契约、model 字段命名"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "审核前端是否经 handleError 分流、是否吞异常"}
+{"file": "docs/agent-resources/conventions/project-boundaries.md", "reason": "审核分层是否越界：解析放前端、批量写入在 service、App 层只做委托"}
