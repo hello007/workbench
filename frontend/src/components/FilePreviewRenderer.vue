@@ -235,6 +235,15 @@
       <li class="context-menu-item" @click="onMenuCommand('selectAll')">
         <el-icon><Select /></el-icon>全选
       </li>
+      <!-- 临时待办·选中文本存为待办（语义锚 data-action，供单测/E2E 定位） -->
+      <li
+        class="context-menu-item"
+        :class="{ 'is-disabled': !contextMenu.canCopy }"
+        data-action="save-todo"
+        @click="onMenuCommand('saveTodo')"
+      >
+        <el-icon><Memo /></el-icon>存为待办
+      </li>
       <!-- 行归属开关（git blame）：仅源码态（markdown/HTML 渲染视图/JSON 派生视图无行对齐语义，不入） -->
       <li
         v-if="blameAvailable"
@@ -260,7 +269,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument, Select, Close, Clock } from '@element-plus/icons-vue'
+import { CopyDocument, Select, Close, Clock, Memo } from '@element-plus/icons-vue'
 // Office 渲染依赖采用静态 import：
 // 历史上曾用 await import('docx-preview') / await import('xlsx') 动态加载，
 // 但 wails dev 下 Vite 会把动态 import 重写为 /node_modules/.vite/deps/xlsx.js
@@ -279,11 +288,11 @@ import MarkdownIt from 'markdown-it'
 import * as jsyaml from 'js-yaml'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 // PPTX 预览转换绑定（.pptx/.ppsx → 后端 COM 转 PDF → 复用 pdf viewer 链路）
-import { ConvertPptxForPreview, GetFileBlame } from '../../wailsjs/go/main/App'
+import { ConvertPptxForPreview, GetFileBlame, AddTempTodo } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import FileHistoryDialog from './FileHistoryDialog.vue'
 import { buildHtmlPreviewDoc } from '../utils/htmlPreview'
-import { useSettingsStore } from '../store'
+import { useSettingsStore, useUiStore } from '../store'
 import hljs from 'highlight.js/lib/core'
 // 按需注册常用语言（控制打包体积）
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -364,6 +373,7 @@ const emit = defineEmits(['openExternal', 'openLink', 'closeToc', 'autoBlameCons
 
 // 主题 store：mermaid 主题随 resolvedTheme 切换（dark/light），避免暗色下亮色残留
 const settingsStore = useSettingsStore()
+const uiStore = useUiStore()
 
 // ---------- 扩展名工具 ----------
 const getExt = (name = '') => {
@@ -1200,6 +1210,20 @@ const copySelectedText = async () => {
   }
 }
 
+// 把预览区选中文本存为临时待办（临时待办二期入口）：复用一期 AddTempTodo，
+// 不弹标签输入框；空标签由后端归一为空数组。落条后通知待办面板重拉列表。
+const saveSelectedAsTodo = async () => {
+  const text = (readSelectionInPreview() || lastSelectedText).trim()
+  if (!text) return
+  try {
+    await AddTempTodo(text, [])
+    uiStore.notifyTempTodoChanged()
+    ElMessage.success('已存为待办')
+  } catch (e) {
+    handleError('存为待办失败: ', e)
+  }
+}
+
 const selectAllText = () => {
   if (cmView) {
     // CodeMirror：selectAll 命令选中全文
@@ -1217,6 +1241,8 @@ const onMenuCommand = (command) => {
   closeContextMenu()
   if (command === 'copy') {
     if (contextMenu.canCopy) copySelectedText()
+  } else if (command === 'saveTodo') {
+    if (contextMenu.canCopy) saveSelectedAsTodo()
   } else if (command === 'selectAll') {
     selectAllText()
   } else if (command === 'blame') {

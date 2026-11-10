@@ -580,7 +580,10 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   AddTempTodoFromClipboard: { id: 'todo-e2e', text: '', tags: [], createdAt: 1735689600000, completedAt: null },
   UpdateTempTodo: null,
   SetTempTodoCompleted: null,
-  DeleteTempTodo: null
+  DeleteTempTodo: null,
+  // 导出 Markdown（桌面专属，RPCHiddenMethods 屏蔽）：默认空串 = 无条目/未导出，
+  // 组件侧按「空路径 → 暂无可导出的待办」降级，不产生文件写入副作用
+  ExportTempTodosMarkdown: ''
 }
 
 /**

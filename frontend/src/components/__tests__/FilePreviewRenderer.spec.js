@@ -8,7 +8,7 @@ import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import { EditorView } from '@codemirror/view'
 import FilePreviewRenderer from '../FilePreviewRenderer.vue'
-import { useSettingsStore } from '../../store'
+import { useSettingsStore, useUiStore } from '../../store'
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -39,7 +39,8 @@ vi.mock('../../../wailsjs/runtime/runtime', () => ({
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ConvertPptxForPreview: vi.fn(),
-  GetFileBlame: vi.fn()
+  GetFileBlame: vi.fn(),
+  AddTempTodo: vi.fn()
 }))
 
 // FileHistoryDialog 以 stub 隔离（内部依赖 wailsjs 绑定与 FileDiffDialog，
@@ -188,11 +189,13 @@ describe('FilePreviewRenderer.vue - 右键复制菜单', () => {
     const menu = wrapper.find('.context-menu')
     expect(menu.exists()).toBe(true)
     const items = wrapper.findAll('.context-menu-item')
-    // 行归属开关（blameAvailable：源码态非 JSON）随「行归属」功能加入菜单
-    expect(items).toHaveLength(3)
+    // 行归属开关（blameAvailable：源码态非 JSON）随「行归属」功能加入菜单；
+    // 「存为待办」为临时待办二期入口
+    expect(items).toHaveLength(4)
     expect(items[0].text()).toContain('复制')
     expect(items[1].text()).toContain('全选')
-    expect(items[2].text()).toContain('行归属')
+    expect(items[2].text()).toContain('存为待办')
+    expect(items[3].text()).toContain('行归属')
   })
 
   it('kind=image 右键不显示复制菜单（保留原生右键）', async () => {
@@ -212,6 +215,41 @@ describe('FilePreviewRenderer.vue - 右键复制菜单', () => {
     await openMenu()
 
     expect(wrapper.findAll('.context-menu-item')[0].classes()).toContain('is-disabled')
+  })
+
+  it('无选中文本时"存为待办"项禁用', async () => {
+    vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' })
+    wrapper = mountRenderer({ kind: 'text', fileName: 'a.js', content: 'hello' })
+    await flushPromises()
+
+    await openMenu()
+
+    expect(wrapper.find('[data-action="save-todo"]').classes()).toContain('is-disabled')
+  })
+
+  it('有选中文本时点击"存为待办"调用 AddTempTodo 一次并通知面板刷新', async () => {
+    const { AddTempTodo } = await import('../../../wailsjs/go/main/App')
+    wrapper = mountRenderer({ kind: 'text', fileName: 'a.js', content: 'hello' })
+    await flushPromises()
+    const uiStore = useUiStore()
+
+    // mock 选区：anchorNode 落在 CodeMirror 宿主内，使预览区内选区判定为真
+    const cmHostEl = wrapper.find('.cm-host').element
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => '  选中的代码片段  ',
+      anchorNode: cmHostEl
+    })
+
+    const beforeSeq = uiStore.tempTodoChangeSeq
+    await openMenu()
+    await wrapper.find('[data-action="save-todo"]').trigger('click')
+    await flushPromises()
+
+    // 语义锚单击只触发一次（禁 mousedown+click 双绑）
+    expect(AddTempTodo).toHaveBeenCalledTimes(1)
+    expect(AddTempTodo).toHaveBeenCalledWith('选中的代码片段', [])
+    expect(ElMessage.success).toHaveBeenCalledWith('已存为待办')
+    expect(uiStore.tempTodoChangeSeq).toBe(beforeSeq + 1)
   })
 
   it('有选中文本时点击"复制"写入剪贴板并提示成功', async () => {

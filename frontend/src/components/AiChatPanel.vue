@@ -166,6 +166,8 @@
             ref="messagesEl"
             class="chat-messages"
             @scroll="onMessagesScroll"
+            @mouseup="cacheMsgSelection"
+            @keyup="cacheMsgSelection"
           >
             <div v-if="!displayMessages.length" class="chat-messages-empty">
               <el-empty
@@ -201,6 +203,7 @@
                   :data-task-id="msg.taskId || ''"
                   v-html="renderMsgMarkdown(msg)"
                   @click="onChatMarkdownClick"
+                  @contextmenu="onMsgContextMenu($event)"
                 ></div>
                 <div v-else class="chat-msg-text">{{ msg.content }}</div>
               </div>
@@ -451,15 +454,30 @@
         </el-form>
       </div>
     </el-dialog>
+
+    <!-- AI 回复选中文本右键菜单（临时待办二期）：仅在有选区时弹出，无选区保留
+         WebView 原生右键菜单。视觉复用全局 .context-menu（style.css），不自造第二套 -->
+    <ul
+      v-if="msgContextMenu.visible"
+      ref="msgContextMenuEl"
+      class="context-menu"
+      :style="{ left: msgContextMenu.x + 'px', top: msgContextMenu.y + 'px' }"
+      @click.stop
+      @mousedown.stop
+    >
+      <li class="context-menu-item" data-action="save-todo" @click="saveMsgSelectionAsTodo">
+        <el-icon><Memo /></el-icon>存为待办
+      </li>
+    </ul>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ChatDotRound, Plus, Folder, Delete, Edit,
-  ArrowDown, ChatLineRound, Document, Setting, Position, VideoPause, Refresh
+  ArrowDown, ChatLineRound, Document, Setting, Position, VideoPause, Refresh, Memo
 } from '@element-plus/icons-vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useAiChatStore, useUiStore } from '../store'
@@ -468,7 +486,7 @@ import { shortenPath } from '../utils/pathFormat'
 import { renderChatMarkdown, CMD_RUN_BTN_TITLE, CMD_RUN_BTN_TITLE_NO_CWD } from '../utils/chatMarkdown'
 import { extractSlashToken, applyCompletion, filterSkills } from '../utils/skillComplete'
 import { debug } from '../utils/debug'
-import { RespondChatApproval, OpenFileDialog } from '../../wailsjs/go/main/App'
+import { RespondChatApproval, OpenFileDialog, AddTempTodo } from '../../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
 const aiChatStore = useAiChatStore()
@@ -757,6 +775,83 @@ const toggleThinking = (taskId) => {
 
 const messagesEl = ref(null)
 
+// ===== AI 回复选中文本右键菜单（临时待办二期：存为待办） =====
+// 仅在有选区时接管右键：未选中文本保留 WebView 原生菜单（AI 回复仍需原生
+// 复制/搜索）。document click 监听随菜单可见性挂载，面板常驻时不产生常驻
+// window 级监听（E2E window 监听计数基线取相对增量）。
+const msgContextMenu = reactive({ visible: false, x: 0, y: 0 })
+const msgContextMenuEl = ref(null)
+let msgMenuText = ''
+
+// 最近一次气泡内选区缓存（对齐 FilePreviewRenderer 的 lastSelectedText）：部分平台
+// 右键 mousedown 会清除 DOM 选区，contextmenu 读到空选区导致菜单不弹。缓存在消息
+// 容器上随 mouseup/keyup 更新——元素级监听，不挂 window/document，避免 v-show 常驻
+// 面板引入全局监听污染；同时记录所属气泡，回退时只复用同一气泡的缓存，防误捕获。
+let msgSelectionCache = { el: null, text: '' }
+
+const cacheMsgSelection = () => {
+  const sel = window.getSelection()
+  const anchor = sel?.anchorNode
+  const host = messagesEl.value
+  if (!anchor || !host || !(host === anchor || host.contains(anchor))) return
+  const node = anchor.nodeType === 1 ? anchor : anchor.parentElement
+  const bubble = typeof node?.closest === 'function' ? node.closest('.chat-msg-md') : null
+  if (!bubble) return
+  const text = (sel.toString() || '').trim()
+  if (text) msgSelectionCache = { el: bubble, text }
+}
+
+const onMsgContextMenu = (event) => {
+  const el = event.currentTarget
+  const sel = window.getSelection()
+  const anchor = sel?.anchorNode
+  const anchorInBubble = !!anchor && (el === anchor || el.contains(anchor))
+  // 优先取当前选区；右键已清除 DOM 选区时回退同一气泡的最近一次缓存
+  let text = anchorInBubble ? (sel.toString() || '').trim() : ''
+  if (!text && msgSelectionCache.el === el) text = msgSelectionCache.text
+  if (!text) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  msgMenuText = text
+  msgContextMenu.x = event.clientX
+  msgContextMenu.y = event.clientY
+  msgContextMenu.visible = true
+
+  nextTick(() => {
+    const rect = msgContextMenuEl.value?.getBoundingClientRect()
+    if (!rect) return
+    if (msgContextMenu.x + rect.width > window.innerWidth) {
+      msgContextMenu.x = Math.max(5, window.innerWidth - rect.width - 5)
+    }
+    if (msgContextMenu.y + rect.height > window.innerHeight) {
+      msgContextMenu.y = Math.max(5, window.innerHeight - rect.height - 5)
+    }
+  })
+}
+
+const closeMsgContextMenu = () => { msgContextMenu.visible = false }
+const onMsgMenuDocClick = () => closeMsgContextMenu()
+
+watch(() => msgContextMenu.visible, (visible) => {
+  if (visible) document.addEventListener('click', onMsgMenuDocClick)
+  else document.removeEventListener('click', onMsgMenuDocClick)
+})
+
+// 存为待办：复用一期 AddTempTodo（空标签），落条后通知待办面板重拉列表
+const saveMsgSelectionAsTodo = async () => {
+  const text = msgMenuText
+  closeMsgContextMenu()
+  if (!text) return
+  try {
+    await AddTempTodo(text, [])
+    uiStore.notifyTempTodoChanged()
+    ElMessage.success('已存为待办')
+  } catch (e) {
+    handleError('存为待办失败: ', e)
+  }
+}
+
 // markdown 气泡链接点击拦截（模式照抄 FilePreviewRenderer.onMarkdownClick）：
 // 不拦截 <a> 点击会触发 webview 顶层导航、整个应用被目标页替换；
 // 外部链接交系统默认浏览器打开，相对链接/锚点在对话场景无意义仅阻止导航
@@ -997,6 +1092,23 @@ watch(
   }
 )
 const inputRef = ref()
+
+// ===== 临时待办「转提示词」消费（二期） =====
+// uiStore.todoPromptRequest 为一次性信箱：{ text, seq }，消费即置 null。填充语义为
+// 追加而非覆盖——输入框已有内容时以空行分隔追加，避免丢失用户已输入的需求。
+// 同时切换到 AI 对话面板并聚焦，保证用户可以直接继续编辑或发送。
+watch(
+  () => uiStore.todoPromptRequest,
+  (req) => {
+    if (!req || !req.text) return
+    const incoming = req.text
+    uiStore.todoPromptRequest = null
+    uiStore.activePanel = 'ai-chat'
+    const prev = inputText.value.replace(/\s+$/, '')
+    inputText.value = prev ? `${prev}\n\n${incoming}` : incoming
+    nextTick(() => inputRef.value?.focus?.())
+  }
+)
 
 // ===== skill 斜杠补全 =====
 
@@ -1425,6 +1537,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // 右键菜单的 document click 监听随可见性挂载，卸载时兜底移除
+  document.removeEventListener('click', onMsgMenuDocClick)
   offQueued && offQueued()
   offStarted && offStarted()
   offOutput && offOutput()

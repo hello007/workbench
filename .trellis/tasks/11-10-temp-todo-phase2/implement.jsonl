@@ -1,0 +1,9 @@
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法 ExportTempTodosMarkdown 须同步 frontend/wailsjs App.js/App.d.ts；错误码跨层契约"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "新错误码 E_TEMP_TODO_EXPORT_FAILED 三处同步规则、error.js 分流、后端 slog 用法"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "新入口 data-action 语义锚、禁 mousedown+click 双绑、面板根元素 flex 约束链"}
+{"file": "docs/spec/browser-channel.md", "reason": "新增纯桌面数据面方法须同步 RPCHiddenMethods；浏览器模式降级提示"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "确认 util.SaveJSON 约束仅覆盖 data/ 下 JSON，导出 Markdown 追加写的边界"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "Wails 绑定与数据模型契约规范，实现 App 层方法时必须遵循"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件设计规范，AiChatPanel/FilePreviewRenderer/TempTodoPanel 改动遵循"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端错误捕获与容灾规范，右键存待办与导出失败分支"}
+{"file": ".trellis/tasks/11-10-temp-todo-phase2/research/source-inventory.md", "reason": "本次探查的源码触点、右键菜单与信箱范式、测试位置清单"}

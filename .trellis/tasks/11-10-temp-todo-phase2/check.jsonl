@@ -1,0 +1,4 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "覆盖率分层门禁：service ≥76%、前端 ≥70%，导出与右键入口新增用例须达标"}
+{"file": "docs/spec/e2e-testing.md", "reason": "单测与 E2E 语义锚规则（data-action 优先，禁 findAll 下标），菜单项断言方式"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "复核错误处理分支是否吞异常、是否按 error code 分流"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "复核新错误码三处同步、日志级别与 WrapAppError 用法"}

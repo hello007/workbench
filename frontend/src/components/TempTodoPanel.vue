@@ -19,6 +19,15 @@
           placeholder="搜索正文或标签"
           class="todo-search"
         />
+        <el-button
+          size="small"
+          data-action="export"
+          :disabled="!todos.length"
+          @click="exportTodos"
+        >
+          <el-icon class="btn-icon"><Download /></el-icon>
+          导出
+        </el-button>
         <el-button type="primary" size="small" data-action="create" :disabled="creating" @click="startCreate">
           <el-icon class="btn-icon"><Plus /></el-icon>
           新建
@@ -128,6 +137,11 @@
                   <el-icon><CopyDocument /></el-icon>
                 </el-button>
               </el-tooltip>
+              <el-tooltip content="转提示词填入 AI 对话" placement="top" :show-after="300">
+                <el-button link size="small" data-action="to-prompt" @click="toPrompt(todo)">
+                  <el-icon><ChatDotRound /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-tooltip content="编辑" placement="top" :show-after="300">
                 <el-button link size="small" data-action="edit" @click="startEdit(todo)">
                   <el-icon><Edit /></el-icon>
@@ -195,6 +209,11 @@
                   <el-icon><CopyDocument /></el-icon>
                 </el-button>
               </el-tooltip>
+              <el-tooltip content="转提示词填入 AI 对话" placement="top" :show-after="300">
+                <el-button link size="small" data-action="to-prompt" @click="toPrompt(todo)">
+                  <el-icon><ChatDotRound /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-tooltip content="删除（已完成的删除不进二次确认）" placement="top" :show-after="300">
                 <el-button link size="small" class="todo-delete-btn" data-action="delete" @click="removeTodo(todo, false)">
                   <el-icon><Delete /></el-icon>
@@ -209,10 +228,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight
+  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, ChatDotRound
 } from '@element-plus/icons-vue'
 import {
   ListTempTodos,
@@ -220,13 +239,18 @@ import {
   AddTempTodoFromClipboard,
   UpdateTempTodo,
   SetTempTodoCompleted,
-  DeleteTempTodo
+  DeleteTempTodo,
+  ExportTempTodosMarkdown,
+  OpenDirectoryDialog
 } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { formatRelativeTime, formatFullTime } from '../utils/formatTime'
 import { useSettingsStore } from '../store/settings'
+import { useUiStore } from '../store/ui'
+import { isBrowserChannel } from '../transport'
 
 const settingsStore = useSettingsStore()
+const uiStore = useUiStore()
 
 const quickShortcutTip = computed(() => settingsStore.shortcutQuickTodo || 'Ctrl+Alt+N')
 
@@ -270,6 +294,36 @@ const load = async () => {
     todos.value = list || []
   } catch (e) {
     handleError('加载临时待办失败: ', e)
+  }
+}
+
+// 转提示词：把条目正文经一次性信箱交给 AiChatPanel 填入输入框（切面板由消费侧完成）
+const toPrompt = (todo) => {
+  uiStore.pushTodoPrompt(todo.text)
+}
+
+// 导出 Markdown：桌面模式经原生目录对话框选目录，后端追加写入当天 YYYY-MM-DD.md。
+// 浏览器通道不提供（OpenDirectoryDialog 在 serve 模式不可用，后端方法亦被屏蔽）。
+const exportTodos = async () => {
+  if (!todos.value.length) {
+    ElMessage.info('暂无可导出的待办')
+    return
+  }
+  if (isBrowserChannel()) {
+    ElMessage.warning('该功能仅桌面模式可用')
+    return
+  }
+  try {
+    const dir = await OpenDirectoryDialog('选择待办导出目录')
+    if (!dir) return
+    const file = await ExportTempTodosMarkdown(dir)
+    if (!file) {
+      ElMessage.info('暂无可导出的待办')
+      return
+    }
+    ElMessage.success(`已导出到 ${file}`)
+  } catch (e) {
+    handleError('导出待办失败: ', e)
   }
 }
 
@@ -393,6 +447,12 @@ const quickAddFromClipboard = async () => {
 }
 
 defineExpose({ quickAddFromClipboard })
+
+// 跨组件写入（AI 回复 / 代码预览右键「存为待办」）后重拉：面板以 v-show 常驻，
+// onMounted 只加载一次，需依赖该计数器感知外部变更。
+watch(() => uiStore.tempTodoChangeSeq, () => {
+  load()
+})
 
 onMounted(() => {
   load()

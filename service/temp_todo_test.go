@@ -396,3 +396,119 @@ func TestTempTodoTextTruncation(t *testing.T) {
 		t.Errorf("正文长度 = %d, want %d", got, TempTodoTextMaxRunes)
 	}
 }
+
+func TestTempTodoExportMarkdownCreatesFile(t *testing.T) {
+	svc := newTestTempTodoService(t)
+
+	// 第一条：带标签与多行正文，稍后完成
+	svc.now = fixedClock(time.Date(2026, 11, 10, 13, 44, 0, 0, time.Local))
+	first, err := svc.Add("第一条\n第二行", []string{"重构", "AI提示词"})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	svc.now = fixedClock(time.Date(2026, 11, 10, 14, 5, 0, 0, time.Local))
+	if err := svc.SetCompleted(first.ID, true); err != nil {
+		t.Fatalf("SetCompleted() error = %v", err)
+	}
+
+	// 第二条：未完成，创建时间晚于第一条
+	svc.now = fixedClock(time.Date(2026, 11, 10, 15, 0, 0, 0, time.Local))
+	if _, err := svc.Add("第二条", nil); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	svc.now = fixedClock(time.Date(2026, 11, 10, 17, 30, 0, 0, time.Local))
+	path, err := svc.ExportMarkdown(dir)
+	if err != nil {
+		t.Fatalf("ExportMarkdown() error = %v", err)
+	}
+	if got, want := filepath.Base(path), "2026-11-10.md"; got != want {
+		t.Fatalf("文件名 = %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(path) {
+		t.Errorf("返回路径应为绝对路径，got %q", path)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	want := "# 2026-11-10\n\n" +
+		"- 15:00 第二条\n" +
+		"- 13:44 第一条\n  第二行  #重构 #AI提示词（已完成 14:05）\n"
+	if got := string(raw); got != want {
+		t.Errorf("导出内容 =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestTempTodoExportMarkdownAppendsToExistingFile(t *testing.T) {
+	svc := newTestTempTodoService(t)
+	day := time.Date(2026, 11, 10, 9, 0, 0, 0, time.Local)
+	svc.now = fixedClock(day)
+	if _, err := svc.Add("追加条目", nil); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "2026-11-10.md")
+	// 既有文件末尾无换行：导出前须先补换行，且不得重复写日期标题
+	if err := os.WriteFile(path, []byte("# 2026-11-10\n\n- 08:00 手工记录"), 0o644); err != nil {
+		t.Fatalf("预置文件失败: %v", err)
+	}
+
+	if _, err := svc.ExportMarkdown(dir); err != nil {
+		t.Fatalf("ExportMarkdown() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	want := "# 2026-11-10\n\n- 08:00 手工记录\n- 09:00 追加条目\n"
+	if got := string(raw); got != want {
+		t.Errorf("追加后内容 =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestTempTodoExportMarkdownRejectsInvalidDir(t *testing.T) {
+	svc := newTestTempTodoService(t)
+	if _, err := svc.Add("条目", nil); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	cases := map[string]string{
+		"空目录":    "",
+		"相对路径":   "relative/dir",
+		"不存在的目录": filepath.Join(t.TempDir(), "missing"),
+	}
+	for name, dir := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.ExportMarkdown(dir)
+			var appErr *model.AppError
+			if !errors.As(err, &appErr) {
+				t.Fatalf("err = %v, want *model.AppError", err)
+			}
+			if appErr.Code != model.ErrCodeTempTodoExportFailed {
+				t.Errorf("错误码 = %q, want %q", appErr.Code, model.ErrCodeTempTodoExportFailed)
+			}
+		})
+	}
+}
+
+func TestTempTodoExportMarkdownEmptyListCreatesNothing(t *testing.T) {
+	svc := newTestTempTodoService(t)
+	svc.now = fixedClock(time.Date(2026, 11, 10, 9, 0, 0, 0, time.Local))
+
+	dir := t.TempDir()
+	path, err := svc.ExportMarkdown(dir)
+	if err != nil {
+		t.Fatalf("ExportMarkdown() error = %v", err)
+	}
+	if path != "" {
+		t.Errorf("空列表应返回空路径，got %q", path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "2026-11-10.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("空列表不应创建文件，Stat err = %v", err)
+	}
+}

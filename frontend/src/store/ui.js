@@ -66,6 +66,33 @@ export const useUiStore = defineStore('ui', () => {
     traceBlameRequest.value = { absPath, seq: traceBlameSeq }
   }
 
+  // 待办→AI 提示词信箱（临时待办二期）：TempTodoPanel「转提示词」写入，
+  // AiChatPanel watch seq 消费并追加到输入框。一次性信箱语义——消费即清空，不持久化。
+  // seq 单调递增：同一条目连续两次点击靠 seq 变化保证不被 watch 依赖比较去重丢失。
+  const todoPromptRequest = ref(null) // { text: '待办正文', seq: 1 }
+  let todoPromptSeq = 0
+
+  /**
+   * 写入待填入 AI 输入框的提示词（唯一写入入口：TempTodoPanel「转提示词」）
+   * @param {string} text 待办正文原文（空白内容忽略，不产生信箱事件）
+   */
+  function pushTodoPrompt(text) {
+    const value = String(text ?? '')
+    if (!value.trim()) return
+    todoPromptSeq += 1
+    todoPromptRequest.value = { text: value, seq: todoPromptSeq }
+  }
+
+  // 待办数据变更通知（临时待办二期）：跨组件新增入口（AI 回复 / 代码预览右键
+  // 「存为待办」）落条后递增，TempTodoPanel watch 该值重拉列表。面板自身增删改
+  // 仍走本地 load()，不经此通知。
+  const tempTodoChangeSeq = ref(0)
+
+  /** 通知待办面板数据已变更（跨组件写入入口调用），面板 watch 后重拉 */
+  function notifyTempTodoChanged() {
+    tempTodoChangeSeq.value += 1
+  }
+
   // 弹窗 visible×6：设置 / 更新提示 / 命令面板 / 仓库筛选 + 内容搜索初始串 + 仓库筛选初始目录 id
   const settingsVisible = ref(false)
   const updateDialogVisible = ref(false)
@@ -127,6 +154,10 @@ export const useUiStore = defineStore('ui', () => {
     pushTerminalPendingCmd,
     traceBlameRequest,
     pushTraceBlameRequest,
+    todoPromptRequest,
+    pushTodoPrompt,
+    tempTodoChangeSeq,
+    notifyTempTodoChanged,
     settingsVisible,
     updateDialogVisible,
     updateInfo,

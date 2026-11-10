@@ -28,7 +28,8 @@ import {
   DiscoverChatClis,
   GetDiscoveredSkills,
   RefreshDiscoveredSkills,
-  OpenFileDialog
+  OpenFileDialog,
+  AddTempTodo
 } from '../../../wailsjs/go/main/App'
 // 断言监听器注销行为需引用 mock 本体
 import { EventsOn, EventsOff, BrowserOpenURL } from '../../../wailsjs/runtime/runtime'
@@ -64,6 +65,7 @@ vi.mock('element-plus', async () => {
 })
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  AddTempTodo: vi.fn(() => Promise.resolve({ id: 'todo-new', text: '', tags: [], createdAt: 0, completedAt: null })),
   GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
   ListChatDirectories: vi.fn(() => Promise.resolve([
     { id: 'chatdir-1', path: 'D:\\workspace\\very-long-projects\\demo-projects\\alpha', displayName: '项目管理', sortOrder: 0, createdAt: 1000 },
@@ -219,7 +221,8 @@ const defaultStubs = {
   Document: { template: '<span>doc</span>' },
   Setting: { template: '<span>setting</span>' },
   Position: { template: '<span>position</span>' },
-  VideoPause: { template: '<span>pause</span>' }
+  VideoPause: { template: '<span>pause</span>' },
+  Memo: { template: '<span>memo</span>' }
 }
 
 // 列表数据经 aiChat store（onMounted loadChatDirectories 驱动），mount 后统一 flushPromises。
@@ -1838,5 +1841,131 @@ describe('AiChatPanel.vue 对话状态栏', () => {
     wrapper = createWrapper()
     await flushPromises()
     expect(wrapper.find('.chat-statusline').exists()).toBe(false)
+  })
+})
+
+describe('临时待办联动（二期）', () => {
+  let wrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+    vi.restoreAllMocks()
+  })
+
+  it('AI 回复有选区时右键弹出「存为待办」，点击落条并通知面板刷新', async () => {
+    GetChatSession.mockResolvedValueOnce({
+      id: 'chatsession-new', directoryId: 'chatdir-1', title: '最近会话', cwd: 'D:\\p',
+      createdAt: 1, updatedAt: 100,
+      messages: [{ role: 'assistant', content: '## 结论\n\n这段结论值得记下', timestamp: 2 }]
+    })
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    const mdEl = wrapper.find('.chat-msg-md').element
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => '  这段结论值得记下  ',
+      anchorNode: mdEl
+    })
+
+    const uiStore = useUiStore()
+    const beforeSeq = uiStore.tempTodoChangeSeq
+    await wrapper.find('.chat-msg-md').trigger('contextmenu', { clientX: 20, clientY: 30 })
+    await flushPromises()
+
+    const item = wrapper.find('[data-action="save-todo"]')
+    expect(item.exists()).toBe(true)
+    await item.trigger('click')
+    await flushPromises()
+
+    // 语义锚单击只触发一次（禁 mousedown+click 双绑）
+    expect(AddTempTodo).toHaveBeenCalledTimes(1)
+    expect(AddTempTodo).toHaveBeenCalledWith('这段结论值得记下', [])
+    expect(ElMessage.success).toHaveBeenCalledWith('已存为待办')
+    expect(uiStore.tempTodoChangeSeq).toBe(beforeSeq + 1)
+  })
+
+  it('右键已清除 DOM 选区时回退同一气泡的最近一次选区缓存', async () => {
+    GetChatSession.mockResolvedValueOnce({
+      id: 'chatsession-new', directoryId: 'chatdir-1', title: '最近会话', cwd: 'D:\\p',
+      createdAt: 1, updatedAt: 100,
+      messages: [{ role: 'assistant', content: '缓存场景的回复', timestamp: 2 }]
+    })
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    const mdEl = wrapper.find('.chat-msg-md').element
+    const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => '  缓存里的选区文本  ',
+      anchorNode: mdEl
+    })
+    // 选中态（mouseup）先写入缓存，随后模拟右键清除 DOM 选区
+    await wrapper.find('.chat-messages').trigger('mouseup')
+    selectionSpy.mockReturnValue({ toString: () => '', anchorNode: null })
+
+    await wrapper.find('.chat-msg-md').trigger('contextmenu', { clientX: 5, clientY: 6 })
+    await flushPromises()
+
+    const item = wrapper.find('[data-action="save-todo"]')
+    expect(item.exists()).toBe(true)
+    await item.trigger('click')
+    await flushPromises()
+    expect(AddTempTodo).toHaveBeenCalledWith('缓存里的选区文本', [])
+  })
+
+  it('无选区右键不接管，保留 WebView 原生菜单', async () => {
+    GetChatSession.mockResolvedValueOnce({
+      id: 'chatsession-new', directoryId: 'chatdir-1', title: '最近会话', cwd: 'D:\\p',
+      createdAt: 1, updatedAt: 100,
+      messages: [{ role: 'assistant', content: '这一段回复文本', timestamp: 2 }]
+    })
+    wrapper = createWrapper()
+    await flushPromises()
+    await selectFirstDirectory(wrapper)
+
+    vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '', anchorNode: null })
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    wrapper.find('.chat-msg-md').element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(wrapper.find('[data-action="save-todo"]').exists()).toBe(false)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('转提示词信箱消费：追加到输入框、切到 AI 面板并清空信箱', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+
+    const uiStore = useUiStore()
+    wrapper.vm.$.setupState.inputText = '已有需求'
+    await flushPromises()
+    uiStore.activePanel = 'directory'
+
+    uiStore.pushTodoPrompt('待办里的提示词')
+    await flushPromises()
+
+    expect(wrapper.vm.$.setupState.inputText).toBe('已有需求\n\n待办里的提示词')
+    expect(uiStore.activePanel).toBe('ai-chat')
+    expect(uiStore.todoPromptRequest).toBe(null)
+  })
+
+  it('转提示词信箱消费：输入框为空时直接填入原文', async () => {
+    wrapper = createWrapper()
+    await flushPromises()
+
+    const uiStore = useUiStore()
+    uiStore.pushTodoPrompt('整段提示词')
+    await flushPromises()
+
+    expect(wrapper.vm.$.setupState.inputText).toBe('整段提示词')
+    expect(uiStore.todoPromptRequest).toBe(null)
   })
 })

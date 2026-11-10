@@ -253,9 +253,11 @@ func assembleWebServe(app *App) (*server.WSHub, *server.WebHandler, error) {
 		// QueryIPBanTrend（连接管控十期攻击趋势，派生自他人 IP 封禁审计明细，
 		// 载荷仅桶 key+计数仍整体收口——无单 IP 明细）与
 		// GetAggregatedRootNodes（聚合视图根节点，载荷含任意入参路径的存在性信息，
-		// 防浏览器侧探测磁盘路径）与
-		// CheckFileExists（本地路径存在性判定，同防浏览器侧探测磁盘路径）
-		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans", "ListIPBanSuggestions", "QueryIPBanTrend", "GetAggregatedRootNodes", "CheckFileExists"},
+		// 防浏览器侧探测磁盘路径）、
+		// CheckFileExists（本地路径存在性判定，同防浏览器侧探测磁盘路径）与
+		// ExportTempTodosMarkdown（临时待办导出，可向任意入参目录追加/新建文件，
+		// 本地文件写入只经桌面出口）
+		RPCHiddenMethods: []string{"QueryAuditLog", "ListIPBans", "ListIPBanSuggestions", "QueryIPBanTrend", "GetAggregatedRootNodes", "CheckFileExists", "ExportTempTodosMarkdown"},
 		WSHub:            hub,
 	})
 	return hub, handler, nil

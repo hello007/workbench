@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -230,6 +231,44 @@ func (s *TempTodoService) Delete(id string) error {
 	return nil
 }
 
+// ExportMarkdown 把全部条目追加导出到 dir 下当天的 YYYY-MM-DD.md，返回目标文件
+// 的绝对路径。无条目时返回空路径与 nil（面板导出按钮已按条数禁用，此分支仅作
+// 防御，调用方据空路径提示「暂无可导出的待办」）。
+//
+// 导出范围与顺序复用 List()：待办在前（创建时间倒序）、已完成在后（完成时间
+// 降序），即用户在面板里看到什么就导出什么；读取顺带执行保留策略，与面板口径一致。
+func (s *TempTodoService) ExportMarkdown(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || !filepath.IsAbs(dir) {
+		return "", model.NewAppError(model.ErrCodeTempTodoExportFailed, "导出目录无效")
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return "", model.WrapAppError(model.ErrCodeTempTodoExportFailed, "导出目录不存在或不是目录", err)
+	}
+
+	todos, err := s.List()
+	if err != nil {
+		return "", err
+	}
+	if len(todos) == 0 {
+		return "", nil
+	}
+
+	day := s.now().Format("2006-01-02")
+	path := filepath.Join(dir, day+".md")
+	if err := appendTempTodoMarkdown(path, day, buildTempTodoMarkdown(todos)); err != nil {
+		Logger().Warn("export temp todos failed", "path", path, "err", err)
+		return "", model.WrapAppError(model.ErrCodeTempTodoExportFailed, "写入导出文件失败", err)
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path, nil
+	}
+	return abs, nil
+}
+
 // loadLocked 惰性加载（调用方须持 s.mu）。文件缺失视为空列表；损坏时留底
 // 备份后降级空列表，不阻塞面板打开（对齐 ChatService 索引加载范式）。
 func (s *TempTodoService) loadLocked() error {
@@ -398,4 +437,78 @@ func newTempTodoID() (string, error) {
 		return fmt.Sprintf("t%d", time.Now().UnixNano()), nil
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// buildTempTodoMarkdown 把条目渲染为流水式列表：- HH:MM 正文  #标签（已完成 HH:MM）。
+// 多行正文的第二行起缩进两空格，使其保持在同一列表项内。
+// 标签原样输出：归一化只去首尾空白，标签内含空格时不做改写（保留用户书写方式）。
+func buildTempTodoMarkdown(todos []model.TempTodo) string {
+	var b strings.Builder
+	for _, t := range todos {
+		b.WriteString("- ")
+		b.WriteString(time.UnixMilli(t.CreatedAt).Format("15:04"))
+		b.WriteString(" ")
+		b.WriteString(indentTempTodoText(t.Text))
+		if len(t.Tags) > 0 {
+			// 正文与首个标签间空两格（Markdown 行尾两空格语义无关，此处仅为可读性）；
+			// 标签之间单空格分隔，与用户笔记习惯一致
+			b.WriteString("  ")
+			for i, tag := range t.Tags {
+				if i > 0 {
+					b.WriteString(" ")
+				}
+				b.WriteString("#")
+				b.WriteString(tag)
+			}
+		}
+		if t.CompletedAt != nil {
+			b.WriteString("（已完成 ")
+			b.WriteString(time.UnixMilli(*t.CompletedAt).Format("15:04"))
+			b.WriteString("）")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// indentTempTodoText 把多行正文的第二行起缩进两空格，保持在同一列表项内。
+func indentTempTodoText(text string) string {
+	lines := strings.Split(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// appendTempTodoMarkdown 追加写入当天文件。空文件（新建）先写一级日期标题；
+// 已有文件末尾无换行时先补换行，避免与既有内容粘连。
+//
+// O_APPEND 保证写入落到文件末尾；ReadAt 使用显式偏移，不受追加模式影响。
+func appendTempTodoMarkdown(path, day, body string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	prefix := ""
+	if info.Size() == 0 {
+		prefix = "# " + day + "\n\n"
+	} else {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+			return err
+		}
+		if last[0] != '\n' {
+			prefix = "\n"
+		}
+	}
+
+	_, err = f.WriteString(prefix + body)
+	return err
 }

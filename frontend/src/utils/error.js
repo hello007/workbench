@@ -55,6 +55,7 @@ export const ErrorCode = Object.freeze({
   TempTodoTextRequired: 'E_TEMP_TODO_TEXT_REQUIRED', // 正文为空或全空白（warning）
   TempTodoNotFound: 'E_TEMP_TODO_NOT_FOUND', // 条目不存在或已被删除，列表已过期（warning）
   TempTodoClipboardFailed: 'E_TEMP_TODO_CLIPBOARD_FAILED', // 剪贴板读取失败或剪贴板工具缺失（error）
+  TempTodoExportFailed: 'E_TEMP_TODO_EXPORT_FAILED', // 导出目录无效或 Markdown 写入失败（error）
   // 浏览器访问通道 token 管理域错误码（多 token 管理），取值与 model/app_error.go
   // token 管理域段一致，均为预期拒绝/用户操作错误（warning）。
   TokenNotFound: 'E_TOKEN_NOT_FOUND', // 目标令牌记录不存在或已被删除（列表过期，引导刷新）

@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 // 静态 import：coverage 插桩下动态 import 首次编译会顶到 5s 超时线
 import TempTodoPanel from '../TempTodoPanel.vue'
+import { useUiStore } from '../../store/ui'
 
 // mock 句柄用 vi.hoisted 提升：静态 import 的组件先于普通 const 求值，
 // 顶层变量直接进 vi.mock 工厂会触发 TDZ（Cannot access before initialization）
@@ -14,7 +15,10 @@ const mocks = vi.hoisted(() => ({
   addFromClipboard: vi.fn(),
   update: vi.fn(),
   setCompleted: vi.fn(),
-  remove: vi.fn()
+  remove: vi.fn(),
+  exportMd: vi.fn(),
+  openDir: vi.fn(),
+  browserChannel: false
 }))
 
 vi.mock('element-plus', async () => {
@@ -32,7 +36,14 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddTempTodoFromClipboard: (...a) => mocks.addFromClipboard(...a),
   UpdateTempTodo: (...a) => mocks.update(...a),
   SetTempTodoCompleted: (...a) => mocks.setCompleted(...a),
-  DeleteTempTodo: (...a) => mocks.remove(...a)
+  DeleteTempTodo: (...a) => mocks.remove(...a),
+  ExportTempTodosMarkdown: (...a) => mocks.exportMd(...a),
+  OpenDirectoryDialog: (...a) => mocks.openDir(...a)
+}))
+
+// 浏览器/桌面模式判定：用例内翻转 mocks.browserChannel 驱动降级分支
+vi.mock('../../transport', () => ({
+  isBrowserChannel: () => mocks.browserChannel
 }))
 
 vi.mock('@element-plus/icons-vue', () => {
@@ -44,7 +55,9 @@ vi.mock('@element-plus/icons-vue', () => {
     Edit: stub('edit'),
     Delete: stub('delete'),
     ArrowDown: stub('arrow-down'),
-    ArrowRight: stub('arrow-right')
+    ArrowRight: stub('arrow-right'),
+    Download: stub('download'),
+    ChatDotRound: stub('chat-dot-round')
   }
 })
 
@@ -113,6 +126,9 @@ beforeEach(() => {
   mocks.setCompleted.mockResolvedValue()
   mocks.remove.mockResolvedValue()
   mocks.confirm.mockResolvedValue()
+  mocks.exportMd.mockResolvedValue('')
+  mocks.openDir.mockResolvedValue('')
+  mocks.browserChannel = false
 })
 
 afterEach(() => {
@@ -295,5 +311,76 @@ describe('TempTodoPanel - 新建 / 编辑 / 快捷键记录', () => {
     await flushPromises()
 
     expect(mocks.message.warning).toHaveBeenCalledWith('剪贴板为空，未记录')
+  })
+})
+
+describe('TempTodoPanel - 二期入口（导出 / 转提示词 / 外部变更刷新）', () => {
+  it('导出：选目录后调用后端并提示写入路径', async () => {
+    mocks.openDir.mockResolvedValue('D:/notes')
+    mocks.exportMd.mockResolvedValue('D:/notes/2026-11-10.md')
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="export"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.openDir).toHaveBeenCalledWith('选择待办导出目录')
+    expect(mocks.exportMd).toHaveBeenCalledWith('D:/notes')
+    expect(mocks.message.success).toHaveBeenCalledWith('已导出到 D:/notes/2026-11-10.md')
+  })
+
+  it('导出：取消目录选择不调用后端', async () => {
+    mocks.openDir.mockResolvedValue('')
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="export"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.exportMd).not.toHaveBeenCalled()
+    expect(mocks.message.success).not.toHaveBeenCalled()
+  })
+
+  it('导出：浏览器模式提示仅桌面可用且不弹目录对话框', async () => {
+    mocks.browserChannel = true
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="export"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.message.warning).toHaveBeenCalledWith('该功能仅桌面模式可用')
+    expect(mocks.openDir).not.toHaveBeenCalled()
+  })
+
+  it('导出：后端返回空路径提示暂无可导出条目', async () => {
+    mocks.openDir.mockResolvedValue('D:/notes')
+    mocks.exportMd.mockResolvedValue('')
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="export"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.message.info).toHaveBeenCalledWith('暂无可导出的待办')
+  })
+
+  it('无条目时导出按钮禁用', async () => {
+    mocks.list.mockResolvedValue([])
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-action="export"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('转提示词：写入 uiStore 一次性信箱（正文原样）', async () => {
+    const wrapper = await mountPanel()
+    const uiStore = useUiStore()
+
+    await wrapper.find('.todo-item [data-action="to-prompt"]').trigger('click')
+
+    expect(uiStore.todoPromptRequest).toMatchObject({ text: '第一条待办\n第二行正文' })
+    expect(uiStore.todoPromptRequest.seq).toBeGreaterThan(0)
+  })
+
+  it('外部变更通知触发重拉列表', async () => {
+    await mountPanel()
+    expect(mocks.list).toHaveBeenCalledTimes(1)
+
+    useUiStore().notifyTempTodoChanged()
+    await flushPromises()
+
+    expect(mocks.list).toHaveBeenCalledTimes(2)
   })
 })

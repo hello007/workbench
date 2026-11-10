@@ -1,7 +1,7 @@
 # 日志与错误处理规范
 
 > 后端 slog 结构化日志 + AppError 统一错误处理契约。记录日志库选型、ErrorFormatter 跨层错误码协议、前端 handleError 分流机制、web_audit.log 审计事件表。
-> 最后更新：2026-11-09 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor；token_ban/token_unban 审计行与 E_TOKEN_REVOKED：10-24-connection-ban；ip_ban/ip_unban 审计行（actorSource 扩 system）：10-26-10-26-connection-auto-ban；ip_ban strike 字段与档位 reason（六期）：10-27-connection-ban-tuning；ip_ban 手动封禁归因分叉（七期）：10-27-ip；临时待办五码：11-09-temp-todo-workspace
+> 最后更新：2026-11-10 · 来源任务：09-12-global-error-logging；审计事件表（conn_kick）：10-24-connection-kick-audit-and-kicked-end-notice；读侧 API 与 actor 归因（§8.1）：10-24-actor；token_ban/token_unban 审计行与 E_TOKEN_REVOKED：10-24-connection-ban；ip_ban/ip_unban 审计行（actorSource 扩 system）：10-26-10-26-connection-auto-ban；ip_ban strike 字段与档位 reason（六期）：10-27-connection-ban-tuning；ip_ban 手动封禁归因分叉（七期）：10-27-ip；临时待办五码：11-09-temp-todo-workspace；临时待办导出码 E_TEMP_TODO_EXPORT_FAILED：11-10-temp-todo-phase2
 
 ---
 
@@ -108,6 +108,7 @@ type AppError struct {
 | `ErrCodeTempTodoTextRequired` | `E_TEMP_TODO_TEXT_REQUIRED` | 临时待办（侧边栏 `todo` 面板） | warning（正文为空或全空白；`Add`/`Update` 归一后判空拒绝，前端表单已挡、后端防御保留） |
 | `ErrCodeTempTodoNotFound` | `E_TEMP_TODO_NOT_FOUND` | 临时待办（侧边栏 `todo` 面板） | warning（目标条目不存在或已被删除，列表已过期；`Update`/`SetCompleted`/`Delete` 按 ID 未命中返回，前端重拉列表） |
 | `ErrCodeTempTodoClipboardFailed` | `E_TEMP_TODO_CLIPBOARD_FAILED` | 临时待办（侧边栏 `todo` 面板） | error（剪贴板读取失败：打开失败或剪贴板工具缺失，`WrapAppError` 保留根因；前端 `handleError` 弹 error 并带前缀） |
+| `ErrCodeTempTodoExportFailed` | `E_TEMP_TODO_EXPORT_FAILED` | 临时待办（侧边栏 `todo` 面板） | error（导出目录为空/非绝对路径/不存在/不是目录，或当天 Markdown 追加写入失败；2026-11-10 临时待办二期新增，`TempTodoService.ExportMarkdown` 在目录校验与 `appendTempTodoMarkdown` 失败分支返回，前端 `handleError` 弹 error 并带前缀；该能力仅桌面模式，`App.ExportTempTodosMarkdown` 已入 `RPCHiddenMethods`） |
 | `ErrCodeRPCBadRequest` | `E_RPC_BAD_REQUEST` | RPC 协议层（serve 浏览器模式） | error（请求体非法/方法不允许） |
 | `ErrCodeRPCMethodNotFound` | `E_RPC_METHOD_NOT_FOUND` | RPC 协议层（serve 浏览器模式） | error（方法不存在或未导出） |
 | `ErrCodeRPCMethodUnsupported` | `E_RPC_METHOD_UNSUPPORTED` | RPC 协议层（serve 浏览器模式） | error（签名形态不受支持，如变参） |

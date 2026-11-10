@@ -39,3 +39,11 @@ func (a *App) SetTempTodoCompleted(id string, completed bool) error {
 func (a *App) DeleteTempTodo(id string) error {
 	return a.tempTodoSvc.Delete(id)
 }
+
+// ExportTempTodosMarkdown 把全部条目追加导出到 dir 下当天的 YYYY-MM-DD.md，
+// 返回写入文件的绝对路径（dir 由前端经 OpenDirectoryDialog 选定）。
+// 浏览器通道不提供该能力（main.go RPCHiddenMethods 屏蔽）：允许浏览器侧指定
+// 任意路径写文件会突破「本地文件只经桌面出口」的边界。
+func (a *App) ExportTempTodosMarkdown(dir string) (string, error) {
+	return a.tempTodoSvc.ExportMarkdown(dir)
+}
