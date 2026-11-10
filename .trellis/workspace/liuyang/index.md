@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 242
-- **Last Active**: 2026-11-09
+- **Total Sessions**: 243
+- **Last Active**: 2026-11-10
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~503 | Active |
+| `journal-5.md` | ~536 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 243 | 2026-11-10 | 临时待办二期：选中文本存待办、转提示词、导出 Markdown | `8cf30c0` | `master` |
 | 242 | 2026-11-09 | 临时待办工作区（剪贴板快速记录 + 完成归档） | `6100a2b` | `master` |
 | 241 | 2026-11-08 | 切换分支支持选择 git 标签 | `a1057bc` | `master` |
 | 240 | 2026-11-07 | 提交历史→文件级追溯入口衔接 | `01736d3` | `master` |

@@ -501,3 +501,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 243: 临时待办二期：选中文本存待办、转提示词、导出 Markdown
+
+**Date**: 2026-11-10
+**Task**: 临时待办二期：选中文本存待办、转提示词、导出 Markdown
+**Branch**: `master`
+
+### Summary
+
+完成临时待办二期三项能力：AI 回复与代码/Markdown 预览选中文本右键存为待办（含选区缓存回退、data-action 语义锚）；条目转提示词经 uiStore 一次性信箱填入 AI 输入框（追加语义、自动切面板聚焦）；导出全部条目为流水式 Markdown 追加到指定目录当天 YYYY-MM-DD.md（桌面限定，后端方法入 RPCHiddenMethods）。新增错误码 E_TEMP_TODO_EXPORT_FAILED 并三处同步，补 service 与前端单测、README 与 docs/spec 登记。trellis-check 审核修复 7 处。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8cf30c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
