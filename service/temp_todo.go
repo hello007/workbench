@@ -120,6 +120,61 @@ func (s *TempTodoService) Add(text string, tags []string) (model.TempTodo, error
 	return todo, nil
 }
 
+// AddMany 批量新建待办（Markdown 导入入口），全部条目一次落盘。
+//
+// 逐条复用 Add 的归一化规则：归一后正文为空的条目直接跳过（导入文件里可能
+// 残留空条目），既不报错也不计入返回值。CreatedAt <= 0 取当前时刻；晚于当前
+// 时刻钳到当前时刻，防止导入带未来时间的历史笔记时条目抢占列表顶部。
+//
+// 落盘失败整体回滚内存态：导入要么全成要么全不成，避免出现「提示导入 10 条、
+// 实际只落了 3 条」的内存与磁盘分叉。
+func (s *TempTodoService) AddMany(items []model.TempTodoDraft) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.loadLocked(); err != nil {
+		return 0, fmt.Errorf("加载临时待办失败: %w", err)
+	}
+
+	now := s.now().UnixMilli()
+	prev := len(s.todos)
+	for _, item := range items {
+		text := normalizeTempTodoText(item.Text)
+		if text == "" {
+			continue
+		}
+		id, err := newTempTodoID()
+		if err != nil {
+			s.todos = s.todos[:prev]
+			return 0, err
+		}
+		createdAt := item.CreatedAt
+		if createdAt <= 0 || createdAt > now {
+			createdAt = now
+		}
+		s.todos = append(s.todos, model.TempTodo{
+			ID:        id,
+			Text:      text,
+			Tags:      normalizeTempTodoTags(item.Tags),
+			CreatedAt: createdAt,
+		})
+	}
+
+	added := len(s.todos) - prev
+	if added == 0 {
+		return 0, nil
+	}
+	if err := s.saveLocked(); err != nil {
+		s.todos = s.todos[:prev]
+		return 0, model.WrapAppError(model.ErrCodeTempTodoImportFailed, "导入待办失败", err)
+	}
+	return added, nil
+}
+
 // AddFromClipboard 读取系统剪贴板文本并直接落一条待办（快速记录唯一入口）。
 //
 // 剪贴板语义分流交给 util：空剪贴板与「有内容但无文本」返回不同哨兵，

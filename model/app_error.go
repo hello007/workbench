@@ -129,16 +129,18 @@ const (
 	// 素材购物栏域（素材管理「购物栏」：跨库页级收集 + 按序合并导出）
 	ErrCodeCartExportInProgress = "E_CART_EXPORT_IN_PROGRESS" // 已有合并导出任务进行中，本次拒绝（warning，等待完成或先取消）
 
-	// 临时待办域（侧边栏「临时待办」：剪贴板快速记录 + 完成归档，data/temp_todos.json）。
-	// 六个码（4 warning + 2 error），前端 error.js WARNING_CODES 同步分流四个预期
-	// 拒绝/引导类；剪贴板为空与不含文本要分开提示，否则用户无法判断是没复制还是
-	// 复制了文件；读取失败（工具缺失/打开失败）与导出写入失败为 error，保留根因供排障。
+	// 临时待办域（侧边栏「临时待办」：剪贴板快速记录 + 完成归档 + Markdown 导入，
+	// data/temp_todos.json）。七个码（4 warning + 3 error），前端 error.js
+	// WARNING_CODES 同步分流四个预期拒绝/引导类；剪贴板为空与不含文本要分开提示，
+	// 否则用户无法判断是没复制还是复制了文件；读取失败（工具缺失/打开失败）、导出
+	// 写入失败与导入落盘失败为 error，保留根因供排障。
 	ErrCodeTempTodoClipboardEmpty  = "E_TEMP_TODO_CLIPBOARD_EMPTY"   // 剪贴板无内容（warning，提示先复制文本）
 	ErrCodeTempTodoClipboardNoText = "E_TEMP_TODO_CLIPBOARD_NO_TEXT" // 剪贴板有内容但无文本格式，如复制的文件（warning）
 	ErrCodeTempTodoTextRequired    = "E_TEMP_TODO_TEXT_REQUIRED"     // 正文为空或全空白（warning，前端表单已挡，后端防御保留）
 	ErrCodeTempTodoNotFound        = "E_TEMP_TODO_NOT_FOUND"         // 目标条目不存在或已被删除（warning，列表已过期，前端刷新）
 	ErrCodeTempTodoClipboardFailed = "E_TEMP_TODO_CLIPBOARD_FAILED"  // 剪贴板读取失败：打开失败或剪贴板工具缺失（error）
 	ErrCodeTempTodoExportFailed    = "E_TEMP_TODO_EXPORT_FAILED"     // 导出目录无效或 Markdown 写入失败（error）
+	ErrCodeTempTodoImportFailed    = "E_TEMP_TODO_IMPORT_FAILED"     // Markdown 导入批量落盘失败（error，整批回滚）
 
 	// PPTX 预览转换域（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）
 	ErrCodePptxPreviewUnavailable = "E_PPTX_PREVIEW_UNAVAILABLE" // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）

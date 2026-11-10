@@ -28,6 +28,10 @@
           <el-icon class="btn-icon"><Download /></el-icon>
           导出
         </el-button>
+        <el-button size="small" data-action="import" @click="startImport">
+          <el-icon class="btn-icon"><Upload /></el-icon>
+          导入
+        </el-button>
         <el-button type="primary" size="small" data-action="create" :disabled="creating" @click="startCreate">
           <el-icon class="btn-icon"><Plus /></el-icon>
           新建
@@ -224,6 +228,63 @@
         </template>
       </div>
     </div>
+
+    <!-- 导入预览：先看将导入条数与重复项，确认后由后端一次落盘 -->
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入待办"
+      width="min(640px, 80vw)"
+      class="todo-import-dialog"
+      @closed="resetImport"
+    >
+      <div class="import-summary">
+        <span>将导入 <b>{{ importWritableCount }}</b> 条</span>
+        <span v-if="importSkippedCount" class="import-summary-dup">
+          跳过重复 <b>{{ importSkippedCount }}</b> 条
+        </span>
+        <el-switch
+          v-model="importIncludeDuplicates"
+          size="small"
+          class="import-switch"
+          active-text="重复项也导入"
+        />
+      </div>
+
+      <div class="import-list">
+        <div
+          v-for="(item, idx) in importPreviewItems"
+          :key="idx"
+          class="import-item"
+          :class="{ 'is-duplicate': item.duplicate && !importIncludeDuplicates }"
+        >
+          <span class="import-item-time">{{ formatImportTime(item.createdAt) }}</span>
+          <span class="import-item-text" :title="item.text">{{ item.text }}</span>
+          <el-tag v-if="item.duplicate" size="small" type="warning">已存在</el-tag>
+          <el-tag
+            v-for="tag in item.tags"
+            :key="tag"
+            size="small"
+            type="info"
+            class="todo-tag"
+          >{{ tag }}</el-tag>
+        </div>
+        <div v-if="importTruncated" class="import-more">
+          仅展示前 {{ IMPORT_PREVIEW_LIMIT }} 条，确认后按上述规则导入
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button size="small" @click="importDialogVisible = false">取消</el-button>
+        <el-button
+          size="small"
+          type="primary"
+          :disabled="!importWritableCount"
+          :loading="importing"
+          data-action="import-confirm"
+          @click="confirmImport"
+        >导入 {{ importWritableCount }} 条</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -231,20 +292,25 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, ChatDotRound
+  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, Upload, ChatDotRound
 } from '@element-plus/icons-vue'
 import {
   ListTempTodos,
   AddTempTodo,
   AddTempTodoFromClipboard,
+  AddTempTodos,
   UpdateTempTodo,
   SetTempTodoCompleted,
   DeleteTempTodo,
   ExportTempTodosMarkdown,
-  OpenDirectoryDialog
+  OpenDirectoryDialog,
+  OpenFileDialog,
+  ReadFileBytes
 } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { formatRelativeTime, formatFullTime } from '../utils/formatTime'
+import { decodeBase64Utf8 } from '../utils/base64'
+import { parseTempTodoMarkdown } from '../utils/tempTodoImport'
 import { useSettingsStore } from '../store/settings'
 import { useUiStore } from '../store/ui'
 import { isBrowserChannel } from '../transport'
@@ -269,6 +335,29 @@ const createInputRef = ref(null)
 
 // 展开态按条目 ID 记录：长文默认折叠成两行，避免侧边栏被单条占满
 const expandedIDs = ref(new Set())
+
+// 导入预览态：解析结果 + 「重复项也导入」开关（默认关，避免制造重复脏数据）。
+// 条目多时只渲染前 200 条，避免大文件把对话框撑爆；写入仍按全量。
+const IMPORT_PREVIEW_LIMIT = 200
+const importDialogVisible = ref(false)
+const importParsed = ref(null)
+const importIncludeDuplicates = ref(false)
+const importing = ref(false)
+
+const importWritableItems = computed(() => {
+  const entries = importParsed.value?.entries || []
+  return importIncludeDuplicates.value ? entries : entries.filter(item => !item.duplicate)
+})
+const importWritableCount = computed(() => importWritableItems.value.length)
+const importSkippedCount = computed(() =>
+  importIncludeDuplicates.value ? 0 : (importParsed.value?.duplicateCount || 0)
+)
+const importPreviewItems = computed(() =>
+  (importParsed.value?.entries || []).slice(0, IMPORT_PREVIEW_LIMIT)
+)
+const importTruncated = computed(() =>
+  (importParsed.value?.entries.length || 0) > IMPORT_PREVIEW_LIMIT
+)
 
 const filteredTodos = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -325,6 +414,83 @@ const exportTodos = async () => {
   } catch (e) {
     handleError('导出待办失败: ', e)
   }
+}
+
+// 导入预览里的时间：0 表示无行内时间，落盘时由后端取导入时刻
+const formatImportTime = (createdAt) => {
+  if (!createdAt) return '导入时刻'
+  const d = new Date(createdAt)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// 导入 Markdown：桌面模式选文件 → 读原始字节还原 UTF-8 → 前端解析 → 打开预览。
+// 浏览器通道不提供（文件对话框与本地文件读取均属桌面能力）。
+const startImport = async () => {
+  if (isBrowserChannel()) {
+    ElMessage.warning('该功能仅桌面模式可用')
+    return
+  }
+  try {
+    const path = await OpenFileDialog('选择待办 Markdown 文件', [
+      { DisplayName: 'Markdown 文件', Pattern: '*.md' }
+    ])
+    if (!path) return
+
+    const bytes = await ReadFileBytes(path)
+    if (bytes?.error) {
+      ElMessage.error('读取文件失败: ' + bytes.error)
+      return
+    }
+    if (bytes?.tooLarge) {
+      ElMessage.error('文件过大（超 50MB），无法导入')
+      return
+    }
+
+    const text = bytes?.base64 ? decodeBase64Utf8(bytes.base64) : ''
+    const parsed = parseTempTodoMarkdown(text, {
+      fileName: path,
+      existingTexts: todos.value.map(t => t.text)
+    })
+    if (!parsed.entries.length) {
+      ElMessage.info('未找到可导入的待办行')
+      return
+    }
+
+    importParsed.value = parsed
+    importIncludeDuplicates.value = false
+    importDialogVisible.value = true
+  } catch (e) {
+    handleError('导入待办失败: ', e)
+  }
+}
+
+const confirmImport = async () => {
+  const items = importWritableItems.value.map(item => ({
+    text: item.text,
+    tags: item.tags,
+    createdAt: item.createdAt
+  }))
+  if (!items.length) return
+
+  importing.value = true
+  try {
+    const added = await AddTempTodos(items)
+    ElMessage.success(`已导入 ${added} 条待办`)
+    importDialogVisible.value = false
+    // 导入后清空搜索：否则新条目可能被当前关键词过滤掉，用户看不到结果
+    keyword.value = ''
+    await load()
+  } catch (e) {
+    handleError('导入待办失败: ', e)
+  } finally {
+    importing.value = false
+  }
+}
+
+const resetImport = () => {
+  importParsed.value = null
+  importIncludeDuplicates.value = false
+  importing.value = false
 }
 
 const resetDraft = () => {
@@ -711,5 +877,71 @@ onMounted(() => {
   display: flex;
   gap: var(--spacing-xs);
   flex-shrink: 0;
+}
+
+/* ---- 导入预览 ---- */
+.import-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.import-summary b {
+  color: var(--text-primary);
+}
+
+.import-summary-dup {
+  color: var(--el-color-warning);
+}
+
+.import-switch {
+  margin-left: auto;
+}
+
+.import-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.import-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+}
+
+.import-item.is-duplicate {
+  opacity: 0.55;
+}
+
+.import-item-time {
+  flex: none;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.import-more {
+  padding: var(--spacing-sm);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 </style>

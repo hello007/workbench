@@ -14,3 +14,14 @@ type TempTodo struct {
 	// CompletedAt 完成时间（Unix 毫秒）；nil = 仍在待办区。
 	CompletedAt *int64 `json:"completedAt"`
 }
+
+// TempTodoDraft 批量导入时的单条草稿（Markdown 导入用）。
+//
+// 与 TempTodo 的区别：无 ID / 完成态，ID 由 service 生成，导入条目恒为待办态。
+// CreatedAt 为 0 表示「取导入时刻」——前端对没有行内时间的待办行传 0，
+// 由后端统一填充，避免前后端时钟口径分叉。
+type TempTodoDraft struct {
+	Text      string   `json:"text"`
+	Tags      []string `json:"tags"`
+	CreatedAt int64    `json:"createdAt"`
+}

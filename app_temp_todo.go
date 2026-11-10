@@ -25,6 +25,12 @@ func (a *App) AddTempTodoFromClipboard() (model.TempTodo, error) {
 	return a.tempTodoSvc.AddFromClipboard()
 }
 
+// AddTempTodos 批量新建待办（Markdown 导入），一次落盘并返回实际新增条数。
+// 空正文条目由 service 跳过；CreatedAt<=0 表示取导入时刻。
+func (a *App) AddTempTodos(items []model.TempTodoDraft) (int, error) {
+	return a.tempTodoSvc.AddMany(items)
+}
+
 // UpdateTempTodo 修改待办正文与标签（不改变创建时间与完成态）。
 func (a *App) UpdateTempTodo(id, text string, tags []string) error {
 	return a.tempTodoSvc.Update(id, text, tags)

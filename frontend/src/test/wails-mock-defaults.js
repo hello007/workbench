@@ -578,6 +578,9 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   ListTempTodos: [],
   AddTempTodo: { id: 'todo-e2e', text: '', tags: [], createdAt: 1735689600000, completedAt: null },
   AddTempTodoFromClipboard: { id: 'todo-e2e', text: '', tags: [], createdAt: 1735689600000, completedAt: null },
+  // 批量导入（Markdown 导入）：返回实际新增条数（number），默认 0 = 无有效条目，
+  // 组件据此提示「已导入 0 条待办」；E2E 导入链用例按需 override 为具体条数
+  AddTempTodos: 0,
   UpdateTempTodo: null,
   SetTempTodoCompleted: null,
   DeleteTempTodo: null,

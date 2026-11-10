@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   exportMd: vi.fn(),
   openDir: vi.fn(),
+  addMany: vi.fn(),
+  openFile: vi.fn(),
+  readFileBytes: vi.fn(),
   browserChannel: false
 }))
 
@@ -38,7 +41,10 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   SetTempTodoCompleted: (...a) => mocks.setCompleted(...a),
   DeleteTempTodo: (...a) => mocks.remove(...a),
   ExportTempTodosMarkdown: (...a) => mocks.exportMd(...a),
-  OpenDirectoryDialog: (...a) => mocks.openDir(...a)
+  OpenDirectoryDialog: (...a) => mocks.openDir(...a),
+  AddTempTodos: (...a) => mocks.addMany(...a),
+  OpenFileDialog: (...a) => mocks.openFile(...a),
+  ReadFileBytes: (...a) => mocks.readFileBytes(...a)
 }))
 
 // 浏览器/桌面模式判定：用例内翻转 mocks.browserChannel 驱动降级分支
@@ -57,6 +63,7 @@ vi.mock('@element-plus/icons-vue', () => {
     ArrowDown: stub('arrow-down'),
     ArrowRight: stub('arrow-right'),
     Download: stub('download'),
+    Upload: stub('upload'),
     ChatDotRound: stub('chat-dot-round')
   }
 })
@@ -81,6 +88,21 @@ const stubs = {
     emits: ['change']
   },
   'el-tag': { template: '<span class="el-tag"><slot /></span>', props: ['size', 'type'] },
+  // 导入预览对话框：真实 EP dialog teleport 到 body 且带过渡，stub 成受 modelValue 控制的块
+  'el-dialog': {
+    template: `<div v-if="modelValue" class="el-dialog">
+      <div class="dialog-title">{{ title }}</div>
+      <slot />
+      <slot name="footer" />
+    </div>`,
+    props: ['modelValue', 'title', 'width'],
+    emits: ['update:modelValue', 'closed']
+  },
+  'el-switch': {
+    template: '<label class="el-switch"><input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" /></label>',
+    props: ['modelValue', 'size'],
+    emits: ['update:modelValue']
+  },
   'el-tooltip': { template: '<div class="el-tooltip"><slot /></div>', props: ['content', 'placement', 'showAfter'] },
   // 真实 ElTooltip 默认 teleport 到 body，按钮会脱离 wrapper，必须显式 stub 掉
   ElTooltip: { template: '<div class="el-tooltip"><slot /></div>' }
@@ -128,6 +150,9 @@ beforeEach(() => {
   mocks.confirm.mockResolvedValue()
   mocks.exportMd.mockResolvedValue('')
   mocks.openDir.mockResolvedValue('')
+  mocks.addMany.mockResolvedValue(1)
+  mocks.openFile.mockResolvedValue('')
+  mocks.readFileBytes.mockResolvedValue({ path: '', name: '', size: 0, tooLarge: false })
   mocks.browserChannel = false
 })
 
@@ -382,5 +407,101 @@ describe('TempTodoPanel - 二期入口（导出 / 转提示词 / 外部变更刷
     await flushPromises()
 
     expect(mocks.list).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('TempTodoPanel - 三期导入 Markdown', () => {
+  const mdBase64 = (text) => Buffer.from(text, 'utf-8').toString('base64')
+
+  const openPreview = async (wrapper, md) => {
+    mocks.openFile.mockResolvedValue('D:/notes/2026-01-05.md')
+    mocks.readFileBytes.mockResolvedValue({ base64: mdBase64(md), tooLarge: false })
+    await wrapper.find('[data-action="import"]').trigger('click')
+    await flushPromises()
+  }
+
+  it('选择文件后解析并打开预览，汇总将导入与重复条数', async () => {
+    const wrapper = await mountPanel()
+    await openPreview(wrapper, [
+      '- [ ] 已完成的事',
+      '- 09:30 新条目  #标签',
+      '- 普通段落'
+    ].join('\n'))
+
+    expect(mocks.openFile).toHaveBeenCalledTimes(1)
+    expect(mocks.readFileBytes).toHaveBeenCalledWith('D:/notes/2026-01-05.md')
+    const dialog = wrapper.find('.el-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('将导入 1 条')
+    expect(dialog.text()).toContain('跳过重复 1 条')
+    expect(dialog.text()).toContain('新条目')
+    expect(dialog.text()).toContain('已存在')
+  })
+
+  it('确认导入调用 AddTempTodos，默认过滤重复项并刷新列表', async () => {
+    const wrapper = await mountPanel()
+    await openPreview(wrapper, '- [ ] 已完成的事\n- 09:30 新条目  #标签')
+
+    await wrapper.find('[data-action="import-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.addMany).toHaveBeenCalledWith([
+      {
+        text: '新条目',
+        tags: ['标签'],
+        createdAt: new Date(2026, 0, 5, 9, 30).getTime()
+      }
+    ])
+    expect(mocks.message.success).toHaveBeenCalledWith('已导入 1 条待办')
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('打开「重复项也导入」后连同重复项一起写入', async () => {
+    const wrapper = await mountPanel()
+    await openPreview(wrapper, '- [ ] 已完成的事\n- 09:30 新条目  #标签')
+
+    await wrapper.find('.el-switch input').setValue(true)
+    await flushPromises()
+    expect(wrapper.find('.el-dialog').text()).toContain('将导入 2 条')
+
+    await wrapper.find('[data-action="import-confirm"]').trigger('click')
+    await flushPromises()
+
+    const items = mocks.addMany.mock.calls[0][0]
+    expect(items.map(item => item.text)).toEqual(['已完成的事', '新条目'])
+  })
+
+  it('浏览器模式提示仅桌面可用且不弹文件对话框', async () => {
+    mocks.browserChannel = true
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.message.warning).toHaveBeenCalledWith('该功能仅桌面模式可用')
+    expect(mocks.openFile).not.toHaveBeenCalled()
+  })
+
+  it('文件中没有待办行时提示且不打开预览', async () => {
+    const wrapper = await mountPanel()
+    await openPreview(wrapper, '# 只有标题\n\n普通段落\n- [x] 已完成')
+
+    expect(mocks.message.info).toHaveBeenCalledWith('未找到可导入的待办行')
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+  })
+
+  it('全部重复时确认按钮禁用', async () => {
+    const wrapper = await mountPanel()
+    await openPreview(wrapper, '- [ ] 已完成的事')
+
+    expect(wrapper.find('[data-action="import-confirm"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('取消文件选择不读取文件', async () => {
+    mocks.openFile.mockResolvedValue('')
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-action="import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.readFileBytes).not.toHaveBeenCalled()
   })
 })

@@ -397,6 +397,110 @@ func TestTempTodoTextTruncation(t *testing.T) {
 	}
 }
 
+func TestTempTodoAddMany(t *testing.T) {
+	base := time.Date(2026, 11, 10, 12, 0, 0, 0, time.Local)
+	svc := newTestTempTodoService(t)
+	svc.now = fixedClock(base)
+
+	added, err := svc.AddMany([]model.TempTodoDraft{
+		{Text: "  导入一  ", Tags: []string{" 标签 ", "", "标签"}, CreatedAt: base.Add(-time.Hour).UnixMilli()},
+		{Text: "   ", Tags: nil}, // 归一后为空，应跳过且不报错
+		{Text: "导入二", CreatedAt: 0},
+		{Text: "未来时间", CreatedAt: base.Add(time.Hour).UnixMilli()},
+	})
+	if err != nil {
+		t.Fatalf("AddMany() error = %v", err)
+	}
+	if added != 3 {
+		t.Fatalf("AddMany() added = %d, want 3", added)
+	}
+
+	list, err := svc.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	byText := make(map[string]model.TempTodo, len(list))
+	for _, todo := range list {
+		byText[todo.Text] = todo
+	}
+	if len(byText) != 3 {
+		t.Fatalf("落盘条目 = %d, want 3: %+v", len(byText), list)
+	}
+	if got, want := strings.Join(byText["导入一"].Tags, ","), "标签"; got != want {
+		t.Errorf("标签归一 = %q, want %q", got, want)
+	}
+	if got, want := byText["导入一"].CreatedAt, base.Add(-time.Hour).UnixMilli(); got != want {
+		t.Errorf("早于当前的创建时间应保留，got %d want %d", got, want)
+	}
+	if got := byText["导入二"].CreatedAt; got != base.UnixMilli() {
+		t.Errorf("CreatedAt=0 应取当前时刻，got %d want %d", got, base.UnixMilli())
+	}
+	if got := byText["未来时间"].CreatedAt; got != base.UnixMilli() {
+		t.Errorf("未来创建时间应钳到当前时刻，got %d want %d", got, base.UnixMilli())
+	}
+	for _, todo := range list {
+		if todo.ID == "" {
+			t.Errorf("批量导入条目缺少 ID: %+v", todo)
+		}
+		if todo.CompletedAt != nil {
+			t.Errorf("导入条目恒为待办态，got CompletedAt=%v", *todo.CompletedAt)
+		}
+	}
+}
+
+func TestTempTodoAddManyEmptyInputCreatesNothing(t *testing.T) {
+	svc := newTestTempTodoService(t)
+
+	for name, items := range map[string][]model.TempTodoDraft{
+		"nil":   nil,
+		"空切片":   {},
+		"全空白条目": {{Text: "  "}, {Text: "\n\t"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			added, err := svc.AddMany(items)
+			if err != nil {
+				t.Fatalf("AddMany() error = %v", err)
+			}
+			if added != 0 {
+				t.Errorf("added = %d, want 0", added)
+			}
+		})
+	}
+	if _, err := os.Stat(svc.configPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("无有效条目不应落盘，Stat err = %v", err)
+	}
+}
+
+func TestTempTodoAddManySaveFailureRollsBack(t *testing.T) {
+	svc := newTestTempTodoService(t)
+	if _, err := svc.Add("既有条目", nil); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	// 把落盘目标指向一个已存在的目录：SaveJSON 的 rename 必然失败
+	badPath := filepath.Join(t.TempDir(), "as-dir")
+	if err := os.MkdirAll(badPath, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+	svc.configPath = badPath
+
+	added, err := svc.AddMany([]model.TempTodoDraft{{Text: "导入一"}, {Text: "导入二"}})
+	if added != 0 {
+		t.Errorf("落盘失败不应返回新增条数，got %d", added)
+	}
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.Code != model.ErrCodeTempTodoImportFailed {
+		t.Fatalf("error = %v, want %s", err, model.ErrCodeTempTodoImportFailed)
+	}
+
+	list, err := svc.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 1 || list[0].Text != "既有条目" {
+		t.Errorf("落盘失败应整体回滚，got %+v", list)
+	}
+}
+
 func TestTempTodoExportMarkdownCreatesFile(t *testing.T) {
 	svc := newTestTempTodoService(t)
 
