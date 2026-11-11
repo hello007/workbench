@@ -64,7 +64,8 @@ vi.mock('@element-plus/icons-vue', () => {
     ArrowRight: stub('arrow-right'),
     Download: stub('download'),
     Upload: stub('upload'),
-    ChatDotRound: stub('chat-dot-round')
+    ChatDotRound: stub('chat-dot-round'),
+    FullScreen: stub('full-screen')
   }
 })
 
@@ -96,7 +97,13 @@ const stubs = {
       <slot name="footer" />
     </div>`,
     props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'closed']
+    emits: ['update:modelValue', 'closed'],
+    watch: {
+      // 真实 EP 在关闭动画结束后触发 closed；stub 以 modelValue 置 false 模拟
+      modelValue(value) {
+        if (!value) this.$emit('closed')
+      }
+    }
   },
   'el-switch': {
     template: '<label class="el-switch"><input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" /></label>',
@@ -503,5 +510,129 @@ describe('TempTodoPanel - 三期导入 Markdown', () => {
     await flushPromises()
 
     expect(mocks.readFileBytes).not.toHaveBeenCalled()
+  })
+})
+
+describe('TempTodoPanel - 全屏编辑弹窗', () => {
+  const openInlineDialog = async (wrapper) => {
+    await wrapper.find('.todo-item [data-action="edit"]').trigger('click')
+    await wrapper.find('.todo-item [data-action="expand-editor"]').trigger('click')
+  }
+
+  it('行内编辑打开全屏弹窗，正文与标签沿用当前草稿', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const dialog = wrapper.find('.el-dialog')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('编辑待办')
+    expect(dialog.find('textarea').element.value).toContain('第一条待办')
+    expect(dialog.find('input').element.value).toBe('重构')
+  })
+
+  it('弹窗内保存调用 UpdateTempTodo，并关闭弹窗、退出编辑态', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('textarea').setValue('改后的正文')
+    await dialog.find('input').setValue('甲, 乙')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledWith('todo-1', '改后的正文', ['甲', '乙'])
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
+  })
+
+  it('弹窗内 Ctrl+Enter 保存同一份草稿', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const textarea = wrapper.find('.el-dialog textarea')
+    await textarea.setValue('快捷键保存的正文')
+    await textarea.trigger('keydown', { key: 'Enter', ctrlKey: true })
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledWith('todo-1', '快捷键保存的正文', ['重构'])
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
+  })
+
+  it('新建卡片可打开全屏弹窗，保存调用 AddTempTodo', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await wrapper.find('.todo-editor [data-action="expand-editor"]').trigger('click')
+
+    const dialog = wrapper.find('.el-dialog')
+    expect(dialog.text()).toContain('新建待办')
+    await dialog.find('textarea').setValue('新待办')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.add).toHaveBeenCalledWith('新待办', [])
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+  })
+
+  it('关闭弹窗只回到原编辑态，未保存的草稿保留', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('textarea').setValue('暂未保存的修改')
+    await wrapper.find('[data-action="editor-back"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+    expect(wrapper.find('.todo-item textarea').element.value).toBe('暂未保存的修改')
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('正文为空时提示且不关闭弹窗', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('textarea').setValue('   ')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.message.warning).toHaveBeenCalledWith('待办内容不能为空')
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('保存失败时弹窗保持打开且内容不丢', async () => {
+    mocks.update.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    const dialog = wrapper.find('.el-dialog')
+    await dialog.find('textarea').setValue('会失败的内容')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+    expect(wrapper.find('.el-dialog textarea').element.value).toBe('会失败的内容')
+    expect(wrapper.find('.todo-item textarea').element.value).toBe('会失败的内容')
+  })
+
+  it('保存请求在途时关闭弹窗，完成后仍退出编辑态不残留草稿', async () => {
+    let resolveUpdate
+    mocks.update.mockImplementationOnce(() => new Promise((resolve) => { resolveUpdate = resolve }))
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+
+    await wrapper.find('.el-dialog textarea').setValue('慢保存的正文')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    // 保存未完成时用户按 ESC / X 关闭弹窗
+    await wrapper.find('[data-action="editor-back"]').trigger('click')
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+
+    resolveUpdate()
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
   })
 })

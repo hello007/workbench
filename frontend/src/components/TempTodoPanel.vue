@@ -59,6 +59,10 @@
             class="todo-tags-input"
           />
           <div class="todo-editor-actions">
+            <el-button size="small" data-action="expand-editor" @click="openEditorDialog">
+              <el-icon class="btn-icon"><FullScreen /></el-icon>
+              全屏编辑
+            </el-button>
             <el-button size="small" @click="cancelDraft">取消</el-button>
             <el-button size="small" type="primary" :loading="saving" @click="saveDraft">保存</el-button>
           </div>
@@ -107,6 +111,10 @@
                   class="todo-tags-input"
                 />
                 <div class="todo-editor-actions">
+                  <el-button size="small" data-action="expand-editor" @click="openEditorDialog">
+                    <el-icon class="btn-icon"><FullScreen /></el-icon>
+                    全屏编辑
+                  </el-button>
                   <el-button size="small" @click="cancelDraft">取消</el-button>
                   <el-button size="small" type="primary" :loading="saving" @click="saveDraft">保存</el-button>
                 </div>
@@ -229,6 +237,52 @@
       </div>
     </div>
 
+    <!-- 全屏编辑：行内三行输入区的放大视图，与行内编辑共用同一份草稿。
+         X / ESC / 返回编辑只关闭弹窗、草稿保留；仅保存才落库并退出编辑态。 -->
+    <el-dialog
+      v-model="editorDialogVisible"
+      :title="editingId ? '编辑待办' : '新建待办'"
+      fullscreen
+      class="todo-editor-dialog"
+      :close-on-click-modal="false"
+      @opened="focusEditorDialog"
+      @closed="onEditorDialogClosed"
+    >
+      <div class="editor-dialog-body">
+        <div class="editor-dialog-field">
+          <el-input
+            ref="dialogInputRef"
+            v-model="draftText"
+            type="textarea"
+            resize="none"
+            placeholder="要记的事、提示词片段或待验证的想法（Ctrl+Enter 保存）"
+            class="editor-dialog-text"
+            @keydown.ctrl.enter.prevent="saveFromDialog"
+          />
+        </div>
+        <div class="editor-dialog-meta">
+          <el-input
+            v-model="draftTags"
+            size="small"
+            placeholder="标签，用逗号分隔（如 重构,AI提示词）"
+            class="editor-dialog-tags"
+          />
+          <span class="editor-dialog-hint">Ctrl+Enter 保存</span>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button size="small" data-action="editor-back" @click="editorDialogVisible = false">返回编辑</el-button>
+        <el-button
+          size="small"
+          type="primary"
+          :loading="saving"
+          data-action="editor-save"
+          @click="saveFromDialog"
+        >保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 导入预览：先看将导入条数与重复项，确认后由后端一次落盘 -->
     <el-dialog
       v-model="importDialogVisible"
@@ -292,7 +346,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, Upload, ChatDotRound
+  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, Upload, ChatDotRound, FullScreen
 } from '@element-plus/icons-vue'
 import {
   ListTempTodos,
@@ -332,6 +386,12 @@ const draftTags = ref('')
 const saving = ref(false)
 const busyId = ref('')
 const createInputRef = ref(null)
+
+// 全屏编辑弹窗：与行内编辑共用 draftText / draftTags，本身只是「放大视图」，
+// 因此不复制草稿；弹窗关闭时是否复位编辑态由 editorDialogSaveDone 区分。
+const editorDialogVisible = ref(false)
+const dialogInputRef = ref(null)
+const editorDialogSaveDone = ref(false)
 
 // 展开态按条目 ID 记录：长文默认折叠成两行，避免侧边栏被单条占满
 const expandedIDs = ref(new Set())
@@ -518,11 +578,29 @@ const startEdit = (todo) => {
 
 const cancelDraft = () => resetDraft()
 
-const saveDraft = async () => {
+// 全屏编辑不复制草稿：弹窗内外的 textarea 绑定同一份 draftText / draftTags
+const openEditorDialog = () => {
+  editorDialogSaveDone.value = false
+  editorDialogVisible.value = true
+}
+
+const focusEditorDialog = () => {
+  dialogInputRef.value?.focus?.()
+}
+
+// 关闭弹窗的默认语义是回到原编辑态（草稿保留）；仅「保存」成功才复位草稿并退出编辑
+const onEditorDialogClosed = () => {
+  if (!editorDialogSaveDone.value) return
+  editorDialogSaveDone.value = false
+  resetDraft()
+}
+
+// 落库只做写入与错误处理，不复位草稿：行内保存与全屏保存的退出时机不同
+const persistDraft = async () => {
   const text = draftText.value.trim()
   if (!text) {
     ElMessage.warning('待办内容不能为空')
-    return
+    return false
   }
   saving.value = true
   try {
@@ -531,13 +609,35 @@ const saveDraft = async () => {
     } else {
       await AddTempTodo(text, parseTags(draftTags.value))
     }
-    resetDraft()
-    await load()
+    return true
   } catch (e) {
     handleError('保存待办失败: ', e)
+    return false
   } finally {
     saving.value = false
   }
+}
+
+const saveDraft = async () => {
+  if (!(await persistDraft())) return false
+  resetDraft()
+  await load()
+  return true
+}
+
+// 全屏保存：先关弹窗（渐隐期间正文仍在），@closed 后再复位编辑态，避免弹窗内容瞬间清空
+const saveFromDialog = async () => {
+  if (!(await persistDraft())) return
+  if (!editorDialogVisible.value) {
+    // 保存请求在途时用户已按 ESC / X 关闭弹窗：@closed 早于此处触发且当时未标记保存完成，
+    // 不会再复位编辑态，就地复位，避免残留草稿被再次保存出新条目
+    resetDraft()
+    await load()
+    return
+  }
+  editorDialogSaveDone.value = true
+  editorDialogVisible.value = false
+  await load()
 }
 
 const toggleCompleted = async (todo, completed) => {
@@ -941,6 +1041,109 @@ onMounted(() => {
 .import-more {
   padding: var(--spacing-sm);
   text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+</style>
+
+<!-- 全屏编辑弹窗外壳与内部结构由 Element Plus 渲染，scoped 无法稳定命中其子节点；
+     采用非 scoped 块 + 专属 class 圈定（对齐 AiChatPanel 的 tpl-manage-dialog 先例）。 -->
+<style>
+/* EP 2.14.5 容器自带 padding，标题栏/底栏背景要贴边必须归零（同 tpl-manage-dialog 先例） */
+.el-dialog.todo-editor-dialog {
+  padding: 0;
+}
+
+.el-dialog.todo-editor-dialog.is-fullscreen {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__title {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__headerbtn .el-dialog__close {
+  color: var(--text-tertiary);
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--text-primary);
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__header {
+  flex-shrink: 0;
+  margin-right: 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-lg);
+}
+
+.el-dialog.todo-editor-dialog .el-dialog__footer {
+  flex-shrink: 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+/* 内部结构规则统一圈定在专属弹窗 class 下，避免非 scoped 块污染全局命名空间 */
+.el-dialog.todo-editor-dialog .editor-dialog-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.el-dialog.todo-editor-dialog .editor-dialog-field {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.el-dialog.todo-editor-dialog .editor-dialog-text {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 输入区内层 textarea 撑满剩余高度：行内三行 → 全屏整页的差异主要在这一条 */
+.el-dialog.todo-editor-dialog .editor-dialog-text .el-textarea__inner {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  resize: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.el-dialog.todo-editor-dialog .editor-dialog-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.el-dialog.todo-editor-dialog .editor-dialog-tags {
+  flex: 1;
+  min-width: 0;
+}
+
+.el-dialog.todo-editor-dialog .editor-dialog-hint {
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--text-tertiary);
 }
