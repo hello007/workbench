@@ -733,3 +733,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 250: 提示词管理面板（话术库 + 占位符复制）
+
+**Date**: 2026-11-11
+**Task**: 提示词管理面板（话术库 + 占位符复制）
+**Branch**: `master`
+
+### Summary
+
+新增第 10 个侧边栏面板「提示词」：PromptService（data/prompts.json 原子写）+ PromptLibraryPanel（增删改查、标题/正文检索）+ 前端 {{名称}} 占位符解析与复制弹窗（未填保留原样）；自定义快捷键补位（默认空）；双 agent 审核修复设置键名漂移等 8 项问题，补齐 4 条体验改进
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0cb6e5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 249
+- **Total Sessions**: 250
 - **Last Active**: 2026-11-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~735 | Active |
+| `journal-5.md` | ~768 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 250 | 2026-11-11 | 提示词管理面板（话术库 + 占位符复制） | `f0cb6e5` | `master` |
 | 249 | 2026-11-11 | 临时待办行内编辑自适应高度 | `6468493` | `master` |
 | 248 | 2026-11-11 | 修复临时待办折叠正文遮挡 | `204f1ee` | `master` |
 | 247 | 2026-11-11 | 临时待办面板视觉重构 | `0fa0293` | `master` |
