@@ -1,0 +1,7 @@
+{"file": "docs/spec/temp-todo.md", "reason": "同为文本片段管理域（待办）的既有约定：数据落盘、解析、面板交互先例"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法与 model 导出 struct 须手工同步 frontend/wailsjs 三处；具名 string 类型需补 models.ts 别名"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 PromptService 须在 app_services.go 两处登记（字段 + NewAppServices 构造行）"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "data/prompts.json 持久化必须经 util.SaveJSON 原子写，禁止裸 os.WriteFile 与自建 temp+rename"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "新增第 10 个侧边栏面板的布局约束、配色语义、图标与选中态规范"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "service 日志用 log/slog；新增错误码三处同步；前端错误分流约定"}
+{"file": "docs/spec/browser-channel.md", "reason": "新面板数据面在浏览器通道的暴露判定，以及 SetEventSink / RPCHiddenMethods 约定"}

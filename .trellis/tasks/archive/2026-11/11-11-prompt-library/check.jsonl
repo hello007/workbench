@@ -1,0 +1,6 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对后端 service >=76% 与前端 >=70% 覆盖率门禁是否满足"}
+{"file": "docs/spec/temp-todo.md", "reason": "同域既有实现的质量与边界行为基准（检索、解析、持久化）"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "核对 App 方法签名与 wailsjs 三处同步是否一致"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对面板布局、图标、选中态与交互规范"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "核对持久化写入是否走 util.SaveJSON"}
+{"file": "docs/spec/e2e-testing.md", "reason": "若涉及 E2E 用例，核对 mock 单一数据源、语义锚与禁 waitForTimeout 约定"}
