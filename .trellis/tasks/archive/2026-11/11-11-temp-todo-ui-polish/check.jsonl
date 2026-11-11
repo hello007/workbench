@@ -1,0 +1,4 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对限宽、卡片层级、hover 反馈、间距归并、行内 style 禁令是否全部满足"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对 data-action / data-todo-id 语义锚保留情况，单测与 E2E 断言方式不得依赖下标"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "确认前端覆盖率 ≥70% 门禁；新增折叠/截断逻辑须有单测覆盖"}
+{"file": "docs/spec/temp-todo.md", "reason": "核对未破坏既有导入/导出/全屏编辑契约，并确认新增条目展示契约已同步"}

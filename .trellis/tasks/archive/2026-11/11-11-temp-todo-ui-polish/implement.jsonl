@@ -1,0 +1,4 @@
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "本次是视觉重构：限宽布局、轻卡片 hover、间距四档归并、kbd 键帽、行内 style 禁令均以本文为准"}
+{"file": "docs/spec/design-tokens.md", "reason": "确认 --bg-* / --text-* / --shadow-* / --primary-* 令牌在双主题下的取值与派生规则，禁硬编码色值"}
+{"file": "docs/spec/temp-todo.md", "reason": "临时待办既有契约（数据模型、导入导出、全屏编辑形态），本次改动不得破坏；完成后在此追加条目展示契约"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件结构、状态与命名约定，模板/脚本改动须遵循"}
