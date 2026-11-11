@@ -12,7 +12,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
  */
 export const useUiStore = defineStore('ui', () => {
   // 活动栏当前面板：'directory' | 'ai' | 'ai-chat' | 'toolbox' | 'assets' |
-  // 'dashboard' | 'stats' | 'branchcompare' | 'todo'
+  // 'dashboard' | 'stats' | 'branchcompare' | 'todo' | 'prompts'
   const activePanel = ref('directory')
 
   // 终端3：可见性 / 高度 / 跟随目录

@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"workbench/model"
@@ -87,6 +88,40 @@ func TestSettingsSave_RoundTrip(t *testing.T) {
 	}
 	if got.GitBashPath != "C:\\git\\bin\\bash.exe" || got.WslDistro != "Ubuntu" {
 		t.Errorf("round-trip 不一致: %+v", got)
+	}
+}
+
+// TestSettingsSave_RoundTrip_ShortcutOpenPromptLibrary 提示词面板自定义快捷键
+// 的 Save→Get 往返。
+//
+// 回归背景：该字段曾以 Go 名 ShortcutPrompt / json key "shortcutPrompt" 落库，
+// 而前端 store 读写 "shortcutOpenPromptLibrary"。Go 反序列化对未知键静默忽略，
+// 保存看似成功但重启后自定义快捷键恒为空（功能实际不可用），且前端单测直接
+// 赋值 store 值掩盖了该问题。此处同时断言磁盘 JSON 键名，防再次漂移。
+func TestSettingsSave_RoundTrip_ShortcutOpenPromptLibrary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	svc := NewSettingsService(path)
+
+	if err := svc.Save(&model.AppSettings{ShortcutOpenPromptLibrary: "Ctrl+Alt+K"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// 新实例读盘（绕过内存缓存），验证键名可原样回读
+	reloaded := NewSettingsService(path)
+	got, err := reloaded.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if got.ShortcutOpenPromptLibrary != "Ctrl+Alt+K" {
+		t.Errorf("ShortcutOpenPromptLibrary = %q, want Ctrl+Alt+K", got.ShortcutOpenPromptLibrary)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取落盘文件: %v", err)
+	}
+	if !strings.Contains(string(raw), `"shortcutOpenPromptLibrary"`) {
+		t.Errorf("落盘 JSON 缺少键 shortcutOpenPromptLibrary: %s", raw)
 	}
 }
 

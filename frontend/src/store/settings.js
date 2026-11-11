@@ -12,7 +12,10 @@ const DEFAULTS = {
   delete: 'Delete',
   // 临时待办「从剪贴板快速记录」。不用 Ctrl+Shift+N：浏览器访问模式下会被
   // Chrome/Edge 吞掉（打开隐身窗口）；Ctrl+Alt+N 在 WebView2 与浏览器下均无默认动作。
-  quickTodo: 'Ctrl+Alt+N'
+  quickTodo: 'Ctrl+Alt+N',
+  // 打开「提示词」面板。默认空 = 不占用任何按键（Alt+数字 已被侧边栏固定占用，
+  // 其余组合键留给用户按需录制）。
+  openPromptLibrary: ''
 }
 
 /**
@@ -39,7 +42,10 @@ export const SIDEBAR_PANELS = [
   { id: 'dashboard', label: '状态看板' },
   { id: 'stats', label: '仓库统计' },
   { id: 'branchcompare', label: '分支对比' },
-  { id: 'todo', label: '临时待办' }
+  { id: 'todo', label: '临时待办' },
+  // 第 10 个面板：Alt+1..9 固定映射只覆盖前 9 项（sidebarShortcutIndex 只认 1-9），
+  // 本面板可达性由可自定义快捷键（DEFAULTS.openPromptLibrary）补位。
+  { id: 'prompts', label: '提示词' }
 ]
 
 const SIDEBAR_PANEL_IDS = new Set(SIDEBAR_PANELS.map(p => p.id))
@@ -340,6 +346,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const shortcutRename = ref(DEFAULTS.rename)
   const shortcutDelete = ref(DEFAULTS.delete)
   const shortcutQuickTodo = ref(DEFAULTS.quickTodo)
+  const shortcutOpenPromptLibrary = ref(DEFAULTS.openPromptLibrary)
 
   // 侧边栏面板顺序（面板 id 数组）：初始默认顺序，loadShortcuts 后端加载后归一化
   // 覆盖（GetSettings 首帧前未完成的窗口期渲染默认顺序，可接受）
@@ -569,6 +576,7 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutRename.value = settings.shortcutRename || DEFAULTS.rename
       shortcutDelete.value = settings.shortcutDelete || DEFAULTS.delete
       shortcutQuickTodo.value = settings.shortcutQuickTodo || DEFAULTS.quickTodo
+      shortcutOpenPromptLibrary.value = settings.shortcutOpenPromptLibrary || DEFAULTS.openPromptLibrary
       sidebarOrder.value = normalizeSidebarOrder(settings.sidebarOrder)
     } catch {
       shortcutCommandPalette.value = DEFAULTS.commandPalette
@@ -576,6 +584,7 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutRename.value = DEFAULTS.rename
       shortcutDelete.value = DEFAULTS.delete
       shortcutQuickTodo.value = DEFAULTS.quickTodo
+      shortcutOpenPromptLibrary.value = DEFAULTS.openPromptLibrary
       sidebarOrder.value = [...SIDEBAR_DEFAULT_ORDER]
     }
   }
@@ -599,6 +608,7 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.shortcutRename = shortcutRename.value
     settings.shortcutDelete = shortcutDelete.value
     settings.shortcutQuickTodo = shortcutQuickTodo.value
+    settings.shortcutOpenPromptLibrary = shortcutOpenPromptLibrary.value
     await SaveSettings(settings)
   }
 
@@ -616,7 +626,8 @@ export const useSettingsStore = defineStore('settings', () => {
       { key: 'toggleTerminal', value: shortcutToggleTerminal.value },
       { key: 'rename', value: shortcutRename.value },
       { key: 'delete', value: shortcutDelete.value },
-      { key: 'quickTodo', value: shortcutQuickTodo.value }
+      { key: 'quickTodo', value: shortcutQuickTodo.value },
+      { key: 'openPromptLibrary', value: shortcutOpenPromptLibrary.value }
     ]
     for (const item of all) {
       if (item.key === excludeKey) continue
@@ -631,6 +642,7 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcutRename,
     shortcutDelete,
     shortcutQuickTodo,
+    shortcutOpenPromptLibrary,
     sidebarOrder,
     orderedPanels,
     saveSidebarOrder,

@@ -114,6 +114,10 @@ type AppServices struct {
 	// 保留策略（已完成 30 天 / 500 条）在 List 时执行。不发生前端事件，
 	// web_serve.go applySink 无需同步；剪贴板只在快捷键触发时读一次。
 	tempTodoSvc *service.TempTodoService
+	// 提示词服务（侧边栏「提示词」：常用话术存取，data/prompts.json 走 util.SaveJSON
+	// 原子写）。惰性加载 + 内存缓存；{{名称}} 占位符的解析与替换都在前端完成，
+	// 本服务只负责存取原文。不发生前端事件，web_serve.go applySink 无需同步。
+	promptSvc *service.PromptService
 	// 分支对比服务（活动栏「分支对比」面板 batch 1，纯只读：提交对齐 + 差异文件树
 	// + 文件 diff + 提交变更文件，无持久化数据）。只读查询不抢 tryLockRepo 仓级锁；
 	// patch-id 批量管道专用 2 分钟长超时 GitCommand 构造内置。
@@ -284,6 +288,9 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 
 	// 临时待办服务（侧边栏「临时待办」，独立 data/temp_todos.json）
 	s.tempTodoSvc = service.NewTempTodoService(filepath.Join(dataDir, "temp_todos.json"))
+
+	// 提示词服务（侧边栏「提示词」，独立 data/prompts.json）
+	s.promptSvc = service.NewPromptService(filepath.Join(dataDir, "prompts.json"))
 
 	// 分支对比服务（活动栏「分支对比」面板，纯只读无持久化数据；ctx 在各方法调用点
 	// 传 context.Background() 下传，service 层 ctx 全贯穿为 batch 2 取消预留）

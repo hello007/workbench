@@ -317,13 +317,16 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     GetSettings.mockResolvedValue({
       shortcutRename: 'F5',
       shortcutCommandPalette: 'Ctrl+Shift+P',
-      shortcutQuickTodo: 'Ctrl+Alt+T'
+      shortcutQuickTodo: 'Ctrl+Alt+T',
+      shortcutOpenPromptLibrary: 'Ctrl+Alt+K'
     })
     const store = useSettingsStore()
     await store.loadShortcuts()
     expect(store.shortcutRename).toBe('F5')
     expect(store.shortcutCommandPalette).toBe('Ctrl+Shift+P')
     expect(store.shortcutQuickTodo).toBe('Ctrl+Alt+T')
+    // 键名须与 Go AppSettings json tag 逐字一致（原名 shortcutPrompt 致保存静默丢失）
+    expect(store.shortcutOpenPromptLibrary).toBe('Ctrl+Alt+K')
     // 未提供的字段回填默认（toggleTerminal/delete）
     expect(store.shortcutToggleTerminal).toBe(DEFAULTS.toggleTerminal)
     expect(store.shortcutDelete).toBe(DEFAULTS.delete)
@@ -354,18 +357,20 @@ describe('settings store - loadShortcuts/saveShortcuts', () => {
     expect(store.shortcutQuickTodo).toBe(DEFAULTS.quickTodo)
   })
 
-  it('saveShortcuts 将 5 个 shortcut 字段写入 settings 对象并保留其他字段', async () => {
+  it('saveShortcuts 将 6 个 shortcut 字段写入 settings 对象并保留其他字段', async () => {
     const existing = { shortcutCommandPalette: 'Ctrl+P', otherField: 'keep' }
     GetSettings.mockResolvedValue(existing)
     const store = useSettingsStore()
     store.shortcutRename = 'F5'
     store.shortcutQuickTodo = 'Ctrl+Alt+T'
+    store.shortcutOpenPromptLibrary = 'Ctrl+Alt+K'
     await store.saveShortcuts()
     expect(SaveSettings).toHaveBeenCalledTimes(1)
     const saved = SaveSettings.mock.calls[0][0]
     // 改后值写入
     expect(saved.shortcutRename).toBe('F5')
     expect(saved.shortcutQuickTodo).toBe('Ctrl+Alt+T')
+    expect(saved.shortcutOpenPromptLibrary).toBe('Ctrl+Alt+K')
     // store 当前值写入（commandPalette 默认 'Ctrl+P'）
     expect(saved.shortcutCommandPalette).toBe('Ctrl+P')
     // 默认值写入

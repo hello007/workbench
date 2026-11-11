@@ -407,6 +407,13 @@ type AppSettings struct {
 	// （打开隐身窗口）。标量字段零值即默认（前端 DEFAULTS 兜底），不进
 	// EnsureAllDefaults / PrivateCopy。
 	ShortcutQuickTodo string `json:"shortcutQuickTodo"`
+	// ShortcutOpenPromptLibrary 打开「提示词」面板的快捷键，默认空（不占用任何
+	// 按键，由用户在设置页按需录制）。第 10 个侧边栏面板不在 Alt+1..9 固定映射内，
+	// 可达性靠该自定义键补位。标量字段零值即默认，不进 EnsureAllDefaults /
+	// PrivateCopy。
+	// json key 必须与前端 settings store 的 shortcutOpenPromptLibrary 完全一致：
+	// 不一致时保存会被 Go 反序列化静默丢弃，重启后自定义快捷键恒为空。
+	ShortcutOpenPromptLibrary string `json:"shortcutOpenPromptLibrary"`
 	// SidebarOrder 侧边栏面板顺序（面板 id 列表，如 ["directory","ai",...]）。空值
 	// = 默认顺序（向后兼容：老配置无此字段解析为 nil，前端归一化为默认顺序）。
 	// 纯存储无后端语义：面板 id 合法性、缺失补齐与未知剔除归一化均在前端进行

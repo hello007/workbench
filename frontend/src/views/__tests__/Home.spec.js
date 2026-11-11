@@ -76,6 +76,11 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   UpdateTempTodo: vi.fn(() => Promise.resolve()),
   SetTempTodoCompleted: vi.fn(() => Promise.resolve()),
   DeleteTempTodo: vi.fn(() => Promise.resolve()),
+  // 提示词面板（PromptLibraryPanel v-show 常驻挂载于 Home，挂载即 ListPrompts）
+  ListPrompts: vi.fn(() => Promise.resolve([])),
+  AddPrompt: vi.fn(() => Promise.resolve({})),
+  UpdatePrompt: vi.fn(() => Promise.resolve()),
+  DeletePrompt: vi.fn(() => Promise.resolve()),
   // 分支对比面板（BranchCompareView v-show 常驻挂载于 Home）：无目录时面板空态不触发，
   // 但 import 的绑定须存在于 mock 否则 undefined 调用抛 TypeError
   GetGitInfo: vi.fn(() => Promise.resolve({ isRepo: false })),
@@ -1594,6 +1599,30 @@ describe('Home.vue - handler 分支补充', () => {
 
     expect(event.preventDefault).toHaveBeenCalled()
     expect(AddTempTodoFromClipboard).toHaveBeenCalled()
+  })
+
+  it('自定义快捷键打开提示词面板并拦截默认行为', () => {
+    const ui = useUiStore()
+    useSettingsStore().shortcutOpenPromptLibrary = 'Ctrl+Alt+K'
+    ui.activePanel = 'directory'
+    const event = keyEvent({ key: 'k', ctrlKey: true, altKey: true, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(ui.activePanel).toBe('prompts')
+  })
+
+  it('打开提示词快捷键默认为空时不劫持任何按键', () => {
+    const ui = useUiStore()
+    useSettingsStore().shortcutOpenPromptLibrary = ''
+    ui.activePanel = 'directory'
+    const event = keyEvent({ key: 'k', ctrlKey: true, altKey: true, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(ui.activePanel).toBe('directory')
   })
 
   it('输入框聚焦时 Ctrl+Alt+N 放行，不触发记录', async () => {

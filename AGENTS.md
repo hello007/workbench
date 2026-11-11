@@ -220,6 +220,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |行级归属（git blame）：blame 路径参数是字面路径**禁 `:(literal)`**（与 log 域相反）；porcelain author-time/author-tz 分行到齐合成作者墙钟；工作树 blame 零 SHA=未提交禁跳转；超 10000 行返 E_BLAME_FILE_TOO_LARGE（warning）；行数守卫≠文档行数整组复位禁静默错位；JSON 派生视图隐藏入口；前端委托点击用例须 attachTo（游离树冒泡不到 document）|[git-blame.md](docs/spec/git-blame.md)|
 |提交历史→文件级追溯入口：行归属分流单点 useTraceBlame（存在性+类型预判，降级转文件历史）；信箱 pushTraceBlameRequest（seq 递增消费即清）；autoBlameSeq 与 filePreview 同批赋值；互嵌弹窗挂载点必 v-if 外控|[file-level-history.md §7](docs/spec/file-level-history.md)|
 |临时待办 Markdown 导入：解析单点 `parseTempTodoMarkdown`（续行拼回/已完成行跳过/行尾 #标签/文件名日期+未来钳制）；重复=正文去空白全等；`AddMany` 一次落盘失败整批回滚；入口仅桌面模式|[temp-todo.md](docs/spec/temp-todo.md)|
+|新增侧边栏面板四处同改（`SIDEBAR_PANELS` + `panelIconMap` + `Home` v-show + `SettingsPanel` 快捷键）；第 10 项起无 `Alt+数字` 固定映射（tooltip 禁拼 `Alt+N`），可达性走自定义快捷键；提示词 `{{名称}}` 解析在前端 `utils/promptPlaceholders.js`，未填占位符保留原样|[prompt-library.md](docs/spec/prompt-library.md)|
 ## 5. 项目长期记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。

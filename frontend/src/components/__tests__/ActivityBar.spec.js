@@ -118,10 +118,10 @@ describe('ActivityBar', () => {
       .findAll('.activity-bar-item.is-active')
       .map((w) => w.attributes('data-panel-id') || w.attributes('data-action'))
 
-  it('应该渲染十一个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、分支对比、临时待办、设置、终端）', () => {
+  it('应该渲染十二个活动栏图标按钮（工作目录、AI 功能、AI 对话、工具箱、素材管理、状态看板、仓库统计、分支对比、临时待办、提示词、设置、终端）', () => {
     const wrapper = createWrapper()
-    // 设备指示隐藏时：9 面板 + 设置 + 终端；指示项出现时不占位（独立 class）。
-    expect(wrapper.findAll('.activity-bar-item').length).toBe(11)
+    // 设备指示隐藏时：10 面板 + 设置 + 终端；指示项出现时不占位（独立 class）。
+    expect(wrapper.findAll('.activity-bar-item').length).toBe(12)
   })
 
   it('每个入口带稳定语义属性（data-panel-id / data-action），供 E2E 语义定位', () => {
@@ -129,7 +129,7 @@ describe('ActivityBar', () => {
     // 面板入口按渲染序输出 data-panel-id（E2E 禁类名 nth 索引，见 e2e-testing.md）
     const panelIds = wrapper.findAll('[data-panel-id]').map((w) => w.attributes('data-panel-id'))
     expect(panelIds).toEqual([
-      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo'
+      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts'
     ])
     expect(new Set(panelIds).size).toBe(panelIds.length) // 语义锚唯一，禁重复 id
     // 设置/终端为直连动作入口（不切换面板），走 data-action
@@ -269,11 +269,13 @@ describe('ActivityBar - 侧边栏顺序与快捷键编号提示', () => {
   it('默认顺序渲染且 tooltip 带编号提示（Alt+1..9 按序拼接）', () => {
     const wrapper = createWrapper()
     expect(panelIds(wrapper)).toEqual([
-      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo'
+      'directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts'
     ])
     const hints = tooltipTexts(wrapper)
     expect(hints[0]).toBe('工作目录 (Alt+1)')
     expect(hints[8]).toBe('临时待办 (Alt+9)')
+    // 第 10 项超出 Alt+1..9 固定映射，不显示「Alt+10」这类不会触发的误导提示
+    expect(hints[9]).toBe('提示词')
   })
 
   it('自定义顺序驱动渲染顺序与编号跟随（Alt+1 指向新顺序第一个）', async () => {
@@ -317,8 +319,8 @@ describe('ActivityBar - 多设备连接指示', () => {
   it('连接数 <=1 时指示不显示（桌面模式无事件恒此形态，空安全）', () => {
     const wrapper = createWrapper()
     expect(wrapper.find('.activity-bar-devices').exists()).toBe(false)
-    // 设备指示隐藏时图标数为 11（9 面板 + 设置 + 终端；指示项不占位）
-    expect(wrapper.findAll('.activity-bar-item').length).toBe(11)
+    // 设备指示隐藏时图标数为 12（10 面板 + 设置 + 终端；指示项不占位）
+    expect(wrapper.findAll('.activity-bar-item').length).toBe(12)
     wrapper.unmount()
   })
 

@@ -586,7 +586,16 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   DeleteTempTodo: null,
   // 导出 Markdown（桌面专属，RPCHiddenMethods 屏蔽）：默认空串 = 无条目/未导出，
   // 组件侧按「空路径 → 暂无可导出的待办」降级，不产生文件写入副作用
-  ExportTempTodosMarkdown: ''
+  ExportTempTodosMarkdown: '',
+
+  // ---- 提示词（侧边栏「提示词」面板：常用话术存取 + 占位符复制）----
+  // 形状对齐 model.Prompt（id/title/content/createdAt/updatedAt，毫秒）。面板
+  // 常驻挂载于 Home，挂载即 ListPrompts；默认空列表 = 空态。写操作为 void 返回
+  // （Wails 映射 Promise<void>），null 安全 no-op（失败经 {__error__, __code__} 注入）
+  ListPrompts: [],
+  AddPrompt: { id: 'prompt-e2e', title: '', content: '', createdAt: 1735689600000, updatedAt: 1735689600000 },
+  UpdatePrompt: null,
+  DeletePrompt: null
 }
 
 /**

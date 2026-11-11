@@ -244,7 +244,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound, Memo } from '@element-plus/icons-vue'
+import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound, Memo, Collection } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
@@ -454,7 +454,8 @@ const panelIconMap = {
   dashboard: DataBoard,
   stats: TrendCharts,
   branchcompare: BranchCompareIcon,
-  todo: Memo
+  todo: Memo,
+  prompts: Collection
 }
 
 const panels = computed(() =>
@@ -462,7 +463,9 @@ const panels = computed(() =>
     id: p.id,
     label: p.label,
     icon: panelIconMap[p.id],
-    shortcutTip: ` (Alt+${idx + 1})`
+    // Alt+1..9 是固定映射，只覆盖前 9 项；第 10 项起没有固定序号，不显示
+    // 「Alt+10」这类不会触发切换的误导提示（可达性由自定义快捷键补位）
+    shortcutTip: idx < 9 ? ` (Alt+${idx + 1})` : ''
   }))
 )
 </script>

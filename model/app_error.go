@@ -142,6 +142,13 @@ const (
 	ErrCodeTempTodoExportFailed    = "E_TEMP_TODO_EXPORT_FAILED"     // 导出目录无效或 Markdown 写入失败（error）
 	ErrCodeTempTodoImportFailed    = "E_TEMP_TODO_IMPORT_FAILED"     // Markdown 导入批量落盘失败（error，整批回滚）
 
+	// 提示词域（侧边栏「提示词」：常用话术存取 + 前端占位符替换，data/prompts.json）。
+	// 三个码均为预期拒绝/用户操作错误（warning），前端 error.js WARNING_CODES 同步分流；
+	// 空标题/空正文前端表单已挡，后端防御保留（列表无标题无法识别、空正文无复制价值）。
+	ErrCodePromptTitleRequired   = "E_PROMPT_TITLE_REQUIRED"   // 标题为空或全空白（warning）
+	ErrCodePromptContentRequired = "E_PROMPT_CONTENT_REQUIRED" // 正文为空或全空白（warning）
+	ErrCodePromptNotFound        = "E_PROMPT_NOT_FOUND"        // 目标条目不存在或已被删除（warning，列表已过期，前端刷新）
+
 	// PPTX 预览转换域（文件树 pptx/ppsx 内嵌预览：COM 转 PDF + pdfjs viewer）
 	ErrCodePptxPreviewUnavailable = "E_PPTX_PREVIEW_UNAVAILABLE" // 环境不可用：非 Windows 或未检测到 PowerPoint/WPS COM（error，前端降级提示 + 用默认程序打开）
 	ErrCodePptxPreviewFailed      = "E_PPTX_PREVIEW_FAILED"      // 转换失败：文件损坏/COM 调用失败/超时（重试 1 次后仍失败）（error，前端降级提示 + 用默认程序打开）

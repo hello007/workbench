@@ -298,6 +298,7 @@
                     <kbd class="recording-hint">请按下新快捷键...</kbd>
                   </template>
                   <template v-else>
+                    <kbd v-if="!item.keys.length" class="shortcut-unset">未设置</kbd>
                     <kbd v-for="key in item.keys" :key="key">{{ key }}</kbd>
                   </template>
                 </div>
@@ -1489,6 +1490,7 @@ const shortcutLabels = {
   rename: '重命名',
   delete: '删除',
   quickTodo: '从剪贴板记为待办',
+  openPromptLibrary: '打开提示词面板',
   sidebarShortcut: '切换侧边栏面板（Alt+数字）'
 }
 
@@ -1497,7 +1499,8 @@ const customizableShortcuts = computed(() => [
   { action: '切换终端面板', key: 'toggleTerminal', keys: formatDisplay(settingsStore.shortcutToggleTerminal), customizable: true },
   { action: '重命名', key: 'rename', keys: formatDisplay(settingsStore.shortcutRename), customizable: true },
   { action: '删除', key: 'delete', keys: formatDisplay(settingsStore.shortcutDelete), customizable: true },
-  { action: '从剪贴板记为待办', key: 'quickTodo', keys: formatDisplay(settingsStore.shortcutQuickTodo), customizable: true }
+  { action: '从剪贴板记为待办', key: 'quickTodo', keys: formatDisplay(settingsStore.shortcutQuickTodo), customizable: true },
+  { action: '打开提示词面板', key: 'openPromptLibrary', keys: formatDisplay(settingsStore.shortcutOpenPromptLibrary), customizable: true }
 ])
 
 function startRecording(key) {
@@ -1519,6 +1522,7 @@ function isDefault(key) {
   if (key === 'rename') return settingsStore.shortcutRename === DEFAULTS.rename
   if (key === 'delete') return settingsStore.shortcutDelete === DEFAULTS.delete
   if (key === 'quickTodo') return settingsStore.shortcutQuickTodo === DEFAULTS.quickTodo
+  if (key === 'openPromptLibrary') return settingsStore.shortcutOpenPromptLibrary === DEFAULTS.openPromptLibrary
   return true
 }
 
@@ -1528,6 +1532,7 @@ function resetShortcut(key) {
   else if (key === 'rename') settingsStore.shortcutRename = DEFAULTS.rename
   else if (key === 'delete') settingsStore.shortcutDelete = DEFAULTS.delete
   else if (key === 'quickTodo') settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
+  else if (key === 'openPromptLibrary') settingsStore.shortcutOpenPromptLibrary = DEFAULTS.openPromptLibrary
   settingsStore.saveShortcuts()
 }
 
@@ -1537,6 +1542,7 @@ function resetAllShortcuts() {
   settingsStore.shortcutRename = DEFAULTS.rename
   settingsStore.shortcutDelete = DEFAULTS.delete
   settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
+  settingsStore.shortcutOpenPromptLibrary = DEFAULTS.openPromptLibrary
   settingsStore.saveShortcuts()
 }
 
@@ -1602,6 +1608,8 @@ function handleRecordingKeydown(e) {
     settingsStore.shortcutDelete = shortcut
   } else if (recordingKey.value === 'quickTodo') {
     settingsStore.shortcutQuickTodo = shortcut
+  } else if (recordingKey.value === 'openPromptLibrary') {
+    settingsStore.shortcutOpenPromptLibrary = shortcut
   }
 
   recordingKey.value = null
@@ -2295,6 +2303,16 @@ const onThemeChange = async () => {
 
 .shortcut-item--fixed .shortcut-keys kbd {
   opacity: 0.7;
+}
+
+/* 可自定义快捷键值为空（如「打开提示词面板」默认不占用固定键）时展示「未设置」
+   占位：弱化为说明文案（虚线无底色），与已生效键帽区分；仅显示层兜底，
+   点击后仍按原有录制逻辑进入录制态 */
+.shortcut-keys .shortcut-unset {
+  color: var(--text-tertiary);
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
 }
 
 .recording-hint {

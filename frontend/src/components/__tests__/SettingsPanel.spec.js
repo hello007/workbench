@@ -348,10 +348,10 @@ describe('SettingsPanel.vue', () => {
     wrapper = await createWrapper()
     const shortcutsTab = wrapper.findAll('.settings-nav-item')[3]
     await shortcutsTab.trigger('click')
-    // 5 可自定义 + 5 固定（含 Alt+1..9 侧边栏面板切换说明行；快捷键行不含侧边栏
+    // 6 可自定义 + 5 固定（含 Alt+1..9 侧边栏面板切换说明行；快捷键行不含侧边栏
     // 顺序行——后者为独立 sidebar-order-item）
-    expect(wrapper.findAll('.shortcut-item:not(.sidebar-order-item)').length).toBe(10)
-    expect(wrapper.findAll('.sidebar-order-item').length).toBe(9)
+    expect(wrapper.findAll('.shortcut-item:not(.sidebar-order-item)').length).toBe(11)
+    expect(wrapper.findAll('.sidebar-order-item').length).toBe(10)
   })
 
   it('loadSettings 失败时 gpuEnabled 回退 true', async () => {
@@ -774,6 +774,22 @@ describe('SettingsPanel.vue', () => {
     expect(resetBtns.length).toBe(0)
   })
 
+  it('快捷键：未配置的可自定义快捷键显示「未设置」占位', async () => {
+    wrapper = await createWrapper()
+    await wrapper.findAll('.settings-nav-item')[3].trigger('click')
+    const rowOf = (action) => wrapper.findAll('.shortcut-item')
+      .find(r => r.find('.shortcut-action').text() === action)
+
+    // 打开提示词面板默认不占固定键（store 默认空串）→ 按键区显示弱化占位
+    const promptRow = rowOf('打开提示词面板')
+    expect(promptRow).toBeTruthy()
+    expect(promptRow.find('.shortcut-unset').exists()).toBe(true)
+    expect(promptRow.find('.shortcut-keys').text()).toContain('未设置')
+
+    // 有默认值的快捷键行不出现占位
+    expect(rowOf('打开命令面板').find('.shortcut-unset').exists()).toBe(false)
+  })
+
   it('快捷键：重置所有恢复全部默认', async () => {
     const { SaveSettings } = await import('../../../wailsjs/go/main/App')
     SaveSettings.mockResolvedValue(true)
@@ -791,7 +807,7 @@ describe('SettingsPanel.vue', () => {
 
 // ---- 侧边栏顺序调整区（快捷键 tab 内；上移/下移相邻交换 + 恢复默认）----
 describe('SettingsPanel.vue - 侧边栏顺序调整区', () => {
-  const DEFAULT_IDS = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo']
+  const DEFAULT_IDS = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts']
 
   let wrapper
 
@@ -814,14 +830,15 @@ describe('SettingsPanel.vue - 侧边栏顺序调整区', () => {
     return wrapper.findAll('.sidebar-order-item')
   }
 
-  it('默认顺序渲染 9 行（编号 + label），首尾行上移/下移按钮 disabled', async () => {
+  it('默认顺序渲染 10 行（编号 + label），首尾行上移/下移按钮 disabled', async () => {
     const rows = await openShortcutsTab()
-    expect(rows.length).toBe(9)
+    expect(rows.length).toBe(10)
     expect(rows[0].text()).toContain('1. 工作目录')
     expect(rows[8].text()).toContain('9. 临时待办')
+    expect(rows[9].text()).toContain('10. 提示词')
     // 边界禁用：首行无上移、末行无下移
     expect(rows[0].findAll('button').find(b => b.text().includes('上移')).attributes('disabled')).toBeDefined()
-    expect(rows[8].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeDefined()
+    expect(rows[9].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeDefined()
     expect(rows[0].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeUndefined()
   })
 

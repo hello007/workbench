@@ -98,6 +98,7 @@
              v-show 常驻挂载：切走再切回保留搜索关键字、展开态与草稿。
              全局快捷键经 ref 调 quickAddFromClipboard，不依赖面板是否可见。 -->
         <TempTodoPanel ref="tempTodoPanelRef" v-show="uiStore.activePanel === 'todo'" />
+        <PromptLibraryPanel v-show="uiStore.activePanel === 'prompts'" />
         <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
           v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
@@ -136,6 +137,7 @@ import AiFunctionPanel from '../components/AiFunctionPanel.vue'
 import AiChatPanel from '../components/AiChatPanel.vue'
 import AssetsPanel from '../components/AssetsPanel.vue'
 import TempTodoPanel from '../components/TempTodoPanel.vue'
+import PromptLibraryPanel from '../components/PromptLibraryPanel.vue'
 import StatsView from './StatsView.vue'
 import DashboardView from './DashboardView.vue'
 import BranchCompareView from './BranchCompareView.vue'
@@ -577,6 +579,16 @@ const handleGlobalKeydown = (e) => {
     if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
     e.preventDefault()
     tempTodoPanelRef.value?.quickAddFromClipboard()
+    return
+  }
+
+  // 打开「提示词」面板（快捷键可自定义，默认空 = 未启用）。第 10 个侧边栏面板
+  // 不在 Alt+1..9 固定映射内，靠这条自定义快捷键补可达性。焦点判定与侧边栏切换
+  // 一致：输入框/对话框/终端聚焦时放行，避免打断输入。
+  if (matchShortcut(e, settingsStore.shortcutOpenPromptLibrary)) {
+    if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
+    e.preventDefault()
+    uiStore.activePanel = 'prompts'
     return
   }
 
