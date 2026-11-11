@@ -634,3 +634,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 247: 临时待办面板视觉重构
+
+**Date**: 2026-11-11
+**Task**: 临时待办面板视觉重构
+**Branch**: `master`
+
+### Summary
+
+TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、header 精简（kbd 快捷键提示 + 图标化导入导出 + 弹性搜索框）、条目正文 3 行折叠且仅截断时显示展开、展开限高 50vh 内滚、正文点击不再展开、四操作图标常驻 meta 行、轻卡片 hover 阴影、新建卡主色左边条。新增 isTextOverflowing 截断判定单点与单测，更新组件单测、temp-todo.md 展示契约与 README。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0fa0293` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
