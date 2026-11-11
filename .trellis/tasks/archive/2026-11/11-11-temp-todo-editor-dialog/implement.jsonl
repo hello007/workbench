@@ -1,0 +1,4 @@
+{"file": "docs/spec/temp-todo.md", "reason": "临时待办域契约：草稿态、单点函数、前端实现约束与回归面"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件编写规范：组合式 API、状态与事件绑定约定"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "界面视觉约定：对话框布局、配色语义、flex 约束链与语义锚要求"}
+{"file": "docs/spec/design-tokens.md", "reason": "暗色主题设计令牌：全屏对话框背景与边框配色覆盖依据"}

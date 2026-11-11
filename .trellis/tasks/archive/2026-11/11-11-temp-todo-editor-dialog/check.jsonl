@@ -1,0 +1,4 @@
+{"file": "docs/spec/temp-todo.md", "reason": "检查临时待办既有行为（导入、快捷记录、搜索）零回归"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查全屏对话框布局、亮暗主题一致性与语义锚命名"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查组件单测语义锚（data-action）与断言方式符合统一约定"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "检查前端异常捕获与错误提示走 handleError/ElMessage 约定"}
