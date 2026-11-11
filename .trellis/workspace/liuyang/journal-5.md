@@ -667,3 +667,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 248: 修复临时待办折叠正文遮挡
+
+**Date**: 2026-11-11
+**Task**: 修复临时待办折叠正文遮挡
+**Branch**: `master`
+
+### Summary
+
+去掉折叠正文底部 20px 渐隐遮罩（实测覆盖第三行整片高度），改用 line-clamp 自带省略号 +「展开」按钮表达截断；has-overflow 改为仅由 overflowIDs 驱动并加 8px 底部留白，正文底到按钮间距由 4px 提升到 12px。同步 temp-todo.md §8 展示契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `204f1ee` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
