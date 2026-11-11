@@ -601,3 +601,36 @@ CommitHistory 变更文件 tag 与 FileDiffDialog（commit 头部/range 分组�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 246: 临时待办全屏编辑
+
+**Date**: 2026-11-11
+**Task**: 临时待办全屏编辑
+**Branch**: `master`
+
+### Summary
+
+为临时待办新增全屏编辑弹窗：新建与行内编辑共享草稿，关闭保留内容、保存才退出；补组件单测 8 例并同步规范文档与 README，前端全量 2821 用例与构建通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d95327` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
