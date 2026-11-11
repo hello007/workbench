@@ -1,0 +1,2 @@
+{"file": "docs/spec/temp-todo.md", "reason": "核对 §7 与 README 中「三行输入区」表述已改为行内自适应 3–15 行"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对新增的 E2E 断言不使用 waitForTimeout、语义锚与 fixture 形状合规"}
