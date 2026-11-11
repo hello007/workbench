@@ -700,3 +700,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 249: 临时待办行内编辑自适应高度
+
+**Date**: 2026-11-11
+**Task**: 临时待办行内编辑自适应高度
+**Branch**: `master`
+
+### Summary
+
+行内编辑 textarea 由固定 3 行改为 EP autosize（minRows 3 / maxRows 15），展开读完再编辑时不必反复滚动；超 15 行框内滚动，更长内容仍走全屏编辑，新建卡保持固定 3 行可拖拽。E2E 实测 5 行 115px 无滚动、30 行 325px（15 行）内滚；同步 temp-todo.md §7 与 README（并修正渐隐旧表述）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6468493` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
