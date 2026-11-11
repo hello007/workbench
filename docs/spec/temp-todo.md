@@ -129,6 +129,7 @@
 | 入口 | 新建卡片与行内编辑 footer 各一个「全屏编辑」按钮（`data-action="expand-editor"`），行为一致 |
 | 实现 | `el-dialog fullscreen`；弹窗外壳样式写非 scoped 块并以 `.el-dialog.todo-editor-dialog` 圈定，禁裸改全局 `.el-dialog`；容器 `padding: 0`（EP 2.14.5 自带 16px，不归零则 header/footer 背景内缩、贴不到边） |
 | 草稿 | 弹窗与行内编辑共用 `draftText` / `draftTags`，不复制、不回写；弹窗只是「放大视图」 |
+| 行内编辑高度 | 按内容自适应 3–15 行（EP `autosize`，`minRows:3 / maxRows:15`）；超 15 行框内滚动，更长内容走全屏编辑；新建卡片仍为固定 3 行 + 可拖拽 |
 | 关闭语义 | `X` / `ESC` /「返回编辑」只关闭弹窗、草稿保留；仅保存成功（`editorDialogSaveDone`）经 `@closed` 复位编辑态 |
 | 保存 | 行内 `saveDraft` 与弹窗 `saveFromDialog` 共用 `persistDraft`；空正文与保存失败均不关闭弹窗；保存在途被 ESC/X 关闭时 `@closed` 已错过标记，保存完成后由 `saveFromDialog` 就地复位（防残留草稿再次保存出新条目） |
 | 快捷键 | 弹窗内 `Ctrl+Enter` 保存 |

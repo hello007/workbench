@@ -101,11 +101,12 @@
 
           <template v-if="editingId === todo.id">
             <div class="todo-editor todo-editor--inline">
+              <!-- 行内编辑按内容自适应 3–15 行：展开读完再编辑时不必反复滚动；
+                   autosize 与原生 resize 互斥，超长内容仍走「全屏编辑」 -->
               <el-input
                 v-model="draftText"
                 type="textarea"
-                :rows="3"
-                resize="vertical"
+                :autosize="{ minRows: 3, maxRows: 15 }"
                 @keydown.ctrl.enter.prevent="saveDraft"
               />
               <div class="todo-editor-footer">
