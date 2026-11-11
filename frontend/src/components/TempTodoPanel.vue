@@ -131,7 +131,7 @@
             <div class="todo-main">
               <div
                 class="todo-text-wrap"
-                :class="{ 'has-overflow': overflowIDs.has(todo.id) && !expandedIDs.has(todo.id) }"
+                :class="{ 'has-overflow': overflowIDs.has(todo.id) }"
               >
                 <div
                   class="todo-text"
@@ -221,7 +221,7 @@
             <div class="todo-main">
               <div
                 class="todo-text-wrap"
-                :class="{ 'has-overflow': overflowIDs.has(todo.id) && !expandedIDs.has(todo.id) }"
+                :class="{ 'has-overflow': overflowIDs.has(todo.id) }"
               >
                 <div
                   class="todo-text"
@@ -1032,16 +1032,9 @@ onMounted(async () => {
   position: relative;
 }
 
-/* 只在确实被截断且未展开时显示底部渐隐 */
-.todo-text-wrap.has-overflow::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 20px;
-  background: linear-gradient(to bottom, transparent, var(--todo-card-bg));
-  pointer-events: none;
+/* 折叠态底部留白：给省略号与「展开」按钮之间留呼吸空间，避免压住第三行 */
+.todo-text-wrap.has-overflow {
+  padding-bottom: var(--spacing-sm);
 }
 
 .todo-text {

@@ -138,7 +138,7 @@
 
 | 项 | 契约 |
 |---|---|
-| 折叠 | 正文默认 `-webkit-line-clamp: 3`；底部渐隐仅在 `has-overflow` 时出现 |
+| 折叠 | 正文默认 `-webkit-line-clamp: 3`；截断提示靠浏览器省略号 +「展开」按钮，**不使用底部渐隐遮罩**（20px 渐隐会压住第三行）；`has-overflow` 仅用于底部 8px 留白 |
 | 截断判定 | 单点 `isTextOverflowing`：`clientHeight <= 0` 视为未截断（面板隐藏或未布局），`scrollHeight > clientHeight + 1` 才算截断 |
 | 展开 | `display:block` + `max-height:50vh` + `overflow-y:auto`；按钮文案「展开 / 收起」，`data-action="toggle-expand"` |
 | 点击 | 正文点击**不再**切换展开（避免与选中文字复制冲突）；展开唯一入口是显式按钮 |
