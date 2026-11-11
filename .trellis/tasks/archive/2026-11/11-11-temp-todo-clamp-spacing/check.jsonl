@@ -1,0 +1,2 @@
+{"file": "docs/spec/temp-todo.md", "reason": "核对条目展示契约已同步（渐隐移除、留白与截断提示口径）"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "核对间距使用 --spacing-sm 档位、未引入硬编码像素"}

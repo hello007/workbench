@@ -1,0 +1,2 @@
+{"file": "docs/spec/temp-todo.md", "reason": "条目展示契约（§8）是本次修复的基线，改动后需同步该节关于渐隐的描述"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "间距归并四档与卡片视觉约束，padding 取值须用令牌"}
