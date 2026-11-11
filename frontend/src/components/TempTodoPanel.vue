@@ -8,7 +8,8 @@
           临时待办
         </span>
         <span class="panel-subtitle">
-          <span class="subtitle-sign">&gt;</span>{{ quickShortcutTip }} 从剪贴板快速记录
+          <kbd>{{ quickShortcutTip }}</kbd>
+          从剪贴板记一条
         </span>
       </div>
       <div class="panel-actions">
@@ -19,19 +20,22 @@
           placeholder="搜索正文或标签"
           class="todo-search"
         />
-        <el-button
-          size="small"
-          data-action="export"
-          :disabled="!todos.length"
-          @click="exportTodos"
-        >
-          <el-icon class="btn-icon"><Download /></el-icon>
-          导出
-        </el-button>
-        <el-button size="small" data-action="import" @click="startImport">
-          <el-icon class="btn-icon"><Upload /></el-icon>
-          导入
-        </el-button>
+        <el-tooltip content="导出为 Markdown" placement="bottom" :show-after="300">
+          <el-button
+            size="small"
+            data-action="export"
+            aria-label="导出待办"
+            :disabled="!todos.length"
+            @click="exportTodos"
+          >
+            <el-icon><Download /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="从 Markdown 导入" placement="bottom" :show-after="300">
+          <el-button size="small" data-action="import" aria-label="导入待办" @click="startImport">
+            <el-icon><Upload /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-button type="primary" size="small" data-action="create" :disabled="creating" @click="startCreate">
           <el-icon class="btn-icon"><Plus /></el-icon>
           新建
@@ -39,7 +43,7 @@
       </div>
     </div>
 
-    <div class="panel-body">
+    <div ref="panelBodyRef" class="panel-body">
       <!-- 新建卡片：与编辑态共用同一套草稿控件 -->
       <div v-if="creating" class="todo-editor">
         <el-input
@@ -58,6 +62,7 @@
             placeholder="标签，用逗号分隔（如 重构,AI提示词）"
             class="todo-tags-input"
           />
+          <span class="todo-editor-hint">Ctrl+Enter 保存</span>
           <div class="todo-editor-actions">
             <el-button size="small" data-action="expand-editor" @click="openEditorDialog">
               <el-icon class="btn-icon"><FullScreen /></el-icon>
@@ -125,11 +130,28 @@
           <template v-else>
             <div class="todo-main">
               <div
-                class="todo-text"
-                :class="{ 'is-expanded': expandedIDs.has(todo.id) }"
-                :title="expandedIDs.has(todo.id) ? '点击收起' : '点击展开全文'"
+                class="todo-text-wrap"
+                :class="{ 'has-overflow': overflowIDs.has(todo.id) && !expandedIDs.has(todo.id) }"
+              >
+                <div
+                  class="todo-text"
+                  :class="{ 'is-expanded': expandedIDs.has(todo.id) }"
+                  :ref="setTextEl(todo.id)"
+                >{{ todo.text }}</div>
+              </div>
+              <el-button
+                v-if="overflowIDs.has(todo.id)"
+                link
+                size="small"
+                class="todo-expand-btn"
+                data-action="toggle-expand"
                 @click="toggleExpanded(todo.id)"
-              >{{ todo.text }}</div>
+              >
+                {{ expandedIDs.has(todo.id) ? '收起' : '展开' }}
+                <el-icon class="todo-expand-icon">
+                  <component :is="expandedIDs.has(todo.id) ? ArrowUp : ArrowDown" />
+                </el-icon>
+              </el-button>
               <div class="todo-meta">
                 <span class="todo-time" :title="formatFullTime(todo.createdAt / 1000)">
                   {{ formatRelativeTime(todo.createdAt / 1000) }}
@@ -141,9 +163,7 @@
                   type="info"
                   class="todo-tag"
                 >{{ tag }}</el-tag>
-              </div>
-            </div>
-            <div class="todo-actions">
+                <div class="todo-actions">
               <el-tooltip content="复制正文" placement="top" :show-after="300">
                 <el-button link size="small" data-action="copy" @click="copyText(todo.text)">
                   <el-icon><CopyDocument /></el-icon>
@@ -164,6 +184,8 @@
                   <el-icon><Delete /></el-icon>
                 </el-button>
               </el-tooltip>
+                </div>
+              </div>
             </div>
           </template>
         </div>
@@ -198,10 +220,28 @@
             />
             <div class="todo-main">
               <div
-                class="todo-text"
-                :class="{ 'is-expanded': expandedIDs.has(todo.id) }"
+                class="todo-text-wrap"
+                :class="{ 'has-overflow': overflowIDs.has(todo.id) && !expandedIDs.has(todo.id) }"
+              >
+                <div
+                  class="todo-text"
+                  :class="{ 'is-expanded': expandedIDs.has(todo.id) }"
+                  :ref="setTextEl(todo.id)"
+                >{{ todo.text }}</div>
+              </div>
+              <el-button
+                v-if="overflowIDs.has(todo.id)"
+                link
+                size="small"
+                class="todo-expand-btn"
+                data-action="toggle-expand"
                 @click="toggleExpanded(todo.id)"
-              >{{ todo.text }}</div>
+              >
+                {{ expandedIDs.has(todo.id) ? '收起' : '展开' }}
+                <el-icon class="todo-expand-icon">
+                  <component :is="expandedIDs.has(todo.id) ? ArrowUp : ArrowDown" />
+                </el-icon>
+              </el-button>
               <div class="todo-meta">
                 <span class="todo-time" :title="formatFullTime(todo.completedAt / 1000)">
                   完成于 {{ formatRelativeTime(todo.completedAt / 1000) }}
@@ -213,9 +253,7 @@
                   type="info"
                   class="todo-tag"
                 >{{ tag }}</el-tag>
-              </div>
-            </div>
-            <div class="todo-actions">
+                <div class="todo-actions">
               <el-tooltip content="复制正文" placement="top" :show-after="300">
                 <el-button link size="small" data-action="copy" @click="copyText(todo.text)">
                   <el-icon><CopyDocument /></el-icon>
@@ -231,6 +269,8 @@
                   <el-icon><Delete /></el-icon>
                 </el-button>
               </el-tooltip>
+                </div>
+              </div>
             </div>
           </div>
         </template>
@@ -343,10 +383,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowRight, Download, Upload, ChatDotRound, FullScreen
+  Memo, Plus, CopyDocument, Edit, Delete, ArrowDown, ArrowUp, ArrowRight, Download, Upload, ChatDotRound, FullScreen
 } from '@element-plus/icons-vue'
 import {
   ListTempTodos,
@@ -365,6 +405,7 @@ import { handleError } from '../utils/error'
 import { formatRelativeTime, formatFullTime } from '../utils/formatTime'
 import { decodeBase64Utf8 } from '../utils/base64'
 import { parseTempTodoMarkdown } from '../utils/tempTodoImport'
+import { isTextOverflowing } from '../utils/todoTextOverflow'
 import { useSettingsStore } from '../store/settings'
 import { useUiStore } from '../store/ui'
 import { isBrowserChannel } from '../transport'
@@ -393,8 +434,15 @@ const editorDialogVisible = ref(false)
 const dialogInputRef = ref(null)
 const editorDialogSaveDone = ref(false)
 
-// 展开态按条目 ID 记录：长文默认折叠成两行，避免侧边栏被单条占满
+// 展开态按条目 ID 记录：长文默认折叠成三行，展开后限高内部滚动
 const expandedIDs = ref(new Set())
+
+// 截断判定结果：只有被截断的条目才显示「展开」按钮。
+// 面板 v-show 隐藏时 clientHeight 为 0 无法判定，切回可见后由 refreshOverflow 重算
+const overflowIDs = ref(new Set())
+const textEls = new Map()
+const panelBodyRef = ref(null)
+let resizeObserver = null
 
 // 导入预览态：解析结果 + 「重复项也导入」开关（默认关，避免制造重复脏数据）。
 // 条目多时只渲染前 200 条，避免大文件把对话框撑爆；写入仍按全量。
@@ -692,6 +740,49 @@ const toggleExpanded = (id) => {
   expandedIDs.value = next
 }
 
+// 正文元素注册：ref 回调在卸载时传 null，须同步移出集合，避免测量到已销毁节点
+const setTextEl = (id) => (el) => {
+  if (el) textEls.set(id, el)
+  else textEls.delete(id)
+}
+
+const sameSet = (a, b) => a.size === b.size && [...a].every(item => b.has(item))
+
+/**
+ * 重算「哪些条目被折叠截断」。
+ * 展开态不参与重新测量：此时可见高度由 max-height 限制，再按 scrollHeight
+ * 比较会把长文持续判为截断；能展开本身说明历史上已被判定过
+ */
+const refreshOverflow = () => {
+  const next = new Set()
+  for (const [id, el] of textEls) {
+    if (expandedIDs.value.has(id)) {
+      if (overflowIDs.value.has(id)) next.add(id)
+      continue
+    }
+    if (isTextOverflowing(el)) next.add(id)
+  }
+  if (!sameSet(next, overflowIDs.value)) overflowIDs.value = next
+}
+
+const detachResizeObserver = () => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+}
+
+// 面板常驻 v-show：隐藏时观察器得到 0 宽直接跳过，切回可见由
+// activePanel 的 watch 重新测量并重建观察器，避免隐藏期间空转
+const attachResizeObserver = () => {
+  if (resizeObserver || typeof ResizeObserver === 'undefined') return
+  const target = panelBodyRef.value
+  if (!target) return
+  resizeObserver = new ResizeObserver(() => {
+    if (!target.clientWidth) return
+    requestAnimationFrame(refreshOverflow)
+  })
+  resizeObserver.observe(target)
+}
+
 /**
  * 剪贴板快速记录（全局快捷键入口，由 Home.vue 经 ref 调用）。
  * 成功后不切换面板、不抢焦点：用户此时多半正看着 AI 输出，打断视线比「看不见结果」更烦。
@@ -720,8 +811,32 @@ watch(() => uiStore.tempTodoChangeSeq, () => {
   load()
 })
 
-onMounted(() => {
-  load()
+// 列表或搜索条件变化后重测截断（flush post 保证 DOM 已更新）
+watch([() => todos.value, keyword, expandedIDs], () => {
+  nextTick(refreshOverflow)
+}, { flush: 'post' })
+
+// 面板可见性切换：隐藏期间无法判定截断，切回待办时重测并挂载宽度观察器
+watch(() => uiStore.activePanel, (panel) => {
+  if (panel === 'todo') {
+    nextTick(() => {
+      refreshOverflow()
+      attachResizeObserver()
+    })
+  } else {
+    detachResizeObserver()
+  }
+})
+
+onBeforeUnmount(detachResizeObserver)
+
+onMounted(async () => {
+  await load()
+  if (uiStore.activePanel === 'todo') {
+    await nextTick()
+    refreshOverflow()
+    attachResizeObserver()
+  }
 })
 </script>
 
@@ -743,14 +858,16 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-md);
-  padding: var(--spacing-md);
+  /* 内容限宽 1000px 居中、背景铺满：calc 为负时由 max 兜底为常规内边距 */
+  padding-block: var(--spacing-md);
+  padding-inline: max(var(--spacing-md), calc((100% - 1000px) / 2));
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
 }
 
 .panel-heading {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--spacing-sm);
   min-width: 0;
 }
@@ -770,6 +887,9 @@ onMounted(() => {
 }
 
 .panel-subtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   font-size: 12px;
   color: var(--text-tertiary);
   white-space: nowrap;
@@ -777,21 +897,34 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
-.subtitle-sign {
-  margin-right: var(--spacing-xs);
-  color: var(--primary-color);
-  font-weight: 600;
+.panel-subtitle kbd {
+  font-family: 'Geist', 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 .panel-actions {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .todo-search {
-  width: 200px;
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+
+/* 窄窗口优先隐藏快捷键提示，把横向空间让给搜索框与主操作 */
+@media (max-width: 900px) {
+  .panel-subtitle {
+    display: none;
+  }
 }
 
 .btn-icon {
@@ -802,7 +935,8 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--spacing-md) var(--spacing-md) var(--spacing-lg);
+  /* 与 header 同一限宽基线：滚动条仍贴面板右缘 */
+  padding: var(--spacing-md) max(var(--spacing-md), calc((100% - 1000px) / 2)) var(--spacing-lg);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
@@ -854,26 +988,30 @@ onMounted(() => {
 
 /* ---- 条目 ---- */
 .todo-item {
+  /* 正文底部渐隐用卡片自身底色，已完成条目换档后渐变自然跟随 */
+  --todo-card-bg: var(--bg-secondary);
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  background: var(--todo-card-bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+/* 悬停只轻提边框与阴影，不整圈主色填充 */
 .todo-item:hover {
-  border-color: var(--primary-color);
+  border-color: var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 .todo-item--done {
-  background: var(--bg-tertiary);
+  --todo-card-bg: var(--bg-tertiary);
 }
 
 .todo-item--done .todo-text {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .todo-check {
@@ -889,23 +1027,52 @@ onMounted(() => {
   gap: var(--spacing-xs);
 }
 
+/* 正文：默认折叠三行；点击不再切换展开，避免与「选中文字复制」冲突 */
+.todo-text-wrap {
+  position: relative;
+}
+
+/* 只在确实被截断且未展开时显示底部渐隐 */
+.todo-text-wrap.has-overflow::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 20px;
+  background: linear-gradient(to bottom, transparent, var(--todo-card-bg));
+  pointer-events: none;
+}
+
 .todo-text {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  cursor: pointer;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
 }
 
+/* 展开后限高内部滚动：一条长日志不会把整个列表撑开 */
 .todo-text.is-expanded {
   display: block;
   -webkit-line-clamp: unset;
-  overflow: visible;
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.todo-expand-btn {
+  align-self: flex-start;
+  padding: 0;
+  font-size: 12px;
+  color: var(--primary-color);
+}
+
+.todo-expand-icon {
+  margin-left: var(--spacing-xs);
 }
 
 .todo-meta {
@@ -927,35 +1094,47 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
+/* 操作图标常驻 meta 行右端：默认低对比度，悬停卡片或图标本身时提亮 */
 .todo-actions {
-  flex-shrink: 0;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
 }
 
-.todo-item:hover .todo-actions {
-  opacity: 1;
+.todo-actions .el-button {
+  padding: var(--spacing-xs);
+  height: auto;
+  color: var(--text-tertiary);
 }
 
-.todo-delete-btn:hover {
+.todo-item:hover .todo-actions .el-button {
+  color: var(--text-secondary);
+}
+
+.todo-actions .el-button:hover {
+  color: var(--text-primary);
+}
+
+.todo-actions .todo-delete-btn:hover {
   color: var(--el-color-danger);
 }
 
 /* ---- 编辑器 ---- */
+/* 新建卡片：主色左边条 + 浅主色底，与列表卡片区分开 */
 .todo-editor {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--primary-color);
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--primary-color) 5%, var(--bg-secondary));
 }
 
+/* 行内编辑退化为无壳，避免卡片里再套一层卡片 */
 .todo-editor--inline {
   padding: 0;
   border: none;
@@ -973,10 +1152,22 @@ onMounted(() => {
   min-width: 0;
 }
 
+.todo-editor-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 .todo-editor-actions {
   display: flex;
   gap: var(--spacing-xs);
   flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .todo-editor-hint {
+    display: none;
+  }
 }
 
 /* ---- 导入预览 ---- */

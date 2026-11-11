@@ -1,7 +1,7 @@
 # 临时待办契约（侧边栏「临时待办」）
 
 > 剪贴板快速记录、选中文本存档、转提示词、Markdown 导出与导入的跨层契约。
-> 最后更新：2026-11-11 · 来源任务：11-09-temp-todo-workspace（一期）、11-10-temp-todo-phase2（二期导出）、11-10-markdown（三期导入）、11-11-temp-todo-editor-dialog（全屏编辑）
+> 最后更新：2026-11-11 · 来源任务：11-09-temp-todo-workspace（一期）、11-10-temp-todo-phase2（二期导出）、11-10-markdown（三期导入）、11-11-temp-todo-editor-dialog（全屏编辑）、11-11-temp-todo-ui-polish（视觉重构）
 
 ---
 
@@ -108,6 +108,8 @@
 | service | `AddMany` 归一化/跳过空条目/`CreatedAt<=0` 取当前/未来钳制/一次落盘；落盘失败返回 `E_TEMP_TODO_IMPORT_FAILED` 且内存回滚 |
 | 组件 | 导入入口 `data-action="import"`、浏览器降级提示、预览汇总与开关联动、确认调用参数、空文件提示、全部重复禁用确认 |
 | 组件（全屏编辑） | `data-action="expand-editor"` 打开弹窗、正文与标签沿用草稿、保存入参、`Ctrl+Enter` 保存、空正文与保存失败不关闭弹窗、关闭后草稿保留、保存成功退出编辑态、保存在途关闭弹窗后仍复位 |
+| 组件（条目展示） | 截断才显示「展开」、按钮切换展开/收起文案、未截断无按钮且点击正文不改变展开态；截断判定纯函数覆盖未布局/相等/1px 容差 |
+| 组件（常驻操作） | 四个 `data-action` 图标在未 hover 时仍渲染（防回归到 hover-only） |
 | E2E | `frontend/e2e/temp-todo-import.spec.js`：真实面板链路预览汇总 3/2、开关切到 5、确认后 `AddTempTodos` 入参 3/5 条且字段对齐 `TempTodoDraft`；fixture 文件名取历史日期规避未来时刻钳制 |
 
 ## 6. 前端实现单点
@@ -118,6 +120,7 @@
 | `indentTempTodoText` | `service/temp_todo.go` | 导出续行缩进；改动须同步导入端的 `CONTINUATION_RE` |
 | `normalizeTempTodoText` / `normalizeTempTodoTags` | `service/temp_todo.go` | 单条与批量共用，禁在导入链路另起归一化 |
 | `appendTempTodoMarkdown` | `service/temp_todo.go` | 导出追加写入的唯一出口 |
+| `isTextOverflowing` | `frontend/src/utils/todoTextOverflow.js` | 截断判定唯一入口；jsdom 无布局，单测直接传模拟元素，禁在组件内另写判定 |
 
 ## 7. 全屏编辑形态
 
@@ -130,3 +133,17 @@
 | 保存 | 行内 `saveDraft` 与弹窗 `saveFromDialog` 共用 `persistDraft`；空正文与保存失败均不关闭弹窗；保存在途被 ESC/X 关闭时 `@closed` 已错过标记，保存完成后由 `saveFromDialog` 就地复位（防残留草稿再次保存出新条目） |
 | 快捷键 | 弹窗内 `Ctrl+Enter` 保存 |
 | 布局 | body 纵向 flex 约束链（`.el-dialog__body` → `.editor-dialog-body` → textarea 撑满）；标签输入与 footer 固定不随正文滚动 |
+
+## 8. 条目展示契约（11-11 视觉重构）
+
+| 项 | 契约 |
+|---|---|
+| 折叠 | 正文默认 `-webkit-line-clamp: 3`；底部渐隐仅在 `has-overflow` 时出现 |
+| 截断判定 | 单点 `isTextOverflowing`：`clientHeight <= 0` 视为未截断（面板隐藏或未布局），`scrollHeight > clientHeight + 1` 才算截断 |
+| 展开 | `display:block` + `max-height:50vh` + `overflow-y:auto`；按钮文案「展开 / 收起」，`data-action="toggle-expand"` |
+| 点击 | 正文点击**不再**切换展开（避免与选中文字复制冲突）；展开唯一入口是显式按钮 |
+| 测量时机 | 可见时 `onMounted`、列表/关键词/展开态变化、`activePanel` 切回 `todo`、容器宽度变化（ResizeObserver；隐藏态 0 宽跳过） |
+| 布局 | header 与 body 用 `padding-inline: max(var(--spacing-md), calc((100% - 1000px) / 2))` 限宽居中，背景仍铺满全宽，不改 DOM 结构 |
+| 操作按钮 | 四图标常驻 meta 行右端，默认 `--text-tertiary`，悬停卡片或图标提亮，删除悬停转危险色；`data-action` 保持 copy/to-prompt/edit/delete |
+| header | 单行；副标题为 `kbd` 键帽，< 900px 隐藏；导入/导出图标化 + tooltip；搜索框 `flex: 0 1 240px`、最小 160px |
+| 卡片 | 轻卡片：`--border-light` 描边，hover 升 `--border-color` + `--shadow-sm`（不整圈主色）；已完成卡换 `--bg-tertiary` 与次级文字色 |

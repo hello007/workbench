@@ -24,6 +24,13 @@ const mocks = vi.hoisted(() => ({
   browserChannel: false
 }))
 
+// 截断判定在 jsdom 下无法真实测量（元素尺寸恒为 0），由用例注入结果
+const overflow = vi.hoisted(() => ({ value: false }))
+
+vi.mock('../../utils/todoTextOverflow', () => ({
+  isTextOverflowing: () => overflow.value
+}))
+
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
   return {
@@ -61,6 +68,7 @@ vi.mock('@element-plus/icons-vue', () => {
     Edit: stub('edit'),
     Delete: stub('delete'),
     ArrowDown: stub('arrow-down'),
+    ArrowUp: stub('arrow-up'),
     ArrowRight: stub('arrow-right'),
     Download: stub('download'),
     Upload: stub('upload'),
@@ -134,6 +142,8 @@ const sampleTodos = () => [
 ]
 
 const mountPanel = async () => {
+  // 截断测量只在面板可见时进行，测试统一置为当前面板
+  useUiStore().activePanel = 'todo'
   const wrapper = mount(TempTodoPanel, { global: { stubs } })
   await flushPromises()
   return wrapper
@@ -161,6 +171,7 @@ beforeEach(() => {
   mocks.openFile.mockResolvedValue('')
   mocks.readFileBytes.mockResolvedValue({ path: '', name: '', size: 0, tooLarge: false })
   mocks.browserChannel = false
+  overflow.value = false
 })
 
 afterEach(() => {
@@ -206,13 +217,45 @@ describe('TempTodoPanel - 列表渲染与分区', () => {
     expect(wrapper.text()).toContain('没有匹配')
   })
 
-  it('条目长文默认折叠，点击正文切换展开态 class', async () => {
+  it('条目正文默认折叠，被截断时显示展开按钮', async () => {
+    overflow.value = true
     const wrapper = await mountPanel()
-    const text = wrapper.find('.todo-item .todo-text')
-    expect(text.classes()).not.toContain('is-expanded')
 
-    await text.trigger('click')
+    expect(wrapper.find('.todo-item .todo-text').classes()).not.toContain('is-expanded')
+    expect(wrapper.find('.todo-item [data-action="toggle-expand"]').exists()).toBe(true)
+  })
+
+  it('展开按钮切换展开态，展开后按钮文案变为收起', async () => {
+    overflow.value = true
+    const wrapper = await mountPanel()
+    const toggle = () => wrapper.find('.todo-item [data-action="toggle-expand"]')
+
+    await toggle().trigger('click')
     expect(wrapper.find('.todo-item .todo-text').classes()).toContain('is-expanded')
+    expect(toggle().text()).toContain('收起')
+
+    await toggle().trigger('click')
+    expect(wrapper.find('.todo-item .todo-text').classes()).not.toContain('is-expanded')
+    expect(toggle().text()).toContain('展开')
+  })
+
+  it('四个操作图标常驻渲染，不依赖 hover 才显形', async () => {
+    const wrapper = await mountPanel()
+    const item = wrapper.find('.todo-item:not(.todo-item--done)')
+
+    expect(item.find('[data-action="copy"]').exists()).toBe(true)
+    expect(item.find('[data-action="to-prompt"]').exists()).toBe(true)
+    expect(item.find('[data-action="edit"]').exists()).toBe(true)
+    expect(item.find('[data-action="delete"]').exists()).toBe(true)
+  })
+
+  it('未被截断时不显示展开按钮，点击正文也不改变展开态', async () => {
+    overflow.value = false
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-action="toggle-expand"]').exists()).toBe(false)
+    await wrapper.find('.todo-item .todo-text').trigger('click')
+    expect(wrapper.find('.todo-item .todo-text').classes()).not.toContain('is-expanded')
   })
 })
 
