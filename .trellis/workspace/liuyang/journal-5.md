@@ -865,3 +865,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 254: 待办与提示词面板编辑焦点与快捷键
+
+**Date**: 2026-11-12
+**Task**: 待办与提示词面板编辑焦点与快捷键
+**Branch**: `master`
+
+### Summary
+
+临时待办与提示词面板新建/编辑统一为：打开即聚焦首个可编辑框并定位文末；Ctrl/Cmd+S 保存（兼容 Ctrl+Enter）；ESC 取消编辑（全屏弹窗取消整条，X/返回编辑保留草稿）。新增 utils/focusInput.js 单点；引入草稿/弹窗双会话代次防在途保存竞态，快速记录拆独立 saving。补焦点、快捷键、取消与竞态单测。经三轮子代理审核并修复。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0009e48` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
