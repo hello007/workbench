@@ -766,3 +766,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 251: 提示词面板 Playwright E2E
+
+**Date**: 2026-11-12
+**Task**: 提示词面板 Playwright E2E
+**Branch**: `master`
+
+### Summary
+
+新增 prompt-library.spec.js，覆盖打开面板、新建含占位符条目、三条复制路径与删除确认；剪贴板真实读写并用哨兵+差异填写值三重守卫防假绿；同步 e2e README 与 docs/spec/e2e-testing.md §5.4（EP 输入框 data-* 落点）。两轮子 agent 审查后修复断言与选择器精度。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `56f78e2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
