@@ -1,0 +1,4 @@
+{"file": "docs/spec/prompt-library.md", "reason": "提示词面板复制交互与组件结构契约"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "配色语义、深色对比度与组件视觉规范"}
+{"file": "docs/spec/design-tokens.md", "reason": "设计令牌与主题变量使用约束"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 语义锚与断言约定"}

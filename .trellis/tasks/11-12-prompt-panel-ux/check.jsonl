@@ -1,0 +1,3 @@
+{"file": "docs/spec/prompt-library.md", "reason": "检查预览与复制语义一致"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "检查高亮配色与深浅色适配"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增测试无隐式时序依赖"}

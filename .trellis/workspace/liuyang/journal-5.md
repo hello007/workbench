@@ -799,3 +799,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 252: 占位符默认值语法
+
+**Date**: 2026-11-12
+**Task**: 占位符默认值语法
+**Branch**: `master`
+
+### Summary
+
+实现 {{名称:默认值}}：前后端统一三级回退（填写值→默认值→保留原文）；前端解析/分段单点与填写弹窗默认值提示，Go renderPrompt 同步并放行 form Required；AiFunctionRunner 必填门禁识别模板默认值，ParamsEditor 复用占位符解析单点；同步文档与两端测试。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `439a6b3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
