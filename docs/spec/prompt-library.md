@@ -61,6 +61,15 @@
 - 未填写（undefined / null / 空串 / 纯空白）的占位符按 §2.1 三级回退：有默认值用默认值，无默认值保留 `{{名称}}` 原样。
 - 写入失败提示「复制失败，请检查剪贴板权限」，弹窗保持打开。
 - 保存/删除命中 `E_PROMPT_NOT_FOUND`（列表已过期，条目被删除）时除 warning 提示外**必须重新拉取列表**：保存场景同时关闭编辑弹窗，避免用户对已不存在的条目反复重试。
+- 弹窗尺寸：新建/编辑 `min(1040px, 94vw)`，正文输入 18 行且编辑区 `min-height: 360px`；填写弹窗 `min(820px, 92vw)`（新建/编辑对齐 `frontend-visual-conventions.md` §5「尺寸分档」的「长文编辑器」行，填写弹窗对齐同节 min() 响应式策略）。
+- 填写弹窗在输入项下方渲染「实际内容预览」（`data-preview`），随 `fillValues` 实时更新。预览与「替换并复制」共用 `segmentPlaceholders(text, values)` 分段单点，`applyPlaceholders` 即各段文本拼接，保证复制结果与预览不漂移。
+- 预览按分段 kind 用 `v-for` 渲染 `<span>`（**禁 `v-html`**）：
+  - `filled`（填写值）：`--primary-bg` 底 + `--primary-color` 字；
+  - `default`（默认值）：同 filled 配色 + `--primary-color` 虚线边框，`title="使用默认值"`；
+  - `unfilled`（未填且无默认值）：`--text-tertiary` 字 + `--border-light` 虚线边框，保留 `{{名称}}` 原文，`title="未填写，保留占位符"`；
+  - `text`：原样输出，不加样式类。
+- 预览容器 `white-space: pre-wrap`、`word-break: break-word`、`max-height: 32vh` + `overflow-y: auto` + `overscroll-behavior: contain`（滚到边界不链式传给外层弹窗），背景 `--bg-tertiary`、边框 `--border-light`、圆角 `--radius-md`；颜色全部取主题变量，浅色/深色自动适配。
+- 暗色主题下 `filled` / `default` 文字提亮为 `--primary-light`（`--primary-color` 叠 `--primary-bg` 仅约 2.4:1）：按本仓「非正文 token ≥ 3:1」口径（提亮后约 3.5:1），**不追求正文 WCAG AA 4.5:1**——高亮是替换片段的标记而非正文，与 CodeMirror 深色 token 同口径（详见 `frontend-visual-conventions.md` §6「Vue scoped 样式」小节）。
 
 ## 4. 面板注册点
 
@@ -81,8 +90,8 @@
 
 - `service/prompt_test.go`：增删改查、归一化（首行缩进保留）、排序、脏数据剔除、损坏留底、截断、重载持久化、Add/Update/Delete 三条落盘失败回滚。
 - `service/settings_test.go`：`ShortcutOpenPromptLibrary` 的 Save→Get 往返 + 磁盘 JSON 键名断言（防 Go/前端键名漂移）。
-- `frontend/src/utils/__tests__/promptPlaceholders.spec.js`：提取/替换的全部边界；默认值用例组（含冒号默认值、空默认保留、去空白、超长不识别、同名首次为准、纯空白视为未填、填写值不裁剪）与 Go `TestRenderPrompt_DefaultValue` 保持同一组语义用例，防跨语言漂移。
-- `frontend/src/components/__tests__/PromptLibraryPanel.spec.js`：无占位符直复制、弹窗去重、部分填写、默认值 placeholder 提示、未填走默认值、填写覆盖默认值、复制原文保留语法、失败保持、新建校验、编辑、删除确认、搜索、展开、`E_PROMPT_NOT_FOUND` 刷新列表。
-- `frontend/e2e/prompt-library.spec.js`：默认值链路的独立用例（新建 `{{页数:1}}` → 不填得默认值 → 填写覆盖 → 复制原文保留语法）。
+- `frontend/src/utils/__tests__/promptPlaceholders.spec.js`：提取/替换的全部边界；默认值用例组（含冒号默认值、空默认保留、去空白、超长不识别、同名首次为准、纯空白视为未填、填写值不裁剪）与 Go `TestRenderPrompt_DefaultValue` 保持同一组语义用例，防跨语言漂移；`segmentPlaceholders` 分段（普通文本、填写值、默认值、未填、混合、换行、无效占位符）及 `applyPlaceholders` 与分段拼接一致性。
+- `frontend/src/components/__tests__/PromptLibraryPanel.spec.js`：无占位符直复制、弹窗去重、部分填写、默认值 placeholder 提示、未填走默认值、填写覆盖默认值、复制原文保留语法、失败保持、新建校验、编辑、删除确认、搜索、展开、`E_PROMPT_NOT_FOUND` 刷新列表；预览区三类高亮与输入实时更新、复制原文不受预览影响。
+- `frontend/e2e/prompt-library.spec.js`：默认值链路的独立用例（新建 `{{页数:1}}` → 不填得默认值 → 填写覆盖 → 复制原文保留语法）；预览区可见性、`ph-unfilled`/`ph-default`/`ph-filled` 文本与切换断言。
 - `frontend/src/views/__tests__/Home.spec.js`：自定义快捷键打开面板 / 空快捷键不劫持。
 - `frontend/src/test/wails-mock-defaults.js`：四方法默认值（面板常驻挂载即拉取）。

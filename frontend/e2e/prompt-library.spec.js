@@ -135,7 +135,16 @@ test.describe('提示词面板：新建、占位符复制与删除', () => {
 
     const fillInput = fillDialog.locator('[data-fill-name="客户名称"]')
     await expect(fillInput).toBeVisible()
+
+    // 预览区：未填写时保留占位符原文（unfilled），填写后变为 filled
+    const preview = fillDialog.locator('[data-preview]')
+    await expect(preview).toBeVisible()
+    await expect(preview).toContainText('实际内容预览')
+    await expect(preview.locator('.ph-unfilled')).toHaveText('{{客户名称}}')
+
     await fillInput.fill('张三')
+    await expect(preview.locator('.ph-filled')).toHaveText('张三')
+    await expect(preview.locator('.ph-unfilled')).toHaveCount(0)
     await primeClipboard(page)
     await fillDialog.locator('[data-action="copy-filled"]').click()
 
@@ -255,6 +264,11 @@ test.describe('提示词面板：占位符默认值', () => {
     await expect(fillInput).toHaveAttribute('placeholder', '输入「页数」的内容（可留空，默认 1）')
     await expect(fillInput).toHaveValue('')
 
+    // 预览区：未填但有默认值时展示默认值并带 default 高亮
+    const preview = fillDialog.locator('[data-preview]')
+    await expect(preview).toBeVisible()
+    await expect(preview.locator('.ph-default')).toHaveText('1')
+
     await primeClipboard(page)
     await fillDialog.locator('[data-action="copy-filled"]').click()
     await expect(fillDialog).toBeHidden()
@@ -266,6 +280,8 @@ test.describe('提示词面板：占位符默认值', () => {
     await expect(fillDialog).toBeVisible()
 
     await fillInput.fill('3')
+    await expect(preview.locator('.ph-filled')).toHaveText('3')
+    await expect(preview.locator('.ph-default')).toHaveCount(0)
     await primeClipboard(page)
     await fillDialog.locator('[data-action="copy-filled"]').click()
     await expect(fillDialog).toBeHidden()

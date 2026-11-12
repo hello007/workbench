@@ -5,7 +5,8 @@ import {
   applyPlaceholders,
   extractPlaceholderDefs,
   extractPlaceholders,
-  parsePlaceholder
+  parsePlaceholder,
+  segmentPlaceholders
 } from '../promptPlaceholders'
 
 describe('extractPlaceholders', () => {
@@ -168,5 +169,88 @@ describe('applyPlaceholders', () => {
   it('空正文与非字符串输入安全返回', () => {
     expect(applyPlaceholders('', { a: 'b' })).toBe('')
     expect(applyPlaceholders(null, { a: 'b' })).toBe('')
+  })
+})
+
+describe('segmentPlaceholders', () => {
+  it('普通文本返回单个 text 片段', () => {
+    expect(segmentPlaceholders('普通文本', {})).toEqual([
+      { kind: 'text', text: '普通文本' }
+    ])
+  })
+
+  it('填写值替换为 filled 片段', () => {
+    expect(segmentPlaceholders('你好 {{名称}}', { 名称: '张三' })).toEqual([
+      { kind: 'text', text: '你好 ' },
+      { kind: 'filled', text: '张三' }
+    ])
+  })
+
+  it('未填时使用默认值生成 default 片段', () => {
+    expect(segmentPlaceholders('页数 {{页数:1}}', {})).toEqual([
+      { kind: 'text', text: '页数 ' },
+      { kind: 'default', text: '1' }
+    ])
+  })
+
+  it('未填且无默认值生成 unfilled 片段并保留原文', () => {
+    expect(segmentPlaceholders('{{客户名称}}', {})).toEqual([
+      { kind: 'unfilled', text: '{{客户名称}}' }
+    ])
+    expect(segmentPlaceholders('{{ 名称 }}', {})).toEqual([
+      { kind: 'unfilled', text: '{{ 名称 }}' }
+    ])
+  })
+
+  it('混合多段按原文顺序拆分', () => {
+    expect(segmentPlaceholders('称呼 {{客户名称}}，页数 {{页数:1}}，时间 {{时间}}', { 客户名称: '张三' }))
+      .toEqual([
+        { kind: 'text', text: '称呼 ' },
+        { kind: 'filled', text: '张三' },
+        { kind: 'text', text: '，页数 ' },
+        { kind: 'default', text: '1' },
+        { kind: 'text', text: '，时间 ' },
+        { kind: 'unfilled', text: '{{时间}}' }
+      ])
+  })
+
+  it('保留换行且相邻占位符之间不产生空片段', () => {
+    expect(segmentPlaceholders('第一行\n{{甲}}{{乙}}', { 甲: 'A' })).toEqual([
+      { kind: 'text', text: '第一行\n' },
+      { kind: 'filled', text: 'A' },
+      { kind: 'unfilled', text: '{{乙}}' }
+    ])
+  })
+
+  it('无效占位符按 text 片段保留原文', () => {
+    expect(segmentPlaceholders('{{}} 与 {{a\nb}}', { '': 'X' })).toEqual([
+      { kind: 'text', text: '{{}} 与 {{a\nb}}' }
+    ])
+  })
+
+  it('纯空白填写视为未填，走默认值', () => {
+    expect(segmentPlaceholders('{{页数:1}}', { 页数: '   ' })).toEqual([
+      { kind: 'default', text: '1' }
+    ])
+  })
+
+  it('非字符串值转成字符串，0 不算未填写', () => {
+    expect(segmentPlaceholders('{{n}}', { n: 0 })).toEqual([
+      { kind: 'filled', text: '0' }
+    ])
+  })
+
+  it('applyPlaceholders 恒等于分段文本拼接', () => {
+    const text = '称呼 {{客户名称}}，页数 {{页数:1}}，时间 {{时间}}'
+    const cases = [{}, { 客户名称: '张三' }, { 页数: '3', 时间: '10:30' }]
+    for (const values of cases) {
+      expect(applyPlaceholders(text, values))
+        .toBe(segmentPlaceholders(text, values).map(segment => segment.text).join(''))
+    }
+  })
+
+  it('空正文与非字符串输入返回空数组', () => {
+    expect(segmentPlaceholders('', {})).toEqual([])
+    expect(segmentPlaceholders(null, {})).toEqual([])
   })
 })

@@ -259,6 +259,7 @@ top="15vh"                    <!-- 距顶：vh 响应式（CommandPalette 显式
 |弹窗类型|宽|高|参照|
 |---|---|---|---|
 |设置弹窗（多 tab + nav）|`min(960px, 86vw)`|`min(620px, 78vh)`|SettingsPanel、AiChatPanel 管理对话模板弹窗（960 档第二实例）|
+|长文编辑器（提示词新建/编辑）|`min(1040px, 94vw)`|按内容自适应（正文 18 行）|PromptLibraryPanel 新建/编辑弹窗（2026-11-12 新先例；视口比例取 94vw 而非大弹窗 85vw，为长文换行留行宽）|
 |命令面板（搜索 + 列表）|`min(720px, 70vw)`|内容区 `min(480px, 60vh)`|CommandPalette|
 |内容多的大弹窗|`min(Npx, 85vw)` N≥900|按内容自适应|RepoFilterDialog/AiTaskHistoryPanel（目标值 900/920；现状固定 px，待迁移 min() 模式）|
 |中小弹窗（添加/选择）|`min(Npx, 80vw)` N=600-700|自适应|DashboardView 添加仓库（目标值 640；现状固定 px，待迁移 min() 模式）|
@@ -289,6 +290,31 @@ EP 2.13+（实测 2.14.5）对**非 autosize** 的 `el-input type="textarea"` �
 - 另一陷阱：`:autosize` 由 JS 接管高度，与原生 `resize` 拖拽互斥——要「默认 N 行 + 可拖拽调高」须去 autosize 改 `:rows="N"`
 - 先例：AiChatPanel `.chat-input`（52px）与 `.tpl-content-input`（120px）
 - `!important` 方案依赖 EP 非 autosize 模式只写无 important 的 `minHeight` 这一实现细节，EP 升级后须回归验证
+
+#### Vue scoped 样式中 `:global(html.dark) .x` 会丢弃后续选择器
+
+主题覆盖写在 SFC scoped 样式时，`html.dark .ph-filled` 这种**裸前缀**写法是正确的（scoped 只给末段挂 `[data-v-*]`，编译为 `html.dark .ph-filled[data-v-x]`）；而 `:global(...)` 拼接会把后续选择器丢掉——Vue 3.5（实测 3.5.44 `@vue/compiler-sfc` 的 `compileStyle({ scoped: true })`）中 `:global()` 内层选择器被整段替换为自身、其后部分被丢弃，且两种写法的产物不同：
+
+- 单选择器 `:global(html.dark) .ph-filled` → `html.dark { color: ... }`（`.ph-filled` 丢失）；
+- 逗号分隔多选择器 `:global(html.dark) .a, :global(html.dark) .b` → `html.dark,html.dark { ... }`（两个 `.x` 均丢失）。
+
+两种形态的规则都落到 `html` 元素自身，`color` 沿继承污染全页文字色。
+
+```css
+/* 错误：单选择器编译为 html.dark { color: ... }，.ph-filled 丢失 */
+:global(html.dark) .ph-filled { color: var(--primary-light); }
+
+/* 错误：逗号多选择器编译为 html.dark,html.dark { ... }，两个 .x 均丢失 */
+:global(html.dark) .a,
+:global(html.dark) .b { color: var(--primary-light); }
+
+/* 正确：编译为 html.dark .ph-filled[data-v-x] */
+html.dark .ph-filled { color: var(--primary-light); }
+```
+
+- 先例：PromptLibraryPanel 预览高亮暗色提亮（2026-11-12），构建产物 CSS 可核对落地选择器
+- 该先例的取色口径：暗色下 `--primary-color`（#3b82f6）叠在 `--primary-bg`（rgba(59,130,246,.15)）上对比度约 2.4:1，低于本仓「非正文 token ≥ 3:1」基线，故提亮为既有 `--primary-light`（#60a5fa）约 3.5:1。此处**不追求正文 WCAG AA 4.5:1**——高亮是替换片段的标记而非正文，与 CodeMirror 深色 token 的 ≥3:1 单测口径一致（见下方「CodeMirror 语法高亮」节）
+- 需要更复杂的选择器组合时，改用全局样式文件（`src/style.css`）或在非 scoped 样式块中写，不要依赖 `:global()` 拼接
 
 #### highlight.js 按需注册必须包含 plaintext 回退名
 

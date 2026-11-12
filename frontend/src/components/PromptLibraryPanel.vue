@@ -81,7 +81,7 @@
     <el-dialog
       v-model="editorVisible"
       :title="editorTitle"
-      width="min(720px, 86vw)"
+      width="min(1040px, 94vw)"
       append-to-body
       :close-on-click-modal="false"
     >
@@ -95,7 +95,7 @@
       <el-input
         v-model="draftContent"
         type="textarea"
-        :rows="10"
+        :rows="18"
         maxlength="20000"
         show-word-limit
         resize="vertical"
@@ -114,7 +114,7 @@
     <el-dialog
       v-model="fillVisible"
       title="填写占位符"
-      width="min(640px, 85vw)"
+      width="min(820px, 92vw)"
       append-to-body
       :close-on-click-modal="false"
     >
@@ -128,6 +128,23 @@
           :placeholder="fillPlaceholder(def)"
           :data-fill-name="def.name"
         />
+      </div>
+      <div class="prompt-fill-preview" data-preview>
+        <div class="prompt-fill-preview-title">实际内容预览</div>
+        <div class="prompt-fill-preview-body">
+          <span
+            v-for="(segment, index) in previewSegments"
+            :key="index"
+            :class="{
+              'ph-filled': segment.kind === 'filled',
+              'ph-default': segment.kind === 'default',
+              'ph-unfilled': segment.kind === 'unfilled'
+            }"
+            :title="segment.kind === 'default'
+              ? '使用默认值'
+              : (segment.kind === 'unfilled' ? '未填写，保留占位符' : undefined)"
+          >{{ segment.text }}</span>
+        </div>
       </div>
       <template #footer>
         <el-button data-action="copy-original" @click="copyOriginal">复制原文</el-button>
@@ -143,7 +160,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Collection, Plus, CopyDocument, Edit, Delete } from '@element-plus/icons-vue'
 import { ListPrompts, AddPrompt, UpdatePrompt, DeletePrompt } from '../../wailsjs/go/main/App'
 import { ErrorCode, handleError } from '../utils/error'
-import { applyPlaceholders, extractPlaceholderDefs, extractPlaceholders } from '../utils/promptPlaceholders'
+import {
+  applyPlaceholders,
+  extractPlaceholderDefs,
+  extractPlaceholders,
+  segmentPlaceholders
+} from '../utils/promptPlaceholders'
 
 const prompts = ref([])
 const loading = ref(false)
@@ -169,6 +191,14 @@ const fillValues = ref({})
 const fillPlaceholder = (def) => (def.defaultValue
   ? `输入「${def.name}」的内容（可留空，默认 ${def.defaultValue}）`
   : `输入「${def.name}」的内容（可留空）`)
+
+// 预览与「替换并复制」共用 segmentPlaceholders 分段单点：填写值变化即时刷新，
+// 且与 applyPlaceholders 输出严格一致（后者即分段文本拼接）。
+const previewSegments = computed(() => {
+  const target = fillTarget.value
+  if (!target) return []
+  return segmentPlaceholders(target.content, fillValues.value)
+})
 
 const filteredPrompts = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -516,6 +546,14 @@ onMounted(load)
   margin-top: var(--spacing-md);
 }
 
+/* 正文编辑区拖拽下限：EP 非 autosize 模式会给 .el-textarea__inner 挂内联
+   min-height:31px，下限类规则须 !important 才能压过（frontend-visual-conventions §6）。
+   下限挂在 inner 而非 .el-textarea 根元素——根元素被撑高时字数统计（绝对定位在根元素
+   底部）会与 textarea 脱开，拖小后浮在空白区。 */
+.prompt-editor-content :deep(.el-textarea__inner) {
+  min-height: 360px !important;
+}
+
 .prompt-editor-hint {
   margin-top: var(--spacing-sm);
   font-size: 12px;
@@ -547,6 +585,73 @@ onMounted(load)
   font-weight: 600;
   color: var(--text-primary);
   word-break: break-word;
+}
+
+.prompt-fill-preview {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.prompt-fill-preview-title {
+  margin-bottom: var(--spacing-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 预览容器：保留换行与空格，超长内容内部滚动，避免撑高弹窗；overscroll-behavior
+   阻断滚到边界后链式滚动外层弹窗/页面 */
+.prompt-fill-preview-body {
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 32vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 三类高亮全部取自主题变量，浅色/深色自动适配；文字段无 class 保持原样 */
+.ph-filled {
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.ph-default {
+  padding: 0 2px;
+  border: 1px dashed var(--primary-color);
+  border-radius: var(--radius-sm);
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.ph-unfilled {
+  padding: 0 2px;
+  border: 1px dashed var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+/* 暗色主题提亮：--primary-color(#3b82f6) 叠在 --primary-bg(rgba(59,130,246,.15))
+   上对比度约 2.4:1，低于 3:1；改用既有 --primary-light(#60a5fa) 约 3.5:1。
+   注意不能用 :global(html.dark) .ph-filled —— Vue 3.5 的 :global 会整段替换选择器，
+   末尾 .ph-filled 被丢弃，规则退化为作用于 html.dark 自身；直接写 html.dark 前缀
+   由 scoped 编译为 html.dark .ph-filled[data-v-*] 才是目标形态。 */
+html.dark .ph-filled,
+html.dark .ph-default {
+  color: var(--primary-light);
+}
+
+html.dark .ph-default {
+  border-color: var(--primary-light);
 }
 
 @media (max-width: 900px) {

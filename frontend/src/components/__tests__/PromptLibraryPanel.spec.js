@@ -177,6 +177,60 @@ describe('PromptLibraryPanel', () => {
     expect(wrapper.find('.el-dialog').exists()).toBe(false)
   })
 
+  it('填写弹窗渲染实时预览，按填写值/默认值/未填写分类高亮', async () => {
+    const wrapper = await mountPanel([
+      {
+        id: 'p4',
+        title: '预览',
+        content: '称呼 {{客户名称}}，页数 {{页数:1}}，时间 {{时间}}',
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+
+    const preview = wrapper.find('[data-preview]')
+    expect(preview.exists()).toBe(true)
+    expect(preview.text()).toContain('实际内容预览')
+
+    const body = preview.find('.prompt-fill-preview-body')
+    expect(body.find('.ph-default').text()).toBe('1')
+    expect(body.find('.ph-default').attributes('title')).toBe('使用默认值')
+    expect(body.find('.ph-filled').exists()).toBe(false)
+
+    const unfilled = body.findAll('.ph-unfilled')
+    expect(unfilled).toHaveLength(2)
+    expect(unfilled[0].text()).toBe('{{客户名称}}')
+    expect(unfilled[0].attributes('title')).toBe('未填写，保留占位符')
+    expect(body.text()).toBe('称呼 {{客户名称}}，页数 1，时间 {{时间}}')
+
+    // 输入后预览随 fillValues 实时更新
+    await wrapper.find('[data-fill-name="客户名称"]').setValue('张三')
+    await flushPromises()
+
+    expect(body.find('.ph-filled').text()).toBe('张三')
+    expect(body.findAll('.ph-unfilled')).toHaveLength(1)
+    expect(body.text()).toBe('称呼 张三，页数 1，时间 {{时间}}')
+  })
+
+  it('复制原文不受预览影响，仍输出占位符原文', async () => {
+    const wrapper = await mountPanel([
+      { id: 'p4', title: '预览', content: '称呼 {{客户名称}}', createdAt: 1, updatedAt: 1 }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-preview]').exists()).toBe(true)
+    await wrapper.find('[data-fill-name="客户名称"]').setValue('张三')
+    await wrapper.find('[data-action="copy-original"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.writeText).toHaveBeenCalledWith('称呼 {{客户名称}}')
+  })
+
   it('占位符有默认值时填写框提示默认值，无默认值沿用原文案', async () => {
     const wrapper = await mountPanel([
       {
