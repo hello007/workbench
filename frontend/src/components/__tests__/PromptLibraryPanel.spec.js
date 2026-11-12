@@ -177,6 +177,68 @@ describe('PromptLibraryPanel', () => {
     expect(wrapper.find('.el-dialog').exists()).toBe(false)
   })
 
+  it('占位符有默认值时填写框提示默认值，无默认值沿用原文案', async () => {
+    const wrapper = await mountPanel([
+      {
+        id: 'p3',
+        title: '默认值',
+        content: '页数 {{页数:1}}，称呼 {{客户名称}}',
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+
+    const rows = wrapper.findAll('.prompt-fill-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].find('textarea').attributes('placeholder'))
+      .toBe('输入「页数」的内容（可留空，默认 1）')
+    expect(rows[1].find('textarea').attributes('placeholder'))
+      .toBe('输入「客户名称」的内容（可留空）')
+  })
+
+  it('占位符未填时用默认值替换', async () => {
+    const wrapper = await mountPanel([
+      { id: 'p3', title: '默认值', content: '页数 {{页数:1}}', createdAt: 1, updatedAt: 1 }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-action="copy-filled"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.writeText).toHaveBeenCalledWith('页数 1')
+  })
+
+  it('占位符填写值覆盖默认值', async () => {
+    const wrapper = await mountPanel([
+      { id: 'p3', title: '默认值', content: '页数 {{页数:1}}', createdAt: 1, updatedAt: 1 }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.prompt-fill-row textarea')[0].setValue('3')
+    await wrapper.find('[data-action="copy-filled"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.writeText).toHaveBeenCalledWith('页数 3')
+  })
+
+  it('复制原文保留含默认值的占位符写法', async () => {
+    const wrapper = await mountPanel([
+      { id: 'p3', title: '默认值', content: '页数 {{页数:1}}', createdAt: 1, updatedAt: 1 }
+    ])
+
+    await wrapper.find('[data-action="copy"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-action="copy-original"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.writeText).toHaveBeenCalledWith('页数 {{页数:1}}')
+  })
+
   it('复制原文跳过替换', async () => {
     const wrapper = await mountPanel([
       { id: 'p3', title: '多占位符', content: '前缀 {{甲}}', createdAt: 1, updatedAt: 1 }

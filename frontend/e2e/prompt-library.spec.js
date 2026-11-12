@@ -194,3 +194,92 @@ test.describe('提示词面板：新建、占位符复制与删除', () => {
     ])
   })
 })
+
+/**
+ * 默认值语法 `{{名称:默认值}}` 的独立用例。
+ *
+ * 与上一条用例相互独立（各自 describe + 自己的 ListPrompts 状态机），不改动既有
+ * 用例的断言口径。链路：新建含 {{页数:1}} 的提示词 → 不填直接「替换并复制」得到
+ * 默认值 → 填写覆盖默认值 → 「复制原文」保留语法原文。
+ */
+const DEFAULT_PROMPT_ID = 'fedcba9876543210'
+const DEFAULT_PROMPT_TITLE = '摘要页数'
+const DEFAULT_PROMPT_CONTENT = '生成 {{页数:1}} 页的摘要'
+
+const DEFAULT_PROMPT = {
+  id: DEFAULT_PROMPT_ID,
+  title: DEFAULT_PROMPT_TITLE,
+  content: DEFAULT_PROMPT_CONTENT,
+  createdAt: 1735689600001,
+  updatedAt: 1735689600001
+}
+
+const DEFAULT_OVERRIDES = {
+  ListPrompts: {
+    __rules__: [{ after: 'AddPrompt', value: [DEFAULT_PROMPT] }],
+    __default__: []
+  }
+}
+
+test.describe('提示词面板：占位符默认值', () => {
+  test.use({
+    wailsOverrides: DEFAULT_OVERRIDES,
+    permissions: ['clipboard-read', 'clipboard-write']
+  })
+
+  test('未填使用默认值，填写覆盖默认值，复制原文保留语法', async ({ page }) => {
+    await openPromptPanel(page)
+
+    // ---- 1. 新建含 {{页数:1}} 的提示词 ----
+    await page.locator('.prompt-panel [data-action="create"]').click()
+    const createDialog = page.locator('.el-dialog').filter({ hasText: '新建提示词' })
+    await expect(createDialog).toBeVisible()
+
+    await createDialog.locator('[data-field="title"]').fill(DEFAULT_PROMPT_TITLE)
+    await createDialog.locator('[data-field="content"]').fill(DEFAULT_PROMPT_CONTENT)
+    await createDialog.locator('[data-action="save"]').click()
+    await expect(createDialog).toBeHidden()
+
+    const item = page.locator(`[data-prompt-id="${DEFAULT_PROMPT_ID}"]`)
+    await expect(item).toBeVisible()
+    await expect(item.locator('.prompt-badge')).toHaveText('1 个占位符')
+
+    // ---- 2. 不填写直接「替换并复制」：默认值生效 ----
+    const fillDialog = page.locator('.el-dialog').filter({ hasText: '填写占位符' })
+    const fillInput = fillDialog.locator('[data-fill-name="页数"]')
+
+    await item.locator('[data-action="copy"]').click()
+    await page.mouse.move(0, 0)
+    await expect(fillDialog).toBeVisible()
+    // 填写框只提示默认值，不预填（留空才走默认值）
+    await expect(fillInput).toHaveAttribute('placeholder', '输入「页数」的内容（可留空，默认 1）')
+    await expect(fillInput).toHaveValue('')
+
+    await primeClipboard(page)
+    await fillDialog.locator('[data-action="copy-filled"]').click()
+    await expect(fillDialog).toBeHidden()
+    expect(await readClipboard(page)).toBe('生成 1 页的摘要')
+
+    // ---- 3. 填写值覆盖默认值 ----
+    await item.locator('[data-action="copy"]').click()
+    await page.mouse.move(0, 0)
+    await expect(fillDialog).toBeVisible()
+
+    await fillInput.fill('3')
+    await primeClipboard(page)
+    await fillDialog.locator('[data-action="copy-filled"]').click()
+    await expect(fillDialog).toBeHidden()
+    expect(await readClipboard(page)).toBe('生成 3 页的摘要')
+
+    // ---- 4. 已填写却点「复制原文」：输出保留 {{页数:1}} 原文，不替换 ----
+    await item.locator('[data-action="copy"]').click()
+    await page.mouse.move(0, 0)
+    await expect(fillDialog).toBeVisible()
+
+    await fillInput.fill('3')
+    await primeClipboard(page)
+    await fillDialog.locator('[data-action="copy-original"]').click()
+    await expect(fillDialog).toBeHidden()
+    expect(await readClipboard(page)).toBe(DEFAULT_PROMPT_CONTENT)
+  })
+})

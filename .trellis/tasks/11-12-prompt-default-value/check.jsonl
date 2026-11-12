@@ -1,0 +1,3 @@
+{"file": "docs/spec/prompt-library.md", "reason": "检查提示词面板语法与交互是否同步"}
+{"file": "docs/spec/ai-structured-output.md", "reason": "检查 Go 模板渲染与必填校验改动"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增测试无隐式时序依赖"}

@@ -127,6 +127,17 @@ func mergeMissingSeedSkills(funcs []*model.AiFunction) ([]*model.AiFunction, boo
 - 斜杠命令 skill（Command 非空）与纯 prompt skill（如 AI 提交信息生成/代码审查）两类并存。
 - 纯 prompt skill 经 `BuildStagePrompt` form 模板 `{{key}}` 占位注入 diff/历史等参数。
 
+## 模板占位符默认值（`{{名称:默认值}}`）
+
+`renderPrompt` 解析式替换（正则 `\{\{([^{}\r\n]+)\}\}` + `ReplaceAllStringFunc`），与前端提示词面板同一套语法与未填语义（详见 [prompt-library.md](prompt-library.md) §2）：
+
+- 名称与默认值以**首个半角冒号**分隔，两者去首尾空白；名称 ≤30 码点、默认值 ≤200 码点，超限整段按普通文本处理；
+- 三级回退：参数值（`TrimSpace` 后非空，输出保留原内容）→ 该名称首个非空默认值 → 保留整段原样；
+- `parsePromptPlaceholders` / `promptDefaultsByName` 为解析单点（同名首次为准）；
+- **form Required 校验放行**：参数为空但模板中该 key 有非空默认值时视为已满足（`promptDefaultsByName` 命中）；
+- **file / text 单字段模式不扩展默认值语义**：参数值仍必填，模板默认值不替代必填校验（回归测试 `TestBuildStagePrompt_FileRequiredIgnoresDefault`）；
+- `BuildFollowUpPrompt` 二级「无残留 `{{`」判定沿用——默认值替换后产物无 `{{` 可正常采用。
+
 ## 约束
 
 - `OutputSchema` 可选（nil 不加 `--json-schema` flag），兼容现有非结构化 skill 零回归

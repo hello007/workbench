@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"workbench/model"
 	"workbench/util"
@@ -952,13 +954,94 @@ func expandEnvRef(v string) string {
 	return v
 }
 
-// renderPrompt 将模板中的 {{key}} 替换为参数值（form 类型参数用）
-func renderPrompt(template string, params map[string]string) string {
-	out := template
-	for k, v := range params {
-		out = strings.ReplaceAll(out, "{{"+k+"}}", v)
+// 提示词占位符约束（与前端 frontend/src/utils/promptPlaceholders.js 同口径）
+const (
+	promptPlaceholderNameMaxRunes    = 30
+	promptPlaceholderDefaultMaxRunes = 200
+)
+
+// promptPlaceholderPattern 匹配单行占位符；花括号与换行在捕获组内被排除，
+// 因此模板里贴 JSON / 代码块时不会跨段误判。
+var promptPlaceholderPattern = regexp.MustCompile(`\{\{([^{}\r\n]+)\}\}`)
+
+// promptPlaceholderDef 占位符定义：名称 + 默认值（无冒号或默认值为空白时 Default 为空）。
+type promptPlaceholderDef struct {
+	Name    string
+	Default string
+}
+
+// parsePromptPlaceholder 解析 {{ 与 }} 之间的原文。
+// 名称与默认值以首个半角冒号分隔（故 {{时间:10:30}} 的默认值是 10:30），两者均去
+// 首尾空白；名称为空或超长、默认值超长时返回 false，调用方须把整段按普通文本处理。
+func parsePromptPlaceholder(raw string) (promptPlaceholderDef, bool) {
+	namePart, defaultPart := raw, ""
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		namePart, defaultPart = raw[:idx], raw[idx+1:]
 	}
-	return out
+	name := strings.TrimSpace(namePart)
+	if name == "" || utf8.RuneCountInString(name) > promptPlaceholderNameMaxRunes {
+		return promptPlaceholderDef{}, false
+	}
+	def := strings.TrimSpace(defaultPart)
+	if utf8.RuneCountInString(def) > promptPlaceholderDefaultMaxRunes {
+		return promptPlaceholderDef{}, false
+	}
+	return promptPlaceholderDef{Name: name, Default: def}, true
+}
+
+// parsePromptPlaceholders 按模板出现顺序返回去重后的占位符定义；同名只保留首次出现
+// 的默认值定义（与前端 extractPlaceholderDefs 一致）。
+func parsePromptPlaceholders(template string) []promptPlaceholderDef {
+	defs := make([]promptPlaceholderDef, 0, 4)
+	seen := make(map[string]bool, 4)
+	for _, m := range promptPlaceholderPattern.FindAllStringSubmatch(template, -1) {
+		def, ok := parsePromptPlaceholder(m[1])
+		if !ok || seen[def.Name] {
+			continue
+		}
+		seen[def.Name] = true
+		defs = append(defs, def)
+	}
+	return defs
+}
+
+// promptDefaultsByName 返回模板中各占位符的非空默认值（首次定义为准），
+// 供 form 必填校验判断「参数为空但有默认值可放行」。
+func promptDefaultsByName(template string) map[string]string {
+	defaults := make(map[string]string, 4)
+	for _, def := range parsePromptPlaceholders(template) {
+		if def.Default != "" {
+			defaults[def.Name] = def.Default
+		}
+	}
+	return defaults
+}
+
+// renderPrompt 将模板中的 {{名称}} / {{名称:默认值}} 替换为参数值（form 类型参数用）。
+//
+// 三级回退（与前端 applyPlaceholders 一致）：
+//  1. 参数值去首尾空白后非空 —— 直接替换（输出保留参数原内容，不裁剪）；
+//  2. 该名称存在非空默认值 —— 替换为默认值（同名多处均取首次定义）；
+//  3. 保留整段原样（含 {{名称}} 与 {{名称:默认值}} 的原始写法）。
+func renderPrompt(template string, params map[string]string) string {
+	if template == "" {
+		return ""
+	}
+	defaults := promptDefaultsByName(template)
+	return promptPlaceholderPattern.ReplaceAllStringFunc(template, func(whole string) string {
+		// whole 恒形如 {{...}}，去掉两侧花括号即为待解析原文
+		def, ok := parsePromptPlaceholder(whole[2 : len(whole)-2])
+		if !ok {
+			return whole
+		}
+		if v, exists := params[def.Name]; exists && strings.TrimSpace(v) != "" {
+			return v
+		}
+		if d := defaults[def.Name]; d != "" {
+			return d
+		}
+		return whole
+	})
 }
 
 // joinParamLines 将多行参数值整理为单行追加串：按换行拆分、去空白、滤空；
@@ -1028,8 +1111,11 @@ func BuildStagePrompt(command string, spec *model.AiParamSpec, params map[string
 		if spec.PromptTemplate == "" {
 			return "", fmt.Errorf("form 类型参数缺少 PromptTemplate")
 		}
+		// 模板中该 key 写了非空默认值时，参数留空可由默认值兜底，不必报必填错误；
+		// file/text 单字段模式不走此分支，仍要求参数值非空（默认值不替代必填）。
+		defaults := promptDefaultsByName(spec.PromptTemplate)
 		for _, f := range spec.Fields {
-			if f.Required && strings.TrimSpace(params[f.Key]) == "" {
+			if f.Required && strings.TrimSpace(params[f.Key]) == "" && defaults[f.Key] == "" {
 				return "", fmt.Errorf("表单字段「%s」不能为空", f.Label)
 			}
 		}

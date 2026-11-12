@@ -1,0 +1,3 @@
+{"file": "docs/spec/prompt-library.md", "reason": "占位符语法与复制交互契约，需同步默认值语义"}
+{"file": "docs/spec/ai-structured-output.md", "reason": "Go 侧 AI 功能模板与 renderPrompt/BuildStagePrompt 契约"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 扩展约定：fixtures、语义锚、禁 waitForTimeout"}

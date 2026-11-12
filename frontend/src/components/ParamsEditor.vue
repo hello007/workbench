@@ -79,6 +79,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { extractPlaceholders } from '../utils/promptPlaceholders'
 
 // v-model 绑 AiParamSpec 对象（params 或 followUp.input）；父传入 reactive 对象，
 // 子组件直接改其属性触发响应式，整体替换（如 type 切换、null→新建）经 model.value = 走 emit
@@ -123,12 +124,13 @@ const removeField = (i) => {
 }
 
 // form 模式 promptTemplate 的 {{key}} 与 fields.key 一致性校验（告警不阻断）：
-// 模板出现的占位符无对应 field 定义、field 的 key 未在模板出现，均提示用户核对
+// 模板出现的占位符无对应 field 定义、field 的 key 未在模板出现，均提示用户核对。
+// 解析复用 utils/promptPlaceholders 单点，保证 {{名称:默认值}} 与中文名同样按占位符识别。
 const placeholderWarnings = computed(() => {
   if (!model.value || model.value.type !== 'form') return []
   const template = model.value.promptTemplate || ''
   const fields = model.value.fields || []
-  const usedKeys = new Set([...template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]))
+  const usedKeys = new Set(extractPlaceholders(template))
   const definedKeys = new Set(fields.map((f) => f.key).filter(Boolean))
   const warns = []
   for (const k of usedKeys) {

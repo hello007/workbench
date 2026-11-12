@@ -100,17 +100,17 @@
         show-word-limit
         resize="vertical"
         class="prompt-editor-content"
-        placeholder="正文。可用双花括号占位符标记复制时需要填写的内容"
+        placeholder="正文。可用双花括号占位符标记复制时需要填写的内容，支持「名称:默认值」写法"
         data-field="content"
       />
-      <div class="prompt-editor-hint" v-pre>占位符写法：{{名称}}。复制时弹窗填写，留空则保留原样。</div>
+      <div class="prompt-editor-hint" v-pre>占位符写法：{{名称}} 或 {{名称:默认值}}。复制时弹窗填写，留空使用默认值（无默认值则保留原样）。</div>
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" data-action="save" @click="savePrompt">保存</el-button>
       </template>
     </el-dialog>
 
-    <!-- 占位符填写弹窗：留空的项保留原样；「复制原文」跳过替换 -->
+    <!-- 占位符填写弹窗：留空的项使用默认值，无默认值保留原样；「复制原文」跳过替换 -->
     <el-dialog
       v-model="fillVisible"
       title="填写占位符"
@@ -118,15 +118,15 @@
       append-to-body
       :close-on-click-modal="false"
     >
-      <div class="prompt-fill-tip" v-pre>留空的项会保留 {{名称}} 原样，可复制后手动补填。</div>
-      <div v-for="name in fillNames" :key="name" class="prompt-fill-row">
-        <label class="prompt-fill-label">{{ name }}</label>
+      <div class="prompt-fill-tip" v-pre>留空的项按默认值填入（无默认值保留 {{名称}} 原样），可复制后手动补填。</div>
+      <div v-for="def in fillDefs" :key="def.name" class="prompt-fill-row">
+        <label class="prompt-fill-label">{{ def.name }}</label>
         <el-input
-          v-model="fillValues[name]"
+          v-model="fillValues[def.name]"
           type="textarea"
           :autosize="{ minRows: 1, maxRows: 6 }"
-          :placeholder="`输入「${name}」的内容（可留空）`"
-          :data-fill-name="name"
+          :placeholder="fillPlaceholder(def)"
+          :data-fill-name="def.name"
         />
       </div>
       <template #footer>
@@ -143,7 +143,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Collection, Plus, CopyDocument, Edit, Delete } from '@element-plus/icons-vue'
 import { ListPrompts, AddPrompt, UpdatePrompt, DeletePrompt } from '../../wailsjs/go/main/App'
 import { ErrorCode, handleError } from '../utils/error'
-import { applyPlaceholders, extractPlaceholders } from '../utils/promptPlaceholders'
+import { applyPlaceholders, extractPlaceholderDefs, extractPlaceholders } from '../utils/promptPlaceholders'
 
 const prompts = ref([])
 const loading = ref(false)
@@ -161,8 +161,14 @@ const editorTitle = computed(() => (editingId.value ? '编辑提示词' : '新�
 // 占位符填写弹窗
 const fillVisible = ref(false)
 const fillTarget = ref(null)
-const fillNames = ref([])
+// 按名称去重的占位符定义（含默认值），填写弹窗逐项渲染
+const fillDefs = ref([])
 const fillValues = ref({})
+
+/** 填写框提示：有默认值时提示可留空并展示默认值，无默认值沿用原文案。 */
+const fillPlaceholder = (def) => (def.defaultValue
+  ? `输入「${def.name}」的内容（可留空，默认 ${def.defaultValue}）`
+  : `输入「${def.name}」的内容（可留空）`)
 
 const filteredPrompts = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -297,15 +303,15 @@ const writeClipboard = async (text) => {
 }
 
 const copyPrompt = async (prompt) => {
-  const names = extractPlaceholders(prompt.content)
-  if (!names.length) {
+  const defs = extractPlaceholderDefs(prompt.content)
+  if (!defs.length) {
     await writeClipboard(prompt.content)
     return
   }
 
   fillTarget.value = prompt
-  fillNames.value = names
-  fillValues.value = Object.fromEntries(names.map(name => [name, '']))
+  fillDefs.value = defs
+  fillValues.value = Object.fromEntries(defs.map(def => [def.name, '']))
   fillVisible.value = true
 }
 

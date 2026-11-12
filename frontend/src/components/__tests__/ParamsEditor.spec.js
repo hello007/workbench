@@ -153,6 +153,18 @@ describe('ParamsEditor.vue', () => {
     expect(wrapper.vm.placeholderWarnings.length).toBe(0)
   })
 
+  it('placeholderWarnings：模板含默认值语法 {{页数:1}} 时按名称匹配不误报', () => {
+    const model = reactive({ type: 'form', promptTemplate: '页数{{页数:1}}', fields: [{ key: '页数' }] })
+    wrapper = createWrapper(model)
+    expect(wrapper.vm.placeholderWarnings).toEqual([])
+  })
+
+  it('placeholderWarnings：模板含中文名占位符时按名称匹配不误报', () => {
+    const model = reactive({ type: 'form', promptTemplate: '客户{{客户名称}}', fields: [{ key: '客户名称' }] })
+    wrapper = createWrapper(model)
+    expect(wrapper.vm.placeholderWarnings).toEqual([])
+  })
+
   it('placeholderWarnings：非 form 类型无告警', () => {
     const model = reactive({ type: 'text', promptTemplate: '{{x}}' })
     wrapper = createWrapper(model)

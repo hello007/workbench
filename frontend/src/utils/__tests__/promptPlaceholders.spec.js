@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  PLACEHOLDER_DEFAULT_MAX_LENGTH,
   PLACEHOLDER_NAME_MAX_LENGTH,
   applyPlaceholders,
-  extractPlaceholders
+  extractPlaceholderDefs,
+  extractPlaceholders,
+  parsePlaceholder
 } from '../promptPlaceholders'
 
 describe('extractPlaceholders', () => {
@@ -36,6 +39,56 @@ describe('extractPlaceholders', () => {
   })
 })
 
+describe('parsePlaceholder', () => {
+  it('无冒号时默认值为空', () => {
+    expect(parsePlaceholder('名称')).toEqual({ name: '名称', defaultValue: '' })
+  })
+
+  it('以首个半角冒号分隔，默认值可含冒号', () => {
+    expect(parsePlaceholder('时间:10:30')).toEqual({ name: '时间', defaultValue: '10:30' })
+  })
+
+  it('名称与默认值都去首尾空白', () => {
+    expect(parsePlaceholder(' 页数 : 1 ')).toEqual({ name: '页数', defaultValue: '1' })
+    expect(parsePlaceholder('页数:  ')).toEqual({ name: '页数', defaultValue: '' })
+  })
+
+  it('名称为空、名称超长、默认值超长返回 null', () => {
+    expect(parsePlaceholder(':1')).toBeNull()
+    expect(parsePlaceholder('   ')).toBeNull()
+    expect(parsePlaceholder('名'.repeat(PLACEHOLDER_NAME_MAX_LENGTH + 1) + ':1')).toBeNull()
+    expect(parsePlaceholder('页数:' + '值'.repeat(PLACEHOLDER_DEFAULT_MAX_LENGTH + 1))).toBeNull()
+  })
+
+  it('恰好达到长度上限仍有效', () => {
+    const name = '名'.repeat(PLACEHOLDER_NAME_MAX_LENGTH)
+    const defaultValue = '值'.repeat(PLACEHOLDER_DEFAULT_MAX_LENGTH)
+    expect(parsePlaceholder(`${name}:${defaultValue}`)).toEqual({ name, defaultValue })
+  })
+})
+
+describe('extractPlaceholderDefs', () => {
+  it('按首次出现顺序去重并带默认值', () => {
+    expect(extractPlaceholderDefs('{{甲:1}} {{乙}} {{甲:9}}'))
+      .toEqual([
+        { name: '甲', defaultValue: '1' },
+        { name: '乙', defaultValue: '' }
+      ])
+  })
+
+  it('非法默认值整段按普通文本（不出现在定义里）', () => {
+    const tooLong = '值'.repeat(PLACEHOLDER_DEFAULT_MAX_LENGTH + 1)
+    expect(extractPlaceholderDefs(`{{页数:${tooLong}} {{名称}}`)).toEqual([
+      { name: '名称', defaultValue: '' }
+    ])
+  })
+
+  it('非字符串输入返回空数组', () => {
+    expect(extractPlaceholderDefs(null)).toEqual([])
+    expect(extractPlaceholderDefs('')).toEqual([])
+  })
+})
+
 describe('applyPlaceholders', () => {
   it('同名占位符全部替换', () => {
     expect(applyPlaceholders('{{名}} 和 {{名}}', { 名: 'X' })).toBe('X 和 X')
@@ -45,6 +98,59 @@ describe('applyPlaceholders', () => {
     expect(applyPlaceholders('{{甲}} {{乙}}', { 甲: 'A' })).toBe('A {{乙}}')
     expect(applyPlaceholders('{{甲}}', { 甲: '' })).toBe('{{甲}}')
     expect(applyPlaceholders('{{甲}}', { 甲: null })).toBe('{{甲}}')
+  })
+
+  // 默认值语义用例组：与 Go service/ai_function_test.go 的 TestRenderPrompt_DefaultValue
+  // 保持同一组「名称 / 默认值 / 期望输出」，防跨语言实现漂移。
+  it('未填时用默认值替换', () => {
+    expect(applyPlaceholders('页数{{页数:1}}', {})).toBe('页数1')
+  })
+
+  it('填写值覆盖默认值', () => {
+    expect(applyPlaceholders('页数{{页数:1}}', { 页数: '3' })).toBe('页数3')
+  })
+
+  it('空默认值（{{页数:}}）未填时保留整段原样', () => {
+    expect(applyPlaceholders('{{页数:}}', {})).toBe('{{页数:}}')
+  })
+
+  it('默认值可含冒号', () => {
+    expect(applyPlaceholders('{{时间:10:30}}', {})).toBe('10:30')
+  })
+
+  it('同名多处不同默认值以首次出现为准', () => {
+    expect(applyPlaceholders('{{页数:1}} … {{页数:5}}', {})).toBe('1 … 1')
+  })
+
+  it('默认值去首尾空白', () => {
+    expect(applyPlaceholders('{{页数: 1 }}', {})).toBe('1')
+  })
+
+  it('首次定义为空默认值时，后续同名默认值不生效（两处均保留原文）', () => {
+    expect(applyPlaceholders('{{页数:}} … {{页数:5}}', {})).toBe('{{页数:}} … {{页数:5}}')
+    expect(extractPlaceholderDefs('{{页数:}} … {{页数:5}}'))
+      .toEqual([{ name: '页数', defaultValue: '' }])
+  })
+
+  it('默认值跨行不识别为占位符，按普通文本保留', () => {
+    expect(applyPlaceholders('{{页数:1\n2}}', {})).toBe('{{页数:1\n2}}')
+    expect(extractPlaceholderDefs('{{页数:1\n2}}')).toEqual([])
+    expect(extractPlaceholders('{{页数:1\n2}}')).toEqual([])
+  })
+
+  it('超长名称或默认值不识别为占位符', () => {
+    const tooLongName = '名'.repeat(PLACEHOLDER_NAME_MAX_LENGTH + 1)
+    const tooLongDefault = '值'.repeat(PLACEHOLDER_DEFAULT_MAX_LENGTH + 1)
+    expect(applyPlaceholders(`{{${tooLongName}:1}}`, {})).toBe(`{{${tooLongName}:1}}`)
+    expect(applyPlaceholders(`{{页数:${tooLongDefault}}}`, {})).toBe(`{{页数:${tooLongDefault}}}`)
+  })
+
+  it('纯空白填写视为未填，走默认值', () => {
+    expect(applyPlaceholders('{{页数:1}}', { 页数: '   ' })).toBe('1')
+  })
+
+  it('填写值保留用户原内容（仅判空时 trim）', () => {
+    expect(applyPlaceholders('{{名称:默认}}', { 名称: ' 张三 ' })).toBe(' 张三 ')
   })
 
   it('不带花括号差异地匹配原文（含空格的写法按归一名字取值）', () => {

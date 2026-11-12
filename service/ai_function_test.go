@@ -119,6 +119,61 @@ func TestRenderPrompt_MissingParamKept(t *testing.T) {
 	}
 }
 
+// TestRenderPrompt_DefaultValue 默认值语义用例组：与前端
+// frontend/src/utils/__tests__/promptPlaceholders.spec.js 的默认值用例保持同一组
+// 「名称 / 默认值 / 期望输出」，防两侧实现漂移。
+func TestRenderPrompt_DefaultValue(t *testing.T) {
+	tooLongName := strings.Repeat("名", promptPlaceholderNameMaxRunes+1)
+	tooLongDefault := strings.Repeat("值", promptPlaceholderDefaultMaxRunes+1)
+
+	cases := []struct {
+		name   string
+		tmpl   string
+		params map[string]string
+		want   string
+	}{
+		{name: "未填用默认值", tmpl: "页数{{页数:1}}", want: "页数1"},
+		{name: "填写值覆盖默认值", tmpl: "页数{{页数:1}}", params: map[string]string{"页数": "3"}, want: "页数3"},
+		{name: "无默认值保留原样", tmpl: "{{名称}}", want: "{{名称}}"},
+		{name: "空默认值保留整段", tmpl: "{{页数:}}", want: "{{页数:}}"},
+		{name: "默认值可含冒号", tmpl: "{{时间:10:30}}", want: "10:30"},
+		{name: "同名多处取首次默认值", tmpl: "{{页数:1}} … {{页数:5}}", want: "1 … 1"},
+		// 与前端 promptPlaceholders.spec.js 同语义：首次定义默认值为空时，
+		// 后续同名默认值不生效（两处均保留原文）。
+		{name: "首次定义为空默认则后续同名默认不生效", tmpl: "{{页数:}} … {{页数:5}}", want: "{{页数:}} … {{页数:5}}"},
+		{name: "默认值跨行不识别为占位符", tmpl: "{{页数:1\n2}}", want: "{{页数:1\n2}}"},
+		{name: "默认值去首尾空白", tmpl: "{{页数: 1 }}", want: "1"},
+		{name: "名称去首尾空白后匹配参数", tmpl: "{{ 页数 :2}}", params: map[string]string{"页数": "4"}, want: "4"},
+		{name: "超长名称按普通文本", tmpl: "{{" + tooLongName + ":1}}", want: "{{" + tooLongName + ":1}}"},
+		{name: "超长默认值按普通文本", tmpl: "{{页数:" + tooLongDefault + "}}", want: "{{页数:" + tooLongDefault + "}}"},
+		{name: "纯空白填写视为未填", tmpl: "{{页数:1}}", params: map[string]string{"页数": "   "}, want: "1"},
+		{name: "填写值保留原内容不裁剪", tmpl: "{{名称:默认}}", params: map[string]string{"名称": " 张三 "}, want: " 张三 "},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := renderPrompt(c.tmpl, c.params); got != c.want {
+				t.Errorf("renderPrompt(%q, %v) = %q, 期望 %q", c.tmpl, c.params, got, c.want)
+			}
+		})
+	}
+}
+
+func TestParsePromptPlaceholder_Invalid(t *testing.T) {
+	// 花括号/换行的片段不会被正则捕获，故这里只覆盖名称空与长度越界
+	if _, ok := parsePromptPlaceholder(":1"); ok {
+		t.Errorf("空名称不应识别为占位符")
+	}
+	if _, ok := parsePromptPlaceholder(strings.Repeat("名", promptPlaceholderNameMaxRunes+1)); ok {
+		t.Errorf("超长名称不应识别为占位符")
+	}
+	if def, ok := parsePromptPlaceholder(strings.Repeat("名", promptPlaceholderNameMaxRunes)); !ok || def.Name == "" {
+		t.Errorf("恰好达到上限的名称应被识别")
+	}
+	if def, ok := parsePromptPlaceholder("页数"); !ok || def.Default != "" {
+		t.Errorf("无冒号时应返回空默认值: %+v ok=%v", def, ok)
+	}
+}
+
 // === parseStreamLine 测试 ===
 
 func TestParseStreamLine_AssistantText(t *testing.T) {
@@ -598,6 +653,66 @@ func TestBuildStagePrompt_FormRequired(t *testing.T) {
 	_, err = BuildStagePrompt("", spec, map[string]string{"duration": "30"})
 	if err == nil {
 		t.Errorf("缺 Required 字段应报错")
+	}
+}
+
+// TestBuildStagePrompt_FormRequiredWithDefault 模板中 Required 字段写了非空默认值时
+// 参数留空可放行（以默认值渲染）；空默认值仍报必填错误。
+func TestBuildStagePrompt_FormRequiredWithDefault(t *testing.T) {
+	spec := &model.AiParamSpec{
+		Type:           "form",
+		PromptTemplate: "主题{{topic}} 页数{{页数:1}}",
+		Fields: []model.AiFormField{
+			{Key: "topic", Label: "主题", Required: true},
+			{Key: "页数", Label: "页数", Required: true},
+		},
+	}
+
+	p, err := BuildStagePrompt("", spec, map[string]string{"topic": "评审"})
+	if err != nil {
+		t.Fatalf("有默认值的 Required 字段应放行: %v", err)
+	}
+	if p != "主题评审 页数1" {
+		t.Errorf("默认值渲染不符: %q", p)
+	}
+
+	// 填写值覆盖默认值
+	p, err = BuildStagePrompt("", spec, map[string]string{"topic": "评审", "页数": "3"})
+	if err != nil || p != "主题评审 页数3" {
+		t.Errorf("填写值应覆盖默认值: p=%q err=%v", p, err)
+	}
+
+	// 无默认值的 Required 字段仍报错
+	if _, err = BuildStagePrompt("", spec, map[string]string{"页数": "3"}); err == nil {
+		t.Errorf("缺 Required 字段（无默认值）应报错")
+	}
+
+	// 空默认值不视为已满足
+	emptyDefault := &model.AiParamSpec{
+		Type:           "form",
+		PromptTemplate: "{{页数:}}",
+		Fields:         []model.AiFormField{{Key: "页数", Label: "页数", Required: true}},
+	}
+	if _, err = BuildStagePrompt("", emptyDefault, nil); err == nil {
+		t.Errorf("空默认值不应放行 Required 校验")
+	}
+}
+
+// TestBuildStagePrompt_FileRequiredIgnoresDefault file/text 模式维持现状：参数值仍为
+// 必填，模板默认值不替代该必填校验。
+func TestBuildStagePrompt_FileRequiredIgnoresDefault(t *testing.T) {
+	spec := &model.AiParamSpec{
+		Type:           "file",
+		Label:          "源文档",
+		TextFieldKey:   "file",
+		PromptTemplate: "{{file:默认文件}}",
+	}
+	if _, err := BuildStagePrompt("", spec, map[string]string{"file": " "}); err == nil {
+		t.Errorf("file 参数为空应报错（默认值不替代必填）")
+	}
+	p, err := BuildStagePrompt("", spec, map[string]string{"file": "a.md"})
+	if err != nil || p != "a.md" {
+		t.Errorf("file 参数按模板渲染: p=%q err=%v", p, err)
 	}
 }
 

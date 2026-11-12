@@ -276,6 +276,39 @@ describe('AiFunctionRunner.vue', () => {
     expect(ElMessage.warning).toHaveBeenCalledWith('请填写「名称」')
   })
 
+  it('form 参数：必填字段留空但模板含非空默认值时放行（后端渲染默认值）', async () => {
+    const { ElMessage } = await import('element-plus')
+    wrapper = createWrapper(baseFn({
+      params: {
+        type: 'form',
+        promptTemplate: '主题{{topic}} 页数{{页数:1}}',
+        fields: [
+          { key: 'topic', label: '主题', type: 'text', required: true },
+          { key: '页数', label: '页数', type: 'text', required: true }
+        ]
+      }
+    }))
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('评审')
+    await wrapper.findAll('button').find(b => b.text() === '运行').trigger('click')
+    expect(ElMessage.warning).not.toHaveBeenCalled()
+    expect(wrapper.emitted('run')[0]).toEqual([{ topic: '评审', 页数: '' }])
+  })
+
+  it('form 参数：必填字段的模板默认值为空时仍拦截', async () => {
+    const { ElMessage } = await import('element-plus')
+    wrapper = createWrapper(baseFn({
+      params: {
+        type: 'form',
+        promptTemplate: '{{页数:}}',
+        fields: [{ key: '页数', label: '页数', type: 'text', required: true }]
+      }
+    }))
+    await wrapper.findAll('button').find(b => b.text() === '运行').trigger('click')
+    expect(ElMessage.warning).toHaveBeenCalledWith('请填写「页数」')
+    expect(wrapper.emitted('run')).toBeFalsy()
+  })
+
   it('form 参数：运行 emit 全字段字符串化', async () => {
     wrapper = createWrapper(baseFn({
       params: {

@@ -137,6 +137,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as Icons from '@element-plus/icons-vue'
 import { GetFileTree } from '../../wailsjs/go/main/App'
+import { extractPlaceholderDefs } from '../utils/promptPlaceholders'
 
 const props = defineProps({
   // AiFunction 配置对象（GetAiFunctions 返回项）
@@ -232,8 +233,14 @@ const handleRun = () => {
     return
   }
   if (type === 'form') {
+    // 模板里该字段写了非空默认值时，留空由后端渲染默认值兜底，前端放行
+    // （与 service.BuildStagePrompt 的 Required 校验同一口径；空默认值不算）
+    const templateDefaults = new Map(
+      extractPlaceholderDefs(spec.promptTemplate || '').map((def) => [def.name, def.defaultValue])
+    )
     for (const f of spec.fields || []) {
-      if (f.required && String(formValues.value[f.key] || '').trim() === '') {
+      const empty = String(formValues.value[f.key] ?? '').trim() === ''
+      if (f.required && empty && !templateDefaults.get(f.key)) {
         ElMessage.warning(`请填写「${f.label}」`)
         return
       }
