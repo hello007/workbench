@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 用例是否符合仓内约定"}
+{"file": "docs/spec/test-stability.md", "reason": "检查是否存在隐式时序依赖或固定等待"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "检查确认弹窗选择器是否安全"}

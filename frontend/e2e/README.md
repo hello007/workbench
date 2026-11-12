@@ -41,7 +41,7 @@ Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`�
 | `e2e/fixtures.js` | 扩展 `test`：每个用例自动 `addInitScript` 注入 Wails mock，用例统一从这里 import；导出 `getWailsCalls(page, method?)`（调用记录）、`releaseDeferred(page, key, value)` / `pendingDeferredCount(page, key)`（挂起解析器放行与在途数）、`emitWailsEvent(page, event, payload)`（页面上下文广播 Wails 事件）、`activityPanel(page, id)` / `activityAction(page, action)` / `openPanel(page, id)`（活动栏语义定位，见 docs/spec/e2e-testing.md §5.1） |
 | `e2e/wails-init.js` | 浏览器页面上下文执行的注入函数（`window.go.main.App` + `window.runtime` stub + `__wailsCalls` 调用记录 + `{__error__}` / `{__sequence__}` / `{__value__, __events__, __preEvents__}` / `{__deferred__}` 返回值描述符；`EventsEmit` 同步广播到已注册 handler） |
 | `e2e/git-fixtures.js` | Git 三流程共享上下文：mock 工作目录常量（`GIT_FLOW_OVERRIDES`）、公共前置 `openGitRepoPage`、对话框定位 `visibleDialog` |
-| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发 / ai-chat AI 对话工作台 / command-palette-retry 搜索超时重试编排 / terminal-tabs 终端多 tab / toolbox-panel 工具箱与进程管理 / assets-cart 购物栏收集溯源导出 / settings-save 设置保存链） |
+| `e2e/*.spec.js` | E2E 用例（smoke 冒烟 / commit-push 提交推送 / branch 分支 / merge 合并变基 / file-tree 文件树操作 / submodule 子模块管理 / ai-function AI 功能触发 / ai-chat AI 对话工作台 / command-palette-retry 搜索超时重试编排 / terminal-tabs 终端多 tab / toolbox-panel 工具箱与进程管理 / assets-cart 购物栏收集溯源导出 / settings-save 设置保存链 / prompt-library 提示词面板与占位符复制） |
 | `../src/test/wails-mock-defaults.js` | mock 默认返回值表单一数据源（vitest setup.js 与 E2E 共用基础表，E2E 另有专属补充表） |
 
 ## mock 机制说明

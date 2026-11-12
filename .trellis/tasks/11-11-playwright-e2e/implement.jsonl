@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例约定：fixtures 导入、语义锚、禁 waitForTimeout、mock 单一数据源"}
+{"file": "docs/spec/confirm-dialog.md", "reason": "ElMessageBox 删除确认弹窗定位规范（EP 关闭后实例驻留 DOM）"}
+{"file": "docs/spec/prompt-library.md", "reason": "提示词面板行为契约（占位符复制语义、面板装配）"}

@@ -1,7 +1,7 @@
 # E2E 测试规范（方案 C 混合架构）
 
 > 本文档规定 WorkBench E2E 测试的分层架构、mock 约束、调用断言模式、构建标签隔离与 CI 绑定生成要求。
-> 最后更新：2026-10-21 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）
+> 最后更新：2026-11-11 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）、11-11-playwright-e2e（EP 输入框 data-* 落点）
 
 ## 1. 适用范围
 
@@ -83,6 +83,17 @@ el-table 类表格断言**禁硬编码 `td.nth(n)` 列下标**，先例辅助：
 
 - 列断言一律经表头文本解析下标（`columnIndexOf` 单点），禁散写 `td.nth(n)`；
 - 弱负断言（`not.toContainText(...)`）不具守卫力，定位类断言须用正向内容断言（先例：日期列断 `toContainText('/')`——zh-CN 日期含分隔符而相对时间不含）。
+
+### 5.4 Element Plus 输入框的 data-* 属性落在内层控件（2026-11-11）
+
+`el-input`（含 `type="textarea"` 形态，EP 无独立 `el-textarea` 组件）定义了 `inheritAttrs: false`，非 prop 属性经 `useAttrs` 过滤 class/style 后**绑定到内层 `<input>` / `<textarea>`**，不在组件根容器上。因此为测试加的 `data-field` / `data-fill-name` 定位写法是：
+
+- ✅ `page.locator('[data-field="title"]')` / `locator('[data-fill-name="客户名称"]')` —— 直接命中输入控件，可 `.fill()`
+- ❌ `locator('[data-field="title"] input')` —— 属性不在祖先容器上，元素永远等不到（表现为 30s 超时，而页面快照里输入框明明存在）
+
+先例：`prompt-library.spec.js` 首次运行即因此超时。
+
+**组件单测命中同类元素，但不是同一机理**：`PromptLibraryPanel.spec.js` 把 `el-input` mock 成单根 `<input>` / `<textarea>` 模板桩（`PromptLibraryPanel.spec.js:49-54`），VTU 默认 `inheritAttrs: true` 使 `data-field` 透传到该桩的根元素，故 `wrapper.find('[data-field="title"]')` 直接命中——与 EP 的 `inheritAttrs: false + useAttrs` 无关。两者结论一致（属性落在输入控件上）但成因不同，因此**桩结构变更（改成多根模板、或显式关闭属性继承）必须同步定位写法**，否则单测会先于 E2E 静默失效。
 
 ## 6. per-test 覆盖（wailsOverrides）
 
