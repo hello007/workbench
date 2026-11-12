@@ -1,0 +1,4 @@
+{"file": "docs/spec/temp-todo.md", "reason": "核对临时待办编辑态与取消语义"}
+{"file": "docs/spec/prompt-library.md", "reason": "核对提示词编辑弹窗关闭与保存语义"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增单测无隐式时序依赖"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "检查异常处理与错误码分流"}

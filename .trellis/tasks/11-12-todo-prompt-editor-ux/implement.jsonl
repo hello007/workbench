@@ -1,0 +1,4 @@
+{"file": "docs/spec/temp-todo.md", "reason": "临时待办解析、入口与交互契约"}
+{"file": "docs/spec/prompt-library.md", "reason": "提示词面板组件结构与交互契约"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 3 组件编写与事件绑定规范"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端单测分层与断言要求"}

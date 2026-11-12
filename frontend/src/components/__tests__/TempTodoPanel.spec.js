@@ -105,11 +105,13 @@ const stubs = {
       <slot name="footer" />
     </div>`,
     props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue', 'closed'],
+    emits: ['update:modelValue', 'closed', 'opened'],
     watch: {
-      // 真实 EP 在关闭动画结束后触发 closed；stub 以 modelValue 置 false 模拟
+      // 真实 EP 打开动画结束后 emit opened、关闭后 emit closed；
+      // 打开态延后一个 tick，确保弹窗内输入框已渲染再让父组件聚焦
       modelValue(value) {
-        if (!value) this.$emit('closed')
+        if (value) this.$nextTick(() => this.$emit('opened'))
+        else this.$emit('closed')
       }
     }
   },
@@ -387,6 +389,219 @@ describe('TempTodoPanel - 新建 / 编辑 / 快捷键记录', () => {
 
     expect(mocks.message.warning).toHaveBeenCalledWith('剪贴板为空，未记录')
   })
+
+  it('新建打开后聚焦正文并把光标放在末尾，Ctrl+S 保存并阻止浏览器默认行为', async () => {
+    // attachTo 后 focus 才真正作用于 document.activeElement；空正文的 selectionStart 恒为 0，
+    // 仅靠它无法区分「已聚焦」与「未聚焦」，故断言焦点落在正文 textarea 上
+    useUiStore().activePanel = 'todo'
+    const wrapper = mount(TempTodoPanel, { global: { stubs }, attachTo: document.body })
+    await flushPromises()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+
+    const textarea = wrapper.find('.todo-editor textarea')
+    expect(document.activeElement).toBe(textarea.element)
+    expect(textarea.element.selectionStart).toBe(0)
+
+    await textarea.setValue('快捷键保存的待办')
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(mocks.add).toHaveBeenCalledWith('快捷键保存的待办', [])
+    wrapper.unmount()
+  })
+
+  it('行内编辑打开后光标落在原文末尾，Cmd+S 同样保存', async () => {
+    // jsdom 写入 value 时会把光标放到末尾，光标断言须以显式 setSelectionRange 调用为准
+    const selSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'setSelectionRange')
+    const wrapper = await mountPanel()
+    await wrapper.find('.todo-item [data-action="edit"]').trigger('click')
+    await flushPromises()
+
+    const textarea = wrapper.find('.todo-item textarea')
+    const original = sampleTodos()[0].text
+    expect(textarea.element.value).toBe(original)
+    expect(selSpy).toHaveBeenCalledWith(original.length, original.length)
+
+    const event = new KeyboardEvent('keydown', { key: 'S', metaKey: true, bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(mocks.update).toHaveBeenCalledWith('todo-1', original, ['重构'])
+  })
+
+  it('新建卡片按 ESC 取消编辑并丢弃草稿', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+
+    const textarea = wrapper.find('.todo-editor textarea')
+    await textarea.setValue('不保存的内容')
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(wrapper.find('.todo-editor').exists()).toBe(false)
+    expect(mocks.add).not.toHaveBeenCalled()
+  })
+
+  it('行内编辑按 ESC 取消并还原列表项正文', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.todo-item [data-action="edit"]').trigger('click')
+    await flushPromises()
+
+    const textarea = wrapper.find('.todo-item textarea')
+    await textarea.setValue('不保存的改写')
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
+    expect(wrapper.find('.todo-item').text()).toContain('第一条待办')
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('从较后条目切到较前条目编辑时，焦点仍落在新条目正文末尾', async () => {
+    const selSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'setSelectionRange')
+    mocks.list.mockResolvedValue([
+      { id: 'newer', text: '较新的待办', tags: [], createdAt: now, completedAt: null },
+      { id: 'older', text: '较早的待办内容', tags: [], createdAt: now - 1000, completedAt: null }
+    ])
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('.todo-item')[1].find('[data-action="edit"]').trigger('click')
+    await flushPromises()
+    selSpy.mockClear()
+    await wrapper.findAll('.todo-item')[0].find('[data-action="edit"]').trigger('click')
+    await flushPromises()
+
+    const textarea = wrapper.findAll('.todo-item')[0].find('textarea').element
+    expect(textarea.value).toBe('较新的待办')
+    expect(selSpy).toHaveBeenCalledWith('较新的待办'.length, '较新的待办'.length)
+  })
+
+  it('行内保存未完成时取消并重新新建，成功回调不清空新草稿', async () => {
+    let resolveAdd
+    mocks.add.mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('第一次提交')
+
+    const findBtn = (label) => wrapper.find('.todo-editor').findAll('button').find(b => b.text().includes(label))
+    await findBtn('保存').trigger('click')
+    await findBtn('取消').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('新草稿')
+
+    resolveAdd({ id: 'new', text: '第一次提交', tags: [], createdAt: now, completedAt: null })
+    await flushPromises()
+
+    expect(wrapper.find('.todo-editor').exists()).toBe(true)
+    expect(wrapper.find('.todo-editor textarea').element.value).toBe('新草稿')
+  })
+
+  it('保存成功但列表刷新未完成时已退出编辑态，不存在重复提交窗口', async () => {
+    let resolveList
+    mocks.list
+      .mockResolvedValueOnce(sampleTodos())
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve }))
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('只提交一次')
+
+    const textarea = wrapper.find('.todo-editor textarea')
+    textarea.element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+    )
+    await flushPromises()
+
+    expect(mocks.add).toHaveBeenCalledTimes(1)
+    // 列表刷新未返回，但编辑态必须已退出；否则编辑器存活且按钮已解除 loading，可二次落库
+    expect(wrapper.find('.todo-editor').exists()).toBe(false)
+    resolveList(sampleTodos())
+    await flushPromises()
+  })
+
+  it('行内保存未完成时打开全屏编辑，保存完成后正常退出编辑', async () => {
+    let resolveAdd
+    mocks.add.mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('同一份草稿')
+
+    const saveBtn = wrapper.find('.todo-editor').findAll('button').find(b => b.text().includes('保存'))
+    await saveBtn.trigger('click')
+    // 保存在途时切到全屏视图：仍属同一草稿，不应被当成新会话
+    await wrapper.find('.todo-editor [data-action="expand-editor"]').trigger('click')
+    await flushPromises()
+
+    resolveAdd({ id: 'new', text: '同一份草稿', tags: [], createdAt: now, completedAt: null })
+    await flushPromises()
+
+    expect(mocks.add).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.todo-editor').exists()).toBe(false)
+    // 弹窗内草稿随保存完成复位，继续点保存只会命中空正文校验
+    expect(wrapper.find('.el-dialog textarea').element.value).toBe('')
+  })
+
+  it('剪贴板快速记录不会清除草稿保存的在途标记', async () => {
+    let resolveAdd
+    mocks.add.mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    mocks.addFromClipboard.mockResolvedValueOnce({
+      id: 'clip', text: '剪贴板内容', tags: [], createdAt: now, completedAt: null
+    })
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('只提交一次')
+
+    const saveBtn = wrapper.find('.todo-editor').findAll('button').find(b => b.text().includes('保存'))
+    await saveBtn.trigger('click')
+    await wrapper.vm.quickAddFromClipboard()
+    await flushPromises()
+
+    // 快速记录完成后 saving 仍应为在途状态，第二次 Ctrl+S 被拦住
+    wrapper.find('.todo-editor textarea').element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+    )
+    await flushPromises()
+    expect(mocks.add).toHaveBeenCalledTimes(1)
+
+    resolveAdd({ id: 'new', text: '只提交一次', tags: [], createdAt: now, completedAt: null })
+    await flushPromises()
+  })
+
+  it('保存未完成时重复按 Ctrl+S 不会重复提交', async () => {
+    let resolveAdd
+    mocks.add.mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    const wrapper = await mountPanel()
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('只提交一次')
+
+    const textarea = wrapper.find('.todo-editor textarea')
+    const press = () => {
+      const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+      textarea.element.dispatchEvent(event)
+    }
+    press()
+    press()
+    await flushPromises()
+
+    expect(mocks.add).toHaveBeenCalledTimes(1)
+    resolveAdd({ id: 'new', text: '只提交一次', tags: [], createdAt: now, completedAt: null })
+    await flushPromises()
+  })
 })
 
 describe('TempTodoPanel - 二期入口（导出 / 转提示词 / 外部变更刷新）', () => {
@@ -658,6 +873,78 @@ describe('TempTodoPanel - 全屏编辑弹窗', () => {
     expect(wrapper.find('.el-dialog').exists()).toBe(true)
     expect(wrapper.find('.el-dialog textarea').element.value).toBe('会失败的内容')
     expect(wrapper.find('.todo-item textarea').element.value).toBe('会失败的内容')
+  })
+
+  it('全屏弹窗打开后聚焦正文并把光标放在原文末尾，Ctrl+S 保存', async () => {
+    const selSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'setSelectionRange')
+    const wrapper = await mountPanel()
+    const original = sampleTodos()[0].text
+    // 行内编辑打开时会先聚焦一次；清空后只验证弹窗打开这一跳的定位
+    await wrapper.find('.todo-item [data-action="edit"]').trigger('click')
+    await flushPromises()
+    selSpy.mockClear()
+    await wrapper.find('.todo-item [data-action="expand-editor"]').trigger('click')
+    await flushPromises()
+
+    expect(selSpy).toHaveBeenCalledWith(original.length, original.length)
+
+    const textarea = wrapper.find('.el-dialog textarea')
+    await textarea.setValue('全屏快捷键保存')
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(mocks.update).toHaveBeenCalledWith('todo-1', '全屏快捷键保存', ['重构'])
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
+  })
+
+  it('弹窗保存在途时关闭并重开，完成回调不关闭新弹窗也不清空新草稿', async () => {
+    let resolveUpdate
+    mocks.update.mockImplementationOnce(() => new Promise((resolve) => { resolveUpdate = resolve }))
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+    await flushPromises()
+
+    await wrapper.find('.el-dialog textarea').setValue('第一次保存')
+    await wrapper.find('[data-action="editor-save"]').trigger('click')
+    // 保存未完成：ESC 取消并关闭弹窗
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    wrapper.find('.el-dialog textarea').element.dispatchEvent(esc)
+    wrapper.findComponent('.el-dialog').vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    // 取消后重新新建并打开弹窗输入新内容
+    await wrapper.find('.panel-actions [data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('.todo-editor textarea').setValue('新草稿')
+    await wrapper.find('.todo-editor [data-action="expand-editor"]').trigger('click')
+    await flushPromises()
+
+    resolveUpdate()
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+    expect(wrapper.find('.el-dialog textarea').element.value).toBe('新草稿')
+  })
+
+  it('全屏弹窗按 ESC 取消整条编辑，草稿不残留', async () => {
+    const wrapper = await mountPanel()
+    await openInlineDialog(wrapper)
+    await flushPromises()
+
+    const textarea = wrapper.find('.el-dialog textarea')
+    await textarea.setValue('ESC 丢弃的正文')
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    textarea.element.dispatchEvent(event)
+    // 真实 EP 由 document 级 ESC 监听关闭弹窗；stub 不模拟，手动置 false 走 closed
+    wrapper.findComponent('.el-dialog').vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(wrapper.find('.el-dialog').exists()).toBe(false)
+    expect(wrapper.find('.todo-item textarea').exists()).toBe(false)
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 
   it('保存请求在途时关闭弹窗，完成后仍退出编辑态不残留草稿', async () => {

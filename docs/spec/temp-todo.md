@@ -1,7 +1,7 @@
 # 临时待办契约（侧边栏「临时待办」）
 
 > 剪贴板快速记录、选中文本存档、转提示词、Markdown 导出与导入的跨层契约。
-> 最后更新：2026-11-11 · 来源任务：11-09-temp-todo-workspace（一期）、11-10-temp-todo-phase2（二期导出）、11-10-markdown（三期导入）、11-11-temp-todo-editor-dialog（全屏编辑）、11-11-temp-todo-ui-polish（视觉重构）
+> 最后更新：2026-11-12 · 来源任务：11-09-temp-todo-workspace（一期）、11-10-temp-todo-phase2（二期导出）、11-10-markdown（三期导入）、11-11-temp-todo-editor-dialog（全屏编辑）、11-11-temp-todo-ui-polish（视觉重构）、11-12-todo-prompt-editor-ux（编辑焦点与快捷键）
 
 ---
 
@@ -107,7 +107,7 @@
 | 解析纯函数 | 两类待办行、跳过矩阵、续行拼接与缩进保留、标签提取、文件名日期与钳制、去空白去重（含文件内第三条）、CRLF、空输入 |
 | service | `AddMany` 归一化/跳过空条目/`CreatedAt<=0` 取当前/未来钳制/一次落盘；落盘失败返回 `E_TEMP_TODO_IMPORT_FAILED` 且内存回滚 |
 | 组件 | 导入入口 `data-action="import"`、浏览器降级提示、预览汇总与开关联动、确认调用参数、空文件提示、全部重复禁用确认 |
-| 组件（全屏编辑） | `data-action="expand-editor"` 打开弹窗、正文与标签沿用草稿、保存入参、`Ctrl+Enter` 保存、空正文与保存失败不关闭弹窗、关闭后草稿保留、保存成功退出编辑态、保存在途关闭弹窗后仍复位 |
+| 组件（全屏编辑） | `data-action="expand-editor"` 打开弹窗、正文与标签沿用草稿、打开后焦点落在正文末尾、保存入参、`Ctrl+Enter` / `Ctrl+S` 保存、空正文与保存失败不关闭弹窗、`X` /「返回编辑」关闭后草稿保留、`ESC` 取消整条编辑、保存成功退出编辑态、保存在途关闭弹窗后仍复位 |
 | 组件（条目展示） | 截断才显示「展开」、按钮切换展开/收起文案、未截断无按钮且点击正文不改变展开态；截断判定纯函数覆盖未布局/相等/1px 容差 |
 | 组件（常驻操作） | 四个 `data-action` 图标在未 hover 时仍渲染（防回归到 hover-only） |
 | E2E | `frontend/e2e/temp-todo-import.spec.js`：真实面板链路预览汇总 3/2、开关切到 5、确认后 `AddTempTodos` 入参 3/5 条且字段对齐 `TempTodoDraft`；fixture 文件名取历史日期规避未来时刻钳制 |
@@ -121,6 +121,7 @@
 | `normalizeTempTodoText` / `normalizeTempTodoTags` | `service/temp_todo.go` | 单条与批量共用，禁在导入链路另起归一化 |
 | `appendTempTodoMarkdown` | `service/temp_todo.go` | 导出追加写入的唯一出口 |
 | `isTextOverflowing` | `frontend/src/utils/todoTextOverflow.js` | 截断判定唯一入口；jsdom 无布局，单测直接传模拟元素，禁在组件内另写判定 |
+| `focusInputAtEnd` / `isSaveShortcut` | `frontend/src/utils/focusInput.js` | 编辑入口聚焦到末尾与 `Ctrl/Cmd+S` 判定的唯一入口；新增编辑入口复用，禁各组件手写 `focus` + `setSelectionRange` |
 
 ## 7. 全屏编辑形态
 
@@ -130,9 +131,11 @@
 | 实现 | `el-dialog fullscreen`；弹窗外壳样式写非 scoped 块并以 `.el-dialog.todo-editor-dialog` 圈定，禁裸改全局 `.el-dialog`；容器 `padding: 0`（EP 2.14.5 自带 16px，不归零则 header/footer 背景内缩、贴不到边） |
 | 草稿 | 弹窗与行内编辑共用 `draftText` / `draftTags`，不复制、不回写；弹窗只是「放大视图」 |
 | 行内编辑高度 | 按内容自适应 3–15 行（EP `autosize`，`minRows:3 / maxRows:15`）；超 15 行框内滚动，更长内容走全屏编辑；新建卡片仍为固定 3 行 + 可拖拽 |
-| 关闭语义 | `X` / `ESC` /「返回编辑」只关闭弹窗、草稿保留；仅保存成功（`editorDialogSaveDone`）经 `@closed` 复位编辑态 |
-| 保存 | 行内 `saveDraft` 与弹窗 `saveFromDialog` 共用 `persistDraft`；空正文与保存失败均不关闭弹窗；保存在途被 ESC/X 关闭时 `@closed` 已错过标记，保存完成后由 `saveFromDialog` 就地复位（防残留草稿再次保存出新条目） |
-| 快捷键 | 弹窗内 `Ctrl+Enter` 保存 |
+| 焦点 | 新建卡片、行内编辑、全屏弹窗打开后焦点进入正文 textarea 且光标置于文本末尾（`focusInputAtEnd`，`frontend/src/utils/focusInput.js`），长文本同时滚到底部 |
+| 关闭语义 | `X` /「返回编辑」只关闭弹窗、草稿保留（回到行内编辑）；`ESC` 取消整条编辑——键盘入口绑定在 `el-dialog`（EP 将 `$attrs` 合并到 `.el-dialog` 根，覆盖 header/body/footer），先置 `editorDialogCanceled`，EP 默认关闭后由 `@closed` 复位；仅保存成功（`editorDialogSaveDone`）同样经 `@closed` 复位 |
+| 保存 | 行内 `saveDraft` 与弹窗 `saveFromDialog` 共用 `persistDraft`；空正文与保存失败均不关闭弹窗；**复位/关闭必须在 `await load()` 之前同步完成**——`persistDraft` 已清 `saving`，等列表刷新再复位会打开二次提交窗口；保存在途按 ESC 时由 `@closed` 自行复位，按 X /「返回编辑」时未置标记，由 `saveFromDialog` 完成后就地复位 |
+| 会话代次 | `draftSession` 在开始/取消编辑时递增，`dialogSession` 仅在弹窗 `@closed` 递增；保存回调：草稿会话变化 → 不复位新草稿；弹窗关闭后又重开且仍可见 → 不关闭新弹窗；仅关闭未重开 → 就地复位。`saving` 期间键盘保存直接忽略；剪贴板快速记录用独立 `quickSaving`，**禁与 `saving` 共用**（快速记录完成会提前清掉草稿保存在途标记） |
+| 快捷键 | 新建、行内、全屏三处均支持 `Ctrl+S` / `Cmd+S` 保存（`isSaveShortcut`，拦截浏览器默认保存网页）；`Ctrl+Enter` 保留兼容；新建卡片与行内编辑 `ESC` 丢弃草稿退出编辑 |
 | 布局 | body 纵向 flex 约束链（`.el-dialog__body` → `.editor-dialog-body` → textarea 撑满）；标签输入与 footer 固定不随正文滚动 |
 
 ## 8. 条目展示契约（11-11 视觉重构）

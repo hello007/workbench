@@ -45,14 +45,14 @@
 
     <div ref="panelBodyRef" class="panel-body">
       <!-- 新建卡片：与编辑态共用同一套草稿控件 -->
-      <div v-if="creating" class="todo-editor">
+      <div v-if="creating" class="todo-editor" @keydown="onEditorKeydown">
         <el-input
           ref="createInputRef"
           v-model="draftText"
           type="textarea"
           :rows="3"
           resize="vertical"
-          placeholder="要记的事、提示词片段或待验证的想法（Ctrl+Enter 保存）"
+          placeholder="要记的事、提示词片段或待验证的想法（Ctrl+S 或 Ctrl+Enter 保存）"
           @keydown.ctrl.enter.prevent="saveDraft"
         />
         <div class="todo-editor-footer">
@@ -62,7 +62,7 @@
             placeholder="标签，用逗号分隔（如 重构,AI提示词）"
             class="todo-tags-input"
           />
-          <span class="todo-editor-hint">Ctrl+Enter 保存</span>
+          <span class="todo-editor-hint">Ctrl+S 或 Ctrl+Enter 保存</span>
           <div class="todo-editor-actions">
             <el-button size="small" data-action="expand-editor" @click="openEditorDialog">
               <el-icon class="btn-icon"><FullScreen /></el-icon>
@@ -100,10 +100,11 @@
           />
 
           <template v-if="editingId === todo.id">
-            <div class="todo-editor todo-editor--inline">
+            <div class="todo-editor todo-editor--inline" @keydown="onEditorKeydown">
               <!-- 行内编辑按内容自适应 3–15 行：展开读完再编辑时不必反复滚动；
                    autosize 与原生 resize 互斥，超长内容仍走「全屏编辑」 -->
               <el-input
+                :ref="setInlineInputRef"
                 v-model="draftText"
                 type="textarea"
                 :autosize="{ minRows: 3, maxRows: 15 }"
@@ -279,13 +280,14 @@
     </div>
 
     <!-- 全屏编辑：行内三行输入区的放大视图，与行内编辑共用同一份草稿。
-         X / ESC / 返回编辑只关闭弹窗、草稿保留；仅保存才落库并退出编辑态。 -->
+         X / 返回编辑只关闭弹窗、草稿保留；ESC 取消整条编辑并丢弃草稿；保存成功落库并退出编辑态。 -->
     <el-dialog
       v-model="editorDialogVisible"
       :title="editingId ? '编辑待办' : '新建待办'"
       fullscreen
       class="todo-editor-dialog"
       :close-on-click-modal="false"
+      @keydown="onDialogKeydown"
       @opened="focusEditorDialog"
       @closed="onEditorDialogClosed"
     >
@@ -296,7 +298,7 @@
             v-model="draftText"
             type="textarea"
             resize="none"
-            placeholder="要记的事、提示词片段或待验证的想法（Ctrl+Enter 保存）"
+            placeholder="要记的事、提示词片段或待验证的想法（Ctrl+S 保存）"
             class="editor-dialog-text"
             @keydown.ctrl.enter.prevent="saveFromDialog"
           />
@@ -308,7 +310,7 @@
             placeholder="标签，用逗号分隔（如 重构,AI提示词）"
             class="editor-dialog-tags"
           />
-          <span class="editor-dialog-hint">Ctrl+Enter 保存</span>
+          <span class="editor-dialog-hint">Ctrl+S 或 Ctrl+Enter 保存</span>
         </div>
       </div>
 
@@ -407,6 +409,7 @@ import { formatRelativeTime, formatFullTime } from '../utils/formatTime'
 import { decodeBase64Utf8 } from '../utils/base64'
 import { parseTempTodoMarkdown } from '../utils/tempTodoImport'
 import { isTextOverflowing } from '../utils/todoTextOverflow'
+import { focusInputAtEnd, isSaveShortcut } from '../utils/focusInput'
 import { useSettingsStore } from '../store/settings'
 import { useUiStore } from '../store/ui'
 import { isBrowserChannel } from '../transport'
@@ -426,14 +429,28 @@ const editingId = ref('')
 const draftText = ref('')
 const draftTags = ref('')
 const saving = ref(false)
+// 剪贴板快速记录独立于草稿保存：两者共用 saving 时，快速记录完成会提前清掉
+// 草稿保存的在途标记，使 persistDraft 的防重守卫失效
+const quickSaving = ref(false)
 const busyId = ref('')
 const createInputRef = ref(null)
+// 行内编辑正文的 ref：textarea 渲染在 v-for 内，字符串 ref 会聚成数组，
+// 改用函数 ref 只保留当前编辑项（同一时刻仅一个 editingId 命中）
+const inlineInputRef = ref(null)
+const setInlineInputRef = (el) => {
+  // 卸载时 Vue 以 null 回调。切换编辑目标时新实例可能先挂载、旧实例后卸载，
+  // 把 null 写回会让 nextTick 后的聚焦静默失效，故忽略 null
+  if (el) inlineInputRef.value = el
+}
 
 // 全屏编辑弹窗：与行内编辑共用 draftText / draftTags，本身只是「放大视图」，
 // 因此不复制草稿；弹窗关闭时是否复位编辑态由 editorDialogSaveDone 区分。
 const editorDialogVisible = ref(false)
 const dialogInputRef = ref(null)
 const editorDialogSaveDone = ref(false)
+// 弹窗内按 ESC 的标记：EP 默认行为仍会关闭弹窗，@closed 依据该标记取消整条编辑；
+// X 与「返回编辑」不置标记，维持「关闭弹窗、保留草稿」
+const editorDialogCanceled = ref(false)
 
 // 展开态按条目 ID 记录：长文默认折叠成三行，展开后限高内部滚动
 const expandedIDs = ref(new Set())
@@ -602,50 +619,107 @@ const resetImport = () => {
   importing.value = false
 }
 
+// 草稿会话代次：每次开始/取消编辑递增。保存请求在途时若用户已切换会话
+// （取消后重新新建/编辑），成功回调不得再复位新草稿。
+const draftSession = ref(0)
+// 弹窗开关代次：仅弹窗关闭时递增。保存请求在途时弹窗关闭又重开（X 关闭不重置草稿），
+// 成功回调不得关闭重开后的弹窗——与「草稿是否被替换」是两个独立维度。
+const dialogSession = ref(0)
+
 const resetDraft = () => {
+  draftSession.value++
   creating.value = false
   editingId.value = ''
   draftText.value = ''
   draftTags.value = ''
+  inlineInputRef.value = null
 }
 
+// 打开编辑即把焦点放到正文末尾：新建时末尾与开头重合，编辑时可继续向下写
 const startCreate = async () => {
+  draftSession.value++
   editingId.value = ''
   creating.value = true
   draftText.value = ''
   draftTags.value = ''
   await nextTick()
-  createInputRef.value?.focus?.()
+  focusInputAtEnd(createInputRef.value)
 }
 
-const startEdit = (todo) => {
+const startEdit = async (todo) => {
+  draftSession.value++
   creating.value = false
   editingId.value = todo.id
   draftText.value = todo.text
   draftTags.value = (todo.tags || []).join(', ')
+  await nextTick()
+  focusInputAtEnd(inlineInputRef.value)
 }
 
 const cancelDraft = () => resetDraft()
 
-// 全屏编辑不复制草稿：弹窗内外的 textarea 绑定同一份 draftText / draftTags
+/**
+ * 新建卡片 / 行内编辑的键盘入口（绑定在编辑容器上，正文与标签输入共用）：
+ * Ctrl+S / Cmd+S 保存，ESC 丢弃草稿退出编辑。
+ * 输入法组合中（isComposing）直接放行：中文候选框同样用 ESC 取消，不能误退出编辑。
+ */
+const onEditorKeydown = (event) => {
+  if (event.isComposing || event.keyCode === 229) return
+  if (isSaveShortcut(event)) {
+    event.preventDefault()
+    saveDraft()
+    return
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelDraft()
+  }
+}
+
+// 全屏编辑不复制草稿：弹窗内外的 textarea 绑定同一份 draftText / draftTags。
+// 这里只切换视图、不递增会话：保存中打开全屏仍是同一草稿，保存完成后正常退出编辑。
 const openEditorDialog = () => {
   editorDialogSaveDone.value = false
+  editorDialogCanceled.value = false
   editorDialogVisible.value = true
 }
 
 const focusEditorDialog = () => {
-  dialogInputRef.value?.focus?.()
+  focusInputAtEnd(dialogInputRef.value)
 }
 
-// 关闭弹窗的默认语义是回到原编辑态（草稿保留）；仅「保存」成功才复位草稿并退出编辑
+/**
+ * 全屏弹窗键盘入口（绑定在 el-dialog 上，EP 把 $attrs 合并到 .el-dialog 根，
+ * 覆盖 header / body / footer，焦点在标题栏关闭键或表单控件上均生效）：
+ * Ctrl+S / Cmd+S 保存；ESC 只置取消标记、不 preventDefault，由 EP 依默认行为关闭弹窗，
+ * @closed 再按标记退出编辑态。输入法组合中放行，避免取消中文候选时误判为取消编辑。
+ */
+const onDialogKeydown = (event) => {
+  if (event.isComposing || event.keyCode === 229) return
+  if (isSaveShortcut(event)) {
+    event.preventDefault()
+    saveFromDialog()
+    return
+  }
+  if (event.key === 'Escape') {
+    editorDialogCanceled.value = true
+  }
+}
+
+// 弹窗关闭三态：保存完成、ESC 取消 → 复位草稿退出编辑；
+// X 与「返回编辑」→ 回到原编辑态，草稿保留
 const onEditorDialogClosed = () => {
-  if (!editorDialogSaveDone.value) return
+  dialogSession.value++
+  const shouldReset = editorDialogSaveDone.value || editorDialogCanceled.value
   editorDialogSaveDone.value = false
-  resetDraft()
+  editorDialogCanceled.value = false
+  if (shouldReset) resetDraft()
 }
 
 // 落库只做写入与错误处理，不复位草稿：行内保存与全屏保存的退出时机不同
 const persistDraft = async () => {
+  // 键盘路径不受按钮 loading 保护：连续按 Ctrl+S 会在新建场景写入重复条目
+  if (saving.value) return false
   const text = draftText.value.trim()
   if (!text) {
     ElMessage.warning('待办内容不能为空')
@@ -668,24 +742,35 @@ const persistDraft = async () => {
 }
 
 const saveDraft = async () => {
+  const session = draftSession.value
   if (!(await persistDraft())) return false
-  resetDraft()
+  // 会话已切换（保存在途时取消并重新新建/编辑）：不得复位用户的新草稿。
+  // 复位必须在 load() 之前：persistDraft 已清 saving，若等列表刷新完再复位，
+  // 编辑器仍存活且按钮已解除 loading，二次 Ctrl+S 会重复落库
+  if (session === draftSession.value) resetDraft()
   await load()
   return true
 }
 
 // 全屏保存：先关弹窗（渐隐期间正文仍在），@closed 后再复位编辑态，避免弹窗内容瞬间清空
 const saveFromDialog = async () => {
+  const draft = draftSession.value
+  const dialog = dialogSession.value
   if (!(await persistDraft())) return
-  if (!editorDialogVisible.value) {
-    // 保存请求在途时用户已按 ESC / X 关闭弹窗：@closed 早于此处触发且当时未标记保存完成，
-    // 不会再复位编辑态，就地复位，避免残留草稿被再次保存出新条目
-    resetDraft()
-    await load()
-    return
+  // 收尾条件：草稿会话未切换，且弹窗不是「关闭后又重开」。
+  // 仅关闭未重开（visible=false）仍需就地复位，防残留草稿再次保存；
+  // 关闭后重开（对话代次已变且 visible=true）则不得关闭用户的新弹窗。
+  const dialogReopened = dialog !== dialogSession.value && editorDialogVisible.value
+  if (draft === draftSession.value && !dialogReopened) {
+    if (!editorDialogVisible.value) {
+      // 保存请求在途时用户已按 X /「返回编辑」关闭弹窗：@closed 早于此处触发且当时未标记保存完成，
+      // 不会再复位编辑态，就地复位，避免残留草稿被再次保存出新条目
+      resetDraft()
+    } else {
+      editorDialogSaveDone.value = true
+      editorDialogVisible.value = false
+    }
   }
-  editorDialogSaveDone.value = true
-  editorDialogVisible.value = false
   await load()
 }
 
@@ -790,7 +875,8 @@ const attachResizeObserver = () => {
  * 预览取正文首个非空行前 20 字，用来确认记的是不是刚复制的那段。
  */
 const quickAddFromClipboard = async () => {
-  saving.value = true
+  if (quickSaving.value) return
+  quickSaving.value = true
   try {
     const todo = await AddTempTodoFromClipboard()
     const firstLine = (todo?.text || '').split('\n').find(line => line.trim()) || ''
@@ -800,7 +886,7 @@ const quickAddFromClipboard = async () => {
   } catch (e) {
     handleError('快速记录失败: ', e)
   } finally {
-    saving.value = false
+    quickSaving.value = false
   }
 }
 

@@ -71,7 +71,15 @@
 - 预览容器 `white-space: pre-wrap`、`word-break: break-word`、`max-height: 32vh` + `overflow-y: auto` + `overscroll-behavior: contain`（滚到边界不链式传给外层弹窗），背景 `--bg-tertiary`、边框 `--border-light`、圆角 `--radius-md`；颜色全部取主题变量，浅色/深色自动适配。
 - 暗色主题下 `filled` / `default` 文字提亮为 `--primary-light`（`--primary-color` 叠 `--primary-bg` 仅约 2.4:1）：按本仓「非正文 token ≥ 3:1」口径（提亮后约 3.5:1），**不追求正文 WCAG AA 4.5:1**——高亮是替换片段的标记而非正文，与 CodeMirror 深色 token 同口径（详见 `frontend-visual-conventions.md` §6「Vue scoped 样式」小节）。
 
-## 4. 面板注册点
+## 4. 编辑弹窗与键盘交互
+
+- 新建/编辑共用同一弹窗，`@opened` 后聚焦标题输入框并把光标置于文本末尾（`focusInputAtEnd`，`frontend/src/utils/focusInput.js`）；新建为空、编辑时接着原标题继续输入。
+- 标题与正文外层容器监听 `Ctrl+S` / `Cmd+S`（`isSaveShortcut`），命中后 `preventDefault` 并调用 `savePrompt`，避免触发浏览器「保存网页」；两个输入框共用容器级监听。
+- 弹窗关闭（`ESC`、右上角 X、「取消」）统一走 `@closed="resetEditorDraft"`，复位 `editingId` 与标题/正文草稿，重新打开不带入上次内容；保存成功关闭同样复位（幂等）。
+- 保存发起时记录 `editorSession`（开始/结束编辑递增）；保存请求在途时若已关闭并重新打开，回调只刷新列表，不关闭新弹窗、不清空新草稿；`saving` 期间重复保存直接忽略。
+- 前端空标题/空正文校验、`E_PROMPT_NOT_FOUND` 关闭并刷新列表的既有语义不变。
+
+## 5. 面板注册点
 
 新增一级面板须同步（缺任一则入口不可达或构建失败）：
 
@@ -86,12 +94,13 @@
 
 `Alt+1..9` 是固定映射，只覆盖前 9 个面板；第 10 个面板起没有固定快捷键，可达性由自定义快捷键补位（默认空，不占键）。
 
-## 5. 测试点位
+## 6. 测试点位
 
 - `service/prompt_test.go`：增删改查、归一化（首行缩进保留）、排序、脏数据剔除、损坏留底、截断、重载持久化、Add/Update/Delete 三条落盘失败回滚。
 - `service/settings_test.go`：`ShortcutOpenPromptLibrary` 的 Save→Get 往返 + 磁盘 JSON 键名断言（防 Go/前端键名漂移）。
 - `frontend/src/utils/__tests__/promptPlaceholders.spec.js`：提取/替换的全部边界；默认值用例组（含冒号默认值、空默认保留、去空白、超长不识别、同名首次为准、纯空白视为未填、填写值不裁剪）与 Go `TestRenderPrompt_DefaultValue` 保持同一组语义用例，防跨语言漂移；`segmentPlaceholders` 分段（普通文本、填写值、默认值、未填、混合、换行、无效占位符）及 `applyPlaceholders` 与分段拼接一致性。
-- `frontend/src/components/__tests__/PromptLibraryPanel.spec.js`：无占位符直复制、弹窗去重、部分填写、默认值 placeholder 提示、未填走默认值、填写覆盖默认值、复制原文保留语法、失败保持、新建校验、编辑、删除确认、搜索、展开、`E_PROMPT_NOT_FOUND` 刷新列表；预览区三类高亮与输入实时更新、复制原文不受预览影响。
+- `frontend/src/components/__tests__/PromptLibraryPanel.spec.js`：无占位符直复制、弹窗去重、部分填写、默认值 placeholder 提示、未填走默认值、填写覆盖默认值、复制原文保留语法、失败保持、新建校验、编辑、删除确认、搜索、展开、`E_PROMPT_NOT_FOUND` 刷新列表；预览区三类高亮与输入实时更新、复制原文不受预览影响；打开后聚焦标题且光标在末尾、`Ctrl/Cmd+S` 保存并阻止默认、关闭复位草稿。
+- `frontend/src/utils/__tests__/focusInput.spec.js`：原生元素与 ElInput 实例/ stub 根元素解析、光标定位末尾、长文本滚动到底、`Ctrl/Cmd+S` 组合键矩阵（含 Alt/Shift 不命中）。
 - `frontend/e2e/prompt-library.spec.js`：默认值链路的独立用例（新建 `{{页数:1}}` → 不填得默认值 → 填写覆盖 → 复制原文保留语法）；预览区可见性、`ph-unfilled`/`ph-default`/`ph-filled` 文本与切换断言。
 - `frontend/src/views/__tests__/Home.spec.js`：自定义快捷键打开面板 / 空快捷键不劫持。
 - `frontend/src/test/wails-mock-defaults.js`：四方法默认值（面板常驻挂载即拉取）。

@@ -84,26 +84,31 @@
       width="min(1040px, 94vw)"
       append-to-body
       :close-on-click-modal="false"
+      @opened="focusEditorAtStart"
+      @closed="resetEditorDraft"
     >
-      <el-input
-        v-model="draftTitle"
-        maxlength="100"
-        show-word-limit
-        placeholder="标题（如：代码评审话术）"
-        data-field="title"
-      />
-      <el-input
-        v-model="draftContent"
-        type="textarea"
-        :rows="18"
-        maxlength="20000"
-        show-word-limit
-        resize="vertical"
-        class="prompt-editor-content"
-        placeholder="正文。可用双花括号占位符标记复制时需要填写的内容，支持「名称:默认值」写法"
-        data-field="content"
-      />
-      <div class="prompt-editor-hint" v-pre>占位符写法：{{名称}} 或 {{名称:默认值}}。复制时弹窗填写，留空使用默认值（无默认值则保留原样）。</div>
+      <div class="prompt-editor-body" @keydown="onEditorKeydown">
+        <el-input
+          ref="titleInputRef"
+          v-model="draftTitle"
+          maxlength="100"
+          show-word-limit
+          placeholder="标题（如：代码评审话术）"
+          data-field="title"
+        />
+        <el-input
+          v-model="draftContent"
+          type="textarea"
+          :rows="18"
+          maxlength="20000"
+          show-word-limit
+          resize="vertical"
+          class="prompt-editor-content"
+          placeholder="正文。可用双花括号占位符标记复制时需要填写的内容，支持「名称:默认值」写法"
+          data-field="content"
+        />
+        <div class="prompt-editor-hint" v-pre>占位符写法：{{名称}} 或 {{名称:默认值}}。复制时弹窗填写，留空使用默认值（无默认值则保留原样）。Ctrl+S 保存。</div>
+      </div>
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" data-action="save" @click="savePrompt">保存</el-button>
@@ -166,6 +171,7 @@ import {
   extractPlaceholders,
   segmentPlaceholders
 } from '../utils/promptPlaceholders'
+import { focusInputAtEnd, isSaveShortcut } from '../utils/focusInput'
 
 const prompts = ref([])
 const loading = ref(false)
@@ -178,7 +184,11 @@ const editingId = ref('')
 const draftTitle = ref('')
 const draftContent = ref('')
 const saving = ref(false)
+const titleInputRef = ref(null)
 const editorTitle = computed(() => (editingId.value ? '编辑提示词' : '新建提示词'))
+// 编辑会话代次：开始/结束编辑时递增。保存请求在途时若用户已关闭或切到另一条，
+// 成功回调不得关闭当前弹窗、不得复位新草稿。
+const editorSession = ref(0)
 
 // 占位符填写弹窗
 const fillVisible = ref(false)
@@ -253,6 +263,7 @@ const formatFullTime = (ms) => {
 }
 
 const startCreate = () => {
+  editorSession.value++
   editingId.value = ''
   draftTitle.value = ''
   draftContent.value = ''
@@ -260,13 +271,36 @@ const startCreate = () => {
 }
 
 const startEdit = (prompt) => {
+  editorSession.value++
   editingId.value = prompt.id
   draftTitle.value = prompt.title
   draftContent.value = prompt.content
   editorVisible.value = true
 }
 
+// 弹窗打开动画结束后聚焦标题并定位末尾：新建为空、编辑时接着原标题继续输入
+const focusEditorAtStart = () => {
+  focusInputAtEnd(titleInputRef.value)
+}
+
+// 弹窗关闭统一复位草稿：ESC / 右上角 X / 取消 都视为放弃本次编辑
+const resetEditorDraft = () => {
+  editorSession.value++
+  editingId.value = ''
+  draftTitle.value = ''
+  draftContent.value = ''
+}
+
+// Ctrl+S / Cmd+S 保存（标题与正文输入框共用，事件冒泡到编辑容器）
+const onEditorKeydown = (event) => {
+  if (!isSaveShortcut(event)) return
+  event.preventDefault()
+  savePrompt()
+}
+
 const savePrompt = async () => {
+  // 键盘路径不受按钮 loading 保护：连续按 Ctrl+S 会重复提交新建
+  if (saving.value) return
   if (!draftTitle.value.trim()) {
     ElMessage.warning('标题不能为空')
     return
@@ -276,6 +310,7 @@ const savePrompt = async () => {
     return
   }
 
+  const session = editorSession.value
   saving.value = true
   try {
     if (editingId.value) {
@@ -283,15 +318,18 @@ const savePrompt = async () => {
     } else {
       await AddPrompt(draftTitle.value, draftContent.value)
     }
-    editorVisible.value = false
     await load()
+    // 会话已切换（保存在途时关闭并重新打开编辑）：不得关闭当前弹窗
+    if (session !== editorSession.value) return
+    editorVisible.value = false
   } catch (e) {
     handleError('保存提示词失败：', e)
     // 列表已过期（条目被其他端删除）：刷新后关闭编辑弹窗，避免对不存在的
     // 条目反复重试；刷新还能把新数据带回列表。
     if (e?.code === ErrorCode.PromptNotFound) {
-      editorVisible.value = false
       await load()
+      if (session !== editorSession.value) return
+      editorVisible.value = false
     }
   } finally {
     saving.value = false

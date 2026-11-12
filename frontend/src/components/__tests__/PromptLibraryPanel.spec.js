@@ -60,7 +60,14 @@ const stubs = {
       <slot name="footer" />
     </div>`,
     props: ['modelValue', 'title', 'width'],
-    emits: ['update:modelValue']
+    emits: ['update:modelValue', 'opened', 'closed'],
+    watch: {
+      // 对齐真实 EP：打开后 emit opened（延后一 tick 等输入框渲染完），关闭后 emit closed
+      modelValue(value) {
+        if (value) this.$nextTick(() => this.$emit('opened'))
+        else this.$emit('closed')
+      }
+    }
   }
 }
 
@@ -433,5 +440,110 @@ describe('PromptLibraryPanel', () => {
 
     expect(mocks.message.error).toHaveBeenCalled()
     expect(wrapper.findAll('.prompt-item')).toHaveLength(0)
+  })
+
+  it('新建弹窗打开后聚焦标题输入框，光标在末尾', async () => {
+    const selSpy = vi.spyOn(HTMLInputElement.prototype, 'setSelectionRange')
+    mocks.list.mockResolvedValue([])
+    // attachTo 后 focus 才真正作用于 document.activeElement，避免空输入框恒为 0 的假阳性断言
+    const wrapper = mount(PromptLibraryPanel, { global: { stubs }, attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+
+    const title = wrapper.find('[data-field="title"]').element
+    expect(document.activeElement).toBe(title)
+    expect(selSpy).toHaveBeenCalledWith(0, 0)
+    wrapper.unmount()
+  })
+
+  it('编辑弹窗打开后光标落在原标题末尾', async () => {
+    // jsdom 写入 value 时会把光标放到末尾，以显式 setSelectionRange 入参为准
+    const selSpy = vi.spyOn(HTMLInputElement.prototype, 'setSelectionRange')
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('.prompt-item')[0].find('[data-action="edit"]').trigger('click')
+    await flushPromises()
+
+    const title = wrapper.find('[data-field="title"]').element
+    expect(title.value).toBe('代码评审')
+    expect(selSpy).toHaveBeenCalledWith('代码评审'.length, '代码评审'.length)
+  })
+
+  it('Ctrl+S / Cmd+S 在标题或正文输入时保存并阻止默认行为', async () => {
+    const wrapper = await mountPanel([])
+    mocks.add.mockResolvedValue({ id: 'new' })
+
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-field="title"]').setValue('快捷键话术')
+    await wrapper.find('[data-field="content"]').setValue('正文内容')
+
+    const ctrlS = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+    wrapper.find('[data-field="title"]').element.dispatchEvent(ctrlS)
+    await flushPromises()
+
+    expect(ctrlS.defaultPrevented).toBe(true)
+    expect(mocks.add).toHaveBeenCalledWith('快捷键话术', '正文内容')
+
+    // 再次新建后从正文输入框按 Cmd+S，验证容器级监听覆盖两个输入框
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-field="title"]').setValue('第二段')
+    await wrapper.find('[data-field="content"]').setValue('正文二')
+    const cmdS = new KeyboardEvent('keydown', { key: 'S', metaKey: true, bubbles: true, cancelable: true })
+    wrapper.find('[data-field="content"]').element.dispatchEvent(cmdS)
+    await flushPromises()
+
+    expect(cmdS.defaultPrevented).toBe(true)
+    expect(mocks.add).toHaveBeenCalledWith('第二段', '正文二')
+  })
+
+  it('保存在途时关闭并重新打开，完成回调不关闭新弹窗也不清空新草稿', async () => {
+    let resolveAdd
+    mocks.add.mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    const wrapper = await mountPanel([])
+
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-field="title"]').setValue('第一条')
+    await wrapper.find('[data-field="content"]').setValue('正文一')
+    await wrapper.find('[data-action="save"]').trigger('click')
+
+    // 保存未完成：关闭弹窗（ESC / X 均走 @closed 复位）
+    wrapper.findComponent('.el-dialog').vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    // 重新打开并输入新内容
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-field="title"]').setValue('第二条')
+
+    resolveAdd({ id: 'new' })
+    await flushPromises()
+
+    expect(wrapper.find('.el-dialog').exists()).toBe(true)
+    expect(wrapper.find('[data-field="title"]').element.value).toBe('第二条')
+  })
+
+  it('弹窗关闭即复位草稿，重新打开不带入上次内容', async () => {
+    const wrapper = await mountPanel([])
+
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-field="title"]').setValue('未保存的标题')
+    await wrapper.find('[data-field="content"]').setValue('未保存的正文')
+
+    // 真实 EP 由 ESC/X/取消按钮关闭弹窗并触发 closed，stub 手动置 false 模拟
+    wrapper.findComponent('.el-dialog').vm.$emit('update:modelValue', false)
+    await flushPromises()
+
+    await wrapper.find('[data-action="create"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-field="title"]').element.value).toBe('')
+    expect(wrapper.find('[data-field="content"]').element.value).toBe('')
+    expect(wrapper.find('.dialog-title').text()).toBe('新建提示词')
   })
 })
