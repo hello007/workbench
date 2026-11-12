@@ -832,3 +832,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 253: 提示词面板弹窗与替换预览优化
+
+**Date**: 2026-11-12
+**Task**: 提示词面板弹窗与替换预览优化
+**Branch**: `master`
+
+### Summary
+
+编辑弹窗加宽至 1040px/94vw 并修正 textarea 下限落点；填写弹窗新增实时替换预览与三类高亮（填写值/默认值/未填保留），深浅色适配；新增 segmentPlaceholders 单点保证预览与复制同源；沉淀 Vue scoped :global 踩坑、尺寸分档与对比度口径。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dc47e4d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
