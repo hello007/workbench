@@ -898,3 +898,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 255: WorkBench 白屏卡死排查与恢复
+
+**Date**: 2026-11-13
+**Task**: WorkBench 白屏卡死排查与恢复
+**Branch**: `master`
+
+### Summary
+
+诊断安装版白屏假死：定性为 WebView2 renderer 主线程运行中猝死（11:10:17 锚定，非崩溃/非代码/非产物），taskkill 重启恢复正常。沉淀排障条目至 docs/agent-resources/troubleshooting/（临时解法已验证），索引新增「运行时故障」分类。遗留决策：watchdog 自愈或复发时 procdump -hang 留现场。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee0219e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
