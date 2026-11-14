@@ -964,3 +964,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 257: 沉淀 E2E 焦点与光标断言鉴别力范式
+
+**Date**: 2026-11-14
+**Task**: 沉淀 E2E 焦点与光标断言鉴别力范式
+**Branch**: `master`
+
+### Summary
+
+docs/spec/e2e-testing.md 新增 §13：判定表（草稿保留/DOM复用/值非空）、四步加固（置0→保留草稿关闭→重开+expando 探针钉复用）、不可鉴别的三条记录口径、实现形态对照、先例索引，并补 EP dialog focus-trap 时序约束（须 @opened+nextTick，E2E 只能 toBeFocused 重试）。AGENTS.md 新增关键规则行（201 字符）。排查 23 个『打开即聚焦』入口：实质结论为 AI 对话输入框并无打开即聚焦；可鉴别缺口是重命名三入口（FileTreePanel:1765/DirectoryTree:557/AiChatPanel:658 的 focus+select），建议 P2 补 3 条同构用例；其余空值新建类不补并给理由。两路子 agent 复核（trellis-check 规范 + cavecrew-reviewer 只读事实核查），共修 17 条问题（含清单漏 FolderTree、AiChatPanel 单测无 caret 断言、『唯一落位单点』绝对化等），终态通过。E2E temp-todo-editor + prompt-library-editor 7/7 绿，产品代码零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8fbc7a8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

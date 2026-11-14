@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 256
+- **Total Sessions**: 257
 - **Last Active**: 2026-11-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~966 | Active |
+| `journal-5.md` | ~999 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 257 | 2026-11-14 | 沉淀 E2E 焦点与光标断言鉴别力范式 | `8fbc7a8` | `master` |
 | 256 | 2026-11-14 | E2E 补齐待办全屏编辑与提示词编辑弹窗交互 | `ad18036` | `master` |
 | 255 | 2026-11-13 | WorkBench 白屏卡死排查与恢复 | `ee0219e` | `master` |
 | 254 | 2026-11-12 | 待办与提示词面板编辑焦点与快捷键 | `0009e48` | `master` |
