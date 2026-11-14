@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "校验 §13 判定表与加固步骤可直接照做，先例 file:line 可点击且存在"}
+{"file": ".trellis/tasks/11-14-e2e-focus-assertion/research/focus-entry-inventory.md", "reason": "校验清单覆盖 grep 全量命中点，未覆盖项均已给出不补理由"}
+{"file": "docs/spec/README.md", "reason": "校验两级分流规则：详细契约留 spec，AGENTS.md 仅留钩子，行内不超 250 字符"}

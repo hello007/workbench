@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "焦点/光标断言鉴别力范式的唯一落点（§13），含判定表、四步加固、记录口径、先例索引"}
+{"file": ".trellis/tasks/11-14-e2e-focus-assertion/research/focus-entry-inventory.md", "reason": "全仓「打开即聚焦」入口清单、鉴别力分档与补用例优先级"}
+{"file": "AGENTS.md", "reason": "关键规则行新增（≤250 字符），钩子指向 e2e-testing.md §13"}

@@ -80,3 +80,7 @@ Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`�
 6. 活动栏入口一律经 `activityPanel` / `activityAction` / `openPanel` 语义定位，
    **禁按 `.activity-bar-item` 类名硬编码 nth 索引**（面板增删会使索引整体漂移，
    见 `docs/spec/e2e-testing.md` §5.1）
+7. 「打开即聚焦」断言 `selectionStart === value.length` 对新节点或重新赋值恒真，
+   不能证明 `setSelectionRange` 生效——可鉴别需「置 0 → 保留草稿关闭 → 重开」+
+   expando 探针钉 DOM 复用；每打开都重赋值的场景按不可鉴别记录残余风险，
+   见 `docs/spec/e2e-testing.md` §13

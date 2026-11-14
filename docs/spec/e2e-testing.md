@@ -1,7 +1,7 @@
 # E2E 测试规范（方案 C 混合架构）
 
 > 本文档规定 WorkBench E2E 测试的分层架构、mock 约束、调用断言模式、构建标签隔离与 CI 绑定生成要求。
-> 最后更新：2026-11-11 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）、11-11-playwright-e2e（EP 输入框 data-* 落点）
+> 最后更新：2026-11-14 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）、11-11-playwright-e2e（EP 输入框 data-* 落点）、11-14-e2e-focus-assertion（焦点与光标断言鉴别力）
 
 ## 1. 适用范围
 
@@ -190,7 +190,82 @@ AssetsPanel 以 `v-show` 常驻挂载在 `Home.vue`（非 `v-if`），其子组�
 | 游离 DOM 传播盲区 | 未 `attachTo` 的 wrapper 不在文档树内，`trigger` 事件传播链**不含 window**——window 级捕获监听（如 contextmenu 收旧菜单）在单测中不可触达 | 该用例 `attachTo: document.body`；`window.dispatchEvent` 直派不经传播树不受影响 |
 | 实例泄漏污染计数 | 前序用例 wrapper 未卸载且开着菜单，残留 window 监听被同文件后续用例的全局事件派发连带触发（多实例 × 监听数的注销计数） | 文件级 `enableAutoUnmount(afterEach)` 兜底卸载（触发 onBeforeUnmount 注销） |
 
-## 13. 相关文档
+## 13. 焦点与光标断言的鉴别力（2026-11-14）
+
+**问题**：`expect(selectionStart).toBe(value.length)` 在「打开弹窗即聚焦」场景**多数时候恒真**，不能证明组件调用了 `setSelectionRange`。
+
+**机理**（Chromium 实测）：
+
+1. 向输入控件写入 `value`（首次赋值或任意重新赋值）后，selection 被重置为 `(len, len)`；
+2. 元素失焦后浏览器记忆其 selection，单纯 `focus()` 会**恢复记忆位置**；
+3. 因此只有当「元素已存在 + 值自上次失焦后未被重写 + 值非空」时，`focus()` 恢复旧位置与 `setSelectionRange(len,len)` 才产生数值可分的差异。
+
+### 13.1 判定表
+
+| 条件 | 成立时的含义 |
+|---|---|
+| C1 关闭后草稿保留（值不变） | 重开时值不被重写 |
+| C2 弹窗 DOM 复用（`destroy-on-close` 为默认 false 且未用 `v-if` 卸载） | 元素对象不变，selection 记忆生效 |
+| C3 值非空 | `末尾 ≠ 0`，与「恢复旧位置 0」数值可分 |
+| **C1 ∧ C2 ∧ C3** | **可鉴别** → 按 13.2 加固 |
+| 任一不成立 | **不可鉴别** → 按 13.3 记录口径处理 |
+
+### 13.2 可鉴别场景的四步加固
+
+先例：`frontend/e2e/temp-todo-editor.spec.js:63-100`（加固段 `:85-99`）。
+
+1. **基线**：`toHaveValue` + `toBeFocused` + `selectionStart/End === value.length`；
+2. **制造差异**：`el.setSelectionRange(0, 0)`，同时写 `el.__e2eCaretProbe = 'kept'`（expando 探针）；
+3. **走保留草稿的关闭路径**（右上角 X）；
+4. **重开**：`toBeFocused` → 探针仍为 `kept` → `selectionStart/End === value.length`。
+
+**为什么第 4 步才有鉴别力**：若实现只有 `focus()`，selection 恢复到失焦前的 0；只有 `@opened` 里的 `setSelectionRange(end)` 才能把它移回末尾。
+
+**探针是前提守卫**：它把「DOM 复用」从隐含假设变成断言。若未来加 `destroy-on-close` 或改 `v-if`，节点重建会重新赋值、光标默认回末尾——第 4 步照样通过，但鉴别力归零；探针断言会让该降级**立刻失败**。
+
+**约束**：
+
+- 关闭路径只能选保留草稿的 X——ESC 会复位整条编辑并销毁编辑器（见 `@closed` 分支），保存路径同样退出编辑态，两者都无法制造「同值复用」态；
+- 两次打开之间**禁** `fill()` / 改值，值一旦重写即回退到不可鉴别档；
+- 等待 `@opened` 一律靠 `toBeFocused` 自动重试（`@opened` 在打开动画结束后触发），禁 `waitForTimeout`；
+- 组件侧聚焦必须落在 `@opened`（打开动画结束）而非 `@open`——EP dialog 的 focus-trap 会在 `@open` 阶段把焦点夺回 dialog wrapper，`nextTick` 里的 `input.focus()` 随之被覆盖（先例实测记录 `frontend/src/components/FolderTree.vue:537-542`，jsdom 无 focus-trap 行为故单测测不出）；对应到 E2E，`@opened` 的触发时点由动画时长决定，因此只能用 `toBeFocused` 自动重试覆盖，禁固定等待。
+
+### 13.3 不可鉴别场景的记录口径
+
+两类在用户可见层无法区分：
+
+- **每次打开都重新赋值**：`@closed` 复位草稿 → 重开重新赋初值（先例 `PromptLibraryPanel.vue:287-292`），节点虽复用但值已重写 → 浏览器默认末尾与 `setSelectionRange` 同形；
+- **值恒空**：`末尾 = 0`，与任何实现同形。先例 `frontend/e2e/prompt-library-editor.spec.js:106-117` 的 `selectionStart === 0` 只守「值确为空 + 焦点就位」。
+
+**记录要求**（缺任一条即视为无效覆盖）：
+
+1. 用例头注释或断言旁注明「本断言只守焦点就位，不构成 `setSelectionRange` 鉴别」；
+2. 写明不可鉴别的**具体成因**（重新赋值 / 值恒空 / 节点重建），条件变化时据此重评；
+3. caret 的鉴别职责**下沉单测**：组件单测用 `vi.spyOn(HTMLTextAreaElement/HTMLInputElement.prototype, 'setSelectionRange')` 断言入参（先例 `TempTodoPanel.spec.js:418`、`PromptLibraryPanel.spec.js:446`）；单点工具 `focusInputAtEnd` 自身则由 `focusInput.spec.js:53` 先 `setSelectionRange(0, 0)` 归零、再断言真实 `selectionStart/End` 回到末尾。
+
+**残余风险定性**：不补 E2E 属**可接受**——实现的唯一分歧点在单点工具 `focusInputAtEnd` 内部，已由单测锁定；但评审时**禁**以「E2E 已断言 selectionStart」为由认为该链已覆盖。
+
+### 13.4 实现形态对照（决定该走哪一档）
+
+| 实现形态 | 代码位置 | 档位 |
+|---|---|---|
+| `@opened` + `focusInputAtEnd`（focus + setSelectionRange(end) + scrollTop） | `frontend/src/utils/focusInput.js:40`，调用方 `TempTodoPanel.vue:688`、`PromptLibraryPanel.vue:283` | 值非空且草稿保留时可鉴别（13.2）；否则不可鉴别 |
+| 弹窗 `focus()` + `select()` | `FileTreePanel.vue:1765`、`DirectoryTree.vue:557`、`AiChatPanel.vue:658` | 选区 `(0, len)` 与默认末尾天然不同，**一次断言即可鉴别**，无需四步技巧（当前缺焦点 E2E 断言，评估见任务 11-14-e2e-focus-assertion 的 `research/focus-entry-inventory.md`） |
+| `nextTick` / `setTimeout` / `@opened` + `focus()` | `FileTreePanel.vue:1722,1850`、`DirectoryTree.vue:495`、`AiChatPanel.vue:615`、`ContentPanel.vue:1220`、`FolderTree.vue:543` | 不可鉴别（值恒空、每次重赋值或无 caret 实现） |
+
+### 13.5 先例索引
+
+| 场景 | 文件:行 | 写法 |
+|---|---|---|
+| 可鉴别（四步加固） | `frontend/e2e/temp-todo-editor.spec.js:63-100` | 置 0 + 探针 + X 关闭 + 重开再断言 |
+| 不可鉴别（重新赋值） | `frontend/e2e/prompt-library-editor.spec.js:76-87` | 基线断言（残余风险在文件头 `:15-19` 声明，用例体内无） |
+| 不可鉴别（值恒空） | `frontend/e2e/prompt-library-editor.spec.js:106-117` | 空串位置 0 |
+| 单测 caret 入参 | `frontend/src/components/__tests__/TempTodoPanel.spec.js:418,469,879`；`PromptLibraryPanel.spec.js:446,463` | `spyOn(setSelectionRange)` + 入参断言 |
+| 单测 caret 结果（单点工具） | `frontend/src/utils/__tests__/focusInput.spec.js:53,72` | 置 0 归零 → 调 `focusInputAtEnd` → 断言真实 `selectionStart/End` |
+| 仅焦点断言（非光标） | `frontend/e2e/file-tree.spec.js:263`（筛选框）、`terminal-tabs.spec.js:211`（命令面板） | `toBeFocused` |
+| 单测仅焦点断言（非光标） | `frontend/src/components/__tests__/FolderTree.spec.js:218,226` | 断言 `document.activeElement`（无 caret 断言） |
+
+## 14. 相关文档
 
 - [cross-layer-contracts.md](cross-layer-contracts.md) — mock 返回值形状契约依据（App.d.ts / models.ts 签名同步）
 - [test-stability.md](test-stability.md) — 文件系统时序 flaky 规避

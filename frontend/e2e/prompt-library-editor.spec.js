@@ -11,6 +11,12 @@
  *
  * 与 prompt-library.spec.js 的分工：后者覆盖新建、占位符复制与删除的完整业务链；
  * 本文件只聚焦编辑弹窗的键盘与焦点交互，避免在既有长用例里堆叠断言。
+ *
+ * 光标断言的鉴别力边界：编辑弹窗 `@closed` 复位草稿、重开时重新赋 draftTitle，
+ * 节点即使复用值也已重写，浏览器默认末尾与 setSelectionRange 同形——因此本文件的
+ * 「光标位于原标题末尾 / 空串位置 0」只守焦点就位，不构成 setSelectionRange 鉴别；
+ * caret 入参的鉴别职责由 PromptLibraryPanel.spec.js 的 spyOn 承担
+ * （判定表与记录口径见 docs/spec/e2e-testing.md §13）。
  */
 import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
