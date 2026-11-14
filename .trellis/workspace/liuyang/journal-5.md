@@ -931,3 +931,36 @@ TempTodoPanel 视觉与信息层级重构：内容区限宽 1000px 居中、head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 256: E2E 补齐待办全屏编辑与提示词编辑弹窗交互
+
+**Date**: 2026-11-14
+**Task**: E2E 补齐待办全屏编辑与提示词编辑弹窗交互
+**Branch**: `master`
+
+### Summary
+
+新增 temp-todo-editor.spec.js 与 prompt-library-editor.spec.js 共 7 条 Playwright 用例：打开后焦点与光标末尾、Ctrl+S 保存、ESC 取消整条编辑与 X 保留草稿分流；光标断言经「置 0 + 复用节点重开」加固消除假绿，并经「仅保留 focus」变异验证鉴别力。同步 e2e README 与 docs/spec 测试锚点，产品代码零改动。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ad18036` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
