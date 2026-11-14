@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "检查用例是否符合语义锚、键盘挂载与零固定等待的约定"}
+{"file": "docs/spec/temp-todo.md", "reason": "检查 ESC 取消与 X 保留草稿的断言是否与组件契约一致"}
+{"file": "docs/spec/prompt-library.md", "reason": "检查提示词弹窗 ESC/X 同为取消的断言是否与契约一致"}

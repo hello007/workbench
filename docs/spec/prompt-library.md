@@ -102,5 +102,6 @@
 - `frontend/src/components/__tests__/PromptLibraryPanel.spec.js`：无占位符直复制、弹窗去重、部分填写、默认值 placeholder 提示、未填走默认值、填写覆盖默认值、复制原文保留语法、失败保持、新建校验、编辑、删除确认、搜索、展开、`E_PROMPT_NOT_FOUND` 刷新列表；预览区三类高亮与输入实时更新、复制原文不受预览影响；打开后聚焦标题且光标在末尾、`Ctrl/Cmd+S` 保存并阻止默认、关闭复位草稿。
 - `frontend/src/utils/__tests__/focusInput.spec.js`：原生元素与 ElInput 实例/ stub 根元素解析、光标定位末尾、长文本滚动到底、`Ctrl/Cmd+S` 组合键矩阵（含 Alt/Shift 不命中）。
 - `frontend/e2e/prompt-library.spec.js`：默认值链路的独立用例（新建 `{{页数:1}}` → 不填得默认值 → 填写覆盖 → 复制原文保留语法）；预览区可见性、`ph-unfilled`/`ph-default`/`ph-filled` 文本与切换断言。
+- `frontend/e2e/prompt-library-editor.spec.js`：真实 EP 弹窗下编辑时焦点在标题且光标在末尾（读 `selectionStart`）、新建空标题光标为 0、`Ctrl+S` 调用 `UpdatePrompt`、`ESC` 与右上角 `X` 均取消并复位草稿。
 - `frontend/src/views/__tests__/Home.spec.js`：自定义快捷键打开面板 / 空快捷键不劫持。
 - `frontend/src/test/wails-mock-defaults.js`：四方法默认值（面板常驻挂载即拉取）。

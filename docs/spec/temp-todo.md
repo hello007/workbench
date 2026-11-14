@@ -110,7 +110,7 @@
 | 组件（全屏编辑） | `data-action="expand-editor"` 打开弹窗、正文与标签沿用草稿、打开后焦点落在正文末尾、保存入参、`Ctrl+Enter` / `Ctrl+S` 保存、空正文与保存失败不关闭弹窗、`X` /「返回编辑」关闭后草稿保留、`ESC` 取消整条编辑、保存成功退出编辑态、保存在途关闭弹窗后仍复位 |
 | 组件（条目展示） | 截断才显示「展开」、按钮切换展开/收起文案、未截断无按钮且点击正文不改变展开态；截断判定纯函数覆盖未布局/相等/1px 容差 |
 | 组件（常驻操作） | 四个 `data-action` 图标在未 hover 时仍渲染（防回归到 hover-only） |
-| E2E | `frontend/e2e/temp-todo-import.spec.js`：真实面板链路预览汇总 3/2、开关切到 5、确认后 `AddTempTodos` 入参 3/5 条且字段对齐 `TempTodoDraft`；fixture 文件名取历史日期规避未来时刻钳制 |
+| E2E | `frontend/e2e/temp-todo-import.spec.js`：真实面板链路预览汇总 3/2、开关切到 5、确认后 `AddTempTodos` 入参 3/5 条且字段对齐 `TempTodoDraft`；fixture 文件名取历史日期规避未来时刻钳制。`frontend/e2e/temp-todo-editor.spec.js`：真实 EP 弹窗打开后焦点在正文且光标在末尾（读 `selectionStart`）、`Ctrl+S` 落库并退出编辑态、`ESC` 取消整条编辑、`X` 保留草稿四分流 |
 
 ## 6. 前端实现单点
 

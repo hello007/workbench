@@ -1,0 +1,4 @@
+{"file": "docs/spec/temp-todo.md", "reason": "全屏编辑形态与关闭语义真相源：焦点落末尾、ESC 取消整条编辑、X 保留草稿、Ctrl+S 保存"}
+{"file": "docs/spec/prompt-library.md", "reason": "提示词编辑弹窗与键盘交互契约：@opened 聚焦标题末尾、容器级 Ctrl+S、关闭统一复位草稿"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 用例约定：语义锚定位、键盘入口挂载竞态、禁 waitForTimeout 与固定 sleep"}
+{"file": "frontend/e2e/README.md", "reason": "E2E 新增用例约定：从 fixtures import、wailsOverrides 覆盖、调用链断言方式"}
