@@ -7,6 +7,7 @@ import {
   startSessionAutoSave
 } from '../useSessionState'
 import { useDirectoryStore, useUiStore } from '../../store'
+import { SIDEBAR_PANELS } from '../../store/sidebarPanels'
 
 // 复用 setup.js 全局 mock（GetSessionState→null / SaveSessionState→true 已注入 wails-mock-defaults）
 // 用 vi.importMock 拿到 mock 引用并按用例 override
@@ -172,6 +173,48 @@ describe('useSessionState - applySessionState', () => {
   it('非法 activePanel 被忽略（保持默认 directory）', () => {
     const uiStore = useUiStore()
     const touched = applySessionState({ activePanel: 'invalid-panel' })
+    expect(touched).toBe(false)
+    expect(uiStore.activePanel).toBe('directory')
+  })
+
+  it('空串 / 缺失 activePanel 保持当前面板不写回（白名单判定前置非空守卫）', () => {
+    const uiStore = useUiStore()
+    uiStore.activePanel = 'stats'
+    for (const state of [{ activePanel: '' }, { activePanel: null }, { activePanel: undefined }, {}]) {
+      const touched = applySessionState(state)
+      expect(touched, '无有效面板字段时不应标记恢复').toBe(false)
+      expect(uiStore.activePanel, '空值不覆盖既有面板').toBe('stats')
+    }
+  })
+
+  it('恢复新增一级面板 branchcompare / todo / prompts（白名单漂移修复回归）', () => {
+    const uiStore = useUiStore()
+    for (const panelId of ['branchcompare', 'todo', 'prompts']) {
+      uiStore.activePanel = 'directory'
+      const touched = applySessionState({ activePanel: panelId })
+      expect(touched, `面板 ${panelId} 应恢复`).toBe(true)
+      expect(uiStore.activePanel).toBe(panelId)
+    }
+  })
+
+  it('SIDEBAR_PANELS 全量 id 均可恢复（白名单与其同源，新增面板无需二次登记）', () => {
+    const uiStore = useUiStore()
+    const ids = SIDEBAR_PANELS.map(p => p.id)
+    // 非空守卫：真相源为空时下面的循环零迭代会假通过，此处先固定「至少一个面板且 id 为非空字符串」
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) {
+      expect(typeof id).toBe('string')
+      expect(id.length).toBeGreaterThan(0)
+      uiStore.activePanel = 'directory'
+      const touched = applySessionState({ activePanel: id })
+      expect(touched, `面板 ${id} 应恢复`).toBe(true)
+      expect(uiStore.activePanel).toBe(id)
+    }
+  })
+
+  it('非 SIDEBAR_PANELS 内的自定义面板 id 回退 directory（解耦证明）', () => {
+    const uiStore = useUiStore()
+    const touched = applySessionState({ activePanel: 'custom-plugin-panel' })
     expect(touched).toBe(false)
     expect(uiStore.activePanel).toBe('directory')
   })

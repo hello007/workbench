@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "§12.4 侧边栏面板同源派生口径：SIDEBAR_PANELS 是面板 id 真相源，消费方禁硬编码"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "崩溃恢复会话快照前端编排契约（useSessionState 职责与非法值回落语义）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率 ≥70% 硬门禁，新增/调整测试须满足"}

@@ -1,0 +1,2 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "校验覆盖率四指标 ≥70%，且不得为通过测试放宽门禁"}
+{"file": "docs/spec/e2e-testing.md", "reason": "校验断言口径：语义锚、负用例原样保留、禁硬编码漂移"}

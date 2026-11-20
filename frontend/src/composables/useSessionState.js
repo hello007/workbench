@@ -18,10 +18,14 @@
  */
 import { watch } from 'vue'
 import { useDirectoryStore, useUiStore } from '../store'
+import { SIDEBAR_PANELS } from '../store/sidebarPanels'
 import { GetSessionState, SaveSessionState } from '../../wailsjs/go/main/App'
 
-/** activePanel 合法值集合（与 ActivityBar.vue items 对齐），非法值忽略走默认 directory。 */
-const VALID_PANELS = new Set(['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats'])
+/**
+ * activePanel 合法值集合：自 SIDEBAR_PANELS 派生（唯一真相源），新增面板无需在本文件二次登记，
+ * 非法值忽略走默认 directory。派生不引入额外依赖（sidebarPanels 为零依赖模块）。
+ */
+const VALID_PANELS = new Set(SIDEBAR_PANELS.map(p => p.id))
 
 /** debounce 写入间隔（毫秒），避免高频 IO（每次 store 变化合并为一次写入）。 */
 const SAVE_DEBOUNCE_MS = 2000

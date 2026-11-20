@@ -331,3 +331,4 @@ watch(repoPath, () => resetAiState()) // 切仓库重置任务态 + 取消在途
 ### 3. Contracts
 - Load 损坏降级空快照不阻塞启动（复用 SettingsService 模式 + slog.Warn）。
 - 字段变更须同步 `frontend/wailsjs/` 绑定三处（App.js / App.d.ts / models.ts）。
+- `activePanel` 恢复白名单须自 `frontend/src/store/sidebarPanels.js` 的 `SIDEBAR_PANELS` 派生（零依赖模块），**禁在前端硬编码面板 id 清单**：历史缺口为 `useSessionState.js` 硬编码前 7 个面板，新增的 `branchcompare` / `todo` / `prompts` 崩溃恢复后被判非法并静默回退 `directory`。单测以「参数化遍历 `SIDEBAR_PANELS` 全量 id」锚定同源（新增面板自动覆盖）。
