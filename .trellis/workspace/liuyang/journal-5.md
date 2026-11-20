@@ -997,3 +997,36 @@ docs/spec/e2e-testing.md 新增 §13：判定表（草稿保留/DOM复用/值非
 ### Next Steps
 
 - None - task complete
+
+
+## Session 258: E2E 监听计数 helper 与静态守护
+
+**Date**: 2026-11-20
+**Task**: E2E 监听计数 helper 与静态守护
+**Branch**: `master`
+
+### Summary
+
+新增 frontend/e2e/listenerCounter.js（仅相对增量，缺基线抛错）与 scripts/check-e2e-listener-hooks.mjs（5+2 类禁令、15 例 selftest、CI 接入）；terminal-tabs 改走 helper 且断言语义不变；顺手修复 sidebar-shortcuts 既有 9→10 失效断言；沉淀 e2e-testing.md §12.1 与 AGENTS 关键规则行。验证：全量 E2E 152 passed、npm test 2932 passed、覆盖率 87.17%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `865e334` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
