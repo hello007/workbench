@@ -1063,3 +1063,36 @@ SIDEBAR_PANELS 抽零依赖 sidebarPanels.js，E2E sidebar-shortcuts 全部断�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 260: FileHistoryDialog 覆盖率插桩下的用例超时修复
+
+**Date**: 2026-11-20
+**Task**: FileHistoryDialog 覆盖率插桩下的用例超时修复
+**Branch**: `master`
+
+### Summary
+
+「initialSha 超定位上限未命中」用例在 v8 插桩 + 全量并行下实测 5.5~6.5s，越过 vitest 默认 5s 上限，定性为环境敏感 flaky（裸跑稳定通过；单文件无覆盖率 1.36s、覆盖率 2.7s、全量并行最坏 6.45s）。修复用双层超时：用例级 { timeout: 20000 } + vi.waitFor 显式 { timeout: 15000, interval: 50 }，断言零改动（调用 25 次、终点文案全等、目标 SHA 负断言保留）；未动全局 testTimeout 与组件逻辑。验证：覆盖率全量连跑 3 次全绿（该用例 6453/5494/6274ms）、npm test 2932 用例全绿、四指标 87.17/81.04/85.38/89.82%。沉淀 docs/spec/test-stability.md §8（适用范围/根因实测/方案对照/推荐写法/判定要点/反例/断言要求）+ AGENTS.md 钩子行 202 字符 + README 索引。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a6ee2aea` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

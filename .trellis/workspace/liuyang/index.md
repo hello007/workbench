@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 259
+- **Total Sessions**: 260
 - **Last Active**: 2026-11-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1065 | Active |
+| `journal-5.md` | ~1098 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 260 | 2026-11-20 | FileHistoryDialog 覆盖率插桩下的用例超时修复 | `a6ee2aea` | `master` |
 | 259 | 2026-11-20 | E2E 侧边栏面板顺序同源守护 | `ac234c1c` | `master` |
 | 258 | 2026-11-20 | E2E 监听计数 helper 与静态守护 | `865e334` | `master` |
 | 257 | 2026-11-14 | 沉淀 E2E 焦点与光标断言鉴别力范式 | `8fbc7a8` | `master` |
