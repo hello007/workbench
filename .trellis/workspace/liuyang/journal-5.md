@@ -1096,3 +1096,36 @@ SIDEBAR_PANELS 抽零依赖 sidebarPanels.js，E2E sidebar-shortcuts 全部断�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 261: 崩溃恢复面板白名单与 SIDEBAR_PANELS 同源
+
+**Date**: 2026-11-20
+**Task**: 崩溃恢复面板白名单与 SIDEBAR_PANELS 同源
+**Branch**: `master`
+
+### Summary
+
+useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS 派生，修复 branchcompare/todo/prompts 崩溃恢复被回退 directory；补 4 组单测（含非空守卫防假绿、空值路径回归）；契约沉淀至 cross-layer-contracts 会话快照 §3 与 AGENTS 关键规则行；全量 2936 用例通过、覆盖率四指标 87.17/81.04/85.38/89.82。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6ddc58cd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
