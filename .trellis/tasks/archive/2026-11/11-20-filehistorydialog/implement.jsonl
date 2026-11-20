@@ -1,0 +1,3 @@
+{"file": "docs/spec/test-stability.md", "reason": "目标沉淀文档：现有 Flaky 规范的章节结构（适用范围/根因/方案对照/推荐写法/反例/判定要点），本次新增「前端 v8 插桩放大单用例耗时」须沿用同一结构并追加到 §8 相关文档链接"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前端覆盖率门禁为四指标 ≥70% 硬失败；验收「覆盖率不低于 70% 门禁」的判定依据，且本次不得改动阈值"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端单测分层与用例编写规范（.spec.js 命名、__tests__ 目录、组件挂载形态），本次改动须与既有测试形态一致"}
