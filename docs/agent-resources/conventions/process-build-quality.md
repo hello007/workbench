@@ -13,6 +13,7 @@ targets: [package.json, config, go]
 | 门禁 | 命令 | 生效范围 |
 |------|------|----------|
 | 前端依赖分档一致性 | `node scripts/check-dep-consistency.mjs`（配 `--selftest`） | `frontend/package.json` + lock 三维一致 |
+| E2E 监听 hook 静态守护 | `node scripts/check-e2e-listener-hooks.mjs`（配 `--selftest`） | `frontend/e2e/**`（js/ts/jsx/tsx/mjs/cjs/mts/cts） |
 | Go 静态检查 | `go vet ./...` | 全部 Go 包 |
 | Go 单元测试 | `go test ./...` | 全部 Go 包（含覆盖率门禁：model/server ≥80%、service ≥76%、util ≥40%，阈值见仓根 AGENTS.md） |
 | Go 集成测试 | `go test -tags=integration ./...` | 带 integration 标签的测试 |

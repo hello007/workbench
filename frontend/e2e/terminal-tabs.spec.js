@@ -16,13 +16,13 @@
  *    真实浏览器验证面，jsdom 无层叠/焦点语义测不出）：is-fullscreen fixed 层
  *    z-index 1500、ESC 退出恢复停靠、EP 弹窗（命令面板）内 ESC 仅关弹窗全屏保持
  *    （defaultPrevented + .el-overlay 目标双过滤）、非全屏期 keydown 监听随态
- *    挂载/卸载（window 级 keydown 注册计数——仅 TerminalPanel 全屏监听注册在
- *    window，Home 快捷键监听在 document 不混入）
+ *    挂载/卸载（window 级 keydown 注册计数，走 listenerCounter helper）
  *
  * mock 前置：终端 5 方法缺省已入 wails-mock-defaults.js 基础表（单一数据源）；
  * 本 spec 用 __sequence__ 让 CreateTerminal 按调用序分配可区分的 sessionId。
  */
 import { test, expect, getWailsCalls, activityAction } from './fixtures'
+import { installListenerCounter, listenerSnapshot, listenerDelta } from './listenerCounter'
 
 const shellOverrides = {
   // 平台 Shell 列表（Windows 形态）：默认 Shell 解析收敛首项 powershell，
@@ -151,29 +151,20 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
   test.use({ wailsOverrides: shellOverrides })
 
   test('全屏开合 + ESC 退出 + EP 弹窗内 ESC 仅关弹窗 + 监听随态挂载卸载', async ({ page }) => {
-    // window 级 keydown 注册计数（TerminalPanel 全屏 ESC 监听注册在 window；FolderTree
-    // 右键菜单 ESC 监听同为 window 级但随菜单态挂载、页面加载期不注册；Home 全局快捷键
-    // 监听在 document，不混入计数）。基线一律取 openTerminal 挂载后的快照做相对增量
-    // 断言，禁依赖绝对值——任何组件未来合法注册 window keydown 都不得破坏本用例
-    // （2026-11 教训：绝对断言 toBe(0) 曾因 FolderTree 引入菜单监听而误报）
-    await page.addInitScript(() => {
-      window.__keydownAdded = 0
-      window.__keydownRemoved = 0
-      const add = window.addEventListener.bind(window)
-      const remove = window.removeEventListener.bind(window)
-      window.addEventListener = function (type, listener, options) {
-        if (type === 'keydown') window.__keydownAdded++
-        return add(type, listener, options)
-      }
-      window.removeEventListener = function (type, listener, options) {
-        if (type === 'keydown') window.__keydownRemoved++
-        return remove(type, listener, options)
-      }
-    })
+    // window 级 keydown 注册计数（docs/spec/e2e-testing.md §12.1）。计数一律走
+    // listenerCounter helper（goto 前安装），禁在 spec 内联覆写 addEventListener
+    // （由 scripts/check-e2e-listener-hooks.mjs 在 CI 拦截）。
+    // 当前已知 window 级注册点与排除面：
+    // - TerminalPanel 全屏 ESC 监听：注册在 window，随全屏态挂载/卸载（本用例观测对象）
+    // - FolderTree 右键菜单 ESC 监听：同为 window 级，但随菜单态注册/注销，页面加载期不注册
+    // - Home 全局快捷键监听：注册在 document，不进 window 计数
+    // 基线取 openTerminal 挂载后的快照做相对增量断言，禁依赖绝对值——任何组件未来
+    // 合法注册 window keydown 都不得破坏本用例（2026-11 教训：绝对断言 toBe(0) 曾因
+    // FolderTree 引入菜单监听而误报）
+    await installListenerCounter(page, ['keydown'])
 
     const panel = await openTerminal(page)
-    const addBase = await page.evaluate(() => window.__keydownAdded)
-    const removeBase = await page.evaluate(() => window.__keydownRemoved)
+    const base = await listenerSnapshot(page)
 
     // 点全屏按钮 → is-fullscreen（fixed 层 z-index 1500：低于 EP 弹窗 2001+ 与
     // 右键菜单 2000，保证全屏态弹窗正常置顶）
@@ -182,7 +173,7 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
     await expect(fullscreenPanel).toBeVisible()
     expect(await fullscreenPanel.evaluate((el) => getComputedStyle(el).zIndex)).toBe('1500')
     // 全屏态挂载 window keydown 监听
-    expect(await page.evaluate(() => window.__keydownAdded)).toBe(addBase + 1)
+    expect((await listenerDelta(page, base)).keydown.added).toBe(1)
 
     // 失焦再按 ESC：xterm textarea 持焦时 ESC 被终端消费（过滤规则 c 的真实形态，
     // vim 的 ESC 不得退全屏），点工具栏中段空白（无交互 handler）移出焦点
@@ -192,13 +183,13 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
     // ESC 退出全屏恢复停靠，非全屏期监听随态卸载（不占全局监听）
     await expect(page.locator('.terminal-panel.is-fullscreen')).toHaveCount(0)
     await expect(panel).toBeVisible()
-    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 1)
+    expect((await listenerDelta(page, base)).keydown.removed).toBe(1)
 
     // 再次全屏 + 打开 EP 弹窗（命令面板）：键盘入口有挂载竞态（Home onMounted 注册
     // 全局 keydown 晚于 load 事件），按键 + 断言整体 toPass 重试（e2e-testing.md §6.1）
     await panel.locator('.fullscreen-btn').click()
     await expect(page.locator('.terminal-panel.is-fullscreen')).toBeVisible()
-    expect(await page.evaluate(() => window.__keydownAdded)).toBe(addBase + 2)
+    expect((await listenerDelta(page, base)).keydown.added).toBe(2)
     await panel.locator('.terminal-toolbar').click({ position: { x: 600, y: 18 } })
 
     const dialog = page.locator('.command-palette-dialog')
@@ -215,13 +206,13 @@ test.describe('终端：整窗全屏与全局 ESC 过滤', () => {
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
     await expect(page.locator('.terminal-panel.is-fullscreen')).toBeVisible()
-    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 1)
+    expect((await listenerDelta(page, base)).keydown.removed).toBe(1)
 
     // 弹窗已关（目标不在 .el-overlay 内、无 defaultPrevented）→ ESC 退出全屏 + 卸载监听
     await panel.locator('.terminal-toolbar').click({ position: { x: 600, y: 18 } })
     await page.keyboard.press('Escape')
     await expect(page.locator('.terminal-panel.is-fullscreen')).toHaveCount(0)
     await expect(panel).toBeVisible()
-    expect(await page.evaluate(() => window.__keydownRemoved)).toBe(removeBase + 2)
+    expect((await listenerDelta(page, base)).keydown.removed).toBe(2)
   })
 })

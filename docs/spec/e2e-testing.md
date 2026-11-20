@@ -177,6 +177,9 @@ mock 通道盲区的真实进程生命周期链路覆盖：会话状态真实持
 
 - window 级监听计数 hook 一律以操作后快照为基线取**相对增量**断言，**禁 `toBe(0)` 绝对断言**——任何组件未来合法注册同类型 window 监听都不得破坏用例
 - hook 注释必须列全当前已知的 window 级注册点与排除面（先例：TerminalPanel 全屏监听 / FolderTree 菜单监听注册在 window；Home 全局快捷键在 document 不混入）
+- **计数统一走 helper（2026-11-20 落地）**：`frontend/e2e/listenerCounter.js` 是 E2E 监听计数的唯一入口。`installListenerCounter(page, ['keydown'])` 在 `page.goto` 之前安装（覆写 `window.add/removeEventListener`、按事件类型分组、页面内幂等守卫），`listenerSnapshot(page)` 取基线，`listenerDelta(page, base)` 读相对增量 `{ [type]: { added, removed } }`；helper 只接受基线快照做 delta（缺基线或缺该类型统计即抛错），不提供「断言绝对值 = N」的便捷入口，断言留在 spec（先例 `terminal-tabs.spec.js` 全屏用例）
+- **「禁内联覆写」已落为静态守护**：`scripts/check-e2e-listener-hooks.mjs` 扫描 `frontend/e2e/**`（脚本类扩展名），命中 `window.addEventListener =` / `window.removeEventListener =` / `addEventListener.bind(window)` / `removeEventListener.bind(window)` / `EventTarget.prototype.addEventListener` 即失败并报 `file:line`；唯一放行点是 `frontend/e2e/listenerCounter.js` 本体。CI 在依赖分档一致性检查之后跑 `--selftest` + 正式检查，本地可用 `npm run check:listener-hooks` 直跑。守护同时覆盖 `globalThis` / `self` / `Window.prototype` 别名形态与 `.ts/.mjs` 等扩展名；计数口径为 add/remove 调用次数（非有效注册数，原生去重与 no-op remove 也各计 1 次），基线快照与增量须在同一 document 内读取（`goto`/reload 归零，跨导航 delta 为负）。需要更复杂的监听观测（如 per-listener 身份追踪）时扩展 helper，不得绕过检查
+- **不并入 helper 的例外**：`frontend/src/components/__tests__/FolderTree.spec.js` 的单测计数工具（`expect(counter.added).toBe(0)`）属 §12.2「常驻组件禁页面加载期常驻注册」的**设计校验**，语义是「未使用态应为零」而非「操作前后增量配对」，与 E2E helper 不同源、不迁移
 
 ### 12.2 常驻面板组件的 window 监听须随使用态挂载
 

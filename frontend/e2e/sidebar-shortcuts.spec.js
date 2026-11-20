@@ -34,7 +34,9 @@ const baseSettings = {
   diffToolArgs: '{left} {right}'
 }
 
-const DEFAULT_ORDER = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo']
+// 与 frontend/src/store/settings.js 的 SIDEBAR_PANELS 定义序严格一致（10 项，prompts 末尾）。
+// Alt+1..9 固定映射只覆盖前 9 项，第 10 项 prompts 无 Alt 编号，故 Alt+9 仍指向临时待办。
+const DEFAULT_ORDER = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts']
 
 /** 打开设置弹窗并切到快捷键 tab（导航语义定位 hasText，禁 nth） */
 async function openShortcutsTab(page) {
@@ -120,7 +122,7 @@ test.describe('侧边栏顺序：设置区上移调整', () => {
     const payload = (await getWailsCalls(page, 'SaveSettings'))[0].args[0]
     expect(payload.sidebarOrder[0]).toBe('ai')
     expect(payload.sidebarOrder[1]).toBe('directory')
-    expect(payload.sidebarOrder).toHaveLength(9)
+    expect(payload.sidebarOrder).toHaveLength(10)
 
     // 活动栏即时重排（store 响应式跨组件）
     await expect(page.locator('[data-panel-id]').first()).toHaveAttribute('data-panel-id', 'ai')

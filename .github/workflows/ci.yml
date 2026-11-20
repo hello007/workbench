@@ -55,6 +55,16 @@ jobs:
           node scripts/check-dep-consistency.mjs --selftest
           node scripts/check-dep-consistency.mjs
 
+      # 2.6 E2E 监听计数 hook 静态守护：E2E spec 内联覆写 window.addEventListener /
+      #    removeEventListener（含 bind(window) / EventTarget.prototype 变体）一律拦截，
+      #    计数统一走 frontend/e2e/listenerCounter.js 的相对增量 helper，防 §12 绝对基线
+      #    事故回流（e2e-testing.md §12.1）。唯一放行点 listenerCounter.js 本体；
+      #    --selftest 注入违规/合规 fixture 自证检查器有效（与上一检查同形态）。
+      - name: E2E 监听计数 hook 静态守护
+        run: |
+          node scripts/check-e2e-listener-hooks.mjs --selftest
+          node scripts/check-e2e-listener-hooks.mjs
+
       # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.10；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5

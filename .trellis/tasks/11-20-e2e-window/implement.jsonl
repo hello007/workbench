@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "§12 相对增量禁令、常驻监听随态挂载、单测 spy gotcha；§13 断言鉴别力——helper 设计与 spec 改造的直接契约"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端测试分层与 E2E 规范：禁 waitForTimeout、统一 fixtures 入口"}
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "CI 门禁清单与「禁擅自引入检查工具」约束；本次新增检查脚本已获用户授权，须沿用既有 --selftest 两步形态接入"}
