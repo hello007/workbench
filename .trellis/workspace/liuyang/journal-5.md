@@ -1030,3 +1030,36 @@ docs/spec/e2e-testing.md 新增 §13：判定表（草稿保留/DOM复用/值非
 ### Next Steps
 
 - None - task complete
+
+
+## Session 259: E2E 侧边栏面板顺序同源守护
+
+**Date**: 2026-11-20
+**Task**: E2E 侧边栏面板顺序同源守护
+**Branch**: `master`
+
+### Summary
+
+SIDEBAR_PANELS 抽零依赖 sidebarPanels.js，E2E sidebar-shortcuts 全部断言派生并断渲染序列；新增 check-e2e-sidebar-panels.mjs（--selftest 11 例、CLI 位置参数与阈值边界经审核修正）接入 CI 2.7；沉淀 e2e-testing.md §12.4、AGENTS 规则行、门禁清单；登记 useSessionState 白名单缺项与组件单测硬编码两条待办。验证：npm test 2932 passed、E2E 全量 152 passed + sidebar 3 连跑、覆盖率 4 指标 81%-90%。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac234c1c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
