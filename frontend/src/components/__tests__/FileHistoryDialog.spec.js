@@ -226,7 +226,10 @@ describe('FileHistoryDialog', () => {
     expect(rows[20].classes()).toContain('is-located')
   })
 
-  it('initialSha 超定位上限未命中：info 提示并不再无限扫描', async () => {
+  // 满 25 页扫描（累计渲染 6500 行）在 v8 插桩 + 全量并行下实测最坏 6.5s，逼近
+  // vitest 默认 5s 用例上限（test-stability.md「插桩放大单用例耗时」）；超时与
+  // 轮询边界显式写在本用例，断言强度不变
+  it('initialSha 超定位上限未命中：info 提示并不再无限扫描', { timeout: 20000 }, async () => {
     const target = 'f'.repeat(40)
     // 恒返回满页且每页 SHA 唯一（永不命中目标）
     GetFileCommitHistory.mockImplementation((_path, _limit, offset) => {
@@ -241,9 +244,14 @@ describe('FileHistoryDialog', () => {
 
     // 上限 500 条 = 25 页（20 起步每轮 +20 至 500 止）；终点信号（info 提示）
     // 用 vi.waitFor 轮询等待，扫描链完成后精确断言调用次数防无限扫描
-    await vi.waitFor(() => {
-      expect(ElMessage.info).toHaveBeenCalledWith('该提交不在最近 500 条提交中')
-    })
+    // 轮询上限显式抬到 15s：默认 1s 在插桩/并行下会先于扫描链完成而超时；
+    // 全量并行实测最坏 6.5s，取 2 倍余量，用例级 20s 超时作为外层兜底
+    await vi.waitFor(
+      () => {
+        expect(ElMessage.info).toHaveBeenCalledWith('该提交不在最近 500 条提交中')
+      },
+      { timeout: 15000, interval: 50 }
+    )
     expect(GetFileCommitHistory).toHaveBeenCalledTimes(25)
     expect(ElMessage.info.mock.calls[0][0]).not.toContain(target)
   })

@@ -1,7 +1,7 @@
 # 测试稳定性规范（Flaky 规避）
 
-> 本文档规定 WorkBench 测试中依赖文件系统时序、环境端口等外部状态的 flaky 规避方案与正反例。
-> 最后更新：2026-09-23 · 来源任务：09-11-filetree-cache-mtime-flaky、09-23-testapp-startwebserve-startupmatrix
+> 本文档规定 WorkBench 测试中依赖文件系统时序、环境端口、覆盖率插桩开销等外部状态的 flaky 规避方案与正反例。
+> 最后更新：2026-11-20 · 来源任务：09-11-filetree-cache-mtime-flaky、09-23-testapp-startwebserve-startupmatrix、11-20-filehistorydialog
 
 ## 1. 适用范围
 
@@ -136,7 +136,89 @@ Close 返回端口号，Close 到后续 `Start` 真实绑定之间存在 TOCTOU 
 规则：能直接绑 `:0` 的用例一律直传 `"127.0.0.1:0"`，禁新增非必要 `freePort`
 调用；确需具体端口的用例在 freePort 注释处留痕说明。
 
-## 8. 相关文档
+## 8. 前端覆盖率插桩放大单用例耗时
+
+### 8.1 适用范围
+
+前端单测中**单次遍历/渲染量大**的用例：逐页扫描链（多次串行 `await`）、大列表挂载（数百行以上）、大 diff 渲染等。此类用例在 `npm test` 下稳定通过，但在 `npm run test:coverage`（v8 插桩 + 全量多 worker 并行）下耗时被放大数倍，逼近或越过 vitest 默认 `testTimeout: 5000`。
+
+### 8.2 根因
+
+v8 插桩为每行/每分支增加计数开销，配合全量套件多 worker 的 CPU 争用，放大倍数随用例的计算与 DOM 操作量上升。实测 `FileHistoryDialog` 的 25 页扫描用例（累计渲染 6500 行）：
+
+| 运行形态 | 耗时 |
+|---|---|
+| 单文件、无覆盖率 | 1356 ms |
+| 单文件、v8 覆盖率 | 2699 ms |
+| 全量并行、v8 覆盖率 | 4793 ms（距 5000 ms 上限 207 ms） |
+
+全量并行连测 3 次该用例分别为 6453 / 5494 / 6274 ms，均超过默认 5000 ms——即此用例在覆盖率门禁下**必然**偶发失败，而非极端个例。失败与代码提交无关，纯环境敏感 flaky；同文件只扫 2 页的相邻用例覆盖率下仅 53 ms，不受影响。
+
+### 8.3 方案对照
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| A. 用例级超时 + 显式轮询参数 | `it('...', { timeout: 20000 }, fn)`，`vi.waitFor(fn, { timeout: 15000, interval: 50 })` | **推荐**：影响面精确到该用例，其他用例保持默认守卫强度 |
+| B. 文件级 `vi.setConfig({ testTimeout })` | 整个 spec 文件放宽 | 文件内其他用例失守默认超时，仅在整文件均为重链路时考虑 |
+| C. 全局 `testTimeout` | 改 `vitest.config.js` | **禁止**：会把其他用例的真实变慢一并掩盖 |
+| D. 缩短扫描/渲染量 | 改被测逻辑或减少断言 | **禁止**：等于放松断言与业务语义 |
+
+### 8.4 推荐写法
+
+`frontend/src/components/__tests__/FileHistoryDialog.spec.js`「initialSha 超定位上限未命中」范式：
+
+```js
+// 满 25 页扫描在 v8 插桩 + 全量并行下实测最坏 6.5s，逼近默认 5s 上限
+it('initialSha 超定位上限未命中：info 提示并不再无限扫描', { timeout: 20000 }, async () => {
+  // ...
+  // 轮询上限显式抬到 15s：默认 1s 在插桩/并行下会先于扫描链完成而超时，
+  // 用例级 20s 超时作为外层兜底
+  await vi.waitFor(
+    () => {
+      expect(ElMessage.info).toHaveBeenCalledWith('该提交不在最近 500 条提交中')
+    },
+    { timeout: 15000, interval: 50 }
+  )
+  expect(GetFileCommitHistory).toHaveBeenCalledTimes(25)
+})
+```
+
+先例：`BranchCompareDiffViewer.spec.js`「大 diff 截断保护」同样以 `{ timeout: 20000 }` 承载 5000 行渲染。
+
+### 8.5 判定要点
+
+- 仅当该用例**在无覆盖率单跑下耗时已达数百毫秒以上**、且失败形态是「testTimeout 超时」而非断言失败时才适用；断言类失败一律排查真实缺陷，禁以加超时掩盖。
+- 用例级超时须与**显式轮询参数**配套：`vi.waitFor` 默认 `timeout: 1000`，只抬用例超时仍可能先死在轮询上限。
+- 超时值按「全量并行实测最坏值」留足余量并在注释中写明依据：用例级超时约 ×3（6.5s → 20s）、轮询上限约 ×2（6.5s → 15s）；禁写成无依据的大数（如 60000）。
+- 仍然**禁 `sleep` / 固定等待**：等待语义一律由 `vi.waitFor` 轮询表达。
+
+### 8.6 反例（错误做法）
+
+```js
+// 反例 1：只加用例超时，轮询仍用默认 1s —— 先死在 vi.waitFor 上，超时值形同虚设
+it('...', { timeout: 20000 }, async () => {
+  await vi.waitFor(() => { expect(ElMessage.info).toHaveBeenCalledWith('...') })
+})
+
+// 反例 2：全局放宽 vitest.config.js —— 其他用例的真实变慢被一并掩盖
+test: { testTimeout: 20000 }
+
+// 反例 3：用固定等待消化扫描链 —— 既不确定又拖慢全部运行
+await new Promise((r) => setTimeout(r, 3000))
+expect(GetFileCommitHistory).toHaveBeenCalledTimes(25)
+```
+
+正例见 §8.4：双层超时显式落在该用例，轮询语义不变、断言原样保留。
+
+### 8.7 断言要求
+
+超时调整**只允许**新增参数，以下断言必须原样保留——它们是该用例的唯一价值所在：
+
+- 扫描终点文案全等（`toHaveBeenCalledWith('该提交不在最近 500 条提交中')`），证明「500 条上限」这一上限常量未被改坏；
+- 调用次数精确断言（`toHaveBeenCalledTimes(25)`），是「未无限扫描」的唯一信号，**禁**改为 `toBeGreaterThan` / `toHaveBeenCalled()` 等等价性更弱的写法；
+- 目标 SHA 不出现在提示文案的负断言，防止提示泄露内部标识。
+
+## 9. 相关文档
 
 - [测试覆盖率分层门禁](test-coverage-gate.md) — service ≥76% 基线，本任务改动后覆盖率 77.7%
 - `service/filetree_cache_test.go:286` `TestInvalidateCache_BypassesStaleCache` — 同款注入陈旧缓存范式（验证 clearPath 语义）
