@@ -65,6 +65,15 @@ jobs:
           node scripts/check-e2e-listener-hooks.mjs --selftest
           node scripts/check-e2e-listener-hooks.mjs
 
+      # 2.7 E2E 侧边栏面板顺序同源守护：顺序/数量真相源是 frontend/src/store/sidebarPanels.js
+      #    的 SIDEBAR_PANELS，spec 必须导入派生；E2E 内再次出现硬编码面板 id 名单（同行 ≥3 个
+      #    已知 id）即失败并报 file:line，防 f0cb6e5 双份名单漂移回流（e2e-testing.md §12.4）。
+      #    --selftest 注入违规/合规 fixture 自证检查器有效（与上一检查同形态）。
+      - name: E2E 侧边栏面板顺序同源守护
+        run: |
+          node scripts/check-e2e-sidebar-panels.mjs --selftest
+          node scripts/check-e2e-sidebar-panels.mjs
+
       # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.10；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5

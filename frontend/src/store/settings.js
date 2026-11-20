@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { GetSettings, SaveSettings, GetShellConfigs } from '../../wailsjs/go/main/App'
+// 面板元数据拆出零依赖模块：E2E 与静态守护直接导入，避免连带引入 vue/pinia/wailsjs
+import { SIDEBAR_PANELS, SIDEBAR_DEFAULT_ORDER } from './sidebarPanels'
 
 /**
  * 默认快捷键配置
@@ -28,28 +30,10 @@ const ALLOWED_SINGLE_KEYS = new Set([
   'arrowup', 'arrowdown', 'arrowleft', 'arrowright'
 ])
 
-/**
- * 侧边栏面板元数据（id + label 真相源；icon 组件引用留 ActivityBar.vue 按 id 映射）。
- * 数组顺序即默认顺序。ActivityBar 渲染与 Home 全局快捷键（Alt+数字按序号切换）
- * 共用 orderedPanels，保证两处消费同一顺序、设置区调整后即时一致。
- */
-export const SIDEBAR_PANELS = [
-  { id: 'directory', label: '工作目录' },
-  { id: 'ai', label: 'AI 功能' },
-  { id: 'ai-chat', label: 'AI 对话' },
-  { id: 'toolbox', label: '工具箱' },
-  { id: 'assets', label: '素材管理' },
-  { id: 'dashboard', label: '状态看板' },
-  { id: 'stats', label: '仓库统计' },
-  { id: 'branchcompare', label: '分支对比' },
-  { id: 'todo', label: '临时待办' },
-  // 第 10 个面板：Alt+1..9 固定映射只覆盖前 9 项（sidebarShortcutIndex 只认 1-9），
-  // 本面板可达性由可自定义快捷键（DEFAULTS.openPromptLibrary）补位。
-  { id: 'prompts', label: '提示词' }
-]
+// 面板元数据真相源在 ./sidebarPanels（零依赖模块），此处仅重新导出保持既有消费面不变
+export { SIDEBAR_PANELS } from './sidebarPanels'
 
 const SIDEBAR_PANEL_IDS = new Set(SIDEBAR_PANELS.map(p => p.id))
-const SIDEBAR_DEFAULT_ORDER = SIDEBAR_PANELS.map(p => p.id)
 
 /**
  * 归一化侧边栏顺序配置：剔除未知 id（面板已移除的历史残留）、重复 id 保留首次

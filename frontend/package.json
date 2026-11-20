@@ -13,7 +13,8 @@
     "e2e:desktop": "playwright test --config playwright.desktop.config.js",
     "e2e:install": "playwright install chromium",
     "e2e:report": "playwright show-report",
-    "check:listener-hooks": "node ../scripts/check-e2e-listener-hooks.mjs"
+    "check:listener-hooks": "node ../scripts/check-e2e-listener-hooks.mjs",
+    "check:sidebar-panels": "node ../scripts/check-e2e-sidebar-panels.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

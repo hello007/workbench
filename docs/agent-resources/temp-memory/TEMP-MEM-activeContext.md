@@ -19,6 +19,9 @@
 - **[技术债务名称]**：[简要描述代码、架构或文档中已知但暂未处理的技术债务及补齐建议]。
 -->
 
+- **[useSessionState 面板白名单缺项]**：`frontend/src/composables/useSessionState.js` 的 `VALID_PANELS` 仅含前 7 个面板，缺 `branchcompare` / `todo` / `prompts`，崩溃恢复时这些面板的 activePanel 被判非法回退 `directory`；建议改为从 `frontend/src/store/sidebarPanels.js` 的 `SIDEBAR_PANELS` 派生（与 11-20-e2e-sidebar-panels 同源方案一致）。
+- **[组件单测硬编码侧边栏名单]**：`ActivityBar.spec.js:132/272/286`、`SettingsPanel.spec.js:810`、`Home.spec.js:1578` 各写一份面板 id 列表（部分仅 9 项，靠 `normalizeSidebarOrder` 补齐形成假通过），存在与 E2E 同类漂移风险；是否改为派生需先决定「字面量断言钉住产品决策」与「同源防漂移」的取舍，并据此决定是否把 `scripts/check-e2e-sidebar-panels.mjs` 扫描面扩展到组件单测。
+
 ## 更新时机
 
 **立即更新**的情况（agent 遇到以下场景必须主动更新本文件）：

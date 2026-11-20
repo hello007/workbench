@@ -1,7 +1,7 @@
 # E2E 测试规范（方案 C 混合架构）
 
 > 本文档规定 WorkBench E2E 测试的分层架构、mock 约束、调用断言模式、构建标签隔离与 CI 绑定生成要求。
-> 最后更新：2026-11-14 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）、11-11-playwright-e2e（EP 输入框 data-* 落点）、11-14-e2e-focus-assertion（焦点与光标断言鉴别力）
+> 最后更新：2026-11-20 · 来源任务：09-13-e2e-key-flows、09-13-e2e-submodule-ai-mock、10-21-e2e-coverage（挂起解析器 + EventsEmit 广播范式）、11-11-playwright-e2e（EP 输入框 data-* 落点）、11-14-e2e-focus-assertion（焦点与光标断言鉴别力）、11-20-e2e-sidebar-panels（侧边栏面板顺序同源）
 
 ## 1. 适用范围
 
@@ -192,6 +192,19 @@ AssetsPanel 以 `v-show` 常驻挂载在 `Home.vue`（非 `v-if`），其子组�
 | window spy 跨用例泄漏 | 后续用例再 `spyOn` 时 bind 到上一用例的 spy 自身，mockImplementation 透传即无限递归（计数爆炸 + `Maximum call stack size exceeded`） | spy 用例组独立 `describe` + `afterEach(() => vi.restoreAllMocks())` |
 | 游离 DOM 传播盲区 | 未 `attachTo` 的 wrapper 不在文档树内，`trigger` 事件传播链**不含 window**——window 级捕获监听（如 contextmenu 收旧菜单）在单测中不可触达 | 该用例 `attachTo: document.body`；`window.dispatchEvent` 直派不经传播树不受影响 |
 | 实例泄漏污染计数 | 前序用例 wrapper 未卸载且开着菜单，残留 window 监听被同文件后续用例的全局事件派发连带触发（多实例 × 监听数的注销计数） | 文件级 `enableAutoUnmount(afterEach)` 兜底卸载（触发 onBeforeUnmount 注销） |
+
+### 12.4 侧边栏面板顺序同源（2026-11-20）
+
+**事故背景**：`f0cb6e5` 新增第 10 个面板（提示词）后，`frontend/e2e/sidebar-shortcuts.spec.js` 的 `DEFAULT_ORDER` 仍是 9 项、`toHaveLength(9)` 直接失败，直到任务 11-20-e2e-window 顺手修复。根因是「面板默认顺序」在业务侧与 E2E 侧各写一份，业务侧增删面板时测试侧无任何机制感知。
+
+**落地方案**：
+
+- **真相源拆零依赖模块**：`frontend/src/store/sidebarPanels.js` 独占 `SIDEBAR_PANELS`（`id + label`，数组序即默认顺序）与派生的 `SIDEBAR_DEFAULT_ORDER`；`settings.js` 仅导入并重新导出，公共导出与消费面不变。**不得直接 import `settings.js`**——它静态依赖 `vue` / `pinia` / `wailsjs` 生成产物，后者在 E2E 的 node 运行时无法解析（无扩展名、非入库）。
+- **E2E 派生断言**：spec 从 `../src/store/sidebarPanels` 导入 `SIDEBAR_PANELS`，顺序、数量、`Alt+N` 目标、tooltip 文案全部派生（`panelAt(n)`）；另断言活动栏 `[data-panel-id]` 渲染序列 `toEqual(DEFAULT_ORDER)`。面板增删时用例自动跟随，零手工同步。
+- **静态守护防回流**：`scripts/check-e2e-sidebar-panels.mjs` 扫描 `frontend/e2e/**`，同一行出现 **≥3 个**已知面板 id 字符串字面量即判「又写了一份名单」并报 `file:line`；同时要求 `sidebar-shortcuts.spec.js` 必须从 `store/sidebarPanels` 导入真相源。阈值 3 使单 id 语义定位（`activityPanel(page, 'directory')`）与 2 项筛选条件放行。
+- **自证与 CI**：脚本带 `--selftest`（注入违规/合规 fixture，含阈值边界、嵌套目录 `.ts`、收敛点未导入、真相源空/重复 id 共 11 用例）；CI 在 2.6 监听守护之后跑 `--selftest` + 正式检查，本地 `npm run check:sidebar-panels`。形态与 §12.1 监听守护一致。
+
+**边界**：逐行正则不剥离注释（一行凑够 3 个 id 的注释同样报违规）；跨行数组（一行一个 id）不检测；只认真相源中已解析出的 id。
 
 ## 13. 焦点与光标断言的鉴别力（2026-11-14）
 

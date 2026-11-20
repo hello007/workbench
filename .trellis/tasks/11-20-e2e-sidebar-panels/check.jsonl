@@ -1,0 +1,3 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "校验 E2E 改造是否守住 §5.2 语义锚、§6.1 挂载竞态重试、§12 相对增量与静态守护范式"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "校验测试分层合规：spec 只从 fixtures 导入、无 waitForTimeout、未破坏覆盖率门禁"}
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "校验新检查工具接入形态：零依赖零网络、--selftest 自证、CI 两步、本地 npm 脚本入口"}
