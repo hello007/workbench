@@ -1,0 +1,4 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "§12.4 侧边栏面板同源守护先例：零依赖静态脚本 + --selftest + CI 两步 + 本地 npm 脚本的完整范式，本次图标映射守护直接沿用"}
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "新增检查工具须获用户授权并在 §1 真实门禁清单登记；本任务由用户明确要求新增守护脚本，需同步更新门禁表"}
+{"file": "docs/spec/prompt-library.md", "reason": "§5「新增一级面板须同步」六处清单含 panelIconMap；本次守护落地后需在该节注明漏加由 check-sidebar-panel-icons.mjs CI 拦截"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "前端测试分层与静态守护边界：确认本任务采用静态脚本而非组件渲染单测，不新增 wailsjs/EP 挂载成本"}

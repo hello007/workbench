@@ -1,0 +1,4 @@
+{"file": "docs/spec/e2e-testing.md", "reason": "校验守护脚本形态对齐 §12.4：零依赖读文本、--selftest fixture 自证、CI 先 selftest 后正式检查、本地 npm 入口"}
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "校验新检查工具已登记 §1 门禁表、未经授权不引入额外工具、未改写既有构建配置"}
+{"file": "docs/spec/prompt-library.md", "reason": "校验 §5 面板注册清单补充与 AGENTS 规则行结论一致，未遗漏 panelIconMap 守护说明"}
+{"file": "docs/agent-resources/conventions/testing-strategy.md", "reason": "校验未违反前端测试分层：npm test 保持全绿、未放宽既有断言、未以静态脚本替代必要的业务单测"}
