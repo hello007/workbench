@@ -11,8 +11,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
  * 数据态（directories/selectedDirectoryId/selectedNode 等）仍留 Home.vue，批次5/6 处理。
  */
 export const useUiStore = defineStore('ui', () => {
-  // 活动栏当前面板：'directory' | 'ai' | 'ai-chat' | 'toolbox' | 'assets' |
-  // 'dashboard' | 'stats' | 'branchcompare' | 'todo' | 'prompts'
+  // 活动栏当前面板：面板 id 以 store/sidebarPanels.js 的 SIDEBAR_PANELS 为准
   const activePanel = ref('directory')
 
   // 终端3：可见性 / 高度 / 跟随目录
