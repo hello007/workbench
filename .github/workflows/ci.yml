@@ -74,6 +74,15 @@ jobs:
           node scripts/check-e2e-sidebar-panels.mjs --selftest
           node scripts/check-e2e-sidebar-panels.mjs
 
+      # 2.8 侧边栏面板图标映射对齐守护：ActivityBar.vue 的 panelIconMap 键集必须与
+      #    frontend/src/store/sidebarPanels.js 的 SIDEBAR_PANELS 全量 id 双向一致——新增面板
+      #    漏加图标键、删面板残留死映射均失败并报 file:line，防新增面板静默渲染空图标
+      #    （prompt-library.md §5）。--selftest 注入 fixture 自证检查器有效（与上一检查同形态）。
+      - name: 侧边栏面板图标映射对齐守护
+        run: |
+          node scripts/check-sidebar-panel-icons.mjs --selftest
+          node scripts/check-sidebar-panel-icons.mjs
+
       # 3. 安装 Go 1.26（对齐 release.yml 与 go.mod toolchain go1.26.10；setup-go 默认缓存 go module/build）
       - name: 安装 Go
         uses: actions/setup-go@v5

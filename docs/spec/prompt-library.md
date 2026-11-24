@@ -92,6 +92,8 @@
 | `model/settings.go` | `ShortcutOpenPromptLibrary` 字段（json key 须与前端 `shortcutOpenPromptLibrary` **逐字一致**，不一致时保存被 Go 静默丢弃） |
 | `frontend/wailsjs/` | App.js / App.d.ts / models.ts 三处手工同步 |
 
+> `panelIconMap` 漏加或删除面板后的残留键由 `scripts/check-sidebar-panel-icons.mjs` 在 CI 拦截（`--selftest` + 正式检查两步），双向比对 `SIDEBAR_PANELS` 全量 id；新增/删除面板时无需手工同步检查器。
+
 `Alt+1..9` 是固定映射，只覆盖前 9 个面板；第 10 个面板起没有固定快捷键，可达性由自定义快捷键补位（默认空，不占键）。
 
 ## 6. 测试点位

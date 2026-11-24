@@ -15,6 +15,7 @@ targets: [package.json, config, go]
 | 前端依赖分档一致性 | `node scripts/check-dep-consistency.mjs`（配 `--selftest`） | `frontend/package.json` + lock 三维一致 |
 | E2E 监听 hook 静态守护 | `node scripts/check-e2e-listener-hooks.mjs`（配 `--selftest`） | `frontend/e2e/**`（js/ts/jsx/tsx/mjs/cjs/mts/cts） |
 | E2E 侧边栏面板顺序同源守护 | `node scripts/check-e2e-sidebar-panels.mjs`（配 `--selftest`） | `frontend/e2e/**` 内硬编码面板 id 名单 + `sidebar-shortcuts.spec.js` 同源导入 |
+| 侧边栏面板图标映射对齐守护 | `node scripts/check-sidebar-panel-icons.mjs`（配 `--selftest`） | `ActivityBar.vue` 的 `panelIconMap` 键集 ↔ `sidebarPanels.js` 的 `SIDEBAR_PANELS` id 集双向一致 |
 | Go 静态检查 | `go vet ./...` | 全部 Go 包 |
 | Go 单元测试 | `go test ./...` | 全部 Go 包（含覆盖率门禁：model/server ≥80%、service ≥76%、util ≥40%，阈值见仓根 AGENTS.md） |
 | Go 集成测试 | `go test -tags=integration ./...` | 带 integration 标签的测试 |

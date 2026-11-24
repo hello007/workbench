@@ -14,7 +14,8 @@
     "e2e:install": "playwright install chromium",
     "e2e:report": "playwright show-report",
     "check:listener-hooks": "node ../scripts/check-e2e-listener-hooks.mjs",
-    "check:sidebar-panels": "node ../scripts/check-e2e-sidebar-panels.mjs"
+    "check:sidebar-panels": "node ../scripts/check-e2e-sidebar-panels.mjs",
+    "check:sidebar-panel-icons": "node ../scripts/check-sidebar-panel-icons.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
