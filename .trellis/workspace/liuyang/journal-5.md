@@ -1129,3 +1129,36 @@ useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 262: 侧边栏面板图标映射对齐守护
+
+**Date**: 2026-11-24
+**Task**: 侧边栏面板图标映射对齐守护
+**Branch**: `master`
+
+### Summary
+
+新增 scripts/check-sidebar-panel-icons.mjs 静态守护，双向比对 ActivityBar 的 panelIconMap 与 SIDEBAR_PANELS；CI 2.8 + package.json 入口；--selftest 22 用例；同步 process-build-quality 门禁表、prompt-library §5、AGENTS 规则行（347 字符）。两轮 subagent 审核修复行号偏移、注释内花括号 fail-open、顶层非对象项静默跳过、模板引号干扰等缺陷。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62125234` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
