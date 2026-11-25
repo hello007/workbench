@@ -9,8 +9,7 @@
  
 | 文档 | 关键字 | 审核状态 | 到期日 |
 |------|--------|----------|--------|
-
-*暂无条目。登记格式示例：`| docs/agent-resources/troubleshooting/TS-001-<描述>.md | <核心现象> | 已审核 | YYYY-MM-DD |`*
+| [claude-integration-test-env.md](troubleshooting/claude-integration-test-env.md) | claude 集成测试 Not logged in / settings.json env 未注入 / ANTHROPIC_AUTH_TOKEN | 已审核 | 2027-05-24 |
 
 ## 代码质量门禁
 
