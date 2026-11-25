@@ -1196,3 +1196,36 @@ useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 264: 排查 E2E 与后端覆盖率并行资源冲突
+
+**Date**: 2026-11-25
+**Task**: 排查 E2E 与后端覆盖率并行资源冲突
+**Branch**: `master`
+
+### Summary
+
+定位并修复两类并行失败根因：Go ./... 遍历 frontend 非点号目录与 Playwright 重建 test-results 竞态（E2E 产物改落 .e2e-dist/.e2e-artifacts）、chat-task:started 与 output 顺序竞态（started 前移至写 stdin 前）。coverage-check.sh 失败保留真实输出；并行 4 轮全绿，覆盖率基线不变。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `331bb207` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
