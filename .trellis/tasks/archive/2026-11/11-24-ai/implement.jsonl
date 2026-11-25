@@ -1,0 +1,10 @@
+{"file": "docs/spec/ai-structured-output.md", "reason": "json-schema 与 structured_output 提取链路，生成器复用"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "wailsjs 三处同步与 AppError 契约"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 service 方法的装配规范"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误处理与错误码同步"}
+{"file": "docs/spec/browser-channel.md", "reason": "RPCHiddenMethods 纯桌面方法登记"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "弹窗与表单视觉规范"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "前后端接口契约规范"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 组件设计规范"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾"}
+{"file": ".trellis/tasks/11-24-ai/prd.md", "reason": "本任务需求与决策"}

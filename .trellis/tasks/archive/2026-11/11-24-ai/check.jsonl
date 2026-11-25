@@ -1,0 +1,7 @@
+{"file": "docs/spec/test-coverage-gate.md", "reason": "前后端覆盖率分层门禁"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 单测与 mock 规范"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "绑定同步检查"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "错误码三处同步检查"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "视觉规范检查"}
+{"file": "docs/agent-resources/conventions/coding-api-contracts.md", "reason": "接口契约检查"}
+{"file": "docs/agent-resources/conventions/coding-vue-style.md", "reason": "Vue 规范检查"}
