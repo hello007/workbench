@@ -1229,3 +1229,36 @@ useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 265: T0 个人看板指标口径锁定
+
+**Date**: 2026-11-25
+**Task**: T0 个人看板指标口径锁定
+**Branch**: `master`
+
+### Summary
+
+完成 T0 阶段 0 决策：确认两条前提假设（本仓即 WorkBench、仅聚合工作台内数据），用 Signal Check 三问锁定 5 个上板指标 M1 待收尾仓库/M2 久未推进仓库/M3 待办积压/M4 AI 成本/M5 AI 成功率，排除清单 12 项。新增 docs/spec/dashboard-metrics.md 口径契约并登记 README 索引与 AGENTS 关键规则钩子。子 agent 审核纠正 AI 历史保留期 30 天→90 天（aiTaskHistoryMaxDays），同步 T1/父任务 4 路→3 域 5 卡，标注 useRecentAccess 不上卡。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64cb180d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
