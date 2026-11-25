@@ -11,7 +11,7 @@
 
 ## 已有数据（零采集成本）
 
-`GetDashboardStatuses`（pin 仓库 dirty/ahead/behind/stash）、`useRecentAccess`（最近访问 50 条）、`temp_todos.json`、`AiTaskHistoryStats`。ECharts 基建见 `RepoStatsChart.vue`；`v-show` + `v-loading` + `requestSeq` 竞态守卫见 `StatsView.vue`。
+`GetDashboardStatuses`（pin 仓库 dirty/ahead/behind/stash）、`useRecentAccess`（最近访问 50 条，**不上上板卡片，仅作入口导航辅助**：T0 Signal Check 判定 Q1 弱、Q3 否）、`temp_todos.json`、`AiTaskHistoryStats`。ECharts 基建见 `RepoStatsChart.vue`；`v-show` + `v-loading` + `requestSeq` 竞态守卫见 `StatsView.vue`。上板卡片口径以 `docs/spec/dashboard-metrics.md` 的 M1–M5 为准。
 
 ## 契约同步清单
 
@@ -19,7 +19,7 @@
 
 ## 验收标准（可测试）
 
-一屏可见 4 路数据且下钻可用；`wails generate module` 后 `go test ./...`、`npm run build`、覆盖率门禁全部通过；未新增任何采集层或 LLM 调用。
+一屏可见 3 域 5 卡（M1–M5，口径见 `docs/spec/dashboard-metrics.md`）且下钻可用；`wails generate module` 后 `go test ./...`、`npm run build`、覆盖率门禁全部通过；未新增任何采集层或 LLM 调用。
 
 ## 不做的事
 

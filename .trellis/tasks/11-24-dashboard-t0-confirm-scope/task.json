@@ -3,7 +3,7 @@
   "name": "dashboard-t0-confirm-scope",
   "title": "T0 确认评估前提并锁定上板指标",
   "description": "确认两条关键假设并用 Signal Check 三问锁定不超过 5 个上板指标，写死排除清单。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

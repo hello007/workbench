@@ -15,7 +15,7 @@ Trellis 没有 `dependsOn` / 阻塞字段，**执行顺序以本清单为准，�
 | 序号 | 子任务目录 | 标题 | 阶段 / 优先级 | 前置 | 完成标志 |
 |---|---|---|---|---|---|
 | 0 | `11-24-dashboard-t0-confirm-scope` | T0 确认评估前提并锁定上板指标 | 阶段 0 / P0 | — | ≤5 项指标清单 + 排除清单 + 两条假设确认 |
-| 1 | `11-24-dashboard-t1-overview-panel` | T1 新增只读今日/本周概览入口 | 阶段 1 / P0 | 0 | 一屏可见 4 路数据、可下钻、门禁通过 |
+| 1 | `11-24-dashboard-t1-overview-panel` | T1 新增只读今日/本周概览入口 | 阶段 1 / P0 | 0 | 一屏可见 3 域 5 卡（M1–M5，口径见 `docs/spec/dashboard-metrics.md`）、可下钻、门禁通过 |
 | 2 | `11-24-dashboard-t2-ai-cost-metrics` | T2 将 AI 成本与成功率上浮主视野 | 阶段 1 / P0 | 1 | 成本/成功率可见且与现有面板一致（与 3 并行） |
 | 3 | `11-24-dashboard-t3-time-range-annotations` | T3 统一时间范围控件与数据口径标注 | 阶段 1 / P0 | 1 | 范围切换生效、每路带口径提示（与 2 并行） |
 | 4 | `11-24-dashboard-t4-go-no-go-gate` | T4 按 Go/No-Go 门槛验证 P0 使用闭环 | 阶段 2 / P0 | 2、3 | 给出 Go / No-Go 结论；**No-Go 则终止 5–11** |
@@ -43,7 +43,7 @@ T4 在 P0 上线两周后判定：每周主动打开次数 ≥2，且至少一�
 
 `app_services.go` 两处装配 + `wailsjs` 三处手同步（`App.js` / `App.d.ts` / `models.ts`）；第 11 个面板须自定义快捷键（`Alt+1..9` 已占满），`router/index.js` 不用改；`data/` 写入走 `util.SaveJSON` 原子写 + 损坏留底；日志用 `log/slog`；覆盖率 service ≥76% / 前端 ≥70%；soak 与 goleak 门禁；隐私数据面须加入 `main.go` `RPCHiddenMethods` 并在 `isBrowserChannel()` 隐藏入口。
 
-口径断层必须显式标注：AI 历史 30 天/2000 条、待办已完成 30 天/500 条、审计 5MB×7 档轮转、>5000 commit 采样、ahead/behind 为「相对上次 fetch 的近似值」。
+口径断层必须显式标注：AI 历史 90 天/2000 条、待办已完成 30 天/500 条、审计 5MB×7 档轮转、>5000 commit 采样、ahead/behind 为「相对上次 fetch 的近似值」。
 
 ## 6. 证据强度
 

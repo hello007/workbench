@@ -224,6 +224,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |提交历史→文件级追溯入口：行归属分流单点 useTraceBlame（存在性+类型预判，降级转文件历史）；信箱 pushTraceBlameRequest（seq 递增消费即清）；autoBlameSeq 与 filePreview 同批赋值；互嵌弹窗挂载点必 v-if 外控|[file-level-history.md §7](docs/spec/file-level-history.md)|
 |临时待办 Markdown 导入：解析单点 `parseTempTodoMarkdown`（续行拼回/已完成行跳过/行尾 #标签/文件名日期+未来钳制）；重复=正文去空白全等；`AddMany` 一次落盘失败整批回滚；入口仅桌面模式|[temp-todo.md](docs/spec/temp-todo.md)|
 |新增面板四处同改（`SIDEBAR_PANELS`、`panelIconMap`、`Home` v-show、`SettingsPanel` 快捷键；`panelIconMap` 失配由 `check-sidebar-panel-icons` 守）；`useSessionState` 白名单自 `SIDEBAR_PANELS` 派生；第 10 项起无 `Alt+数字` 固定映射（tooltip 禁拼 `Alt+N`）；提示词 `{{名称:默认值}}` 未填走默认值，`promptPlaceholders.js` 与 Go 同语义|[面板规范](docs/spec/prompt-library.md)、[会话快照](docs/spec/cross-layer-contracts.md)|
+|个人看板 5 指标口径（M1 待收尾仓/M2 久未推进(默认7天)/M3 待办积压/M4 AI 成本/M5 AI 成功率 canceled 不进分母）；M1–M3 快照或全量不加时间窗，范围仅覆盖 M4/M5；behind 标上次 fetch 近似、AI 历史 90 天/2000 条截断须标；统计后端算（M5 需补 CanceledCount）|[dashboard-metrics.md](docs/spec/dashboard-metrics.md)|
 |E2E 可写目录禁落 Go 遍历范围：构建产物 `frontend/.e2e-dist`、工件 `.e2e-artifacts`（`.` 前缀 Go 跳过 `./...`），禁复用 `dist`/`test-results`；`frontend/go.mod` 反例（跨模块 embed 报错）；chat `started` 须先于 `output` 投递|[test-stability.md §9](docs/spec/test-stability.md)|
 ## 5. 项目长期记忆（docs/memory）
 
