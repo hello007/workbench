@@ -22,6 +22,15 @@
           <div class="config-item-id">{{ f.id }}</div>
         </div>
         <el-button class="add-btn" size="small" @click="addNew">+ 新增功能</el-button>
+        <el-button
+          class="add-btn ai-create-btn"
+          size="small"
+          :disabled="browserChannel"
+          :title="browserChannel ? '浏览器访问模式下不可用（生成需本地 claude 子进程）' : '用自然语言描述需求，由 AI 生成配置草稿'"
+          @click="openCreate"
+        >
+          ✨ 自然语言创建
+        </el-button>
         <div class="config-io-btns">
           <el-button size="small" @click="exportConfig">导出配置</el-button>
           <el-button size="small" @click="importConfig">导入配置</el-button>
@@ -44,11 +53,14 @@
           <el-form-item label="描述">
             <el-input v-model="editing.description" />
           </el-form-item>
-          <el-form-item label="斜杠命令" required>
+          <el-form-item label="斜杠命令">
             <el-input v-model="editing.command" placeholder="如 /ab-weekly-report（插件 skill 带命名空间）" />
+            <div class="form-hint form-hint--block">
+              斜杠命令与「参数 → 提示词模板」至少填写一项；纯 prompt 功能可留空
+            </div>
           </el-form-item>
-          <el-form-item label="工作目录" required>
-            <el-input v-model="editing.cwd" placeholder="skill 所在项目根目录（决定 skill 发现与 env 生效）" />
+          <el-form-item label="工作目录">
+            <el-input v-model="editing.cwd" placeholder="skill 所在项目根目录（决定 skill 发现与 env 生效）；纯 prompt 功能可留空" />
           </el-form-item>
           <el-form-item label="授权目录">
             <el-input v-model="addDirsText" placeholder="额外授权目录，逗号分隔（--add-dir）" />
@@ -219,6 +231,9 @@
         <el-button type="primary" :disabled="!hasPreviewItems" :loading="importApplying" @click="applyImport">确认导入</el-button>
       </template>
     </el-dialog>
+
+    <!-- 自然语言创建弹窗：AI 生成配置草稿，回填为新增项（不落盘，保存全部才写文件） -->
+    <AiFunctionCreateDialog v-model:visible="createVisible" @created="onDraftCreated" />
   </el-dialog>
 </template>
 
@@ -227,6 +242,8 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { GetAiFunctions, SaveAiFunctions, ExportAiFunctions, ImportAiFunctions, SaveFile, SaveFileDialog, OpenFileDialog, ReadFileBytes, GetDiscoveredSkills, RefreshDiscoveredSkills } from '../../wailsjs/go/main/App'
 import { decodeBase64Utf8 } from '../utils/base64'
+import { isBrowserChannel } from '../transport'
+import AiFunctionCreateDialog from './AiFunctionCreateDialog.vue'
 import ParamsEditor from './ParamsEditor.vue'
 import FollowUpsEditor from './FollowUpsEditor.vue'
 import EnvEditor from './EnvEditor.vue'
@@ -240,9 +257,55 @@ const emit = defineEmits(['update:visible', 'saved'])
 const functions = ref([])
 const selectedId = ref('')
 const editing = ref(null)
+// 编辑态来源：select() 深拷贝列表项进 editing，此值记录被拷贝项的原 id，
+// 保存时据此回写列表（新增项的 editing 与列表项是同一对象，来源 id 为空串，
+// 回写/删除走对象身份兜底）。
+const editingSourceId = ref('')
 const addDirsText = ref('')
 const tagsText = ref('')
 const saving = ref(false)
+
+// 自然语言创建弹窗：浏览器通道被后端 RPCHiddenMethods 屏蔽，入口禁用并提示
+const browserChannel = isBrowserChannel()
+const createVisible = ref(false)
+
+const openCreate = () => {
+  if (browserChannel) {
+    ElMessage.warning('浏览器访问模式下不可用（生成需本地 claude 子进程）')
+    return
+  }
+  createVisible.value = true
+}
+
+// 草稿回填：补默认字段 + 内存内 ID 唯一化（后端按磁盘配置避让，未保存的新增项需前端再兜底），
+// 追加到列表末尾并选中，右侧表单可继续编辑；不直接落盘。
+const onDraftCreated = (draft) => {
+  if (!draft) return
+  const item = JSON.parse(JSON.stringify(draft))
+  item.addDirs = item.addDirs || []
+  item.tags = item.tags || []
+  item.followUps = item.followUps || []
+  item.pinned = item.pinned || false
+  if (!item.icon) item.icon = 'MagicStick'
+  if (!item.permissionMode) item.permissionMode = 'bypassPermissions'
+  if (!item.completion) item.completion = 'none'
+  if (!item.timeoutMinutes) item.timeoutMinutes = 10
+
+  // 内存内 ID 冲突：按 -2/-3 递增后缀，提示用户实际采用的新 ID
+  const baseId = (item.id || '').trim()
+  let finalId = baseId
+  if (baseId && functions.value.some((f) => f.id === baseId)) {
+    let n = 2
+    while (functions.value.some((f) => f.id === `${baseId}-${n}`)) n++
+    finalId = `${baseId}-${n}`
+    item.id = finalId
+    ElMessage.warning(`ID「${baseId}」与列表内已有项冲突，已改为「${finalId}」`)
+  }
+
+  functions.value.push(item)
+  select(finalId)
+  ElMessage.success('草稿已填入配置，确认后可点「保存全部」')
+}
 
 // 折叠面板：默认展开 params，其余收起
 const activeNames = ref(['params'])
@@ -487,6 +550,7 @@ watch(
     if (v) {
       selectedId.value = ''
       editing.value = null
+      editingSourceId.value = ''
       load()
     }
   }
@@ -494,6 +558,7 @@ watch(
 
 const select = (id) => {
   selectedId.value = id
+  editingSourceId.value = id
   const f = functions.value.find((x) => x.id === id)
   if (!f) return
   // 深拷贝进编辑态（子组件直接改 editing.value.xxx 属性，reactive 触发更新）
@@ -525,11 +590,24 @@ const addNew = () => {
   }
   functions.value.push(item)
   editing.value = item
+  // 新增项的 editing 与列表项同一对象，来源 id 记空串，保存/删除按对象身份兜底
+  editingSourceId.value = ''
   selectedId.value = ''
   addDirsText.value = ''
   tagsText.value = ''
   activeNames.value = ['params']
   syncRawFromForm()
+}
+
+// 定位当前编辑项在列表中的下标：优先按来源 id（深拷贝编辑态），
+// 新增项（来源 id 空）按对象身份；均未命中返回 -1。
+const locateEditingIndex = () => {
+  if (editingSourceId.value) {
+    const idx = functions.value.findIndex((f) => f.id === editingSourceId.value)
+    if (idx >= 0) return idx
+  }
+  const idx = functions.value.indexOf(editing.value)
+  return idx
 }
 
 const removeSelected = async () => {
@@ -542,10 +620,11 @@ const removeSelected = async () => {
   } catch {
     return
   }
-  const idx = functions.value.indexOf(target)
+  const idx = locateEditingIndex()
   if (idx >= 0) functions.value.splice(idx, 1)
   editing.value = null
   selectedId.value = ''
+  editingSourceId.value = ''
 }
 
 // 表单 → 原始 JSON：四块字段任一变化即序列化；序列化结果与当前文本一致则不覆盖（避免 JSON 编辑时回写触发抖动）
@@ -611,14 +690,29 @@ const save = async () => {
     await doSave()
     return
   }
-  if (!item.id.trim() || !item.name.trim() || !item.command.trim() || !item.cwd.trim()) {
-    ElMessage.warning('ID、名称、斜杠命令、工作目录为必填')
+  const id = (item.id || '').trim()
+  const name = (item.name || '').trim()
+  // 与后端 validateFunctions 对齐：ID/名称必填；斜杠命令与提示词模板至少一项非空；
+  // 工作目录选填（纯 prompt 功能不依赖项目级 skill 发现，空则继承父进程目录）。
+  if (!id || !name) {
+    ElMessage.warning('ID 与名称为必填')
     return
   }
-  // id 唯一性
-  const dup = functions.value.filter((f) => f.id === item.id.trim())
-  if (dup.length > 1) {
-    ElMessage.warning(`ID「${item.id}」重复`)
+  const hasCommand = (item.command || '').trim() !== ''
+  const hasTemplate =
+    !!item.params &&
+    typeof item.params === 'object' &&
+    typeof item.params.promptTemplate === 'string' &&
+    item.params.promptTemplate.trim() !== ''
+  if (!hasCommand && !hasTemplate) {
+    ElMessage.warning('斜杠命令与「参数 → 提示词模板」至少填写一项')
+    return
+  }
+  // id 唯一性：排除编辑项自身（editing 是深拷贝，列表中仍是旧 id）
+  const sourceIdx = locateEditingIndex()
+  const duplicated = functions.value.some((f, i) => f.id === id && i !== sourceIdx)
+  if (duplicated) {
+    ElMessage.warning(`ID「${id}」重复`)
     return
   }
   // 字段级校验：失败定位到具体字段（如 followUps[1].label 不能为空）
@@ -627,11 +721,23 @@ const save = async () => {
     ElMessage.warning('配置校验失败：\n' + errors.join('\n'))
     return
   }
-  item.id = item.id.trim()
+  item.id = id
+  item.name = name
+  item.command = (item.command || '').trim()
+  item.cwd = (item.cwd || '').trim()
   item.addDirs = addDirsText.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
   item.tags = tagsText.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
   // params/followUps/env/mcp 已被子组件直接改 editing.value，无需再赋值；followUps 兜底为 []
   item.followUps = item.followUps || []
+  // 回写列表：选中项按来源 id 定位替换（addNew 场景 editing 即列表项，替换为幂等操作）；
+  // 找不到（如被导入流程替换）则追加，避免用户编辑丢失。
+  if (sourceIdx >= 0) {
+    functions.value[sourceIdx] = item
+  } else {
+    functions.value.push(item)
+  }
+  editingSourceId.value = item.id
+  selectedId.value = item.id
   await doSave()
 }
 
@@ -700,6 +806,9 @@ const doSave = async () => {
 .add-btn {
   width: 100%;
   margin-top: 4px;
+}
+.ai-create-btn {
+  margin-left: 0;
 }
 .config-io-btns {
   display: flex;
@@ -770,6 +879,14 @@ const doSave = async () => {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-left: 8px;
+}
+/* 跨行提示：占满 form-item 内容宽度，避免与输入框挤在同一行 */
+.form-hint--block {
+  display: block;
+  width: 100%;
+  margin-left: 0;
+  margin-top: 2px;
+  line-height: 1.5;
 }
 .import-toolbar {
   display: flex;

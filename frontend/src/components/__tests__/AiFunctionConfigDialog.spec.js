@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ElementPlus from 'element-plus'
 import AiFunctionConfigDialog from '../AiFunctionConfigDialog.vue'
+import AiFunctionCreateDialog from '../AiFunctionCreateDialog.vue'
 
 // seed 配置（覆盖 file/form/none + followUps + followUps.input=text 四种形态）
 const seedData = [
@@ -109,7 +110,9 @@ const refreshDiscoveredMock = vi.fn(() => Promise.resolve(discoveredSkills))
 
 vi.mock('../../../wailsjs/go/main/App', () => ({
   GetClaudeDefaultModel: vi.fn(() => Promise.resolve('')),
-  GetAiFunctions: vi.fn(() => Promise.resolve(seedData)),
+  // 每次返回深拷贝：组件会把返回值直接作为可编辑列表（push/替换），
+  // 共享同一数组会让用例间状态互相污染
+  GetAiFunctions: vi.fn(() => Promise.resolve(JSON.parse(JSON.stringify(seedData)))),
   SaveAiFunctions: (...args) => saveAiFunctionsMock(...args),
   ExportAiFunctions: () => exportAiFunctionsMock(),
   ImportAiFunctions: (...args) => importPreviewMock(...args),
@@ -118,7 +121,12 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   OpenFileDialog: (...args) => openFileDialogMock(...args),
   ReadFileBytes: (...args) => readFileBytesMock(...args),
   GetDiscoveredSkills: vi.fn(() => Promise.resolve(discoveredSkills)),
-  RefreshDiscoveredSkills: () => refreshDiscoveredMock()
+  RefreshDiscoveredSkills: () => refreshDiscoveredMock(),
+  // 子组件 AiFunctionCreateDialog 的绑定面（本 spec 不触发生成，仅需模块导出存在）
+  GenerateAiFunctionDraft: vi.fn(() => Promise.resolve({ draft: null, warnings: [], renamed: false })),
+  CancelAiFunctionDraft: vi.fn(() => Promise.resolve(false)),
+  GetDiscoveredSkillsIn: vi.fn(() => Promise.resolve([])),
+  OpenDirectoryDialog: vi.fn(() => Promise.resolve(''))
 }))
 
 // stub 外壳/折叠组件（避免 teleport 与 transition 在 jsdom 下的问题）；
@@ -500,5 +508,140 @@ describe('AiFunctionConfigDialog', () => {
     await clickImportConfig(wrapper)
     expect(ElMessage.error).toHaveBeenCalled()
     expect(saveAiFunctionsMock).not.toHaveBeenCalled()
+  })
+
+  // ---- 自然语言创建入口 ----
+  const clickCreate = async (wrapper) => {
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('自然语言创建'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  const childDialog = (wrapper) => wrapper.findComponent(AiFunctionCreateDialog)
+
+  it('点「自然语言创建」打开生成弹窗', async () => {
+    const wrapper = await createWrapper()
+    expect(childDialog(wrapper).props('visible')).toBe(false)
+    await clickCreate(wrapper)
+    expect(childDialog(wrapper).props('visible')).toBe(true)
+  })
+
+  it('生成草稿回填为新增项并选中，且不直接落盘', async () => {
+    const wrapper = await createWrapper()
+    await clickCreate(wrapper)
+    const draft = {
+      id: 'fresh-generated',
+      name: '生成的周报功能',
+      description: '把会议纪要转成周报',
+      icon: 'Calendar',
+      command: '',
+      cwd: 'D:\\proj',
+      tags: ['周报'],
+      pinned: false,
+      permissionMode: 'bypassPermissions',
+      timeoutMinutes: 5,
+      completion: 'none',
+      params: { type: 'form', label: '输入', promptTemplate: '请生成周报：{{topic}}', fields: [] },
+      followUps: []
+    }
+    childDialog(wrapper).vm.$emit('created', draft)
+    await flushPromises()
+
+    // 列表追加到 5 项，且新项被选中（右侧表单回填草稿字段）
+    expect(wrapper.findAll('.config-item').length).toBe(5)
+    const idInput = wrapper.findAll('input').find((i) => i.element.value === 'fresh-generated')
+    expect(idInput).toBeTruthy()
+    const nameInput = wrapper.findAll('input').find((i) => i.element.value === '生成的周报功能')
+    expect(nameInput).toBeTruthy()
+    // 未点「保存全部」→ 不落盘
+    expect(saveAiFunctionsMock).not.toHaveBeenCalled()
+  })
+
+  it('纯 prompt 草稿（command 空 + promptTemplate 非空）可保存为新增项', async () => {
+    const wrapper = await createWrapper()
+    await clickCreate(wrapper)
+    childDialog(wrapper).vm.$emit('created', {
+      id: 'prompt-only',
+      name: '纯提示词功能',
+      command: '',
+      cwd: '',
+      params: { type: 'form', label: '输入', promptTemplate: '请生成周报：{{topic}}', fields: [] },
+      followUps: []
+    })
+    await flushPromises()
+
+    await clickSave(wrapper)
+    expect(saveAiFunctionsMock).toHaveBeenCalledTimes(1)
+    const saved = saveAiFunctionsMock.mock.calls[0][0]
+    const item = saved.find((f) => f.id === 'prompt-only')
+    expect(item).toBeTruthy()
+    expect(item.command).toBe('')
+    expect(item.params.promptTemplate).toContain('请生成周报')
+  })
+
+  it('斜杠命令与提示词模板皆空时阻断保存', async () => {
+    const wrapper = await createWrapper()
+    const addBtn = wrapper.findAll('button').find((b) => b.text().includes('新增功能'))
+    await addBtn.trigger('click')
+    await flushPromises()
+    wrapper.vm.editing.id = 'empty-both'
+    wrapper.vm.editing.name = '两者皆空'
+    wrapper.vm.editing.command = ''
+    wrapper.vm.editing.params = null
+    await flushPromises()
+
+    await clickSave(wrapper)
+    expect(ElMessage.warning).toHaveBeenCalled()
+    expect(ElMessage.warning.mock.calls[0][0]).toContain('至少填写一项')
+    expect(saveAiFunctionsMock).not.toHaveBeenCalled()
+  })
+
+  it('编辑已选中项后保存，回写后的列表随 SaveAiFunctions 落盘', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    const nameInput = wrapper.findAll('input').find((i) => i.element.value === '生成周报')
+    await nameInput.setValue('生成周报（修订）')
+    await flushPromises()
+
+    await clickSave(wrapper)
+    expect(saveAiFunctionsMock).toHaveBeenCalledTimes(1)
+    const saved = saveAiFunctionsMock.mock.calls[0][0]
+    const item = saved.find((f) => f.id === 'weekly-report')
+    expect(item.name).toBe('生成周报（修订）')
+  })
+
+  it('删除选中项后保存，payload 不再包含该项', async () => {
+    const wrapper = await createWrapper()
+    await clickItem(wrapper, 'weekly-report')
+    const delBtn = wrapper.findAll('button').find((b) => b.text().includes('删除该功能'))
+    await delBtn.trigger('click')
+    await flushPromises()
+
+    await clickSave(wrapper)
+    expect(saveAiFunctionsMock).toHaveBeenCalledTimes(1)
+    const saved = saveAiFunctionsMock.mock.calls[0][0]
+    expect(saved.length).toBe(seedData.length - 1)
+    expect(saved.find((f) => f.id === 'weekly-report')).toBeFalsy()
+  })
+
+  it('草稿 ID 与列表内已有项冲突时自动加 -2 后缀并提示', async () => {
+    const wrapper = await createWrapper()
+    await clickCreate(wrapper)
+    childDialog(wrapper).vm.$emit('created', {
+      id: 'weekly-report',
+      name: '重复 ID 的周报',
+      command: '',
+      cwd: '',
+      params: { type: 'form', label: '输入', promptTemplate: 'x', fields: [] },
+      followUps: []
+    })
+    await flushPromises()
+
+    expect(ElMessage.warning).toHaveBeenCalled()
+    const renamed = wrapper.findAll('input').find((i) => i.element.value === 'weekly-report-2')
+    expect(renamed).toBeTruthy()
+    // 原项未被覆盖
+    expect(wrapper.findAll('.config-item').length).toBe(5)
   })
 })

@@ -31,7 +31,7 @@
 | 仓库元数据 | 5 | `app_repometa.go` |
 | 仓库配置导入导出 | 3 | `app_repo_config.go` |
 | 状态看板 | 7 | `app_dashboard.go` |
-| AI 功能 | 21 | `app_ai.go` |
+| AI 功能 | 24 | `app_ai.go` |
 | AI 对话 | 23 | `app_chat.go` |
 | 会话快照 | 2 | `app_session.go` |
 | 终端 | 6 | `app_terminal.go` |
@@ -342,6 +342,9 @@ skill 聚合触发 AI 任务，并发控制 + 历史归档。AI 任务异步事�
 | `ImportAiFunctions` | `(jsonText) => Promise<ImportPreview>` | 导入 AI 功能（预览新增/冲突/非法） | ImportPreview |
 | `GetDiscoveredSkills` | `() => Promise<SkillDescriptor[]>` | 获取自动发现的 skill 列表 | SkillDescriptor 数组 |
 | `RefreshDiscoveredSkills` | `() => Promise<SkillDescriptor[]>` | 刷新 skill 发现 | SkillDescriptor 数组 |
+| `GetDiscoveredSkillsIn` | `(dir) => Promise<SkillDescriptor[]>` | 扫描指定目录 `.claude/skills`（浏览器 RPC 屏蔽） | SkillDescriptor 数组 |
+| `GenerateAiFunctionDraft` | `(req) => Promise<AiFunctionDraftResult>` | 依自然语言需求生成配置草稿（不落盘，浏览器 RPC 屏蔽） | AiFunctionDraftResult |
+| `CancelAiFunctionDraft` | `() => Promise<boolean>` | 取消进行中的草稿生成（浏览器 RPC 屏蔽） | 是否取消 |
 | `RunAiFunction` | `(functionID, params) => Promise<string>` | 运行 AI 功能（返回 taskID） | taskID |
 | `RunAiFollowUp` | `(taskID, followUpID, params) => Promise<string>` | 运行追问（返回新 taskID） | taskID |
 | `CancelAiTask` | `(taskID) => Promise<boolean>` | 取消 AI 任务 | 是否成功 |

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"workbench/model"
 	"workbench/service"
@@ -50,6 +51,80 @@ func (a *App) RefreshDiscoveredSkills() []*model.SkillDescriptor {
 		return []*model.SkillDescriptor{}
 	}
 	return a.skillDiscoverySvc.Refresh()
+}
+
+// GenerateAiFunctionDraft 依自然语言需求生成 AI 功能配置草稿（纯桌面能力）。
+// 入参 req 的 Description/Cwd/SkillCommand 由前端填写；本方法补全候选 skill 清单
+// （全局已发现 ∪ 指定目录扫描去重）与已有功能 ID 清单后交 service 同步生成。
+// 生成结果不落盘，前端预览后由用户决定是否填入配置表单；取消/关闭不产生副作用。
+// 浏览器通道经 main.go 的 RPCHiddenMethods 屏蔽（生成会拉起本地 claude 子进程）。
+func (a *App) GenerateAiFunctionDraft(req model.AiFunctionDraftRequest) (*model.AiFunctionDraftResult, error) {
+	if a.aiFuncSvc == nil {
+		return nil, fmt.Errorf("AI 功能服务未初始化")
+	}
+	req.Skills = a.collectDraftSkills(req.Cwd)
+	req.ExistingIDs = a.collectAiFunctionIDs()
+	return a.aiFuncSvc.GenerateAiFunctionDraft(&req)
+}
+
+// CancelAiFunctionDraft 取消进行中的自然语言生成，返回是否确有生成被取消。
+func (a *App) CancelAiFunctionDraft() bool {
+	if a.aiFuncSvc == nil {
+		return false
+	}
+	return a.aiFuncSvc.CancelAiFunctionDraft()
+}
+
+// GetDiscoveredSkillsIn 扫描指定目录的 .claude/skills 并返回 skill 列表。
+// 供生成弹窗选定目录后实时刷新候选 skill 下拉；目录为空或不存在返回空切片、不报错。
+// 纯桌面能力，随 GenerateAiFunctionDraft 一并屏蔽浏览器通道。
+func (a *App) GetDiscoveredSkillsIn(dir string) []*model.SkillDescriptor {
+	if a.skillDiscoverySvc == nil {
+		return []*model.SkillDescriptor{}
+	}
+	return a.skillDiscoverySvc.GetDiscoveredSkillsIn(dir)
+}
+
+// collectDraftSkills 汇总候选 skill：全局发现（工作目录/对话目录/插件）∪ 指定目录扫描，
+// 按来源（source + sourceDir）去重，忽略无命令项。
+func (a *App) collectDraftSkills(cwd string) []*model.SkillDescriptor {
+	result := make([]*model.SkillDescriptor, 0)
+	if a.skillDiscoverySvc == nil {
+		return result
+	}
+	seen := make(map[string]bool)
+	add := func(list []*model.SkillDescriptor) {
+		for _, sd := range list {
+			if sd == nil || strings.TrimSpace(sd.Command) == "" {
+				continue
+			}
+			key := sd.Source + ":" + sd.SourceDir
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, sd)
+		}
+	}
+	add(a.skillDiscoverySvc.GetCached())
+	if strings.TrimSpace(cwd) != "" {
+		add(a.skillDiscoverySvc.GetDiscoveredSkillsIn(cwd))
+	}
+	return result
+}
+
+// collectAiFunctionIDs 收集已有功能项 ID（生成结果避让重名用）。只读解析配置，
+// 不触发 LoadAiFunctions 的 seed 合并/损坏回种落盘——生成链路须保持「不落盘」语义；
+// 读取失败按空清单处理，生成不受阻。
+func (a *App) collectAiFunctionIDs() []string {
+	if a.aiFuncSvc == nil {
+		return []string{}
+	}
+	ids := a.aiFuncSvc.ExistingFunctionIDsReadOnly()
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // RunAiFunction 运行功能项主段：按参数规格组装 prompt 后起 claude 子进程。

@@ -84,6 +84,21 @@ func (s *SkillDiscoveryService) Refresh() []*model.SkillDescriptor {
 	return s.GetCached()
 }
 
+// GetDiscoveredSkillsIn 扫描指定目录下的 .claude/skills 并返回发现的 skill 列表。
+// 复用 scanSkillsDir（source=project、cwd=dir、去重键 source+sourceDir），与全量发现
+// 的项目级扫描同口径；目录为空或不存在时返回空切片、不报错（生成弹窗选目录后
+// 实时刷新候选 skill 下拉用）。
+func (s *SkillDiscoveryService) GetDiscoveredSkillsIn(dir string) []*model.SkillDescriptor {
+	dir = strings.TrimSpace(dir)
+	result := make([]*model.SkillDescriptor, 0)
+	if dir == "" {
+		return result
+	}
+	seen := make(map[string]*model.SkillDescriptor)
+	scanSkillsDir(filepath.Join(dir, ".claude", "skills"), "project", dir, seen, &result)
+	return result
+}
+
 // discover 执行全量扫描：用户级 + 工作目录项目级 + 对话目录项目级 + 已安装插件。
 // 去重键 source + ":" + sourceDir，同路径不重复；同名不同来源都保留（source 不同）。
 func (s *SkillDiscoveryService) discover() []*model.SkillDescriptor {

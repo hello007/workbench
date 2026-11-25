@@ -9,6 +9,7 @@
  *    （排队中 -> 运行中 -> 已完成）-> 流式输出渲染
  * 3. 失败流：done 事件带 error -> 「失败」标签 + 错误信息展示
  * 4. 取消链路：运行中点取消 -> CancelAiTask(taskId) 参数正确
+ * 5. 自然语言创建配置草稿：生成弹窗 -> mock 草稿 -> 预览/重命名提示 -> 填入配置为新增项且不落盘
  *
  * 事件 payload 形状对齐 service/ai_function.go emit 数据与 model.AiTaskRunResult
  * （taskId/text/output/exitCode/error/canceled 等字段）。
@@ -145,6 +146,73 @@ test.describe('AI 功能触发流程', () => {
 
       const cancelCalls = await getWailsCalls(page, 'CancelAiTask')
       expect(cancelCalls).toEqual([{ method: 'CancelAiTask', args: ['task-cancel-1'] }])
+    })
+  })
+
+  // 自然语言创建配置草稿：配置管理弹窗 → 生成弹窗 → mock 生成 → 预览 → 填入配置。
+  // 草稿只回填到配置列表不落盘，SaveAiFunctions 零调用。
+  test.describe('自然语言创建配置草稿', () => {
+    test.use({
+      wailsOverrides: {
+        GenerateAiFunctionDraft: {
+          draft: {
+            id: 'weekly-report-gen',
+            name: '生成的周报功能',
+            description: '把会议纪要转成周报',
+            icon: 'Calendar',
+            command: '',
+            cwd: '',
+            addDirs: [],
+            tags: ['周报'],
+            pinned: false,
+            permissionMode: 'bypassPermissions',
+            timeoutMinutes: 5,
+            completion: 'none',
+            params: { type: 'form', label: '输入', promptTemplate: '请生成周报：{{topic}}', fields: [] },
+            followUps: []
+          },
+          warnings: ['ID 与已有功能冲突，已自动重命名'],
+          renamed: true,
+          originalId: 'weekly-report'
+        }
+      }
+    })
+
+    test('输入需求生成草稿 → 预览含重命名提示 → 填入配置为新增项且不落盘', async ({ page }) => {
+      await openAiPanelPage(page)
+
+      await page.getByRole('button', { name: '配置管理' }).click()
+      const createBtn = page.locator('.ai-config-dialog .ai-create-btn')
+      await expect(createBtn).toBeVisible()
+      await createBtn.click()
+
+      const createDialog = page.locator('.ai-create-dialog')
+      await expect(createDialog).toBeVisible()
+      await createDialog.locator('textarea').fill('把会议纪要转成周报')
+      await page.getByRole('button', { name: '生成', exact: true }).click()
+
+      // 生成入参只含前端填写项（Skills/ExistingIDs 由后端补全）
+      const genCalls = await getWailsCalls(page, 'GenerateAiFunctionDraft')
+      expect(genCalls).toEqual([
+        {
+          method: 'GenerateAiFunctionDraft',
+          args: [{ description: '把会议纪要转成周报', cwd: '', skillCommand: '' }]
+        }
+      ])
+
+      // 预览：字段与重命名提示
+      await expect(createDialog.locator('.draft-preview')).toBeVisible()
+      await expect(createDialog.locator('[data-testid="rename-hint"]')).toContainText('weekly-report-gen')
+      await expect(createDialog).toContainText('生成的周报功能')
+
+      await page.getByRole('button', { name: '填入配置' }).click()
+
+      // 只回填配置文件列表，不落盘
+      await expect(
+        page.locator('.ai-config-dialog .config-item', { hasText: '生成的周报功能' })
+      ).toBeVisible()
+      const saveCalls = await getWailsCalls(page, 'SaveAiFunctions')
+      expect(saveCalls).toEqual([])
     })
   })
 })

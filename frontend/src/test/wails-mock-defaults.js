@@ -299,6 +299,13 @@ export const WAILS_MOCK_DEFAULT_RETURN_VALUES = {
   RefreshDiscoveredSkills: [
     { name: 'drawio', description: '画图工具', command: '/drawio', cwd: '', source: 'user', sourceDir: '/h/.claude/skills/drawio', plugin: '' }
   ],
+  // AI 功能自然语言创建（配置弹窗入口，仅用户操作时调用，启动期不触达）：
+  // 默认无在途生成（false = 无任务可取消）、指定目录无 skill；
+  // GenerateAiFunctionDraft 默认空草稿形状对齐 model.AiFunctionDraftResult，
+  // 用例按需 override
+  GenerateAiFunctionDraft: { draft: null, warnings: [], renamed: false },
+  CancelAiFunctionDraft: false,
+  GetDiscoveredSkillsIn: [],
   AddChatDirectory: null,
   ListChatDirectories: [],
   UpdateChatDirectory: true,

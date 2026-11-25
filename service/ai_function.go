@@ -64,6 +64,12 @@ type AiFunctionService struct {
 	// 全局并发信号量，缓冲 = aiTaskMaxConcurrent
 	concurrencySem chan struct{}
 	historySvc     *AiTaskHistoryService // P1-2：历史归档服务（输出文件零拷贝接管 + 元数据持久化）
+
+	// 自然语言生成配置草稿的取消面：draftMu 保护当前生成的 cancel 与代次。
+	// draftSeq 单调递增作代次标识（函数值不可比较，用代次判断 defer 是否清理本轮）。
+	draftMu     sync.Mutex
+	draftCancel context.CancelFunc
+	draftSeq    uint64
 }
 
 // aiTaskRuntime 一个运行中/已完成任务的内部状态
@@ -109,6 +115,20 @@ func NewAiFunctionService(ctx context.Context, configPath string) *AiFunctionSer
 // 供输出文件、历史归档定位 data/ai_task_output、data/ai_task_history 等子目录。
 func (s *AiFunctionService) dataDir() string {
 	return filepath.Dir(s.configPath)
+}
+
+// draftRunDir 草稿生成子进程的工作目录：应用数据目录（存在且为目录时使用），
+// 否则返回空串继承父进程目录。用户所选 cwd 仅用于收集候选 skill 并已写入 prompt，
+// 不作为生成进程 cwd——生成只应产出 JSON，不在用户项目内产生副作用。
+func (s *AiFunctionService) draftRunDir() string {
+	dir := s.dataDir()
+	if dir == "" {
+		return ""
+	}
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		return dir
+	}
+	return ""
 }
 
 // outputDir 运行期输出文件目录（data/ai_task_output/），调用方负责 MkdirAll。
@@ -192,6 +212,41 @@ func (s *AiFunctionService) SaveAiFunctions(funcs []*model.AiFunction) error {
 	return s.saveConfig(funcs)
 }
 
+// ExistingFunctionIDsReadOnly 只读解析本机功能项 ID（自然语言生成草稿避让重名用）。
+//
+// 严格只读：不调用 LoadAiFunctions（该方法在迁移/seed 合并/损坏回种时会写配置文件），
+// 以保证「生成不落盘」。配置文件不存在时返回内置默认项 ID（同样不写盘）；读取或
+// 解析失败按空清单降级（生成不受阻）。
+func (s *AiFunctionService) ExistingFunctionIDsReadOnly() []string {
+	if !util.FileExists(s.configPath) {
+		defaults := defaultAiFunctions()
+		ids := make([]string, 0, len(defaults))
+		for _, fn := range defaults {
+			if fn != nil && strings.TrimSpace(fn.ID) != "" {
+				ids = append(ids, strings.TrimSpace(fn.ID))
+			}
+		}
+		return ids
+	}
+	raw, err := os.ReadFile(s.configPath)
+	if err != nil {
+		Logger().Warn("read ai function config for draft ids failed", "err", err)
+		return nil
+	}
+	funcs, _, err := s.migrateFunctions(raw)
+	if err != nil {
+		Logger().Warn("parse ai function config for draft ids failed", "err", err)
+		return nil
+	}
+	ids := make([]string, 0, len(funcs))
+	for _, fn := range funcs {
+		if fn != nil && strings.TrimSpace(fn.ID) != "" {
+			ids = append(ids, strings.TrimSpace(fn.ID))
+		}
+	}
+	return ids
+}
+
 // saveConfig 以 schema v2 结构 {schemaVersion, functions} 落盘。
 func (s *AiFunctionService) saveConfig(funcs []*model.AiFunction) error {
 	return util.SaveJSON(s.configPath, model.AiFunctionsConfig{
@@ -253,6 +308,693 @@ func (s *AiFunctionService) ImportAiFunctions(jsonText string) (*model.ImportPre
 		}
 	}
 	return preview, nil
+}
+
+// ===== 自然语言生成配置草稿 =====
+
+// aiFunctionDraftTimeoutMinutes 自然语言生成配置的超时（分钟）。
+// 生成 prompt 与输出 schema 固定、无多轮编排，2 分钟足够；超时返回可读错误。
+const aiFunctionDraftTimeoutMinutes = 2
+
+// aiFunctionDraftDisallowedTools 生成进程禁用的工具（写文件/执行命令类）。
+// 与 default 权限模式双保险：生成只允许读取上下文并产出结构化 JSON，绝不落地文件
+// 或执行命令（对齐 chat_service.go 的 --disallowedTools 先例）。
+const aiFunctionDraftDisallowedTools = "Write,Edit,MultiEdit,NotebookEdit,Bash,BashOutput,KillBash,KillShell"
+
+// 生成进程诊断输出（stderr 合并流里的非 JSON 行）截断口径：
+// 单行 500 字符、最多保留 20 行、汇总后 2000 字符，防异常进程刷屏撑爆错误信息。
+const (
+	draftDiagLineMaxRunes  = 500
+	draftDiagMaxLines      = 20
+	draftDiagTotalMaxRunes = 2000
+)
+
+// aiFunctionDraftPromptFieldMaxRunes prompt 中外部 skill 元数据单字段最大长度，
+// 防超长内容挤占 prompt 预算或夹带换行破坏规则段落结构。
+const aiFunctionDraftPromptFieldMaxRunes = 500
+
+// draftClaudeExec 草稿生成的 claude 执行函数（可注入，测试替换避免依赖真机 claude）。
+// 第二参数为生成进程工作目录（应用数据目录，见 draftRunDir），不是用户所选 cwd。
+var draftClaudeExec = runDraftClaudeProcess
+
+// aiFunctionDraftSchema 生成草稿的结构化输出 schema（代码内固定，不允许用户修改）。
+// 常规字段必填；高级字段（env/mcp/addDirs/followUps/outputSchema/pinned）声明为
+// 可选，prompt 约束仅在需求明确提及时产出，避免模型凭空编造。
+const aiFunctionDraftSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "description": "小写英文/数字/短横线组成的功能唯一标识，如 weekly-report"},
+    "name": {"type": "string", "description": "功能名称（中文，简短）"},
+    "description": {"type": "string", "description": "功能描述（中文一句话）"},
+    "icon": {"type": "string", "description": "Element Plus 图标组件名，如 MagicStick"},
+    "command": {"type": "string", "description": "斜杠命令（含命名空间，如 /ab-weekly-report）；纯 prompt 功能填空串"},
+    "cwd": {"type": "string", "description": "工作目录；纯 prompt 功能可填空串"},
+    "tags": {"type": "array", "items": {"type": "string"}, "description": "业务域标签"},
+    "params": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["none", "file", "form", "text"]},
+        "label": {"type": "string"},
+        "startDir": {"type": "string"},
+        "extensions": {"type": "array", "items": {"type": "string"}},
+        "promptTemplate": {"type": "string"},
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {"type": "string"},
+              "label": {"type": "string"},
+              "type": {"type": "string", "enum": ["text", "datetime", "number"]},
+              "placeholder": {"type": "string"},
+              "required": {"type": "boolean"}
+            },
+            "required": ["key", "label", "type"]
+          }
+        },
+        "textFieldKey": {"type": "string"}
+      },
+      "required": ["type"]
+    },
+    "completion": {"type": "string", "enum": ["none", "open_dir", "preview", "copy"]},
+    "timeoutMinutes": {"type": "integer", "minimum": 1, "maximum": 120},
+    "permissionMode": {"type": "string", "enum": ["bypassPermissions", "acceptEdits", "default", "plan"]},
+    "env": {"type": "object", "additionalProperties": {"type": "string"}},
+    "mcp": {"type": "object"},
+    "addDirs": {"type": "array", "items": {"type": "string"}},
+    "followUps": {"type": "array", "items": {"type": "object"}},
+    "outputSchema": {"type": "object"},
+    "pinned": {"type": "boolean"}
+  },
+  "required": ["id", "name", "description", "icon", "command", "cwd", "tags", "params", "completion", "timeoutMinutes", "permissionMode"]
+}`
+
+// aiFunctionDraftPayload 生成结果的结构化输出解析目标（字段与 aiFunctionDraftSchema 对应）。
+type aiFunctionDraftPayload struct {
+	ID             string             `json:"id"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Icon           string             `json:"icon"`
+	Command        string             `json:"command"`
+	Cwd            string             `json:"cwd"`
+	Tags           []string           `json:"tags"`
+	Params         *model.AiParamSpec `json:"params"`
+	Completion     string             `json:"completion"`
+	TimeoutMinutes int                `json:"timeoutMinutes"`
+	PermissionMode string             `json:"permissionMode"`
+	Env            map[string]string  `json:"env"`
+	Mcp            *model.AiMcpConfig `json:"mcp"`
+	AddDirs        []string           `json:"addDirs"`
+	FollowUps      []model.AiFollowUp `json:"followUps"`
+	OutputSchema   json.RawMessage    `json:"outputSchema"`
+	Pinned         bool               `json:"pinned"`
+}
+
+// GenerateAiFunctionDraft 依自然语言需求同步生成一条 AI 功能配置草稿。
+//
+// 独立生成链路：临时固定 OutputSchema + default 权限模式（禁用写/命令类工具）+ 2 分钟
+// 超时，复用 claudeCommandResolver/buildClaudeArgs/parseStreamLine，同步等待进程结束并取
+// structured_output。不注册任务、不发 ai-task:* 事件、不进历史（生成非业务运行）。
+// 并发受全局 concurrencySem 约束（拿到槽位后才起算超时）；同一时刻仅保留一个生成，
+// 重入会取消上一轮。生成后做静态校验与 ID 避让，不试跑。
+func (s *AiFunctionService) GenerateAiFunctionDraft(req *model.AiFunctionDraftRequest) (*model.AiFunctionDraftResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("生成请求不能为空")
+	}
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		return nil, fmt.Errorf("需求描述不能为空")
+	}
+	cwd := strings.TrimSpace(req.Cwd)
+	if cwd != "" {
+		if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
+			return nil, fmt.Errorf("工作目录不存在: %s（可能已被移动或删除，请重新选择）", cwd)
+		}
+	}
+
+	prompt := buildAiFunctionDraftPrompt(description, cwd, req.SkillCommand, req.Skills, req.ExistingIDs)
+
+	parent := s.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	// 基础 ctx 只承载取消（注册到 draftCancel，排队阶段也可取消）；超时在拿到并发
+	// 槽位后再起算，与 RunStage 对齐——排队等待不侵蚀生成预算。
+	baseCtx, cancelBase := context.WithCancel(parent)
+	defer cancelBase()
+
+	// 注册本轮取消面并取代上一轮：前端关闭/重开弹窗重试时，旧调用不再滞留。
+	s.draftMu.Lock()
+	seq := s.draftSeq + 1
+	s.draftSeq = seq
+	if s.draftCancel != nil {
+		s.draftCancel()
+	}
+	s.draftCancel = cancelBase
+	s.draftMu.Unlock()
+	defer func() {
+		s.draftMu.Lock()
+		if s.draftSeq == seq {
+			s.draftCancel = nil
+		}
+		s.draftMu.Unlock()
+	}()
+
+	// 复用全局并发信号量控制同时运行的 claude 子进程数；取消（含用户取消）可中断排队。
+	if s.concurrencySem != nil {
+		select {
+		case s.concurrencySem <- struct{}{}:
+			defer func() { <-s.concurrencySem }()
+		case <-baseCtx.Done():
+			return nil, draftContextError(baseCtx)
+		}
+	}
+
+	// 获取槽位后才起算超时（RunStage 同口径，排队时间不计入生成预算）。
+	ctx, cancelTimeout := context.WithTimeout(baseCtx, aiFunctionDraftTimeoutMinutes*time.Minute)
+	defer cancelTimeout()
+
+	// 生成进程的工作目录固定为应用数据目录（非用户所选 cwd）：用户目录只用于
+	// 收集候选 skill（已写入 prompt），避免生成模型在用户项目内落地文件。
+	structured, resultErr, err := draftClaudeExec(ctx, s.draftRunDir(), prompt)
+	// 取消/超时优先（进程被杀会让 err 变为信号错误，掩盖真实原因）。
+	if ctxErr := draftContextError(ctx); ctxErr != nil {
+		return nil, ctxErr
+	}
+	// claude 常在失败时同时给出 result 事件错误与非 0 退出码（如未登录）：
+	// result 事件的错误文案更可读，优先于 exit status。
+	if resultErr != "" {
+		return nil, fmt.Errorf("生成失败：%s", resultErr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("生成失败: %w", err)
+	}
+	trimmed := bytes.TrimSpace(structured)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, fmt.Errorf("生成结果为空（模型未返回结构化输出）")
+	}
+	var payload aiFunctionDraftPayload
+	if err := json.Unmarshal(trimmed, &payload); err != nil {
+		return nil, fmt.Errorf("解析生成结果失败: %w", err)
+	}
+	return buildAiFunctionDraftResult(&payload, req)
+}
+
+// CancelAiFunctionDraft 取消进行中的自然语言生成，返回是否确有生成被取消。
+// 仅触发 ctx 取消（claude 子进程由 exec.CommandContext 终止），清理由生成调用方负责。
+func (s *AiFunctionService) CancelAiFunctionDraft() bool {
+	s.draftMu.Lock()
+	cancel := s.draftCancel
+	s.draftMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// draftContextError 将生成 ctx 的取消/超时态翻译为可读错误；ctx 正常返回 nil。
+func draftContextError(ctx context.Context) error {
+	switch ctx.Err() {
+	case context.DeadlineExceeded:
+		return fmt.Errorf("生成超时（上限 %d 分钟）", aiFunctionDraftTimeoutMinutes)
+	case context.Canceled:
+		return fmt.Errorf("生成已取消")
+	default:
+		return nil
+	}
+}
+
+// buildAiFunctionDraftPrompt 组装生成草稿的 prompt（纯函数，便于单测）。
+// 携带需求、工作目录、指定 skill、候选 skill 清单与已有 ID，并内嵌生成规则。
+func buildAiFunctionDraftPrompt(description, cwd, skillCommand string, skills []*model.SkillDescriptor, existingIDs []string) string {
+	var sb strings.Builder
+	sb.WriteString("你是 WorkBench 的 AI 功能配置生成助手。请根据用户需求，生成一条可直接运行的 AI 功能配置草稿。\n\n")
+	sb.WriteString("## 用户需求\n")
+	sb.WriteString(description)
+	sb.WriteString("\n\n## 上下文\n")
+	if cwd == "" {
+		sb.WriteString("- 工作目录：未指定\n")
+	} else {
+		sb.WriteString("- 工作目录：" + sanitizePromptField(cwd, aiFunctionDraftPromptFieldMaxRunes) + "\n")
+	}
+	if strings.TrimSpace(skillCommand) == "" {
+		sb.WriteString("- 用户指定 skill：未指定\n")
+	} else {
+		sb.WriteString("- 用户指定 skill（必须使用）：" + sanitizePromptField(skillCommand, aiFunctionDraftPromptFieldMaxRunes) + "\n")
+	}
+
+	sb.WriteString("\n## 可用 skill 候选（来自全局发现与所选目录）\n")
+	wrote := false
+	for _, sd := range skills {
+		if sd == nil {
+			continue
+		}
+		// 外部元数据先压成单行并截断，防换行/超长内容破坏 prompt 段落结构（注入面）。
+		command := sanitizePromptField(sd.Command, aiFunctionDraftPromptFieldMaxRunes)
+		if command == "" {
+			continue
+		}
+		wrote = true
+		sb.WriteString("- command: " + command)
+		sb.WriteString(" | cwd: " + emptyAsDash(sanitizePromptField(sd.Cwd, aiFunctionDraftPromptFieldMaxRunes)))
+		sb.WriteString(" | source: " + emptyAsDash(sanitizePromptField(sd.Source, aiFunctionDraftPromptFieldMaxRunes)))
+		if name := sanitizePromptField(sd.Name, aiFunctionDraftPromptFieldMaxRunes); name != "" {
+			sb.WriteString(" | name: " + name)
+		}
+		if desc := sanitizePromptField(sd.Description, aiFunctionDraftPromptFieldMaxRunes); desc != "" {
+			sb.WriteString(" | description: " + desc)
+		}
+		sb.WriteString("\n")
+	}
+	if !wrote {
+		sb.WriteString("（无）\n")
+	}
+
+	sb.WriteString("\n## 已有功能 ID（新 ID 不得重复）\n")
+	ids := make([]string, 0, len(existingIDs))
+	for _, id := range existingIDs {
+		if v := sanitizePromptField(id, aiFunctionDraftPromptFieldMaxRunes); v != "" {
+			ids = append(ids, v)
+		}
+	}
+	if len(ids) == 0 {
+		sb.WriteString("（无）\n")
+	} else {
+		sb.WriteString(strings.Join(ids, ", "))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(`
+## 生成规则
+1. 用户指定 skill 时，必须使用该 skill 的 command 与 cwd。
+2. 否则若存在语义匹配的 skill，优先包装该 skill：command 取候选清单中的 command（含命名空间），cwd 取该 skill 的 cwd。
+3. 未命中合适 skill 时生成纯 prompt 功能：command 留空，params.type=form 且 params.promptTemplate 写入完整的多行指令，params.fields 定义所需输入字段。
+4. 常规字段全部生成：id（小写英文/数字/短横线，如 weekly-report）、name、description、icon（Element Plus 图标名）、tags、params、completion、timeoutMinutes、permissionMode（默认 bypassPermissions）。
+5. 高级字段（env、mcp、addDirs、followUps、outputSchema、pinned）仅当用户需求明确提及时生成，否则省略或留空。
+6. id 必须避开已有功能 ID；生成结果必须能直接通过功能项校验（id/name 非空，command 与 promptTemplate 至少一个非空）。
+7. 若 command 非空且 params.type 不为 none，则 params.promptTemplate 必须以该 command 开头（至少包含该 command）；运行期有模板时只渲染模板、不会自动拼接 command，模板漏写命令会导致 skill 不被调用。form 类型必须提供非空 promptTemplate。
+`)
+	return sb.String()
+}
+
+// buildAiFunctionDraftResult 将模型输出规范化为草稿并做静态校验（纯函数，便于单测）。
+//   - 用户指定 skill 优先（未命中候选仍以用户选择为准，写入警告）；
+//   - 模型自选 command 未命中候选写警告（不阻断），命中则补全 cwd；
+//   - ID 规范化 + 与已有 ID 冲突时自动加 -2/-3 后缀（写警告）；
+//   - 字段缺失回退默认值；最终须通过 validateFunctions。
+func buildAiFunctionDraftResult(payload *aiFunctionDraftPayload, req *model.AiFunctionDraftRequest) (*model.AiFunctionDraftResult, error) {
+	if payload == nil {
+		return nil, fmt.Errorf("生成结果为空")
+	}
+	warnings := make([]string, 0)
+
+	rawID := strings.TrimSpace(payload.ID)
+	fn := &model.AiFunction{
+		ID:             normalizeDraftID(rawID),
+		Name:           strings.TrimSpace(payload.Name),
+		Description:    strings.TrimSpace(payload.Description),
+		Icon:           strings.TrimSpace(payload.Icon),
+		Command:        strings.TrimSpace(payload.Command),
+		Cwd:            strings.TrimSpace(payload.Cwd),
+		Tags:           normalizeDraftStrings(payload.Tags),
+		Params:         payload.Params,
+		Completion:     strings.TrimSpace(payload.Completion),
+		TimeoutMinutes: payload.TimeoutMinutes,
+		PermissionMode: strings.TrimSpace(payload.PermissionMode),
+		Env:            payload.Env,
+		Mcp:            payload.Mcp,
+		AddDirs:        normalizeDraftStrings(payload.AddDirs),
+		FollowUps:      payload.FollowUps,
+		Pinned:         payload.Pinned,
+	}
+	if rawID != "" && rawID != fn.ID {
+		warnings = append(warnings, fmt.Sprintf("ID %q 含非法字符，已规范化为 %q", rawID, fn.ID))
+	}
+	// 高级字段 outputSchema 仅在模型明确给出对象时保留；"null" 语义按未提供处理。
+	if outputSchema := bytes.TrimSpace(payload.OutputSchema); len(outputSchema) > 0 && string(outputSchema) != "null" {
+		fn.OutputSchema = payload.OutputSchema
+	}
+
+	// skill 绑定：用户指定 > 模型自选匹配 > 纯 prompt。
+	specified := strings.TrimSpace(req.SkillCommand)
+	switch {
+	case specified != "":
+		cand := findSkillByCommand(req.Skills, specified)
+		if cand == nil {
+			if fn.Command != "" && fn.Command != specified {
+				warnings = append(warnings, fmt.Sprintf("指定的 skill %q 不在候选清单中，已忽略模型给出的命令 %q", specified, fn.Command))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("指定的 skill %q 不在候选清单中（可能已被删除），已按该命令生成", specified))
+			}
+			fn.Command = specified
+		} else {
+			if fn.Command != "" && fn.Command != cand.Command {
+				warnings = append(warnings, fmt.Sprintf("模型判断所选 skill 与需求不完全匹配（曾建议 %q），已按你的选择使用 %q", fn.Command, cand.Command))
+			} else if fn.Command == "" {
+				warnings = append(warnings, fmt.Sprintf("模型未选择 skill，已按你的选择使用 %q", cand.Command))
+			}
+			fn.Command = cand.Command
+			fn.Cwd = cand.Cwd
+		}
+	case fn.Command != "":
+		cand := findSkillByCommand(req.Skills, fn.Command)
+		if cand == nil {
+			warnings = append(warnings, fmt.Sprintf("命令 %q 不在 skill 候选清单中，请确认 skill 是否可用", fn.Command))
+		} else if fn.Cwd == "" {
+			fn.Cwd = cand.Cwd
+		}
+	}
+	if fn.Cwd == "" {
+		fn.Cwd = strings.TrimSpace(req.Cwd)
+	}
+
+	// 参数规格归一：type 缺失时按有无模板推断，避免 form 缺 Type 时运行期行为漂移。
+	if fn.Params != nil {
+		fn.Params.Type = strings.TrimSpace(fn.Params.Type)
+		fn.Params.Label = strings.TrimSpace(fn.Params.Label)
+		fn.Params.PromptTemplate = strings.TrimSpace(fn.Params.PromptTemplate)
+		fn.Params.TextFieldKey = strings.TrimSpace(fn.Params.TextFieldKey)
+		if fn.Params.Type == "" {
+			if fn.Params.PromptTemplate != "" {
+				fn.Params.Type = "form"
+			} else {
+				fn.Params.Type = "none"
+			}
+		}
+		switch fn.Params.Type {
+		case "none", "file", "text", "form":
+			// 合法枚举
+		default:
+			warnings = append(warnings, fmt.Sprintf("未知参数类型 %q，已回退为 none", fn.Params.Type))
+			fn.Params.Type = "none"
+		}
+
+		// form 运行期硬性要求 PromptTemplate（BuildStagePrompt form 分支缺模板直接报错）；
+		// 有命令时降级为 none（仍可执行 skill），无命令则交给下方「命令与模板均空」阻断。
+		// file/text 无模板时 BuildStagePrompt 会把参数拼到 command 尾部，仍可正常运行，
+		// 故不强制模板（避免把可运行的文件/文本输入功能误降级）。
+		if fn.Params.Type == "form" && fn.Params.PromptTemplate == "" && fn.Command != "" {
+			warnings = append(warnings, "form 类型缺少 promptTemplate，已降级为 none（仅执行命令，不注入表单参数）")
+			fn.Params.Type = "none"
+		}
+
+		// skill + 参数模板一致性：模板非空时 BuildStagePrompt 只渲染模板，不会自动
+		// 拼接 command；模板漏写命令会导致「配置写着 skill、运行时不调用」。
+		// 等价方案取「模板前自动补 command + 空格」：既保证命令位于 prompt 开头被
+		// claude 按斜杠命令解析，又最小侵入保留用户指令与占位符。
+		if fn.Command != "" && fn.Params.PromptTemplate != "" &&
+			!strings.Contains(fn.Params.PromptTemplate, fn.Command) {
+			fn.Params.PromptTemplate = fn.Command + " " + fn.Params.PromptTemplate
+			warnings = append(warnings, fmt.Sprintf("prompt 模板未包含命令 %q，已自动补到模板开头（否则运行期不会调用该 skill）", fn.Command))
+		}
+	}
+
+	switch fn.Completion {
+	case "":
+		fn.Completion = "none"
+	case "none", "open_dir", "preview", "copy":
+		// 合法枚举，保持
+	default:
+		warnings = append(warnings, fmt.Sprintf("未知完成动作 %q，已回退为 none", fn.Completion))
+		fn.Completion = "none"
+	}
+
+	// 权限模式枚举兜底（与 completion 同口径）：非法值回退默认并告警。
+	switch fn.PermissionMode {
+	case "":
+		fn.PermissionMode = "bypassPermissions"
+	case "bypassPermissions", "acceptEdits", "default", "plan":
+		// 合法枚举，保持
+	default:
+		warnings = append(warnings, fmt.Sprintf("未知权限模式 %q，已回退为 bypassPermissions", fn.PermissionMode))
+		fn.PermissionMode = "bypassPermissions"
+	}
+	if fn.TimeoutMinutes <= 0 {
+		fn.TimeoutMinutes = aiTaskDefaultTimeoutMinutes
+	} else if fn.TimeoutMinutes > 120 {
+		fn.TimeoutMinutes = 120
+	}
+	if fn.Icon == "" {
+		fn.Icon = "MagicStick"
+	}
+	warnings = append(warnings, draftAdvancedFieldWarnings(fn)...)
+
+	// 静态校验（不试跑）：阻断项给出具体原因，其余交 validateFunctions 兜底。
+	if fn.ID == "" {
+		return nil, fmt.Errorf("生成结果缺少合法的功能 ID")
+	}
+	if fn.Name == "" {
+		return nil, fmt.Errorf("生成结果缺少功能名称")
+	}
+	hasCommand := fn.Command != ""
+	hasTemplate := fn.Params != nil && fn.Params.PromptTemplate != ""
+	if !hasCommand && !hasTemplate {
+		return nil, fmt.Errorf("生成结果既没有命令也没有 prompt 模板，无法运行")
+	}
+	if valid, invalidIDs := validateFunctions([]*model.AiFunction{fn}); len(invalidIDs) > 0 || len(valid) != 1 {
+		return nil, fmt.Errorf("生成结果未通过功能项校验")
+	}
+
+	// ID 与已有项冲突时自动加后缀（-2/-3…），前端预览提示。
+	existing := make(map[string]bool, len(req.ExistingIDs))
+	for _, id := range req.ExistingIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			existing[id] = true
+		}
+	}
+	originalID := fn.ID
+	renamed := false
+	if existing[fn.ID] {
+		for i := 2; i <= 99; i++ {
+			candidate := fmt.Sprintf("%s-%d", originalID, i)
+			if !existing[candidate] {
+				fn.ID = candidate
+				renamed = true
+				break
+			}
+		}
+		if !renamed {
+			return nil, fmt.Errorf("功能 ID %q 与已有项冲突，且自动重命名失败（同前缀项过多）", originalID)
+		}
+		warnings = append(warnings, fmt.Sprintf("ID %q 已存在，已自动重命名为 %q", originalID, fn.ID))
+	}
+
+	result := &model.AiFunctionDraftResult{
+		Draft:    fn,
+		Warnings: warnings,
+		Renamed:  renamed,
+	}
+	if renamed {
+		result.OriginalID = originalID
+	}
+	return result, nil
+}
+
+// draftAdvancedFieldWarnings 高级字段非空时提示用户逐项确认。
+// 生成侧对这些字段取保守策略（仅需求明确提及时产出），非空即提示复核，避免
+// 用户直接保存未经确认的 env/mcp/目录等副作用配置。
+func draftAdvancedFieldWarnings(fn *model.AiFunction) []string {
+	if fn == nil {
+		return nil
+	}
+	var warnings []string
+	if len(fn.Env) > 0 {
+		warnings = append(warnings, "已生成环境变量 env，请确认变量名与取值（$ENV: 引用运行时从宿主环境读取）")
+	}
+	if fn.Mcp != nil && len(fn.Mcp.Servers) > 0 {
+		warnings = append(warnings, "已生成 MCP 配置，请确认服务地址、命令与参数")
+	}
+	if len(fn.AddDirs) > 0 {
+		warnings = append(warnings, "已生成附加目录 addDirs，请确认目录存在且可访问")
+	}
+	if len(fn.FollowUps) > 0 {
+		warnings = append(warnings, "已生成后续段 followUps，请确认段 ID、标签与提示词")
+	}
+	if len(fn.OutputSchema) > 0 {
+		warnings = append(warnings, "已生成输出 schema outputSchema，请确认字段结构与前端消费能力匹配")
+	}
+	return warnings
+}
+
+// sanitizePromptField 将外部元数据压成单行并截断：空白（含换行/制表符）折叠为
+// 单个空格，超长按 rune 截断（UTF-8 安全）。用于拼接 skill 元数据进 prompt，
+// 防止换行破坏规则段落结构或超长内容挤占 prompt 预算（注入面防护）。
+func sanitizePromptField(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	if maxRunes <= 0 {
+		return s
+	}
+	return truncateRunes(s, maxRunes)
+}
+
+// runDraftClaudeProcess 拉起一次 claude 同步生成，解析 result 事件的 structured_output。
+// 不写任务输出文件、不发事件；stdout/stderr 合并，逐行读到进程结束。
+//
+// 安全加固：生成进程以 plan 权限模式运行并显式禁用写文件/命令执行类工具，
+// 确保只产出结构化 JSON；工作目录取应用数据目录（runDir），不使用用户所选 cwd。
+// draftClaudeArgs 组装草稿生成进程的 claude 参数（纯函数，便于单测钉住安全加固项）。
+// 使用 default 权限模式（非 bypassPermissions，集成测试已验证该模式与 --json-schema
+// 组合可用）+ 显式禁用写文件/命令执行工具，确保生成只产出结构化 JSON。
+func draftClaudeArgs() []string {
+	tempFn := &model.AiFunction{
+		ID:             "ai-function-draft",
+		PermissionMode: "default",
+		TimeoutMinutes: aiFunctionDraftTimeoutMinutes,
+		OutputSchema:   json.RawMessage(aiFunctionDraftSchema),
+	}
+	args := buildClaudeArgs(tempFn, "")
+	// 双保险：default 模式下写/命令类工具无审批放行，再由 disallowedTools 显式禁用。
+	args = append(args, "--disallowedTools", aiFunctionDraftDisallowedTools)
+	return args
+}
+
+func runDraftClaudeProcess(ctx context.Context, runDir, prompt string) (json.RawMessage, string, error) {
+	name, prefixArgs := claudeCommandResolver()
+	args := append(prefixArgs, draftClaudeArgs()...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	// ctx 取消/超时整树终止：CommandContext 默认只 Kill 根进程，claude 可能 spawn
+	// MCP 等子进程，不整树杀会留孤儿（对齐 chat_service.go 的 cmd.Cancel 先例）。
+	cmd.Cancel = func() error {
+		killProcessTree(cmd)
+		return nil
+	}
+	if runDir != "" {
+		cmd.Dir = runDir
+	}
+	util.HideCommandWindow(cmd)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, "", fmt.Errorf("创建输出管道失败: %w", err)
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		_ = stdout.Close()
+		return nil, "", fmt.Errorf("创建输入管道失败: %w", err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		// 启动失败：显式关闭两端管道，避免读端句柄泄漏。
+		_ = stdout.Close()
+		_ = stdin.Close()
+		return nil, "", fmt.Errorf("启动 claude 失败（请确认已安装并在 PATH 中）: %w", err)
+	}
+	// prompt 走 stdin 后立即关闭（claude -p 裸参数），与 RunStage 同口径。
+	go func() {
+		_, _ = io.WriteString(stdin, prompt)
+		_ = stdin.Close()
+	}()
+
+	var structured json.RawMessage
+	var resultErr string
+	// diag 保留 stderr 合并流里无法解析为 JSON 的诊断行末尾（claude 早退/参数错误时
+	// 往往只在这里留下原因），进程异常退出时随错误返回，避免只看到 "exit status 1"。
+	// 单行截断 + 行数上限：异常进程刷屏时不让诊断信息膨胀。
+	diag := make([]string, 0, 4)
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024) // 单行上限 4MB（长 JSON 事件）
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		_, isResult, _, _, out, rerr, _ := parseStreamLine(line)
+		if !isResult {
+			// JSON 事件流恒以 '{' 开头；其余为 claude stderr 诊断文本。
+			if trimmed != "" && !strings.HasPrefix(trimmed, "{") {
+				diag = append(diag, truncateRunes(trimmed, draftDiagLineMaxRunes))
+				if len(diag) > draftDiagMaxLines {
+					diag = diag[len(diag)-draftDiagMaxLines:]
+				}
+			}
+			continue
+		}
+		if len(out) > 0 {
+			structured = out
+		}
+		if rerr != "" {
+			resultErr = rerr
+		}
+	}
+	// 扫描中止（单行超 bufio 上限 / 管道读错）时进程可能仍阻塞在写端，
+	// 直接 Wait 会永久阻塞；先整树终止再等待，并返回可读错误而非静默走到超时。
+	if scanErr := scanner.Err(); scanErr != nil {
+		killProcessTree(cmd)
+		_ = cmd.Wait()
+		return structured, resultErr, fmt.Errorf("读取 claude 输出失败（单行超过 4MB 上限或管道中断）: %w", scanErr)
+	}
+	waitErr := cmd.Wait()
+	if waitErr != nil && len(diag) > 0 {
+		return structured, resultErr, fmt.Errorf("%w（诊断输出末尾: %s）",
+			waitErr, truncateRunes(strings.Join(diag, " | "), draftDiagTotalMaxRunes))
+	}
+	return structured, resultErr, waitErr
+}
+
+// normalizeDraftID 将 ID 规范化为小写英文/数字/短横线（生成结果容错，非唯一性判定源）。
+func normalizeDraftID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	var sb strings.Builder
+	lastDash := false
+	for _, r := range id {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			sb.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '.':
+			if sb.Len() > 0 && !lastDash {
+				sb.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(sb.String(), "-")
+}
+
+// normalizeDraftStrings 去空白、滤空项；全空返回 nil（贴合 omitempty 语义）。
+func normalizeDraftStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// findSkillByCommand 按命令（含命名空间）在候选清单中查找 skill，未命中返回 nil。
+func findSkillByCommand(skills []*model.SkillDescriptor, command string) *model.SkillDescriptor {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+	for _, sd := range skills {
+		if sd == nil {
+			continue
+		}
+		if strings.TrimSpace(sd.Command) == command {
+			return sd
+		}
+	}
+	return nil
+}
+
+// emptyAsDash prompt 展示用：空串以 '-' 占位，保持清单行结构可读。
+func emptyAsDash(s string) string {
+	if s = strings.TrimSpace(s); s == "" {
+		return "-"
+	}
+	return s
 }
 
 // migrateFunctions 解析配置原始字节并迁移到当前版本，返回 (功能项, 是否需落盘, 错误)。
