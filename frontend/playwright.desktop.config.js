@@ -13,6 +13,10 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e-desktop',
+  // 工件落 `.` 前缀目录：Go 展开 ./... 时按官方规则跳过，避免与 go test 的
+  // 目录遍历竞态（默认 outputDir=test-results 会落在遍历范围内，
+  // 见 docs/spec/test-stability.md §9）
+  outputDir: './.e2e-artifacts/desktop-test-results',
   fullyParallel: false, // 用例各自 spawn 独立应用实例，串行避免资源竞争与端口漂移
   forbidOnly: !!process.env.CI,
   retries: 0,

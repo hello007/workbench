@@ -110,7 +110,7 @@ headless 流式模式下 claude 的 AskUserQuestion 工具不渲染 UI 且被 CL
 | 事件 | 载荷 | 时机 |
 |---|---|---|
 | chat-task:queued | `{taskId, chatSessionId}` | 轮次接受入队 |
-| chat-task:started | `{taskId, chatSessionId}` | stdin 写入成功开始执行 |
+| chat-task:started | `{taskId, chatSessionId}` | 轮次开始执行（**写 stdin 之前**投递，保证恒先于 output；stdin 写失败时紧接 done 失败收尾，不落盘 user 消息） |
 | chat-task:output | `{taskId, chatSessionId, text}` | assistant 文本增量 |
 | chat-task:done | `ChatTaskRunResult` | 轮次终态（先落盘后发） |
 | chat-approval:request | `ChatApprovalRequest` | can_use_tool 下发 |

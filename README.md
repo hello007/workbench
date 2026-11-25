@@ -388,6 +388,8 @@ go test ./service/ -soak-rounds=2000 -run TestSoak -v
 cd frontend && npm test
 
 # E2E 测试（Playwright + mock Wails 后端，首次需先 npm run e2e:install）
+# 产物隔离：构建到 .e2e-dist、报告/trace 到 .e2e-artifacts，不触碰生产 dist，
+# 因此可与后端 go test / coverage-check.sh 并行执行
 cd frontend && npm run e2e
 ```
 
@@ -395,6 +397,7 @@ cd frontend && npm run e2e
 
 ```bash
 # 后端覆盖率门禁（分层阈值：model/server ≥80%，service ≥76%，util ≥40% 且排除 pty_windows.go）
+# 可与 E2E 并行执行；失败时会打印 go test 真实输出便于定位
 bash scripts/coverage-check.sh
 
 # 前端覆盖率（vitest v8 provider + thresholds，低于阈值 exit 非 0）

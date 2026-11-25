@@ -356,7 +356,7 @@ export const useAiChatStore = defineStore('aiChat', () => {
     task.status = 'queued'
   }
 
-  /** chat-task:started：轮次写入 stdin 开始执行（排队轮推进，幂等）。 */
+  /** chat-task:started：轮次开始执行（排队轮推进，幂等）。后端保证 started 先于 output 投递。 */
   function onChatTaskStarted(ev) {
     const task = chatTasks.value[ev?.taskId]
     if (task) task.status = 'running'

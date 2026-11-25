@@ -17,10 +17,17 @@ cd "$(dirname "$0")/.."
 echo "=== 后端测试覆盖率门禁 ==="
 
 # 1. 生成覆盖率 profile
-if ! go test ./... -coverprofile=coverage.out >/dev/null 2>&1; then
+#    失败时保留 go test 真实输出：直接 >/dev/null 2>&1 会让并行执行等外部干扰
+#    只剩一句结论、无法定位失败包与用例。输出先落临时文件，失败打印尾部。
+test_log="$(mktemp "${TMPDIR:-/tmp}/coverage-check.XXXXXX.log")"
+if ! go test ./... -coverprofile=coverage.out >"$test_log" 2>&1; then
     echo "FAIL: go test 失败，先修复测试再检查覆盖率"
+    echo "--- go test 输出（末 200 行；完整日志 $test_log）---"
+    tail -n 200 "$test_log"
+    rm -f coverage.out
     exit 1
 fi
+rm -f "$test_log"
 
 # 阈值
 MODEL_MIN=80

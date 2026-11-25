@@ -65,6 +65,10 @@ frontend/coverage/
 coverage.out
 
 # Playwright E2E artifacts
+# 现行路径（`.` 前缀：Go 展开 ./... 时按官方规则跳过，见 docs/spec/test-stability.md）
+frontend/.e2e-dist/
+frontend/.e2e-artifacts/
+# 历史路径（旧版本产物，保留忽略以兼容本地残留）
 frontend/test-results/
 frontend/playwright-report/
 

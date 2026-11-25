@@ -166,7 +166,9 @@ jobs:
       - name: 安装 Playwright 浏览器
         run: cd frontend && npx playwright install --with-deps chromium
 
-      # 16. E2E 测试（webServer 自动 vite build + vite preview，CI 环境自动 retries=2）
+      # 16. E2E 测试（webServer 自动 build:e2e + vite preview，CI 环境自动 retries=2）。
+      #     构建产物落 frontend/.e2e-dist、工件落 frontend/.e2e-artifacts（`.` 前缀，
+      #     使 Go 展开 ./... 时跳过，避免与 go test/vet 的目录遍历及 go:embed 读取竞态）
       - name: E2E 测试
         run: cd frontend && npm run e2e
 
@@ -181,8 +183,8 @@ jobs:
         with:
           name: playwright-report
           path: |
-            frontend/playwright-report/
-            frontend/test-results/
+            frontend/.e2e-artifacts/report/
+            frontend/.e2e-artifacts/test-results/
           retention-days: 7
 
   # Windows 后端测试 job：与 Linux test/security 并行，覆盖 runtime.GOOS == "windows" 平台分支

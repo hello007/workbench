@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-25-e2e/research/repro-and-root-cause.md", "reason": "校验修复是否覆盖全部已复现失败模式与排除项"}
+{"file": "docs/spec/test-stability.md", "reason": "检查新增文档节与既有稳定性规则无冲突、无 sleep/放大超时类规避"}
+{"file": "docs/spec/e2e-testing.md", "reason": "检查 E2E 配置改动未破坏 mock/工件/CI 契约"}
+{"file": "docs/agent-resources/conventions/process-build-quality.md", "reason": "构建质量门禁要求：不得降级检查、须保留可观测输出"}

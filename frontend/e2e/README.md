@@ -17,27 +17,30 @@ npm run e2e:install
 
 ```bash
 cd frontend
-npm run e2e          # 跑全部 E2E（webServer 自动先 vite build 再 vite preview）
-npm run e2e:report   # 查看最近一次 HTML 报告（含失败 trace 入口）
+npm run e2e          # 跑全部 E2E（webServer 自动先 build:e2e 构建到 .e2e-dist 再 vite preview）
+npm run e2e:report   # 查看最近一次 HTML 报告（.e2e-artifacts/report，含失败 trace 入口）
 ```
 
 - webServer 固定端口 `4173`（strictPort，端口被占直接失败而非漂移）
 - 本地 `retries=0`；CI（`process.env.CI`）`retries=2`，并启用 github + html reporter
 - 本地若已手动起 4173 preview，Playwright 直接复用（`reuseExistingServer`）
+- 产物隔离：构建产物落 `frontend/.e2e-dist`、报告与 trace 落 `frontend/.e2e-artifacts/`
+  （`.` 前缀使 Go 展开 `./...` 时跳过），可与 `go test` / `scripts/coverage-check.sh`
+  并行执行，不触碰生产 `frontend/dist`（见 docs/spec/test-stability.md §9）
 
 ## CI 集成
 
 `.github/workflows/ci.yml`（push master / pull_request 触发，ubuntu-latest）：CI 环境自动安装
 Chromium（`npx playwright install --with-deps chromium`）后跑 `npm run e2e`，失败时上传
-`playwright-report/` 与 `test-results/`（保留 7 天，含失败用例 trace）。`frontend/wailsjs/`
+`.e2e-artifacts/report/` 与 `.e2e-artifacts/test-results/`（保留 7 天，含失败用例 trace）。`frontend/wailsjs/`
 不入库，CI 在前端构建前经 `wails generate module` 重新生成绑定（规范见
-[docs/spec/e2e-testing.md](../docs/spec/e2e-testing.md) 第 8 节）。
+[docs/spec/e2e-testing.md](../../docs/spec/e2e-testing.md) 第 8 节）。
 
 ## 目录与文件职责
 
 | 文件 | 职责 |
 |---|---|
-| `playwright.config.js` | testDir / projects（仅 Chromium）/ retries / webServer（build + preview） |
+| `playwright.config.js` | testDir / projects（仅 Chromium）/ retries / webServer（build:e2e + `vite preview --outDir .e2e-dist`）/ outputDir 与 html 报告落 `.e2e-artifacts/` |
 | `e2e/fixtures.js` | 扩展 `test`：每个用例自动 `addInitScript` 注入 Wails mock，用例统一从这里 import；导出 `getWailsCalls(page, method?)`（调用记录）、`releaseDeferred(page, key, value)` / `pendingDeferredCount(page, key)`（挂起解析器放行与在途数）、`emitWailsEvent(page, event, payload)`（页面上下文广播 Wails 事件）、`activityPanel(page, id)` / `activityAction(page, action)` / `openPanel(page, id)`（活动栏语义定位，见 docs/spec/e2e-testing.md §5.1） |
 | `e2e/wails-init.js` | 浏览器页面上下文执行的注入函数（`window.go.main.App` + `window.runtime` stub + `__wailsCalls` 调用记录 + `{__error__}` / `{__sequence__}` / `{__value__, __events__, __preEvents__}` / `{__deferred__}` 返回值描述符；`EventsEmit` 同步广播到已注册 handler） |
 | `e2e/git-fixtures.js` | Git 三流程共享上下文：mock 工作目录常量（`GIT_FLOW_OVERRIDES`）、公共前置 `openGitRepoPage`、对话框定位 `visibleDialog` |

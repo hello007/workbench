@@ -224,6 +224,7 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 |提交历史→文件级追溯入口：行归属分流单点 useTraceBlame（存在性+类型预判，降级转文件历史）；信箱 pushTraceBlameRequest（seq 递增消费即清）；autoBlameSeq 与 filePreview 同批赋值；互嵌弹窗挂载点必 v-if 外控|[file-level-history.md §7](docs/spec/file-level-history.md)|
 |临时待办 Markdown 导入：解析单点 `parseTempTodoMarkdown`（续行拼回/已完成行跳过/行尾 #标签/文件名日期+未来钳制）；重复=正文去空白全等；`AddMany` 一次落盘失败整批回滚；入口仅桌面模式|[temp-todo.md](docs/spec/temp-todo.md)|
 |新增面板四处同改（`SIDEBAR_PANELS`、`panelIconMap`、`Home` v-show、`SettingsPanel` 快捷键；`panelIconMap` 失配由 `check-sidebar-panel-icons` 守）；`useSessionState` 白名单自 `SIDEBAR_PANELS` 派生；第 10 项起无 `Alt+数字` 固定映射（tooltip 禁拼 `Alt+N`）；提示词 `{{名称:默认值}}` 未填走默认值，`promptPlaceholders.js` 与 Go 同语义|[面板规范](docs/spec/prompt-library.md)、[会话快照](docs/spec/cross-layer-contracts.md)|
+|E2E 可写目录禁落 Go 遍历范围：构建产物 `frontend/.e2e-dist`、工件 `.e2e-artifacts`（`.` 前缀 Go 跳过 `./...`），禁复用 `dist`/`test-results`；`frontend/go.mod` 反例（跨模块 embed 报错）；chat `started` 须先于 `output` 投递|[test-stability.md §9](docs/spec/test-stability.md)|
 ## 5. 项目长期记忆（docs/memory）
 
 项目长期记忆存放于 `docs/memory/`（git 版本管理，跨机器可用），**是唯一权威源**，user 级自动记忆目录已废弃（2026-10-20 迁移）。
@@ -294,5 +295,5 @@ model/（契约真相源）、util/（工具）、server/（浏览器通道）
 
 ---
 
-**最后更新：** 2026-11-07
-**文档版本：** v2.49
+**最后更新：** 2026-11-25
+**文档版本：** v2.50

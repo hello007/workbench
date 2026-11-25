@@ -849,6 +849,8 @@ func chatInterruptLine(requestID string) string {
 //
 // 事件序列（每轮）：chat-task:queued → chat-task:started → chat-task:output（增量）
 // → chat-task:done（ChatTaskRunResult，含全文回复与 claude session id）。
+// started 由 advanceSession 在写 stdin 之前投递，output 只能由 stdin 写入后的子进程
+// 响应触发，故 started 恒先于 output（高负载下亦成立）。
 func (s *ChatService) RunChat(chatSessionID, prompt, permissionMode, modelName string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", model.NewAppError(model.ErrCodeChatEmptyPrompt, "对话内容不能为空")
@@ -1274,6 +1276,13 @@ func (s *ChatService) advanceSession(rt *chatSessionRuntime) error {
 	chatSessionID, taskID, prompt := turn.chatSessionID, turn.id, turn.prompt
 	s.mu.Unlock()
 
+	// started 必须先于 stdin 写入投递：output 事件由 pumpSession 独立 goroutine
+	// 解析子进程 stdout 后发出，而子进程只有在收到 stdin 后才可能产生输出。若
+	// started 放在写 stdin / 落盘用户消息之后（磁盘 IO 窗口），高负载下 pump 会
+	// 先发出 output，事件序列出现 queued -> output -> started 的倒序。语义上
+	// started 表示「本轮开始执行」（与排队态 queued 的分界），不承诺 stdin 已落盘。
+	s.emitCurrent("chat-task:started", map[string]any{"taskId": taskID, "chatSessionId": chatSessionID})
+
 	if err := writeChatStdinLine(stdin, chatUserStdinLine(claudeText)); err != nil {
 		// stdin 写入失败视为进程已死：该轮失败收尾（done 事件），错误同步返回给调用方，
 		// 进程由 pump 收尾摘除（执行槽位复位与在途表摘除在 finishAbnormalTurn 认领后统一完成）
@@ -1292,7 +1301,6 @@ func (s *ChatService) advanceSession(rt *chatSessionRuntime) error {
 		// 消息落盘失败不阻断对话执行（回复仍可流式送达前端），仅记录
 		Logger().Error("append chat user message failed", "session", chatSessionID, "err", err)
 	}
-	s.emitCurrent("chat-task:started", map[string]any{"taskId": taskID, "chatSessionId": chatSessionID})
 	return nil
 }
 

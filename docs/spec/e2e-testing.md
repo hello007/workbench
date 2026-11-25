@@ -155,7 +155,7 @@ el-table 类表格断言**禁硬编码 `td.nth(n)` 列下标**，先例辅助：
 | 触发 | push(master) + pull_request；与 release.yml（tag v*）不冲突 |
 | Runner | ubuntu-latest（git 预装，集成测试可跑；Playwright headless 原生支持） |
 | 步骤顺序 | checkout → dist 占位（满足 `//go:embed`）→ Go 1.26 → Node 20 → GTK/WebKit apt 依赖 → wails CLI + `wails generate module` → go build（production 标签）+ go vet → go test → go test integration → npm ci → npm run build → playwright install → e2e → npm test（快的在前，失败即停） |
-| 失败产物 | `playwright-report/` + `test-results/` 上传 artifact（`if: failure()`，保留 7 天） |
+| 失败产物 | `.e2e-artifacts/report/` + `.e2e-artifacts/test-results/` 上传 artifact（`if: failure()`，保留 7 天）；`.` 前缀使 Go 展开 `./...` 时跳过，见 [test-stability.md](test-stability.md) §9 |
 | 版本对齐 | Go 1.26 / Node 20 / npm cache 与 release.yml 一致 |
 
 ## 11. 真桌面 E2E 通道（e2e-desktop，2026-09-24）

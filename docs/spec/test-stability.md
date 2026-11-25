@@ -1,7 +1,7 @@
 # 测试稳定性规范（Flaky 规避）
 
 > 本文档规定 WorkBench 测试中依赖文件系统时序、环境端口、覆盖率插桩开销等外部状态的 flaky 规避方案与正反例。
-> 最后更新：2026-11-20 · 来源任务：09-11-filetree-cache-mtime-flaky、09-23-testapp-startwebserve-startupmatrix、11-20-filehistorydialog
+> 最后更新：2026-11-25 · 来源任务：09-11-filetree-cache-mtime-flaky、09-23-testapp-startwebserve-startupmatrix、11-20-filehistorydialog、11-25-e2e
 
 ## 1. 适用范围
 
@@ -218,7 +218,52 @@ expect(GetFileCommitHistory).toHaveBeenCalledTimes(25)
 - 调用次数精确断言（`toHaveBeenCalledTimes(25)`），是「未无限扫描」的唯一信号，**禁**改为 `toBeGreaterThan` / `toHaveBeenCalled()` 等等价性更弱的写法；
 - 目标 SHA 不出现在提示文案的负断言，防止提示泄露内部标识。
 
-## 9. 相关文档
+## 9. E2E 与 Go 测试并发的资源隔离
 
+### 9.1 现象与复现
+
+并行执行 `cd frontend && npx playwright test e2e/ai-function.spec.js` 与 `bash scripts/coverage-check.sh` 时，后者间歇性报 `FAIL: go test 失败`；单独执行则全部通过。2026-11-25 三轮复现中两轮失败，失败文本分两类：
+
+| 失败文本 | 阶段 | 触发条件 |
+|---|---|---|
+| `pattern ./...: open frontend\test-results: The system cannot find the file specified.` | `go test ./...` 模式展开（`[setup failed]`），任何用例都未运行 | Go 遍历目录时 Playwright 正在删除/重建 `frontend/test-results` |
+| `TestChatService_RunChat_FullFlow`：`事件序列[1]: got "chat-task:output", want "chat-task:started"` | service 包用例 | 高负载下 chat 事件顺序竞态被放大（见 §9.3） |
+
+### 9.2 根因：产物目录落在 Go 的遍历范围内
+
+Go 展开 `./...` 时逐目录 `open`，并**只跳过**以 `.` / `_` 开头的目录、`testdata` 以及含 `go.mod` 的子目录。`frontend/` 下的 `test-results`、`playwright-report`、`dist`、`node_modules` 都在遍历范围内：
+
+- `playwright test` 每轮删除并重建 `test-results` → 遍历瞬间目录不存在 → `ENOENT` → 整个命令 `[setup failed]`；
+- `npm run build` 的 `emptyOutDir` 会清空 `frontend/dist`，与主包 `//go:embed all:frontend/dist` 的编译期读取竞态 → 主包编译可能失败或嵌入半态产物。
+
+**反例（已验证不可用）**：在 `frontend/` 放 `go.mod` 让 Go 视作嵌套模块。`go list ./...` 会直接报 `cannot embed directory frontend/dist: in different module`——Go 禁止跨模块 `go:embed`，此路不通。
+
+### 9.3 修复约定
+
+| 产物 | 落点 | 约束 |
+|---|---|---|
+| E2E 构建产物 | `frontend/.e2e-dist` | 由 `npm run build:e2e`（`vite build --outDir .e2e-dist --emptyOutDir`）生成，`vite preview --outDir .e2e-dist` 消费；**禁复用** `frontend/dist` |
+| trace / test-results | `frontend/.e2e-artifacts/test-results` | `playwright.config.js` 的 `outputDir` |
+| html 报告 | `frontend/.e2e-artifacts/report` | reporter `outputFolder`；`npm run e2e:report` 与 CI artifact 路径同步 |
+| 真桌面 E2E 工件 | `frontend/.e2e-artifacts/desktop-test-results` | `playwright.desktop.config.js` 的 `outputDir`（Playwright 默认 `test-results` 会落回遍历范围） |
+| 生产构建 | `frontend/dist` | 仅 `wails build` / CI 前端构建步骤写入，E2E 不再触碰 |
+
+新增任何 E2E 侧可写目录（截图、下载、自定义报告）同样必须落在 `.` 开头目录内，或确认 Go 不会遍历。
+
+残余风险：`frontend/node_modules` 不在 `.` 前缀保护范围内，`npm install` / `npm ci` 会大量增删该目录。安装期间禁止与 `go test ./...` 并行（本任务场景是 E2E 运行，只写 `node_modules/.vite` 等 `.` 前缀缓存，不受影响）。
+
+### 9.4 chat 事件顺序竞态
+
+`runChat` 的事件序列约定为 `queued → started → output → done`。原实现 `started` 在「写 stdin → 落盘 user 消息」之后投递，而 `pumpSession` 独立 goroutine 可在 stdin 写入后立即发出 `output`；磁盘 IO 窗口内高负载调度即可造成 `output` 抢先。修复为 `started` 在写 stdin **之前**投递（此时轮次已在锁内置为 executing），`output` 只能由 stdin 写入后的子进程响应触发，顺序恒成立。**禁**通过放宽 `chat_service_test.go` 的序列断言或加重试规避。
+
+### 9.5 判定要点
+
+- 并行验证命令：E2E 与 `bash scripts/coverage-check.sh` 同时起跑，连续 ≥3 轮全绿；单跑仍需通过。
+- `coverage-check.sh` 失败时必须打印 `go test` 真实输出（临时文件 + `tail -n 200`），**禁** `>/dev/null 2>&1` 只留结论。
+- 端口非本期根因：E2E 独占 4173，Go 测试不引用该端口；36115 相关用例按 §7 使用 `127.0.0.1:0`。
+
+## 10. 相关文档
+
+- [E2E 测试规范](e2e-testing.md) — E2E 配置、mock 单一数据源与 CI artifact 路径
 - [测试覆盖率分层门禁](test-coverage-gate.md) — service ≥76% 基线，本任务改动后覆盖率 77.7%
 - `service/filetree_cache_test.go:286` `TestInvalidateCache_BypassesStaleCache` — 同款注入陈旧缓存范式（验证 clearPath 语义）

@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-25-e2e/research/repro-and-root-cause.md", "reason": "本轮复现日志、隔离实验与失败代码点位，是修复方案的直接依据"}
+{"file": "docs/spec/test-stability.md", "reason": "测试稳定性规范：固定端口、mtime、并发外部状态约束，新增节须与既有规则一致"}
+{"file": "docs/spec/e2e-testing.md", "reason": "E2E 配置契约（wailsjs 生成、mock 单一数据源、工件路径），改动 playwright.config.js 须遵循"}
+{"file": "docs/spec/ai-chat-service.md", "reason": "chat-task:* 事件流顺序契约与 spawn/审批约束，started/output 修复须符合该契约"}
