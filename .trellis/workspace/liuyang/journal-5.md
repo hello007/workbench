@@ -1262,3 +1262,37 @@ useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 266: T1 个人看板概览面板实现
+
+**Date**: 2026-11-25
+**Task**: T1 个人看板概览面板实现
+**Branch**: `master`
+
+### Summary
+
+新增第 11 个侧边栏面板「概览」：后端 OverviewService 单次 IPC 聚合 M1–M5（5 分钟 TTL、三域分区降级），前端 3 域 5 卡可下钻，新增 StaleRepoDays 设置项与 overviewDrillRequest 信箱。trellis-check 审核发现 12 项问题（4 阻断：M2 取整口径错误、App 签名缺 error、设置注释错位、M1/M2 空态缺失）并全部修复。验证：go build/vet、service 覆盖 81.8%、前端 2977 单测、覆盖率 87.06%、E2E 5 新用例 + 17 回归全部通过。父任务 T2 范围已收缩并回写。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ab2aaa93` | (see git log) |
+| `81c59610` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
