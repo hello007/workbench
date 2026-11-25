@@ -1,1 +1,10 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/11-24-dashboard-t1-overview-panel/prd.md", "reason": "本任务需求、口径、下钻与刷新决策的唯一真相源"}
+{"file": "docs/spec/dashboard-metrics.md", "reason": "M1–M5 指标口径、阈值、断层标注与下游约束，实现必须逐条对齐"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "新增 App 方法与 model struct 须同步 frontend/wailsjs 三处；具名 string 类型需手补类型别名"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 OverviewService 须在 app_services.go 两处装配，构造纯 new"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "新面板根元素 flex 约束链、设计令牌、图标与三列布局规范"}
+{"file": "docs/spec/logging-and-errors.md", "reason": "后端日志用 log/slog；新增错误码三处同步；分区错误降级不得吞异常"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service 覆盖率 ≥76% 与前端 ≥70% 门禁，新代码不得拉低基线"}
+{"file": "docs/spec/e2e-testing.md", "reason": "面板顺序断言自 SIDEBAR_PANELS 派生、语义锚与监听计数规范"}
+{"file": "docs/spec/browser-channel.md", "reason": "GetOverviewSnapshot 的 RPCHiddenMethods 判定与浏览器模式入口可见性"}
+{"file": "docs/spec/perf-baseline.md", "reason": "聚合缓存与刷新策略的性能约定，避免重复计算与 N+1 读取"}

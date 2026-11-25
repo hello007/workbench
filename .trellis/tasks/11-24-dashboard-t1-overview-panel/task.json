@@ -3,7 +3,7 @@
   "name": "dashboard-t1-overview-panel",
   "title": "T1 新增只读今日/本周概览入口",
   "description": "第 11 个侧边栏面板，只读聚合仓库状态/待办/AI 统计 3 域 5 卡已有数据（口径见 docs/spec/dashboard-metrics.md），卡片可下钻；最近访问仅作入口导航不上卡。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

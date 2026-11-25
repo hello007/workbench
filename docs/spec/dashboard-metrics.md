@@ -61,6 +61,11 @@ Yes 才可上主看板。
 **默认决策**：优先方案 1（统计在后端算、前端只渲染，与仓内惯例一致）。若 T2 评估改契约
 成本过高，可降级方案 2，但须在 T2 的 PRD 登记理由。
 
+**实现状态（2026-11-25，T1）**：T1 在后端 `service/overview.go` 内用
+`AiFunctionService.GetAiTaskHistory(nil)` 一次全量读取后按 `Status` 内存计数，已能产出
+正确成功率，**未改动 `AiTaskHistoryStats` 契约**。T2 仍须决定是否补 `CanceledCount`
+并统一口径（见 T2 PRD「范围收缩说明」）。
+
 ## 6. 排除清单（明确不上主看板）
 
 | 排除项 | 原因 |
@@ -99,6 +104,7 @@ Yes 才可上主看板。
 
 | 数据 | 位置 |
 |---|---|
+| 概览聚合（M1–M5 单次快照） | `model/overview.go`、`service/overview.go`、`app_overview.go` |
 | 仓库状态 | `model/dashboard.go`（`RepoStatus`）、`service/dashboard.go`、`app_dashboard.go` |
 | AI 历史统计 | `service/ai_task_history.go`（`Stats` / `List` / `UsageCounts`）、`model/ai_task_history.go` |
 | 待办 | `service/temp_todo.go`（`List`）、`model/temp_todo.go` |

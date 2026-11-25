@@ -16,7 +16,7 @@ Trellis 没有 `dependsOn` / 阻塞字段，**执行顺序以本清单为准，�
 |---|---|---|---|---|---|
 | 0 | `11-24-dashboard-t0-confirm-scope` | T0 确认评估前提并锁定上板指标 | 阶段 0 / P0 | — | ≤5 项指标清单 + 排除清单 + 两条假设确认 |
 | 1 | `11-24-dashboard-t1-overview-panel` | T1 新增只读今日/本周概览入口 | 阶段 1 / P0 | 0 | 一屏可见 3 域 5 卡（M1–M5，口径见 `docs/spec/dashboard-metrics.md`）、可下钻、门禁通过 |
-| 2 | `11-24-dashboard-t2-ai-cost-metrics` | T2 将 AI 成本与成功率上浮主视野 | 阶段 1 / P0 | 1 | 成本/成功率可见且与现有面板一致（与 3 并行） |
+| 2 | `11-24-dashboard-t2-ai-cost-metrics` | T2 AI 成本口径统一与排行视图 | 阶段 1 / P0 | 1 | 成本/成功率卡片已由 T1 落地；T2 交付 `CanceledCount` 口径统一 + 功能排行视图 + 与 AI 历史面板一致性核对（与 3 并行） |
 | 3 | `11-24-dashboard-t3-time-range-annotations` | T3 统一时间范围控件与数据口径标注 | 阶段 1 / P0 | 1 | 范围切换生效、每路带口径提示（与 2 并行） |
 | 4 | `11-24-dashboard-t4-go-no-go-gate` | T4 按 Go/No-Go 门槛验证 P0 使用闭环 | 阶段 2 / P0 | 2、3 | 给出 Go / No-Go 结论；**No-Go 则终止 5–11** |
 | 5 | `11-24-dashboard-t5-activity-log-service` | T5 新增轻量活动日志 service | 阶段 3 / P1 | 4=Go | 事件可落盘/查询、重启不丢、门禁通过 |
