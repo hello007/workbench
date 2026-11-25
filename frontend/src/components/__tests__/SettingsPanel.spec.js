@@ -348,10 +348,10 @@ describe('SettingsPanel.vue', () => {
     wrapper = await createWrapper()
     const shortcutsTab = wrapper.findAll('.settings-nav-item')[3]
     await shortcutsTab.trigger('click')
-    // 6 可自定义 + 5 固定（含 Alt+1..9 侧边栏面板切换说明行；快捷键行不含侧边栏
+    // 7 可自定义 + 5 固定（含 Alt+1..9 侧边栏面板切换说明行；快捷键行不含侧边栏
     // 顺序行——后者为独立 sidebar-order-item）
-    expect(wrapper.findAll('.shortcut-item:not(.sidebar-order-item)').length).toBe(11)
-    expect(wrapper.findAll('.sidebar-order-item').length).toBe(10)
+    expect(wrapper.findAll('.shortcut-item:not(.sidebar-order-item)').length).toBe(12)
+    expect(wrapper.findAll('.sidebar-order-item').length).toBe(11)
   })
 
   it('loadSettings 失败时 gpuEnabled 回退 true', async () => {
@@ -807,7 +807,7 @@ describe('SettingsPanel.vue', () => {
 
 // ---- 侧边栏顺序调整区（快捷键 tab 内；上移/下移相邻交换 + 恢复默认）----
 describe('SettingsPanel.vue - 侧边栏顺序调整区', () => {
-  const DEFAULT_IDS = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts']
+  const DEFAULT_IDS = ['directory', 'ai', 'ai-chat', 'toolbox', 'assets', 'dashboard', 'stats', 'branchcompare', 'todo', 'prompts', 'overview']
 
   let wrapper
 
@@ -830,15 +830,16 @@ describe('SettingsPanel.vue - 侧边栏顺序调整区', () => {
     return wrapper.findAll('.sidebar-order-item')
   }
 
-  it('默认顺序渲染 10 行（编号 + label），首尾行上移/下移按钮 disabled', async () => {
+  it('默认顺序渲染全部面板行（编号 + label），首尾行上移/下移按钮 disabled', async () => {
     const rows = await openShortcutsTab()
-    expect(rows.length).toBe(10)
+    expect(rows.length).toBe(DEFAULT_IDS.length)
     expect(rows[0].text()).toContain('1. 工作目录')
     expect(rows[8].text()).toContain('9. 临时待办')
     expect(rows[9].text()).toContain('10. 提示词')
+    expect(rows[10].text()).toContain('11. 概览')
     // 边界禁用：首行无上移、末行无下移
     expect(rows[0].findAll('button').find(b => b.text().includes('上移')).attributes('disabled')).toBeDefined()
-    expect(rows[9].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeDefined()
+    expect(rows[10].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeDefined()
     expect(rows[0].findAll('button').find(b => b.text().includes('下移')).attributes('disabled')).toBeUndefined()
   })
 

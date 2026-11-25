@@ -82,6 +82,24 @@ export const useUiStore = defineStore('ui', () => {
     todoPromptRequest.value = { text: value, seq: todoPromptSeq }
   }
 
+  // 概览面板下钻信箱（个人看板 T1）：OverviewView 卡片点击写入 target + payload，
+  // Home 切好面板后由目标面板 watch seq 消费（M3 → TempTodoPanel 定位最老条目；
+  // M4/M5 → AiFunctionPanel 打开历史抽屉并设时间窗）。一次性信箱语义——消费即
+  // 清空，不持久化。seq 单调递增：同一卡片连续两次点击靠 seq 变化保证不被 watch
+  // 的依赖比较去重丢失。
+  const overviewDrillRequest = ref(null) // { target: 'todo'|'ai', payload: {...}, seq: 1 }
+  let overviewDrillSeq = 0
+
+  /**
+   * 写入概览卡片下钻请求（唯一写入入口 OverviewView）
+   * @param {'todo'|'ai'} target 目标面板
+   * @param {object} payload 目标面板消费的载荷（todoId/range 等）
+   */
+  function pushOverviewDrillRequest(target, payload = {}) {
+    overviewDrillSeq += 1
+    overviewDrillRequest.value = { target, payload, seq: overviewDrillSeq }
+  }
+
   // 待办数据变更通知（临时待办二期）：跨组件新增入口（AI 回复 / 代码预览右键
   // 「存为待办」）落条后递增，TempTodoPanel watch 该值重拉列表。面板自身增删改
   // 仍走本地 load()，不经此通知。
@@ -153,6 +171,8 @@ export const useUiStore = defineStore('ui', () => {
     pushTerminalPendingCmd,
     traceBlameRequest,
     pushTraceBlameRequest,
+    overviewDrillRequest,
+    pushOverviewDrillRequest,
     todoPromptRequest,
     pushTodoPrompt,
     tempTodoChangeSeq,

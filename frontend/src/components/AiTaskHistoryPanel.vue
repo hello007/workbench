@@ -164,7 +164,12 @@ import {
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
-const props = defineProps({ visible: Boolean })
+const props = defineProps({
+  visible: Boolean,
+  // 概览卡片下钻带入的时间窗（'today'/'week'，空 = 不套用）。
+  // 打开时套用一次，避免上次下钻的范围残留影响下一次手动打开。
+  initialRange: { type: String, default: '' }
+})
 const emit = defineEmits(['update:visible'])
 
 const functions = ref([])
@@ -250,8 +255,27 @@ const exportCsv = () =>
 const exportMarkdown = () =>
   exportReport(ExportAiTaskHistoryMarkdown, 'ai-task-history-report.md', [{ DisplayName: 'Markdown 文件', Pattern: '*.md' }], 'Markdown 报告')
 
+// 概览卡片下钻带入的时间窗：换算成本地「今日 00:00」或「本周一 00:00」起，
+// 与后端 Stats/List 的 StartedAt 窗口口径一致；结束时间不设上限（to=0）。
+const applyInitialRange = () => {
+  if (!props.initialRange) return
+  const now = new Date()
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  let from = dayStart.getTime()
+  if (props.initialRange === 'week') {
+    const offset = (dayStart.getDay() + 6) % 7
+    dayStart.setDate(dayStart.getDate() - offset)
+    from = dayStart.getTime()
+  }
+  filter.value.from = from
+  filter.value.to = 0
+  // 日期选择器 value-format="x"，v-model 是毫秒字符串数组
+  dateRange.value = [String(from), String(Date.now())]
+}
+
 // 打开时加载功能列表与历史（destroy-on-close 下每次打开重新加载，含最新归档）
 const onOpen = () => {
+  applyInitialRange()
   loadFunctions()
   loadList()
 }

@@ -17,7 +17,10 @@ const DEFAULTS = {
   quickTodo: 'Ctrl+Alt+N',
   // 打开「提示词」面板。默认空 = 不占用任何按键（Alt+数字 已被侧边栏固定占用，
   // 其余组合键留给用户按需录制）。
-  openPromptLibrary: ''
+  openPromptLibrary: '',
+  // 打开「概览」面板（第 11 个侧边栏面板，同样不在 Alt+1..9 固定映射内）。
+  // 默认空 = 不占用按键，由用户按需录制。
+  openOverview: ''
 }
 
 /**
@@ -331,6 +334,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const shortcutDelete = ref(DEFAULTS.delete)
   const shortcutQuickTodo = ref(DEFAULTS.quickTodo)
   const shortcutOpenPromptLibrary = ref(DEFAULTS.openPromptLibrary)
+  const shortcutOpenOverview = ref(DEFAULTS.openOverview)
+  // 个人看板「概览」M2「久未推进仓库」阈值天数（后端 settings.dashboard 段，
+  // 默认 7，设置页提供 7/14/30 三档）。快照里的 StaleDays 由后端回传，本字段
+  // 只用于设置页展示与保存。
+  const staleRepoDays = ref(7)
 
   // 侧边栏面板顺序（面板 id 数组）：初始默认顺序，loadShortcuts 后端加载后归一化
   // 覆盖（GetSettings 首帧前未完成的窗口期渲染默认顺序，可接受）
@@ -561,6 +569,8 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutDelete.value = settings.shortcutDelete || DEFAULTS.delete
       shortcutQuickTodo.value = settings.shortcutQuickTodo || DEFAULTS.quickTodo
       shortcutOpenPromptLibrary.value = settings.shortcutOpenPromptLibrary || DEFAULTS.openPromptLibrary
+      shortcutOpenOverview.value = settings.shortcutOpenOverview || DEFAULTS.openOverview
+      staleRepoDays.value = settings.dashboard?.staleRepoDays || 7
       sidebarOrder.value = normalizeSidebarOrder(settings.sidebarOrder)
     } catch {
       shortcutCommandPalette.value = DEFAULTS.commandPalette
@@ -569,6 +579,8 @@ export const useSettingsStore = defineStore('settings', () => {
       shortcutDelete.value = DEFAULTS.delete
       shortcutQuickTodo.value = DEFAULTS.quickTodo
       shortcutOpenPromptLibrary.value = DEFAULTS.openPromptLibrary
+      shortcutOpenOverview.value = DEFAULTS.openOverview
+      staleRepoDays.value = 7
       sidebarOrder.value = [...SIDEBAR_DEFAULT_ORDER]
     }
   }
@@ -593,6 +605,16 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.shortcutDelete = shortcutDelete.value
     settings.shortcutQuickTodo = shortcutQuickTodo.value
     settings.shortcutOpenPromptLibrary = shortcutOpenPromptLibrary.value
+    settings.shortcutOpenOverview = shortcutOpenOverview.value
+    await SaveSettings(settings)
+  }
+
+  /**
+   * 保存个人看板设置（当前仅 M2 阈值）。基于后端完整设置合并写，避免覆盖其他段。
+   */
+  async function saveDashboardSettings() {
+    const settings = await GetSettings()
+    settings.dashboard = { ...(settings.dashboard || {}), staleRepoDays: staleRepoDays.value }
     await SaveSettings(settings)
   }
 
@@ -611,7 +633,8 @@ export const useSettingsStore = defineStore('settings', () => {
       { key: 'rename', value: shortcutRename.value },
       { key: 'delete', value: shortcutDelete.value },
       { key: 'quickTodo', value: shortcutQuickTodo.value },
-      { key: 'openPromptLibrary', value: shortcutOpenPromptLibrary.value }
+      { key: 'openPromptLibrary', value: shortcutOpenPromptLibrary.value },
+      { key: 'openOverview', value: shortcutOpenOverview.value }
     ]
     for (const item of all) {
       if (item.key === excludeKey) continue
@@ -627,6 +650,9 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcutDelete,
     shortcutQuickTodo,
     shortcutOpenPromptLibrary,
+    shortcutOpenOverview,
+    staleRepoDays,
+    saveDashboardSettings,
     sidebarOrder,
     orderedPanels,
     saveSidebarOrder,

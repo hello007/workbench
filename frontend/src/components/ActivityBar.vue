@@ -244,7 +244,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound, Memo, Collection } from '@element-plus/icons-vue'
+import { Folder, MagicStick, Setting, Monitor, TrendCharts, DataBoard, ChatDotRound, Memo, Collection, DataAnalysis } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import ToolboxIcon from './icons/ToolboxIcon.vue'
 import AssetsIcon from './icons/AssetsIcon.vue'
@@ -455,7 +455,8 @@ const panelIconMap = {
   stats: TrendCharts,
   branchcompare: BranchCompareIcon,
   todo: Memo,
-  prompts: Collection
+  prompts: Collection,
+  overview: DataAnalysis
 }
 
 const panels = computed(() =>

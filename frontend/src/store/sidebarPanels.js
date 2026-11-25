@@ -19,7 +19,10 @@ export const SIDEBAR_PANELS = [
   { id: 'todo', label: '临时待办' },
   // 第 10 个面板：Alt+1..9 固定映射只覆盖前 9 项（sidebarShortcutIndex 只认 1-9），
   // 本面板可达性由可自定义快捷键（DEFAULTS.openPromptLibrary）补位。
-  { id: 'prompts', label: '提示词' }
+  { id: 'prompts', label: '提示词' },
+  // 第 11 个面板：个人数据看板「概览」（只读聚合 M1–M5）。同样不在 Alt+1..9
+  // 固定映射内，可达性由可自定义快捷键（DEFAULTS.openOverview）补位。
+  { id: 'overview', label: '概览' }
 ]
 
 /** 默认顺序 id 列表（SIDEBAR_PANELS 派生，顺序与面板定义序严格一致） */

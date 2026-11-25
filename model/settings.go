@@ -381,6 +381,58 @@ func clampAuditInt(v, min, max, def int) int {
 	return v
 }
 
+// 个人看板设置项默认值与取值边界（docs/spec/dashboard-metrics.md M2 阈值）。
+// 设置页提供 7/14/30 三档，后端只做零值回退与 [1,30] 越界收敛——接受任意天数
+// 是为了兼容将来 T8 规则提醒自定义阈值，避免口径在两处各立一套边界。
+const (
+	DefaultDashboardStaleRepoDays = 7
+	minDashboardStaleRepoDays     = 1
+	maxDashboardStaleRepoDays     = 30
+)
+
+// DashboardSettings 个人看板设置段（侧边栏「概览」面板）。
+//
+// 指针形态区分「老配置缺失 → 默认 7 天」与显式取值（对齐 IPBan/Audit 先例）；
+// 加载后经 EnsureDashboardDefaults 补全，消费方拿到的段始终完整可用。
+type DashboardSettings struct {
+	// StaleRepoDays M2「久未推进仓库」阈值天数，默认 7，范围 [1,30]。
+	StaleRepoDays int `json:"staleRepoDays"`
+}
+
+// DefaultDashboardSettings 返回个人看板设置段默认值。
+func DefaultDashboardSettings() DashboardSettings {
+	return DashboardSettings{StaleRepoDays: DefaultDashboardStaleRepoDays}
+}
+
+// EnsureDashboardDefaults 补全个人看板设置段：
+//   - 段缺失（nil，含老配置升级与配置文件损坏降级）→ 全默认；
+//   - 段存在 → 零值回退默认、越界收敛。
+//
+// 经 AppSettings.EnsureAllDefaults 统一调用，新消费点无需再手抄默认值。
+func (s *AppSettings) EnsureDashboardDefaults() {
+	if s.Dashboard == nil {
+		def := DefaultDashboardSettings()
+		s.Dashboard = &def
+		return
+	}
+	s.Dashboard.normalize()
+}
+
+// normalize 零值回退默认，越界收敛到 [minDashboardStaleRepoDays, maxDashboardStaleRepoDays]。
+func (d *DashboardSettings) normalize() {
+	if d.StaleRepoDays == 0 {
+		d.StaleRepoDays = DefaultDashboardStaleRepoDays
+		return
+	}
+	if d.StaleRepoDays < minDashboardStaleRepoDays {
+		d.StaleRepoDays = minDashboardStaleRepoDays
+		return
+	}
+	if d.StaleRepoDays > maxDashboardStaleRepoDays {
+		d.StaleRepoDays = maxDashboardStaleRepoDays
+	}
+}
+
 // AppSettings 应用设置
 type AppSettings struct {
 	GpuDisabled        bool   `json:"gpuDisabled"`
@@ -443,6 +495,10 @@ type AppSettings struct {
 	// 缺失 → 默认」与显式取值（对齐 IPBan 先例），加载后经
 	// EnsureAuditDefaults 补全；运行期经 SetAuditConfig「保存+生效」单点热更。
 	Audit *AuditSettings `json:"audit,omitempty"`
+	// Dashboard 个人看板设置段（侧边栏「概览」M2 久未推进阈值）。指针形态区分
+	// 「老配置缺失 → 默认 7 天」与显式取值（对齐 Audit 先例），加载后经
+	// EnsureDashboardDefaults 补全。
+	Dashboard *DashboardSettings `json:"dashboard,omitempty"`
 }
 
 // EnsureAllDefaults 各设置段默认值补全的 Ensure 串联单点：service.SettingsService
@@ -456,6 +512,7 @@ func (s *AppSettings) EnsureAllDefaults() {
 	s.EnsureAssetsThumbsDefaults()
 	s.EnsureIPBanDefaults()
 	s.EnsureAuditDefaults()
+	s.EnsureDashboardDefaults()
 }
 
 // PrivateCopy 指针段私有拷贝单点：值拷贝后将全部指针段（WebServe/Assets/IPBan/
@@ -485,6 +542,10 @@ func (s *AppSettings) PrivateCopy() AppSettings {
 	if s.Audit != nil {
 		seg := *s.Audit
 		c.Audit = &seg
+	}
+	if s.Dashboard != nil {
+		seg := *s.Dashboard
+		c.Dashboard = &seg
 	}
 	return c
 }

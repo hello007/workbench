@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import AiFunctionPanel from '../AiFunctionPanel.vue'
 import AiFunctionRunner from '../AiFunctionRunner.vue'
@@ -151,6 +152,8 @@ const runFromCard = async (wrapper, idx, params = {}) => {
 }
 
 beforeEach(() => {
+  // 组件经 useUiStore 消费概览下钻信箱（M4/M5 打开历史抽屉），挂载前需激活 pinia
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   localStorage.clear()
   for (const k of Object.keys(eventHandlers)) delete eventHandlers[k]

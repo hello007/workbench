@@ -99,6 +99,9 @@
              全局快捷键经 ref 调 quickAddFromClipboard，不依赖面板是否可见。 -->
         <TempTodoPanel ref="tempTodoPanelRef" v-show="uiStore.activePanel === 'todo'" />
         <PromptLibraryPanel v-show="uiStore.activePanel === 'prompts'" />
+        <!-- 个人看板概览：只读聚合 3 域 5 卡（M1–M5），与三栏区 v-show 互斥。
+             切走再切回不丢快照，刷新策略由面板内 TTL 控制。 -->
+        <OverviewView v-show="uiStore.activePanel === 'overview'" />
         <!-- 拖拽分隔条（全屏态隐藏：fixed 覆盖整窗时高度拖拽无意义） -->
         <div
           v-if="uiStore.terminalVisible && !uiStore.terminalFullscreen"
@@ -140,6 +143,7 @@ import TempTodoPanel from '../components/TempTodoPanel.vue'
 import PromptLibraryPanel from '../components/PromptLibraryPanel.vue'
 import StatsView from './StatsView.vue'
 import DashboardView from './DashboardView.vue'
+import OverviewView from './OverviewView.vue'
 import BranchCompareView from './BranchCompareView.vue'
 import SettingsPanel from '../components/SettingsPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
@@ -589,6 +593,15 @@ const handleGlobalKeydown = (e) => {
     if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
     e.preventDefault()
     uiStore.activePanel = 'prompts'
+    return
+  }
+
+  // 打开「概览」面板（快捷键可自定义，默认空 = 未启用）。第 11 个侧边栏面板，
+  // 与提示词面板同款补位逻辑；焦点判定一致。
+  if (matchShortcut(e, settingsStore.shortcutOpenOverview)) {
+    if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
+    e.preventDefault()
+    uiStore.activePanel = 'overview'
     return
   }
 

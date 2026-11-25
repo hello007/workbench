@@ -209,7 +209,7 @@
     />
 
     <!-- 运行历史（P1-2：任务完成归档后查看历史记录，复用 metrics 展示样式） -->
-    <AiTaskHistoryPanel v-model:visible="historyVisible" />
+    <AiTaskHistoryPanel v-model:visible="historyVisible" :initial-range="historyInitialRange" />
   </div>
 </template>
 
@@ -237,6 +237,7 @@ import { EventsOn } from '../../wailsjs/runtime/runtime'
 import AiFunctionRunner from './AiFunctionRunner.vue'
 import AiFunctionConfigDialog from './AiFunctionConfigDialog.vue'
 import AiTaskHistoryPanel from './AiTaskHistoryPanel.vue'
+import { useUiStore } from '../store/ui'
 
 // 组件经 v-show 常驻挂载（Home 主区互斥展示），无 visible prop；
 // 功能列表挂载时加载一次，配置管理 saved 回调与标题栏「刷新」按钮负责后续重载
@@ -247,6 +248,27 @@ const openFuncs = ref([])
 const activeTabId = ref('')
 const configVisible = ref(false)
 const historyVisible = ref(false)
+// 概览卡片下钻带入的历史时间窗（'today'/'week'）；抽屉打开时消费，关闭后清空，
+// 避免下次手动打开历史仍被上次下钻的范围限制。
+const historyInitialRange = ref('')
+const uiStore = useUiStore()
+
+// 概览卡片下钻（M4/M5）：打开历史抽屉并带入时间窗（today/week）。
+// 一次性信箱语义——仅 target 匹配时消费并清空；切面板由 OverviewView 完成。
+watch(
+  () => uiStore.overviewDrillRequest,
+  (req) => {
+    if (!req || req.target !== 'ai') return
+    historyInitialRange.value = req.payload?.range || ''
+    uiStore.overviewDrillRequest = null
+    historyVisible.value = true
+  }
+)
+
+// 抽屉关闭后清空下钻带入的范围，避免下次手动打开历史仍被上次筛选限制。
+watch(historyVisible, (visible) => {
+  if (!visible) historyInitialRange.value = ''
+})
 
 const iconComp = (name) => (name && Icons[name]) || Icons.MagicStick
 

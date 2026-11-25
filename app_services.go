@@ -122,6 +122,11 @@ type AppServices struct {
 	// + 文件 diff + 提交变更文件，无持久化数据）。只读查询不抢 tryLockRepo 仓级锁；
 	// patch-id 批量管道专用 2 分钟长超时 GitCommand 构造内置。
 	branchCompareSvc *service.BranchCompareService
+	// 个人看板「概览」聚合服务（侧边栏第 11 面板）：只读聚合仓库状态 M1/M2、
+	// AI 成本与成功率 M4/M5、待办积压 M3，口径见 docs/spec/dashboard-metrics.md。
+	// 内建 5 分钟快照缓存；分区降级，单域失败只降级对应卡片。不发生前端事件，
+	// web_serve.go applySink 无需同步。
+	overviewSvc *service.OverviewService
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -295,6 +300,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 分支对比服务（活动栏「分支对比」面板，纯只读无持久化数据；ctx 在各方法调用点
 	// 传 context.Background() 下传，service 层 ctx 全贯穿为 batch 2 取消预留）
 	s.branchCompareSvc = service.NewBranchCompareService()
+
+	// 个人看板「概览」聚合服务：依赖 dashboard/aiFunc/tempTodo/settings 四个既有
+	// 服务，必须放在它们构造之后；构造纯 new，无启动期副作用。
+	s.overviewSvc = service.NewOverviewService(s.dashboardSvc, s.tempTodoSvc, s.aiFuncSvc, s.settingsSvc)
 
 	return s
 }

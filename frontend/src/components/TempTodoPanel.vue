@@ -90,6 +90,7 @@
           v-for="todo in pendingTodos"
           :key="todo.id"
           class="todo-item"
+          :class="{ 'todo-item--highlight': highlightedTodoId === todo.id }"
           :data-todo-id="todo.id"
         >
           <el-checkbox
@@ -420,6 +421,8 @@ const uiStore = useUiStore()
 const quickShortcutTip = computed(() => settingsStore.shortcutQuickTodo || 'Ctrl+Alt+N')
 
 const todos = ref([])
+// 概览卡片下钻定位高亮：命中条目短暂高亮 2 秒，避免用户在一长串待办里找不到目标。
+const highlightedTodoId = ref('')
 const keyword = ref('')
 const showCompleted = ref(false)
 
@@ -511,6 +514,32 @@ const load = async () => {
     handleError('加载临时待办失败: ', e)
   }
 }
+
+// 概览卡片下钻：定位并高亮「最老未完成条目」。
+// 一次性信箱语义——仅当 target 匹配时消费并清空；切面板由 OverviewView 完成。
+// 列表可能已有旧数据，先重拉保证目标条目存在，再滚动到可视区中部。
+watch(
+  () => uiStore.overviewDrillRequest,
+  async (req) => {
+    if (!req || req.target !== 'todo') return
+    const todoId = req.payload?.todoId
+    uiStore.overviewDrillRequest = null
+    if (!todoId) return
+
+    await load()
+    await nextTick()
+    const el = panelBodyRef.value?.querySelector(`[data-todo-id="${todoId}"]`)
+    if (!el) {
+      ElMessage.info('最老待办已不存在，可能刚被完成或删除')
+      return
+    }
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    highlightedTodoId.value = todoId
+    setTimeout(() => {
+      if (highlightedTodoId.value === todoId) highlightedTodoId.value = ''
+    }, 2000)
+  }
+)
 
 // 转提示词：把条目正文经一次性信箱交给 AiChatPanel 填入输入框（切面板由消费侧完成）
 const toPrompt = (todo) => {
@@ -1085,6 +1114,12 @@ onMounted(async () => {
   border-radius: var(--radius-md);
   background: var(--todo-card-bg);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+/* 概览卡片下钻定位：短暂主色描边提示目标条目（2 秒后由脚本移除） */
+.todo-item--highlight {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-bg);
 }
 
 /* 悬停只轻提边框与阴影，不整圈主色填充 */

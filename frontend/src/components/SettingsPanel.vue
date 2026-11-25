@@ -137,6 +137,24 @@
               @click="handleExportDiagnostics"
             >导出诊断信息</el-button>
           </div>
+          <!-- 个人看板（概览面板）：M2 久未推进阈值，快照由后端按此计算 -->
+          <div class="settings-section-title settings-section-title--spaced">个人看板</div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <div class="settings-item-label">久未推进阈值</div>
+              <div class="settings-item-desc">概览面板「久未推进仓库」的天数阈值，改动后下次刷新快照生效</div>
+            </div>
+            <el-select
+              v-model="settingsStore.staleRepoDays"
+              class="input-w-sm"
+              size="small"
+              @change="onDashboardSettingChange"
+            >
+              <el-option label="7 天" :value="7" />
+              <el-option label="14 天" :value="14" />
+              <el-option label="30 天" :value="30" />
+            </el-select>
+          </div>
         </div>
         <!-- 终端页 -->
         <div v-show="activeTab === 'terminal'">
@@ -1491,6 +1509,7 @@ const shortcutLabels = {
   delete: '删除',
   quickTodo: '从剪贴板记为待办',
   openPromptLibrary: '打开提示词面板',
+  openOverview: '打开概览面板',
   sidebarShortcut: '切换侧边栏面板（Alt+数字）'
 }
 
@@ -1500,7 +1519,8 @@ const customizableShortcuts = computed(() => [
   { action: '重命名', key: 'rename', keys: formatDisplay(settingsStore.shortcutRename), customizable: true },
   { action: '删除', key: 'delete', keys: formatDisplay(settingsStore.shortcutDelete), customizable: true },
   { action: '从剪贴板记为待办', key: 'quickTodo', keys: formatDisplay(settingsStore.shortcutQuickTodo), customizable: true },
-  { action: '打开提示词面板', key: 'openPromptLibrary', keys: formatDisplay(settingsStore.shortcutOpenPromptLibrary), customizable: true }
+  { action: '打开提示词面板', key: 'openPromptLibrary', keys: formatDisplay(settingsStore.shortcutOpenPromptLibrary), customizable: true },
+  { action: '打开概览面板', key: 'openOverview', keys: formatDisplay(settingsStore.shortcutOpenOverview), customizable: true }
 ])
 
 function startRecording(key) {
@@ -1523,6 +1543,7 @@ function isDefault(key) {
   if (key === 'delete') return settingsStore.shortcutDelete === DEFAULTS.delete
   if (key === 'quickTodo') return settingsStore.shortcutQuickTodo === DEFAULTS.quickTodo
   if (key === 'openPromptLibrary') return settingsStore.shortcutOpenPromptLibrary === DEFAULTS.openPromptLibrary
+  if (key === 'openOverview') return settingsStore.shortcutOpenOverview === DEFAULTS.openOverview
   return true
 }
 
@@ -1533,6 +1554,7 @@ function resetShortcut(key) {
   else if (key === 'delete') settingsStore.shortcutDelete = DEFAULTS.delete
   else if (key === 'quickTodo') settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
   else if (key === 'openPromptLibrary') settingsStore.shortcutOpenPromptLibrary = DEFAULTS.openPromptLibrary
+  else if (key === 'openOverview') settingsStore.shortcutOpenOverview = DEFAULTS.openOverview
   settingsStore.saveShortcuts()
 }
 
@@ -1543,6 +1565,7 @@ function resetAllShortcuts() {
   settingsStore.shortcutDelete = DEFAULTS.delete
   settingsStore.shortcutQuickTodo = DEFAULTS.quickTodo
   settingsStore.shortcutOpenPromptLibrary = DEFAULTS.openPromptLibrary
+  settingsStore.shortcutOpenOverview = DEFAULTS.openOverview
   settingsStore.saveShortcuts()
 }
 
@@ -1610,6 +1633,8 @@ function handleRecordingKeydown(e) {
     settingsStore.shortcutQuickTodo = shortcut
   } else if (recordingKey.value === 'openPromptLibrary') {
     settingsStore.shortcutOpenPromptLibrary = shortcut
+  } else if (recordingKey.value === 'openOverview') {
+    settingsStore.shortcutOpenOverview = shortcut
   }
 
   recordingKey.value = null
@@ -1765,6 +1790,16 @@ const onSettingsChange = async () => {
     await saveGeneralSettings(!gpuEnabled.value)
   } catch {
     // 回滚
+  }
+}
+
+// 个人看板设置保存：基于后端完整设置合并写（store.saveDashboardSettings），
+// 失败经 handleError 分流提示但不回滚 UI——下次打开设置页重新从后端加载。
+const onDashboardSettingChange = async () => {
+  try {
+    await settingsStore.saveDashboardSettings()
+  } catch (e) {
+    handleError('保存个人看板设置失败: ', e)
   }
 }
 
