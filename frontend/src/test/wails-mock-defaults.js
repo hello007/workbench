@@ -665,11 +665,22 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
   // （见 frontend/wailsjs/go/models.ts）。默认空数据，具体用例在测试内局部覆盖。
   GetOverviewSnapshot: {
     generatedAt: 0,
-    range: 'today',
+    // 默认档 week；rangeKey / selected 与 range 同档回显（形状对齐 model.AIOverview）。
+    range: 'week',
     repos: { pinnedTotal: 0, pendingCount: 0, staleCount: 0, staleDays: 7, missingCount: 0, noCommitCount: 0 },
     ai: {
       today: { costUsd: 0, taskCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       week: { costUsd: 0, taskCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      rangeKey: 'week',
+      selected: {
+        cost: { costUsd: 0, taskCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        successRate: 0,
+        hasData: false,
+        successCount: 0,
+        failedCount: 0,
+        timeoutCount: 0,
+        canceledCount: 0
+      },
       successRate: 0,
       hasData: false,
       successCount: 0,

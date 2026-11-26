@@ -59,7 +59,7 @@ const stubs = {
   },
   'el-tag': { template: '<span class="el-tag"><slot /></span>', props: ['type'] },
   'el-empty': { template: '<div class="el-empty" />', props: ['description'] },
-  'el-alert': { template: '<div class="el-alert" />', props: ['type', 'closable', 'showIcon', 'title'] },
+  'el-alert': { template: '<div class="el-alert">{{ title }}<slot /></div>', props: ['type', 'closable', 'showIcon', 'title'] },
   'el-icon': { template: '<i><slot /></i>' }
 }
 
@@ -127,7 +127,11 @@ describe('StatsView', () => {
     const wrapper = mount(StatsView, { global: { stubs } })
     await flushPromises()
 
-    expect(wrapper.find('.el-alert').exists()).toBe(true)
+    const alert = wrapper.find('.el-alert')
+    expect(alert.exists()).toBe(true)
+    // 正向文案断言：采样提示须显式说明 5000 条上限与采样值口径（R4 回归）。
+    expect(alert.text()).toContain('采样提示')
+    expect(alert.text()).toContain('数据基于最近 5000 条提交采样（仓库超限未全量缓存，TotalCommits/贡献者为采样值）')
   })
 
   it('GetRepoStats 失败时应提示错误且清空统计', async () => {

@@ -252,13 +252,13 @@ const openFuncs = ref([])
 const activeTabId = ref('')
 const configVisible = ref(false)
 const historyVisible = ref(false)
-// 概览卡片下钻带入的历史时间窗（'today'/'week'）与状态集合（M5 = failed+timeout）；
+// 概览卡片下钻带入的历史时间窗（today/week/7d/30d/90d 五档）与状态集合（M5 = failed+timeout）；
 // 抽屉打开时消费，关闭后清空，避免下次手动打开历史仍被上次下钻的限制。
 const historyInitialRange = ref('')
 const historyInitialStatuses = ref([])
 const uiStore = useUiStore()
 
-// 概览卡片下钻（M4/M5）：打开历史抽屉并带入时间窗（today/week）。
+// 概览卡片下钻（M4/M5）：打开历史抽屉并带入时间窗（today/week/7d/30d/90d）。
 // 一次性信箱语义——仅 target 匹配时消费并清空；切面板由 OverviewView 完成。
 watch(
   () => uiStore.overviewDrillRequest,

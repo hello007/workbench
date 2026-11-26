@@ -428,23 +428,315 @@ func TestOverviewSnapshot_AIMatchesStats(t *testing.T) {
 	}
 }
 
-// TestOverviewSnapshot_RangeEcho range 未知值归一为 today，week 原样回显；
-// 缓存命中时按本次入参回显 range（T3 切换控件后不回显旧值）。
+// TestOverviewSnapshot_RangeEcho 五档 key 原样回显，空值/未知值回落默认 week；
+// 缓存命中时按本次入参回填 Range 与 AI.RangeKey（切档不回显旧值）。
 func TestOverviewSnapshot_RangeEcho(t *testing.T) {
 	svc, _, _, _ := newTestOverviewService(t)
 	svc.now = func() time.Time { return time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local) }
 
-	if got := svc.GetSnapshot("", true).Range; got != "today" {
-		t.Errorf("空 range 应归一为 today，实际 %q", got)
+	for _, key := range []string{"today", "week", "7d", "30d", "90d"} {
+		snap := svc.GetSnapshot(key, true)
+		if snap.Range != key {
+			t.Errorf("%q 应原样回显，实际 %q", key, snap.Range)
+		}
+		if snap.AI.RangeKey != key {
+			t.Errorf("%q 应回填 AI.RangeKey，实际 %q", key, snap.AI.RangeKey)
+		}
 	}
-	if got := svc.GetSnapshot("week", true).Range; got != "week" {
-		t.Errorf("week 应原样回显，实际 %q", got)
+
+	// 空值/未知值统一回落默认档 week。
+	if got := svc.GetSnapshot("", true); got.Range != "week" || got.AI.RangeKey != "week" {
+		t.Errorf("空 range 应归一为 week，实际 range=%q rangeKey=%q", got.Range, got.AI.RangeKey)
 	}
-	if got := svc.GetSnapshot("month", true).Range; got != "today" {
-		t.Errorf("未知 range 应归一为 today，实际 %q", got)
+	if got := svc.GetSnapshot("365d", true); got.Range != "week" || got.AI.RangeKey != "week" {
+		t.Errorf("未知 range 应归一为 week，实际 range=%q rangeKey=%q", got.Range, got.AI.RangeKey)
 	}
-	// force=false 命中缓存（范围块恒为今日+本周），但 Range 应回显本次入参。
-	if got := svc.GetSnapshot("week", false).Range; got != "week" {
-		t.Errorf("缓存命中应回显本次 range，实际 %q", got)
+
+	// force=false 命中缓存，Range 与 RangeKey 仍按本次入参回填。
+	if got := svc.GetSnapshot("30d", false); got.Range != "30d" || got.AI.RangeKey != "30d" {
+		t.Errorf("缓存命中应按入参回填，实际 range=%q rangeKey=%q", got.Range, got.AI.RangeKey)
+	}
+}
+
+// TestOverviewRangeStart 五档窗口起点：today=当天 00:00、week=本周一 00:00、
+// 近 N 天 = 今天 00:00 往前 N−1 天（含今天共 N 个自然日）。
+// 固定周三验证基础档，另用周日与跨月/跨年锚点钉住边界换算。
+func TestOverviewRangeStart(t *testing.T) {
+	loc := time.Local
+	cases := []struct {
+		name string
+		now  time.Time
+		key  string
+		want time.Time
+	}{
+		{
+			// 2026-11-25 是周三
+			name: "today-周三",
+			now:  time.Date(2026, 11, 25, 12, 0, 0, 0, loc),
+			key:  "today",
+			want: time.Date(2026, 11, 25, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "week-周三",
+			now:  time.Date(2026, 11, 25, 12, 0, 0, 0, loc),
+			key:  "week",
+			want: time.Date(2026, 11, 23, 0, 0, 0, 0, loc),
+		},
+		{
+			// 周日是一周最后一天：本周一为 6 天前，不能算到次日。
+			name: "week-周日边界",
+			now:  time.Date(2026, 11, 29, 9, 0, 0, 0, loc),
+			key:  "week",
+			want: time.Date(2026, 11, 23, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "近7天-跨月",
+			now:  time.Date(2026, 12, 2, 10, 0, 0, 0, loc),
+			key:  "7d",
+			want: time.Date(2026, 11, 26, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "近30天-跨年",
+			now:  time.Date(2027, 1, 5, 10, 0, 0, 0, loc),
+			key:  "30d",
+			want: time.Date(2026, 12, 7, 0, 0, 0, 0, loc),
+		},
+		{
+			name: "近90天-跨月",
+			now:  time.Date(2026, 11, 25, 10, 0, 0, 0, loc),
+			key:  "90d",
+			want: time.Date(2026, 8, 28, 0, 0, 0, 0, loc),
+		},
+		{
+			// 未知档位回落 week（与 normalizeOverviewRange 同口径）。
+			name: "未知档位回落-week",
+			now:  time.Date(2026, 11, 25, 12, 0, 0, 0, loc),
+			key:  "365d",
+			want: time.Date(2026, 11, 23, 0, 0, 0, 0, loc),
+		},
+	}
+
+	for _, tc := range cases {
+		if got := overviewRangeStart(tc.key, tc.now); !got.Equal(tc.want) {
+			t.Errorf("%s: overviewRangeStart = %v，期望 %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestOverviewSnapshot_SelectedMatchesStats 任意档位 Selected 与直接调用
+// GetAiTaskHistoryStats(From=该档起点) 逐项一致；week 档与顶层本周字段相等。
+func TestOverviewSnapshot_SelectedMatchesStats(t *testing.T) {
+	svc, _, _, aiFunc := newTestOverviewService(t)
+	fixed := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local) // 周三
+	svc.now = func() time.Time { return fixed }
+
+	usage := &model.AiTaskUsage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10, CacheCreationInputTokens: 5}
+	entries := []*model.AiTaskHistory{
+		// 当天：success / failed / canceled
+		{ID: "r1", FunctionID: "f1", Name: "周报", Status: "success", StartedAt: fixed.Add(-4 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.2, Usage: usage}},
+		{ID: "r2", FunctionID: "f1", Name: "周报", Status: "failed", StartedAt: fixed.Add(-3 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.1, Usage: usage}},
+		{ID: "r3", FunctionID: "f1", Name: "周报", Status: "canceled", StartedAt: fixed.Add(-2 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.01, Usage: usage}},
+		// 10 天前：仅落入 30d/90d 档
+		{ID: "r4", FunctionID: "f2", Name: "会议", Status: "timeout", StartedAt: fixed.AddDate(0, 0, -10).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 1.0, Usage: usage}},
+		// 60 天前：仅落入 90d 档
+		{ID: "r5", FunctionID: "f3", Name: "归档", Status: "success", StartedAt: fixed.AddDate(0, 0, -60).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 2.0, Usage: usage}},
+	}
+	for _, entry := range entries {
+		if _, err := aiFunc.historySvc.Archive(entry, ""); err != nil {
+			t.Fatalf("Archive(%s) 失败: %v", entry.ID, err)
+		}
+	}
+
+	for _, key := range overviewRangeKeys {
+		snap := svc.GetSnapshot(key, true)
+		start := overviewRangeStart(key, fixed).UnixMilli()
+		stats, err := aiFunc.GetAiTaskHistoryStats(&model.AiTaskHistoryFilter{From: start})
+		if err != nil {
+			t.Fatalf("读取 %q 统计失败: %v", key, err)
+		}
+		want := aiRangeStatsFromStats(stats)
+		if snap.AI.Selected != want {
+			t.Errorf("%q 档 Selected 与 Stats 不一致: selected=%+v want=%+v", key, snap.AI.Selected, want)
+		}
+	}
+
+	// week 档 Selected 与顶层本周语义字段逐项相等（纯增量契约的硬约束）。
+	weekSnap := svc.GetSnapshot("week", true)
+	if weekSnap.AI.Selected.Cost != weekSnap.AI.Week ||
+		weekSnap.AI.Selected.SuccessRate != weekSnap.AI.SuccessRate ||
+		weekSnap.AI.Selected.HasData != weekSnap.AI.HasData ||
+		weekSnap.AI.Selected.SuccessCount != weekSnap.AI.SuccessCount ||
+		weekSnap.AI.Selected.FailedCount != weekSnap.AI.FailedCount ||
+		weekSnap.AI.Selected.TimeoutCount != weekSnap.AI.TimeoutCount ||
+		weekSnap.AI.Selected.CanceledCount != weekSnap.AI.CanceledCount {
+		t.Errorf("week 档 Selected 与顶层字段不等: selected=%+v ai=%+v", weekSnap.AI.Selected, weekSnap.AI)
+	}
+}
+
+// TestOverviewSnapshot_RangeSwitchUsesCache 缓存有效期内切档不重算任何域：
+// 时钟前移 1 秒（仍 < TTL）后切档，GeneratedAt 保持首次 build 的值即为命中缓存；
+// 仓库/待办域数值不随档位变化。
+func TestOverviewSnapshot_RangeSwitchUsesCache(t *testing.T) {
+	svc, dashboard, tempTodo, aiFunc := newTestOverviewService(t)
+	base := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local)
+	svc.now = func() time.Time { return base }
+
+	if _, err := tempTodo.Add("未完成待办", nil); err != nil {
+		t.Fatalf("Add 失败: %v", err)
+	}
+	entry := &model.AiTaskHistory{
+		ID: "c1", FunctionID: "f1", Name: "周报", Status: "success",
+		StartedAt:  base.Add(-time.Hour).UnixMilli(),
+		FinishedAt: base.UnixMilli(),
+		Metrics:    &model.AiTaskMetrics{CostUSD: 0.3},
+	}
+	if _, err := aiFunc.historySvc.Archive(entry, ""); err != nil {
+		t.Fatalf("Archive 失败: %v", err)
+	}
+
+	first := svc.GetSnapshot("today", false)
+	if first.GeneratedAt != base.UnixMilli() {
+		t.Fatalf("首次 GeneratedAt = %d，期望 %d", first.GeneratedAt, base.UnixMilli())
+	}
+
+	// 状态变更探针：OverviewService 依赖均为具体类型指针，无接口注入缝，无法注入计数 stub；
+	// 改以「首次 build 后变更数据源，若切档重算必然读到新数据」等价断言缓存未重算。
+	if err := dashboard.AddPin(filepath.Join(t.TempDir(), "probe-pin")); err != nil {
+		t.Fatalf("AddPin 失败: %v", err)
+	}
+	if _, err := tempTodo.Add("首次 build 后新增待办", nil); err != nil {
+		t.Fatalf("Add 失败: %v", err)
+	}
+	// 探针有效性自检：数据源确实已变化，否则「切档值不变」可能假绿。
+	if got := len(dashboard.GetStatuses()); got != first.Repos.PinnedTotal+1 {
+		t.Fatalf("状态变更探针未生效: GetStatuses=%d，期望 %d", got, first.Repos.PinnedTotal+1)
+	}
+
+	// 时钟前移 1 秒仍命中 TTL；若重算 GeneratedAt 会随之变化。
+	svc.now = func() time.Time { return base.Add(time.Second) }
+	switched := svc.GetSnapshot("90d", false)
+
+	if switched.GeneratedAt != first.GeneratedAt {
+		t.Errorf("切档应命中缓存不重算，GeneratedAt 变化 %d -> %d", first.GeneratedAt, switched.GeneratedAt)
+	}
+	if switched.Range != "90d" || switched.AI.RangeKey != "90d" {
+		t.Errorf("切档回显不符: range=%q rangeKey=%q", switched.Range, switched.AI.RangeKey)
+	}
+	// 仓库/待办域是快照/全量语义，不随 AI 档位变化。
+	if switched.Repos != first.Repos || switched.Todos != first.Todos {
+		t.Errorf("仓库/待办域不应随档位变化: repos %+v -> %+v todos %+v -> %+v",
+			first.Repos, switched.Repos, first.Todos, switched.Todos)
+	}
+	// 状态变更探针：命中缓存时两个域仍保持首次快照值；若切档触发重算，
+	// PinnedTotal 会从 0 变 1、PendingCount 会从 1 变 2。
+	if switched.Repos.PinnedTotal != first.Repos.PinnedTotal ||
+		switched.Todos.PendingCount != first.Todos.PendingCount {
+		t.Errorf("切档命中缓存不应重算仓库/待办域: PinnedTotal %d -> %d, PendingCount %d -> %d",
+			first.Repos.PinnedTotal, switched.Repos.PinnedTotal,
+			first.Todos.PendingCount, switched.Todos.PendingCount)
+	}
+	if switched.AI.Selected.Cost.CostUSD != 0.3 {
+		t.Errorf("90d 档成本 = %v，期望 0.3", switched.AI.Selected.Cost.CostUSD)
+	}
+}
+
+// TestOverviewSnapshot_AIFailureDegradesNotZero AI 域读取失败时只标记 Error，
+// 不得把失败降级为 0 成本 / 0%（Selected 零值仅在 Error 非空时出现）。
+func TestOverviewSnapshot_AIFailureDegradesNotZero(t *testing.T) {
+	svc, _, _, _ := newTestOverviewService(t)
+	fixed := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local)
+	svc.now = func() time.Time { return fixed }
+	// 依赖缺失：最直接的可控失败路径（与 nil aiFunc 一致的分区降级语义）。
+	svc.aiFunc = nil
+
+	snap := svc.GetSnapshot("7d", true)
+	if snap.AI.Error == "" {
+		t.Fatal("AI 域依赖缺失应产生错误标记")
+	}
+	if snap.AI.Selected.HasData || snap.AI.HasData {
+		t.Errorf("失败不得伪装成有数据: selected=%+v", snap.AI.Selected)
+	}
+}
+
+// TestOverviewSnapshot_AIFailureNotCached AI 域失败快照不参与缓存命中：
+// 损坏历史元数据制造真实失败，恢复数据后仅用 force=false 再请求即可自愈，
+// 无需手动点「重试」（force=true），且 Selected 回到真实数据而非零值。
+func TestOverviewSnapshot_AIFailureNotCached(t *testing.T) {
+	svc, _, _, aiFunc := newTestOverviewService(t)
+	fixed := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local)
+	svc.now = func() time.Time { return fixed }
+	historyPath := aiFunc.historySvc.historyMetaPath()
+
+	// 制造真实失败：损坏的历史元数据 JSON 让五档 Stats 读取报错。
+	testutil.WriteFile(t, historyPath, "{broken json")
+
+	failed := svc.GetSnapshot("", false)
+	if failed.AI.Error == "" {
+		t.Fatal("损坏历史文件应产生 AI 域错误")
+	}
+	if failed.AI.Selected.HasData {
+		t.Errorf("失败态 Selected 不应伪装成有数据: %+v", failed.AI.Selected)
+	}
+
+	// 恢复数据：写回合法空数组后归档一条有效任务（归档内部会读到空数组）。
+	testutil.WriteFile(t, historyPath, "[]")
+	entry := &model.AiTaskHistory{
+		ID: "recover-1", FunctionID: "f1", Name: "周报", Status: "success",
+		StartedAt:  fixed.Add(-time.Hour).UnixMilli(),
+		FinishedAt: fixed.UnixMilli(),
+		Metrics:    &model.AiTaskMetrics{CostUSD: 0.42},
+	}
+	if _, err := aiFunc.historySvc.Archive(entry, ""); err != nil {
+		t.Fatalf("Archive 失败: %v", err)
+	}
+
+	// 失败态下再次 force=false 请求不得复用失败缓存，必须重算并恢复真实数据。
+	healed := svc.GetSnapshot("7d", false)
+	if healed.AI.Error != "" {
+		t.Errorf("数据恢复后 force=false 应重算，AI.Error = %q", healed.AI.Error)
+	}
+	if !healed.AI.Selected.HasData || healed.AI.Selected.Cost.TaskCount != 1 ||
+		healed.AI.Selected.Cost.CostUSD != 0.42 {
+		t.Errorf("恢复后 Selected 应为真实数据: %+v", healed.AI.Selected)
+	}
+	if healed.Range != "7d" || healed.AI.RangeKey != "7d" {
+		t.Errorf("切档回显不符: range=%q rangeKey=%q", healed.Range, healed.AI.RangeKey)
+	}
+}
+
+// TestOverviewSnapshot_AIFailureKeepsOtherDomains 分区降级的真实读取失败路径：
+// 损坏历史元数据使五档 Stats 循环报错时只标记 AI.Error，仓库/待办域照常聚合，
+// Selected 保持零值交由前端降级显示，不伪装成 0 成本 / 0%。
+func TestOverviewSnapshot_AIFailureKeepsOtherDomains(t *testing.T) {
+	svc, dashboard, tempTodo, aiFunc := newTestOverviewService(t)
+	fixed := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local)
+	svc.now = func() time.Time { return fixed }
+
+	// 仓库/待办域先备好真实数据，用于验证 AI 失败不连累其余两域。
+	repo := testutil.InitTempRepo(t)
+	commitWithDate(t, repo, fixed.Add(-time.Hour))
+	if err := dashboard.AddPin(repo); err != nil {
+		t.Fatalf("AddPin 失败: %v", err)
+	}
+	if _, err := tempTodo.Add("未完成待办", nil); err != nil {
+		t.Fatalf("Add 失败: %v", err)
+	}
+
+	testutil.WriteFile(t, aiFunc.historySvc.historyMetaPath(), "{broken json")
+
+	snap := svc.GetSnapshot("90d", true)
+	if snap.AI.Error == "" {
+		t.Fatal("损坏历史文件应产生 AI 域错误")
+	}
+	if snap.Repos.Error != "" || snap.Todos.Error != "" {
+		t.Errorf("AI 域失败不应影响仓库/待办域: repos=%q todos=%q", snap.Repos.Error, snap.Todos.Error)
+	}
+	if snap.Repos.PinnedTotal != 1 || snap.Todos.PendingCount != 1 {
+		t.Errorf("仓库/待办域应照常聚合: PinnedTotal=%d PendingCount=%d",
+			snap.Repos.PinnedTotal, snap.Todos.PendingCount)
+	}
+	if snap.AI.Selected.HasData || snap.AI.Selected.Cost.TaskCount != 0 ||
+		snap.AI.Selected.SuccessRate != 0 {
+		t.Errorf("失败态 Selected 应保持零值: %+v", snap.AI.Selected)
 	}
 }

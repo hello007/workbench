@@ -201,7 +201,7 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
 const props = defineProps({
   visible: Boolean,
-  // 概览卡片下钻带入的时间窗（'today'/'week'，空 = 不套用）。
+  // 概览卡片下钻带入的时间窗（'today'/'week'/'7d'/'30d'/'90d'，空 = 不套用）。
   // 打开时套用一次，避免上次下钻的范围残留影响下一次手动打开。
   initialRange: { type: String, default: '' },
   // 概览 M5 下钻带入的状态集合（如 ['failed','timeout']），空 = 不套用。
@@ -366,6 +366,17 @@ const applyInitialRange = () => {
     const offset = (dayStart.getDay() + 6) % 7
     dayStart.setDate(dayStart.getDate() - offset)
     from = dayStart.getTime()
+  } else {
+    // 「近 N 天」= 今天 00:00 往前 N−1 天（含今天共 N 个自然日），档位 key 由概览卡片下钻带入。
+    // 边界：下钻只传合法五档（today/week/7d/30d/90d）；未知档位不套用偏移、前端按今日兜底，
+    // 与后端 normalizeOverviewRange 回落 week 的归一化不同源，不做同源假设。
+    const offsets = { '7d': 6, '30d': 29, '90d': 89 }
+    const offset = offsets[props.initialRange]
+    if (offset !== undefined) {
+      const start = new Date(dayStart)
+      start.setDate(start.getDate() - offset)
+      from = start.getTime()
+    }
   }
   filter.value.from = from
   filter.value.to = 0

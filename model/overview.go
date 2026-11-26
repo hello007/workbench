@@ -10,7 +10,8 @@ type OverviewSnapshot struct {
 	// GeneratedAt 快照生成时间 Unix 毫秒，前端据此展示「统计于 HH:mm」；
 	// TTL 判定只在后端，前端不自行计时。
 	GeneratedAt int64 `json:"generatedAt"`
-	// Range 时间范围回显（today/week）；T1 内部固定同时返回今日与本周块。
+	// Range 时间范围回显（today/week/7d/30d/90d），与 AI.RangeKey 一致；
+	// 仅回显，仓库与待办域不受其影响（快照类/全量类不加时间窗）。
 	Range string `json:"range"`
 	// Repos 仓库状态域：M1 待收尾仓库 + M2 久未推进仓库。
 	Repos RepoOverview `json:"repos"`
@@ -46,11 +47,20 @@ type RepoOverview struct {
 //
 // 窗口按 StartedAt 过滤；保留裁剪按 FinishedAt，跨天边界任务可能不计入，
 // 属已知微小差异（见 docs/spec/dashboard-metrics.md §3）。
+//
+// Today/Week 与顶层本周语义字段在 T3 后原样保留（纯增量契约）：无论所选
+// 档位为何，它们始终表示今日与本周，供卡片作对比基准；所选档位的完整数据
+// 在 Selected。
 type AIOverview struct {
 	// Today 今日（本地时区 00:00 起）成本与 token 聚合（M4）。
 	Today AICostBlock `json:"today"`
 	// Week 本周（本地时区周一 00:00 起）成本与 token 聚合（M4）。
 	Week AICostBlock `json:"week"`
+	// RangeKey 当前所选时间档位回显（today/week/7d/30d/90d）。
+	RangeKey string `json:"rangeKey"`
+	// Selected 所选档位的完整统计（M4 成本 + M5 成功率 + 四状态计数）。
+	// week 档下与本结构顶层的本周语义字段逐项相等。
+	Selected AIRangeStats `json:"selected"`
 	// SuccessRate 本周成功率 = success ÷ (success+failed+timeout)，canceled 不进分母（M5）。
 	SuccessRate float64 `json:"successRate"`
 	// HasData 本周是否存在有效任务（success+failed+timeout>0）。false 时前端显示
@@ -64,6 +74,24 @@ type AIOverview struct {
 	CanceledCount int `json:"canceledCount"`
 	// Error AI 域整体失败原因（历史文件读取失败等）；正常为空。
 	Error string `json:"error,omitempty"`
+}
+
+// AIRangeStats 单个时间档位的 AI 统计（M4 成本 + M5 成功率 + 四状态计数）。
+//
+// 与 AIOverview 的顶层「本周」语义字段同式：成功率的分子取 SuccessCount，
+// 分母显式取 success+failed+timeout 三态之和，canceled 不进分母。
+type AIRangeStats struct {
+	// Cost 该档位的成本与 token 聚合（M4）。
+	Cost AICostBlock `json:"cost"`
+	// SuccessRate 该档位成功率；HasData=false 时恒 0（前端显示「无数据」）。
+	SuccessRate float64 `json:"successRate"`
+	// HasData 该档位是否存在有效任务（success+failed+timeout>0）。
+	HasData bool `json:"hasData"`
+	// 该档位四个状态计数，供卡片展示「成功 n / 失败 n / 超时 n / 取消 n」。
+	SuccessCount  int `json:"successCount"`
+	FailedCount   int `json:"failedCount"`
+	TimeoutCount  int `json:"timeoutCount"`
+	CanceledCount int `json:"canceledCount"`
 }
 
 // AICostBlock 单个时间窗口内的 AI 成本与 token 聚合。

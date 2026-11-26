@@ -22,7 +22,17 @@
         </section>
 
         <section class="domain">
-          <h3 class="domain-title">AI 任务</h3>
+          <!-- 范围控件只覆盖 AI 域（M4/M5）：位置即语义，仓库/待办不加任何范围说明 -->
+          <div class="domain-head">
+            <h3 class="domain-title">AI 任务</h3>
+            <el-radio-group v-model="rangeKey" size="small" @change="load(false)">
+              <el-radio-button value="today">今日</el-radio-button>
+              <el-radio-button value="week">本周</el-radio-button>
+              <el-radio-button value="7d">近 7 天</el-radio-button>
+              <el-radio-button value="30d">近 30 天</el-radio-button>
+              <el-radio-button value="90d">近 90 天</el-radio-button>
+            </el-radio-group>
+          </div>
           <div class="card-grid">
             <AiCostCard :ai="snapshot.ai" @drill="goAi" @retry="load(true)" />
             <AiSuccessCard :ai="snapshot.ai" @drill="goAi" @retry="load(true)" />
@@ -66,7 +76,12 @@ const uiStore = useUiStore()
 const snapshot = ref(null)
 const loading = ref(false)
 
-// requestSeq 请求序号：连点刷新或快速切回面板时，后到的旧响应不覆盖新快照。
+// 时间范围档位（只作用于 AI 域 M4/M5），默认本周；不持久化，切面板保当前档位。
+// 后端按五档缓存，切档不传 force，仅换返回块，仓库/待办域数值不变。
+const rangeKey = ref('week')
+
+// requestSeq 请求序号：连点刷新/快速切档/切回面板时，后到的旧响应不覆盖新快照。
+// 每次 load 先自增，切档调 load(false) 即重置守卫。
 let requestSeq = 0
 
 const generatedText = computed(() => {
@@ -83,7 +98,7 @@ async function load(force = false) {
   const seq = ++requestSeq
   loading.value = true
   try {
-    const result = await GetOverviewSnapshot('', force)
+    const result = await GetOverviewSnapshot(rangeKey.value, force)
     if (seq !== requestSeq) return
     snapshot.value = result
   } catch (error) {
@@ -175,6 +190,13 @@ watch(
 .domain {
   display: flex;
   flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.domain-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--spacing-sm);
 }
 

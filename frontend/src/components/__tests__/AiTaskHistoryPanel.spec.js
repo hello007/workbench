@@ -438,4 +438,64 @@ describe('AiTaskHistoryPanel', () => {
     expect(exportMarkdownMock).toHaveBeenCalled()
     expect(saveFileMock).toHaveBeenCalledWith('D:/tmp/ai-task-history.csv', '# AI 任务历史报告', 'utf-8')
   })
+
+  // 合法五档的窗口起点与后端自然日边界一致；未知档位不在本组覆盖范围，
+  // 其 fallback 见下方「未知档位回落到 today」用例（与后端归一化为 week 不同源）。
+  describe('initialRange 档位换算', () => {
+    const dayStart = () => {
+      const now = new Date()
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    }
+    const daysBefore = (n) => {
+      const d = new Date(dayStart())
+      d.setDate(d.getDate() - n)
+      return d.getTime()
+    }
+
+    const cases = [
+      { range: 'today', from: () => dayStart() },
+      { range: '7d', from: () => daysBefore(6) },
+      { range: '30d', from: () => daysBefore(29) },
+      { range: '90d', from: () => daysBefore(89) }
+    ]
+
+    for (const { range, from } of cases) {
+      it(`${range} 档 from = 今天 00:00 往前 N−1 天，to = 0`, async () => {
+        const expected = from()
+        const wrapper = mount(AiTaskHistoryPanel, {
+          props: { visible: true, initialRange: range },
+          global: { stubs }
+        })
+        await flushPromises()
+
+        expect(wrapper.vm.filter.from).toBe(expected)
+        expect(wrapper.vm.filter.to).toBe(0)
+        expect(getAiTaskHistoryMock).toHaveBeenCalledWith(
+          expect.objectContaining({ from: expected, to: 0 })
+        )
+      })
+    }
+
+    it('week 档 from = 本周一 00:00', async () => {
+      const monday = new Date(dayStart())
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+      const wrapper = mount(AiTaskHistoryPanel, {
+        props: { visible: true, initialRange: 'week' },
+        global: { stubs }
+      })
+      await flushPromises()
+      expect(wrapper.vm.filter.from).toBe(monday.getTime())
+    })
+
+    // 本用例只固化前端兜底：下钻只传合法五档，未知档位按今日 00:00 兜底；
+    // 后端 normalizeOverviewRange 对非法档位回落 week，两者刻意不同源，不改行为。
+    it('未知档位回落到 today（不套用任何偏移以外的范围）', async () => {
+      const wrapper = mount(AiTaskHistoryPanel, {
+        props: { visible: true, initialRange: 'unknown' },
+        global: { stubs }
+      })
+      await flushPromises()
+      expect(wrapper.vm.filter.from).toBe(dayStart())
+    })
+  })
 })

@@ -61,7 +61,11 @@ const defaultStubs = {
     emits: ['click']
   },
   'el-icon': { template: '<i><slot /></i>' },
-  'el-tooltip': { template: '<span><slot /></span>' },
+  'el-tooltip': {
+    // 把 content 落为 data-content 供口径标注回归断言（tooltip 内容不进 DOM 文本）
+    template: '<span class="el-tooltip" :data-content="content"><slot /></span>',
+    props: ['content', 'placement']
+  },
   'el-tag': {
     template: '<span class="el-tag" :data-type="type"><slot /></span>',
     props: { type: String, size: String }
@@ -124,6 +128,15 @@ describe('DashboardView.vue', () => {
     // 表格接收到 4 行数据
     const table = wrapper.find('.el-table')
     expect(table.attributes('data-count')).toBe('4')
+  })
+
+  it('ahead/behind 标注为相对上次 fetch 的近似值（口径回归）', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    // 断层须在「10 秒读屏」内可见：tooltip 文案点明非实时远程（spec §3）
+    const tooltip = wrapper.find('.el-tooltip')
+    expect(tooltip.exists()).toBe(true)
+    expect(tooltip.attributes('data-content')).toContain('基于上次 fetch')
   })
 
   it('点击行 emit locate 事件（非失效仓库）', async () => {
