@@ -671,7 +671,11 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
       today: { costUsd: 0, taskCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       week: { costUsd: 0, taskCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       successRate: 0,
-      hasData: false
+      hasData: false,
+      successCount: 0,
+      failedCount: 0,
+      timeoutCount: 0,
+      canceledCount: 0
     },
     todos: { pendingCount: 0, oldestDays: 0, oldestId: '', oldestText: '' }
   },

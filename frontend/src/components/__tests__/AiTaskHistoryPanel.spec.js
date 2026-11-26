@@ -94,6 +94,31 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   ClearAiTaskHistory: (...args) => clearAiTaskHistoryMock(...args)
 }))
 
+// 排行排序 radio 组：声明 props/emits，测试经 update:modelValue 驱动 v-model，
+// 验证组件模板接线本身（只改 vm.rankSort 无法发现模板绑定写错导致的假绿）
+const rankGroupStub = {
+  template: '<div class="el-radio-group"><slot /></div>',
+  props: ['modelValue', 'size'],
+  emits: ['update:modelValue', 'change']
+}
+const rankButtonStub = {
+  template: '<label class="el-radio-button"><slot /></label>',
+  props: ['value', 'label']
+}
+
+// el-select / el-tag 桩声明 emits，测试经 $emit('change') / $emit('close') 驱动，
+// 验证模板 @change / @close 接线本身（直接调 vm 方法无法发现模板绑定写错导致的假绿）。
+const elSelectStub = {
+  template: '<select class="el-select"><slot /></select>',
+  props: ['modelValue'],
+  emits: ['change', 'update:modelValue']
+}
+const elTagStub = {
+  template: '<span class="tag"><slot /></span>',
+  props: ['type', 'size', 'closable'],
+  emits: ['close']
+}
+
 const stubs = {
   'el-dialog': {
     template: '<div v-if="modelValue" class="dlg"><slot /></div>',
@@ -112,14 +137,14 @@ const stubs = {
     template: '<div v-if="modelValue" class="drawer"><slot /></div>',
     props: ['modelValue', 'title', 'size']
   },
-  'el-select': { template: '<select class="el-select"><slot /></select>', props: ['modelValue'] },
+  'el-select': elSelectStub,
   'el-option': { template: '<option class="el-option" :value="value">{{ label }}</option>', props: ['label', 'value'] },
   'el-date-picker': { template: '<input class="el-date-picker" />', props: ['modelValue'] },
   'el-button': {
     emits: ['click'],
     template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>'
   },
-  'el-tag': { template: '<span class="tag"><slot /></span>', props: ['type'] },
+  'el-tag': elTagStub,
   'el-table': {
     template: '<div class="el-table"><slot /></div>',
     props: ['data', 'size', 'border']
@@ -128,7 +153,9 @@ const stubs = {
   'el-table-column': {
     props: ['prop', 'label', 'width', 'fixed'],
     template: '<div class="el-table-col"><span class="col-label">{{ label }}</span><div v-for="row in $parent.data" :key="row.id"><slot :row="row" /></div></div>'
-  }
+  },
+  'el-radio-group': rankGroupStub,
+  'el-radio-button': rankButtonStub
 }
 
 const createWrapper = (visible = true) =>
@@ -147,6 +174,9 @@ describe('AiTaskHistoryPanel', () => {
     getAiTaskHistoryStatsMock.mockResolvedValue({
       totalCount: 2,
       successCount: 1,
+      failedCount: 0,
+      canceledCount: 0,
+      timeoutCount: 0,
       totalCostUsd: 0.012,
       totalInputTokens: 1000,
       totalOutputTokens: 500,
@@ -249,6 +279,8 @@ describe('AiTaskHistoryPanel', () => {
     expect(wrapper.vm.totalTokens()).toBe(1800)
     // 功能排行含功能名
     expect(text).toContain('生成周报')
+    // 排行 token 列头显式标注「入+出 token」，与统计卡片四分项口径区分
+    expect(text).toContain('入+出 token')
   })
 
   it('导出 CSV：调 ExportAiTaskHistoryCSV 后经 SaveFileDialog 选路径调 SaveFile 落盘', async () => {
@@ -262,6 +294,138 @@ describe('AiTaskHistoryPanel', () => {
     expect(SaveFileDialogMock).toHaveBeenCalled()
     // 落盘调用：路径 + 文本 + 编码
     expect(saveFileMock).toHaveBeenCalledWith('D:/tmp/ai-task-history.csv', expect.stringContaining('时间'), 'utf-8')
+  })
+
+  it('功能排行可切换排序：次数 / 成本 / token，成本占比按筛选总成本计算', async () => {
+    getAiTaskHistoryStatsMock.mockResolvedValue({
+      // 四状态计数之和 = totalCount = byFunction 次数之和（6），对齐后端 Stats 不变式
+      totalCount: 6,
+      successCount: 2,
+      failedCount: 1,
+      canceledCount: 2,
+      timeoutCount: 1,
+      totalCostUsd: 1.0,
+      totalInputTokens: 100,
+      totalOutputTokens: 50,
+      totalCacheReadTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalDurationMs: 1000,
+      byFunction: [
+        { functionId: 'a', functionName: '高频低耗', count: 5, canceledCount: 2, totalCostUsd: 0.2, totalTokens: 100 },
+        { functionId: 'b', functionName: '低频高耗', count: 1, canceledCount: 0, totalCostUsd: 0.8, totalTokens: 5000 }
+      ]
+    })
+    const wrapper = createWrapper(true)
+    await flushPromises()
+
+    // 默认按次数降序
+    expect(wrapper.vm.rankSort).toBe('count')
+    expect(wrapper.vm.rankedFunctions[0].functionId).toBe('a')
+
+    // 切成本：经 radio 组 v-model 事件切换（验证模板接线），低频高耗升到首位
+    const rankGroup = wrapper.findComponent(rankGroupStub)
+    expect(rankGroup.exists()).toBe(true)
+    rankGroup.vm.$emit('update:modelValue', 'cost')
+    await flushPromises()
+    expect(wrapper.vm.rankSort).toBe('cost')
+    expect(wrapper.vm.rankedFunctions[0].functionId).toBe('b')
+    expect(wrapper.vm.costShare(wrapper.vm.rankedFunctions[0])).toBe('80.0')
+    // 各功能项占比之和 ≈ 100%（允许一位小数的舍入误差）
+    const shareSum = wrapper.vm.rankedFunctions
+      .reduce((sum, row) => sum + Number(wrapper.vm.costShare(row)), 0)
+    expect(Math.abs(shareSum - 100)).toBeLessThan(0.2)
+    // 表格 DOM 顺序同步翻转（防只在 vm 上假绿）；按表头文本定位列，避免下标漂移
+    const fnColumn = wrapper
+      .findAll('.el-table-col')
+      .find((c) => c.find('.col-label').text() === '功能排行')
+    expect(fnColumn).toBeTruthy()
+    const fnColumnText = fnColumn.text()
+    expect(fnColumnText.indexOf('低频高耗')).toBeLessThan(fnColumnText.indexOf('高频低耗'))
+
+    // 切 token：同样低频高耗在前
+    rankGroup.vm.$emit('update:modelValue', 'tokens')
+    await flushPromises()
+    expect(wrapper.vm.rankSort).toBe('tokens')
+    expect(wrapper.vm.rankedFunctions[0].functionId).toBe('b')
+
+    // 排序切换按钮文案齐全，用户可发现切换入口
+    expect(wrapper.find('.fn-rank-head').text()).toContain('次数')
+    expect(wrapper.find('.fn-rank-head').text()).toContain('成本')
+    expect(wrapper.find('.fn-rank-head').text()).toContain('token')
+
+    // 取消数在排行表中显式展示，不清零 Count
+    const text = wrapper.find('.history-stats').text()
+    expect(text).toContain('取消 2')
+    expect(text).toContain('5')
+    // 四状态计数在运行次数卡片 title 中可见
+    const statTitle = wrapper.find('.stat-value').attributes('title')
+    expect(statTitle).toContain('失败 1')
+    expect(statTitle).toContain('取消 2')
+  })
+
+  it('initialStatuses 下钻：列表与统计同带多状态筛选，事件驱动清除', async () => {
+    const wrapper = mount(AiTaskHistoryPanel, {
+      props: { visible: true, initialStatuses: ['failed', 'timeout'] },
+      global: { stubs }
+    })
+    await flushPromises()
+    // 列表与统计同一筛选范围：两者都应收到 statuses
+    expect(getAiTaskHistoryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ statuses: ['failed', 'timeout'] })
+    )
+    expect(getAiTaskHistoryStatsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ statuses: ['failed', 'timeout'] })
+    )
+    // 筛选行显示可关闭的多状态标签
+    expect(wrapper.find('.dlg').text()).toContain('失败 + 超时')
+
+    // 用户改选单值状态：多状态必须清除，否则后端 Statuses 优先导致查询条件失效。
+    // 经 el-select 桩的 change 事件驱动，验证模板 @change 接线本身（非直调方法）。
+    wrapper.vm.filter.status = 'success'
+    const statusSelect = wrapper.findAllComponents(elSelectStub)[1]
+    statusSelect.vm.$emit('change', 'success')
+    await flushPromises()
+    expect(wrapper.vm.filter.statuses).toEqual([])
+
+    // 清除标签立即刷新列表：经 el-tag 桩的 close 事件驱动，验证 @close 接线本身。
+    getAiTaskHistoryMock.mockClear()
+    wrapper.vm.filter.statuses = ['failed', 'timeout']
+    await flushPromises()
+    const filterTag = wrapper.findAllComponents(elTagStub)[0]
+    filterTag.vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.vm.filter.statuses).toEqual([])
+    expect(getAiTaskHistoryMock).toHaveBeenCalled()
+  })
+
+  it('改筛选不点查询直接导出时，导出沿用上次查询生效条件', async () => {
+    const wrapper = createWrapper(true)
+    await flushPromises()
+
+    // 上次查询条件：状态=成功
+    wrapper.vm.filter.status = 'success'
+    const queryBtn = wrapper.findAll('button').find((b) => b.text().includes('查询'))
+    await queryBtn.trigger('click')
+    await flushPromises()
+    expect(getAiTaskHistoryMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'success' })
+    )
+
+    // 用户改了筛选但未点查询（模拟下拉改选未生效）
+    wrapper.vm.filter.status = 'failed'
+    exportCsvMock.mockClear()
+    exportMarkdownMock.mockClear()
+
+    const csvBtn = wrapper.findAll('button').find((b) => b.text().includes('导出 CSV'))
+    await csvBtn.trigger('click')
+    await flushPromises()
+    // 导出必须使用上次查询的 success，而非屏幕上未生效的 failed
+    expect(exportCsvMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'success' }))
+
+    const mdBtn = wrapper.findAll('button').find((b) => b.text().includes('导出 Markdown'))
+    await mdBtn.trigger('click')
+    await flushPromises()
+    expect(exportMarkdownMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'success' }))
   })
 
   it('导出 Markdown：调 ExportAiTaskHistoryMarkdown 落盘', async () => {

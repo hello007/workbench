@@ -808,13 +808,15 @@ pty 终端会话（Windows 用 conpty）。终端不真实复用进程，崩溃�
 
 **AiTaskHistory** — 任务历史（`id` / `functionId` / `name` / `prompt` / `startedAt` / `finishedAt` / `status` / `exitCode` / `error` / `sessionId` / `metrics` / `outputFile` / `outputSize`）
 
-**AiTaskHistoryFilter**（`functionId` / `status` / `from` / `to`）
+**AiTaskHistoryFilter**（`functionId` / `status` / `statuses` / `from` / `to`；`statuses` 非空时按集合匹配并优先于 `status`）
 
 **AiTaskHistoryClearCriteria**（`olderThanDays` / `keepRecent` / `functionId`）
 
 **AiConcurrencyStatus**（`running` / `queued` / `max`）
 
-**AiTaskHistoryStats**（`totalCount` / `successCount` / `totalCostUsd` / `totalInputTokens` / `totalOutputTokens` / `totalCacheReadTokens` / `totalCacheCreationTokens` / `totalDurationMs` / `byFunction`: FunctionStat[]）
+**AiTaskHistoryStats**（`totalCount` / `successCount` / `failedCount` / `canceledCount` / `timeoutCount` / `totalCostUsd` / `totalInputTokens` / `totalOutputTokens` / `totalCacheReadTokens` / `totalCacheCreationTokens` / `totalDurationMs` / `byFunction`: FunctionStat[]；四状态计数之和 = `totalCount`）
+
+**FunctionStat**（`functionId` / `functionName` / `count` / `canceledCount` / `totalCostUsd` / `totalTokens`；`count` 含 canceled，`canceledCount` 为其中已取消数）
 
 **ImportPreview** — AI 功能导入预览（`new` / `conflict`: AiFunction[]，`invalid`: string[]）
 

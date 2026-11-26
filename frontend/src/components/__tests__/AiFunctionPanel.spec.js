@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ElMessageBox } from 'element-plus'
 import AiFunctionPanel from '../AiFunctionPanel.vue'
 import AiFunctionRunner from '../AiFunctionRunner.vue'
+import { useUiStore } from '../../store/ui'
 
 // Wails 事件 handler 注册表（EventsOn mock 捕获）
 const eventHandlers = {}
@@ -133,7 +134,12 @@ const stubs = {
     template: '<div class="ai-runner-stub" />'
   },
   AiFunctionConfigDialog: true,
-  AiTaskHistoryPanel: true
+  // 历史抽屉 stub：声明 props 以断言下钻入参（时间窗 + 状态集合）透传与关闭复位
+  AiTaskHistoryPanel: {
+    props: ['visible', 'initialRange', 'initialStatuses'],
+    emits: ['update:visible'],
+    template: '<div class="ai-history-stub" />'
+  }
 }
 
 const createWrapper = () =>
@@ -575,6 +581,27 @@ describe('AiFunctionPanel', () => {
     wrapper.vm.sortByFrequency = false
     await flushPromises()
     expect(wrapper.find('.ai-card-count').exists()).toBe(false)
+  })
+
+  it('概览 M5 下钻：打开历史抽屉并透传时间窗与多状态集合，关闭后复位', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const historyPanel = wrapper.findComponent(stubs.AiTaskHistoryPanel)
+    expect(historyPanel.exists()).toBe(true)
+    expect(historyPanel.props('visible')).toBe(false)
+
+    // 模拟概览 M5 卡片下钻：信箱写入后由面板 watch 消费并打开抽屉
+    useUiStore().pushOverviewDrillRequest('ai', { range: 'week', statuses: ['failed', 'timeout'] })
+    await flushPromises()
+    expect(historyPanel.props('visible')).toBe(true)
+    expect(historyPanel.props('initialRange')).toBe('week')
+    expect(historyPanel.props('initialStatuses')).toEqual(['failed', 'timeout'])
+
+    // 关闭抽屉后清空入参：下次手动打开不被上次下钻筛选残留限制
+    wrapper.vm.historyVisible = false
+    await flushPromises()
+    expect(historyPanel.props('initialRange')).toBe('')
+    expect(historyPanel.props('initialStatuses')).toEqual([])
   })
 
   it('排序模式持久化：开关写入 localStorage，初始化读取恢复', async () => {

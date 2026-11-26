@@ -33,16 +33,25 @@ type MeetingTable struct {
 type AiTaskHistoryFilter struct {
 	FunctionID string `json:"functionId,omitempty"` // 功能项 id 精确匹配，空表示不限
 	Status     string `json:"status,omitempty"`     // 状态精确匹配，空表示不限
-	From       int64  `json:"from,omitempty"`       // 起始时间（unix 毫秒），0 表示不限
-	To         int64  `json:"to,omitempty"`         // 结束时间（unix 毫秒），0 表示不限
+	// Statuses 状态集合匹配（任一命中即保留）。非空时优先于 Status，供
+	// 「失败/超时清单」这类多状态下钻使用；非法值自然匹配不到记录，不报错。
+	Statuses []string `json:"statuses,omitempty"`
+	From     int64    `json:"from,omitempty"` // 起始时间（unix 毫秒），0 表示不限
+	To       int64    `json:"to,omitempty"`   // 结束时间（unix 毫秒），0 表示不限
 }
 
 // AiTaskHistoryStats 历史聚合统计（按筛选范围汇总，后端算好返回，前端只渲染）。
 // metrics 为 nil 的记录（异常 result）计入 TotalCount 但不参与 token/成本/耗时累加。
 type AiTaskHistoryStats struct {
-	TotalCount   int     `json:"totalCount"`   // 记录总数
-	SuccessCount int     `json:"successCount"` // 成功数
-	TotalCostUSD float64 `json:"totalCostUsd"` // 总成本
+	// 四个状态计数之和恒等于 TotalCount（归档状态为闭集）。成功率分母取
+	// success+failed+timeout 三态之和（canceled 不进分母，见 dashboard-metrics.md §2 M5），
+	// 与卡片文案同式；四状态之和 = TotalCount 仅作实现验证点，不作分母推导前提。
+	TotalCount    int     `json:"totalCount"`    // 记录总数
+	SuccessCount  int     `json:"successCount"`  // 成功数
+	FailedCount   int     `json:"failedCount"`   // 失败数
+	CanceledCount int     `json:"canceledCount"` // 已取消数（不进成功率分母）
+	TimeoutCount  int     `json:"timeoutCount"`  // 超时数
+	TotalCostUSD  float64 `json:"totalCostUsd"`  // 总成本
 	// token 四分项独立累加（Anthropic 计费口径：cache_creation 与 cache_read 均为实际消耗）
 	TotalInputTokens         int            `json:"totalInputTokens"`
 	TotalOutputTokens        int            `json:"totalOutputTokens"`
@@ -54,11 +63,13 @@ type AiTaskHistoryStats struct {
 
 // FunctionStat 单个功能项的统计。
 type FunctionStat struct {
-	FunctionID   string  `json:"functionId"`
-	FunctionName string  `json:"functionName"` // 取最近一条的 name 快照（功能改名取最新）
-	Count        int     `json:"count"`
-	TotalCostUSD float64 `json:"totalCostUsd"`
-	TotalTokens  int     `json:"totalTokens"` // 入+出
+	FunctionID   string `json:"functionId"`
+	FunctionName string `json:"functionName"` // 取最近一条的 name 快照（功能改名取最新）
+	Count        int    `json:"count"`        // 运行次数，含 canceled（既有口径，不改语义）
+	// CanceledCount 其中已取消的次数，供前端显示「次数（取消 n）」而不改动 Count。
+	CanceledCount int     `json:"canceledCount"`
+	TotalCostUSD  float64 `json:"totalCostUsd"`
+	TotalTokens   int     `json:"totalTokens"` // 入+出
 }
 
 // AiTaskHistoryClearCriteria 批量清理条件，满足任一条件的记录被清理。

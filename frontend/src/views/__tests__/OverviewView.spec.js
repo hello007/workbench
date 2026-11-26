@@ -139,6 +139,24 @@ describe('OverviewView', () => {
     expect(ui.overviewDrillRequest).toMatchObject({ target: 'ai', payload: { range: 'week' } })
   })
 
+  it('M5 下钻写入 ai 信箱并预选失败 + 超时状态', async () => {
+    wailsMock.GetOverviewSnapshot.mockResolvedValue(
+      makeSnapshot({ ai: { successRate: 0.5, hasData: true, successCount: 1, failedCount: 1 } })
+    )
+    const ui = useUiStore()
+    ui.activePanel = 'overview'
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 卡片顺序 M1、M2、M4、M5、M3：索引 3 为 AI 成功率卡片
+    await wrapper.findAll('.overview-card')[3].trigger('click')
+    expect(ui.activePanel).toBe('ai')
+    expect(ui.overviewDrillRequest).toMatchObject({
+      target: 'ai',
+      payload: { range: 'week', statuses: ['failed', 'timeout'] }
+    })
+  })
+
   it('并发旧响应不覆盖新快照（requestSeq 守卫）', async () => {
     let resolveFirst
     let resolveSecond

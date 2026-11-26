@@ -519,6 +519,106 @@ func TestFormatHistoryTime(t *testing.T) {
 	}
 }
 
+// TestStats_StatusCounts 四个状态计数之和恒等于 TotalCount，且功能项取消数正确。
+// 归档状态为闭集（classifyStatus），这是概览用 TotalCount-CanceledCount 作分母的前提。
+func TestStats_StatusCounts(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	entries := []*model.AiTaskHistory{
+		makeEntryWithMetrics("sc1", "fn-x", "功能X", base.Add(-4*time.Hour), "success", nil, 0, 0),
+		makeEntryWithMetrics("sc2", "fn-x", "功能X", base.Add(-3*time.Hour), "failed", nil, 0, 0),
+		makeEntryWithMetrics("sc3", "fn-x", "功能X", base.Add(-2*time.Hour), "canceled", nil, 0, 0),
+		makeEntryWithMetrics("sc4", "fn-y", "功能Y", base.Add(-time.Hour), "timeout", nil, 0, 0),
+		// metrics 为 nil 的异常记录同样计入状态计数
+		makeEntry("sc5", base, "canceled", 0),
+	}
+	for _, e := range entries {
+		if _, err := svc.Archive(e, ""); err != nil {
+			t.Fatalf("Archive(%s) 失败: %v", e.ID, err)
+		}
+	}
+
+	stats, err := svc.Stats(nil)
+	if err != nil {
+		t.Fatalf("Stats 失败: %v", err)
+	}
+	if stats.TotalCount != 5 || stats.SuccessCount != 1 || stats.FailedCount != 1 ||
+		stats.CanceledCount != 2 || stats.TimeoutCount != 1 {
+		t.Errorf("状态计数不符: %+v", stats)
+	}
+	sum := stats.SuccessCount + stats.FailedCount + stats.CanceledCount + stats.TimeoutCount
+	if sum != stats.TotalCount {
+		t.Errorf("四状态计数之和 %d 应等于 TotalCount %d", sum, stats.TotalCount)
+	}
+
+	// 功能项取消数：fn-x 有 1 条 canceled，fn-y 无；Count 仍含 canceled（既有口径）。
+	fnStats := map[string]model.FunctionStat{}
+	for _, fn := range stats.ByFunction {
+		fnStats[fn.FunctionID] = fn
+	}
+	if got := fnStats["fn-x"]; got.Count != 3 || got.CanceledCount != 1 {
+		t.Errorf("fn-x 次数/取消数不符: %+v", got)
+	}
+	if got := fnStats["fn-y"]; got.Count != 1 || got.CanceledCount != 0 {
+		t.Errorf("fn-y 次数/取消数不符: %+v", got)
+	}
+	// 各功能项取消数之和 = 同筛选下 Statuses=['canceled'] 的 Stats 总数（PRD 验收项）
+	onlyCanceled, err := svc.Stats(&model.AiTaskHistoryFilter{Statuses: []string{"canceled"}})
+	if err != nil {
+		t.Fatalf("Stats(canceled) 失败: %v", err)
+	}
+	canceledSum := 0
+	for _, fn := range stats.ByFunction {
+		canceledSum += fn.CanceledCount
+	}
+	if canceledSum != onlyCanceled.TotalCount || canceledSum != stats.CanceledCount {
+		t.Errorf("功能项取消数之和 %d 应等于 canceled 筛选总数 %d 与顶层取消数 %d",
+			canceledSum, onlyCanceled.TotalCount, stats.CanceledCount)
+	}
+}
+
+// TestList_Statuses Statuses 多值匹配生效；非空时优先于单值 Status；空时回退 Status。
+func TestList_Statuses(t *testing.T) {
+	svc := newHistorySvc(t)
+	base := time.Now()
+	statuses := []string{"success", "failed", "canceled", "timeout"}
+	for i, st := range statuses {
+		_, _ = svc.Archive(makeEntry("ls-"+st, base.Add(-time.Duration(i)*time.Minute), st, 0), "")
+	}
+
+	// 多值：failed + timeout
+	got, err := svc.List(&model.AiTaskHistoryFilter{Statuses: []string{"failed", "timeout"}})
+	if err != nil {
+		t.Fatalf("List 失败: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("多状态匹配应返回 2 条, got %d", len(got))
+	}
+	for _, e := range got {
+		if e.Status != "failed" && e.Status != "timeout" {
+			t.Errorf("多状态匹配混入非法状态: %s", e.Status)
+		}
+	}
+
+	// Statuses 优先于 Status：同时存在时忽略单值
+	got, _ = svc.List(&model.AiTaskHistoryFilter{Status: "success", Statuses: []string{"canceled"}})
+	if len(got) != 1 || got[0].Status != "canceled" {
+		t.Errorf("Statuses 应优先于 Status: %+v", got)
+	}
+
+	// Statuses 为空时回退单值
+	got, _ = svc.List(&model.AiTaskHistoryFilter{Status: "success"})
+	if len(got) != 1 || got[0].Status != "success" {
+		t.Errorf("空 Statuses 应回退 Status: %+v", got)
+	}
+
+	// 非法状态值自然匹配不到，不报错
+	got, err = svc.List(&model.AiTaskHistoryFilter{Statuses: []string{"unknown"}})
+	if err != nil || len(got) != 0 {
+		t.Errorf("非法状态应返回空且无错误: len=%d err=%v", len(got), err)
+	}
+}
+
 // TestMdEscape 竖线转义为全角，无竖线不变。
 func TestMdEscape(t *testing.T) {
 	if got := mdEscape("a|b|c"); got != "a｜b｜c" {

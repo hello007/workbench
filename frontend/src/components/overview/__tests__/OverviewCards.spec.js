@@ -110,6 +110,56 @@ describe('概览卡片', () => {
     expect(wrapper.find('.value-num').text()).toBe('75.0%')
   })
 
+  it('M5 有数据时展示四状态计数，成功率可自行验算', () => {
+    const wrapper = mount(AiSuccessCard, {
+      props: {
+        ai: { ...baseAI, hasData: true, successRate: 0.75, successCount: 3, failedCount: 1, timeoutCount: 0, canceledCount: 2 }
+      },
+      global: { stubs }
+    })
+    const text = wrapper.text()
+    expect(text).toContain('成功 3')
+    expect(text).toContain('失败 1')
+    expect(text).toContain('超时 0')
+    expect(text).toContain('取消 2')
+  })
+
+  it('M5 无有效任务但存在取消任务时说明原因', () => {
+    const wrapper = mount(AiSuccessCard, {
+      props: { ai: { ...baseAI, hasData: false, successRate: 0, canceledCount: 4 } },
+      global: { stubs }
+    })
+    expect(wrapper.find('.value-num').text()).toBe('无数据')
+    expect(wrapper.text()).toContain('4 个任务均被取消')
+  })
+
+  it('M5 全部任务取消时下钻载荷改为取消状态，避免点开为空', async () => {
+    const wrapper = mount(AiSuccessCard, {
+      props: { ai: { ...baseAI, hasData: false, successRate: 0, canceledCount: 4 } },
+      global: { stubs }
+    })
+    await wrapper.find('.overview-card').trigger('click')
+    expect(wrapper.emitted('drill')[0][0]).toEqual({ range: 'week', statuses: ['canceled'] })
+  })
+
+  it('M5 无数据且无取消时下钻载荷回落失败+超时', async () => {
+    const wrapper = mount(AiSuccessCard, {
+      props: { ai: { ...baseAI, hasData: false, successRate: 0 } },
+      global: { stubs }
+    })
+    await wrapper.find('.overview-card').trigger('click')
+    expect(wrapper.emitted('drill')[0][0]).toEqual({ range: 'week', statuses: ['failed', 'timeout'] })
+  })
+
+  it('M5 下钻载荷带入失败+超时状态集合', async () => {
+    const wrapper = mount(AiSuccessCard, {
+      props: { ai: { ...baseAI, hasData: true, successRate: 0.5, successCount: 1, failedCount: 1 } },
+      global: { stubs }
+    })
+    await wrapper.find('.overview-card').trigger('click')
+    expect(wrapper.emitted('drill')[0][0]).toEqual({ range: 'week', statuses: ['failed', 'timeout'] })
+  })
+
   it('分区错误只降级当前卡片并展示重试', async () => {
     const wrapper = mount(RepoPendingCard, {
       props: { repos: { ...baseRepo, error: '读取仓库状态失败' } },

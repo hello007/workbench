@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -167,7 +168,12 @@ func (h *AiTaskHistoryService) List(filter *model.AiTaskHistoryFilter) ([]*model
 			if filter.FunctionID != "" && e.FunctionID != filter.FunctionID {
 				continue
 			}
-			if filter.Status != "" && e.Status != filter.Status {
+			// Statuses 非空时按集合匹配并忽略单值 Status，供「失败/超时清单」下钻。
+			if len(filter.Statuses) > 0 {
+				if !slices.Contains(filter.Statuses, e.Status) {
+					continue
+				}
+			} else if filter.Status != "" && e.Status != filter.Status {
 				continue
 			}
 			if filter.From > 0 && e.StartedAt < filter.From {
@@ -206,7 +212,8 @@ func (h *AiTaskHistoryService) UsageCounts() (map[string]int, error) {
 	return counts, nil
 }
 
-// Stats 按筛选范围聚合统计：总数/成功数/总成本/token 四分项/总耗时 + 按功能项聚合排行。
+// Stats 按筛选范围聚合统计：总数与四状态计数（success/failed/canceled/timeout，
+// 四者之和恒等于总数）/总成本/token 四分项/总耗时 + 按功能项聚合排行（含取消数）。
 // metrics 为 nil 的记录（异常 result）计入 count 但跳过计量累加。
 // 量级 2000 条上限（enforceRetention），内存聚合无性能压力。
 func (h *AiTaskHistoryService) Stats(filter *model.AiTaskHistoryFilter) (*model.AiTaskHistoryStats, error) {
@@ -219,8 +226,17 @@ func (h *AiTaskHistoryService) Stats(filter *model.AiTaskHistoryFilter) (*model.
 	fnIndex := map[string]int{}
 	for _, e := range list {
 		stats.TotalCount++
-		if e.Status == "success" {
+		// 归档状态为闭集 {success, failed, canceled, timeout}（classifyStatus），
+		// 四个计数之和恒等于 TotalCount，成功率分母可直接用 TotalCount-CanceledCount。
+		switch e.Status {
+		case "success":
 			stats.SuccessCount++
+		case "failed":
+			stats.FailedCount++
+		case "canceled":
+			stats.CanceledCount++
+		case "timeout":
+			stats.TimeoutCount++
 		}
 		idx, ok := fnIndex[e.FunctionID]
 		if !ok {
@@ -232,6 +248,9 @@ func (h *AiTaskHistoryService) Stats(filter *model.AiTaskHistoryFilter) (*model.
 			fnIndex[e.FunctionID] = idx
 		}
 		stats.ByFunction[idx].Count++
+		if e.Status == "canceled" {
+			stats.ByFunction[idx].CanceledCount++
+		}
 		if e.Metrics == nil {
 			continue
 		}

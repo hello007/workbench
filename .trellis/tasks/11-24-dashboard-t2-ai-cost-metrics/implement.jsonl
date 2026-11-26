@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/dashboard-metrics.md", "reason": "M4/M5 口径、canceled 不进分母、口径断层标注与 §5 CanceledCount 前置的真相源"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "model 导出 struct 字段变更须同步 frontend/wailsjs 三处（models.ts 手工补字段）"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76%、前端 ≥70% 门禁，改动后不得下降"}
+{"file": "docs/spec/ai-structured-output.md", "reason": "AI 历史/统计相关既有约束，避免与结构化输出链路口径冲突"}

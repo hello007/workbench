@@ -357,6 +357,77 @@ func TestOverviewSnapshot_StaleThresholdBoundary(t *testing.T) {
 	}
 }
 
+// TestOverviewSnapshot_AIMatchesStats 概览 AI 域与 AiTaskHistoryService.Stats 同口径：
+// 同一时间窗的成本/token/任务数与成功率必须逐项一致（T2 聚合同源的核心断言）。
+// 含 Metrics==nil 记录，锁定「只计任务数、不计成本与 token」的累加规则。
+func TestOverviewSnapshot_AIMatchesStats(t *testing.T) {
+	svc, _, _, aiFunc := newTestOverviewService(t)
+	fixed := time.Date(2026, 11, 25, 12, 0, 0, 0, time.Local) // 周三
+	svc.now = func() time.Time { return fixed }
+
+	usage := &model.AiTaskUsage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10, CacheCreationInputTokens: 5}
+	entries := []*model.AiTaskHistory{
+		{ID: "m1", FunctionID: "f1", Name: "周报", Status: "success", StartedAt: fixed.Add(-4 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.2, Usage: usage}},
+		{ID: "m2", FunctionID: "f1", Name: "周报", Status: "failed", StartedAt: fixed.Add(-3 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.1, Usage: usage}},
+		{ID: "m3", FunctionID: "f2", Name: "会议", Status: "timeout", StartedAt: fixed.Add(-2 * time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.05, Usage: usage}},
+		{ID: "m4", FunctionID: "f2", Name: "会议", Status: "canceled", StartedAt: fixed.Add(-time.Hour).UnixMilli(), FinishedAt: fixed.UnixMilli(), Metrics: &model.AiTaskMetrics{CostUSD: 0.01, Usage: usage}},
+		// 异常 result：计入任务数，不参与成本/token 累加
+		{ID: "m5", FunctionID: "f1", Name: "周报", Status: "success", StartedAt: fixed.Add(-30 * time.Minute).UnixMilli(), FinishedAt: fixed.UnixMilli()},
+	}
+	for _, entry := range entries {
+		if _, err := aiFunc.historySvc.Archive(entry, ""); err != nil {
+			t.Fatalf("Archive(%s) 失败: %v", entry.ID, err)
+		}
+	}
+
+	snap := svc.GetSnapshot("", true)
+	if snap.AI.Error != "" {
+		t.Fatalf("AI 域不应报错: %q", snap.AI.Error)
+	}
+
+	weekStats, err := aiFunc.GetAiTaskHistoryStats(&model.AiTaskHistoryFilter{From: startOfWeek(fixed).UnixMilli()})
+	if err != nil {
+		t.Fatalf("读取周统计失败: %v", err)
+	}
+	if snap.AI.Week.TaskCount != weekStats.TotalCount {
+		t.Errorf("TaskCount 与 Stats 不一致: %d vs %d", snap.AI.Week.TaskCount, weekStats.TotalCount)
+	}
+	if snap.AI.Week.CostUSD != weekStats.TotalCostUSD {
+		t.Errorf("CostUSD 与 Stats 不一致: %v vs %v", snap.AI.Week.CostUSD, weekStats.TotalCostUSD)
+	}
+	if snap.AI.Week.InputTokens != weekStats.TotalInputTokens ||
+		snap.AI.Week.OutputTokens != weekStats.TotalOutputTokens ||
+		snap.AI.Week.CacheReadTokens != weekStats.TotalCacheReadTokens ||
+		snap.AI.Week.CacheCreationTokens != weekStats.TotalCacheCreationTokens {
+		t.Errorf("token 与 Stats 不一致: overview=%+v stats=%+v", snap.AI.Week, weekStats)
+	}
+
+	// 四个状态计数逐项与 Stats 对齐（四状态之和 = TotalCount 的不变式）。
+	if snap.AI.SuccessCount != weekStats.SuccessCount ||
+		snap.AI.FailedCount != weekStats.FailedCount ||
+		snap.AI.TimeoutCount != weekStats.TimeoutCount ||
+		snap.AI.CanceledCount != weekStats.CanceledCount {
+		t.Errorf("四状态计数与 Stats 不一致: overview success=%d failed=%d timeout=%d canceled=%d / stats success=%d failed=%d timeout=%d canceled=%d",
+			snap.AI.SuccessCount, snap.AI.FailedCount, snap.AI.TimeoutCount, snap.AI.CanceledCount,
+			weekStats.SuccessCount, weekStats.FailedCount, weekStats.TimeoutCount, weekStats.CanceledCount)
+	}
+
+	// success=2（m1、m5），分母 = success+failed+timeout = 2+1+1 = 4 → 0.5
+	wantDenominator := weekStats.SuccessCount + weekStats.FailedCount + weekStats.TimeoutCount
+	wantRate := float64(weekStats.SuccessCount) / float64(wantDenominator)
+	if snap.AI.SuccessRate != wantRate {
+		t.Errorf("SuccessRate = %v，期望 %v（Stats 同口径）", snap.AI.SuccessRate, wantRate)
+	}
+	if snap.AI.SuccessRate != 0.5 {
+		t.Errorf("SuccessRate = %v，期望 0.5", snap.AI.SuccessRate)
+	}
+	// 今日窗口包含全部 5 条（均为 fixed 当天），成本不含 m5 的 nil metrics。
+	todayStats, _ := aiFunc.GetAiTaskHistoryStats(&model.AiTaskHistoryFilter{From: startOfDay(fixed).UnixMilli()})
+	if snap.AI.Today.TaskCount != todayStats.TotalCount || snap.AI.Today.CostUSD != todayStats.TotalCostUSD {
+		t.Errorf("今日块与 Stats 不一致: overview=%+v stats=%+v", snap.AI.Today, todayStats)
+	}
+}
+
 // TestOverviewSnapshot_RangeEcho range 未知值归一为 today，week 原样回显；
 // 缓存命中时按本次入参回显 range（T3 切换控件后不回显旧值）。
 func TestOverviewSnapshot_RangeEcho(t *testing.T) {

@@ -43,7 +43,12 @@ const overviewSnapshot = {
       cacheCreationTokens: 400
     },
     successRate: 0.75,
-    hasData: true
+    hasData: true,
+    // 四状态计数：3 成功 / 1 失败 / 0 超时 / 0 取消，分母 4 = 75%
+    successCount: 3,
+    failedCount: 1,
+    timeoutCount: 0,
+    canceledCount: 0
   },
   todos: {
     pendingCount: 3,

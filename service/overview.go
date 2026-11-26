@@ -19,7 +19,7 @@ const overviewSnapshotTTL = 5 * time.Minute
 // 聚合三个既有数据源，零新增采集层、零 LLM 调用：
 //   - M1/M2 ← DashboardService.GetStatuses（pin 仓库状态快照）
 //   - M3    ← TempTodoService.List（未完成待办）
-//   - M4/M5 ← AiFunctionService.GetAiTaskHistory（历史元数据内存聚合）
+//   - M4/M5 ← AiFunctionService.GetAiTaskHistoryStats（与 AI 历史面板同源聚合）
 //
 // 分区降级：三个域各自把失败写进对应 Error 字段，不阻断其余域，也绝不把
 // 查询失败静默降级为 0。指针依赖在 NewAppServices 中注入，构造纯 new 无副作用。
@@ -134,8 +134,9 @@ func (s *OverviewService) buildRepos(now time.Time) model.RepoOverview {
 
 // buildAI 计算 M4（今日/本周成本与 token）与 M5（本周成功率）。
 //
-// 一次全量读取后在内存按 StartedAt 切今日/本周，避免两次 loadAll。
-// canceled 不进成功率分母（spec §2 M5）。
+// 与 AI 历史面板同源：两次调用 AiTaskHistoryService.Stats（今日、本周各一次），
+// 不再手写状态计数与成本累加，概览与历史抽屉的数值由同一段聚合代码产出。
+// 窗口按 StartedAt；canceled 不进成功率分母（spec §2 M5）。
 func (s *OverviewService) buildAI(now time.Time) model.AIOverview {
 	out := model.AIOverview{}
 	if s.aiFunc == nil {
@@ -143,57 +144,50 @@ func (s *OverviewService) buildAI(now time.Time) model.AIOverview {
 		return out
 	}
 
-	list, err := s.aiFunc.GetAiTaskHistory(nil)
-	if err != nil {
-		out.Error = fmt.Sprintf("读取 AI 任务历史失败: %v", err)
-		return out
-	}
-
 	todayStart := startOfDay(now).UnixMilli()
 	weekStart := startOfWeek(now).UnixMilli()
 
-	var success, failed, timeout int
-	for _, entry := range list {
-		if entry == nil || entry.StartedAt < weekStart {
-			continue
-		}
-		accumulateAICost(&out.Week, entry)
-		if entry.StartedAt >= todayStart {
-			accumulateAICost(&out.Today, entry)
-		}
-		switch entry.Status {
-		case "success":
-			success++
-		case "failed":
-			failed++
-		case "timeout":
-			timeout++
-		}
+	weekStats, err := s.aiFunc.GetAiTaskHistoryStats(&model.AiTaskHistoryFilter{From: weekStart})
+	if err != nil || weekStats == nil {
+		out.Error = fmt.Sprintf("读取 AI 周统计失败: %v", err)
+		return out
+	}
+	todayStats, err := s.aiFunc.GetAiTaskHistoryStats(&model.AiTaskHistoryFilter{From: todayStart})
+	if err != nil || todayStats == nil {
+		out.Error = fmt.Sprintf("读取 AI 今日统计失败: %v", err)
+		return out
 	}
 
-	denominator := success + failed + timeout
+	out.Week = aiCostBlockFromStats(weekStats)
+	out.Today = aiCostBlockFromStats(todayStats)
+	out.SuccessCount = weekStats.SuccessCount
+	out.FailedCount = weekStats.FailedCount
+	out.TimeoutCount = weekStats.TimeoutCount
+	out.CanceledCount = weekStats.CanceledCount
+
+	// 分母显式取 success+failed+timeout 三态之和，与卡片文案「success ÷
+	// （success+failed+timeout）」同式，不依赖「归档状态为闭集」这一隐含假设：
+	// 历史文件若出现未知状态，只会计入 TotalCount 而不会污染分母。
+	// 四状态计数之和 = TotalCount 仍作为 Stats 实现的验证点，但不作为分母推导前提。
+	denominator := weekStats.SuccessCount + weekStats.FailedCount + weekStats.TimeoutCount
 	out.HasData = denominator > 0
 	if denominator > 0 {
-		out.SuccessRate = float64(success) / float64(denominator)
+		out.SuccessRate = float64(weekStats.SuccessCount) / float64(denominator)
 	}
 	return out
 }
 
-// accumulateAICost 把单条历史记录累加进指定窗口块。
-// Metrics 为 nil（异常 result）的记录只计任务数，不累加成本与 token。
-func accumulateAICost(block *model.AICostBlock, entry *model.AiTaskHistory) {
-	block.TaskCount++
-	if entry.Metrics == nil {
-		return
+// aiCostBlockFromStats 把单窗口统计映射为卡片成本块。
+// Metrics 为 nil 的记录在 Stats 内只计 TotalCount、不计成本与 token，与 T1 口径一致。
+func aiCostBlockFromStats(stats *model.AiTaskHistoryStats) model.AICostBlock {
+	return model.AICostBlock{
+		CostUSD:             stats.TotalCostUSD,
+		TaskCount:           stats.TotalCount,
+		InputTokens:         stats.TotalInputTokens,
+		OutputTokens:        stats.TotalOutputTokens,
+		CacheReadTokens:     stats.TotalCacheReadTokens,
+		CacheCreationTokens: stats.TotalCacheCreationTokens,
 	}
-	block.CostUSD += entry.Metrics.CostUSD
-	if entry.Metrics.Usage == nil {
-		return
-	}
-	block.InputTokens += entry.Metrics.Usage.InputTokens
-	block.OutputTokens += entry.Metrics.Usage.OutputTokens
-	block.CacheReadTokens += entry.Metrics.Usage.CacheReadInputTokens
-	block.CacheCreationTokens += entry.Metrics.Usage.CacheCreationInputTokens
 }
 
 // buildTodos 计算 M3（未完成待办条数与最老滞留天数）。

@@ -43,12 +43,23 @@
         size="small"
         clearable
         class="filter-status"
+        @change="onStatusChange"
       >
         <el-option label="成功" value="success" />
         <el-option label="失败" value="failed" />
         <el-option label="已取消" value="canceled" />
         <el-option label="超时" value="timeout" />
       </el-select>
+      <!-- 概览 M5 下钻带入的多状态筛选（失败+超时），可一键清除 -->
+      <el-tag
+        v-if="filter.statuses.length"
+        size="small"
+        type="warning"
+        closable
+        @close="clearStatuses"
+      >
+        {{ statusesLabel }}
+      </el-tag>
       <el-button size="small" @click="loadList">查询</el-button>
       <el-button size="small" type="warning" plain @click="clearOld">清理 30 天前</el-button>
       <el-button size="small" plain @click="exportCsv">导出 CSV</el-button>
@@ -59,7 +70,12 @@
     <!-- 统计卡片区：随筛选查询一并刷新 -->
     <div class="history-stats">
       <div class="stat-card">
-        <div class="stat-value">{{ stats.totalCount }} <span class="stat-sub">成功 {{ stats.successCount }}</span></div>
+        <div
+          class="stat-value"
+          :title="`成功 ${stats.successCount || 0} / 失败 ${stats.failedCount || 0} / 超时 ${stats.timeoutCount || 0} / 取消 ${stats.canceledCount || 0}`"
+        >
+          {{ stats.totalCount }} <span class="stat-sub">成功 {{ stats.successCount }}</span>
+        </div>
         <div class="stat-label">运行次数</div>
       </div>
       <div class="stat-card">
@@ -76,15 +92,34 @@
         <div class="stat-value">{{ fmtDuration(stats.totalDurationMs) }}</div>
         <div class="stat-label">总耗时</div>
       </div>
-      <!-- 功能排行：全部展示 -->
+      <!-- 功能排行：次数（含取消）/ 成本与占比 / token，可切换排序 -->
       <div v-if="stats.byFunction && stats.byFunction.length" class="stat-card fn-rank">
-        <el-table :data="stats.byFunction" size="small" border max-height="120">
-          <el-table-column prop="functionName" label="功能排行" min-width="120" show-overflow-tooltip>
+        <div class="fn-rank-head">
+          <span class="fn-rank-title">功能排行（近 90 天 / 最多 2000 条）</span>
+          <el-radio-group v-model="rankSort" size="small">
+            <el-radio-button value="count">次数</el-radio-button>
+            <el-radio-button value="cost">成本</el-radio-button>
+            <el-radio-button value="tokens">token</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-table :data="rankedFunctions" size="small" border max-height="140">
+          <el-table-column prop="functionName" label="功能排行" min-width="110" show-overflow-tooltip>
             <template #default="{ row }">{{ row.functionName }}</template>
           </el-table-column>
-          <el-table-column prop="count" label="次数" width="60" />
-          <el-table-column label="成本" width="80">
-            <template #default="{ row }">${{ row.totalCostUsd.toFixed(3) }}</template>
+          <el-table-column label="次数" width="96">
+            <template #default="{ row }">
+              {{ row.count }}
+              <span v-if="row.canceledCount" class="fn-canceled">取消 {{ row.canceledCount }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="成本" width="104">
+            <template #default="{ row }">
+              ${{ row.totalCostUsd.toFixed(3) }}
+              <span class="fn-share">{{ costShare(row) }}%</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="入+出 token" width="96">
+            <template #default="{ row }">{{ formatTokens(row.totalTokens) }}</template>
           </el-table-column>
         </el-table>
       </div>
@@ -148,7 +183,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   GetAiFunctions,
@@ -168,18 +203,27 @@ const props = defineProps({
   visible: Boolean,
   // 概览卡片下钻带入的时间窗（'today'/'week'，空 = 不套用）。
   // 打开时套用一次，避免上次下钻的范围残留影响下一次手动打开。
-  initialRange: { type: String, default: '' }
+  initialRange: { type: String, default: '' },
+  // 概览 M5 下钻带入的状态集合（如 ['failed','timeout']），空 = 不套用。
+  initialStatuses: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['update:visible'])
 
 const functions = ref([])
 const list = ref([])
-const filter = ref({ functionId: '', status: '', from: 0, to: 0 })
+const filter = ref({ functionId: '', status: '', statuses: [], from: 0, to: 0 })
+// appliedFilter 记录「上次查询生效」的筛选快照：loadList 发起前浅拷贝 filter 并
+// 复制 statuses 数组，成功返回后写入。用户改了控件但未点查询时，导出仍按上次生效
+// 条件生成，避免导出内容与屏幕列表悄悄不一致（M5 下钻改状态后尤其明显）。
+const appliedFilter = ref(null)
 const dateRange = ref(null)
 // 统计随筛选查询一并拉取（loadList 时并行）
 const stats = ref({
   totalCount: 0,
   successCount: 0,
+  failedCount: 0,
+  canceledCount: 0,
+  timeoutCount: 0,
   totalCostUsd: 0,
   totalInputTokens: 0,
   totalOutputTokens: 0,
@@ -187,6 +231,44 @@ const stats = ref({
   totalCacheCreationTokens: 0,
   totalDurationMs: 0,
   byFunction: []
+})
+
+// 排行排序维度：次数（默认）/ 成本 / token，仅前端排序，不改后端返回顺序
+const rankSort = ref('count')
+
+// 排序数值归一：缺失字段按 0 参与比较，避免 undefined 相减产生 NaN 打乱排序
+const num = (v) => Number(v) || 0
+
+// 排行表排序：稳定排序保留同值时的原有相对顺序
+const rankedFunctions = computed(() => {
+  const rows = [...(stats.value.byFunction || [])]
+  const key = rankSort.value
+  return rows.sort((a, b) => {
+    if (key === 'cost') return num(b.totalCostUsd) - num(a.totalCostUsd)
+    if (key === 'tokens') return num(b.totalTokens) - num(a.totalTokens)
+    return num(b.count) - num(a.count)
+  })
+})
+
+// 单个功能项成本占当前筛选总成本的百分比（总成本为 0 时返回 0，避免 NaN）
+const costShare = (row) => {
+  const total = num(stats.value.totalCostUsd)
+  if (!total) return '0.0'
+  return ((num(row.totalCostUsd) / total) * 100).toFixed(1)
+}
+
+// token 缩写与概览成本卡一致，便于跨面板对照
+const formatTokens = (value) => {
+  const n = num(value)
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+// 多状态筛选的中文标签（用于筛选行上的可关闭标签）
+const statusesLabel = computed(() => {
+  const map = { success: '成功', failed: '失败', canceled: '已取消', timeout: '超时' }
+  return filter.value.statuses.map((s) => map[s] || s).join(' + ')
 })
 
 // 详情抽屉状态
@@ -204,14 +286,21 @@ const loadFunctions = async () => {
 }
 
 const loadList = async () => {
+  // 发起前先取筛选快照：浅拷贝当前控件值 + 复制 statuses 数组，成功返回后才写入
+  // appliedFilter，失败不污染「上次生效」条件。
+  const snapshot = {
+    ...filter.value,
+    statuses: [...(filter.value.statuses || [])]
+  }
   try {
     // 列表与统计并行拉取，保证统计与列表同筛选范围
     const [hist, stat] = await Promise.all([
-      GetAiTaskHistory(filter.value),
-      GetAiTaskHistoryStats(filter.value)
+      GetAiTaskHistory(snapshot),
+      GetAiTaskHistoryStats(snapshot)
     ])
     list.value = hist || []
     stats.value = stat || stats.value
+    appliedFilter.value = snapshot
   } catch (e) {
     ElMessage.error('加载历史失败: ' + (e?.message || String(e)))
   }
@@ -226,9 +315,11 @@ const totalTokens = () =>
 
 // 导出通用流程：后端生成文本 -> SaveFileDialog 选路径 -> SaveFile 落盘
 const exportReport = async (fetchText, defaultFilename, filters, label) => {
+  // 导出与可见列表同源：优先用「上次查询生效」的快照，首次无快照才回落当前控件。
+  const exportFilter = appliedFilter.value || filter.value
   let text
   try {
-    text = await fetchText(filter.value)
+    text = await fetchText(exportFilter)
   } catch (e) {
     ElMessage.error('生成' + label + '失败: ' + (e?.message || String(e)))
     return
@@ -258,7 +349,16 @@ const exportMarkdown = () =>
 // 概览卡片下钻带入的时间窗：换算成本地「今日 00:00」或「本周一 00:00」起，
 // 与后端 Stats/List 的 StartedAt 窗口口径一致；结束时间不设上限（to=0）。
 const applyInitialRange = () => {
-  if (!props.initialRange) return
+  // 每次打开先复位下钻相关筛选：单值状态清空、多状态按下钻入参套用，
+  // 避免上次下钻残留（M5 带入 failed+timeout 后手动重开不应仍被限制）。
+  filter.value.status = ''
+  filter.value.statuses = Array.isArray(props.initialStatuses) ? [...props.initialStatuses] : []
+  if (!props.initialRange) {
+    filter.value.from = 0
+    filter.value.to = 0
+    dateRange.value = null
+    return
+  }
   const now = new Date()
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   let from = dayStart.getTime()
@@ -277,6 +377,18 @@ const applyInitialRange = () => {
 const onOpen = () => {
   applyInitialRange()
   loadFunctions()
+  loadList()
+}
+
+// 单值状态选择会覆盖多状态筛选：后端 Statuses 非空时优先于 Status，
+// 若不清除，用户选了「成功」仍会按「失败+超时」查询。
+const onStatusChange = () => {
+  filter.value.statuses = []
+}
+
+// 清除下钻带入的多状态筛选并立即刷新列表
+const clearStatuses = () => {
+  filter.value.statuses = []
   loadList()
 }
 
@@ -456,6 +568,27 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 300px;
   padding: 4px;
+}
+.fn-rank-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+.fn-rank-title {
+  font-size: 12px;
+  color: var(--text-secondary, #606266);
+}
+.fn-canceled {
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary, #909399);
+}
+.fn-share {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary, #909399);
 }
 .detail-loading {
   padding: 24px;

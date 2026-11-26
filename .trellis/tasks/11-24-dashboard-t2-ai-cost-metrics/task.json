@@ -3,7 +3,7 @@
   "name": "dashboard-t2-ai-cost-metrics",
   "title": "T2 将 AI 成本与成功率上浮主视野",
   "description": "复用 ai_task_history Stats/UsageCounts，把成本、成功率、功能 Top5 提到概览页。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

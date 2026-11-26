@@ -209,7 +209,11 @@
     />
 
     <!-- 运行历史（P1-2：任务完成归档后查看历史记录，复用 metrics 展示样式） -->
-    <AiTaskHistoryPanel v-model:visible="historyVisible" :initial-range="historyInitialRange" />
+    <AiTaskHistoryPanel
+      v-model:visible="historyVisible"
+      :initial-range="historyInitialRange"
+      :initial-statuses="historyInitialStatuses"
+    />
   </div>
 </template>
 
@@ -248,9 +252,10 @@ const openFuncs = ref([])
 const activeTabId = ref('')
 const configVisible = ref(false)
 const historyVisible = ref(false)
-// 概览卡片下钻带入的历史时间窗（'today'/'week'）；抽屉打开时消费，关闭后清空，
-// 避免下次手动打开历史仍被上次下钻的范围限制。
+// 概览卡片下钻带入的历史时间窗（'today'/'week'）与状态集合（M5 = failed+timeout）；
+// 抽屉打开时消费，关闭后清空，避免下次手动打开历史仍被上次下钻的限制。
 const historyInitialRange = ref('')
+const historyInitialStatuses = ref([])
 const uiStore = useUiStore()
 
 // 概览卡片下钻（M4/M5）：打开历史抽屉并带入时间窗（today/week）。
@@ -260,14 +265,19 @@ watch(
   (req) => {
     if (!req || req.target !== 'ai') return
     historyInitialRange.value = req.payload?.range || ''
+    // 防御：非数组按空处理，避免旧调用方（无 statuses）把 undefined 传给子组件
+    historyInitialStatuses.value = Array.isArray(req.payload?.statuses) ? req.payload.statuses : []
     uiStore.overviewDrillRequest = null
     historyVisible.value = true
   }
 )
 
-// 抽屉关闭后清空下钻带入的范围，避免下次手动打开历史仍被上次筛选限制。
+// 抽屉关闭后清空下钻带入的范围与状态，避免下次手动打开历史仍被上次筛选限制。
 watch(historyVisible, (visible) => {
-  if (!visible) historyInitialRange.value = ''
+  if (!visible) {
+    historyInitialRange.value = ''
+    historyInitialStatuses.value = []
+  }
 })
 
 const iconComp = (name) => (name && Icons[name]) || Icons.MagicStick

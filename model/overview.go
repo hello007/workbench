@@ -56,6 +56,12 @@ type AIOverview struct {
 	// HasData 本周是否存在有效任务（success+failed+timeout>0）。false 时前端显示
 	// 「无数据」而不是 0%，避免把「没有任务」误读为「全部失败」。
 	HasData bool `json:"hasData"`
+	// 本周四个状态计数（来自 Stats，四者之和 = 本周任务数），供卡片展示
+	// 「成功 n / 失败 n / 超时 n / 取消 n」让成功率可自行验算。
+	SuccessCount  int `json:"successCount"`
+	FailedCount   int `json:"failedCount"`
+	TimeoutCount  int `json:"timeoutCount"`
+	CanceledCount int `json:"canceledCount"`
 	// Error AI 域整体失败原因（历史文件读取失败等）；正常为空。
 	Error string `json:"error,omitempty"`
 }

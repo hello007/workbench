@@ -61,10 +61,18 @@ Yes 才可上主看板。
 **默认决策**：优先方案 1（统计在后端算、前端只渲染，与仓内惯例一致）。若 T2 评估改契约
 成本过高，可降级方案 2，但须在 T2 的 PRD 登记理由。
 
-**实现状态（2026-11-25，T1）**：T1 在后端 `service/overview.go` 内用
-`AiFunctionService.GetAiTaskHistory(nil)` 一次全量读取后按 `Status` 内存计数，已能产出
-正确成功率，**未改动 `AiTaskHistoryStats` 契约**。T2 仍须决定是否补 `CanceledCount`
-并统一口径（见 T2 PRD「范围收缩说明」）。
+**实现状态（2026-11-26，T2 已落地）**：采用方案 1 并扩展为四状态计数——
+`AiTaskHistoryStats` 新增 `CanceledCount` / `FailedCount` / `TimeoutCount`，
+`FunctionStat` 新增 `CanceledCount`（`Count` 语义不变，仍含 canceled）；
+`AiTaskHistoryFilter` 新增 `Statuses []string`（非空优先于 `Status`，供「失败/超时清单」
+多状态下钻）。`OverviewService.buildAI` 改为两次调用 `GetAiTaskHistoryStats`
+（今日、本周），概览与 AI 历史面板**同源聚合**，成功率分母 =
+`SuccessCount + FailedCount + TimeoutCount`（与卡片文案「success ÷（success+failed+timeout）」
+同式，不依赖「归档状态为闭集」假设；历史文件若出现未知状态只计入 `TotalCount`，不污染分母）。
+四状态计数之和 = `TotalCount` 保留为当前 `Stats` 实现的验证点，**不作为分母推导前提**。
+今日/本周两次 `Stats` 读取非原子，属秒级窗口，在 5 分钟 TTL 下可接受。
+
+T1 曾在 `service/overview.go` 内手写全量读取与状态计数，该实现已于 T2 移除，禁止回退。
 
 ## 6. 排除清单（明确不上主看板）
 
@@ -88,7 +96,7 @@ Yes 才可上主看板。
 | 任务 | 约束 |
 |---|---|
 | T1 概览入口 | 按 §4 的「3 域 5 卡」实施；模块数 ≤5 |
-| T2 AI 成本上浮 | 实现 M4 + M5；处理 §5 的 `CanceledCount` 前置 |
+| T2 AI 成本上浮 | 实现 M4 + M5；§5 前置已落地（四状态计数 + `Statuses` 多状态下钻），概览改走 `Stats` 同源聚合，成功率分母取 success+failed+timeout 三态之和 |
 | T3 时间范围 | 范围控件只覆盖 M4/M5；M1–M3 不加时间窗 |
 | T7 待办节奏 | M3 为起点；扩展的完成率/积压趋势不得改变「只统计未完成」的基线口径 |
 | T8 规则提醒 | 告警阈值复用 M1–M3 的默认阈值，不另立一套 |
@@ -106,6 +114,6 @@ Yes 才可上主看板。
 |---|---|
 | 概览聚合（M1–M5 单次快照） | `model/overview.go`、`service/overview.go`、`app_overview.go` |
 | 仓库状态 | `model/dashboard.go`（`RepoStatus`）、`service/dashboard.go`、`app_dashboard.go` |
-| AI 历史统计 | `service/ai_task_history.go`（`Stats` / `List` / `UsageCounts`）、`model/ai_task_history.go` |
+| AI 历史统计 | `service/ai_task_history.go`（`Stats` / `List` / `UsageCounts`）、`model/ai_task_history.go`；`Stats` 返回四状态计数，`List` 支持 `Statuses` 多状态匹配 |
 | 待办 | `service/temp_todo.go`（`List`）、`model/temp_todo.go` |
 | 仓库统计（下钻用） | `service/repo_stats.go`（`AggregateRepoStats`）、`model/repo_stats.go` |
