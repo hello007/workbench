@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/dashboard-metrics.md", "reason": "五档时间范围口径真相源：§2 M4/M5 定义、§3 标注要求、§4 档位与自然日边界、§7 T3 约束"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "AIOverview 新增 RangeKey/Selected 属 model 导出 struct 变更，须手同步 frontend/wailsjs/go/models.ts"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "后端 service ≥76%、前端 ≥70% 门禁，改动后不得下降"}
+{"file": "docs/spec/frontend-visual-conventions.md", "reason": "概览卡片与 el-radio-group 控件视觉规范（尺寸、小字标注层级、禁自定义着色）"}
+{"file": "docs/spec/e2e-testing.md", "reason": "切档 E2E 断言规范：语义锚、禁 waitForTimeout、mock 单一数据源"}
+{"file": "docs/spec/browser-channel.md", "reason": "隐私红线：GetOverviewSnapshot 保持不在 RPCHiddenMethods，浏览器通道可用性约束"}

@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/dashboard-metrics.md", "reason": "校验实现与五档口径、自然日边界、默认本周、无 365 档、M1–M3 不加时间窗一致"}
+{"file": "docs/spec/cross-layer-contracts.md", "reason": "校验 models.ts 已补 AIRangeStats 与 AIOverview 新字段，App 签名未变则不误改"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "核对覆盖率门禁未下降"}
+{"file": "docs/spec/e2e-testing.md", "reason": "核对 E2E 未使用绝对基线/硬编码面板顺序，新增用例走 fixtures 与语义锚"}
+{"file": "docs/spec/browser-channel.md", "reason": "校验 R7 隐私红线：GetOverviewSnapshot 未被 RPCHiddenMethods 隐藏、浏览器通道可用"}
