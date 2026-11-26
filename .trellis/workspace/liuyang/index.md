@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-5.md`
-- **Total Sessions**: 267
+- **Total Sessions**: 268
 - **Last Active**: 2026-11-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-5.md` | ~1331 | Active |
+| `journal-5.md` | ~1365 | Active |
 | `journal-4.md` | ~1973 | Archived |
 | `journal-3.md` | ~1974 | Archived |
 | `journal-2.md` | ~1959 | Archived |
@@ -33,6 +33,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 268 | 2026-11-26 | T3 统一时间范围控件与数据口径标注 | `df928ff9`, `46e608e5` | `master` |
 | 267 | 2026-11-26 | T2 AI 成本口径统一与排行视图 | `3b5c1c9f` | `master` |
 | 266 | 2026-11-25 | T1 个人看板概览面板实现 | `ab2aaa93`, `81c59610` | `master` |
 | 265 | 2026-11-25 | T0 个人看板指标口径锁定 | `64cb180d` | `master` |

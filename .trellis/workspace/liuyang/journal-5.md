@@ -1329,3 +1329,37 @@ AI 任务历史统计补齐四状态计数（success/failed/canceled/timeout）�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 268: T3 统一时间范围控件与数据口径标注
+
+**Date**: 2026-11-26
+**Task**: T3 统一时间范围控件与数据口径标注
+**Branch**: `master`
+
+### Summary
+
+概览 AI 域新增五档时间范围（今日/本周/近 7/30/90 天，默认本周、自然日边界、无 365 档）：后端一次 build 算齐五档并按档位缓存、AIOverview 纯增量 RangeKey/Selected，前端两卡片只读 ai.selected 且口径句随档位联动、下钻带档位；失败态快照不复用 TTL。收口修复 2 处文档口径冲突与测试补强，新增 docs/spec/dashboard-metrics.md §10 跨层 code-spec。串行门禁全绿：go vet、go test ./...、后端 model 92.8%/server 90.3%/service 81.8%/util 61.0%、前端 3005 用例、覆盖率 87.25%、npm run build、E2E 6 用例、四项静态守护。两组提交后归档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df928ff9` | (see git log) |
+| `46e608e5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
