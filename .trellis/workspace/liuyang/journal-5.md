@@ -1296,3 +1296,36 @@ useSessionState 的 VALID_PANELS 由硬编码 7 面板改为自 SIDEBAR_PANELS �
 ### Next Steps
 
 - None - task complete
+
+
+## Session 267: T2 AI 成本口径统一与排行视图
+
+**Date**: 2026-11-26
+**Task**: T2 AI 成本口径统一与排行视图
+**Branch**: `master`
+
+### Summary
+
+AI 任务历史统计补齐四状态计数（success/failed/canceled/timeout）与 Filter.Statuses 多状态匹配；概览 AI 域改走 Stats 同源聚合，成功率分母与卡片文案同式；历史抽屉排行支持次数/成本/token 排序、成本占比与取消数，M5 下钻预选失败+超时（全取消周次预选取消）；导出改用上次查询生效的筛选快照。两轮独立子代理审核后修复 5 项（下钻矛盾、token 口径标注、分母防御、导出一致性、测试接线），全量门禁通过：go test ./...、前端 2987 用例、service 覆盖率 81.8%、前端 87.1%、npm run build。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3b5c1c9f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
