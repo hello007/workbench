@@ -66,6 +66,7 @@
 |[el-tree-expand-state.md](el-tree-expand-state.md)|el-tree 展开面维护契约：`FolderTree.syncExpandedKeysFromStore` 单点为可达展开面过滤（收起须连带剔除其展开中子孙，防 EP `default-expanded-keys` 回放祖先链翻回；收起须 `nextTick`，EP 事件早于落值）；批量展开/收起禁直改 `expandedKeys`，须经 `store.nodesMap` 并统一回写；展开/收起行为断言禁自造 el-tree 桩（假绿），须真实 EP mount|
 |[prompt-library.md](prompt-library.md)|提示词管理契约（侧边栏「提示词」）：`Prompt` 模型与 `data/prompts.json` 原子写（标题/正文必填、100/20000 rune 上限、加载剔除脏条目）；占位符 `{{名称}}` / `{{名称:默认值}}` 宽松单行规则（名称≤30 码点、默认值≤200 码点、均不含花括号与换行，以首个半角冒号分隔；同名以首次定义为准、去重全部替换、三级回退：填写值→默认值→保留原样、不做转义）与前端单点 `utils/promptPlaceholders.js`（parsePlaceholder / extractPlaceholderDefs / applyPlaceholders）及 Go `renderPrompt` / `BuildStagePrompt` 同语义；复制两出口与失败保持弹窗；新增侧边栏面板六处同步清单（第 10 项起无 `Alt+数字` 固定映射，tooltip 禁拼 `Alt+N`）；编辑弹窗聚焦标题末尾、`Ctrl/Cmd+S` 保存、关闭复位草稿|
 |[dashboard-metrics.md](dashboard-metrics.md)|个人数据看板指标口径契约（T0 锁定组合 A，T3 扩展五档）：主看板 5 模块 M1 待收尾仓库 / M2 久未推进仓库（默认 7 天可调）/ M3 待办积压 / M4 AI 成本 / M5 AI 成功率（canceled 不进分母）；M1–M3 快照/全量不加时间范围，控件仅覆盖 M4/M5 五档 今日/本周/近7/30/90（自然日边界、默认本周、无365），`AIOverview` 纯增量 `RangeKey`+`Selected` 且前端只读 `ai.selected`；失败态快照不复用 TTL、AI 90 天/2000 条保留上限常显、behind 标上次 fetch 近似；§10 为 T3 跨层 code-spec（签名/错误矩阵/测试断言点）|
+|[overview-open-tracking.md](overview-open-tracking.md)|概览面板主动打开埋点（T4 门槛取证）：`RecordOverviewOpen` 白名单三档单点、`overviewEntrySource` 消费即清、`data/overview_opens.log` 独立 O_APPEND JSONL 禁复用 `AuditLogger`、双通道同文件、判定日只读不新增 RPC 出口；含七节 code-spec 与测试断言点|
 
 ## 新增文档约定
 
@@ -77,4 +78,4 @@
 
 **迁移记录：** 2026-09-07 自 `.trellis/spec/backend/cross-layer-contracts.md` 经 `git mv` 迁入（保留 git 历史）；原 `.trellis/spec/` 下空模板与通用 guides 一并删除。
 
-**最后更新：** 2026-11-25
+**最后更新：** 2026-11-27

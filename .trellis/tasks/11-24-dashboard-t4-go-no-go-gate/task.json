@@ -3,7 +3,7 @@
   "name": "dashboard-t4-go-no-go-gate",
   "title": "T4 按 Go/No-Go 门槛验证 P0 使用闭环",
   "description": "上线两周后按每周打开次数与行为改变次数判定，未达成即终止后续全部任务。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

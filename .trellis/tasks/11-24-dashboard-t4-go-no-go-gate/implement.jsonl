@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "docs/spec/dashboard-metrics.md", "reason": "T4 须回写 §6 排除清单中「面板活跃度」的理由；同时是 M1–M5 口径真相源，须确认埋点不新增上板卡片"}
+{"file": "docs/spec/app-services-assembly.md", "reason": "新增 OverviewOpenLogService 须在 app_services.go 的 AppServices 字段与 NewAppServices 构造行两处装配，构造纯 new"}
+{"file": "docs/spec/data-atomic-write.md", "reason": "append-only JSONL 属「非 JSON 写入」豁免口径，须 O_APPEND 单行原子追加，禁复用 AuditRecord"}
+{"file": "docs/spec/test-coverage-gate.md", "reason": "service ≥76% / 前端 ≥70% 覆盖率门禁不得下降"}
+{"file": "docs/agent-resources/conventions/coding-error-handling.md", "reason": "前端异常捕获与容灾规范，写码前必读"}
