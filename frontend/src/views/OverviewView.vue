@@ -55,7 +55,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { GetOverviewSnapshot } from '../../wailsjs/go/main/App'
+import { GetOverviewSnapshot, RecordOverviewOpen } from '../../wailsjs/go/main/App'
 import { handleError } from '../utils/error'
 import { useUiStore } from '../store'
 import RepoPendingCard from '../components/overview/RepoPendingCard.vue'
@@ -130,10 +130,25 @@ function goAi(payload) {
 }
 
 // 面板 v-show 常驻挂载：仅在本面板可见时拉取，避免其他面板操作触发无谓聚合。
+// 命中 overview 时先消费「进入来源」信箱（T4 Go/No-Go 门槛 G1 取证）：只有点击图标、
+// 自定义快捷键、Alt+数字三个显式入口会写入 source；会话恢复写回 activePanel、
+// immediate 首次执行、切档 @change、手刷 load(true)、TTL 命中均无源，故不落盘。
 watch(
   () => uiStore.activePanel,
   (panel) => {
-    if (panel === 'overview') load(false)
+    if (panel === 'overview') {
+      // 消费即清：读后立即置空，重复进入不重复上报。
+      const source = uiStore.overviewEntrySource
+      uiStore.overviewEntrySource = ''
+      if (source) {
+        // 埋点属旁路观测面：失败仅记日志降级，不弹提示、不引入新错误码，
+        // 且经 Promise 化兜住同步异常与 reject，绝不阻断下方 load(false)。
+        Promise.resolve()
+          .then(() => RecordOverviewOpen(source))
+          .catch((error) => console.warn('[overview] 记录面板打开失败（埋点降级，不影响概览加载）:', error))
+      }
+      load(false)
+    }
   },
   { immediate: true }
 )

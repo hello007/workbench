@@ -14,3 +14,16 @@ import "workbench/model"
 func (a *App) GetOverviewSnapshot(rangeKey string, force bool) (*model.OverviewSnapshot, error) {
 	return a.overviewSvc.GetSnapshot(rangeKey, force), nil
 }
+
+// RecordOverviewOpen 记录一次「概览面板主动打开」，供 T4 Go/No-Go 门槛 G1 取证。
+//
+// source 仅取 click（点击图标）/ shortcut（快捷键）/ alt（Alt+数字）三个显式入口，
+// 非法值由 service 层白名单丢弃；会话恢复、切档、手刷、TTL 命中、下钻切走均不传源。
+// 埋点是旁路观测面：写失败只在 service 内 Warn 降级，此处恒返回 nil error，
+// 任何情况下不阻断概览面板加载。
+func (a *App) RecordOverviewOpen(source string) error {
+	if a.overviewOpenLogSvc != nil {
+		a.overviewOpenLogSvc.Record(source)
+	}
+	return nil
+}

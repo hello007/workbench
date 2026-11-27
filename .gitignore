@@ -52,6 +52,8 @@ data/web_token
 data/web_tokens.json
 # 认证审计 JSONL（运行期追加，见 service/web_audit.go）
 data/web_audit.log
+# T4 门槛取证埋点 JSONL（运行期追加，不上主看板，见 service/overview_open_log.go）
+data/overview_opens.log
 # 异常退出标记（startup 检测上次会话崩溃/强杀，正常 shutdown 删除，见 app.go）
 data/crash.flag
 

@@ -12,6 +12,7 @@ import { ElMessage } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import Home from '../Home.vue'
 import { useUiStore, useDirectoryStore, useWorkspaceStore, useSettingsStore } from '../../store'
+import { SIDEBAR_PANELS } from '../../store/sidebarPanels'
 
 // Mock Wails runtime
 vi.mock('../../../wailsjs/runtime/runtime', () => ({
@@ -81,6 +82,10 @@ vi.mock('../../../wailsjs/go/main/App', () => ({
   AddPrompt: vi.fn(() => Promise.resolve({})),
   UpdatePrompt: vi.fn(() => Promise.resolve()),
   DeletePrompt: vi.fn(() => Promise.resolve()),
+  // 概览面板（v-show 常驻挂载于 Home）：切到 overview 时拉取快照 + T4 门槛取证埋点。
+  // 文件级 mock 需与真实绑定同名，否则 watch 命中后访问缺失导出会抛错。
+  GetOverviewSnapshot: vi.fn(() => Promise.resolve(null)),
+  RecordOverviewOpen: vi.fn(() => Promise.resolve()),
   // 分支对比面板（BranchCompareView v-show 常驻挂载于 Home）：无目录时面板空态不触发，
   // 但 import 的绑定须存在于 mock 否则 undefined 调用抛 TypeError
   GetGitInfo: vi.fn(() => Promise.resolve({ isRepo: false })),
@@ -1623,6 +1628,49 @@ describe('Home.vue - handler 分支补充', () => {
 
     expect(event.preventDefault).not.toHaveBeenCalled()
     expect(ui.activePanel).toBe('directory')
+  })
+
+  // T4 门槛取证：三个显式入口写入的进入来源必须是小写字面量（对齐 service 白名单）
+  it('自定义快捷键打开概览写入 shortcut 进入来源', () => {
+    const ui = useUiStore()
+    useSettingsStore().shortcutOpenOverview = 'Ctrl+Alt+O'
+    ui.activePanel = 'directory'
+    const event = keyEvent({ key: 'o', ctrlKey: true, altKey: true, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(ui.activePanel).toBe('overview')
+    expect(ui.overviewEntrySource).toBe('shortcut')
+  })
+
+  it('Alt+数字按当前顺序命中概览时写入 alt 进入来源', () => {
+    const ui = useUiStore()
+    const settings = useSettingsStore()
+    // 概览默认在第 11 位，Alt+1..9 只覆盖前 9 位；按当前顺序移到首位后命中。
+    // 面板名单自 SIDEBAR_PANELS 派生（禁硬编码，见 docs/spec/e2e-testing.md §12.4）
+    const defaultIds = SIDEBAR_PANELS.map(p => p.id)
+    settings.sidebarOrder = ['overview', ...defaultIds.filter(id => id !== 'overview')]
+    ui.activePanel = 'directory'
+    const event = keyEvent({ key: '1', altKey: true, preventDefault: vi.fn() })
+
+    wrapper.vm.handleGlobalKeydown(event)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(ui.activePanel).toBe('overview')
+    expect(ui.overviewEntrySource).toBe('alt')
+  })
+
+  it('Alt+数字命中非概览面板时不写入进入来源', () => {
+    const ui = useUiStore()
+    ui.activePanel = 'directory'
+    // 顺序自 SIDEBAR_PANELS 派生，避免面板增删/调序后断言漂移
+    const secondPanelId = SIDEBAR_PANELS[1].id
+    expect(secondPanelId).not.toBe('overview')
+    wrapper.vm.handleGlobalKeydown(keyEvent({ key: '2', altKey: true }))
+
+    expect(ui.activePanel).toBe(secondPanelId)
+    expect(ui.overviewEntrySource).toBe('')
   })
 
   it('输入框聚焦时 Ctrl+Alt+N 放行，不触发记录', async () => {

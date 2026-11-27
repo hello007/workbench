@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElMessage } from 'element-plus'
 import OverviewView from '../OverviewView.vue'
 import { useUiStore } from '../../store'
+
+// 每个用例结束自动卸载 wrapper：watch(immediate) 常驻监听 activePanel，
+// 不卸载会把陈旧实例泄漏到后续用例（消费端埋点断言会串扰）。
+enableAutoUnmount(afterEach)
+// console.warn spy 等局部 spy 用例间不留残留（restoreAllMocks 只作用于 spyOn，不动 vi.fn）
+afterEach(() => { vi.restoreAllMocks() })
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
@@ -14,7 +21,11 @@ vi.mock('element-plus', async () => {
 })
 
 const { wailsMock } = vi.hoisted(() => ({
-  wailsMock: { GetOverviewSnapshot: vi.fn() }
+  wailsMock: {
+    GetOverviewSnapshot: vi.fn(),
+    // T4 门槛取证埋点：无返回值，默认 resolve；失败路径由用例局部 mockRejectedValue
+    RecordOverviewOpen: vi.fn(() => Promise.resolve())
+  }
 }))
 
 vi.mock('../../../wailsjs/go/main/App', () => wailsMock)
@@ -100,7 +111,98 @@ describe('OverviewView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     wailsMock.GetOverviewSnapshot.mockReset()
+    wailsMock.RecordOverviewOpen.mockReset()
+    wailsMock.RecordOverviewOpen.mockResolvedValue(undefined)
     vi.clearAllMocks()
+  })
+
+  // ---- 概览面板进入埋点（T4 Go/No-Go 门槛 G1 取证）----
+
+  describe('进入来源消费（仅三个显式入口上报）', () => {
+    beforeEach(() => {
+      wailsMock.GetOverviewSnapshot.mockResolvedValue(makeSnapshot())
+    })
+
+    // 三个入口在 ActivityBar / Home 写入信箱，本组验证消费端对每种来源
+    // 都只上报一次，且按小写字面量透传（对齐 service 白名单口径）。
+    it.each(['click', 'shortcut', 'alt'])('显式入口 %s：命中 overview 上报一次且透传来源', async (source) => {
+      const ui = useUiStore()
+      ui.setOverviewEntrySource(source)
+      ui.activePanel = 'overview'
+      mountView()
+      await flushPromises()
+
+      expect(wailsMock.RecordOverviewOpen).toHaveBeenCalledTimes(1)
+      expect(wailsMock.RecordOverviewOpen).toHaveBeenCalledWith(source)
+      expect(ui.overviewEntrySource).toBe('')
+    })
+
+    it('会话恢复写回 activePanel（无来源）不上报', async () => {
+      const ui = useUiStore()
+      // 模拟 useSessionState.applySessionState 直接写回，不经过三个显式入口
+      ui.activePanel = 'overview'
+      mountView()
+      await flushPromises()
+
+      expect(wailsMock.RecordOverviewOpen).not.toHaveBeenCalled()
+      expect(wailsMock.GetOverviewSnapshot).toHaveBeenCalledWith('week', false)
+    })
+
+    it('消费即清：切走再切回不重复上报', async () => {
+      const ui = useUiStore()
+      ui.setOverviewEntrySource('click')
+      ui.activePanel = 'overview'
+      mountView()
+      await flushPromises()
+      expect(wailsMock.RecordOverviewOpen).toHaveBeenCalledTimes(1)
+
+      // 切走（watch 不命中）再切回（watch 命中但信箱已清空），均无新来源
+      ui.activePanel = 'directory'
+      await nextTick()
+      ui.activePanel = 'overview'
+      await flushPromises()
+      expect(wailsMock.RecordOverviewOpen).toHaveBeenCalledTimes(1)
+    })
+
+    it('切档 @change 只重拉快照，不产生新埋点', async () => {
+      const ui = useUiStore()
+      ui.activePanel = 'overview'
+      const wrapper = mountView()
+      await flushPromises()
+
+      await switchRange(wrapper, '7d')
+      expect(wailsMock.RecordOverviewOpen).not.toHaveBeenCalled()
+      expect(wailsMock.GetOverviewSnapshot).toHaveBeenLastCalledWith('7d', false)
+    })
+
+    it('手刷 load(true) 不产生新埋点', async () => {
+      const ui = useUiStore()
+      ui.activePanel = 'overview'
+      const wrapper = mountView()
+      await flushPromises()
+
+      await wrapper.find('el-button-stub').trigger('click')
+      await flushPromises()
+      expect(wailsMock.RecordOverviewOpen).not.toHaveBeenCalled()
+      expect(wailsMock.GetOverviewSnapshot).toHaveBeenLastCalledWith('week', true)
+    })
+
+    it('埋点调用失败静默降级，load(false) 仍执行且不弹错误提示', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      wailsMock.RecordOverviewOpen.mockRejectedValue(new Error('boom'))
+
+      const ui = useUiStore()
+      ui.setOverviewEntrySource('click')
+      ui.activePanel = 'overview'
+      const wrapper = mountView()
+      await flushPromises()
+
+      // 埋点是旁路观测面：失败不引入新错误码、不弹 ElMessage，快照照常拉取与渲染
+      expect(wailsMock.GetOverviewSnapshot).toHaveBeenCalledWith('week', false)
+      expect(wrapper.findAll('.overview-card')).toHaveLength(5)
+      expect(ElMessage.error).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalled()
+    })
   })
 
   it('进入面板即拉取快照并渲染 5 张卡片', async () => {

@@ -601,6 +601,8 @@ const handleGlobalKeydown = (e) => {
   if (matchShortcut(e, settingsStore.shortcutOpenOverview)) {
     if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
     e.preventDefault()
+    // T4 门槛取证：仅此快捷键属「主动打开概览」三个显式入口之一，先登记来源再切面板
+    uiStore.setOverviewEntrySource('shortcut')
     uiStore.activePanel = 'overview'
     return
   }
@@ -615,6 +617,8 @@ const handleGlobalKeydown = (e) => {
     if (sidebarIdx < panels.length) {
       if (isEditableTarget(e.target) || isAnyOverlayOpen() || isTerminalFocused()) return
       e.preventDefault()
+      // T4 门槛取证：Alt+数字按当前顺序命中概览时登记来源（概览可能不在前 9 位，故按实际 id 判定）
+      if (panels[sidebarIdx].id === 'overview') uiStore.setOverviewEntrySource('alt')
       uiStore.activePanel = panels[sidebarIdx].id
     }
     return

@@ -690,6 +690,13 @@ export const WAILS_MOCK_E2E_EXTRA_RETURN_VALUES = {
     },
     todos: { pendingCount: 0, oldestDays: 0, oldestId: '', oldestText: '' }
   },
+  // 概览面板进入埋点（T4 门槛取证）：无返回值的 void 方法，null 即代表调用成功。
+  // 本表是「返回值表」而非函数表，值须可结构化克隆供 Playwright addInitScript 序列化；
+  // E2E 侧经合并表由 wails-init.js 登记并记调用（getWailsCalls 断言依赖该登记）。
+  // 单测侧不依赖全局兜底：与 GetOverviewSnapshot 同形态，概览域方法只登记在本
+  // 补充表、不进基础表，由 OverviewView.spec.js / Home.spec.js 的文件级 vi.mock
+  // 显式声明（Home.vue 常驻挂载子组件的既有分层，见本表头注释）。
+  RecordOverviewOpen: null,
 
 
   // ---- Git 三流程（提交/推送、分支管理、合并/变基）E2E 默认值 ----

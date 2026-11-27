@@ -12,7 +12,7 @@
         class="activity-bar-item"
         :class="{ 'is-active': uiStore.activePanel === item.id }"
         :data-panel-id="item.id"
-        @click="uiStore.activePanel = item.id"
+        @click="if (item.id === 'overview') uiStore.setOverviewEntrySource('click'); uiStore.activePanel = item.id"
       >
         <el-icon :size="20">
           <component :is="item.icon" />

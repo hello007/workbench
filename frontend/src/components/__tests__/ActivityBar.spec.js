@@ -194,6 +194,23 @@ describe('ActivityBar', () => {
     expect(useUiStore().activePanel).toBe('dashboard')
   })
 
+  // T4 门槛取证：点击概览图标是三个显式入口之一，写入 click 来源；
+  // 点击其他面板不得写源（通用赋值语义未改）。
+  it('点击概览图标写入 click 进入来源', async () => {
+    const wrapper = createWrapper('directory')
+    await panel(wrapper, 'overview').trigger('click')
+    expect(useUiStore().activePanel).toBe('overview')
+    expect(useUiStore().overviewEntrySource).toBe('click')
+    wrapper.unmount()
+  })
+
+  it('点击非概览图标不写入进入来源', async () => {
+    const wrapper = createWrapper('directory')
+    await panel(wrapper, 'dashboard').trigger('click')
+    expect(useUiStore().overviewEntrySource).toBe('')
+    wrapper.unmount()
+  })
+
   it('点击 AI 功能图标应将 activePanel 置为 ai', async () => {
     const wrapper = createWrapper('directory')
     await panel(wrapper, 'ai').trigger('click')

@@ -127,6 +127,10 @@ type AppServices struct {
 	// 内建 5 分钟快照缓存；分区降级，单域失败只降级对应卡片。不发生前端事件，
 	// web_serve.go applySink 无需同步。
 	overviewSvc *service.OverviewService
+	// T4 门槛取证的概览面板进入埋点（data/overview_opens.log，append-only JSONL）。
+	// 只记录概览面板进入，不上主看板卡片；桌面与浏览器模式经同一 App 方法落同一
+	// 份文件。构造纯 new，无启动期副作用，判 Go 后 T5 复用本日志器扩展。
+	overviewOpenLogSvc *service.OverviewOpenLog
 }
 
 // NewAppServices 集中装配 App 的全部 service 与缓存。
@@ -304,6 +308,10 @@ func NewAppServices(ctx context.Context, dataDir string, isDev bool) *AppService
 	// 个人看板「概览」聚合服务：依赖 dashboard/aiFunc/tempTodo/settings 四个既有
 	// 服务，必须放在它们构造之后；构造纯 new，无启动期副作用。
 	s.overviewSvc = service.NewOverviewService(s.dashboardSvc, s.tempTodoSvc, s.aiFuncSvc, s.settingsSvc)
+
+	// T4 门槛取证埋点：独立 append-only JSONL，不复用 AuditLogger 闭集，
+	// 不进 RPCHiddenMethods（浏览器模式同样能打开概览面板，须落同一份文件）。
+	s.overviewOpenLogSvc = service.NewOverviewOpenLog(filepath.Join(dataDir, "overview_opens.log"))
 
 	return s
 }

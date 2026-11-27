@@ -100,6 +100,21 @@ export const useUiStore = defineStore('ui', () => {
     overviewDrillRequest.value = { target, payload, seq: overviewDrillSeq }
   }
 
+  // 概览面板进入来源信箱（个人看板 T4 Go/No-Go 门槛取证）：三个显式入口
+  // （点击图标 click / 自定义快捷键 shortcut / Alt+数字 alt）写入，
+  // OverviewView watch 命中 overview 时读取并消费即清空。一次性信箱语义——
+  // 不持久化、不入会话快照；会话恢复写回、切档、手刷、TTL 命中均不写源，
+  // 故不落盘（G1 只数「主动打开」）。
+  const overviewEntrySource = ref('')
+
+  /**
+   * 写入概览面板进入来源（三个显式入口唯一写入口）
+   * @param {'click'|'shortcut'|'alt'} source 主动打开来源
+   */
+  function setOverviewEntrySource(source) {
+    overviewEntrySource.value = source
+  }
+
   // 待办数据变更通知（临时待办二期）：跨组件新增入口（AI 回复 / 代码预览右键
   // 「存为待办」）落条后递增，TempTodoPanel watch 该值重拉列表。面板自身增删改
   // 仍走本地 load()，不经此通知。
@@ -173,6 +188,8 @@ export const useUiStore = defineStore('ui', () => {
     pushTraceBlameRequest,
     overviewDrillRequest,
     pushOverviewDrillRequest,
+    overviewEntrySource,
+    setOverviewEntrySource,
     todoPromptRequest,
     pushTodoPrompt,
     tempTodoChangeSeq,

@@ -1,15 +1,18 @@
 /**
  * 个人看板「概览」面板 E2E（mock 驱动）。
  *
- * 覆盖四条链路：
+ * 覆盖五条链路：
  * 1. 入口可达：活动栏 data-panel-id="overview" 可点击，面板渲染 5 张卡片
  *    （M1/M2 仓库状态、M4/M5 AI 任务、M3 待办积压）。
  * 2. 数值渲染：GetOverviewSnapshot fixture（形状对齐 model.OverviewSnapshot）
  *    映射到卡片主数值与口径标注（失效仓库单列、无提交单列、AI 90 天/2000 条）。
  * 3. 刷新：点击「刷新」按钮以 force=true 重拉（进入面板默认 force=false）。
  * 4. 下钻：M1 → 状态看板；M3 → 临时待办；M4 → AI 面板并打开历史抽屉。
+ * 5. 门槛取证埋点（T4）：点击概览图标只上报一次 RecordOverviewOpen('click')，
+ *    切档 @change 不经过 activePanel watch，不新增记录。
  *
- * mock 前置：默认表已含空快照 GetOverviewSnapshot，本 spec override 具体快照。
+ * mock 前置：默认表已含空快照 GetOverviewSnapshot 与 void 方法
+ * RecordOverviewOpen，本 spec override 具体快照并经 getWailsCalls 断言调用链。
  */
 import { test, expect, getWailsCalls, openPanel } from './fixtures'
 
@@ -144,6 +147,25 @@ test.describe('个人看板概览面板', () => {
 
     const calls = await getWailsCalls(page, 'GetOverviewSnapshot')
     expect(calls[1].args).toEqual(['week', true])
+  })
+
+  // T4 Go/No-Go 门槛 G1 取证：点击图标是三个显式入口之一，只记录一次；
+  // 切档 @change 不经过 activePanel watch，不新增记录。
+  test('点击概览图标记录一次主动打开（click），切档不新增记录', async ({ page }) => {
+    await openPanel(page, 'overview')
+    await expect(page.locator('.overview-card')).toHaveCount(5)
+
+    await expect
+      .poll(async () => (await getWailsCalls(page, 'RecordOverviewOpen')).length)
+      .toBe(1)
+    const opens = await getWailsCalls(page, 'RecordOverviewOpen')
+    expect(opens[0].args).toEqual(['click'])
+
+    await page.locator('.el-radio-button', { hasText: '近 7 天' }).click()
+    await expect
+      .poll(async () => (await getWailsCalls(page, 'GetOverviewSnapshot')).length)
+      .toBe(2)
+    expect(await getWailsCalls(page, 'RecordOverviewOpen')).toHaveLength(1)
   })
 
   test('M1 下钻切到状态看板', async ({ page }) => {
